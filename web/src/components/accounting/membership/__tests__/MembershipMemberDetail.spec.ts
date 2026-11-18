@@ -15,11 +15,22 @@ const api = vi.hoisted(() => ({ member: vi.fn(), claim: vi.fn() }))
 vi.mock('@/api/nonprofitMembership', () => ({ membershipApi: api }))
 vi.mock('@/api/accounting', () => ({ accountingApi: { listAccounts: vi.fn() } }))
 vi.mock('@/api/nonprofitDppo', () => ({ nonprofitDppoApi: { profile: vi.fn() } }))
+// Potvrzení akcí jde jako v celé aplikaci do toastu.
+const toast = vi.hoisted(() => ({ success: vi.fn(), warning: vi.fn(), error: vi.fn(), info: vi.fn() }))
+vi.mock('@/composables/useToast', () => ({ useToast: () => toast }))
 
 const ActionBar = defineComponent({
   props: ['actions'],
   setup: p => () => h('div', (p.actions as Array<{ key: string; label: string; disabled?: boolean; disabledReason?: string; tier?: string; show?: unknown; run: () => void }>)
     .filter(a => a.show !== false).map(a => h('button', { 'data-action': a.key, 'data-tier': a.tier, disabled: a.disabled, 'data-reason': a.disabled ? a.disabledReason : undefined, onClick: a.run }, a.label))),
+})
+// Formuláře detailu jsou v okně; v testu se vykreslí na místě i s nadpisem.
+const Modal = defineComponent({ name: 'Modal', props: ['title', 'widthClass'], emits: ['close'], setup: (p, { slots }) => () => h('div', { 'data-stub': 'modal', 'data-title': p.title }, [slots.default?.(), slots.footer?.()]) })
+// Akce řádku předpisu jako tlačítka s klíčem, stavem a důvodem zašednutí.
+const RowActionsMenu = defineComponent({
+  props: ['actions', 'inlineCount', 'iconOnly'],
+  setup: p => () => h('div', (p.actions as Array<{ key: string; label: string; disabled?: boolean; disabledReason?: string; show?: unknown; run: () => void }>)
+    .filter(a => a.show !== false).map(a => h('button', { 'data-action': a.key, disabled: a.disabled, title: a.disabled ? a.disabledReason : undefined, onClick: a.run }, a.label))),
 })
 const RevisionForm = defineComponent({ name: 'MembershipRevisionForm', props: ['supplier', 'canManage', 'member', 'history'], emits: ['done', 'close', 'lock', 'dirty'], setup: () => () => h('div', { 'data-stub': 'revision' }) })
 const IssueFlow = defineComponent({ name: 'MembershipIssueFlow', props: ['supplier', 'canManage', 'member', 'history', 'periods'], emits: ['done', 'close', 'lock'], setup: () => () => h('div', { 'data-stub': 'issue' }) })
@@ -52,18 +63,36 @@ function mounted(props: Record<string, unknown> = {}, locale = 'cs') {
     props: { supplier: 5, canManage: true, memberId: 9, label: 'Synthetic member', periods: [period], ...props },
     global: {
       plugins: [createI18n({ legacy: false, locale, messages: { cs, en } })],
-      stubs: { ActionBar, MembershipRevisionForm: RevisionForm, MembershipIssueFlow: IssueFlow, MembershipReverseFlow: ReverseFlow },
+      stubs: { ActionBar, Modal, RowActionsMenu, MembershipRevisionForm: RevisionForm, MembershipIssueFlow: IssueFlow, MembershipReverseFlow: ReverseFlow },
     },
   })
 }
 const mixed = [claim(31, 100000, unreconciled), claim(32, 80000, ambiguous), claim(33, 120050, partial), claim(34, 70000, reversed, { reversal_claim_id: 99 })]
 
 beforeEach(() => {
+  toast.success.mockClear()
   vi.clearAllMocks()
   api.member.mockResolvedValue(detail([revision(1, '2020-01-01')], mixed))
 })
 
 describe('Membership member detail', () => {
+  it('names the member from the contact the server returns, so the page works without the list', async () => {
+    const named = detail([revision(1, '2020-01-01')], [])
+    api.member.mockResolvedValue({ ...named, member: { ...named.member, company_name: '', first_name: 'Syntetická', last_name: 'Osoba' } })
+    const w = mounted({ label: undefined }); await flushPromises()
+    // Hlavička jako detail kontaktu: jméno v nadpisu, členské číslo pod ním.
+    expect(w.get('[data-focus="member-heading"]').text()).toBe('Syntetická Osoba')
+    expect(w.get('[data-focus="member-heading"]').element.tagName).toBe('H1')
+    expect(w.get('[data-field="member-identity"]').text()).toContain('M-1')
+    expect(w.get('[data-field="status-badge"]').text()).toBe(cs.nonprofitMembership.status_active)
+    w.unmount()
+    // Bez jména kontaktu i bez popisku ze seznamu: náhradní označení podle kontaktu.
+    api.member.mockResolvedValue(detail([revision(1, '2020-01-01')], []))
+    const fallback = mounted({ label: undefined }); await flushPromises()
+    expect(fallback.get('[data-focus="member-heading"]').text()).toBe(cs.nonprofitMembership.clientFallback.replace('{id}', '3'))
+    fallback.unmount()
+  })
+
   it('defers an external refresh while a single-charge confirmation is locked', async () => {
     const w=mounted({refreshVersion:0});await flushPromises()
     await w.get('[data-action="new-charge"]').trigger('click');await flushPromises()
@@ -95,7 +124,7 @@ describe('Membership member detail', () => {
     const w = mounted()
     await flushPromises()
     expect(w.get('[data-field="status-today"]').text()).toContain(cs.nonprofitMembership.status_active)
-    expect(w.get('[data-field="status-today"]').text()).toContain(formatDate(appIsoDate()))
+    expect(w.get('[data-section="member-status"]').text()).toContain(formatDate(appIsoDate()))
     expect(w.get('[data-field="status-today"]').text()).not.toContain(cs.nonprofitMembership.status_ended)
     expect(w.get('[data-field="status-upcoming"]').text()).toContain(formatDate('2999-01-01'))
     expect(w.get('[data-field="status-upcoming"]').text()).toContain(cs.nonprofitMembership.status_ended)
@@ -224,7 +253,6 @@ describe('Membership member detail', () => {
     await flushPromises()
     expect(w.get('[data-claim="31"] [data-action="reverse-claim"]').attributes('disabled')).toBeDefined()
     expect(w.get('[data-action="new-charge"]').attributes('disabled')).toBeDefined()
-    expect(w.get('[data-action="close-detail"]').attributes('disabled')).toBeDefined()
     issue.vm.$emit('lock', false)
     await flushPromises()
     expect(w.get('[data-claim="31"] [data-action="reverse-claim"]').attributes('disabled')).toBeUndefined()
@@ -240,7 +268,7 @@ describe('Membership member detail', () => {
     expect(api.member).toHaveBeenCalledTimes(2)
     expect(w.emitted('changed')).toHaveLength(1)
     expect(w.find('[data-stub="issue"]').exists()).toBe(false)
-    expect(w.get('[data-section="detail-notice"]').text()).toBe(cs.nonprofitMembership.issueDone)
+    expect(toast.success).toHaveBeenCalledWith(cs.nonprofitMembership.issueDone)
     w.unmount()
   })
 
@@ -325,12 +353,21 @@ describe('Membership member detail', () => {
     w.unmount()
   })
 
-  it('opens the revision form right away for a member without any revision', async () => {
+  it('offers the first revision as the main action instead of a full-width form', async () => {
     api.member.mockResolvedValue(detail([], []))
     const w = mounted()
     await flushPromises()
+    // Formulář nezabírá stránku; hlavní akcí je zápis první revize, předpis je zašedlý s důvodem.
+    expect(w.find('[data-stub="revision"]').exists()).toBe(false)
+    const first = w.get('[data-action="change-status"]')
+    expect(first.text()).toBe(cs.nonprofitMembership.firstRevision)
+    expect(first.attributes('data-tier')).toBe('primary')
+    expect(w.get('[data-action="new-charge"]').attributes('data-tier')).toBe('secondary')
+    expect(w.get('[data-action="new-charge"]').attributes('disabled')).toBeDefined()
+    expect(w.get('[data-field="first-revision-hint"]').text()).toBe(cs.nonprofitMembership.firstRevisionHint)
+    await first.trigger('click')
+    expect(w.get('[data-stub="modal"]').attributes('data-title')).toContain(cs.nonprofitMembership.revisionTitle)
     expect(w.find('[data-stub="revision"]').exists()).toBe(true)
-    expect(w.find('[data-action="change-status"]').exists()).toBe(false)
     w.unmount()
   })
 
@@ -349,7 +386,7 @@ describe('Membership member detail', () => {
     w.findComponent(RevisionForm).vm.$emit('done')
     await flushPromises()
     expect(w.find('[data-stub="revision"]').exists()).toBe(false)
-    expect(w.get('[data-section="detail-notice"]').text()).toBe(cs.nonprofitMembership.revisionDone)
+    expect(toast.success).toHaveBeenCalledWith(cs.nonprofitMembership.revisionDone)
     expect(w.emitted('changed')).toHaveLength(1)
     w.unmount()
   })
@@ -375,12 +412,9 @@ describe('Membership member detail', () => {
     expect(w.find('[data-action="void-revision"]').exists()).toBe(true)
     expect(w.get('[data-action="delete-member"]').attributes('disabled')).toBeDefined()
     expect(w.get('[data-action="delete-member"]').attributes('data-reason')).toBe(cs.nonprofitMembership.serverErrors.nonprofit_membership_member_has_revisions)
-    const scroll = vi.fn()
-    Element.prototype.scrollIntoView = scroll
     await w.get('[data-action="void-revision"]').trigger('click'); await flushPromises()
-    // Formulář je pod historií; otevření ho posune na obrazovku.
-    expect(scroll).toHaveBeenCalledTimes(1)
-    expect(scroll.mock.contexts[0]).toBe(w.findComponent(CorrectionFlow).element.parentElement)
+    // Oprava se otevře v okně s nadpisem režimu a člena.
+    expect(w.get('[data-stub="modal"]').attributes('data-title')).toBe(`${cs.nonprofitMembership.correction.title_void} · M-1 · Synthetic member`)
     const flow = w.findComponent(CorrectionFlow)
     expect(flow.props('mode')).toBe('void')
     expect(flow.props('revision')).toMatchObject({ id: 1 })
@@ -412,6 +446,7 @@ describe('Membership member detail', () => {
     api.member.mockResolvedValue({ ...detail([], []), corrections })
     const w = mountedWithCorrection(); await flushPromises()
     expect(w.get('[data-action="fix-identity"]').attributes('disabled'), 'prázdný formulář opravy neblokuje').toBeUndefined()
+    await w.get('[data-action="change-status"]').trigger('click'); await flushPromises()
     w.findComponent(RevisionForm).vm.$emit('dirty', true); await flushPromises()
     for (const key of ['fix-identity', 'delete-member']) {
       expect(w.get(`[data-action="${key}"]`).attributes('disabled'), key).toBeDefined()
@@ -506,6 +541,7 @@ describe('Membership member detail after a correction', () => {
   it('odloží obnovu z jiné záložky, dokud je rozepsaná první revize, a načte po uvolnění', async () => {
     api.member.mockResolvedValue({ ...detail([], []), corrections: allowed })
     const w = mountedWithCorrection({ refreshVersion: 0 }); await flushPromises()
+    await w.get('[data-action="change-status"]').trigger('click'); await flushPromises()
     w.findComponent(RevisionForm).vm.$emit('dirty', true); await flushPromises()
     await w.setProps({ refreshVersion: 1 }); await flushPromises()
     expect(api.member).toHaveBeenCalledTimes(1)
@@ -523,7 +559,7 @@ describe('Membership member detail after a correction', () => {
     expect(api.member).toHaveBeenCalledTimes(2)
     expect(w.findComponent(CorrectionFlow).exists()).toBe(false)
     expect(w.get('[data-section="detail-stale"]').text()).toBe(cs.nonprofitMembership.correction.staleClosed)
-    expect(w.get('[data-section="detail-stale"]').classes()).toContain('text-warning-700')
+    expect(w.get('[data-section="detail-stale"]').classes()).toContain('text-warning-800')
     expect(w.find('[data-section="detail-notice"]').exists()).toBe(false)
     expect(w.emitted('changed')).toHaveLength(1)
     expect(w.get('[data-action="fix-identity"]').attributes('disabled')).toBeUndefined()
@@ -577,7 +613,7 @@ describe('Membership member detail after a correction', () => {
     expect(w.find('[data-section="detail-stale"]').exists()).toBe(true)
     await w.get('[data-action="change-status"]').trigger('click'); await flushPromises()
     w.findComponent(RevisionForm).vm.$emit('done'); await flushPromises()
-    expect(w.find('[data-section="detail-notice"]').exists()).toBe(true)
+    expect(toast.success).toHaveBeenCalledWith(cs.nonprofitMembership.revisionDone)
     expect(w.find('[data-section="detail-stale"]').exists()).toBe(false)
     w.unmount()
   })
@@ -612,8 +648,9 @@ describe('Membership member detail after a correction', () => {
     const shown = ref(true)
     const Host = defineComponent({ setup: () => () => h(KeepAlive, null, [shown.value ? h(Detail, { supplier: 5, canManage: true, memberId: 9, label: 'Synthetic member', periods: [period] }) : h('div')]) })
     const w = mount(Host, { attachTo: document.body, global: { plugins: [createI18n({ legacy: false, locale: 'cs', messages: { cs, en } })],
-      stubs: { ActionBar, MembershipRevisionForm: RevisionForm, MembershipIssueFlow: IssueFlow, MembershipReverseFlow: ReverseFlow, MembershipCorrectionFlow: CorrectionFlow } } })
+      stubs: { ActionBar, Modal, RowActionsMenu, MembershipRevisionForm: RevisionForm, MembershipIssueFlow: IssueFlow, MembershipReverseFlow: ReverseFlow, MembershipCorrectionFlow: CorrectionFlow } } })
     await flushPromises()
+    await w.get('[data-action="change-status"]').trigger('click'); await flushPromises()
     w.findComponent(RevisionForm).vm.$emit('dirty', true); await flushPromises()
     expect(w.get('[data-action="reload"]').attributes('disabled')).toBeDefined()
     shown.value = false; await flushPromises()
@@ -643,7 +680,98 @@ function mountedWithCorrection(props: Record<string, unknown> = {}) {
     props: { supplier: 5, canManage: true, memberId: 9, label: 'Synthetic member', periods: [period], ...props },
     global: {
       plugins: [createI18n({ legacy: false, locale: 'cs', messages: { cs, en } })],
-      stubs: { ActionBar, MembershipRevisionForm: RevisionForm, MembershipIssueFlow: IssueFlow, MembershipReverseFlow: ReverseFlow, MembershipCorrectionFlow: CorrectionFlow },
+      stubs: { ActionBar, Modal, RowActionsMenu, MembershipRevisionForm: RevisionForm, MembershipIssueFlow: IssueFlow, MembershipReverseFlow: ReverseFlow, MembershipCorrectionFlow: CorrectionFlow },
     },
   })
 }
+
+describe('Membership member detail – zámky oken, vymazaný člen a načítání', () => {
+  it('uvolní zámek formuláře zavřeného po zápisu, aby akce detailu nezůstaly zašedlé', async () => {
+    api.member.mockResolvedValue(detail([revision(1, '2020-01-01')], [claim(31, 100000, unreconciled)]))
+    const w = mounted(); await flushPromises()
+    // Okno se zavře dřív, než formulář stihne ohlásit uvolnění zámku (done přijde před lock(false)).
+    await w.get('[data-action="change-status"]').trigger('click')
+    w.findComponent(RevisionForm).vm.$emit('lock', true)
+    w.findComponent(RevisionForm).vm.$emit('done'); await flushPromises()
+    expect(w.find('[data-section="first-revision"]').exists()).toBe(false)
+    expect(w.get('[data-action="new-charge"]').attributes('disabled')).toBeUndefined()
+    await w.get('[data-action="new-charge"]').trigger('click')
+    w.findComponent(IssueFlow).vm.$emit('lock', true)
+    w.findComponent(IssueFlow).vm.$emit('done'); await flushPromises()
+    expect(w.get('[data-action="new-charge"]').attributes('disabled')).toBeUndefined()
+    await w.get('[data-claim="31"] [data-action="reverse-claim"]').trigger('click')
+    w.findComponent(ReverseFlow).vm.$emit('lock', true)
+    w.findComponent(ReverseFlow).vm.$emit('done'); await flushPromises()
+    expect(w.get('[data-action="new-charge"]').attributes('disabled')).toBeUndefined()
+    w.unmount()
+  })
+
+  it('nechá okno otevřené, dokud ho drží rozběhnutý zápis', async () => {
+    api.member.mockResolvedValue(detail([revision(1, '2020-01-01')], []))
+    const w = mounted(); await flushPromises()
+    await w.get('[data-action="new-charge"]').trigger('click')
+    w.findComponent(IssueFlow).vm.$emit('lock', true); await flushPromises()
+    w.findComponent(Modal).vm.$emit('close'); await flushPromises()
+    expect(w.findComponent(IssueFlow).exists()).toBe(true)
+    w.findComponent(IssueFlow).vm.$emit('lock', false); await flushPromises()
+    w.findComponent(Modal).vm.$emit('close'); await flushPromises()
+    expect(w.findComponent(IssueFlow).exists()).toBe(false)
+    w.unmount()
+  })
+
+  it('vymazaného člena neoznačí jménem kontaktu ani v nadpisu', async () => {
+    const named = detail([revision(1, '2020-01-01', 'ended')], [])
+    api.member.mockResolvedValue({ ...named, erased: true, member: { ...named.member, company_name: 'Synthetic leaked name' } })
+    const w = mounted(); await flushPromises()
+    expect(w.get('[data-focus="member-heading"]').text()).toBe(cs.nonprofitMembership.erasure.erasedMemberLabel.replace('{id}', '9'))
+    expect(w.text()).not.toContain('Synthetic leaked name')
+    expect(w.find('[data-section="detail-erased"]').exists()).toBe(true)
+    w.unmount()
+  })
+
+  it('nemá prázdný nadpis, dokud se člen načítá', async () => {
+    api.member.mockReturnValue(new Promise(() => {}))
+    const w = mounted({ label: undefined }); await flushPromises()
+    expect(w.get('[data-focus="member-heading"]').text()).toBe(cs.common.loading)
+    w.unmount()
+  })
+})
+
+describe('Membership member detail – rozepsaný formulář v okně', () => {
+  it('se před zavřením zeptá, po zápisu a bez psaní ne', async () => {
+    const confirm = vi.spyOn(window, 'confirm')
+    api.member.mockResolvedValue(detail([revision(1, '2020-01-01')], [claim(31, 100000, unreconciled)]))
+    const w = mounted(); await flushPromises()
+    // Bez psaní se okno zavře hned.
+    await w.get('[data-action="new-charge"]').trigger('click')
+    w.findComponent(Modal).vm.$emit('close'); await flushPromises()
+    expect(w.findComponent(IssueFlow).exists()).toBe(false)
+    expect(confirm).not.toHaveBeenCalled()
+    // Rozepsaný předpis: Zrušit nechá okno, vlastní Zavřít toku jde přes stejný dotaz.
+    await w.get('[data-action="new-charge"]').trigger('click')
+    await w.findComponent(IssueFlow).trigger('input')
+    confirm.mockReturnValueOnce(false)
+    w.findComponent(Modal).vm.$emit('close'); await flushPromises()
+    expect(confirm).toHaveBeenCalledWith(cs.nonprofitMembership.closeUnsavedConfirm)
+    expect(w.findComponent(IssueFlow).exists()).toBe(true)
+    confirm.mockReturnValueOnce(true)
+    w.findComponent(IssueFlow).vm.$emit('close'); await flushPromises()
+    expect(w.findComponent(IssueFlow).exists()).toBe(false)
+    // Po zápisu se další zavření neptá.
+    confirm.mockClear()
+    await w.get('[data-claim="31"] [data-action="reverse-claim"]').trigger('click')
+    await w.findComponent(ReverseFlow).trigger('input')
+    w.findComponent(ReverseFlow).vm.$emit('done'); await flushPromises()
+    await w.get('[data-action="new-charge"]').trigger('click')
+    w.findComponent(Modal).vm.$emit('close'); await flushPromises()
+    expect(confirm).not.toHaveBeenCalled()
+    // Revize hlásí rozepsanost sama (změna stavu ve výběru); dřív okno nešlo zavřít vůbec, teď se zeptá.
+    await w.get('[data-action="change-status"]').trigger('click')
+    w.findComponent(RevisionForm).vm.$emit('dirty', true)
+    confirm.mockReturnValueOnce(true)
+    w.findComponent(Modal).vm.$emit('close'); await flushPromises()
+    expect(confirm).toHaveBeenCalledTimes(1)
+    expect(w.findComponent(RevisionForm).exists()).toBe(false)
+    w.unmount()
+  })
+})

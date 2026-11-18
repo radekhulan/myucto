@@ -3,13 +3,14 @@ import { computed, onActivated, onBeforeUnmount, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
 import { formInput as field, formLabel } from '@/components/ui/formStyles'
-import { btnFilled, btnOutline, btnOutlineSm, ICONS } from '@/components/ui/buttonStyles'
+import { btnFilled, btnOutline, ICONS } from '@/components/ui/buttonStyles'
 import { formatDate, formatDateTime } from '@/composables/useFormat'
+import { useToast } from '@/composables/useToast'
 import {
   membershipErasureApi, type MembershipErasureAssessment, type MembershipErasureDetail, type MembershipErasureItem,
   type MembershipErasureProposal, type MembershipErasureStatus,
 } from '@/api/nonprofitMembership'
-import { badgeBase, errorBox, membershipError, membershipMemberLabel, warningBox } from './membershipFormat'
+import { errorBox, loudBadge, quietBadge, membershipError, membershipMemberLabel, warningBox } from './membershipFormat'
 
 /**
  * Výmaz osobních údajů bývalých členů (#321, krok 10): posouzení lhůt, návrh, schválení a provedení.
@@ -18,22 +19,24 @@ import { badgeBase, errorBox, membershipError, membershipMemberLabel, warningBox
 const props = defineProps<{ supplier: number; canWrite: boolean; open: boolean }>()
 const emit = defineEmits<{ erased: [] }>()
 const { t, te } = useI18n()
+const toast = useToast()
 
 const proposals = ref<MembershipErasureProposal[]>([])
 const assessment = ref<MembershipErasureAssessment | null>(null)
 const detail = ref<MembershipErasureDetail | null>(null)
 const loading = ref(false), busy = ref(false), loaded = ref(false)
-const error = ref(''), notice = ref('')
+const error = ref('')
 const confirmation = ref('')
 let alive = true, generation = 0
 
-const statusTones: Record<MembershipErasureStatus, string> = {
-  pending: 'bg-warning-50 text-warning-700',
-  approved: 'bg-primary-50 text-primary-700',
-  rejected: 'bg-neutral-100 text-neutral-700',
-  executed: 'bg-success-50 text-success-600',
+// Návrh čekající na schválení chce rozhodnutí, ostatní stavy jsou tiché.
+const statusBadges: Record<MembershipErasureStatus, string> = {
+  pending: loudBadge('warning'),
+  approved: quietBadge('primary'),
+  rejected: quietBadge('neutral'),
+  executed: quietBadge('success'),
 }
-const statusBadge = (status: MembershipErasureStatus) => `${badgeBase} ${statusTones[status]}`
+const statusBadge = (status: MembershipErasureStatus) => statusBadges[status]
 const outcomeTone = (outcome: MembershipErasureItem['outcome']) => outcome === 'done' ? 'text-success-700' : outcome === 'pending' ? 'text-neutral-500' : 'text-warning-700'
 
 const openProposal = computed(() => proposals.value.find(p => p.status === 'pending' || p.status === 'approved') ?? null)
@@ -99,12 +102,13 @@ async function more() {
 
 async function run(work: () => Promise<string>) {
   if (busy.value) return
-  busy.value = true; error.value = ''; notice.value = ''
+  busy.value = true; error.value = ''
   const supplier = props.supplier
   try {
     const message = await work()
     if (!alive || supplier !== props.supplier) return
-    notice.value = message
+    // Potvrzení jako jinde v aplikaci (toast).
+    toast.success(message)
     await load()
   } catch (e) { if (alive && supplier === props.supplier) error.value = membershipError({ t, te }, e) }
   finally { if (alive) busy.value = false }
@@ -147,7 +151,7 @@ const detailActions = computed<ActionItem[]>(() => {
 })
 
 watch(() => props.open, open => { if (open && !loaded.value) void load() }, { immediate: true })
-watch(() => props.supplier, () => { generation++; proposals.value = []; assessment.value = null; detail.value = null; loaded.value = false; error.value = ''; notice.value = ''; confirmation.value = ''; if (props.open) void load() })
+watch(() => props.supplier, () => { generation++; proposals.value = []; assessment.value = null; detail.value = null; loaded.value = false; error.value = ''; confirmation.value = ''; if (props.open) void load() })
 onActivated(() => { if (props.open && loaded.value && !busy.value) void load() })
 onBeforeUnmount(() => { alive = false })
 </script>
@@ -156,7 +160,6 @@ onBeforeUnmount(() => { alive = false })
   <div class="space-y-4" data-section="erasure">
     <p class="text-sm text-neutral-500">{{ t('nonprofitMembership.erasure.help') }}</p>
     <p v-if="error" role="alert" :class="errorBox" data-section="erasure-error">{{ error }}</p>
-    <p v-if="notice" role="status" class="text-sm text-success-600" data-section="erasure-notice">{{ notice }}</p>
     <ActionBar :actions="actions" />
     <p v-if="loading && !loaded" role="status" class="text-sm text-neutral-500">{{ t('common.loading') }}</p>
 
@@ -169,22 +172,24 @@ onBeforeUnmount(() => { alive = false })
     </div>
 
     <div v-if="proposals.length" class="space-y-2" data-section="erasure-proposals">
-      <h3 class="font-semibold">{{ t('nonprofitMembership.erasure.proposals') }}</h3>
-      <ul class="divide-y divide-neutral-200 rounded-lg border border-neutral-200 text-sm">
-        <li v-for="p in proposals" :key="p.id" class="flex flex-wrap items-center justify-between gap-2 p-3" :class="detail?.proposal.id === p.id ? 'bg-neutral-50' : ''">
-          <div class="min-w-0 space-y-1">
-            <p class="flex flex-wrap items-center gap-2 font-medium">{{ t('nonprofitMembership.erasure.proposalTitle', { id: p.id, date: formatDate(p.as_of) }) }}
-              <span :class="statusBadge(p.status)">{{ t(`nonprofitMembership.erasure.status_${p.status}`) }}</span></p>
-            <p class="text-neutral-500">{{ t('nonprofitMembership.erasure.proposalCounts', { total: p.item_count ?? 0, done: p.done_count ?? 0, skipped: p.skipped_count ?? 0 }) }}</p>
-          </div>
-          <button type="button" :class="btnOutlineSm('neutral')" class="whitespace-nowrap" data-action="erasure-show" :disabled="busy" @click="show(p.id)"><svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.eye" /></svg>{{ t('nonprofitMembership.erasure.show') }}</button>
-        </li>
-      </ul>
+      <h3 class="text-sm font-semibold uppercase tracking-wide text-neutral-500">{{ t('nonprofitMembership.erasure.proposals') }}</h3>
+      <!-- Návrhy jako řádky seznamu členů: klik na řádek nebo na název otevře návrh; otevřený je zvýrazněný. -->
+      <div class="overflow-x-auto rounded-lg border border-neutral-200">
+        <table class="w-full text-sm">
+          <tbody class="divide-y divide-neutral-100">
+            <tr v-for="p in proposals" :key="p.id" class="cursor-pointer hover:bg-neutral-50" :class="detail?.proposal.id === p.id ? 'bg-primary-50/40' : ''" data-field="erasure-proposal" @click="!busy && show(p.id)">
+              <td class="px-4 py-2.5"><button type="button" class="row-link cursor-pointer text-left font-medium text-neutral-900 disabled:cursor-default" :disabled="busy" data-action="erasure-show" @click.stop="show(p.id)">{{ t('nonprofitMembership.erasure.proposalTitle', { id: p.id, date: formatDate(p.as_of) }) }}</button></td>
+              <td class="whitespace-nowrap px-4 py-2.5"><span :class="statusBadge(p.status)">{{ t(`nonprofitMembership.erasure.status_${p.status}`) }}</span></td>
+              <td class="px-4 py-2.5 text-neutral-500">{{ t('nonprofitMembership.erasure.proposalCounts', { total: p.item_count ?? 0, done: p.done_count ?? 0, skipped: p.skipped_count ?? 0 }) }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
     </div>
 
-    <section v-if="detail && current" class="space-y-3 rounded-lg border border-neutral-200 p-3" data-section="erasure-detail">
+    <section v-if="detail && current" class="space-y-3 border-t border-neutral-200 pt-4" data-section="erasure-detail">
       <div class="flex flex-wrap items-center justify-between gap-3">
-        <h3 class="flex flex-wrap items-center gap-2 font-semibold">{{ t('nonprofitMembership.erasure.proposalTitle', { id: current.id, date: formatDate(current.as_of) }) }}
+        <h3 class="flex flex-wrap items-center gap-2 text-base font-semibold">{{ t('nonprofitMembership.erasure.proposalTitle', { id: current.id, date: formatDate(current.as_of) }) }}
           <span :class="statusBadge(current.status)">{{ t(`nonprofitMembership.erasure.status_${current.status}`) }}</span></h3>
         <ActionBar :actions="detailActions" />
       </div>
@@ -197,8 +202,8 @@ onBeforeUnmount(() => { alive = false })
         </label>
         <button type="submit" :class="btnFilled('danger')" class="whitespace-nowrap" data-action="erasure-execute" :disabled="busy || !confirmed"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.trash" /></svg>{{ started ? t('nonprofitMembership.erasure.continue') : t('nonprofitMembership.erasure.execute') }}</button>
       </form>
-      <ul class="divide-y divide-neutral-200 text-sm" data-section="erasure-items">
-        <li v-for="item in detail.items" :key="item.id" class="space-y-1 py-2" data-field="erasure-item">
+      <ul class="divide-y divide-neutral-100 rounded-lg border border-neutral-200 text-sm" data-section="erasure-items">
+        <li v-for="item in detail.items" :key="item.id" class="space-y-1 px-4 py-2.5" data-field="erasure-item">
           <p class="break-words font-medium">{{ itemLabel(item) }}</p>
           <p class="text-neutral-500">{{ t(`nonprofitMembership.erasure.rule_${item.governing_rule}`, { until: formatDate(item.retained_until), ended: formatDate(item.ended_on) }) }}</p>
           <p :class="outcomeTone(item.outcome)">{{ t(`nonprofitMembership.erasure.outcome_${item.outcome}`) }}<template v-if="item.skip_reason"> · {{ reason(item.skip_reason) }}</template>

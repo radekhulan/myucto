@@ -206,6 +206,8 @@ function onKey(e: KeyboardEvent) {
     highlightIdx.value = filtered.value.length - 1
     scrollHighlightIntoView()
   } else if (e.key === 'Escape') {
+    // Zavření rozbaleného výběru Escape spotřebuje; okno, ve kterém výběr je, se tím nezavře.
+    if (open.value) e.preventDefault()
     open.value = false
     // resetuj query na vybraný label, kdyby uživatel měnil text bez výběru
     query.value = selected.value?.label ?? ''

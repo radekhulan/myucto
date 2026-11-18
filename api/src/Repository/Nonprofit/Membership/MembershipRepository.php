@@ -28,6 +28,23 @@ final class MembershipRepository
         return $row === false ? null : $this->memberRow($row);
     }
 
+    /**
+     * Jméno kontaktu člena pro samostatnou stránku detailu; stejné sloupce jako řádek seznamu členů.
+     *
+     * @return array{company_name: ?string, first_name: ?string, last_name: ?string}
+     */
+    public function contactName(int $supplier, int $client): array
+    {
+        $q = $this->db->pdo()->prepare('SELECT company_name,first_name,last_name FROM clients WHERE supplier_id=? AND id=?');
+        $q->execute([$supplier, $client]);
+        $row = $q->fetch(PDO::FETCH_ASSOC);
+        return [
+            'company_name' => $row === false ? null : $row['company_name'],
+            'first_name' => $row === false ? null : $row['first_name'],
+            'last_name' => $row === false ? null : $row['last_name'],
+        ];
+    }
+
     public function byIdentity(int $supplier, int $client, string $number, bool $currentRead = false): ?array
     {
         $this->current($currentRead);

@@ -30,7 +30,7 @@ const revision = (no: number, from: string, status: MemberRevision['status'] = '
 function mounted(props: Record<string, unknown> = {}, locale = 'cs') {
   return mount(Form, {
     props: { supplier: 5, canManage: true, member, history: [revision(1, '2020-01-01')], ...props },
-    global: { plugins: [createI18n({ legacy: false, locale, messages: { cs, en } })], stubs: { ActionBar, DateInput } },
+    global: { plugins: [createI18n({ legacy: false, locale, messages: { cs, en } })], stubs: { ActionBar, DialogActions: ActionBar, DateInput } },
   })
 }
 async function fill(w: ReturnType<typeof mounted>, from = '2026-01-01') {
@@ -79,7 +79,7 @@ describe('Membership revision form', () => {
 
   it.each(['cs', 'en'])('renders translated %s texts', async locale => {
     const w = mounted({}, locale)
-    expect(w.text()).toContain((locale === 'cs' ? cs : en).nonprofitMembership.revisionTitle)
+    expect(w.text()).toContain((locale === 'cs' ? cs : en).nonprofitMembership.revisionHelp)
     expect(w.text()).not.toContain('nonprofitMembership.')
     w.unmount()
   })

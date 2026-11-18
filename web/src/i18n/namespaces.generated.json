@@ -814,6 +814,9 @@
       "purchase_invoice",
       "settings"
     ],
+    "accounting-nonprofit-member-detail": [
+      "dimensions"
+    ],
     "accounting-nonprofit-tax": [
       "nonprofitTaxJ6"
     ],

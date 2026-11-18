@@ -9,6 +9,9 @@ import en from '@/i18n/en.json'
 
 const api = vi.hoisted(() => ({ assessment: vi.fn(), proposals: vi.fn(), proposal: vi.fn(), create: vi.fn(), approve: vi.fn(), revoke: vi.fn(), reject: vi.fn(), execute: vi.fn() }))
 vi.mock('@/api/nonprofitMembership', () => ({ membershipErasureApi: api }))
+// Potvrzení jde jako v celé aplikaci do toastu.
+const toast = vi.hoisted(() => ({ success: vi.fn(), warning: vi.fn(), error: vi.fn(), info: vi.fn() }))
+vi.mock('@/composables/useToast', () => ({ useToast: () => toast }))
 
 const ActionBar = defineComponent({
   props: ['actions'],
@@ -111,7 +114,7 @@ describe('Membership erasure', () => {
     await x.get('[data-section="erasure-execute"]').trigger('submit')
     await flushPromises()
     expect(api.execute).toHaveBeenCalledWith(5, 7, 'TRVALE SMAZAT')
-    expect(x.get('[data-section="erasure-notice"]').text()).toContain('12')
+    expect(toast.success).toHaveBeenCalledWith(expect.stringContaining('12'))
     expect(x.emitted('erased')).toHaveLength(1)
     x.unmount()
   })

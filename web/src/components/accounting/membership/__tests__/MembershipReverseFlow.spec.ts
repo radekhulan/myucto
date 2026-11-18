@@ -37,7 +37,7 @@ const preview = (): MembershipPreview => ({
 function mounted(props: Record<string, unknown> = {}, locale = 'cs') {
   return mount(Flow, {
     props: { supplier: 5, canManage: true, member: { id: 9, member_number: 'M-1', label: 'Synthetic member' }, claim: claim(), periods: [period], ...props },
-    global: { plugins: [createI18n({ legacy: false, locale, messages: { cs, en } })], stubs: { ActionBar, DateInput } },
+    global: { plugins: [createI18n({ legacy: false, locale, messages: { cs, en } })], stubs: { ActionBar, DialogActions: ActionBar, DateInput } },
   })
 }
 async function fill(w: ReturnType<typeof mounted>) {
@@ -71,7 +71,7 @@ describe('Membership reverse flow', () => {
   it.each(['cs', 'en'])('renders translated %s texts and the picked claim without any hidden id field', async locale => {
     const w = mounted({}, locale)
     await fill(w)
-    expect(w.text()).toContain((locale === 'cs' ? cs : en).nonprofitMembership.reverseTitle)
+    expect(w.text()).toContain((locale === 'cs' ? cs : en).nonprofitMembership.reverseHelp)
     expect(w.text()).not.toContain('nonprofitMembership.')
     expect(w.get('[data-section="reverse-claim"]').text()).toContain('DUES-2026')
     expect(w.find('[data-field="case-id"]').exists()).toBe(false)

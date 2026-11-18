@@ -35,7 +35,11 @@ export interface MembershipImportReport {
 }
 export interface MembershipListFilters {search?: string; year?: number | null; title_key?: string; payment_status?: 'all' | 'paid' | 'unpaid' | 'unproven' | 'none'}
 
-export interface MemberIdentity { id: number; supplier_id: number; client_id: number; member_number: string; created_by: number; created_at?: string }
+export interface MemberIdentity {
+  id: number; supplier_id: number; client_id: number; member_number: string; created_by: number; created_at?: string
+  /** Jméno kontaktu; vrací ho detail člena (samostatná stránka), ne zápisové akce. */
+  company_name?: string | null; first_name?: string | null; last_name?: string | null
+}
 export interface MemberRevision {
   id: number; supplier_id: number; member_id: number; revision_no: number; previous_id: number | null
   /** Rušící článek: odkaz na zrušenou revizi. Zrušená revize zůstává v historii, ale nepočítá se. */

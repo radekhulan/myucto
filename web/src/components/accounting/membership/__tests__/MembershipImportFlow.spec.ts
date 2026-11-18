@@ -31,7 +31,7 @@ const withError: MembershipImportReport = {
 }
 
 function mounted(locale = 'cs') {
-  return mount(Flow, { props: { supplier: 5, canManage: true }, global: { plugins: [createI18n({ legacy: false, locale, messages: { cs, en } })], stubs: { ActionBar } } })
+  return mount(Flow, { props: { supplier: 5, canManage: true }, global: { plugins: [createI18n({ legacy: false, locale, messages: { cs, en } })], stubs: { ActionBar, DialogActions: ActionBar } } })
 }
 async function choose(w: ReturnType<typeof mounted>, name = 'clenove.csv', size = 10) {
   const input = w.get('[data-field="import-file"]')

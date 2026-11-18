@@ -1,14 +1,14 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
+import DialogActions, { type DialogAction } from '@/components/ui/DialogActions.vue'
 import { membershipApi, type MembershipImportReport, type MembershipImportRow } from '@/api/nonprofitMembership'
 import { formatDate } from '@/composables/useFormat'
-import { badgeBase, errorBox, errorCode, membershipError, warningBox } from './membershipFormat'
+import { errorBox, loudBadge, quietBadge, errorCode, membershipError, warningBox } from './membershipFormat'
 
 /** Import seznamu členů: soubor → náhled po řádcích → potvrzení stejného souboru (krok 8 #321). */
 const props = defineProps<{ supplier: number; canManage: boolean }>()
-const emit = defineEmits<{ changed: []; close: [] }>()
+const emit = defineEmits<{ changed: []; close: []; lock: [locked: boolean] }>()
 const { t, te } = useI18n()
 
 const MAX_SIZE = 2 * 1024 * 1024
@@ -16,6 +16,7 @@ const file = ref<File | null>(null)
 const report = ref<MembershipImportReport | null>(null)
 const step = ref<'upload' | 'preview' | 'result'>('upload')
 const busy = ref(false), error = ref(''), notice = ref(''), onlyProblems = ref(false)
+watch(busy, value => emit('lock', value))
 const input = ref<HTMLInputElement | null>(null)
 let alive = true
 onBeforeUnmount(() => { alive = false })
@@ -81,7 +82,7 @@ const rows = computed<MembershipImportRow[]>(() => {
   return onlyProblems.value ? all.filter(row => row.status === 'error' || row.outcome === 'failed') : all
 })
 
-const actions = computed<ActionItem[]>(() => [
+const actions = computed<DialogAction[]>(() => [
   { key: 'import-preview', label: t('nonprofitMembership.import.preview'), icon: 'eye', tier: 'primary', variant: 'primary', show: step.value === 'upload',
     disabled: !file.value || busy.value, disabledReason: t('nonprofitMembership.import.chooseFile'), run: () => { void send(false) } },
   { key: 'import-confirm', label: t('nonprofitMembership.import.confirm'), icon: 'check', tier: 'primary', variant: 'success', show: step.value === 'preview' && props.canManage,
@@ -92,10 +93,10 @@ const actions = computed<ActionItem[]>(() => [
 ])
 
 function statusClass(row: MembershipImportRow): string {
-  if (row.outcome === 'failed' || row.status === 'error') return 'bg-danger-50 text-danger-600'
-  if (row.status === 'new_member') return 'bg-success-50 text-success-700'
-  if (row.status === 'new_revision') return 'bg-primary-50 text-primary-700'
-  return 'bg-neutral-100 text-neutral-600'
+  if (row.outcome === 'failed' || row.status === 'error') return loudBadge('danger')
+  if (row.status === 'new_member') return quietBadge('success')
+  if (row.status === 'new_revision') return quietBadge('primary')
+  return quietBadge('neutral')
 }
 function detail(row: MembershipImportRow): string {
   if (row.outcome === 'failed') return membershipError({ t, te }, row.failure ?? '')
@@ -119,8 +120,7 @@ function detail(row: MembershipImportRow): string {
 </script>
 
 <template>
-  <section class="space-y-3 rounded-lg border border-neutral-200 bg-surface p-4" data-section="member-import">
-    <h2 class="font-semibold">{{ t('nonprofitMembership.import.title') }}</h2>
+  <section class="space-y-3" data-section="member-import">
     <p class="text-sm text-neutral-500">{{ t('nonprofitMembership.import.help') }}</p>
     <template v-if="step === 'upload'">
       <!-- Stejný výběr souboru jako import číselníků (CodebookImportDialog); input zůstává dosažitelný klávesnicí. -->
@@ -152,12 +152,12 @@ function detail(row: MembershipImportRow): string {
         <li v-for="row in rows" :key="row.line" class="flex flex-wrap items-start gap-x-3 gap-y-1 rounded border border-neutral-200 p-2 text-sm" data-section="import-row" :data-line="row.line">
           <span class="whitespace-nowrap text-neutral-500">{{ t('nonprofitMembership.import.line', { line: row.line }) }}</span>
           <span class="min-w-0 break-words font-medium">{{ row.member_number || '—' }}<template v-if="row.name"> · {{ row.name }}</template></span>
-          <span :class="[badgeBase, statusClass(row)]" data-field="import-status">{{ t(`nonprofitMembership.import.status_${row.outcome === 'failed' || row.outcome === 'already_imported' ? row.outcome : row.status}`) }}</span>
+          <span :class="statusClass(row)" data-field="import-status">{{ t(`nonprofitMembership.import.status_${row.outcome === 'failed' || row.outcome === 'already_imported' ? row.outcome : row.status}`) }}</span>
           <span class="basis-full break-words text-neutral-600" data-field="import-detail">{{ detail(row) }}</span>
         </li>
         <li v-if="!rows.length" class="text-sm text-neutral-500">{{ t('nonprofitMembership.import.noRows') }}</li>
       </ul>
     </template>
-    <ActionBar :actions="actions" />
+    <DialogActions :actions="actions" />
   </section>
 </template>

@@ -41605,8 +41605,19 @@
     "listStatus_unpaid": "Neuhrazeno",
     "listStatus_unproven": "K prověření",
     "listStatus_none": "Bez předpisu pro zvolený titul nebo rok",
-    "listPrescribed": "Předepsáno",
-    "listPaid": "Úhrada",
+    "backToList": "← Zpět na seznam členů",
+    "listColumns": {
+      "name": "Člen",
+      "membership": "Členství",
+      "payment": "Stav úhrady",
+      "prescribed": "Předepsáno",
+      "paid": "Uhrazeno",
+      "open": "Zbývá",
+      "future": "{status} od {date}",
+      "noRevision": "Členství nezačalo",
+      "voided": "Revize zrušené",
+      "statusNone": "Bez předpisu"
+    },
     "listNoResults": "Zadaným filtrům neodpovídá žádný člen.",
     "rateRetryOptions": "Znovu načíst účty a dimenze",
     "ratePartialList": "Hledáte jen v načtených sazbách. Další sazby načtete tlačítkem vedle.",
@@ -42006,7 +42017,6 @@
     "batchSelected": "Zaškrtnutí členové ({count})",
     "batchActive": "Všichni aktivní k účetnímu datu",
     "batchSelectionRequired": "Zaškrtněte v seznamu alespoň jednoho člena (nejvýše 500), nebo vyberte všechny aktivní.",
-    "batchSelectedCount": "Vybráno pro dávku: {count} z nejvýše 500. Pro všechny aktivní použijte volbu v hromadném předpisu.",
     "batchSelectMember": "Vybrat člena {name} pro hromadný předpis",
     "batchContinuePreview": "Pokračovat v přípravě náhledu",
     "batchConfirm": "Potvrdit dávku a zapsat předpisy",
@@ -42105,7 +42115,30 @@
       "reason_duplicate_client": "Kontakt nebo IČO je v souboru u víc nových členů (řádky {lines}).",
       "reason_contact_create_forbidden": "Kontakt by se musel založit, ale nemáte právo zakládat kontakty. Uveďte ID nebo IČO existujícího kontaktu.",
       "status_already_imported": "Už zapsáno"
-    }
+    },
+    "tabs": {
+      "members": "Členové",
+      "rates": "Sazby",
+      "reconciliation": "Kontrola s účetnictvím",
+      "erasure": "Výmaz údajů"
+    },
+    "detailColumns": {
+      "summary": "Přehled",
+      "revision": "Revize",
+      "status": "Stav",
+      "from": "Platí od",
+      "basis": "Podklad",
+      "title": "Příspěvek",
+      "amount": "Částka",
+      "dates": "Účetní datum a splatnost",
+      "settlement": "Úhrada"
+    },
+    "batchSelectionLimit": "Do hromadného předpisu jde vybrat nejvýše 500 členů. Pro všechny aktivní členy zvolte v hromadném předpisu možnost Všichni aktivní k účetnímu datu.",
+    "closeUnsavedConfirm": "Máte neuložené změny. Zavřít bez uložení?",
+    "listTitleAll": "Všechna označení",
+    "firstRevision": "Zapsat první revizi",
+    "firstRevisionHint": "Bez první revize nejde zapsat předpis. Zvolte Zapsat první revizi.",
+    "listYearAll": "Všechny roky"
   },
   "propertyCharges": {
     "account": "Účet (volitelné)",

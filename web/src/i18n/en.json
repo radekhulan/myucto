@@ -41920,8 +41920,19 @@
     "listStatus_unpaid": "Unpaid",
     "listStatus_unproven": "Needs review",
     "listStatus_none": "No charge for the selected title or year",
-    "listPrescribed": "Charged",
-    "listPaid": "Paid",
+    "backToList": "← Back to members",
+    "listColumns": {
+      "name": "Member",
+      "membership": "Membership",
+      "payment": "Payment status",
+      "prescribed": "Charged",
+      "paid": "Paid",
+      "open": "Outstanding",
+      "future": "{status} from {date}",
+      "noRevision": "Not started",
+      "voided": "Revisions voided",
+      "statusNone": "No charge"
+    },
     "listNoResults": "No members match the selected filters.",
     "rateRetryOptions": "Reload accounts and dimensions",
     "ratePartialList": "Search covers loaded rates only. Use the button to load more.",
@@ -42321,7 +42332,6 @@
     "batchSelected": "Selected members ({count})",
     "batchActive": "All active on the accounting date",
     "batchSelectionRequired": "Select at least one member in the list (up to 500), or choose all active members.",
-    "batchSelectedCount": "Selected for batch: {count} of up to 500. To include all active members, use the option in batch charges.",
     "batchSelectMember": "Select member {name} for batch charges",
     "batchContinuePreview": "Continue preparing preview",
     "batchConfirm": "Confirm batch and post charges",
@@ -42420,7 +42430,30 @@
       "reason_duplicate_client": "The contact or company ID appears with more than one new member (rows {lines}).",
       "reason_contact_create_forbidden": "A contact would have to be created, but you are not allowed to create contacts. Enter the ID or company ID of an existing contact.",
       "status_already_imported": "Already written"
-    }
+    },
+    "tabs": {
+      "members": "Members",
+      "rates": "Rates",
+      "reconciliation": "Accounting check",
+      "erasure": "Data erasure"
+    },
+    "detailColumns": {
+      "summary": "Overview",
+      "revision": "Revision",
+      "status": "Status",
+      "from": "Valid from",
+      "basis": "Basis",
+      "title": "Contribution",
+      "amount": "Amount",
+      "dates": "Accounting and due date",
+      "settlement": "Payment"
+    },
+    "batchSelectionLimit": "Up to 500 members can be selected for a batch charge. For all active members, choose All active on the accounting date in the batch charge.",
+    "closeUnsavedConfirm": "You have unsaved changes. Close without saving?",
+    "listTitleAll": "All contributions",
+    "firstRevision": "Record first revision",
+    "firstRevisionHint": "A charge needs the first revision. Choose Record first revision.",
+    "listYearAll": "All years"
   },
   "fx504": {
     "case_nominal_unproven": "The journal entry has no proven amount in the foreign currency. Verify the supporting evidence and any links to documents or payments, then refresh the preview.",

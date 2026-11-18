@@ -1,15 +1,15 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
-import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
+import DialogActions, { type DialogAction } from '@/components/ui/DialogActions.vue'
 import { warningBox } from './membershipFormat'
 
 /** `tone`: potvrzení zápisu je `success`, storno (protizápis) `danger` podle sémantiky akčních tlačítek. */
-const props = withDefaults(defineProps<{ acknowledged: boolean; busy: boolean; uncertain: boolean; canManage: boolean; ackLabel: string; blockedReason?: string; tone?: 'success' | 'danger'; confirmLabel?: string; showCancel?: boolean; ackField?: string }>(), { blockedReason: undefined, tone: 'success', showCancel: true, ackField: 'ack' })
+const props = withDefaults(defineProps<{ acknowledged: boolean; busy: boolean; uncertain: boolean; canManage: boolean; ackLabel: string; blockedReason?: string; tone?: 'success' | 'danger'; confirmLabel?: string; showCancel?: boolean; ackField?: string; inline?: boolean }>(), { blockedReason: undefined, tone: 'success', showCancel: true, ackField: 'ack' })
 const emit = defineEmits<{ 'update:acknowledged': [value: boolean]; confirm: []; cancel: []; discard: [] }>()
 const { t } = useI18n()
 
-const actions = computed<ActionItem[]>(() => [
+const actions = computed<DialogAction[]>(() => [
   {
     key: 'confirm', label: props.confirmLabel ?? t(props.uncertain ? 'nonprofitMembership.retrySame' : 'nonprofitMembership.confirm'), icon: 'check', tier: 'primary', variant: props.tone, loading: props.busy,
     disabled: props.busy || !props.acknowledged || !props.canManage || !!props.blockedReason,
@@ -29,6 +29,6 @@ const actions = computed<ActionItem[]>(() => [
       <input type="checkbox" :checked="acknowledged" :disabled="busy || uncertain" :data-field="ackField" @change="emit('update:acknowledged', ($event.target as HTMLInputElement).checked)" />
       <span>{{ ackLabel }}</span>
     </label>
-    <ActionBar :actions="actions" />
+    <DialogActions :actions="actions" :inline="inline" />
   </div>
 </template>

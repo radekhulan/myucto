@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
+import DialogActions, { type DialogAction } from '@/components/ui/DialogActions.vue'
 import DateInput from '@/components/ui/DateInput.vue'
 import { formDateInput as dateInput, formInput as field, formLabel, formTextarea as textarea } from '@/components/ui/formStyles'
 import type { AccountingPeriod } from '@/api/accounting'
@@ -85,15 +85,14 @@ const frozenRequest = computed(() => {
 })
 const accounts = computed(() => commit.review.value?.original?.proof?.accounts)
 
-const actions = computed<ActionItem[]>(() => [
+const actions = computed<DialogAction[]>(() => [
   { key: 'reverse-preview', label: t('nonprofitMembership.preview'), icon: 'eye', tier: 'primary', variant: 'primary', loading: commit.previewing.value, disabled: !props.canManage || !!problem.value || commit.busy.value || commit.locked.value, disabledReason: problem.value || undefined, run: () => { void runPreview() } },
   { key: 'reverse-close', label: t('nonprofitMembership.close'), icon: 'x', disabled: commit.locked.value, run: () => emit('close') },
 ])
 </script>
 
 <template>
-  <section class="space-y-4 rounded-lg border border-neutral-200 bg-surface p-4" data-section="reverse-flow">
-    <h3 class="break-words font-semibold">{{ t('nonprofitMembership.reverseTitle') }} · {{ member.member_number }} · {{ member.label }}</h3>
+  <section class="space-y-4" data-section="reverse-flow">
     <p class="text-sm text-neutral-500">{{ t('nonprofitMembership.reverseHelp') }}</p>
     <dl class="grid gap-3 sm:grid-cols-4" data-section="reverse-claim">
       <div class="min-w-0"><dt class="text-sm text-neutral-500">{{ t('nonprofitMembership.titleKey') }}</dt><dd class="break-words">{{ claim.title_key }}</dd></div>
@@ -115,7 +114,7 @@ const actions = computed<ActionItem[]>(() => [
       <label :class="[formLabel, 'sm:col-span-2']">{{ t('nonprofitMembership.reverseReason') }}<textarea v-model="form.reason" :class="textarea" maxlength="2000" data-field="reverse-reason" /></label>
     </fieldset>
     </form>
-    <ActionBar v-if="canManage && !commit.review.value" :actions="actions" />
+    <DialogActions v-if="canManage && !commit.review.value" :actions="actions" />
     <div v-if="commit.review.value && frozenRequest" class="space-y-3 rounded border border-neutral-200 p-3" data-section="reverse-preview">
       <h4 class="font-semibold">{{ t('nonprofitMembership.reviewTitle') }}</h4>
       <p class="text-sm text-neutral-500">{{ t('nonprofitMembership.advisory') }}</p>

@@ -29,7 +29,7 @@ const revision: MemberRevision = {
 function mounted(props: { mode: 'identity' | 'delete' | 'void' } & Record<string, unknown>, locale = 'cs') {
   return mount(Flow, {
     props: { supplier: 5, canManage: true, member, label: 'Synthetic member', headRevisionNo: 2, revision: null, ...props },
-    global: { plugins: [createI18n({ legacy: false, locale, messages: { cs, en } })], stubs: { ActionBar, ClientSearchSelect } },
+    global: { plugins: [createI18n({ legacy: false, locale, messages: { cs, en } })], stubs: { ActionBar, DialogActions: ActionBar, ClientSearchSelect } },
   })
 }
 async function confirm(w: ReturnType<typeof mounted>) {
@@ -52,7 +52,8 @@ describe('Membership correction flow', () => {
     for (const mode of ['identity', 'delete', 'void'] as const) {
       const w = mounted({ mode, revision }, locale)
       const messages = (locale === 'cs' ? cs : en).nonprofitMembership.correction as Record<string, string>
-      expect(w.text()).toContain(messages[`title_${mode}`])
+      // Nadpis nese okno detailu; tok sám ukazuje nápovědu režimu.
+      expect(w.text()).toContain(messages[`help_${mode}`])
       w.unmount()
     }
   })

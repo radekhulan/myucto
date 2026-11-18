@@ -10,6 +10,10 @@ import en from '@/i18n/en.json'
 const api = vi.hoisted(() => ({members: vi.fn(), titles: vi.fn(), selectionCheck: vi.fn()}))
 vi.mock('@/api/nonprofitMembership', () => ({membershipApi: api}))
 vi.mock('@/api/accounting', () => ({accountingApi: {listPeriods: async () => []}}))
+// Preference tabulky (sloupce, hustota) se v testu nenačítají ze serveru.
+// Direktiva popisků sloupců se registruje v main.ts; v testu stačí prázdná.
+config.global.directives = { ...config.global.directives, 'column-labels': {} }
+vi.mock('@/composables/useUserPrefs', () => ({ ensurePrefsLoaded: () => Promise.resolve(), getPagePrefs: () => ({ value: {} }), patchPagePrefs: vi.fn() }))
 vi.mock('@/api/clients', () => ({clientsApi: {}}))
 const ActionBar = defineComponent({props: ['actions'], setup: p => () => h('div', (p.actions as {key: string; label: string; show?: boolean; disabled?: boolean; run: () => void}[]).filter(a => a.show !== false).map(a => h('button', {'data-action': a.key, disabled: a.disabled, onClick: a.run}, a.label)))})
 const Batch = defineComponent({name: 'MembershipBatchFlow', props: ['selectedMemberIds'], emits: ['lock'], setup: () => () => h('div')})
@@ -23,7 +27,7 @@ async function mounted() {
   delete config.global.components.RouterLink
   const w = mount(Workspace, {props: {supplier: 5, canManage: true}, global: {
     plugins: [router, createI18n({legacy: false, locale: 'cs', messages: {cs, en}})],
-    stubs: {ActionBar, MembershipBatchFlow: Batch, MembershipRates: empty, ClientSearchSelect: empty, MembershipMemberDetail: empty, MembershipReconciliation: empty},
+    stubs: {ActionBar, MembershipBatchFlow: Batch, MembershipRates: empty, ClientSearchSelect: empty, MembershipReconciliation: empty},
   }})
   if (link) config.global.components.RouterLink = link
   await flushPromises()
@@ -32,6 +36,8 @@ async function mounted() {
   return {w, router, batch: w.findComponent(Batch)}
 }
 beforeEach(() => {
+  // Výběr do dávky se drží v sessionStorage; testy ho nesmí sdílet.
+  sessionStorage.clear()
   vi.clearAllMocks()
   api.members.mockImplementation(async (_supplier, _after, _limit, filters) => ({items: [{...member, company_name: 'Synthetic ' + filters.year}], next_after_id: null}))
   api.selectionCheck.mockImplementation(async (_supplier, member_ids) => ({member_ids}))

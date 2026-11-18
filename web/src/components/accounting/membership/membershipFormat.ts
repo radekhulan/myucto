@@ -26,24 +26,39 @@ export function formatDateRange(from: string, to: string): string {
   return `${formatDate(from)} – ${formatDate(to)}`
 }
 
-/** Štítek stavu ve stejném tvaru jako ostatní štítky aplikace. */
-export const badgeBase = 'whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-medium'
-
-const statusTones: Record<MemberStatus, string> = {
-  active: 'bg-success-50 text-success-600',
-  suspended: 'bg-warning-50 text-warning-700',
-  ended: 'bg-neutral-100 text-neutral-700',
+/**
+ * Štítky stavů jako na fakturách (`.badge` v main.css, statusBadgeClass): běžný stav je tichý (tečka a text),
+ * plnou výplň má jen stav, který po uživateli něco chce (neuhrazeno, neověřeno, chyba).
+ */
+export type BadgeTone = 'success' | 'warning' | 'danger' | 'neutral' | 'primary'
+const dotTones: Record<BadgeTone, string> = {
+  success: '[--badge-dot:var(--color-success-500)]',
+  warning: '[--badge-dot:var(--color-warning-500)]',
+  danger: '[--badge-dot:var(--color-danger-500)]',
+  neutral: '[--badge-dot:var(--color-neutral-400)]',
+  primary: '[--badge-dot:var(--color-primary-500)]',
 }
+const fillTones: Record<BadgeTone, string> = {
+  success: 'bg-success-50 text-success-700',
+  warning: 'bg-warning-50 text-warning-700',
+  danger: 'bg-danger-50 text-danger-700',
+  neutral: 'bg-neutral-100 text-neutral-700',
+  primary: 'bg-primary-50 text-primary-700',
+}
+export const quietBadge = (tone: BadgeTone) => `badge badge-quiet px-2 py-0.5 text-xs ${dotTones[tone]}`
+export const loudBadge = (tone: BadgeTone) => `badge badge-loud rounded-full px-2 py-0.5 text-xs ${fillTones[tone]}`
+
+const statusTones: Record<MemberStatus, BadgeTone> = { active: 'success', suspended: 'warning', ended: 'neutral' }
 
 export function memberStatusBadge(status: MemberStatus): string {
-  return `${badgeBase} ${statusTones[status] ?? statusTones.ended}`
+  return quietBadge(statusTones[status] ?? 'neutral')
 }
 
 /** Chybová hláška ve stejném rámečku jako sousední obrazovky. */
 export const errorBox = 'rounded-lg border border-danger-500/30 bg-danger-50 p-3 text-sm text-danger-700'
 
 /** Upozornění ve stejném tvaru jako chybová hláška. */
-export const warningBox = 'rounded-lg border border-warning-500/30 bg-warning-50 p-3 text-sm text-warning-700'
+export const warningBox = 'rounded-lg border border-warning-200 bg-warning-50 p-3 text-sm text-warning-800'
 
 /**
  * Platné revize v pořadí řetězu. Zrcadlí `MembershipRevisionTimeline::effective()`: rušící článek

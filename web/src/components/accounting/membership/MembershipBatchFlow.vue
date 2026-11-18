@@ -3,6 +3,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useIntervalFn } from '@vueuse/core'
 import { useI18n } from 'vue-i18n'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
+import DialogActions, { type DialogAction } from '@/components/ui/DialogActions.vue'
 import { membershipApi, type MembershipIssueRequest, type MembershipBatchDetail, type MembershipBatchCreate, type MembershipBatchRecent } from '@/api/nonprofitMembership'
 import type { AccountingPeriod } from '@/api/accounting'
 import type { DimensionOverview } from '@/api/dimensions'
@@ -190,7 +191,7 @@ async function cancelBatch() {
   } finally {if (alive && ticket === epoch) {busy.value = false; void loadRecent()}}
 }
 
-const actions = computed<ActionItem[]>(() => [
+const actions = computed<DialogAction[]>(() => [
   {key: 'batch-prepare', label: t('nonprofitMembership.batchContinuePreview'), icon: 'eye', tier: 'primary', variant: 'primary', show: !!detail.value && ['seeding', 'preparing'].includes(detail.value.batch.phase), disabled: busy.value || !props.canManage, run: () => {void work('prepare')}},
   {key: 'batch-renew', label: t('nonprofitMembership.batchRenewPreview'), icon: 'eye', variant: 'primary', show: !!detail.value && ['ready', 'posting'].includes(detail.value.batch.phase) && approvalExpired.value && props.canManage, disabled: busy.value, run: () => {void renewPreview()}},
   {key: 'batch-cancel', label: t('nonprofitMembership.batchCancel'), icon: 'x', variant: 'warning', show: !!detail.value && ['seeding','preparing','ready','posting'].includes(detail.value.batch.phase) && props.canManage, disabled: busy.value, run: () => {cancelling.value = true}},
@@ -219,8 +220,7 @@ onBeforeUnmount(() => {alive = false; epoch++; recentTicket++; dimensionsTicket+
 </script>
 
 <template>
-  <section class="space-y-4 rounded-lg border border-neutral-200 bg-surface p-4" data-section="membership-batch">
-    <h2 class="font-semibold">{{ t('nonprofitMembership.batchTitle') }}</h2>
+  <section class="space-y-4" data-section="membership-batch">
     <p class="text-sm text-neutral-500">{{ t('nonprofitMembership.batchHelp') }}</p>
     <p v-if="error" role="alert" :class="errorBox" data-section="batch-error">{{ error }}</p>
     <p v-if="notice" role="status" class="text-sm text-warning-700">{{ notice }}</p>
@@ -260,7 +260,7 @@ onBeforeUnmount(() => {alive = false; epoch++; recentTicket++; dimensionsTicket+
         <span class="whitespace-nowrap tabular-nums">{{ formatMoneyMinor(row.amount_cents) }}</span>
       </div>
       <ActionBar :actions="pageActions" />
-      <MembershipConfirmBar v-if="['ready', 'posting'].includes(detail.batch.phase) && canManage && !cancelling && !approvalExpired"
+      <MembershipConfirmBar v-if="['ready', 'posting'].includes(detail.batch.phase) && canManage && !cancelling && !approvalExpired" inline
         v-model:acknowledged="acknowledged" :busy="busy" :uncertain="false" :can-manage="canManage" :show-cancel="false" ack-field="batch-ack"
         :ack-label="t('nonprofitMembership.batchAck')" :confirm-label="t(detail.batch.phase === 'posting' ? 'nonprofitMembership.batchContinuePosting' : 'nonprofitMembership.batchConfirm')"
         :blocked-reason="!classificationVisible ? t('nonprofitMembership.classificationProofMissing') : !detail.batch.approval_token ? t('nonprofitMembership.batchNeedNewPreview') : undefined"
@@ -274,7 +274,7 @@ onBeforeUnmount(() => {alive = false; epoch++; recentTicket++; dimensionsTicket+
         ]" />
       </div>
     </template>
-    <ActionBar :actions="actions" />
+    <DialogActions :actions="actions" />
     <details class="space-y-3 rounded border border-neutral-200 p-3" data-section="batch-recent">
       <summary class="cursor-pointer font-medium">{{ t('nonprofitMembership.batchRecent') }}</summary>
       <p v-if="recentError" role="alert" :class="errorBox">{{ recentError }}</p>

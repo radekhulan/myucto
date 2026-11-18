@@ -336,7 +336,11 @@ final class MembershipAction
             $after = $this->queryInteger($query['after_claim_id'] ?? 0, 'after_claim_id', 0);
             $limit = $this->queryInteger($query['limit'] ?? 100, 'limit', 1, 100);
             $history = $this->members->history($supplier, $member['id']);
-            $detail = ['member' => $member, 'history' => $history, 'erased' => MembershipErasureService::isErasedMember($member)];
+            // Detail je samostatná stránka (i v novém panelu), jméno kontaktu proto nese sám, jako řádek seznamu.
+            // Vymazaný člen jméno nenese, stejně jako jeho řádek v seznamu.
+            $erased = MembershipErasureService::isErasedMember($member);
+            $contact = $erased ? ['company_name' => null, 'first_name' => null, 'last_name' => null] : $this->members->contactName($supplier, $member['client_id']);
+            $detail = ['member' => $member + $contact, 'history' => $history, 'erased' => $erased];
             // Dostupnost oprav čte předpisy, důkazy operací a dávky člena; počítá se jen pro toho, kdo smí opravovat.
             if (RequestAuthorization::allows($request, 'accounting.journal.post', AccessLevel::WRITE)) {
                 $detail['corrections'] = $this->corrections->availability($supplier, $member, $history);

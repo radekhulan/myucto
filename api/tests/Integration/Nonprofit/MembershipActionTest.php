@@ -26,6 +26,7 @@ use PHPUnit\Framework\TestCase;
 use PHPUnit\Framework\Attributes\DataProvider;
 use Slim\Psr7\Factory\ServerRequestFactory;
 use Slim\Psr7\Response;
+use MyInvoice\Service\Nonprofit\Membership\MembershipErasureService;
 
 final class MembershipActionTest extends TestCase
 {
@@ -137,6 +138,10 @@ final class MembershipActionTest extends TestCase
         [$status, $detail] = $this->call('GET', 'member', null, ['id' => (string) $member['id']], ['accounting' => 1], 'session');
         self::assertSame(200, $status);
         self::assertSame(1800000, $detail['balance']['page_active_claim_cents']);
+        // Samostatná stránka detailu zobrazí jméno kontaktu bez seznamu.
+        self::assertSame('Synthetic action member', $detail['member']['company_name']);
+        self::assertArrayHasKey('first_name', $detail['member']);
+        self::assertArrayHasKey('last_name', $detail['member']);
         [$status, $list] = $this->call('GET', 'members', null, [], ['accounting' => 1], 'session');
         self::assertSame(200, $status);
         self::assertSame('active', $list['items'][0]['status']);
@@ -149,6 +154,22 @@ final class MembershipActionTest extends TestCase
         [$status, $error] = $this->call('POST', 'preview', ['operation' => 'issue', 'request' => $charge, 'unexpected' => true]);
         self::assertSame(422, $status);
         self::assertSame('nonprofit_membership_invalid', $error['error']['code']);
+
+        // Vymazaný člen (krok 10): jméno kontaktu detail nenese, ani když kontakt dál drží jiný doklad. Člen bez
+        // předpisu, u kterého trigger změnu čísla dovolí; výmaz ho přepíše na stejné zástupné číslo.
+        $currency = (int) $this->pdo->query('SELECT default_currency_id FROM supplier WHERE id=' . $this->supplier)->fetchColumn();
+        $this->pdo->prepare("INSERT INTO clients(supplier_id,company_name,first_name,last_name,street,city,zip,country_id,main_email,language,currency_default_id,is_customer,is_vendor) VALUES(?,'Synthetic erased member','Synthetic','Person','Synthetic street','Synthetic city','10000',203,'membership-action-erased@example.test','cs',?,1,0)")
+            ->execute([$this->supplier, $currency]);
+        [$status, $gone] = $this->call('POST', 'createMember', ['client_id' => (int) $this->pdo->lastInsertId(), 'member_number' => 'M-ACTION-ERASED']);
+        self::assertSame(201, $status);
+        $this->pdo->prepare('UPDATE nonprofit_members SET member_number=? WHERE supplier_id=? AND id=?')
+            ->execute([MembershipErasureService::placeholderNumber((int) $gone['id']), $this->supplier, $gone['id']]);
+        [$status, $erased] = $this->call('GET', 'member', null, ['id' => (string) $gone['id']], ['accounting' => 1], 'session');
+        self::assertSame(200, $status);
+        self::assertTrue($erased['erased']);
+        self::assertNull($erased['member']['company_name']);
+        self::assertNull($erased['member']['first_name']);
+        self::assertNull($erased['member']['last_name']);
     }
 
     public function testInvalidIssueAmountsReturnValidationErrorsWithoutWriting(): void

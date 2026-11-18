@@ -4,9 +4,11 @@ V podvojném účetnictví podle vyhlášky 504 otevřete **Účetnictví → Č
 
 Postup je vždy stejný: založte člena, zapište mu první revizi členství a teprve potom předpis příspěvku. Dokud není evidován žádný člen, stránka tyto tři kroky vypíše.
 
+Stránka má záložky **Členové**, **Sazby**, **Kontrola s účetnictvím** (jen když firma má účetní období) a **Výmaz údajů** (jen s právem k výmazu). Vybraná záložka je součástí adresy stránky, takže na ni vede i odkaz. V hlavičce stránky jsou akce **Nový člen**, **Hromadný předpis příspěvků** a **Import ze souboru**; export a **Načíst znovu** najdete v nabídce **…**. Formuláře (založení člena, hromadný předpis, import, nový předpis, storno, změna stavu a opravy) se otevírají v okně nad stránkou. Okno s rozběhnutým zápisem nejde zavřít, dokud zápis neskončí. Když do okna něco vyplníte a zavíráte ho bez uložení (křížkem, Escapem nebo klikem mimo okno), aplikace se nejdřív zeptá, jestli neuložené změny zahodit. Potvrzení dokončené akce se zobrazí jako krátké oznámení v rohu obrazovky.
+
 ## 120.1 Založení a historie člena
 
-Vyberte kontakt a vyplňte jedinečné členské číslo. Kontakt i číslo smí v organizaci patřit jen jednomu členovi. Založení člena samo nevytvoří pohledávku ani účetní zápis. V detailu přidejte první revizi členství s datem účinnosti, odkazem na stanovy nebo rozhodnutí a doložením členského vztahu bez vzájemného protiplnění. První revize musí mít stav **Aktivní**.
+Zvolte **Nový člen**, vyberte kontakt a vyplňte jedinečné členské číslo. Kontakt i číslo smí v organizaci patřit jen jednomu členovi. Založení člena samo nevytvoří pohledávku ani účetní zápis. V detailu zvolte **Zapsat první revizi** a přidejte první revizi členství s datem účinnosti, odkazem na stanovy nebo rozhodnutí a doložením členského vztahu bez vzájemného protiplnění. První revize musí mít stav **Aktivní**.
 
 Změny stavu se zapisují jako další revize přes **Změnit stav členství** v detailu člena. Nová revize musí začínat po datu účinnosti poslední platné revize. Původní historie zůstává zachovaná. Budoucí pozastavení nebo ukončení nemění dnešní stav ani starší předpisy. Detail odlišuje dnešní stav od budoucích změn.
 
@@ -32,7 +34,7 @@ Revize, na které stojí předpis, ani člena s předpisem opravit nejde. Před 
 
 ### Sazby členských příspěvků
 
-V rozbalovací části **Sazby členských příspěvků** založte šablony své organizace. Každá sazba obsahuje název, částku na jednoho člena, účet pohledávky, výnosový účet povolený nastavenou rolí přijatých členských příspěvků, označení příspěvku, výchozí délku období a texty podkladu. Analytiky lze členit podle vlastních potřeb; nemusí odpovídat částce příspěvku. Vstupní poplatek může mít vlastní sazbu a vlastní označení. Rodinná částka za domácnost se touto sazbou nerozděluje.
+Na záložce **Sazby** založte šablony své organizace. Každá sazba obsahuje název, částku na jednoho člena, účet pohledávky, výnosový účet povolený nastavenou rolí přijatých členských příspěvků, označení příspěvku, výchozí délku období a texty podkladu. Analytiky lze členit podle vlastních potřeb; nemusí odpovídat částce příspěvku. Vstupní poplatek může mít vlastní sazbu a vlastní označení. Rodinná částka za domácnost se touto sazbou nerozděluje.
 
 U nového předpisu vyberte sazbu a zvolte **Použít sazbu**. Výchozí délka (měsíc, čtvrtletí, pololetí, rok) se počítá od vyplněného začátku příspěvku, jinak od účetního data. Kalendářní sazba vyžaduje začátek prvním dnem měsíce. Konec připadne na poslední den posledního měsíce zvolené délky. Volba ručního období data nemění. Před náhledem vždy zkontrolujte a případně upravte obě data, částku, účty a texty. Délka příspěvku neurčuje platnost členství ani automaticky nezapisuje jeho prodloužení či ukončení. Předpis lze zadat také bez sazby.
 
@@ -65,7 +67,7 @@ API token s [Plným zápisem](103_API.md#103973-plny-zapis-tokenem-systemwrite).
 
 Správce instalace může proměnnou prostředí `MYINVOICE_MEMBERSHIP_BATCH_MAX_MEMBERS` nastavit strop velikosti dávky na 1–5000 členů; výchozí hodnota je 5000.
 
-V seznamu zaškrtněte členy a otevřete **Hromadný předpis příspěvků**. Výběr se zachovává i při načítání dalších členů, nejvýše 500. Místo zaškrtnutých můžete výslovně zvolit **Všichni aktivní k účetnímu datu**; tento výběr nemá omezení na právě zobrazenou stránku. Členové s budoucím ukončením se posuzují podle účetního data. Každý předpis přesto vyžaduje aktivní členství po celé období příspěvku.
+V seznamu zaškrtněte členy; u spodního okraje se objeví lišta s počtem vybraných a tlačítkem **Hromadný předpis příspěvků** (stejnou akci najdete i v hlavičce stránky). Výběr se zachovává i při načítání dalších členů, nejvýše 500. Místo zaškrtnutých můžete výslovně zvolit **Všichni aktivní k účetnímu datu**; tento výběr nemá omezení na právě zobrazenou stránku. Členové s budoucím ukončením se posuzují podle účetního data. Každý předpis přesto vyžaduje aktivní členství po celé období příspěvku.
 
 Pro dávku vyberte sazbu s kalendářní délkou období a zkontrolujte společné údaje ve stejném formuláři jako u jednotlivého předpisu. U dávky určuje sazba částku, účty a délku období; tyto údaje nelze přepsat. Začátek kalendářního období musí být první den měsíce. Upravit můžete data, podklady a dimenze. **Připravit náhled dávky** uloží její společné údaje a výběr členů. Založení ani příprava náhledu nic neúčtuje. Příprava postupuje po omezených částech; k potvrzení musí nejdřív dokončit náhled všech členů.
 
@@ -85,9 +87,13 @@ Pro změnu společných údajů nebo nové zpracování členů po opravě odmí
 
 ### Přehled příspěvků v seznamu členů
 
-Seznam můžete prohledat podle jména a příjmení, názvu kontaktu nebo členského čísla. Zadáte-li víc slov (například celé jméno), musí se najít každé z nich, na pořadí nezáleží. Zvolte rok příspěvku a případně přesné označení ve výběru titulů. Vyhledávání a rok se použijí po krátké prodlevě, takže rozepsaná hodnota seznam nepřenačte. Titul a stav úhrady se použijí ihned; pokud ale právě běží prodleva rozepsaného hledání nebo roku, prodleva se spustí znovu a po jejím uplynutí se použijí všechny změny společně. Aktivní filtry jsou vidět jako odstranitelné štítky a ukládají se do adresy stránky. Rok vybírá příspěvky, jejichž období do zvoleného roku zasahuje. Pro zobrazení všech období jednoho titulu vyberte označení, rok nechte prázdný a stav úhrady ponechte **Vše**. Filtrování podle stavu úhrady vyžaduje konkrétní rok; při prázdném roce se doplní aktuální rok. Přehled všech období může nad velkou historií trvat déle. Volba roku nemění účetní datum ani stav členství.
+Seznam můžete prohledat podle jména a příjmení, názvu kontaktu nebo členského čísla. Zadáte-li víc slov (například celé jméno), musí se najít každé z nich, na pořadí nezáleží. Zvolte rok příspěvku a případně přesné označení ve výběru titulů. Vyhledávání se použije po krátké prodlevě, takže rozepsaný text seznam nepřenačte. Rok, titul a stav úhrady se použijí ihned; pokud ale právě běží prodleva rozepsaného hledání, prodleva se spustí znovu a po jejím uplynutí se použijí všechny změny společně. Rok vyberete ze seznamu let účetních období a aktuálního roku. Aktivní filtry jsou vidět jako odstranitelné štítky a ukládají se do adresy stránky. Rok vybírá příspěvky, jejichž období do zvoleného roku zasahuje. Pro zobrazení všech období jednoho titulu vyberte označení, u roku zvolte **Všechny roky** a stav úhrady ponechte **Vše**. Filtrování podle stavu úhrady vyžaduje konkrétní rok; při volbě **Všechny roky** se doplní aktuální rok. Přehled všech období může nad velkou historií trvat déle. Volba roku nemění účetní datum ani stav členství.
 
 U člena uvidíte částku předepsaných aktivních příspěvků za vybraný titul nebo rok a stav **Uhrazeno**, **Neuhrazeno**, **K prověření** nebo **Bez předpisu pro zvolený titul nebo rok**. Stornované předpisy se do těchto součtů nezahrnují. Úhrada a zůstatek vycházejí ze stejného nativního párování jako detail člena.
+
+Na počítači je seznam tabulka se sloupci členské číslo, člen, členství (stav a datum od), stav úhrady, **Předepsáno**, **Uhrazeno** a **Zbývá**. Viditelné sloupce a hustotu řádků nastavíte tlačítky nad tabulkou; nastavení si aplikace pamatuje. Seznam jde ovládat klávesnicí jako seznam faktur: J a K posouvají po řádcích, Enter otevře člena, X ho vybere do hromadného předpisu a Esc výběr zruší. Klik na řádek nebo na jméno člena otevře detail člena na samostatné stránce, stejně jako detail kontaktu; Ctrl+klik nebo prostřední tlačítko ho otevře v novém panelu. Odkaz **Zpět na seznam členů** vrátí seznam se stejnými filtry a se zaškrtnutými členy. Během exportu se detail otevře v novém panelu, aby export doběhl. Po založení nového člena se rovnou otevře jeho detail. Zaškrtávátko na začátku řádku vybírá člena do hromadného předpisu a detail neotevírá. Na telefonu se členové zobrazují jako karty se stejnými údaji. Seznam je seřazený podle pořadí založení členů a další členy načtete tlačítkem **Načíst další členy**. Do hromadného předpisu jde zaškrtnout nejvýše 500 členů; pro všechny aktivní členy zvolte v hromadném předpisu **Všichni aktivní k účetnímu datu**.
+
+Detail člena má v hlavičce jméno kontaktu se štítkem dnešního stavu, pod ním členské číslo a vpravo akce (**Nový předpis příspěvku**, **Změnit stav členství**, opravy v nabídce **…**). Pod hlavičkou je přehled (stav k dnešnímu dni a budoucí změny, předepsáno, zůstatek k úhradě, předpisy k prověření), tabulka historie členství a tabulka předpisů s úhradou. Obnovu úhrady a storno předpisu najdete na konci jeho řádku.
 
 Předpis bez spárované úhrady se zobrazí jako neuhrazený s nulovou úhradou a plným zůstatkem. Pokud jsou účetní důkazy poškozené nebo je párování nejednoznačné, úhrada a zůstatek se zobrazí jako neurčené, nikoli jako potvrzený dluh. Filtr **Neuhrazeno** proto zahrnuje předpisy bez spárované úhrady i předpisy uhrazené jen zčásti; předpisy k prověření mají vlastní filtr **K prověření**. Filtry se uplatní před stránkováním celého seznamu.
 
@@ -111,7 +117,7 @@ Párovat lze také ručně, doporučujeme ale párování v bance: ruční páro
 
 U poškozených důkazů nebo nejednoznačného párování se částka nevydává za potvrzený dluh. Opravte párování v opisu účtu pohledávky.
 
-Kontrola vybraného účetního období pod seznamem členů porovnává členské pohledávky, potvrzené operace a pohledávkové i výnosové řádky účetního deníku. Po zápisu předpisu, storna nebo revize se dřívější výsledek kontroly skryje; spusťte ji znovu. Případný rozdíl vyžaduje kontrolu původu dokladů.
+Kontrola vybraného účetního období na záložce **Kontrola s účetnictvím** porovnává členské pohledávky, potvrzené operace a pohledávkové i výnosové řádky účetního deníku. Po zápisu předpisu, storna nebo revize se dřívější výsledek kontroly skryje; spusťte ji znovu. Případný rozdíl vyžaduje kontrolu původu dokladů.
 
 ## 120.4 Storno a opakování požadavku
 
@@ -131,7 +137,7 @@ Historické role vyžadují průkazný okamžik zaznamenání. Pokud jej starš�
 
 ## 120.6 Výmaz osobních údajů bývalých členů
 
-Osobní údaje bývalého člena se po uplynutí lhůt vymažou v sekci **Výmaz osobních údajů bývalých členů** pod sazbami. Sekce je vidět s právem **Schválit a provést výmaz osobních údajů bývalých členů**. Ve výchozím stavu ho má správce; jiné roli ho přidělí správce v editoru rolí. Nic se nemaže automaticky. Sestaví se návrh, člověk ho schválí a teprve pak se provede.
+Osobní údaje bývalého člena se po uplynutí lhůt vymažou na záložce **Výmaz údajů**. Záložka je vidět s právem **Schválit a provést výmaz osobních údajů bývalých členů**. Ve výchozím stavu ho má správce; jiné roli ho přidělí správce v editoru rolí. Nic se nemaže automaticky. Sestaví se návrh, člověk ho schválí a teprve pak se provede.
 
 **Kdy jde údaje vymazat.** Kandidátem je člen, jehož poslední platná revize má stav **Ukončeno**. Lhůta běží od ukončení členství a od konce účetního období posledního účetního záznamu, který na členovi stojí: předpisu, storna nebo úhrady spárované s jeho předpisem. Platí ta lhůta, která skončí později:
 

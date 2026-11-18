@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, reactive, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
+import DialogActions, { type DialogAction } from '@/components/ui/DialogActions.vue'
 import ClientSearchSelect from '@/components/ui/ClientSearchSelect.vue'
 import { formInput as field, formLabel, formTextarea as textarea } from '@/components/ui/formStyles'
 import { membershipApi, type MemberIdentity, type MemberIdentityInput, type MemberRevision, type MemberRevisionVoidInput } from '@/api/nonprofitMembership'
@@ -91,9 +91,8 @@ watch(() => props.supplier, () => commit.reset())
 watch(commit.errorKind, kind => { if (STALE.includes(kind)) emit('stale') })
 watch(commit.locked, locked => emit('lock', locked))
 
-const title = computed(() => t(`nonprofitMembership.correction.title_${props.mode}`))
 const tone = computed(() => (props.mode === 'identity' ? 'success' : 'danger'))
-const actions = computed<ActionItem[]>(() => [
+const actions = computed<DialogAction[]>(() => [
   { key: 'corr-close', label: t('nonprofitMembership.close'), icon: 'x', disabled: commit.locked.value, run: () => emit('close') },
   { key: 'corr-review', label: t('nonprofitMembership.review'), icon: 'eye', tier: 'primary', variant: props.mode === 'identity' ? 'primary' : 'danger',
     disabled: !props.canManage || !!invalid.value || commit.busy.value || commit.locked.value, disabledReason: invalidShown.value ? undefined : invalid.value || undefined, run: review },
@@ -102,8 +101,7 @@ const pending = computed(() => commit.review.value)
 </script>
 
 <template>
-  <section class="space-y-4 rounded-lg border border-neutral-200 bg-surface p-4" :data-section="`correction-${mode}`">
-    <h3 class="font-semibold">{{ title }}</h3>
+  <section class="space-y-4" :data-section="`correction-${mode}`">
     <p class="text-sm text-neutral-500">{{ t(`nonprofitMembership.correction.help_${mode}`) }}</p>
     <p v-if="commit.error.value" role="alert" :class="errorBox" data-section="corr-error">{{ commit.error.value }}</p>
 
@@ -128,7 +126,7 @@ const pending = computed(() => commit.review.value)
     <p v-if="mode === 'delete'" class="text-sm" data-section="corr-delete-target">{{ t('nonprofitMembership.correction.deleteTarget', { member: `${base.number} · ${base.label}` }) }}</p>
     <p v-if="invalidShown" class="text-sm text-warning-700" data-section="corr-invalid">{{ invalid }}</p>
 
-    <ActionBar v-if="canManage && !pending" :actions="actions" />
+    <DialogActions v-if="canManage && !pending" :actions="actions" />
     <div v-if="pending" class="space-y-3 rounded border border-neutral-200 p-3" data-section="corr-review">
       <dl v-if="pending.mode === 'identity'" class="grid gap-3 sm:grid-cols-2">
         <div><dt class="text-sm text-neutral-500">{{ t('nonprofitMembership.correction.client') }}</dt><dd>{{ base.label }} → {{ form.clientLabel }}</dd></div>

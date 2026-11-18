@@ -182,7 +182,12 @@ function onMenuKey(e: KeyboardEvent) {
   else if (e.key === 'Tab') close(true)
 }
 
-function onKey(e: KeyboardEvent) { if (paneActive.value && e.key === 'Escape') close(true) }
+// Capture na dokumentu: rozbalenou nabídku zavře dřív, než Escape dojde k oknu (Modal), a okno tak zůstane.
+function onKey(e: KeyboardEvent) {
+  if (!paneActive.value || e.key !== 'Escape') return
+  if (open.value) e.preventDefault()
+  close(true)
+}
 // Posluchač musí být TÁŽ funkce při přidání i odebrání; `close` sama bere
 // argument, takže by jí prohlížeč jako „vrať ohnisko" podstrčil Event.
 function closeOnViewportChange() { close() }
@@ -197,14 +202,14 @@ function closeOnNavigationCapture(event: MouseEvent) {
 onMounted(() => {
   window.addEventListener('click', closeOnNavigationCapture, true)
   window.addEventListener('auxclick', closeOnNavigationCapture, true)
-  window.addEventListener('keydown', onKey)
+  document.addEventListener('keydown', onKey, true)
   window.addEventListener('scroll', closeOnViewportChange, true)
   window.addEventListener('resize', closeOnViewportChange)
 })
 onBeforeUnmount(() => {
   window.removeEventListener('click', closeOnNavigationCapture, true)
   window.removeEventListener('auxclick', closeOnNavigationCapture, true)
-  window.removeEventListener('keydown', onKey)
+  document.removeEventListener('keydown', onKey, true)
   window.removeEventListener('scroll', closeOnViewportChange, true)
   window.removeEventListener('resize', closeOnViewportChange)
 })

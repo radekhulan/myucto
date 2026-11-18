@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
+import DialogActions, { type DialogAction } from '@/components/ui/DialogActions.vue'
 import DateInput from '@/components/ui/DateInput.vue'
 import { formDateInput as dateInput, formInput as field, formLabel, formTextarea as textarea } from '@/components/ui/formStyles'
 import { membershipApi, type MemberIdentity, type MemberRevision, type MemberRevisionInput, type MemberStatus } from '@/api/nonprofitMembership'
@@ -69,15 +69,14 @@ const dirty = computed(() => form.status !== 'active' || !!form.effectiveFrom ||
 watch(dirty, value => emit('dirty', value), { immediate: true })
 onBeforeUnmount(() => emit('dirty', false))
 
-const actions = computed<ActionItem[]>(() => [
+const actions = computed<DialogAction[]>(() => [
   { key: 'rev-close', label: t('nonprofitMembership.close'), icon: 'x', show: !!last.value, disabled: commit.locked.value, run: () => emit('close') },
   { key: 'rev-review', label: t('nonprofitMembership.review'), icon: 'eye', tier: 'primary', variant: 'primary', disabled: !props.canManage || !!invalid.value || commit.busy.value || commit.locked.value, disabledReason: invalid.value || undefined, run: review },
 ])
 </script>
 
 <template>
-  <section class="space-y-4 rounded-lg border border-neutral-200 bg-surface p-4" data-section="revision-form">
-    <h3 class="font-semibold">{{ t('nonprofitMembership.revisionTitle') }}</h3>
+  <section class="space-y-4" data-section="revision-form">
     <p class="text-sm text-neutral-500">{{ t('nonprofitMembership.revisionHelp') }}</p>
     <p v-if="notice" role="status" class="text-sm text-success-600">{{ notice }}</p>
     <p v-if="commit.error.value" role="alert" :class="errorBox" data-section="rev-error">{{ commit.error.value }}</p>
@@ -95,7 +94,7 @@ const actions = computed<ActionItem[]>(() => [
     </fieldset>
     </form>
     <p v-if="invalid && (form.effectiveFrom || form.reference || form.evidence)" class="text-sm text-warning-700" data-section="rev-invalid">{{ invalid }}</p>
-    <ActionBar v-if="canManage && !commit.review.value" :actions="actions" />
+    <DialogActions v-if="canManage && !commit.review.value" :actions="actions" />
     <div v-if="commit.review.value" class="space-y-3 rounded border border-neutral-200 p-3" data-section="rev-preview">
       <h4 class="font-semibold">{{ t('nonprofitMembership.revisionReview') }}</h4>
       <dl class="grid gap-3 sm:grid-cols-3">
