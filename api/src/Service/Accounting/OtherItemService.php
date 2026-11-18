@@ -6,14 +6,15 @@ namespace MyInvoice\Service\Accounting;
 
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Infrastructure\Database\TransactionFailure;
-use MyInvoice\Repository\AccountingPeriodRepository;
 use MyInvoice\Repository\ChartOfAccountsRepository;
 use MyInvoice\Repository\DimensionAssignmentRepository;
 use MyInvoice\Repository\OtherItemRepository;
+use MyInvoice\Repository\PostingRuleRepository;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Accounting\Accrual\AccrualPeriodDetector;
 use MyInvoice\Service\Accounting\Closing\DocumentSeriesService;
 use MyInvoice\Service\Accounting\Dimension\DimensionDefaults;
+use MyInvoice\Service\Accounting\Dimension\DimensionPeriodGuard;
 use MyInvoice\Service\Bank\NonInvoiceBankTransactionScope;
 use MyInvoice\Service\Invoice\InvoiceOtherItemPayments;
 use MyInvoice\Service\Nonprofit\Membership\MembershipBankPaymentGuard;
@@ -356,17 +357,10 @@ final class OtherItemService
     /**
      * Období časového rozlišení výnosu zaúčtované pohledávky. Zápis položky se nemění,
      * období čte až uzávěrka ({@see accrualPeriod()}), proto jde nastavit i po zaúčtování,
-     * podobně jako u řádků vydané faktury (`PUT /invoices/{id}/accrual`). Pojistka je ale
-     * přísnější: faktura hlídá jen uzavřené období podle data DPH, položka všechna data
-     * svých zápisů, přezkoumané a schválené období i zaúčtovaný krok uzávěrky
+     * stejně jako u řádků vydané faktury (`PUT /invoices/{id}/accrual`) a se stejnou pojistkou
      * ({@see assertAccrualChangeAllowed()}). Vynechaný klíč
      * = uložená hodnota, obě prázdné = bez rozlišení. Koncept se upravuje celý, položka
      * bez vlastního zápisu (ze zůstatku deníku) výnos v deníku nemá.
-     *
-     * Rozpuštění v dalším roce počítá z uloženého období, ne z odkladu, proto se období
-     * nesmí měnit, jakmile ho uzávěrka použila: v uzavřeném (i přezkoumaném a schváleném)
-     * období zápisu nikdy, v probíhající uzávěrce až po vrácení kroku Časové rozlišení.
-     * Zámek řádku období serializuje změnu s během kroku uzávěrky.
      *
      * @param array<string,mixed> $input
      * @return array{item:array<string,mixed>, before:array{0:?string,1:?string}, after:array{0:?string,1:?string}}
@@ -419,53 +413,22 @@ final class OtherItemService
     }
 
     /**
-     * Pojistka změny období rozlišení: odklad i rozpuštění čtou všechny zápisy položky
-     * k jejich období, i ten, který přeúčtování nebo odúčtování položky později stornovalo
-     * ({@see \MyInvoice\Service\Accounting\Closing\AccrualDeferralService}). Rozpuštění počítá
-     * z uloženého období, proto se nesmí měnit, jakmile ho uzávěrka některého z těch období
-     * použila: v uzavřeném (i přezkoumaném a schváleném) období nikdy, v probíhající
-     * uzávěrce až po vrácení kroku Časové rozlišení. Volá se v transakci, zamyká období.
+     * Pojistka změny období rozlišení: stejné pravidlo jako u řádků faktur
+     * ({@see Closing\AccrualDeferralService::accrualChangeBlocker()}). Odklad zaúčtovaný uzávěrkou
+     * se počítal z uloženého období a jeho rozpuštění zrcadlí záznam kroku, proto se období
+     * nesmí měnit v uzavřeném, přezkoumaném či schváleném období žádného zdrojového zápisu
+     * položky a v probíhající uzávěrce po zaúčtování odkladu výnosů. Krok potvrzený bez zápisu
+     * změnu nebrání: rozdíl proti náhledu odmítne uzavření knih (`deferrals_stale`). Volá se
+     * v transakci, zamyká období firmy.
      */
     private function assertAccrualChangeAllowed(int $supplierId, int $id): void
     {
-        $periods = new AccountingPeriodRepository($this->db);
-        foreach (Closing\AccrualDeferralService::otherItemSourceDates($this->db, $supplierId, $id) as $entryDate) {
-            $period = $periods->findForDateForUpdate($supplierId, substr((string) $entryDate, 0, 10));
-            if ($period !== null && AccountingPeriodStatus::isClosed((string) $period['status'])) {
-                throw new OtherItemException('period_closed', 'Doklad patří do uzavřeného účetního období, jeho časové rozlišení už je součástí uzávěrky.', 409);
-            }
-            // Krok Časové rozlišení platí jen v probíhající uzávěrce. Po jejím přerušení (abort
-            // jde jen bez závěrkových zápisů) může zůstat krok potvrzený, ale nic neodložil
-            // a v otevřeném období ho vrátit nejde: neblokuje.
-            if ($period !== null && (string) $period['status'] === 'closing' && $this->deferralPosted($supplierId, (int) $period['id'])) {
-                throw new OtherItemException('accrual_deferral_posted', 'Krok Časové rozlišení uzávěrky je už zaúčtovaný, dokončený nebo přeskočený. Vraťte ho v uzávěrce, změňte období a krok spusťte znovu.', 409);
-            }
+        $accruals = new Closing\AccrualDeferralService($this->db, $this->posting, new PostingRuleRepository($this->db));
+        $blocked = $accruals->accrualChangeBlocker($supplierId, 'other_item', $id, null,
+            (new DimensionPeriodGuard($this->db))->lockPeriods($supplierId));
+        if ($blocked !== null) {
+            throw new OtherItemException($blocked[0], $blocked[1], 409);
         }
-    }
-
-    /**
-     * Zaúčtoval krok uzávěrky období odklad výnosů (384), nebo je krok Časové rozlišení
-     * dokončený či přeskočený (i s nulovým návrhem, kdy zápis nevznikl)? Zamykací čtení po
-     * zámku období: vidí i krok potvrzený souběžnou transakcí, ne jen snímek před čekáním na zámek.
-     */
-    private function deferralPosted(int $supplierId, int $periodId): bool
-    {
-        $stmt = $this->db->pdo()->prepare(
-            "SELECT 1 FROM journal_entries
-              WHERE supplier_id = ? AND source_type = 'deferred_revenue_accrual' AND source_id = ?
-                AND posted_at IS NOT NULL AND reversed_by IS NULL LIMIT 1 LOCK IN SHARE MODE"
-        );
-        $stmt->execute([$supplierId, Closing\ClosingSourceId::deferredRevenueAccrual($periodId)]);
-        if ($stmt->fetchColumn() !== false) {
-            return true;
-        }
-        $step = $this->db->pdo()->prepare(
-            "SELECT 1 FROM accounting_closing_steps
-              WHERE supplier_id = ? AND period_id = ? AND step_key = 'deferrals' AND status IN ('done', 'skipped')
-              LIMIT 1 LOCK IN SHARE MODE"
-        );
-        $step->execute([$supplierId, $periodId]);
-        return $step->fetchColumn() !== false;
     }
 
     private static function dateOrNull(mixed $value): ?string

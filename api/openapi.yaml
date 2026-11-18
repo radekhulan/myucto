@@ -22454,8 +22454,8 @@ paths:
 
         Období časového rozlišení (`accrual_from`, `accrual_to`) se při vynechání zachová. Koncept
         se zaúčtovanou historií (vrácený odúčtováním) ho nesmí změnit, pokud některý jeho zápis leží
-        v uzavřeném období (`409 other_items.error.period_closed`) nebo v probíhající uzávěrce, kde je krok
-        Časové rozlišení zaúčtovaný, dokončený či přeskočený (`409 other_items.error.accrual_deferral_posted`).
+        v uzavřeném, revidovaném či schváleném období (`409 other_items.error.period_closed`) nebo v probíhající
+        uzávěrce, jejíž krok Časové rozlišení už zaúčtoval odklad výnosů (`409 other_items.error.accrual_deferral_posted`).
       requestBody:
         required: true
         content: { application/json: { schema: { $ref: '#/components/schemas/OtherItemInput' } } }
@@ -22596,9 +22596,10 @@ paths:
         Změní `accrual_from`/`accrual_to` zaúčtované pohledávky s vlastním zápisem. Zápis v deníku se nemění,
         období čte až uzávěrka (krok Časové rozlišení). Vynechaný klíč ponechá uloženou hodnotu, obě prázdné
         hodnoty rozlišení zruší. Koncept vrací `409 other_items.error.is_draft` (upravuje se přes `PUT /accounting/other-items/{id}`),
-        doklad bez vlastního zápisu nebo nezaúčtovaný `409 other_items.error.accrual_not_posted`, doklad v uzavřeném účetním
-        období `409 other_items.error.period_closed` a doklad, jehož období už použil krok Časové rozlišení
-        probíhající uzávěrky (zaúčtovaný, dokončený či přeskočený), `409 other_items.error.accrual_deferral_posted` (krok je nutné vrátit). Změna se zapíše do aktivity dokladu (`other_item.accrual_changed`).
+        doklad bez vlastního zápisu nebo nezaúčtovaný `409 other_items.error.accrual_not_posted`, doklad v uzavřeném,
+        revidovaném či schváleném účetním období `409 other_items.error.period_closed` a doklad v probíhající uzávěrce,
+        jejíž krok Časové rozlišení už zaúčtoval odklad výnosů, `409 other_items.error.accrual_deferral_posted` (krok je
+        nutné vrátit). Stejné pravidlo jako `PUT /invoices/{id}/accrual`. Změna se zapíše do aktivity dokladu (`other_item.accrual_changed`).
         Přes API token nedostupné (403 token_write_forbidden).
       parameters:
         - { $ref: '#/components/parameters/SupplierIdHeader' }
@@ -22616,7 +22617,7 @@ paths:
         '200': { description: Upravený doklad, content: { application/json: { schema: { $ref: '#/components/schemas/OtherItem' } } } }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
-        '409': { description: 'Koncept (`other_items.error.is_draft`), doklad bez vlastního zápisu (`other_items.error.accrual_not_posted`), v uzavřeném období (`other_items.error.period_closed`) nebo po zaúčtovaném kroku odkladu (`other_items.error.accrual_deferral_posted`)', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '409': { description: 'Koncept (`other_items.error.is_draft`), doklad bez vlastního zápisu (`other_items.error.accrual_not_posted`), v uzavřeném, revidovaném či schváleném období (`other_items.error.period_closed`) nebo po zaúčtovaném kroku odkladu (`other_items.error.accrual_deferral_posted`)', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
         '422': { description: 'Neúplné nebo neplatné období (`other_items.error.accrual_period_incomplete`, `other_items.error.accrual_period_invalid`), závazek (`other_items.error.accrual_receivable_only`), daňová evidence (`other_items.error.accrual_double_entry_only`) nebo tělo bez obou polí', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
 
   /api/v1/accounting/other-items/{id}/posted:

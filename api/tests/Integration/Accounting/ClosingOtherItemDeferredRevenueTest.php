@@ -10,6 +10,7 @@ use MyInvoice\Repository\AccountingPeriodRepository;
 use MyInvoice\Repository\DimensionAssignmentRepository;
 use MyInvoice\Repository\JournalEntryRepository;
 use MyInvoice\Service\Accounting\ChartOfAccountsSeeder;
+use MyInvoice\Service\Accounting\Closing\ClosingException;
 use MyInvoice\Service\Accounting\Closing\ClosingService;
 use MyInvoice\Service\Accounting\Closing\ClosingSourceId;
 use MyInvoice\Service\Accounting\Dimension\DimensionService;
@@ -20,6 +21,7 @@ use MyInvoice\Service\Accounting\Pair\JournalPairCorrectionService;
 use MyInvoice\Service\Accounting\PostingService;
 use MyInvoice\Service\Accounting\Reports\InterimAccrualAdjustment;
 use PDO;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
 
@@ -714,21 +716,73 @@ final class ClosingOtherItemDeferredRevenueTest extends TestCase
     }
 
     /**
-     * Krok Časové rozlišení potvrzený s nulovým návrhem (zápis odkladu nevznikl): nové období
-     * položky z téhož roku by už uzávěrka neodložila, pojistka ho odmítne.
+     * Krok Časové rozlišení potvrzený bez zápisu (nulový návrh) nebo přeskočený změnu období
+     * nebrání, stejně jako u řádků faktur (AccrualDeferralService::accrualChangeBlocker): nic
+     * neodložil, takže rozpuštění se nerozejde. Potvrzený krok pak zachytí uzavření knih.
      */
-    public function testCompletedDeferralStepWithoutEntryBlocksPeriodChange(): void
+    public function testDeferralStepWithoutEntryDoesNotBlockPeriodChange(): void
     {
         $id = $this->receivable(36600.00, self::YEAR . '-07-01', null, null);
         $this->db->pdo()->prepare("UPDATE accounting_periods SET status = 'closing' WHERE id = ?")->execute([$this->periodId]);
         $this->db->pdo()->prepare("INSERT INTO accounting_closing_steps (supplier_id, period_id, step_key, status) VALUES (?, ?, 'deferrals', 'done')")
             ->execute([$this->supplierId, $this->periodId]);
 
-        $this->assertAccrualRefused($id, 'accrual_deferral_posted', 409);
-        // Přeskočený krok také: uzávěrka by nové období neodložila.
+        $this->items->updateAccrual($this->supplierId, $id, ['accrual_from' => '2091-07-01', 'accrual_to' => '2092-06-30'], $this->userId);
         $this->db->pdo()->prepare("UPDATE accounting_closing_steps SET status = 'skipped' WHERE supplier_id = ? AND period_id = ? AND step_key = 'deferrals'")
             ->execute([$this->supplierId, $this->periodId]);
-        $this->assertAccrualRefused($id, 'accrual_deferral_posted', 409);
+        $this->items->updateAccrual($this->supplierId, $id, ['accrual_to' => '2092-03-31'], $this->userId);
+
+        $stored = $this->items->get($this->supplierId, $id);
+        self::assertSame('2092-03-31', substr((string) $stored['accrual_to'], 0, 10));
+    }
+
+    /**
+     * Období nastavené až po potvrzení kroku bez zápisu: uzavření knih porovná zaúčtovaný
+     * odklad (žádný) s náhledem (18 200) a odmítne zastaralý krok (#384).
+     */
+    public function testPeriodSetAfterStepWithoutEntryStopsCloseBooks(): void
+    {
+        $id = $this->receivable(36600.00, self::YEAR . '-07-01', null, null);
+        $this->driveCloseWithAccrual();
+        self::assertNull($this->journal->findBySource($this->supplierId, 'deferred_revenue_accrual', ClosingSourceId::deferredRevenueAccrual($this->periodId)));
+
+        $this->items->updateAccrual($this->supplierId, $id, ['accrual_from' => '2091-07-01', 'accrual_to' => '2092-06-30'], $this->userId);
+
+        try {
+            $this->closing->closeBooks($this->supplierId, $this->periodId, $this->rv(), $this->meta());
+            self::fail('Uzavření knih mělo odmítnout zastaralý krok Časové rozlišení.');
+        } catch (ClosingException $e) {
+            self::assertSame('deferrals_stale', $e->errorCode);
+        }
+    }
+
+    /**
+     * Rozpuštění zrcadlí odklad zaúčtovaný uzávěrkou (#384): krok uloží rozpad ostatní
+     * pohledávky do záznamu a openNext z něj rozpustí i po pozdější změně období položky
+     * (zde přímo v databázi, mimo pojistku), stejně jako u řádků faktur.
+     */
+    public function testReleaseMirrorsPostedDeferralOfReceivable(): void
+    {
+        $id = $this->receivable(36600.00, self::YEAR . '-07-01', '2091-07-01', '2092-06-30');
+        $this->driveCloseWithAccrual();
+        $this->closing->closeBooks($this->supplierId, $this->periodId, $this->rv(), $this->meta());
+
+        $stmt = $this->db->pdo()->prepare("SELECT payload FROM accounting_closing_steps WHERE supplier_id = ? AND period_id = ? AND step_key = 'deferrals'");
+        $stmt->execute([$this->supplierId, $this->periodId]);
+        $snapshot = json_decode((string) $stmt->fetchColumn(), true)['deferred_revenue_accrual']['items'];
+        self::assertCount(1, $snapshot);
+        self::assertSame('other_item', $snapshot[0]['source']);
+        self::assertSame($id, (int) $snapshot[0]['doc_id']);
+        self::assertEqualsWithDelta(36600.00, (float) $snapshot[0]['basis'], 0.001);
+
+        $this->db->pdo()->prepare('UPDATE other_items SET accrual_to = ? WHERE supplier_id = ? AND id = ?')
+            ->execute(['2092-12-31', $this->supplierId, $id]);
+        $this->closing->openNext($this->supplierId, $this->periodId, $this->rv(), $this->meta());
+
+        $release = $this->journal->findBySource($this->supplierId, 'deferred_revenue_accrual', ClosingSourceId::deferredRevenueAccrualRelease($this->periodId));
+        self::assertNotNull($release);
+        self::assertEqualsWithDelta(18200.00, $this->sideAmount($this->entryLines((int) $release['id']), '602', 'credit'), 0.001);
+        self::assertEqualsWithDelta(0.0, $this->balance384AsOf('2092-12-31'), 0.005);
     }
 
     /** Datum jako pole či objekt z JSON je validační chyba (422) bez varování PHP, ne 500. */
@@ -902,12 +956,27 @@ final class ClosingOtherItemDeferredRevenueTest extends TestCase
         self::assertSame(['2091-03-01', '2092-02-29'], $cleared['before']);
     }
 
-    /** Víceleté období: druhou tranši rozpustí otevření roku N+2. */
-    public function testMultiYearPeriodReleasesSecondTrancheOnFollowingOpen(): void
+    /** @return iterable<string,array{0:bool}> */
+    public static function multiYearChanges(): iterable
     {
-        $this->receivable(73100.00, self::YEAR . '-07-01', '2091-07-01', '2093-06-30');
+        yield 'beze změny' => [false];
+        yield 'období změněné po uzávěrce N mimo pojistku' => [true];
+    }
+
+    /**
+     * Víceleté období: druhou tranši rozpustí otevření roku N+2, a to ze záznamu kroku roku N
+     * (#384) i tehdy, když se období položky po uzávěrce N změní (zde přímo v databázi).
+     */
+    #[DataProvider('multiYearChanges')]
+    public function testMultiYearPeriodReleasesSecondTrancheOnFollowingOpen(bool $changedAfterClose): void
+    {
+        $id = $this->receivable(73100.00, self::YEAR . '-07-01', '2091-07-01', '2093-06-30');
         $this->driveCloseWithAccrual();
         $this->closing->closeBooks($this->supplierId, $this->periodId, $this->rv(), $this->meta());
+        if ($changedAfterClose) {
+            $this->db->pdo()->prepare('UPDATE other_items SET accrual_to = ? WHERE supplier_id = ? AND id = ?')
+                ->execute(['2093-03-31', $this->supplierId, $id]);
+        }
         $this->closing->openNext($this->supplierId, $this->periodId, $this->rv(), $this->meta());
 
         $this->periodId = (int) $this->db->pdo()->query('SELECT id FROM accounting_periods WHERE supplier_id = ' . $this->supplierId . ' AND fiscal_year = ' . (self::YEAR + 1))->fetchColumn();

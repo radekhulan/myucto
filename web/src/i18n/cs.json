@@ -599,7 +599,7 @@
       "period": "{from} – {to}",
       "error": {
         "period_closed": "Doklad má zápis v uzavřeném, revidovaném či schváleném účetním období, jeho časové rozlišení už je součástí uzávěrky.",
-        "accrual_deferral_posted": "Krok Časové rozlišení uzávěrky je už zaúčtovaný, dokončený nebo přeskočený. Vraťte ho v uzávěrce, změňte období a krok spusťte znovu.",
+        "accrual_deferral_posted": "Krok Časové rozlišení uzávěrky už zaúčtoval odklad. Vraťte ho v uzávěrce, změňte období a krok spusťte znovu.",
         "accrual_period_incomplete": "Období časového rozlišení potřebuje začátek i konec.",
         "accrual_period_invalid": "Období potřebuje platná data a začátek nejpozději v den konce.",
         "accrual_not_posted": "Časové rozlišení výnosu jde nastavit jen u zaúčtovaného dokladu s vlastním zápisem.",

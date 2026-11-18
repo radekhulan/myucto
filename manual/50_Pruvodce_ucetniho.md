@@ -529,10 +529,11 @@ ikonou tužky u pole **Časové rozlišení výnosu** v kartě **Údaje položky
 rozlišení zruší). U položky bez vlastního zápisu (v daňové evidenci, potvrzené, stornované
 nebo převzaté ze zůstatku deníku) uložené období jen zrušíte ikonou křížku u stejného pole;
 znovu ho jde zadat až u zaúčtované položky s vlastním zápisem. Zápis v deníku se
-tím nemění a změna se zapíše do aktivity položky. Položku v uzavřeném účetním
-období (kteréhokoli zápisu, ze kterého uzávěrka odkládá) už změnit nelze, rozlišení je součástí uzávěrky. Je-li v probíhající
-uzávěrce už zaúčtovaný, dokončený nebo přeskočený krok **Časové rozlišení**, nejdřív ho v uzávěrce vraťte,
-pak období změňte a krok spusťte znovu. Stejně se hlídá smazání konceptu s obdobím. Opakování období
+tím nemění a změna se zapíše do aktivity položky. Položku v uzavřeném, revidovaném či schváleném
+účetním období (kteréhokoli zápisu, ze kterého uzávěrka odkládá) už změnit nelze, rozlišení je součástí
+uzávěrky. Zaúčtoval-li krok **Časové rozlišení** probíhající uzávěrky odklad výnosů, nejdřív ho v uzávěrce
+vraťte, pak období změňte a krok spusťte znovu. Stejně se hlídá smazání konceptu s obdobím. Uzávěrka si
+odklad položky uloží a další rok rozpouští právě jej, stejně jako u řádků faktur. Opakování období
 do nově vzniklých položek nepřenáší.
 
 Na detailu lze připojit originály ze [skladu dokumentů](34_Dokumenty.md) a

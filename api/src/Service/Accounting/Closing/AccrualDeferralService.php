@@ -261,34 +261,44 @@ final class AccrualDeferralService
      * - v uzavřeném, revidovaném či schváleném období ({@see AccountingPeriodStatus::CLOSED}),
      * - v uzavíraném období, jehož krok Časové rozlišení už zaúčtoval odklad daného druhu.
      * Posuzuje se období data dokladu a období všech živých zápisů jeho skupiny zaúčtování
-     * (převzatý zápis může ležet jinde). Volá se v transakci se zamčenými obdobími firmy
+     * (převzatý zápis může ležet jinde). Ostatní pohledávka (`other_item`) skupinu zaúčtování
+     * nemá: posuzují se období jejích zdrojových zápisů ({@see otherItemSourceDates()}), ze
+     * kterých uzávěrka odkládá. Volá se v transakci se zamčenými obdobími firmy
      * (`$statuses` z {@see \MyInvoice\Service\Accounting\Dimension\DimensionPeriodGuard::lockPeriods()}),
-     * aby souběžná uzávěrka nemohla mezi kontrolou a změnou krok zaúčtovat.
+     * aby souběžná uzávěrka nemohla mezi kontrolou a změnou krok zaúčtovat. Zápis odkladu se
+     * čte zamykacím čtením: snímek transakce založený před čekáním na zámek období by krok
+     * zaúčtovaný souběžně neviděl.
      *
-     * @param 'invoice'|'purchase_invoice' $docType
+     * @param 'invoice'|'purchase_invoice'|'other_item' $docType
      * @param array<int,string> $statuses id období => stav (aktuální čtení pod zámkem)
      * @return array{0:string,1:string}|null
      */
     public function accrualChangeBlocker(int $supplierId, string $docType, int $docId, ?string $docDate, array $statuses): ?array
     {
         $periodIds = [];
+        $dates = $docType === 'other_item' ? self::otherItemSourceDates($this->db, $supplierId, $docId) : [];
         if ($docDate !== null && $docDate !== '') {
-            $stmt = $this->db->pdo()->prepare('SELECT id FROM accounting_periods WHERE supplier_id = ? AND starts_on <= ? AND ends_on >= ?');
-            $stmt->execute([$supplierId, substr($docDate, 0, 10), substr($docDate, 0, 10)]);
-            foreach ($stmt->fetchAll(\PDO::FETCH_COLUMN) ?: [] as $id) {
+            $dates[] = $docDate;
+        }
+        $period = $this->db->pdo()->prepare('SELECT id FROM accounting_periods WHERE supplier_id = ? AND starts_on <= ? AND ends_on >= ?');
+        foreach (array_unique(array_map(static fn (string $date): string => substr($date, 0, 10), $dates)) as $date) {
+            $period->execute([$supplierId, $date, $date]);
+            foreach ($period->fetchAll(\PDO::FETCH_COLUMN) ?: [] as $id) {
                 $periodIds[(int) $id] = true;
             }
         }
-        foreach ((new DocumentPostingGroup($this->db))->active($supplierId, $docType, $docId) as $entry) {
-            if ($entry['period_id'] !== null) {
-                $periodIds[(int) $entry['period_id']] = true;
+        if ($docType !== 'other_item') {
+            foreach ((new DocumentPostingGroup($this->db))->active($supplierId, $docType, $docId) as $entry) {
+                if ($entry['period_id'] !== null) {
+                    $periodIds[(int) $entry['period_id']] = true;
+                }
             }
         }
-        $sourceType = $docType === 'invoice' ? 'deferred_revenue_accrual' : 'prepaid_expense_accrual';
+        $sourceType = $docType === 'purchase_invoice' ? 'prepaid_expense_accrual' : 'deferred_revenue_accrual';
         $deferral = $this->db->pdo()->prepare(
             'SELECT 1 FROM journal_entries
               WHERE supplier_id = ? AND source_type = ? AND source_id = ?
-                AND posted_at IS NOT NULL AND reversed_by IS NULL LIMIT 1'
+                AND posted_at IS NOT NULL AND reversed_by IS NULL LIMIT 1 LOCK IN SHARE MODE'
         );
         foreach (array_keys($periodIds) as $periodId) {
             $status = $statuses[$periodId] ?? null;
@@ -296,7 +306,7 @@ final class AccrualDeferralService
                 return ['period_closed', 'Doklad patří do uzavřeného účetního období, jeho časové rozlišení už je součástí uzávěrky.'];
             }
             if ($status === 'closing') {
-                $deferral->execute([$supplierId, $sourceType, $docType === 'invoice'
+                $deferral->execute([$supplierId, $sourceType, $sourceType === 'deferred_revenue_accrual'
                     ? ClosingSourceId::deferredRevenueAccrual($periodId)
                     : ClosingSourceId::prepaidExpenseAccrual($periodId)]);
                 if ($deferral->fetchColumn() !== false) {
@@ -321,6 +331,46 @@ final class AccrualDeferralService
     public static function snapshotItem(int $itemId, int $docId, string $from, string $to, float $basis, array $accounts): array
     {
         return ['item_id' => $itemId, 'doc_id' => $docId, 'from' => $from, 'to' => $to, 'basis' => round($basis, 2), 'accounts' => $accounts];
+    }
+
+    /**
+     * Rozpad odkladu řádku ostatní pohledávky ({@see otherItemDeferredRevenueRows()}) pro záznam
+     * kroku: k údajům {@see snapshotItem()} navíc zdrojový zápis a jeho zápisy s daty, ze
+     * kterých rozpuštění bere dimenze. Rozpuštění tak zrcadlí zaúčtovaný odklad i po pozdější
+     * opravě nebo stornu položky, stejně jako u řádků faktur.
+     *
+     * @param array<string,mixed> $row
+     * @param array<string,float> $accounts
+     * @return array<string,mixed>
+     */
+    public static function snapshotOtherItem(array $row, string $from, string $to, float $basis, array $accounts): array
+    {
+        return self::snapshotItem((int) $row['other_item_id'], (int) $row['other_item_id'], $from, $to, $basis, $accounts)
+            + ['source' => 'other_item', 'journal_entry_id' => (int) $row['journal_entry_id'], 'entries' => $row['source_entries']];
+    }
+
+    /**
+     * Řádek rozpuštění ze záznamu kroku ({@see snapshotItem()}, {@see snapshotOtherItem()}) ve
+     * tvaru řádků {@see deferredRevenueRows()}. Záznam bez `source` (řádek faktury) je faktura.
+     *
+     * @param array<string,mixed> $item
+     * @return array<string,mixed>
+     */
+    public static function deferredRevenueSnapshotRow(array $item): array
+    {
+        $row = ['item_id' => (int) $item['item_id'], 'membership_case_id' => null, 'accrual_from' => (string) $item['from'],
+            'accrual_to' => (string) $item['to'], 'snapshot' => $item];
+        if (($item['source'] ?? 'invoice') === 'other_item') {
+            $entries = [];
+            foreach ((array) ($item['entries'] ?? []) as $entryId => $date) {
+                $entries[(int) $entryId] = (string) $date;
+            }
+            return $row + ['source' => 'other_item', 'invoice_id' => null, 'other_item_id' => (int) $item['doc_id'],
+                'journal_entry_id' => (int) $item['journal_entry_id'], 'source_entries' => $entries,
+                'revenue_account_code' => (string) array_key_first(self::snapshotAccounts($item))];
+        }
+        return $row + ['source' => 'invoice', 'invoice_id' => (int) $item['doc_id'], 'other_item_id' => null,
+            'journal_entry_id' => null, 'revenue_account_code' => null];
     }
 
     /**
@@ -431,7 +481,7 @@ final class AccrualDeferralService
         return [
             ...$rows,
             ...$this->membershipDeferredRevenueRows($supplierId, $afterDate, $postedFrom, $postedTo, $startsBy, $release, $asOfInJournal),
-            ...$this->otherItemDeferredRevenueRows($supplierId, $afterDate, $postedFrom, $postedTo, $startsBy, $release, $asOfInJournal),
+            ...$this->otherItemDeferredRevenueRows($supplierId, $afterDate, $postedFrom, $postedTo, $startsBy, $release, $asOfInJournal, $mirroredPeriodIds),
         ];
     }
 
@@ -457,16 +507,19 @@ final class AccrualDeferralService
      * deníku: jeden řádek na výnosový účet zdrojového zápisu ({@see otherItemSources()}) s jeho
      * čistým obratem; výnosový účet je ten zaúčtovaný (stejně jako u členského předpisu).
      * Zdroj, který (i opravou) nese s nenulovým obratem účet odkladu, se neodkládá podruhé.
+     * Rozpuštění vynechá období v `$mirroredPeriodIds`: jejich odklad se rozpouští ze záznamu
+     * kroku ({@see snapshotOtherItem()}), stejně jako u řádků faktur.
      *
+     * @param list<int> $mirroredPeriodIds
      * @return list<array<string,mixed>>
      */
-    private function otherItemDeferredRevenueRows(int $supplierId, string $afterDate, ?string $postedFrom, string $postedTo, ?string $startsBy, bool $release, ?string $asOfInJournal): array
+    private function otherItemDeferredRevenueRows(int $supplierId, string $afterDate, ?string $postedFrom, string $postedTo, ?string $startsBy, bool $release, ?string $asOfInJournal, array $mirroredPeriodIds = []): array
     {
         $sources = self::otherItemSources($this->db, $supplierId, $postedTo, null, $afterDate);
         if ($sources['roots'] === []) {
             return [];
         }
-        [$closingSql, $closingParams] = self::closingFilter($release, $asOfInJournal, $postedTo, 'je.entry_date');
+        [$closingSql, $closingParams] = self::closingFilter($release, $asOfInJournal, $postedTo, 'je.entry_date', $mirroredPeriodIds);
         $heads = [];
         foreach (array_chunk(array_keys($sources['roots']), 500) as $chunk) {
             $marks = implode(',', array_fill(0, count($chunk), '?'));

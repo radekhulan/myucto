@@ -61,37 +61,6 @@ final class OtherItemAccrualConcurrencyTest extends TestCase
         }
     }
 
-    /** Krok potvrzený (bez zápisu odkladu) jiným spojením po začátku transakce změny: také zamykací čtení. */
-    public function testDeferralStepConfirmedByOtherConnectionBlocksPeriodChange(): void
-    {
-        $db = self::sandboxConnection(self::SANDBOX);
-        $pdo = $db->pdo();
-        try {
-            $pdo->exec('SET SESSION innodb_snapshot_isolation=0');
-            $pdo->exec('SET SESSION TRANSACTION ISOLATION LEVEL REPEATABLE READ');
-            $container = Bootstrap::buildContainer();
-            $container->set(Config::class, self::sandboxConfig(self::SANDBOX));
-            $container->set(Connection::class, $db);
-            [$supplier, $periodId, $item] = $this->fixture($pdo, $container);
-
-            $pdo->beginTransaction();
-            $pdo->query('SELECT COUNT(*) FROM accounting_closing_steps')->fetchColumn();
-            $this->secondConnection()->prepare(
-                "INSERT INTO accounting_closing_steps (supplier_id, period_id, step_key, status) VALUES (?, ?, 'deferrals', 'done')"
-            )->execute([$supplier, $periodId]);
-
-            try {
-                $container->get(OtherItemService::class)->updateAccrual($supplier, $item, ['accrual_to' => '2100-12-31'], null);
-                self::fail('Změna období prošla přes krok potvrzený souběžně.');
-            } catch (OtherItemException $e) {
-                self::assertSame('accrual_deferral_posted', $e->errorCode);
-            }
-        } finally {
-            if ($pdo->inTransaction()) $pdo->rollBack();
-            $db->close();
-        }
-    }
-
     /**
      * Krok uzávěrky drží zámek období (lockPeriod) a počítá odklad: změna období položky
      * z téhož roku musí na zámek čekat, ne projít mezi výpočtem a zápisem kroku.

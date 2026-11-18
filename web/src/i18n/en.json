@@ -599,7 +599,7 @@
       "period": "{from} – {to}",
       "error": {
         "period_closed": "The item has an entry in a closed, reviewed or approved accounting period; its accrual is already part of the year-end closing.",
-        "accrual_deferral_posted": "The year-end Accruals step is already posted, completed or skipped. Revert it in the closing, change the period and run the step again.",
+        "accrual_deferral_posted": "The year-end Accruals step has already posted the deferral. Revert it in the closing, change the period and run the step again.",
         "accrual_period_incomplete": "The accrual period needs both a start and an end.",
         "accrual_period_invalid": "The period needs valid dates and must start no later than it ends.",
         "accrual_not_posted": "The accrual period can be set only on a posted item with its own journal entry.",
