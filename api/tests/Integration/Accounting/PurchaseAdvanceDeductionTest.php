@@ -86,6 +86,50 @@ final class PurchaseAdvanceDeductionTest extends BankPostingTestCase
         self::assertSame([], (new PurchaseAdvanceDeduction($this->db))->finalsMissingDeduction($this->supplierId, self::YEAR . '-12-31'));
     }
 
+    /**
+     * Přehledy nákladů sčítané z hlavičky (CRM, hlavičky měsíců seznamu, daňový profil,
+     * seznam dodavatelů): náklad konečné faktury = plnění 665,66 (s DPH 805,45), ne hlavička
+     * po odpočtu zálohy (−69,88). DDKP se z nákladů vyřazuje, takže bez odečtu odpočtového
+     * řádku by se základ zálohy ztratil úplně ({@see \MyInvoice\Support\Sql\PurchaseCostSql}).
+     */
+    public function testCostOverviewsCountFinalWithoutAdvanceDeduction(): void
+    {
+        [$advance] = $this->paidAdvanceWithDdkp('ZPF-CST');
+        $final = $this->finalInvoice('PF-CST', $advance, true);
+        $vendor = (int) $this->piRow($final)['vendor_id'];
+
+        $crm = $this->container->get(\MyInvoice\Service\Crm\CrmAggregationService::class)
+            ->documentRange($this->supplierId, '2099-10-01', '2099-11-01');
+        $czk = array_values(array_filter($crm, static fn (array $r): bool => $r['currency'] === 'CZK'))[0] ?? null;
+        self::assertNotNull($czk, 'CRM musí mít korunový řádek za říjen.');
+        self::assertSame(66566, self::cents($czk['costs']), 'CRM náklad za říjen.');
+        self::assertSame(66566, self::cents($czk['costs_czk']), 'CRM náklad za říjen v Kč.');
+
+        $vendors = $this->container->get(\MyInvoice\Service\Crm\CrmAggregationService::class)->topVendors($this->supplierId, 1200, 50);
+        $row = array_values(array_filter($vendors, static fn (array $v): bool => (int) $v['vendor_id'] === $vendor))[0] ?? null;
+        self::assertNotNull($row);
+        self::assertSame(66566, self::cents($row['costs']), 'Top dodavatelé: náklad dodavatele.');
+
+        $repo = $this->container->get(PurchaseInvoiceRepository::class);
+        $list = $repo->listGroupedByMonth(['supplier_id' => $this->supplierId, 'vendor_id' => $vendor], 1, 0);
+        $october = array_values(array_filter($list['data'], static fn (array $g): bool => ($g['month'] ?? '') === '2099-10'))[0] ?? null;
+        self::assertNotNull($october, 'Seznam musí mít skupinu 2099-10.');
+        $totals = $october['totals_per_currency'][0] ?? [];
+        self::assertSame(66566, self::cents($totals['without_vat'] ?? null), 'Hlavička měsíce: základ nákladu.');
+        self::assertSame(80545, self::cents($totals['with_vat'] ?? null), 'Hlavička měsíce: náklad s DPH.');
+
+        $this->db->pdo()->prepare("UPDATE purchase_invoices SET status = 'paid', paid_at = '2099-10-20' WHERE id = ?")->execute([$final]);
+        $tax = $this->container->get(\MyInvoice\Repository\TaxProfileRepository::class);
+        self::assertSame(66566, self::cents($tax->monthExpenses($this->supplierId, '2099-10', true)), 'Daňový profil plátce: výdaj bez DPH.');
+        self::assertSame(80545, self::cents($tax->monthExpenses($this->supplierId, '2099-10', false)), 'Daňový profil neplátce: výdaj s DPH.');
+
+        $clients = $this->container->get(\MyInvoice\Repository\ClientRepository::class)
+            ->list(['supplier_id' => $this->supplierId, 'q' => 'Dodavatel ZPF-CST'], 1, 20);
+        $client = array_values(array_filter($clients['data'], static fn (array $c): bool => (int) $c['id'] === $vendor))[0] ?? null;
+        self::assertNotNull($client);
+        self::assertSame(80545, self::cents($client['costs']), 'Seznam dodavatelů: náklady s DPH.');
+    }
+
     public function testLinkingFinalWithDeductionKeepsHeaderAdvanceZero(): void
     {
         [$advance] = $this->paidAdvanceWithDdkp('ZPF-LNK');

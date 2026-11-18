@@ -2622,8 +2622,9 @@ final class ClosingService
                     pi.effective_cost_date,
                     -- CZK pojistka jako ve zbytku kódu: bez ní by se korunový doklad
                     -- se zbloudilým `exchange_rate` vynásobil kurzem.
-                    ROUND(pi.total_without_vat * COALESCE(IF(cur.code = 'CZK', 1, pi.exchange_rate), 1), 2) AS net_base
-               FROM purchase_invoices pi
+                    -- Odpočet zálohy z DDKP nákladem není ({@see PurchaseCostSql}).
+                    ROUND(" . \MyInvoice\Support\Sql\PurchaseCostSql::net('pi') . " * COALESCE(IF(cur.code = 'CZK', 1, pi.exchange_rate), 1), 2) AS net_base
+               FROM purchase_invoices pi" . \MyInvoice\Support\Sql\PurchaseCostSql::deductionJoin('pi', $supplierId) . "
                LEFT JOIN clients c ON c.id = pi.vendor_id AND c.supplier_id = pi.supplier_id
                LEFT JOIN currencies cur ON cur.id = pi.currency_id
               WHERE pi.supplier_id = ?

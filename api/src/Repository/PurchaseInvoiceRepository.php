@@ -24,6 +24,7 @@ use MyInvoice\Support\PaymentMethods;
 use MyInvoice\Support\PublicAuthorityFeeText;
 use MyInvoice\Support\Sql\PayablePredicate;
 use MyInvoice\Support\Sql\PurchaseSettledExpr;
+use MyInvoice\Support\Sql\PurchaseCostSql;
 use PDO;
 use MyInvoice\Support\Sql\AdvanceSettledSql;
 
@@ -1223,7 +1224,7 @@ final class PurchaseInvoiceRepository
                     ? ['months' => array_keys($grouped)]
                     : ['ids' => $pageIds];
             }
-            $summaries = $this->monthSummaries($whereSql, $params, $groupByMonth, $scope);
+            $summaries = $this->monthSummaries($whereSql, $params, $groupByMonth, $scope, (int) ($filters['supplier_id'] ?? 0) ?: null);
             foreach ($grouped as $month => &$g) {
                 $g['count'] = $summaries[$month]['count'] ?? count($g['invoices']);
                 $g['totals_per_currency'] = $summaries[$month]['totals_per_currency'] ?? [];
@@ -1266,7 +1267,7 @@ final class PurchaseInvoiceRepository
      *        (YYYY-MM) nebo ID dokladů stránky; null = celý výběr
      * @return array<string, array{count:int, totals_per_currency: list<array<string,mixed>>}>
      */
-    public function monthSummaries(string $whereSql, array $params, bool $groupByMonth, ?array $scope = null): array
+    public function monthSummaries(string $whereSql, array $params, bool $groupByMonth, ?array $scope = null, ?int $supplierId = null): array
     {
         if (isset($scope['months'])) {
             $months = array_values(array_filter(
@@ -1291,15 +1292,16 @@ final class PurchaseInvoiceRepository
         $bucket = $groupByMonth ? "DATE_FORMAT(pi.issue_date, '%Y-%m')" : "''";
         $excludedAdvance = "(pi.document_kind = 'advance' AND (pi.status = 'paid' OR " . AdvanceSettledSql::purchase('pi') . '))';
         $cost = "pi.status NOT IN ('draft', 'cancelled') AND pi.document_kind <> 'tax_document' AND NOT $excludedAdvance";
-        $sum = static fn (string $col): string => "ROUND(COALESCE(SUM(CASE WHEN $cost THEN pi.$col END), 0), 2)";
+        // Odpočet zálohy z DDKP na konečné faktuře nákladem není ({@see PurchaseCostSql}).
+        $sum = static fn (string $expr): string => "ROUND(COALESCE(SUM(CASE WHEN $cost THEN $expr END), 0), 2)";
 
         $stmt = $this->db->pdo()->prepare(
             "SELECT $bucket AS month_bucket, cur.code AS currency, COUNT(*) AS cnt,
                     SUM(CASE WHEN $cost THEN 1 ELSE 0 END) AS cost_rows,
-                    " . $sum('total_without_vat') . " AS without_vat,
-                    " . $sum('total_vat') . " AS vat,
-                    " . $sum('total_with_vat') . " AS with_vat
-               FROM purchase_invoices pi
+                    " . $sum(PurchaseCostSql::net('pi')) . " AS without_vat,
+                    " . $sum(PurchaseCostSql::vat('pi')) . " AS vat,
+                    " . $sum(PurchaseCostSql::gross('pi')) . " AS with_vat
+               FROM purchase_invoices pi" . PurchaseCostSql::deductionJoinFor($this->db->pdo(), 'pi', $supplierId) . "
                JOIN clients c ON c.id = pi.vendor_id
                JOIN currencies cur ON cur.id = pi.currency_id
               WHERE $whereSql

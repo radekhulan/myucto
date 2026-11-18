@@ -10,6 +10,7 @@ use MyInvoice\Service\Payroll\Security\PayrollSensitiveData;
 use MyInvoice\Service\Payroll\Security\PayrollSensitiveField;
 use PDO;
 use MyInvoice\Support\Sql\AdvanceSettledSql;
+use MyInvoice\Support\Sql\PurchaseCostSql;
 
 /**
  * Daňové profily (tax_profiles) — per supplier × rok — a agregace příjmů
@@ -175,10 +176,16 @@ final class TaxProfileRepository
      */
     private static function paidInvoiceBaseSql(string $alias, bool $isVatPayer): string
     {
+        return self::paidBaseFromSql("{$alias}.total_with_vat", "{$alias}.total_vat", $isVatPayer);
+    }
+
+    /** Tentýž rozpad nad výrazy brutto a DPH (přijatý doklad bez odpočtu zálohy, {@see PurchaseCostSql}). */
+    private static function paidBaseFromSql(string $gross, string $vat, bool $isVatPayer): string
+    {
         return $isVatPayer
-            ? "({$alias}.total_with_vat - IF(SIGN({$alias}.total_vat) = SIGN({$alias}.total_with_vat),"
-                . " SIGN({$alias}.total_with_vat) * LEAST(ABS({$alias}.total_vat), ABS({$alias}.total_with_vat)), 0))"
-            : "{$alias}.total_with_vat";
+            ? "({$gross} - IF(SIGN({$vat}) = SIGN({$gross}),"
+                . " SIGN({$gross}) * LEAST(ABS({$vat}), ABS({$gross})), 0))"
+            : $gross;
     }
 
     /**
@@ -284,12 +291,13 @@ final class TaxProfileRepository
      */
     public function monthExpenses(int $supplierId, string $ym, bool $isVatPayer): float
     {
-        $col = self::paidInvoiceBaseSql('pi', $isVatPayer);
+        // Brutto a DPH bez odpočtu zálohy z DDKP: odpočtový řádek výdajem není ({@see PurchaseCostSql}).
+        $col = self::paidBaseFromSql(PurchaseCostSql::gross('pi'), PurchaseCostSql::vat('pi'), $isVatPayer);
         // Kladně uložený dobropis náklad snižuje, stejně jako v evidenci DPH a peněžním deníku.
         $docSign = \MyInvoice\Service\Report\VatLedgerService::purchaseDocumentSignSql('pi');
         $stmt = $this->db->pdo()->prepare(
             "SELECT COALESCE(SUM({$docSign} * {$col} * COALESCE(IF(cur.code = 'CZK', 1, pi.exchange_rate), 1)), 0)
-               FROM purchase_invoices pi
+               FROM purchase_invoices pi" . PurchaseCostSql::deductionJoin('pi', $supplierId) . "
           LEFT JOIN currencies cur ON cur.id = pi.currency_id
               WHERE pi.supplier_id = ?
                 AND pi.status = 'paid'

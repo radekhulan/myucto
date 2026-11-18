@@ -15,6 +15,7 @@ use MyInvoice\Service\Invoice\OverduePolicy;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 use MyInvoice\Support\Sql\AdvanceSettledSql;
+use MyInvoice\Support\Sql\PurchaseCostSql;
 
 final class GetClientAction
 {
@@ -181,9 +182,9 @@ final class GetClientAction
         $stmtCM = $pdo->prepare(
             "SELECT DATE_FORMAT(pi.issue_date, '%Y-%m') AS month,
                     cur.code AS currency,
-                    SUM(pi.total_with_vat) AS total,
-                    SUM(pi.total_with_vat * COALESCE(IF(cur.code = 'CZK', 1, pi.exchange_rate), 1)) AS total_czk
-               FROM purchase_invoices pi
+                    SUM(" . PurchaseCostSql::gross('pi') . ") AS total,
+                    SUM(" . PurchaseCostSql::gross('pi') . " * COALESCE(IF(cur.code = 'CZK', 1, pi.exchange_rate), 1)) AS total_czk
+               FROM purchase_invoices pi" . PurchaseCostSql::deductionJoin('pi', $sid) . "
                JOIN currencies cur ON cur.id = pi.currency_id
               WHERE pi.vendor_id = ?
                 AND pi.supplier_id = ?
@@ -210,10 +211,10 @@ final class GetClientAction
         $stmtCY = $pdo->prepare(
             "SELECT YEAR(pi.issue_date) AS year,
                     cur.code AS currency,
-                    SUM(pi.total_with_vat) AS total,
-                    SUM(pi.total_with_vat * COALESCE(IF(cur.code = 'CZK', 1, pi.exchange_rate), 1)) AS total_czk,
+                    SUM(" . PurchaseCostSql::gross('pi') . ") AS total,
+                    SUM(" . PurchaseCostSql::gross('pi') . " * COALESCE(IF(cur.code = 'CZK', 1, pi.exchange_rate), 1)) AS total_czk,
                     COUNT(*) AS count
-               FROM purchase_invoices pi
+               FROM purchase_invoices pi" . PurchaseCostSql::deductionJoin('pi', $sid) . "
                JOIN currencies cur ON cur.id = pi.currency_id
               WHERE pi.vendor_id = ?
                 AND pi.supplier_id = ?
