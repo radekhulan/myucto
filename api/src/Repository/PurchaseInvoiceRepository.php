@@ -1164,7 +1164,6 @@ final class PurchaseInvoiceRepository
                        pi.project_id, prj.name AS project_name,
                        c.company_name AS vendor_company_name, c.ic AS vendor_ic,
                        DATE_FORMAT(pi.issue_date, '%Y-%m') AS month_bucket,
-                       " . AdvanceSettledSql::purchase('pi') . " AS is_settled_advance,
                        -- §DM: doklad obsahuje drobný majetek → ikonka v seznamu. Stačí, že
                        -- ho nese JEDNA položka (faktura běžně míchá majetek se službou),
                        -- proto EXISTS, ne JOIN — ten by doklad znásobil na počet položek.
@@ -1193,13 +1192,9 @@ final class PurchaseInvoiceRepository
         }
 
         $grouped = [];
+        $pageIds = [];
         foreach ($rows as $row) {
             unset($row['total_rows']); // metadata, nepatří do invoice payloadu
-            // Spárovaná záloha = advance, na kterou ukazuje finální (vyúčtovací) faktura.
-            // Zachytit z DB flagu PŘED castem a vyřadit z payloadu (interní metadata).
-            $isSettledAdvance = (string) ($row['document_kind'] ?? '') === 'advance'
-                && (int) ($row['is_settled_advance'] ?? 0) === 1;
-            unset($row['is_settled_advance']);
             $row = $this->castInvoice($row);
             $month = $groupByMonth ? (string) $row['month_bucket'] : '';
             if (!isset($grouped[$month])) {
@@ -1211,46 +1206,27 @@ final class PurchaseInvoiceRepository
                 ];
             }
             $grouped[$month]['invoices'][] = $row;
-            $grouped[$month]['count']++;
+            $pageIds[] = (int) $row['id'];
+        }
 
-            // Měsíční součet = reálný náklad. Vyřadit: draft/cancelled a spárovanou/zaplacenou
-            // zálohu (advance) — náklad nese finální faktura, jinak 2× započteno.
-            // Nespárovaná nezaplacená záloha se počítá (očekávaný náklad).
-            // Řádek se i tak zobrazí (analogicky proforma u vystavených faktur).
-            //
-            // ZÁMĚRNĚ OPAČNĚ NEŽ CRM — nesjednocovat: tohle je ÚČETNÍ pohled (zaplacená
-            // záloha sedí na 314, náklad nezakládá), zatímco CrmAggregationService
-            // a PurchaseSummaryAction jsou informativní predikce, kde zaplacená
-            // a nespárovaná záloha do nákladů patří. Rozhodnutí, ne chyba —
-            // viz private/checks/NALEZY.md, N-019. Hlídá AdvanceCostPredicateParityTest.
-            //
-            // DDKP (§ 28 ZDPH) není náklad NIKDY — účtuje jen odpočet DPH ze zálohy (343/314),
-            // náklad vzniká až u vyúčtovací faktury. Bez toho hlavička měsíce nesedí
-            // s dlaždicí Náklady ani s costs_by_month o celé brutto DDKP.
-            $excludedAdvance = $row['document_kind'] === 'advance'
-                && ($row['status'] === 'paid' || $isSettledAdvance);
-            $excludedVatDoc = $row['document_kind'] === 'tax_document';
-            if (!in_array($row['status'], ['draft', 'cancelled'], true) && !$excludedAdvance && !$excludedVatDoc) {
-                $cur = $row['currency'];
-                if (!isset($grouped[$month]['totals_per_currency'][$cur])) {
-                    $grouped[$month]['totals_per_currency'][$cur] = [
-                        'currency'    => $cur,
-                        'without_vat' => 0.0,
-                        'vat'         => 0.0,
-                        'with_vat'    => 0.0,
-                    ];
-                }
-                $grouped[$month]['totals_per_currency'][$cur]['without_vat'] += (float) $row['total_without_vat'];
-                $grouped[$month]['totals_per_currency'][$cur]['vat']         += (float) $row['total_vat'];
-                $grouped[$month]['totals_per_currency'][$cur]['with_vat']    += (float) $row['total_with_vat'];
+        // Počet a součty hlavičky měsíce za CELÝ měsíc z databáze, ne z načtené
+        // stránky (#392); stejný postup jako u vystavených faktur.
+        if ($grouped !== []) {
+            $scope = null;
+            if ($perPage > 0) {
+                $scope = $groupByMonth
+                    ? ['months' => array_keys($grouped)]
+                    : ['ids' => $pageIds];
             }
+            $summaries = $this->monthSummaries($whereSql, $params, $groupByMonth, $scope);
+            foreach ($grouped as $month => &$g) {
+                $g['count'] = $summaries[$month]['count'] ?? count($g['invoices']);
+                $g['totals_per_currency'] = $summaries[$month]['totals_per_currency'] ?? [];
+            }
+            unset($g);
         }
-        foreach ($grouped as &$g) {
-            $g['totals_per_currency'] = array_values($g['totals_per_currency']);
-        }
-        unset($g);
 
-        $meta = ['total' => $total ?? array_sum(array_column($grouped, 'count'))];
+        $meta = ['total' => $total ?? count($rows)];
         if ($perPage > 0) {
             $meta['page']     = $page;
             $meta['per_page'] = $perPage;
@@ -1258,6 +1234,93 @@ final class PurchaseInvoiceRepository
         }
 
         return ['data' => array_values($grouped), 'meta' => $meta];
+    }
+
+    /**
+     * Počet dokladů a součty po měnách pro hlavičky měsíců seznamu přijatých faktur,
+     * nad stejným WHERE jako seznam ({@see listWhere()}). Agreguje databáze, takže
+     * hlavička ukazuje celý měsíc bez ohledu na načtené řádky (#392).
+     *
+     * Měsíční součet = reálný náklad. Vyřadit: draft/cancelled a spárovanou/zaplacenou
+     * zálohu (advance), náklad nese finální faktura, jinak 2× započteno. Nespárovaná
+     * nezaplacená záloha se počítá (očekávaný náklad). Řádek se v seznamu i tak zobrazí
+     * (analogicky proforma u vystavených faktur).
+     *
+     * ZÁMĚRNĚ OPAČNĚ NEŽ CRM — nesjednocovat: tohle je ÚČETNÍ pohled (zaplacená
+     * záloha sedí na 314, náklad nezakládá), zatímco CrmAggregationService
+     * a PurchaseSummaryAction jsou informativní predikce, kde zaplacená
+     * a nespárovaná záloha do nákladů patří. Rozhodnutí, ne chyba —
+     * viz private/checks/NALEZY.md, N-019. Hlídá AdvanceCostPredicateParityTest.
+     *
+     * DDKP (§ 28 ZDPH) není náklad NIKDY — účtuje jen odpočet DPH ze zálohy (343/314),
+     * náklad vzniká až u vyúčtovací faktury. Bez toho hlavička měsíce nesedí
+     * s dlaždicí Náklady ani s costs_by_month o celé brutto DDKP.
+     *
+     * @param list<mixed> $params
+     * @param array{months?: list<string>, ids?: list<int>}|null $scope omezení na měsíce
+     *        (YYYY-MM) nebo ID dokladů stránky; null = celý výběr
+     * @return array<string, array{count:int, totals_per_currency: list<array<string,mixed>>}>
+     */
+    public function monthSummaries(string $whereSql, array $params, bool $groupByMonth, ?array $scope = null): array
+    {
+        if (isset($scope['months'])) {
+            $months = array_values(array_filter(
+                $scope['months'],
+                static fn (string $m): bool => preg_match('/^\d{4}-\d{2}$/', $m) === 1,
+            ));
+            if ($months !== []) {
+                sort($months);
+                $last = new \DateTimeImmutable(end($months) . '-01');
+                $whereSql .= ' AND pi.issue_date >= ? AND pi.issue_date < ?';
+                $params[] = $months[0] . '-01';
+                $params[] = $last->modify('+1 month')->format('Y-m-d');
+            }
+        } elseif (isset($scope['ids'])) {
+            if ($scope['ids'] === []) {
+                return [];
+            }
+            $whereSql .= ' AND pi.id IN (' . implode(',', array_fill(0, count($scope['ids']), '?')) . ')';
+            array_push($params, ...$scope['ids']);
+        }
+
+        $bucket = $groupByMonth ? "DATE_FORMAT(pi.issue_date, '%Y-%m')" : "''";
+        $excludedAdvance = "(pi.document_kind = 'advance' AND (pi.status = 'paid' OR " . AdvanceSettledSql::purchase('pi') . '))';
+        $cost = "pi.status NOT IN ('draft', 'cancelled') AND pi.document_kind <> 'tax_document' AND NOT $excludedAdvance";
+        $sum = static fn (string $col): string => "ROUND(COALESCE(SUM(CASE WHEN $cost THEN pi.$col END), 0), 2)";
+
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT $bucket AS month_bucket, cur.code AS currency, COUNT(*) AS cnt,
+                    SUM(CASE WHEN $cost THEN 1 ELSE 0 END) AS cost_rows,
+                    " . $sum('total_without_vat') . " AS without_vat,
+                    " . $sum('total_vat') . " AS vat,
+                    " . $sum('total_with_vat') . " AS with_vat
+               FROM purchase_invoices pi
+               JOIN clients c ON c.id = pi.vendor_id
+               JOIN currencies cur ON cur.id = pi.currency_id
+              WHERE $whereSql
+              GROUP BY month_bucket, cur.code
+              ORDER BY month_bucket, cur.code"
+        );
+        $stmt->execute($params);
+
+        $out = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $r) {
+            $month = (string) $r['month_bucket'];
+            $out[$month] ??= ['count' => 0, 'totals_per_currency' => []];
+            $out[$month]['count'] += (int) $r['cnt'];
+            // Měna jen z dokladů mimo náklad (koncept, storno, spárovaná záloha) se
+            // v hlavičce neukazuje, stejně jako dřív při sčítání řádků.
+            if ((int) $r['cost_rows'] === 0) {
+                continue;
+            }
+            $out[$month]['totals_per_currency'][] = [
+                'currency'    => (string) $r['currency'],
+                'without_vat' => (float) $r['without_vat'],
+                'vat'         => (float) $r['vat'],
+                'with_vat'    => (float) $r['with_vat'],
+            ];
+        }
+        return $out;
     }
 
     /**

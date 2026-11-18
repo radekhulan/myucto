@@ -11590,9 +11590,10 @@ paths:
                       type: object
                       properties:
                         month: { type: string, example: "2026-05" }
-                        count: { type: integer }
+                        count: { type: integer, description: "Počet dokladů celého měsíce podle filtrů, nezávisle na stránkování (v souvislém seznamu počet na aktuální stránce)" }
                         totals_per_currency:
                           type: array
+                          description: "Měsíční náklad po měnách za celý měsíc podle filtrů, nezávisle na stránkování (v souvislém seznamu jen za řádky aktuální stránky). Bez konceptů, storen, DDKP a zaplacených nebo vyúčtovaných záloh."
                           items:
                             type: object
                             properties:
@@ -53310,11 +53311,12 @@ components:
       required: [month, count, totals_per_currency, invoices]
       properties:
         month: { type: string, example: "2026-05", description: "Měsíc ve formátu YYYY-MM; prázdný řetězec pro souvislý seznam." }
-        count: { type: integer, description: "Počet faktur skupiny na aktuální stránce" }
+        count: { type: integer, description: "Počet faktur celého měsíce podle filtrů, nezávisle na stránkování (v souvislém seznamu počet na aktuální stránce)" }
         totals_per_currency:
           type: array
           description: |
-            Měsíční obrat po měnách. Do obratu (`without_vat`/`vat`/`with_vat`) se
+            Měsíční obrat po měnách za celý měsíc podle filtrů, nezávisle na stránkování
+            (v souvislém seznamu jen za řádky aktuální stránky). Do obratu (`without_vat`/`vat`/`with_vat`) se
             počítají jen vystavené doklady (`issued`/`sent`/`reminded`/`paid`) typu
             `invoice`/`credit_note`/`tax_document`; koncepty (`draft`) stejných typů
             jdou zvlášť do `draft_*` (predikce „rozpracováno k vystavení“).

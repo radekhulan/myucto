@@ -46,7 +46,7 @@ final class AdvanceCostPredicateParityTest extends TestCase
     {
         $code = $this->src('Repository/PurchaseInvoiceRepository.php');
         self::assertStringContainsString(
-            "\$row['status'] === 'paid' || \$isSettledAdvance",
+            "(pi.document_kind = 'advance' AND (pi.status = 'paid' OR \" . AdvanceSettledSql::purchase('pi')",
             $code,
             'Účetní pohled musí zaplacenou zálohu z nákladů VYLUČOVAT (sedí na 314). Viz N-019.',
         );
@@ -58,7 +58,7 @@ final class AdvanceCostPredicateParityTest extends TestCase
         foreach ([
             'Service/Crm/CrmAggregationService.php'      => "<> 'tax_document'",
             'Action/Dashboard/PurchaseSummaryAction.php' => "<> 'tax_document'",
-            'Repository/PurchaseInvoiceRepository.php'   => "=== 'tax_document'",
+            'Repository/PurchaseInvoiceRepository.php'   => "AND pi.document_kind <> 'tax_document' AND NOT \$excludedAdvance",
         ] as $rel => $needle) {
             if (!str_contains($this->src($rel), $needle)) {
                 $missing[] = $rel;
