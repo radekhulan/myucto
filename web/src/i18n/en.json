@@ -42251,8 +42251,6 @@
     "createMember": "Create member",
     "createNeedsInput": "Select a contact and enter a member number.",
     "memberCreated": "The member was created. Add the first membership revision.",
-    "memberCreatedOpenBlocked": "The member was created. The browser blocked opening the detail in a new pane.",
-    "openMemberDetail": "Open detail",
     "members": "Members",
     "membersEmpty": "No member is registered yet.",
     "firstSteps": [

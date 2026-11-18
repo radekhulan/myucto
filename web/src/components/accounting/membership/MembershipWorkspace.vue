@@ -162,11 +162,11 @@ const paneKey = () => (paneId.value === null ? null : String(paneId.value))
  * Rozpracovaný hromadný předpis, import nebo běžící export by odchodem ze seznamu zmizel, proto se tehdy detail
  * otevře v novém panelu. Při odchodu ve stejném panelu seznam předá adresu s filtry, výběr a otevřeného člena.
  */
-function goToMember(id: number, event?: MouseEvent): boolean {
+function goToMember(id: number, event?: MouseEvent) {
   const keepList = batchOpen.value || importOpen.value || exporting.value
   const newPanel = keepList || !!event && (event.ctrlKey || event.metaKey || event.button === 1)
   if (!newPanel) saveListHandoff({ supplier: props.supplier, pane: paneKey(), returning: false, path: route?.fullPath || MEMBERSHIP_LIST_PATH, filters: appliedFilters.value, ids: [...checkedMembers.value], openedId: id })
-  return navigateRow(memberDetailPath(id), event, { newPanel: keepList })
+  navigateRow(memberDetailPath(id), event, { newPanel: keepList })
 }
 // Pravé tlačítko a tlačítka myši Zpět/Vpřed řádek neotevírají (stejně jako `useRowLink`), ani nezapíší předání seznamu.
 function openMember(row: MemberRow, event?: MouseEvent) { if (event && event.button > 1) return; goToMember(row.id, event) }
@@ -310,13 +310,8 @@ async function create() {
     creating.value = false; draft.reset()
     closeCreate()
     // Jako u kontaktu rovnou detail nového člena (tam se zapisuje jeho první revize); oznámení přežije přechod.
-    // Nový panel se otevírá až po odpovědi serveru; po pomalém uložení ho prohlížeč zablokuje
-    // jako vyskakovací okno (#404). Pak oznámení nabídne detail tlačítkem (to už je akce uživatele).
-    if (goToMember(created.id)) toast.success(t('nonprofitMembership.memberCreated'))
-    else toast.success(t('nonprofitMembership.memberCreatedOpenBlocked'), {
-      label: t('nonprofitMembership.openMemberDetail'),
-      handler: () => { goToMember(created.id) },
-    })
+    toast.success(t('nonprofitMembership.memberCreated'))
+    goToMember(created.id)
   } catch (e) {
     if (alive && ticket === createTicket) createError.value = membershipError({t, te}, e)
   } finally {

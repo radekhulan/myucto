@@ -25,31 +25,27 @@ import { windowContextKey } from '@/workspace/windowContext'
  * Volba `newPanel: true` otevře cíl v novém panelu i při běžném kliku (nebo bez události)
  * a má přednost před navigací v panelu pracovní plochy, např. když by odchod ze stránky zahodil
  * rozpracovanou práci. Pravé/jiné tlačítko nenaviguje ani s modifikátorem, ani s volbou.
- *
- * Vrací false, když prohlížeč nový panel zablokoval (otevření mimo akci uživatele, typicky
- * až po pomalé odpovědi serveru); volající pak může nabídnout otevření tlačítkem.
  */
 export function useRowLink() {
   const router = useRouter()
   const windowContext = inject(windowContextKey, null)
 
-  // router.resolve respektuje base path routeru; otevře SPA na dané route v novém panelu.
-  // S `noopener` vrací window.open null i při úspěchu, proto se okno otevře bez něj
-  // a odkaz na opener se zruší ručně; null pak spolehlivě znamená zablokované okno.
-  const openNewPanel = (to: RouteLocationRaw): boolean => {
-    const opened = window.open(router.resolve(to).href, '_blank')
-    if (opened) opened.opener = null
-    return opened !== null
-  }
+  // router.resolve respektuje base path routeru; otevře SPA na dané route v novém panelu
+  const openNewPanel = (to: RouteLocationRaw) => { window.open(router.resolve(to).href, '_blank', 'noopener') }
 
-  return function navigate(to: RouteLocationRaw, e?: MouseEvent, options?: { newPanel?: boolean }): boolean {
+  return function navigate(to: RouteLocationRaw, e?: MouseEvent, options?: { newPanel?: boolean }): void {
     // Pravé (a jiné než levé a prostřední) tlačítko nenaviguje nikdy, ani s Ctrl/⌘:
     // `auxclick` chodí i pro pravé tlačítko, takže Ctrl + pravé by jinak otevřelo panel (#405).
-    if (e && e.button !== undefined && e.button !== 0 && e.button !== 1) return true
-    if (e && (e.metaKey || e.ctrlKey || e.button === 1)) return openNewPanel(to)
-    if (options?.newPanel) return openNewPanel(to)
+    if (e && e.button !== undefined && e.button !== 0 && e.button !== 1) return
+    if (e && (e.metaKey || e.ctrlKey || e.button === 1)) {
+      openNewPanel(to)
+      return
+    }
+    if (options?.newPanel) {
+      openNewPanel(to)
+      return
+    }
     if (windowContext?.navigate) void windowContext.navigate(to)
     else void router.push(to)
-    return true
   }
 }

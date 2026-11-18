@@ -36,7 +36,7 @@ describe('useRowLink', () => {
     const { navigate, push } = setup()
     navigate('/a', click(), { newPanel: true })
     navigate('/b', undefined, { newPanel: true })
-    expect(open.mock.calls).toEqual([['/a', '_blank'], ['/b', '_blank']])
+    expect(open.mock.calls).toEqual([['/a', '_blank', 'noopener'], ['/b', '_blank', 'noopener']])
     expect(push).not.toHaveBeenCalled()
     navigate('/c', click(), { newPanel: false })
     expect(push).toHaveBeenLastCalledWith('/c')
@@ -65,14 +65,5 @@ describe('useRowLink', () => {
     navigate('/c', new MouseEvent('auxclick', { button: 2, ctrlKey: true }))
     navigate('/d', new MouseEvent('auxclick', { button: 2, metaKey: true }))
     expect(open).not.toHaveBeenCalled()
-  })
-
-  it('reports a new panel blocked by the browser (#404)', () => {
-    const { navigate } = setup()
-    expect(navigate('/a', click({ ctrlKey: true }))).toBe(false)
-    expect(navigate('/b', undefined, { newPanel: true })).toBe(false)
-    open.mockReturnValue({} as Window)
-    expect(navigate('/c', click({ ctrlKey: true }))).toBe(true)
-    expect(navigate('/d', click())).toBe(true)
   })
 })

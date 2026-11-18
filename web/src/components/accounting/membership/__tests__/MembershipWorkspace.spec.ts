@@ -24,7 +24,7 @@ config.global.directives = { ...config.global.directives, 'column-labels': {} }
 vi.mock('@/composables/useUserPrefs', () => ({ ensurePrefsLoaded: () => Promise.resolve(), getPagePrefs: () => ({ value: {} }), patchPagePrefs: vi.fn() }))
 vi.mock('@/api/clients', () => ({ clientsApi: {} }))
 // Detail člena je samostatná stránka; řádek jen naviguje (Ctrl+klik a prostřední tlačítko do nového panelu).
-const rowLink = vi.hoisted(() => ({ navigate: vi.fn((..._args: unknown[]): boolean => true) }))
+const rowLink = vi.hoisted(() => ({ navigate: vi.fn() }))
 vi.mock('@/composables/useRowLink', () => ({ useRowLink: () => rowLink.navigate }))
 config.global.stubs = { ...config.global.stubs, RouterLink: RouterLinkStub }
 // Potvrzení a varování jdou jako v celé aplikaci do toastu.
@@ -543,24 +543,6 @@ describe('Membership workspace', () => {
     expect(lastNavigation()).toEqual({ to: DETAIL(9), newPanel: false })
     expect(toast.success).toHaveBeenCalledWith(cs.nonprofitMembership.memberCreated)
     expect(w.find('[data-section="create-member"]').exists()).toBe(false)
-    w.unmount()
-  })
-
-  it('nabídne detail nového člena tlačítkem, když prohlížeč nový panel zablokuje (#404)', async () => {
-    const w = mounted()
-    await flushPromises()
-    await w.get('[data-action="create-open"]').trigger('click')
-    await w.get('[data-field="member-client"]').setValue('3')
-    await w.get('[data-section="create-member"] [data-field="member-number"]').setValue('M-9')
-    rowLink.navigate.mockReturnValueOnce(false)
-    await w.get('[data-action="create-member"]').trigger('click')
-    await flushPromises()
-    expect(toast.success).toHaveBeenCalledWith(cs.nonprofitMembership.memberCreatedOpenBlocked,
-      expect.objectContaining({ label: cs.nonprofitMembership.openMemberDetail }))
-    const action = (toast.success.mock.lastCall as unknown[])[1] as { handler: () => void }
-    rowLink.navigate.mockClear()
-    action.handler()
-    expect(lastNavigation().to).toBe(DETAIL(9))
     w.unmount()
   })
 
