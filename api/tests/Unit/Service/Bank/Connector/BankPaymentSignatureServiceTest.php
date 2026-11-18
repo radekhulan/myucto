@@ -13,6 +13,7 @@ use MyInvoice\Service\Bank\Connector\BankConnectorOperationException;
 use MyInvoice\Service\Bank\Connector\BankPaymentSignatureService;
 use MyInvoice\Service\Bank\Connector\BankPaymentSubmissionJournal;
 use MyInvoice\Service\Bank\Connector\BankPaymentSubmissionService;
+use MyInvoice\Service\Bank\Connector\CsasApiClient;
 use MyInvoice\Service\Bank\Connector\SignableBankPaymentConnector;
 use MyInvoice\Service\OAuth\OAuthAuthorization;
 use MyInvoice\Service\OAuth\OAuthCallback;
@@ -75,6 +76,38 @@ final class BankPaymentSignatureServiceTest extends TestCase
             'secret' => ['source' => 'purchase_invoice', 'order_id' => 501], 'ttl' => 1800], $stored);
         self::assertSame('160527036796442', $this->state['provider_poll_id']);
         self::assertSame('awaiting_signature', $this->state['status']);
+    }
+
+    /**
+     * #393: příkaz s jedinou platbou se podepisuje jako platba (/my/payments/federate/sign)
+     * a dotaz na stav podpisu jde na /my/payments/sign/poll; dávka zůstává u batchpayments.
+     */
+    public function testSinglePaymentIsSignedAndPolledAsPaymentNotBatch(): void
+    {
+        $this->state['provider_reference'] = 'SIGN-1';
+        $this->state['provider_sign_hash'] = 'synthetic-payment-hash';
+        $this->state['provider_sign_scope'] = 'payment';
+        $this->items = [1 => ['line_no' => 1, 'status' => 'created', 'provider_sign_id' => 'SIGN-1', 'instruction_status' => 'ACTC']];
+        $flow = $this->createMock(OAuthClientFlow::class);
+        $flow->method('authorize')->willReturn(new OAuthAuthorization(str_repeat('d', 64), null));
+        $flow->method('callbackUrl')->willReturn('https://ucto.example.test/api/oauth/callback');
+
+        $this->service($flow)->startSignature(1, 501, 'purchase_invoice', 7);
+        self::assertSame('SIGN-1', $this->connector->signatures[0][0]);
+        $this->connector->poll = 'DONE';
+        $this->connector->payments = ['SIGN-1' => 'ACSP'];
+        self::assertSame('signed', $this->service()->refresh(1, 501, 'purchase_invoice')['status']);
+
+        self::assertSame([CsasApiClient::SIGN_SCOPE_PAYMENT, CsasApiClient::SIGN_SCOPE_PAYMENT], $this->connector->scopes);
+    }
+
+    public function testBatchWithoutStoredScopeIsSignedAsBatch(): void
+    {
+        $flow = $this->createMock(OAuthClientFlow::class);
+        $flow->method('authorize')->willReturn(new OAuthAuthorization(str_repeat('d', 64), null));
+        $flow->method('callbackUrl')->willReturn('https://ucto.example.test/api/oauth/callback');
+        $this->service($flow)->startSignature(1, 501, 'purchase_invoice', 7);
+        self::assertSame([CsasApiClient::SIGN_SCOPE_BATCH], $this->connector->scopes);
     }
 
     #[DataProvider('notSignable')]
@@ -363,6 +396,8 @@ final class SigningConnector implements SignableBankPaymentConnector
     public bool $failPoll = false;
     public int $polls = 0;
     public int $submissions = 0;
+    /** @var list<string> rozsah podpisu u každého volání podpisu a dotazu na něj */
+    public array $scopes = [];
 
     public function provider(): string { return 'csas'; }
 
@@ -386,16 +421,19 @@ final class SigningConnector implements SignableBankPaymentConnector
         throw new \LogicException('Podpis nesmí zakládat platby.');
     }
 
-    public function startSignature(#[\SensitiveParameter] string $token, string $batchSignId, string $batchHash, string $callbackUri): array
+    public function startSignature(#[\SensitiveParameter] string $token, string $signId, string $hash, string $callbackUri,
+        string $scope = CsasApiClient::SIGN_SCOPE_BATCH): array
     {
-        $this->signatures[] = [$batchSignId, $batchHash, $callbackUri];
+        $this->signatures[] = [$signId, $hash, $callbackUri];
+        $this->scopes[] = $scope;
         return ['signing_url' => 'https://webapi.developers.erstegroup.com/api/csas/sandbox/v1/sandbox-idp/sign', 'valid_to' => null,
             'poll_id' => '160527036796442', 'poll_interval_ms' => 5000];
     }
 
-    public function signatureState(#[\SensitiveParameter] string $token, string $pollId): array
+    public function signatureState(#[\SensitiveParameter] string $token, string $pollId, string $scope = CsasApiClient::SIGN_SCOPE_BATCH): array
     {
         $this->polls++;
+        $this->scopes[] = $scope;
         if ($this->failPoll) throw new BankConnectorException(BankConnectorException::REMOTE_UNAVAILABLE, 'synthetic');
         return ['state' => $this->poll, 'poll_interval_ms' => 5000];
     }

@@ -279,6 +279,113 @@ final class CsasApiClientTest extends TestCase
         yield ['SOMETHING_ELSE', BankConnectorException::PAYMENT_REJECTED];
     }
 
+    /**
+     * #393: banka odmítala platby s haléři (WRONG_DECIMAL_PLACES), protože float haléře/100
+     * se při serialize_precision=17 zapsal jako 1234.5599999999999. Částka z ABO musí jít
+     * do těla požadavku přesně, nezávisle na nastavení PHP.
+     */
+    #[\PHPUnit\Framework\Attributes\DataProvider('exactAmounts')]
+    public function testMappedAmountIsSentExactlyWithHighSerializePrecision(int $minor, string $json): void
+    {
+        $previous = ini_get('serialize_precision');
+        ini_set('serialize_precision', '17');
+        try {
+            $abo = (new \MyInvoice\Service\Payment\AboPaymentOrderWriter())->build([
+                'client_name' => 'Synthetic Client', 'payer_account_number' => '1000000005', 'payer_bank_code' => '0800',
+                'payment_date' => '2026-11-02',
+                'items' => [['account_number' => '1000000005', 'bank_code' => '0100', 'amount_minor' => $minor, 'variable_symbol' => '1']],
+            ]);
+            $body = (new CsasAboBatchMapper())->map($abo, 'CZ7508000000001000000005')['payments'][0]['body'];
+            $history = [];
+            $this->client([new Response(200, [], json_encode(['instructionStatus' => 'ACTC',
+                'signInfo' => ['state' => 'OPEN', 'signId' => '166609107206666', 'hash' => 'synthetic-hash']]))], $history)
+                ->createPayment($this->credentials(), $body);
+            self::assertStringContainsString('"instructedAmount":{"value":' . $json . ',"currency":"CZK"}', (string) $history[0]['request']->getBody());
+        } finally {
+            ini_set('serialize_precision', (string) $previous);
+        }
+    }
+
+    public static function exactAmounts(): iterable
+    {
+        yield 'haléře' => [123456, '1234.56'];
+        yield 'malá částka' => [235, '2.35'];
+        yield 'desetiny' => [1010, '10.1'];
+        yield 'jeden haléř' => [1, '0.01'];
+        yield 'celé tisíce' => [100000, '1000'];
+    }
+
+    public function testPaymentBodyWithFloatIsRefusedBeforeAnyRequest(): void
+    {
+        $history = [];
+        try {
+            $this->client([], $history)->createPayment($this->credentials(), ['amount' => ['instructedAmount' => ['value' => 12.34, 'currency' => 'CZK']]]);
+            self::fail('Float v těle platby se nesmí odeslat.');
+        } catch (BankConnectorException $e) {
+            self::assertSame(BankConnectorException::INVALID_PAYMENT_ORDER, $e->errorCode);
+            self::assertFalse($e->ambiguousPaymentOutcome, 'Nic se neodeslalo, výsledek je jistý.');
+        }
+        self::assertSame([], $history);
+    }
+
+    /** #393: kód, pole a text hlášky banky se dostanou až k uživateli (dřív zůstal jen obecný PAYMENT_REJECTED). */
+    #[\PHPUnit\Framework\Attributes\DataProvider('bankErrorBodies')]
+    public function testRejectionCarriesBankErrorForUser(string $body, ?array $expected): void
+    {
+        $history = [];
+        try {
+            $this->client([new Response(400, [], $body)], $history)->createPayment($this->credentials(), ['synthetic' => true]);
+            self::fail('Odmítnutí musí skončit výjimkou.');
+        } catch (BankConnectorException $e) {
+            self::assertSame(BankConnectorException::PAYMENT_REJECTED, $e->errorCode);
+            self::assertFalse($e->ambiguousPaymentOutcome);
+            self::assertSame($expected, $e->bankError);
+        }
+    }
+
+    public static function bankErrorBodies(): iterable
+    {
+        yield 'kód, pole a text' => ['{"errors":[{"error":"WRONG_DECIMAL_PLACES","scope":"amount.instructedAmount.value","message":"Chybný počet desetinných míst v částce."}]}',
+            ['code' => 'WRONG_DECIMAL_PLACES', 'scope' => 'amount.instructedAmount.value', 'message' => 'Chybný počet desetinných míst v částce.']];
+        yield 'tvar z dokumentace bez textu' => ['{"errors":[{"error":"WRONG_DECIMAL_PLACES","scope":"amount.instructedAmount.value"}]}',
+            ['code' => 'WRONG_DECIMAL_PLACES', 'scope' => 'amount.instructedAmount.value', 'message' => null]];
+        yield 'text v description, řídicí znaky' => ['{"errors":[{"error":"FIELD_INVALID","scope":"bad scope <x>","description":"Neplatná\n\u0007hodnota"}]}',
+            ['code' => 'FIELD_INVALID', 'scope' => null, 'message' => 'Neplatná hodnota']];
+        yield 'neočekávaný tvar' => ['{"errors":[{"error":"lower-case"}]}', null];
+        yield 'ne JSON' => ['synthetic-not-json', null];
+    }
+
+    public function testExpiredTokenWithErrorBodyIsInvalidTokenNotRejectedPayment(): void
+    {
+        $history = [];
+        try {
+            $this->client([new Response(403, [], '{"errors":[{"error":"TOKEN_INVALID"}]}')], $history)->createPayment($this->credentials(), ['synthetic' => true]);
+            self::fail('Neplatný token musí skončit výjimkou.');
+        } catch (BankConnectorException $e) {
+            self::assertSame(BankConnectorException::INVALID_TOKEN, $e->errorCode);
+        }
+    }
+
+    /** #393: jediná platba se podepisuje a dotazuje přes /my/payments, ne přes dávku. */
+    public function testSinglePaymentSignatureUsesPaymentResources(): void
+    {
+        $history = [];
+        $client = $this->client([
+            new Response(200, [], json_encode(['validTo' => '2026-11-20T12:00:00Z', 'signingUrl' => 'https://george.csas.cz/sign?x=1',
+                'poll' => ['id' => '160527036796442', 'interval' => 5000], 'signInfo' => ['state' => 'OPEN', 'signId' => '166609107206666']])),
+            new Response(200, [], json_encode(['state' => 'AUTHORIZATION_NOT_STARTED', 'pollInterval' => 5000])),
+        ], $history);
+        $callback = 'https://ucto.example.test/api/oauth/callback?state=' . str_repeat('c', 64);
+
+        self::assertSame('160527036796442', $client->federatedSign($this->credentials(), '166609107206666', 'synthetic-hash', $callback,
+            CsasApiClient::SIGN_SCOPE_PAYMENT)['poll_id']);
+        self::assertSame('AUTHORIZATION_NOT_STARTED', $client->pollSign($this->credentials(), '160527036796442', CsasApiClient::SIGN_SCOPE_PAYMENT)['state']);
+        self::assertSame('https://www.csas.cz/webapi/api/v1/payments/my/payments/federate/sign/166609107206666/hash/synthetic-hash',
+            (string) $history[0]['request']->getUri());
+        self::assertSame($callback, $history[0]['request']->getHeaderLine('Callback-Uri'));
+        self::assertSame('https://www.csas.cz/webapi/api/v1/payments/my/payments/sign/poll/160527036796442', (string) $history[1]['request']->getUri());
+    }
+
     public function testBatchReferencesOnlySignIdsOfCreatedPayments(): void
     {
         $history = [];

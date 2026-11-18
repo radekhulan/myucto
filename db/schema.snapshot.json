@@ -1209,7 +1209,8 @@
         "2303_membership_correctability.sql",
         "2304_activity_log_redactions.sql",
         "2305_membership_erasure.sql",
-        "2306_membership_erasure_permission.sql"
+        "2306_membership_erasure_permission.sql",
+        "2307_bank_payment_submission_bank_errors.sql"
     ],
     "tables": {
         "abra_flexi_connections": {
@@ -3420,9 +3421,13 @@
                 "payment_order_id": "bigint(20) unsigned NULL DEFAULT NULL",
                 "payroll_batch_id": "bigint(20) unsigned NULL DEFAULT NULL",
                 "provider": "varchar(32) NOT NULL",
+                "provider_error_code": "varchar(64) NULL DEFAULT NULL",
+                "provider_error_message": "varchar(255) NULL DEFAULT NULL",
+                "provider_error_scope": "varchar(128) NULL DEFAULT NULL",
                 "provider_poll_id": "varchar(64) NULL DEFAULT NULL",
                 "provider_reference": "text NULL DEFAULT NULL",
                 "provider_sign_hash": "varchar(128) NULL DEFAULT NULL",
+                "provider_sign_scope": "enum('batch','payment') NOT NULL DEFAULT 'batch'",
                 "rejected_count": "int(10) unsigned NULL DEFAULT NULL",
                 "remote_http_status": "smallint(5) unsigned NULL DEFAULT NULL",
                 "signature_requested_at": "datetime NULL DEFAULT NULL",
@@ -3463,6 +3468,9 @@
                 "instruction_identification": "varchar(35) NOT NULL",
                 "instruction_status": "varchar(8) NULL DEFAULT NULL",
                 "line_no": "smallint(5) unsigned NOT NULL",
+                "provider_error_code": "varchar(64) NULL DEFAULT NULL",
+                "provider_error_message": "varchar(255) NULL DEFAULT NULL",
+                "provider_error_scope": "varchar(128) NULL DEFAULT NULL",
                 "provider_hash": "varchar(128) NULL DEFAULT NULL",
                 "provider_sign_id": "varchar(64) NULL DEFAULT NULL",
                 "status": "enum('planned','sending','created','rejected','unknown') NOT NULL DEFAULT 'planned'",

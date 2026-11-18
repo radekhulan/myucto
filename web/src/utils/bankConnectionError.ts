@@ -1,5 +1,23 @@
 import { apiErrorCode, apiErrorMessage } from '@/api/errors'
-import type { BankReconciliationCandidate } from '@/api/bankConnections'
+import type { BankProviderError, BankReconciliationCandidate } from '@/api/bankConnections'
+
+/**
+ * Důvod odmítnutí, jak ho vrátila banka: text hlášky banky (nebo náš překlad známého
+ * kódu), doplněný kódem a polem požadavku, např. „Chybný počet desetinných míst v částce.
+ * (kód WRONG_DECIMAL_PLACES, pole amount.instructedAmount.value)“.
+ */
+export function bankProviderReason(
+  error: BankProviderError | null | undefined,
+  t: (key: string, params?: Record<string, unknown>) => string,
+  te: (key: string) => boolean,
+): string {
+  if (!error || typeof error.code !== 'string' || !/^[A-Z][A-Z0-9_]{1,63}$/.test(error.code)) return ''
+  const known = `bank_connection.bank_error_${error.code}`
+  const text = error.message || (te(known) ? t(known) : '')
+  const detail = [t('bank_connection.payment_bank_reason_code', { code: error.code })]
+  if (error.scope) detail.push(t('bank_connection.payment_bank_reason_scope', { scope: error.scope }))
+  return text ? `${text} (${detail.join(', ')})` : detail.join(', ')
+}
 
 export function bankReconciliationCandidates(error: unknown): BankReconciliationCandidate[] {
   if (apiErrorCode(error) !== 'statement_reconciliation_required') return []

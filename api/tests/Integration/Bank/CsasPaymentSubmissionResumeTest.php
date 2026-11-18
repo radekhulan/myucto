@@ -11,6 +11,7 @@ use MyInvoice\Repository\BankPaymentOrderSubmissionRepository;
 use MyInvoice\Service\Auth\SecretEncryption;
 use MyInvoice\Service\Bank\Connector\AboDomesticPaymentParser;
 use MyInvoice\Service\Bank\Connector\BankConnectorCallGuard;
+use MyInvoice\Service\Bank\Connector\BankConnectorException;
 use MyInvoice\Service\Bank\Connector\BankConnectorRegistry;
 use MyInvoice\Service\Bank\Connector\BankPaymentSubmissionService;
 use MyInvoice\Service\Bank\Connector\CsasApiClient;
@@ -261,6 +262,116 @@ final class CsasPaymentSubmissionResumeTest extends TestCase
         self::assertFalse($this->repository->markBatchSending($this->supplierId, $submissionId), 'Dávku nelze zakládat dvakrát.');
     }
 
+    /**
+     * #393: smíšený příkaz (2 platby banka odmítne s WRONG_DECIMAL_PLACES, 1 přijme s ID).
+     * Odeslání je jistě odmítnuté, důvod banky je u položek i v souhrnu a dávka nevznikla.
+     */
+    public function testMixedOrderIsRejectedWithBankReasonOnItemsAndSummary(): void
+    {
+        $history = [];
+        $abo = $this->aboOf([235, 100000, 123456]);
+        $result = $this->engineWithBank([$this->bankRejection(), $this->bankCreated('166609107206666'), $this->bankRejection()], $history)
+            ->submit($this->supplierId, $this->orderId, $this->connectionId, null, fn (): string => $abo);
+
+        $submission = $result['submission'];
+        self::assertSame('rejected', $submission['status'], 'Přijatá platba bez podpisu se neprovede, výsledek není nejasný.');
+        self::assertSame(BankConnectorException::PAYMENT_REJECTED, $submission['error_code']);
+        self::assertSame([1, 2], [$submission['accepted_count'], $submission['rejected_count']]);
+        self::assertSame(self::WRONG_DECIMAL_PLACES, $submission['provider_error']);
+        $items = $this->repository->publicItems($this->supplierId, (int) $submission['id']);
+        self::assertSame(['rejected', 'created', 'rejected'], array_column($items, 'status'));
+        self::assertSame([self::WRONG_DECIMAL_PLACES, null, self::WRONG_DECIMAL_PLACES], array_column($items, 'provider_error'));
+        self::assertSame('166609107206666', $items[1]['provider_sign_id']);
+        self::assertCount(3, $history, 'Dávka se nezakládá.');
+    }
+
+    /**
+     * #393: příkaz s jedinou platbou, kterou banka přijala a vrátila ID, čeká na podpis
+     * té platby (bez dávky). Dřív odmítnutá dávka vedla na „výsledek není známý“.
+     */
+    public function testSingleAcceptedPaymentAwaitsSignatureOfThatPayment(): void
+    {
+        $history = [];
+        $abo = $this->aboOf([100000]);
+        $result = $this->engineWithBank([$this->bankCreated('166609107206666')], $history)
+            ->submit($this->supplierId, $this->orderId, $this->connectionId, null, fn (): string => $abo);
+
+        self::assertSame('awaiting_signature', $result['submission']['status']);
+        self::assertSame('166609107206666', $result['submission']['provider_reference']);
+        self::assertNull($result['submission']['provider_error']);
+        $state = $this->repository->signingState($this->supplierId, (int) $result['submission']['id']);
+        self::assertSame(['payment', 'synthetic-payment-hash'], [$state['provider_sign_scope'], $state['provider_sign_hash']]);
+        self::assertCount(1, $history);
+    }
+
+    public function testResumeAfterRejectedItemSendsRestButNeverResendsOrCreatesBatch(): void
+    {
+        $this->interrupted(static function (StoredBankPaymentSubmissionJournal $journal): void {
+            $journal->sending(1);
+            $journal->rejected(1, BankConnectorException::PAYMENT_REJECTED, self::WRONG_DECIMAL_PLACES);
+        });
+        $history = [];
+        $result = $this->engineWithBank([$this->bankCreated('166609107206666')], $history)
+            ->submit($this->supplierId, $this->orderId, $this->connectionId, null, fn (): string => $this->abo());
+
+        self::assertSame('rejected', $result['submission']['status']);
+        self::assertSame([1, 1], [$result['submission']['accepted_count'], $result['submission']['rejected_count']]);
+        self::assertCount(1, $history, 'Odmítnutá položka se znovu neposílá a dávka nevzniká.');
+        $items = $this->repository->publicItems($this->supplierId, (int) $result['submission']['id']);
+        self::assertSame(['rejected', 'created'], array_column($items, 'status'));
+        self::assertSame(self::WRONG_DECIMAL_PLACES, $items[0]['provider_error']);
+    }
+
+    public function testRejectedBatchIsDefiniteRejectionWithBankReason(): void
+    {
+        $history = [];
+        $result = $this->engineWithBank([$this->bankCreated('166609107206666'), $this->bankCreated('166609107206667'),
+            new \GuzzleHttp\Psr7\Response(400, [], (string) file_get_contents(self::FIXTURES . '/batch-rejected-not-signable.json'))], $history)
+            ->submit($this->supplierId, $this->orderId, $this->connectionId, null, fn (): string => $this->abo());
+
+        self::assertSame('rejected', $result['submission']['status']);
+        self::assertSame(2, $result['submission']['accepted_count']);
+        self::assertSame(['code' => 'NOT_SIGNABLE', 'scope' => 'payments', 'message' => null], $result['submission']['provider_error']);
+    }
+
+    private const FIXTURES = __DIR__ . '/../../Fixtures/Bank/Csas';
+    private const WRONG_DECIMAL_PLACES = ['code' => 'WRONG_DECIMAL_PLACES', 'scope' => 'amount.instructedAmount.value',
+        'message' => 'Chybný počet desetinných míst v částce.'];
+
+    private function bankCreated(string $signId): \GuzzleHttp\Psr7\Response
+    {
+        $data = json_decode((string) file_get_contents(self::FIXTURES . '/payment-created.json'), true, 32, JSON_THROW_ON_ERROR);
+        $data['signInfo']['signId'] = $signId;
+        return new \GuzzleHttp\Psr7\Response(200, [], json_encode($data, JSON_THROW_ON_ERROR));
+    }
+
+    private function bankRejection(): \GuzzleHttp\Psr7\Response
+    {
+        return new \GuzzleHttp\Psr7\Response(400, [], (string) file_get_contents(self::FIXTURES . '/payment-rejected-wrong-decimal-places.json'));
+    }
+
+    /** @param list<int> $amounts částky položek v haléřích */
+    private function aboOf(array $amounts): string
+    {
+        $items = [];
+        foreach ($amounts as $index => $minor) {
+            $items[] = ['account_number' => '1000000005', 'bank_code' => $index % 2 === 0 ? '0100' : '0300', 'amount_minor' => $minor,
+                'variable_symbol' => (string) (2026001 + $index)];
+        }
+        return (new AboPaymentOrderWriter())->build([
+            'client_name' => 'Synthetic Client', 'file_number' => str_pad((string) ($this->orderId % 1000000), 6, '0', STR_PAD_LEFT),
+            'payer_account_number' => '1000000005', 'payer_bank_code' => '0800', 'payment_date' => date('Y-m-d'), 'items' => $items,
+        ]);
+    }
+
+    /** Odesílací služba se skutečným klientem ČS nad atrapou HTTP (odpovědi z fixtures). */
+    private function engineWithBank(array $responses, array &$history): BankPaymentSubmissionService
+    {
+        $stack = \GuzzleHttp\HandlerStack::create(new \GuzzleHttp\Handler\MockHandler($responses));
+        $stack->push(\GuzzleHttp\Middleware::history($history));
+        return $this->engine(api: new CsasApiClient(new \GuzzleHttp\Client(['handler' => $stack])));
+    }
+
     /** @param callable(StoredBankPaymentSubmissionJournal):void $steps kroky, po kterých proces „spadl“ */
     private function interrupted(callable $steps): int
     {
@@ -310,7 +421,7 @@ final class CsasPaymentSubmissionResumeTest extends TestCase
      * @param ?string $cooldown chyba časové pojistky volání (sdílená se stahováním výpisů)
      * @param ?int $busyOnAccess kolikáté získání tokenu skončí souběhem (obnova pod zámkem napojení)
      */
-    private function engine(?string $cooldown = null, ?int $busyOnAccess = null): BankPaymentSubmissionService
+    private function engine(?string $cooldown = null, ?int $busyOnAccess = null, ?CsasApiClient $api = null): BankPaymentSubmissionService
     {
         $credentials = ['version' => 1, 'supplier_id' => $this->supplierId, 'connection_id' => $this->connectionId,
             'api_key' => 'synthetic-key', 'client_id' => 'synthetic-client', 'client_secret' => 'synthetic-secret',
@@ -325,15 +436,17 @@ final class CsasPaymentSubmissionResumeTest extends TestCase
             if (++$accesses === $busyOnAccess) throw new \MyInvoice\Service\Bank\Connector\BankConnectorOperationException('bank_connection_busy');
             return $credentials;
         });
-        $api = $this->createStub(CsasApiClient::class);
-        $api->method('createPayment')->willReturnCallback(function (): array {
-            $this->calls[] = 'payment';
-            return ['sign_id' => 'SYNTHETIC-SIGN-' . count($this->calls), 'hash' => 'synthetic-hash', 'instruction_status' => 'ACTC'];
-        });
-        $api->method('createBatch')->willReturnCallback(function (): array {
-            $this->calls[] = 'batch';
-            return ['sign_id' => 'SYNTHETIC-BATCH', 'hash' => 'synthetic-batch-hash'];
-        });
+        if ($api === null) {
+            $api = $this->createStub(CsasApiClient::class);
+            $api->method('createPayment')->willReturnCallback(function (): array {
+                $this->calls[] = 'payment';
+                return ['sign_id' => 'SYNTHETIC-SIGN-' . count($this->calls), 'hash' => 'synthetic-hash', 'instruction_status' => 'ACTC'];
+            });
+            $api->method('createBatch')->willReturnCallback(function (): array {
+                $this->calls[] = 'batch';
+                return ['sign_id' => 'SYNTHETIC-BATCH', 'hash' => 'synthetic-batch-hash'];
+            });
+        }
         $connector = new CsasBankConnector($api, $vault, new CsasTransactionParser());
 
         $connections = $this->createStub(BankConnectionRepository::class);

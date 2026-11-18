@@ -21,7 +21,8 @@ interface BankPaymentSubmissionJournal
 
     public function created(int $lineNo, string $signId, string $hash, string $instructionStatus): void;
 
-    public function rejected(int $lineNo, string $errorCode): void;
+    /** @param array{code:string,scope:?string,message:?string}|null $bankError důvod odmítnutí od banky */
+    public function rejected(int $lineNo, string $errorCode, ?array $bankError = null): void;
 
     public function unknown(int $lineNo, string $errorCode): void;
 

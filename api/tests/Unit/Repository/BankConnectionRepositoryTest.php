@@ -43,6 +43,7 @@ final class BankConnectionRepositoryTest extends TestCase
                 payment_order_id INTEGER, payroll_batch_id INTEGER, connection_id INTEGER, provider TEXT NOT NULL,
                 payload_hash TEXT NOT NULL, submitted_by_user_id INTEGER, status TEXT NOT NULL,
                 provider_reference TEXT, error_code TEXT, accepted_count INTEGER,
+                provider_error_code TEXT, provider_error_scope TEXT, provider_error_message TEXT,
                 rejected_count INTEGER, remote_http_status INTEGER, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 submitted_at TEXT, UNIQUE (supplier_id, payment_order_id), UNIQUE (supplier_id, payroll_batch_id)
             )'
