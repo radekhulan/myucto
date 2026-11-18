@@ -1212,7 +1212,9 @@
         "2306_membership_erasure_permission.sql",
         "2307_purchase_item_advance_deduction.sql",
         "2308_bank_payment_submission_bank_errors.sql",
-        "2309_scheduled_pohoda_export.sql"
+        "2309_scheduled_pohoda_export.sql",
+        "2310_journal_rebook.sql",
+        "2311_journal_bulk_repost_permission.sql"
     ],
     "tables": {
         "abra_flexi_connections": {
@@ -6688,7 +6690,7 @@
                 "result_path": "varchar(255) NULL DEFAULT NULL",
                 "result_size": "bigint(20) unsigned NULL DEFAULT NULL",
                 "skipped_count": "int(10) unsigned NOT NULL DEFAULT 0",
-                "source": "enum('idoklad','fakturoid','pdf_isdoc_inbox','pdf_ai','monthly_export','document_zip_import','document_zip_export','document_folder_import','closing_package','file_import','document_backfill','accounting_setup_analysis','accounting_history_reclassification','automation_recommendations','scan_attach','money_s3_import','pohoda_import','premier_import','stereo_nx_import','money_s3_batch','abra_flexi_import','myucto_import') NOT NULL",
+                "source": "enum('idoklad','fakturoid','pdf_isdoc_inbox','pdf_ai','monthly_export','document_zip_import','document_zip_export','document_folder_import','closing_package','file_import','document_backfill','accounting_setup_analysis','accounting_history_reclassification','automation_recommendations','scan_attach','money_s3_import','pohoda_import','premier_import','stereo_nx_import','money_s3_batch','abra_flexi_import','myucto_import','journal_rebook') NOT NULL",
                 "started_at": "timestamp NULL DEFAULT NULL",
                 "status": "enum('queued','running','completed','failed','cancelled','completed_with_warnings') NOT NULL DEFAULT 'queued'",
                 "supplier_id": "int(10) unsigned NOT NULL",
@@ -8411,6 +8413,48 @@
                 "fk_jpr_user": "(created_by) -> users (id) ON UPDATE RESTRICT ON DELETE SET NULL"
             },
             "checks": []
+        },
+        "journal_rebook_items": {
+            "type": "BASE TABLE",
+            "engine": "InnoDB",
+            "collation": "utf8mb4_unicode_ci",
+            "columns": {
+                "after_json": "longtext NULL DEFAULT NULL COLLATE utf8mb4_bin",
+                "amount": "decimal(15,2) NOT NULL DEFAULT 0.00",
+                "before_json": "longtext NULL DEFAULT NULL COLLATE utf8mb4_bin",
+                "created_at": "timestamp NOT NULL DEFAULT current_timestamp()",
+                "date_shifted": "tinyint(1) NOT NULL DEFAULT 0",
+                "description": "varchar(255) NULL DEFAULT NULL",
+                "document_no": "varchar(50) NULL DEFAULT NULL",
+                "entry_date": "date NOT NULL",
+                "entry_id": "bigint(20) unsigned NOT NULL",
+                "fingerprint": "char(64) NULL DEFAULT NULL",
+                "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
+                "items_synced": "smallint(5) unsigned NOT NULL DEFAULT 0",
+                "job_id": "bigint(20) unsigned NOT NULL",
+                "message": "varchar(500) NULL DEFAULT NULL",
+                "reason_code": "varchar(80) NULL DEFAULT NULL",
+                "result_entry_id": "bigint(20) unsigned NULL DEFAULT NULL",
+                "source_id": "bigint(20) unsigned NOT NULL",
+                "source_type": "enum('invoice','purchase_invoice','bank') NOT NULL",
+                "status": "enum('would_change','unchanged','skipped','excluded','applied','failed') NOT NULL",
+                "strategy": "varchar(16) NULL DEFAULT NULL",
+                "supplier_id": "int(10) unsigned NOT NULL",
+                "target_date": "date NULL DEFAULT NULL"
+            },
+            "indexes": {
+                "PRIMARY": "UNIQUE BTREE (id)",
+                "idx_journal_rebook_job_status": "BTREE (job_id, status, entry_date, id)",
+                "idx_journal_rebook_supplier_job": "BTREE (supplier_id, job_id)",
+                "uq_journal_rebook_job_source": "UNIQUE BTREE (job_id, source_type, source_id)"
+            },
+            "foreign_keys": {
+                "fk_journal_rebook_job_supplier": "(supplier_id, job_id) -> import_jobs (supplier_id, id) ON UPDATE RESTRICT ON DELETE CASCADE"
+            },
+            "checks": {
+                "after_json": "json_valid(`after_json`)",
+                "before_json": "json_valid(`before_json`)"
+            }
         },
         "journal_settlement_allocations": {
             "type": "BASE TABLE",
@@ -19743,7 +19787,7 @@
                 "employment_id": "bigint(20) unsigned NOT NULL",
                 "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
                 "input_hash": "char(64) NOT NULL",
-                "input_json": "longtext /*M!100301 COMPRESSED*/ NOT NULL DEFAULT ''",
+                "input_json": "longtext /*M!100301 COMPRESSED*/ NOT NULL",
                 "period_start": "date NOT NULL",
                 "result_hash": "char(64) NULL DEFAULT NULL",
                 "result_json": "longtext /*M!100301 COMPRESSED*/ NULL DEFAULT NULL",
@@ -19891,7 +19935,7 @@
                 "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
                 "idempotency_key_hash": "binary(32) NOT NULL",
                 "input_snapshot_hash": "char(64) NOT NULL",
-                "input_snapshot_json": "longtext /*M!100301 COMPRESSED*/ NOT NULL DEFAULT ''",
+                "input_snapshot_json": "longtext /*M!100301 COMPRESSED*/ NOT NULL",
                 "previous_revision_id": "bigint(20) unsigned NULL DEFAULT NULL",
                 "result_snapshot_hash": "char(64) NULL DEFAULT NULL",
                 "result_snapshot_json": "longtext /*M!100301 COMPRESSED*/ NULL DEFAULT NULL",
@@ -20560,9 +20604,9 @@
                 "employee_id": "bigint(20) unsigned NOT NULL",
                 "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
                 "input_snapshot_hash": "char(64) NOT NULL",
-                "input_snapshot_json": "longtext /*M!100301 COMPRESSED*/ NOT NULL DEFAULT ''",
+                "input_snapshot_json": "longtext /*M!100301 COMPRESSED*/ NOT NULL",
                 "result_snapshot_hash": "char(64) NOT NULL",
-                "result_snapshot_json": "longtext /*M!100301 COMPRESSED*/ NOT NULL DEFAULT ''",
+                "result_snapshot_json": "longtext /*M!100301 COMPRESSED*/ NOT NULL",
                 "result_status": "enum('calculated','manual_review','error') NOT NULL",
                 "revision_id": "bigint(20) unsigned NOT NULL",
                 "statutory_result_id": "bigint(20) unsigned NOT NULL",
@@ -20597,10 +20641,10 @@
                 "employment_id": "bigint(20) unsigned NOT NULL",
                 "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
                 "input_snapshot_hash": "char(64) NOT NULL",
-                "input_snapshot_json": "longtext /*M!100301 COMPRESSED*/ NOT NULL DEFAULT ''",
+                "input_snapshot_json": "longtext /*M!100301 COMPRESSED*/ NOT NULL",
                 "person_result_id": "bigint(20) unsigned NOT NULL",
                 "result_snapshot_hash": "char(64) NOT NULL",
-                "result_snapshot_json": "longtext /*M!100301 COMPRESSED*/ NOT NULL DEFAULT ''",
+                "result_snapshot_json": "longtext /*M!100301 COMPRESSED*/ NOT NULL",
                 "result_status": "enum('calculated','manual_review','error') NOT NULL",
                 "revision_id": "bigint(20) unsigned NOT NULL",
                 "statutory_result_id": "bigint(20) unsigned NOT NULL",
@@ -20635,10 +20679,10 @@
                 "created_by": "bigint(20) unsigned NULL DEFAULT NULL",
                 "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
                 "input_snapshot_hash": "char(64) NOT NULL",
-                "input_snapshot_json": "longtext /*M!100301 COMPRESSED*/ NOT NULL DEFAULT ''",
+                "input_snapshot_json": "longtext /*M!100301 COMPRESSED*/ NOT NULL",
                 "result_set_hash": "char(64) NOT NULL",
                 "result_snapshot_hash": "char(64) NOT NULL",
-                "result_snapshot_json": "longtext /*M!100301 COMPRESSED*/ NOT NULL DEFAULT ''",
+                "result_snapshot_json": "longtext /*M!100301 COMPRESSED*/ NOT NULL",
                 "result_status": "enum('calculated','manual_review','error') NOT NULL",
                 "revision_id": "bigint(20) unsigned NOT NULL",
                 "ruleset_hash": "char(64) NOT NULL",

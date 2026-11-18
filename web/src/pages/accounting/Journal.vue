@@ -142,6 +142,17 @@ function accountName(code: string): string {
   return accounts.value.find(a => a.account_code === code)?.name ?? ''
 }
 
+// Přeúčtování podle filtru jen pro jeden účet (rozsah od-do by na stránce přeúčtování nedával smysl).
+const rebookLink = computed<RouteLocationRaw | null>(() => {
+  const account = filters.account_from
+  if (!account || (filters.account_to && filters.account_to !== account)) return null
+  if (!auth.canWrite('accounting.journal.post')) return null
+  const query: Record<string, string> = { from_account: account }
+  if (filters.date_from) query.date_from = filters.date_from
+  if (filters.date_to) query.date_to = filters.date_to
+  return { name: 'accounting-journal-rebook', query }
+})
+
 const SOURCE_TYPES = [
   'manual', 'invoice', 'purchase_invoice', 'other_item', 'bank', 'gopay', 'cash',
   'depreciation', 'payroll', 'asset', 'asset_disposal', 'unit_charge',
@@ -1042,6 +1053,10 @@ function entryRange(entry: JournalEntryDetail): { from: string; to: string } {
           <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.download" /></svg>
           {{ t('accounting.journal.export_xlsx') }}
         </button>
+        <RouterLink v-if="rebookLink" :to="rebookLink" :class="btnOutline('neutral')" class="whitespace-nowrap" data-test="journal-rebook-by-filter">
+          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.swap" /></svg>
+          {{ t('accounting.journal.rebook_by_filter') }}
+        </RouterLink>
         <RouterLink v-if="auth.canWrite('accounting.journal.write') || auth.isDemo" to="/accounting/journal/new" :class="btnFilled('primary')">
           <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.plus" /></svg>
           {{ t('accounting.journal.new') }}

@@ -143,6 +143,8 @@ Přeúčtování změní jen kontaci. DPH se jím nemění, daňový režim se o
 
 **Jak poznáte, že je hotovo:** Zápis má novou kontaci. V otevřeném období se přepsal na místě, v uzavřeném nebo zamčeném vznikl storno a nový zápis. Oba zůstanou v deníku kvůli auditu.
 
+U faktury se změněný účet výnosu nebo nákladu zapíše i na položky dokladu, které na původní účet vedly, takže ho další úprava faktury nevrátí. Platí to pro výměnu jednoho účtu za jiný se stejnou částkou. Protiúčet (311, 321), DPH a zaokrouhlení se na položky nepřenášejí. Stejný účet na mnoha dokladech najednou změníte hromadně, viz [§ 52.14.17](#521417-hromadne-preuctovani-dokladu).
+
 Doklad převzatý z jiného programu má skupinu jednoho nebo více vlastních účetních zápisů, například zvlášť základ a DPH. Tato skupina je oddělená od informativních vazeb **Souvisí**. Opakované automatické zaúčtování převzatou skupinu nepřepisuje. Při **Přeúčtování** dialog vypíše všechny její členy a předvyplní řádky, které jsou právě v deníku. Po potvrzení vzniknou protizápisy ke všem původním členům a jeden nový předpis. Úhrady a pouze související zápisy zůstanou zachované. Změní-li se některý člen během otevřeného dialogu, obnovte náhled. Storno nebo smazání zdrojového dokladu rovněž zruší celou skupinu zaúčtování.
 
 Po ručním stornu jednoho člena zůstává doklad zaúčtovaný, dokud má skupina alespoň jeden aktivní zaúčtovaný zápis. Kontroly integrity a doúčtování proto neoznačují takový doklad za nezaúčtovaný. Automatická reklasifikace nebo dorovnání zúčtování zálohy rozdělenou skupinu nepřepíše po jednom členu; opravu proveďte přes **Přeúčtovat** na detailu celého dokladu.
@@ -1124,9 +1126,10 @@ projde uložení). Buď napíše, že se zápis přepíše na místě k původn�
 proč to nejde (mění se DPH, saldokontní účet, po podání DPPO výsledek nebo uznatelnost),
 a teprve pak si vyžádá potvrzení posunu data.
 Kontrolu dělá server ještě jednou těsně před zápisem. Když oprava podmínky nesplní,
-postupuje se stornem a novým zápisem jako v tabulce výše. U přijaté faktury se nový
-nákladový účet zapíše i na položku dokladu, pokud se celý náklad přesunul z jednoho
-účtu na jiný. Jinak by ho další úprava dokladu vrátila zpět.
+postupuje se stornem a novým zápisem jako v tabulce výše. U vydané i přijaté faktury
+se nový účet výnosu nebo nákladu zapíše i na položky dokladu, které na původní účet
+vedly (i když ho měly z druhu výdaje, produktu nebo předkontace), pokud se celá částka
+přesunula z jednoho účtu na jiný. Jinak by ho další úprava dokladu vrátila zpět.
 
 Přeúčtování se týká jen **kontace**. DPH se jím nemění: evidence DPH se počítá z řádků
 dokladu, takže daňový režim se opravuje editací dokladu, ne kontace.
@@ -2071,6 +2074,58 @@ V tabulce **Dvojice zápisu** zaškrtněte dvojice a použijte lištu akcí:
 U zápisů vzniklých zaúčtováním dokladu (faktura, banka, pokladna) jde dvojici **jen přeúčtovat**, protože čisté
 storno dvojice by rozešlo zápis s dokladem. Čisté storno dvojice je jen u ručních a interních zápisů. U mzdových
 zápisů, stornovaných zápisů a protizápisů se obě akce nenabízejí.
+
+### 52.14.17 Hromadné přeúčtování dokladů
+
+**Účetnictví → Přeúčtovat doklady.**
+
+Kdy to potřebujete: stejný účet je chybně na desítkách až stovkách dokladů. Například
+přijaté faktury jednoho dodavatele se celý rok účtovaly na 518100 a patří na 518300,
+část tržeb má být místo na 602100 na 602200, nebo platby zaúčtované z banky přímo na
+315001 patří na 315002. Hromadné přeúčtování dělá totéž co **Přeúčtovat** na jednom
+dokladu ([§ 52.8](#528-krok-za-krokem-preuctovani-z-dokladu)), jen pro všechny doklady
+podle filtru najednou.
+
+Stránka je mimo běžné seznamy. Otevřete ji z menu, nebo z účetního deníku vyfiltrovaného
+na jeden účet tlačítkem **Přeúčtovat podle filtru…**, které předvyplní účet a období.
+
+1. V části **Co přeúčtovat** zadejte účet, ze kterého a na který se přeúčtuje, stranu
+   (MD, Dal nebo obě) a období. Výběr můžete zúžit zdrojem (vydané faktury, přijaté
+   faktury, bankovní pohyby), textem v čísle dokladu nebo popisu a částkou řádku.
+2. Zvolte **Způsob**:
+   - **Opravit zápis (jen kde to jde)** přepíše zápis na místě se stejným číslem,
+     původní podoba zůstane v historii zápisu. Doklady, u kterých to období nedovolí,
+     se vynechají s důvodem.
+   - **Opravit, jinak storno a nový zápis** vynechané doklady stornuje a zaúčtuje znovu,
+     v uzavřeném nebo zamčeném období k nejbližšímu otevřenému datu.
+3. Pod formulářem se průběžně ukazuje, kolika dokladům výběr odpovídá. Zápisy na účtu
+   z jiných agend (pokladna, ruční a interní zápisy, mzdy) přeúčtování nemění a ukáže
+   jen jejich počet.
+4. Klikněte na **Zkusit nanečisto**. Úloha nic nezapíše a u každého dokladu ukáže
+   původní a nový účet, způsob opravy a u vynechaných důvod.
+5. V záložce **Změní se** můžete jednotlivé doklady odškrtnout.
+6. Klikněte na **Přeúčtovat** a potvrďte počet. Přeúčtují se přesně doklady z běhu
+   nanečisto bez odškrtnutých. Doklad, jehož zaúčtování se od běhu nanečisto změnilo,
+   se vynechá.
+7. V **Posledních bězích** jde ostré přeúčtování jednou vrátit tlačítkem **Vrátit**.
+   Vrátí se doklady, které od přeúčtování nikdo nezměnil, ostatní se vypíšou s důvodem.
+
+**Jak poznáte, že je hotovo:** Běh má stav Hotovo a v jeho výsledku jsou všechny doklady
+v záložce Provedené. V deníku mají zápisy nový účet.
+
+Pravidla:
+
+- Najednou jde přeúčtovat nejvýš 500 dokladů. Větší výběr rozdělte podle období.
+- U vydaných a přijatých faktur jde měnit jen účet, na který vedou položky dokladu
+  (výnos, náklad, majetek). Nový účet se zapíše i na položky, takže ho další úprava
+  faktury nevrátí. Protiúčet 311/321, DPH a zaokrouhlení se mění úpravou dokladu
+  nebo předkontace.
+- U bankovního pohybu se nemění bankovní účet pohybu (221).
+- DPH se přeúčtováním nemění, stejně jako u jednotlivého **Přeúčtovat**.
+- Spustit přeúčtování smí správce firmy a role s právem **Hromadně přeúčtovat doklady**
+  spolu s právem zaúčtovat doklad. Systémové role správců ho mají, účetní a vlastní role
+  ho dostanou v editoru rolí. API token hromadné přeúčtování nespustí.
+- Každý přeúčtovaný doklad má v historii záznam s číslem běhu.
 
 ## 52.15 Související kapitoly
 

@@ -688,6 +688,7 @@ const navSections = computed<NavSection[]>(() => {
         // jak je dostat do deníku. Automatika účtování je háček na vznik dokladu, ne
         // zametač existujících, a hromadné zaúčtování ze seznamu má strop 500 dokladů.
         { to: '/accounting/posting-backfill', label: t('nav.posting_backfill'), icon: ICONS.accounting, permission: 'accounting' },
+        { to: '/accounting/journal-rebook', label: t('nav.journal_rebook'), icon: ICONS.accounting, permission: 'accounting' },
         // 3) Sestavy.
         { to: '/accounting/general-ledger',   label: t('nav.accounting_general_ledger'),   icon: ICONS.tax_book, dividerBefore: true },
         { to: '/accounting/trial-balance',    label: t('nav.accounting_trial_balance'),    icon: ICONS.stats },

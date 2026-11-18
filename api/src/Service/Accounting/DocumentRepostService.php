@@ -365,6 +365,18 @@ final class DocumentRepostService
                 409,
             );
         }
+        // Hromadné přeúčtování v režimu „jen opravit zápis" nesmí po náhledu tiše přejít
+        // na storno: rozhodnutí se počítá znovu tady pod zámkem, takže i kontrola musí.
+        if (isset($meta['require_strategy']) && $plan['strategy'] !== $meta['require_strategy']) {
+            throw new PostingException(
+                'repost_strategy_changed',
+                'Zápis už nejde opravit na místě (' . (string) ($plan['reason_code'] ?? $plan['strategy']) . ').',
+                409,
+                ['strategy' => $plan['strategy'], 'reason_code' => $plan['reason_code']],
+            );
+        }
+        $bulkJobId = isset($meta['bulk_rebook_job_id']) ? (int) $meta['bulk_rebook_job_id'] : null;
+        unset($meta['require_strategy'], $meta['bulk_rebook_job_id']);
         if ($plan['date_shifted'] && !$confirmDateShift) {
             $why = $plan['tax_neutral_available'] && $plan['tax_neutral_violation'] !== null
                 ? ' Přepsat zápis na místě nejde, protože '
@@ -439,7 +451,7 @@ final class DocumentRepostService
                 'before'             => $plan['lines'],
                 'after'              => $lines,
                 'items_synced'       => $itemsSynced,
-            ],
+            ] + ($bulkJobId !== null ? ['bulk_rebook_job_id' => $bulkJobId] : []),
             $meta['ip'] ?? null,
             $meta['user_agent'] ?? null,
             $supplierId,

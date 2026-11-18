@@ -2900,6 +2900,15 @@ final class Routes
             $g->post  ('/posting-backfill/start',             [\MyInvoice\Action\Accounting\PostingBackfillAction::class, 'start']);
             $g->get   ('/posting-backfill/{id:[0-9]+}',       [\MyInvoice\Action\Accounting\PostingBackfillAction::class, 'job']);
             $g->post  ('/posting-backfill/{id:[0-9]+}/cancel',[\MyInvoice\Action\Accounting\PostingBackfillAction::class, 'cancel']);
+            // Hromadné přeúčtování (účet X → Y podle filtru): nanečisto, ostře podle běhu
+            // nanečisto a vrácení ostrého běhu, vše na pozadí jako doúčtování.
+            $g->get   ('/journal-rebook',                     [\MyInvoice\Action\Accounting\JournalRebookAction::class, 'status']);
+            $g->post  ('/journal-rebook/count',               [\MyInvoice\Action\Accounting\JournalRebookAction::class, 'count']);
+            $g->post  ('/journal-rebook/start',               [\MyInvoice\Action\Accounting\JournalRebookAction::class, 'start']);
+            $g->get   ('/journal-rebook/{id:[0-9]+}',         [\MyInvoice\Action\Accounting\JournalRebookAction::class, 'job']);
+            $g->get   ('/journal-rebook/{id:[0-9]+}/items',   [\MyInvoice\Action\Accounting\JournalRebookAction::class, 'items']);
+            $g->post  ('/journal-rebook/{id:[0-9]+}/rollback',[\MyInvoice\Action\Accounting\JournalRebookAction::class, 'rollback']);
+            $g->post  ('/journal-rebook/{id:[0-9]+}/cancel',  [\MyInvoice\Action\Accounting\JournalRebookAction::class, 'cancel']);
             $g->get   ('/setup-assistant', [\MyInvoice\Action\Accounting\AccountingSetupAssistantAction::class, 'status']);
             $g->post  ('/setup-assistant/analysis', [\MyInvoice\Action\Accounting\AccountingSetupAssistantAction::class, 'startAnalysis']);
             $g->get   ('/setup-assistant/runs/{id:[0-9]+}', [\MyInvoice\Action\Accounting\AccountingSetupAssistantAction::class, 'run']);

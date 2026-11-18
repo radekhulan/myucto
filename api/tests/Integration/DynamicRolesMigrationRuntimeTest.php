@@ -421,6 +421,7 @@ final class DynamicRolesMigrationRuntimeTest extends TestCase
                 '2236_invoice_defaults_role_permission.sql',
                 '2272_accounting_period_lock_permission.sql',
                 '2306_membership_erasure_permission.sql',
+                '2311_journal_bulk_repost_permission.sql',
             ]),
         ];
         $env = getenv();

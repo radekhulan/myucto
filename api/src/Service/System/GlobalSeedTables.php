@@ -427,7 +427,7 @@ final class GlobalSeedTables
         'journal_line_pairings',
         // Jednoduchý zápis: storna dvojic, posouzení zápisů bez dvojic a běhy převodu
         // patří k deníku a mažou se s ním.
-        'journal_pair_reversals', 'journal_entry_pair_status', 'journal_pair_conversion_runs',
+        'journal_pair_reversals', 'journal_entry_pair_status', 'journal_pair_conversion_runs', 'journal_rebook_items',
         'logbook_fuel_scans',
         'login_attempts',
         'mail_outbox', 'mail_rate_limit_events', 'mail_send_log',

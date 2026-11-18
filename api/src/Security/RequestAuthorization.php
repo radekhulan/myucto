@@ -421,6 +421,21 @@ final class RequestAuthorization
     }
 
     /**
+     * Hromadné přeúčtování zápisů podle filtru (stránka Přeúčtovat doklady): správce
+     * firmy, nebo interní role s právem zaúčtovat (`accounting.journal.post`) a zároveň
+     * s vlastním právem `accounting.journal.bulk_repost`. Jedním krokem mění stovky
+     * zápisů, proto ho API token nespustí nikdy a klient ho nedostane.
+     */
+    public static function canBulkRepost(Request $request): bool
+    {
+        return self::mayOverridePeriodProtection($request)
+            && (self::isCompanyAdmin($request)
+                || (!self::isClientType($request)
+                    && self::allows($request, 'accounting.journal.post', AccessLevel::WRITE)
+                    && self::allows($request, 'accounting.journal.bulk_repost', AccessLevel::WRITE)));
+    }
+
+    /**
      * Ruční posun zámku účtování k datu (§ 52.14.10): kdo spravuje účetní období
      * (`accounting.periods.manage`, správci), nebo interní role s vlastním právem
      * `accounting.period_lock` (typicky hlavní účetní). Klient ho nedostane.

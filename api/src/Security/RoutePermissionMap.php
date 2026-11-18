@@ -857,6 +857,13 @@ final class RoutePermissionMap
         // obecné `/api/accounting` níž: je to zápis do deníku, ne čtení nastavení.
         ['GET', '#^/api/accounting/posting-backfill(/|$)#', 'accounting', AccessLevel::READ],
         ['*', '#^/api/accounting/posting-backfill(/|$)#', 'accounting.journal.post', AccessLevel::WRITE],
+        // Hromadné přeúčtování: čtení stavu a náhledu jako účetnictví, spuštění jako
+        // zaúčtování. Vlastní právo `accounting.journal.bulk_repost` ověřuje akce přes
+        // RequestAuthorization::canBulkRepost(). Počet odpovídajících zápisů je POST
+        // jen kvůli tělu filtru, nic nezapisuje.
+        ['GET', '#^/api/accounting/journal-rebook(/|$)#', 'accounting', AccessLevel::READ],
+        ['POST', '#^/api/accounting/journal-rebook/count$#', 'accounting', AccessLevel::READ],
+        ['*', '#^/api/accounting/journal-rebook(/|$)#', 'accounting.journal.post', AccessLevel::WRITE],
         // Převod starších zápisů na dvojice fyzicky dělí řádky deníku → právo účtovat.
         ['GET', '#^/api/accounting/pair-conversion(/|$)#', 'accounting', AccessLevel::READ],
         ['*', '#^/api/accounting/pair-conversion(/|$)#', 'accounting.journal.post', AccessLevel::WRITE],

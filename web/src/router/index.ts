@@ -157,6 +157,7 @@ const routePermissions: Record<string, [PermissionKey | readonly PermissionKey[]
   // samotné spuštění hlídá server právem `accounting.journal.post` jako hromadné
   // zaúčtování z výběru — jedna operace, jedno právo.
   'accounting-posting-backfill': ['accounting'],
+  'accounting-journal-rebook': ['accounting'],
   'accounting-setup-assistant': ['accounting'],
   'payroll-dashboard': ['payroll'],
   'payroll-runs': ['payroll'],
