@@ -1210,7 +1210,7 @@
         "2304_activity_log_redactions.sql",
         "2305_membership_erasure.sql",
         "2306_membership_erasure_permission.sql",
-        "2307_bank_payment_submission_bank_errors.sql"
+        "2308_bank_payment_submission_bank_errors.sql"
     ],
     "tables": {
         "abra_flexi_connections": {
