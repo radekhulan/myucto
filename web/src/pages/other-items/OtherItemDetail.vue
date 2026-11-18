@@ -311,7 +311,7 @@ async function saveCounterparty() {
 
 // Období časového rozlišení výnosu zaúčtované pohledávky: zápis se nemění, čte ho uzávěrka.
 // V daňové evidenci jen ke čtení, a jen s uloženým obdobím (z dřívějšího podvojného účetnictví).
-const showAccrual = computed(() => item.value?.side === 'receivable' && (isDoubleEntry.value || !!item.value?.accrual_from))
+const showAccrual = computed(() => !!item.value && (isDoubleEntry.value || !!item.value.accrual_from))
 const canEditAccrual = computed(() => isDoubleEntry.value && auth.canWrite('other_items') && item.value?.status === 'posted' && !!item.value?.journal_entry_id)
 // Bez vlastního zápisu (daňová evidence, položka ze zůstatku deníku) období nic neodkládá a server
 // ho dovolí jen odebrat, např. uložené z konceptu před přechodem na daňovou evidenci.
@@ -764,13 +764,13 @@ onMounted(load)
             </div>
             <div v-if="showAccrual" data-test="accrual">
               <div class="flex justify-between gap-3">
-                <dt class="text-neutral-500">{{ t('other_items.accrual.label') }}</dt>
+                <dt class="text-neutral-500">{{ t(`other_items.accrual.label_${item.side}`) }}</dt>
                 <dd v-if="!accrualEditing" class="flex flex-wrap items-center justify-end gap-1">
                   <span class="font-mono" data-test="accrual-period">{{ item.accrual_from && item.accrual_to
                     ? t('other_items.accrual.period', { from: formatDate(item.accrual_from), to: formatDate(item.accrual_to) })
                     : t('other_items.accrual.none') }}</span>
                   <button v-if="canEditAccrual" type="button" data-test="accrual-edit" class="inline-flex h-6 w-6 items-center justify-center rounded text-neutral-400 hover:bg-neutral-100 hover:text-primary-700"
-                    :title="`${t('common.edit')}: ${t('other_items.accrual.label')}`" :aria-label="`${t('common.edit')}: ${t('other_items.accrual.label')}`" @click="startAccrualEdit">
+                    :title="`${t('common.edit')}: ${t(`other_items.accrual.label_${item.side}`)}`" :aria-label="`${t('common.edit')}: ${t(`other_items.accrual.label_${item.side}`)}`" @click="startAccrualEdit">
                     <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.edit" /></svg>
                   </button>
                   <button v-if="canClearAccrual" type="button" data-test="accrual-clear" :disabled="busy" class="inline-flex h-6 w-6 items-center justify-center rounded text-neutral-400 hover:bg-neutral-100 hover:text-danger-600"
@@ -790,7 +790,7 @@ onMounted(load)
                       <DateInput v-model="accrualTo" :aria-invalid="!!accrualError" :class="['mt-1 block', formDateInput, accrualError ? 'border-danger-500' : '']" data-test="accrual-to" />
                     </label>
                   </div>
-                  <p class="text-xs text-neutral-500" data-test="accrual-hint">{{ t('other_items.accrual.hint') }}</p>
+                  <p class="text-xs text-neutral-500" data-test="accrual-hint">{{ t(`other_items.accrual.hint_${item.side}`) }}</p>
                   <FieldNote :error="accrualError" />
                   <div class="flex flex-wrap items-center gap-2">
                     <button type="submit" :disabled="busy" :class="btnFilled('primary')" class="whitespace-nowrap">

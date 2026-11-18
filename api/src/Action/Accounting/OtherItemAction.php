@@ -187,7 +187,7 @@ final class OtherItemAction
     }
 
     /**
-     * Období časového rozlišení výnosu zaúčtované pohledávky (`accrual_from`, `accrual_to`).
+     * Období časového rozlišení zaúčtované pohledávky (výnos) či závazku (náklad) (`accrual_from`, `accrual_to`).
      * Zápis v deníku se nemění, období čte uzávěrka.
      */
     public function updateAccrual(Request $request, Response $response, array $args): Response

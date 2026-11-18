@@ -207,7 +207,7 @@ test('úprava konceptu složí celý doklad a jediný protiřádek přepočte', 
   }]);
 });
 
-test('úprava konceptu drží období rozlišení výnosu, přepnutí na závazek ho zahodí', async () => {
+test('úprava konceptu drží období rozlišení, přepnutí strany ho zahodí', async () => {
   const client = new FakeClient({ 'GET /accounting/other-items/12': draft({ side: 'receivable', accrual_from: '2094-07-01', accrual_to: '2095-06-30' }) });
   await tool('update_other_item').run(client, { id: 12, title: 'Syntetický nájem' }, 'update_other_item');
   assert.equal(writes(client)[0].body.accrual_from, '2094-07-01');
@@ -216,6 +216,25 @@ test('úprava konceptu drží období rozlišení výnosu, přepnutí na závaze
   await tool('update_other_item').run(client, { id: 12, side: 'payable' }, 'update_other_item');
   assert.equal(writes(client)[1].body.accrual_from, null);
   assert.equal(writes(client)[1].body.accrual_to, null);
+});
+
+test('závazek období nákladu drží, stejná strana ho nezahodí', async () => {
+  const client = new FakeClient({ 'GET /accounting/other-items/12': draft({ side: 'payable', accrual_from: '2094-07-01', accrual_to: '2095-06-30' }) });
+  await tool('update_other_item').run(client, { id: 12, side: 'payable', title: 'Syntetické nájemné' }, 'update_other_item');
+  assert.equal(writes(client)[0].body.accrual_from, '2094-07-01');
+  assert.equal(writes(client)[0].body.accrual_to, '2095-06-30');
+
+  await tool('update_other_item').run(client, { id: 12, side: 'receivable', accrual_from: '2094-08-01', accrual_to: '2095-07-31' }, 'update_other_item');
+  assert.equal(writes(client)[1].body.accrual_from, '2094-08-01');
+  assert.equal(writes(client)[1].body.accrual_side, 'receivable');
+
+  // Shodné období zadané výslovně pro novou stranu nese označení, server ho pak nezahodí.
+  await tool('update_other_item').run(client, { id: 12, side: 'receivable', accrual_from: '2094-07-01', accrual_to: '2095-06-30' }, 'update_other_item');
+  assert.equal(writes(client)[2].body.accrual_from, '2094-07-01');
+  assert.equal(writes(client)[2].body.accrual_side, 'receivable');
+  // Bez změny strany se nic neoznačuje.
+  await tool('update_other_item').run(client, { id: 12, title: 'Syntetické nájemné' }, 'update_other_item');
+  assert.equal(writes(client)[3].body.accrual_side, undefined);
 });
 
 test('úprava konceptu s vlastním druhem ho drží, vestavěný druh ho zruší', async () => {

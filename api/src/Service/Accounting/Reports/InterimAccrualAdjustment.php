@@ -71,7 +71,7 @@ final class InterimAccrualAdjustment
                     $add($deltas, (string) $account, -$part);
                 }
                 $prepaid = round($prepaid + $deferred, 2);
-                $documents['purchase_invoice:' . (int) $row['purchase_invoice_id']] = true;
+                $documents[AccrualDeferralService::prepaidExpenseDocumentKey($row)] = true;
             }
 
             $contexts = [];

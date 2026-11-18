@@ -90,9 +90,9 @@ const ITEM_INPUT = {
   issued_on: date('Datum vzniku pohledávky nebo závazku (YYYY-MM-DD).'),
   accounting_on: nullable(date('Datum účetního případu; bez zadání stejné jako datum vzniku.')),
   due_on: date('Splatnost (YYYY-MM-DD).'),
-  accrual_from: nullable(date('Časové rozlišení výnosu pohledávky od (YYYY-MM-DD), spolu s accrual_to. Jen pohledávka v podvojném účetnictví; '
-    + 'uzávěrka odloží na 384 část výnosu za koncem roku. Null = bez rozlišení.')),
-  accrual_to: nullable(date('Časové rozlišení výnosu pohledávky do (YYYY-MM-DD), nejdříve v den accrual_from.')),
+  accrual_from: nullable(date('Časové rozlišení od (YYYY-MM-DD), spolu s accrual_to. Jen v podvojném účetnictví; uzávěrka odloží '
+    + 'část výsledku za koncem roku: výnos pohledávky na 384, náklad závazku na 381. Změna strany uložené období zahodí, pokud ho nezadáte výslovně; období zadané spolu se změnou strany (i shodné s uloženým) patří nové straně. Null = bez rozlišení.')),
+  accrual_to: nullable(date('Časové rozlišení do (YYYY-MM-DD), nejdříve v den accrual_from.')),
   amount: num('Celková částka v Kč na haléře. Agenda je jen v CZK.', { exclusiveMinimum: 0 }),
   variable_symbol: nullable(str('Variabilní symbol, jen číslice.', { pattern: '^[0-9]{1,20}$' })),
   counterparty_account: nullable(str('Účet protistrany pro párování úhrad: český účet ve tvaru '
@@ -184,10 +184,15 @@ function updateBody(current, a) {
   if (a.kind !== undefined && a.kind !== 'other' && a.kind_id === undefined) body.kind_id = null;
   // Nový účet nese kód banky za lomítkem nebo je to IBAN; uložený kód by mu odporoval (shodně se serverem).
   if (a.counterparty_account !== undefined && a.counterparty_bank_code === undefined) body.counterparty_bank_code = null;
-  // Rozlišení výnosu má jen pohledávka: přepnutí na závazek uložené období zahodí (shodně se serverem).
-  if (body.side === 'payable' && (current?.accrual_from || current?.accrual_to) && a.accrual_from === undefined && a.accrual_to === undefined) {
+  // Období je u pohledávky výnos, u závazku náklad: změna strany uložené období zahodí (shodně se serverem).
+  if (a.side !== undefined && a.side !== current?.side && (current?.accrual_from || current?.accrual_to)
+    && a.accrual_from === undefined && a.accrual_to === undefined) {
     body.accrual_from = null;
     body.accrual_to = null;
+  }
+  // Období zadané výslovně spolu se změnou strany patří nové straně, i když se shoduje s uloženým.
+  if (a.side !== undefined && a.side !== current?.side && (a.accrual_from !== undefined || a.accrual_to !== undefined)) {
+    body.accrual_side = a.side;
   }
   if (a.issued_on !== undefined && a.accounting_on === undefined
     && current?.accounting_on && current.accounting_on === current.issued_on) {

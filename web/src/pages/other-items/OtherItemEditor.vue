@@ -207,6 +207,11 @@ function onSideChange(event: Event) {
   form.counter_account_code = ''
   splitPosting.value = false
   postingLines.value = []
+  // Období rozlišení je u pohledávky výnos, u závazku náklad: se stranou mění význam.
+  // Návrat na uloženou stranu vrátí uložené období (jinak by se uložilo jako změna).
+  const stored = storedAccrual.value
+  form.accrual_from = stored && stored.side === form.side ? stored.from : null
+  form.accrual_to = stored && stored.side === form.side ? stored.to : null
 }
 function startSplitPosting() {
   postingLines.value = [
@@ -257,6 +262,7 @@ async function load() {
       form.due_on = item.due_on || today
       form.accrual_from = item.accrual_from ? item.accrual_from.slice(0, 10) : null
       form.accrual_to = item.accrual_to ? item.accrual_to.slice(0, 10) : null
+      storedAccrual.value = { side: item.side, from: form.accrual_from, to: form.accrual_to }
       form.amount = Number(item.amount)
       form.variable_symbol = item.variable_symbol || ''
       form.counterparty_account = joinAccountBankCode(item.counterparty_account, item.counterparty_bank_code)
@@ -298,8 +304,10 @@ watch(() => form.counterparty_account, () => { delete fieldErrors.counterparty_a
 watch(postingLines, () => { delete fieldErrors.posting_lines }, { deep: true })
 watch(() => [form.accrual_from, form.accrual_to, form.side], () => { delete fieldErrors.accrual })
 
-// Období rozlišení výnosu má jen pohledávka v podvojném účetnictví (uzávěrka odkládá na 384).
-const showAccrualFields = computed(() => isDoubleEntry.value && form.side === 'receivable')
+// Období rozlišení jen v podvojném účetnictví: u pohledávky výnos (384), u závazku náklad (381).
+const showAccrualFields = computed(() => isDoubleEntry.value)
+// Uložená strana a období konceptu (jen editace).
+const storedAccrual = ref<{ side: string, from: string | null, to: string | null } | null>(null)
 // Návrh období z názvu položky (jako u řádků faktur); zamítnutí platí pro konkrétní text.
 const accrualDismissedFor = ref<string | null>(null)
 const accrualSuggestion = computed(() => {
@@ -354,10 +362,12 @@ async function save() {
     issued_on: form.issued_on,
     accounting_on: form.accounting_on || form.issued_on,
     due_on: form.due_on,
-    // Rozlišení výnosu jen u pohledávky; po přepnutí na závazek se zahodí. V daňové evidenci
-    // je pole skryté a jde uložené období beze změny (server ho ponechá, rozpouští se z něj).
-    accrual_from: form.side === 'receivable' ? form.accrual_from || null : null,
-    accrual_to: form.side === 'receivable' ? form.accrual_to || null : null,
+    // Přepnutí strany období vymaže (onSideChange). V daňové evidenci je pole skryté a jde
+    // uložené období beze změny (server ho ponechá, rozpouští se z něj).
+    accrual_from: form.accrual_from || null,
+    accrual_to: form.accrual_to || null,
+    // Období v editoru vždy patří zvolené straně: shodné s uloženým po změně strany server nezahodí.
+    accrual_side: form.side,
     currency: 'CZK',
     exchange_rate: null,
     amount: Number(form.amount),
@@ -504,8 +514,8 @@ onMounted(load)
           {{ t('other_items.single_posting') }}
         </button>
         <div v-if="showAccrualFields" class="mt-4 border-t border-neutral-100 pt-4" data-test="accrual-fields">
-          <h3 class="text-sm font-medium">{{ t('other_items.accrual.label') }}</h3>
-          <p class="mt-1 text-xs text-neutral-500">{{ t('other_items.accrual.hint') }}</p>
+          <h3 class="text-sm font-medium">{{ t(`other_items.accrual.label_${form.side}`) }}</h3>
+          <p class="mt-1 text-xs text-neutral-500">{{ t(`other_items.accrual.hint_${form.side}`) }}</p>
           <div class="mt-2 grid items-start gap-4 sm:grid-cols-2">
             <label class="text-sm font-medium">{{ t('accrual_period.from') }}
               <DateInput v-model="form.accrual_from" :aria-invalid="!!fieldErrors.accrual" :class="['mt-1 block', formDateInput, fieldErrors.accrual ? 'border-danger-500' : '']" data-test="editor-accrual-from" />

@@ -784,6 +784,66 @@ final class ClosingDeferredRevenueAccrual504Test extends TestCase
     }
 
     /**
+     * Ostatní závazek ve 504: odklad na 381 i rozpuštění nesou osy činnosti řádku nákladu
+     * jeho zápisu (5xx), bez nich by zápis uzávěrky nešel zaúčtovat.
+     */
+    #[DataProvider('entryFormProvider')]
+    public function testOtherItemPrepaidDeferralAndReleaseCarryActivityAxes(bool $single): void
+    {
+        $this->singleForm($single);
+        $this->db->pdo()->prepare(
+            'INSERT INTO clients (supplier_id, company_name, street, city, zip, country_id, main_email,
+                                  language, currency_default_id, is_customer, is_vendor)
+             SELECT supplier_id, "Syntetický pronajímatel", street, city, zip, country_id, "landlord-504@example.test",
+                    language, currency_default_id, 0, 1 FROM clients WHERE id = ?'
+        )->execute([$this->clientId]);
+        $vendorId = (int) $this->db->pdo()->lastInsertId();
+        $container = Bootstrap::buildContainer();
+        $items = $container->get(OtherItemService::class);
+        $item = $items->create($this->supplierId, [
+            'side' => 'payable', 'kind' => 'rent', 'title' => 'Syntetické nájemné spolku', 'partner_id' => $vendorId,
+            'issued_on' => self::YEAR . '-07-01', 'due_on' => self::YEAR . '-07-15', 'currency' => 'CZK', 'amount' => 36600.00,
+            'counter_account_code' => '518',
+            'accrual_from' => self::YEAR . '-07-01', 'accrual_to' => (self::YEAR + 1) . '-06-30',
+        ], $this->userId);
+        $container->get(DimensionService::class)->saveDocument($this->supplierId, 'other_item', (int) $item['id'], $this->axes, []);
+        $items->post($this->supplierId, (int) $item['id'], $this->userId);
+        $this->db->pdo()->prepare("UPDATE accounting_periods SET status = 'closing' WHERE id = ?")->execute([$this->periodId]);
+
+        $run = $this->closing->runPrepaidExpenseAccrual($this->supplierId, $this->periodId, $this->rv(), $this->meta());
+
+        self::assertEqualsWithDelta(18200.00, (float) $run['total'], 0.001);
+        $entry = $this->journal->findBySource($this->supplierId, 'prepaid_expense_accrual', ClosingSourceId::prepaidExpenseAccrual($this->periodId));
+        self::assertNotNull($entry);
+        $this->assertLineAxes((int) $entry['id'], '518', 'credit', 18200.00);
+        $this->assertCounterpartAxes((int) $entry['id'], '381', $single);
+
+        $this->periods->create($this->supplierId, self::YEAR + 1, (self::YEAR + 1) . '-01-01', (self::YEAR + 1) . '-12-31');
+        $release = $this->invokePrivate('prepaidExpenseReleaseForPeriod', self::YEAR . '-12-31', (self::YEAR + 1) . '-01-01', (self::YEAR + 1) . '-12-31');
+        self::assertEqualsWithDelta(18200.00, (float) $release['total'], 0.001);
+        $lines = $this->invokePrivate('prepaidExpenseLines', $release['lines'], (float) $release['total'], true, (self::YEAR + 1) . '-01-01');
+        $releaseId = $this->posting->postDocument($this->supplierId, 'prepaid_expense_accrual', ClosingSourceId::prepaidExpenseAccrualRelease($this->periodId), $lines, [
+            'entry_date' => (self::YEAR + 1) . '-01-01', 'posted' => true, 'posted_by' => $this->userId, 'user_id' => $this->userId,
+        ]);
+        $this->assertLineAxes($releaseId, '518', 'debit', 18200.00);
+        $this->assertCounterpartAxes($releaseId, '381', $single);
+    }
+
+    /** Řádek zápisu na účtu nese osy činnosti hlavní činnosti (bez ohledu na původ přiřazení). */
+    private function assertLineAxes(int $entryId, string $accountCode, string $side, float $amount): void
+    {
+        $lines = $this->linesOn($entryId, $accountCode);
+        self::assertCount(1, $lines);
+        self::assertSame($side, $lines[0]['side']);
+        self::assertEqualsWithDelta($amount, (float) $lines[0]['amount'], 0.001);
+        $actual = (new DimensionAssignmentRepository($this->db))->entryLineDimensions($this->supplierId, $entryId)[(int) $lines[0]['id']] ?? [];
+        ksort($actual);
+        $expected = $this->axes;
+        ksort($expected);
+        self::assertSame($expected, $actual, 'Zápis musí nést osy činnosti řádku nákladu zápisu závazku.');
+    }
+
+    /**
      * Zaúčtovaná přijatá faktura s nákladem na 518 (osy hlavní činnosti) a obdobím přes
      * rozvahový den; rok se uzavírá a krok „Časové rozlišení nákladů" proběhne.
      *

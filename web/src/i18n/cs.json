@@ -591,8 +591,10 @@
     "edit_note_hint": "Poznámka je jen interní text dokladu, do zaúčtování ani saldokonta se nepromítá. Ostatní údaje zůstávají zamčené, jejich opravu řeší storno nebo přeúčtování.",
     "note_saved": "Poznámka uložena.",
     "accrual": {
-      "label": "Časové rozlišení výnosu",
-      "hint": "Období, do kterého výnos pohledávky patří (nájem, licence, předplatné). Pohledávka se zaúčtuje celá, část za koncem roku odloží uzávěrka na 384 a další rok ji rozpustí. Odkládá se jen výnos (účty třídy 6) zápisu pohledávky.",
+      "label_receivable": "Časové rozlišení výnosu",
+      "label_payable": "Časové rozlišení nákladu",
+      "hint_receivable": "Období, do kterého výnos pohledávky patří (nájem, licence, předplatné). Pohledávka se zaúčtuje celá, část za koncem roku odloží uzávěrka na 384 a další rok ji rozpustí. Odkládá se jen výnos (účty třídy 6) zápisu pohledávky.",
+      "hint_payable": "Období, do kterého náklad závazku patří (nájem, pojistné, předplatné placené předem). Závazek se zaúčtuje celý, část za koncem roku odloží uzávěrka na 381 a další rok ji rozpustí. Odkládá se jen náklad (účty třídy 5) zápisu závazku.",
       "none": "Bez rozlišení",
       "clear": "Zrušit časové rozlišení",
       "clear_confirm": "Zrušit časové rozlišení položky? Znovu ho půjde zadat jen u zaúčtované položky s vlastním zápisem v podvojném účetnictví.",
@@ -602,10 +604,9 @@
         "accrual_deferral_posted": "Krok Časové rozlišení uzávěrky už zaúčtoval odklad. Vraťte ho v uzávěrce, změňte období a krok spusťte znovu.",
         "accrual_period_incomplete": "Období časového rozlišení potřebuje začátek i konec.",
         "accrual_period_invalid": "Období potřebuje platná data a začátek nejpozději v den konce.",
-        "accrual_not_posted": "Časové rozlišení výnosu jde nastavit jen u zaúčtovaného dokladu s vlastním zápisem.",
+        "accrual_not_posted": "Časové rozlišení jde nastavit jen u zaúčtovaného dokladu s vlastním zápisem.",
         "is_draft": "Koncept upravte v editaci dokladu.",
-        "accrual_receivable_only": "Časové rozlišení výnosu jde nastavit jen u pohledávky.",
-        "accrual_double_entry_only": "Časové rozlišení výnosu jde nastavit jen v podvojném účetnictví."
+        "accrual_double_entry_only": "Časové rozlišení jde nastavit jen v podvojném účetnictví."
       }
     },
     "delete_posted": "Smazat i se zápisem",
@@ -22386,14 +22387,14 @@
       },
       "prepaid_expense": {
         "title": "Časové rozlišení nákladů příštích období (381)",
-        "hint": "Z řádků přijatých faktur označených obdobím od–do, jejichž náklad přesahuje konec roku (pojistné, parkovné, předplatné). Systém spočítá poměrně dle dnů část patřící do příštích období a odloží ji na 381 (MD 381 / D nákladový účet). V N+1 se rozpustí automaticky.",
+        "hint": "Z řádků přijatých faktur a ostatních závazků označených obdobím od–do, jejichž náklad přesahuje konec roku (pojistné, parkovné, předplatné). Systém spočítá poměrně dle dnů část patřící do příštích období a odloží ji na 381 (MD 381 / D nákladový účet). V N+1 se rozpustí automaticky.",
         "reload": "Načíst návrh",
         "col_document": "Doklad",
         "col_period": "Období rozlišení",
         "col_account": "Nákladový účet",
         "col_deferred": "Odklad na 381",
         "total_deferred": "Odloženo celkem (MD 381 / D 5xx)",
-        "no_items": "V období nejsou žádné řádky faktur označené k časovému rozlišení.",
+        "no_items": "V období nejsou žádné řádky přijatých faktur ani ostatní závazky označené k časovému rozlišení.",
         "existing": "Zaúčtováno {amount}.",
         "post": "Zaúčtovat rozlišení",
         "posted": "Časové rozlišení nákladů příštích období bylo zaúčtováno.",

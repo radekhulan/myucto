@@ -591,8 +591,10 @@
     "edit_note_hint": "The note is internal text of the document and does not affect the posting or the subledger. Other fields stay locked; correct them with a reversal or reposting.",
     "note_saved": "Note saved.",
     "accrual": {
-      "label": "Revenue accrual",
-      "hint": "The period the receivable revenue belongs to (rent, licence, subscription). The receivable is posted in full; year-end closing defers the part after the year end to 384 and releases it in the next year. Only revenue (class 6 accounts) of the receivable entry is deferred.",
+      "label_receivable": "Revenue accrual",
+      "label_payable": "Expense accrual",
+      "hint_receivable": "The period the receivable revenue belongs to (rent, licence, subscription). The receivable is posted in full; year-end closing defers the part after the year end to 384 and releases it in the next year. Only revenue (class 6 accounts) of the receivable entry is deferred.",
+      "hint_payable": "The period the payable expense belongs to (rent, insurance, subscription paid in advance). The payable is posted in full; year-end closing defers the part after the year end to 381 and releases it in the next year. Only expense (class 5 accounts) of the payable entry is deferred.",
       "none": "No accrual",
       "clear": "Remove accrual period",
       "clear_confirm": "Remove the accrual period? It can be entered again only for a posted item with its own journal entry in double-entry accounting.",
@@ -604,7 +606,6 @@
         "accrual_period_invalid": "The period needs valid dates and must start no later than it ends.",
         "accrual_not_posted": "The accrual period can be set only on a posted item with its own journal entry.",
         "is_draft": "Edit a draft in the item editor.",
-        "accrual_receivable_only": "The accrual period can be set only on a receivable.",
         "accrual_double_entry_only": "The accrual period can be set only in double-entry bookkeeping."
       }
     },
@@ -22386,14 +22387,14 @@
       },
       "prepaid_expense": {
         "title": "Prepaid expenses (381)",
-        "hint": "From received-invoice lines marked with a from–to period whose cost extends beyond year-end (insurance, parking, subscriptions). The system pro-rates by days the part belonging to future periods and defers it to 381 (Dr 381 / Cr expense account). Released automatically in N+1.",
+        "hint": "From received-invoice lines and other payables marked with a from–to period whose cost extends beyond year-end (insurance, parking, subscriptions). The system pro-rates by days the part belonging to future periods and defers it to 381 (Dr 381 / Cr expense account). Released automatically in N+1.",
         "reload": "Load proposal",
         "col_document": "Document",
         "col_period": "Accrual period",
         "col_account": "Expense account",
         "col_deferred": "Deferred to 381",
         "total_deferred": "Total deferred (Dr 381 / Cr 5xx)",
-        "no_items": "No invoice lines marked for time accrual in this period.",
+        "no_items": "No received-invoice lines or other payables marked for time accrual in this period.",
         "existing": "Posted {amount}.",
         "post": "Post accrual",
         "posted": "Prepaid expenses were posted.",

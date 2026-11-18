@@ -22452,10 +22452,14 @@ paths:
         následuje, pokud se dosud rovnalo uloženému `issued_on`; jinak zůstane. `due_on` se při
         vynechání zachová.
 
-        Období časového rozlišení (`accrual_from`, `accrual_to`) se při vynechání zachová. Koncept
+        Období časového rozlišení (`accrual_from`, `accrual_to`) se při vynechání zachová. Změna
+        `side` ho zahodí, i když je poslané beze změny (u pohledávky jde o výnos, u závazku o náklad);
+        jiné období poslané spolu se změnou strany zůstane, shodné s uloženým jen s `accrual_side` rovným
+        nové straně (pojistka níže pak prověří obě strany). Koncept
         se zaúčtovanou historií (vrácený odúčtováním) ho nesmí změnit, pokud některý jeho zápis leží
         v uzavřeném, revidovaném či schváleném období (`409 other_items.error.period_closed`) nebo v probíhající
-        uzávěrce, jejíž krok Časové rozlišení už zaúčtoval odklad výnosů (`409 other_items.error.accrual_deferral_posted`).
+        uzávěrce, jejíž krok Časové rozlišení už zaúčtoval odklad strany položky (výnosy u pohledávky, náklady u závazku;
+        `409 other_items.error.accrual_deferral_posted`).
       requestBody:
         required: true
         content: { application/json: { schema: { $ref: '#/components/schemas/OtherItemInput' } } }
@@ -22463,7 +22467,7 @@ paths:
         '200': { description: Změněný koncept, content: { application/json: { schema: { $ref: '#/components/schemas/OtherItem' } } } }
         '403': { $ref: '#/components/responses/Forbidden' }
         '409': { description: 'Doklad není koncept (`other_items.error.not_draft`), nebo změna období rozlišení u konceptu se zaúčtovanou historií (`other_items.error.period_closed`, `other_items.error.accrual_deferral_posted`)', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
-        '422': { description: 'Neplatný vstup, mimo jiné období rozlišení (`other_items.error.accrual_period_incomplete`, `accrual_period_invalid`, `accrual_receivable_only`, `accrual_double_entry_only`)', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '422': { description: 'Neplatný vstup, mimo jiné období rozlišení (`other_items.error.accrual_period_incomplete`, `accrual_period_invalid`, `accrual_double_entry_only`)', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
     delete:
       tags: [Accounting]
       summary: Měkce smaže pouze koncept
@@ -22591,14 +22595,16 @@ paths:
   /api/v1/accounting/other-items/{id}/accrual:
     put:
       tags: [Accounting]
-      summary: Nastaví období časového rozlišení výnosu zaúčtované pohledávky
+      summary: Nastaví období časového rozlišení zaúčtované pohledávky či závazku
       description: |
-        Změní `accrual_from`/`accrual_to` zaúčtované pohledávky s vlastním zápisem. Zápis v deníku se nemění,
+        Změní `accrual_from`/`accrual_to` zaúčtované ostatní položky s vlastním zápisem: u pohledávky období
+        výnosu (odklad na 384), u závazku období nákladu (odklad na 381). Zápis v deníku se nemění,
         období čte až uzávěrka (krok Časové rozlišení). Vynechaný klíč ponechá uloženou hodnotu, obě prázdné
         hodnoty rozlišení zruší. Koncept vrací `409 other_items.error.is_draft` (upravuje se přes `PUT /accounting/other-items/{id}`),
         doklad bez vlastního zápisu nebo nezaúčtovaný `409 other_items.error.accrual_not_posted`, doklad v uzavřeném,
         revidovaném či schváleném účetním období `409 other_items.error.period_closed` a doklad v probíhající uzávěrce,
-        jejíž krok Časové rozlišení už zaúčtoval odklad výnosů, `409 other_items.error.accrual_deferral_posted` (krok je
+        jejíž krok Časové rozlišení už zaúčtoval odklad strany položky (výnosy u pohledávky, náklady u závazku),
+        `409 other_items.error.accrual_deferral_posted` (krok je
         nutné vrátit). Stejné pravidlo jako `PUT /invoices/{id}/accrual`. Změna se zapíše do aktivity dokladu (`other_item.accrual_changed`).
         Přes API token nedostupné (403 token_write_forbidden).
       parameters:
@@ -22618,7 +22624,7 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { description: 'Koncept (`other_items.error.is_draft`), doklad bez vlastního zápisu (`other_items.error.accrual_not_posted`), v uzavřeném, revidovaném či schváleném období (`other_items.error.period_closed`) nebo po zaúčtovaném kroku odkladu (`other_items.error.accrual_deferral_posted`)', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
-        '422': { description: 'Neúplné nebo neplatné období (`other_items.error.accrual_period_incomplete`, `other_items.error.accrual_period_invalid`), závazek (`other_items.error.accrual_receivable_only`), daňová evidence (`other_items.error.accrual_double_entry_only`) nebo tělo bez obou polí', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '422': { description: 'Neúplné nebo neplatné období (`other_items.error.accrual_period_incomplete`, `other_items.error.accrual_period_invalid`), daňová evidence (`other_items.error.accrual_double_entry_only`) nebo tělo bez obou polí', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
 
   /api/v1/accounting/other-items/{id}/posted:
     delete:
@@ -46866,8 +46872,9 @@ components:
         issued_on: { type: string, format: date }
         accounting_on: { type: [string, 'null'], format: date }
         due_on: { type: string, format: date }
-        accrual_from: { type: [string, "null"], format: date, description: "Začátek období, do kterého patří výnos pohledávky (časové rozlišení výnosů 384). Zadává se spolu s accrual_to, jen u pohledávky (side=receivable) a v podvojném účetnictví (jinak 422 other_items.error.accrual_period_incomplete / accrual_period_invalid / accrual_receivable_only / accrual_double_entry_only). NULL = bez rozlišení. PUT konceptu bez obou polí uložené období zachová (i v daňové evidenci, kde ho nejde změnit, jen ponechat nebo smazat), při přepnutí na závazek ho zahodí. Změnu či smazání období dokladu, ze kterého už uzávěrka odložila, odmítne 409 (other_items.error.period_closed / accrual_deferral_posted)." }
-        accrual_to: { type: [string, "null"], format: date, description: "Konec období výnosu pohledávky (nejdříve v den accrual_from). Uzávěrka odloží na 384 část výnosu zaúčtovaného zápisem položky, která připadá na dny za rozvahovým dnem, a další rok ji rozpustí." }
+        accrual_from: { type: [string, "null"], format: date, description: "Začátek období, do kterého patří výnos pohledávky (časové rozlišení výnosů 384), resp. náklad závazku (náklady příštích období 381). Zadává se spolu s accrual_to, jen v podvojném účetnictví (jinak 422 other_items.error.accrual_period_incomplete / accrual_period_invalid / accrual_double_entry_only). NULL = bez rozlišení. PUT konceptu bez obou polí uložené období zachová (i v daňové evidenci, kde ho nejde změnit, jen ponechat nebo smazat). Změna strany (side) období poslané beze změny zahodí, protože období výnosu není obdobím nákladu; nové období zadané spolu se stranou zůstane. Změnu či smazání období dokladu, ze kterého už uzávěrka odložila, odmítne 409 (other_items.error.period_closed / accrual_deferral_posted)." }
+        accrual_to: { type: [string, "null"], format: date, description: "Konec období výnosu pohledávky či nákladu závazku (nejdříve v den accrual_from). Uzávěrka odloží na 384 (výnos) či 381 (náklad) část výsledku zaúčtovaného zápisem položky, která připadá na dny za rozvahovým dnem, a další rok ji rozpustí." }
+        accrual_side: { type: string, enum: [receivable, payable], writeOnly: true, description: "Strana, ke které patří poslané období. Při změně strany (side) se období shodné s uloženým bere jako vrácený uložený stav a zahodí se; s accrual_side rovným nové straně zůstane (období zadané záměrně pro novou stranu). Bez změny strany se ignoruje. Neukládá se." }
         currency: { type: string, enum: [CZK], default: CZK }
         amount: { type: number, exclusiveMinimum: 0 }
         exchange_rate: { type: [number, 'null'], description: Ignorováno, pro tuto agendu je podporována pouze CZK }
@@ -62292,14 +62299,28 @@ components:
           items:
             type: object
             required:
+            - source
             - purchase_invoice_id
+            - other_item_id
             - vendor_invoice_number
             - deferred_amount
             properties:
+              source:
+                type: string
+                enum:
+                - purchase_invoice
+                - other_item
               purchase_invoice_id:
-                type: integer
+                type:
+                - integer
+                - 'null'
+              other_item_id:
+                type:
+                - integer
+                - 'null'
               vendor_invoice_number:
                 type: string
+                description: Číslo přijaté faktury od dodavatele, u ostatního závazku jeho číslo dokladu.
               deferred_amount:
                 type: number
         by_account:
@@ -62325,8 +62346,10 @@ components:
     PrepaidExpenseAccrualItem:
       type: object
       required:
+      - source
       - item_id
       - purchase_invoice_id
+      - other_item_id
       - vendor_invoice_number
       - description
       - currency_code
@@ -62340,12 +62363,27 @@ components:
       - fraction
       - deferred_amount
       properties:
+        source:
+          type: string
+          enum:
+          - purchase_invoice
+          - other_item
+          description: Řádek přijaté faktury, nebo ostatní závazek (item_id = other_item_id; jeden řádek na
+            nákladový účet zdrojového zápisu, kterým je zápis položky nebo její storno či oprava dvojice z jiného
+            roku, takže jedna položka může mít víc řádků i na témže účtu).
         item_id:
           type: integer
         purchase_invoice_id:
-          type: integer
+          type:
+          - integer
+          - 'null'
+        other_item_id:
+          type:
+          - integer
+          - 'null'
         vendor_invoice_number:
           type: string
+          description: Číslo přijaté faktury od dodavatele, u ostatního závazku jeho číslo dokladu.
         description:
           type: string
         currency_code:
@@ -62355,6 +62393,7 @@ components:
         total_czk:
           type: number
           description: Účetní náklad položky v Kč (základ a neodpočitatelná část DPH), ze kterého se počítá odklad.
+            Ostatní závazek DPH nemá, jeho náklad je čistý obrat nákladového účtu zápisu.
         credit_account:
           type: string
         accrual_from:

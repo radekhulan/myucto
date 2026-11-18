@@ -72,6 +72,9 @@ final class AccrualDeferralService
      * zastaví už kontrolou) a vyřadí doklady, jejichž odklad k tomu dni zaúčtovala
      * uzávěrka ({@see deferredByClosingSql}).
      *
+     * Navíc ostatní závazky s obdobím ({@see otherItemAccrualRows()}): náklad z obratu 5xx
+     * jejich zápisu, filtry data a uzávěrky stejné jako u výnosu ostatních pohledávek.
+     *
      * @return list<array<string,mixed>>
      */
     public function prepaidExpenseRows(int $supplierId, string $afterDate, string $costFrom, string $costTo, ?string $asOfInJournal = null): array
@@ -107,7 +110,35 @@ final class AccrualDeferralService
         );
         array_push($params, ...self::deferredOnDocumentParams($deferPrefix));
         $stmt->execute($params);
-        return $stmt->fetchAll(\PDO::FETCH_ASSOC) ?: [];
+        return [
+            ...self::purchaseInvoiceRows($stmt->fetchAll(\PDO::FETCH_ASSOC) ?: []),
+            ...$this->otherItemAccrualRows('payable', $supplierId, $afterDate, $costFrom, $costTo, null, false, $asOfInJournal),
+        ];
+    }
+
+    /**
+     * Řádky přijatých faktur v jednotném tvaru nákladových řádků; ostatní závazky
+     * ({@see otherItemAccrualRows()}) nesou navíc `other_item_id` a zdrojový zápis.
+     *
+     * @param list<array<string,mixed>> $rows
+     * @return list<array<string,mixed>>
+     */
+    private static function purchaseInvoiceRows(array $rows): array
+    {
+        return array_map(static fn (array $row): array => $row + ['source' => 'purchase_invoice', 'other_item_id' => null, 'journal_entry_id' => null], $rows);
+    }
+
+    /**
+     * Klíč dokladu nákladového řádku ({@see prepaidExpenseRows()}): víc řádků téhož dokladu
+     * (položky faktury, nákladové účty ostatního závazku) je v přehledu jeden doklad.
+     *
+     * @param array<string,mixed> $row
+     */
+    public static function prepaidExpenseDocumentKey(array $row): string
+    {
+        return $row['source'] === 'other_item'
+            ? 'other_item:' . (int) $row['other_item_id']
+            : 'purchase_invoice:' . (int) $row['purchase_invoice_id'];
     }
 
     /**
@@ -151,19 +182,28 @@ final class AccrualDeferralService
               ORDER BY pi.id, pii.order_index, pii.id'
         );
         $stmt->execute([$supplierId, $originEndsOn, $targetEnd, $originEndsOn, ...self::deferredOnDocumentParams($deferPrefix)]);
-        return $stmt->fetchAll(\PDO::FETCH_ASSOC) ?: [];
+        // Ostatní závazek: zdroje zaúčtované do konce období, ze kterého se otevírá, jen
+        // v obdobích, jejichž odklad zaúčtovala uzávěrka (stejně jako výnos ostatní pohledávky).
+        return [
+            ...self::purchaseInvoiceRows($stmt->fetchAll(\PDO::FETCH_ASSOC) ?: []),
+            ...$this->otherItemAccrualRows('payable', $supplierId, $originEndsOn, null, $originEndsOn, $targetEnd, true, null, $mirroredPeriodIds),
+        ];
     }
 
     /**
      * Účetní náklad řádku přijaté faktury v Kč, ze kterého se počítá odklad na 381: základ
      * a neodpočitatelná část daně ({@see PostingService::purchaseItemCostsCzk()}, SSOT), jinak
-     * by budoucí část daně zůstala v nákladu roku pořízení.
+     * by budoucí část daně zůstala v nákladu roku pořízení. Ostatní závazek DPH nemá, jeho
+     * náklad je obrat nákladového účtu zápisu ({@see otherItemAccrualRows()}).
      *
      * @param array<string,mixed> $row
      * @param array<int,array<int,float>> $costsByInvoice cache jednoho průchodu (faktura => položka => náklad)
      */
     public function prepaidExpenseCostCzk(int $supplierId, array $row, array &$costsByInvoice): float
     {
+        if ($row['source'] === 'other_item') {
+            return round((float) $row['total_without_vat'], 2);
+        }
         $netCzk = $this->prepaidExpenseNetCzk($row);
         $purchaseInvoiceId = (int) $row['purchase_invoice_id'];
         if (!isset($costsByInvoice[$purchaseInvoiceId])) {
@@ -181,6 +221,11 @@ final class AccrualDeferralService
      * uložené uzávěrkou, která odklad zaúčtovala. Rozpouštět se musí tatáž hodnota, jinak by 381
      * nedošlo na nulu. Uzávěrka bez uloženého ocenění odložila jen základ, zůstává proto
      * na základu i v dalších letech a zaúčtovaný odklad se zpětně nemění.
+     *
+     * Ostatní závazek ocenění v `item_costs` nemá: rozpouští se z rozpadu kroku
+     * ({@see snapshotOtherItem()}), v období bez rozpadu z obratu zdroje ke konci jeho období
+     * ({@see otherItemSources()}), tedy z téže hodnoty, ze které uzávěrka odložila (řádek nese
+     * obrat v Kč bez kurzu, `prepaidExpenseNetCzk()` ho vrátí beze změny).
      *
      * @param array<string,mixed> $row
      */
@@ -209,7 +254,8 @@ final class AccrualDeferralService
      * by se náklad odložil z jiného účtu, než na kterém leží. Účtotvorná dimenze mohla náklad
      * položky zaúčtovat na analytiku nebo ho rozpadem rozdělit mezi analytiky, odklad
      * i rozpuštění proto jdou na tytéž analytiky ve stejném poměru
-     * ({@see PostingService::itemAccountsByDimension()}).
+     * ({@see PostingService::itemAccountsByDimension()}). Ostatní závazek odkládá z účtu,
+     * který nese jeho zápis (jako výnos ostatní pohledávky).
      *
      * @param array<string,mixed> $row
      * @param array<int,array<int,array<string,float>>> $accountsByInvoice cache jednoho průchodu (faktura => položka => účet => podíl)
@@ -217,6 +263,9 @@ final class AccrualDeferralService
      */
     public function prepaidExpenseAccounts(int $supplierId, array $row, array &$accountsByInvoice): array
     {
+        if ($row['source'] === 'other_item') {
+            return [(string) $row['expense_account_code'] => 1.0];
+        }
         $purchaseInvoiceId = (int) $row['purchase_invoice_id'];
         if (!isset($accountsByInvoice[$purchaseInvoiceId])) {
             try {
@@ -261,22 +310,27 @@ final class AccrualDeferralService
      * - v uzavřeném, revidovaném či schváleném období ({@see AccountingPeriodStatus::CLOSED}),
      * - v uzavíraném období, jehož krok Časové rozlišení už zaúčtoval odklad daného druhu.
      * Posuzuje se období data dokladu a období všech živých zápisů jeho skupiny zaúčtování
-     * (převzatý zápis může ležet jinde). Ostatní pohledávka (`other_item`) skupinu zaúčtování
+     * (převzatý zápis může ležet jinde). Ostatní položka (`other_item`) skupinu zaúčtování
      * nemá: posuzují se období jejích zdrojových zápisů ({@see otherItemSourceDates()}), ze
-     * kterých uzávěrka odkládá. Volá se v transakci se zamčenými obdobími firmy
+     * kterých uzávěrka odkládá, a odklad podle uložené strany `$side` (pohledávka výnosy 384,
+     * závazek náklady 381). Volá se v transakci se zamčenými obdobími firmy
      * (`$statuses` z {@see \MyInvoice\Service\Accounting\Dimension\DimensionPeriodGuard::lockPeriods()}),
      * aby souběžná uzávěrka nemohla mezi kontrolou a změnou krok zaúčtovat. Zápis odkladu se
      * čte zamykacím čtením: snímek transakce založený před čekáním na zámek období by krok
      * zaúčtovaný souběžně neviděl.
      *
      * @param 'invoice'|'purchase_invoice'|'other_item' $docType
+     * @param ?string $side strana ostatní položky ('receivable'|'payable')
      * @param array<int,string> $statuses id období => stav (aktuální čtení pod zámkem)
      * @return array{0:string,1:string}|null
      */
-    public function accrualChangeBlocker(int $supplierId, string $docType, int $docId, ?string $docDate, array $statuses): ?array
+    public function accrualChangeBlocker(int $supplierId, string $docType, int $docId, ?string $docDate, array $statuses, ?string $side = null): ?array
     {
         $periodIds = [];
-        $dates = $docType === 'other_item' ? self::otherItemSourceDates($this->db, $supplierId, $docId) : [];
+        if ($docType === 'other_item' && !in_array($side, ['receivable', 'payable'], true)) {
+            throw new \LogicException('Pojistka ostatní položky vyžaduje stranu.');
+        }
+        $dates = $docType === 'other_item' ? self::otherItemSourceDates($this->db, $supplierId, $docId, (string) $side) : [];
         if ($docDate !== null && $docDate !== '') {
             $dates[] = $docDate;
         }
@@ -294,7 +348,7 @@ final class AccrualDeferralService
                 }
             }
         }
-        $sourceType = $docType === 'purchase_invoice' ? 'prepaid_expense_accrual' : 'deferred_revenue_accrual';
+        $sourceType = $docType === 'purchase_invoice' || $side === 'payable' ? 'prepaid_expense_accrual' : 'deferred_revenue_accrual';
         $deferral = $this->db->pdo()->prepare(
             'SELECT 1 FROM journal_entries
               WHERE supplier_id = ? AND source_type = ? AND source_id = ?
@@ -371,6 +425,30 @@ final class AccrualDeferralService
         }
         return $row + ['source' => 'invoice', 'invoice_id' => (int) $item['doc_id'], 'other_item_id' => null,
             'journal_entry_id' => null, 'revenue_account_code' => null];
+    }
+
+    /**
+     * Řádek rozpuštění nákladů ze záznamu kroku ({@see snapshotItem()}, {@see snapshotOtherItem()})
+     * ve tvaru řádků {@see prepaidExpenseReleaseRows()}. Záznam bez `source` je řádek přijaté faktury.
+     *
+     * @param array<string,mixed> $item
+     * @return array<string,mixed>
+     */
+    public static function prepaidExpenseSnapshotRow(array $item): array
+    {
+        $row = ['item_id' => (int) $item['item_id'], 'accrual_from' => (string) $item['from'],
+            'accrual_to' => (string) $item['to'], 'snapshot' => $item];
+        if (($item['source'] ?? 'purchase_invoice') === 'other_item') {
+            $entries = [];
+            foreach ((array) ($item['entries'] ?? []) as $entryId => $date) {
+                $entries[(int) $entryId] = (string) $date;
+            }
+            return $row + ['source' => 'other_item', 'purchase_invoice_id' => null, 'other_item_id' => (int) $item['doc_id'],
+                'journal_entry_id' => (int) $item['journal_entry_id'], 'source_entries' => $entries,
+                'expense_account_code' => (string) array_key_first(self::snapshotAccounts($item))];
+        }
+        return $row + ['source' => 'purchase_invoice', 'purchase_invoice_id' => (int) $item['doc_id'],
+            'other_item_id' => null, 'journal_entry_id' => null];
     }
 
     /**
@@ -481,7 +559,7 @@ final class AccrualDeferralService
         return [
             ...$rows,
             ...$this->membershipDeferredRevenueRows($supplierId, $afterDate, $postedFrom, $postedTo, $startsBy, $release, $asOfInJournal),
-            ...$this->otherItemDeferredRevenueRows($supplierId, $afterDate, $postedFrom, $postedTo, $startsBy, $release, $asOfInJournal, $mirroredPeriodIds),
+            ...$this->otherItemAccrualRows('receivable', $supplierId, $afterDate, $postedFrom, $postedTo, $startsBy, $release, $asOfInJournal, $mirroredPeriodIds),
         ];
     }
 
@@ -501,25 +579,33 @@ final class AccrualDeferralService
     }
 
     /**
-     * Ostatní pohledávky s obdobím výnosu (`other_items.accrual_from/to`) přesahujícím
-     * `afterDate`. Výnos nese deník položky, a to na protiúčtech, které při zaúčtování
-     * zvolil uživatel nebo profil druhu (i rozdělený na víc účtů). Proto se odkládá podle
-     * deníku: jeden řádek na výnosový účet zdrojového zápisu ({@see otherItemSources()}) s jeho
-     * čistým obratem; výnosový účet je ten zaúčtovaný (stejně jako u členského předpisu).
+     * Ostatní položky strany `$side` s obdobím rozlišení (`other_items.accrual_from/to`)
+     * přesahujícím `afterDate`: u pohledávky výnos (6xx, odklad na 384), u závazku náklad
+     * (5xx, odklad na 381). Výsledek nese deník položky, a to na protiúčtech, které při
+     * zaúčtování zvolil uživatel nebo profil druhu (i rozdělený na víc účtů). Proto se odkládá
+     * podle deníku: jeden řádek na výsledkový účet zdrojového zápisu ({@see otherItemSources()})
+     * s jeho čistým obratem (výnos D − MD, náklad MD − D); účet je ten zaúčtovaný (stejně jako
+     * u členského předpisu). Ostatní položka DPH nemá, obrat 5xx je proto celý účetní náklad.
      * Zdroj, který (i opravou) nese s nenulovým obratem účet odkladu, se neodkládá podruhé.
      * Rozpuštění vynechá období v `$mirroredPeriodIds`: jejich odklad se rozpouští ze záznamu
      * kroku ({@see snapshotOtherItem()}), stejně jako u řádků faktur.
      *
+     * Tvar řádku: výnos jako {@see deferredRevenueRows()} (`revenue_account_code`), náklad jako
+     * {@see prepaidExpenseRows()} (`expense_account_code`, `vendor_invoice_number`).
+     *
+     * @param 'receivable'|'payable' $side
      * @param list<int> $mirroredPeriodIds
      * @return list<array<string,mixed>>
      */
-    private function otherItemDeferredRevenueRows(int $supplierId, string $afterDate, ?string $postedFrom, string $postedTo, ?string $startsBy, bool $release, ?string $asOfInJournal, array $mirroredPeriodIds = []): array
+    private function otherItemAccrualRows(string $side, int $supplierId, string $afterDate, ?string $postedFrom, string $postedTo, ?string $startsBy, bool $release, ?string $asOfInJournal, array $mirroredPeriodIds = []): array
     {
-        $sources = self::otherItemSources($this->db, $supplierId, $postedTo, null, $afterDate);
+        $expense = $side === 'payable';
+        $sources = self::otherItemSources($this->db, $supplierId, $postedTo, null, $afterDate, $side);
         if ($sources['roots'] === []) {
             return [];
         }
-        [$closingSql, $closingParams] = self::closingFilter($release, $asOfInJournal, $postedTo, 'je.entry_date', $mirroredPeriodIds);
+        [$closingSql, $closingParams] = self::closingFilter($release, $asOfInJournal, $postedTo, 'je.entry_date', $mirroredPeriodIds,
+            $expense ? 'prepaid_expense_accrual' : 'deferred_revenue_accrual');
         $heads = [];
         foreach (array_chunk(array_keys($sources['roots']), 500) as $chunk) {
             $marks = implode(',', array_fill(0, count($chunk), '?'));
@@ -542,11 +628,10 @@ final class AccrualDeferralService
         foreach (array_chunk(array_values(array_unique($heads)), 500) as $chunk) {
             $marks = implode(',', array_fill(0, count($chunk), '?'));
             $stmt = $this->db->pdo()->prepare(
-                "SELECT oi.id, oi.accrual_from, oi.accrual_to, oi.document_no AS varsymbol, oi.title AS description
+                "SELECT oi.id, oi.accrual_from, oi.accrual_to, oi.document_no, oi.title AS description
                    FROM other_items oi
                   WHERE oi.supplier_id = ? AND oi.id IN ({$marks})
                     AND oi.deleted_at IS NULL
-                    AND oi.side = 'receivable'
                     AND (? IS NULL OR oi.accrual_from <= ?)"
             );
             // Období přesahující den (`accrual_to > afterDate`, úplná dvojice) zajišťuje už kotva
@@ -561,71 +646,89 @@ final class AccrualDeferralService
             return [];
         }
 
-        $deferPrefix = $this->deferralAccountPrefix($supplierId, self::RULE_DEFERRED_REVENUE);
-        $nets = [];
-        $members = [];
+        $rule = $expense ? self::RULE_PREPAID_EXPENSE : self::RULE_DEFERRED_REVENUE;
+        $nets = self::otherItemSourceNets($this->db, $supplierId, $sources['members'], $side, $this->deferralAccountPrefix($supplierId, $rule), $roots);
+        $deferAccount = $this->deferralAccount($supplierId, $rule);
         $entriesOf = [];
         foreach ($sources['members'] as $entryId => $member) {
             if (isset($roots[$member['root_id']])) {
-                $members[$entryId] = $member['root_id'];
                 $entriesOf[$member['root_id']][$entryId] = $member['entry_date'];
             }
         }
-        foreach (array_chunk(array_keys($members), 500) as $chunk) {
-            $marks = implode(',', array_fill(0, count($chunk), '?'));
-            $lines = $this->db->pdo()->prepare(
-                "SELECT l.entry_id, a.account_code,
-                        SUM(CASE WHEN l.side = 'credit' THEN l.signed_amount ELSE -l.signed_amount END) AS net
-                   FROM journal_entry_lines l
-                   JOIN chart_of_accounts a ON a.id = l.account_id
-                  WHERE l.supplier_id = ? AND l.entry_id IN ({$marks})
-                    AND (a.account_code LIKE '6%' OR a.account_code LIKE ?)
-                  GROUP BY l.entry_id, a.account_code"
-            );
-            $lines->execute([$supplierId, ...$chunk, $deferPrefix]);
-            foreach ($lines->fetchAll(\PDO::FETCH_ASSOC) ?: [] as $line) {
-                $root = $members[(int) $line['entry_id']];
-                $code = (string) $line['account_code'];
-                $nets[$root][$code] = ($nets[$root][$code] ?? 0.0) + (float) $line['net'];
-            }
-        }
-        $deferAccount = $this->deferralAccount($supplierId, self::RULE_DEFERRED_REVENUE);
         $rows = [];
         foreach ($roots as $rootId => $itemId) {
             $accounts = $nets[$rootId] ?? [];
             foreach ($accounts as $code => $net) {
-                // Účet odkladu s nulovým obratem (přeúčtováno na 384 a zpět) odklad nevyřadí;
+                // Účet odkladu s nulovým obratem (přeúčtováno na 381/384 a zpět) odklad nevyřadí;
                 // jeho nulový řádek uzávěrka přeskočí. Záměrně jinak než faktura a předpis
-                // (vyřadí je kterýkoli řádek 384, {@see deferredOnDocumentSql()}): obrat položky
+                // (vyřadí je kterýkoli řádek účtu odkladu, {@see deferredOnDocumentSql()}): obrat položky
                 // se čte po zdrojích a opravách z deníku, takže jde posoudit přesně.
                 if (str_starts_with((string) $code, $deferAccount) && (int) round($net * 100) !== 0) {
                     continue 2;
                 }
             }
             ksort($accounts, SORT_STRING);
-            $entries = $entriesOf[$rootId] ?? [];
+            $item = $items[$itemId];
             foreach ($accounts as $code => $net) {
-                $rows[] = [
+                $row = [
                     'item_id' => $itemId,
                     'other_item_id' => $itemId,
                     'journal_entry_id' => $rootId,
-                    'accrual_from' => $items[$itemId]['accrual_from'],
-                    'accrual_to' => $items[$itemId]['accrual_to'],
-                    'varsymbol' => $items[$itemId]['varsymbol'],
-                    'description' => $items[$itemId]['description'],
+                    'accrual_from' => $item['accrual_from'],
+                    'accrual_to' => $item['accrual_to'],
+                    'description' => $item['description'],
                     'total_without_vat' => round($net, 2),
                     'currency_code' => 'CZK',
-                    'revenue_account_code' => (string) $code,
                     'source' => 'other_item',
-                    'invoice_id' => null,
-                    'membership_case_id' => null,
-                    'source_entries' => $entries,
+                    'source_entries' => $entriesOf[$rootId] ?? [],
                 ];
+                $rows[] = $expense
+                    ? $row + ['purchase_invoice_id' => null, 'vendor_invoice_number' => $item['document_no'], 'exchange_rate' => null, 'expense_account_code' => (string) $code]
+                    : $row + ['invoice_id' => null, 'membership_case_id' => null, 'varsymbol' => $item['document_no'], 'revenue_account_code' => (string) $code];
             }
         }
-        usort($rows, static fn (array $a, array $b): int => [$a['other_item_id'], $a['journal_entry_id'], $a['revenue_account_code']]
-            <=> [$b['other_item_id'], $b['journal_entry_id'], $b['revenue_account_code']]);
+        $key = static fn (array $row): array => [$row['other_item_id'], $row['journal_entry_id'], $row['revenue_account_code'] ?? $row['expense_account_code']];
+        usort($rows, static fn (array $a, array $b): int => $key($a) <=> $key($b));
         return $rows;
+    }
+
+    /**
+     * Čistý obrat zdrojů ostatních položek po výsledkových účtech strany (výnos 6xx jako
+     * D − MD, náklad 5xx jako MD − D) a po účtu odkladu `$deferPrefix` (null = bez něj).
+     * Řádky deníku po `idx_jel_supplier_entry` (IN přes id zápisů), součet do zdroje v PHP.
+     *
+     * @param array<int,array{root_id:int,entry_date:string}> $members zápis => zdroj
+     * @param 'receivable'|'payable' $side
+     * @param ?array<int,int> $roots jen tyto zdroje (zdroj => položka), jinak všechny
+     * @return array<int,array<string,float>> zdroj => účet => obrat
+     */
+    private static function otherItemSourceNets(Connection $db, int $supplierId, array $members, string $side, ?string $deferPrefix, ?array $roots = null): array
+    {
+        if ($roots !== null) {
+            $members = array_filter($members, static fn (array $member): bool => isset($roots[$member['root_id']]));
+        }
+        [$resultPrefix, $positive] = $side === 'payable' ? ['5%', 'debit'] : ['6%', 'credit'];
+        $deferSql = $deferPrefix === null ? '' : ' OR a.account_code LIKE ?';
+        $nets = [];
+        foreach (array_chunk(array_keys($members), 500) as $chunk) {
+            $marks = implode(',', array_fill(0, count($chunk), '?'));
+            $stmt = $db->pdo()->prepare(
+                "SELECT l.entry_id, a.account_code,
+                        SUM(CASE WHEN l.side = ? THEN l.signed_amount ELSE -l.signed_amount END) AS net
+                   FROM journal_entry_lines l
+                   JOIN chart_of_accounts a ON a.id = l.account_id
+                  WHERE l.supplier_id = ? AND l.entry_id IN ({$marks})
+                    AND (a.account_code LIKE ?{$deferSql})
+                  GROUP BY l.entry_id, a.account_code"
+            );
+            $stmt->execute([$positive, $supplierId, ...$chunk, $resultPrefix, ...($deferPrefix === null ? [] : [$deferPrefix])]);
+            foreach ($stmt->fetchAll(\PDO::FETCH_ASSOC) ?: [] as $line) {
+                $root = $members[(int) $line['entry_id']]['root_id'];
+                $code = (string) $line['account_code'];
+                $nets[$root][$code] = ($nets[$root][$code] ?? 0.0) + (float) $line['net'];
+            }
+        }
+        return $nets;
     }
 
     /**
@@ -646,16 +749,21 @@ final class AccrualDeferralService
      * výběr nepoužívají.
      *
      * @param ?int $itemId jedna položka (pojistka změny období), jinak všechny s obdobím po `$afterDate`
+     *        a stranou `$side` (náhled a rozpuštění 384 jen pohledávky, 381 jen závazky)
+     * @param ?'receivable'|'payable' $side
      * @return array{roots:array<int,array{item_id:int,entry_date:string}>,members:array<int,array{root_id:int,entry_date:string}>}
      */
-    private static function otherItemSources(Connection $db, int $supplierId, string $until, ?int $itemId = null, ?string $afterDate = null): array
+    private static function otherItemSources(Connection $db, int $supplierId, string $until, ?int $itemId = null, ?string $afterDate = null, ?string $side = null): array
     {
-        // Uzávěrka: jen položky s obdobím přesahujícím den (idx_other_item_accrual_to, rozsah);
-        // pojistka změny období: jedna položka, i bez období.
+        // Uzávěrka: jen položky strany s obdobím přesahujícím den (idx_other_item_accrual_to,
+        // rozsah, strana jako zbytková podmínka); pojistka změny období: jedna položka, i bez období.
+        if ($itemId === null && $side === null) {
+            throw new \LogicException('Výběr zdrojů pro uzávěrku potřebuje stranu položek.');
+        }
         $items = $itemId === null
-            ? '(SELECT a.id FROM other_items a WHERE a.supplier_id = ? AND a.accrual_to > ?)'
+            ? '(SELECT a.id FROM other_items a WHERE a.supplier_id = ? AND a.accrual_to > ? AND a.side = ?)'
             : '(' . $itemId . ')';
-        $itemParams = $itemId === null ? [$supplierId, $afterDate ?? '0000-01-01'] : [];
+        $itemParams = $itemId === null ? [$supplierId, $afterDate ?? '0000-01-01', $side] : [];
         if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $until) !== 1) {
             throw new \InvalidArgumentException('Neplatný den výpočtu ' . $until . '.');
         }
@@ -701,34 +809,19 @@ final class AccrualDeferralService
 
     /**
      * Data zdrojových zápisů ostatní položky ({@see otherItemSources()}) bez ohledu na den
-     * výpočtu: v jejich obdobích uzávěrka odkládá a rozpouští výnos položky. Pojistka změny
-     * období ({@see \MyInvoice\Service\Accounting\OtherItemService}) kontroluje právě tato období.
+     * výpočtu: v jejich obdobích uzávěrka odkládá a rozpouští výnos pohledávky, resp. náklad
+     * závazku (`$side` = strana, ze které se odkládalo). Pojistka změny období
+     * ({@see \MyInvoice\Service\Accounting\OtherItemService}) kontroluje právě tato období.
      *
+     * @param 'receivable'|'payable' $side
      * @return list<string>
      */
-    public static function otherItemSourceDates(Connection $db, int $supplierId, int $itemId): array
+    public static function otherItemSourceDates(Connection $db, int $supplierId, int $itemId, string $side): array
     {
         $sources = self::otherItemSources($db, $supplierId, '9999-12-31', $itemId);
-        $nets = [];
-        foreach (array_chunk(array_keys($sources['members']), 500) as $chunk) {
-            $marks = implode(',', array_fill(0, count($chunk), '?'));
-            $stmt = $db->pdo()->prepare(
-                "SELECT l.entry_id, a.account_code,
-                        SUM(CASE WHEN l.side = 'credit' THEN l.signed_amount ELSE -l.signed_amount END) AS net
-                   FROM journal_entry_lines l
-                   JOIN chart_of_accounts a ON a.id = l.account_id
-                  WHERE l.supplier_id = ? AND l.entry_id IN ({$marks}) AND a.account_code LIKE '6%'
-                  GROUP BY l.entry_id, a.account_code"
-            );
-            $stmt->execute([$supplierId, ...$chunk]);
-            foreach ($stmt->fetchAll(\PDO::FETCH_ASSOC) ?: [] as $line) {
-                $root = $sources['members'][(int) $line['entry_id']]['root_id'];
-                $code = (string) $line['account_code'];
-                $nets[$root][$code] = ($nets[$root][$code] ?? 0.0) + (float) $line['net'];
-            }
-        }
-        // Zdroj s nulovým obratem na všech výnosových účtech (zápis zrušený stornem ve stejném
-        // období) uzávěrka neodkládá, jeho období pojistku nespouští.
+        $nets = self::otherItemSourceNets($db, $supplierId, $sources['members'], $side, null);
+        // Zdroj s nulovým obratem na všech výsledkových účtech strany (zápis zrušený stornem
+        // ve stejném období) uzávěrka neodkládá, jeho období pojistku nespouští.
         $live = array_filter($sources['roots'], static fn (array $root, int $rootId): bool => array_filter(
             $nets[$rootId] ?? [], static fn (float $net): bool => (int) round($net * 100) !== 0) !== [], ARRAY_FILTER_USE_BOTH);
         $dates = array_values(array_unique(array_column($live, 'entry_date')));
@@ -814,19 +907,20 @@ final class AccrualDeferralService
     }
 
     /**
-     * Podmínka na uzávěrkový odklad pro výnosové řádky: rozpuštění bere jen odklad
+     * Podmínka na uzávěrkový odklad (`$sourceType`: výnosy 384, u ostatních závazků
+     * náklady 381): rozpuštění bere jen odklad
      * zaúčtovaný uzávěrkou (k `$postedTo`), výkaz mimo deník jen doklady, jejichž odklad
      * k `$asOfInJournal` uzávěrka ještě nezaúčtovala. Odklad v uzávěrce podmínku nemá.
      *
      * @return array{0:string,1:list<string>}
      */
-    private static function closingFilter(bool $release, ?string $asOfInJournal, string $postedTo, string $dateSql, array $mirroredPeriodIds = []): array
+    private static function closingFilter(bool $release, ?string $asOfInJournal, string $postedTo, string $dateSql, array $mirroredPeriodIds = [], string $sourceType = 'deferred_revenue_accrual'): array
     {
         if ($release) {
-            return ['AND ' . self::deferredByClosingSql('deferred_revenue_accrual', 'je.supplier_id', $dateSql, $mirroredPeriodIds), [$postedTo]];
+            return ['AND ' . self::deferredByClosingSql($sourceType, 'je.supplier_id', $dateSql, $mirroredPeriodIds), [$postedTo]];
         }
         if ($asOfInJournal !== null) {
-            return ['AND NOT ' . self::deferredByClosingSql('deferred_revenue_accrual', 'je.supplier_id', $dateSql), [$asOfInJournal]];
+            return ['AND NOT ' . self::deferredByClosingSql($sourceType, 'je.supplier_id', $dateSql), [$asOfInJournal]];
         }
         return ['', []];
     }
@@ -1069,8 +1163,9 @@ final class AccrualDeferralService
     }
 
     /**
-     * Rozpad nákladového řádku přijaté faktury ({@see prepaidExpenseRows()},
-     * {@see prepaidExpenseReleaseRows()}) na účty a dimenze zápisu faktury.
+     * Rozpad nákladového řádku ({@see prepaidExpenseRows()}, {@see prepaidExpenseReleaseRows()})
+     * na účty a dimenze zápisu: přijatá faktura podle položky, ostatní závazek podle zápisů
+     * svého zdroje.
      *
      * @param array<string,mixed> $row
      * @param array<string,float> $accounts výstup {@see prepaidExpenseAccounts()}
@@ -1079,7 +1174,9 @@ final class AccrualDeferralService
      */
     public function prepaidExpenseAllocations(int $supplierId, array $row, array $accounts, array &$cache): array
     {
-        return $this->dimensionAllocations($supplierId, 'purchase_invoice', (int) $row['purchase_invoice_id'], (int) $row['item_id'], $accounts, $cache);
+        return $row['source'] === 'other_item'
+            ? $this->dimensionAllocations($supplierId, 'other_item', (int) $row['journal_entry_id'], null, $accounts, $cache)
+            : $this->dimensionAllocations($supplierId, 'purchase_invoice', (int) $row['purchase_invoice_id'], (int) $row['item_id'], $accounts, $cache);
     }
 
     /**
@@ -1127,7 +1224,7 @@ final class AccrualDeferralService
                 $cache[self::CACHE_ITEM_ACCOUNTS] ??= [];
                 if (!isset($cache[self::CACHE_ITEM_ACCOUNTS][$purchaseInvoiceId])) {
                     try {
-                        $this->prepaidExpenseAccounts($supplierId, ['purchase_invoice_id' => $purchaseInvoiceId, 'item_id' => $itemId], $cache[self::CACHE_ITEM_ACCOUNTS]);
+                        $this->prepaidExpenseAccounts($supplierId, ['source' => 'purchase_invoice', 'purchase_invoice_id' => $purchaseInvoiceId, 'item_id' => $itemId], $cache[self::CACHE_ITEM_ACCOUNTS]);
                     } catch (ClosingException) {
                         // Trasa zaúčtování dnes neprojde (kurz, mapa účtů změněná po zaúčtování):
                         // zápis dokladu platí, dělí se poměrem jeho nákladů. Výpadek platí pro celou
@@ -1261,14 +1358,25 @@ final class AccrualDeferralService
     }
 
     /**
-     * Dávkově načte kombinace dimenzí zápisů přijatých faktur nákladových řádků.
+     * Dávkově načte kombinace dimenzí zápisů dokladů nákladových řádků (přijaté faktury
+     * a zdroje ostatních závazků).
      *
      * @param list<array<string,mixed>> $rows
      * @param array<string,mixed> $cache
      */
     public function preloadPrepaidExpenseAllocations(int $supplierId, array $rows, array &$cache): void
     {
-        $this->preloadDimensionGroups($supplierId, 'purchase_invoice', array_map(static fn (array $row): int => (int) $row['purchase_invoice_id'], $rows), $cache);
+        $invoices = $otherItems = [];
+        foreach ($rows as $row) {
+            if ($row['source'] === 'other_item') {
+                $otherItems[] = (int) $row['journal_entry_id'];
+                $cache[self::CACHE_OTHER_ITEM_SOURCES][(int) $row['journal_entry_id']] = $row['source_entries'];
+            } else {
+                $invoices[] = (int) $row['purchase_invoice_id'];
+            }
+        }
+        $this->preloadDimensionGroups($supplierId, 'purchase_invoice', $invoices, $cache);
+        $this->preloadDimensionGroups($supplierId, 'other_item', $otherItems, $cache);
     }
 
     /**
@@ -1282,7 +1390,9 @@ final class AccrualDeferralService
      * Doklad se k období odkladu přiřazuje stejným datem, jakým ho rozpuštění vybírá
      * ({@see deferredByClosingSql()}): přijatá faktura datem nákladu
      * (`effective_cost_date`, {@see prepaidExpenseReleaseRows()}), výnosový doklad daty
-     * zápisů své skupiny zaúčtování ({@see deferredRevenueRows()}).
+     * zápisů své skupiny zaúčtování ({@see deferredRevenueRows()}). Ostatní položka
+     * (pohledávka ani závazek) se jako starý odklad neoznačí: dřív období mít nemohla, její
+     * odklad 381/384 tedy vznikl až s dimenzemi zápisu.
      *
      * @param 'deferred_revenue_accrual'|'prepaid_expense_accrual' $sourceType zápis odkladu
      * @param array<string,mixed> $cache
@@ -1320,8 +1430,6 @@ final class AccrualDeferralService
         }
         $costDates = $sourceType === 'prepaid_expense_accrual' ? $this->purchaseCostDates($supplierId, $cache) : null;
         foreach ($cache as $key => &$doc) {
-            // Ostatní položky dostaly období až s časovým rozlišením odkladu po dimenzích:
-            // starý odklad bez dimenzí je nikdy neobsahoval.
             if (!is_array($doc) || !isset($doc['groups']) || str_starts_with((string) $key, 'other_item:')) {
                 continue;
             }
@@ -1690,7 +1798,7 @@ final class AccrualDeferralService
         }
         if ($unknown !== []) {
             // Obrat zdroje tvoří všechny jeho zápisy; dimenze jen z kořene by se s ním rozešly.
-            throw new \LogicException('Dimenze ostatní položky vyžadují přednačtení zdrojů (preloadDeferredRevenueAllocations).');
+            throw new \LogicException('Dimenze ostatní položky vyžadují přednačtení zdrojů (preloadDeferredRevenueAllocations / preloadPrepaidExpenseAllocations).');
         }
         $out = [];
         foreach (array_chunk(array_keys($members), 500) as $chunk) {

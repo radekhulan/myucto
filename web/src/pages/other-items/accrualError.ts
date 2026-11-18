@@ -2,12 +2,12 @@ import { apiErrorCode } from '@/api/errors'
 
 const PREFIX = 'other_items.error.'
 
-// Chyby období časového rozlišení výnosu: přeložená hláška místo serverového textu, ostatní
+// Chyby období časového rozlišení: přeložená hláška místo serverového textu, ostatní
 // chyby beze změny. `period_closed` a `is_draft` jsou obecné kódy (storno položky, smazání se
 // zápisem), proto je volající předává jen tam, kde je vrací pojistka či změna období.
 export const ACCRUAL_ERRORS = [
   'period_closed', 'accrual_deferral_posted', 'accrual_period_incomplete', 'accrual_period_invalid',
-  'accrual_not_posted', 'is_draft', 'accrual_receivable_only', 'accrual_double_entry_only',
+  'accrual_not_posted', 'is_draft', 'accrual_double_entry_only',
 ]
 
 // Uložení či smazání konceptu: `period_closed` tam vrací jen pojistka období, `is_draft` nikdy.

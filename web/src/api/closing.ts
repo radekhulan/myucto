@@ -481,10 +481,13 @@ export interface SmallAssetAccrualPreview {
   post_blocked?: 'closing_taken_over' | 'booked_outside' | null
 }
 
-// ── §DČR / Task 12: časové rozlišení nákladů příštích období (381 z označených faktur) ──
+// ── §DČR / Task 12: časové rozlišení nákladů příštích období (381 z faktur a ostatních závazků) ──
+/** Časové rozlišení nákladů příštích období (381) z řádků přijatých faktur a ostatních závazků. */
 export interface PrepaidExpenseAccrualItem {
+  source: 'purchase_invoice' | 'other_item'
   item_id: number
-  purchase_invoice_id: number
+  purchase_invoice_id: number | null
+  other_item_id: number | null
   vendor_invoice_number: string
   description: string
   currency_code: string
@@ -506,7 +509,7 @@ export interface PrepaidExpenseAccrualPreview {
   period: { id: number; fiscal_year: number; starts_on: string; ends_on: string }
   next_period_start: string
   items: PrepaidExpenseAccrualItem[]
-  documents: { purchase_invoice_id: number; vendor_invoice_number: string; deferred_amount: number }[]
+  documents: { source: 'purchase_invoice' | 'other_item'; purchase_invoice_id: number | null; other_item_id: number | null; vendor_invoice_number: string; deferred_amount: number }[]
   by_account: Record<string, number>
   total: number
   existing: { entry_id: number; amount: number | null } | null

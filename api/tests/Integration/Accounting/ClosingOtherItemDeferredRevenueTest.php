@@ -183,7 +183,6 @@ final class ClosingOtherItemDeferredRevenueTest extends TestCase
         yield 'jen konec' => [['accrual_to' => '2092-06-30'], 'accrual_period_incomplete'];
         yield 'konec před začátkem' => [['accrual_from' => '2092-07-01', 'accrual_to' => '2092-06-30'], 'accrual_period_invalid'];
         yield 'neexistující datum' => [['accrual_from' => '2091-02-31', 'accrual_to' => '2092-06-30'], 'accrual_period_invalid'];
-        yield 'závazek' => [['side' => 'payable', 'accrual_from' => '2091-07-01', 'accrual_to' => '2092-06-30'], 'accrual_receivable_only'];
     }
 
     /** @param array<string,mixed> $override */
@@ -574,7 +573,7 @@ final class ClosingOtherItemDeferredRevenueTest extends TestCase
         // Zdroje: zápis z 1. 8. N (živý k 31. 12. N) a v N+1 jeho storno i nový zápis. Původní
         // zápis z 1. 7. N stornovaný ještě v N zdrojem není, pojistku by neměl spouštět.
         self::assertSame([self::YEAR . '-08-01', (self::YEAR + 1) . '-02-01'],
-            \MyInvoice\Service\Accounting\Closing\AccrualDeferralService::otherItemSourceDates($this->db, $this->supplierId, $id));
+            \MyInvoice\Service\Accounting\Closing\AccrualDeferralService::otherItemSourceDates($this->db, $this->supplierId, $id, 'receivable'));
     }
 
     public function testUnchangedPeriodWritesNoAudit(): void
@@ -874,7 +873,10 @@ final class ClosingOtherItemDeferredRevenueTest extends TestCase
         $this->assertAccrualRefused($id, 'period_closed', 409, ['accrual_to' => '2092-12-31']);
     }
 
-    /** Přepnutí konceptu na závazek s obdobím poslaným beze změny (klient vrací celý objekt) ho zahodí. */
+    /**
+     * Přepnutí konceptu na závazek s obdobím poslaným beze změny (klient vrací celý objekt) ho
+     * zahodí: období výnosu není obdobím nákladu. Nové období závazku jde zadat znovu.
+     */
     public function testSwitchToPayableWithUnchangedPeriodDropsIt(): void
     {
         $id = $this->receivable(1200.00, self::YEAR . '-03-01', '2091-03-01', '2092-02-29', post: false);
@@ -883,8 +885,8 @@ final class ClosingOtherItemDeferredRevenueTest extends TestCase
             'accrual_from' => '2091-03-01', 'accrual_to' => '2092-02-29'], $this->userId);
 
         self::assertNull($item['accrual_from']);
-        $this->expectException(OtherItemException::class);
-        $this->items->update($this->supplierId, $id, ['accrual_from' => '2091-04-01', 'accrual_to' => '2092-02-29'], $this->userId);
+        $item = $this->items->update($this->supplierId, $id, ['accrual_from' => '2091-04-01', 'accrual_to' => '2092-02-29'], $this->userId);
+        self::assertSame('2091-04-01', substr((string) $item['accrual_from'], 0, 10));
     }
 
     /** Uzávěrka bere jen položky, jejichž období přesahuje rozvahový den, už v rekurzivním výběru. */
@@ -894,22 +896,22 @@ final class ClosingOtherItemDeferredRevenueTest extends TestCase
         $open = $this->receivable(36600.00, self::YEAR . '-07-01', '2091-07-01', '2092-06-30');
         $method = new \ReflectionMethod(\MyInvoice\Service\Accounting\Closing\AccrualDeferralService::class, 'otherItemSources');
 
-        $sources = $method->invoke(null, $this->db, $this->supplierId, self::ENDS_ON, null, self::ENDS_ON);
+        $sources = $method->invoke(null, $this->db, $this->supplierId, self::ENDS_ON, null, self::ENDS_ON, 'receivable');
 
         self::assertSame([$open], array_values(array_unique(array_column($sources['roots'], 'item_id'))));
         self::assertNotContains($ended, array_column($sources['roots'], 'item_id'));
     }
 
-    /** Uložený závazek s obdobím (stará data): úprava konceptu bez polí období ho zahodí, ne 422. */
-    public function testStoredPayableDraftDropsPeriodOnUpdate(): void
+    /** Úprava konceptu závazku bez změny strany uložené období ponechá (je to období nákladu). */
+    public function testStoredPayableDraftKeepsPeriodOnUpdate(): void
     {
         $item = $this->items->create($this->supplierId, ['side' => 'payable', 'counter_account_code' => '518'] + $this->payload(1200.00, self::YEAR . '-03-01'), $this->userId);
         $this->db->pdo()->prepare("UPDATE other_items SET accrual_from = '2091-03-01', accrual_to = '2092-02-29' WHERE id = ?")->execute([(int) $item['id']]);
 
-        $updated = $this->items->update($this->supplierId, (int) $item['id'], ['title' => 'Syntetický závazek upravený'], $this->userId);
+        $updated = $this->items->update($this->supplierId, (int) $item['id'], ['side' => 'payable', 'title' => 'Syntetický závazek upravený'], $this->userId);
 
-        self::assertNull($updated['accrual_from']);
-        self::assertNull($updated['accrual_to']);
+        self::assertSame('2091-03-01', substr((string) $updated['accrual_from'], 0, 10));
+        self::assertSame('2092-02-29', substr((string) $updated['accrual_to'], 0, 10));
     }
 
     /** Úprava konceptu bez období v těle ho ponechá, i po přechodu do daňové evidence. */
@@ -1096,14 +1098,10 @@ final class ClosingOtherItemDeferredRevenueTest extends TestCase
         self::assertSame([], $this->closing->deferredRevenueAccrualPreview($this->supplierId, $this->periodId)['items']);
     }
 
-    public function testPostedPeriodChangeIsRefusedForDraftClosedPeriodAndPayable(): void
+    public function testPostedPeriodChangeIsRefusedForDraftAndClosedPeriod(): void
     {
         $draft = $this->receivable(1000.00, self::YEAR . '-07-01', null, null, post: false);
         $this->assertAccrualRefused($draft, 'is_draft', 409);
-
-        $payable = $this->items->create($this->supplierId, ['side' => 'payable', 'counter_account_code' => '518'] + $this->payload(1000.00, self::YEAR . '-07-01'), $this->userId);
-        $this->items->post($this->supplierId, (int) $payable['id'], $this->userId);
-        $this->assertAccrualRefused((int) $payable['id'], 'accrual_receivable_only', 422);
 
         $posted = $this->receivable(1000.00, self::YEAR . '-07-01', null, null);
         foreach (['closed', 'reviewed', 'approved'] as $status) {
@@ -1333,8 +1331,8 @@ final class ClosingOtherItemDeferredRevenueTest extends TestCase
         self::assertSame([], $this->closing->deferredRevenueAccrualPreview($this->supplierId, $this->periodId)['items']);
     }
 
-    /** Závazek s obdobím (např. ze starých dat) se neodkládá, i když ho validace nepustí. */
-    public function testPayableWithStoredPeriodIsNotDeferred(): void
+    /** Závazek s obdobím odkládá náklad (381), do odkladu výnosů nepatří ani s výnosovým protiúčtem. */
+    public function testPayableWithStoredPeriodIsNotDeferredAsRevenue(): void
     {
         $item = $this->items->create($this->supplierId, ['side' => 'payable', 'counter_account_code' => '648'] + $this->payload(36600.00, self::YEAR . '-07-01'), $this->userId);
         $this->db->pdo()->prepare("UPDATE other_items SET accrual_from = '2091-07-01', accrual_to = '2092-06-30' WHERE id = ?")->execute([(int) $item['id']]);

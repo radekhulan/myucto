@@ -210,7 +210,7 @@ describe('OtherItemDetail', () => {
     expect(wrapper.get('[data-test="accrual-period"]').text()).toBe('other_items.accrual.none')
     await wrapper.get('[data-test="accrual-edit"]').trigger('click')
     // Pole Od/Do se otevřou rovnou, nápověda je vidět u nich (ne jen v title).
-    expect(wrapper.get('[data-test="accrual-hint"]').text()).toBe('other_items.accrual.hint')
+    expect(wrapper.get('[data-test="accrual-hint"]').text()).toBe('other_items.accrual.hint_receivable')
     dateInput(wrapper, 'accrual-from').vm.$emit('update:modelValue', '2099-07-01')
     dateInput(wrapper, 'accrual-to').vm.$emit('update:modelValue', '2100-06-30')
     await wrapper.get('[data-test="accrual-form"]').trigger('submit')
@@ -245,7 +245,7 @@ describe('OtherItemDetail', () => {
 
   it.each([
     'period_closed', 'accrual_deferral_posted', 'accrual_period_incomplete', 'accrual_period_invalid',
-    'accrual_not_posted', 'is_draft', 'accrual_receivable_only', 'accrual_double_entry_only',
+    'accrual_not_posted', 'is_draft', 'accrual_double_entry_only',
   ])('odmítnutou změnu období %s ohlásí přeloženou hláškou u polí', async (code) => {
     m.mode = 'double_entry'
     m.get.mockResolvedValue({ id: 9, side: 'receivable', kind: 'claim', title: 'Syntetický nájem', partner_name: null,
@@ -412,7 +412,19 @@ describe('OtherItemDetail', () => {
     expect(m.toastError).toHaveBeenCalledWith('other_items.accrual.error.accrual_deferral_posted')
   })
 
-  it('období rozlišení výnosu neukáže u závazku, v daňové evidenci ani úpravu u konceptu', async () => {
+  it('u zaúčtovaného závazku v podvojném účetnictví nabídne období rozlišení nákladu', async () => {
+    m.mode = 'double_entry'
+    m.get.mockResolvedValue({ id: 9, side: 'payable', kind: 'rent', title: 'Syntetické nájemné', partner_name: null,
+      issued_on: '2099-07-01', due_on: '2099-07-15', currency: 'CZK', amount: 3000, paid_amount: 0, remaining_amount: 3000,
+      status: 'posted', journal_entry_id: 77, accrual_from: null, accrual_to: null })
+    const wrapper = shallowMount(OtherItemDetail)
+    await flushPromises()
+    expect(wrapper.get('[data-test="accrual"]').text()).toContain('other_items.accrual.label_payable')
+    await wrapper.get('[data-test="accrual-edit"]').trigger('click')
+    expect(wrapper.get('[data-test="accrual-hint"]').text()).toBe('other_items.accrual.hint_payable')
+  })
+
+  it('období rozlišení neukáže v daňové evidenci bez uloženého období ani úpravu u konceptu', async () => {
     const wrapper = shallowMount(OtherItemDetail)
     await flushPromises()
     expect(wrapper.find('[data-test="accrual"]').exists()).toBe(false)

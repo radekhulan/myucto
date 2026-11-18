@@ -1389,8 +1389,12 @@ const canOpenNextStage = computed(() => ['closed', 'reviewed', 'approved'].inclu
                       </tr>
                     </thead>
                     <tbody>
-                      <tr v-for="it in peAccrualPreview.items" :key="it.item_id" class="border-b border-neutral-100">
-                        <td class="py-1 pr-2">{{ it.vendor_invoice_number }}<span class="block text-xs text-neutral-400">{{ it.description }}</span></td>
+                      <tr v-for="(it, i) in peAccrualPreview.items" :key="`${it.source}:${it.item_id}:${it.credit_account}:${i}`" class="border-b border-neutral-100">
+                        <td class="py-1 pr-2">
+                          <RouterLink v-if="it.other_item_id !== null" :to="`/other-items/${it.other_item_id}`" class="text-primary-700 hover:underline">{{ it.vendor_invoice_number }}</RouterLink>
+                          <span v-else>{{ it.vendor_invoice_number }}</span>
+                          <span class="block text-xs text-neutral-400">{{ it.description }}</span>
+                        </td>
                         <td class="py-1 px-2 whitespace-nowrap">{{ formatDate(it.accrual_from) }} – {{ formatDate(it.accrual_to) }}</td>
                         <td class="py-1 px-2 text-right font-mono">{{ it.credit_account }}</td>
                         <td class="py-1 pl-2 text-right font-mono">{{ formatMoney(it.deferred_amount) }}</td>
