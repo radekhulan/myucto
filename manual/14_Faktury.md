@@ -78,8 +78,8 @@ Typický začátek měsíce:
 3. V liště nahoře klikněte na **Vystavit znovu (N)** a potvrďte. Vzniknou koncepty s
    posunutými měsíci v popiscích položek (`Konzultace 3/2026` se změní na `Konzultace 4/2026`).
 4. Projděte koncepty a podle potřeby je upravte (hodiny navíc, sleva).
-5. Koncepty znovu označte a klikněte na **Vystavit (N)**. Každý dostane číslo podle šablony
-   číslování a vygeneruje se PDF.
+5. Koncepty znovu označte a klikněte na **Vystavit (N)**. Potvrzení ukáže, kolik konceptů si
+   ponechá ručně vyplněné číslo a kolik dostane číslo z číselné řady. Pak se vygeneruje PDF.
 6. Vystavené faktury označte a klikněte na **Odeslat klientovi (N)**.
 
 **Jak poznáte, že je hotovo:** faktury mají ve sloupci **Stav** hodnotu **Odesláno**.
@@ -463,7 +463,7 @@ Po zaškrtnutí více faktur se nahoře objeví lišta s akcemi:
 <!-- cols: 24 46 30 -->
 | Akce | Funkce | Aplikuje se na |
 |---|---|---|
-| **Vystavit (N)** | Hromadně vystaví vybrané koncepty. Každý dostane variabilní symbol podle šablony číslování, akce je nevratná | Koncepty |
+| **Vystavit (N)** | Hromadně vystaví vybrané koncepty. Koncept s ručně vyplněným číslem si ho ponechá, koncept bez čísla dostane číslo z číselné řady. Potvrzení ukáže počty obou skupin, akce je nevratná | Koncepty |
 | **Vystavit znovu (N)** | Vytvoří klony jako nové koncepty s posunutým měsícem v popiscích položek (`3/2026 → 4/2026`). Žádný se nevystaví ani neodešle automaticky | Faktury libovolného stavu |
 | **Odeslat klientovi (N)** | Hromadně odešle e-mail s PDF přílohou na hlavní adresu klienta a fakturační e-maily zakázky | Vystavené, neodeslané |
 | **Označit za zaplacené (N)** | Ručně označí jako zaplacené dnešním datem | Vystavené / odeslané / upomínkované |

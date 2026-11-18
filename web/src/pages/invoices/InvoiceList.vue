@@ -10,6 +10,7 @@ import { invoicesApi, type MonthGroup, type InvoiceListItem, type InvoiceItem,
   type OssBulkResult, type OssBulkScope, type OssBulkSet, type OssBulkFailure, type OssReviewScope } from '@/api/invoices'
 import { formatMoney, formatMoneyWhole, formatUnitPrice, formatDate, formatMonth, formatNumber, statusLabel, typeLabel, statusBadgeClass, isOverdue, invoiceRowClass, displayStatus, taxDateClass } from '@/composables/useFormat'
 import { isCalendarType } from '@/utils/invoiceCalendar'
+import { bulkIssueConfirmMessage } from '@/pages/invoices/invoiceBulkIssue'
 import { mergeMonthGroups } from '@/utils/monthGroups'
 import { useRowLink } from '@/composables/useRowLink'
 import { useListNavigationSource } from '@/composables/useListNavigation'
@@ -770,7 +771,7 @@ async function bulkIssue() {
     toast.warning(t('invoice.bulk_issue_no_eligible'))
     return
   }
-  if (!confirm(t('invoice.bulk_issue_confirm', { n: list.length }))) return
+  if (!confirm(bulkIssueConfirmMessage(list, t))) return
   bulkBusy.value = true
   let okCount = 0
   const errors: string[] = []
