@@ -1251,6 +1251,7 @@ final class InvoiceRepository
 
         // Grupování po měsíci
         $grouped = [];
+        $pageIds = [];
         foreach ($rows as $row) {
             $row = $this->castInvoice($row);
             $row['payment_varsymbol'] = VariableSymbolNormalizer::forInvoicePayment($row);
@@ -1264,62 +1265,27 @@ final class InvoiceRepository
                 ];
             }
             $grouped[$month]['invoices'][] = $row;
-            $grouped[$month]['count']++;
-
-            $cur = $row['currency'];
-            if (!isset($grouped[$month]['totals_per_currency'][$cur])) {
-                $grouped[$month]['totals_per_currency'][$cur] = [
-                    'currency'        => $cur,
-                    'without_vat'     => 0.0,
-                    'vat'             => 0.0,
-                    'with_vat'        => 0.0,
-                    // Predikce: koncepty (draft) vystavených faktur/dobropisů – ještě nejsou
-                    // obratem, ale ukazují, kolik je „rozpracováno" k vystavení v daném měsíci.
-                    'draft_without_vat' => 0.0,
-                    'draft_vat'         => 0.0,
-                    'draft_with_vat'    => 0.0,
-                ];
-            }
-            // Do obratu počítáme jen vystavené faktury + dobropisy + daňové doklady
-            // k přijaté platbě (finál k záloze pak nese jen zbytek přes odpočtové řádky).
-            // Vyloučeno: draft (koncepty), proforma (zálohovky), cancelled (storno), cancellation (interní storno).
-            //
-            // Dobropis obrat vždy SNIŽUJE (§ 4a ZDPH), proto se u něj znaménko vynucuje.
-            // Dřív se jen spoléhalo na to, že má záporné částky — u dobropisu chybně
-            // zadaného s kladným součtem (žádná negace; blokovaná je jen dvojí, viz
-            // InvoiceAmountPolicy) by se obrat NAVÝŠIL. To je citlivé: obrat rozhoduje
-            // o limitu registrace k DPH. Pro správně zadaný dobropis je to no-op.
-            $sign = static fn (float $v): float => $v;
-            if ($row['invoice_type'] === 'credit_note') {
-                $sign = static fn (float $v): float => -abs($v);
-            }
-            if (in_array($row['status'], ['issued', 'sent', 'reminded', 'paid'], true)
-                && in_array($row['invoice_type'], ['invoice', 'credit_note', 'tax_document'], true)) {
-                $grouped[$month]['totals_per_currency'][$cur]['without_vat'] += $sign((float) $row['total_without_vat']);
-                $grouped[$month]['totals_per_currency'][$cur]['vat']         += $sign((float) $row['total_vat']);
-                $grouped[$month]['totals_per_currency'][$cur]['with_vat']    += $sign((float) $row['total_with_vat']);
-            } elseif ($row['status'] === 'draft'
-                && in_array($row['invoice_type'], ['invoice', 'credit_note', 'tax_document'], true)) {
-                // Koncepty do samostatné „predikce" (sčítají se k obratu až na FE pro predikovaný součet).
-                $grouped[$month]['totals_per_currency'][$cur]['draft_without_vat'] += $sign((float) $row['total_without_vat']);
-                $grouped[$month]['totals_per_currency'][$cur]['draft_vat']         += $sign((float) $row['total_vat']);
-                $grouped[$month]['totals_per_currency'][$cur]['draft_with_vat']    += $sign((float) $row['total_with_vat']);
-            }
+            $pageIds[] = (int) $row['id'];
         }
 
-        // Round totals
-        foreach ($grouped as &$m) {
-            foreach ($m['totals_per_currency'] as &$t) {
-                $t['without_vat']       = round($t['without_vat'], 2);
-                $t['vat']               = round($t['vat'], 2);
-                $t['with_vat']          = round($t['with_vat'], 2);
-                $t['draft_without_vat'] = round($t['draft_without_vat'], 2);
-                $t['draft_vat']         = round($t['draft_vat'], 2);
-                $t['draft_with_vat']    = round($t['draft_with_vat'], 2);
+        // Počet a součty hlavičky měsíce se berou z databáze za CELÝ měsíc, ne z řádků
+        // načtené stránky (#392). Jinak by hlavička ukazovala jen to, co uživatel už
+        // doscrolloval. Bez stránkování je načtené všechno, omezení netřeba; v plynulém
+        // zobrazení (bez měsíců) se součet drží řádků stránky.
+        if ($grouped !== []) {
+            $scope = null;
+            if ($perPage > 0) {
+                $scope = $groupByMonth
+                    ? ['months' => array_keys($grouped)]
+                    : ['ids' => $pageIds];
             }
-            $m['totals_per_currency'] = array_values($m['totals_per_currency']);
+            $summaries = $this->monthSummaries($whereSql, $params, $groupByMonth, $scope);
+            foreach ($grouped as $month => &$m) {
+                $m['count'] = $summaries[$month]['count'] ?? count($m['invoices']);
+                $m['totals_per_currency'] = $summaries[$month]['totals_per_currency'] ?? [];
+            }
+            unset($m);
         }
-        unset($m, $t);
 
         $meta = ['total' => $total ?? count($rows)];
         if ($perPage > 0) {
@@ -1332,6 +1298,92 @@ final class InvoiceRepository
             'data' => array_values($grouped),
             'meta' => $meta,
         ];
+    }
+
+    /**
+     * Počet dokladů a součty po měnách pro hlavičky měsíců seznamu, nad stejným WHERE
+     * jako seznam ({@see listWhere()}). Agreguje databáze, takže hlavička ukazuje celý
+     * měsíc bez ohledu na to, kolik řádků je načteno (#392).
+     *
+     * Do obratu jdou jen vystavené faktury, dobropisy a daňové doklady k přijaté platbě
+     * (finál k záloze nese jen zbytek přes odpočtové řádky). Vyloučeno: koncepty,
+     * proformy, storna a interní storno. Koncepty týchž typů tvoří samostatnou
+     * „predikci" (draft_*), k obratu se přičítají až na frontendu.
+     *
+     * Dobropis obrat vždy SNIŽUJE (§ 4a ZDPH), proto se u něj znaménko vynucuje
+     * (-ABS). U dobropisu chybně zadaného s kladným součtem by se jinak obrat NAVÝŠIL,
+     * a obrat rozhoduje o limitu registrace k DPH. Pro správně zadaný dobropis no-op.
+     *
+     * @param list<mixed> $params
+     * @param array{months?: list<string>, ids?: list<int>}|null $scope omezení na měsíce
+     *        (YYYY-MM) nebo ID dokladů stránky; null = celý výběr
+     * @return array<string, array{count:int, totals_per_currency: list<array<string,mixed>>}>
+     */
+    public function monthSummaries(string $whereSql, array $params, bool $groupByMonth, ?array $scope = null): array
+    {
+        if (isset($scope['months'])) {
+            $months = array_values(array_filter(
+                $scope['months'],
+                static fn (string $m): bool => preg_match('/^\d{4}-\d{2}$/', $m) === 1,
+            ));
+            if ($months !== []) {
+                sort($months);
+                $last = new \DateTimeImmutable(end($months) . '-01');
+                $whereSql .= ' AND i.effective_tax_date >= ? AND i.effective_tax_date < ?';
+                $params[] = $months[0] . '-01';
+                $params[] = $last->modify('+1 month')->format('Y-m-d');
+            }
+        } elseif (isset($scope['ids'])) {
+            if ($scope['ids'] === []) {
+                return [];
+            }
+            $whereSql .= ' AND i.id IN (' . implode(',', array_fill(0, count($scope['ids']), '?')) . ')';
+            array_push($params, ...$scope['ids']);
+        }
+
+        $bucket = $groupByMonth ? "DATE_FORMAT(i.effective_tax_date, '%Y-%m')" : "''";
+        $types = "i.invoice_type IN ('invoice', 'credit_note', 'tax_document')";
+        $turnover = "i.status IN ('issued', 'sent', 'reminded', 'paid') AND $types";
+        $draft = "i.status = 'draft' AND $types";
+        $signed = static fn (string $col): string =>
+            "CASE WHEN i.invoice_type = 'credit_note' THEN -ABS(i.$col) ELSE i.$col END";
+        $sum = static fn (string $cond, string $col): string =>
+            "ROUND(COALESCE(SUM(CASE WHEN $cond THEN " . $signed($col) . " END), 0), 2)";
+
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT $bucket AS month_bucket, cur.code AS currency, COUNT(*) AS cnt,
+                    " . $sum($turnover, 'total_without_vat') . " AS without_vat,
+                    " . $sum($turnover, 'total_vat') . " AS vat,
+                    " . $sum($turnover, 'total_with_vat') . " AS with_vat,
+                    " . $sum($draft, 'total_without_vat') . " AS draft_without_vat,
+                    " . $sum($draft, 'total_vat') . " AS draft_vat,
+                    " . $sum($draft, 'total_with_vat') . " AS draft_with_vat
+               FROM invoices i
+               JOIN clients c ON c.id = i.client_id
+          LEFT JOIN projects p ON p.id = i.project_id
+               JOIN currencies cur ON cur.id = i.currency_id
+              WHERE $whereSql
+              GROUP BY month_bucket, cur.code
+              ORDER BY month_bucket, cur.code"
+        );
+        $stmt->execute($params);
+
+        $out = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $r) {
+            $month = (string) $r['month_bucket'];
+            $out[$month] ??= ['count' => 0, 'totals_per_currency' => []];
+            $out[$month]['count'] += (int) $r['cnt'];
+            $out[$month]['totals_per_currency'][] = [
+                'currency'          => (string) $r['currency'],
+                'without_vat'       => (float) $r['without_vat'],
+                'vat'               => (float) $r['vat'],
+                'with_vat'          => (float) $r['with_vat'],
+                'draft_without_vat' => (float) $r['draft_without_vat'],
+                'draft_vat'         => (float) $r['draft_vat'],
+                'draft_with_vat'    => (float) $r['draft_with_vat'],
+            ];
+        }
+        return $out;
     }
 
     /**

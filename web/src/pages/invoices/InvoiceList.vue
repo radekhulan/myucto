@@ -10,6 +10,7 @@ import { invoicesApi, type MonthGroup, type InvoiceListItem, type InvoiceItem,
   type OssBulkResult, type OssBulkScope, type OssBulkSet, type OssBulkFailure, type OssReviewScope } from '@/api/invoices'
 import { formatMoney, formatMoneyWhole, formatUnitPrice, formatDate, formatMonth, formatNumber, statusLabel, typeLabel, statusBadgeClass, isOverdue, invoiceRowClass, displayStatus, taxDateClass } from '@/composables/useFormat'
 import { isCalendarType } from '@/utils/invoiceCalendar'
+import { mergeMonthGroups } from '@/utils/monthGroups'
 import { useRowLink } from '@/composables/useRowLink'
 import { useListNavigationSource } from '@/composables/useListNavigation'
 import { useToast } from '@/composables/useToast'
@@ -882,34 +883,7 @@ async function bulkSend() {
   }
 }
 
-function mergeGroups(existing: MonthGroup[], incoming: MonthGroup[]): MonthGroup[] {
-  const byMonth = new Map<string, MonthGroup>()
-  for (const g of existing) byMonth.set(g.month, g)
-  for (const g of incoming) {
-    const cur = byMonth.get(g.month)
-    if (!cur) {
-      byMonth.set(g.month, g)
-      continue
-    }
-    cur.invoices.push(...g.invoices)
-    cur.count += g.count
-    // Merge totals_per_currency
-    for (const t of g.totals_per_currency) {
-      const found = cur.totals_per_currency.find(x => x.currency === t.currency)
-      if (found) {
-        found.without_vat = Math.round((found.without_vat + t.without_vat) * 100) / 100
-        found.vat         = Math.round((found.vat         + t.vat)         * 100) / 100
-        found.with_vat    = Math.round((found.with_vat    + t.with_vat)    * 100) / 100
-        found.draft_without_vat = Math.round((found.draft_without_vat + t.draft_without_vat) * 100) / 100
-        found.draft_vat         = Math.round((found.draft_vat         + t.draft_vat)         * 100) / 100
-        found.draft_with_vat    = Math.round((found.draft_with_vat    + t.draft_with_vat)    * 100) / 100
-      } else {
-        cur.totals_per_currency.push({ ...t })
-      }
-    }
-  }
-  return Array.from(byMonth.values())
-}
+const mergeGroups = (existing: MonthGroup[], incoming: MonthGroup[]): MonthGroup[] => mergeMonthGroups(existing, incoming)
 
 let loadSeq = 0
 async function load(reset = true) {
