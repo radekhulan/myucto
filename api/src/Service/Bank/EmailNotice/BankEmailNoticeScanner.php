@@ -363,14 +363,28 @@ final class BankEmailNoticeScanner
                 return $attachmentSummary + ['status' => 'match_failed', 'message_id' => $messageId, 'reason' => 'account_mapping_missing'];
             }
 
-            $tx = $this->repo->createTransactionFromNotice(
-                $targetSupplierId,
-                $notice,
-                'imap-' . $imapAccountId . ':' . ($messageId ?: $hash),
-                (float) ($mapping['amount_tolerance'] ?? 0.05),
-                $this->matcher,
-                isset($mapping['currency_code']) ? (string) $mapping['currency_code'] : null,
-            );
+            try {
+                $tx = $this->repo->createTransactionFromNotice(
+                    $targetSupplierId,
+                    $notice,
+                    'imap-' . $imapAccountId . ':' . ($messageId ?: $hash),
+                    (float) ($mapping['amount_tolerance'] ?? 0.05),
+                    $this->matcher,
+                    isset($mapping['currency_code']) ? (string) $mapping['currency_code'] : null,
+                );
+            } catch (ForeignCurrencyNoticeException $e) {
+                // Avízo přečtené správně, jen bez částky v měně účtu (#390). Není to chyba
+                // parseru, a proto ani položka v „Akcích pro tebe": pohyb doplní výpis.
+                $this->repo->recordMessage($base + [
+                    'provider_id' => $provider->id,
+                    'provider_code' => $provider->code,
+                    'status' => 'match_failed',
+                    'parsed_payload' => $notice->toArray(),
+                    'error_message' => $e->getMessage(),
+                ]);
+                $this->safePostProcess($settings, $message, 'failure');
+                return $attachmentSummary + ['status' => 'match_failed', 'message_id' => $messageId, 'reason' => 'foreign_currency_without_account_amount'];
+            }
             $match = $tx['match_result'];
             $matchedInvoiceId = isset($match['invoice_id']) ? (int) $match['invoice_id'] : null;
             // Spárování je úspěšné i u ODCHOZÍ platby na přijatou fakturu — matcher v tom

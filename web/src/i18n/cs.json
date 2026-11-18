@@ -27859,6 +27859,8 @@
     "field_message": "Zpráva",
     "field_bank_ref": "Reference banky",
     "field_balance": "Disponibilní zůstatek",
+    "field_original_amount": "Původní částka (cizí měna)",
+    "field_original_currency": "Původní měna",
     "ingest_notices": "Načítat bankovní avíza",
     "ingest_notices_hint": "Z těla e-mailu se čte avízo o pohybu a založí se z něj bankovní transakce. Vypněte, pokud vám banka posílá i PDF výpisy a avíza by pohyby zdvojovala - přílohy se dál zpracují podle přepínačů níže."
   },

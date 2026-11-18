@@ -153,6 +153,13 @@ final class RegexBankEmailNoticeParser extends AbstractBankEmailNoticeParser
         [$cpAccount, $cpBank] = $this->splitAccount((string) ($data['counterparty_account'] ?? ''));
         $postedAt = $this->parseDate((string) $data['posted_at']);
 
+        // Platba kartou v cizí měně (#390): `amount`/`currency` nesou částku v měně účtu,
+        // volitelné `original_amount`/`original_currency` částku nákupu. Bez obou polí
+        // se původní částka nezapisuje; s měnou účtu je pak porovná založení pohybu.
+        $originalAmount = trim((string) ($data['original_amount'] ?? ''));
+        $originalCurrency = trim((string) ($data['original_currency'] ?? ''));
+        $hasOriginal = $originalAmount !== '' && $originalCurrency !== '';
+
         return new ParsedBankEmailNotice(
             variableSymbol: $this->digitsOnly((string) ($data['variable_symbol'] ?? '')),
             amount: $this->applyDirection($this->parseAmount((string) $data['amount']), (string) ($data['direction'] ?? '')),
@@ -168,6 +175,8 @@ final class RegexBankEmailNoticeParser extends AbstractBankEmailNoticeParser
             balance: trim((string) ($data['balance'] ?? '')) !== ''
                 ? $this->parseAmount((string) $data['balance'])
                 : null,
+            originalAmount: $hasOriginal ? $this->parseAmount($originalAmount) : null,
+            originalCurrency: $hasOriginal ? $this->normalizeCurrency($originalCurrency) : null,
         );
     }
 }

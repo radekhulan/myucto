@@ -676,11 +676,10 @@ final class BankEmailNoticeRepository
         // takže parser defaultuje na CZK. Cílový účet je ale už vyřešený na currencies row,
         // jejíž kód (EUR…) přicházi jako $accountCurrency. Parserem defaultovaná měna
         // zůstává jen poslední fallback (např. nemapovaná auto-detekce bez měny účtu).
-        $currency = strtoupper(
-            $accountCurrency !== null && trim($accountCurrency) !== ''
-                ? trim($accountCurrency)
-                : $notice->currency
-        );
+        // Výslovně uvedenou cizí měnu ale měnou účtu přepsat nelze (#390): z 18 EUR by
+        // vzniklo 18 Kč. Avízo bez částky v měně účtu proto pohyb nezaloží.
+        $resolved = \MyInvoice\Service\Bank\EmailNotice\NoticeAccountAmount::resolve($notice, $accountCurrency);
+        $currency = $resolved->currency;
 
         // Měsíční výpis: avíza pro stejný účet/měnu/měsíc se sbírají do jednoho
         // bank_statements (source=email_notice), ať seznam výpisů nezaplaví 1 řádek/avízo.
@@ -763,17 +762,20 @@ final class BankEmailNoticeRepository
 
         $pdo->prepare(
             'INSERT INTO bank_transactions
-                (source, source_ref, statement_id, posted_at, amount, balance, currency, variable_symbol, constant_symbol,
+                (source, source_ref, statement_id, posted_at, amount, balance, currency, original_amount, original_currency,
+                 variable_symbol, constant_symbol,
                  counterparty_account, counterparty_bank, counterparty_name, card_last4, description, bank_ref, match_tolerance)
-             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
+             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
         )->execute([
             'email_notice',
             $transactionSourceRef,
             $statementId,
             $notice->postedAt,
-            $notice->amount,
+            $resolved->amount,
             $notice->balance,
             $currency,
+            $resolved->originalAmount,
+            $resolved->originalCurrency,
             // Avízo bez VS (odchozí platba, poplatek, karetní transakce) ukládáme jako
             // NULL, ne jako prázdný řetězec — sloupec je nullable a párování i sestavy
             // testují „VS není". Parsery vracejí '' a bez tohohle převodu by v DB vznikly
