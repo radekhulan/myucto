@@ -91,9 +91,8 @@ use Psr\Log\LoggerInterface;
  */
 final class ClosingService
 {
-    // `deferred_tax` následuje AŽ po `income_tax`: odložená daň stojí na rozdílech, které
-    // jsou známé teprve po zaúčtování odpisů a po vyčíslení splatné daně.
-    public const STEP_KEYS = ['precheck', 'depreciation', 'fx_revaluation', 'estimates', 'deferrals', 'provisions', 'income_tax', 'deferred_tax', 'stock', 'close_books', 'open_next'];
+    /** @see ClosingSteps::ALL */
+    public const STEP_KEYS = ClosingSteps::ALL;
 
     /**
      * Klíče kontrol, které staví {@see buildErrorChecks} v jednom průchodu.
@@ -254,19 +253,12 @@ final class ClosingService
     ) {}
 
     /**
-     * Pořadí kroků průvodce uzávěrkou. U neziskové organizace (504) jde krok Zásoby před
-     * daň: zápis zásob mění náklady 5xx, ze kterých vychází daňové posouzení a z něj DPPO,
-     * takže daň spočítaná před zásobami by se po kroku Zásoby musela opravovat (#401).
-     * U ostatních firem zůstává zavedené pořadí; výpočet DPPO tam nezaúčtované zásoby
-     * promítne projekcí uzávěrky. Frontend přebírá pořadí odsud (`step_order`).
-     *
+     * @see ClosingSteps::order()
      * @return list<string>
      */
     public static function stepOrder(?string $framework): array
     {
-        return $framework === AccountingFrameworkService::CZ_504
-            ? ['precheck', 'depreciation', 'fx_revaluation', 'estimates', 'deferrals', 'provisions', 'stock', 'income_tax', 'deferred_tax', 'close_books', 'open_next']
-            : ['precheck', 'depreciation', 'fx_revaluation', 'estimates', 'deferrals', 'provisions', 'income_tax', 'stock', 'close_books', 'open_next'];
+        return ClosingSteps::order($framework);
     }
 
     // ── stav pro FE ───────────────────────────────────────────────────────────
@@ -810,7 +802,7 @@ final class ClosingService
      */
     public function confirmStep(int $supplierId, int $periodId, string $stepKey, string $status, ?string $note, int $rowVersion, array $meta = []): array
     {
-        if (!in_array($stepKey, ['depreciation', 'estimates', 'deferrals', 'provisions', 'income_tax', 'deferred_tax'], true)) {
+        if (!in_array($stepKey, ClosingSteps::CONFIRMABLE, true)) {
             throw new ClosingException('unknown_step', 'Krok "' . $stepKey . '" nelze potvrdit tímto způsobem.');
         }
         if (!in_array($status, ['done', 'skipped'], true)) {
@@ -819,6 +811,10 @@ final class ClosingService
         return $this->tx(function () use ($supplierId, $periodId, $stepKey, $status, $note, $rowVersion, $meta): array {
             $period = $this->lockPeriod($supplierId, $periodId, $rowVersion);
             $this->assertStatus($period, $stepKey === 'depreciation' ? ['open', 'closing'] : ['closing']);
+            if ($stepKey === 'income_tax' && $status === 'done') {
+                $this->assertStockBeforeIncomeTax($supplierId, $periodId,
+                    $this->roleProfile($supplierId, (string) $period['ends_on'])->framework === AccountingFrameworkService::CZ_504);
+            }
             $existing = $this->stepsMap($supplierId, $periodId)[$stepKey];
             $this->closing->upsertStep(
                 $supplierId,
@@ -3581,14 +3577,7 @@ final class ClosingService
             $endsOn = (string) $period['ends_on'];
             $fiscalYear = (int) $period['fiscal_year'];
             $is504 = $this->roleProfile($supplierId, $endsOn)->framework === AccountingFrameworkService::CZ_504;
-            // U 504 vstupují zásoby do daňového posouzení: daň se zaúčtuje až po kroku Zásoby
-            // ({@see stepOrder()}, #401). Ostatní firmy pořadí nevynucují.
-            if ($is504
-                && $this->stockStepRequired($supplierId)
-                && !$this->stepsComplete($this->stepsMap($supplierId, $periodId, true), ['stock'])) {
-                throw new ClosingException('stock_step_first',
-                    'U neziskové organizace se nejdřív provede krok Zásoby: mění náklady, ze kterých vychází daňové posouzení a výpočet daně.', 409);
-            }
+            $this->assertStockBeforeIncomeTax($supplierId, $periodId, $is504);
 
             // Zdroj a hodnota návrhu (stejná logika jako incomeTaxPreview): přednost má
             // finalizované DPPO přiznání roku, jinak orientační dopočet z aktuálních knih.
@@ -6798,6 +6787,20 @@ final class ClosingService
             }
         }
         return true;
+    }
+
+    /**
+     * U 504 vstupují zásoby do daňového posouzení: daň se zaúčtuje i potvrdí jako provedená až po kroku
+     * Zásoby ({@see ClosingSteps::order()}, #401). Ostatní firmy pořadí nevynucují.
+     */
+    private function assertStockBeforeIncomeTax(int $supplierId, int $periodId, bool $is504): void
+    {
+        if ($is504
+            && $this->stockStepRequired($supplierId)
+            && !$this->stepsComplete($this->stepsMap($supplierId, $periodId, true), ['stock'])) {
+            throw new ClosingException('stock_step_first',
+                'U neziskové organizace se nejdřív provede krok Zásoby: mění náklady, ze kterých vychází daňové posouzení a výpočet daně.', 409);
+        }
     }
 
     /**

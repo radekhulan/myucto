@@ -268,6 +268,13 @@ final class NonprofitReferenceAssociationEndToEndTest extends TestCase
         } catch (\MyInvoice\Service\Accounting\Closing\ClosingException $e) {
             self::assertSame('stock_step_first', $e->errorCode);
         }
+        // Ani ruční potvrzení kroku (cesta převodů z jiných systémů) pořadí neobejde.
+        try {
+            $closing->confirmStep($this->supplier, $this->period, 'income_tax', 'done', null, $version, ['user_id' => $this->actor]);
+            self::fail('Krok daně 504 šel potvrdit před krokem Zásoby.');
+        } catch (\MyInvoice\Service\Accounting\Closing\ClosingException $e) {
+            self::assertSame('stock_step_first', $e->errorCode);
+        }
     }
 
     public function testBalanceSheetEntriesDoNotStaleConfirmedAssessment(): void

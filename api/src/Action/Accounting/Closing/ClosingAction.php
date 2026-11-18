@@ -12,6 +12,7 @@ use MyInvoice\Repository\AccountingFrameworkRepository;
 use MyInvoice\Service\Accounting\AccountingFrameworkService;
 use MyInvoice\Service\Accounting\Closing\ClosingException;
 use MyInvoice\Service\Accounting\Closing\ClosingService;
+use MyInvoice\Service\Accounting\Closing\ClosingSteps;
 use MyInvoice\Service\Accounting\FindingRemedyService;
 use MyInvoice\Service\Accounting\PostingException;
 use MyInvoice\Service\Bank\Match\PaymentMatchAuditChecker;
@@ -52,9 +53,6 @@ final class ClosingAction
     use AccountingActionSupport;
     use GuardsAccountingMode;
 
-    private const RUNNABLE_STEPS  = ['precheck', 'depreciation', 'fx_revaluation', 'estimates', 'deferrals', 'provisions', 'income_tax', 'deferred_tax', 'stock'];
-    private const REVERTIBLE_STEPS = ['precheck', 'depreciation', 'fx_revaluation', 'estimates', 'deferrals', 'provisions', 'income_tax', 'deferred_tax', 'stock', 'close_books', 'open_next'];
-    private const ASSIST_STEPS = ['estimates', 'deferrals', 'provisions'];
     private const ASSIST_RULE_KEYS = [
         'provisions' => ['reserve.repairs.create', 'reserve.repairs.release'],
         'estimates' => ['estimate.asset', 'estimate.liability'],
@@ -799,7 +797,7 @@ final class ClosingAction
         $periodId = (int) ($args['id'] ?? 0);
         $step = (string) ($args['step'] ?? '');
 
-        if (!in_array($step, self::RUNNABLE_STEPS, true)) {
+        if (!in_array($step, ClosingSteps::RUNNABLE, true)) {
             return Json::error($response, 'validation_failed',
                 "Krok '{$step}' nelze spustit tímto endpointem — close_books = POST /close, open_next = POST /open-next.", 422);
         }
@@ -948,7 +946,7 @@ final class ClosingAction
         $periodId = (int) ($args['id'] ?? 0);
         $step = (string) ($args['step'] ?? '');
 
-        if (!in_array($step, self::REVERTIBLE_STEPS, true)) {
+        if (!in_array($step, ClosingSteps::REVERTIBLE, true)) {
             return Json::error($response, 'validation_failed', "Neznámý krok uzávěrky '{$step}'.", 422);
         }
         $rowVersion = $this->rowVersion($request, $response, $err);
@@ -978,7 +976,7 @@ final class ClosingAction
         if ($rowVersion === null) return $err;
 
         $step = trim((string) ($body['step'] ?? ''));
-        if (!in_array($step, self::ASSIST_STEPS, true)
+        if (!in_array($step, ClosingSteps::ASSIST, true)
             || ($step === 'provisions' && !$this->periodUsesFramework504($supplierId, $periodId))) {
             return Json::error($response, 'validation_failed', 'Nepodporovaný krok asistovaného zápisu.', 422);
         }
