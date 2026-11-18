@@ -22323,6 +22323,8 @@
       "income_tax": {
         "suggested": "Proposal from the CIT return",
         "computed_from_ledger": "Computed from the ledger (no finalized return) — verify before booking",
+        "computed_from_assessment": "Computed from the confirmed tax assessment (no finalised return) - check before posting",
+        "suggestion_unavailable": "The tax cannot be suggested yet: {reason}",
         "stock_pending": "The inventory close (step 8) has not run yet. Under method B the closing stock is removed from expenses, so the tax base will still change — do not rely on this figure yet. Book the inventory first, then come back.",
         "no_return": "No finalized CIT return for the year — enter the amount manually per the tax-base adjustments report.",
         "amount": "Income tax payable",

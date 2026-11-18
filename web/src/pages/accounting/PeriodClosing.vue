@@ -58,8 +58,8 @@ const BASE_STEP_ORDER: ClosingStepKey[] = [
 ]
 
 const state = ref<ClosingState | null>(null)
-const stepOrder = computed<ClosingStepKey[]>(() => state.value?.accounting_framework === 'cz_504'
-  ? BASE_STEP_ORDER.flatMap(key => key === 'income_tax' ? [key, 'deferred_tax'] : [key]) : BASE_STEP_ORDER)
+// Pořadí kroků určuje server (u 504 jde krok Zásoby před daň); výchozí pořadí jen dokud stav nedorazí.
+const stepOrder = computed<ClosingStepKey[]>(() => state.value?.step_order ?? BASE_STEP_ORDER)
 const loading = ref(false)
 const busy = ref(false)
 const selected = ref<ClosingStepKey>('precheck')
@@ -1562,6 +1562,13 @@ const canOpenNextStage = computed(() => ['closed', 'reviewed', 'approved'].inclu
               <div v-else-if="incomeTaxPreview.suggested_source === 'computed_from_ledger'" class="text-warning-700">
                 {{ t('accounting.closing.income_tax.computed_from_ledger') }}:
                 <strong class="font-mono">{{ formatMoney(incomeTaxPreview.suggested_amount || 0) }}</strong>
+              </div>
+              <div v-else-if="incomeTaxPreview.suggested_source === 'computed_from_assessment'" class="text-warning-700" data-test="income-tax-from-assessment">
+                {{ t('accounting.closing.income_tax.computed_from_assessment') }}:
+                <strong class="font-mono">{{ formatMoney(incomeTaxPreview.suggested_amount || 0) }}</strong>
+              </div>
+              <div v-else-if="incomeTaxPreview.suggested_unavailable" class="rounded-md bg-warning-50 px-3 py-2 text-warning-800" data-test="income-tax-unavailable">
+                {{ t('accounting.closing.income_tax.suggestion_unavailable', { reason: incomeTaxPreview.suggested_unavailable.message }) }}
               </div>
               <!-- Uzávěrka zásob (krok 8) je AŽ ZA tímhle krokem, přitom mění náklady:
                    způsobem B se konečný stav zásob odúčtuje z 501/504, takže základ daně

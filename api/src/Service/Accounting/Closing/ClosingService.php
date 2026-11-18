@@ -248,7 +248,26 @@ final class ClosingService
         // dnů sdílí uzávěrka s výkazy s průběžným časovým rozlišením.
         private readonly AccrualDeferralService $accruals,
         private readonly \MyInvoice\Service\Accounting\OtherItemMonthlyCheck $otherItemChecks,
+        // Nativní zdroj DPPO 504 pro návrh daně v kroku Daň z příjmů (#400). Mimo 504 ho
+        // DppoReturnDataProvider::gather nepoužije, takže ostatní firmy počítají jako dosud.
+        private readonly \MyInvoice\Service\Tax\Nonprofit\NonprofitDppoDataProvider $nonprofitDppo,
     ) {}
+
+    /**
+     * Pořadí kroků průvodce uzávěrkou. U neziskové organizace (504) jde krok Zásoby před
+     * daň: zápis zásob mění náklady 5xx, ze kterých vychází daňové posouzení a z něj DPPO,
+     * takže daň spočítaná před zásobami by se po kroku Zásoby musela opravovat (#401).
+     * U ostatních firem zůstává zavedené pořadí; výpočet DPPO tam nezaúčtované zásoby
+     * promítne projekcí uzávěrky. Frontend přebírá pořadí odsud (`step_order`).
+     *
+     * @return list<string>
+     */
+    public static function stepOrder(?string $framework): array
+    {
+        return $framework === AccountingFrameworkService::CZ_504
+            ? ['precheck', 'depreciation', 'fx_revaluation', 'estimates', 'deferrals', 'provisions', 'stock', 'income_tax', 'deferred_tax', 'close_books', 'open_next']
+            : ['precheck', 'depreciation', 'fx_revaluation', 'estimates', 'deferrals', 'provisions', 'income_tax', 'stock', 'close_books', 'open_next'];
+    }
 
     // ── stav pro FE ───────────────────────────────────────────────────────────
 
@@ -281,6 +300,7 @@ final class ClosingService
 
         $framework = $this->roleProfile($supplierId, (string) $period['ends_on'])->framework;
         return ($framework === AccountingFrameworkService::CZ_504 ? ['accounting_framework' => $framework] : []) + [
+            'step_order' => self::stepOrder($framework),
             'period' => $period,
             'row_version' => (int) $period['row_version'],
             'steps' => $stepList,
@@ -3436,7 +3456,7 @@ final class ClosingService
      * Náhled podkladu splatné daně (GET). Přednabídne částku z finalizovaného DPPO
      * přiznání téhož roku (řádné/opravné); pokud takové přiznání ještě neexistuje
      * (běžný stav během uzávěrky), dopočítá ji z AKTUÁLNÍHO účetnictví ({@see
-     * computeIncomeTaxFromLedger}). `suggested_source` rozlišuje zdroj částky —
+     * incomeTaxFromLedger}). `suggested_source` rozlišuje zdroj částky —
      * dopočtenou si účetní musí před zaúčtováním ověřit. Nezaúčtovává nic — účetní
      * částku potvrdí/upraví v {@see runIncomeTax}.
      *
@@ -3455,9 +3475,10 @@ final class ClosingService
         $taxpayerType = $this->supplierTaxpayerType($supplierId);
         $applicable = $taxpayerType !== 'fo';
         $fromReturn = $applicable ? $this->taxReturns->findLastKnownTax($supplierId, $fiscalYear, 'po') : null;
-        $computed = $fromReturn === null && $applicable
-            ? $this->computeIncomeTaxFromLedger($supplierId, $fiscalYear)
-            : null;
+        $ledger = $fromReturn === null && $applicable
+            ? $this->incomeTaxFromLedger($supplierId, $fiscalYear)
+            : ['amount' => null, 'source' => null, 'reason' => null];
+        $computed = $ledger['amount'];
         $suggested = $fromReturn ?? $computed;
         $existing = $this->journal->findBySource($supplierId, 'income_tax', $periodId);
         $step = $this->stepsMap($supplierId, $periodId)['income_tax'];
@@ -3466,7 +3487,9 @@ final class ClosingService
             'as_of' => $endsOn,
             'period' => ['id' => (int) $period['id'], 'fiscal_year' => $fiscalYear],
             'suggested_amount' => $suggested,
-            'suggested_source' => $fromReturn !== null ? 'finalized_return' : ($computed !== null ? 'computed_from_ledger' : null),
+            'suggested_source' => $fromReturn !== null ? 'finalized_return' : ($computed !== null ? $ledger['source'] : null),
+            // Proč návrh chybí (např. u 504 chybí aktuální potvrzené daňové posouzení).
+            'suggested_unavailable' => $suggested === null ? $ledger['reason'] : null,
             'has_finalized_return' => $fromReturn !== null,
             'taxpayer_type' => $taxpayerType,
             'applicable' => $applicable,
@@ -3490,20 +3513,35 @@ final class ClosingService
      * si volal sám sebe). Read-only, nic neúčtuje. Chyba v podkladech (chybějící období apod.)
      * dopočet jen tiše přeskočí — nesmí shodit celý náhled kroku.
      */
-    private function computeIncomeTaxFromLedger(int $supplierId, int $fiscalYear): ?float
+    /**
+     * U neziskové organizace (504) staví podklady nativní zdroj DPPO nad potvrzeným daňovým
+     * posouzením ({@see \MyInvoice\Service\Tax\Nonprofit\NonprofitDppoDataProvider}), stejně
+     * jako výpočet přiznání; zdroj návrhu je pak `computed_from_assessment`. Bez aktuálního
+     * posouzení návrh chybí a `reason` řekne proč (#400). Ostatní firmy beze změny.
+     *
+     * @return array{amount:?float, source:?string, reason:?array{code:string, message:string}}
+     */
+    private function incomeTaxFromLedger(int $supplierId, int $fiscalYear): array
     {
         try {
-            $provider = new DppoReturnDataProvider($this->db, $this->periods, $this->nonDeductibleCosts, null);
+            $provider = new DppoReturnDataProvider($this->db, $this->periods, $this->nonDeductibleCosts, null,
+                nonprofit: $this->nonprofitDppo);
             $data = $provider->gather($supplierId, $fiscalYear);
             if ($data['period'] === null) {
-                return null;
+                return ['amount' => null, 'source' => null, 'reason' => null];
             }
             $constants = $this->taxConstants->forYear($fiscalYear);
             $result = $this->dppoCalc->compute($data, [], $constants);
-            return round((float) ($result['tax'] ?? 0), 2);
+            return [
+                'amount' => round((float) ($result['tax'] ?? 0), 2),
+                'source' => isset($data['nonprofit']) ? 'computed_from_assessment' : 'computed_from_ledger',
+                'reason' => null,
+            ];
+        } catch (\MyInvoice\Service\Tax\Return\TaxReturnException $e) {
+            return ['amount' => null, 'source' => null, 'reason' => ['code' => $e->errorCode, 'message' => $e->getMessage()]];
         } catch (\Throwable $e) {
             $this->logger->warning('Dopočet daně z příjmů z knih se nezdařil: ' . $e->getMessage(), ['exception' => $e]);
-            return null;
+            return ['amount' => null, 'source' => null, 'reason' => null];
         }
     }
 
@@ -3539,13 +3577,22 @@ final class ClosingService
             $this->assertStatus($period, ['closing']);
             $endsOn = (string) $period['ends_on'];
             $fiscalYear = (int) $period['fiscal_year'];
+            // U 504 vstupují zásoby do daňového posouzení: daň se zaúčtuje až po kroku Zásoby
+            // ({@see stepOrder()}, #401). Ostatní firmy pořadí nevynucují.
+            if ($this->roleProfile($supplierId, $endsOn)->framework === AccountingFrameworkService::CZ_504
+                && $this->stockStepRequired($supplierId)
+                && !$this->stepsComplete($this->stepsMap($supplierId, $periodId, true), ['stock'])) {
+                throw new ClosingException('stock_step_first',
+                    'U neziskové organizace se nejdřív provede krok Zásoby: mění náklady, ze kterých vychází daňové posouzení a výpočet daně.', 409);
+            }
 
             // Zdroj a hodnota návrhu (stejná logika jako incomeTaxPreview): přednost má
             // finalizované DPPO přiznání roku, jinak orientační dopočet z aktuálních knih.
             $fromReturn = $this->taxReturns->findLastKnownTax($supplierId, $fiscalYear, 'po');
-            $computed = $fromReturn === null ? $this->computeIncomeTaxFromLedger($supplierId, $fiscalYear) : null;
+            $ledger = $fromReturn === null ? $this->incomeTaxFromLedger($supplierId, $fiscalYear) : ['amount' => null, 'source' => null];
+            $computed = $ledger['amount'];
             $suggested = $fromReturn ?? $computed;
-            $suggestedSource = $fromReturn !== null ? 'finalized_return' : ($computed !== null ? 'computed_from_ledger' : null);
+            $suggestedSource = $fromReturn !== null ? 'finalized_return' : ($computed !== null ? $ledger['source'] : null);
             $difference = $suggested !== null ? round($amount - (float) $suggested, 2) : null;
 
             $rule = $this->rules->resolve($supplierId, 'income_tax.payable');

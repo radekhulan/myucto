@@ -237,6 +237,39 @@ final class NonprofitReferenceAssociationEndToEndTest extends TestCase
         self::assertTrue($frozen(), 'Uzavření knih dimenze období nezmrazilo.');
     }
 
+    public function testIncomeTaxStepSuggestsTaxFromConfirmedAssessmentAfterStock(): void
+    {
+        // #400: krok Daň z příjmů u 504 navrhne daň z výpočtu nad potvrzeným posouzením,
+        // bez posouzení řekne proč. #401: u 504 jde krok Zásoby před daní.
+        $this->postReferenceYear();
+        $closing = $this->container->get(\MyInvoice\Service\Accounting\Closing\ClosingService::class);
+        $before = $closing->incomeTaxPreview($this->supplier, $this->period);
+        self::assertNull($before['suggested_amount']);
+        self::assertNotEmpty($before['suggested_unavailable']['code'] ?? null, json_encode($before));
+
+        (new NonprofitLegalProfileService($this->db))->confirm($this->supplier, $this->period, $this->legalRequest('tj-legal-tax'), $this->actor);
+        $this->confirmPaged($this->period, $this->referenceAssessment(), 'tj-tax-confirm-' . $this->supplier);
+        $preview = $closing->incomeTaxPreview($this->supplier, $this->period);
+        self::assertSame(21000.0, $preview['suggested_amount'], json_encode($preview));
+        self::assertSame('computed_from_assessment', $preview['suggested_source']);
+        self::assertNull($preview['suggested_unavailable']);
+
+        $order = \MyInvoice\Service\Accounting\Closing\ClosingService::stepOrder('cz_504');
+        self::assertLessThan(array_search('income_tax', $order, true), array_search('stock', $order, true));
+        self::assertSame(['precheck', 'depreciation', 'fx_revaluation', 'estimates', 'deferrals', 'provisions', 'income_tax', 'stock', 'close_books', 'open_next'],
+            \MyInvoice\Service\Accounting\Closing\ClosingService::stepOrder('cz_500'), 'Pořadí kroků mimo 504 se nemění.');
+
+        $this->pdo->prepare("UPDATE supplier SET stock_enabled = 1 WHERE id = ?")->execute([$this->supplier]);
+        $this->pdo->prepare("UPDATE accounting_periods SET status = 'closing' WHERE id = ?")->execute([$this->period]);
+        $version = (int) $this->pdo->query('SELECT row_version FROM accounting_periods WHERE id = ' . $this->period)->fetchColumn();
+        try {
+            $closing->runIncomeTax($this->supplier, $this->period, 21000.0, $version, ['user_id' => $this->actor]);
+            self::fail('Daň 504 šla zaúčtovat před krokem Zásoby.');
+        } catch (\MyInvoice\Service\Accounting\Closing\ClosingException $e) {
+            self::assertSame('stock_step_first', $e->errorCode);
+        }
+    }
+
     public function testPagedNextPeriodUsesWholeSavingWithoutAddback(): void
     {
         $this->pagedReferenceYearFinal();

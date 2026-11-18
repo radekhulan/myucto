@@ -20391,6 +20391,9 @@ paths:
       summary: Stav uzávěrkového průvodce období (Epic F4)
       description: 'Období + kroky (precheck…open_next, stav pending/done/skipped, payload) + odvozené flagy can_*.
 
+        `step_order` = pořadí kroků průvodce; u neziskové organizace (504) je krok stock před income_tax
+        a deferred_tax, krok Daň z příjmů pak bez dokončeného kroku Zásoby vrátí 409 stock_step_first.
+
         `opening_takeover` (null po dokončení open_next) = počáteční stavy dalšího roku:
 
         `status` to_create / match / mismatch / unavailable, převzaté zápisy `entries`,
@@ -20655,7 +20658,7 @@ paths:
         - $ref: '#/components/parameters/SupplierIdHeader'
         - { in: path, name: id, required: true, schema: { type: integer } }
       responses:
-        '200': { description: "OK {suggested_amount, has_finalized_return, taxpayer_type, applicable, balance_341, balance_591}; applicable=false pro FO", content: { application/json: { schema: { type: object } } } }
+        '200': { description: "OK {suggested_amount, suggested_source (finalized_return | computed_from_ledger | computed_from_assessment u 504), suggested_unavailable {code, message} když návrh chybí, has_finalized_return, taxpayer_type, applicable, balance_341, balance_591}; applicable=false pro FO", content: { application/json: { schema: { type: object } } } }
         '404': { $ref: '#/components/responses/NotFound' }
         '422': { $ref: '#/components/responses/ValidationFailed' }
 

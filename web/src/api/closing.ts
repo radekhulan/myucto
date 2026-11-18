@@ -250,6 +250,8 @@ export interface ClosingStep {
 /** GET /periods/{id}/closing — období + kroky + odvozené flagy (§3.4). */
 export interface ClosingState {
   accounting_framework?: 'cz_504'
+  /** Pořadí kroků průvodce ze serveru (u 504 jde krok Zásoby před daň). */
+  step_order?: ClosingStepKey[]
   period: ClosingPeriod
   steps: ClosingStep[]
   can_start?: boolean
@@ -588,7 +590,9 @@ export interface IncomeTaxPreview {
   as_of: string
   period: { id: number; fiscal_year: number }
   suggested_amount: number | null
-  suggested_source: 'finalized_return' | 'computed_from_ledger' | null
+  suggested_source: 'finalized_return' | 'computed_from_ledger' | 'computed_from_assessment' | null
+  /** Proč návrh chybí (u 504 např. chybějící nebo zastaralé daňové posouzení). */
+  suggested_unavailable?: { code: string; message: string } | null
   has_finalized_return: boolean
   taxpayer_type: string | null
   applicable: boolean

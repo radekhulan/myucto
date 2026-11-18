@@ -22323,6 +22323,8 @@
       "income_tax": {
         "suggested": "Návrh z DPPO přiznání",
         "computed_from_ledger": "Dopočteno z účetnictví (bez finalizovaného přiznání) - ověřte před zaúčtováním",
+        "computed_from_assessment": "Dopočteno z potvrzeného daňového posouzení (bez finalizovaného přiznání) - ověřte před zaúčtováním",
+        "suggestion_unavailable": "Návrh daně zatím nejde spočítat: {reason}",
         "stock_pending": "Uzávěrka zásob (krok 8) zatím neproběhla. Způsobem B se konečný stav zásob odúčtuje z nákladů, takže základ daně se po ní ještě změní - z tohoto čísla zatím nevycházejte. Zaúčtujte nejdřív zásoby a pak se sem vraťte.",
         "no_return": "Za rok není finalizované DPPO přiznání - zadejte částku ručně dle reportu úprav základu daně.",
         "amount": "Splatná daň",
