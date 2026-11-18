@@ -34,9 +34,9 @@ final class StoredBankPaymentSubmissionJournal implements BankPaymentSubmissionJ
         $this->move($lineNo, 'created', $signId, $hash, $instructionStatus);
     }
 
-    public function rejected(int $lineNo, string $errorCode): void
+    public function rejected(int $lineNo, string $errorCode, ?array $bankError = null): void
     {
-        $this->move($lineNo, 'rejected', errorCode: $errorCode);
+        $this->move($lineNo, 'rejected', errorCode: $errorCode, bankError: $bankError);
     }
 
     public function unknown(int $lineNo, string $errorCode): void
@@ -57,11 +57,11 @@ final class StoredBankPaymentSubmissionJournal implements BankPaymentSubmissionJ
     }
 
     private function move(int $lineNo, string $to, ?string $signId = null, ?string $hash = null, ?string $instructionStatus = null,
-        ?string $errorCode = null): void
+        ?string $errorCode = null, ?array $bankError = null): void
     {
         try {
             $moved = $this->submissions->moveItem($this->supplierId, $this->submissionId, $lineNo, $to, $signId, $hash,
-                $instructionStatus, $errorCode);
+                $instructionStatus, $errorCode, $bankError);
         } catch (\Throwable) {
             throw self::ambiguous('payment_journal_unavailable');
         }

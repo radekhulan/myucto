@@ -271,6 +271,28 @@ final class KbPlusApiClientTest extends TestCase
         self::assertCount(18, $history);
     }
 
+    /** #393: částka z ABO jde do JSON přesně i při serialize_precision=17 (některé hostingy). */
+    public function testMappedAmountKeepsTwoDecimalsWithHighSerializePrecision(): void
+    {
+        $previous = ini_get('serialize_precision');
+        ini_set('serialize_precision', '17');
+        try {
+            $abo = (new \MyInvoice\Service\Payment\AboPaymentOrderWriter())->build([
+                'client_name' => 'Synthetic Client', 'payer_account_number' => '1000000005', 'payer_bank_code' => '0100',
+                'payment_date' => '2026-11-02',
+                'items' => [['account_number' => '1000000005', 'bank_code' => '0300', 'amount_minor' => 123456, 'variable_symbol' => '1']],
+            ]);
+            $mapped = (new \MyInvoice\Service\Bank\Connector\KbPlusAboBatchMapper())->map($abo, 'CZ1801000000001000000005');
+            $history = [];
+            $client = $this->client([new Response(200, [], $this->json($this->batchResponse('ACTC', 1, 0)))], $history);
+            $client->submitPaymentBatch($this->credentials(['scope' => 'adaa bpisp']), self::ACCESS_TOKEN,
+                ['processing_mode' => 'BATCH', 'exchange_identification' => 'synthetic-0001'] + $mapped);
+            self::assertStringContainsString('"instructedAmount":{"value":1234.56,"currency":"CZK"}', (string) $history[0]['request']->getBody());
+        } finally {
+            ini_set('serialize_precision', (string) $previous);
+        }
+    }
+
     public function testUploadsDocumentedJsonBatchForLaterBankAuthorization(): void
     {
         $history = [];
@@ -298,10 +320,13 @@ final class KbPlusApiClientTest extends TestCase
         self::assertSame('synthetic-0001', $history[0]['request']->getHeaderLine('x-exchange-identification'));
         self::assertSame('BATCH', $history[0]['request']->getHeaderLine('x-batch-processing-mode'));
         self::assertSame('Syntetická dávka', $history[0]['request']->getHeaderLine('x-instruction-name'));
+        $expected = $this->payment();
+        $expected['amount']['instructedAmount']['value'] = 1234.56;
         self::assertSame(
-            ['batchPaymentDataCollectionRequest' => [$this->payment()]],
+            ['batchPaymentDataCollectionRequest' => [$expected]],
             json_decode((string) $history[0]['request']->getBody(), true, 64, JSON_THROW_ON_ERROR),
         );
+        self::assertStringContainsString('"instructedAmount":{"value":1234.56,"currency":"CZK"}', (string) $history[0]['request']->getBody());
         self::assertFalse($history[0]['options']['allow_redirects']);
         self::assertTrue($history[0]['options']['verify']);
     }
@@ -625,7 +650,7 @@ final class KbPlusApiClientTest extends TestCase
     {
         return [
             'paymentIdentification' => ['instructionIdentification' => $instructionId],
-            'amount' => ['instructedAmount' => ['value' => 1234.56, 'currency' => 'CZK']],
+            'amount' => ['instructedAmount' => ['value' => \MyInvoice\Service\Bank\Connector\BankPaymentAmount::fromMinor(123456), 'currency' => 'CZK']],
             'requestedExecutionDate' => '2026-09-08',
             'debtorAccount' => ['identification' => ['iban' => 'CZ0401000000191000000005']],
             'creditorAccount' => ['identification' => ['iban' => 'CZ6108000000191000000005']],

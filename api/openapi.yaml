@@ -65414,6 +65414,7 @@ components:
       - error_code
       - accepted_count
       - rejected_count
+      - provider_error
       - created_at
       - submitted_at
       properties:
@@ -65458,6 +65459,27 @@ components:
         rejected_count:
           anyOf:
           - type: integer
+          - type: 'null'
+        provider_error:
+          description: Důvod odmítnutí, jak ho vrátila banka (kód chyby, pole požadavku a text hlášky). Jen u bank,
+            které důvod vracejí (Česká spořitelna); jinak null.
+          anyOf:
+          - type: object
+            required:
+            - code
+            - scope
+            - message
+            properties:
+              code:
+                type: string
+              scope:
+                anyOf:
+                - type: string
+                - type: 'null'
+              message:
+                anyOf:
+                - type: string
+                - type: 'null'
           - type: 'null'
         created_at:
           type: string

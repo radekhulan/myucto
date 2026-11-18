@@ -192,6 +192,30 @@ describe('Bank payment submission', () => {
       expect(rows[1].text()).toContain('bank_connection.payment_item_unconfirmed')
     })
 
+    it('shows the bank reason in the summary and for each rejected payment (#393)', async () => {
+      const reason = { code: 'WRONG_DECIMAL_PLACES', scope: 'amount.instructedAmount.value', message: 'Chybný počet desetinných míst v částce.' }
+      m.submission.mockResolvedValue(pending('rejected', { error_code: 'payment_rejected', accepted_count: 1, rejected_count: 2, provider_error: reason }))
+      m.items.mockResolvedValue([
+        { line_no: 1, status: 'rejected', amount: '2.35', creditor_iban: 'CZ1801000000001000000005', creditor_account: '1000000005/0100',
+          variable_symbol: '1', instruction_identification: 'MU001x', provider_sign_id: null, instruction_status: null, error_code: 'payment_rejected', provider_error: reason },
+        { line_no: 2, status: 'created', amount: '1000.00', creditor_iban: 'CZ6203000000001000000005', creditor_account: '1000000005/0300',
+          variable_symbol: '2', instruction_identification: 'MU002x', provider_sign_id: '166609107206666', instruction_status: 'ACTC', error_code: null, provider_error: null },
+        { line_no: 3, status: 'rejected', amount: '1234.56', creditor_iban: 'CZ1801000000001000000005', creditor_account: '1000000005/0100',
+          variable_symbol: '3', instruction_identification: 'MU003x', provider_sign_id: null, instruction_status: null, error_code: 'payment_rejected', provider_error: null },
+      ])
+      const wrapper = mount(BankPaymentSubmission, { props: { orders: [csasOrder], modelValue: order.id } })
+      await flushPromises()
+      expect(wrapper.find('[data-test="submission-bank-reason"]').exists()).toBe(true)
+      expect(wrapper.text()).toContain('bank_connection.payment_unsigned_count')
+      expect(wrapper.text()).not.toContain('bank_connection.payment_accepted_count')
+      const rows = wrapper.findAll('[data-test="submission-item"]')
+      expect(rows.map(row => row.attributes('data-status'))).toEqual(['rejected', 'created', 'rejected'])
+      expect(rows[0].text()).toContain('bank_connection.payment_item_rejected')
+      expect(rows[1].text()).toContain('bank_connection.payment_item_accepted_unsigned')
+      expect(rows[2].text()).toContain('bank_connection.payment_item_rejected_unknown')
+      expect(button(wrapper, 'sign').exists()).toBe(false)
+    })
+
     it('offers no signing for an archived order', async () => {
       m.submission.mockResolvedValue(pending('awaiting_signature', { error_code: 'payment_order_no_longer_payable' }))
       const wrapper = mount(BankPaymentSubmission, { props: { orders: [csasOrder], modelValue: order.id } })

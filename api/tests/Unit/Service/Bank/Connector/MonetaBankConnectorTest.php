@@ -217,6 +217,23 @@ final class MonetaBankConnectorTest extends TestCase
         );
     }
 
+    /** #393: částka jde do JSON přesně i při serialize_precision=17 (některé hostingy). */
+    public function testAmountKeepsTwoDecimalsWithHighSerializePrecision(): void
+    {
+        $previous = ini_get('serialize_precision');
+        ini_set('serialize_precision', '17');
+        try {
+            $history = [];
+            $this->connector([$this->account(), $this->json(['batchId' => 'synthetic-batch_1'])], $history)
+                ->submitPaymentOrder($this->credentials(), $this->abo(firstAmountMinor: 123456));
+            $body = (string) $history[1]['request']->getBody();
+            self::assertStringContainsString('"instructedAmount":{"value":1234.56,"currency":"CZK"}', $body);
+            self::assertStringContainsString('"instructedAmount":{"value":5.0,"currency":"CZK"}', $body, 'Celé koruny jako dosud s nulou za tečkou.');
+        } finally {
+            ini_set('serialize_precision', (string) $previous);
+        }
+    }
+
     public function testValidationRejectionIsNotAmbiguous(): void
     {
         try {
@@ -278,7 +295,7 @@ final class MonetaBankConnectorTest extends TestCase
         (new MonetaAboBatchMapper())->map($abo, self::IBAN);
     }
 
-    private function abo(string $payer = '1000000005'): string
+    private function abo(string $payer = '1000000005', int $firstAmountMinor = 12345): string
     {
         return (new AboPaymentOrderWriter())->build([
             'client_name' => 'Synthetic Company',
@@ -289,7 +306,7 @@ final class MonetaBankConnectorTest extends TestCase
                 [
                     'account_number' => '35-2000000018',
                     'bank_code' => '0100',
-                    'amount_minor' => 12345,
+                    'amount_minor' => $firstAmountMinor,
                     'variable_symbol' => '202600001',
                     'constant_symbol' => '0308',
                     'specific_symbol' => '77',

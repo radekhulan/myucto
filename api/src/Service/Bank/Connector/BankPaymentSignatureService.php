@@ -96,7 +96,7 @@ final class BankPaymentSignatureService
                 }
                 try {
                     $signature = $access['connector']->startSignature($access['token'], (string) $state['provider_reference'],
-                        (string) $state['provider_sign_hash'], $callback);
+                        (string) $state['provider_sign_hash'], $callback, self::signScope($state));
                 } catch (BankConnectorException $e) {
                     throw new BankConnectorOperationException($e->errorCode === BankConnectorException::RATE_LIMITED
                         ? 'bank_rate_limited' : 'payment_signature_failed');
@@ -283,7 +283,7 @@ final class BankPaymentSignatureService
             $this->submissions->updateSigning($supplierId, $submissionId, ['awaiting_signature'], ['next_poll_seconds' => self::POLL_SIGNING_SECONDS]);
             return;
         }
-        $result = $access['connector']->signatureState($access['token'], $pollId);
+        $result = $access['connector']->signatureState($access['token'], $pollId, self::signScope($state));
         $requestedRecently = self::recent($state['signature_requested_seconds_ago'], 3600);
         $changes = match ($result['state']) {
             'DONE' => ['status' => 'signed', 'signature_state' => 'DONE', 'error_code' => null, 'next_poll_seconds' => self::POLL_SIGNING_SECONDS],
@@ -389,6 +389,18 @@ final class BankPaymentSignatureService
     {
         $this->submissions->updateSigning($supplierId, $submissionId, ['awaiting_signature', 'signed'],
             ['error_code' => self::WITHDRAWN, 'next_poll_seconds' => null, 'polled' => true]);
+    }
+
+    /**
+     * Dávka, nebo jediná platba podepisovaná bez dávky (adresa podpisu i dotaz na jeho stav
+     * jdou na jiný prostředek banky).
+     *
+     * @param array<string,mixed> $state
+     */
+    private static function signScope(array $state): string
+    {
+        return ($state['provider_sign_scope'] ?? null) === CsasApiClient::SIGN_SCOPE_PAYMENT
+            ? CsasApiClient::SIGN_SCOPE_PAYMENT : CsasApiClient::SIGN_SCOPE_BATCH;
     }
 
     /** @return array<string,mixed> */

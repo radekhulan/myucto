@@ -72,6 +72,15 @@ final class CsasBankConnector implements StructuredBankConnector, BankConnectorC
      * Založí platby jednu po druhé a pak dávku. Položka, která už má od banky signId, se
      * znovu nezakládá; položka s nejasným výsledkem (sending, unknown) zastaví odeslání
      * k ruční kontrole. Access token platí asi 5 minut, proto se obnovuje před každým voláním.
+     *
+     * Položku, kterou banka jistě odmítla s vlastní hláškou (400 s kódem chyby), odeslání
+     * zaznamená a pokračuje dalšími, aby uživatel viděl důvody u všech položek. Dávka se
+     * pak nezakládá: založené platby zůstanou bez podpisu, a protože první podpis plateb
+     * založených přes API jde jen přes API, banka je neprovede a po 30 dnech propadnou.
+     *
+     * Příkaz s jedinou platbou se nepodepisuje jako dávka, ale přímo jako platba
+     * (/my/payments/federate/sign). Dávka s jednou položkou nic nepřidá a banka ji nemusí
+     * přijmout (oprávnění pro hromadnou autorizaci).
      */
     public function submitStagedPaymentOrder(#[\SensitiveParameter] string $token, #[\SensitiveParameter] string $abo,
         BankPaymentSubmissionJournal $journal): array
@@ -89,51 +98,83 @@ final class CsasBankConnector implements StructuredBankConnector, BankConnectorC
             'variable_symbol' => $payment['variable_symbol'],
         ], $batch['payments']));
 
-        $signIds = [];
+        $created = [];
+        $rejected = 0;
+        $firstRejection = null;
+        $rejectionCode = null;
         foreach ($batch['payments'] as $payment) {
             $line = $payment['line_no'];
             $row = $plan[$line] ?? null;
             $status = $row['status'] ?? null;
             if ($status === 'created' && is_string($row['provider_sign_id'] ?? null)) {
-                $signIds[] = $row['provider_sign_id'];
+                $created[] = ['sign_id' => $row['provider_sign_id'], 'hash' => $row['provider_hash'] ?? null];
+                continue;
+            }
+            if ($status === 'rejected') {
+                // Pokračování po přerušení: odmítnutou položku banka nezaložila, znovu se neposílá.
+                $rejected++;
+                $rejectionCode ??= BankConnectorException::PAYMENT_REJECTED;
                 continue;
             }
             if ($status !== 'planned') {
-                throw new BankConnectorException($status === 'rejected' ? BankConnectorException::PAYMENT_REJECTED : 'csas_payment_outcome_unknown',
-                    'Stav položky odeslání vyžaduje ruční kontrolu.', $status !== 'rejected', null, count($signIds));
+                throw new BankConnectorException('csas_payment_outcome_unknown', 'Stav položky odeslání vyžaduje ruční kontrolu.', true, null,
+                    count($created), $rejected > 0 ? $rejected : null);
             }
             // Obnova tokenu může skončit chybou (souběh, banka) ještě před odesláním platby;
             // položka proto přejde do „sending“ až těsně před samotným HTTP voláním.
             $access = $this->freshAccess($token);
             $journal->sending($line);
             try {
-                $created = $this->api->createPayment($access, $payment['body']);
+                $result = $this->api->createPayment($access, $payment['body']);
             } catch (BankConnectorException $e) {
                 if ($e->ambiguousPaymentOutcome) {
                     $journal->unknown($line, $e->errorCode);
-                } else {
-                    $journal->rejected($line, $e->errorCode);
+                    throw new BankConnectorException($e->errorCode, 'Českou spořitelnu nelze o platbě bezpečně informovat.',
+                        true, $e->remoteHttpStatus, count($created), $rejected > 0 ? $rejected : null, bankError: $firstRejection);
                 }
-                throw new BankConnectorException($e->errorCode, 'Českou spořitelnu nelze o platbě bezpečně informovat.',
-                    $e->ambiguousPaymentOutcome, $e->remoteHttpStatus, count($signIds), $e->ambiguousPaymentOutcome ? null : 1);
+                $journal->rejected($line, $e->errorCode, $e->bankError);
+                $rejected++;
+                $firstRejection ??= $e->bankError;
+                $rejectionCode = $rejectionCode === null || $rejectionCode === $e->errorCode ? $e->errorCode : 'payment_items_rejected';
+                if ($e->remoteHttpStatus === 400 && $e->bankError !== null) {
+                    continue;
+                }
+                throw self::itemsRejected($rejectionCode, count($created), $rejected, $e->remoteHttpStatus, $firstRejection);
             } catch (\Throwable) {
                 $journal->unknown($line, 'submission_failed');
-                throw new BankConnectorException('submission_failed', 'Založení platby skončilo neočekávanou chybou.', true, null, count($signIds));
+                throw new BankConnectorException('submission_failed', 'Založení platby skončilo neočekávanou chybou.', true, null, count($created));
             }
-            $journal->created($line, $created['sign_id'], $created['hash'], $created['instruction_status']);
-            $signIds[] = $created['sign_id'];
+            $journal->created($line, $result['sign_id'], $result['hash'], $result['instruction_status']);
+            $created[] = ['sign_id' => $result['sign_id'], 'hash' => $result['hash']];
+        }
+        if ($rejected > 0) {
+            throw self::itemsRejected($rejectionCode ?? BankConnectorException::PAYMENT_REJECTED, count($created), $rejected, 400, $firstRejection);
+        }
+
+        if (count($created) === 1 && is_string($created[0]['hash'])) {
+            return ['accepted' => true, 'reference' => $created[0]['sign_id'], 'status' => 'awaiting_signature',
+                'sign_hash' => $created[0]['hash'], 'sign_scope' => CsasApiClient::SIGN_SCOPE_PAYMENT];
         }
 
         $access = $this->freshAccess($token);
         $journal->batchSending();
         try {
-            $signed = $this->api->createBatch($access, $batch['exchange_identification'], $signIds);
+            $signed = $this->api->createBatch($access, $batch['exchange_identification'], array_column($created, 'sign_id'));
         } catch (BankConnectorException $e) {
-            // Platby jsou založené a bez podpisu se neprovedou; dávku ale už nelze bezpečně zopakovat.
+            // Jisté odmítnutí (4xx) dávku nezaložilo; založené platby bez podpisu se neprovedou.
+            // Nejasný výsledek (výpad, 5xx) dávku zopakovat nedovolí.
             throw new BankConnectorException($e->errorCode, 'Dávku České spořitelny nelze bezpečně založit.',
-                true, $e->remoteHttpStatus, count($signIds));
+                $e->ambiguousPaymentOutcome, $e->remoteHttpStatus, count($created), bankError: $e->bankError);
         }
-        return ['accepted' => true, 'reference' => $signed['sign_id'], 'status' => 'awaiting_signature', 'sign_hash' => $signed['hash']];
+        return ['accepted' => true, 'reference' => $signed['sign_id'], 'status' => 'awaiting_signature', 'sign_hash' => $signed['hash'],
+            'sign_scope' => CsasApiClient::SIGN_SCOPE_BATCH];
+    }
+
+    /** @param array{code:string,scope:?string,message:?string}|null $bankError */
+    private static function itemsRejected(string $code, int $created, int $rejected, ?int $httpStatus, ?array $bankError): BankConnectorException
+    {
+        return new BankConnectorException($code, 'Česká spořitelna odmítla platby příkazu.', false, $httpStatus, $created, $rejected,
+            bankError: $bankError);
     }
 
     /**
@@ -149,14 +190,15 @@ final class CsasBankConnector implements StructuredBankConnector, BankConnectorC
         }
     }
 
-    public function startSignature(#[\SensitiveParameter] string $token, string $batchSignId, string $batchHash, string $callbackUri): array
+    public function startSignature(#[\SensitiveParameter] string $token, string $signId, string $hash, string $callbackUri,
+        string $scope = CsasApiClient::SIGN_SCOPE_BATCH): array
     {
-        return $this->api->federatedSign($this->vault->access($token), $batchSignId, $batchHash, $callbackUri);
+        return $this->api->federatedSign($this->vault->access($token), $signId, $hash, $callbackUri, $scope);
     }
 
-    public function signatureState(#[\SensitiveParameter] string $token, string $pollId): array
+    public function signatureState(#[\SensitiveParameter] string $token, string $pollId, string $scope = CsasApiClient::SIGN_SCOPE_BATCH): array
     {
-        return $this->api->pollSign($this->vault->access($token), $pollId);
+        return $this->api->pollSign($this->vault->access($token), $pollId, $scope);
     }
 
     public function paymentState(#[\SensitiveParameter] string $token, string $signId): array

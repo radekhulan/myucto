@@ -56,7 +56,15 @@ export interface BankPaymentSubmission {
   error_code?: string | null
   accepted_count?: number | null
   rejected_count?: number | null
+  provider_error?: BankProviderError | null
   submitted_at: string | null
+}
+
+/** Důvod odmítnutí, jak ho vrátila banka (kód, pole požadavku, text hlášky). */
+export interface BankProviderError {
+  code: string
+  scope: string | null
+  message: string | null
 }
 
 /** Položka odeslání po jednotlivých platbách (ČS) ke kontrole v bankovnictví. */
@@ -70,11 +78,19 @@ export interface BankPaymentSubmissionItem {
   instruction_identification: string
   provider_sign_id: string | null
   instruction_status: string | null
+  error_code?: string | null
+  provider_error?: BankProviderError | null
 }
 
-/** Stav odeslání, u kterého může banka mít založené platby a uživatel je má zkontrolovat. */
-export function needsItemReview(submission: { status: string; provider?: string } | null): boolean {
-  return !!submission && submission.provider === 'csas' && ['unknown', 'creating'].includes(submission.status)
+/**
+ * Stav odeslání po položkách (ČS), u kterého uživatel potřebuje vidět jednotlivé platby:
+ * nejasný nebo přerušený výsledek (banka je mohla založit), nebo odmítnutí s přijatými
+ * či odmítnutými položkami (důvody banky u položek).
+ */
+export function needsItemReview(submission: { status: string; provider?: string; accepted_count?: number | null; rejected_count?: number | null } | null): boolean {
+  if (!submission || submission.provider !== 'csas') return false
+  if (['unknown', 'creating'].includes(submission.status)) return true
+  return submission.status === 'rejected' && ((submission.accepted_count ?? 0) > 0 || (submission.rejected_count ?? 0) > 0)
 }
 
 /** Adresa podpisu musí vést do banky (Česká spořitelna, v sandboxu portál Erste). */
