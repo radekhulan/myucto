@@ -82,7 +82,17 @@ async function reconciliationVersion(w: ReturnType<typeof mounted>) {
   await w.get('[data-tab="reconciliation"]').trigger('click'); await flushPromises()
   return w.getComponent(Reconciliation).props('dataVersion')
 }
-const lastNavigation = () => { const [to, event] = rowLink.navigate.mock.lastCall ?? []; return { to, newPanel: !!(event as MouseEvent | undefined)?.ctrlKey } }
+const lastNavigation = () => {
+  const [to, event, options] = rowLink.navigate.mock.lastCall ?? []
+  const e = event as MouseEvent | undefined
+  return { to, newPanel: (options as { newPanel?: boolean } | undefined)?.newPanel === true || !!e && (e.ctrlKey || e.metaKey || e.button === 1) }
+}
+/** Nový panel kvůli rozpracované práci jde volbou `useRowLink`; řádek předá skutečnou událost kliknutí, ne vyrobený Ctrl+klik. */
+const expectNewPanelOption = () => {
+  const [, event, options] = rowLink.navigate.mock.lastCall ?? []
+  expect(options).toEqual({ newPanel: true })
+  expect((event as MouseEvent | undefined)?.ctrlKey ?? false).toBe(false)
+}
 
 beforeEach(() => {
   vi.clearAllMocks()
@@ -201,10 +211,12 @@ describe('Membership workspace', () => {
     await w.get('[data-action="batch-open"]').trigger('click');await flushPromises()
     await w.get('[data-member="1"] [data-field="member-name"]').trigger('click');await flushPromises()
     expect(lastNavigation()).toEqual({ to: DETAIL(1), newPanel: true })
+    expectNewPanelOption()
     w.findComponent(MembershipBatchFlow).vm.$emit('close');await flushPromises()
     await w.get('[data-action="import-open"]').trigger('click');await flushPromises()
     await w.get('[data-member-card="2"]').trigger('click');await flushPromises()
     expect(lastNavigation()).toEqual({ to: DETAIL(2), newPanel: true })
+    expectNewPanelOption()
     w.findComponent(ImportFlow).vm.$emit('close');await flushPromises()
     await w.get('[data-member="3"]').trigger('click');await flushPromises()
     expect(lastNavigation()).toEqual({ to: DETAIL(3), newPanel: false })
@@ -263,11 +275,22 @@ describe('Membership workspace', () => {
     await w.get('[data-member="1"]').trigger('click', { ctrlKey: true })
     expect(lastNavigation()).toEqual({ to: DETAIL(1), newPanel: true })
     expect(readListHandoff(5, null)).toBeNull()
+    // Ctrl+klik bez rozpracované práce nese skutečnou událost a volbu nevynucuje.
+    expect(rowLink.navigate.mock.lastCall?.[2]).toEqual({ newPanel: false })
+    expect((rowLink.navigate.mock.lastCall?.[1] as MouseEvent).ctrlKey).toBe(true)
+    // Tlačítka myši Zpět/Vpřed a pravé tlačítko člena neotevřou ani nezapíší předání seznamu.
+    rowLink.navigate.mockClear()
+    await w.get('[data-member="1"]').trigger('auxclick', { button: 3 })
+    await w.get('[data-member-card="1"]').trigger('auxclick', { button: 4 })
+    await w.get('[data-member="1"]').trigger('auxclick', { button: 2 })
+    expect(rowLink.navigate).not.toHaveBeenCalled()
+    expect(readListHandoff(5, null)).toBeNull()
     // Běžící export by odchodem ze seznamu tiše skončil.
     api.exportMembers.mockReturnValueOnce(new Promise(() => {}))
     await w.get('[data-action="export-xlsx"]').trigger('click');await flushPromises()
     await w.get('[data-member="2"] [data-field="member-name"]').trigger('click')
     expect(lastNavigation()).toEqual({ to: DETAIL(2), newPanel: true })
+    expectNewPanelOption()
     w.unmount()
     // Rozběhnutý hromadný předpis zamyká založení člena: jeho okno by se otevřelo nad dávkou.
     const b=mounted();await flushPromises()
@@ -483,6 +506,21 @@ describe('Membership workspace', () => {
     expect(w.get('[data-member="1"] [data-field="member-number"]').text()).toBe('M-1')
     await link.trigger('click');await flushPromises()
     expect(lastNavigation()).toEqual({ to: DETAIL(1), newPanel: false })
+    w.unmount()
+  })
+  it('opens a member created during an open batch in a new panel without a handoff, so the batch stays', async () => {
+    const w = mounted()
+    await flushPromises()
+    await w.get('[data-action="batch-open"]').trigger('click');await flushPromises()
+    await w.get('[data-action="create-open"]').trigger('click')
+    await w.get('[data-field="member-client"]').setValue('3')
+    await w.get('[data-section="create-member"] [data-field="member-number"]').setValue('M-9')
+    await w.get('[data-action="create-member"]').trigger('click')
+    await flushPromises()
+    expect(lastNavigation()).toEqual({ to: DETAIL(9), newPanel: true })
+    expectNewPanelOption()
+    expect(readListHandoff(5, null)).toBeNull()
+    expect(w.findComponent(MembershipBatchFlow).exists()).toBe(true)
     w.unmount()
   })
   it('creates a member only on explicit request from a chosen contact and a member number', async () => {
@@ -1166,6 +1204,11 @@ describe('Membership workspace', () => {
     expect(w.get('[data-member="1"]').attributes('data-row-active')).toBe('true')
     await key('Enter')
     expect(lastNavigation()).toEqual({ to: DETAIL(1), newPanel: false })
+    // Při rozpracované dávce otevře Enter člena v novém panelu volbou, bez vyrobené události.
+    await w.get('[data-action="batch-open"]').trigger('click'); await flushPromises()
+    await key('Enter')
+    expect(lastNavigation()).toEqual({ to: DETAIL(1), newPanel: true })
+    expectNewPanelOption()
     // Na jiné záložce klávesy seznamu nepůsobí (Enter, x i Esc patří jejím prvkům).
     rowLink.navigate.mockClear()
     await w.get('[data-tab="rates"]').trigger('click'); await flushPromises()
