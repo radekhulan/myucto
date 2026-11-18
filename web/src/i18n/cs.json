@@ -22982,6 +22982,15 @@
       "confirm": "Potvrdit",
       "dismiss": "Zamítnout"
     },
+    "advance_deduction": {
+      "missing": "K záloze je daňový doklad k platbě (DDKP) a jeho DPH je už uplatněná. Faktura musí zálohu odečíst, jinak se DPH uplatní podruhé a doklad nepůjde zaúčtovat.",
+      "add": "Doplnit odpočet zálohy z DDKP",
+      "present": "Faktura odečítá zálohu odpočtovým řádkem podle daňového dokladu k platbě.",
+      "pick_vendor": "Zálohu lze navázat po výběru dodavatele a měny.",
+      "line_description": "Odpočet zálohy, daňový doklad {number}",
+      "badge": "Odpočet zálohy",
+      "badge_hint": "Řádek odečítá zálohu s daňovým dokladem k platbě. Nejde na náklad, zúčtuje zálohu na 314."
+    },
     "bank_payment": {
       "title": "Úhrada v bance",
       "open_statement": "Bankovní výpis"

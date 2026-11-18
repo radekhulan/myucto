@@ -14521,6 +14521,61 @@ paths:
                 properties:
                   candidates: { type: array, items: { type: object } }
 
+  /api/v1/purchase-invoices/advance-candidates:
+    parameters:
+      - $ref: '#/components/parameters/SupplierIdHeader'
+    get:
+      tags: [Purchase invoices]
+      summary: Nespárované zálohy dodavatele pro konečnou fakturu, která ještě není uložená
+      description: Stejný výběr a řazení jako `/purchase-invoices/{id}/advance-candidates`. Vazbu založí uložení dokladu s `advance_purchase_invoice_id`.
+      parameters:
+        - { in: query, name: vendor_id, required: true, schema: { type: integer, format: int64 } }
+        - { in: query, name: currency_id, required: true, schema: { type: integer, format: int64 } }
+        - { in: query, name: total, required: false, schema: { type: number }, description: "Částka konečné faktury s DPH pro řazení podle nejbližší zálohy." }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  candidates: { type: array, items: { type: object } }
+        '400': { description: Chybí vendor_id nebo currency_id }
+
+  /api/v1/purchase-invoices/advance-deduction-lines:
+    parameters:
+      - $ref: '#/components/parameters/SupplierIdHeader'
+    get:
+      tags: [Purchase invoices]
+      summary: Řádky odpočtu poskytnuté zálohy podle jejích daňových dokladů k platbě
+      description: Za každý živý DDKP zálohy a sazbu DPH jeden řádek se základem a daní DDKP se znaménkem minus (v měně dokladu). Záloha bez DDKP vrací prázdný seznam. Řádek vložený na konečnou fakturu nese `advance_purchase_invoice_id` zálohy.
+      parameters:
+        - { in: query, name: advance_id, required: true, schema: { type: integer, format: int64 } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  advance_id: { type: integer, format: int64 }
+                  lines:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        tax_document_id: { type: integer, format: int64 }
+                        tax_document_number: { type: string }
+                        vat_rate_id: { type: integer }
+                        vat_rate: { type: number }
+                        vat_classification_code: { type: [string, "null"] }
+                        base: { type: number, description: "Základ odpočtu (záporný)." }
+                        vat: { type: number, description: "Daň odpočtu (záporná)." }
+                        gross: { type: number, description: "Odpočet s DPH (záporný)." }
+        '400': { description: Chybí advance_id }
+
   /api/v1/purchase-invoices/{id}/settlement-candidates:
     parameters:
       - $ref: '#/components/parameters/SupplierIdHeader'

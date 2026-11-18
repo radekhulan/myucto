@@ -165,6 +165,9 @@ Kontrola porovnává evidenční stav dokladu, platební vazby a deník:
 - zaplacené přijaté faktury s otevřeným saldem na 321,
 - zaplacené proformy, které nemají inkaso na účtu přijatých záloh ani na 311,
 - zaplacené zálohové přijaté faktury bez úhrady na 314,
+- konečné přijaté faktury k záloze s daňovým dokladem k platbě, které zálohu neodečítají
+  (DPH zálohy by se uplatnila podruhé; kontrola bere i starší období, postup opravy
+  v [§ 23.8.1](23_Prijate_faktury.md#2381-vyuctovani-zalohy-ke-ktere-dodavatel-vystavil-danovy-doklad-k-platbe)),
 - doklady stále ve stavu odeslané/přijaté, přestože účetní saldo už je
   vyrovnané,
 - nesoulady spárované platby v částce, měně, protistraně nebo použití kurzu;
