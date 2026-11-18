@@ -65,5 +65,56 @@ final class RegexBankEmailNoticeCardPaymentTest extends TestCase
         self::assertSame('PAYPAL *EXAMPLE', $parsed->counterpartyName);
         self::assertSame(25000.5, $parsed->balance);
         self::assertSame('', $parsed->variableSymbol);
+        self::assertNull($parsed->originalAmount);
+        self::assertNull($parsed->originalCurrency);
+    }
+
+    /** Platba kartou v cizí měně s částkou v měně účtu i nákupu (#390). */
+    public function testForeignCardPaymentKeepsOriginalAmount(): void
+    {
+        $body = 'Dobrý den, potvrzujeme platbu kartou 1234 ve výši 400,25 Kč (původní částka 17,50 USD) '
+            . 'ze dne 23. 10. 2026 u EXAMPLE SERVICE. Na účtu 1000000005 je k dispozici 25 000,50 Kč.';
+        $parsed = (new RegexBankEmailNoticeParser())->parse(
+            new BankEmailNoticeMessage(
+                uid: 2,
+                messageId: '<card-fx@example.com>',
+                date: new \DateTimeImmutable('2026-10-24 09:30:00'),
+                sender: 'avizo@example.com',
+                subject: 'Platba kartou',
+                text: $body,
+                raw: $body,
+                authResults: [],
+                allowForwarded: false,
+                forwardedFrom: '',
+            ),
+            new BankEmailNoticeProvider(
+                id: 1,
+                supplierId: 1,
+                providerRef: 'db:1',
+                code: 'karta',
+                name: 'Platba kartou',
+                parserType: 'regex',
+                enabled: true,
+                senderWhitelist: 'example.com',
+                subjectPattern: null,
+                bodyPattern: 'potvrzujeme\s+platbu\s+kartou',
+                fieldPatterns: [
+                    'amount' => 've výši\s+(?<value>[0-9 ]+,[0-9]{2})',
+                    'currency' => 've výši\s+[0-9 ]+,[0-9]{2}\s*(?<value>Kč|CZK|EUR|USD)',
+                    'original_amount' => 'původní částka\s+(?<value>[0-9 ]+,[0-9]{2})',
+                    'original_currency' => 'původní částka\s+[0-9 ]+,[0-9]{2}\s*(?<value>[A-Z]{3})',
+                    'posted_at' => 'ze dne\s+(?<value>[0-9]{1,2}\.\s*[0-9]{1,2}\.\s*[0-9]{4})',
+                    'recipient_account' => 'Na účtu\s+(?<value>[0-9\-]+(?:/[0-9]{4})?)',
+                    'direction' => '(?<value>platbu\s+kartou)',
+                ],
+                normalizerConfig: [],
+                system: false,
+            ),
+        );
+
+        self::assertSame(-400.25, $parsed->amount);
+        self::assertSame('CZK', $parsed->currency);
+        self::assertSame(17.5, $parsed->originalAmount);
+        self::assertSame('USD', $parsed->originalCurrency);
     }
 }

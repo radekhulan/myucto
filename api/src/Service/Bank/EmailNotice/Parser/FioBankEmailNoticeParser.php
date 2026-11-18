@@ -170,6 +170,7 @@ final class FioBankEmailNoticeParser extends AbstractBankEmailNoticeParser
             constantSymbol: $constantSymbol,
             message: $note,
             balance: $balance !== null ? $this->parseAmount($balance) : null,
+            currencyStated: $currency !== '',
         );
     }
 
@@ -228,6 +229,7 @@ final class FioBankEmailNoticeParser extends AbstractBankEmailNoticeParser
             message: $note,
             bankRef: $bankRef,
             balance: $balance !== null ? $this->parseAmount($balance) : null,
+            currencyStated: $currency !== '',
         );
     }
 
@@ -291,6 +293,7 @@ final class FioBankEmailNoticeParser extends AbstractBankEmailNoticeParser
             message: $note,
             bankRef: $bankRef,
             balance: $balance !== null ? $this->parseAmount($balance) : null,
+            currencyStated: $currency !== '',
         );
     }
 

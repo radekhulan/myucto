@@ -562,6 +562,9 @@ Povinná vytěžená pole: `amount`, `currency`, `posted_at`, `recipient_account
 - `message`
 - `bank_ref`
 - `balance` (disponibilní zůstatek účtu z avíza - zobrazí se v detailu měsíčního avízo-výpisu a promítne se do přehledu **Stavy na účtech**)
+- `original_amount` a `original_currency` (částka a měna nákupu u platby kartou v cizí měně; `amount` a `currency` pak nesou částku v měně účtu)
+
+Pohyb se na účtu eviduje vždy v měně účtu. Avízo o platbě kartou v cizí měně, které uvádí jen částku nákupu (například 18,00 EUR na korunovém účtu), pohyb nezaloží: banka v tu chvíli částku jen blokuje a korunovou částku určí až při zúčtování svým kurzem. Zpráva skončí ve stavu **match_failed** s vysvětlením a pohyb doplní bankovní výpis (GPC/ABO, CAMT nebo API). Uvádí-li avízo i částku v měně účtu, zachyťte ji do `amount` a `currency` a cizí částku do `original_amount` a `original_currency`; pohyb pak nese obě. Měnu účtu přebírá pohyb jen u avíz, která měnu vůbec neuvádějí.
 
 Regex parser používá první zachycenou skupinu nebo pojmenovanou skupinu se stejným názvem jako pole. Pro částku umí formáty typu `+1.234,56` i mezery mezi tisíci, datum například `01. 06. 2026 10:15`.
 

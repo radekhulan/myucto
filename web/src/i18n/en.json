@@ -27859,6 +27859,8 @@
     "field_message": "Message",
     "field_bank_ref": "Bank reference",
     "field_balance": "Available balance",
+    "field_original_amount": "Original amount (foreign currency)",
+    "field_original_currency": "Original currency",
     "ingest_notices": "Read bank notifications",
     "ingest_notices_hint": "Reads the payment notification from the e-mail body and creates a bank transaction from it. Turn off if your bank also sends PDF statements and the notifications would duplicate the transactions - attachments are still processed per the switches below."
   },

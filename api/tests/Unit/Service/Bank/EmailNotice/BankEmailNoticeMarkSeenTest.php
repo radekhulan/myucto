@@ -7,6 +7,7 @@ namespace MyInvoice\Tests\Unit\Service\Bank\EmailNotice;
 use MyInvoice\Repository\BankEmailNoticeRepository;
 use MyInvoice\Service\Bank\EmailNotice\BankEmailNoticeMessage;
 use MyInvoice\Service\Bank\EmailNotice\BankEmailNoticeScanner;
+use MyInvoice\Service\Bank\EmailNotice\ForeignCurrencyNoticeException;
 use MyInvoice\Service\Bank\EmailNotice\ImapMailboxClientInterface;
 use MyInvoice\Service\Bank\EmailNotice\ParsedBankEmailNotice;
 use MyInvoice\Service\Bank\EmailNotice\Parser\BankEmailNoticeParserRepository;
@@ -98,6 +99,32 @@ final class BankEmailNoticeMarkSeenTest extends TestCase
         );
 
         self::assertSame($rejection, $this->process($repo, $parsers, $imap, $settings, $this->message())['status']);
+    }
+
+    /** Avízo jen s cizí částkou (#390): pohyb nevznikne, zpráva nese důvod, ne chybu parseru. */
+    public function testForeignCurrencyNoticeIsRecordedWithoutTransaction(): void
+    {
+        $repo = $this->createMock(BankEmailNoticeRepository::class);
+        $parsers = $this->createStub(BankEmailNoticeParserRepository::class);
+        $imap = $this->createMock(ImapMailboxClientInterface::class);
+        $settings = ['id' => 7, 'mark_seen_after_import' => true];
+        $repo->method('knownMessage')->willReturn(null);
+        $repo->method('accountMappings')->willReturn([]);
+        $repo->method('mappingForRecipientAccount')->willReturn(['currency_code' => 'CZK']);
+        $parsers->method('parse')->willReturn($this->parsed());
+        $repo->expects(self::once())->method('createTransactionFromNotice')
+            ->willThrowException(new ForeignCurrencyNoticeException('Syntetické avízo v EUR.'));
+        $repo->expects(self::once())->method('recordMessage')->with(self::callback(
+            static fn (array $data): bool => $data['status'] === 'match_failed'
+                && !isset($data['bank_transaction_id'])
+                && $data['error_message'] === 'Syntetické avízo v EUR.',
+        ))->willReturn(79);
+        $imap->expects(self::once())->method('postProcess')->with($settings, self::anything(), 'failure', false);
+
+        $result = $this->process($repo, $parsers, $imap, $settings, $this->message());
+
+        self::assertSame('match_failed', $result['status']);
+        self::assertSame('foreign_currency_without_account_amount', $result['reason']);
     }
 
     public static function rejections(): iterable
