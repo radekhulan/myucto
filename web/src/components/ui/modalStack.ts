@@ -1,10 +1,10 @@
 /**
- * Pořadí otevřených oken (Modal) v jednom panelu pracovní plochy.
+ * Pořadí otevřených oken (Modal a Drawer) v jednom panelu pracovní plochy.
  *
  * Why: každé okno poslouchá Escape na celém dokumentu. Okno otevřené z jiného okna (nový kontakt z okna
  * nového člena) by Escapem zavřelo i rodiče a s ním rozepsaný formulář. Escape proto zavírá jen
  * nejvrchnější okno svého panelu, a vůbec ne, když ho už spotřeboval prvek uvnitř: Escape spotřebují
- * SearchableSelect a nabídky ActionBar a RowActionsMenu (preventDefault). Ostatní rozbalovací prvky to zatím nedělají.
+ * SearchableSelect, EntityLinkPicker a nabídky ActionBar a RowActionsMenu (preventDefault).
  * Panel i aktivitu čteme až při stisku: okno pracovní plochy se při navigaci odloží (zůstane připojené,
  * jen neaktivní) a jeho otevřená okna se nesmí počítat.
  */

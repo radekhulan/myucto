@@ -3,6 +3,7 @@ import { onMounted, onBeforeUnmount, watch } from 'vue'
 import { usePaneActivity, usePaneId } from '@/workspace/paneActivity'
 import { lockBodyScroll, unlockBodyScroll } from '@/utils/bodyScrollLock'
 import WorkspaceTeleport from '@/components/workspace/WorkspaceTeleport.vue'
+import { closesOnEscape, pushModal, removeModal } from './modalStack'
 
 /**
  * Generic right-anchored drawer — sourozenec Modal.vue se stejným kontraktem
@@ -27,6 +28,9 @@ const emit = defineEmits<{
 const paneActive = usePaneActivity()
 const paneId = usePaneId()
 let scrollLocked = false
+/** Drawer je v pořadí oken jako Modal: Escape zavře jen nejvrchnější a ne, když ho spotřeboval prvek uvnitř. */
+const stackId = Symbol('drawer')
+pushModal(stackId, () => paneId.value, () => paneActive.value)
 
 function syncBodyScrollLock(active: boolean): void {
   if (active && !scrollLocked) {
@@ -39,7 +43,7 @@ function syncBodyScrollLock(active: boolean): void {
 }
 
 function onKey(e: KeyboardEvent) {
-  if (paneActive.value && e.key === 'Escape') emit('close')
+  if (paneActive.value && e.key === 'Escape' && closesOnEscape(stackId, e)) emit('close')
 }
 
 onMounted(() => {
@@ -48,6 +52,7 @@ onMounted(() => {
 })
 onBeforeUnmount(() => {
   document.removeEventListener('keydown', onKey)
+  removeModal(stackId)
   syncBodyScrollLock(false)
 })
 watch(paneActive, syncBodyScrollLock)

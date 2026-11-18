@@ -8,6 +8,7 @@ import { windowContextKey } from '@/workspace/windowContext'
 import cs from '@/i18n/cs.json'
 import Modal from '@/components/ui/Modal.vue'
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
+import Drawer from '@/components/ui/Drawer.vue'
 
 afterEach(() => { document.body.innerHTML = '' })
 
@@ -112,6 +113,46 @@ describe('Modal a Escape v pracovní ploše a s nabídkou akcí', () => {
     await flushPromises()
     escape(); await flushPromises()
     expect(closed).toEqual(['child'])
+    w.unmount()
+  })
+})
+
+describe('Drawer a Escape (#394)', () => {
+  const DrawerHost = defineComponent({
+    setup() {
+      const drawer = ref(true), inner = ref(false)
+      return () => h('div', [
+        drawer.value ? h(Drawer, { title: 'Synthetic drawer', onClose: () => { drawer.value = false } }, () => [
+          h('p', { 'data-test': 'drawer-body' }, 'drawer'),
+          h(SearchableSelect, { modelValue: null, options: [{ value: 'a', label: 'Synthetic A' }] }),
+          h('button', { 'data-test': 'open-inner', onClick: () => { inner.value = true } }),
+          inner.value ? h(Modal, { title: 'Inner', onClose: () => { inner.value = false } }, () => h('p', 'inner')) : null,
+        ]) : null,
+      ])
+    },
+  })
+  const drawerOpen = () => document.querySelector('[data-test="drawer-body"]') !== null
+
+  it('Escape v okně otevřeném z draweru zavře jen okno', async () => {
+    const w = mount(DrawerHost, { attachTo: document.body, global: { plugins: [createPinia()] } })
+    await flushPromises()
+    ;(document.querySelector('[data-test="open-inner"]') as HTMLButtonElement).click(); await flushPromises()
+    escape(); await flushPromises()
+    expect(titles().some(text => text.includes('Inner'))).toBe(false)
+    expect(drawerOpen()).toBe(true)
+    escape(); await flushPromises()
+    expect(drawerOpen()).toBe(false)
+    w.unmount()
+  })
+
+  it('Escape v rozbaleném výběru v draweru zavře jen výběr', async () => {
+    const w = mount(DrawerHost, { attachTo: document.body, global: { plugins: [createPinia()] } })
+    await flushPromises()
+    const input = document.querySelector<HTMLInputElement>('input[role="combobox"]')!
+    input.dispatchEvent(new FocusEvent('focus')); await flushPromises()
+    escape(input); await flushPromises()
+    expect(input.getAttribute('aria-expanded')).toBe('false')
+    expect(drawerOpen()).toBe(true)
     w.unmount()
   })
 })
