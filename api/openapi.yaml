@@ -20658,7 +20658,7 @@ paths:
         - $ref: '#/components/parameters/SupplierIdHeader'
         - { in: path, name: id, required: true, schema: { type: integer } }
       responses:
-        '200': { description: "OK {suggested_amount, suggested_source (finalized_return | computed_from_ledger | computed_from_assessment u 504), suggested_unavailable {code, message} když návrh chybí, has_finalized_return, taxpayer_type, applicable, balance_341, balance_591}; applicable=false pro FO", content: { application/json: { schema: { type: object } } } }
+        '200': { description: "OK {suggested_amount, suggested_source (finalized_return | computed_from_ledger | computed_from_assessment u 504), suggested_unavailable {code, message} když návrh chybí, activity_required a existing_activity (504), has_finalized_return, taxpayer_type, applicable, balance_341, balance_591}; applicable=false pro FO", content: { application/json: { schema: { type: object } } } }
         '404': { $ref: '#/components/responses/NotFound' }
         '422': { $ref: '#/components/responses/ValidationFailed' }
 
@@ -20687,6 +20687,7 @@ paths:
                 status: { type: string, enum: [done, skipped], description: "Checklist kroky + skip u provisions/income_tax" }
                 note: { type: string, maxLength: 500 }
                 amount: { type: number, description: "Jen income_tax — splatná daň (591/341)" }
+                activity: { type: string, enum: [main, economic], description: "Jen income_tax u neziskové organizace (504) — činnost, do které daň patří; bez ní 422 income_tax_activity_required" }
                 partial: { type: boolean, default: false, description: "Jen provisions. true mění zaslané položky (nejvýše 200), ostatní otevřené OP zachová a plně uhrazené odstraní; false nahrazuje celý seznam." }
                 items:
                   type: array

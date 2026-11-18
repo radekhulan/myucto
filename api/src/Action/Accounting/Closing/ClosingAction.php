@@ -844,7 +844,8 @@ final class ClosingAction
                     if ($reason !== null && mb_strlen($reason) > 500) {
                         return Json::error($response, 'validation_failed', 'reason může mít nejvýše 500 znaků.', 422);
                     }
-                    $data = $this->closing->runIncomeTax($supplierId, $periodId, (float) $body['amount'], $rowVersion, $meta, $reason);
+                    $activity = isset($body['activity']) && is_string($body['activity']) ? $body['activity'] : null;
+                    $data = $this->closing->runIncomeTax($supplierId, $periodId, (float) $body['amount'], $rowVersion, $meta, $reason, $activity);
                 }
             } elseif ($step === 'deferred_tax') {
                 // ČÚS 003 — odložená daň (592/481 závazek, 481/592 pohledávka).

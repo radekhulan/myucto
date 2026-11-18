@@ -22323,6 +22323,10 @@
       "income_tax": {
         "suggested": "Návrh z DPPO přiznání",
         "computed_from_ledger": "Dopočteno z účetnictví (bez finalizovaného přiznání) - ověřte před zaúčtováním",
+        "activity": "Činnost (nezisková organizace)",
+        "activity_main": "Hlavní činnost",
+        "activity_economic": "Hospodářská činnost",
+        "activity_required": "Zvolte, do které činnosti daň z příjmů patří.",
         "computed_from_assessment": "Dopočteno z potvrzeného daňového posouzení (bez finalizovaného přiznání) - ověřte před zaúčtováním",
         "suggestion_unavailable": "Návrh daně zatím nejde spočítat: {reason}",
         "stock_pending": "Uzávěrka zásob (krok 8) zatím neproběhla. Způsobem B se konečný stav zásob odúčtuje z nákladů, takže základ daně se po ní ještě změní - z tohoto čísla zatím nevycházejte. Zaúčtujte nejdřív zásoby a pak se sem vraťte.",

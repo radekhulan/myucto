@@ -313,6 +313,40 @@ final class NonprofitReferenceAssociationEndToEndTest extends TestCase
         self::assertSame('assessment_stale', $guard->closingCheck($this->supplier, $this->period)['findings'][0]['code'] ?? null);
     }
 
+    public function testIncomeTaxStepPostsTaxWithChosenActivity(): void
+    {
+        // Krok Daň z příjmů u 504: zápis 591/341 nese zvolenou činnost (systémové pravidlo
+        // činnosti i výkaz zisku a ztráty 504 ji vyžadují); bez volby se odmítne s důvodem.
+        $this->postReferenceYear();
+        (new NonprofitLegalProfileService($this->db))->confirm($this->supplier, $this->period, $this->legalRequest('tj-legal-post'), $this->actor);
+        $this->confirmPaged($this->period, $this->referenceAssessment(), 'tj-post-' . $this->supplier);
+        $this->pdo->prepare('INSERT INTO chart_of_accounts(supplier_id,account_code,name,account_type) VALUES(?,?,?,?),(?,?,?,?)')
+            ->execute([$this->supplier, '591', 'Syntetická daň', 'expense', $this->supplier, '341', 'Syntetický závazek daně', 'liability']);
+        $this->pdo->prepare('UPDATE supplier SET stock_enabled = 0 WHERE id = ?')->execute([$this->supplier]);
+        $this->pdo->prepare("UPDATE accounting_periods SET status = 'closing' WHERE id = ?")->execute([$this->period]);
+        $version = fn (): int => (int) $this->pdo->query('SELECT row_version FROM accounting_periods WHERE id = ' . $this->period)->fetchColumn();
+        $closing = $this->container->get(\MyInvoice\Service\Accounting\Closing\ClosingService::class);
+        self::assertTrue($closing->incomeTaxPreview($this->supplier, $this->period)['activity_required']);
+        try {
+            $closing->runIncomeTax($this->supplier, $this->period, 21000.0, $version(), ['user_id' => $this->actor]);
+            self::fail('Daň 504 se zaúčtovala bez činnosti.');
+        } catch (\MyInvoice\Service\Accounting\Closing\ClosingException $e) {
+            self::assertSame('income_tax_activity_required', $e->errorCode);
+        }
+
+        $result = $closing->runIncomeTax($this->supplier, $this->period, 21000.0, $version(), ['user_id' => $this->actor], null, 'economic');
+        $line = $this->pdo->prepare('SELECT v.semantic_key FROM journal_entry_lines l
+            JOIN chart_of_accounts a ON a.id = l.account_id AND a.account_code = \'591\'
+            JOIN journal_entry_line_dimensions d ON d.line_id = l.id AND d.dimension_type_id = ?
+            JOIN dimension_values v ON v.id = d.dimension_value_id WHERE l.entry_id = ?');
+        $line->execute([$this->catalog['activity']['id'], $result['entry_id']]);
+        self::assertSame('economic', $line->fetchColumn());
+        self::assertSame('economic', $closing->incomeTaxPreview($this->supplier, $this->period)['existing_activity']);
+        // Daň 591 do podkladů posouzení nevstupuje: posouzení zůstává aktuální.
+        self::assertTrue($this->container->get(\MyInvoice\Service\Tax\Nonprofit\NonprofitTaxAssessmentGuard::class)
+            ->closingCheck($this->supplier, $this->period)['complete']);
+    }
+
     public function testPagedNextPeriodUsesWholeSavingWithoutAddback(): void
     {
         $this->pagedReferenceYearFinal();

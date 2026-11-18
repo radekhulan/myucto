@@ -654,12 +654,14 @@ function runProvisions() {
 // ── D11: splatná daň z příjmů (591/341) ────────────────────────────────────
 const incomeTaxPreview = ref<IncomeTaxPreview | null>(null)
 const incomeTaxAmount = ref<number | null>(null)
+const incomeTaxActivity = ref<'main' | 'economic' | null>(null)
 
 async function loadIncomeTax() {
   try {
     const p = await closingApi.incomeTaxPreview(periodId)
     incomeTaxPreview.value = p
     incomeTaxAmount.value = p.existing_amount ?? p.suggested_amount ?? null
+    incomeTaxActivity.value = p.existing_activity ?? null
   } catch (e: any) {
     handleApiError(e)
   }
@@ -670,7 +672,14 @@ function bookIncomeTax() {
     toast.warning(t('accounting.closing.income_tax.amount_required'))
     return
   }
-  mutate(() => closingApi.runStep(periodId, 'income_tax', { row_version: rowVersion.value, amount: Number(incomeTaxAmount.value) }),
+  if (incomeTaxPreview.value?.activity_required && !incomeTaxActivity.value) {
+    toast.warning(t('accounting.closing.income_tax.activity_required'))
+    return
+  }
+  mutate(() => closingApi.runStep(periodId, 'income_tax', {
+    row_version: rowVersion.value, amount: Number(incomeTaxAmount.value),
+    ...(incomeTaxPreview.value?.activity_required ? { activity: incomeTaxActivity.value } : {}),
+  }),
     t('accounting.closing.income_tax.booked')).then(ok => { if (ok) loadIncomeTax() })
 }
 
@@ -1593,6 +1602,15 @@ const canOpenNextStage = computed(() => ['closed', 'reviewed', 'approved'].inclu
               <input v-model.number="incomeTaxAmount" type="number" step="0.01" min="0" :disabled="!isClosing"
                 class="w-full h-10 px-3 border border-neutral-300 rounded-md text-sm text-right font-mono" />
             </div>
+            <fieldset v-if="incomeTaxPreview?.activity_required" class="text-sm" data-test="income-tax-activity">
+              <legend class="block text-sm font-medium text-neutral-700 mb-1">{{ t('accounting.closing.income_tax.activity') }}</legend>
+              <div class="flex flex-wrap gap-4">
+                <label v-for="a in (['main', 'economic'] as const)" :key="a" class="inline-flex items-center gap-2 whitespace-nowrap">
+                  <input v-model="incomeTaxActivity" type="radio" :value="a" :disabled="!isClosing" class="border-neutral-300 text-primary-600" />
+                  {{ t('accounting.closing.income_tax.activity_' + a) }}
+                </label>
+              </div>
+            </fieldset>
             <div class="flex flex-wrap gap-2 border-t border-neutral-200 pt-3">
               <button v-if="isClosing && incomeTaxPreview?.applicable !== false" @click="bookIncomeTax" :disabled="busy" :class="btnFilled('primary')">
                 <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.check" /></svg>

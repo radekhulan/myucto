@@ -600,6 +600,9 @@ export interface IncomeTaxPreview {
   balance_341: number
   balance_591: number
   existing_entry_id: number | null
+  /** U 504 se daň zařazuje do hlavní nebo hospodářské činnosti. */
+  activity_required?: boolean
+  existing_activity?: 'main' | 'economic' | null
   existing_amount: number | null
 }
 

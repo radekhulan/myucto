@@ -3498,6 +3498,9 @@ final class ClosingService
             'balance_591' => round($this->closing->accountBalance($supplierId, '591', $endsOn), 2),
             'existing_entry_id' => $existing !== null ? (int) $existing['id'] : null,
             'existing_amount' => $step['payload']['amount'] ?? null,
+            // U 504 se daň zařazuje do hlavní nebo hospodářské činnosti ({@see runIncomeTax}).
+            'activity_required' => $this->roleProfile($supplierId, $endsOn)->framework === AccountingFrameworkService::CZ_504,
+            'existing_activity' => $step['payload']['activity'] ?? null,
         ];
     }
 
@@ -3558,7 +3561,7 @@ final class ClosingService
      * @param array{user_id?:?int, posted_by?:?int, ip?:?string, user_agent?:?string} $meta
      * @return array{entry_id:int, amount:float, document_no:string, suggested_amount:?float, suggested_source:?string, difference:?float, reason:?string}
      */
-    public function runIncomeTax(int $supplierId, int $periodId, float $amount, int $rowVersion, array $meta = [], ?string $reason = null): array
+    public function runIncomeTax(int $supplierId, int $periodId, float $amount, int $rowVersion, array $meta = [], ?string $reason = null, ?string $activity = null): array
     {
         if ($this->supplierTaxpayerType($supplierId) === 'fo') {
             throw new ClosingException(
@@ -3572,14 +3575,15 @@ final class ClosingService
             throw new ClosingException('validation_failed', 'Částka splatné daně musí být kladná (nulovou daň krok přeskoč).');
         }
         $reason = $reason !== null && trim($reason) !== '' ? trim($reason) : null;
-        return $this->tx(function () use ($supplierId, $periodId, $amount, $rowVersion, $meta, $reason): array {
+        return $this->tx(function () use ($supplierId, $periodId, $amount, $rowVersion, $meta, $reason, $activity): array {
             $period = $this->lockPeriod($supplierId, $periodId, $rowVersion);
             $this->assertStatus($period, ['closing']);
             $endsOn = (string) $period['ends_on'];
             $fiscalYear = (int) $period['fiscal_year'];
+            $is504 = $this->roleProfile($supplierId, $endsOn)->framework === AccountingFrameworkService::CZ_504;
             // U 504 vstupují zásoby do daňového posouzení: daň se zaúčtuje až po kroku Zásoby
             // ({@see stepOrder()}, #401). Ostatní firmy pořadí nevynucují.
-            if ($this->roleProfile($supplierId, $endsOn)->framework === AccountingFrameworkService::CZ_504
+            if ($is504
                 && $this->stockStepRequired($supplierId)
                 && !$this->stepsComplete($this->stepsMap($supplierId, $periodId, true), ['stock'])) {
                 throw new ClosingException('stock_step_first',
@@ -3602,6 +3606,17 @@ final class ClosingService
                 ['account_code' => $debit, 'side' => 'debit', 'amount' => $amount],
                 ['account_code' => $credit, 'side' => 'credit', 'amount' => $amount],
             ];
+            // U 504 nese každý řádek 5xx činnost (systémové pravidlo i sloupce výkazu zisku
+            // a ztráty). Zařazení daně do hlavní nebo hospodářské činnosti je rozhodnutí
+            // účetní, proto se nehádá a krok ho vyžaduje.
+            if ($is504) {
+                if (!in_array($activity, ['main', 'economic'], true)) {
+                    throw new ClosingException('income_tax_activity_required',
+                        'U neziskové organizace zvolte, do které činnosti daň z příjmů patří (hlavní nebo hospodářská).', 422);
+                }
+                $catalog = (new \MyInvoice\Service\Accounting\Dimension\SystemDimensionCatalog($this->db))->ensureForFramework($supplierId, $endsOn);
+                $lines[0]['dimensions'] = [(int) $catalog['activity']['id'] => (int) $catalog['activity']['values'][$activity]];
+            }
             $this->assertKnownCodes($supplierId, $lines);
 
             $existing = $this->journal->findBySource($supplierId, 'income_tax', $periodId);
@@ -3630,7 +3645,7 @@ final class ClosingService
                 'difference' => $difference,
                 'reason' => $reason,
                 'ran_at' => date('Y-m-d H:i:s'),
-            ];
+            ] + ($is504 ? ['activity' => $activity] : []);
             $this->closing->upsertStep($supplierId, $periodId, 'income_tax', 'done', $payload, null, $meta['user_id'] ?? null);
             $this->bumpVersion($supplierId, $periodId, $rowVersion);
             $this->audit($supplierId, 'accounting.closing_step_done', $periodId, [
