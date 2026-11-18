@@ -794,10 +794,56 @@ zůstaly na syntetice s mapou, typicky doklad bez střediska.
 
 ### 114.11.13 Mzdy
 
-Mzdy mají vlastní číselník středisek, zakázek a činností (Mzdy → Nastavení →
-Dimenze). Mzdovou dimenzi lze navázat na hodnotu firemní dimenze, takže jedno
-středisko platí pro faktury i mzdy. Vazba smí mířit jen na hodnotu firmy nebo
-její skupiny firem.
+Mzdy mají vlastní číselník středisek, zakázek a činností (Mzdy → Nastavení
+mezd → Dimenze). Mzdovou dimenzi lze navázat na hodnotu firemní dimenze, takže
+jedno středisko platí pro faktury i mzdy. Vazba smí mířit jen na hodnotu firmy
+nebo její skupiny firem a jen na odpovídající druh firemní dimenze:
+
+<!-- cols: 30 70 -->
+| Mzdová dimenze | Smí se navázat na |
+|---|---|
+| Středisko | hodnotu firemní dimenze druhu Středisko |
+| Zakázka | hodnotu firemní dimenze druhu Projekt |
+| Činnost | hodnotu jiného druhu než Středisko a Projekt (např. systémová Činnost) |
+
+Vazbu jiného druhu editor ani API neuloží. Starší vazbu jiného druhu úprava
+názvu nebo platnosti nezmění; kontrola před mzdovým během ji ukáže jako
+varování.
+
+#### Mzdy na zakázky krok za krokem
+
+Zakázka se do mzdového zápisu dostane jen přes řetěz mzdová dimenze → firemní
+dimenze → zakázka. Mzdová dimenze Zakázka bez vazby nese jen svůj kód
+v mzdových sestavách; v deníku po ní nezůstane nic a Ekonomika zakázky mzdy
+neuvidí.
+
+1. V `Zakázky` založte zakázku (nebo použijte existující).
+2. V `Firma → Dimenze` u typu druhu **Projekt** založte hodnotu a ve vazbě
+   hodnoty vyberte tuto zakázku ([§ 114.11.2](#114112-typy-a-hodnoty)).
+3. V `Mzdy → Nastavení mezd → Dimenze` klikněte na **Přidat dimenzi** a v poli
+   **Firemní dimenze** vyberte hodnotu z kroku 2. Typ se předvyplní na Zakázka,
+   název a kód podle hodnoty. U existující mzdové zakázky vazbu doplňte úpravou.
+4. Na kartě pracovního vztahu v `Mzdy → Zaměstnanci` přiřaďte vztahu mzdovou
+   zakázku, případně rozpad mezi více zakázek (např. 50 / 50).
+5. Zahajte mzdový běh. Kontrola před během hlásí mzdové dimenze vztahů běhu,
+   které vazbu na firemní dimenzi nemají nebo ji mají na jiný druh, s odkazem
+   na `Mzdy → Nastavení mezd → Dimenze`. Varování běh nezastaví; vazba se
+   zmrazí do vstupů běhu, takže doplněná až po schválení se do zápisu dostane
+   jen opravnou revizí.
+6. Po zaúčtování nesou nákladové řádky 521 a 524 vztahu firemní dimenzi
+   i zakázku. V podvojném účetnictví počítá Ekonomika zakázky z deníku, takže
+   v ní mzdový náklad uvidíte; v daňové evidenci sčítá jen doklady a mzdy
+   v ní nejsou.
+
+**Jak poznáte, že je hotovo:** v účetním deníku mají řádky 521 mzdového
+předpisu vyplněnou zakázku a v detailu zakázky je v Ekonomice zakázky mzdový
+náklad. Editor mzdové dimenze typu Zakázka bez vazby pod polem **Firemní
+dimenze** upozorní, že se zakázka do mzdového zápisu nepropíše.
+
+Firma bez zapnutých firemních dimenzí žádné takové varování nedostane; mzdy
+účtuje s textovým střediskem jako dosud.
+
+#### Zaúčtování
 
 Při zaúčtování schváleného mzdového běhu:
 
@@ -809,7 +855,11 @@ Při zaúčtování schváleného mzdového běhu:
   Haléř, který po dělení zbude, dostane podíl s největším zbytkem, součet tedy
   vždy sedí na haléř.
 - Závazky (331, 336, 342 a další) se na střediska nedělí. Dluží se jako celek.
-- Do deníku se neúčtuje po zaměstnancích. Mzdový předpis zůstává jeden za firmu.
+- Mzdový předpis zůstává jeden za firmu. Řádky jsou souhrnné za účet, stranu
+  a dimenze, pokud firma v `Mzdy → Nastavení mezd → Automatické účtování`
+  nezvolí u **Mzdový předpis** možnost **Po zaměstnancích**. Pak má každý
+  zaměstnanec vlastní řádky s osobním číslem a pojistné zaměstnavatele se
+  rozdělí na jeho pracovní vztahy.
 - Textový kód střediska se na řádky zapisuje dál, sestavy po středisku proto
   fungují i bez vazby.
 

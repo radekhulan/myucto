@@ -11355,8 +11355,14 @@
         "company_value_none": "Not linked to a company dimension",
         "company_value_hint": "Payroll for this dimension is posted to the selected value from Company → Dimensions, just like invoices. For a new dimension the choice pre-fills type, name and code.",
         "company_value_empty": "The company has no values in Company → Dimensions yet. Without a link, payroll is posted with the text cost centre only.",
+        "company_value_project_missing": "Without a link to a company dimension value of the Project kind that has a project selected, the project is not carried into the payroll entry and the Project economics panel does not see the payroll.",
         "validation": {
           "title": "Please check the highlighted fields.",
+          "company_kind": {
+            "cost_center": "A payroll dimension of the Cost center type can only be linked to a company dimension value of the Cost center kind.",
+            "project": "A payroll dimension of the Project type can only be linked to a company dimension value of the Project kind.",
+            "activity": "A payroll dimension of the Activity type cannot be linked to a company dimension of the Project or Cost center kind; those belong to payroll dimensions of the Project or Cost center type."
+          },
           "code": "Code must be 1–50 characters: uppercase letters, digits, dot, underscore or hyphen.",
           "code_duplicate": "Another dimension already uses this code.",
           "name": "Name must be 1–190 characters.",

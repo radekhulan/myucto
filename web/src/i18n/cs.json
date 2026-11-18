@@ -11355,8 +11355,14 @@
         "company_value_none": "Bez vazby na firemní dimenzi",
         "company_value_hint": "Mzdy dimenze se zaúčtují na zvolenou hodnotu z Firma → Dimenze, stejně jako faktury. U nové dimenze výběr předvyplní typ, název a kód.",
         "company_value_empty": "Firma zatím nemá žádné hodnoty v Firma → Dimenze. Bez vazby se mzdy účtují jen s textovým střediskem.",
+        "company_value_project_missing": "Bez vazby na hodnotu firemní dimenze druhu Projekt, která má vybranou zakázku, se zakázka do mzdového zápisu nepropíše a Ekonomika zakázky mzdy neuvidí.",
         "validation": {
           "title": "Zkontrolujte prosím zvýrazněná pole.",
+          "company_kind": {
+            "cost_center": "Mzdovou dimenzi typu Středisko lze navázat jen na hodnotu firemní dimenze druhu Středisko.",
+            "project": "Mzdovou dimenzi typu Zakázka lze navázat jen na hodnotu firemní dimenze druhu Projekt.",
+            "activity": "Mzdovou dimenzi typu Činnost nelze navázat na firemní dimenzi druhu Projekt ani Středisko; na ně patří mzdová dimenze typu Zakázka, respektive Středisko."
+          },
           "code": "Kód musí mít 1–50 znaků: velká písmena, číslice, tečku, podtržítko nebo pomlčku.",
           "code_duplicate": "Tento kód už jiná dimenze používá.",
           "name": "Název musí mít 1–190 znaků.",

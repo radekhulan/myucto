@@ -111,6 +111,12 @@ nebo z výslovné předkontace mzdové složky. Nemusí tedy jít jen o syntetik
 521, 522 a 523. Opravná revize zachová v klasifikaci i původní účet, aby
 jeho storno a přesun na nový účet skončily ve stejné mzdové kategorii.
 
+Zakázku a firemní dimenzi nesou nákladové řádky mzdového předpisu jen tehdy,
+když je mzdová dimenze vztahu navázaná na hodnotu firemní dimenze (zakázka na
+hodnotu druhu Projekt s vybranou zakázkou). Bez vazby zůstane na řádcích jen
+textové středisko. Porovnání mezd s deníkem to neovlivní, chybí jen členění
+po zakázkách. Postup je v [Mzdy na zakázky krok za krokem](114_Dimenze.md#mzdy-na-zakazky-krok-za-krokem).
+
 U povinného spoření při rizikové práci se sleduje nákladová strana (527).
 Účtujete-li na 527 i jinou mzdovou složku, oddělte příspěvek analytikou (např.
 527.100). Zápočet čisté mzdy na účet společníka nic nevyplácí, je to účetní
