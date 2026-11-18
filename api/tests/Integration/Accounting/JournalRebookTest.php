@@ -214,4 +214,53 @@ final class JournalRebookTest extends BankPostingTestCase
         self::assertSame(409, $status);
         self::assertSame('matching_dry_run_required', $body['error']['code'] ?? $body['code'] ?? null, json_encode($body));
     }
+
+    public function testManualEntryWithInternalDocumentIsRebookedInPlaceAndRolledBack(): void
+    {
+        $map = $this->accounts->codeToIdMap($this->supplierId);
+        $entryId = $this->journal->insert([
+            'supplier_id' => $this->supplierId, 'period_id' => $this->periodId, 'entry_date' => self::YEAR . '-06-12',
+            'document_no' => 'ID-SYN-1', 'description' => 'Přeúčtování zálohy', 'source_type' => 'manual', 'source_id' => null,
+            'posted_at' => date('Y-m-d H:i:s'), 'posted_by' => $this->userId,
+        ], [
+            ['account_id' => $map['378']['id'], 'side' => 'debit', 'amount' => 700.0],
+            ['account_id' => $map['395']['id'], 'side' => 'credit', 'amount' => 700.0],
+        ]);
+        $pdo = $this->db->pdo();
+        $pdo->prepare("INSERT INTO internal_documents (supplier_id, title, document_date, entry_date, amount, status, origin, document_no, journal_entry_id, posted_at)
+                       VALUES (?, 'Syntetický interní doklad', ?, ?, 700, 'posted', 'draft', 'ID-SYN-1', ?, NOW())")
+            ->execute([$this->supplierId, self::YEAR . '-06-12', self::YEAR . '-06-12', $entryId]);
+        $docId = (int) $pdo->lastInsertId();
+        $pdo->prepare("INSERT INTO internal_document_lines (supplier_id, internal_document_id, position, account_code, side, amount)
+                       VALUES (?, ?, 0, '378', 'debit', 700), (?, ?, 1, '395', 'credit', 700)")
+            ->execute([$this->supplierId, $docId, $this->supplierId, $docId]);
+        $lineIds = array_column($this->journal->linesForEntry($entryId, $this->supplierId), 'id');
+
+        $filter = $this->filter(['from_account' => '378', 'to_account' => '335', 'side' => 'debit', 'source_types' => ['manual'],
+            'date_from' => self::YEAR . '-06-12', 'date_to' => self::YEAR . '-06-12']);
+        $dryId = $this->dryRun($filter);
+        $dry = $this->items($dryId)['would_change'] ?? [];
+        self::assertCount(1, $dry, json_encode($this->items($dryId)));
+        self::assertSame($entryId, $dry[0]['source_id']);
+
+        $applyId = $this->applyRun($dryId);
+        self::assertSame('completed', $this->jobs->find($applyId, $this->supplierId)['status'], (string) $this->jobs->find($applyId, $this->supplierId)['last_error']);
+        $codes = array_map('strval', array_keys($this->linesByAccountCode($entryId)));
+        self::assertContains('335', $codes);
+        self::assertNotContains('378', $codes);
+        self::assertSame($lineIds, array_column($this->journal->linesForEntry($entryId, $this->supplierId), 'id'), 'Řádky zůstávají tytéž.');
+        $docCodes = $pdo->query('SELECT account_code FROM internal_document_lines WHERE internal_document_id = ' . $docId . ' ORDER BY position')->fetchAll(\PDO::FETCH_COLUMN);
+        self::assertSame(['335', '395'], $docCodes);
+
+        $rollbackId = $this->runJob(['kind' => 'rollback', 'rollback_of_job_id' => $applyId]);
+        self::assertCount(1, $this->items($rollbackId)['applied'] ?? [], json_encode($this->items($rollbackId)));
+        self::assertContains('378', array_map('strval', array_keys($this->linesByAccountCode($entryId))));
+        self::assertSame(['378', '395'], $pdo->query('SELECT account_code FROM internal_document_lines WHERE internal_document_id = ' . $docId . ' ORDER BY position')->fetchAll(\PDO::FETCH_COLUMN));
+
+        $this->db->pdo()->prepare('INSERT INTO accounting_supplier_settings (supplier_id, locked_until) VALUES (?, ?) ON DUPLICATE KEY UPDATE locked_until = VALUES(locked_until)')
+            ->execute([$this->supplierId, self::YEAR . '-06-30']);
+        $lockedDry = $this->dryRun($this->filter(['from_account' => '395', 'to_account' => '343', 'side' => 'credit', 'source_types' => ['manual'],
+            'date_from' => self::YEAR . '-06-12', 'date_to' => self::YEAR . '-06-12']));
+        self::assertSame('date_locked', ($this->items($lockedDry)['skipped'][0] ?? [])['reason_code'] ?? null, 'V zamčeném datu jen daňově neutrální přesun.');
+    }
 }

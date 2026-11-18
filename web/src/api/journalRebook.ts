@@ -7,7 +7,7 @@ import { api } from './client'
  * (bez ručně vyřazených zápisů). Ostrý běh jde vrátit samostatnou úlohou.
  */
 export type JournalRebookSide = 'both' | 'debit' | 'credit'
-export type JournalRebookSourceType = 'invoice' | 'purchase_invoice' | 'bank'
+export type JournalRebookSourceType = 'invoice' | 'purchase_invoice' | 'bank' | 'manual' | 'cash'
 export type JournalRebookMode = 'rewrite' | 'rewrite_or_reverse'
 
 export interface JournalRebookFilter {
@@ -126,8 +126,9 @@ export const journalRebookApi = {
   job: (id: number): Promise<JournalRebookJob> =>
     api.get<JournalRebookJob>(`/accounting/journal-rebook/${id}`).then(r => r.data),
 
-  items: (id: number, status: JournalRebookItemStatus, page: number): Promise<JournalRebookItemsPage> =>
+  /** `status` null = položky všech stavů (export). */
+  items: (id: number, status: JournalRebookItemStatus | null, page: number, perPage = JOURNAL_REBOOK_PER_PAGE): Promise<JournalRebookItemsPage> =>
     api.get<JournalRebookItemsPage>(`/accounting/journal-rebook/${id}/items`, {
-      params: { status, page, per_page: JOURNAL_REBOOK_PER_PAGE },
+      params: { ...(status ? { status } : {}), page, per_page: perPage },
     }).then(r => r.data),
 }

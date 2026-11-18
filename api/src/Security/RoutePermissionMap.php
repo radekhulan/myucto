@@ -864,6 +864,11 @@ final class RoutePermissionMap
         ['GET', '#^/api/accounting/journal-rebook(/|$)#', 'accounting', AccessLevel::READ],
         ['POST', '#^/api/accounting/journal-rebook/count$#', 'accounting', AccessLevel::READ],
         ['*', '#^/api/accounting/journal-rebook(/|$)#', 'accounting.journal.post', AccessLevel::WRITE],
+        // Bankovní pohyby podle filtru: totéž rozdělení jako přeúčtování. Párování navíc
+        // ověřuje `bank.match` akce i jednotlivé párování, které hromadný krok volá.
+        ['GET', '#^/api/accounting/bank-bulk(/|$)#', 'accounting', AccessLevel::READ],
+        ['POST', '#^/api/accounting/bank-bulk/count$#', 'accounting', AccessLevel::READ],
+        ['*', '#^/api/accounting/bank-bulk(/|$)#', 'accounting.journal.post', AccessLevel::WRITE],
         // Převod starších zápisů na dvojice fyzicky dělí řádky deníku → právo účtovat.
         ['GET', '#^/api/accounting/pair-conversion(/|$)#', 'accounting', AccessLevel::READ],
         ['*', '#^/api/accounting/pair-conversion(/|$)#', 'accounting.journal.post', AccessLevel::WRITE],

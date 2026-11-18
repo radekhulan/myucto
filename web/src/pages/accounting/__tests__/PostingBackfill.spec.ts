@@ -13,6 +13,9 @@ vi.mock('vue-i18n', () => ({
   useI18n: () => ({ locale: { value: 'cs' }, t: (key: string, p?: unknown) => (p ? `${key}${JSON.stringify(p)}` : key) }),
 }))
 vi.mock('vue-router', () => ({ RouterLink: { props: ['to'], template: '<a :href="to"><slot /></a>' } }))
+vi.mock('@/components/accounting/BankBulkPanel.vue', () => ({
+  default: { name: 'BankBulkPanel', emits: ['changed'], template: '<section id="bank-bulk" data-test="bank-bulk" />' },
+}))
 
 import PostingBackfill from '../PostingBackfill.vue'
 
@@ -35,6 +38,16 @@ describe('PostingBackfill', () => {
     expect(wrapper.find('[data-test="backfill-nothing"]').exists()).toBe(false)
     expect(wrapper.find('[data-test="backfill-invoices-done"]').exists()).toBe(true)
     expect(wrapper.get('[data-test="backfill-link-bank"]').attributes('href')).toBe('/bank?tab=posting')
+    expect(wrapper.get('[data-test="backfill-link-bank-bulk"]').attributes('href')).toBe('#bank-bulk')
+  })
+
+  it('box hromadné práce s bankovními pohyby je na stránce vždy a po jeho akci se obnoví počty', async () => {
+    const wrapper = await mountWith({})
+    expect(wrapper.find('[data-test="bank-bulk"]').exists()).toBe(true)
+    m.status.mockResolvedValue({ pending: pending({ bank_transactions: 1, total: 1 }), jobs: [] })
+    wrapper.findComponent({ name: 'BankBulkPanel' }).vm.$emit('changed')
+    await flushPromises()
+    expect(wrapper.find('[data-test="backfill-link-bank"]').exists()).toBe(true)
   })
 
   it('bez čekajících pohybů ukáže, že je všechno zaúčtované', async () => {

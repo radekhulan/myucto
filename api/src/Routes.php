@@ -2909,6 +2909,15 @@ final class Routes
             $g->get   ('/journal-rebook/{id:[0-9]+}/items',   [\MyInvoice\Action\Accounting\JournalRebookAction::class, 'items']);
             $g->post  ('/journal-rebook/{id:[0-9]+}/rollback',[\MyInvoice\Action\Accounting\JournalRebookAction::class, 'rollback']);
             $g->post  ('/journal-rebook/{id:[0-9]+}/cancel',  [\MyInvoice\Action\Accounting\JournalRebookAction::class, 'cancel']);
+            // Nespárované bankovní pohyby podle filtru: hromadně zaúčtovat na protiúčet,
+            // nebo spárovat s jedním dokladem (box na stránce Doúčtovat doklady).
+            $g->get   ('/bank-bulk',                          [\MyInvoice\Action\Accounting\BankBulkAction::class, 'status']);
+            $g->post  ('/bank-bulk/count',                    [\MyInvoice\Action\Accounting\BankBulkAction::class, 'count']);
+            $g->post  ('/bank-bulk/start',                    [\MyInvoice\Action\Accounting\BankBulkAction::class, 'start']);
+            $g->get   ('/bank-bulk/{id:[0-9]+}',              [\MyInvoice\Action\Accounting\BankBulkAction::class, 'job']);
+            $g->get   ('/bank-bulk/{id:[0-9]+}/items',        [\MyInvoice\Action\Accounting\BankBulkAction::class, 'items']);
+            $g->post  ('/bank-bulk/{id:[0-9]+}/rollback',     [\MyInvoice\Action\Accounting\BankBulkAction::class, 'rollback']);
+            $g->post  ('/bank-bulk/{id:[0-9]+}/cancel',       [\MyInvoice\Action\Accounting\BankBulkAction::class, 'cancel']);
             $g->get   ('/setup-assistant', [\MyInvoice\Action\Accounting\AccountingSetupAssistantAction::class, 'status']);
             $g->post  ('/setup-assistant/analysis', [\MyInvoice\Action\Accounting\AccountingSetupAssistantAction::class, 'startAnalysis']);
             $g->get   ('/setup-assistant/runs/{id:[0-9]+}', [\MyInvoice\Action\Accounting\AccountingSetupAssistantAction::class, 'run']);

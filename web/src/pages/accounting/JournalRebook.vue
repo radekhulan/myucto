@@ -15,8 +15,6 @@ import {
   JOURNAL_REBOOK_PER_PAGE,
   type JournalRebookCount,
   type JournalRebookItem,
-  type JournalRebookItemStatus,
-  type JournalRebookItemsPage,
   type JournalRebookJob,
   type JournalRebookMode,
   type JournalRebookStatus,
@@ -24,18 +22,24 @@ import {
 import { accountingApi, type ChartAccount } from '@/api/accounting'
 import { apiErrorMessage } from '@/api/errors'
 import { useToast } from '@/composables/useToast'
+import { useBulkJobs } from '@/composables/useBulkJobs'
 import { formatDate, formatMoney } from '@/composables/useFormat'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
 import ConfirmDialog from '@/components/ui/ConfirmDialog.vue'
 import DateInput from '@/components/ui/DateInput.vue'
 import PaginationBar from '@/components/ui/PaginationBar.vue'
 import ChartAccountSelect from '@/components/accounting/ChartAccountSelect.vue'
-import { ICONS, btnOutlineSm } from '@/components/ui/buttonStyles'
+import BulkJobProgress from '@/components/accounting/BulkJobProgress.vue'
+import BulkJobTabs from '@/components/accounting/BulkJobTabs.vue'
+import { ICONS, btnOutline, btnOutlineSm } from '@/components/ui/buttonStyles'
+import { buildCsv, downloadCsv, fetchAllPages } from '@/utils/bulkJobCsv'
 import {
+  REBOOK_CSV_COLUMNS,
   REBOOK_SOURCE_TYPES,
   buildRebookFilter,
   changedLines,
   isRebookFormValid,
+  rebookCsvRows,
   rebookReasonText,
   type JournalRebookForm,
 } from '@/utils/journalRebook'
@@ -44,15 +48,19 @@ const { t, locale } = useI18n()
 const route = useRoute()
 const toast = useToast()
 
-const state = ref<JournalRebookStatus | null>(null)
-const running = ref<JournalRebookJob | null>(null)
-const loading = ref(true)
-const starting = ref(false)
-const cancelling = ref(false)
-const error = ref('')
 const accounts = ref<ChartAccount[]>([])
 
-let timer: ReturnType<typeof setTimeout> | null = null
+const {
+  state, running, loading, starting, cancelling, error, isRunning,
+  load, startJob, cancel, stopPolling,
+  selected, activeTab, page, itemsPage, itemsLoading, itemsError, counts, excluded,
+  tabs, selectedFinished, canExclude, applyCount, canApplySelected,
+  selectJob, setTab, setPage, isIncluded, toggleItem, pageAllIncluded, togglePage,
+} = useBulkJobs<JournalRebookJob, JournalRebookStatus, JournalRebookItem>({
+  api: journalRebookApi,
+  itemKey: item => item.entry_id,
+  i18nPrefix: 'accounting.journal_rebook',
+})
 
 function queryString(key: string): string {
   const v = route.query[key]
@@ -75,13 +83,6 @@ const form = reactive<JournalRebookForm>({
 
 const canRun = computed(() => !!state.value?.can_run)
 const formValid = computed(() => isRebookFormValid(form))
-const isRunning = computed(() =>
-  running.value?.status === 'queued' || running.value?.status === 'running')
-const percent = computed(() => {
-  const j = running.value
-  if (!j || !j.total_items) return null
-  return Math.min(100, Math.round((j.processed / j.total_items) * 100))
-})
 
 // ── Živý počet ─────────────────────────────────────────────────────────────
 const count = ref<JournalRebookCount | null>(null)
@@ -125,200 +126,26 @@ watch(
   scheduleCount,
 )
 
-// ── Načtení a polling ──────────────────────────────────────────────────────
-function stopPolling() {
-  if (timer !== null) {
-    clearTimeout(timer)
-    timer = null
-  }
-}
-
-async function load() {
-  loading.value = true
-  error.value = ''
-  try {
-    state.value = await journalRebookApi.status()
-    const active = state.value.jobs.find(j => j.status === 'queued' || j.status === 'running')
-    if (active) {
-      running.value = active
-      poll(active.id)
-    } else if (!selected.value) {
-      const latest = state.value.jobs[0]
-      if (latest && latest.kind === 'dry_run' && latest.can_apply) selectJob(latest)
-    }
-  } catch (e) {
-    error.value = apiErrorMessage(e)
-  } finally {
-    loading.value = false
-  }
-}
-
-function doneMessage(j: JournalRebookJob): string {
-  if (j.kind === 'dry_run') return t('accounting.journal_rebook.done_dry', { n: j.changed_count })
-  if (j.kind === 'rollback') return t('accounting.journal_rebook.done_rollback', { n: j.changed_count })
-  return t('accounting.journal_rebook.done_apply', { n: j.changed_count })
-}
-
-function poll(jobId: number) {
-  // Úloha běží dál i bez nás, takže výpadek jednoho dotazu není důvod přestat se ptát.
-  let failures = 0
-  const tick = async () => {
-    try {
-      const j = await journalRebookApi.job(jobId)
-      failures = 0
-      running.value = j
-      if (j.status === 'queued' || j.status === 'running') {
-        timer = setTimeout(tick, 1500)
-        return
-      }
-      timer = null
-      cancelling.value = false
-      if (j.status === 'failed') {
-        toast.error(j.last_error || t('accounting.journal_rebook.failed'))
-      } else if (j.status === 'cancelled') {
-        toast.warning(t('accounting.journal_rebook.cancelled'))
-      } else {
-        toast.success(doneMessage(j))
-      }
-      state.value = await journalRebookApi.status()
-      if (j.status !== 'failed') selectJob(state.value.jobs.find(x => x.id === j.id) ?? j)
-    } catch (e) {
-      failures++
-      if (failures < 5) {
-        timer = setTimeout(tick, 3000)
-      } else {
-        timer = null
-        error.value = apiErrorMessage(e)
-      }
-    }
-  }
-  timer = null
-  void tick()
-}
-
-async function startJob(run: () => Promise<{ job_id: number }>) {
-  starting.value = true
-  error.value = ''
-  try {
-    const { job_id } = await run()
-    running.value = null
-    poll(job_id)
-  } catch (e) {
-    error.value = apiErrorMessage(e)
-  } finally {
-    starting.value = false
-  }
-}
-
 function startDryRun() {
   void startJob(() => journalRebookApi.start({ ...buildRebookFilter(form), mode: form.mode, dry_run: true }))
 }
 
-async function cancel() {
-  const id = running.value?.id
-  if (!id || cancelling.value) return
-  cancelling.value = true
+// ── Export CSV ─────────────────────────────────────────────────────────────
+const exporting = ref(false)
+
+async function exportCsv() {
+  const job = selected.value
+  if (!job || exporting.value) return
+  exporting.value = true
   try {
-    await journalRebookApi.cancel(id)
+    const items = await fetchAllPages((p, perPage) => journalRebookApi.items(job.id, null, p, perPage))
+    const header = REBOOK_CSV_COLUMNS.map(c => t('accounting.journal_rebook.' + c))
+    downloadCsv(`preuctovani-${job.id}.csv`, buildCsv(header, rebookCsvRows(items, job.params, key => t(key))))
   } catch (e) {
-    cancelling.value = false
     toast.error(apiErrorMessage(e))
-  }
-}
-
-// ── Výsledek vybraného běhu ────────────────────────────────────────────────
-const selected = ref<JournalRebookJob | null>(null)
-const activeTab = ref<JournalRebookItemStatus>('would_change')
-const page = ref(1)
-const itemsPage = ref<JournalRebookItemsPage | null>(null)
-const itemsLoading = ref(false)
-const itemsError = ref('')
-const counts = ref<Partial<Record<JournalRebookItemStatus, number>>>({})
-const excluded = ref<Set<number>>(new Set())
-let itemsSeq = 0
-
-const tabsByKind: Record<JournalRebookJob['kind'], JournalRebookItemStatus[]> = {
-  dry_run: ['would_change', 'skipped', 'unchanged'],
-  apply: ['applied', 'failed', 'skipped', 'excluded', 'unchanged'],
-  rollback: ['applied', 'failed', 'skipped', 'unchanged'],
-}
-
-const tabs = computed<JournalRebookItemStatus[]>(() => {
-  const job = selected.value
-  if (!job) return []
-  const all = tabsByKind[job.kind]
-  return all.filter((s, i) => i === 0 || s === activeTab.value || (counts.value[s] ?? 0) > 0)
-})
-
-const selectedFinished = computed(() =>
-  !!selected.value && selected.value.status !== 'queued' && selected.value.status !== 'running')
-const canExclude = computed(() =>
-  selected.value?.kind === 'dry_run' && selected.value.can_apply && activeTab.value === 'would_change')
-const wouldChangeCount = computed(() => counts.value.would_change ?? selected.value?.changed_count ?? 0)
-const applyCount = computed(() => Math.max(0, wouldChangeCount.value - excluded.value.size))
-
-function selectJob(job: JournalRebookJob) {
-  if (selected.value?.id !== job.id) excluded.value = new Set()
-  selected.value = job
-  counts.value = {}
-  activeTab.value = tabsByKind[job.kind][0]
-  page.value = 1
-  void loadItems()
-}
-
-async function loadItems() {
-  const job = selected.value
-  if (!job) return
-  const seq = ++itemsSeq
-  itemsLoading.value = true
-  itemsError.value = ''
-  try {
-    const res = await journalRebookApi.items(job.id, activeTab.value, page.value)
-    if (seq !== itemsSeq) return
-    itemsPage.value = res
-    counts.value = res.counts
-  } catch (e) {
-    if (seq !== itemsSeq) return
-    itemsPage.value = null
-    itemsError.value = apiErrorMessage(e)
   } finally {
-    if (seq === itemsSeq) itemsLoading.value = false
+    exporting.value = false
   }
-}
-
-function setTab(tab: JournalRebookItemStatus) {
-  activeTab.value = tab
-  page.value = 1
-  void loadItems()
-}
-
-function setPage(p: number) {
-  page.value = p
-  void loadItems()
-}
-
-function isIncluded(item: JournalRebookItem): boolean {
-  return !excluded.value.has(item.entry_id)
-}
-
-function toggleItem(item: JournalRebookItem) {
-  const next = new Set(excluded.value)
-  if (next.has(item.entry_id)) next.delete(item.entry_id)
-  else next.add(item.entry_id)
-  excluded.value = next
-}
-
-const pageAllIncluded = computed(() =>
-  (itemsPage.value?.items ?? []).every(isIncluded))
-
-function togglePage() {
-  const next = new Set(excluded.value)
-  const include = !pageAllIncluded.value
-  for (const item of itemsPage.value?.items ?? []) {
-    if (include) next.delete(item.entry_id)
-    else next.add(item.entry_id)
-  }
-  excluded.value = next
 }
 
 // ── Potvrzení ostrého běhu a vrácení ───────────────────────────────────────
@@ -352,12 +179,6 @@ function runRollback() {
   if (!job) return
   void startJob(() => journalRebookApi.rollback(job.id))
 }
-
-const canApplySelected = computed(() => {
-  const job = selected.value
-  return !!job && job.kind === 'dry_run' && job.can_apply
-    && (job.status === 'completed' || job.status === 'completed_with_warnings')
-})
 
 const actions = computed<ActionItem[]>(() => [
   {
@@ -398,10 +219,6 @@ function statusLabel(status: JournalRebookJob['status']): string {
 
 function kindLabel(kind: JournalRebookJob['kind']): string {
   return t('accounting.journal_rebook.kind.' + kind)
-}
-
-function tabLabel(tab: JournalRebookItemStatus): string {
-  return t('accounting.journal_rebook.tab.' + tab)
 }
 
 function strategyLabel(item: JournalRebookItem): string {
@@ -546,53 +363,21 @@ onUnmounted(() => {
       </div>
 
       <!-- Průběh -->
-      <div v-if="running" class="rounded-lg border border-primary-200 bg-primary-50/50 px-4 py-4 mb-4 space-y-2">
-        <div class="flex items-center justify-between gap-3 flex-wrap">
-          <div class="text-sm font-medium text-primary-700">
-            {{ statusLabel(running.status) }}
-            <span class="ml-2 text-xs text-neutral-500">({{ kindLabel(running.kind) }})</span>
-          </div>
-          <button
-            v-if="isRunning"
-            type="button"
-            class="cursor-pointer text-sm text-danger-500 hover:underline whitespace-nowrap"
-            :disabled="cancelling"
-            @click="cancel"
-          >
-            {{ cancelling ? t('accounting.journal_rebook.cancelling') : t('accounting.journal_rebook.cancel') }}
-          </button>
-        </div>
-
-        <div class="h-2 rounded-full bg-primary-100 overflow-hidden">
-          <div
-            class="h-full bg-primary-500 transition-all duration-300"
-            :class="percent === null ? 'animate-pulse w-1/3' : ''"
-            :style="percent === null ? undefined : { width: percent + '%' }"
-          ></div>
-        </div>
-
-        <div class="flex justify-between text-xs text-neutral-600 flex-wrap gap-x-4">
-          <span v-if="running.total_items">{{ running.processed }} / {{ running.total_items }}<span v-if="percent !== null"> ({{ percent }} %)</span></span>
-          <span>{{ t('accounting.journal_rebook.counts', {
-            changed: running.changed_count, skipped: running.skipped_count, failed: running.failed_count,
-          }) }}</span>
-        </div>
-
-        <p class="text-xs text-neutral-500">{{ t('accounting.journal_rebook.background_hint') }}</p>
-
-        <details v-if="running.log_text" class="text-xs">
-          <summary class="cursor-pointer text-neutral-600 hover:text-neutral-900">{{ t('accounting.journal_rebook.log') }}</summary>
-          <pre class="mt-2 max-h-72 overflow-auto bg-neutral-900 text-neutral-100 rounded p-3 text-[11px] leading-relaxed">{{ running.log_text }}</pre>
-        </details>
-      </div>
+      <BulkJobProgress v-if="running" :job="running" i18n-prefix="accounting.journal_rebook" :cancelling="cancelling" @cancel="cancel" />
 
       <!-- Výsledek vybraného běhu -->
       <div v-if="selected && selectedFinished" class="bg-surface border border-neutral-200 rounded-lg shadow-sm p-5 mb-4" data-test="rebook-result">
         <div class="flex flex-wrap items-baseline justify-between gap-2 mb-1">
           <h2 class="font-medium text-neutral-900">{{ resultTitle }}</h2>
-          <span class="text-xs text-neutral-500 font-mono">
-            {{ selected.params.from_account }} → {{ selected.params.to_account }} · {{ modeLabel(selected.params.mode) }}
-          </span>
+          <div class="flex flex-wrap items-center gap-3">
+            <span class="text-xs text-neutral-500 font-mono">
+              {{ selected.params.from_account }} → {{ selected.params.to_account }} · {{ modeLabel(selected.params.mode) }}
+            </span>
+            <button type="button" :class="btnOutline('neutral')" :disabled="exporting" data-test="rebook-export" @click="exportCsv">
+              <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.download" /></svg>
+              {{ exporting ? t('common.loading') : t('accounting.journal_rebook.export_csv') }}
+            </button>
+          </div>
         </div>
         <p class="text-sm text-neutral-700 mb-3">
           {{ t(selected.kind === 'dry_run' ? 'accounting.journal_rebook.summary' : 'accounting.journal_rebook.summary_done', {
@@ -605,16 +390,7 @@ onUnmounted(() => {
           </span>
         </p>
 
-        <div class="overflow-x-auto border-b border-neutral-200" role="tablist" :aria-label="resultTitle">
-          <div class="flex min-w-max gap-1">
-            <button v-for="tab in tabs" :key="tab" type="button" role="tab"
-              :aria-selected="activeTab === tab" class="cursor-pointer whitespace-nowrap border-b-2 px-3 py-2 text-sm transition"
-              :class="activeTab === tab ? 'border-primary-600 text-primary-700 font-medium' : 'border-transparent text-neutral-600 hover:text-neutral-900'"
-              @click="setTab(tab)">
-              {{ tabLabel(tab) }} ({{ counts[tab] ?? 0 }})
-            </button>
-          </div>
-        </div>
+        <BulkJobTabs :tabs="tabs" :active="activeTab" :counts="counts" i18n-prefix="accounting.journal_rebook" :label="resultTitle" @select="setTab" />
 
         <div v-if="itemsError" class="mt-3 text-sm text-danger-500">{{ itemsError }}</div>
         <div v-else-if="itemsLoading && !itemsPage" class="py-6 text-center text-sm text-neutral-400">{{ t('common.loading') }}…</div>

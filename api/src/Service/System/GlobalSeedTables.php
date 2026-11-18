@@ -365,7 +365,7 @@ final class GlobalSeedTables
         'accounting_archives', 'accounting_backfill_jobs', 'accounting_balance_inventory',
         'accounting_balance_inventory_items', 'accounting_closing_steps', 'accounting_corrections',
         'accounting_opening_balances', 'accounting_receivable_provisions',
-        'accounting_reclassification_items', 'accounting_setup_proposals', 'accounting_setup_rule_bundles',
+        'accounting_bulk_items', 'accounting_reclassification_items', 'accounting_setup_proposals', 'accounting_setup_rule_bundles',
         'accounting_setup_runs',
         'activity_log', 'activity_log_chain_head', 'activity_log_redactions',
         'ai_assistant_conversations', 'ai_assistant_messages',
@@ -427,7 +427,7 @@ final class GlobalSeedTables
         'journal_line_pairings',
         // Jednoduchý zápis: storna dvojic, posouzení zápisů bez dvojic a běhy převodu
         // patří k deníku a mažou se s ním.
-        'journal_pair_reversals', 'journal_entry_pair_status', 'journal_pair_conversion_runs', 'journal_rebook_items',
+        'journal_pair_reversals', 'journal_entry_pair_status', 'journal_pair_conversion_runs',
         'logbook_fuel_scans',
         'login_attempts',
         'mail_outbox', 'mail_rate_limit_events', 'mail_send_log',

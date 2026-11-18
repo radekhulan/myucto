@@ -31,6 +31,7 @@ final class JournalLineWriterGuardTest extends TestCase
     private const ALLOWED_LEDGER_UPDATE = [
         'Repository/JournalEntryRepository.php::splitIntoPairs' => 'převod na dvojice, invariant nad výsledným zápisem',
         'Repository/JournalEntryRepository.php::replaceSomeLines' => 'přečíslování dvojic při výměně řádků, invariant nad výsledkem',
+        'Repository/JournalEntryRepository.php::reassignLineAccounts' => 'hromadné přeúčtování ručních zápisů: mění jen účet řádku, strana, částka i dvojice zůstávají, pojistky jako replaceSomeLines',
     ];
 
     private const GUARDED_COLUMNS = '/\b(?:[a-z_]+\.)?(account_id|side|amount|is_red_storno|pair_no)\s*=/i';

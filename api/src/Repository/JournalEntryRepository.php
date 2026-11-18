@@ -933,6 +933,73 @@ final class JournalEntryRepository
     }
 
     /**
+     * Přeúčtuje vybrané řádky ŽIVÉHO zápisu na jiný účet: řádek zůstává týž (id, částka,
+     * strana, dvojice, text, měna, dimenze i rozpady), mění se jen `account_id`. Pro
+     * hromadné přeúčtování ručních zápisů, interních a pokladních dokladů, kde zápis
+     * nestaví žádný zdrojový doklad znovu a výměna celých řádků by zbytečně přišla
+     * o dimenze a vazby řádků.
+     *
+     * Pojistky stejné jako {@see replaceSomeLines()}: optimistický zámek `row_version`,
+     * použití zápisu jinými agendami (členské příspěvky, předpisy SVJ, společné náklady,
+     * zúčtování, rezerva majetku, kapitál a daňová úspora neziskovky, platby SVJ) a politika
+     * systémových dimenzí. Vázaná párování saldokonta na změněných řádcích se uvolní.
+     * Kontroly období, zámku k datu a daňové neutrality dělá volající.
+     * PŘEDPOKLAD: volající drží transakci.
+     *
+     * @param list<int> $lineIds
+     */
+    public function reassignLineAccounts(int $entryId, int $supplierId, int $expectedRowVersion, array $lineIds, int $accountId): void
+    {
+        $lineIds = array_values(array_unique(array_map('intval', $lineIds)));
+        (new MembershipUseGuard($this->db))->assertEntriesMutable($supplierId, [$entryId]);
+        (new IssuanceUseGuard($this->db))->assertPostingEntriesMutable($supplierId, [$entryId]);
+        $entry = $this->currentEntryForDimensionWrite($entryId, $supplierId);
+        (new JointAllocationUseGuard($this->db))->assertEntriesMutable($supplierId, [$entryId]);
+        if ($entry === null || $entry['reversed_by'] !== null || (int) $entry['row_version'] !== $expectedRowVersion) {
+            throw new PostingException('version_conflict', 'Zápis #' . $entryId . ' se mezitím změnil nebo byl stornován - načtěte aktuální stav.', 409);
+        }
+        $ids = array_flip($lineIds);
+        $known = array_flip(array_map(static fn (array $l): int => (int) $l['id'], $entry['lines']));
+        if ($lineIds === [] || array_diff_key($ids, $known) !== []) {
+            throw new PostingException('entry_not_found', 'Řádek do zápisu #' . $entryId . ' nepatří.', 404);
+        }
+        (new \MyInvoice\Service\Accounting\JournalSettlementUseGuard($this->db))->assertLinesRemovable($supplierId, $entryId, $lineIds);
+        $result = array_map(static fn (array $l): array => isset($ids[(int) $l['id']]) ? ['account_id' => $accountId] + $l : $l, $entry['lines']);
+        foreach ([
+            new \MyInvoice\Service\Accounting\Closing\AssetReserveSourceUseGuard($this->db, $this),
+            new \MyInvoice\Service\Tax\Nonprofit\NonprofitTaxSavingUseGuard($this->db, $this),
+            new \MyInvoice\Service\Nonprofit\Capital\CapitalUseGuard($this->db, $this),
+        ] as $guard) {
+            // `true` = zápis je použitý jinde a změna je jen beze změny řádků; jiná změna
+            // použitého zápisu v guardu skončí výjimkou. Výměna účtu tedy nikdy `true` nedá.
+            if ($guard->assertEntryChange($supplierId, $entryId, $result, $entry['entry_date'], $entry)) {
+                return;
+            }
+        }
+        (new \MyInvoice\Service\Property\Payments\Workflow\PaymentMutationContext($this->db))->assertEntriesMutable($supplierId, [$entryId]);
+        (new SystemDimensionWritePolicy($this->db))->assertJournal($entry, $result, $entry['lines']);
+
+        $pdo = $this->db->pdo();
+        $stmt = $pdo->prepare(
+            'UPDATE journal_entries SET row_version = row_version + 1
+              WHERE id = ? AND supplier_id = ? AND reversed_by IS NULL AND row_version = ?'
+        );
+        $stmt->execute([$entryId, $supplierId, $expectedRowVersion]);
+        if ($stmt->rowCount() !== 1) {
+            throw new PostingException('version_conflict', 'Zápis #' . $entryId . ' se mezitím změnil nebo byl stornován - načtěte aktuální stav.', 409);
+        }
+        $in = implode(',', array_fill(0, count($lineIds), '?'));
+        $pdo->prepare("UPDATE journal_entry_lines SET account_id = ? WHERE entry_id = ? AND supplier_id = ? AND id IN ({$in})")
+            ->execute([$accountId, $entryId, $supplierId, ...$lineIds]);
+        $this->logReleasedPairings(
+            $supplierId,
+            $entryId,
+            (new JournalLinePairingRepository($this->db))->releaseStale($supplierId, $entryId),
+            'repost',
+        );
+    }
+
+    /**
      * @param list<array{pairing_id:int, entry_id:int, line_no:int}> $released
      */
     private function logReleasedPairings(int $supplierId, int $entryId, array $released, string $reason): void

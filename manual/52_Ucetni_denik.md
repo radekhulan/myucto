@@ -163,6 +163,8 @@ Automatika účtování se spouští při vzniku dokladu. Doklad, který už v s
 
 Podrobnosti jsou v [§ 52.14.13](#521413-douctovani-nezauctovanych-dokladu).
 
+Nespárované bankovní pohyby (výplaty mezd, platby z terminálu) zaúčtujete nebo spárujete s jedním dokladem hromadně v boxu **Bankovní pohyby podle filtru** na téže stránce, viz [§ 52.14.13.2](#5214132-bankovni-pohyby-podle-filtru).
+
 ## 52.10 Krok za krokem: přílohy, poznámky a vazba na doklad
 
 1. Rozbalte zápis. V sekci **Přílohy** klikněte na **Přidat přílohu**, nebo soubory přetáhněte do vyznačené zóny. Jeden soubor smí mít nejvýš 20 MiB, všechny přílohy zápisu dohromady 100 MiB.
@@ -1357,6 +1359,38 @@ běhu se kontroluje **podvojnost celého deníku** a nevyrovnaný stav se hlás�
 jako by doklady prošly aktivací. Oproti hromadnému zaúčtování z výběru v seznamu faktur
 tu není strop 500 dokladů na dávku.
 
+#### 52.14.13.2 Bankovní pohyby podle filtru
+
+Box **Bankovní pohyby podle filtru** na téže stránce pracuje s pohyby z výpisů, které
+jsou **nespárované a nezaúčtované**. Má dvě akce:
+
+- **Zaúčtovat na protiúčet** - pro pohyby, které nemají s čím se spárovat a pravidlo
+  účtování se na ně nehodí, typicky výplaty mezd zaúčtovaných interním dokladem 521/331.
+  Výdej se zaúčtuje MD protiúčet / Dal banka, příjem obráceně. Bankovní noha jde na
+  analytiku účtu výpisu stejně jako při ručním zaúčtování z fronty.
+- **Spárovat s dokladem** - pro pohyby patřící k jednomu dokladu, typicky platby
+  z karetního terminálu k měsíční tržbě. Každý pohyb se spáruje stejně jako výběr úhrady
+  na detailu dokladu a zaúčtuje se podle pravidel párování. Pohyb, který se nevejde do
+  zbytku k úhradě, se vynechá, doklad zůstane částečně uhrazený a rozdíl (poplatky
+  terminálu) vyřešíte zápočtem.
+
+Postup:
+
+1. Zvolte akci a období. Výběr zužte účtem výpisu, směrem, textem nebo protistranou,
+   účtem protistrany, VS a částkou. U zaúčtování zadejte protiúčet, u párování vyberte
+   vydanou nebo přijatou fakturu (směr se pak nastaví podle ní).
+2. Klikněte na **Zkusit nanečisto**. U každého pohybu uvidíte zaúčtování nebo doklad
+   a u vynechaných důvod. Jednotlivé pohyby můžete odškrtnout.
+3. Klikněte na **Zaúčtovat** nebo **Spárovat** a potvrďte počet. Zpracují se přesně pohyby
+   z běhu nanečisto, které mezitím nikdo jiný nespároval ani nezaúčtoval.
+4. Ostrý běh jde jednou vrátit tlačítkem **Vrátit** v Posledních bězích: zaúčtování se
+   stornuje, párování se zruší. Pohyb, který se od té doby změnil, se nevrátí a vypíše
+   se s důvodem.
+
+Najednou jde zaúčtovat nejvýš 500 pohybů a spárovat nejvýš 100. Spustit to smí stejní
+uživatelé jako hromadné přeúčtování ([§ 52.14.17](#521417-hromadne-preuctovani-dokladu)),
+párování navíc vyžaduje právo párovat banku.
+
 #### 52.14.13.1 Dogenerování popisů u převzatých zápisů
 
 Deník převzatý z POHODY nebo Money S3 nese v popisu jen jedno pole původní agendy, takže
@@ -2091,7 +2125,8 @@ na jeden účet tlačítkem **Přeúčtovat podle filtru…**, které předvypln
 
 1. V části **Co přeúčtovat** zadejte účet, ze kterého a na který se přeúčtuje, stranu
    (MD, Dal nebo obě) a období. Výběr můžete zúžit zdrojem (vydané faktury, přijaté
-   faktury, bankovní pohyby), textem v čísle dokladu nebo popisu a částkou řádku.
+   faktury, bankovní pohyby, ruční a interní zápisy, pokladna), textem v čísle dokladu
+   nebo popisu a částkou řádku.
 2. Zvolte **Způsob**:
    - **Opravit zápis (jen kde to jde)** přepíše zápis na místě se stejným číslem,
      původní podoba zůstane v historii zápisu. Doklady, u kterých to období nedovolí,
@@ -2099,14 +2134,14 @@ na jeden účet tlačítkem **Přeúčtovat podle filtru…**, které předvypln
    - **Opravit, jinak storno a nový zápis** vynechané doklady stornuje a zaúčtuje znovu,
      v uzavřeném nebo zamčeném období k nejbližšímu otevřenému datu.
 3. Pod formulářem se průběžně ukazuje, kolika dokladům výběr odpovídá. Zápisy na účtu
-   z jiných agend (pokladna, ruční a interní zápisy, mzdy) přeúčtování nemění a ukáže
-   jen jejich počet.
+   z jiných agend (mzdy, majetek, uzávěrka, zápočty) přeúčtování nemění a ukáže jen
+   jejich počet.
 4. Klikněte na **Zkusit nanečisto**. Úloha nic nezapíše a u každého dokladu ukáže
    původní a nový účet, způsob opravy a u vynechaných důvod.
 5. V záložce **Změní se** můžete jednotlivé doklady odškrtnout.
 6. Klikněte na **Přeúčtovat** a potvrďte počet. Přeúčtují se přesně doklady z běhu
    nanečisto bez odškrtnutých. Doklad, jehož zaúčtování se od běhu nanečisto změnilo,
-   se vynechá.
+   se vynechá. Výsledek kteréhokoli běhu jde stáhnout tlačítkem **Export CSV**.
 7. V **Posledních bězích** jde ostré přeúčtování jednou vrátit tlačítkem **Vrátit**.
    Vrátí se doklady, které od přeúčtování nikdo nezměnil, ostatní se vypíšou s důvodem.
 
@@ -2121,9 +2156,15 @@ Pravidla:
   faktury nevrátí. Protiúčet 311/321, DPH a zaokrouhlení se mění úpravou dokladu
   nebo předkontace.
 - U bankovního pohybu se nemění bankovní účet pohybu (221).
+- Ruční zápisy, interní doklady a pokladní doklady se přeúčtují **jen opravou zápisu**,
+  i když zvolíte storno: mění se jen účet na řádcích, částky, dvojice, texty i dimenze
+  řádků zůstávají. U interního dokladu se nový účet zapíše i do jeho řádků. U pokladního
+  dokladu jde měnit jen jeho protiúčet (ne pokladní účet 211 ani účty z předkontace)
+  a jen u dokladu, který neuhrazuje fakturu. Zápis v uzavřeném období, zápis patřící ke
+  skupině zaúčtování dokladu a v zamčeném datu změna s daňovým dopadem se vynechají.
 - DPH se přeúčtováním nemění, stejně jako u jednotlivého **Přeúčtovat**.
-- Spustit přeúčtování smí správce firmy a role s právem **Hromadně přeúčtovat doklady**
-  spolu s právem zaúčtovat doklad. Systémové role správců ho mají, účetní a vlastní role
+- Spustit přeúčtování smí správce firmy a role s právem **Hromadně přeúčtovat
+  a doúčtovat doklady** spolu s právem zaúčtovat doklad. Systémové role správců ho mají, účetní a vlastní role
   ho dostanou v editoru rolí. API token hromadné přeúčtování nespustí.
 - Každý přeúčtovaný doklad má v historii záznam s číslem běhu.
 

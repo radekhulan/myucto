@@ -13,6 +13,7 @@ use MyInvoice\Repository\AccountingModeRepository;
 use MyInvoice\Repository\ImportJobRepository;
 use MyInvoice\Security\AccessLevel;
 use MyInvoice\Security\RequestAuthorization;
+use MyInvoice\Service\Accounting\AccountingBulkJobs;
 use MyInvoice\Service\Accounting\JournalRebookService;
 use MyInvoice\Service\Accounting\PostingException;
 use MyInvoice\Service\ActivityLogger;
@@ -39,6 +40,9 @@ use Psr\Http\Message\ServerRequestInterface as Request;
 final class JournalRebookAction
 {
     private const HISTORY = 10;
+    private const PARAMS = [
+        'from_account', 'to_account', 'side', 'date_from', 'date_to', 'source_types', 'text', 'amount_min', 'amount_max', 'mode',
+    ];
 
     public function __construct(
         private readonly ImportJobRepository $jobs,
@@ -65,7 +69,7 @@ final class JournalRebookAction
             'can_run' => $canRun,
             'limit'   => JournalRebookService::LIMIT,
             'jobs'    => array_map(
-                fn (array $j): array => $this->jobView($j, $all, $canRun),
+                fn (array $j): array => AccountingBulkJobs::view($j, $all, $canRun, self::PARAMS),
                 array_slice($all, 0, self::HISTORY),
             ),
         ]);
@@ -128,7 +132,7 @@ final class JournalRebookAction
                 $dryJobId = (int) ($body['dry_run_job_id'] ?? 0);
                 $dryJob = $this->jobs->find($dryJobId, $supplierId);
                 $all = $this->jobs->listForTenant($supplierId, JournalRebookService::SOURCE, limit: 50);
-                if ($dryJob === null || $dryJob['source'] !== JournalRebookService::SOURCE || !$this->canApply($dryJob, $all)) {
+                if ($dryJob === null || $dryJob['source'] !== JournalRebookService::SOURCE || !AccountingBulkJobs::canApply($dryJob, $all)) {
                     return Json::error($response, 'matching_dry_run_required',
                         'Přeúčtovat jde jen podle dokončeného běhu nanečisto, který se ještě neprovedl.', 409);
                 }
@@ -167,15 +171,13 @@ final class JournalRebookAction
                 ['existing_job_id' => $running['id']]);
         }
         $all = $this->jobs->listForTenant($supplierId, JournalRebookService::SOURCE, limit: 50);
-        if (!$this->canRollback($job, $all)) {
+        if (!AccountingBulkJobs::canRollback($job, $all)) {
             return Json::error($response, 'rollback_not_available', 'Vrátit jde jen dokončené přeúčtování, které se ještě nevracelo.', 409);
         }
         return $this->spawn($request, $response, $supplierId, [
             'kind' => 'rollback',
             'rollback_of_job_id' => (int) $job['id'],
-        ] + array_intersect_key((array) $job['params'], array_flip([
-            'from_account', 'to_account', 'side', 'date_from', 'date_to', 'source_types', 'text', 'amount_min', 'amount_max', 'mode',
-        ])));
+        ] + array_intersect_key((array) $job['params'], array_flip(self::PARAMS)));
     }
 
     /** GET /api/accounting/journal-rebook/{id} */
@@ -192,7 +194,7 @@ final class JournalRebookAction
         $all = $this->jobs->listForTenant($supplierId, JournalRebookService::SOURCE, limit: 50);
         $canRun = RequestAuthorization::canBulkRepost($request);
 
-        return Json::ok($response, $this->jobView($job, $all, $canRun) + ['log_text' => $job['log_text'] ?? null]);
+        return Json::ok($response, AccountingBulkJobs::view($job, $all, $canRun, self::PARAMS) + ['log_text' => $job['log_text'] ?? null]);
     }
 
     /** GET /api/accounting/journal-rebook/{id}/items?status=&page=&per_page= */
@@ -276,93 +278,5 @@ final class JournalRebookAction
             }
         }
         return null;
-    }
-
-    /**
-     * @param array<string,mixed> $job
-     * @param list<array<string,mixed>> $all
-     */
-    private function canApply(array $job, array $all): bool
-    {
-        if ((($job['params'] ?? [])['kind'] ?? '') !== 'dry_run'
-            || !in_array($job['status'], ['completed', 'completed_with_warnings'], true)
-            || (int) $job['created_count'] === 0) {
-            return false;
-        }
-        foreach ($all as $other) {
-            if ((($other['params'] ?? [])['kind'] ?? '') === 'apply'
-                && (int) (($other['params'] ?? [])['dry_run_job_id'] ?? 0) === (int) $job['id']
-                && $other['status'] !== 'failed') {
-                return false;
-            }
-        }
-        return true;
-    }
-
-    /**
-     * @param array<string,mixed> $job
-     * @param list<array<string,mixed>> $all
-     */
-    private function canRollback(array $job, array $all): bool
-    {
-        if ((($job['params'] ?? [])['kind'] ?? '') !== 'apply'
-            || !in_array($job['status'], ['completed', 'completed_with_warnings', 'cancelled'], true)
-            || (int) $job['created_count'] === 0) {
-            return false;
-        }
-        return self::childOf($job, $all, 'rollback', 'rollback_of_job_id') === null;
-    }
-
-    /**
-     * @param array<string,mixed> $job
-     * @param list<array<string,mixed>> $all
-     * @return ?array<string,mixed>
-     */
-    private static function childOf(array $job, array $all, string $kind, string $key): ?array
-    {
-        foreach ($all as $other) {
-            if ((($other['params'] ?? [])['kind'] ?? '') === $kind
-                && (int) (($other['params'] ?? [])[$key] ?? 0) === (int) $job['id']
-                && $other['status'] !== 'failed') {
-                return $other;
-            }
-        }
-        return null;
-    }
-
-    /**
-     * @param array<string,mixed> $j
-     * @param list<array<string,mixed>> $all
-     * @return array<string,mixed>
-     */
-    private function jobView(array $j, array $all, bool $canRun): array
-    {
-        $params = (array) ($j['params'] ?? []);
-        $applied = self::childOf($j, $all, 'apply', 'dry_run_job_id');
-        $rolledBack = self::childOf($j, $all, 'rollback', 'rollback_of_job_id');
-
-        return [
-            'id'                    => (int) $j['id'],
-            'kind'                  => (string) ($params['kind'] ?? 'dry_run'),
-            'status'                => (string) $j['status'],
-            'total_items'           => $j['total_items'] !== null ? (int) $j['total_items'] : null,
-            'processed'             => (int) $j['processed'],
-            'changed_count'         => (int) $j['created_count'],
-            'skipped_count'         => (int) $j['skipped_count'],
-            'failed_count'          => (int) $j['failed_count'],
-            'current_step'          => $j['current_step'] ?? null,
-            'last_error'            => $j['last_error'] ?? null,
-            'created_at'            => $j['created_at'] ?? null,
-            'finished_at'           => $j['finished_at'] ?? null,
-            'params'                => array_intersect_key($params, array_flip([
-                'from_account', 'to_account', 'side', 'date_from', 'date_to', 'source_types', 'text', 'amount_min', 'amount_max', 'mode',
-            ])),
-            'dry_run_job_id'        => isset($params['dry_run_job_id']) ? (int) $params['dry_run_job_id'] : null,
-            'rollback_of_job_id'    => isset($params['rollback_of_job_id']) ? (int) $params['rollback_of_job_id'] : null,
-            'applied_by_job_id'     => $applied === null ? null : (int) $applied['id'],
-            'rolled_back_by_job_id' => $rolledBack === null ? null : (int) $rolledBack['id'],
-            'can_apply'             => $canRun && $this->canApply($j, $all),
-            'can_rollback'          => $canRun && $this->canRollback($j, $all),
-        ];
     }
 }

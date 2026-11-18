@@ -23,6 +23,7 @@ import { apiErrorMessage } from '@/api/errors'
 import { useAuthStore } from '@/stores/auth'
 import { useToast } from '@/composables/useToast'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
+import BankBulkPanel from '@/components/accounting/BankBulkPanel.vue'
 
 const { t, locale } = useI18n()
 const auth = useAuthStore()
@@ -164,6 +165,19 @@ const actions = computed<ActionItem[]>(() => [
   },
 ])
 
+/** Počty čekajících dokladů po hromadné akci s bankovními pohyby, bez překreslení stránky. */
+async function refreshPending() {
+  try {
+    state.value = await postingBackfillApi.status()
+  } catch {
+    // počty se obnoví při dalším načtení stránky
+  }
+}
+
+function scrollToBankBulk() {
+  document.getElementById('bank-bulk')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+}
+
 function fmtDateTime(iso: string | null): string {
   if (!iso) return '—'
   const d = new Date(iso)
@@ -242,6 +256,10 @@ onUnmounted(stopPolling)
               <RouterLink v-if="pending && pending.bank_transactions > 0" to="/bank?tab=posting" class="text-primary-600 hover:underline whitespace-nowrap" data-test="backfill-link-bank">
                 {{ t('accounting.posting_backfill.manual_bank', { count: pending.bank_transactions }) }}
               </RouterLink>
+              <a v-if="pending && pending.bank_transactions > 0" href="#bank-bulk" class="text-primary-600 hover:underline whitespace-nowrap" data-test="backfill-link-bank-bulk"
+                @click.prevent="scrollToBankBulk">
+                {{ t('accounting.posting_backfill.manual_bank_bulk') }}
+              </a>
               <RouterLink v-if="pending && pending.cash_documents > 0" to="/accounting/cash" class="text-primary-600 hover:underline whitespace-nowrap">
                 {{ t('accounting.posting_backfill.manual_cash', { count: pending.cash_documents }) }}
               </RouterLink>
@@ -324,5 +342,7 @@ onUnmounted(stopPolling)
         </div>
       </div>
     </template>
+
+    <BankBulkPanel class="mt-4 block" @changed="refreshPending" />
   </div>
 </template>

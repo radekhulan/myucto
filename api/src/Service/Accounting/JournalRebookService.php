@@ -6,8 +6,13 @@ namespace MyInvoice\Service\Accounting;
 
 use MyInvoice\Http\IsoDate;
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Repository\AccountingBulkItemRepository;
 use MyInvoice\Repository\ChartOfAccountsRepository;
 use MyInvoice\Repository\ImportJobRepository;
+use MyInvoice\Repository\JournalEntryRepository;
+use MyInvoice\Service\Accounting\Dimension\DimensionPeriodGuard;
+use MyInvoice\Service\ActivityLogger;
+use MyInvoice\Infrastructure\Database\TransactionFailure;
 use PDO;
 
 /**
@@ -18,7 +23,7 @@ use PDO;
  * Přeúčtovat na jednom dokladu ({@see DocumentRepostService}): ta rozhoduje, jestli se
  * zápis opraví na místě, stornuje a zaúčtuje znovu, nebo jestli to období nedovolí,
  * a u faktur přenese nový účet i na položky dokladu. Tahle služba jen vybere zápisy,
- * vymění v nich účet a výsledek po dokladech zapíše do `journal_rebook_items`.
+ * vymění v nich účet a výsledek po dokladech zapíše do `accounting_bulk_items`.
  *
  * Úloha má tři druhy (`params.kind`):
  *   - `dry_run`  … nic nezapíše, u každého dokladu řekne, co by se stalo,
@@ -35,7 +40,17 @@ final class JournalRebookService
 {
     public const SOURCE = 'journal_rebook';
     public const LIMIT = 500;
-    public const SOURCES = ['invoice', 'purchase_invoice', 'bank'];
+    public const SOURCES = ['invoice', 'purchase_invoice', 'bank', 'manual', 'cash'];
+    /** Zdroje, které přeúčtuje {@see DocumentRepostService}; ruční zápisy a pokladnu mění {@see rebookEntryInPlace()}. */
+    public const DOCUMENT_SOURCES = ['invoice', 'purchase_invoice', 'bank'];
+    /**
+     * Živý zápis kandidáta: doklad má aktivní zápis se zdrojem, ruční zápis (bez zdroje)
+     * nesmí být stornovaný ani být sám stornem jiného zápisu.
+     */
+    private const LIVE_SQL = "(je.active_source_id IS NOT NULL OR (je.source_type = 'manual' AND je.reversed_by IS NULL
+        AND NOT EXISTS (SELECT 1 FROM journal_entries rev WHERE rev.supplier_id = je.supplier_id AND rev.reversed_by = je.id)))";
+    /** Klíč dokladu: ruční zápis nemá zdroj, je jím sám zápis. */
+    private const KEY_SQL = "IF(je.source_type = 'manual', je.id, je.source_id)";
     public const MODE_REWRITE = 'rewrite';
     public const MODE_REWRITE_OR_REVERSE = 'rewrite_or_reverse';
     public const KINDS = ['dry_run', 'apply', 'rollback'];
@@ -46,7 +61,20 @@ final class JournalRebookService
         private readonly DocumentRepostService $repost,
         private readonly PostingService $posting,
         private readonly ChartOfAccountsRepository $accounts,
+        private readonly AccountingBulkItemRepository $items,
+        private readonly JournalEntryRepository $journal,
+        private readonly ActivityLogger $activity,
     ) {}
+
+    /**
+     * Stránka položek běhu pro obrazovku.
+     *
+     * @return array{items:list<array<string,mixed>>, total:int, counts:array<string,int>}
+     */
+    public function items(int $supplierId, int $jobId, ?string $status, int $page, int $perPage): array
+    {
+        return $this->items->page($supplierId, $jobId, $status, $page, $perPage);
+    }
 
     /**
      * Ověří a znormalizuje filtr z požadavku.
@@ -132,10 +160,10 @@ final class JournalRebookService
         [$where, $params] = $this->lineConditions($supplierId, $filter);
         $sources = implode(', ', array_fill(0, count($filter['source_types']), '?'));
         $stmt = $this->db->pdo()->prepare(
-            "SELECT je.source_type, COUNT(DISTINCT je.source_id) AS n
+            "SELECT je.source_type, COUNT(DISTINCT " . self::KEY_SQL . ") AS n
                FROM journal_entry_lines l
                JOIN journal_entries je ON je.id = l.entry_id AND je.supplier_id = l.supplier_id
-              WHERE {$where} AND je.active_source_id IS NOT NULL AND je.source_type IN ({$sources})
+              WHERE {$where} AND " . self::LIVE_SQL . " AND je.source_type IN ({$sources})
               GROUP BY je.source_type"
         );
         $stmt->execute([...$params, ...$filter['source_types']]);
@@ -206,12 +234,12 @@ final class JournalRebookService
         [$where, $params] = $this->lineConditions($supplierId, $filter);
         $sources = implode(', ', array_fill(0, count($filter['source_types']), '?'));
         $stmt = $this->db->pdo()->prepare(
-            "SELECT je.source_type, je.source_id, MIN(je.id) AS entry_id, MIN(je.entry_date) AS entry_date,
+            "SELECT je.source_type, " . self::KEY_SQL . " AS source_id, MIN(je.id) AS entry_id, MIN(je.entry_date) AS entry_date,
                     MAX(je.document_no) AS document_no, MAX(je.description) AS description
                FROM journal_entry_lines l
                JOIN journal_entries je ON je.id = l.entry_id AND je.supplier_id = l.supplier_id
-              WHERE {$where} AND je.active_source_id IS NOT NULL AND je.source_type IN ({$sources})
-              GROUP BY je.source_type, je.source_id
+              WHERE {$where} AND " . self::LIVE_SQL . " AND je.source_type IN ({$sources})
+              GROUP BY je.source_type, " . self::KEY_SQL . "
               ORDER BY MIN(je.entry_date), MIN(je.id)
               LIMIT " . (self::LIMIT + 1)
         );
@@ -267,7 +295,7 @@ final class JournalRebookService
         foreach ($rows as $i => $row) {
             if ($this->jobs->isCancelRequested($jobId)) return true;
             $item = $this->evaluate($supplierId, $filter, $row);
-            $this->insertItem($jobId, $supplierId, $item);
+            $this->items->insert($jobId, $supplierId, $item);
             $counts[match ($item['status']) { 'would_change' => 'changed', 'failed' => 'failed', default => 'skipped' }]++;
             $this->progress($jobId, $i + 1, $counts);
         }
@@ -279,13 +307,16 @@ final class JournalRebookService
      *
      * @param array<string,mixed> $filter
      * @param array<string,mixed> $row kandidát z {@see candidates()}
-     * @return array<string,mixed> řádek pro journal_rebook_items
+     * @return array<string,mixed> řádek pro accounting_bulk_items
      */
     private function evaluate(int $supplierId, array $filter, array $row): array
     {
         $sourceType = (string) $row['source_type'];
         $sourceId = (int) $row['source_id'];
         $item = self::itemBase($row);
+        if (!in_array($sourceType, self::DOCUMENT_SOURCES, true)) {
+            return $this->evaluateEntry($supplierId, $filter, $row, $item);
+        }
         try {
             $plan = $this->repost->plan($supplierId, $sourceType, $sourceId);
             $before = self::normalizeLines($plan['lines']);
@@ -329,16 +360,16 @@ final class JournalRebookService
         $filter = $this->normalizeFilter($supplierId, $params);
         $dryJobId = (int) ($params['dry_run_job_id'] ?? 0);
         $excluded = array_flip(array_map('intval', (array) ($params['excluded_entry_ids'] ?? [])));
-        $items = $this->itemsByStatus($supplierId, $dryJobId, 'would_change');
+        $items = $this->items->byStatus($supplierId, $dryJobId, 'would_change');
         $this->jobs->updateProgress($jobId, ['total_items' => count($items), 'current_step' => 'apply']);
         foreach ($items as $i => $dry) {
             if ($this->jobs->isCancelRequested($jobId)) return true;
             if (isset($excluded[(int) $dry['entry_id']])) {
-                $this->insertItem($jobId, $supplierId, ['status' => 'excluded', 'reason_code' => 'excluded_by_user'] + self::copyItem($dry));
+                $this->items->insert($jobId, $supplierId, ['status' => 'excluded', 'reason_code' => 'excluded_by_user'] + self::copyItem($dry));
                 $counts['skipped']++;
             } else {
                 $result = $this->applyOne($jobId, $supplierId, $userId, $filter, $dry);
-                $this->insertItem($jobId, $supplierId, $result);
+                $this->items->insert($jobId, $supplierId, $result);
                 $counts[match ($result['status']) { 'applied' => 'changed', 'failed' => 'failed', default => 'skipped' }]++;
             }
             $this->progress($jobId, $i + 1, $counts);
@@ -356,6 +387,9 @@ final class JournalRebookService
         $sourceType = (string) $dry['source_type'];
         $sourceId = (int) $dry['source_id'];
         $item = self::copyItem($dry);
+        if (!in_array($sourceType, self::DOCUMENT_SOURCES, true)) {
+            return $this->rebookEntryInPlace($jobId, $supplierId, $userId, (int) $dry['entry_id'], $filter['from_account'], $filter['to_account'], $filter['side'], $dry['fingerprint'], $item);
+        }
         try {
             $plan = $this->repost->plan($supplierId, $sourceType, $sourceId);
             [$after] = self::transform(self::normalizeLines($plan['lines']), $filter['from_account'], $filter['to_account'], $filter['side']);
@@ -406,12 +440,12 @@ final class JournalRebookService
             throw new \RuntimeException('Vrátit lze jen dokončené přeúčtování.');
         }
         $mode = (string) (($applyJob['params'] ?? [])['mode'] ?? self::MODE_REWRITE);
-        $items = $this->itemsByStatus($supplierId, $applyJobId, 'applied');
+        $items = $this->items->byStatus($supplierId, $applyJobId, 'applied');
         $this->jobs->updateProgress($jobId, ['total_items' => count($items), 'current_step' => 'rollback']);
         foreach ($items as $i => $applied) {
             if ($this->jobs->isCancelRequested($jobId)) return true;
             $result = $this->rollbackOne($jobId, $supplierId, $userId, $mode, $applied);
-            $this->insertItem($jobId, $supplierId, $result);
+            $this->items->insert($jobId, $supplierId, $result);
             $counts[match ($result['status']) { 'applied' => 'changed', 'failed' => 'failed', default => 'skipped' }]++;
             $this->progress($jobId, $i + 1, $counts);
         }
@@ -428,6 +462,14 @@ final class JournalRebookService
         $sourceId = (int) $applied['source_id'];
         // V položce vrácení je „před" stav po přeúčtování a „po" původní kontace.
         $item = ['before' => $applied['after'], 'after' => $applied['before']] + self::copyItem($applied);
+        if (!in_array($sourceType, self::DOCUMENT_SOURCES, true)) {
+            $applyJob = $this->jobs->findById($jobId);
+            $of = $this->jobs->find((int) (($applyJob['params'] ?? [])['rollback_of_job_id'] ?? 0), $supplierId);
+            $p = (array) ($of['params'] ?? []);
+            $lineIds = array_values(array_filter(array_map(static fn (array $l): int => (int) ($l['line_id'] ?? 0), $applied['after'])));
+            $result = $this->rebookEntryInPlace($jobId, $supplierId, $userId, (int) $applied['entry_id'], (string) $p['to_account'], (string) $p['from_account'], 'both', $applied['fingerprint'], $item, $lineIds);
+            return $result['status'] === 'applied' ? $result : ['status' => 'failed'] + $result;
+        }
         try {
             $plan = $this->repost->plan($supplierId, $sourceType, $sourceId);
             if ($this->fingerprint($supplierId, $plan) !== $applied['fingerprint']) {
@@ -454,6 +496,273 @@ final class JournalRebookService
             $reason = $e instanceof PostingException ? self::reasonFor($e) : 'repost_failed';
             return ['status' => 'failed', 'reason_code' => $reason, 'message' => $e->getMessage()] + $item;
         }
+    }
+
+    /**
+     * Ruční zápis, interní doklad nebo pokladní doklad: co by se stalo. Tyto zápisy
+     * nestaví žádný doklad znovu, takže se přeúčtují jen na místě (otevřené období,
+     * nezamčené datum, nebo zamčené s daňově neutrálním přesunem) a stornem nikdy.
+     *
+     * @param array<string,mixed> $filter
+     * @param array<string,mixed> $row
+     * @param array<string,mixed> $item
+     * @return array<string,mixed>
+     */
+    private function evaluateEntry(int $supplierId, array $filter, array $row, array $item): array
+    {
+        try {
+            $state = $this->entryState($supplierId, (int) $row['entry_id'], false);
+            [$after, $moved] = self::transform($state['lines'], $filter['from_account'], $filter['to_account'], $filter['side']);
+            $item['entry_id'] = $state['id'];
+            $item['before'] = $state['lines'];
+            $item['amount'] = $moved;
+            if ($moved <= 0) {
+                return ['status' => 'unchanged'] + $item;
+            }
+            $item['after'] = self::markChanged($state['lines'], $after);
+            $reason = $this->entryBlocker($supplierId, $state, $filter['from_account'], $filter['to_account'], $after);
+            if ($reason !== null) {
+                return ['status' => 'skipped', 'reason_code' => $reason] + $item;
+            }
+            return [
+                'status' => 'would_change', 'strategy' => DocumentRepostService::STRATEGY_REPLACE,
+                'target_date' => $state['entry_date'], 'fingerprint' => self::entryFingerprint($state),
+                'reason_code' => $state['date_locked'] ? 'tax_neutral_rewrite' : null,
+            ] + $item;
+        } catch (PostingException $e) {
+            return ['status' => 'skipped', 'reason_code' => self::reasonFor($e), 'message' => $e->getMessage()] + $item;
+        }
+    }
+
+    /**
+     * Přeúčtuje řádky zápisu na místě: zámek období a zápisu, znovu všechny podmínky
+     * z náhledu, shodný otisk, výměna účtu na řádcích
+     * ({@see JournalEntryRepository::reassignLineAccounts()}) a zápis téhož účtu do
+     * zdrojového dokladu (řádky interního dokladu, protiúčet pokladního dokladu).
+     *
+     * @param array<string,mixed> $item
+     * @param list<int>|null $onlyLineIds vrácení: přesně řádky, které ostrý běh změnil
+     * @return array<string,mixed>
+     */
+    private function rebookEntryInPlace(int $jobId, int $supplierId, int $userId, int $entryId, string $from, string $to, string $side, ?string $fingerprint, array $item, ?array $onlyLineIds = null): array
+    {
+        try {
+            return TransactionFailure::retrying($this->db->pdo(), fn (): array => (new DimensionPeriodGuard($this->db))->transaction(
+                function () use ($jobId, $supplierId, $userId, $entryId, $from, $to, $side, $fingerprint, $item, $onlyLineIds): array {
+                    (new DimensionPeriodGuard($this->db))->lockPeriods($supplierId);
+                    $state = $this->entryState($supplierId, $entryId, true);
+                    if ($fingerprint !== null && self::entryFingerprint($state) !== $fingerprint) {
+                        return ['status' => 'skipped', 'reason_code' => $onlyLineIds === null ? 'changed_after_dry_run' : 'changed_after_apply'] + $item;
+                    }
+                    if ($onlyLineIds !== null) {
+                        $only = array_flip($onlyLineIds);
+                        $after = array_map(static fn (array $l): array => isset($only[(int) $l['line_id']]) && $l['account_code'] === $from
+                            ? ['account_code' => $to] + $l : $l, $state['lines']);
+                    } else {
+                        [$after] = self::transform($state['lines'], $from, $to, $side);
+                    }
+                    $lineIds = [];
+                    foreach ($state['lines'] as $i => $line) {
+                        if ($line['account_code'] !== $after[$i]['account_code']) $lineIds[] = (int) $line['line_id'];
+                    }
+                    if ($lineIds === []) {
+                        return ['status' => 'skipped', 'reason_code' => 'changed_after_dry_run'] + $item;
+                    }
+                    $reason = $this->entryBlocker($supplierId, $state, $from, $to, $after);
+                    if ($reason !== null) {
+                        return ['status' => 'skipped', 'reason_code' => $reason] + $item;
+                    }
+                    $accountId = (int) ($this->accounts->codeToIdMap($supplierId, $state['entry_date'], true)[$to]['id'] ?? 0);
+                    if ($accountId === 0) {
+                        throw new PostingException('account_not_found', 'Účet ' . $to . ' v účtovém rozvrhu firmy není.', 422);
+                    }
+                    $this->journal->reassignLineAccounts($entryId, $supplierId, $state['row_version'], $lineIds, $accountId);
+                    $synced = $this->syncEntrySource($supplierId, $state, $from, $to, $side, $lineIds);
+                    $now = $this->entryState($supplierId, $entryId, true);
+                    $this->activity->log('accounting.reposted', $userId ?: null, 'journal_entry', $entryId, [
+                        'source_type' => $state['source_type'], 'source_id' => $state['source_id'], 'strategy' => 'replace',
+                        'reason_code' => $state['date_locked'] ? 'tax_neutral_rewrite' : null, 'original_entry_id' => $entryId,
+                        'before' => $state['lines'], 'after' => $now['lines'], 'items_synced' => $synced, 'bulk_rebook_job_id' => $jobId,
+                    ], null, null, $supplierId);
+                    return [
+                        'status' => 'applied', 'strategy' => DocumentRepostService::STRATEGY_REPLACE, 'target_date' => $state['entry_date'],
+                        'date_shifted' => false, 'reason_code' => null, 'after' => self::markChanged($state['lines'], $now['lines']),
+                        'fingerprint' => self::entryFingerprint($now), 'result_entry_id' => $entryId, 'items_synced' => $synced,
+                    ] + $item;
+                },
+            ));
+        } catch (PostingException $e) {
+            $reason = self::reasonFor($e);
+            return ['status' => $reason === 'repost_failed' ? 'failed' : 'skipped', 'reason_code' => $reason, 'message' => $e->getMessage()] + $item;
+        } catch (\Throwable $e) {
+            return ['status' => 'failed', 'reason_code' => 'repost_failed', 'message' => $e->getMessage()] + $item;
+        }
+    }
+
+    /**
+     * Zápis s hlavičkou, obdobím, zámkem a řádky (kód účtu, `line_id`).
+     *
+     * @return array{id:int, entry_date:string, row_version:int, source_type:string, source_id:?int,
+     *               period_status:?string, date_locked:bool, reversed:bool,
+     *               lines:list<array{line_id:int, account_id:int, account_code:?string, side:string, amount:float, is_red_storno:bool}>}
+     */
+    private function entryState(int $supplierId, int $entryId, bool $lock): array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT je.id, je.entry_date, je.row_version, je.source_type, je.source_id, je.reversed_by, je.posted_at, p.status AS period_status
+               FROM journal_entries je
+          LEFT JOIN accounting_periods p ON p.id = je.period_id AND p.supplier_id = je.supplier_id
+              WHERE je.id = ? AND je.supplier_id = ?' . ($lock ? ' FOR UPDATE' : '')
+        );
+        $stmt->execute([$entryId, $supplierId]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        if ($row === false || $row['posted_at'] === null) {
+            throw new PostingException('entry_not_found', 'Zápis #' . $entryId . ' není zaúčtovaný.', 404);
+        }
+        $lockStmt = $this->db->pdo()->prepare('SELECT locked_until FROM accounting_supplier_settings WHERE supplier_id = ?' . ($lock ? ' FOR UPDATE' : ''));
+        $lockStmt->execute([$supplierId]);
+        $lockedUntil = $lockStmt->fetchColumn();
+        $map = $this->accounts->idToAccountMap($supplierId);
+        $lines = [];
+        foreach ($this->journal->linesForEntry($entryId, $supplierId, $lock) as $line) {
+            $lines[] = [
+                'line_id'       => (int) $line['id'],
+                'account_id'    => (int) $line['account_id'],
+                'account_code'  => isset($map[(int) $line['account_id']]['code']) ? (string) $map[(int) $line['account_id']]['code'] : null,
+                'side'          => (string) $line['side'],
+                'amount'        => round((float) $line['amount'], 2),
+                'is_red_storno' => (bool) ($line['is_red_storno'] ?? false),
+            ];
+        }
+        return [
+            'id'            => (int) $row['id'],
+            'entry_date'    => (string) $row['entry_date'],
+            'row_version'   => (int) $row['row_version'],
+            'source_type'   => (string) $row['source_type'],
+            'source_id'     => $row['source_id'] === null ? null : (int) $row['source_id'],
+            'period_status' => $row['period_status'] === null ? null : (string) $row['period_status'],
+            'date_locked'   => $lockedUntil !== false && $lockedUntil !== null && (string) $row['entry_date'] <= (string) $lockedUntil,
+            'reversed'      => $row['reversed_by'] !== null,
+            'lines'         => $lines,
+        ];
+    }
+
+    /**
+     * Proč zápis nejde přeúčtovat na místě (NULL = jde).
+     *
+     * @param array<string,mixed> $state {@see entryState()}
+     * @param list<array<string,mixed>> $after
+     */
+    private function entryBlocker(int $supplierId, array $state, string $from, string $to, array $after): ?string
+    {
+        if ($state['reversed']) return 'entry_reversed';
+        if ($state['period_status'] !== 'open') return 'period_not_open';
+        if ((new DocumentPostingGroup($this->db))->owner($supplierId, $state['id']) !== null) return 'posting_group';
+        if ($state['source_type'] === 'manual') {
+            $doc = $this->internalDocument($supplierId, $state['id']);
+            if ($doc !== null && $doc['status'] !== 'posted') return 'entry_reversed';
+        }
+        if ($state['source_type'] === 'cash') {
+            if (str_starts_with($from, '211') || str_starts_with($to, '211')) return 'cash_account';
+            $cash = $this->cashDocument($supplierId, (int) $state['source_id']);
+            // Zápis pokladního dokladu se staví z dokladu: protiúčet nese hlavička, ostatní
+            // účty předkontace. Přeúčtovat jde jen protiúčet dokladu, který neuhrazuje fakturu.
+            if ($cash === null || $cash['status'] !== 'posted' || $cash['invoice_id'] !== null || $cash['purchase_invoice_id'] !== null
+                || (string) $cash['counter_account_code'] !== $from) {
+                return 'not_item_account';
+            }
+            if (mb_strlen($to) > 10) return 'not_item_account';
+        }
+        if ($state['date_locked']) {
+            $violation = TaxNeutralReclassification::violation(
+                $state['lines'],
+                array_map(fn (array $l): array => ['account_id' => (int) ($this->accounts->codeToIdMap($supplierId)[(string) $l['account_code']]['id'] ?? 0)] + $l, $after),
+                $this->accounts->idToAccountMap($supplierId),
+                $this->posting->incomeTaxFiledForYear($supplierId, (int) substr($state['entry_date'], 0, 4)),
+            );
+            if ($violation !== null) return 'date_locked';
+        }
+        return null;
+    }
+
+    /**
+     * Zapíše přeúčtovaný účet i do zdrojového dokladu, aby se doklad s deníkem nerozešel:
+     * řádky interního dokladu na téže straně a s týmž účtem, protiúčet pokladního dokladu.
+     *
+     * @param array<string,mixed> $state
+     * @param list<int> $lineIds
+     */
+    private function syncEntrySource(int $supplierId, array $state, string $from, string $to, string $side, array $lineIds): int
+    {
+        if ($state['source_type'] === 'cash') {
+            $stmt = $this->db->pdo()->prepare('UPDATE cash_documents SET counter_account_code = ? WHERE id = ? AND supplier_id = ? AND counter_account_code = ?');
+            $stmt->execute([$to, (int) $state['source_id'], $supplierId, $from]);
+            return $stmt->rowCount();
+        }
+        $doc = $this->internalDocument($supplierId, $state['id']);
+        if ($doc === null) {
+            return 0;
+        }
+        $sides = array_values(array_unique(array_map(
+            static fn (array $l): string => $l['side'],
+            array_filter($state['lines'], static fn (array $l): bool => in_array((int) $l['line_id'], $lineIds, true)),
+        )));
+        $in = implode(',', array_fill(0, count($sides), '?'));
+        $stmt = $this->db->pdo()->prepare(
+            "UPDATE internal_document_lines SET account_code = ?
+              WHERE internal_document_id = ? AND supplier_id = ? AND account_code = ? AND side IN ({$in})"
+        );
+        $stmt->execute([$to, (int) $doc['id'], $supplierId, $from, ...$sides]);
+        $this->db->pdo()->prepare('UPDATE internal_documents SET row_version = row_version + 1 WHERE id = ? AND supplier_id = ?')
+            ->execute([(int) $doc['id'], $supplierId]);
+        return $stmt->rowCount();
+    }
+
+    /** @return ?array{id:int, status:string} */
+    private function internalDocument(int $supplierId, int $entryId): ?array
+    {
+        $stmt = $this->db->pdo()->prepare('SELECT id, status FROM internal_documents WHERE supplier_id = ? AND journal_entry_id = ?');
+        $stmt->execute([$supplierId, $entryId]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        return $row === false ? null : ['id' => (int) $row['id'], 'status' => (string) $row['status']];
+    }
+
+    /** @return ?array<string,mixed> */
+    private function cashDocument(int $supplierId, int $docId): ?array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT id, status, counter_account_code, invoice_id, purchase_invoice_id FROM cash_documents WHERE id = ? AND supplier_id = ?'
+        );
+        $stmt->execute([$docId, $supplierId]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        return $row === false ? null : $row;
+    }
+
+    /** @param array<string,mixed> $state */
+    private static function entryFingerprint(array $state): string
+    {
+        return hash('sha256', $state['id'] . '#' . $state['row_version'] . '#' . self::linesHash($state['lines']));
+    }
+
+    /**
+     * Řádky po změně s `line_id` jen u přeúčtovaných: vrácení podle nich ví, které řádky
+     * vrátit, a obrazovka páruje řádky podle pořadí.
+     *
+     * @param list<array<string,mixed>> $before
+     * @param list<array<string,mixed>> $after
+     * @return list<array<string,mixed>>
+     */
+    private static function markChanged(array $before, array $after): array
+    {
+        $out = [];
+        foreach ($after as $i => $line) {
+            $changed = ($before[$i]['account_code'] ?? null) !== $line['account_code'];
+            $out[] = [
+                'account_code' => $line['account_code'], 'side' => $line['side'], 'amount' => $line['amount'],
+                'is_red_storno' => (bool) ($line['is_red_storno'] ?? false),
+            ] + ($changed ? ['line_id' => (int) ($line['line_id'] ?? $before[$i]['line_id'] ?? 0)] : []);
+        }
+        return $out;
     }
 
     /**
@@ -595,118 +904,6 @@ final class JournalRebookService
             'entry_id', 'source_type', 'source_id', 'entry_date', 'document_no', 'description',
             'amount', 'strategy', 'target_date', 'date_shifted', 'before', 'after', 'fingerprint',
         ]));
-    }
-
-    /** @param array<string,mixed> $item */
-    private function insertItem(int $jobId, int $supplierId, array $item): void
-    {
-        $this->db->pdo()->prepare(
-            'INSERT INTO journal_rebook_items
-                (job_id, supplier_id, entry_id, source_type, source_id, entry_date, document_no, description,
-                 amount, status, strategy, target_date, date_shifted, reason_code, message, fingerprint,
-                 before_json, after_json, result_entry_id, items_synced)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
-        )->execute([
-            $jobId,
-            $supplierId,
-            (int) $item['entry_id'],
-            (string) $item['source_type'],
-            (int) $item['source_id'],
-            (string) $item['entry_date'],
-            $item['document_no'] === null ? null : mb_substr((string) $item['document_no'], 0, 50),
-            $item['description'] === null ? null : mb_substr((string) $item['description'], 0, 255),
-            (float) ($item['amount'] ?? 0),
-            (string) $item['status'],
-            $item['strategy'] ?? null,
-            $item['target_date'] ?? null,
-            !empty($item['date_shifted']) ? 1 : 0,
-            $item['reason_code'] ?? null,
-            isset($item['message']) ? mb_substr((string) $item['message'], 0, 500) : null,
-            $item['fingerprint'] ?? null,
-            json_encode($item['before'] ?? [], JSON_THROW_ON_ERROR),
-            json_encode($item['after'] ?? [], JSON_THROW_ON_ERROR),
-            $item['result_entry_id'] ?? null,
-            (int) ($item['items_synced'] ?? 0),
-        ]);
-    }
-
-    /**
-     * Položky běhu v daném stavu (pro navazující běh). Běh má nejvýš {@see LIMIT} položek.
-     *
-     * @return list<array<string,mixed>>
-     */
-    private function itemsByStatus(int $supplierId, int $jobId, string $status): array
-    {
-        $stmt = $this->db->pdo()->prepare(
-            'SELECT * FROM journal_rebook_items WHERE supplier_id = ? AND job_id = ? AND status = ? ORDER BY entry_date, id'
-        );
-        $stmt->execute([$supplierId, $jobId, $status]);
-        return array_map(self::castItem(...), $stmt->fetchAll(PDO::FETCH_ASSOC));
-    }
-
-    /**
-     * Stránka položek běhu pro obrazovku.
-     *
-     * @return array{items:list<array<string,mixed>>, total:int, counts:array<string,int>}
-     */
-    public function items(int $supplierId, int $jobId, ?string $status, int $page, int $perPage): array
-    {
-        $counts = $this->db->pdo()->prepare(
-            'SELECT status, COUNT(*) FROM journal_rebook_items WHERE supplier_id = ? AND job_id = ? GROUP BY status'
-        );
-        $counts->execute([$supplierId, $jobId]);
-        $byStatus = array_map('intval', $counts->fetchAll(PDO::FETCH_KEY_PAIR));
-
-        $where = 'supplier_id = ? AND job_id = ?';
-        $params = [$supplierId, $jobId];
-        if ($status !== null) {
-            $where .= ' AND status = ?';
-            $params[] = $status;
-        }
-        $offset = max(0, ($page - 1) * $perPage);
-        $stmt = $this->db->pdo()->prepare(
-            "SELECT * FROM journal_rebook_items WHERE {$where} ORDER BY entry_date, id LIMIT {$perPage} OFFSET {$offset}"
-        );
-        $stmt->execute($params);
-
-        return [
-            'items'  => array_map(static function (array $row): array {
-                $item = self::castItem($row);
-                unset($item['fingerprint']);
-                return $item;
-            }, $stmt->fetchAll(PDO::FETCH_ASSOC)),
-            'total'  => $status === null ? array_sum($byStatus) : ($byStatus[$status] ?? 0),
-            'counts' => $byStatus,
-        ];
-    }
-
-    /**
-     * @param array<string,mixed> $row
-     * @return array<string,mixed>
-     */
-    private static function castItem(array $row): array
-    {
-        return [
-            'id'              => (int) $row['id'],
-            'entry_id'        => (int) $row['entry_id'],
-            'source_type'     => (string) $row['source_type'],
-            'source_id'       => (int) $row['source_id'],
-            'document_no'     => $row['document_no'],
-            'entry_date'      => (string) $row['entry_date'],
-            'description'     => $row['description'],
-            'amount'          => (float) $row['amount'],
-            'status'          => (string) $row['status'],
-            'strategy'        => $row['strategy'],
-            'target_date'     => $row['target_date'],
-            'date_shifted'    => (bool) $row['date_shifted'],
-            'reason_code'     => $row['reason_code'],
-            'message'         => $row['message'],
-            'fingerprint'     => $row['fingerprint'],
-            'before'          => json_decode((string) ($row['before_json'] ?? '[]'), true) ?: [],
-            'after'           => json_decode((string) ($row['after_json'] ?? '[]'), true) ?: [],
-            'result_entry_id' => $row['result_entry_id'] === null ? null : (int) $row['result_entry_id'],
-            'items_synced'    => (int) $row['items_synced'],
-        ];
     }
 
     /** @param array{changed:int, skipped:int, failed:int} $counts */

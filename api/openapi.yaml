@@ -16035,6 +16035,111 @@ paths:
         '404': { $ref: '#/components/responses/NotFound' }
         '422': { $ref: '#/components/responses/ValidationFailed' }
 
+  /api/v1/accounting/bank-bulk:
+    get:
+      tags: [Accounting]
+      summary: Bankovní pohyby podle filtru - poslední běhy
+      description: >
+        Poslední běhy hromadného zaúčtování nespárovaných bankovních pohybů na protiúčet
+        a hromadného spárování pohybů s jedním dokladem (nanečisto, provedení, vrácení).
+        Spuštění a vrácení jsou jen v aplikaci (Účetnictví → Doúčtovat doklady), přes token
+        dostupné nejsou.
+      parameters:
+        - $ref: '#/components/parameters/SupplierIdHeader'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  can_run: { type: boolean }
+                  can_match: { type: boolean }
+                  limit: { type: integer }
+                  match_limit: { type: integer }
+                  accounts:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        account_number: { type: string }
+                        bank_code: { type: [string, "null"] }
+                        label: { type: [string, "null"] }
+                  jobs:
+                    type: array
+                    items: { $ref: '#/components/schemas/JournalRebookJob' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/v1/accounting/bank-bulk/{id}:
+    get:
+      tags: [Accounting]
+      summary: Stav běhu bankovních pohybů podle filtru
+      description: Tvar je stejný jako u hromadného přeúčtování, `params` nese filtr pohybů.
+      parameters:
+        - $ref: '#/components/parameters/SupplierIdHeader'
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer, minimum: 1 }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/JournalRebookJob'
+                  - type: object
+                    properties:
+                      log_text: { type: [string, "null"] }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/v1/accounting/bank-bulk/{id}/items:
+    get:
+      tags: [Accounting]
+      summary: Výsledek běhu bankovních pohybů po pohybech
+      description: >
+        `source_id` je id bankovního pohybu, `document_no` jeho VS, `amount` částka se
+        znaménkem. `after` nese řádky zaúčtování, nebo doklad, se kterým se pohyb spáruje.
+      parameters:
+        - $ref: '#/components/parameters/SupplierIdHeader'
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer, minimum: 1 }
+        - in: query
+          name: status
+          schema:
+            type: string
+            enum: [would_change, unchanged, skipped, excluded, applied, failed]
+        - in: query
+          name: page
+          schema: { type: integer, minimum: 1, default: 1 }
+        - in: query
+          name: per_page
+          schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/JournalRebookItem' }
+                  total: { type: integer }
+                  counts:
+                    type: object
+                    additionalProperties: { type: integer }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+
   /api/v1/accounting/entry-form:
     get:
       tags: [Accounting]
@@ -58654,7 +58759,7 @@ components:
             date_to: { type: string, format: date }
             source_types:
               type: array
-              items: { type: string, enum: [invoice, purchase_invoice, bank] }
+              items: { type: string, enum: [invoice, purchase_invoice, bank, manual, cash] }
             text: { type: [string, "null"] }
             amount_min: { type: [number, "null"] }
             amount_max: { type: [number, "null"] }
@@ -58669,8 +58774,8 @@ components:
       type: object
       properties:
         id: { type: integer }
-        entry_id: { type: integer }
-        source_type: { type: string, enum: [invoice, purchase_invoice, bank] }
+        entry_id: { type: [integer, "null"] }
+        source_type: { type: string, description: 'Zdroj dokladu: invoice, purchase_invoice, bank, manual (source_id je id zápisu), cash' }
         source_id: { type: integer }
         document_no: { type: [string, "null"] }
         entry_date: { type: string, format: date }

@@ -289,6 +289,9 @@ final class AnonymizationPolicy
         'accounting_fixed_exchange_rates' => ['currency_code' => 'keep'],
         'accounting_opening_balances' => ['account_code' => 'keep', 'note' => 'text'],
         'accounting_periods' => ['approval_body' => 'text', 'approval_decision_ref' => 'text', 'approval_document_hash' => 'keep', 'created_reason' => 'keep'],
+        // Hromadné úlohy účtování: řádky kontace před a po (kódy účtů a částky), popis a číslo
+        // dokladu jako v deníku, důvody jsou strojové kódy.
+        'accounting_bulk_items' => ['after_json' => 'json', 'before_json' => 'json', 'description' => 'text', 'document_no' => 'keep', 'fingerprint' => 'keep', 'message' => 'text', 'reason_code' => 'keep', 'strategy' => 'keep'],
         'accounting_reclassification_items' => ['after_json' => 'json', 'before_json' => 'json', 'error_code' => 'keep', 'error_message' => 'text'],
         'accounting_setup_proposals' => ['evidence_json' => 'json', 'proposal_json' => 'json', 'signature' => 'keep', 'title' => 'text'],
         'accounting_setup_rule_bundles' => ['bundle_hash' => 'keep', 'input_hash' => 'keep', 'payload_json' => 'json'],
@@ -447,9 +450,6 @@ final class AnonymizationPolicy
         'journal_pair_conversion_runs' => ['counts' => 'keep', 'sample' => 'json', 'error' => 'text'],
         'accounting_entry_form_history' => ['note' => 'text'],
         'journal_line_pairings' => ['note' => 'text'],
-        // Hromadné přeúčtování: řádky kontace před a po (kódy účtů a částky), popis a číslo
-        // dokladu jako v deníku, důvody jsou strojové kódy.
-        'journal_rebook_items' => ['after_json' => 'json', 'before_json' => 'json', 'description' => 'text', 'document_no' => 'keep', 'fingerprint' => 'keep', 'message' => 'text', 'reason_code' => 'keep', 'strategy' => 'keep'],
         'journal_entry_templates' => ['description' => 'text', 'name' => 'text', 'seed_key' => 'keep'],
         'journal_integrity_findings' => ['detail' => 'json'],
         'logbook_fuel_scans' => ['parser' => 'keep'],

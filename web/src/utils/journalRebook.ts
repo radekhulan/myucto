@@ -6,6 +6,7 @@ import type {
   JournalRebookSide,
   JournalRebookSourceType,
 } from '@/api/journalRebook'
+import { csvAmount, type CsvCell } from '@/utils/bulkJobCsv'
 
 /** Stav formuláře „Co přeúčtovat" (částky jako text z inputu). */
 export interface JournalRebookForm {
@@ -21,13 +22,13 @@ export interface JournalRebookForm {
   mode: JournalRebookMode
 }
 
-export const REBOOK_SOURCE_TYPES: JournalRebookSourceType[] = ['invoice', 'purchase_invoice', 'bank']
+export const REBOOK_SOURCE_TYPES: JournalRebookSourceType[] = ['invoice', 'purchase_invoice', 'bank', 'manual', 'cash']
 
 /** Důvody vynechání, které umí stránka přeložit; ostatní (a `repost_failed`) ukazují zprávu serveru. */
 export const REBOOK_REASON_CODES = [
   'period_not_open', 'date_locked', 'entry_reversed', 'posting_group', 'needs_reverse',
   'not_item_account', 'changed_after_dry_run', 'changed_after_apply', 'excluded_by_user',
-  'bank_invariant', 'taken_over',
+  'bank_invariant', 'taken_over', 'cash_account', 'entry_not_found',
 ] as const
 
 const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/
@@ -99,4 +100,32 @@ export function rebookReasonText(
     return t('accounting.journal_rebook.reason.' + code)
   }
   return item.message || code || '—'
+}
+
+/** Řádky CSV exportu výsledku přeúčtování (sloupce viz `REBOOK_CSV_COLUMNS`). */
+export const REBOOK_CSV_COLUMNS = [
+  'col_document', 'col_date', 'col_description', 'col_amount', 'col_status',
+  'col_from_account', 'col_to_account', 'col_strategy', 'col_reason',
+] as const
+
+export function rebookCsvRows(
+  items: JournalRebookItem[],
+  params: Pick<JournalRebookFilter, 'from_account' | 'to_account'>,
+  t: (key: string) => string,
+): CsvCell[][] {
+  const uniq = (xs: string[]) => [...new Set(xs)].join(', ')
+  return items.map(item => {
+    const changes = changedLines(item).filter(c => c.to !== '—')
+    return [
+      item.document_no,
+      item.entry_date,
+      item.description,
+      csvAmount(item.amount),
+      t('accounting.journal_rebook.tab.' + item.status),
+      changes.length ? uniq(changes.map(c => c.from)) : params.from_account,
+      changes.length ? uniq(changes.map(c => c.to)) : params.to_account,
+      item.strategy ? t('accounting.journal_rebook.strategy.' + item.strategy) : '',
+      item.reason_code || item.message ? rebookReasonText(item, t) : '',
+    ]
+  })
 }
