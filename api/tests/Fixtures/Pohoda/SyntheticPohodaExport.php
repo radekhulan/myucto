@@ -1250,6 +1250,53 @@ final class SyntheticPohodaExport
             . self::entry('Počáteční stavy účtů', 'ZAV', 'Počáteční stav účtu', $opening314, '701000', '411000', '2026-01-01'));
     }
 
+    /** Vydané zálohové listy z {@see withIssuedProformas()}. */
+    public const PROFORMA_PREVIOUS = '125ZL0001';
+    public const PROFORMA_DRAWN_UNPAID = '126ZL0001';
+    public const PROFORMA_FINAL = '26FV0201';
+
+    /**
+     * Vydané zálohové listy bez zaúčtování (předkontace „Bez“), jak je POHODA přenáší:
+     *  - 125ZL0001 (1 210, z minulého roku, neuhrazený): v počátečních stavech 311 není;
+     *  - 126ZL0001 (605, neuhrazený), který konečná faktura 26FV0201 (500 + 105 DPH) odečetla
+     *    položkou odpočtu ještě před platbou: zápis 324/311 nechá na 324 debet 605.
+     */
+    public static function withIssuedProformas(string $agendaDir): void
+    {
+        $customer = self::partner('inv', 'Odběratel Test s.r.o.', self::CUSTOMER_ICO, 'CZ' . self::CUSTOMER_ICO);
+        $proforma = static fn (string $number, string $date, float $amount): string =>
+            '<lst:invoice version="2.0"><inv:invoiceHeader><inv:invoiceType>issuedProformaInvoice</inv:invoiceType><inv:number><typ:numberRequested>' . $number . '</typ:numberRequested></inv:number>'
+            . '<inv:symVar>' . preg_replace('/\D/', '', $number) . '</inv:symVar><inv:date>' . $date . '</inv:date><inv:dateAccounting>' . $date . '</inv:dateAccounting>'
+            . '<inv:dateDue>' . date('Y-m-d', (int) strtotime($date . ' +14 days')) . '</inv:dateDue>'
+            . '<inv:accounting><typ:ids>Bez</typ:ids><typ:accountingType>withoutAccounting</typ:accountingType></inv:accounting>'
+            . '<inv:text>Záloha ' . $number . '</inv:text>' . $customer
+            . '<inv:paymentType><typ:paymentType>draft</typ:paymentType></inv:paymentType>'
+            . '<inv:liquidation><typ:amountHome>' . $amount . '</typ:amountHome></inv:liquidation></inv:invoiceHeader>'
+            . '<inv:invoiceSummary><inv:homeCurrency><typ:priceNone>' . $amount . '</typ:priceNone><typ:priceLow>0</typ:priceLow><typ:priceLowVAT rate="12">0</typ:priceLowVAT>'
+            . '<typ:priceLowSum>0</typ:priceLowSum><typ:priceHigh>0</typ:priceHigh><typ:priceHighVAT rate="21">0</typ:priceHighVAT><typ:priceHighSum>0</typ:priceHighSum>'
+            . '<typ:round><typ:priceRound>0</typ:priceRound></typ:round></inv:homeCurrency></inv:invoiceSummary></lst:invoice>';
+        self::file($agendaDir . '/16_faktury_issuedProformaInvoice.xml', '<lst:listInvoice version="2.0" state="ok">'
+            . $proforma(self::PROFORMA_PREVIOUS, '2025-11-10', 1210)
+            . $proforma(self::PROFORMA_DRAWN_UNPAID, '2026-02-01', 605)
+            . '</lst:listInvoice>');
+        self::append($agendaDir . '/02_uctova_osnova.xml', '</lst:listAccount>', '<lst:itemAccount id="324000" code="324000" name="Přijaté zálohy"/>');
+        $final = '<lst:invoice version="2.0"><inv:invoiceHeader><inv:invoiceType>issuedInvoice</inv:invoiceType><inv:number><typ:numberRequested>' . self::PROFORMA_FINAL . '</typ:numberRequested></inv:number>'
+            . '<inv:symVar>260201</inv:symVar><inv:date>2026-02-10</inv:date><inv:dateTax>2026-02-10</inv:dateTax><inv:dateAccounting>2026-02-10</inv:dateAccounting><inv:dateDue>2026-02-24</inv:dateDue>'
+            . '<inv:classificationVAT><typ:ids>UD</typ:ids></inv:classificationVAT><inv:text>Vyúčtování</inv:text>' . $customer
+            . '<inv:paymentType><typ:paymentType>draft</typ:paymentType></inv:paymentType><inv:liquidation><typ:amountHome>0</typ:amountHome></inv:liquidation></inv:invoiceHeader>'
+            . '<inv:invoiceDetail><inv:invoiceItem><inv:text>Služby</inv:text><inv:quantity>1.0</inv:quantity><inv:rateVAT value="21">high</inv:rateVAT>'
+            . '<inv:homeCurrency><typ:unitPrice>500</typ:unitPrice><typ:price>500</typ:price><typ:priceVAT>105</typ:priceVAT><typ:priceSum>605</typ:priceSum></inv:homeCurrency></inv:invoiceItem>'
+            . '<inv:invoiceAdvancePaymentItem><inv:text>Odpočet zálohy</inv:text><inv:quantity>1.0</inv:quantity><inv:rateVAT value="0">none</inv:rateVAT>'
+            . '<inv:homeCurrency><typ:unitPrice>-605</typ:unitPrice><typ:price>-605</typ:price><typ:priceVAT>0</typ:priceVAT><typ:priceSum>-605</typ:priceSum></inv:homeCurrency>'
+            . '<inv:sourceDocument><typ:number>' . self::PROFORMA_DRAWN_UNPAID . '</typ:number></inv:sourceDocument></inv:invoiceAdvancePaymentItem></inv:invoiceDetail>'
+            . self::summary('inv', 500, 105) . '</lst:invoice>';
+        self::append($agendaDir . '/12_faktury_issuedInvoice.xml', '</lst:listInvoice>', $final);
+        self::append($agendaDir . '/01_ucetni_denik.xml', '</lst:accountancy>',
+            self::entry('Vydané faktury', self::PROFORMA_FINAL, 'Služby', 500, '311001', '602000', '2026-02-10')
+            . self::entry('Vydané faktury', self::PROFORMA_FINAL, 'DPH', 105, '311001', '343021', '2026-02-10')
+            . self::entry('Vydané faktury', self::PROFORMA_FINAL, 'Vyúčtování přijaté zálohy', 605, '324000', '311001', '2026-02-10'));
+    }
+
     /** Pohyby bez zápisu v deníku z {@see withBookedBankHistory()}, které návrh dostanou nebo nedostanou. */
     public const PROPOSAL_BY_ACCOUNT = 'BAN0020001';
     public const PROPOSAL_BY_NAME = 'BAN0020002';

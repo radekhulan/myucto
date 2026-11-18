@@ -296,6 +296,9 @@ final class InvoiceImporter
             // zápis v deníku roku nemá a nesmí se napodruhé hlásit jako nezaúčtovaný.
             if ($this->isPreviousPeriod($ctx, $doc)) {
                 $ctx->previousPeriod['invoice|' . $existing[$key]] = true;
+                if ($kind === 'proforma' && $doc['without_accounting']) {
+                    $ctx->previousPeriodUnbooked['invoice|' . $existing[$key]] = true;
+                }
             }
             $p->count($step, 'existing');
             $this->reportChanged($ctx, $step, 'invoices', $existing[$key], $doc['number'], $r, $prefix);
@@ -420,6 +423,9 @@ final class InvoiceImporter
         $this->captureLiquidations($ctx, 'invoice', $id, $doc['number'], $r);
         if ($previous) {
             $ctx->previousPeriod['invoice|' . $id] = true;
+            if ($type === 'proforma' && $doc['without_accounting']) {
+                $ctx->previousPeriodUnbooked['invoice|' . $id] = true;
+            }
             $p->count($step, 'previous_period');
         }
         $ctx->statsClients[] = $clientId;
@@ -631,6 +637,8 @@ final class InvoiceImporter
             'issue' => $issue,
             'tax' => PohodaXml::date($h, 'dateTax'),
             'accounting' => PohodaXml::date($h, 'dateAccounting') ?? $issue,
+            // Doklad bez zaúčtování (předkontace „Bez“): v deníku ani v počátečních stavech není.
+            'without_accounting' => PohodaXml::text($h, 'accounting/accountingType') === 'withoutAccounting',
             'due' => PohodaXml::date($h, 'dateDue') ?? $issue,
             'claim' => PohodaXml::date($h, 'dateKHDPH'),
             'vat_class' => PohodaXml::text($h, 'classificationVAT/ids'),

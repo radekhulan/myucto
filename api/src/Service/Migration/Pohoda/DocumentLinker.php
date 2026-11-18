@@ -113,6 +113,12 @@ final class DocumentLinker
                         $p->count(self::STEP_LINK, 'previous_period');
                         if ($docType === 'purchase_invoice' && $this->isAdvance((int) $docId)) {
                             $openingAdvances[(int) $docId] = true;
+                        } elseif (isset($ctx->previousPeriodUnbooked[$docType . '|' . $docId])) {
+                            // Zálohový list minulého roku bez zaúčtování: počáteční stav 311 ho
+                            // nenese (zaplacená záloha je v PS 324), saldokonto 311 by ho jinak
+                            // ukázalo jako neuhrazenou pohledávku. Vazba z dřívějšího převodu se ruší.
+                            $this->unlinkOpening($ctx, $docType, (int) $docId);
+                            $p->count(self::STEP_LINK, 'previous_period_unbooked');
                         } else {
                             $this->linkOpening($ctx, $docType, (int) $docId);
                         }
@@ -1380,6 +1386,17 @@ final class DocumentLinker
             '%d poskytnutých záloh z minulých let (%s Kč) se do počátečního stavu 314 (%s Kč) nevejde; POHODA je nese bez vazby na konečnou fakturu. V saldokontu se berou jako vyúčtované.',
             count($advanceIds), number_format($total, 2, ',', ' '), number_format($balance, 2, ',', ' '),
         ), ['unlinked' => (int) $unlinked]);
+    }
+
+    private function unlinkOpening(PohodaContext $ctx, string $docType, int $docId): void
+    {
+        if ($ctx->period === null) {
+            return;
+        }
+        $this->db->pdo()->prepare(
+            "DELETE dl FROM journal_entry_document_links dl JOIN journal_entries e ON e.id = dl.entry_id
+              WHERE dl.supplier_id = ? AND e.source_type = 'opening' AND e.period_id = ? AND dl.doc_type = ? AND dl.doc_id = ?"
+        )->execute([$ctx->supplierId, (int) $ctx->period['id'], $docType, $docId]);
     }
 
     private function linkOpening(PohodaContext $ctx, string $docType, int $docId): bool

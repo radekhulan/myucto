@@ -259,7 +259,7 @@ final class SaldoService
 
         // O jeden řádek víc, než smí projít — přetečení se pozná, aniž by se celý
         // (potenciálně milionový) seznam musel načíst do paměti.
-        $rawItems = $this->saldo->openItems($supplierId, $acc['id'], $asOf, $acc['code'], max(1, $budget) + 1, $partnerId);
+        $rawItems = $this->saldo->openItems($supplierId, $acc['id'], $asOf, $acc['code'], max(1, $budget) + 1, $partnerId, withOverdrawnAdvances: true);
 
         /** @var array<int, array{partner_id:int, partner_name:string, total_remaining:float, items:list<array<string,mixed>>}> $byPartner */
         $byPartner = [];

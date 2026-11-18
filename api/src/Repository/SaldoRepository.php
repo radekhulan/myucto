@@ -195,6 +195,10 @@ final class SaldoRepository
      * @param string|null $dueBefore volitelná horní hranice splatnosti (exclusive),
      *                        aplikovaná v SQL před stránkováním.
      * @param bool $orderByDue řadit kandidáty primárně od nejstarší splatnosti.
+     * @param bool $withOverdrawnAdvances na 324 i neuhrazené zálohy, které konečná faktura
+     *                        čerpala dřív než přišla platba ({@see fetchReceivedAdvances()}
+     *                        s `$overdrawn`). Jen pro sestavu saldokonta: párování a čerpání
+     *                        záloh (převod Money S3, AdvanceDeductionService) s nimi nepočítá.
      * @return list<array{doc_type:string, doc_id:int, doc_no:string, issue_date:string,
      *                    due_date:string, status:string, partner_id:int, partner_name:string,
      *                    currency_code:string, booked_signed:float, foreign_signed:float,
@@ -209,6 +213,7 @@ final class SaldoRepository
         ?int $partnerId = null,
         ?string $dueBefore = null,
         bool $orderByDue = false,
+        bool $withOverdrawnAdvances = false,
     ): array {
         $pdo = $this->db->pdo();
         $ownsSnapshot = !$pdo->inTransaction();
@@ -222,6 +227,9 @@ final class SaldoRepository
             if ($accountCode === '324') {
                 $result = array_merge(
                     $this->fetchReceivedAdvances($supplierId, $accountId, $asOf, $limit, $partnerId, $dueBefore, $orderByDue),
+                    $withOverdrawnAdvances && $dueBefore === null
+                        ? $this->fetchReceivedAdvances($supplierId, $accountId, $asOf, $limit, $partnerId, null, $orderByDue, overdrawn: true)
+                        : [],
                     $this->fetchOpenOtherItems($supplierId, $accountId, $asOf, $limit, $partnerId, $dueBefore, $orderByDue),
                 );
             } elseif ($accountCode === '314') {
@@ -1225,9 +1233,19 @@ final class SaldoRepository
         ?string $dueBefore = null,
         bool $orderByDue = false,
         bool $onReceivable = false,
+        bool $overdrawn = false,
     ): array
     {
-        if ($onReceivable) {
+        if ($onReceivable && $overdrawn) {
+            throw new \LogicException('Přečerpaná záloha je jen položkou zálohového účtu.');
+        }
+        if ($overdrawn) {
+            // Čerpání čistým pohybem zápisů konečné faktury na zálohovém účtu: převod z Money S3
+            // v nich přeúčtovává DPH zálohy (debet i kredit 324), samotný debet by čerpání nadsadil.
+            $settledAmount = "CASE WHEN l.side = 'debit' THEN l.signed_amount ELSE -l.signed_amount END";
+            $settledFilter = '';
+            $receivableFilter = '';
+        } elseif ($onReceivable) {
             $settledAmount = "CASE WHEN l.side = 'debit' THEN l.signed_amount ELSE -l.signed_amount END";
             $settledFilter = "AND child.invoice_type = 'tax_document'";
             $receivableFilter = '
@@ -1330,19 +1348,31 @@ final class SaldoRepository
                    p.issue_date, p.due_date, p.status,
                    cl.id AS partner_id, cl.company_name AS partner_name,
                    cur.code AS currency_code,
+                   " . ($overdrawn ? 'LEAST(p.total_with_vat, ' . $settledTotal . ')' : '0') . " AS overdrawn_czk,
                    c.collected_czk, {$settledTotal} AS settled_czk,
                    (SELECT td.id FROM invoices td
                      WHERE td.supplier_id = p.supplier_id AND td.parent_invoice_id = p.id
                        AND td.invoice_type = 'tax_document' AND td.status NOT IN ('draft', 'cancelled')
                      ORDER BY td.id LIMIT 1) AS tax_document_id
-              FROM collected c
-              JOIN invoices p ON p.id = c.invoice_id
+              FROM " . ($overdrawn
+                ? '(SELECT invoice_id FROM settled UNION SELECT invoice_id FROM deducted) od
+              LEFT JOIN collected c ON c.invoice_id = od.invoice_id
+              JOIN invoices p ON p.id = od.invoice_id'
+                : 'collected c
+              JOIN invoices p ON p.id = c.invoice_id') . "
               JOIN params x ON x.supplier_id = p.supplier_id
               JOIN clients cl ON cl.id = p.client_id
               JOIN currencies cur ON cur.id = p.currency_id
               LEFT JOIN settled s ON s.invoice_id = p.id{$deductedJoin}
              WHERE p.invoice_type = 'proforma'
-               AND " . self::advanceOpenFilterSql('c.collected_czk', $settledTotal)
+               AND " . ($overdrawn
+                   // Zcela neuhrazená korunová záloha, kterou konečná faktura už čerpala. Uhrazená
+                   // nebo částečně uhrazená proforma sem nepatří: převzatý deník (Helios, Money S3)
+                   // čerpá kurzem či zaokrouhlením jinak než úhrada a úhradu ne vždy účtuje bankovním
+                   // zápisem MyÚčta, rozdíl by se tvářil jako nezaplacená záloha.
+                   ? "p.status <> 'paid' AND cur.code = 'CZK' AND p.paid_total = 0 AND COALESCE(c.collected_czk, 0) = 0
+                      AND ROUND(LEAST(p.total_with_vat, {$settledTotal}), 2) > 0"
+                   : self::advanceOpenFilterSql('c.collected_czk', $settledTotal))
                . $receivableFilter
                . self::partnerSql($partnerId)
                . self::dueBeforeSql('p', $dueBefore)
@@ -1351,9 +1381,30 @@ final class SaldoRepository
         return $this->fetchDefinitiveOpenRows(
             $sql,
             static fn (string $pageSql): array => [$supplierId, $asOf, $accountId],
-            static function (array $r) use ($onReceivable): array {
+            static function (array $r) use ($onReceivable, $overdrawn): array {
                 $collected = round((float) $r['collected_czk'], 2);
                 $settled = round((float) $r['settled_czk'], 2);
+                if ($overdrawn) {
+                    // Zálohový účet má na zálohu debet: pohledávka za odběratelem, dokud nepřijde
+                    // platba. Vyrovná ji úhrada proformy, ne další čerpání.
+                    return [
+                        'kind'           => 'document',
+                        'settleable'     => false,
+                        'tax_document_id' => null,
+                        'doc_type'       => 'invoice',
+                        'doc_id'         => (int) $r['doc_id'],
+                        'doc_no'         => (string) $r['doc_no'],
+                        'issue_date'     => (string) $r['issue_date'],
+                        'due_date'       => (string) $r['due_date'],
+                        'status'         => (string) $r['status'],
+                        'partner_id'     => (int) $r['partner_id'],
+                        'partner_name'   => (string) $r['partner_name'],
+                        'currency_code'  => (string) $r['currency_code'],
+                        'booked_signed'  => round((float) $r['overdrawn_czk'], 2),
+                        'foreign_signed' => 0.0,
+                        'paid_ratio'     => 0.0,
+                    ];
+                }
                 return [
                     // Záloha na saldokontním účtu čekající na vyúčtování — sestava ji musí
                     // popsat jinak než fakturu (částka = přijatá platba, uhrazeno = daň DDKP).

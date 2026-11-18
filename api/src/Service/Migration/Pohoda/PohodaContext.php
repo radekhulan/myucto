@@ -95,6 +95,15 @@ final class PohodaContext
     /** @var array<string,true> id převedených dokladů minulého období („typ|id“) - nemají zápis v deníku roku */
     public array $previousPeriod = [];
 
+    /**
+     * Doklady minulého období, které POHODA nezaúčtovala (`accountingType = withoutAccounting`,
+     * vydané zálohové a proforma faktury). V počátečních stavech nejsou, a proto se nevážou
+     * na otevírací zápis ({@see DocumentLinker}).
+     *
+     * @var array<string,true> „typ|id“
+     */
+    public array $previousPeriodUnbooked = [];
+
     /** @var array<int,true> pokladní doklady bez zaúčtování k začátku období - jsou v počátečních stavech */
     public array $openingCash = [];
 
