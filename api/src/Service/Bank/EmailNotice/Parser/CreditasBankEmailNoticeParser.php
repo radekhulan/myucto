@@ -156,6 +156,7 @@ final class CreditasBankEmailNoticeParser extends AbstractBankEmailNoticeParser
             constantSymbol: $constantSymbol,
             message: $type,
             balance: $balance !== null ? $this->parseAmount($balance) : null,
+            currencyStated: $currency !== '',
         );
     }
 

@@ -773,7 +773,7 @@ onBeforeUnmount(() => { clearValuationTimer(); ++valuationGeneration; void aband
             </thead>
             <tbody class="divide-y divide-neutral-100">
               <tr v-for="g in trendReport.groups" :key="`${g.kind}-${g.category_id ?? ''}`">
-                <td class="trend-sticky px-3 py-2" :class="g.kind === 'category' ? '' : 'text-neutral-600'">{{ trendGroupLabel(g) }}</td>
+                <td class="px-3 py-2" :class="g.kind === 'category' ? '' : 'text-neutral-600'">{{ trendGroupLabel(g) }}</td>
                 <td v-for="d in trendReport.dates" :key="d" class="px-3 py-2 text-right font-mono whitespace-nowrap">{{ formatMoney(Number(g.values[d])) }}</td>
               </tr>
             </tbody>
@@ -858,13 +858,3 @@ onBeforeUnmount(() => { clearValuationTimer(); ++valuationGeneration; void aband
   </div>
 </template>
 
-<style scoped>
-/* Zebra a hover řádku jsou poloprůhledné; zafixovaný první sloupec je proto kreslí přes neprůhlednou plochu,
-   jinak by pod ním při posunu doprava prosvítaly částky. */
-.trend-sticky {
-  --trend-tint: transparent;
-  background: linear-gradient(var(--trend-tint), var(--trend-tint)), var(--color-surface);
-}
-tr:nth-child(even) > .trend-sticky { --trend-tint: color-mix(in oklab, var(--color-neutral-500) 4%, transparent); }
-tr:hover > .trend-sticky { --trend-tint: color-mix(in oklab, var(--color-primary-500) 7%, transparent); }
-</style>

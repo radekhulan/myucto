@@ -240,6 +240,10 @@ export interface InboxMessage {
   sender_ident: string | null
   classification: InboxClassification
   matched_outbox_id: number | null
+  /** Podání, ke kterému zpráva patří; vrací jen seznam příchozích zpráv. */
+  matched_outbox_subject?: string | null
+  matched_outbox_artifact_kind?: string | null
+  matched_outbox_artifact_id?: number | null
   document_id: number | null
   signature_status: 'unverified' | 'trusted'
   delivered_at: string | null

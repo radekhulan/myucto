@@ -102,7 +102,9 @@ info:
     Ke konceptu ostatní položky smí token zapsat i dimenze hlavičky
     (`PUT /accounting/dimensions/documents/other-items/{id}`); u potvrzeného či
     zaúčtovaného dokladu a u konceptu z automaticky účtovaného opakování odpoví
-    `403 token_write_forbidden`. Dokument (např. smlouvu) k ostatní položce připojíte
+    `403 token_write_forbidden`. Totéž platí pro dimenze hlavičky a položek konceptu
+    vydané a přijaté faktury (`PUT /accounting/dimensions/documents/invoices/{id}`,
+    `.../purchase-invoices/{id}`). Dokument (např. smlouvu) k ostatní položce připojíte
     přes `POST /documents/{id}/links` s `entity_type: other_item`.
 
     Zaúčtování dokladu, storno zápisu, uzavření období, zaevidování opravy podle
@@ -3547,7 +3549,9 @@ paths:
       summary: Kurátorované historické členské role
       description: Pouze čtení s oprávněním accounting. Bez jmen, členských čísel, právních podkladů a interních otisků.
         Výsledek neopravňuje k finanční mutaci. Detail vrací stejnou obálku jako seznam. Role se ověřují k účinnosti
-        a okamžiku tehdejší znalosti.
+        a okamžiku tehdejší znalosti. Zrušená revize se nepočítá od okamžiku zápisu zrušení. Oprava kontaktu
+        člena bez předpisu se projeví i pro dřívější okamžik znalosti. U člena s vymazanými osobními údaji
+        vrací client_id null a erased true; účetní údaje zůstávají.
       parameters:
       - $ref: '#/components/parameters/SupplierIdHeader'
       - in: query
@@ -3595,7 +3599,9 @@ paths:
       summary: Kurátorované historické členské role
       description: Pouze čtení s oprávněním accounting. Bez jmen, členských čísel, právních podkladů a interních otisků.
         Výsledek neopravňuje k finanční mutaci. Detail vrací stejnou obálku jako seznam. Role se ověřují k účinnosti
-        a okamžiku tehdejší znalosti.
+        a okamžiku tehdejší znalosti. Zrušená revize se nepočítá od okamžiku zápisu zrušení. Oprava kontaktu
+        člena bez předpisu se projeví i pro dřívější okamžik znalosti. U člena s vymazanými osobními údaji
+        vrací client_id null a erased true; účetní údaje zůstávají.
       parameters:
       - $ref: '#/components/parameters/SupplierIdHeader'
       - in: path
@@ -3638,8 +3644,10 @@ paths:
       summary: Kurátorované členské pohledávky
       description: Pouze čtení s oprávněním accounting. Bez jmen, členských čísel, právních podkladů a interních otisků.
         Výsledek neopravňuje k finanční mutaci. Detail vrací stejnou obálku jako seznam. Úhrady vycházejí pouze ze
-        současných nativních bankovních a pokladních párování. Neprokázané částky zůstávají null. Historické datum
-        úhrad se nepřijímá.
+        současných nativních bankovních a pokladních párování. Předpis bez spárované úhrady (unreconciled) má celou
+        částku otevřenou; null vrací jen neprůkazný podklad (ambiguous). Historické datum úhrad se nepřijímá.
+        Vyrovnaný okruh s více platnými členskými pohledávkami prokazuje úhradu všech; částečně uhrazený společný
+        okruh zůstává nejednoznačný a částky jsou null.
       parameters:
       - $ref: '#/components/parameters/SupplierIdHeader'
       - in: query
@@ -3681,8 +3689,8 @@ paths:
       summary: Kurátorované členské pohledávky
       description: Pouze čtení s oprávněním accounting. Bez jmen, členských čísel, právních podkladů a interních otisků.
         Výsledek neopravňuje k finanční mutaci. Detail vrací stejnou obálku jako seznam. Úhrady vycházejí pouze ze
-        současných nativních bankovních a pokladních párování. Neprokázané částky zůstávají null. Historické datum
-        úhrad se nepřijímá.
+        současných nativních bankovních a pokladních párování. Předpis bez spárované úhrady (unreconciled) má celou
+        částku otevřenou; null vrací jen neprůkazný podklad (ambiguous). Historické datum úhrad se nepřijímá.
       parameters:
       - $ref: '#/components/parameters/SupplierIdHeader'
       - in: path
@@ -5133,7 +5141,8 @@ paths:
           description: |
             Validace neprošla (`validation_failed`, detaily v `error.fields`), klient
             neexistuje (`client_not_found`), odkaz míří na cizí firmu
-            (`invalid_reference`) nebo by zápis porušil integritu (`integrity_violation`).
+            (`invalid_reference`), kód měny `currency` firma nemá (`unknown_currency`)
+            nebo by zápis porušil integritu (`integrity_violation`).
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
@@ -5688,6 +5697,12 @@ paths:
 
         Doklad s historií evidence tržeb (platební událost, QR záměr, tržba EET)
         nelze smazat ani s `force=1` (409 `eet_history_exists`); jde jen stornovat.
+
+        Zápis, jehož řádek je spárovaný s jiným zápisem v okruhu otevřených položek
+        nebo rozepsaný na doklady saldokonta, se z deníku nesmaže. Brání-li smazání
+        faktury zároveň retenční lhůta, vrátí se místo 422 `retention_period` 409
+        `entry_paired` nebo `allocation_saldo_in_use` s `entry_id` a `retention_period: true`
+        (co zrušit, aby šel zápis smazat). S `ack_retention=1` se zápis stornuje.
       parameters:
         - in: query
           name: force
@@ -5706,7 +5721,7 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
         '409':
-          description: Doklad je uzamčený, nelze bezpečně stornovat jeho účetní či skladový zápis, nebo má historii EET (`eet_history_exists`)
+          description: Doklad je uzamčený, nelze bezpečně stornovat jeho účetní či skladový zápis, má historii EET (`eet_history_exists`), nebo zápis v retenční lhůtě drží okruh párování (`entry_paired`) či rozpad saldokonta (`allocation_saldo_in_use`)
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
@@ -5829,7 +5844,10 @@ paths:
         Smí i u vystavené a zaúčtované faktury: zápis faktury se nemění, období čte až
         uzávěrka (časové rozlišení výnosů příštích období, účet 384). Řádky, které
         v těle nejsou, zůstanou beze změny; `null` v obou datech rozlišení zruší.
-        Stornovaný doklad a faktura v uzavřeném účetním období vrací 409.
+        Stornovaný doklad vrací 409 `not_editable`. Faktura, jejíž datum nebo zápis leží
+        v uzavřeném, revidovaném či schváleném účetním období, vrací 409 `period_closed`;
+        v uzavíraném období, jehož krok Časové rozlišení už zaúčtoval odklad výnosů,
+        409 `accrual_deferral_posted`.
 
         Částečná aktualizace (viz úvod). V `items[]` je řádek bez `accrual_from` i `accrual_to` bez
         účinku. Je-li poslána jen jedna hranice, doplní se uloženou druhou; `null` v obou vymaže
@@ -5860,7 +5878,7 @@ paths:
               schema: { $ref: '#/components/schemas/Invoice' }
         '400': { description: Neplatné období nebo řádek nepatří k faktuře (validation_failed) }
         '404': { $ref: '#/components/responses/NotFound' }
-        '409': { description: Stornovaný doklad nebo faktura v uzavřeném účetním období }
+        '409': { description: "Stornovaný doklad (not_editable), faktura v uzavřeném, revidovaném či schváleném období (period_closed) nebo v uzavíraném období se zaúčtovaným odkladem (accrual_deferral_posted)" }
 
   /api/v1/invoices/{id}/mark-paid:
     parameters:
@@ -7573,7 +7591,9 @@ paths:
 
         Dobropis lze stornovat pouze v režimu `internal`. Stornovací doklad
         (`cancellation`) stornovat nelze. Storno je účetní akt — na zaúčtovaném
-        či uzamčeném dokladu ho blokuje zámek (Epic F6).
+        či uzamčeném dokladu ho blokuje zámek (Epic F6). Interní storno zaúčtované faktury
+        stornuje i její zápis v deníku, proto přes API token vrací 403 `token_write_forbidden`
+        (provádí se v aplikaci); dobropis (`credit_note`) token založit smí.
 
         Kalendář (`rent_calendar`, `advance_calendar`) se stornuje jen v režimu `internal`
         a spolu s ním i jeho neuhrazené splátky. Doklad splátky se opravuje jen dobropisem
@@ -8091,6 +8111,7 @@ paths:
       tags: [Bank]
       summary: Detail výpisu vč. stránkovaných transakcí
       description: Mzdová úhrada vrací vazbu na existující zaúčtování v posting. Filtr zaúčtování a počty zahrnují bankovní i mzdové zápisy; pohyb se neúčtuje podruhé.
+        Členské úhrady označuje resolution=membership; podrobné matched_membership_claims jsou jen v přihlášené relaci nebo přes token s plným zápisem (system_write; přes běžný API token prázdné) a vyžadují čtení účetnictví, neklientskou roli a licenci.
       parameters:
         - { in: query, name: page, schema: { type: integer, minimum: 1, default: 1 } }
         - { in: query, name: per_page, schema: { type: integer, minimum: 5, maximum: 200, default: 50 } }
@@ -8311,7 +8332,9 @@ paths:
         Doklad se vybírá právě jedním z pěti způsobů (v tomto pořadí priority):
 
         - `purchase_invoice_ids` (2 a více): sloučená odchozí úhrada více přijatých
-          faktur, i od různých dodavatelů. Jediné ID degraduje na 1:1 párování.
+          faktur, zálohových faktur nebo účtenek, i od různých dodavatelů. CZK platbou
+          lze takto uhradit i cizoměnové faktury a účtenky (ne zálohové faktury).
+          Jediné ID degraduje na 1:1 párování.
         - `invoice_ids` (2 a více) — sloučená úhrada: jedna příchozí platba proti
           více vystavaným fakturám. Součet musí sedět na částku transakce.
           Jediné ID v poli degraduje na běžné 1:1 párování.
@@ -8324,6 +8347,12 @@ paths:
         Odpověď má tři tvary podle toho, co se párovalo — vždy obsahuje `matched`,
         `paid_at` a `posting` (souhrn automatického zaúčtování, `null` když se
         neúčtovalo).
+
+        API token bez plného zápisu (MCP, integrace) jen páruje a do účetního deníku
+        nezapisuje: `posting` je `{action: deferred, reason: api_token}`. Spárovaný
+        pohyb zaúčtuje uživatel v aplikaci nebo plánovaný přepočet fronty automatiky
+        podle politiky automatického účtování firmy. Pohyb, který už má zápis v deníku,
+        token nepřepáruje (403 `token_write_forbidden`).
       requestBody:
         required: true
         content:
@@ -8408,7 +8437,9 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
         '403':
-          description: Chybí oprávnění k párování nebo změně úhrady dokladu.
+          description: |
+            Chybí oprávnění k párování nebo změně úhrady dokladu, nebo API token
+            páruje pohyb se zápisem v deníku (`token_write_forbidden`).
         '404':
           description: |
             Transakce nenalezena (`not_found`), faktura nenalezena nebo patří jiné
@@ -8457,15 +8488,16 @@ paths:
         zbývajících plateb — fakturu, kterou kryje jiná platba, nechá zaplacenou.
         Zaúčtovaný pohyb se stornuje; u zaúčtovaného pohybu proto endpoint vyžaduje
         stejná práva jako `unpost` (`bank.unpost` a zápis do účetnictví).
-        Přes API token je endpoint jen pro čtení (`token_write_forbidden`).
+        API token bez plného zápisu smí zrušit jen párování pohybu bez zápisu
+        v deníku, který nehradí zálohu; jinak `token_write_forbidden`.
       responses:
         '200':
           description: OK
         '403':
           description: |
             Chybí oprávnění k párování nebo změně úhrady dokladu, u zaúčtovaného pohybu
-            oprávnění odúčtovat banku (`forbidden`), nebo jde o volání API tokenem
-            (`token_write_forbidden`).
+            oprávnění odúčtovat banku (`forbidden`), nebo API token ruší párování pohybu
+            se zápisem v deníku či úhrady zálohy (`token_write_forbidden`).
         '409':
           description: |
             Zrušení párování odmítnuto — zápis leží v uzavřeném nebo zamčeném období
@@ -10640,6 +10672,9 @@ paths:
         kandidáta čtení i právo změnit úhradu (`invoices.mark_paid`, u přijatých
         faktur `purchase_invoices.transition`). Práva a dostupnost pohybu se
         kontrolují znovu při potvrzení návrhu.
+
+        API token bez plného zápisu pohyb jen spáruje a nezaúčtuje (`posting`
+        `{action: deferred, reason: api_token}`), stejně jako ruční párování.
       requestBody:
         required: false
         content:
@@ -10650,7 +10685,7 @@ paths:
                 candidate_index: { type: integer, minimum: 0, default: 0 }
       responses:
         '200': { description: Transakce byla spárována }
-        '403': { description: Chybí oprávnění k párování nebo změně úhrady dokladu }
+        '403': { description: 'Chybí oprávnění k párování nebo změně úhrady dokladu, nebo má pohyb zápis v deníku a volá API token (`token_write_forbidden`).' }
         '404': { description: Návrh nebyl nalezen v aktuální firmě }
         '409': { description: Návrh už byl vyřízen }
         '422': { description: Index kandidáta je mimo rozsah }
@@ -11555,9 +11590,10 @@ paths:
                       type: object
                       properties:
                         month: { type: string, example: "2026-05" }
-                        count: { type: integer }
+                        count: { type: integer, description: "Počet dokladů celého měsíce podle filtrů, nezávisle na stránkování (v souvislém seznamu počet na aktuální stránce)" }
                         totals_per_currency:
                           type: array
+                          description: "Měsíční náklad po měnách za celý měsíc podle filtrů, nezávisle na stránkování (v souvislém seznamu jen za řádky aktuální stránky). Bez konceptů, storen, DDKP a zaplacených nebo vyúčtovaných záloh."
                           items:
                             type: object
                             properties:
@@ -11578,6 +11614,15 @@ paths:
     post:
       tags: [Purchase invoices]
       summary: Vytvoří draft přijaté faktury
+      description: |
+        Doklad vzniká jako koncept. S `status: received` se po založení přijme stejným přechodem
+        jako `POST /api/v1/purchase-invoices/{id}/transition` s `target=received` (schvalování
+        manažerem střediska, interní číslo, automatické zaúčtování podle politiky firmy, pokladní
+        doklad u úhrady hotově). Výsledek nese `status_transition`: `result` je `received`,
+        `approval_requested` (doklad zůstal konceptem a čeká na schválení), nebo `failed`
+        s `error` (doklad zůstal úplným konceptem). Přes API token bez plného zápisu se
+        automatické zaúčtování odloží (`posting: {action: deferred, reason: api_token}`),
+        doklad zaúčtuje uživatel v aplikaci. Jiný `status` než `draft` a `received` vrací 400.
       parameters: [{ $ref: '#/components/parameters/SupplierIdHeader' }]
       requestBody:
         required: true
@@ -11589,7 +11634,24 @@ paths:
           description: Created
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/PurchaseInvoice' }
+              schema:
+                allOf:
+                  - { $ref: '#/components/schemas/PurchaseInvoice' }
+                  - type: object
+                    properties:
+                      status_transition:
+                        type: object
+                        description: "Jen při `status: received` v těle."
+                        properties:
+                          requested: { type: string, enum: [received] }
+                          result: { type: string, enum: [received, approval_requested, failed] }
+                          error: { $ref: '#/components/schemas/Error' }
+                      posting:
+                        type: object
+                        description: Automatické zaúčtování odložené pro API token.
+                        properties:
+                          action: { type: string, enum: [deferred] }
+                          reason: { type: string, enum: [api_token] }
         '400': { description: Validation error }
 
   /api/v1/purchase-invoices/{id}:
@@ -11817,6 +11879,10 @@ paths:
         Pošle-li se `rate` (hodnota, nebo `null` pro vymazání) bez `rate_date` a `source`, nastaví
         se `rate_date` na `null` a `source` na `manual`, takže se trojice resetuje společně.
         Explicitní `null` v `source` se bere jako `manual`.
+
+        Zaúčtovaný doklad (`posted_document`) a storno (`not_editable`) endpoint odmítne s 409:
+        kurz mění korunové částky a tenhle endpoint deník nepřeúčtuje. Kurz zaúčtovaného dokladu
+        se mění úpravou dokladu (`PUT /api/v1/purchase-invoices/{id}`), která zápis dorovná.
       parameters:
         - in: path
           name: id
@@ -11835,6 +11901,7 @@ paths:
                 source: { type: string, enum: [cnb, manual, idoklad, fakturoid], default: manual }
       responses:
         '200': { description: OK }
+        '409': { description: Zaúčtovaný nebo stornovaný doklad, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
 
   /api/v1/purchase-invoices/{id}/payment-calendar:
     parameters:
@@ -11909,9 +11976,11 @@ paths:
       description: |
         `target=booked` je ruční zaúčtování dokladu, tedy účetní úkon: přes API token
         vrací 403 `token_write_forbidden` a provádí se v aplikaci (token s plným zápisem
-        `system_write` ho provede jako uživatel v aplikaci). Ostatní přechody
-        token smí; automatické zaúčtování při přijetí (`received`), které má firma
-        zapnuté, proběhne stejně jako z aplikace.
+        `system_write` ho provede jako uživatel v aplikaci). Totéž platí pro
+        `target=cancelled` u zaúčtovaného dokladu (storno stornuje i zápis v deníku).
+        Ostatní přechody token smí. Automatické zaúčtování při přijetí (`received`), které
+        má firma zapnuté, se pro token bez plného zápisu odloží: odpověď nese
+        `posting: {action: deferred, reason: api_token}` a doklad zaúčtuje uživatel v aplikaci.
 
         Schvalování manažerem střediska: vyžaduje-li koncept schválení (typ dimenze
         se schvalováním a hodnota nad limitem), přechod na `received` doklad
@@ -12132,6 +12201,15 @@ paths:
           required: false
           description: Model AI poskytovatele firmy. Musí být mezi povolenými modely, jinak 400 `validation_failed`.
           schema: { type: string }
+        - in: query
+          name: without_items
+          required: false
+          description: |
+            `1` = načíst doklad bez rozpisu položek. Koncept dostane jeden řádek na každou sazbu DPH
+            (součet řádků dané sazby), základ, daň i celková částka odpovídají dokladu. Odpočet zdaněné
+            zálohy zůstává samostatným záporným řádkem. Platí jen pro AI vytěžení, doklad s ISDOC
+            se zakládá vždy z vlastních položek.
+          schema: { type: string, enum: ['0', '1'] }
       requestBody:
         required: true
         content:
@@ -14337,8 +14415,11 @@ paths:
         schema: { type: integer, format: int64 }
     get:
       tags: [InvoiceOps]
-      summary: Zálohy, ze kterých může koncept faktury postupně čerpat
-      description: Zálohové faktury téhož odběratele a měny s vystaveným daňovým dokladem k platbě a dosud nevyčerpanou částkou s DPH.
+      summary: Zálohy, ze kterých může koncept faktury čerpat
+      description: >-
+        Zálohové faktury téhož odběratele a měny s vystaveným daňovým dokladem k platbě a dosud
+        nevyčerpanou částkou (bez čerpání tohoto konceptu), i zálohy, které koncept čerpá teď.
+        Faktura může čerpat víc záloh najednou, jednu zálohu může čerpat víc faktur.
       responses:
         '200':
           description: OK
@@ -14353,22 +14434,35 @@ paths:
                     varsymbol: { type: string, nullable: true }
                     issue_date: { type: string, format: date }
                     total_with_vat: { type: number }
-                    available: { type: number }
+                    available: { type: number, description: Nevyčerpaná částka zálohy s DPH (bez čerpání tohoto konceptu). }
+                    available_base: { type: number, description: Totéž bez DPH. }
+                    drawn: { type: number, description: Kolik ze zálohy koncept čerpá teď (s DPH). }
+                    drawn_base: { type: number, description: Totéž bez DPH. }
+                    tax_documents: { type: string, description: Čísla daňových dokladů k platbě zálohy. }
         '409': { description: Doklad není koncept běžné faktury }
     post:
       tags: [InvoiceOps]
-      summary: Odečte na konceptu faktury část zálohy (postupné čerpání)
-      description: Nahradí odpočtové řádky § 37a na konceptu čerpáním `amount` (s DPH) ze zálohy a naváže fakturu na zálohu.
+      summary: Nastaví na konceptu faktury čerpání zálohy
+      description: >-
+        Doplní na koncept odpočtové řádky § 37a ze zálohy `proforma_id` po sazbách jejího daňového
+        dokladu k platbě, nebo nahradí čerpání téže zálohy; čerpání ostatních záloh na faktuře zůstává.
+        Částka je `amount` v měně dokladu (`basis` gross = s DPH, net = bez DPH), nebo `percent` =
+        procento plnění faktury s DPH (součtu řádků mimo odpočty záloh). Zadává se právě jedno z nich.
+        Faktura čerpající jedinou zálohu ji má v `parent_invoice_id`, faktura čerpající víc záloh
+        vazbu dokladu nemá a čerpání nese `advance_drawdown` a `items[].advance_invoice_id`.
+        Při čerpání víc záloh nesmí odpočty převýšit plnění faktury.
       requestBody:
         required: true
         content:
           application/json:
             schema:
               type: object
-              required: [proforma_id, amount]
+              required: [proforma_id]
               properties:
                 proforma_id: { type: integer, format: int64 }
-                amount: { type: number }
+                amount: { type: number, description: Čerpaná částka v měně dokladu. }
+                percent: { type: number, exclusiveMinimum: 0, maximum: 100, description: Procento plnění faktury s DPH (místo amount). }
+                basis: { type: string, enum: [gross, net], default: gross, description: Základ částky amount. }
       responses:
         '200':
           description: OK
@@ -14381,7 +14475,8 @@ paths:
                     type: object
                     properties:
                       proforma_id: { type: integer, format: int64 }
-                      amount: { type: number }
+                      amount: { type: number, description: Čerpání zálohy s DPH. }
+                      base: { type: number, description: Čerpání zálohy bez DPH. }
                       available: { type: number }
                       remaining: { type: number }
                   invoice: { $ref: '#/components/schemas/Invoice' }
@@ -14390,13 +14485,20 @@ paths:
     delete:
       tags: [InvoiceOps]
       summary: Odebere z konceptu faktury čerpání zálohy
+      description: S `proforma_id` odebere odpočtové řádky jen té zálohy, bez něj odpočty všech záloh i vazbu na zálohu.
+      parameters:
+        - in: query
+          name: proforma_id
+          required: false
+          schema: { type: integer, format: int64 }
       responses:
         '200':
           description: OK
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Invoice' }
-        '409': { description: Doklad není koncept běžné faktury }
+        '400': { description: Neplatná záloha }
+        '409': { description: Doklad není koncept běžné faktury, nebo faktura ze zálohy nečerpá }
 
   # ── Přijaté faktury — párování zálohy ────────────────────────────────────
   /api/v1/purchase-invoices/{id}/advance-candidates:
@@ -14418,6 +14520,61 @@ paths:
                 type: object
                 properties:
                   candidates: { type: array, items: { type: object } }
+
+  /api/v1/purchase-invoices/advance-candidates:
+    parameters:
+      - $ref: '#/components/parameters/SupplierIdHeader'
+    get:
+      tags: [Purchase invoices]
+      summary: Nespárované zálohy dodavatele pro konečnou fakturu, která ještě není uložená
+      description: Stejný výběr a řazení jako `/purchase-invoices/{id}/advance-candidates`. Vazbu založí uložení dokladu s `advance_purchase_invoice_id`.
+      parameters:
+        - { in: query, name: vendor_id, required: true, schema: { type: integer, format: int64 } }
+        - { in: query, name: currency_id, required: true, schema: { type: integer, format: int64 } }
+        - { in: query, name: total, required: false, schema: { type: number }, description: "Částka konečné faktury s DPH pro řazení podle nejbližší zálohy." }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  candidates: { type: array, items: { type: object } }
+        '400': { description: Chybí vendor_id nebo currency_id }
+
+  /api/v1/purchase-invoices/advance-deduction-lines:
+    parameters:
+      - $ref: '#/components/parameters/SupplierIdHeader'
+    get:
+      tags: [Purchase invoices]
+      summary: Řádky odpočtu poskytnuté zálohy podle jejích daňových dokladů k platbě
+      description: Za každý živý DDKP zálohy a sazbu DPH jeden řádek se základem a daní DDKP se znaménkem minus (v měně dokladu). Záloha bez DDKP vrací prázdný seznam. Řádek vložený na konečnou fakturu nese `advance_purchase_invoice_id` zálohy.
+      parameters:
+        - { in: query, name: advance_id, required: true, schema: { type: integer, format: int64 } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  advance_id: { type: integer, format: int64 }
+                  lines:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        tax_document_id: { type: integer, format: int64 }
+                        tax_document_number: { type: string }
+                        vat_rate_id: { type: integer }
+                        vat_rate: { type: number }
+                        vat_classification_code: { type: [string, "null"] }
+                        base: { type: number, description: "Základ odpočtu (záporný)." }
+                        vat: { type: number, description: "Daň odpočtu (záporná)." }
+                        gross: { type: number, description: "Odpočet s DPH (záporný)." }
+        '400': { description: Chybí advance_id }
 
   /api/v1/purchase-invoices/{id}/settlement-candidates:
     parameters:
@@ -16240,7 +16397,7 @@ paths:
     get:
       tags: [Accounting]
       summary: Konverzace AI asistenta se zprávami; cizí konverzace vrací 404
-      description: Zpráva asistenta nese v `response` strukturovanou odpověď (other_items, internal_documents, journal_entries, document_suggestions, warnings) a v `applied` značky použitých návrhů {druh -> {index -> id}}; druh je journal_entry, other_item, internal_document nebo document.
+      description: Zpráva asistenta nese v `response` strukturovanou odpověď (other_items, internal_documents, journal_entries, document_suggestions, warnings, tool_calls = použité nástroje {tool, kind, label, detail, status} bez obsahu výsledků, manual_sources = citované oddíly manuálu {section_id, chapter, title, url}) a v `applied` značky použitých návrhů {druh -> {index -> id}}; druh je journal_entry, other_item, internal_document nebo document.
       parameters:
       - $ref: '#/components/parameters/SupplierIdHeader'
       - { in: path, name: id, required: true, schema: { type: integer } }
@@ -16275,7 +16432,7 @@ paths:
     get:
       tags: [Accounting]
       summary: Dostupnost AI asistenta účetní (poskytovatel, model, podpora PDF a obrázků)
-      description: Dotaz na asistenta (POST /api/accounting/ai-assistant/ask) je jen pro přihlášeného uživatele v aplikaci, API tokenem nejde. Volitelné multipart pole model vybere pro dotaz jednu hodnotu z models bez změny nastavení firmy.
+      description: Dotaz na asistenta (POST /api/accounting/ai-assistant/ask) je jen pro přihlášeného uživatele v aplikaci, API tokenem nejde. Asistent při dotazu čte data firmy čtecími nástroji katalogu MCP s právy přihlášeného uživatele. Volitelné multipart pole model vybere pro dotaz jednu hodnotu z models bez změny nastavení firmy.
       parameters:
       - $ref: '#/components/parameters/SupplierIdHeader'
       responses:
@@ -16627,6 +16784,9 @@ paths:
         dokumenty a splátkový kalendář zachová. Vyžaduje navíc zápisová oprávnění
         other_items a accounting.journal.post. Spárované úhrady vrátí 409 has_payments, jiná
         navazující data (například mzdová platba) 409 entry_delete_conflict.
+        Řádek spárovaný s jiným zápisem v okruhu otevřených položek vrátí 409 entry_paired
+        (`pairing_id`, `account_id` v chybě), řádek rozepsaný na doklady saldokonta
+        409 allocation_saldo_in_use.
         Vždy jen pro otevřené období, mimo uzamčené datum a u zápisu bez storna.
       parameters:
         - $ref: '#/components/parameters/SupplierIdHeader'
@@ -16647,7 +16807,7 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
         '409':
-          description: Období není otevřené, datum je uzamčené, zápis je stornovaný, existuje pozdější odpis nebo typ zdroje nepodporuje přímé smazání
+          description: Období není otevřené, datum je uzamčené, zápis je stornovaný, existuje pozdější odpis, typ zdroje nepodporuje přímé smazání, řádek je v okruhu párování (`entry_paired`) nebo v rozpadu saldokonta (`allocation_saldo_in_use`)
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
@@ -17093,8 +17253,11 @@ paths:
         jen přestane být v deníku vidět. Lze zadat ID kterékoli ze stran.
 
         Odmítne se, když je některá strana v neotevřeném období nebo v uzamčené části
-        účetnictví, když na dvojici navazuje další storno, nebo když se zdroj zápisu ruší
-        vlastním workflow (mzdy, odpisy, reklasifikace).
+        účetnictví, když na dvojici navazuje další storno, když se zdroj zápisu ruší
+        vlastním workflow (mzdy, odpisy, reklasifikace), když je řádek některé strany
+        spárovaný s jiným zápisem v okruhu otevřených položek (`entry_paired`) nebo
+        rozepsaný na doklady saldokonta (`allocation_saldo_in_use`). Okruh, který leží
+        celý uvnitř dvojice, smazání nebrání.
       parameters:
         - $ref: '#/components/parameters/SupplierIdHeader'
         - { in: path, name: id, required: true, schema: { type: integer } }
@@ -17111,7 +17274,7 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
         '409':
-          description: Zavřené období, uzamčené datum, navazující storno nebo nepodporovaný zdroj
+          description: Zavřené období, uzamčené datum, navazující storno, nepodporovaný zdroj, okruh párování (`entry_paired`) nebo rozpad saldokonta (`allocation_saldo_in_use`)
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
@@ -19693,7 +19856,9 @@ paths:
       description: >-
         Účetní/admin. U karty v užívání atomicky odstraní i zápis zařazení.
         Operace je povolena jen bez potvrzených odpisů a technických zhodnocení;
-        zápis zařazení musí být v otevřeném a neuzamčeném období.
+        zápis zařazení musí být v otevřeném a neuzamčeném období a jeho řádky nesmí být
+        spárované s jiným zápisem v okruhu otevřených položek (409 `entry_paired`)
+        ani rozepsané na doklady saldokonta (409 `allocation_saldo_in_use`).
       parameters:
         - $ref: '#/components/parameters/SupplierIdHeader'
         - { in: path, name: id, required: true, schema: { type: integer } }
@@ -20365,6 +20530,10 @@ paths:
         Admin-only. Pořadí vynuceno: open_next → close_books → fx_revaluation;
         mazané řádky jdou dumpem do activity_log. Asistované zápisy
         estimates/deferrals se nemažou — stornují se jednotlivě.
+        Okruhy párování otevřených položek nad mazanými zápisy se uvolní (audit
+        `accounting.pairing_released` s okruhy, zápisy a účty); odpověď nese
+        `released_pairings` = počet uvolněných okruhů. Řádek rozepsaný na doklady
+        saldokonta revert zastaví (409 `allocation_saldo_in_use`).
       parameters:
         - $ref: '#/components/parameters/SupplierIdHeader'
         - { in: path, name: id, required: true, schema: { type: integer } }
@@ -20474,6 +20643,8 @@ paths:
         nepošle `replace_taken_over_opening: true` s důvodem — pak se převzaté
         zápisy smažou (auditní událost `accounting.opening_takeover_replaced`
         s dumpem) a zaúčtuje se vypočtený zápis (`opening_source = replaced`).
+        Okruhy párování nad nahrazenými zápisy se uvolní, odpověď nese
+        `released_pairings` (počet uvolněných okruhů, jako u všech akcí kroků uzávěrky).
       parameters:
         - $ref: '#/components/parameters/SupplierIdHeader'
         - { in: path, name: id, required: true, schema: { type: integer } }
@@ -21130,7 +21301,7 @@ paths:
     delete:
       tags: [Accounting]
       summary: Smaže importované GoPay XML, případné PDF a účetní zápisy vytvořené tímto importem
-      description: Zachová faktury, dobropisy, jejich úhrady a dříve existující bankovní zápisy. Dostupné pouze superadminovi a jen pro otevřené, nezamčené období.
+      description: Zachová faktury, dobropisy, jejich úhrady a dříve existující bankovní zápisy. Dostupné pouze superadminovi a jen pro otevřené, nezamčené období. Zápis spárovaný s jiným zápisem v okruhu otevřených položek (409 `gopay.entry_paired`) nebo rozepsaný na doklady saldokonta (409 `gopay.allocation_saldo_in_use`) se nesmaže.
       parameters:
         - $ref: '#/components/parameters/SupplierIdHeader'
         - { in: path, name: id, required: true, schema: { type: integer, format: int64 } }
@@ -21618,6 +21789,68 @@ paths:
         '409': { description: Doklad není potvrzený ani zaúčtovaný (`other_items.error.counterparty_not_editable`), content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
         '422': { description: Neplatný účet protistrany (`other_items.error.invalid_counterparty_account`), content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
 
+  /api/v1/accounting/other-items/{id}/text:
+    put:
+      tags: [Accounting]
+      summary: Změní poznámku vystaveného dokladu
+      description: |
+        Poznámka je popisný údaj mimo účetnictví: jde změnit u potvrzeného, zaúčtovaného, stornovaného
+        i zrušeného dokladu, také v uzavřeném období. Ostatní pole tělo ignoruje (název tvoří popis
+        zápisu v deníku, účetní pole se mění stornem nebo přeúčtováním). Koncept vrací
+        `409 other_items.error.is_draft` (upravuje se přes `PUT /accounting/other-items/{id}`).
+        Změna se zapíše do aktivity dokladu (`other_item.text_updated` s hodnotou před a po).
+        Přes API token nedostupné (403 token_write_forbidden).
+      parameters:
+        - { $ref: '#/components/parameters/SupplierIdHeader' }
+        - { in: path, name: id, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, required: [note], properties: { note: { type: [string, 'null'], maxLength: 10000 } } } } }
+      responses:
+        '200': { description: Upravený doklad, content: { application/json: { schema: { $ref: '#/components/schemas/OtherItem' } } } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { description: Doklad je koncept (`other_items.error.is_draft`), content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '422': { description: Chybí pole note nebo je delší než 10 000 znaků, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+
+  /api/v1/accounting/other-items/{id}/posted:
+    delete:
+      tags: [Accounting]
+      summary: Smaže zaúčtovaný doklad i se zápisem v deníku bez storna
+      description: |
+        Odstraní chybný zaúčtovaný doklad i jeho zápis v deníku, za stejných podmínek jako
+        `DELETE /accounting/journal/{id}`: otevřené období (`409 period_not_open`), zápis bez storna,
+        uzamčené datum jen s vědomým potvrzením (`409 date_locked` s `can_acknowledge`, opakovat
+        s `?ack_locked=1`), řádky bez rozpadu saldokonta (`409 allocation_saldo_in_use`), mimo okruh
+        párování (`409 entry_paired`) a bez navazujících agend. Doklad navíc nesmí mít úhradu
+        (`other_items.error.has_payments`), být v platebním příkazu (`in_payment_order`), účtovat
+        navázanou fakturu (`linked_invoice`), být zdrojem opakování (`has_schedule`) ani mít historii
+        přeúčtování (`has_posting_history`); takový doklad se ruší stornem. Výskyt opakování se po
+        smazání zápisu jen zruší (`status: cancelled`), aby ho opakování nevytvořilo znovu.
+        Číslo se do řady nevrací. Vše proběhne v jedné transakci a zapíše se do auditu
+        (`accounting.entry_deleted` u zápisu, `other_item.deleted_posted` u dokladu).
+        Práva other_items, accounting, accounting.journal.write a accounting.journal.post (zápis).
+        Přes API token nedostupné (403 token_write_forbidden).
+      parameters:
+        - { $ref: '#/components/parameters/SupplierIdHeader' }
+        - { in: path, name: id, required: true, schema: { type: integer } }
+        - { in: query, name: ack_locked, schema: { type: string, enum: ['1'] }, description: Vědomé potvrzení zásahu do uzamčeného data (jen přihlášená relace). }
+      responses:
+        '200':
+          description: Doklad i zápis smazány
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [deleted, journal_entry_id, status]
+                properties:
+                  deleted: { type: boolean }
+                  journal_entry_id: { type: integer, format: int64, description: Smazaný zápis deníku }
+                  status: { type: string, enum: [deleted, cancelled], description: cancelled = zrušený výskyt opakování }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { description: 'Smazání brání pravidlo deníku nebo navazující údaj (`period_not_open`, `date_locked`, `entry_paired`, `allocation_saldo_in_use`, `entry_delete_conflict`, `other_items.error.not_posted|has_payments|in_payment_order|linked_invoice|has_schedule|has_posting_history`)', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+
   /api/v1/accounting/other-items/{id}/allocations:
     get:
       tags: [Accounting]
@@ -21928,7 +22161,7 @@ paths:
     delete:
       tags: [Accounting]
       summary: Smaže koncept
-      description: Zaúčtovaný doklad se nemaže, stornuje se (409 internal_documents.error.not_draft). Přes API token nedostupné.
+      description: Zaúčtovaný doklad tato cesta nemaže (409 internal_documents.error.not_draft); stornuje se, nebo se smaže i se zápisem přes `DELETE /accounting/internal-documents/{id}/posted`. Přes API token nedostupné.
       responses:
         '200': { description: Smazáno }
         '403': { $ref: '#/components/responses/Forbidden' }
@@ -21971,6 +22204,75 @@ paths:
         '409': { description: 'Doklad není zaúčtovaný (`internal_documents.error.not_posted`)', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
         '422': { description: 'Chybí důvod (`internal_documents.error.reason_required`), neplatné datum nebo storno do uzavřeného či zamčeného období (`period_not_open`, `date_locked`)', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
 
+  /api/v1/accounting/internal-documents/{id}/text:
+    put:
+      tags: [Accounting]
+      summary: Změní poznámku (a popis) vystaveného interního dokladu
+      description: |
+        Poznámka jde změnit u zaúčtovaného i stornovaného dokladu, také v uzavřeném období, do
+        účetnictví se nepromítá. Popis (`title`) jde změnit jen u zaúčtovaného dokladu: je zároveň
+        popisem zápisu v deníku a mění se s ním stejně jako `PATCH /accounting/journal/{id}/description`
+        (otevřené období, jinak `409 period_not_open`; stornovaný doklad `409 internal_documents.error.title_locked`).
+        Řádky kontace, data a částky tělo ignoruje. Koncept vrací `409 internal_documents.error.is_draft`.
+        Změny se zapíší do aktivity dokladu (`internal_document.text_updated` s hodnotami před a po),
+        změna popisu i do auditu zápisu. Práva accounting.journal.write, u popisu navíc accounting (zápis).
+        Přes API token nedostupné (403 token_write_forbidden).
+      parameters:
+        - { $ref: '#/components/parameters/SupplierIdHeader' }
+        - { in: path, name: id, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                note: { type: [string, 'null'], maxLength: 10000 }
+                title: { type: string, minLength: 1, maxLength: 255 }
+      responses:
+        '200': { description: Upravený doklad, content: { application/json: { schema: { $ref: '#/components/schemas/InternalDocument' } } } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { description: 'Koncept, popis stornovaného dokladu nebo zápis v uzavřeném období (`internal_documents.error.is_draft|title_locked`, `period_not_open`)', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+
+  /api/v1/accounting/internal-documents/{id}/posted:
+    delete:
+      tags: [Accounting]
+      summary: Smaže zaúčtovaný interní doklad i se zápisem v deníku bez storna
+      description: |
+        Odstraní chybný zaúčtovaný doklad i jeho ruční zápis, za stejných podmínek jako
+        `DELETE /accounting/journal/{id}`: otevřené období (`409 period_not_open`), zápis bez storna,
+        uzamčené datum jen s vědomým potvrzením (`409 date_locked` s `can_acknowledge`, opakovat
+        s `?ack_locked=1`), řádky bez rozpadu saldokonta (`409 allocation_saldo_in_use`), mimo okruh
+        párování (`409 entry_paired`) a bez navazujících agend. Stornovaný doklad
+        (`internal_documents.error.not_posted`) a hlavička nad převzatým ručním zápisem
+        (`internal_documents.error.internal_document_use_detail`) se nemažou. Číslo z nové řady
+        číselníku se vrátí do řady, je-li poslední (`number_released`); číslo dosavadní řady ID
+        sdílené s ručními zápisy se nevrací. Vše proběhne v jedné transakci a zapíše se do auditu
+        (`accounting.entry_deleted` u zápisu, `internal_document.deleted_posted` u dokladu).
+        Práva accounting, accounting.journal.write a accounting.journal.post (zápis).
+        Přes API token nedostupné (403 token_write_forbidden).
+      parameters:
+        - { $ref: '#/components/parameters/SupplierIdHeader' }
+        - { in: path, name: id, required: true, schema: { type: integer } }
+        - { in: query, name: ack_locked, schema: { type: string, enum: ['1'] }, description: Vědomé potvrzení zásahu do uzamčeného data (jen přihlášená relace). }
+      responses:
+        '200':
+          description: Doklad i zápis smazány
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [deleted, journal_entry_id, number_released]
+                properties:
+                  deleted: { type: boolean }
+                  journal_entry_id: { type: integer, format: int64, description: Smazaný zápis deníku }
+                  number_released: { type: boolean, description: Číslo se vrátilo do řady číselníku }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { description: 'Smazání brání pravidlo deníku nebo stav dokladu (`period_not_open`, `date_locked`, `entry_paired`, `allocation_saldo_in_use`, `entry_delete_conflict`, `internal_documents.error.not_posted|is_draft|internal_document_use_detail`)', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+
   /api/v1/accounting/cash-documents:
     get:
       tags: [Accounting]
@@ -22006,6 +22308,19 @@ paths:
         krýt dluh blokovaný potvrzeným QR příkazem čekajícím na banku (422
         `cash.error.eet_qr_pending`). Povinnou tržbu mimo podporovaný rozsah (cizí měna) doklad
         nezaúčtuje (422 `cash.error.eet_unsupported_scenario`).
+
+        Úhrada cizoměnového dokladu z korunové pokladny: `total_amount` jsou skutečně přijaté
+        nebo vydané koruny. Přijatou fakturu nebo účtenku (`document_kind` invoice | receipt)
+        lze uhradit jen celou a jen dosud neuhrazenou; koruny se musí vejít do kurzové tolerance
+        vůči zbytku přepočtenému kurzem dokladu (jinak 422 `cash.error.fx_amount_out_of_tolerance`
+        s `params` {remaining, currency_code, expected_czk, tolerance_czk}, u částečně uhrazeného dokladu 422
+        `cash.error.cross_currency_partial_unsupported`). Vydaná faktura se v toleranci uhradí
+        celá, menší částka se přepočte kurzem dokladu na částečnou úhradu. Saldokonto se odúčtuje
+        kurzem předpisu, rozdíl proti korunám jde na kurzovou ztrátu 563 nebo zisk 663. Uhrazená
+        částka v měně dokladu je v detailu dokladu jako `settled_document_amount`. Cizoměnovou
+        zálohu, daňový doklad k platbě, vratku ani výplatu dokladu k vyplacení pokladna nehradí
+        (422 `cash.error.foreign_currency_invoice` / `foreign_currency_proforma`), valutová
+        pokladna faktury nehradí vůbec (`foreign_register_purpose_unsupported`).
       parameters:
         - $ref: '#/components/parameters/SupplierIdHeader'
       requestBody:
@@ -22019,22 +22334,29 @@ paths:
   /api/v1/accounting/cash-documents/unpaid:
     get:
       tags: [Accounting]
-      summary: Našeptávač nezaplacených FV/PF (jen CZK) pro úhradu hotově
+      summary: Našeptávač nezaplacených FV/PF pro úhradu z korunové pokladny
       description: |
-        Vrací doklady, na kterých ještě něco zbývá k úhradě. `remaining` je zbytek,
-        ne brutto: u přijaté faktury se odečítá uhrazená záloha (`amount_to_pay`)
+        Vrací doklady, na kterých ještě něco zbývá k úhradě. `remaining` je zbytek
+        v měně dokladu, ne brutto: u přijaté faktury se odečítá uhrazená záloha (`amount_to_pay`)
         i už zaúčtované úhrady (bankovní i hotovostní), takže doklad krytý zálohou
         se nenabízí vůbec. U vydaných faktur je v seznamu i zálohová faktura
         (`invoice_type = proforma`, příznak `is_proforma`) — hotově se hradit smí,
         ale úhrada spustí vystavení finálního dokladu nebo daňového dokladu
         k přijaté platbě. Platební kalendář se nenabízí.
+
+        Cizoměnové doklady se nabízejí k úhradě korunami: vydaná faktura (ne zálohová)
+        a dosud neuhrazená přijatá faktura nebo účtenka, vždy s kurzem dokladu. Takový řádek
+        nese navíc `exchange_rate` (kurz dokladu), `remaining_czk` (zbytek přepočtený kurzem
+        dokladu) a `czk_tolerance` (kurzová tolerance v Kč, ve které koruny uhradí celý zbytek).
+        Vratka (`refundable=1`) nabízí jen korunové doklady.
       parameters:
         - $ref: '#/components/parameters/SupplierIdHeader'
         - { in: query, name: kind, required: true, schema: { type: string, enum: [invoice, purchase_invoice] } }
         - { in: query, name: q, schema: { type: string } }
         - { in: query, name: limit, schema: { type: integer, default: 20 } }
+        - { in: query, name: refundable, description: "1 = doklady pro vratku úhrady nebo výplatu dokladu k vyplacení (jen v Kč)", schema: { type: string, enum: ['0', '1'] } }
       responses:
-        '200': { description: "OK — položky {id, kind, number, partner_name, partner_ic, partner_dic, total, paid, remaining, currency_code, issued_on} + `invoice_type`/`is_proforma` (FV) nebo `document_kind` (PF)", content: { application/json: { schema: { type: array, items: { type: object, properties: { id: { type: integer }, kind: { type: string, enum: [invoice, purchase_invoice] }, number: { type: string }, partner_name: { type: string }, partner_ic: { type: string, nullable: true, description: "IČ odběratele (FV) nebo dodavatele (PF)" }, partner_dic: { type: string, nullable: true, description: "DIČ odběratele (FV) nebo dodavatele (PF)" }, total: { type: number }, paid: { type: number }, remaining: { type: number }, currency_code: { type: string }, issued_on: { type: string, format: date }, invoice_type: { type: string }, is_proforma: { type: boolean }, document_kind: { type: string } } } } } } }
+        '200': { description: "OK — položky {id, kind, number, partner_name, partner_ic, partner_dic, total, paid, remaining, currency_code, issued_on} + `invoice_type`/`is_proforma` (FV) nebo `document_kind` (PF); u cizoměnového dokladu navíc `exchange_rate`, `remaining_czk`, `czk_tolerance`", content: { application/json: { schema: { type: array, items: { type: object, properties: { id: { type: integer }, kind: { type: string, enum: [invoice, purchase_invoice] }, number: { type: string }, partner_name: { type: string }, partner_ic: { type: string, nullable: true, description: "IČ odběratele (FV) nebo dodavatele (PF)" }, partner_dic: { type: string, nullable: true, description: "DIČ odběratele (FV) nebo dodavatele (PF)" }, total: { type: number }, paid: { type: number }, remaining: { type: number, description: "Zbytek v měně dokladu" }, currency_code: { type: string }, issued_on: { type: string, format: date }, invoice_type: { type: string }, is_proforma: { type: boolean }, document_kind: { type: string }, exchange_rate: { type: number, description: "Kurz dokladu (jen cizoměnový doklad)" }, remaining_czk: { type: number, description: "Zbytek přepočtený kurzem dokladu (jen cizoměnový doklad)" }, czk_tolerance: { type: number, description: "Kurzová tolerance v Kč, ve které koruny uhradí celý zbytek (jen cizoměnový doklad)" } } } } } } }
 
   /api/v1/accounting/cash-documents/number-series:
     get:
@@ -22119,6 +22441,8 @@ paths:
         po draftu smazaném přes `?force=1` žádná díra nevzniká.
         Preferovanou cestou je storno (`/reverse`), které auditní stopu zachová.
         Doklad s evidovanou tržbou EET smazat nelze (409 `cash.error.eet_history_exists`).
+        Zápis spárovaný s jiným zápisem v okruhu otevřených položek (409 `entry_paired`)
+        nebo rozepsaný na doklady saldokonta (409 `allocation_saldo_in_use`) se nesmaže.
       parameters:
         - $ref: '#/components/parameters/SupplierIdHeader'
         - { in: path, name: id, required: true, schema: { type: integer } }
@@ -28675,6 +28999,7 @@ paths:
         protiúčty, `period_closed`) vyplňuje jen firma v podvojném účetnictví,
         jinak `posting` nese nejvýš mzdové párování. Filtr a řazení podle
         zaúčtování se mimo podvojné účetnictví ignorují.
+        Členské úhrady nesou resolution=membership; matched_membership_claims je přes běžný API token (bez plného zápisu), bez čtení účetnictví, bez licence nebo pro klientskou roli prázdné.
       parameters:
         - { in: query, name: page, schema: { type: integer, minimum: 1, default: 1 } }
         - { in: query, name: per_page, schema: { type: integer, minimum: 1, maximum: 100, default: 50 } }
@@ -28693,6 +29018,26 @@ paths:
               schema: { $ref: '#/components/schemas/BankMovementPage' }
         '400': { description: 'Není zvolena firma.' }
         '403': { $ref: '#/components/responses/Forbidden' }
+  /api/v1/bank-transactions/{id}:
+    parameters:
+      - $ref: '#/components/parameters/SupplierIdHeader'
+      - { in: path, name: id, required: true, schema: { type: integer, format: int64 } }
+    get:
+      tags: [Bank]
+      summary: Detail bankovního pohybu
+      description: |
+        Jeden pohyb ve stejném tvaru jako řádek `GET /bank-transactions`: stav párování,
+        navázaný doklad, stav zaúčtování (jen podvojné účetnictví) a korunový přepočet.
+        Vyžaduje čtení banky.
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/BankMovement' }
+        '400': { description: 'Není zvolena firma.' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
   /api/v1/bank-transactions/payment-candidates:
     parameters:
       - $ref: '#/components/parameters/SupplierIdHeader'
@@ -32582,6 +32927,84 @@ paths:
           $ref: '#/components/responses/NotFound'
         '422':
           $ref: '#/components/responses/ValidationFailed'
+  /api/v1/accounting/dimensions/documents/invoices/{id}:
+    put:
+      tags:
+      - Accounting
+      summary: Dimenze konceptu vydané faktury
+      description: |
+        Nahradí dimenze hlavičky (ID typu → ID hodnoty z `GET /accounting/dimensions`), položek
+        (pořadí položky od 1, jak je vrací detail dokladu → mapa typ → hodnota) a rozpadu
+        (`splits`, pořadí 0 = hlavička). Vynechané `items` nebo `splits` zůstanou beze změny.
+        Firma musí mít dimenze zapnuté. Přes API token jen u KONCEPTU (u vystaveného,
+        přijatého nebo zaúčtovaného dokladu `403 token_write_forbidden`); koncept nemá řádky
+        v deníku, nic se nepřeúčtuje. Vyžaduje oprávnění zápisu `accounting` i `invoices`.
+      parameters:
+      - $ref: '#/components/parameters/SupplierIdHeader'
+      - in: path
+        name: id
+        required: true
+        schema:
+          type: integer
+          minimum: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DocumentDimensionsInput'
+      responses:
+        '200':
+          description: Uložené dimenze dokladu
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DocumentDimensions'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/ValidationFailed'
+  /api/v1/accounting/dimensions/documents/purchase-invoices/{id}:
+    put:
+      tags:
+      - Accounting
+      summary: Dimenze konceptu přijaté faktury
+      description: |
+        Nahradí dimenze hlavičky (ID typu → ID hodnoty z `GET /accounting/dimensions`), položek
+        (pořadí položky od 1, jak je vrací detail dokladu → mapa typ → hodnota) a rozpadu
+        (`splits`, pořadí 0 = hlavička). Vynechané `items` nebo `splits` zůstanou beze změny.
+        Firma musí mít dimenze zapnuté. Přes API token jen u KONCEPTU (u vystaveného,
+        přijatého nebo zaúčtovaného dokladu `403 token_write_forbidden`); koncept nemá řádky
+        v deníku, nic se nepřeúčtuje. Vyžaduje oprávnění zápisu `accounting` i `purchase_invoices`.
+      parameters:
+      - $ref: '#/components/parameters/SupplierIdHeader'
+      - in: path
+        name: id
+        required: true
+        schema:
+          type: integer
+          minimum: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DocumentDimensionsInput'
+      responses:
+        '200':
+          description: Uložené dimenze dokladu
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DocumentDimensions'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/ValidationFailed'
   /api/v1/accounting/dimensions/journal/{id}:
     get:
       tags:
@@ -34144,6 +34567,10 @@ paths:
       - Invoices
       summary: Obnovení interně stornované faktury
       operationId: publicInvoicesIdUncancelPost
+      description: |
+        Vyžaduje scope read_write. Má-li faktura nebo její stornovací doklad zápisy v deníku,
+        obnovení je smaže; přes API token proto vrací 403 `token_write_forbidden` a provádí
+        se v aplikaci.
       parameters:
       - $ref: '#/components/parameters/SupplierIdHeader'
       - name: id
@@ -34173,7 +34600,6 @@ paths:
                 $ref: '#/components/schemas/Error'
         '422':
           $ref: '#/components/responses/ValidationFailed'
-      description: Vyžaduje scope read_write.
   /api/v1/invoices/{id}/refund-order/prefill:
     get:
       tags:
@@ -45363,6 +45789,7 @@ components:
         provider: { type: [string, 'null'] }
         model: { type: [string, 'null'], description: Výchozí model pro dotaz bez explicitní volby }
         supports_files: { type: boolean, description: 'false = poskytovatel neumí PDF ani obrázky (Ollama); textové přílohy jdou' }
+        supports_tools: { type: boolean, description: 'Výchozí model umí volat nástroje nad daty firmy a manuálem; účtový rozvrh se pak ve výchozím stavu nepřikládá' }
         models:
           type: array
           items: { type: string }
@@ -45638,6 +46065,7 @@ components:
             amount_czk: { type: number }
             settled_outside_amount: { type: number, description: Část uhrazená mimo banku a pokladnu (zápočet, interní doklad, stav úhrady převzatý z jiného programu). Je součástí paid_amount. }
             paid_amount: { type: number, description: Alokované úhrady z banky a pokladny včetně settled_outside_amount. }
+            posted_deletion: { $ref: '#/components/schemas/PostedDeletion', description: Jen v detailu zaúčtovaného dokladu se zápisem v deníku }
             remaining_amount: { type: number, description: Saldo položky. U úvěru s rozdělenými splátkami jen jistina. }
             remaining_payment: { type: number, description: Kolik zbývá zaplatit; u rozdělených splátek i úrok a poplatek, jinak rovno remaining_amount. Jen detail. }
             has_split_installments: { type: boolean, description: Splátkový kalendář má aspoň jednu splátku rozdělenou na jistinu, úrok a poplatek. Jen detail. }
@@ -45748,6 +46176,17 @@ components:
           maxItems: 50
           description: Vazby na doklady (např. vydaná a přijatá faktura zápočtu); při zaúčtování se přenesou do vazeb zápisu deníku.
           items: { $ref: '#/components/schemas/InternalDocumentLink' }
+    PostedDeletion:
+      type: object
+      required: [allowed, needs_ack, code, message]
+      description: >-
+        Náhled serveru, zda jde zaúčtovaný doklad smazat i se zápisem v deníku (stejné brány jako
+        DELETE …/{id}/posted, bez zámků). Rozhoduje až samotné smazání.
+      properties:
+        allowed: { type: boolean, description: Smazání lze nabídnout (u uzamčeného data s potvrzením). }
+        needs_ack: { type: boolean, description: Zápis spadá do uzamčeného data, smazání chce vědomé potvrzení (`ack_locked=1`). }
+        code: { type: [string, 'null'], description: 'Kód brány, např. period_not_open, date_locked, entry_paired, allocation_saldo_in_use, has_payments.' }
+        message: { type: [string, 'null'], description: Vysvětlení pro uživatele, proč smazání nejde a zbývá storno. }
     InternalDocument:
       type: object
       required: [id, kind, title, document_date, entry_date, amount, status, document_links]
@@ -45773,6 +46212,7 @@ components:
         document_count: { type: integer, description: Jen v seznamu, počet připojených dokumentů }
         lines: { type: array, items: { $ref: '#/components/schemas/InternalDocumentLine' }, description: Jen v detailu }
         document_links: { type: array, items: { $ref: '#/components/schemas/InternalDocumentLink' } }
+        posted_deletion: { $ref: '#/components/schemas/PostedDeletion', description: Jen v detailu zaúčtovaného dokladu }
     NumberSeriesOptions:
       type: object
       required: [kind, multiple, default_id, series]
@@ -52862,6 +53302,26 @@ components:
         parent_invoice:
           type: [object, "null"]
           description: "Jen pokud je parent_invoice_id ({ id, varsymbol, status, invoice_type })"
+        advance_drawdown:
+          type: [object, "null"]
+          description: "Konečná faktura: plnění a čerpání záloh odpočtovými řádky § 37a (i víc záloh). Částky v měně dokladu. NULL u jiných typů dokladu."
+          properties:
+            supply:
+              type: object
+              description: "Plnění faktury, součet řádků mimo odpočty záloh."
+              properties:
+                gross: { type: number }
+                base: { type: number }
+            drawdowns:
+              type: array
+              items:
+                type: object
+                properties:
+                  proforma_id: { type: integer, format: int64 }
+                  varsymbol: { type: [string, "null"] }
+                  gross: { type: number, description: "Čerpání zálohy s DPH." }
+                  base: { type: number, description: "Čerpání zálohy bez DPH." }
+                  vat: { type: number }
         has_advance_candidates: { type: boolean, description: "UI flag — existují nespárované zálohy k propojení" }
         has_final_candidates: { type: boolean }
         sent_at: { type: [string, "null"], format: date-time, description: "Kdy byla naposledy odeslána emailem" }
@@ -52936,11 +53396,12 @@ components:
       required: [month, count, totals_per_currency, invoices]
       properties:
         month: { type: string, example: "2026-05", description: "Měsíc ve formátu YYYY-MM; prázdný řetězec pro souvislý seznam." }
-        count: { type: integer, description: "Počet faktur skupiny na aktuální stránce" }
+        count: { type: integer, description: "Počet faktur celého měsíce podle filtrů, nezávisle na stránkování (v souvislém seznamu počet na aktuální stránce)" }
         totals_per_currency:
           type: array
           description: |
-            Měsíční obrat po měnách. Do obratu (`without_vat`/`vat`/`with_vat`) se
+            Měsíční obrat po měnách za celý měsíc podle filtrů, nezávisle na stránkování
+            (v souvislém seznamu jen za řádky aktuální stránky). Do obratu (`without_vat`/`vat`/`with_vat`) se
             počítají jen vystavené doklady (`issued`/`sent`/`reminded`/`paid`) typu
             `invoice`/`credit_note`/`tax_document`; koncepty (`draft`) stejných typů
             jdou zvlášť do `draft_*` (predikce „rozpracováno k vystavení“).
@@ -53003,7 +53464,7 @@ components:
           type: string
           example: CZK
           deprecated: true
-          description: "Legacy — kód měny (CZK, EUR, …) resolvuje se na `currency_id` v rámci supplier-a. Preferuj `currency_id`."
+          description: "Kód měny (CZK, EUR, …), resolvuje se na `currency_id` v rámci firmy. Kód, který firma v číselníku měn nemá, vrátí 400 `unknown_currency`. Při PUT bez `currency_id` kód měnu dokladu změní."
         language: { type: string, enum: [cs, en], description: "Default = language klienta (cs)" }
         reverse_charge: { type: boolean, description: "Přenesená daňová povinnost. Default = z klienta." }
         prices_include_vat: { type: boolean, default: false, description: "Ceny položek zadané včetně DPH (DPH shora koeficientem)." }
@@ -54246,7 +54707,10 @@ components:
       properties:
         action:
           type: string
-          description: "Co automatika udělala. `skipped` je výchozí, když služba akci nevrátila."
+          description: |
+            Co automatika udělala. `skipped` je výchozí, když služba akci nevrátila.
+            `deferred` (důvod `api_token`) = párování API tokenem, zaúčtování proběhne
+            až v aplikaci nebo plánovaným přepočtem podle politiky firmy.
         reason:
           type: string
           description: Doplňující důvod — přítomný jen když ho služba uvedla.
@@ -54458,8 +54922,11 @@ components:
       properties:
         resolution:
           type: [string, "null"]
-          enum: [payroll, transfer, outside_saldo, null]
-          description: Bezpečné označení jiného vypořádání pohybu pro klientské zobrazení bez účetních detailů.
+          enum: [payroll, transfer, outside_saldo, membership, null]
+          description: |
+            Bezpečné označení jiného vypořádání pohybu pro klientské zobrazení bez účetních detailů.
+            Neklientská role dostane resolution, match_available a ignore_available jen u pohybu použitého
+            členskou úhradou (resolution=membership, obě dostupnosti false); u ostatních pohybů tato pole chybí.
         match_available:
           type: boolean
           description: Dostupnost párování pohybu pro klienta; samotná akce navíc vyžaduje odpovídající oprávnění.
@@ -54519,6 +54986,21 @@ components:
               side: { type: string, enum: [receivable, payable] }
               partner_name: { type: [string, "null"], description: Partner, případně název položky. }
               amount: { type: number, format: float, description: Přiřazená částka v CZK. }
+        matched_membership_claims:
+          type: array
+          description: Členské pohledávky v nativním okruhu bankovního řádku; částka je hodnota pohledávky,
+            nikoli podíl platby. Přes běžný API token (bez plného zápisu), bez čtení účetnictví, bez licence a pro klientské role je pole prázdné.
+            match_status popisuje jen faktury, použitý pohyb označuje resolution=membership.
+          items:
+            type: object
+            additionalProperties: false
+            required: [claim_id, member_id, member_number, title_key, amount_cents]
+            properties:
+              claim_id: { type: integer, minimum: 1 }
+              member_id: { type: integer, minimum: 1 }
+              member_number: { type: string, description: 'Číslo člena pro odkaz na přehled příspěvků; u člena s vymazanými osobními údaji pseudonym vymazano-{id}.' }
+              title_key: { type: string }
+              amount_cents: { type: string, pattern: '^[0-9]+$' }
         matched_varsymbol: { type: [string, "null"] }
         matched_invoice_amount: { type: [number, "null"], format: float }
         client_id: { type: [integer, "null"] }
@@ -54567,6 +55049,19 @@ components:
           description: "Typy dimenzí z `dimensions`, které pohybu zapsalo pravidlo účtování při zaúčtování (ostatní jsou zadané ručně). Jen tam, kde je `dimensions`."
           items: { type: integer, format: int64 }
 
+    BankMovement:
+      description: Bankovní pohyb v přehledu napříč účty (`GET /bank-transactions`, `GET /bank-transactions/{id}`).
+      allOf:
+        - $ref: '#/components/schemas/BankTransaction'
+        - type: object
+          properties:
+            account_number: { type: string, description: Náš účet z výpisu. }
+            bank_code: { type: [string, "null"] }
+            account_label: { type: [string, "null"], description: Název našeho účtu z nastavení firmy. }
+            period_closed: { type: boolean, description: "Pohyb leží v uzavřeném nebo zamčeném účetním období. Mimo podvojné účetnictví vždy false." }
+            fx_rate: { type: [number, "null"], description: Kurz do CZK ke dni pohybu. }
+            amount_czk: { type: [number, "null"] }
+
     BankMovementPage:
       type: object
       description: Stránka seznamu bankovních pohybů (`GET /bank-transactions`).
@@ -54574,17 +55069,7 @@ components:
       properties:
         items:
           type: array
-          items:
-            allOf:
-              - $ref: '#/components/schemas/BankTransaction'
-              - type: object
-                properties:
-                  account_number: { type: string, description: Náš účet z výpisu. }
-                  bank_code: { type: [string, "null"] }
-                  account_label: { type: [string, "null"], description: Název našeho účtu z nastavení firmy. }
-                  period_closed: { type: boolean, description: "Pohyb leží v uzavřeném nebo zamčeném účetním období. Mimo podvojné účetnictví vždy false." }
-                  fx_rate: { type: [number, "null"], description: Kurz do CZK ke dni pohybu. }
-                  amount_czk: { type: [number, "null"] }
+          items: { $ref: '#/components/schemas/BankMovement' }
         total: { type: integer }
         page: { type: integer, minimum: 1 }
         per_page: { type: integer, minimum: 1, maximum: 100 }
@@ -55080,6 +55565,7 @@ components:
         accrual_from: { type: [string, "null"], format: date, description: "Začátek období, do kterého výnos řádku patří (časové rozlišení výnosů 384). NULL = bez rozlišení." }
         accrual_to: { type: [string, "null"], format: date, description: "Konec období výnosu řádku. Část výnosu za koncem účetního období odloží uzávěrka na 384 (MD výnos / D 384) a v dalším roce ji rozpustí." }
         seller_item_code: { type: [string, "null"], maxLength: 64, description: "Kód položky prodávajícího (ISDOC SellersItemIdentification). Import ho přebírá, páruje podle něj pravidla výnosů." }
+        advance_invoice_id: { type: [integer, "null"], description: "Zálohová faktura, ze které odpočtový řádek § 37a čerpá (čerpání záloh). NULL u odpočtového řádku = záloha z `parent_invoice_id`. Při uložení položek se zachová jen záloha, kterou řádky faktury už nesly; klient, který ji nepošle, ji dostane podle shodného popisu a sazby uloženého odpočtového řádku." }
         revenue_account_code: { type: [string, "null"], maxLength: 10, example: "604", description: "Účet položky: výnosový, nebo u přefakturace rozvahový či nákladový; saldokontní, daňové a peněžní účty (311, 314, 321, 324, 325, 33x, 34x, 211, 221) nejsou povolené. NULL = účet produktu (stock_item_id) > jeho kategorie > předkontace dokladu. Prodej majetku (asset_id / small_asset_id) má přednost." }
         small_asset_name: { type: [string, "null"], description: "Název navázané karty drobného majetku (read-only, z JOINu)." }
         asset_name: { type: [string, "null"], description: "Název navázané karty dlouhodobého majetku (read-only, z JOINu)." }
@@ -55157,6 +55643,11 @@ components:
           type: [string, "null"]
           maxLength: 10
           description: "Účet položky (aktivní účet rozvrhu firmy mimo saldokontní, daňové a peněžní účty 311, 314, 321, 324, 325, 33x, 34x, 211, 221), jinak 400 validation_failed. Kromě výnosu smí být i rozvahový nebo nákladový (přefakturace). Vynecháno/NULL = účet produktu > kategorie > předkontace dokladu při zaúčtování. Kopie, dobropis, vyúčtování proformy i pravidelná fakturace ho přenášejí. Round-trip: uložení položek je DELETE + INSERT, nepošlete-li ho zpět, zanikne."
+        counter_account_code: { type: [string, "null"], maxLength: 10, description: "Protiúčet řádku (MD, pohledávka). Musí být v rámci dokladu jeden. Round-trip jako `revenue_account_code`." }
+        posting_rule_key: { type: [string, "null"], maxLength: 64, description: "Předkontace řádku (`GET /api/v1/accounting/posting-rules`); doplní účty, které řádek sám nemá. Round-trip jako `revenue_account_code`." }
+        seller_item_code: { type: [string, "null"], description: "Kód položky prodávajícího. Round-trip jako `revenue_account_code`." }
+        item_kind: { type: string, enum: [standard, text], default: standard, description: "`text` = textový řádek jen s popisem, bez částky a DPH." }
+        id: { type: integer, description: "Volitelné id uloženého řádku z detailu dokladu. Slouží ke spárování (vazba na výkaz práce, výběr sériových čísel); řádek se uloží s novým id." }
         oss_applicable: { type: boolean, default: false }
         oss_consumer_country: { type: [string, "null"], minLength: 2, maxLength: 2 }
         oss_rate_type: { type: [string, "null"], enum: [standard, reduced, second_reduced, parking, null] }
@@ -55547,6 +56038,9 @@ components:
         item_ean: { type: [string, "null"], maxLength: 20, description: "EAN zboží z dokladu (jen číslice v délce 8, 12, 13 nebo 14), použije se při párování se skladovou kartou." }
         intrastat_cn8_code: { type: [string, "null"], minLength: 8, maxLength: 8, description: "Kód KN8 z dokladu. Příjemka ho doplní na kartu, pokud tam chybí." }
         intrastat_country_of_origin: { type: [string, "null"], minLength: 2, maxLength: 2, description: "Země původu (ISO alpha-2) z dokladu. Příjemka ji doplní na kartu, pokud tam chybí." }
+        advance_purchase_invoice_id:
+          type: [integer, "null"]
+          description: "Odpočet poskytnuté zálohy: záporný řádek konečné faktury se základem a daní daňového dokladu k platbě (DDKP) zálohy, kterou faktura vyúčtovává (`advance_purchase_invoice_id` dokladu). Základ odpočtu nejde na náklad, zaúčtování z něj zúčtuje zálohu 321/314. NULL = běžná položka."
         is_fixed_asset:
           type: boolean
           default: false
@@ -55570,7 +56064,7 @@ components:
 
     PurchaseInvoiceItemPayload:
       type: object
-      description: "Uložení řádků faktury je náhrada celého seznamu (DELETE + INSERT). Pole, která klient nepošle zpět, zaniknou. Výjimkou jsou `stock_item_id`, `seller_item_code`, `item_ean`, `intrastat_cn8_code` a `intrastat_country_of_origin`: chybí-li klíč v položce, která odpovídá uloženému řádku, převezme se uložená hodnota. Řádek se páruje podle `id`, bez něj podle pořadí, ale jen při shodném popisu. Explicitní `null` hodnotu smaže."
+      description: "Uložení řádků faktury je náhrada celého seznamu (DELETE + INSERT). Pole, která klient nepošle zpět, zaniknou. Výjimkou jsou `stock_item_id`, `seller_item_code`, `item_ean`, `intrastat_cn8_code`, `intrastat_country_of_origin`, `expense_account_code`, `counter_account_code`, `posting_rule_key` a `advance_purchase_invoice_id`: chybí-li klíč v položce, která odpovídá uloženému řádku, převezme se uložená hodnota. Řádek se páruje podle `id`, bez něj podle pořadí, ale jen při shodném popisu. Explicitní `null` hodnotu smaže."
       required: [description, quantity, unit_price_without_vat, vat_rate_id]
       properties:
         id: { type: integer, description: "Volitelné id uloženého řádku (z detailu dokladu). Slouží jen ke spárování pro převzetí vynechaných sloupců; řádek se uloží s novým id." }
@@ -55584,13 +56078,16 @@ components:
         vat_classification_code: { type: [string, "null"] }
         is_fixed_asset: { type: boolean, default: false }
         expense_kind: { type: [string, "null"], enum: [service, material, small_asset, small_intangible, fixed_asset, null] }
-        expense_account_code: { type: [string, "null"], description: "Vlastní nákladový účet položky; NULL odvodí účet z druhu nákladu." }
+        expense_account_code: { type: [string, "null"], description: "Vlastní nákladový účet položky (MD); NULL odvodí účet z druhu nákladu. Vynechání a `null` stejně jako u `seller_item_code`." }
+        counter_account_code: { type: [string, "null"], description: "Protiúčet řádku (Dal, závazek). Musí být v rámci dokladu jeden. Vynechání a `null` stejně jako u `seller_item_code`." }
+        posting_rule_key: { type: [string, "null"], description: "Předkontace řádku (`GET /api/v1/accounting/posting-rules`); doplní účty, které řádek sám nemá. Vynechání a `null` stejně jako u `seller_item_code`." }
         accrual_from: { type: [string, "null"], format: date, description: "Časové rozlišení nákladu (381) — začátek období. Jen spolu s `accrual_to`; neplatná dvojice se uloží jako bez rozlišení." }
         accrual_to: { type: [string, "null"], format: date, description: "Časové rozlišení nákladu (381) — konec období (včetně)." }
         seller_item_code: { type: [string, "null"], maxLength: 80, description: "Kód položky dodavatele. Delší kód se nezkracuje, uloží se null. Vynechaný klíč převezme hodnotu uloženého řádku, explicitní `null` kód smaže (viz popis schématu)." }
         item_ean: { type: [string, "null"], maxLength: 20, description: "EAN zboží, jen číslice v délce 8, 12, 13 nebo 14, jinak se uloží null. Vynechání a `null` stejně jako u `seller_item_code`." }
         intrastat_cn8_code: { type: [string, "null"], description: "Kód KN8, tečky se odstraní; co nemá 8 číslic, se neuloží. Vynechání a `null` stejně jako u `seller_item_code`." }
         intrastat_country_of_origin: { type: [string, "null"], description: "Země původu (ISO alpha-2); jiný tvar se neuloží. Vynechání a `null` stejně jako u `seller_item_code`." }
+        advance_purchase_invoice_id: { type: [integer, "null"], description: "Označí záporný řádek jako odpočet poskytnuté zálohy (zálohová faktura nebo samostatný DDKP firmy, jinak se uloží null). Záloha musí být ta, kterou faktura vyúčtovává, jinak zaúčtování vrátí `advance_settlement_ambiguous`. Vynechání a `null` stejně jako u `seller_item_code`." }
         stock_item_id:
           type: [integer, "null"]
           description: |
@@ -56108,6 +56605,9 @@ components:
         settled_by: { type: [object, "null"], description: "Jen u zálohy — brief finální faktury, která ji vyúčtovává" }
         has_advance_candidates: { type: boolean }
         has_settlement_candidates: { type: boolean }
+        advance_deduction_missing:
+          type: boolean
+          description: "Konečná faktura navázaná na zálohu s daňovým dokladem k platbě (DDKP) neodečítá zálohu odpočtovým řádkem: DPH zálohy by se uplatnila podruhé a doklad nejde zaúčtovat."
         linked_advance_unpaid:
           type: boolean
           description: |
@@ -56408,7 +56908,8 @@ components:
           type: array
           description: "Účetní alokace celé rekapitulace; součty musí po sazbách přesně odpovídat dokladu. [] alokace zruší."
           items: { $ref: '#/components/schemas/PurchaseVatAllocation' }
-        rounding: { type: number, description: "Jen PUT — zaokrouhlení dokladu; zapisuje se jen když je klíč přítomen." }
+        rounding: { type: number, description: "Zaokrouhlení dokladu (POST i PUT); zapisuje se jen když je klíč přítomen." }
+        status: { type: string, enum: [draft, received], description: "Jen POST: `received` doklad po založení přijme přechodem stavu (viz POST /api/v1/purchase-invoices)." }
         vat_deduction: { type: string, enum: [full, none, proportional, reduced], default: full, description: "Nárok na odpočet DPH (none → mimo Knihu DPH/DPHDP3/KH; proportional → poměrný §75; reduced → krácený §76)." }
         vat_deduction_percent: { type: number, format: float, minimum: 0, maximum: 100, default: 100, description: "Procento odpočtu pro proportional (§75)." }
         tax_deductible: { type: boolean, default: true, description: "Daňová uznatelnost pro daň z příjmů (nezávislé na DPH)." }
@@ -61556,6 +62057,27 @@ components:
       properties:
         header:
           $ref: '#/components/schemas/DimensionAssignmentMap'
+    DocumentDimensionsInput:
+      type: object
+      required:
+      - header
+      properties:
+        header:
+          $ref: '#/components/schemas/DimensionAssignmentMap'
+        items:
+          type: object
+          description: Pořadí položky od 1 → mapa ID typu → ID hodnoty. Pořadí, které chybí, dimenze nemá.
+          additionalProperties:
+            $ref: '#/components/schemas/DimensionAssignmentMap'
+        splits:
+          type: object
+          description: Pořadí položky (0 = hlavička) → ID typu → podíly hodnot.
+          additionalProperties:
+            type: object
+            additionalProperties:
+              type: array
+              items:
+                $ref: '#/components/schemas/DimensionSplitShare'
     DimensionSplitShare:
       type: object
       required:
@@ -64922,6 +65444,7 @@ components:
       - error_code
       - accepted_count
       - rejected_count
+      - provider_error
       - created_at
       - submitted_at
       properties:
@@ -64966,6 +65489,27 @@ components:
         rejected_count:
           anyOf:
           - type: integer
+          - type: 'null'
+        provider_error:
+          description: Důvod odmítnutí, jak ho vrátila banka (kód chyby, pole požadavku a text hlášky). Jen u bank,
+            které důvod vracejí (Česká spořitelna); jinak null.
+          anyOf:
+          - type: object
+            required:
+            - code
+            - scope
+            - message
+            properties:
+              code:
+                type: string
+              scope:
+                anyOf:
+                - type: string
+                - type: 'null'
+              message:
+                anyOf:
+                - type: string
+                - type: 'null'
           - type: 'null'
         created_at:
           type: string
@@ -69961,6 +70505,7 @@ components:
       required:
       - member_id
       - client_id
+      - erased
       - revision_id
       - revision_no
       - previous_revision_id
@@ -69976,19 +70521,27 @@ components:
           type: integer
           minimum: 1
         client_id:
-          type: integer
+          type:
+          - integer
+          - 'null'
           minimum: 1
+          description: Kontakt člena; u člena s vymazanými osobními údaji null.
+        erased:
+          type: boolean
+          description: Osobní údaje člena byly vymazány (výmaz bývalých členů); účetní údaje zůstávají a proof_status ověřuje i pečeti výmazu.
         revision_id:
           type: integer
           minimum: 1
         revision_no:
           type: integer
           minimum: 1
+          description: Pořadí článku v řetězu historie; zrušení revize je také článek, proto čísla platných revizí nemusí jít po sobě.
         previous_revision_id:
           type:
           - integer
           - 'null'
           minimum: 1
+          description: Předchozí platná revize; zrušené revize a rušící články přeskakuje.
         role:
           type: string
           const: association_member
@@ -70017,6 +70570,13 @@ components:
           const: proven_utc
     NonprofitMembershipReceivableSettlement:
       type: object
+      description: >-
+        Stav unreconciled označuje platný předpis bez spárované úhrady:
+        paid_cents je "0" a open_cents je celá částka předpisu. Ambiguous označuje
+        neprůkazný účetní podklad nebo vadné párování; tehdy jsou paid_cents i open_cents null.
+        Reversed má open_cents "0". Úhrady se odvozují pouze z nativního párování banky a pokladny.
+        Úplná úhrada všech platných členských pohledávek ve společném okruhu je settled;
+        částečná úhrada nebo přeplatek takového okruhu je ambiguous bez rozdělení částky mezi členy.
       additionalProperties: false
       required:
       - status
@@ -70056,6 +70616,7 @@ components:
       - operation_id
       - member_id
       - client_id
+      - erased
       - member_revision_id
       - legal_profile_id
       - accounting_period_id
@@ -70087,8 +70648,14 @@ components:
           type: integer
           minimum: 1
         client_id:
-          type: integer
+          type:
+          - integer
+          - 'null'
           minimum: 1
+          description: Kontakt člena; u člena s vymazanými osobními údaji null.
+        erased:
+          type: boolean
+          description: Osobní údaje člena byly vymazány (výmaz bývalých členů); účetní údaje zůstávají a proof_status ověřuje i pečeti výmazu.
         member_revision_id:
           type: integer
           minimum: 1

@@ -9,6 +9,7 @@ use MyInvoice\Http\Json;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Infrastructure\Database\TransactionFailure;
 use MyInvoice\Security\AccessLevel;
+use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\Accounting\Closing\ClosingException;
 use MyInvoice\Service\Accounting\InternalDocumentException;
 use MyInvoice\Service\Accounting\InternalDocumentService;
@@ -29,12 +30,15 @@ use Slim\Psr7\Stream;
  *   GET    /api/accounting/internal-documents/{id}            - detail s řádky kontace
  *   PUT    /api/accounting/internal-documents/{id}            - úprava konceptu
  *   DELETE /api/accounting/internal-documents/{id}            - smazání konceptu
+ *   PUT    /api/accounting/internal-documents/{id}/text       - poznámka a popis vystaveného dokladu
+ *   DELETE /api/accounting/internal-documents/{id}/posted     - smazání zaúčtovaného dokladu i se zápisem
  *   POST   /api/accounting/internal-documents/{id}/post       - zaúčtování ručním zápisem deníku
  *   POST   /api/accounting/internal-documents/{id}/reverse    - storno zápisu protizápisem
  *   POST   /api/accounting/internal-documents/from-entry/{id} - hlavička nad existujícím ručním zápisem
  *
  * Práva zrcadlí ruční zápis deníku (RoutePermissionMap): čtení `accounting`, koncept
- * `accounting.journal.write`, zaúčtování a storno `accounting.journal.post`.
+ * `accounting.journal.write`, zaúčtování, storno a smazání zaúčtovaného dokladu
+ * `accounting.journal.post`.
  */
 final class InternalDocumentAction
 {
@@ -64,7 +68,14 @@ final class InternalDocumentAction
     public function get(Request $request, Response $response, array $args): Response
     {
         if (!$this->guard($request, $response, 'accounting', AccessLevel::READ, $err)) return $err;
-        return $this->run($request, $response, fn () => $this->service->get($this->currentSupplierId($request), (int) $args['id']));
+        return $this->run($request, $response, function () use ($request, $args): array {
+            $supplierId = $this->currentSupplierId($request);
+            $doc = $this->service->get($supplierId, (int) $args['id']);
+            if ($doc['status'] === 'posted') {
+                $doc['posted_deletion'] = $this->service->postedDeletion($supplierId, $doc);
+            }
+            return $doc;
+        });
     }
 
     public function create(Request $request, Response $response): Response
@@ -96,6 +107,52 @@ final class InternalDocumentAction
             $this->service->deleteDraft($this->currentSupplierId($request), $id);
             $this->log($request, 'internal_document.deleted', $id);
             return ['deleted' => true];
+        });
+    }
+
+    /** Poznámka (a u zaúčtovaného dokladu popis) vystaveného dokladu, s auditem před a po. */
+    public function updateText(Request $request, Response $response, array $args): Response
+    {
+        if (!$this->guard($request, $response, 'accounting.journal.write', AccessLevel::WRITE, $err)) return $err;
+        $body = $this->body($request);
+        // Popis je zároveň popisem zápisu v deníku: stejné právo jako úprava popisu v deníku.
+        if (array_key_exists('title', $body)
+            && !$this->requirePermission($request, $response, 'accounting', AccessLevel::WRITE, $err)) return $err;
+        return $this->run($request, $response, function () use ($request, $args, $body) {
+            $id = (int) $args['id'];
+            $result = $this->service->updateText($this->currentSupplierId($request), $id,
+                array_intersect_key($body, ['note' => true, 'title' => true]), $this->auditMeta($request));
+            if ($result['changes'] !== []) {
+                $this->log($request, 'internal_document.text_updated', $id, $result['changes']);
+            }
+            return $result['document'];
+        });
+    }
+
+    /**
+     * Smazání zaúčtovaného dokladu i s jeho zápisem v deníku, bez storna. Práva jako
+     * mazání zápisu interního dokladu v deníku (JournalAction::delete).
+     */
+    public function deletePosted(Request $request, Response $response, array $args): Response
+    {
+        if (!$this->guard($request, $response, 'accounting.journal.write', AccessLevel::WRITE, $err)) return $err;
+        if (!$this->requirePermission($request, $response, 'accounting', AccessLevel::WRITE, $err)
+            || !$this->requirePermission($request, $response, 'accounting.journal.post', AccessLevel::WRITE, $err)) return $err;
+        return $this->run($request, $response, function () use ($request, $args) {
+            $id = (int) $args['id'];
+            $result = $this->service->deletePosted($this->currentSupplierId($request), $id, $this->auditMeta($request),
+                RequestAuthorization::acknowledgesLockedPeriod($request));
+            $doc = $result['document'];
+            $this->log($request, 'internal_document.deleted_posted', $id, [
+                'document_no' => $doc['document_no'],
+                'title' => $doc['title'],
+                'entry_date' => $doc['entry_date'],
+                'amount' => $doc['amount'],
+                'journal_entry_id' => $result['entry_id'],
+                'number_released' => $result['number_released'],
+                'locked_override' => $result['locked_override'],
+            ]);
+            return ['deleted' => true, 'journal_entry_id' => $result['entry_id'], 'number_released' => $result['number_released']];
         });
     }
 

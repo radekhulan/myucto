@@ -810,6 +810,9 @@ final class Routes
         $app->get    ('/api/purchase-invoices/export',                     ExportPurchaseInvoicesAction::class);
         $app->get    ('/api/purchase-invoices/book',                       [\MyInvoice\Action\Invoice\InvoiceBookAction::class, 'received']);
         $app->get    ('/api/purchase-invoices/import-batches',             PurchaseInvoiceImportBatchesAction::class);
+        // Řádky odpočtu poskytnuté zálohy z jejích DDKP pro editor konečné faktury.
+        $app->get    ('/api/purchase-invoices/advance-deduction-lines',    \MyInvoice\Action\PurchaseInvoice\AdvanceDeductionLinesAction::class);
+        $app->get    ('/api/purchase-invoices/advance-candidates',         \MyInvoice\Action\PurchaseInvoice\NewInvoiceAdvanceCandidatesAction::class);
         // Přečíslování měsíce podle data vystavení (náhled + provedení).
         $app->get    ('/api/purchase-invoices/renumber',                   [\MyInvoice\Action\PurchaseInvoice\RenumberPurchaseInvoicesAction::class, 'preview']);
         $app->post   ('/api/purchase-invoices/renumber',                   [\MyInvoice\Action\PurchaseInvoice\RenumberPurchaseInvoicesAction::class, 'renumber']);
@@ -3003,6 +3006,8 @@ final class Routes
                 [\MyInvoice\Action\Accounting\DimensionAction::class, 'saveDocument']);
             $g->post  ('/dimensions/documents/{doc:purchase-invoices|invoices|cash-documents|bank-transactions|other-items|assets}/{id:[0-9]+}/preview',
                 [\MyInvoice\Action\Accounting\DimensionAction::class, 'previewDocument']);
+            $g->post  ('/dimensions/documents/{doc:invoices}/bulk',
+                [\MyInvoice\Action\Accounting\DimensionAction::class, 'bulkDocuments']);
             $g->get   ('/dimensions/journal/{id:[0-9]+}',                [\MyInvoice\Action\Accounting\DimensionAction::class, 'getJournal']);
             $g->put   ('/dimensions/journal/{id:[0-9]+}',                [\MyInvoice\Action\Accounting\DimensionAction::class, 'saveJournal']);
             $g->get   ('/dimensions/group',                              [\MyInvoice\Action\Accounting\DimensionAction::class, 'group']);
@@ -3248,6 +3253,12 @@ final class Routes
             $g->get('/nonprofit-dppo/acceptance', [\MyInvoice\Action\Accounting\Closing\NonprofitDppoAction::class, 'acceptance']);
             $g->post('/nonprofit-dppo/acceptance/{operation:accept|revoke}', [\MyInvoice\Action\Accounting\Closing\NonprofitDppoAction::class, 'changeAcceptance']);
             $g->get('/nonprofit-membership/members', [\MyInvoice\Action\Nonprofit\MembershipAction::class, 'members']);
+            $g->get('/nonprofit-membership/members/export', [\MyInvoice\Action\Nonprofit\MembershipAction::class, 'exportMembers']);
+            $g->post('/nonprofit-membership/members/import', [\MyInvoice\Action\Nonprofit\MembershipAction::class, 'importMembers']);
+            $g->get('/nonprofit-membership/titles', [\MyInvoice\Action\Nonprofit\MembershipAction::class, 'titles']);
+            $g->post('/nonprofit-membership/members/selection-check', [\MyInvoice\Action\Nonprofit\MembershipAction::class, 'selectionCheck']);
+            $g->get('/nonprofit-membership/bank-candidates', [\MyInvoice\Action\Nonprofit\MembershipBankMatchAction::class, 'candidates']);
+            $g->post('/nonprofit-membership/bank-match', [\MyInvoice\Action\Nonprofit\MembershipBankMatchAction::class, 'match']);
             $g->get('/nonprofit-membership/rates', [\MyInvoice\Action\Nonprofit\MembershipAction::class, 'rates']);
             $g->get('/nonprofit-membership/batches', [\MyInvoice\Action\Nonprofit\MembershipAction::class, 'batches']);
             $g->get('/nonprofit-membership/batches/{id:[0-9]+}', [\MyInvoice\Action\Nonprofit\MembershipAction::class, 'batch']);
@@ -3264,6 +3275,18 @@ final class Routes
             $g->get('/periods/{id:[0-9]+}/nonprofit-membership/reconciliation', [\MyInvoice\Action\Nonprofit\MembershipAction::class, 'reconciliation']);
             $g->post('/nonprofit-membership/members', [\MyInvoice\Action\Nonprofit\MembershipAction::class, 'createMember']);
             $g->post('/nonprofit-membership/members/{id:[0-9]+}/revisions', [\MyInvoice\Action\Nonprofit\MembershipAction::class, 'appendRevision']);
+            $g->put('/nonprofit-membership/members/{id:[0-9]+}', [\MyInvoice\Action\Nonprofit\MembershipAction::class, 'updateMember']);
+            $g->delete('/nonprofit-membership/members/{id:[0-9]+}', [\MyInvoice\Action\Nonprofit\MembershipAction::class, 'deleteMember']);
+            // Výmaz osobních údajů bývalých členů (#321, krok 10); konkrétní cesty před `{id}`.
+            $g->get('/nonprofit-membership/erasure/assessment', [\MyInvoice\Action\Nonprofit\MembershipErasureAction::class, 'assessment']);
+            $g->get('/nonprofit-membership/erasure', [\MyInvoice\Action\Nonprofit\MembershipErasureAction::class, 'proposals']);
+            $g->post('/nonprofit-membership/erasure', [\MyInvoice\Action\Nonprofit\MembershipErasureAction::class, 'create']);
+            $g->get('/nonprofit-membership/erasure/{id:[0-9]+}', [\MyInvoice\Action\Nonprofit\MembershipErasureAction::class, 'proposal']);
+            $g->post('/nonprofit-membership/erasure/{id:[0-9]+}/approve', [\MyInvoice\Action\Nonprofit\MembershipErasureAction::class, 'approve']);
+            $g->post('/nonprofit-membership/erasure/{id:[0-9]+}/revoke', [\MyInvoice\Action\Nonprofit\MembershipErasureAction::class, 'revoke']);
+            $g->post('/nonprofit-membership/erasure/{id:[0-9]+}/reject', [\MyInvoice\Action\Nonprofit\MembershipErasureAction::class, 'reject']);
+            $g->post('/nonprofit-membership/erasure/{id:[0-9]+}/execute', [\MyInvoice\Action\Nonprofit\MembershipErasureAction::class, 'execute']);
+            $g->post('/nonprofit-membership/members/{id:[0-9]+}/revisions/{revisionId:[0-9]+}/void', [\MyInvoice\Action\Nonprofit\MembershipAction::class, 'voidRevision']);
             $g->post('/nonprofit-membership/charges/preview', [\MyInvoice\Action\Nonprofit\MembershipAction::class, 'preview']);
             $g->post('/nonprofit-membership/charges/confirm', [\MyInvoice\Action\Nonprofit\MembershipAction::class, 'confirm']);
             $g->get('/nonprofit-tax-savings', [\MyInvoice\Action\Accounting\Closing\NonprofitDppoAction::class, 'savings']);
@@ -3357,6 +3380,13 @@ final class Routes
             $g->get   ('/cash-registers/{id:[0-9]+}/book',     [\MyInvoice\Action\Accounting\Cash\CashBookAction::class, 'get']);
             $g->get   ('/cash-registers/{id:[0-9]+}/book/pdf', [\MyInvoice\Action\Accounting\Cash\CashBookAction::class, 'pdf']);
             $g->get   ('/cash-documents',                      [\MyInvoice\Action\Accounting\Cash\CashDocumentAction::class, 'list']);
+            // Přečíslování měsíce podle data (vzor /api/purchase-invoices/renumber), interní plumbing.
+            $g->get   ('/cash-documents/renumber',             [\MyInvoice\Action\Accounting\RenumberAgendaDocumentsAction::class, 'cashPreview']);
+            $g->post  ('/cash-documents/renumber',             [\MyInvoice\Action\Accounting\RenumberAgendaDocumentsAction::class, 'cashRenumber']);
+            $g->get   ('/other-items/renumber',                [\MyInvoice\Action\Accounting\RenumberAgendaDocumentsAction::class, 'otherItemsPreview']);
+            $g->post  ('/other-items/renumber',                [\MyInvoice\Action\Accounting\RenumberAgendaDocumentsAction::class, 'otherItemsRenumber']);
+            $g->get   ('/internal-documents/renumber',         [\MyInvoice\Action\Accounting\RenumberAgendaDocumentsAction::class, 'internalPreview']);
+            $g->post  ('/internal-documents/renumber',         [\MyInvoice\Action\Accounting\RenumberAgendaDocumentsAction::class, 'internalRenumber']);
             $g->get   ('/other-items',                         [\MyInvoice\Action\Accounting\OtherItemAction::class, 'list']);
             $g->post  ('/other-items',                         [\MyInvoice\Action\Accounting\OtherItemAction::class, 'create']);
             $g->get   ('/other-items/bank-candidates',         [\MyInvoice\Action\Accounting\OtherItemAction::class, 'bankMatchCandidates']);
@@ -3383,6 +3413,8 @@ final class Routes
             $g->put   ('/other-items/{id:[0-9]+}',             [\MyInvoice\Action\Accounting\OtherItemAction::class, 'update']);
             $g->delete('/other-items/{id:[0-9]+}',             [\MyInvoice\Action\Accounting\OtherItemAction::class, 'delete']);
             $g->put   ('/other-items/{id:[0-9]+}/counterparty-account', [\MyInvoice\Action\Accounting\OtherItemAction::class, 'updateCounterpartyAccount']);
+            $g->put   ('/other-items/{id:[0-9]+}/text',        [\MyInvoice\Action\Accounting\OtherItemAction::class, 'updateText']);
+            $g->delete('/other-items/{id:[0-9]+}/posted',      [\MyInvoice\Action\Accounting\OtherItemAction::class, 'deletePosted']);
             $g->post  ('/other-items/{id:[0-9]+}/post',        [\MyInvoice\Action\Accounting\OtherItemAction::class, 'post']);
             $g->post  ('/other-items/{id:[0-9]+}/reverse',     [\MyInvoice\Action\Accounting\OtherItemAction::class, 'reverse']);
             $g->post  ('/other-items/{id:[0-9]+}/repost',      [\MyInvoice\Action\Accounting\OtherItemAction::class, 'repost']);
@@ -3392,6 +3424,9 @@ final class Routes
             $g->post  ('/other-items/{id:[0-9]+}/allocations', [\MyInvoice\Action\Accounting\OtherItemAction::class, 'allocate']);
             $g->post  ('/other-items/{id:[0-9]+}/match-bank-transaction', [\MyInvoice\Action\Accounting\OtherItemAction::class, 'matchBankTransaction']);
             $g->delete('/other-items/{id:[0-9]+}/allocations/{allocation_id:[0-9]+}', [\MyInvoice\Action\Accounting\OtherItemAction::class, 'unallocate']);
+            // Měsíční zaúčtování mezd z PAMICY: interní doklad + ostatní závazky (migrace 2300).
+            $g->post  ('/payroll-posting-imports/preview',          [\MyInvoice\Action\Accounting\PayrollPostingImportAction::class, 'preview']);
+            $g->post  ('/payroll-posting-imports/apply',            [\MyInvoice\Action\Accounting\PayrollPostingImportAction::class, 'apply']);
             // Interní doklady (migrace 2193). Specifické cesty PŘED generickým /internal-documents/{id}.
             $g->get   ('/internal-documents',                       [\MyInvoice\Action\Accounting\InternalDocumentAction::class, 'list']);
             $g->post  ('/internal-documents',                       [\MyInvoice\Action\Accounting\InternalDocumentAction::class, 'create']);
@@ -3402,6 +3437,8 @@ final class Routes
             $g->get   ('/internal-documents/{id:[0-9]+}',           [\MyInvoice\Action\Accounting\InternalDocumentAction::class, 'get']);
             $g->put   ('/internal-documents/{id:[0-9]+}',           [\MyInvoice\Action\Accounting\InternalDocumentAction::class, 'update']);
             $g->delete('/internal-documents/{id:[0-9]+}',           [\MyInvoice\Action\Accounting\InternalDocumentAction::class, 'delete']);
+            $g->put   ('/internal-documents/{id:[0-9]+}/text',      [\MyInvoice\Action\Accounting\InternalDocumentAction::class, 'updateText']);
+            $g->delete('/internal-documents/{id:[0-9]+}/posted',    [\MyInvoice\Action\Accounting\InternalDocumentAction::class, 'deletePosted']);
             $g->post  ('/internal-documents/{id:[0-9]+}/post',      [\MyInvoice\Action\Accounting\InternalDocumentAction::class, 'post']);
             $g->post  ('/internal-documents/{id:[0-9]+}/reverse',   [\MyInvoice\Action\Accounting\InternalDocumentAction::class, 'reverse']);
             $g->post  ('/cash-documents',                      [\MyInvoice\Action\Accounting\Cash\CashDocumentAction::class, 'create']);
@@ -4258,6 +4295,7 @@ final class Routes
         $app->post ('/api/bank-match-suggestions/{id:[0-9]+}/accept', [BankStatementAction::class, 'acceptMatchSuggestion']);
         $app->post ('/api/bank-match-suggestions/{id:[0-9]+}/reject', [BankStatementAction::class, 'rejectMatchSuggestion']);
         $app->get  ('/api/bank-transactions',                \MyInvoice\Action\Bank\BankTransactionListAction::class);
+        $app->get  ('/api/bank-transactions/{id:[0-9]+}',    [\MyInvoice\Action\Bank\BankTransactionListAction::class, 'detail']);
         $app->get  ('/api/bank-transactions/{id:[0-9]+}/match-candidates', [BankStatementAction::class, 'matchCandidates']);
         $app->get  ('/api/bank-transactions/payment-candidates', [\MyInvoice\Action\Bank\BankPaymentCandidatesAction::class, 'list']);
         $app->post ('/api/bank-transactions/{id:[0-9]+}/match-document', [\MyInvoice\Action\Bank\BankPaymentCandidatesAction::class, 'match']);

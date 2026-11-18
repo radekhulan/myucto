@@ -66,7 +66,7 @@ final class MembershipBatchRepository
             $q->execute([$supplier, ...$chunk]);
             $found += count($q->fetchAll(PDO::FETCH_COLUMN));
         }
-        if ($found !== count($ids)) throw new MembershipException('nonprofit_membership_batch_selection_invalid', 'Výběr obsahuje člena mimo tuto organizaci.', 422);
+        if ($found !== count($ids)) throw new MembershipException('nonprofit_membership_batch_selection_invalid', 'Výběr obsahuje člena, který byl smazán nebo nepatří této organizaci. Obnovte seznam a vyberte členy znovu.', 422);
     }
 
     /** Právě jedna trvale uložená stránka; další požadavek naváže po commitu. */
@@ -97,6 +97,10 @@ final class MembershipBatchRepository
                     $revision = $error === null ? MembershipRevisionTimeline::at($contexts[$member]['history'], $date) : null;
                     // Neprůkazná historie je viditelná chyba; pouze prokazatelně neaktivní člen se nevybírá.
                     if ($mode === 'active' && $error === null && $revision !== null && $revision['status'] !== 'active') continue;
+                    // Člen se všemi revizemi zrušenými (oprava chybného zadání) žádné členství nemá; smazat ho nejde, aby
+                    // zůstala stopa zrušení. Režim všech aktivních ho proto nevybírá. Člen bez jakékoli revize zůstává chybou.
+                    if ($mode === 'active' && $error === null && $revision === null && $contexts[$member]['history'] !== []
+                        && MembershipRevisionTimeline::effective($contexts[$member]['history']) === []) continue;
                     if ($revision === null && $error === null) $error = new MembershipException('nonprofit_membership_inactive', 'Členství není k účetnímu datu aktivní.', 409);
                     if ($current['member_count'] + ++$count > $maximum) throw new MembershipException('nonprofit_membership_batch_limit', 'Výběr přesahuje maximální velikost dávky.', 422);
                     $status = $error === null ? 'pending' : 'rejected';
@@ -306,7 +310,9 @@ final class MembershipBatchRepository
 
     public function page(int $supplier, int $batch, int $after, bool $current = false): array
     {
-        $q = $this->db->pdo()->prepare("SELECT i.member_id,i.status,i.amount_cents,i.operation_id,i.error_code,i.error_message,m.member_number,c.company_name
+        // Vymazaný člen (krok 10) nevrací jméno ani u kontaktu, který drží jiný doklad.
+        $q = $this->db->pdo()->prepare("SELECT i.member_id,i.status,i.amount_cents,i.operation_id,i.error_code,i.error_message,m.member_number,
+                IF(" . MembershipListRepository::erasedSql('m') . ",NULL,c.company_name) company_name
             FROM nonprofit_membership_batch_members i JOIN nonprofit_members m ON m.supplier_id=i.supplier_id AND m.id=i.member_id
             JOIN clients c ON c.supplier_id=m.supplier_id AND c.id=m.client_id
             WHERE i.supplier_id=? AND i.batch_id=? AND i.member_id>? ORDER BY i.member_id LIMIT 50" . ($current ? ' FOR UPDATE' : ''));

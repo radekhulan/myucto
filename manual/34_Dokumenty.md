@@ -271,7 +271,8 @@ je v [§ 9.4 Klientský portál](09_Klientsky_portal.md#94-krok-za-krokem-predan
 Klient může vlastní čekající předání odstranit před zahájením zpracování. Originál se
 přesune do koše a související nahraný požadavek se vrátí do stavu **Vyžádáno**.
 Odmítnutí účetní s povinným důvodem naopak originál zachová a klient může nahrát
-opravenou náhradu. Doklady již použité v jiné agendě a vyřízené požadavky jsou proti
+opravenou náhradu, nebo odmítnuté předání sám smazat. Totéž platí pro předání
+vrácené k doplnění. Doklady již použité v jiné agendě a vyřízené požadavky jsou proti
 smazání podání chráněné.
 
 Otevřený požadavek ve stavu **Vyžádáno** se promítá také do

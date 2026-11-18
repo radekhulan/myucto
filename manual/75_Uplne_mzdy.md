@@ -112,6 +112,11 @@ obrazovky; přeskočený krok obvykle skončí blokací při výpočtu nebo pod�
    registrace u ČSSZ, zdravotních pojišťoven a finančního úřadu, bankovní účty
    institucí a předkontace (podrobně v [Nastavení mezd](90_Nastaveni_mezd.md)).
    Registrační a sériová čísla opište přesně tak, jak je přidělila instituce.
+   Chcete-li mzdové náklady vidět na střediscích nebo zakázkách, založte na
+   záložce **Dimenze** mzdové dimenze a navažte je na firemní dimenze; mzdová
+   zakázka se do deníku a do Ekonomiky zakázky dostane jen přes hodnotu
+   firemní dimenze druhu Projekt navázanou na zakázku (postup
+   v [Mzdy na zakázky krok za krokem](114_Dimenze.md#mzdy-na-zakazky-krok-za-krokem)).
 5. **Datová schránka.** V `Mzdy → Datová schránka` na záložce **Přístup**
    nastavte schránku firmy (viz [§ 75.7.3](#7573-datova-schranka-firmy)
    a [Datová schránka](97_Datova_schranka.md)).
@@ -317,6 +322,16 @@ dokud je jen ve stavu nastavení. Aktivní začátek už běžný přepínač ne
 aby nezmizely vazby na běhy, platby, dokumenty a podání. Vypnutí **Vést mzdy**
 skryje mzdy z menu, mzdová data se ale nemažou a po opětovném zapnutí zůstanou
 dostupná.
+
+Dokud jsou mzdy ve stavu nastavení, jde první mzdové období změnit na
+`Mzdy → Přehled mezd` volbou **Změnit první mzdové období** v nabídce „…".
+Posun zpět se hodí, když má rozpracovaný měsíc z předchozího programu spočítat
+MyÚčto. Nejde ho posunout přes převzatý mzdový běh a dopředu přes běh, který už
+MyÚčto spočítalo. Po posunu zpět zkontrolujte počáteční stavy kumulací: smějí
+končit měsícem před novým prvním obdobím. Převod z předchozího programu je po
+zopakování srovná sám, ručně zadané stavy upravte na kartě pracovního vztahu.
+Dokud počáteční stav pokrývá počítaný měsíc, výpočet běhu skončí chybou, aby se
+měsíc do ročních kumulací nezapočetl dvakrát.
 
 ### 75.7.2 Průvodce prvním nastavením mezd
 

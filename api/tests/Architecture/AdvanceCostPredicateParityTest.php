@@ -46,7 +46,7 @@ final class AdvanceCostPredicateParityTest extends TestCase
     {
         $code = $this->src('Repository/PurchaseInvoiceRepository.php');
         self::assertStringContainsString(
-            "\$row['status'] === 'paid' || \$isSettledAdvance",
+            "(pi.document_kind = 'advance' AND (pi.status = 'paid' OR \" . AdvanceSettledSql::purchase('pi')",
             $code,
             'Účetní pohled musí zaplacenou zálohu z nákladů VYLUČOVAT (sedí na 314). Viz N-019.',
         );
@@ -58,7 +58,7 @@ final class AdvanceCostPredicateParityTest extends TestCase
         foreach ([
             'Service/Crm/CrmAggregationService.php'      => "<> 'tax_document'",
             'Action/Dashboard/PurchaseSummaryAction.php' => "<> 'tax_document'",
-            'Repository/PurchaseInvoiceRepository.php'   => "=== 'tax_document'",
+            'Repository/PurchaseInvoiceRepository.php'   => "AND pi.document_kind <> 'tax_document' AND NOT \$excludedAdvance",
         ] as $rel => $needle) {
             if (!str_contains($this->src($rel), $needle)) {
                 $missing[] = $rel;
@@ -71,8 +71,52 @@ final class AdvanceCostPredicateParityTest extends TestCase
         ));
     }
 
+    /**
+     * Zdroj BEZ komentářů a docblocků: hledaný predikát musí být v kódu. Stejný řetězec
+     * v komentáři by jinak rozsvítil guard, který nic nekontroluje (AGENTS.md, pravidlo 1).
+     */
     private function src(string $relative): string
     {
-        return (string) file_get_contents(dirname(__DIR__, 2) . '/src/' . $relative);
+        return self::withoutComments((string) file_get_contents(dirname(__DIR__, 2) . '/src/' . $relative));
+    }
+
+    private static function withoutComments(string $php): string
+    {
+        $code = '';
+        foreach (token_get_all($php) as $t) {
+            if (is_array($t)) {
+                if ($t[0] !== T_COMMENT && $t[0] !== T_DOC_COMMENT) {
+                    $code .= $t[1];
+                }
+                continue;
+            }
+            $code .= $t;
+        }
+        return $code;
+    }
+
+    /** Konečná faktura s odpočtem zálohy z DDKP: náklad bez odpočtu, na obou stranách predikátu. */
+    public function testFinalInvoiceCostExcludesAdvanceDeductionOnBothViews(): void
+    {
+        $missing = [];
+        foreach ([
+            'Service/Crm/CrmAggregationService.php',
+            'Action/Dashboard/PurchaseSummaryAction.php',
+            'Repository/PurchaseInvoiceRepository.php',
+        ] as $rel) {
+            if (preg_match('/PurchaseCostSql::deductionJoin(For)?\(/', $this->src($rel)) !== 1) {
+                $missing[] = $rel;
+            }
+        }
+        self::assertSame([], $missing, "Náklad konečné faktury musí odečíst odpočet zálohy (PurchaseCostSql) — chybí v:\n  "
+            . implode("\n  ", $missing));
+    }
+
+    public function testCommentDoesNotSatisfyGuard(): void
+    {
+        $code = self::withoutComments("<?php\n// status <> 'paid'\n/** <> 'tax_document' */\n\$sql = \"x <> 'y'\";\n");
+        self::assertStringNotContainsString("status <> 'paid'", $code);
+        self::assertStringNotContainsString("<> 'tax_document'", $code);
+        self::assertStringContainsString("x <> 'y'", $code, 'Kód (i řetězce SQL) zůstává.');
     }
 }

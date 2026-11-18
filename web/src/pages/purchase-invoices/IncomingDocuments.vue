@@ -154,6 +154,8 @@ const canDeleteSelected = computed(() => canDelete.value && selected.value !== n
 
 /** Hromadný výběr (checkboxy) je nezávislý na dokladu otevřeném v náhledu. */
 const checkedIds = ref<Set<number>>(new Set())
+// Jednorázová volba vytěžení: doklad bez rozpisu položek, jeden řádek na sazbu DPH.
+const extractWithoutItems = ref(false)
 const bulkReason = ref('')
 const bulkDims = ref<DimensionMap>({})
 const bulkProgress = ref<{ done: number; total: number } | null>(null)
@@ -220,7 +222,7 @@ async function bulkExtract() {
   acting.value = true
   try {
     const result = await runBulk(targets, async item => {
-      const fresh = await purchaseInvoiceSubmissionsApi.extract(item.id)
+      const fresh = await purchaseInvoiceSubmissionsApi.extract(item.id, extractWithoutItems.value)
       if (fresh.duplicate) duplicates++
       else if (fresh.purchase_invoice_id) invoiceIds.push(fresh.purchase_invoice_id)
     })
@@ -430,7 +432,7 @@ async function extract() {
   if (!selected.value || acting.value) return
   acting.value = true
   try {
-    const fresh = await purchaseInvoiceSubmissionsApi.extract(selected.value.id)
+    const fresh = await purchaseInvoiceSubmissionsApi.extract(selected.value.id, extractWithoutItems.value)
     selected.value = fresh
     if (fresh.duplicate) {
       // Doklad zůstane vybraný i s tlačítkem na existující fakturu, místo aby z fronty
@@ -882,6 +884,11 @@ onBeforeUnmount(() => { context++; loadRequest++ })
                 {{ t('purchase_submissions.bulk_delete') }}
               </button>
             </div>
+            <label v-if="bulkCanExtract" class="flex items-center gap-2 text-sm text-neutral-700 cursor-pointer max-md:min-h-11 max-md:text-base"
+              :title="t('purchase_submissions.without_items_hint')" data-testid="inbox-bulk-without-items">
+              <input v-model="extractWithoutItems" type="checkbox" :disabled="acting" class="w-4 h-4 accent-primary-600 max-md:w-5 max-md:h-5" />
+              {{ t('purchase_submissions.without_items') }}
+            </label>
             <input v-if="bulkCanReject" v-model="bulkReason" maxlength="8000"
               class="w-full h-9 px-3 text-sm border border-neutral-300 rounded-md bg-surface max-md:h-10 max-md:text-base"
               :placeholder="bulkNeedsReason ? t('purchase_submissions.bulk_reason_placeholder') : t('purchase_submissions.reason_internal_placeholder')" />
@@ -1013,6 +1020,14 @@ onBeforeUnmount(() => { context++; loadRequest++ })
             {{ t('purchase_submissions.processing_stale') }}
           </p>
 
+          <label v-if="canExtract(selected) && canWrite && canCreateInvoice"
+            class="flex items-start gap-2 text-sm text-neutral-700 cursor-pointer max-md:min-h-11 max-md:text-base" data-testid="inbox-without-items">
+            <input v-model="extractWithoutItems" type="checkbox" :disabled="acting" class="mt-0.5 w-4 h-4 accent-primary-600 max-md:w-5 max-md:h-5" />
+            <span>
+              {{ t('purchase_submissions.without_items') }}
+              <span class="block text-xs text-neutral-500">{{ t('purchase_submissions.without_items_hint') }}</span>
+            </span>
+          </label>
           <div v-if="!isPhone" class="flex flex-wrap gap-2">
             <button v-if="canExtract(selected) && canWrite && canCreateInvoice" type="button"
               :disabled="acting" :class="btnFilled('primary')" @click="extract">

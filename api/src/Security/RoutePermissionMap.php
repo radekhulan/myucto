@@ -811,10 +811,19 @@ final class RoutePermissionMap
         ['POST', '#^/api/accounting/periods/[0-9]+/nonprofit-legal-profile/readiness$#', 'accounting', AccessLevel::READ],
         ['GET', '#^/api/accounting/nonprofit-dppo/acceptance$#', 'accounting', AccessLevel::READ],
         ['POST', '#^/api/accounting/nonprofit-dppo/acceptance/(accept|revoke)$#', 'accounting.periods.close', AccessLevel::WRITE],
-        ['GET', '#^/api/accounting/(?:nonprofit-membership/(?:rates(?:/[0-9]+)?|members(?:/[0-9]+)?|claims/[0-9]+)|periods/[0-9]+/nonprofit-membership/reconciliation)$#', 'accounting', AccessLevel::READ],
-        ['POST', '#^/api/accounting/nonprofit-membership/(?:members(?:/[0-9]+/revisions)?|charges/(?:preview|confirm))$#', 'accounting.journal.post', AccessLevel::WRITE],
+        ['GET', '#^/api/accounting/(?:nonprofit-membership/(?:titles|rates(?:/[0-9]+)?|members(?:/[0-9]+)?|claims/[0-9]+)|periods/[0-9]+/nonprofit-membership/reconciliation)$#', 'accounting', AccessLevel::READ],
+        ['POST', '#^/api/accounting/nonprofit-membership/(?:members(?:/[0-9]+/revisions(?:/[0-9]+/void)?)?|charges/(?:preview|confirm))$#', 'accounting.journal.post', AccessLevel::WRITE],
+        ['PUT', '#^/api/accounting/nonprofit-membership/members/[0-9]+$#', 'accounting.journal.post', AccessLevel::WRITE],
+        ['DELETE', '#^/api/accounting/nonprofit-membership/members/[0-9]+$#', 'accounting.journal.post', AccessLevel::WRITE],
+        ['GET', '#^/api/accounting/nonprofit-membership/erasure(?:/assessment|/[0-9]+)?$#', 'accounting.membership_erasure', AccessLevel::READ],
+        ['POST', '#^/api/accounting/nonprofit-membership/erasure(?:/[0-9]+/(?:approve|revoke|reject|execute))?$#', 'accounting.membership_erasure', AccessLevel::WRITE],
         ['POST', '#^/api/accounting/nonprofit-membership/rates$#', 'accounting.templates', AccessLevel::WRITE],
         ['PUT', '#^/api/accounting/nonprofit-membership/rates/[0-9]+$#', 'accounting.templates', AccessLevel::WRITE],
+        ['POST', '#^/api/accounting/nonprofit-membership/members/selection-check$#', 'accounting', AccessLevel::READ],
+        ['GET', '#^/api/accounting/nonprofit-membership/members/export$#', 'accounting', AccessLevel::READ],
+        ['POST', '#^/api/accounting/nonprofit-membership/members/import$#', 'accounting.journal.post', AccessLevel::WRITE],
+        ['GET', '#^/api/accounting/nonprofit-membership/bank-candidates$#', 'accounting', AccessLevel::READ],
+        ['POST', '#^/api/accounting/nonprofit-membership/bank-match$#', 'accounting.journal.post', AccessLevel::WRITE],
         ['GET', '#^/api/accounting/nonprofit-membership/batches(/[0-9]+)?$#', 'accounting', AccessLevel::READ],
         ['POST', '#^/api/accounting/nonprofit-membership/batches(/[0-9]+/(prepare|confirm|cancel|renew-preview))?$#', 'accounting.journal.post', AccessLevel::WRITE],
         ['GET', '#^/api/accounting/nonprofit-tax-savings$#', 'accounting', AccessLevel::READ],
@@ -892,11 +901,19 @@ final class RoutePermissionMap
         ['GET', '#^/api/accounting/journal(/|$)#', 'accounting', AccessLevel::READ],
         ['*', '#^/api/accounting/journal(/|$)#', 'accounting.journal.write', AccessLevel::WRITE],
         ['GET', '#^/api/accounting/other-items(/|$)#', 'other_items', AccessLevel::READ],
+        // Smazání zaúčtované položky maže i její zápis v deníku (akce ověří navíc `other_items`).
+        ['DELETE', '#^/api/accounting/other-items/[0-9]+/posted$#', 'accounting.journal.post', AccessLevel::WRITE],
         ['*', '#^/api/accounting/other-items(/|$)#', 'other_items', AccessLevel::WRITE],
-        // Interní doklady: práva ručního zápisu deníku. Zaúčtování, storno a hlavička nad
-        // existujícím zápisem jsou zápis do deníku, koncept jen jeho příprava.
+        // Zaúčtování mezd z PAMICY: náhled čte, načtení zakládá a účtuje interní doklad
+        // a ostatní závazky (akce ověří navíc `accounting.journal.write` a `other_items`).
+        ['POST', '#^/api/accounting/payroll-posting-imports/preview$#', 'accounting', AccessLevel::READ],
+        ['POST', '#^/api/accounting/payroll-posting-imports/apply$#', 'accounting.journal.post', AccessLevel::WRITE],
+        // Interní doklady: práva ručního zápisu deníku. Zaúčtování, storno, smazání
+        // zaúčtovaného dokladu i se zápisem a hlavička nad existujícím zápisem jsou zápis
+        // do deníku, koncept jen jeho příprava.
         ['GET', '#^/api/accounting/internal-documents(/|$)#', 'accounting', AccessLevel::READ],
         ['POST', '#^/api/accounting/internal-documents/(?:[0-9]+/(?:post|reverse)|from-entry/[0-9]+)$#', 'accounting.journal.post', AccessLevel::WRITE],
+        ['DELETE', '#^/api/accounting/internal-documents/[0-9]+/posted$#', 'accounting.journal.post', AccessLevel::WRITE],
         ['*', '#^/api/accounting/internal-documents(/|$)#', 'accounting.journal.write', AccessLevel::WRITE],
         ['GET', '#^/api/accounting(?:$|/(?!cash-|assets|bank-posting-))#', 'accounting', AccessLevel::READ],
         ['*', '#^/api/accounting(?:$|/(?!cash-|assets|bank-posting-))#', 'accounting', AccessLevel::WRITE],

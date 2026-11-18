@@ -66,11 +66,22 @@ final class PayrollDimensionService
             throw new \InvalidArgumentException('row_version nesmí být záporné.');
         }
         $data = $this->normalize($input);
+        $current = $id !== null ? $this->repository->find($supplierId, $id) : null;
         // Klient, který o vazbě neví (starší frontend, import), ji úpravou
         // nesmaže — chybějící klíč znamená „beze změny".
         $data['dimension_value_id'] = !array_key_exists('dimension_value_id', $input) && $id !== null
-            ? ($this->repository->find($supplierId, $id)['dimension_value_id'] ?? null)
+            ? ($current['dimension_value_id'] ?? null)
             : $this->companyValueId($supplierId, $input);
+        // Druh se ověřuje jen u nové vazby nebo u změny typu. Dřív uložená
+        // nesouladná vazba úpravu názvu nebo platnosti nezablokuje; ukáže ji
+        // kontrola před mzdovým během.
+        if ($data['dimension_value_id'] !== null
+            && ($current === null
+                || $current['dimension_value_id'] !== $data['dimension_value_id']
+                || $current['dimension_type'] !== $data['dimension_type'])
+        ) {
+            $this->assertCompanyKindFits($supplierId, $data['dimension_type'], $data['dimension_value_id']);
+        }
 
         if ($id === null) {
             if ($expectedVersion !== 0) {
@@ -206,6 +217,25 @@ final class PayrollDimensionService
         }
 
         return $valueId;
+    }
+
+    private function assertCompanyKindFits(int $supplierId, string $payrollType, int $valueId): void
+    {
+        $value = $this->companyDimensions->findValue($supplierId, $valueId);
+        $type = $value === null ? null : $this->companyDimensions->findType($supplierId, (int) $value['type_id']);
+        if ($type === null) {
+            throw new \InvalidArgumentException(
+                'Zvolená hodnota firemní dimenze neexistuje nebo nepatří firmě ani její skupině.',
+            );
+        }
+        if (!PayrollDimensionCompanyLink::fits($payrollType, (string) $type['kind'])) {
+            throw new \InvalidArgumentException(sprintf(
+                '%s Zvolená hodnota %s patří do firemní dimenze %s.',
+                PayrollDimensionCompanyLink::requirement($payrollType),
+                (string) $value['code'],
+                (string) $type['name'],
+            ));
+        }
     }
 
     private function nullableDate(mixed $value, string $field): ?string

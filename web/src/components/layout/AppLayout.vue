@@ -20,6 +20,7 @@ import GlobalSearch from './GlobalSearch.vue'
 import CommandPalette from './CommandPalette.vue'
 import FooterTip from './FooterTip.vue'
 import ThemeToggle from './ThemeToggle.vue'
+import FullscreenToggle from './FullscreenToggle.vue'
 import LanguageToggle from './LanguageToggle.vue'
 import AppBrand from './AppBrand.vue'
 import AppMenuToggle from './AppMenuToggle.vue'
@@ -1766,8 +1767,8 @@ const mobileSheetActions = computed<SheetAction[]>(() => {
         actions.push({ key: 'receipt', to: '/invoices/new?simplified=1', label: t('nav.mobile.receipt'), hint: t('nav.mobile.receipt_hint'), icon: MOBILE_ICONS.receipt })
       }
     }
-    if (!clientExperience.value && auth.canWrite('projects.create')) {
-      actions.push({ key: 'project', to: '/projects/new', label: t('nav.mobile.new_project'), hint: t('nav.mobile.new_project_hint'), icon: ICONS.projects })
+    if (auth.canRead('invoices')) {
+      actions.push({ key: 'invoices', to: '/invoices', label: t('nav.invoices'), hint: t('nav.mobile.issued_invoices_hint'), icon: ICONS.invoices })
     }
     if (can('/clients/new')) {
       actions.push({ key: 'client', to: '/clients/new', label: t('nav.mobile.new_client'), hint: t('nav.mobile.new_client_hint'), icon: ICONS.clients })
@@ -1794,6 +1795,9 @@ const mobileSheetActions = computed<SheetAction[]>(() => {
     }
     if (!clientExperience.value && auth.canRead('purchase_invoices')) {
       actions.push({ key: 'payables', to: '/purchase-invoices?unpaid=1', label: t('nav.mobile.payables'), hint: t('nav.mobile.payables_hint'), icon: ICONS.payment_orders })
+    }
+    if (!clientExperience.value && auth.canRead('bank')) {
+      actions.push({ key: 'bank_movements', to: '/bank?tab=all_movements', label: t('nav.mobile.bank_movements'), hint: t('nav.mobile.bank_movements_hint'), icon: ICONS.bank })
     }
     // Kniha jízd je v sekci Dokumenty: zápis jízdy z auta je typicky telefonní úkon.
     const logbook = mobileSection('documents')?.items.find(item => item.to === '/logbook')
@@ -2365,10 +2369,11 @@ onBeforeUnmount(() => {
           <!-- Na telefonu nemá jazyk, motiv ani oblíbené místo ve spodní liště, žijí tady
                v jednom řádku s odhlášením, ať menu zůstane co nejvíc místa. Okna jsou v hlavičce.
                Zamknutí a odhlášení jsou pro obě podoby tatáž tlačítka, mění se jen vzhled. -->
-          <div :class="phoneNavigation ? 'flex items-center gap-1.5' : ['grid gap-2', canLockSession ? 'grid-cols-2' : 'grid-cols-1']">
+          <div :class="phoneNavigation ? 'flex flex-wrap items-center gap-1.5' : ['grid gap-2', canLockSession ? 'grid-cols-2' : 'grid-cols-1']">
             <template v-if="phoneNavigation">
               <LanguageToggle class="h-9! w-10!" />
               <ThemeToggle class="h-9! w-10!" />
+              <FullscreenToggle />
               <WorkspaceFavoritesButton class="h-9! w-10! border border-neutral-200" />
             </template>
             <button

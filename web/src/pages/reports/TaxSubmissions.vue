@@ -28,6 +28,7 @@ import TaxIsdsSendDialog from '@/components/submission/TaxIsdsSendDialog.vue'
 import { authApi } from '@/api/auth'
 import { getCredential, isWebAuthnAvailable } from '@/security/webauthn'
 import { useToast } from '@/composables/useToast'
+import { useWindowRefresh } from '@/composables/useWindowRefresh'
 import { useAuthStore } from '@/stores/auth'
 import { useSupplierStore } from '@/stores/supplier'
 import { hasUnresolvedProductionDirectAttempt } from '@/utils/epoAttemptState'
@@ -1805,6 +1806,22 @@ onMounted(async () => {
   await Promise.all([load(), loadCredentials(), loadEpoEnvironment()])
   if (ssoReturn) await resumeSsoStepUp(ssoReturn)
 })
+
+/*
+ * Doručenku k podání odeslanému datovkou stahuje Datová schránka při načtení
+ * schránky, tedy v jiném okně nebo záložce. Bez tiché obnovy tu zůstával stav
+ * „odesláno, bez doručenky", dokud se stránka nenačetla znovu.
+ */
+async function refreshSilently() {
+  await load(false)
+  const item = selected.value
+  if (item && !clientScope.value && isdsDispatch(item)) await loadIsdsInbox(item)
+}
+
+useWindowRefresh(refreshSilently, () => !loading.value
+  && !uploadBusy.value && !manualBusy.value && !manualOpen.value && !directBusy.value
+  && !credentialBusy.value && !settingsSaving.value && !isdsReceiptBusy.value
+  && isdsAttachBusy.value === null && isdsDialogFor.value === null)
 </script>
 
 <template>

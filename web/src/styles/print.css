@@ -104,6 +104,15 @@
   .table-sticky-first tbody td:first-child {
     position: static !important;
   }
+  /* Vrstvy lepivé buňky (main.css) v tisku nepotřebujeme, nic se tu neposouvá.
+     ::after by se bez sticky kotvil k cizímu předkovi a bílý podklad by při
+     tisku s pozadím zakryl tint řádku, buňka tak dědí barvu řádku jako dřív. */
+  .table-sticky-first tbody td:first-child {
+    background-image: none;
+  }
+  .table-sticky-first tbody td:first-child::after {
+    display: none;
+  }
 
   /* ─── Plná šířka obsahu ───
    * main má padding pro odstup od tmavé navigace (ta je pryč) a řada stránek

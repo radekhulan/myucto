@@ -2311,12 +2311,7 @@ final class PayrollPostingLineBuilder
     public function employerInsuranceCostShares(array $snapshot, array $statutorySets): array
     {
         $snapshotPeople = $this->snapshotPeople($snapshot);
-        $partsByEmployment = [];
-        foreach ($snapshotPeople as $person) {
-            foreach ($person['employments'] as $employmentId => $employmentSnapshot) {
-                $partsByEmployment[$employmentId] = $this->employmentParts($employmentSnapshot);
-            }
-        }
+        $partsByEmployment = $this->partsByEmployment($snapshotPeople);
         $sets = $this->sets($statutorySets, array_keys($snapshotPeople));
         $social = $this->socialEmployerShares(
             $sets,
@@ -2335,6 +2330,45 @@ final class PayrollPostingLineBuilder
                 ? null
                 : $this->employerInsuranceDebits('employer-insurance:health', $health, $partsByEmployment),
         ];
+    }
+
+    /**
+     * Nákladový rozpad firemní částky, kterou si vztahy dělí už rozdělenou
+     * (employment_id → částka), na části vztahů podle jejich dimenzí ze
+     * zmrazeného snapshotu revize.
+     *
+     * Je to tentýž rozpad, kterým se dělí 524 ({@see employerInsuranceDebits()}):
+     * vztah bez dimenzí má jednu část bez střediska, vztah s procentním rozpadem
+     * se dělí metodou největšího zbytku a součet sedí na haléř. Vztah, který
+     * snapshot nezná, dostane jednu část bez dimenzí.
+     *
+     * @param array<string,mixed> $snapshot vstupní snapshot revize
+     * @param array<int,int> $shares employment_id → částka
+     * @return list<array{allocation_key:string,employment_id:int,cost_center:?string,dimensions:array<int,int>,signed_minor:int}>
+     */
+    public function employmentCostShares(array $snapshot, string $baseKey, array $shares): array
+    {
+        return $this->employerInsuranceDebits(
+            $baseKey,
+            $shares,
+            $this->partsByEmployment($this->snapshotPeople($snapshot)),
+        );
+    }
+
+    /**
+     * @param array<int,array{employments:array<int,array<string,mixed>>,payout_rules:mixed}> $snapshotPeople
+     * @return array<int,list<array{cost_center:?string,dimensions:array<int,int>,account:?string,weight:int}>>
+     */
+    private function partsByEmployment(array $snapshotPeople): array
+    {
+        $partsByEmployment = [];
+        foreach ($snapshotPeople as $person) {
+            foreach ($person['employments'] as $employmentId => $employmentSnapshot) {
+                $partsByEmployment[$employmentId] = $this->employmentParts($employmentSnapshot);
+            }
+        }
+
+        return $partsByEmployment;
     }
 
     /**

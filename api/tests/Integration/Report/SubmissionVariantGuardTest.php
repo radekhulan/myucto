@@ -4,7 +4,9 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Integration\Report;
 
+use MyInvoice\Bootstrap;
 use MyInvoice\Service\Accounting\PostingException;
+use MyInvoice\Service\Report\SouhrnneHlaseniBuilder;
 use PHPUnit\Framework\Attributes\Group;
 
 /**
@@ -115,5 +117,49 @@ final class SubmissionVariantGuardTest extends VatAmendedReturnTest
 
         self::assertStringContainsString('už je evidované podané tvrzení', implode(' | ', $vat['warnings']));
         self::assertStringContainsString('už je evidované podané tvrzení', implode(' | ', $kh['warnings']));
+    }
+
+    /**
+     * Issue #379: karta „Termín podání" hlásila „N dní po termínu!" i u podaného období.
+     * Souhrn výkazu proto nese rozhodný čas podání v řádné lhůtě z téhož dotazu jako
+     * varování o už podaném tvrzení; dodejka (`accepted`) podmínkou není. Opravy po lhůtě
+     * (dodatečné, následné) mají vlastní lhůtu a dál odpočítávají.
+     */
+    public function testSummaryCarriesFiledAtOfRegularSubmission(): void
+    {
+        $sh = Bootstrap::buildContainer()->get(SouhrnneHlaseniBuilder::class);
+        $cust = $this->client('Odběratel', 'CZ90020053');
+        $this->sale('VG-6', $cust, '1', $this->d(5, 10), [[100000, 21000, 21]]);
+
+        $vatBaseline = $this->dph->build($this->supplierId, self::YEAR, 5, 'monthly', 'radne');
+        $khBaseline = $this->kh->build($this->supplierId, self::YEAR, 5, 'monthly', 'radne');
+        $shBaseline = $sh->build($this->supplierId, self::YEAR, 5, 'monthly', 'radne');
+        self::assertNull($vatBaseline['summary']['filed_at']);
+        self::assertNull($khBaseline['summary']['filed_at']);
+        self::assertNull($shBaseline['summary']['filed_at']);
+
+        $this->archiveAndSubmit(
+            $this->supplierId, 'dphdp3', self::YEAR, 5, null,
+            $vatBaseline['xml'], $vatBaseline['summary'], $this->userId, true, 'B',
+        );
+        $this->archiveAndSubmit(
+            $this->supplierId, 'dphkh1', self::YEAR, 5, null,
+            $khBaseline['xml'], $khBaseline['summary'], $this->userId, true, 'B',
+        );
+        $this->archiveAndSubmit(
+            $this->supplierId, 'dphshv', self::YEAR, 5, null,
+            $shBaseline['xml'], $shBaseline['summary'], $this->userId, true, 'R',
+        );
+
+        $vat = $this->dph->build($this->supplierId, self::YEAR, 5, 'monthly', 'radne');
+        $kh = $this->kh->build($this->supplierId, self::YEAR, 5, 'monthly', 'radne');
+        $shFiled = $sh->build($this->supplierId, self::YEAR, 5, 'monthly', 'radne');
+        self::assertNotNull($vat['summary']['filed_at'], 'Podané přiznání musí karta termínu znát.');
+        self::assertNotNull($kh['summary']['filed_at'], 'Podané kontrolní hlášení musí karta termínu znát.');
+        self::assertNotNull($shFiled['summary']['filed_at'], 'Podané souhrnné hlášení musí karta termínu znát.');
+
+        $this->sale('VG-6B', $cust, '1', $this->d(5, 20), [[50000, 10500, 21]]);
+        $amended = $this->dph->build($this->supplierId, self::YEAR, 5, 'monthly', 'dodatecne', '2092-07-15');
+        self::assertNull($amended['summary']['filed_at'], 'Dodatečné přiznání má vlastní lhůtu.');
     }
 }

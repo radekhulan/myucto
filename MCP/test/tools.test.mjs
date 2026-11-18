@@ -497,6 +497,8 @@ const draftInvoice = (overrides = {}) => ({
       vat_classification_code: '1', stock_item_id: null, warehouse_id: null,
       small_asset_id: null, asset_id: null, accrual_from: '2026-10-01', accrual_to: '2027-09-30',
       oss_applicable: false, oss_consumer_country: null, total_with_vat: 14520,
+      revenue_account_code: '604.100', counter_account_code: '315', posting_rule_key: 'licence.sw',
+      seller_item_code: 'LIC-1', manual_price: false,
     },
     {
       id: 102, description: 'Konzultace', quantity: 2, duration_minutes: 120, unit: 'h',
@@ -504,6 +506,7 @@ const draftInvoice = (overrides = {}) => ({
       vat_classification_code: '1', stock_item_id: null, warehouse_id: null,
       small_asset_id: null, asset_id: null, accrual_from: null, accrual_to: null,
       oss_applicable: false, oss_consumer_country: null,
+      linked_work_report_id: 77, work_report_billing_key: 'band:1',
     },
     {
       id: 103, description: 'E-kniha', quantity: 1, duration_minutes: null, unit: 'ks',
@@ -558,13 +561,19 @@ test('změna ceny jedné položky zachová ostatní řádky i jejich skrytá pol
   assert.equal(body.exchange_rate, undefined, 'Kurz se bez pokynu neposílá, jinak by se zamkl.');
   // Slevový řádek generuje server, zpět se neposílá.
   assert.equal(body.items.length, 3);
+  // BEZ OPRAVY PADÁ: účty, předkontace, kód zboží a vazba na výkaz se při úpravě konceptu ztrácely.
   assert.deepEqual(body.items[0], {
-    description: 'Licence', quantity: 1, duration_minutes: null, unit: 'ks',
+    id: 101, description: 'Licence', quantity: 1, duration_minutes: null, unit: 'ks',
     unit_price_without_vat: 1800, vat_rate_id: 1, order_index: 0, item_kind: 'standard', vat_classification_code: '1',
     stock_item_id: null, warehouse_id: null, small_asset_id: null, asset_id: null,
     accrual_from: '2026-10-01', accrual_to: '2027-09-30',
     oss_applicable: false, oss_consumer_country: null,
+    revenue_account_code: '604.100', counter_account_code: '315', posting_rule_key: 'licence.sw',
+    seller_item_code: 'LIC-1', manual_price: false,
   });
+  assert.equal(body.items[1].linked_work_report_id, 77);
+  assert.equal(body.items[1].work_report_billing_key, 'band:1');
+  assert.equal(body.items[1].id, 102);
   assert.equal(body.items[1].duration_minutes, 120);
   assert.equal(body.items[2].oss_consumer_country, 'DE');
   assert.equal(body.items[2].oss_rate_type, 'reduced');
@@ -748,13 +757,68 @@ test('změna DUZP nechá server znovu odvodit zařazení všech položek', async
   assert.equal(body.items[0].accrual_from, '2026-10-01');
 });
 
-test('změna měny se posílá kódem a zakázku jde odebrat nulou', async () => {
+/** BEZ OPRAVY PADÁ: MCP poslal kód měny bez `currency_id` a server doplnil uloženou měnu, změna se tiše neprovedla. */
+test('změna měny pošle kód s currency_id null a zakázku jde odebrat nulou', async () => {
   const client = draftClient();
   await tool('update_invoice').run(client, { invoice_id: 42, currency: 'eur', project_id: 0 }, 'update_invoice');
   const body = putOf(client);
   assert.equal(body.currency, 'EUR');
-  assert.equal('currency_id' in body, false);
+  assert.equal(body.currency_id, null);
   assert.equal(body.project_id, null);
+});
+
+test('stejná měna se jako změna neposílá', async () => {
+  const client = draftClient();
+  await tool('update_invoice').run(client, { invoice_id: 42, currency: 'czk', due_date: '2026-11-01' }, 'update_invoice');
+  const body = putOf(client);
+  assert.equal(body.currency_id, 1);
+  assert.equal('currency' in body, false);
+});
+
+/** BEZ OPRAVY PADÁ: hlavička nesla uložený kód DPH i po změně přenesené povinnosti a server ho nepřepočítal. */
+test('změna přenesené povinnosti nepošle starý kód DPH hlavičky ani položek', async () => {
+  const client = draftClient();
+  await tool('update_invoice').run(client, { invoice_id: 42, reverse_charge: true }, 'update_invoice');
+  const body = putOf(client);
+  assert.equal('vat_classification_code' in body, false);
+  assert.equal('vat_classification_code' in body.items[0], false);
+  assert.equal(body.items[0].revenue_account_code, '604.100', 'Účty položek odvozování nezahodí.');
+});
+
+test('změna kategorie tržby nepošle starý text kategorie', async () => {
+  const client = draftClient(draftInvoice({ revenue_category: 'Stará', revenue_category_id: 4 }));
+  await tool('update_invoice').run(client, { invoice_id: 42, revenue_category_id: 5 }, 'update_invoice');
+  const body = putOf(client);
+  assert.equal(body.revenue_category_id, 5);
+  assert.equal('revenue_category' in body, false);
+});
+
+test('účet, předkontaci a kód DPH položky jde nastavit i zrušit prázdným textem', async () => {
+  const client = draftClient();
+  await tool('update_invoice_item').run(client, {
+    invoice_id: 42, row: 1, revenue_account_code: '', posting_rule_key: 'licence.hw', vat_classification_code: '1m',
+  }, 'update_invoice_item');
+  const body = putOf(client);
+  assert.equal(body.items[0].revenue_account_code, null);
+  assert.equal(body.items[0].posting_rule_key, 'licence.hw');
+  assert.equal(body.items[0].vat_classification_code, '1m');
+  assert.equal(body.items[0].counter_account_code, '315');
+});
+
+test('pokladnu jde vybrat jen k platbě v hotovosti', async () => {
+  const client = draftClient();
+  await assert.rejects(
+    tool('update_invoice').run(client, { invoice_id: 42, cash_register_id: 3 }, 'update_invoice'),
+    /jen k platbě v hotovosti/,
+  );
+  await tool('update_invoice').run(client, {
+    invoice_id: 42, payment_method: 'cash', cash_register_id: 3, rounding_mode: 'whole_czk', number_series_id: 6,
+  }, 'update_invoice');
+  const body = putOf(client);
+  assert.equal(body.payment_method, 'cash');
+  assert.equal(body.cash_register_id, 3);
+  assert.equal(body.rounding_mode, 'whole_czk');
+  assert.equal(body.number_series_id, 6);
 });
 
 test('vystavenou fakturu úpravy odmítnou ještě před zápisem', async () => {

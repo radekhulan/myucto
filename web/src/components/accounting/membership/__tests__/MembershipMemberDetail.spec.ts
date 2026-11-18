@@ -1,5 +1,5 @@
 import { flushPromises, mount } from '@vue/test-utils'
-import { defineComponent, h } from 'vue'
+import { KeepAlive, defineComponent, h, ref } from 'vue'
 import { createI18n } from 'vue-i18n'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import Detail from '../MembershipMemberDetail.vue'
@@ -18,10 +18,10 @@ vi.mock('@/api/nonprofitDppo', () => ({ nonprofitDppoApi: { profile: vi.fn() } }
 
 const ActionBar = defineComponent({
   props: ['actions'],
-  setup: p => () => h('div', (p.actions as Array<{ key: string; label: string; disabled?: boolean; show?: unknown; run: () => void }>)
-    .filter(a => a.show !== false).map(a => h('button', { 'data-action': a.key, disabled: a.disabled, onClick: a.run }, a.label))),
+  setup: p => () => h('div', (p.actions as Array<{ key: string; label: string; disabled?: boolean; disabledReason?: string; tier?: string; show?: unknown; run: () => void }>)
+    .filter(a => a.show !== false).map(a => h('button', { 'data-action': a.key, 'data-tier': a.tier, disabled: a.disabled, 'data-reason': a.disabled ? a.disabledReason : undefined, onClick: a.run }, a.label))),
 })
-const RevisionForm = defineComponent({ name: 'MembershipRevisionForm', props: ['supplier', 'canManage', 'member', 'history'], emits: ['done', 'close', 'lock'], setup: () => () => h('div', { 'data-stub': 'revision' }) })
+const RevisionForm = defineComponent({ name: 'MembershipRevisionForm', props: ['supplier', 'canManage', 'member', 'history'], emits: ['done', 'close', 'lock', 'dirty'], setup: () => () => h('div', { 'data-stub': 'revision' }) })
 const IssueFlow = defineComponent({ name: 'MembershipIssueFlow', props: ['supplier', 'canManage', 'member', 'history', 'periods'], emits: ['done', 'close', 'lock'], setup: () => () => h('div', { 'data-stub': 'issue' }) })
 const ReverseFlow = defineComponent({ name: 'MembershipReverseFlow', props: ['supplier', 'canManage', 'member', 'claim', 'periods'], emits: ['done', 'close', 'lock'], setup: () => () => h('div', { 'data-stub': 'reverse' }) })
 
@@ -44,7 +44,7 @@ const period = { id: 11, supplier_id: 5, fiscal_year: 2026, starts_on: '2000-01-
 function detail(history: MemberRevision[], items: ClaimRow[], next: number | null = null): MemberDetail {
   return {
     member: { id: 9, supplier_id: 5, client_id: 3, member_number: 'M-1', created_by: 1 }, history,
-    balance: { member_id: 9, page_active_claim_cents: 0, page_proven_open_cents: 0, page_unreconciled_count: 0, items, next_after_claim_id: next },
+    balance: { member_id: 9, page_active_claim_cents: 0, page_open_cents: 0, page_needs_review_count: 0, items, next_after_claim_id: next },
   }
 }
 function mounted(props: Record<string, unknown> = {}, locale = 'cs') {
@@ -116,6 +116,15 @@ describe('Membership member detail', () => {
     w.unmount()
   })
 
+  it('sums the balance due of unpaired and partial charges when nothing needs review', async () => {
+    api.member.mockResolvedValue(detail([revision(1, '2020-01-01')], mixed.filter(c => c.settlement.status !== 'ambiguous')))
+    const w = mounted()
+    await flushPromises()
+    expect(w.get('[data-field="sum-open"]').text()).toBe(formatMoneyMinor(130000))
+    expect(w.get('[data-field="sum-needs-review"]').text()).toBe('0')
+    w.unmount()
+  })
+
   it('shows only ambiguous payments as needing review and unmatched charges as unpaid and never mixes the issued total with a debt', async () => {
     const w = mounted()
     await flushPromises()
@@ -130,8 +139,9 @@ describe('Membership member detail', () => {
     expect(rows[2]!.get('[data-field="settlement-amounts"]').text()).toContain(formatMoneyMinor(30000))
     expect(rows[3]!.get('[data-field="settlement-status"]').text()).toBe(cs.nonprofitMembership.settlement_reversed)
     expect(w.get('[data-field="sum-issued"]').text()).toBe(formatMoneyMinor(100000 + 80000 + 120050))
-    expect(w.get('[data-field="sum-proven-open"]').text()).toBe(formatMoneyMinor(130000))
-    expect(w.get('[data-field="sum-unproven"]').text()).toBe('1')
+    // Stejně jako řádek seznamu: s předpisem k prověření je zůstatek neurčený, ne součet známých částí.
+    expect(w.get('[data-field="sum-open"]').text()).toBe(formatMoneyMinor(null))
+    expect(w.get('[data-field="sum-needs-review"]').text()).toBe('1')
     expect(w.get('[data-section="unproven-note"]').text()).toContain(cs.nonprofitMembership.unprovenNote)
     expect(w.get('[data-section="claims-summary"]').text()).not.toMatch(/neuhrazen|dluh:/i)
     w.unmount()
@@ -165,15 +175,41 @@ describe('Membership member detail', () => {
     w.unmount()
   })
 
+  it('shows an erased member read-only with a notice even with write rights', async () => {
+    // Bez platné revize by se formulář revize jinak zobrazil hned; u vymazaného člena se nezobrazí.
+    api.member.mockResolvedValue({ ...detail([], mixed), erased: true })
+    const w = mounted({ canManage: true })
+    await flushPromises()
+    expect(w.get('[data-section="detail-erased"]').text()).toBe(cs.nonprofitMembership.erasure.detailErased)
+    for (const action of ['new-charge', 'reverse-claim']) expect(w.find(`[data-action="${action}"]`).exists()).toBe(false)
+    expect(w.find('[data-stub="revision"]').exists()).toBe(false)
+    expect(w.findAll('[data-section="claim-row"]')).toHaveLength(4)
+    w.unmount()
+  })
+
   it('reverses the chosen existing claim and offers no reversal for a reversed one', async () => {
     const w = mounted()
     await flushPromises()
     expect(w.find('[data-claim="34"] [data-action="reverse-claim"]').exists()).toBe(false)
-    await w.get('[data-claim="32"] [data-action="reverse-claim"]').trigger('click')
+    await w.get('[data-claim="31"] [data-action="reverse-claim"]').trigger('click')
     const flow = w.findComponent(ReverseFlow)
     expect(flow.exists()).toBe(true)
-    expect(flow.props('claim')).toMatchObject({ claim_id: 32, case_id: 72 })
+    expect(flow.props('claim')).toMatchObject({ claim_id: 31, case_id: 71 })
     expect(flow.props('member')).toEqual({ id: 9, member_number: 'M-1', label: 'Synthetic member' })
+    w.unmount()
+  })
+
+  it('disables reversal of a claim matched in the ledger and explains why, like other receivables', async () => {
+    const w = mounted()
+    await flushPromises()
+    for (const id of ['32', '33']) {
+      const button = w.get(`[data-claim="${id}"] [data-action="reverse-claim"]`)
+      expect(button.attributes('disabled')).toBeDefined()
+      expect(button.attributes('title')).toBe('Předpis je spárovaný v saldokontu. Nejprve zrušte jeho párování.')
+      await button.trigger('click')
+    }
+    expect(w.findComponent(ReverseFlow).exists()).toBe(false)
+    expect(w.get('[data-claim="31"] [data-action="reverse-claim"]').attributes('disabled')).toBeUndefined()
     w.unmount()
   })
 
@@ -328,4 +364,286 @@ describe('Membership member detail', () => {
     expect(w.find('[data-stub="revision"]').exists()).toBe(true)
     w.unmount()
   })
+
+  it('offers only the corrections the server allows and opens one at a time', async () => {
+    const corrections = { can_edit_identity: true, edit_identity_block: null, can_delete: false, delete_block: 'nonprofit_membership_member_has_revisions',
+      voidable_revision_id: 1, void_block: null, head_revision_no: 1 }
+    api.member.mockResolvedValue({ ...detail([revision(1, '2020-01-01')], []), corrections })
+    const w = mountedWithCorrection(); await flushPromises()
+    // Opravy mají stálé místo v „…“ bez ohledu na to, zda jsou právě povolené.
+    expect(w.get('[data-action="fix-identity"]').attributes('data-tier')).toBe('overflow')
+    expect(w.find('[data-action="void-revision"]').exists()).toBe(true)
+    expect(w.get('[data-action="delete-member"]').attributes('disabled')).toBeDefined()
+    expect(w.get('[data-action="delete-member"]').attributes('data-reason')).toBe(cs.nonprofitMembership.serverErrors.nonprofit_membership_member_has_revisions)
+    const scroll = vi.fn()
+    Element.prototype.scrollIntoView = scroll
+    await w.get('[data-action="void-revision"]').trigger('click'); await flushPromises()
+    // Formulář je pod historií; otevření ho posune na obrazovku.
+    expect(scroll).toHaveBeenCalledTimes(1)
+    expect(scroll.mock.contexts[0]).toBe(w.findComponent(CorrectionFlow).element.parentElement)
+    const flow = w.findComponent(CorrectionFlow)
+    expect(flow.props('mode')).toBe('void')
+    expect(flow.props('revision')).toMatchObject({ id: 1 })
+    expect(w.find('[data-action="fix-identity"]').exists()).toBe(false)
+    w.unmount()
+  })
+
+  it('nezavře tiše rozepsaný formulář revize ani předpisu: opravy jsou zašedlé s důvodem', async () => {
+    const corrections = { can_edit_identity: true, edit_identity_block: null, can_delete: true, delete_block: null,
+      voidable_revision_id: 1, void_block: null, head_revision_no: 1 }
+    api.member.mockResolvedValue({ ...detail([revision(1, '2020-01-01')], []), corrections })
+    const w = mountedWithCorrection(); await flushPromises()
+    for (const opener of ['change-status', 'new-charge']) {
+      await w.get(`[data-action="${opener}"]`).trigger('click'); await flushPromises()
+      for (const key of ['fix-identity', 'void-revision', 'delete-member']) {
+        expect(w.get(`[data-action="${key}"]`).attributes('disabled'), `${opener} → ${key}`).toBeDefined()
+        expect(w.get(`[data-action="${key}"]`).attributes('data-reason')).toBe(cs.nonprofitMembership.correction.closeFormFirst)
+      }
+      await w.get('[data-action="fix-identity"]').trigger('click'); await flushPromises()
+      expect(w.findComponent(CorrectionFlow).exists()).toBe(false)
+      if (opener === 'change-status') { w.findComponent(RevisionForm).vm.$emit('close'); await flushPromises() }
+    }
+    w.unmount()
+  })
+
+  it('nezavře tiše rozepsanou první revizi samootevřenou u člena bez platné revize', async () => {
+    const corrections = { can_edit_identity: true, edit_identity_block: null, can_delete: true, delete_block: null,
+      voidable_revision_id: null, void_block: null, head_revision_no: 0 }
+    api.member.mockResolvedValue({ ...detail([], []), corrections })
+    const w = mountedWithCorrection(); await flushPromises()
+    expect(w.get('[data-action="fix-identity"]').attributes('disabled'), 'prázdný formulář opravy neblokuje').toBeUndefined()
+    w.findComponent(RevisionForm).vm.$emit('dirty', true); await flushPromises()
+    for (const key of ['fix-identity', 'delete-member']) {
+      expect(w.get(`[data-action="${key}"]`).attributes('disabled'), key).toBeDefined()
+      expect(w.get(`[data-action="${key}"]`).attributes('data-reason')).toBe(cs.nonprofitMembership.correction.closeFormFirst)
+    }
+    await w.get('[data-action="fix-identity"]').trigger('click'); await flushPromises()
+    expect(w.findComponent(CorrectionFlow).exists()).toBe(false)
+    expect(w.find('[data-stub="revision"]').exists()).toBe(true)
+    w.unmount()
+  })
+
+  it('rozepsanou opravu nezavře „Změnit stav“', async () => {
+    const corrections = { can_edit_identity: true, edit_identity_block: null, can_delete: true, delete_block: null,
+      voidable_revision_id: 1, void_block: null, head_revision_no: 1 }
+    api.member.mockResolvedValue({ ...detail([revision(1, '2020-01-01')], []), corrections })
+    const w = mountedWithCorrection(); await flushPromises()
+    await w.get('[data-action="void-revision"]').trigger('click'); await flushPromises()
+    expect(w.findComponent(CorrectionFlow).exists()).toBe(true)
+    expect(w.get('[data-action="change-status"]').attributes('disabled')).toBeDefined()
+    expect(w.get('[data-action="change-status"]').attributes('data-reason')).toBe(cs.nonprofitMembership.correction.closeCorrectionFirst)
+    await w.get('[data-action="change-status"]').trigger('click'); await flushPromises()
+    expect(w.findComponent(CorrectionFlow).exists()).toBe(true)
+    w.unmount()
+  })
+
+  it('explains blocked corrections after a charge and hides them without the write permission', async () => {
+    api.member.mockResolvedValue({ ...detail([revision(1, '2020-01-01')], []), corrections: { can_edit_identity: false, edit_identity_block: 'nonprofit_membership_member_has_charges',
+      can_delete: false, delete_block: 'nonprofit_membership_member_has_charges', voidable_revision_id: null, void_block: 'nonprofit_membership_revision_has_charges', head_revision_no: 1 } })
+    const w = mountedWithCorrection(); await flushPromises()
+    expect(w.get('[data-action="fix-identity"]').attributes('data-reason')).toBe(cs.nonprofitMembership.serverErrors.nonprofit_membership_member_has_charges)
+    expect(w.get('[data-action="fix-identity"]').attributes('data-tier')).toBe('overflow')
+    expect(w.get('[data-action="void-revision"]').attributes('data-reason')).toBe(cs.nonprofitMembership.serverErrors.nonprofit_membership_revision_has_charges)
+    expect(w.get('[data-action="delete-member"]').attributes('data-reason')).toBe(cs.nonprofitMembership.serverErrors.nonprofit_membership_member_has_charges)
+    for (const key of ['fix-identity', 'void-revision', 'delete-member']) expect(w.get(`[data-action="${key}"]`).attributes('disabled')).toBeDefined()
+    w.unmount()
+    api.member.mockResolvedValue({ ...detail([revision(1, '2020-01-01')], []), corrections: { can_edit_identity: true, edit_identity_block: null, can_delete: true, delete_block: null, voidable_revision_id: 1, void_block: null, head_revision_no: 1 } })
+    const readOnly = mountedWithCorrection({ canManage: false }); await flushPromises()
+    for (const key of ['fix-identity', 'void-revision', 'delete-member']) expect(readOnly.find(`[data-action="${key}"]`).exists()).toBe(false)
+    readOnly.unmount()
+  })
+
+  it('shows a voided revision struck through with the voiding reason and keeps today status from the valid revision', async () => {
+    const voiding = { ...revision(3, '2021-01-01', 'ended'), voids_revision_id: 2, request: { reason: 'Synthetic wrong date' } }
+    api.member.mockResolvedValue(detail([revision(1, '2020-01-01'), revision(2, '2021-01-01', 'ended'), voiding], []))
+    const w = mountedWithCorrection(); await flushPromises()
+    expect(w.get('[data-section="history-row"][data-voided="true"]').text()).toContain('#2')
+    expect(w.get('[data-section="history-void-row"]').text()).toContain('Synthetic wrong date')
+    expect(w.get('[data-field="status-today"]').text()).toContain(cs.nonprofitMembership.status_active)
+    w.unmount()
+  })
+
+  it('emits deleted after a confirmed deletion without reloading the removed member', async () => {
+    api.member.mockResolvedValue({ ...detail([], []), corrections: { can_edit_identity: true, edit_identity_block: null, can_delete: true, delete_block: null, voidable_revision_id: null, void_block: null, head_revision_no: 0 } })
+    const w = mountedWithCorrection(); await flushPromises()
+    await w.get('[data-action="delete-member"]').trigger('click')
+    w.findComponent(CorrectionFlow).vm.$emit('done', 'delete', '')
+    await flushPromises()
+    expect(w.emitted('deleted')).toHaveLength(1)
+    expect(api.member).toHaveBeenCalledTimes(1)
+    w.unmount()
+  })
 })
+
+describe('Membership member detail after a correction', () => {
+  const allowed = { can_edit_identity: true, edit_identity_block: null, can_delete: true, delete_block: null, voidable_revision_id: 1, void_block: null, head_revision_no: 1 }
+
+  it('releases the correction lock and focuses the heading when the flow finishes while locked', async () => {
+    api.member.mockResolvedValue({ ...detail([revision(1, '2020-01-01')], []), corrections: allowed })
+    const w = mountedWithCorrection(); await flushPromises()
+    await w.get('[data-action="void-revision"]').trigger('click')
+    const flow = w.findComponent(CorrectionFlow)
+    flow.vm.$emit('lock', true)
+    flow.vm.$emit('done', 'void', '')
+    await flushPromises()
+    expect(w.get('[data-action="change-status"]').attributes('disabled')).toBeUndefined()
+    expect(w.get('[data-action="fix-identity"]').attributes('disabled')).toBeUndefined()
+    expect(document.activeElement?.getAttribute('data-focus')).toBe('member-heading')
+    w.unmount()
+  })
+
+  it('reports the deletion before the list refresh so the deleted member leaves the selection first', async () => {
+    api.member.mockResolvedValue({ ...detail([], []), corrections: allowed })
+    const w = mountedWithCorrection(); await flushPromises()
+    await w.get('[data-action="delete-member"]').trigger('click')
+    w.findComponent(CorrectionFlow).vm.$emit('done', 'delete', '')
+    await flushPromises()
+    const order = Object.entries(w.emitted()).filter(([name]) => name === 'deleted' || name === 'changed')
+    expect(order.map(([name]) => name)).toEqual(['deleted', 'changed'])
+    w.unmount()
+  })
+
+  it('odloží obnovu z jiné záložky, dokud je rozepsaná první revize, a načte po uvolnění', async () => {
+    api.member.mockResolvedValue({ ...detail([], []), corrections: allowed })
+    const w = mountedWithCorrection({ refreshVersion: 0 }); await flushPromises()
+    w.findComponent(RevisionForm).vm.$emit('dirty', true); await flushPromises()
+    await w.setProps({ refreshVersion: 1 }); await flushPromises()
+    expect(api.member).toHaveBeenCalledTimes(1)
+    w.findComponent(RevisionForm).vm.$emit('dirty', false); await flushPromises()
+    expect(api.member).toHaveBeenCalledTimes(2)
+    w.unmount()
+  })
+
+  it('po odmítnutí zastaralé opravy ji zavře, načte detail i seznam a vyzve k novému otevření', async () => {
+    api.member.mockResolvedValue({ ...detail([revision(1, '2020-01-01')], []), corrections: allowed })
+    const w = mountedWithCorrection(); await flushPromises()
+    await w.get('[data-action="fix-identity"]').trigger('click'); await flushPromises()
+    w.findComponent(CorrectionFlow).vm.$emit('lock', true)
+    w.findComponent(CorrectionFlow).vm.$emit('stale'); await flushPromises()
+    expect(api.member).toHaveBeenCalledTimes(2)
+    expect(w.findComponent(CorrectionFlow).exists()).toBe(false)
+    expect(w.get('[data-section="detail-stale"]').text()).toBe(cs.nonprofitMembership.correction.staleClosed)
+    expect(w.get('[data-section="detail-stale"]').classes()).toContain('text-warning-700')
+    expect(w.find('[data-section="detail-notice"]').exists()).toBe(false)
+    expect(w.emitted('changed')).toHaveLength(1)
+    expect(w.get('[data-action="fix-identity"]').attributes('disabled')).toBeUndefined()
+    await w.get('[data-action="fix-identity"]').trigger('click'); await flushPromises()
+    expect(w.find('[data-section="detail-stale"]').exists(), 'nové otevření hlášku smaže').toBe(false)
+    w.unmount()
+  })
+
+  it('hlášku o zavřené opravě nezapne načtení přeběhnuté novějším, které selhalo, a odložená obnova se neopakuje', async () => {
+    let release: (v: unknown) => void = () => {}
+    let fail: (e: unknown) => void = () => {}
+    api.member.mockResolvedValueOnce({ ...detail([revision(1, '2020-01-01')], []), corrections: allowed })
+      .mockReturnValueOnce(new Promise(resolve => { release = resolve }))
+      .mockReturnValueOnce(new Promise((_resolve, reject) => { fail = reject }))
+    const w = mountedWithCorrection({ refreshVersion: 0 }); await flushPromises()
+    await w.get('[data-action="fix-identity"]').trigger('click'); await flushPromises()
+    w.findComponent(CorrectionFlow).vm.$emit('stale'); await flushPromises()
+    await w.setProps({ refreshVersion: 1 }); await flushPromises()
+    // Přerušené načtení doběhne dřív, než novější selže.
+    release({ ...detail([revision(1, '2020-01-01')], []), corrections: allowed }); await flushPromises()
+    fail({ response: { status: 500, data: { error: { code: 'server_error', message: 'Chyba.' } } } }); await flushPromises()
+    expect(w.find('[data-section="detail-error"]').exists()).toBe(true)
+    expect(w.find('[data-section="detail-stale"]').exists()).toBe(false)
+    expect(api.member).toHaveBeenCalledTimes(3)
+    w.unmount()
+  })
+
+  it('varování o zavřené opravě je vidět už během načítání a nepřenese se na jiného člena', async () => {
+    let release: (v: unknown) => void = () => {}
+    const ok = { ...detail([revision(1, '2020-01-01')], []), corrections: allowed }
+    api.member.mockResolvedValueOnce(ok).mockReturnValueOnce(new Promise(resolve => { release = resolve })).mockResolvedValue(ok)
+    const w = mountedWithCorrection(); await flushPromises()
+    await w.get('[data-action="fix-identity"]').trigger('click'); await flushPromises()
+    w.findComponent(CorrectionFlow).vm.$emit('stale'); await flushPromises()
+    expect(w.find('[data-section="detail-stale"]').exists(), 'během načítání').toBe(true)
+    await w.setProps({ memberId: 10 }); await flushPromises()
+    release(ok); await flushPromises()
+    expect(w.find('[data-section="detail-stale"]').exists(), 'jiný člen').toBe(false)
+    w.unmount()
+  })
+
+  it('novější úspěšné načtení varování o zavřené opravě ponechá a další hláška detailu ho smaže', async () => {
+    let release: (v: unknown) => void = () => {}
+    const ok = { ...detail([revision(1, '2020-01-01')], []), corrections: allowed }
+    api.member.mockResolvedValueOnce(ok).mockReturnValueOnce(new Promise(resolve => { release = resolve })).mockResolvedValue(ok)
+    const w = mountedWithCorrection({ refreshVersion: 0 }); await flushPromises()
+    await w.get('[data-action="fix-identity"]').trigger('click'); await flushPromises()
+    w.findComponent(CorrectionFlow).vm.$emit('stale'); await flushPromises()
+    await w.setProps({ refreshVersion: 1 }); await flushPromises()
+    release(ok); await flushPromises()
+    expect(w.find('[data-section="detail-stale"]').exists()).toBe(true)
+    await w.get('[data-action="change-status"]').trigger('click'); await flushPromises()
+    w.findComponent(RevisionForm).vm.$emit('done'); await flushPromises()
+    expect(w.find('[data-section="detail-notice"]').exists()).toBe(true)
+    expect(w.find('[data-section="detail-stale"]').exists()).toBe(false)
+    w.unmount()
+  })
+
+  it('zavření zastaralé opravy nespustí odloženou obnovu podruhé a Obnovit varování smaže', async () => {
+    api.member.mockResolvedValue({ ...detail([revision(1, '2020-01-01')], []), corrections: allowed })
+    const w = mountedWithCorrection({ refreshVersion: 0 }); await flushPromises()
+    await w.get('[data-action="fix-identity"]').trigger('click'); await flushPromises()
+    w.findComponent(CorrectionFlow).vm.$emit('lock', true); await flushPromises()
+    await w.setProps({ refreshVersion: 1 }); await flushPromises()
+    expect(api.member).toHaveBeenCalledTimes(1)
+    w.findComponent(CorrectionFlow).vm.$emit('stale'); await flushPromises()
+    expect(api.member).toHaveBeenCalledTimes(2)
+    expect(w.find('[data-section="detail-stale"]').exists()).toBe(true)
+    await w.get('[data-action="reload"]').trigger('click'); await flushPromises()
+    expect(w.find('[data-section="detail-stale"]').exists()).toBe(false)
+    w.unmount()
+  })
+
+  it('po zastaralé opravě s nezdařeným načtením hlášku o načtení neukáže', async () => {
+    api.member.mockResolvedValueOnce({ ...detail([revision(1, '2020-01-01')], []), corrections: allowed })
+      .mockRejectedValueOnce({ response: { status: 500, data: { error: { code: 'server_error', message: 'Chyba.' } } } })
+    const w = mountedWithCorrection(); await flushPromises()
+    await w.get('[data-action="fix-identity"]').trigger('click'); await flushPromises()
+    w.findComponent(CorrectionFlow).vm.$emit('stale'); await flushPromises()
+    expect(w.find('[data-section="detail-stale"]').exists()).toBe(false)
+    w.unmount()
+  })
+
+  it('ruční Obnovit i návrat do záložky počkají na rozepsanou první revizi', async () => {
+    api.member.mockResolvedValue({ ...detail([], []), corrections: allowed })
+    const shown = ref(true)
+    const Host = defineComponent({ setup: () => () => h(KeepAlive, null, [shown.value ? h(Detail, { supplier: 5, canManage: true, memberId: 9, label: 'Synthetic member', periods: [period] }) : h('div')]) })
+    const w = mount(Host, { attachTo: document.body, global: { plugins: [createI18n({ legacy: false, locale: 'cs', messages: { cs, en } })],
+      stubs: { ActionBar, MembershipRevisionForm: RevisionForm, MembershipIssueFlow: IssueFlow, MembershipReverseFlow: ReverseFlow, MembershipCorrectionFlow: CorrectionFlow } } })
+    await flushPromises()
+    w.findComponent(RevisionForm).vm.$emit('dirty', true); await flushPromises()
+    expect(w.get('[data-action="reload"]').attributes('disabled')).toBeDefined()
+    shown.value = false; await flushPromises()
+    shown.value = true; await flushPromises()
+    expect(api.member).toHaveBeenCalledTimes(1)
+    w.findComponent(RevisionForm).vm.$emit('dirty', false); await flushPromises()
+    expect(api.member).toHaveBeenCalledTimes(2)
+    w.unmount()
+  })
+
+  it('closes like a deletion when the member was deleted in another tab', async () => {
+    api.member.mockResolvedValueOnce({ ...detail([revision(1, '2020-01-01')], []), corrections: allowed })
+      .mockRejectedValue({ response: { status: 404, data: { error: { code: 'nonprofit_membership_member_not_found' } } } })
+    const w = mountedWithCorrection({ refreshVersion: 0 }); await flushPromises()
+    expect(w.emitted('deleted')).toBeUndefined()
+    await w.setProps({ refreshVersion: 1 }); await flushPromises()
+    expect(w.emitted('deleted')).toHaveLength(1)
+    expect(w.find('[data-section="detail-error"]').exists()).toBe(false)
+    w.unmount()
+  })
+})
+
+const CorrectionFlow = defineComponent({ name: 'MembershipCorrectionFlow', props: ['supplier', 'canManage', 'mode', 'member', 'label', 'revision', 'headRevisionNo'], emits: ['done', 'close', 'lock', 'stale'], setup: () => () => h('div', { 'data-stub': 'correction' }) })
+function mountedWithCorrection(props: Record<string, unknown> = {}) {
+  return mount(Detail, {
+    attachTo: document.body,
+    props: { supplier: 5, canManage: true, memberId: 9, label: 'Synthetic member', periods: [period], ...props },
+    global: {
+      plugins: [createI18n({ legacy: false, locale: 'cs', messages: { cs, en } })],
+      stubs: { ActionBar, MembershipRevisionForm: RevisionForm, MembershipIssueFlow: IssueFlow, MembershipReverseFlow: ReverseFlow, MembershipCorrectionFlow: CorrectionFlow },
+    },
+  })
+}

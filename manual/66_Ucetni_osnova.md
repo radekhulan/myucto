@@ -243,7 +243,7 @@ u správce daně. Na plochém 343 to z principu nešlo.
 | Popis | „Zúčtování DPH za 01/2026“; v deníku je zdroj označený jako **Zúčtování DPH** |
 | Datum zápisu | **poslední den období**, takže zápis padne do správného období i při opožděném běhu |
 | Kdy běží | plánovaná úloha **1. den v měsíci ve 04:30** (viz [§ 5.5](05_Po_instalaci.md#55-krok-za-krokem-naplanovani-uloh-cron)), za období obsahující předchozí měsíc |
-| Opakované spuštění | doklad se **přepočítá, nikdy nezdvojí**; vlastní zúčtovací doklady se přitom z obratu vylučují, aby si samy sebe nepřičítaly |
+| Opakované spuštění | doklad se **přepočítá, nikdy nezdvojí**; vlastní zúčtovací doklady se přitom z obratu vylučují, aby si samy sebe nepřičítaly. Vyjde-li období nově nulové, doklad se smaže; je-li jeho řádek spárovaný s jiným zápisem v okruhu otevřených položek (typicky s platbou daně) nebo rozepsaný v saldokontu, nesmaže se a běh to nahlásí. Okruh pak zrušte v opisu účtu na záložce **Otevřené položky - párování** |
 | Zpětné dohnání | jde spustit ručně pro konkrétní období |
 
 Do obratu se **nepočítají** uzávěrkové a otevírací zápisy, dřívější zúčtovací doklady ani nezaúčtované koncepty.

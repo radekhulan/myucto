@@ -6,6 +6,13 @@ namespace MyInvoice\Service\Bank\EmailNotice;
 
 final class ParsedBankEmailNotice
 {
+    /**
+     * @param bool $currencyStated Měnu avízo výslovně uvádí. Parser, který ji v textu
+     *   nenašel a dosadil výchozí CZK (Fio „Příjem na kontě"), předá false a měnu
+     *   pak určí účet (#160). Výslovně uvedená měna se s měnou účtu porovnává (#390).
+     * @param float|null $originalAmount Částka nákupu v původní měně, uvádí-li avízo
+     *   vedle částky v měně účtu i ji (platba kartou v cizí měně).
+     */
     public function __construct(
         public readonly string $variableSymbol,
         public readonly float $amount,
@@ -19,6 +26,9 @@ final class ParsedBankEmailNotice
         public readonly ?string $message = null,
         public readonly ?string $bankRef = null,
         public readonly ?float $balance = null,
+        public readonly bool $currencyStated = true,
+        public readonly ?float $originalAmount = null,
+        public readonly ?string $originalCurrency = null,
     ) {}
 
     /**
@@ -39,6 +49,9 @@ final class ParsedBankEmailNotice
             'message' => $this->message,
             'bank_ref' => $this->bankRef,
             'balance' => $this->balance,
+            'currency_stated' => $this->currencyStated,
+            'original_amount' => $this->originalAmount,
+            'original_currency' => $this->originalCurrency,
         ];
     }
 }

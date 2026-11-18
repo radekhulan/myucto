@@ -17,11 +17,13 @@ use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 
 /**
- * Postupné čerpání zálohy konceptem faktury (smlouvy s milníky), viz {@see AdvancePartialDrawdown}.
+ * Čerpání záloh konceptem faktury (víc záloh na jedné faktuře i postupné čerpání jedné zálohy
+ * víc fakturami), viz {@see AdvancePartialDrawdown}.
  *
- *   GET    /api/invoices/{id}/advance-drawdown  zálohy odběratele s nevyčerpanou částkou
- *   POST   /api/invoices/{id}/advance-drawdown  body: {proforma_id, amount} — odečte část zálohy
- *   DELETE /api/invoices/{id}/advance-drawdown  odebere odpočet i vazbu na zálohu
+ *   GET    /api/invoices/{id}/advance-drawdown  zálohy odběratele s nevyčerpanou částkou a čerpáním konceptu
+ *   POST   /api/invoices/{id}/advance-drawdown  body: {proforma_id, amount | percent, basis?}: nastaví čerpání
+ *          zálohy (částka nebo procento plnění faktury, basis gross = s DPH, net = bez DPH)
+ *   DELETE /api/invoices/{id}/advance-drawdown  odebere čerpání zálohy `?proforma_id=`, bez něj všech záloh
  */
 final class AdvanceDrawdownAction
 {
@@ -60,13 +62,18 @@ final class AdvanceDrawdownAction
         }
         $body = (array) ($request->getParsedBody() ?? []);
         $proformaId = (int) ($body['proforma_id'] ?? 0);
-        $amount = is_numeric($body['amount'] ?? null) ? (float) $body['amount'] : 0.0;
-        if ($proformaId <= 0 || $amount <= 0.0) {
-            return Json::error($response, 'invalid_input', 'Zadejte zálohu (proforma_id) a kladnou čerpanou částku (amount).', 400);
+        $amount = is_numeric($body['amount'] ?? null) ? (float) $body['amount'] : null;
+        $percent = is_numeric($body['percent'] ?? null) ? (float) $body['percent'] : null;
+        $basis = (string) ($body['basis'] ?? AdvancePartialDrawdown::BASIS_GROSS);
+        if ($proformaId <= 0 || ($amount === null) === ($percent === null) || ($amount ?? $percent) <= 0.0) {
+            return Json::error($response, 'invalid_input', 'Zadejte zálohu (proforma_id) a kladnou čerpanou částku (amount), nebo procento plnění faktury (percent).', 400);
         }
 
         try {
-            $result = $this->drawdown->apply(SupplierGuard::currentId($request), $id, $proformaId, $amount);
+            $supplierId = SupplierGuard::currentId($request);
+            $result = $percent !== null
+                ? $this->drawdown->applyPercent($supplierId, $id, $proformaId, $percent, $basis)
+                : $this->drawdown->apply($supplierId, $id, $proformaId, (float) $amount, $basis);
         } catch (\InvalidArgumentException $e) {
             return Json::error($response, 'invalid_input', $e->getMessage(), 400);
         } catch (\DomainException $e) {
@@ -94,13 +101,21 @@ final class AdvanceDrawdownAction
         if ($deny = $this->denyIfLocked($request, $response, $this->locks->forInvoice($invoice), 'invoice', $id)) {
             return $deny;
         }
+        $query = $request->getQueryParams();
+        $proformaId = isset($query['proforma_id']) && is_numeric($query['proforma_id']) ? (int) $query['proforma_id'] : null;
+        if ($proformaId !== null && $proformaId <= 0) {
+            return Json::error($response, 'invalid_input', 'Neplatná záloha (proforma_id).', 400);
+        }
         try {
-            $this->drawdown->remove(SupplierGuard::currentId($request), $id);
+            $removed = $this->drawdown->remove(SupplierGuard::currentId($request), $id, $proformaId);
         } catch (\DomainException $e) {
             return Json::error($response, 'drawdown_failed', $e->getMessage(), 409);
         }
 
-        $this->log($request, 'invoice.advance_drawdown_removed', $id, ['proforma_id' => $invoice['parent_invoice_id'] ?? null]);
+        $this->log($request, 'invoice.advance_drawdown_removed', $id, [
+            'proforma_id'  => $proformaId ?? ($removed[0] ?? null),
+            'proforma_ids' => $removed,
+        ]);
         return Json::ok($response, $this->repo->find($id));
     }
 

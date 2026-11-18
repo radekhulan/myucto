@@ -290,7 +290,7 @@ Konektor načítá zaúčtované pohyby (`BOOK`) jako `bank_api` do společné e
 
 **Odesílání platebních příkazů.** Souhlas v bance se žádá i pro zakládání plateb (`siblings.payments`), jen když zapnete volbu **Povolit odesílání platebních příkazů**. Volba je ve výchozím stavu vypnutá a připojení pak slouží jen ke čtení. Napojení ukazuje, zda je odesílání pro účet povolené. Připojení, které vzniklo jen pro čtení, pohyby načítá dál. Chcete-li z něj odesílat příkazy, zvolte **Udělit nebo obnovit souhlas v bance** se zapnutou volbou odesílání; nový souhlas jen nahradí uložený přístup a čtení výpisů nepřeruší. Banka musí účet označit jako vhodný pro platby přes Premium API a váš uživatel potřebuje dispoziční právo k zadávání plateb (George: **Platby**, George Business: **Zadávat platební příkazy**). U dávky v George se spolupodpisem je potřeba právo podepisovat hromadné platby. Banka účtuje za každý účet připojený k Premium API poplatek podle svého ceníku.
 
-Odesílat lze jen tuzemské platby v CZK na český účet, nejvýše 400 položek v jednom příkazu. Banka dávku jen připraví k podpisu. Podepíšete ji tlačítkem **Podepsat v George**, které vás přesměruje do banky a po podpisu zpět do MyÚčta. Bez podpisu se žádná platba neprovede a nepodepsaná dávka po 30 dnech propadne. Pravidla odeslání a stavy jsou v [§ 30.11.6](#30116-odeslani-prikazu-do-banky-pravidla).
+Odesílat lze jen tuzemské platby v CZK na český účet, nejvýše 400 položek v jednom příkazu. Banka příkaz jen připraví k podpisu. Podepíšete ho tlačítkem **Podepsat v George**, které vás přesměruje do banky a po podpisu zpět do MyÚčta. V George (i George Business) se platby založené přes API objeví až po zahájení podpisu tímto tlačítkem. Bez podpisu se žádná platba neprovede a nepodepsaný příkaz po 30 dnech propadne. Pravidla odeslání a stavy jsou v [§ 30.11.6](#30116-odeslani-prikazu-do-banky-pravidla).
 
 #### 30.11.5.3 Raiffeisenbank (5500)
 
@@ -364,11 +364,12 @@ Stav zahájeného importu znamená pouze převzetí dávky ke zpracování, niko
 
 #### 30.11.6.1 Česká spořitelna: zakládání plateb, podpis a stav
 
-Česká spořitelna nepřijímá soubor. Aplikace založí každou platbu příkazu zvlášť a pak je seskupí do jedné dávky k podpisu. API banky nemá ochranu proti dvojímu odeslání, proto aplikace každou platbu zapíše do evidence dřív, než ji bance pošle, a k tomu uloží identifikátor, který banka vrátí.
+Česká spořitelna nepřijímá soubor. Aplikace založí každou platbu příkazu zvlášť a pak je seskupí do jedné dávky k podpisu. Příkaz s jedinou platbou se do dávky neseskupuje a podepisuje se přímo tato platba. API banky nemá ochranu proti dvojímu odeslání, proto aplikace každou platbu zapíše do evidence dřív, než ji bance pošle, a k tomu uloží identifikátor, který banka vrátí. Částky se bance posílají přesně na haléře (číslo s nejvýše dvěma desetinnými místy).
 
 | Stav u příkazu | Co znamená | Co udělat |
 |---|---|---|
-| Čeká na podpis | Banka připravila dávku k podpisu | Klikněte na **Podepsat v George** a dávku podepište. |
+| Čeká na podpis | Banka příkaz přijala a připravila k podpisu | Klikněte na **Podepsat v George** a příkaz podepište. |
+| Odmítnuto | Banka odmítla platbu nebo dávku; žádná platba se neprovede | Podle důvodu banky u příkazu a u jednotlivých plateb opravte příkaz a připravte nový. |
 | Podepsáno | Dávka je podepsaná, banka platby zpracovává | Nic, stav se ověřuje automaticky. |
 | Provedeno | Banka provedla všechny platby | Úhrady faktur potvrdí výpis. |
 | Část plateb odmítnuta | Některé platby banka odmítla | Ověřte je v bankovnictví a nezaplacené doklady uhraďte novým příkazem. |
@@ -378,9 +379,10 @@ Stav zahájeného importu znamená pouze převzetí dávky ke zpracování, niko
 
 - **Pokračování po přerušení** založí jen platby, které banka podle evidence ještě nemá, a dokončí dávku. Už založené platby se znovu neposílají. Pokračuje se jen přes stejné napojení a jen u nezměněného příkazu. Když pokračování narazí na přechodnou překážku (na účtu právě běží načítání výpisů, bezpečnostní odstup mezi požadavky), aplikace ji ohlásí a odeslání zůstane připravené k dalšímu pokusu.
 - **Shodné platby** (stejný účet příjemce, částka i symboly) aplikace odmítne dřív, než cokoli založí, a vypíše čísla řádků. Banka by takovou dávku odmítla až po založení plateb. Sloučte je do jedné platby, nebo je odlište například specifickým symbolem.
+- **Odmítnutí bankou.** Když banka některou platbu odmítne, aplikace pošle i zbývající platby, aby u každé ukázala odpověď banky, ale dávku k podpisu nezaloží. U příkazu se zobrazí důvod banky (text hlášky, kód chyby a pole platby, např. `WRONG_DECIMAL_PLACES`, pole `amount.instructedAmount.value`) a seznam plateb: odmítnuté s důvodem a přijaté s identifikátorem banky. Přijaté platby zůstanou bez podpisu, neprovedou se a po 30 dnech propadnou. Stejně skončí příkaz, jehož dávku banka odmítla. Tentýž příkaz nelze odeslat znovu; po opravě připravte nový.
 - **Nejasný výsledek** nastane, když spojení vypadne v okamžiku, kdy banka platbu nebo dávku zakládala. Takovou položku aplikace znovu neposílá a odeslání zastaví k ruční kontrole. U příkazu se pak zobrazí seznam plateb, které banka založila nebo mohla založit (částka, účet, VS a identifikátor banky). Zkontrolujte je v George a nepotřebné zrušte dřív, než připravíte nový příkaz. Nepodepsané platby se neprovedou a po 30 dnech propadnou.
 - **Archivace a zahození.** API České spořitelny založené platby zrušit neumí. Než archivujete příkaz nebo zahodíte mzdovou dávku, zrušte platby a dávku čekající na podpis v George ručně. Archivovaný příkaz ani zahozenou dávku už aplikace nepodepíše, nedokončí ani se na ně nedotazuje.
-- **Podpis** probíhá vždy v bance. Tlačítko **Podepsat v George** lze použít znovu, když podpis vyprší nebo ho nedokončíte; podepisuje se stále stejná dávka, žádné nové platby nevznikají.
+- **Podpis** probíhá vždy v bance a zahajuje ho aplikace tlačítkem **Podepsat v George**; dokud ho nezahájíte, platby v George nenajdete. Tlačítko lze použít znovu, když podpis vyprší nebo ho nedokončíte; podepisuje se stále stejná dávka nebo platba, žádné nové platby nevznikají.
 - **Stav** banka nehlásí sama. Aplikace se dotáže po návratu z podpisu, na tlačítko **Ověřit stav v bance** a automaticky v cronu bankovních napojení: během podpisu zhruba po minutě, u podepsané dávky před splatností dvakrát denně, kolem splatnosti po 2 hodinách a později jednou denně. Banka stav celé dávky nevrací, ptá se proto na jednotlivé platby, jen dokud nemají konečný stav, a jeden běh cronu má omezený počet dotazů. Banka stav plateb drží 34 dní, potom se dotazy zastaví.
 - Podpis a ověření stavu vyžadují stejná oprávnění jako odeslání (zápis k bankovním účtům a platebním příkazům, u mezd k mzdovým platbám) a přihlášení v aplikaci; přes API token je dokončit nelze.
 
@@ -481,7 +483,7 @@ Přepínač **Načítat PDF výpisy z příloh** u IMAP účtu zapne třetí vě
 
 Aby se výpis naimportoval, musí splnit obě podmínky:
 
-1. **Je to výpis banky, kterou umíme přečíst** - Komerční banka, ČSOB, Česká spořitelna, MONETA Money Bank, Raiffeisenbank, Banka CREDITAS. Rozhoduje textová vrstva PDF, ne název souboru.
+1. **Je to výpis banky, kterou umíme přečíst** - Komerční banka, ČSOB, Česká spořitelna, MONETA Money Bank, Raiffeisenbank, Banka CREDITAS, Revolut Business. Rozhoduje textová vrstva PDF, ne název souboru.
 2. **Je k účtu vaší firmy** - číslo účtu z hlavičky výpisu musí sedět na právě jeden bankovní účet firmy (záložka *Měny a účty*). U víceměnového účtu se sdíleným číslem rozhoduje ještě měna výpisu.
 
 Cizí výpis se tím nikdy nestane vaším dokladem: kdyby vám někdo poslal do schránky výpis jiné firmy, skončí jako *Výpis k cizímu účtu* a nic nezaloží.
@@ -562,6 +564,9 @@ Povinná vytěžená pole: `amount`, `currency`, `posted_at`, `recipient_account
 - `message`
 - `bank_ref`
 - `balance` (disponibilní zůstatek účtu z avíza - zobrazí se v detailu měsíčního avízo-výpisu a promítne se do přehledu **Stavy na účtech**)
+- `original_amount` a `original_currency` (částka a měna nákupu u platby kartou v cizí měně; `amount` a `currency` pak nesou částku v měně účtu)
+
+Pohyb se na účtu eviduje vždy v měně účtu. Avízo o platbě kartou v cizí měně, které uvádí jen částku nákupu (například 18,00 EUR na korunovém účtu), pohyb nezaloží: banka v tu chvíli částku jen blokuje a korunovou částku určí až při zúčtování svým kurzem. Zpráva skončí ve stavu **match_failed** s vysvětlením a pohyb doplní bankovní výpis (GPC/ABO, CAMT nebo API). Uvádí-li avízo i částku v měně účtu, zachyťte ji do `amount` a `currency` a cizí částku do `original_amount` a `original_currency`; pohyb pak nese obě. Měnu účtu přebírá pohyb jen u avíz, která měnu vůbec neuvádějí.
 
 Regex parser používá první zachycenou skupinu nebo pojmenovanou skupinu se stejným názvem jako pole. Pro částku umí formáty typu `+1.234,56` i mezery mezi tisíci, datum například `01. 06. 2026 10:15`.
 

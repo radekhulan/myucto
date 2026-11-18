@@ -56,6 +56,7 @@ final class BankMovementListService
                 'sort' => isset($query['sort']) && is_string($query['sort'])
                     && ($doubleEntry || $query['sort'] !== 'posting') ? $query['sort'] : null,
                 'direction' => isset($query['direction']) && is_string($query['direction']) ? $query['direction'] : null,
+                'id' => isset($query['id']) && (int) $query['id'] > 0 ? (int) $query['id'] : null,
             ],
         );
         $txIds = array_map('intval', array_column($result['items'], 'id'));

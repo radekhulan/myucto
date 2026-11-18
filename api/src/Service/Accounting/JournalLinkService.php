@@ -299,12 +299,18 @@ final class JournalLinkService
         // 8) Daňový doklad k platbě a konečná faktura zálohy: protějškem je úhrada ZÁLOHY
         //    (viz paymentsOfDocument). Stačí, že záloha nějakou úhradu má.
         if ($invoices !== []) {
+            // Záloha konečné faktury: vazba dokladu, nebo odpočtový řádek faktury s víc zálohami.
             foreach ($this->rows(
-                "SELECT ch.id FROM invoices ch
-                   JOIN invoices pf ON pf.id = ch.parent_invoice_id AND pf.supplier_id = ch.supplier_id
+                "SELECT DISTINCT ch.id FROM invoices ch
+                   JOIN (SELECT id AS child_id, parent_invoice_id AS advance_id FROM invoices
+                          WHERE supplier_id = ? AND parent_invoice_id IS NOT NULL AND id IN (" . $this->placeholders($invoices) . ")
+                         UNION
+                         SELECT invoice_id, advance_invoice_id FROM invoice_items
+                          WHERE advance_invoice_id IS NOT NULL AND invoice_id IN (" . $this->placeholders($invoices) . ")) lnk
+                     ON lnk.child_id = ch.id
+                   JOIN invoices pf ON pf.id = lnk.advance_id AND pf.supplier_id = ch.supplier_id
                   WHERE ch.supplier_id = ? AND pf.invoice_type = 'proforma'
                     AND ch.invoice_type IN ('invoice', 'tax_document')
-                    AND ch.id IN (" . $this->placeholders($invoices) . ")
                     AND (EXISTS (SELECT 1 FROM invoice_payments ip
                                   WHERE ip.supplier_id = pf.supplier_id AND ip.invoice_id = pf.id
                                     AND ip.bank_transaction_id IS NOT NULL)
@@ -312,7 +318,7 @@ final class JournalLinkService
                                      WHERE pm.supplier_id = pf.supplier_id AND pm.invoice_id = pf.id)
                          OR EXISTS (SELECT 1 FROM cash_documents cd
                                      WHERE cd.supplier_id = pf.supplier_id AND cd.invoice_id = pf.id))",
-                array_merge([$supplierId], $invoices)
+                array_merge([$supplierId], $invoices, $invoices, [$supplierId])
             ) as $r) {
                 $mark((int) $r['id'], 'invoice');
             }
@@ -567,8 +573,7 @@ final class JournalLinkService
         // Daňový doklad k platbě i konečná faktura vlastní úhradu nemají — zaplatila se
         // ZÁLOHA, na kterou ukazují. Bez tohohle by z nich panel „Souvisí" nevedl k bance,
         // přestože právě ta platba je důvodem jejich vzniku.
-        $advanceId = $this->advanceParentOf($supplierId, $docType, $docId);
-        if ($advanceId !== null) {
+        foreach ($this->advanceParentsOf($supplierId, $docType, $docId) as $advanceId) {
             $this->addRef($refs, $docType, $advanceId, 'document', null);
             foreach ($this->paymentsOfDocument($supplierId, $docType, $advanceId) as $r) {
                 if ($r['kind'] === $docType) continue;
@@ -580,13 +585,21 @@ final class JournalLinkService
     }
 
     /**
-     * Záloha, ke které doklad patří: u vydaných proforma přes `parent_invoice_id`
-     * (DDKP i konečná faktura), u přijatých zálohová PF přes `advance_purchase_invoice_id`
+     * Zálohy, ke kterým doklad patří: u vydaných proforma přes `parent_invoice_id`
+     * (DDKP i konečná faktura) a u faktury čerpající víc záloh proformy z odpočtových
+     * řádků ({@see \MyInvoice\Service\Invoice\AdvanceDrawLinks}), u přijatých zálohová PF přes `advance_purchase_invoice_id`
      * (konečná faktura) nebo `parent_purchase_invoice_id` (přijatý DDKP). Dobropis
      * a penále nesou `parent_*` taky, ale rodičem není záloha, proto kontrola typu rodiče.
      */
-    private function advanceParentOf(int $supplierId, string $docType, int $docId): ?int
+    /** @return list<int> */
+    private function advanceParentsOf(int $supplierId, string $docType, int $docId): array
     {
+        if ($docType === 'invoice') {
+            $advances = \MyInvoice\Service\Invoice\AdvanceDrawLinks::advancesOfFinal($this->db->pdo(), $supplierId, $docId);
+            if ($advances !== []) {
+                return $advances;
+            }
+        }
         $sql = $docType === 'invoice'
             ? "SELECT pf.id FROM invoices d
                  JOIN invoices pf ON pf.id = d.parent_invoice_id AND pf.supplier_id = d.supplier_id
@@ -599,7 +612,7 @@ final class JournalLinkService
                                     ELSE d.advance_purchase_invoice_id END
                 WHERE d.id = ? AND d.supplier_id = ? AND adv.document_kind = 'advance'";
         $rows = $this->rows($sql, [$docId, $supplierId]);
-        return $rows === [] ? null : (int) $rows[0]['id'];
+        return $rows === [] ? [] : [(int) $rows[0]['id']];
     }
 
     /**
@@ -622,14 +635,22 @@ final class JournalLinkService
             if ($r['kind'] === 'purchase_invoice') $advances[] = $r['id'];
         }
         if ($proformas !== []) {
+            // DDKP a konečné faktury: vazba dokladu i faktura čerpající zálohu odpočtovým řádkem.
             foreach ($this->rows(
                 "SELECT ch.id FROM invoices ch
                    JOIN invoices pf ON pf.id = ch.parent_invoice_id AND pf.supplier_id = ch.supplier_id
                   WHERE ch.supplier_id = ? AND pf.invoice_type = 'proforma'
                     AND ch.invoice_type IN ('invoice', 'tax_document') AND ch.status <> 'cancelled'
-                    AND pf.id IN (" . $this->placeholders($proformas) . ')
-                  ORDER BY ch.id',
-                array_merge([$supplierId], $proformas)
+                    AND pf.id IN (" . $this->placeholders($proformas) . ")
+                 UNION
+                 SELECT ch.id FROM invoice_items ii
+                   JOIN invoices ch ON ch.id = ii.invoice_id
+                   JOIN invoices pf ON pf.id = ii.advance_invoice_id AND pf.supplier_id = ch.supplier_id
+                  WHERE ii.advance_invoice_id IN (" . $this->placeholders($proformas) . ")
+                    AND ch.supplier_id = ? AND pf.invoice_type = 'proforma'
+                    AND ch.invoice_type = 'invoice' AND ch.status <> 'cancelled'
+                  ORDER BY id",
+                array_merge([$supplierId], $proformas, $proformas, [$supplierId])
             ) as $r) {
                 $this->addRef($byKey, 'invoice', (int) $r['id'], 'document', null);
             }

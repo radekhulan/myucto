@@ -183,6 +183,69 @@ describe('Membership issue flow', () => {
     w.unmount()
   })
 
+  it('shows the member symbol only as a hint so the server keeps the symbol of an earlier charge', async () => {
+    const w = mounted({ member: {id: 9, member_number: '00123', label: 'Synthetic member'} })
+    await fill(w)
+    const field = w.get('[data-field="variable-symbol"]')
+    expect((field.element as HTMLInputElement).value).toBe('')
+    expect(field.attributes('placeholder')).toBe('00123')
+    // Opětovné vystavení po stornu: server použije VS dřívějšího předpisu, předvyplněné číslo by ho přepsalo.
+    api.preview.mockResolvedValue({...previewResult(), variable_symbol: '777'})
+    await review(w)
+    expect(api.preview.mock.calls[0]![1].request).not.toHaveProperty('variable_symbol')
+    expect(w.get('[data-field="review-variable-symbol"]').text()).toBe('777')
+    w.unmount()
+  })
+
+  it('hints the symbol of a loaded earlier charge with the same title and period instead of the member number', async () => {
+    const w = mounted({ member: {id: 9, member_number: '00123', label: 'Synthetic member'}, caseSymbols: {'DUES-2026|2026-01-01|2026-12-31': '777'} })
+    await fill(w)
+    expect(w.get('[data-field="variable-symbol"]').attributes('placeholder')).toBe('777')
+    await w.get('[data-field="title-key"]').setValue('DUES-2027')
+    expect(w.get('[data-field="variable-symbol"]').attributes('placeholder')).toBe('00123')
+    w.unmount()
+  })
+
+  it('sends only an explicitly typed symbol with leading zeros and clears it for another member', async () => {
+    const w = mounted({ member: {id: 9, member_number: '00123', label: 'Synthetic member'} })
+    await fill(w)
+    await w.get('[data-field="variable-symbol"]').setValue('00045')
+    api.preview.mockResolvedValue({...previewResult(), variable_symbol: '00045'})
+    await review(w)
+    expect(api.preview.mock.calls[0]![1].request.variable_symbol).toBe('00045')
+    expect(w.get('[data-field="review-variable-symbol"]').text()).toBe('00045')
+    await w.setProps({member: {id: 10, member_number: '00999', label: 'Other synthetic member'}})
+    expect((w.get('[data-field="variable-symbol"]').element as HTMLInputElement).value).toBe('')
+    expect(w.get('[data-field="variable-symbol"]').attributes('placeholder')).toBe('00999')
+    expect(w.find('[data-section="issue-preview"]').exists()).toBe(false)
+    w.unmount()
+  })
+
+  it('leaves nonnumeric member numbers to the server and displays the generated symbol', async () => {
+    const w = mounted()
+    await fill(w)
+    api.preview.mockResolvedValue({...previewResult(), variable_symbol: '1234567890'})
+    await review(w)
+    expect(api.preview.mock.calls[0]![1].request).not.toHaveProperty('variable_symbol')
+    expect(w.get('[data-field="review-variable-symbol"]').text()).toBe('1234567890')
+    w.unmount()
+  })
+
+  it('blocks malformed symbols and does not offer a shared symbol in a batch', async () => {
+    const w = mounted()
+    await fill(w)
+    await w.get('[data-field="variable-symbol"]').setValue('12-34')
+    expect(w.get('[data-action="issue-preview"]').attributes('disabled')).toBeDefined()
+    // Samé nuly nemají klíč shody, platbu by nikdy nenašly.
+    await w.get('[data-field="variable-symbol"]').setValue('0000')
+    expect(w.get('[data-action="issue-preview"]').attributes('disabled')).toBeDefined()
+    w.unmount()
+    const batch = mounted({batchMode: true})
+    await flushPromises()
+    expect(batch.find('[data-field="variable-symbol"]').exists()).toBe(false)
+    batch.unmount()
+  })
+
   it('restores all saved batch overrides after options load and requires a new preview', async () => {
     const {member_id: _member, ...initialRequest} = {...expectedRequest, rate_id: 42, nonreciprocal: true as const}
     const w = mounted({batchMode: true, initialRequest})

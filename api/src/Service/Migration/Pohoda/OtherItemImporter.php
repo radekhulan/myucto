@@ -89,14 +89,16 @@ final class OtherItemImporter
                     $p->warn(self::STEP, 'other_item_review', "Doklad {$number} (" . self::label($agenda) . ') má částky, měnu nebo zálohu, které převod do agendy nepřevezme; zůstává jen v deníku.', ['document_no' => $number]);
                     continue;
                 }
-                $entries = [];
+                $candidates = [];
                 foreach ($journal as $journalKey => $entryId) {
                     $parts = explode('|', (string) $journalKey, 4);
                     if (count($parts) === 4 && $parts[1] === $source && $parts[2] === $number
                         && (int) $parts[0] >= $ctx->year() - 1 && (int) $parts[0] <= $ctx->year()) {
-                        $entries[(int) $entryId] = true;
+                        $candidates[] = ['year' => (int) $parts[0], 'date' => $parts[3], 'id' => (int) $entryId];
                     }
                 }
+                // Stejné číslo dokladu v minulé agendě je jiný doklad ({@see DocumentLinker::agendaEntries()}).
+                $entries = array_fill_keys(array_column(DocumentLinker::agendaEntries($candidates, $ctx->year(), $ctx->calendar->periodStart($ctx->year())), 'id'), true);
                 if ($entries === []) {
                     // Bez vlastního zápisu: předpis nese jiný doklad (nebo ho nese počáteční stav).
                     $rule = PohodaXml::text($header, 'accounting/ids');

@@ -1,0 +1,9 @@
+{
+    "errors": [
+        {
+            "error": "WRONG_DECIMAL_PLACES",
+            "scope": "amount.instructedAmount.value",
+            "message": "Chybný počet desetinných míst v částce."
+        }
+    ]
+}

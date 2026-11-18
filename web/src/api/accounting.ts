@@ -2292,15 +2292,19 @@ export interface SaldoAdvanceFinal {
 }
 
 export interface SaldoAdvanceDeduction {
-  id: number
+  /** null = čerpání odpočtovým řádkem faktury s víc zálohami (v saldokontu se neruší). */
+  id: number | null
   doc_type: SaldoSettleDocType
   final_id: number
   final_no: string
   advance_id: number
   advance_no: string
   amount: number
-  /** import = převzaté z převodu (v saldokontu se neruší), saldo = zadané v saldokontu. */
-  source: 'import' | 'saldo'
+  /**
+   * import = převzaté z převodu (v saldokontu se neruší), saldo = zadané v saldokontu,
+   * invoice = odpočtový řádek faktury, která čerpá víc záloh (mění ho jen oprava faktury).
+   */
+  source: 'import' | 'saldo' | 'invoice'
   posted_on: string | null
   deletable: boolean
 }
@@ -2655,6 +2659,18 @@ export interface PostingOriginItemAccount {
   product_id: number | null
   product_name: string | null
   used: boolean
+}
+
+/**
+ * Náhled serveru, zda jde zaúčtovaný doklad (interní doklad, ostatní položka) smazat
+ * i se zápisem v deníku. `needs_ack` = uzamčené datum, smazání chce vědomé potvrzení;
+ * `allowed: false` nese důvod, proč zbývá storno. Rozhoduje až samotné smazání.
+ */
+export interface PostedDeletion {
+  allowed: boolean
+  needs_ack: boolean
+  code: string | null
+  message: string | null
 }
 
 export const accountingApi = {

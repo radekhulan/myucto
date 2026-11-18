@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
   bank: { matchCandidates: vi.fn(), splitSuggestions: vi.fn(), matchMultiple: vi.fn(), matchMultiplePurchases: vi.fn() },
   purchases: vi.fn(), invoices: vi.fn(), reload: vi.fn(), toast: vi.fn(),
 }))
+vi.mock('@/api/membershipBank', () => ({ membershipBankApi: { candidates: vi.fn().mockResolvedValue({ candidates: [], next_after_id: null }) } }))
 vi.mock('@/api/bank', () => ({ bankApi: mocks.bank }))
 vi.mock('@/api/purchaseInvoices', () => ({ purchaseInvoicesApi: { listGrouped: mocks.purchases } }))
 vi.mock('@/api/invoices', () => ({ invoicesApi: { searchMatchable: mocks.invoices } }))

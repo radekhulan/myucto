@@ -173,6 +173,8 @@ export interface PurchaseInvoiceItem {
   /** Intrastat z dokladu: při příjmu se doplní na kartu, pokud tam chybí. FE je MUSÍ posílat zpět. */
   intrastat_cn8_code?: string | null
   intrastat_country_of_origin?: string | null
+  /** Odpočet poskytnuté zálohy s DDKP (migrace 2307): záloha, kterou záporný řádek odečítá. FE ho MUSÍ posílat zpět. */
+  advance_purchase_invoice_id?: number | null
   /** Karta drobného majetku vzniklá z téhle položky (§DM), pokud existuje — read-only join. */
   small_asset?: { id: number; name: string; status: 'in_use' | 'disposed' | 'sold' } | null
 }
@@ -518,6 +520,8 @@ export interface PurchaseInvoice {
   linked_advance_unpaid?: boolean
   /** Vyúčtovací faktura bez vazby: existuje nespárovaná záloha téhož dodavatele? */
   has_advance_candidates?: boolean
+  /** Konečná faktura k záloze s DDKP bez odpočtu zálohy (hrozí dvojí odpočet DPH). */
+  advance_deduction_missing?: boolean
   /** Záloha bez vyúčtování: existuje nepropojená finální faktura téhož dodavatele? */
   has_settlement_candidates?: boolean
   /**
@@ -710,6 +714,8 @@ export interface PurchaseInvoicePayload {
   project_id?: number | null
   /** Dobropis (credit_note): ID opravované přijaté faktury (migrace 1096). */
   parent_purchase_invoice_id?: number | null
+  /** Jen při založení: záloha, kterou nová konečná faktura vyúčtovává (u uloženého dokladu link-advance). */
+  advance_purchase_invoice_id?: number | null
   /** Ruční rekapitulace DPH dle dokladu (§ 73). null/[] = počítat standardně. */
   vat_overrides?: PurchaseVatOverride[] | null
   /** Prázdné pole = použít hlavičkový režim faktury. */
@@ -746,7 +752,20 @@ export interface PurchaseInvoicePayload {
     accrual_from?: string | null
     accrual_to?: string | null
     stock_item_id?: number | null
+    advance_purchase_invoice_id?: number | null
   }>
+}
+
+/** Řádek odpočtu zálohy podle DDKP (GET /purchase-invoices/advance-deduction-lines). Částky záporné. */
+export interface PurchaseAdvanceDeductionLine {
+  tax_document_id: number
+  tax_document_number: string
+  vat_rate_id: number
+  vat_rate: number
+  vat_classification_code: string | null
+  base: number
+  vat: number
+  gross: number
 }
 
 export interface PurchaseListFilters {
@@ -1057,6 +1076,14 @@ export const purchaseInvoicesApi = {
     api.delete<PurchaseInvoice>(`/purchase-invoices/${id}/link-advance`).then(r => r.data),
   dismissAdvanceSuggestion: (id: number) =>
     api.delete<PurchaseInvoice>(`/purchase-invoices/${id}/advance-suggestion`).then(r => r.data),
+  // Nová (neuložená) konečná faktura: zálohy dodavatele k navázání při uložení.
+  newInvoiceAdvanceCandidates: (params: { vendor_id: number; currency_id: number; total?: number }) =>
+    api.get<{ candidates: PurchaseInvoiceBrief[] }>('/purchase-invoices/advance-candidates', { params })
+      .then(r => r.data.candidates),
+  // Řádky odpočtu zálohy podle jejích DDKP (prázdné = záloha bez DDKP).
+  advanceDeductionLines: (advanceId: number) =>
+    api.get<{ advance_id: number; lines: PurchaseAdvanceDeductionLine[] }>('/purchase-invoices/advance-deduction-lines', { params: { advance_id: advanceId } })
+      .then(r => r.data.lines),
 
   uploadPdf: (id: number, file: File) => {
     const fd = new FormData()

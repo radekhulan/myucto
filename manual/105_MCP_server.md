@@ -215,8 +215,11 @@ Při ručním režimu daňového dokladu k platbě postupujte takto:
    vrátí již existující doklad.
 
 Čerpání vyžaduje vystavený daňový doklad k platbě, stejnou protistranu a měnu
-a nevyčerpanou částku zálohy; OSS nepodporuje. Opakované čerpání na stejném
-konceptu nahradí dosavadní odpočet. Odpojení vazby vydané i přijaté faktury
+a nevyčerpanou částku zálohy; OSS nepodporuje. Jeden koncept může čerpat víc
+záloh: každé volání `apply_invoice_advance_drawdown` přidá zálohu `proforma_id`,
+nebo nahradí čerpání téže zálohy, ostatní zálohy zůstanou. Částka je `amount`
+(`basis` `gross` s DPH, nebo `net` bez DPH), nebo `percent` z plnění faktury.
+Odpočty víc záloh nesmí převýšit plnění faktury. Odpojení vazby vydané i přijaté faktury
 a odebrání čerpání se provedou až s `confirm: true`. Bez potvrzení asistent
 ukáže náhled. Samotné odpojení vazby ponechá odečtenou zálohu na dokladu;
 odebrání čerpání odstraní i odpočtové řádky konceptu.
@@ -322,25 +325,29 @@ Podstatné vlastnosti:
 
 | Oblast | Rozsah |
 |---|---|
-| Fakturace | čtení, založení, úprava a smazání konceptu (hlavička i jednotlivé položky), vystavování, odesílání a příjemci, storno a dobropis, kopie dokladu, vyúčtování a propojení zálohy, penalizační faktura, evidence a mazání úhrad, daňový doklad k platbě, platební kalendář s rozpisem plateb, ISDOC, upomínky jednotlivě i hromadně |
+| Fakturace | čtení, založení, úprava a smazání konceptu (hlavička i jednotlivé položky včetně účtů, předkontací, členění DPH a dimenzí), vystavování, odesílání a příjemci, storno nezaúčtovaného dokladu a dobropis, zápočet dobropisu, vratka odběrateli, kopie dokladu, vyúčtování a propojení zálohy, penalizační faktura, evidence a mazání úhrad, daňový doklad k platbě, platební kalendář s rozpisem plateb, výkaz práce do položek, náhled zaúčtování, ISDOC, upomínky jednotlivě i hromadně |
 | Pravidelná fakturace | čtení šablon a vygenerovaných faktur, založení, úprava, smazání, pozastavení, obnovení, přeplánování a ruční vygenerování faktury |
-| Odběratelé | vyhledání, založení a úprava karty, dotažení údajů z ARES |
-| Přijaté faktury | čtení, založení a úprava konceptu (hlavička i jednotlivé položky), přijetí, úhrada, storno, zálohy, zakázka, druh nákladu, účet dodavatele, příprava příkazu k úhradě; zaúčtování a odeslání do banky ne (viz [§ 105.8.8.4](#105884-prijate-faktury)) |
+| Odběratelé | vyhledání, založení a úprava karty, dotažení údajů z ARES, bankovní účty partnera, ověření plátcovství DPH, zakázky klienta, duplicitní karty, archivace a obnovení karty |
+| Banka | výpisy, zůstatky účtů, přehled a detail pohybů, kandidáti párování, ruční spárování s jedním i více doklady, zrušení párování nezaúčtovaného pohybu, ignorování, přijetí a zamítnutí návrhu, koncept přijaté faktury z platby; **párování se přes MCP nezaúčtuje** (viz [§ 105.8.8.7](#105887-banka-a-parovani-plateb)) |
+| Přijaté faktury | čtení, založení a úprava konceptu (hlavička i jednotlivé položky včetně účtů, předkontací a dimenzí), přijetí, úhrada, storno nezaúčtovaného dokladu, zálohy, zápočet dobropisu, zakázka, druh nákladu a účet po položkách, oprava nároku na odpočet, náhled zaúčtování, účet dodavatele, příprava příkazu k úhradě; zaúčtování a odeslání do banky ne (viz [§ 105.8.8.4](#105884-prijate-faktury)) |
 | Výkazy práce a materiálu | přidání a odebrání řádků u konceptu faktury, automatická hodinová sazba |
 | Zakázky | **čtení i zápis** - založení, úprava, archivace, rozpočty a ziskovost |
-| Dokumenty | metadata, fulltext a omezené čtení vytěženého textu; úprava tagů a vazeb; nahrání a stažení originálu |
+| Dokumenty | metadata, fulltext a omezené čtení vytěženého textu; úprava názvu, popisu, tagů, vazeb a složky; složky, tagy a soubory dokumentu; nahrání a stažení originálu |
+| Požadavky na doklady | čtení, vyžádání dokladu od klienta (i k bankovnímu pohybu), uzavření a znovuotevření požadavku |
 | Soubory a přílohy | stažení PDF a ISDOC vydané faktury, příloh, PDF přijaté faktury a originálu dokumentu; nahrání přílohy faktury, PDF přijaté faktury, dokumentu a obrázku ke zboží; založení přijaté faktury ze souboru ISDOC (viz [§ 105.8.8.6](#105886-soubory-a-prilohy)) |
 | Kniha jízd | **čtení i zápis** - vozidla, jízdy a tankování; daňový souhrn jen ke čtení |
 | Pohledávky a závazky | zaplacené / nezaplacené / po splatnosti, stáří pohledávek |
-| Daně | odhad DPH za měsíc i kvartál, kontrolní a souhrnné hlášení, daň z příjmů, daňový kalendář - **jen čtení** |
-| Účetnictví | obratovka, rozvaha, výsledovka, hlavní kniha, saldo, deník včetně dvojic jednoduchého zápisu a formy zápisu firmy: **jen čtení** ([§ 105.8.15](#105815-jednoduchy-zapis-a-dvojice-v-deniku)); výjimkou jsou koncepty ostatních pohledávek a závazků a založení či úprava analytického účtu v osnově |
+| Daně | odhad DPH za měsíc i kvartál, kontrolní a souhrnné hlášení, daň z příjmů, daňový kalendář, kontroly před podáním DPH (změny po podání, § 46, § 74b, koeficient, spojené osoby), detail podání s platebními údaji, odhad daně OSVČ, rozhodnutí FÚ o zálohách, roční daňové konstanty - **jen čtení** |
+| Účetnictví | obratovka, rozvaha, výsledovka, hlavní kniha, saldo, deník včetně dvojic jednoduchého zápisu a formy zápisu firmy, historie a vazby zápisu, zápisy faktury, otevřené položky, fronty zaúčtování, nálezy kontrol období, vypořádání DPH a měsíční přehled pro klienta: **jen čtení** ([§ 105.8.15](#105815-jednoduchy-zapis-a-dvojice-v-deniku)); výjimkou jsou koncepty ostatních pohledávek a závazků a založení či úprava analytického účtu v osnově |
 | Ostatní pohledávky a závazky | čtení dokladů, úhrad, opakování a splátek; **zápis jen konceptů**: založení, úprava, smazání, splátkový kalendář (i vyčtený ze smlouvy), opakování bez automatického účtování, dimenze a připojení smlouvy. Nic se nezaúčtuje ([§ 105.8.8.5](#105885-ostatni-pohledavky-a-zavazky)) |
-| Dimenze | typy a hodnoty, zisk, roční a měsíční vývoj, manažerské cash flow, rozvaha a výsledovka s filtrem dimenze, přiřazení na dokladech a kontrola pravidel - **jen čtení** |
+| Pokladna a majetek | pokladny, pokladní doklady a pokladní kniha, majetkové karty a plány odpisů, drobný majetek, přijaté faktury na majetek bez karty - **jen čtení** |
+| Dimenze | typy a hodnoty, zisk, roční a měsíční vývoj, manažerské cash flow, rozvaha a výsledovka s filtrem dimenze, přiřazení na dokladech a kontrola pravidel - **jen čtení**; zápis jen ke konceptu faktury a ostatní položky |
+| Číselníky dokladů | kategorie tržeb, členění DPH, předkontace, číselné řady, brandingové profily, pravidla klasifikace nákladů, cenové hladiny, pokladny, kategorie nákladů - jen čtení |
 | Statistika | tržby, zisk, trendy, top odběratelé a dodavatelé, cash flow, platební morálka, koncentrace, riziko odchodu |
 | Všechny firmy | manažerské součty přístupných firem za přesné období, měsíční vývoj, roční predikce, cashflow, zůstatky a rizika přes `group_dashboard`; původní měny i samostatný přepočet CZK |
 | E-shop a sklad | **kompletní správa včetně zápisu** - zboží, obsah karet, ceny, dodavatelé, média, kategorie, číselníky, sklady, příjemky a výdejky, inventury (viz [§ 105.8.9](#10589-e-shop-a-sklad)) |
 | Objednávky u dodavatele | **čtení i zápis** - založení, odeslání, potvrzení, uzavření, storno, příjemka z objednávky a hromadné objednání podle návrhu doplnění zásob ([§ 105.8.9](#10589-e-shop-a-sklad)) |
-| Mzdy | čtení zaměstnanců, pracovních podmínek a výsledků; změna sjednané mzdy, mzdové vstupy, přesčasy a absence; řízení mzdového běhu, platby, podání a dokumenty jsou zakázané |
+| Mzdy | čtení zaměstnanců, pracovních podmínek, mzdových běhů a výsledků po zaměstnancích; změna sjednané mzdy, mzdové vstupy, přesčasy a absence; řízení mzdového běhu, platby, podání a dokumenty jsou zakázané |
 | Hledání | globální vyhledávání napříč odběrateli a doklady |
 
 V režimu jen pro čtení (`MYUCTO_READ_ONLY=1`, [§ 105.8.4](#10584-nastaveni))
@@ -673,6 +680,16 @@ Podrobnosti v [§ 105.8.7.4](#105874-uprava-konceptu-faktury).
 
 Podrobnosti v [§ 105.8.7.5](#105875-dalsi-prace-s-vydanymi-fakturami).
 
+**Banka a doklady**
+
+- „Které příchozí platby z října ještě nejsou spárované? Ke každé navrhni fakturu.“
+- „Spáruj platbu 24 200 Kč od ACME s fakturami 2026041 a 2026042.“ *(token čtení a zápis)*
+- „U plateb kartou bez dokladu vyžádej od klienta účtenky.“ *(token čtení a zápis)*
+- „Co čeká ve frontě k zaúčtování a proč se to nezaúčtovalo samo?“
+- „Ukaž mi doklady změněné po podání DPH za 3. čtvrtletí.“
+
+Podrobnosti v [§ 105.8.8.7](#105887-banka-a-parovani-plateb).
+
 **Pravidelná fakturace** *(token čtení a zápis)*
 
 - „Založ pro ACME měsíční paušál 5 000 Kč za správu serveru, vždy k 1. dni v měsíci.“
@@ -859,27 +876,37 @@ Koncept, který asistent připravil, nemusíte opravovat ručně v editoru. Sta�
 
 | Nástroj | Co dělá |
 |---|---|
-| `update_invoice` | změní hlavičku: data, splatnost, měnu, jazyk, způsob úhrady, poznámky, zakázku, slevu, variabilní symbol |
+| `update_invoice` | změní hlavičku: odběratele, data, splatnost, měnu a kurz, jazyk, způsob úhrady a pokladnu, číselnou řadu, cenovou hladinu, brandingový profil, zjednodušený doklad, zaokrouhlení, kategorii tržby, kód DPH, poznámky, zakázku, slevu, variabilní symbol |
 | `add_invoice_item` | přidá položku na konec nebo na zvolené místo; s `kind: "text"` přidá textový řádek jen s popisem |
-| `update_invoice_item` | změní jednu položku (text, množství, jednotku, cenu, sazbu DPH, časové rozlišení); u textového řádku jen text |
+| `update_invoice_item` | změní jednu položku (text, množství, jednotku, cenu, sazbu DPH, časové rozlišení, účet, protiúčet, předkontaci, kód členění DPH); u textového řádku jen text |
 | `remove_invoice_item` | odebere jednu položku, jen s potvrzením ([§ 105.8.9.4](#105894-potvrzovani-nevratnych-kroku)) |
+| `set_invoice_dimensions` | nastaví dimenze (středisko, zakázku) hlavičce nebo položkám konceptu |
+
+Čísla a kódy k těmto polím asistent vezme z číselníků: `list_invoice_number_series`,
+`list_revenue_categories`,
+`list_vat_classifications`, `list_posting_rules`, `list_branding_profiles`,
+`list_price_levels` a `list_cash_registers`.
 
 Platí přitom:
 
 - **Mění se jen to, co řeknete.** Ostatní pole hlavičky i ostatní položky zůstanou,
-  včetně údajů, které v rozhovoru nevidíte: časové rozlišení, vazba na sklad
-  a majetek, nastavení OSS a pořadí položek.
+  včetně údajů, které v rozhovoru nevidíte: účet, protiúčet a předkontace položky,
+  časové rozlišení, vazba na sklad, majetek a výkaz práce, nastavení OSS, pořadí
+  položek a jejich dimenze (po vložení nebo odebrání řádku zůstanou u svých položek).
 - Položku určíte pořadím, jak ji vidíte na dokladu („druhá položka“), nebo jejím
   ID. Řádek se slevou z celé faktury se nepočítá, ten dopočítává aplikace sama.
 - **Sazbu DPH si asistent nevymýšlí.** U nové položky se na ni zeptá, u upravované
-  ji nechá, dokud ji výslovně nezměníte. Po změně sazby, data zdanitelného plnění
-  nebo přenesené daňové povinnosti si aplikace zařazení položek pro přiznání
-  k DPH a OSS odvodí znovu.
+  ji nechá, dokud ji výslovně nezměníte. Po změně sazby, odběratele, data
+  zdanitelného plnění nebo přenesené daňové povinnosti si aplikace zařazení
+  položek i hlavičky pro přiznání k DPH a OSS odvodí znovu. Kód členění DPH
+  (např. 1m u prodeje majetku) zadá asistent jen na výslovný pokyn.
+- Pokladnu lze vybrat jen u platby v hotovosti. Zjednodušený daňový doklad nemusí
+  mít odběratele.
 - Doklad se dohledá stejně jako u výkazu práce ([§ 105.8.7.2](#105872-ktery-doklad-se-pouzije)):
   má-li odběratel víc konceptů, asistent je vypíše a nechá vás vybrat.
 - Součty a DPH spočítá aplikace; asistent vrátí upravený doklad.
 - **Upravit jde jen koncept.** Vystavenou fakturu asistent odmítne změnit,
-  ta se opravuje dobropisem nebo stornem v aplikaci.
+  ta se opravuje dobropisem nebo stornem (`cancel_invoice`).
 - Jedinou položku dokladu odebrat nejde, doklad musí nějakou mít. Textové řádky se
   mezi položky nepočítají ([§ 15.9.3](15_Faktura_editor.md#1593-polozky)).
 
@@ -893,11 +920,16 @@ Kromě konceptu umí asistent s vydanými doklady totéž, co detail faktury v a
 | Nástroj | Co dělá |
 |---|---|
 | `delete_invoice_draft` | smaže koncept; vystavený doklad odmítne |
-| `cancel_invoice` | interní storno, nebo koncept dobropisu se zápornými položkami |
-| `uncancel_invoice` | zruší interní storno omylem stornované faktury nebo zálohy |
+| `cancel_invoice` | interní storno nezaúčtovaného dokladu, nebo koncept dobropisu se zápornými položkami |
+| `uncancel_invoice` | zruší interní storno omylem stornované faktury nebo zálohy, která nebyla zaúčtovaná |
+| `get_invoice_credit_note_offset`, `set_invoice_credit_note_offset` | zápočet dobropisu s opravovanou fakturou, nebo jeho zrušení |
+| `prefill_invoice_refund_order`, `create_invoice_refund_order` | vratka přeplatku nebo dobropisu odběrateli jako příkaz k úhradě (do banky nic neodesílá) |
+| `preview_work_report_billing`, `transfer_work_report_billing` | cenová rekapitulace výkazu práce a její přenos do položek konceptu |
+| `set_invoice_project` | zařadí i vystavenou fakturu k zakázce |
+| `get_invoice_posting` | zápis zaúčtované faktury v deníku, u nezaúčtované náhled kontace (i přijaté faktury) |
 | `clone_invoice` | založí koncept jako kopii dokladu |
 | `create_final_invoice_from_proforma` | ze zaplacené zálohy založí koncept finální faktury s odečtenou zálohou |
-| `list_invoice_advance_drawdown_candidates`, `apply_invoice_advance_drawdown`, `remove_invoice_advance_drawdown` | postupné čerpání jedné zálohy víc fakturami (milníky): na koncept faktury odečte zadanou část zálohy, nebo odpočet odebere |
+| `list_invoice_advance_drawdown_candidates`, `apply_invoice_advance_drawdown`, `remove_invoice_advance_drawdown` | čerpání záloh na konceptu faktury: faktura odečte jednu nebo víc záloh (každou zvlášť částkou s DPH, bez DPH, nebo procentem plnění faktury) a jednu zálohu může čerpat víc faktur (milníky); odebrat jde jednu zálohu (`proforma_id`), nebo všechny |
 | `list_invoice_advance_candidates`, `list_proforma_final_candidates`, `link_invoice_advance`, `unlink_invoice_advance` | ruční propojení faktury se zálohou a jeho zrušení |
 | `preview_invoice_penalty`, `create_invoice_penalty` | výpočet úroku z prodlení a koncept penalizační faktury |
 | `add_invoice_payment`, `delete_invoice_payment`, `unmark_invoice_paid` | evidence částečné i celé úhrady, smazání úhrady, vrácení stavu zaplaceno |
@@ -929,7 +961,12 @@ Platí přitom:
 - Platby z bankovního výpisu se párují v bance. Ručně se evidují hotovost,
   zápočet nebo platba, kterou banka nespárovala.
 - Upomínka i poděkování za platbu jsou e-maily odběrateli, posílají se jen na váš pokyn.
-- Zaúčtování dokladu asistent neumí, to zůstává v aplikaci.
+- **Dobropis vzniká vždy k vystavenému dokladu.** Bez vazby na opravovanou fakturu
+  ho asistent nezaloží; nejjednodušší je dobropis ze storna původní faktury.
+- **Zaúčtování dokladu asistent neumí, to zůstává v aplikaci.** Proto neprovede ani
+  interní storno a zrušení storna zaúčtované faktury: stornovalo by nebo mazalo zápis
+  v účetním deníku. Dobropis k zaúčtované faktuře založit umí. Automatické zaúčtování
+  při vystavení, které má firma zapnuté, proběhne stejně jako v aplikaci.
 
 #### 105.8.7.6 Pravidelná fakturace
 
@@ -970,9 +1007,21 @@ něj nic nezaúčtuje ani neopraví.
 #### 105.8.8.2 Dokumenty
 
 MCP umí dokumenty vypsat, hledat v názvu, popisu i vytěženém textu, přečíst
-omezený úsek textu, upravit název, popis a tagy a připojit dokument k odběrateli,
-dokladu nebo zakázce. Dlouhý text se vrací po částech nejvýše 50 000 znaků.
-Platí stejná firemní a osobní oprávnění jako v aplikaci.
+omezený úsek textu, upravit název, popis a tagy, přesunout dokument do složky
+a připojit ho k odběrateli, dokladu nebo zakázce. Dlouhý text se vrací po částech
+nejvýše 50 000 znaků. Platí stejná firemní a osobní oprávnění jako v aplikaci.
+
+Asistent zná strom složek a umí založit novou složku, takže dokument nahraje nebo
+přesune rovnou na správné místo. Vypíše také tagy používané ve firmě, aby nevznikaly
+duplicitní tagy s jiným zápisem, a soubory dokumentu (hlavní soubor a přílohy).
+Při připojování dokumentu najde cílový doklad, klienta nebo zakázku podle čísla
+či názvu. Složky, dokumenty ani koš nemaže.
+
+Chybějící doklad si asistent umí od klienta vyžádat: založí požadavek na doklad,
+který klient uvidí v portálu, nejlépe přímo k bankovnímu pohybu bez dokladu
+(popis, částka a datum se předvyplní z platby). Požadavek umí také uzavřít, když
+doklad přišel jinou cestou, nebo vrátit klientovi k doplnění. Požadavek tím
+neposílá e-mailem a nic nemaže.
 
 Soubor umí asistent do Dokumentů i nahrát a originál stáhnout, postup a limity
 popisuje [§ 105.8.8.6](#105886-soubory-a-prilohy). Pro práci s obsahem dokumentu je
@@ -999,19 +1048,22 @@ smazat.
 
 | Nástroj | Co dělá |
 |---|---|
-| `create_purchase_invoice` | založí koncept: dodavatel, číslo dokladu dodavatele, data, měna, druh dokladu, odpočet DPH, kategorie nákladu, zakázka, položky |
+| `create_purchase_invoice` | založí koncept: dodavatel, číslo dokladu dodavatele, data, měna, druh dokladu, odpočet DPH, kategorie nákladu, zakázka, číselná řada, pokladna, zaokrouhlení, účet k úhradě, položky (i s nákladovým účtem, protiúčtem a předkontací) |
 | `update_purchase_invoice` | změní hlavičku konceptu, ostatní pole i položky zůstanou |
 | `add_purchase_invoice_item`, `update_purchase_invoice_item`, `remove_purchase_invoice_item` | přidá, změní nebo odebere jednu položku konceptu |
+| `set_purchase_invoice_dimensions` | nastaví dimenze hlavičce nebo položkám konceptu |
+| `set_purchase_invoice_vat_treatment` | opraví nárok na odpočet a členění DPH přijatého, ještě nezaúčtovaného dokladu |
+| `get_purchase_credit_note_offset`, `set_purchase_credit_note_offset` | zápočet přijatého dobropisu s fakturou, nebo jeho zrušení |
 | `delete_purchase_invoice` | smaže koncept |
 | `receive_purchase_invoice` | přijme doklad; také zruší označení úhrady nebo obnoví stornovaný doklad |
 | `mark_purchase_invoice_paid` | zaeviduje úhradu, která nepřišla z výpisu ani z pokladny |
-| `cancel_purchase_invoice` | stornuje doklad |
-| `set_purchase_invoice_document_kind`, `set_purchase_invoice_project`, `set_purchase_invoice_expense_kinds` | změní druh dokladu, zakázku nebo druh nákladu po položkách |
+| `cancel_purchase_invoice` | stornuje nezaúčtovaný doklad |
+| `set_purchase_invoice_document_kind`, `set_purchase_invoice_project`, `set_purchase_invoice_expense_kinds` | změní druh dokladu, zakázku, nebo druh nákladu, nákladový účet a členění DPH po položkách |
 | `set_purchase_invoice_exchange_rate` | nastaví ruční kurz konceptu v cizí měně |
 | `list_purchase_advance_candidates`, `link_purchase_advance`, `unlink_purchase_advance` | spáruje konečnou fakturu se zálohou, nebo vazbu zruší |
 | `get_purchase_invoice_payment`, `set_purchase_invoice_payment_account`, `verify_purchase_payment_account` | platební údaje, změna účtu dodavatele a jeho ověření v registru plátců DPH |
 | `list_purchase_payment_candidates`, `create_purchase_payment_order`, `list_purchase_payment_orders`, `delete_purchase_payment_order` | příprava a přehled příkazů k úhradě |
-| `get_purchase_invoice_activity`, `list_expense_categories` | historie dokladu a číselník kategorií nákladů |
+| `get_purchase_invoice_activity`, `list_expense_categories`, `list_purchase_number_series`, `list_expense_rules` | historie dokladu, kategorie nákladů, číselné řady a pravidla klasifikace nákladů |
 
 Platí přitom:
 
@@ -1023,20 +1075,26 @@ Platí přitom:
   Ruční kurz zadává asistent jen na výslovný pokyn.
 - **Mění se jen to, co řeknete.** Při úpravě hlavičky i položek zůstanou ostatní
   údaje beze změny, včetně těch, které v rozhovoru nevidíte: druh nákladu,
-  nákladový účet, časové rozlišení, vazba na sklad a pořadí položek.
+  nákladový účet, protiúčet a předkontace řádku, časové rozlišení, vazba na sklad,
+  pořadí položek a jejich dimenze.
 - Po změně dodavatele nebo přenesené daňové povinnosti si aplikace zařazení
   položek pro přiznání k DPH odvodí znovu. Změna data zařazení nemění.
 - Doklad s ruční rekapitulací DPH podle dokladu upravujte v aplikaci; asistent
   jeho položky nemění, protože by rekapitulace přestala sedět.
-- **Upravit jde jen koncept.** Přijatý doklad opravuje účetní v aplikaci.
-- **Přijetí může doklad rovnou zaúčtovat.** Má-li firma zapnuté automatické
-  účtování přijatých faktur, aplikace doklad při přijetí zaúčtuje; u úhrady
-  hotově z pokladny založí výdajový pokladní doklad. Asistent to před přijetím
-  řekne a čeká na potvrzení.
+- **Upravit jde jen koncept.** Přijatý doklad opravuje účetní v aplikaci. Výjimkou
+  je klasifikace položek (druh nákladu, účet, členění DPH) a oprava nároku na odpočet,
+  které jdou i u přijatého dokladu, dokud není zaúčtovaný. Před přijetím ukáže
+  `get_invoice_posting`, jak se doklad zaúčtuje.
+- **Přijetí přes asistenta doklad nezaúčtuje.** Má-li firma zapnuté automatické
+  účtování přijatých faktur, při přijetí přes MCP se zaúčtování odloží a doklad
+  zaúčtujete v aplikaci (fronta nezaúčtovaných dokladů, hromadné zaúčtování). U úhrady
+  hotově z pokladny vznikne výdajový pokladní doklad. Asistent přijetí provede až
+  po potvrzení.
 - **Zaúčtovat doklad asistent neumí.** Ruční zaúčtování není
   v katalogu MCP a běžný token je nepovoluje. U zaúčtovaného dokladu proto odmítne i změnu druhu dokladu,
-  druhu nákladu, kurzu a spárování se zálohou, protože by se doklad rozešel
-  s deníkem. Zakázku přiřadit jde, je to jen analytický údaj.
+  druhu nákladu, kurzu, nároku na odpočet, spárování se zálohou a storno, protože
+  by se doklad rozešel s deníkem nebo by se měnil zápis. Zakázku přiřadit jde, je to
+  jen analytický údaj.
 - Zálohová faktura se zakládá jako druh „záloha“, daňový doklad k zaplacené
   záloze jako „daňový doklad k záloze“. Konečnou fakturu se zálohou spáruje
   `link_purchase_advance`; náklad se pak nepočítá dvakrát.
@@ -1190,6 +1248,37 @@ Pro nahrání musí mít token oprávnění čtení a zápis a v režimu jen pro
 nahrávací nástroje nenabízejí. Doklad v uzavřeném období aplikace změnit
 nedovolí stejně jako v aplikaci. Smazání přílohy nebo PDF a náhrada už
 archivovaného PDF vyžadují potvrzení ([§ 105.8.9.4](#105894-potvrzovani-nevratnych-kroku)).
+
+#### 105.8.8.7 Banka a párování plateb
+
+Asistent čte bankovní výpisy a zůstatky účtů a pracuje s jednotlivými pohyby napříč
+účty: najde nespárované nebo nezaúčtované platby, dohledá platbu podle protistrany,
+VS nebo částky a k pohybu navrhne doklady. Umí i opačný směr, tedy k faktuře najít
+volné platby, a hledá sloučené úhrady, kdy jedna platba hradí víc faktur.
+
+S tokenem čtení a zápis asistent pohyb spáruje s jedním nebo více doklady, zruší
+párování, označí pohyb jako ignorovaný (například převod mezi vlastními účty),
+přijme nebo zamítne návrh párování z výpisu a z odchozí platby bez dokladu založí
+koncept přijaté faktury. Zrušení párování vyžaduje potvrzení.
+
+**Párování přes MCP se nezaúčtuje.** V aplikaci se spárovaná platba podle politiky
+automatického účtování firmy rovnou zaúčtuje. Přes MCP (API token) se pohyb jen
+spáruje a do účetního deníku se nic nezapíše. Spárovanou platbu pak zaúčtujete
+v aplikaci (Automat, fronta K zaúčtování) nebo ji zpracuje ranní přepočet fronty
+automatiky podle stejné politiky firmy: buď ji zaúčtuje, nebo ji nabídne
+k potvrzení. Platí to i pro přijetí návrhu párování. Čekající návrh kontace
+z doby před spárováním (např. pravidlo pro platbu bez dokladu) se při spárování
+odloží, aby ho nikdo nepotvrdil proti spárované úhradě.
+
+Pohyb, který už má zápis v deníku, asistent nepřepáruje ani neodpáruje; zrušení
+párování by zápis stornovalo a to patří účetní v aplikaci. Stejně tak nezruší
+párování platby zálohy, protože by se změnilo zúčtování zálohy. Zaúčtování
+a zrušení zaúčtování pohybu, přepárování celého výpisu, nahrání a smazání výpisu
+ani AI návrh kontace přes MCP nejdou. Náhled, jak by se pohyb zaúčtoval, si
+asistent zobrazit může.
+
+Podle nastavení firmy může po spárování odejít poděkování za platbu, stejně jako
+při párování v aplikaci.
 
 ### 105.8.9 E-shop a sklad
 

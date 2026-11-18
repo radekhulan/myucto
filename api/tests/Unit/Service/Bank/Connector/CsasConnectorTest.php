@@ -170,15 +170,106 @@ final class CsasConnectorTest extends TestCase
         self::assertSame(['plan', 'sending:1', 'created:1', 'sending:2', 'unknown:2'], $journal->events);
     }
 
-    private function abo(): string
+    /**
+     * #393: smíšený příkaz, kde banka dvě platby odmítne (WRONG_DECIMAL_PLACES) a jednu přijme.
+     * Odeslání zaznamená důvod u každé odmítnuté položky, dávku nezakládá a výsledek je jisté
+     * odmítnutí (přijatá platba bez podpisu se neprovede).
+     */
+    public function testMixedOrderRecordsBankReasonForEachRejectedItemAndCreatesNoBatch(): void
     {
+        $history = [];
+        $connector = $this->bankConnector([$this->bankRejection(), $this->bankCreated('166609107206666'), $this->bankRejection()], $history);
+        $journal = new MemoryJournal();
+        try {
+            $connector->submitStagedPaymentOrder('synthetic', $this->abo([235, 100000, 123456]), $journal);
+            self::fail('Odmítnuté položky musí odeslání ukončit chybou.');
+        } catch (BankConnectorException $e) {
+            self::assertFalse($e->ambiguousPaymentOutcome, 'Jisté odmítnutí není nejasný výsledek.');
+            self::assertSame(BankConnectorException::PAYMENT_REJECTED, $e->errorCode);
+            self::assertSame([1, 2], [$e->acceptedCount, $e->rejectedCount]);
+            self::assertSame(self::WRONG_DECIMAL_PLACES, $e->bankError);
+        }
+        self::assertSame(['plan', 'sending:1', 'rejected:1', 'sending:2', 'created:2', 'sending:3', 'rejected:3'], $journal->events);
+        self::assertSame([1 => self::WRONG_DECIMAL_PLACES, 3 => self::WRONG_DECIMAL_PLACES], $journal->bankErrors);
+        self::assertCount(3, $history, 'Dávka se po odmítnutí položek nezakládá.');
+    }
+
+    /**
+     * #393: příkaz s jedinou přijatou platbou čeká na podpis té platby. Dávka se nezakládá
+     * (dřív její odmítnutí vedlo na „výsledek není známý“ a podpis nešlo spustit).
+     */
+    public function testSingleAcceptedPaymentAwaitsSignatureWithoutBatch(): void
+    {
+        $history = [];
+        $connector = $this->bankConnector([$this->bankCreated('166609107206666')], $history);
+        $journal = new MemoryJournal();
+
+        $result = $connector->submitStagedPaymentOrder('synthetic', $this->abo([100000]), $journal);
+
+        self::assertSame(['accepted' => true, 'reference' => '166609107206666', 'status' => 'awaiting_signature',
+            'sign_hash' => 'synthetic-payment-hash', 'sign_scope' => CsasApiClient::SIGN_SCOPE_PAYMENT], $result);
+        self::assertSame(['plan', 'sending:1', 'created:1'], $journal->events);
+        self::assertCount(1, $history);
+        self::assertSame('https://www.csas.cz/webapi/api/v1/payments/my/payments', (string) $history[0]['request']->getUri());
+    }
+
+    /** Jisté odmítnutí dávky (4xx) dávku nezaložilo: výsledek je jistý a nese důvod banky. */
+    public function testRejectedBatchIsDefiniteAndCarriesBankReason(): void
+    {
+        $history = [];
+        $connector = $this->bankConnector([$this->bankCreated('166609107206666'), $this->bankCreated('166609107206667'),
+            new \GuzzleHttp\Psr7\Response(400, [], (string) file_get_contents(self::FIXTURES . '/batch-rejected-not-signable.json'))], $history);
+        try {
+            $connector->submitStagedPaymentOrder('synthetic', $this->abo([100, 200]), new MemoryJournal());
+            self::fail('Odmítnutá dávka musí skončit chybou.');
+        } catch (BankConnectorException $e) {
+            self::assertFalse($e->ambiguousPaymentOutcome);
+            self::assertSame(2, $e->acceptedCount);
+            self::assertSame(['code' => 'NOT_SIGNABLE', 'scope' => 'payments', 'message' => null], $e->bankError);
+        }
+        self::assertCount(3, $history);
+    }
+
+    private const FIXTURES = __DIR__ . '/../../../../Fixtures/Bank/Csas';
+    private const WRONG_DECIMAL_PLACES = ['code' => 'WRONG_DECIMAL_PLACES', 'scope' => 'amount.instructedAmount.value',
+        'message' => 'Chybný počet desetinných míst v částce.'];
+
+    /** Konektor se skutečným klientem ČS nad atrapou HTTP s odpověďmi z fixtures. */
+    private function bankConnector(array $responses, array &$history): CsasBankConnector
+    {
+        $stack = \GuzzleHttp\HandlerStack::create(new \GuzzleHttp\Handler\MockHandler($responses));
+        $stack->push(\GuzzleHttp\Middleware::history($history));
+        $credentials = $this->credentials() + ['environment' => 'production', 'scope' => 'siblings.accounts siblings.payments',
+            'payment_account_suitable' => true];
+        $vault = $this->createStub(CsasCredentialVault::class);
+        $vault->method('decode')->willReturn($credentials);
+        $vault->method('access')->willReturn($credentials);
+        return new CsasBankConnector(new CsasApiClient(new \GuzzleHttp\Client(['handler' => $stack])), $vault, new CsasTransactionParser());
+    }
+
+    private function bankCreated(string $signId): \GuzzleHttp\Psr7\Response
+    {
+        $data = json_decode((string) file_get_contents(self::FIXTURES . '/payment-created.json'), true, 32, JSON_THROW_ON_ERROR);
+        $data['signInfo']['signId'] = $signId;
+        return new \GuzzleHttp\Psr7\Response(200, [], json_encode($data, JSON_THROW_ON_ERROR));
+    }
+
+    private function bankRejection(): \GuzzleHttp\Psr7\Response
+    {
+        return new \GuzzleHttp\Psr7\Response(400, [], (string) file_get_contents(self::FIXTURES . '/payment-rejected-wrong-decimal-places.json'));
+    }
+
+    /** @param list<int> $amounts částky položek v haléřích */
+    private function abo(array $amounts = [100, 200]): string
+    {
+        $items = [];
+        foreach (array_values($amounts) as $index => $minor) {
+            $items[] = ['account_number' => '1000000005', 'bank_code' => $index % 2 === 0 ? '0100' : '0300', 'amount_minor' => $minor,
+                'variable_symbol' => (string) ($index + 1)];
+        }
         return (new \MyInvoice\Service\Payment\AboPaymentOrderWriter())->build([
             'client_name' => 'Synthetic Client', 'payer_account_number' => '1000000005', 'payer_bank_code' => '0800',
-            'payment_date' => '2026-11-02',
-            'items' => [
-                ['account_number' => '1000000005', 'bank_code' => '0100', 'amount_minor' => 100, 'variable_symbol' => '1'],
-                ['account_number' => '1000000005', 'bank_code' => '0300', 'amount_minor' => 200, 'variable_symbol' => '2'],
-            ],
+            'payment_date' => '2026-11-02', 'items' => $items,
         ]);
     }
 }
@@ -212,7 +303,14 @@ final class MemoryJournal implements \MyInvoice\Service\Bank\Connector\BankPayme
         $this->rows[$lineNo]['provider_hash'] = $hash;
     }
 
-    public function rejected(int $lineNo, string $errorCode): void { $this->move($lineNo, 'sending', 'rejected'); }
+    /** @var array<int,array{code:string,scope:?string,message:?string}|null> */
+    public array $bankErrors = [];
+
+    public function rejected(int $lineNo, string $errorCode, ?array $bankError = null): void
+    {
+        $this->move($lineNo, 'sending', 'rejected');
+        $this->bankErrors[$lineNo] = $bankError;
+    }
 
     public function unknown(int $lineNo, string $errorCode): void { $this->move($lineNo, 'sending', 'unknown'); }
 

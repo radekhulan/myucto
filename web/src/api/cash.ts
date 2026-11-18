@@ -70,6 +70,8 @@ export interface CashDocument {
   description: string
   total_amount: number; currency_code: string
   fx_rate?: number; amount_foreign?: number | null   // valutová pokladna (§11): total_amount = CZK ekvivalent
+  /** Korunová úhrada cizoměnového dokladu: uhrazená částka v měně hrazeného dokladu. */
+  settled_document_amount?: number | null
   vat_mode: 'none' | 'vat'; vat_lines: CashVatLine[]
   invoice_id: number | null; invoice_number?: string | null
   purchase_invoice_id: number | null; purchase_invoice_number?: string | null
@@ -140,6 +142,13 @@ export interface UnpaidDocumentOption {
   invoice_type?: string
   /** Přijatá faktura: běžná / daňový doklad k záloze (DDKP). */
   document_kind?: string | null
+  /**
+   * Cizoměnový doklad hrazený korunami: kurz dokladu, zbytek přepočtený tímto kurzem
+   * a kurzová tolerance v Kč, ve které koruny uhradí celý zbytek. U korunového chybí.
+   */
+  exchange_rate?: number
+  remaining_czk?: number
+  czk_tolerance?: number
 }
 
 export interface CashBookItem {

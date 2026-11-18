@@ -76,7 +76,13 @@ watch(() => props.modelValue, (v) => {
 
 // Parent po vytvoření nového vendoru nastaví modelValue a zavolá reload.
 async function reload() { await ensureLoaded(props.modelValue) }
-defineExpose({ reload })
+// Parent upravil kartu (např. z ARES/VIES) — obnov cache a popisek vybraného dodavatele.
+function upsert(c: Client) {
+  merge([c])
+  if (props.modelValue === c.id) selectedOption.value = toOpt(c)
+  options.value = options.value.map(o => o.value === c.id ? toOpt(c) : o)
+}
+defineExpose({ reload, upsert })
 </script>
 
 <template>

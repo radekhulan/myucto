@@ -59,6 +59,7 @@ import { useSupplierStore } from '@/stores/supplier'
 import { accountingApi, postingErrorI18nKey } from '@/api/accounting'
 import WorkspaceDragHandle from '@/components/workspace/WorkspaceDragHandle.vue'
 import { isInvoiceDateOverdue } from '@/utils/invoiceOverdue'
+import { mergeMonthGroups } from '@/utils/monthGroups'
 import DateInput from '@/components/ui/DateInput.vue'
 
 const { t, locale } = useI18n()
@@ -616,29 +617,7 @@ watch(() => route.query, (newQ) => {
 })
 
 function mergeGroups(existing: PurchaseMonthGroup[], incoming: PurchaseMonthGroup[]): PurchaseMonthGroup[] {
-  const byMonth = new Map<string, PurchaseMonthGroup>()
-  for (const g of existing) byMonth.set(g.month, { ...g, invoices: [...g.invoices], totals_per_currency: [...g.totals_per_currency] })
-  for (const g of incoming) {
-    const cur = byMonth.get(g.month)
-    if (!cur) {
-      byMonth.set(g.month, { ...g, invoices: [...g.invoices], totals_per_currency: [...g.totals_per_currency] })
-      continue
-    }
-    const seenIds = new Set(cur.invoices.map(i => i.id))
-    for (const inv of g.invoices) if (!seenIds.has(inv.id)) cur.invoices.push(inv)
-    cur.count = cur.invoices.length
-    for (const t of g.totals_per_currency) {
-      const found = cur.totals_per_currency.find(x => x.currency === t.currency)
-      if (found) {
-        found.without_vat = (found.without_vat ?? 0) + (t.without_vat ?? 0)
-        found.vat = (found.vat ?? 0) + (t.vat ?? 0)
-        found.with_vat = (found.with_vat ?? 0) + (t.with_vat ?? 0)
-      } else {
-        cur.totals_per_currency.push({ ...t })
-      }
-    }
-  }
-  return Array.from(byMonth.values())
+  return mergeMonthGroups(existing, incoming)
 }
 
 /**

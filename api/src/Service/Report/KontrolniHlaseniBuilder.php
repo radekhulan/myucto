@@ -506,6 +506,14 @@ final class KontrolniHlaseniBuilder
                 'b2_count'            => count($b2),
                 'b3_count_aggregated' => $b3['count'],
                 'submission_deadline' => $deadline,
+                // Podání v řádné lhůtě už evidované → karta termínu nehlásí prodlení.
+                // Následné má vlastní lhůtu od zjištění, tam odpočet zůstává.
+                'filed_at'            => $isFollowUp ? null : $this->variantGuard->filedAt(
+                    $supplierId, 'dphkh1', $year,
+                    $period === 'quarterly' ? null : $month,
+                    $period === 'quarterly' ? $quarter : null,
+                    ['B', 'O'],
+                ),
                 // C7' — typ podání (řádné/opravné/následné).
                 'variant'             => $variant,
                 'khdph_forma'         => $forma,

@@ -150,9 +150,11 @@ async function submit() {
 }
 
 async function removeDeduction(d: SaldoAdvanceDeduction) {
+  const id = d.id
+  if (id === null) return
   if (!window.confirm(t('accounting.saldo_settle.advance_delete_confirm'))) return
   try {
-    const result = await withPeriodForce(force => accountingApi.deleteSaldoAdvanceDeduction(d.doc_type, d.id, force), auth.isCompanyAdminRole, confirmForce)
+    const result = await withPeriodForce(force => accountingApi.deleteSaldoAdvanceDeduction(d.doc_type, id, force), auth.isCompanyAdminRole, confirmForce)
     if (result === null) return
     toast.success(t('accounting.saldo_settle.advance_deleted'))
     emit('done')
@@ -197,15 +199,15 @@ onMounted(load)
       <div v-if="data && data.deductions.length > 0" class="border border-neutral-200 rounded-md">
         <div class="px-3 py-2 text-xs font-medium text-neutral-500 uppercase tracking-wide border-b border-neutral-100">{{ t('accounting.saldo_settle.advance_existing') }}</div>
         <ul class="divide-y divide-neutral-100 text-sm">
-          <li v-for="d in data.deductions" :key="d.id" class="px-3 py-2 flex flex-wrap items-center gap-2">
+          <li v-for="d in data.deductions" :key="d.id ?? `invoice-${d.final_id}-${d.advance_id}`" class="px-3 py-2 flex flex-wrap items-center gap-2">
             <span v-if="d.posted_on" class="whitespace-nowrap">{{ formatDate(d.posted_on) }}</span>
             <RouterLink :to="docLink(d.doc_type, d.final_id)" class="font-mono text-primary-600 hover:underline">{{ d.final_no }}</RouterLink>
             <span class="text-[11px] px-1.5 rounded" :class="d.source === 'saldo' ? 'bg-primary-50 text-primary-700' : 'bg-neutral-100 text-neutral-700'">
-              {{ d.source === 'saldo' ? t('accounting.saldo_settle.advance_source_saldo') : t('accounting.saldo_settle.advance_source_import') }}
+              {{ t(`accounting.saldo_settle.advance_source_${d.source}`) }}
             </span>
             <span class="flex-1" />
             <span class="font-mono">{{ formatMoney(d.amount) }}</span>
-            <button v-if="d.deletable" type="button" :class="btnIconSm('danger')" :title="t('accounting.saldo_settle.advance_delete')" :aria-label="t('accounting.saldo_settle.advance_delete')" @click="removeDeduction(d)">
+            <button v-if="d.deletable && d.id !== null" type="button" :class="btnIconSm('danger')" :title="t('accounting.saldo_settle.advance_delete')" :aria-label="t('accounting.saldo_settle.advance_delete')" @click="removeDeduction(d)">
               <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.trash" /></svg>
             </button>
           </li>

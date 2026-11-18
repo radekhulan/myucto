@@ -127,6 +127,9 @@ v sekci **Originální PDF od dodavatele**.
    a **Daňově uznatelný náklad**.
 2. Pokud je dodavatel neplátce, nastavte přepínač **Dodavatel je plátce DPH** podle skutečnosti.
    Aplikace ho vyplní podle ARES a VIES, u neplátce nastaví **Bez nároku na odpočet**.
+   Tlačítko **ARES** (u zahraničního dodavatele bez IČO **VIES**) vedle výběru dodavatele porovná
+   jeho kartu s registrem a zaškrtnuté rozdíly (název, adresa, IČO, DIČ, plátcovství DPH) uloží
+   do karty. Změněné plátcovství se promítne i do rozpracovaného dokladu.
 3. Je-li doklad v režimu přenesené daňové povinnosti, zaškrtněte **Reverse charge** a postupujte podle
    [§ 23.11.10](#231110-reverse-charge-z-eu-porizeni-zbozi-vs-sluzba).
 4. U položek vyberte **Druh nákladu** (**Služba**, **Materiál**, **Drobný majetek**, **Drobný nehmotný majetek**,
@@ -151,6 +154,8 @@ upravit bez administrátorského zásahu.
 1. Otevřete `Nákup → Příchozí doklady`. Stránka je pracovní fronta účetní. Klient sem nechodí, doklady předává v `Dokumenty → Předat doklady účetní` a odtud se objeví tady.
 2. Doklady do fronty dostanete z klientského portálu, e-mailem nebo je nahrajete sami tlačítkem **Nahrát do fronty**. Vedle něj je tlačítko **Vyfotit**: na telefonu a tabletu vyfotí doklad fotoaparátem, na počítači s připojenou kamerou otevře živý náhled z webkamery (bez kamery se tlačítko na počítači neukáže). Na fotce doklad najde a navrhne ořez (rohy jdou v náhledu posunout, ořez jde vypnout a nahrát celou fotku), doklad narovná a zmenší (zhruba do 150 kB) a po potvrzení ho nahraje stejně jako ostatní soubory. Ořez i zmenšení proběhnou v prohlížeči, fotka nikam jinam neodchází. Nejlépe se doklad najde na tmavém podkladu. Stejné tlačítko je u nahrání přílohy v editoru nové přijaté faktury. Stejná obrazovka s návrhem ořezu se otevře i na fotku, kterou vyberete ze souborů nebo přetáhnete do nahrávacího pole — ořez v ní jde vypnout a nahrát celou fotku. U více fotek najednou nabídne **Přeskočit ořez u ostatních**, které zbývající fotky nahraje beze změny. Na počítači se při výběru více než tří fotek ořez nenabízí.
 3. U dokladu zvolte, jak ho zpracovat: vytěžit přes ISDOC nebo AI, přepsat ručně, odmítnout, nebo klienta požádat o náhradu.
+   Zaškrtnutím **Načíst bez položek** před vytěžením dostane AI vytěžený doklad jen jeden řádek na sazbu DPH
+   (viz [§ 25.4](25_AI_extrakce.md#254-krok-za-krokem-importovat-prijate-faktury-z-pdf)).
 4. Patří-li doklad jiné vaší firmě, klikněte na **Přesunout do …** u navržené firmy, nebo na **Přesunout do jiné firmy** a firmu vyberte.
 5. Pro více dokladů najednou je zaškrtněte a použijte hromadnou akci, například **Vytěžit označené**.
 
@@ -236,7 +241,34 @@ Bez propojení by se náklad počítal dvakrát.
 **Jak poznáte, že je hotovo:** v boxu je odkaz na zálohu a tlačítko **Zrušit propojení**. V detailu zálohy
 vidíte, kterou fakturou je vyúčtována.
 
+Zálohu můžete navázat i přímo v editoru finální faktury: v boxu pod druhem dokladu klikněte na **Spárovat se zálohou**.
+U nové faktury se vazba uloží spolu s dokladem.
+
 Pravidla propojení a jejich dopad na náklady, daň a DPH jsou v [§ 23.11.16](#231116-propojeni-zalohy-s-vyuctovaci-fakturou-proti-dvojimu-zapocteni).
+
+### 23.8.1 Vyúčtování zálohy, ke které dodavatel vystavil daňový doklad k platbě
+
+Dělejte to, když jste zálohu zaplatili, dodavatel k ní vystavil daňový doklad k přijaté platbě (DDKP) a pak poslal
+konečnou fakturu, která zálohu odečítá. DPH ze zálohy jste uplatnili už z DDKP, konečná faktura proto smí do přiznání
+přinést jen rozdíl.
+
+1. Zadejte zálohovou fakturu, zaplaťte ji z banky nebo pokladny (zaúčtuje se na 314) a zadejte k ní DDKP s vazbou
+   na zálohu (typ dokladu *Daňový doklad k platbě*). DDKP zaúčtujte.
+2. Zadejte konečnou fakturu tak, jak ji poslal dodavatel, tedy položky plnění v plné výši.
+3. Navažte ji na zálohu (**Spárovat se zálohou** v editoru nebo v detailu).
+4. Klikněte na **Doplnit odpočet zálohy z DDKP**. Aplikace přidá za každý DDKP a sazbu DPH záporný řádek se základem
+   a daní DDKP, označený jako **Odpočet zálohy**. Částky porovnejte s odpočtem zálohy na dokladu dodavatele.
+5. Doklad uložte a zaúčtujte.
+
+**Jak poznáte, že je hotovo:** faktura má celkovou částku po odečtu zálohy (při přeplatku zápornou), **Uhrazená záloha**
+v hlavičce je nulová a zápis v deníku obsahuje náklad za plnění, DPH faktury (MD 343), vrácení DPH z DDKP (D 343)
+a zúčtování zbytku zálohy (MD 321 / D 314). Účet 314 zálohy skončí na nule. V přiznání k DPH a v kontrolním hlášení
+je za období konečné faktury jen rozdíl mezi daní faktury a DDKP.
+
+Příklad: záloha 890 Kč (735,54 + 154,46 DPH), DDKP v září. Konečná faktura v říjnu: plnění 665,66 + 139,79 DPH,
+odpočet zálohy −735,54 a −154,46 DPH, celkem −84,55 Kč. Za říjen jde do DPH základ −69,88 a daň −14,67.
+V deníku je náklad 665,66, MD 343 139,79, D 343 154,46, D 321 650,99 a zúčtování MD 321 / D 314 735,54.
+Na 321 zůstane přeplatek 84,55 Kč, který vám dodavatel vrátí (po zaokrouhlení dokladu 84,38 Kč).
 
 ## 23.9 Krok za krokem: automatický import ze složky (scan inbox)
 
@@ -270,7 +302,9 @@ Tento postup je pro správce. Dodavatelé vám posílají PDF e-mailem nebo mát
 | Při nahrání hláška, že soubor už byl zpracován | Soubor se stejným otiskem v systému už je | Otevřete existující doklad podle čísla faktury v hlášce |
 | Při skenu inbox hláška „Koncept z tohoto souboru byl smazán“ | Smazaný koncept si aplikace pamatuje | Chcete-li soubor přesto zpracovat, nahrajte ho ručně |
 | Hláška „Nemáte založenou žádnou korunovou pokladnu - doklad zůstane neuhrazený“ | Pro platbu hotově není korunová pokladna | Založte pokladnu v [Pokladně](32_Pokladna.md) |
-| Zaúčtování zálohy neproběhlo automaticky | Záloha nebo DDKP s vlastním daňovým dokladem | Postupujte podle hlášky, zúčtování zapište ručním zápisem |
+| Konečnou fakturu k záloze s DDKP nejde zaúčtovat, detail hlásí chybějící odpočet zálohy | Faktura zálohu neodečítá, DPH z DDKP by se uplatnila podruhé | Klikněte na **Doplnit odpočet zálohy z DDKP**, viz [§ 23.8.1](#2381-vyuctovani-zalohy-ke-ktere-dodavatel-vystavil-danovy-doklad-k-platbe) |
+| Zaúčtování konečné faktury hlásí, že odpočet zálohy nesedí s DDKP nebo s úhradou zálohy | Odpočtový řádek má jiný základ nebo daň než DDKP, nebo úhrada zálohy není celá zaúčtovaná | Opravte odpočtový řádek podle DDKP, zaúčtujte úhradu zálohy, případně zapište zúčtování ručním zápisem |
+| Zaúčtování zálohy neproběhlo automaticky | Odpočet zálohy s DDKP u faktury bez plného nároku na odpočet, s přenesenou daňovou povinností nebo s rozpisem DPH | Postupujte podle hlášky, zúčtování zapište ručním zápisem |
 
 ## 23.11 Podrobnosti a pravidla
 
@@ -748,6 +782,25 @@ dodavatele, takže přečíslování na daně vliv nemá. Po uzávěrce se čís
 uzavíraném účetním období, v roce s dokončenou roční uzávěrkou daňové evidence nebo v období uzamčeném k datu
 přečíslovat nejde. Přečíslování je vyhrazené účetní, klient ho nevidí.
 
+**Přečíslování dalších agend.** Stránka má záložky **Přijaté doklady**, **Pokladna**, **Ostatní pohledávky**,
+**Ostatní závazky** a **Interní doklady**. Záložka se ukáže jen tomu, kdo má právo zápisu do dané agendy; na stránku
+vede i položka **Přečíslovat podle data** v nabídce „…" seznamu pokladny, ostatních pohledávek a závazků a interních
+dokladů. Řady těchto agend běží po letech, proto se nečíslují od 1: přečíslování vezme čísla, která automaticky
+očíslované doklady měsíce v řadě už mají, a rozdá je dokladům znovu podle data. Ostatní měsíce ani počítadlo řady se
+nezmění a v řadě nevznikne díra. Rozhoduje datum úhrady u pokladny, datum vzniku u ostatních pohledávek a závazků
+a datum účetního případu u interních dokladů.
+
+- **Pokladna** se přečísluje po jednotlivých pokladnách a jen u výdajových dokladů bez DPH. Příjmový doklad si číslo
+  nechává, protože ho jako stvrzenku, zjednodušený daňový doklad nebo účtenku EET dostal plátce. Výdajový doklad s DPH
+  si číslo nechává, protože jde do evidence DPH a kontrolního hlášení. Číslo si nechává i doklad evidovaný v EET.
+- **Ostatní pohledávky a závazky** se přečíslují zvlášť. Pohledávka navázaná na vydanou fakturu si číslo nechává.
+- **Interní doklady** se přečíslují všechny automaticky očíslované. Ruční zápisy deníku bez interního dokladu se
+  nemění, i když čerpají z téže řady.
+
+Ve všech agendách se přepíše i číslo dokladu a popis zápisu v účetním deníku včetně storna a přeúčtování. Pravidla
+pro uzávěrky a zamčené období platí stejně jako u přijatých dokladů. Vydané faktury a bankovní výpisy se
+nepřečíslovávají: číslo vydané faktury už má odběratel a číslo bankovního dokladu určuje výpis banky.
+
 #### Rekapitulace DPH dle dokladu (§ 73 ZDPH)
 
 Pod položkami je box **Rekapitulace DPH** se základem a daní **za každou sazbu**. Hodnoty se dopočítají ze řádků, ale pokud
@@ -966,8 +1019,13 @@ Zrušení volby smaže pokladní doklad i jeho zápis a vrátí fakturu do před
 Ručně vystaveného pokladního dokladu se vyrovnání nikdy nedotkne. Podrobnosti, včetně chování při selhání a při stornu,
 jsou u vydané faktury v [§ 15.2.7](15_Faktura_editor.md#1592-hlavicka), u přijaté faktury platí zrcadlově.
 
-Nepodporuje se **cizoměnová faktura**, **valutová pokladna** a **daňový doklad k poskytnuté záloze (DDKP)**, ten se
-samostatně nehradí. V těchto případech se vyrovnání jen přeskočí (s informativní hláškou) a faktura se normálně uloží.
+Cizoměnovou fakturu nebo účtenku korunová pokladna uhradí v korunách: zbytek přepočtený kurzem dokladu, ke dni dokladu,
+bez kurzového rozdílu. Platili-li jste jinou korunovou částkou, pořiďte úhradu ručně v
+[Pokladně](32_Pokladna.md#326-krok-za-krokem-uhrada-faktury-z-pokladny), rozdíl se zaúčtuje jako kurzový.
+
+Nepodporuje se **valutová pokladna**, **cizoměnová záloha**, cizoměnový doklad bez kurzu a **daňový doklad k poskytnuté
+záloze (DDKP)**, ten se samostatně nehradí. V těchto případech se vyrovnání jen přeskočí (s informativní hláškou)
+a faktura se normálně uloží.
 
 ### 23.11.14 Detail přijaté faktury
 
@@ -1084,10 +1142,20 @@ faktury se zúčtováním, dokud záloha uhrazená není, říká, že se zaúč
 neúčtuje záměrně, automatické účtování ji proto ani nezkouší a nehlásí chybu.
 
 **Záloha (nebo samostatný DDKP) s vlastním daňovým dokladem k platbě.** Má-li navázaná záloha svůj DDKP, nebo je-li
-zálohou přímo samostatný DDKP, část účtu 314 už vyčerpala DPH (343/314), kterou DDKP uplatnil při platbě. Automatické
-zúčtování na plnou zaplacenou částku by pak 314 přečerpalo do minusu o tuhle už uplatněnou daň, takže se v tomto případě
-**nezaúčtuje automaticky**. Hláška u zaúčtování rovnou spočítá, kolik DPH z finální faktury zbývá doúčtovat na 343 nad rámec
-toho, co DDKP uplatnil už při platbě. Zúčtování zálohy pak zapište ručním zápisem podle této částky.
+zálohou přímo samostatný DDKP, část účtu 314 už vyčerpala DPH (343/314), kterou DDKP uplatnil při platbě. Finální faktura
+pak musí zálohu odečíst **odpočtovým řádkem** se základem a daní DDKP (postup v [§ 23.8.1](#2381-vyuctovani-zalohy-ke-ktere-dodavatel-vystavil-danovy-doklad-k-platbe)).
+Řádek se pozná jen podle označení **Odpočet zálohy**, samotná záporná částka nestačí. Při zaúčtování se základ odpočtu
+nevede na náklad, daň odpočtu vrací DPH uplatněnou z DDKP a zbytek zálohy (zaplaceno minus DPH DDKP) se zúčtuje
+MD 321 / D 314. Odpočet musí s DDKP sedět s tolerancí 1 Kč a zbytek zálohy se základem odpočtu, jinak zaúčtování skončí
+hláškou s čísly. Uhrazenou zálohu v hlavičce faktura s odpočtovým řádkem neodečítá, aby se záloha neodečetla dvakrát.
+
+Finální faktura navázaná na zálohu s DDKP **bez** odpočtového řádku se nezaúčtuje: hláška spočítá, kolik DPH z faktury
+zbývá doúčtovat nad rámec toho, co DDKP uplatnil, a detail faktury nabídne **Doplnit odpočet zálohy z DDKP**. Takové
+doklady (i ze starších období) najdete v [Měsíční kontrole](62_Mesicni_kontrola.md) jako konečné přijaté faktury bez odpočtu
+zálohy, protože v evidenci DPH by se daň zálohy uplatnila podruhé.
+
+Automaticky se neúčtuje odpočet zálohy s DDKP u faktury bez plného nároku na odpočet, s přenesenou daňovou povinností
+nebo s rozpisem DPH podle druhu plnění. Zúčtování zálohy pak zapište ručním zápisem.
 
 **Co propojení (a zaplacení) ovlivní:**
 

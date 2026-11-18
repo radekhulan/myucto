@@ -587,6 +587,76 @@ final class SyntheticPohodaExport
             . '</lst:listIntDoc>');
     }
 
+    /** Číslo pokladního dokladu bez roku v řadě - POHODA ho čísluje znovu v každé agendě. */
+    public const CASH_REPEATED_NUMBER = 'PP0001';
+
+    /**
+     * Pokladní příjem v hotovosti (pokladna `HP`, účet 211000) se zápisem v deníku agendy.
+     * Opakovaným voláním nad agendami různých let vznikne doklad se stejným číslem v obou.
+     */
+    public static function withCashReceipt(string $agendaDir, string $number, string $date, float $amount): void
+    {
+        $chart = $agendaDir . '/02_uctova_osnova.xml';
+        if (!str_contains((string) file_get_contents($chart), 'code="211000"')) {
+            self::append($chart, '</lst:listAccount>', '<lst:itemAccount id="211000" code="211000" name="Pokladna"/>');
+        }
+        self::append($agendaDir . '/01_ucetni_denik.xml', '</lst:accountancy>',
+            self::entry('Pokladna', $number, 'Tržba v hotovosti', $amount, '211000', '602000', $date));
+        $voucher = '<lst:voucher version="2.0"><vch:voucherHeader>'
+            . '<vch:voucherType>receipt</vch:voucherType><vch:cashAccount><typ:ids>HP</typ:ids></vch:cashAccount>'
+            . '<vch:number><typ:numberRequested>' . $number . '</typ:numberRequested></vch:number>'
+            . '<vch:date>' . $date . '</vch:date><vch:datePayment>' . $date . '</vch:datePayment><vch:text>Tržba v hotovosti</vch:text>'
+            . '<vch:classificationVAT><typ:ids>UN</typ:ids></vch:classificationVAT>'
+            . '</vch:voucherHeader><vch:voucherSummary><vch:homeCurrency><typ:priceNone>' . $amount . '</typ:priceNone>'
+            . '<typ:priceLow>0</typ:priceLow><typ:priceLowVAT>0</typ:priceLowVAT><typ:priceHigh>0</typ:priceHigh><typ:priceHighVAT>0</typ:priceHighVAT>'
+            . '</vch:homeCurrency></vch:voucherSummary></lst:voucher>';
+        $vouchers = $agendaDir . '/28_pokladna.xml';
+        if (is_file($vouchers)) {
+            self::append($vouchers, '</lst:listVoucher>', $voucher);
+        } else {
+            self::file($vouchers, '<lst:listVoucher version="2.0" state="ok">' . $voucher . '</lst:listVoucher>');
+        }
+    }
+
+    /** Číslo vydané faktury bez roku v řadě ({@see withIssuedInvoice()}). */
+    public const ISSUED_REPEATED_NUMBER = 'FV0001';
+
+    /** Vydaná faktura se základní sazbou DPH a jejím předpisem v deníku agendy. */
+    public static function withIssuedInvoice(string $agendaDir, string $number, string $vs, string $date, float $base): void
+    {
+        $vat = round($base * 0.21, 2);
+        self::append($agendaDir . '/12_faktury_issuedInvoice.xml', '</lst:listInvoice>', self::invoice('issuedInvoice', $number, $vs, $date, $base, $vat));
+        self::append($agendaDir . '/01_ucetni_denik.xml', '</lst:accountancy>',
+            self::entry('Vydané faktury', $number, 'Služby', $base, '311001', '602000', $date)
+            . self::entry('Vydané faktury', $number, 'DPH', $vat, '311001', '343021', $date));
+    }
+
+    /** Číslo ostatního závazku bez roku v řadě ({@see withOtherCommitment()}). */
+    public const OTHER_ITEM_REPEATED_NUMBER = 'OZ0007';
+
+    /** Neuhrazený ostatní závazek (pojistné, 518000/325000) se zápisem v deníku agendy. */
+    public static function withOtherCommitment(string $agendaDir, string $number, string $date, float $amount): void
+    {
+        $item = '<lst:invoice version="2.0"><inv:invoiceHeader>'
+            . '<inv:number><typ:numberRequested>' . $number . '</typ:numberRequested></inv:number>'
+            . '<inv:date>' . $date . '</inv:date><inv:dateAccounting>' . $date . '</inv:dateAccounting><inv:dateDue>' . $date . '</inv:dateDue>'
+            . '<inv:text>Pojistné</inv:text><inv:classificationVAT><typ:ids>PN</typ:ids></inv:classificationVAT>'
+            . '<inv:partnerIdentity><typ:address><typ:company>Pojišťovna Test a.s.</typ:company></typ:address></inv:partnerIdentity>'
+            . '<inv:liquidation><typ:amountHome>' . $amount . '</typ:amountHome></inv:liquidation>'
+            . '</inv:invoiceHeader><inv:invoiceSummary><inv:homeCurrency>'
+            . '<typ:priceNone>' . $amount . '</typ:priceNone><typ:priceLow>0</typ:priceLow>'
+            . '<typ:priceLowVAT>0</typ:priceLowVAT><typ:priceHigh>0</typ:priceHigh>'
+            . '<typ:priceHighVAT>0</typ:priceHighVAT></inv:homeCurrency></inv:invoiceSummary></lst:invoice>';
+        $items = $agendaDir . '/26_faktury_commitment.xml';
+        if (is_file($items)) {
+            self::append($items, '</lst:listInvoice>', $item);
+        } else {
+            self::file($items, '<lst:listInvoice version="2.0" state="ok">' . $item . '</lst:listInvoice>');
+        }
+        self::append($agendaDir . '/01_ucetni_denik.xml', '</lst:accountancy>',
+            self::entry('Ostatní závazky', $number, 'Pojistné', $amount, '518000', '325000', $date));
+    }
+
     /**
      * Agenda následujícího roku po agendě `write(..., unbooked: true)`: POHODA do ní převzala
      * doklady, které vedla už agenda minulého roku (vydaná faktura s úhradou a nezaúčtovaný

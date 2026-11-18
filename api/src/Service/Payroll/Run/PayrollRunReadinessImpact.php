@@ -159,6 +159,11 @@ final class PayrollRunReadinessImpact
         // § 111 odst. 2 ZP — sjednaná měsíční mzda pod minimální mzdou období.
         // Mzda vstupuje do zmrazeného snímku, oprava po zamknutí je revize.
         'monthly_wage_below_minimum' => [self::IMPACT_REVISION, self::SCOPE_MONTHLY],
+        // Vazba mzdové dimenze na firemní dimenzi (zakázku) se zmrazí do
+        // snímku vstupů. Doplněná po schválení se do zápisu dostane jen
+        // opravnou revizí. Mzdu nezastaví, zápis jde i bez ní.
+        'payroll_dimension_company_link_missing' => [self::IMPACT_REVISION, self::SCOPE_SETUP],
+        'payroll_dimension_company_link_mismatch' => [self::IMPACT_REVISION, self::SCOPE_SETUP],
         // Podmínky vztahu (pracoviště 10229 až 10231, tristavy, APZ, dočasné
         // přidělení, kategorizace rizika, druh činnosti a upřesnění vztahu
         // pro výběr formuláře) vstupují do zmrazeného snímku běhu.

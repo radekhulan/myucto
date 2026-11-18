@@ -30,6 +30,7 @@ use MyInvoice\Service\Currency\PurchaseInvoiceRateReloader;
 use MyInvoice\Service\Invoice\DocumentItemsPayload;
 use MyInvoice\Service\Invoice\PurchaseInvoiceCalculator;
 use MyInvoice\Service\IpMatcher;
+use MyInvoice\Service\PurchaseInvoice\PurchaseAdvanceDeduction;
 use MyInvoice\Service\PurchaseInvoice\PurchaseVatTreatment;
 use MyInvoice\Service\PurchaseInvoice\PurchaseVatTreatmentConflict;
 use MyInvoice\Service\PurchaseInvoice\StoredPurchaseItemColumns;
@@ -71,6 +72,7 @@ final class UpdatePurchaseInvoiceAction
         private readonly \MyInvoice\Service\Document\AttachmentCheck\AttachmentCheckService $attachmentChecks,
         private readonly PurchaseFiledVatPeriod $filedPeriods,
         private readonly NumberSeriesSelection $numberSeries,
+        private readonly \MyInvoice\Service\Accounting\Dimension\DraftItemDimensionRealign $itemDimensions,
     ) {}
 
     /**
@@ -395,11 +397,17 @@ final class UpdatePurchaseInvoiceAction
             // vědomá položka smíšeného dokladu, ne pozůstatek z doby před zatržením.
             $keepDomesticItemCodes = (bool) ($existing['reverse_charge'] ?? false);
             if (DocumentItemsPayload::replaces($body)) {
+                // Dimenze položek konceptu vrátí k položkám podle `id` z těla ({@see DraftItemDimensionRealign}).
+                $isDraft = (string) ($existing['status'] ?? '') === 'draft';
+                $dimensionsBefore = $isDraft ? $this->itemDimensions->snapshot('purchase_invoice', $id) : [];
                 $this->repo->replaceItems(
                     $id,
                     StoredPurchaseItemColumns::carryOver((array) $body['items'], (array) ($existing['items'] ?? [])),
                     $keepDomesticItemCodes,
                 );
+                if ($isDraft) {
+                    $this->itemDimensions->realign($supplierId, 'purchase_invoice', $id, $dimensionsBefore, (array) $body['items']);
+                }
             } else {
                 // Zatržení přenesené povinnosti nebo změna kódu v hlavičce bez položek
                 // v těle musí srovnat i tuzemské kódy uložených řádků (issue #119).
@@ -424,6 +432,9 @@ final class UpdatePurchaseInvoiceAction
             // Až PO recompute — volba dominantního kódu váží podle total_with_vat, které
             // kalkulátor dopočítává.
             $this->repo->syncHeaderClassificationFromItems($id, $supplierId);
+            // Odpočet zálohy na řádku už zálohu z celkové částky odečetl; hlavička ji
+            // odečíst nesmí, jinak by K úhradě zálohu odečetlo podruhé.
+            (new PurchaseAdvanceDeduction($this->db))->clearHeaderAdvanceWhenDeducted($supplierId, $id);
             if (array_key_exists('rounding', $body)) {
                 $this->repo->setRounding($id, $supplierId, (float) $body['rounding']);
             }
@@ -628,9 +639,8 @@ final class UpdatePurchaseInvoiceAction
                 $invoice['_warning_meta']['exchange_rate_cnb_deviation'] = $dev;
             }
         }
-        // Finální faktura na zálohu s DDKP → DPH ze zálohy už odečtena (dvojí odpočet).
-        if (is_array($invoice) && (string) ($invoice['document_kind'] ?? 'invoice') === 'invoice'
-            && CreatePurchaseInvoiceAction::advanceHasActiveTaxDocument($this->db, $invoice['advance_purchase_invoice_id'] ?? null, $supplierId)) {
+        // Finální faktura na zálohu s DDKP bez odpočtu zálohy → dvojí odpočet DPH.
+        if (is_array($invoice) && CreatePurchaseInvoiceAction::finalRisksDoubleVatDeduction($this->db, $invoice, $supplierId)) {
             $warnings[] = 'advance_has_tax_document';
         }
         // Účtenka, která vypadá jako doklad k přijaté záloze → nejspíš má být DDKP/záloha.

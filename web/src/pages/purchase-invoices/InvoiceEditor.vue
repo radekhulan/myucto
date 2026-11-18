@@ -21,7 +21,10 @@ import {
   type PurchaseVatAllocation,
   type AiPostingSuggestion,
   type PurchaseForceMode,
+  type PurchaseInvoiceBrief,
+  type PurchaseAdvanceDeductionLine,
 } from '@/api/purchaseInvoices'
+import AdvancePickerModal from '@/components/purchase/AdvancePickerModal.vue'
 import {
   portalPurchaseInvoiceSubmissionsApi,
   purchaseInvoiceSubmissionsApi,
@@ -36,7 +39,7 @@ import { stockApi, type StockItemSearchResult } from '@/api/stock'
 import { expenseCategoriesApi, type ExpenseCategory } from '@/api/expenseCategories'
 import { projectsApi, type Project } from '@/api/projects'
 import { vatClassificationsApi, type VatClassification } from '@/api/vatClassifications'
-import { allocationsHaveMixedDeduction, headerDiffersFromAllocations, itemConflictsWithHeader, itemVatState, type HeaderVat } from './purchaseVatTreatment'
+import { allocationDeductionKey, allocationsHaveMixedDeduction, headerDeductionFromAllocations, headerDiffersFromAllocations, itemConflictsWithHeader, itemVatState, type HeaderVat } from './purchaseVatTreatment'
 import { settingsApi } from '@/api/settings'
 import { usePaneDom } from '@/composables/usePaneDom'
 import AutomationBadge from '@/components/automation/AutomationBadge.vue'
@@ -62,6 +65,7 @@ import { reverseChargeCodeForKind } from '@/utils/reverseChargeSupplyCode'
 import ExtractionWarningText from '@/components/purchase/ExtractionWarningText.vue'
 import VendorPicker from '@/components/purchase/VendorPicker.vue'
 import ClientFormModal from '@/components/modals/ClientFormModal.vue'
+import ClientRegistryCheck from '@/components/clients/ClientRegistryCheck.vue'
 import { clientsApi, type Client } from '@/api/clients'
 import PdfDropzone from '@/components/purchase/PdfDropzone.vue'
 import CapturePhotoButton from '@/components/upload/CapturePhotoButton.vue'
@@ -408,6 +412,117 @@ watch(
   },
 )
 
+// Vyúčtování poskytnuté zálohy konečnou fakturou. U uloženého dokladu se vazba zakládá
+// a ruší hned (link-advance, stejně jako v detailu), u nového se pošle s uložením.
+// Záloha s DDKP se odečítá označenými odpočtovými řádky se základem a daní DDKP
+// („Doplnit odpočet zálohy z DDKP"), jinak by se DPH zálohy uplatnila podruhé.
+const linkedAdvance = ref<PurchaseInvoiceBrief | null>(null)
+const advancePickerOpen = ref(false)
+const advanceBusy = ref(false)
+const advanceDeductionLines = ref<PurchaseAdvanceDeductionLine[]>([])
+const advanceLinkDisabledReason = computed(() =>
+  !form.value.vendor_id || !form.value.currency_id ? t('purchase_invoice.advance_deduction.pick_vendor') : null)
+const hasAdvanceDeductionLine = computed(() =>
+  linkedAdvance.value !== null
+  && form.value.items.some(it => it.advance_purchase_invoice_id === linkedAdvance.value?.id))
+let autoAddAdvanceDeduction = route.query.advance_deduction === '1'
+
+watch(() => linkedAdvance.value?.id ?? null, async (advanceId) => {
+  advanceDeductionLines.value = []
+  if (advanceId === null) return
+  try {
+    advanceDeductionLines.value = await purchaseInvoicesApi.advanceDeductionLines(advanceId)
+  } catch (e) {
+    toast.error(apiErrorMessage(e))
+  }
+  if (autoAddAdvanceDeduction && !hasAdvanceDeductionLine.value) addAdvanceDeductionLines()
+  autoAddAdvanceDeduction = false
+})
+
+// Nový doklad: jiný dodavatel, měna nebo druh dokladu vybranou zálohu ruší (vazba by neprošla).
+watch(() => [form.value.vendor_id, form.value.currency_id, form.value.document_kind] as const, () => {
+  if (invoiceId.value === null) linkedAdvance.value = null
+})
+
+function loadAdvanceCandidates(): Promise<PurchaseInvoiceBrief[]> {
+  if (invoiceId.value !== null) return purchaseInvoicesApi.advanceCandidates(invoiceId.value)
+  if (!form.value.vendor_id || !form.value.currency_id) return Promise.resolve([])
+  return purchaseInvoicesApi.newInvoiceAdvanceCandidates({
+    vendor_id: form.value.vendor_id,
+    currency_id: form.value.currency_id,
+    total: totals.value.with_vat,
+  })
+}
+
+async function pickAdvance(advanceId: number, candidate: PurchaseInvoiceBrief) {
+  if (invoiceId.value === null) {
+    linkedAdvance.value = candidate
+    advancePickerOpen.value = false
+    return
+  }
+  advanceBusy.value = true
+  try {
+    const inv = await purchaseInvoicesApi.linkAdvance(invoiceId.value, advanceId)
+    linkedAdvance.value = inv.linked_advance ?? candidate
+    form.value.advance_paid_amount = inv.advance_paid_amount
+    advancePickerOpen.value = false
+    toast.success(t('purchase_invoice.advance_link.linked'))
+  } catch (e) {
+    toast.error(apiErrorMessage(e))
+  } finally {
+    advanceBusy.value = false
+  }
+}
+
+async function unlinkAdvanceInEditor() {
+  if (!linkedAdvance.value || advanceBusy.value) return
+  if (!confirm(t('purchase_invoice.advance_link.unlink_confirm'))) return
+  if (invoiceId.value === null) {
+    linkedAdvance.value = null
+    return
+  }
+  advanceBusy.value = true
+  try {
+    const inv = await purchaseInvoicesApi.unlinkAdvance(invoiceId.value)
+    linkedAdvance.value = null
+    form.value.advance_paid_amount = inv.advance_paid_amount
+    toast.success(t('purchase_invoice.advance_link.unlinked'))
+  } catch (e) {
+    toast.error(apiErrorMessage(e))
+  } finally {
+    advanceBusy.value = false
+  }
+}
+
+// Odpočtový řádek za každý DDKP a sazbu: základ a daň DDKP se znaménkem minus. Hlavička
+// zálohu pak neodečítá (server Uhrazenou zálohu u dokladu s odpočtem vynuluje).
+function addAdvanceDeductionLines() {
+  const advance = linkedAdvance.value
+  if (!advance || advanceDeductionLines.value.length === 0) return
+  const unit = units.value.find(u => u.is_default)?.code || 'ks'
+  for (const line of advanceDeductionLines.value) {
+    form.value.items.push({
+      description: t('purchase_invoice.advance_deduction.line_description', { number: line.tax_document_number }),
+      quantity: 1,
+      duration_minutes: null,
+      unit,
+      unit_price_without_vat: form.value.prices_include_vat ? line.gross : line.base,
+      vat_rate_id: line.vat_rate_id,
+      order_index: form.value.items.length,
+      expense_kind: null,
+      expense_account_code: null,
+      vat_classification_code: line.vat_classification_code,
+      counter_account_code: null,
+      posting_rule_key: null,
+      accrual_from: null,
+      accrual_to: null,
+      stock_item_id: null,
+      advance_purchase_invoice_id: advance.id,
+    })
+  }
+  form.value.advance_paid_amount = 0
+}
+
 // PDF state
 const existingPdf = ref<{ path: string; hash: string; size: number; name: string; uploadedAt: string } | null>(null)
 // Výchozí stav: zavřeno, sdílená volba s detailem dokladu. FR5 (audit 2026-08) — u konceptu
@@ -565,6 +680,19 @@ function onVendorVatPayerToggle() {
 
 // === Quick "New vendor" modal — vytvoří klienta s is_vendor=true, is_customer=false ===
 const vendorModalOpen = ref(false)
+const vendorPickerRef = ref<InstanceType<typeof VendorPicker> | null>(null)
+
+// Karta dodavatele aktualizovaná z ARES/VIES: obnov popisek výběru a plátcovství
+// na dokladu stejně jako při výběru dodavatele (neplátce ⇒ bez odpočtu).
+function onVendorRegistryUpdated(client: Client, fields: string[]) {
+  vendorPickerRef.value?.upsert(client)
+  if (form.value.vendor_id !== client.id) return
+  windowVendor.value = { id: client.id, name: client.company_name }
+  if (fields.includes('is_vat_payer') && client.is_vat_payer !== undefined) {
+    applyVendorVatStatus(client.is_vat_payer, true)
+  }
+}
+
 async function onVendorCreated(client: Client) {
   form.value.vendor_id = client.id
   vendorModalOpen.value = false
@@ -934,6 +1062,7 @@ function populate(inv: PurchaseInvoice) {
     expense_account_code: it.expense_account_code ?? null,
     vat_classification_code: it.vat_classification_code ?? null,
   }))
+  linkedAdvance.value = inv.linked_advance ?? null
   // Faktura s už zadaným časovým rozlišením → odkryj celý blok (jinak by řádek s pickery byl schovaný).
   showAccrual.value = form.value.items.some(it => !!it.accrual_from || !!it.accrual_to)
   // §DM legacy: doklad označený hlavičkovým `is_fixed_asset` z doby před item-level
@@ -952,6 +1081,7 @@ function populate(inv: PurchaseInvoice) {
     vatOverrides.value[String(o.rate)] = { base: o.base, vat: o.vat }
   }
   vatAllocations.value = (inv.vat_allocations ?? []).map(a => ({ ...a }))
+  allocationDeductionBaseline = allocationDeductionKey(vatAllocations.value)
   // Existující faktura: plátcovství čteme ze SNAPSHOTU dokladu (migrace 0133), který si
   // fakturu drží k datu plnění. ZÁMĚRNĚ NEvoláme online ARES/VIES lookup — ten se ptá na
   // dnešní stav a persistoval by ho na klienta, čímž by u historické faktury příznak
@@ -1228,6 +1358,16 @@ const vatOverrides = ref<Record<string, { base: number; vat: number }>>({})
 const vatAllocations = ref<PurchaseVatAllocation[]>([])
 const hasVatAllocations = computed(() => vatAllocations.value.length > 0)
 const mixedAllocationDeduction = computed(() => allocationsHaveMixedDeduction(vatAllocations.value))
+// Jednotný nárok rozpisu se po změně v rozpisu propíše do nároku v Klasifikaci. Načtení
+// dokladu uloženou hlavičku nepřepisuje: výchozí stav je nárok rozpisu při načtení.
+let allocationDeductionBaseline: string | null = null
+watch(() => allocationDeductionKey(vatAllocations.value), () => {
+  const next = headerDeductionFromAllocations(vatAllocations.value, allocationDeductionBaseline, form.value.vendor_is_vat_payer)
+  allocationDeductionBaseline = allocationDeductionKey(vatAllocations.value)
+  if (!next) return
+  form.value.vat_deduction = next.vat_deduction
+  form.value.vat_deduction_percent = next.vat_deduction_percent
+})
 
 function accountExists(code: string): boolean {
   return accountingAccounts.value.some(a => a.is_active && a.account_code === code)
@@ -1688,6 +1828,10 @@ function buildPayload(): PurchaseInvoicePayload {
         form.value.document_kind === 'credit_note' || form.value.document_kind === 'tax_document'
           ? form.value.parent_purchase_invoice_id
           : null,
+      // Záloha vybraná u nového dokladu; uložený doklad má vazbu už založenou (link-advance).
+      ...(invoiceId.value === null && form.value.document_kind === 'invoice' && linkedAdvance.value
+        ? { advance_purchase_invoice_id: linkedAdvance.value.id }
+        : {}),
       // Ruční rekapitulace DPH dle dokladu (§ 73) — [] vyčistí případný starý override.
       vat_overrides: buildVatOverridesPayload(),
       vat_allocations: vatAllocations.value.map((a, i) => ({ ...a, order_index: i })),
@@ -1711,6 +1855,7 @@ function buildPayload(): PurchaseInvoicePayload {
         item_ean: it.item_ean ?? null,
         intrastat_cn8_code: it.intrastat_cn8_code ?? null,
         intrastat_country_of_origin: it.intrastat_country_of_origin ?? null,
+        advance_purchase_invoice_id: it.advance_purchase_invoice_id ?? null,
       })),
     }
 }
@@ -2093,10 +2238,12 @@ useWindowTitle(
             <div class="flex gap-2">
               <div class="flex-1 min-w-0">
                 <VendorPicker
+                  ref="vendorPickerRef"
                   v-model="form.vendor_id"
                   @selected="onVendorSelected"
                 />
               </div>
+              <ClientRegistryCheck :client-id="form.vendor_id" button-class="mt-[26px]" @updated="onVendorRegistryUpdated" />
               <button type="button" @click="vendorModalOpen = true"
                 class="cursor-pointer shrink-0 h-9 px-3 mt-[26px] inline-flex items-center gap-1.5 border border-primary-500/40 text-primary-700 hover:bg-primary-50 rounded-md text-sm font-medium"
                 :title="t('purchase_invoice.new_vendor')">
@@ -2162,6 +2309,48 @@ useWindowTitle(
             <span v-else>{{ t('purchase_invoice.tax_document_link.hint') }}</span>
           </p>
         </div>
+
+        <!-- Konečná faktura: vyúčtování poskytnuté zálohy (a odpočet zálohy s DDKP) -->
+        <div v-if="form.document_kind === 'invoice' && auth.canWrite('purchase_invoices')"
+             class="rounded-md border border-primary-200 bg-primary-50/60 px-3 py-2.5 space-y-2" data-test="editor-advance">
+          <div class="flex flex-wrap items-center justify-between gap-2">
+            <span class="text-sm text-neutral-700 min-w-0">
+              <template v-if="linkedAdvance">
+                {{ t('purchase_invoice.advance_link.linked_to') }}
+                <span class="font-mono font-medium">{{ linkedAdvance.varsymbol || linkedAdvance.vendor_invoice_number || ('#' + linkedAdvance.id) }}</span>
+                <span class="text-neutral-500 font-mono">({{ formatMoney(linkedAdvance.total_with_vat, linkedAdvance.currency) }})</span>
+              </template>
+              <template v-else>{{ t('purchase_invoice.advance_link.none') }}</template>
+            </span>
+            <div class="flex flex-wrap gap-2">
+              <button v-if="!linkedAdvance" type="button" :class="btnOutline('primary')"
+                :disabled="advanceBusy || advanceLinkDisabledReason !== null"
+                :title="advanceLinkDisabledReason ?? undefined" @click="advancePickerOpen = true">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.link" /></svg>
+                {{ t('purchase_invoice.advance_link.pair') }}
+              </button>
+              <button v-else type="button" :class="btnOutline('neutral')" :disabled="advanceBusy" @click="unlinkAdvanceInEditor">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.x" /></svg>
+                {{ t('purchase_invoice.advance_link.unlink') }}
+              </button>
+            </div>
+          </div>
+          <p v-if="!linkedAdvance && advanceLinkDisabledReason" class="text-xs text-neutral-500">{{ advanceLinkDisabledReason }}</p>
+          <div v-if="linkedAdvance && advanceDeductionLines.length > 0 && !hasAdvanceDeductionLine"
+               class="flex flex-wrap items-center justify-between gap-2 rounded-md bg-warning-50 border border-warning-200 px-3 py-2">
+            <span class="text-sm text-warning-700 min-w-0">{{ t('purchase_invoice.advance_deduction.missing') }}</span>
+            <button type="button" :class="btnFilled('warning')" @click="addAdvanceDeductionLines" data-test="add-advance-deduction">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.plus" /></svg>
+              {{ t('purchase_invoice.advance_deduction.add') }}
+            </button>
+          </div>
+          <p v-else-if="linkedAdvance && hasAdvanceDeductionLine" class="text-xs text-neutral-600">{{ t('purchase_invoice.advance_deduction.present') }}</p>
+        </div>
+        <AdvancePickerModal :open="advancePickerOpen"
+          :title="t('purchase_invoice.advance_link.modal_title')"
+          :empty-text="t('purchase_invoice.advance_link.no_candidates')"
+          :load="loadAdvanceCandidates" :busy="advanceBusy"
+          @pick="pickAdvance" @close="advancePickerOpen = false" />
 
         <!-- Vendor invoice number + our varsymbol -->
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -2350,6 +2539,8 @@ useWindowTitle(
                   @toggle="docDims.toggleItem(it)" />
                 </div>
                 <p v-if="fieldErr(`items.${i}.description`)" class="text-xs text-danger-600 mt-1">{{ fieldErr(`items.${i}.description`) }}</p>
+                <span v-if="it.advance_purchase_invoice_id" class="inline-flex mt-1 px-1.5 py-0.5 rounded text-xs bg-primary-50 text-primary-700 border border-primary-200"
+                  :title="t('purchase_invoice.advance_deduction.badge_hint')">{{ t('purchase_invoice.advance_deduction.badge') }}</span>
                 <AccrualSuggestionHint v-if="accrualSuggestionFor(it)"
                   :from="accrualSuggestionFor(it)!.from" :to="accrualSuggestionFor(it)!.to"
                   @apply="applyAccrualSuggestion(it)" @dismiss="dismissAccrualSuggestion(it)" />
@@ -2540,6 +2731,8 @@ useWindowTitle(
                 @select="(v: number | null) => onStockSelect(i, v)"
               />
               <p v-if="fieldErr(`items.${i}.description`)" class="text-xs text-danger-600 mt-1">{{ fieldErr(`items.${i}.description`) }}</p>
+              <span v-if="it.advance_purchase_invoice_id" class="inline-flex mt-1 px-1.5 py-0.5 rounded text-xs bg-primary-50 text-primary-700 border border-primary-200"
+                :title="t('purchase_invoice.advance_deduction.badge_hint')">{{ t('purchase_invoice.advance_deduction.badge') }}</span>
               <AccrualSuggestionHint v-if="accrualSuggestionFor(it)"
                 :from="accrualSuggestionFor(it)!.from" :to="accrualSuggestionFor(it)!.to"
                 @apply="applyAccrualSuggestion(it)" @dismiss="dismissAccrualSuggestion(it)" />
@@ -2876,7 +3069,7 @@ useWindowTitle(
                   </div>
                   <div class="sm:col-span-2">
                     <label class="block text-xs text-neutral-500 mb-1">{{ t('purchase_invoice.vat_allocation.deduction') }}</label>
-                    <select v-model="a.vat_deduction" :disabled="a.usage_type === 'personal' || a.usage_type === 'mixed'"
+                    <select v-model="a.vat_deduction" :disabled="a.usage_type === 'personal' || a.usage_type === 'mixed'" data-test="allocation-vat-deduction"
                       class="w-full h-9 px-2 border border-neutral-300 rounded text-sm bg-surface disabled:bg-neutral-100">
                       <option value="full">{{ t('purchase_invoice.vat_deduction.full') }}</option>
                       <option value="none">{{ t('purchase_invoice.vat_deduction.none') }}</option>

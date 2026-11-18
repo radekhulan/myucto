@@ -36,8 +36,13 @@ use PDOException;
  */
 final class CompanyPurgeService
 {
-    /** @var list<string> */
-    public const RETAINED_TABLES = ['activity_log'];
+    /**
+     * Otisky redakcí (výmaz osobních údajů, #321 krok 10) dokládají redigované záznamy řetězu;
+     * bez nich by zachovaný řetěz po smazání firmy hlásil redigované záznamy jako změněné.
+     *
+     * @var list<string>
+     */
+    public const RETAINED_TABLES = ['activity_log', 'activity_log_redactions'];
 
     private const LOCK = 'myucto_company_purge';
     private const MAX_PASSES = 10;
@@ -226,6 +231,7 @@ final class CompanyPurgeService
             }
             $pdo->beginTransaction();
             try {
+                $this->detachSelfReferences($pdo, array_keys($plan['counts']), $where);
                 $pending = [];
                 foreach ($plan['children'] as $child) {
                     $pending[] = ['table' => $child['table'], 'sql' => "DELETE FROM `{$child['table']}` WHERE {$child['where']}", 'own' => false];
@@ -291,6 +297,48 @@ final class CompanyPurgeService
         }
 
         return ['deleted' => $deleted, 'cycle' => $cycle, 'triggers' => count($dropped)];
+    }
+
+    /**
+     * Hierarchie uvnitř jedné tabulky s `ON DELETE RESTRICT` (`dimension_values.parent_id`,
+     * `property_objects.parent_id`, řetězce opravných záznamů): hromadný DELETE narazí na
+     * rodiče dřív než na jeho potomka (1451) a tabulka by skončila v cestě s vypnutou
+     * kontrolou cizích klíčů. Nulovatelný odkaz na řádek téže firmy se proto zruší předem.
+     * Brání-li tomu trigger tabulky jen pro přidávání (1644), zůstane dosavadní cesta.
+     *
+     * @param list<string> $tables
+     */
+    private function detachSelfReferences(PDO $pdo, array $tables, \Closure $where): void
+    {
+        $company = array_fill_keys($tables, true);
+        $nullable = [];
+        $stmt = $pdo->query(
+            "SELECT TABLE_NAME, COLUMN_NAME FROM information_schema.COLUMNS
+              WHERE TABLE_SCHEMA = DATABASE() AND IS_NULLABLE = 'YES'"
+        );
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $nullable[$row['TABLE_NAME'] . "\0" . $row['COLUMN_NAME']] = true;
+        }
+        $done = [];
+        foreach ($this->schema->localForeignKeys() as $fk) {
+            $table = (string) $fk['TABLE_NAME'];
+            $column = (string) $fk['COLUMN_NAME'];
+            $key = $table . "\0" . $column;
+            if ($table !== $fk['REFERENCED_TABLE_NAME'] || $table === 'supplier' || !isset($company[$table], $nullable[$key])
+                || isset($done[$key]) || !in_array($fk['DELETE_RULE'], ['RESTRICT', 'NO ACTION'], true)) {
+                continue;
+            }
+            $done[$key] = true;
+            $col = str_replace('`', '``', $column);
+            try {
+                $pdo->exec(sprintf('UPDATE `%s` SET `%s` = NULL WHERE %s AND `%s` IS NOT NULL',
+                    str_replace('`', '``', $table), $col, $where($table), $col));
+            } catch (PDOException $e) {
+                if ((int) ($e->errorInfo[1] ?? 0) !== 1644) {
+                    throw $e;
+                }
+            }
+        }
     }
 
     /** @return array{sql: string, sql_mode: string} */

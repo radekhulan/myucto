@@ -52,6 +52,20 @@ const systems = [
           <p class="mt-1 flex-1 text-sm leading-5 text-neutral-600">{{ t(`migration_overview.${system.key}_hint`) }}</p>
           <span class="mt-5 inline-flex items-center gap-2 text-sm font-semibold text-primary-700">{{ t('migration_overview.open') }}<svg class="h-4 w-4 transition-transform group-hover:translate-x-1" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M5 12h14m-6-6 6 6-6 6" /></svg></span>
         </RouterLink>
+        <a href="https://myucto.cz/#kontakt" target="_blank" rel="noopener" data-testid="migration-overview-custom"
+          class="group flex min-h-52 flex-col rounded-xl border border-dashed border-neutral-300 bg-surface p-5 shadow-sm transition-all hover:-translate-y-1 hover:border-primary-400 hover:bg-primary-50 hover:shadow-md focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary-600">
+          <div class="flex items-start justify-between gap-3">
+            <span class="inline-flex h-11 w-11 items-center justify-center rounded-xl bg-warning-50 text-warning-700">
+              <svg class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M8 10h8M8 14h5m-9 6 3-3h11a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v14z" />
+              </svg>
+            </span>
+            <span class="rounded-full bg-warning-50 px-2.5 py-1 text-xs font-medium text-warning-700">{{ t('migration_overview.custom_tag') }}</span>
+          </div>
+          <h3 class="mt-5 text-lg font-semibold text-neutral-900">{{ t('migration_overview.custom_title') }}</h3>
+          <p class="mt-1 flex-1 text-sm leading-5 text-neutral-600">{{ t('migration_overview.custom_hint') }}</p>
+          <span class="mt-5 inline-flex items-center gap-2 text-sm font-semibold text-primary-700">{{ t('migration_overview.custom_contact') }}<svg class="h-4 w-4 transition-transform group-hover:translate-x-1" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M7 17 17 7m0 0H9m8 0v8" /></svg></span>
+        </a>
       </div>
     </section>
   </div>

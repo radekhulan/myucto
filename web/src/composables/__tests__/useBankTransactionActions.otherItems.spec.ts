@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
   reload: vi.fn(), toast: vi.fn(),
   client: false,
 }))
+vi.mock('@/api/membershipBank', () => ({ membershipBankApi: { candidates: vi.fn().mockResolvedValue({ candidates: [], next_after_id: null }) } }))
 vi.mock('@/api/bank', () => ({ bankApi: mocks.bank }))
 vi.mock('@/api/otherItems', () => ({ otherItemsApi: mocks.otherItems }))
 vi.mock('@/api/accounting', () => ({ accountingApi: {} }))

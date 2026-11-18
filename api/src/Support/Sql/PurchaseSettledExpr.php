@@ -178,9 +178,13 @@ final class PurchaseSettledExpr
 
     /**
      * Částka pokladního dokladu převedená do měny dokladu, se znaménkem (vratka odečítá).
-     * Pokladna ve měně dokladu nese cizí částku v `amount_foreign`; korunová pokladna
-     * k cizoměnovému dokladu se přepočte kurzem dokladu. Veřejné ze stejného důvodu jako
-     * {@see bankAmountSql()}.
+     * Korunová úhrada cizoměnového dokladu nese uhrazenou částku v měně dokladu přímo
+     * (`settled_document_amount`, zapisuje ji zaúčtování stejným pravidlem jako banka,
+     * {@see \MyInvoice\Service\Bank\FxPaymentSettlement}) — koruny zaplacené jiným kurzem,
+     * než má doklad, by přepočtem vypadaly jako přeplatek nebo nedoplatek. Pokladna ve
+     * měně dokladu nese cizí částku v `amount_foreign`; starší korunový doklad
+     * k cizoměnovému dokladu bez uložené částky se přepočte kurzem dokladu. Veřejné ze
+     * stejného důvodu jako {@see bankAmountSql()}.
      *
      * @param string $cd          alias `cash_documents`
      * @param string $doc         alias `purchase_invoices`
@@ -191,7 +195,8 @@ final class PurchaseSettledExpr
         $d = $doc === '' ? '' : $doc . '.';
 
         return "(CASE WHEN {$cd}.doc_type = 'in' THEN -1 ELSE 1 END)
-                * (CASE WHEN UPPER({$docCurrency}.code) = 'CZK' AND UPPER({$cd}.currency_code) = 'CZK' THEN {$cd}.total_amount
+                * (CASE WHEN {$cd}.settled_document_amount IS NOT NULL THEN {$cd}.settled_document_amount
+                        WHEN UPPER({$docCurrency}.code) = 'CZK' AND UPPER({$cd}.currency_code) = 'CZK' THEN {$cd}.total_amount
                         WHEN UPPER({$cd}.currency_code) = UPPER({$docCurrency}.code) THEN COALESCE({$cd}.amount_foreign, {$cd}.total_amount)
                         WHEN {$d}exchange_rate > 0 THEN ROUND({$cd}.total_amount / {$d}exchange_rate, 2)
                         ELSE {$cd}.total_amount END)";

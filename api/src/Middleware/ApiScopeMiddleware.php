@@ -191,6 +191,7 @@ final class ApiScopeMiddleware implements MiddlewareInterface
         '#^/api/accounting/periods/[0-9]+/closing/(asset-reserve|legal-provisions)/workspace$#',
         // Přečíslování přijatých dokladů přepisuje čísla i v deníku — jen účetní v aplikaci.
         '#^/api/purchase-invoices/renumber$#',
+        '#^/api/accounting/(cash-documents|other-items|internal-documents)/renumber$#',
         // Výchozí číselná řada je volba přihlášeného uživatele v editoru, ne integrace.
         '#^/api/(invoices|purchase-invoices|accounting/(cash|internal)-documents)/number-series/default$#',
     ];
@@ -223,7 +224,9 @@ final class ApiScopeMiddleware implements MiddlewareInterface
         // se tiskne na faktury a do QR platby. Token je smí jen číst; změnu
         // příjemce plateb dělá správce ve webovém rozhraní (openapi: mutace jen přes UI).
         '#^/api/settings/currencies(/|$)#',
-        '#^/api/bank-transactions/[0-9]+/unmatch$#',
+        // Párování a jeho zrušení (`match`, `unmatch`, přijetí návrhu) token smí, ale do
+        // deníku nezasáhne: BankStatementAction pohyb po spárování nezaúčtuje a pohyb se
+        // zápisem v deníku tokenu nepřepáruje ani neodpáruje (403 token_write_forbidden).
         '#^/api/accounting(/|$)#',
         '#^/api/reports(/|$)#',
         '#^/api/tax(/|$)#',
@@ -281,9 +284,10 @@ final class ApiScopeMiddleware implements MiddlewareInterface
      * deaktivace) je jen pro analytiku; syntetiku z šablony osnovy token jen čte,
      * což hlídá akce. Mazání účtu zůstává ve webovém rozhraní.
      *
-     * Ke konceptu ostatní položky smí token zapsat i dimenze (středisko, projekt).
-     * Koncept nemá řádky v deníku, takže se nic nepřerazítkuje; zaúčtovaný doklad
-     * a koncept z automaticky účtovaného opakování odmítne DimensionAction.
+     * Ke konceptu ostatní položky, vydané a přijaté faktury smí token zapsat i dimenze
+     * (středisko, projekt). Koncept nemá řádky v deníku, takže se nic nepřerazítkuje;
+     * vystavený, přijatý a zaúčtovaný doklad a koncept z automaticky účtovaného
+     * opakování odmítne DimensionAction.
      *
      * @var list<array{0:string,1:string}>
      */
@@ -297,7 +301,7 @@ final class ApiScopeMiddleware implements MiddlewareInterface
         ['PUT', '#^/api/accounting/other-items/schedules/[0-9]+/status$#'],
         ['POST', '#^/api/accounting/accounts$#'],
         ['PATCH', '#^/api/accounting/accounts/[0-9]+$#'],
-        ['PUT', '#^/api/accounting/dimensions/documents/other-items/[0-9]+$#'],
+        ['PUT', '#^/api/accounting/dimensions/documents/(other-items|invoices|purchase-invoices)/[0-9]+$#'],
     ];
 
     /**

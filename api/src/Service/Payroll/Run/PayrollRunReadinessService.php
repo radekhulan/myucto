@@ -23,6 +23,7 @@ use MyInvoice\Service\Payroll\People\PayrollPersonDataGapCatalog;
 use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetDomain;
 use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetRegistry;
 use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetYearOutlook;
+use MyInvoice\Service\Payroll\Settings\PayrollDimensionCompanyLink;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzBlockerCatalog;
 use PDO;
 use Psr\Clock\ClockInterface;
@@ -334,6 +335,9 @@ final class PayrollRunReadinessService
                 $periodStart,
                 $snapshot->data,
             ) as $finding) {
+                $findings[] = $finding;
+            }
+            foreach ($this->payrollDimensionLinkFindings($supplierId, $snapshot->data) as $finding) {
                 $findings[] = $finding;
             }
         }
@@ -1250,6 +1254,152 @@ final class PayrollRunReadinessService
         );
     }
 
+    /**
+     * Mzdové dimenze vztahů běhu, které se do deníku nepromítnou jako firemní
+     * dimenze.
+     *
+     * ── Co bylo špatně ──────────────────────────────────────────────────────
+     * Zakázka se do mzdového zápisu dostane jen přes vazbu mzdové dimenze na
+     * hodnotu firemní dimenze druhu Projekt navázanou na zakázku
+     * ({@see \MyInvoice\Service\Accounting\Dimension\DimensionStamper}). Bez
+     * vazby zůstane v deníku jen textové středisko, výsledovka zakázek mzdy
+     * nevidí a nic na to neupozornilo. Účetní, která mzdovou zakázku založila
+     * bez vazby, z toho usoudila, že zakázky v mzdách nejsou.
+     *
+     * Vazba se zmrazí do snímku vstupů, proto se posuzuje nad týmž snímkem.
+     * Firma bez zapnutých dimenzí firemní dimenze nemá, nález u ní nevzniká.
+     * Druh navázané hodnoty posuzuje totéž pravidlo jako uložení mzdové
+     * dimenze ({@see PayrollDimensionCompanyLink}); nesoulad se tu jen ukáže,
+     * dřív uložená data se nemění. Jeden dotaz na celý běh.
+     *
+     * @param array<string,mixed> $snapshotData
+     * @return list<array<string,mixed>>
+     */
+    private function payrollDimensionLinkFindings(int $supplierId, array $snapshotData): array
+    {
+        /** @var array<string,array{type:string,code:string,name:string,type_id:?int,employments:array<int,true>}> $dimensions */
+        $dimensions = [];
+        foreach ((array) ($snapshotData['people'] ?? []) as $person) {
+            foreach ((array) (is_array($person) ? ($person['employments'] ?? []) : []) as $employment) {
+                if (!is_array($employment)) {
+                    continue;
+                }
+                $employmentId = (int) ($employment['employment']['id'] ?? 0);
+                foreach ((array) ($employment['dimensions'] ?? []) as $dimension) {
+                    if (!is_array($dimension)) {
+                        continue;
+                    }
+                    $typeId = is_int($dimension['dimension_type_id'] ?? null) ? $dimension['dimension_type_id'] : null;
+                    $key = ($dimension['type'] ?? '') . "\0" . ($dimension['code'] ?? '') . "\0" . ($typeId ?? 0);
+                    $dimensions[$key] ??= [
+                        'type' => (string) ($dimension['type'] ?? ''),
+                        'code' => (string) ($dimension['code'] ?? ''),
+                        'name' => (string) ($dimension['name'] ?? ''),
+                        'type_id' => $typeId,
+                        'employments' => [],
+                    ];
+                    $dimensions[$key]['employments'][$employmentId] = true;
+                }
+            }
+        }
+        if ($dimensions === []) {
+            return [];
+        }
+        $typeIds = array_values(array_unique(array_filter(array_column($dimensions, 'type_id'))));
+        try {
+            $statement = $this->db->pdo()->prepare(
+                'SELECT firm.dimensions_enabled, dt.id, dt.kind, dt.name
+                   FROM supplier firm
+              LEFT JOIN dimension_types dt
+                     ON dt.id IN (' . ($typeIds === [] ? 'NULL' : implode(',', array_fill(0, count($typeIds), '?'))) . ')
+                  WHERE firm.id = ?'
+            );
+            $statement->execute([...$typeIds, $supplierId]);
+            $rows = $statement->fetchAll(PDO::FETCH_ASSOC);
+        } catch (\Throwable) {
+            return [];
+        }
+        if ($rows === [] || (int) $rows[0]['dimensions_enabled'] !== 1) {
+            return [];
+        }
+        $kinds = [];
+        foreach ($rows as $row) {
+            if ($row['id'] !== null) {
+                $kinds[(int) $row['id']] = ['kind' => (string) $row['kind'], 'name' => (string) $row['name']];
+            }
+        }
+
+        $unlinked = [];
+        $mismatched = [];
+        foreach ($dimensions as $dimension) {
+            if ($dimension['type_id'] === null) {
+                $unlinked[] = $dimension;
+            } elseif (isset($kinds[$dimension['type_id']])
+                && !PayrollDimensionCompanyLink::fits($dimension['type'], $kinds[$dimension['type_id']]['kind'])
+            ) {
+                $mismatched[] = $dimension + ['company_type' => $kinds[$dimension['type_id']]['name']];
+            }
+        }
+        $label = static fn (array $dimension): string => sprintf(
+            '%s %s (%s)',
+            PayrollDimensionCompanyLink::typeLabel($dimension['type']),
+            $dimension['code'],
+            $dimension['name'],
+        );
+        $entities = static fn (array $list): array => array_map(
+            static fn (array $dimension): array => [
+                'entity_type' => 'payroll_dimension',
+                'entity_id' => null,
+                'label' => $label($dimension),
+                'remediation_path' => '/payroll/settings?tab=dimensions',
+            ],
+            array_slice($list, 0, self::MAX_ENTITIES),
+        );
+        $employmentCount = static fn (array $list): int => count(array_replace(...array_column($list, 'employments')));
+        $findings = [];
+        if ($unlinked !== []) {
+            $findings[] = self::finding(
+                'payroll_dimension_company_link_missing',
+                sprintf(
+                    'Mzdové dimenze bez vazby na firemní dimenzi (%d, u %d pracovních vztahů běhu): %s. '
+                    . 'Mzdový zápis ponese jen textové středisko: zakázka ani firemní dimenze se '
+                    . 'na řádky nákladů nepropíšou a Ekonomika zakázky mzdy neuvidí. Vazbu doplňte '
+                    . 'v Mzdy → Nastavení mezd → Dimenze u každé mzdové dimenze v poli Firemní dimenze; '
+                    . 'zakázku navažte na hodnotu firemní dimenze druhu Projekt, která má vybranou zakázku.',
+                    count($unlinked),
+                    $employmentCount($unlinked),
+                    implode(', ', array_map($label, array_slice($unlinked, 0, self::MAX_ENTITIES)))
+                        . (count($unlinked) > self::MAX_ENTITIES ? sprintf(' a dalších %d', count($unlinked) - self::MAX_ENTITIES) : ''),
+                ),
+                '/payroll/settings?tab=dimensions',
+                count($unlinked),
+                $entities($unlinked),
+            );
+        }
+        if ($mismatched !== []) {
+            $findings[] = self::finding(
+                'payroll_dimension_company_link_mismatch',
+                sprintf(
+                    'Mzdové dimenze navázané na firemní dimenzi jiného druhu (%d, u %d pracovních vztahů běhu): %s. '
+                    . 'Zakázka patří jen na firemní dimenzi druhu Projekt a středisko jen na druh Středisko; '
+                    . 'jinak se zakázka do mzdového zápisu nedostane, nebo se přepíše. Vazbu opravte '
+                    . 'v Mzdy → Nastavení mezd → Dimenze.',
+                    count($mismatched),
+                    $employmentCount($mismatched),
+                    implode(', ', array_map(
+                        static fn (array $dimension): string => $label($dimension) . ' → ' . $dimension['company_type'],
+                        array_slice($mismatched, 0, self::MAX_ENTITIES),
+                    )),
+                ),
+                '/payroll/settings?tab=dimensions',
+                count($mismatched),
+                $entities($mismatched),
+            );
+        }
+
+        return $findings;
+    }
+
     /** Agendy bez sady na rok, o kterých má mzdová účetní vědět už před během. */
     private const PENDING_AGENDA_LABELS = [
         'enforcement_deductions' => 'exekuční srážky (nezabavitelné částky)',
@@ -1552,7 +1702,8 @@ final class PayrollRunReadinessService
                 . 'Mzdový běh za něj nejde založit. Měsíce zpracované v předchozím programu '
                 . 'patří do počátečních stavů kumulací u zaměstnanců, ne do mzdových běhů. '
                 . 'Pokud má tenhle měsíc spočítat MyÚčto, změňte první mzdové období '
-                . 'v Mzdy → Aktivace mzdové agendy.',
+                . 'na přehledu Mezd (nabídka … → Změnit první mzdové období). Jde to jen během '
+                . 'nastavení mezd.',
                 PayrollPeriodLabel::monthYear($periodStart),
                 PayrollPeriodLabel::monthYear((string) $startPeriod),
             ),

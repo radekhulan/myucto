@@ -7,6 +7,7 @@ namespace MyInvoice\Action\Invoice;
 use MyInvoice\Http\GuardsDocumentLock;
 use MyInvoice\Service\Accounting\Product\ProductPostingDefaults;
 use MyInvoice\Http\Json;
+use MyInvoice\Http\SessionOnlyAccountingAct;
 use MyInvoice\Http\SupplierGuard;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
@@ -33,6 +34,7 @@ use MyInvoice\Service\Stock\StockException;
 use MyInvoice\Service\Stock\StockIssueService;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
+use MyInvoice\Support\Sql\AdvanceDrawSql;
 
 /**
  * Storno vystavené faktury. Dvě varianty:
@@ -114,13 +116,15 @@ final class CancelInvoiceAction
                 $payment->execute([$id]);
                 $proformaId = (int) ($payment->fetchColumn() ?: 0);
             }
+            // Finální faktura zálohy: vazba dokladu i čerpání odpočtovým řádkem (AdvanceDrawSql).
             $final = $this->db->pdo()->prepare(
-                "SELECT 1 FROM invoices
-                  WHERE supplier_id = ? AND parent_invoice_id = ?
-                    AND invoice_type = 'invoice' AND status <> 'cancelled'
+                'SELECT 1 FROM (' . AdvanceDrawSql::finalIds('?', '?') . ") fx
+                   JOIN invoices i ON i.id = fx.id
+                  WHERE i.status <> 'cancelled'
                   LIMIT 1"
             );
-            $final->execute([(int) $invoice['supplier_id'], $proformaId]);
+            $supplierId = (int) $invoice['supplier_id'];
+            $final->execute([$supplierId, $proformaId, $proformaId, $supplierId]);
             if ($proformaId > 0 && $final->fetchColumn() !== false) {
                 return Json::error(
                     $response,
@@ -155,6 +159,12 @@ final class CancelInvoiceAction
         }
 
         if ($mode === 'internal') {
+            // Interní storno zaúčtované faktury stornuje i její zápis v deníku: ruční účetní
+            // úkon jen z relace. Dobropis (mode=credit_note) vzniká jako koncept a deníku se nedotkne.
+            if ($this->locks->forInvoice($invoice)->posted
+                && ($deny = SessionOnlyAccountingAct::deny($request, $response, 'Interní storno zaúčtované faktury'))) {
+                return $deny;
+            }
             return $this->internalCancel($request, $response, $invoice, $reason);
         }
         if ($mode === 'credit_note') {
@@ -193,7 +203,12 @@ final class CancelInvoiceAction
                 return Json::error($response, 'calendar_instalment_settled', 'Kalendář má uhrazené nebo dobropisované splátky. Nejdřív odeberte úhrady a stornujte dobropisy.', 409);
             }
             $instalment = $this->repo->find((int) $row['id']);
-            if ($deny = $this->denyIfLocked($request, $response, $this->locks->forInvoice($instalment), 'invoice', (int) $row['id'])) {
+            $instalmentLock = $this->locks->forInvoice($instalment);
+            if ($deny = $this->denyIfLocked($request, $response, $instalmentLock, 'invoice', (int) $row['id'])) {
+                return $deny;
+            }
+            if ($instalmentLock->posted
+                && ($deny = SessionOnlyAccountingAct::deny($request, $response, 'Storno kalendáře se zaúčtovanou splátkou'))) {
                 return $deny;
             }
             $loaded[] = $instalment;

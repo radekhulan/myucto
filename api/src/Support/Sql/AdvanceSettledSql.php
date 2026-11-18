@@ -10,7 +10,8 @@ namespace MyInvoice\Support\Sql;
  * Zálohu vyúčtuje konečná faktura dvěma cestami a obě musí platit všude, kde se záloha
  * vyřazuje z pohledávek, nákladů a nabídek k párování:
  *   - vazbou na dokladu: přijatá konečná faktura nese `advance_purchase_invoice_id`,
- *     vydaná `parent_invoice_id` na proformu,
+ *     vydaná `parent_invoice_id` na proformu, a vydaná faktura čerpající víc záloh
+ *     vyznačený odpočtový řádek ({@see AdvanceDrawSql}),
  *   - čerpáním po dvojicích záloha × faktura (`purchase_advance_deductions` /
  *     `invoice_advance_deductions`), které zapisuje převod z účetního programu nebo
  *     akce Vyrovnat v saldokontu. Tahle cesta vazbu na dokladu nenastavuje, takže bez
@@ -42,6 +43,7 @@ final class AdvanceSettledSql
         return "(EXISTS (SELECT 1 FROM invoices adv_fin
                           WHERE adv_fin.supplier_id = {$alias}.supplier_id AND adv_fin.parent_invoice_id = {$alias}.id
                             AND adv_fin.invoice_type = 'invoice')
+                 OR " . AdvanceDrawSql::advanceHasDrawLines($alias) . "
                  OR EXISTS (SELECT 1 FROM invoice_advance_deductions adv_ded
                              WHERE adv_ded.supplier_id = {$alias}.supplier_id AND adv_ded.advance_invoice_id = {$alias}.id))";
     }

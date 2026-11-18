@@ -1200,7 +1200,19 @@
         "2294_bank_posting_rule_skip_matching_card.sql",
         "2295_helios_import_map.sql",
         "2296_eet_units_dis_import.sql",
-        "2297_scheduled_pohoda_export.sql"
+        "2297_invoices_supplier_parent_index.sql",
+        "2298_invoice_item_advance_drawdown.sql",
+        "2299_cash_document_settled_document_amount.sql",
+        "2300_payroll_posting_imports.sql",
+        "2301_membership_list_indexes.sql",
+        "2302_membership_variable_symbol.sql",
+        "2303_membership_correctability.sql",
+        "2304_activity_log_redactions.sql",
+        "2305_membership_erasure.sql",
+        "2306_membership_erasure_permission.sql",
+        "2307_purchase_item_advance_deduction.sql",
+        "2308_bank_payment_submission_bank_errors.sql",
+        "2309_scheduled_pohoda_export.sql"
     ],
     "tables": {
         "abra_flexi_connections": {
@@ -1311,8 +1323,8 @@
                 "uq_account_definition_date": "UNIQUE BTREE (supplier_id, account_id, effective_from)"
             },
             "foreign_keys": {
-                "accounting_account_definition_history_ibfk_1": "(supplier_id, account_id) -> chart_of_accounts (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
-                "accounting_account_definition_history_ibfk_2": "(created_by) -> users (id) ON UPDATE RESTRICT ON DELETE RESTRICT"
+                "1": "(supplier_id, account_id) -> chart_of_accounts (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
+                "2": "(created_by) -> users (id) ON UPDATE RESTRICT ON DELETE RESTRICT"
             },
             "checks": {
                 "CONSTRAINT_1": "`is_active` in (0,1)",
@@ -1612,8 +1624,8 @@
                 "uq_framework_conversion_line": "UNIQUE BTREE (supplier_id, opening_line_id)"
             },
             "foreign_keys": {
-                "accounting_framework_conversion_cells_ibfk_1": "(supplier_id, conversion_id) -> accounting_framework_conversions (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
-                "accounting_framework_conversion_cells_ibfk_2": "(opening_line_id) -> journal_entry_lines (id) ON UPDATE RESTRICT ON DELETE RESTRICT"
+                "1": "(supplier_id, conversion_id) -> accounting_framework_conversions (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
+                "2": "(opening_line_id) -> journal_entry_lines (id) ON UPDATE RESTRICT ON DELETE RESTRICT"
             },
             "checks": {
                 "source_json": "json_valid(`source_json`)",
@@ -1637,8 +1649,8 @@
                 "created_by": "BTREE (created_by)"
             },
             "foreign_keys": {
-                "accounting_framework_conversion_commands_ibfk_1": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE RESTRICT",
-                "accounting_framework_conversion_commands_ibfk_2": "(created_by) -> users (id) ON UPDATE RESTRICT ON DELETE RESTRICT"
+                "1": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE RESTRICT",
+                "2": "(created_by) -> users (id) ON UPDATE RESTRICT ON DELETE RESTRICT"
             },
             "checks": {
                 "response_json": "json_valid(`response_json`)"
@@ -1667,9 +1679,9 @@
                 "uq_conversion_result_decision": "UNIQUE BTREE (supplier_id, conversion_id)"
             },
             "foreign_keys": {
-                "accounting_framework_conversion_decisions_ibfk_1": "(supplier_id, conversion_id) -> accounting_framework_conversions (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
-                "accounting_framework_conversion_decisions_ibfk_2": "(journal_entry_id) -> journal_entries (id) ON UPDATE RESTRICT ON DELETE RESTRICT",
-                "accounting_framework_conversion_decisions_ibfk_3": "(created_by) -> users (id) ON UPDATE RESTRICT ON DELETE RESTRICT"
+                "1": "(supplier_id, conversion_id) -> accounting_framework_conversions (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
+                "2": "(journal_entry_id) -> journal_entries (id) ON UPDATE RESTRICT ON DELETE RESTRICT",
+                "3": "(created_by) -> users (id) ON UPDATE RESTRICT ON DELETE RESTRICT"
             },
             "checks": {
                 "receipt_json": "json_valid(`receipt_json`)",
@@ -1712,13 +1724,13 @@
                 "uq_framework_conversion_tenant": "UNIQUE BTREE (supplier_id, id)"
             },
             "foreign_keys": {
-                "accounting_framework_conversions_ibfk_1": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE RESTRICT",
-                "accounting_framework_conversions_ibfk_2": "(source_period_id) -> accounting_periods (id) ON UPDATE RESTRICT ON DELETE RESTRICT",
-                "accounting_framework_conversions_ibfk_3": "(target_period_id) -> accounting_periods (id) ON UPDATE RESTRICT ON DELETE RESTRICT",
-                "accounting_framework_conversions_ibfk_4": "(source_entry_id) -> journal_entries (id) ON UPDATE RESTRICT ON DELETE RESTRICT",
-                "accounting_framework_conversions_ibfk_5": "(opening_entry_id) -> journal_entries (id) ON UPDATE RESTRICT ON DELETE RESTRICT",
-                "accounting_framework_conversions_ibfk_6": "(created_by) -> users (id) ON UPDATE RESTRICT ON DELETE RESTRICT",
-                "accounting_framework_conversions_ibfk_7": "(cancelled_by) -> users (id) ON UPDATE RESTRICT ON DELETE RESTRICT"
+                "1": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE RESTRICT",
+                "2": "(source_period_id) -> accounting_periods (id) ON UPDATE RESTRICT ON DELETE RESTRICT",
+                "3": "(target_period_id) -> accounting_periods (id) ON UPDATE RESTRICT ON DELETE RESTRICT",
+                "4": "(source_entry_id) -> journal_entries (id) ON UPDATE RESTRICT ON DELETE RESTRICT",
+                "5": "(opening_entry_id) -> journal_entries (id) ON UPDATE RESTRICT ON DELETE RESTRICT",
+                "6": "(created_by) -> users (id) ON UPDATE RESTRICT ON DELETE RESTRICT",
+                "7": "(cancelled_by) -> users (id) ON UPDATE RESTRICT ON DELETE RESTRICT"
             },
             "checks": {
                 "CONSTRAINT_1": "`source_period_id` <> `target_period_id`",
@@ -1879,9 +1891,9 @@
                 "supplier_id_2": "BTREE (supplier_id, event_id)"
             },
             "foreign_keys": {
-                "accounting_securities_debt_claims_ibfk_1": "(supplier_id, lot_id) -> accounting_securities_debt_lots (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
-                "accounting_securities_debt_claims_ibfk_2": "(supplier_id, event_id) -> accounting_securities_debt_events (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
-                "accounting_securities_debt_claims_ibfk_3": "(line_id) -> journal_entry_lines (id) ON UPDATE RESTRICT ON DELETE RESTRICT"
+                "1": "(supplier_id, lot_id) -> accounting_securities_debt_lots (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
+                "2": "(supplier_id, event_id) -> accounting_securities_debt_events (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
+                "3": "(line_id) -> journal_entry_lines (id) ON UPDATE RESTRICT ON DELETE RESTRICT"
             },
             "checks": {
                 "CONSTRAINT_2": "`amount_cents` > 0",
@@ -1905,8 +1917,8 @@
                 "created_by": "BTREE (created_by)"
             },
             "foreign_keys": {
-                "accounting_securities_debt_commands_ibfk_1": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE RESTRICT",
-                "accounting_securities_debt_commands_ibfk_2": "(created_by) -> users (id) ON UPDATE RESTRICT ON DELETE RESTRICT"
+                "1": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE RESTRICT",
+                "2": "(created_by) -> users (id) ON UPDATE RESTRICT ON DELETE RESTRICT"
             },
             "checks": {
                 "response_json": "json_valid(`response_json`)"
@@ -1938,9 +1950,9 @@
                 "uq_securities_debt_reversal": "UNIQUE BTREE (supplier_id, reversal_of)"
             },
             "foreign_keys": {
-                "accounting_securities_debt_events_ibfk_1": "(supplier_id, lot_id) -> accounting_securities_debt_lots (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
-                "accounting_securities_debt_events_ibfk_2": "(supplier_id, reversal_of) -> accounting_securities_debt_events (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
-                "accounting_securities_debt_events_ibfk_3": "(journal_entry_id) -> journal_entries (id) ON UPDATE RESTRICT ON DELETE RESTRICT"
+                "1": "(supplier_id, lot_id) -> accounting_securities_debt_lots (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
+                "2": "(supplier_id, reversal_of) -> accounting_securities_debt_events (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
+                "3": "(journal_entry_id) -> journal_entries (id) ON UPDATE RESTRICT ON DELETE RESTRICT"
             },
             "checks": {
                 "chk_securities_debt_event_operation": "`operation` in ('accrual','amortisation','valuation','coupon_receipt','principal_redemption','sale','reverse')",
@@ -1969,9 +1981,9 @@
                 "period_id": "BTREE (period_id)"
             },
             "foreign_keys": {
-                "accounting_securities_debt_fx_carries_ibfk_1": "(supplier_id, lot_id) -> accounting_securities_debt_lots (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
-                "accounting_securities_debt_fx_carries_ibfk_2": "(period_id) -> accounting_periods (id) ON UPDATE RESTRICT ON DELETE RESTRICT",
-                "accounting_securities_debt_fx_carries_ibfk_3": "(journal_entry_id) -> journal_entries (id) ON UPDATE RESTRICT ON DELETE RESTRICT"
+                "1": "(supplier_id, lot_id) -> accounting_securities_debt_lots (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
+                "2": "(period_id) -> accounting_periods (id) ON UPDATE RESTRICT ON DELETE RESTRICT",
+                "3": "(journal_entry_id) -> journal_entries (id) ON UPDATE RESTRICT ON DELETE RESTRICT"
             },
             "checks": {
                 "CONSTRAINT_1": "`slot` in ('saldo','reversal')",
@@ -2000,8 +2012,8 @@
                 "uq_securities_debt_tenant": "UNIQUE BTREE (supplier_id, id)"
             },
             "foreign_keys": {
-                "accounting_securities_debt_lots_ibfk_1": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE RESTRICT",
-                "accounting_securities_debt_lots_ibfk_2": "(created_by) -> users (id) ON UPDATE RESTRICT ON DELETE RESTRICT"
+                "1": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE RESTRICT",
+                "2": "(created_by) -> users (id) ON UPDATE RESTRICT ON DELETE RESTRICT"
             },
             "checks": {
                 "CONSTRAINT_1": "`acquired_on` < `maturity_on`",
@@ -2202,6 +2214,27 @@
             "checks": {
                 "chk_alch_singleton": "`id` = 1"
             }
+        },
+        "activity_log_redactions": {
+            "type": "BASE TABLE",
+            "engine": "InnoDB",
+            "collation": "utf8mb4_unicode_ci",
+            "columns": {
+                "activity_log_id": "bigint(20) unsigned NOT NULL",
+                "created_at": "datetime NOT NULL DEFAULT current_timestamp()",
+                "redacted_digest": "char(64) NULL DEFAULT NULL COLLATE ascii_bin",
+                "source": "varchar(64) NOT NULL COLLATE ascii_bin",
+                "source_id": "bigint(20) unsigned NOT NULL",
+                "supplier_id": "int(10) unsigned NULL DEFAULT NULL"
+            },
+            "indexes": {
+                "PRIMARY": "UNIQUE BTREE (activity_log_id)",
+                "ix_alr_source": "BTREE (source, source_id)"
+            },
+            "foreign_keys": {
+                "fk_alr_log": "(activity_log_id) -> activity_log (id) ON UPDATE RESTRICT ON DELETE CASCADE"
+            },
+            "checks": []
         },
         "ai_assistant_conversations": {
             "type": "BASE TABLE",
@@ -3390,9 +3423,13 @@
                 "payment_order_id": "bigint(20) unsigned NULL DEFAULT NULL",
                 "payroll_batch_id": "bigint(20) unsigned NULL DEFAULT NULL",
                 "provider": "varchar(32) NOT NULL",
+                "provider_error_code": "varchar(64) NULL DEFAULT NULL",
+                "provider_error_message": "varchar(255) NULL DEFAULT NULL",
+                "provider_error_scope": "varchar(128) NULL DEFAULT NULL",
                 "provider_poll_id": "varchar(64) NULL DEFAULT NULL",
                 "provider_reference": "text NULL DEFAULT NULL",
                 "provider_sign_hash": "varchar(128) NULL DEFAULT NULL",
+                "provider_sign_scope": "enum('batch','payment') NOT NULL DEFAULT 'batch'",
                 "rejected_count": "int(10) unsigned NULL DEFAULT NULL",
                 "remote_http_status": "smallint(5) unsigned NULL DEFAULT NULL",
                 "signature_requested_at": "datetime NULL DEFAULT NULL",
@@ -3433,6 +3470,9 @@
                 "instruction_identification": "varchar(35) NOT NULL",
                 "instruction_status": "varchar(8) NULL DEFAULT NULL",
                 "line_no": "smallint(5) unsigned NOT NULL",
+                "provider_error_code": "varchar(64) NULL DEFAULT NULL",
+                "provider_error_message": "varchar(255) NULL DEFAULT NULL",
+                "provider_error_scope": "varchar(128) NULL DEFAULT NULL",
                 "provider_hash": "varchar(128) NULL DEFAULT NULL",
                 "provider_sign_id": "varchar(64) NULL DEFAULT NULL",
                 "status": "enum('planned','sending','created','rejected','unknown') NOT NULL DEFAULT 'planned'",
@@ -3983,6 +4023,7 @@
                 "register_id": "bigint(20) unsigned NOT NULL",
                 "reversal_entry_id": "bigint(20) unsigned NULL DEFAULT NULL",
                 "rule_key": "varchar(64) NULL DEFAULT NULL",
+                "settled_document_amount": "decimal(15,2) NULL DEFAULT NULL",
                 "status": "enum('draft','posted','reversed') NOT NULL DEFAULT 'draft'",
                 "supplier_id": "int(10) unsigned NOT NULL",
                 "tax_date": "date NULL DEFAULT NULL",
@@ -4090,7 +4131,7 @@
                 "uq_catalog_import_profile_name": "UNIQUE BTREE (supplier_id, name)"
             },
             "foreign_keys": {
-                "catalog_import_profiles_ibfk_1": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE CASCADE"
+                "1": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE CASCADE"
             },
             "checks": {
                 "config_json": "json_valid(`config_json`)"
@@ -4117,7 +4158,7 @@
                 "uq_catalog_import_storage": "UNIQUE BTREE (storage_key)"
             },
             "foreign_keys": {
-                "catalog_import_sources_ibfk_1": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE CASCADE"
+                "1": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE CASCADE"
             },
             "checks": []
         },
@@ -6157,7 +6198,7 @@
                 "uq_external_entity_connection_lookup": "UNIQUE BTREE (supplier_id, connection_id, entity_type, external_id)"
             },
             "foreign_keys": {
-                "external_entity_map_ibfk_1": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE CASCADE",
+                "1": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE CASCADE",
                 "fk_external_entity_connection": "(supplier_id, connection_id) -> integration_connections (supplier_id, id) ON UPDATE RESTRICT ON DELETE CASCADE"
             },
             "checks": []
@@ -7281,6 +7322,7 @@
             "columns": {
                 "accrual_from": "date NULL DEFAULT NULL",
                 "accrual_to": "date NULL DEFAULT NULL",
+                "advance_invoice_id": "bigint(20) unsigned NULL DEFAULT NULL",
                 "asset_id": "bigint(20) unsigned NULL DEFAULT NULL",
                 "counter_account_code": "varchar(10) NULL DEFAULT NULL",
                 "description": "text NOT NULL",
@@ -7332,9 +7374,11 @@
                 "idx_ii_invoice": "BTREE (invoice_id, order_index)",
                 "idx_ii_small_asset": "BTREE (small_asset_id)",
                 "idx_invoice_items_oss": "BTREE (oss_applicable, oss_consumer_country)",
-                "idx_invoice_items_oss_manual_review": "BTREE (oss_needs_manual_review, oss_applicable, invoice_id)"
+                "idx_invoice_items_oss_manual_review": "BTREE (oss_needs_manual_review, oss_applicable, invoice_id)",
+                "ix_ii_advance_invoice": "BTREE (advance_invoice_id, invoice_id)"
             },
             "foreign_keys": {
+                "fk_ii_advance_invoice": "(advance_invoice_id) -> invoices (id) ON UPDATE RESTRICT ON DELETE SET NULL",
                 "fk_ii_asset": "(asset_id) -> assets (id) ON UPDATE RESTRICT ON DELETE SET NULL",
                 "fk_ii_invoice": "(invoice_id) -> invoices (id) ON UPDATE RESTRICT ON DELETE CASCADE",
                 "fk_ii_small_asset": "(small_asset_id) -> small_assets (id) ON UPDATE RESTRICT ON DELETE SET NULL",
@@ -7605,6 +7649,7 @@
                 "idx_inv_supplier_calendar": "BTREE (supplier_id, calendar_id)",
                 "idx_inv_supplier_efftax": "BTREE (supplier_id, effective_tax_date)",
                 "idx_inv_supplier_issue": "BTREE (supplier_id, issue_date)",
+                "idx_inv_supplier_parent": "BTREE (supplier_id, parent_invoice_id)",
                 "idx_inv_supplier_payment_vs": "BTREE (supplier_id, payment_variable_symbol)",
                 "idx_inv_supplier_payment_vs_key": "BTREE (supplier_id, payment_variable_symbol_match_key)",
                 "idx_inv_supplier_status_due": "BTREE (supplier_id, status, due_date)",
@@ -8948,8 +8993,8 @@
                 "uq_ncc_token": "UNIQUE BTREE (supplier_id, idempotency_key)"
             },
             "foreign_keys": {
-                "nonprofit_capital_commands_ibfk_1": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE RESTRICT",
-                "nonprofit_capital_commands_ibfk_2": "(created_by) -> users (id) ON UPDATE RESTRICT ON DELETE RESTRICT"
+                "1": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE RESTRICT",
+                "2": "(created_by) -> users (id) ON UPDATE RESTRICT ON DELETE RESTRICT"
             },
             "checks": {
                 "request_json": "json_valid(`request_json`)"
@@ -8989,14 +9034,14 @@
                 "uq_nce_tenant": "UNIQUE BTREE (supplier_id, id)"
             },
             "foreign_keys": {
-                "nonprofit_capital_events_ibfk_1": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE RESTRICT",
-                "nonprofit_capital_events_ibfk_2": "(supplier_id, source_id) -> nonprofit_capital_sources (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
-                "nonprofit_capital_events_ibfk_3": "(supplier_id, command_id) -> nonprofit_capital_commands (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
-                "nonprofit_capital_events_ibfk_4": "(supplier_id, source_id, previous_id) -> nonprofit_capital_events (supplier_id, source_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
-                "nonprofit_capital_events_ibfk_5": "(supplier_id, source_id, original_id) -> nonprofit_capital_events (supplier_id, source_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
-                "nonprofit_capital_events_ibfk_6": "(supplier_id, entry_id) -> journal_entries (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
-                "nonprofit_capital_events_ibfk_7": "(supplier_id, depreciation_id) -> depreciation_entries (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
-                "nonprofit_capital_events_ibfk_8": "(supplier_id, cost_line_id) -> journal_entry_lines (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT"
+                "1": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE RESTRICT",
+                "2": "(supplier_id, source_id) -> nonprofit_capital_sources (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
+                "3": "(supplier_id, command_id) -> nonprofit_capital_commands (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
+                "4": "(supplier_id, source_id, previous_id) -> nonprofit_capital_events (supplier_id, source_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
+                "5": "(supplier_id, source_id, original_id) -> nonprofit_capital_events (supplier_id, source_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
+                "6": "(supplier_id, entry_id) -> journal_entries (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
+                "7": "(supplier_id, depreciation_id) -> depreciation_entries (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
+                "8": "(supplier_id, cost_line_id) -> journal_entry_lines (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT"
             },
             "checks": {
                 "CONSTRAINT_1": "`amount_cents` > 0",
@@ -9032,11 +9077,11 @@
                 "uq_ncs_tenant": "UNIQUE BTREE (supplier_id, id)"
             },
             "foreign_keys": {
-                "nonprofit_capital_sources_ibfk_1": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE RESTRICT",
-                "nonprofit_capital_sources_ibfk_2": "(supplier_id, command_id) -> nonprofit_capital_commands (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
-                "nonprofit_capital_sources_ibfk_3": "(supplier_id, source_line_id) -> journal_entry_lines (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
-                "nonprofit_capital_sources_ibfk_4": "(supplier_id, asset_id) -> assets (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
-                "nonprofit_capital_sources_ibfk_5": "(supplier_id, provider_id) -> clients (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT"
+                "1": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE RESTRICT",
+                "2": "(supplier_id, command_id) -> nonprofit_capital_commands (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
+                "3": "(supplier_id, source_line_id) -> journal_entry_lines (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
+                "4": "(supplier_id, asset_id) -> assets (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
+                "5": "(supplier_id, provider_id) -> clients (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT"
             },
             "checks": {
                 "CONSTRAINT_1": "`amount_cents` > 0",
@@ -9162,10 +9207,10 @@
                 "uq_nlp_tenant": "UNIQUE BTREE (supplier_id, id)"
             },
             "foreign_keys": {
-                "nonprofit_legal_profiles_ibfk_1": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE RESTRICT",
-                "nonprofit_legal_profiles_ibfk_2": "(supplier_id, period_id) -> accounting_periods (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
-                "nonprofit_legal_profiles_ibfk_3": "(supplier_id, period_id, previous_id) -> nonprofit_legal_profiles (supplier_id, period_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
-                "nonprofit_legal_profiles_ibfk_4": "(created_by) -> users (id) ON UPDATE RESTRICT ON DELETE RESTRICT"
+                "1": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE RESTRICT",
+                "2": "(supplier_id, period_id) -> accounting_periods (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
+                "3": "(supplier_id, period_id, previous_id) -> nonprofit_legal_profiles (supplier_id, period_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
+                "4": "(created_by) -> users (id) ON UPDATE RESTRICT ON DELETE RESTRICT"
             },
             "checks": {
                 "CONSTRAINT_1": "`revision_no` > 0",
@@ -9181,6 +9226,8 @@
                 "created_at": "datetime(6) NOT NULL DEFAULT current_timestamp(6)",
                 "created_by": "bigint(20) unsigned NOT NULL",
                 "effective_from": "date NOT NULL",
+                "erased_digest": "char(64) NULL DEFAULT NULL COLLATE ascii_bin",
+                "erasure_item_id": "bigint(20) unsigned NULL DEFAULT NULL",
                 "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
                 "idempotency_key": "varchar(80) NOT NULL COLLATE ascii_bin",
                 "legal_basis_json": "longtext NOT NULL",
@@ -9193,24 +9240,28 @@
                 "request_json": "longtext NOT NULL",
                 "revision_no": "int(10) unsigned NOT NULL",
                 "status": "enum('active','suspended','ended') NOT NULL",
-                "supplier_id": "int(10) unsigned NOT NULL"
+                "supplier_id": "int(10) unsigned NOT NULL",
+                "voids_revision_id": "bigint(20) unsigned NULL DEFAULT NULL"
             },
             "indexes": {
                 "PRIMARY": "UNIQUE BTREE (id)",
                 "created_by": "BTREE (created_by)",
                 "ix_nmr_effective_lookup": "BTREE (supplier_id, member_id, effective_from, id)",
+                "ix_nmr_erasure": "BTREE (supplier_id, erasure_item_id)",
                 "supplier_id": "BTREE (supplier_id, member_id, previous_id)",
                 "uq_nmr_chain": "UNIQUE BTREE (supplier_id, member_id, id)",
-                "uq_nmr_effective": "UNIQUE BTREE (supplier_id, member_id, effective_from)",
                 "uq_nmr_key": "UNIQUE BTREE (supplier_id, idempotency_key)",
                 "uq_nmr_revision": "UNIQUE BTREE (supplier_id, member_id, revision_no)",
-                "uq_nmr_tenant": "UNIQUE BTREE (supplier_id, id)"
+                "uq_nmr_tenant": "UNIQUE BTREE (supplier_id, id)",
+                "uq_nmr_voids": "UNIQUE BTREE (supplier_id, member_id, voids_revision_id)"
             },
             "foreign_keys": {
-                "nonprofit_member_revisions_ibfk_1": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE RESTRICT",
-                "nonprofit_member_revisions_ibfk_2": "(supplier_id, member_id) -> nonprofit_members (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
-                "nonprofit_member_revisions_ibfk_3": "(supplier_id, member_id, previous_id) -> nonprofit_member_revisions (supplier_id, member_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
-                "nonprofit_member_revisions_ibfk_4": "(created_by) -> users (id) ON UPDATE RESTRICT ON DELETE RESTRICT"
+                "1": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE RESTRICT",
+                "2": "(supplier_id, member_id) -> nonprofit_members (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
+                "3": "(supplier_id, member_id, previous_id) -> nonprofit_member_revisions (supplier_id, member_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
+                "4": "(created_by) -> users (id) ON UPDATE RESTRICT ON DELETE RESTRICT",
+                "fk_nmr_erasure": "(supplier_id, erasure_item_id) -> nonprofit_membership_erasure_items (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
+                "fk_nmr_voids": "(supplier_id, member_id, voids_revision_id) -> nonprofit_member_revisions (supplier_id, member_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT"
             },
             "checks": {
                 "CONSTRAINT_1": "`revision_no` > 0",
@@ -9239,9 +9290,9 @@
                 "uq_nm_tenant": "UNIQUE BTREE (supplier_id, id)"
             },
             "foreign_keys": {
-                "nonprofit_members_ibfk_1": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE RESTRICT",
-                "nonprofit_members_ibfk_2": "(supplier_id, client_id) -> clients (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
-                "nonprofit_members_ibfk_3": "(created_by) -> users (id) ON UPDATE RESTRICT ON DELETE RESTRICT"
+                "1": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE RESTRICT",
+                "2": "(supplier_id, client_id) -> clients (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
+                "3": "(created_by) -> users (id) ON UPDATE RESTRICT ON DELETE RESTRICT"
             },
             "checks": []
         },
@@ -9271,9 +9322,9 @@
                 "supplier_id_2": "BTREE (supplier_id, operation_id)"
             },
             "foreign_keys": {
-                "nonprofit_membership_batch_members_ibfk_1": "(supplier_id, batch_id) -> nonprofit_membership_batches (supplier_id, id) ON UPDATE RESTRICT ON DELETE CASCADE",
-                "nonprofit_membership_batch_members_ibfk_2": "(supplier_id, member_id) -> nonprofit_members (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
-                "nonprofit_membership_batch_members_ibfk_3": "(supplier_id, operation_id) -> nonprofit_membership_charge_operations (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT"
+                "1": "(supplier_id, batch_id) -> nonprofit_membership_batches (supplier_id, id) ON UPDATE RESTRICT ON DELETE CASCADE",
+                "2": "(supplier_id, member_id) -> nonprofit_members (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
+                "3": "(supplier_id, operation_id) -> nonprofit_membership_charge_operations (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT"
             },
             "checks": []
         },
@@ -9314,14 +9365,15 @@
                 "PRIMARY": "UNIQUE BTREE (id)",
                 "confirmed_by": "BTREE (confirmed_by)",
                 "created_by": "BTREE (created_by)",
+                "ix_nmb_phase": "BTREE (supplier_id, phase, id)",
                 "uq_nmb_key": "UNIQUE BTREE (supplier_id, idempotency_key)",
                 "uq_nmb_tenant": "UNIQUE BTREE (supplier_id, id)",
                 "uq_nmb_uid": "UNIQUE BTREE (batch_uid)"
             },
             "foreign_keys": {
-                "nonprofit_membership_batches_ibfk_1": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE RESTRICT",
-                "nonprofit_membership_batches_ibfk_2": "(created_by) -> users (id) ON UPDATE RESTRICT ON DELETE RESTRICT",
-                "nonprofit_membership_batches_ibfk_3": "(confirmed_by) -> users (id) ON UPDATE RESTRICT ON DELETE RESTRICT"
+                "1": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE RESTRICT",
+                "2": "(created_by) -> users (id) ON UPDATE RESTRICT ON DELETE RESTRICT",
+                "3": "(confirmed_by) -> users (id) ON UPDATE RESTRICT ON DELETE RESTRICT"
             },
             "checks": {
                 "selection_json": "json_valid(`selection_json`)",
@@ -9342,22 +9394,26 @@
                 "period_to": "date NOT NULL",
                 "row_version": "int(10) unsigned NOT NULL DEFAULT 1",
                 "supplier_id": "int(10) unsigned NOT NULL",
-                "title_key": "varchar(80) NOT NULL COLLATE ascii_bin"
+                "title_key": "varchar(80) NOT NULL COLLATE ascii_bin",
+                "variable_symbol": "varchar(10) NULL DEFAULT NULL COLLATE ascii_bin",
+                "variable_symbol_match_key": "varchar(10) NULL DEFAULT NULL STORED GENERATED COLLATE ascii_bin AS (nullif(trim(leading '0' from `variable_symbol`),''))"
             },
             "indexes": {
                 "PRIMARY": "UNIQUE BTREE (id)",
                 "created_by": "BTREE (created_by)",
                 "fk_nmcc_head": "BTREE (supplier_id, id, head_operation_id)",
                 "ix_nmcc_deferral": "BTREE (supplier_id, period_to, period_from, id)",
+                "ix_nmcc_list_title": "BTREE (supplier_id, title_key, member_id, period_to, period_from)",
                 "ix_nmcc_overlap": "BTREE (supplier_id, member_id, title_key, period_from, period_to, id)",
+                "ix_nmcc_variable_symbol": "BTREE (supplier_id, variable_symbol_match_key)",
                 "uq_nmcc_identity": "UNIQUE BTREE (supplier_id, member_id, title_key, period_from, period_to)",
                 "uq_nmcc_tenant": "UNIQUE BTREE (supplier_id, id)"
             },
             "foreign_keys": {
-                "fk_nmcc_head": "(supplier_id, id, head_operation_id) -> nonprofit_membership_charge_operations (supplier_id, case_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
-                "nonprofit_membership_charge_cases_ibfk_1": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE RESTRICT",
-                "nonprofit_membership_charge_cases_ibfk_2": "(supplier_id, member_id) -> nonprofit_members (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
-                "nonprofit_membership_charge_cases_ibfk_3": "(created_by) -> users (id) ON UPDATE RESTRICT ON DELETE RESTRICT"
+                "1": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE RESTRICT",
+                "2": "(supplier_id, member_id) -> nonprofit_members (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
+                "3": "(created_by) -> users (id) ON UPDATE RESTRICT ON DELETE RESTRICT",
+                "fk_nmcc_head": "(supplier_id, id, head_operation_id) -> nonprofit_membership_charge_operations (supplier_id, case_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT"
             },
             "checks": {
                 "CONSTRAINT_1": "`period_from` <= `period_to`",
@@ -9384,6 +9440,7 @@
             },
             "indexes": {
                 "PRIMARY": "UNIQUE BTREE (id)",
+                "ix_nmclaim_bank_amount": "BTREE (supplier_id, amount_cents, id)",
                 "ix_nmclaim_client": "BTREE (supplier_id, client_id, id)",
                 "ix_nmclaim_member": "BTREE (supplier_id, member_id, id)",
                 "supplier_id": "BTREE (supplier_id, case_id)",
@@ -9392,12 +9449,12 @@
                 "uq_nmclaim_tenant": "UNIQUE BTREE (supplier_id, id)"
             },
             "foreign_keys": {
-                "nonprofit_membership_charge_claims_ibfk_1": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE RESTRICT",
-                "nonprofit_membership_charge_claims_ibfk_2": "(supplier_id, case_id) -> nonprofit_membership_charge_cases (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
-                "nonprofit_membership_charge_claims_ibfk_3": "(supplier_id, operation_id) -> nonprofit_membership_charge_operations (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
-                "nonprofit_membership_charge_claims_ibfk_4": "(supplier_id, original_claim_id) -> nonprofit_membership_charge_claims (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
-                "nonprofit_membership_charge_claims_ibfk_5": "(supplier_id, member_id) -> nonprofit_members (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
-                "nonprofit_membership_charge_claims_ibfk_6": "(supplier_id, client_id) -> clients (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT"
+                "1": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE RESTRICT",
+                "2": "(supplier_id, case_id) -> nonprofit_membership_charge_cases (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
+                "3": "(supplier_id, operation_id) -> nonprofit_membership_charge_operations (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
+                "4": "(supplier_id, original_claim_id) -> nonprofit_membership_charge_claims (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
+                "5": "(supplier_id, member_id) -> nonprofit_members (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
+                "6": "(supplier_id, client_id) -> clients (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT"
             },
             "checks": {
                 "CONSTRAINT_1": "`amount_cents` > 0",
@@ -9411,6 +9468,8 @@
             "columns": {
                 "created_at": "datetime(6) NOT NULL DEFAULT current_timestamp(6)",
                 "created_by": "bigint(20) unsigned NOT NULL",
+                "erased_digest": "char(64) NULL DEFAULT NULL COLLATE ascii_bin",
+                "erasure_item_id": "bigint(20) unsigned NULL DEFAULT NULL",
                 "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
                 "idempotency_key": "varchar(80) NOT NULL COLLATE ascii_bin",
                 "rate_id": "int(10) unsigned NULL DEFAULT NULL",
@@ -9422,13 +9481,15 @@
                 "PRIMARY": "UNIQUE BTREE (id)",
                 "created_by": "BTREE (created_by)",
                 "idx_nmcmd_rate": "BTREE (supplier_id, rate_id, id)",
+                "ix_nmcmd_erasure": "BTREE (supplier_id, erasure_item_id)",
                 "uq_nmcmd_key": "UNIQUE BTREE (supplier_id, idempotency_key)",
                 "uq_nmcmd_tenant": "UNIQUE BTREE (supplier_id, id)"
             },
             "foreign_keys": {
-                "fk_nmcmd_rate": "(supplier_id, rate_id) -> nonprofit_membership_rates (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
-                "nonprofit_membership_charge_commands_ibfk_1": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE RESTRICT",
-                "nonprofit_membership_charge_commands_ibfk_2": "(created_by) -> users (id) ON UPDATE RESTRICT ON DELETE RESTRICT"
+                "1": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE RESTRICT",
+                "2": "(created_by) -> users (id) ON UPDATE RESTRICT ON DELETE RESTRICT",
+                "fk_nmcmd_erasure": "(supplier_id, erasure_item_id) -> nonprofit_membership_erasure_items (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
+                "fk_nmcmd_rate": "(supplier_id, rate_id) -> nonprofit_membership_rates (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT"
             },
             "checks": {
                 "request_json": "json_valid(`request_json`)"
@@ -9447,6 +9508,8 @@
                 "created_at": "datetime(6) NOT NULL DEFAULT current_timestamp(6)",
                 "created_by": "bigint(20) unsigned NOT NULL",
                 "due_date": "date NOT NULL",
+                "erased_digest": "char(64) NULL DEFAULT NULL COLLATE ascii_bin",
+                "erasure_item_id": "bigint(20) unsigned NULL DEFAULT NULL",
                 "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
                 "journal_entry_id": "bigint(20) unsigned NOT NULL",
                 "legal_profile_id": "bigint(20) unsigned NOT NULL",
@@ -9468,6 +9531,7 @@
             "indexes": {
                 "PRIMARY": "UNIQUE BTREE (id)",
                 "created_by": "BTREE (created_by)",
+                "ix_nmop_erasure": "BTREE (supplier_id, erasure_item_id)",
                 "ix_nmop_period": "BTREE (supplier_id, accounting_period_id, operation, id)",
                 "supplier_id": "BTREE (supplier_id, case_id, previous_operation_id)",
                 "supplier_id_2": "BTREE (supplier_id, case_id, original_operation_id)",
@@ -9484,26 +9548,104 @@
                 "uq_nmop_tenant": "UNIQUE BTREE (supplier_id, id)"
             },
             "foreign_keys": {
-                "nonprofit_membership_charge_operations_ibfk_1": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE RESTRICT",
-                "nonprofit_membership_charge_operations_ibfk_10": "(supplier_id, revenue_account_id) -> chart_of_accounts (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
-                "nonprofit_membership_charge_operations_ibfk_11": "(supplier_id, journal_entry_id) -> journal_entries (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
-                "nonprofit_membership_charge_operations_ibfk_12": "(supplier_id, receivable_line_id) -> journal_entry_lines (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
-                "nonprofit_membership_charge_operations_ibfk_13": "(supplier_id, revenue_line_id) -> journal_entry_lines (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
-                "nonprofit_membership_charge_operations_ibfk_14": "(created_by) -> users (id) ON UPDATE RESTRICT ON DELETE RESTRICT",
-                "nonprofit_membership_charge_operations_ibfk_2": "(supplier_id, case_id) -> nonprofit_membership_charge_cases (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
-                "nonprofit_membership_charge_operations_ibfk_3": "(supplier_id, command_id) -> nonprofit_membership_charge_commands (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
-                "nonprofit_membership_charge_operations_ibfk_4": "(supplier_id, case_id, previous_operation_id) -> nonprofit_membership_charge_operations (supplier_id, case_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
-                "nonprofit_membership_charge_operations_ibfk_5": "(supplier_id, case_id, original_operation_id) -> nonprofit_membership_charge_operations (supplier_id, case_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
-                "nonprofit_membership_charge_operations_ibfk_6": "(supplier_id, member_revision_id) -> nonprofit_member_revisions (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
-                "nonprofit_membership_charge_operations_ibfk_7": "(supplier_id, legal_profile_id) -> nonprofit_legal_profiles (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
-                "nonprofit_membership_charge_operations_ibfk_8": "(supplier_id, accounting_period_id) -> accounting_periods (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
-                "nonprofit_membership_charge_operations_ibfk_9": "(supplier_id, receivable_account_id) -> chart_of_accounts (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT"
+                "1": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE RESTRICT",
+                "10": "(supplier_id, revenue_account_id) -> chart_of_accounts (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
+                "11": "(supplier_id, journal_entry_id) -> journal_entries (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
+                "12": "(supplier_id, receivable_line_id) -> journal_entry_lines (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
+                "13": "(supplier_id, revenue_line_id) -> journal_entry_lines (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
+                "14": "(created_by) -> users (id) ON UPDATE RESTRICT ON DELETE RESTRICT",
+                "2": "(supplier_id, case_id) -> nonprofit_membership_charge_cases (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
+                "3": "(supplier_id, command_id) -> nonprofit_membership_charge_commands (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
+                "4": "(supplier_id, case_id, previous_operation_id) -> nonprofit_membership_charge_operations (supplier_id, case_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
+                "5": "(supplier_id, case_id, original_operation_id) -> nonprofit_membership_charge_operations (supplier_id, case_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
+                "6": "(supplier_id, member_revision_id) -> nonprofit_member_revisions (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
+                "7": "(supplier_id, legal_profile_id) -> nonprofit_legal_profiles (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
+                "8": "(supplier_id, accounting_period_id) -> accounting_periods (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
+                "9": "(supplier_id, receivable_account_id) -> chart_of_accounts (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
+                "fk_nmop_erasure": "(supplier_id, erasure_item_id) -> nonprofit_membership_erasure_items (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT"
             },
             "checks": {
                 "CONSTRAINT_1": "`amount_cents` > 0",
                 "CONSTRAINT_2": "`operation` = 'issue' and `original_operation_id` is null or `operation` = 'reverse' and `original_operation_id` is not null",
                 "proof_json": "json_valid(`proof_json`)",
                 "receipt_json": "json_valid(`receipt_json`)"
+            }
+        },
+        "nonprofit_membership_erasure_items": {
+            "type": "BASE TABLE",
+            "engine": "InnoDB",
+            "collation": "utf8mb4_unicode_ci",
+            "columns": {
+                "counts_json": "longtext NULL DEFAULT NULL",
+                "ended_on": "date NOT NULL",
+                "executed_at": "datetime NULL DEFAULT NULL",
+                "governing_rule": "enum('accounting_records','membership_only') NOT NULL",
+                "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
+                "last_record_period_end": "date NULL DEFAULT NULL",
+                "member_id": "bigint(20) unsigned NOT NULL",
+                "outcome": "enum('pending','done','skipped_changed','skipped_hold') NOT NULL DEFAULT 'pending'",
+                "proposal_id": "bigint(20) unsigned NOT NULL",
+                "retained_until": "date NOT NULL",
+                "skip_reason": "varchar(64) NULL DEFAULT NULL COLLATE ascii_bin",
+                "subject": "enum('member','deleted_member') NOT NULL",
+                "supplier_id": "int(10) unsigned NOT NULL"
+            },
+            "indexes": {
+                "PRIMARY": "UNIQUE BTREE (id)",
+                "ix_nmei_member": "BTREE (supplier_id, member_id, outcome)",
+                "uq_nmei_member": "UNIQUE BTREE (supplier_id, proposal_id, member_id)",
+                "uq_nmei_tenant": "UNIQUE BTREE (supplier_id, id)"
+            },
+            "foreign_keys": {
+                "fk_nmei_proposal": "(supplier_id, proposal_id) -> nonprofit_membership_erasure_proposals (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT"
+            },
+            "checks": {
+                "counts_json": "`counts_json` is null or json_valid(`counts_json`)"
+            }
+        },
+        "nonprofit_membership_erasure_proposals": {
+            "type": "BASE TABLE",
+            "engine": "InnoDB",
+            "collation": "utf8mb4_unicode_ci",
+            "columns": {
+                "approved_at": "datetime NULL DEFAULT NULL",
+                "approved_by": "bigint(20) unsigned NULL DEFAULT NULL",
+                "as_of": "date NOT NULL",
+                "created_at": "datetime NOT NULL DEFAULT current_timestamp()",
+                "created_by": "bigint(20) unsigned NULL DEFAULT NULL",
+                "executable_from": "datetime NULL DEFAULT NULL",
+                "executed_at": "datetime NULL DEFAULT NULL",
+                "executed_by": "bigint(20) unsigned NULL DEFAULT NULL",
+                "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
+                "note": "varchar(500) NULL DEFAULT NULL",
+                "rejected_at": "datetime NULL DEFAULT NULL",
+                "rejected_by": "bigint(20) unsigned NULL DEFAULT NULL",
+                "revoked_at": "datetime NULL DEFAULT NULL",
+                "revoked_by": "bigint(20) unsigned NULL DEFAULT NULL",
+                "row_version": "int(10) unsigned NOT NULL DEFAULT 1",
+                "status": "enum('pending','approved','rejected','executed') NOT NULL DEFAULT 'pending'",
+                "supplier_id": "int(10) unsigned NOT NULL"
+            },
+            "indexes": {
+                "PRIMARY": "UNIQUE BTREE (id)",
+                "fk_nmep_approver": "BTREE (approved_by)",
+                "fk_nmep_creator": "BTREE (created_by)",
+                "fk_nmep_executor": "BTREE (executed_by)",
+                "fk_nmep_rejector": "BTREE (rejected_by)",
+                "fk_nmep_revoker": "BTREE (revoked_by)",
+                "ix_nmep_status": "BTREE (supplier_id, status, id)",
+                "uq_nmep_tenant": "UNIQUE BTREE (supplier_id, id)"
+            },
+            "foreign_keys": {
+                "fk_nmep_approver": "(approved_by) -> users (id) ON UPDATE RESTRICT ON DELETE SET NULL",
+                "fk_nmep_creator": "(created_by) -> users (id) ON UPDATE RESTRICT ON DELETE SET NULL",
+                "fk_nmep_executor": "(executed_by) -> users (id) ON UPDATE RESTRICT ON DELETE SET NULL",
+                "fk_nmep_rejector": "(rejected_by) -> users (id) ON UPDATE RESTRICT ON DELETE SET NULL",
+                "fk_nmep_revoker": "(revoked_by) -> users (id) ON UPDATE RESTRICT ON DELETE SET NULL",
+                "fk_nmep_supplier": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE RESTRICT"
+            },
+            "checks": {
+                "CONSTRAINT_1": "`row_version` > 0"
             }
         },
         "nonprofit_membership_rates": {
@@ -9554,7 +9696,7 @@
                 "ix_ntafm_member": "BTREE (supplier_id, member_id, assessment_id)"
             },
             "foreign_keys": {
-                "nonprofit_tax_assessment_funding_members_ibfk_1": "(supplier_id, assessment_id, anchor) -> nonprofit_tax_assessment_funding_usage (supplier_id, assessment_id, anchor) ON UPDATE RESTRICT ON DELETE RESTRICT"
+                "1": "(supplier_id, assessment_id, anchor) -> nonprofit_tax_assessment_funding_usage (supplier_id, assessment_id, anchor) ON UPDATE RESTRICT ON DELETE RESTRICT"
             },
             "checks": []
         },
@@ -9576,7 +9718,7 @@
                 "PRIMARY": "UNIQUE BTREE (supplier_id, assessment_id, anchor)"
             },
             "foreign_keys": {
-                "nonprofit_tax_assessment_funding_usage_ibfk_1": "(supplier_id, assessment_id) -> nonprofit_tax_assessments (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT"
+                "1": "(supplier_id, assessment_id) -> nonprofit_tax_assessments (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT"
             },
             "checks": []
         },
@@ -9596,7 +9738,7 @@
                 "ix_ntage_origin": "BTREE (supplier_id, origin_line_id, assessment_id)"
             },
             "foreign_keys": {
-                "nonprofit_tax_assessment_gift_elections_ibfk_1": "(supplier_id, assessment_id) -> nonprofit_tax_assessments (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT"
+                "1": "(supplier_id, assessment_id) -> nonprofit_tax_assessments (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT"
             },
             "checks": []
         },
@@ -9706,7 +9848,7 @@
                 "uq_ntcc_tenant": "UNIQUE BTREE (supplier_id, id)"
             },
             "foreign_keys": {
-                "nonprofit_tax_calculation_chunks_ibfk_1": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE RESTRICT"
+                "1": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE RESTRICT"
             },
             "checks": {
                 "CONSTRAINT_1": "`chunk_kind` in ('decision','result','coverage','usage')",
@@ -9730,8 +9872,8 @@
                 "ix_ntcmc_chunk": "BTREE (supplier_id, chunk_id)"
             },
             "foreign_keys": {
-                "nonprofit_tax_calculation_manifest_chunks_ibfk_1": "(supplier_id, manifest_id) -> nonprofit_tax_calculation_manifests (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
-                "nonprofit_tax_calculation_manifest_chunks_ibfk_2": "(supplier_id, chunk_id) -> nonprofit_tax_calculation_chunks (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT"
+                "1": "(supplier_id, manifest_id) -> nonprofit_tax_calculation_manifests (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
+                "2": "(supplier_id, chunk_id) -> nonprofit_tax_calculation_chunks (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT"
             },
             "checks": []
         },
@@ -9761,8 +9903,8 @@
                 "uq_ntcm_tenant": "UNIQUE BTREE (supplier_id, id)"
             },
             "foreign_keys": {
-                "nonprofit_tax_calculation_manifests_ibfk_1": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE RESTRICT",
-                "nonprofit_tax_calculation_manifests_ibfk_2": "(supplier_id, period_id) -> accounting_periods (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT"
+                "1": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE RESTRICT",
+                "2": "(supplier_id, period_id) -> accounting_periods (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT"
             },
             "checks": {
                 "CONSTRAINT_1": "`chunk_kind` in ('decision','result','coverage','usage')",
@@ -9785,7 +9927,7 @@
                 "PRIMARY": "UNIQUE BTREE (supplier_id, draft_id, activity_kind_id)"
             },
             "foreign_keys": {
-                "nonprofit_tax_draft_activities_ibfk_1": "(supplier_id, draft_id) -> nonprofit_tax_drafts (supplier_id, id) ON UPDATE RESTRICT ON DELETE CASCADE"
+                "1": "(supplier_id, draft_id) -> nonprofit_tax_drafts (supplier_id, id) ON UPDATE RESTRICT ON DELETE CASCADE"
             },
             "checks": {
                 "payload_json": "json_valid(`payload_json`)"
@@ -9806,7 +9948,7 @@
                 "PRIMARY": "UNIQUE BTREE (supplier_id, draft_id, source_id)"
             },
             "foreign_keys": {
-                "nonprofit_tax_draft_decisions_ibfk_1": "(supplier_id, draft_id) -> nonprofit_tax_drafts (supplier_id, id) ON UPDATE RESTRICT ON DELETE CASCADE"
+                "1": "(supplier_id, draft_id) -> nonprofit_tax_drafts (supplier_id, id) ON UPDATE RESTRICT ON DELETE CASCADE"
             },
             "checks": {
                 "payload_json": "json_valid(`payload_json`)"
@@ -9829,7 +9971,7 @@
                 "ix_ntdfl_cost": "BTREE (supplier_id, draft_id, cost_id, source_id)"
             },
             "foreign_keys": {
-                "nonprofit_tax_draft_funding_links_ibfk_1": "(supplier_id, draft_id) -> nonprofit_tax_drafts (supplier_id, id) ON UPDATE RESTRICT ON DELETE CASCADE"
+                "1": "(supplier_id, draft_id) -> nonprofit_tax_drafts (supplier_id, id) ON UPDATE RESTRICT ON DELETE CASCADE"
             },
             "checks": {
                 "payload_json": "json_valid(`payload_json`)"
@@ -9851,7 +9993,7 @@
                 "ix_ntdfm_member": "BTREE (supplier_id, draft_id, member_id)"
             },
             "foreign_keys": {
-                "nonprofit_tax_draft_funding_members_ibfk_1": "(supplier_id, draft_id, pool_kind, anchor) -> nonprofit_tax_draft_funding_pools (supplier_id, draft_id, pool_kind, anchor) ON UPDATE RESTRICT ON DELETE CASCADE"
+                "1": "(supplier_id, draft_id, pool_kind, anchor) -> nonprofit_tax_draft_funding_pools (supplier_id, draft_id, pool_kind, anchor) ON UPDATE RESTRICT ON DELETE CASCADE"
             },
             "checks": []
         },
@@ -9871,7 +10013,7 @@
                 "PRIMARY": "UNIQUE BTREE (supplier_id, draft_id, pool_kind, anchor)"
             },
             "foreign_keys": {
-                "nonprofit_tax_draft_funding_pools_ibfk_1": "(supplier_id, draft_id) -> nonprofit_tax_drafts (supplier_id, id) ON UPDATE RESTRICT ON DELETE CASCADE"
+                "1": "(supplier_id, draft_id) -> nonprofit_tax_drafts (supplier_id, id) ON UPDATE RESTRICT ON DELETE CASCADE"
             },
             "checks": {
                 "CONSTRAINT_1": "`pool_kind` in ('revenue','expense')",
@@ -9902,10 +10044,10 @@
                 "uq_ntd_tenant": "UNIQUE BTREE (supplier_id, id)"
             },
             "foreign_keys": {
-                "fk_ntd_source_manifest": "(supplier_id, source_manifest_id) -> nonprofit_tax_snapshot_manifests (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
-                "nonprofit_tax_drafts_ibfk_1": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE CASCADE",
-                "nonprofit_tax_drafts_ibfk_2": "(supplier_id, period_id) -> accounting_periods (supplier_id, id) ON UPDATE RESTRICT ON DELETE CASCADE",
-                "nonprofit_tax_drafts_ibfk_3": "(created_by) -> users (id) ON UPDATE RESTRICT ON DELETE CASCADE"
+                "1": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE CASCADE",
+                "2": "(supplier_id, period_id) -> accounting_periods (supplier_id, id) ON UPDATE RESTRICT ON DELETE CASCADE",
+                "3": "(created_by) -> users (id) ON UPDATE RESTRICT ON DELETE CASCADE",
+                "fk_ntd_source_manifest": "(supplier_id, source_manifest_id) -> nonprofit_tax_snapshot_manifests (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT"
             },
             "checks": {
                 "CONSTRAINT_1": "`revision_no` > 0",
@@ -9932,8 +10074,8 @@
                 "uq_ntsc_tenant": "UNIQUE BTREE (supplier_id, id)"
             },
             "foreign_keys": {
-                "nonprofit_tax_saving_commands_ibfk_1": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE RESTRICT",
-                "nonprofit_tax_saving_commands_ibfk_2": "(created_by) -> users (id) ON UPDATE RESTRICT ON DELETE RESTRICT"
+                "1": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE RESTRICT",
+                "2": "(created_by) -> users (id) ON UPDATE RESTRICT ON DELETE RESTRICT"
             },
             "checks": {
                 "request_json": "json_valid(`request_json`)"
@@ -9955,8 +10097,8 @@
                 "supplier_id": "BTREE (supplier_id, source_id, event_id)"
             },
             "foreign_keys": {
-                "nonprofit_tax_saving_cost_bindings_ibfk_1": "(supplier_id, source_id, event_id) -> nonprofit_tax_saving_events (supplier_id, source_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
-                "nonprofit_tax_saving_cost_bindings_ibfk_2": "(supplier_id, cost_line_id) -> journal_entry_lines (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT"
+                "1": "(supplier_id, source_id, event_id) -> nonprofit_tax_saving_events (supplier_id, source_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
+                "2": "(supplier_id, cost_line_id) -> journal_entry_lines (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT"
             },
             "checks": []
         },
@@ -9992,12 +10134,12 @@
                 "uq_ntse_tenant": "UNIQUE BTREE (supplier_id, id)"
             },
             "foreign_keys": {
-                "nonprofit_tax_saving_events_ibfk_1": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE RESTRICT",
-                "nonprofit_tax_saving_events_ibfk_2": "(supplier_id, source_id) -> nonprofit_tax_saving_sources (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
-                "nonprofit_tax_saving_events_ibfk_3": "(supplier_id, command_id) -> nonprofit_tax_saving_commands (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
-                "nonprofit_tax_saving_events_ibfk_4": "(supplier_id, source_id, previous_id) -> nonprofit_tax_saving_events (supplier_id, source_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
-                "nonprofit_tax_saving_events_ibfk_5": "(supplier_id, source_id, original_id) -> nonprofit_tax_saving_events (supplier_id, source_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
-                "nonprofit_tax_saving_events_ibfk_6": "(supplier_id, period_id) -> accounting_periods (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT"
+                "1": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE RESTRICT",
+                "2": "(supplier_id, source_id) -> nonprofit_tax_saving_sources (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
+                "3": "(supplier_id, command_id) -> nonprofit_tax_saving_commands (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
+                "4": "(supplier_id, source_id, previous_id) -> nonprofit_tax_saving_events (supplier_id, source_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
+                "5": "(supplier_id, source_id, original_id) -> nonprofit_tax_saving_events (supplier_id, source_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
+                "6": "(supplier_id, period_id) -> accounting_periods (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT"
             },
             "checks": {
                 "chk_ntse_operation": "`operation` = 'use' and `original_id` is null and `period_id` is not null and `cost_line_id` is not null and `amount_cents` > 0 or `operation` = 'reverse_use' and `original_id` is not null and `period_id` is not null and `cost_line_id` is not null and `amount_cents` > 0 or `operation` in ('void','restore') and `original_id` is null and `period_id` is null and `cost_line_id` is null and `amount_cents` = 0",
@@ -10031,11 +10173,11 @@
                 "uq_ntss_tenant": "UNIQUE BTREE (supplier_id, id)"
             },
             "foreign_keys": {
-                "nonprofit_tax_saving_sources_ibfk_1": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE RESTRICT",
-                "nonprofit_tax_saving_sources_ibfk_2": "(supplier_id, period_id) -> accounting_periods (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
-                "nonprofit_tax_saving_sources_ibfk_3": "(supplier_id, snapshot_id) -> income_tax_return_snapshots (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
-                "nonprofit_tax_saving_sources_ibfk_4": "(supplier_id, legal_profile_id) -> nonprofit_legal_profiles (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
-                "nonprofit_tax_saving_sources_ibfk_5": "(created_by) -> users (id) ON UPDATE RESTRICT ON DELETE RESTRICT"
+                "1": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE RESTRICT",
+                "2": "(supplier_id, period_id) -> accounting_periods (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
+                "3": "(supplier_id, snapshot_id) -> income_tax_return_snapshots (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
+                "4": "(supplier_id, legal_profile_id) -> nonprofit_legal_profiles (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
+                "5": "(created_by) -> users (id) ON UPDATE RESTRICT ON DELETE RESTRICT"
             },
             "checks": {
                 "CONSTRAINT_1": "`reduction_kc` > 0",
@@ -10063,7 +10205,7 @@
                 "uq_ntsc_tenant": "UNIQUE BTREE (supplier_id, id)"
             },
             "foreign_keys": {
-                "nonprofit_tax_snapshot_chunks_ibfk_1": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE RESTRICT"
+                "1": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE RESTRICT"
             },
             "checks": {
                 "CONSTRAINT_1": "`row_count` <= 500",
@@ -10088,8 +10230,8 @@
                 "ix_ntsmc_chunk": "BTREE (supplier_id, chunk_id)"
             },
             "foreign_keys": {
-                "nonprofit_tax_snapshot_manifest_chunks_ibfk_1": "(supplier_id, manifest_id) -> nonprofit_tax_snapshot_manifests (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
-                "nonprofit_tax_snapshot_manifest_chunks_ibfk_2": "(supplier_id, chunk_id) -> nonprofit_tax_snapshot_chunks (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT"
+                "1": "(supplier_id, manifest_id) -> nonprofit_tax_snapshot_manifests (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
+                "2": "(supplier_id, chunk_id) -> nonprofit_tax_snapshot_chunks (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT"
             },
             "checks": []
         },
@@ -10120,8 +10262,8 @@
                 "uq_ntsm_tenant": "UNIQUE BTREE (supplier_id, id)"
             },
             "foreign_keys": {
-                "nonprofit_tax_snapshot_manifests_ibfk_1": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE RESTRICT",
-                "nonprofit_tax_snapshot_manifests_ibfk_2": "(supplier_id, period_id) -> accounting_periods (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT"
+                "1": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE RESTRICT",
+                "2": "(supplier_id, period_id) -> accounting_periods (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT"
             },
             "checks": {
                 "header_json": "json_valid(`header_json`)"
@@ -10147,7 +10289,7 @@
                 "uq_ntsec_tenant": "UNIQUE BTREE (supplier_id, id)"
             },
             "foreign_keys": {
-                "nonprofit_tax_source_evidence_chunks_ibfk_1": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE RESTRICT"
+                "1": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE RESTRICT"
             },
             "checks": {
                 "CONSTRAINT_1": "`evidence_kind` in ('funding_reference','funding_history')",
@@ -10171,8 +10313,8 @@
                 "ix_ntsemc_chunk": "BTREE (supplier_id, chunk_id)"
             },
             "foreign_keys": {
-                "nonprofit_tax_source_evidence_manifest_chunks_ibfk_1": "(supplier_id, manifest_id) -> nonprofit_tax_source_evidence_manifests (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
-                "nonprofit_tax_source_evidence_manifest_chunks_ibfk_2": "(supplier_id, chunk_id) -> nonprofit_tax_source_evidence_chunks (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT"
+                "1": "(supplier_id, manifest_id) -> nonprofit_tax_source_evidence_manifests (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
+                "2": "(supplier_id, chunk_id) -> nonprofit_tax_source_evidence_chunks (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT"
             },
             "checks": []
         },
@@ -10200,8 +10342,8 @@
                 "uq_ntsem_tenant": "UNIQUE BTREE (supplier_id, id)"
             },
             "foreign_keys": {
-                "nonprofit_tax_source_evidence_manifests_ibfk_1": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE RESTRICT",
-                "nonprofit_tax_source_evidence_manifests_ibfk_2": "(supplier_id, period_id) -> accounting_periods (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT"
+                "1": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE RESTRICT",
+                "2": "(supplier_id, period_id) -> accounting_periods (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT"
             },
             "checks": {
                 "CONSTRAINT_1": "`evidence_kind` in ('funding_reference','funding_history')",
@@ -18855,6 +18997,36 @@
                 "chk_payroll_posting_batch_state": "`status` = 'prepared' and `journal_entry_id` is null and `posted_at` is null or `status` = 'posted' and `journal_entry_id` is not null and `posted_at` is not null or `status` = 'no_change' and `journal_entry_id` is null and `posted_at` is not null or `status` = 'reversed' and `posted_at` is not null"
             }
         },
+        "payroll_posting_imports": {
+            "type": "BASE TABLE",
+            "engine": "InnoDB",
+            "collation": "utf8mb4_unicode_ci",
+            "columns": {
+                "created_at": "timestamp NOT NULL DEFAULT current_timestamp()",
+                "created_by": "bigint(20) unsigned NULL DEFAULT NULL",
+                "file_name": "varchar(255) NULL DEFAULT NULL",
+                "file_sha256": "char(64) NOT NULL",
+                "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
+                "internal_document_ids": "longtext NOT NULL",
+                "other_item_ids": "longtext NOT NULL",
+                "pack_id": "varchar(64) NULL DEFAULT NULL",
+                "period": "char(7) NOT NULL",
+                "source_application": "varchar(20) NOT NULL",
+                "source_ico": "varchar(16) NOT NULL",
+                "supplier_id": "int(10) unsigned NOT NULL",
+                "sym_par": "varchar(40) NOT NULL",
+                "total_amount": "decimal(14,2) NOT NULL DEFAULT 0.00"
+            },
+            "indexes": {
+                "PRIMARY": "UNIQUE BTREE (id)",
+                "idx_payroll_posting_import_period": "BTREE (supplier_id, period)",
+                "uq_payroll_posting_import_source": "UNIQUE BTREE (supplier_id, source_application, source_ico, sym_par)"
+            },
+            "foreign_keys": {
+                "fk_payroll_posting_import_supplier": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE CASCADE"
+            },
+            "checks": []
+        },
         "payroll_posting_map_proposals": {
             "type": "BASE TABLE",
             "engine": "InnoDB",
@@ -21935,9 +22107,9 @@
                 "warehouse_id": "BTREE (warehouse_id)"
             },
             "foreign_keys": {
-                "product_assemblies_ibfk_1": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE CASCADE",
-                "product_assemblies_ibfk_2": "(stock_item_id) -> stock_items (id) ON UPDATE RESTRICT ON DELETE RESTRICT",
-                "product_assemblies_ibfk_3": "(warehouse_id) -> warehouses (id) ON UPDATE RESTRICT ON DELETE RESTRICT"
+                "1": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE CASCADE",
+                "2": "(stock_item_id) -> stock_items (id) ON UPDATE RESTRICT ON DELETE RESTRICT",
+                "3": "(warehouse_id) -> warehouses (id) ON UPDATE RESTRICT ON DELETE RESTRICT"
             },
             "checks": {
                 "components_json": "json_valid(`components_json`)",
@@ -22035,7 +22207,7 @@
                 "uq_product_set_revision": "UNIQUE BTREE (supplier_id, stock_item_id, row_version)"
             },
             "foreign_keys": {
-                "product_set_revisions_ibfk_1": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE CASCADE"
+                "1": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE CASCADE"
             },
             "checks": {
                 "definition_json": "json_valid(`definition_json`)"
@@ -22058,8 +22230,8 @@
                 "idx_product_sets_supplier": "BTREE (supplier_id, stock_item_id)"
             },
             "foreign_keys": {
-                "product_sets_ibfk_1": "(stock_item_id) -> stock_items (id) ON UPDATE RESTRICT ON DELETE CASCADE",
-                "product_sets_ibfk_2": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE CASCADE"
+                "1": "(stock_item_id) -> stock_items (id) ON UPDATE RESTRICT ON DELETE CASCADE",
+                "2": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE CASCADE"
             },
             "checks": {
                 "definition_json": "json_valid(`definition_json`)"
@@ -22393,7 +22565,7 @@
                 "ix_funding_claim_source": "BTREE (supplier_id, source_kind, source_id, claim_role)"
             },
             "foreign_keys": {
-                "property_funding_claims_ibfk_1": "(supplier_id, operation_id) -> property_funding_operations (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT"
+                "1": "(supplier_id, operation_id) -> property_funding_operations (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT"
             },
             "checks": {
                 "CONSTRAINT_1": "`amount_cents` > 0"
@@ -22422,8 +22594,8 @@
                 "uq_funding_effect_tenant": "UNIQUE BTREE (supplier_id, id)"
             },
             "foreign_keys": {
-                "property_funding_effects_ibfk_1": "(supplier_id, operation_id) -> property_funding_operations (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
-                "property_funding_effects_ibfk_2": "(supplier_id, unit_id) -> property_objects (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT"
+                "1": "(supplier_id, operation_id) -> property_funding_operations (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
+                "2": "(supplier_id, unit_id) -> property_objects (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT"
             },
             "checks": {
                 "CONSTRAINT_1": "`amount_cents` <> 0",
@@ -22443,7 +22615,7 @@
                 "PRIMARY": "UNIQUE BTREE (supplier_id, house_id)"
             },
             "foreign_keys": {
-                "property_funding_heads_ibfk_1": "(supplier_id, house_id) -> property_objects (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT"
+                "1": "(supplier_id, house_id) -> property_objects (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT"
             },
             "checks": []
         },
@@ -22482,10 +22654,10 @@
                 "uq_funding_tenant": "UNIQUE BTREE (supplier_id, id)"
             },
             "foreign_keys": {
-                "property_funding_operations_ibfk_1": "(supplier_id, house_id) -> property_objects (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
-                "property_funding_operations_ibfk_2": "(supplier_id, reversal_of) -> property_funding_operations (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
-                "property_funding_operations_ibfk_3": "(journal_entry_id) -> journal_entries (id) ON UPDATE RESTRICT ON DELETE RESTRICT",
-                "property_funding_operations_ibfk_4": "(created_by) -> users (id) ON UPDATE RESTRICT ON DELETE RESTRICT"
+                "1": "(supplier_id, house_id) -> property_objects (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
+                "2": "(supplier_id, reversal_of) -> property_funding_operations (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
+                "3": "(journal_entry_id) -> journal_entries (id) ON UPDATE RESTRICT ON DELETE RESTRICT",
+                "4": "(created_by) -> users (id) ON UPDATE RESTRICT ON DELETE RESTRICT"
             },
             "checks": {
                 "CONSTRAINT_1": "`kind` in ('draw','income','transfer','payout','reverse')",
@@ -23001,9 +23173,9 @@
                 "uq_lifecycle_tenant": "UNIQUE BTREE (supplier_id, id)"
             },
             "foreign_keys": {
-                "property_service_lifecycle_cases_ibfk_1": "(supplier_id, unit_id) -> property_objects (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
-                "property_service_lifecycle_cases_ibfk_2": "(supplier_id, service_id) -> property_objects (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
-                "property_service_lifecycle_cases_ibfk_3": "(created_by) -> users (id) ON UPDATE RESTRICT ON DELETE RESTRICT"
+                "1": "(supplier_id, unit_id) -> property_objects (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
+                "2": "(supplier_id, service_id) -> property_objects (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
+                "3": "(created_by) -> users (id) ON UPDATE RESTRICT ON DELETE RESTRICT"
             },
             "checks": {
                 "CONSTRAINT_1": "`period_from` <= `period_to`",
@@ -23027,8 +23199,8 @@
                 "supplier_id": "BTREE (supplier_id, event_id)"
             },
             "foreign_keys": {
-                "property_service_lifecycle_claims_ibfk_1": "(supplier_id, event_id) -> property_service_lifecycle_events (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
-                "property_service_lifecycle_claims_ibfk_2": "(line_id) -> journal_entry_lines (id) ON UPDATE RESTRICT ON DELETE RESTRICT"
+                "1": "(supplier_id, event_id) -> property_service_lifecycle_events (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
+                "2": "(line_id) -> journal_entry_lines (id) ON UPDATE RESTRICT ON DELETE RESTRICT"
             },
             "checks": []
         },
@@ -23051,8 +23223,8 @@
                 "supplier_id": "BTREE (supplier_id, case_id)"
             },
             "foreign_keys": {
-                "property_service_lifecycle_commands_ibfk_1": "(supplier_id, case_id) -> property_service_lifecycle_cases (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
-                "property_service_lifecycle_commands_ibfk_2": "(created_by) -> users (id) ON UPDATE RESTRICT ON DELETE RESTRICT"
+                "1": "(supplier_id, case_id) -> property_service_lifecycle_cases (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
+                "2": "(created_by) -> users (id) ON UPDATE RESTRICT ON DELETE RESTRICT"
             },
             "checks": {
                 "response_json": "json_valid(`response_json`)"
@@ -23081,8 +23253,8 @@
                 "uq_lifecycle_event_key": "UNIQUE BTREE (supplier_id, case_id, event_key)"
             },
             "foreign_keys": {
-                "property_service_lifecycle_events_ibfk_1": "(supplier_id, case_id) -> property_service_lifecycle_cases (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
-                "property_service_lifecycle_events_ibfk_2": "(journal_entry_id) -> journal_entries (id) ON UPDATE RESTRICT ON DELETE RESTRICT"
+                "1": "(supplier_id, case_id) -> property_service_lifecycle_cases (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
+                "2": "(journal_entry_id) -> journal_entries (id) ON UPDATE RESTRICT ON DELETE RESTRICT"
             },
             "checks": {
                 "receipt_json": "`receipt_json` is null or json_valid(`receipt_json`)",
@@ -23152,12 +23324,12 @@
                 "uq_service_application_token": "UNIQUE BTREE (supplier_id, idempotency_key)"
             },
             "foreign_keys": {
-                "fk_service_application_request": "(supplier_id, request_id) -> property_service_settlement_requests (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
-                "property_service_settlement_applications_ibfk_1": "(supplier_id, document_id) -> property_service_settlements (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
-                "property_service_settlement_applications_ibfk_2": "(supplier_id, reversal_of) -> property_service_settlement_applications (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
-                "property_service_settlement_applications_ibfk_3": "(supplier_id, period_id) -> accounting_periods (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
-                "property_service_settlement_applications_ibfk_4": "(supplier_id, journal_entry_id) -> journal_entries (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
-                "property_service_settlement_applications_ibfk_5": "(created_by) -> users (id) ON UPDATE RESTRICT ON DELETE RESTRICT"
+                "1": "(supplier_id, document_id) -> property_service_settlements (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
+                "2": "(supplier_id, reversal_of) -> property_service_settlement_applications (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
+                "3": "(supplier_id, period_id) -> accounting_periods (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
+                "4": "(supplier_id, journal_entry_id) -> journal_entries (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
+                "5": "(created_by) -> users (id) ON UPDATE RESTRICT ON DELETE RESTRICT",
+                "fk_service_application_request": "(supplier_id, request_id) -> property_service_settlement_requests (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT"
             },
             "checks": {
                 "receipt_json": "json_valid(`receipt_json`)"
@@ -23229,11 +23401,11 @@
                 "uq_service_effect_tenant": "UNIQUE BTREE (supplier_id, id)"
             },
             "foreign_keys": {
-                "property_service_settlement_effects_ibfk_1": "(supplier_id, application_id) -> property_service_settlement_applications (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
-                "property_service_settlement_effects_ibfk_2": "(supplier_id, debt_id) -> unit_payment_debts (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
-                "property_service_settlement_effects_ibfk_3": "(supplier_id, charge_line_id) -> unit_charge_lines (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
-                "property_service_settlement_effects_ibfk_4": "(supplier_id, opening_component_id) -> property_opening_components (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
-                "property_service_settlement_effects_ibfk_5": "(supplier_id, allocation_id) -> unit_payment_allocations (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT"
+                "1": "(supplier_id, application_id) -> property_service_settlement_applications (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
+                "2": "(supplier_id, debt_id) -> unit_payment_debts (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
+                "3": "(supplier_id, charge_line_id) -> unit_charge_lines (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
+                "4": "(supplier_id, opening_component_id) -> property_opening_components (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
+                "5": "(supplier_id, allocation_id) -> unit_payment_allocations (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT"
             },
             "checks": {
                 "CONSTRAINT_1": "`amount_cents` > 0 and `kind` in ('advance_applied','claim_reduction','allocation_relief','opening_paid_credit','new_claim')",
@@ -23256,8 +23428,8 @@
                 "supplier_id": "BTREE (supplier_id, application_id)"
             },
             "foreign_keys": {
-                "property_service_settlement_heads_ibfk_1": "(supplier_id, document_id) -> property_service_settlements (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
-                "property_service_settlement_heads_ibfk_2": "(supplier_id, application_id) -> property_service_settlement_applications (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT"
+                "1": "(supplier_id, document_id) -> property_service_settlements (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
+                "2": "(supplier_id, application_id) -> property_service_settlement_applications (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT"
             },
             "checks": []
         },
@@ -23316,11 +23488,11 @@
                 "supplier_id_4": "BTREE (supplier_id, debt_id)"
             },
             "foreign_keys": {
-                "property_service_settlement_origins_ibfk_1": "(supplier_id, document_id) -> property_service_settlements (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
-                "property_service_settlement_origins_ibfk_2": "(supplier_id, charge_line_id) -> unit_charge_lines (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
-                "property_service_settlement_origins_ibfk_3": "(supplier_id, opening_component_id) -> property_opening_components (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
-                "property_service_settlement_origins_ibfk_4": "(supplier_id, opening_advance_component_id) -> property_opening_components (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
-                "property_service_settlement_origins_ibfk_5": "(supplier_id, debt_id) -> unit_payment_debts (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT"
+                "1": "(supplier_id, document_id) -> property_service_settlements (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
+                "2": "(supplier_id, charge_line_id) -> unit_charge_lines (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
+                "3": "(supplier_id, opening_component_id) -> property_opening_components (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
+                "4": "(supplier_id, opening_advance_component_id) -> property_opening_components (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
+                "5": "(supplier_id, debt_id) -> unit_payment_debts (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT"
             },
             "checks": {
                 "CONSTRAINT_1": "`charge_line_id` is not null and `opening_component_id` is null and `opening_advance_component_id` is null and `debt_id` is not null or `charge_line_id` is null and `opening_component_id` is not null and `opening_advance_component_id` is not null"
@@ -23353,9 +23525,9 @@
                 "uq_service_request_token": "UNIQUE BTREE (supplier_id, idempotency_key)"
             },
             "foreign_keys": {
-                "property_service_settlement_requests_ibfk_1": "(supplier_id, document_id) -> property_service_settlements (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
-                "property_service_settlement_requests_ibfk_2": "(supplier_id, reversal_of) -> property_service_settlement_applications (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
-                "property_service_settlement_requests_ibfk_3": "(created_by) -> users (id) ON UPDATE RESTRICT ON DELETE RESTRICT"
+                "1": "(supplier_id, document_id) -> property_service_settlements (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
+                "2": "(supplier_id, reversal_of) -> property_service_settlement_applications (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
+                "3": "(created_by) -> users (id) ON UPDATE RESTRICT ON DELETE RESTRICT"
             },
             "checks": {
                 "preview_json": "json_valid(`preview_json`)",
@@ -23395,11 +23567,11 @@
                 "uq_service_settlement_token": "UNIQUE BTREE (supplier_id, idempotency_key)"
             },
             "foreign_keys": {
-                "fk_service_settlement_cost": "(cost_line_id) -> journal_entry_lines (id) ON UPDATE RESTRICT ON DELETE RESTRICT",
-                "property_service_settlements_ibfk_1": "(supplier_id, unit_id) -> property_objects (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
-                "property_service_settlements_ibfk_2": "(supplier_id, service_id) -> property_objects (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
-                "property_service_settlements_ibfk_3": "(supplier_id, previous_id) -> property_service_settlements (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
-                "property_service_settlements_ibfk_4": "(created_by) -> users (id) ON UPDATE RESTRICT ON DELETE RESTRICT"
+                "1": "(supplier_id, unit_id) -> property_objects (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
+                "2": "(supplier_id, service_id) -> property_objects (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
+                "3": "(supplier_id, previous_id) -> property_service_settlements (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
+                "4": "(created_by) -> users (id) ON UPDATE RESTRICT ON DELETE RESTRICT",
+                "fk_service_settlement_cost": "(cost_line_id) -> journal_entry_lines (id) ON UPDATE RESTRICT ON DELETE RESTRICT"
             },
             "checks": {
                 "CONSTRAINT_1": "`revision_no` > 0",
@@ -23552,6 +23724,7 @@
             "columns": {
                 "accrual_from": "date NULL DEFAULT NULL",
                 "accrual_to": "date NULL DEFAULT NULL",
+                "advance_purchase_invoice_id": "bigint(20) unsigned NULL DEFAULT NULL",
                 "counter_account_code": "varchar(10) NULL DEFAULT NULL",
                 "description": "text NOT NULL",
                 "duration_minutes": "int(11) NULL DEFAULT NULL",
@@ -23592,9 +23765,11 @@
                 "fk_pii_vat": "BTREE (vat_rate_id)",
                 "idx_pii_accrual_to": "BTREE (accrual_to)",
                 "idx_pii_expense_rule": "BTREE (expense_rule_id)",
-                "idx_pii_invoice": "BTREE (purchase_invoice_id, order_index)"
+                "idx_pii_invoice": "BTREE (purchase_invoice_id, order_index)",
+                "ix_pii_advance_purchase_invoice": "BTREE (advance_purchase_invoice_id, purchase_invoice_id)"
             },
             "foreign_keys": {
+                "fk_pii_advance_purchase_invoice": "(advance_purchase_invoice_id) -> purchase_invoices (id) ON UPDATE RESTRICT ON DELETE SET NULL",
                 "fk_pii_invoice": "(purchase_invoice_id) -> purchase_invoices (id) ON UPDATE RESTRICT ON DELETE CASCADE",
                 "fk_pii_pol": "(purchase_order_line_id) -> purchase_order_lines (id) ON UPDATE RESTRICT ON DELETE SET NULL",
                 "fk_pii_stock_item": "(stock_item_id) -> stock_items (id) ON UPDATE RESTRICT ON DELETE SET NULL",
@@ -30594,18 +30769,17 @@
         "trg_nfr_insert": "BEFORE INSERT ON nonprofit_funding_revisions #8ef193715bd5844a87d770d92e7eb9b550d9c2eb",
         "trg_nlp_immutable_delete": "BEFORE DELETE ON nonprofit_legal_profiles #14114d6f757030293ceadac8f5ac999e5e0188fa",
         "trg_nlp_immutable_update": "BEFORE UPDATE ON nonprofit_legal_profiles #14114d6f757030293ceadac8f5ac999e5e0188fa",
-        "trg_nm_immutable_delete": "BEFORE DELETE ON nonprofit_members #b6e16ca403b6b8a607604546967555ea319ac4e1",
-        "trg_nm_immutable_update": "BEFORE UPDATE ON nonprofit_members #b6e16ca403b6b8a607604546967555ea319ac4e1",
+        "trg_nm_immutable_update": "BEFORE UPDATE ON nonprofit_members #5a266b3a9dd32e56bc2bc37c3555a33669433280",
         "trg_nmcc_guard_update": "BEFORE UPDATE ON nonprofit_membership_charge_cases #6c2a7a4e0c545851941b22f2f96d111a5263b2f5",
         "trg_nmcc_immutable_delete": "BEFORE DELETE ON nonprofit_membership_charge_cases #b6e16ca403b6b8a607604546967555ea319ac4e1",
         "trg_nmclaim_immutable_delete": "BEFORE DELETE ON nonprofit_membership_charge_claims #b6e16ca403b6b8a607604546967555ea319ac4e1",
         "trg_nmclaim_immutable_update": "BEFORE UPDATE ON nonprofit_membership_charge_claims #b6e16ca403b6b8a607604546967555ea319ac4e1",
         "trg_nmcmd_immutable_delete": "BEFORE DELETE ON nonprofit_membership_charge_commands #b6e16ca403b6b8a607604546967555ea319ac4e1",
-        "trg_nmcmd_immutable_update": "BEFORE UPDATE ON nonprofit_membership_charge_commands #b6e16ca403b6b8a607604546967555ea319ac4e1",
+        "trg_nmcmd_immutable_update": "BEFORE UPDATE ON nonprofit_membership_charge_commands #4147507eeaa028aafc6be913319bd0884d6da26b",
         "trg_nmop_immutable_delete": "BEFORE DELETE ON nonprofit_membership_charge_operations #b6e16ca403b6b8a607604546967555ea319ac4e1",
-        "trg_nmop_immutable_update": "BEFORE UPDATE ON nonprofit_membership_charge_operations #b6e16ca403b6b8a607604546967555ea319ac4e1",
+        "trg_nmop_immutable_update": "BEFORE UPDATE ON nonprofit_membership_charge_operations #a52d80914623c81c6f1929a36e796b8ab649e12c",
         "trg_nmr_immutable_delete": "BEFORE DELETE ON nonprofit_member_revisions #b6e16ca403b6b8a607604546967555ea319ac4e1",
-        "trg_nmr_immutable_update": "BEFORE UPDATE ON nonprofit_member_revisions #b6e16ca403b6b8a607604546967555ea319ac4e1",
+        "trg_nmr_immutable_update": "BEFORE UPDATE ON nonprofit_member_revisions #49e6383e7554d8ed8ce0ad0bd316335cf93cfad7",
         "trg_nonprofit_tax_immutable_delete": "BEFORE DELETE ON nonprofit_tax_assessments #f38c1e13859ea670801b2496d566bdd872f4cb06",
         "trg_nonprofit_tax_immutable_update": "BEFORE UPDATE ON nonprofit_tax_assessments #6bd110f6c67f9cdbbd20e50f624c033fcd65f7d3",
         "trg_nonprofit_tax_insert": "BEFORE INSERT ON nonprofit_tax_assessments #4e66f08f4b1f04a9c040cdde16a122b7ffcc8f1b",

@@ -123,6 +123,15 @@ export interface DocumentDimensions {
   splits?: Record<number, DimensionSplits>
 }
 
+/** Výsledek hromadné změny dimenzí hlavičky dokladů ze seznamu. */
+export interface BulkDocumentDimensionsResult {
+  updated: number[]
+  unchanged: number[]
+  /** Uložené doklady, jejichž zaúčtované řádky potřebují přeúčtovat (rozdělení, jiný účet). */
+  needs_repost: number[]
+  skipped: { id: number; varsymbol: string | null; code: string; message: string }[]
+}
+
 export type DimensionRuleEnforcement = 'error' | 'warning' | 'none'
 
 export interface DimensionRule {
@@ -469,6 +478,13 @@ export const dimensionsApi = {
     api.get<DocumentDimensions>(`/accounting/dimensions/documents/${doc}/${id}`).then(r => r.data),
   saveDocument: (doc: DimensionDocType, id: number, payload: DocumentDimensionsPayload) =>
     api.put<DocumentDimensionsSaveResult>(`/accounting/dimensions/documents/${doc}/${id}`, documentDimensionsBody(payload))
+      .then(r => r.data),
+  /**
+   * Hromadná změna dimenzí hlavičky vydaných faktur: hodnota typ nastaví, `null` ho
+   * odebere, typ mimo mapu zůstane beze změny.
+   */
+  bulkInvoiceDimensions: (ids: number[], dimensions: Record<number, number | null>) =>
+    api.post<BulkDocumentDimensionsResult>('/accounting/dimensions/documents/invoices/bulk', { ids, dimensions })
       .then(r => r.data),
   /** Co by po uložení nesl každý zaúčtovaný řádek dokladu — nic se neuloží. */
   previewDocument: (doc: DimensionDocType, id: number, payload: DocumentDimensionsPayload) =>

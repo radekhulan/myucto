@@ -676,15 +676,63 @@ final class Pseudonymizer
     }
 
     /**
+     * Platební symbol, který musí zůstat spárovatelný s bankovním pohybem (VS členského
+     * předpisu). Mění se jádro bez vodicích nul, nuly zůstanou; různá jádra dostanou různé
+     * pseudonymy stejné délky. Alias jádra platí pro {@see symbol()}, takže platba se stejným
+     * VS s nulami i bez nich dostane týž pseudonym. Jádro kratší než šest číslic zůstává jako
+     * u {@see shapeDigits()}: krátké číslo neidentifikuje a jeho alias by v kopii přepsal
+     * i nesouvisející symboly (úhrady faktur, SS), jejichž doklady se nemění.
+     */
+    public function paymentSymbol(string $value): string
+    {
+        $trimmed = trim($value);
+        if (preg_match('/^\d+$/D', $trimmed) !== 1) {
+            return $this->shapeDigits($value);
+        }
+        $core = ltrim($trimmed, '0');
+        if (strlen($core) < 6) {
+            return $trimmed;
+        }
+        $pseudo = $this->maps['payment_symbol'][$core] ?? $this->newPaymentSymbol($core);
+        $result = substr($trimmed, 0, strlen($trimmed) - strlen($core)) . $pseudo;
+        $this->dictionary->add($core, $pseudo);
+        $this->dictionary->add($trimmed, $result);
+
+        return $result;
+    }
+
+    private function newPaymentSymbol(string $core): string
+    {
+        for ($attempt = 0; $attempt < 1000; $attempt++) {
+            $candidate = self::digitsFrom($this->hmac('payment_symbol', $core, $attempt), strlen($core), true);
+            if (isset($this->taken['payment_symbol'][$candidate])) {
+                continue;
+            }
+            if ($candidate === $core) {
+                continue;
+            }
+            $this->taken['payment_symbol'][$candidate] = $core;
+
+            return $this->maps['payment_symbol'][$core] = $candidate;
+        }
+        throw new \RuntimeException('Pro platební symbol se nepodařilo najít jednoznačný pseudonym.');
+    }
+
+    /**
      * Symbol platby (VS/SS). Mění se jen tehdy, když CELÝ symbol je identifikátor,
      * který už prošel pseudonymizací (IČO, rodné číslo, číslo účtu, variabilní
-     * symbol zaměstnavatele). Čísla faktur zůstávají — jinak by se rozpadlo párování.
+     * symbol zaměstnavatele, VS členského předpisu). Čísla faktur zůstávají — jinak
+     * by se rozpadlo párování.
      */
     public function symbol(string $value): string
     {
         $trimmed = trim($value);
         if ($trimmed === '') {
             return $value;
+        }
+        $core = ltrim($trimmed, '0');
+        if ($core !== '' && isset($this->maps['payment_symbol'][$core]) && preg_match('/^\d+$/D', $trimmed) === 1) {
+            return substr($trimmed, 0, strlen($trimmed) - strlen($core)) . $this->maps['payment_symbol'][$core];
         }
         $hit = $this->dictionary->lookup($trimmed);
         if ($hit === null && ltrim($trimmed, '0') !== $trimmed && ltrim($trimmed, '0') !== '') {

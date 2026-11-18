@@ -72,6 +72,7 @@ final class SouhrnneHlaseniBuilder
         private readonly VatLedgerService $ledger,
         // Archiv podání — stav, který ve VIES vznikl řádným hlášením a předchozími následnými.
         private readonly TaxSubmissionRepository $submissions,
+        private readonly SubmissionVariantGuard $variantGuard,
     ) {}
 
     /**
@@ -320,6 +321,11 @@ final class SouhrnneHlaseniBuilder
                 )), 2),
                 'rows'                => $rows,
                 'submission_deadline' => $deadline,
+                // Řádné hlášení už evidované → karta termínu nehlásí prodlení. Následné má
+                // vlastní lhůtu od zjištění, tam odpočet zůstává.
+                'filed_at'            => $isFollowUp ? null : $this->variantGuard->filedAt(
+                    $supplierId, 'dphshv', $year, $quarter !== null ? null : $month, $quarter, ['R'],
+                ),
                 'variant'             => $variant,
                 'shvies_forma'        => $forma,
                 'is_follow_up'        => $isFollowUp,

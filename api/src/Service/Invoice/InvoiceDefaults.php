@@ -91,7 +91,12 @@ final class InvoiceDefaults
                 );
                 $stmt->execute([(int) $supplierId, strtoupper($data['currency'])]);
                 $found = (int) $stmt->fetchColumn();
-                if ($found > 0) $data['currency_id'] = $found;
+                if ($found <= 0) {
+                    // Zadaný kód je vůle volajícího: tichý pád na výchozí měnu by vyrobil
+                    // doklad v jiné měně, než chtěl.
+                    throw UnknownCurrencyException::forCode(strtoupper(trim($data['currency'])));
+                }
+                $data['currency_id'] = $found;
             }
         }
         if (empty($data['currency_id'])) {

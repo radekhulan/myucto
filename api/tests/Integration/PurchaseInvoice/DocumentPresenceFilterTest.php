@@ -174,7 +174,8 @@ final class DocumentPresenceFilterTest extends TestCase
             self::assertCount(5, $this->ids($first));
             self::assertCount(2, $this->ids($second));
             self::assertEqualsCanonicalizing($expected, [...$this->ids($first), ...$this->ids($second)]);
-            self::assertEqualsWithDelta(500, $first['data'][0]['totals_per_currency'][0]['with_vat'], 0.001);
+            // Hlavička měsíce sčítá celý měsíc podle filtrů (#392), souvislý seznam jen stránku.
+            self::assertEqualsWithDelta($grouped ? 700 : 500, $first['data'][0]['totals_per_currency'][0]['with_vat'], 0.001);
         }
     }
 

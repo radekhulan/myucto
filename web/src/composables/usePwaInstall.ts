@@ -35,7 +35,6 @@ export function initPwaInstall(): void {
 export function isStandaloneDisplay(): boolean {
   if (typeof window === 'undefined') return false
   if ((navigator as Navigator & { standalone?: boolean }).standalone === true) return true
-  // Starší instalace mohou až do aktualizace manifestu stále běžet ve fullscreenu.
   return typeof window.matchMedia === 'function'
     && (window.matchMedia('(display-mode: fullscreen)').matches || window.matchMedia('(display-mode: standalone)').matches)
 }

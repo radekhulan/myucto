@@ -231,6 +231,8 @@ const regexFieldDefinitions = [
   { key: 'message', required: false },
   { key: 'bank_ref', required: false },
   { key: 'balance', required: false },
+  { key: 'original_amount', required: false },
+  { key: 'original_currency', required: false },
 ] as const
 type RegexFieldKey = typeof regexFieldDefinitions[number]['key']
 interface RegexProviderDraft {

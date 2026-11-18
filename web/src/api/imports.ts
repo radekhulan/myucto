@@ -15,6 +15,8 @@ export interface ImportResultRow {
   /** Doklad už v systému byl — status zůstává 'created' (v systému je), ale nevznikl teď. */
   duplicate?: boolean
   reason?: string
+  /** Strojový důvod vyčlenění; `payroll_posting` = zaúčtování mezd z PAMICY, ne faktury. */
+  code?: string
   kind?: 'issued' | 'purchase' | null   // backend dispatch route (auto → konkrétní)
   invoice_id?: number          // pro issued
   purchase_invoice_id?: number  // pro purchase

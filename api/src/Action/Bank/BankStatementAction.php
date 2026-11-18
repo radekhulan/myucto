@@ -19,6 +19,7 @@ use MyInvoice\Infrastructure\Database\TransactionFailure;
 use MyInvoice\Service\Bank\GpcParser;
 use MyInvoice\Service\Bank\AccountNumberNormalizer;
 use MyInvoice\Service\Bank\FxPaymentSettlement;
+use MyInvoice\Service\Bank\PurchasePaymentKinds;
 use MyInvoice\Service\Bank\CreditRefundAllocation;
 use MyInvoice\Service\Bank\PurchasePaymentMatchReader;
 use MyInvoice\Service\Bank\StatementReconciliationConfirmation;
@@ -38,6 +39,7 @@ use MyInvoice\Service\Bank\StatementMatcher;
 use MyInvoice\Service\Bank\Match\MatchSuggestionException;
 use MyInvoice\Service\Bank\Match\MatchSuggestionService;
 use MyInvoice\Service\Bank\Match\SubsetSumSolver;
+use MyInvoice\Service\Bank\OtherItemPaymentMatchReader;
 use MyInvoice\Service\Bank\StatementScanner;
 use MyInvoice\Service\Bank\VariableSymbolNormalizer;
 use MyInvoice\Service\IpMatcher;
@@ -1945,7 +1947,8 @@ final class BankStatementAction
             }
 
             $matchedPurchasesByTx = PurchasePaymentMatchReader::byTransactions($this->db->pdo(), $sid, $txIds);
-            $matchedOtherItemsByTx = \MyInvoice\Service\Bank\OtherItemPaymentMatchReader::byTransactions($this->db->pdo(), $sid, $txIds);
+            $matchedOtherItemsByTx = OtherItemPaymentMatchReader::byTransactions($this->db->pdo(), $sid, $txIds);
+            $matchedMembershipByTx = OtherItemPaymentMatchReader::membershipByTransactions($this->db->pdo(), $sid, $txIds);
         }
 
         // Automatizace: stav zaúčtování per transakce (jen double_entry, §3.7 #6).
@@ -1973,6 +1976,10 @@ final class BankStatementAction
             $t['matched_invoices'] = $matchedByTx[$t['id']] ?? [];
             $t['matched_purchase_invoices'] = $matchedPurchasesByTx[$t['id']] ?? [];
             $t['matched_other_items'] = $matchedOtherItemsByTx[$t['id']] ?? [];
+            $t['matched_membership_claims'] = array_map(static function (array $claim): array {
+                unset($claim['pairing_id'], $claim['entry_id']);
+                return $claim;
+            }, $matchedMembershipByTx[$t['id']] ?? []);
             $t['posting'] = $postingByTx[$t['id']] ?? null;
             // Stav zpracování po importu nese výpis (`processing_failed`), ne pohyb.
             unset($t['processing_pending_at'], $t['processing_error']);
@@ -2396,13 +2403,21 @@ final class BankStatementAction
         $body = (array) ($request->getParsedBody() ?? []);
         $candidateIndex = (int) ($body['candidate_index'] ?? 0);
 
+        if (RequestAuthorization::isRestrictedBearer($request)) {
+            $owner = $this->db->pdo()->prepare('SELECT bank_transaction_id FROM bank_match_suggestions WHERE id = ? AND supplier_id = ?');
+            $owner->execute([(int) ($args['id'] ?? 0), $supplierId]);
+            $suggestedTxId = (int) $owner->fetchColumn();
+            $guard = $suggestedTxId > 0 ? $this->tokenJournalChangeError($request, $response, $suggestedTxId, false) : null;
+            if ($guard !== null) {
+                return $guard;
+            }
+        }
+
         try {
             $result = $this->matchV2->accept((int) ($args['id'] ?? 0), $supplierId, $userId, $candidateIndex,
                 RequestAuthorization::isClientType($request) ? fn (array $candidate, array $transaction) => $this->clientAccess->assertAvailableCandidate($request, $candidate, $transaction) : null);
             $transactionId = (int) ($result['bank_transaction_id'] ?? 0);
-            $posting = $transactionId > 0
-                ? $this->postingSummary($this->bankPosting->handleTransaction($transactionId, $userId ?: null))
-                : null;
+            $posting = $transactionId > 0 ? $this->postAfterMatch($request, $transactionId, $userId) : null;
             $result['posting'] = RequestAuthorization::isClientType($request) ? null : $posting;
             return Json::ok($response, $result);
         } catch (\DomainException $e) {
@@ -2893,7 +2908,7 @@ final class BankStatementAction
                    FROM purchase_invoices
                   WHERE id = ? AND supplier_id = ?
                     AND status IN ('received','booked','paid')
-                    AND document_kind IN ('invoice','advance')"
+                    AND " . PurchasePaymentKinds::bankPayableSql('purchase_invoices')
             );
             $anchor->execute([$anchorId, $supplierId]);
             $anchorRefDate = $anchor->fetchColumn();
@@ -2932,7 +2947,7 @@ final class BankStatementAction
              LEFT JOIN clients c ON c.id = p.vendor_id
                  WHERE p.supplier_id = ?
                    AND p.status IN ('received','booked','paid')
-                   AND p.document_kind IN ('invoice','advance')";
+                   AND " . PurchasePaymentKinds::bankPayableSql('p');
         $params = [$supplierId];
         if ($window > 0 && $anchorId === 0) {
             $sql .= ' AND (ABS(DATEDIFF(p.due_date, ?)) <= ? OR ABS(DATEDIFF(p.issue_date, ?)) <= ?)';
@@ -2956,7 +2971,7 @@ final class BankStatementAction
             if ($invoiceCurrency !== $txCcy) {
                 if ($txCcy !== FxPaymentSettlement::LOCAL_CURRENCY
                     || (float) $row['exchange_rate'] <= 0
-                    || (string) $row['document_kind'] !== 'invoice'
+                    || !PurchasePaymentKinds::allowsCrossCurrency((string) $row['document_kind'])
                     || $paymentCount > 0
                     || $offsetCount > 0
                     || $cashCount > 0
@@ -3246,6 +3261,8 @@ final class BankStatementAction
 
     private function manualMatchWithCurrentSource(Request $request, Response $response, array $args): Response
     {
+        $guard = $this->tokenJournalChangeError($request, $response, (int) ($args['id'] ?? 0), false);
+        if ($guard !== null) return $guard;
         if (!RequestAuthorization::isClientType($request)) return $this->performManualMatch($request, $response, $args);
         if (!RequestAuthorization::allows($request, 'bank.match', AccessLevel::WRITE)) {
             return Json::error($response, 'forbidden', 'Chybí oprávnění pro párování banky.', 403);
@@ -3548,7 +3565,7 @@ final class BankStatementAction
         $this->recordManualMatchV2($txId, SupplierGuard::currentId($request), $userId);
 
         // Automatizace: zaúčtování po spárování (M5 — „spárováno" × „spárováno a zaúčtováno").
-        $posting = $this->postingSummary($this->bankPosting->handleTransaction($txId, $userId ?: null));
+        $posting = $this->postAfterMatch($request, $txId, $userId);
 
         $ip = $this->ipMatcher->clientIpFromRequest($request->getServerParams());
         $this->logger->log('bank.tx_manual_match', $userId ?: null, 'bank_transaction', $txId, [
@@ -3649,6 +3666,54 @@ final class BankStatementAction
             $this->payments->markCreditNoteRefunded($invoiceId, $supplierId, $postedAt);
         }
         return $covered;
+    }
+
+    /**
+     * Zaúčtování po spárování (M5). API token bez plného zápisu jen páruje: deník je pro něj
+     * jednosměrný ({@see \MyInvoice\Middleware\ApiScopeMiddleware}), takže pohyb zůstane
+     * spárovaný a nezaúčtovaný ({@see \MyInvoice\Service\Accounting\Bank\BankPostingService::deferMatchedPosting()}).
+     *
+     * @return array{action:string, reason?:string}|null
+     */
+    private function postAfterMatch(Request $request, int $txId, int $userId): ?array
+    {
+        if (RequestAuthorization::isRestrictedBearer($request)) {
+            return $this->bankPosting->deferMatchedPosting(SupplierGuard::currentId($request), $txId);
+        }
+        return $this->postingSummary($this->bankPosting->handleTransaction($txId, $userId ?: null));
+    }
+
+    /**
+     * Párování ani jeho zrušení tokenem bez plného zápisu nesmí sáhnout do deníku. U pohybu
+     * s živým zápisem (i nezaúčtovaným konceptem) by přepárování zápis přepsalo a zrušení
+     * párování ho stornovalo, zrušení úhrady zálohy navíc dorovnává její zúčtování. Takovou
+     * změnu udělá uživatel v aplikaci.
+     */
+    private function tokenJournalChangeError(Request $request, Response $response, int $txId, bool $unmatch): ?Response
+    {
+        if (!RequestAuthorization::isRestrictedBearer($request)) {
+            return null;
+        }
+        $supplierId = SupplierGuard::currentId($request);
+        $types = BankTransactionReleaseService::TRANSACTION_SOURCE_TYPES;
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT 1 FROM journal_entries
+              WHERE supplier_id = ? AND source_type IN (' . implode(',', array_fill(0, count($types), '?')) . ') AND source_id = ?
+                AND reversed_by IS NULL
+              LIMIT 1'
+        );
+        $stmt->execute([$supplierId, ...$types, $txId]);
+        $journal = $stmt->fetchColumn() !== false;
+        $advances = $unmatch && !$journal
+            && array_merge(...array_values($this->bankPosting->advancesOfTransaction($supplierId, $txId))) !== [];
+        if (!$journal && !$advances) {
+            return null;
+        }
+        return Json::error($response, 'token_write_forbidden', $journal
+            ? 'Pohyb má zápis v účetním deníku. Párování zaúčtovaného pohybu přes API token měnit nelze, '
+                . 'zrušení párování nebo přepárování proveďte ve webovém rozhraní.'
+            : 'Pohyb hradí zálohu a zrušení párování by změnilo její zúčtování v deníku. '
+                . 'Proveďte ho ve webovém rozhraní.', 403);
     }
 
     /**
@@ -3987,7 +4052,7 @@ final class BankStatementAction
         $this->recordManualMatchV2($txId, SupplierGuard::currentId($request), $userId);
 
         // Automatizace: zaúčtování sloučené úhrady (split = 1 zápis s N řádky saldokonta).
-        $posting = $this->postingSummary($this->bankPosting->handleTransaction($txId, $userId ?: null));
+        $posting = $this->postAfterMatch($request, $txId, $userId);
 
         $result = ['matched' => true, 'split' => true, 'paid_at' => $postedAt, 'invoice_ids' => $invoiceIds, 'posting' => $posting];
         if ($finalDraftIds !== []) {
@@ -4085,7 +4150,7 @@ final class BankStatementAction
                     $paidStmt->execute(array_merge($requestedIds, [$supplierId]));
                     if ((int) $paidStmt->fetchColumn() === count($requestedIds)) {
                         self::commitAtomic($pdo, $own, $savepoint);
-                        $posting = $this->postingSummary($this->bankPosting->handleTransaction($txId, $userId ?: null));
+                        $posting = $this->postAfterMatch($request, $txId, $userId);
                         return Json::ok($response, [
                             'matched' => true,
                             'split' => true,
@@ -4152,9 +4217,9 @@ final class BankStatementAction
                     self::rollbackAtomic($pdo, $own, $savepoint);
                     return Json::error($response, 'invalid_status', "Přijatou fakturu #$purchaseInvoiceId v jejím stavu nelze spárovat.", 409);
                 }
-                if (!in_array((string) $invoice['document_kind'], ['invoice', 'advance'], true)) {
+                if (!PurchasePaymentKinds::isBankPayable((string) $invoice['document_kind'])) {
                     self::rollbackAtomic($pdo, $own, $savepoint);
-                    return Json::error($response, 'invalid_type', "Doklad #$purchaseInvoiceId není faktura ani zálohová faktura.", 409);
+                    return Json::error($response, 'invalid_type', "Doklad #$purchaseInvoiceId není faktura, zálohová faktura ani účtenka.", 409);
                 }
 
                 $invoiceCurrency = strtoupper((string) $invoice['currency']);
@@ -4172,7 +4237,7 @@ final class BankStatementAction
                 if ($invoiceMode === 'cross') {
                     if ($txCurrency !== FxPaymentSettlement::LOCAL_CURRENCY
                         || (float) $invoice['exchange_rate'] <= 0
-                        || (string) $invoice['document_kind'] !== 'invoice'
+                        || !PurchasePaymentKinds::allowsCrossCurrency((string) $invoice['document_kind'])
                     ) {
                         self::rollbackAtomic($pdo, $own, $savepoint);
                         return Json::error($response, 'currency_mismatch', "Přijatou fakturu #$purchaseInvoiceId nelze převést do měny platby.", 409);
@@ -4288,7 +4353,7 @@ final class BankStatementAction
         }
 
         $this->recordManualMatchV2($txId, $supplierId, $userId);
-        $posting = $this->postingSummary($this->bankPosting->handleTransaction($txId, $userId ?: null));
+        $posting = $this->postAfterMatch($request, $txId, $userId);
         $ip = $this->ipMatcher->clientIpFromRequest($request->getServerParams());
         $this->logger->log('bank.tx_manual_match_purchase_split', $userId ?: null, 'bank_transaction', $txId, [
             'purchase_invoice_ids' => $purchaseInvoiceIds,
@@ -4524,7 +4589,7 @@ final class BankStatementAction
         $this->recordManualMatchV2($txId, $supplierId, $userId);
 
         // Automatizace: zaúčtování úhrady přijaté faktury (321/221).
-        $posting = $this->postingSummary($this->bankPosting->handleTransaction($txId, $userId ?: null));
+        $posting = $this->postAfterMatch($request, $txId, $userId);
 
         $ip = $this->ipMatcher->clientIpFromRequest($request->getServerParams());
         $this->logger->log('bank.tx_manual_match_purchase', $userId ?: null, 'bank_transaction', $txId, [
@@ -4565,6 +4630,8 @@ final class BankStatementAction
 
     private function unmatchWithCurrentSource(Request $request, Response $response, array $args): Response
     {
+        $guard = $this->tokenJournalChangeError($request, $response, (int) ($args['id'] ?? 0), true);
+        if ($guard !== null) return $guard;
         if (!RequestAuthorization::isClientType($request)) return $this->performUnmatch($request, $response, $args);
         if (!RequestAuthorization::allows($request, 'bank.match', AccessLevel::WRITE)) return Json::error($response, 'forbidden', 'Chybí oprávnění pro párování banky.', 403);
         $pdo = $this->db->pdo();

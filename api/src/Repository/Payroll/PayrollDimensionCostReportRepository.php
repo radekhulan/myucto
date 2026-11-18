@@ -95,6 +95,54 @@ final class PayrollDimensionCostReportRepository
     }
 
     /**
+     * Zákonné pojištění odpovědnosti roku po čtvrtletích: součet řetězu závazků
+     * čtvrtletí (předpis a jeho opravy se znaménkem), jak ho firma platí.
+     *
+     * Jde po indexu `(supplier_id, due_on, liability_kind)`: splatnost čtvrtletí
+     * leží v jeho roce, u posledního čtvrtletí na začátku roku následujícího.
+     * Rozsah splatností je záměrně širší, čtvrtletí samo určuje odkaz závazku.
+     *
+     * @return list<array{quarter_end_period:string,signed_minor:int}>
+     */
+    public function accidentInsuranceQuarters(int $supplierId, int $year): array
+    {
+        $statement = $this->db->pdo()->prepare(
+            "SELECT liability.liability_reference,
+                    SUM(CASE liability.direction
+                            WHEN 'outgoing' THEN CAST(liability.amount_minor AS SIGNED)
+                            ELSE -CAST(liability.amount_minor AS SIGNED)
+                        END) AS signed_minor
+               FROM payroll_payment_liabilities liability
+              WHERE liability.supplier_id = ?
+                AND liability.due_on >= ?
+                AND liability.due_on < ?
+                AND liability.liability_kind = 'statutory_insurance'
+                AND liability.liability_reference LIKE ?
+              GROUP BY liability.liability_reference
+              ORDER BY liability.liability_reference"
+        );
+        $statement->execute([
+            $supplierId,
+            sprintf('%04d-01-01', $year),
+            sprintf('%04d-07-01', $year + 1),
+            sprintf('accident-insurance:quarter:%04d-%%', $year),
+        ]);
+
+        $result = [];
+        foreach ($statement->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            if (preg_match('/^accident-insurance:quarter:(\d{4})-(\d{2})$/D', (string) $row['liability_reference'], $match) !== 1) {
+                continue;
+            }
+            $result[] = [
+                'quarter_end_period' => sprintf('%04d-%02d-01', (int) $match[1], (int) $match[2] + 2),
+                'signed_minor' => (int) $row['signed_minor'],
+            ];
+        }
+
+        return $result;
+    }
+
+    /**
      * Má report smysl? Firma má zapnuté firemní dimenze, nebo vede aspoň jednu
      * mzdovou dimenzi (středisko, zakázku, činnost).
      */

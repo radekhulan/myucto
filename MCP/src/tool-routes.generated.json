@@ -35,6 +35,15 @@
       ]
     ]
   },
+  "accounting_period_check_findings": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/accounting/periods/{id}/checks/{id}"
+      ]
+    ]
+  },
   "action_items": {
     "write": false,
     "api": [
@@ -219,6 +228,15 @@
       ]
     ]
   },
+  "asset_purchase_candidates": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/accounting/assets/purchase-candidates"
+      ]
+    ]
+  },
   "automation_checklist": {
     "write": false,
     "api": [
@@ -309,6 +327,28 @@
       ]
     ]
   },
+  "bank_transaction_match_candidates": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/bank-transactions/{id}/match-candidates"
+      ],
+      [
+        "GET",
+        "/api/bank-transactions/{id}/split-suggestions"
+      ]
+    ]
+  },
+  "bank_transaction_posting_preview": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/bank-transactions/{id}/posting-preview"
+      ]
+    ]
+  },
   "cancel_invoice": {
     "write": true,
     "api": [
@@ -386,6 +426,15 @@
       [
         "GET",
         "/api/accounting/accounts"
+      ]
+    ]
+  },
+  "check_client_vat_status": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/clients/{id}/vat-status"
       ]
     ]
   },
@@ -507,6 +556,28 @@
       ]
     ]
   },
+  "create_document_folder": {
+    "write": true,
+    "api": [
+      [
+        "POST",
+        "/api/document-folders"
+      ]
+    ]
+  },
+  "create_document_request": {
+    "write": true,
+    "api": [
+      [
+        "POST",
+        "/api/bank-transactions/{id}/document-request"
+      ],
+      [
+        "POST",
+        "/api/document-requests"
+      ]
+    ]
+  },
   "create_fee_type": {
     "write": true,
     "api": [
@@ -529,6 +600,10 @@
     "write": true,
     "api": [
       [
+        "GET",
+        "/api/invoices/{id}"
+      ],
+      [
         "POST",
         "/api/invoices"
       ]
@@ -540,6 +615,15 @@
       [
         "POST",
         "/api/invoices/{id}/penalty"
+      ]
+    ]
+  },
+  "create_invoice_refund_order": {
+    "write": true,
+    "api": [
+      [
+        "POST",
+        "/api/invoices/{id}/refund-order"
       ]
     ]
   },
@@ -647,6 +731,15 @@
       [
         "GET",
         "/api/codebooks/cnb-rate"
+      ]
+    ]
+  },
+  "create_purchase_invoice_from_bank_transaction": {
+    "write": true,
+    "api": [
+      [
+        "POST",
+        "/api/bank-transactions/{id}/create-purchase-invoice"
       ]
     ]
   },
@@ -1048,6 +1141,15 @@
       ]
     ]
   },
+  "document_link_search": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/documents/link-search"
+      ]
+    ]
+  },
   "download_document": {
     "write": false,
     "api": [
@@ -1115,6 +1217,15 @@
       ]
     ]
   },
+  "find_bank_payments_for_document": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/bank-transactions/payment-candidates"
+      ]
+    ]
+  },
   "general_ledger": {
     "write": false,
     "api": [
@@ -1151,6 +1262,15 @@
       ]
     ]
   },
+  "get_bank_transaction": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/bank-transactions/{id}"
+      ]
+    ]
+  },
   "get_cash_document": {
     "write": false,
     "api": [
@@ -1166,6 +1286,15 @@
       [
         "GET",
         "/api/accounting/cash-registers/{id}"
+      ]
+    ]
+  },
+  "get_cash_register_book": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/accounting/cash-registers/{id}/book"
       ]
     ]
   },
@@ -1214,6 +1343,15 @@
       ]
     ]
   },
+  "get_client_bank_accounts": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/clients/{id}/bank-accounts"
+      ]
+    ]
+  },
   "get_client_dimensions": {
     "write": false,
     "api": [
@@ -1238,12 +1376,36 @@
       [
         "GET",
         "/api/documents/{id}"
+      ],
+      [
+        "GET",
+        "/api/documents/{id}/text"
       ]
     ]
   },
   "get_document_dimensions": {
     "write": false,
     "api": [
+      [
+        "GET",
+        "/api/accounting/dimensions/documents/bank-transactions/{id}"
+      ],
+      [
+        "GET",
+        "/api/accounting/dimensions/documents/cash-documents/{id}"
+      ],
+      [
+        "GET",
+        "/api/accounting/dimensions/documents/invoices/{id}"
+      ],
+      [
+        "GET",
+        "/api/accounting/dimensions/documents/journal-templates/{id}"
+      ],
+      [
+        "GET",
+        "/api/accounting/dimensions/documents/other-items/{id}"
+      ],
       [
         "GET",
         "/api/accounting/dimensions/documents/purchase-invoices/{id}"
@@ -1277,12 +1439,42 @@
       ]
     ]
   },
+  "get_invoice_credit_note_offset": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/invoices/{id}/credit-note-offset"
+      ]
+    ]
+  },
   "get_invoice_isdoc": {
     "write": false,
     "api": [
       [
         "GET",
         "/api/invoices/{id}/isdoc"
+      ]
+    ]
+  },
+  "get_invoice_posting": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/accounting/journal/for-document/invoices/{id}"
+      ],
+      [
+        "GET",
+        "/api/accounting/journal/for-document/purchase-invoices/{id}"
+      ],
+      [
+        "GET",
+        "/api/accounting/journal/posting-preview/invoices/{id}"
+      ],
+      [
+        "GET",
+        "/api/accounting/journal/posting-preview/purchase-invoices/{id}"
       ]
     ]
   },
@@ -1319,6 +1511,31 @@
       [
         "GET",
         "/api/accounting/journal/{id}"
+      ]
+    ]
+  },
+  "get_journal_entry_context": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/accounting/journal/{id}/history"
+      ],
+      [
+        "GET",
+        "/api/accounting/journal/{id}/links"
+      ],
+      [
+        "GET",
+        "/api/accounting/journal/{id}/notes"
+      ],
+      [
+        "GET",
+        "/api/accounting/journal/{id}/related"
+      ],
+      [
+        "GET",
+        "/api/accounting/journal/{id}/source"
       ]
     ]
   },
@@ -1421,9 +1638,26 @@
       ]
     ]
   },
+  "get_payroll_run_results": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/payroll/runs/{id}"
+      ],
+      [
+        "GET",
+        "/api/payroll/runs/{id}/people"
+      ]
+    ]
+  },
   "get_payroll_salary_result": {
     "write": false,
     "api": [
+      [
+        "GET",
+        "/api/payroll/revisions/{id}/net-results/{id}"
+      ],
       [
         "GET",
         "/api/payroll/runs"
@@ -1632,6 +1866,15 @@
       ]
     ]
   },
+  "get_purchase_credit_note_offset": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/purchase-invoices/{id}/credit-note-offset"
+      ]
+    ]
+  },
   "get_purchase_invoice": {
     "write": false,
     "api": [
@@ -1704,12 +1947,38 @@
       ]
     ]
   },
+  "get_tax_constants": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/codebooks/tax-constants"
+      ]
+    ]
+  },
   "get_tax_return": {
     "write": false,
     "api": [
       [
         "GET",
         "/api/tax-return/fo/{id}"
+      ],
+      [
+        "GET",
+        "/api/tax-return/po/{id}"
+      ]
+    ]
+  },
+  "get_tax_submission": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/reports/submissions/{id}"
+      ],
+      [
+        "GET",
+        "/api/reports/submissions/{id}/payment"
       ]
     ]
   },
@@ -1897,12 +2166,51 @@
       ]
     ]
   },
+  "list_bank_posting_queue": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/accounting/bank-posting-suggestions"
+      ],
+      [
+        "GET",
+        "/api/accounting/bank-posting-suggestions/count"
+      ],
+      [
+        "GET",
+        "/api/accounting/bank-posting-unposted"
+      ],
+      [
+        "GET",
+        "/api/accounting/bank-posting-unposted/count"
+      ]
+    ]
+  },
   "list_bank_statements": {
     "write": false,
     "api": [
       [
         "GET",
         "/api/bank-statements"
+      ]
+    ]
+  },
+  "list_bank_transactions": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/bank-transactions"
+      ]
+    ]
+  },
+  "list_branding_profiles": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/branding-profiles"
       ]
     ]
   },
@@ -1930,6 +2238,33 @@
       [
         "GET",
         "/api/eshop/categories"
+      ]
+    ]
+  },
+  "list_client_duplicates": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/clients/duplicates"
+      ]
+    ]
+  },
+  "list_client_projects": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/clients/{id}/projects"
+      ]
+    ]
+  },
+  "list_countries": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/codebooks/countries"
       ]
     ]
   },
@@ -1969,12 +2304,52 @@
       ]
     ]
   },
+  "list_document_files": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/documents/{id}/files"
+      ]
+    ]
+  },
+  "list_document_folders": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/document-folders"
+      ]
+    ]
+  },
+  "list_document_journal_entries": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/accounting/journal/for-document/invoices/{id}"
+      ],
+      [
+        "GET",
+        "/api/accounting/journal/for-document/purchase-invoices/{id}"
+      ]
+    ]
+  },
   "list_document_requests": {
     "write": false,
     "api": [
       [
         "GET",
         "/api/document-requests"
+      ]
+    ]
+  },
+  "list_document_tags": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/documents/tags"
       ]
     ]
   },
@@ -1993,6 +2368,18 @@
       [
         "GET",
         "/api/documents/by-entity/client/{id}"
+      ],
+      [
+        "GET",
+        "/api/documents/by-entity/invoice/{id}"
+      ],
+      [
+        "GET",
+        "/api/documents/by-entity/project/{id}"
+      ],
+      [
+        "GET",
+        "/api/documents/by-entity/{value}/{id}"
       ]
     ]
   },
@@ -2011,6 +2398,15 @@
       [
         "GET",
         "/api/expense-categories"
+      ]
+    ]
+  },
+  "list_expense_rules": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/accounting/expense-rules"
       ]
     ]
   },
@@ -2047,6 +2443,15 @@
       [
         "GET",
         "/api/invoices/{id}/attachments"
+      ]
+    ]
+  },
+  "list_invoice_number_series": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/invoices/number-series"
       ]
     ]
   },
@@ -2152,6 +2557,15 @@
       ]
     ]
   },
+  "list_manual_posting_queue": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/accounting/manual-posting-queue"
+      ]
+    ]
+  },
   "list_manufacturers": {
     "write": false,
     "api": [
@@ -2203,6 +2617,19 @@
       [
         "GET",
         "/api/accounting/catalog/nonprofit-membership/roles"
+      ]
+    ]
+  },
+  "list_open_items": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/accounting/open-items/{id}"
+      ],
+      [
+        "GET",
+        "/api/accounting/open-items/{id}/suggestions"
       ]
     ]
   },
@@ -2302,6 +2729,15 @@
       [
         "GET",
         "/api/payroll/runs"
+      ]
+    ]
+  },
+  "list_posting_rules": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/accounting/posting-rules"
       ]
     ]
   },
@@ -2437,6 +2873,14 @@
       [
         "GET",
         "/api/property/catalog/houses"
+      ],
+      [
+        "GET",
+        "/api/property/catalog/services"
+      ],
+      [
+        "GET",
+        "/api/property/catalog/units"
       ]
     ]
   },
@@ -2494,6 +2938,15 @@
       ]
     ]
   },
+  "list_purchase_number_series": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/purchase-invoices/number-series"
+      ]
+    ]
+  },
   "list_purchase_payment_candidates": {
     "write": false,
     "api": [
@@ -2530,6 +2983,15 @@
       ]
     ]
   },
+  "list_revenue_categories": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/revenue-categories"
+      ]
+    ]
+  },
   "list_sales_currencies": {
     "write": false,
     "api": [
@@ -2545,6 +3007,19 @@
       [
         "GET",
         "/api/stock/sales-orders"
+      ]
+    ]
+  },
+  "list_small_assets": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/accounting/small-assets"
+      ],
+      [
+        "GET",
+        "/api/accounting/small-assets/{id}"
       ]
     ]
   },
@@ -2590,6 +3065,10 @@
       [
         "GET",
         "/api/tax-return/fo/{id}/advances"
+      ],
+      [
+        "GET",
+        "/api/tax-return/po/{id}/advances"
       ]
     ]
   },
@@ -2608,6 +3087,19 @@
       [
         "GET",
         "/api/invoices"
+      ]
+    ]
+  },
+  "list_vat_classifications": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/vat-classifications"
+      ],
+      [
+        "GET",
+        "/api/vat-classifications/lines"
       ]
     ]
   },
@@ -2674,6 +3166,24 @@
       ]
     ]
   },
+  "match_bank_transaction": {
+    "write": true,
+    "api": [
+      [
+        "POST",
+        "/api/bank-transactions/{id}/match"
+      ]
+    ]
+  },
+  "monthly_report_preview": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/accounting/reports/monthly-report/preview"
+      ]
+    ]
+  },
   "move_category": {
     "write": true,
     "api": [
@@ -2706,7 +3216,32 @@
     "api": [
       [
         "GET",
+        "/api/accounting/nonprofit-tax-assessments/{id}/coverage"
+      ],
+      [
+        "GET",
+        "/api/accounting/nonprofit-tax-assessments/{id}/decision"
+      ],
+      [
+        "GET",
+        "/api/accounting/nonprofit-tax-assessments/{id}/result"
+      ],
+      [
+        "GET",
         "/api/accounting/nonprofit-tax-assessments/{id}/source"
+      ],
+      [
+        "GET",
+        "/api/accounting/nonprofit-tax-assessments/{id}/usage"
+      ]
+    ]
+  },
+  "open_items_listing": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/accounting/reports/open-items-list"
       ]
     ]
   },
@@ -2791,12 +3326,30 @@
       ]
     ]
   },
+  "prefill_invoice_refund_order": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/invoices/{id}/refund-order/prefill"
+      ]
+    ]
+  },
   "preview_invoice_penalty": {
     "write": false,
     "api": [
       [
         "GET",
         "/api/invoices/{id}/penalty/preview"
+      ]
+    ]
+  },
+  "preview_work_report_billing": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/invoices/{id}/work-report/billing-preview"
       ]
     ]
   },
@@ -3168,6 +3721,19 @@
       ]
     ]
   },
+  "resolve_bank_match_suggestion": {
+    "write": true,
+    "api": [
+      [
+        "POST",
+        "/api/bank-match-suggestions/{id}/accept"
+      ],
+      [
+        "POST",
+        "/api/bank-match-suggestions/{id}/reject"
+      ]
+    ]
+  },
   "resolve_price_list_item": {
     "write": false,
     "api": [
@@ -3406,6 +3972,19 @@
       ]
     ]
   },
+  "set_bank_transaction_ignored": {
+    "write": true,
+    "api": [
+      [
+        "POST",
+        "/api/bank-transactions/{id}/ignore"
+      ],
+      [
+        "POST",
+        "/api/bank-transactions/{id}/unignore"
+      ]
+    ]
+  },
   "set_category_i18n": {
     "write": true,
     "api": [
@@ -3415,12 +3994,81 @@
       ]
     ]
   },
+  "set_client_archived": {
+    "write": true,
+    "api": [
+      [
+        "POST",
+        "/api/clients/{id}/archive"
+      ],
+      [
+        "POST",
+        "/api/clients/{id}/unarchive"
+      ]
+    ]
+  },
+  "set_document_request_status": {
+    "write": true,
+    "api": [
+      [
+        "POST",
+        "/api/document-requests/{id}/reopen"
+      ],
+      [
+        "POST",
+        "/api/document-requests/{id}/resolve"
+      ]
+    ]
+  },
+  "set_invoice_credit_note_offset": {
+    "write": true,
+    "api": [
+      [
+        "DELETE",
+        "/api/invoices/{id}/credit-note-offset"
+      ],
+      [
+        "POST",
+        "/api/invoices/{id}/credit-note-offset"
+      ]
+    ]
+  },
+  "set_invoice_dimensions": {
+    "write": true,
+    "api": [
+      [
+        "GET",
+        "/api/accounting/dimensions/documents/invoices/{id}"
+      ],
+      [
+        "GET",
+        "/api/invoices/{id}"
+      ],
+      [
+        "PUT",
+        "/api/accounting/dimensions/documents/invoices/{id}"
+      ]
+    ]
+  },
   "set_invoice_payment_schedule": {
     "write": true,
     "api": [
       [
         "GET",
         "/api/invoices/{id}"
+      ],
+      [
+        "PUT",
+        "/api/invoices/{id}"
+      ]
+    ]
+  },
+  "set_invoice_project": {
+    "write": true,
+    "api": [
+      [
+        "POST",
+        "/api/invoices/{id}/project"
       ]
     ]
   },
@@ -3477,6 +4125,36 @@
       ]
     ]
   },
+  "set_purchase_credit_note_offset": {
+    "write": true,
+    "api": [
+      [
+        "DELETE",
+        "/api/purchase-invoices/{id}/credit-note-offset"
+      ],
+      [
+        "POST",
+        "/api/purchase-invoices/{id}/credit-note-offset"
+      ]
+    ]
+  },
+  "set_purchase_invoice_dimensions": {
+    "write": true,
+    "api": [
+      [
+        "GET",
+        "/api/accounting/dimensions/documents/purchase-invoices/{id}"
+      ],
+      [
+        "GET",
+        "/api/purchase-invoices/{id}"
+      ],
+      [
+        "PUT",
+        "/api/accounting/dimensions/documents/purchase-invoices/{id}"
+      ]
+    ]
+  },
   "set_purchase_invoice_document_kind": {
     "write": true,
     "api": [
@@ -3496,6 +4174,10 @@
       [
         "GET",
         "/api/purchase-invoices/{id}"
+      ],
+      [
+        "POST",
+        "/api/purchase-invoices/{id}/exchange-rate"
       ]
     ]
   },
@@ -3505,6 +4187,10 @@
       [
         "GET",
         "/api/purchase-invoices/{id}"
+      ],
+      [
+        "PUT",
+        "/api/purchase-invoices/{id}/expense-kinds"
       ]
     ]
   },
@@ -3530,12 +4216,38 @@
       ]
     ]
   },
+  "set_purchase_invoice_vat_treatment": {
+    "write": true,
+    "api": [
+      [
+        "GET",
+        "/api/purchase-invoices/{id}"
+      ],
+      [
+        "POST",
+        "/api/purchase-invoices/{id}/vat-treatment"
+      ]
+    ]
+  },
   "set_stock_take_counts": {
     "write": true,
     "api": [
       [
         "PUT",
         "/api/stock/takes/{id}"
+      ]
+    ]
+  },
+  "small_assets_report": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/accounting/reports/small-assets/inventory"
+      ],
+      [
+        "GET",
+        "/api/accounting/reports/small-assets/movements"
       ]
     ]
   },
@@ -3629,6 +4341,19 @@
       ]
     ]
   },
+  "tax_advance_overrides": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/tax-return/fo/{id}/advances/overrides"
+      ],
+      [
+        "GET",
+        "/api/tax-return/po/{id}/advances/overrides"
+      ]
+    ]
+  },
   "tax_calendar": {
     "write": false,
     "api": [
@@ -3656,6 +4381,15 @@
       ]
     ]
   },
+  "tax_evidence_tax_estimate": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/tax-evidence/tax-estimate"
+      ]
+    ]
+  },
   "tax_evidence_transition_report": {
     "write": false,
     "api": [
@@ -3671,6 +4405,10 @@
       [
         "GET",
         "/api/tax-return/fo/{id}/prefinalize-check"
+      ],
+      [
+        "GET",
+        "/api/tax-return/po/{id}/prefinalize-check"
       ]
     ]
   },
@@ -3689,6 +4427,10 @@
       [
         "GET",
         "/api/tax-return/fo/{id}/xml/preview"
+      ],
+      [
+        "GET",
+        "/api/tax-return/po/{id}/xml/preview"
       ]
     ]
   },
@@ -3707,6 +4449,19 @@
       [
         "GET",
         "/api/crm/top-vendors"
+      ]
+    ]
+  },
+  "transfer_work_report_billing": {
+    "write": true,
+    "api": [
+      [
+        "GET",
+        "/api/invoices/{id}/work-report/billing-preview"
+      ],
+      [
+        "POST",
+        "/api/invoices/{id}/work-report/billing-transfer"
       ]
     ]
   },
@@ -3784,6 +4539,19 @@
       ]
     ]
   },
+  "unmatch_bank_transaction": {
+    "write": true,
+    "api": [
+      [
+        "GET",
+        "/api/bank-transactions/{id}"
+      ],
+      [
+        "POST",
+        "/api/bank-transactions/{id}/unmatch"
+      ]
+    ]
+  },
   "upcoming_tax_advances": {
     "write": false,
     "api": [
@@ -3843,6 +4611,10 @@
       [
         "PATCH",
         "/api/documents/{id}"
+      ],
+      [
+        "POST",
+        "/api/documents/{id}/move"
       ]
     ]
   },
@@ -4074,6 +4846,15 @@
       ]
     ]
   },
+  "vat_clearing_status": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/accounting/vat-clearing"
+      ]
+    ]
+  },
   "vat_control_statement_preview": {
     "write": false,
     "api": [
@@ -4092,12 +4873,45 @@
       ]
     ]
   },
+  "vat_filing_checks": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/reports/dphdp3/post-filing-changes"
+      ],
+      [
+        "GET",
+        "/api/reports/dphdp3/settings"
+      ],
+      [
+        "GET",
+        "/api/reports/related-parties"
+      ],
+      [
+        "GET",
+        "/api/reports/s46/candidates"
+      ],
+      [
+        "GET",
+        "/api/reports/s74b/preview"
+      ],
+      [
+        "GET",
+        "/api/reports/vat-coefficient"
+      ]
+    ]
+  },
   "vat_ledger": {
     "write": false,
     "api": [
       [
         "GET",
         "/api/reports/dph-book/preview"
+      ],
+      [
+        "GET",
+        "/api/reports/kh-evidence/preview"
       ]
     ]
   },

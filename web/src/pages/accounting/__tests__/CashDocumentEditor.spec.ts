@@ -756,6 +756,84 @@ describe('CashDocumentEditor: partner u úhrady faktury', () => {
   })
 })
 
+// ── #39: cizoměnový doklad hrazený korunami z korunové pokladny ─────────────────
+describe('CashDocumentEditor: korunová úhrada cizoměnového dokladu', () => {
+  const eurPurchase = {
+    id: 7, kind: 'purchase_invoice', number: 'PF-EUR-1', partner_name: 'Dodavatel GmbH', partner_ic: null, partner_dic: null,
+    total: 1000, paid: 0, remaining: 1000, currency_code: 'EUR', issued_on: '2093-01-01', document_kind: 'invoice',
+    exchange_rate: 24, remaining_czk: 24000, czk_tolerance: 960,
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    for (const key of Object.keys(m.routeParams)) delete m.routeParams[key]
+    m.listRegisters.mockResolvedValue([register()])
+    m.listRulePresets.mockResolvedValue([])
+    m.listAccounts.mockResolvedValue([])
+    m.listPostingRules.mockResolvedValue({})
+    m.taxList.mockResolvedValue([taxYear(new Date().getFullYear(), 10000)])
+    m.clientsList.mockResolvedValue({ data: [] })
+    m.createDocument.mockResolvedValue({ id: 1, doc_number: 'VPD-1', journal_entry_id: 1, status: 'posted', warnings: [] })
+  })
+
+  it('předvyplní koruny podle kurzu dokladu, nechá je upravit a ukáže kurzovou ztrátu v náhledu', async () => {
+    const wrapper = await mountEditor()
+    const vm = wrapper.vm as any
+    vm.form.doc_type = 'out'
+    vm.form.purpose = 'purchase_payment'
+    await flushPromises()
+
+    vm.pickUnpaid(eurPurchase)
+    await flushPromises()
+    expect(vm.form.total_amount).toBe(24000)
+    expect(vm.amountReadonly).toBe(false)
+    expect(wrapper.find('[data-test="cash-fx-settlement"]').exists()).toBe(true)
+
+    vm.form.total_amount = 24500
+    await flushPromises()
+    expect(wrapper.find('[data-test="cash-fx-difference"]').text()).toContain('cash.form.fx_settlement_loss')
+    expect(vm.previewLines).toEqual([
+      { account_code: '321', side: 'debit', amount: 24000 },
+      { account_code: '211.100', side: 'credit', amount: 24500 },
+      { account_code: '563', side: 'debit', amount: 500 },
+    ])
+
+    await vm.save(true)
+    expect(m.createDocument).toHaveBeenCalledWith(expect.objectContaining({
+      purchase_invoice_id: 7, total_amount: 24500, amount_foreign: null,
+    }))
+  })
+
+  it('korunová částka mimo toleranci se u přijatého dokladu ohlásí', async () => {
+    const wrapper = await mountEditor()
+    const vm = wrapper.vm as any
+    vm.form.doc_type = 'out'
+    vm.form.purpose = 'purchase_payment'
+    await flushPromises()
+    vm.pickUnpaid(eurPurchase)
+    vm.form.total_amount = 12000
+    await flushPromises()
+
+    expect(wrapper.find('[data-test="cash-fx-out-of-tolerance"]').exists()).toBe(true)
+  })
+
+  it('kurzový zisk u vydané faktury jde na 663', async () => {
+    const wrapper = await mountEditor()
+    const vm = wrapper.vm as any
+    vm.form.purpose = 'invoice_payment'
+    await flushPromises()
+    vm.pickUnpaid({ ...eurPurchase, kind: 'invoice', document_kind: undefined, invoice_type: 'invoice' })
+    vm.form.total_amount = 24500
+    await flushPromises()
+
+    expect(vm.previewLines).toEqual([
+      { account_code: '211.100', side: 'debit', amount: 24500 },
+      { account_code: '311', side: 'credit', amount: 24000 },
+      { account_code: '663', side: 'credit', amount: 500 },
+    ])
+  })
+})
+
 // ── #21: našeptávač partnera hledá na serveru a doplní IČO/DIČ ───────────────
 describe('CashDocumentEditor — našeptávač partnera', () => {
   function client(id: number, company_name: string, ic: string | null, dic: string | null) {

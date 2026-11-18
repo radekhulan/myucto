@@ -243,8 +243,6 @@ final class ApiScopeMiddlewareTest extends TestCase
             ['POST', '/api/invoices/12/rebuild-snapshots'],
             ['POST', '/api/bank-transactions/34/post'],
             ['POST', '/api/bank-transactions/34/unpost'],
-            // Zrušení párování zaúčtovaného pohybu stornuje zápis stejně jako unpost.
-            ['POST', '/api/bank-transactions/34/unmatch'],
             ['POST', '/api/reports/s74b/record'],
             ['POST', '/api/reports/s46/correction'],
             ['PUT',  '/api/tax/profile'],
@@ -258,6 +256,24 @@ final class ApiScopeMiddlewareTest extends TestCase
             );
             self::assertSame(403, $r->getStatusCode(), "$method $path musí být odmítnuto");
             self::assertSame('token_write_forbidden', $this->errorCode($r), "$method $path");
+        }
+    }
+
+    /**
+     * Párování banky token smí, včetně zrušení párování. Deník hlídá akce: po spárování
+     * tokenem nic nezaúčtuje a pohyb se zápisem v deníku tokenu neodpáruje
+     * (BankMatchTokenPostingTest). Zaúčtování a jeho zrušení zůstávají zavřené výš.
+     */
+    public function testBearerReadWriteCanMatchAndUnmatchBankTransactions(): void
+    {
+        foreach ([
+            ['POST', '/api/bank-transactions/34/match'],
+            ['POST', '/api/bank-transactions/34/match-document'],
+            ['POST', '/api/bank-transactions/34/unmatch'],
+            ['POST', '/api/bank-match-suggestions/5/accept'],
+        ] as [$method, $path]) {
+            $r = $this->middleware()->process($this->bearer($method, $path, 'read_write'), $this->okHandler());
+            self::assertSame(204, $r->getStatusCode(), "bearer $method $path musí projít");
         }
     }
 
@@ -318,17 +334,23 @@ final class ApiScopeMiddlewareTest extends TestCase
         }
     }
 
-    /** Dimenze smí token zapsat jen ke konceptu ostatní položky; jiné doklady a náhled ne. */
-    public function testBearerReadWriteCanTagOnlyOtherItemDimensions(): void
+    /**
+     * Dimenze smí token zapsat jen ke konceptu ostatní položky a faktury (stav ověřuje
+     * DimensionAction); jiné doklady a náhled ne.
+     */
+    public function testBearerReadWriteCanTagOnlyDraftDocumentDimensions(): void
     {
-        $ok = $this->middleware()->process(
-            $this->bearer('PUT', '/api/accounting/dimensions/documents/other-items/12', 'read_write'),
-            $this->okHandler(),
-        );
-        self::assertSame(204, $ok->getStatusCode());
+        foreach (['other-items', 'invoices', 'purchase-invoices'] as $doc) {
+            $ok = $this->middleware()->process(
+                $this->bearer('PUT', "/api/accounting/dimensions/documents/$doc/12", 'read_write'),
+                $this->okHandler(),
+            );
+            self::assertSame(204, $ok->getStatusCode(), $doc);
+        }
 
         foreach ([
-            ['PUT', '/api/accounting/dimensions/documents/purchase-invoices/12'],
+            ['PUT', '/api/accounting/dimensions/documents/cash-documents/12'],
+            ['POST', '/api/accounting/dimensions/documents/invoices/12/preview'],
             ['PUT', '/api/accounting/dimensions/documents/assets/12'],
             ['POST', '/api/accounting/dimensions/documents/other-items/12/preview'],
             ['PUT', '/api/accounting/dimensions/journal/12'],
@@ -868,6 +890,10 @@ final class ApiScopeMiddlewareTest extends TestCase
             ['GET', '/api/property/charges/issues/context'],
             ['POST', '/api/accounting/payroll/post'],
             ['POST', '/api/purchase-invoices/renumber'],
+            ['GET', '/api/accounting/cash-documents/renumber'],
+            ['POST', '/api/accounting/cash-documents/renumber'],
+            ['GET', '/api/accounting/other-items/renumber'],
+            ['POST', '/api/accounting/internal-documents/renumber'],
         ] as [$method, $path]) {
             $denied = $this->middleware()->process($this->bearer($method, $path, 'read_write'), $this->okHandler());
             self::assertSame(403, $denied->getStatusCode(), $path);

@@ -6,19 +6,22 @@ const m = vi.hoisted(() => ({
   allocations: vi.fn(),
   paymentCandidates: vi.fn(),
   updateCounterpartyAccount: vi.fn(),
+  updateText: vi.fn(),
+  removePosted: vi.fn(),
+  mode: 'tax_evidence',
 }))
 
 vi.mock('@/api/otherItems', () => ({
   otherItemsApi: { get: m.get, allocations: m.allocations, paymentCandidates: m.paymentCandidates,
-    updateCounterpartyAccount: m.updateCounterpartyAccount },
+    updateCounterpartyAccount: m.updateCounterpartyAccount, updateText: m.updateText, removePosted: m.removePosted },
 }))
-vi.mock('@/api/accounting', () => ({ accountingApi: { listAccounts: vi.fn() } }))
+vi.mock('@/api/accounting', () => ({ accountingApi: { listAccounts: vi.fn().mockResolvedValue([]) } }))
 vi.mock('@/api/otherItemSettings', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/api/otherItemSettings')>()),
   otherItemSettingsApi: { get: vi.fn().mockResolvedValue({ document_folder: 'Smlouvy/{YYYY}', document_folder_default: 'Ostatní pohledávky a závazky/{YYYY}/{MM}', is_default: false }), update: vi.fn() },
 }))
 vi.mock('@/stores/auth', () => ({ useAuthStore: () => ({ canWrite: () => true, canRead: () => true }) }))
-vi.mock('@/stores/supplier', () => ({ useSupplierStore: () => ({ currentSupplier: { accounting_mode: 'tax_evidence' } }) }))
+vi.mock('@/stores/supplier', () => ({ useSupplierStore: () => ({ currentSupplier: { accounting_mode: m.mode } }) }))
 vi.mock('@/composables/useToast', () => ({ useToast: () => ({ error: vi.fn(), success: vi.fn() }) }))
 vi.mock('@/composables/useFormat', () => ({ formatDate: (v: string) => v, formatMoney: (v: number) => `${v} Kč` }))
 vi.mock('vue-router', () => ({
@@ -31,10 +34,12 @@ vi.mock('vue-i18n', () => ({
 }))
 
 import OtherItemDetail from '../OtherItemDetail.vue'
+import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
 
 describe('OtherItemDetail', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    m.mode = 'tax_evidence'
     m.get.mockResolvedValue({
       id: 9, side: 'payable', kind: 'loan', title: 'Syntetický úvěr', partner_name: null, issued_on: '2099-01-01',
       due_on: '2099-03-10', currency: 'CZK', amount: 3000, paid_amount: 0, remaining_amount: 3000, status: 'confirmed',
@@ -115,5 +120,45 @@ describe('OtherItemDetail', () => {
     expect(wrapper.get('[data-test="allocation-split"]').text())
       .toBe('other_items.allocation_split:{"principal":"1000 Kč","interest":"100 Kč","fee":"20 Kč"}')
     expect(wrapper.text()).toContain('1120 Kč')
+  })
+
+  it('doplní poznámku potvrzeného dokladu bez úpravy konceptu', async () => {
+    m.updateText.mockResolvedValue({ id: 9, side: 'payable', kind: 'loan', title: 'Syntetický úvěr', partner_name: null,
+      issued_on: '2099-01-01', due_on: '2099-03-10', currency: 'CZK', amount: 3000, paid_amount: 0, remaining_amount: 3000,
+      status: 'confirmed', note: 'Doplněno' })
+    const wrapper = shallowMount(OtherItemDetail)
+    await flushPromises()
+    await wrapper.get('[data-test="note-edit"]').trigger('click')
+    await wrapper.get('[data-test="note-form"] textarea').setValue('  Doplněno ')
+    await wrapper.get('[data-test="note-form"]').trigger('submit')
+    await flushPromises()
+    expect(m.updateText).toHaveBeenCalledWith(9, 'Doplněno')
+  })
+
+  it('smazání zaúčtovaného dokladu nabídne jen s povolením serveru, jinak s důvodem', async () => {
+    m.mode = 'double_entry'
+    const posted = { id: 9, side: 'payable', kind: 'loan', title: 'Syntetický úvěr', partner_name: null, issued_on: '2099-01-01',
+      due_on: '2099-03-10', currency: 'CZK', amount: 3000, paid_amount: 0, remaining_amount: 3000, status: 'posted',
+      journal_entry_id: 55, document_no: 'OZ-2099-0001' }
+    m.get.mockResolvedValue({ ...posted, posted_deletion: { allowed: false, needs_ack: false, code: 'period_not_open', message: 'Uzavřené období.' } })
+    let wrapper = shallowMount(OtherItemDetail)
+    await flushPromises()
+    let action = (wrapper.findComponent(ActionBar).props('actions') as ActionItem[]).find(a => a.key === 'delete_posted')!
+    expect(action.show).toBe(true)
+    expect(action.disabled).toBe(true)
+    expect(action.disabledReason).toBe('other_items.delete_posted_blocked:{"reason":"Uzavřené období."}')
+    expect((wrapper.findComponent(ActionBar).props('actions') as ActionItem[]).find(a => a.key === 'reverse')!.show).toBe(true)
+
+    m.get.mockResolvedValue({ ...posted, posted_deletion: { allowed: true, needs_ack: false, code: null, message: null } })
+    m.removePosted.mockResolvedValue({ deleted: true, journal_entry_id: 55, status: 'deleted' })
+    wrapper = shallowMount(OtherItemDetail, { global: { stubs: { Modal: { template: '<div><slot /><slot name="footer" /></div>' } } } })
+    await flushPromises()
+    action = (wrapper.findComponent(ActionBar).props('actions') as ActionItem[]).find(a => a.key === 'delete_posted')!
+    expect(action.disabled).toBe(false)
+    action.run!()
+    await flushPromises()
+    await wrapper.get('[data-test="delete-posted-confirm"]').trigger('click')
+    await flushPromises()
+    expect(m.removePosted).toHaveBeenCalledWith(9, false)
   })
 })

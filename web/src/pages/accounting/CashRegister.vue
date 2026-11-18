@@ -384,6 +384,11 @@ const headerActions = computed<ActionItem[]>(() => {
       key: 'registers', tier: 'overflow', variant: 'neutral', icon: 'edit',
       label: t('cash.registers_manage'), show: canManageRegisters.value, run: () => { managerOpen.value = true },
     },
+    {
+      key: 'renumber', tier: 'overflow', variant: 'warning', icon: 'cycle',
+      label: t('common.renumber_by_date'), show: canWrite && !auth.isClientRole,
+      to: { path: '/purchase-invoices/renumber', query: { agenda: 'cash' } },
+    },
   ]
 })
 

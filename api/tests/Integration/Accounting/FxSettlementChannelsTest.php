@@ -54,10 +54,12 @@ final class FxSettlementChannelsTest extends TestCase
     public static function channels(): iterable
     {
         foreach (['invoice','purchase_invoice'] as $type) {
-            foreach ($type === 'invoice' ? ['bank'] : ['bank','settlement'] as $channel) {
+            foreach ($type === 'invoice' ? ['bank','cash'] : ['bank','settlement'] as $channel) {
                 foreach ([500,1000] as $amount) yield $type.'_'.$channel.'_'.$amount => [$type,$channel,$amount];
             }
         }
+        // Přijatý doklad hradí korunová pokladna jen celý (jako banka korunovou platbou).
+        yield 'purchase_invoice_cash_1000' => ['purchase_invoice','cash',1000];
         foreach ([500,1000] as $amount) yield 'invoice_manual_'.$amount => ['invoice','manual',$amount];
     }
 
@@ -211,8 +213,7 @@ final class FxSettlementChannelsTest extends TestCase
         self::assertSame((float)(1000-$amount),$preview['totals'][$type==='invoice'?'gain':'loss']);
     }
 
-    #[\PHPUnit\Framework\Attributes\TestWith(['invoice','cash','foreign_currency_invoice'])]
-    #[\PHPUnit\Framework\Attributes\TestWith(['purchase_invoice','cash','foreign_currency_invoice'])]
+    #[\PHPUnit\Framework\Attributes\TestWith(['purchase_invoice','cash','fx_amount_out_of_tolerance'])]
     #[\PHPUnit\Framework\Attributes\TestWith(['invoice','settlement','foreign_currency'])]
     public function testNativeUnsupportedChannelFailsExplicitly(string $type,string $channel,string $code): void
     {
@@ -827,7 +828,8 @@ final class FxSettlementChannelsTest extends TestCase
             $register=$c->get(\MyInvoice\Repository\CashRegisterRepository::class)->create($this->sid,['name'=>'Synthetic CZK','currency_code'=>'CZK','account_code'=>'211']);
             $c->get(\MyInvoice\Service\Accounting\Cash\CashDocumentService::class)->create($this->sid,[
                 'register_id'=>$register,'purpose'=>$type==='invoice'?'invoice_payment':'purchase_payment','doc_type'=>$type==='invoice'?'in':'out',
-                'issue_date'=>'2098-09-15','description'=>'Synthetic payment','vat_mode'=>'none','total_amount'=>$amount,'fx_rate'=>24,
+                // Korunová pokladna platí koruny: částka v měně dokladu × kurz dokladu.
+                'issue_date'=>'2098-09-15','description'=>'Synthetic payment','vat_mode'=>'none','total_amount'=>$amount*24,
                 $type==='invoice'?'invoice_id':'purchase_invoice_id'=>$id,
             ],$this->user);
         } else {

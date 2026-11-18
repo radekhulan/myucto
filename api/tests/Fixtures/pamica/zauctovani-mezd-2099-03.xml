@@ -1,0 +1,323 @@
+<?xml version="1.0" encoding="Windows-1250"?>
+<dat:dataPack version="2.0" id="00042" ico="87654321" application="PAMICA" note="" xmlns:dat="http://www.stormware.cz/schema/version_2/data.xsd" xmlns:inv="http://www.stormware.cz/schema/version_2/invoice.xsd" xmlns:int="http://www.stormware.cz/schema/version_2/intDoc.xsd" xmlns:typ="http://www.stormware.cz/schema/version_2/type.xsd">
+<dat:dataPackItem version="2.0" id="001">
+	<int:intDoc version="2.0">
+		<int:intDocHeader>
+			<int:symPar>MZ209903</int:symPar>
+			<int:date>2099-04-15</int:date>
+			<int:dateTax>2099-04-15</int:dateTax>
+			<int:dateAccounting>2099-03-31</int:dateAccounting>
+			<int:accounting>
+				<typ:ids>521000/331000</typ:ids>
+			</int:accounting>
+			<int:classificationVAT>
+				<typ:classificationVATType>nonSubsume</typ:classificationVATType>
+			</int:classificationVAT>
+			<int:text>Mzdy 2099/03, zaúčtování mzdových nákladů - hrubá mzda</int:text>
+			<int:partnerIdentity>
+				<typ:address/>
+			</int:partnerIdentity>
+		</int:intDocHeader>
+		<int:intDocDetail>
+			<int:intDocItem>
+				<int:text>Hrubá mzda zaměstnanců</int:text>
+				<int:quantity>1</int:quantity>
+				<int:rateVAT>none</int:rateVAT>
+				<int:homeCurrency>
+					<typ:unitPrice>30000</typ:unitPrice>
+				</int:homeCurrency>
+				<int:note>(zaměstnanci)</int:note>
+				<int:accounting>
+					<typ:ids>521000/331000</typ:ids>
+				</int:accounting>
+			</int:intDocItem>
+		</int:intDocDetail>
+	</int:intDoc>
+</dat:dataPackItem>
+<dat:dataPackItem version="2.0" id="002">
+	<inv:invoice version="2.0">
+		<inv:invoiceHeader>
+			<inv:invoiceType>commitment</inv:invoiceType>
+			<inv:symVar>87654321</inv:symVar>
+			<inv:symPar>MZ209903</inv:symPar>
+			<inv:date>2099-04-15</inv:date>
+			<inv:dateTax>2099-04-15</inv:dateTax>
+			<inv:dateAccounting>2099-03-31</inv:dateAccounting>
+			<inv:dateDue>2099-04-20</inv:dateDue>
+			<inv:accounting>
+				<typ:ids>331000/342000</typ:ids>
+			</inv:accounting>
+			<inv:classificationVAT>
+				<typ:classificationVATType>nonSubsume</typ:classificationVATType>
+			</inv:classificationVAT>
+			<inv:text>Mzdy 2099/03, daň z příjmů, zálohová</inv:text>
+			<inv:partnerIdentity>
+				<typ:address>
+					<typ:company>Finanční úřad pro Testovací kraj</typ:company>
+					<typ:city>Testov</typ:city>
+				</typ:address>
+			</inv:partnerIdentity>
+			<inv:paymentType>
+				<typ:paymentType>draft</typ:paymentType>
+			</inv:paymentType>
+			<inv:symConst>1148</inv:symConst>
+			<inv:paymentAccount>
+				<typ:accountNo>3000000004</typ:accountNo>
+				<typ:bankCode>0710</typ:bankCode>
+			</inv:paymentAccount>
+		</inv:invoiceHeader>
+		<inv:invoiceDetail>
+			<inv:invoiceItem>
+				<inv:text>Mzdy 2099/03, daň z příjmů, zálohová</inv:text>
+				<inv:quantity>1</inv:quantity>
+				<inv:rateVAT>none</inv:rateVAT>
+				<inv:homeCurrency>
+					<typ:unitPrice>3000</typ:unitPrice>
+				</inv:homeCurrency>
+				<inv:note>(zaměstnanci)</inv:note>
+				<inv:accounting>
+					<typ:ids>331000/342000</typ:ids>
+				</inv:accounting>
+			</inv:invoiceItem>
+		</inv:invoiceDetail>
+	</inv:invoice>
+</dat:dataPackItem>
+<dat:dataPackItem version="2.0" id="003">
+	<inv:invoice version="2.0">
+		<inv:invoiceHeader>
+			<inv:invoiceType>commitment</inv:invoiceType>
+			<inv:symVar>1234567890</inv:symVar>
+			<inv:symPar>MZ209903</inv:symPar>
+			<inv:date>2099-04-15</inv:date>
+			<inv:dateTax>2099-04-15</inv:dateTax>
+			<inv:dateAccounting>2099-03-31</inv:dateAccounting>
+			<inv:dateDue>2099-04-20</inv:dateDue>
+			<inv:accounting>
+				<typ:ids>331000/336001</typ:ids>
+			</inv:accounting>
+			<inv:classificationVAT>
+				<typ:classificationVATType>nonSubsume</typ:classificationVATType>
+			</inv:classificationVAT>
+			<inv:text>Mzdy 2099/03, sociální pojištění</inv:text>
+			<inv:partnerIdentity>
+				<typ:address>
+					<typ:company>OSSZ Testov</typ:company>
+				</typ:address>
+			</inv:partnerIdentity>
+			<inv:paymentType>
+				<typ:paymentType>draft</typ:paymentType>
+			</inv:paymentType>
+			<inv:symConst>1148</inv:symConst>
+			<inv:paymentAccount>
+				<typ:accountNo>5000000003</typ:accountNo>
+				<typ:bankCode>0710</typ:bankCode>
+			</inv:paymentAccount>
+		</inv:invoiceHeader>
+		<inv:invoiceDetail>
+			<inv:invoiceItem>
+				<inv:text>Mzdy 2099/03, sociální pojištění</inv:text>
+				<inv:quantity>1</inv:quantity>
+				<inv:rateVAT>none</inv:rateVAT>
+				<inv:homeCurrency>
+					<typ:unitPrice>7440</typ:unitPrice>
+				</inv:homeCurrency>
+				<inv:note>firma (zaměstnanci)</inv:note>
+				<inv:accounting>
+					<typ:ids>524000/336001</typ:ids>
+				</inv:accounting>
+			</inv:invoiceItem>
+			<inv:invoiceItem>
+				<inv:text>Mzdy 2099/03, sociální pojištění</inv:text>
+				<inv:quantity>1</inv:quantity>
+				<inv:rateVAT>none</inv:rateVAT>
+				<inv:homeCurrency>
+					<typ:unitPrice>2130</typ:unitPrice>
+				</inv:homeCurrency>
+				<inv:note>(zaměstnanci)</inv:note>
+				<inv:accounting>
+					<typ:ids>331000/336001</typ:ids>
+				</inv:accounting>
+			</inv:invoiceItem>
+		</inv:invoiceDetail>
+	</inv:invoice>
+</dat:dataPackItem>
+<dat:dataPackItem version="2.0" id="004">
+	<inv:invoice version="2.0">
+		<inv:invoiceHeader>
+			<inv:invoiceType>commitment</inv:invoiceType>
+			<inv:symVar>8765432100</inv:symVar>
+			<inv:symPar>MZ209903</inv:symPar>
+			<inv:date>2099-04-15</inv:date>
+			<inv:dateTax>2099-04-15</inv:dateTax>
+			<inv:dateAccounting>2099-03-31</inv:dateAccounting>
+			<inv:dateDue>2099-04-20</inv:dateDue>
+			<inv:accounting>
+				<typ:ids>331000/336000</typ:ids>
+			</inv:accounting>
+			<inv:classificationVAT>
+				<typ:classificationVATType>nonSubsume</typ:classificationVATType>
+			</inv:classificationVAT>
+			<inv:text>Mzdy 2099/03, zdravotní pojištění</inv:text>
+			<inv:partnerIdentity>
+				<typ:address>
+					<typ:company>Testovací zdravotní pojišťovna</typ:company>
+				</typ:address>
+			</inv:partnerIdentity>
+			<inv:paymentType>
+				<typ:paymentType>draft</typ:paymentType>
+			</inv:paymentType>
+			<inv:symConst>3558</inv:symConst>
+			<inv:paymentAccount>
+				<typ:accountNo>7000000002</typ:accountNo>
+				<typ:bankCode>0710</typ:bankCode>
+			</inv:paymentAccount>
+		</inv:invoiceHeader>
+		<inv:invoiceDetail>
+			<inv:invoiceItem>
+				<inv:text>Mzdy 2099/03, zdravotní pojištění</inv:text>
+				<inv:quantity>1</inv:quantity>
+				<inv:rateVAT>none</inv:rateVAT>
+				<inv:homeCurrency>
+					<typ:unitPrice>2700</typ:unitPrice>
+				</inv:homeCurrency>
+				<inv:note>firma (zaměstnanci)</inv:note>
+				<inv:accounting>
+					<typ:ids>524000/336000</typ:ids>
+				</inv:accounting>
+			</inv:invoiceItem>
+			<inv:invoiceItem>
+				<inv:text>Mzdy 2099/03, zdravotní pojištění</inv:text>
+				<inv:quantity>1</inv:quantity>
+				<inv:rateVAT>none</inv:rateVAT>
+				<inv:homeCurrency>
+					<typ:unitPrice>1350</typ:unitPrice>
+				</inv:homeCurrency>
+				<inv:note>(zaměstnanci)</inv:note>
+				<inv:accounting>
+					<typ:ids>331000/336000</typ:ids>
+				</inv:accounting>
+			</inv:invoiceItem>
+		</inv:invoiceDetail>
+	</inv:invoice>
+</dat:dataPackItem>
+<dat:dataPackItem version="2.0" id="005">
+	<inv:invoice version="2.0">
+		<inv:invoiceHeader>
+			<inv:invoiceType>commitment</inv:invoiceType>
+			<inv:symVar>209903</inv:symVar>
+			<inv:symPar>MZ209903</inv:symPar>
+			<inv:date>2099-04-15</inv:date>
+			<inv:dateTax>2099-04-15</inv:dateTax>
+			<inv:dateAccounting>2099-03-31</inv:dateAccounting>
+			<inv:dateDue>2099-04-20</inv:dateDue>
+			<inv:accounting>
+				<typ:ids>BEZ331000</typ:ids>
+			</inv:accounting>
+			<inv:classificationVAT>
+				<typ:classificationVATType>nonSubsume</typ:classificationVATType>
+			</inv:classificationVAT>
+			<inv:text>Mzdy 2099/03, mzda zaměstnance</inv:text>
+			<inv:partnerIdentity>
+				<typ:address>
+					<typ:name>Testovací Jana</typ:name>
+					<typ:city>Testov</typ:city>
+					<typ:street>Vzorová 1</typ:street>
+					<typ:zip>100 00</typ:zip>
+					<typ:country>
+						<typ:ids>CZ</typ:ids>
+					</typ:country>
+				</typ:address>
+			</inv:partnerIdentity>
+			<inv:paymentType>
+				<typ:paymentType>draft</typ:paymentType>
+			</inv:paymentType>
+			<inv:symConst>0138</inv:symConst>
+			<inv:paymentAccount>
+				<typ:accountNo>1000000005</typ:accountNo>
+				<typ:bankCode>0100</typ:bankCode>
+			</inv:paymentAccount>
+		</inv:invoiceHeader>
+		<inv:invoiceSummary>
+			<inv:homeCurrency>
+				<typ:priceNone>12000</typ:priceNone>
+			</inv:homeCurrency>
+		</inv:invoiceSummary>
+	</inv:invoice>
+</dat:dataPackItem>
+<dat:dataPackItem version="2.0" id="006">
+	<inv:invoice version="2.0">
+		<inv:invoiceHeader>
+			<inv:invoiceType>commitment</inv:invoiceType>
+			<inv:symVar>209903</inv:symVar>
+			<inv:symPar>MZ209903</inv:symPar>
+			<inv:date>2099-04-15</inv:date>
+			<inv:dateTax>2099-04-15</inv:dateTax>
+			<inv:dateAccounting>2099-03-31</inv:dateAccounting>
+			<inv:dateDue>2099-04-20</inv:dateDue>
+			<inv:accounting>
+				<typ:ids>BEZ331000</typ:ids>
+			</inv:accounting>
+			<inv:classificationVAT>
+				<typ:classificationVATType>nonSubsume</typ:classificationVATType>
+			</inv:classificationVAT>
+			<inv:text>Mzdy 2099/03, mzda zaměstnance</inv:text>
+			<inv:partnerIdentity>
+				<typ:address>
+					<typ:name>Vzorový Petr</typ:name>
+					<typ:city>Vzorov</typ:city>
+					<typ:street>Vzorová 1</typ:street>
+					<typ:zip>100 00</typ:zip>
+					<typ:country>
+						<typ:ids>CZ</typ:ids>
+					</typ:country>
+				</typ:address>
+			</inv:partnerIdentity>
+			<inv:paymentType>
+				<typ:paymentType>draft</typ:paymentType>
+			</inv:paymentType>
+			<inv:symConst>0138</inv:symConst>
+			<inv:paymentAccount>
+				<typ:accountNo>5000000003</typ:accountNo>
+				<typ:bankCode>0800</typ:bankCode>
+			</inv:paymentAccount>
+		</inv:invoiceHeader>
+		<inv:invoiceSummary>
+			<inv:homeCurrency>
+				<typ:priceNone>8000</typ:priceNone>
+			</inv:homeCurrency>
+		</inv:invoiceSummary>
+	</inv:invoice>
+</dat:dataPackItem>
+<dat:dataPackItem version="2.0" id="007">
+	<inv:invoice version="2.0">
+		<inv:invoiceHeader>
+			<inv:invoiceType>commitment</inv:invoiceType>
+			<inv:symVar>209903</inv:symVar>
+			<inv:symPar>MZ209903</inv:symPar>
+			<inv:date>2099-04-15</inv:date>
+			<inv:dateTax>2099-04-15</inv:dateTax>
+			<inv:dateAccounting>2099-03-31</inv:dateAccounting>
+			<inv:dateDue>2099-04-20</inv:dateDue>
+			<inv:accounting>
+				<typ:ids>BEZ331000</typ:ids>
+			</inv:accounting>
+			<inv:classificationVAT>
+				<typ:classificationVATType>nonSubsume</typ:classificationVATType>
+			</inv:classificationVAT>
+			<inv:text>Mzdy 2099/03, vyplaceno hotově</inv:text>
+			<inv:partnerIdentity>
+				<typ:address/>
+			</inv:partnerIdentity>
+			<inv:paymentType>
+				<typ:paymentType>cash</typ:paymentType>
+			</inv:paymentType>
+			<inv:symConst></inv:symConst>
+		</inv:invoiceHeader>
+		<inv:invoiceSummary>
+			<inv:homeCurrency>
+				<typ:priceNone>3520</typ:priceNone>
+			</inv:homeCurrency>
+		</inv:invoiceSummary>
+	</inv:invoice>
+</dat:dataPackItem>
+</dat:dataPack>

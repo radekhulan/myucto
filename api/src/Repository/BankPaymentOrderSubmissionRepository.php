@@ -57,23 +57,25 @@ final class BankPaymentOrderSubmissionRepository
         }
     }
 
+    /** @param 'batch'|'payment' $signScope co se podepisuje: dávka, nebo jediná platba bez dávky */
     public function accept(
         int $supplierId,
         int $submissionId,
         string $reference,
         string $status = 'accepted_awaiting_authorization',
         ?string $signHash = null,
+        string $signScope = 'batch',
     ): void {
         if (!in_array($status, ['accepted_awaiting_authorization', 'import_started', 'awaiting_signature'], true)
-            || ($status === 'awaiting_signature') !== ($signHash !== null)) {
+            || ($status === 'awaiting_signature') !== ($signHash !== null) || !in_array($signScope, ['batch', 'payment'], true)) {
             throw new \InvalidArgumentException('Neplatný stav přijetí bankovního příkazu.');
         }
         $this->db->pdo()->prepare(
             "UPDATE bank_payment_order_submissions
-                SET status = ?, provider_reference = ?, provider_sign_hash = ?,
+                SET status = ?, provider_reference = ?, provider_sign_hash = ?, provider_sign_scope = ?,
                     error_code = NULL, submitted_at = CURRENT_TIMESTAMP
               WHERE supplier_id = ? AND id = ? AND status IN ('unknown', 'creating')"
-        )->execute([$status, $reference, $signHash, $supplierId, $submissionId]);
+        )->execute([$status, $reference, $signHash, $signScope, $supplierId, $submissionId]);
     }
 
     /**
@@ -138,8 +140,9 @@ final class BankPaymentOrderSubmissionRepository
      * Přechod položky. Povolené jsou jen planned → sending a sending → created/rejected/unknown;
      * jiný výchozí stav znamená souběh nebo poškozenou evidenci a volající nesmí pokračovat.
      */
+    /** @param array{code:string,scope:?string,message:?string}|null $bankError důvod odmítnutí od banky */
     public function moveItem(int $supplierId, int $submissionId, int $lineNo, string $to, ?string $signId = null,
-        ?string $hash = null, ?string $instructionStatus = null, ?string $errorCode = null): bool
+        ?string $hash = null, ?string $instructionStatus = null, ?string $errorCode = null, ?array $bankError = null): bool
     {
         $from = match ($to) {
             'sending' => 'planned',
@@ -149,12 +152,42 @@ final class BankPaymentOrderSubmissionRepository
         $stmt = $this->db->pdo()->prepare(
             "UPDATE bank_payment_submission_items
                 SET status = ?, provider_sign_id = COALESCE(?, provider_sign_id), provider_hash = COALESCE(?, provider_hash),
-                    instruction_status = COALESCE(?, instruction_status), error_code = ?
+                    instruction_status = COALESCE(?, instruction_status), error_code = ?,
+                    provider_error_code = ?, provider_error_scope = ?, provider_error_message = ?
               WHERE supplier_id = ? AND submission_id = ? AND line_no = ? AND status = ?"
         );
         $stmt->execute([$to, $signId, $hash, $instructionStatus, $errorCode !== null ? mb_substr($errorCode, 0, 80) : null,
-            $supplierId, $submissionId, $lineNo, $from]);
+            ...self::bankErrorColumns($bankError), $supplierId, $submissionId, $lineNo, $from]);
         return $stmt->rowCount() === 1;
+    }
+
+    /**
+     * Sloupce provider_error_code/scope/message. Délky drží šířku sloupců i tehdy, když
+     * hodnotu nepřipravil klient banky.
+     *
+     * @param array{code:string,scope:?string,message:?string}|null $bankError
+     * @return array{0:?string,1:?string,2:?string}
+     */
+    private static function bankErrorColumns(?array $bankError): array
+    {
+        if ($bankError === null) {
+            return [null, null, null];
+        }
+        $text = static fn (mixed $value, int $length): ?string => is_string($value) && $value !== '' ? mb_substr($value, 0, $length) : null;
+        return [$text($bankError['code'] ?? null, 64), $text($bankError['scope'] ?? null, 128), $text($bankError['message'] ?? null, 255)];
+    }
+
+    /** @return array{code:string,scope:?string,message:?string}|null */
+    private static function bankErrorFromRow(array $row): ?array
+    {
+        if (($row['provider_error_code'] ?? null) === null || $row['provider_error_code'] === '') {
+            return null;
+        }
+        return [
+            'code' => (string) $row['provider_error_code'],
+            'scope' => $row['provider_error_scope'] !== null ? (string) $row['provider_error_scope'] : null,
+            'message' => $row['provider_error_message'] !== null ? (string) $row['provider_error_message'] : null,
+        ];
     }
 
     /** Dávka se právě zakládá; po přerušení v tomto bodě je výsledek nejasný. */
@@ -219,13 +252,14 @@ final class BankPaymentOrderSubmissionRepository
      * podle evidence založila nebo mohla založit. Bez hashe podpisu.
      *
      * @return list<array{line_no:int,status:string,amount:string,creditor_iban:string,creditor_account:?string,
-     *     variable_symbol:?string,instruction_identification:string,provider_sign_id:?string,instruction_status:?string}>
+     *     variable_symbol:?string,instruction_identification:string,provider_sign_id:?string,instruction_status:?string,
+     *     error_code:?string,provider_error:array{code:string,scope:?string,message:?string}|null}>
      */
     public function publicItems(int $supplierId, int $submissionId): array
     {
         $stmt = $this->db->pdo()->prepare(
             'SELECT line_no, status, amount_minor, creditor_iban, variable_symbol, instruction_identification, provider_sign_id,
-                    instruction_status
+                    instruction_status, error_code, provider_error_code, provider_error_scope, provider_error_message
                FROM bank_payment_submission_items
               WHERE supplier_id = ? AND submission_id = ?
               ORDER BY line_no'
@@ -244,6 +278,8 @@ final class BankPaymentOrderSubmissionRepository
                 'instruction_identification' => (string) $row['instruction_identification'],
                 'provider_sign_id' => $row['provider_sign_id'] !== null ? (string) $row['provider_sign_id'] : null,
                 'instruction_status' => $row['instruction_status'] !== null ? (string) $row['instruction_status'] : null,
+                'error_code' => $row['error_code'] !== null ? (string) $row['error_code'] : null,
+                'provider_error' => self::bankErrorFromRow($row),
             ];
         }
         return $result;
@@ -279,7 +315,7 @@ final class BankPaymentOrderSubmissionRepository
             // zahozena. Takové odeslání se už nesmí podepsat ani dokončit (vedle náhradního
             // příkazu by šlo o druhou platbu).
             'SELECT s.id, s.supplier_id, s.payment_order_id, s.payroll_batch_id, s.connection_id, s.provider, s.status,
-                    s.provider_reference, s.provider_sign_hash, s.provider_poll_id, s.signature_state,
+                    s.provider_reference, s.provider_sign_hash, s.provider_sign_scope, s.provider_poll_id, s.signature_state,
                     TIMESTAMPDIFF(SECOND, s.created_at, CURRENT_TIMESTAMP) AS age_seconds,
                     TIMESTAMPDIFF(SECOND, s.last_polled_at, CURRENT_TIMESTAMP) AS polled_seconds_ago,
                     TIMESTAMPDIFF(SECOND, s.signature_requested_at, CURRENT_TIMESTAMP) AS signature_requested_seconds_ago,
@@ -371,6 +407,7 @@ final class BankPaymentOrderSubmissionRepository
             $stmt->fetchAll(PDO::FETCH_ASSOC));
     }
 
+    /** @param array{code:string,scope:?string,message:?string}|null $bankError důvod odmítnutí od banky */
     public function fail(
         int $supplierId,
         int $submissionId,
@@ -379,6 +416,7 @@ final class BankPaymentOrderSubmissionRepository
         ?int $acceptedCount = null,
         ?int $rejectedCount = null,
         ?int $remoteHttpStatus = null,
+        ?array $bankError = null,
     ): void {
         if (!in_array($status, ['rejected', 'unknown'], true)) {
             throw new \InvalidArgumentException('Neplatný stav bankovního odeslání.');
@@ -386,6 +424,7 @@ final class BankPaymentOrderSubmissionRepository
         $stmt = $this->db->pdo()->prepare(
             'UPDATE bank_payment_order_submissions
                 SET status = ?, error_code = ?, accepted_count = ?, rejected_count = ?,
+                    provider_error_code = ?, provider_error_scope = ?, provider_error_message = ?,
                     remote_http_status = ?, submitted_at = CURRENT_TIMESTAMP
               WHERE supplier_id = ? AND id = ? AND status IN (\'unknown\', \'creating\')'
         );
@@ -394,6 +433,7 @@ final class BankPaymentOrderSubmissionRepository
             mb_substr($errorCode, 0, 80),
             $acceptedCount,
             $rejectedCount,
+            ...self::bankErrorColumns($bankError),
             $remoteHttpStatus,
             $supplierId,
             $submissionId,
@@ -406,6 +446,7 @@ final class BankPaymentOrderSubmissionRepository
         $stmt = $this->db->pdo()->prepare(
             "SELECT id, payment_order_id, payroll_batch_id, connection_id, provider, status,
                     provider_reference, error_code, accepted_count, rejected_count,
+                    provider_error_code, provider_error_scope, provider_error_message,
                     created_at, submitted_at
                FROM bank_payment_order_submissions
               WHERE supplier_id = ? AND {$column} = ?"
@@ -438,6 +479,7 @@ final class BankPaymentOrderSubmissionRepository
             'error_code' => $row['error_code'] ?: null,
             'accepted_count' => $row['accepted_count'] !== null ? (int) $row['accepted_count'] : null,
             'rejected_count' => $row['rejected_count'] !== null ? (int) $row['rejected_count'] : null,
+            'provider_error' => self::bankErrorFromRow($row),
             'created_at' => $row['created_at'],
             'submitted_at' => $row['submitted_at'] ?: null,
         ];

@@ -12,7 +12,9 @@ use MyInvoice\Repository\OtherItemRepository;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Accounting\Closing\DocumentSeriesService;
 use MyInvoice\Service\Accounting\Dimension\DimensionDefaults;
+use MyInvoice\Service\Bank\NonInvoiceBankTransactionScope;
 use MyInvoice\Service\Invoice\InvoiceOtherItemPayments;
+use MyInvoice\Service\Nonprofit\Membership\MembershipBankPaymentGuard;
 use PDO;
 
 final class OtherItemService
@@ -36,6 +38,7 @@ final class OtherItemService
         private readonly OtherItemPostingResolver $postingResolver,
         private readonly OtherItemPostingProfileService $postingProfiles,
         private readonly ActivityLogger $activity,
+        private readonly DocumentJournalPurge $journalPurge,
     ) {}
 
     /**
@@ -261,6 +264,161 @@ final class OtherItemService
             }
         }
         return $input;
+    }
+
+    /**
+     * Poznámka vystaveného dokladu (potvrzeného, zaúčtovaného i stornovaného). Do zápisu
+     * v deníku ani do saldokonta se nepromítá, proto jde měnit kdykoli. Ostatní pole
+     * zůstávají zamčená: popis zápisu skládá zaúčtování z názvu a profilu druhu
+     * (deník ho u zápisu ostatní položky nechá měnit jen přes zdroj), účet protistrany
+     * má vlastní úpravu ({@see updateCounterpartyAccount()}), koncept se upravuje celý.
+     *
+     * @return array{item:array<string,mixed>, before:?string, after:?string}
+     */
+    public function updateNote(int $supplierId, int $id, mixed $note, ?int $userId): array
+    {
+        $text = trim(is_scalar($note) ? (string) $note : '');
+        if (mb_strlen($text) > 10000) {
+            throw new OtherItemException('invalid_note', 'Poznámka smí mít nejvýše 10 000 znaků.');
+        }
+        $after = $text === '' ? null : $text;
+        $pdo = $this->db->pdo();
+        $ownTx = !$pdo->inTransaction();
+        if ($ownTx) $pdo->beginTransaction();
+        try {
+            $existing = $this->items->find($supplierId, $id, true)
+                ?? throw new OtherItemException('not_found', 'Doklad nebyl nalezen.', 404);
+            if ($existing['status'] === 'draft') {
+                throw new OtherItemException('is_draft', 'Koncept upravte v editaci dokladu.', 409);
+            }
+            $before = $existing['note'] !== null ? (string) $existing['note'] : null;
+            if ($before !== $after) {
+                $pdo->prepare('UPDATE other_items SET note = ?, updated_by = ?, row_version = row_version + 1
+                    WHERE id = ? AND supplier_id = ? AND deleted_at IS NULL')
+                    ->execute([$after, $userId, $id, $supplierId]);
+            }
+            if ($ownTx) $pdo->commit();
+        } catch (\Throwable $e) {
+            if ($ownTx && $pdo->inTransaction()) $pdo->rollBack();
+            throw $e;
+        }
+        return ['item' => $this->get($supplierId, $id), 'before' => $before, 'after' => $after];
+    }
+
+    /**
+     * Smazání zaúčtovaného dokladu i s jeho zápisem, bez storna. Zápis maže
+     * {@see DocumentJournalPurge::purgeEntry()} se stejnými branami jako mazání v deníku
+     * (otevřené období, uzamčené datum jen s potvrzením, saldokonto, párování, navazující
+     * agendy), doklad se vrátí do konceptu ({@see prepareEntryDeletion()}) a smaže jako
+     * koncept ({@see deleteDraft()}: výskyt opakování se jen zruší, aby ho rozvrh nevytvořil
+     * znovu). Vše v jedné transakci.
+     *
+     * Doklad s úhradou, v platebním příkazu, s navázanou fakturou nebo s historií
+     * přeúčtování se nesmaže: nejdřív je potřeba zrušit to, co na něm stojí. Číslo
+     * se do řady nevrací, stejně jako po smazání zápisu v deníku a novém zaúčtování.
+     *
+     * @param array<string,mixed> $audit user_id, ip, user_agent
+     * @return array{item: array<string,mixed>, entry_id: int, result_status: string, locked_override: ?string}
+     */
+    public function deletePosted(int $supplierId, int $id, array $audit, bool $lockedAcknowledged): array
+    {
+        $userId = isset($audit['user_id']) ? (int) $audit['user_id'] : null;
+        $pdo = $this->db->pdo();
+        $ownTx = !$pdo->inTransaction();
+        if ($ownTx) $pdo->beginTransaction();
+        try {
+            // Položka se zamyká až v detachSource: pořadí zámků jako mazání zápisu v deníku.
+            $item = $this->items->find($supplierId, $id)
+                ?? throw new OtherItemException('not_found', 'Doklad nebyl nalezen.', 404);
+            $this->assertPostedDeletable($supplierId, $item);
+            $entryId = (int) $item['journal_entry_id'];
+            $purged = $this->journalPurge->purgeEntry($supplierId, $entryId, 'other_item', $id, $audit,
+                'other_item_delete', $lockedAcknowledged,
+                function () use ($supplierId, $id, $entryId, $userId): array {
+                    $locked = $this->items->find($supplierId, $id, true);
+                    if ($locked === null || $locked['status'] !== 'posted' || (int) $locked['journal_entry_id'] !== $entryId) {
+                        throw new OtherItemException('changed', 'Doklad mezitím změnil jiný uživatel. Načtěte ho znovu.', 409);
+                    }
+                    $this->assertPostedDeletable($supplierId, $locked);
+                    $this->prepareEntryDeletion($supplierId, $id, $entryId, $userId);
+                    return ['posted', 'deleted'];
+                });
+            $this->deleteDraft($supplierId, $id);
+            $state = $pdo->prepare('SELECT status, deleted_at FROM other_items WHERE id = ? AND supplier_id = ?');
+            $state->execute([$id, $supplierId]);
+            $row = $state->fetch(PDO::FETCH_ASSOC);
+            $resultStatus = $row !== false && $row['deleted_at'] === null ? (string) $row['status'] : 'deleted';
+            if ($ownTx) $pdo->commit();
+        } catch (\Throwable $e) {
+            if ($ownTx && $pdo->inTransaction()) $pdo->rollBack();
+            throw $e;
+        }
+        if ($ownTx) {
+            $this->journalPurge->cleanupAttachments($supplierId, $purged['attachments']);
+        }
+        return ['item' => $item, 'entry_id' => $entryId, 'result_status' => $resultStatus,
+            'locked_override' => $purged['locked_override']];
+    }
+
+    /**
+     * Smí rozhraní nabídnout smazání zaúčtovaného dokladu i se zápisem? Náhled bez zámků,
+     * rozhoduje až {@see deletePosted()}.
+     *
+     * @param array<string,mixed> $item
+     * @return array{allowed:bool, needs_ack:bool, code:?string, message:?string}
+     */
+    public function postedDeletion(int $supplierId, array $item): array
+    {
+        try {
+            $this->assertPostedDeletable($supplierId, $item);
+        } catch (OtherItemException $e) {
+            return ['allowed' => false, 'needs_ack' => false, 'code' => $e->errorCode, 'message' => $e->getMessage()];
+        }
+        return DocumentJournalPurge::verdict($this->journalPurge->entryBlock($supplierId, (int) $item['journal_entry_id']));
+    }
+
+    /** @param array<string,mixed> $item */
+    private function assertPostedDeletable(int $supplierId, array $item): void
+    {
+        $id = (int) $item['id'];
+        if ($item['status'] === 'draft') {
+            throw new OtherItemException('is_draft', 'Doklad je koncept, smažte ho běžným smazáním.', 409);
+        }
+        if ($item['status'] !== 'posted' || $item['journal_entry_id'] === null) {
+            throw new OtherItemException('not_posted',
+                'Smazat i se zápisem lze jen zaúčtovaný doklad. Stornovaný nebo potvrzený doklad bez zápisu se ruší stornem.', 409);
+        }
+        if ((float) $item['paid_amount'] > 0 || $this->hasActivePayments($supplierId, $id)) {
+            throw new OtherItemException('has_payments',
+                'Doklad má spárované úhrady. Nejprve je v detailu dokladu odpojte, pak doklad smažte.', 409);
+        }
+        $this->assertNoLinkedInvoice($supplierId, $id);
+        $ordered = $this->db->pdo()->prepare(
+            'SELECT 1 FROM payment_order_items poi
+               JOIN payment_orders po ON po.id = poi.payment_order_id
+              WHERE poi.other_item_id = ? AND po.supplier_id = ? AND po.archived_at IS NULL LIMIT 1'
+        );
+        $ordered->execute([$id, $supplierId]);
+        if ($ordered->fetchColumn() !== false) {
+            throw new OtherItemException('in_payment_order',
+                'Závazek je v platebním příkazu. Nejdřív ho z příkazu odeberte, pak doklad smažte.', 409);
+        }
+        $scheduled = $this->db->pdo()->prepare('SELECT 1 FROM other_item_schedule_occurrences
+            WHERE supplier_id = ? AND item_id = ? AND occurrence_index = 0 LIMIT 1');
+        $scheduled->execute([$supplierId, $id]);
+        if ($scheduled->fetchColumn() !== false) {
+            throw new OtherItemException('has_schedule', 'Doklad je zdrojem opakování. Smazat ho nelze, stornujte ho.', 409);
+        }
+        // Přeúčtovaný doklad má v deníku i storno dvojici původního zaúčtování. Smazáním
+        // dokladu by dvojice zůstala bez dokladu; takový doklad se ruší stornem.
+        $history = $this->db->pdo()->prepare(
+            "SELECT 1 FROM journal_entries WHERE supplier_id = ? AND source_type = 'other_item' AND source_id = ? AND id <> ? LIMIT 1"
+        );
+        $history->execute([$supplierId, $id, (int) $item['journal_entry_id']]);
+        if ($history->fetchColumn() !== false) {
+            throw new OtherItemException('has_posting_history',
+                'Doklad byl přeúčtován a v deníku má i storno původního zaúčtování. Smazat ho nelze, stornujte ho.', 409);
+        }
     }
 
     public function deleteDraft(int $supplierId, int $id): void
@@ -967,6 +1125,7 @@ final class OtherItemService
 
     private function bankPayment(int $supplierId, int $id, string $side): array
     {
+        (new MembershipBankPaymentGuard($this->db))->assertSourceMutable($supplierId, 'bank', $id);
         $stmt = $this->db->pdo()->prepare(
             'SELECT bt.amount, bt.posted_at payment_on, COALESCE(bt.currency, bs.currency, \'CZK\') currency,
                     bt.matched_invoice_id, bt.match_status
@@ -1012,12 +1171,13 @@ final class OtherItemService
 
     /**
      * Bankovní pohyb je volný k přiřazení ostatní položce: CZK, nespárovaný s fakturou,
-     * mzdou ani zálohou na daň a má nevyčerpanou částku. Předpokládá aliasy `bt`
+     * mzdou, zálohou na daň ani členským předpisem a má nevyčerpanou částku. Členské párování
+     * smí členskou úhradu zopakovat (`$membershipReplay`); shodu předpisů ověří samo. Předpokládá aliasy `bt`
      * (bank_transactions), `bs` (bank_statements) a `a` (součet aktivních přiřazení
      * pohybu jako `used_amount`). Sdílí ji výběr plateb z detailu položky i párování
      * z banky ({@see OtherItemBankMatchService}), aby se pravidla nerozešla.
      */
-    public static function freeBankPaymentSql(): string
+    public static function freeBankPaymentSql(bool $membershipReplay = false): string
     {
         return 'COALESCE(bt.currency, bs.currency, \'CZK\') = \'CZK\'
                     AND bt.match_status = \'unmatched\' AND bt.matched_invoice_id IS NULL
@@ -1029,7 +1189,8 @@ final class OtherItemService
                     AND NOT EXISTS (SELECT 1 FROM payroll_payment_matches ppm
                                      WHERE ppm.bank_transaction_id = bt.id AND ppm.supplier_id = bs.supplier_id)
                     AND NOT EXISTS (SELECT 1 FROM tax_advance_schedules tas
-                                     WHERE tas.matched_transaction_id = bt.id AND tas.supplier_id = bs.supplier_id)';
+                                     WHERE tas.matched_transaction_id = bt.id AND tas.supplier_id = bs.supplier_id)'
+            . ($membershipReplay ? '' : ' AND NOT ' . NonInvoiceBankTransactionScope::membershipSql('bs.supplier_id', 'bt.id'));
     }
 
     /**

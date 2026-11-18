@@ -45,7 +45,24 @@ final class ClosingRepository
      */
     private const NO_LATERAL_SPLIT = "SET STATEMENT optimizer_switch='split_materialized=off' FOR ";
 
+    /** @var list<array{pairing_id:int, entry_id:int, line_no:int}> okruhy uvolněné nahrazením zápisů od posledního {@see takeReleasedPairings()} */
+    private array $releasedPairings = [];
+
     public function __construct(private readonly Connection $db) {}
+
+    /**
+     * Položky okruhů párování, které uvolnily smazané zápisy uzávěrky od posledního volání,
+     * a vynulování počítadla. Volá ho {@see \MyInvoice\Service\Accounting\Closing\ClosingService}
+     * kolem každé akce kroku, aby počet uvolněných párování ukázal v odpovědi.
+     *
+     * @return list<array{pairing_id:int, entry_id:int, line_no:int}>
+     */
+    public function takeReleasedPairings(): array
+    {
+        $released = $this->releasedPairings;
+        $this->releasedPairings = [];
+        return $released;
+    }
 
     public function resultDecisionPeriods(int $supplierId, bool $forUpdate = false): array
     {
@@ -1154,6 +1171,8 @@ final class ClosingRepository
         try {
             (new \MyInvoice\Service\Accounting\Closing\AssetReserveSourceUseGuard($this->db, new JournalEntryRepository($this->db, new \MyInvoice\Service\ActivityLogger($this->db))))->assertEntriesMutable($supplierId, [$entryId]);
             (new \MyInvoice\Service\Property\Services\Settlement\SettlementUseGuard($this->db))->assertEntriesMutable($supplierId, [$entryId]);
+            // Rozpad saldokonta systém neobnoví (předpis ostatní položky by osiřel), proto blokuje.
+            (new \MyInvoice\Service\Accounting\JournalSettlementUseGuard($this->db))->assertEntriesFree($supplierId, [$entryId]);
         } catch (\MyInvoice\Service\Accounting\PostingException|\MyInvoice\Service\Property\Charges\Issuance\IssuanceException $e) {
             throw new \MyInvoice\Service\Accounting\Closing\ClosingException($e->errorCode, $e->getMessage(), $e->httpStatus);
         }
@@ -1168,10 +1187,59 @@ final class ClosingRepository
         $linesStmt->execute([$entryId, $supplierId]);
         $lines = $linesStmt->fetchAll(PDO::FETCH_ASSOC);
 
+        $released = $this->releasePairings($supplierId, $entry);
+
         $pdo->prepare('DELETE FROM journal_entries WHERE id = ? AND supplier_id = ?')
             ->execute([$entryId, $supplierId]);
 
-        return ['entry' => $entry, 'lines' => $lines];
+        return ['entry' => $entry, 'lines' => $lines, 'released_pairings' => $released];
+    }
+
+    /**
+     * Systémový přepočet uzávěrky zápis jen nahrazuje (vzetí zpět kroku, opakovaný běh,
+     * náhrada převzatých počátečních stavů). Okruhy párování jeho řádků proto neblokují
+     * jako ruční mazání ({@see \MyInvoice\Service\Accounting\JournalPairingUseGuard}), ale
+     * uvolní se stejně jako při stornu ({@see JournalLinePairingRepository::releaseEntry()})
+     * a do auditu se zapíše, co se uvolnilo: okruhy, zápisy a účty všech jejich řádků.
+     *
+     * @param array<string,mixed> $entry
+     * @return list<array{pairing_id:int, entry_id:int, line_no:int}>
+     */
+    private function releasePairings(int $supplierId, array $entry): array
+    {
+        $entryId = (int) $entry['id'];
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT i.pairing_id, i.entry_id, i.line_no, i.account_id, ca.account_code
+               FROM journal_line_pairing_items i
+               JOIN chart_of_accounts ca ON ca.supplier_id = i.supplier_id AND ca.id = i.account_id
+              WHERE i.supplier_id = ?
+                AND i.pairing_id IN (SELECT o.pairing_id FROM journal_line_pairing_items o
+                                      WHERE o.supplier_id = ? AND o.entry_id = ?)
+              ORDER BY i.pairing_id, i.entry_id, i.line_no'
+        );
+        $stmt->execute([$supplierId, $supplierId, $entryId]);
+        $items = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        if ($items === []) {
+            return [];
+        }
+        $released = (new JournalLinePairingRepository($this->db))->releaseEntry($supplierId, $entryId);
+        $this->releasedPairings = [...$this->releasedPairings, ...$released];
+        (new \MyInvoice\Service\ActivityLogger($this->db))->log('accounting.pairing_released', null, 'journal_entry', $entryId, [
+            'reason'        => 'closing_replace',
+            'source_type'   => (string) $entry['source_type'],
+            'source_id'     => $entry['source_id'] === null ? null : (int) $entry['source_id'],
+            'pairing_count' => count(array_unique(array_column($items, 'pairing_id'))),
+            'entry_ids'     => array_values(array_unique(array_map('intval', array_column($items, 'entry_id')))),
+            'accounts'      => array_values(array_unique(array_column($items, 'account_code'))),
+            'items'         => array_map(static fn (array $i): array => [
+                'pairing_id'   => (int) $i['pairing_id'],
+                'entry_id'     => (int) $i['entry_id'],
+                'line_no'      => (int) $i['line_no'],
+                'account_code' => (string) $i['account_code'],
+            ], $items),
+            'released'      => $released,
+        ], null, null, $supplierId);
+        return $released;
     }
 
     /**
@@ -1443,7 +1511,9 @@ final class ClosingRepository
      * místa: mapa transakce → doklad se staví napřed v `bank_target` (dvě disjunktní
      * větve) a teprve ta se joinuje na `bank_credit`. Nový odkaz na `bank_credit`
      * nebo `booked` = další plný průchod deníkem. K rozkladu na LATERAL DERIVED viz
-     * {@see self::NO_LATERAL_SPLIT}.
+     * {@see self::NO_LATERAL_SPLIT}. Bankovní zápisy se berou po idx_je_supplier_source:
+     * bez něj optimizer začínal plným průchodem řádků deníku všech firem instalace.
+     * Konečnou fakturu proformy dává jediná agregace {@see firstFinalInvoiceSql}.
      *
      * @return list<array{id:int, doc_no:string, partner_name:string, booked:float, settled:float, saldo:float}>
      */
@@ -1469,7 +1539,7 @@ final class ClosingRepository
             ), bank_credit AS (
                 SELECT e.source_id AS bank_transaction_id,
                        SUM(CASE WHEN l.side = 'credit' THEN l.signed_amount ELSE -l.signed_amount END) AS net_credit
-                  FROM journal_entries e
+                  FROM journal_entries e FORCE INDEX (idx_je_supplier_source)
                   JOIN journal_entry_lines l ON l.entry_id = e.id AND l.supplier_id = e.supplier_id
                   JOIN chart_of_accounts ca ON ca.id = l.account_id
                   LEFT JOIN chart_of_accounts pa ON pa.id = ca.parent_id
@@ -1484,6 +1554,16 @@ final class ClosingRepository
                   FROM invoice_payments ip
                  WHERE ip.supplier_id = ? AND ip.bank_transaction_id IS NOT NULL
                  GROUP BY ip.bank_transaction_id
+            ), final_of AS (
+                " . self::firstFinalInvoiceSql($supplierId) . "
+            ), advance_311 AS (
+                " . self::advancePaidOn311Sql($supplierId) . "
+            ), advance_draw AS (
+                " . self::advanceDrawSql($supplierId) . "
+            ), draw_proforma AS (
+                SELECT DISTINCT proforma_id FROM advance_draw
+            ), draw_final AS (
+                SELECT final_id, SUM(drawn) AS drawn FROM advance_draw GROUP BY final_id
             ), bank_target AS (
                 -- Mapa bankovní transakce → cílový doklad a podíl úhrady (num/den).
                 -- Postavená PŘED sáhnutím na `bank_credit`, aby se deník pro 311
@@ -1501,8 +1581,10 @@ final class ClosingRepository
                 -- fakturou mu dává `doc` níž). Bez konečné faktury úhrada zůstane na
                 -- proformě a `JOIN booked` ji zahodí — přijatá záloha na 311 není
                 -- nesoulad zaplaceného dokladu, ukazuje ji saldokonto.
+                -- Záloha, kterou konečné faktury čerpají odpočtem (`draw_proforma`), zůstává
+                -- na proformě: každá faktura dostane jen svůj díl v `draw_final` níž.
                 SELECT ip.bank_transaction_id,
-                       COALESCE(ch.id, ip.invoice_id) AS invoice_id,
+                       COALESCE(CASE WHEN dp.proforma_id IS NULL THEN ch.final_id END, ip.invoice_id) AS invoice_id,
                        ip.amount AS num, a.total_alloc AS den
                   FROM invoice_payments ip
                   JOIN alloc a       ON a.bank_transaction_id = ip.bank_transaction_id
@@ -1512,13 +1594,8 @@ final class ClosingRepository
                   -- Zálohu čerpanou postupně víc fakturami (milníky) nese jen první z nich,
                   -- shodně se skupinou DDKP v `doc` níž; jinak by se úhrada rozpadla na
                   -- každou konečnou fakturu zvlášť a započetla se vícekrát.
-                  LEFT JOIN invoices ch ON ch.id = (
-                                SELECT MIN(fin.id) FROM invoices fin
-                                 WHERE fin.supplier_id = ip.supplier_id
-                                   AND fin.parent_invoice_id = pf.id
-                                   AND fin.invoice_type NOT IN ('proforma', 'tax_document')
-                                   AND fin.cancelled_at IS NULL
-                            )
+                  LEFT JOIN final_of ch ON ch.proforma_id = pf.id
+                  LEFT JOIN draw_proforma dp ON dp.proforma_id = pf.id
                  WHERE ip.supplier_id = ?
                 UNION ALL
                 -- Větev 2 — úhrady spárované jen přes bank_transactions.matched_invoice_id
@@ -1616,20 +1693,18 @@ final class ClosingRepository
                        CASE WHEN i.invoice_type = 'credit_note' AND i.parent_invoice_id IS NOT NULL
                             THEN i.parent_invoice_id
                             WHEN i.invoice_type = 'tax_document' AND i.parent_invoice_id IS NOT NULL
-                            THEN COALESCE((
-                                SELECT MIN(fin.id) FROM invoices fin
-                                 WHERE fin.supplier_id = i.supplier_id
-                                   AND fin.parent_invoice_id = i.parent_invoice_id
-                                   AND fin.invoice_type NOT IN ('proforma', 'tax_document')
-                                   AND fin.cancelled_at IS NULL
-                            ), i.id)
+                            THEN COALESCE(CASE WHEN dpp.proforma_id IS NULL THEN ff.final_id END, i.id)
                             ELSE i.id END AS group_id,
                        b.booked,
                        COALESCE(sb.settled, 0) + COALESCE(sc.settled, 0)
                          + COALESCE(so.settled, 0) + COALESCE(sg.settled, 0)
-                         + COALESCE(sm.settled, 0) + COALESCE(si.settled, 0) AS settled
+                         + COALESCE(sm.settled, 0) + COALESCE(si.settled, 0)
+                         + COALESCE(dfin.drawn, 0) AS settled
                   FROM booked b
                   JOIN invoices i ON i.id = b.invoice_id AND i.supplier_id = ?
+                  LEFT JOIN final_of ff ON ff.proforma_id = i.parent_invoice_id
+                  LEFT JOIN draw_proforma dpp ON dpp.proforma_id = i.parent_invoice_id
+                  LEFT JOIN draw_final dfin ON dfin.final_id = i.id
                   LEFT JOIN settled_bank sb ON sb.invoice_id = i.id
                   LEFT JOIN settled_cash sc ON sc.invoice_id = i.id
                   LEFT JOIN settled_offset so ON so.invoice_id = i.id
@@ -1684,6 +1759,102 @@ final class ClosingRepository
             $supplierId, $asOf, $asOf,          // final SELECT
         ]);
         return array_map(static fn (array $r): array => self::castPaidSaldoRow($r), $stmt->fetchAll(PDO::FETCH_ASSOC));
+    }
+
+    /**
+     * První konečná faktura každé proformy firmy: `proforma_id`, `final_id`. Úhradu proformy
+     * i DDKP k ní K3 přiřazuje této faktuře (záloha čerpaná víc fakturami jen té první).
+     *
+     * Jedna agregace místo závislého poddotazu za každou úhradu a každý DDKP: ten na
+     * produkci s neaktuálními statistikami šel po indexu jen na `supplier_id` a za každou
+     * úhradu proformy prošel všechny faktury firmy (desítky milionů řádků, 9 až 26 s).
+     * Agregace jde po idx_inv_supplier_parent. Bez placeholderů, firma literálem.
+     */
+    private static function firstFinalInvoiceSql(int $supplierId): string
+    {
+        // Konečná faktura čerpající víc záloh vazbu dokladu nemá, proformu na ni váže
+        // odpočtový řádek ({@see \MyInvoice\Support\Sql\AdvanceDrawSql}).
+        return "SELECT lnk.proforma_id, MIN(lnk.final_id) AS final_id
+                  FROM (SELECT fin.parent_invoice_id AS proforma_id, fin.id AS final_id
+                          FROM invoices fin
+                         WHERE fin.supplier_id = {$supplierId} AND fin.parent_invoice_id IS NOT NULL
+                           AND fin.invoice_type NOT IN ('proforma', 'tax_document')
+                           AND fin.cancelled_at IS NULL
+                        UNION ALL
+                        SELECT fii.advance_invoice_id, fin.id
+                          FROM invoice_items fii
+                          JOIN invoices fin ON fin.id = fii.invoice_id
+                         WHERE fii.advance_invoice_id IS NOT NULL AND fin.supplier_id = {$supplierId}
+                           AND fin.invoice_type = 'invoice' AND fin.cancelled_at IS NULL) lnk
+                 GROUP BY lnk.proforma_id";
+    }
+
+    /**
+     * Proformy firmy, jejichž úhrada (banka nebo pokladna) je zaúčtovaná přímo na 311
+     * (`proforma_id`). Jen u nich se záloha na 311 vypořádává čerpáním konečných faktur;
+     * záloha přes 324 se na 311 nepotká. Bez placeholderů, firma literálem.
+     */
+    private static function advancePaidOn311Sql(int $supplierId): string
+    {
+        $on311 = "JOIN journal_entry_lines l3 ON l3.entry_id = e3.id AND l3.supplier_id = e3.supplier_id AND l3.side = 'credit'
+                  JOIN chart_of_accounts ca3 ON ca3.id = l3.account_id
+                  LEFT JOIN chart_of_accounts pa3 ON pa3.id = ca3.parent_id";
+        $where = "e3.posted_at IS NOT NULL AND e3.reversed_by IS NULL
+                  AND (ca3.account_code LIKE '311%' OR COALESCE(pa3.account_code, '') LIKE '311%')";
+        return "SELECT ip3.invoice_id AS proforma_id
+                  FROM invoice_payments ip3
+                  JOIN invoices pf3 ON pf3.id = ip3.invoice_id AND pf3.supplier_id = ip3.supplier_id AND pf3.invoice_type = 'proforma'
+                  JOIN journal_entries e3 ON e3.supplier_id = ip3.supplier_id AND e3.source_type = 'bank'
+                                         AND e3.source_id = ip3.bank_transaction_id
+                  {$on311}
+                 WHERE ip3.supplier_id = {$supplierId} AND ip3.bank_transaction_id IS NOT NULL AND {$where}
+                UNION
+                SELECT ip3.invoice_id
+                  FROM cash_documents cd3
+                  JOIN invoice_payments ip3 ON ip3.id = cd3.invoice_payment_id AND ip3.supplier_id = cd3.supplier_id
+                  JOIN invoices pf3 ON pf3.id = ip3.invoice_id AND pf3.supplier_id = ip3.supplier_id AND pf3.invoice_type = 'proforma'
+                  JOIN journal_entries e3 ON e3.supplier_id = cd3.supplier_id AND e3.source_type = 'cash' AND e3.source_id = cd3.id
+                  {$on311}
+                 WHERE cd3.supplier_id = {$supplierId} AND {$where}";
+    }
+
+    /**
+     * Čerpání zálohy uhrazené na 311 konečnými fakturami: `final_id`, `proforma_id`, `drawn`
+     * (Kč). Faktura s odpočtovými řádky zálohy ubírá jejich základ (daň zálohy z 311 odčerpal
+     * daňový doklad k platbě) a k nim odečet úhrady bez DDKP v hlavičce. Čerpá-li zálohu postupně víc faktur
+     * (milníky) nebo jedna faktura víc záloh, má tak každá faktura vyrovnaný jen svůj díl;
+     * úhrada zálohy a její DDKP pak do skupiny konečné faktury nepatří. Faktura bez odpočtových
+     * řádků zálohy (ručně navázaná, převzatá, vyúčtování jen odečtem v hlavičce) sem nepatří,
+     * zálohu jí dál přiřadí `final_of`.
+     * Vyžaduje CTE `advance_311`. Bez placeholderů, firma literálem.
+     */
+    private static function advanceDrawSql(int $supplierId): string
+    {
+        $rate = "CASE WHEN fcur.code = 'CZK' OR f.exchange_rate IS NULL OR f.exchange_rate <= 0 THEN 1 ELSE f.exchange_rate END";
+        $deduction = \MyInvoice\Support\Sql\AdvanceDrawSql::deductionLine('pii');
+        $lines = "SELECT -SUM(pii.total_without_vat) FROM invoice_items pii
+                   WHERE pii.invoice_id = f.id AND COALESCE(pii.advance_invoice_id, f.parent_invoice_id) = f.parent_invoice_id
+                     AND {$deduction}";
+        return "SELECT d.final_id, d.proforma_id, SUM(d.drawn) AS drawn
+                  FROM (SELECT f.id AS final_id, f.parent_invoice_id AS proforma_id,
+                               CASE WHEN COALESCE(({$lines}), 0) > 0.005
+                                    THEN ROUND((f.advance_paid_amount + ({$lines})) * {$rate}, 2) ELSE 0 END AS drawn
+                          FROM advance_311 a3
+                          JOIN invoices f ON f.supplier_id = {$supplierId} AND f.parent_invoice_id = a3.proforma_id
+                                         AND f.invoice_type = 'invoice' AND f.cancelled_at IS NULL
+                          JOIN currencies fcur ON fcur.id = f.currency_id
+                        UNION ALL
+                        SELECT f.id, pii.advance_invoice_id, ROUND(-SUM(pii.total_without_vat) * {$rate}, 2)
+                          FROM advance_311 a3
+                          JOIN invoice_items pii ON pii.advance_invoice_id = a3.proforma_id
+                          JOIN invoices f ON f.id = pii.invoice_id AND f.supplier_id = {$supplierId}
+                                         AND f.invoice_type = 'invoice' AND f.cancelled_at IS NULL
+                                         AND pii.advance_invoice_id <> COALESCE(f.parent_invoice_id, 0)
+                          JOIN currencies fcur ON fcur.id = f.currency_id
+                         WHERE {$deduction}
+                         GROUP BY f.id, pii.advance_invoice_id, fcur.code, f.exchange_rate) d
+                 WHERE d.drawn > 0.005
+                 GROUP BY d.final_id, d.proforma_id";
     }
 
     /**
@@ -1780,7 +1951,7 @@ final class ClosingRepository
             ), bank_debit AS (
                 SELECT e.source_id AS bank_transaction_id,
                        SUM(CASE WHEN l.side = 'debit' THEN l.signed_amount ELSE -l.signed_amount END) AS net_debit
-                  FROM journal_entries e
+                  FROM journal_entries e FORCE INDEX (idx_je_supplier_source)
                   JOIN journal_entry_lines l ON l.entry_id = e.id AND l.supplier_id = e.supplier_id
                   JOIN chart_of_accounts ca ON ca.id = l.account_id
                   LEFT JOIN chart_of_accounts pa ON pa.id = ca.parent_id
@@ -2517,7 +2688,7 @@ final class ClosingRepository
             ), bank_credit AS (
                 SELECT e.source_id AS bank_transaction_id,
                        SUM(CASE WHEN l.side = 'credit' THEN l.signed_amount ELSE -l.signed_amount END) AS net_credit
-                  FROM journal_entries e
+                  FROM journal_entries e FORCE INDEX (idx_je_supplier_source)
                   JOIN journal_entry_lines l ON l.entry_id = e.id AND l.supplier_id = e.supplier_id
                   JOIN chart_of_accounts ca ON ca.id = l.account_id
                   LEFT JOIN chart_of_accounts pa ON pa.id = ca.parent_id
@@ -2646,7 +2817,7 @@ final class ClosingRepository
             ), bank_debit AS (
                 SELECT e.source_id AS bank_transaction_id,
                        SUM(CASE WHEN l.side = 'debit' THEN l.signed_amount ELSE -l.signed_amount END) AS net_debit
-                  FROM journal_entries e
+                  FROM journal_entries e FORCE INDEX (idx_je_supplier_source)
                   JOIN journal_entry_lines l ON l.entry_id = e.id AND l.supplier_id = e.supplier_id
                   JOIN chart_of_accounts ca ON ca.id = l.account_id
                   LEFT JOIN chart_of_accounts pa ON pa.id = ca.parent_id

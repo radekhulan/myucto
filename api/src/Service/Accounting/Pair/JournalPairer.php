@@ -188,7 +188,8 @@ final class JournalPairer
      * (311, 321, 331, 221) od výsledkového řádku dokladu. Doplňuje se jen chybějící:
      * středisko a zakázka, když je řádek nemá, dimenze a rozpady po typech, které řádek
      * nemá ani jako hodnotu, ani jako rozpad (s původem přiřazení). Co řádek už má,
-     * se nepřepisuje. Řádky bez `pair_no` (složený zápis) zůstávají beze změny.
+     * se nepřepisuje. S doplněnými dimenzemi či rozpady jde i odkaz na zdrojový řádek dokladu
+     * (`dimension_carry_lines`, časové rozlišení). Řádky bez `pair_no` (složený zápis) zůstávají beze změny.
      *
      * Volá ho jen zaúčtování v jednoduché formě, ne zobrazení ani převod starších zápisů.
      *
@@ -253,6 +254,16 @@ final class JournalPairer
         }
         if ($addedSplits) {
             ksort($target['dimension_splits']);
+        }
+        // Převzaté hodnoty nesou s sebou i odkaz na řádek dokladu, ze kterého pocházejí
+        // (časové rozlišení): podle něj politika dimenzí přijme i hodnotu uzavřenou až po
+        // zaúčtování dokladu. Odkaz platí pro celý řádek; politika z něj uzná jen dvojice
+        // typ–hodnota, které uvedený řádek dokladu skutečně nese, a jen u zdrojů uzávěrky.
+        if (($addedDims || $addedSplits) && isset($source['dimension_carry_lines'])) {
+            $target['dimension_carry_lines'] = array_values(array_unique(array_merge(
+                array_map('intval', (array) ($target['dimension_carry_lines'] ?? [])),
+                array_map('intval', (array) $source['dimension_carry_lines']),
+            )));
         }
         return $target;
     }

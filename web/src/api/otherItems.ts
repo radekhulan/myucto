@@ -1,5 +1,6 @@
 import { api } from './client'
 import type { MatchCandidate } from './bank'
+import type { PostedDeletion } from './accounting'
 
 export type OtherItemSide = 'receivable' | 'payable'
 export type OtherItemStatus = 'draft' | 'posted' | 'reversed' | 'confirmed' | 'cancelled' | 'paid' | 'partial' | 'forecast'
@@ -111,6 +112,8 @@ export interface OtherItem {
   posting_lines?: OtherItemPostingLine[]
   note?: string | null
   journal_entry_id?: number | null
+  /** Jen detail zaúčtované položky: smí se smazat i se zápisem? */
+  posted_deletion?: PostedDeletion
   /** Vlastní kontace úhrad položky (podvojné účetnictví). */
   posting_overrides?: Partial<Record<OtherItemOverrideEvent, OtherItemPostingRule>>
   /** Účinná kontace vzniku a úhrad; prázdný objekt v daňové evidenci. */
@@ -277,6 +280,14 @@ export const otherItemsApi = {
   updateCounterpartyAccount: (id: number, counterpartyAccount: string | null) =>
     api.put<OtherItem>(`/accounting/other-items/${id}/counterparty-account`, { counterparty_account: counterpartyAccount }).then(r => r.data),
   remove: (id: number) => api.delete(`/accounting/other-items/${id}`).then(r => r.data),
+  /** Poznámka vystaveného dokladu (popisný údaj mimo účetnictví). */
+  updateText: (id: number, note: string | null) =>
+    api.put<OtherItem>(`/accounting/other-items/${id}/text`, { note }).then(r => r.data),
+  /** Smaže zaúčtovaný doklad i se zápisem v deníku; `ackLocked` = potvrzený zásah do uzamčeného období. */
+  removePosted: (id: number, ackLocked = false) =>
+    api.delete<{ deleted: boolean; journal_entry_id: number; status: string }>(`/accounting/other-items/${id}/posted`, {
+      params: ackLocked ? { ack_locked: 1 } : undefined,
+    }).then(r => r.data),
   post: (id: number) => api.post<OtherItem>(`/accounting/other-items/${id}/post`).then(r => r.data),
   reverse: (id: number, payload: { reason: string; entry_date?: string }) =>
     api.post<OtherItem>(`/accounting/other-items/${id}/reverse`, payload).then(r => r.data),

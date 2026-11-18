@@ -14,6 +14,7 @@ use MyInvoice\Service\Anonymization\AnonymizationService;
 use MyInvoice\Service\Anonymization\DatabaseCloner;
 use MyInvoice\Service\Anonymization\Pseudonymizer;
 use MyInvoice\Service\Auth\SecretEncryption;
+use MyInvoice\Service\Nonprofit\Membership\MembershipCorrectionService;
 use MyInvoice\Service\Payroll\Security\PayrollRevealPurpose;
 use MyInvoice\Service\Payroll\Security\PayrollSensitiveData;
 use MyInvoice\Service\Payroll\Security\PayrollSensitiveField;
@@ -34,6 +35,7 @@ final class AnonymizationServiceTest extends TestCase
     private const COMPANY = 'Zkušební Montáže Anonym s.r.o.';
     private const PERSON = 'Radomíra Zkušebnová';
     private const EMAIL = 'kontakt@zkusebni-montaze.example';
+    private const MEMBER_NUMBER = 'ZK-CLEN-4711';
     private const ACCOUNT = '1000000005';
 
     private PDO $server;
@@ -189,9 +191,12 @@ final class AnonymizationServiceTest extends TestCase
         self::assertStringNotContainsString(self::EMAIL, $history, 'Historie verzované tabulky nesmí v kopii nést původní hodnoty.');
         self::assertContains('journal_entries', $plan['system_versioned'], 'Verzovanou tabulku pozná plán podle definice.');
         $dump = $this->tableTexts($this->target, ['clients', 'client_bank_accounts', 'payroll_employees', 'activity_log', 'supplier', 'users']);
-        foreach ([self::COMPANY, 'Zkušební Montáže', self::PERSON, 'Zkušebnová', self::EMAIL, self::ACCOUNT, $this->ico, $this->birthNumber, str_replace('/', '', $this->birthNumber)] as $needle) {
+        foreach ([self::COMPANY, 'Zkušební Montáže', self::PERSON, 'Zkušebnová', self::EMAIL, self::ACCOUNT, $this->ico, $this->birthNumber, str_replace('/', '', $this->birthNumber), self::MEMBER_NUMBER] as $needle) {
             self::assertStringNotContainsString($needle, $dump, "V kopii zůstal originální údaj {$needle}.");
         }
+        $audit = $this->server->query('SELECT action, payload FROM ' . DatabaseCloner::quote($this->target) . ".activity_log WHERE action LIKE 'nonprofit\\_membership\\_%'")->fetchAll(PDO::FETCH_KEY_PAIR);
+        self::assertCount(3, $audit, 'Audit oprav členské evidence zůstává v kopii, jen bez původních údajů.');
+        self::assertSame([7], json_decode((string) $audit[MembershipCorrectionService::AUDIT_MEMBER_DELETE], true)['rejected_batch_ids']);
 
         $client = $this->row($this->target, 'SELECT company_name, ic, dic, main_email, note, email_subject_format, email_attachment_name_format FROM clients WHERE id = ?', [$this->clientId]);
         self::assertStringEndsWith('s.r.o.', (string) $client['company_name']);
@@ -366,6 +371,20 @@ final class AnonymizationServiceTest extends TestCase
             ->execute([$this->supplierId, $this->clientId, $payload]);
         $chain = new ActivityLogHashChain(new Connection($this->targetConfig($this->source)));
         $chain->seal((int) $pdo->lastInsertId());
+        // Audit oprav členské evidence (MembershipCorrectionService): členské číslo (klíč membernumber, tvar) a důvod
+        // zrušení revize, který se jako ostatní volné texty čistí od osobních údajů (jméno, e-mail), ne celý.
+        $membershipAudit = [
+            MembershipCorrectionService::AUDIT_MEMBER_UPDATE => ['before' => ['client_id' => $this->clientId, 'member_number' => self::MEMBER_NUMBER],
+                'after' => ['client_id' => $this->clientId, 'member_number' => self::MEMBER_NUMBER . '-B']],
+            MembershipCorrectionService::AUDIT_MEMBER_DELETE => ['client_id' => $this->clientId, 'member_number' => self::MEMBER_NUMBER . '-C', 'rejected_batch_ids' => [7]],
+            MembershipCorrectionService::AUDIT_REVISION_VOID => ['revision_id' => 11, 'revision_no' => 2, 'voiding_revision_id' => 12,
+                'reason' => 'Chybně zadal ' . self::PERSON . ' <' . self::EMAIL . '>'],
+        ];
+        foreach ($membershipAudit as $action => $details) {
+            $pdo->prepare("INSERT INTO activity_log (supplier_id, action, entity_type, entity_id, payload) VALUES (?, ?, 'nonprofit_member', 1, ?)")
+                ->execute([$this->supplierId, $action, json_encode($details, JSON_UNESCAPED_UNICODE)]);
+            $chain->seal((int) $pdo->lastInsertId());
+        }
         $pdo->exec('SET SESSION FOREIGN_KEY_CHECKS = 1');
     }
 

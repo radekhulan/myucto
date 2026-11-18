@@ -46,6 +46,7 @@ final class AnonymizationPolicy
      * @var array<string,string> tabulka → důvod
      */
     public const TRUNCATE = [
+        'activity_log_redactions' => 'klon přegeneruje payload i hash auditní stopy; otisk redakce vázaný na původní hash by v kopii neplatil',
         'nonprofit_membership_batch_members' => 'rozpracované dávky nelze přehrávat nad pseudonymizovanými podklady',
         'nonprofit_membership_batches' => 'požadavky dávek obsahují osobní podklady; finanční operace se anonymizují samostatně',
         'accounting_securities_debt_commands' => 'původní idempotentní odpovědi obsahují soukromé podklady instrumentů',
@@ -145,10 +146,14 @@ final class AnonymizationPolicy
     /** @var array<string, array<string,string>> */
     public const COLUMNS = [
         'nonprofit_members' => ['member_number'=>'keep'],
-        'nonprofit_member_revisions' => ['legal_basis_json'=>'keep','request_json'=>'keep','idempotency_key'=>'keep','request_hash'=>'keep','parent_hash'=>'keep','record_hash'=>'keep'],
-        'nonprofit_membership_charge_cases' => ['title_key'=>'keep'],
-        'nonprofit_membership_charge_commands' => ['idempotency_key'=>'keep','request_json'=>'keep','request_hash'=>'keep'],
-        'nonprofit_membership_charge_operations' => ['preview_hash'=>'keep','proof_json'=>'keep','receipt_json'=>'keep','parent_hash'=>'keep','record_hash'=>'keep'],
+        // Pečeť výmazu (krok 10) klon zahodí: obsah přepíše MembershipCloneScrubber a otisky přepočítá.
+        'nonprofit_member_revisions' => ['legal_basis_json'=>'keep','request_json'=>'keep','idempotency_key'=>'keep','request_hash'=>'keep','parent_hash'=>'keep','record_hash'=>'keep','erased_digest'=>'keep'],
+        'nonprofit_membership_charge_cases' => ['title_key'=>'keep', 'variable_symbol'=>'payment_symbol'],
+        'nonprofit_membership_charge_commands' => ['idempotency_key'=>'keep','request_json'=>'keep','request_hash'=>'keep','erased_digest'=>'keep'],
+        'nonprofit_membership_charge_operations' => ['preview_hash'=>'keep','proof_json'=>'keep','receipt_json'=>'keep','parent_hash'=>'keep','record_hash'=>'keep','erased_digest'=>'keep'],
+        // Doklad o výmazu nenese osobní údaj; poznámka návrhu je volný text.
+        'nonprofit_membership_erasure_proposals' => ['note'=>'text'],
+        'nonprofit_membership_erasure_items' => ['skip_reason'=>'keep','counts_json'=>'keep'],
         'nonprofit_membership_charge_claims' => ['record_hash'=>'keep'],
         // Sazba je firemní číselník, ne finanční důkaz. Volné podklady mohou obsahovat osobní údaje.
         'nonprofit_membership_rates' => ['name'=>'text', 'receivable_account'=>'keep', 'revenue_account'=>'keep',
@@ -313,11 +318,12 @@ final class AnonymizationPolicy
         'bank_match_audit' => ['invoice_ids' => 'keep', 'signals_json' => 'json'],
         'bank_match_suggestions' => ['candidates_json' => 'json', 'reason' => 'keep'],
         'bank_oauth_clients' => ['credentials_ciphertext' => 'wipe', 'provider' => 'keep'],
-        'bank_payment_order_submissions' => ['error_code' => 'keep', 'payload_hash' => 'keep', 'provider' => 'keep', 'provider_poll_id' => 'keep',
+        'bank_payment_order_submissions' => ['error_code' => 'keep', 'payload_hash' => 'keep', 'provider' => 'keep', 'provider_error_code' => 'keep',
+            'provider_error_message' => 'text', 'provider_error_scope' => 'keep', 'provider_poll_id' => 'keep',
             'provider_reference' => 'keep', 'provider_sign_hash' => 'keep', 'signature_state' => 'keep'],
         'bank_payment_submission_items' => ['creditor_iban' => 'iban', 'error_code' => 'keep', 'instruction_identification' => 'keep',
-            'instruction_status' => 'keep', 'provider_hash' => 'keep', 'provider_sign_id' => 'keep', 'status_change_info' => 'keep',
-            'variable_symbol' => 'symbol'],
+            'instruction_status' => 'keep', 'provider_error_code' => 'keep', 'provider_error_message' => 'text', 'provider_error_scope' => 'keep',
+            'provider_hash' => 'keep', 'provider_sign_id' => 'keep', 'status_change_info' => 'keep', 'variable_symbol' => 'symbol'],
         'bank_posting_rules' => ['applies_currency' => 'keep', 'counterparty_account' => 'bank_account', 'counterparty_bank' => 'keep', 'counterparty_prefix' => 'keep', 'credit_account_code' => 'keep', 'debit_account_code' => 'keep', 'description' => 'text', 'message_contains' => 'text', 'name' => 'text', 'operation_type' => 'keep', 'system_template_key' => 'keep', 'variable_symbol' => 'symbol'],
         'bank_posting_suggestions' => ['ai_model' => 'keep', 'ai_prompt_version' => 'keep', 'ai_provider' => 'keep', 'ai_reasoning' => 'text', 'batch_id' => 'keep', 'credit_account_code' => 'keep', 'debit_account_code' => 'keep', 'description' => 'text', 'detector' => 'keep', 'note' => 'text', 'operation_type' => 'keep', 'snooze_reason' => 'keep'],
         'bank_rule_template_defaults' => ['counterparty_bank' => 'keep', 'counterparty_prefix' => 'keep', 'message_contains' => 'keep', 'name_cs' => 'keep', 'name_en' => 'keep', 'operation_type' => 'keep', 'rule_key' => 'keep', 'template_key' => 'keep', 'vs_placeholder' => 'keep'],
@@ -611,6 +617,7 @@ final class AnonymizationPolicy
         'payroll_period_export_jobs' => ['last_error_code' => 'keep', 'last_error_message' => 'text', 'lease_token' => 'keep'],
         'payroll_period_exports' => ['file_sha256' => 'keep', 'manifest_json' => 'json', 'mime_type' => 'keep', 'source_manifest_hash' => 'keep', 'storage_key' => 'keep', 'suggested_filename' => 'file_name'],
         'payroll_period_ownership' => ['source_type' => 'keep'],
+        'payroll_posting_imports' => ['file_name' => 'file_name', 'file_sha256' => 'keep', 'internal_document_ids' => 'keep', 'other_item_ids' => 'keep', 'pack_id' => 'keep', 'period' => 'keep', 'source_application' => 'keep', 'source_ico' => 'ico', 'sym_par' => 'keep'],
         'payroll_person_accounts' => ['bank_account_ciphertext' => 'sealed:bank_account:bank_account_hash:bank_account_masked:id', 'bank_account_hash' => 'sealed_companion', 'bank_account_masked' => 'sealed_companion', 'label' => 'text'],
         'payroll_person_addresses' => ['city' => 'city', 'country_code' => 'keep', 'postal_code' => 'zip', 'street_line' => 'street'],
         'payroll_person_contacts' => ['contact_value_ciphertext' => 'sealed:@contact_type:contact_value_hash:contact_value_masked:id', 'contact_value_hash' => 'sealed_companion', 'contact_value_masked' => 'sealed_companion'],
@@ -861,7 +868,7 @@ final class AnonymizationPolicy
     public const PHASE_STRUCTURED = [
         'party_name', 'person_name', 'first_name', 'last_name', 'street', 'city', 'zip', 'address',
         'ico', 'dic', 'birth_number', 'email', 'phone', 'bank_account', 'iban', 'card_last4',
-        'data_box', 'web', 'host', 'login', 'shape', 'shape_digits', 'file_name', 'file_path',
+        'data_box', 'web', 'host', 'login', 'shape', 'shape_digits', 'payment_symbol', 'file_name', 'file_path',
         'wipe', 'token', 'password', 'blob_pdf', 'blob_text', 'cssz_variable_symbol',
     ];
 

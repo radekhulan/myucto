@@ -54,6 +54,44 @@ final class DimensionDefaults
     }
 
     /**
+     * {@see resolve()} pro víc dokladů najednou: zakázka > klient (dodavatel), se stejným
+     * filtrem neaktivních hodnot a typů. Čte dávkou, počet dotazů nezávisí na počtu dokladů.
+     *
+     * @param array<int,array{0:?int,1:?int}> $parties klíč (doklad) => [klient, zakázka]
+     * @return array<int,array<int,int>> klíč => typ => hodnota (jen neprázdné)
+     */
+    public function resolveMany(int $supplierId, array $parties): array
+    {
+        $clientIds = $projectIds = [];
+        foreach ($parties as [$clientId, $projectId]) {
+            if ($clientId !== null && $clientId > 0) {
+                $clientIds[] = $clientId;
+            }
+            if ($projectId !== null && $projectId > 0) {
+                $projectIds[] = $projectId;
+            }
+        }
+        $repo = new DimensionDefaultRepository($this->db);
+        $byProject = $repo->forEntities($supplierId, 'project', $projectIds);
+        $byClient = $repo->forEntities($supplierId, 'client', $clientIds);
+        if ($byProject === [] && $byClient === []) {
+            return [];
+        }
+        $context = $this->mergeContext($supplierId, [...array_values($byProject), ...array_values($byClient)]);
+        $out = [];
+        foreach ($parties as $key => [$clientId, $projectId]) {
+            $header = self::mergeLayers([
+                'project:' . (int) $projectId => $byProject[(int) $projectId] ?? [],
+                'client:' . (int) $clientId => $byClient[(int) $clientId] ?? [],
+            ], $context)['header'];
+            if ($header !== []) {
+                $out[$key] = $header;
+            }
+        }
+        return $out;
+    }
+
+    /**
      * Výchozí dimenze položek z produktu: produkt > jeho kategorie > nadřízené kategorie,
      * typ po typu (Účtování podle dimenzí, F1). Volá je předvyplnění položky v editoru
      * i {@see DimensionStamper}, takže položka bez vlastních dimenzí dostane při
@@ -76,13 +114,15 @@ final class DimensionDefaults
         if ($own === [] && $categories === []) {
             return [];
         }
+        // Typy a hodnoty jedním čtením pro všechny produkty, ne po produktech.
+        $context = $this->mergeContext($supplierId, [...array_values($own), ...array_values($categories)]);
         $out = [];
         foreach ($productIds as $productId) {
             $layers = ['product:' . $productId => $own[$productId] ?? []];
             foreach ($chains[$productId] ?? [] as $categoryId) {
                 $layers['product_category:' . $categoryId] = $categories[$categoryId] ?? [];
             }
-            $merged = $this->merge($supplierId, $layers);
+            $merged = self::mergeLayers($layers, $context);
             if ($merged['header'] === []) {
                 continue;
             }
@@ -626,11 +666,94 @@ final class DimensionDefaults
                 ];
             }
         }
+        array_push($documents, ...$this->membershipClaims($supplierId, $transactionId, $withOrigins));
         return [
             'incoming' => (float) $tx['amount'] > 0,
             'documents' => $documents,
             'statement_account' => ['number' => (string) ($tx['account_number'] ?? ''), 'bank' => (string) ($tx['bank_code'] ?? '')],
         ];
+    }
+
+    /** @var array{0:int,1:int,2:list<int>}|null firma, pohyb a předpisy, které právě zaúčtovávané párování hradí */
+    private static ?array $pendingMembershipClaims = null;
+
+    /**
+     * Jen pro {@see \MyInvoice\Service\Nonprofit\Membership\MembershipBankMatchService::match()}: párování
+     * zaúčtovává dosud nezaúčtovaný pohyb dřív, než může vzniknout okruh. Razítka zápisu i kontrola pravidel
+     * dimenzí tak vidí dimenze hrazených předpisů už při zaúčtování (jinak by povinné pravidlo na 315
+     * nebo systémové dimenze zápis odmítly, i když je předpis nese). Platí jen pro tento pohyb a dokud
+     * okruh neexistuje.
+     *
+     * @param list<int> $claimIds
+     */
+    public static function withPendingMembershipClaims(int $supplierId, int $transactionId, array $claimIds, callable $post): mixed
+    {
+        $previous = self::$pendingMembershipClaims;
+        self::$pendingMembershipClaims = [$supplierId, $transactionId, array_values(array_map('intval', $claimIds))];
+        try {
+            return $post();
+        } finally {
+            self::$pendingMembershipClaims = $previous;
+        }
+    }
+
+    /**
+     * Členské předpisy hrazené pohybem (nativní párování bankovního zápisu s řádkem pohledávky,
+     * {@see \MyInvoice\Service\Nonprofit\Membership\MembershipBankPaymentGuard::entryUsedSql()}).
+     * Předpis nemá vlastní dimenze dokladu: hlavičkou jsou dimenze jeho řádku pohledávky,
+     * aby se úhrada vyrovnala s pohledávkou i po dimenzi (stejný požadavek jako saldokonto
+     * faktur, #312). Jen podvojné účetnictví; daňová evidence předpisy nemá.
+     *
+     * @return list<array<string,mixed>>
+     */
+    private function membershipClaims(int $supplierId, int $transactionId, bool $withOrigins): array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT c.id, c.amount_cents, l.id AS line_id
+               FROM journal_entries be
+               JOIN journal_line_pairing_items bp ON bp.supplier_id = be.supplier_id AND bp.entry_id = be.id
+               JOIN journal_line_pairing_items cp ON cp.supplier_id = bp.supplier_id AND cp.pairing_id = bp.pairing_id
+                AND cp.entry_id <> be.id
+               JOIN nonprofit_membership_charge_operations mop ON mop.supplier_id = cp.supplier_id
+                AND mop.journal_entry_id = cp.entry_id AND mop.operation = 'issue'
+               JOIN journal_entry_lines l ON l.supplier_id = cp.supplier_id AND l.entry_id = cp.entry_id
+                AND l.line_no = cp.line_no AND l.account_id = cp.account_id AND l.id = mop.receivable_line_id
+               JOIN nonprofit_membership_charge_claims c ON c.supplier_id = mop.supplier_id
+                AND c.operation_id = mop.id AND c.kind = 'issue'
+              WHERE be.supplier_id = ? AND be.source_type = 'bank' AND be.source_id = ? AND be.reversed_by IS NULL
+           GROUP BY c.id, c.amount_cents, l.id
+           ORDER BY c.id"
+        );
+        $stmt->execute([$supplierId, $transactionId]);
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        $pending = self::$pendingMembershipClaims;
+        if ($rows === [] && $pending !== null && $pending[0] === $supplierId && $pending[1] === $transactionId && $pending[2] !== []) {
+            $marks = implode(',', array_fill(0, count($pending[2]), '?'));
+            $stmt = $this->db->pdo()->prepare(
+                "SELECT c.id, c.amount_cents, mop.receivable_line_id AS line_id
+                   FROM nonprofit_membership_charge_claims c
+                   JOIN nonprofit_membership_charge_operations mop ON mop.supplier_id = c.supplier_id
+                    AND mop.id = c.operation_id AND mop.operation = 'issue'
+                  WHERE c.supplier_id = ? AND c.kind = 'issue' AND c.id IN ($marks)
+               ORDER BY c.id"
+            );
+            $stmt->execute([$supplierId, ...$pending[2]]);
+            $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        }
+        if ($rows === []) {
+            return [];
+        }
+        $assignments = new DimensionAssignmentRepository($this->db);
+        $lineIds = array_map(static fn (array $r): int => (int) $r['line_id'], $rows);
+        $dims = $assignments->lineDimensions($supplierId, $lineIds);
+        $origins = $withOrigins ? $assignments->lineOrigins($supplierId, $lineIds) : [];
+        return array_map(static fn (array $r): array => [
+            'doc_type' => 'membership_claim',
+            'doc_id' => (int) $r['id'],
+            'amount' => round((int) $r['amount_cents'] / 100, 2),
+            'header' => $dims[(int) $r['line_id']] ?? [],
+            ...($withOrigins ? ['origins' => $origins[(int) $r['line_id']] ?? []] : []),
+        ], $rows);
     }
 
     /**
@@ -722,27 +845,49 @@ final class DimensionDefaults
      */
     private function merge(int $supplierId, array $layers): array
     {
+        return self::mergeLayers($layers, $this->mergeContext($supplierId, array_values($layers)));
+    }
+
+    /**
+     * Aktivní typy a hodnoty vrstev pro {@see mergeLayers()}; bez hodnot se nečte nic.
+     *
+     * @param list<array<int,int>> $layers typ => hodnota
+     * @return array{types:array<int,true>, values:array<int,array<string,mixed>>}
+     */
+    private function mergeContext(int $supplierId, array $layers): array
+    {
         $all = [];
         foreach ($layers as $dims) {
             array_push($all, ...array_values($dims));
         }
         if ($all === []) {
-            return ['header' => [], 'sources' => [], 'origins' => []];
+            return ['types' => [], 'values' => []];
         }
         $dimRepo = new DimensionRepository($this->db);
         $types = [];
         foreach ($dimRepo->listTypes($supplierId, false) as $t) {
             $types[$t['id']] = true;
         }
-        $values = $dimRepo->valuesByIds($supplierId, $all);
+        return ['types' => $types, 'values' => $dimRepo->valuesByIds($supplierId, $all)];
+    }
+
+    /**
+     * Složí vrstvy typ po typu: bere první vrstvu s aktivní hodnotou aktivního typu.
+     *
+     * @param array<string,array<int,int>> $layers zdroj => typ => hodnota, v pořadí přednosti
+     * @param array{types:array<int,true>, values:array<int,array<string,mixed>>} $context výstup {@see mergeContext()}
+     * @return array{header:array<int,int>, sources:array<int,string>, origins:array<int,array{origin:string,ref:string}>}
+     */
+    private static function mergeLayers(array $layers, array $context): array
+    {
         $header = [];
         $sources = [];
         $origins = [];
         foreach ($layers as $source => $dims) {
             foreach ($dims as $typeId => $valueId) {
-                $value = $values[$valueId] ?? null;
+                $value = $context['values'][$valueId] ?? null;
                 if (isset($header[$typeId]) || $value === null || !$value['is_active']
-                    || $value['type_id'] !== $typeId || !isset($types[$typeId])) {
+                    || $value['type_id'] !== $typeId || !isset($context['types'][$typeId])) {
                     continue;
                 }
                 $header[$typeId] = $valueId;

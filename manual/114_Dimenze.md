@@ -100,6 +100,23 @@ se objeví na dokladech.
 1. Rozbalte zápis v účetním deníku.
 2. Klikněte na **Upravit dimenze** a uložte hodnoty.
 
+**Více vydaných faktur najednou:**
+
+1. Otevřete `Prodej → Vydané faktury` a zaškrtněte doklady. Mohou to být koncepty
+   i vystavené a zaúčtované faktury.
+2. V liště hromadných akcí klikněte na **Nastavit dimenze (N)**.
+3. U každého typu zvolte **Ponechat**, **Nastavit** (a vyberte hodnotu) nebo **Odebrat**.
+4. Klikněte na **Uložit dimenze**.
+
+Změna se týká dimenzí celého dokladu, dimenze položek zůstávají. Položka s vlastní
+hodnotou stejného typu si ji ponechá. Každý doklad se uloží stejně jako z panelu
+**Dimenze** na detailu, takže se změna promítne i do zaúčtovaných řádků deníku.
+Doklad, u kterého změna neprojde (uzavřené účetní období, rozdělení řádku nebo jiný
+analytický účet v zamčeném období), se přeskočí. Souhrn ukáže počet upravených,
+nezměněných a přeskočených dokladů a u každého přeskočeného důvod. Přeskočené doklady
+zůstanou vybrané. Najednou lze upravit nejvýše 500 dokladů. Akci vidí uživatel s právem
+zápisu do účetnictví.
+
 **Jak poznáte, že je hotovo:** doklad nebo pohyb ukazuje dimenze jako štítky a sestavy po dimenzi je zahrnují.
 
 > [!WARNING]
@@ -570,8 +587,12 @@ Změna dimenzí karty se promítne do jejích už zaúčtovaných zápisů majet
 změnila zápis uzavřeného období, odmítne se celé uložení karty. Přepíší se jen typy, které
 karta určuje: dimenze jiného typu zadaná ručně na řádku zápisu (například projekt
 u odpisu) zůstane. Totéž platí pro ostatní pohledávky a závazky a pro zápočty.
-Drobný majetek dimenze nese z přijaté faktury nákupu; časové rozlišení drobného
-majetku v uzávěrce je souhrnný zápis za období a dimenze nemá.
+Drobný majetek dimenze nese z přijaté faktury nákupu. Časové rozlišení drobného majetku
+v uzávěrce dělí řádek 501 podle dimenzí zápisu dokladu, ze kterého náklad pochází
+([§ 72](72_Uzaverka.md)); karta bez vazby na doklad zůstává mimo vyhlášku 504/2002 Sb.
+na řádku bez dimenzí, u vyhlášky 504/2002 Sb. ji krok odmítne (při poměrném rozlišení a u paušálu, který se dělí podle karet; u paušálu z faktur rozpisu 501
+rozhodují faktury rozpisu). Řádek jde z analytiky účtu 501, na které náklad
+v zápisu dokladu leží; účtotvorná dimenze ho dodatečně nepřesměruje.
 
 ### 114.11.9 Produkt a kategorie
 
@@ -759,7 +780,8 @@ Při zaúčtování:
 - Mapa platí podle data účetního případu. Rozvahové účty se nemapují nikdy, DPH
   ani kontrolní hlášení se nemění.
 - Náhled kontace před zaúčtováním ukáže, kam se syntetika přesune.
-- Časové rozlišení (381, 384) odkládá a rozpouští náklad i výnos z týchž analytik.
+- Časové rozlišení (381, 384) odkládá a rozpouští náklad i výnos z týchž analytik
+  a se stejnými dimenzemi, které nese řádek dokladu (viz [§ 72.4.4](72_Uzaverka.md#7244-kroky-4-a-5-dohadne-polozky-a-casove-rozliseni)).
 
 Změna dimenze u zaúčtovaného dokladu, která by přesunula řádek na jinou
 analytiku, se do deníku tiše nepromítne: řádek si ponechá dosavadní dimenzi
@@ -772,10 +794,56 @@ zůstaly na syntetice s mapou, typicky doklad bez střediska.
 
 ### 114.11.13 Mzdy
 
-Mzdy mají vlastní číselník středisek, zakázek a činností (Mzdy → Nastavení →
-Dimenze). Mzdovou dimenzi lze navázat na hodnotu firemní dimenze, takže jedno
-středisko platí pro faktury i mzdy. Vazba smí mířit jen na hodnotu firmy nebo
-její skupiny firem.
+Mzdy mají vlastní číselník středisek, zakázek a činností (Mzdy → Nastavení
+mezd → Dimenze). Mzdovou dimenzi lze navázat na hodnotu firemní dimenze, takže
+jedno středisko platí pro faktury i mzdy. Vazba smí mířit jen na hodnotu firmy
+nebo její skupiny firem a jen na odpovídající druh firemní dimenze:
+
+<!-- cols: 30 70 -->
+| Mzdová dimenze | Smí se navázat na |
+|---|---|
+| Středisko | hodnotu firemní dimenze druhu Středisko |
+| Zakázka | hodnotu firemní dimenze druhu Projekt |
+| Činnost | hodnotu jiného druhu než Středisko a Projekt (např. systémová Činnost) |
+
+Vazbu jiného druhu editor ani API neuloží. Starší vazbu jiného druhu úprava
+názvu nebo platnosti nezmění; kontrola před mzdovým během ji ukáže jako
+varování.
+
+#### Mzdy na zakázky krok za krokem
+
+Zakázka se do mzdového zápisu dostane jen přes řetěz mzdová dimenze → firemní
+dimenze → zakázka. Mzdová dimenze Zakázka bez vazby nese jen svůj kód
+v mzdových sestavách; v deníku po ní nezůstane nic a Ekonomika zakázky mzdy
+neuvidí.
+
+1. V `Zakázky` založte zakázku (nebo použijte existující).
+2. V `Firma → Dimenze` u typu druhu **Projekt** založte hodnotu a ve vazbě
+   hodnoty vyberte tuto zakázku ([§ 114.11.2](#114112-typy-a-hodnoty)).
+3. V `Mzdy → Nastavení mezd → Dimenze` klikněte na **Přidat dimenzi** a v poli
+   **Firemní dimenze** vyberte hodnotu z kroku 2. Typ se předvyplní na Zakázka,
+   název a kód podle hodnoty. U existující mzdové zakázky vazbu doplňte úpravou.
+4. Na kartě pracovního vztahu v `Mzdy → Zaměstnanci` přiřaďte vztahu mzdovou
+   zakázku, případně rozpad mezi více zakázek (např. 50 / 50).
+5. Zahajte mzdový běh. Kontrola před během hlásí mzdové dimenze vztahů běhu,
+   které vazbu na firemní dimenzi nemají nebo ji mají na jiný druh, s odkazem
+   na `Mzdy → Nastavení mezd → Dimenze`. Varování běh nezastaví; vazba se
+   zmrazí do vstupů běhu, takže doplněná až po schválení se do zápisu dostane
+   jen opravnou revizí.
+6. Po zaúčtování nesou nákladové řádky 521 a 524 vztahu firemní dimenzi
+   i zakázku. V podvojném účetnictví počítá Ekonomika zakázky z deníku, takže
+   v ní mzdový náklad uvidíte; v daňové evidenci sčítá jen doklady a mzdy
+   v ní nejsou.
+
+**Jak poznáte, že je hotovo:** v účetním deníku mají řádky 521 mzdového
+předpisu vyplněnou zakázku a v detailu zakázky je v Ekonomice zakázky mzdový
+náklad. Editor mzdové dimenze typu Zakázka bez vazby pod polem **Firemní
+dimenze** upozorní, že se zakázka do mzdového zápisu nepropíše.
+
+Firma bez zapnutých firemních dimenzí žádné takové varování nedostane; mzdy
+účtuje s textovým střediskem jako dosud.
+
+#### Zaúčtování
 
 Při zaúčtování schváleného mzdového běhu:
 
@@ -787,7 +855,11 @@ Při zaúčtování schváleného mzdového běhu:
   Haléř, který po dělení zbude, dostane podíl s největším zbytkem, součet tedy
   vždy sedí na haléř.
 - Závazky (331, 336, 342 a další) se na střediska nedělí. Dluží se jako celek.
-- Do deníku se neúčtuje po zaměstnancích. Mzdový předpis zůstává jeden za firmu.
+- Mzdový předpis zůstává jeden za firmu. Řádky jsou souhrnné za účet, stranu
+  a dimenze, pokud firma v `Mzdy → Nastavení mezd → Automatické účtování`
+  nezvolí u **Mzdový předpis** možnost **Po zaměstnancích**. Pak má každý
+  zaměstnanec vlastní řádky s osobním číslem a pojistné zaměstnavatele se
+  rozdělí na jeho pracovní vztahy.
 - Textový kód střediska se na řádky zapisuje dál, sestavy po středisku proto
   fungují i bez vazby.
 
@@ -940,8 +1012,9 @@ pracovat, dokud nebude licence znovu platná.
 měnit je smí uživatel s právem zápisu do účetnictví. Zapnutí dimenzí patří
 k nastavení firmy, skupinu firem spravuje správce firmy. Výchozí dimenze klienta
 a zakázky smí měnit ten, kdo smí upravovat klienta, resp. zakázku. Výchozí
-dimenze bankovního účtu smí měnit uživatel s právem zápisu do účetnictví.
-Schvalování přijatých dokladů řídí oprávnění **Schvalovat přijaté doklady**;
+dimenze bankovního účtu smí měnit uživatel s právem zápisu do účetnictví, stejně
+jako hromadně nastavit dimenze vybraným vydaným fakturám. Přes API token hromadná
+úprava dimenzí nejde. Schvalování přijatých dokladů řídí oprávnění **Schvalovat přijaté doklady**;
 odeslání ke schválení a jeho zrušení patří ke změně stavu přijaté faktury.
 
 ### 114.11.16 Převod z Money S3

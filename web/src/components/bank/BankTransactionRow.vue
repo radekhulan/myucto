@@ -122,7 +122,12 @@ const supersededNotice = computed(() => props.tx.notice_superseded === true)
 const otherItems = computed(() => props.tx.match_status === 'unmatched' ? props.tx.matched_other_items ?? [] : [])
 const otherItemMatched = computed(() => otherItems.value.length > 0)
 const otherItemLinks = computed(() => auth.canRead('other_items') ? otherItems.value : [])
-const noInvoiceExpected = computed(() => payrollMatched.value || ownTransfer.value || outsideSaldo.value || supersededNotice.value || otherItemMatched.value)
+const membershipMatched = computed(() => props.tx.resolution === 'membership' || (props.tx.matched_membership_claims?.length ?? 0) > 0)
+// Přehled příspěvků najde člena podle čísla; titul bez roku ukáže předpis z kteréhokoli roku.
+const membershipLink = (claim: { member_number: string; title_key: string }) =>
+  ({ name: 'accounting-nonprofit-membership', query: { search: claim.member_number, title_key: claim.title_key, year: '' } })
+const membershipLinks = computed(() => !auth.isClientRole && auth.canRead('accounting') ? props.tx.matched_membership_claims ?? [] : [])
+const noInvoiceExpected = computed(() => payrollMatched.value || ownTransfer.value || outsideSaldo.value || supersededNotice.value || otherItemMatched.value || membershipMatched.value)
 // Úhrady jednotek SVJ: řádek se jen přihlásí o vazbu, dotaz jde jednou za dávku řádků.
 // Firma bez profilu SVJ se neptá vůbec, SVJ bez povolených vazeb jen jednou (usePropertyBankLinks).
 const supplierStore = useSupplierStore()
@@ -140,9 +145,9 @@ const statusText = computed(() => supersededNotice.value
   ? t('bank.match_status.superseded')
   : payrollMatched.value ? t('bank.match_status.payroll')
     : ownTransfer.value ? t('bank.match_status.transfer')
-      : otherItemMatched.value ? t('bank.match_status.other_item')
+      : membershipMatched.value ? t('bank.match_status.membership') : otherItemMatched.value ? t('bank.match_status.other_item')
         : outsideSaldo.value ? t('bank.match_status.outside_saldo') : statusLabel(props.tx.match_status))
-const statusBadgeClass = computed(() => statusBadge(otherItemMatched.value
+const statusBadgeClass = computed(() => statusBadge(otherItemMatched.value || membershipMatched.value
   ? 'manual'
   : supersededNotice.value || outsideSaldo.value
   ? 'ignored'
@@ -461,6 +466,11 @@ function candidateReject() {
             class="text-primary-600 hover:underline">
             {{ tx.matched_purchase_ref || `#${tx.matched_purchase_invoice_id}` }}
           </RouterLink>
+          <template v-else-if="membershipLinks.length > 0">
+            <div v-for="claim in membershipLinks" :key="claim.claim_id" data-test="tx-membership-claim">
+              <RouterLink :to="membershipLink(claim)" class="text-primary-600 hover:underline">{{ claim.title_key }}</RouterLink>
+            </div>
+          </template>
           <template v-else-if="otherItemLinks.length > 0">
             <div v-for="item in otherItemLinks" :key="item.other_item_id" data-test="tx-other-item">
               <RouterLink :to="`/other-items/${item.other_item_id}`" class="text-primary-600 hover:underline">
@@ -668,6 +678,11 @@ function candidateReject() {
         {{ tx.matched_purchase_ref || `#${tx.matched_purchase_invoice_id}` }}
       </RouterLink>
       <span v-if="tx.matched_vendor_name" class="text-neutral-500 ml-2">{{ tx.matched_vendor_name }}</span>
+    </div>
+    <div v-else-if="membershipLinks.length > 0" class="text-xs">
+      <div v-for="claim in membershipLinks" :key="claim.claim_id" data-test="tx-membership-claim">
+        <RouterLink :to="membershipLink(claim)" class="text-primary-600 hover:underline">{{ claim.title_key }}</RouterLink>
+      </div>
     </div>
     <div v-else-if="otherItemLinks.length > 0" class="text-xs">
       <div v-for="item in otherItemLinks" :key="item.other_item_id" data-test="tx-other-item">

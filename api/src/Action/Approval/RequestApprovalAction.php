@@ -72,7 +72,7 @@ final class RequestApprovalAction
         if (
             InvoiceAmountPolicy::requiresPositiveDraftAmountToPay(
                 (string) ($invoice['invoice_type'] ?? 'invoice'),
-                $invoice['parent_invoice_id'] ?? null,
+                InvoiceAmountPolicy::advanceLinkId($invoice),
             )
             && !InvoiceAmountPolicy::hasPositiveAmountToPay($invoice)
             && !(InvoiceAmountPolicy::isAllowedRefundInvoice($invoice)

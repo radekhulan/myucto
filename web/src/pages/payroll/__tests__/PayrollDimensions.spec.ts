@@ -7,6 +7,7 @@ const m = vi.hoisted(() => ({
   createPayrollDimension: vi.fn(),
   updatePayrollDimension: vi.fn(),
   deletePayrollDimension: vi.fn(),
+  payrollCompanyDimensionValues: vi.fn(),
   toastSuccess: vi.fn(),
   toastError: vi.fn(),
 }))
@@ -17,6 +18,7 @@ vi.mock('@/api/payroll', () => ({
     createPayrollDimension: m.createPayrollDimension,
     updatePayrollDimension: m.updatePayrollDimension,
     deletePayrollDimension: m.deletePayrollDimension,
+    payrollCompanyDimensionValues: m.payrollCompanyDimensionValues,
   },
 }))
 
@@ -45,6 +47,7 @@ vi.mock('@/composables/useUserPrefs', async () => {
 })
 
 import PayrollDimensions from '@/pages/payroll/PayrollDimensions.vue'
+import SearchableSelect from '@/components/ui/SearchableSelect.vue'
 
 function dimension(overrides: Partial<PayrollDimension> = {}): PayrollDimension {
   return {
@@ -77,6 +80,7 @@ async function openNew(wrapper: Awaited<ReturnType<typeof mountPage>>) {
 describe('PayrollDimensions — kód z názvu', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    m.payrollCompanyDimensionValues.mockResolvedValue([])
   })
 
   it('odvodí kód z názvu, dokud do něj uživatel nesáhne', async () => {
@@ -119,6 +123,60 @@ describe('PayrollDimensions — kód z názvu', () => {
 
     await wrapper.get('[data-test="dimension-name"]').setValue('Jiný název')
     expect((code.element as HTMLInputElement).value).toBe('SPRAVA')
+
+    wrapper.unmount()
+  })
+})
+
+describe('PayrollDimensions — vazba na firemní dimenzi', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    m.payrollCompanyDimensionValues.mockResolvedValue([
+      { id: 5, type_id: 2, type_name: 'Střediska', type_kind: 'cost_center', code: 'STR-1', name: 'Středisko 1' },
+      { id: 6, type_id: 3, type_name: 'Zakázky', type_kind: 'project', code: 'ZAK-1', name: 'Zakázka 1' },
+    ])
+  })
+
+  async function editFirst(wrapper: Awaited<ReturnType<typeof mountPage>>) {
+    await wrapper.findAll('button').filter(button => button.text() === 'common.edit')[0].trigger('click')
+  }
+
+  function selectCompanyValue(wrapper: Awaited<ReturnType<typeof mountPage>>, valueId: number) {
+    const select = wrapper.findAllComponents(SearchableSelect)
+      .find(component => component.attributes('data-test') === 'dimension-company-value')!
+    select.vm.$emit('update:model-value', valueId)
+  }
+
+  it('zakázku bez vazby upozorní, že se do mzdového zápisu nepropíše', async () => {
+    const wrapper = await mountPage([dimension({ dimension_type: 'project', code: 'ZAK', dimension_value_id: null })])
+    await editFirst(wrapper)
+
+    expect(wrapper.find('[data-test="dimension-project-link-missing"]').exists()).toBe(true)
+
+    wrapper.unmount()
+  })
+
+  it('vazbu zakázky na středisko odmítne a neuloží', async () => {
+    const wrapper = await mountPage([dimension({ dimension_type: 'project', code: 'ZAK', dimension_value_id: null })])
+    await editFirst(wrapper)
+    selectCompanyValue(wrapper, 5)
+    await flushPromises()
+
+    expect(wrapper.get('[data-test="dimension-company-kind-error"]').text())
+      .toBe('payroll.employer.dimensions.validation.company_kind.project')
+
+    selectCompanyValue(wrapper, 6)
+    await flushPromises()
+    expect(wrapper.find('[data-test="dimension-company-kind-error"]').exists()).toBe(false)
+
+    wrapper.unmount()
+  })
+
+  it('dřív uloženou nesouladnou vazbu při úpravě neblokuje', async () => {
+    const wrapper = await mountPage([dimension({ dimension_type: 'project', code: 'ZAK', dimension_value_id: 5 })])
+    await editFirst(wrapper)
+
+    expect(wrapper.find('[data-test="dimension-company-kind-error"]').exists()).toBe(false)
 
     wrapper.unmount()
   })

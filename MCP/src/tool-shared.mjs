@@ -95,3 +95,36 @@ export const merged = (current, a, keys) => Object.fromEntries(
     .filter((k) => a[k] !== undefined || current?.[k] !== undefined)
     .map((k) => [k, a[k] !== undefined ? a[k] : current[k]]),
 );
+
+/** Způsoby úhrady dokladu, zrcadlo `PaymentMethods::ALL` na serveru. */
+export const PAYMENT_METHODS = ['bank_transfer', 'direct_debit', 'card', 'cash', 'cash_on_delivery', 'offset', 'other'];
+
+/** Popis způsobů úhrady pro model; inkaso a zápočet se jinak zaplatí podruhé příkazem. */
+export const PAYMENT_METHOD_HELP = 'Způsob úhrady: `bank_transfer` převodem, `direct_debit` inkaso nebo SIPO, '
+  + '`card` kartou, `cash` hotově (s pokladnou `cash_register_id` vznikne pokladní doklad), '
+  + '`cash_on_delivery` dobírka, `offset` zápočet, `other` jinak.';
+
+/**
+ * Prázdný text jako pokyn „smaž hodnotu": model posílá '' tam, kde člověk pole vymaže.
+ */
+export const nullIfEmpty = (value) => (value === '' ? null : value);
+
+/**
+ * Měna firmy podle kódu (`currency`) nebo ID (`currency_id`) z číselníku
+ * `GET /codebooks/currencies`. Vrací `{ id, code }`; neznámou měnu odmítne
+ * srozumitelnou chybou dřív, než by ji server tiše nahradil výchozí.
+ */
+export async function resolveCurrency(c, a, tool) {
+  const list = await c.get('/codebooks/currencies', { include_inactive: 1 }, tool);
+  const rows = Array.isArray(list) ? list : (list?.data ?? []);
+  if (a.currency_id !== undefined) {
+    const row = rows.find((r) => Number(r.id) === Number(a.currency_id));
+    if (!row) throw new Error(`Měna #${a.currency_id} ve firmě není. Seznam vrátí \`list_currencies\`.`);
+    return { id: Number(row.id), code: String(row.code).toUpperCase() };
+  }
+  const code = String(a.currency ?? '').trim().toUpperCase();
+  const hits = rows.filter((r) => String(r.code).toUpperCase() === code);
+  if (hits.length === 0) throw new Error(`Měna ${code} ve firmě není. Seznam vrátí \`list_currencies\`.`);
+  const row = hits.find((r) => r.is_default) ?? hits.find((r) => r.is_active) ?? hits[0];
+  return { id: Number(row.id), code };
+}

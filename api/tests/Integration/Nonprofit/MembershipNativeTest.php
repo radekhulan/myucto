@@ -11,10 +11,13 @@ use MyInvoice\Repository\DimensionAssignmentRepository;
 use MyInvoice\Repository\JournalLinePairingRepository;
 use MyInvoice\Repository\Nonprofit\Membership\MembershipBalanceRepository;
 use MyInvoice\Repository\Nonprofit\Membership\MembershipChargeRepository;
+use MyInvoice\Repository\Nonprofit\Membership\MembershipListRepository;
 use MyInvoice\Repository\Nonprofit\Membership\MembershipRepository;
 use MyInvoice\Service\Accounting\Dimension\SystemDimensionCatalog;
 use MyInvoice\Service\Accounting\PostingService;
 use MyInvoice\Service\Nonprofit\Membership\MembershipChargeService;
+use MyInvoice\Service\Nonprofit\Membership\MembershipException;
+use MyInvoice\Service\Nonprofit\Membership\MembershipListFilter;
 use MyInvoice\Service\Nonprofit\Membership\MembershipMemberService;
 use MyInvoice\Service\Nonprofit\Membership\MembershipPublicCatalog;
 use MyInvoice\Service\Nonprofit\Membership\MembershipReceivablePaymentAdapter;
@@ -285,6 +288,728 @@ final class MembershipNativeTest extends TestCase
         self::assertSame(0, (int) $this->pdo->query('SELECT COUNT(*) FROM nonprofit_membership_charge_operations WHERE supplier_id=' . $this->supplier)->fetchColumn());
     }
 
+    public function testMemberListFiltersAndStatusesAreComputedInOneQueryBeforePagination(): void
+    {
+        $none = $this->member('SYN-LIST-NONE', 'list-none');
+        $unknown = $this->member('SYN-LIST-UNKNOWN', 'list-unknown');
+        $partial = $this->member('SYN-LIST-PARTIAL', 'list-partial');
+        $this->issue($unknown['id'], 'list-unknown');
+        $issued = $this->issue($partial['id'], 'list-partial');
+        $this->payClaim($issued, '10000.00', 'list-partial');
+        $list = $this->listRows();
+        self::assertSame(['none', 'unpaid', 'unpaid'], array_column(array_column($list, 'contribution'), 'status'));
+        self::assertSame('2000000', $list[2]['contribution']['prescribed_cents']);
+        self::assertSame('1000000', $list[2]['contribution']['paid_cents']);
+        self::assertSame('1000000', $list[2]['contribution']['open_cents']);
+        self::assertSame('2000000', $list[1]['contribution']['open_cents']);
+        self::assertSame([0, 1, 0], array_column(array_column($list, 'contribution'), 'unpaired_count'), 'Text „bez spárované úhrady“ jen u předpisu bez párování.');
+        $filtered = $this->listRows(['payment_status' => 'unpaid'], 0, 1);
+        self::assertSame([$unknown['id']], array_column($filtered, 'id'), 'Filtr musí být před LIMIT a zahrnout předpis bez úhrady.');
+        self::assertSame([], array_column($this->listRows(['payment_status' => 'unproven']), 'id'));
+        self::assertSame([$none['id']], array_column($this->listRows(['payment_status' => 'none']), 'id'));
+        self::assertSame(1, $this->selectQueries(fn (): array => $this->listRows()));
+        self::assertSame([], $this->listRows(['title_key' => 'synthetic-missing', 'payment_status' => 'unpaid']));
+        self::assertSame(['none', 'none', 'none'], array_column(array_column($this->listRows(['year' => 2027]), 'contribution'), 'status'));
+        $this->pdo->prepare('UPDATE clients SET company_name=? WHERE supplier_id=? AND id=?')->execute(['Synthetic Rowan', $this->supplier, $partial['client_id']]);
+        self::assertSame([$partial['id']], array_column($this->listRows(['search' => 'rowan']), 'id'));
+        self::assertSame([$unknown['id']], array_column($this->listRows(['search' => 'UNKNOWN']), 'id'));
+        $filter = MembershipListFilter::parse(['year' => 2026]);
+        self::assertSame([], (new MembershipListRepository($this->db))->page($this->supplier + 100000, 0, 50, $filter));
+        $detail = (new MembershipReconciliationService($this->balances))->memberBalance($this->supplier, $partial['id']);
+        self::assertSame('partially_settled', $detail['items'][0]['settlement']['status']);
+        self::assertSame((string) $detail['items'][0]['settlement']['open_cents'], $list[2]['contribution']['open_cents']);
+    }
+
+    public function testUnfilteredMemberListAggregatesOnlyTheRequestedPage(): void
+    {
+        for ($i = 1; $i <= 5; $i++) {
+            $member = $this->member('SYN-LIMIT-' . $i, 'list-limit-' . $i);
+            $issued = $this->issue($member['id'], 'list-limit-' . $i);
+            $this->payClaim($issued, '10000.00', 'list-limit-payment-' . $i);
+        }
+        $filter = MembershipListFilter::parse(['year' => 2026]);
+        [$sql, $params] = (new MembershipListRepository($this->db))->query($this->supplier, 0, 1, $filter);
+        $q = $this->pdo->prepare('ANALYZE FORMAT=JSON ' . $sql);
+        $q->execute($params);
+        $plan = json_decode((string) $q->fetchColumn(), true, flags: JSON_THROW_ON_ERROR);
+        $examined = [];
+        $lineReads = [];
+        $pairReads = [];
+        $walk = function (array $node) use (&$walk, &$examined, &$lineReads, &$pairReads): void {
+            if (($node['table_name'] ?? null) === 'cc' && isset($node['r_rows'], $node['r_loops'])) {
+                $examined[] = (float) $node['r_rows'] * (float) $node['r_loops'];
+            }
+            if (($node['table_name'] ?? null) === 'l' && isset($node['r_rows'], $node['r_loops'])) {
+                $lineReads[] = (float) $node['r_rows'] * (float) $node['r_loops'];
+            }
+            if (($node['table_name'] ?? null) === 'i' && isset($node['r_rows'], $node['r_loops'])) {
+                $pairReads[] = (float) $node['r_rows'] * (float) $node['r_loops'];
+            }
+            foreach ($node as $value) {
+                if (is_array($value)) {
+                    $walk($value);
+                }
+            }
+        };
+        $walk($plan);
+        self::assertNotEmpty($examined, 'Měření musí skutečně číst účetní případy.');
+        foreach ($examined as $rows) {
+            self::assertLessThanOrEqual(1.0, $rows, 'Seznam bez filtru úhrady nesmí agregovat předpisy dalších čtyř členů.');
+        }
+        self::assertNotEmpty($lineReads);
+        foreach ($lineReads as $rows) {
+            self::assertLessThanOrEqual(4.0, $rows, 'Párování stránky nesmí začínat skenem všech účetních řádků firmy.');
+        }
+        self::assertNotEmpty($pairReads);
+        foreach ($pairReads as $rows) {
+            self::assertLessThanOrEqual(4.0, $rows, 'Párování stránky nesmí načíst skupiny ostatních členů.');
+        }
+    }
+
+    public function testMemberSummaryCountsUnpairedClaimAsOpenAndOnlyDamagedProofAsNeedingReview(): void
+    {
+        $member = $this->member('SYN-SUMMARY', 'summary');
+        $open = $this->issueTitle($member['id'], 'CLENSTVI', 'summary-open');
+        $damaged = $this->issueTitle($member['id'], 'VSTUP', 'summary-damaged');
+        $intact = (new MembershipReconciliationService($this->balances))->memberBalance($this->supplier, $member['id']);
+        $claimed = array_sum(array_column($intact['items'], 'amount_cents'));
+        self::assertGreaterThan(0, $claimed);
+        self::assertSame($claimed, $intact['page_open_cents'], 'Nespárované předpisy jsou otevřené celou částkou.');
+        // Úmyslně poškozené syntetické úložiště, nikoli podporovaná cesta účetní opravy.
+        $this->pdo->prepare('UPDATE journal_entry_lines SET amount=19999 WHERE supplier_id=? AND id=?')->execute([$this->supplier, $damaged['operation']['receivable_line_id']]);
+        $detail = (new MembershipReconciliationService($this->balances))->memberBalance($this->supplier, $member['id']);
+        $byOperation = array_column($detail['items'], null, 'operation_id');
+        self::assertSame('unreconciled', $byOperation[$open['operation']['id']]['settlement']['status']);
+        self::assertSame('ambiguous', $byOperation[$damaged['operation']['id']]['settlement']['status']);
+        self::assertNull($detail['page_open_cents'], 'S předpisem k prověření je zůstatek neurčený stejně jako v seznamu.');
+        $list = $this->listRows(['search' => 'SYN-SUMMARY']);
+        self::assertSame('unproven', $list[0]['contribution']['status']);
+        self::assertNull($list[0]['contribution']['open_cents']);
+        self::assertSame(1, $detail['page_needs_review_count'], 'K prověření je jen předpis s poškozeným důkazem.');
+        self::assertArrayNotHasKey('page_proven_open_cents', $detail);
+        self::assertArrayNotHasKey('page_unreconciled_count', $detail);
+    }
+
+    public function testStatusFilterScansMembersInBoundedChunksFromTheCursor(): void
+    {
+        $ids = [];
+        foreach (['none', 'none', 'unpaid', 'none', 'unpaid'] as $i => $kind) {
+            $member = $this->member('SYN-CHUNK-' . $i, 'chunk-' . $i);
+            if ($kind === 'unpaid') {
+                $this->issue($member['id'], 'chunk-' . $i);
+            }
+            $ids[] = $member['id'];
+        }
+        $filter = MembershipListFilter::parse(['year' => 2026, 'payment_status' => 'unpaid']);
+        $tiny = new MembershipListRepository($this->db, 1);
+        // Dávky 1, 2, 4 členů: stránka se musí doplnit přes hranice dávek a pokračovat od kurzoru.
+        self::assertSame([$ids[2]], array_column($tiny->page($this->supplier, 0, 1, $filter), 'id'));
+        self::assertSame([$ids[2], $ids[4]], array_column($tiny->page($this->supplier, 0, 5, $filter), 'id'));
+        self::assertSame([$ids[4]], array_column($tiny->page($this->supplier, $ids[2], 5, $filter), 'id'));
+        self::assertSame([], $tiny->page($this->supplier, $ids[4], 5, $filter));
+        $filter['search'] = 'SYN-CHUNK-4';
+        self::assertSame([$ids[4]], array_column($tiny->page($this->supplier, 0, 5, $filter), 'id'), 'Dávka počítá jen členy odpovídající hledání.');
+        $filter['search'] = '';
+        self::assertSame(
+            array_column($tiny->page($this->supplier, 0, 5, $filter), 'id'),
+            array_column((new MembershipListRepository($this->db))->page($this->supplier, 0, 5, $filter), 'id')
+        );
+
+        // Další stránka ani dávka nesmí číst předpisy členů před kurzorem nebo za hranicí dávky.
+        $repo = new MembershipListRepository($this->db);
+        foreach ([[$ids[2], null, 1.0], [$ids[1], $ids[2], 1.0]] as [$after, $upper, $max]) {
+            [$sql, $params] = $repo->query($this->supplier, $after, 5, $filter, null, $upper);
+            $q = $this->pdo->prepare('ANALYZE FORMAT=JSON ' . $sql);
+            $q->execute($params);
+            $plan = json_decode((string) $q->fetchColumn(), true, flags: JSON_THROW_ON_ERROR);
+            $reads = ['cc' => [], 'l' => [], 'i' => []];
+            $walk = function (array $node) use (&$walk, &$reads): void {
+                $table = (string) ($node['table_name'] ?? '');
+                if (isset($reads[$table], $node['r_rows'], $node['r_loops'])) {
+                    $reads[$table][] = (float) $node['r_rows'] * (float) $node['r_loops'];
+                }
+                foreach ($node as $value) {
+                    if (is_array($value)) {
+                        $walk($value);
+                    }
+                }
+            };
+            $walk($plan);
+            foreach ($reads as $table => $values) {
+                self::assertNotEmpty($values, 'Měření musí skutečně číst tabulku ' . $table . '.');
+                foreach ($values as $rows) {
+                    self::assertLessThanOrEqual($table === 'cc' ? $max : 2.0, $rows, 'Filtr úhrady nesmí číst ' . $table . ' mimo dávku od kurzoru.');
+                }
+            }
+        }
+        // Obnova výběru se stavem: dva vybraní členové z různých dávek, třetí neodpovídá stavu.
+        self::assertSame([$ids[2], $ids[4]], $tiny->matchingSelection($this->supplier, [$ids[0], $ids[2], $ids[4]], $filter));
+    }
+
+    public function testStatusFilterFillsThePageAcrossChunksWithGrowingChunks(): void
+    {
+        $ids = [];
+        foreach (['paid', 'paid', 'unpaid', 'paid', 'paid', 'unpaid'] as $i => $kind) {
+            $member = $this->member('SYN-LOOP-' . $i, 'loop-' . $i);
+            $issued = $this->issue($member['id'], 'loop-' . $i);
+            if ($kind === 'paid') {
+                $this->payClaim($issued, '20000.00', 'loop-payment-' . $i);
+            }
+            $ids[] = $member['id'];
+        }
+        $filter = MembershipListFilter::parse(['year' => 2026, 'payment_status' => 'unpaid']);
+        $tiny = new MembershipListRepository($this->db, 1);
+        $rows = [];
+        // Dávka 2 (ids 0–1) nic nenajde, dávka 4 (ids 2–5) doplní stránku: 2 × (hranice + agregace).
+        self::assertSame(4, $this->selectQueries(function () use ($tiny, $filter, &$rows): void {
+            $rows = $tiny->page($this->supplier, 0, 2, $filter);
+        }));
+        self::assertSame([$ids[2], $ids[5]], array_column($rows, 'id'));
+        self::assertSame(array_column($rows, 'id'), array_column((new MembershipListRepository($this->db))->page($this->supplier, 0, 2, $filter), 'id'));
+        self::assertSame([$ids[5]], array_column($tiny->page($this->supplier, $ids[2], 2, $filter), 'id'));
+    }
+
+    public function testNoChargeFilterDoesNotAggregatePaymentsOfMembersWithCharges(): void
+    {
+        $with = [];
+        for ($i = 0; $i < 3; $i++) {
+            $member = $this->member('SYN-NONE-WITH-' . $i, 'none-with-' . $i);
+            $this->issue($member['id'], 'none-with-' . $i);
+            $with[] = $member['id'];
+        }
+        $without = $this->member('SYN-NONE-WITHOUT', 'none-without');
+        $filter = MembershipListFilter::parse(['year' => 2026, 'payment_status' => 'none']);
+        $repo = new MembershipListRepository($this->db);
+        self::assertSame([$without['id']], array_column($repo->page($this->supplier, 0, 50, $filter), 'id'));
+        self::assertSame([$with[0], $with[1], $with[2]], array_column($repo->page($this->supplier, 0, 50, ['payment_status' => 'unpaid'] + $filter), 'id'));
+        [$sql, $params] = $repo->query($this->supplier, 0, 50, $filter);
+        $q = $this->pdo->prepare('ANALYZE FORMAT=JSON ' . $sql);
+        $q->execute($params);
+        $plan = json_decode((string) $q->fetchColumn(), true, flags: JSON_THROW_ON_ERROR);
+        $reads = [];
+        $walk = function (array $node) use (&$walk, &$reads): void {
+            if (($node['table_name'] ?? null) === 'cc' && isset($node['r_rows'], $node['r_loops'])) {
+                $reads[] = (float) $node['r_rows'] * (float) $node['r_loops'];
+            }
+            foreach ($node as $value) {
+                if (is_array($value)) {
+                    $walk($value);
+                }
+            }
+        };
+        $walk($plan);
+        self::assertSame(0.0, array_sum($reads), 'Stav bez předpisu nesmí agregovat předpisy členů, kteří předpis mají.');
+    }
+
+    public function testRareTitleWithStatusFilterSkipsMembersWithoutTheTitle(): void
+    {
+        $ids = [];
+        for ($i = 0; $i < 6; $i++) {
+            $member = $this->member('SYN-RARE-' . $i, 'rare-' . $i);
+            $this->issue($member['id'], 'rare-' . $i);
+            $ids[] = $member['id'];
+        }
+        $rare = $this->member('SYN-RARE-TITLE', 'rare-title');
+        $this->issueTitle($rare['id'], 'RARE', 'rare-title-claim');
+        $tiny = new MembershipListRepository($this->db, 2);
+        $filter = MembershipListFilter::parse(['year' => 2026, 'title_key' => 'RARE', 'payment_status' => 'unpaid']);
+        $rows = [];
+        self::assertSame(
+            2,
+            $this->selectQueries(function () use ($tiny, $filter, &$rows): void {
+                $rows = $tiny->page($this->supplier, 0, 5, $filter);
+            }),
+            'Kandidáti dávky se berou z předpisů titulu, ne ze všech členů firmy.'
+        );
+        self::assertSame([$rare['id']], array_column($rows, 'id'));
+        // Stav „bez předpisu“ dál prochází členy, protože hledá právě členy bez předpisu titulu.
+        $filter['payment_status'] = 'none';
+        self::assertSame($ids, array_column($tiny->page($this->supplier, 0, 6, $filter), 'id'));
+        // Prázdný výsledek: kandidáti titulu docházejí hned, bez průchodu ostatními členy.
+        $filter['payment_status'] = 'paid';
+        self::assertSame(2, $this->selectQueries(fn () => $tiny->page($this->supplier, 0, 5, $filter)));
+        // Hustý titul: výběr členů dávky čte jen předpisy titulu v rozsahu dávky.
+        $filter = MembershipListFilter::parse(['year' => 2026, 'title_key' => 'annual-2026', 'payment_status' => 'unpaid']);
+        [$sql, $params] = $tiny->query($this->supplier, $ids[2], 5, $filter, null, $ids[3]);
+        $q = $this->pdo->prepare('ANALYZE FORMAT=JSON ' . $sql);
+        $q->execute($params);
+        $plan = json_decode((string) $q->fetchColumn(), true, flags: JSON_THROW_ON_ERROR);
+        $reads = [];
+        $walk = function (array $node) use (&$walk, &$reads): void {
+            if (($node['table_name'] ?? null) === 'x' && isset($node['r_rows'], $node['r_loops'])) {
+                $reads[] = (float) $node['r_rows'] * (float) $node['r_loops'];
+            }
+            foreach ($node as $value) {
+                if (is_array($value)) {
+                    $walk($value);
+                }
+            }
+        };
+        $walk($plan);
+        self::assertNotEmpty($reads);
+        // Každá instance CTE scope (dávka se vyhodnocuje víckrát) smí číst jen předpis jediného člena dávky.
+        foreach ($reads as $rows) {
+            self::assertLessThanOrEqual(1.0, $rows, 'Poddotaz titulu nesmí číst předpisy mimo dávku.');
+        }
+    }
+
+    public function testTitleChunkAndSelectionReadTitleChargesInMemberOrderFromTheCursor(): void
+    {
+        $ids = [];
+        for ($i = 0; $i < 6; $i++) {
+            $member = $this->member('SYN-DENSE-' . $i, 'dense-' . $i);
+            $this->issue($member['id'], 'dense-' . $i);
+            $ids[] = $member['id'];
+        }
+        $repo = new MembershipListRepository($this->db);
+        $filter = MembershipListFilter::parse(['year' => 2026, 'title_key' => 'annual-2026', 'payment_status' => 'unpaid']);
+        // Hranice dávky za kurzorem: rozsah indexu titulu podle člena, bez třídění předpisů celého titulu.
+        [$sql, $params] = $repo->chunkQuery($this->supplier, $ids[3], 1, $filter);
+        $plan = $this->analyze($sql, $params);
+        self::assertSame([['supplier_id', 'title_key', 'member_id']], $this->usedKeyParts($plan, 'x'), 'Dávka titulu musí začít předpisy titulu od kurzoru v pořadí členů.');
+        self::assertStringNotContainsString('filesort', json_encode($plan, JSON_THROW_ON_ERROR), 'Hranice dávky titulu nesmí třídit předpisy titulu.');
+        $q = $this->pdo->prepare($sql);
+        $q->execute($params);
+        self::assertSame($ids[4], (int) $q->fetchColumn());
+        // Obnova výběru s titulem ověří jen vybrané členy, ne všechny předpisy titulu.
+        [$sql, $params] = $repo->query($this->supplier, 0, 501, $filter, [$ids[5]]);
+        $plan = $this->analyze($sql, $params);
+        self::assertNotEmpty($this->usedKeyParts($plan, 'x'));
+        foreach ($this->usedKeyParts($plan, 'x') as $parts) {
+            self::assertContains('member_id', $parts);
+        }
+        foreach ($this->reads($plan, 'x') as $rows) {
+            self::assertLessThanOrEqual(1.0, $rows, 'Výběr s titulem nesmí číst předpisy nevybraných členů.');
+        }
+        self::assertSame([$ids[5]], $repo->matchingSelection($this->supplier, [$ids[5]], $filter));
+    }
+
+    public function testChargeStatusChunkReadsOnlyMembersWithChargeInRangeAcrossWideIdBand(): void
+    {
+        $rareA = $this->member('SYN-BAND-RARE-A', 'band-rare-a');
+        $this->issueTitle($rareA['id'], 'RARE', 'band-rare-a');
+        for ($i = 0; $i < 5; $i++) {
+            $this->member('SYN-BAND-EMPTY-' . $i, 'band-empty-' . $i);
+        }
+        $annual = $this->member('SYN-BAND-ANNUAL', 'band-annual');
+        $this->issue($annual['id'], 'band-annual');
+        $rareB = $this->member('SYN-BAND-RARE-B', 'band-rare-b');
+        $this->issueTitle($rareB['id'], 'RARE', 'band-rare-b');
+        // Člen s titulem za hranicí dávky do ní nesmí propadnout.
+        $after = $this->member('SYN-BAND-RARE-AFTER', 'band-rare-after');
+        $this->issueTitle($after['id'], 'RARE', 'band-rare-after');
+        $repo = new MembershipListRepository($this->db);
+        // Dávka (0, rareB] je široká 8 členů, ale titul v ní má jen dva a rok jen tři členy s předpisem.
+        foreach ([[['title_key' => 'RARE'], [$rareA['id'], $rareB['id']]], [[], [$rareA['id'], $annual['id'], $rareB['id']]]] as [$extra, $expected]) {
+            $filter = MembershipListFilter::parse($extra + ['year' => 2026, 'payment_status' => 'unpaid']);
+            [$sql, $params] = $repo->query($this->supplier, 0, 50, $filter, null, $rareB['id']);
+            $q = $this->pdo->prepare($sql);
+            $q->execute($params);
+            self::assertSame($expected, array_map('intval', array_column($q->fetchAll(PDO::FETCH_ASSOC), 'id')));
+            $plan = $this->analyze($sql, $params);
+            foreach (['m', 'c'] as $table) {
+                $reads = $this->reads($plan, $table);
+                self::assertNotEmpty($reads);
+                foreach ($reads as $rows) {
+                    self::assertLessThanOrEqual((float) count($expected), $rows, 'Dávka nesmí prověřovat členy bez předpisu v rozsahu (' . $table . ').');
+                }
+            }
+        }
+    }
+
+    public function testNoChargeStatusIncludesReversedChargesAndChargesOfOtherYears(): void
+    {
+        $reversed = $this->member('SYN-NONE-REVERSED', 'none-reversed');
+        $issued = $this->issue($reversed['id'], 'none-reversed');
+        $reverse = ['case_id' => $issued['case']['id'], 'accounting_date' => '2026-12-31', 'reason' => 'Synthetic approved cancellation'];
+        $preview = $this->charges->previewReverse($this->supplier, $reverse);
+        $this->charges->confirmReverse($this->supplier, $reverse, $preview['expected_case_version'], $preview['preview_hash'], 'none-reversed-cancel', $this->actor);
+        $other = $this->member('SYN-NONE-OTHER-YEAR', 'none-other-year');
+        $request = ['title_key' => 'annual-2027', 'period_from' => '2027-01-01', 'period_to' => '2027-12-31'] + $this->request($other['id']);
+        $preview = $this->charges->previewIssue($this->supplier, $request);
+        $this->charges->confirmIssue($this->supplier, $request, $preview['expected_case_version'], $preview['preview_hash'], 'none-other-year', $this->actor);
+        $charged = $this->member('SYN-NONE-CHARGED', 'none-charged');
+        $this->issue($charged['id'], 'none-charged');
+        $filter = MembershipListFilter::parse(['year' => 2026, 'payment_status' => 'none']);
+        foreach ([1, 200] as $chunk) {
+            $repo = new MembershipListRepository($this->db, $chunk);
+            self::assertSame([$reversed['id'], $other['id']], array_column($repo->page($this->supplier, 0, 50, $filter), 'id'), 'Stornovaný předpis ani předpis jiného roku nejsou předpisem v rozsahu.');
+        }
+        $filter['year'] = 2027;
+        self::assertSame([$reversed['id'], $charged['id']], array_column((new MembershipListRepository($this->db))->page($this->supplier, 0, 50, $filter), 'id'));
+    }
+
+    private function analyze(string $sql, array $params): array
+    {
+        $q = $this->pdo->prepare('ANALYZE FORMAT=JSON ' . $sql);
+        $q->execute($params);
+        return json_decode((string) $q->fetchColumn(), true, flags: JSON_THROW_ON_ERROR);
+    }
+
+    /** @return list<float> přečtené řádky (r_rows × r_loops) tabulky v každém uzlu plánu */
+    private function reads(array $plan, string $table): array
+    {
+        $reads = [];
+        $walk = function (array $node) use (&$walk, &$reads, $table): void {
+            if ((string) ($node['table_name'] ?? '') === $table && isset($node['r_rows'], $node['r_loops'])) {
+                $reads[] = (float) $node['r_rows'] * (float) $node['r_loops'];
+            }
+            foreach ($node as $value) {
+                if (is_array($value)) {
+                    $walk($value);
+                }
+            }
+        };
+        $walk($plan);
+        return $reads;
+    }
+
+    /** @return list<list<string>> použité části klíče tabulky v každém uzlu plánu */
+    private function usedKeyParts(array $plan, string $table): array
+    {
+        $parts = [];
+        $walk = function (array $node) use (&$walk, &$parts, $table): void {
+            if ((string) ($node['table_name'] ?? '') === $table && isset($node['used_key_parts'])) {
+                $parts[] = $node['used_key_parts'];
+            }
+            foreach ($node as $value) {
+                if (is_array($value)) {
+                    $walk($value);
+                }
+            }
+        };
+        $walk($plan);
+        return $parts;
+    }
+
+    private function listRows(array $query = [], int $after = 0, int $limit = 100): array
+    {
+        $filter = MembershipListFilter::parse($query + ['year' => 2026]);
+        return (new MembershipListRepository($this->db))->page($this->supplier, $after, $limit, $filter);
+    }
+
+    public function testPairingOfTwoClaimsIsUnprovenInDetailListAndFilter(): void
+    {
+        $one = $this->member('SYN-SHARED-ONE', 'shared-one');
+        $two = $this->member('SYN-SHARED-TWO', 'shared-two');
+        $adapter = new MembershipReceivablePaymentAdapter($this->balances);
+        $charges = new MembershipChargeRepository($this->db);
+        $targets = [];
+        foreach ([$one, $two] as $member) {
+            $issued = $this->issue($member['id'], 'shared-' . $member['id']);
+            $targets[$member['id']] = $adapter->target($this->supplier, $charges->claimForOperation($this->supplier, $issued['operation']['id'])['id']);
+        }
+        $account = $targets[$one['id']]['journal_line']['account_id'];
+        $this->pdo->prepare("INSERT INTO bank_statements(supplier_id,file_name,file_hash,account_number,bank_code,currency,statement_date,imported_by) VALUES(?,'synthetic-shared.gpc',?,'1000000005','0100','CZK','2026-02-01',?)")
+            ->execute([$this->supplier, hash('sha256', 'synthetic shared ' . $this->supplier), $this->actor]);
+        $this->pdo->prepare("INSERT INTO bank_transactions(statement_id,posted_at,amount,currency,description,match_status) VALUES(?,'2026-02-01','30000.00','CZK','Synthetic shared payment','manual')")
+            ->execute([(int) $this->pdo->lastInsertId()]);
+        // Saldo okruhu (2 × 20 000 − 30 000) nepřesahuje předpis: ambiguous plyne jen z počtu členských předpisů.
+        $entry = $this->posting->postDocument($this->supplier, 'bank', (int) $this->pdo->lastInsertId(), [
+            ['account_code' => '221', 'side' => 'debit', 'amount' => '30000.00'], ['account_code' => '315.100', 'side' => 'credit', 'amount' => '30000.00'],
+        ], ['entry_date' => '2026-02-01', 'description' => 'Synthetic shared payment', 'posted' => true, 'posted_by' => $this->actor]);
+        $q = $this->pdo->prepare('SELECT line_no FROM journal_entry_lines WHERE supplier_id=? AND entry_id=? AND account_id=?');
+        $q->execute([$this->supplier, $entry, $account]);
+        (new JournalLinePairingRepository($this->db))->create($this->supplier, $account, [
+            $targets[$one['id']]['journal_line'], $targets[$two['id']]['journal_line'],
+            ['entry_id' => $entry, 'line_no' => (int) $q->fetchColumn(), 'account_id' => $account],
+        ], 'Synthetic shared payment of two claims', 'manual', $this->actor);
+
+        $reconciliation = new MembershipReconciliationService($this->balances);
+        foreach ([$one, $two] as $member) {
+            // Okruh je jinak platný: K prověření plyne jen z počtu členských předpisů.
+            $evidence = array_values($this->balances->pairingEvidence($this->supplier, $this->balances->claimsForMember($this->supplier, $member['id'])))[0];
+            self::assertSame([0, 2, 1000000], [$evidence['invalid_count'], $evidence['membership_claim_count'], $evidence['net_cents']]);
+            $detail = $reconciliation->memberBalance($this->supplier, $member['id']);
+            self::assertSame('ambiguous', $detail['items'][0]['settlement']['status']);
+            self::assertNull($detail['items'][0]['settlement']['open_cents']);
+        }
+        $statuses = array_column(array_map(fn (array $row): array => ['id' => $row['id'], 'status' => $row['contribution']['status']], $this->listRows()), 'status', 'id');
+        self::assertSame('unproven', $statuses[$one['id']]);
+        self::assertSame('unproven', $statuses[$two['id']]);
+        $unproven = array_column($this->listRows(['payment_status' => 'unproven']), 'id');
+        sort($unproven);
+        self::assertSame([$one['id'], $two['id']], $unproven);
+        self::assertSame([], $this->listRows(['payment_status' => 'paid']));
+    }
+
+    public function testRefreshValidatesSelectionOutsideTheFirstPageAndFindsPersonalNames(): void
+    {
+        $one = $this->member('SYN-REVIEW-ONE', 'review-one');
+        $two = $this->member('SYN-REVIEW-TWO', 'review-two');
+        $this->pdo->prepare('UPDATE clients SET company_name=?,first_name=?,last_name=? WHERE supplier_id=? AND id=?')
+            ->execute(['', 'Synthetic', 'Rowan', $this->supplier, $two['client_id']]);
+        $repo = new MembershipListRepository($this->db);
+        $filter = MembershipListFilter::parse(['year' => 2026]);
+        self::assertCount(1, $repo->page($this->supplier, 0, 1, $filter));
+        self::assertSame([$one['id'], $two['id']], $repo->matchingSelection($this->supplier, [$one['id'], $two['id']], $filter));
+        $filter['search'] = 'Rowan';
+        self::assertSame([$two['id']], $repo->matchingSelection($this->supplier, [$one['id'], $two['id']], $filter));
+        self::assertSame('Rowan', $repo->page($this->supplier, 0, 50, $filter)[0]['last_name']);
+        // Celé zobrazené jméno v libovolném pořadí slov, i s členským číslem; každé slovo musí sedět.
+        foreach (['Synthetic Rowan', 'rowan  synthetic', 'SYN-REVIEW-TWO Rowan'] as $text) {
+            $filter['search'] = $text;
+            self::assertSame([$two['id']], $repo->matchingSelection($this->supplier, [$one['id'], $two['id']], $filter), $text);
+            self::assertSame([$two['id']], array_column($repo->page($this->supplier, 0, 50, $filter), 'id'), $text);
+        }
+        $filter['search'] = 'Synthetic member';
+        self::assertSame([$one['id']], $repo->matchingSelection($this->supplier, [$one['id'], $two['id']], $filter));
+        $filter['search'] = 'Rowan Nobody';
+        self::assertSame([], $repo->matchingSelection($this->supplier, [$one['id'], $two['id']], $filter));
+        // Znak % je doslovný i ve víceslovném hledání.
+        $filter['search'] = '% Rowan';
+        self::assertSame([], $repo->matchingSelection($this->supplier, [$one['id'], $two['id']], $filter));
+        // Víc slov i v cestách se stavem úhrady: bez předpisu (NOT EXISTS) a s předpisem (dávky předpisů).
+        $none = MembershipListFilter::parse(['year' => 2026, 'search' => 'Rowan Synthetic', 'payment_status' => 'none']);
+        self::assertSame([$two['id']], array_column($repo->page($this->supplier, 0, 50, $none), 'id'));
+        self::assertSame([$two['id']], $repo->matchingSelection($this->supplier, [$one['id'], $two['id']], $none));
+        $this->issue($two['id'], 'review-two-search');
+        $unpaid = MembershipListFilter::parse(['year' => 2026, 'search' => 'Rowan Synthetic', 'payment_status' => 'unpaid']);
+        self::assertSame([$two['id']], array_column($repo->page($this->supplier, 0, 50, $unpaid), 'id'));
+        self::assertSame([$two['id']], $repo->matchingSelection($this->supplier, [$one['id'], $two['id']], $unpaid));
+        self::assertSame([], $repo->page($this->supplier, 0, 50, $none));
+        self::assertSame([], $repo->matchingSelection($this->supplier + 100000, [$one['id'], $two['id']], $filter));
+    }
+
+    public function testTitlePickerReturnsStoredCaseSensitiveKeysWithTenantAndYearScope(): void
+    {
+        $member = $this->member('SYN-TITLES', 'review-titles');
+        $this->issueTitle($member['id'], 'CLENSTVI', 'review-title-one');
+        $this->issueTitle($member['id'], 'VSTUP', 'review-title-two');
+        $repo = new MembershipListRepository($this->db);
+        self::assertSame(['CLENSTVI', 'VSTUP'], $repo->titles($this->supplier, 2026, '', 100));
+        self::assertSame(['VSTUP'], $repo->titles($this->supplier, null, 'CLENSTVI', 100));
+        self::assertSame([], $repo->titles($this->supplier, 2027, '', 100));
+        self::assertSame([], $repo->titles($this->supplier + 100000, null, '', 100));
+    }
+
+    public function testExistingMismatchedReceiptIsVisibleForReviewInListAndDetail(): void
+    {
+        foreach (['amount', 'account', 'side'] as $variant) {
+            $member = $this->member('SYN-DAMAGED-' . $variant, 'damaged-' . $variant);
+            $issued = $this->issue($member['id'], 'damaged-' . $variant);
+            $line = $issued['operation']['receivable_line_id'];
+            // Úmyslně poškozené syntetické úložiště, nikoli podporovaná cesta účetní opravy.
+            if ($variant === 'amount') {
+                $this->pdo->prepare('UPDATE journal_entry_lines SET amount=19999 WHERE supplier_id=? AND id=?')->execute([$this->supplier, $line]);
+            }
+            if ($variant === 'account') {
+                $this->pdo->prepare("UPDATE journal_entry_lines SET account_id=(SELECT id FROM chart_of_accounts WHERE supplier_id=? AND account_code='221') WHERE supplier_id=? AND id=?")->execute([$this->supplier, $this->supplier, $line]);
+            }
+            if ($variant === 'side') {
+                $this->pdo->prepare("UPDATE journal_entry_lines SET side='credit' WHERE supplier_id=? AND id=?")->execute([$this->supplier, $line]);
+            }
+            $detail = (new MembershipReconciliationService($this->balances))->memberBalance($this->supplier, $member['id']);
+            self::assertSame('ambiguous', $detail['items'][0]['settlement']['status'], $variant);
+            self::assertNull($detail['items'][0]['settlement']['open_cents']);
+            $list = $this->listRows(['search' => 'SYN-DAMAGED-' . $variant]);
+            self::assertSame('unproven', $list[0]['contribution']['status'], $variant);
+            self::assertNull($list[0]['contribution']['open_cents']);
+        }
+    }
+
+    public function testMissingJournalLineDoesNotHideClaimFromDetailOrList(): void
+    {
+        $member = $this->member('SYN-MISSING-LINE', 'missing-line');
+        $issued = $this->issue($member['id'], 'missing-line');
+        // Simulace poškozeného syntetického úložiště v transakci testu.
+        $this->pdo->exec('SET FOREIGN_KEY_CHECKS=0');
+        try {
+            $this->pdo->prepare('DELETE FROM journal_entry_lines WHERE supplier_id=? AND id=?')->execute([$this->supplier, $issued['operation']['receivable_line_id']]);
+        } finally {
+            $this->pdo->exec('SET FOREIGN_KEY_CHECKS=1');
+        }
+        $detail = (new MembershipReconciliationService($this->balances))->memberBalance($this->supplier, $member['id']);
+        self::assertCount(1, $detail['items']);
+        self::assertSame('ambiguous', $detail['items'][0]['settlement']['status']);
+        self::assertSame('unproven', $this->listRows()[0]['contribution']['status']);
+        // Veřejný katalog předpis tiše nevynechá: ověření uloženého důkazu poškozený deník odmítne.
+        try {
+            $this->catalog()->receivables($this->supplier, $member['id'], null, 25);
+            self::fail('Veřejný katalog vrátil předpisy bez pohledávkového řádku.');
+        } catch (MembershipException $e) {
+            self::assertSame('nonprofit_membership_ledger_mismatch', $e->errorCode);
+        }
+        // Předpis bez platného pohledávkového řádku nesmí být cílem úhrady (dřív řádek 0 a účet 0).
+        $claimId = (new MembershipChargeRepository($this->db))->claimForOperation($this->supplier, $issued['operation']['id'])['id'];
+        try {
+            (new MembershipReceivablePaymentAdapter($this->balances))->target($this->supplier, $claimId);
+            self::fail('Předpis bez pohledávkového řádku se nabídl jako cíl úhrady.');
+        } catch (MembershipException $e) {
+            self::assertSame('nonprofit_membership_claim_not_payable', $e->errorCode);
+            self::assertSame(409, $e->httpStatus);
+        }
+    }
+
+    #[DataProvider('collectivePayments')]
+    public function testCollectivePaymentHasTheSameResultInDetailAndList(string $amount, string $status): void
+    {
+        $first = $this->member('SYN-COLLECTIVE-1', 'collective-first');
+        $second = $this->member('SYN-COLLECTIVE-2', 'collective-second');
+        $one = $this->issue($first['id'], 'collective-first');
+        $two = $this->issue($second['id'], 'collective-second');
+        $this->payClaims([$one, $two], $amount, 'collective');
+        $reconciliation = new MembershipReconciliationService($this->balances);
+        $list = array_column($this->listRows(), null, 'id');
+        foreach ([$first, $second] as $member) {
+            $settlement = $reconciliation->memberBalance($this->supplier, $member['id'])['items'][0]['settlement'];
+            self::assertSame($status, $settlement['status']);
+            self::assertSame($status === 'settled' ? 2000000 : null, $settlement['paid_cents']);
+            self::assertSame($status === 'settled' ? 0 : null, $settlement['open_cents']);
+            if ($amount === '20000.00') self::assertSame('collective_partial_payment', $settlement['evidence']);
+            self::assertSame($status === 'settled' ? 'paid' : 'unproven', $list[$member['id']]['contribution']['status']);
+            self::assertSame($status === 'settled' ? '2000000' : null, $list[$member['id']]['contribution']['paid_cents']);
+            self::assertSame($status === 'settled' ? '0' : null, $list[$member['id']]['contribution']['open_cents']);
+        }
+    }
+
+    public static function collectivePayments(): iterable
+    {
+        yield 'úplná úhrada obou členů' => ['40000.00', 'settled'];
+        yield 'částečná úhrada neurčuje člena' => ['20000.00', 'ambiguous'];
+        yield 'přeplatek se nesmí rozdělit' => ['40001.00', 'ambiguous'];
+    }
+
+    public function testReissueWithoutExplicitSymbolKeepsTheManualSymbolOfTheCase(): void
+    {
+        $member = $this->member('12', 'reissue-symbol');
+        $request = ['variable_symbol' => '777'] + $this->request($member['id']);
+        $preview = $this->charges->previewIssue($this->supplier, $request);
+        $issued = $this->charges->confirmIssue($this->supplier, $request, $preview['expected_case_version'], $preview['preview_hash'], 'reissue-symbol-1', $this->actor);
+        $reverse = ['case_id' => $issued['case']['id'], 'accounting_date' => '2026-12-31', 'reason' => 'Synthetic cancellation'];
+        $preview = $this->charges->previewReverse($this->supplier, $reverse);
+        $this->charges->confirmReverse($this->supplier, $reverse, $preview['expected_case_version'], $preview['preview_hash'], 'reissue-symbol-rev', $this->actor);
+        // Bez VS v požadavku platí VS případu, ne výchozí členské číslo „12“.
+        $again = $this->request($member['id']);
+        $preview = $this->charges->previewIssue($this->supplier, $again);
+        self::assertSame('777', $preview['variable_symbol']);
+        $reissued = $this->charges->confirmIssue($this->supplier, $again, $preview['expected_case_version'], $preview['preview_hash'], 'reissue-symbol-2', $this->actor);
+        self::assertSame($issued['case']['id'], $reissued['case']['id']);
+        self::assertSame('777', (string) $this->pdo->query('SELECT variable_symbol FROM nonprofit_membership_charge_cases WHERE id=' . (int) $issued['case']['id'])->fetchColumn());
+    }
+
+    public function testReissueOfCaseWithoutSymbolGetsTheDefaultSymbol(): void
+    {
+        // Případ z doby před VS (migrace 2298) nemá variable_symbol; opětovné vystavení ho doplní výchozím.
+        $member = $this->member('34', 'legacy-symbol');
+        $issued = $this->issue($member['id'], 'legacy-symbol');
+        $this->pdo->prepare('UPDATE nonprofit_membership_charge_cases SET variable_symbol=NULL,row_version=row_version+1 WHERE supplier_id=? AND id=?')
+            ->execute([$this->supplier, $issued['case']['id']]);
+        $reverse = ['case_id' => $issued['case']['id'], 'accounting_date' => '2026-12-31', 'reason' => 'Synthetic cancellation'];
+        $preview = $this->charges->previewReverse($this->supplier, $reverse);
+        $this->charges->confirmReverse($this->supplier, $reverse, $preview['expected_case_version'], $preview['preview_hash'], 'legacy-symbol-rev', $this->actor);
+        $again = $this->request($member['id']);
+        $preview = $this->charges->previewIssue($this->supplier, $again);
+        self::assertSame('34', $preview['variable_symbol']);
+        $this->charges->confirmIssue($this->supplier, $again, $preview['expected_case_version'], $preview['preview_hash'], 'legacy-symbol-2', $this->actor);
+        self::assertSame('34', (string) $this->pdo->query('SELECT variable_symbol FROM nonprofit_membership_charge_cases WHERE id=' . (int) $issued['case']['id'])->fetchColumn());
+    }
+
+    public function testReversalOfClaimLeftAloneInItsPairingIsAllowedAndClearsThePairing(): void
+    {
+        $member = $this->member('SYN-REV-ALONE', 'rev-alone');
+        $issued = $this->issue($member['id'], 'rev-alone');
+        $this->payClaims([$issued], '20000.00', 'rev-alone');
+        $entry = (int) $issued['operation']['journal_entry_id'];
+        $pairing = (int) $this->pdo->query("SELECT pairing_id FROM journal_line_pairing_items WHERE supplier_id={$this->supplier} AND entry_id=$entry")->fetchColumn();
+        // Uživatel odebral v saldokontu z okruhu platbu; pohledávka v něm zůstala sama a úhradu už nedokládá.
+        $this->pdo->prepare('DELETE FROM journal_line_pairing_items WHERE supplier_id=? AND pairing_id=? AND entry_id<>?')->execute([$this->supplier, $pairing, $entry]);
+        $reverse = ['case_id' => $issued['case']['id'], 'accounting_date' => '2026-12-31', 'reason' => 'Synthetic cancellation'];
+        $preview = $this->charges->previewReverse($this->supplier, $reverse);
+        $reversed = $this->charges->confirmReverse($this->supplier, $reverse, $preview['expected_case_version'], $preview['preview_hash'], 'rev-alone', $this->actor);
+        self::assertSame('reverse', $reversed['operation']['operation']);
+        self::assertSame(0, (int) $this->pdo->query("SELECT COUNT(*) FROM journal_line_pairing_items WHERE supplier_id={$this->supplier} AND pairing_id=$pairing")->fetchColumn());
+    }
+
+    public function testReversalOfClaimInCollectivePaymentIsRejectedUntilPairingIsCancelled(): void
+    {
+        $first = $this->member('SYN-REV-COLLECTIVE-1', 'rev-collective-first');
+        $second = $this->member('SYN-REV-COLLECTIVE-2', 'rev-collective-second');
+        $one = $this->issue($first['id'], 'rev-collective-first');
+        $two = $this->issue($second['id'], 'rev-collective-second');
+        $reverse = ['case_id' => $two['case']['id'], 'accounting_date' => '2026-12-31', 'reason' => 'Synthetic cancellation'];
+        // Náhled vznikl před párováním; potvrzení musí stav ověřit znovu pod zámkem.
+        $preview = $this->charges->previewReverse($this->supplier, $reverse);
+        $this->payClaims([$one, $two], '40000.00', 'rev-collective');
+        try {
+            $this->charges->confirmReverse($this->supplier, $reverse, $preview['expected_case_version'], $preview['preview_hash'], 'rev-collective', $this->actor);
+            self::fail('Storno předpisu ze společné úhrady prošlo a nechalo by platbu v okruhu bez protějšku.');
+        } catch (MembershipException $e) {
+            self::assertSame('nonprofit_membership_claim_paired', $e->errorCode);
+        }
+        $reconciliation = new MembershipReconciliationService($this->balances);
+        foreach ([$first, $second] as $member) {
+            self::assertSame('settled', $reconciliation->memberBalance($this->supplier, $member['id'])['items'][0]['settlement']['status']);
+        }
+        self::assertSame(0, (int) $this->pdo->query("SELECT COUNT(*) FROM nonprofit_membership_charge_operations WHERE supplier_id={$this->supplier} AND operation='reverse'")->fetchColumn());
+    }
+
+    #[DataProvider('membershipNumbersForPayment')]
+    public function testVariableSymbolIsStablePaymentMetadataOutsideFinancialProof(string $number, ?string $expected): void
+    {
+        $member = $this->member($number, 'symbol-member');
+        $request = $this->request($member['id']);
+        $preview = $this->charges->previewIssue($this->supplier, $request);
+        $symbol = $preview['variable_symbol'];
+        self::assertMatchesRegularExpression('/^[0-9]{1,10}$/D', $symbol);
+        if ($expected !== null) self::assertSame($expected, $symbol);
+        self::assertSame($symbol, $this->charges->previewIssue($this->supplier, $request)['variable_symbol']);
+        $explicit = $request + ['variable_symbol' => '00045'];
+        $changed = $this->charges->previewIssue($this->supplier, $explicit);
+        self::assertSame($preview['proof'], $changed['proof']);
+        self::assertSame($preview['journal_plan'], $changed['journal_plan']);
+        self::assertNotSame($preview['preview_hash'], $changed['preview_hash']);
+        try {
+            $this->charges->confirmIssue($this->supplier, $explicit, 0, $preview['preview_hash'], 'symbol-stale', $this->actor);
+            self::fail('Změněný VS musí vyžadovat nový náhled.');
+        } catch (MembershipException $error) {
+            self::assertSame('nonprofit_membership_preview_stale', $error->errorCode);
+        }
+        $issued = $this->charges->confirmIssue($this->supplier, $explicit, 0, $changed['preview_hash'], 'symbol-issue', $this->actor);
+        self::assertSame('00045', $issued['case']['variable_symbol']);
+        self::assertSame('45', $issued['case']['variable_symbol_match_key']);
+        self::assertArrayNotHasKey('variable_symbol', $issued['operation']['proof']);
+        $again = $this->charges->confirmIssue($this->supplier, $explicit, 0, $changed['preview_hash'], 'symbol-issue', $this->actor);
+        self::assertTrue($again['idempotent_replay']);
+        self::assertSame($issued['operation']['record_hash'], $again['operation']['record_hash']);
+        self::assertSame(1, (int) $this->pdo->query('SELECT COUNT(*) FROM nonprofit_membership_charge_operations WHERE supplier_id=' . $this->supplier)->fetchColumn());
+    }
+
+    public static function membershipNumbersForPayment(): iterable
+    {
+        yield 'číselné s vodicími nulami' => ['0012345678', '0012345678'];
+        yield 'nečíselné' => ['SYN-MEMBER-VS', null];
+        yield 'delší než deset číslic' => ['12345678901', null];
+    }
+
+    private function payClaim(array $issued, string $amount, string $key): void
+    {
+        $this->payClaims([$issued], $amount, $key);
+    }
+
+    private function payClaims(array $issuedClaims, string $amount, string $key): void
+    {
+        $targets = [];
+        foreach ($issuedClaims as $issued) {
+            $claim = (new MembershipChargeRepository($this->db))->claimForOperation($this->supplier, $issued['operation']['id']);
+            $targets[] = (new MembershipReceivablePaymentAdapter($this->balances))->target($this->supplier, $claim['id']);
+        }
+        $target = $targets[0];
+        $this->pdo->prepare("INSERT INTO bank_statements(supplier_id,file_name,file_hash,account_number,bank_code,currency,statement_date,imported_by) VALUES(?,'synthetic-list.gpc',?,'1000000005','0100','CZK','2026-02-01',?)")
+            ->execute([$this->supplier, hash('sha256', 'synthetic list ' . $key . $this->supplier), $this->actor]);
+        $statement = (int) $this->pdo->lastInsertId();
+        $this->pdo->prepare("INSERT INTO bank_transactions(statement_id,posted_at,amount,currency,description,match_status) VALUES(?,'2026-02-01',?,'CZK','Synthetic list payment','manual')")->execute([$statement, $amount]);
+        $transaction = (int) $this->pdo->lastInsertId();
+        $entry = $this->posting->postDocument($this->supplier, 'bank', $transaction, [
+            ['account_code' => '221', 'side' => 'debit', 'amount' => $amount], ['account_code' => '315.100', 'side' => 'credit', 'amount' => $amount],
+        ], ['entry_date' => '2026-02-01', 'description' => 'Synthetic list payment', 'posted' => true, 'posted_by' => $this->actor]);
+        $q = $this->pdo->prepare("SELECT line_no FROM journal_entry_lines WHERE supplier_id=? AND entry_id=? AND account_id=?");
+        $q->execute([$this->supplier, $entry, $target['journal_line']['account_id']]);
+        (new JournalLinePairingRepository($this->db))->create($this->supplier, $target['journal_line']['account_id'], [
+            ...array_column($targets, 'journal_line'), ['entry_id' => $entry, 'line_no' => (int) $q->fetchColumn(), 'account_id' => $target['journal_line']['account_id']],
+        ], 'Synthetic list native payment', 'manual', $this->actor);
+    }
+
     private function batchTemplate(): array
     {
         $template = $this->request(1);
@@ -344,7 +1069,7 @@ final class MembershipNativeTest extends TestCase
         try {
             $this->charges->previewIssue($this->supplier, $new);
             self::fail('A retired classification value was accepted for a new charge.');
-        } catch (\MyInvoice\Service\Nonprofit\Membership\MembershipException $error) {
+        } catch (MembershipException $error) {
             self::assertSame('nonprofit_membership_classification_invalid', $error->errorCode);
         }
     }
@@ -368,7 +1093,7 @@ final class MembershipNativeTest extends TestCase
         try {
             $this->charges->confirmIssue($this->supplier, $this->request($member['id']), 0, $issued['preview_hash'], 'issue-proof-' . $mutation, $this->actor);
             self::fail('Changed dimension proof was accepted: ' . $mutation);
-        } catch (\MyInvoice\Service\Nonprofit\Membership\MembershipException $error) {
+        } catch (MembershipException $error) {
             self::assertSame('nonprofit_membership_ledger_mismatch', $error->errorCode, $mutation);
         }
     }
@@ -498,8 +1223,9 @@ final class MembershipNativeTest extends TestCase
         $reconciliation = new MembershipReconciliationService($this->balances);
         $before = $reconciliation->claimSettlement($this->supplier, $claimId);
         self::assertSame('unreconciled', $before['settlement']['status']);
-        self::assertNull($before['settlement']['paid_cents']);
-        self::assertNull($before['settlement']['open_cents']);
+        self::assertSame(0, $before['settlement']['paid_cents']);
+        self::assertSame(2000000, $before['settlement']['open_cents']);
+        self::assertSame('unpaid', $this->listRows()[0]['contribution']['status']);
 
         $target = (new MembershipReceivablePaymentAdapter($this->balances))->target($this->supplier, $claimId);
         $forged = $this->posting->postDocument($this->supplier, 'bank', null, [
@@ -515,6 +1241,7 @@ final class MembershipNativeTest extends TestCase
             ['entry_id' => $forged, 'line_no' => (int) $forgedLine['line_no'], 'account_id' => (int) $forgedLine['account_id']],
         ], 'Synthetic forged payment evidence', 'manual', $this->actor);
         self::assertSame('ambiguous', $reconciliation->claimSettlement($this->supplier, $claimId)['settlement']['status']);
+        self::assertSame('unproven', $this->listRows()[0]['contribution']['status']);
         self::assertTrue($pairings->delete($this->supplier, $forgedPairing));
 
         $this->pdo->prepare("INSERT INTO bank_statements(supplier_id,file_name,file_hash,account_number,bank_code,currency,statement_date,imported_by) VALUES(?,'synthetic-membership.gpc',?,'1000000005','0100','CZK','2026-02-01',?)")
@@ -529,7 +1256,7 @@ final class MembershipNativeTest extends TestCase
         ], ['entry_date' => '2026-02-01', 'description' => 'Synthetic native bank payment', 'posted' => true, 'posted_by' => $this->actor]);
         $q->execute([$this->supplier, $payment]);
         $paymentLine = $q->fetch(PDO::FETCH_ASSOC);
-        $pairings->create($this->supplier, $target['journal_line']['account_id'], [
+        $paymentPairing = $pairings->create($this->supplier, $target['journal_line']['account_id'], [
             ['entry_id' => $target['journal_line']['entry_id'], 'line_no' => $target['journal_line']['line_no'], 'account_id' => $target['journal_line']['account_id']],
             ['entry_id' => $payment, 'line_no' => (int) $paymentLine['line_no'], 'account_id' => (int) $paymentLine['account_id']],
         ], 'Synthetic exact membership payment', 'manual', $this->actor);
@@ -537,12 +1264,27 @@ final class MembershipNativeTest extends TestCase
         self::assertSame('settled', $settled['settlement']['status']);
         self::assertSame(2000000, $settled['settlement']['paid_cents']);
         self::assertSame(0, $settled['settlement']['open_cents']);
+        self::assertSame('paid', $this->listRows()[0]['contribution']['status']);
+        self::assertSame('2000000', $this->listRows()[0]['contribution']['paid_cents']);
+        self::assertSame('0', $this->listRows()[0]['contribution']['open_cents']);
 
-        $preview = $this->charges->previewReverse($this->supplier, ['case_id' => $issued['case']['id'], 'accounting_date' => '2026-12-31', 'reason' => 'Synthetic approved cancellation']);
-        $reversed = $this->charges->confirmReverse($this->supplier, ['case_id' => $issued['case']['id'], 'accounting_date' => '2026-12-31', 'reason' => 'Synthetic approved cancellation'],
+        // Jako ostatní pohledávky: předpis se spárovanou úhradou nejde stornovat, nejdřív se zruší párování.
+        $reverse = ['case_id' => $issued['case']['id'], 'accounting_date' => '2026-12-31', 'reason' => 'Synthetic approved cancellation'];
+        try {
+            $this->charges->previewReverse($this->supplier, $reverse);
+            self::fail('Náhled storna přijal předpis se spárovanou úhradou.');
+        } catch (MembershipException $e) {
+            self::assertSame('nonprofit_membership_claim_paired', $e->errorCode);
+            self::assertSame(409, $e->httpStatus);
+        }
+        self::assertTrue($pairings->delete($this->supplier, $paymentPairing));
+
+        $preview = $this->charges->previewReverse($this->supplier, $reverse);
+        $reversed = $this->charges->confirmReverse($this->supplier, $reverse,
             $preview['expected_case_version'], $preview['preview_hash'], 'reverse-payment', $this->actor);
         self::assertSame('reverse', $reversed['operation']['operation']);
         self::assertSame('reversed', $reconciliation->claimSettlement($this->supplier, $claimId)['settlement']['status']);
+        self::assertSame('none', $this->listRows()[0]['contribution']['status']);
         self::assertSame(0, (int) $this->pdo->query('SELECT COUNT(*) FROM journal_line_pairing_items WHERE entry_id=' . $target['journal_line']['entry_id'])->fetchColumn());
     }
 
@@ -661,7 +1403,7 @@ final class MembershipNativeTest extends TestCase
         self::assertArrayNotHasKey('legal_basis', $historical['items'][0]);
     }
 
-    public function testPublicReceivableUsesStoredProofAndKeepsUnprovenSettlementNull(): void
+    public function testPublicReceivableUsesStoredProofAndShowsUnpairedClaimAsUnpaid(): void
     {
         $member = $this->member('M-PUBLIC-CLAIM', 'public-claim');
         $issued = $this->issue($member['id'], 'public-claim');
@@ -673,8 +1415,8 @@ final class MembershipNativeTest extends TestCase
         self::assertCount(1, $response['items']);
         self::assertSame($response['items'][0], $detail['items'][0]);
         self::assertSame('unreconciled', $detail['items'][0]['settlement']['status']);
-        self::assertNull($detail['items'][0]['settlement']['paid_cents']);
-        self::assertNull($detail['items'][0]['settlement']['open_cents']);
+        self::assertSame('0', $detail['items'][0]['settlement']['paid_cents']);
+        self::assertSame('2000000', $detail['items'][0]['settlement']['open_cents']);
         self::assertSame('proven_utc', $detail['items'][0]['recorded_time_status']);
         self::assertStringEndsWith('Z', $detail['items'][0]['recorded_at']);
         self::assertSame('verified', $detail['items'][0]['proof_status']);

@@ -181,6 +181,24 @@ final class BankTransactionListTest extends TestCase
         self::assertSame([], array_column($queue['body']['items'], 'id'));
     }
 
+    public function testDetailReturnsOneOwnMovementAndHidesForeign(): void
+    {
+        $this->setMode('tax_evidence');
+        $own = $this->detail($this->tx['income']);
+        self::assertSame(200, $own['status'], json_encode($own['body']));
+        self::assertSame($this->tx['income'], $own['body']['id']);
+        self::assertArrayHasKey('amount_czk', $own['body']);
+
+        self::assertSame(404, $this->detail($this->foreignTx)['status'], 'pohyb cizí firmy se nesmí vrátit');
+        self::assertSame(404, $this->detail(0)['status']);
+    }
+
+    /** @return array{status:int, body:array<string,mixed>} */
+    private function detail(int $id): array
+    {
+        return $this->decode($this->list->detail($this->request([]), new Psr7Response(), ['id' => (string) $id]));
+    }
+
     public function testMissingSupplierIsRejected(): void
     {
         $req = (new ServerRequestFactory())->createServerRequest('GET', '/api/bank-transactions')

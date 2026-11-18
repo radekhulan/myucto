@@ -84,6 +84,8 @@ export interface DphPriznaniPreview {
     tax_due: number
     is_excess_deduction: boolean
     submission_deadline: string
+    /** Rozhodný čas evidovaného podání v řádné lhůtě (null = nepodáno). */
+    filed_at?: string | null
     supplier_vat_period: string
     // C7' — typ podání + podklady dodatečného přiznání.
     variant: DphVariant
@@ -256,6 +258,8 @@ export interface KhPreview {
     b2_count: number
     b3_count_aggregated: number
     submission_deadline: string
+    /** Rozhodný čas evidovaného podání v řádné lhůtě (null = nepodáno). */
+    filed_at?: string | null
     variant: KhVariant
     khdph_forma: string
     is_follow_up: boolean
@@ -784,6 +788,8 @@ export const reportsApi = {
           counterparty_name: string
         }>
         submission_deadline: string
+        /** Rozhodný čas evidovaného řádného podání za období (null = nepodáno). */
+        filed_at?: string | null
         variant: ShvVariant
         shvies_forma: string
         is_follow_up: boolean

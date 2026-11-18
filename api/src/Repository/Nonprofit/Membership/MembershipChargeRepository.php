@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace MyInvoice\Repository\Nonprofit\Membership;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Service\Nonprofit\Membership\MembershipErasureAnchor;
+use MyInvoice\Service\Nonprofit\Membership\MembershipErasureSeal;
 use MyInvoice\Service\Nonprofit\Membership\MembershipException;
 use MyInvoice\Service\Nonprofit\Membership\MembershipRecordedTime;
 use MyInvoice\Service\Tax\Nonprofit\NonprofitTaxRules;
@@ -12,6 +14,8 @@ use PDO;
 
 final class MembershipChargeRepository
 {
+    private ?MembershipErasureAnchor $anchor = null;
+
     public function __construct(private readonly Connection $db) {}
 
     public function command(int $supplier, string $key, bool $lock = false): ?array
@@ -24,6 +28,12 @@ final class MembershipChargeRepository
         foreach (['id', 'supplier_id', 'created_by'] as $field) $row[$field] = (int) $row[$field];
         $row['request'] = json_decode($row['request_json'], true, flags: JSON_THROW_ON_ERROR);
         unset($row['request_json']);
+        // Zapečetěný příkaz (výmaz, krok 10) se ověří pečetí i kotvou; nezapečetěný ověřuje opakování otiskem požadavku.
+        if (MembershipErasureSeal::sealed($row)) {
+            if (!MembershipErasureSeal::commandProven($row)) throw new MembershipException('nonprofit_membership_command_corrupt', 'Požadavek členského příspěvku není průkazný.', 409);
+            $this->anchor()->assertRows($supplier, [[MembershipErasureAnchor::COMMAND, $row]],
+                'nonprofit_membership_command_corrupt', 'Požadavek členského příspěvku není průkazný.');
+        }
         return $row;
     }
 
@@ -59,10 +69,10 @@ final class MembershipChargeRepository
         return array_map($this->caseRow(...), $q->fetchAll(PDO::FETCH_ASSOC));
     }
 
-    public function insertCase(int $supplier, int $member, string $title, string $from, string $to, int $actor): array
+    public function insertCase(int $supplier, int $member, string $title, string $from, string $to, int $actor, ?string $variableSymbol = null): array
     {
-        $q = $this->db->pdo()->prepare('INSERT INTO nonprofit_membership_charge_cases(supplier_id,member_id,title_key,period_from,period_to,created_by,created_at) VALUES(?,?,?,?,?,?,UTC_TIMESTAMP(6))');
-        $q->execute([$supplier, $member, $title, $from, $to, $actor]);
+        $q = $this->db->pdo()->prepare('INSERT INTO nonprofit_membership_charge_cases(supplier_id,member_id,title_key,period_from,period_to,created_by,variable_symbol,created_at) VALUES(?,?,?,?,?,?,?,UTC_TIMESTAMP(6))');
+        $q->execute([$supplier, $member, $title, $from, $to, $actor, $variableSymbol]);
         return $this->caseById($supplier, (int) $this->db->pdo()->lastInsertId(), true) ?? throw new \LogicException('Inserted charge case disappeared.');
     }
 
@@ -102,7 +112,8 @@ final class MembershipChargeRepository
         $q = $this->db->pdo()->prepare("SELECT * FROM nonprofit_membership_charge_operations FORCE INDEX(uq_nmop_tenant) WHERE supplier_id=? AND id IN ({$marks}) ORDER BY supplier_id,id");
         $q->execute([$supplier, ...$operationIds]);
         $rows = [];
-        foreach ($q->fetchAll(PDO::FETCH_ASSOC) as $row) $rows[(int) $row['id']] = $this->operationRow($row);
+        foreach ($q->fetchAll(PDO::FETCH_ASSOC) as $row) $rows[(int) $row['id']] = $this->operationRow($row, false);
+        $this->assertAnchored($supplier, array_values($rows));
         return $rows;
     }
 
@@ -113,6 +124,19 @@ final class MembershipChargeRepository
         $q->execute([$supplier, $command]);
         $id = $q->fetchColumn();
         return $id === false ? null : $this->operation($supplier, (int) $id, $lock);
+    }
+
+    /** Všechny operace případů člena jedním dotazem, každá ověřená jako při čtení jednotlivě. */
+    public function operationsForMember(int $supplier, int $member, bool $lock = false): array
+    {
+        $this->current($lock);
+        $q = $this->db->pdo()->prepare('SELECT o.* FROM nonprofit_membership_charge_cases c FORCE INDEX(uq_nmcc_identity)
+            JOIN nonprofit_membership_charge_operations o FORCE INDEX(uq_nmop_case) ON o.supplier_id=c.supplier_id AND o.case_id=c.id
+            WHERE c.supplier_id=? AND c.member_id=? ORDER BY o.id' . ($lock ? ' FOR UPDATE' : ''));
+        $q->execute([$supplier, $member]);
+        $rows = array_map(fn (array $row): array => $this->operationRow($row, false), $q->fetchAll(PDO::FETCH_ASSOC));
+        $this->assertAnchored($supplier, $rows);
+        return $rows;
     }
 
     public function head(int $supplier, array $case, bool $lock = false): ?array
@@ -132,10 +156,10 @@ final class MembershipChargeRepository
         return $this->operation((int) $row['supplier_id'], (int) $this->db->pdo()->lastInsertId(), true) ?? throw new \LogicException('Inserted membership operation disappeared.');
     }
 
-    public function advanceHead(int $supplier, int $case, ?int $expectedHead, int $expectedVersion, int $operation): array
+    public function advanceHead(int $supplier, int $case, ?int $expectedHead, int $expectedVersion, int $operation, ?string $variableSymbol = null): array
     {
-        $q = $this->db->pdo()->prepare('UPDATE nonprofit_membership_charge_cases SET head_operation_id=?,row_version=row_version+1 WHERE supplier_id=? AND id=? AND row_version=? AND head_operation_id<=>?');
-        $q->execute([$operation, $supplier, $case, $expectedVersion, $expectedHead]);
+        $q = $this->db->pdo()->prepare('UPDATE nonprofit_membership_charge_cases SET head_operation_id=?,variable_symbol=COALESCE(?,variable_symbol),row_version=row_version+1 WHERE supplier_id=? AND id=? AND row_version=? AND head_operation_id<=>?');
+        $q->execute([$operation, $variableSymbol, $supplier, $case, $expectedVersion, $expectedHead]);
         if ($q->rowCount() !== 1) throw new MembershipException('nonprofit_membership_case_changed', 'Účetní případ se mezitím změnil.', 409);
         return $this->caseById($supplier, $case, true) ?? throw new \LogicException('Updated charge case disappeared.');
     }
@@ -188,14 +212,22 @@ final class MembershipChargeRepository
         return $record;
     }
 
-    public function operationRecord(array $row): array
+    public static function operationRecord(array $row): array
     {
         return array_intersect_key($row, array_flip(['supplier_id', 'case_id', 'command_id', 'operation', 'previous_operation_id', 'original_operation_id',
             'member_revision_id', 'legal_profile_id', 'accounting_period_id', 'accounting_date', 'due_date', 'amount_cents', 'receivable_account_id',
             'revenue_account_id', 'journal_entry_id', 'receivable_line_id', 'revenue_line_id', 'preview_hash', 'proof', 'receipt', 'parent_hash', 'created_by']));
     }
 
-    private function operationRow(array $row): array
+    /** Zapečetěné operace (výmaz, krok 10) musí odpovídat kotvě své položky v řetězu auditu; jeden dotaz na dávku. */
+    private function assertAnchored(int $supplier, array $operations): void
+    {
+        $this->anchor()->assertRows($supplier,
+            array_map(static fn (array $row): array => [MembershipErasureAnchor::OPERATION, $row], $operations),
+            'nonprofit_membership_operation_corrupt', 'Operace členského příspěvku není průkazná.');
+    }
+
+    private function operationRow(array $row, bool $anchor = true): array
     {
         foreach (['id', 'supplier_id', 'case_id', 'command_id', 'member_revision_id', 'legal_profile_id', 'accounting_period_id', 'amount_cents',
             'receivable_account_id', 'revenue_account_id', 'journal_entry_id', 'receivable_line_id', 'revenue_line_id', 'created_by'] as $field) $row[$field] = (int) $row[$field];
@@ -204,9 +236,11 @@ final class MembershipChargeRepository
             $row[$field] = json_decode($row[$field . '_json'], true, flags: JSON_THROW_ON_ERROR);
             unset($row[$field . '_json']);
         }
-        if (!hash_equals($row['record_hash'], NonprofitTaxRules::hash($this->operationRecord($row)))) {
+        if (!MembershipErasureSeal::operationProven($row)) {
             throw new MembershipException('nonprofit_membership_operation_corrupt', 'Operace členského příspěvku není průkazná.', 409);
         }
+        // Jednotlivé čtení ověří kotvu hned; dávky ji ověřují najednou (assertAnchored).
+        if ($anchor) $this->assertAnchored($row['supplier_id'], [$row]);
         return $row;
     }
 
@@ -223,6 +257,12 @@ final class MembershipChargeRepository
         $row['original_claim_id'] = $row['original_claim_id'] === null ? null : (int) $row['original_claim_id'];
         if (!hash_equals($row['record_hash'], NonprofitTaxRules::hash(self::claimRecord($row)))) throw new MembershipException('nonprofit_membership_claim_corrupt', 'Pohledávka členského příspěvku není průkazná.', 409);
         return $row;
+    }
+
+    /** Jedna instance kotvy na repozitář. */
+    private function anchor(): MembershipErasureAnchor
+    {
+        return $this->anchor ??= new MembershipErasureAnchor($this->db);
     }
 
     private function current(bool $lock): void

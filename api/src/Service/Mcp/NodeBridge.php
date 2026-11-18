@@ -49,7 +49,7 @@ final class NodeBridge
             0 => ['pipe', 'r'],
             1 => ['pipe', 'w'],
             2 => ['pipe', 'w'],
-        ], $pipes, dirname($script), $this->nodeEnvironment());
+        ], $pipes, dirname($script), self::nodeEnvironment());
         if (!is_resource($process)) {
             throw new \RuntimeException('Node.js MCP proces se nepodařilo spustit.');
         }
@@ -82,7 +82,8 @@ final class NodeBridge
         return (array) $decoded;
     }
 
-    private function nodeEnvironment(): ?array
+    /** Prostředí pro Node: pod IIS FastCGI musí dostat platnou proměnnou SystemRoot. */
+    public static function nodeEnvironment(): ?array
     {
         if (PHP_OS_FAMILY !== 'Windows') return null;
         $systemRoot = trim((string) (getenv('SystemRoot') ?: getenv('windir') ?: ''));

@@ -125,6 +125,7 @@
     "payroll_absence",
     "payroll_bank",
     "payroll_imports",
+    "payroll_posting_import",
     "payroll_travel",
     "pending_documents",
     "period_filter",
@@ -417,6 +418,7 @@
       "dimensions",
       "export",
       "imports",
+      "payroll_posting_import",
       "pohodaSchedule",
       "purchase_invoice"
     ],
@@ -425,6 +427,7 @@
       "dimensions",
       "export",
       "imports",
+      "payroll_posting_import",
       "pohodaSchedule",
       "purchase_invoice"
     ],
@@ -451,6 +454,7 @@
       "dimensions",
       "export",
       "imports",
+      "payroll_posting_import",
       "pohodaSchedule",
       "purchase_invoice"
     ],
@@ -459,6 +463,7 @@
       "dimensions",
       "export",
       "imports",
+      "payroll_posting_import",
       "pohodaSchedule",
       "purchase_invoice"
     ],
@@ -483,6 +488,7 @@
       "imports",
       "migration_nonprofit_notice",
       "pamica",
+      "payroll_posting_import",
       "pohoda",
       "premier"
     ],
@@ -491,6 +497,7 @@
       "imports",
       "migration_nonprofit_notice",
       "pamica",
+      "payroll_posting_import",
       "pohoda",
       "premier"
     ],
@@ -523,6 +530,7 @@
       "purchase_invoice"
     ],
     "purchase-invoices-renumber": [
+      "cash",
       "purchase_invoice"
     ],
     "purchase-invoice-ai-import": [

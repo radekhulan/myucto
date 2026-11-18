@@ -37,7 +37,9 @@ Nepřepočítávají se a nic se z nich znovu neúčtuje ani nepodává.
 1. **První mzdové období** je nastavené při zapnutí mezd na
    `Mzdy → Přehled mezd`. Za převzaté se považují měsíce roku zahájení před
    tímto obdobím. Když mzdy začínají lednem, převzatá část roku neexistuje
-   a nic z této kapitoly se neukáže.
+   a nic z této kapitoly se neukáže. Během nastavení mezd jde období změnit
+   volbou **Změnit první mzdové období** v nabídce „…" na téže stránce
+   (viz [75.7](75_Uplne_mzdy.md)).
 2. **Zaměstnanci a pracovní vztahy** jsou založené (ručně nebo převodem).
    Převod z [PAMICA](108_Prechod_z_PAMICA.md), [PREMIER](109_Prechod_z_PREMIER.md)
    nebo [import hlášení JMHZ](90_Nastaveni_mezd.md#9010-krok-za-krokem-import-zamestnancu-z-jmhz-a-registraci)

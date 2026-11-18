@@ -9,6 +9,7 @@ use MyInvoice\Infrastructure\Database\DbErrorLogger;
 use MyInvoice\Service\Bank\BankTransactionPostingScope;
 use MyInvoice\Service\Bank\BankTransactionSort;
 use MyInvoice\Service\Bank\NonInvoiceBankTransactionScope;
+use MyInvoice\Service\Bank\OtherItemPaymentMatchReader;
 use MyInvoice\Service\Bank\PurchasePaymentMatchReader;
 use PDO;
 use PDOException;
@@ -692,6 +693,7 @@ final class BankPostingSuggestionRepository
      *   account   — náš zdrojový účet (bs.account_number, normalizováno stejně jako u BankStatementAction::list).
      *   sort      — sloupec řazení z whitelistu {@see BankTransactionSort::KEYS} (jinak datum),
      *   direction — asc | desc (výchozí desc, nejnovější nahoře).
+     *   id        — jediný pohyb (detail `GET /bank-transactions/{id}`).
      */
     public function paginateUnposted(int $supplierId, int $limit, int $offset, array $filters = []): array
     {
@@ -718,6 +720,11 @@ final class BankPostingSuggestionRepository
         if (!$unpostedOnly && in_array($posting, ['unposted', 'posted'], true)) {
             $scopeSql .= ' AND ' . ($posting === 'unposted' ? 'NOT ' : '')
                 . BankTransactionPostingScope::existsSql($supplierId, 'bt.id');
+        }
+
+        if (isset($filters['id']) && (int) $filters['id'] > 0) {
+            $scopeSql .= ' AND bt.id = ?';
+            $scopeParams[] = (int) $filters['id'];
         }
 
         $year = isset($filters['year']) && (int) $filters['year'] > 0 ? (int) $filters['year'] : null;
@@ -860,7 +867,8 @@ final class BankPostingSuggestionRepository
 
         $matchedPurchasesByTx = PurchasePaymentMatchReader::byTransactions($pdo, $supplierId, $txIds);
         $matchedOtherItemsByTx = \MyInvoice\Service\Bank\OtherItemPaymentMatchReader::byTransactions($pdo, $supplierId, $txIds);
-        $items = array_map(static function (array $row) use ($matchedByTx, $matchedPurchasesByTx, $matchedOtherItemsByTx): array {
+        $matchedMembershipByTx = OtherItemPaymentMatchReader::membershipByTransactions($pdo, $supplierId, $txIds);
+        $items = array_map(static function (array $row) use ($matchedByTx, $matchedPurchasesByTx, $matchedOtherItemsByTx, $matchedMembershipByTx): array {
             return [
                 'id' => (int) $row['id'],
                 'source' => (string) $row['transaction_source'],
@@ -886,6 +894,10 @@ final class BankPostingSuggestionRepository
                 'matched_invoices' => $matchedByTx[(int) $row['id']] ?? [],
                 'matched_purchase_invoices' => $matchedPurchasesByTx[(int) $row['id']] ?? [],
                 'matched_other_items' => $matchedOtherItemsByTx[(int) $row['id']] ?? [],
+                'matched_membership_claims' => array_map(static function (array $claim): array {
+                    unset($claim['pairing_id'], $claim['entry_id']);
+                    return $claim;
+                }, $matchedMembershipByTx[(int) $row['id']] ?? []),
                 'match_status' => (string) $row['match_status'],
                 'ignore_note' => $row['ignore_note'] === null ? null : (string) $row['ignore_note'],
                 'ignore_origin' => $row['ignore_origin'] === null ? null : (string) $row['ignore_origin'],
