@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Import;
 
 use MyInvoice\Bootstrap;
+use MyInvoice\Http\IsoDate;
 use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\ClientRepository;
@@ -501,7 +502,14 @@ final class AiPdfExtractor
      */
     public static function withIssueDateFallback(array $data, string $today): array
     {
-        $valid = static fn (mixed $v): bool => is_string($v) && preg_match('/^\d{4}-\d{2}-\d{2}$/', $v) === 1;
+        // AI umí vrátit i neexistující den (31. 9.): regex ho propustil a zápis pak
+        // spadl na chybě databáze. Takové datum se bere jako nenalezené.
+        $valid = static fn (mixed $v): bool => is_string($v) && IsoDate::isValid($v);
+        foreach (['tax_date', 'due_date', 'delivery_date'] as $key) {
+            if (isset($data[$key]) && !$valid($data[$key])) {
+                $data[$key] = null;
+            }
+        }
         if ($valid($data['issue_date'] ?? null)) {
             return $data;
         }
