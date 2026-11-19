@@ -410,8 +410,12 @@ export interface RunStepPayload {
   /** D9 provisions — účetní-potvrzený seznam OP per pohledávka. */
   items?: ProvisionInput[]
   partial?: boolean
-  /** D11 income_tax — částka splatné daně (591/341). */
+  /** D11 income_tax — částka splatné daně (591/341); deferred_tax 500 — odložená daň (záporná = pohledávka). */
   amount?: number
+  /** Důvod odchylky ruční částky od návrhu (daň z příjmů, odložená daň). */
+  reason?: string
+  /** Odložená daňová pohledávka (500): potvrzené posouzení podle § 59 odst. 4 vyhlášky. */
+  prudence_confirmed?: boolean
   /** §DM / Task 11 — časové rozlišení drobného majetku (deferrals): režim + volitelné %. */
   small_asset_accrual?: { mode: SmallAssetAccrualMode; pct?: number | null }
   /** §DČR / Task 12 — časové rozlišení nákladů příštích období (deferrals): trigger, částky z faktur. */
@@ -589,6 +593,31 @@ export interface ProvisionInput {
 }
 
 // ── D11: splatná daň z příjmů ──────────────────────────────────────────────
+/** Náhled odložené daně u ostatních firem (vyhláška 500, ČÚS 003). */
+export interface DeferredTaxPreview {
+  as_of: string
+  period: { id: number; fiscal_year: number }
+  taxpayer_type: string | null
+  applicable: boolean
+  computation: {
+    rate: number
+    rate_year: number
+    rate_is_fallback: boolean
+    titles: { key: string; label: string; difference: number; kind: string }[]
+    net_difference: number
+    deferred_tax: number
+    kind: string
+    requires_prudence_check: boolean
+    warnings: string[]
+  } | null
+  balance_481: number
+  balance_592: number
+  /** Kladný = dozúčtovat závazek, záporný = snížit ho nebo zaúčtovat pohledávku. */
+  movement: number
+  existing_entry_id: number | null
+  existing_amount: number | null
+}
+
 export interface IncomeTaxPreview {
   as_of: string
   period: { id: number; fiscal_year: number }
@@ -885,6 +914,8 @@ export const closingApi = {
   estimatesSuggest: (periodId: number) =>
     api.get<EstimatesSuggest>(`/accounting/periods/${periodId}/closing/estimates-suggest`).then(r => r.data),
   // D11 — náhled podkladu splatné daně (DPPO + zůstatky 341/591).
+  deferredTaxPreview: (periodId: number) =>
+    api.get<DeferredTaxPreview>(`/accounting/periods/${periodId}/closing/deferred-tax-preview`).then(r => r.data),
   incomeTaxPreview: (periodId: number) =>
     api.get<IncomeTaxPreview>(`/accounting/periods/${periodId}/closing/income-tax-preview`).then(r => r.data),
   // §DM / Task 11 — náhled časového rozlišení drobného majetku (381/501) dle režimu.

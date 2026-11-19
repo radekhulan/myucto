@@ -256,8 +256,8 @@ final class NonprofitReferenceAssociationEndToEndTest extends TestCase
 
         $order = \MyInvoice\Service\Accounting\Closing\ClosingService::stepOrder('cz_504');
         self::assertLessThan(array_search('income_tax', $order, true), array_search('stock', $order, true));
-        self::assertSame(['precheck', 'depreciation', 'fx_revaluation', 'estimates', 'deferrals', 'provisions', 'income_tax', 'stock', 'close_books', 'open_next'],
-            \MyInvoice\Service\Accounting\Closing\ClosingService::stepOrder('cz_500'), 'Pořadí kroků mimo 504 se nemění.');
+        self::assertSame(['precheck', 'depreciation', 'fx_revaluation', 'estimates', 'deferrals', 'provisions', 'income_tax', 'deferred_tax', 'stock', 'close_books', 'open_next'],
+            \MyInvoice\Service\Accounting\Closing\ClosingService::stepOrder('cz_500'), 'Mimo 504 jde volitelná odložená daň hned po splatné dani, zásoby zůstávají za daní.');
 
         $this->pdo->prepare("UPDATE supplier SET stock_enabled = 1 WHERE id = ?")->execute([$this->supplier]);
         $this->pdo->prepare("UPDATE accounting_periods SET status = 'closing' WHERE id = ?")->execute([$this->period]);

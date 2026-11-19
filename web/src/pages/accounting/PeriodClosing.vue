@@ -41,6 +41,7 @@ import DateInput from '@/components/ui/DateInput.vue'
 import PaginationBar from '@/components/ui/PaginationBar.vue'
 import ResultDecision504 from '@/components/accounting/ResultDecision504.vue'
 import DeferredTax504Panel from '@/components/accounting/DeferredTax504Panel.vue'
+import DeferredTax500Panel from '@/components/accounting/DeferredTax500Panel.vue'
 import AssetReserve504 from '@/components/accounting/AssetReserve504.vue'
 import LegalProvisions504 from '@/components/accounting/LegalProvisions504.vue'
 import FxRevaluation504 from '@/components/accounting/FxRevaluation504.vue'
@@ -54,7 +55,7 @@ const pageId = useId()
 const periodId = Number(route.params.id)
 
 const BASE_STEP_ORDER: ClosingStepKey[] = [
-  'precheck', 'depreciation', 'fx_revaluation', 'estimates', 'deferrals', 'provisions', 'income_tax', 'stock', 'close_books', 'open_next',
+  'precheck', 'depreciation', 'fx_revaluation', 'estimates', 'deferrals', 'provisions', 'income_tax', 'deferred_tax', 'stock', 'close_books', 'open_next',
 ]
 
 const state = ref<ClosingState | null>(null)
@@ -834,6 +835,11 @@ function takeoverBadge(status: string): string {
   return 'bg-neutral-100 text-neutral-500'
 }
 
+function bookDeferredTax(body: { amount: number; reason?: string; prudence_confirmed?: boolean }) {
+  mutate(() => closingApi.runStep(periodId, 'deferred_tax', { row_version: rowVersion.value, ...body }),
+    t('accounting.closing.deferred_tax500.booked'))
+}
+
 function revertStep(key: ClosingStepKey) {
   if (!confirm(t('accounting.closing.revert.confirm'))) return
   mutate(() => closingApi.revertStep(periodId, key, rowVersion.value), t('accounting.closing.revert.done'))
@@ -940,7 +946,9 @@ const canOpenNextStage = computed(() => ['closed', 'reviewed', 'approved'].inclu
       <div class="bg-surface border border-neutral-200 rounded-lg shadow-sm p-5 space-y-4 min-w-0">
         <div>
           <h2 class="text-lg font-semibold">{{ t(`accounting.closing.steps.${selected}.title`) }}</h2>
-          <p class="text-sm text-neutral-500 mt-0.5">{{ t(`accounting.closing.steps.${selected}.description`) }}</p>
+          <p class="text-sm text-neutral-500 mt-0.5">{{ t(selected === 'deferred_tax' && state.accounting_framework !== 'cz_504'
+            ? 'accounting.closing.steps.deferred_tax.description_500'
+            : `accounting.closing.steps.${selected}.description`) }}</p>
         </div>
 
         <!-- 1) Precheck -->
@@ -1557,6 +1565,16 @@ const canOpenNextStage = computed(() => ['closed', 'reviewed', 'approved'].inclu
 
         <template v-else-if="selected === 'deferred_tax' && state?.accounting_framework === 'cz_504'">
           <DeferredTax504Panel :period-id="periodId" :row-version="rowVersion" :can-write="isClosing && auth.canWrite('accounting.periods.close') && !busy" @updated="load" />
+        </template>
+
+        <!-- Odložená daň u ostatních firem (500): volitelný krok, uzavření knih neblokuje. -->
+        <template v-else-if="selected === 'deferred_tax'">
+          <div v-if="!isClosing && step('deferred_tax')?.status === 'pending'" class="text-sm text-neutral-500">
+            {{ t('accounting.closing.assist.needs_closing') }}
+          </div>
+          <DeferredTax500Panel v-else :period-id="periodId" :row-version="rowVersion" :step="step('deferred_tax')"
+            :is-closing="isClosing" :can-write="auth.canWrite('accounting.periods.close')" :busy="busy"
+            @book="bookDeferredTax" @skip="confirmStep('deferred_tax', 'skipped')" @revert="revertStep('deferred_tax')" />
         </template>
 
         <!-- D11) Splatná daň z příjmů -->

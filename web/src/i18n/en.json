@@ -22035,7 +22035,8 @@
         },
         "deferred_tax": {
           "title": "Deferred tax",
-          "description": "Voluntary evidenced method with separate asset and liability presentation."
+          "description": "Voluntary evidenced method with separate asset and liability presentation.",
+          "description_500": "Deferred tax on temporary differences between the carrying amount and the tax base (CAS 003, 592/481). Optional step, does not block closing the books."
         }
       },
       "checks": {
@@ -22511,6 +22512,23 @@
         "missing_account": "A required closing account is missing from the chart of accounts.",
         "period_not_open": "The fiscal period is not open.",
         "precheck_errors_exist": "Pre-closing checks contain errors — the books cannot be closed."
+      },
+      "deferred_tax500": {
+        "hint": "Under § 59 of Decree 500/2002 Coll., deferred tax is mandatory for entities with a statutory audit and for consolidation groups. Other companies account for it voluntarily. The step is therefore optional and does not block closing the books; skip it if you do not need it.",
+        "not_applicable": "An individual does not account for deferred tax. Skip the step.",
+        "rate": "Rate {rate} % (year {year})",
+        "title_col": "Temporary difference",
+        "difference_col": "Difference",
+        "no_titles": "There are no temporary differences at the balance sheet date.",
+        "computed": "Computed deferred tax",
+        "suggested": "Suggested entry (adjusts the 481 balance)",
+        "amount": "Deferred tax to post",
+        "amount_hint": "A positive amount is a liability (592/481), a negative one an asset (481/592).",
+        "reason": "Reason for deviating from the computation (optional)",
+        "prudence": "I have assessed that taxable profit will be available against which the asset can be used (§ 59(4) of the Decree).",
+        "book": "Post deferred tax",
+        "booked": "Deferred tax has been posted.",
+        "amount_required": "Enter a non-zero amount. Do not post zero deferred tax, skip the step instead."
       }
     },
     "monthly_check": {

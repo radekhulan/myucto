@@ -607,7 +607,7 @@ final class ClosingWorkflowTest extends TestCase
         self::assertSame(['estimates'], $this->closing->state($sid, $pid)['income_tax_stale']['caused_by'] ?? null);
         $this->closing->runPrecheck($sid, $pid, $this->rv(), $this->meta());
 
-        $this->closing->confirmStep($sid, $pid, 'income_tax', 'done', null, $this->rv(), $this->meta());
+        $this->closing->reconfirmIncomeTax($sid, $pid, null, $this->rv(), $this->meta());
         $state = $this->closing->state($sid, $pid);
         self::assertNull($state['income_tax_stale']);
         self::assertTrue($state['can_close']);

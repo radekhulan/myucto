@@ -22035,7 +22035,8 @@
         },
         "deferred_tax": {
           "title": "Odložená daň",
-          "description": "Dobrovolná doložená metoda s odděleným vykázáním závazku a pohledávky."
+          "description": "Dobrovolná doložená metoda s odděleným vykázáním závazku a pohledávky.",
+          "description_500": "Odložená daň z přechodných rozdílů mezi účetní a daňovou hodnotou (ČÚS 003, 592/481). Volitelný krok, uzavření knih neblokuje."
         }
       },
       "checks": {
@@ -22511,6 +22512,23 @@
         "missing_account": "V účtové osnově chybí požadovaný závěrkový účet.",
         "period_not_open": "Účetní období není otevřené.",
         "precheck_errors_exist": "Předběžné kontroly obsahují chyby - knihy nelze uzavřít."
+      },
+      "deferred_tax500": {
+        "hint": "Podle § 59 vyhlášky 500/2002 Sb. účtují o odložené dani povinně účetní jednotky s povinným auditem a konsolidační celky. Ostatní firmy o ní účtují dobrovolně. Krok je proto volitelný a uzavření knih neblokuje, nepotřebujete-li ho, přeskočte ho.",
+        "not_applicable": "Fyzická osoba o odložené dani neúčtuje. Krok přeskočte.",
+        "rate": "Sazba {rate} % (rok {year})",
+        "title_col": "Přechodný rozdíl",
+        "difference_col": "Rozdíl",
+        "no_titles": "K rozvahovému dni nejsou žádné přechodné rozdíly.",
+        "computed": "Vypočtená odložená daň",
+        "suggested": "Návrh zápisu (dorovnání zůstatku 481)",
+        "amount": "Odložená daň k zaúčtování",
+        "amount_hint": "Kladná částka je závazek (592/481), záporná pohledávka (481/592).",
+        "reason": "Důvod odchylky od výpočtu (nepovinné)",
+        "prudence": "Posoudil(a) jsem, že bude dosaženo základu daně, o který lze pohledávku uplatnit (§ 59 odst. 4 vyhlášky).",
+        "book": "Zaúčtovat odloženou daň",
+        "booked": "Odložená daň byla zaúčtována.",
+        "amount_required": "Zadejte nenulovou částku. Nulovou odloženou daň neúčtujte, krok přeskočte."
       }
     },
     "monthly_check": {

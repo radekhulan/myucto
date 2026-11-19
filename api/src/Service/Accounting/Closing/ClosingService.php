@@ -857,6 +857,25 @@ final class ClosingService
     }
 
     /**
+     * Potvrzení už zaúčtované daně z příjmů beze změny částky. Slouží po vrácení kroku,
+     * který mění výsledek hospodaření ({@see markIncomeTaxStale}): účetní ověří, že částka
+     * platí dál, a příznak přepočtu se zruší. Nezaúčtovanou daň takto potvrdit nejde.
+     *
+     * @param array{user_id?:?int, ip?:?string, user_agent?:?string} $meta
+     * @return array<string,mixed>
+     */
+    public function reconfirmIncomeTax(int $supplierId, int $periodId, ?string $note, int $rowVersion, array $meta = []): array
+    {
+        return $this->tx(function () use ($supplierId, $periodId, $note, $rowVersion, $meta): array {
+            $this->lockPeriod($supplierId, $periodId, $rowVersion);
+            if ($this->stepsMap($supplierId, $periodId, true)['income_tax']['status'] !== 'done') {
+                throw new ClosingException('income_tax_not_posted', 'Daň z příjmů ještě není zaúčtovaná - zadejte částku splatné daně.', 422);
+            }
+            return $this->confirmStep($supplierId, $periodId, 'income_tax', 'done', $note, $rowVersion, $meta);
+        });
+    }
+
+    /**
      * Zaúčtování odpisů majetku jako součást uzávěrkového kroku 2 (audit 2026-07 B10).
      * Jediné místo, které smí zaúčtovat odpisy do období ve stavu 'closing' — R7 flag
      * allow_closing_period nastaví VÝHRADNĚ tady, a to jen když je období skutečně
