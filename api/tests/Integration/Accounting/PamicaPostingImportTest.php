@@ -13,6 +13,7 @@ use MyInvoice\Repository\AccountingPeriodRepository;
 use MyInvoice\Security\EffectiveRole;
 use MyInvoice\Service\Accounting\ChartOfAccountsSeeder;
 use MyInvoice\Service\Import\InvoiceImportService;
+use MyInvoice\Service\Import\PamicaPosting\PamicaPostingCodeMap;
 use MyInvoice\Service\Import\PamicaPosting\PamicaPostingException;
 use MyInvoice\Service\Import\PamicaPosting\PamicaPostingImportService;
 use MyInvoice\Tests\Support\IsolatedSupplierTrait;
@@ -294,6 +295,84 @@ final class PamicaPostingImportTest extends TestCase
         $applied = $action->apply($this->request($all, 'mzdy.xml', $this->xml, true), new Response());
         self::assertSame(201, $applied->getStatusCode());
         self::assertSame(1, $this->countWhere('activity_log', "action = 'payroll_posting.imported'"));
+    }
+
+    public function testCodesNeedMapPerSupplierAndSavedMapIsApplied(): void
+    {
+        $xml = strtr($this->xml, ['521000/331000' => '7Int', '331000/342000' => '2Oz']);
+        self::assertSame(['7Int', '2Oz'], array_column($this->unmappedCodes($xml), 'code'));
+
+        $map = $this->container->get(PamicaPostingCodeMap::class);
+        $liability = (string) $this->pdo->query("SELECT account_code FROM chart_of_accounts WHERE supplier_id = {$this->supplierId} AND account_code LIKE '342.%' ORDER BY account_code LIMIT 1")->fetchColumn();
+        self::assertNotSame('', $liability);
+        foreach ([
+            [['code' => '7Int', 'debit_account_code' => '521', 'credit_account_code' => '521']],
+            [['code' => '7Int', 'debit_account_code' => '521', 'credit_account_code' => '999']],
+            [['code' => '7Int', 'debit_account_code' => '', 'credit_account_code' => '331']],
+            [['code' => '7/Int', 'debit_account_code' => '521', 'credit_account_code' => '331']],
+        ] as $invalid) {
+            try {
+                $map->save($this->supplierId, PamicaPostingImportService::APPLICATION, $invalid, null);
+                self::fail('Neplatné mapování se nesmí uložit.');
+            } catch (PamicaPostingException $e) {
+                self::assertSame('invalid_code_map', $e->errorCode);
+            }
+        }
+        self::assertSame(0, $this->countWhere('payroll_posting_code_maps', '1 = 1'));
+
+        $action = $this->container->get(PayrollPostingImportAction::class);
+        $all = ['accounting' => 2, 'other_items' => 2, 'accounting.journal.write' => 2, 'accounting.journal.post' => 2];
+        $codes = ['codes' => [
+            ['code' => '7int', 'debit_account_code' => '521', 'credit_account_code' => '331'],
+            ['code' => '2Oz', 'debit_account_code' => '331', 'credit_account_code' => $liability],
+        ]];
+        self::assertSame(403, $action->saveCodeMap($this->jsonRequest(['other_items' => 1] + $all, $codes), new Response())->getStatusCode());
+        $saved = $action->saveCodeMap($this->jsonRequest($all, $codes), new Response());
+        self::assertSame(200, $saved->getStatusCode());
+        self::assertCount(2, $this->data($saved)['code_map']);
+        // Úprava přepíše řádek zkratky (bez ohledu na velikost písmen), druhý nezaloží.
+        $codes['codes'][0]['code'] = '7Int';
+        self::assertSame(200, $action->saveCodeMap($this->jsonRequest($all, $codes), new Response())->getStatusCode());
+        self::assertSame(2, $this->countWhere('payroll_posting_code_maps', '1 = 1'));
+
+        $preview = $this->service->preview($this->supplierId, $xml);
+        self::assertEqualsCanonicalizing(['7Int', '2Oz'], array_column($preview['code_map'], 'code'));
+        $line = $preview['internal_documents'][0]['lines'][0];
+        self::assertSame(['7Int', '521', '331'], [$line['code'], $line['debit'], $line['credit']]);
+        // 331 ze zkratky a BEZ331000 jsou tentýž účet: kontrola zúčtování mezd sedí.
+        self::assertSame(0.0, $preview['totals']['clearing']['331000']['difference']);
+        self::assertSame('ok', array_column($preview['checks'], 'level', 'code')['clearing_balanced']);
+
+        $result = $this->service->apply($this->supplierId, $xml, 'mzdy.xml', true, $this->audit());
+        $doc = $this->row('SELECT journal_entry_id FROM internal_documents WHERE id = ? AND supplier_id = ?', [$result['internal_documents'][0]['id'], $this->supplierId]);
+        self::assertSame(['331:credit:30000.00', '521:debit:30000.00'], $this->entryLines((int) $doc['journal_entry_id']));
+        self::assertSame(['331:debit:3000.00', $liability . ':credit:3000.00'], $this->entryLines((int) $this->items()[0]['journal_entry_id']));
+
+        // Mapování patří firmě: jiná firma tytéž zkratky přiřazené nemá.
+        $this->supplierId = $this->createIsolatedSupplier($this->pdo, $this->supplierId);
+        self::assertSame(['7Int', '2Oz'], array_column($this->unmappedCodes($xml), 'code'));
+    }
+
+    /** @return list<array<string,mixed>> */
+    private function unmappedCodes(string $xml): array
+    {
+        try {
+            $this->service->preview($this->supplierId, $xml);
+            self::fail('Zkratky bez mapování musí náhled zastavit.');
+        } catch (PamicaPostingException $e) {
+            self::assertSame('unmapped_accounting_codes', $e->errorCode);
+            return $e->context['unmapped_codes'];
+        }
+    }
+
+    private function jsonRequest(array $permissions, array $body)
+    {
+        return (new ServerRequestFactory())->createServerRequest('PUT', '/api/accounting/payroll-posting-imports/code-map')
+            ->withParsedBody($body)
+            ->withAttribute(SupplierScopeMiddleware::ATTR_CURRENT_ID, $this->supplierId)
+            ->withAttribute(AuthMiddleware::ATTR_USER, ['id' => $this->userId, 'role' => 'accountant'])
+            ->withAttribute(AuthMiddleware::ATTR_METHOD, 'session')
+            ->withAttribute('auth.effective_role', new EffectiveRole(0, 'Test', 'staff', true, $permissions, 'custom'));
     }
 
     private function expectApplyError(string $code, bool $createAccounts = true): void

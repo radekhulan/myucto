@@ -281,8 +281,9 @@ final class GlobalSeedTables
         // úrazového pojištění, mzdové složky a jejich mapování do JMHZ, střediska,
         // matice agend, skartační lhůty, profily importů a podpisů podání. Hraniční:
         // potvrzené návrhy předkontací mezd (payroll_posting_map_proposals) nesou
-        // mapování mzdových složek na účty, tedy předkontaci mezd.
-        'payroll_module_state', 'payroll_production_qualifications',
+        // mapování mzdových složek na účty, tedy předkontaci mezd. Stejně tak přiřazení
+        // zkratek předkontací PAMICY k účtům (payroll_posting_code_maps).
+        'payroll_module_state', 'payroll_production_qualifications', 'payroll_posting_code_maps',
         'payroll_employer_settings', 'payroll_employer_policies', 'payroll_employer_policy_audit',
         'payroll_offices', 'payroll_office_registration_versions', 'payroll_regzel_employer_profiles',
         'payroll_institutions', 'payroll_institution_accounts', 'payroll_accident_insurance_rates',

@@ -44899,7 +44899,27 @@
     "detected_title": "Zaúčtování mezd z PAMICY",
     "detected_hint": "Tento soubor neobsahuje faktury, ale zaúčtování mezd, a přijaté faktury z něj nevznikly. Načtěte ho jako interní doklad a ostatní závazky.",
     "open_preview": "Zobrazit náhled zaúčtování",
-    "open_wizard": "Otevřít průvodce PAMICA"
+    "open_wizard": "Otevřít průvodce PAMICA",
+    "edit_codes": "Upravit zkratky předkontací",
+    "code_map": {
+      "title": "Zkratky předkontací",
+      "hint_unmapped": "Soubor místo účtů nese zkratky předkontací z PAMICY. Každé zkratce přiřaďte účet MD a účet Dal z účtové osnovy. Přiřazení se uloží pro firmu a příští načtení ho použije samo.",
+      "hint_edit": "Přiřazení zkratek použitých v tomto souboru. Změna platí pro toto i další načtení, už načtené doklady nemění.",
+      "col_code": "Zkratka",
+      "col_samples": "Řádky v souboru",
+      "usage_internal": "interní doklad",
+      "usage_commitment": "ostatní závazek",
+      "count": "řádků: {n}",
+      "already_mapped": "přiřazeno dříve",
+      "debit_for": "Účet MD pro zkratku {code}",
+      "credit_for": "Účet Dal pro zkratku {code}",
+      "both_required": "Vyberte účet MD i účet Dal.",
+      "same_accounts": "Účet MD a účet Dal musí být různé.",
+      "unknown_account": "Účet není v účtové osnově firmy.",
+      "save": "Uložit a načíst náhled",
+      "saved": "Přiřazení zkratek je uložené.",
+      "save_failed": "Přiřazení zkratek se nepodařilo uložit."
+    }
   },
   "bulk_actions": {
     "menu": "Hromadné akce",

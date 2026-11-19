@@ -9,6 +9,7 @@ use MyInvoice\Infrastructure\Database\TransactionFailure;
 use MyInvoice\Security\AccessLevel;
 use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\ActivityLogger;
+use MyInvoice\Service\Import\PamicaPosting\PamicaPostingCodeMap;
 use MyInvoice\Service\Import\PamicaPosting\PamicaPostingException;
 use MyInvoice\Service\Import\PamicaPosting\PamicaPostingFormat;
 use MyInvoice\Service\Import\PamicaPosting\PamicaPostingImportService;
@@ -22,6 +23,8 @@ use Psr\Http\Message\UploadedFileInterface;
  *
  *   POST /api/accounting/payroll-posting-imports/preview  multipart `file` - náhled, nic neukládá
  *   POST /api/accounting/payroll-posting-imports/apply    multipart `file` (+ `create_missing_accounts=1`)
+ *   PUT  /api/accounting/payroll-posting-imports/code-map JSON `{codes:[{code, debit_account_code, credit_account_code}]}`
+ *        - přiřazení zkratek předkontací k účtům MD a Dal ({@see PamicaPostingCodeMap})
  *
  * Volá ho průvodce PAMICA i import přijatých faktur, když rozpozná soubor se zaúčtováním
  * mezd ({@see PamicaPostingFormat}); obě místa sdílí tytéž akce a kontroly. Soubor jiného
@@ -39,6 +42,7 @@ final class PayrollPostingImportAction
         private readonly PamicaPostingImportService $service,
         private readonly ActivityLogger $logger,
         private readonly IpMatcher $ipMatcher,
+        private readonly PamicaPostingCodeMap $codeMap,
     ) {}
 
     public function preview(Request $request, Response $response): Response
@@ -94,6 +98,34 @@ final class PayrollPostingImportAction
             'totals' => $result['totals'],
         ], $audit['ip'], $audit['user_agent'], $supplierId);
         return Json::ok($response, $result, 201);
+    }
+
+    /**
+     * Uloží přiřazení zkratek předkontací. Mapování určuje, kam import účtuje, proto chce
+     * stejná práva jako samotné načtení.
+     */
+    public function saveCodeMap(Request $request, Response $response): Response
+    {
+        if (!RequestAuthorization::actsAsSession($request)) {
+            return Json::sessionRequired($response);
+        }
+        foreach (['accounting.journal.write', 'accounting.journal.post', 'other_items'] as $permission) {
+            if (!$this->requirePermission($request, $response, $permission, AccessLevel::WRITE, $err)) return $err;
+        }
+        $body = $request->getParsedBody();
+        $codes = is_array($body) && is_array($body['codes'] ?? null) ? array_values($body['codes']) : [];
+        $supplierId = $this->currentSupplierId($request);
+        $audit = $this->auditMeta($request);
+        try {
+            $rows = $this->codeMap->save($supplierId, PamicaPostingImportService::APPLICATION, $codes, $audit['user_id']);
+        } catch (PamicaPostingException $e) {
+            return Json::error($response, $e->errorCode, $e->getMessage(), $e->httpStatus, $e->context);
+        }
+        $this->logger->log('payroll_posting.code_map_saved', $audit['user_id'], 'payroll_posting_code_map', null, [
+            'application' => PamicaPostingImportService::APPLICATION,
+            'codes' => $rows,
+        ], $audit['ip'], $audit['user_agent'], $supplierId);
+        return Json::ok($response, ['code_map' => $rows]);
     }
 
     /** Smí uživatel zaúčtování načíst (a případně založit chybějící analytiky)? */

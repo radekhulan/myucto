@@ -17,9 +17,12 @@ use MyInvoice\Http\IsoDate;
  *    znamená „bez zaúčtování": závazek už vznikl interním dokladem (331 Dal) a eviduje se
  *    jen k úhradě; účet za předponou je účet, na kterém závazek leží.
  *
- * Předkontace je v exportu PAMICY přímo dvojice účtů „MD/Dal" ve tvaru STORMWARE
- * (šest číslic, např. 524000/336001). Jiný tvar předkontace parser odmítne, protože by
- * ji nebylo podle čeho zaúčtovat.
+ * Předkontace je v exportu PAMICY buď přímo dvojice účtů „MD/Dal" ve tvaru STORMWARE
+ * (šest číslic, např. 524000/336001), nebo zkratka předkontace POHODY (7Int, 4Oz), když
+ * je PAMICA nastavená na zkratky. Zkratku přeloží na dvojici účtů mapování firmy
+ * (`$codeMap`, {@see PamicaPostingCodeMap}); zkratky bez mapování parser posbírá i se
+ * vzorovými řádky a vrátí chybou `unmapped_accounting_codes`, aby je účetní mohla
+ * přiřadit. Jiný tvar předkontace parser odmítne, protože by ji nebylo podle čeho zaúčtovat.
  */
 final class PamicaPostingParser
 {
@@ -30,16 +33,28 @@ final class PamicaPostingParser
 
     private const MAX_ITEMS = 2000;
     private const MAX_LINES = 50;
+    private const MAX_SAMPLES = 3;
+
+    /** @var array<string,array{code:string,usage:array<string,true>,count:int,samples:list<array{document:string,text:string,amount:float}>}> */
+    private array $unmapped = [];
+    /** @var array<string,array{debit:string,credit:string}> */
+    private array $codeMap = [];
 
     /**
+     * @param array<string,array{debit:string,credit:string}> $codeMap zkratka (velkými písmeny) => účty MD a Dal
      * @return array{
      *   application:string, ico:string, pack_id:?string, sym_par:string, period:string,
      *   accounting_date:string, document_date:string,
      *   internal_documents:list<array<string,mixed>>, commitments:list<array<string,mixed>>
      * }
      */
-    public function parse(string $bytes): array
+    public function parse(string $bytes, array $codeMap = []): array
     {
+        $this->unmapped = [];
+        $this->codeMap = [];
+        foreach ($codeMap as $code => $pair) {
+            $this->codeMap[PamicaPostingCodeMap::key((string) $code)] = $pair;
+        }
         if ($bytes === '' || strlen($bytes) > PamicaPostingFormat::MAX_BYTES) {
             throw new PamicaPostingException('invalid_file', 'Soubor je prázdný nebo větší než 20 MiB.');
         }
@@ -124,6 +139,18 @@ final class PamicaPostingParser
         if (substr(min($accountingDates), 0, 7) !== substr($accountingDate, 0, 7)) {
             throw new PamicaPostingException('period_mismatch', 'Doklady v souboru mají datum účetního případu v různých měsících.');
         }
+        if ($this->unmapped !== []) {
+            $unmapped = array_values(array_map(static fn (array $u): array => [
+                'code' => $u['code'],
+                'usage' => array_keys($u['usage']),
+                'count' => $u['count'],
+                'samples' => $u['samples'],
+            ], $this->unmapped));
+            throw new PamicaPostingException('unmapped_accounting_codes',
+                'Soubor používá zkratky předkontací ' . implode(', ', array_column($unmapped, 'code'))
+                . ', ke kterým firma nemá přiřazené účty MD a Dal. Přiřaďte je a načtení zopakujte.',
+                422, ['unmapped_codes' => $unmapped]);
+        }
 
         return [
             'application' => 'PAMICA',
@@ -154,7 +181,7 @@ final class PamicaPostingParser
         if ($lines === []) {
             $amount = $this->summaryAmount($xp, $doc, 'int:intDocSummary');
             if ($amount !== null) {
-                $lines[] = $this->accountLine($headerAccounting, $amount, $title, null, "Interní doklad {$itemId}");
+                $lines[] = $this->accountLine($headerAccounting, $amount, $title, null, "Interní doklad {$itemId}", 'internal');
             }
         }
         $lines = array_values(array_filter($lines, static fn (array $l): bool => $l['amount'] !== 0.0));
@@ -231,7 +258,7 @@ final class PamicaPostingParser
         if ($lines === []) {
             $amount = $this->summaryAmount($xp, $doc, 'inv:invoiceSummary')
                 ?? throw new PamicaPostingException('empty_document', "{$label} nemá položky ani částku.");
-            $lines[] = $this->accountLine($headerAccounting, $amount, $title, null, $label);
+            $lines[] = $this->accountLine($headerAccounting, $amount, $title, null, $label, 'commitment');
         }
         $lines = array_values(array_filter($lines, static fn (array $l): bool => $l['amount'] !== 0.0));
         if ($lines === []) {
@@ -245,12 +272,19 @@ final class PamicaPostingParser
                 throw new PamicaPostingException('negative_amount', "{$label}, položka " . ($i + 1) . ': záporná částka ostatního závazku není podporovaná.');
             }
         }
+        // Řádky s nemapovanou zkratkou účty nemají; kontroly účtů proběhnou až s mapováním
+        // (parse po posbírání všech zkratek skončí chybou unmapped_accounting_codes).
+        $unmapped = array_filter($lines, static fn (array $l): bool => $l['credit'] === null);
         $withoutPosting = array_values(array_unique(array_map(static fn (array $l): bool => $l['without_posting'], $lines)));
-        if (count($withoutPosting) !== 1) {
+        if ($unmapped !== []) {
+            $withoutPosting = [false];
+        } elseif (count($withoutPosting) !== 1) {
             throw new PamicaPostingException('invalid_accounting', "{$label} míchá položky se zaúčtováním a bez zaúčtování.");
         }
         $credits = array_values(array_unique(array_map(static fn (array $l): string => (string) $l['credit'], $lines)));
-        if (count($credits) !== 1) {
+        if ($unmapped !== []) {
+            $credits = [''];
+        } elseif (count($credits) !== 1) {
             throw new PamicaPostingException('invalid_accounting',
                 "{$label} má položky na různých účtech Dal (" . implode(', ', $credits) . '). Ostatní závazek leží na jednom účtu.');
         }
@@ -310,26 +344,48 @@ final class PamicaPostingParser
             : round(self::number($this->text($xp, $ns . ':homeCurrency/typ:unitPrice', $row) ?: '0', $label) * $qty, 2);
         $accounting = $this->text($xp, $ns . ':accounting/typ:ids', $row);
         return $this->accountLine($accounting !== '' ? $accounting : $headerAccounting, $amount,
-            $this->text($xp, $ns . ':text', $row), $this->text($xp, $ns . ':note', $row), $label);
+            $this->text($xp, $ns . ':text', $row), $this->text($xp, $ns . ':note', $row), $label,
+            $ns === 'int' ? 'internal' : 'commitment');
     }
 
-    /** @return array<string,mixed> */
-    private function accountLine(string $accounting, float $amount, string $text, ?string $note, string $label): array
+    /**
+     * Řádek s účty podle předkontace. Zkratka bez mapování vrátí řádek bez účtů
+     * (`credit` null) a zapíše se do seznamu nemapovaných zkratek.
+     *
+     * @return array<string,mixed>
+     */
+    private function accountLine(string $accounting, float $amount, string $text, ?string $note, string $label, string $usage): array
     {
+        $base = ['text' => self::clip($text, 255), 'note' => self::nullable(self::clip((string) $note, 255)), 'code' => null];
         $ids = strtoupper(str_replace(' ', '', $accounting));
         if (preg_match('/^BEZ(\d{3,9})$/', $ids, $m) === 1) {
-            return ['text' => self::clip($text, 255), 'note' => self::nullable(self::clip((string) $note, 255)),
-                'debit' => null, 'credit' => $m[1], 'without_posting' => true, 'amount' => round($amount, 2)];
+            return $base + ['debit' => null, 'credit' => $m[1], 'without_posting' => true, 'amount' => round($amount, 2)];
         }
-        if (preg_match('/^(\d{3,9})\/(\d{3,9})$/', $ids, $m) !== 1) {
+        if (preg_match('/^(\d{3,9})\/(\d{3,9})$/', $ids, $m) === 1) {
+            if ($m[1] === $m[2]) {
+                throw new PamicaPostingException('invalid_accounting', "{$label}: předkontace {$accounting} má stejný účet na obou stranách.");
+            }
+            return $base + ['debit' => $m[1], 'credit' => $m[2], 'without_posting' => false, 'amount' => round($amount, 2)];
+        }
+        $code = trim($accounting);
+        if (!PamicaPostingCodeMap::isCode($code)) {
             throw new PamicaPostingException('invalid_accounting',
-                "{$label}: předkontace „{$accounting}\" není ve tvaru účet MD/účet Dal. V PAMICE nastavte zaúčtování mezd přímo na účty.");
+                "{$label}: předkontace „{$accounting}\" není dvojice účtů MD/Dal ani zkratka předkontace.");
         }
-        if ($m[1] === $m[2]) {
-            throw new PamicaPostingException('invalid_accounting', "{$label}: předkontace {$accounting} má stejný účet na obou stranách.");
+        $key = PamicaPostingCodeMap::key($code);
+        $base['code'] = $code;
+        $pair = $this->codeMap[$key] ?? null;
+        if ($pair !== null) {
+            return $base + ['debit' => $pair['debit'], 'credit' => $pair['credit'], 'without_posting' => false, 'amount' => round($amount, 2)];
         }
-        return ['text' => self::clip($text, 255), 'note' => self::nullable(self::clip((string) $note, 255)),
-            'debit' => $m[1], 'credit' => $m[2], 'without_posting' => false, 'amount' => round($amount, 2)];
+        $entry = $this->unmapped[$key] ?? ['code' => $code, 'usage' => [], 'count' => 0, 'samples' => []];
+        $entry['usage'][$usage] = true;
+        $entry['count']++;
+        if (count($entry['samples']) < self::MAX_SAMPLES) {
+            $entry['samples'][] = ['document' => $label, 'text' => $base['text'], 'amount' => round($amount, 2)];
+        }
+        $this->unmapped[$key] = $entry;
+        return $base + ['debit' => null, 'credit' => null, 'without_posting' => false, 'amount' => round($amount, 2)];
     }
 
     private function summaryAmount(\DOMXPath $xp, \DOMElement $doc, string $summaryPath): ?float

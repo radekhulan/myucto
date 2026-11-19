@@ -44899,7 +44899,27 @@
     "detected_title": "Payroll posting from PAMICA",
     "detected_hint": "This file contains no invoices but a payroll posting, so no received invoices were created from it. Import it as an internal document and other liabilities.",
     "open_preview": "Show posting preview",
-    "open_wizard": "Open the PAMICA wizard"
+    "open_wizard": "Open the PAMICA wizard",
+    "edit_codes": "Edit posting codes",
+    "code_map": {
+      "title": "Posting codes",
+      "hint_unmapped": "Instead of accounts, the file carries PAMICA posting codes. Assign a debit and a credit account from the chart of accounts to each code. The assignment is saved for the company and the next import uses it automatically.",
+      "hint_edit": "Assignment of the codes used in this file. A change applies to this and later imports, it does not change documents already imported.",
+      "col_code": "Code",
+      "col_samples": "Lines in the file",
+      "usage_internal": "internal document",
+      "usage_commitment": "other liability",
+      "count": "lines: {n}",
+      "already_mapped": "assigned earlier",
+      "debit_for": "Debit account for code {code}",
+      "credit_for": "Credit account for code {code}",
+      "both_required": "Choose both the debit and the credit account.",
+      "same_accounts": "The debit and credit accounts must differ.",
+      "unknown_account": "The account is not in the company's chart of accounts.",
+      "save": "Save and reload preview",
+      "saved": "Posting codes saved.",
+      "save_failed": "Posting codes could not be saved."
+    }
   },
   "bulk_actions": {
     "menu": "Bulk actions",

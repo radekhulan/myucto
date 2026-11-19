@@ -620,6 +620,7 @@ final class AnonymizationPolicy
         'payroll_period_export_jobs' => ['last_error_code' => 'keep', 'last_error_message' => 'text', 'lease_token' => 'keep'],
         'payroll_period_exports' => ['file_sha256' => 'keep', 'manifest_json' => 'json', 'mime_type' => 'keep', 'source_manifest_hash' => 'keep', 'storage_key' => 'keep', 'suggested_filename' => 'file_name'],
         'payroll_period_ownership' => ['source_type' => 'keep'],
+        'payroll_posting_code_maps' => ['code' => 'keep', 'credit_account_code' => 'keep', 'debit_account_code' => 'keep', 'source_application' => 'keep'],
         'payroll_posting_imports' => ['file_name' => 'file_name', 'file_sha256' => 'keep', 'internal_document_ids' => 'keep', 'other_item_ids' => 'keep', 'pack_id' => 'keep', 'period' => 'keep', 'source_application' => 'keep', 'source_ico' => 'ico', 'sym_par' => 'keep'],
         'payroll_person_accounts' => ['bank_account_ciphertext' => 'sealed:bank_account:bank_account_hash:bank_account_masked:id', 'bank_account_hash' => 'sealed_companion', 'bank_account_masked' => 'sealed_companion', 'label' => 'text'],
         'payroll_person_addresses' => ['city' => 'city', 'country_code' => 'keep', 'postal_code' => 'zip', 'street_line' => 'street'],

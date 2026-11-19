@@ -3453,6 +3453,7 @@ final class Routes
             // Měsíční zaúčtování mezd z PAMICY: interní doklad + ostatní závazky (migrace 2300).
             $g->post  ('/payroll-posting-imports/preview',          [\MyInvoice\Action\Accounting\PayrollPostingImportAction::class, 'preview']);
             $g->post  ('/payroll-posting-imports/apply',            [\MyInvoice\Action\Accounting\PayrollPostingImportAction::class, 'apply']);
+            $g->put   ('/payroll-posting-imports/code-map',         [\MyInvoice\Action\Accounting\PayrollPostingImportAction::class, 'saveCodeMap']);
             // Interní doklady (migrace 2193). Specifické cesty PŘED generickým /internal-documents/{id}.
             $g->get   ('/internal-documents',                       [\MyInvoice\Action\Accounting\InternalDocumentAction::class, 'list']);
             $g->post  ('/internal-documents',                       [\MyInvoice\Action\Accounting\InternalDocumentAction::class, 'create']);
