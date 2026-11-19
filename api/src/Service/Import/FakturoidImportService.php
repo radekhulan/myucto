@@ -1077,6 +1077,8 @@ final class FakturoidImportService
 
         $id = $this->purchaseRepo->createDraft($payload, $userId, $supplierId);
         if (!empty($items)) $this->purchaseRepo->replaceItems($id, $items);
+        // Stav dokladu zrcadlí Fakturoid, takže jen varování o možné duplicitě s jiným datem.
+        $this->purchaseRepo->flagLikelyVendorDuplicate($id, $supplierId);
         // Auto-ČNB kurz pro non-CZK fakturu pokud Fakturoid neobsahoval explicitní kurz
         $this->cnbApplier->applyIfMissing(
             $id,

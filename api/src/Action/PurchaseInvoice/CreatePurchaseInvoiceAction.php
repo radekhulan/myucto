@@ -372,6 +372,13 @@ final class CreatePurchaseInvoiceAction
         if ($vendorUnreliablePayer) {
             $warnings[] = 'vendor_unreliable_payer';
         }
+        // Tentýž doklad dodavatele už může být v evidenci s jiným datem vystavení — unikátní
+        // index ho nechytí, editor proto jen upozorní a nabídne proklik na existující doklad.
+        $likelyDuplicates = VendorNumberDuplicates::likelyForInvoice($this->db->pdo(), $id, $supplierId);
+        if ($likelyDuplicates !== []) {
+            $warnings[] = 'vendor_invoice_likely_duplicate';
+            $invoice['_warning_meta']['vendor_invoice_likely_duplicate'] = ['matches' => $likelyDuplicates];
+        }
         // Finální faktura na zálohu s DDKP bez odpočtu zálohy → dvojí odpočet DPH (viz helper).
         if (is_array($invoice) && self::finalRisksDoubleVatDeduction($this->db, $invoice, $supplierId)) {
             $warnings[] = 'advance_has_tax_document';

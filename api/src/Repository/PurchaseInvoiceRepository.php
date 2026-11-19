@@ -3817,6 +3817,26 @@ final class PurchaseInvoiceRepository
     }
 
     /**
+     * Připíše k automaticky založenému dokladu varování o pravděpodobné duplicitě
+     * s jiným datem vystavení ({@see VendorNumberDuplicates::likely()}). Shody lze předat,
+     * pokud je volající zjistil dřív (rozhodoval podle nich o stavu dokladu).
+     *
+     * @param list<array<string,mixed>>|null $matches
+     * @return bool zda se varování připsalo
+     */
+    public function flagLikelyVendorDuplicate(int $id, int $supplierId, ?array $matches = null): bool
+    {
+        $matches ??= VendorNumberDuplicates::likelyForInvoice($this->db->pdo(), $id, $supplierId);
+        $warning = VendorNumberDuplicates::likelyWarning($matches);
+        if ($warning === null) {
+            return false;
+        }
+        $this->appendExtractionWarning($id, $supplierId, $warning);
+
+        return true;
+    }
+
+    /**
      * Označí přijatou fakturu identifikátorem importní dávky (#232). Volá se po
      * úspěšném vytvoření dokladu při hromadném AI importu, ať jde dávka později
      * dohledat/filtrovat v seznamu. Idempotentní (přepíše na stejnou hodnotu).

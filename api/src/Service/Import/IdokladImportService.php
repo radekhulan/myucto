@@ -776,6 +776,8 @@ final class IdokladImportService
         if (!empty($items)) {
             $this->purchaseRepo->replaceItems($id, $items);
         }
+        // Stav dokladu zrcadlí iDoklad, takže jen varování o možné duplicitě s jiným datem.
+        $this->purchaseRepo->flagLikelyVendorDuplicate($id, $supplierId);
         // Auto-ČNB kurz pro non-CZK fakturu pokud iDoklad neobsahoval explicitní kurz
         $this->cnbApplier->applyIfMissing(
             $id,
@@ -986,6 +988,7 @@ final class IdokladImportService
         if (!empty($items)) {
             $this->purchaseRepo->replaceItems($id, $items);
         }
+        $this->purchaseRepo->flagLikelyVendorDuplicate($id, $supplierId);
         $this->cnbApplier->applyIfMissing(
             $id,
             $supplierId,

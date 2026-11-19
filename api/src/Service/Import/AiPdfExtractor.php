@@ -15,6 +15,7 @@ use MyInvoice\Service\Accounting\Expense\ExpenseKindClassifier;
 use MyInvoice\Service\Accounting\Expense\ExpenseKindSuggestion;
 use MyInvoice\Service\Invoice\PurchaseInvoiceCalculator;
 use MyInvoice\Service\Invoice\UnitPricePrecision;
+use MyInvoice\Service\PurchaseInvoice\VendorNumberDuplicates;
 use MyInvoice\Service\Report\KontrolniHlaseniBuilder;
 use MyInvoice\Support\AdvanceTaxDocumentText;
 use MyInvoice\Support\PaymentMethods;
@@ -1101,6 +1102,9 @@ final class AiPdfExtractor
             $supplierId, $vendorId, (string) $payload['vendor_invoice_number'], (string) $payload['issue_date'],
         );
         $id = $this->repo->createDraft($payload, $userId, $supplierId);
+        // Tentýž doklad už může být v evidenci s jinak přečteným datem vystavení (např.
+        // převzatý z jiného systému). Neblokuje, ale doklad zůstane konceptem s varováním.
+        $likelyDuplicates = VendorNumberDuplicates::likelyForInvoice($this->db->pdo(), $id, $supplierId);
         // párování platby kartou. Čte se přes týž SSOT jako u skenů; ruční hodnotu nepřepíše.
         $cardLast4 = \MyInvoice\Service\Document\ScanAttach\ScanExtractionNormalizer::cardLast4($data['card_last4'] ?? null);
         if ($cardLast4 !== null) {
@@ -1140,7 +1144,7 @@ final class AiPdfExtractor
             // Schvalování manažerem střediska (F6): s ním se účtenka hned neuhradí —
             // skok draft → paid by schválení obešel. Zůstane konceptem a ke schválení
             // ji pošle přijetí po kontrole vytěžení.
-            if (!$requireReview && $this->isCardSettledReceipt($supplierId, $data)
+            if (!$requireReview && $likelyDuplicates === [] && $this->isCardSettledReceipt($supplierId, $data)
                 && (new \MyInvoice\Service\PurchaseInvoice\Approval\PurchaseApprovalRequirements($this->db))->approvalTypes($supplierId) === []) {
                 $this->markAlreadyPaid($id, $supplierId);
             } else {
@@ -1241,6 +1245,13 @@ final class AiPdfExtractor
         if ($recapOnlyWarning !== null) {
             try {
                 $this->repo->appendExtractionWarning($id, $supplierId, $recapOnlyWarning);
+            } catch (\Throwable) {
+                // Varování je „nice to have" — faktura už je vytvořená správně.
+            }
+        }
+        if ($likelyDuplicates !== []) {
+            try {
+                $this->repo->flagLikelyVendorDuplicate($id, $supplierId, $likelyDuplicates);
             } catch (\Throwable) {
                 // Varování je „nice to have" — faktura už je vytvořená správně.
             }

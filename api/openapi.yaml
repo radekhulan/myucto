@@ -57179,7 +57179,27 @@ components:
         _warnings:
           type: array
           items: { type: string }
-          description: "Jen v odpovědi POST/PUT — non-blocking varování (credit_note_positive_total, vendor_non_payer_deduction, vendor_unreliable_payer — CRPDPH nespolehlivý plátce, audit 2026-07, public_authority_fee_out_of_scope, missing_vat_classification, eu_acquisition_delivery_date_missing, eu_acquisition_tax_date_mismatch), uložení neblokují."
+          description: "Jen v odpovědi POST/PUT — non-blocking varování (credit_note_positive_total, vendor_non_payer_deduction, vendor_unreliable_payer — CRPDPH nespolehlivý plátce, audit 2026-07, public_authority_fee_out_of_scope, missing_vat_classification, eu_acquisition_delivery_date_missing, eu_acquisition_tax_date_mismatch, vendor_invoice_likely_duplicate — doklad téhož dodavatele se stejným číslem a jiným datem vystavení v okně ±1 rok, detail v `_warning_meta`), uložení neblokují."
+        _warning_meta:
+          type: object
+          description: "Jen v odpovědi POST/PUT — podrobnosti k vybraným kódům z `_warnings`, klíčované týmž kódem."
+          properties:
+            vendor_invoice_likely_duplicate:
+              type: object
+              properties:
+                matches:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      id: { type: integer }
+                      vendor_invoice_number: { type: string }
+                      issue_date: { type: string, format: date }
+                      total_with_vat: { type: number }
+                      currency: { type: string }
+                      status: { type: string }
+                      varsymbol: { type: string, nullable: true }
+          additionalProperties: true
 
     PurchaseVatTreatment:
       type: object

@@ -639,6 +639,19 @@ final class UpdatePurchaseInvoiceAction
                 $invoice['_warning_meta']['exchange_rate_cnb_deviation'] = $dev;
             }
         }
+        // Možná duplicita s jiným datem vystavení (viz CreatePurchaseInvoiceAction) — jen když
+        // uživatel změnil dodavatele, číslo nebo datum vystavení, jinak by se hlásila při
+        // každém uložení už jednou potvrzeného dokladu.
+        if (is_array($invoice)
+            && ((int) ($invoice['vendor_id'] ?? 0) !== (int) ($existing['vendor_id'] ?? 0)
+                || trim((string) ($invoice['vendor_invoice_number'] ?? '')) !== trim((string) ($existing['vendor_invoice_number'] ?? ''))
+                || self::dateOnly($invoice['issue_date'] ?? null) !== self::dateOnly($existing['issue_date'] ?? null))) {
+            $likelyDuplicates = VendorNumberDuplicates::likelyForInvoice($this->db->pdo(), $id, $supplierId);
+            if ($likelyDuplicates !== []) {
+                $warnings[] = 'vendor_invoice_likely_duplicate';
+                $invoice['_warning_meta']['vendor_invoice_likely_duplicate'] = ['matches' => $likelyDuplicates];
+            }
+        }
         // Finální faktura na zálohu s DDKP bez odpočtu zálohy → dvojí odpočet DPH.
         if (is_array($invoice) && CreatePurchaseInvoiceAction::finalRisksDoubleVatDeduction($this->db, $invoice, $supplierId)) {
             $warnings[] = 'advance_has_tax_document';

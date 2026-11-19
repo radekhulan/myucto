@@ -1399,6 +1399,21 @@ Při vytěžení (AI import), skenování složky a zpracování příchozích d
 stejného souboru nebo se stejným číslem vznikne nový doklad. Nestornovaný doklad se stejným souborem nebo číslem a datem
 import dál zastaví a ukáže jeho číslo.
 
+**Možná duplicita s jiným datem vystavení.** Tentýž doklad může přijít dvakrát s různě přečteným datem, například jednou
+převzatý z jiného účetního programu a podruhé vytěžený z PDF. Aplikace proto hledá i nestornovaný doklad téhož dodavatele
+se stejným číslem dokladu a jiným datem vystavení, nejvýš rok před nebo po. Čísla se porovnávají bez mezer a oddělovačů,
+takže `FV 2025/0042` a `FV-2025-0042` jsou shoda, `ZF-2025-0042` už ne. Uložení to neblokuje:
+
+- při ručním uložení v editoru se ukáže varování s číslem, datem a částkou existujícího dokladu a tlačítkem
+  **Otevřít doklad**,
+- vytěžení PDF, import ISDOC a Pohoda XML, skenování složky a příchozí doklady založí doklad jako **koncept** (i když
+  dávka zakládá doklady rovnou jako přijaté) a do žlutého hlášení ke kontrole připíší větu „Možná duplicita: doklad č. …
+  od tohoto dodavatele už existuje" s datem vystavení a částkou,
+- převody z Fakturoidu a iDokladu stav dokladu přebírají ze zdrojového systému, hlášení ale připíší také.
+
+Pokud jde opravdu o tentýž doklad, koncept smažte nebo stornujte. Pokud jde o jiný doklad (například další splátka
+s opakovaným číslem), hlášení potvrďte tlačítkem **Beru na vědomí**.
+
 ### 23.11.26 Doklady z e-mailu
 
 Stránka `Nákup → Doklady z e-mailu` vysvětluje, jak si aplikace sama vyzvedává faktury z e-mailové schránky,

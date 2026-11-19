@@ -23539,6 +23539,8 @@
       "credit_note_positive_total": "Dobropis má kladný součet - má mít záporné částky. Záporné znaménko stačí na jedné straně (např. −1 ks × 1000, nebo 1 ks × −1000); pokud jsou záporné množství i cena zároveň, výkazy DPH/KH plnění přičtou místo odečtení. Zkontrolujte prosím znaménka.",
       "vendor_non_payer_deduction": "Dodavatel je neplátce DPH, ale je uplatněn nárok na odpočet. Od neplátce nelze DPH odpočítat - zkontrolujte nastavení odpočtu.",
       "vendor_unreliable_payer": "Dodavatel je dle registru plátců DPH (CRPDPH) veden jako nespolehlivý plátce - při úhradě hrozí ručení za nepřiznanou DPH (§109 ZDPH). Zvažte úhradu zvláštním způsobem (§109a) nebo ověření u dodavatele.",
+      "vendor_invoice_likely_duplicate": "Možná duplicita: doklad č. {number} od tohoto dodavatele už existuje (datum vystavení {date}, částka {amount}). Zkontrolujte, zda nejde o tentýž doklad.",
+      "vendor_invoice_likely_duplicate_open": "Otevřít doklad",
       "exchange_rate_cnb_deviation": "Kurz na dokladu ({used}) se liší od denního kurzu ČNB ({cnb}) k rozhodnému dni o {diff} %. Zkontrolujte prosím kurz. Účetní přepočet - korunová částka DPH na dokladu (§73/6) tím není dotčena.",
       "advance_has_tax_document": "K navázané záloze už existuje daňový doklad k platbě (DDKP) - DPH z ní byla uplatněna zvlášť. Na této vyúčtovací faktuře uplatni nárok na odpočet jen z DOPLATKU DPH (rozdíl proti DDKP), jinak by se odpočet uplatnil dvakrát.",
       "linked_advance_unpaid": "Záloha {advance} zatím nemá zaúčtovanou úhradu, proto tato faktura zálohu nezúčtovala (321/314). Platbu zálohy spárujte se zálohou {advance}, ne s touto fakturou - zúčtování se pak do zápisu faktury doplní samo.",
