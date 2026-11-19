@@ -45059,10 +45059,10 @@
       "changed_after_apply": "The record changed after the change was applied",
       "excluded_by_user": "Excluded manually",
       "entry_not_found": "The entry is no longer posted",
-      "tax_neutral_rewrite": "The change would affect tax, only reversal is possible",
+      "tax_neutral_rewrite": "Rewritten in place in a locked date (move without tax impact)",
       "cash_account": "The cash account 211 is not changed",
       "taken_over": "Entry taken over from another program",
-      "dimensions_frozen": "Dimensions are frozen in a closed period",
+      "dimensions_frozen": "Dimensions of the period are frozen by closing the books",
       "dimension_required": "The dimension is required and cannot be cleared",
       "split_in_locked_period": "A dimension split in a locked period cannot be changed",
       "account_change_in_locked_period": "Account change in a locked period",
@@ -45078,12 +45078,13 @@
       "entry_delete_not_supported": "This kind of entry cannot be deleted",
       "reversed_instead": "Reversed instead of deleted",
       "not_found": "The record no longer exists",
-      "invalid_posting_rule": "The posting rule does not fit the document",
+      "invalid_posting_rule": "The posting rule does not exist in the company",
       "dimensions_disabled": "Dimensions are not enabled for the company",
       "document_cancelled": "The document is cancelled",
       "rollback_not_supported": "This change cannot be reverted",
       "journal_period_not_open": "The entry is in a closed accounting period",
-      "calendar_not_deletable": "A calendar document cannot be deleted"
+      "calendar_not_deletable": "A calendar document cannot be deleted",
+      "failed": "Processing error"
     },
     "rebook_hint": "For manually selected documents or entries, use the \"…\" menu and Bulk actions in the Issued invoices, Received invoices or Accounting journal list.",
     "bank_link": "Bank transactions by filter"

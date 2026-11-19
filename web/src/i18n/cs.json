@@ -45059,10 +45059,10 @@
       "changed_after_apply": "Záznam se po provedení změnil",
       "excluded_by_user": "Vyřazeno ručně",
       "entry_not_found": "Zápis už není zaúčtovaný",
-      "tax_neutral_rewrite": "Změna by ovlivnila daň, jde jen stornem",
+      "tax_neutral_rewrite": "Oprava na místě v zamčeném datu (přesun bez daňového dopadu)",
       "cash_account": "Pokladní účet 211 se nemění",
       "taken_over": "Převzatý zápis z jiného programu",
-      "dimensions_frozen": "Dimenze jsou v uzavřeném období zamčené",
+      "dimensions_frozen": "Dimenze období jsou zmrazené uzavřením knih",
       "dimension_required": "Dimenze je povinná a nejde vymazat",
       "split_in_locked_period": "Rozpad dimenze v uzamčeném období nejde měnit",
       "account_change_in_locked_period": "Změna účtu v uzamčeném období",
@@ -45078,12 +45078,13 @@
       "entry_delete_not_supported": "Tento druh zápisu smazat nejde",
       "reversed_instead": "Místo smazání stornováno",
       "not_found": "Záznam už neexistuje",
-      "invalid_posting_rule": "Předkontace se na doklad nehodí",
+      "invalid_posting_rule": "Předkontace ve firmě neexistuje",
       "dimensions_disabled": "Firma nemá zapnuté dimenze",
       "document_cancelled": "Doklad je stornovaný",
       "rollback_not_supported": "Tuto změnu vrátit nejde",
       "journal_period_not_open": "Zápis je v uzavřeném účetním období",
-      "calendar_not_deletable": "Doklad kalendáře smazat nejde"
+      "calendar_not_deletable": "Doklad kalendáře smazat nejde",
+      "failed": "Chyba při zpracování"
     },
     "rebook_hint": "Pro ručně vybrané doklady nebo zápisy použijte v seznamu Vydaných faktur, Přijatých faktur nebo v Účetním deníku nabídku „…“ a Hromadné akce.",
     "bank_link": "Bankovní pohyby podle filtru"

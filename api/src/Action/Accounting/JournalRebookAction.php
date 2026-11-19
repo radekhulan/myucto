@@ -265,17 +265,20 @@ final class JournalRebookAction
     }
 
     /**
-     * Běh přeúčtování, který ve firmě právě běží. Dva běhy naráz by přeúčtovaly tytéž
+     * Běh přeúčtování nebo hromadné akce, který ve firmě právě běží. Dva běhy naráz by přeúčtovaly tytéž
      * doklady proti sobě; zaseknutý běh (mrtvý worker) se nejdřív uklidí.
      *
      * @return ?array{id:int, status:string}
      */
     private function running(int $supplierId): ?array
     {
-        $this->jobs->reapStale($supplierId, JournalRebookService::SOURCE);
-        foreach ($this->jobs->listForTenant($supplierId, JournalRebookService::SOURCE, limit: 5) as $existing) {
-            if (in_array($existing['status'], ['queued', 'running'], true)) {
-                return ['id' => (int) $existing['id'], 'status' => (string) $existing['status']];
+        // Hromadné akce v seznamech mění tytéž doklady, proto se hlídají spolu.
+        foreach ([JournalRebookService::SOURCE, \MyInvoice\Service\Accounting\Bulk\BulkActionService::SOURCE] as $source) {
+            $this->jobs->reapStale($supplierId, $source);
+            foreach ($this->jobs->listForTenant($supplierId, $source, limit: 5) as $existing) {
+                if (in_array($existing['status'], ['queued', 'running'], true)) {
+                    return ['id' => (int) $existing['id'], 'status' => (string) $existing['status']];
+                }
             }
         }
         return null;
