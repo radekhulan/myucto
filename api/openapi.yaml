@@ -20418,7 +20418,10 @@ paths:
 
         tabulka rozdílů `diff` [{account_code, expected, existing, difference}],
 
-        `preliminary` = porovnání před uzavřením knih.
+        `preliminary` = porovnání před uzavřením knih, `compare_level` = account,
+        když se porovnává jen po účtech, s důvodem `compare_reason`
+        (taken_over_closing = převzatá uzávěrka, opening_without_dimensions =
+        převzaté otevírací zápisy nenesou žádnou dimenzi).
 
         Účty kontrol vycházejí z historického rámce období; například kontrola
 
@@ -20864,7 +20867,9 @@ paths:
 
         Převzaté počáteční stavy: má-li následující období už zaúčtovaný otevírací
         zápis z jiného zdroje (bez ohledu na source_id), porovná se účet po účtu
-        (70x vynechané a 431 za syntetiku pro 500; 96x a 931 pro 504). Shoda → krok hotový s `opening_source =
+        (70x vynechané a 431 za syntetiku pro 500; 96x a 931 pro 504) i po dimenzích.
+        Jen po účtech se porovnává po převzaté uzávěrce a u převzatých zápisů bez
+        jediné dimenze (převod z Money S3 apod.; u 504 nikdy). Shoda → krok hotový s `opening_source =
         taken_over`, nic se neúčtuje. Rozdíl → 422 `opening_takeover_mismatch`
         (tabulka rozdílů je v `opening_takeover` stavu průvodce), dokud klient
         nepošle `replace_taken_over_opening: true` s důvodem — pak se převzaté
@@ -20941,7 +20946,9 @@ paths:
 
         Σ přídělů = |zůstatek 431| a limitu rozdělitelných zdrojů. Účtuje se do OTEVŘENÉHO období; idempotence source
 
-        profit_distribution/approved_period_id.
+        profit_distribution/approved_period_id. První rok v MyÚčtu bez předchozího období (převod
+        z jiného systému) rozděluje výsledek z počátečního stavu 431 převzaté otevírací rozvahy; klíč
+        je pak ClosingSourceId::openingProfitDistribution (6e12 + id cílového období).
 
         Pro rámec 504 vyžaduje označení rozhodnutí, oprávněný orgán, datum, otisk podkladů a přesné příděly každé společné kombinace
         do 932, 911 nebo 901. Krytí ztráty fondem či vlastním jměním nepřekročí zůstatek stejné kombinace. Podíly společníků
@@ -45019,7 +45026,10 @@ components:
       - existing_entry_id
       properties:
         approved_period:
-          type: object
+          type:
+          - object
+          - 'null'
+          description: Schválené předchozí období; null, když se rozděluje výsledek z počátečních stavů (source = opening).
           required:
           - id
           - fiscal_year
@@ -45031,6 +45041,15 @@ components:
               type: integer
             status:
               type: string
+        source:
+          type: string
+          enum:
+          - approved_period
+          - opening
+          description: Odkud výsledek pochází. opening = první rok v MyÚčtu bez předchozího období, výsledek minulého roku je na 431 z převzaté otevírací rozvahy.
+        source_fiscal_year:
+          type: integer
+          description: Rok, jehož výsledek se rozděluje.
         target_period:
           type: object
           required:

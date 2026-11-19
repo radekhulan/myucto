@@ -313,6 +313,23 @@ final class ClosingSmallAssetAccrualTest extends TestCase
         self::assertSame((self::YEAR + 1) . '-01-01', (string) $release['entry_date']);
     }
 
+    /** Zámek k datu na začátku nového roku (podané lednové DPH) nezastaví rozpuštění. */
+    public function testAccrualIsReleasedIntoDateLockedNextYear(): void
+    {
+        $this->card('Notebook', self::YEAR . '-07-01', 36500.00);
+        $this->driveCloseWithAccrual('flat_pct', 50.0);
+        $this->closing->closeBooks($this->supplierId, $this->periodId, $this->rv(), $this->meta());
+        $this->db->pdo()->prepare('INSERT INTO accounting_supplier_settings (supplier_id, locked_until) VALUES (?, ?) ON DUPLICATE KEY UPDATE locked_until = VALUES(locked_until)')
+            ->execute([$this->supplierId, (self::YEAR + 1) . '-01-31']);
+
+        $open = $this->closing->openNext($this->supplierId, $this->periodId, $this->rv(), $this->meta());
+
+        self::assertNotNull($open['small_asset_release_entry_id']);
+        $release = $this->journal->findBySource($this->supplierId, 'small_asset_accrual', ClosingSourceId::smallAssetAccrualRelease($this->periodId));
+        self::assertSame((self::YEAR + 1) . '-01-01', (string) $release['entry_date']);
+        self::assertEqualsWithDelta(18250.00, $this->sideAmount($this->entryLines((int) $release['id']), '381', 'credit'), 0.001);
+    }
+
     /**
      * Regrese: období, které odloží drobný majetek na 381, šlo NATRVALO zablokovat
      * proti znovuotevření. Open_next zrcadlí rozpouštěcí zápis (§DM release) do N+1

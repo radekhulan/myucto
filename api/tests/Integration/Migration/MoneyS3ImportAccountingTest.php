@@ -37,7 +37,11 @@ use Slim\Psr7\Factory\ServerRequestFactory;
 #[Group('integration')]
 final class MoneyS3ImportAccountingTest extends MoneyS3ImportTestCase
 {
-    public function testOpeningWithoutDimensionsIsNotAcceptedEvenWhenAccountTotalsMatch(): void
+    /**
+     * Money převádí počáteční stavy bez středisek a zakázek, zůstatky roku je nesou. Sedí-li
+     * každý účet, historický rok se uzavře a převzatá rozvaha se porovná jen po účtech.
+     */
+    public function testOpeningWithoutDimensionsIsTakenOverWhenAccountTotalsMatch(): void
     {
         $supplierId = $this->supplier();
         SyntheticAgenda::writeLzFiles($this->tmp . '/no-opening-dimensions.lz', SyntheticAgenda::filesWithoutOpeningDimensions());
@@ -45,9 +49,15 @@ final class MoneyS3ImportAccountingTest extends MoneyS3ImportTestCase
         $protocol = $this->importer->run($supplierId, $this->userId, $backup, new ImportOptions(ImportOptions::MODE_IMPORT, true));
         self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
         $closing = array_column($protocol->get('closing'), null, 'year')[2024];
-        self::assertSame('mismatch', $closing['status'], $this->explain($protocol));
-        self::assertNotEmpty($closing['diffs']);
-        self::assertSame('open', $this->container(AccountingPeriodRepository::class)->findByYear($supplierId, 2024)['status']);
+        self::assertSame('closed', $closing['status'], $this->explain($protocol));
+        self::assertSame([], $closing['diffs']);
+        $period = $this->container(AccountingPeriodRepository::class)->findByYear($supplierId, 2024);
+        self::assertSame('closed', $period['status']);
+        $step = $this->db->pdo()->prepare("SELECT payload FROM accounting_closing_steps WHERE supplier_id = ? AND period_id = ? AND step_key = 'open_next'");
+        $step->execute([$supplierId, (int) $period['id']]);
+        $payload = json_decode((string) $step->fetchColumn(), true);
+        self::assertSame('taken_over', $payload['opening_source'] ?? null);
+        self::assertSame('opening_without_dimensions', $payload['taken_over_compare_reason'] ?? null);
     }
 
     public function testImportedAccountingPreservesPeriodsBalancesAndClassification(): void

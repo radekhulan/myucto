@@ -1878,7 +1878,7 @@ const canOpenNextStage = computed(() => ['closed', 'reviewed', 'approved'].inclu
                 {{ t('accounting.closing.opening_takeover.preliminary') }}
               </p>
               <p v-if="openingTakeover.compare_level === 'account'" class="text-xs text-neutral-500" data-test="opening-takeover-account-level">
-                {{ t('accounting.closing.opening_takeover.account_level') }}
+                {{ t(openingTakeover.compare_reason === 'opening_without_dimensions' ? 'accounting.closing.opening_takeover.account_level_no_dimensions' : 'accounting.closing.opening_takeover.account_level') }}
               </p>
               <div v-if="openingTakeover.entries.length" class="text-xs text-neutral-500">
                 {{ t('accounting.closing.opening_takeover.entries') }}:
@@ -1971,6 +1971,9 @@ const canOpenNextStage = computed(() => ['closed', 'reviewed', 'approved'].inclu
             <strong class="font-mono">{{ formatMoney(pdPreview.distributable_resources) }}</strong>
           </div>
         </div>
+        <p v-if="pdPreview.source === 'opening'" class="text-xs text-neutral-500" data-test="profit-distribution-opening-source">
+          {{ t('accounting.closing.profit_distribution.opening_source', { year: pdPreview.source_fiscal_year }) }}
+        </p>
 
         <div v-if="pdPreview.existing_entry_id" class="text-sm text-warning-600 flex items-center gap-2">
           {{ t('accounting.closing.profit_distribution.already_booked') }}

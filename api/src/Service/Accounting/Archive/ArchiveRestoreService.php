@@ -1223,6 +1223,10 @@ final class ArchiveRestoreService
             return null;
         }
         // závěrkové rodiny — source_id kóduje period_id (příp. slot)
+        if ($sourceType === 'profit_distribution' && $old >= ClosingSourceId::OPENING_PROFIT_DISTRIBUTION_BASE) {
+            $period = $this->maps['accounting_periods'][$old - ClosingSourceId::OPENING_PROFIT_DISTRIBUTION_BASE] ?? null;
+            return $period === null ? null : ClosingSourceId::openingProfitDistribution((int) $period);
+        }
         if (in_array($sourceType, ['opening', 'income_tax', 'profit_distribution'], true)) {
             return $this->maps['accounting_periods'][$old] ?? null; // plain period id
         }

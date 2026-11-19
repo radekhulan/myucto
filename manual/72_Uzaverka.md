@@ -116,6 +116,8 @@ Kontrolují se mimo jiné:
 - **cizoměnové otevřené doklady** čekající na přecenění,
 - zůstatky **dohadných účtů 388/389** a **časového rozlišení 381 až 385**,
 - informativní upozornění na **splatnou daň z příjmů** (591/341), kterou je nutné zaúčtovat ručně,
+- **vznik plátcovství DPH z obratu** (§ 6 ZDPH) u firmy, která plátcem není: vzniklo-li plátcovství uvnitř období (překročení horního limitu), je to chyba; překročení dolního limitu, kdy plátcovství vzniká až 1. ledna dalšího roku, je jen varování. Hodnotí se ke konci období, ne ke dni spuštění kontrol,
+- **kategorie účetní jednotky** pro povinné přehledy podle § 18 odst. 2 ZoÚ: nejde-li kategorii určit (například nastavení čistého obratu zahrnuje výnosy jen v jednom členění výsledovky), kontroly doběhnou a ohlásí varování s důvodem,
 - **zaúčtovaná daň z příjmů proti spočtené dani**: obrat účtu 591 roku (bez uzavření knih) se porovná s daní, kterou by dnes navrhl krok Daň z příjmů (finalizované přiznání, jinak dopočet z účetnictví). Rozdíl od jedné koruny výš je varování, uzavření knih neblokuje. Dokud krok daně není hotový a nic zaúčtováno není, kontrola jen informuje; ztrátová firma bez daně nevaruje.
 
 **Jak poznáte, že je hotovo:** Kontroly neobsahují žádnou chybu. Při alespoň jedné chybě se u tlačítka zobrazí
@@ -420,8 +422,11 @@ ukáže jeden ze stavů:
 Porovnává se účet po účtu: konečné stavy rozvahových účtů a výsledek hospodaření na účtu 431 (tak, jak by je krok
 zaúčtoval) proti součtu převzatých otevíracích zápisů. Rozvažné účty 70x se vynechávají a účet 431 se srovnává
 za syntetiku, takže nevadí, když převzaté stavy vedou výsledek hospodaření na analytice. Kontroluje se také
-členění po dimenzích, střediscích a projektech. Shodná celková částka účtu bez odpovídajícího členění
-nestačí k automatickému převzetí. Dokud nejsou uzavřené knihy, je porovnání jen předběžné.
+členění po dimenzích, střediscích a projektech. Nese-li převzatý zápis členění, shodná celková částka účtu bez
+odpovídajícího členění nestačí k automatickému převzetí. Nenese-li převzatá rozvaha žádnou dimenzi (převod
+z Money S3 a jiných systémů, které počáteční stavy převádějí bez středisek a zakázek), porovnává se jen po účtech
+a panel to uvede. U neziskové organizace (vyhláška 504) se členění porovnává vždy. Dokud nejsou uzavřené knihy,
+je porovnání jen předběžné.
 
 Při rozdílu máte dvě cesty. Buď rozdíl dohledáte a opravíte (v uzavíraném roce nebo v převzatém zápisu), nebo
 použijete **Nahradit převzaté stavy vypočtenými**. Náhrada vyžaduje **povinný důvod** (**Důvod náhrady**), převzaté
@@ -486,6 +491,12 @@ Po schválení závěrky (a po převodu výsledku hospodaření na účet 431 ot
 dostupná karta **Rozdělení výsledku hospodaření**. Zápis se účtuje do otevřeného období (nikdy do uzavřeného,
 431 se řeší až v novém roce), proto je karta dostupná nad schváleným obdobím. Při otevření z následujícího období
 aplikace stejně ověří, že bezprostředně předchozí závěrka je schválená.
+
+**První rok po převodu z jiného systému.** Nemá-li rok v MyÚčtu žádné předchozí období a výsledek minulého roku
+přišel na 431 převzatou otevírací rozvahou, otevřete kartu přímo na stránce uzávěrky tohoto roku (stav Otevřené).
+Rozděluje se zůstatek 431 z počátečních stavů a karta to uvede. Postup je jinak stejný. Bez rozdělení by uzávěrku
+roku nešlo zahájit, protože nerozdělený výsledek na 431 zahájení odmítne. Rok bez předchozího období a bez
+otevíracího zápisu rozdělení nenabízí.
 
 1. Otevřete stránku uzávěrky schváleného období a klikněte na **Rozdělit výsledek hospodaření**. Zobrazí se disponibilní zůstatek účtu 431 (**K rozdělení**, případně **Ztráta k úhradě**) a **Cílové období**.
 2. Pro každý příděl klikněte na **Přidat příděl** a zadejte **Účet**, **Druh** a **Částku**. Druhy jsou **Nerozdělený zisk (428)**, **Příděl do fondu** (například 421/427), **Podíly společníků (364)** a **Úhrada ztráty (429/428)**. Každý řádek druhu Podíly společníků představuje jednoho společníka; **srážková daň** podle § 36 zákona o daních z příjmů (**Sazba srážkové daně (§36)**, výchozí 15 %) se počítá a zaokrouhluje dolů samostatně za každého a účtuje se **MD 364 / D 342**.
@@ -665,7 +676,9 @@ kontroly zaměřené na **inventarizaci zůstatků**:
 | Krok je dostupný až po zahájení uzávěrky | Období je ještě Otevřené | Klikněte na **Zahájit uzávěrku**. |
 | Znovuotevření odmítnuto, existují uzávěrkové zápisy | Zaúčtovaná uzavření a otevírací zápisy | Nejdřív vezměte zpět kroky **Otevření nového roku** a **Uzavření knih**. |
 | Schválení odmítnuto: *„… automatické sekce přílohy k závěrce nejsou zmražené …“* | Při uzavření knih ani při schválení se nepodařilo zmrazit přílohu, typicky nejde vyhodnotit kategorii účetní jednotky | Doplňte podklady kategorizace (mapování rozvahy, počet zaměstnanců) a schválení zopakujte. |
+| Kontrola *Kategorii účetní jednotky nelze určit* | Nastavení **Čistý obrat: výnosy obchodního modelu** zahrnuje výnosy jen v jednom členění výsledovky (druhovém, nebo účelovém), případně mapování účtů do výkazů není úplné. Důvod uvádí kontrola. | V nastavení účetnictví zahrňte tytéž výnosy v obou členěních a kontroly spusťte znovu. Do té doby nejde ověřit povinné přehledy podle § 18 odst. 2 ZoÚ. |
 | Schválenou závěrku nelze zrušit ani změnit přechodem stavu | Zákonné schválení je nevratné (§ 17 odst. 7) | Opravte chybu v období zjištění (§ 35). |
+| Otevření roku odmítnuto: *„Následující období … má rozdělanou uzávěrku (stav Uzavírá se)“* | Uzávěrka dalšího roku byla zahájena dřív, než se otevřel nový rok | V uzávěrce dalšího roku klikněte na **Přerušit uzávěrku** (má-li už uzávěrkové zápisy, nejdřív vezměte zpět její kroky) a otevření roku zopakujte. |
 | Otevření roku zablokované, panel ukazuje **Rozdíl** | Převzatý otevírací zápis nesouhlasí s konečnými stavy | Rozdíl dohledejte a opravte, nebo použijte **Nahradit převzaté stavy vypočtenými**. |
 | Odpisy nejde zaúčtovat z Majetku, hlásí neotevřené období | Období je ve stavu Uzavírá se | Použijte **Zaúčtovat odpisy roku** v panelu kroku. |
 | Změna nebyla provedena, aplikace načetla aktuální stav | Mezitím záznam upravil jiný uživatel | Zkontrolujte aktuální stav a akci zopakujte. |
@@ -738,6 +751,12 @@ období a platný napříč všemi otevřenými obdobími firmy. Posune se po oz
 odeslaného v EPO podání a archívu, které uživatel provede po kontrole nahrané doručenky. Zámek brání zaúčtování,
 přeúčtování i stornu dokladů starších než zamčené datum, i když je období samo pořád Otevřené. Podrobně viz
 [Účetní deník, zámek účtování k datu](52_Ucetni_denik.md).
+
+Zápisy kroků uzávěrky zámek nezastaví. Přiznání DPH za prosinec, případně i za leden nového roku, bývá podané dřív,
+než se starý rok uzavře. Uzavření knih k poslednímu dni roku i otevření dalšího roku proto projde, i když je zamčený
+už 1. den nového roku: otevírací zápis, storno kurzových rozdílů, převod počátečního stavu zásob do spotřeby
+i rozpuštění časového rozlišení (drobný majetek, náklady a výnosy příštích období). DPH se počítá z dokladů, ne
+z deníku, takže ho tyto zápisy nemění.
 
 ### 72.12.4 Pořadí kroků uzávěrky
 

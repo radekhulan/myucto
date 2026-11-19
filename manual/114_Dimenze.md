@@ -17,7 +17,9 @@ v průvodci uzávěrkou. Samotný zámek data v otevřeném období změnu analy
 
 Při uzavření knih a otevření nového roku se členění rozvahových zůstatků přenáší včetně kombinací dimenzí
 a procentních rozpadů. Počáteční stavy tak zachovávají zůstatky jednotlivých středisek a projektů,
-i když je celý účet v součtu nulový. Podrobnosti jsou v [Uzávěrce](72_Uzaverka.md#7252-krok-11-otevreni-noveho-roku).
+i když je celý účet v součtu nulový. Má-li nový rok už převzatou rozvahu bez dimenzí (převod z jiného systému),
+krok ji převezme po účtech a členění zůstatků do nového roku nepřenese. Podrobnosti jsou
+v [Uzávěrce](72_Uzaverka.md#7252-krok-11-otevreni-noveho-roku).
 
 ## 114.1 Kdy to potřebujete
 

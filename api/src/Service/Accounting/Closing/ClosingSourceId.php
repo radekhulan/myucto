@@ -52,6 +52,14 @@ final class ClosingSourceId
      */
     public const DEFERRED_REVENUE_RELEASE_BASE = 5_000_000_000_000;
 
+    /**
+     * Rozdělení výsledku hospodaření z počátečního stavu 431 prvního roku v MyÚčtu (převod
+     * z jiného systému). Předchozí rok tu není, takže klíč nemůže být jeho period_id jako
+     * u běžného rozdělení; plain period_id cílového roku by se srazil s rozdělením jeho
+     * vlastního výsledku v dalším roce. Pásmo 6e12 + period_id cílového roku.
+     */
+    public const OPENING_PROFIT_DISTRIBUTION_BASE = 6_000_000_000_000;
+
     /** FX přecenění saldokonta (311/321) k rozvahovému dni (R10a). */
     public const SLOT_FX_SALDO = 1;
 
@@ -106,6 +114,12 @@ final class ClosingSourceId
     public static function stockOpening(int $periodId): int
     {
         return self::STOCK_SLOT_BASE + $periodId * 10 + self::SLOT_STOCK_OPENING;
+    }
+
+    /** Rozdělení výsledku z počátečního stavu 431 roku bez předchozího období (převod). */
+    public static function openingProfitDistribution(int $targetPeriodId): int
+    {
+        return self::OPENING_PROFIT_DISTRIBUTION_BASE + $targetPeriodId;
     }
 
     /** Časové rozlišení drobného majetku (§DM) — defer zápis MD 381 / D 501 v období N. */

@@ -176,7 +176,67 @@ final class ClosingWorkflowTest extends TestCase
         $this->assertClosingDimensionContinuity([$typeId => [$a => 4000, $b => 4000]]);
     }
 
+    /** Převzatá rozvaha, která dimenze nese, se porovnává i po dimenzích. */
     public function testOpeningTakeoverRefusesMatchingAccountsWithoutDimensions(): void
+    {
+        [$typeId, $a, , $projectType, $c] = $this->createClosingDimensions();
+        $this->manual([
+            self::l('378', 'debit', 100.00) + ['dimensions' => [$typeId => $a]],
+            self::l('379', 'credit', 100.00),
+        ], self::YEAR . '-04-01');
+        $this->runStepsUntilCloseReady();
+        $this->closing->closeBooks($this->supplierId, $this->periodId, $this->rv(), $this->meta());
+        $nextId = $this->periods->create($this->supplierId, self::YEAR + 1, (self::YEAR + 1) . '-01-01', (self::YEAR + 1) . '-12-31');
+        $this->posting->postDocument($this->supplierId, 'opening', null, [
+            self::l('378', 'debit', 100.00),
+            self::l('379', 'credit', 100.00) + ['dimensions' => [$projectType => $c]],
+        ], ['entry_date' => (self::YEAR + 1) . '-01-01', 'period_id' => $nextId] + $this->meta());
+
+        $takeover = $this->closing->state($this->supplierId, $this->periodId)['opening_takeover'];
+        self::assertSame('mismatch', $takeover['status']);
+        self::assertStringContainsString('CLOSE-A', implode(' ', array_merge(...array_column($takeover['diff'], 'dimension_labels'))));
+        try {
+            $this->closing->openNext($this->supplierId, $this->periodId, $this->rv(), $this->meta());
+            self::fail('Převzaté stavy nesmějí tiše ztratit dimenze.');
+        } catch (ClosingException $e) {
+            self::assertSame('opening_takeover_mismatch', $e->errorCode);
+        }
+    }
+
+    /**
+     * Rozvaha převzatá z Money S3 a jiných systémů dimenze nenese, zůstatky roku v MyÚčtu ano
+     * (střediska, vozidla). Sedí-li každý účet, převezme se po účtech, jinak by rok nešlo
+     * otevřít nikdy (rozdíl u každé hodnoty dimenze).
+     */
+    public function testOpeningTakeoverWithoutAnyDimensionsComparesByAccount(): void
+    {
+        [$typeId, $a, $b] = $this->createClosingDimensions();
+        $this->manual([
+            self::l('378', 'debit', 100.00) + ['dimensions' => [$typeId => $a]],
+            self::l('378', 'debit', 50.00) + ['dimensions' => [$typeId => $b]],
+            self::l('379', 'credit', 150.00),
+        ], self::YEAR . '-04-01');
+        $this->runStepsUntilCloseReady();
+        $this->closing->closeBooks($this->supplierId, $this->periodId, $this->rv(), $this->meta());
+        $nextId = $this->periods->create($this->supplierId, self::YEAR + 1, (self::YEAR + 1) . '-01-01', (self::YEAR + 1) . '-12-31');
+        $opening = $this->posting->postDocument($this->supplierId, 'opening', null, [
+            self::l('378', 'debit', 150.00),
+            self::l('379', 'credit', 150.00),
+        ], ['entry_date' => (self::YEAR + 1) . '-01-01', 'period_id' => $nextId] + $this->meta());
+
+        $takeover = $this->closing->state($this->supplierId, $this->periodId)['opening_takeover'];
+        self::assertSame('match', $takeover['status']);
+        self::assertSame('account', $takeover['compare_level']);
+        self::assertSame('opening_without_dimensions', $takeover['compare_reason']);
+
+        $result = $this->closing->openNext($this->supplierId, $this->periodId, $this->rv(), $this->meta());
+        self::assertSame('taken_over', $result['opening_source']);
+        self::assertSame([$opening], $result['taken_over_entry_ids']);
+        self::assertSame('opening_without_dimensions', $result['taken_over_compare_reason']);
+    }
+
+    /** Rozdíl na účtu se po účtech pozná i u rozvahy bez dimenzí. */
+    public function testOpeningTakeoverWithoutDimensionsStillRefusesAccountDifference(): void
     {
         [$typeId, $a] = $this->createClosingDimensions();
         $this->manual([
@@ -187,16 +247,13 @@ final class ClosingWorkflowTest extends TestCase
         $this->closing->closeBooks($this->supplierId, $this->periodId, $this->rv(), $this->meta());
         $nextId = $this->periods->create($this->supplierId, self::YEAR + 1, (self::YEAR + 1) . '-01-01', (self::YEAR + 1) . '-12-31');
         $this->posting->postDocument($this->supplierId, 'opening', null, [
-            self::l('378', 'debit', 100.00),
-            self::l('379', 'credit', 100.00),
+            self::l('378', 'debit', 90.00),
+            self::l('379', 'credit', 90.00),
         ], ['entry_date' => (self::YEAR + 1) . '-01-01', 'period_id' => $nextId] + $this->meta());
 
-        $takeover = $this->closing->state($this->supplierId, $this->periodId)['opening_takeover'];
-        self::assertSame('mismatch', $takeover['status']);
-        self::assertStringContainsString('CLOSE-A', implode(' ', array_merge(...array_column($takeover['diff'], 'dimension_labels'))));
         try {
             $this->closing->openNext($this->supplierId, $this->periodId, $this->rv(), $this->meta());
-            self::fail('Převzaté stavy nesmějí tiše ztratit dimenze.');
+            self::fail('Rozdíl na účtu musí otevření zastavit.');
         } catch (ClosingException $e) {
             self::assertSame('opening_takeover_mismatch', $e->errorCode);
         }
@@ -377,6 +434,114 @@ final class ClosingWorkflowTest extends TestCase
             (int) $next['id'], $this->supplierId, 'reviewed', (int) $next['row_version'], $this->userId,
         ));
         self::assertFalse($this->closing->state($this->supplierId, $this->periodId)['can_revert_open_next']);
+    }
+
+    /**
+     * Přiznání DPH za leden bývá podané dřív, než se uzavře minulý rok, takže zámek k datu
+     * leží už na 1. dni nového roku. Otevření nového roku i se zásobami musí přesto projít.
+     */
+    public function testOpenNextPostsStockReleaseIntoDateLockedNextYear(): void
+    {
+        $this->seedScenario();
+        $this->manual([self::l('112', 'debit', 3000.00), self::l('321', 'credit', 3000.00)], self::YEAR . '-04-01');
+        $this->runStepsUntilCloseReady();
+        $this->posting->postDocument($this->supplierId, 'closing', \MyInvoice\Service\Accounting\Closing\ClosingSourceId::stockClosing($this->periodId), [
+            self::l('112', 'debit', 500.00),
+            self::l('501', 'credit', 500.00),
+        ], ['entry_date' => self::ENDS_ON, 'allow_closing_period' => true] + $this->meta());
+        $this->closing->closeBooks($this->supplierId, $this->periodId, $this->rv(), $this->meta());
+        $this->db->pdo()->prepare('INSERT INTO accounting_supplier_settings (supplier_id, locked_until) VALUES (?, ?) ON DUPLICATE KEY UPDATE locked_until = VALUES(locked_until)')
+            ->execute([$this->supplierId, (self::YEAR + 1) . '-01-31']);
+
+        $result = $this->closing->openNext($this->supplierId, $this->periodId, $this->rv(), $this->meta());
+
+        self::assertNotNull($result['entry_id']);
+        self::assertNotNull($result['stock_release_entry_id'], 'Počáteční stav zásob se musí vrátit do spotřeby i v zamčeném dni.');
+        $release = $this->linesByAccountCode((int) $result['stock_release_entry_id']);
+        self::assertEqualsWithDelta(500.0, $release['501']['debit'], 0.001);
+        self::assertEqualsWithDelta(500.0, $release['112']['credit'], 0.001);
+    }
+
+    /**
+     * Nastavení čistého obratu vybírá řádek jen v druhovém členění výsledovky, takže kategorii
+     * účetní jednotky nejde určit. Precheck musí doběhnout a důvod ohlásit jako varování.
+     */
+    public function testPrecheckReportsUndeterminableEntityCategory(): void
+    {
+        $this->seedScenario();
+        $this->manual([self::l('221', 'debit', 100.00), self::l('648', 'credit', 100.00)], self::YEAR . '-03-01');
+        (new \MyInvoice\Repository\AccountingSupplierSettingsRepository($this->db))->setNetTurnoverExtraRows($this->supplierId, [
+            'income_statement' => ['III.3.'], 'income_statement_purpose' => [],
+        ]);
+        try {
+            $this->categories->evaluate($this->supplierId, $this->periodId);
+            self::fail('Předpoklad testu: kategorie nejde určit.');
+        } catch (\MyInvoice\Service\Accounting\Reports\ReportException $e) {
+            self::assertSame('net_turnover_membership_conflict', $e->errorCode);
+        }
+
+        $this->closing->start($this->supplierId, $this->periodId, $this->rv(), $this->meta());
+        $precheck = $this->closing->runPrecheck($this->supplierId, $this->periodId, $this->rv(), $this->meta());
+
+        $check = $this->findCheck($precheck['checks'], 'entity_category_unavailable');
+        self::assertNotNull($check);
+        self::assertSame('warning', $check['severity']);
+        self::assertFalse($check['ok']);
+        self::assertStringContainsString('Čistý obrat', (string) $check['value']);
+        self::assertNull($this->findCheck($precheck['checks'], 'section18_statements_required'));
+        self::assertNotNull($this->findCheck($precheck['checks'], 'unposted_invoices'), 'Ostatní kontroly doběhnou.');
+    }
+
+    /**
+     * Plátcovství z dolního limitu vzniká až 1. ledna dalšího roku. Uzávěrka roku, v němž
+     * firma limit překročila, ho hodnotí k rozvahovému dni (varování), ne k dnešku, kdy už
+     * plátcovství běží. Vznik plátcovství uvnitř uzavíraného roku zůstává chybou.
+     */
+    public function testVatRegistrationDueIsGradedAgainstPeriodEnd(): void
+    {
+        $year = (int) date('Y') - 1;
+        $periodId = $this->periods->create($this->supplierId, $year, $year . '-01-01', $year . '-12-31');
+        $period = $this->periods->findById($this->supplierId, $periodId);
+        $this->db->pdo()->prepare('UPDATE supplier SET is_vat_payer = 0 WHERE id = ?')->execute([$this->supplierId]);
+        $this->issuedInvoice(2100000.00, $year . '-06-01');
+
+        $check = $this->findCheck($this->closing->buildChecks($this->supplierId, $period, onlyKeys: ['vat_registration_due']), 'vat_registration_due');
+        self::assertSame(($year + 1) . '-01-01', $check['value']['becomes_payer_on']);
+        self::assertSame('warning', $check['severity'], 'Povinnost začíná až po konci období.');
+
+        $this->issuedInvoice(600000.00, $year . '-07-01');
+        $check = $this->findCheck($this->closing->buildChecks($this->supplierId, $period, onlyKeys: ['vat_registration_due']), 'vat_registration_due');
+        self::assertSame($year . '-07-02', $check['value']['becomes_payer_on']);
+        self::assertSame('error', $check['severity'], 'Plátcovství vzniklo uvnitř období.');
+    }
+
+    /** Rozdělaná uzávěrka dalšího roku: hláška řekne, že ji je potřeba nejdřív přerušit. */
+    public function testOpenNextIntoClosingNextYearTellsToAbortIt(): void
+    {
+        $this->seedScenario();
+        $this->runStepsUntilCloseReady();
+        $this->closing->closeBooks($this->supplierId, $this->periodId, $this->rv(), $this->meta());
+        $nextId = $this->periods->create($this->supplierId, self::YEAR + 1, (self::YEAR + 1) . '-01-01', (self::YEAR + 1) . '-12-31');
+        $this->db->pdo()->prepare("UPDATE accounting_periods SET status = 'closing' WHERE id = ?")->execute([$nextId]);
+
+        try {
+            $this->closing->openNext($this->supplierId, $this->periodId, $this->rv(), $this->meta());
+            self::fail('Do rozdělané uzávěrky dalšího roku se otevírat nesmí.');
+        } catch (ClosingException $e) {
+            self::assertSame('next_period_not_open', $e->errorCode);
+            self::assertStringContainsString('Přerušit uzávěrku', $e->getMessage());
+            self::assertStringNotContainsString('vezměte zpět', $e->getMessage());
+        }
+
+        $this->posting->postDocument($this->supplierId, 'income_tax', $nextId, [
+            self::l('591', 'debit', 10.00), self::l('341', 'credit', 10.00),
+        ], ['entry_date' => (self::YEAR + 1) . '-12-31', 'allow_closing_period' => true] + $this->meta());
+        try {
+            $this->closing->openNext($this->supplierId, $this->periodId, $this->rv(), $this->meta());
+            self::fail('Do rozdělané uzávěrky dalšího roku se otevírat nesmí.');
+        } catch (ClosingException $e) {
+            self::assertStringContainsString('vezměte zpět její kroky', $e->getMessage());
+        }
     }
 
     // ── I2: bilanční kontinuita 702↔701 ─────────────────────────────────────
@@ -1070,6 +1235,28 @@ final class ClosingWorkflowTest extends TestCase
      * Syntetická data I1: výnos 602 10 000, náklad 518 4 000, zůstatky 311/321/221/343.
      * BS: 311 = 7 100, 343 = −1 260, 221 = 5 000, 321 = −4 840; VH = 6 000.
      */
+    private function issuedInvoice(float $amount, string $date): void
+    {
+        $pdo = $this->db->pdo();
+        $clientId = (int) ($pdo->query('SELECT id FROM clients WHERE supplier_id = ' . $this->supplierId . ' ORDER BY id LIMIT 1')->fetchColumn() ?: 0);
+        $currencyId = (int) $pdo->query("SELECT id FROM currencies WHERE code = 'CZK' ORDER BY id LIMIT 1")->fetchColumn();
+        if ($clientId === 0) {
+            $czId = (int) $pdo->query("SELECT id FROM countries WHERE iso2 = 'CZ' LIMIT 1")->fetchColumn();
+            $pdo->prepare(
+                'INSERT INTO clients (supplier_id, company_name, street, city, zip, country_id, main_email, currency_default_id)
+                 VALUES (?, "Odběratel test s.r.o.", "Testovací 1", "Praha", "11000", ?, "odberatel@example.com", ?)'
+            )->execute([$this->supplierId, $czId, $currencyId]);
+            $clientId = (int) $pdo->lastInsertId();
+        }
+        $pdo->prepare(
+            'INSERT INTO invoices
+                (supplier_id, client_id, invoice_type, varsymbol, issue_date, tax_date, due_date,
+                 currency_id, reverse_charge, client_snapshot, supplier_snapshot,
+                 total_without_vat, total_vat, total_with_vat, status, created_by)
+             VALUES (?, ?, "invoice", ?, ?, ?, ?, ?, 0, "{}", "{}", ?, 0, ?, "issued", ?)'
+        )->execute([$this->supplierId, $clientId, (string) random_int(10000000, 99999999), $date, $date, $date, $currencyId, $amount, $amount, $this->userId]);
+    }
+
     private function createClosingDimensions(): array
     {
         $dimensions = $this->dimensions;

@@ -527,6 +527,28 @@ final class ArchiveRestoreRoundTripTest extends TestCase
         }
     }
 
+    /** Rozdělení výsledku z počátečních stavů prvního roku nese klíč 6e12 + id období; obnova ho přemapuje. */
+    public function testOpeningProfitDistributionKeySurvivesArchiveRoundTrip(): void
+    {
+        $period = (int) $this->periods->findByYear($this->supplierId, self::YEAR)['id'];
+        $this->posting->postDocument($this->supplierId, 'profit_distribution', \MyInvoice\Service\Accounting\Closing\ClosingSourceId::openingProfitDistribution($period), [
+            ['account_code' => '431', 'side' => 'debit', 'amount' => 700],
+            ['account_code' => '428', 'side' => 'credit', 'amount' => 700],
+        ], ['entry_date' => self::YEAR . '-03-01', 'posted_by' => $this->userId]);
+        $meta = $this->archive->export($this->supplierId, $this->userId);
+        $zip = $this->archive->filePath($this->supplierId, $meta);
+        $this->tempFiles[] = $zip;
+        $report = $this->restore->restore($zip);
+        $newSupplier = (int) $report['new_supplier_id'];
+        $this->cleanupSuppliers[] = $newSupplier;
+
+        $newPeriod = (int) $this->periods->findByYear($newSupplier, self::YEAR)['id'];
+        self::assertNotSame($period, $newPeriod);
+        $stmt = $this->db->pdo()->prepare("SELECT source_id FROM journal_entries WHERE supplier_id = ? AND source_type = 'profit_distribution'");
+        $stmt->execute([$newSupplier]);
+        self::assertSame(\MyInvoice\Service\Accounting\Closing\ClosingSourceId::openingProfitDistribution($newPeriod), (int) $stmt->fetchColumn());
+    }
+
     public function testProvisionSourceAndClosingStateSurviveArchiveRoundTrip(): void
     {
         $invoice = $this->saleInvoice('TEST-PROVISION', $this->client(), 50000);

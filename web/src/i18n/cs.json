@@ -22085,6 +22085,7 @@
         "cancelled_with_entry": "Stornované doklady, jejichž zápis je v deníku pořád aktivní (knihy a evidence si protiřečí)",
         "entries_without_description": "Zaúčtované zápisy bez obsahu účetního případu (§ 11 odst. 1 písm. b) ZoÚ) - doplňte popis",
         "section18_statements_required": "Kategorie účetní jednotky vyžaduje i přehled o peněžních tocích a o změnách vlastního kapitálu (§ 18 odst. 2 ZoÚ) - bez nich není závěrka úplná",
+        "entity_category_unavailable": "Kategorii účetní jednotky nelze určit, a proto ani ověřit povinné přehledy podle § 18 odst. 2 ZoÚ. Důvod je uveden u kontroly",
         "vat_registration_due": "Obrat překročil limit pro registraci k DPH (§ 6 ZDPH) - plátcovství vzniká ze zákona, zkontrolujte datum a podejte přihlášku",
         "vat_status_s79_missing": "Přechod plátcovství DPH v období bez korekce odpočtu na ř. 45 (§ 79 nárok na odpočet při registraci / § 79a snížení odpočtu při zrušení) - posuďte obchodní majetek ke dni přechodu a případné položky zaevidujte v agendě Opravy DPH",
         "estimates_unreleased": "Dohadné položky z minulého období se nerozpustily (ČÚS 019) - náklad může být v knihách dvakrát",
@@ -22295,7 +22296,8 @@
         "done_taken_over": "Počáteční stavy převzaty - souhlasí na {count} účtech, nic se neúčtovalo.",
         "done_replaced": "Převzaté počáteční stavy byly nahrazeny vypočtenými. Důvod: {reason}",
         "revert_keeps": "Vzetí kroku zpět převzatý zápis nesmaže.",
-        "account_level": "Uzávěrka roku je převzatá z původního systému, který otevírací rozvahu převádí bez dimenzí. Počáteční stavy se proto porovnávají jen po účtech."
+        "account_level": "Uzávěrka roku je převzatá z původního systému, který otevírací rozvahu převádí bez dimenzí. Počáteční stavy se proto porovnávají jen po účtech.",
+        "account_level_no_dimensions": "Převzaté počáteční stavy dalšího roku nenesou žádnou dimenzi (převod z jiného systému). Porovnávají se proto jen po účtech."
       },
       "revert": {
         "confirm": "Opravdu vzít krok zpět? Uzávěrkové zápisy kroku se smažou (s auditní stopou).",
@@ -22386,6 +22388,7 @@
         "date_required": "Vyplňte datum rozhodnutí valné hromady.",
         "withholding_rate": "Sazba srážkové daně (§36)",
         "resources_limit": "Limit rozdělitelných zdrojů",
+        "opening_source": "Rozděluje se výsledek roku {year} z počátečního stavu účtu 431. Předchozí rok v MyÚčtu není, výsledek přišel převzatými počátečními stavy.",
         "shareholder_row_hint": "Každý řádek druhu Podíly společníků musí představovat jednoho společníka; srážková daň se zaokrouhluje dolů za každého zvlášť.",
         "col_account": "Účet",
         "col_kind": "Druh",
