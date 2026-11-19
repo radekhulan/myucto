@@ -76,7 +76,7 @@ final class FrameworkConversionRepository
         foreach($rows as &$row){$row['dimensions']=$dimensions[$row['id']]??[];$row['dimension_splits']=$splits[$row['id']]??[];}unset($row);
         $closing=array_values(array_filter($rows,static fn($r)=>(int)$r['entry_id']===$entry));
         $expect=(new \MyInvoice\Service\Accounting\Conversion\FrameworkConversionNative500Adapter($this->db))->snapshot($supplier,$source,$current);
-        E::need(self::journal($closing)===self::journal($expect['lines']),'conversion_native_close_changed');
+        E::need(self::journal($closing)===self::journal($expect['lines'])||self::netJournal($closing)===self::netJournal($expect['lines']),'conversion_native_close_changed');
         E::need(JournalLineAmount::cents($payload['profit']??'0')===JournalLineAmount::cents($expect['profit']),'conversion_profit_changed');
         // Rozvaha převodu musí stát na týchž zápisech jako zůstatky, ze kterých vznikl zápis
         // uzavření knih ({@see \MyInvoice\Repository\ClosingRepository::bsBalances()}): vypadá
@@ -118,6 +118,16 @@ final class FrameworkConversionRepository
         return $anchor;
     }
 
+    /**
+     * Uzavření po buňkách účtu v netto haléřích. Uzávěrka 500 rozděluje buňku po měnách
+     * až od chvíle, kdy nese cizí měnu; rok uzavřený dřív má buňku jedním řádkem. Obsah
+     * uzavření je přitom týž, takže se srovná i takto.
+     */
+    private static function netJournal(array $rows):array
+    {
+        $out=[];foreach(self::journal($rows) as [$code,$side,$cents,$dimensions,$splits,$costCenter,$project]){$key=json_encode([$code,$dimensions,$splits,$costCenter,$project],JSON_THROW_ON_ERROR);$out[$key]=($out[$key]??0)+($side==='debit'?$cents:-$cents);}
+        $out=array_filter($out,static fn(int $cents):bool=>$cents!==0);ksort($out);return $out;
+    }
     public static function journal(array $rows):array
     {
         $out=[];foreach($rows as $r){$dimensions=$r['dimensions']??[];ksort($dimensions);$splits=$r['dimension_splits']??[];ksort($splits);$out[]=[(string)$r['account_code'],$r['side'],JournalLineAmount::signedCents($r),$dimensions,$splits,$r['cost_center']??null,isset($r['project_id'])?(int)$r['project_id']:null];}return $out;
@@ -125,8 +135,13 @@ final class FrameworkConversionRepository
     public function cells(array $snapshot):array
     {
         $closing=[];foreach($snapshot['closing'] as $row)if(in_array($row['account_type'],['asset','liability','equity'],true)){
-            $key=self::tuple($row);E::need(!isset($closing[$key]),'conversion_close_cell_ambiguous');
-            $closing[$key]=['account_code'=>$row['account_code'],'account_type'=>$row['account_type'],'dimensions'=>$row['dimensions'],'cost_center'=>$row['cost_center'],'project_id'=>$row['project_id'],'czk_cents'=>($row['side']==='credit'?1:-1)*JournalLineAmount::signedCents($row),'close_line_ids'=>[(int)$row['id']]];
+            // Buňka účtu může mít v uzavření víc řádků: uzávěrka 500 rozděluje zůstatek po měnách
+            // (korunová část a každá cizí měna zvlášť, ClosingRepository::bsBalances). Řádky
+            // téže buňky a téže měny by byly dvojznačné.
+            $key=self::tuple($row);$currency=($row['currency_code']??null)===null||$row['currency_code']==='CZK'?'CZK':(string)$row['currency_code'];
+            E::need(!in_array($currency,$closing[$key]['currencies']??[],true),'conversion_close_cell_ambiguous');
+            $closing[$key]??=['account_code'=>$row['account_code'],'account_type'=>$row['account_type'],'dimensions'=>$row['dimensions'],'cost_center'=>$row['cost_center'],'project_id'=>$row['project_id'],'czk_cents'=>0,'close_line_ids'=>[],'currencies'=>[]];
+            $closing[$key]['czk_cents']+=($row['side']==='credit'?1:-1)*JournalLineAmount::signedCents($row);$closing[$key]['close_line_ids'][]=(int)$row['id'];$closing[$key]['currencies'][]=$currency;
         }
         $parts=[];
         foreach($snapshot['bs'] as $row){

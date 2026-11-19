@@ -391,6 +391,21 @@ dimenzí i částky procentních rozpadů po haléřích. Přenáší se také n
 i když je celý účet v součtu nulový. Následující uzávěrka vychází z počátečních stavů tohoto roku,
 stejně jako účetní sestavy.
 
+Zůstatky v cizí měně (devizový účet 221, valutová pokladna, pohledávky a závazky v cizí měně) se v obou
+rámcích přenášejí i s měnou a částkou v cizí měně, takže přecenění v dalším roce vychází z počátečního stavu.
+Má-li účet (se stejnými dimenzemi) řádky ve více měnách, uzavření i otevření ho rozdělí: korunové řádky tvoří
+korunový zůstatek bez měny a každá cizí měna vlastní zůstatek. Bez měny, jen v korunách, se přenese:
+
+- zůstatek, jehož řádky v cizí měně nemají vyplněnou částku v cizí měně,
+- zůstatek, jehož částka v cizí měně má opačné znaménko než korunová (jedním řádkem ho zapsat nejde),
+- účet, jehož počáteční stav vznikl ještě bez měny (rok otevřený dřívější verzí). Cizí zůstatek takového účtu
+  by od počátečního stavu zachytil jen pohyby roku, proto se přenáší jako dřív a návrh devizových zůstatků
+  v kroku Kurzové rozdíly ho dál počítá z celého deníku.
+
+Návrh devizových zůstatků (kurzové rozdíly) i přecenění účtů 378/379 počítají cizí zůstatek od počátečního
+stavu, stejně jako rozvaha. Po uzávěrce převzaté z původního programu, která měnu nenesla, se tak cizí zůstatek
+nezapočítá dvakrát.
+
 Administrátor může krok vrátit tlačítkem **Vzít zpět otevření roku**.
 
 > [!NOTE]

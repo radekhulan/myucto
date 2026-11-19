@@ -308,11 +308,20 @@ final class ClosingRepository
 
     /**
      * Zůstatky rozvahových účtů k ends_on (R9) od kotvy shodné s účetními sestavami,
-     * po účtech a dimenzích, bez vlastního close_books zápisu období
+     * po účtech, dimenzích a měně, bez vlastního close_books zápisu období
      * (source_id = period_id; slotované stock zápisy §3.4 se počítají —
      * viz plBalances).
      *
-     * @return list<array{account_id:int, account_code:string, name:string, bal:float}>
+     * Cizí měna se nese stejně jako u rámce 504 ({@see \MyInvoice\Service\Accounting\Closing\ClosingCurrency504Builder}):
+     * buňka účtu se rozdělí po měnách, korunové řádky (bez měny) zůstávají korunovým
+     * zůstatkem a každá cizí měna má vlastní zůstatek s `currency_code` a `amount_foreign`.
+     * Uzavírací i otevírací zápis tak nesou cizoměnový zůstatek dál a přecenění dalšího
+     * roku ho najde v počátečním stavu. Cizoměnová část, kterou přenést nejde, se vrátí
+     * do korunového zůstatku buňky (dosavadní chování): řádek bez cizí částky, cizí
+     * zůstatek s opačným znaménkem než korunový nebo nulový korunový, a účet, jehož
+     * počáteční stav vznikl bez měny ({@see foreignOpeningGaps()}).
+     *
+     * @return list<array{account_id:int, account_code:string, name:string, bal:float, currency_code?:string, amount_foreign?:float, fx_rate?:null}>
      */
     public function bsBalances(int $supplierId, int $periodId, string $endsOn, bool $currentRead = false, array $excludeEntryIds = []): array
     {
@@ -330,7 +339,46 @@ final class ClosingRepository
             $where,
             $params,
             $currentRead,
+            $anchor === null ? [] : $this->foreignOpeningGaps($supplierId, $anchor, $endsOn, $currentRead),
         );
+    }
+
+    /**
+     * Účty, jejichž počáteční stav ke kotvě vznikl bez cizí měny, ač účet cizoměnové řádky
+     * před kotvou má: otevírací zápis má na účtu jen korunové řádky. Typicky rok otevřený
+     * před tím, než uzávěrka uměla nést měnu. Cizoměnový zůstatek od kotvy by u nich
+     * zachytil jen pohyby od kotvy, ne celý zůstatek, proto se jim měna nepřenáší
+     * ({@see bsBalances()}) a návrh přecenění je počítá z celého deníku ({@see bankProposals()}).
+     *
+     * @return array<int,true> account_id => true
+     */
+    public function foreignOpeningGaps(int $supplierId, string $anchor, string $asOf, bool $currentRead = false): array
+    {
+        $lock = $currentRead ? ' FOR UPDATE' : '';
+        $foreign = "l.currency_code IS NOT NULL AND l.currency_code <> 'CZK'";
+        $opening = $this->db->pdo()->prepare(
+            "SELECT l.account_id
+               FROM journal_entry_lines l
+               JOIN journal_entries e ON e.id = l.entry_id AND e.supplier_id = l.supplier_id
+              WHERE l.supplier_id = ? AND e.source_type = 'opening' AND e.posted_at IS NOT NULL
+                AND e.entry_date >= ? AND e.entry_date <= ?
+              GROUP BY l.account_id
+             HAVING SUM({$foreign}) = 0{$lock}"
+        );
+        $opening->execute([$supplierId, $anchor, $asOf]);
+        $candidates = array_map('intval', $opening->fetchAll(PDO::FETCH_COLUMN));
+        if ($candidates === []) {
+            return [];
+        }
+        $before = $this->db->pdo()->prepare(
+            "SELECT DISTINCT l.account_id
+               FROM journal_entry_lines l
+               JOIN journal_entries e ON e.id = l.entry_id AND e.supplier_id = l.supplier_id
+              WHERE l.supplier_id = ? AND e.posted_at IS NOT NULL AND e.entry_date < ? AND {$foreign}
+                AND l.account_id IN (" . implode(',', array_fill(0, count($candidates), '?')) . "){$lock}"
+        );
+        $before->execute([$supplierId, $anchor, ...$candidates]);
+        return array_fill_keys(array_map('intval', $before->fetchAll(PDO::FETCH_COLUMN)), true);
     }
 
     /** @param list<int> $entryIds */
@@ -403,14 +451,24 @@ final class ClosingRepository
         );
     }
 
-    private function balancesWithDimensions(int $supplierId, string $where, array $params, bool $currentRead = false): array
+    /**
+     * @param array<int,true>|null $currencyBlocked null = zůstatky bez měny; pole = rozdělit
+     *     buňky po měnách ({@see bsBalances()}), u vyjmenovaných účtů měnu nenést
+     */
+    private function balancesWithDimensions(int $supplierId, string $where, array $params, bool $currentRead = false, ?array $currencyBlocked = null): array
     {
         if ($currentRead && !$this->db->pdo()->inTransaction()) throw new \LogicException('Current native balances require caller locks.');
+        $withCurrency = $currencyBlocked !== null;
+        $currencySelect = $withCurrency
+            ? ", CASE WHEN l.currency_code IS NULL OR l.currency_code = 'CZK' THEN NULL ELSE l.currency_code END AS fx_currency,
+                    SUM(CASE WHEN l.side = 'debit' THEN l.signed_amount_foreign ELSE -l.signed_amount_foreign END) AS fx_bal,
+                    SUM(CASE WHEN l.amount_foreign IS NULL THEN 1 ELSE 0 END) AS fx_missing"
+            : '';
         $stmt = $this->db->pdo()->prepare(
             "SELECT l.account_id, a.account_code, a.name, l.cost_center, l.project_id,
                     d.dimensions, s.splits,
                     CASE WHEN s.splits IS NULL THEN 0 ELSE l.amount END AS split_amount,
-                    SUM(CASE WHEN l.side = 'debit' THEN l.signed_amount ELSE -l.signed_amount END) AS bal
+                    SUM(CASE WHEN l.side = 'debit' THEN l.signed_amount ELSE -l.signed_amount END) AS bal{$currencySelect}
                FROM journal_entry_lines l
                JOIN journal_entries e ON e.id = l.entry_id AND e.supplier_id = l.supplier_id
                JOIN chart_of_accounts a ON a.id = l.account_id AND a.supplier_id = l.supplier_id
@@ -429,13 +487,17 @@ final class ClosingRepository
               WHERE l.supplier_id = ? AND e.posted_at IS NOT NULL
                 AND {$where}
               GROUP BY l.account_id, a.account_code, a.name, l.cost_center, l.project_id,
-                       d.dimensions, s.splits, split_amount
+                       d.dimensions, s.splits, split_amount" . ($withCurrency ? ', fx_currency' : '') . "
              HAVING bal <> 0
-              ORDER BY a.account_code, l.cost_center, l.project_id, d.dimensions, s.splits, split_amount" . ($currentRead ? ' FOR UPDATE' : '')
+              ORDER BY a.account_code, l.cost_center, l.project_id, d.dimensions, s.splits, split_amount" . ($withCurrency ? ', fx_currency' : '') . ($currentRead ? ' FOR UPDATE' : '')
         );
         $stmt->execute([$supplierId, $supplierId, $supplierId, ...$params]);
+        $records = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        if ($withCurrency) {
+            $records = self::mergeUncarriedCurrency($records, $currencyBlocked);
+        }
         $balances = [];
-        while ($record = $stmt->fetch(PDO::FETCH_ASSOC)) {
+        foreach ($records as $record) {
             $row = self::castBalance($record);
             foreach (json_decode((string) ($record['dimensions'] ?? '[]'), true, 512, JSON_THROW_ON_ERROR) as [$typeId, $valueId]) {
                 $row['dimensions'][(int) $typeId] = (int) $valueId;
@@ -455,11 +517,52 @@ final class ClosingRepository
             if ($splitCents > 0) {
                 $row['bal'] = ($balanceCents < 0 ? -$splitCents : $splitCents) / 100;
             }
+            $foreignCents = ($record['fx_currency'] ?? null) === null ? null : abs((int) round((float) $record['fx_bal'] * 100));
             for ($i = 0; $i < $count; $i++) {
+                if ($foreignCents !== null) {
+                    // Rozpad na shodné díly (sdílené rozpouštění) dělí i cizí částku, zbytek haléřů jde prvním dílům.
+                    $share = intdiv($foreignCents, $count) + ($i < $foreignCents % $count ? 1 : 0);
+                    $row['currency_code'] = (string) $record['fx_currency'];
+                    $row['amount_foreign'] = $share / 100;
+                    $row['fx_rate'] = null;
+                }
                 $balances[] = $row;
             }
         }
         return $balances;
+    }
+
+    /**
+     * Cizoměnové části buněk, které přenést nejde, sečte do korunové části téže buňky
+     * ({@see bsBalances()}). Pořadí záznamů zůstává.
+     *
+     * @param list<array<string,mixed>> $records
+     * @param array<int,true> $blocked
+     * @return list<array<string,mixed>>
+     */
+    private static function mergeUncarriedCurrency(array $records, array $blocked): array
+    {
+        $merged = [];
+        foreach ($records as $record) {
+            $currency = $record['fx_currency'];
+            if ($currency !== null) {
+                $balCents = (int) round((float) $record['bal'] * 100);
+                $fxCents = (int) round((float) $record['fx_bal'] * 100);
+                if (isset($blocked[(int) $record['account_id']]) || (int) $record['fx_missing'] > 0
+                    || ($fxCents !== 0 && ($fxCents < 0) !== ($balCents < 0))) {
+                    $currency = null;
+                }
+            }
+            $key = json_encode([$record['account_id'], $record['cost_center'], $record['project_id'], $record['dimensions'],
+                $record['splits'], $record['split_amount'], $currency], JSON_THROW_ON_ERROR);
+            if (!isset($merged[$key])) {
+                $merged[$key] = ['fx_currency' => $currency] + $record;
+                $merged[$key]['bal'] = 0.0;
+                $merged[$key]['fx_bal'] = $currency === null ? null : $record['fx_bal'];
+            }
+            $merged[$key]['bal'] = round((float) $merged[$key]['bal'] + (float) $record['bal'], 2);
+        }
+        return array_values(array_filter($merged, static fn (array $r): bool => (int) round((float) $r['bal'] * 100) !== 0));
     }
 
     /**
@@ -949,6 +1052,7 @@ final class ClosingRepository
     {
         $prefixes = ForeignCurrencyAccountPolicy::LEDGER_REVALUED_PREFIXES;
         $accountFilter = implode(' OR ', array_fill(0, count($prefixes), "a.account_code LIKE CONCAT(?, '%')"));
+        [$window, $windowParams] = $this->foreignWindow($supplierId, $asOf, 'e', 'l');
         $stmt = $this->db->pdo()->prepare(
             "SELECT a.account_code, a.name AS label, l.currency_code,
                     SUM(CASE WHEN l.side = 'debit' THEN l.signed_amount_foreign ELSE -l.signed_amount_foreign END) AS foreign_balance,
@@ -960,12 +1064,12 @@ final class ClosingRepository
                 AND e.entry_date <= ?
                 AND NOT (e.source_type = 'fx_revaluation' AND e.source_id = ?)
                 AND l.currency_code IS NOT NULL AND l.currency_code <> 'CZK'
-                AND ({$accountFilter})
+                AND ({$accountFilter}){$window}
               GROUP BY a.account_code, a.name, l.currency_code
              HAVING ABS(foreign_balance) >= 0.005 OR ABS(czk_balance) >= 0.005
               ORDER BY a.account_code, l.currency_code"
         );
-        $stmt->execute([$supplierId, $asOf, $excludeSourceId, ...$prefixes]);
+        $stmt->execute([$supplierId, $asOf, $excludeSourceId, ...$prefixes, ...$windowParams]);
         return array_map(static function (array $r): array {
             return [
                 'account_code' => (string) $r['account_code'],
@@ -1016,7 +1120,8 @@ final class ClosingRepository
      * analytiky (i termínované vklady bez bankovního výpisu) a Kč zůstatek přesně
      * k D, ne k datu posledního výpisu.
      *
-     * Agregace přes CELÝ deník (žádný filtr na reversed_by): storno nese vlastní
+     * Agregace od kotvy počátečních stavů jako u bsBalances ({@see foreignWindow()}),
+     * bez filtru na reversed_by: storno nese vlastní
      * řádky se stejnou částkou na opačné straně (PostingService::reverse), takže
      * se v SUM per (účet, měna) samo vynuluje — stejný vzor jako accountBalance/
      * bsBalances/plBalances. Filtr na source_id (jak to dělá dokladové openFxItems)
@@ -1038,6 +1143,8 @@ final class ClosingRepository
      */
     public function bankProposals(int $supplierId, string $asOf): array
     {
+        [$window, $windowParams] = $this->foreignWindow($supplierId, $asOf, 'e', 'l');
+        [$totalWindow, $totalParams] = $this->foreignWindow($supplierId, $asOf, 'et', 'lt');
         $stmt = $this->db->pdo()->prepare(
             "SELECT a.account_code, a.name AS label, l.currency_code,
                     SUM(CASE WHEN l.side = 'debit' THEN l.signed_amount_foreign ELSE -l.signed_amount_foreign END) AS foreign_balance,
@@ -1050,7 +1157,7 @@ final class ClosingRepository
               WHERE l.supplier_id = ? AND e.posted_at IS NOT NULL
                 AND e.entry_date <= ?
                 AND l.currency_code IS NOT NULL AND l.currency_code <> 'CZK'
-                AND (a.account_code LIKE '211%' OR a.account_code LIKE '221%')
+                AND (a.account_code LIKE '211%' OR a.account_code LIKE '221%'){$window}
               GROUP BY a.account_code, a.name, l.currency_code
              HAVING (ABS(foreign_balance) >= 0.005 OR ABS(czk_balance) >= 0.005)
                 AND ABS(czk_balance - (
@@ -1058,15 +1165,40 @@ final class ClosingRepository
                       FROM journal_entry_lines lt
                       JOIN journal_entries et ON et.id = lt.entry_id
                      WHERE lt.supplier_id = ? AND lt.account_id = MAX(l.account_id)
-                       AND et.posted_at IS NOT NULL AND et.entry_date <= ?)) < 0.5
+                       AND et.posted_at IS NOT NULL AND et.entry_date <= ?{$totalWindow})) < 0.5
               ORDER BY a.account_code, l.currency_code"
         );
-        $stmt->execute([$supplierId, $asOf, $supplierId, $asOf]);
+        $stmt->execute([$supplierId, $asOf, ...$windowParams, $supplierId, $asOf, ...$totalParams]);
         return array_map(static function (array $r): array {
             $r['foreign_balance'] = round((float) $r['foreign_balance'], 2);
             $r['czk_balance'] = round((float) $r['czk_balance'], 2);
             return $r;
         }, $stmt->fetchAll(PDO::FETCH_ASSOC));
+    }
+
+    /**
+     * Okno deníku pro cizoměnové zůstatky peněžních účtů k datu: od kotvy počátečních
+     * stavů jako rozvaha ({@see bsBalances()}). Uzavírací a otevírací zápis nesou měnu,
+     * součet přes celý deník by ji tak počítal znovu za každý rok, ve kterém otevření
+     * měnu neslo a uzavření ne (uzávěrka převzatá z původního systému, převod
+     * s počátečními stavy každého roku). Účty, jejichž počáteční stav měnu nenese
+     * ({@see foreignOpeningGaps()}), se dál sčítají z celého deníku: tam se uzavření
+     * i otevření bez měny vzájemně ruší a cizí zůstatek drží jen pohyby.
+     *
+     * @return array{0:string, 1:list<string|int>} SQL podmínka (začíná AND) a parametry
+     */
+    private function foreignWindow(int $supplierId, string $asOf, string $entryAlias, string $lineAlias): array
+    {
+        $anchor = (new LedgerReportRepository($this->db))->openingAnchor($supplierId, $asOf);
+        if ($anchor === null) {
+            return ['', []];
+        }
+        $gaps = array_keys($this->foreignOpeningGaps($supplierId, $anchor, $asOf));
+        if ($gaps === []) {
+            return [" AND {$entryAlias}.entry_date >= ?", [$anchor]];
+        }
+        return [" AND ({$entryAlias}.entry_date >= ? OR {$lineAlias}.account_id IN (" . implode(',', array_fill(0, count($gaps), '?')) . '))',
+            [$anchor, ...$gaps]];
     }
 
     // ── kroky průvodce (accounting_closing_steps) ─────────────────────────────
