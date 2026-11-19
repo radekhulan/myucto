@@ -210,6 +210,14 @@ final class OtherItemActionPaymentPermissionTest extends TestCase
         self::assertSame(0, $this->data($response)['total']);
     }
 
+    public function testListShowsDocumentCountOnlyWithDocumentsRead(): void
+    {
+        $without = $this->data($this->call('list', 'GET', ['other_items' => 1], [], null, ['from' => '2099-01-01']));
+        self::assertArrayNotHasKey('document_count', $without['items'][0]);
+        $with = $this->data($this->call('list', 'GET', ['other_items' => 1, 'documents' => 1], [], null, ['from' => '2099-01-01']));
+        self::assertSame(0, $with['items'][0]['document_count']);
+    }
+
     public function testOpenEndedDueDateFiltersIncludeDerivedTaxAdvances(): void
     {
         $insert = $this->pdo->prepare(

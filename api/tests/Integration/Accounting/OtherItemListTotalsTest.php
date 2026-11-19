@@ -96,6 +96,29 @@ final class OtherItemListTotalsTest extends TestCase
         ], $open['totals']);
     }
 
+    public function testListCountsAttachedDocumentsPerItem(): void
+    {
+        $withDocs = $this->item('payable', 'CZK', 500, 'posted', title: 'S dokumenty');
+        $without = $this->item('payable', 'CZK', 400, 'posted', title: 'Bez dokumentu');
+        foreach (['smlouva', 'dodatek'] as $name) $this->attach($this->supplierId, $withDocs, $name);
+        // Odkaz jiného typu se stejným id se nepočítá. Odkaz cizí firmy na položku nepustí trigger (migrace 1885).
+        $this->attach($this->supplierId, $without, 'zapis', 'journal_entry');
+
+        $items = array_column($this->service->list($this->supplierId, ['status' => 'all'], 1, 50)['items'], null, 'id');
+        self::assertSame(2, $items[$withDocs]['document_count']);
+        self::assertSame(0, $items[$without]['document_count']);
+    }
+
+    private function attach(int $supplierId, int $entityId, string $name, string $entityType = 'other_item'): void
+    {
+        $this->pdo->prepare(
+            "INSERT INTO documents (supplier_id, title, original_name, filename, sha256, mime_type, size_bytes, doc_type)
+             VALUES (?, ?, 'sken.pdf', 'sken.pdf', ?, 'application/pdf', 100, 'pdf')"
+        )->execute([$supplierId, 'Syntetický ' . $name, hash('sha256', $name . bin2hex(random_bytes(6)))]);
+        $this->pdo->prepare('INSERT INTO document_links (document_id, supplier_id, entity_type, entity_id) VALUES (?, ?, ?, ?)')
+            ->execute([(int) $this->pdo->lastInsertId(), $supplierId, $entityType, $entityId]);
+    }
+
     private function item(string $side, string $currency, float $amount, string $status,
         float $settledOutside = 0.0, string $title = 'Syntetická položka'): int
     {

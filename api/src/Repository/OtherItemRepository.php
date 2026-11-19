@@ -125,11 +125,37 @@ final class OtherItemRepository
         );
         $stmt->execute($params);
         $items = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        $counts = $this->documentCounts($supplierId, array_map(static fn (array $row): int => (int) $row['id'], $items));
+        foreach ($items as &$item) {
+            $item['document_count'] = $counts[(int) $item['id']] ?? 0;
+        }
+        unset($item);
         $result = ['items' => $items, 'total' => $total, 'page' => $page, 'per_page' => $perPage];
         if ($page === 1) {
             $result['totals'] = $this->remainingTotals($whereSql, $params);
         }
         return $result;
+    }
+
+    /**
+     * Počet připojených dokumentů pro řádky stránky jedním dotazem (index document_links
+     * supplier_id, entity_type, entity_id), vzor InternalDocumentRepository.
+     *
+     * @param list<int> $ids
+     * @return array<int,int>
+     */
+    private function documentCounts(int $supplierId, array $ids): array
+    {
+        if ($ids === []) return [];
+        $in = implode(',', array_fill(0, count($ids), '?'));
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT dl.entity_id, COUNT(*)
+               FROM document_links dl
+              WHERE dl.supplier_id = ? AND dl.entity_type = 'other_item' AND dl.entity_id IN ({$in})
+              GROUP BY dl.entity_id"
+        );
+        $stmt->execute([$supplierId, ...$ids]);
+        return array_map('intval', $stmt->fetchAll(PDO::FETCH_KEY_PAIR));
     }
 
     /**

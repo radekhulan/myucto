@@ -58,6 +58,13 @@ final class OtherItemAction
             $this->currentSupplierId($request), $filters,
             (int) ($q['page'] ?? 1), (int) ($q['per_page'] ?? 50),
         );
+        // Počet připojených dokumentů jen tomu, kdo smí dokumenty číst.
+        if (!RequestAuthorization::allows($request, 'documents', AccessLevel::READ)) {
+            $result['items'] = array_map(static function (array $item): array {
+                unset($item['document_count']);
+                return $item;
+            }, $result['items']);
+        }
         $derived = [];
         $sid = $this->currentSupplierId($request);
         $forecastFrom = max($from, date('Y-m-d'));

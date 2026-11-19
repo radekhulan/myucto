@@ -46918,6 +46918,7 @@ components:
             journal_entry_id: { type: [integer, 'null'], format: int64 }
             reversal_entry_id: { type: [integer, 'null'], format: int64 }
             posted_at: { type: [string, 'null'], format: date-time }
+            document_count: { type: integer, description: 'Jen v seznamu a jen s právem číst dokumenty: počet připojených dokumentů.' }
             posting_rules:
               type: object
               description: Účinná kontace vzniku a úhrad (prázdný objekt v daňové evidenci).

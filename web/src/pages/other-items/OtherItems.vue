@@ -22,7 +22,18 @@ import OtherItemKindsModal from '@/components/accounting/OtherItemKindsModal.vue
 import OtherItemDocumentSettingsModal from '@/components/accounting/OtherItemDocumentSettingsModal.vue'
 import DateInput from '@/components/ui/DateInput.vue'
 import SortableTh from '@/components/ui/SortableTh.vue'
-import type { SortPref } from '@/api/preferences'
+import ColumnDragHandle from '@/components/ui/ColumnDragHandle.vue'
+import ColumnPicker from '@/components/ui/ColumnPicker.vue'
+import DensityToggle from '@/components/ui/DensityToggle.vue'
+import SavedFiltersMenu from '@/components/ui/SavedFiltersMenu.vue'
+import PostingBadge from '@/components/ui/PostingBadge.vue'
+import WorkspaceDragHandle from '@/components/workspace/WorkspaceDragHandle.vue'
+import type { SavedFilter } from '@/api/preferences'
+import { useTablePrefs, type ColumnDef } from '@/composables/useTablePrefs'
+import { useColumnDrag } from '@/composables/useColumnDrag'
+import { useListKeyboard } from '@/composables/useListKeyboard'
+import { useSavedFilters, savedFilterTone, type SavedFilterTone } from '@/composables/useSavedFilters'
+import { ensurePrefsLoaded } from '@/composables/useUserPrefs'
 import { useFillViewportHeight } from '@/composables/useFillViewportHeight'
 import { useScrollLoadMore } from '@/composables/useScrollLoadMore'
 import { ICONS, btnOutlineSm } from '@/components/ui/buttonStyles'
@@ -33,6 +44,7 @@ const router = useRouter()
 const auth = useAuthStore()
 const toast = useToast()
 const navigate = useRowLink()
+const supplierStore = useSupplierStore()
 const loading = ref(false)
 const loadingMore = ref(false)
 const refreshing = ref(false)
@@ -62,7 +74,6 @@ const search = ref('')
 const searchPending = ref(false)
 const dueFrom = ref('')
 const dueTo = ref('')
-const sort = ref<SortPref | null>(null)
 let searchTimer: ReturnType<typeof setTimeout> | null = null
 let loadRequest = 0
 
@@ -70,10 +81,58 @@ const pages = computed(() => Math.max(1, Math.ceil(total.value / perPage.value))
 const canLoadMore = computed(() => !loading.value && !loadingMore.value && !refreshing.value && !searchPending.value && page.value < pages.value)
 useScrollLoadMore(loadMoreTarget, () => canLoadMore.value, () => load(true))
 
+// ─── Sloupce, hustota a řazení (vzor přijatých faktur) ───
+// Řazení drží uživatelské předvolby seznamu stejně jako u faktur, ne adresa.
+// Zápis má jen podvojné účetnictví a role, která smí číst deník (stejně jako detail). Účty seznam
+// neukazuje: uložené účty položky nejsou účinná kontace (rozpad, profil druhu), tu ukazuje detail.
+const showsJournal = computed(() => supplierStore.currentSupplier?.accounting_mode === 'double_entry' && auth.canRead('accounting'))
+/** Štítek jen u živého zápisu: storno nese původní journal_entry_id, ale zaúčtované už není. */
+function showsPostingBadge(item: OtherItem): boolean {
+  return showsJournal.value && item.status === 'posted' && !!item.journal_entry_id
+}
+/** Vestavěný druh nese směr v názvu, vlastní druh ne: u něj směr doplnit, ať je pohledávka od závazku poznat. */
+function kindLabel(item: OtherItem): string {
+  const label = otherItemKindLabel(t, item)
+  return item.kind_name ? `${t(`other_items.side.${item.side}`)} · ${label}` : label
+}
+const COLUMNS: ColumnDef[] = [
+  { key: 'document_no', labelKey: 'other_items.document_no', required: true },
+  { key: 'title', labelKey: 'other_items.item', required: true },
+  { key: 'side', labelKey: 'other_items.side_label', defaultHidden: true },
+  { key: 'kind', labelKey: 'other_items.kind_label' },
+  { key: 'partner_name', labelKey: 'other_items.partner' },
+  { key: 'issued_on', labelKey: 'other_items.issued_on', defaultHidden: true },
+  { key: 'accounting_on', labelKey: 'other_items.accounting_on', defaultHidden: true },
+  { key: 'due_on', labelKey: 'other_items.due_on' },
+  { key: 'amount', labelKey: 'other_items.amount', required: true },
+  { key: 'paid_amount', labelKey: 'other_items.paid_amount', defaultHidden: true },
+  { key: 'remaining_amount', labelKey: 'other_items.remaining' },
+  { key: 'status', labelKey: 'other_items.status_label' },
+  { key: 'variable_symbol', labelKey: 'other_items.variable_symbol', defaultHidden: true },
+  { key: 'documents', labelKey: 'other_items.col_documents', defaultHidden: true, available: () => auth.canRead('documents') },
+  { key: 'note', labelKey: 'other_items.note', defaultHidden: true },
+  { key: 'posting', labelKey: 'other_items.col_posting', available: () => showsJournal.value },
+]
+/** Sloupce, podle kterých umí řadit API (OtherItemSort). */
+// Stav ne: výpis ukazuje odvozený stav (uhrazeno, částečně), API řadí podle uloženého.
+const SORTABLE = ['document_no', 'title', 'partner_name', 'due_on', 'amount', 'remaining_amount']
+const RIGHT_ALIGNED = ['amount', 'paid_amount', 'remaining_amount']
+const tbl = useTablePrefs('other_items', COLUMNS)
+const columnDrag = useColumnDrag(tbl)
+const visibleColumns = computed(() => tbl.orderedColumns.value.filter(column => tbl.isVisible(column.key)))
+const sort = computed(() => tbl.sort.value)
+function onSortToggle(key: string) {
+  tbl.toggleSort(key)
+  void load()
+}
+function clearSort() {
+  tbl.clearSort()
+  void load()
+}
+
 // ─── Filtry v URL ───
-// Filtry a řazení drží query, takže odkaz, obnova stránky i návrat z detailu ukážou
+// Filtry drží query, takže odkaz, obnova stránky i návrat z detailu ukážou
 // stejný výběr. Klik na položku menu (prázdné query) vrátí výchozí stav.
-const SORT_KEYS = ['document_no', 'title', 'partner_name', 'due_on', 'amount', 'remaining_amount', 'status']
 function str(value: LocationQuery[string]): string {
   return typeof value === 'string' ? value : ''
 }
@@ -90,8 +149,6 @@ function readQuery(q: LocationQuery) {
   search.value = str(q.q)
   dueFrom.value = /^\d{4}-\d{2}-\d{2}$/.test(str(q.from)) ? str(q.from) : ''
   dueTo.value = /^\d{4}-\d{2}-\d{2}$/.test(str(q.to)) ? str(q.to) : ''
-  const qSort = str(q.sort)
-  sort.value = SORT_KEYS.includes(qSort) ? { key: qSort, dir: str(q.dir) === 'asc' ? 'asc' : 'desc' } : null
 }
 function buildQuery(): Record<string, string> {
   const q: Record<string, string> = {}
@@ -102,9 +159,11 @@ function buildQuery(): Record<string, string> {
   if (search.value.trim()) q.q = search.value.trim()
   if (dueFrom.value) q.from = dueFrom.value
   if (dueTo.value) q.to = dueTo.value
-  if (sort.value) { q.sort = sort.value.key; q.dir = sort.value.dir }
-  if (showKinds.value) q.kinds = '1'
   return q
+}
+/** Adresa = filtry + otevřený číselník druhů; uložený pohled nese jen filtry. */
+function urlQuery(): Record<string, string> {
+  return showKinds.value ? { ...buildQuery(), kinds: '1' } : buildQuery()
 }
 let applyingQuery = false
 /**
@@ -116,8 +175,10 @@ function stringQuery(query: LocationQuery): string {
   return JSON.stringify(Object.fromEntries(Object.entries(query).filter(([, value]) => typeof value === 'string')))
 }
 function syncUrl() {
-  if (applyingQuery) return
-  const next = buildQuery()
+  if (!applyingQuery) writeUrl()
+}
+function writeUrl() {
+  const next = urlQuery()
   const target = ownQueries.length ? ownQueries[ownQueries.length - 1] : stringQuery(route.query)
   if (JSON.stringify(next) === target) return
   const key = JSON.stringify(next)
@@ -132,11 +193,6 @@ function syncUrl() {
 function closeKinds() {
   showKinds.value = false
   syncUrl()
-}
-
-function toggleSort(key: string) {
-  sort.value = sort.value?.key !== key ? { key, dir: 'desc' }
-    : sort.value.dir === 'desc' ? { key, dir: 'asc' } : null
 }
 
 function onListScroll(event: Event) {
@@ -229,10 +285,13 @@ function detailRoute(item: OtherItem) {
 }
 
 // Detail si pamatuje výběr seznamu: „Zpět“ vrátí stejné filtry a šipky listují v něm (vzor přijatých faktur).
-const supplierStore = useSupplierStore()
 // Parametry a adresa posledního ÚSPĚŠNÉHO načtení: řádky na obrazovce pocházejí z něj, ne z filtru,
 // který se právě načítá (vzor loadedParams přijatých faktur).
 let loadedParams: Record<string, unknown> = {}
+/** Adresa výpisu s filtry, které se právě načítají; URL se zapisuje asynchronně a číselník druhů se nepamatuje. */
+function listPath(): string {
+  return router.resolve({ path: route.path, query: buildQuery() }).fullPath
+}
 let loadedPath = route.fullPath
 const listNav = useListNavigationSource('other-items', () => ({
   ids: visibleItems.value.map(item => Number(item.source_id)), page: page.value, pages: pages.value, params: loadedParams,
@@ -284,7 +343,7 @@ async function load(append = false) {
   }
   const nextPage = append ? page.value + 1 : 1
   const { page: _page, ...requestedParams } = listParams(1)
-  const requestedPath = route.fullPath
+  const requestedPath = listPath()
   try {
     const result = await otherItemsApi.list(listParams(nextPage))
     if (request !== loadRequest) return
@@ -328,6 +387,9 @@ async function refreshLoadedPages() {
     const loaded = Math.min(REFRESH_PAGE_LIMIT, Math.max(1, page.value))
     const results = await Promise.all(Array.from({ length: loaded }, (_, index) => otherItemsApi.list(listParams(index + 1, perPage.value))))
     if (request !== loadRequest) return
+    const { page: _page, ...refreshedParams } = listParams(1)
+    loadedParams = refreshedParams
+    loadedPath = listPath()
     page.value = loaded
     items.value = results.flatMap(result => result.items)
     sources.value = results[0].sources || []
@@ -368,7 +430,7 @@ async function removeItem(item: OtherItem) {
 watch(side, () => {
   if (side.value && kindFilter.value && !kindFilter.value.startsWith(`${side.value}|`)) kindFilter.value = ''
 })
-watch([side, status, kindFilter, dueFrom, dueTo, sort], () => { if (!applyingQuery) reloadFirstPage() })
+watch([side, status, kindFilter, dueFrom, dueTo], () => { if (!applyingQuery) reloadFirstPage() })
 // Zdroj filtruje jen zobrazení načtených dat, nový dotaz nepotřebuje.
 watch(source, () => syncUrl())
 watch(search, () => {
@@ -385,7 +447,7 @@ watch(() => route.query, query => {
   const current = stringQuery(query)
   const own = ownQueries.indexOf(current)
   if (own !== -1) { ownQueries.splice(0, own + 1); return }
-  if (current === JSON.stringify(buildQuery())) return
+  if (current === JSON.stringify(urlQuery())) return
   applyQuery(query)
 })
 function applyQuery(query: LocationQuery) {
@@ -409,7 +471,40 @@ function onKindsChanged() {
   void loadKinds()
   reloadFirstPage()
 }
-onMounted(() => { applyQuery(route.query); void loadKinds() })
+
+// ─── Uložené pohledy (vzor přijatých faktur) ───
+function applyQueryToPage(query: Record<string, string>) {
+  applyQuery(query)
+  writeUrl()
+}
+const saved = useSavedFilters('other_items', { getQuery: buildQuery, applyQuery: applyQueryToPage })
+const VIEW_DOT_CLASS: Record<SavedFilterTone, string> = {
+  danger: 'bg-danger-500',
+  warning: 'bg-warning-500',
+  success: 'bg-success-500',
+  neutral: 'bg-neutral-300',
+}
+function viewDotClass(filter: SavedFilter): string {
+  return VIEW_DOT_CLASS[savedFilterTone(filter.payload)]
+}
+function onViewClick(filter: SavedFilter) {
+  if (saved.activeId.value === filter.id) saved.clearActive()
+  else saved.apply(filter)
+}
+
+// ─── Klávesnice: j/k pohyb, Enter otevře (vzor přijatých faktur) ───
+const { activeIndex } = useListKeyboard({
+  count: () => visibleItems.value.length,
+  open: index => { const item = visibleItems.value[index]; if (item) openDetail(item) },
+})
+
+onMounted(async () => {
+  void loadKinds()
+  // Řazení je v předvolbách: první načtení počká na ně, jinak by šlo dvakrát.
+  await ensurePrefsLoaded()
+  if (Object.keys(route.query).length === 0 && await saved.applyDefaultIfAny()) return
+  applyQuery(route.query)
+})
 </script>
 
 <template>
@@ -417,12 +512,37 @@ onMounted(() => { applyQuery(route.query); void loadKinds() })
     <div class="mb-4 flex flex-wrap items-start justify-between gap-3">
       <div>
         <h1 class="text-2xl font-semibold">{{ t('other_items.title') }}</h1>
-        <p class="mt-0.5 text-sm text-neutral-500">{{ t('other_items.subtitle') }}</p>
+        <p class="mt-0.5 text-sm text-neutral-500" data-test="other-items-summary">
+          <span class="max-md:hidden">{{ t('other_items.subtitle') }}</span>
+          <template v-if="!loading && total > 0 && source !== 'payroll' && source !== 'tax'">
+            <span class="whitespace-nowrap md:ml-2"><span class="max-md:hidden">· </span>{{ t('other_items.summary_count', total) }}</span>
+            <span v-if="items.length < total" class="ml-2 whitespace-nowrap">· {{ t('common.loaded_count', { loaded: items.length, total }) }}</span>
+          </template>
+        </p>
       </div>
       <ActionBar :actions="actions" />
     </div>
 
-    <FilterBar :active-count="activeFilterCount" collapsible :chips="filterChips" @clear="clearFilter" @clear-all="clearFilters">
+    <!-- Řádek pohledů: uložené filtry jako záložky (vzor přijatých faktur); bez pohledu se nekreslí. -->
+    <div v-if="saved.filters.value.length" role="tablist" :aria-label="t('common.saved_views')"
+      class="mb-3 flex items-center gap-1.5 overflow-x-auto pb-1" data-test="saved-views">
+      <button type="button" role="tab" :aria-selected="saved.activeId.value === null"
+        class="inline-flex h-8 shrink-0 cursor-pointer items-center rounded-full border px-3 text-sm transition-colors"
+        :class="saved.activeId.value === null ? 'border-primary-300 bg-primary-50 font-medium text-primary-700' : 'border-neutral-200 text-neutral-600 hover:bg-neutral-50'"
+        @click="saved.clearActive()">{{ t('common.saved_view_all') }}</button>
+      <button v-for="filter in saved.filters.value" :key="filter.id" type="button" role="tab"
+        :aria-selected="saved.activeId.value === filter.id"
+        :title="saved.activeId.value === filter.id ? t('common.saved_view_clear') : filter.name"
+        class="inline-flex h-8 max-w-56 shrink-0 cursor-pointer items-center gap-1.5 rounded-full border px-3 text-sm transition-colors"
+        :class="saved.activeId.value === filter.id ? 'border-primary-300 bg-primary-50 font-medium text-primary-700' : 'border-neutral-200 text-neutral-600 hover:bg-neutral-50'"
+        @click="onViewClick(filter)">
+        <span class="h-1.5 w-1.5 shrink-0 rounded-full" :class="viewDotClass(filter)" aria-hidden="true"></span>
+        <span class="truncate">{{ filter.name }}</span>
+      </button>
+    </div>
+
+    <!-- Bez `collapsible`: šest filtrů se na desktopu vejde do lišty, na telefonu jsou za tlačítkem Filtry. -->
+    <FilterBar :active-count="activeFilterCount" :chips="filterChips" @clear="clearFilter" @clear-all="clearFilters">
       <template #primary>
         <div class="relative min-w-56 flex-1">
           <svg class="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-neutral-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
@@ -465,6 +585,12 @@ onMounted(() => { applyQuery(route.query); void loadKinds() })
         <span class="whitespace-nowrap">{{ t('other_items.due_to') }}</span>
         <DateInput v-model="dueTo" class="h-9 w-40 rounded-md border border-neutral-300 px-2 text-sm" />
       </label>
+      <template #actions>
+        <SavedFiltersMenu :ctrl="saved" />
+        <!-- Karty na telefonu mají pevný obsah, sloupce ani hustota je nemění. -->
+        <ColumnPicker class="hidden md:block" :ctrl="tbl" reorderable />
+        <DensityToggle class="hidden md:block" :ctrl="tbl" />
+      </template>
     </FilterBar>
 
     <div v-if="loading && !items.length && !sources.length" class="overflow-hidden rounded-lg border border-neutral-200 bg-surface shadow-sm">
@@ -494,62 +620,102 @@ onMounted(() => { applyQuery(route.query); void loadKinds() })
           </div>
         </header>
         <EmptyState v-if="!visibleItems.length" boxed dense accent="neutral" icon="doc" :title="t('other_items.no_manual')" />
-        <div v-if="visibleItems.length" ref="listBox" class="hidden overflow-auto scrollbar-slim rounded-lg border border-neutral-200 bg-surface shadow-sm lg:block" @scroll.passive="onListScroll">
-          <table class="w-full text-sm table-sticky-first">
+        <div v-if="visibleItems.length" ref="listBox" class="hidden overflow-auto scrollbar-slim rounded-lg border border-neutral-200 bg-surface md:block" @scroll.passive="onListScroll">
+          <table v-column-labels="tbl" class="w-max min-w-full text-sm table-sticky-first singleline-list-table list-stacked-controls" :class="tbl.densityClass.value">
             <thead class="sticky top-0 z-20 bg-neutral-50 text-xs uppercase tracking-wide text-neutral-500 shadow-sm">
               <tr>
-                <SortableTh :label="t('other_items.document_no')" sort-key="document_no" :sort="sort" @toggle="toggleSort" />
-                <SortableTh :label="t('other_items.item')" sort-key="title" :sort="sort" @toggle="toggleSort" />
-                <SortableTh :label="t('other_items.partner')" sort-key="partner_name" :sort="sort" @toggle="toggleSort" />
-                <SortableTh :label="t('other_items.due_on')" sort-key="due_on" :sort="sort" @toggle="toggleSort" />
-                <SortableTh :label="t('other_items.amount')" sort-key="amount" :sort="sort" align="right" @toggle="toggleSort" />
-                <SortableTh :label="t('other_items.remaining')" sort-key="remaining_amount" :sort="sort" align="right" @toggle="toggleSort" />
-                <SortableTh :label="t('other_items.status_label')" sort-key="status" :sort="sort" @toggle="toggleSort" />
-                <th class="w-12 px-3 py-2"><span class="sr-only">{{ t('common.actions') }}</span></th>
+                <th class="w-8 px-2 py-2"><span class="sr-only">{{ t('workspace.drag_row') }}</span></th>
+                <template v-for="column in visibleColumns" :key="column.key">
+                  <SortableTh v-if="SORTABLE.includes(column.key)" v-bind="columnDrag.headerAttrs(column.key)" reorderable
+                    :label="t(column.labelKey)" :sort-key="column.key" :sort="sort"
+                    :align="RIGHT_ALIGNED.includes(column.key) ? 'right' : 'left'" @toggle="onSortToggle" />
+                  <th v-else scope="col" v-bind="columnDrag.headerAttrs(column.key)"
+                    class="py-2 text-xs font-medium uppercase tracking-wide text-neutral-500"
+                    :class="RIGHT_ALIGNED.includes(column.key) ? 'px-3 text-right' : column.key === 'posting' ? 'px-2 text-center' : 'px-3 text-left'"><ColumnDragHandle /> {{ t(column.labelKey) }}</th>
+                </template>
+                <th class="w-8 px-1 py-2 text-right">
+                  <button v-if="sort" type="button" data-test="reset-sort" class="inline-flex h-6 w-6 items-center justify-center rounded text-neutral-500 hover:bg-neutral-200 hover:text-neutral-800"
+                    :title="t('common.reset_sort')" :aria-label="t('common.reset_sort')" @click.stop="clearSort">×</button>
+                  <span v-else class="sr-only">{{ t('common.actions') }}</span>
+                </th>
               </tr>
             </thead>
             <tbody class="divide-y divide-neutral-100">
-              <tr v-for="item in visibleItems" :key="item.id" class="cursor-pointer hover:bg-neutral-50" :class="{ 'row-flagged': isOtherItemOverdue(item) }"
+              <tr v-for="(item, index) in visibleItems" :key="item.id" draggable="true" :data-workspace-route="`/other-items/${item.source_id}`"
+                class="cursor-pointer transition hover:bg-neutral-50" :class="{ 'row-flagged': isOtherItemOverdue(item) }"
+                :data-row-active="index === activeIndex"
                 data-test="other-item-row" @click="openDetail(item, $event)" @auxclick.prevent="openDetail(item, $event)">
-                <td class="whitespace-nowrap px-3 py-2.5 font-mono text-xs">
-                  <RouterLink class="row-link" :to="detailRoute(item)" @click.stop="listNav.markOpen(Number(item.source_id))" @auxclick.stop="listNav.markOpen(Number(item.source_id))">{{ item.document_no || t('other_items.status.draft') }}</RouterLink>
-                </td>
-                <td class="px-3 py-2.5">
-                  <span class="font-medium text-neutral-900">{{ item.title }}</span>
-                  <div class="mt-0.5 text-xs text-neutral-500">
-                    {{ t(`other_items.side.${item.side}`) }} · {{ otherItemKindLabel(t, item) }}<span v-if="item.document_count" data-test="document-count"> · {{ t('other_items.document_count', item.document_count) }}</span>
-                  </div>
-                </td>
-                <td class="px-3 py-2.5">{{ item.partner_name || t('other_items.no_partner') }}</td>
-                <td class="whitespace-nowrap px-3 py-2.5" :class="isOtherItemOverdue(item) ? 'font-medium text-danger-500' : ''">{{ item.due_on ? formatDate(item.due_on) : '–' }}</td>
-                <td class="whitespace-nowrap px-3 py-2.5 text-right tabular-nums">{{ formatMoney(item.amount, item.currency) }}</td>
-                <td class="whitespace-nowrap px-3 py-2.5 text-right font-semibold tabular-nums">{{ formatMoney(item.remaining_amount, item.currency) }}</td>
-                <td class="px-3 py-2.5"><span class="text-xs" :class="otherItemStatusClass(otherItemDisplayStatus(item))" data-test="status-badge">{{ statusLabel(otherItemDisplayStatus(item)) }}</span></td>
-                <td class="px-3 py-2.5 text-right" @click.stop>
+                <td class="px-2 py-2.5 text-center" @click.stop><WorkspaceDragHandle /></td>
+                <template v-for="column in visibleColumns" :key="column.key">
+                  <td v-if="column.key === 'document_no'" class="whitespace-nowrap px-3 py-2.5 font-mono text-xs">
+                    <RouterLink class="row-link" :to="detailRoute(item)" @click.stop="listNav.markOpen(Number(item.source_id))" @auxclick.stop="listNav.markOpen(Number(item.source_id))">
+                      <span v-if="item.document_no">{{ item.document_no }}</span>
+                      <span v-else class="text-neutral-400">{{ t('other_items.status.draft') }}</span>
+                    </RouterLink>
+                  </td>
+                  <td v-else-if="column.key === 'title'" class="px-3 py-2.5">
+                    <div class="max-w-[13rem] truncate font-medium text-neutral-900" :title="item.title">{{ item.title }}</div>
+                  </td>
+                  <td v-else-if="column.key === 'side'" class="whitespace-nowrap px-3 py-2.5 text-xs">{{ t(`other_items.side.${item.side}`) }}</td>
+                  <td v-else-if="column.key === 'kind'" class="px-3 py-2.5 text-xs"><span class="inline-block max-w-32 truncate align-middle" :title="kindLabel(item)" data-test="kind-cell">{{ kindLabel(item) }}</span></td>
+                  <td v-else-if="column.key === 'partner_name'" class="px-3 py-2.5">
+                    <div class="max-w-[10rem] truncate" :class="item.partner_name ? '' : 'text-neutral-400'" :title="item.partner_name || undefined">{{ item.partner_name || t('other_items.no_partner') }}</div>
+                  </td>
+                  <td v-else-if="column.key === 'issued_on'" class="whitespace-nowrap px-3 py-2.5 text-center text-xs text-neutral-600">{{ item.issued_on ? formatDate(item.issued_on) : '—' }}</td>
+                  <td v-else-if="column.key === 'accounting_on'" class="whitespace-nowrap px-3 py-2.5 text-center text-xs text-neutral-600">{{ item.accounting_on ? formatDate(item.accounting_on) : '—' }}</td>
+                  <td v-else-if="column.key === 'due_on'" class="whitespace-nowrap px-3 py-2.5 text-center text-xs" :class="isOtherItemOverdue(item) ? 'font-medium text-danger-500' : 'text-neutral-600'">{{ item.due_on ? formatDate(item.due_on) : '—' }}</td>
+                  <td v-else-if="column.key === 'amount'" class="whitespace-nowrap px-3 py-2.5 text-right font-mono font-semibold text-neutral-900">{{ formatMoney(item.amount, item.currency) }}</td>
+                  <td v-else-if="column.key === 'paid_amount'" class="whitespace-nowrap px-3 py-2.5 text-right font-mono text-xs">{{ formatMoney(item.paid_amount, item.currency) }}</td>
+                  <td v-else-if="column.key === 'remaining_amount'" class="whitespace-nowrap px-3 py-2.5 text-right font-mono text-xs"
+                    :class="Number(item.remaining_amount) > 0 ? 'text-neutral-900' : 'text-neutral-400'">{{ formatMoney(item.remaining_amount, item.currency) }}</td>
+                  <td v-else-if="column.key === 'status'" class="whitespace-nowrap px-3 py-2.5 text-center"><span class="rounded px-2 py-0.5 text-xs" :class="otherItemStatusClass(otherItemDisplayStatus(item))" data-test="status-badge">{{ statusLabel(otherItemDisplayStatus(item)) }}</span></td>
+                  <td v-else-if="column.key === 'variable_symbol'" class="whitespace-nowrap px-3 py-2.5 font-mono text-xs"><span v-if="item.variable_symbol">{{ item.variable_symbol }}</span><span v-else class="text-neutral-300">—</span></td>
+                  <td v-else-if="column.key === 'documents'" class="whitespace-nowrap px-3 py-2.5 text-xs" data-test="document-count"><span v-if="item.document_count">{{ t('other_items.document_count', item.document_count) }}</span><span v-else class="text-neutral-300">—</span></td>
+                  <td v-else-if="column.key === 'note'" class="px-3 py-2.5 text-xs" :title="item.note || undefined"><span v-if="item.note" class="inline-block max-w-64 truncate align-middle">{{ item.note }}</span><span v-else class="text-neutral-300">—</span></td>
+                  <td v-else-if="column.key === 'posting'" class="px-2 py-2.5 text-center">
+                    <PostingBadge v-if="showsPostingBadge(item)" :booked-at="item.posted_at ?? item.accounting_on" :journal-entry-id="Number(item.journal_entry_id)" data-test="posting-badge" />
+                  </td>
+                </template>
+                <td class="px-1 py-2.5 text-right" @click.stop>
                   <RowActionsMenu v-if="rowActions(item).some(action => action.show)" :actions="rowActions(item)" :inline-count="0" :menu-label="t('common.actions')" />
                 </td>
               </tr>
             </tbody>
           </table>
         </div>
-        <div v-if="visibleItems.length" class="space-y-2 lg:hidden">
-          <div v-for="item in visibleItems" :key="item.id" class="rounded-lg border border-neutral-200 bg-surface p-3 shadow-sm"
-            :class="{ 'border-l-2 border-l-danger-500': isOtherItemOverdue(item) }" data-test="other-item-card">
-            <div class="flex flex-wrap items-start justify-between gap-2">
-              <div class="min-w-0">
-                <RouterLink :to="detailRoute(item)" class="font-semibold text-primary-700" data-test="other-item-card-link" @click="listNav.markOpen(Number(item.source_id))" @auxclick="listNav.markOpen(Number(item.source_id))">{{ item.title }}</RouterLink>
-                <div class="text-xs text-neutral-500"><span v-if="item.document_no" class="font-mono">{{ item.document_no }} · </span>{{ t(`other_items.side.${item.side}`) }} · {{ otherItemKindLabel(t, item) }}</div>
-              </div>
-              <div class="flex items-center gap-1">
-                <span class="text-xs" :class="otherItemStatusClass(otherItemDisplayStatus(item))">{{ statusLabel(otherItemDisplayStatus(item)) }}</span>
-                <RowActionsMenu v-if="rowActions(item).some(action => action.show)" :actions="rowActions(item)" :inline-count="0" :menu-label="t('common.actions')" />
-              </div>
+        <!-- Telefon: karty v jednom boxu jako u přijatých faktur, ťuknutí kamkoli otevře detail. -->
+        <div v-if="visibleItems.length" class="divide-y divide-neutral-100 rounded-lg border border-neutral-200 bg-surface md:hidden">
+          <div v-for="item in visibleItems" :key="item.id" draggable="true" :data-workspace-route="`/other-items/${item.source_id}`"
+            class="cursor-pointer px-3 py-3 transition hover:bg-neutral-50" :class="{ 'row-flagged': isOtherItemOverdue(item) }"
+            data-test="other-item-card" @click="openDetail(item, $event)" @auxclick.prevent="openDetail(item, $event)">
+            <div class="flex items-baseline justify-between gap-2">
+              <div class="min-w-0 truncate font-medium text-neutral-900 max-md:line-clamp-2 max-md:whitespace-normal max-md:break-words">{{ item.title }}</div>
+              <div class="whitespace-nowrap font-mono text-sm">{{ formatMoney(item.amount, item.currency) }}</div>
             </div>
-            <div class="mt-3 flex flex-wrap justify-between gap-2 text-sm">
-              <span>{{ item.partner_name || t('other_items.no_partner') }}</span>
-              <span :class="isOtherItemOverdue(item) ? 'font-medium text-danger-500' : ''">{{ item.due_on ? formatDate(item.due_on) : '–' }}</span>
+            <div class="mt-1 flex items-baseline justify-between gap-2 text-xs text-neutral-500">
+              <div class="min-w-0 truncate font-mono">
+                <RouterLink class="row-link" :to="detailRoute(item)" data-test="other-item-card-link" @click.stop="listNav.markOpen(Number(item.source_id))" @auxclick.stop="listNav.markOpen(Number(item.source_id))">
+                  <span v-if="item.document_no">{{ item.document_no }}</span>
+                  <span v-else class="text-neutral-400">{{ t('other_items.status.draft') }}</span>
+                </RouterLink>
+                <span class="text-neutral-400"> · </span><span class="font-sans" data-test="card-kind">{{ kindLabel(item) }}</span>
+              </div>
+              <span class="inline-flex items-center gap-1">
+                <PostingBadge v-if="showsPostingBadge(item)" :booked-at="item.posted_at ?? item.accounting_on" :journal-entry-id="Number(item.journal_entry_id)" />
+                <span class="rounded px-1.5 py-0.5 text-xs" :class="otherItemStatusClass(otherItemDisplayStatus(item))">{{ statusLabel(otherItemDisplayStatus(item)) }}</span>
+                <span v-if="rowActions(item).some(action => action.show)" @click.stop>
+                  <RowActionsMenu :actions="rowActions(item)" :inline-count="0" :menu-label="t('common.actions')" />
+                </span>
+              </span>
             </div>
-            <div class="mt-2 flex flex-wrap justify-between gap-2 border-t border-neutral-100 pt-2 text-sm"><span>{{ t('other_items.remaining') }}</span><strong class="tabular-nums">{{ formatMoney(item.remaining_amount, item.currency) }}</strong></div>
+            <div class="mt-1 flex items-center justify-between gap-2 text-xs text-neutral-500">
+              <span class="min-w-0 truncate" :class="item.partner_name ? '' : 'text-neutral-400'">{{ item.partner_name || t('other_items.no_partner') }}</span>
+              <span class="whitespace-nowrap" :class="isOtherItemOverdue(item) ? 'font-medium text-danger-500' : ''">{{ t('other_items.due_on') }}: {{ item.due_on ? formatDate(item.due_on) : '—' }}</span>
+            </div>
+            <div v-if="Number(item.paid_amount) > 0.005 && Number(item.remaining_amount) > 0.005" class="mt-1 flex flex-wrap items-center justify-between gap-x-2 gap-y-1 text-xs">
+              <span class="text-neutral-500">{{ t('other_items.paid_amount') }}: <span class="font-mono text-neutral-700">{{ formatMoney(item.paid_amount, item.currency) }}</span></span>
+              <span class="text-neutral-900">{{ t('other_items.remaining') }}: <span class="font-mono">{{ formatMoney(item.remaining_amount, item.currency) }}</span></span>
+            </div>
           </div>
         </div>
         <div v-if="visibleItems.length && page < pages" ref="loadMoreTarget" class="flex flex-wrap items-center justify-center gap-3 text-sm pointer-fine-hidden">

@@ -535,7 +535,10 @@
       "amount_positive": "Enter a positive amount.",
       "form_invalid": "The item cannot be saved, fix the highlighted fields.",
       "variable_symbol_digits": "The variable symbol may contain digits only."
-    }
+    },
+    "summary_count": "no manual items | 1 manual item | {count} manual items",
+    "col_documents": "Documents",
+    "col_posting": "Entry"
   },
   "internal_documents": {
     "title": "Internal documents",

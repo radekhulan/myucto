@@ -1,5 +1,5 @@
 import { flushPromises, shallowMount } from '@vue/test-utils'
-import { reactive } from 'vue'
+import { reactive, ref } from 'vue'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const m = vi.hoisted(() => ({
@@ -14,6 +14,15 @@ const m = vi.hoisted(() => ({
   refresh: null as null | (() => Promise<unknown>),
   route: null as any,
   navSnapshot: null as any,
+  prefs: null as any,
+  canReadAccounting: true,
+  mode: 'double_entry',
+  savedFilters: [] as Array<{ id: number; name: string; payload: Record<string, string> }>,
+  savedActive: null as number | null,
+  defaultQuery: null as Record<string, string> | null,
+  applySaved: null as null | ((query: Record<string, string>) => void),
+  savedQuery: null as null | (() => Record<string, string>),
+  keyboard: null as null | { count: () => number; open: (index: number) => void },
 }))
 
 vi.mock('@/api/otherItems', () => ({
@@ -21,7 +30,38 @@ vi.mock('@/api/otherItems', () => ({
   otherItemKindsApi: { list: m.listKinds },
 }))
 vi.mock('@/stores/auth', () => ({
-  useAuthStore: () => ({ canWrite: m.canWrite, canRead: () => true }),
+  useAuthStore: () => ({ canWrite: m.canWrite, canRead: (module: string) => module !== 'accounting' || m.canReadAccounting }),
+}))
+// Předvolby tabulky (sloupce, pořadí, hustota, řazení) žijí v uživatelských předvolbách jako u faktur.
+vi.mock('@/composables/useUserPrefs', () => ({
+  ensurePrefsLoaded: () => Promise.resolve(),
+  getPagePrefs: () => m.prefs,
+  patchPagePrefs: (_page: string, patch: Record<string, unknown>) => { m.prefs.value = { ...m.prefs.value, ...patch } },
+}))
+vi.mock('@/composables/useSavedFilters', () => ({
+  useSavedFilters: (page: string, opts: { getQuery: () => Record<string, string>; applyQuery: (query: Record<string, string>) => void }) => {
+    expect(page).toBe('other_items')
+    m.applySaved = opts.applyQuery
+    m.savedQuery = opts.getQuery
+    return {
+      activeId: { get value() { return m.savedActive } },
+      filters: { get value() { return m.savedFilters } },
+      apply: (filter: { payload: Record<string, string> }) => opts.applyQuery({ ...filter.payload }),
+      clearActive: () => opts.applyQuery({}),
+      applyDefaultIfAny: async () => {
+        if (!m.defaultQuery) return false
+        opts.applyQuery(m.defaultQuery)
+        return true
+      },
+    }
+  },
+  savedFilterTone: () => 'neutral',
+}))
+vi.mock('@/composables/useListKeyboard', () => ({
+  useListKeyboard: (options: { count: () => number; open: (index: number) => void }) => {
+    m.keyboard = options
+    return { activeIndex: ref(-1) }
+  },
 }))
 vi.mock('@/api/otherItemSettings', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/api/otherItemSettings')>()),
@@ -36,7 +76,7 @@ vi.mock('@/composables/useFormat', () => ({
   statusBadgeClass: (status: string) => `badge badge-${status}`,
 }))
 vi.mock('@/composables/useRowLink', () => ({ useRowLink: () => m.navigate }))
-vi.mock('@/stores/supplier', () => ({ useSupplierStore: () => ({ currentSupplierId: 1 }) }))
+vi.mock('@/stores/supplier', () => ({ useSupplierStore: () => ({ currentSupplierId: 1, currentSupplier: { accounting_mode: m.mode } }) }))
 vi.mock('@/composables/useListNavigation', () => ({
   useListNavigationSource: (_kind: string, snapshot: () => unknown, listPath: () => string) => ({
     markOpen: (id: number) => { m.navSnapshot = { id, snapshot: snapshot(), listPath: listPath() } },
@@ -47,7 +87,13 @@ vi.mock('@/composables/useWindowRefresh', () => ({
 }))
 vi.mock('vue-router', () => ({
   useRoute: () => m.route,
-  useRouter: () => ({ replace: m.replace }),
+  useRouter: () => ({
+    replace: m.replace,
+    resolve: ({ path, query }: { path?: string; query: Record<string, string> }) => {
+      const search = new URLSearchParams(query).toString()
+      return { fullPath: `${path ?? '/other-items'}${search ? `?${search}` : ''}` }
+    },
+  }),
   RouterLink: { template: '<a><slot /></a>' },
 }))
 vi.mock('vue-i18n', () => ({
@@ -59,10 +105,11 @@ vi.mock('vue-i18n', () => ({
 import OtherItems from '../OtherItems.vue'
 import SortableTh from '@/components/ui/SortableTh.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
+import PostingBadge from '@/components/ui/PostingBadge.vue'
 
 const stubs = {
   RouterLink: { template: '<a><slot /></a>' },
-  FilterBar: { template: '<div><slot name="primary" /><slot /><slot name="actions" /></div>' },
+  FilterBar: { name: 'FilterBar', props: { activeCount: Number, collapsible: Boolean, chips: Array }, template: '<div><slot name="primary" /><slot /><slot name="actions" /></div>' },
   RowActionsMenu: {
     props: ['actions'],
     template: '<div><button v-for="a in actions.filter(x => x.show)" :key="a.key" type="button" @click="a.run && a.run()">{{ a.label }}</button></div>',
@@ -80,8 +127,18 @@ function item(status: 'draft' | 'posted', changes: Record<string, unknown> = {})
 
 function mountList(query: Record<string, string> = {}) {
   m.route = reactive({ name: 'other-items', query })
-  return shallowMount(OtherItems, { global: { stubs } })
+  return shallowMount(OtherItems, { global: { stubs, directives: { 'column-labels': {} } } })
 }
+
+// Platí pro všechny bloky: předvolby a uložené pohledy začínají prázdné.
+beforeEach(() => {
+  m.prefs = ref({})
+  m.canReadAccounting = true
+  m.mode = 'double_entry'
+  m.savedFilters = []
+  m.savedActive = null
+  m.defaultQuery = null
+})
 
 describe('OtherItems', () => {
   beforeEach(() => {
@@ -132,7 +189,7 @@ describe('OtherItems', () => {
 
     const badges = wrapper.findAll('[data-test="status-badge"]')
     expect(badges.map(badge => badge.text())).toEqual(['S:paid', 'S:partial', 'S:draft'])
-    expect(badges.map(badge => badge.classes().join(' '))).toEqual(['text-xs badge badge-paid', 'text-xs badge badge-partially_paid', 'text-xs badge badge-draft'])
+    expect(badges.map(badge => badge.classes().join(' '))).toEqual(['rounded px-2 py-0.5 text-xs badge badge-paid', 'rounded px-2 py-0.5 text-xs badge badge-partially_paid', 'rounded px-2 py-0.5 text-xs badge badge-draft'])
   })
 
   it('zvýrazní jen otevřenou položku po splatnosti a počet dokumentů skloňuje přes překlad', async () => {
@@ -141,6 +198,7 @@ describe('OtherItems', () => {
       item('posted', { id: 'manual:2', due_on: '2000-01-01', remaining_amount: 0, paid_amount: 1200 }),
       item('draft', { id: 'manual:3', due_on: '2000-01-01' }),
     ], sources: [], total: 3, per_page: 50 })
+    m.prefs.value = { shown: ['documents'] }
     const wrapper = mountList()
     await flushPromises()
 
@@ -167,9 +225,10 @@ describe('OtherItems', () => {
     expect(totals).toContain('700 CZK')
   })
 
-  it('načte filtry a řazení z URL a změnu filtru do URL zapíše', async () => {
+  it('načte filtry z URL a řazení z předvoleb, změnu filtru zapíše do URL bez řazení', async () => {
     m.list.mockResolvedValue({ items: [item('posted')], sources: [], total: 1, per_page: 50 })
-    const wrapper = mountList({ side: 'receivable', status: 'all', q: 'nájem', sort: 'amount', dir: 'asc', from: '2099-01-01' })
+    m.prefs.value = { sort: { key: 'amount', dir: 'asc' } }
+    const wrapper = mountList({ side: 'receivable', status: 'all', q: 'nájem', from: '2099-01-01' })
     await flushPromises()
 
     expect(m.list).toHaveBeenCalledTimes(1)
@@ -180,8 +239,8 @@ describe('OtherItems', () => {
 
     await wrapper.find('[data-test="filter-status"]').setValue('open')
     await flushPromises()
-    expect(m.replace).toHaveBeenLastCalledWith({ query: { side: 'receivable', q: 'nájem', from: '2099-01-01', sort: 'amount', dir: 'asc' } })
-    expect(m.list).toHaveBeenLastCalledWith(expect.objectContaining({ status: 'open' }))
+    expect(m.replace).toHaveBeenLastCalledWith({ query: { side: 'receivable', q: 'nájem', from: '2099-01-01' } })
+    expect(m.list).toHaveBeenLastCalledWith(expect.objectContaining({ status: 'open', sort_by: 'amount' }))
   })
 
   it('prázdné query (klik v menu) vrátí výchozí filtry', async () => {
@@ -484,7 +543,7 @@ describe('OtherItems výběr pro listování', () => {
     m.list.mockImplementationOnce(() => new Promise(() => undefined))
     wrapper.findAllComponents(SortableTh).find(th => th.props('sortKey') === 'amount')!.vm.$emit('toggle', 'amount')
     await flushPromises()
-    m.route.fullPath = '/other-items?sort=amount&dir=desc'
+    m.route.fullPath = '/other-items?side=payable'
     await wrapper.findAll('[data-test="other-item-row"]')[0]!.trigger('click')
     expect(m.navSnapshot.snapshot.params).not.toHaveProperty('sort_by')
     expect(m.navSnapshot.listPath).toBe('/other-items')
@@ -497,5 +556,242 @@ describe('OtherItems výběr pro listování', () => {
     m.navSnapshot = null
     await wrapper.get('[data-test="other-item-card-link"]').trigger('auxclick')
     expect(m.navSnapshot.id).toBe(42)
+  })
+})
+
+describe('OtherItems prvky seznamu jako přijaté faktury', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    m.canWrite.mockReturnValue(true)
+    m.listKinds.mockResolvedValue([])
+    m.replace.mockImplementation(({ query }: { query: Record<string, string> }) => { m.route.query = query })
+  })
+
+  it('filtry nejsou sbalené a lišta nabízí uložené pohledy, sloupce a hustotu', async () => {
+    m.list.mockResolvedValue({ items: [item('posted')], sources: [], total: 1, per_page: 50 })
+    const wrapper = mountList()
+    await flushPromises()
+
+    expect(wrapper.findComponent({ name: 'FilterBar' }).props('collapsible')).toBeFalsy()
+    expect(wrapper.findComponent({ name: 'SavedFiltersMenu' }).exists()).toBe(true)
+    expect(wrapper.findComponent({ name: 'ColumnPicker' }).props('reorderable')).not.toBe(false)
+    expect(wrapper.findComponent({ name: 'DensityToggle' }).exists()).toBe(true)
+    expect(wrapper.find('[data-test="other-items-summary"]').text()).toContain('other_items.summary_count:1')
+  })
+
+  it('sloupce řídí předvolby: skryté se nekreslí, zapnuté a přeřazené ano', async () => {
+    m.list.mockResolvedValue({ items: [item('posted', { variable_symbol: '20990001' })], sources: [], total: 1, per_page: 50 })
+    m.prefs.value = { hidden: ['partner_name'], shown: ['variable_symbol'], column_order: ['variable_symbol', 'document_no'] }
+    const wrapper = mountList()
+    await flushPromises()
+
+    const row = wrapper.get('[data-test="other-item-row"]')
+    expect(row.text()).toContain('20990001')
+    expect(row.text()).not.toContain('Syntetická protistrana')
+    const headers = wrapper.findAll('thead th, thead sortable-th-stub').map(th => th.attributes('label') ?? th.text())
+    expect(headers.findIndex(text => text.includes('other_items.variable_symbol')))
+      .toBeLessThan(headers.findIndex(text => text.includes('other_items.document_no')))
+  })
+
+  it('zrušení řazení vrátí výchozí pořadí a znovu načte seznam', async () => {
+    m.list.mockResolvedValue({ items: [item('posted')], sources: [], total: 1, per_page: 50 })
+    m.prefs.value = { sort: { key: 'amount', dir: 'desc' } }
+    const wrapper = mountList()
+    await flushPromises()
+    expect(m.list).toHaveBeenLastCalledWith(expect.objectContaining({ sort_by: 'amount' }))
+
+    await wrapper.get('[data-test="reset-sort"]').trigger('click')
+    await flushPromises()
+    expect(m.prefs.value.sort).toBeNull()
+    expect(m.list).toHaveBeenLastCalledWith(expect.not.objectContaining({ sort_by: expect.anything() }))
+    expect(wrapper.find('[data-test="reset-sort"]').exists()).toBe(false)
+  })
+
+  it('zaúčtovanou položku označí odkazem na zápis, jen s právem číst účetnictví', async () => {
+    m.list.mockResolvedValue({ items: [
+      item('posted', { id: 'manual:1', journal_entry_id: 77, posted_at: '2099-01-02 10:00:00' }),
+      item('draft', { id: 'manual:2' }),
+    ], sources: [], total: 2, per_page: 50 })
+    const wrapper = mountList()
+    await flushPromises()
+    const badges = wrapper.findAll('[data-test="other-item-row"]').flatMap(row => row.findAllComponents(PostingBadge))
+    expect(badges).toHaveLength(1)
+    expect(badges[0]!.props()).toMatchObject({ journalEntryId: 77, bookedAt: '2099-01-02 10:00:00' })
+
+    m.canReadAccounting = false
+    const restricted = mountList()
+    await flushPromises()
+    expect(restricted.findComponent(PostingBadge).exists()).toBe(false)
+  })
+
+  it('řádky i karty jdou přetáhnout do panelu', async () => {
+    m.list.mockResolvedValue({ items: [item('posted')], sources: [], total: 1, per_page: 50 })
+    const wrapper = mountList()
+    await flushPromises()
+    expect(wrapper.get('[data-test="other-item-row"]').attributes('data-workspace-route')).toBe('/other-items/42')
+    expect(wrapper.get('[data-test="other-item-row"]').attributes('draggable')).toBe('true')
+    expect(wrapper.get('[data-test="other-item-card"]').attributes('data-workspace-route')).toBe('/other-items/42')
+  })
+
+  it('klávesnice otevře řádek a zapamatuje výběr pro šipky v detailu', async () => {
+    m.list.mockResolvedValue({ items: [item('posted'), item('posted', { id: 'manual:43', source_id: 43 })], sources: [], total: 2, per_page: 50 })
+    mountList()
+    await flushPromises()
+    expect(m.keyboard!.count()).toBe(2)
+    m.keyboard!.open(1)
+    expect(m.navigate).toHaveBeenLastCalledWith({ name: 'other-item-detail', params: { id: 43 } }, undefined)
+    expect(m.navSnapshot.id).toBe(43)
+  })
+
+  it('bez query použije výchozí uložený pohled a načte seznam jen jednou', async () => {
+    m.list.mockResolvedValue({ items: [item('posted')], sources: [], total: 1, per_page: 50 })
+    m.defaultQuery = { side: 'payable', status: 'all' }
+    const wrapper = mountList()
+    await flushPromises()
+    expect(m.list).toHaveBeenCalledTimes(1)
+    expect(m.list).toHaveBeenLastCalledWith(expect.objectContaining({ side: 'payable', status: 'all' }))
+    expect(m.replace).toHaveBeenLastCalledWith({ query: { side: 'payable', status: 'all' } })
+    expect((wrapper.get('[data-test="filter-side"]').element as HTMLSelectElement).value).toBe('payable')
+  })
+
+  it('řádek pohledů přepne uložený pohled a druhým klikem ho zruší', async () => {
+    m.list.mockResolvedValue({ items: [item('posted')], sources: [], total: 1, per_page: 50 })
+    m.savedFilters = [{ id: 5, name: 'Závazky', payload: { side: 'payable' } }]
+    const wrapper = mountList()
+    await flushPromises()
+    const tabs = wrapper.findAll('[data-test="saved-views"] [role="tab"]')
+    expect(tabs.map(tab => tab.text())).toEqual(['common.saved_view_all', 'Závazky'])
+
+    await tabs[1]!.trigger('click')
+    await flushPromises()
+    expect(m.list).toHaveBeenLastCalledWith(expect.objectContaining({ side: 'payable' }))
+    expect(m.route.query).toEqual({ side: 'payable' })
+
+    m.savedActive = 5
+    await wrapper.findAll('[data-test="saved-views"] [role="tab"]')[1]!.trigger('click')
+    await flushPromises()
+    expect(m.list.mock.lastCall![0]).not.toHaveProperty('side')
+    expect(m.route.query).toEqual({})
+  })
+
+  it('uložený pohled nese jen filtry, ne otevřený číselník druhů', async () => {
+    m.list.mockResolvedValue({ items: [item('posted')], sources: [], total: 1, per_page: 50 })
+    mountList({ side: 'payable', kinds: '1' })
+    await flushPromises()
+    expect(m.savedQuery!()).toEqual({ side: 'payable' })
+  })
+
+  it('sloupec Zápis jen v podvojném účetnictví s právem číst účetnictví', async () => {
+    m.list.mockResolvedValue({ items: [item('posted', { journal_entry_id: 77, account_code: '325' })], sources: [], total: 1, per_page: 50 })
+    const full = mountList()
+    await flushPromises()
+    expect(full.find('thead').text()).toContain('other_items.col_posting')
+    expect(full.findAllComponents(PostingBadge)).toHaveLength(2)
+
+    m.canReadAccounting = false
+    const noRight = mountList()
+    await flushPromises()
+    expect(noRight.find('thead').text()).not.toContain('other_items.col_posting')
+    expect(noRight.findComponent(PostingBadge).exists()).toBe(false)
+
+    m.canReadAccounting = true
+    m.mode = 'tax_evidence'
+    const taxEvidence = mountList()
+    await flushPromises()
+    expect(taxEvidence.find('thead').text()).not.toContain('other_items.col_posting')
+    expect(taxEvidence.findComponent(PostingBadge).exists()).toBe(false)
+  })
+
+  it('štítek Zaúčtováno nemá stornovaná položka a vlastní druh ukáže i směr', async () => {
+    m.list.mockResolvedValue({ items: [
+      item('reversed' as 'posted', { id: 'manual:1', journal_entry_id: 77 }),
+      item('posted', { id: 'manual:2', journal_entry_id: 78, posted_at: null, accounting_on: '2099-01-05', kind: 'other', kind_id: 9, kind_name: 'Vlastní druh' }),
+    ], sources: [], total: 2, per_page: 50 })
+    const wrapper = mountList({ status: 'all' })
+    await flushPromises()
+    const rows = wrapper.findAll('[data-test="other-item-row"]')
+    expect(rows[0]!.findComponent(PostingBadge).exists()).toBe(false)
+    expect(rows[1]!.findComponent(PostingBadge).props('bookedAt')).toBe('2099-01-05')
+    expect(rows[1]!.get('[data-test="kind-cell"]').text()).toBe('other_items.side.payable · Vlastní druh')
+    expect(rows[0]!.get('[data-test="kind-cell"]').text()).toBe('other_items.kind_by_side.payable.rent')
+    expect(wrapper.findAll('[data-test="card-kind"]')[1]!.text()).toBe('other_items.side.payable · Vlastní druh')
+  })
+
+  it('podle stavu neřadí, protože výpis ukazuje odvozený stav', async () => {
+    m.list.mockResolvedValue({ items: [item('posted')], sources: [], total: 1, per_page: 50 })
+    const wrapper = mountList()
+    await flushPromises()
+    expect(wrapper.findAllComponents(SortableTh).map(th => th.props('sortKey'))).not.toContain('status')
+  })
+
+  it('počet ručních položek se při filtru zdroje mzdy nebo daně neukazuje', async () => {
+    m.list.mockResolvedValue({ items: [item('posted')], sources: [], total: 12, per_page: 50 })
+    const wrapper = mountList({ source: 'payroll' })
+    await flushPromises()
+    expect(wrapper.find('[data-test="other-items-summary"]').text()).not.toContain('other_items.summary_count')
+  })
+
+  it('ťuknutí na kartu kamkoli otevře detail a zaúčtovaná karta nese štítek', async () => {
+    m.list.mockResolvedValue({ items: [item('posted', { journal_entry_id: 77 })], sources: [], total: 1, per_page: 50 })
+    const wrapper = mountList()
+    await flushPromises()
+    const card = wrapper.get('[data-test="other-item-card"]')
+    expect(card.findComponent(PostingBadge).exists()).toBe(true)
+    await card.trigger('click')
+    expect(m.navigate).toHaveBeenLastCalledWith({ name: 'other-item-detail', params: { id: 42 } }, expect.anything())
+    expect(m.navSnapshot.id).toBe(42)
+  })
+})
+
+describe('OtherItems adresa pro návrat z detailu', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    m.canWrite.mockReturnValue(true)
+    m.listKinds.mockResolvedValue([])
+    // Skutečný router zapíše URL až později; detail se otevře dřív.
+    m.replace.mockImplementation(({ query }: { query: Record<string, string> }) => Promise.resolve().then(() => {
+      m.route.query = query
+      const search = new URLSearchParams(query).toString()
+      m.route.fullPath = `/other-items${search ? `?${search}` : ''}`
+    }))
+  })
+
+  it('po změně filtru si zapamatuje adresu nového výběru, ne té před zápisem URL', async () => {
+    m.list.mockResolvedValue({ items: [item('posted')], sources: [], total: 1, per_page: 50 })
+    m.route = reactive({ name: 'other-items', path: '/other-items', query: {}, fullPath: '/other-items' })
+    const wrapper = shallowMount(OtherItems, { global: { stubs, directives: { 'column-labels': {} } } })
+    await flushPromises()
+    await wrapper.get('[data-test="filter-side"]').setValue('payable')
+    await flushPromises()
+    await wrapper.get('[data-test="other-item-row"]').trigger('click')
+    expect(m.navSnapshot.listPath).toBe('/other-items?side=payable')
+  })
+
+  it('uložený pohled i otevřený číselník druhů: návrat vede na filtry pohledu bez druhů', async () => {
+    m.list.mockResolvedValue({ items: [item('posted')], sources: [], total: 1, per_page: 50 })
+    m.savedFilters = [{ id: 5, name: 'Závazky', payload: { side: 'payable' } }]
+    m.route = reactive({ name: 'other-items', path: '/other-items', query: { kinds: '1' }, fullPath: '/other-items?kinds=1' })
+    const wrapper = shallowMount(OtherItems, { global: { stubs, directives: { 'column-labels': {} } } })
+    await flushPromises()
+    await wrapper.findAll('[data-test="saved-views"] [role="tab"]')[1]!.trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-test="other-item-row"]').trigger('click')
+    expect(m.navSnapshot.listPath).toBe('/other-items?side=payable')
+  })
+
+  it('obnova okna po neúspěšném načtení převezme nový výběr pro šipky v detailu', async () => {
+    m.list.mockResolvedValueOnce({ items: [item('posted')], sources: [], total: 1, per_page: 50 })
+    m.route = reactive({ name: 'other-items', path: '/other-items', query: {}, fullPath: '/other-items' })
+    const wrapper = shallowMount(OtherItems, { global: { stubs, directives: { 'column-labels': {} } } })
+    await flushPromises()
+    m.list.mockRejectedValueOnce(new Error('500'))
+    await wrapper.get('[data-test="filter-side"]').setValue('payable')
+    await flushPromises()
+    m.list.mockResolvedValueOnce({ items: [item('posted')], sources: [], total: 1, per_page: 50 })
+    await m.refresh!()
+    await flushPromises()
+    await wrapper.get('[data-test="other-item-row"]').trigger('click')
+    expect(m.navSnapshot.snapshot.params).toEqual(expect.objectContaining({ side: 'payable' }))
+    expect(m.navSnapshot.listPath).toBe('/other-items?side=payable')
   })
 })

@@ -57,7 +57,7 @@ final class SavedFilterAction
         'payroll-erasure-log', 'payroll-dimensions',
         'payroll-health-insurer-accounts', 'payroll-person-dependants',
         'payroll-rulesets', 'payroll-benefit-baskets',
-        'payroll-annual-settlement', 'nonprofit-members'];
+        'payroll-annual-settlement', 'nonprofit-members', 'other_items'];
 
     private const MAX_FILTERS = 30;
 

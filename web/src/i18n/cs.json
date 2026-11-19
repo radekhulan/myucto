@@ -535,7 +535,10 @@
       "amount_positive": "Zadejte kladnou částku.",
       "form_invalid": "Položku nejde uložit, opravte zvýrazněná pole.",
       "variable_symbol_digits": "Variabilní symbol smí obsahovat jen číslice."
-    }
+    },
+    "summary_count": "žádná ručně zadaná položka | 1 ručně zadaná položka | {count} ručně zadané položky | {count} ručně zadaných položek",
+    "col_documents": "Dokumenty",
+    "col_posting": "Zápis"
   },
   "internal_documents": {
     "title": "Interní doklady",

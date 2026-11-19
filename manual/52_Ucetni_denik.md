@@ -1568,16 +1568,29 @@ nezadává; patří do faktur, aby jeho řádky vstoupily do knihy DPH a výkaz�
 #### 52.14.14.1 Přehled
 
 Seznam ukazuje ruční položky a pod nimi položky z jiných modulů. U ruční položky
-vidíte číslo dokladu (koncept ho ještě nemá), název se směrem, druhem a počtem
-připojených dokumentů, protistranu, splatnost, částku, **zbývá uhradit** a stav.
-Stav uhrazené nebo částečně uhrazené položky má přednost před stavem Zaúčtováno.
-Otevřená položka po splatnosti má zvýrazněný řádek i datum splatnosti. Podle
-každého sloupce kromě akcí jde seznam řadit.
+vidíte číslo dokladu (koncept ho ještě nemá), název, druh, protistranu,
+splatnost, částku, **zbývá uhradit**, stav a ve sloupci **Zápis** u zaúčtované
+položky ikonu **Zaúčtováno**, která otevře její zápis v deníku. Stav uhrazené nebo částečně
+uhrazené položky má přednost před stavem Zaúčtováno. Otevřená položka po splatnosti
+má zvýrazněný řádek i datum splatnosti. Pod nadpisem je počet ručně zadaných
+položek ve výběru (při filtru zdroje mzdy nebo daně se neukazuje).
+
+Sloupce se nastavují stejně jako u faktur: tlačítko **Sloupce** je zapíná a vypíná
+(navíc směr, datum vzniku a zaúčtování, uhrazeno, variabilní symbol, s právem číst
+dokumenty počet dokumentů a poznámka), přetažením záhlaví změníte jejich pořadí
+a přepínač hustoty zmenší řádky. Sloupec **Zápis** je jen v podvojném účetnictví
+pro role, které smí číst účetnictví. Účty zaúčtování ukazuje detail položky.
+Na telefonu je seznam v kartách s pevným obsahem (položka, částka, číslo, druh, stav,
+protistrana a splatnost), proto se tam sloupce ani hustota nenastavují. Podle čísla, položky, protistrany, splatnosti, částky a zbývající částky
+jde seznam řadit; řazení si seznam pamatuje a tlačítko **×** v záhlaví vrátí výchozí
+řazení podle splatnosti.
 
 Kliknutím na řádek otevřete detail, s Ctrl (nebo prostředním tlačítkem myši)
-v novém panelu. Rozpracovaný koncept upravíte nebo smažete z nabídky **…** na konci
-řádku. Odkaz **Zpět** v detailu vrátí seznam se stejnými filtry a šipkami (nebo
-klávesami `[` a `]`) přejdete na předchozí či další položku téhož výběru.
+v novém panelu; řádek jde do panelu také přetáhnout za úchyt na jeho začátku.
+Klávesami `j` a `k` se pohybujete po řádcích a `Enter` otevře detail. Rozpracovaný
+koncept upravíte nebo smažete z nabídky **…** na konci řádku. Odkaz **Zpět**
+v detailu vrátí seznam se stejnými filtry a šipkami (nebo klávesami `[` a `]`)
+přejdete na předchozí či další položku téhož výběru.
 
 Nad seznamem je součet **zbývá uhradit** za celý výběr (všechny stránky, ne jen
 zobrazené řádky), zvlášť pro pohledávky a závazky a zvlášť pro každou měnu. Počítá
@@ -1585,11 +1598,14 @@ jen ručně zadané potvrzené a zaúčtované položky ve zvoleném rozmezí sp
 koncepty, storna ani položky z mezd a daní ne. Přeplatek jedné položky nesnižuje
 dluh ostatních, u úvěru s rozdělenými splátkami se počítá zbývající jistina.
 
-Hledání je vždy vidět, ostatní filtry jsou v liště **Filtry** a zvolené se ukazují
-jako štítky, které jde jednotlivě zrušit. Filtry a řazení se ukládají do adresy
-stránky, takže je zachová obnovení stránky, odkaz i návrat z detailu; kliknutí
-na položku v menu je vrátí na výchozí. Když se seznam nepodaří obnovit, zůstanou
-zobrazená poslední načtená data s upozorněním a tlačítkem **Zkusit znovu**.
+Filtry jsou vidět v liště nad seznamem (na telefonu za tlačítkem **Filtry**)
+a zvolené se ukazují jako štítky, které jde jednotlivě zrušit. Filtry se ukládají
+do adresy stránky, takže je zachová obnovení stránky, odkaz i návrat z detailu;
+kliknutí na položku v menu je vrátí na výchozí. Často používaný výběr uložíte
+v nabídce **Uložené filtry** jako pohled; uložené pohledy jsou nad seznamem
+jako záložky a výchozí pohled se použije při otevření seznamu bez filtrů. Když se
+seznam nepodaří obnovit, zůstanou zobrazená poslední načtená data s upozorněním
+a tlačítkem **Zkusit znovu**.
 
 Filtry:
 

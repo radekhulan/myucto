@@ -297,7 +297,8 @@ export const OTHER_ITEM_TOOLS = [
     'Ruční ostatní pohledávky a závazky (nájem, půjčky, úvěry, kauce, pojistné, poplatky) se stavem a zbývající '
     + 'částkou, k tomu odděleně převzaté předpisy ze mzdového a daňového modulu (`sources`, jen ke čtení). '
     + 'Bez filtru data vrací splatnosti od roku zpět do roku dopředu. První stránka nese `totals`: zbývá uhradit za celý '
-    + 'výběr ručních položek po straně a měně (jen potvrzené a zaúčtované, přeplatek = 0).', {
+    + 'výběr ručních položek po straně a měně (jen potvrzené a zaúčtované, přeplatek = 0). S právem číst dokumenty '
+    + 'nese každá ruční položka `document_count` (počet připojených dokumentů).', {
       side: str('Strana.', { enum: ['receivable', 'payable'] }),
       status: str('Stav: open = neuhrazené aktivní, all = vše.', {
         enum: ['open', 'all', 'draft', 'confirmed', 'posted', 'reversed', 'cancelled'],
