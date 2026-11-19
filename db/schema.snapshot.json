@@ -1220,7 +1220,8 @@
         "2314_purchase_invoice_supplier_advance_index.sql",
         "2315_bulk_actions.sql",
         "2316_bulk_changes_permission.sql",
-        "2317_document_item_search.sql"
+        "2317_document_item_search.sql",
+        "2318_payroll_posting_code_maps.sql"
     ],
     "tables": {
         "abra_flexi_connections": {
@@ -19048,6 +19049,30 @@
                 "chk_payroll_posting_batch_hashes": "`target_hash` regexp '^[0-9a-f]{64}$' and `delta_hash` regexp '^[0-9a-f]{64}$'",
                 "chk_payroll_posting_batch_state": "`status` = 'prepared' and `journal_entry_id` is null and `posted_at` is null or `status` = 'posted' and `journal_entry_id` is not null and `posted_at` is not null or `status` = 'no_change' and `journal_entry_id` is null and `posted_at` is not null or `status` = 'reversed' and `posted_at` is not null"
             }
+        },
+        "payroll_posting_code_maps": {
+            "type": "BASE TABLE",
+            "engine": "InnoDB",
+            "collation": "utf8mb4_unicode_ci",
+            "columns": {
+                "code": "varchar(20) NOT NULL",
+                "created_at": "timestamp NOT NULL DEFAULT current_timestamp()",
+                "credit_account_code": "varchar(20) NOT NULL",
+                "debit_account_code": "varchar(20) NOT NULL",
+                "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
+                "source_application": "varchar(20) NOT NULL",
+                "supplier_id": "int(10) unsigned NOT NULL",
+                "updated_at": "timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE CURRENT_TIMESTAMP()",
+                "updated_by": "bigint(20) unsigned NULL DEFAULT NULL"
+            },
+            "indexes": {
+                "PRIMARY": "UNIQUE BTREE (id)",
+                "uq_payroll_posting_code_map": "UNIQUE BTREE (supplier_id, source_application, code)"
+            },
+            "foreign_keys": {
+                "fk_payroll_posting_code_map_supplier": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE CASCADE"
+            },
+            "checks": []
         },
         "payroll_posting_imports": {
             "type": "BASE TABLE",

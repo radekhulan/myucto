@@ -1205,8 +1205,11 @@ final class InvoiceRepository
                 . ' AND ' . $flaggedOss . ') AS oss_review_oss,';
         }
 
+        $clientIcSql = $this->saleCounterpartyIcExpr('i', 'c');
+        $clientDicSql = VatLedgerService::saleCounterpartyDicExpr($this->db, 'i', 'c');
         $sortColumns = [
             'number' => 'i.varsymbol', 'client' => 'c.company_name', 'type' => 'i.invoice_type',
+            'client_ic' => "($clientIcSql)", 'client_dic' => "($clientDicSql)",
             'issued' => 'COALESCE(i.tax_date, i.issue_date)', 'due' => 'i.due_date', 'amount' => 'i.amount_to_pay',
             'status' => 'i.status', 'payment_vs' => "COALESCE(NULLIF(LEFT(REGEXP_REPLACE(i.payment_variable_symbol, '[^0-9]', ''), 10), ''), LEFT(REGEXP_REPLACE(i.varsymbol, '[^0-9]', ''), 10))",
             'order_number' => 'i.supplier_order_number', 'paid_at' => 'i.paid_at',
@@ -1249,6 +1252,7 @@ final class InvoiceRepository
                        i.sent_at, i.last_reminder_at, i.reminder_count,
                        i.paid_at, i.cancelled_at, i.booked_at,
                        c.company_name AS client_company_name,
+                       ($clientIcSql) AS client_ic, ($clientDicSql) AS client_dic,
                        p.name AS project_name,
                        p.requires_work_report_approval AS project_requires_approval,
                        EXISTS (SELECT 1 FROM work_reports wr WHERE wr.invoice_id = i.id) AS has_work_report,
@@ -2909,6 +2913,30 @@ final class InvoiceRepository
         return "(CASE WHEN {$a}invoice_type IN ('invoice', 'proforma') AND {$a}amount_to_pay <= 0 THEN 0
                       WHEN {$a}status = 'paid' AND ABS({$a}paid_total) < 0.005 THEN 0
                       ELSE {$a}amount_to_pay - {$a}paid_total END)";
+    }
+
+    /**
+     * IČ odběratele, jak je uvedené na dokladu: `client_snapshot.ic` z okamžiku vystavení,
+     * pro koncept bez snapshotu nebo snapshot bez klíče `ic` živé IČ klienta. Stejné
+     * pravidlo jako DIČ ve {@see VatLedgerService::saleCounterpartyDicExpr()}, aby sloupce
+     * IČ a DIČ v seznamu popisovaly tentýž stav odběratele.
+     */
+    private function saleCounterpartyIcExpr(string $invoiceAlias, string $clientAlias): string
+    {
+        if (!$this->db->hasColumn('invoices', 'client_snapshot')) {
+            return "{$clientAlias}.ic";
+        }
+        if ($this->db->pdo()->getAttribute(PDO::ATTR_DRIVER_NAME) === 'sqlite') {
+            return "CASE WHEN {$invoiceAlias}.client_snapshot IS NULL THEN {$clientAlias}.ic
+                         WHEN json_type({$invoiceAlias}.client_snapshot, '$.ic') IS NOT NULL
+                              THEN NULLIF(json_extract({$invoiceAlias}.client_snapshot, '$.ic'), '')
+                         ELSE {$clientAlias}.ic END";
+        }
+
+        return "CASE WHEN {$invoiceAlias}.client_snapshot IS NULL THEN {$clientAlias}.ic
+                     WHEN JSON_CONTAINS_PATH({$invoiceAlias}.client_snapshot, 'one', '$.ic')
+                          THEN NULLIF(JSON_VALUE({$invoiceAlias}.client_snapshot, '$.ic'), '')
+                     ELSE {$clientAlias}.ic END";
     }
 
     private function castInvoice(array $row): array

@@ -5,9 +5,10 @@ import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
 import { apiErrorMessage } from '@/api/errors'
 import { useToast } from '@/composables/useToast'
 import {
-  NOT_PAYROLL_POSTING, payrollPostingImportsApi,
-  type PayrollPostingCheck, type PayrollPostingPreview, type PayrollPostingResult,
+  NOT_PAYROLL_POSTING, UNMAPPED_ACCOUNTING_CODES, payrollPostingImportsApi,
+  type PayrollPostingCheck, type PayrollPostingPreview, type PayrollPostingResult, type PayrollPostingUnmappedCode,
 } from '@/api/pamicaPosting'
+import PayrollPostingCodeMap from './PayrollPostingCodeMap.vue'
 
 /**
  * Náhled a načtení měsíčního zaúčtování mezd z PAMICY. Sdílí ho průvodce PAMICA
@@ -27,6 +28,11 @@ const loadError = ref<string | null>(null)
 const preview = ref<PayrollPostingPreview | null>(null)
 const result = ref<PayrollPostingResult | null>(null)
 const createAccounts = ref(false)
+// Zkratky předkontací bez přiřazených účtů: náhled nejde sestavit, dokud je účetní nepřiřadí.
+const unmappedCodes = ref<PayrollPostingUnmappedCode[]>([])
+const editingCodes = ref(false)
+// Uložit mapování smí, kdo smí zaúčtování načíst; bez náhledu to server ověří až při uložení.
+const canEditCodes = computed(() => preview.value?.can_write ?? true)
 
 async function load(): Promise<void> {
   loading.value = true
@@ -34,11 +40,18 @@ async function load(): Promise<void> {
   preview.value = null
   result.value = null
   createAccounts.value = false
+  unmappedCodes.value = []
+  editingCodes.value = false
   try {
     preview.value = await payrollPostingImportsApi.preview(props.file)
   } catch (error: any) {
-    if (error?.response?.data?.error?.code === NOT_PAYROLL_POSTING) {
+    const apiError = error?.response?.data?.error
+    if (apiError?.code === NOT_PAYROLL_POSTING) {
       emit('not-posting')
+      return
+    }
+    if (apiError?.code === UNMAPPED_ACCOUNTING_CODES && Array.isArray(apiError.unmapped_codes)) {
+      unmappedCodes.value = apiError.unmapped_codes
       return
     }
     loadError.value = apiErrorMessage(error, t('payroll_posting_import.preview_failed'))
@@ -103,6 +116,8 @@ const actions = computed<ActionItem[]>(() => result.value
   : [
       { key: 'apply', label: t('payroll_posting_import.apply'), icon: 'check', tier: 'primary', variant: 'success', show: !!preview.value,
         disabled: !canApply.value || applying.value, disabledReason: disabledReason.value, loading: applying.value, run: () => { void apply() } },
+      { key: 'codes', label: t('payroll_posting_import.edit_codes'), icon: 'edit', tier: 'secondary', variant: 'neutral',
+        show: !!preview.value && preview.value.code_map.length > 0 && !editingCodes.value, run: () => { editingCodes.value = true } },
       { key: 'reload', label: t('payroll_posting_import.reload'), icon: 'cycle', tier: 'secondary', variant: 'neutral', show: !loading.value, run: () => { void load() } },
       { key: 'close', label: t('payroll_posting_import.other_file'), icon: 'x', tier: 'secondary', variant: 'neutral', run: () => emit('close') },
     ])
@@ -117,8 +132,11 @@ const actions = computed<ActionItem[]>(() => result.value
 
     <div v-if="loading" class="py-8 text-center text-neutral-400">{{ t('common.loading') }}</div>
     <div v-else-if="loadError" class="rounded-md border border-danger-500/40 bg-danger-50 px-3 py-2 text-sm text-danger-600" role="alert" data-testid="payroll-posting-error">{{ loadError }}</div>
+    <PayrollPostingCodeMap v-else-if="unmappedCodes.length" :unmapped="unmappedCodes" :mapped="[]" :can-edit="canEditCodes" @saved="load" />
 
     <template v-else-if="preview">
+      <PayrollPostingCodeMap v-if="editingCodes && !result" :unmapped="[]" :mapped="preview.code_map" :can-edit="preview.can_write"
+        @saved="load" @cancel="editingCodes = false" />
       <div v-if="result" class="rounded-lg border border-success-500/40 bg-success-50 px-4 py-3 text-sm text-success-700" data-testid="payroll-posting-done">
         <p class="font-medium">{{ t('payroll_posting_import.done_title', { month: monthLabel }) }}</p>
         <p class="mt-1">{{ t('payroll_posting_import.done_detail', { internal: result.internal_documents.map(d => d.document_no).join(', '), items: result.other_items.length }) }}</p>
@@ -151,7 +169,8 @@ const actions = computed<ActionItem[]>(() => result.value
             </thead>
             <tbody class="divide-y divide-neutral-100">
               <tr v-for="(line, i) in doc.lines" :key="i">
-                <td class="px-3 py-2">{{ line.text }} <span v-if="line.note" class="text-neutral-500">{{ line.note }}</span></td>
+                <td class="px-3 py-2">{{ line.text }} <span v-if="line.note" class="text-neutral-500">{{ line.note }}</span>
+                  <span v-if="line.code" class="ml-1 rounded-full bg-neutral-100 px-2 py-0.5 font-mono text-xs text-neutral-600">{{ line.code }}</span></td>
                 <td class="px-3 py-2 font-mono">{{ line.debit }}</td>
                 <td class="px-3 py-2 font-mono">{{ line.credit }}</td>
                 <td class="px-3 py-2 text-right whitespace-nowrap">{{ money(line.amount) }}</td>
@@ -196,7 +215,7 @@ const actions = computed<ActionItem[]>(() => result.value
                 <td class="px-3 py-2">
                   <span v-if="c.posting === 'without_posting'" class="rounded-full bg-neutral-100 px-2 py-0.5 text-xs whitespace-nowrap text-neutral-600">{{ t('payroll_posting_import.without_posting', { account: c.credit }) }}</span>
                   <div v-else class="space-y-0.5 font-mono text-xs">
-                    <div v-for="(line, i) in c.lines" :key="i" class="whitespace-nowrap">{{ line.debit }} / {{ line.credit }} · {{ money(line.amount) }}</div>
+                    <div v-for="(line, i) in c.lines" :key="i" class="whitespace-nowrap"><span v-if="line.code" class="text-neutral-500">{{ line.code }}: </span>{{ line.debit }} / {{ line.credit }} · {{ money(line.amount) }}</div>
                   </div>
                 </td>
                 <td class="px-3 py-2 text-right font-medium whitespace-nowrap">{{ money(c.amount) }}</td>

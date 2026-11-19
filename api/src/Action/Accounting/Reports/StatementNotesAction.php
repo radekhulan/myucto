@@ -11,6 +11,7 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Security\AccessLevel;
 use MyInvoice\Security\RequestAuthorization;
+use MyInvoice\Service\Accounting\Reports\ReportException;
 use MyInvoice\Service\Accounting\Reports\StatementNotesService;
 use MyInvoice\Service\ActivityLogger;
 use Psr\Http\Message\ResponseInterface as Response;
@@ -47,7 +48,7 @@ final class StatementNotesAction
         try {
             return Json::ok($response, $this->notes->build($supplierId, (int) ($args['id'] ?? 0)));
         } catch (\Throwable $e) {
-            return $this->mapError($response, $e, 'Přílohu k závěrce se nepodařilo sestavit');
+            return $this->mapError($response, $e);
         }
     }
 
@@ -76,7 +77,7 @@ final class StatementNotesAction
         } catch (\InvalidArgumentException $e) {
             return Json::error($response, 'validation_failed', $e->getMessage(), 422);
         } catch (\Throwable $e) {
-            return $this->mapError($response, $e, 'Sekci přílohy se nepodařilo uložit');
+            return $this->mapError($response, $e);
         }
 
         $this->logger->log('accounting.statement_note_saved', $userId, 'accounting_period', $periodId, [
@@ -109,7 +110,7 @@ final class StatementNotesAction
             $data = $this->notes->build($supplierId, $periodId);
             $result = $this->notes->carryOverFromPreviousYear($supplierId, (int) $data['fiscal_year'], $userId);
         } catch (\Throwable $e) {
-            return $this->mapError($response, $e, 'Přílohu se nepodařilo převzít z minulého roku');
+            return $this->mapError($response, $e);
         }
 
         $this->logger->log('accounting.statement_notes_carried_over', $userId, 'accounting_period', $periodId, [
@@ -121,5 +122,14 @@ final class StatementNotesAction
             'carried' => $result['copied'],
             'notes'   => $this->notes->build($supplierId, $periodId),
         ]);
+    }
+
+    /** Neexistující období a účetní chyby jsou hláška pro uživatele, ne 500. */
+    private function mapError(Response $response, \Throwable $e): Response
+    {
+        if ($e instanceof ReportException) {
+            return Json::error($response, $e->errorCode, $e->getMessage(), $e->httpStatus, $e->context);
+        }
+        return $this->mapPostingError($response, $e);
     }
 }

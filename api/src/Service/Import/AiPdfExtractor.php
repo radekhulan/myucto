@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Import;
 
 use MyInvoice\Bootstrap;
+use MyInvoice\Http\IsoDate;
 use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\ClientRepository;
@@ -14,6 +15,7 @@ use MyInvoice\Service\Accounting\Expense\ExpenseKindClassifier;
 use MyInvoice\Service\Accounting\Expense\ExpenseKindSuggestion;
 use MyInvoice\Service\Invoice\PurchaseInvoiceCalculator;
 use MyInvoice\Service\Invoice\UnitPricePrecision;
+use MyInvoice\Service\PurchaseInvoice\VendorNumberDuplicates;
 use MyInvoice\Service\Report\KontrolniHlaseniBuilder;
 use MyInvoice\Support\AdvanceTaxDocumentText;
 use MyInvoice\Support\PaymentMethods;
@@ -501,7 +503,14 @@ final class AiPdfExtractor
      */
     public static function withIssueDateFallback(array $data, string $today): array
     {
-        $valid = static fn (mixed $v): bool => is_string($v) && preg_match('/^\d{4}-\d{2}-\d{2}$/', $v) === 1;
+        // AI umí vrátit i neexistující den (31. 9.): regex ho propustil a zápis pak
+        // spadl na chybě databáze. Takové datum se bere jako nenalezené.
+        $valid = static fn (mixed $v): bool => is_string($v) && IsoDate::isValid($v);
+        foreach (['tax_date', 'due_date', 'delivery_date'] as $key) {
+            if (isset($data[$key]) && !$valid($data[$key])) {
+                $data[$key] = null;
+            }
+        }
         if ($valid($data['issue_date'] ?? null)) {
             return $data;
         }
@@ -1093,6 +1102,9 @@ final class AiPdfExtractor
             $supplierId, $vendorId, (string) $payload['vendor_invoice_number'], (string) $payload['issue_date'],
         );
         $id = $this->repo->createDraft($payload, $userId, $supplierId);
+        // Tentýž doklad už může být v evidenci s jinak přečteným datem vystavení (např.
+        // převzatý z jiného systému). Neblokuje, ale doklad zůstane konceptem s varováním.
+        $likelyDuplicates = VendorNumberDuplicates::likelyForInvoice($this->db->pdo(), $id, $supplierId);
         // párování platby kartou. Čte se přes týž SSOT jako u skenů; ruční hodnotu nepřepíše.
         $cardLast4 = \MyInvoice\Service\Document\ScanAttach\ScanExtractionNormalizer::cardLast4($data['card_last4'] ?? null);
         if ($cardLast4 !== null) {
@@ -1132,7 +1144,7 @@ final class AiPdfExtractor
             // Schvalování manažerem střediska (F6): s ním se účtenka hned neuhradí —
             // skok draft → paid by schválení obešel. Zůstane konceptem a ke schválení
             // ji pošle přijetí po kontrole vytěžení.
-            if (!$requireReview && $this->isCardSettledReceipt($supplierId, $data)
+            if (!$requireReview && $likelyDuplicates === [] && $this->isCardSettledReceipt($supplierId, $data)
                 && (new \MyInvoice\Service\PurchaseInvoice\Approval\PurchaseApprovalRequirements($this->db))->approvalTypes($supplierId) === []) {
                 $this->markAlreadyPaid($id, $supplierId);
             } else {
@@ -1233,6 +1245,13 @@ final class AiPdfExtractor
         if ($recapOnlyWarning !== null) {
             try {
                 $this->repo->appendExtractionWarning($id, $supplierId, $recapOnlyWarning);
+            } catch (\Throwable) {
+                // Varování je „nice to have" — faktura už je vytvořená správně.
+            }
+        }
+        if ($likelyDuplicates !== []) {
+            try {
+                $this->repo->flagLikelyVendorDuplicate($id, $supplierId, $likelyDuplicates);
             } catch (\Throwable) {
                 // Varování je „nice to have" — faktura už je vytvořená správně.
             }

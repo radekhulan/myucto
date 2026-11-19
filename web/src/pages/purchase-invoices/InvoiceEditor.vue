@@ -44,7 +44,7 @@ import { settingsApi } from '@/api/settings'
 import { usePaneDom } from '@/composables/usePaneDom'
 import AutomationBadge from '@/components/automation/AutomationBadge.vue'
 import ConfidenceLabel from '@/components/automation/ConfidenceLabel.vue'
-import { formatMoney } from '@/composables/useFormat'
+import { formatDate, formatMoney } from '@/composables/useFormat'
 import { evalMath } from '@/directives/vMath'
 import { focusLastRow } from '@/composables/useRowFocus'
 import { useToast } from '@/composables/useToast'
@@ -1931,6 +1931,18 @@ function afterSaveWarnings(inv: PurchaseInvoice) {
           date: m?.rate_date ?? '—',
           reason: t(`purchase_invoice.warning.exchange_rate_not_reloaded_${m?.reason ?? 'source_locked'}`),
         }))
+      } else if (code === 'vendor_invoice_likely_duplicate') {
+        // Možná duplicita s jiným datem vystavení: proklik na existující doklad.
+        for (const m of inv._warning_meta?.vendor_invoice_likely_duplicate?.matches ?? []) {
+          toast.warning(t('purchase_invoice.warning.vendor_invoice_likely_duplicate', {
+            number: m.vendor_invoice_number,
+            date: formatDate(m.issue_date),
+            amount: formatMoney(m.total_with_vat, m.currency),
+          }), {
+            label: t('purchase_invoice.warning.vendor_invoice_likely_duplicate_open'),
+            handler: () => { router.push(`/purchase-invoices/${m.id}`) },
+          })
+        }
       } else if (code === 'cash_settlement_failed') {
         // Vlastní hláška — kód pokladny nese `_cash_settlement.reason`, ne
         // `purchase_invoice.warning.*` (tam by chyběl překlad).

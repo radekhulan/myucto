@@ -748,6 +748,10 @@ final class Routes
         $app->get    ('/api/invoices/{id:[0-9]+}/pdfs',      ListPdfsAction::class);
         $app->get    ('/api/invoices/{id:[0-9]+}/pdfs/{archiveId:[0-9]+}', DownloadArchivedPdfAction::class);
         $app->get    ('/api/invoices/{id:[0-9]+}/imported-pdf', DownloadImportedPdfAction::class);
+        // Ruční nahrání / odebrání originálu PDF a náhled hromadného párování podle názvu souboru.
+        $app->post   ('/api/invoices/{id:[0-9]+}/imported-pdf', [\MyInvoice\Action\Invoice\InvoiceOriginalPdfAction::class, 'upload']);
+        $app->delete ('/api/invoices/{id:[0-9]+}/imported-pdf', [\MyInvoice\Action\Invoice\InvoiceOriginalPdfAction::class, 'remove']);
+        $app->post   ('/api/invoices/imported-pdf/match',       [\MyInvoice\Action\Invoice\InvoiceOriginalPdfAction::class, 'match']);
         $app->get    ('/api/invoices/{id:[0-9]+}/attachments', ListAttachmentsAction::class);
         $app->post   ('/api/invoices/{id:[0-9]+}/attachments', UploadAttachmentAction::class);
         $app->get    ('/api/invoices/{id:[0-9]+}/attachments/{attId:[0-9]+}', DownloadAttachmentAction::class);
@@ -3453,6 +3457,7 @@ final class Routes
             // Měsíční zaúčtování mezd z PAMICY: interní doklad + ostatní závazky (migrace 2300).
             $g->post  ('/payroll-posting-imports/preview',          [\MyInvoice\Action\Accounting\PayrollPostingImportAction::class, 'preview']);
             $g->post  ('/payroll-posting-imports/apply',            [\MyInvoice\Action\Accounting\PayrollPostingImportAction::class, 'apply']);
+            $g->put   ('/payroll-posting-imports/code-map',         [\MyInvoice\Action\Accounting\PayrollPostingImportAction::class, 'saveCodeMap']);
             // Interní doklady (migrace 2193). Specifické cesty PŘED generickým /internal-documents/{id}.
             $g->get   ('/internal-documents',                       [\MyInvoice\Action\Accounting\InternalDocumentAction::class, 'list']);
             $g->post  ('/internal-documents',                       [\MyInvoice\Action\Accounting\InternalDocumentAction::class, 'create']);

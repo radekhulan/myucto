@@ -23540,6 +23540,8 @@
       "exchange_rate_cnb_deviation": "The rate on the document ({used}) differs from the daily CNB rate ({cnb}) for the relevant day by {diff} %. Please check the rate. This is the accounting conversion — the CZK VAT amount on the document (§73/6) is unaffected.",
       "vendor_non_payer_deduction": "The vendor is not a VAT payer, yet a VAT deduction is claimed. VAT cannot be deducted from a non-payer — please check the deduction setting.",
       "vendor_unreliable_payer": "According to the VAT payer registry (CRPDPH), the vendor is listed as an unreliable VAT payer — paying them carries liability risk for unpaid VAT (§109 VAT Act). Consider special-mode payment (§109a) or verifying with the vendor.",
+      "vendor_invoice_likely_duplicate": "Possible duplicate: document no. {number} from this vendor already exists (issue date {date}, amount {amount}). Please check it is not the same document.",
+      "vendor_invoice_likely_duplicate_open": "Open document",
       "advance_has_tax_document": "The linked advance already has a tax document for payment (DDKP) — its VAT was claimed separately. On this final invoice claim the deduction only from the VAT TOP-UP (the difference against the DDKP), otherwise the deduction would be taken twice.",
       "linked_advance_unpaid": "Advance {advance} has no posted payment yet, so this invoice did not settle the advance (321/314). Match the advance payment with advance {advance}, not with this invoice; the settlement is then added to this invoice's entry automatically.",
       "receipt_looks_like_prepayment": "This document is classified as a receipt, but its content looks like a tax document for a received payment (advance). A receipt books the cost (518) immediately — when the final invoice later arrives, the cost is double-counted. Consider the type \"Tax document for payment\" (DDKP → VAT deduction only, 343/314) or \"Advance\".",
@@ -25904,9 +25906,53 @@
       "no_candidates_final": "No unlinked tax documents for this customer."
     },
     "imported_pdf": {
-      "title": "Imported source PDF",
+      "title": "Original PDF",
       "show": "Show PDF",
-      "hide": "Hide PDF"
+      "hide": "Hide PDF",
+      "missing": "The invoice has no original document uploaded.",
+      "upload": "Upload original PDF",
+      "uploading": "Uploading…",
+      "drop_here": "or drop a PDF file here",
+      "replace": "Replace",
+      "remove": "Remove",
+      "confirm_remove": "Remove the original PDF {name}? The document itself will not change.",
+      "uploaded": "The original PDF has been saved.",
+      "replaced": "The original PDF has been replaced.",
+      "removed": "The original PDF has been removed.",
+      "upload_failed": "Could not upload the original PDF.",
+      "remove_failed": "Could not remove the original PDF.",
+      "only_pdf": "Only a PDF file can be uploaded."
+    },
+    "original_pdf_bulk": {
+      "action": "Upload original PDFs",
+      "title": "Upload original PDFs",
+      "intro": "Select PDF files. Each file is matched to an issued invoice by the invoice number or variable symbol in its name, e.g. FV-2026-001.pdf or Invoice 20260001.pdf.",
+      "choose": "Select PDF files",
+      "drop_here": "or drop them here",
+      "matching": "Matching files with invoices…",
+      "match_failed": "Could not match the files.",
+      "summary": "Matched {matched}, unmatched {unmatched}, ambiguous {ambiguous}",
+      "col_file": "File",
+      "col_invoice": "Invoice",
+      "col_state": "State",
+      "status": {
+        "matched": "Matched",
+        "unmatched": "Unmatched",
+        "ambiguous": "Ambiguous",
+        "not_pdf": "Not a PDF",
+        "uploaded": "Uploaded",
+        "failed": "Error"
+      },
+      "reason": {
+        "multiple_invoices": "The name fits several invoices: {numbers}",
+        "duplicate_file": "Several files point to the same invoice"
+      },
+      "replaces_original": "Replaces the existing original",
+      "confirm": "Upload matched ({n})",
+      "uploading": "Uploading {done} of {total}…",
+      "done": "Uploaded {ok} originals, errors {failed}.",
+      "reset": "Choose other files",
+      "too_many": "You can upload at most {max} files at once."
     },
     "pdf_history": {
       "title": "PDF history",
@@ -44900,7 +44946,27 @@
     "detected_title": "Payroll posting from PAMICA",
     "detected_hint": "This file contains no invoices but a payroll posting, so no received invoices were created from it. Import it as an internal document and other liabilities.",
     "open_preview": "Show posting preview",
-    "open_wizard": "Open the PAMICA wizard"
+    "open_wizard": "Open the PAMICA wizard",
+    "edit_codes": "Edit posting codes",
+    "code_map": {
+      "title": "Posting codes",
+      "hint_unmapped": "Instead of accounts, the file carries PAMICA posting codes. Assign a debit and a credit account from the chart of accounts to each code. The assignment is saved for the company and the next import uses it automatically.",
+      "hint_edit": "Assignment of the codes used in this file. A change applies to this and later imports, it does not change documents already imported.",
+      "col_code": "Code",
+      "col_samples": "Lines in the file",
+      "usage_internal": "internal document",
+      "usage_commitment": "other liability",
+      "count": "lines: {n}",
+      "already_mapped": "assigned earlier",
+      "debit_for": "Debit account for code {code}",
+      "credit_for": "Credit account for code {code}",
+      "both_required": "Choose both the debit and the credit account.",
+      "same_accounts": "The debit and credit accounts must differ.",
+      "unknown_account": "The account is not in the company's chart of accounts.",
+      "save": "Save and reload preview",
+      "saved": "Posting codes saved.",
+      "save_failed": "Posting codes could not be saved."
+    }
   },
   "bulk_actions": {
     "menu": "Bulk actions",

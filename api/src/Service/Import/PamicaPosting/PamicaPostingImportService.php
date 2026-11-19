@@ -35,6 +35,9 @@ use MyInvoice\Service\Import\ClientResolver;
  * v tomto pořadí: stejný kód, tečkovaná analytika (336.001) a u analytiky 000 samotná
  * syntetika (521), pokud ji osnova analyticky nečlení. Chybějící analytiku pod existující
  * syntetikou nabídne náhled založit, chybějící syntetika import zastaví.
+ *
+ * Zkratky předkontací POHODY (7Int, 4Oz) překládá na účty mapování firmy
+ * ({@see PamicaPostingCodeMap}); jeho účty jsou už kódy osnovy MyÚčta a hledají se přímo.
  */
 final class PamicaPostingImportService
 {
@@ -49,17 +52,45 @@ final class PamicaPostingImportService
         private readonly OtherItemService $otherItems,
         private readonly ClientResolver $clients,
         private readonly PayrollPostingImportRepository $imports,
+        private readonly PamicaPostingCodeMap $codeMap,
     ) {}
 
     /**
-     * Náhled bez zápisu: doklady, účty a kontroly.
+     * Náhled bez zápisu: doklady, účty a kontroly. Zkratky předkontací bez přiřazených
+     * účtů vrátí chybou `unmapped_accounting_codes` ({@see PamicaPostingParser}).
      *
      * @return array<string,mixed>
      */
     public function preview(int $supplierId, string $bytes): array
     {
-        $parsed = $this->parser->parse($bytes);
-        return $this->analyze($supplierId, $parsed, false) + ['file_sha256' => hash('sha256', $bytes)];
+        $parsed = $this->parse($supplierId, $bytes);
+        return $this->analyze($supplierId, $parsed, false) + [
+            'file_sha256' => hash('sha256', $bytes),
+            'code_map' => $this->usedCodeMap($supplierId, $parsed),
+        ];
+    }
+
+    /** @return array<string,mixed> */
+    private function parse(int $supplierId, string $bytes): array
+    {
+        return $this->parser->parse($bytes, $this->codeMap->forSupplier($supplierId, self::APPLICATION));
+    }
+
+    /**
+     * Přiřazení zkratek, které soubor používá (aby je náhled ukázal k úpravě).
+     *
+     * @param array<string,mixed> $parsed
+     * @return list<array<string,mixed>>
+     */
+    private function usedCodeMap(int $supplierId, array $parsed): array
+    {
+        $codes = [];
+        foreach ([...$parsed['internal_documents'], ...$parsed['commitments']] as $doc) {
+            foreach ($doc['lines'] as $line) {
+                if ($line['code'] !== null) $codes[PamicaPostingCodeMap::key($line['code'])] = $line['code'];
+            }
+        }
+        return $this->codeMap->rows($supplierId, self::APPLICATION, array_values($codes));
     }
 
     /**
@@ -71,7 +102,7 @@ final class PamicaPostingImportService
      */
     public function apply(int $supplierId, string $bytes, ?string $fileName, bool $createMissingAccounts, array $audit): array
     {
-        $parsed = $this->parser->parse($bytes);
+        $parsed = $this->parse($supplierId, $bytes);
         $userId = $audit['user_id'];
         $pdo = $this->db->pdo();
         return TransactionFailure::retrying($pdo, function () use ($pdo, $supplierId, $parsed, $bytes, $fileName, $createMissingAccounts, $audit, $userId): array {
@@ -278,7 +309,11 @@ final class PamicaPostingImportService
         }
 
         // Součty a kontrola účtu závazku: Dal z interních dokladů = MD ze závazků + závazky bez zaúčtování.
-        $totals = self::totals($parsed);
+        $resolved = [];
+        foreach ($accounts as $a) {
+            $resolved[$a['source']] = (string) ($a['target'] ?? $a['proposed'] ?? $a['source']);
+        }
+        $totals = self::totals($parsed, $resolved);
         foreach ($totals['clearing'] as $code => $balance) {
             if (abs($balance['difference']) < 0.005) {
                 $checks[] = self::check('clearing_balanced', 'ok',
@@ -325,6 +360,13 @@ final class PamicaPostingImportService
      */
     private function resolveAccount(int $supplierId, string $code, string $date, bool $liability): array
     {
+        if (!ctype_digit($code)) {
+            // Účet z mapování zkratky je kód osnovy MyÚčta (336.001): jen přímá shoda,
+            // nic se nedomýšlí ani nezakládá.
+            $base = ['source' => $code, 'synthetic' => $code, 'target' => null, 'proposed' => null];
+            $row = $this->accounts->findByCode($supplierId, $code, $date);
+            return $row !== null ? $this->usable($row, $code, $liability, $base) : ['status' => 'missing'] + $base;
+        }
         $synthetic = substr($code, 0, 3);
         $analytic = substr($code, 3);
         $candidates = array_values(array_unique(array_filter([$code, $analytic !== '' ? $synthetic . '.' . $analytic : null])));
@@ -493,13 +535,17 @@ final class PamicaPostingImportService
     /**
      * Součty dokladů a kontrola účtů, přes které mzdy tečou: co interní doklady dají na Dal
      * účtu závazku (331), mají závazky srazit na MD nebo převzít bez zaúčtování.
+     * Účty se sčítají podle účtu osnovy, na který půjdou: zkratka předkontace dá 331,
+     * předkontace BEZ331000 kód PAMICY 331000, a přitom jde o tentýž účet.
      *
      * @param array<string,mixed> $parsed
+     * @param array<string,string> $resolved kód ze souboru => účet osnovy
      * @return array<string,mixed>
      */
-    private static function totals(array $parsed): array
+    private static function totals(array $parsed, array $resolved): array
     {
         $cents = static fn (float $v): int => (int) round($v * 100);
+        $key = static fn (string $code): string => $resolved[$code] ?? $code;
         $internal = 0;
         $posted = 0;
         $without = 0;
@@ -507,7 +553,8 @@ final class PamicaPostingImportService
         foreach ($parsed['internal_documents'] as $doc) {
             $internal += $cents($doc['amount']);
             foreach ($doc['lines'] as $line) {
-                $clearing[$line['credit']]['credit'] = ($clearing[$line['credit']]['credit'] ?? 0) + $cents($line['amount']);
+                $k = $key((string) $line['credit']);
+                $clearing[$k]['credit'] = ($clearing[$k]['credit'] ?? 0) + $cents($line['amount']);
             }
         }
         $withoutCodes = [];
@@ -515,17 +562,19 @@ final class PamicaPostingImportService
             if ($c['without_posting']) {
                 $without += $cents($c['amount']);
                 $withoutCodes[$c['credit']] = true;
-                $clearing[$c['credit']]['without'] = ($clearing[$c['credit']]['without'] ?? 0) + $cents($c['amount']);
+                $k = $key((string) $c['credit']);
+                $clearing[$k]['without'] = ($clearing[$k]['without'] ?? 0) + $cents($c['amount']);
                 continue;
             }
             $posted += $cents($c['amount']);
             foreach ($c['lines'] as $line) {
-                $clearing[$line['debit']]['debit'] = ($clearing[$line['debit']]['debit'] ?? 0) + $cents($line['amount']);
+                $k = $key((string) $line['debit']);
+                $clearing[$k]['debit'] = ($clearing[$k]['debit'] ?? 0) + $cents($line['amount']);
             }
         }
         $out = [];
         foreach ($withoutCodes as $code => $_) {
-            $row = $clearing[$code];
+            $row = $clearing[$key((string) $code)];
             $credit = $row['credit'] ?? 0;
             $debit = $row['debit'] ?? 0;
             $w = $row['without'] ?? 0;

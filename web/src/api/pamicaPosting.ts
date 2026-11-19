@@ -18,11 +18,31 @@ export interface PayrollPostingCheck {
 export interface PayrollPostingLine {
   text: string
   note: string | null
+  /** Zkratka předkontace ze souboru (7Int), když řádek nenese přímo dvojici účtů. */
+  code: string | null
   debit: string | null
   credit: string
   without_posting: boolean
   amount: number
 }
+
+/** Přiřazení zkratky předkontace k účtům osnovy firmy. */
+export interface PayrollPostingCodeMapRow {
+  code: string
+  debit_account_code: string
+  credit_account_code: string
+  updated_at?: string | null
+}
+
+/** Zkratka předkontace ze souboru, ke které firma ještě nemá účty (chyba `unmapped_accounting_codes`). */
+export interface PayrollPostingUnmappedCode {
+  code: string
+  usage: ('internal' | 'commitment')[]
+  count: number
+  samples: { document: string; text: string; amount: number }[]
+}
+
+export const UNMAPPED_ACCOUNTING_CODES = 'unmapped_accounting_codes'
 
 export interface PayrollPostingInternalDocument {
   item_id: string
@@ -81,6 +101,7 @@ export interface PayrollPostingPreview {
     commitments: number
   }
   checks: PayrollPostingCheck[]
+  code_map: PayrollPostingCodeMapRow[]
   can_apply: boolean
   can_apply_with_new_accounts: boolean
   can_write: boolean
@@ -114,4 +135,6 @@ export const payrollPostingImportsApi = {
     api.post<PayrollPostingResult>('/accounting/payroll-posting-imports/apply',
       form(file, createMissingAccounts ? { create_missing_accounts: '1' } : {}),
       { headers: { 'Content-Type': 'multipart/form-data' } }).then(r => r.data),
+  saveCodeMap: (codes: PayrollPostingCodeMapRow[]) =>
+    api.put<{ code_map: PayrollPostingCodeMapRow[] }>('/accounting/payroll-posting-imports/code-map', { codes }).then(r => r.data),
 }

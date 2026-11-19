@@ -5094,7 +5094,7 @@ paths:
         - { in: query, name: 'filter[include_document_tags]', description: "1 = štítky dostupných příloh; vyžaduje documents read a respektuje viditelnost dokumentů", schema: { type: integer, enum: [0, 1], default: 0 } }
         - in: query
           name: sort_key
-          schema: { type: string, enum: [number, client, type, issued, due, amount, status, payment_vs, order_number, paid_at, payment_method, booked_at, exchange_rate, amount_czk, base, vat, total, project, sent_at, paid_total, remaining_amount, vat_breakdown, debit_accounts, credit_accounts, locked, country, note, journal_notes] }
+          schema: { type: string, enum: [number, client, client_ic, client_dic, type, issued, due, amount, status, payment_vs, order_number, paid_at, payment_method, booked_at, exchange_rate, amount_czk, base, vat, total, project, sent_at, paid_total, remaining_amount, vat_breakdown, debit_accounts, credit_accounts, locked, country, note, journal_notes] }
         - in: query
           name: sort_dir
           schema: { type: string, enum: [asc, desc], default: desc }
@@ -6246,10 +6246,10 @@ paths:
         schema: { type: integer, enum: [1] }
     get:
       tags: [Invoices]
-      summary: Zdrojové PDF vydané faktury z importu
+      summary: Originál PDF vydané faktury
       description: |
-        Vrátí archivovaný ZDROJOVÝ PDF vydané faktury tak, jak dorazil z importu
-        (iDoklad/Fakturoid) — nezaměňovat s naším vlastním rendered PDF
+        Vrátí archivovaný originál PDF vydané faktury (z importu iDoklad/Fakturoid
+        nebo ručně nahraný) — nezaměňovat s naším vlastním rendered PDF
         (`GET /api/v1/invoices/{id}/pdf`). Dostupné jen pro faktury s neprázdným
         `imported_pdf_path`; jinak `404`.
       responses:
@@ -6260,6 +6260,105 @@ paths:
               schema: { type: string, format: binary }
         '404':
           description: Faktura nenalezena, nemá archivovaný zdrojový PDF, nebo soubor chybí na disku.
+    post:
+      tags: [Invoices]
+      summary: Nahraje nebo nahradí originál PDF vydané faktury
+      description: |
+        Multipart upload jednoho PDF (pole `file`, max 20 MiB, obsah musí být PDF podle
+        hlavičky `%PDF-`). Předchozí originál nahradí; jeho soubor se smaže až po uložení
+        nového. Nemění stav ani zaúčtování dokladu, a proto ho neblokuje zamčené období.
+        Vyžaduje zápis do vydaných faktur.
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file: { type: string, format: binary }
+      responses:
+        '200':
+          description: Uloženo
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/InvoiceOriginalPdf' }
+        '400':
+          description: Soubor chybí nebo je prázdný
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '403':
+          description: Chybí oprávnění
+        '404':
+          description: Faktura nenalezena
+        '413':
+          description: Soubor je příliš velký
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '422':
+          description: Soubor není PDF
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+    delete:
+      tags: [Invoices]
+      summary: Odebere originál PDF vydané faktury
+      responses:
+        '200':
+          description: Odebráno
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+        '403':
+          description: Chybí oprávnění
+        '404':
+          description: Faktura nenalezena nebo nemá originál
+
+  /api/v1/invoices/imported-pdf/match:
+    parameters:
+      - $ref: '#/components/parameters/SupplierIdHeader'
+    post:
+      tags: [Invoices]
+      summary: Spáruje názvy PDF souborů s vydanými fakturami
+      description: |
+        Náhled hromadného nahrání originálů: ke každému názvu souboru najde vydanou
+        fakturu firmy, jejíž číslo (nebo platební VS) je v názvu jako samostatný úsek
+        (bez ohledu na diakritiku, velikost písmen a oddělovače). Nic neukládá; soubory
+        se pak nahrají po jednom přes `POST /api/v1/invoices/{id}/imported-pdf`.
+        Nejvýše 500 názvů najednou.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [files]
+              properties:
+                files:
+                  type: array
+                  maxItems: 500
+                  items: { type: string }
+      responses:
+        '200':
+          description: Výsledek párování ve stejném pořadí jako `files`
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/InvoiceOriginalPdfMatch' }
+        '422':
+          description: Prázdný nebo příliš dlouhý seznam souborů
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
 
   /api/v1/projects:
     get:
@@ -11561,7 +11660,7 @@ paths:
         - { in: query, name: 'filter[include_document_tags]', description: "1 = štítky dostupných příloh; vyžaduje documents read a respektuje viditelnost dokumentů", schema: { type: integer, enum: [0, 1], default: 0 } }
         - in: query
           name: sort_key
-          schema: { type: string, enum: [number, vendor, vendor_ic, vendor_number, kind, tax_date, due_date, amount, status, paid_at, booked_at, exchange_rate, vat_deduction, expense_category, base, vat, balance, paid_amount, remaining_amount, project, received_at, payment_ordered_at, vat_breakdown, debit_accounts, credit_accounts, locked, country, note, journal_notes, payment_vs, payment_method] }
+          schema: { type: string, enum: [number, vendor, vendor_ic, vendor_dic, vendor_number, kind, tax_date, due_date, amount, status, paid_at, booked_at, exchange_rate, vat_deduction, expense_category, base, vat, balance, paid_amount, remaining_amount, project, received_at, payment_ordered_at, vat_breakdown, debit_accounts, credit_accounts, locked, country, note, journal_notes, payment_vs, payment_method] }
         - in: query
           name: sort_dir
           schema: { type: string, enum: [asc, desc], default: desc }
@@ -53942,6 +54041,8 @@ components:
             `has_work_report`, `project_requires_approval` a `remaining_amount`
             (zbývá uhradit v měně dokladu = `amount_to_pay − paid_total`; 0 u finálního
             dokladu k zaplacené proformě a u dokladu `paid` bez evidované platby).
+            `client_ic` a `client_dic` jsou v seznamu IČ a DIČ odběratele uvedené na
+            dokladu (snapshot z vystavení), u konceptu bez snapshotu z karty klienta.
 
             Dále booleany `oss_review_domestic` a `oss_review_oss` — doklad má řádek
             k ručnímu posouzení místa plnění mimo OSS, resp. v OSS podání. Rozlišují
@@ -54539,6 +54640,51 @@ components:
         mime_type: { type: string, example: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }
         size_bytes: { type: integer, example: 18452 }
         created_at: { type: string, format: date-time }
+
+    InvoiceOriginalPdf:
+      type: object
+      description: Metadata uloženého originálu PDF vydané faktury.
+      properties:
+        imported_pdf_path: { type: string, example: "supplier-1/9f/9f86d081884c7d65.pdf" }
+        imported_pdf_hash: { type: string, description: SHA-256 obsahu }
+        imported_pdf_size_bytes: { type: integer }
+        imported_pdf_original_name: { type: string, example: "FV-2026-001.pdf" }
+        replaced: { type: boolean, description: Faktura už originál měla a byl nahrazen }
+
+    InvoiceOriginalPdfMatch:
+      type: object
+      properties:
+        file: { type: string, example: "FV-2026-001.pdf" }
+        status: { type: string, enum: [matched, unmatched, ambiguous] }
+        reason:
+          type: [string, "null"]
+          enum: [multiple_invoices, duplicate_file, null]
+          description: U `ambiguous` - název sedí na víc faktur, nebo na tutéž fakturu míří víc souborů.
+        invoice_id: { type: [integer, "null"], format: int64 }
+        candidate_ids:
+          type: array
+          items: { type: integer, format: int64 }
+        invoice:
+          oneOf:
+            - $ref: '#/components/schemas/InvoiceOriginalPdfCandidate'
+            - type: 'null'
+        candidates:
+          type: array
+          items: { $ref: '#/components/schemas/InvoiceOriginalPdfCandidate' }
+
+    InvoiceOriginalPdfCandidate:
+      type: object
+      properties:
+        id: { type: integer, format: int64 }
+        varsymbol: { type: [string, "null"] }
+        payment_variable_symbol: { type: [string, "null"] }
+        invoice_type: { type: string }
+        status: { type: string }
+        issue_date: { type: [string, "null"], format: date }
+        total_with_vat: { type: [number, "null"] }
+        currency: { type: [string, "null"] }
+        client_name: { type: [string, "null"] }
+        has_original: { type: boolean }
 
     AresLookupResult:
       type: object
@@ -56454,6 +56600,7 @@ components:
         currency_symbol: { type: string }
         vendor_company_name: { type: string }
         vendor_ic: { type: [string, "null"] }
+        vendor_dic: { type: [string, "null"], description: "DIČ dodavatele uvedené na dokladu, jinak z karty dodavatele." }
         month_bucket: { type: string, example: "2026-05" }
         kh_sections:
           type: array
@@ -57176,7 +57323,27 @@ components:
         _warnings:
           type: array
           items: { type: string }
-          description: "Jen v odpovědi POST/PUT — non-blocking varování (credit_note_positive_total, vendor_non_payer_deduction, vendor_unreliable_payer — CRPDPH nespolehlivý plátce, audit 2026-07, public_authority_fee_out_of_scope, missing_vat_classification, eu_acquisition_delivery_date_missing, eu_acquisition_tax_date_mismatch), uložení neblokují."
+          description: "Jen v odpovědi POST/PUT — non-blocking varování (credit_note_positive_total, vendor_non_payer_deduction, vendor_unreliable_payer — CRPDPH nespolehlivý plátce, audit 2026-07, public_authority_fee_out_of_scope, missing_vat_classification, eu_acquisition_delivery_date_missing, eu_acquisition_tax_date_mismatch, vendor_invoice_likely_duplicate — doklad téhož dodavatele se stejným číslem a jiným datem vystavení v okně ±1 rok, detail v `_warning_meta`), uložení neblokují."
+        _warning_meta:
+          type: object
+          description: "Jen v odpovědi POST/PUT — podrobnosti k vybraným kódům z `_warnings`, klíčované týmž kódem."
+          properties:
+            vendor_invoice_likely_duplicate:
+              type: object
+              properties:
+                matches:
+                  type: array
+                  items:
+                    type: object
+                    properties:
+                      id: { type: integer }
+                      vendor_invoice_number: { type: string }
+                      issue_date: { type: string, format: date }
+                      total_with_vat: { type: number }
+                      currency: { type: string }
+                      status: { type: string }
+                      varsymbol: { type: string, nullable: true }
+          additionalProperties: true
 
     PurchaseVatTreatment:
       type: object

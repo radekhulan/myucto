@@ -23539,6 +23539,8 @@
       "credit_note_positive_total": "Dobropis má kladný součet - má mít záporné částky. Záporné znaménko stačí na jedné straně (např. −1 ks × 1000, nebo 1 ks × −1000); pokud jsou záporné množství i cena zároveň, výkazy DPH/KH plnění přičtou místo odečtení. Zkontrolujte prosím znaménka.",
       "vendor_non_payer_deduction": "Dodavatel je neplátce DPH, ale je uplatněn nárok na odpočet. Od neplátce nelze DPH odpočítat - zkontrolujte nastavení odpočtu.",
       "vendor_unreliable_payer": "Dodavatel je dle registru plátců DPH (CRPDPH) veden jako nespolehlivý plátce - při úhradě hrozí ručení za nepřiznanou DPH (§109 ZDPH). Zvažte úhradu zvláštním způsobem (§109a) nebo ověření u dodavatele.",
+      "vendor_invoice_likely_duplicate": "Možná duplicita: doklad č. {number} od tohoto dodavatele už existuje (datum vystavení {date}, částka {amount}). Zkontrolujte, zda nejde o tentýž doklad.",
+      "vendor_invoice_likely_duplicate_open": "Otevřít doklad",
       "exchange_rate_cnb_deviation": "Kurz na dokladu ({used}) se liší od denního kurzu ČNB ({cnb}) k rozhodnému dni o {diff} %. Zkontrolujte prosím kurz. Účetní přepočet - korunová částka DPH na dokladu (§73/6) tím není dotčena.",
       "advance_has_tax_document": "K navázané záloze už existuje daňový doklad k platbě (DDKP) - DPH z ní byla uplatněna zvlášť. Na této vyúčtovací faktuře uplatni nárok na odpočet jen z DOPLATKU DPH (rozdíl proti DDKP), jinak by se odpočet uplatnil dvakrát.",
       "linked_advance_unpaid": "Záloha {advance} zatím nemá zaúčtovanou úhradu, proto tato faktura zálohu nezúčtovala (321/314). Platbu zálohy spárujte se zálohou {advance}, ne s touto fakturou - zúčtování se pak do zápisu faktury doplní samo.",
@@ -25904,9 +25906,53 @@
       "no_candidates_final": "Žádné nepropojené daňové doklady tohoto odběratele."
     },
     "imported_pdf": {
-      "title": "Zdrojové PDF z importu",
+      "title": "Originál PDF",
       "show": "Zobrazit PDF",
-      "hide": "Skrýt PDF"
+      "hide": "Skrýt PDF",
+      "missing": "Faktura nemá nahraný originál dokladu.",
+      "upload": "Nahrát originál PDF",
+      "uploading": "Nahrávám…",
+      "drop_here": "nebo sem přetáhněte PDF soubor",
+      "replace": "Nahradit",
+      "remove": "Odebrat",
+      "confirm_remove": "Odebrat originál PDF {name}? Doklad samotný se nezmění.",
+      "uploaded": "Originál PDF byl uložen.",
+      "replaced": "Originál PDF byl nahrazen.",
+      "removed": "Originál PDF byl odebrán.",
+      "upload_failed": "Originál PDF se nepodařilo nahrát.",
+      "remove_failed": "Originál PDF se nepodařilo odebrat.",
+      "only_pdf": "Nahrát lze jen soubor PDF."
+    },
+    "original_pdf_bulk": {
+      "action": "Nahrát originály PDF",
+      "title": "Nahrát originály PDF",
+      "intro": "Vyberte PDF soubory. Ke každému se podle čísla faktury nebo variabilního symbolu v názvu souboru najde vydaná faktura, například FV-2026-001.pdf nebo Faktura 20260001.pdf.",
+      "choose": "Vybrat PDF soubory",
+      "drop_here": "nebo je sem přetáhněte",
+      "matching": "Páruji soubory s fakturami…",
+      "match_failed": "Soubory se nepodařilo spárovat.",
+      "summary": "Spárováno {matched}, nespárováno {unmatched}, nejednoznačné {ambiguous}",
+      "col_file": "Soubor",
+      "col_invoice": "Faktura",
+      "col_state": "Stav",
+      "status": {
+        "matched": "Spárováno",
+        "unmatched": "Nespárováno",
+        "ambiguous": "Nejednoznačné",
+        "not_pdf": "Není PDF",
+        "uploaded": "Nahráno",
+        "failed": "Chyba"
+      },
+      "reason": {
+        "multiple_invoices": "Název sedí na více faktur: {numbers}",
+        "duplicate_file": "Na tutéž fakturu míří více souborů"
+      },
+      "replaces_original": "Nahradí stávající originál",
+      "confirm": "Nahrát spárované ({n})",
+      "uploading": "Nahrávám {done} z {total}…",
+      "done": "Nahráno {ok} originálů, chyby {failed}.",
+      "reset": "Vybrat jiné soubory",
+      "too_many": "Najednou lze nahrát nejvýše {max} souborů."
     },
     "pdf_history": {
       "title": "Historie PDF",
@@ -44900,7 +44946,27 @@
     "detected_title": "Zaúčtování mezd z PAMICY",
     "detected_hint": "Tento soubor neobsahuje faktury, ale zaúčtování mezd, a přijaté faktury z něj nevznikly. Načtěte ho jako interní doklad a ostatní závazky.",
     "open_preview": "Zobrazit náhled zaúčtování",
-    "open_wizard": "Otevřít průvodce PAMICA"
+    "open_wizard": "Otevřít průvodce PAMICA",
+    "edit_codes": "Upravit zkratky předkontací",
+    "code_map": {
+      "title": "Zkratky předkontací",
+      "hint_unmapped": "Soubor místo účtů nese zkratky předkontací z PAMICY. Každé zkratce přiřaďte účet MD a účet Dal z účtové osnovy. Přiřazení se uloží pro firmu a příští načtení ho použije samo.",
+      "hint_edit": "Přiřazení zkratek použitých v tomto souboru. Změna platí pro toto i další načtení, už načtené doklady nemění.",
+      "col_code": "Zkratka",
+      "col_samples": "Řádky v souboru",
+      "usage_internal": "interní doklad",
+      "usage_commitment": "ostatní závazek",
+      "count": "řádků: {n}",
+      "already_mapped": "přiřazeno dříve",
+      "debit_for": "Účet MD pro zkratku {code}",
+      "credit_for": "Účet Dal pro zkratku {code}",
+      "both_required": "Vyberte účet MD i účet Dal.",
+      "same_accounts": "Účet MD a účet Dal musí být různé.",
+      "unknown_account": "Účet není v účtové osnově firmy.",
+      "save": "Uložit a načíst náhled",
+      "saved": "Přiřazení zkratek je uložené.",
+      "save_failed": "Přiřazení zkratek se nepodařilo uložit."
+    }
   },
   "bulk_actions": {
     "menu": "Hromadné akce",

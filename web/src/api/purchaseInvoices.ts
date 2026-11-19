@@ -50,6 +50,17 @@ export interface ResolvedExchangeRateMeta {
   fixed_missing: boolean
 }
 
+/** Existující doklad dodavatele se stejným číslem a jiným datem vystavení (možná duplicita). */
+export interface VendorInvoiceLikelyDuplicate {
+  id: number
+  vendor_invoice_number: string
+  issue_date: string
+  total_with_vat: number
+  currency: string
+  status: string
+  varsymbol: string | null
+}
+
 /** Proč se kurz po změně rozhodného data / měny NEpřenačetl. */
 export interface ExchangeRateNotReloadedMeta {
   reason: 'source_locked' | 'cnb_unavailable'
@@ -565,6 +576,7 @@ export interface PurchaseInvoice {
   _warning_meta?: {
     exchange_rate_cnb_deviation?: CnbRateDeviationMeta
     exchange_rate_not_reloaded?: ExchangeRateNotReloadedMeta
+    vendor_invoice_likely_duplicate?: { matches: VendorInvoiceLikelyDuplicate[] }
   }
   /** Metadata k serverem provedenému přenačtení kurzu (migrace 1303). */
   _meta?: {
@@ -642,6 +654,7 @@ export interface PurchaseInvoiceListItem {
   expense_category_code?: string | null
   vendor_company_name: string
   vendor_ic: string | null
+  vendor_dic?: string | null
   month_bucket: string
   project_name?: string | null
   kh_sections?: string[]

@@ -1014,8 +1014,8 @@ zaměstnance ani mzdové vstupy nezakládá. Funkce je pro firmy v podvojném
 1. V PAMICA zpracujte mzdy měsíce a otevřete jejich zaúčtování.
 2. Předkontace nastavte **přímo na účty** ve tvaru MD/Dal, například
    `521000/331000` pro hrubé mzdy nebo `524000/336001` pro sociální pojištění
-   placené firmou. Jinou předkontaci MyÚčto zaúčtovat neumí a náhled ji
-   ohlásí.
+   placené firmou. Používá-li PAMICA **zkratky předkontací POHODY** (např.
+   `7Int`, `4Oz`), přiřadíte jim účty při prvním načtení (§ 108.10.2).
 3. Závazky na čisté mzdy zaměstnanců veďte **bez zaúčtování** (předkontace
    `BEZ` s účtem závazku, například `BEZ331000`). Závazek na účtu 331 vznikl
    už zaúčtováním hrubé mzdy, výplata se jen eviduje k úhradě.
@@ -1039,6 +1039,19 @@ obvykle a u vyčleněného souboru je tlačítko **Zobrazit náhled
 zaúčtování**. Náhled i načtení jsou stejné jako v průvodci. Soubor zabalený
 v ZIP nahrajte do průvodce samostatně.
 
+**Zkratky předkontací.** Nese-li soubor místo dvojic účtů zkratky
+předkontací (`7Int` pro interní doklad mzdových nákladů, `2Oz`, `4Oz`
+a další pro ostatní závazky), MyÚčto nejdřív ukáže tabulku zkratek, ke
+kterým firma ještě nemá účty. U každé zkratky jsou vzorové řádky ze
+souboru s částkou. Každé zkratce vyberte z účtové osnovy **účet MD a účet
+Dal**: zkratka vždy znamená celou dvojici účtů, oba účty musí být v osnově
+a nesmí být stejné. Po kliknutí **Uložit a načíst náhled** se přiřazení
+uloží pro firmu a náhled se načte znovu. Příští měsíc se uložené zkratky
+použijí samy a tabulka se ukáže jen pro nové zkratky. Přiřazení zkratek
+použitých v souboru změníte v náhledu tlačítkem **Upravit zkratky
+předkontací**; změna platí pro toto a další načtení, už načtené doklady
+nemění. U řádků se zkratkou náhled zkratku zobrazí vedle účtů.
+
 Náhled nic neukládá. Ukáže měsíc a párovací symbol PAMICY (např.
 `MZ202603`), interní doklad s řádky MD a Dal a ostatní závazky
 s protistranou, variabilním a konstantním symbolem, splatností, účtem
@@ -1061,7 +1074,8 @@ a u analytiky `000` syntetiku (`521000` → `521`), pokud ji osnova analyticky
 nečlení. Chybí-li analytika pod existující syntetikou, náhled ji navrhne
 a po zaškrtnutí **Založit chybějící analytické účty** ji načtení založí se
 stejným typem jako syntetika. Chybějící syntetický účet načtení zastaví,
-založte ho v `Účetnictví → Účtová osnova`.
+založte ho v `Účetnictví → Účtová osnova`. Účty přiřazené zkratkám jsou už
+účty osnovy MyÚčta a používají se tak, jak jsou.
 
 ### 108.10.3 Co vznikne
 

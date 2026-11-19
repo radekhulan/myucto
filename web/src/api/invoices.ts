@@ -323,6 +323,38 @@ export interface PaymentScheduleRow {
   note: string | null
 }
 
+/** Metadata uloženého originálu PDF vydané faktury. */
+export interface InvoiceOriginalPdfMeta {
+  imported_pdf_path: string
+  imported_pdf_hash: string
+  imported_pdf_size_bytes: number
+  imported_pdf_original_name: string
+  replaced: boolean
+}
+
+export interface InvoiceOriginalPdfCandidate {
+  id: number
+  varsymbol: string | null
+  payment_variable_symbol: string | null
+  invoice_type: string
+  status: string
+  issue_date: string | null
+  total_with_vat: number | null
+  currency: string | null
+  client_name: string | null
+  has_original: boolean
+}
+
+export interface InvoiceOriginalPdfMatch {
+  file: string
+  status: 'matched' | 'unmatched' | 'ambiguous'
+  reason: 'multiple_invoices' | 'duplicate_file' | null
+  invoice_id: number | null
+  candidate_ids: number[]
+  invoice: InvoiceOriginalPdfCandidate | null
+  candidates: InvoiceOriginalPdfCandidate[]
+}
+
 export interface Invoice {
   id: number
   varsymbol: string | null
@@ -433,7 +465,7 @@ export interface Invoice {
   booked_at?: string | null
   cancelled_at: string | null
   pdf_path: string | null
-  /** Zdrojové PDF z importu (iDoklad/Fakturoid) — oddělené od našeho rendered `pdf_path`. */
+  /** Originál PDF (z importu iDoklad/Fakturoid nebo ručně nahraný) — oddělený od našeho rendered `pdf_path`. */
   imported_pdf_path: string | null
   imported_pdf_original_name?: string | null
   imported_pdf_size_bytes?: number | string | null
@@ -596,6 +628,8 @@ export interface InvoiceListItem {
   cancelled_at: string | null
   booked_at?: string | null
   client_company_name: string
+  client_ic?: string | null
+  client_dic?: string | null
   project_name: string | null
   project_requires_approval?: boolean
   has_work_report?: boolean
@@ -1120,6 +1154,19 @@ export const invoicesApi = {
     const qs = params.toString()
     return `/api/invoices/${id}/imported-pdf${qs ? '?' + qs : ''}`
   },
+
+  /** Nahraje nebo nahradí originál PDF vydané faktury. */
+  uploadImportedPdf: (id: number, file: File) => {
+    const fd = new FormData()
+    fd.append('file', file, file.name)
+    return api.post<InvoiceOriginalPdfMeta>(`/invoices/${id}/imported-pdf`, fd,
+      { headers: { 'Content-Type': 'multipart/form-data' } }).then(r => r.data)
+  },
+  deleteImportedPdf: (id: number) =>
+    api.delete<{ ok: boolean }>(`/invoices/${id}/imported-pdf`).then(r => r.data),
+  /** Náhled hromadného nahrání: spáruje názvy souborů s fakturami firmy (nic neukládá). */
+  matchImportedPdfs: (files: string[]) =>
+    api.post<{ items: InvoiceOriginalPdfMatch[] }>('/invoices/imported-pdf/match', { files }).then(r => r.data.items),
 
   listPdfs: (id: number) =>
     api.get<{ items: Array<{

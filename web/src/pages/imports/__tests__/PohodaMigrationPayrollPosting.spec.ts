@@ -4,14 +4,19 @@ import { ref } from 'vue'
 import PohodaMigration from '../PohodaMigration.vue'
 import PayrollPostingImport from '@/components/migration/PayrollPostingImport.vue'
 
-const m = vi.hoisted(() => ({ wizard: null as any, preview: vi.fn(), apply: vi.fn() }))
+const m = vi.hoisted(() => ({ wizard: null as any, preview: vi.fn(), apply: vi.fn(), saveCodeMap: vi.fn() }))
 
 vi.mock('@/composables/useMigrationWizard', () => ({ useMigrationWizard: () => m.wizard }))
 vi.mock('@/api/pohoda', () => ({ pohodaApi: {}, isPohodaUploadReady: () => true }))
 vi.mock('@/api/pamicaPosting', () => ({
   NOT_PAYROLL_POSTING: 'not_payroll_posting',
-  payrollPostingImportsApi: { preview: m.preview, apply: m.apply },
+  UNMAPPED_ACCOUNTING_CODES: 'unmapped_accounting_codes',
+  payrollPostingImportsApi: { preview: m.preview, apply: m.apply, saveCodeMap: m.saveCodeMap },
 }))
+vi.mock('@/api/accounting', () => ({ accountingApi: { listAccounts: () => Promise.resolve([
+  { account_code: '331', name: 'Zaměstnanci', is_active: true },
+  { account_code: '521', name: 'Mzdové náklady', is_active: true },
+]) } }))
 vi.mock('@/composables/useToast',() => ({ useToast: () => ({ error: vi.fn(), success: vi.fn() }) }))
 vi.mock('@/stores/auth', () => ({ useAuthStore: () => ({ canWrite: () => true }) }))
 vi.mock('@/stores/supplier', () => ({ useSupplierStore: () => ({ currentSupplier: { ic: '87654321', company_name: 'Syntetická firma' } }) }))
@@ -42,6 +47,7 @@ function preview(overrides: Record<string, unknown> = {}) {
       { code: 'ico_match', level: 'ok', message: 'IČO sedí', context: {} },
       { code: 'accounts_creatable', level: 'error', message: 'Chybí analytiky', context: {} },
     ],
+    code_map: [],
     can_apply: false, can_apply_with_new_accounts: true, can_write: true, can_create_accounts: true,
     ...overrides,
   }
@@ -132,5 +138,37 @@ describe('Náhled zaúčtování mezd', () => {
     expect(wrapper.get('[data-testid="payroll-posting-check-already_imported"]').text()).toBe('Už načteno')
     expect(wrapper.get('[data-testid="action-apply"]').attributes('disabled')).toBeDefined()
     expect(wrapper.find('[data-testid="payroll-posting-create-accounts"]').exists()).toBe(false)
+  })
+
+  it('zkratky předkontací bez účtů nabídne přiřadit a po uložení načte náhled znovu', async () => {
+    m.preview.mockRejectedValueOnce({ response: { status: 422, data: { error: {
+      code: 'unmapped_accounting_codes', message: 'Zkratky bez účtů',
+      unmapped_codes: [{ code: '7Int', usage: ['internal'], count: 1, samples: [{ document: 'Interní doklad 001', text: 'Hrubá mzda', amount: 30000 }] }],
+    } } } })
+    m.preview.mockResolvedValueOnce(preview({ code_map: [{ code: '7Int', debit_account_code: '521', credit_account_code: '331' }] }))
+    m.saveCodeMap.mockResolvedValue({ code_map: [{ code: '7Int', debit_account_code: '521', credit_account_code: '331' }] })
+    const wrapper = mount(PayrollPostingImport, { props: { file: new File(['<xml/>'], 'mzdy.xml') }, global: { stubs } })
+    await flushPromises()
+
+    expect(wrapper.find('[data-testid="payroll-posting-error"]').exists()).toBe(false)
+    const row = wrapper.get('[data-testid="payroll-posting-code-7Int"]')
+    expect(row.text()).toContain('Hrubá mzda')
+    const save = wrapper.get('[data-testid="payroll-posting-code-map-save"]')
+    expect(save.attributes('disabled')).toBeDefined()
+    const inputs = row.findAll('input')
+    await inputs[0].setValue('521')
+    await inputs[1].setValue('521')
+    expect(save.attributes('disabled')).toBeDefined()
+    await inputs[1].setValue('331')
+    expect(save.attributes('disabled')).toBeUndefined()
+    await save.trigger('click')
+    await flushPromises()
+
+    expect(m.saveCodeMap).toHaveBeenCalledWith([{ code: '7Int', debit_account_code: '521', credit_account_code: '331' }])
+    expect(m.preview).toHaveBeenCalledTimes(2)
+    expect(wrapper.find('[data-testid="payroll-posting-code-map"]').exists()).toBe(false)
+    await wrapper.get('[data-testid="action-codes"]').trigger('click')
+    const inputsAgain = wrapper.get('[data-testid="payroll-posting-code-7Int"]').findAll('input')
+    expect(inputsAgain.map(i => (i.element as HTMLInputElement).value)).toEqual(['521', '331'])
   })
 })

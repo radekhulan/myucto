@@ -927,6 +927,7 @@ final class RoutePermissionMap
         // a ostatní závazky (akce ověří navíc `accounting.journal.write` a `other_items`).
         ['POST', '#^/api/accounting/payroll-posting-imports/preview$#', 'accounting', AccessLevel::READ],
         ['POST', '#^/api/accounting/payroll-posting-imports/apply$#', 'accounting.journal.post', AccessLevel::WRITE],
+        ['PUT', '#^/api/accounting/payroll-posting-imports/code-map$#', 'accounting.journal.post', AccessLevel::WRITE],
         // Interní doklady: práva ručního zápisu deníku. Zaúčtování, storno, smazání
         // zaúčtovaného dokladu i se zápisem a hlavička nad existujícím zápisem jsou zápis
         // do deníku, koncept jen jeho příprava.
