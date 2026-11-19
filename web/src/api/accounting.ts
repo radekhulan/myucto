@@ -2393,6 +2393,8 @@ export const POSTING_ERROR_CODES = [
   // Odpisy majetku u hospodářského roku hlásí totéž jako `no_accounting_period`,
   // jen pod vlastním kódem (DepreciationPostingService) — bez něj spadl na `generic`.
   'period_missing',
+  // Zaúčtovaný odpis roku nemá v deníku svůj zápis (deník roku nahradil převod) - znovu se neúčtuje.
+  'depreciation_journal_missing',
   'entry_reversed', 'empty_entry',
   // Vyúčtování zálohy má víc kandidátů → nelze jednoznačně odečíst zálohovou DPH.
   'advance_settlement_ambiguous',

@@ -20013,6 +20013,13 @@ paths:
         opakované spuštění přepíše in-place, dokud je období otevřené. Chyby per
         majetek vrací v poli `errors` (HTTP 200). Zaúčtovat lze pouze období, které
         už skončilo; probíhající nebo budoucí období vrací 409 `period_not_ended`.
+
+        Karta, jejíž účetní odpis roku je zaúčtovaný, ale jeho zápis v deníku chybí
+        (deník roku nahradil převod), se znovu neúčtuje a vrátí se v `errors` s kódem
+        `depreciation_journal_missing`. V roce uzavřeném původním programem (převzatá
+        uzávěrka) se účetní odpisy neúčtují a odpověď nese
+        `accounting_skipped: closing_taken_over`; daňové odpisy se potvrdí. Daňový odpis
+        potvrzený převodem z jiného programu se nepřepočítává.
       parameters:
         - $ref: '#/components/parameters/SupplierIdHeader'
       requestBody:
@@ -20025,7 +20032,7 @@ paths:
               properties:
                 fiscal_year: { type: integer, minimum: 2000, maximum: 2100 }
       responses:
-        '200': { description: "Souhrn {booked, skipped, total_accounting, total_tax, errors}", content: { application/json: { schema: { type: object } } } }
+        '200': { description: "Souhrn {booked, skipped, total_accounting, total_tax, errors, accounting_skipped?}", content: { application/json: { schema: { type: object } } } }
         '403': { $ref: '#/components/responses/Forbidden' }
         '409': { description: Období ještě neskončilo, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
         '422': { $ref: '#/components/responses/ValidationFailed' }
@@ -20585,6 +20592,27 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { description: version_conflict, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+
+  /api/v1/accounting/periods/{id}/closing/book-depreciation:
+    post:
+      tags: [Accounting]
+      summary: Zaúčtování odpisů roku v kroku Odpisy uzávěrky
+      description: |
+        Účetní/admin. Totéž jako `POST /accounting/assets/depreciations/book` za rok období,
+        navíc i do období ve stavu `closing`. Odpověď má stejný tvar
+        (`booked`, `skipped`, `total_accounting`, `total_tax`, `errors`,
+        `accounting_skipped`). V roce uzavřeném původním programem (převzatá uzávěrka)
+        se účetní odpisy neúčtují (`accounting_skipped: closing_taken_over`); karta se
+        zaúčtovaným odpisem bez vlastního zápisu v deníku se hlásí v `errors` kódem
+        `depreciation_journal_missing` a znovu se neúčtuje.
+      parameters:
+        - $ref: '#/components/parameters/SupplierIdHeader'
+        - { in: path, name: id, required: true, schema: { type: integer } }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { type: object } } } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
         '422': { $ref: '#/components/responses/ValidationFailed' }
 
   /api/v1/accounting/periods/{id}/closing/fx-preview:

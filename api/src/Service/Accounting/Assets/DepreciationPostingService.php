@@ -8,6 +8,7 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Infrastructure\Database\TransactionFailure;
 use MyInvoice\Repository\AccountingPeriodRepository;
 use MyInvoice\Repository\AssetRepository;
+use MyInvoice\Repository\ClosingRepository;
 use MyInvoice\Repository\DepreciationEntryRepository;
 use MyInvoice\Repository\PostingRuleRepository;
 use MyInvoice\Service\Accounting\FiscalCalendar;
@@ -31,6 +32,9 @@ use Psr\Log\LoggerInterface;
  */
 final class DepreciationPostingService
 {
+    /** Kód nálezu: zaúčtovaný účetní řádek roku nemá v deníku svůj zápis ({@see postedWithoutJournal()}). */
+    public const JOURNAL_MISSING = 'depreciation_journal_missing';
+
     public function __construct(
         private readonly PostingService $posting,
         private readonly PostingRuleRepository $rules,
@@ -52,9 +56,13 @@ final class DepreciationPostingService
      * pro období skutečně ve stavu 'closing'. Přímé volání z DepreciationAction ho nechává
      * false → účtování striktně jen do 'open' (žádné obcházení R7).
      *
+     * Zaúčtovaný účetní řádek roku bez vlastního zápisu v deníku se znovu neúčtuje a vrátí
+     * se v errors s kódem {@see JOURNAL_MISSING}. V roce uzavřeném původním systémem se
+     * účetní odpisy neúčtují vůbec (`accounting_skipped` = 'closing_taken_over').
+     *
      * @param array{user_id?:?int, posted_by?:?int, ip?:?string, user_agent?:?string} $meta
      * @return array{booked:int, skipped:int, total_accounting:float, total_tax:float,
-     *     errors: list<array{asset_id:int, code:string}>}
+     *     errors: list<array{asset_id:int, code:string}>, accounting_skipped?:string}
      */
     public function bookYear(int $supplierId, int $fiscalYear, array $meta = [], bool $allowClosingPeriod = false): array
     {
@@ -73,18 +81,28 @@ final class DepreciationPostingService
         ];
 
         [$periodStart, $periodEnd] = $this->bookingWindow($supplierId, $fiscalYear, $taxEvidence);
+        $takenOver = $this->closingTakenOver($supplierId, $fiscalYear, $taxEvidence);
+        if ($takenOver) {
+            $result['accounting_skipped'] = 'closing_taken_over';
+        }
 
         $pdo = $this->db->pdo();
         $foreign = $pdo->inTransaction();
         foreach ($this->assets->listForBooking($supplierId, $fiscalYear, $periodStart, $periodEnd) as $asset) {
             $assetId = (int) $asset['id'];
+            // Účetní řádek roku je zaúčtovaný, ale jeho zápis v deníku chybí (deník roku
+            // nahradil jiný, např. obnovený z převodu). Znovu se neúčtuje: odpis roku by se
+            // zdvojil, pokud ho nese jiný zápis. Ohlásí se, rozhodne účetní.
+            if (!$takenOver && $this->accountingJournalMissing($supplierId, $asset, $fiscalYear, $taxEvidence)) {
+                $result['errors'][] = ['asset_id' => $assetId, 'code' => self::JOURNAL_MISSING];
+            }
             try {
                 // Odvolanou transakci (1020/1213) karta zopakuje, pokud ji vlastní. V cizí
                 // transakci (uzávěrka) ji dostane vlastník: další karty by jinak běžely
                 // v autocommitu.
                 [$bookedSomething, $accAmount, $taxAmount] = TransactionFailure::retrying(
                     $pdo,
-                    fn (): array => $this->bookAsset($supplierId, $assetId, $fiscalYear, $periodEnd, $taxEvidence, $meta, $allowClosingPeriod),
+                    fn (): array => $this->bookAsset($supplierId, $assetId, $fiscalYear, $periodEnd, $taxEvidence, $meta, $allowClosingPeriod, $takenOver),
                 );
                 if ($bookedSomething) {
                     $result['booked']++;
@@ -133,6 +151,7 @@ final class DepreciationPostingService
         bool $taxEvidence,
         array $meta,
         bool $allowClosingPeriod,
+        bool $closingTakenOver = false,
     ): array {
         $pdo = $this->db->pdo();
         $ownTx = !$pdo->inTransaction();
@@ -176,8 +195,9 @@ final class DepreciationPostingService
             }
 
             // 1) účetní řádek roku → upsert (posted) + journal 551/oprávky. Rok, jehož
-            //    odpisy zaúčtoval deník převzatý z jiného programu, se znovu neúčtuje.
-            $accRow = $this->accountingRowToBook($asset, $ctx, $fiscalYear, $taxEvidence);
+            //    odpisy zaúčtoval deník převzatý z jiného programu, ani rok uzavřený původním
+            //    systémem se znovu neúčtuje.
+            $accRow = $closingTakenOver ? null : $this->accountingRowToBook($asset, $ctx, $fiscalYear, $taxEvidence);
             if ($accRow !== null) {
                 // Zaúčtování k poslednímu dni ZDAŇOVACÍHO OBDOBÍ (reálné hranice
                 // z hlavičky bookYear — hospodářský rok posunut).
@@ -235,19 +255,26 @@ final class DepreciationPostingService
      * přepis). `pending_*` je rozdíl proti tomu, co už za rok leží v evidenci — o tolik
      * se po zaúčtování změní účetní náklad 551 (VH), resp. daňové odpisy v DPPO.
      * Chronologický zámek předchozího roku se nekontroluje: jde o odhad, ne o zaúčtování.
+     * `findings` = karty, jejichž zaúčtovaný účetní řádek roku nemá v deníku svůj zápis
+     * (bookYear je neúčtuje, ohlásí je); `accounting_skipped` = 'closing_taken_over', když
+     * rok uzavřel původní systém a účetní odpisy se v něm neúčtují.
      *
      * @return array{assets:int, planned_accounting:float, posted_accounting:float, pending_accounting:float,
-     *     planned_tax:float, confirmed_tax:float, pending_tax:float}
+     *     planned_tax:float, confirmed_tax:float, pending_tax:float, accounting_skipped:?string,
+     *     findings: list<array{asset_id:int, code:string}>}
      */
     public function previewYear(int $supplierId, int $fiscalYear): array
     {
         $taxEvidence = $this->isTaxEvidence($supplierId);
         [$periodStart, $periodEnd] = $this->bookingWindow($supplierId, $fiscalYear, $taxEvidence);
 
+        $takenOver = $this->closingTakenOver($supplierId, $fiscalYear, $taxEvidence);
         $out = [
             'assets' => 0,
             'planned_accounting' => 0.0, 'posted_accounting' => 0.0, 'pending_accounting' => 0.0,
             'planned_tax' => 0.0, 'confirmed_tax' => 0.0, 'pending_tax' => 0.0,
+            'accounting_skipped' => $takenOver ? 'closing_taken_over' : null,
+            'findings' => [],
         ];
         foreach ($this->assets->listForBooking($supplierId, $fiscalYear, $periodStart, $periodEnd) as $asset) {
             $assetId = (int) $asset['id'];
@@ -257,7 +284,10 @@ final class DepreciationPostingService
             $postedAcc = $existingAcc !== null ? round((float) $existingAcc['amount'], 2) : 0.0;
             $confirmedTax = $existingTax !== null ? round((float) $existingTax['amount'], 2) : 0.0;
 
-            $accRow = $this->accountingRowToBook($asset, $ctx, $fiscalYear, $taxEvidence);
+            if (!$takenOver && $this->accountingJournalMissing($supplierId, $asset, $fiscalYear, $taxEvidence)) {
+                $out['findings'][] = ['asset_id' => $assetId, 'code' => self::JOURNAL_MISSING];
+            }
+            $accRow = $takenOver ? null : $this->accountingRowToBook($asset, $ctx, $fiscalYear, $taxEvidence);
             $plannedAcc = $accRow !== null ? round((float) $accRow['amount'], 2) : $postedAcc;
             $taxRow = self::taxRowIsRecomputed($existingTax)
                 ? $this->calculator->taxYearRow($ctx, (string) $asset['tax_method'], $fiscalYear)
@@ -291,8 +321,12 @@ final class DepreciationPostingService
      */
     private function accountingRowToBook(array $asset, DepreciationContext $ctx, int $fiscalYear, bool $taxEvidence): ?array
     {
-        if ($taxEvidence || $asset['accumulated_account_code'] === null
-            || DepreciationEntryRepository::isBookedByMigratedJournal($this->entries->findYear((int) $asset['id'], 'accounting', $fiscalYear))) {
+        if ($taxEvidence || $asset['accumulated_account_code'] === null) {
+            return null;
+        }
+        $existing = $this->entries->findYear((int) $asset['id'], 'accounting', $fiscalYear);
+        if (DepreciationEntryRepository::isBookedByMigratedJournal($existing)
+            || $this->postedWithoutJournal((int) $asset['supplier_id'], $existing)) {
             return null;
         }
         $row = $this->calculator->accountingYearRow(
@@ -305,11 +339,55 @@ final class DepreciationPostingService
         return $row !== null && round((float) $row['amount'], 2) > 0.0 ? $row : null;
     }
 
-    /** Přepočítá bookYear daňový řádek? Pauzu (R14) a ruční přepis nechává být. */
+    /**
+     * Zaúčtovaný účetní řádek roku, jehož vlastní zápis ('depreciation', id řádku) v deníku
+     * není. Odpis roku pak nese jiný zápis (deník převzatý nebo obnovený z jiného programu)
+     * nebo chybí úplně; nové zaúčtování by ho v prvním případě zdvojilo. Řádek zaúčtovaný
+     * převzatým deníkem ({@see DepreciationEntryRepository::isBookedByMigratedJournal()}) se
+     * nepočítá: tam je to stav očekávaný.
+     */
+    private function postedWithoutJournal(int $supplierId, ?array $existing): bool
+    {
+        if ($existing === null || ($existing['status'] ?? '') !== 'posted' || DepreciationEntryRepository::isBookedByMigratedJournal($existing)) {
+            return false;
+        }
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT 1 FROM journal_entries WHERE supplier_id = ? AND source_type = 'depreciation' AND source_id = ? LIMIT 1"
+        );
+        $stmt->execute([$supplierId, (int) $existing['id']]);
+        return $stmt->fetchColumn() === false;
+    }
+
+    /** @param array<string,mixed> $asset */
+    private function accountingJournalMissing(int $supplierId, array $asset, int $fiscalYear, bool $taxEvidence): bool
+    {
+        return !$taxEvidence && $asset['accumulated_account_code'] !== null
+            && $this->postedWithoutJournal($supplierId, $this->entries->findYear((int) $asset['id'], 'accounting', $fiscalYear));
+    }
+
+    /**
+     * Rok uzavřel původní systém (převzaté uzávěrkové zápisy, {@see ClosingRepository::takenOverClosingEntryIds()}):
+     * jeho deník je úplný včetně odpisů, uzávěrka ho jen navazuje. Účetní odpis se do něj
+     * neúčtuje, jinak by uzavření knih odmítlo zbytek po převzaté uzávěrce.
+     */
+    private function closingTakenOver(int $supplierId, int $fiscalYear, bool $taxEvidence): bool
+    {
+        if ($taxEvidence) {
+            return false;
+        }
+        $period = $this->periods->findByYear($supplierId, $fiscalYear);
+        return $period !== null && (new ClosingRepository($this->db))->takenOverClosingEntryIds($supplierId, (int) $period['id']) !== [];
+    }
+
+    /**
+     * Přepočítá bookYear daňový řádek? Pauzu (R14), ruční přepis a řádek potvrzený převodem
+     * z jiného programu nechává být (převzatý daňový odpis uplatnila firma v podaném přiznání).
+     */
     private static function taxRowIsRecomputed(?array $existingTax): bool
     {
         return $existingTax === null
-            || (!$existingTax['is_paused'] && !DepreciationEntryRepository::isOverridden($existingTax));
+            || (!$existingTax['is_paused'] && !DepreciationEntryRepository::isOverridden($existingTax)
+                && !DepreciationEntryRepository::isConfirmedByMigration($existingTax));
     }
 
     private function isTaxEvidence(int $supplierId): bool

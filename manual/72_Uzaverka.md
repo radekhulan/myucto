@@ -128,6 +128,17 @@ Kontrolují se mimo jiné:
 
 Nebyl-li v období žádný odpisovaný majetek, krok se přeskočí sám.
 
+Zaúčtování odpisů roku nezdvojí odpis, který už v deníku je:
+
+- Je-li u karty účetní odpis roku vedený jako zaúčtovaný, ale jeho zápis v deníku chybí (deník roku například
+  nahradil převod z původního programu, který odpisy nese v měsíčních zápisech), odpis se znovu nezaúčtuje.
+  Aplikace kartu ohlásí jako chybu „zápis v deníku chybí". Ověřte v deníku, zda odpis roku nese jiný zápis,
+  a případně ho zaúčtujte ručně. Náhled odpisů pro daň z příjmů s tím počítá stejně (nic nečeká na zaúčtování).
+- V roce uzavřeném původním programem (převzatá uzávěrka, viz [Převzatá uzávěrka roku](#prevzata-uzaverka-roku))
+  se účetní odpisy neúčtují vůbec, deník roku je obsahuje. Potvrdí se jen daňové odpisy.
+- Daňový odpis převzatý převodem z jiného programu (Money S3, PREMIER apod.) se nepřepočítává. Firma ho uplatnila
+  v podaném přiznání a odhad daně z příjmů i potvrzení roku ho berou tak, jak ho převod zapsal.
+
 > [!WARNING]
 > Tlačítko **Zaúčtovat odpisy** na stránce Majetek funguje jen do stavu období Otevřené. Jakmile období přejde
 > do Uzavírá se, stejné tlačítko odpisy dál nezaúčtuje (hlásí neotevřené období). V panelu kroku je ale
