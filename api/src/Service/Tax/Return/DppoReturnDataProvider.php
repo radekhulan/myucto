@@ -503,20 +503,7 @@ final class DppoReturnDataProvider
      */
     private function profitBeforeTax(int $supplierId, string $startsOn, string $endsOn): float
     {
-        $stmt = $this->db->pdo()->prepare(
-            "WITH RECURSIVE " . JournalTaxOrigin::cte($supplierId) . " SELECT COALESCE(SUM(CASE WHEN l.side = 'credit' THEN l.signed_amount ELSE -l.signed_amount END), 0) AS vh
-               FROM journal_entry_lines l
-               JOIN journal_entries e   ON e.id = l.entry_id
-               " . JournalTaxOrigin::join() . "
-               JOIN chart_of_accounts a ON a.id = l.account_id
-              WHERE l.supplier_id = ? AND e.posted_at IS NOT NULL
-                AND e.entry_date BETWEEN ? AND ?
-                AND " . JournalTaxOrigin::includedSql() . "
-                AND a.account_type IN ('revenue','expense')
-                AND a.account_code NOT LIKE '59%'"
-        );
-        $stmt->execute([$supplierId, $startsOn, $endsOn, ClosingSourceId::STOCK_SLOT_BASE]);
-        return round((float) $stmt->fetchColumn(), 2);
+        return (new DppoBooksFingerprint($this->db))->profitBeforeTax($supplierId, $startsOn, $endsOn);
     }
 
     /**

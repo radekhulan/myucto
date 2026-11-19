@@ -954,9 +954,15 @@ function tabLabel(k: TabKey): string { return t('taxReturn.tab_' + k) }
         </button>
       </div>
 
-      <div v-if="type === 'po' && isFinal && state.books_current === false"
+      <!-- Přiznání bez otisku: VH se od finalizace drobně změnil, daň ale ne. Jen informace. -->
+      <div v-if="type === 'po' && isFinal && state.books_current === false && state.books_current_reason === 'vh_differs_tax_same'"
+        class="bg-primary-50 dark:bg-primary-500/[0.06] border border-primary-200 rounded-md p-3 text-sm text-primary-800 dark:text-primary-200 mb-4" data-test="books-vh-differs">
+        {{ t('taxReturn.books_vh_differs_tax_same', { difference: formatMoney(state.books_vh?.difference ?? 0, 'CZK') }) }}
+      </div>
+      <div v-else-if="type === 'po' && isFinal && state.books_current === false"
         class="bg-warning-50 border border-warning-500/40 rounded-md p-3 text-sm text-warning-700 mb-4" data-test="books-changed">
         {{ t('taxReturn.books_changed_after_final') }}
+        <template v-if="state.books_vh"> {{ t('taxReturn.books_vh_difference', { difference: formatMoney(state.books_vh.difference, 'CZK') }) }}</template>
       </div>
 
       <!-- Warnings (společné) -->

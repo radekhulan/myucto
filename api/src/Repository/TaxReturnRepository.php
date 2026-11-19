@@ -310,19 +310,47 @@ final class TaxReturnRepository
      * Vrací null, když žádné finalizované nemáme — uživatel pak zadá poslední známou
      * daň ručně.
      *
-     * `$currentBooksOnly` (výchozí): DPPO, jehož otisk účetnictví uložený při finalizaci
-     * ({@see \MyInvoice\Service\Tax\Return\DppoBooksFingerprint}) už neodpovídá deníku,
-     * se jako známá daň nevrátí; průvodce uzávěrkou pak navrhne daň dopočtenou z aktuálních
-     * knih. Přiznání bez otisku (finalizovaná dřív) se berou jako dosud. Dodatečné přiznání
-     * podle § 141 DŘ potřebuje naopak naposledy stanovenou daň bez ohledu na pozdější změny
+     * `$currentBooksOnly` (výchozí): DPPO, které už neodpovídá účetnictví
+     * ({@see \MyInvoice\Service\Tax\Return\DppoBooksFingerprint::assess()}: otisk uložený při
+     * finalizaci, u starších přiznání bez otisku uložený VH), se jako známá daň nevrátí;
+     * průvodce uzávěrkou pak navrhne daň dopočtenou z aktuálních knih. Rozdíl VH, který
+     * zaokrouhlený základ ani daň nemění, přiznání nezneplatní. Dodatečné přiznání podle
+     * § 141 DŘ potřebuje naopak naposledy stanovenou daň bez ohledu na pozdější změny
      * účetnictví, proto volá s false.
      *
      * @param 'fo'|'po'|string $type
      */
     public function findLastKnownTax(int $supplierId, int $year, string $type, bool $currentBooksOnly = true): ?float
     {
+        $row = $this->lastFinalizedComputed($supplierId, $year, $type);
+        if ($row === null) {
+            return null;
+        }
+        if ($currentBooksOnly && $this->normType($type) === 'po'
+            && \MyInvoice\Service\Tax\Return\DppoBooksFingerprint::isStale($this->assessRow($supplierId, $year, $row))) {
+            return null;
+        }
+        return $this->extractTax($row['computed'], $this->normType($type));
+    }
+
+    /**
+     * Posouzení posledního finalizovaného DPPO proti aktuálnímu účetnictví
+     * ({@see \MyInvoice\Service\Tax\Return\DppoBooksFingerprint::assess()}); null = žádné
+     * finalizované přiznání. Průvodce uzávěrkou z něj ukazuje drobný rozdíl VH, který daň nemění.
+     *
+     * @return array{current:?bool, reason:string, stored_vh?:float, current_vh?:float, vh_difference?:float}|null
+     */
+    public function lastFinalizedBooksAssessment(int $supplierId, int $year): ?array
+    {
+        $row = $this->lastFinalizedComputed($supplierId, $year, 'po');
+        return $row === null ? null : $this->assessRow($supplierId, $year, $row);
+    }
+
+    /** @return array{computed:array<string,mixed>, inputs:array<string,mixed>, books_fingerprint:?string}|null */
+    private function lastFinalizedComputed(int $supplierId, int $year, string $type): ?array
+    {
         $stmt = $this->db->pdo()->prepare(
-            "SELECT variant, computed, books_fingerprint
+            "SELECT variant, computed, inputs, books_fingerprint
                FROM income_tax_returns
               WHERE supplier_id = ? AND year = ? AND taxpayer_type = ?
                 AND status = 'final' AND computed IS NOT NULL
@@ -334,12 +362,21 @@ final class TaxReturnRepository
         if ($row === false) {
             return null;
         }
-        if ($currentBooksOnly && $this->normType($type) === 'po'
-            && (new \MyInvoice\Service\Tax\Return\DppoBooksFingerprint($this->db))->isCurrent($supplierId, $year, $row['books_fingerprint']) === false) {
-            return null;
-        }
-        $computed = $this->decode((string) ($row['computed'] ?? ''));
-        return $this->extractTax($computed, $this->normType($type));
+        return [
+            'computed' => $this->decode((string) ($row['computed'] ?? '')),
+            'inputs' => $this->decode($row['inputs'] ?? null),
+            'books_fingerprint' => $row['books_fingerprint'] !== null ? (string) $row['books_fingerprint'] : null,
+        ];
+    }
+
+    /**
+     * @param array{computed:array<string,mixed>, inputs:array<string,mixed>, books_fingerprint:?string} $row
+     * @return array{current:?bool, reason:string, stored_vh?:float, current_vh?:float, vh_difference?:float}
+     */
+    private function assessRow(int $supplierId, int $year, array $row): array
+    {
+        return (new \MyInvoice\Service\Tax\Return\DppoBooksFingerprint($this->db))
+            ->assess($supplierId, $year, $row['books_fingerprint'], $row['computed'], $row['inputs']);
     }
 
     /** @return array<string,mixed>|null Poslední finalizovaná varianta přiznání za období. */

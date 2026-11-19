@@ -1646,6 +1646,9 @@ const canOpenNextStage = computed(() => ['closed', 'reviewed', 'approved'].inclu
               <div v-if="incomeTaxPreview.suggested_source === 'finalized_return'">
                 {{ t('accounting.closing.income_tax.suggested') }}:
                 <strong class="font-mono">{{ formatMoney(incomeTaxPreview.suggested_amount || 0) }}</strong>
+                <p v-if="incomeTaxPreview.return_books?.reason === 'vh_differs_tax_same'" class="text-xs text-neutral-500" data-test="income-tax-return-vh-differs">
+                  {{ t('accounting.closing.income_tax.return_vh_differs', { difference: formatMoney(incomeTaxPreview.return_books.vh_difference ?? 0) }) }}
+                </p>
               </div>
               <div v-else-if="incomeTaxPreview.suggested_source === 'computed_from_ledger'" class="text-warning-700">
                 {{ t('accounting.closing.income_tax.computed_from_ledger') }}:

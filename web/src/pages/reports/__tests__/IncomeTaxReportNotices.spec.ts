@@ -120,6 +120,15 @@ describe('IncomeTaxReport.vue: upozornění DPPO', () => {
     expect(w.find('[data-test="books-changed"]').text()).toContain('taxReturn.books_changed_after_final')
   })
 
+  it('shows a small profit difference that keeps the tax as info, not as stale books', async () => {
+    const w = await mountPage({
+      ...makeState('po', 'final'), books_current: false, books_current_reason: 'vh_differs_tax_same',
+      books_vh: { stored: 3295583.22, current: 3295591.17, difference: 7.95 },
+    })
+    expect(w.find('[data-test="books-vh-differs"]').text()).toContain('taxReturn.books_vh_differs_tax_same')
+    expect(w.find('[data-test="books-changed"]').exists()).toBe(false)
+  })
+
   it('stays quiet while the books match or cannot be judged', async () => {
     for (const current of [true, null]) {
       const w = await mountPage({ ...makeState('po', 'final'), books_current: current })

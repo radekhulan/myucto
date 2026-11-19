@@ -6,6 +6,7 @@ namespace MyInvoice\Service\Tax\Return;
 
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\AccountingPeriodRepository;
+use MyInvoice\Repository\TaxConstantsRepository;
 use MyInvoice\Service\Accounting\Closing\ClosingSourceId;
 
 /**
@@ -18,11 +19,27 @@ use MyInvoice\Service\Accounting\Closing\ClosingSourceId;
  * (591/341), odložené daně (592) ani uzavření knih po finalizaci otisk nezmění. Otisk je
  * obsahový (kódy účtů a dimenzí, částky), ne id řádků, takže přeúčtování se stejným
  * výsledkem ho nemění.
+ *
+ * Přiznání finalizované před zavedením otisku se posuzuje náhradně podle výsledku
+ * hospodaření uloženého v podkladech přiznání ({@see assess()}).
  */
 final class DppoBooksFingerprint
 {
     private const VERSION = 'v1';
     private const AXES = ['activity', 'activity_kind', 'tax_regime'];
+
+    /** Otisk odpovídá účetnictví. */
+    public const REASON_FINGERPRINT_MATCH = 'fingerprint_match';
+    /** Otisk neodpovídá: účetnictví se po finalizaci změnilo. */
+    public const REASON_FINGERPRINT_MISMATCH = 'fingerprint_mismatch';
+    /** Bez otisku: uložený VH přiznání se shoduje s VH z aktuálního účetnictví. */
+    public const REASON_VH_MATCH = 'vh_match';
+    /** Bez otisku: VH se liší, ale základ daně po zaokrouhlení a daň zůstávají stejné. */
+    public const REASON_VH_DIFFERS_TAX_SAME = 'vh_differs_tax_same';
+    /** Bez otisku: VH se liší a mění základ daně, přiznání je zastaralé. */
+    public const REASON_VH_DIFFERS_TAX_CHANGED = 'vh_differs_tax_changed';
+    /** Nelze posoudit (bez otisku i bez uloženého VH, nezisková organizace, rok bez období). */
+    public const REASON_NOT_ASSESSABLE = 'not_assessable';
 
     public function __construct(private readonly Connection $db) {}
 
@@ -85,13 +102,106 @@ final class DppoBooksFingerprint
         ));
     }
 
-    /** Odpovídá uložený otisk aktuálnímu účetnictví? null = otisk nebyl uložen (nelze posoudit). */
-    public function isCurrent(int $supplierId, int $year, ?string $stored): ?bool
+    /**
+     * Výsledek hospodaření před zdaněním pro DPPO (ř. 10): výsledkové účty bez 59x, bez
+     * uzavření knih, se skladovými sloty. Stejné vymezení zápisů jako otisk; podklady DPPO
+     * ho berou odsud ({@see DppoReturnDataProvider::gather()}).
+     */
+    public function profitBeforeTax(int $supplierId, string $startsOn, string $endsOn): float
     {
-        if ($stored === null || $stored === '') {
-            return null;
+        $stmt = $this->db->pdo()->prepare(
+            "WITH RECURSIVE " . JournalTaxOrigin::cte($supplierId) . " SELECT COALESCE(SUM(CASE WHEN l.side = 'credit' THEN l.signed_amount ELSE -l.signed_amount END), 0) AS vh
+               FROM journal_entry_lines l
+               JOIN journal_entries e   ON e.id = l.entry_id
+               " . JournalTaxOrigin::join() . "
+               JOIN chart_of_accounts a ON a.id = l.account_id
+              WHERE l.supplier_id = ? AND e.posted_at IS NOT NULL
+                AND e.entry_date BETWEEN ? AND ?
+                AND " . JournalTaxOrigin::includedSql() . "
+                AND a.account_type IN ('revenue','expense')
+                AND a.account_code NOT LIKE '59%'"
+        );
+        $stmt->execute([$supplierId, $startsOn, $endsOn, ClosingSourceId::STOCK_SLOT_BASE]);
+        return round((float) $stmt->fetchColumn(), 2);
+    }
+
+    /**
+     * Odpovídá finalizované DPPO aktuálnímu účetnictví?
+     *
+     * S uloženým otiskem rozhoduje otisk. Přiznání finalizované bez otisku se posoudí podle
+     * výsledku hospodaření uloženého v podkladech (`computed.podklady.vh`) proti VH
+     * z aktuálních knih spočtenému stejně jako pro DPPO ({@see profitBeforeTax()}): shoda =
+     * aktuální; rozdíl, po kterém vyjde stejný zaokrouhlený základ daně (ř. 270) i daň,
+     * = neaktuální, ale daň platí (`vh_differs_tax_same`); jinak zastaralé. Základ se
+     * přepočte výpočtem DPPO nad uloženými podklady a vstupy přiznání dvakrát, s uloženým
+     * a s aktuálním VH, takže se liší jen VH a zaokrouhlení i limity jsou stejné jako v DPPO.
+     *
+     * @param array<string,mixed> $computed uložený výpočet přiznání (income_tax_returns.computed)
+     * @param array<string,mixed> $inputs ruční vstupy přiznání
+     * @return array{current:?bool, reason:string, stored_vh?:float, current_vh?:float, vh_difference?:float}
+     */
+    public function assess(int $supplierId, int $year, ?string $storedFingerprint, array $computed, array $inputs): array
+    {
+        if ($storedFingerprint !== null && $storedFingerprint !== '') {
+            $current = $this->forYear($supplierId, $year);
+            return $current !== null && hash_equals($storedFingerprint, $current)
+                ? ['current' => true, 'reason' => self::REASON_FINGERPRINT_MATCH]
+                : ['current' => false, 'reason' => self::REASON_FINGERPRINT_MISMATCH];
         }
-        $current = $this->forYear($supplierId, $year);
-        return $current !== null && hash_equals($stored, $current);
+        $podklady = is_array($computed['podklady'] ?? null) ? $computed['podklady'] : [];
+        $period = (new AccountingPeriodRepository($this->db))->findByYear($supplierId, $year);
+        if (!isset($podklady['vh']) || !is_numeric($podklady['vh']) || $period === null
+            || isset($podklady['nonprofit']) || ($podklady['accounting_decree'] ?? '500') === '504') {
+            return ['current' => null, 'reason' => self::REASON_NOT_ASSESSABLE];
+        }
+        $storedVh = round((float) $podklady['vh'], 2);
+        $currentVh = $this->profitBeforeTax($supplierId, (string) $period['starts_on'], (string) $period['ends_on']);
+        $detail = ['stored_vh' => $storedVh, 'current_vh' => $currentVh, 'vh_difference' => round($currentVh - $storedVh, 2)];
+        if ((int) round($storedVh * 100) === (int) round($currentVh * 100)) {
+            return ['current' => true, 'reason' => self::REASON_VH_MATCH] + $detail;
+        }
+        return ['current' => false, 'reason' => $this->taxUnaffected($year, $podklady, $inputs, $currentVh)
+            ? self::REASON_VH_DIFFERS_TAX_SAME : self::REASON_VH_DIFFERS_TAX_CHANGED] + $detail;
+    }
+
+    /**
+     * Přiznání je pro průvodce uzávěrkou zastaralé (daň z něj se nepoužije). Rozdíl VH,
+     * který nemění zaokrouhlený základ ani daň, přiznání nezneplatní.
+     *
+     * @param array{current:?bool, reason:string} $assessment výsledek {@see assess()}
+     */
+    public static function isStale(array $assessment): bool
+    {
+        return $assessment['current'] === false && $assessment['reason'] !== self::REASON_VH_DIFFERS_TAX_SAME;
+    }
+
+    /**
+     * Vyjde s aktuálním VH stejný zaokrouhlený základ daně (ř. 270) i daň? Selže-li
+     * přepočet nad uloženými podklady, bere se přiznání jako dotčené (zastaralé).
+     *
+     * @param array<string,mixed> $podklady
+     * @param array<string,mixed> $inputs
+     */
+    private function taxUnaffected(int $year, array $podklady, array $inputs, float $currentVh): bool
+    {
+        try {
+            $constants = (new TaxConstantsRepository($this->db))->forExactYear($year);
+            $calc = new DppoReturnCalculator();
+            $stored = $calc->compute($podklady, $inputs, $constants);
+            $current = $calc->compute(['vh' => $currentVh] + $podklady, $inputs, $constants);
+        } catch (\Throwable) {
+            return false;
+        }
+        $base = static function (array $result): ?float {
+            foreach ((array) ($result['lines'] ?? []) as $line) {
+                if ((int) ($line['line'] ?? 0) === 270) {
+                    return round((float) $line['value'], 2);
+                }
+            }
+            return null;
+        };
+        $storedBase = $base($stored);
+        return $storedBase !== null && $storedBase === $base($current)
+            && round((float) ($stored['summary']['total_tax'] ?? 0), 2) === round((float) ($current['summary']['total_tax'] ?? 0), 2);
     }
 }

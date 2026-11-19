@@ -20713,7 +20713,7 @@ paths:
         - $ref: '#/components/parameters/SupplierIdHeader'
         - { in: path, name: id, required: true, schema: { type: integer } }
       responses:
-        '200': { description: "OK {suggested_amount, suggested_source (finalized_return | computed_from_ledger | computed_from_assessment u 504), suggested_unavailable {code, message} když návrh chybí, activity_required a existing_activity (504), has_finalized_return, taxpayer_type, applicable, balance_341, balance_591, booked_amount, booked_outside_wizard, closing_taken_over, existing_booked_outside}; applicable=false pro FO. Finalizované DPPO, jehož účetnictví se po finalizaci změnilo (books_current=false v detailu přiznání), se jako finalized_return nepoužije", content: { application/json: { schema: { type: object } } } }
+        '200': { description: "OK {suggested_amount, suggested_source (finalized_return | computed_from_ledger | computed_from_assessment u 504), suggested_unavailable {code, message} když návrh chybí, activity_required a existing_activity (504), has_finalized_return, taxpayer_type, applicable, balance_341, balance_591, booked_amount, booked_outside_wizard, closing_taken_over, existing_booked_outside, return_books {current, reason, vh_difference}}; applicable=false pro FO. Finalizované DPPO, jehož účetnictví se po finalizaci změnilo (books_current=false v detailu přiznání), se jako finalized_return nepoužije, kromě rozdílu VH bez dopadu na daň (return_books.reason = vh_differs_tax_same)", content: { application/json: { schema: { type: object } } } }
         '404': { $ref: '#/components/responses/NotFound' }
         '422': { $ref: '#/components/responses/ValidationFailed' }
 
@@ -31147,9 +31147,26 @@ paths:
                     readOnly: true
                     description: >-
                       Jen finalizované DPPO: odpovídá daňově relevantní účetnictví období (výsledkové účty bez 59x
-                      a daňové osy 504) stavu při finalizaci? false = účetnictví se po finalizaci změnilo a průvodce
-                      uzávěrkou toto přiznání jako známou daň nepoužije. null = nelze posoudit (koncept, DPFO nebo
-                      přiznání finalizované bez uloženého otisku).
+                      a daňové osy 504) stavu při finalizaci? Přiznání bez uloženého otisku se posoudí podle VH
+                      uloženého v podkladech (computed.podklady.vh) proti VH z aktuálních knih. false = účetnictví
+                      se po finalizaci změnilo a průvodce uzávěrkou toto přiznání jako známou daň nepoužije, kromě
+                      books_current_reason = vh_differs_tax_same (daň z přiznání dál platí). null = nelze posoudit
+                      (koncept, DPFO, přiznání bez otisku i bez uloženého VH).
+                  books_current_reason:
+                    type: [string, 'null']
+                    readOnly: true
+                    enum: [fingerprint_match, fingerprint_mismatch, vh_match, vh_differs_tax_same, vh_differs_tax_changed, not_assessable, null]
+                    description: >-
+                      Důvod books_current. vh_differs_tax_same = přiznání bez otisku, VH se liší, ale základ daně
+                      po zaokrouhlení (ř. 270) i daň vyjdou stejně; vh_differs_tax_changed = rozdíl mění základ.
+                  books_vh:
+                    type: [object, 'null']
+                    readOnly: true
+                    description: Jen u přiznání bez otisku s uloženým VH, VH přiznání, VH z aktuálních knih a rozdíl.
+                    properties:
+                      stored: { type: number }
+                      current: { type: number }
+                      difference: { type: number }
                   computed:
                     type: object
                     properties:

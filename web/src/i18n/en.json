@@ -22359,7 +22359,8 @@
         "confirm_taken_over": "Confirm, posted in the original system",
         "confirm_booked": "Confirm posted tax",
         "confirmed_outside": "The step is confirmed without a new entry, the tax of {amount} is in the journal outside the wizard.",
-        "taken_over_no_tax": "The original system closed this year and no income tax is posted in it. If no tax arose, skip the step."
+        "taken_over_no_tax": "The original system closed this year and no income tax is posted in it. If no tax arose, skip the step.",
+        "return_vh_differs": "The profit or loss from the books differs from the return by {difference}, the rounded tax base and the tax stay the same."
       },
       "stock": {
         "needs_closing": "This step becomes available once closing has started (status Closing).",
@@ -32320,6 +32321,8 @@
     "projection_optional": "informational",
     "projection_incomplete": "The closing projection is incomplete. These steps could not be previewed and are not included in the projected result or tax:",
     "books_changed_after_final": "The accounting records changed after this return was finalized, consider a supplementary return. The closing wizard therefore suggests the tax from the current books, not from this return.",
+    "books_vh_difference": "The profit or loss from the current books differs from the return by {difference}.",
+    "books_vh_differs_tax_same": "The profit or loss from the current books differs from the return by {difference}. The tax base rounded to whole thousands and the tax stay the same, so the closing wizard keeps suggesting the tax from this return.",
     "proj_depreciation": "Depreciation of the year per depreciation plan (not posted)",
     "proj_stock": "Closing inventory at the balance sheet date (method B)",
     "proj_source_closing": "Closing",

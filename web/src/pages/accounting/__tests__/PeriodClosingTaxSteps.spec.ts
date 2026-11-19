@@ -241,6 +241,16 @@ describe('PeriodClosing.vue - daň z příjmů a odložená daň', () => {
     expect(wrapper.find('[data-test="income-tax-book"]').exists()).toBe(false)
   })
 
+  it('drobný rozdíl VH proti přiznání bez dopadu na daň ukáže jen jako informaci', async () => {
+    m.state.mockResolvedValue(makeState())
+    m.incomeTaxPreview.mockResolvedValue(taxPreview({ return_books: { current: false, reason: 'vh_differs_tax_same', vh_difference: 7.95 } }))
+    const wrapper = mount(PeriodClosing)
+    await flushPromises()
+    await select(wrapper, 'income_tax')
+    expect(wrapper.get('[data-test="income-tax-return-vh-differs"]').text()).toContain('accounting.closing.income_tax.return_vh_differs')
+    expect(wrapper.find('[data-test="income-tax-book"]').exists()).toBe(true)
+  })
+
   it('bez daně zaúčtované jinde nabízí běžné zaúčtování', async () => {
     m.state.mockResolvedValue(makeState())
     m.incomeTaxPreview.mockResolvedValue(taxPreview())

@@ -100,14 +100,77 @@ final class DppoBooksFingerprintTest extends TestCase
         self::assertFalse($this->current());
     }
 
-    public function testLegacyReturnWithoutFingerprintKeepsBeingUsed(): void
+    /** Přiznání bez otisku se stejným VH jako účetnictví je aktuální a průvodce ho použije. */
+    public function testLegacyReturnWithSameProfitIsCurrent(): void
+    {
+        $tax = $this->finalizeLegacy();
+        $state = $this->returns->getReturn($this->supplierId, self::YEAR, 'po', $this->userId);
+        self::assertTrue($state['books_current']);
+        self::assertSame('vh_match', $state['books_current_reason']);
+        self::assertSame($tax, $this->repo->findLastKnownTax($this->supplierId, self::YEAR, 'po'));
+    }
+
+    /**
+     * Přiznání bez otisku, VH se od finalizace změnil o pár korun, zaokrouhlený základ daně
+     * i daň ale zůstávají: přiznání není aktuální, průvodce však jeho daň dál navrhne
+     * a rozdíl jen ukáže.
+     */
+    public function testLegacyReturnWithSmallProfitDifferenceKeepsTax(): void
+    {
+        $tax = $this->finalizeLegacy();
+        $this->post(self::YEAR . '-11-20', [['311', 'debit', 7.95], ['602', 'credit', 7.95]]);
+        $state = $this->returns->getReturn($this->supplierId, self::YEAR, 'po', $this->userId);
+        self::assertFalse($state['books_current']);
+        self::assertSame('vh_differs_tax_same', $state['books_current_reason']);
+        self::assertSame(7.95, $state['books_vh']['difference']);
+        self::assertSame($tax, $this->repo->findLastKnownTax($this->supplierId, self::YEAR, 'po'));
+        $preview = $this->closing->incomeTaxPreview($this->supplierId, $this->periodId);
+        self::assertSame('finalized_return', $preview['suggested_source']);
+        self::assertSame('vh_differs_tax_same', $preview['return_books']['reason']);
+    }
+
+    /** Přiznání bez otisku, změna VH mění základ daně: zastaralé, průvodce daň dopočte. */
+    public function testLegacyReturnWithChangedTaxBaseIsStale(): void
+    {
+        $tax = $this->finalizeLegacy();
+        $this->post(self::YEAR . '-11-20', [['311', 'debit', 50000], ['602', 'credit', 50000]]);
+        $state = $this->returns->getReturn($this->supplierId, self::YEAR, 'po', $this->userId);
+        self::assertFalse($state['books_current']);
+        self::assertSame('vh_differs_tax_changed', $state['books_current_reason']);
+        self::assertNull($this->repo->findLastKnownTax($this->supplierId, self::YEAR, 'po'));
+        self::assertNotSame('finalized_return', $this->closing->incomeTaxPreview($this->supplierId, $this->periodId)['suggested_source']);
+        self::assertSame($tax, $this->repo->findLastKnownTax($this->supplierId, self::YEAR, 'po', false));
+    }
+
+    /** Přiznání bez otisku i bez uloženého VH nejde posoudit a bere se jako dosud. */
+    public function testLegacyReturnWithoutStoredProfitIsNotAssessed(): void
+    {
+        $tax = $this->finalizeLegacy();
+        $this->db->pdo()->prepare("UPDATE income_tax_returns SET computed = JSON_REMOVE(computed, '$.podklady.vh') WHERE supplier_id = ?")
+            ->execute([$this->supplierId]);
+        $this->post(self::YEAR . '-11-20', [['311', 'debit', 50000], ['602', 'credit', 50000]]);
+        $state = $this->returns->getReturn($this->supplierId, self::YEAR, 'po', $this->userId);
+        self::assertNull($state['books_current']);
+        self::assertSame('not_assessable', $state['books_current_reason']);
+        self::assertSame($tax, $this->repo->findLastKnownTax($this->supplierId, self::YEAR, 'po'));
+    }
+
+    /** Nové přiznání s otiskem: drobný rozdíl VH ho zneplatní jako dosud (rozhoduje otisk). */
+    public function testFingerprintDecidesEvenWhenTaxIsSame(): void
+    {
+        $this->finalize();
+        $this->post(self::YEAR . '-11-20', [['311', 'debit', 7.95], ['602', 'credit', 7.95]]);
+        $state = $this->returns->getReturn($this->supplierId, self::YEAR, 'po', $this->userId);
+        self::assertFalse($state['books_current']);
+        self::assertSame('fingerprint_mismatch', $state['books_current_reason']);
+        self::assertNull($this->repo->findLastKnownTax($this->supplierId, self::YEAR, 'po'));
+    }
+
+    private function finalizeLegacy(): float
     {
         $tax = $this->finalize();
         $this->db->pdo()->prepare('UPDATE income_tax_returns SET books_fingerprint = NULL WHERE supplier_id = ?')->execute([$this->supplierId]);
-        $this->post(self::YEAR . '-11-20', [['311', 'debit', 50000], ['602', 'credit', 50000]]);
-        self::assertNull($this->current());
-        self::assertSame($tax, $this->repo->findLastKnownTax($this->supplierId, self::YEAR, 'po'));
-        self::assertSame('finalized_return', $this->closing->incomeTaxPreview($this->supplierId, $this->periodId)['suggested_source']);
+        return $tax;
     }
 
     public function testReopenClearsFingerprint(): void

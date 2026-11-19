@@ -22359,7 +22359,8 @@
         "confirm_taken_over": "Potvrdit, zaúčtováno v původním systému",
         "confirm_booked": "Potvrdit zaúčtovanou daň",
         "confirmed_outside": "Krok je potvrzený bez nového zápisu, daň {amount} leží v deníku mimo průvodce.",
-        "taken_over_no_tax": "Rok uzavřel původní systém a daň z příjmů v něm zaúčtovaná není. Pokud daň nevznikla, krok přeskočte."
+        "taken_over_no_tax": "Rok uzavřel původní systém a daň z příjmů v něm zaúčtovaná není. Pokud daň nevznikla, krok přeskočte.",
+        "return_vh_differs": "Výsledek hospodaření z knih se od přiznání liší o {difference}, základ daně po zaokrouhlení i daň zůstávají stejné."
       },
       "stock": {
         "needs_closing": "Krok je dostupný až po zahájení uzávěrky (stav Uzavírá se).",
@@ -32320,6 +32321,8 @@
     "projection_optional": "informativní",
     "projection_incomplete": "Projekce uzávěrky je neúplná. Náhled těchto kroků selhal a projektovaný výsledek ani daň je nezahrnují:",
     "books_changed_after_final": "Účetnictví se po finalizaci přiznání změnilo, zvažte dodatečné přiznání. Průvodce uzávěrkou proto navrhuje daň z aktuálních knih, ne z tohoto přiznání.",
+    "books_vh_difference": "Výsledek hospodaření z aktuálních knih se od přiznání liší o {difference}.",
+    "books_vh_differs_tax_same": "Výsledek hospodaření z aktuálních knih se od přiznání liší o {difference}. Základ daně po zaokrouhlení na celé tisíce i daň zůstávají stejné, průvodce uzávěrkou proto daň z tohoto přiznání dál navrhuje.",
     "proj_depreciation": "Odpisy roku podle odpisového plánu (nezaúčtované)",
     "proj_stock": "Konečný stav zásob k rozvahovému dni (způsob B)",
     "proj_source_closing": "Uzávěrka",

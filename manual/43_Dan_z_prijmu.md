@@ -324,6 +324,12 @@ Nad tabulkou se zobrazují **upozornění** (chybějící FÚ, nadlimitní dary,
   finalizaci přiznání změnilo, zvažte dodatečné přiznání** a průvodce uzávěrkou přestane
   daň z tohoto přiznání nabízet (navrhne ji z aktuálních knih). Zaúčtování samotné daně
   z příjmů, odložené daně ani uzavření knih upozornění nevyvolá.
+  Přiznání finalizované dřív, které stav účetnictví uložený nemá, se porovná podle výsledku
+  hospodaření uloženého v podkladech přiznání s výsledkem z aktuálních knih. Při shodě je
+  přiznání aktuální. Liší-li se výsledek jen tak, že základ daně po zaokrouhlení na celé
+  tisíce i daň zůstávají stejné, detail přiznání rozdíl jen ukáže jako informaci a průvodce
+  uzávěrkou daň z přiznání dál navrhuje. Mění-li rozdíl základ daně, platí stejné upozornění
+  jako u změněného účetnictví i s výší rozdílu.
 - **PDF sestava** (tlačítko **Stáhnout PDF sestavu**) - přehledná pracovní sestava přiznání (DPPO i DPFO) pro kontrolu
   s účetní a do archivu. Není podáním pro finanční úřad a netváří se jako tiskopis; každá
   strana to uvádí. Obsahuje identifikaci poplatníka, zdaňovací období, druh a stav

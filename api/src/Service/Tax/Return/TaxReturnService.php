@@ -146,6 +146,11 @@ final class TaxReturnService
             $prefinalize = $this->preFinalizeChecks->run($supplierId, $year, $type, (array) $row['inputs'], $computation);
         }
 
+        $booksAssessment = $type === 'po' && $row['status'] === 'final'
+            ? (new DppoBooksFingerprint($this->db))->assess($supplierId, $year, $row['books_fingerprint'] ?? null,
+                is_array($row['computed']) ? $row['computed'] : [], (array) $row['inputs'])
+            : null;
+
         return [
             'return' => $this->publicRow($row),
             'form_code' => $type === 'po' ? 'dppdp9' : 'dpfdp7',
@@ -156,10 +161,15 @@ final class TaxReturnService
                 ? $this->returns->findLastKnownTax($supplierId, $year, $type, false)
                 : null,
             // Finalizované DPPO: odpovídá účetnictví období ještě stavu při finalizaci?
-            // null = nelze posoudit (koncept, DPFO, finalizace před zavedením otisku).
-            'books_current' => $type === 'po' && $row['status'] === 'final'
-                ? (new DppoBooksFingerprint($this->db))->isCurrent($supplierId, $year, $row['books_fingerprint'] ?? null)
-                : null,
+            // null = nelze posoudit (koncept, DPFO, finalizace bez otisku i bez uloženého VH).
+            // Důvod a u přiznání bez otisku rozdíl VH viz books_current_reason / books_vh.
+            'books_current' => $booksAssessment['current'] ?? null,
+            'books_current_reason' => $booksAssessment['reason'] ?? null,
+            'books_vh' => isset($booksAssessment['vh_difference']) ? [
+                'stored' => $booksAssessment['stored_vh'],
+                'current' => $booksAssessment['current_vh'],
+                'difference' => $booksAssessment['vh_difference'],
+            ] : null,
             // Rodná čísla rodiny jen maskovaná (H28) — i u starších finálních přiznání,
             // jejichž uložený výpočet je ještě nese otevřeně.
             'computed' => $this->familyIdentifiers->maskResult($computation['result']),

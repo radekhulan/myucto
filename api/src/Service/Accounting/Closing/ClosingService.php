@@ -3846,6 +3846,10 @@ final class ClosingService
             // Proč návrh chybí (např. u 504 chybí aktuální potvrzené daňové posouzení).
             'suggested_unavailable' => $suggested === null ? $ledger['reason'] : null,
             'has_finalized_return' => $fromReturn !== null,
+            // Návrh z přiznání, jehož VH se od účetnictví drobně liší, ale daň nemění
+            // (přiznání bez otisku, {@see \MyInvoice\Service\Tax\Return\DppoBooksFingerprint::assess()}):
+            // jen informace, návrh daně platí.
+            'return_books' => $fromReturn !== null ? $this->taxReturns->lastFinalizedBooksAssessment($supplierId, $fiscalYear) : null,
             'taxpayer_type' => $taxpayerType,
             'applicable' => $applicable,
             'rate_hint' => (float) ($constants['corporate_tax_rate'] ?? self::CORPORATE_TAX_RATE),

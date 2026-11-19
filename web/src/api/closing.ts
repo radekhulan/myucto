@@ -650,6 +650,9 @@ export interface IncomeTaxPreview {
   /** Proč návrh chybí (u 504 např. chybějící nebo zastaralé daňové posouzení). */
   suggested_unavailable?: { code: string; message: string } | null
   has_finalized_return: boolean
+  /** Posouzení finalizovaného DPPO, ze kterého je návrh, proti účetnictví (vh_differs_tax_same
+   *  = drobný rozdíl VH bez dopadu na daň, jen informace). */
+  return_books?: { current: boolean | null; reason: string; vh_difference?: number } | null
   taxpayer_type: string | null
   applicable: boolean
   rate_hint: number
