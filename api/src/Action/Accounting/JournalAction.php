@@ -1214,7 +1214,7 @@ final class JournalAction
                     // Zápis interního dokladu se stornuje v detailu dokladu (kontrola pod zámkem zápisu).
                     $this->internalDocuments->assertJournalReversible($supplierId, $id);
                     $owner = (new DocumentPostingGroup($this->db))->owner($supplierId, $id, true);
-                    $reversalId = $this->posting->reverse($supplierId, $id, $meta);
+                    $reversalId = $this->posting->reverseManual($supplierId, $id, $meta);
                     // I poslední ruční člen převzatého předpisu odemyká svůj doklad.
                     if ($owner !== null) {
                         $this->unlockSourceAfterReverse($request, $supplierId, $owner['doc_type'],

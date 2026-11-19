@@ -1151,6 +1151,25 @@ final class PostingService
         );
     }
 
+    /** Zdroje, jejichž zápisy vrací jen průvodce uzávěrkou (vrácení kroku), ne ruční storno. */
+    public const WIZARD_ONLY_REVERSAL_SOURCES = ['closing', 'opening'];
+
+    /**
+     * Ruční storno z účetního deníku (API i rozhraní). Zápisy uzávěrky a otevření účtů
+     * odmítne: storno nese týž zdroj bez source_id, takže by se tvářilo jako uzavření
+     * knih a zmrazilo dimenze období. Tyto zápisy vrací průvodce uzávěrkou.
+     *
+     * @param array{entry_date?:string, description?:?string, posted_by?:?int, user_id?:?int, ip?:?string, user_agent?:?string} $meta
+     * @throws PostingException `closing_reversal_forbidden` (409), jinak jako {@see reverse()}
+     */
+    public function reverseManual(int $supplierId, int $entryId, array $meta = []): int
+    {
+        return TransactionFailure::retrying(
+            $this->db->pdo(),
+            fn (): int => $this->reverseOnce($supplierId, $entryId, $meta, null, null, true),
+        );
+    }
+
     /**
      * Storno celého předpisu dokladu. Bez entry_date se každý člen ruší ke svému
      * původnímu datu; úhrady ani informativní vazby se do skupiny nenačítají.
@@ -1201,7 +1220,7 @@ final class PostingService
      * @param list<int>|null $pairNos null = storno celého zápisu
      * @param array{debit_account_code:string, credit_account_code:string, line_text?:?string}|null $replacement
      */
-    private function reverseOnce(int $supplierId, int $entryId, array $meta, ?array $pairNos = null, ?array $replacement = null): int
+    private function reverseOnce(int $supplierId, int $entryId, array $meta, ?array $pairNos = null, ?array $replacement = null, bool $manual = false): int
     {
         $pdo = $this->db->pdo();
         $ownTx = !$pdo->inTransaction();
@@ -1230,6 +1249,13 @@ final class PostingService
         $original = $this->journal->findForUpdate($entryId, $supplierId);
         if ($original === null) {
             throw new PostingException('entry_not_found', 'Účetní zápis #' . $entryId . ' neexistuje.', 404);
+        }
+        if ($manual && in_array((string) ($original['source_type'] ?? ''), self::WIZARD_ONLY_REVERSAL_SOURCES, true)) {
+            throw new PostingException(
+                'closing_reversal_forbidden',
+                'Zápis uzávěrky nebo otevření účtů nejde stornovat ručně. Vraťte příslušný krok v průvodci uzávěrkou (Uzávěrka, Vzít krok zpět).',
+                409,
+            );
         }
         if (($original['source_type'] ?? null) === 'payroll') {
             throw new PostingException(

@@ -17308,7 +17308,10 @@ paths:
     post:
       tags: [Accounting]
       summary: Storno zápisu (zrcadlový protizápis)
-      description: Účetní/admin. Vytvoří opačný zápis a naváže reversed_by (§35).
+      description: >-
+        Účetní/admin. Vytvoří opačný zápis a naváže reversed_by (§35). Zápisy uzávěrky
+        a otevření účtů (`source_type` closing, opening) ručně stornovat nejde (409
+        `closing_reversal_forbidden`), vrací je průvodce uzávěrkou.
       parameters:
         - $ref: '#/components/parameters/SupplierIdHeader'
         - { in: path, name: id, required: true, schema: { type: integer } }
@@ -17327,6 +17330,11 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/JournalEntry' }
         '403': { $ref: '#/components/responses/Forbidden' }
+        '409':
+          description: Zápis uzávěrky nebo otevření účtů (`closing_reversal_forbidden`), vrací ho průvodce uzávěrkou
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
         '422':
           description: Zápis neexistuje / už stornován / koncept / zavřené období
           content:
