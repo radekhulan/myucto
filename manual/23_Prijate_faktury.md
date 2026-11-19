@@ -229,6 +229,17 @@ až její skutečná úhrada. Kromě ručního zaúčtování lze zapnout automa
 Pokud zaúčtování selže, ukáže aplikace hlášku (chybějící kurz, uzavřené období, nevyvážený zápis,
 chybějící účet v osnově). Tabulka hlášek je v [§ 16.1.3](16_Faktura_PDF.md#16103-zauctovani-do-deniku).
 
+### 23.7.1 Hromadné akce
+
+Mnoho přijatých faktur najednou změníte z nabídky **…** v záhlaví seznamu, položka
+**Hromadné akce** (se zaškrtnutými fakturami i v liště výběru dole). Akce pracuje s vybranými
+fakturami, nebo se všemi podle filtru seznamu, nejvýš s 500 doklady. Umí nastavit dimenze
+(například středisko všem fakturám jednoho dodavatele, s volbou přepsat, jen kde je prázdné,
+nebo vymazat), změnit předkontaci položek a doklady znovu zaúčtovat, přeúčtovat účet v jejich
+zápisech a smazat koncepty. Vždy nejdřív proběhne běh nanečisto, provedení jde (kromě smazání)
+vrátit. Postup je v [§ 52.8.2](52_Ucetni_denik.md#5282-krok-za-krokem-hromadne-akce-v-seznamech),
+pravidla a oprávnění v [§ 52.14.18](52_Ucetni_denik.md#521418-hromadne-akce-v-seznamech).
+
 ## 23.8 Krok za krokem: spárovat zálohu s vyúčtovací fakturou
 
 Dělejte to, když vám dodavatel poslal nejdřív zálohovou fakturu a po zaplacení vyúčtovací (finální) fakturu.

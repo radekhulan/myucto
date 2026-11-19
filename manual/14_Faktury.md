@@ -140,6 +140,22 @@ období, a přeskočené doklady nechá vybrané. Změna se týká dimenzí cel�
 zaúčtovaných dokladů i řádků deníku. Pravidla popisuje
 [§ 114.4](114_Dimenze.md#1144-krok-za-krokem-zadat-dimenze-na-dokladu).
 
+### 14.6.2 Hromadné akce: dimenze, předkontace, přeúčtování, smazání
+
+Pro větší změny mnoha faktur najednou otevřete v záhlaví seznamu nabídku **…** a zvolte
+**Hromadné akce** (se zaškrtnutými fakturami i v liště výběru dole). Akce pracuje s vybranými
+fakturami, nebo se všemi, které seznam ukazuje podle filtru, nejvýš s 500 doklady:
+
+- **Nastavit dimenze**: víc typů najednou, v režimu přepsat, jen kde je prázdné, nebo vymazat,
+  na hlavičce dokladu nebo jen na položkách,
+- **Změnit předkontaci** položek a znovu zaúčtovat,
+- **Přeúčtovat účet** v zápisech vybraných faktur,
+- **Smazat** podle pravidel mazání jednoho dokladu.
+
+Vždy nejdřív proběhne běh nanečisto se stavem před a po, provedení jde (kromě smazání)
+vrátit. Postup je v [§ 52.8.2](52_Ucetni_denik.md#5282-krok-za-krokem-hromadne-akce-v-seznamech),
+pravidla a oprávnění v [§ 52.14.18](52_Ucetni_denik.md#521418-hromadne-akce-v-seznamech).
+
 ## 14.7 Krok za krokem: sloučené PDF z více faktur
 
 1. V seznamu zaškrtněte vystavené faktury nebo dobropisy (nejvýše 100 najednou).
@@ -487,6 +503,7 @@ Po zaškrtnutí více faktur se nahoře objeví lišta s akcemi:
 | **Zaúčtovat (N)** | Zaúčtuje vybrané do deníku jednu po druhé (chyba jedné neblokuje ostatní), na konci souhrn. Max 500 dokladů na dávku | Vystavené a dosud nezaúčtované, jen podvojné účetnictví, viz [§ 16.10.3](16_Faktura_PDF.md#16103-zauctovani-do-deniku) |
 | **Nastavit OSS (N)** | Hromadně nastaví režim OSS, zemi spotřeby, typ sazby a typ plnění na položkách. Náhled je povinný. Max 200 dokladů na dávku | Doklady, které nejsou stornované, zamčené ani v podaném období |
 | **Nastavit dimenze (N)** | U každého typu dimenze zvolíte Ponechat, Nastavit hodnotu nebo Odebrat. Mění dimenze celého dokladu a promítne je i do zaúčtovaných řádků deníku. Doklad v uzavřeném období se přeskočí s důvodem. Max 500 dokladů na dávku, postup v [§ 14.6.1](#1461-hromadne-nastavit-dimenze) | Koncepty, vystavené i zaúčtované doklady, jen se zapnutými dimenzemi a právem zápisu do účetnictví |
+| **Hromadné akce** (nabídka **…**) | Nastavit dimenze s režimy a rozsahem, změnit předkontaci, přeúčtovat účet, smazat. Běh nanečisto, provedení a vrácení, max 500 dokladů, viz [§ 14.6.2](#1462-hromadne-akce-dimenze-predkontace-preuctovani-smazani) | Podle operace; jen s právem Hromadné změny dokladů a zápisů nebo jako správce firmy |
 
 Při hromadném odeslání můžete být dotázáni, zda se má poslat i poděkování za úhradu u již
 zaplacených faktur.
