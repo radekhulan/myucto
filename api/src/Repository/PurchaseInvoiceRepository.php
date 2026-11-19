@@ -1128,20 +1128,39 @@ final class PurchaseInvoiceRepository
             $sortSql = "DATE_FORMAT(pi.issue_date, '%Y-%m') {$monthDir}, " . $sortSql;
         }
 
-        $joins = 'JOIN clients c ON c.id = pi.vendor_id
-                  JOIN currencies cur ON cur.id = pi.currency_id
-             LEFT JOIN countries co ON co.id = c.country_id
-             LEFT JOIN expense_categories ec ON ec.id = pi.expense_category_id AND ec.supplier_id = pi.supplier_id
-             LEFT JOIN projects prj ON prj.id = pi.project_id';
+        $joinByAlias = [
+            'c'   => 'JOIN clients c ON c.id = pi.vendor_id',
+            'cur' => 'JOIN currencies cur ON cur.id = pi.currency_id',
+            'co'  => 'LEFT JOIN countries co ON co.id = c.country_id',
+            'ec'  => 'LEFT JOIN expense_categories ec ON ec.id = pi.expense_category_id AND ec.supplier_id = pi.supplier_id',
+            'prj' => 'LEFT JOIN projects prj ON prj.id = pi.project_id',
+        ];
+        $joins = implode("\n", $joinByAlias);
 
         // Okno počítá a stránkuje jen ID. Saldo a další odvozené sloupce se načtou až pro stránku.
+        // Okno projde všechny vyhovující doklady firmy, proto připojí jen tabulky, na které
+        // odkazuje filtr nebo řazení. Dodavatel i měna jsou povinné cizí klíče, takže vnitřní
+        // JOIN počet dokladů nemění. STRAIGHT_JOIN drží doklady firmy jako první tabulku:
+        // podle statistik malé tabulky by optimalizátor jinak mohl začít číselníkem všech
+        // firem (např. celým indexem `clients`).
+        $referenced = $whereSql . ' ' . $sortSql;
+        $pageJoins = [];
+        foreach ($joinByAlias as $alias => $join) {
+            $needed = preg_match('/\b' . $alias . '\./', $referenced) === 1
+                || ($alias === 'c' && preg_match('/\bco\./', $referenced) === 1);
+            if ($needed) {
+                $pageJoins[] = $join;
+            }
+        }
+        $pageJoins = implode("\n", $pageJoins);
+
         $pageCte = '';
         $selectTotal = '';
         $from = "FROM purchase_invoices pi $joins WHERE $whereSql";
         if ($perPage > 0) {
             $pageCte = "WITH page_ids AS (
-                SELECT pi.id, COUNT(*) OVER() AS total_rows
-                  FROM purchase_invoices pi $joins
+                SELECT STRAIGHT_JOIN pi.id, COUNT(*) OVER() AS total_rows
+                  FROM purchase_invoices pi $pageJoins
                  WHERE $whereSql
                  ORDER BY $sortSql
                  LIMIT ? OFFSET ?
@@ -1150,7 +1169,7 @@ final class PurchaseInvoiceRepository
             $from = "FROM page_ids JOIN purchase_invoices pi ON pi.id = page_ids.id $joins";
         }
 
-        $sql = "$pageCte SELECT pi.id, pi.varsymbol, pi.vendor_invoice_number, pi.document_kind,
+        $sql = "$pageCte SELECT STRAIGHT_JOIN pi.id, pi.varsymbol, pi.vendor_invoice_number, pi.document_kind,
                        pi.payment_variable_symbol, pi.payment_method,
                        pi.vendor_id, pi.supplier_id,
                        pi.issue_date, pi.tax_date, pi.due_date, pi.received_at,
@@ -1297,11 +1316,12 @@ final class PurchaseInvoiceRepository
 
         // Agregace čte všechny doklady měsíce: protistranu připojí jen filtr, který na ni
         // odkazuje, a kódy měn se dohledají až pro výsledné skupiny. JOIN na každý doklad
-        // by jinak znásobil čtení klíčů celého měsíce.
+        // by jinak znásobil čtení klíčů celého měsíce. STRAIGHT_JOIN začíná doklady firmy
+        // stejně jako okno seznamu.
         $vendorJoin = (preg_match('/\bc\./', $whereSql) === 1 ? ' JOIN clients c ON c.id = pi.vendor_id' : '')
             . (preg_match('/\bcur\./', $whereSql) === 1 ? ' JOIN currencies cur ON cur.id = pi.currency_id' : '');
         $stmt = $this->db->pdo()->prepare(
-            "SELECT $bucket AS month_bucket, pi.currency_id, COUNT(*) AS cnt,
+            "SELECT STRAIGHT_JOIN $bucket AS month_bucket, pi.currency_id, COUNT(*) AS cnt,
                     SUM(CASE WHEN $cost THEN 1 ELSE 0 END) AS cost_rows,
                     " . $sum(PurchaseCostSql::net('pi')) . " AS without_vat,
                     " . $sum(PurchaseCostSql::vat('pi')) . " AS vat,

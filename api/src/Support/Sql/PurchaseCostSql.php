@@ -16,9 +16,11 @@ namespace MyInvoice\Support\Sql;
  * (u syntetického případu −69,88 − (−735,54) = 665,66). Zaúčtování to dělá stejně
  * ({@see \MyInvoice\Service\Accounting\PostingService::purchaseAdvanceDeduction()}).
  *
- * Odpočtové řádky se předagregují po dokladu v odvozené tabulce omezené firmou a jdou po
- * indexu `ix_pii_advance_purchase_invoice` (označených řádků je zlomek), takže se
- * k přehledu připojují LEFT JOINem bez korelovaného poddotazu na každý doklad.
+ * Odpočtové řádky se předagregují po dokladu v odvozené tabulce omezené firmou, takže se
+ * k přehledu připojují LEFT JOINem bez korelovaného poddotazu na každý doklad. Odvozená
+ * tabulka vychází z konečných faktur firmy s vyplněnou zálohou (`idx_pi_supplier_advance`)
+ * a řádky odpočtu dohledá po `ix_pii_advance_purchase_invoice`. Index řádků firmu nezná,
+ * takže jako první tabulka by dotaz procházel odpočtové řádky všech firem.
  *
  * Použití: `FROM purchase_invoices pi ` . deductionJoin('pi', $supplierId) a v SELECT
  * {@see cost()}, {@see net()} nebo {@see gross()} místo `pi.total_without_vat` /
@@ -34,33 +36,23 @@ final class PurchaseCostSql
     public static function deductionJoin(string $doc, ?int $supplierId): string
     {
         self::assertAlias($doc);
-        $supplier = $supplierId !== null ? "ded_f.supplier_id = {$supplierId} AND " : '';
         return " LEFT JOIN (SELECT ded_i.purchase_invoice_id,
                                    SUM(ded_i.total_without_vat) AS base, SUM(ded_i.total_vat) AS vat,
                                    SUM(ded_i.total_with_vat) AS gross
-                              FROM purchase_invoice_items ded_i
-                              JOIN purchase_invoices ded_f ON ded_f.id = ded_i.purchase_invoice_id
-                             WHERE {$supplier}ded_i.advance_purchase_invoice_id IS NOT NULL
-                               AND ded_i.advance_purchase_invoice_id = ded_f.advance_purchase_invoice_id
-                               AND ded_i.total_with_vat < 0
+                              " . self::deductionRowsFrom($supplierId) . "
                              GROUP BY ded_i.purchase_invoice_id) {$doc}_ded ON {$doc}_ded.purchase_invoice_id = {$doc}.id ";
     }
 
     /**
      * {@see deductionJoin()} pro dotaz na horké cestě (hlavičky měsíců seznamu): firma bez
      * jediného odpočtového řádku dostane místo odvozené tabulky konstantní řádek s nulami,
-     * takže se doklady nedohledávají v odpočtech ani po indexu. Rozhodne jeden dotaz po
-     * indexu `ix_pii_advance_purchase_invoice`.
+     * takže se doklady nedohledávají v odpočtech ani po indexu. Rozhodne jeden dotaz nad
+     * konečnými fakturami firmy se zálohou, který skončí prvním odpočtovým řádkem.
      */
     public static function deductionJoinFor(\PDO $pdo, string $doc, ?int $supplierId): string
     {
         self::assertAlias($doc);
-        $stmt = $pdo->prepare(
-            'SELECT 1 FROM purchase_invoice_items ded_i
-               JOIN purchase_invoices ded_f ON ded_f.id = ded_i.purchase_invoice_id
-              WHERE ded_i.advance_purchase_invoice_id IS NOT NULL AND ded_i.total_with_vat < 0'
-                . ($supplierId !== null ? ' AND ded_f.supplier_id = ' . $supplierId : '') . ' LIMIT 1'
-        );
+        $stmt = $pdo->prepare('SELECT 1 ' . self::deductionRowsFrom($supplierId) . ' LIMIT 1');
         $stmt->execute();
         if ($stmt->fetchColumn() !== false) {
             return self::deductionJoin($doc, $supplierId);
@@ -93,6 +85,29 @@ final class PurchaseCostSql
     public static function cost(string $doc, bool $isVatPayer): string
     {
         return $isVatPayer ? self::net($doc) : self::gross($doc);
+    }
+
+    /**
+     * FROM a WHERE odpočtových řádků zálohy (`ded_i`) na konečných fakturách (`ded_f`).
+     * S firmou vychází z jejích konečných faktur s vyplněnou zálohou a STRAIGHT_JOIN pořadí
+     * drží i při statistikách, podle kterých by optimalizátor začal řádky všech firem.
+     */
+    private static function deductionRowsFrom(?int $supplierId): string
+    {
+        if ($supplierId === null) {
+            return 'FROM purchase_invoice_items ded_i
+                    JOIN purchase_invoices ded_f ON ded_f.id = ded_i.purchase_invoice_id
+                   WHERE ded_i.advance_purchase_invoice_id IS NOT NULL
+                     AND ded_i.advance_purchase_invoice_id = ded_f.advance_purchase_invoice_id
+                     AND ded_i.total_with_vat < 0';
+        }
+
+        return "FROM purchase_invoices ded_f
+                STRAIGHT_JOIN purchase_invoice_items ded_i
+                     ON ded_i.advance_purchase_invoice_id = ded_f.advance_purchase_invoice_id
+                    AND ded_i.purchase_invoice_id = ded_f.id
+               WHERE ded_f.supplier_id = {$supplierId} AND ded_f.advance_purchase_invoice_id IS NOT NULL
+                 AND ded_i.total_with_vat < 0";
     }
 
     private static function assertAlias(string $alias): void

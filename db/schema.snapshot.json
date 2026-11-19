@@ -1216,7 +1216,8 @@
         "2310_accounting_bulk_jobs.sql",
         "2311_journal_bulk_repost_permission.sql",
         "2312_supplier_dashboard_work_reports.sql",
-        "2313_income_tax_books_fingerprint.sql"
+        "2313_income_tax_books_fingerprint.sql",
+        "2314_purchase_invoice_supplier_advance_index.sql"
     ],
     "tables": {
         "abra_flexi_connections": {
@@ -24050,6 +24051,7 @@
                 "idx_pi_source_hash": "BTREE (supplier_id, source_hash)",
                 "idx_pi_status_due": "BTREE (supplier_id, status, due_date)",
                 "idx_pi_supplier": "BTREE (supplier_id)",
+                "idx_pi_supplier_advance": "BTREE (supplier_id, advance_purchase_invoice_id)",
                 "idx_pi_supplier_approval": "BTREE (supplier_id, approval_status)",
                 "idx_pi_supplier_external_barcode": "BTREE (supplier_id, external_barcode)",
                 "idx_pi_supplier_issue": "BTREE (supplier_id, issue_date)",
