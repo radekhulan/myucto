@@ -20,6 +20,15 @@ export interface JournalRebookFilter {
   text?: string | null
   amount_min?: number | null
   amount_max?: number | null
+  /** Odběratel/dodavatel dokladu (clients.id), jen faktury a přijaté faktury. */
+  partner_id?: number | null
+  /** Řádek nese tuto hodnotu dimenze (včetně podřízených). */
+  dimension_value_id?: number | null
+  /** Doklad má položku s touto předkontací (jen faktury a přijaté faktury). */
+  posting_rule_key?: string | null
+  /** Rozsah čísla dokladu; jedno číslo = obě meze stejné. */
+  document_no_from?: string | null
+  document_no_to?: string | null
 }
 
 export type JournalRebookJobKind = 'dry_run' | 'apply' | 'rollback'

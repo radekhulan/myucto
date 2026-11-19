@@ -12,6 +12,7 @@ import {
   type AccountingPeriod,
   type ChartAccount,
   type JournalEntryPair,
+  type JournalFilters,
 } from '@/api/accounting'
 import { usePaneDom } from '@/composables/usePaneDom'
 import { requestSupplierId } from '@/workspace/supplierContext'
@@ -43,7 +44,11 @@ import JournalEntryDetailPanel from '@/components/accounting/JournalEntryDetailP
 import JournalPairsTable from '@/components/accounting/JournalPairsTable.vue'
 import Modal from '@/components/ui/Modal.vue'
 import ConfirmDialog from '@/components/ui/ConfirmDialog.vue'
-import type { ActionItem } from '@/components/ui/ActionBar.vue'
+import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
+import BulkActionBar from '@/components/ui/BulkActionBar.vue'
+import BulkActionsDialog from '@/components/bulk/BulkActionsDialog.vue'
+import { useListBulkActions } from '@/components/bulk/useListBulkActions'
+import { journalListFilterParams } from '@/api/listQueries'
 import { apiErrorText, hasAnySingle } from '@/utils/entryForm'
 import LockedPeriodAckModal from '@/components/accounting/LockedPeriodAckModal.vue'
 import { useLockedPeriodAck } from '@/composables/useLockedPeriodAck'
@@ -175,6 +180,54 @@ const sourceIdFilter = ref<number | ''>('')
 // jako součást nálezu.
 const entryIdFilter = ref<number | ''>('')
 
+/** Filtr seznamu tak, jak jde na `GET /accounting/journal` (bez stránkování, řazení a sloupců). */
+function listFilters(): JournalFilters {
+  return {
+    document_no: filters.document_no || undefined,
+    period_id: filters.period_id || undefined,
+    date_from: filters.date_from || undefined,
+    date_to: filters.date_to || undefined,
+    source_type: filters.source_type || undefined,
+    source_id: sourceIdFilter.value || undefined,
+    entry_id: entryIdFilter.value || undefined,
+    posted: filters.posted === '' ? undefined : filters.posted === 'posted',
+    reversal: filters.reversal === '' ? undefined : filters.reversal,
+    automation: filters.automation || undefined,
+    q: filters.q || undefined,
+    account_from: filters.account_from || undefined,
+    account_to: filters.account_to || undefined,
+    amount_from: filters.amount_from === '' ? undefined : Number(filters.amount_from),
+    amount_to: filters.amount_to === '' ? undefined : Number(filters.amount_to),
+    integrity: filters.integrity || undefined,
+    pair_status: filters.pair_status || undefined,
+    dimension_value_id: dimensionValueIdsParam(filters.dimension_value_ids),
+    dimension_descendants: filters.dimension_descendants,
+  }
+}
+
+// ── Výběr řádků a hromadné akce ────────────────────────────────────────────
+const selectedIds = ref<number[]>([])
+const bulk = useListBulkActions({
+  target: 'journal_entry',
+  selectedIds,
+  listQuery: () => journalListFilterParams(listFilters()),
+  total,
+})
+const headerActions = computed<ActionItem[]>(() => [bulk.menuItem.value])
+const allLoadedSelected = computed(() => entries.value.length > 0 && entries.value.every(e => selectedIds.value.includes(e.id)))
+function toggleSelected(id: number) {
+  selectedIds.value = selectedIds.value.includes(id)
+    ? selectedIds.value.filter(x => x !== id)
+    : [...selectedIds.value, id]
+}
+function toggleAllLoaded() {
+  selectedIds.value = allLoadedSelected.value ? [] : entries.value.map(e => e.id)
+}
+async function onBulkChanged() {
+  collapseAll()
+  await load()
+}
+
 let loadSeq = 0
 async function load(reset = true): Promise<boolean> {
   if (!reset && (loading.value || loadingMore.value || page.value >= totalPages.value)) return false
@@ -191,25 +244,7 @@ async function load(reset = true): Promise<boolean> {
   try {
     const r = await accountingApi.listJournal({
       page: page.value,
-      document_no: filters.document_no || undefined,
-      period_id: filters.period_id || undefined,
-      date_from: filters.date_from || undefined,
-      date_to: filters.date_to || undefined,
-      source_type: filters.source_type || undefined,
-      source_id: sourceIdFilter.value || undefined,
-      entry_id: entryIdFilter.value || undefined,
-      posted: filters.posted === '' ? undefined : filters.posted === 'posted',
-      reversal: filters.reversal === '' ? undefined : filters.reversal,
-      automation: filters.automation || undefined,
-      q: filters.q || undefined,
-      account_from: filters.account_from || undefined,
-      account_to: filters.account_to || undefined,
-      amount_from: filters.amount_from === '' ? undefined : Number(filters.amount_from),
-      amount_to: filters.amount_to === '' ? undefined : Number(filters.amount_to),
-      integrity: filters.integrity || undefined,
-      pair_status: filters.pair_status || undefined,
-      dimension_value_id: dimensionValueIdsParam(filters.dimension_value_ids),
-      dimension_descendants: filters.dimension_descendants,
+      ...listFilters(),
       sort_key: tbl.sort.value?.key,
       sort_dir: tbl.sort.value?.dir,
       include_vat_breakdown: tbl.isVisible('vat_breakdown'),
@@ -220,6 +255,7 @@ async function load(reset = true): Promise<boolean> {
     })
     if (seq !== loadSeq || disposed || supplierId !== requestSupplierId()) return false
     entries.value = reset ? r.items : [...entries.value, ...r.items]
+    if (reset) selectedIds.value = []
     total.value = r.total
     perPage.value = r.per_page
     return true
@@ -565,7 +601,7 @@ function clearSort() {
   load()
 }
 const saved = useSavedFilters('journal', { getQuery: buildQuery, applyQuery: applyQueryToPage })
-const visibleColCount = computed(() => 2 + tbl.columns.filter(c => tbl.isVisible(c.key)).length)
+const visibleColCount = computed(() => 2 + (bulk.canUse.value ? 1 : 0) + tbl.columns.filter(c => tbl.isVisible(c.key)).length)
 
 /**
  * Řádek pohledů = uložené filtry vytažené z dropdownu do záložek nad seznamem.
@@ -1057,6 +1093,7 @@ function entryRange(entry: JournalEntryDetail): { from: string; to: string } {
           <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.swap" /></svg>
           {{ t('accounting.journal.rebook_by_filter') }}
         </RouterLink>
+        <ActionBar v-if="bulk.canUse.value" :actions="headerActions" data-test="journal-more-actions" />
         <RouterLink v-if="auth.canWrite('accounting.journal.write') || auth.isDemo" to="/accounting/journal/new" :class="btnFilled('primary')">
           <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.plus" /></svg>
           {{ t('accounting.journal.new') }}
@@ -1262,6 +1299,10 @@ function entryRange(entry: JournalEntryDetail): { from: string; to: string } {
         <table v-column-labels="tbl" class="w-max min-w-full text-sm singleline-list-table list-gutter-mini" :class="tbl.densityClass.value">
           <thead class="bg-neutral-50 text-xs text-neutral-500 uppercase tracking-wide sticky top-0 z-20 shadow-sm">
             <tr>
+              <th v-if="bulk.canUse.value" class="pl-3 py-2 w-6">
+                <input type="checkbox" class="h-4 w-4 cursor-pointer" :checked="allLoadedSelected"
+                  :aria-label="t('common.select_all')" data-test="journal-select-all" @change="toggleAllLoaded" />
+              </th>
               <th class="px-3 py-2 w-8"></th>
               <template v-for="c in tbl.orderedColumns.value.filter(c => tbl.isVisible(c.key))" :key="c.key">
                 <th v-if="c.key === 'dimensions'" scope="col" class="px-3 py-2 text-left font-medium" v-bind="columnDrag.headerAttrs(c.key)"><ColumnDragHandle /> {{ t(c.labelKey) }}</th>
@@ -1286,6 +1327,10 @@ function entryRange(entry: JournalEntryDetail): { from: string; to: string } {
                       ? 'bg-primary-50/60 border-x-2 border-t-2 border-primary-500/60'
                       : entryIdFilter === e.id ? 'bg-primary-50' : 'hover:bg-neutral-50',
                   ]" @click="toggleExpand(e)">
+                <td v-if="bulk.canUse.value" class="pl-3 py-2" @click.stop>
+                  <input type="checkbox" class="h-4 w-4 cursor-pointer" :checked="selectedIds.includes(e.id)"
+                    :aria-label="e.document_no || String(e.id)" data-test="journal-row-select" @change="toggleSelected(e.id)" />
+                </td>
                 <td class="px-3 py-2 text-neutral-400">
                   <span class="inline-block transition-transform" :class="{ 'rotate-90': isExpanded(e.id) }">▸</span>
                 </td>
@@ -1421,7 +1466,12 @@ function entryRange(entry: JournalEntryDetail): { from: string; to: string } {
       <div class="md:hidden divide-y divide-neutral-100">
         <div v-for="e in entries" :key="`m-${e.id}`" :data-journal-entry="e.id" :aria-current="entryIdFilter === e.id ? 'true' : undefined" class="scroll-mt-12"
           :class="[isExpanded(e.id) || entryIdFilter === e.id ? 'bg-primary-50/60' : '', entryIdFilter === e.id ? 'ring-2 ring-inset ring-primary-500' : '']">
-          <button type="button" class="cursor-pointer w-full text-left p-3 space-y-1.5"
+          <div class="flex items-start">
+          <label v-if="bulk.canUse.value" class="shrink-0 pl-3 pt-3.5 cursor-pointer">
+            <input type="checkbox" class="h-4 w-4 cursor-pointer" :checked="selectedIds.includes(e.id)"
+              :aria-label="e.document_no || String(e.id)" data-test="journal-card-select" @change="toggleSelected(e.id)" />
+          </label>
+          <button type="button" class="cursor-pointer min-w-0 flex-1 text-left p-3 space-y-1.5"
             :class="e.reversed_by && !colors.hasColors.value ? 'opacity-60' : ''" @click="toggleExpand(e)">
             <div class="flex items-baseline justify-between gap-2">
               <span class="flex items-baseline gap-1.5 min-w-0">
@@ -1473,6 +1523,7 @@ function entryRange(entry: JournalEntryDetail): { from: string; to: string } {
               </div>
             </div>
           </button>
+          </div>
           <!-- Náhled dokladu mimo rozbalovací tlačítko: vnořené tlačítko není
                platné HTML a klik by se protáhl do akordeonu. -->
           <div v-if="sourceLink(e)" class="px-3 pb-3 -mt-1">
@@ -1516,6 +1567,17 @@ function entryRange(entry: JournalEntryDetail): { from: string; to: string } {
       </div>
     </div>
     <ListLoadingSpinner :show="loading || loadingMore" />
+
+    <BulkActionBar v-if="bulk.canUse.value" :count="selectedIds.length" @clear="selectedIds = []">
+      <button type="button" :class="btnOutline('warning')" class="whitespace-nowrap" data-test="journal-bulk-open" @click="bulk.open">
+        <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.table" /></svg>
+        {{ t('bulk_actions.menu') }}
+      </button>
+    </BulkActionBar>
+    <BulkActionsDialog v-if="bulk.dialog.value" target="journal_entry"
+      :selection="bulk.dialog.value.selection" :selection-count="bulk.dialog.value.selectionCount"
+      :filter-selection="bulk.dialog.value.filterSelection" :filter-count="bulk.dialog.value.filterCount"
+      @close="bulk.close" @changed="onBulkChanged" />
 
     <JournalSourceDrawer v-if="sourceDrawerEntryId" :entry-id="sourceDrawerEntryId"
       @close="sourceDrawerEntryId = null" @focus-entry="onFocusEntry" />

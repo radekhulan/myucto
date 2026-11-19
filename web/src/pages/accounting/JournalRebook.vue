@@ -29,6 +29,10 @@ import ConfirmDialog from '@/components/ui/ConfirmDialog.vue'
 import DateInput from '@/components/ui/DateInput.vue'
 import PaginationBar from '@/components/ui/PaginationBar.vue'
 import ChartAccountSelect from '@/components/accounting/ChartAccountSelect.vue'
+import SearchableSelect from '@/components/ui/SearchableSelect.vue'
+import DimensionReportFilter from '@/components/dimensions/DimensionReportFilter.vue'
+import PostingRuleSelect from '@/components/bulk/PostingRuleSelect.vue'
+import { clientsApi, type Client } from '@/api/clients'
 import BulkJobProgress from '@/components/accounting/BulkJobProgress.vue'
 import BulkJobTabs from '@/components/accounting/BulkJobTabs.vue'
 import { ICONS, btnOutline, btnOutlineSm } from '@/components/ui/buttonStyles'
@@ -49,6 +53,8 @@ const route = useRoute()
 const toast = useToast()
 
 const accounts = ref<ChartAccount[]>([])
+const partners = ref<Client[]>([])
+const partnerOptions = computed(() => partners.value.map(c => ({ value: c.id, label: c.company_name, secondary: c.ic ?? undefined })))
 
 const {
   state, running, loading, starting, cancelling, error, isRunning,
@@ -79,6 +85,11 @@ const form = reactive<JournalRebookForm>({
   amount_min: '',
   amount_max: '',
   mode: 'rewrite',
+  partner_id: null,
+  dimension_value_id: null,
+  posting_rule_key: null,
+  document_no_from: '',
+  document_no_to: '',
 })
 
 const canRun = computed(() => !!state.value?.can_run)
@@ -122,7 +133,8 @@ function scheduleCount() {
 
 watch(
   () => [form.from_account, form.to_account, form.side, form.date_from, form.date_to,
-    form.source_types.join(','), form.text, form.amount_min, form.amount_max],
+    form.source_types.join(','), form.text, form.amount_min, form.amount_max,
+    form.partner_id, form.dimension_value_id, form.posting_rule_key, form.document_no_from, form.document_no_to],
   scheduleCount,
 )
 
@@ -245,6 +257,8 @@ const resultTitle = computed(() => {
 onMounted(() => {
   void load()
   accountingApi.listAccounts().then(v => { accounts.value = v }).catch(() => { accounts.value = [] })
+  // Partner je jen zúžení výběru: výpadek číselníku nesmí zablokovat přeúčtování.
+  clientsApi.list({ archived: false, per_page: 200 }).then(r => { partners.value = r.data }).catch(() => { partners.value = [] })
   scheduleCount()
 })
 onUnmounted(() => {
@@ -265,6 +279,7 @@ onUnmounted(() => {
     <div class="bg-primary-50 border border-primary-200 rounded-lg p-4 mb-4 text-sm text-neutral-700">
       <p class="font-medium text-primary-800 mb-1">{{ t('accounting.journal_rebook.explainer_title') }}</p>
       <p>{{ t('accounting.journal_rebook.explainer_body') }}</p>
+      <p class="mt-1 text-neutral-600" data-test="rebook-bulk-hint">{{ t('bulk_actions.rebook_hint') }}</p>
     </div>
 
     <div v-if="error" class="bg-danger-50 border border-danger-500/40 text-danger-500 rounded-md p-3 text-sm mb-4">
@@ -329,6 +344,33 @@ onUnmounted(() => {
               <input v-model="form.amount_max" type="text" inputmode="decimal" :disabled="!canRun" :aria-label="t('accounting.journal_rebook.amount_max')"
                 :placeholder="t('accounting.journal_rebook.amount_max')" class="w-full h-10 px-3 border border-neutral-300 rounded-md text-sm font-mono bg-surface" />
             </div>
+          </div>
+          <div>
+            <span class="block text-xs font-medium text-neutral-500 mb-1">{{ t('accounting.journal_rebook.partner') }}</span>
+            <SearchableSelect :model-value="form.partner_id ?? null" :options="partnerOptions" :disabled="!canRun"
+              :placeholder="t('accounting.journal_rebook.partner_any')" data-test="rebook-partner"
+              @update:model-value="v => { form.partner_id = v === null ? null : Number(v) }" />
+          </div>
+          <div>
+            <label class="block text-xs font-medium text-neutral-500 mb-1" for="rebook-rule">{{ t('accounting.journal_rebook.posting_rule') }}</label>
+            <PostingRuleSelect v-model="form.posting_rule_key" input-id="rebook-rule" :disabled="!canRun"
+              :empty-label="t('accounting.journal_rebook.posting_rule_any')" />
+          </div>
+          <div>
+            <span class="block text-xs font-medium text-neutral-500 mb-1">{{ t('accounting.journal_rebook.document_no') }}</span>
+            <div class="flex items-center gap-2">
+              <input v-model="form.document_no_from" type="text" :disabled="!canRun" :aria-label="t('accounting.journal_rebook.document_no_from')"
+                :placeholder="t('accounting.journal_rebook.document_no_from')" data-test="rebook-docno-from"
+                class="w-full h-10 px-3 border border-neutral-300 rounded-md text-sm font-mono bg-surface" />
+              <span class="text-neutral-400">-</span>
+              <input v-model="form.document_no_to" type="text" :disabled="!canRun" :aria-label="t('accounting.journal_rebook.document_no_to')"
+                :placeholder="t('accounting.journal_rebook.document_no_to')"
+                class="w-full h-10 px-3 border border-neutral-300 rounded-md text-sm font-mono bg-surface" />
+            </div>
+          </div>
+          <div>
+            <DimensionReportFilter :value-id="form.dimension_value_id ?? null" :descendants="true" hide-descendants
+              @update:value-id="v => { form.dimension_value_id = v }" />
           </div>
           <div class="sm:col-span-2">
             <span class="block text-xs font-medium text-neutral-500 mb-1">{{ t('accounting.journal_rebook.mode_label') }}</span>

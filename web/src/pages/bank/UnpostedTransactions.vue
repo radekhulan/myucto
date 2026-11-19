@@ -12,6 +12,8 @@ import { useToast } from '@/composables/useToast'
 import { apiErrorMessage } from '@/api/errors'
 import { downloadApiFile } from '@/utils/downloadFile'
 import ActionBar from '@/components/ui/ActionBar.vue'
+import { RouterLink } from 'vue-router'
+import { ICONS, btnOutline } from '@/components/ui/buttonStyles'
 import BankTransactionRow from '@/components/bank/BankTransactionRow.vue'
 import BankTransactionDialogs from '@/components/bank/BankTransactionDialogs.vue'
 import BankMatchModal from '@/components/bank/BankMatchModal.vue'
@@ -249,6 +251,11 @@ useWindowRefresh(() => load(true))
         <option value="posted">{{ t('bank.filter_posting_posted') }}</option>
       </select>
       <ActionBar v-if="scope === 'all' && !auth.isClientRole" :actions="[{ key: 'export', label: t('bank.unmatched_export.download'), icon: 'download', tier: 'secondary', run: exportUnmatched }]" />
+      <RouterLink v-if="isDoubleEntry && auth.canRead('accounting')" :to="{ name: 'accounting-posting-backfill' }"
+        :class="btnOutline('primary')" class="whitespace-nowrap" data-test="bank-bulk-link">
+        <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.table" /></svg>
+        {{ t('bulk_actions.bank_link') }}
+      </RouterLink>
       <BankTransactionSortSelect v-model="txSort.selectValue.value" class="md:hidden" :keys="sortKeys" />
       <span class="text-xs text-neutral-500 whitespace-nowrap">{{ t('bank.posting.count_found', { n: total }) }}</span>
     </div>

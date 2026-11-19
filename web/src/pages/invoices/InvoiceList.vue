@@ -32,6 +32,10 @@ import MultiSelectFilter, { type MultiSelectOption } from '@/components/ui/Multi
 import FilterBar, { type FilterChip } from '@/components/ui/FilterBar.vue'
 import BulkActionBar from '@/components/ui/BulkActionBar.vue'
 import InvoiceBookMenu from '@/components/invoices/InvoiceBookMenu.vue'
+import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
+import BulkActionsDialog from '@/components/bulk/BulkActionsDialog.vue'
+import { useListBulkActions } from '@/components/bulk/useListBulkActions'
+import { invoiceListFilterParams } from '@/api/listQueries'
 import { markRowsTouched, consumeFlashedRows } from '@/composables/useRowFlash'
 import { useListKeyboard } from '@/composables/useListKeyboard'
 import WorkReportModal from '@/components/modals/WorkReportModal.vue'
@@ -1009,6 +1013,13 @@ function listParams(): InvoiceListParams {
   }
 }
 const invoiceBookUrl = (format: 'pdf' | 'xlsx') => invoicesApi.bookUrl(listParams(), format)
+const bulk = useListBulkActions({
+  target: 'invoice',
+  selectedIds,
+  listQuery: () => invoiceListFilterParams(listParams()),
+  total,
+})
+const headerActions = computed<ActionItem[]>(() => [bulk.menuItem.value])
 const listNav = useListNavigationSource('invoices', () => ({
   ids: flatRows.value.map(inv => inv.id),
   page: page.value,
@@ -1343,6 +1354,7 @@ useWindowRefresh(refreshLoadedPages,
           fallback-filename="kniha-vystavenych-faktur"
           class="max-md:-order-1"
         />
+        <ActionBar v-if="bulk.canUse.value" :actions="headerActions" data-test="invoice-more-actions" />
         <RouterLink
           v-if="auth.canWrite('invoices.create') || auth.isDemo"
           to="/invoices/new"
@@ -1459,6 +1471,11 @@ useWindowRefresh(refreshLoadedPages,
           :class="btnOutline('primary')">
           <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.clipboardCheck" /></svg>
           {{ bulkBusy ? '…' : t('invoice.bulk_post', { n: postableSelected.length }) }}
+        </button>
+        <button v-if="bulk.canUse.value" type="button" :class="btnOutline('warning')" class="whitespace-nowrap"
+          data-test="invoice-bulk-open" @click="bulk.open">
+          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.table" /></svg>
+          {{ t('bulk_actions.menu') }}
         </button>
     </BulkActionBar>
 
@@ -2002,6 +2019,10 @@ useWindowRefresh(refreshLoadedPages,
       </div>
     </div>
 
+    <BulkActionsDialog v-if="bulk.dialog.value" target="invoice"
+      :selection="bulk.dialog.value.selection" :selection-count="bulk.dialog.value.selectionCount"
+      :filter-selection="bulk.dialog.value.filterSelection" :filter-count="bulk.dialog.value.filterCount"
+      @close="bulk.close" @changed="load()" />
     <BulkDimensionsModal v-if="bulkDimsOpen" :ids="selectedIds"
       @close="bulkDimsOpen = false" @done="onBulkDimensionsDone" @failed="onBulkDimensionsFailed" />
 

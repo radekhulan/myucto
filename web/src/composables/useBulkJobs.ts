@@ -50,10 +50,12 @@ export function useBulkJobs<J extends BulkJobLike, S extends { jobs: J[] }, I>(o
   /** Klíč položky pro ruční vyřazení (id zápisu, id pohybu). */
   itemKey: (item: I) => number
   i18nPrefix: string
+  /** Po načtení vybrat poslední běh nanečisto, který jde provést (stránky ano, dialog nad novým výběrem ne). */
+  autoSelectLatest?: boolean
 }) {
   const { t } = useI18n()
   const toast = useToast()
-  const { api, itemKey, i18nPrefix } = options
+  const { api, itemKey, i18nPrefix, autoSelectLatest = true } = options
 
   const state = shallowRef<S | null>(null) as Ref<S | null>
   const running = shallowRef<J | null>(null) as Ref<J | null>
@@ -184,7 +186,7 @@ export function useBulkJobs<J extends BulkJobLike, S extends { jobs: J[] }, I>(o
       if (active) {
         running.value = active
         poll(active.id)
-      } else if (!selected.value) {
+      } else if (autoSelectLatest && !selected.value) {
         const latest = state.value.jobs[0]
         if (latest && latest.kind === 'dry_run' && latest.can_apply) selectJob(latest)
       }

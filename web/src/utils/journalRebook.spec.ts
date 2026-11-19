@@ -27,6 +27,16 @@ describe('journalRebook', () => {
     })
   })
 
+  it('nepovinná zúžení jdou jen vyplněná, jediné číslo dokladu platí jako obě meze', () => {
+    expect(buildRebookFilter(form({ partner_id: 7, dimension_value_id: 9, posting_rule_key: ' 3a ', document_no_from: '', document_no_to: ' FV12 ' }))).toMatchObject({
+      partner_id: 7, dimension_value_id: 9, posting_rule_key: '3a', document_no_from: 'FV12', document_no_to: 'FV12',
+    })
+    const plain = buildRebookFilter(form({ partner_id: null, posting_rule_key: '', document_no_from: '  ' }))
+    for (const key of ['partner_id', 'dimension_value_id', 'posting_rule_key', 'document_no_from', 'document_no_to']) {
+      expect(plain).not.toHaveProperty(key)
+    }
+  })
+
   it('formulář není validní se stejným účtem, bez zdroje, s obráceným obdobím nebo neplatnou částkou', () => {
     expect(isRebookFormValid(form())).toBe(true)
     expect(isRebookFormValid(form({ to_account: '315001' }))).toBe(false)

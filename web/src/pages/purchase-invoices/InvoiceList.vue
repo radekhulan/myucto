@@ -29,6 +29,10 @@ import SearchableSelect from '@/components/ui/SearchableSelect.vue'
 import FilterBar, { type FilterChip } from '@/components/ui/FilterBar.vue'
 import BulkActionBar from '@/components/ui/BulkActionBar.vue'
 import InvoiceBookMenu from '@/components/invoices/InvoiceBookMenu.vue'
+import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
+import BulkActionsDialog from '@/components/bulk/BulkActionsDialog.vue'
+import { useListBulkActions } from '@/components/bulk/useListBulkActions'
+import { purchaseListFilterParams } from '@/api/listQueries'
 import ExtractionReviewModal from '@/components/purchase/ExtractionReviewModal.vue'
 import { markRowsTouched, consumeFlashedRows } from '@/composables/useRowFlash'
 import { useListKeyboard } from '@/composables/useListKeyboard'
@@ -741,6 +745,13 @@ function listParams(): PurchaseListParams {
     include_review: dimensions.enabled.value,
   }
 }
+const bulk = useListBulkActions({
+  target: 'purchase_invoice',
+  selectedIds,
+  listQuery: () => purchaseListFilterParams(listParams()),
+  total,
+})
+const headerActions = computed<ActionItem[]>(() => [bulk.menuItem.value])
 const listNav = useListNavigationSource('purchase-invoices', () => ({
   ids: flatRows.value.map(inv => inv.id),
   page: page.value,
@@ -1101,6 +1112,7 @@ function closeFilterPanel(event: MouseEvent, reveal = false) {
           fallback-filename="kniha-prijatych-faktur"
           class="max-md:-order-1"
         />
+        <ActionBar v-if="bulk.canUse.value" :actions="headerActions" data-test="purchase-more-actions" />
         <RouterLink
           v-if="auth.canWrite('purchase_invoices.create') || auth.isDemo"
           to="/purchase-invoices/new"
@@ -1176,6 +1188,11 @@ function closeFilterPanel(event: MouseEvent, reveal = false) {
           :class="btnOutline('danger')">
           <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.trash" /></svg>
           {{ bulkBusy ? '…' : t('purchase_invoice.bulk.delete', { n: draftsSelected.length }) }}
+        </button>
+        <button v-if="bulk.canUse.value" type="button" :class="btnOutline('warning')" class="whitespace-nowrap"
+          data-test="purchase-bulk-open" @click="bulk.open">
+          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.table" /></svg>
+          {{ t('bulk_actions.menu') }}
         </button>
     </BulkActionBar>
 
@@ -1787,5 +1804,9 @@ function closeFilterPanel(event: MouseEvent, reveal = false) {
     <JournalSourceDrawer v-if="previewInvoiceId" :purchase-invoice-id="previewInvoiceId" @close="previewInvoiceId = null"
       @focus-entry="id => router.push({ name: 'accounting-journal', query: { entry_id: String(id) } })" />
     <ExtractionReviewModal v-if="reviewIds" :invoice-ids="reviewIds" @close="onReviewClosed" />
+    <BulkActionsDialog v-if="bulk.dialog.value" target="purchase_invoice"
+      :selection="bulk.dialog.value.selection" :selection-count="bulk.dialog.value.selectionCount"
+      :filter-selection="bulk.dialog.value.filterSelection" :filter-count="bulk.dialog.value.filterCount"
+      @close="bulk.close" @changed="load()" />
   </div>
 </template>

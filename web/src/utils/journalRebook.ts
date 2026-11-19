@@ -20,6 +20,11 @@ export interface JournalRebookForm {
   amount_min: string
   amount_max: string
   mode: JournalRebookMode
+  partner_id?: number | null
+  dimension_value_id?: number | null
+  posting_rule_key?: string | null
+  document_no_from?: string
+  document_no_to?: string
 }
 
 export const REBOOK_SOURCE_TYPES: JournalRebookSourceType[] = ['invoice', 'purchase_invoice', 'bank', 'manual', 'cash']
@@ -53,9 +58,29 @@ export function isRebookFormValid(form: JournalRebookForm): boolean {
   return true
 }
 
+/**
+ * Nepovinné zúžení výběru (partner, dimenze, předkontace, rozsah čísla dokladu). Do filtru
+ * jde jen vyplněné pole; jediné vyplněné číslo dokladu platí jako obě meze.
+ */
+export function rebookExtraFilter(form: JournalRebookForm): Partial<JournalRebookFilter> {
+  const out: Partial<JournalRebookFilter> = {}
+  if (form.partner_id) out.partner_id = form.partner_id
+  if (form.dimension_value_id) out.dimension_value_id = form.dimension_value_id
+  const rule = form.posting_rule_key?.trim()
+  if (rule) out.posting_rule_key = rule
+  const from = form.document_no_from?.trim() ?? ''
+  const to = form.document_no_to?.trim() ?? ''
+  if (from || to) {
+    out.document_no_from = from || to
+    out.document_no_to = to || from
+  }
+  return out
+}
+
 export function buildRebookFilter(form: JournalRebookForm): JournalRebookFilter {
   const text = form.text.trim()
   return {
+    ...rebookExtraFilter(form),
     from_account: form.from_account.trim(),
     to_account: form.to_account.trim(),
     side: form.side,
