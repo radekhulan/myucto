@@ -22035,7 +22035,8 @@
         },
         "deferred_tax": {
           "title": "Odložená daň",
-          "description": "Dobrovolná doložená metoda s odděleným vykázáním závazku a pohledávky."
+          "description": "Dobrovolná doložená metoda s odděleným vykázáním závazku a pohledávky.",
+          "description_500": "Odložená daň z přechodných rozdílů mezi účetní a daňovou hodnotou (ČÚS 003, 592/481). Volitelný krok, uzavření knih neblokuje."
         }
       },
       "checks": {
@@ -22096,7 +22097,8 @@
         "property_reconciliation": "Shoda salda SVJ s hlavní knihou",
         "deferred_tax_assessment": "Aktuální doložené posouzení odložené daně",
         "nonprofit_tax_assessment": "Aktuální potvrzené daňové posouzení činností 504",
-        "property_funding_reconciliation": "Shoda záloh a příjmů vlastníků s hlavní knihou"
+        "property_funding_reconciliation": "Shoda záloh a příjmů vlastníků s hlavní knihou",
+        "income_tax_591_mismatch": "Zaúčtovaná daň z příjmů (591) neodpovídá spočtené dani"
       },
       "payment_match_audit": {
         "currency_mismatch": "Měna platby neodpovídá měně dokladu",
@@ -22249,7 +22251,9 @@
         "override_text": "V období jsou nezaúčtované aktivní doklady. Uzavřít knihy přes ně můžete jen s doloženým důvodem - výjimka se zapíše do auditu i do závěrkového balíčku.",
         "override_reason": "Důvod override",
         "override_reason_ph": "Např. doklad dodán po uzávěrce, doúčtuje se v následujícím období",
-        "override_button": "Uzavřít přes nezaúčtované"
+        "override_button": "Uzavřít přes nezaúčtované",
+        "blocked_income_tax_stale": "Uzavřít knihy zatím nejde - daň z příjmů je potřeba přepočítat, protože se po jejím zaúčtování vrátil krok, který mění výsledek hospodaření. Otevřete krok Daň z příjmů.",
+        "blocked_assessment": "Uzavřít knihy zatím nejde - chybí: {items}. Posouzení potvrďte a pak se sem vraťte."
       },
       "open": {
         "hint": "Zaúčtuje počáteční stavy rozvahových účtů přes 701 - Počáteční účet rozvažný do následujícího období (založí se automaticky, pokud neexistuje) a převede výsledek hospodaření na 431.",
@@ -22290,7 +22294,8 @@
         "replace_confirm": "Nahradit a otevřít rok",
         "done_taken_over": "Počáteční stavy převzaty - souhlasí na {count} účtech, nic se neúčtovalo.",
         "done_replaced": "Převzaté počáteční stavy byly nahrazeny vypočtenými. Důvod: {reason}",
-        "revert_keeps": "Vzetí kroku zpět převzatý zápis nesmaže."
+        "revert_keeps": "Vzetí kroku zpět převzatý zápis nesmaže.",
+        "account_level": "Uzávěrka roku je převzatá z původního systému, který otevírací rozvahu převádí bez dimenzí. Počáteční stavy se proto porovnávají jen po účtech."
       },
       "revert": {
         "confirm": "Opravdu vzít krok zpět? Uzávěrkové zápisy kroku se smažou (s auditní stopou).",
@@ -22332,14 +22337,16 @@
         "activity_required": "Zvolte, do které činnosti daň z příjmů patří.",
         "computed_from_assessment": "Dopočteno z potvrzeného daňového posouzení (bez finalizovaného přiznání) - ověřte před zaúčtováním",
         "suggestion_unavailable": "Návrh daně zatím nejde spočítat: {reason}",
-        "stock_pending": "Uzávěrka zásob (krok 8) zatím neproběhla. Způsobem B se konečný stav zásob odúčtuje z nákladů, takže základ daně se po ní ještě změní - z tohoto čísla zatím nevycházejte. Zaúčtujte nejdřív zásoby a pak se sem vraťte.",
+        "stock_pending": "Uzávěrka zásob zatím neproběhla. Návrh daně už počítá s jejím předpokládaným dopadem podle skladové evidence, stejně jako náhled DPPO. Po zaúčtování zásob návrh ověřte.",
         "no_return": "Za rok není finalizované DPPO přiznání - zadejte částku ručně dle reportu úprav základu daně.",
         "amount": "Splatná daň",
         "tax_base_link": "Report úprav základu daně (podklad)",
         "book": "Zaúčtovat daň",
         "booked": "Splatná daň byla zaúčtována.",
         "amount_required": "Zadejte kladnou částku splatné daně.",
-        "not_applicable_fo": "Daň z příjmů fyzické osoby není nákladem účetní jednotky a neúčtuje se na 591/341. Krok vědomě přeskočte."
+        "not_applicable_fo": "Daň z příjmů fyzické osoby není nákladem účetní jednotky a neúčtuje se na 591/341. Krok vědomě přeskočte.",
+        "stale": "Daň je potřeba přepočítat: po jejím zaúčtování se vrátil krok {steps}, který mění výsledek hospodaření. Zaúčtujte daň znovu, nebo ji potvrďte beze změny, pokud částka platí dál.",
+        "stale_confirm": "Potvrdit daň beze změny"
       },
       "stock": {
         "needs_closing": "Krok je dostupný až po zahájení uzávěrky (stav Uzavírá se).",
@@ -22511,6 +22518,30 @@
         "missing_account": "V účtové osnově chybí požadovaný závěrkový účet.",
         "period_not_open": "Účetní období není otevřené.",
         "precheck_errors_exist": "Předběžné kontroly obsahují chyby - knihy nelze uzavřít."
+      },
+      "deferred_tax500": {
+        "hint": "Podle § 59 vyhlášky 500/2002 Sb. účtují o odložené dani povinně účetní jednotky s povinným auditem a konsolidační celky. Ostatní firmy o ní účtují dobrovolně. Krok je proto volitelný a uzavření knih neblokuje, nepotřebujete-li ho, přeskočte ho.",
+        "not_applicable": "Fyzická osoba o odložené dani neúčtuje. Krok přeskočte.",
+        "rate": "Sazba {rate} % (rok {year})",
+        "title_col": "Přechodný rozdíl",
+        "difference_col": "Rozdíl",
+        "no_titles": "K rozvahovému dni nejsou žádné přechodné rozdíly.",
+        "computed": "Vypočtená odložená daň",
+        "suggested": "Návrh zápisu (dorovnání zůstatku 481)",
+        "amount": "Odložená daň k zaúčtování",
+        "amount_hint": "Kladná částka je závazek (592/481), záporná pohledávka (481/592).",
+        "reason": "Důvod odchylky od výpočtu (nepovinné)",
+        "prudence": "Posoudil(a) jsem, že bude dosaženo základu daně, o který lze pohledávku uplatnit (§ 59 odst. 4 vyhlášky).",
+        "book": "Zaúčtovat odloženou daň",
+        "booked": "Odložená daň byla zaúčtována.",
+        "amount_required": "Zadejte nenulovou částku. Nulovou odloženou daň neúčtujte, krok přeskočte."
+      },
+      "taken_over": {
+        "title": "Uzávěrka převzatá z původního systému",
+        "text": "Tento rok uzavřel už původní účetní program a jeho uzávěrkové zápisy se převedly s daty. Průvodce uzávěrku znovu neúčtuje: kroky potvrďte nebo přeskočte bez nových zápisů, Uzavření knih jen uloží skutečný výsledek hospodaření a Otevření nového roku převezme převedené počáteční stavy, pokud s nimi souhlasí.",
+        "dimensions": "Kvůli převzaté uzávěrce jsou dimenze dokladů tohoto roku zmrazené a nejdou měnit.",
+        "skip_hint": "Tento krok už provedl původní systém v převzaté uzávěrce. Nový zápis by po ní zůstal neuzavřený, krok proto přeskočte.",
+        "skip": "Přeskočit (provedeno v původním systému)"
       }
     },
     "monthly_check": {
@@ -24836,7 +24867,10 @@
       "completed": "dokončeno",
       "unresolved_count": "nevyřešeno",
       "041": "účet 041",
-      "042": "účet 042"
+      "042": "účet 042",
+      "posted": "zaúčtováno",
+      "computed": "spočtená daň",
+      "source": "zdroj"
     },
     "value": {
       "monthly": "měsíční",
@@ -24853,7 +24887,13 @@
       "false": "ne",
       "completed": "dokončeno",
       "not_applicable": "Nevztahuje se",
-      "pending": "chybí aktuální posouzení"
+      "pending": "chybí aktuální posouzení",
+      "not_posted_yet": "daň zatím není zaúčtovaná",
+      "not_computable": "daň zatím nejde spočítat",
+      "finalized_return": "finalizované přiznání",
+      "computed_from_ledger": "dopočet z účetnictví",
+      "computed_from_assessment": "dopočet z daňového posouzení",
+      "check_failed": "kontrolu se nepodařilo provést, spusťte ji znovu, při opakování kontaktujte podporu"
     },
     "findings_count": "Nálezů: {count}",
     "showing_capped": "Zobrazeno {shown} z {total} nálezů",
@@ -32547,7 +32587,8 @@
     "filed_import_done_created": "Vstupy přiznání byly převzaty z podaného přiznání.",
     "filed_import_done_replaced": "Vstupy rozpracovaného přiznání byly nahrazeny údaji z podaného přiznání.",
     "filed_import_done_kept": "Rozpracované přiznání už existuje, vstupy se nezměnily.",
-    "filed_import_source": "Vstupy převzaty z podaného přiznání (forma {forma}, {date})."
+    "filed_import_source": "Vstupy převzaty z podaného přiznání (forma {forma}, {date}).",
+    "check_failed": "Kontrolu se nepodařilo provést. Zkuste ji načíst znovu, při opakování kontaktujte podporu."
   },
   "tax": {
     "title": "Daňový optimalizátor",

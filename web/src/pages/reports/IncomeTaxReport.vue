@@ -898,7 +898,10 @@ function tabLabel(k: TabKey): string { return t('taxReturn.tab_' + k) }
             <span class="text-xs font-semibold uppercase">{{ checkStatusLabel(c) }}</span>
           </div>
           <div class="text-xs mt-1 opacity-90">
-            <template v-if="c.key === 'period_status'">
+            <template v-if="c.value?.reason === 'check_failed'">
+              {{ t('taxReturn.check_failed') }}
+            </template>
+            <template v-else-if="c.key === 'period_status'">
               {{ t('taxReturn.check_period_' + ((c.value?.status as string) || 'na')) }}
             </template>
             <template v-else-if="c.key === 'depreciation_551' && !c.na">

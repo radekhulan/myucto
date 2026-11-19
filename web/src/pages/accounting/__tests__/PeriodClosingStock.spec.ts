@@ -59,7 +59,7 @@ import PeriodClosing from '@/pages/accounting/PeriodClosing.vue'
 
 const STEP_ORDER = [
   'precheck', 'depreciation', 'fx_revaluation', 'estimates', 'deferrals',
-  'provisions', 'income_tax', 'stock', 'close_books', 'open_next',
+  'provisions', 'income_tax', 'deferred_tax', 'stock', 'close_books', 'open_next',
 ]
 
 function stockStep(payload: ClosingStepPayload | null, status: ClosingStep['status'] = 'done'): ClosingStep {
@@ -97,7 +97,7 @@ describe('PeriodClosing.vue — krok zásob (stock)', () => {
     m.listAccounts.mockResolvedValue([])
   })
 
-  it('(a) stock je v seznamu kroků mezi income_tax a close_books', async () => {
+  it('(a) stock je v seznamu kroků za daněmi a před close_books', async () => {
     m.state.mockResolvedValue(makeState())
     const wrapper = mount(PeriodClosing)
     await flushPromises()
@@ -107,7 +107,7 @@ describe('PeriodClosing.vue — krok zásob (stock)', () => {
       .map((b) => b.text().match(/steps\.(\w+)\.title/)?.[1])
       .filter(Boolean)
     expect(keys).toEqual(STEP_ORDER)
-    expect(keys.indexOf('stock')).toBe(keys.indexOf('income_tax') + 1)
+    expect(keys.indexOf('stock')).toBe(keys.indexOf('deferred_tax') + 1)
     expect(keys.indexOf('stock')).toBe(keys.indexOf('close_books') - 1)
   })
 

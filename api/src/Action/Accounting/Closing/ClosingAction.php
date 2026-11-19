@@ -810,6 +810,9 @@ final class ClosingAction
         try {
             if ($step === 'precheck') {
                 $data = $this->closing->runPrecheck($supplierId, $periodId, $rowVersion, $meta);
+            } elseif (in_array($step, ['fx_revaluation', 'stock'], true) && ($body['status'] ?? null) === 'skipped') {
+                // Jen rok s uzávěrkou převzatou z původního systému (ověří služba).
+                $data = $this->closing->confirmStep($supplierId, $periodId, $step, 'skipped', $this->nullableString($body['note'] ?? null), $rowVersion, $meta);
             } elseif ($step === 'fx_revaluation') {
                 $bankRows = $this->parseBankRows($body['bank_rows'] ?? [], $response, $err);
                 if ($bankRows === null) return $err;
@@ -833,6 +836,9 @@ final class ClosingAction
                 $status = trim((string) ($body['status'] ?? ''));
                 if ($status === 'skipped') {
                     $data = $this->closing->confirmStep($supplierId, $periodId, 'income_tax', 'skipped', $this->nullableString($body['note'] ?? null), $rowVersion, $meta);
+                } elseif ($status === 'done' && !array_key_exists('amount', $body)) {
+                    // Potvrzení zaúčtované daně beze změny (zruší příznak přepočtu po vrácení kroku).
+                    $data = $this->closing->reconfirmIncomeTax($supplierId, $periodId, $this->nullableString($body['note'] ?? null), $rowVersion, $meta);
                 } elseif (!is_numeric($body['amount'] ?? null)) {
                     return Json::error($response, 'validation_failed', 'amount (splatná daň) musí být číslo.', 422);
                 } else {

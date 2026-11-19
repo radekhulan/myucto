@@ -41,6 +41,7 @@ import DateInput from '@/components/ui/DateInput.vue'
 import PaginationBar from '@/components/ui/PaginationBar.vue'
 import ResultDecision504 from '@/components/accounting/ResultDecision504.vue'
 import DeferredTax504Panel from '@/components/accounting/DeferredTax504Panel.vue'
+import DeferredTax500Panel from '@/components/accounting/DeferredTax500Panel.vue'
 import AssetReserve504 from '@/components/accounting/AssetReserve504.vue'
 import LegalProvisions504 from '@/components/accounting/LegalProvisions504.vue'
 import FxRevaluation504 from '@/components/accounting/FxRevaluation504.vue'
@@ -54,7 +55,7 @@ const pageId = useId()
 const periodId = Number(route.params.id)
 
 const BASE_STEP_ORDER: ClosingStepKey[] = [
-  'precheck', 'depreciation', 'fx_revaluation', 'estimates', 'deferrals', 'provisions', 'income_tax', 'stock', 'close_books', 'open_next',
+  'precheck', 'depreciation', 'fx_revaluation', 'estimates', 'deferrals', 'provisions', 'income_tax', 'deferred_tax', 'stock', 'close_books', 'open_next',
 ]
 
 const state = ref<ClosingState | null>(null)
@@ -241,9 +242,19 @@ const closeBlockedReason = computed<string | null>(() => {
       checks: failing.map(c => checkLabel(c.key)).join(', '),
     })
   }
+  if (incomeTaxStale.value) return t('accounting.closing.close.blocked_income_tax_stale')
+  const blockers = state.value.close_blockers ?? []
+  if (blockers.length) {
+    return t('accounting.closing.close.blocked_assessment', { items: blockers.map(k => checkLabel(k)).join(', ') })
+  }
   if (!(state.value.can_close ?? true)) return t('accounting.closing.close.blocked_steps')
   return null
 })
+
+/** Daň z příjmů označená k přepočtu po vrácení kroku, který mění výsledek hospodaření. */
+const incomeTaxStale = computed(() => state.value?.income_tax_stale ?? null)
+const incomeTaxStaleSteps = computed(() =>
+  (incomeTaxStale.value?.caused_by ?? []).map(k => t(`accounting.closing.steps.${k}.title`)).join(', '))
 
 function runPrecheck() {
   mutate(() => closingApi.runStep(periodId, 'precheck', { row_version: rowVersion.value }),
@@ -828,6 +839,11 @@ function takeoverBadge(status: string): string {
   return 'bg-neutral-100 text-neutral-500'
 }
 
+function bookDeferredTax(body: { amount: number; reason?: string; prudence_confirmed?: boolean }) {
+  mutate(() => closingApi.runStep(periodId, 'deferred_tax', { row_version: rowVersion.value, ...body }),
+    t('accounting.closing.deferred_tax500.booked'))
+}
+
 function revertStep(key: ClosingStepKey) {
   if (!confirm(t('accounting.closing.revert.confirm'))) return
   mutate(() => closingApi.revertStep(periodId, key, rowVersion.value), t('accounting.closing.revert.done'))
@@ -912,6 +928,15 @@ const canOpenNextStage = computed(() => ['closed', 'reviewed', 'approved'].inclu
       </div>
     </div>
 
+    <!-- Rok převedený i s uzávěrkou původního systému: průvodce ji znovu neúčtuje a dimenze
+         roku jsou kvůli převzaté uzávěrce zmrazené (jinak by se ptali, proč nejdou změnit). -->
+    <div v-if="state?.closing_taken_over" data-test="closing-taken-over"
+      class="mb-4 rounded-lg border border-primary-200 bg-primary-50 dark:bg-primary-500/[0.06] px-4 py-3 text-sm text-primary-800 dark:text-primary-200 space-y-1">
+      <p class="font-medium">{{ t('accounting.closing.taken_over.title') }}</p>
+      <p>{{ t('accounting.closing.taken_over.text') }}</p>
+      <p>{{ t('accounting.closing.taken_over.dimensions') }}</p>
+    </div>
+
     <div v-if="loading && !state" class="text-center text-neutral-500 py-12 text-sm">{{ t('common.loading') }}</div>
 
     <div v-else-if="state" class="grid grid-cols-1 lg:grid-cols-[280px_1fr] gap-4">
@@ -934,7 +959,9 @@ const canOpenNextStage = computed(() => ['closed', 'reviewed', 'approved'].inclu
       <div class="bg-surface border border-neutral-200 rounded-lg shadow-sm p-5 space-y-4 min-w-0">
         <div>
           <h2 class="text-lg font-semibold">{{ t(`accounting.closing.steps.${selected}.title`) }}</h2>
-          <p class="text-sm text-neutral-500 mt-0.5">{{ t(`accounting.closing.steps.${selected}.description`) }}</p>
+          <p class="text-sm text-neutral-500 mt-0.5">{{ t(selected === 'deferred_tax' && state.accounting_framework !== 'cz_504'
+            ? 'accounting.closing.steps.deferred_tax.description_500'
+            : `accounting.closing.steps.${selected}.description`) }}</p>
         </div>
 
         <!-- 1) Precheck -->
@@ -1038,6 +1065,11 @@ const canOpenNextStage = computed(() => ['closed', 'reviewed', 'approved'].inclu
 
         <!-- 3) Kurzové rozdíly -->
         <template v-else-if="selected === 'fx_revaluation'">
+          <div v-if="state.closing_taken_over && isClosing && step('fx_revaluation')?.status === 'pending' && auth.canWrite('accounting.periods.close')"
+            class="rounded-md border border-primary-200 bg-primary-50 dark:bg-primary-500/[0.06] px-3 py-2 text-sm text-primary-800 dark:text-primary-200 space-y-2" data-test="taken-over-skip-fx_revaluation">
+            <p>{{ t('accounting.closing.taken_over.skip_hint') }}</p>
+            <button @click="confirmStep('fx_revaluation', 'skipped')" :disabled="busy" :class="btnOutline('neutral')">{{ t('accounting.closing.taken_over.skip') }}</button>
+          </div>
           <FxRevaluation504 v-if="state.accounting_framework === 'cz_504'" :supplier-id="state.period.supplier_id" :period-id="state.period.id"
             :row-version="rowVersion" :ends-on="state.period.ends_on" :can-write="isClosing && auth.canWrite('accounting.periods.close')"
             :can-revert="!!state.can_revert_fx_revaluation" @updated="load" />
@@ -1553,12 +1585,31 @@ const canOpenNextStage = computed(() => ['closed', 'reviewed', 'approved'].inclu
           <DeferredTax504Panel :period-id="periodId" :row-version="rowVersion" :can-write="isClosing && auth.canWrite('accounting.periods.close') && !busy" @updated="load" />
         </template>
 
+        <!-- Odložená daň u ostatních firem (500): volitelný krok, uzavření knih neblokuje. -->
+        <template v-else-if="selected === 'deferred_tax'">
+          <div v-if="!isClosing && step('deferred_tax')?.status === 'pending'" class="text-sm text-neutral-500">
+            {{ t('accounting.closing.assist.needs_closing') }}
+          </div>
+          <DeferredTax500Panel v-else :period-id="periodId" :row-version="rowVersion" :step="step('deferred_tax')"
+            :is-closing="isClosing" :can-write="auth.canWrite('accounting.periods.close')" :busy="busy"
+            @book="bookDeferredTax" @skip="confirmStep('deferred_tax', 'skipped')" @revert="revertStep('deferred_tax')" />
+        </template>
+
         <!-- D11) Splatná daň z příjmů -->
         <template v-else-if="selected === 'income_tax'">
           <div v-if="!isClosing && step('income_tax')?.status === 'pending'" class="text-sm text-neutral-500">
             {{ t('accounting.closing.assist.needs_closing') }}
           </div>
           <template v-else>
+            <div v-if="incomeTaxStale" data-test="income-tax-stale"
+              class="rounded-md border border-warning-500/30 bg-warning-50 px-3 py-2 text-sm text-warning-800 space-y-2">
+              <p>{{ t('accounting.closing.income_tax.stale', { steps: incomeTaxStaleSteps }) }}</p>
+              <button v-if="isClosing && auth.canWrite('accounting.periods.close')"
+                @click="confirmStep('income_tax', step('income_tax')?.status === 'skipped' ? 'skipped' : 'done')"
+                :disabled="busy" :class="btnOutline('neutral')" data-test="income-tax-stale-confirm">
+                {{ t('accounting.closing.income_tax.stale_confirm') }}
+              </button>
+            </div>
             <div v-if="incomeTaxPreview" class="text-sm space-y-1">
               <div v-if="!incomeTaxPreview.applicable" class="rounded-md bg-warning-50 px-3 py-2 text-warning-800">
                 {{ t('accounting.closing.income_tax.not_applicable_fo') }}
@@ -1633,6 +1684,11 @@ const canOpenNextStage = computed(() => ['closed', 'reviewed', 'approved'].inclu
 
         <!-- Zásoby (SKLAD §3.4 — uzávěrka způsobem B) -->
         <template v-else-if="selected === 'stock'">
+          <div v-if="state.closing_taken_over && isClosing && step('stock')?.status === 'pending' && auth.canWrite('accounting.periods.close')"
+            class="rounded-md border border-primary-200 bg-primary-50 dark:bg-primary-500/[0.06] px-3 py-2 text-sm text-primary-800 dark:text-primary-200 space-y-2" data-test="taken-over-skip-stock">
+            <p>{{ t('accounting.closing.taken_over.skip_hint') }}</p>
+            <button @click="confirmStep('stock', 'skipped')" :disabled="busy" :class="btnOutline('neutral')">{{ t('accounting.closing.taken_over.skip') }}</button>
+          </div>
           <!-- Firma bez skladu v podvojném účetnictví: krok se přeskakuje sám, neblokuje. -->
           <p v-if="!stockRequired" class="text-sm text-neutral-500">
             {{ t('accounting.closing.stock.not_applicable') }}
@@ -1820,6 +1876,9 @@ const canOpenNextStage = computed(() => ['closed', 'reviewed', 'approved'].inclu
               <p class="text-sm text-neutral-600">{{ t(`accounting.closing.opening_takeover.${openingTakeover.status}_hint`) }}</p>
               <p v-if="openingTakeover.status !== 'to_create' && openingTakeover.preliminary" class="text-xs text-warning-700">
                 {{ t('accounting.closing.opening_takeover.preliminary') }}
+              </p>
+              <p v-if="openingTakeover.compare_level === 'account'" class="text-xs text-neutral-500" data-test="opening-takeover-account-level">
+                {{ t('accounting.closing.opening_takeover.account_level') }}
               </p>
               <div v-if="openingTakeover.entries.length" class="text-xs text-neutral-500">
                 {{ t('accounting.closing.opening_takeover.entries') }}:

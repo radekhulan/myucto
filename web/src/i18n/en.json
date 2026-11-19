@@ -22035,7 +22035,8 @@
         },
         "deferred_tax": {
           "title": "Deferred tax",
-          "description": "Voluntary evidenced method with separate asset and liability presentation."
+          "description": "Voluntary evidenced method with separate asset and liability presentation.",
+          "description_500": "Deferred tax on temporary differences between the carrying amount and the tax base (CAS 003, 592/481). Optional step, does not block closing the books."
         }
       },
       "checks": {
@@ -22096,7 +22097,8 @@
         "deferred_tax_assessment": "Current documented deferred tax assessment",
         "nonprofit_tax_assessment": "Current confirmed tax assessment of activities under Decree 504",
         "property_service_reconciliation": "Property services reconcile to the general ledger",
-        "property_funding_reconciliation": "Owner advances and income reconcile to the general ledger"
+        "property_funding_reconciliation": "Owner advances and income reconcile to the general ledger",
+        "income_tax_591_mismatch": "Posted income tax (591) does not match the computed tax"
       },
       "payment_match_audit": {
         "currency_mismatch": "Payment currency does not match the document currency",
@@ -22249,7 +22251,9 @@
         "override_text": "The period has unposted active documents. You may close the books over them only with a documented reason — the exception is recorded in the audit log and the closing package.",
         "override_reason": "Override reason",
         "override_reason_ph": "E.g. document delivered after closing, will be posted in the next period",
-        "override_button": "Close over unposted"
+        "override_button": "Close over unposted",
+        "blocked_income_tax_stale": "Books cannot be closed yet - the income tax needs to be recalculated because a step that changes the profit or loss was reverted after it was posted. Open the Income tax step.",
+        "blocked_assessment": "Books cannot be closed yet - missing: {items}. Confirm the assessment and come back."
       },
       "open": {
         "hint": "Books opening balances of balance sheet accounts via 701 — Opening balance sheet account into the following period (created automatically if missing) and transfers the profit or loss to 431.",
@@ -22290,7 +22294,8 @@
         "replace_confirm": "Replace and open the year",
         "done_taken_over": "Opening balances taken over — they match on {count} accounts, nothing was booked.",
         "done_replaced": "The taken-over opening balances were replaced with the calculated ones. Reason: {reason}",
-        "revert_keeps": "Undoing this step does not delete the taken-over entry."
+        "revert_keeps": "Undoing this step does not delete the taken-over entry.",
+        "account_level": "The year-end closing was taken over from the original system, which migrates the opening balance sheet without dimensions. Opening balances are therefore compared by account only."
       },
       "revert": {
         "confirm": "Really undo this step? Its closing entries will be deleted (with an audit trail).",
@@ -22332,14 +22337,16 @@
         "activity_required": "Choose which activity the income tax belongs to.",
         "computed_from_assessment": "Computed from the confirmed tax assessment (no finalised return) - check before posting",
         "suggestion_unavailable": "The tax cannot be suggested yet: {reason}",
-        "stock_pending": "The inventory close (step 8) has not run yet. Under method B the closing stock is removed from expenses, so the tax base will still change — do not rely on this figure yet. Book the inventory first, then come back.",
+        "stock_pending": "The inventory closing has not run yet. The tax suggestion already includes its expected effect from the stock records, the same as the CIT return preview. Check the suggestion again after the inventory is posted.",
         "no_return": "No finalized CIT return for the year — enter the amount manually per the tax-base adjustments report.",
         "amount": "Income tax payable",
         "tax_base_link": "Tax-base adjustments report (source)",
         "book": "Book the tax",
         "booked": "Income tax payable has been booked.",
         "amount_required": "Enter a positive income tax amount.",
-        "not_applicable_fo": "Personal income tax is not an expense of the accounting entity and is not posted to 591/341. Explicitly skip this step."
+        "not_applicable_fo": "Personal income tax is not an expense of the accounting entity and is not posted to 591/341. Explicitly skip this step.",
+        "stale": "The tax needs to be recalculated: after it was posted, the step {steps} was reverted, which changes the profit or loss. Post the tax again, or confirm it unchanged if the amount still applies.",
+        "stale_confirm": "Confirm tax unchanged"
       },
       "stock": {
         "needs_closing": "This step becomes available once closing has started (status Closing).",
@@ -22511,6 +22518,30 @@
         "missing_account": "A required closing account is missing from the chart of accounts.",
         "period_not_open": "The fiscal period is not open.",
         "precheck_errors_exist": "Pre-closing checks contain errors — the books cannot be closed."
+      },
+      "deferred_tax500": {
+        "hint": "Under § 59 of Decree 500/2002 Coll., deferred tax is mandatory for entities with a statutory audit and for consolidation groups. Other companies account for it voluntarily. The step is therefore optional and does not block closing the books; skip it if you do not need it.",
+        "not_applicable": "An individual does not account for deferred tax. Skip the step.",
+        "rate": "Rate {rate} % (year {year})",
+        "title_col": "Temporary difference",
+        "difference_col": "Difference",
+        "no_titles": "There are no temporary differences at the balance sheet date.",
+        "computed": "Computed deferred tax",
+        "suggested": "Suggested entry (adjusts the 481 balance)",
+        "amount": "Deferred tax to post",
+        "amount_hint": "A positive amount is a liability (592/481), a negative one an asset (481/592).",
+        "reason": "Reason for deviating from the computation (optional)",
+        "prudence": "I have assessed that taxable profit will be available against which the asset can be used (§ 59(4) of the Decree).",
+        "book": "Post deferred tax",
+        "booked": "Deferred tax has been posted.",
+        "amount_required": "Enter a non-zero amount. Do not post zero deferred tax, skip the step instead."
+      },
+      "taken_over": {
+        "title": "Closing taken over from the original system",
+        "text": "This year was already closed in the original accounting program and its closing entries were migrated with the data. The wizard does not post the closing again: confirm or skip the steps without new entries, Close books only stores the actual profit or loss and Open new year takes over the migrated opening balances if they match.",
+        "dimensions": "Because of the taken-over closing, dimensions of this year's documents are frozen and cannot be changed.",
+        "skip_hint": "The original system already performed this step in the taken-over closing. A new entry would stay unclosed after it, so skip the step.",
+        "skip": "Skip (done in the original system)"
       }
     },
     "monthly_check": {
@@ -24836,7 +24867,10 @@
       "completed": "completed",
       "unresolved_count": "unresolved",
       "041": "account 041",
-      "042": "account 042"
+      "042": "account 042",
+      "posted": "posted",
+      "computed": "computed tax",
+      "source": "source"
     },
     "value": {
       "monthly": "monthly",
@@ -24853,7 +24887,13 @@
       "false": "no",
       "pending": "current assessment required",
       "completed": "complete",
-      "not_applicable": "Not applicable"
+      "not_applicable": "Not applicable",
+      "not_posted_yet": "tax not posted yet",
+      "not_computable": "tax cannot be computed yet",
+      "finalized_return": "finalized return",
+      "computed_from_ledger": "computed from the ledger",
+      "computed_from_assessment": "computed from the tax assessment",
+      "check_failed": "the check could not be run, run it again and contact support if it keeps failing"
     },
     "findings_count": "Findings: {count}",
     "showing_capped": "Showing {shown} of {total} findings",
@@ -32547,7 +32587,8 @@
     "filed_import_done_created": "Return inputs were imported from the filed return.",
     "filed_import_done_replaced": "Draft return inputs were replaced with the filed values.",
     "filed_import_done_kept": "A draft return already exists, inputs were not changed.",
-    "filed_import_source": "Inputs imported from the filed return (form {forma}, {date})."
+    "filed_import_source": "Inputs imported from the filed return (form {forma}, {date}).",
+    "check_failed": "The check could not be run. Reload it and contact support if it keeps failing."
   },
   "tax": {
     "title": "Tax optimizer",

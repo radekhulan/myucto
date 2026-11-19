@@ -116,7 +116,7 @@ final class ClosingEntryBuilder
      * @param list<array{account_id:int, account_code:string, name:string, bal:float}> $bsBalances
      * @return list<array{account_code:string, side:'debit'|'credit', amount:float}>
      */
-    public function openingLines(array $bsBalances, float $profit, ?AccountingRoleProfile $profile = null, ?array $resultBalances = null): array
+    public function openingLines(array $bsBalances, float $profit, ?AccountingRoleProfile $profile = null, ?array $resultBalances = null, int $carriedResidueCents = 0): array
     {
         $profile ??= new AccountingRoleProfile();
         $lines = [];
@@ -156,7 +156,10 @@ final class ClosingEntryBuilder
             throw new ClosingException('opening_result_mismatch', 'Výsledek hospodaření nesouhlasí s převáděnými výsledkovými zůstatky.', 422);
         }
 
-        $this->assertZeroBalance($lines, $profile->account('closing.opening_balance'), 'opening_unbalanced_701');
+        // `$carriedResidueCents` = haléřový zbytek na počátečním účtu rozvažném, který rok
+        // zdědil z otevírací rozvahy převzaté z jiného systému. Otevření dalšího roku ho nese
+        // dál stejně jako původní systém; jinak musí účet končit na nule.
+        $this->assertZeroBalance($lines, $profile->account('closing.opening_balance'), 'opening_unbalanced_701', $carriedResidueCents);
 
         return $lines;
     }
@@ -173,7 +176,7 @@ final class ClosingEntryBuilder
      *
      * @param list<array{account_code:string, side:'debit'|'credit', amount:float}> $lines
      */
-    private function assertZeroBalance(array $lines, string $accountCode, string $errorCode): void
+    private function assertZeroBalance(array $lines, string $accountCode, string $errorCode, int $allowedDebitMinusCreditCents = 0): void
     {
         $debit = 0;
         $credit = 0;
@@ -187,7 +190,7 @@ final class ClosingEntryBuilder
                 $credit += self::cents($line['amount']);
             }
         }
-        if ($debit !== $credit) {
+        if ($debit - $credit !== $allowedDebitMinusCreditCents) {
             throw new ClosingException(
                 $errorCode,
                 'Závěrkový zápis není vyvážený: účet ' . $accountCode . ' MD ' . ($debit / 100)

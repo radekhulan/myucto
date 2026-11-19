@@ -84,9 +84,13 @@ zelenou fajfku, přeskočený pomlčku a popisek „přeskočeno".
 | 5 | Časové rozlišení | dle potřeby (potvrdit nebo přeskočit) |
 | 6 | Opravné položky | volitelný |
 | 7 | Daň z příjmů | volitelný (u fyzické osoby se přeskočí) |
-| 8 | Zásoby | podmíněný: jen firma se skladem účtovaným způsobem B, jinak se přeskočí sám |
-| 9 | Uzavření knih | až po dokončení nebo přeskočení kroků 1 až 8 |
-| 10 | Otevření nového roku | až po Uzavření knih |
+| 8 | Odložená daň | volitelný, uzavření knih neblokuje |
+| 9 | Zásoby | podmíněný: jen firma se skladem účtovaným způsobem B, jinak se přeskočí sám |
+| 10 | Uzavření knih | až po dokončení nebo přeskočení kroků 1 až 7 a 9 |
+| 11 | Otevření nového roku | až po Uzavření knih |
+
+U neziskové organizace (vyhláška 504) jde krok Zásoby před Daň z příjmů a Odložená daň má vlastní doloženou metodu
+(viz [§ 72.14](#7214-odlozena-dan-podle-vlastni-metody-v-ramci-504)).
 
 Každý krok se dokončuje tlačítkem **Potvrdit krok** (volitelně s poznámkou), nebo **Přeskočit**. U dokončeného
 kroku se zobrazí datum potvrzení. Administrátor může dokončený krok vrátit tlačítkem **Vzít krok zpět**
@@ -111,7 +115,8 @@ Kontrolují se mimo jiné:
 - **majetek v užívání bez zaúčtovaných odpisů** roku,
 - **cizoměnové otevřené doklady** čekající na přecenění,
 - zůstatky **dohadných účtů 388/389** a **časového rozlišení 381 až 385**,
-- informativní upozornění na **splatnou daň z příjmů** (591/341), kterou je nutné zaúčtovat ručně.
+- informativní upozornění na **splatnou daň z příjmů** (591/341), kterou je nutné zaúčtovat ručně,
+- **zaúčtovaná daň z příjmů proti spočtené dani**: obrat účtu 591 roku (bez uzavření knih) se porovná s daní, kterou by dnes navrhl krok Daň z příjmů (finalizované přiznání, jinak dopočet z účetnictví). Rozdíl od jedné koruny výš je varování, uzavření knih neblokuje. Dokud krok daně není hotový a nic zaúčtováno není, kontrola jen informuje; ztrátová firma bez daně nevaruje.
 
 **Jak poznáte, že je hotovo:** Kontroly neobsahují žádnou chybu. Při alespoň jedné chybě se u tlačítka zobrazí
 červený štítek **Chyby brání uzavření knih** a krok Uzavření knih zůstane zablokovaný.
@@ -275,7 +280,7 @@ označena varováním (ověřte uznání dluhu nebo stavění lhůty).
 Volitelný krok pro zaúčtování **předpisu splatné daně z příjmů** k rozvahovému dni (**MD 591 / D 341**).
 
 1. V panelu zkontrolujte přednabídnutou částku **Návrh z DPPO přiznání** (z finalizovaného přiznání DPPO téhož roku, pokud existuje a účetnictví se od jeho finalizace nezměnilo) a zůstatky účtů 341 (zaplacené zálohy) a 591. Odkaz **Report úprav základu daně (podklad)** vede na sestavu jako podklad.
-2. Není-li finalizované přiznání nebo se účetnictví po jeho finalizaci změnilo, aplikace daň dopočte z účetnictví a upozorní, ať ji před zaúčtováním ověříte. U neziskové organizace (vyhláška 504) se dopočet bere z výpočtu DPPO nad potvrzeným daňovým posouzením; když posouzení chybí nebo zastaralo, panel napíše proč. Případně částku zadejte ručně.
+2. Není-li finalizované přiznání nebo se účetnictví po jeho finalizaci změnilo, aplikace daň dopočte z účetnictví a upozorní, ať ji před zaúčtováním ověříte. Dopočet počítá stejně jako náhled přiznání DPPO: včetně ručních údajů rozpracovaného přiznání (ztráta, dary, slevy) a včetně předpokládaného dopadu kroků uzávěrky, které ještě nejsou zaúčtované. Krok Zásoby jde v rámci 500 až po dani, návrh proto už počítá s konečným stavem zásob podle skladové evidence a po zaúčtování zásob se nezmění. U neziskové organizace (vyhláška 504) se dopočet bere z výpočtu DPPO nad potvrzeným daňovým posouzením; když posouzení chybí nebo zastaralo, panel napíše proč. Případně částku zadejte ručně.
 3. Zadejte kladnou **Splatnou daň**. U neziskové organizace zvolte, do které **činnosti** daň patří (hlavní nebo hospodářská), protože každý nákladový řádek výkazu 504 nese činnost. Klikněte na **Zaúčtovat daň**. Zápis dostane číslo z řady UZ.
 4. Potvrďte krok.
 
@@ -289,10 +294,29 @@ označí jako nepoužitelný a vyžaduje jeho vědomé přeskočení.
 > Kroky Opravné položky a Daň z příjmů musí být před uzavřením knih dokončené nebo vědomě přeskočené, protože
 > ovlivňují výsledek hospodaření.
 
+Vezmete-li po zaúčtování nebo potvrzení daně zpět krok, který mění výsledek hospodaření (Odpisy majetku, Kurzové
+rozdíly, Dohadné položky, Časové rozlišení, Opravné položky, Zásoby), případně stornujete jeho asistovaný zápis,
+krok Daň z příjmů zůstane hotový, ale panel ohlásí, že daň je potřeba přepočítat, a uvede, který krok to způsobil.
+Knihy do té doby uzavřít nejde. Daň zaúčtujte znovu, nebo ji tlačítkem **Potvrdit daň beze změny** potvrďte, pokud
+částka platí dál.
+
 U neziskové organizace (vyhláška 504) je krok Zásoby před daní: zápis zásob mění náklady, ze kterých vychází daňové
 posouzení a výpočet daně. Daň proto nejde zaúčtovat, dokud krok Zásoby (je-li sklad zapnutý) není hotový.
 
-### 72.4.7 Krok 8: Zásoby
+### 72.4.7 Krok 8: Odložená daň
+
+Volitelný krok pro zaúčtování **odložené daně** z přechodných rozdílů mezi účetní a daňovou hodnotou (ČÚS 003).
+Podle § 59 vyhlášky 500/2002 Sb. o ní povinně účtují účetní jednotky s povinným auditem a konsolidační celky,
+ostatní firmy dobrovolně. Krok proto uzavření knih neblokuje; nepotřebujete-li ho, klikněte na **Přeskočit**.
+
+1. Panel ukáže přechodné rozdíly k rozvahovému dni (typicky rozdíl účetní a daňové zůstatkové ceny majetku), sazbu daně platnou pro rok, ve kterém se rozdíly vyrovnají, **Vypočtenou odloženou daň**, zůstatky účtů 481 a 592 a **Návrh zápisu**. Odložená daň se po letech nekumuluje, zápis dorovnává zůstatek 481 na vypočtenou hodnotu.
+2. Zkontrolujte nebo upravte **Odloženou daň k zaúčtování**. Kladná částka je závazek (592/481), záporná pohledávka (481/592). Odchylku od výpočtu můžete zdůvodnit.
+3. U pohledávky potvrďte posouzení, že bude dosaženo základu daně, o který ji lze uplatnit (§ 59 odst. 4 vyhlášky). Bez potvrzení se pohledávka nezaúčtuje.
+4. Klikněte na **Zaúčtovat odloženou daň**. Zápis dostane číslo z řady UZ, opakované zaúčtování přepíše týž zápis.
+
+**Jak poznáte, že je hotovo:** Aplikace ohlásí **Odložená daň byla zaúčtována** a krok má zelenou fajfku.
+
+### 72.4.8 Krok 9: Zásoby
 
 Krok je aktivní jen pro firmu se zapnutým skladem vedeným v podvojném účetnictví; ostatním firmám se
 přeskočí sám (jinak by prázdný krok blokoval uzavření knih). Rozhoduje způsob účtování zásob:
@@ -319,7 +343,7 @@ a posouzení mank a přebytků.
 
 ## 72.5 Krok za krokem: uzavření knih a otevření nového roku
 
-### 72.5.1 Krok 9: Uzavření knih
+### 72.5.1 Krok 10: Uzavření knih
 
 1. Ověřte, že je období ve stavu Uzavírá se, kontroly v kroku 1 nemají chybu a všechny předchozí kroky jsou potvrzené nebo přeskočené.
 2. S právem uzávěrky klikněte na **Uzavřít knihy** a potvrďte dialog **Uzavření účetních knih**.
@@ -354,7 +378,7 @@ příloha v náhledu ukáže nejužší rozsah (mikro), sekce s kategorií se al
 Dokud závěrka není schválená, uživatel s právem uzávěrky může krok zrušit tlačítkem **Vzít zpět uzavření knih** (uzávěrkové zápisy
 se smažou, opět s auditní stopou).
 
-### 72.5.2 Krok 10: Otevření nového roku
+### 72.5.2 Krok 11: Otevření nového roku
 
 1. S právem uzávěrky klikněte na **Otevřít nový rok** (aktivní až po dokončení kroku Uzavření knih) a potvrďte dialog **Otevření účetních knih**.
 2. Zaúčtuje se otevírací zápis k 1. dni následujícího období (to se založí automaticky, pokud ještě neexistuje) přes počáteční účet rozvažný **701** v rámci 500, nebo **961** v rámci 504. Výsledek hospodaření se převede na **431** v rámci 500, nebo **931** v rámci 504. Doklad dostane číslo z řady OT.
@@ -403,6 +427,21 @@ Při rozdílu máte dvě cesty. Buď rozdíl dohledáte a opravíte (v uzavíran
 použijete **Nahradit převzaté stavy vypočtenými**. Náhrada vyžaduje **povinný důvod** (**Důvod náhrady**), převzaté
 otevírací zápisy smaže (jejich obsah se uloží do auditní události spolu s důvodem a tabulkou rozdílů) a zaúčtuje
 vypočtený otevírací zápis z řady OT. Potvrdíte ji tlačítkem **Nahradit a otevřít rok**.
+
+#### Převzatá uzávěrka roku
+
+Převedete-li data z jiného účetního programu (například z POHODY) i s uzávěrkou roku, leží v roce uzávěrkové
+zápisy původního systému, které už vynulovaly výsledkové i rozvahové účty. Průvodce takový rok pozná a nad kroky
+zobrazí upozornění **Uzávěrka převzatá z původního systému**:
+
+- kroky potvrďte nebo přeskočte bez nových zápisů (kurzové rozdíly, zásoby i daň už zaúčtoval původní systém). Kroky Kurzové rozdíly a Zásoby mají v takovém roce tlačítko **Přeskočit (provedeno v původním systému)**,
+- **Uzavřít knihy** nic znovu nezaúčtuje, období jen uzavře a uloží skutečný výsledek hospodaření spočtený bez převzatých uzávěrkových zápisů,
+- **Otevřít nový rok** porovná převedené počáteční stavy dalšího roku s konečnými stavy spočtenými bez převzaté uzávěrky a při shodě je převezme. Porovnává se jen po účtech, bez dimenzí, protože původní systém otevírací rozvahu převádí bez nich. Haléřový zbytek na účtu 701, který původní systém přenáší z roku do roku, se nese dál stejně,
+- dimenze dokladů tohoto roku jsou kvůli převzaté uzávěrce zmrazené a nejdou měnit.
+
+Zaúčtujete-li do takového roku něco až po převodu, zůstanou po převzaté uzávěrce nenulové zůstatky a uzavření knih
+se odmítne. Zápis přesuňte do dalšího roku, nebo zůstatek vyrovnejte v původní uzávěrce. U neziskové organizace
+(vyhláška 504) průvodce převzatou uzávěrku zatím nenavazuje a zahájení uzávěrky odmítne.
 
 > [!WARNING]
 > **Vzít zpět otevření roku** převzatý zápis nesmaže, protože patří k dalšímu roku, ne k uzávěrce. Smažou se jen
@@ -520,7 +559,7 @@ Příloha k závěrce a uzávěrkový balíček respektují účetní rámec zvo
 
 - **Podléhá povinnému auditu (§ 20 zákona o účetnictví)**: auditovaná jednotka pak sestavuje výkazy vždy v plném rozsahu (§ 3a vyhlášky 500/2002 Sb.).
 - **Automatická čísla dokladů ručních zápisů (řada ID)**: když ruční zápis v deníku nemá vyplněné číslo dokladu, přidělí se mu automaticky číslo z řady ID.
-- **Storno přecenění saldokonta k 1. dni nového období**: řídí, zda krok Otevření nového roku zaúčtuje i zrcadlové storno kurzových rozdílů (viz [§ 72.5.2](#7252-krok-10-otevreni-noveho-roku)).
+- **Storno přecenění saldokonta k 1. dni nového období**: řídí, zda krok Otevření nového roku zaúčtuje i zrcadlové storno kurzových rozdílů (viz [§ 72.5.2](#7252-krok-11-otevreni-noveho-roku)).
 - **Časové rozlišení drobného majetku**: výchozí politika žádné, poměrně nebo paušál; nové účetní období ji při založení převezme. Konkrétní uzávěrka pak ukládá a používá snapshot politiky svého období, takže změna firemního defaultu nepřepíše starší roky.
 - **Daně vůči finančnímu úřadu vykazovat v rozvaze souhrnně**: přeplatek jedné daně se v rozvaze započte s nedoplatkem jiné (§ 58 odst. 2 vyhlášky 500/2002 Sb.), volitelně **od účetního období**; viz [§ 57.7.2.1](57_Rozvaha.md#57721-souhrnne-vykazani-dani-vuci-financnimu-uradu).
 - **Minulé období výkazů převzít z uzavřeného výkazu minulého roku**: sloupec minulého období se sestaví s výjimkami mapování a volbami platnými v minulém roce; bez volby podle pravidel běžného roku. Viz [§ 57.7.1](57_Rozvaha.md#5771-obdobi-den-a-verze).
@@ -661,7 +700,7 @@ Stavový automat podporuje tyto samostatné přechody s právem Spravovat obdob�
 - **Zahájit interní kontrolu** (Uzavřené na Zkontrolované): označí závěrku jako procházející interní kontrolou. Jde o vratný pracovní stav, žádná zákonná data nevznikají.
 - **Zrušit interní kontrolu** (Zkontrolované na Uzavřené): vyžaduje **důvod** (nejméně 10 znaků). Ruší pouze interní kontrolu, žádná data zákonného schválení se přitom nemažou (protože ve stavu Zkontrolované ještě žádná neexistují).
 - **Schválit závěrku** (Uzavřené nebo Zkontrolované na Schválené): potvrzovací dialog upozorní, že schválení je nevratné a po něm už knihy nepůjde znovu otevřít; vyžaduje potvrzení zaškrtnutím.
-- **Znovuotevřít** (Uzavřené na Otevřené): vyžaduje důvod (nejméně 10 znaků). Má-li období zaúčtované uzávěrkové nebo otevírací zápisy, aplikace znovuotevření odmítne (viz [§ 72.5.2](#7252-krok-10-otevreni-noveho-roku)).
+- **Znovuotevřít** (Uzavřené na Otevřené): vyžaduje důvod (nejméně 10 znaků). Má-li období zaúčtované uzávěrkové nebo otevírací zápisy, aplikace znovuotevření odmítne (viz [§ 72.5.2](#7252-krok-11-otevreni-noveho-roku)).
 
 Stránka Účetní období nabízí u uzavřeného období tlačítka **Schválit závěrku** a **Znovuotevřít**. Přechody
 interní kontroly (Zahájit a Zrušit interní kontrolu) a schválení ze stavu Zkontrolované podporuje stavový automat
@@ -702,8 +741,8 @@ přeúčtování i stornu dokladů starších než zamčené datum, i když je o
 
 ### 72.12.4 Pořadí kroků uzávěrky
 
-Uzávěrkový průvodce má v rámci 500 deset kroků v pevném, závazném pořadí. V rámci 504 navíc obsahuje krok Odložená daň podle výslovně zvolené vlastní metody (viz tabulka v [§ 72.4](#724-krok-za-krokem-uzaverka-roku-pruvodce)).
-Každý krok musí být před uzavřením knih buď dokončený, nebo vědomě přeskočený. Krok Zásoby je podmíněný: jen firma
+Uzávěrkový průvodce má v rámci 500 jedenáct kroků v pevném, závazném pořadí (viz tabulka v [§ 72.4](#724-krok-za-krokem-uzaverka-roku-pruvodce)). Odložená daň jde hned po splatné dani z příjmů a je volitelná: § 59 vyhlášky 500/2002 Sb. ji ukládá jen účetním jednotkám s povinným auditem a konsolidačním celkům, proto uzavření knih neblokuje. V rámci 504 jde krok Zásoby před daň z příjmů a Odložená daň se řídí výslovně zvolenou vlastní metodou.
+Každý jiný krok musí být před uzavřením knih buď dokončený, nebo vědomě přeskočený. Krok Zásoby je podmíněný: jen firma
 se skladem účtovaným způsobem B, jinak se automaticky přeskočí. Kroky Opravné položky a Daň z příjmů musí být před
 uzavřením knih dokončené nebo vědomě přeskočené, protože ovlivňují výsledek hospodaření.
 

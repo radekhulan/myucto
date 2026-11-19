@@ -20406,6 +20406,11 @@ paths:
 
         `step_order` = pořadí kroků průvodce; u neziskové organizace (504) je krok stock před income_tax
         a deferred_tax, krok Daň z příjmů pak bez dokončeného kroku Zásoby vrátí 409 stock_step_first.
+        U ostatních firem (500) jde volitelný krok deferred_tax hned po income_tax; uzavření knih ho nevyžaduje.
+
+        `income_tax_stale` = {caused_by, at}, když se po zaúčtování nebo potvrzení daně z příjmů vrátil
+        krok měnící VH (depreciation, fx_revaluation, estimates, deferrals, provisions, stock); can_close
+        je pak false a /close vrátí 422 income_tax_stale, dokud se daň znovu nezaúčtuje nebo nepotvrdí.
 
         `opening_takeover` (null po dokončení open_next) = počáteční stavy dalšího roku:
 
@@ -20687,7 +20692,7 @@ paths:
       parameters:
         - $ref: '#/components/parameters/SupplierIdHeader'
         - { in: path, name: id, required: true, schema: { type: integer } }
-        - { in: path, name: step, required: true, schema: { type: string, enum: [precheck, depreciation, fx_revaluation, estimates, deferrals, provisions, income_tax] } }
+        - { in: path, name: step, required: true, schema: { type: string, enum: [precheck, depreciation, fx_revaluation, estimates, deferrals, provisions, income_tax, deferred_tax, stock] } }
       requestBody:
         required: true
         content:
@@ -20697,9 +20702,11 @@ paths:
               required: [row_version]
               properties:
                 row_version: { type: integer, minimum: 1 }
-                status: { type: string, enum: [done, skipped], description: "Checklist kroky + skip u provisions/income_tax" }
+                status: { type: string, enum: [done, skipped], description: "Checklist kroky + skip u provisions/income_tax/deferred_tax. income_tax se status done bez amount potvrdí už zaúčtovanou daň beze změny (zruší income_tax_stale); nezaúčtovanou vrátí 422 income_tax_not_posted. fx_revaluation a stock jde se status skipped přeskočit jen v roce s uzávěrkou převzatou z původního systému (closing_taken_over), jinak 422 step_not_skippable." }
                 note: { type: string, maxLength: 500 }
-                amount: { type: number, description: "Jen income_tax — splatná daň (591/341)" }
+                amount: { type: number, description: "income_tax — splatná daň (591/341); deferred_tax (500) — odložená daň, kladná = závazek 592/481, záporná = pohledávka 481/592" }
+                reason: { type: string, maxLength: 500, description: "income_tax/deferred_tax — důvod odchylky ruční částky od návrhu" }
+                prudence_confirmed: { type: boolean, description: "Jen deferred_tax (500) u pohledávky — posouzení podle § 59 odst. 4 vyhlášky; bez něj 422 prudence_check_required" }
                 activity: { type: string, enum: [main, economic], description: "Jen income_tax u neziskové organizace (504) — činnost, do které daň patří; bez ní 422 income_tax_activity_required" }
                 partial: { type: boolean, default: false, description: "Jen provisions. true mění zaslané položky (nejvýše 200), ostatní otevřené OP zachová a plně uhrazené odstraní; false nahrazuje celý seznam." }
                 items:
@@ -20747,10 +20754,12 @@ paths:
         `accounting.pairing_released` s okruhy, zápisy a účty); odpověď nese
         `released_pairings` = počet uvolněných okruhů. Řádek rozepsaný na doklady
         saldokonta revert zastaví (409 `allocation_saldo_in_use`).
+        Vrácení kroku měnícího VH po zaúčtované nebo potvrzené dani z příjmů označí
+        daň k přepočtu; odpověď pak nese `income_tax_stale: true`.
       parameters:
         - $ref: '#/components/parameters/SupplierIdHeader'
         - { in: path, name: id, required: true, schema: { type: integer } }
-        - { in: path, name: step, required: true, schema: { type: string, enum: [precheck, depreciation, fx_revaluation, estimates, deferrals, provisions, income_tax, close_books, open_next] } }
+        - { in: path, name: step, required: true, schema: { type: string, enum: [precheck, depreciation, fx_revaluation, estimates, deferrals, provisions, income_tax, deferred_tax, stock, close_books, open_next] } }
       requestBody:
         required: true
         content: { application/json: { schema: { type: object, required: [row_version], properties: { row_version: { type: integer, minimum: 1 } } } } }
@@ -45226,6 +45235,33 @@ components:
           type: boolean
         depreciation_step_required:
           type: boolean
+        step_order:
+          type: array
+          items:
+            type: string
+        closing_taken_over:
+          type: boolean
+          description: Rok uzavřel už původní systém (převedené zápisy closing bez source_id, které nejsou storny). Uzavření knih pak nic neúčtuje a uloží skutečný VH bez převzatých zápisů; otevření roku porovnává převzaté počáteční stavy se zůstatky bez převzaté uzávěrky, a to jen po účtech (opening_takeover.compare_level = account). U 504 start vrátí 422 closing_taken_over, zůstatek po převzaté uzávěrce 422 closing_taken_over_residual.
+        close_blockers:
+          type: array
+          description: Chybějící posouzení, bez kterých uzavření knih odmítne (deferred_tax_assessment u 504, nonprofit_tax_assessment); can_close je pak false.
+          items:
+            type: string
+            enum: [deferred_tax_assessment, nonprofit_tax_assessment]
+        income_tax_stale:
+          type:
+          - object
+          - 'null'
+          description: Daň z příjmů je potřeba přepočítat; caused_by = vrácené kroky měnící VH.
+          properties:
+            caused_by:
+              type: array
+              items:
+                type: string
+            at:
+              type:
+              - string
+              - 'null'
         opening_takeover:
           type:
           - object

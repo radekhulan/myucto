@@ -35,12 +35,17 @@ final class ClosingSteps
      * firem zůstává zavedené pořadí; výpočet DPPO tam nezaúčtované zásoby promítne
      * projekcí uzávěrky. Frontend přebírá pořadí ze stavu (`step_order`).
      *
+     * Odložená daň (ČÚS 003) je u ostatních firem VOLITELNÝ krok hned po splatné dani:
+     * § 59 vyhlášky 500/2002 Sb. ji ukládá jen účetním jednotkám s povinným auditem
+     * (a konsolidačním celkům), ostatní o ní účtují dobrovolně. Proto ji uzavření knih
+     * nevyžaduje ({@see ClosingService::preCloseStepKeys()} ji nezná).
+     *
      * @return list<string>
      */
     public static function order(?string $framework): array
     {
         return $framework === AccountingFrameworkService::CZ_504
             ? ['precheck', 'depreciation', 'fx_revaluation', 'estimates', 'deferrals', 'provisions', 'stock', 'income_tax', 'deferred_tax', 'close_books', 'open_next']
-            : ['precheck', 'depreciation', 'fx_revaluation', 'estimates', 'deferrals', 'provisions', 'income_tax', 'stock', 'close_books', 'open_next'];
+            : ['precheck', 'depreciation', 'fx_revaluation', 'estimates', 'deferrals', 'provisions', 'income_tax', 'deferred_tax', 'stock', 'close_books', 'open_next'];
     }
 }

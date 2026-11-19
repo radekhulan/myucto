@@ -309,8 +309,11 @@ final class PreFinalizeCheckService
             $profitAfterTax = round((float) ($stmt['checks']['profit_current'] ?? 0), 2);
             $tax59x = $this->accountTurnover($supplierId, '59', (string) $period['starts_on'], (string) $period['ends_on']);
             $statementVh = round($profitAfterTax + $tax59x, 2);
-        } catch (\Throwable) {
-            return ['key' => 'vh_vs_statement', 'severity' => 'info', 'ok' => true, 'na' => true, 'value' => null];
+        } catch (\Throwable $e) {
+            // Neúčtující a ne-PO poplatník odpadl výš; tady výsledovka selhala doopravdy.
+            // Kontrola, která nic neověřila, nesmí svítit zeleně.
+            error_log(sprintf('Kontrola vh_vs_statement (supplier %d) selhala: %s: %s', $supplierId, $e::class, $e->getMessage()));
+            return ['key' => 'vh_vs_statement', 'severity' => 'warning', 'ok' => false, 'value' => ['reason' => 'check_failed']];
         }
         $diff = round($returnVh - $statementVh, 2);
         return [

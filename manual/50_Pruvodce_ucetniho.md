@@ -75,8 +75,8 @@ Celý postup vede uzávěrkový průvodce v `Nástroje → Uzávěrka` ([Uzávě
 4. [Dohadné položky a časové rozlišení](72_Uzaverka.md#7244-kroky-4-a-5-dohadne-polozky-a-casove-rozliseni), včetně návrhů předplacených nákladů a zvolené politiky drobného majetku. Návrhy vycházejí z pravidel nákladů označených jako **opakovaný předplacený náklad**. Jde o doporučení jen ke čtení, které uzávěrka zaúčtuje až po vašem potvrzení.
 5. [Opravné položky k pohledávkám](72_Uzaverka.md#7245-krok-6-opravne-polozky-k-pohledavkam). Navazují na saldokonto z [§ 50.4](#504-krok-za-krokem-mesicni-prace).
 6. [Daň z příjmů](72_Uzaverka.md#7246-krok-7-dan-z-prijmu): mezikrok na stránce [Daň z příjmů](43_Dan_z_prijmu.md).
-7. **Odložená daň**: po splatné dani z příjmů posuďte a potvrďte odloženou daň, případně doložte přeskočení podle nastavení firmy.
-8. [Zásoby](72_Uzaverka.md#7247-krok-8-zasoby). Je-li sklad vedený v podvojném účetnictví a firma účtuje zásoby způsobem B, doložte fyzickou inventuru a ocenění a klikněte na **Zaúčtovat / přepočítat zásoby**. Krok zaúčtuje konečný stav, manka a přebytky. Firmě bez skladu se krok přeskočí sám.
+7. [Odložená daň](72_Uzaverka.md#7247-krok-8-odlozena-dan): po splatné dani z příjmů posuďte a zaúčtujte odloženou daň, případně krok přeskočte. Povinná je jen pro účetní jednotky s povinným auditem a konsolidační celky, uzavření knih neblokuje.
+8. [Zásoby](72_Uzaverka.md#7248-krok-9-zasoby). Je-li sklad vedený v podvojném účetnictví a firma účtuje zásoby způsobem B, doložte fyzickou inventuru a ocenění a klikněte na **Zaúčtovat / přepočítat zásoby**. Krok zaúčtuje konečný stav, manka a přebytky. Firmě bez skladu se krok přeskočí sám.
 9. [Uzavření knih a otevření nového roku](72_Uzaverka.md#725-krok-za-krokem-uzavreni-knih-a-otevreni-noveho-roku).
 10. **Uzávěrkový balíček.** Před schválením stáhněte doložitelný ZIP sestav, inventarizací a daňových podkladů.
 11. [Schválení závěrky](72_Uzaverka.md#726-krok-za-krokem-schvaleni-zaverky-a-znovuotevreni-obdobi): rozdělení výsledku hospodaření podle rámce firmy. Účty 431 → 428/429/364 platí pro rámec 500; v rámci 504 se pracuje s výsledkem na 931 a příslušnými účty 9xx.
