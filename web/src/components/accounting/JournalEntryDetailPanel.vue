@@ -71,11 +71,13 @@ const canRepost = computed(() => props.canWrite && repostSource.value !== null &
 const repostOpen = ref(false)
 
 // Zúčtování DPH se nestornuje, přepočítává se a maže na místě (VatClearingService).
-// Zápis interního dokladu se stornuje v detailu dokladu. Zápisy uzávěrky a otevření
-// účtů vrací jen průvodce uzávěrkou (server ruční storno odmítne).
-const NON_REVERSIBLE_SOURCES = ['vat_clearing', 'closing', 'opening']
-const canReverse = computed(() => props.canWrite && !props.detail.reversed_by
-  && !NON_REVERSIBLE_SOURCES.includes(props.detail.source_type) && !props.detail.internal_document)
+// Zápis interního dokladu se stornuje v detailu dokladu. Zápisy uzávěrky a otevření účtů
+// založené průvodcem (otevření se source_id) vrací jen průvodce uzávěrkou (server ruční
+// storno odmítne); převzaté otevření z migrace (bez source_id) stornovat jde.
+const wizardOnly = computed(() => props.detail.source_type === 'closing'
+  || (props.detail.source_type === 'opening' && props.detail.source_id != null))
+const canReverse = computed(() => props.canWrite && !props.detail.reversed_by && !wizardOnly.value
+  && props.detail.source_type !== 'vat_clearing' && !props.detail.internal_document)
 
 // Přílohy, poznámky, vazby, dokumenty: u drtivé většiny zápisů je pod hlavní
 // věcí prázdno, takže celá ta část stojí sbalená pod jedním řádkem. Počty

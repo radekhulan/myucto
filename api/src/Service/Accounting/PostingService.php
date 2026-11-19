@@ -1151,13 +1151,26 @@ final class PostingService
         );
     }
 
-    /** Zdroje, jejichž zápisy vrací jen průvodce uzávěrkou (vrácení kroku), ne ruční storno. */
-    public const WIZARD_ONLY_REVERSAL_SOURCES = ['closing', 'opening'];
+    /**
+     * Zápis, který vrací jen průvodce uzávěrkou (vrácení kroku), ne ruční storno: každý
+     * zápis uzávěrky (`closing`, i skladové sloty) a otevření účtů založené aplikací
+     * (`opening` se source_id = otevírané období, krok Otevření nového roku). Převzaté
+     * otevírací zápisy z migrace (`opening` bez source_id) jdou stornovat ručně, jinak by
+     * chybně převzatý počáteční stav nešlo opravit.
+     *
+     * @param array<string,mixed> $entry řádek journal_entries (source_type, source_id)
+     */
+    public static function isWizardOnlyReversal(array $entry): bool
+    {
+        $source = (string) ($entry['source_type'] ?? '');
+        return $source === 'closing' || ($source === 'opening' && ($entry['source_id'] ?? null) !== null);
+    }
 
     /**
-     * Ruční storno z účetního deníku (API i rozhraní). Zápisy uzávěrky a otevření účtů
-     * odmítne: storno nese týž zdroj bez source_id, takže by se tvářilo jako uzavření
-     * knih a zmrazilo dimenze období. Tyto zápisy vrací průvodce uzávěrkou.
+     * Ruční storno z účetního deníku (API i rozhraní). Odmítne zápisy podle
+     * {@see isWizardOnlyReversal()}: storno uzávěrky nese týž zdroj bez source_id, takže by
+     * se tvářilo jako uzavření knih a zmrazilo dimenze období. Tyto zápisy vrací průvodce
+     * uzávěrkou.
      *
      * @param array{entry_date?:string, description?:?string, posted_by?:?int, user_id?:?int, ip?:?string, user_agent?:?string} $meta
      * @throws PostingException `closing_reversal_forbidden` (409), jinak jako {@see reverse()}
@@ -1250,10 +1263,10 @@ final class PostingService
         if ($original === null) {
             throw new PostingException('entry_not_found', 'Účetní zápis #' . $entryId . ' neexistuje.', 404);
         }
-        if ($manual && in_array((string) ($original['source_type'] ?? ''), self::WIZARD_ONLY_REVERSAL_SOURCES, true)) {
+        if ($manual && self::isWizardOnlyReversal($original)) {
             throw new PostingException(
                 'closing_reversal_forbidden',
-                'Zápis uzávěrky nebo otevření účtů nejde stornovat ručně. Vraťte příslušný krok v průvodci uzávěrkou (Uzávěrka, Vzít krok zpět).',
+                'Zápis uzávěrky nebo otevření účtů založený průvodcem uzávěrkou nejde stornovat ručně. Vraťte příslušný krok v průvodci (Uzávěrka, Vzít krok zpět).',
                 409,
             );
         }

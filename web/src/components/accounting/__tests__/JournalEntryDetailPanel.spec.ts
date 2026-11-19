@@ -59,9 +59,19 @@ describe('JournalEntryDetailPanel', () => {
     w.unmount()
   })
 
-  it.each(['closing', 'opening'])('zápis zdroje %s storno nenabízí, vrací ho průvodce uzávěrkou', (source) => {
-    const w = mountPanel(detail({ source_type: source }), true)
+  it.each([
+    ['closing', 12],
+    ['closing', null],
+    ['opening', 13],
+  ])('zápis zdroje %s (source_id %s) storno nenabízí, vrací ho průvodce uzávěrkou', (source, sourceId) => {
+    const w = mountPanel(detail({ source_type: source, source_id: sourceId }), true)
     expect(w.findAll('button').some(b => b.text().includes('accounting.journal.reverse'))).toBe(false)
+    w.unmount()
+  })
+
+  it('převzaté otevření z migrace (bez source_id) jde stornovat', () => {
+    const w = mountPanel(detail({ source_type: 'opening', source_id: null }), true)
+    expect(w.findAll('button').some(b => b.text().includes('accounting.journal.reverse'))).toBe(true)
     w.unmount()
   })
 })

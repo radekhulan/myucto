@@ -21,9 +21,10 @@ use Slim\Psr7\Factory\ServerRequestFactory;
 use Slim\Psr7\Response as Psr7Response;
 
 /**
- * Ruční storno zápisu uzávěrky nebo otevření účtů z deníku se odmítne. Storno nese
- * týž zdroj bez source_id, takže by se tvářilo jako uzavření knih a zmrazilo dimenze
- * období. Tyto zápisy vrací průvodce uzávěrkou (vrácení kroku).
+ * Ruční storno zápisu uzávěrky nebo otevření účtů založeného průvodcem se z deníku
+ * odmítne. Storno nese týž zdroj bez source_id, takže by se tvářilo jako uzavření knih
+ * a zmrazilo dimenze období. Tyto zápisy vrací průvodce uzávěrkou (vrácení kroku).
+ * Převzaté otevření z migrace (bez source_id) stornovat jde.
  */
 #[Group('integration')]
 final class ClosingEntryManualReversalTest extends TestCase
@@ -75,34 +76,59 @@ final class ClosingEntryManualReversalTest extends TestCase
         }
     }
 
-    /** @return list<array{string}> */
+    /**
+     * Zápisy průvodce: uzávěrka (i bez source_id, např. převzatá z jiného programu)
+     * a otevření účtů, které založil krok Otevření nového roku (source_id = období).
+     *
+     * @return array<string,array{string,bool}>
+     */
     public static function wizardSources(): array
     {
-        return [['closing'], ['opening']];
+        return [
+            'uzávěrka průvodce' => ['closing', true],
+            'uzávěrka bez source_id' => ['closing', false],
+            'otevření průvodce' => ['opening', true],
+        ];
     }
 
     #[DataProvider('wizardSources')]
-    public function testJournalReverseRefusesWizardEntry(string $source): void
+    public function testJournalReverseRefusesWizardEntry(string $source, bool $withSourceId): void
     {
-        $entryId = $this->entry($source, $this->periodId);
+        $entryId = $this->entry($source, $withSourceId ? $this->periodId : null);
+        $before = $this->reversals($source);
 
         $res = $this->reverse($entryId);
 
         self::assertSame(409, $res['status'], (string) json_encode($res['body'], JSON_UNESCAPED_UNICODE));
         self::assertSame('closing_reversal_forbidden', $res['body']['error']['code'] ?? $res['body']['code'] ?? null);
-        self::assertStringContainsString('průvodci uzávěrkou', (string) json_encode($res['body'], JSON_UNESCAPED_UNICODE));
+        self::assertStringContainsString('průvodci', (string) json_encode($res['body'], JSON_UNESCAPED_UNICODE));
         self::assertNull($this->journal->find($entryId, $this->supplierId)['reversed_by'], 'Zápis zůstává nestornovaný.');
-        self::assertSame(0, $this->reversals($source), 'Nevznikl protizápis bez source_id.');
+        self::assertSame($before, $this->reversals($source), 'Nevznikl protizápis bez source_id.');
     }
 
     #[DataProvider('wizardSources')]
-    public function testManualReversalServiceRefusesWizardEntry(string $source): void
+    public function testManualReversalServiceRefusesWizardEntry(string $source, bool $withSourceId): void
     {
-        $entryId = $this->entry($source, $this->periodId);
+        $entryId = $this->entry($source, $withSourceId ? $this->periodId : null);
 
         $this->expectException(PostingException::class);
-        $this->expectExceptionMessage('průvodci uzávěrkou');
+        $this->expectExceptionMessage('průvodci');
         $this->posting->reverseManual($this->supplierId, $entryId, ['user_id' => $this->userId]);
+    }
+
+    /**
+     * Převzatý otevírací zápis z migrace nemá source_id. Chybně převzatý počáteční stav
+     * jde opravit jen ručním stornem, proto zůstává povolené (storno otevření období
+     * dimenze nezmrazí, closeBooksSql se týká jen uzávěrky).
+     */
+    public function testJournalReverseStillReversesImportedOpening(): void
+    {
+        $entryId = $this->entry('opening', null);
+
+        $res = $this->reverse($entryId);
+
+        self::assertSame(201, $res['status'], (string) json_encode($res['body'], JSON_UNESCAPED_UNICODE));
+        self::assertNotNull($this->journal->find($entryId, $this->supplierId)['reversed_by']);
     }
 
     public function testJournalReverseStillReversesManualEntry(): void
