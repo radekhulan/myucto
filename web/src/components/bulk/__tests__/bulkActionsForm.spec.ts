@@ -184,11 +184,11 @@ describe('hromadné akce: výběr ze seznamu a oprávnění', () => {
     })
   })
 
-  it('položku vidí nové právo, přeúčtování s právem zaúčtovat, nebo správce; klient nikdy', () => {
+  it('položku vidí právo hromadných změn nebo správce, právo doúčtovat ne; klient nikdy', () => {
     const can = (keys: string[]) => (k: string) => keys.includes(k)
     expect(canOpenBulkActions({ canWrite: can(['accounting.bulk_changes']) })).toBe(true)
     expect(canOpenBulkActions({ canWrite: can(['accounting.journal.bulk_repost']) })).toBe(false)
-    expect(canOpenBulkActions({ canWrite: can(['accounting.journal.bulk_repost', 'accounting.journal.post']) })).toBe(true)
+    expect(canOpenBulkActions({ canWrite: can(['accounting.journal.bulk_repost', 'accounting.journal.post']) })).toBe(false)
     expect(canOpenBulkActions({ canWrite: can([]), isCompanyAdminRole: true })).toBe(true)
     expect(canOpenBulkActions({ canWrite: can(['accounting.bulk_changes']), isClientRole: true })).toBe(false)
   })

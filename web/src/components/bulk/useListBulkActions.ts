@@ -5,21 +5,19 @@ import type { ActionItem } from '@/components/ui/ActionBar.vue'
 import type { BulkSelection, BulkTarget } from '@/api/bulkActions'
 
 export interface BulkAccess {
-  canWrite: (key: 'accounting.bulk_changes' | 'accounting.journal.bulk_repost' | 'accounting.journal.post') => boolean
+  canWrite: (key: 'accounting.bulk_changes') => boolean
   isCompanyAdminRole?: boolean
   isClientRole?: boolean
 }
 
 /**
- * Položka „Hromadné akce" se ukáže jen tomu, kdo smí aspoň jednu operaci: nové právo
- * hromadných změn, dosavadní hromadné přeúčtování, nebo správce firmy. Přesnou dostupnost
+ * Položka „Hromadné akce" se ukáže jen tomu, kdo smí aspoň jednu operaci: právo
+ * hromadných změn, nebo správce firmy (jen ten smí i přeúčtovat účet). Přesnou dostupnost
  * jednotlivých operací pak vrací server.
  */
 export function canOpenBulkActions(auth: BulkAccess): boolean {
   if (auth.isClientRole) return false
-  return auth.canWrite('accounting.bulk_changes')
-    || (auth.canWrite('accounting.journal.bulk_repost') && auth.canWrite('accounting.journal.post'))
-    || auth.isCompanyAdminRole === true
+  return auth.canWrite('accounting.bulk_changes') || auth.isCompanyAdminRole === true
 }
 
 export interface BulkDialogState {

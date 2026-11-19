@@ -64,7 +64,7 @@ final class JournalRebookAction
             return Json::error($response, 'no_supplier', 'Chybí kontext firmy.', 400);
         }
         $all = $this->jobs->listForTenant($supplierId, JournalRebookService::SOURCE, limit: 50);
-        $canRun = RequestAuthorization::canBulkRepost($request) && $this->modes->hasDoubleEntry($supplierId);
+        $canRun = RequestAuthorization::canRebookAccounts($request) && $this->modes->hasDoubleEntry($supplierId);
 
         return Json::ok($response, [
             'can_run' => $canRun,
@@ -101,8 +101,8 @@ final class JournalRebookAction
         if ($supplierId === 0) {
             return Json::error($response, 'no_supplier', 'Chybí kontext firmy.', 400);
         }
-        if (!RequestAuthorization::canBulkRepost($request)) {
-            return Json::error($response, 'forbidden', 'Hromadné přeúčtování smí správce firmy nebo role s právem hromadně přeúčtovat doklady.', 403);
+        if (!RequestAuthorization::canRebookAccounts($request)) {
+            return Json::error($response, 'forbidden', 'Hromadné přeúčtování smí jen správce firmy.', 403);
         }
         if (!$this->modes->hasDoubleEntry($supplierId)) {
             return Json::error($response, 'not_double_entry', 'Firma nevede podvojné účetnictví.', 409);
@@ -159,8 +159,8 @@ final class JournalRebookAction
     public function rollback(Request $request, Response $response, array $args): Response
     {
         $supplierId = SupplierGuard::currentId($request);
-        if (!RequestAuthorization::canBulkRepost($request)) {
-            return Json::error($response, 'forbidden', 'Hromadné přeúčtování smí správce firmy nebo role s právem hromadně přeúčtovat doklady.', 403);
+        if (!RequestAuthorization::canRebookAccounts($request)) {
+            return Json::error($response, 'forbidden', 'Hromadné přeúčtování smí jen správce firmy.', 403);
         }
         $job = $this->jobs->find((int) ($args['id'] ?? 0), $supplierId);
         if ($job === null || $job['source'] !== JournalRebookService::SOURCE) {
@@ -193,7 +193,7 @@ final class JournalRebookAction
             return Json::error($response, 'not_found', 'Úloha nenalezena.', 404);
         }
         $all = $this->jobs->listForTenant($supplierId, JournalRebookService::SOURCE, limit: 50);
-        $canRun = RequestAuthorization::canBulkRepost($request);
+        $canRun = RequestAuthorization::canRebookAccounts($request);
 
         return Json::ok($response, AccountingBulkJobs::view($job, $all, $canRun, self::PARAMS) + ['log_text' => $job['log_text'] ?? null]);
     }

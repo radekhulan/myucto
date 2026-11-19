@@ -80,7 +80,7 @@ final class PermissionCatalog
             ['accounting', 'accounting', 'Účetnictví', $staffOnly],
             ['accounting.journal.write', 'accounting', 'Zápisy v deníku', $staffOnly],
             ['accounting.journal.post', 'accounting', 'Zaúčtovat doklad', $staffOnly],
-            ['accounting.journal.bulk_repost', 'accounting', 'Hromadně přeúčtovat a doúčtovat doklady', $staffOnly],
+            ['accounting.journal.bulk_repost', 'accounting', 'Hromadně doúčtovat bankovní pohyby', $staffOnly],
             ['accounting.bulk_changes', 'accounting', 'Hromadné změny dokladů a zápisů', $staffOnly],
             ['accounting.periods.manage', 'accounting', 'Spravovat období', $staffOnly],
             ['accounting.periods.close', 'accounting', 'Uzavřít období', $staffOnly],

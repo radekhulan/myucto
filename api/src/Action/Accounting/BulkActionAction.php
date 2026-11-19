@@ -49,8 +49,8 @@ use Psr\Http\Message\ServerRequestInterface as Request;
  * spuštění převede na pevný seznam id, nejvýš {@see BulkSelection::LIMIT}.
  *
  * Spuštění smí správce firmy nebo role s právem `accounting.bulk_changes`
- * ({@see RequestAuthorization::canBulkChange()}); přeúčtování účtu dál vyžaduje
- * právo hromadného přeúčtování ({@see RequestAuthorization::canBulkRepost()}). Každý
+ * ({@see RequestAuthorization::canBulkChange()}); přeúčtování účtu jen správce firmy
+ * ({@see RequestAuthorization::canRebookAccounts()}). Každý
  * záznam pak projde právy a pojistkami úpravy jednoho záznamu za uživatele, který
  * úlohu spustil. Ostrý běh nebere výběr z požadavku: zpracuje jen to, co ukázal
  * dokončený běh nanečisto, bez vyřazených položek. Smazání vyžaduje opsaný počet.
@@ -120,7 +120,7 @@ final class BulkActionAction
         if ($supplierId === 0) {
             return Json::error($response, 'no_supplier', 'Chybí kontext firmy.', 400);
         }
-        if (!RequestAuthorization::canBulkChange($request) && !RequestAuthorization::canBulkRepost($request)) {
+        if (!RequestAuthorization::canBulkChange($request)) {
             return Json::error($response, 'forbidden', 'Hromadné akce smí správce firmy nebo role s právem Hromadné změny dokladů a zápisů.', 403);
         }
         $body = (array) ($request->getParsedBody() ?? []);
@@ -229,7 +229,7 @@ final class BulkActionAction
     /** POST /api/accounting/bulk-actions/{id}/cancel */
     public function cancel(Request $request, Response $response, array $args): Response
     {
-        if (!RequestAuthorization::canBulkChange($request) && !RequestAuthorization::canBulkRepost($request)) {
+        if (!RequestAuthorization::canBulkChange($request)) {
             return Json::error($response, 'forbidden', 'Hromadné akce smí správce firmy nebo role s právem Hromadné změny dokladů a zápisů.', 403);
         }
         $supplierId = SupplierGuard::currentId($request);
@@ -429,8 +429,9 @@ final class BulkActionAction
         $params = (array) ($job['params'] ?? []);
         $operation = (string) ($params['operation'] ?? '');
         $rollback = $operation !== DeleteOperation::KEY;
-        $canRun = RequestAuthorization::canBulkChange($request)
-            || ($operation === JournalRebookService::KEY && RequestAuthorization::canBulkRepost($request));
+        $canRun = $operation === JournalRebookService::KEY
+            ? RequestAuthorization::canRebookAccounts($request)
+            : RequestAuthorization::canBulkChange($request);
         $view = AccountingBulkJobs::view($job, $all, $canRun, self::PARAMS);
         return [
             'operation' => $operation,

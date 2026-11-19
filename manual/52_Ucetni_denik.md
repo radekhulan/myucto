@@ -211,7 +211,7 @@ Spolu se zápisem se změní i zdrojový doklad, aby změnu nevrátila jeho dal�
 
 **Jak poznáte, že je hotovo:** Ostré přeúčtování má v **Posledních bězích** stav **Hotovo** a záložka **Chyby** je prázdná. Skončil-li některý doklad chybou, má běh stav **Hotovo s upozorněními**. V deníku mají zápisy nový účet a každý přeúčtovaný doklad má v historii záznam s číslem běhu.
 
-Spustit přeúčtování smí správce firmy a role s právem **Hromadně přeúčtovat a doúčtovat doklady** spolu s právem zaúčtovat doklad. Ostatní uživatelé stránku vidí s neaktivním formulářem a bez tlačítek **Zkusit nanečisto** a **Přeúčtovat**. Pravidla jsou v [§ 52.14.17](#521417-hromadne-preuctovani-dokladu).
+Spustit přeúčtování smí jen správce firmy (a superadmin). Žádná jiná role ho nedostane, ani v editoru rolí. Ostatní uživatelé stránku vidí s neaktivním formulářem a bez tlačítek **Zkusit nanečisto** a **Přeúčtovat**. Pravidla jsou v [§ 52.14.17](#521417-hromadne-preuctovani-dokladu).
 
 Doklady nebo zápisy, které máte vybrané v seznamu, přeúčtujete stejně z nabídky **Hromadné akce** přímo v seznamu ([§ 52.8.2](#5282-krok-za-krokem-hromadne-akce-v-seznamech)).
 
@@ -354,7 +354,7 @@ Podrobnosti jsou v [§ 52.14.14](#521414-ostatni-pohledavky-a-zavazky).
 | Pro cizoměnový doklad vidíte kurzový rozdíl na 663 nebo 563 | Přecenění k rozvahovému dni | Nejde o chybu ([§ 52.14.6.1](#521461-kurzove-preceneni-a-kurzove-rozdily)). |
 | Karta **Zkontroluj integritu deníku** na přehledu | Noční kontrola našla nesrovnalost | Klikněte na kartu, nebo v deníku nastavte filtr **Nesrovnalosti doklad ↔ deník** na **Částka zápisu nesedí na doklad** ([§ 52.14.11](#521411-kontrola-integrity-deniku-nocni-job)). |
 | Doklad po importu není v deníku | Automatika účtování neprojde doklady, které už v systému leží | Viz [§ 52.9](#529-krok-za-krokem-douctovani-dokladu-z-jineho-systemu). |
-| Na stránce **Přeúčtovat doklady** je formulář neaktivní a chybí tlačítko **Zkusit nanečisto** | Chybí právo **Hromadně přeúčtovat a doúčtovat doklady** nebo právo zaúčtovat doklad | Požádejte správce firmy o úpravu role ([§ 52.14.17](#521417-hromadne-preuctovani-dokladu)). API token hromadné přeúčtování nespustí. |
+| Na stránce **Přeúčtovat doklady** je formulář neaktivní a chybí tlačítko **Zkusit nanečisto** | Nejste správce firmy, přeúčtování smí jen on | Požádejte správce firmy, ať přeúčtování spustí ([§ 52.14.17](#521417-hromadne-preuctovani-dokladu)). API token hromadné přeúčtování nespustí. |
 | **Nad limit 500, zužte výběr.** | Filtru odpovídá víc než 500 dokladů | Rozdělte výběr podle období, zdroje nebo částky a přeúčtujte po částech. |
 | **Filtru neodpovídá žádný zaúčtovaný doklad.** | Na účtu v období nejsou žádné zaúčtované doklady vybraných zdrojů | Zkontrolujte účet, stranu, období a zaškrtnuté zdroje. Zápisy mezd, majetku, uzávěrky a zápočtů se hromadně nepřeúčtovávají. |
 | **Přeúčtovat jde jen podle dokončeného běhu nanečisto, který se ještě neprovedl.** | Vybraný běh nanečisto ještě běží, už se provedl, nebo jste vybrali jiný druh běhu | Spusťte nový běh nanečisto a v **Posledních bězích** otevřete jeho **Výsledek**. |
@@ -1546,9 +1546,9 @@ Postup krok za krokem je v [§ 52.9.1](#5291-krok-za-krokem-bankovni-pohyby-podl
 jen pohyby z běhu nanečisto, které mezitím nikdo jiný nespároval ani nezaúčtoval. Při
 vrácení se pohyb, který se od ostrého běhu změnil, nevrátí a vypíše se s důvodem.
 
-Najednou jde zaúčtovat nejvýš 500 pohybů a spárovat nejvýš 100. Spustit to smí stejní
-uživatelé jako hromadné přeúčtování ([§ 52.14.17](#521417-hromadne-preuctovani-dokladu)),
-párování navíc vyžaduje právo párovat banku.
+Najednou jde zaúčtovat nejvýš 500 pohybů a spárovat nejvýš 100. Spustit to smí správce
+firmy a role s právem **Hromadně doúčtovat bankovní pohyby** spolu s právem zaúčtovat doklad
+(účetní a vlastní role ho dostanou v editoru rolí), párování navíc vyžaduje právo párovat banku.
 
 ### 52.14.14 Ostatní pohledávky a závazky
 
@@ -2269,9 +2269,10 @@ Pravidla:
   a jen u dokladu, který neuhrazuje fakturu. Zápis v uzavřeném období, zápis patřící ke
   skupině zaúčtování dokladu a v zamčeném datu změna s daňovým dopadem se vynechají.
 - DPH se přeúčtováním nemění, stejně jako u jednotlivého **Přeúčtovat**.
-- Spustit přeúčtování smí správce firmy a role s právem **Hromadně přeúčtovat
-  a doúčtovat doklady** spolu s právem zaúčtovat doklad. Systémové role správců ho mají, účetní a vlastní role
-  ho dostanou v editoru rolí. API token hromadné přeúčtování nespustí.
+- Spustit přeúčtování smí jen správce firmy (a superadmin), na stránce **Přeúčtovat doklady**
+  i operací **Přeúčtovat účet** v hromadných akcích, nad doklady i nad položkami. Přepisuje
+  už zaúčtované zápisy, proto ho žádná jiná role nedostane, ani v editoru rolí. API token
+  hromadné přeúčtování nespustí.
 - Každý přeúčtovaný doklad má v historii záznam s číslem běhu.
 
 ### 52.14.18 Hromadné akce v seznamech
@@ -2356,7 +2357,7 @@ Pravidla společná všem operacím:
 - Převzaté doklady (import z jiného programu) se mažou podle stejných pravidel jako ostatní.
 - Smazání vrátit nejde. Provedení vyžaduje opsat počet záznamů, které se smažou.
 
-**Oprávnění:** Hromadné akce spustí správce firmy a role s právem **Hromadné změny dokladů a zápisů** (skupina Účetnictví). Systémové role správců ho mají, účetní a vlastní role ho dostanou v editoru rolí, stejně jako právo hromadně přeúčtovat. Právo jen otevírá hromadný mechanismus: k nastavení dimenzí je potřeba zápis do účetnictví, ke smazání právo smazat fakturu, přijatou fakturu nebo zápisy v deníku, ke změně předkontace a poznámky právo upravovat doklady, k opravě variabilního symbolu právo párovat bankovní pohyby. Operace **Přeúčtovat účet** dál vyžaduje právo **Hromadně přeúčtovat a doúčtovat doklady**. Bez práv nabídka **Hromadné akce** v seznamu není. API token hromadné akce nespustí, přes API jde jen číst jejich stav a výsledek.
+**Oprávnění:** Hromadné akce spustí správce firmy a role s právem **Hromadné změny dokladů a zápisů** (skupina Účetnictví). Systémové role správců ho mají, účetní a vlastní role ho dostanou v editoru rolí. Právo jen otevírá hromadný mechanismus: k nastavení dimenzí je potřeba zápis do účetnictví, ke smazání právo smazat fakturu, přijatou fakturu nebo zápisy v deníku, ke změně předkontace a poznámky právo upravovat doklady, k opravě variabilního symbolu právo párovat bankovní pohyby. Operaci **Přeúčtovat účet** smí jen správce firmy ([§ 52.14.17](#521417-hromadne-preuctovani-dokladu)). Bez práv nabídka **Hromadné akce** v seznamu není. API token hromadné akce nespustí, přes API jde jen číst jejich stav a výsledek.
 
 ### 52.14.19 Členění DPH a položky dokladů
 

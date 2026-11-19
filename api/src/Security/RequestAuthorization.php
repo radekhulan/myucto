@@ -447,10 +447,10 @@ final class RequestAuthorization
     }
 
     /**
-     * Hromadné přeúčtování zápisů podle filtru (stránka Přeúčtovat doklady): správce
-     * firmy, nebo interní role s právem zaúčtovat (`accounting.journal.post`) a zároveň
-     * s vlastním právem `accounting.journal.bulk_repost`. Jedním krokem mění stovky
-     * zápisů, proto ho API token nespustí nikdy a klient ho nedostane.
+     * Hromadné doúčtování bankovních pohybů podle filtru: správce firmy, nebo interní role
+     * s právem zaúčtovat (`accounting.journal.post`) a zároveň s vlastním právem
+     * `accounting.journal.bulk_repost`. Jedním krokem zaúčtuje stovky pohybů, proto ho
+     * API token nespustí nikdy a klient ho nedostane.
      */
     public static function canBulkRepost(Request $request): bool
     {
@@ -459,6 +459,17 @@ final class RequestAuthorization
                 || (!self::isClientType($request)
                     && self::allows($request, 'accounting.journal.post', AccessLevel::WRITE)
                     && self::allows($request, 'accounting.journal.bulk_repost', AccessLevel::WRITE)));
+    }
+
+    /**
+     * Hromadné přeúčtování účtu (stránka Přeúčtovat doklady a operace Přeúčtovat účet
+     * v Hromadných akcích, nad doklady i položkami): jen správce firmy nebo superadmin
+     * v relaci. Přepisuje už zaúčtované zápisy napříč obdobími, proto ho žádná role
+     * nedostane právem z editoru rolí, API token ani klient.
+     */
+    public static function canRebookAccounts(Request $request): bool
+    {
+        return self::mayOverridePeriodProtection($request) && self::isCompanyAdmin($request);
     }
 
     /**

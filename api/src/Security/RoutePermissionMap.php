@@ -858,20 +858,21 @@ final class RoutePermissionMap
         ['GET', '#^/api/accounting/posting-backfill(/|$)#', 'accounting', AccessLevel::READ],
         ['*', '#^/api/accounting/posting-backfill(/|$)#', 'accounting.journal.post', AccessLevel::WRITE],
         // Hromadné přeúčtování: čtení stavu a náhledu jako účetnictví, spuštění jako
-        // zaúčtování. Vlastní právo `accounting.journal.bulk_repost` ověřuje akce přes
-        // RequestAuthorization::canBulkRepost(). Počet odpovídajících zápisů je POST
+        // zaúčtování. Že jde o správce firmy, ověřuje akce přes
+        // RequestAuthorization::canRebookAccounts(). Počet odpovídajících zápisů je POST
         // jen kvůli tělu filtru, nic nezapisuje.
         ['GET', '#^/api/accounting/journal-rebook(/|$)#', 'accounting', AccessLevel::READ],
         ['POST', '#^/api/accounting/journal-rebook/count$#', 'accounting', AccessLevel::READ],
         ['*', '#^/api/accounting/journal-rebook(/|$)#', 'accounting.journal.post', AccessLevel::WRITE],
-        // Bankovní pohyby podle filtru: totéž rozdělení jako přeúčtování. Párování navíc
+        // Bankovní pohyby podle filtru: totéž rozdělení, vlastní právo
+        // `accounting.journal.bulk_repost` ověřuje akce přes canBulkRepost(). Párování navíc
         // ověřuje `bank.match` akce i jednotlivé párování, které hromadný krok volá.
         ['GET', '#^/api/accounting/bank-bulk(/|$)#', 'accounting', AccessLevel::READ],
         ['POST', '#^/api/accounting/bank-bulk/count$#', 'accounting', AccessLevel::READ],
         ['*', '#^/api/accounting/bank-bulk(/|$)#', 'accounting.journal.post', AccessLevel::WRITE],
         // Hromadné akce v seznamech: čtení stavu a výsledku jako ostatní účetnictví. Spuštění,
         // vrácení a zrušení ověřuje akce přes RequestAuthorization::canBulkChange() (právo
-        // `accounting.bulk_changes`), u přeúčtování účtu canBulkRepost(), a každý záznam
+        // `accounting.bulk_changes`), u přeúčtování účtu canRebookAccounts(), a každý záznam
         // pak právy úpravy jednoho záznamu (smazat fakturu, zápis v deníku, dimenze…).
         ['GET', '#^/api/accounting/bulk-actions(/|$)#', 'accounting', AccessLevel::READ],
         ['POST', '#^/api/accounting/bulk-actions/(start|[0-9]+/(rollback|cancel))$#', 'accounting', AccessLevel::READ],

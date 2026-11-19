@@ -46,8 +46,8 @@ final class ItemAccountOperation implements BulkOperation, BulkCandidateSource
 
     public function unavailableReason(Request $request, int $supplierId, string $target): ?string
     {
-        if (!RequestAuthorization::canBulkChange($request)) {
-            return 'Hromadné změny smí správce firmy nebo role s právem Hromadné změny dokladů a zápisů.';
+        if (!RequestAuthorization::canRebookAccounts($request)) {
+            return 'Přeúčtovat hromadně smí jen správce firmy.';
         }
         if (!in_array($target, self::TARGETS, true)) {
             return 'Účet položky jde měnit jen nad položkami dokladů.';

@@ -553,6 +553,36 @@ final class BulkActionTest extends BankPostingTestCase
         self::assertSame(1, $resp['error']['expected'] ?? null);
     }
 
+    public function testRebookAccountIsOnlyForCompanyAdmin(): void
+    {
+        $own = $this->saleInvoice('', $this->client('Syntetický odběratel'), 100.0, 'invoice', 'draft');
+        $rights = ['accounting' => 2, 'accounting.bulk_changes' => 2, 'accounting.journal.post' => 2,
+            'accounting.journal.bulk_repost' => 2, 'invoices' => 2, 'purchase_invoices' => 2];
+        $body = ['dry_run' => true, 'operation' => 'rebook_account', 'target' => 'invoice', 'selection' => ['ids' => [$own]],
+            'params' => ['from_account' => '602', 'to_account' => '604', 'side' => 'credit', 'mode' => 'rewrite']];
+
+        [$status, $resp] = $this->callStart($rights, $body);
+        self::assertSame([409, 'operation_unavailable'], [$status, $resp['error']['code'] ?? null], 'Právo z editoru rolí přeúčtování neotevře.');
+
+        $operations = $this->container->get(BulkOperations::class);
+        foreach (['invoice', 'purchase_invoice', 'journal_entry', 'invoice_item', 'purchase_invoice_item'] as $target) {
+            $operation = $operations->get('rebook_account', $target);
+            self::assertNotNull($operation->unavailableReason($this->roleRequest($rights, ''), $this->supplierId, $target), $target);
+            self::assertNull($operation->unavailableReason($this->roleRequest(['accounting' => 2, 'invoices' => 2, 'purchase_invoices' => 2], 'admin'), $this->supplierId, $target), $target);
+        }
+        self::assertNull($operations->get('set_dimensions', 'invoice')->unavailableReason($this->roleRequest($rights, ''), $this->supplierId, 'invoice'),
+            'Ostatní hromadné akce role s právem Hromadné změny dál smí.');
+    }
+
+    /** @param array<string,int> $rights */
+    private function roleRequest(array $rights, string $systemKey): \Psr\Http\Message\ServerRequestInterface
+    {
+        return (new ServerRequestFactory())->createServerRequest('POST', '/api/accounting/bulk-actions/start')
+            ->withAttribute(SupplierScopeMiddleware::ATTR_CURRENT_ID, $this->supplierId)
+            ->withAttribute(AuthMiddleware::ATTR_USER, ['id' => $this->userId, 'role' => 'accountant'])
+            ->withAttribute('auth.effective_role', new EffectiveRole(9, 'Test', 'staff', true, $rights, $systemKey));
+    }
+
     private function foreignInvoiceId(): int
     {
         $other = $this->otherSupplierId();

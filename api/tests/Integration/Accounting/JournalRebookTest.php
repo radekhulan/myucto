@@ -188,17 +188,17 @@ final class JournalRebookTest extends BankPostingTestCase
         self::assertSame('bank_invariant', ($this->items($dryId)['skipped'][0] ?? [])['reason_code'] ?? null);
     }
 
-    public function testStartRequiresBulkRepostRightAndMatchingDryRun(): void
+    public function testStartRequiresCompanyAdminAndMatchingDryRun(): void
     {
         $this->postedSaleInvoice();
         $action = $this->container->get(JournalRebookAction::class);
-        $request = static fn (array $rights) => new \MyInvoice\Security\EffectiveRole(9, 'Test', 'staff', true, $rights);
+        $request = static fn (array $rights, ?string $systemKey = null) => new \MyInvoice\Security\EffectiveRole(9, 'Test', 'staff', true, $rights, $systemKey);
 
-        $call = function (array $rights, array $body) use ($action, $request): array {
+        $call = function (array $rights, array $body, ?string $systemKey = null) use ($action, $request): array {
             $req = (new \Slim\Psr7\Factory\ServerRequestFactory())->createServerRequest('POST', '/api/accounting/journal-rebook/start')
                 ->withAttribute(\MyInvoice\Middleware\SupplierScopeMiddleware::ATTR_CURRENT_ID, $this->supplierId)
                 ->withAttribute(\MyInvoice\Middleware\AuthMiddleware::ATTR_USER, ['id' => $this->userId, 'role' => 'accountant'])
-                ->withAttribute('auth.effective_role', $request($rights))
+                ->withAttribute('auth.effective_role', $request($rights, $systemKey))
                 ->withParsedBody($body);
             $resp = $action->start($req, new \Slim\Psr7\Response());
             return [$resp->getStatusCode(), json_decode((string) $resp->getBody(), true)];
@@ -207,9 +207,14 @@ final class JournalRebookTest extends BankPostingTestCase
         [$status] = $call(['accounting' => 2, 'accounting.journal.post' => 2], $this->filter() + ['dry_run' => true]);
         self::assertSame(403, $status);
 
+        // Právo z editoru rolí přeúčtování neotevře, smí ho jen správce firmy.
+        [$status] = $call(['accounting' => 2, 'accounting.journal.post' => 2, 'accounting.journal.bulk_repost' => 2], $this->filter() + ['dry_run' => true]);
+        self::assertSame(403, $status);
+
         [$status, $body] = $call(
-            ['accounting' => 2, 'accounting.journal.post' => 2, 'accounting.journal.bulk_repost' => 2],
+            ['accounting' => 2, 'accounting.journal.post' => 2],
             ['dry_run' => false, 'dry_run_job_id' => 999999999, 'excluded_entry_ids' => []],
+            'admin',
         );
         self::assertSame(409, $status);
         self::assertSame('matching_dry_run_required', $body['error']['code'] ?? $body['code'] ?? null, json_encode($body));
