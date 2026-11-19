@@ -44910,7 +44910,9 @@
     "target": {
       "invoice": "Vydané faktury",
       "purchase_invoice": "Přijaté faktury",
-      "journal_entry": "Zápisy v účetním deníku"
+      "journal_entry": "Zápisy v účetním deníku",
+      "invoice_item": "Položky vydaných faktur",
+      "purchase_invoice_item": "Položky přijatých faktur"
     },
     "selection_summary": "{target}: {n} záznamů",
     "over_limit": "Výběr má {n} záznamů, najednou jde zpracovat nejvýš {limit}. Zužte filtr nebo výběr.",
@@ -44921,13 +44923,15 @@
       "rebook_account": "Přeúčtovat účet",
       "set_dimensions": "Nastavit dimenze",
       "set_posting_rule": "Změnit předkontaci",
-      "delete": "Smazat"
+      "delete": "Smazat",
+      "set_vat_classification": "Změnit členění DPH"
     },
     "operation_hint": {
       "rebook_account": "Změní účet X na Y v zápisech vybraných záznamů.",
       "set_dimensions": "Nastaví, doplní nebo vymaže dimenze na více typech najednou.",
       "set_posting_rule": "Nastaví předkontaci položkám dokladů a doklady znovu zaúčtuje.",
-      "delete": "Smaže vybrané záznamy, které smazat jde."
+      "delete": "Smaže vybrané záznamy, které smazat jde.",
+      "set_vat_classification": "Nastaví kód členění DPH (pro přiznání a kontrolní hlášení), u položek případně i sazbu."
     },
     "unavailable": "Nedostupné: {reason}",
     "from_account": "Z účtu",
@@ -45041,7 +45045,8 @@
       "item": "Položka {no}",
       "line": "Řádek {no}",
       "posted": "Zaúčtovaný",
-      "not_posted": "Nezaúčtovaný"
+      "not_posted": "Nezaúčtovaný",
+      "document_total": "Doklad celkem s DPH"
     },
     "delete_action": {
       "delete": "smazat",
@@ -45084,9 +45089,57 @@
       "rollback_not_supported": "Tuto změnu vrátit nejde",
       "journal_period_not_open": "Zápis je v uzavřeném účetním období",
       "calendar_not_deletable": "Doklad kalendáře smazat nejde",
-      "failed": "Chyba při zpracování"
+      "failed": "Chyba při zpracování",
+      "vat_period_filed": "Období DPH je podané, hromadná akce ho nemění.",
+      "items_not_found": "Vybrané položky na dokladu už nejsou.",
+      "oss_item": "Položka je v režimu OSS.",
+      "vat_allocations": "Doklad má rozpis DPH.",
+      "rollback_not_exact": "Doklad se od akce změnil, přesné vrácení není možné.",
+      "not_editable": "Doklad nejde upravit.",
+      "period_filed": "Období je podané.",
+      "journal_post_forbidden": "Chybí právo zaúčtovat změnu do deníku."
     },
     "rebook_hint": "Pro ručně vybrané doklady nebo zápisy použijte v seznamu Vydaných faktur, Přijatých faktur nebo v Účetním deníku nabídku „…“ a Hromadné akce.",
-    "bank_link": "Bankovní pohyby podle filtru"
+    "bank_link": "Bankovní pohyby podle filtru",
+    "mode_switch_label": "Na čem akci provést",
+    "mode_documents": "Doklady",
+    "mode_items": "Položky dokladů",
+    "from_account_optional": "Z účtu (volitelně)",
+    "vat_code_label": "Členění DPH",
+    "vat_code_placeholder": "Vyberte kód členění",
+    "vat_rate_label": "Sazba DPH (volitelně)",
+    "vat_rate_keep": "Ponechat sazbu",
+    "vat_outside_preset": "Mimo předmět DPH",
+    "vat_rate_hint": "Změna sazby přepočítá částky stejně jako editor faktury: u cen s DPH zůstane cena s DPH, jinak zůstane základ.",
+    "vat_filed_hint": "Doklady v období s podaným přiznáním DPH nebo kontrolním hlášením se vždy přeskočí.",
+    "items_q": "Text",
+    "items_q_placeholder": "Text položky",
+    "items_customer": "Odběratel",
+    "items_vendor": "Dodavatel",
+    "items_customer_all": "Všichni odběratelé",
+    "items_vendor_all": "Všichni dodavatelé",
+    "items_date_field": "Období",
+    "items_date_tax": "podle DUZP",
+    "items_date_issue": "podle data vystavení",
+    "items_date_from": "Od",
+    "items_date_to": "Do",
+    "items_vat_code": "Členění DPH",
+    "items_vat_code_none": "Bez vlastního kódu",
+    "items_vat_rate": "Sazba DPH",
+    "items_any": "Vše",
+    "items_account": "Účet",
+    "items_account_placeholder": "např. 604",
+    "items_product_code": "Kód zboží",
+    "items_doc_number": "Číslo dokladu",
+    "items_count": "Odpovídá položek: {n}",
+    "items_count_capped": "Odpovídá více než {limit} položek",
+    "items_scope_filter_capped": "Všechny podle filtru (více než {limit})",
+    "items_capped_hint": "Jedna akce zpracuje nejvýš {limit} položek. Zužte filtr, nebo zaškrtněte položky ručně.",
+    "items_empty": "Filtru neodpovídá žádná položka.",
+    "items_check_loaded": "Vybrat načtené položky",
+    "items_col_amount": "Částka s DPH",
+    "items_col_vat": "Členění a sazba",
+    "items_vat_from_header": "Kód z hlavičky dokladu",
+    "items_load_more": "Načíst další"
   }
 }

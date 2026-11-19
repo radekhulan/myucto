@@ -2,6 +2,7 @@ import type {
   BulkApplyRequest,
   BulkDryRunRequest,
   BulkItem,
+  BulkItemTarget,
   BulkLabels,
   BulkOperation,
   BulkParams,
@@ -9,6 +10,8 @@ import type {
   BulkTarget,
   DimensionChange,
   DimensionSnapshotRow,
+  DocumentItemSnapshot,
+  DocumentItemSnapshotItem,
   PostingRuleSnapshot,
 } from '@/api/bulkActions'
 import type { JournalRebookItemLine, JournalRebookMode, JournalRebookSide } from '@/api/journalRebook'
@@ -32,6 +35,8 @@ export interface BulkActionForm {
   ruleKey: string
   ruleMode: JournalRebookMode
   journalFallback: 'skip' | 'reverse'
+  /** Členění DPH: kód a u položek volitelně nová sazba. */
+  vat: { code: string; rateId: number | null }
 }
 
 export function emptyBulkForm(): BulkActionForm {
@@ -44,10 +49,22 @@ export function emptyBulkForm(): BulkActionForm {
     ruleKey: '',
     ruleMode: 'rewrite',
     journalFallback: 'skip',
+    vat: { code: '', rateId: null },
   }
 }
 
-export const BULK_OPERATIONS: BulkOperation[] = ['rebook_account', 'set_dimensions', 'set_posting_rule', 'delete']
+export const BULK_OPERATIONS: BulkOperation[] = ['rebook_account', 'set_dimensions', 'set_posting_rule', 'set_vat_classification', 'delete']
+
+/** Agenda Položky dokladů: cíl nad položkami k cíli nad doklady (u deníku žádný). */
+export function itemTargetFor(target: BulkTarget): BulkItemTarget | null {
+  if (target === 'invoice' || target === 'invoice_item') return 'invoice_item'
+  if (target === 'purchase_invoice' || target === 'purchase_invoice_item') return 'purchase_invoice_item'
+  return null
+}
+
+export function isItemTarget(target: BulkTarget): target is BulkItemTarget {
+  return target === 'invoice_item' || target === 'purchase_invoice_item'
+}
 
 /** „5, 6" → ['5', '6']; prázdné hodnoty a duplicity vypadnou. */
 export function parseAccountPrefixes(raw: string): string[] {
@@ -83,12 +100,18 @@ export function buildBulkParams(target: BulkTarget, form: BulkActionForm): BulkP
     case 'rebook_account': {
       const from = form.rebook.from_account.trim()
       const to = form.rebook.to_account.trim()
+      if (isItemTarget(target)) {
+        // U položek je výchozí účet jen zúžení výběru, strana a způsob změny nedávají smysl.
+        if (!to || from.toUpperCase() === to.toUpperCase()) return null
+        return from ? { to_account: to, from_account: from } : { to_account: to }
+      }
       if (!from || !to || from.toUpperCase() === to.toUpperCase()) return null
       return { from_account: from, to_account: to, side: form.rebook.side, mode: form.rebook.mode }
     }
     case 'set_dimensions': {
       const dimensions = dimensionChanges(form.dimensions)
       if (!dimensions) return null
+      if (isItemTarget(target)) return { dimensions }
       if (target === 'journal_entry') {
         const prefixes = parseAccountPrefixes(form.accountPrefixes)
         return prefixes.length > 0 ? { dimensions, account_prefixes: prefixes } : { dimensions }
@@ -99,6 +122,13 @@ export function buildBulkParams(target: BulkTarget, form: BulkActionForm): BulkP
       const ruleKey = form.ruleKey.trim()
       if (!ruleKey) return null
       return { rule_key: ruleKey, mode: form.ruleMode }
+    }
+    case 'set_vat_classification': {
+      const code = form.vat.code.trim()
+      if (!code) return null
+      return isItemTarget(target) && form.vat.rateId
+        ? { vat_classification_code: code, vat_rate_id: form.vat.rateId }
+        : { vat_classification_code: code }
     }
     case 'delete':
       return target === 'journal_entry' ? { journal_fallback: form.journalFallback } : {}
@@ -145,6 +175,8 @@ export const BULK_REASON_CODES = [
   'retention_period', 'not_deletable', 'document_locked', 'delete_blocked', 'entry_delete_not_supported',
   'reversed_instead', 'not_found', 'invalid_posting_rule', 'dimensions_disabled',
   'document_cancelled', 'rollback_not_supported', 'journal_period_not_open', 'calendar_not_deletable',
+  'vat_period_filed', 'items_not_found', 'oss_item', 'vat_allocations', 'rollback_not_exact', 'not_editable',
+  'period_filed', 'journal_post_forbidden',
 ] as const
 
 export function bulkReasonText(item: Pick<BulkItem, 'reason_code' | 'message'>, t: (key: string) => string): string {
@@ -273,6 +305,51 @@ export function deleteChange(before: unknown, after: unknown, t: (key: string) =
   }]
 }
 
+function isPostingRuleSnapshot(v: unknown): boolean {
+  return !!v && typeof v === 'object' && !Array.isArray(v) && Array.isArray((v as { items?: unknown }).items)
+}
+
+/** Snapshot změny členění DPH nad položkami dokladu? */
+export function isDocumentItemSnapshot(v: unknown): v is DocumentItemSnapshot {
+  return !!v && typeof v === 'object' && Array.isArray((v as { items?: unknown }).items)
+    && !!(v as { document?: unknown }).document
+}
+
+function formatRate(rate: number | null): string {
+  return rate === null || rate === undefined ? '—' : `${Math.round(Number(rate) * 100) / 100} %`
+}
+
+function vatItemText(i: DocumentItemSnapshotItem | undefined): string {
+  if (!i) return '—'
+  return `${i.vat_classification_code ?? '—'} · ${formatRate(i.vat_rate)} · ${csvAmount(i.total_with_vat)}`
+}
+
+/**
+ * Členění DPH před a po: jeden řádek na změněnou položku (kód, sazba, částka s DPH)
+ * a řádek se součtem dokladu s DPH, když se změnil.
+ */
+export function vatItemChanges(
+  before: unknown,
+  after: unknown,
+  t: (key: string, params?: Record<string, unknown>) => string,
+): ChangeRow[] {
+  const b = isDocumentItemSnapshot(before) ? before : null
+  const a = isDocumentItemSnapshot(after) ? after : null
+  if (!b && !a) return []
+  const prevById = new Map((b?.items ?? []).map(i => [i.item_id, i]))
+  const out: ChangeRow[] = []
+  for (const item of a?.items ?? []) {
+    const from = vatItemText(prevById.get(item.item_id))
+    const to = vatItemText(item)
+    if (from === to) continue
+    out.push({ label: item.description || t('bulk_actions.snapshot.item', { no: item.position }), from, to })
+  }
+  if (a && b && Number(a.document.total_with_vat) !== Number(b.document.total_with_vat)) {
+    out.push({ label: t('bulk_actions.snapshot.document_total'), from: csvAmount(b.document.total_with_vat), to: csvAmount(a.document.total_with_vat) })
+  }
+  return out
+}
+
 export function itemChanges(
   operation: BulkOperation,
   item: Pick<BulkItem, 'before' | 'after'>,
@@ -280,7 +357,12 @@ export function itemChanges(
   t: (key: string, params?: Record<string, unknown>) => string,
 ): ChangeRow[] {
   switch (operation) {
-    case 'rebook_account': return rebookChanges(item.before, item.after, t)
+    case 'rebook_account':
+      // Přeúčtování položek má tvar předkontace (položky a řádky zápisu), u dokladů jen řádky.
+      return isPostingRuleSnapshot(item.before) || isPostingRuleSnapshot(item.after)
+        ? postingRuleChanges(item.before, item.after, t)
+        : rebookChanges(item.before, item.after, t)
+    case 'set_vat_classification': return vatItemChanges(item.before, item.after, t)
     case 'set_dimensions': return dimensionSnapshotChanges(item.before, item.after, labels, t)
     case 'set_posting_rule': return postingRuleChanges(item.before, item.after, t)
     case 'delete': return deleteChange(item.before, item.after, t)

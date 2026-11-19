@@ -44910,7 +44910,9 @@
     "target": {
       "invoice": "Issued invoices",
       "purchase_invoice": "Received invoices",
-      "journal_entry": "Journal entries"
+      "journal_entry": "Journal entries",
+      "invoice_item": "Issued invoice items",
+      "purchase_invoice_item": "Purchase invoice items"
     },
     "selection_summary": "{target}: {n} records",
     "over_limit": "The selection has {n} records, at most {limit} can be processed at once. Narrow the filter or selection.",
@@ -44921,13 +44923,15 @@
       "rebook_account": "Repost account",
       "set_dimensions": "Set dimensions",
       "set_posting_rule": "Change posting rule",
-      "delete": "Delete"
+      "delete": "Delete",
+      "set_vat_classification": "Change VAT classification"
     },
     "operation_hint": {
       "rebook_account": "Changes account X to Y in the entries of the selected records.",
       "set_dimensions": "Sets, fills in or clears dimensions of several types at once.",
       "set_posting_rule": "Sets the posting rule on document items and reposts the documents.",
-      "delete": "Deletes the selected records that can be deleted."
+      "delete": "Deletes the selected records that can be deleted.",
+      "set_vat_classification": "Sets the VAT classification code (for the VAT return and control statement), for items optionally also the rate."
     },
     "unavailable": "Unavailable: {reason}",
     "from_account": "From account",
@@ -45041,7 +45045,8 @@
       "item": "Item {no}",
       "line": "Line {no}",
       "posted": "Posted",
-      "not_posted": "Not posted"
+      "not_posted": "Not posted",
+      "document_total": "Document total incl. VAT"
     },
     "delete_action": {
       "delete": "delete",
@@ -45084,9 +45089,57 @@
       "rollback_not_supported": "This change cannot be reverted",
       "journal_period_not_open": "The entry is in a closed accounting period",
       "calendar_not_deletable": "A calendar document cannot be deleted",
-      "failed": "Processing error"
+      "failed": "Processing error",
+      "vat_period_filed": "The VAT period is filed, a bulk action does not change it.",
+      "items_not_found": "The selected items are no longer on the document.",
+      "oss_item": "The item is in the OSS scheme.",
+      "vat_allocations": "The document has a VAT allocation.",
+      "rollback_not_exact": "The document changed since the action, an exact rollback is not possible.",
+      "not_editable": "The document cannot be edited.",
+      "period_filed": "The period is filed.",
+      "journal_post_forbidden": "Missing permission to post the change to the journal."
     },
     "rebook_hint": "For manually selected documents or entries, use the \"…\" menu and Bulk actions in the Issued invoices, Received invoices or Accounting journal list.",
-    "bank_link": "Bank transactions by filter"
+    "bank_link": "Bank transactions by filter",
+    "mode_switch_label": "What to apply the action to",
+    "mode_documents": "Documents",
+    "mode_items": "Document items",
+    "from_account_optional": "From account (optional)",
+    "vat_code_label": "VAT classification",
+    "vat_code_placeholder": "Select a classification code",
+    "vat_rate_label": "VAT rate (optional)",
+    "vat_rate_keep": "Keep the rate",
+    "vat_outside_preset": "Outside the scope of VAT",
+    "vat_rate_hint": "Changing the rate recalculates amounts like the invoice editor: prices including VAT keep the gross price, otherwise the base is kept.",
+    "vat_filed_hint": "Documents in a period with a filed VAT return or control statement are always skipped.",
+    "items_q": "Text",
+    "items_q_placeholder": "Item text",
+    "items_customer": "Customer",
+    "items_vendor": "Vendor",
+    "items_customer_all": "All customers",
+    "items_vendor_all": "All vendors",
+    "items_date_field": "Period",
+    "items_date_tax": "by tax point date",
+    "items_date_issue": "by issue date",
+    "items_date_from": "From",
+    "items_date_to": "To",
+    "items_vat_code": "VAT classification",
+    "items_vat_code_none": "No own code",
+    "items_vat_rate": "VAT rate",
+    "items_any": "All",
+    "items_account": "Account",
+    "items_account_placeholder": "e.g. 604",
+    "items_product_code": "Product code",
+    "items_doc_number": "Document number",
+    "items_count": "Matching items: {n}",
+    "items_count_capped": "More than {limit} items match",
+    "items_scope_filter_capped": "All by filter (more than {limit})",
+    "items_capped_hint": "One action processes at most {limit} items. Narrow the filter or check items manually.",
+    "items_empty": "No item matches the filter.",
+    "items_check_loaded": "Select loaded items",
+    "items_col_amount": "Amount incl. VAT",
+    "items_col_vat": "Classification and rate",
+    "items_vat_from_header": "Code from the document header",
+    "items_load_more": "Load more"
   }
 }

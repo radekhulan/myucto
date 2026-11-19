@@ -7,6 +7,8 @@ import {
   deleteConfirmMatches,
   dimensionSnapshotChanges,
   emptyBulkForm,
+  itemChanges,
+  itemTargetFor,
   parseAccountPrefixes,
   type BulkActionForm,
 } from '../bulkActionsForm'
@@ -107,6 +109,68 @@ describe('hromadné akce: sestavení požadavku', () => {
       t,
     )
     expect(changes).toEqual([{ label: 'bulk_actions.snapshot.line:{"no":2} 501 · Zakázka', from: '—', to: 'A 50 %, B 50 %' }])
+  })
+})
+
+describe('hromadné akce: členění DPH a položky dokladů', () => {
+  const vatForm = (code: string, rateId: number | null = null): BulkActionForm =>
+    ({ ...emptyBulkForm(), operation: 'set_vat_classification', vat: { code, rateId } })
+
+  it('členění DPH: u položek i sazba, u dokladů jen kód, bez kódu nic', () => {
+    expect(buildDryRunRequest('invoice_item', { list_query: { filter: { vat_code: 'none' } } }, vatForm('mimo', 3))).toEqual({
+      dry_run: true, operation: 'set_vat_classification', target: 'invoice_item',
+      selection: { list_query: { filter: { vat_code: 'none' } } },
+      params: { vat_classification_code: 'mimo', vat_rate_id: 3 },
+    })
+    expect(buildDryRunRequest('purchase_invoice_item', { ids: [4] }, vatForm('A1'))?.params).toEqual({ vat_classification_code: 'A1' })
+    expect(buildDryRunRequest('invoice', { ids: [4] }, vatForm('mimo', 3))?.params).toEqual({ vat_classification_code: 'mimo' })
+    expect(buildDryRunRequest('invoice', { ids: [4] }, vatForm('  '))).toBeNull()
+  })
+
+  it('položky: přeúčtování bez strany a způsobu, výchozí účet volitelný; dimenze bez rozsahu', () => {
+    const rebook = (from: string, to: string): BulkActionForm =>
+      ({ ...emptyBulkForm(), operation: 'rebook_account', rebook: { from_account: from, to_account: to, side: 'both', mode: 'rewrite' } })
+    expect(buildDryRunRequest('invoice_item', { ids: [1] }, rebook('', '604'))?.params).toEqual({ to_account: '604' })
+    expect(buildDryRunRequest('invoice_item', { ids: [1] }, rebook('602', '604'))?.params).toEqual({ to_account: '604', from_account: '602' })
+    expect(buildDryRunRequest('invoice_item', { ids: [1] }, rebook('604', '604'))).toBeNull()
+    expect(buildDryRunRequest('invoice_item', { ids: [1] }, rebook('602', ''))).toBeNull()
+    expect(buildDryRunRequest('invoice', { ids: [1] }, rebook('', '604'))).toBeNull()
+    expect(buildDryRunRequest('purchase_invoice_item', { ids: [1] }, dimsForm({ scope: 'items' }))?.params)
+      .toEqual({ dimensions: expect.any(Array) })
+    expect(itemTargetFor('invoice')).toBe('invoice_item')
+    expect(itemTargetFor('purchase_invoice')).toBe('purchase_invoice_item')
+    expect(itemTargetFor('journal_entry')).toBeNull()
+  })
+
+  it('členění DPH před a po: řádek na změněnou položku a součet dokladu', () => {
+    const it1 = { position: 1, item_id: 11, description: 'Konzultace', oss: false, vat_classification_code: null, vat_rate_id: 1, vat_rate: 21, account_code: '602', total_without_vat: 100, total_vat: 21, total_with_vat: 121 }
+    const it2 = { ...it1, position: 2, item_id: 12, description: '', vat_classification_code: 'A1' }
+    const doc = (total: number) => ({ vat_classification_code: null, total_without_vat: 200, total_vat: 42, total_with_vat: total })
+    const changes = itemChanges('set_vat_classification', {
+      before: { items: [it1, it2], document: doc(242), posted: false },
+      after: { items: [{ ...it1, vat_classification_code: 'mimo', vat_rate: 0, total_vat: 0, total_with_vat: 100 }, it2], document: doc(221), posted: false },
+    }, undefined, t)
+    expect(changes).toEqual([
+      { label: 'Konzultace', from: '— · 21 % · 121,00', to: 'mimo · 0 % · 100,00' },
+      { label: 'bulk_actions.snapshot.document_total', from: '242,00', to: '221,00' },
+    ])
+  })
+
+  it('přeúčtování položek má tvar předkontace, přeúčtování dokladů řádky zápisu', () => {
+    const item = { item_id: 5, description: 'Nájem', standard: true, posting_rule_key: 'R1', account_code: '602', counter_account_code: '311' }
+    expect(itemChanges('rebook_account', {
+      before: { items: [item], lines: [] },
+      after: { items: [{ ...item, account_code: '604' }], lines: [] },
+    }, undefined, t)).toEqual([{ label: 'Nájem', from: 'R1 (602 / 311)', to: 'R1 (604 / 311)' }])
+    expect(itemChanges('rebook_account', {
+      before: [{ side: 'debit', amount: 10, account_code: '518' }],
+      after: [{ side: 'debit', amount: 10, account_code: '501' }],
+    }, undefined, t)).toEqual([{ label: 'bulk_actions.side.debit 10,00', from: '518', to: '501' }])
+  })
+
+  it('nové důvody přeskočení mají překlad', () => {
+    expect(bulkReasonText({ reason_code: 'vat_period_filed', message: 'x' }, t)).toBe('bulk_actions.reason.vat_period_filed')
+    expect(bulkReasonText({ reason_code: 'oss_item', message: 'x' }, t)).toBe('bulk_actions.reason.oss_item')
   })
 })
 

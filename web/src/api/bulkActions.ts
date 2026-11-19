@@ -7,8 +7,10 @@ import type { JournalRebookItemLine, JournalRebookMode, JournalRebookSide } from
  * ostrý běh převezme přesně jeho výsledek bez ručně vyřazených položek a jde vrátit
  * (kromě smazání).
  */
-export type BulkTarget = 'invoice' | 'purchase_invoice' | 'journal_entry'
-export type BulkOperation = 'rebook_account' | 'set_dimensions' | 'set_posting_rule' | 'delete'
+export type BulkTarget = 'invoice' | 'purchase_invoice' | 'journal_entry' | BulkItemTarget
+/** Položky vydaných, resp. přijatých faktur (agenda Položky dokladů). */
+export type BulkItemTarget = 'invoice_item' | 'purchase_invoice_item'
+export type BulkOperation = 'rebook_account' | 'set_dimensions' | 'set_posting_rule' | 'set_vat_classification' | 'delete'
 export type BulkJobKind = 'dry_run' | 'apply' | 'rollback'
 export type BulkJobStatus = 'queued' | 'running' | 'completed' | 'completed_with_warnings' | 'failed' | 'cancelled'
 export type BulkItemStatus = 'would_change' | 'unchanged' | 'skipped' | 'excluded' | 'applied' | 'failed'
@@ -41,7 +43,18 @@ export interface SetPostingRuleParams {
 export interface DeleteParams {
   journal_fallback?: 'skip' | 'reverse'
 }
-export type BulkParams = RebookAccountParams | SetDimensionsParams | SetPostingRuleParams | DeleteParams
+/** Přeúčtování položek: účet položky, `from_account` jen zúží změnu na položky s tímto účtem. */
+export interface RebookItemAccountParams {
+  to_account: string
+  from_account?: string
+}
+/** Členění DPH; sazbu jde změnit jen u položek (cíl `*_item`). */
+export interface SetVatClassificationParams {
+  vat_classification_code: string
+  vat_rate_id?: number
+}
+export type BulkParams = RebookAccountParams | RebookItemAccountParams | SetDimensionsParams | SetPostingRuleParams
+  | SetVatClassificationParams | DeleteParams
 
 export interface BulkOperationInfo {
   key: BulkOperation
@@ -111,6 +124,31 @@ export interface PostingRuleSnapshot {
   lines: JournalRebookItemLine[]
 }
 
+/** Před a po u operací nad položkami (členění DPH, přeúčtování položek): jeden řádek na doklad. */
+export interface DocumentItemSnapshotItem {
+  position: number
+  item_id: number
+  description: string | null
+  oss: boolean
+  vat_classification_code: string | null
+  vat_rate_id: number | null
+  vat_rate: number | null
+  account_code: string | null
+  total_without_vat: number
+  total_vat: number
+  total_with_vat: number
+}
+export interface DocumentItemSnapshot {
+  items: DocumentItemSnapshotItem[]
+  document: {
+    vat_classification_code: string | null
+    total_without_vat: number
+    total_vat: number
+    total_with_vat: number
+  }
+  posted: boolean
+}
+
 export interface DeleteBefore { status: string | null; posted: boolean }
 export interface DeleteAfter { action: 'delete' | 'reverse' }
 
@@ -165,6 +203,60 @@ export interface BulkApplyRequest {
 
 export const BULK_ITEMS_PER_PAGE = 50
 
+/** Položka dokladu v agendě Položky dokladů. */
+export interface BulkDocumentItem {
+  item_id: number
+  document_id: number
+  document_no: string | null
+  document_kind: string
+  status: string
+  document_date: string | null
+  issue_date: string
+  partner_id: number
+  partner_name: string | null
+  description: string
+  quantity: number
+  unit: string
+  total_without_vat: number
+  total_vat: number
+  total_with_vat: number
+  currency: string | null
+  vat_rate_id: number
+  vat_rate: number
+  /** Vlastní kód položky; null = platí kód z hlavičky dokladu. */
+  vat_classification_code: string | null
+  document_vat_classification_code: string | null
+  account_code: string | null
+  product_code: string | null
+  oss: boolean
+}
+
+/** Filtr položek; prázdné hodnoty se neposílají. `vat_code: 'none'` = bez vlastního kódu. */
+export interface BulkDocumentItemFilters {
+  q?: string
+  partner_id?: number
+  date_field?: 'tax' | 'issue'
+  date_from?: string
+  date_to?: string
+  vat_code?: string
+  vat_rate_id?: number
+  account?: string
+  product_code?: string
+  doc_number?: string
+}
+
+export interface BulkDocumentItemsPage {
+  items: BulkDocumentItem[]
+  next_cursor: string | null
+  /** Jen na první stránce: počet nejvýš do `limit + 1`. */
+  count: number | null
+  /** true = odpovídá víc položek než `limit`. */
+  count_capped: boolean | null
+  limit: number
+}
+
+export const BULK_DOCUMENT_ITEMS_PER_PAGE = 50
+
 export const bulkActionsApi = {
   status: (target: BulkTarget): Promise<BulkStatus> =>
     api.get<BulkStatus>('/accounting/bulk-actions', { params: { target } }).then(r => r.data),
@@ -186,4 +278,14 @@ export const bulkActionsApi = {
 
   cancel: (id: number): Promise<void> =>
     api.post(`/accounting/bulk-actions/${id}/cancel`, {}).then(() => undefined),
+
+  documentItems: (target: BulkItemTarget, filters: BulkDocumentItemFilters, cursor: string | null = null,
+    perPage = BULK_DOCUMENT_ITEMS_PER_PAGE): Promise<BulkDocumentItemsPage> => {
+    const params: Record<string, string | number> = { target, per_page: perPage }
+    for (const [key, value] of Object.entries(filters)) {
+      if (value !== undefined && value !== null && value !== '') params[`filter[${key}]`] = value as string | number
+    }
+    if (cursor) params.cursor = cursor
+    return api.get<BulkDocumentItemsPage>('/accounting/bulk-actions/document-items', { params }).then(r => r.data)
+  },
 }

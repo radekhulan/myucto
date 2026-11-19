@@ -33,6 +33,8 @@ import BulkJobProgress from '@/components/accounting/BulkJobProgress.vue'
 import BulkJobTabs from '@/components/accounting/BulkJobTabs.vue'
 import DimensionPicker from '@/components/dimensions/DimensionPicker.vue'
 import PostingRuleSelect from './PostingRuleSelect.vue'
+import BulkItemFinder from './BulkItemFinder.vue'
+import VatClassificationFields from './VatClassificationFields.vue'
 import { ICONS, btnFilled, btnOutline, btnOutlineSm } from '@/components/ui/buttonStyles'
 import { buildCsv, downloadCsv, fetchAllPages } from '@/utils/bulkJobCsv'
 import {
@@ -45,6 +47,7 @@ import {
   deleteConfirmMatches,
   emptyBulkForm,
   itemChanges,
+  itemTargetFor,
   type BulkDimensionChoiceMode,
 } from './bulkActionsForm'
 
@@ -64,6 +67,13 @@ const toast = useToast()
 const dims = useDimensions()
 const tt = (key: string, params?: Record<string, unknown>) => (params ? t(key, params) : t(key))
 
+// ── Doklady, nebo jejich položky (agenda Položky dokladů u faktur) ─────────────
+const itemTarget = computed(() => itemTargetFor(props.target))
+const itemsMode = ref(false)
+const effectiveTarget = computed<BulkTarget>(() => (itemsMode.value && itemTarget.value) || props.target)
+const itemSelection = ref<BulkSelection | null>(null)
+const itemCount = ref(0)
+
 const {
   state, running, loading, starting, cancelling, error, isRunning,
   load, startJob, cancel, stopPolling,
@@ -72,7 +82,7 @@ const {
   selectJob, setTab, setPage, isIncluded, toggleItem, pageAllIncluded, togglePage,
 } = useBulkJobs<BulkJob, BulkStatus, BulkItem>({
   api: {
-    status: () => bulkActionsApi.status(props.target),
+    status: () => bulkActionsApi.status(effectiveTarget.value),
     job: bulkActionsApi.job,
     cancel: bulkActionsApi.cancel,
     items: (id, status, p) => bulkActionsApi.items(id, status, p),
@@ -85,10 +95,10 @@ const {
 // ── Výběr ──────────────────────────────────────────────────────────────────
 const useFilter = ref(false)
 const canSwitch = computed(() => !!props.filterSelection && 'ids' in props.selection && props.selectionCount > 0)
-const activeSelection = computed<BulkSelection>(() =>
-  useFilter.value && props.filterSelection ? props.filterSelection : props.selection)
-const activeCount = computed(() =>
-  useFilter.value && props.filterSelection ? (props.filterCount ?? 0) : props.selectionCount)
+const activeSelection = computed<BulkSelection | null>(() => itemsMode.value ? itemSelection.value
+  : useFilter.value && props.filterSelection ? props.filterSelection : props.selection)
+const activeCount = computed(() => itemsMode.value ? itemCount.value
+  : useFilter.value && props.filterSelection ? (props.filterCount ?? 0) : props.selectionCount)
 const overLimit = computed(() => !!state.value && activeCount.value > state.value.limit)
 
 // ── Formulář ───────────────────────────────────────────────────────────────
@@ -115,7 +125,21 @@ watch(operations, ops => {
   form.operation = ops.find(o => o.available)?.key ?? ''
 })
 
-const dryRunRequest = computed(() => buildDryRunRequest(props.target, activeSelection.value, form))
+const dryRunRequest = computed(() => activeSelection.value
+  ? buildDryRunRequest(effectiveTarget.value, activeSelection.value, form)
+  : null)
+const vatDirection = computed(() => props.target === 'purchase_invoice' ? 'purchase' : 'sale')
+
+function setItemsMode(on: boolean) {
+  if (on === itemsMode.value || isRunning.value) return
+  itemsMode.value = on
+  // Stav, historie i výsledek patří k jinému cíli: načíst znovu od začátku.
+  stopPolling()
+  selected.value = null
+  running.value = null
+  state.value = null
+  void load()
+}
 
 function startDryRun() {
   const body = dryRunRequest.value
@@ -222,7 +246,25 @@ onUnmounted(stopPolling)
   <Modal :title="t('bulk_actions.title')" width-class="max-w-5xl" @close="emit('close')">
     <div class="space-y-4 text-sm" data-test="bulk-actions-dialog">
       <!-- Výběr -->
-      <div class="flex flex-wrap items-center gap-2">
+      <div v-if="itemTarget" class="flex flex-wrap items-center gap-2">
+        <div class="inline-flex flex-wrap gap-1" role="radiogroup" :aria-label="t('bulk_actions.mode_switch_label')" data-test="bulk-mode-switch">
+          <button type="button" role="radio" :aria-checked="!itemsMode" class="whitespace-nowrap"
+            :class="!itemsMode ? btnFilled('primary') : btnOutline('neutral')" data-test="bulk-mode-documents"
+            :disabled="isRunning" @click="setItemsMode(false)">
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.doc" /></svg>
+            {{ t('bulk_actions.mode_documents') }}
+          </button>
+          <button type="button" role="radio" :aria-checked="itemsMode" class="whitespace-nowrap"
+            :class="itemsMode ? btnFilled('primary') : btnOutline('neutral')" data-test="bulk-mode-items"
+            :disabled="isRunning" @click="setItemsMode(true)">
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.table" /></svg>
+            {{ t('bulk_actions.mode_items') }}
+          </button>
+        </div>
+      </div>
+      <BulkItemFinder v-if="itemsMode && itemTarget" v-model:selection="itemSelection" v-model:count="itemCount"
+        :target="itemTarget" :disabled="isRunning" />
+      <div v-else class="flex flex-wrap items-center gap-2">
         <span class="font-medium text-neutral-700">{{ t('bulk_actions.target.' + target) }}:</span>
         <template v-if="canSwitch">
           <div class="inline-flex flex-wrap gap-1" role="radiogroup" :aria-label="t('bulk_actions.scope_label')">
@@ -276,14 +318,14 @@ onUnmounted(stopPolling)
           <!-- Přeúčtovat -->
           <div v-if="form.operation === 'rebook_account'" class="grid grid-cols-1 sm:grid-cols-2 gap-3" data-test="bulk-params-rebook">
             <div>
-              <label class="block text-xs font-medium text-neutral-500 mb-1" for="bulk-from">{{ t('bulk_actions.from_account') }}</label>
+              <label class="block text-xs font-medium text-neutral-500 mb-1" for="bulk-from">{{ itemsMode ? t('bulk_actions.from_account_optional') : t('bulk_actions.from_account') }}</label>
               <ChartAccountSelect v-model="form.rebook.from_account" :accounts="accounts" input-id="bulk-from" />
             </div>
             <div>
               <label class="block text-xs font-medium text-neutral-500 mb-1" for="bulk-to">{{ t('bulk_actions.to_account') }}</label>
               <ChartAccountSelect v-model="form.rebook.to_account" :accounts="accounts" input-id="bulk-to" />
             </div>
-            <div>
+            <div v-if="!itemsMode">
               <label class="block text-xs font-medium text-neutral-500 mb-1" for="bulk-side">{{ t('bulk_actions.side_label') }}</label>
               <select id="bulk-side" v-model="form.rebook.side" class="w-full h-10 px-2 border border-neutral-300 rounded-md bg-surface">
                 <option value="both">{{ t('bulk_actions.side_both') }}</option>
@@ -291,7 +333,7 @@ onUnmounted(stopPolling)
                 <option value="credit">{{ t('bulk_actions.side_credit') }}</option>
               </select>
             </div>
-            <div>
+            <div v-if="!itemsMode">
               <label class="block text-xs font-medium text-neutral-500 mb-1" for="bulk-rebook-mode">{{ t('bulk_actions.mode_label') }}</label>
               <select id="bulk-rebook-mode" v-model="form.rebook.mode" class="w-full h-10 px-2 border border-neutral-300 rounded-md bg-surface">
                 <option value="rewrite">{{ t('bulk_actions.mode_rewrite') }}</option>
@@ -314,7 +356,7 @@ onUnmounted(stopPolling)
                 v-model="form.dimensions[type.id]!.valueId" :type-id="type.id" teleport :aria-label="type.name"
                 :placeholder="t('bulk_actions.dim_value_required')" />
             </div>
-            <fieldset v-if="isInvoiceTarget" data-test="bulk-dimension-scope">
+            <fieldset v-if="isInvoiceTarget && !itemsMode" data-test="bulk-dimension-scope">
               <legend class="block text-xs font-medium text-neutral-500 mb-1">{{ t('bulk_actions.scope_title') }}</legend>
               <label class="flex items-start gap-2 cursor-pointer">
                 <input v-model="form.scope" type="radio" value="document" class="mt-0.5 h-4 w-4" />
@@ -325,7 +367,7 @@ onUnmounted(stopPolling)
                 <span><span class="block">{{ t('bulk_actions.scope_items') }}</span><span class="block text-xs text-neutral-500">{{ t('bulk_actions.scope_items_hint') }}</span></span>
               </label>
             </fieldset>
-            <div v-else data-test="bulk-account-prefixes">
+            <div v-else-if="!isInvoiceTarget" data-test="bulk-account-prefixes">
               <label class="block text-xs font-medium text-neutral-500 mb-1" for="bulk-prefixes">{{ t('bulk_actions.account_prefixes') }}</label>
               <input id="bulk-prefixes" v-model="form.accountPrefixes" type="text" :placeholder="t('bulk_actions.account_prefixes_placeholder')"
                 class="w-full sm:w-64 h-10 px-3 border border-neutral-300 rounded-md font-mono bg-surface" />
@@ -348,6 +390,10 @@ onUnmounted(stopPolling)
               </select>
             </div>
           </div>
+
+          <!-- Členění DPH -->
+          <VatClassificationFields v-else-if="form.operation === 'set_vat_classification'"
+            v-model:code="form.vat.code" v-model:rate-id="form.vat.rateId" :direction="vatDirection" :with-rate="itemsMode" :disabled="isRunning" />
 
           <!-- Smazat -->
           <div v-else-if="form.operation === 'delete'" class="space-y-3" data-test="bulk-params-delete">

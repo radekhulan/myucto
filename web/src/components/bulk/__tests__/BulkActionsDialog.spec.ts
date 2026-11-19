@@ -40,6 +40,8 @@ const stubs = {
   DimensionPicker: true,
   PostingRuleSelect: true,
   PaginationBar: true,
+  BulkItemFinder: { name: 'BulkItemFinder', props: ['target', 'disabled', 'selection', 'count'], emits: ['update:selection', 'update:count'], template: '<div data-test="finder-stub" />' },
+  VatClassificationFields: { name: 'VatClassificationFields', props: ['code', 'rateId', 'direction', 'withRate', 'disabled'], emits: ['update:code', 'update:rateId'], template: '<div data-test="vat-stub" />' },
 }
 
 function job(operation: BulkOperation, patch: Partial<BulkJob> = {}): BulkJob {
@@ -167,5 +169,65 @@ describe('BulkActionsDialog', () => {
     expect(wrapper.find('[data-test="bulk-account-prefixes"]').exists()).toBe(true)
     expect(wrapper.find('[data-test="bulk-dimension-scope"]').exists()).toBe(false)
     expect(wrapper.get('[data-test="bulk-dry-run"]').attributes('disabled')).toBeDefined()
+  })
+
+  it('přepínač Položky dokladů: stav a běh nad položkami, výběr z vyhledávání položek, členění DPH se sazbou', async () => {
+    const ITEM_OPS = [
+      { key: 'rebook_account', available: true, reason: null, rollback: true },
+      { key: 'set_vat_classification', available: true, reason: null, rollback: true },
+    ]
+    const wrapper = mountDialog()
+    await flushPromises()
+    expect(m.status).toHaveBeenLastCalledWith('invoice')
+    expect(wrapper.find('[data-test="finder-stub"]').exists()).toBe(false)
+
+    m.status.mockResolvedValue({ can_run: true, limit: 500, operations: ITEM_OPS, jobs: [] })
+    await wrapper.get('[data-test="bulk-mode-items"]').trigger('click')
+    await flushPromises()
+    expect(m.status).toHaveBeenLastCalledWith('invoice_item')
+    const finder = wrapper.getComponent({ name: 'BulkItemFinder' })
+    expect(finder.props('target')).toBe('invoice_item')
+    expect(wrapper.find('[data-test="bulk-op-set_dimensions"]').exists()).toBe(false)
+
+    // Přeúčtování položek: bez strany a způsobu změny.
+    expect(wrapper.find('#bulk-side').exists()).toBe(false)
+
+    await wrapper.get('[data-test="bulk-op-set_vat_classification"] input').setValue(true)
+    const vat = wrapper.getComponent({ name: 'VatClassificationFields' })
+    expect(vat.props('withRate')).toBe(true)
+    expect(vat.props('direction')).toBe('sale')
+    vat.vm.$emit('update:code', 'mimo')
+    vat.vm.$emit('update:rateId', 4)
+    await flushPromises()
+    // Bez výběru položek nejde spustit.
+    expect(wrapper.get('[data-test="bulk-dry-run"]').attributes('disabled')).toBeDefined()
+
+    finder.vm.$emit('update:selection', { ids: [31, 32] })
+    finder.vm.$emit('update:count', 2)
+    await flushPromises()
+    m.start.mockResolvedValueOnce({ job_id: 7 })
+    m.job.mockResolvedValue(job('set_vat_classification', { target: 'invoice_item' }))
+    await wrapper.get('[data-test="bulk-dry-run"]').trigger('click')
+    await flushPromises()
+    expect(m.start).toHaveBeenCalledWith({
+      dry_run: true, operation: 'set_vat_classification', target: 'invoice_item', selection: { ids: [31, 32] },
+      params: { vat_classification_code: 'mimo', vat_rate_id: 4 },
+    })
+
+    m.status.mockResolvedValue({ can_run: true, limit: 500, operations: OPERATIONS, jobs: [] })
+    await wrapper.get('[data-test="bulk-mode-documents"]').trigger('click')
+    await flushPromises()
+    expect(m.status).toHaveBeenLastCalledWith('invoice')
+    expect(wrapper.find('[data-test="finder-stub"]').exists()).toBe(false)
+    expect(wrapper.find('[data-test="bulk-result"]').exists()).toBe(false)
+  })
+
+  it('u deníku přepínač položek není', async () => {
+    const wrapper = mount(BulkActionsDialog, {
+      props: { target: 'journal_entry', selection: { ids: [1] }, selectionCount: 1 },
+      global: { stubs },
+    })
+    await flushPromises()
+    expect(wrapper.find('[data-test="bulk-mode-switch"]').exists()).toBe(false)
   })
 })
