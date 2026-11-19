@@ -601,7 +601,7 @@ function clearSort() {
   load()
 }
 const saved = useSavedFilters('journal', { getQuery: buildQuery, applyQuery: applyQueryToPage })
-const visibleColCount = computed(() => 2 + (bulk.canUse.value ? 1 : 0) + tbl.columns.filter(c => tbl.isVisible(c.key)).length)
+const visibleColCount = computed(() => 2 + tbl.columns.filter(c => tbl.isVisible(c.key)).length)
 
 /**
  * Řádek pohledů = uložené filtry vytažené z dropdownu do záložek nad seznamem.
@@ -1299,11 +1299,12 @@ function entryRange(entry: JournalEntryDetail): { from: string; to: string } {
         <table v-column-labels="tbl" class="w-max min-w-full text-sm singleline-list-table list-gutter-mini" :class="tbl.densityClass.value">
           <thead class="bg-neutral-50 text-xs text-neutral-500 uppercase tracking-wide sticky top-0 z-20 shadow-sm">
             <tr>
-              <th v-if="bulk.canUse.value" class="pl-3 py-2 w-6">
-                <input type="checkbox" class="h-4 w-4 cursor-pointer" :checked="allLoadedSelected"
+              <!-- Výběr řádku sdílí první buňku se šipkou rozbalení: useAdaptiveTableRows
+                   bere první a poslední buňku jako ovládací a do rozložení sloupců je nepočítá. -->
+              <th class="px-3 py-2" :class="bulk.canUse.value ? 'w-14' : 'w-8'">
+                <input v-if="bulk.canUse.value" type="checkbox" class="h-4 w-4 cursor-pointer" :checked="allLoadedSelected"
                   :aria-label="t('common.select_all')" data-test="journal-select-all" @change="toggleAllLoaded" />
               </th>
-              <th class="px-3 py-2 w-8"></th>
               <template v-for="c in tbl.orderedColumns.value.filter(c => tbl.isVisible(c.key))" :key="c.key">
                 <th v-if="c.key === 'dimensions'" scope="col" class="px-3 py-2 text-left font-medium" v-bind="columnDrag.headerAttrs(c.key)"><ColumnDragHandle /> {{ t(c.labelKey) }}</th>
                 <SortableTh v-else v-bind="columnDrag.headerAttrs(c.key)" reorderable :label="t(c.labelKey)" :sort-key="c.key" :sort="tbl.sort.value"
@@ -1327,11 +1328,9 @@ function entryRange(entry: JournalEntryDetail): { from: string; to: string } {
                       ? 'bg-primary-50/60 border-x-2 border-t-2 border-primary-500/60'
                       : entryIdFilter === e.id ? 'bg-primary-50' : 'hover:bg-neutral-50',
                   ]" @click="toggleExpand(e)">
-                <td v-if="bulk.canUse.value" class="pl-3 py-2" @click.stop>
-                  <input type="checkbox" class="h-4 w-4 cursor-pointer" :checked="selectedIds.includes(e.id)"
-                    :aria-label="e.document_no || String(e.id)" data-test="journal-row-select" @change="toggleSelected(e.id)" />
-                </td>
-                <td class="px-3 py-2 text-neutral-400">
+                <td class="px-3 py-2 text-neutral-400 whitespace-nowrap">
+                  <input v-if="bulk.canUse.value" type="checkbox" class="mr-2 h-4 w-4 cursor-pointer align-middle" :checked="selectedIds.includes(e.id)"
+                    :aria-label="e.document_no || String(e.id)" data-test="journal-row-select" @click.stop @change="toggleSelected(e.id)" />
                   <span class="inline-block transition-transform" :class="{ 'rotate-90': isExpanded(e.id) }">▸</span>
                 </td>
                 <template v-for="c in tbl.orderedColumns.value.filter(c => tbl.isVisible(c.key))" :key="c.key">
