@@ -398,12 +398,23 @@ final class DeferredTax504Test extends TestCase
         $fx = $closing->fxPreview($this->supplier, $this->period);
         $closing->runFxRevaluation($this->supplier, $this->period, [], $this->version(), [], ['snapshot_hash' => $fx['snapshot_hash']]);
         $count = $this->journalCount();
+        $state = $closing->state($this->supplier, $this->period);
+        self::assertFalse($state['can_close'], 'Průvodce nesmí nabízet uzavření, které server odmítne.');
+        self::assertContains('deferred_tax_assessment', $state['close_blockers']);
         try { $closing->closeBooks($this->supplier, $this->period, $this->version()); self::fail('Prior-year assessment allowed closing next books.'); }
         catch (ClosingException $e) { self::assertSame('deferred_tax_assessment_required', $e->errorCode); }
         self::assertSame($count, $this->journalCount());
         $deferred->run($this->supplier, $this->period, $this->body(), $this->version());
         $deferred->run($this->supplier, $this->period, $this->body(), $this->version());
+        $state = $closing->state($this->supplier, $this->period);
+        self::assertNotContains('deferred_tax_assessment', $state['close_blockers']);
+        self::assertSame(['nonprofit_tax_assessment'], $state['close_blockers']);
+        self::assertFalse($state['can_close']);
         \MyInvoice\Tests\Support\NonprofitTaxAssessmentFixture::confirm($container, $this->supplier, $this->period, (int) $this->db->pdo()->query('SELECT id FROM users ORDER BY id LIMIT 1')->fetchColumn());
+        $state = $closing->state($this->supplier, $this->period);
+        self::assertSame([], $state['close_blockers']);
+        self::assertTrue($state['can_close']);
+        self::assertFalse($state['precheck_stale'], 'Posouzení potvrzená po předběžných kontrolách snímek nezastarají.');
         self::assertSame(0.0, $closing->closeBooks($this->supplier, $this->period, $this->version())['profit']);
     }
 

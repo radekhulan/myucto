@@ -102,6 +102,9 @@ final class ClosingService
      */
     private const INCOME_TAX_INPUT_STEPS = ['depreciation', 'fx_revaluation', 'estimates', 'deferrals', 'provisions', 'stock'];
 
+    /** Kontroly posouzení, které zastarání snímku předběžných kontrol nesledují ({@see precheckStale}). */
+    private const PRECHECK_STALE_IGNORED_KEYS = ['nonprofit_tax_assessment', 'deferred_tax_assessment'];
+
     /** Názvy kroků do chybových hlášek (shodně s průvodcem). */
     private const STEP_LABELS = [
         'depreciation' => 'Odpisy majetku',
@@ -310,6 +313,7 @@ final class ClosingService
         }
 
         $framework = $this->roleProfile($supplierId, (string) $period['ends_on'])->framework;
+        $assessmentBlockers = $period['status'] === 'closing' ? $this->closeAssessmentBlockers($supplierId, $periodId, $framework) : [];
         return ($framework === AccountingFrameworkService::CZ_504 ? ['accounting_framework' => $framework] : []) + [
             'step_order' => self::stepOrder($framework),
             'period' => $period,
@@ -320,7 +324,9 @@ final class ClosingService
             'can_start' => $period['status'] === 'open' && $prevOk,
             'precheck_stale' => $this->precheckStale($supplierId, $period, $steps),
             'can_abort' => $period['status'] === 'closing' && !$hasClosingEntries,
-            'can_close' => $period['status'] === 'closing' && $preCloseDone && $incomeTaxStale === null,
+            'can_close' => $period['status'] === 'closing' && $preCloseDone && $incomeTaxStale === null && $assessmentBlockers === [],
+            // Posouzení, bez kterých uzavření knih odmítne (stejné kontroly jako closeBooks).
+            'close_blockers' => $assessmentBlockers,
             'income_tax_stale' => $incomeTaxStale,
             'stock_step_required' => in_array('stock', $requiredPreClose, true),
             'depreciation_step_required' => in_array('depreciation', $requiredPreClose, true),
@@ -340,6 +346,26 @@ final class ClosingService
                 ? null
                 : $this->openingTakeoverPreview($supplierId, $period, $steps, $next),
         ];
+    }
+
+    /**
+     * Posouzení, která {@see closeBooks} vyžaduje před uzavřením knih: aktuální posouzení
+     * metody odložené daně (504) a potvrzené daňové posouzení činností. Čte bez zámků,
+     * jen aby průvodce nenabízel uzavření, které server odmítne.
+     *
+     * @return list<string> klíče chybějících posouzení
+     */
+    private function closeAssessmentBlockers(int $supplierId, int $periodId, ?string $framework): array
+    {
+        $blockers = [];
+        if ($framework === AccountingFrameworkService::CZ_504
+            && !(new DeferredTax504Service($this->db, $this->journal, $this->periods, $this->closing, $this->series))->closingCheck($supplierId, $periodId)['complete']) {
+            $blockers[] = 'deferred_tax_assessment';
+        }
+        if (!$this->nonprofitTaxAssessment->closingCheck($supplierId, $periodId)['complete']) {
+            $blockers[] = 'nonprofit_tax_assessment';
+        }
+        return $blockers;
     }
 
     /**
@@ -6623,6 +6649,12 @@ final class ClosingService
         }
         foreach ($this->buildErrorChecks($supplierId, $period) as $c) {
             $key = (string) $c['key'];
+            // Posouzení (daňové posouzení činností, odložená daň 504) se potvrzují až PO
+            // předběžných kontrolách, takže by snímek zastaral pokaždé. Uzavření knih je
+            // kontroluje samo a průvodce je ukazuje u kroku Uzavření knih.
+            if (in_array($key, self::PRECHECK_STALE_IGNORED_KEYS, true)) {
+                continue;
+            }
             $severity = (string) ($c['severity'] ?? 'error');
             $prev = $snapshot[$key] ?? null;
 

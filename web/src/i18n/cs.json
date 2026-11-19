@@ -22249,7 +22249,8 @@
         "override_reason": "Důvod override",
         "override_reason_ph": "Např. doklad dodán po uzávěrce, doúčtuje se v následujícím období",
         "override_button": "Uzavřít přes nezaúčtované",
-        "blocked_income_tax_stale": "Uzavřít knihy zatím nejde - daň z příjmů je potřeba přepočítat, protože se po jejím zaúčtování vrátil krok, který mění výsledek hospodaření. Otevřete krok Daň z příjmů."
+        "blocked_income_tax_stale": "Uzavřít knihy zatím nejde - daň z příjmů je potřeba přepočítat, protože se po jejím zaúčtování vrátil krok, který mění výsledek hospodaření. Otevřete krok Daň z příjmů.",
+        "blocked_assessment": "Uzavřít knihy zatím nejde - chybí: {items}. Posouzení potvrďte a pak se sem vraťte."
       },
       "open": {
         "hint": "Zaúčtuje počáteční stavy rozvahových účtů přes 701 - Počáteční účet rozvažný do následujícího období (založí se automaticky, pokud neexistuje) a převede výsledek hospodaření na 431.",

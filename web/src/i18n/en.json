@@ -22249,7 +22249,8 @@
         "override_reason": "Override reason",
         "override_reason_ph": "E.g. document delivered after closing, will be posted in the next period",
         "override_button": "Close over unposted",
-        "blocked_income_tax_stale": "Books cannot be closed yet - the income tax needs to be recalculated because a step that changes the profit or loss was reverted after it was posted. Open the Income tax step."
+        "blocked_income_tax_stale": "Books cannot be closed yet - the income tax needs to be recalculated because a step that changes the profit or loss was reverted after it was posted. Open the Income tax step.",
+        "blocked_assessment": "Books cannot be closed yet - missing: {items}. Confirm the assessment and come back."
       },
       "open": {
         "hint": "Books opening balances of balance sheet accounts via 701 — Opening balance sheet account into the following period (created automatically if missing) and transfers the profit or loss to 431.",

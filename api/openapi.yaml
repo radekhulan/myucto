@@ -45213,6 +45213,12 @@ components:
           type: array
           items:
             type: string
+        close_blockers:
+          type: array
+          description: Chybějící posouzení, bez kterých uzavření knih odmítne (deferred_tax_assessment u 504, nonprofit_tax_assessment); can_close je pak false.
+          items:
+            type: string
+            enum: [deferred_tax_assessment, nonprofit_tax_assessment]
         income_tax_stale:
           type:
           - object

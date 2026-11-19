@@ -243,6 +243,10 @@ const closeBlockedReason = computed<string | null>(() => {
     })
   }
   if (incomeTaxStale.value) return t('accounting.closing.close.blocked_income_tax_stale')
+  const blockers = state.value.close_blockers ?? []
+  if (blockers.length) {
+    return t('accounting.closing.close.blocked_assessment', { items: blockers.map(k => checkLabel(k)).join(', ') })
+  }
   if (!(state.value.can_close ?? true)) return t('accounting.closing.close.blocked_steps')
   return null
 })

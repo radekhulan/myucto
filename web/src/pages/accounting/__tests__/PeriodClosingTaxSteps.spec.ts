@@ -183,4 +183,13 @@ describe('PeriodClosing.vue - daň z příjmů a odložená daň', () => {
     await flushPromises()
     expect(m.runStep).toHaveBeenCalledWith(1, 'income_tax', { row_version: 7, status: 'done' })
   })
+
+  it('chybějící posouzení vysvětlí u uzavření knih místo obecné hlášky', async () => {
+    m.state.mockResolvedValue(makeState({ can_close: false, close_blockers: ['nonprofit_tax_assessment'] }))
+    const wrapper = mount(PeriodClosing)
+    await flushPromises()
+    await select(wrapper, 'close_books')
+    expect(wrapper.text()).toContain('accounting.closing.close.blocked_assessment')
+    expect(wrapper.text()).not.toContain('accounting.closing.close.blocked_steps')
+  })
 })
