@@ -325,6 +325,7 @@ const COLUMNS: ColumnDef[] = [
   { key: 'number', labelKey: 'purchase_invoice.fields.varsymbol', required: true },
   { key: 'vendor', labelKey: 'purchase_invoice.fields.vendor', required: true },
   { key: 'vendor_ic', labelKey: 'common.ic' },
+  { key: 'vendor_dic', labelKey: 'common.dic', defaultHidden: true },
   { key: 'vendor_number', labelKey: 'purchase_invoice.col_vendor_number' },
   { key: 'kind', labelKey: 'purchase_invoice.fields.document_kind' },
   { key: 'issue_date', labelKey: 'purchase_invoice.fields.issue_date', defaultHidden: true },
@@ -382,6 +383,7 @@ function extraFieldValue(inv: PurchaseInvoiceListItem, key: string): string {
 }
 function mobileExtraFields(inv: PurchaseInvoiceListItem): Array<{ key: string; label: string; value: string }> {
   const values: Record<string, string> = {
+    vendor_dic: inv.vendor_dic || '—',
     country: inv.country || '—',
     vat_classification: inv.vat_classification_codes?.join(', ') || '—',
     vat_return_lines: inv.vat_return_lines?.join(', ') || '—',
@@ -1505,6 +1507,7 @@ function closeFilterPanel(event: MouseEvent, reveal = false) {
                     <div class="font-medium text-neutral-900 truncate max-w-[15rem]" :title="inv.vendor_company_name">{{ inv.vendor_company_name }}</div>
                   </td>
                   <td v-else-if="c.key === 'vendor_ic'" :data-custom-color="!!colors.color('vendor_ic')" :style="colors.cellStyle('vendor_ic')" class="px-3 py-2.5 font-mono text-xs text-neutral-600 whitespace-nowrap">{{ inv.vendor_ic || '—' }}</td>
+                  <td v-else-if="c.key === 'vendor_dic'" :data-custom-color="!!colors.color('vendor_dic')" :style="colors.cellStyle('vendor_dic')" class="px-3 py-2.5 font-mono text-xs text-neutral-600 whitespace-nowrap">{{ inv.vendor_dic || '—' }}</td>
                   <td v-else-if="c.key === 'vendor_number'" :data-custom-color="!!colors.color('vendor_number')" :style="colors.cellStyle('vendor_number')" class="px-3 py-2.5 font-mono text-xs text-neutral-600">
                     <div class="flex items-center gap-1.5">
                       <span

@@ -596,6 +596,8 @@ export interface InvoiceListItem {
   cancelled_at: string | null
   booked_at?: string | null
   client_company_name: string
+  client_ic?: string | null
+  client_dic?: string | null
   project_name: string | null
   project_requires_approval?: boolean
   has_work_report?: boolean

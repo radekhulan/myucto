@@ -5094,7 +5094,7 @@ paths:
         - { in: query, name: 'filter[include_document_tags]', description: "1 = štítky dostupných příloh; vyžaduje documents read a respektuje viditelnost dokumentů", schema: { type: integer, enum: [0, 1], default: 0 } }
         - in: query
           name: sort_key
-          schema: { type: string, enum: [number, client, type, issued, due, amount, status, payment_vs, order_number, paid_at, payment_method, booked_at, exchange_rate, amount_czk, base, vat, total, project, sent_at, paid_total, remaining_amount, vat_breakdown, debit_accounts, credit_accounts, locked, country, note, journal_notes] }
+          schema: { type: string, enum: [number, client, client_ic, client_dic, type, issued, due, amount, status, payment_vs, order_number, paid_at, payment_method, booked_at, exchange_rate, amount_czk, base, vat, total, project, sent_at, paid_total, remaining_amount, vat_breakdown, debit_accounts, credit_accounts, locked, country, note, journal_notes] }
         - in: query
           name: sort_dir
           schema: { type: string, enum: [asc, desc], default: desc }
@@ -11561,7 +11561,7 @@ paths:
         - { in: query, name: 'filter[include_document_tags]', description: "1 = štítky dostupných příloh; vyžaduje documents read a respektuje viditelnost dokumentů", schema: { type: integer, enum: [0, 1], default: 0 } }
         - in: query
           name: sort_key
-          schema: { type: string, enum: [number, vendor, vendor_ic, vendor_number, kind, tax_date, due_date, amount, status, paid_at, booked_at, exchange_rate, vat_deduction, expense_category, base, vat, balance, paid_amount, remaining_amount, project, received_at, payment_ordered_at, vat_breakdown, debit_accounts, credit_accounts, locked, country, note, journal_notes, payment_vs, payment_method] }
+          schema: { type: string, enum: [number, vendor, vendor_ic, vendor_dic, vendor_number, kind, tax_date, due_date, amount, status, paid_at, booked_at, exchange_rate, vat_deduction, expense_category, base, vat, balance, paid_amount, remaining_amount, project, received_at, payment_ordered_at, vat_breakdown, debit_accounts, credit_accounts, locked, country, note, journal_notes, payment_vs, payment_method] }
         - in: query
           name: sort_dir
           schema: { type: string, enum: [asc, desc], default: desc }
@@ -53942,6 +53942,8 @@ components:
             `has_work_report`, `project_requires_approval` a `remaining_amount`
             (zbývá uhradit v měně dokladu = `amount_to_pay − paid_total`; 0 u finálního
             dokladu k zaplacené proformě a u dokladu `paid` bez evidované platby).
+            `client_ic` a `client_dic` jsou v seznamu IČ a DIČ odběratele uvedené na
+            dokladu (snapshot z vystavení), u konceptu bez snapshotu z karty klienta.
 
             Dále booleany `oss_review_domestic` a `oss_review_oss` — doklad má řádek
             k ručnímu posouzení místa plnění mimo OSS, resp. v OSS podání. Rozlišují
@@ -56454,6 +56456,7 @@ components:
         currency_symbol: { type: string }
         vendor_company_name: { type: string }
         vendor_ic: { type: [string, "null"] }
+        vendor_dic: { type: [string, "null"], description: "DIČ dodavatele uvedené na dokladu, jinak z karty dodavatele." }
         month_bucket: { type: string, example: "2026-05" }
         kh_sections:
           type: array

@@ -642,6 +642,7 @@ export interface PurchaseInvoiceListItem {
   expense_category_code?: string | null
   vendor_company_name: string
   vendor_ic: string | null
+  vendor_dic?: string | null
   month_bucket: string
   project_name?: string | null
   kh_sections?: string[]

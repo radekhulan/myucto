@@ -1126,8 +1126,11 @@ final class PurchaseInvoiceRepository
      */
     private function listGroupedRows(string $whereSql, array $params, array $filters, int $page, int $perPage): array
     {
+        // DIČ uvedené na dokladu (snapshot), jinak z karty dodavatele: stejný výraz jako KH.
+        $vendorDicSql = \MyInvoice\Service\Report\VatLedgerService::purchaseCounterpartyDicExpr($this->db, 'pi', 'c');
         $sortColumns = [
             'number' => 'pi.varsymbol', 'vendor' => 'c.company_name', 'vendor_ic' => 'c.ic',
+            'vendor_dic' => '(' . $vendorDicSql . ')',
             'vendor_number' => 'pi.vendor_invoice_number', 'kind' => 'pi.document_kind',
             'issue_date' => 'pi.issue_date',
             'tax_date' => 'COALESCE(pi.tax_date, pi.issue_date)', 'due_date' => 'pi.due_date',
@@ -1219,7 +1222,7 @@ final class PurchaseInvoiceRepository
                        pi.reverse_charge, pi.prices_include_vat,
                        ec.label AS expense_category_label, ec.code AS expense_category_code,
                        pi.project_id, prj.name AS project_name,
-                       c.company_name AS vendor_company_name, c.ic AS vendor_ic,
+                       c.company_name AS vendor_company_name, c.ic AS vendor_ic, ($vendorDicSql) AS vendor_dic,
                        DATE_FORMAT(pi.issue_date, '%Y-%m') AS month_bucket,
                        -- §DM: doklad obsahuje drobný majetek → ikonka v seznamu. Stačí, že
                        -- ho nese JEDNA položka (faktura běžně míchá majetek se službou),
