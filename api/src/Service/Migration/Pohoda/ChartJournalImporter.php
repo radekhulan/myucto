@@ -127,6 +127,12 @@ final class ChartJournalImporter
             }
             $groups[PohodaJournal::groupKey($item)][] = $item;
             $source = PohodaJournal::source($item);
+            if ($source === PohodaJournal::BANK && !$ctx->skipsDate(PohodaXml::date($item, 'date'))) {
+                $row = PohodaBankJournal::row($item);
+                if ($row !== null) {
+                    $ctx->bankJournalRows[PohodaJournal::number($item)][] = $row;
+                }
+            }
             if (str_starts_with($source, PohodaJournal::UNKNOWN_AGENDA_PREFIX)) {
                 $unknownAgendas[$source] = ($unknownAgendas[$source] ?? 0) + 1;
             }

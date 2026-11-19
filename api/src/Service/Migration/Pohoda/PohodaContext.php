@@ -81,8 +81,16 @@ final class PohodaContext
     /** @var array<string,int> číslo dokladu => cash_documents.id */
     public array $cashDocuments = [];
 
-    /** @var array<string,list<array{id:int,date:string}>> číslo pohybu => bank_transactions */
+    /** @var array<string,list<array{id:int,date:string,amount:float}>> číslo pohybu => bank_transactions (částka se znaménkem) */
     public array $bankTransactions = [];
+
+    /**
+     * Řádky deníku POHODY ze zdroje Banka po číslech dokladu ({@see PohodaBankJournal::row()}).
+     * Podle nich {@see PohodaBankJournal} rozhoduje, kterým pohybům se stejným číslem zápis patří.
+     *
+     * @var array<string,list<array{date:string,source_id:string,net:float,candidates:list<float>}>>
+     */
+    public array $bankJournalRows = [];
 
     /**
      * Úhrady dokladů z `liquidations` - kterým bankovním nebo pokladním dokladem Pohody

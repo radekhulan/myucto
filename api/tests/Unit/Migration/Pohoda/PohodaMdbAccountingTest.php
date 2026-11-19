@@ -50,6 +50,21 @@ final class PohodaMdbAccountingTest extends TestCase
         self::assertSame('2026-02-03', $records[0]['date']);
     }
 
+    /**
+     * Řádek deníku nese id zdrojového dokladu (`RelAgID`, u banky id bankovního dokladu).
+     * Podle něj se pozná, kterému z pohybů se stejným číslem řádek patří; 0 = bez dokladu.
+     */
+    public function testJournalCarriesSourceDocumentId(): void
+    {
+        $rows = iterator_to_array($this->mapper(['pUD' => [
+            ['ID' => '1', 'RelUdAg' => '28', 'RelAgID' => '29180', 'Cislo' => 'B1', 'UMD' => '261000', 'UD' => '221000', 'Kc' => '100'],
+            ['ID' => '2', 'RelUdAg' => '28', 'RelAgID' => '0', 'Cislo' => 'B1', 'UMD' => '568000', 'UD' => '221000', 'Kc' => '1'],
+            ['ID' => '3', 'RelUdAg' => '28', 'Cislo' => 'B1', 'UMD' => '568000', 'UD' => '221000', 'Kc' => '1'],
+        ]])->records('journal'), false);
+
+        self::assertSame(['29180', '', ''], array_map(static fn (array $r): string => PohodaXml::text($r, 'sourceId'), $rows));
+    }
+
     /** Partner řádku deníku v tvaru XML; RefAD 0 znamená bez vazby, starší export sloupce nemá. */
     public function testJournalCarriesPartnerOfTheRow(): void
     {

@@ -57,12 +57,11 @@ final class DocumentLinker
         // mají v deníku Pohody jediný zápis a vlastnit ho může jen jeden z nich. Dostane ho
         // pohyb, kterým Pohoda hradí doklad - jinak by úhrada faktury zůstala mezi
         // nezaúčtovanými pohyby, ačkoli její zápis v deníku je.
-        $paying = [];
-        foreach ($ctx->liquidations as $l) {
-            if ($l['agenda'] === 'bank' && ($l['source_id'] ?? '') !== '' && isset($ctx->bankByPohodaId[$l['source_id']])) {
-                $paying[$ctx->bankByPohodaId[$l['source_id']]] = true;
-            }
-        }
+        $paying = PohodaBankJournal::paying($ctx);
+        // Pohyb bez vlastního řádku v deníku POHODY mezi pohyby téhož čísla (celý výpis pod
+        // jedním číslem, předkontace „Nevím") zápis čísla nedostane ({@see bankEntries()}).
+        $bankRows = PohodaBankJournal::byMovement($ctx);
+        $this->releaseUnbooked($ctx, array_filter($bankRows, static fn (array $rows): bool => $rows === []), $index[PohodaJournal::BANK] ?? []);
         $bankDocs = [];
         foreach ($ctx->bankTransactions as $number => $txs) {
             usort($txs, static fn (array $a, array $b): int => isset($paying[$b['id']]) <=> isset($paying[$a['id']]));
@@ -97,15 +96,8 @@ final class DocumentLinker
                     $this->dropForeignLinks($ctx->supplierId, $retype ?? $sourceType, $docType, (int) $docId,
                         array_values(array_diff(array_column($all, 'id'), array_column($entries, 'id'))));
                 }
-                if ($docType === 'bank' && count($entries) > 1 && $date !== null) {
-                    $sameDay = array_values(array_filter($entries, static fn (array $e): bool => $e['date'] === $date));
-                    $entries = $sameDay !== [] ? $sameDay : $entries;
-                }
-                // Číselná řada banky se každý rok začíná znovu a agenda vede i pohyby po konci
-                // roku: nezaúčtovaný pohyb nesmí převzít zápis stejného čísla o rok dřív.
-                if ($docType === 'bank' && $date !== null && count($ctx->bankTransactions[$number] ?? []) > 1) {
-                    $entries = array_values(array_filter($entries, static fn (array $e): bool =>
-                        abs(strtotime((string) $e['date']) - strtotime($date)) <= self::SAME_BANK_NUMBER_SECONDS));
+                if ($docType === 'bank') {
+                    $entries = self::bankEntries($ctx, $entries, (string) $number, $date, (int) $docId, $bankRows);
                 }
                 $entryIds = array_column($entries, 'id');
                 if ($entryIds === []) {
@@ -1448,9 +1440,9 @@ final class DocumentLinker
     }
 
     /**
-     * Převedené pohyby podle toho, zda je POHODA zaúčtovala (v deníku je zápis banky se
-     * stejným číslem dokladu), nebo mají předkontaci „Nevím" a zápis nemají. Jediné místo
-     * toho rozhodnutí - řídí se jím vyřízení pohybů bez dokladu i odvozené úhrady
+     * Převedené pohyby podle toho, zda je POHODA zaúčtovala (pohyb má v deníku zápis podle
+     * {@see bankEntries()}, stejně jako při navázání v {@see link()}), nebo mají předkontaci
+     * „Nevím" a zápis nemají. Řídí se tím vyřízení pohybů bez dokladu i odvozené úhrady
      * ({@see UnbookedBankPayments}).
      *
      * @return array{booked:list<int>,unbooked:list<int>}
@@ -1459,14 +1451,82 @@ final class DocumentLinker
     {
         // Jen deník téže agendy: číselná řada banky se v POHODĚ opakuje po letech a pohyb
         // zaúčtovaný v jiné agendě by jinak vypadal jako zaúčtovaný i tady.
-        $booked = $this->journalIndex($ctx->supplierId, $ctx->year(), $ctx->calendar)[PohodaJournal::BANK] ?? [];
+        $index = $this->journalIndex($ctx->supplierId, $ctx->year(), $ctx->calendar)[PohodaJournal::BANK] ?? [];
+        $rows = PohodaBankJournal::byMovement($ctx);
         $ids = ['booked' => [], 'unbooked' => []];
         foreach ($ctx->bankTransactions as $number => $txs) {
             foreach ($txs as $tx) {
-                $ids[($booked[(string) $number] ?? []) !== [] ? 'booked' : 'unbooked'][] = (int) $tx['id'];
+                $entries = self::bankEntries($ctx, $index[(string) $number] ?? [], (string) $number, (string) $tx['date'], (int) $tx['id'], $rows);
+                $ids[$entries !== [] ? 'booked' : 'unbooked'][] = (int) $tx['id'];
             }
         }
         return ['booked' => array_values(array_unique($ids['booked'])), 'unbooked' => array_values(array_unique($ids['unbooked']))];
+    }
+
+    /**
+     * Zápisy deníku banky, které patří pohybu - jediné místo toho rozhodnutí pro navázání
+     * ({@see link()}) i vyřízení pohybů ({@see bankBooking()}). Z `$entries` (zápisy čísla
+     * v agendě pohybu):
+     *  - pohyb, který podle řádků deníku POHODY vlastní řádek nemá ({@see PohodaBankJournal}),
+     *    nedostane žádný (výpis pod jedním číslem, stejné číslo v datovém souboru o rok později);
+     *  - z víc zápisů čísla zápis dne pohybu, pokud je;
+     *  - má-li číslo víc pohybů, jen zápisy do půl roku od pohybu: číselná řada banky se každý
+     *    rok začíná znovu a agenda vede i pohyby po konci roku, nezaúčtovaný pohyb nesmí
+     *    převzít zápis stejného čísla o rok dřív.
+     *
+     * @param list<array{year:int,date:string,id:int}> $entries
+     * @param array<int,list<array<string,mixed>>> $rows {@see PohodaBankJournal::byMovement()}
+     * @return list<array{year:int,date:string,id:int}>
+     */
+    private static function bankEntries(PohodaContext $ctx, array $entries, string $number, ?string $date, int $txId, array $rows): array
+    {
+        if (($rows[$txId] ?? null) === []) {
+            return [];
+        }
+        if (count($entries) > 1 && $date !== null) {
+            $sameDay = array_values(array_filter($entries, static fn (array $e): bool => $e['date'] === $date));
+            $entries = $sameDay !== [] ? $sameDay : $entries;
+        }
+        if ($date !== null && count($ctx->bankTransactions[$number] ?? []) > 1) {
+            $entries = array_values(array_filter($entries, static fn (array $e): bool =>
+                abs(strtotime((string) $e['date']) - strtotime($date)) <= self::SAME_BANK_NUMBER_SECONDS));
+        }
+        return $entries;
+    }
+
+    /**
+     * Opakovaný převod uvolní pohyby, které dřívější převod navázal na zápis čísla, ačkoli
+     * v deníku POHODY vlastní řádek nemají ({@see PohodaBankJournal::byMovement()}):
+     * smaže vazby převodu na zápisy čísla a zápis, jehož zdrojem pohyb byl, vrátí bez zdroje,
+     * aby ho v {@see link()} dostal zaúčtovaný pohyb. Ruční vazby a odvozené zápisy úhrad
+     * se nemění.
+     *
+     * @param array<int,mixed> $txIds bank_transactions.id => cokoli
+     * @param array<string,list<array{year:int,date:string,id:int}>> $bankIndex zápisy banky po číslech
+     */
+    private function releaseUnbooked(PohodaContext $ctx, array $txIds, array $bankIndex): void
+    {
+        if ($txIds === []) {
+            return;
+        }
+        $pdo = $this->db->pdo();
+        foreach ($ctx->bankTransactions as $number => $txs) {
+            $entryIds = array_map('intval', array_column($bankIndex[(string) $number] ?? [], 'id'));
+            $released = array_values(array_filter(array_map(static fn (array $tx): int => (int) $tx['id'], $txs), static fn (int $id): bool => isset($txIds[$id])));
+            if ($entryIds === [] || $released === []) {
+                continue;
+            }
+            $entries = implode(',', $entryIds);
+            $docs = implode(',', $released);
+            $pdo->prepare(
+                "DELETE FROM journal_entry_document_links
+                  WHERE supplier_id = ? AND doc_type = 'bank' AND note = ? AND doc_id IN ({$docs}) AND entry_id IN ({$entries})"
+            )->execute([$ctx->supplierId, $this->entries->linkNote()]);
+            $pdo->prepare(
+                "UPDATE journal_entries SET source_id = NULL
+                  WHERE supplier_id = ? AND source_type = 'bank' AND source_id IN ({$docs}) AND id IN ({$entries})"
+            )->execute([$ctx->supplierId]);
+        }
     }
 
     /**

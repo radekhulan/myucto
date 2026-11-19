@@ -351,7 +351,7 @@ final class CashBankImporter
                         $p->count(self::STEP_BANK, 'duplicate_numbers');
                     }
                     if (isset($existingTx[$txKey])) {
-                        $ctx->bankTransactions[$number][] = ['id' => $existingTx[$txKey], 'date' => $date];
+                        $ctx->bankTransactions[$number][] = ['id' => $existingTx[$txKey], 'date' => $date, 'amount' => $amount];
                         self::rememberReferences($ctx, $r, $existingTx[$txKey]);
                         $p->count(self::STEP_BANK, 'existing');
                         continue;
@@ -379,7 +379,7 @@ final class CashBankImporter
                         'bank_ref' => mb_substr($number, 0, 40),
                     ]);
                     $this->map->put($ctx->supplierId, PohodaImportRepository::KIND_BANK_TRANSACTION, $txKey, $id, $ctx->runId);
-                    $ctx->bankTransactions[$number][] = ['id' => $id, 'date' => $date];
+                    $ctx->bankTransactions[$number][] = ['id' => $id, 'date' => $date, 'amount' => $amount];
                     self::rememberReferences($ctx, $r, $id);
                     $added++;
                     $p->count(self::STEP_BANK, 'transactions');

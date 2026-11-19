@@ -665,6 +665,17 @@ se stejným číslem: příjem, poplatek a odvod netto. Zápis v deníku pod tí
 patří k pohybu, kterým POHODA hradí doklad. Úhrada faktury proto nezůstane mezi
 nezaúčtovanými pohyby.
 
+**Výpis pod jedním číslem.** POHODA někdy dá stejné číslo dokladu všem pohybům
+výpisu z téhož dne. Zaúčtované pohyby mají v deníku řádky, pohyby s předkontací
+„Nevím" žádné. Zápis pod tímto číslem patří jen pohybům, které v deníku POHODY
+řádek mají. Z datového souboru (MDB) to převod pozná podle vazby řádku deníku na
+bankovní doklad, ze standardního XML podle částky pohybu. Ostatní pohyby zůstanou
+nespárované a nabídnou se k zaúčtování
+([§ 107.9.5.1](#107951-pohyby-ktere-pohoda-nezauctovala)). Když částky
+jednoznačně nerozhodnou, patří zápis všem pohybům čísla. Stejně se posuzuje číslo,
+které se v číselné řadě banky opakuje o rok později: pohyb bez řádku v deníku
+zůstane k zaúčtování, i když starší pohyb téhož čísla zaúčtovaný je.
+
 Číslo dokladu, které už ve firmě je, dostane příponu roku, například
 `FV-0001/2026`.
 

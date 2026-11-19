@@ -1020,6 +1020,47 @@ final class SyntheticPohodaExport
             . self::entry('Banka', self::GATEWAY_BANK, 'Úhrada ' . self::GATEWAY_INVOICE, 1210, '221001', '311001', '2026-03-05'));
     }
 
+    /** Výpis pod jedním číslem dokladu ({@see withSharedBankNumber()}). */
+    public const SHARED_BANK = 'BAN0010050';
+    public const SHARED_BANK_UNBOOKED = -150.0;
+
+    /**
+     * Výpis, který POHODA vede pod jediným číslem dokladu: tři pohyby BAN0010050 téhož dne.
+     * Příjem 500 Kč (221/261) a poplatek 20 Kč (568/221) mají řádek v deníku, výdaj 150 Kč
+     * má předkontaci „Nevím" a řádek nemá.
+     */
+    public static function withSharedBankNumber(string $agendaDir): void
+    {
+        $doc = static fn (string $id, string $type, float $amount): string =>
+            str_replace('<bnk:id>' . abs(crc32(self::SHARED_BANK)) . '</bnk:id>', '<bnk:id>' . abs(crc32($id)) . '</bnk:id>',
+                self::bank(self::SHARED_BANK, $type, '2026-04-10', $amount, '', 'Banka Test'));
+        self::append($agendaDir . '/02_uctova_osnova.xml', '</lst:listAccount>', '<lst:itemAccount id="261000" code="261000" name="Peníze na cestě"/>');
+        self::append($agendaDir . '/29_banka.xml', '</lst:listBank>',
+            $doc('SB-IN', 'receipt', 500) . $doc('SB-FEE', 'expense', 20) . $doc('SB-OPEN', 'expense', abs(self::SHARED_BANK_UNBOOKED)));
+        self::append($agendaDir . '/01_ucetni_denik.xml', '</lst:accountancy>',
+            self::entry('Banka', self::SHARED_BANK, 'Převod z jiného účtu', 500, '221001', '261000', '2026-04-10')
+            . self::entry('Banka', self::SHARED_BANK, 'Poplatek', 20, '568000', '221001', '2026-04-10'));
+    }
+
+    /** Číslo bankovního dokladu použité znovu o rok později ({@see withBankNumberNextYear()}). */
+    public const NEXT_YEAR_BANK = 'BAN0010070';
+
+    /**
+     * Číselná řada banky se v POHODĚ každý rok začíná znovu: příjem 400 Kč z března má
+     * v deníku řádek, výdaj 250 Kč se stejným číslem o rok později (agenda vede i doklady
+     * po konci roku) má předkontaci „Nevím" a řádek nemá.
+     */
+    public static function withBankNumberNextYear(string $agendaDir): void
+    {
+        $doc = static fn (string $id, string $type, string $date, float $amount): string =>
+            str_replace('<bnk:id>' . abs(crc32(self::NEXT_YEAR_BANK)) . '</bnk:id>', '<bnk:id>' . abs(crc32($id)) . '</bnk:id>',
+                self::bank(self::NEXT_YEAR_BANK, $type, $date, $amount, '', 'Banka Test'));
+        self::append($agendaDir . '/29_banka.xml', '</lst:listBank>',
+            $doc('NY-OLD', 'receipt', '2026-03-03', 400) . $doc('NY-NEW', 'expense', self::NEXT_YEAR . '-03-02', 250));
+        self::append($agendaDir . '/01_ucetni_denik.xml', '</lst:accountancy>',
+            self::entry('Banka', self::NEXT_YEAR_BANK, 'Příjem', 400, '221001', '602000', '2026-03-03'));
+    }
+
     /** Totéž bez částek v cizí měně - doklady, jak by je převod převzal v Kč. */
     public static function withoutForeignAmounts(string $agendaDir): void
     {

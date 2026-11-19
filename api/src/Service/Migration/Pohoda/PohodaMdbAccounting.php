@@ -260,6 +260,9 @@ final class PohodaMdbAccounting
                 // převodník tyto sloupce neexportoval.
                 'address' => ['company' => $r['Firma'] ?? '', 'name' => $r['Jmeno'] ?? '', 'ico' => $r['ParICO'] ?? ''],
                 'addressbookId' => ($r['RefAD'] ?? '') === '0' ? '' : ($r['RefAD'] ?? ''),
+                // Id zdrojového dokladu řádku (u banky id bankovního dokladu). XML ho nenese,
+                // rozlišuje se jím pohyb mezi pohyby se stejným číslem ({@see PohodaBankJournal}).
+                'sourceId' => ($r['RelAgID'] ?? '') === '0' ? '' : ($r['RelAgID'] ?? ''),
                 'pairing' => ['symbol' => $r['ParSym'] ?? '', 'advance' => $r['ParSym2'] ?? ''],
             ];
         } elseif ($key === 'chart') {
