@@ -32262,6 +32262,7 @@
     "projection_tax": "Projected tax",
     "projection_optional": "informational",
     "projection_incomplete": "The closing projection is incomplete. These steps could not be previewed and are not included in the projected result or tax:",
+    "books_changed_after_final": "The accounting records changed after this return was finalized, consider a supplementary return. The closing wizard therefore suggests the tax from the current books, not from this return.",
     "proj_depreciation": "Depreciation of the year per depreciation plan (not posted)",
     "proj_stock": "Closing inventory at the balance sheet date (method B)",
     "proj_source_closing": "Closing",

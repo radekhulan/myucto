@@ -32262,6 +32262,7 @@
     "projection_tax": "Projektovaná daň",
     "projection_optional": "informativní",
     "projection_incomplete": "Projekce uzávěrky je neúplná. Náhled těchto kroků selhal a projektovaný výsledek ani daň je nezahrnují:",
+    "books_changed_after_final": "Účetnictví se po finalizaci přiznání změnilo, zvažte dodatečné přiznání. Průvodce uzávěrkou proto navrhuje daň z aktuálních knih, ne z tohoto přiznání.",
     "proj_depreciation": "Odpisy roku podle odpisového plánu (nezaúčtované)",
     "proj_stock": "Konečný stav zásob k rozvahovému dni (způsob B)",
     "proj_source_closing": "Uzávěrka",

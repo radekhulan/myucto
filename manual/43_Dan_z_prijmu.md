@@ -318,6 +318,12 @@ Nad tabulkou se zobrazují **upozornění** (chybějící FÚ, nadlimitní dary,
   předvyplněného formuláře EPO a po odeslání k němu přetáhnout XML a potvrzení.
   Dokumenty DPFO a DPPO se ukládají pod samostatně konfigurovatelný kořen
   **Daň z příjmů** a dále podle roku a typu formuláře.
+- Finalizované **DPPO** si pamatuje stav účetnictví období, ze kterého vzniklo (výsledkové
+  účty bez daně z příjmů 59x a u neziskové organizace i činnost a daňový režim řádků).
+  Když se účetnictví po finalizaci změní, detail přiznání upozorní **Účetnictví se po
+  finalizaci přiznání změnilo, zvažte dodatečné přiznání** a průvodce uzávěrkou přestane
+  daň z tohoto přiznání nabízet (navrhne ji z aktuálních knih). Zaúčtování samotné daně
+  z příjmů, odložené daně ani uzavření knih upozornění nevyvolá.
 - **PDF sestava** (tlačítko **Stáhnout PDF sestavu**) - přehledná pracovní sestava přiznání (DPPO i DPFO) pro kontrolu
   s účetní a do archivu. Není podáním pro finanční úřad a netváří se jako tiskopis; každá
   strana to uvádí. Obsahuje identifikaci poplatníka, zdaňovací období, druh a stav

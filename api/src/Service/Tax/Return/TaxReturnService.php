@@ -153,7 +153,12 @@ final class TaxReturnService
             'variant_seq' => $seq,
             'available_variants' => $this->returns->listVariants($supplierId, $year, $type),
             'last_known_tax_suggested' => $variant === 'dodatecne'
-                ? $this->returns->findLastKnownTax($supplierId, $year, $type)
+                ? $this->returns->findLastKnownTax($supplierId, $year, $type, false)
+                : null,
+            // Finalizované DPPO: odpovídá účetnictví období ještě stavu při finalizaci?
+            // null = nelze posoudit (koncept, DPFO, finalizace před zavedením otisku).
+            'books_current' => $type === 'po' && $row['status'] === 'final'
+                ? (new DppoBooksFingerprint($this->db))->isCurrent($supplierId, $year, $row['books_fingerprint'] ?? null)
                 : null,
             // Rodná čísla rodiny jen maskovaná (H28) — i u starších finálních přiznání,
             // jejichž uložený výpočet je ještě nese otevřeně.
@@ -537,6 +542,7 @@ final class TaxReturnService
             $seq,
             $snapshotId,
             $userId,
+            $type === 'po' ? (new DppoBooksFingerprint($this->db))->forYear($supplierId, $year) : null,
         );
         if ($updated === null) {
             throw new TaxReturnException('version_conflict', 'Přiznání bylo mezitím změněno — načtěte znovu.', 409);
@@ -2000,7 +2006,7 @@ final class TaxReturnService
     {
         $warnings = [];
         $manualLast = isset($inputs['last_known_tax']) ? (float) $inputs['last_known_tax'] : null;
-        $derivedLast = $this->returns->findLastKnownTax($supplierId, $year, $type);
+        $derivedLast = $this->returns->findLastKnownTax($supplierId, $year, $type, false);
         $lastKnown = $manualLast ?? $derivedLast ?? 0.0;
 
         if ($manualLast === null && $derivedLast === null) {

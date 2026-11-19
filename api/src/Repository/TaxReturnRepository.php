@@ -31,7 +31,7 @@ final class TaxReturnRepository
     private const VARIANTS = ['radne', 'opravne', 'dodatecne'];
 
     private const COLS = 'id, supplier_id, year, taxpayer_type, variant, variant_seq, status, inputs, computed,
-                          final_snapshot_id, finalized_at, finalized_by,
+                          final_snapshot_id, finalized_at, finalized_by, books_fingerprint,
                           last_submission_id, row_version, created_by, created_at, updated_at';
 
     /** @return array<string,mixed>|null */
@@ -112,12 +112,13 @@ final class TaxReturnRepository
      * @param array<string,mixed> $computed
      * @return array<string,mixed>|null null = konflikt/neexistuje/už final
      */
-    public function finalize(int $supplierId, int $year, string $type, array $computed, int $expectedRowVersion, string $variant = 'radne', int $variantSeq = 1, ?int $snapshotId = null, ?int $finalizedBy = null): ?array
+    public function finalize(int $supplierId, int $year, string $type, array $computed, int $expectedRowVersion, string $variant = 'radne', int $variantSeq = 1, ?int $snapshotId = null, ?int $finalizedBy = null, ?string $booksFingerprint = null): ?array
     {
         $seq = $this->normSeq($variant, $variantSeq);
         $stmt = $this->db->pdo()->prepare(
             'UPDATE income_tax_returns
-                SET status = \'final\', computed = ?, final_snapshot_id = ?, finalized_at = NOW(), finalized_by = ?, row_version = row_version + 1
+                SET status = \'final\', computed = ?, final_snapshot_id = ?, finalized_at = NOW(), finalized_by = ?, books_fingerprint = ?,
+                    row_version = row_version + 1
               WHERE supplier_id = ? AND year = ? AND taxpayer_type = ? AND variant = ? AND variant_seq = ?
                 AND status = \'draft\' AND row_version = ?'
         );
@@ -125,6 +126,7 @@ final class TaxReturnRepository
             $this->encode($computed),
             $snapshotId,
             $finalizedBy,
+            $booksFingerprint,
             $supplierId,
             $year,
             $this->normType($type),
@@ -149,7 +151,7 @@ final class TaxReturnRepository
         $stmt = $this->db->pdo()->prepare(
             'UPDATE income_tax_returns
                 SET status = \'draft\', computed = NULL, final_snapshot_id = NULL, finalized_at = NULL, finalized_by = NULL,
-                    row_version = row_version + 1
+                    books_fingerprint = NULL, row_version = row_version + 1
               WHERE supplier_id = ? AND year = ? AND taxpayer_type = ? AND variant = ? AND variant_seq = ?
                 AND status = \'final\' AND row_version = ?'
         );
@@ -308,12 +310,19 @@ final class TaxReturnRepository
      * Vrací null, když žádné finalizované nemáme — uživatel pak zadá poslední známou
      * daň ručně.
      *
+     * `$currentBooksOnly` (výchozí): DPPO, jehož otisk účetnictví uložený při finalizaci
+     * ({@see \MyInvoice\Service\Tax\Return\DppoBooksFingerprint}) už neodpovídá deníku,
+     * se jako známá daň nevrátí; průvodce uzávěrkou pak navrhne daň dopočtenou z aktuálních
+     * knih. Přiznání bez otisku (finalizovaná dřív) se berou jako dosud. Dodatečné přiznání
+     * podle § 141 DŘ potřebuje naopak naposledy stanovenou daň bez ohledu na pozdější změny
+     * účetnictví, proto volá s false.
+     *
      * @param 'fo'|'po'|string $type
      */
-    public function findLastKnownTax(int $supplierId, int $year, string $type): ?float
+    public function findLastKnownTax(int $supplierId, int $year, string $type, bool $currentBooksOnly = true): ?float
     {
         $stmt = $this->db->pdo()->prepare(
-            "SELECT variant, computed
+            "SELECT variant, computed, books_fingerprint
                FROM income_tax_returns
               WHERE supplier_id = ? AND year = ? AND taxpayer_type = ?
                 AND status = 'final' AND computed IS NOT NULL
@@ -323,6 +332,10 @@ final class TaxReturnRepository
         $stmt->execute([$supplierId, $year, $this->normType($type)]);
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
         if ($row === false) {
+            return null;
+        }
+        if ($currentBooksOnly && $this->normType($type) === 'po'
+            && (new \MyInvoice\Service\Tax\Return\DppoBooksFingerprint($this->db))->isCurrent($supplierId, $year, $row['books_fingerprint']) === false) {
             return null;
         }
         $computed = $this->decode((string) ($row['computed'] ?? ''));

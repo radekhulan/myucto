@@ -414,7 +414,7 @@ final class AnonymizationPolicy
         'import_jobs' => ['current_step' => 'keep', 'last_error' => 'text', 'log_text' => 'text', 'params' => 'json', 'report' => 'json', 'result_mime' => 'keep', 'result_name' => 'file_name', 'result_path' => 'file_path'],
         'income_tax_finalization_overrides' => ['check_key' => 'keep', 'reason' => 'text'],
         'income_tax_return_snapshots' => ['business_errors' => 'json', 'snapshot_json' => 'json', 'source_manifest' => 'json', 'source_sha256' => 'keep', 'xml_content' => 'text', 'xml_sha256' => 'keep'],
-        'income_tax_returns' => ['computed' => 'json', 'inputs' => 'json'],
+        'income_tax_returns' => ['books_fingerprint' => 'keep', 'computed' => 'json', 'inputs' => 'json'],
         'instance_storage_usage' => ['breakdown' => 'keep'],
         'internal_document_lines' => ['account_code' => 'keep', 'cost_center' => 'keep', 'dimensions_json' => 'keep', 'line_text' => 'text'],
         'internal_documents' => ['document_links_json' => 'json', 'document_no' => 'keep', 'kind' => 'keep', 'note' => 'text', 'partner_name' => 'party_name', 'reversal_reason' => 'text', 'title' => 'text'],

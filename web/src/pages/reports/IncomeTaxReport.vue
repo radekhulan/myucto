@@ -951,6 +951,11 @@ function tabLabel(k: TabKey): string { return t('taxReturn.tab_' + k) }
         </button>
       </div>
 
+      <div v-if="type === 'po' && isFinal && state.books_current === false"
+        class="bg-warning-50 border border-warning-500/40 rounded-md p-3 text-sm text-warning-700 mb-4" data-test="books-changed">
+        {{ t('taxReturn.books_changed_after_final') }}
+      </div>
+
       <!-- Warnings (společné) -->
       <div v-if="warnings.length" class="bg-warning-50 border border-warning-500/40 rounded-md p-3 text-sm text-warning-700 mb-4">
         <strong>{{ t('taxReturn.warnings') }}:</strong>
