@@ -31,9 +31,9 @@ function detail(extra: Partial<JournalEntryDetail> = {}): JournalEntryDetail {
   } as JournalEntryDetail
 }
 
-function mountPanel(d: JournalEntryDetail) {
+function mountPanel(d: JournalEntryDetail, canWrite = false) {
   return mount(JournalEntryDetailPanel, {
-    props: { detail: d, relatedKey: 0, canWrite: false, canDelete: false, canDeletePair: false, dateFrom: '', dateTo: '' },
+    props: { detail: d, relatedKey: 0, canWrite, canDelete: false, canDeletePair: false, dateFrom: '', dateTo: '' },
     global: { stubs },
   })
 }
@@ -50,6 +50,28 @@ describe('JournalEntryDetailPanel', () => {
       pairs: [{ pair_no: 1, debit_line_id: 1, credit_line_id: 2, debit_account_code: '311', credit_account_code: '602', amount: 100 }],
     }))
     expect(w.find('[data-test="lines-table"]').exists()).toBe(false)
+    w.unmount()
+  })
+
+  it('ruční zápis jde stornovat', () => {
+    const w = mountPanel(detail(), true)
+    expect(w.findAll('button').some(b => b.text().includes('accounting.journal.reverse'))).toBe(true)
+    w.unmount()
+  })
+
+  it.each([
+    ['closing', 12],
+    ['closing', null],
+    ['opening', 13],
+  ])('zápis zdroje %s (source_id %s) storno nenabízí, vrací ho průvodce uzávěrkou', (source, sourceId) => {
+    const w = mountPanel(detail({ source_type: source, source_id: sourceId }), true)
+    expect(w.findAll('button').some(b => b.text().includes('accounting.journal.reverse'))).toBe(false)
+    w.unmount()
+  })
+
+  it('převzaté otevření z migrace (bez source_id) jde stornovat', () => {
+    const w = mountPanel(detail({ source_type: 'opening', source_id: null }), true)
+    expect(w.findAll('button').some(b => b.text().includes('accounting.journal.reverse'))).toBe(true)
     w.unmount()
   })
 })

@@ -32,6 +32,14 @@ final class DimensionRuleService
     /** Zdroje zápisu, na které se pravidla vztahují (doklady a ruční zápis). */
     public const RULE_SOURCES = ['invoice', 'purchase_invoice', 'cash', 'bank', 'manual'];
 
+    /**
+     * Automatické zápisy modulů bez vlastního dokladu (poplatek GoPay, uzavření platby kartou
+     * bez dokladu, cestovní náhrada vypořádaná pokladnou). Výchozí hodnoty pravidel dostávají
+     * stejně jako doklady, jinak by u 504 skončily na povinné činnosti nákladů a výnosů.
+     * Vynucení vlastních pravidel ({@see check()}) se na ně nevztahuje.
+     */
+    public const DEFAULT_SOURCES = ['gopay', 'card_writeoff', 'payroll_travel'];
+
     /** Třída, se kterou se maska pravidla porovnává u příjmu daňové evidence. */
     public const CASH_INCOME_CODE = '6';
 
@@ -98,6 +106,7 @@ final class DimensionRuleService
         // ty potřebují dimenze stejně jako ruční zápis 112/501, u 504 i pro daňové posouzení (#398).
         // Vynucení povinných dimenzí ({@see check()}) se na závěrku dál nevztahuje.
         if (!in_array($sourceType, self::RULE_SOURCES, true)
+            && !in_array($sourceType, self::DEFAULT_SOURCES, true)
             && !($sourceType === 'closing' && \MyInvoice\Service\Accounting\Closing\ClosingSourceId::isStockSlot($sourceId))) {
             return $lines;
         }
@@ -305,7 +314,7 @@ final class DimensionRuleService
             return null;
         }
         $sql = match ($sourceType) {
-            'bank' => 'SELECT bt.card_last4, DATE(bt.posted_at) AS d
+            'bank', 'card_writeoff' => 'SELECT bt.card_last4, DATE(bt.posted_at) AS d
                          FROM bank_transactions bt JOIN bank_statements bs ON bs.id = bt.statement_id
                         WHERE bt.id = ? AND bs.supplier_id = ?',
             'purchase_invoice' => 'SELECT card_last4, COALESCE(tax_date, issue_date) AS d

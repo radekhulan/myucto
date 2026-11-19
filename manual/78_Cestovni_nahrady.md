@@ -74,6 +74,7 @@ cesty neukazuje.
 | Do mzdy šel celý nárok, i když zaměstnanec dostal zálohu z pokladny | Záloha nebyla správně zapsaná před schválením | Ověřte vyúčtování a zálohu. Schválenou cestu nelze přepsat a opakované promítnutí chybějící odečet nepřidá; rozdíl vypořádejte opravnou revizí mzdy a doložte účetně. |
 | *„Záloha převýšila nárok. Zaměstnanec vrací do pokladny …“* | Záloha byla vyšší než nárok | Přeplatek se ze mzdy nesráží; přijměte ho pokladním dokladem. |
 | *„Nezdaněnou část se nepodařilo zaúčtovat …“* | Účetní období je zavřené | Prověřte vzniklé mzdové vstupy i deník a opravte účtování v přípustném období. Stav Promítnutá do mzdy již nenabízí nové promítnutí z webového seznamu. |
+| *„Nezdaněnou část se nepodařilo zaúčtovat: … Po opravě nastavení ji zaúčtujte ručním zápisem v deníku.“* | Zaúčtování odmítlo něco jiného než období, typicky chybí povinná dimenze (u vyhlášky 504/2002 Sb. činnost na nákladu 512) | Doplňte vztahu mzdovou dimenzi navázanou na dimenzi firmy, nebo nastavte pravidlo dimenze s výchozí hodnotou ([§ 114](114_Dimenze.md)). Pak nezdaněnou část zaúčtujte ručním zápisem v deníku. |
 | *„Nemáte oprávnění měnit pracovní cesty“* | Chybí oprávnění pro mzdové vstupy | Požádejte správce o oprávnění. |
 | Účtenka je ve vyúčtování dvakrát | Duplicitně vložená položka | Smažte ji u položky tlačítkem **Smazat**. |
 | Stravné je vyšší, než má být | Chybí zápis poskytnutých jídel | Doplňte **Bezplatná jídla**. |
@@ -159,7 +160,9 @@ zaměstnancem (335):
   D 335,
 - při vypořádání **pokladnou** zaúčtuje vyúčtování nezdaněnou část MD 512 /
   D 335 a pokladní doklad doplatku (MD 335 / D 211) nebo vrácení přeplatku
-  (MD 211 / D 335) pohledávku vyrovná.
+  (MD 211 / D 335) pohledávku vyrovná. Náklad 512 dostane dimenze firmy, na které
+  ukazují mzdové dimenze pracovního vztahu platné v den schválení, zbytek doplní
+  výchozí hodnoty pravidel dimenzí.
 
 Účty lze změnit v
 [Nastavení mezd](90_Nastaveni_mezd.md#90146-predkontace-pro-zvlastni-mzdove-situace).

@@ -16521,6 +16521,9 @@ paths:
         open↔closing a closing→closed patří uzávěrkovému průvodci (422
         `use_closing_workflow`). Každá změna vyžaduje `row_version` (optimistická
         konkurence) — konflikt vrací 409 `version_conflict`.
+        Schválení dozmrazí kategorii účetní jednotky a automatické sekce přílohy
+        k závěrce, pokud se to při uzavření knih nepodařilo; když ani teď nejde,
+        vrací 422 `category_not_frozen`, resp. `statement_notes_not_frozen`.
       parameters:
         - $ref: '#/components/parameters/SupplierIdHeader'
         - { in: path, name: id, required: true, schema: { type: integer } }
@@ -17308,7 +17311,12 @@ paths:
     post:
       tags: [Accounting]
       summary: Storno zápisu (zrcadlový protizápis)
-      description: Účetní/admin. Vytvoří opačný zápis a naváže reversed_by (§35).
+      description: >-
+        Účetní/admin. Vytvoří opačný zápis a naváže reversed_by (§35). Zápisy uzávěrky
+        (`source_type` closing) a otevření účtů založené aplikací (`source_type` opening
+        s vyplněným `source_id`) ručně stornovat nejde (409 `closing_reversal_forbidden`),
+        vrací je průvodce uzávěrkou. Převzaté otevření z migrace (opening bez `source_id`)
+        stornovat jde.
       parameters:
         - $ref: '#/components/parameters/SupplierIdHeader'
         - { in: path, name: id, required: true, schema: { type: integer } }
@@ -17327,6 +17335,11 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/JournalEntry' }
         '403': { $ref: '#/components/responses/Forbidden' }
+        '409':
+          description: Zápis uzávěrky nebo otevření účtů založený aplikací (`closing_reversal_forbidden`), vrací ho průvodce uzávěrkou
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
         '422':
           description: Zápis neexistuje / už stornován / koncept / zavřené období
           content:
@@ -20808,6 +20821,11 @@ paths:
         Admin-only, stav closing, kroky 1–5 done/skipped, precheck bez errors.
         Zaúčtuje closing zápis (5xx/6xx→710, VH 710↔702, rozvahové↔702) k ends_on
         s číslem z řady UZ a přepne období na closed.
+        Odpověď nese `category_frozen` a `notes_frozen`. Selhání zmražení kategorie
+        účetní jednotky nebo automatických sekcí přílohy uzavření nezastaví, ale
+        přidá varování `warning` = `category_freeze_failed`, resp. `notes_warning` =
+        `statement_notes_freeze_failed` s textem v `warning_detail`, resp.
+        `notes_warning_detail`; schválení zmražení zopakuje.
       parameters:
         - $ref: '#/components/parameters/SupplierIdHeader'
         - { in: path, name: id, required: true, schema: { type: integer } }

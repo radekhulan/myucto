@@ -1152,6 +1152,38 @@ final class PostingService
     }
 
     /**
+     * Zápis, který vrací jen průvodce uzávěrkou (vrácení kroku), ne ruční storno: každý
+     * zápis uzávěrky (`closing`, i skladové sloty) a otevření účtů založené aplikací
+     * (`opening` se source_id = otevírané období, krok Otevření nového roku). Převzaté
+     * otevírací zápisy z migrace (`opening` bez source_id) jdou stornovat ručně, jinak by
+     * chybně převzatý počáteční stav nešlo opravit.
+     *
+     * @param array<string,mixed> $entry řádek journal_entries (source_type, source_id)
+     */
+    public static function isWizardOnlyReversal(array $entry): bool
+    {
+        $source = (string) ($entry['source_type'] ?? '');
+        return $source === 'closing' || ($source === 'opening' && ($entry['source_id'] ?? null) !== null);
+    }
+
+    /**
+     * Ruční storno z účetního deníku (API i rozhraní). Odmítne zápisy podle
+     * {@see isWizardOnlyReversal()}: storno uzávěrky nese týž zdroj bez source_id, takže by
+     * se tvářilo jako uzavření knih a zmrazilo dimenze období. Tyto zápisy vrací průvodce
+     * uzávěrkou.
+     *
+     * @param array{entry_date?:string, description?:?string, posted_by?:?int, user_id?:?int, ip?:?string, user_agent?:?string} $meta
+     * @throws PostingException `closing_reversal_forbidden` (409), jinak jako {@see reverse()}
+     */
+    public function reverseManual(int $supplierId, int $entryId, array $meta = []): int
+    {
+        return TransactionFailure::retrying(
+            $this->db->pdo(),
+            fn (): int => $this->reverseOnce($supplierId, $entryId, $meta, null, null, true),
+        );
+    }
+
+    /**
      * Storno celého předpisu dokladu. Bez entry_date se každý člen ruší ke svému
      * původnímu datu; úhrady ani informativní vazby se do skupiny nenačítají.
      * @return array<int,int> id původního zápisu => id protizápisu
@@ -1201,7 +1233,7 @@ final class PostingService
      * @param list<int>|null $pairNos null = storno celého zápisu
      * @param array{debit_account_code:string, credit_account_code:string, line_text?:?string}|null $replacement
      */
-    private function reverseOnce(int $supplierId, int $entryId, array $meta, ?array $pairNos = null, ?array $replacement = null): int
+    private function reverseOnce(int $supplierId, int $entryId, array $meta, ?array $pairNos = null, ?array $replacement = null, bool $manual = false): int
     {
         $pdo = $this->db->pdo();
         $ownTx = !$pdo->inTransaction();
@@ -1230,6 +1262,13 @@ final class PostingService
         $original = $this->journal->findForUpdate($entryId, $supplierId);
         if ($original === null) {
             throw new PostingException('entry_not_found', 'Účetní zápis #' . $entryId . ' neexistuje.', 404);
+        }
+        if ($manual && self::isWizardOnlyReversal($original)) {
+            throw new PostingException(
+                'closing_reversal_forbidden',
+                'Zápis uzávěrky nebo otevření účtů založený průvodcem uzávěrkou nejde stornovat ručně. Vraťte příslušný krok v průvodci (Uzávěrka, Vzít krok zpět).',
+                409,
+            );
         }
         if (($original['source_type'] ?? null) === 'payroll') {
             throw new PostingException(

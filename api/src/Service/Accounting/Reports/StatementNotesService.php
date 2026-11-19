@@ -274,13 +274,24 @@ final class StatementNotesService
      * Ručně vyplněný text se NEPŘEPISUJE: účetní ho mohla vědomě upřesnit a automatika
      * by ho tiše přebila. Zmrazí se jen sekce, které vlastní text nemají.
      *
+     * Když kategorii účetní jednotky nejde určit, sekce s kategorií se NEZMRAZÍ (náhled
+     * smí ukázat nejužší rozsah, ale zmražený text by se už nikdy nepřepsal) a metoda
+     * po zmražení ostatních sekcí skončí výjimkou. Uzávěrka pak hlásí varování a schválení
+     * zmražení zopakuje ({@see ensureFrozen()}).
+     *
      * @return int počet zmražených sekcí
+     * @throws ReportException `statement_notes_category_unknown`
      */
     public function freezeAutoValues(int $supplierId, int $fiscalYear, int $periodId, ?int $userId = null): int
     {
         $stored = $this->stored($supplierId, $fiscalYear);
         $is504 = $this->frameworks->framework($supplierId, $periodId) === 'cz_504';
-        $category = $is504 ? (string) $this->categories->evaluate($supplierId, $periodId)['category'] : $this->categoryFor($supplierId, $periodId);
+        $categoryError = null;
+        if ($is504) {
+            $category = (string) $this->categories->evaluate($supplierId, $periodId)['category'];
+        } else {
+            [$category, $categoryError] = $this->evaluatedCategory($supplierId, $periodId);
+        }
         $auto = $this->autoValues($supplierId, $fiscalYear, $category);
         if ($is504) {
             $auto = $this->auto504($auto, $this->periods->findById($supplierId, $periodId));
@@ -288,6 +299,9 @@ final class StatementNotesService
 
         $frozen = 0;
         foreach ($auto as $key => $content) {
+            if ($categoryError !== null && $key === 'entity_category') {
+                continue;
+            }
             $existing = $stored[$key] ?? null;
             if (($existing !== null && trim($existing) !== '') || trim((string) $content) === '') {
                 continue;
@@ -295,8 +309,32 @@ final class StatementNotesService
             $this->saveSection($supplierId, $fiscalYear, $key, (string) $content, $userId);
             $frozen++;
         }
+        if ($categoryError !== null) {
+            throw new ReportException(
+                'statement_notes_category_unknown',
+                'Kategorii účetní jednotky se nepodařilo určit, sekce přílohy s kategorií zůstala nezmražená (' . $categoryError . ').',
+            );
+        }
 
         return $frozen;
+    }
+
+    /**
+     * Dozmrazí automatické sekce přílohy období před zákonným schválením. Uzavření knih
+     * je zmrazit mělo, ale jeho selhání knihy nezastaví. Zmražení je idempotentní:
+     * uložený text se nepřepisuje, doplní se jen chybějící sekce.
+     *
+     * @return int počet nově zmražených sekcí
+     * @throws ReportException když zmražení ani teď nejde (schválení se pak odmítne)
+     */
+    public function ensureFrozen(int $supplierId, int $periodId, ?int $userId = null): int
+    {
+        $period = $this->periods->findById($supplierId, $periodId);
+        if ($period === null) {
+            throw new ReportException('period_not_found', 'Účetní období #' . $periodId . ' neexistuje.', 404);
+        }
+
+        return $this->freezeAutoValues($supplierId, (int) $period['fiscal_year'], $periodId, $userId);
     }
 
     /**
@@ -516,12 +554,22 @@ final class StatementNotesService
 
     private function categoryFor(int $supplierId, int $periodId): string
     {
+        return $this->evaluatedCategory($supplierId, $periodId)[0];
+    }
+
+    /**
+     * Kategorie účetní jednotky pro přílohu. Bez dat pro kategorizaci se náhled drží
+     * nejužšího rozsahu (nadsadit povinnosti jednotce, o které nic nevíme, by přílohu
+     * jen zaplevelilo); druhý prvek pak nese důvod, aby se náhradní kategorie nezmrazila.
+     *
+     * @return array{0:string, 1:?string} kategorie, chyba vyhodnocení (null = vyhodnoceno)
+     */
+    private function evaluatedCategory(int $supplierId, int $periodId): array
+    {
         try {
-            return (string) ($this->categories->evaluate($supplierId, $periodId)['category'] ?? 'micro');
-        } catch (\Throwable) {
-            // Bez dat pro kategorizaci se drž nejužšího rozsahu — nadsadit povinnosti
-            // jednotce, o které nic nevíme, by přílohu jen zaplevelilo.
-            return 'micro';
+            return [(string) ($this->categories->evaluate($supplierId, $periodId)['category'] ?? 'micro'), null];
+        } catch (\Throwable $e) {
+            return ['micro', $e->getMessage()];
         }
     }
 

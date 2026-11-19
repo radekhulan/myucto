@@ -130,6 +130,8 @@ v detailu dokladu akcí **Smazat i se zápisem** ([§ 52.14.14.6](#5214146-storn
 
 > [!WARNING]
 > Do uzavřeného účetního období nelze stornovat ani přepsat zápis. Opravu řeší znovuotevření knih v [Uzávěrce](72_Uzaverka.md) (do schválení závěrky), ne přímé storno. Zápis lze stornovat jen jednou.
+>
+> Zápisy uzávěrky a otevření účtů, které založila aplikace (krok Otevření nového roku, počáteční stavy), deník stornovat nenabízí a ruční storno přes API se odmítne. Vrací je průvodce v [Uzávěrce](72_Uzaverka.md) tlačítkem **Vzít krok zpět** (u otevření roku **Vzít zpět otevření roku**). Otevírací zápis převzatý z jiného programu stornovat jde, chybně převzatý počáteční stav tak opravíte stornem a novým zápisem.
 
 ## 52.8 Krok za krokem: přeúčtování z dokladu
 

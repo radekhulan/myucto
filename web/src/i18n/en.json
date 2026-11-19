@@ -22242,6 +22242,9 @@
         "profit": "Profit / loss",
         "document_no": "Document",
         "journal_link": "Show closing entries in the journal",
+        "freeze_warning": "The books are closed, but part of the closing records could not be frozen. Approval retries the freeze and will not approve the period without it.",
+        "category_freeze_failed": "Freezing the entity category failed.",
+        "notes_freeze_failed": "Freezing the automatic sections of the notes to the financial statements failed.",
         "override_title": "Unposted documents block closing",
         "override_text": "The period has unposted active documents. You may close the books over them only with a documented reason — the exception is recorded in the audit log and the closing package.",
         "override_reason": "Override reason",
@@ -33438,7 +33441,8 @@
       "employee_refund": "Employee returns the excess advance",
       "refund_notice": "The advance exceeded the entitlement. The employee returns {amount} to the cash desk.",
       "cash_payout_notice": "Pay the top-up of {amount} from the cash desk.",
-      "posting_skipped": "The tax-free part could not be posted ({reason}). Settle the trip again once the accounting period is open."
+      "posting_skipped": "The tax-free part could not be posted ({reason}). Settle the trip again once the accounting period is open.",
+      "posting_failed": "The tax-free part could not be posted: {message} Once the settings are fixed, post it with a manual journal entry."
     },
     "messages": {
       "load_failed": "Business trips could not be loaded.",

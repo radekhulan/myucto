@@ -1754,6 +1754,12 @@ const canOpenNextStage = computed(() => ['closed', 'reviewed', 'approved'].inclu
                 {{ t('accounting.closing.close.journal_link') }}
               </RouterLink>
             </div>
+            <div v-if="closeBooksPayload?.warning || closeBooksPayload?.notes_warning" data-test="close-books-freeze-warning"
+              class="rounded-lg border border-warning-200 bg-warning-50 dark:bg-warning-500/[0.06] px-3 py-2 text-sm text-warning-800 dark:text-warning-200 space-y-1">
+              <div class="font-medium">{{ t('accounting.closing.close.freeze_warning') }}</div>
+              <div v-if="closeBooksPayload?.warning">{{ closeBooksPayload.warning_detail || t('accounting.closing.close.category_freeze_failed') }}</div>
+              <div v-if="closeBooksPayload?.notes_warning">{{ closeBooksPayload.notes_warning_detail || t('accounting.closing.close.notes_freeze_failed') }}</div>
+            </div>
             <button v-if="state.can_revert_close_books && auth.canWrite('accounting.periods.close')" @click="revertStep('close_books')" :disabled="busy" :class="btnOutline('danger')">
               <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.uturn" /></svg>
               {{ t('accounting.closing.revert.close_books') }}

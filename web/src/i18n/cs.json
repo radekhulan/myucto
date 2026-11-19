@@ -22242,6 +22242,9 @@
         "profit": "Výsledek hospodaření",
         "document_no": "Doklad",
         "journal_link": "Zobrazit uzávěrkové zápisy v deníku",
+        "freeze_warning": "Knihy jsou uzavřené, ale část evidence k závěrce se nepodařilo zmrazit. Schválení zmražení zopakuje a bez něj období neschválí.",
+        "category_freeze_failed": "Zmražení kategorie účetní jednotky se nezdařilo.",
+        "notes_freeze_failed": "Zmražení automatických sekcí přílohy k závěrce se nezdařilo.",
         "override_title": "Nezaúčtované doklady blokují uzavření",
         "override_text": "V období jsou nezaúčtované aktivní doklady. Uzavřít knihy přes ně můžete jen s doloženým důvodem - výjimka se zapíše do auditu i do závěrkového balíčku.",
         "override_reason": "Důvod override",
@@ -33438,7 +33441,8 @@
       "employee_refund": "Zaměstnanec vrací přeplatek zálohy",
       "refund_notice": "Záloha převýšila nárok. Zaměstnanec vrací do pokladny {amount}.",
       "cash_payout_notice": "Vyplaťte z pokladny doplatek {amount}.",
-      "posting_skipped": "Nezdaněnou část se nepodařilo zaúčtovat ({reason}). Promítněte vyúčtování znovu, až bude účetní období otevřené."
+      "posting_skipped": "Nezdaněnou část se nepodařilo zaúčtovat ({reason}). Promítněte vyúčtování znovu, až bude účetní období otevřené.",
+      "posting_failed": "Nezdaněnou část se nepodařilo zaúčtovat: {message} Po opravě nastavení ji zaúčtujte ručním zápisem v deníku."
     },
     "messages": {
       "load_failed": "Pracovní cesty se nepodařilo načíst.",
