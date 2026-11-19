@@ -12,6 +12,7 @@ use MyInvoice\Repository\AccountingPeriodRepository;
 use MyInvoice\Repository\ClosingRepository;
 use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\Accounting\Reports\EntityCategoryService;
+use MyInvoice\Service\Accounting\Reports\StatementNotesService;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\IpMatcher;
 use Psr\Http\Message\ResponseInterface as Response;
@@ -56,6 +57,7 @@ final class AccountingPeriodAction
         private readonly IpMatcher $ipMatcher,
         private readonly Connection $db,
         private readonly EntityCategoryService $categories,
+        private readonly StatementNotesService $statementNotes,
     ) {}
 
     public function list(Request $request, Response $response): Response
@@ -299,6 +301,22 @@ final class AccountingPeriodAction
                         'Účetní závěrku nelze zákonně schválit: historická kategorie účetní jednotky '
                         . '(§1e ZoÚ) není uložená a její zmražení selhalo (' . $e->getMessage() . '). '
                         . 'Doplň podklady kategorizace (rozvahové mapování / počet zaměstnanců) a schválení zopakuj.', 422);
+                }
+                // Totéž pro automatické sekce přílohy k závěrce (§ 18/1/c): jejich zmražení
+                // při uzavření knih mohlo selhat (varování kroku close_books).
+                try {
+                    $this->statementNotes->ensureFrozen($supplierId, $id, $this->userId($request));
+                } catch (\Throwable $e) {
+                    if (TransactionFailure::rollbackIfAborted($pdo, $e)) {
+                        throw $e;
+                    }
+                    if ($ownTx && $pdo->inTransaction()) {
+                        $pdo->rollBack();
+                    }
+                    return Json::error($response, 'statement_notes_not_frozen',
+                        'Účetní závěrku nelze zákonně schválit: automatické sekce přílohy k závěrce '
+                        . 'nejsou zmražené a jejich zmražení selhalo (' . $e->getMessage() . '). '
+                        . 'Doplňte podklady kategorizace a schválení zopakujte.', 422);
                 }
             }
             if (!$this->periods->setStatusCas($id, $supplierId, $status, $rowVersion, $this->userId($request), $approval)) {

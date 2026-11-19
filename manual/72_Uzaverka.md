@@ -346,6 +346,11 @@ Doklad dostane číslo z řady UZ (viz [§ 72.8](#728-krok-za-krokem-ciselne-rad
 **Jak poznáte, že je hotovo:** Aplikace ohlásí **Účetní knihy byly uzavřeny**. Panel zobrazí **Výsledek
 hospodaření**, **Doklad** a odkaz **Zobrazit uzávěrkové zápisy v deníku**.
 
+Uzavření knih zároveň zmrazí kategorii účetní jednotky a automaticky předvyplněné sekce přílohy k závěrce
+(identifikace, kategorie, období). Selže-li zmražení, knihy se uzavřou, ale panel kroku ukáže varování.
+Schválení závěrky zmražení zopakuje a dokud se nepodaří, období neschválí. Když kategorii nejde vyhodnotit,
+příloha v náhledu ukáže nejužší rozsah (mikro), sekce s kategorií se ale nezmrazí.
+
 Dokud závěrka není schválená, uživatel s právem uzávěrky může krok zrušit tlačítkem **Vzít zpět uzavření knih** (uzávěrkové zápisy
 se smažou, opět s auditní stopou).
 
@@ -620,6 +625,7 @@ kontroly zaměřené na **inventarizaci zůstatků**:
 | Nezaúčtované doklady blokují uzavření | V období jsou nezaúčtované aktivní doklady | Zaúčtujte je, nebo uzavřete přes ně s doloženým důvodem. |
 | Krok je dostupný až po zahájení uzávěrky | Období je ještě Otevřené | Klikněte na **Zahájit uzávěrku**. |
 | Znovuotevření odmítnuto, existují uzávěrkové zápisy | Zaúčtovaná uzavření a otevírací zápisy | Nejdřív vezměte zpět kroky **Otevření nového roku** a **Uzavření knih**. |
+| Schválení odmítnuto: *„… automatické sekce přílohy k závěrce nejsou zmražené …“* | Při uzavření knih ani při schválení se nepodařilo zmrazit přílohu, typicky nejde vyhodnotit kategorii účetní jednotky | Doplňte podklady kategorizace (mapování rozvahy, počet zaměstnanců) a schválení zopakujte. |
 | Schválenou závěrku nelze zrušit ani změnit přechodem stavu | Zákonné schválení je nevratné (§ 17 odst. 7) | Opravte chybu v období zjištění (§ 35). |
 | Otevření roku zablokované, panel ukazuje **Rozdíl** | Převzatý otevírací zápis nesouhlasí s konečnými stavy | Rozdíl dohledejte a opravte, nebo použijte **Nahradit převzaté stavy vypočtenými**. |
 | Odpisy nejde zaúčtovat z Majetku, hlásí neotevřené období | Období je ve stavu Uzavírá se | Použijte **Zaúčtovat odpisy roku** v panelu kroku. |

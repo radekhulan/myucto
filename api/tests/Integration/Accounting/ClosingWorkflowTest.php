@@ -311,10 +311,34 @@ final class ClosingWorkflowTest extends TestCase
 
         self::assertTrue($result['category_frozen'], 'Uzavření knih zmrazí kategorii ÚJ.');
         self::assertArrayNotHasKey('warning', $result, 'Bez selhání zmražení není warning.');
+        self::assertTrue($result['notes_frozen'], 'Uzavření knih zmrazí přílohu k závěrce.');
+        self::assertArrayNotHasKey('notes_warning', $result);
         self::assertTrue(
             $this->categories->isFrozen($this->supplierId, $this->periodId),
             'Po uzavření je historická kategorie uložená (předpoklad schválení).',
         );
+    }
+
+    /**
+     * Selhání zmražení přílohy k závěrce knihy nezastaví, ale nesmí se spolknout: krok
+     * close_books vrací varování stejně jako u kategorie ÚJ (schválení ho pak zopakuje).
+     */
+    public function testCloseBooksReportsFailedStatementNotesFreeze(): void
+    {
+        $this->seedScenario();
+        $this->runStepsUntilCloseReady();
+        $this->db->pdo()->exec("UPDATE statement_versions SET valid_from = '2999-01-01' WHERE statement_type = 'balance_sheet' AND framework = 'cz_500'");
+
+        $result = $this->closing->closeBooks($this->supplierId, $this->periodId, $this->rv(), $this->meta());
+
+        self::assertSame('closed', $this->period()['status'], 'Knihy jsou uzavřené i bez zmražené přílohy.');
+        self::assertFalse($result['notes_frozen']);
+        self::assertSame('statement_notes_freeze_failed', $result['notes_warning'] ?? null);
+        self::assertStringContainsString('přílohy', (string) ($result['notes_warning_detail'] ?? ''));
+        $step = $this->db->pdo()->prepare("SELECT payload FROM accounting_closing_steps WHERE supplier_id = ? AND period_id = ? AND step_key = 'close_books'");
+        $step->execute([$this->supplierId, $this->periodId]);
+        $payload = json_decode((string) $step->fetchColumn(), true);
+        self::assertSame('statement_notes_freeze_failed', $payload['notes_warning'] ?? null, 'Varování zůstává v kroku pro průvodce.');
     }
 
     public function testReviewedPeriodAllowsOpeningAndFollowingClosing(): void

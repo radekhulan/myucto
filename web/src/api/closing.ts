@@ -235,6 +235,14 @@ export interface ClosingStepPayload {
   taken_over_entry_ids?: number[]
   taken_over_accounts?: number
   replace_reason?: string
+  // Krok close_books: zmražení kategorie ÚJ a přílohy k závěrce (selhání knihy nezastaví,
+  // ale blokuje schválení, dokud se zmražení nepodaří).
+  category_frozen?: boolean
+  warning?: string
+  warning_detail?: string
+  notes_frozen?: boolean
+  notes_warning?: string
+  notes_warning_detail?: string
 }
 
 export interface ClosingStep {

@@ -4530,7 +4530,11 @@ final class ClosingService
             // Bez toho se příloha schváleného roku mění spolu s firmou: název, sídlo,
             // IČO i kategorie se braly z AKTUÁLNÍHO supplier, ne ze stavu k rozvahovému
             // dni. Selhání NESMÍ shodit uzavření knih — příloha je textová evidence,
-            // ne účetní zápis; stejný důvod jako u zmražení kategorie výše.
+            // ne účetní zápis; stejný důvod jako u zmražení kategorie výše. Selhání se ale
+            // nesmí spolknout: vrací se varování v odpovědi kroku a schválení zmražení
+            // zopakuje, případně zablokuje (viz AccountingPeriodAction).
+            $notesFrozen = true;
+            $notesFreezeError = null;
             try {
                 $this->statementNotes->freezeAutoValues(
                     $supplierId,
@@ -4539,8 +4543,10 @@ final class ClosingService
                     $meta['user_id'] ?? null,
                 );
             } catch (\Throwable $e) {
+                $notesFrozen = false;
+                $notesFreezeError = $e->getMessage();
                 $this->logger->warning(
-                    'Zmražení přílohy k závěrce selhalo (nezablokuje uzavření knih): ' . $e->getMessage(),
+                    'Zmražení přílohy k závěrce selhalo (nezablokuje uzavření knih, blokuje schválení): ' . $e->getMessage(),
                     ['supplier_id' => $supplierId, 'period_id' => $periodId, 'exception' => $e],
                 );
             }
@@ -4551,6 +4557,7 @@ final class ClosingService
                 'document_no' => $docNo,
                 'lines_count' => count($lines),
                 'category_frozen' => $categoryFrozen,
+                'notes_frozen' => $notesFrozen,
             ];
             if ($unpostedOverride !== null) {
                 // Výjimka do závěrkového balíčku (EP-10b) — auditovatelný záznam, že se
@@ -4562,6 +4569,11 @@ final class ClosingService
                 $payload['warning_detail'] = 'Zmražení kategorie účetní jednotky (§1e) se nezdařilo: '
                     . $categoryFreezeError . '. Knihy jsou uzavřené, ale období nelze zákonně schválit, '
                     . 'dokud historická kategorie nebude uložena (zopakuj krok / oprav podklad kategorizace).';
+            }
+            if (!$notesFrozen) {
+                $payload['notes_warning'] = 'statement_notes_freeze_failed';
+                $payload['notes_warning_detail'] = 'Zmražení automatických sekcí přílohy k závěrce se nezdařilo: '
+                    . $notesFreezeError . ' Knihy jsou uzavřené, schválení zmražení zopakuje a bez něj období neschválí.';
             }
             if ($profile->framework === AccountingFrameworkService::CZ_504) {
                 $carryStep = (new \MyInvoice\Repository\ClosingCarryReadRepository($this->db))->step($supplierId, $periodId, 'close_books');
