@@ -204,7 +204,7 @@ final class ClosingService
         // neexistuje finalizované přiznání (běžný stav během uzávěrky). DppoReturnDataProvider
         // se NEinjektuje přímo (jeho produkční binding v Bootstrapu sám závisí na ClosingService
         // — cyklus), proto jen jeho čisté stavební kameny; instance se skládá lokálně bez
-        // ClosingService (closing_projection Feature 1 se přeskočí — tady chceme jen posted stav).
+        // ClosingService (projekci Feature 1 dostává ClosingService sám sebou, viz incomeTaxFromLedger).
         private readonly TaxConstantsRepository $taxConstants,
         // § 99a — posouzení nároku na čtvrtletní zdaňovací období z obratu.
         private readonly \MyInvoice\Service\Report\VatPeriodEntitlementService $vatPeriodEntitlement,
@@ -3505,11 +3505,9 @@ final class ClosingService
      * finalizované přiznání za rok. Sestavuje podklady stejným VH/nedaňové náklady/odpisy/
      * vyřazení jako náhled DPPO ({@see DppoReturnDataProvider::gather}), bez ručních vstupů
      * poplatníka (dary, ztráta, slevy §35 — ty zná jen rozpracované přiznání, ne uzávěrka) —
-     * proto je výsledek jen orientační odhad, ne závazný základ. DppoReturnDataProvider se
-     * VŽDY konstruuje s $closing = null: Feature 1 (projekce nezaúčtovaných kroků) by tu byla
-     * jednak zbytečná (VH už zahrnuje předchozí posted kroky uzávěrky — FX/dohady/rozlišení
-     * mají vlastní source_type, ne 'closing'), jednak by způsobila cyklus (ClosingService by
-     * si volal sám sebe). Read-only, nic neúčtuje. Chyba v podkladech (chybějící období apod.)
+     * proto je výsledek jen orientační odhad, ne závazný základ. U ostatních firem (500)
+     * počítá se stejnou projekcí nezaúčtovaných kroků uzávěrky jako náhled DPPO (Feature 1)
+     * a vrací projektovanou daň: krok Zásoby jde v jejich pořadí až po dani. Read-only, nic neúčtuje. Chyba v podkladech (chybějící období apod.)
      * dopočet jen tiše přeskočí — nesmí shodit celý náhled kroku.
      */
     /**
@@ -3523,16 +3521,33 @@ final class ClosingService
     private function incomeTaxFromLedger(int $supplierId, int $fiscalYear): array
     {
         try {
-            $provider = new DppoReturnDataProvider($this->db, $this->periods, $this->nonDeductibleCosts, null,
-                nonprofit: $this->nonprofitDppo);
-            $data = $provider->gather($supplierId, $fiscalYear);
+            // Ostatní firmy (500): stejná projekce uzávěrky jako náhled DPPO přiznání. Krok
+            // Zásoby jde v pořadí 500 až po dani, takže bez projekce by návrh vynechal dopad
+            // nezaúčtovaných zásob a průvodce by ukázal jinou daň než náhled přiznání. Projekce
+            // čte jen náhledy kroků, daň z příjmů nepočítá, cyklus tedy nevzniká. Ruční vstupy
+            // rozpracovaného přiznání (ztráta, dary, slevy) se berou také, aby čísla seděla.
+            $period = $this->periods->findByYear($supplierId, $fiscalYear);
+            $is504 = $period !== null
+                && $this->roleProfile($supplierId, (string) $period['ends_on'])->framework === AccountingFrameworkService::CZ_504;
+            $provider = $is504
+                ? new DppoReturnDataProvider($this->db, $this->periods, $this->nonDeductibleCosts, null,
+                    nonprofit: $this->nonprofitDppo)
+                : new DppoReturnDataProvider($this->db, $this->periods, $this->nonDeductibleCosts, $this,
+                    depreciationPreview: $this->depreciation, nonprofit: $this->nonprofitDppo);
+            $draft = $is504 ? null : $this->taxReturns->find($supplierId, $fiscalYear, 'po');
+            $inputs = $draft !== null && ($draft['status'] ?? null) === 'draft' ? (array) ($draft['inputs'] ?? []) : [];
+            $data = $provider->gather($supplierId, $fiscalYear, $inputs);
             if ($data['period'] === null) {
                 return ['amount' => null, 'source' => null, 'reason' => null];
             }
             $constants = $this->taxConstants->forYear($fiscalYear);
-            $result = $this->dppoCalc->compute($data, [], $constants);
+            $result = $this->dppoCalc->compute($data, $inputs, $constants);
+            $projection = $result['projection'] ?? null;
+            $tax = !isset($data['nonprofit']) && is_array($projection) && ($projection['is_projection'] ?? false) === true
+                ? (float) ($projection['projected_tax'] ?? 0)
+                : (float) ($result['tax'] ?? 0);
             return [
-                'amount' => round((float) ($result['tax'] ?? 0), 2),
+                'amount' => round($tax, 2),
                 'source' => isset($data['nonprofit']) ? 'computed_from_assessment' : 'computed_from_ledger',
                 'reason' => null,
             ];
