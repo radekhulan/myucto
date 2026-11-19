@@ -233,6 +233,7 @@ Pravidla (perioda resetu, zděděná šablona) jsou v
 | Zkouška selhala jen na rozdílech k přijetí | Doklad se nepřevedl, nebo výsledek nesedí na POHODU | Zaškrtněte **Převést i přes rozdíly**, nebo opravte a zopakujte |
 | Doklad je koncept | Nejistá daňová povaha | Opravte klasifikaci DPH a potvrďte |
 | Faktura uhrazená v nevybraném roce zůstala neuhrazená | Pozdější rok jste nevybrali | Převeďte pozdější rok opakovaným převodem ([§ 107.9.7](#10797-opakovany-prevod)) |
+| Převod kopie MDB odmítl doklad kvůli sazbám DPH | Doklad má DPH ze sazeb před 1. 5. 2004, částku v druhé snížené sazbě před rokem 2015, nebo zaškrtnuté historické sazby; číslo dokladu je v hlášení | Opravte doklad v POHODĚ, nebo převeďte agendu XML exportem POHODY (cesta 1). Starší neuhrazené doklady převedené do nového roku jinak převod přijme se sazbami platnými k datu plnění |
 | Přeskočený doklad s neznámým typem | Neznámý typ faktury, banky, pokladny nebo zdroj úhrady | Doklad doplňte ručně, číslo a důvod uvádí protokol |
 | Karta majetku je koncept | Neznámý typ majetku nebo odpisu, jiná vstupní cena, chybí plán nebo účet | Zkontrolujte kartu podle důvodu v protokolu |
 | Nástroj hlásí, že datový soubor je chráněný heslem databáze | MDB má heslo databáze | Spusťte nástroj znovu a heslo zadejte, když se zeptá, nebo parametrem `-Heslo` |

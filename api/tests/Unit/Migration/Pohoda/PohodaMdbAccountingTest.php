@@ -405,11 +405,51 @@ final class PohodaMdbAccountingTest extends TestCase
         $this->mapper(['sKonfig' => [['ICO' => '12345678', 'Rok' => '2025']]]);
     }
 
-    public function testUnsupportedHistoricalDateIsRejectedBeforeImport(): void
+    public function testDocumentCarriedOverFromOldYearTakesRatesValidOnItsTaxDate(): void
+    {
+        // POHODA převádí do nového roku i neuhrazené doklady s původním datem.
+        $mapper = $this->mapper([
+            'FA' => [['ID' => '1', 'Cislo' => 'TEST-OLD', 'RelTpFak' => '1', 'Datum' => '2012-12-31', 'DatZdPln' => '2012-12-31',
+                'Kc1' => '100', 'KcDPH1' => '14', 'Kc2' => '200', 'KcDPH2' => '40']],
+            'FApol' => [['ID' => '1', 'RefAg' => '1', 'RelSzDPH' => '2', 'Kc' => '200', 'KcDPH' => '40', 'KcJedn' => '200', 'Mnozstvi' => '1']],
+        ]);
+        $invoice = iterator_to_array($mapper->records('issued'))[0];
+        $summary = $invoice['invoiceSummary']['homeCurrency'];
+        self::assertSame('14', $summary['priceLowVAT']['@rate']);
+        self::assertSame('20', $summary['priceHighVAT']['@rate']);
+        self::assertSame('20', $invoice['invoiceDetail']['invoiceItem'][0]['rateVAT']['@value']);
+    }
+
+    public function testAccessEmptyTaxDateFallsBackToDocumentDate(): void
+    {
+        $mapper = $this->mapper([
+            'FA' => [['ID' => '1', 'Cislo' => 'TEST-F1', 'RelTpFak' => '1', 'Datum' => '2026-03-01', 'DatZdPln' => '1899-12-30', 'Kc1' => '100', 'KcDPH1' => '12']],
+        ]);
+        $invoice = iterator_to_array($mapper->records('issued'))[0];
+        self::assertSame('12', $invoice['invoiceSummary']['homeCurrency']['priceLowVAT']['@rate']);
+        self::assertSame('', $invoice['invoiceHeader']['dateTax']);
+    }
+
+    public function testOldDocumentWithoutVatIsAccepted(): void
+    {
+        $mapper = $this->mapper([
+            'FA' => [['ID' => '1', 'Cislo' => 'TEST-OLD', 'RelTpFak' => '1', 'Datum' => '2003-12-31', 'Kc0' => '100']],
+        ]);
+        self::assertCount(1, iterator_to_array($mapper->records('issued')));
+    }
+
+    public function testVatBeforeMay2004IsRejectedWithDocumentNumber(): void
     {
         $this->expectException(PohodaException::class);
-        $this->expectExceptionMessage('staršími sazbami');
-        $this->mapper(['FA' => [['ID' => '1', 'Cislo' => 'TEST-OLD', 'RelTpFak' => '1', 'Datum' => '2012-12-31', 'Kc2' => '100']]]);
+        $this->expectExceptionMessage('Doklad TEST-OLD (31. 12. 2003) má DPH ze sazeb platných před 1. 5. 2004');
+        $this->mapper(['FA' => [['ID' => '1', 'Cislo' => 'TEST-OLD', 'RelTpFak' => '1', 'Datum' => '2003-12-31', 'Kc2' => '100', 'KcDPH2' => '22']]]);
+    }
+
+    public function testSecondReducedRateBefore2015IsRejected(): void
+    {
+        $this->expectException(PohodaException::class);
+        $this->expectExceptionMessage('Doklad TEST-OLD (30. 6. 2014) má částku v druhé snížené sazbě');
+        $this->mapper(['FA' => [['ID' => '1', 'Cislo' => 'TEST-OLD', 'RelTpFak' => '1', 'Datum' => '2014-06-30', 'Kc3' => '100', 'KcDPH3' => '10']]]);
     }
 
     private function mapper(array $data): PohodaMdbAccounting

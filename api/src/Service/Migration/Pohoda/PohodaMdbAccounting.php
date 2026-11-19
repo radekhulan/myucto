@@ -140,9 +140,9 @@ final class PohodaMdbAccounting
         if ($table === 'pUD') {
             return;
         }
-        self::lowRate($r);
+        self::assertRatesKnown($r);
         if (in_array(strtolower($r['HistSzDPH'] ?? ''), ['true', '1', '-1'], true)) {
-            throw new PohodaException('mdb_historical_vat', 'Doklad s historickými sazbami vyžaduje standardní XML export.');
+            throw new PohodaException('mdb_historical_vat', 'Doklad ' . self::label($r) . ' má zaškrtnuté historické sazby DPH, které MDB export nenese. Použijte standardní XML export.');
         }
         if ($table === 'FA' && (($r['Cislo'] ?? '') !== '' || ($r['Datum'] ?? '') !== '') && !isset(self::INVOICES[(int) ($r['RelTpFak'] ?? 0)])) {
             throw new PohodaException('mdb_invoice_type', 'Nepodporovaný typ faktury ' . ($r['RelTpFak'] ?? '0') . '.');
@@ -320,7 +320,7 @@ final class PohodaMdbAccounting
     private function document(array $r, string $prefix, string $itemsTable): array
     {
         if (in_array(strtolower($r['HistSzDPH'] ?? ''), ['true', '1', '-1'], true)) {
-            throw new PohodaException('mdb_historical_vat', 'Doklad s historickými sazbami vyžaduje standardní XML export.');
+            throw new PohodaException('mdb_historical_vat', 'Doklad ' . self::label($r) . ' má zaškrtnuté historické sazby DPH, které MDB export nenese. Použijte standardní XML export.');
         }
         $payment = $this->lookup('sFormUh', $r['RelForUh'] ?? '');
         $h = [
@@ -453,7 +453,8 @@ final class PohodaMdbAccounting
     private function summary(array $r): array
     {
         $out = ['priceNone' => $r['Kc0'] ?? '0', 'round' => ['priceRound' => $r['KcZaokr'] ?? '0']];
-        foreach ([1 => ['Low', $this->lowRate($r)], 2 => ['High', 21], 3 => ['3', 10]] as $slot => [$name, $rate]) {
+        $rates = self::rates($r);
+        foreach ([1 => ['Low', $rates[1]], 2 => ['High', $rates[2]], 3 => ['3', $rates[3]]] as $slot => [$name, $rate]) {
             $out['price' . $name] = $r['Kc' . $slot] ?? '0';
             $out['price' . $name . 'VAT'] = ['#' => $r['KcDPH' . $slot] ?? '0', '@rate' => (string) $rate];
             $out['price' . $name . 'Sum'] = (string) ((float) ($r['Kc' . $slot] ?? 0) + (float) ($r['KcDPH' . $slot] ?? 0));
@@ -464,7 +465,8 @@ final class PohodaMdbAccounting
     private function item(array $r, array $header): array
     {
         $slot = (int) ($r['RelSzDPH'] ?? 0);
-        $rate = $r['ProcentoDPH'] ?? ([0 => '0', 1 => (string) $this->lowRate($header), 2 => '21', 3 => '10'][$slot] ?? null);
+        $rates = self::rates($header);
+        $rate = $r['ProcentoDPH'] ?? ([0 => '0', 1 => (string) $rates[1], 2 => (string) $rates[2], 3 => (string) $rates[3]][$slot] ?? null);
         if ($rate === null) {
             throw new PohodaException('mdb_item_vat', 'Sazbu položky z MDB nelze bezpečně určit. Použijte standardní XML export.');
         }
@@ -595,7 +597,9 @@ final class PohodaMdbAccounting
 
     private function date(array $r, string $key): string
     {
-        return substr($r[$key] ?? '', 0, 10);
+        $date = substr($r[$key] ?? '', 0, 10);
+        // Prázdné datum Accessu (30. 12. 1899) není datum dokladu.
+        return $date !== '' && $date <= '1900-12-31' ? '' : $date;
     }
 
     private static function direction(string $type): string
@@ -603,13 +607,75 @@ final class PohodaMdbAccounting
         return match ($type) { '1' => 'receipt', '2' => 'expense', default => throw new PohodaException('mdb_direction', 'Neznámý směr dokladu ' . $type . ' v MDB exportu.') };
     }
 
-    private static function lowRate(array $r): int
+    /**
+     * Sazby DPH slotů dokladu (1 snížená, 2 základní, 3 druhá snížená) podle data
+     * zdanitelného plnění, jinak data dokladu. MDB export sazbu u hlavičky nenese, jen
+     * slot; POHODA přitom převádí do nového roku i neuhrazené doklady s původním datem,
+     * takže v záloze roku 2026 může být faktura z roku 2012 se sazbami 14 a 20 %.
+     * Slot 3 před rokem 2015 neexistoval; doklad s částkou v něm odmítne
+     * {@see assertRatesKnown()}.
+     *
+     * @param array<string,string> $r
+     * @return array{1:int,2:int,3:int}
+     */
+    private static function rates(array $r): array
     {
-        $date = ($r['DatZdPln'] ?? '') ?: ($r['Datum'] ?? '');
-        if ($date !== '' && substr($date, 0, 4) < '2013') {
-            throw new PohodaException('mdb_historical_vat', 'Doklad se staršími sazbami vyžaduje standardní XML export.');
+        $date = self::taxDate($r);
+        return match (true) {
+            $date === '' || $date >= '2024-01-01' => [1 => 12, 2 => 21, 3 => 10],
+            $date >= '2013-01-01' => [1 => 15, 2 => 21, 3 => 10],
+            $date >= '2012-01-01' => [1 => 14, 2 => 20, 3 => 10],
+            $date >= '2010-01-01' => [1 => 10, 2 => 20, 3 => 10],
+            $date >= '2008-01-01' => [1 => 9, 2 => 19, 3 => 10],
+            default => [1 => 5, 2 => 19, 3 => 10],
+        };
+    }
+
+    /**
+     * Odmítne doklad, jehož sazby z data nejde bezpečně určit: částky DPH před 1. 5. 2004
+     * (sazby 5 a 22 % číselník nezná) a částka ve slotu druhé snížené sazby před rokem
+     * 2015. Doklad bez DPH (nebo s prázdným datem) projde, sazba se u něj neuplatní.
+     *
+     * @param array<string,string> $r
+     */
+    private static function assertRatesKnown(array $r): void
+    {
+        $date = self::taxDate($r);
+        if ($date === '' || $date >= '2015-01-01') {
+            return;
         }
-        return $date !== '' && substr($date, 0, 4) < '2024' ? 15 : 12;
+        $nonZero = static fn (string ...$keys): bool => array_filter($keys, static fn (string $k): bool => (float) ($r[$k] ?? 0) != 0.0) !== [];
+        if ($date < '2004-05-01' && $nonZero('Kc1', 'Kc2', 'Kc3', 'KcDPH1', 'KcDPH2', 'KcDPH3')) {
+            throw new PohodaException('mdb_historical_vat', 'Doklad ' . self::label($r) . ' má DPH ze sazeb platných před 1. 5. 2004, které převod nezná. Použijte standardní XML export.');
+        }
+        if ($nonZero('Kc3', 'KcDPH3')) {
+            throw new PohodaException('mdb_historical_vat', 'Doklad ' . self::label($r) . ' má částku v druhé snížené sazbě DPH, která před rokem 2015 neexistovala. Opravte doklad v POHODĚ, nebo použijte standardní XML export.');
+        }
+    }
+
+    /**
+     * Datum zdanitelného plnění, jinak datum dokladu. Access ukládá prázdné datum jako
+     * 30. 12. 1899, takové datum se bere jako nevyplněné.
+     *
+     * @param array<string,string> $r
+     */
+    private static function taxDate(array $r): string
+    {
+        foreach (['DatZdPln', 'Datum'] as $key) {
+            $date = substr($r[$key] ?? '', 0, 10);
+            if ($date !== '' && $date > '1900-12-31') {
+                return $date;
+            }
+        }
+        return '';
+    }
+
+    /** @param array<string,string> $r */
+    private static function label(array $r): string
+    {
+        $date = self::taxDate($r);
+        return trim(($r['Cislo'] ?? '') !== '' ? $r['Cislo'] : 'ID ' . ($r['ID'] ?? '?'))
+            . ($date !== '' ? ' (' . (int) substr($date, 8, 2) . '. ' . (int) substr($date, 5, 2) . '. ' . substr($date, 0, 4) . ')' : '');
     }
 
     private function isPlaceholder(array $r): bool
