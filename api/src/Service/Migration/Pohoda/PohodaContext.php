@@ -43,20 +43,21 @@ final class PohodaContext
     public array $costCenters = [];
 
     /**
-     * Řádky deníku se zakázkou POHODY (`CisloZAK`), i u zápisů z dřívějšího převodu
-     * ({@see ChartJournalImporter}): číslo zakázky => seznam [journal_entries.id, line_no].
+     * Řádky deníku s analytickým členěním POHODY (zakázka `CisloZAK`, činnost `RefCin`), i u zápisů
+     * z dřívějšího převodu ({@see ChartJournalImporter}): členění ({@see PohodaSplitDimension::SPLITS})
+     * => kód => seznam [journal_entries.id, line_no].
      *
-     * @var array<string,list<array{0:int,1:int}>>
+     * @var array<string,array<string,list<array{0:int,1:int}>>>
      */
-    public array $contractLines = [];
+    public array $splitLines = [];
 
     /**
-     * Zakázka převedených faktur podle exportu ({@see InvoiceImporter}), i u dokladů z dřívějšího
-     * převodu: typ dokladu (`invoice`, `purchase_invoice`) => id => zakázka hlavičky a položek.
+     * Členění převedených faktur podle exportu ({@see InvoiceImporter}), i u dokladů z dřívějšího
+     * převodu: členění => typ dokladu (`invoice`, `purchase_invoice`) => id => kód hlavičky a položek.
      *
-     * @var array<string,array<int,array{header:string,items:list<string>}>>
+     * @var array<string,array<string,array<int,array{header:string,items:list<string>}>>>
      */
-    public array $documentContracts = [];
+    public array $splitDocuments = [];
 
     /**
      * Dorovnání novější zálohou: datum prvního zápisu zadaného v MyÚčtu. Od něj se účtuje

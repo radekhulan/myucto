@@ -24,6 +24,8 @@ export interface PohodaAgendaCounts {
   partners: number
   /** Zakázky agendy (chybí u přehledu nahraného dřív). */
   contracts?: number
+  /** Činnosti agendy (chybí u přehledu nahraného dřív). */
+  activities?: number
 }
 
 export interface PohodaAgendaFile {

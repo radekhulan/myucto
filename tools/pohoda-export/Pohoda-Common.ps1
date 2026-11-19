@@ -14,23 +14,25 @@ $PohodaDocumentColumns = @(
     'PSC', 'ICO', 'DIC', 'RefZeme', 'Ucet', 'KodBanky', 'RelForUh',
     'KcLikv', 'DatLikv', 'Pozn', 'RefCM', 'CmKurs', 'CmMnoz', 'CmCelkem',
     'Kc0', 'KcZaokr', 'Kc1', 'KcDPH1', 'Kc2', 'KcDPH2', 'Kc3', 'KcDPH3',
-    'KcCelkem', 'RelStorn', 'TpStorn', 'TpUD', 'RelDruhUD', 'HistSzDPH', 'CisloZAK'
+    'KcCelkem', 'RelStorn', 'TpStorn', 'TpUD', 'RelDruhUD', 'HistSzDPH', 'CisloZAK', 'RefCin'
 )
 
 $PohodaItemColumns = @(
     'ID', 'RefAg', 'RelAgID', 'RefPol', 'SText', 'Mnozstvi', 'MJ', 'RelSzDPH',
-    'ProcentoDPH', 'KcJedn', 'Kc', 'KcDPH', 'RelTpDPH', 'OrderFld', 'CisloZAK'
+    'ProcentoDPH', 'KcJedn', 'Kc', 'KcDPH', 'RelTpDPH', 'OrderFld', 'CisloZAK', 'RefCin'
 )
 
-# Zakázku (CisloZAK, číslo ze sZAK) nese hlavička i položka dokladu a řádek deníku.
+# Zakázku (CisloZAK, číslo ze sZAK) a činnost (RefCin, odkaz na ID v sCIN) nese hlavička
+# i položka dokladu a řádek deníku.
 # Režim OSS vede jen agenda faktur (stát spotřeby, doklady prokazující stát, typ plnění
 # a částky položky v cizí měně). Ostatní tabulky dokladů tyto sloupce nemají; sloupec,
 # který konkrétní verze POHODY nezná, Write-PohodaTable vynechá.
 $PohodaAccountingTables = [ordered]@{
     FA       = $PohodaDocumentColumns + @('RelTpFak', 'MOSS', 'MOSSDukaz', 'DatZdPlnMOSS')
     FApol    = $PohodaItemColumns + @('MOSSDruh', 'CmJedn', 'Cm', 'CmDPH')
-    pUD      = @('ID', 'RelUdAg', 'Cislo', 'Datum', 'DatZdPln', 'SText', 'Kc', 'UMD', 'UD', 'RelAgID', 'ParSym', 'ParSym2', 'RefStr', 'RefAD', 'Firma', 'Jmeno', 'ParICO', 'CisloZAK')
+    pUD      = @('ID', 'RelUdAg', 'Cislo', 'Datum', 'DatZdPln', 'SText', 'Kc', 'UMD', 'UD', 'RelAgID', 'ParSym', 'ParSym2', 'RefStr', 'RefAD', 'Firma', 'Jmeno', 'ParICO', 'CisloZAK', 'RefCin')
     sSTR     = @('ID', 'IDS', 'SText')
+    sCIN     = @('ID', 'IDS', 'SText', 'RelTypDP')
     sZAK     = @('ID', 'Cislo', 'SText', 'RefAD', 'Firma', 'ICO', 'PlZahaj', 'PlPredani', 'Zahajeni', 'Predani', 'RefStav')
     pOS      = @('Ucet', 'Nazev')
     pPK      = @('ID', 'IDS', 'SText', 'UMD', 'UD', 'RelPkAg')

@@ -29,7 +29,8 @@ final class SyntheticPohodaExport
         . 'xmlns:vat="http://www.stormware.cz/schema/version_2/classificationVAT.xsd" xmlns:bka="http://www.stormware.cz/schema/version_2/bankAccount.xsd" '
         . 'xmlns:adb="http://www.stormware.cz/schema/version_2/addressbook.xsd" xmlns:lAdb="http://www.stormware.cz/schema/version_2/list_addBook.xsd" '
         . 'xmlns:acu="http://www.stormware.cz/schema/version_2/accountingunit.xsd" xmlns:int="http://www.stormware.cz/schema/version_2/intDoc.xsd" xmlns:vch="http://www.stormware.cz/schema/version_2/voucher.xsd" '
-        . 'xmlns:lCon="http://www.stormware.cz/schema/version_2/list_contract.xsd" xmlns:con="http://www.stormware.cz/schema/version_2/contract.xsd"';
+        . 'xmlns:lCon="http://www.stormware.cz/schema/version_2/list_contract.xsd" xmlns:con="http://www.stormware.cz/schema/version_2/contract.xsd" '
+        . 'xmlns:lAcv="http://www.stormware.cz/schema/version_2/list_activity.xsd" xmlns:acv="http://www.stormware.cz/schema/version_2/activity.xsd"';
 
     /** Karta majetku v tabulkách POHODY (`90_majetek.xml`) a její odpisy v deníku. */
     public const ASSET_NUMBER = '25IM0001';
@@ -560,6 +561,59 @@ final class SyntheticPohodaExport
             '$1<inv:invoiceDetail><inv:invoiceItem><inv:text>Materiál</inv:text><inv:quantity>1.0</inv:quantity><inv:rateVAT value="21">high</inv:rateVAT>'
             . '<inv:homeCurrency><typ:unitPrice>500</typ:unitPrice><typ:price>500</typ:price><typ:priceVAT>105</typ:priceVAT><typ:priceSum>605</typ:priceSum></inv:homeCurrency>'
             . '<inv:contract>' . $tag(self::CONTRACT_OWN) . '</inv:contract></inv:invoiceItem></inv:invoiceDetail>',
+            $received, 1,
+        ));
+    }
+
+    /** Činnost hlavičky vydané faktury 26FV0001 a jejích řádků deníku. */
+    public const ACTIVITY_SALES = 'PRODEJ';
+    /** Činnost položky vydané faktury, hlavičky přijaté faktury 26PF0001, jejích řádků a poplatku banky BAN0010003. */
+    public const ACTIVITY_SERVICE = 'SERVIS';
+    /** Činnost, kterou žádný doklad nepoužívá. */
+    public const ACTIVITY_UNUSED = 'REZIE';
+
+    /**
+     * Agenda Činnosti (`34_cinnosti.xml`) a činnost na dokladech a v deníku (`typ:activity`):
+     * {@see ACTIVITY_SALES} na hlavičce vydané faktury a jejích řádcích deníku (její jediná
+     * položka nese {@see ACTIVITY_SERVICE}), {@see ACTIVITY_SERVICE} na hlavičce přijaté faktury,
+     * jejích řádcích deníku a na řádku poplatku banky, {@see ACTIVITY_UNUSED} jen v číselníku.
+     * Jde kombinovat se zakázkami ({@see withContracts()}).
+     */
+    public static function withActivities(string $dir): void
+    {
+        $activity = static fn (int $id, string $code, string $name): string =>
+            '<lAcv:activity version="2.0"><acv:activityHeader><acv:id>' . $id . '</acv:id><acv:code>' . $code . '</acv:code>'
+            . '<acv:name>' . $name . '</acv:name></acv:activityHeader></lAcv:activity>';
+        self::file($dir . '/34_cinnosti.xml', '<lAcv:listActivity version="2.0" state="ok">'
+            . $activity(1, self::ACTIVITY_SALES, 'Prodej služeb')
+            . $activity(2, self::ACTIVITY_SERVICE, 'Servis a údržba')
+            . $activity(3, self::ACTIVITY_UNUSED, 'Správní režie')
+            . '</lAcv:listActivity>');
+        $tag = static fn (string $code): string => '<typ:ids>' . $code . '</typ:ids>';
+        $journal = (string) file_get_contents($dir . '/01_ucetni_denik.xml');
+        foreach (['26FV0001' => self::ACTIVITY_SALES, '26PF0001' => self::ACTIVITY_SERVICE, 'BAN0010003' => self::ACTIVITY_SERVICE] as $number => $code) {
+            $journal = str_replace(
+                '<act:number><typ:numberRequested>' . $number . '</typ:numberRequested></act:number>',
+                '<act:number><typ:numberRequested>' . $number . '</typ:numberRequested></act:number><act:activity>' . $tag($code) . '</act:activity>',
+                $journal,
+            );
+        }
+        file_put_contents($dir . '/01_ucetni_denik.xml', $journal);
+        $issued = (string) file_get_contents($dir . '/12_faktury_issuedInvoice.xml');
+        $issued = (string) preg_replace(
+            '~(<typ:numberRequested>26FV0001</typ:numberRequested>.*?)</inv:invoiceHeader>~s',
+            '$1<inv:activity>' . $tag(self::ACTIVITY_SALES) . '</inv:activity></inv:invoiceHeader>',
+            $issued, 1,
+        );
+        file_put_contents($dir . '/12_faktury_issuedInvoice.xml', preg_replace(
+            '~(<typ:numberRequested>26FV0001</typ:numberRequested>.*?)</inv:invoiceItem>~s',
+            '$1<inv:activity>' . $tag(self::ACTIVITY_SERVICE) . '</inv:activity></inv:invoiceItem>',
+            $issued, 1,
+        ));
+        $received = (string) file_get_contents($dir . '/20_faktury_receivedInvoice.xml');
+        file_put_contents($dir . '/20_faktury_receivedInvoice.xml', preg_replace(
+            '~(<typ:numberRequested>26PF0001</typ:numberRequested>.*?)</inv:invoiceHeader>~s',
+            '$1<inv:activity>' . $tag(self::ACTIVITY_SERVICE) . '</inv:activity></inv:invoiceHeader>',
             $received, 1,
         ));
     }

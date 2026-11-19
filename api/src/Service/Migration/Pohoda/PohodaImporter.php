@@ -26,7 +26,7 @@ use PDO;
  *
  * Pořadí: osnova → období a deník → režim účetní jednotky → adresář a předkontace →
  * přijaté a vydané doklady → pokladna a banka → vazby dokladů na deník a úhrady →
- * zakázky → majetek → sklad → koeficient krácení odpočtu (§ 76) → rekonciliace. Automatika účtování je po celou dobu vypnutá ({@see AccountingUnitSwitch}).
+ * zakázky a činnosti → majetek → sklad → koeficient krácení odpočtu (§ 76) → rekonciliace. Automatika účtování je po celou dobu vypnutá ({@see AccountingUnitSwitch}).
  *
  * **Zkouška nanečisto** běží stejným kódem v jedné transakci, která se na konci vrátí.
  * **Ostrý převod** zapisuje po krocích, každý krok je idempotentní ({@see PohodaImportRepository}):
@@ -64,6 +64,7 @@ final class PohodaImporter
         private readonly UnbookedBankProposals $proposals,
         private readonly PayrollModuleAccess $payrollAccess,
         private readonly ContractImporter $contracts,
+        private readonly ActivityImporter $activities,
     ) {}
 
     /** @return list<string> */
@@ -84,6 +85,7 @@ final class PohodaImporter
             DocumentLinker::STEP_LINK,
             DocumentLinker::STEP_PAYMENTS,
             ContractImporter::STEP,
+            ActivityImporter::STEP,
             AssetImporter::STEP,
             SmallAssetImporter::STEP,
             StockImporter::STEP,
@@ -266,7 +268,7 @@ final class PohodaImporter
         $lines = $stmt->rowCount() + $ctx->nonprofitLines;
         if ($lines > 0) {
             $ctx->protocol->warn(PohodaReconciler::STEP, 'nonprofit_activity_default', sprintf(
-                '%d řádkům nákladů a výnosů převod nastavil hlavní činnost, činnost z POHODY nepřebírá. Účetní přeřadí hospodářskou činnost podle skutečnosti, ovlivňuje to výkazy i daň z příjmů.',
+                '%d řádkům nákladů a výnosů převod nastavil hlavní činnost, hlavní a hospodářskou činnost z POHODY neodvozuje (činnosti POHODY převádí do samostatné dimenze Činnost POHODY). Účetní přeřadí hospodářskou činnost podle skutečnosti, ovlivňuje to výkazy i daň z příjmů.',
                 $lines,
             ), ['lines' => $lines]);
         }
@@ -493,6 +495,7 @@ final class PohodaImporter
                 }
             },
             ContractImporter::STEP => fn () => $this->contracts->run($ctx),
+            ActivityImporter::STEP => fn () => $this->activities->run($ctx),
             AssetImporter::STEP => fn () => $this->assets->import($ctx),
             SmallAssetImporter::STEP => fn () => $this->smallAssets->import($ctx),
             StockImporter::STEP => fn () => $this->stock->import($ctx),

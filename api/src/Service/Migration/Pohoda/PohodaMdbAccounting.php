@@ -57,6 +57,7 @@ final class PohodaMdbAccounting
         'cash' => 'HO',
         'internal' => 'pINT',
         'contracts' => 'sZAK',
+        'activities' => 'sCIN',
     ];
 
     /** Tabulky, jejichž řádky se kontrolují při otevření, v pořadí hlášení chyb. */
@@ -258,6 +259,7 @@ final class PohodaMdbAccounting
                 'accounting' => ['credit' => $r['UMD'] ?? '', 'debit' => $r['UD'] ?? ''],
                 'centre' => $this->centre($r['RefStr'] ?? ''),
                 'contract' => self::contract($r),
+                'activity' => $this->activity($r['RefCin'] ?? ''),
                 // Partner řádku v tvaru `act:address` z XML. Vazbu na adresář XML nenese, starší
                 // převodník tyto sloupce neexportoval.
                 'address' => ['company' => $r['Firma'] ?? '', 'name' => $r['Jmeno'] ?? '', 'ico' => $r['ParICO'] ?? ''],
@@ -283,6 +285,12 @@ final class PohodaMdbAccounting
                 'dateStart' => $this->date($r, 'Zahajeni'),
                 'dateDelivery' => $this->date($r, 'Predani'),
             ]];
+        } elseif ($key === 'activities') {
+            if (trim($r['IDS'] ?? '') === '') {
+                return null;
+            }
+            // Činnost ve tvaru `acv:activityHeader` z XML (agenda Činnosti).
+            return ['activityHeader' => ['id' => $r['ID'] ?? '', 'code' => trim($r['IDS']), 'name' => $r['SText'] ?? '']];
         } elseif ($key === 'chart') {
             return ['@code' => $r['Ucet'] ?? '', '@name' => $r['Nazev'] ?? ''];
         } elseif ($key === 'posting_rules') {
@@ -366,6 +374,7 @@ final class PohodaMdbAccounting
             'liquidation' => ['amountHome' => $r['KcLikv'] ?? '0', 'date' => $this->date($r, 'DatLikv')],
             'note' => $r['Pozn'] ?? '',
             'contract' => self::contract($r),
+            'activity' => $this->activity($r['RefCin'] ?? ''),
         ];
         // Režim OSS dokladu (FA.MOSS = stát spotřeby, FA.MOSSDukaz = doklady prokazující
         // stát) ve stejných elementech jako XML POHODY. Prázdné se vynechává stejně jako
@@ -501,6 +510,7 @@ final class PohodaMdbAccounting
             'homeCurrency' => ['unitPrice' => $r['KcJedn'] ?? '0', 'price' => $r['Kc'] ?? '0', 'priceVAT' => $r['KcDPH'] ?? '0', 'priceSum' => (string) ((float) ($r['Kc'] ?? 0) + (float) ($r['KcDPH'] ?? 0))],
             'classificationVAT' => $this->reference('sDPH', $r['RelTpDPH'] ?? ''),
             'contract' => self::contract($r),
+            'activity' => $this->activity($r['RefCin'] ?? ''),
         ];
         // Stejné elementy jako XML POHODY, ať převod z obou zdrojů skončí v téže logice:
         // skutečné procento sazby, typ plnění OSS a částky položky v cizí měně dokladu.
@@ -547,6 +557,23 @@ final class PohodaMdbAccounting
         }
         $r = $this->lookup('sSTR', $id);
         return ['ids' => $r['IDS'] ?? '', 'name' => $r['SText'] ?? ''];
+    }
+
+    /**
+     * Činnost řádku deníku, dokladu nebo položky (`RefCin` do `sCIN`) jako `typ:activity` z XML.
+     * Starší převodník činnost ani číselník neexportoval; odkaz na činnost, kterou číselník
+     * nemá, se čte jako bez činnosti.
+     *
+     * @return array{ids?:string,name?:string}
+     */
+    private function activity(string $id): array
+    {
+        if ($id === '' || $id === '0' || !$this->tables->has('sCIN')) {
+            return [];
+        }
+        $r = $this->lookup('sCIN', $id);
+        $code = trim($r['IDS'] ?? '');
+        return $code === '' ? [] : ['ids' => $code, 'name' => $r['SText'] ?? ''];
     }
 
     /**

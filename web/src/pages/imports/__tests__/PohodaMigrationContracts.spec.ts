@@ -27,7 +27,7 @@ vi.mock('vue-i18n', () => ({ useI18n: () => ({
   te: () => false, tm: () => [], rt: (value: string) => value,
 }) }))
 
-// Přehled nahraný dřív počet zakázek nenese.
+// Přehled nahraný dřív počet zakázek ani činností nenese.
 const counts = { journal: 10, opening: 1, first_date: '2026-01-01', last_date: '2026-06-30', later_years: [], issued: 1, purchase: 1, internal: 0, cash: 0, bank: 0, partners: 2 }
 
 function wizard() {
@@ -41,7 +41,7 @@ function wizard() {
       token: 'synthetic', supplier_ico: '12345678', default_year: 2026, preflight: { 2025: [], 2026: [] },
       agendas: [
         { ico: '12345678', company: '', year: 2025, has_accounting: true, files: [], counts, stock: null },
-        { ico: '12345678', company: '', year: 2026, has_accounting: true, files: [], counts: { ...counts, contracts: 4 }, stock: null },
+        { ico: '12345678', company: '', year: 2026, has_accounting: true, files: [], counts: { ...counts, contracts: 4, activities: 22 }, stock: null },
       ],
     }),
     canGoTo: () => true, goTo: vi.fn(), onFile: vi.fn(), doUpload: vi.fn(), resetUpload: vi.fn(), retryUpload: vi.fn(), abandonUpload: vi.fn(),
@@ -60,10 +60,16 @@ async function mountPage() {
   return wrapper
 }
 
-describe('POHODA: zakázky v náhledu exportu', () => {
+describe('POHODA: zakázky a činnosti v náhledu exportu', () => {
   it('ukáže počet zakázek agendy, starší přehled bez počtu pomlčkou', async () => {
     const wrapper = await mountPage()
     expect(wrapper.text()).toContain('pohoda.col_contracts')
     expect(wrapper.findAll('[data-testid="pohoda-contracts-cell"]').map((cell) => cell.text())).toEqual(['—', '4'])
+  })
+
+  it('ukáže počet činností agendy vedle zakázek, starší přehled bez počtu pomlčkou', async () => {
+    const wrapper = await mountPage()
+    expect(wrapper.text()).toContain('pohoda.col_activities')
+    expect(wrapper.findAll('[data-testid="pohoda-activities-cell"]').map((cell) => cell.text())).toEqual(['—', '22'])
   })
 })

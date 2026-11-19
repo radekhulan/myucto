@@ -36222,6 +36222,7 @@
     "col_bank": "Bank",
     "col_partners": "Partners",
     "col_contracts": "Contracts",
+    "col_activities": "Activities",
     "col_payroll": "Payroll",
     "payroll_cell": "{employees} empl. · {months} mo.",
     "payroll_only": "payroll only",
@@ -36335,6 +36336,7 @@
       "link": "Documents linked to the journal",
       "payments": "Invoice payments",
       "contracts": "Contracts",
+      "activities": "Activities",
       "assets": "Fixed assets",
       "small_assets": "Small assets",
       "stock": "Stock",
@@ -36613,7 +36615,14 @@
       "contract_items": "items with a contract",
       "contract_items_skipped": "items without a contract (different item split)",
       "contract_project_documents": "invoices linked to a client project",
-      "contract_project_lines": "journal lines linked to a client project"
+      "contract_project_lines": "journal lines linked to a client project",
+      "activities": "activities in the export",
+      "activity_values_created": "new Activity dimension values",
+      "activity_values_existing": "existing Activity dimension values",
+      "activity_lines": "journal lines with an activity",
+      "activity_documents": "documents with an activity",
+      "activity_items": "items with an activity",
+      "activity_items_skipped": "items without an activity (different item split)"
     },
     "checks": {
       "turnover_balanced": "Debit = credit turnover",

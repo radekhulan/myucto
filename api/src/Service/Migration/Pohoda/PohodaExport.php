@@ -21,6 +21,8 @@ final class PohodaExport
     private ?PohodaMdbAccounting $mdb = null;
     private array $warnings = [];
     private bool $warningsScanned = false;
+    /** Osnova pro neziskové organizace ({@see hasNonprofitChart()}), spočtená při prvním dotazu. */
+    private ?bool $nonprofitChart = null;
 
     public const FILES = [
         'journal' => '01_ucetni_denik.xml',
@@ -49,6 +51,7 @@ final class PohodaExport
         'addressbook' => '30_adresar.xml',
         'bank_accounts' => '31_bankovni_ucty.xml',
         'cash_registers' => '32_pokladny.xml',
+        'activities' => '34_cinnosti.xml',
         'contracts' => '35_zakazky.xml',
         // Tabulky z datového souboru POHODY (XML export je nemá), vytváří je exportní nástroj.
         'assets' => '90_majetek.xml',
@@ -157,15 +160,18 @@ final class PohodaExport
      */
     public function hasNonprofitChart(): bool
     {
+        if ($this->nonprofitChart !== null) {
+            return $this->nonprofitChart;
+        }
         $equity504 = false;
         foreach ($this->records('chart', 'itemAccount') as $r) {
             $code = (string) ($r['@code'] ?? '');
             if (str_starts_with($code, '411')) {
-                return false;
+                return $this->nonprofitChart = false;
             }
             $equity504 = $equity504 || str_starts_with($code, '901') || str_starts_with($code, '931');
         }
-        return $equity504;
+        return $this->nonprofitChart = $equity504;
     }
 
     /**
@@ -450,7 +456,7 @@ final class PohodaExport
                 'company' => $names[$ico . '_' . $year] ?? '',
                 'program' => 'POHODA Mzdy',
                 'exported_at' => null,
-                'counts' => ['journal' => 0, 'opening' => 0, 'first_date' => null, 'last_date' => null, 'issued' => 0, 'purchase' => 0, 'internal' => 0, 'cash' => 0, 'bank' => 0, 'partners' => 0, 'contracts' => 0],
+                'counts' => ['journal' => 0, 'opening' => 0, 'first_date' => null, 'last_date' => null, 'issued' => 0, 'purchase' => 0, 'internal' => 0, 'cash' => 0, 'bank' => 0, 'partners' => 0, 'contracts' => 0, 'activities' => 0],
                 'files' => [['file' => self::FILES['payroll'], 'state' => 'ok', 'note' => '']],
                 'has_accounting' => false,
                 'has_payroll' => true,
@@ -526,10 +532,10 @@ final class PohodaExport
 
     /**
      * Počty záznamů agendy pro náhled: řádky deníku (z toho počáteční stavy), rozsah dat,
-     * vydané a přijaté doklady, interní doklady, pokladna, banka, adresář a zakázky. `later_years` =
+     * vydané a přijaté doklady, interní doklady, pokladna, banka, adresář, zakázky a činnosti. `later_years` =
      * roky po roce agendy, do kterých padají zápisy deníku ({@see PohodaJournal::laterYear()}).
      *
-     * @return array{journal:int,opening:int,first_date:?string,last_date:?string,later_years:list<int>,issued:int,purchase:int,internal:int,cash:int,bank:int,partners:int,contracts:int}
+     * @return array{journal:int,opening:int,first_date:?string,last_date:?string,later_years:list<int>,issued:int,purchase:int,internal:int,cash:int,bank:int,partners:int,contracts:int,activities:int}
      */
     public function counts(): array
     {
@@ -546,6 +552,7 @@ final class PohodaExport
             'bank' => [['bank'], 'bank'],
             'partners' => [['addressbook'], 'addressbook'],
             'contracts' => [['contracts'], 'contract'],
+            'activities' => [['activities'], 'activity'],
         ];
         // Z MDB převodu se deník i všechny počítané agendy čtou jedním průchodem souborem.
         $tally = [];

@@ -318,7 +318,7 @@ final class ChartJournalImporter
         }
         $ctx->report(self::STEP_JOURNAL, $total, $total);
         $this->storePairingSymbols($ctx, $groups);
-        $this->collectContracts($ctx, $groups);
+        $this->collectSplits($ctx, $groups);
 
         $stats['debit'] = round($stats['debit'], 2);
         $stats['credit'] = round($stats['credit'], 2);
@@ -367,13 +367,13 @@ final class ChartJournalImporter
     }
 
     /**
-     * Zakázky řádků deníku pro {@see ContractImporter}, i u zápisů z dřívějšího převodu:
-     * export s novým převodníkem tak zakázku doplní i firmě převedené bez ní. Čísluje řádky
+     * Zakázky a činnosti řádků deníku pro {@see PohodaSplitDimension}, i u zápisů z dřívějšího
+     * převodu: export s novým převodníkem je tak doplní i firmě převedené bez nich. Čísluje řádky
      * stejně jako zápis a {@see storePairingSymbols()}, zápis se tím nemění.
      *
      * @param array<string,list<array<string,mixed>>> $groups
      */
-    private function collectContracts(PohodaContext $ctx, array $groups): void
+    private function collectSplits(PohodaContext $ctx, array $groups): void
     {
         $entries = null;
         $year = $ctx->year();
@@ -384,17 +384,19 @@ final class ChartJournalImporter
                     continue;
                 }
                 $lineNo += 2;
-                $code = mb_substr(PohodaXml::text($item, 'contract/ids'), 0, 50);
-                if ($code === '') {
-                    continue;
+                foreach (PohodaSplitDimension::SPLITS as $split) {
+                    $code = PohodaSplitDimension::code($item, $split);
+                    if ($code === '') {
+                        continue;
+                    }
+                    $entries ??= $this->map->all($ctx->supplierId, PohodaImportRepository::KIND_JOURNAL_ENTRY);
+                    $entryId = $entries[$year . '|' . $groupKey] ?? $entries[($year - 1) . '|' . $groupKey] ?? null;
+                    if ($entryId === null) {
+                        continue 2;
+                    }
+                    $ctx->splitLines[$split][$code][] = [(int) $entryId, $lineNo - 1];
+                    $ctx->splitLines[$split][$code][] = [(int) $entryId, $lineNo];
                 }
-                $entries ??= $this->map->all($ctx->supplierId, PohodaImportRepository::KIND_JOURNAL_ENTRY);
-                $entryId = $entries[$year . '|' . $groupKey] ?? $entries[($year - 1) . '|' . $groupKey] ?? null;
-                if ($entryId === null) {
-                    continue;
-                }
-                $ctx->contractLines[$code][] = [(int) $entryId, $lineNo - 1];
-                $ctx->contractLines[$code][] = [(int) $entryId, $lineNo];
             }
         }
     }

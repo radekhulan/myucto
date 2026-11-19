@@ -37,9 +37,11 @@ samostatný průvodce, viz [Přechod z PAMICA](108_Prechod_z_PAMICA.md).
 
 Agendu neziskové organizace (osnova podle vyhlášky 504/2002 Sb. s účty skupiny 9)
 převod přijme jen do firmy, která účtuje podle vyhlášky 504; agendu podnikatele
-do takové firmy odmítne. Převod přebírá deník, doklady, střediska (dimenze Středisko)
-a zakázky (dimenze Zakázka) a ověřuje rovnováhu rozvahy. Činnost z POHODY nečte, všem řádkům nákladů a výnosů
-nastaví hlavní činnost, kterou účetní přeřadí. Fondy, dotace ani členské příspěvky
+do takové firmy odmítne. Převod přebírá deník, doklady, střediska (dimenze Středisko),
+činnosti (samostatná dimenze Činnost POHODY) a zakázky (dimenze Zakázka) a ověřuje
+rovnováhu rozvahy. Hlavní a hospodářskou činnost (systémová dimenze Činnost) z činností
+POHODY neodvozuje: všem řádkům nákladů a výnosů nastaví hlavní činnost, kterou účetní
+přeřadí. Fondy, dotace ani členské příspěvky
 zvlášť nepřebírá a výkazy s POHODOU neporovnává, proto je zkontrolujte. Průvodce na to
 upozorní (podrobnosti v kapitole [Přechod z Money S3](106_Prechod_z_Money_S3.md),
 oddíl 106.2).
@@ -509,8 +511,35 @@ Soubory `90_majetek.xml`, `91_mzdy.xml` a `92_sklad.xml` jsou stejné jako u dat
 | drobný majetek (`90_majetek.xml`) | karty evidence drobného majetku navázané na zdrojový doklad |
 | sklady a karty zásob (`92_sklad.xml`) | sklady, skladové karty a počáteční stav každé karty po skladech k datu exportu |
 | ceníky (`92_sklad.xml`) | cenové hladiny s cenou bez DPH u každé karty |
+| střediska na řádcích deníku | střediska firmy a hodnoty dimenze Středisko, viz níže |
+| činnosti a činnost na dokladech a v deníku | hodnoty firemní dimenze Činnost, u neziskové organizace Činnost POHODY, viz níže |
 | zakázky a číslo zakázky na dokladech a v deníku | hodnoty firemní dimenze Zakázka; zakázka u klienta jen u zakázky s vlastním partnerem, viz níže |
 | členění skladu, alternativní jednotky, dodavatel karty (`92_sklad.xml`) | kategorie skladu, balení karty, dodavatel karty s nákupní cenou |
+
+**Středisko, činnost a zakázka.** POHODA vede tři analytická členění a převod každé
+z nich přenese jako dimenzi (`Firma → Dimenze`): středisko jako dimenzi Středisko,
+činnost jako dimenzi Činnost a zakázku jako dimenzi Zakázka. Řádek deníku i doklad
+tak může nést všechna tři členění zároveň a sestavy po dimenzích je ukážou stejně
+jako POHODA. Export bez některého členění tuto dimenzi nezakládá a u firmy dimenze
+nezapíná.
+
+**Střediska.** Středisko řádku deníku z POHODY je hodnota dimenze Středisko
+a zároveň středisko firmy. Hodnotu dostanou řádky deníku podle svého střediska
+a doklad do hlavičky, když mají všechny jeho řádky stejné středisko.
+
+**Činnosti.** Každá činnost z agendy Činnosti je hodnota firemní dimenze Činnost
+s kódem podle zkratky činnosti a názvem podle jejího textu, i když ji žádný doklad
+nepoužívá. Řádky deníku, faktury, jejich položky, pokladní doklady a bankovní pohyby
+dostanou hodnotu podle stejných pravidel jako u zakázek níže. Interní doklad nese
+činnost ve svém zápisu v deníku. Protokol v kroku Činnosti uvede počet činností,
+nových a existujících hodnot dimenze a označených řádků deníku a dokladů.
+
+U neziskové organizace (vyhláška 504) vede MyÚčto systémovou dimenzi Činnost s hlavní
+a hospodářskou činností, podle které se sestavují výkazy a daň z příjmů. Činnosti
+POHODY jsou volný číselník firmy a z exportu nejde bezpečně poznat, která z nich je
+hospodářská. Převod je proto založí jako samostatnou dimenzi Činnost POHODY
+a systémovou dimenzi podle nich nemění. Hlavní nebo hospodářskou činnost řádků
+určí účetní, činnost POHODY mu k tomu zůstává na řádcích deníku i dokladech.
 
 **Zakázky.** Každá zakázka z agendy Zakázky je hodnota firemní dimenze Zakázka
 (`Firma → Dimenze`, druh Projekt) s kódem podle čísla zakázky a názvem podle jejího
@@ -535,9 +564,10 @@ uvede počet zakázek, nových a existujících hodnot dimenze, označených ř�
 a dokladů a zakázek založených u klienta, a vyjmenuje zakázky, které zůstaly jen
 dimenzí.
 
-Zakázky nese export z aktuální verze nástroje: převodník MDB a POHODA SQL čte agendu
-Zakázky (`sZAK`) a číslo zakázky dokladů a řádků deníku, XML export agendu
-`35_zakazky.xml` a zakázku na dokladech a v deníku. Starší export zakázky nenese
+Zakázky a činnosti nese export z aktuální verze nástroje: převodník MDB a POHODA SQL
+čte agendy Zakázky (`sZAK`) a Činnosti (`sCIN`), číslo zakázky a činnost dokladů,
+jejich položek a řádků deníku, XML export agendy `35_zakazky.xml` a `34_cinnosti.xml`
+a zakázku a činnost na dokladech a v deníku. Starší export zakázky ani činnosti nenese
 a převod se bez nich chová jako dřív.
 
 **Přeplatky a pohyby bez dokladu.** Bankovní nebo pokladní pohyb, který POHODA
@@ -753,8 +783,8 @@ zůstane k zaúčtování, i když starší pohyb téhož čísla zaúčtovaný 
    `.zip`. Rozbalení a načtení běží na serveru na pozadí, u velkého exportu
    i několik minut; obnovení stránky mezitím průvodce nepřeruší.
 2. **Náhled a volby.** Tabulka ukáže všechny agendy v exportu: IČO, firmu,
-   rok, počty řádků deníku, počátečních stavů, dokladů a partnerů a rozsah
-   zápisů. Převést jde jen agendu s IČO firmy v MyÚčtu. Roky k převodu
+   rok, počty řádků deníku, počátečních stavů, dokladů, partnerů, zakázek
+   a činností a rozsah zápisů. Převést jde jen agendu s IČO firmy v MyÚčtu. Roky k převodu
    zaškrtněte v prvním sloupci tabulky; předvybrané jsou všechny roky agend
    s IČO firmy. Soubory exportu, které POHODA vrátila prázdné nebo které
    v exportu chybí, průvodce vypíše jako informaci.
@@ -952,13 +982,13 @@ POHODY starší než první zápis zadaný v MyÚčtu. Novější záznamy POHOD
 nevznikl dvojí zápis, a protokol uvede datum, od kterého se nepřebírají. Rekonciliace
 tu může hlásit rozdíl, protože deník nese i vlastní zápisy.
 
-**Doplnění zakázek.** Firmu převedenou exportem bez zakázek doplníte novým
-exportem z aktuální verze nástroje a opakovaným převodem téhož roku. Převod založí
-hodnoty dimenze Zakázka a zakázky u klienta a doplní je k už převedeným dokladům
-a řádkům deníku. Nic nezdvojí a hodnotu, kterou jste v MyÚčtu změnili, nepřepíše.
-Zápisy a doklady v uzavřeném období nebo se zmrazenými dimenzemi zůstanou bez
-zakázky a protokol uvede jejich počet; po znovuotevření knih je doplní další
-opakovaný převod.
+**Doplnění zakázek a činností.** Firmu převedenou exportem bez zakázek a činností
+doplníte novým exportem z aktuální verze nástroje a opakovaným převodem téhož roku.
+Převod založí hodnoty dimenzí Zakázka a Činnost a zakázky u klienta a doplní je
+k už převedeným dokladům a řádkům deníku. Nic nezdvojí a hodnotu, kterou jste
+v MyÚčtu změnili, nepřepíše. Zápisy a doklady v uzavřeném období nebo se zmrazenými
+dimenzemi zůstanou bez zakázky a činnosti a protokol uvede jejich počet; po
+znovuotevření knih je doplní další opakovaný převod.
 
 Už převedené doklady ani zápisy deníku opakovaný převod nepřepisuje, protože
 mohly být mezitím zaúčtované, spárované nebo upravené v MyÚčtu. Změnila-li se

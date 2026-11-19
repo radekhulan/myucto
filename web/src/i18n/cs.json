@@ -36222,6 +36222,7 @@
     "col_bank": "Banka",
     "col_partners": "Partneři",
     "col_contracts": "Zakázky",
+    "col_activities": "Činnosti",
     "col_payroll": "Mzdy",
     "payroll_cell": "{employees} zam. · {months} měs.",
     "payroll_only": "jen mzdy",
@@ -36335,6 +36336,7 @@
       "link": "Vazby dokladů na deník",
       "payments": "Úhrady faktur",
       "contracts": "Zakázky",
+      "activities": "Činnosti",
       "assets": "Dlouhodobý majetek",
       "small_assets": "Drobný majetek",
       "stock": "Sklad",
@@ -36613,7 +36615,14 @@
       "contract_items": "položky se zakázkou",
       "contract_items_skipped": "položky bez zakázky (jiné členění)",
       "contract_project_documents": "faktury navázané na zakázku u klienta",
-      "contract_project_lines": "řádky deníku navázané na zakázku u klienta"
+      "contract_project_lines": "řádky deníku navázané na zakázku u klienta",
+      "activities": "činnosti v exportu",
+      "activity_values_created": "nové hodnoty dimenze Činnost",
+      "activity_values_existing": "existující hodnoty dimenze Činnost",
+      "activity_lines": "řádky deníku s činností",
+      "activity_documents": "doklady s činností",
+      "activity_items": "položky s činností",
+      "activity_items_skipped": "položky bez činnosti (jiné členění)"
     },
     "checks": {
       "turnover_balanced": "Obraty MD = D",

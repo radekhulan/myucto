@@ -103,6 +103,49 @@ final class PohodaMdbAccountingTest extends TestCase
         self::assertSame([], iterator_to_array($this->mapper([])->records('contracts'), false));
     }
 
+    /**
+     * Činnosti (`sCIN`) ve tvaru `acv:activityHeader` z XML a odkaz na činnost (`RefCin`) na řádku
+     * deníku, hlavičce i položce dokladu jako `typ:activity` se zkratkou a názvem. RefCin 0
+     * i odkaz na činnost, kterou číselník nemá, je bez činnosti; export ze staršího převodníku
+     * (bez `sCIN`) činnost nenese, i když sloupec RefCin má.
+     */
+    public function testActivitiesAndActivityReferencesOfJournalAndDocuments(): void
+    {
+        $mapper = $this->mapper([
+            'sCIN' => [
+                ['ID' => '2', 'IDS' => 'PRODEJ', 'SText' => 'Prodej služeb', 'RelTypDP' => '3'],
+                ['ID' => '4', 'IDS' => 'SERVIS', 'SText' => 'Servis'],
+                ['ID' => '5', 'IDS' => ''],
+            ],
+            'pUD' => [
+                ['ID' => '1', 'RelUdAg' => '2', 'Cislo' => 'F1', 'UMD' => '311000', 'UD' => '602000', 'Kc' => '100', 'RefCin' => '2'],
+                ['ID' => '2', 'RelUdAg' => '2', 'Cislo' => 'F1', 'UMD' => '311000', 'UD' => '343000', 'Kc' => '21', 'RefCin' => '0'],
+                ['ID' => '3', 'RelUdAg' => '2', 'Cislo' => 'F1', 'UMD' => '311000', 'UD' => '343000', 'Kc' => '1', 'RefCin' => '99'],
+            ],
+            'FA' => [['ID' => '5', 'Cislo' => 'F1', 'RelTpFak' => '1', 'Kc2' => '100', 'KcDPH2' => '21', 'RefCin' => '2']],
+            'FApol' => [
+                ['ID' => '51', 'RefAg' => '5', 'SText' => 'Práce', 'RelSzDPH' => '2', 'Kc' => '60', 'KcDPH' => '12.6', 'RefCin' => '4'],
+                ['ID' => '52', 'RefAg' => '5', 'SText' => 'Materiál', 'RelSzDPH' => '2', 'Kc' => '40', 'KcDPH' => '8.4'],
+            ],
+        ]);
+
+        $activities = iterator_to_array($mapper->records('activities'), false);
+        self::assertSame([['PRODEJ', 'Prodej služeb'], ['SERVIS', 'Servis']], array_map(
+            static fn (array $r): array => [PohodaXml::text($r, 'activityHeader/code'), PohodaXml::text($r, 'activityHeader/name')],
+            $activities,
+        ));
+        $journal = iterator_to_array($mapper->records('journal'), false);
+        self::assertSame(['PRODEJ', '', ''], array_map(static fn (array $r): string => PohodaXml::text($r, 'activity/ids'), $journal));
+        self::assertSame('Prodej služeb', PohodaXml::text($journal[0], 'activity/name'));
+        $invoice = iterator_to_array($mapper->records('issued'), false)[0];
+        self::assertSame('PRODEJ', PohodaXml::text($invoice, 'invoiceHeader/activity/ids'));
+        self::assertSame(['SERVIS', ''], array_map(static fn (array $i): string => PohodaXml::text($i, 'activity/ids'), PohodaXml::all($invoice, 'invoiceDetail/invoiceItem')));
+
+        $older = $this->mapper(['pUD' => [['ID' => '1', 'RelUdAg' => '2', 'Cislo' => 'F1', 'UMD' => '311000', 'UD' => '602000', 'Kc' => '100', 'RefCin' => '2']]]);
+        self::assertSame([], iterator_to_array($older->records('activities'), false));
+        self::assertSame('', PohodaXml::text(iterator_to_array($older->records('journal'), false)[0], 'activity/ids'));
+    }
+
     /** Partner řádku deníku v tvaru XML; RefAD 0 znamená bez vazby, starší export sloupce nemá. */
     public function testJournalCarriesPartnerOfTheRow(): void
     {
@@ -404,6 +447,7 @@ final class PohodaMdbAccountingTest extends TestCase
             'pINT' => [['ID' => '1', 'Cislo' => 'TEST-I1', 'Datum' => '2026-02-12']],
             'AD' => [['ID' => '1', 'Firma' => 'Testovací odběratel']],
             'sZAK' => [['ID' => '1', 'Cislo' => 'Z-01', 'SText' => 'Testovací zakázka']],
+            'sCIN' => [['ID' => '1', 'IDS' => 'C-01', 'SText' => 'Testovací činnost'], ['ID' => '2', 'IDS' => 'C-02', 'SText' => 'Druhá činnost']],
         ]);
         $agenda = $this->dir . '/12345678_2026';
         mkdir($agenda);
@@ -418,7 +462,7 @@ final class PohodaMdbAccountingTest extends TestCase
         $counts = $export->counts();
         self::assertSame(
             ['journal' => 2, 'opening' => 1, 'first_date' => '2026-02-03', 'last_date' => '2026-02-03', 'later_years' => [],
-                'issued' => 1, 'purchase' => 2, 'internal' => 1, 'cash' => 1, 'bank' => 1, 'partners' => 1, 'contracts' => 1],
+                'issued' => 1, 'purchase' => 2, 'internal' => 1, 'cash' => 1, 'bank' => 1, 'partners' => 1, 'contracts' => 1, 'activities' => 2],
             $counts,
         );
         // Před opravou: deník + sedm druhů faktur zvlášť + každý číselník a položky zvlášť (přes 20).
