@@ -110,3 +110,9 @@ describe('CheckFindings - ostatní položky', () => {
     expect(wrapper.find('a[data-to]').attributes('data-to')).toBe('{"name":"other-item-detail","params":{"id":42}}')
   })
 })
+
+it('kontrolu, která selhala, popíše přeloženým důvodem místo syrového kódu', () => {
+  const wrapper = mount(CheckFindings, { props: { checkKey: 'vat_clearing_stale', label: 'DPH', value: { reason: 'check_failed' } } })
+  expect(wrapper.text()).toContain('T:checks.field.reason')
+  expect(wrapper.text()).toContain('T:checks.value.check_failed')
+})

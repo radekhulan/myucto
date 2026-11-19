@@ -258,6 +258,7 @@ require __DIR__ . '/../vendor/autoload.php';
     '*/api/src/Repository/AccountingPeriodRepository.php',
     '*/api/src/Service/Accounting/Card/CardClearingRegime.php',
     '*/api/src/Service/Accounting/Vat/VatClearingService.php',
+    '*/api/src/Service/Report/VatCrossCheckService.php',
     '*/api/src/Repository/TaxSubmissionRepository.php',
     '*/api/src/Repository/AccountingSupplierSettingsRepository.php',
     '*/api/src/Service/Validation/XmlSchemaValidator.php',

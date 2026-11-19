@@ -25,6 +25,7 @@ final class PreFinalizeCheckServiceTest extends TestCase
 
     private Connection $db;
     private PreFinalizeCheckService $service;
+    private \Psr\Container\ContainerInterface $container;
     private int $supplierId = 0;
     private int $periodId = 0;
     private bool $inTx = false;
@@ -37,6 +38,7 @@ final class PreFinalizeCheckServiceTest extends TestCase
         }
         try {
             $c = Bootstrap::buildContainer();
+            $this->container = $c;
             $this->db = $c->get(Connection::class);
             $this->service = $c->get(PreFinalizeCheckService::class);
         } catch (\Throwable $e) {
@@ -233,6 +235,35 @@ final class PreFinalizeCheckServiceTest extends TestCase
         $constants['spouse_income_limit'] = $limit;
         $pdo->prepare('INSERT INTO tax_constants (year, data) VALUES (?, ?) ON DUPLICATE KEY UPDATE data = VALUES(data)')
             ->execute([self::YEAR, json_encode($constants, JSON_UNESCAPED_UNICODE)]);
+    }
+
+    /**
+     * Výsledovku se nepodařilo sestavit: kontrola VH nesmí svítit jako splněná ani jako
+     * „netýká se", nese důvod `check_failed`.
+     */
+    public function testVhVsStatementReportsFailureWhenStatementThrows(): void
+    {
+        $this->mkPeriod('closed');
+        $statements = $this->createStub(\MyInvoice\Service\Accounting\Reports\FinancialStatementService::class);
+        $statements->method('incomeStatement')->willThrowException(new \RuntimeException('mapování výkazu chybí'));
+        $service = new PreFinalizeCheckService(
+            $this->db,
+            $this->container->get(\MyInvoice\Repository\AccountingPeriodRepository::class),
+            $statements,
+            $this->container->get(\MyInvoice\Repository\TaxConstantsRepository::class),
+            $this->container->get(\MyInvoice\Service\Tax\Return\UnsupportedCaseDetector::class),
+        );
+        $previous = ini_set('error_log', '/dev/null');
+        try {
+            $byKey = array_column($service->run($this->supplierId, self::YEAR, 'po', [], $this->computation(1000.0))['checks'], null, 'key');
+        } finally {
+            ini_set('error_log', (string) $previous);
+        }
+
+        self::assertFalse($byKey['vh_vs_statement']['ok']);
+        self::assertSame('warning', $byKey['vh_vs_statement']['severity']);
+        self::assertArrayNotHasKey('na', $byKey['vh_vs_statement']);
+        self::assertSame('check_failed', $byKey['vh_vs_statement']['value']['reason']);
     }
 
     private function computation(float $vh): array

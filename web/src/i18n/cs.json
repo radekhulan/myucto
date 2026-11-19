@@ -32573,7 +32573,8 @@
     "filed_import_done_created": "Vstupy přiznání byly převzaty z podaného přiznání.",
     "filed_import_done_replaced": "Vstupy rozpracovaného přiznání byly nahrazeny údaji z podaného přiznání.",
     "filed_import_done_kept": "Rozpracované přiznání už existuje, vstupy se nezměnily.",
-    "filed_import_source": "Vstupy převzaty z podaného přiznání (forma {forma}, {date})."
+    "filed_import_source": "Vstupy převzaty z podaného přiznání (forma {forma}, {date}).",
+    "check_failed": "Kontrolu se nepodařilo provést. Zkuste ji načíst znovu, při opakování kontaktujte podporu."
   },
   "tax": {
     "title": "Daňový optimalizátor",

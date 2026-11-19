@@ -6301,11 +6301,15 @@ final class ClosingService
      */
     private function checkVatClearingFresh(int $supplierId, string $rangeFrom, string $rangeTo): array
     {
+        // Neplátce bez registrace identifikované osoby nemá co zúčtovávat. Firma bez DPH osnovy
+        // vrací ze služby stav „netýká se" sama, výjimku nečeká.
+        if (!$this->vatRegisteredInRange($supplierId, $rangeFrom, $rangeTo)) {
+            return ['key' => 'vat_clearing_stale', 'severity' => 'info', 'ok' => true, 'value' => null];
+        }
         try {
             $stale = $this->vatClearing->staleForRange($supplierId, $rangeFrom, $rangeTo);
-        } catch (\Throwable) {
-            // Firma bez DPH osnovy / neplátce / jednoduché účetnictví — kontrola nedává smysl.
-            return ['key' => 'vat_clearing_stale', 'severity' => 'info', 'ok' => true, 'value' => null];
+        } catch (\Throwable $e) {
+            return $this->failedCheck('vat_clearing_stale', 'warning', $supplierId, $e);
         }
 
         return [
@@ -6314,6 +6318,30 @@ final class ClosingService
             'ok' => $stale === [],
             'value' => ['count' => count($stale), 'items' => $stale],
         ];
+    }
+
+    /** Byla firma v rozsahu plátcem DPH nebo identifikovanou osobou (na začátku nebo na konci)? */
+    private function vatRegisteredInRange(int $supplierId, string $rangeFrom, string $rangeTo): bool
+    {
+        foreach ([$rangeFrom, $rangeTo] as $date) {
+            $flags = \MyInvoice\Service\Vat\VatStatusService::flagsAt($this->db->pdo(), $supplierId, $date);
+            if ($flags['is_vat_payer'] || $flags['is_identified']) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Kontrola, která se nepodařila spočítat. Hlásí se jako nesplněná s běžnou závažností,
+     * ne jako „v pořádku": tichá zelená by schovala, že se nic neověřilo.
+     *
+     * @return array{key:string,severity:string,ok:bool,value:array{reason:string}}
+     */
+    private function failedCheck(string $key, string $severity, int $supplierId, \Throwable $e): array
+    {
+        error_log(sprintf('Kontrola uzávěrky %s (supplier %d) selhala: %s: %s', $key, $supplierId, $e::class, $e->getMessage()));
+        return ['key' => $key, 'severity' => $severity, 'ok' => false, 'value' => ['reason' => 'check_failed']];
     }
 
     private function checkAccount343VsReturn(int $supplierId, string $rangeFrom, string $rangeTo): array
@@ -6332,11 +6360,14 @@ final class ClosingService
             ];
         }
 
+        if (!$this->vatRegisteredInRange($supplierId, $rangeFrom, $rangeTo)) {
+            // Neplátce (ani identifikovaná osoba) DPH přiznání nepodává, kontrola nedává smysl.
+            return ['key' => 'vat_343_vs_return', 'severity' => 'info', 'ok' => true, 'value' => null];
+        }
         try {
             $findings = $this->vatCrossCheck->checkAccountBalanceVsReturn($supplierId, $year, $month, $vatPeriod);
-        } catch (\Throwable) {
-            // Firma bez DPH osnovy / plátcovství — kontrola nedává smysl, ne chyba.
-            return ['key' => 'vat_343_vs_return', 'severity' => 'info', 'ok' => true, 'value' => null];
+        } catch (\Throwable $e) {
+            return $this->failedCheck('vat_343_vs_return', 'warning', $supplierId, $e);
         }
 
         return [

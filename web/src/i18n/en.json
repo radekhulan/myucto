@@ -32573,7 +32573,8 @@
     "filed_import_done_created": "Return inputs were imported from the filed return.",
     "filed_import_done_replaced": "Draft return inputs were replaced with the filed values.",
     "filed_import_done_kept": "A draft return already exists, inputs were not changed.",
-    "filed_import_source": "Inputs imported from the filed return (form {forma}, {date})."
+    "filed_import_source": "Inputs imported from the filed return (form {forma}, {date}).",
+    "check_failed": "The check could not be run. Reload it and contact support if it keeps failing."
   },
   "tax": {
     "title": "Tax optimizer",
