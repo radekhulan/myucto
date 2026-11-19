@@ -239,6 +239,25 @@ final class ClosingDeferredRevenueAccrualTest extends TestCase
         self::assertEqualsWithDelta(0.0, $this->balance384AsOf('2092-12-31'), 0.005, '384 se jednoletým předplatným rozpustí celý.');
     }
 
+    /** Zámek k datu na začátku nového roku (podané lednové DPH) nezastaví rozpuštění. */
+    public function testReleaseIsPostedIntoDateLockedNextYear(): void
+    {
+        $invoiceId = $this->invoice('20910099', 36600.00, self::YEAR . '-07-01');
+        $this->item($invoiceId, 36600.00, '2091-07-01', '2092-06-30');
+        $this->postInvoice($invoiceId, 36600.00, self::YEAR . '-07-01');
+        $this->driveCloseWithAccrual();
+        $this->closing->closeBooks($this->supplierId, $this->periodId, $this->rv(), $this->meta());
+        $this->db->pdo()->prepare('INSERT INTO accounting_supplier_settings (supplier_id, locked_until) VALUES (?, ?) ON DUPLICATE KEY UPDATE locked_until = VALUES(locked_until)')
+            ->execute([$this->supplierId, (self::YEAR + 1) . '-01-31']);
+
+        $open = $this->closing->openNext($this->supplierId, $this->periodId, $this->rv(), $this->meta());
+
+        self::assertNotNull($open['deferred_revenue_release_entry_id']);
+        $release = $this->journal->findBySource($this->supplierId, 'deferred_revenue_accrual', ClosingSourceId::deferredRevenueAccrualRelease($this->periodId));
+        self::assertSame((self::YEAR + 1) . '-01-01', (string) $release['entry_date']);
+        self::assertEqualsWithDelta(18200.00, $this->sideAmount($this->entryLines((int) $release['id']), '384', 'debit'), 0.001);
+    }
+
     /**
      * Firma bez dimenzí: odklad i rozpuštění přes veřejné openNext mají jeden řádek na účet
      * a žádné dimenze — stejně jako před přenosem dimenzí.

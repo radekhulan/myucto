@@ -5075,9 +5075,9 @@ final class ClosingService
             // (swap stran) zaúčtovaného stock-closing slotu, ne nový výpočet —
             // bilanční kontinuita 112/132 (konečný stav N = počáteční N+1) tak platí
             // po haléřích a na TÝCHŽ účtech i při per-tenant overridu kontací
-            // (seedované stock.opening.* = zrcadlo stock.closing.*). Bez R7 flagu —
-            // N+1 je open (asserted výše). Klíč ('closing', stockOpening(period_id)),
-            // vzor fxReversal; reverte se s krokem open_next.
+            // (seedované stock.opening.* = zrcadlo stock.closing.*). N+1 je open (asserted
+            // výše); R7 flag jen kvůli zámku k datu, stejně jako otevírací zápis. Klíč
+            // ('closing', stockOpening(period_id)), vzor fxReversal; reverte se s krokem open_next.
             $stockReleaseId = null;
             $stockClosingEntry = $this->findEntryWithLines($supplierId, 'closing', ClosingSourceId::stockClosing($periodId));
             if ($stockClosingEntry !== null && $stockClosingEntry['posted_at'] !== null && ($stockClosingEntry['lines'] ?? []) !== []) {
@@ -5103,6 +5103,7 @@ final class ClosingService
                     'user_id' => $meta['user_id'] ?? null,
                     'ip' => $meta['ip'] ?? null,
                     'user_agent' => $meta['user_agent'] ?? null,
+                    'allow_closing_period' => true,
                 ]);
             } else {
                 // Re-run po revertu stock kroku: stale release z dřívějšího běhu
@@ -5114,7 +5115,8 @@ final class ClosingService
             // (swap stran) zaúčtovaného defer zápisu N (MD 381 / D 501) → v N+1 MD 501 / D 381.
             // Bez tohoto kroku by odklad trvale „visel" na 381. Klíč ('small_asset_accrual',
             // release_base + period_id), aby se nesrazil s defer zápisem N; entry_date =
-            // 1. den N+1 (open, bez R7 flagu). Vzor stock/FX storna výše, reverte se s open_next.
+            // 1. den N+1 (open, R7 flag jen kvůli zámku k datu). Vzor stock/FX storna výše,
+            // reverte se s open_next.
             $smallAssetReleaseId = null;
             $saDeferEntry = $this->findEntryWithLines($supplierId, 'small_asset_accrual', ClosingSourceId::smallAssetAccrual($periodId));
             if ($saDeferEntry !== null && $saDeferEntry['posted_at'] !== null && ($saDeferEntry['lines'] ?? []) !== []) {
@@ -5133,6 +5135,7 @@ final class ClosingService
                     'user_id' => $meta['user_id'] ?? null,
                     'ip' => $meta['ip'] ?? null,
                     'user_agent' => $meta['user_agent'] ?? null,
+                    'allow_closing_period' => true,
                 ]);
             } else {
                 // Re-run po revertu deferrals / mode=none: stale rozpuštění z dřívějšího běhu.
@@ -5144,7 +5147,7 @@ final class ClosingService
             // ne celý zbytek odkladu — víceletý zbytek (N+2+) zůstává na 381 a rozpustí ho
             // openNext dalšího roku (nachází ho podle accrual dat i bez re-deferu v N+1). Klíč
             // ('prepaid_expense_accrual', release_base + period_id) beze změny, entry_date =
-            // 1. den N+1 (open, bez R7 flagu). Reverte se s open_next.
+            // 1. den N+1 (open, R7 flag jen kvůli zámku k datu). Reverte se s open_next.
             $prepaidExpenseReleaseId = null;
             $relSourceId = ClosingSourceId::prepaidExpenseAccrualRelease($periodId);
             $peRelease = $this->prepaidExpenseReleaseForPeriod($supplierId, (string) $period['ends_on'], $nextStart, $nextEnds);
@@ -5164,6 +5167,7 @@ final class ClosingService
                     'user_id' => $meta['user_id'] ?? null,
                     'ip' => $meta['ip'] ?? null,
                     'user_agent' => $meta['user_agent'] ?? null,
+                    'allow_closing_period' => true,
                 ]);
             } else {
                 // Žádná tranše pro toto období / re-run po revertu: smaž stale rozpuštění.
@@ -5191,6 +5195,7 @@ final class ClosingService
                     'user_id' => $meta['user_id'] ?? null,
                     'ip' => $meta['ip'] ?? null,
                     'user_agent' => $meta['user_agent'] ?? null,
+                    'allow_closing_period' => true,
                 ]);
             } else {
                 $this->closing->deleteClosingEntry($supplierId, 'deferred_revenue_accrual', $revRelSourceId);

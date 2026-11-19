@@ -739,6 +739,12 @@ odeslaného v EPO podání a archívu, které uživatel provede po kontrole nahr
 přeúčtování i stornu dokladů starších než zamčené datum, i když je období samo pořád Otevřené. Podrobně viz
 [Účetní deník, zámek účtování k datu](52_Ucetni_denik.md).
 
+Zápisy kroků uzávěrky zámek nezastaví. Přiznání DPH za prosinec, případně i za leden nového roku, bývá podané dřív,
+než se starý rok uzavře. Uzavření knih k poslednímu dni roku i otevření dalšího roku proto projde, i když je zamčený
+už 1. den nového roku: otevírací zápis, storno kurzových rozdílů, převod počátečního stavu zásob do spotřeby
+i rozpuštění časového rozlišení (drobný majetek, náklady a výnosy příštích období). DPH se počítá z dokladů, ne
+z deníku, takže ho tyto zápisy nemění.
+
 ### 72.12.4 Pořadí kroků uzávěrky
 
 Uzávěrkový průvodce má v rámci 500 jedenáct kroků v pevném, závazném pořadí (viz tabulka v [§ 72.4](#724-krok-za-krokem-uzaverka-roku-pruvodce)). Odložená daň jde hned po splatné dani z příjmů a je volitelná: § 59 vyhlášky 500/2002 Sb. ji ukládá jen účetním jednotkám s povinným auditem a konsolidačním celkům, proto uzavření knih neblokuje. V rámci 504 jde krok Zásoby před daň z příjmů a Odložená daň se řídí výslovně zvolenou vlastní metodou.

@@ -241,6 +241,28 @@ final class ClosingPrepaidExpenseAccrualTest extends TestCase
 
     // ── rozpuštění v N+1 (open_next) ───────────────────────────────────────────
 
+    /** Zámek k datu na začátku nového roku (podané lednové DPH) nezastaví rozpuštění. */
+    public function testReleaseIsPostedIntoDateLockedNextYear(): void
+    {
+        $pi = $this->purchase('PF-2091-LOCK', 36600.00, self::YEAR . '-11-15');
+        $this->item($pi, 36600.00, '2091-07-01', '2092-06-30', '548');
+        $this->posting->postDocument($this->supplierId, 'purchase_invoice', $pi, [
+            ['account_code' => '548', 'side' => 'debit', 'amount' => 36600.00],
+            ['account_code' => '321', 'side' => 'credit', 'amount' => 36600.00],
+        ], ['entry_date' => self::YEAR . '-11-15', 'posted' => true, 'posted_by' => $this->userId, 'user_id' => $this->userId]);
+        $this->driveCloseWithAccrual();
+        $this->closing->closeBooks($this->supplierId, $this->periodId, $this->rv(), $this->meta());
+        $this->db->pdo()->prepare('INSERT INTO accounting_supplier_settings (supplier_id, locked_until) VALUES (?, ?) ON DUPLICATE KEY UPDATE locked_until = VALUES(locked_until)')
+            ->execute([$this->supplierId, (self::YEAR + 1) . '-01-31']);
+
+        $open = $this->closing->openNext($this->supplierId, $this->periodId, $this->rv(), $this->meta());
+
+        self::assertNotNull($open['prepaid_expense_release_entry_id']);
+        $release = $this->journal->findBySource($this->supplierId, 'prepaid_expense_accrual', ClosingSourceId::prepaidExpenseAccrualRelease($this->periodId));
+        self::assertSame((self::YEAR + 1) . '-01-01', (string) $release['entry_date']);
+        self::assertEqualsWithDelta(18200.00, $this->sideAmount($this->entryLines((int) $release['id']), '381', 'credit'), 0.001);
+    }
+
     /**
      * Náklad a sleva se stejným obdobím a částkou, ale různým střediskem dají celkem nulu:
      * odklad i rozpuštění přes openNext přesto vzniknou po střediscích, bez řádku 381.

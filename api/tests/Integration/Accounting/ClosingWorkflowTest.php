@@ -379,6 +379,32 @@ final class ClosingWorkflowTest extends TestCase
         self::assertFalse($this->closing->state($this->supplierId, $this->periodId)['can_revert_open_next']);
     }
 
+    /**
+     * Přiznání DPH za leden bývá podané dřív, než se uzavře minulý rok, takže zámek k datu
+     * leží už na 1. dni nového roku. Otevření nového roku i se zásobami musí přesto projít.
+     */
+    public function testOpenNextPostsStockReleaseIntoDateLockedNextYear(): void
+    {
+        $this->seedScenario();
+        $this->manual([self::l('112', 'debit', 3000.00), self::l('321', 'credit', 3000.00)], self::YEAR . '-04-01');
+        $this->runStepsUntilCloseReady();
+        $this->posting->postDocument($this->supplierId, 'closing', \MyInvoice\Service\Accounting\Closing\ClosingSourceId::stockClosing($this->periodId), [
+            self::l('112', 'debit', 500.00),
+            self::l('501', 'credit', 500.00),
+        ], ['entry_date' => self::ENDS_ON, 'allow_closing_period' => true] + $this->meta());
+        $this->closing->closeBooks($this->supplierId, $this->periodId, $this->rv(), $this->meta());
+        $this->db->pdo()->prepare('INSERT INTO accounting_supplier_settings (supplier_id, locked_until) VALUES (?, ?) ON DUPLICATE KEY UPDATE locked_until = VALUES(locked_until)')
+            ->execute([$this->supplierId, (self::YEAR + 1) . '-01-31']);
+
+        $result = $this->closing->openNext($this->supplierId, $this->periodId, $this->rv(), $this->meta());
+
+        self::assertNotNull($result['entry_id']);
+        self::assertNotNull($result['stock_release_entry_id'], 'Počáteční stav zásob se musí vrátit do spotřeby i v zamčeném dni.');
+        $release = $this->linesByAccountCode((int) $result['stock_release_entry_id']);
+        self::assertEqualsWithDelta(500.0, $release['501']['debit'], 0.001);
+        self::assertEqualsWithDelta(500.0, $release['112']['credit'], 0.001);
+    }
+
     // ── I2: bilanční kontinuita 702↔701 ─────────────────────────────────────
 
     public function testI2OpenNextMirrorsClosingIntoOpening(): void
