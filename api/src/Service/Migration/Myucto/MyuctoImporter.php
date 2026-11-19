@@ -21,6 +21,7 @@ use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzSpecPackageCatalog;
 use MyInvoice\Service\System\ManagedModeGuard;
 use MyInvoice\Service\Export\Instance\TenantScopeResolver;
+use MyInvoice\Service\Accounting\Closing\ClosingStepPayloadRemapper;
 use PDO;
 use RuntimeException;
 
@@ -1970,19 +1971,16 @@ final class MyuctoImporter
         if ($table === 'tax_submissions' && ($row['summary_json'] ?? null) !== null) {
             $out['summary_json'] = $this->remapSubmissionSummary((string) $row['summary_json'], $map);
         }
-        if ($table === 'accounting_closing_steps' && ($row['step_key'] ?? null) === 'provisions' && ($row['payload'] ?? null) !== null) {
-            $payload = json_decode((string) $row['payload'], true, 512, JSON_THROW_ON_ERROR);
-            $changed = false;
-            foreach (is_array($payload) && is_array($payload['entries'] ?? null) ? $payload['entries'] : [] as $index => $entry) {
-                foreach (['invoice_id' => 'invoices', 'entry_id' => 'journal_entries'] as $key => $reference) {
-                    if (is_array($entry) && !empty($entry[$key])) {
-                        $payload['entries'][$index][$key] = $map[$reference][MyuctoExportReader::id($entry[$key])]
-                            ?? throw new RuntimeException('Chybí zdrojová vazba opravné položky uzávěrky → ' . $reference . '.');
-                        $changed = true;
-                    }
-                }
+        if ($table === 'accounting_closing_steps' && ($row['payload'] ?? null) !== null
+            && in_array($row['step_key'] ?? null, ClosingStepPayloadRemapper::STEPS, true)) {
+            $source = json_decode((string) $row['payload'], true, 512, JSON_THROW_ON_ERROR);
+            [$payload, $warnings] = ClosingStepPayloadRemapper::remap((string) $row['step_key'], $source,
+                // Uživatel zdrojové instalace v cíli není; jako u auditní stopy ho zastoupí ten, kdo převod spouští.
+                static fn (string $reference, mixed $old): ?int => $reference === 'users' ? $actorId : ($map[$reference][MyuctoExportReader::id($old)] ?? null));
+            if ($warnings !== []) {
+                $this->droppedLinks['accounting_closing_steps.payload'] = ($this->droppedLinks['accounting_closing_steps.payload'] ?? 0) + count($warnings);
             }
-            if ($changed) {
+            if ($payload !== $source) {
                 $out['payload'] = json_encode($payload, JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE);
             }
         }
