@@ -25906,9 +25906,53 @@
       "no_candidates_final": "No unlinked tax documents for this customer."
     },
     "imported_pdf": {
-      "title": "Imported source PDF",
+      "title": "Original PDF",
       "show": "Show PDF",
-      "hide": "Hide PDF"
+      "hide": "Hide PDF",
+      "missing": "The invoice has no original document uploaded.",
+      "upload": "Upload original PDF",
+      "uploading": "Uploading…",
+      "drop_here": "or drop a PDF file here",
+      "replace": "Replace",
+      "remove": "Remove",
+      "confirm_remove": "Remove the original PDF {name}? The document itself will not change.",
+      "uploaded": "The original PDF has been saved.",
+      "replaced": "The original PDF has been replaced.",
+      "removed": "The original PDF has been removed.",
+      "upload_failed": "Could not upload the original PDF.",
+      "remove_failed": "Could not remove the original PDF.",
+      "only_pdf": "Only a PDF file can be uploaded."
+    },
+    "original_pdf_bulk": {
+      "action": "Upload original PDFs",
+      "title": "Upload original PDFs",
+      "intro": "Select PDF files. Each file is matched to an issued invoice by the invoice number or variable symbol in its name, e.g. FV-2026-001.pdf or Invoice 20260001.pdf.",
+      "choose": "Select PDF files",
+      "drop_here": "or drop them here",
+      "matching": "Matching files with invoices…",
+      "match_failed": "Could not match the files.",
+      "summary": "Matched {matched}, unmatched {unmatched}, ambiguous {ambiguous}",
+      "col_file": "File",
+      "col_invoice": "Invoice",
+      "col_state": "State",
+      "status": {
+        "matched": "Matched",
+        "unmatched": "Unmatched",
+        "ambiguous": "Ambiguous",
+        "not_pdf": "Not a PDF",
+        "uploaded": "Uploaded",
+        "failed": "Error"
+      },
+      "reason": {
+        "multiple_invoices": "The name fits several invoices: {numbers}",
+        "duplicate_file": "Several files point to the same invoice"
+      },
+      "replaces_original": "Replaces the existing original",
+      "confirm": "Upload matched ({n})",
+      "uploading": "Uploading {done} of {total}…",
+      "done": "Uploaded {ok} originals, errors {failed}.",
+      "reset": "Choose other files",
+      "too_many": "You can upload at most {max} files at once."
     },
     "pdf_history": {
       "title": "PDF history",

@@ -39,6 +39,7 @@ import { invoiceListFilterParams } from '@/api/listQueries'
 import { markRowsTouched, consumeFlashedRows } from '@/composables/useRowFlash'
 import { useListKeyboard } from '@/composables/useListKeyboard'
 import WorkReportModal from '@/components/modals/WorkReportModal.vue'
+import OriginalPdfBulkUploadModal from '@/components/invoices/OriginalPdfBulkUploadModal.vue'
 import SavedFiltersMenu from '@/components/ui/SavedFiltersMenu.vue'
 import ColumnPicker from '@/components/ui/ColumnPicker.vue'
 import TableColorsMenu from '@/components/ui/TableColorsMenu.vue'
@@ -1019,7 +1020,21 @@ const bulk = useListBulkActions({
   listQuery: () => invoiceListFilterParams(listParams()),
   total,
 })
-const headerActions = computed<ActionItem[]>(() => [bulk.menuItem.value])
+// Hromadné nahrání originálů PDF (párování podle čísla dokladu v názvu souboru).
+const originalPdfBulkOpen = ref(false)
+const canUploadOriginals = computed(() => auth.canWrite('invoices'))
+const headerActions = computed<ActionItem[]>(() => [
+  {
+    key: 'upload-originals',
+    label: t('invoice.original_pdf_bulk.action'),
+    icon: 'upload',
+    tier: 'overflow',
+    variant: 'neutral',
+    show: canUploadOriginals.value,
+    run: () => { originalPdfBulkOpen.value = true },
+  },
+  bulk.menuItem.value,
+])
 const listNav = useListNavigationSource('invoices', () => ({
   ids: flatRows.value.map(inv => inv.id),
   page: page.value,
@@ -1324,7 +1339,7 @@ const yearOptions = useYearOptions('invoices', yearFilter)
 // `rt()` zformátuje jednotlivé položky pole (pro případnou interpolaci).
 const monthOptions = computed(() => (tm('common.months_short') as unknown as string[]).map(m => rt(m)))
 useWindowRefresh(refreshLoadedPages,
-  () => !loading.value && !loadingMore.value && !bulkBusy.value && !bulkPdfOpen.value && !ossBulkOpen.value && !wrModalOpen.value && selectedIds.value.length === 0)
+  () => !loading.value && !loadingMore.value && !bulkBusy.value && !bulkPdfOpen.value && !ossBulkOpen.value && !wrModalOpen.value && !originalPdfBulkOpen.value && selectedIds.value.length === 0)
 </script>
 
 <template>
@@ -1358,7 +1373,7 @@ useWindowRefresh(refreshLoadedPages,
           fallback-filename="kniha-vystavenych-faktur"
           class="max-md:-order-1"
         />
-        <ActionBar v-if="bulk.canUse.value" :actions="headerActions" data-test="invoice-more-actions" />
+        <ActionBar v-if="bulk.canUse.value || canUploadOriginals" :actions="headerActions" data-test="invoice-more-actions" />
         <RouterLink
           v-if="auth.canWrite('invoices.create') || auth.isDemo"
           to="/invoices/new"
@@ -2216,5 +2231,6 @@ useWindowRefresh(refreshLoadedPages,
       v-model="wrModalOpen"
       :invoice-id="wrModalInvoiceId"
       @saved="load(true)" />
+    <OriginalPdfBulkUploadModal v-if="originalPdfBulkOpen" @close="originalPdfBulkOpen = false" />
   </div>
 </template>

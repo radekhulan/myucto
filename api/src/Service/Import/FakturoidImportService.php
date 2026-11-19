@@ -15,6 +15,7 @@ use MyInvoice\Service\Bank\VariableSymbolNormalizer;
 use MyInvoice\Service\Currency\ExchangeRateApplier;
 use MyInvoice\Service\Invoice\InvoiceCalculator;
 use MyInvoice\Service\Invoice\InvoiceMath;
+use MyInvoice\Service\Invoice\IssuedInvoiceOriginalPdfStore;
 use MyInvoice\Service\Invoice\PurchaseInvoiceCalculator;
 use MyInvoice\Service\Invoice\SnapshotBuilder;
 use MyInvoice\Service\Invoice\TimeBilling;
@@ -77,6 +78,7 @@ final class FakturoidImportService
         private readonly StatsRecomputer $stats,
         private readonly ImportedSubjectLinker $subjectLinker,
         private readonly AdvanceDeductionRepository $advanceDeductions,
+        private readonly IssuedInvoiceOriginalPdfStore $originalPdfs,
     ) {}
 
     /**
@@ -1188,39 +1190,22 @@ final class FakturoidImportService
     }
 
     /**
-     * Stáhne Fakturoidem rendered PDF vydané faktury a uloží do imported_pdf_*
-     * (paralelně s naším renderem pdf_path). Dedup přes SHA-256. Symetrické k iDokladu.
+     * Stáhne Fakturoidem rendered PDF vydané faktury a uloží ho jako originál
+     * (imported_pdf_*, paralelně s naším renderem pdf_path) stejnou cestou jako ruční
+     * nahrání ({@see IssuedInvoiceOriginalPdfStore}). Symetrické k iDokladu.
      */
     private function archiveIssuedPdf(int $supplierId, int $invoiceId, int $fakturoidId, array $inv): void
     {
         $pdf = $this->fakturoid->downloadInvoicePdf($supplierId, $fakturoidId);
         if ($pdf === null) return; // 204 = PDF se ještě generuje
-        if (!$this->isStorablePdf($pdf)) {
+
+        $name = ((string) ($inv['number'] ?? 'invoice')) . '.pdf';
+        if ($this->originalPdfs->store($invoiceId, $supplierId, $pdf, $name) === null) {
             $this->logger->warning('Fakturoid: vydaná faktura nevrátila platné PDF, přeskočeno', [
                 'supplier_id' => $supplierId,
                 'invoice_id' => $invoiceId,
             ]);
-            return;
         }
-
-        $archiveRoot = (string) $this->config->get('invoice.import_archive_storage', '');
-        if ($archiveRoot === '') {
-            $uploads = (string) $this->config->get('storage.uploads_dir', '');
-            $archiveRoot = $uploads !== '' ? dirname($uploads) . '/invoices-imported'
-                : \MyInvoice\Infrastructure\Config\RuntimePaths::storage('invoices-imported');
-        }
-        $sha = hash('sha256', $pdf);
-        // Hash-shard layout (supplier-{id}/{2}/{16}.pdf) — sdílené s PurchaseInvoicePdfArchiver.
-        $diskPath = \MyInvoice\Service\Import\PurchaseInvoicePdfArchiver::ensureShardPath($archiveRoot, $supplierId, $sha);
-        if (!is_file($diskPath)) @file_put_contents($diskPath, $pdf);
-
-        $relPath = \MyInvoice\Service\Import\PurchaseInvoicePdfArchiver::shardedRelPath($supplierId, $sha);
-        $name = ((string) ($inv['number'] ?? 'invoice')) . '.pdf';
-        $this->db->pdo()->prepare(
-            'UPDATE invoices SET imported_pdf_path = ?, imported_pdf_hash = ?,
-                                  imported_pdf_size_bytes = ?, imported_pdf_original_name = ?
-              WHERE id = ?'
-        )->execute([$relPath, $sha, strlen($pdf), $name, $invoiceId]);
     }
 
     /**

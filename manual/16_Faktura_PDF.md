@@ -215,9 +215,9 @@ Detail ukazuje:
   klasifikace DPH (kód i popis), zjednodušený daňový doklad § 30, ceny zadané
   včetně DPH, osvobození od daně z příjmů i s důvodem a kategorie tržby.
 - **Náhled PDF** - vložený náhled, který lze otevřít na celou obrazovku.
-- **Zdrojové PDF z importu** - jen u faktur naimportovaných z iDokladu nebo
-  Fakturoidu: původní PDF dokladu tak, jak dorazilo ze zdrojového systému
-  (náhled a stažení). Je oddělené od vygenerovaného PDF, viz [21. Importy](21_Importy.md).
+- **Originál PDF** - původní PDF dokladu, oddělené od vygenerovaného PDF (náhled
+  a stažení). Import z iDokladu nebo Fakturoidu ho uloží sám (viz
+  [21. Importy](21_Importy.md)), k ostatním fakturám ho lze nahrát ručně, viz níže.
 - **Activity log** - kdo a kdy fakturu vytvořil, vystavil, odeslal a označil jako zaplacenou.
 
 Otevřete-li detail ze seznamu faktur, vlevo od odkazu **Zpět na seznam** jsou šipky
@@ -239,6 +239,37 @@ Akční tlačítka vpravo nahoře závisí na stavu faktury:
 **Test odeslání** a **Test upomínky** posílají na e-mail aktuální firmy,
 případně na výchozí odesílací adresu instalace. Stav faktury ani počítadlo
 upomínek testem nemění.
+
+#### Originál PDF dokladu
+
+Faktura převzatá z jiného systému (například z POHODY) nebo vystavená mimo aplikaci
+může nést svůj původní PDF doklad. Box **Originál PDF** v detailu faktury nabízí:
+
+- **Nahrát originál PDF** - když faktura originál nemá; soubor lze vybrat tlačítkem
+  nebo přetáhnout na box.
+- **Nahradit** - nahraje jiný soubor místo stávajícího originálu.
+- **Odebrat** - originál z faktury odstraní.
+
+Nahrát lze jen PDF do 20 MiB; kontroluje se obsah souboru, ne přípona. Originál je
+jen archivovaná kopie: nemění stav, částky ani zaúčtování faktury, a proto jde nahrát
+i u zaúčtované faktury nebo v uzamčeném období. Ovládání vidí uživatel s právem
+upravovat vydané faktury. Nahrání, náhrada i odebrání se zapíší do aktivity faktury.
+
+**Hromadné nahrání.** V seznamu vydaných faktur v nabídce **…** je akce **Nahrát
+originály PDF**. Vyberte nebo přetáhněte víc PDF souborů najednou (nejvýše 500).
+Ke každému souboru se podle názvu najde faktura firmy: číslo faktury nebo variabilní
+symbol musí být v názvu jako samostatná část, nezáleží na diakritice, velikosti písmen
+ani oddělovačích. `FV-2026-001.pdf` i `Faktura fv 2026 001.pdf` patří k faktuře
+FV-2026-001, `FV-2026-0012.pdf` k ní nepatří. Náhled ukáže soubory:
+
+| Stav | Význam |
+|---|---|
+| Spárováno | Soubor patří jedné faktuře. Má-li faktura už originál, náhled upozorní, že ho soubor nahradí. |
+| Nespárováno | Název neobsahuje číslo žádné faktury firmy, nebo soubor není PDF. |
+| Nejednoznačné | Název sedí na víc faktur, nebo na tutéž fakturu míří víc souborů. |
+
+Tlačítko **Nahrát spárované** nahraje jen spárované soubory; nespárované
+a nejednoznačné nahrajte ručně v detailu faktury.
 
 ### 16.10.2 Platby a částečné úhrady
 

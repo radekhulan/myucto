@@ -748,6 +748,10 @@ final class Routes
         $app->get    ('/api/invoices/{id:[0-9]+}/pdfs',      ListPdfsAction::class);
         $app->get    ('/api/invoices/{id:[0-9]+}/pdfs/{archiveId:[0-9]+}', DownloadArchivedPdfAction::class);
         $app->get    ('/api/invoices/{id:[0-9]+}/imported-pdf', DownloadImportedPdfAction::class);
+        // Ruční nahrání / odebrání originálu PDF a náhled hromadného párování podle názvu souboru.
+        $app->post   ('/api/invoices/{id:[0-9]+}/imported-pdf', [\MyInvoice\Action\Invoice\InvoiceOriginalPdfAction::class, 'upload']);
+        $app->delete ('/api/invoices/{id:[0-9]+}/imported-pdf', [\MyInvoice\Action\Invoice\InvoiceOriginalPdfAction::class, 'remove']);
+        $app->post   ('/api/invoices/imported-pdf/match',       [\MyInvoice\Action\Invoice\InvoiceOriginalPdfAction::class, 'match']);
         $app->get    ('/api/invoices/{id:[0-9]+}/attachments', ListAttachmentsAction::class);
         $app->post   ('/api/invoices/{id:[0-9]+}/attachments', UploadAttachmentAction::class);
         $app->get    ('/api/invoices/{id:[0-9]+}/attachments/{attId:[0-9]+}', DownloadAttachmentAction::class);

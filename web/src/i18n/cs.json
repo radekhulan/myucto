@@ -25906,9 +25906,53 @@
       "no_candidates_final": "Žádné nepropojené daňové doklady tohoto odběratele."
     },
     "imported_pdf": {
-      "title": "Zdrojové PDF z importu",
+      "title": "Originál PDF",
       "show": "Zobrazit PDF",
-      "hide": "Skrýt PDF"
+      "hide": "Skrýt PDF",
+      "missing": "Faktura nemá nahraný originál dokladu.",
+      "upload": "Nahrát originál PDF",
+      "uploading": "Nahrávám…",
+      "drop_here": "nebo sem přetáhněte PDF soubor",
+      "replace": "Nahradit",
+      "remove": "Odebrat",
+      "confirm_remove": "Odebrat originál PDF {name}? Doklad samotný se nezmění.",
+      "uploaded": "Originál PDF byl uložen.",
+      "replaced": "Originál PDF byl nahrazen.",
+      "removed": "Originál PDF byl odebrán.",
+      "upload_failed": "Originál PDF se nepodařilo nahrát.",
+      "remove_failed": "Originál PDF se nepodařilo odebrat.",
+      "only_pdf": "Nahrát lze jen soubor PDF."
+    },
+    "original_pdf_bulk": {
+      "action": "Nahrát originály PDF",
+      "title": "Nahrát originály PDF",
+      "intro": "Vyberte PDF soubory. Ke každému se podle čísla faktury nebo variabilního symbolu v názvu souboru najde vydaná faktura, například FV-2026-001.pdf nebo Faktura 20260001.pdf.",
+      "choose": "Vybrat PDF soubory",
+      "drop_here": "nebo je sem přetáhněte",
+      "matching": "Páruji soubory s fakturami…",
+      "match_failed": "Soubory se nepodařilo spárovat.",
+      "summary": "Spárováno {matched}, nespárováno {unmatched}, nejednoznačné {ambiguous}",
+      "col_file": "Soubor",
+      "col_invoice": "Faktura",
+      "col_state": "Stav",
+      "status": {
+        "matched": "Spárováno",
+        "unmatched": "Nespárováno",
+        "ambiguous": "Nejednoznačné",
+        "not_pdf": "Není PDF",
+        "uploaded": "Nahráno",
+        "failed": "Chyba"
+      },
+      "reason": {
+        "multiple_invoices": "Název sedí na více faktur: {numbers}",
+        "duplicate_file": "Na tutéž fakturu míří více souborů"
+      },
+      "replaces_original": "Nahradí stávající originál",
+      "confirm": "Nahrát spárované ({n})",
+      "uploading": "Nahrávám {done} z {total}…",
+      "done": "Nahráno {ok} originálů, chyby {failed}.",
+      "reset": "Vybrat jiné soubory",
+      "too_many": "Najednou lze nahrát nejvýše {max} souborů."
     },
     "pdf_history": {
       "title": "Historie PDF",

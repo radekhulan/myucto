@@ -213,8 +213,11 @@ const pdfHistoryOpen = ref(false)
 // jen ve vlastním page_key, aby si prodej a nákup nešahaly do stavu.
 const importedPdfPreview = useSidePreview('invoices')
 const importedPdfPreviewOpen = importedPdfPreview.open
+// Otisk cesty (obsahuje hash obsahu) v URL: po nahrazení originálu se náhled načte znovu.
 const importedPdfInlineUrl = computed(
-  () => (invoice.value ? `${invoicesApi.importedPdfUrl(invoice.value.id, true)}#view=FitH` : ''),
+  () => (invoice.value
+    ? `${invoicesApi.importedPdfUrl(invoice.value.id, true)}&v=${encodeURIComponent(invoice.value.imported_pdf_path ?? '')}#view=FitH`
+    : ''),
 )
 
 // SMTP analýza (box jen pro admina, když je log analýza zapnutá; lazy-load na rozbalení)
@@ -766,6 +769,66 @@ async function deleteAttachment(att: InvoiceAttachment) {
     attachments.value = attachments.value.filter(a => a.id !== att.id)
   } catch (e: any) {
     toast.error(apiErrorMessage(e, t('invoice.attachments.delete_failed')))
+  }
+}
+
+// Originál PDF dokladu (imported_pdf_*): nahrání, náhrada a odebrání. Nemění stav ani
+// zaúčtování, proto nezávisí na zámku dokladu, jen na zápisu do vydaných faktur.
+const canManageOriginalPdf = computed(() => !!invoice.value
+  && invoice.value.invoice_type !== 'cancellation'
+  && auth.canWrite('invoices'))
+const originalPdfBusy = ref(false)
+const originalPdfDragOver = ref(false)
+const originalPdfInput = ref<HTMLInputElement | null>(null)
+
+async function uploadOriginalPdf(file: File | undefined) {
+  if (!invoice.value || !file) return
+  if (!/\.pdf$/i.test(file.name) && file.type !== 'application/pdf') {
+    toast.error(t('invoice.imported_pdf.only_pdf'))
+    return
+  }
+  originalPdfBusy.value = true
+  try {
+    const r = await invoicesApi.uploadImportedPdf(invoice.value.id, file)
+    invoice.value.imported_pdf_path = r.imported_pdf_path
+    invoice.value.imported_pdf_original_name = r.imported_pdf_original_name
+    invoice.value.imported_pdf_size_bytes = r.imported_pdf_size_bytes
+    toast.success(t(r.replaced ? 'invoice.imported_pdf.replaced' : 'invoice.imported_pdf.uploaded'))
+  } catch (e: any) {
+    toast.error(apiErrorMessage(e, t('invoice.imported_pdf.upload_failed')))
+  } finally {
+    originalPdfBusy.value = false
+    if (originalPdfInput.value) originalPdfInput.value.value = ''
+  }
+}
+
+function onOriginalPdfInputChange(ev: Event) {
+  const input = ev.target as HTMLInputElement
+  void uploadOriginalPdf(input.files?.[0])
+}
+
+function onOriginalPdfDrop(ev: DragEvent) {
+  ev.preventDefault()
+  originalPdfDragOver.value = false
+  if (!canManageOriginalPdf.value || originalPdfBusy.value) return
+  void uploadOriginalPdf(ev.dataTransfer?.files?.[0])
+}
+
+async function removeOriginalPdf() {
+  if (!invoice.value?.imported_pdf_path) return
+  const name = invoice.value.imported_pdf_original_name || 'invoice.pdf'
+  if (!window.confirm(t('invoice.imported_pdf.confirm_remove', { name }))) return
+  originalPdfBusy.value = true
+  try {
+    await invoicesApi.deleteImportedPdf(invoice.value.id)
+    invoice.value.imported_pdf_path = null
+    invoice.value.imported_pdf_original_name = null
+    invoice.value.imported_pdf_size_bytes = null
+    toast.success(t('invoice.imported_pdf.removed'))
+  } catch (e: any) {
+    toast.error(apiErrorMessage(e, t('invoice.imported_pdf.remove_failed')))
+  } finally {
+    originalPdfBusy.value = false
   }
 }
 
@@ -3870,30 +3933,64 @@ useWindowRefresh(async () => {
         </div>
       </div>
 
-      <!-- Zdrojové PDF z importu (iDoklad/Fakturoid) — originál dokladu, oddělený od našeho rendered PDF -->
-      <div v-if="invoice?.imported_pdf_path" class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-hidden">
+      <!-- Originál PDF dokladu (import iDoklad/Fakturoid nebo ruční nahrání) — oddělený od našeho rendered PDF -->
+      <div v-if="invoice && (invoice.imported_pdf_path || canManageOriginalPdf)"
+           class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-hidden"
+           :class="originalPdfDragOver ? 'ring-2 ring-primary-300' : ''"
+           data-test="invoice-original-pdf"
+           @dragover.prevent="canManageOriginalPdf && (originalPdfDragOver = true)"
+           @dragleave.prevent="originalPdfDragOver = false"
+           @drop="onOriginalPdfDrop">
+        <input v-if="canManageOriginalPdf" ref="originalPdfInput" type="file" accept="application/pdf,.pdf"
+               class="hidden" @change="onOriginalPdfInputChange" />
         <div class="px-4 sm:px-5 py-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
           <div class="flex items-center gap-2 min-w-0">
             <svg class="w-5 h-5 text-neutral-400 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M7 21h10a2 2 0 0 0 2-2V9.414a1 1 0 0 0-.293-.707l-5.414-5.414A1 1 0 0 0 12.586 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2z"/></svg>
             <div class="min-w-0">
               <h3 class="text-sm font-semibold uppercase tracking-wide text-neutral-500">{{ t('invoice.imported_pdf.title') }}</h3>
-              <div class="text-xs text-neutral-500 truncate" :title="invoice.imported_pdf_original_name || 'invoice.pdf'">
+              <div v-if="invoice.imported_pdf_path" class="text-xs text-neutral-500 truncate" :title="invoice.imported_pdf_original_name || 'invoice.pdf'">
                 {{ invoice.imported_pdf_original_name || 'invoice.pdf' }}
                 <template v-if="Number(invoice.imported_pdf_size_bytes)"> · {{ formatBytes(Number(invoice.imported_pdf_size_bytes)) }}</template>
               </div>
+              <div v-else class="text-xs text-neutral-500">
+                {{ t('invoice.imported_pdf.missing') }}
+                <span class="max-sm:hidden">{{ t('invoice.imported_pdf.drop_here') }}</span>
+              </div>
             </div>
           </div>
-          <div class="flex items-center gap-2 shrink-0">
-            <button type="button" @click="importedPdfPreview.toggle()"
-              class="cursor-pointer px-3 h-9 text-sm border border-neutral-300 text-neutral-700 hover:bg-neutral-50 rounded-md inline-flex items-center gap-1.5">
-              <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0z"/><path stroke-linecap="round" stroke-linejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
-              {{ importedPdfPreviewOpen ? t('invoice.imported_pdf.hide') : t('invoice.imported_pdf.show') }}
+          <div class="flex flex-wrap items-center gap-2 shrink-0">
+            <template v-if="invoice.imported_pdf_path">
+              <button type="button" @click="importedPdfPreview.toggle()"
+                class="cursor-pointer px-3 h-9 text-sm border border-neutral-300 text-neutral-700 hover:bg-neutral-50 rounded-md inline-flex items-center gap-1.5 whitespace-nowrap">
+                <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0z"/><path stroke-linecap="round" stroke-linejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/></svg>
+                {{ importedPdfPreviewOpen ? t('invoice.imported_pdf.hide') : t('invoice.imported_pdf.show') }}
+              </button>
+              <a :href="invoicesApi.importedPdfUrl(invoice.id, false)" target="_blank"
+                 class="cursor-pointer px-3 h-9 text-sm border border-primary-500/40 text-primary-700 hover:bg-primary-50 rounded-md inline-flex items-center gap-1.5 whitespace-nowrap">
+                <svg class="w-4 h-4 text-primary-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 0 0 3 3h10a3 3 0 0 0 3-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
+                {{ t('common.download') }}
+              </a>
+              <template v-if="canManageOriginalPdf">
+                <button type="button" :disabled="originalPdfBusy" data-test="original-pdf-replace"
+                  @click="originalPdfInput?.click()"
+                  class="cursor-pointer px-3 h-9 text-sm border border-neutral-300 text-neutral-700 hover:bg-neutral-50 rounded-md inline-flex items-center gap-1.5 whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed">
+                  <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 0 0 3 3h10a3 3 0 0 0 3-3v-1m-4-8l-4-4m0 0l-4 4m4-4v12"/></svg>
+                  {{ originalPdfBusy ? t('invoice.imported_pdf.uploading') : t('invoice.imported_pdf.replace') }}
+                </button>
+                <button type="button" :disabled="originalPdfBusy" data-test="original-pdf-remove"
+                  @click="removeOriginalPdf"
+                  class="cursor-pointer px-3 h-9 text-sm border border-danger-300 text-danger-600 hover:bg-danger-50 rounded-md inline-flex items-center gap-1.5 whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed">
+                  <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M10 11v6m4-6v6m1 5H9a2 2 0 0 1-2-2V7h10v13a2 2 0 0 1-2 2zM5 7h14l-1-3H6L5 7z"/></svg>
+                  {{ t('invoice.imported_pdf.remove') }}
+                </button>
+              </template>
+            </template>
+            <button v-else-if="canManageOriginalPdf" type="button" :disabled="originalPdfBusy" data-test="original-pdf-upload"
+              @click="originalPdfInput?.click()"
+              class="cursor-pointer px-3 h-9 text-sm border border-primary-300 text-primary-600 hover:bg-primary-50 rounded-md inline-flex items-center gap-1.5 whitespace-nowrap disabled:opacity-50 disabled:cursor-not-allowed">
+              <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 0 0 3 3h10a3 3 0 0 0 3-3v-1m-4-8l-4-4m0 0l-4 4m4-4v12"/></svg>
+              {{ originalPdfBusy ? t('invoice.imported_pdf.uploading') : t('invoice.imported_pdf.upload') }}
             </button>
-            <a :href="invoicesApi.importedPdfUrl(invoice.id, false)" target="_blank"
-               class="cursor-pointer px-3 h-9 text-sm border border-primary-500/40 text-primary-700 hover:bg-primary-50 rounded-md inline-flex items-center gap-1.5">
-              <svg class="w-4 h-4 text-primary-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 0 0 3 3h10a3 3 0 0 0 3-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
-              {{ t('common.download') }}
-            </a>
           </div>
         </div>
       </div>

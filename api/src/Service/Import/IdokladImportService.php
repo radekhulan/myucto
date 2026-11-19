@@ -14,6 +14,7 @@ use MyInvoice\Service\Bank\AccountNumberNormalizer;
 use MyInvoice\Service\Bank\VariableSymbolNormalizer;
 use MyInvoice\Service\Currency\ExchangeRateApplier;
 use MyInvoice\Service\Invoice\InvoiceCalculator;
+use MyInvoice\Service\Invoice\IssuedInvoiceOriginalPdfStore;
 use MyInvoice\Service\Invoice\PurchaseInvoiceCalculator;
 use MyInvoice\Service\Invoice\SnapshotBuilder;
 use MyInvoice\Service\Invoice\TimeBilling;
@@ -62,6 +63,7 @@ final class IdokladImportService
         private readonly OssItemPlanner $planner,
         private readonly StatsRecomputer $stats,
         private readonly ImportedSubjectLinker $subjectLinker,
+        private readonly IssuedInvoiceOriginalPdfStore $originalPdfs,
     ) {}
 
     /**
@@ -1536,36 +1538,22 @@ final class IdokladImportService
     }
 
     /**
-     * Stáhne rendered PDF od iDoklad a uloží do storage/invoices/supplier-{id}/.
-     * Dedup přes SHA-256: pokud už existuje stejný soubor, jen reuse path.
-     * Pro vydanou fakturu používáme separátní column imported_pdf_* aby se nepřepsal
-     * náš vlastní rendered PDF (pdf_path).
+     * Stáhne rendered PDF od iDoklad a uloží ho jako originál vydané faktury
+     * (imported_pdf_*, odděleně od našeho renderu pdf_path) stejnou cestou jako ruční
+     * nahrání ({@see IssuedInvoiceOriginalPdfStore}).
      */
     private function archiveIssuedPdf(int $supplierId, int $invoiceId, int $idokladId, array $idoklad): void
     {
         $pdf = $this->idoklad->downloadIssuedPdf($supplierId, $idokladId);
         if ($pdf === null) return;
 
-        $archiveRoot = (string) $this->config->get('invoice.import_archive_storage', '');
-        if ($archiveRoot === '') {
-            $uploads = (string) $this->config->get('storage.uploads_dir', '');
-            $archiveRoot = $uploads !== '' ? dirname($uploads) . '/invoices-imported'
-                : \MyInvoice\Infrastructure\Config\RuntimePaths::storage('invoices-imported');
-        }
-        $sha = hash('sha256', $pdf);
-        $size = strlen($pdf);
-        // Hash-shard layout (supplier-{id}/{2}/{16}.pdf) — sdílené s PurchaseInvoicePdfArchiver.
-        $diskPath = \MyInvoice\Service\Import\PurchaseInvoicePdfArchiver::ensureShardPath($archiveRoot, $supplierId, $sha);
-        if (!is_file($diskPath)) {
-            @file_put_contents($diskPath, $pdf);
-        }
-        $relPath = \MyInvoice\Service\Import\PurchaseInvoicePdfArchiver::shardedRelPath($supplierId, $sha);
         $name = ($idoklad['DocumentNumber'] ?? 'invoice') . '.pdf';
-        $this->db->pdo()->prepare(
-            'UPDATE invoices SET imported_pdf_path = ?, imported_pdf_hash = ?,
-                                  imported_pdf_size_bytes = ?, imported_pdf_original_name = ?
-              WHERE id = ?'
-        )->execute([$relPath, $sha, $size, $name, $invoiceId]);
+        if ($this->originalPdfs->store($invoiceId, $supplierId, $pdf, (string) $name) === null) {
+            $this->logger->warning('iDoklad: originál vydané faktury se nepodařilo uložit, přeskočeno', [
+                'supplier_id' => $supplierId,
+                'invoice_id' => $invoiceId,
+            ]);
+        }
     }
 
     /**
