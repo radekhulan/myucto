@@ -126,6 +126,10 @@ final class PurchaseInvoiceListDetailParityTest extends TestCase
         }
 
         $reads = static fn (): int => (int) $pdo->query("SHOW SESSION STATUS LIKE 'Handler_read_key'")->fetch()['Value'];
+        // Zahřátí: první volání v procesu načítá číselníky a nastavení jednou pro všechny
+        // a jejich počet čtení závisí na tom, co v DB nechaly předchozí testy. Měří se
+        // až druhé volání, tedy jen náklad, který roste s počtem dokladů.
+        $container->get(PurchaseInvoiceRepository::class)->listGroupedByMonth(['supplier_id' => $supplierId], 1, 5);
         $before = $reads();
         $result = $container->get(PurchaseInvoiceRepository::class)->listGroupedByMonth(['supplier_id' => $supplierId], 2, 5);
         $usedReads = $reads() - $before;
