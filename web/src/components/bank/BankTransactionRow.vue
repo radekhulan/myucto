@@ -55,17 +55,23 @@ const props = withDefaults(defineProps<{
   /** Počet sloupců tabulky (desktop) pro colspan expand řádků. */
   colspan?: number
   actions: BankTransactionActions
+  /** Zaškrtávátko výběru pro hromadné akce (seznam pohybů): první buňka řádku, na kartě před částkou. */
+  selectable?: boolean
+  selected?: boolean
 }>(), {
   fallbackCurrency: null,
   showAccount: false,
   showCounterAccount: false,
   showStatementLink: false,
   colspan: 7,
+  selectable: false,
+  selected: false,
 })
 
 const emit = defineEmits<{
   posted: [payload: { result: PostResult; debit: string; credit: string }, tx: BankTransaction]
   changed: []
+  'toggle-select': [id: number]
 }>()
 
 const { t } = useI18n()
@@ -400,6 +406,10 @@ function candidateReject() {
 <template>
   <template v-if="layout === 'desktop'">
     <tr :data-tx-id="tx.id" :class="{ 'opacity-50': tx.match_status === 'ignored' }">
+      <td v-if="selectable" class="pl-3 py-2 w-6">
+        <input type="checkbox" class="h-4 w-4 cursor-pointer" :checked="selected"
+          :aria-label="tx.variable_symbol || String(tx.id)" data-test="bank-row-select" @change="emit('toggle-select', tx.id)" />
+      </td>
       <td class="px-3 py-2 whitespace-nowrap">
         {{ formatDate(tx.posted_at) }}
         <RouterLink v-if="showStatementLink" :to="`/bank/${tx.statement_id}?posting_status=unposted`"
@@ -566,9 +576,13 @@ function candidateReject() {
 
   <div v-else class="p-3 space-y-2" :class="{ 'opacity-50': tx.match_status === 'ignored' }">
     <div class="flex items-baseline justify-between gap-2">
-      <div class="font-mono text-sm font-semibold whitespace-nowrap"
-        :class="tx.amount > 0 ? 'text-success-700 dark:text-success-600' : 'text-danger-500'">
-        {{ tx.amount > 0 ? '+' : '' }}{{ formatMoney(tx.amount, currency()) }}
+      <div class="flex items-baseline gap-2 min-w-0">
+        <input v-if="selectable" type="checkbox" class="h-4 w-4 shrink-0 cursor-pointer self-center" :checked="selected"
+          :aria-label="tx.variable_symbol || String(tx.id)" data-test="bank-card-select" @change="emit('toggle-select', tx.id)" />
+        <div class="font-mono text-sm font-semibold whitespace-nowrap"
+          :class="tx.amount > 0 ? 'text-success-700 dark:text-success-600' : 'text-danger-500'">
+          {{ tx.amount > 0 ? '+' : '' }}{{ formatMoney(tx.amount, currency()) }}
+        </div>
       </div>
       <div class="flex flex-col items-end gap-1">
         <component :is="badgeMatchable ? 'button' : 'span'" :type="badgeMatchable ? 'button' : undefined"

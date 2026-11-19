@@ -13,6 +13,10 @@ import type {
 } from '@/api/bulkActions'
 import type { JournalRebookItemLine, JournalRebookMode, JournalRebookSide } from '@/api/journalRebook'
 import { csvAmount, type CsvCell } from '@/utils/bulkJobCsv'
+import {
+  buildNoteParams, buildSymbolParams, emptyNoteForm, emptySymbolForm, noteChanges, noteSymbolReasonText, symbolChanges,
+  type BulkNoteForm, type BulkSymbolForm,
+} from './noteSymbolForm'
 
 /** Volba u jednoho typu dimenze: `keep` = beze změny (do požadavku nejde). */
 export type BulkDimensionChoiceMode = 'keep' | DimensionChange['mode']
@@ -32,6 +36,8 @@ export interface BulkActionForm {
   ruleKey: string
   ruleMode: JournalRebookMode
   journalFallback: 'skip' | 'reverse'
+  note: BulkNoteForm
+  symbol: BulkSymbolForm
 }
 
 export function emptyBulkForm(): BulkActionForm {
@@ -44,10 +50,12 @@ export function emptyBulkForm(): BulkActionForm {
     ruleKey: '',
     ruleMode: 'rewrite',
     journalFallback: 'skip',
+    note: emptyNoteForm(),
+    symbol: emptySymbolForm(),
   }
 }
 
-export const BULK_OPERATIONS: BulkOperation[] = ['rebook_account', 'set_dimensions', 'set_posting_rule', 'delete']
+export const BULK_OPERATIONS: BulkOperation[] = ['rebook_account', 'set_dimensions', 'set_posting_rule', 'set_note', 'set_variable_symbol', 'delete']
 
 /** „5, 6" → ['5', '6']; prázdné hodnoty a duplicity vypadnou. */
 export function parseAccountPrefixes(raw: string): string[] {
@@ -102,6 +110,10 @@ export function buildBulkParams(target: BulkTarget, form: BulkActionForm): BulkP
     }
     case 'delete':
       return target === 'journal_entry' ? { journal_fallback: form.journalFallback } : {}
+    case 'set_note':
+      return buildNoteParams(form.note)
+    case 'set_variable_symbol':
+      return buildSymbolParams(form.symbol)
     default:
       return null
   }
@@ -150,6 +162,8 @@ export const BULK_REASON_CODES = [
 export function bulkReasonText(item: Pick<BulkItem, 'reason_code' | 'message'>, t: (key: string) => string): string {
   const code = item.reason_code
   if (code && (BULK_REASON_CODES as readonly string[]).includes(code)) return t('bulk_actions.reason.' + code)
+  const own = noteSymbolReasonText(item, t)
+  if (own) return own
   return item.message || code || '—'
 }
 
@@ -275,7 +289,7 @@ export function deleteChange(before: unknown, after: unknown, t: (key: string) =
 
 export function itemChanges(
   operation: BulkOperation,
-  item: Pick<BulkItem, 'before' | 'after'>,
+  item: Pick<BulkItem, 'before' | 'after'> & Partial<Pick<BulkItem, 'strategy'>>,
   labels: BulkLabels | undefined,
   t: (key: string, params?: Record<string, unknown>) => string,
 ): ChangeRow[] {
@@ -284,6 +298,8 @@ export function itemChanges(
     case 'set_dimensions': return dimensionSnapshotChanges(item.before, item.after, labels, t)
     case 'set_posting_rule': return postingRuleChanges(item.before, item.after, t)
     case 'delete': return deleteChange(item.before, item.after, t)
+    case 'set_note': return noteChanges(item.before, item.after, item.strategy, t)
+    case 'set_variable_symbol': return symbolChanges(item.before, item.after, t)
   }
 }
 
