@@ -425,7 +425,7 @@ export interface RunStepPayload {
   /** D9 provisions — účetní-potvrzený seznam OP per pohledávka. */
   items?: ProvisionInput[]
   partial?: boolean
-  /** D11 income_tax — částka splatné daně (591/341); deferred_tax 500 — odložená daň (záporná = pohledávka). */
+  /** D11 income_tax: částka splatné daně (591/341); deferred_tax 500: odložená daň (záporná = pohledávka). */
   amount?: number
   /** Důvod odchylky ruční částky od návrhu (daň z příjmů, odložená daň). */
   reason?: string

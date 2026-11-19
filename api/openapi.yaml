@@ -20704,9 +20704,9 @@ paths:
                 row_version: { type: integer, minimum: 1 }
                 status: { type: string, enum: [done, skipped], description: "Checklist kroky + skip u provisions/income_tax/deferred_tax. income_tax se status done bez amount potvrdí už zaúčtovanou daň beze změny (zruší income_tax_stale); nezaúčtovanou vrátí 422 income_tax_not_posted. fx_revaluation a stock jde se status skipped přeskočit jen v roce s uzávěrkou převzatou z původního systému (closing_taken_over), jinak 422 step_not_skippable." }
                 note: { type: string, maxLength: 500 }
-                amount: { type: number, description: "income_tax — splatná daň (591/341); deferred_tax (500) — odložená daň, kladná = závazek 592/481, záporná = pohledávka 481/592" }
-                reason: { type: string, maxLength: 500, description: "income_tax/deferred_tax — důvod odchylky ruční částky od návrhu" }
-                prudence_confirmed: { type: boolean, description: "Jen deferred_tax (500) u pohledávky — posouzení podle § 59 odst. 4 vyhlášky; bez něj 422 prudence_check_required" }
+                amount: { type: number, description: "income_tax: splatná daň (591/341); deferred_tax (500): odložená daň, kladná = závazek 592/481, záporná = pohledávka 481/592" }
+                reason: { type: string, maxLength: 500, description: "income_tax/deferred_tax: důvod odchylky ruční částky od návrhu" }
+                prudence_confirmed: { type: boolean, description: "Jen deferred_tax (500) u pohledávky, posouzení podle § 59 odst. 4 vyhlášky; bez něj 422 prudence_check_required" }
                 activity: { type: string, enum: [main, economic], description: "Jen income_tax u neziskové organizace (504) — činnost, do které daň patří; bez ní 422 income_tax_activity_required" }
                 partial: { type: boolean, default: false, description: "Jen provisions. true mění zaslané položky (nejvýše 200), ostatní otevřené OP zachová a plně uhrazené odstraní; false nahrazuje celý seznam." }
                 items:

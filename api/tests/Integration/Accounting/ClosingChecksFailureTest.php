@@ -34,7 +34,7 @@ final class ClosingChecksFailureTest extends TestCase
     protected function setUp(): void
     {
         if (!is_file(dirname(__DIR__, 4) . '/cfg.php')) {
-            $this->markTestSkipped('cfg.php neexistuje — test vyžaduje DB connection.');
+            $this->markTestSkipped('cfg.php neexistuje, test vyžaduje DB connection.');
         }
         try {
             $container = Bootstrap::buildContainer();
