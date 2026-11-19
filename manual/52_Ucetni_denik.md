@@ -237,6 +237,24 @@ Použijte, když chcete změnit mnoho záznamů, které máte před sebou v sezn
 
 Nespárované bankovní pohyby se hromadně zaúčtují v boxu **Bankovní pohyby podle filtru** ([§ 52.9.1](#5291-krok-za-krokem-bankovni-pohyby-podle-filtru)), odkaz na něj je v seznamu nezaúčtovaných pohybů banky.
 
+### 52.8.3 Krok za krokem: členění DPH a položky dokladů
+
+Použijte, když import (iDoklad, ISDOC, e-shop) přinesl stovky faktur se špatným zařazením do přiznání k DPH a kontrolního hlášení, typicky položku **Místní poplatek z pobytu**, která předmětem DPH není, nebo e-shopové doklady s chybným kódem. Změní se jen položky, které vyberete; ostatní položky týchž faktur (ubytování, parkování) zůstanou, jak jsou.
+
+1. Otevřete **Vydané faktury**, nebo **Přijaté faktury**, v nabídce **…** zvolte **Hromadné akce** a nahoře přepněte z **Doklady** na **Položky dokladů**.
+2. Vyplňte filtr položek: **Text** (část popisu, například `místní poplatek`; velikost písmen ani diakritika nehrají roli), **Odběratel** nebo **Dodavatel**, **Období** podle DUZP nebo data vystavení, současné **Členění DPH**, **Sazbu DPH**, **Účet**, **Kód zboží** a **Číslo dokladu**. Seznam ukáže číslo dokladu, partnera, datum, text, částku a současné členění.
+3. Zaškrtněte položky, které chcete změnit, nebo zvolte **Všech N podle filtru**. Najednou jde zpracovat nejvýš 500 položek, víc filtr zúžte (například po měsících).
+4. Zvolte operaci:
+   - **Změnit členění DPH**: vyberte kód členění. Tlačítko **Mimo předmět DPH** nastaví kód `mimo` a sazbu 0 %, položka pak nejde do přiznání ani do kontrolního hlášení. Sazbu DPH můžete u položek změnit i samostatně.
+   - **Přeúčtovat účet**: položky dostanou zvolený účet výnosu, resp. nákladu.
+   - **Nastavit dimenze**: dimenze dostanou jen vybrané položky.
+5. Klikněte na **Spustit nanečisto**. Výsledek je po dokladech: u každého vidíte měněné položky před a po (kód, sazba, částka s DPH) a součet dokladu. Doklad v podaném období DPH, uzavřeném období nebo zamčeném datu je v záložce **Vynechané** s důvodem.
+6. Klikněte na **Provést** a potvrďte. Provedení i vrácení probíhá stejně jako u ostatních hromadných akcí ([§ 52.8.2](#5282-krok-za-krokem-hromadne-akce-v-seznamech)).
+
+Členění DPH všech položek vybraných dokladů změníte i v režimu **Doklady** operací **Změnit členění DPH**, sazbu tam měnit nejde.
+
+**Jak poznáte, že je hotovo:** Provedení má v **Posledních bězích** stav **Hotovo**. Položky mají nové členění v detailu faktury, přiznání k DPH a kontrolní hlášení za otevřené období je vykazují podle nového kódu a zaúčtované doklady mají přepočtený zápis. Pravidla jsou v [§ 52.14.19](#521419-cleneni-dph-a-polozky-dokladu).
+
 ## 52.9 Krok za krokem: doúčtování dokladů z jiného systému
 
 Automatika účtování se spouští při vzniku dokladu. Doklad, který už v systému leží (například naimportovaný z jiného systému), jí neprojde nikdy. Takové doklady zaúčtujete takto:
@@ -2310,6 +2328,34 @@ Pravidla společná všem operacím:
 - Smazání vrátit nejde. Provedení vyžaduje opsat počet záznamů, které se smažou.
 
 **Oprávnění:** Hromadné akce spustí správce firmy a role s právem **Hromadné změny dokladů a zápisů** (skupina Účetnictví). Systémové role správců ho mají, účetní a vlastní role ho dostanou v editoru rolí, stejně jako právo hromadně přeúčtovat. Právo jen otevírá hromadný mechanismus: k nastavení dimenzí je potřeba zápis do účetnictví, ke smazání právo smazat fakturu, přijatou fakturu nebo zápisy v deníku, ke změně předkontace právo upravovat doklady. Operace **Přeúčtovat účet** dál vyžaduje právo **Hromadně přeúčtovat a doúčtovat doklady**. Bez práv nabídka **Hromadné akce** v seznamu není. API token hromadné akce nespustí, přes API jde jen číst jejich stav a výsledek.
+
+### 52.14.19 Členění DPH a položky dokladů
+
+Postup je v [§ 52.8.3](#5283-krok-za-krokem-cleneni-dph-a-polozky-dokladu). Platí pravidla společná všem hromadným akcím ([§ 52.14.18](#521418-hromadne-akce-v-seznamech)) a k nim:
+
+**Položky dokladů:**
+
+- Seznam ukazuje položky vydaných, resp. přijatých faktur aktuální firmy napříč doklady, nejnovější doklady první. Stornované doklady, textové řádky a slevové řádky v něm nejsou.
+- Text se hledá jako souvislá část popisu bez ohledu na velikost písmen a diakritiku. Ve velkém množství dokladů se slova hledaného textu dohledávají v rejstříku slov, proto text zadávejte od začátku slova (`poplatek`, ne `platek`). Slova kratší než tři znaky rejstřík nezná, ta se porovnají jen jako část popisu.
+- Filtr **Členění DPH** porovnává vlastní kód položky. **Bez vlastního kódu** najde položky, které přebírají kód hlavičky dokladu.
+- Výběr je ruční seznam položek, nebo všechny položky podle filtru, nejvýš 500. Položka jiné firmy výběr odmítne.
+- Záznamem hromadné akce je doklad: změní se na něm všechny vybrané položky najednou a doklad se jednou uloží, přepočte a případně přeúčtuje. Ostatní položky dokladu se nemění. Vyřadit z provedení jde celý doklad.
+
+**Změnit členění DPH:**
+
+- Mění kód členění DPH položky. Podle něj evidence DPH zařadí položku na řádek přiznání a do oddílu kontrolního hlášení ([§ 41.13.11](41_Vykazy_DPH.md#411311-rucni-volba-klasifikace)). Kód hlavičky dokladu se dopočítá z položek stejně jako při uložení faktury.
+- Kód `mimo` (mimo předmět DPH) nemá řádek přiznání ani oddíl KH. Platí pro vydané i přijaté doklady.
+- Sazbu DPH jde měnit jen nad vybranými položkami. Částky se přepočtou jako při změně sazby v editoru faktury: u dokladu s cenami s DPH zůstane cena s DPH a dopočítá se základ, jinak zůstane základ a dopočítá se daň. Běh nanečisto ukáže částky položek i součet dokladu před a po.
+- Doklad se uloží touž cestou jako tlačítko **Uložit** v editoru, s právy uživatele, který akci spustil: přepočtou se položky, součty a rekapitulace DPH, vystavené faktuře se znovu vytvoří PDF a zaúčtovaný doklad se přeúčtuje v otevřeném období. Vystavenou fakturu mění jen role s právem upravit vystavenou fakturu, přeúčtování vyžaduje právo zaúčtovat. U přijaté faktury se změna samotného kódu provede opravou DPH zařazení (právo **Změnit DPH zařazení přijaté faktury**), změna sazby nebo účtu vynucenou úpravou dokladu, kterou smí jen správce firmy.
+- **Podané období DPH se nemění nikdy.** Doklad, jehož období (u vydaného dokladu DUZP, u přijatého období odpočtu) pokrývá podané přiznání k DPH nebo kontrolní hlášení, u dokladu s OSS položkou i podané OSS přiznání, se vynechá s důvodem **Období DPH je podané**, a to i pro správce firmy. Právo správce měnit jednotlivý doklad v podaném období pro hromadnou akci neplatí. Opravu podaného období řešte opravným nebo dodatečným tvrzením. Koncept do výkazů nevstupuje, proto se mění.
+- Vynechá se také doklad v uzavřeném účetním období nebo v zamčeném datu ([§ 52.14.10](#521410-zamek-uctovani-k-datu)), přijatý doklad s rozpisem DPH (zařazení určují části rozpisu, změňte ho v detailu dokladu) a položka v režimu OSS (do tuzemského přiznání nevstupuje, zařazení se mění hromadnou změnou OSS).
+- Vrácení obnoví u položek předchozí kód, sazbu i částky a doklad znovu uloží a přeúčtuje. Kdyby uložení předchozí stav přesně neobnovilo, doklad zůstane beze změny a vrácení ho vypíše jako chybu.
+
+**Přeúčtovat účet nad položkami** nastaví vybraným položkám vlastní účet výnosu (vydaná faktura) nebo nákladu (přijatá faktura) a doklad uloží touž cestou jako editor, zaúčtovaný doklad se přeúčtuje. Volitelné pole **Z účtu** omezí změnu na položky, jejichž účet tímto číslem začíná. DPH se nemění.
+
+**Nastavit dimenze nad položkami** změní dimenze jen vybraným položkám, stejně jako volba **Jen položky** nad doklady. Rozpad dimenze na vybrané položce volba **Vymazat** neodebere, upravte ho v detailu dokladu.
+
+**Oprávnění:** stejná jako u ostatních hromadných akcí. Kromě práva **Hromadné změny dokladů a zápisů** je potřeba právo upravovat vydané, resp. přijaté faktury (u přijatých stačí právo opravit DPH zařazení). Seznam položek vidí, kdo smí číst vydané, resp. přijaté faktury.
 
 ## 52.15 Související kapitoly
 

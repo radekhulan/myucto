@@ -240,6 +240,12 @@ zápisech a smazat koncepty. Vždy nejdřív proběhne běh nanečisto, proveden
 vrátit. Postup je v [§ 52.8.2](52_Ucetni_denik.md#5282-krok-za-krokem-hromadne-akce-v-seznamech),
 pravidla a oprávnění v [§ 52.14.18](52_Ucetni_denik.md#521418-hromadne-akce-v-seznamech).
 
+Členění DPH položek (například správní poplatek na kód `mimo` nebo `42`) změníte operací
+**Změnit členění DPH**, u vybraných položek napříč doklady v režimu **Položky dokladů**. Samotný
+kód se mění opravou DPH zařazení bez storna ([§ 23.11.24](#231124-oprava-dph-zarazeni-bez-storna)),
+doklady v podaném období DPH a doklady s rozpisem DPH se vynechají. Postup je
+v [§ 52.8.3](52_Ucetni_denik.md#5283-krok-za-krokem-cleneni-dph-a-polozky-dokladu).
+
 ## 23.8 Krok za krokem: spárovat zálohu s vyúčtovací fakturou
 
 Dělejte to, když vám dodavatel poslal nejdřív zálohovou fakturu a po zaplacení vyúčtovací (finální) fakturu.

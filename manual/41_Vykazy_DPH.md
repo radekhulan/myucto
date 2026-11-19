@@ -656,6 +656,8 @@ V editoru faktury (vystavené i přijaté) je sekce **Klasifikace** s výběrem 
 - nechat pole prázdné, použije se automatika,
 - vybrat konkrétní kód jako ruční volbu (např. specifický kód pro export).
 
+Kód `mimo` (mimo předmět DPH) nemá řádek přiznání ani oddíl kontrolního hlášení a platí pro vystavené i přijaté doklady. Použijte ho u položky, která předmětem daně není, například místní poplatek z pobytu přeúčtovaný hostovi. Položka bez vlastního kódu by převzala kód hlavičky dokladu. Kód u mnoha položek najednou změníte hromadnou akcí ([§ 52.8.3](52_Ucetni_denik.md#5283-krok-za-krokem-cleneni-dph-a-polozky-dokladu)).
+
 ### 41.13.12 Reverse charge v cizí měně
 
 U plnění s reverse charge v cizí měně (typicky kódy 5, 23, 24):
