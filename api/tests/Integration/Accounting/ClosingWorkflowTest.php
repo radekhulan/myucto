@@ -492,6 +492,29 @@ final class ClosingWorkflowTest extends TestCase
         self::assertNotNull($this->findCheck($precheck['checks'], 'unposted_invoices'), 'Ostatní kontroly doběhnou.');
     }
 
+    /**
+     * Plátcovství z dolního limitu vzniká až 1. ledna dalšího roku. Uzávěrka roku, v němž
+     * firma limit překročila, ho hodnotí k rozvahovému dni (varování), ne k dnešku, kdy už
+     * plátcovství běží. Vznik plátcovství uvnitř uzavíraného roku zůstává chybou.
+     */
+    public function testVatRegistrationDueIsGradedAgainstPeriodEnd(): void
+    {
+        $year = (int) date('Y') - 1;
+        $periodId = $this->periods->create($this->supplierId, $year, $year . '-01-01', $year . '-12-31');
+        $period = $this->periods->findById($this->supplierId, $periodId);
+        $this->db->pdo()->prepare('UPDATE supplier SET is_vat_payer = 0 WHERE id = ?')->execute([$this->supplierId]);
+        $this->issuedInvoice(2100000.00, $year . '-06-01');
+
+        $check = $this->findCheck($this->closing->buildChecks($this->supplierId, $period, onlyKeys: ['vat_registration_due']), 'vat_registration_due');
+        self::assertSame(($year + 1) . '-01-01', $check['value']['becomes_payer_on']);
+        self::assertSame('warning', $check['severity'], 'Povinnost začíná až po konci období.');
+
+        $this->issuedInvoice(600000.00, $year . '-07-01');
+        $check = $this->findCheck($this->closing->buildChecks($this->supplierId, $period, onlyKeys: ['vat_registration_due']), 'vat_registration_due');
+        self::assertSame($year . '-07-02', $check['value']['becomes_payer_on']);
+        self::assertSame('error', $check['severity'], 'Plátcovství vzniklo uvnitř období.');
+    }
+
     // ── I2: bilanční kontinuita 702↔701 ─────────────────────────────────────
 
     public function testI2OpenNextMirrorsClosingIntoOpening(): void
@@ -1183,6 +1206,28 @@ final class ClosingWorkflowTest extends TestCase
      * Syntetická data I1: výnos 602 10 000, náklad 518 4 000, zůstatky 311/321/221/343.
      * BS: 311 = 7 100, 343 = −1 260, 221 = 5 000, 321 = −4 840; VH = 6 000.
      */
+    private function issuedInvoice(float $amount, string $date): void
+    {
+        $pdo = $this->db->pdo();
+        $clientId = (int) ($pdo->query('SELECT id FROM clients WHERE supplier_id = ' . $this->supplierId . ' ORDER BY id LIMIT 1')->fetchColumn() ?: 0);
+        $currencyId = (int) $pdo->query("SELECT id FROM currencies WHERE code = 'CZK' ORDER BY id LIMIT 1")->fetchColumn();
+        if ($clientId === 0) {
+            $czId = (int) $pdo->query("SELECT id FROM countries WHERE iso2 = 'CZ' LIMIT 1")->fetchColumn();
+            $pdo->prepare(
+                'INSERT INTO clients (supplier_id, company_name, street, city, zip, country_id, main_email, currency_default_id)
+                 VALUES (?, "Odběratel test s.r.o.", "Testovací 1", "Praha", "11000", ?, "odberatel@example.com", ?)'
+            )->execute([$this->supplierId, $czId, $currencyId]);
+            $clientId = (int) $pdo->lastInsertId();
+        }
+        $pdo->prepare(
+            'INSERT INTO invoices
+                (supplier_id, client_id, invoice_type, varsymbol, issue_date, tax_date, due_date,
+                 currency_id, reverse_charge, client_snapshot, supplier_snapshot,
+                 total_without_vat, total_vat, total_with_vat, status, created_by)
+             VALUES (?, ?, "invoice", ?, ?, ?, ?, ?, 0, "{}", "{}", ?, 0, ?, "issued", ?)'
+        )->execute([$this->supplierId, $clientId, (string) random_int(10000000, 99999999), $date, $date, $date, $currencyId, $amount, $amount, $this->userId]);
+    }
+
     private function createClosingDimensions(): array
     {
         $dimensions = $this->dimensions;

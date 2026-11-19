@@ -116,6 +116,8 @@ Kontrolují se mimo jiné:
 - **cizoměnové otevřené doklady** čekající na přecenění,
 - zůstatky **dohadných účtů 388/389** a **časového rozlišení 381 až 385**,
 - informativní upozornění na **splatnou daň z příjmů** (591/341), kterou je nutné zaúčtovat ručně,
+- **vznik plátcovství DPH z obratu** (§ 6 ZDPH) u firmy, která plátcem není: vzniklo-li plátcovství uvnitř období (překročení horního limitu), je to chyba; překročení dolního limitu, kdy plátcovství vzniká až 1. ledna dalšího roku, je jen varování. Hodnotí se ke konci období, ne ke dni spuštění kontrol,
+- **kategorie účetní jednotky** pro povinné přehledy podle § 18 odst. 2 ZoÚ: nejde-li kategorii určit (například nastavení čistého obratu zahrnuje výnosy jen v jednom členění výsledovky), kontroly doběhnou a ohlásí varování s důvodem,
 - **zaúčtovaná daň z příjmů proti spočtené dani**: obrat účtu 591 roku (bez uzavření knih) se porovná s daní, kterou by dnes navrhl krok Daň z příjmů (finalizované přiznání, jinak dopočet z účetnictví). Rozdíl od jedné koruny výš je varování, uzavření knih neblokuje. Dokud krok daně není hotový a nic zaúčtováno není, kontrola jen informuje; ztrátová firma bez daně nevaruje.
 
 **Jak poznáte, že je hotovo:** Kontroly neobsahují žádnou chybu. Při alespoň jedné chybě se u tlačítka zobrazí

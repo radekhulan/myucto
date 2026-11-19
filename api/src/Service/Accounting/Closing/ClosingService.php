@@ -6177,14 +6177,16 @@ final class ClosingService
         // odvádět měl, a doměrek jde zpětně od data vzniku. Systém obrat i limity znal,
         // ale datum vzniku z nich nikdy nevyvodil.
         //
-        // `error`, když plátcovství už VZNIKLO a firma plátcem není — to je stav, ve
-        // kterém se každý další doklad vystavuje špatně. Překročení dolního limitu je
-        // `warning`: povinnost nastane teprve od 1. ledna, je čas se registrovat.
+        // `error`, když plátcovství VZNIKLO uvnitř kontrolovaného období (do $rangeTo)
+        // a firma plátcem není — doklady období se pak vystavovaly špatně. Překročení
+        // dolního limitu je `warning`: povinnost nastane teprve od 1. ledna dalšího roku,
+        // tedy až po konci období. Hodnotí se k období, ne k dnešku: uzávěrka roku 2025
+        // dělaná v listopadu 2026 by jinak hlásila jako chybu roku 2025 povinnost roku 2026.
         if ($wants('vat_registration_due')) {
             $vatReg = $this->vatRegistration->evaluate($supplierId, $fiscalYear);
             if ($vatReg['applicable'] && !$vatReg['is_vat_payer'] && $vatReg['status'] !== 'below') {
                 $alreadyPayer = $vatReg['becomes_payer_on'] !== null
-                    && $vatReg['becomes_payer_on'] <= date('Y-m-d');
+                    && $vatReg['becomes_payer_on'] <= $rangeTo;
                 $checks[] = [
                     'key' => 'vat_registration_due',
                     'severity' => $alreadyPayer ? 'error' : 'warning',
