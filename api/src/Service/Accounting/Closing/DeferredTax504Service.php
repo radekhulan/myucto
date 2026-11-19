@@ -71,7 +71,7 @@ final class DeferredTax504Service
             $this->assertFramework($supplierId, $period, true);
             if ($period['status'] !== 'closing') throw new ClosingException('period_not_closing', 'Období není ve stavu uzavírání.', 409);
             if ((int) $period['row_version'] !== $expectedVersion) throw new ClosingException('version_conflict', 'Stav období se změnil. Obnovte uzávěrku.', 409);
-            if (!is_string($body['source_hash'] ?? null) || !hash_equals($body['source_hash'], DeferredTax504Repository::sourceHash($this->db, $supplierId, $periodId, true))) throw DeferredTax504Repository::changed();
+            if (!DeferredTax504Repository::sourceHashMatches($this->db, $body['source_hash'] ?? null, $supplierId, $periodId, true)) throw DeferredTax504Repository::changed();
             $assessment = DeferredTax504Builder::assessment($body);
             if (!$assessment['enabled']) throw new ClosingException('deferred_tax_method_required', 'Před účtováním výslovně zvolte vlastní metodu odložené daně.', 422);
             \MyInvoice\Service\Accounting\FrameworkOperationPolicy::assertAllowed(new AccountingRoleProfile(AccountingFrameworkService::CZ_504), 'deferred_tax', $body);
