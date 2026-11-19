@@ -4614,7 +4614,7 @@ final class ClosingService
             throw new ClosingException('next_period_missing', 'Následující období (kam se rozdělení účtuje) neexistuje — nejprve otevři nový rok.');
         }
         if (!in_array((string) $next['status'], self::PROFIT_DISTRIBUTION_TARGET_STATUSES, true)) {
-            throw new ClosingException('next_period_not_open', 'Následující období ' . $next['fiscal_year'] . ' není otevřené (stav: ' . $next['status'] . ').');
+            throw new ClosingException('next_period_not_open', $this->nextPeriodNotOpenMessage($supplierId, $next));
         }
         return ['source' => $period, 'target' => $next, 'source_id' => (int) $period['id'], 'source_year' => (int) $period['fiscal_year']];
     }
@@ -4992,10 +4992,7 @@ final class ClosingService
                 $next = $nextLocked;
             }
             if ($next['status'] !== 'open') {
-                throw new ClosingException(
-                    'next_period_not_open',
-                    'Následující období ' . $next['fiscal_year'] . ' není otevřené (stav: ' . $next['status'] . ').',
-                );
+                throw new ClosingException('next_period_not_open', $this->nextPeriodNotOpenMessage($supplierId, $next));
             }
             $nextId = (int) $next['id'];
             $nextFy = (int) $next['fiscal_year'];
@@ -5369,8 +5366,10 @@ final class ClosingService
                     )) {
                         throw new ClosingException(
                             'invalid_status_transition',
-                            'Následující období je uzavřené/schválené nebo má vlastní uzávěrku — '
-                                . 'opening zápis nelze smazat (§17/7). Nejprve znovu otevři následující období.',
+                            AccountingPeriodStatus::isClosed((string) $next['status'])
+                                ? 'Následující období ' . $next['fiscal_year'] . ' je uzavřené nebo schválené, otevírací zápis nelze smazat (§17/7). Nejprve následující období znovu otevřete.'
+                                : 'Následující období ' . $next['fiscal_year'] . ' má rozdělanou vlastní uzávěrku se zaúčtovanými zápisy, otevírací zápis nelze smazat. '
+                                    . 'Nejprve v uzávěrce roku ' . $next['fiscal_year'] . ' vezměte zpět její kroky a klikněte na Přerušit uzávěrku.',
                         );
                     }
                     // Převzatý otevírací zápis (krok ho jen převzal, nic neúčtoval) patří
@@ -7045,6 +7044,27 @@ final class ClosingService
     }
 
     // ── interní ───────────────────────────────────────────────────────────────
+
+    /**
+     * Proč do následujícího období nejde účtovat a co s tím. Rozdělaná uzávěrka (stav
+     * Uzavírá se) se dá přerušit, jen když ještě nemá uzávěrkové zápisy, jinak je napřed
+     * potřeba vzít zpět její kroky.
+     *
+     * @param array<string,mixed> $next
+     */
+    private function nextPeriodNotOpenMessage(int $supplierId, array $next): string
+    {
+        $year = (string) $next['fiscal_year'];
+        if ((string) $next['status'] === 'closing') {
+            return $this->closing->hasClosingEntries($supplierId, (int) $next['id'])
+                ? 'Následující období ' . $year . ' má rozdělanou uzávěrku (stav Uzavírá se) se zaúčtovanými zápisy. '
+                    . 'Nejprve v uzávěrce roku ' . $year . ' vezměte zpět její kroky, klikněte na Přerušit uzávěrku a akci zopakujte.'
+                : 'Následující období ' . $year . ' má rozdělanou uzávěrku (stav Uzavírá se). '
+                    . 'Nejprve v uzávěrce roku ' . $year . ' klikněte na Přerušit uzávěrku a akci zopakujte.';
+        }
+        return 'Následující období ' . $year . ' není otevřené (stav: ' . $next['status'] . '). '
+            . 'Do uzavřeného nebo schváleného roku se neúčtuje; nejprve ho znovu otevřete.';
+    }
 
     /**
      * Vlastní/vnořená transakce (vzor PostingService) + mapování PostingException

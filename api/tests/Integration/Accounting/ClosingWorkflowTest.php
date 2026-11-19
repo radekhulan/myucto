@@ -515,6 +515,35 @@ final class ClosingWorkflowTest extends TestCase
         self::assertSame('error', $check['severity'], 'Plátcovství vzniklo uvnitř období.');
     }
 
+    /** Rozdělaná uzávěrka dalšího roku: hláška řekne, že ji je potřeba nejdřív přerušit. */
+    public function testOpenNextIntoClosingNextYearTellsToAbortIt(): void
+    {
+        $this->seedScenario();
+        $this->runStepsUntilCloseReady();
+        $this->closing->closeBooks($this->supplierId, $this->periodId, $this->rv(), $this->meta());
+        $nextId = $this->periods->create($this->supplierId, self::YEAR + 1, (self::YEAR + 1) . '-01-01', (self::YEAR + 1) . '-12-31');
+        $this->db->pdo()->prepare("UPDATE accounting_periods SET status = 'closing' WHERE id = ?")->execute([$nextId]);
+
+        try {
+            $this->closing->openNext($this->supplierId, $this->periodId, $this->rv(), $this->meta());
+            self::fail('Do rozdělané uzávěrky dalšího roku se otevírat nesmí.');
+        } catch (ClosingException $e) {
+            self::assertSame('next_period_not_open', $e->errorCode);
+            self::assertStringContainsString('Přerušit uzávěrku', $e->getMessage());
+            self::assertStringNotContainsString('vezměte zpět', $e->getMessage());
+        }
+
+        $this->posting->postDocument($this->supplierId, 'income_tax', $nextId, [
+            self::l('591', 'debit', 10.00), self::l('341', 'credit', 10.00),
+        ], ['entry_date' => (self::YEAR + 1) . '-12-31', 'allow_closing_period' => true] + $this->meta());
+        try {
+            $this->closing->openNext($this->supplierId, $this->periodId, $this->rv(), $this->meta());
+            self::fail('Do rozdělané uzávěrky dalšího roku se otevírat nesmí.');
+        } catch (ClosingException $e) {
+            self::assertStringContainsString('vezměte zpět její kroky', $e->getMessage());
+        }
+    }
+
     // ── I2: bilanční kontinuita 702↔701 ─────────────────────────────────────
 
     public function testI2OpenNextMirrorsClosingIntoOpening(): void
