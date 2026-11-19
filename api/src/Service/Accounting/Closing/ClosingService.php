@@ -6197,7 +6197,7 @@ final class ClosingService
         // ale datum vzniku z nich nikdy nevyvodil.
         //
         // `error`, když plátcovství VZNIKLO uvnitř kontrolovaného období (do $rangeTo)
-        // a firma plátcem není — doklady období se pak vystavovaly špatně. Překročení
+        // a firma plátcem není: doklady období se pak vystavovaly špatně. Překročení
         // dolního limitu je `warning`: povinnost nastane teprve od 1. ledna dalšího roku,
         // tedy až po konci období. Hodnotí se k období, ne k dnešku: uzávěrka roku 2025
         // dělaná v listopadu 2026 by jinak hlásila jako chybu roku 2025 povinnost roku 2026.
