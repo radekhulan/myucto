@@ -265,6 +265,31 @@ final class BulkActionTest extends BankPostingTestCase
         self::assertArrayNotHasKey($center, $lines['311'] ?? [], 'Řádek pohledávky hodnotu položky nedostane.');
     }
 
+    public function testItemsScopeLeavesHeaderSplitAloneAndFillTreatsItAsValue(): void
+    {
+        $center = $this->types['cost_center'];
+        $a = $this->value('cost_center', 'S-SPA');
+        $b = $this->value('cost_center', 'S-SPB');
+        $item = $this->value('cost_center', 'S-ITM');
+        $docId = $this->postedSaleInvoice();
+        $this->dimensions->saveDocument($this->supplierId, 'invoice', $docId, [], null, false, [0 => [$center => [$a => 0.5, $b => 0.5]]]);
+        $split = [0 => [$center => [$a => 0.5, $b => 0.5]]];
+        self::assertEquals($split, $this->assignments->documentSplits($this->supplierId, 'invoice', $docId));
+
+        $fill = $this->bySource($this->dryRun('set_dimensions', 'invoice', [$docId], ['scope' => 'items', 'dimensions' => [
+            ['type_id' => $center, 'mode' => 'fill', 'value_id' => $item],
+        ]]))[$docId];
+        self::assertSame('unchanged', $fill['status'], 'Rozpad hlavičky je hodnota: „jen kde je prázdné" položku nevyplní.');
+
+        $this->applyRun($this->dryRun('set_dimensions', 'invoice', [$docId], ['scope' => 'items', 'dimensions' => [
+            ['type_id' => $center, 'mode' => 'set', 'value_id' => $item],
+        ]]));
+        $doc = $this->assignments->documentDimensions($this->supplierId, 'invoice', $docId);
+        self::assertSame([1 => [$center => $item]], $doc['items']);
+        self::assertEquals($split, $this->assignments->documentSplits($this->supplierId, 'invoice', $docId),
+            'Změna položek rozpad hlavičky nesmaže.');
+    }
+
     public function testJournalLinesOnlyOnChosenAccountPrefixesAndRollback(): void
     {
         $center = $this->types['cost_center'];
@@ -308,6 +333,29 @@ final class BulkActionTest extends BankPostingTestCase
         self::assertSame(0, (int) $this->jobs->find($dryId, $this->supplierId)['created_count']);
         self::assertSame([$center => $value], $this->header($docId));
         self::assertSame($value, $this->lineDims('invoice', $docId)['602'][$center] ?? null);
+    }
+
+    public function testRequiredDimensionCheckCoversRestampedPaymentEntries(): void
+    {
+        $center = $this->types['cost_center'];
+        $value = $this->value('cost_center', 'S-PAY');
+        $docId = $this->postedSaleInvoice(header: [$center => $value]);
+        $tx = $this->transaction($this->statement(), 1000.0, ['match_status' => 'manual', 'matched_invoice_id' => $docId]);
+        $this->invoicePayment($docId, $tx, 1000.0);
+        $this->service->handleTransaction($tx, $this->userId);
+        $bankEntry = $this->journal->findBySource($this->supplierId, 'bank', $tx);
+        self::assertNotNull($bankEntry, 'Úhrada je zaúčtovaná.');
+        self::assertSame($value, $this->entryLineDims((int) $bankEntry['id'])['221.100'][$center] ?? null, 'Úhrada převzala středisko faktury.');
+        // Povinné středisko jen na bankovním účtu: vlastní zápis faktury ho nemá, hlídá se jen úhrada.
+        (new DimensionRuleService($this->db))->create($this->supplierId, [
+            'dimension_type_id' => $center, 'account_mask' => '221', 'enforcement' => 'error',
+        ], $this->userId);
+
+        $item = $this->bySource($this->dryRun('set_dimensions', 'invoice', [$docId], ['scope' => 'document', 'dimensions' => [
+            ['type_id' => $center, 'mode' => 'clear'],
+        ]]))[$docId];
+        self::assertSame(['skipped', 'dimension_required'], [$item['status'], $item['reason_code']], json_encode($item));
+        self::assertSame($value, $this->entryLineDims((int) $bankEntry['id'])['221.100'][$center] ?? null);
     }
 
     public function testClosedPeriodAndFrozenDimensionsAreSkipped(): void
@@ -382,6 +430,36 @@ final class BulkActionTest extends BankPostingTestCase
         self::assertContains('602', $codes);
         self::assertNotContains('604', $codes);
         self::assertNull($this->db->pdo()->query("SELECT posting_rule_key FROM invoice_items WHERE invoice_id = {$docId}")->fetchColumn() ?: null);
+    }
+
+    public function testSetPostingRuleInFiledVatPeriodRewritesOnlyTaxNeutrally(): void
+    {
+        $insert = $this->db->pdo()->prepare(
+            "INSERT INTO posting_rules (supplier_id, rule_key, description, debit_account_code, credit_account_code, priority, is_active)
+             VALUES (?, ?, 'Syntetická předkontace', ?, ?, 0, 1)"
+        );
+        $insert->execute([$this->supplierId, 'syn.sale_604', '311', '604']);
+        $insert->execute([$this->supplierId, 'syn.sale_accrual', '311', '384']);
+        $docId = $this->postedSaleInvoice();
+        $this->db->pdo()->prepare("UPDATE invoice_items SET revenue_account_code = '602' WHERE invoice_id = ?")->execute([$docId]);
+        // Podané přiznání k DPH za červen (zámek k datu správce posunul zpět, nikde není)
+        // a podané přiznání k dani z příjmů: přesun výnosu do jiné třídy už není neutrální.
+        $submission = $this->db->pdo()->prepare(
+            "INSERT INTO tax_submissions (supplier_id, form_code, period_year, period_month, period_quarter, form_variant, xml_content,
+                xml_size_bytes, xml_sha256, validation_status, status, submitted_at, summary_json, generated_by)
+             VALUES (?, ?, ?, ?, NULL, 'B', '<test/>', 7, ?, 'passed', 'submitted', NOW(), '{}', NULL)"
+        );
+        $submission->execute([$this->supplierId, 'dphdp3', self::YEAR, 6, hash('sha256', 'syn-filed-vat')]);
+        $submission->execute([$this->supplierId, 'dppdp9', self::YEAR, null, hash('sha256', 'syn-filed-income')]);
+
+        $taxChange = $this->bySource($this->dryRun('set_posting_rule', 'invoice', [$docId],
+            ['rule_key' => 'syn.sale_accrual', 'mode' => JournalRebookService::MODE_REWRITE_OR_REVERSE]))[$docId];
+        self::assertSame(['skipped', 'period_filed'], [$taxChange['status'], $taxChange['reason_code']], json_encode($taxChange));
+        self::assertStringContainsString('přiznání k DPH za 6/' . self::YEAR, (string) $taxChange['message']);
+
+        $neutral = $this->bySource($this->dryRun('set_posting_rule', 'invoice', [$docId],
+            ['rule_key' => 'syn.sale_604', 'mode' => JournalRebookService::MODE_REWRITE]))[$docId];
+        self::assertSame('would_change', $neutral['status'], 'Přesun výnosu mezi účty bez daňového dopadu v podaném období projde, jako u Přeúčtovat.');
     }
 
     // ── rebook_account nad výběrem ───────────────────────────────────────────
