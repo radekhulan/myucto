@@ -231,10 +231,19 @@ final class CapitalNativeTest extends TestCase
         $this->posted('911','1000.00');
         $this->posted('518','800.00','debit');
         $lockedRows=function():int{
-            // InnoDB obnovuje cache INNODB_TRX nejvýš po 100 ms.
+            // InnoDB obnovuje cache INNODB_TRX nejvýš po 100 ms, pod zátěží CI i později.
+            // Počet se bere, až se dvě čtení po sobě shodnou, jinak by „před" mohlo nést
+            // ještě stav bez zámků z vložení zápisů výše.
+            $read=fn():int=>(int)$this->pdo->query('SELECT trx_rows_locked FROM information_schema.INNODB_TRX WHERE trx_mysql_thread_id=CONNECTION_ID()')->fetchColumn();
             usleep(150000);
-            $q=$this->pdo->query('SELECT trx_rows_locked FROM information_schema.INNODB_TRX WHERE trx_mysql_thread_id=CONNECTION_ID()');
-            return (int)$q->fetchColumn();
+            $last=$read();
+            for($i=0;$i<20;$i++){
+                usleep(150000);
+                $now=$read();
+                if($now===$last){return $now;}
+                $last=$now;
+            }
+            return $last;
         };
         $before=$lockedRows();
         $choices=(new \MyInvoice\Service\Nonprofit\Capital\CapitalChoices($this->db))->read($this->supplier,$this->period);
