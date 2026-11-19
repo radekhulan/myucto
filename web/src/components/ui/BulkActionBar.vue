@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { Comment, Fragment, onBeforeUnmount, ref, useSlots, watch, type VNode } from 'vue'
 import { useI18n } from 'vue-i18n'
 import WorkspaceTeleport from '@/components/workspace/WorkspaceTeleport.vue'
 import { useIsPhone } from '@/composables/useIsPhone'
@@ -18,6 +18,10 @@ import { useIsPhone } from '@/composables/useIsPhone'
  *
  * Telefon: zalomená tlačítka by zakryla většinu seznamu, proto lišta drží jeden
  * řádek (počet, Akce, zrušit výběr) a akce stránky se otevřou v nabídce zespodu.
+ *
+ * Desktop: méně časté akce dá stránka do slotu `more`. Lišta je pak schová pod
+ * tlačítko „Další", které otevře nabídku nad lištou, aby se lišta nezalomila do
+ * dvou řádků přes tabulku. Na telefonu jsou v nabídce zespodu pod hlavními akcemi.
  */
 const props = defineProps<{
   /** Počet vybraných položek; při nule se lišta nevykresluje. */
@@ -27,16 +31,70 @@ const props = defineProps<{
 const emit = defineEmits<{ clear: [] }>()
 const { t } = useI18n()
 const isPhone = useIsPhone()
-const sheetOpen = ref(false)
+const slots = useSlots()
 
-watch(() => props.count, count => { if (count === 0) sheetOpen.value = false })
+/** Vykreslí slot `more` aspoň jednu akci? Tlačítka s nesplněným `v-if` zůstanou jen jako komentáře. */
+function hasContent(nodes: VNode[]): boolean {
+  return nodes.some(node => {
+    if (node.type === Comment) return false
+    if (node.type === Fragment) return Array.isArray(node.children) && hasContent(node.children as VNode[])
+    return true
+  })
+}
+
+function hasMore(): boolean {
+  return !!slots.more && hasContent(slots.more())
+}
+const sheetOpen = ref(false)
+const moreOpen = ref(false)
+const moreRoot = ref<HTMLElement | null>(null)
+
+watch(() => props.count, count => {
+  if (count === 0) {
+    sheetOpen.value = false
+    moreOpen.value = false
+  }
+})
 
 /** Klik na akci nabídku zavře; tlačítko, které otevírá vlastní podnabídku, ji nechá. */
-function onSheetClick(event: MouseEvent): void {
+function closesMenu(event: MouseEvent): boolean {
   const target = event.target instanceof Element ? event.target.closest('button, a') : null
-  if (!target || target.hasAttribute('aria-haspopup') || target.getAttribute('aria-expanded') !== null) return
-  sheetOpen.value = false
+  return !!target && !target.hasAttribute('aria-haspopup') && target.getAttribute('aria-expanded') === null
 }
+
+function onSheetClick(event: MouseEvent): void {
+  if (closesMenu(event)) sheetOpen.value = false
+}
+
+function onMoreClick(event: MouseEvent): void {
+  if (closesMenu(event)) moreOpen.value = false
+}
+
+function onDocumentPointer(event: PointerEvent): void {
+  if (moreRoot.value && event.target instanceof Node && !moreRoot.value.contains(event.target)) moreOpen.value = false
+}
+
+function onDocumentKey(event: KeyboardEvent): void {
+  if (event.key === 'Escape') {
+    event.stopPropagation()
+    moreOpen.value = false
+  }
+}
+
+watch(moreOpen, open => {
+  if (open) {
+    document.addEventListener('pointerdown', onDocumentPointer, true)
+    document.addEventListener('keydown', onDocumentKey, true)
+  } else {
+    document.removeEventListener('pointerdown', onDocumentPointer, true)
+    document.removeEventListener('keydown', onDocumentKey, true)
+  }
+})
+
+onBeforeUnmount(() => {
+  document.removeEventListener('pointerdown', onDocumentPointer, true)
+  document.removeEventListener('keydown', onDocumentKey, true)
+})
 </script>
 
 <template>
@@ -83,6 +141,24 @@ function onSheetClick(event: MouseEvent): void {
 
           <slot />
 
+          <div v-if="hasMore()" ref="moreRoot" class="relative" data-test="bulk-bar-more">
+            <button type="button"
+              class="cursor-pointer inline-flex h-8 items-center gap-1.5 rounded-md px-3 text-sm font-medium text-neutral-700 ring-1 ring-neutral-300 transition-colors hover:text-neutral-900 hover:bg-neutral-100"
+              :aria-expanded="moreOpen" data-test="bulk-bar-more-toggle"
+              @click="moreOpen = !moreOpen">
+              {{ t('common.bulk_more') }}
+              <svg class="h-4 w-4 transition-transform" :class="moreOpen ? '' : 'rotate-180'" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.2" aria-hidden="true">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M5 15l7-7 7 7" />
+              </svg>
+            </button>
+            <div v-show="moreOpen"
+              class="bulk-more-menu absolute bottom-full right-0 mb-2 flex min-w-56 flex-col gap-1.5 rounded-xl bg-surface-raised p-2 shadow-2xl ring-1 ring-neutral-300"
+              role="menu" data-test="bulk-bar-more-menu"
+              @click="onMoreClick">
+              <slot name="more" />
+            </div>
+          </div>
+
           <button type="button"
             class="cursor-pointer ml-1 inline-flex h-8 items-center gap-1 rounded-md px-2 text-xs text-neutral-500 transition-colors hover:text-neutral-900"
             @click="emit('clear')">
@@ -102,6 +178,7 @@ function onSheetClick(event: MouseEvent): void {
         <div class="mb-2 px-1 text-sm font-medium text-neutral-700 tabular-nums">{{ t('common.bulk_selected', { n: count }) }}</div>
         <div class="flex flex-col gap-1.5">
           <slot />
+          <slot name="more" />
         </div>
       </div>
     </template>
@@ -114,5 +191,12 @@ function onSheetClick(event: MouseEvent): void {
   width: 100%;
   min-height: 2.75rem;
   justify-content: flex-start;
+}
+
+/* V nabídce Další jsou akce pod sebou přes celou šířku nabídky. */
+.bulk-more-menu :deep(:is(button, a)) {
+  width: 100%;
+  justify-content: flex-start;
+  white-space: nowrap;
 }
 </style>

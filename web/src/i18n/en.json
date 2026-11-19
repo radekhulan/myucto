@@ -25064,6 +25064,7 @@
     "expand_items": "Show document items",
     "bulk_selected": "Selected: {n}",
     "bulk_clear": "Clear selection",
+    "bulk_more": "More",
     "export": "Export",
     "preview": "Preview",
     "view": "View",

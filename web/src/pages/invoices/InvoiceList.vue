@@ -1426,26 +1426,12 @@ useWindowRefresh(refreshLoadedPages,
          řádky dole v tabulce, kdežto v hlavičce byly akce mimo zorné pole a
          navíc při každém výběru odsouvaly tlačítko „Nová faktura". -->
     <BulkActionBar :count="selectedIds.length" @clear="selectedIds = []">
-        <button v-if="selectedIds.length > 0 && auth.canRead('utilities.export')"
-          @click="openBulkPdfExport"
-          :disabled="bulkBusy"
-          :class="btnOutline('primary')">
-          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 16V4m0 12l-4-4m4 4l4-4M4 20h16" /></svg>
-          {{ t('invoice.bulk_pdf', { n: selectedIds.length }) }}
-        </button>
         <button v-if="(issuableSelected.length > 0) && auth.canWrite('invoices.issue')"
           @click="bulkIssue"
           :disabled="bulkBusy"
           :class="btnFilled('success')">
           <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.check" /></svg>
           {{ bulkBusy ? '…' : t('invoice.bulk_issue', { n: issuableSelected.length }) }}
-        </button>
-        <button v-if="(selectedIds.length > 0) && auth.canWrite('invoices.issue') && !auth.isClientRole"
-          @click="bulkReissue"
-          :disabled="bulkBusy"
-          :class="btnOutline('primary')">
-          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.copy" /></svg>
-          {{ bulkBusy ? '…' : t('invoice.bulk_reissue', { n: selectedIds.length }) }}
         </button>
         <button v-if="(markPayableSelected.length > 0) && auth.canWrite('invoices.mark_paid')"
           @click="bulkMarkPaid"
@@ -1468,22 +1454,6 @@ useWindowRefresh(refreshLoadedPages,
           <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.bell" /></svg>
           {{ bulkBusy ? '…' : t('invoice.bulk_reminder', { n: reminderSelected.length }) }}
         </button>
-        <button v-if="(selectedIds.length > 0) && auth.canWrite('invoices.create') && !auth.isClientRole"
-          @click="openBulkOss"
-          :disabled="bulkBusy"
-          :class="btnOutline('warning')">
-          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M3.6 9h16.8M3.6 15h16.8M12 3a15 15 0 010 18M12 3a15 15 0 000 18M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-          {{ t('invoice.bulk_oss', { n: selectedIds.length }) }}
-        </button>
-        <button v-if="(selectedIds.length > 0) && dimensions.canEdit.value && !auth.isClientRole"
-          @click="bulkDimsOpen = true"
-          :disabled="bulkBusy"
-          :class="btnOutline('primary')"
-          class="whitespace-nowrap"
-          data-test="invoice-bulk-dimensions">
-          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M7 7h.01M7 3h5a1.99 1.99 0 011.41.59l7 7a2 2 0 010 2.82l-7 7a2 2 0 01-2.82 0l-7-7A1.99 1.99 0 013 12V7a4 4 0 014-4z" /></svg>
-          {{ t('dimensions.bulk_button', { n: selectedIds.length }) }}
-        </button>
         <button v-if="(postableSelected.length > 0) && auth.canWrite('accounting.journal.post') && !auth.isClientRole"
           @click="bulkPost"
           :disabled="bulkBusy"
@@ -1496,6 +1466,38 @@ useWindowRefresh(refreshLoadedPages,
           <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.table" /></svg>
           {{ t('bulk_actions.menu') }}
         </button>
+        <template #more>
+          <button v-if="selectedIds.length > 0 && auth.canRead('utilities.export')"
+            @click="openBulkPdfExport"
+            :disabled="bulkBusy"
+            :class="btnOutline('primary')">
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 16V4m0 12l-4-4m4 4l4-4M4 20h16" /></svg>
+            {{ t('invoice.bulk_pdf', { n: selectedIds.length }) }}
+          </button>
+          <button v-if="(selectedIds.length > 0) && auth.canWrite('invoices.issue') && !auth.isClientRole"
+            @click="bulkReissue"
+            :disabled="bulkBusy"
+            :class="btnOutline('primary')">
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.copy" /></svg>
+            {{ bulkBusy ? '…' : t('invoice.bulk_reissue', { n: selectedIds.length }) }}
+          </button>
+          <button v-if="(selectedIds.length > 0) && auth.canWrite('invoices.create') && !auth.isClientRole"
+            @click="openBulkOss"
+            :disabled="bulkBusy"
+            :class="btnOutline('warning')">
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M3.6 9h16.8M3.6 15h16.8M12 3a15 15 0 010 18M12 3a15 15 0 000 18M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+            {{ t('invoice.bulk_oss', { n: selectedIds.length }) }}
+          </button>
+          <button v-if="(selectedIds.length > 0) && dimensions.canEdit.value && !auth.isClientRole"
+            @click="bulkDimsOpen = true"
+            :disabled="bulkBusy"
+            :class="btnOutline('primary')"
+            class="whitespace-nowrap"
+            data-test="invoice-bulk-dimensions">
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M7 7h.01M7 3h5a1.99 1.99 0 011.41.59l7 7a2 2 0 010 2.82l-7 7a2 2 0 01-2.82 0l-7-7A1.99 1.99 0 013 12V7a4 4 0 014-4z" /></svg>
+            {{ t('dimensions.bulk_button', { n: selectedIds.length }) }}
+          </button>
+        </template>
     </BulkActionBar>
 
     <!-- Filtry -->
