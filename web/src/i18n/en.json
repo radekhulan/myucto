@@ -22183,6 +22183,8 @@
         "diff": "Cards vs. 501 difference",
         "no_cards": "There are no small asset cards to accrue in this period.",
         "existing": "Posted {amount}.",
+        "booked_outside": "A small-asset deferral of {amount} is already posted in the year by another entry ({entries}). The step will not post it again, a new entry would double it. Confirm the Accruals step, or reverse the other entry first.",
+        "taken_over": "The original system closed this year, the small-asset deferral is not posted again. Confirm the Accruals step.",
         "post": "Post accrual",
         "posted": "Small asset accrual has been posted.",
         "load_failed": "Failed to load the accrual preview.",

@@ -727,6 +727,53 @@ final class ClosingRepository
     }
 
     /**
+     * Odklad nákladu na účet časového rozlišení zaúčtovaný v rozsahu zápisy mimo kroky
+     * uzávěrky (ruční interní doklad, deník převzatý z jiného programu): zápis s čistým MD
+     * na účtu odkladu a čistým D na nákladovém účtu (prefixy kódů). Částka zápisu je menší
+     * z obou pohybů. Zápis, který odklad rozpouští (MD náklad / D odklad), se nepočítá,
+     * stejně jako stornovaný zápis a storno samo.
+     *
+     * @param list<string> $excludeSourceTypes zápisy kroků uzávěrky a otevření roku
+     * @return list<array{entry_id:int, document_no:?string, entry_date:string, amount:float}>
+     */
+    public function deferralsByOtherEntries(int $supplierId, string $deferPrefix, string $expensePrefix, string $from, string $to, array $excludeSourceTypes): array
+    {
+        $types = $excludeSourceTypes === [] ? '' : ' AND e.source_type NOT IN (' . implode(',', array_fill(0, count($excludeSourceTypes), '?')) . ')';
+        // Kandidáti jdou od řádků účtu odkladu (381 bývá řídký), ne od všech zápisů roku.
+        $stmt = $this->db->pdo()->prepare(
+            "WITH candidates AS (
+                SELECT DISTINCT l.entry_id
+                  FROM chart_of_accounts a
+                  JOIN journal_entry_lines l ON l.supplier_id = a.supplier_id AND l.account_id = a.id
+                  JOIN journal_entries e ON e.id = l.entry_id AND e.supplier_id = l.supplier_id
+                 WHERE a.supplier_id = ? AND a.account_code LIKE CONCAT(?, '%')
+                   AND e.posted_at IS NOT NULL AND e.entry_date BETWEEN ? AND ?{$types}
+                   AND e.reversed_by IS NULL
+                   AND NOT EXISTS (SELECT 1 FROM journal_entries o WHERE o.supplier_id = e.supplier_id AND o.reversed_by = e.id)
+             )
+             SELECT e.id, e.document_no, e.entry_date,
+                    SUM(CASE WHEN a.account_code LIKE CONCAT(?, '%')
+                             THEN CASE WHEN l.side = 'debit' THEN l.signed_amount ELSE -l.signed_amount END ELSE 0 END) AS defer_net,
+                    SUM(CASE WHEN a.account_code LIKE CONCAT(?, '%')
+                             THEN CASE WHEN l.side = 'credit' THEN l.signed_amount ELSE -l.signed_amount END ELSE 0 END) AS expense_net
+               FROM candidates c
+               JOIN journal_entries e ON e.id = c.entry_id AND e.supplier_id = ?
+               JOIN journal_entry_lines l ON l.entry_id = e.id AND l.supplier_id = e.supplier_id
+               JOIN chart_of_accounts a ON a.id = l.account_id
+              GROUP BY e.id, e.document_no, e.entry_date
+             HAVING defer_net > 0.005 AND expense_net > 0.005
+              ORDER BY e.entry_date, e.id"
+        );
+        $stmt->execute([$supplierId, $deferPrefix, $from, $to, ...$excludeSourceTypes, $deferPrefix, $expensePrefix, $supplierId]);
+        return array_map(static fn (array $r): array => [
+            'entry_id' => (int) $r['id'],
+            'document_no' => $r['document_no'] !== null ? (string) $r['document_no'] : null,
+            'entry_date' => (string) $r['entry_date'],
+            'amount' => round(min((float) $r['defer_net'], (float) $r['expense_net']), 2),
+        ], $stmt->fetchAll(PDO::FETCH_ASSOC));
+    }
+
+    /**
      * Netto obrat účtu (prefix kódu, MD kladně) mezi daty JEN ze zápisů uzavření knih
      * (včetně uzávěrky převzaté z jiného programu). Zůstatek účtu před uzávěrkou roku je
      * zůstatek k rozvahovému dni bez tohoto obratu.

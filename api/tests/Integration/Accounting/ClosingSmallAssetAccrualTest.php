@@ -449,6 +449,96 @@ final class ClosingSmallAssetAccrualTest extends TestCase
         self::assertEqualsWithDelta(17500.00, (float) $preview['total'], 0.001);
     }
 
+    // ── odklad zaúčtovaný mimo krok, převzatý rok, sada karet ──────────────────
+
+    /**
+     * Odklad drobného majetku zaúčtovaný ručním interním dokladem (381/501): náhled ho ukáže
+     * jako existující a krok ho nezdvojí. Rozpuštění loňského odkladu v témže roce
+     * (MD 501 / D 381) se za odklad nepočítá.
+     */
+    public function testDeferralBookedByManualEntryIsShownAndNotPostedAgain(): void
+    {
+        $this->card('Notebook', self::YEAR . '-07-01', 36500.00);
+        $meta = ['entry_date' => self::ENDS_ON, 'posted_by' => $this->userId, 'user_id' => $this->userId];
+        $manualId = $this->posting->postDocument($this->supplierId, 'manual', null, [
+            ['account_code' => '381', 'side' => 'debit', 'amount' => 18250.00],
+            ['account_code' => '501', 'side' => 'credit', 'amount' => 18250.00],
+        ], $meta);
+        $this->posting->postDocument($this->supplierId, 'manual', null, [
+            ['account_code' => '501', 'side' => 'debit', 'amount' => 5000.00],
+            ['account_code' => '381', 'side' => 'credit', 'amount' => 5000.00],
+        ], ['entry_date' => self::STARTS_ON] + $meta);
+
+        $preview = $this->closing->smallAssetAccrualPreview($this->supplierId, $this->periodId, 'flat_pct', 50.0);
+        self::assertSame('booked_outside', $preview['post_blocked']);
+        self::assertEqualsWithDelta(18250.00, (float) $preview['booked_outside']['amount'], 0.001);
+        self::assertSame([$manualId], array_column($preview['booked_outside']['entries'], 'entry_id'));
+
+        $this->closing->start($this->supplierId, $this->periodId, $this->rv(), $this->meta());
+        try {
+            $this->closing->runSmallAssetAccrual($this->supplierId, $this->periodId, 'flat_pct', 50.0, $this->rv(), $this->meta(), 1000000.00);
+            self::fail('Odklad zaúčtovaný ručním zápisem se nesmí zdvojit.');
+        } catch (ClosingException $e) {
+            self::assertSame('small_asset_accrual_booked_outside', $e->errorCode);
+        }
+        self::assertNull($this->journal->findBySource($this->supplierId, 'small_asset_accrual', ClosingSourceId::smallAssetAccrual($this->periodId)));
+    }
+
+    /** Rok uzavřený původním systémem: krok nový odklad nezaúčtuje (stejně jako odpisy). */
+    public function testTakenOverYearPostsNoSmallAssetDeferral(): void
+    {
+        $this->card('Notebook', self::YEAR . '-07-01', 36500.00);
+        $this->posting->postDocument($this->supplierId, 'closing', null, [
+            ['account_code' => '710', 'side' => 'debit', 'amount' => 100.00],
+            ['account_code' => '702', 'side' => 'credit', 'amount' => 100.00],
+        ], ['entry_date' => self::ENDS_ON, 'posted_by' => $this->userId, 'user_id' => $this->userId]);
+
+        $preview = $this->closing->smallAssetAccrualPreview($this->supplierId, $this->periodId, 'pro_rata');
+        self::assertTrue($preview['closing_taken_over']);
+        self::assertSame('closing_taken_over', $preview['post_blocked']);
+
+        $this->closing->start($this->supplierId, $this->periodId, $this->rv(), $this->meta());
+        try {
+            $this->closing->runSmallAssetAccrual($this->supplierId, $this->periodId, 'pro_rata', null, $this->rv(), $this->meta());
+            self::fail('V roce s převzatou uzávěrkou se odklad drobného majetku neúčtuje.');
+        } catch (ClosingException $e) {
+            self::assertSame('closing_taken_over', $e->errorCode);
+        }
+    }
+
+    /**
+     * Náhled odkladu i kontrola úplnosti evidence počítají tutéž sadu karet: karta vrácená
+     * dobropisem ve stejném roce se nepočítá (nákup a vratka se v 501 vyruší), karta
+     * vyřazená jinak (rozbitá) svůj náklad v roce měla a počítá se.
+     */
+    public function testReturnedCardIsLeftOutButOtherDisposalCountsInBothCardTotals(): void
+    {
+        $returnedInvoice = $this->smallAssetDocument('DM-VRAT', 10000.00);
+        $brokenInvoice = $this->smallAssetDocument('DM-ROZB', 4000.00);
+        $returned = $this->smallAssets->insert($this->supplierId, ['name' => 'Monitor', 'acquisition_date' => self::YEAR . '-08-01',
+            'price' => 10000.00, 'quantity' => 1, 'unit_price' => 10000.00, 'status' => 'in_use', 'purchase_invoice_id' => $returnedInvoice], $this->userId);
+        $broken = $this->smallAssets->insert($this->supplierId, ['name' => 'Tablet', 'acquisition_date' => self::YEAR . '-08-01',
+            'price' => 4000.00, 'quantity' => 1, 'unit_price' => 4000.00, 'status' => 'in_use', 'purchase_invoice_id' => $brokenInvoice], $this->userId);
+        $this->card('Notebook', self::YEAR . '-07-01', 20000.00);
+        $creditNote = $this->smallAssetDocument('DM-VRAT-D', -10000.00, 'credit_note');
+        $pdo = $this->db->pdo();
+        $pdo->prepare('UPDATE purchase_invoices SET parent_purchase_invoice_id = ?, issue_date = ?, tax_date = ? WHERE id = ?')
+            ->execute([$returnedInvoice, self::YEAR . '-09-01', self::YEAR . '-09-01', $creditNote]);
+        $dispose = $pdo->prepare("UPDATE small_assets SET status = 'disposed', disposed_at = ?, disposal_reason = ? WHERE id = ? AND supplier_id = ?");
+        $dispose->execute([self::YEAR . '-09-01', 'Vráceno dodavateli', $returned, $this->supplierId]);
+        $dispose->execute([self::YEAR . '-10-01', 'Rozbité', $broken, $this->supplierId]);
+
+        $preview = $this->closing->smallAssetAccrualPreview($this->supplierId, $this->periodId, 'pro_rata');
+        $check = (new \ReflectionMethod(ClosingService::class, 'checkSmallAssetCards'))
+            ->invoke($this->closing, $this->supplierId, self::STARTS_ON, self::ENDS_ON);
+
+        self::assertEqualsWithDelta(24000.00, (float) $preview['cards_total'], 0.001, 'Notebook + rozbitý tablet, bez vráceného monitoru.');
+        self::assertEqualsWithDelta(24000.00, (float) $check['value']['cards_total'], 0.001, 'Kontrola evidence počítá stejnou sadu karet.');
+        self::assertNotContains($returned, array_column($preview['items'], 'small_asset_id'));
+        self::assertContains($broken, array_column($preview['items'], 'small_asset_id'));
+        self::assertEqualsWithDelta(4000.00, (float) $preview['breakdown_501_small_asset'], 0.001, '501 = 10 000 + 4 000 - 10 000.');
+    }
+
     // ── helpers ────────────────────────────────────────────────────────────────
 
     /** Přijatý doklad s jedinou položkou drobného majetku (bez zápisu); vrací id dokladu. */

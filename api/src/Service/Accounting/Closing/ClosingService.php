@@ -1762,7 +1762,7 @@ final class ClosingService
         $items = [];
         $total = 0.0;
         $cardsTotal = 0.0;
-        foreach ($this->smallAssets->additionsBetween($supplierId, $startsOn, $endsOn) as $card) {
+        foreach ($this->smallAssets->costAdditionsBetween($supplierId, $startsOn, $endsOn) as $card) {
             $price = round((float) ($card['price'] ?? 0), 2);
             $cardsTotal = round($cardsTotal + $price, 2);
             // EP-15: kotva = datum uvedení do užívání (fallback pořízení); doba dle doložených měsíců.
@@ -1797,9 +1797,9 @@ final class ClosingService
 
         // §DM báze pro flat_pct = ČISTÝ OBRAT 501.200 (net dobropisů), NE báze karet.
         // Účetní odkládá % ze skutečného nákladu drobného majetku (§7 ZoÚ / ČÚS), ne z
-        // evidence karet: ta bývá neúplná (řádek bez karty) a naopak by započítala i majetek
-        // pořízený a VRÁCENÝ v témže období (karta zůstává jako `disposed`, ale additionsBetween
-        // ji dá do báze) — net obrat 501 ho správně vynuluje. Karty zůstávají evidencí §28/5;
+        // evidence karet: ta bývá neúplná (řádek bez karty). Majetek pořízený a vrácený
+        // dobropisem v témže období karty nepočítají ({@see SmallAssetRepository::costAdditionsBetween}),
+        // net obrat 501 ho vynuluje stejně. Karty zůstávají evidencí §28/5;
         // per-karta `deferred_amount` u flat_pct proto nedává smysl (null), rozhoduje `total`.
         $materiality = null;
         if ($mode === 'flat_pct') {
@@ -1830,6 +1830,8 @@ final class ClosingService
 
         $existingEntry = $this->journal->findBySource($supplierId, 'small_asset_accrual', ClosingSourceId::smallAssetAccrual($periodId));
         $existingPayload = $this->stepsMap($supplierId, $periodId)['deferrals']['payload']['small_asset_accrual'] ?? null;
+        $bookedOutside = $this->smallAssetDeferralsBookedOutside($supplierId, $startsOn, $endsOn);
+        $takenOver = $this->closing->takenOverClosingEntryIds($supplierId, $periodId) !== [];
 
         return [
             'as_of' => $endsOn,
@@ -1849,7 +1851,34 @@ final class ClosingService
                 'pct' => is_array($existingPayload) ? ($existingPayload['pct'] ?? null) : null,
                 'amount' => is_array($existingPayload) ? round((float) ($existingPayload['total'] ?? 0), 2) : null,
             ],
+            // Odklad drobného majetku zaúčtovaný v roce jinými zápisy než krokem (ruční interní
+            // doklad, převod). Krok ho znovu neúčtuje ({@see runSmallAssetAccrual}).
+            'booked_outside' => $bookedOutside,
+            'closing_taken_over' => $takenOver,
+            // Proč krok nový odklad nezaúčtuje: rok uzavřel původní systém, nebo odklad leží v jiném zápisu.
+            'post_blocked' => $takenOver ? 'closing_taken_over' : ($bookedOutside !== null ? 'booked_outside' : null),
         ];
+    }
+
+    /**
+     * Odklad drobného majetku (MD 381 / D 501 podle pravidla accrual.small_asset.defer, po
+     * syntetikách) zaúčtovaný v rozsahu jinými zápisy než kroky uzávěrky: ruční interní
+     * doklad nebo deník převzatý z jiného programu. Zápisy kroků časového rozlišení,
+     * uzavření knih a otevření roku se nepočítají.
+     *
+     * @return array{amount:float, entries:list<array{entry_id:int, document_no:?string, entry_date:string, amount:float}>}|null
+     */
+    private function smallAssetDeferralsBookedOutside(int $supplierId, string $startsOn, string $endsOn): ?array
+    {
+        $rule = $this->rules->resolve($supplierId, 'accrual.small_asset.defer');
+        $defer = substr((string) ($rule['debit_account_code'] ?? '381'), 0, 3);
+        $expense = substr((string) ($rule['credit_account_code'] ?? '501'), 0, 3);
+        $entries = $this->closing->deferralsByOtherEntries($supplierId, $defer, $expense, $startsOn, $endsOn,
+            ['small_asset_accrual', 'prepaid_expense_accrual', 'deferred_revenue_accrual', 'closing', 'opening']);
+        if ($entries === []) {
+            return null;
+        }
+        return ['amount' => round(array_sum(array_column($entries, 'amount')), 2), 'entries' => $entries];
     }
 
     /**
@@ -1886,6 +1915,20 @@ final class ClosingService
             // Návrh počítej stejně jako preview (zdroj pravdy = karty + režim).
             $preview = $this->smallAssetAccrualPreview($supplierId, $periodId, $mode, $pct);
             $total = round((float) $preview['total'], 2);
+
+            // Rok uzavřený původním systémem nový odklad nedostane (po převzaté uzávěrce by
+            // zůstal neuzavřený, stejně jako odpisy) a odklad zaúčtovaný jiným zápisem
+            // (ruční interní doklad) se nezdvojí. Nulový návrh jen uklidí vlastní zápis.
+            if ((int) round($total * 100) !== 0 && $preview['post_blocked'] === 'closing_taken_over') {
+                throw new ClosingException('closing_taken_over',
+                    'Rok už uzavřel původní systém. Časové rozlišení drobného majetku se v něm znovu neúčtuje: krok Časové rozlišení potvrďte.', 422);
+            }
+            if ((int) round($total * 100) !== 0 && $preview['post_blocked'] === 'booked_outside') {
+                throw new ClosingException('small_asset_accrual_booked_outside',
+                    'Odklad drobného majetku už je v roce zaúčtovaný jiným zápisem (' . number_format((float) $preview['booked_outside']['amount'], 2, ',', ' ')
+                    . ' Kč, ' . implode(', ', array_map(static fn (array $e): string => (string) ($e['document_no'] ?? ('#' . $e['entry_id'])), $preview['booked_outside']['entries']))
+                    . '). Nový zápis by ho zdvojil: krok Časové rozlišení potvrďte, nebo jiný zápis nejdřív stornujte.', 422);
+            }
 
             // EP-15: paušál jen pro nevýznamný homogenní soubor s testem přiměřenosti.
             if ($mode === 'flat_pct') {
@@ -6752,9 +6795,11 @@ final class ClosingService
 
     /**
      * Úplnost evidence karet drobného majetku vs obrat 501 „drobný majetek" (§28/5 ZoÚ —
-     * inventarizace). Součet cen karet pořízených v rozsahu ({@see SmallAssetRepository::additionsBetween})
-     * BEZ karet vyřazených ve STEJNÉM rozsahu (nákup-a-vratka v jednom období by jinak sumu
-     * zkreslil) se porovná s NETTO obratem 501.200 z ŘÁDKŮ přijatých faktur
+     * inventarizace). Součet cen karet, jejichž cena je nákladem rozsahu
+     * ({@see SmallAssetRepository::costAdditionsBetween}: pořízené v rozsahu bez karet vrácených
+     * dobropisem v témže rozsahu, karta vyřazená jinak svůj náklad měla), se porovná
+     * se stejnou sadou jako náhled časového rozlišení drobného majetku a s NETTO obratem
+     * 501.200 z ŘÁDKŮ přijatých faktur
      * ({@see SmallAssetReportService::expenseBreakdown}, expense_kind='small_asset', po
      * dobropisech). Materiální rozdíl = mezera v evidenci (nezaevidovaná karta, nebo karta
      * bez odpovídajícího řádku) — přesně ta 52 104 nezaevidovaného majetku z auditu.
@@ -6768,14 +6813,7 @@ final class ClosingService
     private function checkSmallAssetCards(int $supplierId, string $from, string $to): array
     {
         $cardsTotal = 0.0;
-        foreach ($this->smallAssets->additionsBetween($supplierId, $from, $to) as $card) {
-            $disposedAt = $card['disposed_at'] ?? null;
-            if ($disposedAt !== null) {
-                $disposed = substr((string) $disposedAt, 0, 10);
-                if ($disposed >= $from && $disposed <= $to) {
-                    continue; // pořízeno i vyřazeno v témže rozsahu — do přírůstku evidence nepatří
-                }
-            }
+        foreach ($this->smallAssets->costAdditionsBetween($supplierId, $from, $to) as $card) {
             $cardsTotal = round($cardsTotal + (float) ($card['price'] ?? 0), 2);
         }
 

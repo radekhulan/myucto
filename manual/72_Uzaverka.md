@@ -242,6 +242,16 @@ koncepty do obratu nepatří: náklad 501 nese až konečná faktura. Paušál v
 vyhlazení výsledku: musí odpovídat obhajitelné, konzistentně uplatňované vnitřní politice pro homogenní
 nevýznamný soubor. Jinak odložte jen prokazatelnou budoucí část podle druhu výdaje a doložené doby.
 
+Náhled i kontrola úplnosti evidence drobného majetku počítají stejné karty: pořízené v roce, bez karet vrácených
+dodavateli dobropisem v témže roce (nákup i vratka se v obratu 501 vyruší). Karta vyřazená jinak (rozbitá,
+prodaná, zlikvidovaná) svůj náklad v roce pořízení měla, proto se počítá.
+
+Je-li odklad drobného majetku v roce už zaúčtovaný jiným zápisem (ruční interní doklad MD 381 / D 501, převod
+z jiného programu), náhled ho ukáže i s čísly dokladů a krok nový odklad nezaúčtuje, protože by ho zdvojil.
+Krok Časové rozlišení pak jen potvrďte, nebo jiný zápis nejdřív stornujte. Rozpuštění loňského odkladu (MD 501 / D 381)
+se za odklad nepočítá. V roce s uzávěrkou převzatou z původního systému krok odklad drobného majetku neúčtuje vůbec,
+stejně jako odpisy.
+
 Opakované spuštění řízeného časového rozlišení aktualizuje příslušný uzávěrkový zápis místo založení
 duplicity. Náhled však neumí poznat, zda smlouva skutečně pokračuje, zda je plnění dodáno ani zda se na
 případ vztahuje zásada nevýznamnosti. Účetní musí ověřit období plnění, částku, zvolenou metodu a uložit

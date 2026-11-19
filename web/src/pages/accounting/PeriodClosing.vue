@@ -1351,7 +1351,16 @@ const canOpenNextStage = computed(() => ['closed', 'reviewed', 'approved'].inclu
                 <div v-if="saAccrualPreview.existing" class="text-xs text-success-600">
                   {{ t('accounting.closing.small_asset.existing', { amount: formatMoney(saAccrualPreview.existing.amount ?? 0) }) }}
                 </div>
-                <button v-if="isClosing" @click="runSmallAssetAccrual" :disabled="busy" :class="btnFilled('primary')">
+                <div v-if="saAccrualPreview.post_blocked" data-test="small-asset-post-blocked"
+                  class="rounded-md border border-primary-200 bg-primary-50 dark:bg-primary-500/[0.06] px-3 py-2 text-sm text-primary-800 dark:text-primary-200">
+                  {{ saAccrualPreview.post_blocked === 'closing_taken_over'
+                    ? t('accounting.closing.small_asset.taken_over')
+                    : t('accounting.closing.small_asset.booked_outside', {
+                      amount: formatMoney(saAccrualPreview.booked_outside?.amount ?? 0),
+                      entries: (saAccrualPreview.booked_outside?.entries ?? []).map(e => e.document_no ?? `#${e.entry_id}`).join(', '),
+                    }) }}
+                </div>
+                <button v-if="isClosing && !saAccrualPreview.post_blocked" @click="runSmallAssetAccrual" :disabled="busy" :class="btnFilled('primary')" data-test="small-asset-post">
                   <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.check" /></svg>
                   {{ t('accounting.closing.small_asset.post') }}
                 </button>

@@ -61250,6 +61250,7 @@ components:
           - type: 'null'
         cards_total:
           type: number
+          description: Součet cen karet, jejichž cena je nákladem roku (pořízené v roce bez karet vrácených dobropisem v témže roce); stejnou sadu bere kontrola small_asset_cards_incomplete.
         breakdown_501_small_asset:
           type: number
         cards_vs_501_diff:
@@ -61278,6 +61279,31 @@ components:
                 - number
                 - 'null'
           - type: 'null'
+        booked_outside:
+          description: Odklad drobného majetku (MD 381 / D 501) zaúčtovaný v roce jinými zápisy než krokem (ruční interní doklad, převod z jiného programu). Krok ho znovu neúčtuje.
+          anyOf:
+          - type: object
+            required: [amount, entries]
+            properties:
+              amount: { type: number }
+              entries:
+                type: array
+                items:
+                  type: object
+                  required: [entry_id, document_no, entry_date, amount]
+                  properties:
+                    entry_id: { type: integer }
+                    document_no: { type: [string, 'null'] }
+                    entry_date: { type: string, format: date }
+                    amount: { type: number }
+          - type: 'null'
+        closing_taken_over:
+          type: boolean
+          description: Rok uzavřel původní systém; krok v něm odklad neúčtuje.
+        post_blocked:
+          description: Proč krok nový odklad nezaúčtuje (zaúčtování vrátí 422 closing_taken_over, resp. small_asset_accrual_booked_outside); null = lze zaúčtovat.
+          type: [string, 'null']
+          enum: [closing_taken_over, booked_outside, null]
     SmallAssetAccrualMode:
       type: string
       enum:

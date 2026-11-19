@@ -899,9 +899,9 @@ final class MonthlyCheckTest extends TestCase
 
     /**
      * Ok-větev: obrat 501.200 8 000 Kč přesně pokrytý kartou 8 000 Kč →
-     * small_asset_cards_incomplete musí být ok. Karta pořízená I vyřazená ve STEJNÉM
-     * období (nákup-a-vratka 3 000 Kč) se do součtu karet NEZAPOČÍTÁ — jinak by
-     * cards_total vyskočil na 11 000 a kontrola by falešně selhala.
+     * small_asset_cards_incomplete musí být ok. Karta pořízená a vrácená dobropisem ve
+     * STEJNÉM období (nákup-a-vratka 3 000 Kč, v 501 se vyruší) se do součtu karet
+     * NEZAPOČÍTÁ, jinak by cards_total vyskočil na 11 000 a kontrola by falešně selhala.
      */
     public function testSmallAssetCardsMatchingTurnoverIsOk(): void
     {
@@ -918,9 +918,16 @@ final class MonthlyCheckTest extends TestCase
             'status' => 'in_use',
         ], $this->userId);
 
-        // Nákup-a-vratka v témže období — musí se z přírůstku vyloučit.
+        // Nákup-a-vratka v témže období (faktura a dobropis k ní): musí se z přírůstku vyloučit.
+        $returnedId = $this->createPaidPurchase($vendorId, 'DM-OK-002', self::YEAR . '-10-06');
+        $this->addPurchaseItem($returnedId, 'small_asset', 3000.0, 'Vrácená věc');
+        $creditNoteId = $this->createPaidPurchase($vendorId, 'DM-OK-002-D', self::YEAR . '-10-20');
+        $this->db->pdo()->prepare("UPDATE purchase_invoices SET document_kind = 'credit_note', parent_purchase_invoice_id = ? WHERE id = ?")
+            ->execute([$returnedId, $creditNoteId]);
+        $this->addPurchaseItem($creditNoteId, 'small_asset', -3000.0, 'Vrácená věc');
         $this->smallAssets->insert($this->supplierId, [
             'name' => 'Vrácená karta',
+            'purchase_invoice_id' => $returnedId,
             'acquisition_date' => self::YEAR . '-10-06',
             'price' => 3000.0,
             'status' => 'disposed',

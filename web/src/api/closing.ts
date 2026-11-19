@@ -474,6 +474,11 @@ export interface SmallAssetAccrualPreview {
   breakdown_501_small_asset: number
   cards_vs_501_diff: number
   existing: { entry_id: number; mode: string | null; pct: number | null; amount: number | null } | null
+  /** Odklad zaúčtovaný v roce jinými zápisy než krokem (ruční interní doklad, převod). */
+  booked_outside?: { amount: number; entries: { entry_id: number; document_no: string | null; entry_date: string; amount: number }[] } | null
+  closing_taken_over?: boolean
+  /** Proč krok nový odklad nezaúčtuje (server zaúčtování odmítne). */
+  post_blocked?: 'closing_taken_over' | 'booked_outside' | null
 }
 
 // ── §DČR / Task 12: časové rozlišení nákladů příštích období (381 z označených faktur) ──

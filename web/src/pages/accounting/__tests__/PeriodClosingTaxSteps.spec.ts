@@ -8,6 +8,7 @@ const m = vi.hoisted(() => ({
   revertStep: vi.fn(),
   deferredTaxPreview: vi.fn(),
   incomeTaxPreview: vi.fn(),
+  smallAssetAccrualPreview: vi.fn(),
   listAccounts: vi.fn(),
 }))
 
@@ -19,7 +20,7 @@ vi.mock('@/api/closing', () => ({
     deferredTaxPreview: m.deferredTaxPreview,
     incomeTaxPreview: m.incomeTaxPreview,
     start: vi.fn(), abort: vi.fn(), fxPreview: vi.fn(), provisionsPreview: vi.fn(),
-    estimatesSuggest: vi.fn(), smallAssetAccrualPreview: vi.fn(),
+    estimatesSuggest: vi.fn(), smallAssetAccrualPreview: m.smallAssetAccrualPreview,
     prepaidExpenseAccrualPreview: vi.fn(), profitDistributionPreview: vi.fn(),
     profitDistribution: vi.fn(), profitDistributionRevert: vi.fn(), createEntry: vi.fn(),
     reverseEntry: vi.fn(), close: vi.fn(), openNext: vi.fn(),
@@ -248,6 +249,22 @@ describe('PeriodClosing.vue - daň z příjmů a odložená daň', () => {
     await select(wrapper, 'income_tax')
     expect(wrapper.find('[data-test="income-tax-booked-outside"]').exists()).toBe(false)
     expect(wrapper.find('[data-test="income-tax-book"]').exists()).toBe(true)
+  })
+
+  it('odklad drobného majetku zaúčtovaný jiným zápisem ukáže a znovu ho nenabídne zaúčtovat', async () => {
+    m.state.mockResolvedValue(makeState())
+    m.smallAssetAccrualPreview.mockResolvedValue({
+      as_of: '2025-12-31', period: { id: 1, fiscal_year: 2025, starts_on: '2025-01-01', ends_on: '2025-12-31' },
+      mode: 'flat_pct', pct: 50, period_days: 365, items: [], total: 90140.47, materiality: null,
+      cards_total: 179271.85, breakdown_501_small_asset: 180280.94, cards_vs_501_diff: -1009.09, existing: null,
+      booked_outside: { amount: 90141, entries: [{ entry_id: 5, document_no: 'INT 19', entry_date: '2025-12-31', amount: 90141 }] },
+      closing_taken_over: false, post_blocked: 'booked_outside',
+    })
+    const wrapper = mount(PeriodClosing)
+    await flushPromises()
+    await select(wrapper, 'deferrals')
+    expect(wrapper.get('[data-test="small-asset-post-blocked"]').text()).toContain('accounting.closing.small_asset.booked_outside')
+    expect(wrapper.find('[data-test="small-asset-post"]').exists()).toBe(false)
   })
 
   it('převzatou uzávěrku ohlásí bannerem i se zmrazenými dimenzemi', async () => {

@@ -22183,6 +22183,8 @@
         "diff": "Rozdíl karty × 501",
         "no_cards": "V období nejsou žádné karty drobného majetku k rozlišení.",
         "existing": "Zaúčtováno {amount}.",
+        "booked_outside": "Odklad drobného majetku {amount} už je v roce zaúčtovaný jiným zápisem ({entries}). Krok ho znovu nezaúčtuje, nový zápis by ho zdvojil. Krok Časové rozlišení potvrďte, nebo jiný zápis nejdřív stornujte.",
+        "taken_over": "Rok uzavřel původní systém, časové rozlišení drobného majetku se v něm znovu neúčtuje. Krok Časové rozlišení potvrďte.",
         "post": "Zaúčtovat rozlišení",
         "posted": "Časové rozlišení drobného majetku bylo zaúčtováno.",
         "load_failed": "Náhled rozlišení se nepodařilo načíst.",
