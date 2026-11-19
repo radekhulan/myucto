@@ -284,8 +284,11 @@ export interface ClosingState {
   /** Rok uzavřel už původní systém (převedené uzávěrkové zápisy bez source_id). Průvodce nic
    *  znovu neúčtuje a dimenze roku jsou kvůli převzaté uzávěrce zmrazené. */
   closing_taken_over?: boolean
-  /** Chybějící posouzení, bez kterých server uzavření knih odmítne (pak can_close = false). */
-  close_blockers?: ('deferred_tax_assessment' | 'nonprofit_tax_assessment')[]
+  /** Chybějící posouzení a stavy, se kterými server uzavření knih odmítne (pak can_close = false).
+   *  closing_taken_over_residual = po převzaté uzávěrce zůstal na účtech zůstatek. */
+  close_blockers?: ('deferred_tax_assessment' | 'nonprofit_tax_assessment' | 'closing_taken_over_residual')[]
+  /** Účty se zůstatkem po převzaté uzávěrce (blocker closing_taken_over_residual). */
+  taken_over_residual_accounts?: string[]
 }
 
 export type OpeningTakeoverStatus = 'to_create' | 'match' | 'mismatch' | 'unavailable'
@@ -645,8 +648,16 @@ export interface IncomeTaxPreview {
   taxpayer_type: string | null
   applicable: boolean
   rate_hint: number
+  /** Zůstatky před uzávěrkou roku (bez zápisů uzavření knih, i převzatých). */
   balance_341: number
   balance_591: number
+  /** Daň zaúčtovaná v roce na 591 (bez uzavření knih) a z toho mimo zápis průvodce. */
+  booked_amount?: number | null
+  booked_outside_wizard?: number | null
+  /** Rok uzavřel už původní systém: daň se jen potvrdí, znovu se neúčtuje. */
+  closing_taken_over?: boolean
+  /** Krok potvrzený bez nového zápisu (daň v deníku mimo průvodce). */
+  existing_booked_outside?: 'taken_over' | 'other_entries' | null
   existing_entry_id: number | null
   /** U 504 se daň zařazuje do hlavní nebo hospodářské činnosti. */
   activity_required?: boolean

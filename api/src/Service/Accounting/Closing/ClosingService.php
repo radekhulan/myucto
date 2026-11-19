@@ -320,8 +320,21 @@ final class ClosingService
         }
 
         $framework = $this->roleProfile($supplierId, (string) $period['ends_on'])->framework;
-        $assessmentBlockers = $period['status'] === 'closing' ? $this->closeAssessmentBlockers($supplierId, $periodId, $framework) : [];
+        $closeBlockers = $period['status'] === 'closing' ? $this->closeAssessmentBlockers($supplierId, $periodId, $framework) : [];
         $takenOverClosing = $this->closing->takenOverClosingEntryIds($supplierId, $periodId) !== [];
+        // Zbytek po převzaté uzávěrce: stejná kontrola, na které closeBooks odmítne
+        // (closing_taken_over_residual). U 504 převzatý rok uzávěrku vůbec nezahájí.
+        $takenOverResidual = [];
+        if ($takenOverClosing && $period['status'] === 'closing' && $framework !== AccountingFrameworkService::CZ_504) {
+            $profile = $this->roleProfile($supplierId, (string) $period['ends_on']);
+            $takenOverResidual = self::takenOverResidualAccounts([
+                ...$this->plBalancesForProfile($supplierId, $period, $profile),
+                ...$this->bsBalancesForProfile($supplierId, $period, $profile),
+            ]);
+            if ($takenOverResidual !== []) {
+                $closeBlockers[] = 'closing_taken_over_residual';
+            }
+        }
         return ($framework === AccountingFrameworkService::CZ_504 ? ['accounting_framework' => $framework] : []) + [
             'step_order' => self::stepOrder($framework),
             'period' => $period,
@@ -335,9 +348,11 @@ final class ClosingService
             // Průvodce pak nic neúčtuje znovu a dimenze roku jsou kvůli převzaté uzávěrce zmrazené.
             'closing_taken_over' => $takenOverClosing,
             'can_abort' => $period['status'] === 'closing' && !$hasClosingEntries,
-            'can_close' => $period['status'] === 'closing' && $preCloseDone && $incomeTaxStale === null && $assessmentBlockers === [],
-            // Posouzení, bez kterých uzavření knih odmítne (stejné kontroly jako closeBooks).
-            'close_blockers' => $assessmentBlockers,
+            'can_close' => $period['status'] === 'closing' && $preCloseDone && $incomeTaxStale === null && $closeBlockers === [],
+            // Posouzení a stavy, bez kterých uzavření knih odmítne (stejné kontroly jako closeBooks).
+            'close_blockers' => $closeBlockers,
+            // Účty se zbytkem po převzaté uzávěrce (blocker closing_taken_over_residual).
+            'taken_over_residual_accounts' => $takenOverResidual,
             'income_tax_stale' => $incomeTaxStale,
             'stock_step_required' => in_array('stock', $requiredPreClose, true),
             'depreciation_step_required' => in_array('depreciation', $requiredPreClose, true),
@@ -620,6 +635,26 @@ final class ClosingService
             $cents -= (int) round((float) $row['bal'] * 100);
         }
         return $cents / 100;
+    }
+
+    /**
+     * Účty, na kterých po uzávěrce převzaté z původního systému zůstal nenulový zůstatek
+     * (typicky zápis zaúčtovaný do roku až po převodu). Uzavření knih takový rok odmítne
+     * ({@see closeBooks}) a stav průvodce ho hlásí v close_blockers ({@see state}).
+     * Po účtech, ne po dimenzích: původní systém uzavírá účty bez dimenzí, takže řádky
+     * s dimenzí a bez ní se v součtu účtu vyruší.
+     *
+     * @param list<array{account_code:string, bal:float|int|string}> $balances zůstatky výsledkových i rozvahových účtů
+     * @return list<string> kódy účtů se zbytkem
+     */
+    private static function takenOverResidualAccounts(array $balances): array
+    {
+        $byAccount = [];
+        foreach ($balances as $row) {
+            $code = (string) $row['account_code'];
+            $byAccount[$code] = ($byAccount[$code] ?? 0) + (int) round((float) $row['bal'] * 100);
+        }
+        return array_map('strval', array_keys(array_filter($byAccount, static fn (int $cents): bool => $cents !== 0)));
     }
 
     /** @return list<int> zápisy uzávěrky převzaté z původního systému ({@see ClosingRepository::takenOverClosingEntryIds()}) */
@@ -1017,7 +1052,9 @@ final class ClosingService
     /**
      * Potvrzení už zaúčtované daně z příjmů beze změny částky. Slouží po vrácení kroku,
      * který mění výsledek hospodaření ({@see markIncomeTaxStale}): účetní ověří, že částka
-     * platí dál, a příznak přepočtu se zruší. Nezaúčtovanou daň takto potvrdit nejde.
+     * platí dál, a příznak přepočtu se zruší. Potvrdí i daň zaúčtovanou mimo průvodce
+     * (ruční zápis, uzávěrka převzatá z původního systému), kterou krok znovu neúčtuje
+     * ({@see assertIncomeTaxNotBookedOutside}). Nezaúčtovanou daň takto potvrdit nejde.
      *
      * @param array{user_id?:?int, ip?:?string, user_agent?:?string} $meta
      * @return array<string,mixed>
@@ -1025,12 +1062,83 @@ final class ClosingService
     public function reconfirmIncomeTax(int $supplierId, int $periodId, ?string $note, int $rowVersion, array $meta = []): array
     {
         return $this->tx(function () use ($supplierId, $periodId, $note, $rowVersion, $meta): array {
-            $this->lockPeriod($supplierId, $periodId, $rowVersion);
-            if ($this->stepsMap($supplierId, $periodId, true)['income_tax']['status'] !== 'done') {
+            $period = $this->lockPeriod($supplierId, $periodId, $rowVersion);
+            $step = $this->stepsMap($supplierId, $periodId, true)['income_tax'];
+            $bookedOutside = is_array($step['payload']) && isset($step['payload']['booked_outside']);
+            if ($step['status'] === 'done' && !$bookedOutside) {
+                return $this->confirmStep($supplierId, $periodId, 'income_tax', 'done', $note, $rowVersion, $meta);
+            }
+
+            // Daň zaúčtovaná mimo průvodce (ruční zápis, uzávěrka převzatá z původního
+            // systému): krok se potvrdí jako hotový bez nového zápisu, s částkou z deníku.
+            $this->assertStatus($period, ['closing']);
+            $booked = $this->incomeTaxBooked($supplierId, $period);
+            if (abs($booked['outside']) < 0.005) {
                 throw new ClosingException('income_tax_not_posted', 'Daň z příjmů ještě není zaúčtovaná - zadejte částku splatné daně.', 422);
             }
-            return $this->confirmStep($supplierId, $periodId, 'income_tax', 'done', $note, $rowVersion, $meta);
+            $this->assertStockBeforeIncomeTax($supplierId, $periodId,
+                $this->roleProfile($supplierId, (string) $period['ends_on'])->framework === AccountingFrameworkService::CZ_504);
+            $source = $this->closing->takenOverClosingEntryIds($supplierId, $periodId) !== [] ? 'taken_over' : 'other_entries';
+            $payload = [
+                'amount' => $booked['outside'],
+                'booked_outside' => $source,
+                'account' => $booked['account'],
+                'confirmed_at' => date('Y-m-d H:i:s'),
+            ];
+            $this->closing->upsertStep($supplierId, $periodId, 'income_tax', 'done', $payload, $note, $meta['user_id'] ?? null);
+            $this->bumpVersion($supplierId, $periodId, $rowVersion);
+            $this->audit($supplierId, 'accounting.closing_step_done', $periodId, [
+                'step' => 'income_tax', 'status' => 'done', 'amount' => $booked['outside'], 'booked_outside' => $source,
+            ], $meta);
+            return ['step' => 'income_tax', 'status' => 'done', 'amount' => $booked['outside'], 'booked_outside' => $source];
         });
+    }
+
+    /**
+     * Daň z příjmů zaúčtovaná v roce na nákladový účet předpisu (syntetika účtu z pravidla
+     * income_tax.payable, výchozí 591) bez zápisů uzavření knih: celkem a z toho mimo
+     * vlastní zápis průvodce (ruční zápis, převod z jiného programu). Uzávěrka převzatá
+     * z původního systému se do obratu nepočítá ({@see ClosingSourceId::closeBooksSql()}).
+     *
+     * @param array<string,mixed> $period
+     * @return array{account:string, booked:float, outside:float}
+     */
+    private function incomeTaxBooked(int $supplierId, array $period): array
+    {
+        $rule = $this->rules->resolve($supplierId, 'income_tax.payable');
+        $ruleAccount = $rule !== null && $rule['debit_account_code'] !== null ? (string) $rule['debit_account_code'] : '591';
+        $account = substr($ruleAccount, 0, 3);
+        $from = (string) $period['starts_on'];
+        $to = (string) $period['ends_on'];
+        return [
+            'account' => $account,
+            'booked' => $this->closing->turnoverWithoutCloseBooks($supplierId, $account, $from, $to),
+            'outside' => $this->closing->turnoverWithoutCloseBooks($supplierId, $account, $from, $to, 'income_tax', (int) $period['id']),
+        ];
+    }
+
+    /**
+     * Krok Daň z příjmů účtuje celou daň roku. Leží-li daň v roce už jinde, nový předpis by
+     * ji zdvojil (a v roce s převzatou uzávěrkou by navíc zůstal neuzavřený), proto se
+     * odmítne a krok se jen potvrdí jako zaúčtovaný ({@see reconfirmIncomeTax}). Odmítá se
+     * při jakékoli takové částce, ne jen při shodě: výsledek by byl vždy součet obou zápisů,
+     * nikdy částka, kterou účetní zadala.
+     *
+     * @param array<string,mixed> $period
+     */
+    private function assertIncomeTaxNotBookedOutside(int $supplierId, array $period): void
+    {
+        if ($this->closing->takenOverClosingEntryIds($supplierId, (int) $period['id']) !== []) {
+            throw new ClosingException('closing_taken_over',
+                'Rok už uzavřel původní systém a daň z příjmů zaúčtoval s převedenými daty. Nový předpis by po převzaté uzávěrce '
+                . 'zůstal neuzavřený: krok potvrďte jako zaúčtovaný v původním systému.', 422);
+        }
+        $booked = $this->incomeTaxBooked($supplierId, $period);
+        if (abs($booked['outside']) >= 0.005) {
+            throw new ClosingException('income_tax_booked_outside',
+                'Daň z příjmů roku už je zaúčtovaná jiným zápisem (' . number_format($booked['outside'], 2, ',', ' ') . ' Kč na účtu '
+                . $booked['account'] . '). Nový předpis by ji zdvojil: krok potvrďte jako zaúčtovaný, nebo jiný zápis nejdřív stornujte.', 422);
+        }
     }
 
     /**
@@ -3684,6 +3792,8 @@ final class ClosingService
         $suggested = $fromReturn ?? $computed;
         $existing = $this->journal->findBySource($supplierId, 'income_tax', $periodId);
         $step = $this->stepsMap($supplierId, $periodId)['income_tax'];
+        $booked = $applicable ? $this->incomeTaxBooked($supplierId, $period) : null;
+        $startsOn = (string) $period['starts_on'];
 
         return [
             'as_of' => $endsOn,
@@ -3696,9 +3806,20 @@ final class ClosingService
             'taxpayer_type' => $taxpayerType,
             'applicable' => $applicable,
             'rate_hint' => (float) ($constants['corporate_tax_rate'] ?? self::CORPORATE_TAX_RATE),
-            'balance_341' => round($this->closing->accountBalance($supplierId, '341', $endsOn), 2),
-            'balance_591' => round($this->closing->accountBalance($supplierId, '591', $endsOn), 2),
+            // Zůstatky před uzávěrkou roku: bez zápisů uzavření knih, i převzatých z původního
+            // systému (ty 591 i 341 vynulují, takže by zaúčtovaná daň vypadala jako nula).
+            'balance_341' => round($this->closing->accountBalance($supplierId, '341', $endsOn)
+                - $this->closing->closeBooksTurnover($supplierId, '341', $startsOn, $endsOn), 2),
+            'balance_591' => round($this->closing->accountBalance($supplierId, '591', $endsOn)
+                - $this->closing->closeBooksTurnover($supplierId, '591', $startsOn, $endsOn), 2),
+            // Daň zaúčtovaná v roce (591 bez uzavření knih) a z toho mimo zápis průvodce
+            // (ruční zápis, převod z původního systému). Tu už průvodce znovu nezaúčtuje,
+            // krok se jen potvrdí ({@see reconfirmIncomeTax}).
+            'booked_amount' => $booked['booked'] ?? null,
+            'booked_outside_wizard' => $booked['outside'] ?? null,
+            'closing_taken_over' => $this->closing->takenOverClosingEntryIds($supplierId, $periodId) !== [],
             'existing_entry_id' => $existing !== null ? (int) $existing['id'] : null,
+            'existing_booked_outside' => $step['payload']['booked_outside'] ?? null,
             'existing_amount' => $step['payload']['amount'] ?? null,
             // U 504 se daň zařazuje do hlavní nebo hospodářské činnosti ({@see runIncomeTax}).
             'activity_required' => $this->roleProfile($supplierId, $endsOn)->framework === AccountingFrameworkService::CZ_504,
@@ -3815,6 +3936,7 @@ final class ClosingService
             $fiscalYear = (int) $period['fiscal_year'];
             $is504 = $this->roleProfile($supplierId, $endsOn)->framework === AccountingFrameworkService::CZ_504;
             $this->assertStockBeforeIncomeTax($supplierId, $periodId, $is504);
+            $this->assertIncomeTaxNotBookedOutside($supplierId, $period);
 
             $computed = $ledger['amount'];
             $suggested = $fromReturn ?? $computed;
@@ -4751,14 +4873,7 @@ final class ClosingService
                 if ($profile->framework === AccountingFrameworkService::CZ_504) {
                     throw new ClosingException('closing_taken_over', 'Rok už uzavřel původní systém. U neziskové organizace průvodce převzatou uzávěrku zatím nenavazuje.', 422);
                 }
-                // Po účtech, ne po dimenzích: původní systém uzavírá účty bez dimenzí, takže
-                // řádky s dimenzí a bez ní se v součtu účtu vyruší.
-                $byAccount = [];
-                foreach ([...$pl, ...$bs] as $row) {
-                    $code = (string) $row['account_code'];
-                    $byAccount[$code] = ($byAccount[$code] ?? 0) + (int) round((float) $row['bal'] * 100);
-                }
-                $residual = array_keys(array_filter($byAccount, static fn (int $cents): bool => $cents !== 0));
+                $residual = self::takenOverResidualAccounts([...$pl, ...$bs]);
                 if ($residual !== []) {
                     $example = (string) $residual[0];
                     throw new ClosingException('closing_taken_over_residual',

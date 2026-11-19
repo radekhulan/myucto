@@ -717,7 +717,27 @@ final class ClosingRepository
      * Podklad kontroly zaúčtované daně z příjmů: uzavření knih převádí 591 na 710, takže
      * by obrat roku po uzávěrce vyšel nulový.
      */
-    public function turnoverWithoutCloseBooks(int $supplierId, string $accountCode, string $from, string $to): float
+    public function turnoverWithoutCloseBooks(int $supplierId, string $accountCode, string $from, string $to, ?string $excludeSourceType = null, ?int $excludeSourceId = null): float
+    {
+        // excludeSource*: obrat bez vlastního zápisu kroku (např. předpis daně průvodcem),
+        // tedy jen to, co do roku zaúčtovalo něco jiného.
+        $exclude = $excludeSourceType !== null ? ' AND NOT (e.source_type = ? AND e.source_id <=> ?)' : '';
+        return $this->periodTurnover($supplierId, $accountCode, $from, $to, 'NOT (' . ClosingSourceId::closeBooksSql('e') . ')' . $exclude,
+            $excludeSourceType !== null ? [$excludeSourceType, $excludeSourceId] : []);
+    }
+
+    /**
+     * Netto obrat účtu (prefix kódu, MD kladně) mezi daty JEN ze zápisů uzavření knih
+     * (včetně uzávěrky převzaté z jiného programu). Zůstatek účtu před uzávěrkou roku je
+     * zůstatek k rozvahovému dni bez tohoto obratu.
+     */
+    public function closeBooksTurnover(int $supplierId, string $accountCode, string $from, string $to): float
+    {
+        return $this->periodTurnover($supplierId, $accountCode, $from, $to, ClosingSourceId::closeBooksSql('e'));
+    }
+
+    /** @param list<mixed> $params parametry podmínky $where */
+    private function periodTurnover(int $supplierId, string $accountCode, string $from, string $to, string $where, array $params = []): float
     {
         $stmt = $this->db->pdo()->prepare(
             "SELECT COALESCE(SUM(CASE WHEN l.side = 'debit' THEN l.signed_amount ELSE -l.signed_amount END), 0)
@@ -727,11 +747,11 @@ final class ClosingRepository
                LEFT JOIN chart_of_accounts p ON p.id = a.parent_id
               WHERE l.supplier_id = ? AND e.posted_at IS NOT NULL
                 AND e.entry_date BETWEEN ? AND ?
-                AND NOT (" . ClosingSourceId::closeBooksSql('e') . ")
+                AND ({$where})
                 AND (a.account_code LIKE CONCAT(?, '%')
                      OR COALESCE(p.account_code, a.account_code) LIKE CONCAT(?, '%'))"
         );
-        $stmt->execute([$supplierId, $from, $to, $accountCode, $accountCode]);
+        $stmt->execute([$supplierId, $from, $to, ...$params, $accountCode, $accountCode]);
         return round((float) $stmt->fetchColumn(), 2);
     }
 

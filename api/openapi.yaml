@@ -20701,13 +20701,19 @@ paths:
       tags: [Accounting]
       summary: Náhled podkladu splatné daně z příjmů (D11, 591/341)
       description: |
-        Přednabídne částku z finalizovaného DPPO přiznání téhož roku a zůstatky 341/591.
+        Přednabídne částku z finalizovaného DPPO přiznání téhož roku a zůstatky 341/591
+        před uzávěrkou roku (bez zápisů uzavření knih, i převzatých z původního systému).
         Zaúčtování přes /steps/income_tax/run (idempotence source income_tax/period_id).
+        `booked_amount` je daň zaúčtovaná v roce na 591 bez uzavření knih, `booked_outside_wizard`
+        její část mimo zápis průvodce (ruční zápis, převod z původního systému). Takovou daň
+        krok znovu neúčtuje (422 income_tax_booked_outside, v roce s převzatou uzávěrkou
+        `closing_taken_over` 422 closing_taken_over), jen ji potvrdí status done bez amount.
+        `existing_booked_outside` (taken_over | other_entries) říká, že krok je takto potvrzený.
       parameters:
         - $ref: '#/components/parameters/SupplierIdHeader'
         - { in: path, name: id, required: true, schema: { type: integer } }
       responses:
-        '200': { description: "OK {suggested_amount, suggested_source (finalized_return | computed_from_ledger | computed_from_assessment u 504), suggested_unavailable {code, message} když návrh chybí, activity_required a existing_activity (504), has_finalized_return, taxpayer_type, applicable, balance_341, balance_591}; applicable=false pro FO. Finalizované DPPO, jehož účetnictví se po finalizaci změnilo (books_current=false v detailu přiznání), se jako finalized_return nepoužije", content: { application/json: { schema: { type: object } } } }
+        '200': { description: "OK {suggested_amount, suggested_source (finalized_return | computed_from_ledger | computed_from_assessment u 504), suggested_unavailable {code, message} když návrh chybí, activity_required a existing_activity (504), has_finalized_return, taxpayer_type, applicable, balance_341, balance_591, booked_amount, booked_outside_wizard, closing_taken_over, existing_booked_outside}; applicable=false pro FO. Finalizované DPPO, jehož účetnictví se po finalizaci změnilo (books_current=false v detailu přiznání), se jako finalized_return nepoužije", content: { application/json: { schema: { type: object } } } }
         '404': { $ref: '#/components/responses/NotFound' }
         '422': { $ref: '#/components/responses/ValidationFailed' }
 
@@ -20733,7 +20739,7 @@ paths:
               required: [row_version]
               properties:
                 row_version: { type: integer, minimum: 1 }
-                status: { type: string, enum: [done, skipped], description: "Checklist kroky + skip u provisions/income_tax/deferred_tax. income_tax se status done bez amount potvrdí už zaúčtovanou daň beze změny (zruší income_tax_stale); nezaúčtovanou vrátí 422 income_tax_not_posted. fx_revaluation a stock jde se status skipped přeskočit jen v roce s uzávěrkou převzatou z původního systému (closing_taken_over), jinak 422 step_not_skippable." }
+                status: { type: string, enum: [done, skipped], description: "Checklist kroky + skip u provisions/income_tax/deferred_tax. income_tax se status done bez amount potvrdí už zaúčtovanou daň beze změny (zruší income_tax_stale), i daň zaúčtovanou mimo průvodce (ruční zápis, převzatá uzávěrka; payload kroku booked_outside); nezaúčtovanou vrátí 422 income_tax_not_posted. Zaúčtování amount odmítne 422 income_tax_booked_outside, leží-li daň v roce už v jiném zápisu, a 422 closing_taken_over v roce s převzatou uzávěrkou. fx_revaluation a stock jde se status skipped přeskočit jen v roce s uzávěrkou převzatou z původního systému (closing_taken_over), jinak 422 step_not_skippable." }
                 note: { type: string, maxLength: 500 }
                 amount: { type: number, description: "income_tax: splatná daň (591/341); deferred_tax (500): odložená daň, kladná = závazek 592/481, záporná = pohledávka 481/592" }
                 reason: { type: string, maxLength: 500, description: "income_tax/deferred_tax: důvod odchylky ruční částky od návrhu" }
@@ -45291,10 +45297,15 @@ components:
           description: Rok uzavřel už původní systém (převedené zápisy closing bez source_id, které nejsou storny). Uzavření knih pak nic neúčtuje a uloží skutečný VH bez převzatých zápisů; otevření roku porovnává převzaté počáteční stavy se zůstatky bez převzaté uzávěrky, a to jen po účtech (opening_takeover.compare_level = account). U 504 start vrátí 422 closing_taken_over, zůstatek po převzaté uzávěrce 422 closing_taken_over_residual.
         close_blockers:
           type: array
-          description: Chybějící posouzení, bez kterých uzavření knih odmítne (deferred_tax_assessment u 504, nonprofit_tax_assessment); can_close je pak false.
+          description: Chybějící posouzení a stavy, se kterými uzavření knih odmítne (deferred_tax_assessment u 504, nonprofit_tax_assessment, closing_taken_over_residual = po převzaté uzávěrce zůstal na účtech zůstatek); can_close je pak false.
           items:
             type: string
-            enum: [deferred_tax_assessment, nonprofit_tax_assessment]
+            enum: [deferred_tax_assessment, nonprofit_tax_assessment, closing_taken_over_residual]
+        taken_over_residual_accounts:
+          type: array
+          description: Účty se zůstatkem po převzaté uzávěrce (blocker closing_taken_over_residual), jinak prázdné.
+          items:
+            type: string
         income_tax_stale:
           type:
           - object

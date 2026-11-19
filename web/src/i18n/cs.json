@@ -22256,7 +22256,8 @@
         "override_reason_ph": "Např. doklad dodán po uzávěrce, doúčtuje se v následujícím období",
         "override_button": "Uzavřít přes nezaúčtované",
         "blocked_income_tax_stale": "Uzavřít knihy zatím nejde - daň z příjmů je potřeba přepočítat, protože se po jejím zaúčtování vrátil krok, který mění výsledek hospodaření. Otevřete krok Daň z příjmů.",
-        "blocked_assessment": "Uzavřít knihy zatím nejde - chybí: {items}. Posouzení potvrďte a pak se sem vraťte."
+        "blocked_assessment": "Uzavřít knihy zatím nejde - chybí: {items}. Posouzení potvrďte a pak se sem vraťte.",
+        "blocked_taken_over_residual": "Uzavřít knihy zatím nejde - rok už uzavřel původní systém, ale po jeho uzávěrce zůstaly nenulové zůstatky (účty {accounts}). Zápisy zaúčtované do roku až po převodu přesuňte do dalšího roku, nebo zůstatek vyrovnejte v původní uzávěrce."
       },
       "open": {
         "hint": "Zaúčtuje počáteční stavy rozvahových účtů přes 701 - Počáteční účet rozvažný do následujícího období (založí se automaticky, pokud neexistuje) a převede výsledek hospodaření na 431.",
@@ -22350,7 +22351,13 @@
         "amount_required": "Zadejte kladnou částku splatné daně.",
         "not_applicable_fo": "Daň z příjmů fyzické osoby není nákladem účetní jednotky a neúčtuje se na 591/341. Krok vědomě přeskočte.",
         "stale": "Daň je potřeba přepočítat: po jejím zaúčtování se vrátil krok {steps}, který mění výsledek hospodaření. Zaúčtujte daň znovu, nebo ji potvrďte beze změny, pokud částka platí dál.",
-        "stale_confirm": "Potvrdit daň beze změny"
+        "stale_confirm": "Potvrdit daň beze změny",
+        "booked_taken_over": "Daň z příjmů {amount} zaúčtoval původní systém a uzavřel ji v převzaté uzávěrce. Nový předpis by po ní zůstal neuzavřený, krok proto jen potvrďte.",
+        "booked_outside": "Daň z příjmů {amount} už je v roce zaúčtovaná jiným zápisem (např. ručním). Nový předpis by ji zdvojil. Krok potvrďte jako zaúčtovaný, nebo jiný zápis nejdřív stornujte.",
+        "confirm_taken_over": "Potvrdit, zaúčtováno v původním systému",
+        "confirm_booked": "Potvrdit zaúčtovanou daň",
+        "confirmed_outside": "Krok je potvrzený bez nového zápisu, daň {amount} leží v deníku mimo průvodce.",
+        "taken_over_no_tax": "Rok uzavřel původní systém a daň z příjmů v něm zaúčtovaná není. Pokud daň nevznikla, krok přeskočte."
       },
       "stock": {
         "needs_closing": "Krok je dostupný až po zahájení uzávěrky (stav Uzavírá se).",

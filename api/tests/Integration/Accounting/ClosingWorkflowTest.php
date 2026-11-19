@@ -896,7 +896,10 @@ final class ClosingWorkflowTest extends TestCase
         self::assertTrue($this->closing->state($this->supplierId, $this->periodId)['closing_taken_over']);
         self::assertSame($takenOverIds, $this->closing->takenOverClosingEntryIds($this->supplierId, $this->periodId));
         $this->runStepsUntilCloseReady();
-        $preview = $this->closing->state($this->supplierId, $this->periodId)['opening_takeover'];
+        $state = $this->closing->state($this->supplierId, $this->periodId);
+        self::assertTrue($state['can_close'], json_encode($state['close_blockers']));
+        self::assertSame([], $state['taken_over_residual_accounts']);
+        $preview = $state['opening_takeover'];
         self::assertSame('match', $preview['status'], json_encode($preview['diff'] ?? null));
         self::assertSame('account', $preview['compare_level'] ?? null);
 
@@ -942,11 +945,103 @@ final class ClosingWorkflowTest extends TestCase
         $this->postTakenOverClosingAndOpening();
         $this->manual([self::l('518', 'debit', 100.00), self::l('321', 'credit', 100.00)], self::ENDS_ON);
         $this->runStepsUntilCloseReady();
+        // Průvodce uzavření nenabízí a řekne proč (stejná kontrola jako closeBooks).
+        $state = $this->closing->state($this->supplierId, $this->periodId);
+        self::assertFalse($state['can_close']);
+        self::assertContains('closing_taken_over_residual', $state['close_blockers']);
+        self::assertSame(['518', '321'], $state['taken_over_residual_accounts']);
         try {
             $this->closing->closeBooks($this->supplierId, $this->periodId, $this->rv(), $this->meta());
             self::fail('Zůstatek po převzaté uzávěrce musí uzavření knih odmítnout.');
         } catch (ClosingException $e) {
             self::assertSame('closing_taken_over_residual', $e->errorCode);
+        }
+    }
+
+    /**
+     * Daň z příjmů zaúčtovaná v původním systému ručním zápisem a uzavřená převzatou
+     * uzávěrkou: náhled kroku ji ukáže jako zaúčtovanou (ne nulu), nový předpis odmítne
+     * a krok jde potvrdit jako zaúčtovaný. Uzavření knih pak projde se skutečným VH po dani.
+     */
+    public function testTakenOverYearIncomeTaxIsConfirmedNotPostedAgain(): void
+    {
+        $this->seedScenario();
+        $this->manual([self::l('591', 'debit', 1260.00), self::l('341', 'credit', 1260.00)], self::ENDS_ON);
+        $this->postTakenOverClosingAndOpening(
+            [self::l('710', 'debit', 1260.00), self::l('591', 'credit', 1260.00), self::l('702', 'debit', 1260.00), self::l('710', 'credit', 1260.00),
+             self::l('341', 'debit', 1260.00), self::l('702', 'credit', 1260.00)],
+            [self::l('701', 'debit', 1260.00), self::l('341', 'credit', 1260.00), self::l('431', 'debit', 1260.00), self::l('701', 'credit', 1260.00)],
+        );
+        $this->runStepsUntilIncomeTax();
+        $sid = $this->supplierId;
+        $pid = $this->periodId;
+
+        $preview = $this->closing->incomeTaxPreview($sid, $pid);
+        self::assertTrue($preview['closing_taken_over']);
+        self::assertSame(self::cents(1260.00), self::cents((float) $preview['booked_amount']));
+        self::assertSame(self::cents(1260.00), self::cents((float) $preview['booked_outside_wizard']));
+        self::assertSame(self::cents(1260.00), self::cents((float) $preview['balance_591']), 'Zůstatek před převzatou uzávěrkou, ne nula.');
+        self::assertSame(self::cents(-1260.00), self::cents((float) $preview['balance_341']));
+
+        try {
+            $this->closing->runIncomeTax($sid, $pid, 1260.0, $this->rv(), $this->meta());
+            self::fail('V roce s převzatou uzávěrkou se daň znovu neúčtuje.');
+        } catch (ClosingException $e) {
+            self::assertSame('closing_taken_over', $e->errorCode);
+        }
+        self::assertNull($this->journal->findBySource($sid, 'income_tax', $pid));
+
+        $confirmed = $this->closing->reconfirmIncomeTax($sid, $pid, null, $this->rv(), $this->meta());
+        self::assertSame('taken_over', $confirmed['booked_outside']);
+        $state = $this->closing->state($sid, $pid);
+        self::assertSame('done', $this->stepStatus($state, 'income_tax'));
+        self::assertTrue($state['can_close'], json_encode($state['close_blockers']));
+
+        $closed = $this->closing->closeBooks($sid, $pid, $this->rv(), $this->meta());
+        self::assertSame(self::cents(4740.00), self::cents((float) $closed['profit']));
+    }
+
+    /**
+     * Daň zadaná ručním zápisem v běžném roce: krok ji nezdvojí. Nový předpis odmítne
+     * s jasnou hláškou a nabídne potvrzení zaúčtované daně.
+     */
+    public function testIncomeTaxBookedByManualEntryIsNotDoubled(): void
+    {
+        $this->seedScenario();
+        $this->manual([self::l('591', 'debit', 1260.00), self::l('341', 'credit', 1260.00)], self::ENDS_ON);
+        $this->runStepsUntilIncomeTax();
+        $sid = $this->supplierId;
+        $pid = $this->periodId;
+
+        $preview = $this->closing->incomeTaxPreview($sid, $pid);
+        self::assertFalse($preview['closing_taken_over']);
+        self::assertSame(self::cents(1260.00), self::cents((float) $preview['booked_outside_wizard']));
+        try {
+            $this->closing->runIncomeTax($sid, $pid, 1260.0, $this->rv(), $this->meta());
+            self::fail('Daň zaúčtovaná ručním zápisem se nesmí zdvojit.');
+        } catch (ClosingException $e) {
+            self::assertSame('income_tax_booked_outside', $e->errorCode);
+        }
+        self::assertNull($this->journal->findBySource($sid, 'income_tax', $pid));
+
+        $this->closing->reconfirmIncomeTax($sid, $pid, null, $this->rv(), $this->meta());
+        $step = $this->closing->state($sid, $pid)['steps'][array_search('income_tax', array_column($this->closing->state($sid, $pid)['steps'], 'step_key'), true)];
+        self::assertSame('done', $step['status']);
+        self::assertSame('other_entries', $step['payload']['booked_outside']);
+        self::assertSame(self::cents(1260.00), self::cents((float) $step['payload']['amount']));
+        self::assertSame('other_entries', $this->closing->incomeTaxPreview($sid, $pid)['existing_booked_outside']);
+    }
+
+    /** Bez zaúčtované daně potvrzení „zaúčtováno" odmítne. */
+    public function testIncomeTaxConfirmWithoutBookedTaxIsRefused(): void
+    {
+        $this->seedScenario();
+        $this->runStepsUntilIncomeTax();
+        try {
+            $this->closing->reconfirmIncomeTax($this->supplierId, $this->periodId, null, $this->rv(), $this->meta());
+            self::fail('Nezaúčtovanou daň nejde potvrdit.');
+        } catch (ClosingException $e) {
+            self::assertSame('income_tax_not_posted', $e->errorCode);
         }
     }
 
@@ -1356,6 +1451,13 @@ final class ClosingWorkflowTest extends TestCase
     /** start → precheck → všechny povinné kroky done/skipped. */
     private function runStepsUntilCloseReady(?string $allowedFailingError = null): void
     {
+        $this->runStepsUntilIncomeTax($allowedFailingError);
+        $this->closing->confirmStep($this->supplierId, $this->periodId, 'income_tax', 'skipped', null, $this->rv(), $this->meta());
+    }
+
+    /** start → precheck → kroky před daní z příjmů done/skipped. */
+    private function runStepsUntilIncomeTax(?string $allowedFailingError = null): void
+    {
         $sid = $this->supplierId;
         $pid = $this->periodId;
         $this->closing->start($sid, $pid, $this->rv(), $this->meta());
@@ -1376,7 +1478,6 @@ final class ClosingWorkflowTest extends TestCase
         $this->closing->confirmStep($sid, $pid, 'estimates', 'skipped', null, $this->rv(), $this->meta());
         $this->closing->confirmStep($sid, $pid, 'deferrals', 'skipped', null, $this->rv(), $this->meta());
         $this->closing->confirmStep($sid, $pid, 'provisions', 'skipped', null, $this->rv(), $this->meta());
-        $this->closing->confirmStep($sid, $pid, 'income_tax', 'skipped', null, $this->rv(), $this->meta());
     }
 
     /** EP-6: dokončí inventarizaci rozvahových účtů (skutečný = účetní → resolved), aby closeBooks neblokoval. */

@@ -22256,7 +22256,8 @@
         "override_reason_ph": "E.g. document delivered after closing, will be posted in the next period",
         "override_button": "Close over unposted",
         "blocked_income_tax_stale": "Books cannot be closed yet - the income tax needs to be recalculated because a step that changes the profit or loss was reverted after it was posted. Open the Income tax step.",
-        "blocked_assessment": "Books cannot be closed yet - missing: {items}. Confirm the assessment and come back."
+        "blocked_assessment": "Books cannot be closed yet - missing: {items}. Confirm the assessment and come back.",
+        "blocked_taken_over_residual": "Books cannot be closed yet - the original system already closed this year, but non-zero balances remained after its closing (accounts {accounts}). Move entries posted to the year after the migration to the next year, or settle the balance in the original closing."
       },
       "open": {
         "hint": "Books opening balances of balance sheet accounts via 701 — Opening balance sheet account into the following period (created automatically if missing) and transfers the profit or loss to 431.",
@@ -22350,7 +22351,13 @@
         "amount_required": "Enter a positive income tax amount.",
         "not_applicable_fo": "Personal income tax is not an expense of the accounting entity and is not posted to 591/341. Explicitly skip this step.",
         "stale": "The tax needs to be recalculated: after it was posted, the step {steps} was reverted, which changes the profit or loss. Post the tax again, or confirm it unchanged if the amount still applies.",
-        "stale_confirm": "Confirm tax unchanged"
+        "stale_confirm": "Confirm tax unchanged",
+        "booked_taken_over": "Income tax of {amount} was posted by the original system and closed in the taken-over closing. A new entry would stay unclosed after it, so just confirm the step.",
+        "booked_outside": "Income tax of {amount} is already posted in the year by another entry (e.g. a manual one). A new entry would double it. Confirm the step as posted, or reverse the other entry first.",
+        "confirm_taken_over": "Confirm, posted in the original system",
+        "confirm_booked": "Confirm posted tax",
+        "confirmed_outside": "The step is confirmed without a new entry, the tax of {amount} is in the journal outside the wizard.",
+        "taken_over_no_tax": "The original system closed this year and no income tax is posted in it. If no tax arose, skip the step."
       },
       "stock": {
         "needs_closing": "This step becomes available once closing has started (status Closing).",

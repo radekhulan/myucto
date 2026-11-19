@@ -837,7 +837,8 @@ final class ClosingAction
                 if ($status === 'skipped') {
                     $data = $this->closing->confirmStep($supplierId, $periodId, 'income_tax', 'skipped', $this->nullableString($body['note'] ?? null), $rowVersion, $meta);
                 } elseif ($status === 'done' && !array_key_exists('amount', $body)) {
-                    // Potvrzení zaúčtované daně beze změny (zruší příznak přepočtu po vrácení kroku).
+                    // Potvrzení zaúčtované daně beze změny (zruší příznak přepočtu po vrácení kroku),
+                    // i daně zaúčtované mimo průvodce (ruční zápis, převzatá uzávěrka).
                     $data = $this->closing->reconfirmIncomeTax($supplierId, $periodId, $this->nullableString($body['note'] ?? null), $rowVersion, $meta);
                 } elseif (!is_numeric($body['amount'] ?? null)) {
                     return Json::error($response, 'validation_failed', 'amount (splatná daň) musí být číslo.', 422);

@@ -244,6 +244,11 @@ const closeBlockedReason = computed<string | null>(() => {
   }
   if (incomeTaxStale.value) return t('accounting.closing.close.blocked_income_tax_stale')
   const blockers = state.value.close_blockers ?? []
+  if (blockers.includes('closing_taken_over_residual')) {
+    return t('accounting.closing.close.blocked_taken_over_residual', {
+      accounts: (state.value.taken_over_residual_accounts ?? []).slice(0, 5).join(', '),
+    })
+  }
   if (blockers.length) {
     return t('accounting.closing.close.blocked_assessment', { items: blockers.map(k => checkLabel(k)).join(', ') })
   }
@@ -667,6 +672,19 @@ function runProvisions() {
 const incomeTaxPreview = ref<IncomeTaxPreview | null>(null)
 const incomeTaxAmount = ref<number | null>(null)
 const incomeTaxActivity = ref<'main' | 'economic' | null>(null)
+/** Daň je v roce zaúčtovaná jiným zápisem než průvodcem (ruční zápis, převzatá uzávěrka). */
+const incomeTaxBookedOutside = computed(() => Math.abs(incomeTaxPreview.value?.booked_outside_wizard ?? 0) >= 0.005)
+/** Nový předpis daně: ne u FO, ne v roce s převzatou uzávěrkou a ne přes daň zaúčtovanou jinde. */
+const canBookIncomeTax = computed(() => incomeTaxPreview.value?.applicable !== false
+  && !incomeTaxPreview.value?.closing_taken_over && !incomeTaxBookedOutside.value)
+
+/** Potvrdí daň zaúčtovanou mimo průvodce (status done bez částky), nový zápis nevznikne. */
+function confirmIncomeTaxBooked() {
+  const note = stepNote.income_tax?.trim()
+  mutate(() => closingApi.runStep(periodId, 'income_tax', {
+    row_version: rowVersion.value, status: 'done', ...(note ? { note } : {}),
+  }), t('common.saved')).then(ok => { if (ok) loadIncomeTax() })
+}
 
 async function loadIncomeTax() {
   try {
@@ -1643,18 +1661,37 @@ const canOpenNextStage = computed(() => ['closed', 'reviewed', 'approved'].inclu
                 341: <span class="font-mono">{{ formatMoney(incomeTaxPreview.balance_341) }}</span> ·
                 591: <span class="font-mono">{{ formatMoney(incomeTaxPreview.balance_591) }}</span>
               </div>
+              <!-- Daň zaúčtovaná mimo průvodce (ruční zápis, převzatá uzávěrka): krok ji jen potvrdí,
+                   nový předpis by ji zdvojil (server ho odmítne). -->
+              <div v-if="incomeTaxBookedOutside && step('income_tax')?.status !== 'done'" data-test="income-tax-booked-outside"
+                class="rounded-md border border-primary-200 bg-primary-50 dark:bg-primary-500/[0.06] px-3 py-2 text-primary-800 dark:text-primary-200 space-y-2">
+                <p>{{ t(incomeTaxPreview.closing_taken_over ? 'accounting.closing.income_tax.booked_taken_over' : 'accounting.closing.income_tax.booked_outside',
+                  { amount: formatMoney(incomeTaxPreview.booked_outside_wizard ?? 0) }) }}</p>
+                <button v-if="isClosing && auth.canWrite('accounting.periods.close')" @click="confirmIncomeTaxBooked"
+                  :disabled="busy" :class="btnFilled('success')" data-test="income-tax-confirm-booked">
+                  <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.check" /></svg>
+                  {{ t(incomeTaxPreview.closing_taken_over ? 'accounting.closing.income_tax.confirm_taken_over' : 'accounting.closing.income_tax.confirm_booked') }}
+                </button>
+              </div>
+              <div v-else-if="incomeTaxPreview.closing_taken_over && step('income_tax')?.status === 'pending'" data-test="income-tax-taken-over-no-tax"
+                class="rounded-md border border-primary-200 bg-primary-50 dark:bg-primary-500/[0.06] px-3 py-2 text-primary-800 dark:text-primary-200">
+                {{ t('accounting.closing.income_tax.taken_over_no_tax') }}
+              </div>
+              <div v-if="incomeTaxPreview.existing_booked_outside && step('income_tax')?.status === 'done'" class="text-neutral-600" data-test="income-tax-confirmed-outside">
+                {{ t('accounting.closing.income_tax.confirmed_outside', { amount: formatMoney(incomeTaxPreview.existing_amount ?? 0) }) }}
+              </div>
               <RouterLink :to="{ path: '/accounting/reports/tax-base-adjustments', query: { fiscal_year: incomeTaxPreview.period.fiscal_year } }"
                 class="text-primary-600 hover:text-primary-700 hover:underline inline-block">
                 {{ t('accounting.closing.income_tax.tax_base_link') }}
               </RouterLink>
               </template>
             </div>
-            <div v-if="incomeTaxPreview?.applicable !== false" class="max-w-xs">
+            <div v-if="canBookIncomeTax" class="max-w-xs">
               <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('accounting.closing.income_tax.amount') }} (591 / 341)</label>
               <input v-model.number="incomeTaxAmount" type="number" step="0.01" min="0" :disabled="!isClosing"
                 class="w-full h-10 px-3 border border-neutral-300 rounded-md text-sm text-right font-mono" />
             </div>
-            <fieldset v-if="incomeTaxPreview?.activity_required" class="text-sm" data-test="income-tax-activity">
+            <fieldset v-if="incomeTaxPreview?.activity_required && canBookIncomeTax" class="text-sm" data-test="income-tax-activity">
               <legend class="block text-sm font-medium text-neutral-700 mb-1">{{ t('accounting.closing.income_tax.activity') }}</legend>
               <div class="flex flex-wrap gap-4">
                 <label v-for="a in (['main', 'economic'] as const)" :key="a" class="inline-flex items-center gap-2 whitespace-nowrap">
@@ -1664,7 +1701,7 @@ const canOpenNextStage = computed(() => ['closed', 'reviewed', 'approved'].inclu
               </div>
             </fieldset>
             <div class="flex flex-wrap gap-2 border-t border-neutral-200 pt-3">
-              <button v-if="isClosing && incomeTaxPreview?.applicable !== false" @click="bookIncomeTax" :disabled="busy" :class="btnFilled('primary')">
+              <button v-if="isClosing && canBookIncomeTax" @click="bookIncomeTax" :disabled="busy" :class="btnFilled('primary')" data-test="income-tax-book">
                 <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.check" /></svg>
                 {{ t('accounting.closing.income_tax.book') }}
               </button>

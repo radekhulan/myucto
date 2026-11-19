@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
-import type { ClosingState, ClosingStep, DeferredTaxPreview } from '@/api/closing'
+import type { ClosingState, ClosingStep, DeferredTaxPreview, IncomeTaxPreview } from '@/api/closing'
 
 const m = vi.hoisted(() => ({
   state: vi.fn(),
@@ -191,6 +191,63 @@ describe('PeriodClosing.vue - daň z příjmů a odložená daň', () => {
     await select(wrapper, 'close_books')
     expect(wrapper.text()).toContain('accounting.closing.close.blocked_assessment')
     expect(wrapper.text()).not.toContain('accounting.closing.close.blocked_steps')
+  })
+
+  it('zbytek po převzaté uzávěrce vysvětlí u uzavření knih i s účty', async () => {
+    m.state.mockResolvedValue(makeState({
+      can_close: false, closing_taken_over: true,
+      close_blockers: ['closing_taken_over_residual'], taken_over_residual_accounts: ['518', '321'],
+    }))
+    const wrapper = mount(PeriodClosing)
+    await flushPromises()
+    await select(wrapper, 'close_books')
+    expect(wrapper.text()).toContain('accounting.closing.close.blocked_taken_over_residual')
+    expect(wrapper.text()).not.toContain('accounting.closing.close.blocked_assessment')
+  })
+
+  function taxPreview(overrides: Partial<IncomeTaxPreview> = {}): IncomeTaxPreview {
+    return {
+      as_of: '2025-12-31', period: { id: 1, fiscal_year: 2025 }, suggested_amount: 691950,
+      suggested_source: 'finalized_return', has_finalized_return: true, taxpayer_type: 'po', applicable: true,
+      rate_hint: 0.21, balance_341: -691950, balance_591: 691950, booked_amount: 0, booked_outside_wizard: 0,
+      closing_taken_over: false, existing_entry_id: null, existing_amount: null, ...overrides,
+    }
+  }
+
+  it('v roce s převzatou uzávěrkou daň jen potvrdí, nový předpis nenabídne', async () => {
+    m.state.mockResolvedValue(makeState({ closing_taken_over: true }))
+    m.incomeTaxPreview.mockResolvedValue(taxPreview({ closing_taken_over: true, booked_amount: 691950, booked_outside_wizard: 691950 }))
+    const wrapper = mount(PeriodClosing)
+    await flushPromises()
+    await select(wrapper, 'income_tax')
+    expect(wrapper.get('[data-test="income-tax-booked-outside"]').text()).toContain('accounting.closing.income_tax.booked_taken_over')
+    expect(wrapper.find('[data-test="income-tax-book"]').exists()).toBe(false)
+    const confirmBtn = wrapper.get('[data-test="income-tax-confirm-booked"]')
+    expect(confirmBtn.text()).toContain('accounting.closing.income_tax.confirm_taken_over')
+    await confirmBtn.trigger('click')
+    await flushPromises()
+    expect(m.runStep).toHaveBeenCalledWith(1, 'income_tax', { row_version: 7, status: 'done' })
+  })
+
+  it('daň zaúčtovanou ručním zápisem nezdvojí, nabídne potvrzení', async () => {
+    m.state.mockResolvedValue(makeState())
+    m.incomeTaxPreview.mockResolvedValue(taxPreview({ booked_amount: 691950, booked_outside_wizard: 691950 }))
+    const wrapper = mount(PeriodClosing)
+    await flushPromises()
+    await select(wrapper, 'income_tax')
+    expect(wrapper.get('[data-test="income-tax-booked-outside"]').text()).toContain('accounting.closing.income_tax.booked_outside')
+    expect(wrapper.get('[data-test="income-tax-confirm-booked"]').text()).toContain('accounting.closing.income_tax.confirm_booked')
+    expect(wrapper.find('[data-test="income-tax-book"]').exists()).toBe(false)
+  })
+
+  it('bez daně zaúčtované jinde nabízí běžné zaúčtování', async () => {
+    m.state.mockResolvedValue(makeState())
+    m.incomeTaxPreview.mockResolvedValue(taxPreview())
+    const wrapper = mount(PeriodClosing)
+    await flushPromises()
+    await select(wrapper, 'income_tax')
+    expect(wrapper.find('[data-test="income-tax-booked-outside"]').exists()).toBe(false)
+    expect(wrapper.find('[data-test="income-tax-book"]').exists()).toBe(true)
   })
 
   it('převzatou uzávěrku ohlásí bannerem i se zmrazenými dimenzemi', async () => {

@@ -292,12 +292,17 @@ označena varováním (ověřte uznání dluhu nebo stavění lhůty).
 
 Volitelný krok pro zaúčtování **předpisu splatné daně z příjmů** k rozvahovému dni (**MD 591 / D 341**).
 
-1. V panelu zkontrolujte přednabídnutou částku **Návrh z DPPO přiznání** (z finalizovaného přiznání DPPO téhož roku, pokud existuje a účetnictví se od jeho finalizace nezměnilo) a zůstatky účtů 341 (zaplacené zálohy) a 591. Odkaz **Report úprav základu daně (podklad)** vede na sestavu jako podklad.
+1. V panelu zkontrolujte přednabídnutou částku **Návrh z DPPO přiznání** (z finalizovaného přiznání DPPO téhož roku, pokud existuje a účetnictví se od jeho finalizace nezměnilo) a zůstatky účtů 341 (zaplacené zálohy) a 591 před uzávěrkou roku. Odkaz **Report úprav základu daně (podklad)** vede na sestavu jako podklad.
 2. Není-li finalizované přiznání nebo se účetnictví po jeho finalizaci změnilo, aplikace daň dopočte z účetnictví a upozorní, ať ji před zaúčtováním ověříte. Dopočet počítá stejně jako náhled přiznání DPPO: včetně ručních údajů rozpracovaného přiznání (ztráta, dary, slevy) a včetně předpokládaného dopadu kroků uzávěrky, které ještě nejsou zaúčtované. Krok Zásoby jde v rámci 500 až po dani, návrh proto už počítá s konečným stavem zásob podle skladové evidence a po zaúčtování zásob se nezmění. U neziskové organizace (vyhláška 504) se dopočet bere z výpočtu DPPO nad potvrzeným daňovým posouzením; když posouzení chybí nebo zastaralo, panel napíše proč. Případně částku zadejte ručně.
 3. Zadejte kladnou **Splatnou daň**. U neziskové organizace zvolte, do které **činnosti** daň patří (hlavní nebo hospodářská), protože každý nákladový řádek výkazu 504 nese činnost. Klikněte na **Zaúčtovat daň**. Zápis dostane číslo z řady UZ.
 4. Potvrďte krok.
 
 **Jak poznáte, že je hotovo:** Aplikace ohlásí **Splatná daň byla zaúčtována**.
+
+Je-li daň v roce už zaúčtovaná jiným zápisem (například ručním interním dokladem), panel ukáže zaúčtovanou částku
+a místo zaúčtování nabídne tlačítko **Potvrdit zaúčtovanou daň**. Krok se potvrdí bez nového zápisu, protože nový
+předpis by daň zdvojil; zaúčtování server v takovém roce odmítne vždy, nejen při shodné částce, protože výsledkem by
+byl součet obou zápisů. Chcete-li daň zaúčtovat průvodcem, jiný zápis nejdřív stornujte.
 
 Částku vždy potvrdí účetní. Zaúčtování je idempotentní (opakování přepíše týž zápis, nevznikají duplicity), krok lze
 přeskočit a uživatel s právem uzávěrky ho může vzít zpět. U fyzické osoby se daň z příjmů na 591/341 neúčtuje; průvodce krok
@@ -467,13 +472,14 @@ Převedete-li data z jiného účetního programu (například z POHODY) i s uz�
 zápisy původního systému, které už vynulovaly výsledkové i rozvahové účty. Průvodce takový rok pozná a nad kroky
 zobrazí upozornění **Uzávěrka převzatá z původního systému**:
 
-- kroky potvrďte nebo přeskočte bez nových zápisů (kurzové rozdíly, zásoby i daň už zaúčtoval původní systém). Kroky Kurzové rozdíly a Zásoby mají v takovém roce tlačítko **Přeskočit (provedeno v původním systému)**,
+- kroky potvrďte nebo přeskočte bez nových zápisů (kurzové rozdíly, zásoby i daň už zaúčtoval původní systém). Kroky Kurzové rozdíly a Zásoby mají v takovém roce tlačítko **Přeskočit (provedeno v původním systému)**. Krok Daň z příjmů ukáže daň zaúčtovanou v roce (zůstatky 341 a 591 před převzatou uzávěrkou) a nabídne **Potvrdit, zaúčtováno v původním systému**; nový předpis daně odmítne,
 - **Uzavřít knihy** nic znovu nezaúčtuje, období jen uzavře a uloží skutečný výsledek hospodaření spočtený bez převzatých uzávěrkových zápisů,
 - **Otevřít nový rok** porovná převedené počáteční stavy dalšího roku s konečnými stavy spočtenými bez převzaté uzávěrky a při shodě je převezme. Porovnává se jen po účtech, bez dimenzí, protože původní systém otevírací rozvahu převádí bez nich. Haléřový zbytek na účtu 701, který původní systém přenáší z roku do roku, se nese dál stejně,
 - dimenze dokladů tohoto roku jsou kvůli převzaté uzávěrce zmrazené a nejdou měnit.
 
 Zaúčtujete-li do takového roku něco až po převodu, zůstanou po převzaté uzávěrce nenulové zůstatky a uzavření knih
-se odmítne. Zápis přesuňte do dalšího roku, nebo zůstatek vyrovnejte v původní uzávěrce. U neziskové organizace
+se odmítne. Průvodce to ukáže už u kroku Uzavření knih i s účty, na kterých zůstatek zůstal, a tlačítko uzavření
+nenabídne. Zápis přesuňte do dalšího roku, nebo zůstatek vyrovnejte v původní uzávěrce. U neziskové organizace
 (vyhláška 504) průvodce převzatou uzávěrku zatím nenavazuje a zahájení uzávěrky odmítne.
 
 > [!WARNING]
