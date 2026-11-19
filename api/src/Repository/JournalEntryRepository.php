@@ -2054,6 +2054,27 @@ final class JournalEntryRepository
     }
 
     /**
+     * Id zápisů, které vybírá filtr seznamu deníku ({@see paginate()}), pro hromadné akce:
+     * nejvýš `$limit` id a celkový počet, ať jde odmítnout výběr nad limitem.
+     *
+     * @param array<string,mixed> $filters
+     * @return array{total:int, ids:list<int>}
+     */
+    public function filteredIds(int $supplierId, array $filters, int $limit): array
+    {
+        [$whereSql, $params] = $this->buildWhere($supplierId, $filters);
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT je.id, COUNT(*) OVER() AS total FROM journal_entries je WHERE {$whereSql} ORDER BY je.entry_date, je.id LIMIT " . max(1, $limit)
+        );
+        $stmt->execute($params);
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        return [
+            'total' => $rows === [] ? 0 : (int) $rows[0]['total'],
+            'ids'   => array_map(static fn (array $r): int => (int) $r['id'], $rows),
+        ];
+    }
+
+    /**
      * Stránkovaný seznam zápisů pro firmu s filtry (období / rozsah dat / typ zdroje /
      * stav zaúčtování). Vrací hlavičky (bez řádků) + celkový počet pro paginaci.
      *

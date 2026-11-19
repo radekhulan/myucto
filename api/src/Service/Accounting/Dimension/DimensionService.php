@@ -548,13 +548,20 @@ final class DimensionService
      * novou. `$dropHeaderSplitTypes` = typy, kterým se při ponechaném rozpadu
      * (`$splits` null) zahodí rozpad hlavičky.
      *
+     * `$items` jako closure dostane dosavadní dimenze položek a pořadí všech položek
+     * dokladu a vrátí úplnou novou mapu. `$dropItemSplitTypes` = typy, kterým se při
+     * ponechaném rozpadu zahodí rozpad položek. `$allowIds` = další hodnoty, které smí
+     * projít, i když už nejsou aktivní (vrácení hromadné akce do původního stavu).
+     *
      * @param array<int|string,mixed>|\Closure(array<int,int>):array<int|string,mixed> $header
-     * @param array<int|string,mixed>|null $items
+     * @param array<int|string,mixed>|\Closure(array<int,array<int,int>>, list<int>):array<int,array<int,int>>|null $items
      * @param array<int|string,mixed>|null $splits
      * @param list<int> $dropHeaderSplitTypes
+     * @param list<int> $dropItemSplitTypes
+     * @param list<int> $allowIds
      * @return array{header:array<int,int>, items:array<int,array<int,int>>, splits:array<int,array<int,list<array{value_id:int, share:float}>>>, restamp:array{lines:int,needs_repost:bool,account_change:bool,locked:bool}, changed:bool}
      */
-    private function applyDocument(int $supplierId, string $docType, int $docId, array|\Closure $header, ?array $items, ?array $splits = null, array $dropHeaderSplitTypes = []): array
+    private function applyDocument(int $supplierId, string $docType, int $docId, array|\Closure $header, array|\Closure|null $items, ?array $splits = null, array $dropHeaderSplitTypes = [], array $dropItemSplitTypes = [], array $allowIds = []): array
     {
         $guard = new DimensionPeriodGuard($this->db);
         (new \MyInvoice\Service\Property\Charges\Issuance\IssuanceUseGuard($this->db))->lockClaims($supplierId);
@@ -574,8 +581,12 @@ final class DimensionService
                 array_push($currentIds, ...array_keys($shares));
             }
         }
+        array_push($currentIds, ...$allowIds);
         if ($header instanceof \Closure) {
             $header = $header($current['header']);
+        }
+        if ($items instanceof \Closure) {
+            $items = $items($current['items'], array_keys($context['items']));
         }
         $normHeader = $this->normalize($supplierId, $header, $currentIds);
         $normItems = $items === null ? $current['items'] : [];
@@ -592,7 +603,9 @@ final class DimensionService
             // Rozpad se ponechá, jen typ, kterému teď volba dala jedinou hodnotu, ho ztratí.
             $normSplits = $currentSplits;
             foreach ($normSplits as $itemNo => $byType) {
-                $single = $itemNo === 0 ? $normHeader + array_fill_keys($dropHeaderSplitTypes, 0) : ($normItems[$itemNo] ?? []);
+                $single = $itemNo === 0
+                    ? $normHeader + array_fill_keys($dropHeaderSplitTypes, 0)
+                    : ($normItems[$itemNo] ?? []) + array_fill_keys($dropItemSplitTypes, 0);
                 $normSplits[$itemNo] = array_diff_key($byType, $single);
             }
         } else {
@@ -951,6 +964,517 @@ final class DimensionService
             $ownTx ? $pdo->commit() : $pdo->exec('RELEASE SAVEPOINT dimension_document');
         }
         return $result;
+    }
+
+    // ── hromadné akce (Hromadné akce v seznamech, operace set_dimensions) ─────────
+
+    /**
+     * Hromadná změna dimenzí dokladu. Každý typ má režim `set` (přepsat), `fill` (jen kde
+     * je prázdné) nebo `clear` (vymazat). Ukládá se toutéž cestou jako panel Dimenze na
+     * detailu ({@see applyDocument()}: zámky, promítnutí do zaúčtovaných řádků, kaskáda
+     * na úhrady), navíc se:
+     *   • odmítne doklad, jehož živý zápis leží v uzavřeném období nebo v období se
+     *     zmrazenými dimenzemi (uzavřené knihy),
+     *   • odmítne změna, po které by řádek zápisu porušil pravidlo povinné dimenze.
+     *
+     * Rozsah `document` mění hlavičku dokladu (platí pro všechny řádky zápisu) a u typů
+     * `set`/`clear` zruší vlastní hodnoty a rozpady položek, aby celý doklad nesl jednu
+     * hodnotu. Rozsah `items` mění jen položky; do deníku se pak promítnou jen na
+     * nákladové a výnosové řádky (pravidlo {@see DimensionStamper::assign()}), rozvahové
+     * řádky (311/321/343) hodnotu nedostanou.
+     *
+     * `$dryRun` = jen spočítat a vrátit, nic neuložit. `$expected` = otisk stavu, který
+     * musí doklad mít (ostrý běh navazuje na běh nanečisto).
+     *
+     * @param list<array{type_id:int, mode:string, value_id:?int}> $changes
+     * @return array{changed:bool, before:list<array<string,mixed>>, after:list<array<string,mixed>>, fingerprint_before:string, fingerprint_after:string}
+     * @throws DimensionException
+     */
+    public function bulkPatchDocument(int $supplierId, string $docType, int $docId, array $changes, string $scope, bool $dryRun, ?string $expected = null): array
+    {
+        $this->requireEnabled($supplierId);
+        $this->requireDocument($supplierId, $docType, $docId);
+        return $this->atomically(function () use ($supplierId, $docType, $docId, $changes, $scope, $expected): array {
+            $sourceType = self::DOCUMENTS[$docType][1];
+            $this->assertBulkMutable($supplierId, [[$sourceType, $docId]]);
+            $before = $this->documentSnapshot($supplierId, $docType, $docId);
+            if ($expected !== null && self::snapshotFingerprint($before) !== $expected) {
+                throw new DimensionException('changed_after_dry_run', 'Dimenze dokladu se od běhu nanečisto změnily.', 409);
+            }
+            $header = $before[0];
+            $set = [];
+            $remove = [];
+            $dropItemTypes = [];
+            foreach ($changes as $change) {
+                $typeId = (int) $change['type_id'];
+                $mode = (string) $change['mode'];
+                if ($scope === 'items') {
+                    if ($mode !== 'fill') $dropItemTypes[] = $typeId;
+                    continue;
+                }
+                $headerEmpty = !isset($header['dimensions'][$typeId]) && !isset($header['splits'][$typeId]);
+                if ($mode === 'set' || ($mode === 'fill' && $headerEmpty)) {
+                    $set[$typeId] = (int) $change['value_id'];
+                }
+                if ($mode === 'clear') {
+                    $remove[] = $typeId;
+                }
+                if ($mode !== 'fill') {
+                    $dropItemTypes[] = $typeId;
+                }
+            }
+            $splitsByItem = [];
+            foreach ($before as $row) {
+                if ($row['kind'] === 'item') $splitsByItem[(int) $row['no']] = $row['splits'];
+            }
+            $headerPatch = static function (array $current) use ($set, $remove): array {
+                $out = array_replace($current, $set);
+                foreach ($remove as $typeId) unset($out[$typeId]);
+                return $out;
+            };
+            $itemsPatch = static function (array $current, array $itemNos) use ($changes, $scope, $dropItemTypes, $header, $splitsByItem): array {
+                $out = [];
+                foreach ($itemNos as $no) {
+                    $dims = $current[$no] ?? [];
+                    if ($scope === 'items') {
+                        foreach ($changes as $change) {
+                            $typeId = (int) $change['type_id'];
+                            $empty = !isset($dims[$typeId]) && !isset($splitsByItem[$no][$typeId])
+                                && !isset($header['dimensions'][$typeId]) && !isset($header['splits'][$typeId]);
+                            if ($change['mode'] === 'set' || ($change['mode'] === 'fill' && $empty)) {
+                                $dims[$typeId] = (int) $change['value_id'];
+                            } elseif ($change['mode'] === 'clear') {
+                                unset($dims[$typeId]);
+                            }
+                        }
+                    } else {
+                        foreach ($dropItemTypes as $typeId) unset($dims[$typeId]);
+                    }
+                    if ($dims !== []) $out[(int) $no] = $dims;
+                }
+                return $out;
+            };
+            $result = self::refuseLockedRepost($this->applyDocument(
+                $supplierId, $docType, $docId, $headerPatch, $itemsPatch, null,
+                $scope === 'items' ? [] : array_values(array_unique([...$remove, ...array_keys($set)])),
+                array_values(array_unique($dropItemTypes)),
+            ), false);
+            $after = $this->documentSnapshot($supplierId, $docType, $docId);
+            $this->assertBulkRules($supplierId, $sourceType, $before, $after);
+            return [
+                'changed' => $result['changed'],
+                'before' => $before,
+                'after' => $after,
+                'fingerprint_before' => self::snapshotFingerprint($before),
+                'fingerprint_after' => self::snapshotFingerprint($after),
+            ];
+        }, $dryRun);
+    }
+
+    /**
+     * Vrácení hromadné změny: doklad dostane přesně dimenze hlavičky, položek a rozpadů
+     * ze snímku `$target` (i „bez hodnoty"), jen když má pořád stav `$expected`.
+     *
+     * @param list<array<string,mixed>> $target
+     * @return array{changed:bool, before:list<array<string,mixed>>, after:list<array<string,mixed>>, fingerprint_before:string, fingerprint_after:string}
+     * @throws DimensionException
+     */
+    public function bulkRestoreDocument(int $supplierId, string $docType, int $docId, array $target, string $expected): array
+    {
+        $this->requireEnabled($supplierId);
+        $this->requireDocument($supplierId, $docType, $docId);
+        return $this->atomically(function () use ($supplierId, $docType, $docId, $target, $expected): array {
+            $sourceType = self::DOCUMENTS[$docType][1];
+            $this->assertBulkMutable($supplierId, [[$sourceType, $docId]]);
+            $before = $this->documentSnapshot($supplierId, $docType, $docId);
+            if (self::snapshotFingerprint($before) !== $expected) {
+                throw new DimensionException('changed_after_apply', 'Dimenze dokladu se od hromadné změny znovu změnily.', 409);
+            }
+            $header = [];
+            $items = [];
+            $splits = [];
+            $allow = [];
+            foreach ($target as $row) {
+                if ($row['kind'] === 'line') continue;
+                $dims = self::intMap((array) $row['dimensions']);
+                $rowSplits = self::splitMap((array) $row['splits']);
+                array_push($allow, ...array_values($dims));
+                foreach ($rowSplits as $shares) array_push($allow, ...array_keys($shares));
+                if ($row['kind'] === 'header') {
+                    $header = $dims;
+                } elseif ($dims !== []) {
+                    $items[(int) $row['no']] = $dims;
+                }
+                if ($rowSplits !== []) $splits[(int) $row['no']] = $rowSplits;
+            }
+            $result = self::refuseLockedRepost(
+                $this->applyDocument($supplierId, $docType, $docId, $header, $items, $splits, [], [], $allow),
+                false,
+            );
+            $after = $this->documentSnapshot($supplierId, $docType, $docId);
+            $this->assertBulkRules($supplierId, $sourceType, $before, $after);
+            return [
+                'changed' => $result['changed'],
+                'before' => $before,
+                'after' => $after,
+                'fingerprint_before' => self::snapshotFingerprint($before),
+                'fingerprint_after' => self::snapshotFingerprint($after),
+            ];
+        });
+    }
+
+    /**
+     * Hromadná změna dimenzí na řádcích jednoho zápisu deníku (zápis vybraný přímo
+     * v Účetním deníku). Mění jen řádky na účtech s některým z prefixů `$accountPrefixes`
+     * (prázdné = všechny řádky) a ukládá se toutéž cestou jako úprava dimenzí řádků
+     * v deníku ({@see applyEntryLines()}: zámek období, povinné dimenze, účtotvorná
+     * dimenze). Zápis v uzavřeném období nebo se zmrazenými dimenzemi se odmítne.
+     *
+     * @param list<array{type_id:int, mode:string, value_id:?int}> $changes
+     * @param list<string> $accountPrefixes
+     * @return array{changed:bool, matched:int, before:list<array<string,mixed>>, after:list<array<string,mixed>>, fingerprint_before:string, fingerprint_after:string}
+     * @throws DimensionException
+     */
+    public function bulkPatchEntryLines(int $supplierId, int $entryId, array $changes, array $accountPrefixes, bool $dryRun, ?string $expected = null): array
+    {
+        $this->requireEnabled($supplierId);
+        return $this->atomically(function () use ($supplierId, $entryId, $changes, $accountPrefixes, $expected): array {
+            $this->assertBulkEntryMutable($supplierId, $entryId);
+            $before = $this->entrySnapshot($supplierId, $entryId);
+            if ($expected !== null && self::snapshotFingerprint($before) !== $expected) {
+                throw new DimensionException('changed_after_dry_run', 'Dimenze zápisu se od běhu nanečisto změnily.', 409);
+            }
+            $lines = [];
+            $splits = [];
+            $matched = 0;
+            foreach ($before as $row) {
+                if (!self::matchesPrefix((string) ($row['account_code'] ?? ''), $accountPrefixes)) continue;
+                $matched++;
+                $dims = self::intMap((array) $row['dimensions']);
+                $rowSplits = self::splitMap((array) $row['splits']);
+                foreach ($changes as $change) {
+                    $typeId = (int) $change['type_id'];
+                    $empty = !isset($dims[$typeId]) && !isset($rowSplits[$typeId]);
+                    if ($change['mode'] === 'set' || ($change['mode'] === 'fill' && $empty)) {
+                        $dims[$typeId] = (int) $change['value_id'];
+                        unset($rowSplits[$typeId]);
+                    } elseif ($change['mode'] === 'clear') {
+                        unset($dims[$typeId], $rowSplits[$typeId]);
+                    }
+                }
+                ksort($dims);
+                if ($dims != self::intMap((array) $row['dimensions']) || $rowSplits != self::splitMap((array) $row['splits'])) {
+                    $lines[(int) $row['line_id']] = $dims;
+                    $splits[(int) $row['line_id']] = $rowSplits;
+                }
+            }
+            if ($lines !== []) {
+                $this->applyEntryLines($supplierId, $entryId, $lines, $splits);
+            }
+            $after = $this->entrySnapshot($supplierId, $entryId);
+            return [
+                'changed' => $lines !== [],
+                'matched' => $matched,
+                'before' => $before,
+                'after' => $after,
+                'fingerprint_before' => self::snapshotFingerprint($before),
+                'fingerprint_after' => self::snapshotFingerprint($after),
+            ];
+        }, $dryRun);
+    }
+
+    /**
+     * Vrácení hromadné změny řádků zápisu do snímku `$target`, jen když má zápis pořád
+     * stav `$expected`.
+     *
+     * @param list<array<string,mixed>> $target
+     * @return array{changed:bool, before:list<array<string,mixed>>, after:list<array<string,mixed>>, fingerprint_before:string, fingerprint_after:string}
+     * @throws DimensionException
+     */
+    public function bulkRestoreEntryLines(int $supplierId, int $entryId, array $target, string $expected): array
+    {
+        $this->requireEnabled($supplierId);
+        return $this->atomically(function () use ($supplierId, $entryId, $target, $expected): array {
+            $this->assertBulkEntryMutable($supplierId, $entryId);
+            $before = $this->entrySnapshot($supplierId, $entryId);
+            if (self::snapshotFingerprint($before) !== $expected) {
+                throw new DimensionException('changed_after_apply', 'Dimenze zápisu se od hromadné změny znovu změnily.', 409);
+            }
+            $current = [];
+            foreach ($before as $row) $current[(int) $row['line_id']] = $row;
+            $lines = [];
+            $splits = [];
+            foreach ($target as $row) {
+                $lineId = (int) $row['line_id'];
+                if (!isset($current[$lineId])) continue;
+                $dims = self::intMap((array) $row['dimensions']);
+                $rowSplits = self::splitMap((array) $row['splits']);
+                if ($dims != self::intMap((array) $current[$lineId]['dimensions']) || $rowSplits != self::splitMap((array) $current[$lineId]['splits'])) {
+                    $lines[$lineId] = $dims;
+                    $splits[$lineId] = $rowSplits;
+                }
+            }
+            if ($lines !== []) {
+                $this->applyEntryLines($supplierId, $entryId, $lines, $splits);
+            }
+            $after = $this->entrySnapshot($supplierId, $entryId);
+            return [
+                'changed' => $lines !== [],
+                'before' => $before,
+                'after' => $after,
+                'fingerprint_before' => self::snapshotFingerprint($before),
+                'fingerprint_after' => self::snapshotFingerprint($after),
+            ];
+        });
+    }
+
+    /**
+     * Otisk snímku dimenzí ({@see documentSnapshot()}, {@see entrySnapshot()}).
+     *
+     * @param list<array<string,mixed>> $snapshot
+     */
+    public static function snapshotFingerprint(array $snapshot): string
+    {
+        $norm = array_map(static fn (array $row): array => [
+            $row['kind'], $row['no'], $row['line_id'],
+            self::intMap((array) $row['dimensions']),
+            array_map(static fn (array $shares): array => array_map(static fn (mixed $v): string => number_format((float) $v, 10, '.', ''), $shares), self::splitMap((array) $row['splits'])),
+        ], $snapshot);
+        return hash('sha256', json_encode($norm, JSON_THROW_ON_ERROR));
+    }
+
+    /**
+     * Názvy typů a hodnot pro zobrazení snímků.
+     *
+     * @param list<int> $valueIds
+     * @return array{types:array<int,string>, values:array<int,string>}
+     */
+    public function labels(int $supplierId, array $valueIds): array
+    {
+        $types = [];
+        foreach ($this->repo->listTypes($supplierId) as $type) {
+            $types[(int) $type['id']] = (string) $type['name'];
+        }
+        $values = [];
+        foreach ($this->repo->valuesByIds($supplierId, $valueIds) as $id => $value) {
+            $values[(int) $id] = trim(((string) ($value['code'] ?? '')) . ' ' . (string) ($value['name'] ?? ''));
+        }
+        return ['types' => $types, 'values' => $values];
+    }
+
+    /**
+     * Hlavička, položky a živé řádky zápisů dokladu s dimenzemi a rozpady, čtené pod
+     * zámky probíhající transakce.
+     *
+     * @return list<array<string,mixed>>
+     */
+    private function documentSnapshot(int $supplierId, string $docType, int $docId): array
+    {
+        $dims = $this->assignments->documentDimensions($supplierId, $docType, $docId, true);
+        $splits = $this->assignments->documentSplits($supplierId, $docType, $docId, true);
+        $rows = [self::snapshotRow('header', 0, null, $dims['header'], $splits[0] ?? [])];
+        $itemNos = array_unique([...array_keys($dims['items']), ...array_filter(array_keys($splits), static fn (int $no): bool => $no > 0)]);
+        sort($itemNos);
+        foreach ($itemNos as $no) {
+            $rows[] = self::snapshotRow('item', (int) $no, null, $dims['items'][$no] ?? [], $splits[$no] ?? []);
+        }
+        foreach ($this->postingSources($supplierId, $docType, $docId) as [$sourceType, $sourceId]) {
+            $stmt = $this->db->pdo()->prepare(
+                'SELECT l.id FROM journal_entries je
+                   JOIN journal_entry_lines l ON l.entry_id = je.id AND l.supplier_id = je.supplier_id
+                  WHERE je.supplier_id = ? AND je.source_type = ? AND je.source_id = ? AND je.reversed_by IS NULL
+                  ORDER BY je.id, l.line_no, l.id'
+            );
+            $stmt->execute([$supplierId, $sourceType, $sourceId]);
+            array_push($rows, ...$this->lineSnapshotRows($supplierId, array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN))));
+        }
+        return $rows;
+    }
+
+    /** @return list<array<string,mixed>> */
+    private function entrySnapshot(int $supplierId, int $entryId): array
+    {
+        $stmt = $this->db->pdo()->prepare('SELECT id FROM journal_entry_lines WHERE supplier_id = ? AND entry_id = ? ORDER BY line_no, id');
+        $stmt->execute([$supplierId, $entryId]);
+        return $this->lineSnapshotRows($supplierId, array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN)));
+    }
+
+    /**
+     * @param list<int> $lineIds
+     * @return list<array<string,mixed>>
+     */
+    private function lineSnapshotRows(int $supplierId, array $lineIds): array
+    {
+        if ($lineIds === []) {
+            return [];
+        }
+        $marks = implode(',', array_fill(0, count($lineIds), '?'));
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT l.id, l.account_id, a.account_code, l.side, l.amount, je.entry_date
+               FROM journal_entry_lines l
+               JOIN journal_entries je ON je.id = l.entry_id AND je.supplier_id = l.supplier_id
+          LEFT JOIN chart_of_accounts a ON a.id = l.account_id AND a.supplier_id = l.supplier_id
+              WHERE l.supplier_id = ? AND l.id IN ({$marks})"
+        );
+        $stmt->execute([$supplierId, ...$lineIds]);
+        $byId = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $r) $byId[(int) $r['id']] = $r;
+        $dims = $this->assignments->lineDimensions($supplierId, $lineIds, true);
+        $splits = $this->assignments->lineSplits($supplierId, $lineIds, true);
+        $rows = [];
+        foreach ($lineIds as $lineId) {
+            $r = $byId[$lineId] ?? null;
+            if ($r === null) continue;
+            $rows[] = array_merge(self::snapshotRow('line', null, $lineId, $dims[$lineId] ?? [], $splits[$lineId] ?? []), [
+                'account_id' => (int) $r['account_id'],
+                'account_code' => $r['account_code'] === null ? null : (string) $r['account_code'],
+                'side' => (string) $r['side'],
+                'amount' => round((float) $r['amount'], 2),
+                'entry_date' => (string) $r['entry_date'],
+            ]);
+        }
+        return $rows;
+    }
+
+    /**
+     * @param array<int,int> $dims
+     * @param array<int,array<int,float>> $splits
+     * @return array<string,mixed>
+     */
+    private static function snapshotRow(string $kind, ?int $no, ?int $lineId, array $dims, array $splits): array
+    {
+        ksort($dims);
+        ksort($splits);
+        return [
+            'kind' => $kind, 'no' => $no, 'line_id' => $lineId, 'account_code' => null, 'side' => null, 'amount' => null,
+            'dimensions' => $dims, 'splits' => $splits,
+        ];
+    }
+
+    /**
+     * Mapa typ => hodnota ze snímku (i po průchodu JSON).
+     *
+     * @param array<int|string,mixed> $raw
+     * @return array<int,int>
+     */
+    private static function intMap(array $raw): array
+    {
+        $out = [];
+        foreach ($raw as $typeId => $valueId) $out[(int) $typeId] = (int) $valueId;
+        ksort($out);
+        return $out;
+    }
+
+    /**
+     * Rozpad typ => hodnota => podíl ze snímku (i po průchodu JSON).
+     *
+     * @param array<int|string,mixed> $raw
+     * @return array<int,array<int,float>>
+     */
+    private static function splitMap(array $raw): array
+    {
+        $out = [];
+        foreach ($raw as $typeId => $shares) {
+            $byValue = [];
+            foreach ((array) $shares as $valueId => $share) $byValue[(int) $valueId] = round((float) $share, 10);
+            if ($byValue === []) continue;
+            ksort($byValue);
+            $out[(int) $typeId] = $byValue;
+        }
+        ksort($out);
+        return $out;
+    }
+
+    /** @param list<string> $prefixes */
+    private static function matchesPrefix(string $code, array $prefixes): bool
+    {
+        if ($prefixes === []) return true;
+        foreach ($prefixes as $prefix) {
+            if (str_starts_with($code, $prefix)) return true;
+        }
+        return false;
+    }
+
+    /**
+     * Hromadná změna nesmí do uzavřeného období ani do období se zmrazenými dimenzemi
+     * (uzavřené knihy). Zamyká zápisy zdrojů do konce transakce.
+     *
+     * @param list<array{0:?string, 1:int}> $sources
+     */
+    private function assertBulkMutable(int $supplierId, array $sources): void
+    {
+        $sources = array_values(array_filter($sources, static fn (array $s): bool => $s[0] !== null));
+        foreach ((new DimensionPeriodGuard($this->db))->lockSources($supplierId, $sources) as $entry) {
+            if ($entry['reversed_by'] === null && $entry['posted_at'] !== null) {
+                self::assertBulkEntryState($entry);
+            }
+        }
+    }
+
+    private function assertBulkEntryMutable(int $supplierId, int $entryId): void
+    {
+        $entries = (new DimensionPeriodGuard($this->db))->lockEntries($supplierId, [$entryId]);
+        if (!isset($entries[$entryId])) {
+            throw new DimensionException('not_found', 'Účetní zápis nenalezen.', 404);
+        }
+        if ($entries[$entryId]['reversed_by'] !== null) {
+            throw new DimensionException('entry_reversed', 'Stornovaný zápis se hromadně nemění.', 409);
+        }
+        self::assertBulkEntryState($entries[$entryId]);
+    }
+
+    /** @param array<string,mixed> $entry */
+    private static function assertBulkEntryState(array $entry): void
+    {
+        if (\MyInvoice\Service\Accounting\AccountingPeriodStatus::isClosed((string) $entry['period_status'])) {
+            throw new DimensionException('period_not_open', 'Zápis leží v uzavřeném účetním období.', 409);
+        }
+        if (!empty($entry['dimensions_frozen'])) {
+            throw new DimensionException('dimensions_frozen', 'Dimenze období jsou zmrazené uzavřením knih.', 409);
+        }
+    }
+
+    /**
+     * Pravidla povinných dimenzí ({@see DimensionRuleService::check()}) nad řádky zápisů,
+     * kterým hromadná změna dimenze změnila. Řádky, které změna nezasáhla, se neposuzují:
+     * starší porušení jinde nesmí zablokovat opravu.
+     *
+     * @param list<array<string,mixed>> $before
+     * @param list<array<string,mixed>> $after
+     */
+    private function assertBulkRules(int $supplierId, ?string $sourceType, array $before, array $after): void
+    {
+        if ($sourceType === null) {
+            return;
+        }
+        $previous = [];
+        foreach ($before as $row) {
+            if ($row['kind'] === 'line') $previous[(int) $row['line_id']] = $row;
+        }
+        $byDate = [];
+        $prevByDate = [];
+        foreach ($after as $row) {
+            if ($row['kind'] !== 'line') continue;
+            $old = $previous[(int) $row['line_id']] ?? null;
+            if ($old !== null && self::intMap((array) $old['dimensions']) == self::intMap((array) $row['dimensions'])
+                && self::splitMap((array) $old['splits']) == self::splitMap((array) $row['splits'])) {
+                continue;
+            }
+            $line = static fn (array $r): array => [
+                'id' => (int) $r['line_id'], 'account_id' => (int) $r['account_id'], 'side' => (string) $r['side'],
+                'amount' => (float) $r['amount'], 'dimensions' => self::intMap((array) $r['dimensions']),
+                'dimension_splits' => self::splitMap((array) $r['splits']),
+            ];
+            $byDate[(string) $row['entry_date']][] = $line($row);
+            if ($old !== null) $prevByDate[(string) $row['entry_date']][] = $line($old);
+        }
+        foreach ($byDate as $date => $lines) {
+            try {
+                $this->ruleService()->check($supplierId, $sourceType, $lines, (string) $date, $prevByDate[$date] ?? []);
+            } catch (PostingException $e) {
+                throw new DimensionException($e->errorCode, $e->getMessage(), $e->httpStatus);
+            }
+        }
     }
 
     /** @return array<int,array<int,int>> řádek => typ => hodnota */

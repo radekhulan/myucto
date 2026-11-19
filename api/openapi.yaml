@@ -16035,6 +16035,123 @@ paths:
         '404': { $ref: '#/components/responses/NotFound' }
         '422': { $ref: '#/components/responses/ValidationFailed' }
 
+  /api/v1/accounting/bulk-actions:
+    get:
+      tags: [Accounting]
+      summary: Hromadné akce v seznamech - dostupné operace a poslední běhy
+      description: >
+        Hromadné akce nad vybranými záznamy seznamu (Účetní deník, Vydané faktury, Přijaté
+        faktury): přeúčtování účtu, nastavení dimenzí, změna předkontace a smazání. Vrací,
+        které operace smí aktuální uživatel nad daným druhem záznamů spustit, a posledních
+        10 běhů (nanečisto, provedení, vrácení). Spuštění, vrácení a zrušení jsou jen
+        v aplikaci (právo Hromadné změny dokladů a zápisů), přes token dostupné nejsou.
+      parameters:
+        - $ref: '#/components/parameters/SupplierIdHeader'
+        - in: query
+          name: target
+          required: true
+          schema: { type: string, enum: [invoice, purchase_invoice, journal_entry] }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  can_run: { type: boolean, description: 'Smí uživatel spustit aspoň jednu operaci (token nikdy).' }
+                  limit: { type: integer, description: 'Nejvyšší počet záznamů jednoho běhu.' }
+                  operations:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        key: { type: string, enum: [rebook_account, set_dimensions, set_posting_rule, delete] }
+                        available: { type: boolean }
+                        reason: { type: [string, "null"], description: 'Proč operace není k dispozici.' }
+                        rollback: { type: boolean, description: 'Jde ostrý běh vrátit (smazání ne).' }
+                  jobs:
+                    type: array
+                    items: { $ref: '#/components/schemas/BulkActionJob' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+
+  /api/v1/accounting/bulk-actions/{id}:
+    get:
+      tags: [Accounting]
+      summary: Stav běhu hromadné akce
+      parameters:
+        - $ref: '#/components/parameters/SupplierIdHeader'
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer, minimum: 1 }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/BulkActionJob'
+                  - type: object
+                    properties:
+                      log_text: { type: [string, "null"] }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/v1/accounting/bulk-actions/{id}/items:
+    get:
+      tags: [Accounting]
+      summary: Výsledek běhu hromadné akce po záznamech
+      description: >
+        Stav před a po u každého záznamu. Podoba `before`/`after` závisí na operaci:
+        přeúčtování nese řádky zápisu, dimenze snímek hlavičky, položek a řádků zápisu
+        (`dimensions` typ => hodnota, `splits` typ => hodnota => podíl), předkontace
+        položky a řádky zápisu, smazání stav záznamu a provedený krok.
+      parameters:
+        - $ref: '#/components/parameters/SupplierIdHeader'
+        - in: path
+          name: id
+          required: true
+          schema: { type: integer, minimum: 1 }
+        - in: query
+          name: status
+          schema:
+            type: string
+            enum: [would_change, unchanged, skipped, excluded, applied, failed]
+        - in: query
+          name: page
+          schema: { type: integer, minimum: 1, default: 1 }
+        - in: query
+          name: per_page
+          schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/BulkActionItem' }
+                  total: { type: integer }
+                  counts:
+                    type: object
+                    additionalProperties: { type: integer }
+                  labels:
+                    type: object
+                    description: 'Jen u nastavení dimenzí: názvy typů a hodnot pro zobrazení snímků.'
+                    properties:
+                      types: { type: object, additionalProperties: { type: string } }
+                      values: { type: object, additionalProperties: { type: string } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+
   /api/v1/accounting/bank-bulk:
     get:
       tags: [Accounting]
@@ -58875,6 +58992,58 @@ components:
         side: { type: string, enum: [debit, credit] }
         amount: { type: number }
         is_red_storno: { type: boolean }
+    BulkActionJob:
+      type: object
+      properties:
+        id: { type: integer }
+        operation: { type: string, enum: [rebook_account, set_dimensions, set_posting_rule, delete] }
+        target: { type: string, enum: [invoice, purchase_invoice, journal_entry] }
+        selection_count: { type: integer, description: 'Počet záznamů výběru.' }
+        rollback_supported: { type: boolean }
+        kind: { type: string, enum: [dry_run, apply, rollback] }
+        status:
+          type: string
+          enum: [queued, running, completed, completed_with_warnings, failed, cancelled]
+        total_items: { type: [integer, "null"] }
+        processed: { type: integer }
+        changed_count: { type: integer }
+        skipped_count: { type: integer }
+        failed_count: { type: integer }
+        current_step: { type: [string, "null"] }
+        last_error: { type: [string, "null"] }
+        created_at: { type: [string, "null"] }
+        finished_at: { type: [string, "null"] }
+        params:
+          type: object
+          description: 'Parametry operace (účty, dimenze s režimem set/fill/clear, předkontace, volba u smazání).'
+          additionalProperties: true
+        dry_run_job_id: { type: [integer, "null"] }
+        rollback_of_job_id: { type: [integer, "null"] }
+        applied_by_job_id: { type: [integer, "null"] }
+        rolled_back_by_job_id: { type: [integer, "null"] }
+        can_apply: { type: boolean }
+        can_rollback: { type: boolean }
+    BulkActionItem:
+      type: object
+      properties:
+        id: { type: integer }
+        entry_id: { type: [integer, "null"] }
+        source_type: { type: string, description: 'Druh záznamu: invoice, purchase_invoice, journal_entry (source_id je id zápisu); přeúčtování i bank, manual, cash' }
+        source_id: { type: integer }
+        document_no: { type: [string, "null"] }
+        entry_date: { type: string, format: date }
+        description: { type: [string, "null"] }
+        amount: { type: number }
+        status: { type: string, enum: [would_change, unchanged, skipped, excluded, applied, failed] }
+        strategy: { type: [string, "null"], description: 'replace, reverse nebo delete' }
+        target_date: { type: [string, "null"], format: date }
+        date_shifted: { type: boolean }
+        reason_code: { type: [string, "null"] }
+        message: { type: [string, "null"] }
+        before: { description: 'Stav před změnou, podoba podle operace.' }
+        after: { description: 'Stav po změně, podoba podle operace.' }
+        result_entry_id: { type: [integer, "null"] }
+        items_synced: { type: integer }
     JournalRebookJob:
       type: object
       properties:
@@ -58907,6 +59076,11 @@ components:
             amount_min: { type: [number, "null"] }
             amount_max: { type: [number, "null"] }
             mode: { type: string, enum: [rewrite, rewrite_or_reverse] }
+            partner_id: { type: [integer, "null"], description: 'Odběratel nebo dodavatel dokladu (faktury a přijaté faktury).' }
+            dimension_value_id: { type: [integer, "null"], description: 'Zápis má řádek s touto hodnotou dimenze (i podřízené).' }
+            posting_rule_key: { type: [string, "null"], description: 'Doklad má položku s touto předkontací.' }
+            document_no_from: { type: [string, "null"] }
+            document_no_to: { type: [string, "null"] }
         dry_run_job_id: { type: [integer, "null"] }
         rollback_of_job_id: { type: [integer, "null"] }
         applied_by_job_id: { type: [integer, "null"] }

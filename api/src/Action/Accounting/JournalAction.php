@@ -289,6 +289,28 @@ final class JournalAction
     }
 
     /**
+     * Výběr „všech zápisů podle filtru" pro hromadné akce: query parametry seznamu
+     * deníku vyhodnotí tentýž kód jako {@see list()}, takže akce zasáhne přesně to,
+     * co uživatel v seznamu vidí. Vrací id (nejvýš `$limit`) a celkový počet, nebo
+     * text validační chyby.
+     *
+     * @return array{total:int, ids:list<int>}|string
+     */
+    public function bulkSelection(Request $request, int $supplierId, int $limit): array|string
+    {
+        try {
+            $filters = $this->parseFilters($request->getQueryParams(), $supplierId);
+        } catch (AccountCodeRangeException $e) {
+            return $e->getMessage();
+        }
+        if (!$this->applyDimensionFilter($request, new \Slim\Psr7\Response(), $supplierId, $filters, $err)) {
+            $body = json_decode((string) $err?->getBody(), true);
+            return (string) ($body['error']['message'] ?? 'Neplatný filtr dimenze.');
+        }
+        return $this->journal->filteredIds($supplierId, $filters, $limit);
+    }
+
+    /**
      * @param array<string,mixed> $q query params (Request::getQueryParams())
      * @throws AccountCodeRangeException neplatný rozsah účtů (akce vrací 422)
      * @return array{document_no?:string, period_id?:int, date_from?:string, date_to?:string, source_type?:string, source_id?:int, entry_id?:int, entry_ids?:list<int>, posted?:bool, automation?:string, q?:string, account_from?:string, account_to?:string, amount_from?:float, amount_to?:float}

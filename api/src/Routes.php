@@ -2918,6 +2918,13 @@ final class Routes
             $g->get   ('/bank-bulk/{id:[0-9]+}/items',        [\MyInvoice\Action\Accounting\BankBulkAction::class, 'items']);
             $g->post  ('/bank-bulk/{id:[0-9]+}/rollback',     [\MyInvoice\Action\Accounting\BankBulkAction::class, 'rollback']);
             $g->post  ('/bank-bulk/{id:[0-9]+}/cancel',       [\MyInvoice\Action\Accounting\BankBulkAction::class, 'cancel']);
+            // Hromadné akce v seznamech (deník, vydané a přijaté faktury), viz BulkActionAction.
+            $g->get   ('/bulk-actions',                       [\MyInvoice\Action\Accounting\BulkActionAction::class, 'status']);
+            $g->post  ('/bulk-actions/start',                 [\MyInvoice\Action\Accounting\BulkActionAction::class, 'start']);
+            $g->get   ('/bulk-actions/{id:[0-9]+}',           [\MyInvoice\Action\Accounting\BulkActionAction::class, 'job']);
+            $g->get   ('/bulk-actions/{id:[0-9]+}/items',     [\MyInvoice\Action\Accounting\BulkActionAction::class, 'itemsPage']);
+            $g->post  ('/bulk-actions/{id:[0-9]+}/rollback',  [\MyInvoice\Action\Accounting\BulkActionAction::class, 'rollback']);
+            $g->post  ('/bulk-actions/{id:[0-9]+}/cancel',    [\MyInvoice\Action\Accounting\BulkActionAction::class, 'cancel']);
             $g->get   ('/setup-assistant', [\MyInvoice\Action\Accounting\AccountingSetupAssistantAction::class, 'status']);
             $g->post  ('/setup-assistant/analysis', [\MyInvoice\Action\Accounting\AccountingSetupAssistantAction::class, 'startAnalysis']);
             $g->get   ('/setup-assistant/runs/{id:[0-9]+}', [\MyInvoice\Action\Accounting\AccountingSetupAssistantAction::class, 'run']);

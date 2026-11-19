@@ -1217,7 +1217,9 @@
         "2311_journal_bulk_repost_permission.sql",
         "2312_supplier_dashboard_work_reports.sql",
         "2313_income_tax_books_fingerprint.sql",
-        "2314_purchase_invoice_supplier_advance_index.sql"
+        "2314_purchase_invoice_supplier_advance_index.sql",
+        "2315_bulk_actions.sql",
+        "2316_bulk_changes_permission.sql"
     ],
     "tables": {
         "abra_flexi_connections": {
@@ -1487,7 +1489,7 @@
                 "reason_code": "varchar(80) NULL DEFAULT NULL",
                 "result_entry_id": "bigint(20) unsigned NULL DEFAULT NULL",
                 "source_id": "bigint(20) unsigned NOT NULL",
-                "source_type": "enum('invoice','purchase_invoice','bank','manual','cash') NOT NULL",
+                "source_type": "enum('invoice','purchase_invoice','bank','manual','cash','journal_entry') NOT NULL",
                 "status": "enum('would_change','unchanged','skipped','excluded','applied','failed') NOT NULL",
                 "strategy": "varchar(16) NULL DEFAULT NULL",
                 "supplier_id": "int(10) unsigned NOT NULL",
@@ -6735,7 +6737,7 @@
                 "result_path": "varchar(255) NULL DEFAULT NULL",
                 "result_size": "bigint(20) unsigned NULL DEFAULT NULL",
                 "skipped_count": "int(10) unsigned NOT NULL DEFAULT 0",
-                "source": "enum('idoklad','fakturoid','pdf_isdoc_inbox','pdf_ai','monthly_export','document_zip_import','document_zip_export','document_folder_import','closing_package','file_import','document_backfill','accounting_setup_analysis','accounting_history_reclassification','automation_recommendations','scan_attach','money_s3_import','pohoda_import','premier_import','stereo_nx_import','money_s3_batch','abra_flexi_import','myucto_import','journal_rebook','bank_bulk') NOT NULL",
+                "source": "enum('idoklad','fakturoid','pdf_isdoc_inbox','pdf_ai','monthly_export','document_zip_import','document_zip_export','document_folder_import','closing_package','file_import','document_backfill','accounting_setup_analysis','accounting_history_reclassification','automation_recommendations','scan_attach','money_s3_import','pohoda_import','premier_import','stereo_nx_import','money_s3_batch','abra_flexi_import','myucto_import','journal_rebook','bank_bulk','bulk_action') NOT NULL",
                 "started_at": "timestamp NULL DEFAULT NULL",
                 "status": "enum('queued','running','completed','failed','cancelled','completed_with_warnings') NOT NULL DEFAULT 'queued'",
                 "supplier_id": "int(10) unsigned NOT NULL",

@@ -869,6 +869,12 @@ final class RoutePermissionMap
         ['GET', '#^/api/accounting/bank-bulk(/|$)#', 'accounting', AccessLevel::READ],
         ['POST', '#^/api/accounting/bank-bulk/count$#', 'accounting', AccessLevel::READ],
         ['*', '#^/api/accounting/bank-bulk(/|$)#', 'accounting.journal.post', AccessLevel::WRITE],
+        // Hromadné akce v seznamech: čtení stavu a výsledku jako ostatní účetnictví. Spuštění,
+        // vrácení a zrušení ověřuje akce přes RequestAuthorization::canBulkChange() (právo
+        // `accounting.bulk_changes`), u přeúčtování účtu canBulkRepost(), a každý záznam
+        // pak právy úpravy jednoho záznamu (smazat fakturu, zápis v deníku, dimenze…).
+        ['GET', '#^/api/accounting/bulk-actions(/|$)#', 'accounting', AccessLevel::READ],
+        ['POST', '#^/api/accounting/bulk-actions/(start|[0-9]+/(rollback|cancel))$#', 'accounting', AccessLevel::READ],
         // Převod starších zápisů na dvojice fyzicky dělí řádky deníku → právo účtovat.
         ['GET', '#^/api/accounting/pair-conversion(/|$)#', 'accounting', AccessLevel::READ],
         ['*', '#^/api/accounting/pair-conversion(/|$)#', 'accounting.journal.post', AccessLevel::WRITE],

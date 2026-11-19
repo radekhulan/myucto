@@ -167,6 +167,17 @@ final class CrossSupplierAuthorization
         return $out;
     }
 
+    /**
+     * Syntetický požadavek úlohy na pozadí za uživatele v dané firmě s jeho aktuální rolí.
+     * Úloha (hromadné akce) se tak o každém záznamu ptá týmiž právy jako akce v aplikaci;
+     * NULL = uživatel je neaktivní nebo do firmy už nesmí.
+     */
+    public function backgroundRequestFor(int $userId, int $supplierId): ?Request
+    {
+        $request = $this->requestForUser($userId);
+        return $request === null ? null : $this->scopedRequest($request, $supplierId);
+    }
+
     private function requestForUser(int $userId): ?Request
     {
         $user = $this->activeUser($userId);

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MyInvoice\Action\Invoice;
 
+use MyInvoice\Http\BulkDryRun;
 use MyInvoice\Http\GuardsDocumentLock;
 use MyInvoice\Http\Json;
 use MyInvoice\Http\SessionOnlyAccountingAct;
@@ -296,6 +297,13 @@ final class DeleteInvoiceAction
             $this->journalSync->onDeleteMany($supplierId, 'invoice', $deleteIds, $reverseMeta);
             foreach ($deleteIds as $deleteId) {
                 $this->stockIssue->reverseForInvoice($supplierId, $deleteId, isset($user['id']) ? (int) $user['id'] : null);
+            }
+            // Hromadné akce nanečisto: všechny kontroly i storno prošly, soubory se nemažou.
+            if (BulkDryRun::requested($request)) {
+                if ($ownTx && $pdo->inTransaction()) {
+                    $pdo->rollBack();
+                }
+                return Json::ok($response, ['ok' => true, 'dry_run' => true, 'cascade_deleted' => count($childRows)]);
             }
 
             // 1. Invalidate aktivní PDF cache (parent + děti)

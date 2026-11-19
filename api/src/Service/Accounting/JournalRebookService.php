@@ -7,13 +7,24 @@ namespace MyInvoice\Service\Accounting;
 use MyInvoice\Http\IsoDate;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\AccountingBulkItemRepository;
+use MyInvoice\Repository\AccountingModeRepository;
 use MyInvoice\Repository\ChartOfAccountsRepository;
 use MyInvoice\Repository\ImportJobRepository;
 use MyInvoice\Repository\JournalEntryRepository;
+use MyInvoice\Security\RequestAuthorization;
+use MyInvoice\Service\Accounting\Bulk\BulkActionException;
+use MyInvoice\Service\Accounting\Bulk\BulkCandidateSource;
+use MyInvoice\Service\Accounting\Bulk\BulkContext;
+use MyInvoice\Service\Accounting\Bulk\BulkJobRunner;
+use MyInvoice\Service\Accounting\Bulk\BulkOperation;
+use MyInvoice\Service\Accounting\Bulk\BulkSelection;
+use MyInvoice\Service\Accounting\Dimension\DimensionException;
 use MyInvoice\Service\Accounting\Dimension\DimensionPeriodGuard;
+use MyInvoice\Service\Accounting\Dimension\DimensionService;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Infrastructure\Database\TransactionFailure;
 use PDO;
+use Psr\Http\Message\ServerRequestInterface as Request;
 
 /**
  * Hromadné přeúčtování: změna účtu X → Y na zaúčtovaných zápisech deníku podle filtru
@@ -25,21 +36,22 @@ use PDO;
  * a u faktur přenese nový účet i na položky dokladu. Tahle služba jen vybere zápisy,
  * vymění v nich účet a výsledek po dokladech zapíše do `accounting_bulk_items`.
  *
- * Úloha má tři druhy (`params.kind`):
- *   - `dry_run`  … nic nezapíše, u každého dokladu řekne, co by se stalo,
- *   - `apply`    … zpracuje PŘESNĚ doklady, které běh nanečisto označil ke změně, a jen
- *                  když se od té doby jejich zaúčtování nezměnilo (otisk zápisů),
- *   - `rollback` … vrátí doklady, které ostrý běh změnil, a jen když je od té doby nikdo
- *                  nezměnil.
+ * Je to operace `rebook_account` hromadných úloh ({@see BulkJobRunner}): běh nanečisto,
+ * ostrý běh podle něj a vrácení řídí společný běh, tahle třída vybírá zápisy a mění
+ * jednotlivé doklady. Na stránce Přeúčtovat vybírá filtr nad řádky deníku, z Hromadných
+ * akcí v seznamech týž filtr omezený na vybrané doklady nebo zápisy (`restrict_target`,
+ * `restrict_ids`). Ostrý běh zpracuje jen doklady, jejichž zaúčtování se od běhu
+ * nanečisto nezměnilo (otisk zápisů), vrácení jen ty, které od přeúčtování nikdo nezměnil.
  *
  * Způsob (`params.mode`): `rewrite` přeúčtuje jen zápisy, které jde opravit na místě
  * (otevřené období, ostatní vynechá s důvodem), `rewrite_or_reverse` ostatní stornuje
  * a zaúčtuje znovu, i s posunem data, který ukáže náhled.
  */
-final class JournalRebookService
+final class JournalRebookService implements BulkOperation, BulkCandidateSource
 {
     public const SOURCE = 'journal_rebook';
-    public const LIMIT = 500;
+    public const KEY = 'rebook_account';
+    public const LIMIT = BulkJobRunner::LIMIT;
     public const SOURCES = ['invoice', 'purchase_invoice', 'bank', 'manual', 'cash'];
     /** Zdroje, které přeúčtuje {@see DocumentRepostService}; ruční zápisy a pokladnu mění {@see rebookEntryInPlace()}. */
     public const DOCUMENT_SOURCES = ['invoice', 'purchase_invoice', 'bank'];
@@ -64,7 +76,73 @@ final class JournalRebookService
         private readonly AccountingBulkItemRepository $items,
         private readonly JournalEntryRepository $journal,
         private readonly ActivityLogger $activity,
+        private readonly BulkJobRunner $runner,
+        private readonly AccountingModeRepository $modes,
+        private readonly DimensionService $dimensions,
     ) {}
+
+    /** @var array<int,array<string,mixed>> */
+    private array $filters = [];
+
+    /** @var array<int,array<string,mixed>> */
+    private array $applyParams = [];
+
+    public function key(): string
+    {
+        return self::KEY;
+    }
+
+    public function supportsRollback(): bool
+    {
+        return true;
+    }
+
+    public function unavailableReason(Request $request, int $supplierId, string $target): ?string
+    {
+        if (!RequestAuthorization::canBulkRepost($request)) {
+            return 'Přeúčtovat hromadně smí správce firmy nebo role s právem hromadně přeúčtovat doklady.';
+        }
+        if (!$this->modes->hasDoubleEntry($supplierId)) {
+            return 'Firma nevede podvojné účetnictví.';
+        }
+        return null;
+    }
+
+    public function normalizeParams(int $supplierId, string $target, array $raw): array
+    {
+        try {
+            return $this->normalizeFilter($supplierId, ['restrict_target' => $target, 'restrict_ids' => $raw['ids'] ?? []] + $raw);
+        } catch (PostingException $e) {
+            throw new BulkActionException($e->errorCode, $e->getMessage(), $e->httpStatus);
+        }
+    }
+
+    public function candidates(BulkContext $ctx): array
+    {
+        return $this->filterCandidates($ctx->supplierId, $this->jobFilter($ctx));
+    }
+
+    public function evaluate(BulkContext $ctx, array $row): array
+    {
+        return $this->evaluateRow($ctx->supplierId, $this->jobFilter($ctx), $row);
+    }
+
+    public function apply(BulkContext $ctx, array $dry): array
+    {
+        return $this->applyOne($ctx->jobId, $ctx->supplierId, $ctx->userId, $this->jobFilter($ctx), $dry);
+    }
+
+    public function rollback(BulkContext $ctx, array $applied): array
+    {
+        $of = $this->applyParams[$ctx->jobId] ??= (array) ($this->jobs->find((int) ($ctx->params['rollback_of_job_id'] ?? 0), $ctx->supplierId)['params'] ?? []);
+        return $this->rollbackOne($ctx->jobId, $ctx->supplierId, $ctx->userId, (string) ($of['mode'] ?? self::MODE_REWRITE), $of, $applied);
+    }
+
+    /** @return array<string,mixed> filtr úlohy (ostrý běh nese parametry běhu nanečisto) */
+    private function jobFilter(BulkContext $ctx): array
+    {
+        return $this->filters[$ctx->jobId] ??= $this->normalizeFilter($ctx->supplierId, $ctx->params);
+    }
 
     /**
      * Stránka položek běhu pro obrazovku.
@@ -106,6 +184,22 @@ final class JournalRebookService
         if (!in_array($side, ['both', 'debit', 'credit'], true)) {
             throw new PostingException('validation_failed', 'Strana musí být both, debit nebo credit.', 422);
         }
+        // Výběr ze seznamu (Hromadné akce) omezuje zápisy na vybrané doklady nebo zápisy;
+        // období a zdroje pak nejsou povinné.
+        $restrictTarget = isset($body['restrict_target']) ? (string) $body['restrict_target'] : null;
+        $restrictIds = null;
+        if ($restrictTarget !== null) {
+            if (!in_array($restrictTarget, BulkSelection::TARGETS, true)) {
+                throw new PostingException('validation_failed', 'Neznámý druh vybraných záznamů.', 422);
+            }
+            $restrictIds = array_values(array_unique(array_filter(array_map('intval', (array) ($body['restrict_ids'] ?? [])), static fn (int $id): bool => $id > 0)));
+            if ($restrictIds === [] || count($restrictIds) > self::LIMIT) {
+                throw new PostingException('validation_failed', 'Neplatný výběr záznamů.', 422);
+            }
+            $body += ['date_from' => '1900-01-01', 'date_to' => '2999-12-31', 'source_types' => match ($restrictTarget) {
+                'invoice' => ['invoice'], 'purchase_invoice' => ['purchase_invoice'], default => self::SOURCES,
+            }];
+        }
         $dateFrom = (string) ($body['date_from'] ?? '');
         $dateTo = (string) ($body['date_to'] ?? '');
         if (!IsoDate::isValid($dateFrom) || !IsoDate::isValid($dateTo) || $dateFrom > $dateTo) {
@@ -134,6 +228,39 @@ final class JournalRebookService
             throw new PostingException('validation_failed', 'Neplatný způsob přeúčtování.', 422);
         }
 
+        $positive = static function (mixed $v, string $what) use ($supplierId): ?int {
+            if ($v === null || $v === '' || $v === 0 || $v === '0') return null;
+            if (!is_numeric($v) || (int) $v <= 0 || (string) (int) $v !== (string) $v) {
+                throw new PostingException('validation_failed', 'Neplatné ' . $what . '.', 422);
+            }
+            return (int) $v;
+        };
+        $partnerId = $positive($body['partner_id'] ?? null, 'id odběratele nebo dodavatele');
+        if ($partnerId !== null) {
+            $stmt = $this->db->pdo()->prepare('SELECT 1 FROM clients WHERE id = ? AND supplier_id = ?');
+            $stmt->execute([$partnerId, $supplierId]);
+            if ($stmt->fetchColumn() === false) {
+                throw new PostingException('validation_failed', 'Odběratel nebo dodavatel ve firmě není.', 422);
+            }
+        }
+        $dimensionValueId = $positive($body['dimension_value_id'] ?? null, 'id hodnoty dimenze');
+        if ($dimensionValueId !== null) {
+            try {
+                $this->dimensions->requireValue($supplierId, $dimensionValueId);
+            } catch (DimensionException $e) {
+                throw new PostingException('validation_failed', $e->getMessage(), 422);
+            }
+        }
+        $ruleKey = trim((string) ($body['posting_rule_key'] ?? ''));
+        if ($ruleKey !== '' && preg_match('/^[a-z0-9_.\-]{1,64}$/D', $ruleKey) !== 1) {
+            throw new PostingException('validation_failed', 'Neplatný klíč předkontace.', 422);
+        }
+        $docFrom = mb_substr(trim((string) ($body['document_no_from'] ?? '')), 0, 50);
+        $docTo = mb_substr(trim((string) ($body['document_no_to'] ?? '')), 0, 50);
+        if ($docFrom !== '' && $docTo !== '' && $docFrom > $docTo) {
+            throw new PostingException('validation_failed', 'Číslo dokladu „od" musí být menší nebo rovno číslu „do".', 422);
+        }
+
         return [
             'from_account' => $from,
             'to_account'   => $to,
@@ -145,7 +272,12 @@ final class JournalRebookService
             'amount_min'   => $amount($body['amount_min'] ?? null),
             'amount_max'   => $amount($body['amount_max'] ?? null),
             'mode'         => $mode,
-        ];
+            'partner_id'         => $partnerId,
+            'dimension_value_id' => $dimensionValueId,
+            'posting_rule_key'   => $ruleKey === '' ? null : $ruleKey,
+            'document_no_from'   => $docFrom === '' ? null : $docFrom,
+            'document_no_to'     => $docTo === '' ? null : $docTo,
+        ] + ($restrictTarget === null ? [] : ['restrict_target' => $restrictTarget, 'restrict_ids' => $restrictIds]);
     }
 
     /**
@@ -192,34 +324,7 @@ final class JournalRebookService
     /** Vstupní bod workeru ({@see \MyInvoice\Bootstrap} import-worker.php). */
     public function run(int $jobId): void
     {
-        $job = $this->jobs->findById($jobId);
-        if ($job === null || $job['source'] !== self::SOURCE || !$this->jobs->markRunning($jobId)) {
-            return;
-        }
-        $supplierId = (int) $job['supplier_id'];
-        $params = (array) ($job['params'] ?? []);
-        $userId = (int) $job['created_by'];
-        $counts = ['changed' => 0, 'skipped' => 0, 'failed' => 0];
-        try {
-            $kind = (string) ($params['kind'] ?? '');
-            $cancelled = match ($kind) {
-                'dry_run'  => $this->dryRun($jobId, $supplierId, $params, $counts),
-                'apply'    => $this->apply($jobId, $supplierId, $userId, $params, $counts),
-                'rollback' => $this->rollback($jobId, $supplierId, $userId, $params, $counts),
-                default    => throw new \RuntimeException('Neznámý druh úlohy přeúčtování.'),
-            };
-            $this->progress($jobId, null, $counts, true);
-            if ($cancelled) {
-                $this->jobs->markCancelled($jobId);
-            } elseif ($counts['failed'] > 0) {
-                $this->jobs->markCompletedWithWarnings($jobId);
-            } else {
-                $this->jobs->markCompleted($jobId);
-            }
-        } catch (\Throwable $e) {
-            $this->jobs->appendLog($jobId, $e->getMessage());
-            $this->jobs->markFailed($jobId, mb_substr($e->getMessage(), 0, 500));
-        }
+        $this->runner->run($jobId, self::SOURCE, $this, false);
     }
 
     /**
@@ -229,7 +334,7 @@ final class JournalRebookService
      * @param array<string,mixed> $filter
      * @return list<array<string,mixed>>
      */
-    public function candidates(int $supplierId, array $filter): array
+    public function filterCandidates(int $supplierId, array $filter): array
     {
         [$where, $params] = $this->lineConditions($supplierId, $filter);
         $sources = implode(', ', array_fill(0, count($filter['source_types']), '?'));
@@ -277,29 +382,46 @@ final class JournalRebookService
             $params[] = $like;
             $params[] = $like;
         }
+        if (($filter['document_no_from'] ?? null) !== null) {
+            $where .= ' AND je.document_no >= ?';
+            $params[] = $filter['document_no_from'];
+        }
+        if (($filter['document_no_to'] ?? null) !== null) {
+            $where .= ' AND je.document_no <= ?';
+            $params[] = $filter['document_no_to'];
+        }
+        if (($filter['partner_id'] ?? null) !== null) {
+            $where .= " AND ((je.source_type = 'invoice' AND EXISTS (SELECT 1 FROM invoices fi
+                                WHERE fi.id = je.source_id AND fi.supplier_id = je.supplier_id AND fi.client_id = ?))
+                          OR (je.source_type = 'purchase_invoice' AND EXISTS (SELECT 1 FROM purchase_invoices fp
+                                WHERE fp.id = je.source_id AND fp.supplier_id = je.supplier_id AND fp.vendor_id = ?)))";
+            $params[] = $filter['partner_id'];
+            $params[] = $filter['partner_id'];
+        }
+        if (($filter['posting_rule_key'] ?? null) !== null) {
+            $where .= " AND ((je.source_type = 'invoice' AND EXISTS (SELECT 1 FROM invoice_items fii
+                                WHERE fii.invoice_id = je.source_id AND fii.posting_rule_key = ?))
+                          OR (je.source_type = 'purchase_invoice' AND EXISTS (SELECT 1 FROM purchase_invoice_items fpi
+                                WHERE fpi.purchase_invoice_id = je.source_id AND fpi.posting_rule_key = ?)))";
+            $params[] = $filter['posting_rule_key'];
+            $params[] = $filter['posting_rule_key'];
+        }
+        if (($filter['dimension_value_id'] ?? null) !== null) {
+            [$dimSql, $dimParams] = $this->dimensions->filter($supplierId, (int) $filter['dimension_value_id'])->entrySql('je', $supplierId);
+            $where .= ' AND ' . $dimSql;
+            array_push($params, ...$dimParams);
+        }
+        if (($filter['restrict_target'] ?? null) !== null && ($filter['restrict_ids'] ?? []) !== []) {
+            $marks = implode(',', array_fill(0, count($filter['restrict_ids']), '?'));
+            $where .= $filter['restrict_target'] === 'journal_entry'
+                ? " AND je.id IN ({$marks})"
+                : " AND je.source_type = ? AND je.source_id IN ({$marks})";
+            if ($filter['restrict_target'] !== 'journal_entry') {
+                $params[] = $filter['restrict_target'];
+            }
+            array_push($params, ...$filter['restrict_ids']);
+        }
         return [$where, $params];
-    }
-
-    /**
-     * @param array<string,mixed> $params
-     * @param array{changed:int, skipped:int, failed:int} $counts
-     */
-    private function dryRun(int $jobId, int $supplierId, array $params, array &$counts): bool
-    {
-        $filter = $this->normalizeFilter($supplierId, $params);
-        $rows = $this->candidates($supplierId, $filter);
-        if (count($rows) > self::LIMIT) {
-            throw new \RuntimeException('Filtr zasahuje víc než ' . self::LIMIT . ' dokladů, zužte ho.');
-        }
-        $this->jobs->updateProgress($jobId, ['total_items' => count($rows), 'current_step' => 'dry_run']);
-        foreach ($rows as $i => $row) {
-            if ($this->jobs->isCancelRequested($jobId)) return true;
-            $item = $this->evaluate($supplierId, $filter, $row);
-            $this->items->insert($jobId, $supplierId, $item);
-            $counts[match ($item['status']) { 'would_change' => 'changed', 'failed' => 'failed', default => 'skipped' }]++;
-            $this->progress($jobId, $i + 1, $counts);
-        }
-        return false;
     }
 
     /**
@@ -309,7 +431,7 @@ final class JournalRebookService
      * @param array<string,mixed> $row kandidát z {@see candidates()}
      * @return array<string,mixed> řádek pro accounting_bulk_items
      */
-    private function evaluate(int $supplierId, array $filter, array $row): array
+    private function evaluateRow(int $supplierId, array $filter, array $row): array
     {
         $sourceType = (string) $row['source_type'];
         $sourceId = (int) $row['source_id'];
@@ -352,32 +474,6 @@ final class JournalRebookService
     }
 
     /**
-     * @param array<string,mixed> $params
-     * @param array{changed:int, skipped:int, failed:int} $counts
-     */
-    private function apply(int $jobId, int $supplierId, int $userId, array $params, array &$counts): bool
-    {
-        $filter = $this->normalizeFilter($supplierId, $params);
-        $dryJobId = (int) ($params['dry_run_job_id'] ?? 0);
-        $excluded = array_flip(array_map('intval', (array) ($params['excluded_entry_ids'] ?? [])));
-        $items = $this->items->byStatus($supplierId, $dryJobId, 'would_change');
-        $this->jobs->updateProgress($jobId, ['total_items' => count($items), 'current_step' => 'apply']);
-        foreach ($items as $i => $dry) {
-            if ($this->jobs->isCancelRequested($jobId)) return true;
-            if (isset($excluded[(int) $dry['entry_id']])) {
-                $this->items->insert($jobId, $supplierId, ['status' => 'excluded', 'reason_code' => 'excluded_by_user'] + self::copyItem($dry));
-                $counts['skipped']++;
-            } else {
-                $result = $this->applyOne($jobId, $supplierId, $userId, $filter, $dry);
-                $this->items->insert($jobId, $supplierId, $result);
-                $counts[match ($result['status']) { 'applied' => 'changed', 'failed' => 'failed', default => 'skipped' }]++;
-            }
-            $this->progress($jobId, $i + 1, $counts);
-        }
-        return false;
-    }
-
-    /**
      * @param array<string,mixed> $filter
      * @param array<string,mixed> $dry položka běhu nanečisto
      * @return array<string,mixed>
@@ -386,7 +482,7 @@ final class JournalRebookService
     {
         $sourceType = (string) $dry['source_type'];
         $sourceId = (int) $dry['source_id'];
-        $item = self::copyItem($dry);
+        $item = BulkSelection::copyItem($dry);
         if (!in_array($sourceType, self::DOCUMENT_SOURCES, true)) {
             return $this->rebookEntryInPlace($jobId, $supplierId, $userId, (int) $dry['entry_id'], $filter['from_account'], $filter['to_account'], $filter['side'], $dry['fingerprint'], $item);
         }
@@ -429,43 +525,18 @@ final class JournalRebookService
     }
 
     /**
-     * @param array<string,mixed> $params
-     * @param array{changed:int, skipped:int, failed:int} $counts
-     */
-    private function rollback(int $jobId, int $supplierId, int $userId, array $params, array &$counts): bool
-    {
-        $applyJobId = (int) ($params['rollback_of_job_id'] ?? 0);
-        $applyJob = $this->jobs->find($applyJobId, $supplierId);
-        if ($applyJob === null || $applyJob['source'] !== self::SOURCE || (($applyJob['params'] ?? [])['kind'] ?? '') !== 'apply') {
-            throw new \RuntimeException('Vrátit lze jen dokončené přeúčtování.');
-        }
-        $mode = (string) (($applyJob['params'] ?? [])['mode'] ?? self::MODE_REWRITE);
-        $items = $this->items->byStatus($supplierId, $applyJobId, 'applied');
-        $this->jobs->updateProgress($jobId, ['total_items' => count($items), 'current_step' => 'rollback']);
-        foreach ($items as $i => $applied) {
-            if ($this->jobs->isCancelRequested($jobId)) return true;
-            $result = $this->rollbackOne($jobId, $supplierId, $userId, $mode, $applied);
-            $this->items->insert($jobId, $supplierId, $result);
-            $counts[match ($result['status']) { 'applied' => 'changed', 'failed' => 'failed', default => 'skipped' }]++;
-            $this->progress($jobId, $i + 1, $counts);
-        }
-        return false;
-    }
-
-    /**
+     * @param array<string,mixed> $of parametry ostrého běhu
      * @param array<string,mixed> $applied položka ostrého běhu
      * @return array<string,mixed>
      */
-    private function rollbackOne(int $jobId, int $supplierId, int $userId, string $mode, array $applied): array
+    private function rollbackOne(int $jobId, int $supplierId, int $userId, string $mode, array $of, array $applied): array
     {
         $sourceType = (string) $applied['source_type'];
         $sourceId = (int) $applied['source_id'];
         // V položce vrácení je „před" stav po přeúčtování a „po" původní kontace.
-        $item = ['before' => $applied['after'], 'after' => $applied['before']] + self::copyItem($applied);
+        $item = ['before' => $applied['after'], 'after' => $applied['before']] + BulkSelection::copyItem($applied);
         if (!in_array($sourceType, self::DOCUMENT_SOURCES, true)) {
-            $applyJob = $this->jobs->findById($jobId);
-            $of = $this->jobs->find((int) (($applyJob['params'] ?? [])['rollback_of_job_id'] ?? 0), $supplierId);
-            $p = (array) ($of['params'] ?? []);
+            $p = $of;
             $lineIds = array_values(array_filter(array_map(static fn (array $l): int => (int) ($l['line_id'] ?? 0), $applied['after'])));
             $result = $this->rebookEntryInPlace($jobId, $supplierId, $userId, (int) $applied['entry_id'], (string) $p['to_account'], (string) $p['from_account'], 'both', $applied['fingerprint'], $item, $lineIds);
             return $result['status'] === 'applied' ? $result : ['status' => 'failed'] + $result;
@@ -890,35 +961,5 @@ final class JournalRebookService
             'before'      => [],
             'after'       => [],
         ];
-    }
-
-    /**
-     * Položka předchozího běhu jako základ položky dalšího běhu.
-     *
-     * @param array<string,mixed> $item
-     * @return array<string,mixed>
-     */
-    private static function copyItem(array $item): array
-    {
-        return array_intersect_key($item, array_flip([
-            'entry_id', 'source_type', 'source_id', 'entry_date', 'document_no', 'description',
-            'amount', 'strategy', 'target_date', 'date_shifted', 'before', 'after', 'fingerprint',
-        ]));
-    }
-
-    /** @param array{changed:int, skipped:int, failed:int} $counts */
-    private function progress(int $jobId, ?int $processed, array $counts, bool $force = false): void
-    {
-        if ($force) {
-            $processed = $counts['changed'] + $counts['skipped'] + $counts['failed'];
-        } elseif ($processed % 10 !== 0) {
-            return;
-        }
-        $this->jobs->updateProgress($jobId, array_filter([
-            'processed'     => $processed,
-            'created_count' => $counts['changed'],
-            'skipped_count' => $counts['skipped'],
-            'failed_count'  => $counts['failed'],
-        ], static fn (mixed $v): bool => $v !== null));
     }
 }

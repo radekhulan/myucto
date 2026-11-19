@@ -137,6 +137,8 @@ try {
         $container->get(\MyInvoice\Service\Accounting\JournalRebookService::class)->run($jobId);
     } elseif ($source === 'bank_bulk') {
         $container->get(\MyInvoice\Service\Accounting\Bank\BankBulkService::class)->run($jobId);
+    } elseif ($source === 'bulk_action') {
+        $container->get(\MyInvoice\Service\Accounting\Bulk\BulkActionService::class)->run($jobId);
     } elseif ($source === 'file_import') {
         $container->get(FileImportJobService::class)->run($jobId);
     } elseif ($source === 'document_zip_import' || $source === 'document_zip_export' || $source === 'document_folder_import') {

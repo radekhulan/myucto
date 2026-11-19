@@ -825,6 +825,38 @@ final class PurchaseInvoiceRepository
     }
 
     /**
+     * Id přijatých faktur, které vybírá filtr seznamu ({@see listWhere()}), pro hromadné
+     * akce: nejvýš `$limit` id a celkový počet. Bez firmy nevybere nic.
+     *
+     * @param array<string,mixed> $filters
+     * @return array{total:int, ids:list<int>}
+     */
+    public function listIds(array $filters, int $limit, ?DocumentViewerContext $documentViewer = null): array
+    {
+        if ((int) ($filters['supplier_id'] ?? 0) <= 0) {
+            return ['total' => 0, 'ids' => []];
+        }
+        [$whereSql, $params] = $this->listWhere($filters, $documentViewer);
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT pi.id, COUNT(*) OVER() AS total FROM purchase_invoices pi
+               JOIN clients c ON c.id = pi.vendor_id
+               JOIN currencies cur ON cur.id = pi.currency_id
+          LEFT JOIN countries co ON co.id = c.country_id
+          LEFT JOIN expense_categories ec ON ec.id = pi.expense_category_id AND ec.supplier_id = pi.supplier_id
+          LEFT JOIN projects prj ON prj.id = pi.project_id
+              WHERE $whereSql
+              ORDER BY pi.id
+              LIMIT " . max(1, $limit)
+        );
+        $stmt->execute($params);
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        return [
+            'total' => $rows === [] ? 0 : (int) $rows[0]['total'],
+            'ids'   => array_map(static fn (array $r): int => (int) $r['id'], $rows),
+        ];
+    }
+
+    /**
      * Seznam přijatých faktur tenantu, seskupený po měsících podle **issue_date**
      * (datum vystavení faktury dodavatelem).
      *

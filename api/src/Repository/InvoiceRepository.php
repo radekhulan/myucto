@@ -916,6 +916,36 @@ final class InvoiceRepository
     }
 
     /**
+     * Id faktur, které vybírá filtr seznamu ({@see listWhere()}), pro hromadné akce:
+     * nejvýš `$limit` id a celkový počet. Bez firmy nevybere nic.
+     *
+     * @param array<string,mixed> $filters
+     * @return array{total:int, ids:list<int>}
+     */
+    public function listIds(array $filters, int $limit): array
+    {
+        if ((int) ($filters['supplier_id'] ?? 0) <= 0) {
+            return ['total' => 0, 'ids' => []];
+        }
+        [$whereSql, $params] = $this->listWhere($filters);
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT i.id, COUNT(*) OVER() AS total FROM invoices i
+               JOIN clients c ON c.id = i.client_id
+          LEFT JOIN projects p ON p.id = i.project_id
+               JOIN currencies cur ON cur.id = i.currency_id
+              WHERE $whereSql
+              ORDER BY i.id
+              LIMIT " . max(1, $limit)
+        );
+        $stmt->execute($params);
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        return [
+            'total' => $rows === [] ? 0 : (int) $rows[0]['total'],
+            'ids'   => array_map(static fn (array $r): int => (int) $r['id'], $rows),
+        ];
+    }
+
+    /**
      * WHERE seznamu faktur nad aliasy `i` (invoices), `c` (clients) a `cur` (currencies).
      * Sdílí ho seznam i kniha vystavených faktur, aby export vybral totéž co obrazovka.
      *

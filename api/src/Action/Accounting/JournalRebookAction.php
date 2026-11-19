@@ -42,6 +42,7 @@ final class JournalRebookAction
     private const HISTORY = 10;
     private const PARAMS = [
         'from_account', 'to_account', 'side', 'date_from', 'date_to', 'source_types', 'text', 'amount_min', 'amount_max', 'mode',
+        'partner_id', 'dimension_value_id', 'posting_rule_key', 'document_no_from', 'document_no_to',
     ];
 
     public function __construct(
