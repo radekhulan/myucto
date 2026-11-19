@@ -1017,6 +1017,21 @@ mohly být mezitím zaúčtované, spárované nebo upravené v MyÚčtu. Změni
 v POHODĚ celková částka faktury, protokol ji vypíše jako změněnou v POHODĚ
 a ponechanou v MyÚčtu; upravte ji ručně.
 
+**Oprava dat DPH u dříve převedených dokladů.** Firma převedená verzí, která
+u přijatých dokladů zaměnila Datum KH DPH a Datum odp./doruč., má v DUZP datum odpočtu
+a Datum KH DPH jako ručně zadané datum přijetí. Přiznání k DPH je v pořádku, kontrolní
+hlášení ale nese jako DPPD datum odpočtu. Správce instalace to opraví příkazem
+`php api/bin/repair-pohoda-duzp.php`. Bez parametrů jen vypíše, které doklady by
+opravil a které přeskočí, s `--supplier=<id firmy>` se omezí na jednu firmu a teprve
+s `--apply` data prohodí. Opravují se jen přijaté doklady z převodu, které mají ručně
+zadané datum přijetí dřív než DUZP. Přeskočí a vypíše doklady v obdobích s podaným
+přiznáním nebo kontrolním hlášením, v uzavřeném účetním období nebo pod zámkem k datu,
+doklady zaúčtované v MyÚčtu (opravte je ručně v dokladu, aby se zápis přeúčtoval)
+a zahraniční plnění v přenesení daňové povinnosti s daty v různých měsících. Přiznání
+se opravou nemění, mění se jen DUZP v kontrolním hlášení a případně datum nákladu. Zápisy
+převzaté z deníku POHODY zůstávají beze změny. Každý opravený doklad má záznam
+v auditní stopě a opakované spuštění už opravené doklady nemění.
+
 Před převodem firmy znovu od začátku stáhněte v průvodci **profil firmy** a po
 ostrém převodu ho nahrajte zpět, viz [§ 96.13](96_Nastaveni.md#9613-krok-za-krokem-profil-firmy).
 

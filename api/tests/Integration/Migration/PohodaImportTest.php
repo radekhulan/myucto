@@ -1230,6 +1230,80 @@ final class PohodaImportTest extends TestCase
         self::assertSame('02.03.2026', self::khDppd((string) $kh['xml'], 'VetaA2', 'D-' . SyntheticPohodaExport::SPLIT_FOREIGN_OTHER_MONTH));
     }
 
+    /**
+     * Oprava dokladů převedených před opravou mapování: prohodí DUZP a datum odpočtu,
+     * přeskočí podané období a zahraniční přenesení s daty v různých měsících, přiznání
+     * se nezmění, KH dostane DUZP. Doklad převedený opravenou verzí výběru neodpovídá
+     * a druhý běh nic nemění.
+     */
+    public function testDuzpRepairSwapsLegacyImportOnly(): void
+    {
+        $supplierId = $this->supplier();
+        $dir = SyntheticPohodaExport::write($this->tmp);
+        SyntheticPohodaExport::withSplitVatDates($dir);
+        $protocol = $this->importer->run($supplierId, $this->userId, PohodaExport::open($dir), false);
+        self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
+        $repair = Bootstrap::buildContainer()->get(\MyInvoice\Service\Migration\Pohoda\PohodaDuzpRepair::class);
+        self::assertSame([], $repair->run($supplierId, false), 'Převod s opravou nemá co opravovat.');
+
+        // Stav po původním převodu: datum odpočtu v DUZP, datum KH DPH jako ruční datum přijetí.
+        $legacy = $this->db->pdo()->prepare("UPDATE purchase_invoices SET tax_date = ?, received_at = ?, received_at_source = 'manual' WHERE supplier_id = ? AND varsymbol = ?");
+        foreach ([
+            SyntheticPohodaExport::SPLIT_DOMESTIC => ['2026-03-01', '2026-02-27'],
+            SyntheticPohodaExport::SPLIT_FOREIGN_SAME_MONTH => ['2026-03-20', '2026-03-05'],
+            SyntheticPohodaExport::SPLIT_FOREIGN_OTHER_MONTH => ['2026-03-02', '2026-02-26'],
+            SyntheticPohodaExport::SPLIT_JANUARY => ['2026-01-15', '2026-01-12'],
+        ] as $number => [$tax, $received]) {
+            $legacy->execute([$tax, $received, $supplierId, $number]);
+        }
+        $this->db->pdo()->prepare(
+            "INSERT INTO tax_submissions (supplier_id, form_code, period_year, period_month, xml_content, xml_size_bytes, xml_sha256, status, submitted_at)
+             VALUES (?, 'dphkh1', ?, 1, '<x/>', 4, ?, 'submitted', NOW())"
+        )->execute([$supplierId, SyntheticPohodaExport::YEAR, hash('sha256', 'x')]);
+        $dph = Bootstrap::buildContainer()->get(\MyInvoice\Service\Report\DphPriznaniBuilder::class);
+        $kh = Bootstrap::buildContainer()->get(\MyInvoice\Service\Report\KontrolniHlaseniBuilder::class);
+        $returnBefore = $dph->build($supplierId, SyntheticPohodaExport::YEAR, 3, 'monthly')['summary']['lines'];
+        self::assertSame('01.03.2026', self::khDppd((string) $kh->build($supplierId, SyntheticPohodaExport::YEAR, 3)['xml'], 'VetaB2', 'D-' . SyntheticPohodaExport::SPLIT_DOMESTIC));
+        $before = $this->purchaseDates($supplierId);
+
+        $status = static fn (array $rows): array => array_column(array_map(static fn (array $r): array
+            => ['n' => $r['document_no'], 's' => $r['status'] . ($r['reason'] !== null ? ':' . $r['reason'] : '')], $rows), 's', 'n');
+        $expected = [
+            SyntheticPohodaExport::SPLIT_JANUARY => 'skipped:filed_vat_period',
+            SyntheticPohodaExport::SPLIT_FOREIGN_OTHER_MONTH => 'skipped:foreign_reverse_other_month',
+            SyntheticPohodaExport::SPLIT_DOMESTIC => 'would_repair',
+            SyntheticPohodaExport::SPLIT_FOREIGN_SAME_MONTH => 'would_repair',
+        ];
+        $dry = $status($repair->run($supplierId, false));
+        ksort($dry);
+        ksort($expected);
+        self::assertSame($expected, $dry);
+        self::assertSame($before, $this->purchaseDates($supplierId), 'Nanečisto se nic nemění.');
+
+        $applied = $status($repair->run($supplierId, true, $this->userId));
+        self::assertSame('repaired', $applied[SyntheticPohodaExport::SPLIT_DOMESTIC]);
+        self::assertSame('repaired', $applied[SyntheticPohodaExport::SPLIT_FOREIGN_SAME_MONTH]);
+        $after = $this->purchaseDates($supplierId);
+        self::assertSame(['2026-02-27', '2026-03-01', 'manual'], $after[SyntheticPohodaExport::SPLIT_DOMESTIC]);
+        self::assertSame(['2026-03-05', '2026-03-20', 'manual'], $after[SyntheticPohodaExport::SPLIT_FOREIGN_SAME_MONTH]);
+        self::assertSame($before[SyntheticPohodaExport::SPLIT_FOREIGN_OTHER_MONTH], $after[SyntheticPohodaExport::SPLIT_FOREIGN_OTHER_MONTH]);
+        self::assertSame($before[SyntheticPohodaExport::SPLIT_JANUARY], $after[SyntheticPohodaExport::SPLIT_JANUARY]);
+
+        self::assertSame($returnBefore, $dph->build($supplierId, SyntheticPohodaExport::YEAR, 3, 'monthly')['summary']['lines'], 'Přiznání se opravou nemění.');
+        $khXml = (string) $kh->build($supplierId, SyntheticPohodaExport::YEAR, 3)['xml'];
+        self::assertSame('27.02.2026', self::khDppd($khXml, 'VetaB2', 'D-' . SyntheticPohodaExport::SPLIT_DOMESTIC));
+        self::assertSame('05.03.2026', self::khDppd($khXml, 'VetaA2', 'D-' . SyntheticPohodaExport::SPLIT_FOREIGN_SAME_MONTH));
+        self::assertSame(2, $this->rows('activity_log', $supplierId, "action = '" . \MyInvoice\Service\Migration\Pohoda\PohodaDuzpRepair::AUDIT_ACTION . "'"));
+
+        $again = $status($repair->run($supplierId, true, $this->userId));
+        ksort($again);
+        self::assertSame([
+            SyntheticPohodaExport::SPLIT_FOREIGN_OTHER_MONTH => 'skipped:foreign_reverse_other_month',
+            SyntheticPohodaExport::SPLIT_JANUARY => 'skipped:filed_vat_period',
+        ], $again);
+        self::assertSame($after, $this->purchaseDates($supplierId));
+    }
+
     /** Datový soubor (MDB): „Datum KH DPH" (`DatKHDPH`) je DUZP, `DatZdPln` datum odpočtu - stejně jako v XML. */
     public function testMdbReceivedDocumentSplitsDuzpAndDeductionDate(): void
     {
