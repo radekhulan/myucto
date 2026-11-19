@@ -558,6 +558,49 @@ final class MyuctoImportTest extends TestCase
         // Vazba na ostatní doklad (obnova je nepřenáší) se vynechá a vykáže.
         $package['tables']['document_links'][] = ['document_id' => $fixture['document'], 'supplier_id' => $this->source,
             'entity_type' => 'other_item', 'entity_id' => 987654, 'created_at' => '2090-01-20 10:00:00'];
+        // Kroky uzávěrky s odkazy na zápisy a období zdroje: asistovaný zápis Časového rozlišení
+        // (druhý v exportu není) a otevření dalšího roku převzatým otevíracím zápisem.
+        $sourceEntry = (int) $this->pdo->query('SELECT MIN(id) FROM journal_entries WHERE supplier_id = ' . $this->source)->fetchColumn();
+        $sourcePeriod = (int) $this->pdo->query('SELECT MIN(id) FROM accounting_periods WHERE supplier_id = ' . $this->source)->fetchColumn();
+        $sourcePurchaseItem = (int) $this->pdo->query('SELECT id FROM purchase_invoice_items WHERE purchase_invoice_id = ' . $this->purchase)->fetchColumn();
+        $stepId = array_key_first($package['tables']['accounting_closing_steps']);
+        $step = $package['tables']['accounting_closing_steps'][$stepId];
+        $package['tables']['accounting_closing_steps'][$stepId] = array_replace($step, ['step_key' => 'deferrals', 'payload' => json_encode([
+            'entries' => [['entry_id' => $sourceEntry, 'rule_key' => 'accrual.accrued.expense'], ['entry_id' => 987654, 'rule_key' => 'accrual.accrued.revenue']],
+            // Rozpad odkladu se čte jen se zápisem odkladu, který převod nepřijímá; zůstává beze změny.
+            'prepaid_expense_accrual' => ['entry_id' => null, 'item_costs' => [$sourcePurchaseItem => 100.0]],
+        ])]);
+        // Další rok s otevíracím zápisem převzatým z jiného systému (krok Otevření ho jen převzal).
+        $nextPeriod = max(array_keys($package['tables']['accounting_periods'])) + 1;
+        // Rok N je uzavřený (Uzavření knih i Otevření hotové), rok N+1 otevřený.
+        $package['tables']['accounting_periods'][$nextPeriod] = array_replace($package['tables']['accounting_periods'][$sourcePeriod],
+            ['id' => $nextPeriod, 'fiscal_year' => 2091, 'starts_on' => '2091-01-01', 'ends_on' => '2091-12-31', 'status' => 'open']);
+        $package['tables']['accounting_periods'][$sourcePeriod]['status'] = 'closed';
+        $opening = max(array_keys($package['tables']['journal_entries'])) + 1;
+        $package['tables']['journal_entries'][$opening] = array_replace($package['tables']['journal_entries'][$sourceEntry], ['id' => $opening,
+            'period_id' => $nextPeriod, 'entry_date' => '2091-01-01', 'source_type' => 'opening', 'source_id' => $nextPeriod, 'description' => 'Převzatý otevírací zápis']);
+        $nextLine = max(array_keys($package['tables']['journal_entry_lines']));
+        foreach ($package['tables']['journal_entry_lines'] as $line) {
+            if ((int) $line['entry_id'] === $sourceEntry) {
+                ++$nextLine;
+                $package['tables']['journal_entry_lines'][$nextLine] = array_replace($line, ['id' => $nextLine, 'entry_id' => $opening]);
+            }
+        }
+        $openId = max(array_keys($package['tables']['accounting_closing_steps'])) + 1;
+        $package['tables']['accounting_closing_steps'][$openId] = array_replace($step, ['id' => $openId, 'step_key' => 'open_next', 'status' => 'done', 'payload' => json_encode([
+            'entry_id' => null, 'next_period_id' => $nextPeriod, 'opening_source' => 'taken_over', 'taken_over_entry_ids' => [$opening],
+        ])]);
+        // Rezervy (jen entries) a Dohadné položky (asistovaný zápis) téhož roku.
+        $package['tables']['accounting_closing_steps'][$openId + 2] = array_replace($step, ['id' => $openId + 2, 'step_key' => 'provisions', 'payload' => json_encode([
+            'entries' => [['invoice_id' => $this->invoice, 'entry_id' => $sourceEntry, 'amount' => 10.0]],
+        ])]);
+        $package['tables']['accounting_closing_steps'][$openId + 3] = array_replace($step, ['id' => $openId + 3, 'step_key' => 'estimates', 'payload' => json_encode([
+            'entries' => [['entry_id' => $sourceEntry, 'rule_key' => 'accrual.estimate.expense']],
+        ])]);
+        $package['tables']['accounting_closing_steps'][$openId + 1] = array_replace($step, ['id' => $openId + 1, 'step_key' => 'close_books', 'status' => 'done', 'payload' => json_encode([
+            'entry_id' => $sourceEntry, 'closing_taken_over' => true, 'taken_over_entry_ids' => [$sourceEntry],
+            'unposted_override' => ['count' => 2, 'invoice_ids' => [$this->invoice], 'purchase_ids' => [$this->purchase], 'reason' => 'Syntetický důvod', 'overridden_by' => 987656],
+        ])]);
         $oldDataDir = getenv('MYINVOICE_DATA_DIR');
         putenv('MYINVOICE_DATA_DIR=' . $this->root . '/runtime');
         try {
@@ -576,13 +619,13 @@ final class MyuctoImportTest extends TestCase
                 'journal_entry_templates' => 1, 'journal_entry_template_lines' => 2, 'journal_entry_notes' => 1, 'income_tax_returns' => 1,
                 'tax_advance_schedules' => 1, 'bank_posting_rules' => 1, 'bank_card_merchant_map' => 1, 'expense_classification_rules' => 1,
                 'bank_rule_templates' => 1, 'auto_posting_policy' => 1, 'pdf_signature_output_settings' => 1, 'accounting_corrections' => 1,
-                'accounting_closing_steps' => 1, 'number_series' => 1, 'number_series_counters' => 1, 'invoice_counters' => 2,
+                'accounting_closing_steps' => 5, 'number_series' => 1, 'number_series_counters' => 1, 'invoice_counters' => 2,
                 'accounting_document_series' => 1] as $table => $count) {
                 self::assertSame($count, $report['created'][$table] ?? 0, $table);
             }
             self::assertSame(1, $report['reused']['number_series'] ?? 0);
             self::assertSame(['purchase_invoice_counters' => 1], $report['existing']);
-            self::assertSame(['accounting_corrections.bank_transaction' => 1, 'document_links.other_item' => 1, 'internal_documents.document_links_json' => 1, 'number_series.other_item_kind' => 1], $report['dropped']);
+            self::assertSame(['accounting_closing_steps.payload' => 1, 'accounting_corrections.bank_transaction' => 1, 'document_links.other_item' => 1, 'internal_documents.document_links_json' => 1, 'number_series.other_item_kind' => 1], $report['dropped']);
             self::assertSame(['bank_posting_rules.last_rejected_tx_id' => 1], $report['detached']);
             self::assertSame(['auto_posting_policy' => 1, 'bank_rule_templates' => 1, 'journal_entry_templates' => 1, 'pdf_signature_output_settings' => 1], $report['replaced_setup']);
             self::assertSame([], $report['numbering_check']);
@@ -593,10 +636,10 @@ final class MyuctoImportTest extends TestCase
             $t = $this->target;
             $invoice = (int) $this->pdo->query('SELECT id FROM invoices WHERE supplier_id = ' . $t)->fetchColumn();
             $purchase = (int) $this->pdo->query('SELECT id FROM purchase_invoices WHERE supplier_id = ' . $t)->fetchColumn();
-            $entry = (int) $this->pdo->query('SELECT id FROM journal_entries WHERE supplier_id = ' . $t)->fetchColumn();
+            $entry = (int) $this->pdo->query("SELECT id FROM journal_entries WHERE source_type <> 'opening' AND supplier_id = " . $t)->fetchColumn();
             $line = (int) $this->pdo->query('SELECT MIN(id) FROM journal_entry_lines WHERE supplier_id = ' . $t)->fetchColumn();
             $client = (int) $this->pdo->query('SELECT id FROM clients WHERE supplier_id = ' . $t)->fetchColumn();
-            $period = (int) $this->pdo->query('SELECT id FROM accounting_periods WHERE supplier_id = ' . $t)->fetchColumn();
+            $period = (int) $this->pdo->query('SELECT id FROM accounting_periods WHERE fiscal_year = 2090 AND supplier_id = ' . $t)->fetchColumn();
 
             // 1. Dokumenty: strom složek, dokument z rozbalené zprávy, koš, soubory a vazby.
             $folders = $this->pdo->query('SELECT id, parent_id, name FROM document_folders WHERE supplier_id = ' . $t . ' ORDER BY id')->fetchAll(PDO::FETCH_ASSOC);
@@ -656,6 +699,27 @@ final class MyuctoImportTest extends TestCase
             // 8. Historie oprav a kroků uzávěrky.
             self::assertSame($invoice, (int) $this->pdo->query('SELECT entity_id FROM accounting_corrections WHERE supplier_id = ' . $t)->fetchColumn());
             self::assertSame($period, (int) $this->pdo->query('SELECT period_id FROM accounting_closing_steps WHERE supplier_id = ' . $t)->fetchColumn());
+            // Záznam kroku Časové rozlišení míří na zápis cílové firmy; asistovaný zápis mimo export je vynechán.
+            $deferrals = json_decode((string) $this->pdo->query("SELECT payload FROM accounting_closing_steps WHERE step_key = 'deferrals' AND supplier_id = " . $t)->fetchColumn(), true);
+            self::assertSame([['entry_id' => $entry, 'rule_key' => 'accrual.accrued.expense']], $deferrals['entries']);
+            self::assertEquals(['entry_id' => null, 'item_costs' => [$sourcePurchaseItem => 100.0]], $deferrals['prepaid_expense_accrual']);
+            // Převzatý otevírací zápis cílové firmy: revert a znovuotevření ho poznají podle záznamu kroku.
+            $open = json_decode((string) $this->pdo->query("SELECT payload FROM accounting_closing_steps WHERE step_key = 'open_next' AND supplier_id = " . $t)->fetchColumn(), true);
+            $next = (int) $this->pdo->query('SELECT id FROM accounting_periods WHERE fiscal_year = 2091 AND supplier_id = ' . $t)->fetchColumn();
+            $takenOver = (int) $this->pdo->query("SELECT id FROM journal_entries WHERE source_type = 'opening' AND supplier_id = " . $t)->fetchColumn();
+            self::assertSame($next, $open['next_period_id']);
+            self::assertSame('closed', $this->pdo->query('SELECT status FROM accounting_periods WHERE id = ' . $period)->fetchColumn());
+            $closingRepo = new \MyInvoice\Repository\ClosingRepository($this->db);
+            self::assertSame([$takenOver], $closingRepo->takenOverOpeningEntryIds($t, $period));
+            // Pojistka znovuotevření roku: převzatý otevírací zápis na uzávěrce nestojí.
+            self::assertTrue($closingRepo->hasOpeningEntries($t, $next));
+            self::assertFalse($closingRepo->hasOpeningEntries($t, $next, $closingRepo->takenOverOpeningEntryIds($t, $period)));
+            $stepPayload = fn (string $key): array => json_decode((string) $this->pdo->query("SELECT payload FROM accounting_closing_steps WHERE step_key = '" . $key . "' AND supplier_id = " . $t)->fetchColumn(), true);
+            self::assertSame([['invoice_id' => $invoice, 'entry_id' => $entry, 'amount' => 10]], $stepPayload('provisions')['entries']);
+            self::assertSame([['entry_id' => $entry, 'rule_key' => 'accrual.estimate.expense']], $stepPayload('estimates')['entries']);
+            $closed = json_decode((string) $this->pdo->query("SELECT payload FROM accounting_closing_steps WHERE step_key = 'close_books' AND supplier_id = " . $t)->fetchColumn(), true);
+            self::assertSame(['entry_id' => $entry, 'closing_taken_over' => true, 'taken_over_entry_ids' => [$entry],
+                'unposted_override' => ['count' => 2, 'invoice_ids' => [$invoice], 'purchase_ids' => [$purchase], 'reason' => 'Syntetický důvod', 'overridden_by' => $this->actor]], $closed);
 
             // 9. Číselné řady navazují: řada z průvodce převzala předponu zdroje, počítadla sedí.
             $series = $this->pdo->query('SELECT legacy_key, id, prefix, template, scope_id FROM number_series WHERE supplier_id = ' . $t . ' ORDER BY id')->fetchAll(PDO::FETCH_ASSOC);
