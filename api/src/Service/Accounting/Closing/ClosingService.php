@@ -3736,7 +3736,17 @@ final class ClosingService
             throw new ClosingException('validation_failed', 'Částka splatné daně musí být kladná (nulovou daň krok přeskoč).');
         }
         $reason = $reason !== null && trim($reason) !== '' ? trim($reason) : null;
-        return $this->tx(function () use ($supplierId, $periodId, $amount, $rowVersion, $meta, $reason, $activity): array {
+        // Zdroj a hodnota návrhu (stejná logika jako incomeTaxPreview): přednost má
+        // finalizované DPPO přiznání roku, jinak orientační dopočet z aktuálních knih.
+        // Počítá se PŘED zamčením období: dopočet s projekcí uzávěrky je u velké firmy
+        // drahý a návrh je jen evidence odchylky, ne podmínka zaúčtování.
+        $knownPeriod = $this->periods->findById($supplierId, $periodId);
+        $suggestionYear = $knownPeriod !== null ? (int) $knownPeriod['fiscal_year'] : null;
+        $fromReturn = $suggestionYear !== null ? $this->taxReturns->findLastKnownTax($supplierId, $suggestionYear, 'po') : null;
+        $ledger = $fromReturn === null && $suggestionYear !== null
+            ? $this->incomeTaxFromLedger($supplierId, $suggestionYear)
+            : ['amount' => null, 'source' => null];
+        return $this->tx(function () use ($supplierId, $periodId, $amount, $rowVersion, $meta, $reason, $activity, $fromReturn, $ledger): array {
             $period = $this->lockPeriod($supplierId, $periodId, $rowVersion);
             $this->assertStatus($period, ['closing']);
             $endsOn = (string) $period['ends_on'];
@@ -3744,10 +3754,6 @@ final class ClosingService
             $is504 = $this->roleProfile($supplierId, $endsOn)->framework === AccountingFrameworkService::CZ_504;
             $this->assertStockBeforeIncomeTax($supplierId, $periodId, $is504);
 
-            // Zdroj a hodnota návrhu (stejná logika jako incomeTaxPreview): přednost má
-            // finalizované DPPO přiznání roku, jinak orientační dopočet z aktuálních knih.
-            $fromReturn = $this->taxReturns->findLastKnownTax($supplierId, $fiscalYear, 'po');
-            $ledger = $fromReturn === null ? $this->incomeTaxFromLedger($supplierId, $fiscalYear) : ['amount' => null, 'source' => null];
             $computed = $ledger['amount'];
             $suggested = $fromReturn ?? $computed;
             $suggestedSource = $fromReturn !== null ? 'finalized_return' : ($computed !== null ? $ledger['source'] : null);
