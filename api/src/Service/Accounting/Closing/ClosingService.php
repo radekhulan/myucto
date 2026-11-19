@@ -4100,9 +4100,12 @@ final class ClosingService
         $context = $this->profitDistributionContext($supplierId, $requested);
         $period = $context['source'];
         $target = $context['target'];
-        $sourceId = (int) $period['id'];
+        $sourceId = $context['source_id'];
         $asOf = (string) $target['ends_on'];
         if ($this->roleProfile($supplierId, $asOf)->framework === AccountingFrameworkService::CZ_504) {
+            if ($period === null) {
+                throw new ClosingException('profit_distribution_requires_approved_period', 'Rozhodnutí o výsledku hospodaření vyžaduje bezprostředně předchozí schválené období.', 422);
+            }
             if ($decisionDate !== null && (!self::isIsoDate($decisionDate) || $decisionDate < $target['starts_on'] || $decisionDate > $target['ends_on'])) {
                 throw new ClosingException('validation_failed', 'Datum rozhodnutí musí ležet v cílovém účetním období.', 422);
             }
@@ -4115,7 +4118,10 @@ final class ClosingService
         $resources = $this->distributableResources($snapshot, $available);
 
         return [
-            'approved_period' => ['id' => (int) $period['id'], 'fiscal_year' => (int) $period['fiscal_year'], 'status' => (string) $period['status']],
+            'approved_period' => $period === null ? null : ['id' => (int) $period['id'], 'fiscal_year' => (int) $period['fiscal_year'], 'status' => (string) $period['status']],
+            // `opening`: výsledek minulého roku z převzatých počátečních stavů (rok bez předchozího období).
+            'source' => $period === null ? 'opening' : 'approved_period',
+            'source_fiscal_year' => $context['source_year'],
             'target_period' => [
                 'id' => (int) $target['id'],
                 'fiscal_year' => (int) $target['fiscal_year'],
@@ -4182,9 +4188,8 @@ final class ClosingService
                 throw new ClosingException('not_found', 'Účetní období #' . $periodId . ' neexistuje.', 404);
             }
             $context = $this->profitDistributionContext($supplierId, $requested, true);
-            $period = $context['source'];
             $target = $context['target'];
-            $sourceId = (int) $period['id'];
+            $sourceId = $context['source_id'];
             $targetId = (int) $target['id'];
             $lockedTarget = $this->lockPeriod($supplierId, $targetId, $targetRowVersion);
             $this->assertStatus($lockedTarget, self::PROFIT_DISTRIBUTION_TARGET_STATUSES);
@@ -4289,7 +4294,7 @@ final class ClosingService
             $entryId = $this->posting->postDocument($supplierId, 'profit_distribution', $sourceId, $lines, [
                 'entry_date' => $decisionDate,
                 'document_no' => $docNo,
-                'description' => 'Rozdělení výsledku hospodaření ' . (int) $period['fiscal_year'] . ' (rozhodnutí VH ' . $decisionDate . ')',
+                'description' => 'Rozdělení výsledku hospodaření ' . $context['source_year'] . ' (rozhodnutí VH ' . $decisionDate . ')',
                 'posted' => true,
                 'posted_by' => $meta['posted_by'] ?? null,
                 'user_id' => $meta['user_id'] ?? null,
@@ -4489,9 +4494,8 @@ final class ClosingService
             $is504 = $this->resultDecisionProfile($supplierId, (string) $requested['ends_on'], true)->framework === AccountingFrameworkService::CZ_504;
             $context = $is504 ? $this->resultDecisionCurrentContext($supplierId, $periodId)
                 : $this->profitDistributionContext($supplierId, $requested, true);
-            $period = $context['source'];
             $target = $context['target'];
-            $sourceId = (int) $period['id'];
+            $sourceId = (int) ($context['source_id'] ?? $context['source']['id']);
             $targetId = (int) $target['id'];
             $lockedTarget = $this->lockPeriod($supplierId, $targetId, $targetRowVersion);
             // Symetrie s zaúčtováním: co jde zaúčtovat do 'closing', musí jít i vzít zpět.
@@ -4564,23 +4568,39 @@ final class ClosingService
     /**
      * Zdrojové schválené a cílové otevřené období pro rozdělení VH. Volání nad
      * otevřeným obdobím kanonicky dohledá jeho bezprostředně předchozí approved rok.
+     * Nemá-li cílový rok v MyÚčtu předchozí období a má otevírací zápis (převod), rozděluje
+     * se výsledek z počátečního stavu 431: `source` je null a klíč zápisu
+     * {@see ClosingSourceId::openingProfitDistribution()}.
      *
      * @param array<string,mixed> $period
-     * @return array{source:array<string,mixed>,target:array<string,mixed>}
+     * @return array{source:array<string,mixed>|null,target:array<string,mixed>,source_id:int,source_year:int}
      */
     private function profitDistributionContext(int $supplierId, array $period, bool $forUpdate = false): array
     {
         if (in_array((string) $period['status'], self::PROFIT_DISTRIBUTION_TARGET_STATUSES, true)) {
             $source = $forUpdate ? $this->closing->adjacentPeriodForUpdate($supplierId, (string) $period['starts_on'], true)
                 : $this->previousPeriod($supplierId, (string) $period['starts_on']);
+            // První rok v MyÚčtu po převodu z jiného systému: předchozí rok tu není a výsledek
+            // minulého roku přišel na 431 převzatou otevírací rozvahou. Bez rozdělení by
+            // zahájení uzávěrky (profit_not_distributed) zůstalo zablokované navždy.
+            if ($source === null && $this->closing->openingEntriesInPeriod($supplierId, (int) $period['id']) !== []) {
+                return [
+                    'source' => null,
+                    'target' => $period,
+                    'source_id' => ClosingSourceId::openingProfitDistribution((int) $period['id']),
+                    'source_year' => (int) $period['fiscal_year'] - 1,
+                ];
+            }
             if ($source === null || (string) $source['status'] !== 'approved') {
                 throw new ClosingException(
                     'profit_distribution_requires_approved_period',
-                    'Rozdělení výsledku hospodaření vyžaduje bezprostředně předchozí schválené období.',
+                    $source === null
+                        ? 'Rozdělení výsledku hospodaření vyžaduje bezprostředně předchozí schválené období, nebo počáteční stavy roku (otevírací zápis), ze kterých výsledek minulého roku pochází.'
+                        : 'Rozdělení výsledku hospodaření vyžaduje bezprostředně předchozí schválené období.',
                     422,
                 );
             }
-            return ['source' => $source, 'target' => $period];
+            return ['source' => $source, 'target' => $period, 'source_id' => (int) $source['id'], 'source_year' => (int) $source['fiscal_year']];
         }
         if ((string) $period['status'] !== 'approved') {
             throw new ClosingException(
@@ -4596,7 +4616,7 @@ final class ClosingService
         if (!in_array((string) $next['status'], self::PROFIT_DISTRIBUTION_TARGET_STATUSES, true)) {
             throw new ClosingException('next_period_not_open', 'Následující období ' . $next['fiscal_year'] . ' není otevřené (stav: ' . $next['status'] . ').');
         }
-        return ['source' => $period, 'target' => $next];
+        return ['source' => $period, 'target' => $next, 'source_id' => (int) $period['id'], 'source_year' => (int) $period['fiscal_year']];
     }
 
     /**

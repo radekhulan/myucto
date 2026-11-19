@@ -22388,6 +22388,7 @@
         "date_required": "Enter the general meeting decision date.",
         "withholding_rate": "Withholding tax rate (§36)",
         "resources_limit": "Distributable resources limit",
+        "opening_source": "The {year} result is distributed from the opening balance of account 431. The previous year is not in MyÚčto; the result came with the taken-over opening balances.",
         "shareholder_row_hint": "Each Shareholder shares row must represent one shareholder; withholding tax is rounded down separately for each shareholder.",
         "col_account": "Account",
         "col_kind": "Type",

@@ -22388,6 +22388,7 @@
         "date_required": "Vyplňte datum rozhodnutí valné hromady.",
         "withholding_rate": "Sazba srážkové daně (§36)",
         "resources_limit": "Limit rozdělitelných zdrojů",
+        "opening_source": "Rozděluje se výsledek roku {year} z počátečního stavu účtu 431. Předchozí rok v MyÚčtu není, výsledek přišel převzatými počátečními stavy.",
         "shareholder_row_hint": "Každý řádek druhu Podíly společníků musí představovat jednoho společníka; srážková daň se zaokrouhluje dolů za každého zvlášť.",
         "col_account": "Účet",
         "col_kind": "Druh",

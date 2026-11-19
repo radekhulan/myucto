@@ -657,7 +657,10 @@ export interface IncomeTaxPreview {
 // ── D10: rozdělení výsledku hospodaření ────────────────────────────────────
 export interface ProfitDistribution500Preview {
   accounting_framework?: 'cz_500'
-  approved_period: { id: number; fiscal_year: number; status: string }
+  /** null, když se rozděluje výsledek z počátečních stavů prvního roku v MyÚčtu (source = opening). */
+  approved_period: { id: number; fiscal_year: number; status: string } | null
+  source?: 'approved_period' | 'opening'
+  source_fiscal_year?: number
   target_period: { id: number; fiscal_year: number; row_version: number; starts_on: string; ends_on: string }
   balance_431: number
   available_profit: number

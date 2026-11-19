@@ -492,6 +492,12 @@ dostupná karta **Rozdělení výsledku hospodaření**. Zápis se účtuje do o
 431 se řeší až v novém roce), proto je karta dostupná nad schváleným obdobím. Při otevření z následujícího období
 aplikace stejně ověří, že bezprostředně předchozí závěrka je schválená.
 
+**První rok po převodu z jiného systému.** Nemá-li rok v MyÚčtu žádné předchozí období a výsledek minulého roku
+přišel na 431 převzatou otevírací rozvahou, otevřete kartu přímo na stránce uzávěrky tohoto roku (stav Otevřené).
+Rozděluje se zůstatek 431 z počátečních stavů a karta to uvede. Postup je jinak stejný. Bez rozdělení by uzávěrku
+roku nešlo zahájit, protože nerozdělený výsledek na 431 zahájení odmítne. Rok bez předchozího období a bez
+otevíracího zápisu rozdělení nenabízí.
+
 1. Otevřete stránku uzávěrky schváleného období a klikněte na **Rozdělit výsledek hospodaření**. Zobrazí se disponibilní zůstatek účtu 431 (**K rozdělení**, případně **Ztráta k úhradě**) a **Cílové období**.
 2. Pro každý příděl klikněte na **Přidat příděl** a zadejte **Účet**, **Druh** a **Částku**. Druhy jsou **Nerozdělený zisk (428)**, **Příděl do fondu** (například 421/427), **Podíly společníků (364)** a **Úhrada ztráty (429/428)**. Každý řádek druhu Podíly společníků představuje jednoho společníka; **srážková daň** podle § 36 zákona o daních z příjmů (**Sazba srážkové daně (§36)**, výchozí 15 %) se počítá a zaokrouhluje dolů samostatně za každého a účtuje se **MD 364 / D 342**.
 3. Zadejte **Datum rozhodnutí valné hromady** (musí ležet v otevřeném období).

@@ -1971,6 +1971,9 @@ const canOpenNextStage = computed(() => ['closed', 'reviewed', 'approved'].inclu
             <strong class="font-mono">{{ formatMoney(pdPreview.distributable_resources) }}</strong>
           </div>
         </div>
+        <p v-if="pdPreview.source === 'opening'" class="text-xs text-neutral-500" data-test="profit-distribution-opening-source">
+          {{ t('accounting.closing.profit_distribution.opening_source', { year: pdPreview.source_fiscal_year }) }}
+        </p>
 
         <div v-if="pdPreview.existing_entry_id" class="text-sm text-warning-600 flex items-center gap-2">
           {{ t('accounting.closing.profit_distribution.already_booked') }}

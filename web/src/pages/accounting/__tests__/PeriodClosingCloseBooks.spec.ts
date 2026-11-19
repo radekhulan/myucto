@@ -8,6 +8,7 @@ const m = vi.hoisted(() => ({
   runStep: vi.fn(),
   revertStep: vi.fn(),
   listAccounts: vi.fn(),
+  profitDistributionPreview: vi.fn(),
 }))
 
 // closingApi - v testu se volá jen state() (na mount); ostatní metody komponenta
@@ -19,7 +20,7 @@ vi.mock('@/api/closing', () => ({
     revertStep: m.revertStep,
     start: vi.fn(), abort: vi.fn(), fxPreview: vi.fn(), provisionsPreview: vi.fn(),
     estimatesSuggest: vi.fn(), incomeTaxPreview: vi.fn(), smallAssetAccrualPreview: vi.fn(),
-    prepaidExpenseAccrualPreview: vi.fn(), profitDistributionPreview: vi.fn(),
+    prepaidExpenseAccrualPreview: vi.fn(), profitDistributionPreview: m.profitDistributionPreview,
     profitDistribution: vi.fn(), profitDistributionRevert: vi.fn(), createEntry: vi.fn(),
     reverseEntry: vi.fn(), close: vi.fn(), openNext: vi.fn(),
   },
@@ -157,5 +158,29 @@ describe('PeriodClosing.vue - převzaté počáteční stavy (open_next)', () =>
   it('u převzaté uzávěrky ponechá původní vysvětlení', async () => {
     const note = await openStep('taken_over_closing')
     expect(note.text()).toBe('accounting.closing.opening_takeover.account_level')
+  })
+})
+
+describe('PeriodClosing.vue - rozdělení výsledku z počátečních stavů', () => {
+  it('u prvního roku po převodu řekne, že rozděluje výsledek z počátečního stavu 431', async () => {
+    m.listAccounts.mockResolvedValue([])
+    const state = makeState([])
+    Object.assign(state.period, { status: 'open' })
+    m.state.mockResolvedValue(state)
+    m.profitDistributionPreview.mockResolvedValue({
+      approved_period: null, source: 'opening', source_fiscal_year: 2024,
+      target_period: { id: 1, fiscal_year: 2025, row_version: 3, starts_on: '2025-01-01', ends_on: '2025-12-31' },
+      balance_431: -1000, available_profit: 1000, retained_profit: 0, uncovered_loss: 0,
+      distributable_resources: 1000, is_loss: false, withholding_rate: 0.15, existing_entry_id: null,
+    })
+    const wrapper = mount(PeriodClosing)
+    await flushPromises()
+    const btn = wrapper.findAll('button').find((b) => /profit_distribution\.open/.test(b.text()))
+    expect(btn).toBeTruthy()
+    await btn!.trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('[data-test="profit-distribution-opening-source"]').text())
+      .toBe('accounting.closing.profit_distribution.opening_source')
   })
 })
