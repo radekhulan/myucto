@@ -10,7 +10,7 @@ const m = vi.hoisted(() => ({
   listAccounts: vi.fn(),
 }))
 
-// closingApi — v testu se volá jen state() (na mount); ostatní metody komponenta
+// closingApi - v testu se volá jen state() (na mount); ostatní metody komponenta
 // jen referencuje v handlerech (spouští je až akce uživatele), takže stačí vi.fn().
 vi.mock('@/api/closing', () => ({
   closingApi: {
@@ -29,12 +29,12 @@ vi.mock('@/api/accounting', () => ({
   accountingApi: { listAccounts: m.listAccounts },
 }))
 
-// i18n stub — `t` vrací klíč (na překlady se v testu nespoléháme).
+// i18n stub - `t` vrací klíč (na překlady se v testu nespoléháme).
 vi.mock('vue-i18n', () => ({
   useI18n: () => ({ locale: { value: 'cs' }, t: (key: string) => key }),
 }))
 
-// vue-router — useRoute pro periodId, RouterLink jako jednoduchý stub.
+// vue-router - useRoute pro periodId, RouterLink jako jednoduchý stub.
 vi.mock('vue-router', () => ({
   useRoute: () => ({ params: { id: '1' } }),
   RouterLink: { name: 'RouterLink', props: ['to'], template: '<a><slot /></a>' },
@@ -48,7 +48,7 @@ vi.mock('@/composables/useToast', () => ({
   useToast: () => ({ success: vi.fn(), error: vi.fn(), warning: vi.fn(), info: vi.fn() }),
 }))
 
-// formatMoney/formatDate — deterministické (bez Intl), ať asserty čtou syrové hodnoty.
+// formatMoney/formatDate - deterministické (bez Intl), ať asserty čtou syrové hodnoty.
 vi.mock('@/composables/useFormat', () => ({
   formatMoney: (v: number | null | undefined) => String(v ?? 0),
   formatDate: (d: string | null | undefined) => String(d ?? ''),
@@ -79,7 +79,7 @@ async function selectCloseBooks(wrapper: ReturnType<typeof mount>) {
   await flushPromises()
 }
 
-describe('PeriodClosing.vue — uzavření knih (close_books)', () => {
+describe('PeriodClosing.vue - uzavření knih (close_books)', () => {
   beforeEach(() => {
     m.state.mockReset()
     m.listAccounts.mockReset()

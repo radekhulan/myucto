@@ -43,7 +43,7 @@ final class ClosingEntryManualReversalTest extends TestCase
     {
         $rootDir = dirname(__DIR__, 4);
         if (!is_file($rootDir . '/cfg.php')) {
-            $this->markTestSkipped('cfg.php neexistuje — test vyžaduje DB connection.');
+            $this->markTestSkipped('cfg.php neexistuje, test vyžaduje DB connection.');
         }
         $container = Bootstrap::buildContainer();
         $this->db = $container->get(Connection::class);
