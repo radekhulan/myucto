@@ -165,7 +165,10 @@ final class BulkActionAction
                 ['existing_job_id' => $running['id']]);
         }
         unset($params['dry_run_job_id'], $params['excluded_item_ids'], $params['confirm_count']);
-        return $this->spawn($request, $response, $supplierId, ['kind' => 'rollback', 'rollback_of_job_id' => (int) $job['id']] + $params);
+        // Původ se určuje podle požadavku, který vrácení spouští, ne podle převzatého běhu:
+        // úkony vyhrazené relaci nesmí zdědit API token po běhu spuštěném v aplikaci.
+        return $this->spawn($request, $response, $supplierId, ['kind' => 'rollback', 'rollback_of_job_id' => (int) $job['id'],
+            'origin' => RequestAuthorization::actsAsSession($request) ? 'session' : 'background'] + $params);
     }
 
     /** GET /api/accounting/bulk-actions/{id} */
@@ -314,6 +317,9 @@ final class BulkActionAction
             'kind' => 'apply',
             'dry_run_job_id' => $dryJobId,
             'excluded_item_ids' => $excluded,
+            // Původ podle požadavku, který provedení spouští: běh nanečisto z aplikace
+            // nesmí API tokenu propůjčit úkony vyhrazené relaci.
+            'origin' => RequestAuthorization::actsAsSession($request) ? 'session' : 'background',
         ]);
     }
 

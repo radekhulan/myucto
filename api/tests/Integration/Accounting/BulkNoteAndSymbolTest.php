@@ -186,6 +186,26 @@ final class BulkNoteAndSymbolTest extends BankPostingTestCase
         self::assertSame(1, $forced, 'Vystavený doklad se ukládá jako vynucená úprava z editoru.');
     }
 
+    public function testApplyTakesOriginFromItsOwnRequestNotFromDryRun(): void
+    {
+        // Běh nanečisto spuštěný v aplikaci nesmí API tokenu, který ho provádí, propůjčit
+        // úkony vyhrazené relaci (úprava vystaveného dokladu).
+        $issued = $this->saleInvoice('SYN-ORIG-' . random_int(100000, 999999), $this->client('Syntetický odběratel'), 100.0);
+        $dryId = $this->dryRun('set_note', 'invoice', [$issued], ['include_issued' => true,
+            'note_field' => 'note_above_items', 'note_mode' => 'replace', 'note_text' => 'Text'], 'session');
+        $request = (new ServerRequestFactory())->createServerRequest('POST', '/api/accounting/bulk-actions/start')
+            ->withAttribute(SupplierScopeMiddleware::ATTR_CURRENT_ID, $this->supplierId)
+            ->withAttribute(AuthMiddleware::ATTR_USER, ['id' => $this->userId, 'role' => 'accountant'])
+            ->withAttribute(AuthMiddleware::ATTR_METHOD, 'token')
+            ->withAttribute('auth.effective_role', new EffectiveRole(9, 'Test', 'staff', true,
+                ['accounting' => 2, 'accounting.bulk_changes' => 2, 'invoices' => 2], ''));
+        $apply = new \ReflectionMethod(BulkActionAction::class, 'applyParams');
+        $params = $apply->invoke($this->container->get(BulkActionAction::class), $request, $this->supplierId,
+            ['dry_run' => false, 'dry_run_job_id' => $dryId]);
+        self::assertSame('session', $this->jobs->find($dryId, $this->supplierId)['params']['origin']);
+        self::assertSame('background', $params['origin'], 'Provedení přes API token nesmí zdědit původ z relace.');
+    }
+
     public function testSetNoteSkipsIssuedInvoiceInClosedPeriod(): void
     {
         // Zámky období si služba drží po dobu procesu (jedna úloha = jeden proces workeru),
