@@ -166,6 +166,20 @@ final class RequestAuthorization
         );
     }
 
+    /**
+     * Požadavek hromadné akce v seznamech za uživatele, který ji spustil. Hromadnou změnu
+     * spustí a vrátí jen člověk z přihlášené relace, API token nikdy ({@see canBulkChange()}),
+     * takže úprava jednoho dokladu, kterou úloha za něj provede, je jeho účetní úkon
+     * z relace ({@see actsAsSession()}), stejně jako tlačítko Uložit. Mění jen syntetický
+     * požadavek úlohy na pozadí ({@see isBackgroundAuth()}), jiný vrátí beze změny.
+     */
+    public static function asBulkActionSession(Request $request): Request
+    {
+        return self::isBackgroundAuth($request)
+            ? $request->withAttribute(\MyInvoice\Middleware\AuthMiddleware::ATTR_METHOD, 'session')
+            : $request;
+    }
+
     /** Syntetický požadavek ověřený API tokenem; protějšek {@see isBearerAuth()}. */
     public static function asBearer(Request $request): Request
     {

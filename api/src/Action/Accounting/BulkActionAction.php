@@ -22,6 +22,7 @@ use MyInvoice\Service\Accounting\Bulk\BulkActionService;
 use MyInvoice\Service\Accounting\Bulk\BulkOperations;
 use MyInvoice\Service\Accounting\Bulk\BulkSelection;
 use MyInvoice\Service\Accounting\Bulk\DeleteOperation;
+use MyInvoice\Service\Accounting\Bulk\DocumentItemSearch;
 use MyInvoice\Service\Accounting\Bulk\SetDimensionsOperation;
 use MyInvoice\Service\Accounting\Dimension\DimensionService;
 use MyInvoice\Service\Accounting\JournalRebookService;
@@ -58,6 +59,7 @@ final class BulkActionAction
     private const HISTORY = 10;
     private const PARAMS = [
         'from_account', 'to_account', 'side', 'mode', 'dimensions', 'scope', 'account_prefixes', 'rule_key', 'journal_fallback',
+        'vat_classification_code', 'vat_rate_id',
     ];
 
     public function __construct(
@@ -71,6 +73,7 @@ final class BulkActionAction
         private readonly DimensionService $dimensions,
         private readonly ActivityLogger $logger,
         private readonly IpMatcher $ipMatcher,
+        private readonly DocumentItemSearch $itemSearch,
     ) {}
 
     /** GET /api/accounting/bulk-actions?target= */
@@ -81,15 +84,14 @@ final class BulkActionAction
             return Json::error($response, 'no_supplier', 'Chybí kontext firmy.', 400);
         }
         $target = (string) ($request->getQueryParams()['target'] ?? '');
-        if (!in_array($target, BulkSelection::TARGETS, true)) {
+        if (!in_array($target, BulkSelection::TARGETS, true) && !DocumentItemSearch::isItemTarget($target)) {
             return Json::error($response, 'validation_failed', 'Neznámý druh záznamů hromadné akce.', 422);
         }
         if (($deny = $this->denyList($request, $response, $target)) !== null) {
             return $deny;
         }
         $operations = [];
-        foreach (BulkOperations::TARGETS as $key => $targets) {
-            if (!in_array($target, $targets, true)) continue;
+        foreach (BulkOperations::keysFor($target) as $key) {
             $operation = $this->operations->get($key, $target);
             $reason = $operation->unavailableReason($request, $supplierId, $target);
             $operations[] = [
@@ -242,7 +244,9 @@ final class BulkActionAction
     private function dryRunParams(Request $request, int $supplierId, array $body): array
     {
         $target = (string) ($body['target'] ?? '');
-        BulkSelection::assertTarget($target);
+        if (!DocumentItemSearch::isItemTarget($target)) {
+            BulkSelection::assertTarget($target);
+        }
         $operation = $this->operations->get((string) ($body['operation'] ?? ''), $target);
         $reason = $operation->unavailableReason($request, $supplierId, $target);
         if ($reason !== null) {
@@ -255,9 +259,13 @@ final class BulkActionAction
         if (!is_array($selection) || (array_key_exists('ids', $selection) === array_key_exists('list_query', $selection))) {
             throw new BulkActionException('validation_failed', 'Zvolte vybrané záznamy, nebo všechny podle filtru seznamu.', 422);
         }
-        $ids = array_key_exists('ids', $selection)
-            ? $this->selection->explicitIds($supplierId, $target, $selection['ids'])
-            : $this->listSelection($request, $supplierId, $target, $selection['list_query']);
+        $ids = match (true) {
+            DocumentItemSearch::isItemTarget($target) && array_key_exists('ids', $selection)
+                => $this->itemSearch->explicitIds($supplierId, $target, $selection['ids']),
+            DocumentItemSearch::isItemTarget($target) => $this->itemSelection($supplierId, $target, $selection['list_query']),
+            array_key_exists('ids', $selection) => $this->selection->explicitIds($supplierId, $target, $selection['ids']),
+            default => $this->listSelection($request, $supplierId, $target, $selection['list_query']),
+        };
         $raw = is_array($body['params'] ?? null) ? $body['params'] : [];
         $params = $operation->normalizeParams($supplierId, $target, ['ids' => $ids] + $raw);
 
@@ -354,11 +362,36 @@ final class BulkActionAction
         return $result['ids'];
     }
 
+    /**
+     * „Všech N podle filtru" v agendě Položky dokladů: filtr položek ({@see DocumentItemSearch::filters()}).
+     *
+     * @return list<int>
+     * @throws BulkActionException
+     */
+    private function itemSelection(int $supplierId, string $target, mixed $query): array
+    {
+        if (!is_array($query)) {
+            throw new BulkActionException('validation_failed', 'Neplatný filtr položek.', 422);
+        }
+        $ids = $this->itemSearch->matchingIds($supplierId, $target, DocumentItemSearch::filters($query), BulkSelection::LIMIT + 1);
+        if (count($ids) > BulkSelection::LIMIT) {
+            throw new BulkActionException('too_many_items',
+                'Filtru odpovídá víc než ' . BulkSelection::LIMIT . ' položek, najednou jde zpracovat nejvýš ' . BulkSelection::LIMIT
+                    . '. Zužte filtr nebo vyberte méně položek.',
+                422, ['matching' => null, 'limit' => BulkSelection::LIMIT]);
+        }
+        if ($ids === []) {
+            throw new BulkActionException('no_items', 'Filtru neodpovídá žádná položka.', 422);
+        }
+        sort($ids);
+        return $ids;
+    }
+
     private function mayReadList(Request $request, string $target): bool
     {
         $module = match ($target) {
-            'invoice' => 'invoices',
-            'purchase_invoice' => 'purchase_invoices',
+            'invoice', 'invoice_item' => 'invoices',
+            'purchase_invoice', 'purchase_invoice_item' => 'purchase_invoices',
             default => 'accounting',
         };
         return RequestAuthorization::allows($request, $module, AccessLevel::READ);

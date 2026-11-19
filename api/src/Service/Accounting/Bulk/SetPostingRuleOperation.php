@@ -36,6 +36,10 @@ use Psr\Http\Message\ServerRequestInterface as Request;
  * novou předkontaci položek.
  *
  * Vrácení obnoví předchozí předkontaci a účty položek a doklad znovu přeúčtuje.
+ *
+ * Stejným průběhem jde přeúčtování vybraných položek na jiný účet
+ * ({@see ItemAccountOperation}, parametr `to_account`): položka dostane vlastní účet
+ * a zaúčtovaný doklad se přeúčtuje.
  */
 final class SetPostingRuleOperation implements BulkOperation
 {
@@ -108,7 +112,7 @@ final class SetPostingRuleOperation implements BulkOperation
             return $this->transaction(function () use ($ctx, $type, $docId, $item): array {
                 $state = $this->state($ctx->supplierId, $type, $docId);
                 $item['before'] = ['items' => $state['items'], 'lines' => $state['lines']];
-                $newItems = $this->withRule($ctx->supplierId, $type, $state['items'], (string) $ctx->params['rule_key']);
+                $newItems = $this->changedItems($ctx, $type, $state['items']);
                 if ($newItems === $state['items']) {
                     return ['status' => 'unchanged'] + $item;
                 }
@@ -152,7 +156,7 @@ final class SetPostingRuleOperation implements BulkOperation
                 if ($state['fingerprint'] !== $dry['fingerprint']) {
                     return ['status' => 'skipped', 'reason_code' => 'changed_after_dry_run'] + $item;
                 }
-                $newItems = $this->withRule($ctx->supplierId, $type, $state['items'], (string) $ctx->params['rule_key']);
+                $newItems = $this->changedItems($ctx, $type, $state['items']);
                 return $this->write($ctx, $type, $docId, $state, $newItems, (string) $ctx->params['mode'], $item);
             });
         } catch (PostingException $e) {
@@ -226,6 +230,30 @@ final class SetPostingRuleOperation implements BulkOperation
             'result_entry_id' => $result['entry_id'],
             'items_synced'    => (int) $result['items_synced'],
         ] + $item;
+    }
+
+    /**
+     * Položky po změně: nová předkontace (operace nad doklady), nebo vlastní účet vybraných
+     * položek (přeúčtování položek z agendy Položky dokladů, {@see ItemAccountOperation}).
+     *
+     * @param list<array<string,mixed>> $items
+     * @return list<array<string,mixed>>
+     */
+    private function changedItems(BulkContext $ctx, string $type, array $items): array
+    {
+        if (!isset($ctx->params['to_account'])) {
+            return $this->withRule($ctx->supplierId, $type, $items, (string) $ctx->params['rule_key']);
+        }
+        $selected = array_flip(array_map('intval', (array) ($ctx->params['ids'] ?? [])));
+        $to = (string) $ctx->params['to_account'];
+        $from = (string) ($ctx->params['from_account'] ?? '');
+        return array_map(static function (array $row) use ($selected, $to, $from): array {
+            if ($row['standard'] && isset($selected[$row['item_id']])
+                && ($from === '' || str_starts_with((string) $row['account_code'], $from))) {
+                $row['account_code'] = $to;
+            }
+            return $row;
+        }, $items);
     }
 
     /**

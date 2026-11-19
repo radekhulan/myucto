@@ -2921,6 +2921,7 @@ final class Routes
             // Hromadné akce v seznamech (deník, vydané a přijaté faktury), viz BulkActionAction.
             $g->get   ('/bulk-actions',                       [\MyInvoice\Action\Accounting\BulkActionAction::class, 'status']);
             $g->post  ('/bulk-actions/start',                 [\MyInvoice\Action\Accounting\BulkActionAction::class, 'start']);
+            $g->get   ('/bulk-actions/document-items',        \MyInvoice\Action\Accounting\BulkDocumentItemsAction::class);
             $g->get   ('/bulk-actions/{id:[0-9]+}',           [\MyInvoice\Action\Accounting\BulkActionAction::class, 'job']);
             $g->get   ('/bulk-actions/{id:[0-9]+}/items',     [\MyInvoice\Action\Accounting\BulkActionAction::class, 'itemsPage']);
             $g->post  ('/bulk-actions/{id:[0-9]+}/rollback',  [\MyInvoice\Action\Accounting\BulkActionAction::class, 'rollback']);

@@ -112,6 +112,9 @@ final class SetDimensionsOperation implements BulkOperation
                 $clean[$prefix] = $prefix;
             }
             $params['account_prefixes'] = array_values($clean);
+        } elseif (DocumentItemSearch::isItemTarget($target)) {
+            // Agenda Položky dokladů: jen vybrané položky ({@see DimensionService::bulkPatchDocument()}).
+            $params['scope'] = 'items';
         } else {
             $scope = (string) ($raw['scope'] ?? 'document');
             if (!in_array($scope, ['document', 'items'], true)) {
@@ -181,7 +184,8 @@ final class SetDimensionsOperation implements BulkOperation
                 (array) ($ctx->params['account_prefixes'] ?? []), $dryRun, $expected);
         }
         return $this->dimensions->bulkPatchDocument($ctx->supplierId, (string) $row['source_type'], (int) $row['source_id'], $changes,
-            (string) ($ctx->params['scope'] ?? 'document'), $dryRun, $expected);
+            (string) ($ctx->params['scope'] ?? 'document'), $dryRun, $expected,
+            DocumentItemSearch::isItemTarget($ctx->target) ? array_map('intval', (array) ($ctx->params['ids'] ?? [])) : null);
     }
 
     private static function reason(DimensionException $e): string
