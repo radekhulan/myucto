@@ -11,3 +11,12 @@ SET NAMES utf8mb4;
 CREATE FULLTEXT INDEX IF NOT EXISTS ft_ii_description ON invoice_items (description);
 CREATE FULLTEXT INDEX IF NOT EXISTS ft_pii_description ON purchase_invoice_items (description);
 
+-- Kód `mimo` (mimo předmět DPH, migrace 1866) platí i pro vystavené doklady: položka
+-- vydané faktury, která předmětem daně není (místní poplatek z pobytu, přefakturovaný
+-- správní poplatek), jinak neměla jak zůstat mimo přiznání i KH. Bez vlastního kódu
+-- převezme kód hlavičky a dostane se na ř. 1 nebo 2. Kód nemá řádek přiznání ani oddíl
+-- KH, evidence DPH položku zná, ale do výkazů ji nepošle (stejně jako u přijatých).
+UPDATE vat_classifications
+   SET direction = 'both',
+       label = 'Mimo předmět DPH – nevstupuje do přiznání ani do KH (např. místní poplatek, kurzový rozdíl k samovyměření)'
+ WHERE supplier_id IS NULL AND code = 'mimo' AND direction = 'purchase';
