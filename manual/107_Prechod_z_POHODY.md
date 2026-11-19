@@ -784,8 +784,12 @@ s počty, upozornění a chyby a rekonciliaci převáděného roku:
   než kolik jeho zápis v deníku POHODY dá na účet dokladu, a MyÚčto převzalo
   obojí beze změny. Typicky jde o odpočet nedaňové zálohy, který POHODA
   zaúčtovala kladně na stranu MD účtu 311 (například 311/602). Faktura je
-  uhrazená, účet 311 ale v deníku drží navíc částku zálohy. Saldo takových
-  dokladů zkontrolujte a případně opravte interním dokladem,
+  uhrazená, účet 311 ale v deníku drží navíc částku zálohy. U banky jde
+  typicky o výdaj zaúčtovaný předkontací pro příjem (například MD 221 / D 335):
+  účet 221 se v deníku pohne opačně, než šly peníze, a banka proti deníku nesedí
+  o dvojnásobek pohybu. Protokol takový pohyb vypíše s číslem dokladu, datem
+  a částkou a upozorní na něj už v kroku vazeb. Saldo takových dokladů
+  a zaúčtování takových pohybů zkontrolujte a případně opravte interním dokladem,
 - saldokonto proti hlavní knize za každé období převodu, ke konci období, nejvýš
   k poslednímu zápisu v deníku. Rozdíl nad 1 Kč na účtu protokol uvede jako
   upozornění s účtem, zůstatkem hlavní knihy, součtem položek a rozdílem. Převod

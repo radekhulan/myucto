@@ -14,6 +14,7 @@ use MyInvoice\Service\Accounting\OtherItemService;
 use MyInvoice\Service\Accounting\TakenOverRecord;
 use MyInvoice\Service\Migration\MoneyS3\ImportProtocol;
 use MyInvoice\Service\Migration\Shared\JournalEntryLinker;
+use MyInvoice\Service\Migration\Shared\ReconciliationTolerance;
 use MyInvoice\Support\Sql\PurchaseSettledExpr;
 use PDO;
 
@@ -62,6 +63,7 @@ final class DocumentLinker
         // jedním číslem, předkontace „Nevím") zápis čísla nedostane ({@see bankEntries()}).
         $bankRows = PohodaBankJournal::byMovement($ctx);
         $this->releaseUnbooked($ctx, array_filter($bankRows, static fn (array $rows): bool => $rows === []), $index[PohodaJournal::BANK] ?? []);
+        $this->warnOppositeDirection($ctx, $bankRows);
         $bankDocs = [];
         foreach ($ctx->bankTransactions as $number => $txs) {
             usort($txs, static fn (array $a, array $b): int => isset($paying[$b['id']]) <=> isset($paying[$a['id']]));
@@ -1527,6 +1529,40 @@ final class DocumentLinker
                   WHERE supplier_id = ? AND source_type = 'bank' AND source_id IN ({$docs}) AND id IN ({$entries})"
             )->execute([$ctx->supplierId]);
         }
+    }
+
+    /**
+     * Pohyb, jehož řádky v deníku POHODY hýbou účtem 221 opačně, než jde peníz (výdaj
+     * zaúčtovaný předkontací pro příjem nebo naopak). Převod zápis převezme beze změny,
+     * zůstatek 221 pak nesedí na výpis o dvojnásobek pohybu; protokol ho proto vypíše.
+     *
+     * @param array<int,list<array<string,mixed>>> $rows {@see PohodaBankJournal::byMovement()}
+     */
+    private function warnOppositeDirection(PohodaContext $ctx, array $rows): void
+    {
+        $found = [];
+        foreach ($ctx->bankTransactions as $number => $txs) {
+            foreach ($txs as $tx) {
+                $own = $rows[(int) $tx['id']] ?? [];
+                $net = round(array_sum(array_column($own, 'net')), 2);
+                $amount = (float) ($tx['amount'] ?? 0.0);
+                if ($own === [] || ReconciliationTolerance::isZeroCent($net) || ReconciliationTolerance::isZeroCent($amount) || ($net > 0) === ($amount > 0)) {
+                    continue;
+                }
+                $found[] = ['document_no' => (string) $number, 'date' => (string) $tx['date'], 'amount' => $amount, 'journal' => $net, 'id' => (int) $tx['id']];
+            }
+        }
+        if ($found === []) {
+            return;
+        }
+        $money = static fn (float $v): string => number_format($v, 2, ',', ' ');
+        $list = implode(', ', array_map(static fn (array $f): string => sprintf('%s ze dne %s (pohyb %s Kč, na 221 %s Kč)',
+            $f['document_no'], (new \DateTimeImmutable($f['date']))->format('j. n. Y'), $money($f['amount']), $money($f['journal'])), array_slice($found, 0, 30)));
+        $ctx->protocol->warn(self::STEP_LINK, 'bank_opposite_direction', sprintf(
+            '%d bankovních pohybů je v deníku POHODY zaúčtovaných na účet 221 opačným směrem, než jde platba (předkontace pro opačný směr pohybu): %s%s. '
+            . 'Převod zápisy převzal beze změny, zůstatek účtu 221 se proto od výpisu liší o dvojnásobek pohybu. Zaúčtování opravte interním dokladem.',
+            count($found), $list, count($found) > 30 ? ' a další' : '',
+        ), ['documents' => array_slice($found, 0, 50)]);
     }
 
     /**

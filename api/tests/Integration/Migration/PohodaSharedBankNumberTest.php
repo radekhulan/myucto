@@ -17,7 +17,8 @@ use PHPUnit\Framework\TestCase;
 /**
  * Bankovní pohyby se stejným číslem dokladu a dnem (POHODA dá jedno číslo celému výpisu):
  * zápis deníku patří jen pohybům, které v deníku POHODY řádek mají. Pohyb s předkontací
- * „Nevím" zůstává nespárovaný a k zaúčtování. Izolovaná firma, rollback v tearDown.
+ * „Nevím" zůstává nespárovaný a k zaúčtování. Dál rozdíl banky proti deníku, který je už
+ * v POHODĚ (výdaj zaúčtovaný předkontací pro příjem). Izolovaná firma, rollback v tearDown.
  */
 #[Group('integration')]
 final class PohodaSharedBankNumberTest extends TestCase
@@ -186,6 +187,36 @@ final class PohodaSharedBankNumberTest extends TestCase
         self::assertNotSame($open, $owner);
         self::assertGreaterThan(0, $owner);
         $this->assertBankMatchesJournal($protocol);
+    }
+
+    /**
+     * Výdaj zaúčtovaný v POHODĚ předkontací pro příjem (MD 221 / D 335): MyÚčto ho převezme
+     * věrně, banka proti deníku se liší o dvojnásobek pohybu. Rekonciliace rozdíl vysvětlí
+     * jako rozdíl už v POHODĚ (dřív zůstal nevysvětlený a převod skončil chybou) a převod
+     * na pohyb upozorní.
+     */
+    public function testPaymentBookedInOppositeDirectionIsExplainedAndWarned(): void
+    {
+        $supplierId = $this->supplier();
+        $dir = SyntheticPohodaExport::write($this->tmp);
+        SyntheticPohodaExport::withOppositeDirectionPayment($dir);
+        $protocol = $this->importer->run($supplierId, $this->userId, PohodaExport::open($dir), true);
+
+        $bank = $this->bankCheck($protocol);
+        self::assertTrue($bank['ok'], json_encode($bank));
+        self::assertEqualsWithDelta(-600.0, $bank['documents'] - $bank['journal'], 0.001);
+        self::assertSame([['document_no' => SyntheticPohodaExport::OPPOSITE_BANK, 'date' => '2026-04-20', 'amount' => -300.0, 'difference' => -600.0, 'reason' => 'opposite_direction']],
+            $bank['source_differences'] ?? null, json_encode($bank));
+        $texts = $this->messages($protocol, 'reconciliation', 'source_difference');
+        self::assertCount(1, $texts, $this->explain($protocol));
+        self::assertStringContainsString('Banka × 221', $texts[0]);
+        self::assertStringContainsString('předkontace pro opačný směr pohybu', $texts[0]);
+        self::assertStringContainsString(SyntheticPohodaExport::OPPOSITE_BANK . ' ze dne 20. 4. 2026', $texts[0]);
+
+        $warnings = $this->messages($protocol, 'link', 'bank_opposite_direction');
+        self::assertCount(1, $warnings, $this->explain($protocol));
+        self::assertStringContainsString(SyntheticPohodaExport::OPPOSITE_BANK, $warnings[0]);
+        self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
     }
 
     /** @return array<string,array{status:string,reason:?string,links:int}> částka => pohyb s číslem `$number` */

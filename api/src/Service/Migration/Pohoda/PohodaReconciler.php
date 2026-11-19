@@ -31,7 +31,7 @@ final class PohodaReconciler
 {
     public const STEP = 'reconciliation';
 
-    private const LABELS = ['purchase_invoices' => 'Přijaté faktury × 321', 'issued_invoices' => 'Vydané faktury × 311'];
+    private const LABELS = ['purchase_invoices' => 'Přijaté faktury × 321', 'issued_invoices' => 'Vydané faktury × 311', 'bank' => 'Banka × 221'];
 
     /**
      * Doklady POHODY, ze kterých vznikly doklady kontroly: agenda exportu, element dokladu,
@@ -346,6 +346,9 @@ final class PohodaReconciler
      */
     private function explainBySource(PohodaContext $ctx, array $periodIds, array $row): array
     {
+        if ($row['key'] === 'bank') {
+            return $this->explainBank($ctx, $periodIds, $row);
+        }
         $spec = self::SOURCES[$row['key']] ?? null;
         if ($spec === null) {
             return $row;
@@ -374,9 +377,145 @@ final class PohodaReconciler
         return $row;
     }
 
+    /**
+     * Rozdíl banky proti deníku, který je už v POHODĚ: řádky pohybu v deníku POHODY dají na
+     * účet 221 jinou částku, než zní pohyb. Typicky výdaj zaúčtovaný předkontací pro příjem
+     * (MD 221 / D 335): účet 221 se v deníku pohne opačně a rozdíl je dvojnásobek pohybu.
+     * Po číslech dokladu se porovná rozdíl v MyÚčtu (navázané pohyby − jejich zápis na 221)
+     * s rozdílem v POHODĚ (pohyby s řádky − jejich řádky na 221, {@see PohodaBankJournal});
+     * vysvětlené jsou jen tehdy, když jsou na haléř stejné a dají celý rozdíl kontroly.
+     *
+     * @param list<int> $periodIds
+     * @param array{key:string,documents:float,journal:float,ok:bool,other_accounts:int} $row
+     * @return array<string,mixed>
+     */
+    private function explainBank(PohodaContext $ctx, array $periodIds, array $row): array
+    {
+        $mine = $this->bankEntryDifferences($ctx->supplierId, $periodIds);
+        if ($mine === []) {
+            return $row;
+        }
+        $pohoda = self::pohodaBankDifferences($ctx, array_map('strval', array_keys($mine)));
+        $entries = [];
+        foreach ($mine as $docNo => $difference) {
+            $entries[] = ['document_no' => (string) $docNo, 'difference' => $difference];
+        }
+        if (!TrialBalanceReconciliation::explainedBySource($entries, array_map(static fn (array $s): float => $s['difference'], $pohoda), $row['documents'], $row['journal'])) {
+            return $row;
+        }
+        $explained = [];
+        foreach ($entries as $e) {
+            foreach ($pohoda[$e['document_no']]['movements'] as $m) {
+                $explained[] = ['document_no' => $e['document_no']] + $m;
+            }
+        }
+        $row['ok'] = true;
+        $row['source_differences'] = $explained;
+        return $row;
+    }
+
+    /**
+     * Rozdíl navázaných pohybů proti účtu 221 jejich zápisu po číslech dokladu (zápisy, které
+     * kontrola banky porovnává: navázané na převedený pohyb).
+     *
+     * @param list<int> $periodIds
+     * @return array<string,float>
+     */
+    private function bankEntryDifferences(int $supplierId, array $periodIds): array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT e.document_no,
+                    (SELECT COALESCE(SUM(t.amount), 0)
+                       FROM journal_entry_document_links k JOIN bank_transactions t ON t.id = k.doc_id
+                      WHERE k.supplier_id = e.supplier_id AND k.entry_id = e.id AND k.doc_type = 'bank'
+                        AND EXISTS (SELECT 1 FROM pohoda_import_map m WHERE m.supplier_id = k.supplier_id AND m.kind = 'bank_transaction' AND m.target_id = t.id)) AS docs,
+                    (SELECT COALESCE(SUM(CASE WHEN l.side = 'debit' THEN l.signed_amount ELSE -l.signed_amount END), 0)
+                       FROM journal_entry_lines l JOIN chart_of_accounts a ON a.id = l.account_id AND a.supplier_id = l.supplier_id
+                      WHERE l.supplier_id = e.supplier_id AND l.entry_id = e.id AND a.account_code LIKE '221%') AS journal
+               FROM journal_entries e
+              WHERE e.supplier_id = ? AND e.period_id IN (" . (implode(',', array_map('intval', $periodIds)) ?: '0') . ")
+                AND EXISTS (SELECT 1 FROM journal_entry_document_links k
+                             JOIN pohoda_import_map m ON m.supplier_id = k.supplier_id AND m.target_id = k.doc_id AND m.kind = 'bank_transaction'
+                            WHERE k.supplier_id = e.supplier_id AND k.entry_id = e.id AND k.doc_type = 'bank')"
+        );
+        $stmt->execute([$supplierId]);
+        $out = [];
+        foreach ($stmt->fetchAll(\PDO::FETCH_ASSOC) as $r) {
+            $docNo = trim((string) $r['document_no']);
+            $out[$docNo] = round(($out[$docNo] ?? 0.0) + (float) $r['docs'] - (float) $r['journal'], 2);
+        }
+        return array_filter($out, static fn (float $d): bool => !ReconciliationTolerance::isZeroCent($d));
+    }
+
+    /**
+     * Týž rozdíl v POHODĚ po číslech dokladu: částka pohybu − účinek jeho řádků deníku na 221,
+     * jen u pohybů, které v deníku POHODY řádky mají. Číslo, jehož řádky nejde rozdělit mezi
+     * jeho pohyby ({@see PohodaBankJournal::byMovement()}), se nevysvětluje.
+     *
+     * @param list<string> $docNos
+     * @return array<string,array{difference:float,movements:list<array{date:string,amount:float,difference:float,reason:string}>}>
+     */
+    private static function pohodaBankDifferences(PohodaContext $ctx, array $docNos): array
+    {
+        $rows = PohodaBankJournal::byMovement($ctx);
+        $out = [];
+        foreach ($docNos as $docNo) {
+            $assigned = 0;
+            $total = 0.0;
+            $movements = [];
+            foreach ($ctx->bankTransactions[$docNo] ?? [] as $tx) {
+                $own = $rows[(int) $tx['id']] ?? [];
+                if ($own === []) {
+                    continue;
+                }
+                $assigned += count($own);
+                $amount = (float) $tx['amount'];
+                $net = round(array_sum(array_column($own, 'net')), 2);
+                $difference = round($amount - $net, 2);
+                if (ReconciliationTolerance::isZeroCent($difference)) {
+                    continue;
+                }
+                $total += $difference;
+                $opposite = !ReconciliationTolerance::isZeroCent($amount) && ReconciliationTolerance::sameCent($net, -$amount);
+                $movements[] = ['date' => (string) $tx['date'], 'amount' => $amount, 'difference' => $difference, 'reason' => $opposite ? 'opposite_direction' : 'amount'];
+            }
+            if ($assigned === 0 || $assigned !== count($ctx->bankJournalRows[$docNo] ?? [])) {
+                continue;
+            }
+            $out[$docNo] = ['difference' => round($total, 2), 'movements' => $movements];
+        }
+        return $out;
+    }
+
+    /** @param array{key:string,documents:float,journal:float,source_differences:list<array<string,mixed>>} $row */
+    private static function bankSourceDifferenceText(array $row): string
+    {
+        $money = static fn (float $v): string => number_format($v, 2, ',', ' ');
+        $list = static function (array $rows) use ($money): string {
+            $shown = array_map(static fn (array $s): string => sprintf('%s ze dne %s, pohyb %s Kč (rozdíl %s)',
+                $s['document_no'], self::saldoDay($s['date']), $money($s['amount']), $money($s['difference'])), array_slice($rows, 0, 30));
+            return implode(', ', $shown) . (count($rows) > 30 ? ' a další' : '');
+        };
+        $opposite = array_values(array_filter($row['source_differences'], static fn (array $s): bool => $s['reason'] === 'opposite_direction'));
+        $amount = array_values(array_filter($row['source_differences'], static fn (array $s): bool => $s['reason'] !== 'opposite_direction'));
+        $text = sprintf('%s: rozdíl pohybů proti deníku %s Kč je už v deníku POHODY, převod ho převzal beze změny.',
+            self::LABELS['bank'], $money(round($row['documents'] - $row['journal'], 2)));
+        if ($opposite !== []) {
+            $text .= sprintf(' U %d pohybů je v deníku POHODY předkontace pro opačný směr pohybu (výdaj zaúčtovaný jako příjem nebo naopak), účet 221 se tak pohnul opačně než peníze: %s.',
+                count($opposite), $list($opposite));
+        }
+        if ($amount !== []) {
+            $text .= sprintf(' U %d pohybů se částka pohybu liší od jeho zápisu na účtu 221: %s.', count($amount), $list($amount));
+        }
+        return $text . ' Zaúčtování těchto pohybů zkontrolujte a případně opravte interním dokladem.';
+    }
+
     /** @param array{key:string,documents:float,journal:float,source_differences:list<array{document_no:string,difference:float,reason:string}>} $row */
     private static function sourceDifferenceText(array $row): string
     {
+        if ($row['key'] === 'bank') {
+            return self::bankSourceDifferenceText($row);
+        }
         $money = static fn (float $v): string => number_format($v, 2, ',', ' ');
         $list = static function (array $rows) use ($money): string {
             $shown = array_map(static fn (array $s): string => $s['document_no'] . ' (' . $money($s['difference']) . ')', array_slice($rows, 0, 30));

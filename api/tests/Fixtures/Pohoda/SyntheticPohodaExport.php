@@ -1061,6 +1061,21 @@ final class SyntheticPohodaExport
             self::entry('Banka', self::NEXT_YEAR_BANK, 'Příjem', 400, '221001', '602000', '2026-03-03'));
     }
 
+    /** Výdaj zaúčtovaný předkontací pro příjem ({@see withOppositeDirectionPayment()}). */
+    public const OPPOSITE_BANK = 'BAN0010060';
+
+    /**
+     * Výdaj 300 Kč, který účetní v POHODĚ zaúčtovala předkontací pro příjem: MD 221 / D 335.
+     * Účet 221 se v deníku pohne opačně než peníze, banka proti deníku nesedí o 600 Kč.
+     */
+    public static function withOppositeDirectionPayment(string $agendaDir): void
+    {
+        self::append($agendaDir . '/02_uctova_osnova.xml', '</lst:listAccount>', '<lst:itemAccount id="335000" code="335000" name="Pohledávky za zaměstnanci"/>');
+        self::append($agendaDir . '/29_banka.xml', '</lst:listBank>', self::bank(self::OPPOSITE_BANK, 'expense', '2026-04-20', 300, '', 'Zaměstnanec Test'));
+        self::append($agendaDir . '/01_ucetni_denik.xml', '</lst:accountancy>',
+            self::entry('Banka', self::OPPOSITE_BANK, 'Záloha na cestovné', 300, '221001', '335000', '2026-04-20'));
+    }
+
     /** Totéž bez částek v cizí měně - doklady, jak by je převod převzal v Kč. */
     public static function withoutForeignAmounts(string $agendaDir): void
     {
