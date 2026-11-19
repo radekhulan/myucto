@@ -1190,9 +1190,14 @@ final class ClosingRepository
      * stavů jako rozvaha ({@see bsBalances()}). Uzavírací a otevírací zápis nesou měnu,
      * součet přes celý deník by ji tak počítal znovu za každý rok, ve kterém otevření
      * měnu neslo a uzavření ne (uzávěrka převzatá z původního systému, převod
-     * s počátečními stavy každého roku). Účty, jejichž počáteční stav měnu nenese
-     * ({@see foreignOpeningGaps()}), se dál sčítají z celého deníku: tam se uzavření
-     * i otevření bez měny vzájemně ruší a cizí zůstatek drží jen pohyby.
+     * s počátečními stavy každého roku).
+     *
+     * Účty, jejichž počáteční stav měnu nenese ({@see foreignOpeningGaps()}), se sčítají
+     * z pohybů celého deníku a počátečního stavu na jeho začátku: roční uzavření (close_books
+     * i převzaté) a otevření, kterému v deníku předcházejí pohyby (přenáší jen jejich
+     * zůstatek), se vynechají. Uzavření s měnou proti převzatému
+     * otevření bez měny by se jinak od cizího zůstatku odečetlo bez protějšku; uzavření
+     * i otevření bez měny se vzájemně ruší, takže jejich vynechání nic nemění.
      *
      * @return array{0:string, 1:list<string|int>} SQL podmínka (začíná AND) a parametry
      */
@@ -1206,8 +1211,18 @@ final class ClosingRepository
         if ($gaps === []) {
             return [" AND {$entryAlias}.entry_date >= ?", [$anchor]];
         }
-        return [" AND ({$entryAlias}.entry_date >= ? OR {$lineAlias}.account_id IN (" . implode(',', array_fill(0, count($gaps), '?')) . '))',
-            [$anchor, ...$gaps]];
+        $first = $this->db->pdo()->prepare(
+            "SELECT MIN(entry_date) FROM journal_entries WHERE supplier_id = ? AND source_type <> 'opening' AND posted_at IS NOT NULL"
+        );
+        $first->execute([$supplierId]);
+        $firstMovement = (string) $first->fetchColumn();
+        $in = implode(',', array_fill(0, count($gaps), '?'));
+        $e = $entryAlias;
+        return [" AND (({$lineAlias}.account_id NOT IN ({$in}) AND {$e}.entry_date >= ?)
+                    OR ({$lineAlias}.account_id IN ({$in})
+                        AND NOT ({$e}.source_type = 'closing' AND ({$e}.source_id IS NULL OR {$e}.source_id = {$e}.period_id))
+                        AND NOT ({$e}.source_type = 'opening' AND {$e}.entry_date > ?)))",
+            [...$gaps, $anchor, ...$gaps, $firstMovement]];
     }
 
     // ── kroky průvodce (accounting_closing_steps) ─────────────────────────────

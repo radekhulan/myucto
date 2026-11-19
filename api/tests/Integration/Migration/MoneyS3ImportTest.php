@@ -266,12 +266,13 @@ final class MoneyS3ImportTest extends MoneyS3ImportTestCase
         self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
 
         $this->assertForeignCash($supplierId);
-        // Rok 2024 i 2025: měnu nese otevírací zápis 2024 (z PocStav), 2025 už ne.
-        self::assertSame([['2024-01-01', 'EUR', 25.0, 100.0], ['2025-04-10', 'EUR', 24.35, 289.2]], $this->foreignLines($supplierId, '211.002'));
-        // Bez měny: otevírací zápis 2025 a uzávěrkový zápis 2024 (uzávěrka MyÚčta, v Kč).
-        self::assertSame(2, $this->rowCount('journal_entry_lines', $supplierId,
+        // Měnu nese otevírací zápis 2024 (z PocStav) i uzávěrkový zápis 2024 (uzávěrka MyÚčta
+        // přenáší cizí zůstatek, kurz na řádku nemá). Převzatý otevírací zápis 2025 měnu nenese.
+        self::assertSame([['2024-01-01', 'EUR', 25.0, 100.0], ['2024-12-31', 'EUR', 0.0, 100.0], ['2025-04-10', 'EUR', 24.35, 289.2]], $this->foreignLines($supplierId, '211.002'));
+        // Bez měny: otevírací zápis 2025.
+        self::assertSame(1, $this->rowCount('journal_entry_lines', $supplierId,
             "currency_code IS NULL AND account_id = (SELECT id FROM chart_of_accounts WHERE supplier_id = journal_entry_lines.supplier_id AND account_code = '211.002')"));
-        self::assertSame([['2024-01-01', 'HUF', 0.062, 50000.0], ['2025-04-12', 'HUF', 0.06121, 10120.0]], $this->foreignLines($supplierId, '211.003'));
+        self::assertSame([['2024-01-01', 'HUF', 0.062, 50000.0], ['2024-12-31', 'HUF', 0.0, 50000.0], ['2025-04-12', 'HUF', 0.06121, 10120.0]], $this->foreignLines($supplierId, '211.003'));
         self::assertSame(0, $this->rowCount('journal_entry_lines', $supplierId,
             "currency_code IS NOT NULL AND account_id NOT IN (SELECT id FROM chart_of_accounts WHERE supplier_id = journal_entry_lines.supplier_id AND account_code IN ('211.002', '211.003'))"));
         $this->assertRevaluationProposals($supplierId);
@@ -299,7 +300,7 @@ final class MoneyS3ImportTest extends MoneyS3ImportTestCase
         $series->execute([$supplierId]);
         self::assertCount(6, $series->fetchAll(PDO::FETCH_COLUMN));
         $this->assertForeignCash($supplierId);
-        self::assertSame([['2024-01-01', 'EUR', 25.0, 100.0], ['2025-04-10', 'EUR', 24.35, 289.2]], $this->foreignLines($supplierId, '211.002'));
+        self::assertSame([['2024-01-01', 'EUR', 25.0, 100.0], ['2024-12-31', 'EUR', 0.0, 100.0], ['2025-04-10', 'EUR', 24.35, 289.2]], $this->foreignLines($supplierId, '211.002'));
     }
 
     /**
