@@ -81,29 +81,28 @@ final class DepreciationPostingService
         ];
 
         [$periodStart, $periodEnd] = $this->bookingWindow($supplierId, $fiscalYear, $taxEvidence);
-        $takenOver = $this->closingTakenOver($supplierId, $fiscalYear, $taxEvidence);
-        if ($takenOver) {
-            $result['accounting_skipped'] = 'closing_taken_over';
-        }
 
         $pdo = $this->db->pdo();
         $foreign = $pdo->inTransaction();
         foreach ($this->assets->listForBooking($supplierId, $fiscalYear, $periodStart, $periodEnd) as $asset) {
             $assetId = (int) $asset['id'];
-            // Účetní řádek roku je zaúčtovaný, ale jeho zápis v deníku chybí (deník roku
-            // nahradil jiný, např. obnovený z převodu). Znovu se neúčtuje: odpis roku by se
-            // zdvojil, pokud ho nese jiný zápis. Ohlásí se, rozhodne účetní.
-            if (!$takenOver && $this->accountingJournalMissing($supplierId, $asset, $fiscalYear, $taxEvidence)) {
-                $result['errors'][] = ['asset_id' => $assetId, 'code' => self::JOURNAL_MISSING];
-            }
             try {
                 // Odvolanou transakci (1020/1213) karta zopakuje, pokud ji vlastní. V cizí
                 // transakci (uzávěrka) ji dostane vlastník: další karty by jinak běžely
                 // v autocommitu.
-                [$bookedSomething, $accAmount, $taxAmount] = TransactionFailure::retrying(
+                [$bookedSomething, $accAmount, $taxAmount, $takenOver, $journalMissing] = TransactionFailure::retrying(
                     $pdo,
-                    fn (): array => $this->bookAsset($supplierId, $assetId, $fiscalYear, $periodEnd, $taxEvidence, $meta, $allowClosingPeriod, $takenOver),
+                    fn (): array => $this->bookAsset($supplierId, $assetId, $fiscalYear, $periodEnd, $taxEvidence, $meta, $allowClosingPeriod),
                 );
+                if ($takenOver) {
+                    $result['accounting_skipped'] = 'closing_taken_over';
+                }
+                // Účetní řádek roku je zaúčtovaný, ale jeho zápis v deníku chybí (deník roku
+                // nahradil jiný, např. obnovený z převodu). Znovu se neúčtoval: odpis roku by
+                // se zdvojil, pokud ho nese jiný zápis. Ohlásí se, rozhodne účetní.
+                if ($journalMissing) {
+                    $result['errors'][] = ['asset_id' => $assetId, 'code' => self::JOURNAL_MISSING];
+                }
                 if ($bookedSomething) {
                     $result['booked']++;
                     $result['total_accounting'] = round($result['total_accounting'] + $accAmount, 2);
@@ -141,7 +140,8 @@ final class DepreciationPostingService
      * Odpisy roku jedné karty v jedné transakci.
      *
      * @param array{user_id?:?int, posted_by?:?int, ip?:?string, user_agent?:?string} $meta
-     * @return array{0:bool,1:float,2:float} zaúčtováno něco, účetní a daňový odpis
+     * @return array{0:bool,1:float,2:float,3:bool,4:bool} zaúčtováno něco, účetní a daňový odpis,
+     *     rok uzavřel původní systém, zaúčtovaný účetní řádek bez vlastního zápisu v deníku
      */
     private function bookAsset(
         int $supplierId,
@@ -151,7 +151,6 @@ final class DepreciationPostingService
         bool $taxEvidence,
         array $meta,
         bool $allowClosingPeriod,
-        bool $closingTakenOver = false,
     ): array {
         $pdo = $this->db->pdo();
         $ownTx = !$pdo->inTransaction();
@@ -197,6 +196,8 @@ final class DepreciationPostingService
             // 1) účetní řádek roku → upsert (posted) + journal 551/oprávky. Rok, jehož
             //    odpisy zaúčtoval deník převzatý z jiného programu, ani rok uzavřený původním
             //    systémem se znovu neúčtuje.
+            $closingTakenOver = $this->closingTakenOver($supplierId, $fiscalYear, $taxEvidence);
+            $journalMissing = !$closingTakenOver && $this->accountingJournalMissing($supplierId, $asset, $fiscalYear, $taxEvidence);
             $accRow = $closingTakenOver ? null : $this->accountingRowToBook($asset, $ctx, $fiscalYear, $taxEvidence);
             if ($accRow !== null) {
                 // Zaúčtování k poslednímu dni ZDAŇOVACÍHO OBDOBÍ (reálné hranice
@@ -240,7 +241,7 @@ final class DepreciationPostingService
             if ($ownTx) {
                 $pdo->commit();
             }
-            return [$bookedSomething, $accAmount, $taxAmount];
+            return [$bookedSomething, $accAmount, $taxAmount, $closingTakenOver, $journalMissing];
         } catch (\Throwable $e) {
             if ($ownTx && $pdo->inTransaction()) {
                 $pdo->rollBack();
