@@ -37,8 +37,8 @@ z POHODY Mzdy nebo PAMICA převádí samostatný průvodce, viz
 
 Agendu neziskové organizace (osnova podle vyhlášky 504/2002 Sb. s účty skupiny 9)
 převod přijme jen do firmy, která účtuje podle vyhlášky 504; agendu podnikatele
-do takové firmy odmítne. Převod přebírá deník, doklady a střediska (dimenze Středisko)
-a ověřuje rovnováhu rozvahy. Činnost z POHODY nečte, všem řádkům nákladů a výnosů
+do takové firmy odmítne. Převod přebírá deník, doklady, střediska (dimenze Středisko)
+a zakázky (dimenze Zakázka) a ověřuje rovnováhu rozvahy. Činnost z POHODY nečte, všem řádkům nákladů a výnosů
 nastaví hlavní činnost, kterou účetní přeřadí. Fondy, dotace ani členské příspěvky
 zvlášť nepřebírá a výkazy s POHODOU neporovnává, proto je zkontrolujte. Průvodce na to
 upozorní (podrobnosti v kapitole [Přechod z Money S3](106_Prechod_z_Money_S3.md),
@@ -509,7 +509,36 @@ Soubory `90_majetek.xml`, `91_mzdy.xml` a `92_sklad.xml` jsou stejné jako u dat
 | drobný majetek (`90_majetek.xml`) | karty evidence drobného majetku navázané na zdrojový doklad |
 | sklady a karty zásob (`92_sklad.xml`) | sklady, skladové karty a počáteční stav každé karty po skladech k datu exportu |
 | ceníky (`92_sklad.xml`) | cenové hladiny s cenou bez DPH u každé karty |
+| zakázky a číslo zakázky na dokladech a v deníku | hodnoty firemní dimenze Zakázka; zakázka u klienta jen u zakázky s vlastním partnerem, viz níže |
 | členění skladu, alternativní jednotky, dodavatel karty (`92_sklad.xml`) | kategorie skladu, balení karty, dodavatel karty s nákupní cenou |
+
+**Zakázky.** Každá zakázka z agendy Zakázky je hodnota firemní dimenze Zakázka
+(`Firma → Dimenze`, druh Projekt) s kódem podle čísla zakázky a názvem podle jejího
+textu, i když ji žádný doklad nepoužívá. Výsledovku a rozbor po zakázce pak ukážou
+sestavy po dimenzích. Převod dimenze u firmy zapne. Hodnotu dostanou:
+
+- řádky účetního deníku podle zakázky svého řádku v POHODĚ,
+- vydané a přijaté faktury do hlavičky podle zakázky dokladu; nemá-li ji hlavička,
+  podle zakázky položek, když se všechny shodují. Položka s jinou zakázkou než
+  hlavička dostane hodnotu na položku, když má převedená faktura stejné položky
+  jako v POHODĚ,
+- pokladní doklady, bankovní pohyby a faktury bez zakázky na dokladu do hlavičky,
+  když ji nesou všechny řádky jejich zápisu v deníku se zakázkou.
+
+Zakázka v MyÚčtu (`Zakázky`, vždy u jednoho klienta) vznikne jen u zakázky, která
+má v POHODĚ vlastního partnera z adresáře. Klient je partner zakázky, číslo zakázky
+je číslo z POHODY a měna je výchozí měna firmy. Zakázka je aktivní, stav zakázky
+z POHODY se nepřebírá. Hodnota dimenze se na ni naváže a faktury i řádky deníku
+s touto zakázkou ji dostanou jako zakázku dokladu. Zakázka bez partnera zůstane jen
+hodnotou dimenze, klienta převod z dokladů neodvozuje. Protokol v kroku Zakázky
+uvede počet zakázek, nových a existujících hodnot dimenze, označených řádků deníku
+a dokladů a zakázek založených u klienta, a vyjmenuje zakázky, které zůstaly jen
+dimenzí.
+
+Zakázky nese export z aktuální verze nástroje: převodník MDB a POHODA SQL čte agendu
+Zakázky (`sZAK`) a číslo zakázky dokladů a řádků deníku, XML export agendu
+`35_zakazky.xml` a zakázku na dokladech a v deníku. Starší export zakázky nenese
+a převod se bez nich chová jako dřív.
 
 **Přeplatky a pohyby bez dokladu.** Bankovní nebo pokladní pohyb, který POHODA
 zaúčtovala přímo na účet 315 nebo 325 (typicky přeplatek na analytice 315.999
@@ -922,6 +951,14 @@ starší záznamy, převod s volbou dorovnání vlastní zápisy nechá a převe
 POHODY starší než první zápis zadaný v MyÚčtu. Novější záznamy POHODY nepřebere, aby
 nevznikl dvojí zápis, a protokol uvede datum, od kterého se nepřebírají. Rekonciliace
 tu může hlásit rozdíl, protože deník nese i vlastní zápisy.
+
+**Doplnění zakázek.** Firmu převedenou exportem bez zakázek doplníte novým
+exportem z aktuální verze nástroje a opakovaným převodem téhož roku. Převod založí
+hodnoty dimenze Zakázka a zakázky u klienta a doplní je k už převedeným dokladům
+a řádkům deníku. Nic nezdvojí a hodnotu, kterou jste v MyÚčtu změnili, nepřepíše.
+Zápisy a doklady v uzavřeném období nebo se zmrazenými dimenzemi zůstanou bez
+zakázky a protokol uvede jejich počet; po znovuotevření knih je doplní další
+opakovaný převod.
 
 Už převedené doklady ani zápisy deníku opakovaný převod nepřepisuje, protože
 mohly být mezitím zaúčtované, spárované nebo upravené v MyÚčtu. Změnila-li se

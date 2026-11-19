@@ -48,6 +48,7 @@ final class PohodaExport
         'addressbook' => '30_adresar.xml',
         'bank_accounts' => '31_bankovni_ucty.xml',
         'cash_registers' => '32_pokladny.xml',
+        'contracts' => '35_zakazky.xml',
         // Tabulky z datového souboru POHODY (XML export je nemá), vytváří je exportní nástroj.
         'assets' => '90_majetek.xml',
         'payroll' => '91_mzdy.xml',
@@ -448,7 +449,7 @@ final class PohodaExport
                 'company' => $names[$ico . '_' . $year] ?? '',
                 'program' => 'POHODA Mzdy',
                 'exported_at' => null,
-                'counts' => ['journal' => 0, 'opening' => 0, 'first_date' => null, 'last_date' => null, 'issued' => 0, 'purchase' => 0, 'internal' => 0, 'cash' => 0, 'bank' => 0, 'partners' => 0],
+                'counts' => ['journal' => 0, 'opening' => 0, 'first_date' => null, 'last_date' => null, 'issued' => 0, 'purchase' => 0, 'internal' => 0, 'cash' => 0, 'bank' => 0, 'partners' => 0, 'contracts' => 0],
                 'files' => [['file' => self::FILES['payroll'], 'state' => 'ok', 'note' => '']],
                 'has_accounting' => false,
                 'has_payroll' => true,
@@ -513,10 +514,10 @@ final class PohodaExport
 
     /**
      * Počty záznamů agendy pro náhled: řádky deníku (z toho počáteční stavy), rozsah dat,
-     * vydané a přijaté doklady, interní doklady, pokladna, banka a adresář. `later_years` =
+     * vydané a přijaté doklady, interní doklady, pokladna, banka, adresář a zakázky. `later_years` =
      * roky po roce agendy, do kterých padají zápisy deníku ({@see PohodaJournal::laterYear()}).
      *
-     * @return array{journal:int,opening:int,first_date:?string,last_date:?string,later_years:list<int>,issued:int,purchase:int,internal:int,cash:int,bank:int,partners:int}
+     * @return array{journal:int,opening:int,first_date:?string,last_date:?string,later_years:list<int>,issued:int,purchase:int,internal:int,cash:int,bank:int,partners:int,contracts:int}
      */
     public function counts(): array
     {
@@ -532,6 +533,7 @@ final class PohodaExport
             'cash' => [['cash'], 'voucher'],
             'bank' => [['bank'], 'bank'],
             'partners' => [['addressbook'], 'addressbook'],
+            'contracts' => [['contracts'], 'contract'],
         ];
         // Z MDB převodu se deník i všechny počítané agendy čtou jedním průchodem souborem.
         $tally = [];

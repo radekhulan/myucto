@@ -292,6 +292,7 @@ final class InvoiceImporter
         if (isset($existing[$key])) {
             $this->remember($ctx, $bucket, $doc['number'], $existing[$key]);
             self::rememberRemaining($ctx, 'invoice', $existing[$key], $doc);
+            self::rememberContract($ctx, 'invoice', $existing[$key], $r, $prefix);
             $this->captureLiquidations($ctx, 'invoice', $existing[$key], $doc['number'], $r);
             // Vazby na deník se při opakovaném běhu hodnotí znovu: doklad minulého období
             // zápis v deníku roku nemá a nesmí se napodruhé hlásit jako nezaúčtovaný.
@@ -421,6 +422,7 @@ final class InvoiceImporter
         $this->map->put($ctx->supplierId, PohodaImportRepository::KIND_INVOICE, $key, $id, $ctx->runId);
         $this->remember($ctx, $bucket, $doc['number'], $id);
         self::rememberRemaining($ctx, 'invoice', $id, $doc);
+        self::rememberContract($ctx, 'invoice', $id, $r, $prefix);
         $this->captureLiquidations($ctx, 'invoice', $id, $doc['number'], $r);
         if ($previous) {
             $ctx->previousPeriod['invoice|' . $id] = true;
@@ -456,6 +458,7 @@ final class InvoiceImporter
         if (isset($existing[$key])) {
             $this->remember($ctx, $bucket, $doc['number'], $existing[$key]);
             self::rememberRemaining($ctx, 'purchase_invoice', $existing[$key], $doc);
+            self::rememberContract($ctx, 'purchase_invoice', $existing[$key], $r, $prefix);
             $this->captureLiquidations($ctx, 'purchase_invoice', $existing[$key], $doc['number'], $r);
             if ($this->isPreviousPeriod($ctx, $doc)) {
                 $ctx->previousPeriod['purchase_invoice|' . $existing[$key]] = true;
@@ -603,6 +606,7 @@ final class InvoiceImporter
         $this->map->put($ctx->supplierId, PohodaImportRepository::KIND_PURCHASE_INVOICE, $key, $id, $ctx->runId);
         $this->remember($ctx, $bucket, $doc['number'], $id);
         self::rememberRemaining($ctx, 'purchase_invoice', $id, $doc);
+        self::rememberContract($ctx, 'purchase_invoice', $id, $r, $prefix);
         $this->captureLiquidations($ctx, 'purchase_invoice', $id, $doc['number'], $r);
         if ($previous) {
             $ctx->previousPeriod['purchase_invoice|' . $id] = true;
@@ -1274,6 +1278,24 @@ final class InvoiceImporter
      *
      * @param array<string,mixed> $doc
      */
+    /**
+     * Zakázka dokladu z exportu (`typ:contract` hlavičky a položek) pro {@see ContractImporter}.
+     * Zapisuje se i u dokladu z dřívějšího převodu, ať ji opakovaný převod doplní.
+     *
+     * @param array<string,mixed> $r
+     */
+    private static function rememberContract(PohodaContext $ctx, string $docType, int $id, array $r, string $prefix): void
+    {
+        $header = mb_substr(PohodaXml::text(PohodaXml::get($r, $prefix . 'Header'), 'contract/ids'), 0, 50);
+        $items = array_map(
+            static fn (mixed $item): string => mb_substr(PohodaXml::text($item, 'contract/ids'), 0, 50),
+            PohodaXml::all($r, $prefix . 'Detail/' . $prefix . 'Item'),
+        );
+        if ($header !== '' || array_filter($items, static fn (string $code): bool => $code !== '') !== []) {
+            $ctx->documentContracts[$docType][$id] = ['header' => $header, 'items' => $items];
+        }
+    }
+
     private static function rememberRemaining(PohodaContext $ctx, string $docType, int $id, array $doc): void
     {
         if (is_numeric($doc['remaining'])) {

@@ -26,7 +26,7 @@ use PDO;
  *
  * Pořadí: osnova → období a deník → režim účetní jednotky → adresář a předkontace →
  * přijaté a vydané doklady → pokladna a banka → vazby dokladů na deník a úhrady →
- * majetek → sklad → koeficient krácení odpočtu (§ 76) → rekonciliace. Automatika účtování je po celou dobu vypnutá ({@see AccountingUnitSwitch}).
+ * zakázky → majetek → sklad → koeficient krácení odpočtu (§ 76) → rekonciliace. Automatika účtování je po celou dobu vypnutá ({@see AccountingUnitSwitch}).
  *
  * **Zkouška nanečisto** běží stejným kódem v jedné transakci, která se na konci vrátí.
  * **Ostrý převod** zapisuje po krocích, každý krok je idempotentní ({@see PohodaImportRepository}):
@@ -63,6 +63,7 @@ final class PohodaImporter
         private readonly BalanceItemImporter $balanceItems,
         private readonly UnbookedBankProposals $proposals,
         private readonly PayrollModuleAccess $payrollAccess,
+        private readonly ContractImporter $contracts,
     ) {}
 
     /** @return list<string> */
@@ -82,6 +83,7 @@ final class PohodaImporter
             CashBankImporter::STEP_BANK,
             DocumentLinker::STEP_LINK,
             DocumentLinker::STEP_PAYMENTS,
+            ContractImporter::STEP,
             AssetImporter::STEP,
             SmallAssetImporter::STEP,
             StockImporter::STEP,
@@ -490,6 +492,7 @@ final class PohodaImporter
                     $this->balanceItems->run($ctx);
                 }
             },
+            ContractImporter::STEP => fn () => $this->contracts->run($ctx),
             AssetImporter::STEP => fn () => $this->assets->import($ctx),
             SmallAssetImporter::STEP => fn () => $this->smallAssets->import($ctx),
             StockImporter::STEP => fn () => $this->stock->import($ctx),

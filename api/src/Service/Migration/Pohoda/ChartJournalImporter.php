@@ -318,6 +318,7 @@ final class ChartJournalImporter
         }
         $ctx->report(self::STEP_JOURNAL, $total, $total);
         $this->storePairingSymbols($ctx, $groups);
+        $this->collectContracts($ctx, $groups);
 
         $stats['debit'] = round($stats['debit'], 2);
         $stats['credit'] = round($stats['credit'], 2);
@@ -363,6 +364,39 @@ final class ChartJournalImporter
         }
         $p->set('journal', [$stats]);
         $p->finish(self::STEP_JOURNAL);
+    }
+
+    /**
+     * Zakázky řádků deníku pro {@see ContractImporter}, i u zápisů z dřívějšího převodu:
+     * export s novým převodníkem tak zakázku doplní i firmě převedené bez ní. Čísluje řádky
+     * stejně jako zápis a {@see storePairingSymbols()}, zápis se tím nemění.
+     *
+     * @param array<string,list<array<string,mixed>>> $groups
+     */
+    private function collectContracts(PohodaContext $ctx, array $groups): void
+    {
+        $entries = null;
+        $year = $ctx->year();
+        foreach ($groups as $groupKey => $rows) {
+            $lineNo = 0;
+            foreach ($rows as $item) {
+                if (PohodaJournal::effect($item) === null) {
+                    continue;
+                }
+                $lineNo += 2;
+                $code = mb_substr(PohodaXml::text($item, 'contract/ids'), 0, 50);
+                if ($code === '') {
+                    continue;
+                }
+                $entries ??= $this->map->all($ctx->supplierId, PohodaImportRepository::KIND_JOURNAL_ENTRY);
+                $entryId = $entries[$year . '|' . $groupKey] ?? $entries[($year - 1) . '|' . $groupKey] ?? null;
+                if ($entryId === null) {
+                    continue;
+                }
+                $ctx->contractLines[$code][] = [(int) $entryId, $lineNo - 1];
+                $ctx->contractLines[$code][] = [(int) $entryId, $lineNo];
+            }
+        }
     }
 
     /**

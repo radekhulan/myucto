@@ -680,6 +680,7 @@ const actions = computed<ActionItem[]>(() => {
                   <th class="px-3 py-2 text-right">{{ tt('col_cash') }}</th>
                   <th class="px-3 py-2 text-right">{{ tt('col_bank') }}</th>
                   <th class="px-3 py-2 text-right">{{ tt('col_partners') }}</th>
+                  <th class="px-3 py-2 text-right">{{ tt('col_contracts') }}</th>
                 </template>
                 <th class="px-3 py-2 whitespace-nowrap">{{ tt('col_payroll') }}</th>
               </tr>
@@ -709,6 +710,7 @@ const actions = computed<ActionItem[]>(() => {
                   <td class="px-3 py-2 text-right">{{ a.counts.cash }}</td>
                   <td class="px-3 py-2 text-right">{{ a.counts.bank }}</td>
                   <td class="px-3 py-2 text-right">{{ a.counts.partners }}</td>
+                  <td class="px-3 py-2 text-right" data-testid="pohoda-contracts-cell">{{ a.counts.contracts ?? '—' }}</td>
                 </template>
                 <td class="px-3 py-2 whitespace-nowrap" data-testid="pohoda-payroll-cell">{{ a.payroll ? tt('payroll_cell', { employees: a.payroll.employees, months: a.payroll.months }) : '—' }}</td>
               </tr>
@@ -722,7 +724,7 @@ const actions = computed<ActionItem[]>(() => {
                 <td class="px-3 py-2"></td>
                 <td class="px-3 py-2 text-neutral-600">↳ {{ tt('later_year_row', { year: o.year, agenda: agendaKey(a) }) }}</td>
                 <td class="px-3 py-2 font-medium">{{ yearLabel(o.year) }}</td>
-                <td :colspan="payrollWizard ? 1 : 10"></td>
+                <td :colspan="payrollWizard ? 1 : 11"></td>
               </tr>
               </template>
             </tbody>

@@ -65,6 +65,44 @@ final class PohodaMdbAccountingTest extends TestCase
         self::assertSame(['29180', '', ''], array_map(static fn (array $r): string => PohodaXml::text($r, 'sourceId'), $rows));
     }
 
+    /**
+     * Zakázky (`sZAK`) ve tvaru `con:contractDesc` z XML a číslo zakázky (`CisloZAK`) na řádku
+     * deníku, hlavičce i položce dokladu jako `typ:contract`. Řádek bez čísla zakázky se
+     * vynechá, RefAD 0 je zakázka bez partnera a export ze staršího převodníku zakázky nenese.
+     */
+    public function testContractsAndContractNumbersOfJournalAndDocuments(): void
+    {
+        $mapper = $this->mapper([
+            'sZAK' => [
+                ['ID' => '1', 'Cislo' => 'Z-01', 'SText' => 'Stavba', 'RefAD' => '7', 'Predani' => '2026-05-31T00:00:00'],
+                ['ID' => '2', 'Cislo' => 'Z-02', 'SText' => 'Vývoj', 'RefAD' => '0'],
+                ['ID' => '3', 'Cislo' => ''],
+            ],
+            'pUD' => [
+                ['ID' => '1', 'RelUdAg' => '2', 'Cislo' => 'F1', 'UMD' => '311000', 'UD' => '602000', 'Kc' => '100', 'CisloZAK' => 'Z-01'],
+                ['ID' => '2', 'RelUdAg' => '2', 'Cislo' => 'F1', 'UMD' => '311000', 'UD' => '343000', 'Kc' => '21'],
+            ],
+            'FA' => [['ID' => '5', 'Cislo' => 'F1', 'RelTpFak' => '1', 'Kc2' => '100', 'KcDPH2' => '21', 'CisloZAK' => 'Z-01']],
+            'FApol' => [
+                ['ID' => '51', 'RefAg' => '5', 'SText' => 'Práce', 'RelSzDPH' => '2', 'Kc' => '60', 'KcDPH' => '12.6', 'CisloZAK' => 'Z-02'],
+                ['ID' => '52', 'RefAg' => '5', 'SText' => 'Materiál', 'RelSzDPH' => '2', 'Kc' => '40', 'KcDPH' => '8.4'],
+            ],
+        ]);
+
+        $contracts = iterator_to_array($mapper->records('contracts'), false);
+        self::assertCount(2, $contracts);
+        self::assertSame(['Z-01', 'Stavba', '7', '2026-05-31'], [
+            PohodaXml::text($contracts[0], 'contractDesc/number/numberRequested'), PohodaXml::text($contracts[0], 'contractDesc/text'),
+            PohodaXml::text($contracts[0], 'contractDesc/partnerIdentity/id'), PohodaXml::text($contracts[0], 'contractDesc/dateDelivery'),
+        ]);
+        self::assertSame('', PohodaXml::text($contracts[1], 'contractDesc/partnerIdentity/id'));
+        self::assertSame(['Z-01', ''], array_map(static fn (array $r): string => PohodaXml::text($r, 'contract/ids'), iterator_to_array($mapper->records('journal'), false)));
+        $invoice = iterator_to_array($mapper->records('issued'), false)[0];
+        self::assertSame('Z-01', PohodaXml::text($invoice, 'invoiceHeader/contract/ids'));
+        self::assertSame(['Z-02', ''], array_map(static fn (array $i): string => PohodaXml::text($i, 'contract/ids'), PohodaXml::all($invoice, 'invoiceDetail/invoiceItem')));
+        self::assertSame([], iterator_to_array($this->mapper([])->records('contracts'), false));
+    }
+
     /** Partner řádku deníku v tvaru XML; RefAD 0 znamená bez vazby, starší export sloupce nemá. */
     public function testJournalCarriesPartnerOfTheRow(): void
     {
@@ -365,6 +403,7 @@ final class PohodaMdbAccountingTest extends TestCase
             'HO' => [['ID' => '1', 'RelTpHO' => '2', 'Cislo' => 'TEST-H1', 'Datum' => '2026-02-11']],
             'pINT' => [['ID' => '1', 'Cislo' => 'TEST-I1', 'Datum' => '2026-02-12']],
             'AD' => [['ID' => '1', 'Firma' => 'Testovací odběratel']],
+            'sZAK' => [['ID' => '1', 'Cislo' => 'Z-01', 'SText' => 'Testovací zakázka']],
         ]);
         $agenda = $this->dir . '/12345678_2026';
         mkdir($agenda);
@@ -379,7 +418,7 @@ final class PohodaMdbAccountingTest extends TestCase
         $counts = $export->counts();
         self::assertSame(
             ['journal' => 2, 'opening' => 1, 'first_date' => '2026-02-03', 'last_date' => '2026-02-03', 'later_years' => [],
-                'issued' => 1, 'purchase' => 2, 'internal' => 1, 'cash' => 1, 'bank' => 1, 'partners' => 1],
+                'issued' => 1, 'purchase' => 2, 'internal' => 1, 'cash' => 1, 'bank' => 1, 'partners' => 1, 'contracts' => 1],
             $counts,
         );
         // Před opravou: deník + sedm druhů faktur zvlášť + každý číselník a položky zvlášť (přes 20).

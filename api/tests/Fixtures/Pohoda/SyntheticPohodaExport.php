@@ -28,7 +28,8 @@ final class SyntheticPohodaExport
         . 'xmlns:inv="http://www.stormware.cz/schema/version_2/invoice.xsd" xmlns:bnk="http://www.stormware.cz/schema/version_2/bank.xsd" '
         . 'xmlns:vat="http://www.stormware.cz/schema/version_2/classificationVAT.xsd" xmlns:bka="http://www.stormware.cz/schema/version_2/bankAccount.xsd" '
         . 'xmlns:adb="http://www.stormware.cz/schema/version_2/addressbook.xsd" xmlns:lAdb="http://www.stormware.cz/schema/version_2/list_addBook.xsd" '
-        . 'xmlns:acu="http://www.stormware.cz/schema/version_2/accountingunit.xsd" xmlns:int="http://www.stormware.cz/schema/version_2/intDoc.xsd" xmlns:vch="http://www.stormware.cz/schema/version_2/voucher.xsd"';
+        . 'xmlns:acu="http://www.stormware.cz/schema/version_2/accountingunit.xsd" xmlns:int="http://www.stormware.cz/schema/version_2/intDoc.xsd" xmlns:vch="http://www.stormware.cz/schema/version_2/voucher.xsd" '
+        . 'xmlns:lCon="http://www.stormware.cz/schema/version_2/list_contract.xsd" xmlns:con="http://www.stormware.cz/schema/version_2/contract.xsd"';
 
     /** Karta majetku v tabulkách POHODY (`90_majetek.xml`) a její odpisy v deníku. */
     public const ASSET_NUMBER = '25IM0001';
@@ -501,6 +502,65 @@ final class SyntheticPohodaExport
             '</act:accountingItem>',
             '<act:centre><typ:ids>' . $centre . '</typ:ids><typ:name>' . $centreName . '</typ:name></act:centre></act:accountingItem>',
             self::entry('Interní doklady', $number, $text, $amount, $debit, $credit, '2026-03-05'),
+        ));
+    }
+
+    /** Zakázka s vlastním partnerem (odběratel, adresář č. 1) na vydané faktuře 26FV0001. */
+    public const CONTRACT_PARTNER = 'Z-PARTNER';
+    /** Zakázka bez partnera na přijaté faktuře 26PF0001 a na poplatku banky BAN0010003. */
+    public const CONTRACT_OWN = 'Z-NAKUP';
+    /** Zakázka, kterou žádný doklad nepoužívá. */
+    public const CONTRACT_UNUSED = 'Z-VOLNA';
+
+    /**
+     * Agenda Zakázky (`35_zakazky.xml`) a zakázka na dokladech a v deníku (`typ:contract`):
+     * {@see CONTRACT_PARTNER} na hlavičce vydané faktury a jejích řádcích deníku (její jediná
+     * položka nese {@see CONTRACT_OWN}),
+     * {@see CONTRACT_OWN} na jediné položce přijaté faktury (export ji jinak vede jen
+     * rekapitulací), jejích řádcích deníku a na řádku poplatku
+     * banky, {@see CONTRACT_UNUSED} jen v číselníku.
+     */
+    public static function withContracts(string $dir): void
+    {
+        $contract = static fn (int $id, string $number, string $text, string $partner): string =>
+            '<lCon:contract version="2.0"><con:contractDesc><con:id>' . $id . '</con:id><con:number><typ:numberRequested>' . $number . '</typ:numberRequested></con:number>'
+            . '<con:text>' . $text . '</con:text>'
+            . ($partner !== '' ? '<con:partnerIdentity><typ:id>' . $partner . '</typ:id><typ:address><typ:company>Odběratel Test s.r.o.</typ:company></typ:address></con:partnerIdentity>' : '')
+            . '</con:contractDesc></lCon:contract>';
+        self::file($dir . '/35_zakazky.xml', '<lCon:listContract version="2.0" state="ok">'
+            . $contract(1, self::CONTRACT_PARTNER, 'Stavba haly', '1')
+            . $contract(2, self::CONTRACT_OWN, 'Vlastní vývoj', '')
+            . $contract(3, self::CONTRACT_UNUSED, 'Nevyužitá zakázka', '')
+            . '</lCon:listContract>');
+        $tag = static fn (string $code): string => '<typ:ids>' . $code . '</typ:ids>';
+        $journal = (string) file_get_contents($dir . '/01_ucetni_denik.xml');
+        foreach (['26FV0001' => self::CONTRACT_PARTNER, '26PF0001' => self::CONTRACT_OWN, 'BAN0010003' => self::CONTRACT_OWN] as $number => $code) {
+            $journal = str_replace(
+                '<act:number><typ:numberRequested>' . $number . '</typ:numberRequested></act:number>',
+                '<act:number><typ:numberRequested>' . $number . '</typ:numberRequested></act:number><act:contract>' . $tag($code) . '</act:contract>',
+                $journal,
+            );
+        }
+        file_put_contents($dir . '/01_ucetni_denik.xml', $journal);
+        $issued = (string) file_get_contents($dir . '/12_faktury_issuedInvoice.xml');
+        file_put_contents($dir . '/12_faktury_issuedInvoice.xml', preg_replace(
+            '~(<typ:numberRequested>26FV0001</typ:numberRequested>.*?)</inv:invoiceHeader>~s',
+            '$1<inv:contract>' . $tag(self::CONTRACT_PARTNER) . '</inv:contract></inv:invoiceHeader>',
+            $issued, 1,
+        ));
+        $issued = (string) file_get_contents($dir . '/12_faktury_issuedInvoice.xml');
+        file_put_contents($dir . '/12_faktury_issuedInvoice.xml', preg_replace(
+            '~(<typ:numberRequested>26FV0001</typ:numberRequested>.*?)</inv:invoiceItem>~s',
+            '$1<inv:contract>' . $tag(self::CONTRACT_OWN) . '</inv:contract></inv:invoiceItem>',
+            $issued, 1,
+        ));
+        $received = (string) file_get_contents($dir . '/20_faktury_receivedInvoice.xml');
+        file_put_contents($dir . '/20_faktury_receivedInvoice.xml', preg_replace(
+            '~(<typ:numberRequested>26PF0001</typ:numberRequested>.*?</inv:invoiceHeader>)~s',
+            '$1<inv:invoiceDetail><inv:invoiceItem><inv:text>Materiál</inv:text><inv:quantity>1.0</inv:quantity><inv:rateVAT value="21">high</inv:rateVAT>'
+            . '<inv:homeCurrency><typ:unitPrice>500</typ:unitPrice><typ:price>500</typ:price><typ:priceVAT>105</typ:priceVAT><typ:priceSum>605</typ:priceSum></inv:homeCurrency>'
+            . '<inv:contract>' . $tag(self::CONTRACT_OWN) . '</inv:contract></inv:invoiceItem></inv:invoiceDetail>',
+            $received, 1,
         ));
     }
 

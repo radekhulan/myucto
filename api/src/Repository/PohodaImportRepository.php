@@ -48,6 +48,8 @@ final class PohodaImportRepository extends AbstractMigrationImportRepository
     public const KIND_BANK_PROPOSAL_RULE = 'bank_proposal_rule';
     /** Hlavička interního dokladu nad převzatým zápisem: journal_entries.id => internal_documents.id. */
     public const KIND_INTERNAL_DOCUMENT = 'internal_document';
+    /** Zakázka MyÚčta u partnera zakázky POHODY: číslo zakázky => projects.id. */
+    public const KIND_PROJECT = 'project';
     public const KIND_ASSET = 'asset';
     public const KIND_SMALL_ASSET = 'small_asset';
     /** Sklad podle kódu skladu v POHODĚ => warehouses.id. */

@@ -22,6 +22,8 @@ export interface PohodaAgendaCounts {
   cash: number
   bank: number
   partners: number
+  /** Zakázky agendy (chybí u přehledu nahraného dřív). */
+  contracts?: number
 }
 
 export interface PohodaAgendaFile {

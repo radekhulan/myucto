@@ -56,6 +56,7 @@ final class PohodaMdbAccounting
         'bank' => 'BV',
         'cash' => 'HO',
         'internal' => 'pINT',
+        'contracts' => 'sZAK',
     ];
 
     /** Tabulky, jejichž řádky se kontrolují při otevření, v pořadí hlášení chyb. */
@@ -256,6 +257,7 @@ final class PohodaMdbAccounting
                 'homeCurrency' => ['priceSum' => $r['Kc'] ?? '0'],
                 'accounting' => ['credit' => $r['UMD'] ?? '', 'debit' => $r['UD'] ?? ''],
                 'centre' => $this->centre($r['RefStr'] ?? ''),
+                'contract' => self::contract($r),
                 // Partner řádku v tvaru `act:address` z XML. Vazbu na adresář XML nenese, starší
                 // převodník tyto sloupce neexportoval.
                 'address' => ['company' => $r['Firma'] ?? '', 'name' => $r['Jmeno'] ?? '', 'ico' => $r['ParICO'] ?? ''],
@@ -265,6 +267,22 @@ final class PohodaMdbAccounting
                 'sourceId' => ($r['RelAgID'] ?? '') === '0' ? '' : ($r['RelAgID'] ?? ''),
                 'pairing' => ['symbol' => $r['ParSym'] ?? '', 'advance' => $r['ParSym2'] ?? ''],
             ];
+        } elseif ($key === 'contracts') {
+            if (trim($r['Cislo'] ?? '') === '') {
+                return null;
+            }
+            // Zakázka ve tvaru `con:contractDesc` z XML (agenda Zakázky). Partner je vazba na
+            // adresář (`RefAD`), údaje z hlavičky zakázky jsou jen opis.
+            return ['contractDesc' => [
+                'id' => $r['ID'] ?? '',
+                'number' => ['numberRequested' => trim($r['Cislo'])],
+                'text' => $r['SText'] ?? '',
+                'partnerIdentity' => ['id' => ($r['RefAD'] ?? '') === '0' ? '' : ($r['RefAD'] ?? ''), 'address' => ['company' => $r['Firma'] ?? '', 'ico' => $r['ICO'] ?? '']],
+                'datePlanStart' => $this->date($r, 'PlZahaj'),
+                'datePlanDelivery' => $this->date($r, 'PlPredani'),
+                'dateStart' => $this->date($r, 'Zahajeni'),
+                'dateDelivery' => $this->date($r, 'Predani'),
+            ]];
         } elseif ($key === 'chart') {
             return ['@code' => $r['Ucet'] ?? '', '@name' => $r['Nazev'] ?? ''];
         } elseif ($key === 'posting_rules') {
@@ -347,6 +365,7 @@ final class PohodaMdbAccounting
             'paymentType' => ['paymentType' => [1 => 'cash', 2 => 'creditcard', 3 => 'draft', 4 => 'advance', 5 => 'other', 6 => 'compensation', 7 => 'other', 8 => 'compensation', 9 => 'delivery'][(int) ($payment['RelTyp'] ?? 0)] ?? ''],
             'liquidation' => ['amountHome' => $r['KcLikv'] ?? '0', 'date' => $this->date($r, 'DatLikv')],
             'note' => $r['Pozn'] ?? '',
+            'contract' => self::contract($r),
         ];
         // Režim OSS dokladu (FA.MOSS = stát spotřeby, FA.MOSSDukaz = doklady prokazující
         // stát) ve stejných elementech jako XML POHODY. Prázdné se vynechává stejně jako
@@ -481,6 +500,7 @@ final class PohodaMdbAccounting
             'rateVAT' => ['#' => [0 => 'none', 1 => 'low', 2 => 'high', 3 => 'third'][$slot] ?? '', '@value' => $rate],
             'homeCurrency' => ['unitPrice' => $r['KcJedn'] ?? '0', 'price' => $r['Kc'] ?? '0', 'priceVAT' => $r['KcDPH'] ?? '0', 'priceSum' => (string) ((float) ($r['Kc'] ?? 0) + (float) ($r['KcDPH'] ?? 0))],
             'classificationVAT' => $this->reference('sDPH', $r['RelTpDPH'] ?? ''),
+            'contract' => self::contract($r),
         ];
         // Stejné elementy jako XML POHODY, ať převod z obou zdrojů skončí v téže logice:
         // skutečné procento sazby, typ plnění OSS a částky položky v cizí měně dokladu.
@@ -527,6 +547,19 @@ final class PohodaMdbAccounting
         }
         $r = $this->lookup('sSTR', $id);
         return ['ids' => $r['IDS'] ?? '', 'name' => $r['SText'] ?? ''];
+    }
+
+    /**
+     * Zakázka řádku nebo dokladu (`CisloZAK`) jako `typ:contract` z XML. POHODA ji na doklad
+     * zapisuje číslem zakázky, ne vazbou na `sZAK`; starší převodník sloupec neexportoval.
+     *
+     * @param array<string,string> $r
+     * @return array{ids?:string}
+     */
+    private static function contract(array $r): array
+    {
+        $code = trim($r['CisloZAK'] ?? '');
+        return $code === '' ? [] : ['ids' => $code];
     }
 
     private function reference(string $table, string $id): array

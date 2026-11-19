@@ -43,6 +43,22 @@ final class PohodaContext
     public array $costCenters = [];
 
     /**
+     * Řádky deníku se zakázkou POHODY (`CisloZAK`), i u zápisů z dřívějšího převodu
+     * ({@see ChartJournalImporter}): číslo zakázky => seznam [journal_entries.id, line_no].
+     *
+     * @var array<string,list<array{0:int,1:int}>>
+     */
+    public array $contractLines = [];
+
+    /**
+     * Zakázka převedených faktur podle exportu ({@see InvoiceImporter}), i u dokladů z dřívějšího
+     * převodu: typ dokladu (`invoice`, `purchase_invoice`) => id => zakázka hlavičky a položek.
+     *
+     * @var array<string,array<int,array{header:string,items:list<string>}>>
+     */
+    public array $documentContracts = [];
+
+    /**
      * Dorovnání novější zálohou: datum prvního zápisu zadaného v MyÚčtu. Od něj se účtuje
      * v MyÚčtu, záznamy POHODY s tímto nebo pozdějším datem převod nepřebírá (nevznikne dvojí zápis).
      */
