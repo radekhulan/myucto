@@ -984,18 +984,22 @@ final class DimensionService
      * řádky (311/321/343) hodnotu nedostanou.
      *
      * `$dryRun` = jen spočítat a vrátit, nic neuložit. `$expected` = otisk stavu, který
-     * musí doklad mít (ostrý běh navazuje na běh nanečisto).
+     * musí doklad mít (ostrý běh navazuje na běh nanečisto). `$onlyItemIds` (jen rozsah
+     * `items`) = změnit jen tyto položky dokladu (agenda Položky dokladů), ostatní položky
+     * i jejich rozpady zůstanou; id jiných dokladů se přeskočí.
      *
      * @param list<array{type_id:int, mode:string, value_id:?int}> $changes
+     * @param list<int>|null $onlyItemIds
      * @return array{changed:bool, before:list<array<string,mixed>>, after:list<array<string,mixed>>, fingerprint_before:string, fingerprint_after:string}
      * @throws DimensionException
      */
-    public function bulkPatchDocument(int $supplierId, string $docType, int $docId, array $changes, string $scope, bool $dryRun, ?string $expected = null): array
+    public function bulkPatchDocument(int $supplierId, string $docType, int $docId, array $changes, string $scope, bool $dryRun, ?string $expected = null, ?array $onlyItemIds = null): array
     {
         $this->requireEnabled($supplierId);
         $this->requireDocument($supplierId, $docType, $docId);
-        return $this->atomically(function () use ($supplierId, $docType, $docId, $changes, $scope, $expected): array {
+        return $this->atomically(function () use ($supplierId, $docType, $docId, $changes, $scope, $expected, $onlyItemIds): array {
             $sourceType = self::DOCUMENTS[$docType][1];
+            $onlyNos = $scope === 'items' && $onlyItemIds !== null ? $this->itemNumbers($docType, $docId, $onlyItemIds) : null;
             $this->assertBulkMutable($supplierId, [[$sourceType, $docId]]);
             $before = $this->documentSnapshot($supplierId, $docType, $docId);
             if ($expected !== null && self::snapshotFingerprint($before) !== $expected) {
@@ -1033,10 +1037,14 @@ final class DimensionService
                 foreach ($remove as $typeId) unset($out[$typeId]);
                 return $out;
             };
-            $itemsPatch = static function (array $current, array $itemNos) use ($changes, $scope, $dropItemTypes, $header, $splitsByItem): array {
+            $itemsPatch = static function (array $current, array $itemNos) use ($changes, $scope, $dropItemTypes, $header, $splitsByItem, $onlyNos): array {
                 $out = [];
                 foreach ($itemNos as $no) {
                     $dims = $current[$no] ?? [];
+                    if ($onlyNos !== null && !in_array((int) $no, $onlyNos, true)) {
+                        if ($dims !== []) $out[(int) $no] = $dims;
+                        continue;
+                    }
                     if ($scope === 'items') {
                         foreach ($changes as $change) {
                             $typeId = (int) $change['type_id'];
@@ -1058,7 +1066,7 @@ final class DimensionService
             $result = self::refuseLockedRepost($this->applyDocument(
                 $supplierId, $docType, $docId, $headerPatch, $itemsPatch, null,
                 $scope === 'items' ? [] : array_values(array_unique([...$remove, ...array_keys($set)])),
-                array_values(array_unique($dropItemTypes)),
+                $onlyNos !== null ? [] : array_values(array_unique($dropItemTypes)),
             ), false);
             $after = $this->documentSnapshot($supplierId, $docType, $docId);
             $this->assertBulkRules($supplierId, $sourceType, $before, $after);
@@ -1272,6 +1280,30 @@ final class DimensionService
      *
      * @return list<array<string,mixed>>
      */
+    /**
+     * Pořadová čísla položek (`item_no`, od 1 podle order_index a id) pro vybraná id
+     * položek dokladu; id jiného dokladu se vynechá.
+     *
+     * @param list<int> $itemIds
+     * @return list<int>
+     */
+    private function itemNumbers(string $docType, int $docId, array $itemIds): array
+    {
+        [$table, $parent] = match ($docType) {
+            'invoice' => ['invoice_items', 'invoice_id'],
+            'purchase_invoice' => ['purchase_invoice_items', 'purchase_invoice_id'],
+            default => throw new DimensionException('validation_failed', 'Položky jde vybrat jen u faktur.', 422),
+        };
+        $stmt = $this->db->pdo()->prepare("SELECT id FROM {$table} WHERE {$parent} = ? ORDER BY order_index, id");
+        $stmt->execute([$docId]);
+        $wanted = array_flip(array_map('intval', $itemIds));
+        $out = [];
+        foreach (array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN)) as $index => $id) {
+            if (isset($wanted[$id])) $out[] = $index + 1;
+        }
+        return $out;
+    }
+
     private function documentSnapshot(int $supplierId, string $docType, int $docId): array
     {
         $dims = $this->assignments->documentDimensions($supplierId, $docType, $docId, true);

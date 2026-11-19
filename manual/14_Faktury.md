@@ -156,6 +156,11 @@ Vždy nejdřív proběhne běh nanečisto se stavem před a po, provedení jde (
 vrátit. Postup je v [§ 52.8.2](52_Ucetni_denik.md#5282-krok-za-krokem-hromadne-akce-v-seznamech),
 pravidla a oprávnění v [§ 52.14.18](52_Ucetni_denik.md#521418-hromadne-akce-v-seznamech).
 
+Členění DPH změníte operací **Změnit členění DPH** nad doklady, nebo v režimu **Položky
+dokladů** jen u vybraných položek napříč fakturami, například položce **Místní poplatek z pobytu**
+kód `mimo` a sazbu 0 %, aby nešla do přiznání ani do kontrolního hlášení. Doklady v podaném
+období DPH se nemění nikdy. Postup je v [§ 52.8.3](52_Ucetni_denik.md#5283-krok-za-krokem-cleneni-dph-a-polozky-dokladu).
+
 ## 14.7 Krok za krokem: sloučené PDF z více faktur
 
 1. V seznamu zaškrtněte vystavené faktury nebo dobropisy (nejvýše 100 najednou).

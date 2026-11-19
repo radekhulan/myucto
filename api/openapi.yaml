@@ -16041,8 +16041,10 @@ paths:
       summary: Hromadné akce v seznamech - dostupné operace a poslední běhy
       description: >
         Hromadné akce nad vybranými záznamy seznamu (Účetní deník, Vydané faktury, Přijaté
-        faktury, bankovní pohyby): přeúčtování účtu, nastavení dimenzí, změna předkontace,
-        smazání, změna poznámky faktur a oprava variabilního symbolu pohybů. Vrací,
+        faktury, bankovní pohyby) a nad položkami vydaných a přijatých faktur (agenda Položky
+        dokladů, `invoice_item`, `purchase_invoice_item`): přeúčtování účtu, nastavení dimenzí,
+        změna předkontace, změna členění DPH (a u položek sazby), smazání, změna poznámky faktur
+        a oprava variabilního symbolu pohybů. Vrací,
         které operace smí aktuální uživatel nad daným druhem záznamů spustit, a posledních
         10 běhů (nanečisto, provedení, vrácení). Spuštění, vrácení a zrušení jsou jen
         v aplikaci (právo Hromadné změny dokladů a zápisů), přes token dostupné nejsou.
@@ -16051,7 +16053,7 @@ paths:
         - in: query
           name: target
           required: true
-          schema: { type: string, enum: [invoice, purchase_invoice, journal_entry, bank_transaction] }
+          schema: { type: string, enum: [invoice, purchase_invoice, journal_entry, bank_transaction, invoice_item, purchase_invoice_item] }
       responses:
         '200':
           description: OK
@@ -16067,7 +16069,7 @@ paths:
                     items:
                       type: object
                       properties:
-                        key: { type: string, enum: [rebook_account, set_dimensions, set_posting_rule, delete, set_note, set_variable_symbol] }
+                        key: { type: string, enum: [rebook_account, set_dimensions, set_posting_rule, set_vat_classification, delete, set_note, set_variable_symbol] }
                         available: { type: boolean }
                         reason: { type: [string, "null"], description: 'Proč operace není k dispozici.' }
                         rollback: { type: boolean, description: 'Jde ostrý běh vrátit (smazání ne).' }
@@ -16075,6 +16077,54 @@ paths:
                     type: array
                     items: { $ref: '#/components/schemas/BulkActionJob' }
         '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+
+  /api/v1/accounting/bulk-actions/document-items:
+    get:
+      tags: [Accounting]
+      summary: Položky dokladů podle filtru (výběr pro hromadnou akci nad položkami)
+      description: >
+        Položky vydaných (`invoice_item`) nebo přijatých (`purchase_invoice_item`) faktur
+        aktuální firmy napříč doklady, nejnovější doklady první, bez stornovaných dokladů
+        a textových a slevových řádků. Text se hledá jako podřetězec popisu bez ohledu na
+        diakritiku a velikost písmen; v dlouhém období přes fulltext od začátku slov.
+        Stránkuje se klíčem `next_cursor` (celé doklady na stránce). `count` je počet
+        odpovídajících položek nejvýš do limitu hromadné akce + 1 (`count_capped`), vrací se
+        jen u první stránky.
+      parameters:
+        - $ref: '#/components/parameters/SupplierIdHeader'
+        - in: query
+          name: target
+          required: true
+          schema: { type: string, enum: [invoice_item, purchase_invoice_item] }
+        - { in: query, name: 'filter[q]', schema: { type: string, maxLength: 100 } }
+        - { in: query, name: 'filter[partner_id]', schema: { type: integer, minimum: 1 }, description: 'Odběratel, resp. dodavatel.' }
+        - { in: query, name: 'filter[date_field]', schema: { type: string, enum: [tax, issue], default: tax }, description: 'DUZP, nebo datum vystavení.' }
+        - { in: query, name: 'filter[date_from]', schema: { type: string, format: date } }
+        - { in: query, name: 'filter[date_to]', schema: { type: string, format: date } }
+        - { in: query, name: 'filter[vat_code]', schema: { type: string, maxLength: 10 }, description: 'Kód členění DPH položky, `none` = položka bez vlastního kódu.' }
+        - { in: query, name: 'filter[vat_rate_id]', schema: { type: integer, minimum: 1 } }
+        - { in: query, name: 'filter[account]', schema: { type: string, maxLength: 10 }, description: 'Začátek účtu položky.' }
+        - { in: query, name: 'filter[product_code]', schema: { type: string, maxLength: 64 }, description: 'Začátek kódu zboží (seller_item_code).' }
+        - { in: query, name: 'filter[doc_number]', schema: { type: string, maxLength: 50 }, description: 'Začátek čísla dokladu.' }
+        - { in: query, name: cursor, schema: { type: string } }
+        - { in: query, name: per_page, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/BulkDocumentItem' }
+                  next_cursor: { type: [string, "null"] }
+                  count: { type: [integer, "null"] }
+                  count_capped: { type: [boolean, "null"] }
+                  limit: { type: integer }
         '403': { $ref: '#/components/responses/Forbidden' }
         '422': { $ref: '#/components/responses/ValidationFailed' }
 
@@ -58997,8 +59047,8 @@ components:
       type: object
       properties:
         id: { type: integer }
-        operation: { type: string, enum: [rebook_account, set_dimensions, set_posting_rule, delete, set_note, set_variable_symbol] }
-        target: { type: string, enum: [invoice, purchase_invoice, journal_entry, bank_transaction] }
+        operation: { type: string, enum: [rebook_account, set_dimensions, set_posting_rule, set_vat_classification, delete, set_note, set_variable_symbol] }
+        target: { type: string, enum: [invoice, purchase_invoice, journal_entry, bank_transaction, invoice_item, purchase_invoice_item] }
         selection_count: { type: integer, description: 'Počet záznamů výběru.' }
         rollback_supported: { type: boolean }
         kind: { type: string, enum: [dry_run, apply, rollback] }
@@ -59016,7 +59066,7 @@ components:
         finished_at: { type: [string, "null"] }
         params:
           type: object
-          description: 'Parametry operace (účty, dimenze s režimem set/fill/clear, předkontace, volba u smazání, poznámka note_field/note_mode/note_text/include_issued, symbol vs_mode/vs_value/vs_pattern).'
+          description: 'Parametry operace (účty, dimenze s režimem set/fill/clear, předkontace, členění DPH `vat_classification_code` a sazba `vat_rate_id`, volba u smazání, poznámka note_field/note_mode/note_text/include_issued, symbol vs_mode/vs_value/vs_pattern).'
           additionalProperties: true
         dry_run_job_id: { type: [integer, "null"] }
         rollback_of_job_id: { type: [integer, "null"] }
@@ -59024,6 +59074,32 @@ components:
         rolled_back_by_job_id: { type: [integer, "null"] }
         can_apply: { type: boolean }
         can_rollback: { type: boolean }
+    BulkDocumentItem:
+      type: object
+      properties:
+        item_id: { type: integer }
+        document_id: { type: integer }
+        document_no: { type: [string, "null"] }
+        document_kind: { type: string }
+        status: { type: string }
+        document_date: { type: [string, "null"], format: date }
+        issue_date: { type: string, format: date }
+        partner_id: { type: integer }
+        partner_name: { type: [string, "null"] }
+        description: { type: string }
+        quantity: { type: number }
+        unit: { type: string }
+        total_without_vat: { type: number }
+        total_vat: { type: number }
+        total_with_vat: { type: number }
+        currency: { type: [string, "null"] }
+        vat_rate_id: { type: integer }
+        vat_rate: { type: number }
+        vat_classification_code: { type: [string, "null"], description: 'Vlastní kód členění položky.' }
+        document_vat_classification_code: { type: [string, "null"], description: 'Kód hlavičky (platí pro položku bez vlastního kódu).' }
+        account_code: { type: [string, "null"] }
+        product_code: { type: [string, "null"] }
+        oss: { type: boolean }
     BulkActionItem:
       type: object
       properties:

@@ -1219,7 +1219,8 @@
         "2313_income_tax_books_fingerprint.sql",
         "2314_purchase_invoice_supplier_advance_index.sql",
         "2315_bulk_actions.sql",
-        "2316_bulk_changes_permission.sql"
+        "2316_bulk_changes_permission.sql",
+        "2317_document_item_search.sql"
     ],
     "tables": {
         "abra_flexi_connections": {
@@ -7419,6 +7420,7 @@
                 "fk_ii_vat": "BTREE (vat_rate_id)",
                 "fk_ii_warehouse": "BTREE (warehouse_id)",
                 "fk_ii_wr": "BTREE (linked_work_report_id)",
+                "ft_ii_description": "FULLTEXT (description)",
                 "idx_ii_accrual_to": "BTREE (accrual_to)",
                 "idx_ii_asset": "BTREE (asset_id)",
                 "idx_ii_invoice": "BTREE (invoice_id, order_index)",
@@ -23811,6 +23813,7 @@
             "indexes": {
                 "PRIMARY": "UNIQUE BTREE (id)",
                 "fk_pii_pol": "BTREE (purchase_order_line_id)",
+                "ft_pii_description": "FULLTEXT (description)",
                 "fk_pii_stock_item": "BTREE (stock_item_id)",
                 "fk_pii_vat": "BTREE (vat_rate_id)",
                 "idx_pii_accrual_to": "BTREE (accrual_to)",
