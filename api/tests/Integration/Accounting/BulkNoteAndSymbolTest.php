@@ -290,7 +290,8 @@ final class BulkNoteAndSymbolTest extends BankPostingTestCase
         $invoice = $this->saleInvoice((string) random_int(1000000, 9999999), $this->client('Syntetický odběratel'), 12.0);
         $matched = $this->transaction($statement, 12.0, ['match_status' => 'manual', 'matched_invoice_id' => $invoice]);
         $posted = $this->transaction($statement, 13.0);
-        $this->postPredpis('bank', $posted, '221.100', '518', 13.0);
+        // Syntetická účtová osnova v CI má jen syntetický 221, analytika 221.100 je jen v lokální DB.
+        $this->postPredpis('bank', $posted, '221', '518', 13.0);
 
         $dryId = $this->dryRun('set_variable_symbol', 'bank_transaction', [$free, $ignored, $matched, $posted], ['vs_mode' => 'constant', 'vs_value' => '20990001']);
         $dry = $this->bySource($dryId);
