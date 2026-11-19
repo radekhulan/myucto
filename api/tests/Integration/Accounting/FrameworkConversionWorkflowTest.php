@@ -26,7 +26,7 @@ final class FrameworkConversionWorkflowTest extends TestCase
             $p->exec("CREATE OR REPLACE TRIGGER conversion_test_header_mutant BEFORE INSERT ON journal_entries FOR EACH ROW BEGIN IF COALESCE(@conversion_test_mutant,0)=2 AND (EXISTS(SELECT 1 FROM accounting_framework_conversions c WHERE c.supplier_id=NEW.supplier_id AND c.status='pending') OR NEW.source_type='profit_distribution') THEN SET NEW.entry_date=DATE_ADD(NEW.entry_date,INTERVAL 1 DAY); END IF; END");
         }
         $this->actor=(int)$p->query('SELECT id FROM users ORDER BY id LIMIT 1')->fetchColumn();self::assertGreaterThan(0,$this->actor);
-        $variant='base';foreach(['ProfitTuple','CustomAnalytic','Offbalance','PendingRelease','Foreign'] as $name)if(str_contains($this->name(),$name))$variant=$name;
+        $variant='base';foreach(['ProfitTuple','CustomAnalytic','Offbalance','PendingRelease','Foreign','StockSlot'] as $name)if(str_contains($this->name(),$name))$variant=$name;
         // FrameworkConversionCloneTest a HttpTest si třídu berou přes reflexi jako fixturu.
         if(!$this->preparedByPhpunit()){$p->beginTransaction();$this->closedSource($variant);if($variant==='Foreign')$this->foreignRates();return;}
         $converted=in_array($this->name(),self::CONVERTED,true);
@@ -60,6 +60,13 @@ final class FrameworkConversionWorkflowTest extends TestCase
             foreach(['998','999'] as $code)$this->container->get(\MyInvoice\Repository\ChartOfAccountsRepository::class)->insert($this->supplier,['account_code'=>$code,'name'=>'Synthetic offbalance '.$code,'account_type'=>'offbalance','normal_side'=>null,'is_synthetic'=>true]);
             $this->container->get(PostingService::class)->postDocument($this->supplier,'manual',null,[['account_code'=>'998','side'=>'debit','amount'=>'10.00'],['account_code'=>'999','side'=>'credit','amount'=>'10.00']],['entry_date'=>'2025-06-01','posted'=>true,'user_id'=>$this->actor,'posted_by'=>$this->actor]);
         }
+        if($variant==='StockSlot'){
+            // Krok Zásoby (způsob B) účtuje přes source_type 'closing' do skladových slotů. Loňský
+            // konečný stav zásob se 1. dne převodního roku uvolní do spotřeby (MD 501 / D 112).
+            $posting=$this->container->get(PostingService::class);
+            $posting->postDocument($this->supplier,'manual',null,[['account_code'=>'112','side'=>'debit','amount'=>'50.00'],['account_code'=>'428','side'=>'credit','amount'=>'50.00']],['entry_date'=>'2025-01-01','posted'=>true,'user_id'=>$this->actor,'posted_by'=>$this->actor]);
+            $posting->postDocument($this->supplier,'closing',\MyInvoice\Service\Accounting\Closing\ClosingSourceId::stockOpening($this->source-1),[['account_code'=>'501','side'=>'debit','amount'=>'50.00'],['account_code'=>'112','side'=>'credit','amount'=>'50.00']],['entry_date'=>'2025-01-01','posted'=>true,'user_id'=>$this->actor,'posted_by'=>$this->actor]);
+        }
         if($variant==='PendingRelease')$this->container->get(PostingService::class)->postDocument($this->supplier,'small_asset_accrual',\MyInvoice\Service\Accounting\Closing\ClosingSourceId::smallAssetAccrual($this->source),[['account_code'=>'381','side'=>'debit','amount'=>'20.00'],['account_code'=>'501','side'=>'credit','amount'=>'20.00']],['entry_date'=>'2025-12-31','posted'=>true,'user_id'=>$this->actor,'posted_by'=>$this->actor]);
         $rates=null;
         if($variant==='Foreign'){
@@ -83,6 +90,15 @@ final class FrameworkConversionWorkflowTest extends TestCase
         self::assertSame($before,$this->dump());self::assertCount(5,$cells);self::assertSame(0,array_sum(array_column($cells,'czk_cents')));
         self::assertSame(-40000,array_values(array_filter($cells,fn($c)=>$c['role']==='pending_approval'))[0]['czk_cents']);
         self::assertSame(-70000,array_values(array_filter($cells,fn($c)=>$c['role']==='retained'))[0]['czk_cents']);
+    }
+    /** Rozvahu převodu tvoří stejné zápisy jako zůstatky uzavření knih: skladový slot 'closing' (uvolnění loňských zásob) v ní zůstává. */
+    public function testStockSlotNativeCloseConvertsWithReleasedStock():void
+    {
+        $r=new FrameworkConversionRepository($this->db);$cells=$r->cells($r->source($this->supplier,$this->source,$this->target));
+        self::assertSame(0,array_sum(array_column($cells,'czk_cents')));self::assertSame([],array_values(array_filter($cells,fn($c)=>$c['account_code']==='112')));
+        self::assertSame(-35000,array_values(array_filter($cells,fn($c)=>$c['role']==='pending_approval'))[0]['czk_cents']);
+        self::assertSame(-75000,array_values(array_filter($cells,fn($c)=>$c['role']==='retained'))[0]['czk_cents']);
+        self::assertGreaterThan(0,$this->convert()['opening_entry_id']);
     }
     public function testNative500CloseConvertsToActual504OpeningWithSeparate931And932():void
     {
