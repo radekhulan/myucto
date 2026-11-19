@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Tax\Return;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Infrastructure\Database\TransactionFailure;
 use MyInvoice\Repository\AccountingPeriodRepository;
 use MyInvoice\Service\Accounting\AccountingPeriodStatus;
 use MyInvoice\Service\Accounting\Assets\DepreciationPostingService;
@@ -113,7 +114,7 @@ final class DppoReturnDataProvider
                 'disposals' => [],
                 'securities_cost_excess' => 0.0,
                 'securities_sale' => SecuritiesSaleCostLimit::empty(),
-                'closing_projection' => (new ClosingProjectionCalculator())->project(0.0, []),
+                'closing_projection' => (new ClosingProjectionCalculator())->project(0.0, []) + ['warnings' => []],
                 'legal_provisions' => LegalProvisionLedgerService::empty(),
                 'suggestions' => ['addbacks' => [], 'deductions' => []],
                 'warnings' => array_merge($warnings, [
@@ -209,64 +210,73 @@ final class DppoReturnDataProvider
     {
         $calc = new ClosingProjectionCalculator();
         if ($this->closing === null) {
-            return $calc->project($vhPosted, []);
+            return $calc->project($vhPosted, []) + ['warnings' => []];
         }
         $periodId = (int) $period['id'];
         $endsOn = (string) $period['ends_on'];
         $sources = [];
+        $warnings = [];
+        // Každý náhled izolovaně: chyba jednoho kroku (např. chybí kontace) nesmí shodit náhled,
+        // ale nesmí ani tiše zmizet z projektovaného VH a daně. Vynechaný krok se zaloguje
+        // a vrátí v `warnings`, aby náhled hlásil neúplnou projekci.
+        $read = static function (string $source, callable $preview) use (&$warnings, $supplierId): void {
+            try {
+                $preview();
+            } catch (\Throwable $e) {
+                if (TransactionFailure::aborted($e)) {
+                    throw $e;
+                }
+                error_log(sprintf('DPPO projekce uzávěrky (firma %d): krok %s vynechán: %s: %s', $supplierId, $source, $e::class, $e->getMessage()));
+                $warnings[] = ['source' => $source, 'reason' => property_exists($e, 'errorCode') && trim($e->getMessage()) !== ''
+                    ? mb_substr(trim($e->getMessage()), 0, 300)
+                    : 'Náhled kroku selhal, podrobnosti jsou v logu serveru.'];
+            }
+        };
         // Odpisy a zásoby jen v neuzavřeném roce: uzavřený rok je má zaúčtované (nebo krok
         // vědomě přeskočený) a jeho náhled se nesmí měnit.
         $open = !AccountingPeriodStatus::isClosed((string) ($period['status'] ?? ''));
-        try {
-            if ($open && $this->depreciationPreview !== null) {
+        if ($open && $this->depreciationPreview !== null) {
+            $read('depreciation', function () use (&$sources, $supplierId, $period): void {
                 $sources['depreciation'] = $this->depreciationPreview->previewYear($supplierId, (int) $period['fiscal_year']);
-            }
-        } catch (\Throwable) {
+            });
         }
-        try {
-            // Zásoby způsobem B: jen dokud není uzávěrkový slot zaúčtovaný (pak je ve vh_posted).
-            $stock = $open ? $this->closing->stockValuationProjection($supplierId, $periodId) : null;
-            if ($stock !== null && $stock['applicable'] && !$stock['posted']) {
-                $sources['stock'] = $stock;
-            }
-        } catch (\Throwable) {
+        if ($open) {
+            $read('stock', function () use (&$sources, $supplierId, $periodId): void {
+                // Zásoby způsobem B: jen dokud není uzávěrkový slot zaúčtovaný (pak je ve vh_posted).
+                $stock = $this->closing->stockValuationProjection($supplierId, $periodId);
+                if ($stock['applicable'] && !$stock['posted']) {
+                    $sources['stock'] = $stock;
+                }
+            });
         }
-        // Každý náhled izolovaně — chyba jednoho kroku (např. chybí kontace) nesmí shodit náhled.
-        try {
+        $read('small_asset', function () use (&$sources, $supplierId, $periodId): void {
             $sources['small_asset'] = $this->closing->smallAssetAccrualPreview($supplierId, $periodId);
-        } catch (\Throwable) {
-        }
-        try {
+        });
+        $read('prepaid', function () use (&$sources, $supplierId, $periodId): void {
             $sources['prepaid'] = $this->closing->prepaidExpenseAccrualPreview($supplierId, $periodId);
-        } catch (\Throwable) {
-        }
-        try {
+        });
+        $read('deferred_revenue', function () use (&$sources, $supplierId, $periodId): void {
             $sources['deferred_revenue'] = $this->closing->deferredRevenueAccrualPreview($supplierId, $periodId);
-        } catch (\Throwable) {
-        }
-        try {
+        });
+        $read('fx', function () use (&$sources, $supplierId, $periodId, $endsOn): void {
             // fx jen když ještě NENÍ zaúčtováno k rozvahovému dni (jinak už je ve vh_posted).
             if (!$this->hasPostedFxRevaluation($supplierId, $endsOn)) {
                 $sources['fx'] = $this->closing->fxPreview($supplierId, $periodId);
             }
-        } catch (\Throwable) {
-        }
-        try {
+        });
+        $read('provisions', function () use (&$sources, $supplierId, $periodId): void {
             $sources['provisions'] = $this->closing->provisionsPreview($supplierId, $periodId);
-        } catch (\Throwable) {
-        }
-        try {
+        });
+        $read('estimates', function () use (&$sources, $supplierId, $periodId): void {
             $sources['estimates'] = $this->closing->estimatesSuggest($supplierId, $periodId);
-        } catch (\Throwable) {
-        }
-        try {
+        });
+        $read('prior_release', function () use (&$sources, $supplierId, $periodId): void {
             $rel = $this->closing->priorDeferralReleaseProjection($supplierId, $periodId);
             if (($rel['applicable'] ?? false) === true) {
                 $sources['prior_release'] = $rel;
             }
-        } catch (\Throwable) {
-        }
-        return $calc->project($vhPosted, $sources);
+        });
+        return $calc->project($vhPosted, $sources) + ['warnings' => $warnings];
     }
 
     /** Je k rozvahovému dni zaúčtované přecenění kurzových rozdílů (aby se fx neprojektovalo dvakrát)? */

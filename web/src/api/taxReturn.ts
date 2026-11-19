@@ -113,6 +113,8 @@ export interface TaxReturnState {
   variant_seq: number
   available_variants: AvailableVariant[]
   last_known_tax_suggested: number | null
+  /** Finalizované DPPO: odpovídá účetnictví období stavu při finalizaci? null = nelze posoudit. */
+  books_current?: boolean | null
   computed: {
     lines: TaxReturnLine[]
     tax?: number

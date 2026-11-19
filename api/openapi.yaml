@@ -20671,7 +20671,7 @@ paths:
         - $ref: '#/components/parameters/SupplierIdHeader'
         - { in: path, name: id, required: true, schema: { type: integer } }
       responses:
-        '200': { description: "OK {suggested_amount, suggested_source (finalized_return | computed_from_ledger | computed_from_assessment u 504), suggested_unavailable {code, message} když návrh chybí, activity_required a existing_activity (504), has_finalized_return, taxpayer_type, applicable, balance_341, balance_591}; applicable=false pro FO", content: { application/json: { schema: { type: object } } } }
+        '200': { description: "OK {suggested_amount, suggested_source (finalized_return | computed_from_ledger | computed_from_assessment u 504), suggested_unavailable {code, message} když návrh chybí, activity_required a existing_activity (504), has_finalized_return, taxpayer_type, applicable, balance_341, balance_591}; applicable=false pro FO. Finalizované DPPO, jehož účetnictví se po finalizaci změnilo (books_current=false v detailu přiznání), se jako finalized_return nepoužije", content: { application/json: { schema: { type: object } } } }
         '404': { $ref: '#/components/responses/NotFound' }
         '422': { $ref: '#/components/responses/ValidationFailed' }
 
@@ -31092,6 +31092,14 @@ paths:
                 type: object
                 properties:
                   nonprofit_filing_proof_hash: { type: string, pattern: '^[a-f0-9]{64}$', readOnly: true, description: Přítomný jen u nativního504; váže úplné účetní a právní podklady i aktuální volby. }
+                  books_current:
+                    type: [boolean, 'null']
+                    readOnly: true
+                    description: >-
+                      Jen finalizované DPPO: odpovídá daňově relevantní účetnictví období (výsledkové účty bez 59x
+                      a daňové osy 504) stavu při finalizaci? false = účetnictví se po finalizaci změnilo a průvodce
+                      uzávěrkou toto přiznání jako známou daň nepoužije. null = nelze posoudit (koncept, DPFO nebo
+                      přiznání finalizované bez uloženého otisku).
                   computed:
                     type: object
                     properties:
@@ -59725,6 +59733,29 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/YearEndClosingItem'
+        projection_warnings:
+          type: array
+          description: Kroky uzávěrky, jejichž náhled selhal. Projekce VH a daně je bez nich neúplná.
+          items:
+            type: object
+            required:
+            - source
+            - reason
+            properties:
+              source:
+                type: string
+                enum:
+                - depreciation
+                - stock
+                - small_asset
+                - prepaid
+                - deferred_revenue
+                - fx
+                - provisions
+                - estimates
+                - prior_release
+              reason:
+                type: string
         is_projection:
           type: boolean
         vh_before_tax:

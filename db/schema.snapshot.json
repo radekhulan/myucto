@@ -1215,7 +1215,8 @@
         "2309_scheduled_pohoda_export.sql",
         "2310_accounting_bulk_jobs.sql",
         "2311_journal_bulk_repost_permission.sql",
-        "2312_supplier_dashboard_work_reports.sql"
+        "2312_supplier_dashboard_work_reports.sql",
+        "2313_income_tax_books_fingerprint.sql"
     ],
     "tables": {
         "abra_flexi_connections": {
@@ -6820,6 +6821,7 @@
             "engine": "InnoDB",
             "collation": "utf8mb4_unicode_ci",
             "columns": {
+                "books_fingerprint": "varchar(80) NULL DEFAULT NULL",
                 "computed": "longtext NULL DEFAULT NULL COLLATE utf8mb4_bin",
                 "created_at": "datetime NOT NULL DEFAULT current_timestamp()",
                 "created_by": "int(10) unsigned NULL DEFAULT NULL",

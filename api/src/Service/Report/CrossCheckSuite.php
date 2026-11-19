@@ -5,11 +5,13 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Report;
 
 use MyInvoice\Service\Accounting\AccountingPeriodStatus;
+use MyInvoice\Service\Accounting\Closing\ClosingSourceId;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\AccountingPeriodRepository;
 use MyInvoice\Service\Accounting\Reports\FinancialStatementService;
 use MyInvoice\Service\Accounting\Reports\StatementMetrics;
 use MyInvoice\Service\Accounting\Reports\TrialBalanceService;
+use MyInvoice\Service\Tax\Return\JournalTaxOrigin;
 
 /**
  * Křížové kontroly (vrstva L4 auditního plánu) — totéž číslo spočítané DVĚMA
@@ -337,12 +339,15 @@ final class CrossCheckSuite
 
     /**
      * VH nezávisle na výkazech: Σ výnosů (tř. 6) − Σ nákladů (tř. 5) přímo z deníku,
-     * BEZ uzávěrkových zápisů (ty výsledkovky vynulují převodem na 710).
+     * BEZ uzávěrkových zápisů (ty výsledkovky vynulují převodem na 710). Skladové sloty
+     * kroku „Zásoby" nesou týž source_type 'closing', ale jsou reálnou změnou stavu zásob
+     * a výsledovka je započítává. Uzávěrka se proto vylučuje stejně jako ve výkazu a v DPPO
+     * ({@see JournalTaxOrigin::includedSql()}), jinak kontrola hlásí rozdíl ve výši změny zásob.
      */
     private function profitFromLedger(int $supplierId, string $from, string $to): float
     {
         $stmt = $this->db->pdo()->prepare(
-            "SELECT ROUND(
+            "WITH RECURSIVE " . JournalTaxOrigin::cte($supplierId) . " SELECT ROUND(
                       SUM(CASE WHEN a.account_code LIKE '6%'
                                THEN (CASE WHEN l.side = 'credit' THEN l.signed_amount ELSE -l.signed_amount END)
                                ELSE 0 END)
@@ -352,12 +357,13 @@ final class CrossCheckSuite
                FROM journal_entries e
                JOIN journal_entry_lines l ON l.entry_id = e.id
                JOIN chart_of_accounts a ON a.id = l.account_id
+               " . JournalTaxOrigin::join() . "
               WHERE e.supplier_id = ?
                 AND e.entry_date BETWEEN ? AND ?
                 AND e.posted_at IS NOT NULL
-                AND e.source_type <> 'closing'"
+                AND " . JournalTaxOrigin::includedSql()
         );
-        $stmt->execute([$supplierId, $from, $to]);
+        $stmt->execute([$supplierId, $from, $to, ClosingSourceId::STOCK_SLOT_BASE]);
 
         return (float) ($stmt->fetchColumn() ?: 0.0);
     }

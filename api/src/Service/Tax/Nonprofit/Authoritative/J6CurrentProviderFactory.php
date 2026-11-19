@@ -35,7 +35,11 @@ final readonly class J6CurrentProviderFactory
         return $this->reader->page($supplierId, $periodId, $after, $limit, $currentRead);
     }
 
-    public function fingerprint(int $supplierId, int $periodId, bool $currentRead = false): J6CurrentSourceFingerprint
+    /**
+     * @param (callable(array $rows, array $findings): void)|null $onPage odběratel obsahu stránek
+     *        (obsahový otisk podkladů odložené daně), aby se podklady nečetly dvakrát
+     */
+    public function fingerprint(int $supplierId, int $periodId, bool $currentRead = false, ?callable $onPage = null): J6CurrentSourceFingerprint
     {
         $provider = $this->create($supplierId, $periodId, $currentRead);
         $header = $provider->header();
@@ -47,6 +51,7 @@ final readonly class J6CurrentProviderFactory
             $chunk = $this->hasher->chunk($ordinal, $page);
             $this->hasher->updateRoot($root, $chunk['descriptor']);
             $this->hasher->updateContent($content, $page->rows, $page->findings);
+            if ($onPage !== null) $onPage($page->rows, $page->findings);
             $rows += $chunk['descriptor']['row_count'];
             $findings += $chunk['descriptor']['finding_count'];
             ++$ordinal;

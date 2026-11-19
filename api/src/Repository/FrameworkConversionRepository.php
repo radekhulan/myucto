@@ -78,7 +78,11 @@ final class FrameworkConversionRepository
         $expect=(new \MyInvoice\Service\Accounting\Conversion\FrameworkConversionNative500Adapter($this->db))->snapshot($supplier,$source,$current);
         E::need(self::journal($closing)===self::journal($expect['lines']),'conversion_native_close_changed');
         E::need(JournalLineAmount::cents($payload['profit']??'0')===JournalLineAmount::cents($expect['profit']),'conversion_profit_changed');
-        $native=array_values(array_filter($rows,static fn($r)=>$r['source_type']!=='closing'&&($anchor===null||$r['entry_date']>=$anchor)));
+        // Rozvaha převodu musí stát na týchž zápisech jako zůstatky, ze kterých vznikl zápis
+        // uzavření knih ({@see \MyInvoice\Repository\ClosingRepository::bsBalances()}): vypadá
+        // jen vlastní close_books období. Skladové sloty kroku Zásoby (112/132 k rozvahovému dni
+        // i loňský stav uvolněný 1. dne) nesou týž source_type 'closing', ale v uzávěrce jsou.
+        $native=array_values(array_filter($rows,static fn($r)=>!($r['source_type']==='closing'&&(int)$r['period_id']===$sourceId&&$r['source_id']!==null&&(int)$r['source_id']===$sourceId)&&($anchor===null||$r['entry_date']>=$anchor)));
         $bs=array_values(array_filter($native,static fn($r)=>in_array($r['account_type'],['asset','liability','equity'],true)));
         $plNative=array_values(array_filter($rows,static fn($r)=>(int)$r['entry_id']!==$entry&&$r['entry_date']>=$source['starts_on']&&in_array($r['account_type'],['revenue','expense'],true)));
         $origins=(new FxCaseOriginReadRepository($this->db))->snapshot($supplier,$bs,$current);
