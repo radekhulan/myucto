@@ -104,8 +104,7 @@ final class PurchaseInvoiceListDetailParityTest extends TestCase
         $countryId = (int) $pdo->query("SELECT id FROM countries WHERE iso2 = 'CZ'")->fetchColumn();
         $currencyId = (int) $pdo->query("SELECT MIN(id) FROM currencies WHERE code = 'CZK'")->fetchColumn();
         $vatRateId = (int) $pdo->query('SELECT MIN(id) FROM vat_rates')->fetchColumn();
-        $accountId = (int) $pdo->query('SELECT MIN(id) FROM chart_of_accounts')->fetchColumn();
-        self::assertGreaterThan(0, min($sourceSupplierId, $userId, $countryId, $currencyId, $vatRateId, $accountId));
+        self::assertGreaterThan(0, min($sourceSupplierId, $userId, $countryId, $currencyId, $vatRateId));
 
         $pdo->beginTransaction();
         [$supplierId, $vendorId] = $this->supplierWithVendor($pdo, $sourceSupplierId, $countryId, $currencyId);
@@ -122,7 +121,7 @@ final class PurchaseInvoiceListDetailParityTest extends TestCase
         $repository->listGroupedByMonth($filters, 1, 5);
         [$keyReads, $indexReads] = $this->measureReads($pdo, fn () => $repository->listGroupedByMonth($filters, 2, 5));
 
-        $this->insertForeignSupplierNoise($pdo, $sourceSupplierId, $countryId, $currencyId, $userId, $vatRateId, $accountId);
+        $this->insertForeignSupplierNoise($pdo, $sourceSupplierId, $countryId, $currencyId, $userId, $vatRateId);
         $result = null;
         [$keyReadsWithNoise, $indexReadsWithNoise] = $this->measureReads(
             $pdo,
@@ -194,9 +193,12 @@ final class PurchaseInvoiceListDetailParityTest extends TestCase
         int $currencyId,
         int $userId,
         int $vatRateId,
-        int $accountId,
     ): void {
         [$supplierId, $vendorId] = $this->supplierWithVendor($pdo, $sourceSupplierId, $countryId, $currencyId);
+        // Účet vyrovnání vlastní cizí firmy: čistá testovací DB z migrací osnovu nemá.
+        $pdo->prepare("INSERT INTO chart_of_accounts (supplier_id, account_code, name, account_type) VALUES (?, '221', 'Bankovní účty', 'asset')")
+            ->execute([$supplierId]);
+        $accountId = (int) $pdo->lastInsertId();
         $pdo->prepare(
             "INSERT INTO bank_statements (supplier_id, file_name, file_hash, account_number, statement_date)
              VALUES (?, 'cizi.gpc', ?, '1000000005/0100', '2026-03-31')"
