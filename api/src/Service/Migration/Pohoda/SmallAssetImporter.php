@@ -188,7 +188,8 @@ final class SmallAssetImporter
     }
 
     /**
-     * Volná položka přijaté faktury s datem vystavení nebo DUZP rovným datu karty a částkou
+     * Volná položka přijaté faktury s datem vystavení, DUZP nebo přijetí (datum odpočtu
+     * z POHODY, {@see PohodaPurchaseVatDates}) rovným datu karty a částkou
      * bez DPH rovnou ceně karty. Položka s více kusy (4 dokovací stanice na jednom řádku,
      * v POHODĚ 4 karty) se páruje cenou za kus, dokud na ní není karta pro každý kus.
      * Víc kandidátů se rozhodne názvem; stejné položky téže faktury jsou zaměnitelné
@@ -206,7 +207,7 @@ final class SmallAssetImporter
             "SELECT pii.id, pi.id AS invoice_id, pi.vendor_invoice_number, pii.description
                FROM purchase_invoice_items pii
                JOIN purchase_invoices pi ON pi.id = pii.purchase_invoice_id
-              WHERE pi.supplier_id = ? AND (pi.issue_date = ? OR pi.tax_date = ?)
+              WHERE pi.supplier_id = ? AND (pi.issue_date = ? OR pi.tax_date = ? OR pi.received_at = ?)
                 AND (
                      (ABS({$home} - ?) < 0.005
                       AND NOT EXISTS (SELECT 1 FROM small_assets s WHERE s.supplier_id = pi.supplier_id AND s.purchase_invoice_item_id = pii.id))
@@ -215,7 +216,7 @@ final class SmallAssetImporter
                 )
               ORDER BY pi.id, pii.order_index, pii.id"
         );
-        $stmt->execute([$supplierId, $date, $date, $price, $price]);
+        $stmt->execute([$supplierId, $date, $date, $date, $price, $price]);
         $rows = $stmt->fetchAll(\PDO::FETCH_ASSOC);
         if (count($rows) > 1) {
             $normalize = static fn (string $s): string => mb_strtolower(trim((string) preg_replace('/\s+/u', ' ', $s)));

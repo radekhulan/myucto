@@ -717,20 +717,39 @@ final class PohodaMdbAccounting
     }
 
     /**
-     * Datum zdanitelného plnění, jinak datum dokladu. Access ukládá prázdné datum jako
+     * Datum zdanitelného plnění, jinak datum dokladu. U přijatého dokladu je DUZP z dokladu
+     * dodavatele „Datum KH DPH" (`DatKHDPH`), `DatZdPln` je tam datum odpočtu
+     * ({@see PohodaPurchaseVatDates}); sazby platí ke dni plnění. Vydaný doklad (faktura,
+     * příjmový pokladní doklad) má DUZP v `DatZdPln`. Access ukládá prázdné datum jako
      * 30. 12. 1899, takové datum se bere jako nevyplněné.
      *
      * @param array<string,string> $r
      */
     private static function taxDate(array $r): string
     {
-        foreach (['DatZdPln', 'Datum'] as $key) {
+        $keys = self::isIssued($r) ? ['DatZdPln', 'Datum'] : ['DatKHDPH', 'DatZdPln', 'Datum'];
+        foreach ($keys as $key) {
             $date = substr($r[$key] ?? '', 0, 10);
             if ($date !== '' && $date > '1900-12-31') {
                 return $date;
             }
         }
         return '';
+    }
+
+    /**
+     * Vydaný doklad: faktura vydané strany (`FA.RelTpFak` mimo přijaté druhy) nebo příjmový
+     * pokladní doklad. Interní, bankovní a výdajový pokladní doklad nese DUZP dodavatele
+     * v `DatKHDPH` stejně jako přijatá faktura.
+     *
+     * @param array<string,string> $r
+     */
+    private static function isIssued(array $r): bool
+    {
+        if (isset($r['RelTpFak'])) {
+            return !str_starts_with(self::INVOICES[(int) $r['RelTpFak']] ?? '', 'received') && (self::INVOICES[(int) $r['RelTpFak']] ?? '') !== 'commitment';
+        }
+        return ($r['RelTpHO'] ?? '') === '1';
     }
 
     /** @param array<string,string> $r */

@@ -732,6 +732,28 @@ faktury zůstane tuzemská část s daní dodavatele v odpočtu ř. 40/41. Když
 chybí interní doklad s odpočtem, převezme se samovyměření bez nároku na odpočet,
 stejně jako ho podala POHODA.
 
+**DUZP a období odpočtu přijatých dokladů.** POHODA vede u přijaté faktury, závazku,
+zálohy a interního dokladu dvě data DPH. **Datum KH DPH** je DUZP z dokladu
+dodavatele a POHODA ho uvádí v kontrolním hlášení jako DPPD. **Datum odp./doruč.**
+je den, ke kterému účetní uplatnila odpočet, a určuje období přiznání. Převod je
+přenese takto:
+
+| POHODA | MyÚčto |
+|---|---|
+| Datum KH DPH (MDB `DatKHDPH`) | DUZP dokladu; jde do kontrolního hlášení (DPPD v A.2 a B.2, DUZP v B.1) a podle něj se volí sazba DPH |
+| Datum odp./doruč. (MDB `DatZdPln`), je-li pozdější než DUZP | ručně zadané datum přijetí, takže odpočet je v přiznání za stejné období jako v POHODĚ |
+| Datum odp./doruč., chybí-li Datum KH DPH | DUZP dokladu |
+
+Doklad s odpočtem uplatněným v POHODĚ dřív než DUZP nebo datum vystavení převod
+zařadí do období DUZP a v protokolu na posun upozorní, MyÚčto odpočet před DUZP
+nepřipustí. U samovyměření se data berou z interního dokladu s vyměřením daně, bez
+data KH DPH na interním dokladu z faktury. **Zahraniční plnění v přenesení daňové
+povinnosti** řadí MyÚčto do přiznání podle DUZP. Leží-li Datum KH DPH v jiném měsíci
+než datum, ke kterému POHODA daň přiznala, převod jako DUZP ponechá datum přiznání
+z POHODY, aby přiznání sedělo na podané, a protokol doklad vypíše: v kontrolním
+hlášení (A.2) pak bude toto datum místo DUZP dodavatele. Pokladní doklad nese jediné
+datum DPH; převod do něj dá datum odpočtu a odlišné Datum KH DPH vypíše v protokolu.
+
 **Platební brána.** Úhradu přes bránu vede POHODA jako několik bankovních dokladů
 se stejným číslem: příjem, poplatek a odvod netto. Zápis v deníku pod tímto číslem
 patří k pohybu, kterým POHODA hradí doklad. Úhrada faktury proto nezůstane mezi
@@ -994,6 +1016,21 @@ Už převedené doklady ani zápisy deníku opakovaný převod nepřepisuje, pro
 mohly být mezitím zaúčtované, spárované nebo upravené v MyÚčtu. Změnila-li se
 v POHODĚ celková částka faktury, protokol ji vypíše jako změněnou v POHODĚ
 a ponechanou v MyÚčtu; upravte ji ručně.
+
+**Oprava dat DPH u dříve převedených dokladů.** Firma převedená verzí, která
+u přijatých dokladů zaměnila Datum KH DPH a Datum odp./doruč., má v DUZP datum odpočtu
+a Datum KH DPH jako ručně zadané datum přijetí. Přiznání k DPH je v pořádku, kontrolní
+hlášení ale nese jako DPPD datum odpočtu. Správce instalace to opraví příkazem
+`php api/bin/repair-pohoda-duzp.php`. Bez parametrů jen vypíše, které doklady by
+opravil a které přeskočí, s `--supplier=<id firmy>` se omezí na jednu firmu a teprve
+s `--apply` data prohodí. Opravují se jen přijaté doklady z převodu, které mají ručně
+zadané datum přijetí dřív než DUZP. Přeskočí a vypíše doklady v obdobích s podaným
+přiznáním nebo kontrolním hlášením, v uzavřeném účetním období nebo pod zámkem k datu,
+doklady zaúčtované v MyÚčtu (opravte je ručně v dokladu, aby se zápis přeúčtoval)
+a zahraniční plnění v přenesení daňové povinnosti s daty v různých měsících. Přiznání
+se opravou nemění, mění se jen DUZP v kontrolním hlášení a případně datum nákladu. Zápisy
+převzaté z deníku POHODY zůstávají beze změny. Každý opravený doklad má záznam
+v auditní stopě a opakované spuštění už opravené doklady nemění.
 
 Před převodem firmy znovu od začátku stáhněte v průvodci **profil firmy** a po
 ostrém převodu ho nahrajte zpět, viz [§ 96.13](96_Nastaveni.md#9613-krok-za-krokem-profil-firmy).

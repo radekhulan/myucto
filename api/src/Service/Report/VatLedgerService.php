@@ -206,6 +206,34 @@ final class VatLedgerService
         return $map;
     }
 
+    /** Kódy zařazení, podle kterých {@see purchaseClaimDateExpr()} pozná zahraniční přenesení daňové povinnosti. */
+    public const FOREIGN_REVERSE_CHARGE_CODES = ['23', '24', '24e', '25'];
+
+    /**
+     * Řadí se přijatý doklad do období přímo podle DUZP (`tax_date`), ne podle období
+     * odpočtu § 73? Totéž pravidlo jako první větev {@see purchaseClaimDateExpr()} pro doklad,
+     * který ještě není v databázi (převod z cizího systému): přenesení daňové povinnosti
+     * příznakem nebo kódem hlavičky či položky a dodavatel mimo CZ. Datum přijetí se u
+     * takového dokladu ignoruje.
+     *
+     * @param iterable<?string> $itemCodes
+     */
+    public static function purchaseClaimFollowsTaxDate(bool $reverseCharge, ?string $headerCode, iterable $itemCodes, ?string $vendorIso2): bool
+    {
+        if (strtoupper($vendorIso2 ?? 'CZ') === 'CZ') {
+            return false;
+        }
+        if ($reverseCharge || in_array($headerCode, self::FOREIGN_REVERSE_CHARGE_CODES, true)) {
+            return true;
+        }
+        foreach ($itemCodes as $code) {
+            if (in_array($code, self::FOREIGN_REVERSE_CHARGE_CODES, true)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     /**
      * SQL výraz období odpočtu přijatého dokladu (§ 73 ZDPH) nad aliasy `pi` (purchase_invoices)
      * a `co` (countries) — jediné místo pravdy, sdílí ho fetchPurchases i purchaseClaimInfo.
@@ -213,6 +241,7 @@ final class VatLedgerService
      */
     public static function purchaseClaimDateExpr(): string
     {
+        $codes = "'" . implode("','", self::FOREIGN_REVERSE_CHARGE_CODES) . "'";
         // RC se pozná flagem `reverse_charge` NEBO klasifikačním kódem (23/24/24e/25) na
         // HLAVIČCE i na KTERÉKOLIV POLOŽCE — import (defaultClassificationCode) přiřadí kód
         // 24/24e na položku i bez hlavičkového flagu; bez této shody by se zahraniční doklad
@@ -223,10 +252,10 @@ final class VatLedgerService
         // → fetchPurchases i drill-down kontroly 343 zůstanou konzistentní.
         return "CASE
                        WHEN (pi.reverse_charge = 1
-                             OR pi.vat_classification_code IN ('23','24','24e','25')
+                             OR pi.vat_classification_code IN ({$codes})
                              OR EXISTS (SELECT 1 FROM purchase_invoice_items pcx
                                          WHERE pcx.purchase_invoice_id = pi.id
-                                           AND pcx.vat_classification_code IN ('23','24','24e','25')))
+                                           AND pcx.vat_classification_code IN ({$codes})))
                             AND COALESCE(co.iso2, 'CZ') <> 'CZ'
                            THEN COALESCE(pi.tax_date, pi.issue_date)
                        WHEN pi.received_at_source = 'manual' AND pi.received_at IS NOT NULL THEN
