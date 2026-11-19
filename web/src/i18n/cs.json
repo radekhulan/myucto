@@ -19831,6 +19831,7 @@
       "missing_exchange_rate": "Doklad v cizí měně nemá vyplněný směnný kurz - doplňte kurz k datu účetního případu.",
       "no_accounting_period": "Pro datum dokladu neexistuje účetní období - nejdřív ho založte v Účetnictví → Uzávěrka.",
       "period_missing": "Účetní období pro rok dokladu není založené - nejdřív ho vytvořte v Účetnictví → Uzávěrka.",
+      "depreciation_journal_missing": "Účetní odpis roku je u karty vedený jako zaúčtovaný, ale jeho zápis v deníku chybí. Znovu se neúčtoval, aby se nezdvojil. Ověřte v deníku, zda odpis roku nese jiný zápis (např. převzatý z původního programu), a případně ho zaúčtujte ručně.",
       "open_periods_action": "Založit období",
       "period_not_open": "Účetní období je uzavřené - do něj nelze účtovat.",
       "unbalanced_entry": "Účetní zápis není vyvážený (MD ≠ Dal) - zkontrolujte předkontaci a částky dokladu.",
@@ -21178,6 +21179,7 @@
         "run": "Zaúčtovat",
         "result": "Zaúčtováno: {booked}, přeskočeno: {skipped}.",
         "result_with_errors": "Zaúčtováno: {booked}, přeskočeno: {skipped}, chyb: {errors}.",
+        "closing_taken_over": "Rok uzavřel původní program a jeho deník už odpisy obsahuje. Účetní odpisy se proto neúčtovaly, potvrdily se jen daňové.",
         "result_booked": "Zaúčtováno",
         "result_skipped": "Přeskočeno",
         "result_errors": "Chyby"

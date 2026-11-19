@@ -130,6 +130,17 @@ Kontrolují se mimo jiné:
 
 Nebyl-li v období žádný odpisovaný majetek, krok se přeskočí sám.
 
+Zaúčtování odpisů roku nezdvojí odpis, který už v deníku je:
+
+- Je-li u karty účetní odpis roku vedený jako zaúčtovaný, ale jeho zápis v deníku chybí (deník roku například
+  nahradil převod z původního programu, který odpisy nese v měsíčních zápisech), odpis se znovu nezaúčtuje.
+  Aplikace kartu ohlásí jako chybu „zápis v deníku chybí". Ověřte v deníku, zda odpis roku nese jiný zápis,
+  a případně ho zaúčtujte ručně. Náhled odpisů pro daň z příjmů s tím počítá stejně (nic nečeká na zaúčtování).
+- V roce uzavřeném původním programem (převzatá uzávěrka, viz [Převzatá uzávěrka roku](#prevzata-uzaverka-roku))
+  se účetní odpisy neúčtují vůbec, deník roku je obsahuje. Potvrdí se jen daňové odpisy.
+- Daňový odpis převzatý převodem z jiného programu (Money S3, PREMIER apod.) se nepřepočítává. Firma ho uplatnila
+  v podaném přiznání a odhad daně z příjmů i potvrzení roku ho berou tak, jak ho převod zapsal.
+
 > [!WARNING]
 > Tlačítko **Zaúčtovat odpisy** na stránce Majetek funguje jen do stavu období Otevřené. Jakmile období přejde
 > do Uzavírá se, stejné tlačítko odpisy dál nezaúčtuje (hlásí neotevřené období). V panelu kroku je ale
@@ -392,6 +403,23 @@ Zůstatky rozvahových účtů se přenášejí včetně dimenzí, středisek a 
 dimenzí i částky procentních rozpadů po haléřích. Přenáší se také nenulová salda jednotlivých hodnot,
 i když je celý účet v součtu nulový. Následující uzávěrka vychází z počátečních stavů tohoto roku,
 stejně jako účetní sestavy.
+
+Zůstatky v cizí měně (devizový účet 221, valutová pokladna, pohledávky a závazky v cizí měně) se v obou
+rámcích přenášejí i s měnou a částkou v cizí měně, takže přecenění v dalším roce vychází z počátečního stavu.
+Má-li účet (se stejnými dimenzemi) řádky ve více měnách, uzavření i otevření ho rozdělí: korunové řádky tvoří
+korunový zůstatek bez měny a každá cizí měna vlastní zůstatek. Bez měny, jen v korunách, se přenese:
+
+- zůstatek, jehož řádky v cizí měně nemají vyplněnou částku v cizí měně,
+- zůstatek, jehož částka v cizí měně má opačné znaménko než korunová (jedním řádkem ho zapsat nejde),
+- převodové účty skupiny 26 (261 Peníze na cestě a jeho analytiky): peníze tam přijdou v jedné měně
+  a odejdou v jiné, cizí zůstatek by se jen hromadil,
+- účet, jehož počáteční stav vznikl ještě bez měny (rok otevřený dřívější verzí). Cizí zůstatek takového účtu
+  by od počátečního stavu zachytil jen pohyby roku, proto se přenáší jako dřív a návrh devizových zůstatků
+  v kroku Kurzové rozdíly ho dál počítá z celého deníku.
+
+Návrh devizových zůstatků (kurzové rozdíly) i přecenění účtů 378/379 počítají cizí zůstatek od počátečního
+stavu, stejně jako rozvaha. Po uzávěrce převzaté z původního programu, která měnu nenesla, se tak cizí zůstatek
+nezapočítá dvakrát.
 
 Administrátor může krok vrátit tlačítkem **Vzít zpět otevření roku**.
 

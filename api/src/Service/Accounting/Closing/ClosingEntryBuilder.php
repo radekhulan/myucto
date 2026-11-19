@@ -17,6 +17,9 @@ use MyInvoice\Service\Accounting\AccountingFrameworkService;
  *
  * Vstupní řádek zůstatku = {account_id, account_code, name, bal} — `bal` je
  * signed netto (MD kladně), viz ClosingRepository::plBalances/bsBalances.
+ * Rozvahový zůstatek v cizí měně nese navíc `currency_code` a `amount_foreign`;
+ * řádek téhož účtu je převezme v každém účetním rámci (504 i 500), aby počáteční
+ * stav dalšího roku měl cizoměnový zůstatek pro přecenění.
  * Výstupní řádek = {account_code, side: 'debit'|'credit', amount>0} — přesně
  * formát PostingService::postDocument lines; mapování kódů 701/702/710/431 na
  * account_id firmy dělá ClosingService (chybějící účet → missing_account).
@@ -93,7 +96,6 @@ final class ClosingEntryBuilder
             }
             $amount = abs($cents) / 100;
             $code = (string) $row['account_code'];
-            if ($profile->framework !== AccountingFrameworkService::CZ_504) unset($row['currency_code'], $row['amount_foreign'], $row['fx_rate']);
             if ($cents > 0) {
                 $lines[] = self::line($profile->account('closing.final_balance'), 'debit', $amount, $row);
                 $lines[] = self::line($code, 'credit', $amount, $row);
@@ -128,7 +130,6 @@ final class ClosingEntryBuilder
             }
             $amount = abs($cents) / 100;
             $code = $profile->openingAccount((string) $row['account_code']);
-            if ($profile->framework !== AccountingFrameworkService::CZ_504) unset($row['currency_code'], $row['amount_foreign'], $row['fx_rate']);
             if ($cents > 0) {
                 $lines[] = self::line($code, 'debit', $amount, $row);
                 $lines[] = self::line($profile->account('closing.opening_balance'), 'credit', $amount, $row);
