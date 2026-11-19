@@ -83,6 +83,7 @@ export const MANUAL_CHAPTERS: ManualChapterRule[] = [
   [/^\/accounting\/ai-assistant(?:\/|$)/, '123_AI_asistent'],
   [/^\/accounting\/journal(?:\/|$)/, '52_Ucetni_denik'],
   [/^\/accounting\/internal-documents(?:\/|$)/, '52_Ucetni_denik'],
+  [/^\/accounting\/(?:journal-rebook|posting-backfill)(?:\/|$)/, '52_Ucetni_denik'],
   [/^\/accounting(?:\/|$)|^\/utilities(?:\/|$)/, '73_Ucetni_nastroje'],
   [/^\/tax-evidence(?:\/|$)/, '74_Danova_evidence'],
   [/^\/admin\/suppliers(?:\/|$)/, '95_Multi_supplier'],
