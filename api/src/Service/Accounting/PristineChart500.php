@@ -58,6 +58,7 @@ final class PristineChart500
         'payroll_employees' => ['net_settlement_account_code'],
         'payroll_employee_profiles' => ['partner_settlement_account_code'],
         'payroll_posting_allocations' => ['account_code'],
+        'payroll_posting_code_maps' => ['debit_account_code', 'credit_account_code'],
         'property_funding_effects' => ['account_code'],
         'purchase_invoice_vat_allocations' => ['account_code'],
         'stock_categories' => ['revenue_account_code', 'expense_account_code'],
