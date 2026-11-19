@@ -2281,6 +2281,23 @@
     "body_native": "This company is a non-profit organisation or another accounting unit under Decree 504/2002 Coll. (association, foundation, institute, owners' association). A MyÚčto export transfers the chart of accounts and the journal only into a company with the same accounting framework (Decree 500 or 504) and does not transfer members and fees, grants, capital or the non-profit income tax records. The transfer has not been verified for non-profit organisations, so please contact support before the transfer.",
     "contact": "Contact support"
   },
+  "migration_payroll_notice": {
+    "title": "Payroll will not be migrated to MyÚčto",
+    "summary": "The migrated data contain payroll of {employees} employees {period} ({months} months). This payroll will not be migrated.",
+    "period_range": "for {from} to {to}",
+    "period_single": "for {month}",
+    "reason": {
+      "unlicensed": "The licence does not include the payroll add-on.",
+      "module_disabled": "The company does not have the Payroll module enabled."
+    },
+    "todo": {
+      "unlicensed": "Extend the licence with the payroll add-on and then run the payroll migration again.",
+      "module_disabled": "Enable Payroll in the company settings (Tax and accounting → Run payroll) and then run the payroll migration again."
+    },
+    "accounting": "The accounting migration is not affected: payroll postings are part of the migrated accounting journal, so the accounting stays complete.",
+    "buy": "Extend licence with payroll",
+    "settings": "Open company settings"
+  },
   "migration_overview": {
     "myucto_hint": "Transfer one company from a MyÚčto Complete data export or a MyInvoice database backup, including recurring invoices.",
     "title": "Switch from another accounting system",
@@ -36082,7 +36099,7 @@
     "stock": {
       "title": "Stock transfer",
       "enable": "Transfer stock: {cards} stock cards, quantities as of {date}",
-      "hint": "Warehouses, cards with quantities per warehouse, price lists as price levels and warehouse structure as categories are transferred from the {year} agenda. Movement history is not transferred; stock in MyÚčto starts with the quantities as of this day. Stock must be enabled for the company.",
+      "hint": "Warehouses, cards with quantities per warehouse, price lists as price levels and warehouse structure as categories are transferred from the {year} agenda. Movement history is not transferred; stock in MyÚčto starts with the quantities as of this day.",
       "col_warehouse": "POHODA warehouse",
       "col_cards": "Cards",
       "col_stocked": "With quantity",
@@ -36094,7 +36111,9 @@
         "material": "Material",
         "skip": "Do not transfer"
       },
-      "choice_hint": "The stock kind from the POHODA card takes precedence; the warehouse choice applies only to cards without it (POHODA keeps it for inventory method A). Consignment warehouses are preset to do not transfer, as their stock is not owned by the company."
+      "choice_hint": "The stock kind from the POHODA card takes precedence; the warehouse choice applies only to cards without it (POHODA keeps it for inventory method A). Consignment warehouses are preset to do not transfer, as their stock is not owned by the company.",
+      "module_will_enable": "Stock is disabled for the company. The live migration enables it (Company settings → Track stock); with double-entry accounting the Stock step will then be required at year-end closing. The dry run does not change settings.",
+      "module_unavailable": "Stock is disabled for the company and the licence does not include the commercial modules stock belongs to. Stock will therefore not be migrated; accounting will."
     },
     "tools_download": "Download exporter and converter (ZIP)",
     "export_auto_detect": "Upload the resulting ZIP from any route below. The wizard detects its format automatically; all routes use the same preview, dry run and transfer.",
@@ -36630,6 +36649,9 @@
       "automation_left_off": "Automation stays off until the transfer finishes without errors. Documents not linked to the journal would otherwise be posted twice."
     },
     "other_wizard_hint": "The export contains further agendas this wizard does not migrate (count: {n}). Migrate accounting under Migration from POHODA and payroll under Migration from PAMICA.",
+    "payroll_wizard_hint": "The export also contains payroll. Payroll is migrated separately in the Migration from PAMICA wizard.",
+    "payroll_wizard_open": "Migrate payroll from PAMICA",
+    "other_wizard_hint_payroll_blocked": "The export contains further agendas this wizard does not migrate (count: {n}). Their payroll will not be migrated; see the warning above for the reason and what to do.",
     "payroll_approve_taken_over": "Approve the taken-over attendance and payroll inputs right away. PAMICA months have already been processed and filed; as unapproved drafts they would block starting and closing a payroll run. Note: a started run recalculates the month with its own rule set, so the result may not match what was already filed to the last crown. Leave it unchecked to review and approve them manually under Payroll → Inputs and Payroll → Attendance.",
     "payroll_period_range": {
       "title": "Months to take over",

@@ -1,5 +1,5 @@
 import { api } from './client'
-import { createMigrationApi, type MigrationNonprofitNotice } from './migrationApi'
+import { createMigrationApi, type MigrationNonprofitNotice, type MigrationPayrollNotice } from './migrationApi'
 import { downloadApiFile } from '@/utils/downloadFile'
 import type { AcceptedDifference, MoneyS3Diff, MoneyS3RunStatus, MoneyS3Step, SourceDifference } from './moneyS3'
 
@@ -98,6 +98,10 @@ export interface PohodaMessage {
 
 export interface PohodaUpload {
   nonprofit_notice?: MigrationNonprofitNotice
+  /** Mzdy firmy v exportu, které nejde převzít (licence, modul Mzdy); chybí, když převzít jdou. */
+  payroll_notice?: MigrationPayrollNotice
+  /** Modul Sklad firmy: vypnutý sklad ostrý převod zapne sám, jde-li to (`can_enable`). */
+  stock_module?: { enabled: boolean; can_enable: boolean }
   token: string
   status: 'ready'
   file_name: string

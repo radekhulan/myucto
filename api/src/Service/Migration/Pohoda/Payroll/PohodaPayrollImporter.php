@@ -16,6 +16,7 @@ use MyInvoice\Service\Migration\MoneyS3\ImportProtocol;
 use MyInvoice\Service\Migration\Pohoda\PohodaException;
 use MyInvoice\Service\Migration\Pohoda\PohodaExport;
 use MyInvoice\Service\Migration\Pohoda\PohodaXml;
+use MyInvoice\Service\Migration\Shared\PayrollMigrationNotice;
 use MyInvoice\Service\Payroll\Absence\ImportAbsenceCompensationRates;
 use MyInvoice\Service\Payroll\Absence\PayrollImportAbsenceCompensationMaterializer;
 use MyInvoice\Service\Payroll\Calculation\PayrollWageRounding;
@@ -324,8 +325,11 @@ final class PohodaPayrollImporter
         if ((int) $stmt->fetchColumn() !== 1) {
             if ($willSetUp) {
                 $add('info', 'payroll_module_will_enable', 'Firma nemá zapnutý modul Mzdy. Převod ho zapne.');
+            } elseif (($plan['outcome'] ?? null) === PayrollMigrationModuleSetup::OUTCOME_UNLICENSED) {
+                $add('error', 'payroll_disabled', 'Firma nemá zapnutý modul Mzdy a licence nezahrnuje mzdový doplněk, modul proto nejde zapnout. '
+                    . 'Rozšiřte licenci o mzdový doplněk (Aktivace → Zakoupení), jinak mzdy nejde převést.', ['reason' => 'unlicensed', 'buy_url' => PayrollMigrationNotice::BUY_URL]);
             } else {
-                $add('error', 'payroll_disabled', 'Firma nemá zapnutý modul Mzdy. Zapněte ho v Nastavení → Moduly, jinak mzdy nejde převést.');
+                $add('error', 'payroll_disabled', 'Firma nemá zapnutý modul Mzdy. Zapněte ho v Nastavení firmy (Daně a účetnictví → Vést mzdy), jinak mzdy nejde převést.');
             }
         }
         // Náhled průvodce zná jen svůj rok; při víc vybraných rocích ukáže začátek podle

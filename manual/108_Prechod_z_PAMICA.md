@@ -449,7 +449,10 @@ založí převod výchozí (výplatní termín 10. den následujícího měsíce
 zaokrouhlený na celé koruny, zákonné příplatky); bez ní mzdový běh nejde.
 Zapnutý modul, jeho začátek ani existující nastavení převod nemění. Počáteční
 stavy kumulací převod zapíše jen tehdy, když má firma začátek vedení mezd
-nastavený; jiný než navržený začátek nastavte ještě před převodem.
+nastavený; jiný než navržený začátek nastavte ještě před převodem. Nezahrnuje-li
+licence mzdový doplněk, modul Mzdy zapnout nejde: kontrola před převodem to
+ohlásí jako chybu a mzdy se převedou až po rozšíření licence
+(`Aktivace → Zakoupení`).
 
 **Převáděné měsíce.** V kroku *Náhled a volby* jde převod omezit na rozsah
 měsíců **Od měsíce** - **Do měsíce** (obě meze včetně). Bez vyplnění se převedou

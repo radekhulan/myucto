@@ -284,7 +284,8 @@ final class PohodaImportJobService extends AbstractImportJobService
                             isset($params['job_last_period']) ? (string) $params['job_last_period'] : null,
                             PohodaPayrollPeriodRange::fromParams($params))
                         : $this->importer->run($supplierId, $userId, $export, $dryRun, $runId, $progress, $cancel, $item['skip'], (bool) ($params['accept_differences'] ?? false),
-                            self::stockFor($meta, (string) ($params['ico'] ?? ''), $year, $params['stock'] ?? null)),
+                            self::stockFor($meta, (string) ($params['ico'] ?? ''), $year, $params['stock'] ?? null),
+                            payroll: $agenda['has_payroll'] ? $agenda['payroll'] : null),
                     'journal' => static fn (array $byStep): array => $payroll
                         ? ['entries' => $byStep[PohodaPayrollImporter::STEP_MONTHS]['counts']['months'] ?? 0, 'existing' => $byStep[PohodaPayrollImporter::STEP_MONTHS]['counts']['existing'] ?? 0]
                         : $byStep['journal']['counts'] ?? [],
@@ -487,7 +488,7 @@ final class PohodaImportJobService extends AbstractImportJobService
      * Agenda zvoleného roku z přehledu nahraného exportu.
      *
      * @param array<string,mixed> $meta
-     * @return array{dir:string,ico:string,year:int,has_accounting:bool,has_payroll:bool,later_years:?list<int>}|null
+     * @return array{dir:string,ico:string,year:int,has_accounting:bool,has_payroll:bool,later_years:?list<int>,payroll:?array<string,mixed>}|null
      */
     public static function agenda(array $meta, string $ico, int $year): ?array
     {
@@ -503,6 +504,7 @@ final class PohodaImportJobService extends AbstractImportJobService
                     'has_payroll' => (bool) ($a['has_payroll'] ?? false),
                     // Přehled nahraný před výběrem roků je nemá ({@see laterYears()}).
                     'later_years' => is_array($later) ? array_values(array_map('intval', $later)) : null,
+                    'payroll' => is_array($a['payroll'] ?? null) ? $a['payroll'] : null,
                 ];
             }
         }

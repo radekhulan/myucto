@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Migration\Pohoda;
 
+use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\PohodaImportRepository;
 use MyInvoice\Repository\StockCategoryRepository;
 use MyInvoice\Repository\StockItemCategoryRepository;
@@ -11,9 +12,11 @@ use MyInvoice\Repository\StockItemVendorRepository;
 use MyInvoice\Repository\StockPackagingUnitRepository;
 use MyInvoice\Repository\StockPriceLevelRepository;
 use MyInvoice\Repository\WarehouseRepository;
+use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Eshop\CategoryTreeService;
 use MyInvoice\Service\Eshop\EshopException;
 use MyInvoice\Service\Invoice\UnitPricePrecision;
+use MyInvoice\Service\License\CommercialFeatureAccess;
 use MyInvoice\Service\Migration\Shared\MigratedInventoryException;
 use MyInvoice\Service\Migration\Shared\MigratedInventoryWriter;
 use MyInvoice\Service\Migration\Shared\MigratedStockOpening;
@@ -34,6 +37,11 @@ use MyInvoice\Service\Stock\StockItemPackagingService;
  * v deníku: hodnotu zásob nese převedený deník (způsob B), sklad se promítne uzávěrkou.
  * Každý řádek stavu, karta, sklad, ceník a kategorie mají záznam v mapě převodu, takže
  * opakovaný převod nic nezdvojí ani nepřepíše.
+ *
+ * Firmě s vypnutým skladem ho ostrý převod zapne sám ({@see self::enableStock()}), stejně
+ * jako by to účetní udělala v Nastavení firmy; zkouška nanečisto nastavení nemění a jen
+ * hlásí, že ostrý převod sklad zapne. Sklad je komerční modul: bez licence komerčních
+ * modulů ({@see CommercialFeatureAccess}) se nezapíná a převod jen upozorní.
  */
 final class StockImporter
 {
@@ -54,6 +62,9 @@ final class StockImporter
         private readonly StockPriceLevelRepository $levels,
         private readonly StockPackagingUnitRepository $packaging,
         private readonly StockItemPackagingService $units,
+        private readonly Connection $db,
+        private readonly ActivityLogger $logger,
+        private readonly CommercialFeatureAccess $commercial,
     ) {}
 
     public function import(PohodaContext $ctx): void
@@ -68,8 +79,7 @@ final class StockImporter
             $p->info(self::STEP, 'stock_not_selected', 'Sklad se v tomto převodu nepřevádí. Převádí se jen z nejnovější agendy exportu a jen když ho v průvodci vyberete.');
             return;
         }
-        if (!$this->writer->stockEnabled($ctx->supplierId)) {
-            $p->warn(self::STEP, 'stock_module_missing', 'Firma nemá zapnutý sklad. Zapněte ho v nastavení firmy a převod spusťte znovu, sklad se doplní.');
+        if (!$this->writer->stockEnabled($ctx->supplierId) && !$this->enableStock($ctx)) {
             return;
         }
         $stock = PohodaStock::read($path);
@@ -98,6 +108,40 @@ final class StockImporter
         if ($withComponents > 0) {
             $p->info(self::STEP, 'bill_of_materials', "{$withComponents} karet má v POHODĚ kusovník. MyÚčto výrobu ani kusovníky nevede, karty se převedly jako výrobky bez složení.", ['cards' => $withComponents]);
         }
+    }
+
+    /**
+     * Zapne firmě modul Sklad pro převod skladu, který si uživatel v průvodci vybral.
+     * Ostrý převod zapíše `supplier.stock_enabled` a auditní záznam jako uložení
+     * v Nastavení firmy (`supplier.updated`); zkouška nanečisto nastavení nemění a sklad
+     * jen projde nanečisto. Bez licence komerčních modulů se sklad nezapne ani nepřevede.
+     *
+     * @return bool převod skladu pokračuje
+     */
+    private function enableStock(PohodaContext $ctx): bool
+    {
+        $p = $ctx->protocol;
+        if (!$this->commercial->isAvailable()) {
+            $p->warn(self::STEP, 'stock_module_unlicensed', 'Firma nemá zapnutý sklad a licence nezahrnuje komerční moduly, ke kterým sklad patří. '
+                . 'Sklad se proto nepřevedl; po rozšíření licence zapněte sklad v Nastavení firmy a převod spusťte znovu, sklad se doplní.');
+            return false;
+        }
+        // Převod s účetním obdobím přepíná firmu do podvojného účetnictví (krok Režim účetní
+        // jednotky); zkouška nanečisto to do nastavení nezapíše, proto platí i převáděné období.
+        $stmt = $this->db->pdo()->prepare('SELECT accounting_mode FROM supplier WHERE id = ?');
+        $stmt->execute([$ctx->supplierId]);
+        $closing = $ctx->period !== null || (string) $stmt->fetchColumn() === 'double_entry'
+            ? ' V podvojném účetnictví bude v uzávěrce roku povinný krok Zásoby.'
+            : '';
+        if ($ctx->dryRun) {
+            $p->info(self::STEP, 'stock_module_will_enable', 'Firma nemá zapnutý sklad. Ostrý převod ho zapne (Nastavení firmy → Vést skladovou evidenci) a sklad převede.' . $closing);
+            return true;
+        }
+        $this->db->pdo()->prepare('UPDATE supplier SET stock_enabled = 1 WHERE id = ?')->execute([$ctx->supplierId]);
+        $this->logger->log('supplier.updated', $ctx->userOrNull(), 'supplier', $ctx->supplierId,
+            ['fields' => ['stock_enabled'], 'source' => 'pohoda_import', 'run_id' => $ctx->runId]);
+        $p->info(self::STEP, 'stock_module_enabled', 'Převod zapnul firmě modul Sklad (Nastavení firmy → Vést skladovou evidenci), aby šel převést vybraný sklad.' . $closing);
+        return true;
     }
 
     /**

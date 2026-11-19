@@ -16,7 +16,9 @@ use MyInvoice\Service\Accounting\FiscalCalendar;
 use MyInvoice\Service\Migration\MoneyS3\AccountingUnitSwitch;
 use MyInvoice\Service\Migration\MoneyS3\ImportProtocol;
 use MyInvoice\Service\Migration\Shared\FiscalYearMismatchException;
+use MyInvoice\Service\Migration\Shared\PayrollMigrationNotice;
 use MyInvoice\Service\Migration\Shared\VatCoefficientSeeder;
+use MyInvoice\Service\Payroll\PayrollModuleAccess;
 use PDO;
 
 /**
@@ -60,6 +62,7 @@ final class PohodaImporter
         private readonly InternalDocumentImporter $internalDocuments,
         private readonly BalanceItemImporter $balanceItems,
         private readonly UnbookedBankProposals $proposals,
+        private readonly PayrollModuleAccess $payrollAccess,
     ) {}
 
     /** @return list<string> */
@@ -286,8 +289,10 @@ final class PohodaImporter
      * @param bool $acceptDifferences ostrý převod přijme rozdíly k přijetí ({@see ImportProtocol::difference()})
      * @param array{warehouses:array<string,string>}|null $stock převod skladu zvolený v průvodci ({@see PohodaContext::$stock})
      * @param bool $relinkOnly opravný převod vazeb už převedené firmy ({@see PohodaContext::$relinkOnly})
+     * @param array<string,mixed>|null $payroll přehled mezd agendy z `meta.json` (`employees`, `months`, `first`, `last`);
+     *        mzdy, které firma převzít nemůže, protokol zapíše jako upozornění ({@see PayrollMigrationNotice})
      */
-    public function run(int $supplierId, int $userId, PohodaExport $export, bool $dryRun, ?int $runId = null, ?callable $progress = null, ?callable $shouldCancel = null, array $skipYears = [], bool $acceptDifferences = false, ?array $stock = null, bool $relinkOnly = false, bool $keepOwnJournal = false): ImportProtocol
+    public function run(int $supplierId, int $userId, PohodaExport $export, bool $dryRun, ?int $runId = null, ?callable $progress = null, ?callable $shouldCancel = null, array $skipYears = [], bool $acceptDifferences = false, ?array $stock = null, bool $relinkOnly = false, bool $keepOwnJournal = false, ?array $payroll = null): ImportProtocol
     {
         // Dorovnání: deník nese i vlastní zápisy, rozdíl proti POHODĚ je očekávaný a hlásí se.
         $acceptDifferences = $acceptDifferences || $keepOwnJournal;
@@ -317,6 +322,10 @@ final class PohodaImporter
                 $protocol->count(self::STEP_PREFLIGHT, 'skipped_documents');
             }
         }
+        // Mzdy agendy, které se nepřevedou (licence, modul Mzdy): upozornění zůstane
+        // v historii převodů. Převod účetnictví nezastaví, zaúčtování mezd nese deník.
+        PayrollMigrationNotice::warn($protocol, self::STEP_PREFLIGHT,
+            PayrollMigrationNotice::forSupplier($this->payrollAccess, $supplierId, $payroll));
         if ($protocol->hasErrors()) {
             $protocol->fail(self::STEP_PREFLIGHT);
             return $protocol;

@@ -13,6 +13,7 @@ use MyInvoice\Repository\PohodaImportRepository;
 use MyInvoice\Security\AccessLevel;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\IpMatcher;
+use MyInvoice\Service\License\CommercialFeatureAccess;
 use MyInvoice\Service\Migration\ImportYears;
 use MyInvoice\Service\Migration\Pohoda\PartnerImporter;
 use MyInvoice\Service\Migration\Pohoda\Payroll\PohodaPayrollImporter;
@@ -26,6 +27,8 @@ use MyInvoice\Service\Migration\Pohoda\PohodaUploads;
 use MyInvoice\Service\Migration\Shared\ChunkedUploadStore;
 use MyInvoice\Service\Migration\Shared\MigrationUploadLimits;
 use MyInvoice\Service\Migration\Shared\NonprofitMigrationNotice;
+use MyInvoice\Service\Migration\Shared\PayrollMigrationNotice;
+use MyInvoice\Service\Payroll\PayrollModuleAccess;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 
@@ -95,6 +98,8 @@ final class PohodaMigrationAction extends AbstractMigrationAction
         IpMatcher $ipMatcher,
         private readonly Connection $db,
         private readonly PohodaPayrollImporter $payroll,
+        private readonly PayrollModuleAccess $payrollAccess,
+        private readonly CommercialFeatureAccess $commercial,
     ) {
         parent::__construct($jobs, $runs, $logger, $ipMatcher);
     }
@@ -138,6 +143,7 @@ final class PohodaMigrationAction extends AbstractMigrationAction
         // pod rokem firmy. Kalendářní firma dostane náhled beze změny.
         $calendar = $this->importer->companyCalendar($supplierId);
         $companyYears = [];
+        $payrollSummaries = [];
         foreach ((array) ($meta['agendas'] ?? []) as $agenda) {
             if ($supplierIco === '' || (string) $agenda['ico'] !== $supplierIco) {
                 continue;
@@ -146,6 +152,7 @@ final class PohodaMigrationAction extends AbstractMigrationAction
             $defaultYear = max($defaultYear ?? 0, $year);
             $agendaDir = PohodaUploads::exportDir($supplierId, $token) . DIRECTORY_SEPARATOR . $agenda['dir'];
             if ((bool) ($agenda['has_payroll'] ?? false)) {
+                $payrollSummaries[] = is_array($agenda['payroll'] ?? null) ? $agenda['payroll'] : null;
                 try {
                     $payrollPreflight[(string) $year] = $this->payroll->preflight($supplierId, $agendaDir . DIRECTORY_SEPARATOR . PohodaExport::FILES['payroll'], $year,
                         (array) $agenda['payroll']);
@@ -182,13 +189,18 @@ final class PohodaMigrationAction extends AbstractMigrationAction
                 return $agenda;
             }, (array) $meta['agendas']);
         }
-        return Json::ok($response, NonprofitMigrationNotice::attach($this->db, $supplierId, $meta + [
+        // Mzdy firmy v exportu, které nejde převzít (licence, modul Mzdy): výrazné upozornění
+        // náhledu. Převod účetnictví neblokuje, zaúčtování mezd nese převáděný deník.
+        $payrollNotice = PayrollMigrationNotice::forSupplier($this->payrollAccess, $supplierId,
+            PayrollMigrationNotice::combine($payrollSummaries));
+        return Json::ok($response, PayrollMigrationNotice::attach(NonprofitMigrationNotice::attach($this->db, $supplierId, $meta + [
             'status' => PohodaUploads::STATUS_READY,
             'supplier_ico' => $supplierIco,
             'default_year' => $defaultYear,
             'preflight' => (object) $preflight,
             'payroll_preflight' => (object) $payrollPreflight,
-        ]));
+            'stock_module' => $this->stockModule($supplierId),
+        ]), $payrollNotice));
     }
 
     /**
@@ -510,6 +522,21 @@ final class PohodaMigrationAction extends AbstractMigrationAction
         }
         ksort($out);
         return $out;
+    }
+
+    /**
+     * Modul Sklad firmy pro volbu převodu skladu: vypnutý sklad ostrý převod zapne sám
+     * ({@see \MyInvoice\Service\Migration\Pohoda\StockImporter}), ale jen s licencí
+     * komerčních modulů. Bez ní je API skladu zavřené a zapnutí by nic neodemklo.
+     *
+     * @return array{enabled:bool,can_enable:bool}
+     */
+    private function stockModule(int $supplierId): array
+    {
+        $stmt = $this->db->pdo()->prepare('SELECT stock_enabled FROM supplier WHERE id = ?');
+        $stmt->execute([$supplierId]);
+        $enabled = (int) $stmt->fetchColumn() === 1;
+        return ['enabled' => $enabled, 'can_enable' => $enabled || $this->commercial->isAvailable()];
     }
 
     private function supplierIco(int $supplierId): string

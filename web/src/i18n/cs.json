@@ -2281,6 +2281,23 @@
     "body_native": "Tato firma je nezisková organizace nebo jiná účetní jednotka podle vyhlášky 504/2002 Sb. (spolek, nadace, ústav, SVJ). Export MyÚčto přenese osnovu a účetní deník jen do firmy se stejným účetním rámcem (vyhláška 500, nebo 504) a nepřenáší evidenci členů a příspěvků, dotací, kapitálu ani podklady daně z příjmů neziskové organizace. Převod pro neziskové organizace nebyl ověřen, před převodem proto kontaktujte podporu.",
     "contact": "Kontaktovat podporu"
   },
+  "migration_payroll_notice": {
+    "title": "Mzdy se do MyÚčta nepřevedou",
+    "summary": "Převáděná data obsahují mzdy {employees} zaměstnanců {period} ({months} měsíců). Tyto mzdy se nepřevedou.",
+    "period_range": "za {from} až {to}",
+    "period_single": "za {month}",
+    "reason": {
+      "unlicensed": "Licence nezahrnuje mzdový doplněk.",
+      "module_disabled": "Firma nemá zapnutý modul Mzdy."
+    },
+    "todo": {
+      "unlicensed": "Rozšiřte licenci o mzdový doplněk a převod mezd pak spusťte znovu.",
+      "module_disabled": "Zapněte Mzdy v nastavení firmy (Daně a účetnictví → Vést mzdy) a převod mezd pak spusťte znovu."
+    },
+    "accounting": "Převod účetnictví tím není dotčený: zaúčtování mezd je součástí převáděného účetního deníku, účetnictví proto zůstane úplné.",
+    "buy": "Rozšířit licenci o mzdy",
+    "settings": "Otevřít nastavení firmy"
+  },
   "migration_overview": {
     "myucto_hint": "Přenos jedné firmy z Kompletního exportu dat MyÚčta nebo databázové zálohy MyInvoice, včetně pravidelné fakturace.",
     "title": "Přechod z jiných účetních systémů",
@@ -36082,7 +36099,7 @@
     "stock": {
       "title": "Převod skladu",
       "enable": "Převést sklad: {cards} karet zásob, stav k {date}",
-      "hint": "Převedou se sklady, karty se stavem po skladech, ceníky jako cenové hladiny a členění skladu jako kategorie, vše z agendy {year}. Historie pohybů se nepřevádí, sklad v MyÚčtu začíná stavem k tomuto dni. Firma musí mít zapnutý sklad.",
+      "hint": "Převedou se sklady, karty se stavem po skladech, ceníky jako cenové hladiny a členění skladu jako kategorie, vše z agendy {year}. Historie pohybů se nepřevádí, sklad v MyÚčtu začíná stavem k tomuto dni.",
       "col_warehouse": "Sklad v POHODĚ",
       "col_cards": "Karet",
       "col_stocked": "Se stavem",
@@ -36094,7 +36111,9 @@
         "material": "Materiál",
         "skip": "Nepřevádět"
       },
-      "choice_hint": "Druh zásoby z karty POHODY má přednost, volba skladu platí jen pro karty bez druhu (POHODA ho vede při účtování zásob způsobem A). Konsignační sklady jsou předvolené jako nepřevádět, jejich zásoba firmě nepatří."
+      "choice_hint": "Druh zásoby z karty POHODY má přednost, volba skladu platí jen pro karty bez druhu (POHODA ho vede při účtování zásob způsobem A). Konsignační sklady jsou předvolené jako nepřevádět, jejich zásoba firmě nepatří.",
+      "module_will_enable": "Firma má sklad vypnutý. Ostrý převod ho zapne sám (Nastavení firmy → Vést skladovou evidenci); v podvojném účetnictví pak bude v uzávěrce roku povinný krok Zásoby. Zkouška nanečisto nastavení nemění.",
+      "module_unavailable": "Firma má sklad vypnutý a licence nezahrnuje komerční moduly, ke kterým sklad patří. Sklad se proto nepřevede, účetnictví ano."
     },
     "tools_download": "Stáhnout exportér a převodník (ZIP)",
     "export_auto_detect": "Výsledný ZIP z kterékoli cesty nahrajte níže. Průvodce formát automaticky rozpozná; následuje stejný náhled, zkouška nanečisto a převod.",
@@ -36630,6 +36649,9 @@
       "automation_left_off": "Automatika zůstává vypnutá, dokud převod neskončí bez chyb. Doklady bez vazby na deník by se jinak zaúčtovaly podruhé."
     },
     "other_wizard_hint": "Export obsahuje ještě další agendy, které tenhle průvodce nepřevádí (počet: {n}). Účetnictví převeďte v sekci Přechod z POHODA, mzdy v sekci Přechod z PAMICA.",
+    "payroll_wizard_hint": "Export obsahuje i mzdy. Ty se převádějí zvlášť v průvodci Přechod z PAMICA.",
+    "payroll_wizard_open": "Převést mzdy z PAMICA",
+    "other_wizard_hint_payroll_blocked": "Export obsahuje ještě další agendy, které tenhle průvodce nepřevádí (počet: {n}). Mzdy z nich se nepřevedou, důvod a postup jsou v upozornění výše.",
     "payroll_approve_taken_over": "Převzatou docházku a mzdové vstupy rovnou schválit. Měsíce z PAMICA už proběhly a jsou podané; jako neschválené koncepty by nad nimi mzdový běh nešel spustit ani uzavřít. Pozor: spuštěný běh si měsíc spočítá znovu podle vlastní legislativní sady, takže výsledek se nemusí do koruny trefit do toho, co už bylo podané. Bez zaškrtnutí zůstanou podklady ke kontrole a schválíte je ručně v Mzdy → Mzdové složky a vstupy a Mzdy → Docházka a směny.",
     "payroll_period_range": {
       "title": "Převáděné měsíce",

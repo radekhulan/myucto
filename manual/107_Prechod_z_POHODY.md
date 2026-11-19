@@ -147,18 +147,24 @@ převodníku MDB, nebo `<IČO>_<rok>.zip`). Souhrn nástroje neuvádí chybu.
    všechny roky agend s IČO firmy. U firmy s hospodářským rokem je **Rok**
    účetní rok firmy, do kterého agenda patří, s hranicemi období (například
    2025 (1. 8. 2025 – 31. 7. 2026)).
-4. Má-li agenda doklady po konci roku, průvodce nabídne každý pozdější rok jako
+4. Obsahuje-li export mzdy firmy, které se do MyÚčta převést nedají, ukáže
+   náhled hned pod tabulkou agend výrazné upozornění **Mzdy se do MyÚčta
+   nepřevedou**: kolik zaměstnanců a za které měsíce export obsahuje, proč se
+   nepřevedou a co udělat ([§ 107.9.3](#10793-co-prevod-neprenese)). Převod
+   účetnictví tím nic nezastaví. Jdou-li mzdy převést, nabídne náhled místo
+   upozornění tlačítko **Převést mzdy z PAMICA**.
+5. Má-li agenda doklady po konci roku, průvodce nabídne každý pozdější rok jako
    samostatný řádek pod agendou (u hospodářského roku jako další účetní rok
    firmy). Pozdější rok jde převést jen spolu s rokem agendy; nevybraný převod
    přeskočí ([§ 107.9.4](#10794-postup)).
-5. Zkontrolujte **Kontrolu před převodem** pro každý vybraný rok. Převod se
+6. Zkontrolujte **Kontrolu před převodem** pro každý vybraný rok. Převod se
    zastaví, když export patří firmě s jiným IČO, chybí nebo nejde přečíst deník,
    osnova nebo členění DPH, účetní období v MyÚčtu už obsahuje zápisy, které
    nevznikly převodem, nebo je období uzavřené.
-6. Klikněte na **Pokračovat** a v kroku **Zkouška nanečisto** na **Spustit
+7. Klikněte na **Pokračovat** a v kroku **Zkouška nanečisto** na **Spustit
    zkoušku nanečisto**. Proběhne celý převod včetně rekonciliace, na konci se ale
    všechno vrátí.
-7. Přečtěte protokol za každý rok. Chyby opravte a zkoušku zopakujte.
+8. Přečtěte protokol za každý rok. Chyby opravte a zkoušku zopakujte.
 
 **Jak poznáte, že je hotovo:** Každý rok skončí stavem **V pořádku** nebo **S
 upozorněními**. Selže-li zkouška jen na **Rozdílech k přijetí**, postupujte podle
@@ -522,7 +528,14 @@ hlavní knihu.
   nezaloží.
 
 **Sklad.** Převádí se jen z nejnovější agendy v exportu a jen když ho
-v náhledu necháte zaškrtnutý. Firma musí mít zapnutý sklad. Převede se stav,
+v náhledu necháte zaškrtnutý. Nemá-li firma sklad zapnutý, náhled ho nabídne
+s poznámkou, že ho převod zapne. Ostrý převod pak zapne
+`Nastavení firmy → Daně a účetnictví → Vést skladovou evidenci` sám, zapíše to
+do historie změn firmy a protokol to uvede. V podvojném účetnictví je pak
+v roční uzávěrce povinný krok [Zásoby](72_Uzaverka.md#7248-krok-9-zasoby). Zkouška
+nanečisto nastavení nemění, jen ohlásí, že ostrý převod sklad zapne. Sklad
+patří ke komerčním modulům: bez jejich licence ho převod nezapne, náhled sklad
+nenabídne a protokol uvede, že se nepřevedl. Převede se stav,
 ne historie: každá karta dostane ve svém skladu počáteční stav k datu exportu
 (nejpozději ke konci roku agendy), jednou příjemkou za sklad. Hodnota stavu je
 ocenění, které vede POHODA po posledním pohybu karty, takže sklad v MyÚčtu
@@ -684,7 +697,15 @@ zůstane k zaúčtování, i když starší pohyb téhož čísla zaúčtovaný 
 - **Sklad.** Zápisy jsou v převedeném deníku, zásoby se zakládají v MyÚčtu.
 - **Mzdy.** Tento průvodce mzdy nepřevádí, ani z datového souboru
   (`91_mzdy.xml`); ty převede samostatný průvodce
-  [Přechod z PAMICA](108_Prechod_z_PAMICA.md).
+  [Přechod z PAMICA](108_Prechod_z_PAMICA.md). Zaúčtování mezd je součástí
+  převedeného deníku, účetnictví je proto úplné i bez nich.
+  Mzdy nejde převzít, když licence nezahrnuje mzdový doplněk nebo firma nemá
+  zapnutý modul Mzdy. Náhled pak výrazně upozorní, kolik zaměstnanců a za které
+  měsíce se nepřevede, a nabídne nápravu: **Rozšířit licenci o mzdy**
+  (`Aktivace → Zakoupení`, mzdový doplněk), nebo **Otevřít nastavení firmy**
+  (`Daně a účetnictví → Vést mzdy`). Stejné upozornění zapíše zkouška nanečisto
+  i ostrý převod do protokolu, takže zůstane v historii převodů. Po nápravě
+  mzdy převeďte v průvodci PAMICA.
 - **Objednávky, nabídky a přílohy dokladů.** Skeny dokladů připojíte zvlášť
   v `Dokumenty → Skeny k dokladům`.
 - **Číselné řady a podaná přiznání.** Přiznání k DPH a kontrolní hlášení za

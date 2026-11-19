@@ -18,7 +18,10 @@ use MyInvoice\Service\Migration\Pohoda\NonprofitActivityByCentre;
 use MyInvoice\Service\Migration\Pohoda\PohodaException;
 use MyInvoice\Service\Migration\Pohoda\PohodaExport;
 use MyInvoice\Service\Migration\Pohoda\PohodaImporter;
+use MyInvoice\Service\License\CommercialFeatureAccess;
+use MyInvoice\Service\Migration\Shared\PayrollMigrationNotice;
 use MyInvoice\Service\Oss\OssLedgerService;
+use MyInvoice\Service\Payroll\PayrollModuleAccess;
 use MyInvoice\Tests\Fixtures\Pohoda\OssVariant;
 use MyInvoice\Tests\Fixtures\Pohoda\SyntheticPohodaExport;
 use PHPUnit\Framework\Attributes\Group;
@@ -1419,9 +1422,13 @@ final class PohodaImportTest extends TestCase
         self::assertSame(2, $this->rows('stock_price_level_rules', $supplierId));
     }
 
-    /** Bez volby v průvodci a bez zapnutého skladu se sklad nepřevede, zbytek převodu ano. */
-    public function testStockIsSkippedWithoutChoiceOrStockModule(): void
+    /**
+     * Bez volby v průvodci se sklad nepřevede. Firmě s vypnutým skladem zkouška nanečisto
+     * nastavení nemění: ohlásí, že ostrý převod sklad zapne, a sklad projde nanečisto.
+     */
+    public function testStockIsSkippedWithoutChoiceAndDryRunOnlyAnnouncesEnablingStock(): void
     {
+        $this->requireCommercialModules();
         $supplierId = $this->supplier();
         $dir = SyntheticPohodaExport::write($this->tmp);
         SyntheticPohodaExport::withStock($dir);
@@ -1429,9 +1436,79 @@ final class PohodaImportTest extends TestCase
 
         $protocol = $this->importer->run($supplierId, $this->userId, $export, true);
         self::assertContains('stock_not_selected', $this->messageCodes($protocol));
-        $protocol = $this->importer->run($supplierId, $this->userId, $export, true, stock: ['warehouses' => []]);
-        self::assertContains('stock_module_missing', $this->messageCodes($protocol));
+        $protocol = $this->importer->run($supplierId, $this->userId, $export, true, stock: ['warehouses' => ['KON' => 'skip']]);
+        self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
+        $codes = $this->messageCodes($protocol);
+        self::assertContains('stock_module_will_enable', $codes);
+        self::assertNotContains('stock_module_enabled', $codes);
+        self::assertNotContains('stock_module_missing', $codes);
+        self::assertStringContainsString('krok Zásoby', $this->message($protocol, 'stock_module_will_enable'));
+        self::assertSame(2, self::stepCounts($protocol, 'stock')['warehouses'] ?? 0, 'Sklad projde nanečisto: ' . $this->explain($protocol));
+        self::assertFalse($this->stockEnabled($supplierId), 'Zkouška nanečisto nastavení firmy nemění.');
         self::assertSame(0, $this->rows('stock_items', $supplierId));
+        self::assertSame(0, $this->stockActivity($supplierId));
+    }
+
+    /**
+     * Ostrý převod s vybraným skladem zapne firmě modul Sklad, zapíše to do auditu jako
+     * uložení v Nastavení firmy a v protokolu upozorní na krok Zásoby v uzávěrce.
+     */
+    public function testLiveImportEnablesStockModuleAndLogsIt(): void
+    {
+        $this->requireCommercialModules();
+        $supplierId = $this->supplier();
+        $dir = SyntheticPohodaExport::write($this->tmp);
+        SyntheticPohodaExport::withStock($dir);
+        $export = PohodaExport::open($dir);
+
+        $protocol = $this->importer->run($supplierId, $this->userId, $export, false, stock: ['warehouses' => ['HL' => 'goods', 'MAT' => 'material', 'KON' => 'skip']]);
+        self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
+        self::assertContains('stock_module_enabled', $this->messageCodes($protocol));
+        self::assertStringContainsString('krok Zásoby', $this->message($protocol, 'stock_module_enabled'));
+        self::assertTrue($this->stockEnabled($supplierId));
+        self::assertSame(1, $this->stockActivity($supplierId));
+        self::assertSame(2, $this->rows('warehouses', $supplierId));
+        self::assertSame(2, $this->rows('stock_documents', $supplierId, "doc_type = 'receipt'"));
+
+        // Opakovaný převod už sklad zapnutý najde: nic nezapíná ani neloguje.
+        $again = $this->importer->run($supplierId, $this->userId, $export, false, stock: ['warehouses' => ['HL' => 'goods', 'MAT' => 'material', 'KON' => 'skip']]);
+        self::assertNotContains('stock_module_enabled', $this->messageCodes($again));
+        self::assertSame(1, $this->stockActivity($supplierId));
+    }
+
+    /**
+     * Mzdy agendy, které firma převzít nemůže (modul Mzdy vypnutý nebo licence bez mzdového
+     * doplňku), zkouška nanečisto i ostrý převod zapíšou do protokolu jako upozornění.
+     * Převod účetnictví tím nekončí. Firma se zapnutými mzdami upozornění nedostane.
+     */
+    public function testPayrollThatCannotBeTakenOverIsWarnedInProtocolWithoutBlocking(): void
+    {
+        $supplierId = $this->supplier();
+        $this->db->pdo()->prepare('UPDATE supplier SET payroll_enabled = 0 WHERE id = ?')->execute([$supplierId]);
+        $export = PohodaExport::open(SyntheticPohodaExport::write($this->tmp));
+        $payroll = ['employees' => 4, 'months' => 10, 'payslips' => 40, 'first' => '2026-01', 'last' => '2026-10'];
+        $access = Bootstrap::buildContainer()->get(PayrollModuleAccess::class);
+        $reason = $access->isLicensed() ? PayrollMigrationNotice::REASON_MODULE_DISABLED : PayrollMigrationNotice::REASON_UNLICENSED;
+
+        foreach ([true, false] as $dryRun) {
+            $protocol = $this->importer->run($supplierId, $this->userId, $export, $dryRun, payroll: $payroll);
+            self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
+            self::assertSame('completed_with_warnings', $protocol->status());
+            $notice = $this->messages($protocol, PayrollMigrationNotice::CODE);
+            self::assertCount(1, $notice, $this->explain($protocol));
+            self::assertSame('warning', $notice[0]['level']);
+            self::assertSame($reason, $notice[0]['context']['reason']);
+            self::assertStringContainsString('mzdy 4 zaměstnanců za 01/2026 až 10/2026', $notice[0]['text']);
+            self::assertStringContainsString('účetnictví proto zůstává úplné', $notice[0]['text']);
+        }
+        self::assertGreaterThan(0, $this->rows('journal_entries', $supplierId), 'Účetnictví se převedlo.');
+
+        if (!$access->isLicensed()) {
+            self::markTestIncomplete('Licence bez mzdového doplňku: firmu se zapnutými mzdami nejde ověřit.');
+        }
+        $this->db->pdo()->prepare('UPDATE supplier SET payroll_enabled = 1 WHERE id = ?')->execute([$supplierId]);
+        $enabled = $this->importer->run($supplierId, $this->userId, $export, true, payroll: $payroll);
+        self::assertSame([], $this->messages($enabled, PayrollMigrationNotice::CODE));
     }
 
     /**
@@ -2724,6 +2801,35 @@ final class PohodaImportTest extends TestCase
         )->execute([$id]);
         $pdo->prepare('UPDATE supplier SET default_currency_id = ? WHERE id = ?')->execute([(int) $pdo->lastInsertId(), $id]);
         return $id;
+    }
+
+    private function requireCommercialModules(): void
+    {
+        if (!Bootstrap::buildContainer()->get(CommercialFeatureAccess::class)->isAvailable()) {
+            self::markTestSkipped('Licence bez komerčních modulů: sklad převod nezapíná.');
+        }
+    }
+
+    private function stockEnabled(int $supplierId): bool
+    {
+        $stmt = $this->db->pdo()->prepare('SELECT stock_enabled FROM supplier WHERE id = ?');
+        $stmt->execute([$supplierId]);
+        return (int) $stmt->fetchColumn() === 1;
+    }
+
+    /** Auditní záznamy zapnutí skladu převodem z POHODY. */
+    private function stockActivity(int $supplierId): int
+    {
+        $stmt = $this->db->pdo()->prepare("SELECT COUNT(*) FROM activity_log WHERE supplier_id = ? AND action = 'supplier.updated'
+            AND entity_type = 'supplier' AND entity_id = ? AND JSON_UNQUOTE(JSON_EXTRACT(payload, '$.source')) = 'pohoda_import'
+            AND JSON_CONTAINS(JSON_EXTRACT(payload, '$.fields'), '\"stock_enabled\"')");
+        $stmt->execute([$supplierId, $supplierId]);
+        return (int) $stmt->fetchColumn();
+    }
+
+    private function message(ImportProtocol $protocol, string $code): string
+    {
+        return (string) ($this->messages($protocol, $code)[0]['text'] ?? '');
     }
 
     private function rows(string $table, int $supplierId, string $where = '1 = 1'): int

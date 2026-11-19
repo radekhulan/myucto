@@ -14,6 +14,7 @@ import CompanyProfileBox from '@/components/settings/CompanyProfileBox.vue'
 import MoneyS3Protocol from '@/components/migration/MoneyS3Protocol.vue'
 import MigrationDifferences from '@/components/migration/MigrationDifferences.vue'
 import MigrationNonprofitNotice from '@/components/migration/MigrationNonprofitNotice.vue'
+import MigrationPayrollNotice from '@/components/migration/MigrationPayrollNotice.vue'
 import PayrollPostingImport from '@/components/migration/PayrollPostingImport.vue'
 import { formatBytes } from '@/components/documents/docFormat'
 import { migrationYearLabel } from '@/utils/migrationYear'
@@ -265,6 +266,22 @@ const stockAgenda = computed(() => {
   const newest = ownAgendas.value.reduce<typeof ownAgendas.value[number] | null>((best, a) => (best === null || a.year > best.year ? a : best), null)
   return newest && newest.stock && runYears.value.includes(agendaKey(newest)) ? { year: agendaKey(newest), stock: newest.stock } : null
 })
+/**
+ * Modul Sklad firmy: vypnutý sklad ostrý převod zapne sám, jen bez licence komerčních
+ * modulů (`can_enable`) se sklad nenabízí. Náhled bez údaje je z doby, kdy sklad musel být zapnutý.
+ */
+const stockModule = computed(() => upload.value?.stock_module ?? { enabled: true, can_enable: true })
+const stockBlocked = computed(() => !stockModule.value.enabled && !stockModule.value.can_enable)
+const stockSelected = computed(() => stockEnabled.value && !stockBlocked.value)
+/*
+ * Mzdy firmy v exportu, které nejde převzít (licence bez mzdového doplňku, vypnutý modul
+ * Mzdy). Jen průvodce POHODY: převádí účetnictví, mzdy z exportu by jinak tiše vynechal.
+ * Převod mezd v průvodci PAMICA se nabízí, jen když upozornění není.
+ */
+const payrollNotice = computed(() => props.system === 'pohoda' ? upload.value?.payroll_notice ?? null : null)
+const ownPayroll = computed(() => !payrollWizard.value
+  && (upload.value?.agendas ?? []).some(a => a.ico === upload.value?.supplier_ico && a.has_payroll))
+const payrollWizardAvailable = computed(() => ownPayroll.value && payrollNotice.value === null)
 watch(stockAgenda, agenda => {
   stockChoices.value = Object.fromEntries((agenda?.stock.warehouses ?? []).map(w => [w.code, stockChoices.value[w.code] ?? w.suggested]))
 }, { immediate: true })
@@ -433,7 +450,7 @@ async function start(mode: 'dry_run' | 'import'): Promise<void> {
     ...(kind.value === 'payroll' && periodFrom.value !== '' ? { period_from: periodFrom.value } : {}),
     ...(kind.value === 'payroll' && periodTo.value !== '' ? { period_to: periodTo.value } : {}),
     ...(startBehind.value !== null ? { start_decision: startDecision.value } : {}),
-    ...(stockAgenda.value && stockEnabled.value ? { stock: { warehouses: { ...stockChoices.value } } } : {}),
+    ...(stockAgenda.value && stockSelected.value ? { stock: { warehouses: { ...stockChoices.value } } } : {}),
   })
 }
 
@@ -713,6 +730,15 @@ const actions = computed<ActionItem[]>(() => {
         </div>
         <p class="mb-5 text-sm text-neutral-500">{{ tt('supplier_ico', { ico: upload.supplier_ico || '—' }) }}</p>
 
+        <MigrationPayrollNotice v-if="payrollNotice" :notice="payrollNotice" class="mb-5" />
+        <div v-else-if="payrollWizardAvailable && skipped === 0" class="mb-5 flex flex-wrap items-center gap-x-3 gap-y-2 rounded-lg border border-primary-500/30 bg-primary-50 px-3 py-2 text-sm text-primary-700" data-testid="pohoda-payroll-wizard-hint">
+          <span>{{ tt('payroll_wizard_hint') }}</span>
+          <RouterLink :to="{ name: 'imports-pamica' }" :class="btnOutlineSm('primary')" class="whitespace-nowrap" data-testid="pohoda-payroll-wizard-open">
+            <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.user" /></svg>
+            {{ tt('payroll_wizard_open') }}
+          </RouterLink>
+        </div>
+
         <p v-if="!years.length" class="mb-5 rounded-lg border border-danger-500/30 bg-danger-50 px-3 py-2 text-sm text-danger-600" data-testid="pohoda-no-agenda">
           {{ upload.supplier_ico ? tt('no_matching_agenda', { ico: upload.supplier_ico }) : tt('supplier_ico_missing') }}
         </p>
@@ -723,18 +749,27 @@ const actions = computed<ActionItem[]>(() => {
             <p v-if="yearOptions.some(o => !o.own)" class="mt-1 text-neutral-500" data-testid="pohoda-later-year-hint">{{ tt('later_year_hint') }}</p>
           </div>
 
-          <p v-if="skipped > 0" class="mb-5 rounded-lg border border-primary-500/30 bg-primary-50 px-3 py-2 text-sm text-primary-700" data-testid="pohoda-skipped-agendas">{{ tt('other_wizard_hint', { n: skipped }) }}</p>
+          <div v-if="skipped > 0" class="mb-5 flex flex-wrap items-center gap-x-3 gap-y-2 rounded-lg border border-primary-500/30 bg-primary-50 px-3 py-2 text-sm text-primary-700" data-testid="pohoda-skipped-agendas">
+            <span>{{ tt(payrollNotice ? 'other_wizard_hint_payroll_blocked' : 'other_wizard_hint', { n: skipped }) }}</span>
+            <RouterLink v-if="payrollWizardAvailable" :to="{ name: 'imports-pamica' }" :class="btnOutlineSm('primary')" class="whitespace-nowrap" data-testid="pohoda-payroll-wizard-open">
+              <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.user" /></svg>
+              {{ tt('payroll_wizard_open') }}
+            </RouterLink>
+          </div>
 
           <fieldset v-if="stockAgenda" class="mb-5 rounded-lg border border-neutral-200 p-3 text-sm" data-testid="pohoda-stock">
             <legend class="sr-only">{{ tt('stock.title') }}</legend>
-            <label class="flex cursor-pointer items-start gap-3">
-              <input v-model="stockEnabled" type="checkbox" class="mt-1 rounded border-neutral-300 text-primary-600" data-testid="pohoda-stock-enabled" />
+            <label class="flex items-start gap-3" :class="stockBlocked ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'">
+              <input :checked="stockSelected" :disabled="stockBlocked" type="checkbox" class="mt-1 rounded border-neutral-300 text-primary-600" data-testid="pohoda-stock-enabled"
+                @change="stockEnabled = ($event.target as HTMLInputElement).checked" />
               <span>
                 <span class="font-medium text-neutral-800">{{ tt('stock.enable', { cards: stockAgenda.stock.cards, date: stockAgenda.stock.date ?? '—' }) }}</span>
                 <span class="block text-neutral-600">{{ tt('stock.hint', { year: yearLabel(stockAgenda.year) }) }}</span>
               </span>
             </label>
-            <div v-if="stockEnabled" class="mt-3">
+            <p v-if="stockBlocked" class="mt-3 rounded-md border border-warning-500/30 bg-warning-50 px-3 py-2 text-warning-700" data-testid="pohoda-stock-unavailable">{{ tt('stock.module_unavailable') }}</p>
+            <p v-else-if="!stockModule.enabled && stockSelected" class="mt-3 rounded-md border border-warning-500/30 bg-warning-50 px-3 py-2 text-warning-700" data-testid="pohoda-stock-will-enable">{{ tt('stock.module_will_enable') }}</p>
+            <div v-if="stockSelected" class="mt-3">
               <div class="overflow-x-auto rounded-md border border-neutral-200">
                 <table class="min-w-full text-sm">
                   <thead class="bg-neutral-50 text-left text-xs text-neutral-500">
