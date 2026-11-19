@@ -318,7 +318,8 @@ final class ClosingRepository
      * Uzavírací i otevírací zápis tak nesou cizoměnový zůstatek dál a přecenění dalšího
      * roku ho najde v počátečním stavu. Cizoměnová část, kterou přenést nejde, se vrátí
      * do korunového zůstatku buňky (dosavadní chování): řádek bez cizí částky, cizí
-     * zůstatek s opačným znaménkem než korunový nebo nulový korunový, a účet, jehož
+     * zůstatek s opačným znaménkem než korunový nebo nulový korunový, převodové účty
+     * skupiny 26 ({@see TRANSFER_ACCOUNT_GROUP}) a účet, jehož
      * počáteční stav vznikl bez měny ({@see foreignOpeningGaps()}).
      *
      * @return list<array{account_id:int, account_code:string, name:string, bal:float, currency_code?:string, amount_foreign?:float, fx_rate?:null}>
@@ -533,6 +534,13 @@ final class ClosingRepository
     }
 
     /**
+     * Převodové účty skupiny 26 (261 peníze na cestě a analytiky): peníze přijdou v jedné
+     * měně a odejdou v jiné (konverze). Cizí částka řádků se tam jen hromadí a zůstatek
+     * v cizí měně nemá význam, proto se přenáší jen v korunách ({@see bsBalances()}).
+     */
+    private const TRANSFER_ACCOUNT_GROUP = '26';
+
+    /**
      * Cizoměnové části buněk, které přenést nejde, sečte do korunové části téže buňky
      * ({@see bsBalances()}). Pořadí záznamů zůstává.
      *
@@ -549,7 +557,8 @@ final class ClosingRepository
                 $balCents = (int) round((float) $record['bal'] * 100);
                 $fxCents = (int) round((float) $record['fx_bal'] * 100);
                 if (isset($blocked[(int) $record['account_id']]) || (int) $record['fx_missing'] > 0
-                    || ($fxCents !== 0 && ($fxCents < 0) !== ($balCents < 0))) {
+                    || ($fxCents !== 0 && ($fxCents < 0) !== ($balCents < 0))
+                    || str_starts_with((string) $record['account_code'], self::TRANSFER_ACCOUNT_GROUP)) {
                     $currency = null;
                 }
             }

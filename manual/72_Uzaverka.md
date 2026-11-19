@@ -409,6 +409,8 @@ korunový zůstatek bez měny a každá cizí měna vlastní zůstatek. Bez měn
 
 - zůstatek, jehož řádky v cizí měně nemají vyplněnou částku v cizí měně,
 - zůstatek, jehož částka v cizí měně má opačné znaménko než korunová (jedním řádkem ho zapsat nejde),
+- převodové účty skupiny 26 (261 Peníze na cestě a jeho analytiky): peníze tam přijdou v jedné měně
+  a odejdou v jiné, cizí zůstatek by se jen hromadil,
 - účet, jehož počáteční stav vznikl ještě bez měny (rok otevřený dřívější verzí). Cizí zůstatek takového účtu
   by od počátečního stavu zachytil jen pohyby roku, proto se přenáší jako dřív a návrh devizových zůstatků
   v kroku Kurzové rozdíly ho dál počítá z celého deníku.

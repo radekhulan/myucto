@@ -26,6 +26,7 @@ use PHPUnit\Framework\TestCase;
  *     návrh přecenění banky v dalším roce vychází z přeneseného zůstatku (počítaný jednou).
  *   - Buňka účtu s korunovými i eurovými řádky se rozdělí po měnách (korunová část bez měny).
  *   - Cizí zůstatek s opačným znaménkem než korunový se nepřenáší (zůstane korunový).
+ *   - Převodový účet 26x (peníze na cestě, konverze měny) se otevírá jen v korunách.
  *   - Otevření, které měnu neneslo (rok otevřený dřív), měnu nepřenáší a návrh přecenění
  *     počítá jako dřív z celého deníku.
  *   - Uzávěrka bez měny + otevření s měnou (převzatá uzávěrka): návrh přecenění počítá
@@ -106,6 +107,11 @@ final class ClosingForeignCurrencyCarry500Test extends TestCase
                 'is_synthetic' => false, 'parent_id' => $parent['id'],
             ]);
         }
+        $transit = $this->accounts->findByCode($this->supplierId, '261');
+        $this->accounts->insert($this->supplierId, [
+            'account_code' => '261100', 'name' => 'Peníze na cestě konverze', 'account_type' => 'asset', 'normal_side' => 'debit',
+            'is_synthetic' => false, 'parent_id' => $transit['id'],
+        ]);
 
         $this->seedRate(self::YEAR . '-12-31', 'EUR', 25.10);
         $this->seedRate((self::YEAR + 1) . '-12-31', 'EUR', 26.00);
@@ -130,6 +136,9 @@ final class ClosingForeignCurrencyCarry500Test extends TestCase
         // Smíšená buňka: korunový vklad a eurový vklad na tomtéž účtu bez dimenzí.
         $this->manual([self::l('221200', 'debit', 5000.00), self::l('411', 'credit', 5000.00)], self::YEAR . '-03-01');
         $this->foreign('221200', 'debit', 100.00, 2500.00, 25.00, self::YEAR . '-03-02');
+        // Konverze přes peníze na cestě: EUR přijde, odejde v korunách. Zbytek 261 je korunový.
+        $this->foreign('261100', 'debit', 1000.00, 25000.00, 25.00, self::YEAR . '-05-01');
+        $this->manual([self::l('221200', 'debit', 24800.00), self::l('261100', 'credit', 24800.00)], self::YEAR . '-05-02');
         // Cizí zůstatek -0,10 EUR proti korunovému +97,60 Kč: jedním řádkem ho nést nejde.
         $this->foreign('221300', 'debit', 100.00, 2500.00, 25.00, self::YEAR . '-04-01');
         $this->foreign('221300', 'credit', 100.10, 2402.40, 24.00, self::YEAR . '-04-02');
@@ -150,10 +159,13 @@ final class ClosingForeignCurrencyCarry500Test extends TestCase
         $openingId = (int) $opening['id'];
         self::assertSame([['EUR', 251000.00, 10000.00, 'debit']], $this->accountLines($openingId, '221100'));
         self::assertSame([['EUR', 25100.00, 1000.00, 'debit']], $this->accountLines($openingId, '311'));
-        self::assertSame([[null, 5000.00, null, 'debit'], ['EUR', 2500.00, 100.00, 'debit']], $this->accountLines($openingId, '221200'),
+        self::assertSame([[null, 29800.00, null, 'debit'], ['EUR', 2500.00, 100.00, 'debit']], $this->accountLines($openingId, '221200'),
             'Smíšená buňka: korunová část bez měny, eurová s cizí částkou.');
         self::assertSame([[null, 97.60, null, 'debit']], $this->accountLines($openingId, '221300'),
             'Cizí zůstatek opačného znaménka zůstane korunový.');
+        self::assertSame([[null, 200.00, null, 'debit']], $this->accountLines($openingId, '261100'),
+            'Peníze na cestě po konverzi EUR → Kč se otevírají jen v korunách, cizí částka se nehromadí.');
+        self::assertSame([[null, 200.00, null, 'credit']], $this->accountLines((int) $closingEntry['id'], '261100'));
 
         // Další rok: návrh přecenění banky vychází z přeneseného zůstatku a počítá ho jednou.
         $this->periodId = $nextId;
