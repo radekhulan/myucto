@@ -59707,6 +59707,29 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/YearEndClosingItem'
+        projection_warnings:
+          type: array
+          description: Kroky uzávěrky, jejichž náhled selhal. Projekce VH a daně je bez nich neúplná.
+          items:
+            type: object
+            required:
+            - source
+            - reason
+            properties:
+              source:
+                type: string
+                enum:
+                - depreciation
+                - stock
+                - small_asset
+                - prepaid
+                - deferred_revenue
+                - fx
+                - provisions
+                - estimates
+                - prior_release
+              reason:
+                type: string
         is_projection:
           type: boolean
         vh_before_tax:

@@ -32261,6 +32261,7 @@
     "projection_vh_projected": "Projektovaný VH po uzávěrce",
     "projection_tax": "Projektovaná daň",
     "projection_optional": "informativní",
+    "projection_incomplete": "Projekce uzávěrky je neúplná. Náhled těchto kroků selhal a projektovaný výsledek ani daň je nezahrnují:",
     "proj_depreciation": "Odpisy roku podle odpisového plánu (nezaúčtované)",
     "proj_stock": "Konečný stav zásob k rozvahovému dni (způsob B)",
     "proj_source_closing": "Uzávěrka",

@@ -29,3 +29,27 @@ export function closingProjectionSource(key: string, periodId: number | null | u
   if (!periodId) return null
   return { to: { name: 'accounting-period-closing', params: { id: periodId } }, labelKey: 'taxReturn.proj_source_closing' }
 }
+
+/** Krok uzávěrky, jehož náhled selhal a v projekci chybí (`closing_projection.warnings`). */
+export interface ClosingProjectionWarning {
+  source: string
+  reason: string
+}
+
+/** Zdroj varování (krok náhledu) → položka projekce, jejíž popisek se zobrazí. */
+const CLOSING_PROJECTION_WARNING_ITEMS: Record<string, string> = {
+  small_asset: 'small_asset_accrual',
+  prepaid: 'prepaid_expense_accrual',
+  deferred_revenue: 'deferred_revenue_accrual',
+  fx: 'fx_revaluation',
+  prior_release: 'prior_deferral_release',
+  provisions: 'provision',
+  estimates: 'estimate',
+  stock: 'stock_closing',
+  depreciation: 'depreciation',
+}
+
+export function closingProjectionWarningLabelKey(source: string): string | null {
+  const item = CLOSING_PROJECTION_WARNING_ITEMS[source]
+  return item ? (CLOSING_PROJECTION_LABELS[item] ?? null) : null
+}

@@ -17,7 +17,7 @@ import { taxEvidenceApi, type TaxEvidenceClosing, type TaxEvidenceAdjustment } f
 import { downloadApiFile } from '@/utils/downloadFile'
 import { btnOutline, btnFilled, ICONS } from '@/components/ui/buttonStyles'
 import DateInput from '@/components/ui/DateInput.vue'
-import { closingProjectionLabelKey, closingProjectionSource } from '@/utils/closingProjection'
+import { closingProjectionLabelKey, closingProjectionSource, closingProjectionWarningLabelKey, type ClosingProjectionWarning } from '@/utils/closingProjection'
 
 const { t } = useI18n()
 const route = useRoute()
@@ -123,6 +123,13 @@ const taxLosses = computed(() => (state.value as any)?.tax_losses ?? { losses: [
 // Feature 1 — projekce závěrkových operací do VH (jen DPPO; null, když nic nezaúčtovaného nečeká).
 const projection = computed<TaxReturnProjection | null>(() => (computed_.value as any)?.projection ?? null)
 const projectionPeriodId = computed<number | null>(() => Number((state.value?.podklady as any)?.period?.id ?? 0) || null)
+// Kroky uzávěrky, jejichž náhled selhal: projekce VH a daně je bez nich neúplná.
+const projectionWarnings = computed<ClosingProjectionWarning[]>(() =>
+  ((state.value?.podklady as any)?.closing_projection?.warnings as ClosingProjectionWarning[] | undefined) ?? [])
+function projectionWarningLabel(w: ClosingProjectionWarning): string {
+  const key = closingProjectionWarningLabelKey(w.source)
+  return key ? t(key) : w.source
+}
 // Feature 2 — auto-návrhy připočitatelných / odečitatelných položek k ověření účetní.
 const addbackSuggestions = computed<TaxReturnAddbackSuggestion[]>(() =>
   ((state.value?.podklady as any)?.suggestions?.addbacks as TaxReturnAddbackSuggestion[]) ?? [])
@@ -1374,6 +1381,13 @@ function tabLabel(k: TabKey): string { return t('taxReturn.tab_' + k) }
           </table>
         </div>
         <p class="text-xs text-neutral-500">{{ t('taxReturn.vh_realtime_note') }}</p>
+
+        <div v-if="type === 'po' && !isFinal && projectionWarnings.length" class="bg-warning-50 border border-warning-500/40 rounded-md p-3 text-sm text-warning-700" data-test="projection-warnings">
+          <strong>{{ t('taxReturn.projection_incomplete') }}</strong>
+          <ul class="mt-1 list-disc list-inside">
+            <li v-for="w in projectionWarnings" :key="w.source">{{ projectionWarningLabel(w) }}: {{ w.reason }}</li>
+          </ul>
+        </div>
 
         <!-- Feature 1 — projekce dosud NEzaúčtovaných závěrkových operací do VH (posted → projektovaný). -->
         <div v-if="projection?.is_projection" class="bg-surface border border-primary-500/40 rounded-lg p-4">

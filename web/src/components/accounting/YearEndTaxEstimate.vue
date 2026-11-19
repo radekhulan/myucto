@@ -3,7 +3,7 @@ import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { RouterLink, type RouteLocationRaw } from 'vue-router'
 import { accountingApi, type YearEndTaxEstimate, type YearEndClosingItem } from '@/api/accounting'
-import { closingProjectionLabelKey, closingProjectionSource } from '@/utils/closingProjection'
+import { closingProjectionLabelKey, closingProjectionSource, closingProjectionWarningLabelKey, type ClosingProjectionWarning } from '@/utils/closingProjection'
 
 const props = defineProps<{
   periodId: number
@@ -44,6 +44,11 @@ function closingLabel(item: YearEndClosingItem): string {
   return t(closingProjectionLabelKey(item))
 }
 
+function warningLabel(w: ClosingProjectionWarning): string {
+  const key = closingProjectionWarningLabelKey(w.source)
+  return key ? t(key) : w.source
+}
+
 function signed(value: number, sign: number): string {
   return `${sign >= 0 ? '+' : '−'} ${props.format(Math.abs(value))}`
 }
@@ -70,7 +75,15 @@ function signed(value: number, sign: number): string {
       {{ t('accounting.statement_accounts.estimate.unavailable', { message: estimate.message ?? '' }) }}
     </p>
 
-    <div v-else class="overflow-x-auto">
+    <div v-if="estimate.applicable && (estimate.projection_warnings ?? []).length"
+      class="mx-3 mt-2 bg-warning-50 border border-warning-500/40 rounded-md p-2.5 text-xs text-warning-700" data-test="estimate-projection-warnings">
+      <strong>{{ t('taxReturn.projection_incomplete') }}</strong>
+      <ul class="mt-1 list-disc list-inside">
+        <li v-for="w in estimate.projection_warnings" :key="w.source">{{ warningLabel(w) }}: {{ w.reason }}</li>
+      </ul>
+    </div>
+
+    <div v-if="estimate.applicable" class="overflow-x-auto">
       <table class="w-full text-sm">
         <thead class="text-xs text-neutral-500 uppercase tracking-wide">
           <tr>

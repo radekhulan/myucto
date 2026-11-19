@@ -427,8 +427,12 @@ z minulého roku, konečný stav zásob (způsob B) a odpisy roku podle odpisov�
 stejně jako u zaúčtovaných odpisů. Opravné a dohadné položky jsou jen návrhy
 k potvrzení, zobrazí se šedě a do projekce se nesčítají. Každá položka odkazuje na
 uzávěrku období, odpisy na Majetek. Zaúčtovaný krok z projekce zmizí, takže se nic
-nezapočte dvakrát. Samotné přiznání (řádky a XML) počítá jen se zaúčtovanými položkami
-a schválenými ručními úpravami. Účetní závěrku dokončete podle
+nezapočte dvakrát. Když náhled některého kroku selže (například kvůli neplatnému
+nastavení časového rozlišení), projekce ho nezahrne a nad panelem se zobrazí varování
+**Projekce uzávěrky je neúplná** s krokem a důvodem. Projektovaný výsledek a daň jsou
+pak bez tohoto kroku, opravte jeho nastavení v uzávěrce období. Samotné přiznání (řádky
+a XML) počítá jen se zaúčtovanými položkami a schválenými ručními úpravami. Účetní
+závěrku dokončete podle
 [kapitoly Účetní závěrka](72_Uzaverka.md).
 
 ### 43.11.8 Zálohy na daň a pojistné

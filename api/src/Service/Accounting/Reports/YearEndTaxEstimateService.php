@@ -93,6 +93,8 @@ final class YearEndTaxEstimateService
             'return_status' => $preview['status'],
             'vh_posted' => $vhPosted,
             'closing_items' => array_values((array) ($closing['items'] ?? [])),
+            // Kroky uzávěrky, jejichž náhled selhal: projekce je bez nich neúplná.
+            'projection_warnings' => array_values((array) ($closing['warnings'] ?? [])),
             'is_projection' => $isProjection,
             'vh_before_tax' => $vhBeforeTax,
             'increases' => round((float) ($isProjection ? ($projection['projected_increases'] ?? $this->lineValue($result, 70)) : $this->lineValue($result, 70)), 2),

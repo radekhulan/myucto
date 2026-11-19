@@ -2075,6 +2075,8 @@ export interface YearEndTaxEstimate {
   return_status?: 'none' | 'draft' | 'final'
   vh_posted?: number
   closing_items?: YearEndClosingItem[]
+  /** Kroky uzávěrky, jejichž náhled selhal; projekce je bez nich neúplná. */
+  projection_warnings?: { source: string; reason: string }[]
   is_projection?: boolean
   vh_before_tax?: number
   increases?: number

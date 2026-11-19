@@ -240,7 +240,8 @@ už ukazují jiné stránky:
 
 Blok i náhled DPPO ukazují tatáž čísla. Jakmile se krok uzávěrky nebo odpisy
 roku zaúčtují, položka z projekce zmizí a částka je v průběžném výsledku,
-takže se nic nezapočte dvakrát. Mzdy ani jiné budoucí provozní náklady do
+takže se nic nezapočte dvakrát. Selže-li náhled některého kroku uzávěrky, blok
+ukáže varování o neúplné projekci s krokem a důvodem; odhad je pak bez něj. Mzdy ani jiné budoucí provozní náklady do
 zbytku roku odhad neobsahuje, jde o uzávěrku k dnešnímu stavu účetnictví.
 
 U každého řádku je odkaz na stránku, ze které číslo pochází. Blok se
