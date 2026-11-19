@@ -1,5 +1,6 @@
 import { requestSupplierId } from '@/workspace/supplierContext'
 import { api } from './client'
+import { journalListFilterParams } from './listQueries'
 import type { AutomationProvenance } from './automation'
 import type { DimensionRuleWarning, DimensionSplits } from './dimensions'
 
@@ -2716,27 +2717,7 @@ export const accountingApi = {
     if (filters?.include_documents) params.include_documents = 1
     if (filters?.sort_key) params.sort_key = filters.sort_key
     if (filters?.sort_dir) params.sort_dir = filters.sort_dir
-    if (filters?.document_no) params.document_no = filters.document_no
-    if (filters?.period_id) params.period_id = filters.period_id
-    if (filters?.date_from) params.date_from = filters.date_from
-    if (filters?.date_to) params.date_to = filters.date_to
-    if (filters?.source_type) params.source_type = filters.source_type
-    if (filters?.source_id) params.source_id = filters.source_id
-    if (filters?.entry_id) params.entry_id = filters.entry_id
-    if (filters?.posted !== undefined) params.posted = filters.posted ? '1' : '0'
-    if (filters?.reversal) params.reversal = filters.reversal
-    if (filters?.automation) params.automation = filters.automation
-    if (filters?.q) params.q = filters.q
-    if (filters?.account_from) params.account_from = filters.account_from
-    if (filters?.account_to) params.account_to = filters.account_to
-    if (filters?.amount_from !== undefined) params.amount_from = filters.amount_from
-    if (filters?.amount_to !== undefined) params.amount_to = filters.amount_to
-    if (filters?.integrity) params.integrity = filters.integrity
-    if (filters?.pair_status) params.pair_status = filters.pair_status
-    if (filters?.dimension_value_id) {
-      params.dimension_value_id = filters.dimension_value_id
-      if (filters.dimension_descendants === false) params.dimension_descendants = 0
-    }
+    Object.assign(params, journalListFilterParams(filters))
     if (filters?.page) params.page = filters.page
     if (filters?.per_page) params.per_page = filters.per_page
     return api.get<JournalListResponse>('/accounting/journal', { params }).then(r => r.data)
