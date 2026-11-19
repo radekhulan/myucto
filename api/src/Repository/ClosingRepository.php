@@ -1067,6 +1067,25 @@ final class ClosingRepository
     }
 
     /**
+     * Přepíše jen payload existujícího kroku; stav, poznámka a čas i autor potvrzení
+     * zůstávají (příznak k přepočtu u daně z příjmů po vrácení jiného kroku).
+     *
+     * @param array<string,mixed> $payload
+     */
+    public function updateStepPayload(int $supplierId, int $periodId, string $key, array $payload): void
+    {
+        $this->db->pdo()->prepare(
+            'UPDATE accounting_closing_steps SET payload = ?
+              WHERE supplier_id = ? AND period_id = ? AND step_key = ?'
+        )->execute([
+            json_encode($payload, JSON_UNESCAPED_UNICODE | ($payload === [] ? JSON_FORCE_OBJECT : 0)),
+            $supplierId,
+            $periodId,
+            $key,
+        ]);
+    }
+
+    /**
      * Vrátí krok do stavu pending a smaže payload (revert kroku, R12).
      */
     public function resetStep(int $supplierId, int $periodId, string $key): void

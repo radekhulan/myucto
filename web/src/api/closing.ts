@@ -270,6 +270,9 @@ export interface ClosingState {
   depreciation_step_required?: boolean
   /** Počáteční stavy dalšího roku pro krok open_next; null = krok je hotový. */
   opening_takeover?: OpeningTakeover | null
+  /** Daň z příjmů je potřeba přepočítat: po jejím zaúčtování nebo potvrzení se vrátil
+   *  krok, který mění výsledek hospodaření. Do přepočtu nejde uzavřít knihy. */
+  income_tax_stale?: { caused_by: ClosingStepKey[]; at: string | null } | null
 }
 
 export type OpeningTakeoverStatus = 'to_create' | 'match' | 'mismatch' | 'unavailable'

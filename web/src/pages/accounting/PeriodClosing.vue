@@ -241,9 +241,15 @@ const closeBlockedReason = computed<string | null>(() => {
       checks: failing.map(c => checkLabel(c.key)).join(', '),
     })
   }
+  if (incomeTaxStale.value) return t('accounting.closing.close.blocked_income_tax_stale')
   if (!(state.value.can_close ?? true)) return t('accounting.closing.close.blocked_steps')
   return null
 })
+
+/** Daň z příjmů označená k přepočtu po vrácení kroku, který mění výsledek hospodaření. */
+const incomeTaxStale = computed(() => state.value?.income_tax_stale ?? null)
+const incomeTaxStaleSteps = computed(() =>
+  (incomeTaxStale.value?.caused_by ?? []).map(k => t(`accounting.closing.steps.${k}.title`)).join(', '))
 
 function runPrecheck() {
   mutate(() => closingApi.runStep(periodId, 'precheck', { row_version: rowVersion.value }),
@@ -1559,6 +1565,15 @@ const canOpenNextStage = computed(() => ['closed', 'reviewed', 'approved'].inclu
             {{ t('accounting.closing.assist.needs_closing') }}
           </div>
           <template v-else>
+            <div v-if="incomeTaxStale" data-test="income-tax-stale"
+              class="rounded-md border border-warning-500/30 bg-warning-50 px-3 py-2 text-sm text-warning-800 space-y-2">
+              <p>{{ t('accounting.closing.income_tax.stale', { steps: incomeTaxStaleSteps }) }}</p>
+              <button v-if="isClosing && auth.canWrite('accounting.periods.close')"
+                @click="confirmStep('income_tax', step('income_tax')?.status === 'skipped' ? 'skipped' : 'done')"
+                :disabled="busy" :class="btnOutline('neutral')" data-test="income-tax-stale-confirm">
+                {{ t('accounting.closing.income_tax.stale_confirm') }}
+              </button>
+            </div>
             <div v-if="incomeTaxPreview" class="text-sm space-y-1">
               <div v-if="!incomeTaxPreview.applicable" class="rounded-md bg-warning-50 px-3 py-2 text-warning-800">
                 {{ t('accounting.closing.income_tax.not_applicable_fo') }}

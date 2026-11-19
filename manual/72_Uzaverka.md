@@ -275,7 +275,7 @@ označena varováním (ověřte uznání dluhu nebo stavění lhůty).
 Volitelný krok pro zaúčtování **předpisu splatné daně z příjmů** k rozvahovému dni (**MD 591 / D 341**).
 
 1. V panelu zkontrolujte přednabídnutou částku **Návrh z DPPO přiznání** (z finalizovaného přiznání DPPO téhož roku, pokud existuje) a zůstatky účtů 341 (zaplacené zálohy) a 591. Odkaz **Report úprav základu daně (podklad)** vede na sestavu jako podklad.
-2. Není-li finalizované přiznání, aplikace daň dopočte z účetnictví a upozorní, ať ji před zaúčtováním ověříte. U neziskové organizace (vyhláška 504) se dopočet bere z výpočtu DPPO nad potvrzeným daňovým posouzením; když posouzení chybí nebo zastaralo, panel napíše proč. Případně částku zadejte ručně.
+2. Není-li finalizované přiznání, aplikace daň dopočte z účetnictví a upozorní, ať ji před zaúčtováním ověříte. Dopočet počítá stejně jako náhled přiznání DPPO: včetně ručních údajů rozpracovaného přiznání (ztráta, dary, slevy) a včetně předpokládaného dopadu kroků uzávěrky, které ještě nejsou zaúčtované. Krok Zásoby jde v rámci 500 až po dani, návrh proto už počítá s konečným stavem zásob podle skladové evidence a po zaúčtování zásob se nezmění. U neziskové organizace (vyhláška 504) se dopočet bere z výpočtu DPPO nad potvrzeným daňovým posouzením; když posouzení chybí nebo zastaralo, panel napíše proč. Případně částku zadejte ručně.
 3. Zadejte kladnou **Splatnou daň**. U neziskové organizace zvolte, do které **činnosti** daň patří (hlavní nebo hospodářská), protože každý nákladový řádek výkazu 504 nese činnost. Klikněte na **Zaúčtovat daň**. Zápis dostane číslo z řady UZ.
 4. Potvrďte krok.
 
@@ -288,6 +288,12 @@ označí jako nepoužitelný a vyžaduje jeho vědomé přeskočení.
 > [!TIP]
 > Kroky Opravné položky a Daň z příjmů musí být před uzavřením knih dokončené nebo vědomě přeskočené, protože
 > ovlivňují výsledek hospodaření.
+
+Vezmete-li po zaúčtování nebo potvrzení daně zpět krok, který mění výsledek hospodaření (Odpisy majetku, Kurzové
+rozdíly, Dohadné položky, Časové rozlišení, Opravné položky, Zásoby), případně stornujete jeho asistovaný zápis,
+krok Daň z příjmů zůstane hotový, ale panel ohlásí, že daň je potřeba přepočítat, a uvede, který krok to způsobil.
+Knihy do té doby uzavřít nejde. Daň zaúčtujte znovu, nebo ji tlačítkem **Potvrdit daň beze změny** potvrďte, pokud
+částka platí dál.
 
 U neziskové organizace (vyhláška 504) je krok Zásoby před daní: zápis zásob mění náklady, ze kterých vychází daňové
 posouzení a výpočet daně. Daň proto nejde zaúčtovat, dokud krok Zásoby (je-li sklad zapnutý) není hotový.

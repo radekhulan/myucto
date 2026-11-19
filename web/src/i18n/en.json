@@ -22246,7 +22246,8 @@
         "override_text": "The period has unposted active documents. You may close the books over them only with a documented reason — the exception is recorded in the audit log and the closing package.",
         "override_reason": "Override reason",
         "override_reason_ph": "E.g. document delivered after closing, will be posted in the next period",
-        "override_button": "Close over unposted"
+        "override_button": "Close over unposted",
+        "blocked_income_tax_stale": "Books cannot be closed yet - the income tax needs to be recalculated because a step that changes the profit or loss was reverted after it was posted. Open the Income tax step."
       },
       "open": {
         "hint": "Books opening balances of balance sheet accounts via 701 — Opening balance sheet account into the following period (created automatically if missing) and transfers the profit or loss to 431.",
@@ -22329,14 +22330,16 @@
         "activity_required": "Choose which activity the income tax belongs to.",
         "computed_from_assessment": "Computed from the confirmed tax assessment (no finalised return) - check before posting",
         "suggestion_unavailable": "The tax cannot be suggested yet: {reason}",
-        "stock_pending": "The inventory close (step 8) has not run yet. Under method B the closing stock is removed from expenses, so the tax base will still change — do not rely on this figure yet. Book the inventory first, then come back.",
+        "stock_pending": "The inventory closing has not run yet. The tax suggestion already includes its expected effect from the stock records, the same as the CIT return preview. Check the suggestion again after the inventory is posted.",
         "no_return": "No finalized CIT return for the year — enter the amount manually per the tax-base adjustments report.",
         "amount": "Income tax payable",
         "tax_base_link": "Tax-base adjustments report (source)",
         "book": "Book the tax",
         "booked": "Income tax payable has been booked.",
         "amount_required": "Enter a positive income tax amount.",
-        "not_applicable_fo": "Personal income tax is not an expense of the accounting entity and is not posted to 591/341. Explicitly skip this step."
+        "not_applicable_fo": "Personal income tax is not an expense of the accounting entity and is not posted to 591/341. Explicitly skip this step.",
+        "stale": "The tax needs to be recalculated: after it was posted, the step {steps} was reverted, which changes the profit or loss. Post the tax again, or confirm it unchanged if the amount still applies.",
+        "stale_confirm": "Confirm tax unchanged"
       },
       "stock": {
         "needs_closing": "This step becomes available once closing has started (status Closing).",

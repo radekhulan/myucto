@@ -576,6 +576,63 @@ final class ClosingWorkflowTest extends TestCase
     }
 
     /**
+     * Vrácení kroku, který mění výsledek hospodaření, po zaúčtování daně z příjmů označí
+     * daň k přepočtu. Knihy nejde uzavřít, dokud se daň znovu nepotvrdí nebo nespustí.
+     */
+    public function testRevertingProfitStepAfterIncomeTaxMarksTaxStale(): void
+    {
+        $this->seedScenario();
+        $this->runStepsUntilCloseReady();
+        $sid = $this->supplierId;
+        $pid = $this->periodId;
+        $this->closing->runIncomeTax($sid, $pid, 1260.0, $this->rv(), $this->meta());
+
+        $reverted = $this->closing->revertStep($sid, $pid, 'estimates', $this->rv(), $this->meta());
+        self::assertTrue($reverted['income_tax_stale'] ?? false);
+        $this->closing->confirmStep($sid, $pid, 'estimates', 'skipped', null, $this->rv(), $this->meta());
+
+        $state = $this->closing->state($sid, $pid);
+        self::assertSame(['estimates'], $state['income_tax_stale']['caused_by'] ?? null);
+        self::assertSame('done', $this->stepStatus($state, 'income_tax'), 'Krok daně zůstává hotový, jen se označí k přepočtu.');
+        self::assertFalse($state['can_close']);
+        try {
+            $this->closing->closeBooks($sid, $pid, $this->rv(), $this->meta());
+            self::fail('Daň označená k přepočtu musí uzavření knih blokovat.');
+        } catch (ClosingException $e) {
+            self::assertSame('income_tax_stale', $e->errorCode);
+        }
+
+        // Vrácení kroku, který výsledek nemění, daň neoznačí.
+        $this->closing->revertStep($sid, $pid, 'precheck', $this->rv(), $this->meta());
+        self::assertSame(['estimates'], $this->closing->state($sid, $pid)['income_tax_stale']['caused_by'] ?? null);
+        $this->closing->runPrecheck($sid, $pid, $this->rv(), $this->meta());
+
+        $this->closing->confirmStep($sid, $pid, 'income_tax', 'done', null, $this->rv(), $this->meta());
+        $state = $this->closing->state($sid, $pid);
+        self::assertNull($state['income_tax_stale']);
+        self::assertTrue($state['can_close']);
+        $this->completeInventory($sid, $pid, $this->userId);
+        self::assertSame('closed', $this->closing->closeBooks($sid, $pid, $this->rv(), $this->meta())['status']);
+    }
+
+    /** Nové zaúčtování daně po vrácení kroku příznak přepočtu také zruší. */
+    public function testRerunningIncomeTaxClearsStaleFlag(): void
+    {
+        $this->seedScenario();
+        $this->runStepsUntilCloseReady();
+        $sid = $this->supplierId;
+        $pid = $this->periodId;
+        $this->closing->confirmStep($sid, $pid, 'provisions', 'done', null, $this->rv(), $this->meta());
+        $this->closing->runIncomeTax($sid, $pid, 1260.0, $this->rv(), $this->meta());
+        $this->closing->revertStep($sid, $pid, 'provisions', $this->rv(), $this->meta());
+        $this->closing->confirmStep($sid, $pid, 'provisions', 'skipped', null, $this->rv(), $this->meta());
+        self::assertSame(['provisions'], $this->closing->state($sid, $pid)['income_tax_stale']['caused_by'] ?? null);
+
+        $this->closing->runIncomeTax($sid, $pid, 1300.0, $this->rv(), $this->meta());
+        self::assertNull($this->closing->state($sid, $pid)['income_tax_stale']);
+    }
+
+    /**
      * Nerozdělený zůstatek 431 už PŘED zahájením blokuje start() (uživatel by se jinak
      * zasekl uprostřed uzávěrky). Pojistka u uzavření knih ale musí zůstat funkční pro
      * případ, kdy 431 vznikne až v průběhu — proto ho sem vpravíme až po zahájení.

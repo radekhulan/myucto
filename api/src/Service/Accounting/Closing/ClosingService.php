@@ -95,6 +95,24 @@ final class ClosingService
     public const STEP_KEYS = ClosingSteps::ALL;
 
     /**
+     * Kroky, jejichž vrácení mění výsledek hospodaření, a tím i základ daně z příjmů.
+     * Vrátí-li se některý po zaúčtování nebo potvrzení daně, daň se označí k přepočtu
+     * ({@see markIncomeTaxStale}) a knihy nejde uzavřít, dokud se krok daně znovu nespustí
+     * nebo nepotvrdí.
+     */
+    private const INCOME_TAX_INPUT_STEPS = ['depreciation', 'fx_revaluation', 'estimates', 'deferrals', 'provisions', 'stock'];
+
+    /** Názvy kroků do chybových hlášek (shodně s průvodcem). */
+    private const STEP_LABELS = [
+        'depreciation' => 'Odpisy majetku',
+        'fx_revaluation' => 'Kurzové rozdíly',
+        'estimates' => 'Dohadné položky',
+        'deferrals' => 'Časové rozlišení',
+        'provisions' => 'Opravné položky',
+        'stock' => 'Zásoby',
+    ];
+
+    /**
      * Klíče kontrol, které staví {@see buildErrorChecks} v jednom průchodu.
      *
      * Existuje proto, aby {@see buildChecks} poznal, že se ta metoda vůbec nemusí volat,
@@ -281,6 +299,7 @@ final class ClosingService
         $prevOk = $prev === null || AccountingPeriodStatus::isClosed((string) $prev['status']);
         $requiredPreClose = $this->preCloseStepKeys($supplierId, $period);
         $preCloseDone = $this->stepsComplete($steps, $requiredPreClose);
+        $incomeTaxStale = $this->incomeTaxStale($steps);
         $hasClosingEntries = $this->closing->hasClosingEntries($supplierId, $periodId);
         $nextAllowsRevert = $next === null || (!AccountingPeriodStatus::isClosed((string) $next['status'])
             && !$this->closing->hasClosingEntries($supplierId, (int) $next['id']));
@@ -301,7 +320,8 @@ final class ClosingService
             'can_start' => $period['status'] === 'open' && $prevOk,
             'precheck_stale' => $this->precheckStale($supplierId, $period, $steps),
             'can_abort' => $period['status'] === 'closing' && !$hasClosingEntries,
-            'can_close' => $period['status'] === 'closing' && $preCloseDone,
+            'can_close' => $period['status'] === 'closing' && $preCloseDone && $incomeTaxStale === null,
+            'income_tax_stale' => $incomeTaxStale,
             'stock_step_required' => in_array('stock', $requiredPreClose, true),
             'depreciation_step_required' => in_array('depreciation', $requiredPreClose, true),
             'can_open_next' => AccountingPeriodStatus::isClosed((string) $period['status'])
@@ -816,6 +836,11 @@ final class ClosingService
                     $this->roleProfile($supplierId, (string) $period['ends_on'])->framework === AccountingFrameworkService::CZ_504);
             }
             $existing = $this->stepsMap($supplierId, $periodId)[$stepKey];
+            // Nové potvrzení daně je vědomé rozhodnutí nad aktuálními čísly: příznak přepočtu
+            // po vrácení kroku se tím ruší ({@see markIncomeTaxStale}).
+            if ($stepKey === 'income_tax' && is_array($existing['payload'])) {
+                unset($existing['payload']['stale']);
+            }
             $this->closing->upsertStep(
                 $supplierId,
                 $periodId,
@@ -1389,7 +1414,8 @@ final class ClosingService
                 $payload['reversed'][] = $record;
                 $this->closing->upsertStep($supplierId, $periodId, $stepKey, $step['status'], $payload, $step['note'], $meta['user_id'] ?? null);
                 $this->bumpVersion($supplierId, $periodId, $rowVersion);
-                return ['entry_id' => $entryId, 'reversal_entry_id' => $reversalId, 'step' => $stepKey];
+                $stale = $this->markIncomeTaxStale($supplierId, $periodId, $stepKey);
+                return ['entry_id' => $entryId, 'reversal_entry_id' => $reversalId, 'step' => $stepKey] + ($stale ? ['income_tax_stale' => true] : []);
             };
             return $is504 ? (new DimensionPeriodGuard($this->db))->transaction($work) : $work();
         });
@@ -4436,6 +4462,15 @@ final class ClosingService
                     'Kroky průvodce před uzavřením knih musí být done/skipped.',
                 );
             }
+            if (($stale = $this->incomeTaxStale($steps)) !== null) {
+                throw new ClosingException(
+                    'income_tax_stale',
+                    'Daň z příjmů je potřeba přepočítat: po jejím zaúčtování se vrátil krok '
+                        . implode(', ', array_map(static fn (string $k): string => self::STEP_LABELS[$k] ?? $k, $stale['caused_by']))
+                        . ', který mění výsledek hospodaření. Spusťte krok Daň z příjmů znovu, nebo ho znovu potvrďte.',
+                    422,
+                );
+            }
             $this->assertAccrualDeferralsCurrent($supplierId, $periodId, $steps['deferrals']);
             $failing = $this->failingErrorChecks($supplierId, $period);
             if ($failing !== []) {
@@ -5019,7 +5054,15 @@ final class ClosingService
         if (in_array($stepKey, ['fx_revaluation', 'open_next'], true)) {
             $jointFx = new Fx504Service($this->db, $this->journal, $this->series, $this->closing, $this->posting, $this->activity);
             if ($jointFx->handles($supplierId, $periodId, true)) {
-                if ($stepKey === 'fx_revaluation') return $jointFx->revert($supplierId, $periodId, $rowVersion, $meta);
+                if ($stepKey === 'fx_revaluation') {
+                    return $this->tx(function () use ($jointFx, $supplierId, $periodId, $rowVersion, $meta): array {
+                        $result = $jointFx->revert($supplierId, $periodId, $rowVersion, $meta);
+                        if ($this->markIncomeTaxStale($supplierId, $periodId, 'fx_revaluation')) {
+                            $result['income_tax_stale'] = true;
+                        }
+                        return $result;
+                    });
+                }
                 return (new DimensionPeriodGuard($this->db))->transaction(fn (): array => $this->revertStepBody($supplierId, $periodId, $stepKey, $rowVersion, $meta));
             }
         }
@@ -5257,6 +5300,10 @@ final class ClosingService
             }
 
             $result['dumps'] = $dumps;
+            if (in_array($stepKey, self::INCOME_TAX_INPUT_STEPS, true)
+                && $this->markIncomeTaxStale($supplierId, $periodId, $stepKey)) {
+                $result['income_tax_stale'] = true;
+            }
             $this->audit($supplierId, 'accounting.closing_step_reverted', $periodId, [
                 'step' => $stepKey,
                 'entry_dump' => $dumps,
@@ -6788,6 +6835,49 @@ final class ClosingService
             ];
         }
         return $map;
+    }
+
+    /**
+     * Označí zaúčtovanou nebo potvrzenou daň z příjmů k přepočtu, protože se vrátil krok,
+     * který mění výsledek hospodaření ({@see INCOME_TAX_INPUT_STEPS}). Mění jen payload
+     * kroku (čas a autor potvrzení zůstávají). Fyzická osoba daň na 591 neúčtuje, u ní
+     * se nic neoznačuje. Volat jen uvnitř transakce se zamčeným obdobím.
+     *
+     * @return bool true = daň je nově (nebo dál) označená k přepočtu
+     */
+    private function markIncomeTaxStale(int $supplierId, int $periodId, string $causedBy): bool
+    {
+        $step = $this->stepsMap($supplierId, $periodId, true)['income_tax'];
+        if (!in_array($step['status'], ['done', 'skipped'], true) || $this->supplierTaxpayerType($supplierId) === 'fo') {
+            return false;
+        }
+        $payload = $step['payload'] ?? [];
+        $causes = (array) ($payload['stale']['caused_by'] ?? []);
+        if (!in_array($causedBy, $causes, true)) {
+            $causes[] = $causedBy;
+        }
+        $payload['stale'] = ['caused_by' => array_values($causes), 'at' => date('Y-m-d H:i:s')];
+        $this->closing->updateStepPayload($supplierId, $periodId, 'income_tax', $payload);
+        return true;
+    }
+
+    /**
+     * Příznak přepočtu daně z příjmů, platí jen pro hotový nebo přeskočený krok.
+     *
+     * @param array<string, array<string,mixed>> $steps
+     * @return array{caused_by: list<string>, at: ?string}|null
+     */
+    private function incomeTaxStale(array $steps): ?array
+    {
+        $step = $steps['income_tax'] ?? null;
+        if ($step === null || !in_array($step['status'] ?? 'pending', ['done', 'skipped'], true)) {
+            return null;
+        }
+        $stale = $step['payload']['stale'] ?? null;
+        if (!is_array($stale) || ($stale['caused_by'] ?? []) === []) {
+            return null;
+        }
+        return ['caused_by' => array_values(array_map('strval', (array) $stale['caused_by'])), 'at' => $stale['at'] ?? null];
     }
 
     /**

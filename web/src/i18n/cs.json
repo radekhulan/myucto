@@ -22246,7 +22246,8 @@
         "override_text": "V období jsou nezaúčtované aktivní doklady. Uzavřít knihy přes ně můžete jen s doloženým důvodem - výjimka se zapíše do auditu i do závěrkového balíčku.",
         "override_reason": "Důvod override",
         "override_reason_ph": "Např. doklad dodán po uzávěrce, doúčtuje se v následujícím období",
-        "override_button": "Uzavřít přes nezaúčtované"
+        "override_button": "Uzavřít přes nezaúčtované",
+        "blocked_income_tax_stale": "Uzavřít knihy zatím nejde - daň z příjmů je potřeba přepočítat, protože se po jejím zaúčtování vrátil krok, který mění výsledek hospodaření. Otevřete krok Daň z příjmů."
       },
       "open": {
         "hint": "Zaúčtuje počáteční stavy rozvahových účtů přes 701 - Počáteční účet rozvažný do následujícího období (založí se automaticky, pokud neexistuje) a převede výsledek hospodaření na 431.",
@@ -22329,14 +22330,16 @@
         "activity_required": "Zvolte, do které činnosti daň z příjmů patří.",
         "computed_from_assessment": "Dopočteno z potvrzeného daňového posouzení (bez finalizovaného přiznání) - ověřte před zaúčtováním",
         "suggestion_unavailable": "Návrh daně zatím nejde spočítat: {reason}",
-        "stock_pending": "Uzávěrka zásob (krok 8) zatím neproběhla. Způsobem B se konečný stav zásob odúčtuje z nákladů, takže základ daně se po ní ještě změní - z tohoto čísla zatím nevycházejte. Zaúčtujte nejdřív zásoby a pak se sem vraťte.",
+        "stock_pending": "Uzávěrka zásob zatím neproběhla. Návrh daně už počítá s jejím předpokládaným dopadem podle skladové evidence, stejně jako náhled DPPO. Po zaúčtování zásob návrh ověřte.",
         "no_return": "Za rok není finalizované DPPO přiznání - zadejte částku ručně dle reportu úprav základu daně.",
         "amount": "Splatná daň",
         "tax_base_link": "Report úprav základu daně (podklad)",
         "book": "Zaúčtovat daň",
         "booked": "Splatná daň byla zaúčtována.",
         "amount_required": "Zadejte kladnou částku splatné daně.",
-        "not_applicable_fo": "Daň z příjmů fyzické osoby není nákladem účetní jednotky a neúčtuje se na 591/341. Krok vědomě přeskočte."
+        "not_applicable_fo": "Daň z příjmů fyzické osoby není nákladem účetní jednotky a neúčtuje se na 591/341. Krok vědomě přeskočte.",
+        "stale": "Daň je potřeba přepočítat: po jejím zaúčtování se vrátil krok {steps}, který mění výsledek hospodaření. Zaúčtujte daň znovu, nebo ji potvrďte beze změny, pokud částka platí dál.",
+        "stale_confirm": "Potvrdit daň beze změny"
       },
       "stock": {
         "needs_closing": "Krok je dostupný až po zahájení uzávěrky (stav Uzavírá se).",
