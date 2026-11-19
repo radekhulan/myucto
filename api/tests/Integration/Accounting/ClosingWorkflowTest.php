@@ -725,6 +725,27 @@ final class ClosingWorkflowTest extends TestCase
         self::assertSame(1, (int) $this->db->pdo()->query('SELECT COUNT(*) FROM journal_entries WHERE supplier_id = ' . $this->supplierId . " AND source_type = 'opening' AND period_id = " . $nextId)->fetchColumn());
     }
 
+    /** Kurzové rozdíly a zásoby jde přeskočit jen v roce s převzatou uzávěrkou. */
+    public function testFxAndStockCanBeSkippedOnlyWithTakenOverClosing(): void
+    {
+        $this->seedScenario();
+        $this->closing->start($this->supplierId, $this->periodId, $this->rv(), $this->meta());
+        try {
+            $this->closing->confirmStep($this->supplierId, $this->periodId, 'fx_revaluation', 'skipped', null, $this->rv(), $this->meta());
+            self::fail('Bez převzaté uzávěrky se kurzové rozdíly nepřeskakují.');
+        } catch (ClosingException $e) {
+            self::assertSame('step_not_skippable', $e->errorCode);
+        }
+
+        $this->closing->abort($this->supplierId, $this->periodId, $this->rv(), $this->meta());
+        $this->postTakenOverClosingAndOpening();
+        $this->closing->start($this->supplierId, $this->periodId, $this->rv(), $this->meta());
+        $this->closing->confirmStep($this->supplierId, $this->periodId, 'fx_revaluation', 'skipped', null, $this->rv(), $this->meta());
+        $this->closing->confirmStep($this->supplierId, $this->periodId, 'stock', 'skipped', null, $this->rv(), $this->meta());
+        $state = $this->closing->state($this->supplierId, $this->periodId);
+        self::assertSame(['skipped', 'skipped'], [$this->stepStatus($state, 'fx_revaluation'), $this->stepStatus($state, 'stock')]);
+    }
+
     /** Převzatá uzávěrka a za ní zápis z doby po převodu: nesmíšené uzávěrky se odmítnou. */
     public function testTakenOverClosingWithLaterEntryRefusesToCloseBooks(): void
     {

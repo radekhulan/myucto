@@ -22536,7 +22536,9 @@
       "taken_over": {
         "title": "Closing taken over from the original system",
         "text": "This year was already closed in the original accounting program and its closing entries were migrated with the data. The wizard does not post the closing again: confirm or skip the steps without new entries, Close books only stores the actual profit or loss and Open new year takes over the migrated opening balances if they match.",
-        "dimensions": "Because of the taken-over closing, dimensions of this year's documents are frozen and cannot be changed."
+        "dimensions": "Because of the taken-over closing, dimensions of this year's documents are frozen and cannot be changed.",
+        "skip_hint": "The original system already performed this step in the taken-over closing. A new entry would stay unclosed after it, so skip the step.",
+        "skip": "Skip (done in the original system)"
       }
     },
     "monthly_check": {

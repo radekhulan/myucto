@@ -22536,7 +22536,9 @@
       "taken_over": {
         "title": "Uzávěrka převzatá z původního systému",
         "text": "Tento rok uzavřel už původní účetní program a jeho uzávěrkové zápisy se převedly s daty. Průvodce uzávěrku znovu neúčtuje: kroky potvrďte nebo přeskočte bez nových zápisů, Uzavření knih jen uloží skutečný výsledek hospodaření a Otevření nového roku převezme převedené počáteční stavy, pokud s nimi souhlasí.",
-        "dimensions": "Kvůli převzaté uzávěrce jsou dimenze dokladů tohoto roku zmrazené a nejdou měnit."
+        "dimensions": "Kvůli převzaté uzávěrce jsou dimenze dokladů tohoto roku zmrazené a nejdou měnit.",
+        "skip_hint": "Tento krok už provedl původní systém v převzaté uzávěrce. Nový zápis by po ní zůstal neuzavřený, krok proto přeskočte.",
+        "skip": "Přeskočit (provedeno v původním systému)"
       }
     },
     "monthly_check": {

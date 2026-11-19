@@ -810,6 +810,9 @@ final class ClosingAction
         try {
             if ($step === 'precheck') {
                 $data = $this->closing->runPrecheck($supplierId, $periodId, $rowVersion, $meta);
+            } elseif (in_array($step, ['fx_revaluation', 'stock'], true) && ($body['status'] ?? null) === 'skipped') {
+                // Jen rok s uzávěrkou převzatou z původního systému (ověří služba).
+                $data = $this->closing->confirmStep($supplierId, $periodId, $step, 'skipped', $this->nullableString($body['note'] ?? null), $rowVersion, $meta);
             } elseif ($step === 'fx_revaluation') {
                 $bankRows = $this->parseBankRows($body['bank_rows'] ?? [], $response, $err);
                 if ($bankRows === null) return $err;

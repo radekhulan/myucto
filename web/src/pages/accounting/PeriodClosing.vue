@@ -1065,6 +1065,11 @@ const canOpenNextStage = computed(() => ['closed', 'reviewed', 'approved'].inclu
 
         <!-- 3) Kurzové rozdíly -->
         <template v-else-if="selected === 'fx_revaluation'">
+          <div v-if="state.closing_taken_over && isClosing && step('fx_revaluation')?.status === 'pending' && auth.canWrite('accounting.periods.close')"
+            class="rounded-md border border-primary-200 bg-primary-50 dark:bg-primary-500/[0.06] px-3 py-2 text-sm text-primary-800 dark:text-primary-200 space-y-2" data-test="taken-over-skip-fx_revaluation">
+            <p>{{ t('accounting.closing.taken_over.skip_hint') }}</p>
+            <button @click="confirmStep('fx_revaluation', 'skipped')" :disabled="busy" :class="btnOutline('neutral')">{{ t('accounting.closing.taken_over.skip') }}</button>
+          </div>
           <FxRevaluation504 v-if="state.accounting_framework === 'cz_504'" :supplier-id="state.period.supplier_id" :period-id="state.period.id"
             :row-version="rowVersion" :ends-on="state.period.ends_on" :can-write="isClosing && auth.canWrite('accounting.periods.close')"
             :can-revert="!!state.can_revert_fx_revaluation" @updated="load" />
@@ -1679,6 +1684,11 @@ const canOpenNextStage = computed(() => ['closed', 'reviewed', 'approved'].inclu
 
         <!-- Zásoby (SKLAD §3.4 — uzávěrka způsobem B) -->
         <template v-else-if="selected === 'stock'">
+          <div v-if="state.closing_taken_over && isClosing && step('stock')?.status === 'pending' && auth.canWrite('accounting.periods.close')"
+            class="rounded-md border border-primary-200 bg-primary-50 dark:bg-primary-500/[0.06] px-3 py-2 text-sm text-primary-800 dark:text-primary-200 space-y-2" data-test="taken-over-skip-stock">
+            <p>{{ t('accounting.closing.taken_over.skip_hint') }}</p>
+            <button @click="confirmStep('stock', 'skipped')" :disabled="busy" :class="btnOutline('neutral')">{{ t('accounting.closing.taken_over.skip') }}</button>
+          </div>
           <!-- Firma bez skladu v podvojném účetnictví: krok se přeskakuje sám, neblokuje. -->
           <p v-if="!stockRequired" class="text-sm text-neutral-500">
             {{ t('accounting.closing.stock.not_applicable') }}

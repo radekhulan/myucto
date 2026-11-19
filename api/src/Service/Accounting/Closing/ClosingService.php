@@ -195,6 +195,13 @@ final class ClosingService
 
     /** Hloubka vnoření {@see tx()}: počet uvolněných párování se čte jen v nejvnějším volání. */
     private int $txDepth = 0;
+
+    /**
+     * Návrh daně z příjmů po hotovém kroku Kurzové rozdíly: jeho dopad už leží v deníku,
+     * projekce uzávěrky ho tedy nemá počítat znovu ({@see incomeTaxFromLedger}). Náhled
+     * kurzových rozdílů je navíc u velké firmy nejdražší část projekce.
+     */
+    private bool $projectionSkipsFx = false;
     private ?EntryFormService $entryForms = null;
 
     public function __construct(
@@ -927,15 +934,23 @@ final class ClosingService
      */
     public function confirmStep(int $supplierId, int $periodId, string $stepKey, string $status, ?string $note, int $rowVersion, array $meta = []): array
     {
-        if (!in_array($stepKey, ClosingSteps::CONFIRMABLE, true)) {
+        // Kurzové rozdíly a zásoby jde přeskočit jen v roce s uzávěrkou převzatou z původního
+        // systému: ten je už zaúčtoval a nový zápis by po převzaté uzávěrce zůstal neuzavřený.
+        $takenOverSkip = in_array($stepKey, ['fx_revaluation', 'stock'], true) && $status === 'skipped';
+        if (!in_array($stepKey, ClosingSteps::CONFIRMABLE, true) && !$takenOverSkip) {
             throw new ClosingException('unknown_step', 'Krok "' . $stepKey . '" nelze potvrdit tímto způsobem.');
         }
         if (!in_array($status, ['done', 'skipped'], true)) {
             throw new ClosingException('invalid_step_status', 'Stav kroku musí být done|skipped.');
         }
-        return $this->tx(function () use ($supplierId, $periodId, $stepKey, $status, $note, $rowVersion, $meta): array {
+        return $this->tx(function () use ($supplierId, $periodId, $stepKey, $status, $note, $rowVersion, $meta, $takenOverSkip): array {
             $period = $this->lockPeriod($supplierId, $periodId, $rowVersion);
             $this->assertStatus($period, $stepKey === 'depreciation' ? ['open', 'closing'] : ['closing']);
+            if ($takenOverSkip && ($this->closing->takenOverClosingEntryIds($supplierId, $periodId) === []
+                || $this->roleProfile($supplierId, (string) $period['ends_on'])->framework === AccountingFrameworkService::CZ_504)) {
+                throw new ClosingException('step_not_skippable',
+                    'Krok "' . $stepKey . '" jde přeskočit jen v roce s uzávěrkou převzatou z původního systému.', 422);
+            }
             if ($stepKey === 'income_tax' && $status === 'done') {
                 $this->assertStockBeforeIncomeTax($supplierId, $periodId,
                     $this->roleProfile($supplierId, (string) $period['ends_on'])->framework === AccountingFrameworkService::CZ_504);
@@ -1023,6 +1038,9 @@ final class ClosingService
      */
     public function fxPreview(int $supplierId, int $periodId, array $bankRows = [], ?array $accountDecisions = null, ?array $caseDecisions = null, ?array $securitiesEvidence = null): array
     {
+        if ($this->projectionSkipsFx) {
+            throw new ClosingException('fx_projection_skipped', 'Kurzové rozdíly jsou vyřešené krokem uzávěrky, do projekce se nepočítají.', 409);
+        }
         $jointFx = new Fx504Service($this->db, $this->journal, $this->series, $this->closing, $this->posting, $this->activity);
         if ($jointFx->handles($supplierId, $periodId)) return $jointFx->preview($supplierId, $periodId, $accountDecisions, false, $caseDecisions, $securitiesEvidence);
         if ($accountDecisions !== null || $caseDecisions !== null || $securitiesEvidence !== null) throw new ClosingException('fx_case_framework_unsupported', 'Podrobné posouzení kurzových případů je dostupné pouze pro účetní rámec 504.', 422);
@@ -3686,7 +3704,13 @@ final class ClosingService
                     depreciationPreview: $this->depreciation, nonprofit: $this->nonprofitDppo);
             $draft = $is504 ? null : $this->taxReturns->find($supplierId, $fiscalYear, 'po');
             $inputs = $draft !== null && ($draft['status'] ?? null) === 'draft' ? (array) ($draft['inputs'] ?? []) : [];
-            $data = $provider->gather($supplierId, $fiscalYear, $inputs);
+            $this->projectionSkipsFx = !$is504 && $period !== null
+                && in_array($this->stepsMap($supplierId, (int) $period['id'])['fx_revaluation']['status'], ['done', 'skipped'], true);
+            try {
+                $data = $provider->gather($supplierId, $fiscalYear, $inputs);
+            } finally {
+                $this->projectionSkipsFx = false;
+            }
             if ($data['period'] === null) {
                 return ['amount' => null, 'source' => null, 'reason' => null];
             }

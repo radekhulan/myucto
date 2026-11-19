@@ -20689,7 +20689,7 @@ paths:
               required: [row_version]
               properties:
                 row_version: { type: integer, minimum: 1 }
-                status: { type: string, enum: [done, skipped], description: "Checklist kroky + skip u provisions/income_tax/deferred_tax. income_tax se status done bez amount potvrdí už zaúčtovanou daň beze změny (zruší income_tax_stale); nezaúčtovanou vrátí 422 income_tax_not_posted." }
+                status: { type: string, enum: [done, skipped], description: "Checklist kroky + skip u provisions/income_tax/deferred_tax. income_tax se status done bez amount potvrdí už zaúčtovanou daň beze změny (zruší income_tax_stale); nezaúčtovanou vrátí 422 income_tax_not_posted. fx_revaluation a stock jde se status skipped přeskočit jen v roce s uzávěrkou převzatou z původního systému (closing_taken_over), jinak 422 step_not_skippable." }
                 note: { type: string, maxLength: 500 }
                 amount: { type: number, description: "income_tax — splatná daň (591/341); deferred_tax (500) — odložená daň, kladná = závazek 592/481, záporná = pohledávka 481/592" }
                 reason: { type: string, maxLength: 500, description: "income_tax/deferred_tax — důvod odchylky ruční částky od návrhu" }

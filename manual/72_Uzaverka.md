@@ -429,7 +429,7 @@ Převedete-li data z jiného účetního programu (například z POHODY) i s uz�
 zápisy původního systému, které už vynulovaly výsledkové i rozvahové účty. Průvodce takový rok pozná a nad kroky
 zobrazí upozornění **Uzávěrka převzatá z původního systému**:
 
-- kroky potvrďte nebo přeskočte bez nových zápisů (kurzové rozdíly, zásoby i daň už zaúčtoval původní systém),
+- kroky potvrďte nebo přeskočte bez nových zápisů (kurzové rozdíly, zásoby i daň už zaúčtoval původní systém). Kroky Kurzové rozdíly a Zásoby mají v takovém roce tlačítko **Přeskočit (provedeno v původním systému)**,
 - **Uzavřít knihy** nic znovu nezaúčtuje, období jen uzavře a uloží skutečný výsledek hospodaření spočtený bez převzatých uzávěrkových zápisů,
 - **Otevřít nový rok** porovná převedené počáteční stavy dalšího roku s konečnými stavy spočtenými bez převzaté uzávěrky a při shodě je převezme. Porovnává se jen po účtech, bez dimenzí, protože původní systém otevírací rozvahu převádí bez nich. Haléřový zbytek na účtu 701, který původní systém přenáší z roku do roku, se nese dál stejně,
 - dimenze dokladů tohoto roku jsou kvůli převzaté uzávěrce zmrazené a nejdou měnit.
