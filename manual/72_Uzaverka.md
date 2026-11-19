@@ -420,8 +420,11 @@ ukáže jeden ze stavů:
 Porovnává se účet po účtu: konečné stavy rozvahových účtů a výsledek hospodaření na účtu 431 (tak, jak by je krok
 zaúčtoval) proti součtu převzatých otevíracích zápisů. Rozvažné účty 70x se vynechávají a účet 431 se srovnává
 za syntetiku, takže nevadí, když převzaté stavy vedou výsledek hospodaření na analytice. Kontroluje se také
-členění po dimenzích, střediscích a projektech. Shodná celková částka účtu bez odpovídajícího členění
-nestačí k automatickému převzetí. Dokud nejsou uzavřené knihy, je porovnání jen předběžné.
+členění po dimenzích, střediscích a projektech. Nese-li převzatý zápis členění, shodná celková částka účtu bez
+odpovídajícího členění nestačí k automatickému převzetí. Nenese-li převzatá rozvaha žádnou dimenzi (převod
+z Money S3 a jiných systémů, které počáteční stavy převádějí bez středisek a zakázek), porovnává se jen po účtech
+a panel to uvede. U neziskové organizace (vyhláška 504) se členění porovnává vždy. Dokud nejsou uzavřené knihy,
+je porovnání jen předběžné.
 
 Při rozdílu máte dvě cesty. Buď rozdíl dohledáte a opravíte (v uzavíraném roce nebo v převzatém zápisu), nebo
 použijete **Nahradit převzaté stavy vypočtenými**. Náhrada vyžaduje **povinný důvod** (**Důvod náhrady**), převzaté

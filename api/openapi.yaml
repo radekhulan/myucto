@@ -20418,7 +20418,10 @@ paths:
 
         tabulka rozdílů `diff` [{account_code, expected, existing, difference}],
 
-        `preliminary` = porovnání před uzavřením knih.
+        `preliminary` = porovnání před uzavřením knih, `compare_level` = account,
+        když se porovnává jen po účtech, s důvodem `compare_reason`
+        (taken_over_closing = převzatá uzávěrka, opening_without_dimensions =
+        převzaté otevírací zápisy nenesou žádnou dimenzi).
 
         Účty kontrol vycházejí z historického rámce období; například kontrola
 
@@ -20864,7 +20867,9 @@ paths:
 
         Převzaté počáteční stavy: má-li následující období už zaúčtovaný otevírací
         zápis z jiného zdroje (bez ohledu na source_id), porovná se účet po účtu
-        (70x vynechané a 431 za syntetiku pro 500; 96x a 931 pro 504). Shoda → krok hotový s `opening_source =
+        (70x vynechané a 431 za syntetiku pro 500; 96x a 931 pro 504) i po dimenzích.
+        Jen po účtech se porovnává po převzaté uzávěrce a u převzatých zápisů bez
+        jediné dimenze (převod z Money S3 apod.; u 504 nikdy). Shoda → krok hotový s `opening_source =
         taken_over`, nic se neúčtuje. Rozdíl → 422 `opening_takeover_mismatch`
         (tabulka rozdílů je v `opening_takeover` stavu průvodce), dokud klient
         nepošle `replace_taken_over_opening: true` s důvodem — pak se převzaté

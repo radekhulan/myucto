@@ -123,3 +123,39 @@ describe('PeriodClosing.vue - uzavření knih (close_books)', () => {
     expect(wrapper.find('[data-test="close-books-freeze-warning"]').exists()).toBe(false)
   })
 })
+
+describe('PeriodClosing.vue - převzaté počáteční stavy (open_next)', () => {
+  beforeEach(() => {
+    m.state.mockReset()
+    m.listAccounts.mockReset()
+    m.listAccounts.mockResolvedValue([])
+  })
+
+  async function openStep(reason: 'taken_over_closing' | 'opening_without_dimensions') {
+    const state = makeState([closeStep({ document_no: 'UZ-2025', category_frozen: true, notes_frozen: true })])
+    Object.assign(state, {
+      opening_takeover: {
+        status: 'match', next_period_id: 2, entries: [], diff: [], accounts: 3, preliminary: false,
+        compare_level: 'account', compare_reason: reason,
+      },
+    })
+    m.state.mockResolvedValue(state)
+    const wrapper = mount(PeriodClosing)
+    await flushPromises()
+    const btn = wrapper.findAll('button').find((b) => /steps\.open_next\.title/.test(b.text()))
+    expect(btn).toBeTruthy()
+    await btn!.trigger('click')
+    await flushPromises()
+    return wrapper.find('[data-test="opening-takeover-account-level"]')
+  }
+
+  it('u rozvahy bez dimenzí vysvětlí porovnání po účtech jejím důvodem', async () => {
+    const note = await openStep('opening_without_dimensions')
+    expect(note.text()).toBe('accounting.closing.opening_takeover.account_level_no_dimensions')
+  })
+
+  it('u převzaté uzávěrky ponechá původní vysvětlení', async () => {
+    const note = await openStep('taken_over_closing')
+    expect(note.text()).toBe('accounting.closing.opening_takeover.account_level')
+  })
+})

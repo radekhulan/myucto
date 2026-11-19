@@ -22295,7 +22295,8 @@
         "done_taken_over": "Opening balances taken over — they match on {count} accounts, nothing was booked.",
         "done_replaced": "The taken-over opening balances were replaced with the calculated ones. Reason: {reason}",
         "revert_keeps": "Undoing this step does not delete the taken-over entry.",
-        "account_level": "The year-end closing was taken over from the original system, which migrates the opening balance sheet without dimensions. Opening balances are therefore compared by account only."
+        "account_level": "The year-end closing was taken over from the original system, which migrates the opening balance sheet without dimensions. Opening balances are therefore compared by account only.",
+        "account_level_no_dimensions": "The next year's taken-over opening balances carry no dimensions (migration from another system). They are therefore compared by account only."
       },
       "revert": {
         "confirm": "Really undo this step? Its closing entries will be deleted (with an audit trail).",

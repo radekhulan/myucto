@@ -1878,7 +1878,7 @@ const canOpenNextStage = computed(() => ['closed', 'reviewed', 'approved'].inclu
                 {{ t('accounting.closing.opening_takeover.preliminary') }}
               </p>
               <p v-if="openingTakeover.compare_level === 'account'" class="text-xs text-neutral-500" data-test="opening-takeover-account-level">
-                {{ t('accounting.closing.opening_takeover.account_level') }}
+                {{ t(openingTakeover.compare_reason === 'opening_without_dimensions' ? 'accounting.closing.opening_takeover.account_level_no_dimensions' : 'accounting.closing.opening_takeover.account_level') }}
               </p>
               <div v-if="openingTakeover.entries.length" class="text-xs text-neutral-500">
                 {{ t('accounting.closing.opening_takeover.entries') }}:

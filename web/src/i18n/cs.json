@@ -22295,7 +22295,8 @@
         "done_taken_over": "Počáteční stavy převzaty - souhlasí na {count} účtech, nic se neúčtovalo.",
         "done_replaced": "Převzaté počáteční stavy byly nahrazeny vypočtenými. Důvod: {reason}",
         "revert_keeps": "Vzetí kroku zpět převzatý zápis nesmaže.",
-        "account_level": "Uzávěrka roku je převzatá z původního systému, který otevírací rozvahu převádí bez dimenzí. Počáteční stavy se proto porovnávají jen po účtech."
+        "account_level": "Uzávěrka roku je převzatá z původního systému, který otevírací rozvahu převádí bez dimenzí. Počáteční stavy se proto porovnávají jen po účtech.",
+        "account_level_no_dimensions": "Převzaté počáteční stavy dalšího roku nenesou žádnou dimenzi (převod z jiného systému). Porovnávají se proto jen po účtech."
       },
       "revert": {
         "confirm": "Opravdu vzít krok zpět? Uzávěrkové zápisy kroku se smažou (s auditní stopou).",

@@ -309,8 +309,9 @@ export interface OpeningTakeover {
   accounts: number
   /** Porovnání před uzavřením knih počítá ze zůstatků, ne ze zaúčtovaného uzávěrkového zápisu. */
   preliminary: boolean
-  /** Po uzávěrce převzaté z původního systému se porovnává jen po účtech, bez dimenzí. */
+  /** Po uzávěrce převzaté z původního systému nebo u převzaté rozvahy bez dimenzí se porovnává jen po účtech. */
   compare_level?: 'account'
+  compare_reason?: 'taken_over_closing' | 'opening_without_dimensions'
   message?: string
 }
 

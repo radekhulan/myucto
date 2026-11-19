@@ -176,7 +176,67 @@ final class ClosingWorkflowTest extends TestCase
         $this->assertClosingDimensionContinuity([$typeId => [$a => 4000, $b => 4000]]);
     }
 
+    /** Převzatá rozvaha, která dimenze nese, se porovnává i po dimenzích. */
     public function testOpeningTakeoverRefusesMatchingAccountsWithoutDimensions(): void
+    {
+        [$typeId, $a, , $projectType, $c] = $this->createClosingDimensions();
+        $this->manual([
+            self::l('378', 'debit', 100.00) + ['dimensions' => [$typeId => $a]],
+            self::l('379', 'credit', 100.00),
+        ], self::YEAR . '-04-01');
+        $this->runStepsUntilCloseReady();
+        $this->closing->closeBooks($this->supplierId, $this->periodId, $this->rv(), $this->meta());
+        $nextId = $this->periods->create($this->supplierId, self::YEAR + 1, (self::YEAR + 1) . '-01-01', (self::YEAR + 1) . '-12-31');
+        $this->posting->postDocument($this->supplierId, 'opening', null, [
+            self::l('378', 'debit', 100.00),
+            self::l('379', 'credit', 100.00) + ['dimensions' => [$projectType => $c]],
+        ], ['entry_date' => (self::YEAR + 1) . '-01-01', 'period_id' => $nextId] + $this->meta());
+
+        $takeover = $this->closing->state($this->supplierId, $this->periodId)['opening_takeover'];
+        self::assertSame('mismatch', $takeover['status']);
+        self::assertStringContainsString('CLOSE-A', implode(' ', array_merge(...array_column($takeover['diff'], 'dimension_labels'))));
+        try {
+            $this->closing->openNext($this->supplierId, $this->periodId, $this->rv(), $this->meta());
+            self::fail('Převzaté stavy nesmějí tiše ztratit dimenze.');
+        } catch (ClosingException $e) {
+            self::assertSame('opening_takeover_mismatch', $e->errorCode);
+        }
+    }
+
+    /**
+     * Rozvaha převzatá z Money S3 a jiných systémů dimenze nenese, zůstatky roku v MyÚčtu ano
+     * (střediska, vozidla). Sedí-li každý účet, převezme se po účtech, jinak by rok nešlo
+     * otevřít nikdy (rozdíl u každé hodnoty dimenze).
+     */
+    public function testOpeningTakeoverWithoutAnyDimensionsComparesByAccount(): void
+    {
+        [$typeId, $a, $b] = $this->createClosingDimensions();
+        $this->manual([
+            self::l('378', 'debit', 100.00) + ['dimensions' => [$typeId => $a]],
+            self::l('378', 'debit', 50.00) + ['dimensions' => [$typeId => $b]],
+            self::l('379', 'credit', 150.00),
+        ], self::YEAR . '-04-01');
+        $this->runStepsUntilCloseReady();
+        $this->closing->closeBooks($this->supplierId, $this->periodId, $this->rv(), $this->meta());
+        $nextId = $this->periods->create($this->supplierId, self::YEAR + 1, (self::YEAR + 1) . '-01-01', (self::YEAR + 1) . '-12-31');
+        $opening = $this->posting->postDocument($this->supplierId, 'opening', null, [
+            self::l('378', 'debit', 150.00),
+            self::l('379', 'credit', 150.00),
+        ], ['entry_date' => (self::YEAR + 1) . '-01-01', 'period_id' => $nextId] + $this->meta());
+
+        $takeover = $this->closing->state($this->supplierId, $this->periodId)['opening_takeover'];
+        self::assertSame('match', $takeover['status']);
+        self::assertSame('account', $takeover['compare_level']);
+        self::assertSame('opening_without_dimensions', $takeover['compare_reason']);
+
+        $result = $this->closing->openNext($this->supplierId, $this->periodId, $this->rv(), $this->meta());
+        self::assertSame('taken_over', $result['opening_source']);
+        self::assertSame([$opening], $result['taken_over_entry_ids']);
+        self::assertSame('opening_without_dimensions', $result['taken_over_compare_reason']);
+    }
+
+    /** Rozdíl na účtu se po účtech pozná i u rozvahy bez dimenzí. */
+    public function testOpeningTakeoverWithoutDimensionsStillRefusesAccountDifference(): void
     {
         [$typeId, $a] = $this->createClosingDimensions();
         $this->manual([
@@ -187,16 +247,13 @@ final class ClosingWorkflowTest extends TestCase
         $this->closing->closeBooks($this->supplierId, $this->periodId, $this->rv(), $this->meta());
         $nextId = $this->periods->create($this->supplierId, self::YEAR + 1, (self::YEAR + 1) . '-01-01', (self::YEAR + 1) . '-12-31');
         $this->posting->postDocument($this->supplierId, 'opening', null, [
-            self::l('378', 'debit', 100.00),
-            self::l('379', 'credit', 100.00),
+            self::l('378', 'debit', 90.00),
+            self::l('379', 'credit', 90.00),
         ], ['entry_date' => (self::YEAR + 1) . '-01-01', 'period_id' => $nextId] + $this->meta());
 
-        $takeover = $this->closing->state($this->supplierId, $this->periodId)['opening_takeover'];
-        self::assertSame('mismatch', $takeover['status']);
-        self::assertStringContainsString('CLOSE-A', implode(' ', array_merge(...array_column($takeover['diff'], 'dimension_labels'))));
         try {
             $this->closing->openNext($this->supplierId, $this->periodId, $this->rv(), $this->meta());
-            self::fail('Převzaté stavy nesmějí tiše ztratit dimenze.');
+            self::fail('Rozdíl na účtu musí otevření zastavit.');
         } catch (ClosingException $e) {
             self::assertSame('opening_takeover_mismatch', $e->errorCode);
         }

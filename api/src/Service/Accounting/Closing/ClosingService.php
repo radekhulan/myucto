@@ -405,12 +405,12 @@ final class ClosingService
             if ($entries === []) {
                 return ['status' => 'to_create'] + $base;
             }
-            $accountLevel = $this->openingComparedByAccount($supplierId, $period);
+            $accountLevel = $this->openingComparedByAccount($supplierId, $period, $steps, $entries);
             $cmp = $this->compareOpeningBalances(
                 $supplierId,
                 (int) $next['id'],
                 $this->expectedOpeningLines($supplierId, $period, $steps),
-                $accountLevel,
+                $accountLevel !== null,
             );
         } catch (ClosingException $e) {
             // Nevyvážené zůstatky (rozbitý deník) hlásí precheck; stav průvodce kvůli
@@ -418,22 +418,60 @@ final class ClosingService
             return ['status' => 'unavailable', 'message' => $e->getMessage()] + $base;
         }
         return ['status' => $cmp['diff'] === [] ? 'match' : 'mismatch', 'diff' => $cmp['diff'], 'accounts' => $cmp['accounts']]
-            + ($accountLevel ? ['compare_level' => 'account'] : []) + $base;
+            + ($accountLevel !== null ? ['compare_level' => 'account', 'compare_reason' => $accountLevel] : []) + $base;
     }
 
     /**
-     * Po uzávěrce převzaté z původního systému se počáteční stavy dalšího roku porovnávají
-     * jen po účtech: původní systém otevírací rozvahu převádí bez dimenzí, kdežto zůstatky
-     * roku je v MyÚčtu nesou. Převzatou rozvahu by tak nešlo převzít nikdy, ač účetně sedí.
-     * Rok i jeho uzávěrka zůstávají tak, jak je převod přinesl. Neziskové organizace (504)
-     * převzatou uzávěrku nenavazují vůbec ({@see start()}).
+     * Kdy se počáteční stavy dalšího roku porovnávají jen po účtech (vrací důvod, jinak null).
+     *
+     * - `taken_over_closing`: uzávěrka roku je převzatá z původního systému.
+     * - `opening_without_dimensions`: převzaté otevírací zápisy dalšího roku nenesou žádnou
+     *   dimenzi (převod z Money S3 a jiných systémů, ruční otevírací rozvaha bez členění).
+     *
+     * Původní systém otevírací rozvahu převádí bez dimenzí, kdežto zůstatky roku je
+     * v MyÚčtu nesou (střediska, vozidla). Porovnání po dimenzích by pak hlásilo rozdíl
+     * u každé hodnoty, ač každý účet sedí, a převzatou rozvahu by nešlo převzít nikdy.
+     * Nese-li převzatá rozvaha aspoň jednu dimenzi, porovnává se dál i členění. Zápis,
+     * který zaúčtoval sám krok open_next, za převzatý nepovažujeme. Neziskové organizace
+     * (504) se porovnávají vždy po dimenzích a převzatou uzávěrku nenavazují vůbec
+     * ({@see start()}).
      *
      * @param array<string,mixed> $period
+     * @param array<string, array<string,mixed>> $steps
+     * @param list<array{id:int}> $openingEntries živé otevírací zápisy dalšího roku
      */
-    private function openingComparedByAccount(int $supplierId, array $period): bool
+    private function openingComparedByAccount(int $supplierId, array $period, array $steps, array $openingEntries): ?string
     {
-        return $this->roleProfile($supplierId, (string) $period['ends_on'])->framework !== AccountingFrameworkService::CZ_504
-            && $this->closing->takenOverClosingEntryIds($supplierId, (int) $period['id']) !== [];
+        if ($this->roleProfile($supplierId, (string) $period['ends_on'])->framework === AccountingFrameworkService::CZ_504) {
+            return null;
+        }
+        if ($this->closing->takenOverClosingEntryIds($supplierId, (int) $period['id']) !== []) {
+            return 'taken_over_closing';
+        }
+        $ownEntryId = ($steps['open_next']['status'] ?? 'pending') === 'done'
+            ? (int) ($steps['open_next']['payload']['entry_id'] ?? 0)
+            : 0;
+        $ids = [];
+        foreach ($openingEntries as $entry) {
+            if ((int) $entry['id'] === $ownEntryId) {
+                return null;
+            }
+            $ids[] = (int) $entry['id'];
+        }
+        if ($ids === []) {
+            return null;
+        }
+        $marks = implode(',', array_fill(0, count($ids), '?'));
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT 1 FROM journal_entry_lines l
+              WHERE l.supplier_id = ? AND l.entry_id IN ({$marks})
+                AND (l.cost_center IS NOT NULL OR l.project_id IS NOT NULL
+                     OR EXISTS (SELECT 1 FROM journal_entry_line_dimensions d WHERE d.supplier_id = l.supplier_id AND d.line_id = l.id)
+                     OR EXISTS (SELECT 1 FROM journal_entry_line_dimension_splits s WHERE s.supplier_id = l.supplier_id AND s.line_id = l.id))
+              LIMIT 1"
+        );
+        $stmt->execute([$supplierId, ...$ids]);
+        return $stmt->fetchColumn() === false ? 'opening_without_dimensions' : null;
     }
 
     private function compareOpeningBalances(int $supplierId, int $nextPeriodId, array $expectedLines, bool $accountLevel = false): array
@@ -4960,8 +4998,8 @@ final class ClosingService
             $takenOverIds = [];
             $takenOverAccounts = 0;
             if ($takenOver !== []) {
-                $accountLevel = $this->openingComparedByAccount($supplierId, $period);
-                $cmp = $this->compareOpeningBalances($supplierId, $nextId, $lines, $accountLevel);
+                $accountLevel = $this->openingComparedByAccount($supplierId, $period, $steps, $takenOver);
+                $cmp = $this->compareOpeningBalances($supplierId, $nextId, $lines, $accountLevel !== null);
                 if ($replaceTakenOverReason !== null) {
                     $replacedDumps = [];
                     foreach ($takenOver as $entry) {
@@ -5215,8 +5253,9 @@ final class ClosingService
             if ($openingSource === 'taken_over') {
                 $payload['taken_over_entry_ids'] = $takenOverIds;
                 $payload['taken_over_accounts'] = $takenOverAccounts;
-                if ($accountLevel ?? false) {
+                if (($accountLevel ?? null) !== null) {
                     $payload['taken_over_compare_level'] = 'account';
+                    $payload['taken_over_compare_reason'] = $accountLevel;
                 }
             } elseif ($openingSource === 'replaced') {
                 $payload['replace_reason'] = mb_substr((string) $replaceTakenOverReason, 0, 500);
