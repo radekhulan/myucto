@@ -33,6 +33,7 @@ const unlicensed = computed(() => props.notice?.reason === 'unlicensed')
     <div class="min-w-0">
       <p class="font-semibold">{{ t('migration_payroll_notice.title') }}</p>
       <p class="mt-1" data-testid="migration-payroll-notice-summary">{{ t('migration_payroll_notice.summary', { employees: notice.context.employees, months: notice.context.months, period }) }}</p>
+      <p v-if="notice.context.source === 'pohoda'" class="mt-1" data-testid="migration-payroll-notice-source">{{ t('migration_payroll_notice.source_pohoda') }}</p>
       <p class="mt-1" :data-testid="`migration-payroll-notice-${notice.reason}`">
         <strong>{{ t(`migration_payroll_notice.reason.${notice.reason}`) }}</strong>
         {{ t(`migration_payroll_notice.todo.${notice.reason}`) }}

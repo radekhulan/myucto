@@ -29,6 +29,8 @@ final class PayrollMigrationNotice
     public const REASON_UNLICENSED = 'unlicensed';
     public const REASON_MODULE_DISABLED = 'module_disabled';
     public const BUY_URL = '/activation/purchase#payroll-addon';
+    /** Mzdy vedené přímo v POHODĚ (agenda Mzdy), ne v PAMICA. */
+    public const SOURCE_POHODA = 'pohoda';
 
     /** Proč mzdy nejde převzít, nebo `null`, když modul Mzdy firma má zapnutý. */
     public static function reason(PayrollModuleAccess $access, int $supplierId): ?string
@@ -47,10 +49,12 @@ final class PayrollMigrationNotice
     /**
      * Souhrn mezd přes víc agend (roků): měsíce a mzdy se sečtou, první a poslední měsíc
      * jsou krajní. Zaměstnance bez osobních čísel sečíst nejde, proto platí nejvyšší počet
-     * jednoho roku. Agendy bez měsíců mezd se přeskočí.
+     * jednoho roku. Agendy bez měsíců mezd se přeskočí. Vede-li mzdy některé agendy
+     * přímo POHODA (agenda Mzdy, přehled se `source` `pohoda`), nese souhrn `source`
+     * `pohoda`, aby průvodce ukázal, odkud mzdy jsou; jinak klíč chybí.
      *
      * @param iterable<array<string,mixed>|null> $summaries
-     * @return array{employees:int,months:int,first:?string,last:?string}|null
+     * @return array{employees:int,months:int,first:?string,last:?string,source?:string}|null
      */
     public static function combine(iterable $summaries): ?array
     {
@@ -66,6 +70,9 @@ final class PayrollMigrationNotice
             $out['months'] += (int) $summary['months'];
             $out['first'] = $first !== null && ($out['first'] === null || $first < $out['first']) ? $first : $out['first'];
             $out['last'] = $last !== null && ($out['last'] === null || $last > $out['last']) ? $last : $out['last'];
+            if (($summary['source'] ?? null) === self::SOURCE_POHODA) {
+                $out['source'] = self::SOURCE_POHODA;
+            }
         }
         return $out;
     }
@@ -98,9 +105,10 @@ final class PayrollMigrationNotice
             'level' => 'warning',
             'code' => self::CODE,
             'reason' => $reason,
-            'message' => sprintf('%s obsahuje mzdy %d zaměstnanců%s (%d měsíců), které se do MyÚčta nepřevedou: %s '
+            'message' => sprintf('%s obsahuje mzdy %d zaměstnanců%s (%d měsíců%s), které se do MyÚčta nepřevedou: %s '
                 . 'Zaúčtování mezd je součástí převedeného účetního deníku, účetnictví proto zůstává úplné.',
-                $source, $summary['employees'], $period, $summary['months'], $why),
+                $source, $summary['employees'], $period, $summary['months'],
+                ($summary['source'] ?? null) === self::SOURCE_POHODA ? ', vedené přímo v POHODĚ v agendě Mzdy' : '', $why),
             'context' => $summary + ['buy_url' => $reason === self::REASON_UNLICENSED ? self::BUY_URL : null],
         ];
     }

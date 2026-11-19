@@ -2286,6 +2286,7 @@
     "summary": "Převáděná data obsahují mzdy {employees} zaměstnanců {period} ({months} měsíců). Tyto mzdy se nepřevedou.",
     "period_range": "za {from} až {to}",
     "period_single": "za {month}",
+    "source_pohoda": "Mzdy vede POHODA ve vlastní agendě Mzdy (ne PAMICA); převod mezd je umí převzít stejně jako mzdy z PAMICA.",
     "reason": {
       "unlicensed": "Licence nezahrnuje mzdový doplněk.",
       "module_disabled": "Firma nemá zapnutý modul Mzdy."
@@ -36224,6 +36225,7 @@
     "col_payroll": "Mzdy",
     "payroll_cell": "{employees} zam. · {months} měs.",
     "payroll_only": "jen mzdy",
+    "payroll_source_pohoda": "agenda Mzdy v POHODĚ",
     "kind_title": "Co převést",
     "kind": {
       "accounting": "Účetnictví roku",

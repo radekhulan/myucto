@@ -10,9 +10,11 @@
 Průvodce převede personalistiku a mzdy z datového souboru mzdového programu
 PAMICA, nebo z databáze PAMICA SQL, do firmy v MyÚčtu, i do firmy, která
 účetnictví z POHODY nepřevádí. Stejnou cestou se převádějí i mzdy z **POHODA
-Mzdy**, je to tentýž mzdový modul STORMWARE se stejným formátem dat. Účetnictví
-tento průvodce nepřevádí, to je samostatná kapitola
-[Přechod z POHODY](107_Prechod_z_POHODY.md).
+Mzdy**, je to tentýž mzdový modul STORMWARE se stejným formátem dat, a mzdy
+vedené **přímo v POHODĚ v agendě Mzdy** (datový soubor `StwPh_<IČO>_<rok>.mdb`):
+jejich export má jinou stavbu, převod ji rozpozná a přizpůsobí sám
+([§ 108.9.14](#108914-mzdy-vedene-primo-v-pohode)). Účetnictví tento průvodce
+nepřevádí, to je samostatná kapitola [Přechod z POHODY](107_Prechod_z_POHODY.md).
 
 ## 108.1 Kdy to potřebujete
 
@@ -68,7 +70,7 @@ Vyberte cestu podle toho, kde mzdy běží.
 |---|---|---|
 | Datový soubor PAMICA | Běžná instalace s `Mzdy*.mdb` | `Export-Pamica.cmd` |
 | PAMICA SQL | Mzdy běží na SQL Serveru | `Export-PamicaSQL.cmd` |
-| POHODA Mzdy | Mzdy z POHODY | `Export-PohodaMdb.cmd` (viz [§ 107.9.1.4](107_Prechod_z_POHODY.md#107914-majetek-z-datoveho-souboru)) |
+| POHODA Mzdy, agenda Mzdy v POHODĚ | Mzdy z POHODY | `Export-PohodaMdb.cmd` (viz [§ 107.9.1.4](107_Prechod_z_POHODY.md#107914-majetek-z-datoveho-souboru)) |
 
 **Příprava (všechny cesty):**
 
@@ -201,6 +203,9 @@ který už prošel, přeskočí; změněný měsíc počítaný MyÚčtem převe
 | Nepřítomnost bez schváleného průměru | Chybí průměr čtvrtletí | Doplňte průměr a převod zopakujte |
 | Účet finančního úřadu nebo OSSZ nezaložen | V exportu chybí závazek pod předčíslím, nebo jsou pod ním dva účty | Doplňte účet ručně v Nastavení mezd |
 | Lhůta NEMPRI u převzatého případu dávky nesedí | PAMICA NEMPRI podala, nebo naopak nepodala | Použijte **NEMPRI podal předchozí program** nebo **Předchozí program NEMPRI nepodal** |
+| **Mzdy POHODY za … nesedí samy se sebou** | Mzda z agendy Mzdy v POHODĚ nese částku ve sloupci, který převod nezná, nebo byl export upraven | Porovnejte mzdu v POHODĚ, chybějící složku doplňte ručně a rozdíl vědomě přijměte ([§ 108.9.14](#108914-mzdy-vedene-primo-v-pohode)) |
+| **Převzaté mzdy za … nesedí na mzdy POHODY** | Převzatý úhrn měsíce se liší od mezd POHODY | Podívejte se do protokolu na veličinu a měsíc; převod zopakujte, rozdíl nepřijímejte bez vysvětlení |
+| Mzda nemá vazbu na pracovní poměr (RefPomer) | Export míchá mzdy PAMICA a POHODY, nebo je neúplný | Vyexportujte mzdy znovu aktuálním nástrojem |
 
 ## 108.9 Podrobnosti a pravidla
 
@@ -272,7 +277,8 @@ PAMICA za firmu podala (§ 108.9.12). Binární sloupec, který nejde přečíst
 ZIPu vypíše počty řádků po tabulkách, kolik podání se přečetlo a které tabulky
 s daty export vědomě nebere (protokoly změn, odeslané e-maily, nastavení oken).
 
-V náhledu exportu je u agendy sloupec **Mzdy** s počtem zaměstnanců a měsíců.
+V náhledu exportu je u agendy sloupec **Mzdy** s počtem zaměstnanců a měsíců;
+mzdy vedené přímo v POHODĚ mají navíc štítek *agenda Mzdy v POHODĚ*.
 Firma musí v MyÚčtu existovat a mít vyplněné stejné IČO.
 
 Po nahrání server export na pozadí rozbalí a přečte; průvodce mezitím ukazuje,
@@ -286,8 +292,9 @@ převodu hned.
 Přechází-li firma z POHODY zároveň s účetnictvím i se mzdami z **POHODA
 Mzdy**, použije se místo tohoto nástroje `Export-PohodaMdb.cmd` popsaný
 v [§ 107.9.1.4](107_Prechod_z_POHODY.md#107914-majetek-z-datoveho-souboru) - vzniklý
-`91_mzdy.xml` nahrajte beze změny sem, do tohoto průvodce; sám o sobě je
-formátem shodný s exportem z PAMICA.
+`91_mzdy.xml` nahrajte beze změny sem, do tohoto průvodce. Mzdy vedené přímo
+v POHODĚ v něm nemají pracovní poměry ani položky mezd; převod to pozná sám
+([§ 108.9.14](#108914-mzdy-vedene-primo-v-pohode)).
 
 #### 108.9.1.4 Export z PAMICA SQL
 
@@ -923,6 +930,68 @@ mezd na **Matematicky, jako předchozí mzdový program**, dokud firma nemá vla
 spočítaný mzdový běh. Potom převod volbu nemění. Zákonné zaokrouhlení nahoru
 (§ 142 odst. 2 zákoníku práce) zapnete v Nastavení mezd
 ([§ 90.3](90_Nastaveni_mezd.md#903-krok-za-krokem-zamestnavatel-a-mzdove-uctarny)).
+
+### 108.9.14 Mzdy vedené přímo v POHODĚ
+
+Vede-li firma mzdy přímo v POHODĚ (agenda Mzdy v datovém souboru
+`StwPh_<IČO>_<rok>.mdb`, bez programu PAMICA), vytvoří `Export-PohodaMdb.cmd`
+tentýž `91_mzdy.xml` se stejnými jmény tabulek a sloupců, ale s jinou stavbou:
+
+- **pracovní poměry nejsou zvlášť**: nástup, druh zaměstnání, úvazek
+  a pojišťovna jsou na kartě zaměstnance, každý zaměstnanec má jediný vztah,
+- **mzda nemá položky**: částky a hodiny (základní mzda, náhrada za dovolenou
+  a za svátek, stravenkový paušál, hodiny nemoci) jsou sloupce zpracované mzdy,
+- **doby nepřítomnosti s daty** (dovolená, pracovní neschopnost) jsou na kartě
+  zaměstnance, náhrada mzdy při nemoci v rozpisu náhrad,
+- **karta dovolené** je ve sloupcích karty zaměstnance a **zaúčtování mezd**
+  vede POHODA interními doklady účetnictví, ne v exportu mezd.
+
+Převod takový export pozná sám: v exportu nejsou pracovní poměry a mzdy nemají
+vazbu na poměr. V náhledu u agendy ukáže štítek *agenda Mzdy v POHODĚ*,
+kontrola před převodem i protokol napíšou, že mzdy vede POHODA. Pak export
+přizpůsobí tvaru mezd PAMICA a pokračuje stejnou cestou jako u PAMICA, se
+stejnými volbami (schválení převzatých podkladů, začátek vedení mezd,
+potvrzení identifikátorů ČSSZ, rozsah měsíců).
+
+<!-- cols: 34 66 -->
+| V POHODĚ | V MyÚčtu |
+|---|---|
+| karta zaměstnance | osoba a jediný pracovní vztah: nástup, druh zaměstnání (0 pracovní poměr, 3 dohoda o pracovní činnosti, 108 dohoda o provedení práce), týdenní úvazek, středisko, CZ-ISCO, ID PPV |
+| základní mzda měsíční (druh mzdy 1) | měsíční mzda vztahu se sjednanou částkou; hodinová mzda (druh 2) jen tehdy, když ji mzda doloží součinem hodin a sazby |
+| náhrada za svátek | hodiny svátku v souhrnu docházky (svátek POHODA do odpracovaných hodin nepočítá) |
+| náhrada za dovolenou a dovolená na kartě | hodiny dovolené v souhrnu docházky, doba s daty do evidence |
+| pracovní neschopnost na kartě a rozpis náhrad | nepřítomnost s daty, případ nemoci s vyčerpanými dny náhrady mzdy |
+| stravenkový paušál | složka *Příspěvek na stravování - osvobozená část* |
+| slevy a děti na kartě | slevy na dani a děti (prohlášení poplatníka) |
+| zvláštní sazba daně | srážková daň místo zálohy |
+| karta dovolené (nárok, převod, krácení, čerpání v hodinách) | zůstatek dovolené |
+| zpracovaná mzda | převzatý měsíc s úhrny POHODY (hrubá a čistá mzda, pojistné, záloha a srážková daň, slevy, bonus, výplata) |
+
+**Co převod nezná, nehádá.** Nenulový sloupec mzdy, jehož význam na mzdách
+ověřený není (přesčasy, příplatky, prémie, osobní ohodnocení, náhrady za
+překážky, benefity, srážky ze mzdy), základní mzda jiného druhu, hodiny nemoci
+bez doby na kartě a doba na kartě neznámého druhu se do mzdových vstupů
+nepřevedou. Protokol je vypíše jako **Položky mezd POHODY, které převod nezná**
+se jménem sloupce, počtem mezd, částkou a hodinami. V převzatých měsících jsou
+v úhrnech POHODY; v měsících, které počítá MyÚčto, je doplňte v `Mzdy → Vstupy`
+nebo `Mzdy → Absence`.
+
+**Co se nepřevede vůbec.** Trvalé srážky a exekuce z karet zaměstnanců (export
+nenese jejich rozpis po mzdách; protokol uvede jejich počet, zadejte je
+v `Mzdy → Srážky a exekuce`) a návrh kontací mezd (export účty nenese,
+zaúčtování mezd převádí převod účetnictví).
+
+**Kontrola proti mzdám POHODY.** Na konci převodu, v kroku *Kontrola převzetí
+mezd*, převod porovná za každý převzatý měsíc úhrny uložené v MyÚčtu s mzdami
+POHODY: hrubou mzdu, sociální a zdravotní pojištění zaměstnance
+i zaměstnavatele, zálohu a srážkovou daň, uplatněné slevy na dani, daňový
+bonus, čistou mzdu a částku k výplatě. Každý měsíc má v protokolu řádek
+s úhrny a výsledkem *sedí* nebo *ROZDÍL*. Zároveň ověří každou mzdu samu se
+sebou: hrubá mzda je součtem převedených a známých sloupců, čistá mzda je
+hrubá po pojistném a dani, záloha sedí na slevy, náhrada mzdy na rozpis náhrad
+a výplata na čistou mzdu s náhradou, bonusem a stravným po srážkách. Nesoulad
+je **rozdíl k přijetí**: zkouška nanečisto ho ukáže, ostrý převod bez jeho
+přijetí skončí chybou.
 
 ## 108.10 Měsíční zaúčtování mezd z PAMICY (XML)
 

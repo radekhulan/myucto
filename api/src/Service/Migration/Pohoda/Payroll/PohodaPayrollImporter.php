@@ -13,6 +13,8 @@ use MyInvoice\Repository\Payroll\PayrollInputFilter;
 use MyInvoice\Repository\Payroll\PayrollInputRepository;
 use MyInvoice\Repository\PohodaImportRepository;
 use MyInvoice\Service\Migration\MoneyS3\ImportProtocol;
+use MyInvoice\Service\Migration\Pohoda\PayrollBuiltin\PohodaMzdyAdapter;
+use MyInvoice\Service\Migration\Pohoda\PayrollBuiltin\PohodaMzdyReconciliation;
 use MyInvoice\Service\Migration\Pohoda\PohodaException;
 use MyInvoice\Service\Migration\Pohoda\PohodaExport;
 use MyInvoice\Service\Migration\Pohoda\PohodaXml;
@@ -53,6 +55,10 @@ use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzComponentSourceRule;
  * měsíce z dřívější dávky a zruší její vstupy, které nová dávka nenese
  * ({@see PayrollTakeoverRepeatedMonth}), pokud měsíc nemá běh se zamčenými vstupy.
  * **Zkouška nanečisto** běží celá v jedné transakci, která se na konci vrátí.
+ *
+ * **Mzdy vedené přímo v POHODĚ** (agenda Mzdy bez PAMICA) mají jinou stavbu exportu:
+ * převod je nejdřív převede do tvaru PAMICA ({@see PohodaMzdyAdapter}) a dál jde touž
+ * cestou; na konci je zkontroluje proti mzdám POHODY ({@see PohodaMzdyReconciliation}).
  */
 final class PohodaPayrollImporter
 {
@@ -77,6 +83,11 @@ final class PohodaPayrollImporter
     public const START_WILL_SET = 'payroll_start_will_set';
     /** Kód kontroly: převod je omezený na rozsah měsíců (kontext `period_from`, `period_to`). */
     public const PERIOD_RANGE = 'payroll_period_range';
+    /** Kód kontroly: mzdy vede POHODA ve vlastní agendě Mzdy, ne PAMICA (kontext `source`). */
+    public const SOURCE_POHODA = 'payroll_source_pohoda';
+    private const SOURCE_POHODA_MESSAGE = 'Mzdy vede POHODA ve vlastní agendě Mzdy, ne program PAMICA. Převod je přizpůsobí: '
+        . 'jeden pracovní poměr na zaměstnance podle jeho karty, mzdové složky a nepřítomnosti ze sloupců mzdy, doby '
+        . 'nepřítomnosti z karty zaměstnance. Na konci převzaté mzdy zkontroluje proti úhrnům mezd POHODY.';
     private const PERSON_CHUNK = 100;
     private const MESSAGE_LIMIT = 20;
 
@@ -104,6 +115,7 @@ final class PohodaPayrollImporter
         private readonly PayrollTakeoverAccidentInsuranceRate $accidentRate,
         private readonly PayrollDeferredIncomeRepository $deferredIncomes,
         private readonly PayrollComponentRepository $components,
+        private readonly PohodaMzdyReconciliation $builtinReconciliation,
     ) {}
 
     /**
@@ -375,6 +387,9 @@ final class PohodaPayrollImporter
             $add('info', 'payroll_summary', sprintf('Mzdy za %d měsíců (%s až %s), zaměstnanců v exportu %d.',
                 $months, (string) $summary['first'], (string) $summary['last'], (int) $summary['employees']), ['months' => $months]);
         }
+        if (($summary['source'] ?? null) === PohodaMzdyAdapter::VARIANT_POHODA) {
+            $add('info', self::SOURCE_POHODA, self::SOURCE_POHODA_MESSAGE, ['source' => PohodaMzdyAdapter::VARIANT_POHODA]);
+        }
         if ($range->limited()) {
             $add('info', self::PERIOD_RANGE, self::periodRangeMessage($range), $range->toParams());
         }
@@ -429,6 +444,18 @@ final class PohodaPayrollImporter
         }
         $protocol->finish(self::STEP_PREFLIGHT);
 
+        // Mzdy z agendy Mzdy v POHODĚ: převod čte soubor převedený do tvaru PAMICA,
+        // protokol a převzaté úhrny dál nesou jméno původního exportu.
+        $sourceFile = $file;
+        $builtin = PohodaMzdyAdapter::prepare($file);
+        $program = 'PAMICA';
+        if ($builtin !== null) {
+            $file = $builtin['file'];
+            $program = 'POHODA';
+            $protocol->set('payroll_source', PohodaMzdyAdapter::VARIANT_POHODA);
+            self::reportBuiltin($protocol, $builtin);
+        }
+
         $converter = PohodaPayrollConverter::read($file, $year);
         $protocol->set('agenda', ['ico' => $converter->ico, 'year' => $year, 'program' => 'POHODA Mzdy', 'exported_at' => null, 'dir' => basename(dirname($file))]);
         $userOrNull = $userId > 0 ? $userId : null;
@@ -445,7 +472,7 @@ final class PohodaPayrollImporter
             $last = $range->capLast(self::lastPeriod($converter));
             if ($last !== null) {
                 PayrollMigrationModuleSetup::report($protocol, self::STEP_PREFLIGHT,
-                    $this->moduleSetup->ensure($supplierId, $userOrNull, (string) self::setupLastPeriod($last, $jobLastPeriod)), 'PAMICA');
+                    $this->moduleSetup->ensure($supplierId, $userOrNull, (string) self::setupLastPeriod($last, $jobLastPeriod)), $program);
                 // PAMICA zaokrouhluje krácenou mzdu a náhrady matematicky; navazující měsíce
                 // v MyÚčtu tak sedí s převzatými, dokud firma nepočítá vlastní běhy.
                 if ($this->moduleSetup->adoptWageRounding($supplierId, PayrollWageRounding::HalfUp)) {
@@ -709,6 +736,17 @@ final class PohodaPayrollImporter
                 ))));
                 $protocol->warn(self::STEP_MONTHS, 'items_not_converted', $unconverted);
             }
+            if ($builtin !== null) {
+                $builtinMonths = array_values(array_filter($builtin['unconverted'],
+                    static fn (array $month): bool => in_array($month['period'], $periods, true)));
+                $message = PohodaPayrollConverter::unconvertedItemsMessage($builtinMonths, self::MESSAGE_LIMIT, 'POHODY');
+                if ($message !== null) {
+                    $protocol->count(self::STEP_MONTHS, 'items_not_converted', count(array_unique(array_merge(
+                        ...array_map(static fn (array $month): array => array_keys($month['unconverted_items']), $builtinMonths),
+                    ))));
+                    $protocol->warn(self::STEP_MONTHS, 'items_not_converted', $message);
+                }
+            }
             foreach ($periods as $index => $period) {
                 if ($shouldCancel !== null && $shouldCancel()) {
                     $protocol->fail('cancelled');
@@ -783,7 +821,7 @@ final class PohodaPayrollImporter
                         ), ['period' => $period, 'run_id' => $locking['id']]);
                         continue;
                     }
-                    $this->repeatedMonth->reopenWorkMonths($supplierId, $period, $previousBatches, $userOrNull, 'PAMICA', $protocol, self::STEP_MONTHS);
+                    $this->repeatedMonth->reopenWorkMonths($supplierId, $period, $previousBatches, $userOrNull, $program, $protocol, self::STEP_MONTHS);
                 }
                 foreach ($afterEnd as $number) {
                     $protocol->count(self::STEP_MONTHS, 'payslips_outside_employment');
@@ -851,7 +889,7 @@ final class PohodaPayrollImporter
                     $this->map->put($supplierId, PohodaImportRepository::KIND_PAYROLL_MONTH, $key, (int) ($applied['batch']['id'] ?? $applied['import_id'] ?? 0), $runId);
                     if ($repeated) {
                         $this->repeatedMonth->supersedeInputs($supplierId, $period, $previousBatches,
-                            (int) ($applied['batch']['id'] ?? $applied['import_id'] ?? 0), 'PAMICA', $protocol, self::STEP_MONTHS);
+                            (int) ($applied['batch']['id'] ?? $applied['import_id'] ?? 0), $program, $protocol, self::STEP_MONTHS);
                     }
                     if (self::countedByModule($period, $moduleStart)) {
                         $compensationBatches[$period] = (int) ($applied['batch']['id'] ?? $applied['import_id'] ?? 0);
@@ -914,7 +952,7 @@ final class PohodaPayrollImporter
                 }
                 $this->people->write($supplierId, $userOrNull, $records, $year, $confirmIdentifiers, $protocol, self::STEP_PEOPLE,
                     PohodaPayrollPeople::institutions($file), PohodaPayrollPeople::cards($file, $year, $exportedOn));
-                [$sourceTotals, $sourceSkipped] = $this->storeReferenceTotals($supplierId, $file, $year, $protocol, $exportedOn, $range);
+                [$sourceTotals, $sourceSkipped] = $this->storeReferenceTotals($supplierId, $file, $year, $protocol, $exportedOn, $range, basename($sourceFile));
                 $this->accidentInsuranceRate($supplierId, $file, $year, $userOrNull, $protocol);
                 // Náhrady mzdy z hodin docházky až po osobách: stojí na průměrném výdělku,
                 // který zapisuje teprve tenhle krok.
@@ -1025,7 +1063,7 @@ final class PohodaPayrollImporter
                     $supplierId,
                     PohodaPayrollPostingMap::read($file, $year),
                     $year,
-                    basename($file),
+                    basename($sourceFile),
                 );
                 if ($stored !== null) {
                     $protocol->set('posting_map', $stored['proposal']);
@@ -1038,8 +1076,21 @@ final class PohodaPayrollImporter
             // Brána G2: převzaté mzdy proti zdroji a vlastní data proti dvojím osobám
             // a překryvům verzí. Porušení je rozdíl k přijetí, ne tiché upozornění.
             if (!$protocol->failed()) {
-                PayrollTakeoverInvariants::report($protocol, self::STEP_INVARIANTS,
-                    $this->invariants->verify($supplierId, self::SOURCE, $sourceTotals ?? [], $sourceSkipped ?? 0, !$dryRun));
+                $violations = $this->invariants->verify($supplierId, self::SOURCE, $sourceTotals ?? [], $sourceSkipped ?? 0, !$dryRun);
+                // Mzdy z POHODY: převzaté úhrny měsíců proti úhrnům mezd POHODY a mzdy samy se sebou.
+                $reconciliation = [];
+                if ($builtin !== null) {
+                    $reconciliation = $this->builtinReconciliation->takeover($supplierId, array_intersect_key($builtin['months'], array_flip($periods)));
+                    array_push($violations, ...PohodaMzdyReconciliation::violations(
+                        array_intersect_key($builtin['failures'], array_flip($periods)), $reconciliation));
+                }
+                PayrollTakeoverInvariants::report($protocol, self::STEP_INVARIANTS, $violations);
+                if ($reconciliation !== []) {
+                    $protocol->set('pohoda_payroll_reconciliation', $reconciliation);
+                    foreach ($reconciliation as $month) {
+                        $protocol->info(self::STEP_INVARIANTS, 'pohoda_payroll_reconciliation', PohodaMzdyReconciliation::line($month), ['period' => $month['period']]);
+                    }
+                }
             }
         } finally {
             if ($savepoint) {
@@ -1696,7 +1747,42 @@ final class PohodaPayrollImporter
         }
     }
 
-    private function storeReferenceTotals(int $supplierId, string $file, int $year, ImportProtocol $protocol, ?string $exportedOn, PohodaPayrollPeriodRange $range): array
+    /**
+     * Zdroj mezd POHODA do protokolu: co převod přizpůsobil a co z exportu nepřevádí.
+     *
+     * @param array{notes:array<string,int>} $builtin {@see PohodaMzdyAdapter::prepare()}
+     */
+    private static function reportBuiltin(ImportProtocol $protocol, array $builtin): void
+    {
+        $protocol->info(self::STEP_PREFLIGHT, self::SOURCE_POHODA, self::SOURCE_POHODA_MESSAGE, ['source' => PohodaMzdyAdapter::VARIANT_POHODA]);
+        $notes = $builtin['notes'];
+        if ($notes['standing_deductions'] > 0) {
+            $protocol->count(self::STEP_PREFLIGHT, 'standing_deductions_not_converted', $notes['standing_deductions']);
+            $protocol->warn(self::STEP_PREFLIGHT, 'pohoda_standing_deductions', sprintf(
+                'Trvalé srážky a exekuce z karet zaměstnanců POHODY (%d) převod nepřevádí: export nenese jejich rozpis po mzdách. '
+                . 'Zadejte je v Mzdy → Exekuce a insolvence, dobrovolné srážky v Mzdy → Vstupy.', $notes['standing_deductions'],
+            ));
+        }
+        if ($notes['posting_rows'] > 0) {
+            $protocol->info(self::STEP_PREFLIGHT, 'pohoda_payroll_posting', 'Zaúčtování mezd vede POHODA interními doklady účetnictví (převádí je převod účetnictví); '
+                . 'export mezd účty nenese, návrh kontací mezd proto nevznikne. Kontace nastavte v Mzdy → Nastavení.');
+        }
+        if ($notes['duplicate_payslips'] > 0) {
+            $protocol->warn(self::STEP_PREFLIGHT, 'pohoda_duplicate_payslips', sprintf(
+                'Export nese %d mezd zaměstnance za měsíc, za který už jednu mzdu má. Převod je převezme jako mzdy téhož pracovního poměru.',
+                $notes['duplicate_payslips'],
+            ));
+        }
+        if ($notes['periods_outside_payslips'] > 0) {
+            $protocol->info(self::STEP_PREFLIGHT, 'pohoda_periods_outside_payslips', sprintf(
+                'Doby nepřítomnosti z karet zaměstnanců mimo měsíce mezd exportu (%d) se nepřevádějí; patří k mzdám jiného roku.',
+                $notes['periods_outside_payslips'],
+            ));
+        }
+    }
+
+    /** @param string $reference jméno exportu, ze kterého úhrny pocházejí (převzaté úhrny ho nesou k dohledání) */
+    private function storeReferenceTotals(int $supplierId, string $file, int $year, ImportProtocol $protocol, ?string $exportedOn, PohodaPayrollPeriodRange $range, string $reference): array
     {
         $matched = $this->people->matchedRelations();
         $totals = [];
@@ -1736,7 +1822,7 @@ final class PohodaPayrollImporter
             }
         }
         if ($totals !== []) {
-            $protocol->count(self::STEP_PEOPLE, 'reference_totals', $this->referenceTotals->store($supplierId, self::SOURCE, $totals, basename($file)));
+            $protocol->count(self::STEP_PEOPLE, 'reference_totals', $this->referenceTotals->store($supplierId, self::SOURCE, $totals, $reference));
         }
 
         return [$totals, $skipped];

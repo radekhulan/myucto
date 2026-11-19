@@ -12,8 +12,8 @@ Vstupem je ZIP s XML, který připravíte jednou ze tří cest (export přes XML
 rozhraní POHODY, místní převod kopie datového souboru MDB, nebo export přímo
 z databáze POHODA SQL). Nástroje stáhnete přímo z průvodce. Zdrojová data jen
 čtou, v POHODĚ nic nemění. Průvodce převádí jen **účetnictví**. Mzdy
-z POHODY Mzdy nebo PAMICA převádí samostatný průvodce, viz
-[Přechod z PAMICA](108_Prechod_z_PAMICA.md).
+z POHODA Mzdy, z PAMICA i mzdy vedené přímo v POHODĚ v agendě Mzdy převádí
+samostatný průvodce, viz [Přechod z PAMICA](108_Prechod_z_PAMICA.md).
 
 ## 107.1 Kdy to potřebujete
 
@@ -329,7 +329,7 @@ POHODY (`.mdb`), u POHODA SQL z databáze agendy. Data jen čte, nic v nich nem�
 | Soubor | Obsah |
 |---|---|
 | `90_majetek.xml` | karty dlouhodobého majetku, daňové odpisy po letech, účetní odpisy po měsících, drobný majetek a jeho zdrojové doklady |
-| `91_mzdy.xml` | zaměstnanci, pracovní poměry, zpracované mzdy a číselníky mezd - tento průvodce ho nevyužije, viz [Přechod z PAMICA](108_Prechod_z_PAMICA.md) |
+| `91_mzdy.xml` | zaměstnanci, pracovní poměry (u mezd vedených přímo v POHODĚ jsou na kartě zaměstnance), zpracované mzdy a číselníky mezd - tento průvodce ho nevyužije, viz [Přechod z PAMICA](108_Prechod_z_PAMICA.md#108914-mzdy-vedene-primo-v-pohode) |
 | `92_sklad.xml` | sklady, členění skladu, karty zásob se stavem, ceníky, kusovníky a ocenění stavu každé karty po jejím posledním pohybu; samotné pohyby ne |
 
 **Při běžném exportu nemusíte dělat nic.** `Export-Pohoda.cmd` skript spustí

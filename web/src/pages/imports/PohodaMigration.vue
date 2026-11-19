@@ -712,7 +712,10 @@ const actions = computed<ActionItem[]>(() => {
                   <td class="px-3 py-2 text-right">{{ a.counts.partners }}</td>
                   <td class="px-3 py-2 text-right" data-testid="pohoda-contracts-cell">{{ a.counts.contracts ?? '—' }}</td>
                 </template>
-                <td class="px-3 py-2 whitespace-nowrap" data-testid="pohoda-payroll-cell">{{ a.payroll ? tt('payroll_cell', { employees: a.payroll.employees, months: a.payroll.months }) : '—' }}</td>
+                <td class="px-3 py-2 whitespace-nowrap" data-testid="pohoda-payroll-cell">
+                  {{ a.payroll ? tt('payroll_cell', { employees: a.payroll.employees, months: a.payroll.months }) : '—' }}
+                  <span v-if="a.payroll?.source === 'pohoda'" class="ml-2 rounded-full bg-primary-50 px-2 py-0.5 text-xs whitespace-nowrap text-primary-700" data-testid="pohoda-payroll-source">{{ tt('payroll_source_pohoda') }}</span>
+                </td>
               </tr>
               <tr v-for="o in a.ico === upload.supplier_ico ? laterOptions(agendaKey(a)) : []" :key="`${a.ico}-${a.year}-${o.year}`"
                 :class="isSelected(o.year) ? 'bg-primary-50/60' : ''" :data-testid="`pohoda-later-year-${o.year}`">

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Migration\Pohoda;
 
+use MyInvoice\Service\Migration\Pohoda\PayrollBuiltin\PohodaMzdyAdapter;
 use MyInvoice\Service\Migration\Pohoda\Payroll\PohodaPayrollConverter;
 use MyInvoice\Support\CompanyIdNormalizer;
 
@@ -471,7 +472,10 @@ final class PohodaExport
      * Přehled se počítá v jobu nahrání a z `meta.json` ho čte náhled průvodce, takže
      * kontrola před převodem soubor mezd znovu nečte. Jeden průchod souborem.
      *
-     * @return array{ico:string,employees:int,months:int,payslips:int,first:?string,last:?string,last_overall:?string,exported_on:?string,open:array<string,int>}
+     * `source` = kdo mzdy vedl: `pamica`, nebo `pohoda` (agenda Mzdy přímo v POHODĚ bez
+     * pracovních poměrů, {@see PohodaMzdyAdapter}).
+     *
+     * @return array{ico:string,employees:int,months:int,payslips:int,first:?string,last:?string,last_overall:?string,exported_on:?string,open:array<string,int>,source:string}
      */
     public static function payrollSummary(string $file, int $year): array
     {
@@ -481,11 +485,18 @@ final class PohodaExport
         $open = [];
         $lastOverall = null;
         $employees = 0;
-        foreach (PohodaXml::scan($file, ['MZ', 'ZAM']) as $tag => $row) {
+        $relations = 0;
+        $payslipWithRelation = false;
+        foreach (PohodaXml::scan($file, ['MZ', 'ZAM', 'ZAMpomer']) as $tag => $row) {
             if ($tag === 'ZAM') {
                 $employees++;
                 continue;
             }
+            if ($tag === 'ZAMpomer') {
+                $relations++;
+                continue;
+            }
+            $payslipWithRelation = $payslipWithRelation || PohodaXml::text($row, 'RefPomer') !== '';
             $rowYear = (int) PohodaXml::text($row, 'Rok');
             $period = sprintf('%04d-%02d', $rowYear, (int) PohodaXml::text($row, 'RelMes'));
             if (PohodaPayrollConverter::openPeriod($period, $exportedOn)) {
@@ -509,6 +520,7 @@ final class PohodaExport
             'last_overall' => $lastOverall,
             'exported_on' => $exportedOn,
             'open' => $open,
+            'source' => PohodaMzdyAdapter::variant($employees, $relations, $payslipWithRelation),
         ];
     }
 

@@ -123,6 +123,20 @@ describe('POHODA: mzdy, které se nepřevedou', () => {
     expect(wrapper.get('[data-testid="pohoda-payroll-wizard-open"]').attributes('data-to')).toContain('imports-pamica')
   })
 
+  it('mzdy vedené přímo v POHODĚ: přehled i upozornění ukážou zdroj', async () => {
+    const pohodaNotice = notice('module_disabled')
+    const wrapper = await mountPage({ payroll_notice: { ...pohodaNotice, context: { ...pohodaNotice.context, source: 'pohoda' } } },
+      { has_payroll: true, payroll: { ...payroll, source: 'pohoda' } })
+    expect(wrapper.get('[data-testid="pohoda-payroll-source"]').text()).toBe('pohoda.payroll_source_pohoda')
+    expect(wrapper.get('[data-testid="migration-payroll-notice-source"]').text()).toBe('migration_payroll_notice.source_pohoda')
+  })
+
+  it('mzdy z PAMICA: zdroj se neukazuje', async () => {
+    const wrapper = await mountPage({ payroll_notice: notice('module_disabled') }, { has_payroll: true, payroll: { ...payroll, source: 'pamica' } })
+    expect(wrapper.find('[data-testid="pohoda-payroll-source"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="migration-payroll-notice-source"]').exists()).toBe(false)
+  })
+
   it('export bez mezd: žádné upozornění ani odkaz', async () => {
     const wrapper = await mountPage()
     expect(wrapper.find('[data-testid="migration-payroll-notice"]').exists()).toBe(false)

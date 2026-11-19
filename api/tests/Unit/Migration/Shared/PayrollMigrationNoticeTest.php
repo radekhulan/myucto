@@ -63,6 +63,18 @@ final class PayrollMigrationNoticeTest extends TestCase
         self::assertNull(PayrollMigrationNotice::combine([null]));
     }
 
+    /** Mzdy vedené přímo v POHODĚ: souhrn i upozornění nesou zdroj; u PAMICA klíč chybí. */
+    public function testPohodaPayrollSourceIsCarriedToNotice(): void
+    {
+        $combined = PayrollMigrationNotice::combine([['source' => 'pamica'] + self::SUMMARY, ['source' => PayrollMigrationNotice::SOURCE_POHODA] + self::SUMMARY]);
+        self::assertSame(PayrollMigrationNotice::SOURCE_POHODA, $combined['source'] ?? null);
+        self::assertArrayNotHasKey('source', (array) PayrollMigrationNotice::combine([['source' => 'pamica'] + self::SUMMARY]));
+        $notice = PayrollMigrationNotice::build(PayrollMigrationNotice::REASON_MODULE_DISABLED, ['source' => PayrollMigrationNotice::SOURCE_POHODA] + self::SUMMARY);
+        self::assertNotNull($notice);
+        self::assertSame(PayrollMigrationNotice::SOURCE_POHODA, $notice['context']['source']);
+        self::assertStringContainsString('(10 měsíců, vedené přímo v POHODĚ v agendě Mzdy)', $notice['message']);
+    }
+
     public function testWarnWritesProtocolWarningAndAttachLeavesPayloadWithoutNotice(): void
     {
         $protocol = new ImportProtocol('dry_run');

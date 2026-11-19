@@ -21,7 +21,7 @@ export interface MigrationPayrollNotice {
   code: 'payroll_not_transferred'
   reason: 'unlicensed' | 'module_disabled'
   message: string
-  context: { employees: number; months: number; first: string | null; last: string | null; buy_url: string | null }
+  context: { employees: number; months: number; first: string | null; last: string | null; buy_url: string | null; source?: 'pohoda' }
 }
 
 /**

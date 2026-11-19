@@ -39,6 +39,8 @@ export interface PohodaPayrollSummary {
   payslips: number
   first: string | null
   last: string | null
+  /** Kdo mzdy vedl: `pohoda` = agenda Mzdy přímo v POHODĚ, `pamica` = PAMICA (chybí u přehledu nahraného dřív). */
+  source?: 'pohoda' | 'pamica'
 }
 
 /** Jak převést karty skladu POHODY bez druhu zásoby; `skip` = sklad se nepřevádí. */

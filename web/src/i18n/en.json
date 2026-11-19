@@ -2286,6 +2286,7 @@
     "summary": "The migrated data contain payroll of {employees} employees {period} ({months} months). This payroll will not be migrated.",
     "period_range": "for {from} to {to}",
     "period_single": "for {month}",
+    "source_pohoda": "Payroll is kept in POHODA's own Payroll agenda (not PAMICA); the payroll migration takes it over the same way as PAMICA payroll.",
     "reason": {
       "unlicensed": "The licence does not include the payroll add-on.",
       "module_disabled": "The company does not have the Payroll module enabled."
@@ -36224,6 +36225,7 @@
     "col_payroll": "Payroll",
     "payroll_cell": "{employees} empl. · {months} mo.",
     "payroll_only": "payroll only",
+    "payroll_source_pohoda": "POHODA Payroll agenda",
     "kind_title": "What to transfer",
     "kind": {
       "accounting": "Accounting year",
