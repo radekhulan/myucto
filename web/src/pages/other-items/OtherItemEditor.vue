@@ -8,10 +8,17 @@ import { otherItemKindsApi, otherItemsApi, type OtherItemKind, type OtherItemPay
 import { useSupplierStore } from '@/stores/supplier'
 import { useAuthStore } from '@/stores/auth'
 import { useToast } from '@/composables/useToast'
+import { useHotkey } from '@/composables/useHotkey'
+import { useDemoMode } from '@/composables/useDemoMode'
+import { useWindowTitle } from '@/composables/useWindowTitle'
 import { appIsoDate } from '@/utils/date'
 import { isCounterpartyAccountFormat, joinAccountBankCode } from '@/utils/bankAccount'
 import { ICONS, btnFilled, btnOutline, btnOutlineSm } from '@/components/ui/buttonStyles'
+import { formDateInput, formInput, formTextarea } from '@/components/ui/formStyles'
 import DateInput from '@/components/ui/DateInput.vue'
+import FieldNote from '@/components/ui/FieldNote.vue'
+import EmptyState from '@/components/ui/EmptyState.vue'
+import RequiredMark from '@/components/ui/RequiredMark.vue'
 import ClientSearchSelect from '@/components/ui/ClientSearchSelect.vue'
 import ChartAccountSelect from '@/components/accounting/ChartAccountSelect.vue'
 import OtherItemPostingLines from '@/components/accounting/OtherItemPostingLines.vue'
@@ -27,6 +34,7 @@ const router = useRouter()
 const supplier = useSupplierStore()
 const auth = useAuthStore()
 const toast = useToast()
+const { blockDemoMutation } = useDemoMode()
 const editId = computed(() => Number(route.params.id || 0))
 const isEdit = computed(() => editId.value > 0)
 const isDoubleEntry = computed(() => supplier.currentSupplier?.accounting_mode === 'double_entry')
@@ -44,6 +52,7 @@ const today = appIsoDate()
 const canReadDocuments = computed(() => auth.canRead('documents'))
 const pendingDocuments = ref<PendingDocuments>({ files: [], existing: [] })
 const folderTemplate = ref(OTHER_ITEM_DEFAULT_FOLDER)
+const editorForm = ref<HTMLFormElement | null>(null)
 const form = reactive({
   side: (route.query.side === 'receivable' ? 'receivable' : 'payable') as OtherItemSide,
   kind: 'other',
@@ -60,6 +69,21 @@ const form = reactive({
   counter_account_code: '',
   note: '',
 })
+
+type FieldKey = 'title' | 'issued_on' | 'due_on' | 'amount' | 'variable_symbol' | 'counterparty_account' | 'posting_lines'
+/** Chyby u polí zůstávají vidět, dokud uživatel pole neopraví (toast by zmizel dřív, než ho najde). */
+const fieldErrors = reactive<Partial<Record<FieldKey, string>>>({})
+/** Trvalá hláška nad formulářem: souhrn chyb polí nebo odmítnutí serverem. */
+const formError = ref('')
+/** Úpravu konceptu nejde načíst: formulář se nenabídne, jen opakování. */
+const loadFailed = ref(false)
+// Souhrn „opravte zvýrazněná pole“ zmizí, jakmile je opravené poslední z nich.
+watch(() => Object.keys(fieldErrors).length, count => {
+  if (count === 0 && formError.value === t('other_items.errors.form_invalid')) formError.value = ''
+})
+
+useWindowTitle(() => t(isEdit.value ? 'other_items.edit' : 'other_items.new'), () => form.title.trim() || null)
+useHotkey('ctrl+s', event => { event.preventDefault(); editorForm.value?.requestSubmit() })
 
 const BUILTIN_KINDS = ['rent', 'deposit', 'loan', 'insurance', 'fee', 'claim'] as const
 // Vlastní druh se ve výběru odliší předponou, vestavěné druhy zůstávají kódem.
@@ -124,7 +148,7 @@ function applySuggestion() {
 async function saveSuggestionAsDefault() {
   const kind = selectedKind.value
   const suggestion = originSuggestion.value
-  if (!kind || !suggestion || savingSuggestion.value) return
+  if (!kind || !suggestion || savingSuggestion.value || blockDemoMutation()) return
   savingSuggestion.value = true
   try {
     await otherItemKindsApi.savePostingProfiles(kind, {
@@ -159,7 +183,19 @@ watch(() => [form.kind, dimsReady.value, originProfile.value] as const, () => {
   if (changed) docDims.header.value = header
 })
 
-function onSideChange() {
+/**
+ * Druh a účty patří jedné straně, změna strany je proto vymaže. Když už jsou vyplněné,
+ * zeptá se dřív, než o ně uživatel přijde; po odmítnutí zůstane původní strana.
+ */
+function onSideChange(event: Event) {
+  const select = event.target as HTMLSelectElement
+  const next = select.value as OtherItemSide
+  const filled = form.kind !== 'other' || !!form.account_code || !!form.counter_account_code || splitPosting.value
+  if (filled && !window.confirm(t('other_items.side_change_confirm'))) {
+    select.value = form.side
+    return
+  }
+  form.side = next
   form.kind = 'other'
   form.account_code = ''
   form.counter_account_code = ''
@@ -177,12 +213,19 @@ function stopSplitPosting() {
   form.counter_account_code = postingLines.value[0]?.account_code || ''
   postingLines.value = []
   splitPosting.value = false
+  delete fieldErrors.posting_lines
 }
 function onPartnerNameInput() {
   form.partner_id = null
 }
 function onPartnerSelected(client: Client | null) {
   form.partner_name = client?.company_name || ''
+}
+
+function retryLoad() {
+  loadFailed.value = false
+  formError.value = ''
+  void load()
 }
 
 async function load() {
@@ -220,7 +263,9 @@ async function load() {
     if (isEdit.value) requests.push(docDims.load(editId.value))
     await Promise.all(requests)
   } catch (error: any) {
-    toast.error(error?.response?.data?.error?.message || t('common.error'))
+    formError.value = error?.response?.data?.error?.message || t('common.error')
+    // Bez načteného konceptu by uložení přepsalo jeho účty, rozpad i poznámku výchozími hodnotami.
+    if (isEdit.value) loadFailed.value = true
   } finally {
     loading.value = false
     dimsReady.value = true
@@ -234,19 +279,41 @@ docDims.watchDefaults(
   () => !isEdit.value,
 )
 
-async function save() {
-  if (saving.value) return
-  if (!form.title.trim() || !form.kind || !form.issued_on || !form.due_on || !form.amount || form.amount <= 0) {
-    toast.error(t('other_items.validation_required'))
-    return
-  }
+// Opravené pole chybu ztratí hned, ne až při dalším uložení.
+watch(() => form.title, () => { delete fieldErrors.title })
+watch(() => form.issued_on, () => { delete fieldErrors.issued_on })
+watch(() => form.due_on, () => { delete fieldErrors.due_on })
+// Platnost rozpadu závisí i na částce, proto ji oprava částky také ruší.
+watch(() => form.amount, () => { delete fieldErrors.amount; delete fieldErrors.posting_lines })
+watch(() => form.variable_symbol, () => { delete fieldErrors.variable_symbol })
+watch(() => form.counterparty_account, () => { delete fieldErrors.counterparty_account })
+watch(postingLines, () => { delete fieldErrors.posting_lines }, { deep: true })
+
+function validate(): boolean {
+  for (const key of Object.keys(fieldErrors) as FieldKey[]) delete fieldErrors[key]
+  if (!form.title.trim()) fieldErrors.title = t('other_items.errors.required')
+  if (!form.issued_on) fieldErrors.issued_on = t('other_items.errors.required')
+  if (!form.due_on) fieldErrors.due_on = t('other_items.errors.required')
+  if (!form.amount || form.amount <= 0) fieldErrors.amount = t('other_items.errors.amount_positive')
   if (splitPosting.value && (postingLines.value.some(line => !line.account_code || !Number.isFinite(line.amount) || line.amount <= 0)
     || postingLines.value.reduce((sum, line) => sum + Math.round(line.amount * 100), 0) !== Math.round(Number(form.amount) * 100))) {
-    toast.error(t('other_items.posting_lines_invalid'))
-    return
+    fieldErrors.posting_lines = t('other_items.posting_lines_invalid')
+  }
+  // `novalidate` vypíná nativní pattern, VS se proto kontroluje tady stejně jako na serveru.
+  if (form.variable_symbol.trim() && !/^[0-9]+$/.test(form.variable_symbol.trim())) {
+    fieldErrors.variable_symbol = t('other_items.errors.variable_symbol_digits')
   }
   if (form.counterparty_account.trim() && !isCounterpartyAccountFormat(form.counterparty_account)) {
-    toast.error(t('other_items.counterparty_account_invalid'))
+    fieldErrors.counterparty_account = t('other_items.counterparty_account_invalid')
+  }
+  return Object.keys(fieldErrors).length === 0
+}
+
+async function save() {
+  if (saving.value || blockDemoMutation()) return
+  formError.value = ''
+  if (!validate()) {
+    formError.value = t('other_items.errors.form_invalid')
     return
   }
   const customKindId = form.kind.startsWith(CUSTOM_PREFIX) ? Number(form.kind.slice(CUSTOM_PREFIX.length)) : null
@@ -285,7 +352,7 @@ async function save() {
     toast.success(t('common.saved'))
     await router.push({ name: 'other-item-detail', params: { id: result.source_id || result.id } })
   } catch (error: any) {
-    toast.error(error?.response?.data?.error?.message || t('common.error'))
+    formError.value = error?.response?.data?.error?.message || t('common.error')
   } finally {
     saving.value = false
   }
@@ -300,55 +367,63 @@ onMounted(load)
       <div>
         <RouterLink :to="isEdit ? { name: 'other-item-detail', params: { id: editId } } : { name: 'other-items' }" class="text-sm text-primary-700 hover:underline">← {{ t('other_items.back') }}</RouterLink>
         <h1 class="mt-1 text-2xl font-semibold">{{ t(isEdit ? 'other_items.edit' : 'other_items.new') }}</h1>
-        <p class="mt-0.5 text-sm text-neutral-500">{{ t('other_items.form_hint') }}</p>
+        <p v-if="!isEdit && canReadDocuments && auth.canWrite('documents.move')" class="mt-0.5 text-sm text-neutral-500" data-test="form-hint">{{ t('other_items.form_hint') }}</p>
       </div>
     </div>
     <div v-if="loading" class="py-12 text-center text-sm text-neutral-500">{{ t('common.loading') }}</div>
-    <form v-else class="max-w-4xl space-y-4" @submit.prevent="save">
-      <section class="rounded-lg border border-neutral-200 bg-surface p-4">
-        <h2 class="mb-4 font-semibold">{{ t('other_items.details') }}</h2>
-        <div class="grid gap-4 sm:grid-cols-2">
-          <label class="text-sm font-medium">{{ t('other_items.side_label') }}
-            <select v-model="form.side" class="mt-1 block h-9 w-full rounded-md border border-neutral-300 bg-surface px-2" @change="onSideChange">
+    <EmptyState v-else-if="loadFailed" boxed variant="failed" :message="formError || undefined" @action="retryLoad" />
+    <form v-else ref="editorForm" class="max-w-5xl space-y-4" novalidate @submit.prevent="save">
+      <p v-if="formError" role="alert" class="rounded-md border border-danger-500/40 bg-danger-50 p-3 text-sm text-danger-600" data-test="form-error">{{ formError }}</p>
+      <section class="rounded-lg border border-neutral-200 bg-surface p-4 shadow-sm">
+        <h2 class="mb-4 text-sm font-semibold uppercase tracking-wide text-neutral-500">{{ t('other_items.details') }}</h2>
+        <div class="grid items-start gap-4 sm:grid-cols-2">
+          <label class="text-sm font-medium">{{ t('other_items.side_label') }}<RequiredMark />
+            <select :value="form.side" :class="['mt-1 block', formInput]" data-test="editor-side" @change="onSideChange">
               <option value="receivable">{{ t('other_items.side.receivable') }}</option>
               <option value="payable">{{ t('other_items.side.payable') }}</option>
             </select>
           </label>
-          <label class="text-sm font-medium">{{ t('other_items.kind_label') }}
-            <select v-model="form.kind" class="mt-1 block h-9 w-full rounded-md border border-neutral-300 bg-surface px-2">
+          <label class="text-sm font-medium">{{ t('other_items.kind_label') }}<RequiredMark />
+            <select v-model="form.kind" :class="['mt-1 block', formInput]">
               <option v-for="kind in kindChoices" :key="kind" :value="kind">{{ t(`other_items.kind_by_side.${form.side}.${kind}`) }}</option>
               <optgroup v-if="customKindChoices.length" :label="t('other_items.kinds.custom_group')">
                 <option v-for="kind in customKindChoices" :key="`${CUSTOM_PREFIX}${kind.id}`" :value="`${CUSTOM_PREFIX}${kind.id}`">{{ kind.name }}</option>
               </optgroup>
             </select>
           </label>
-          <label class="text-sm font-medium sm:col-span-2">{{ t('other_items.item') }}
-            <input v-model="form.title" required maxlength="255" class="mt-1 block h-9 w-full rounded-md border border-neutral-300 bg-surface px-2" />
+          <label class="text-sm font-medium sm:col-span-2">{{ t('other_items.item') }}<RequiredMark />
+            <input v-model="form.title" maxlength="255" :aria-invalid="!!fieldErrors.title" :class="['mt-1 block', formInput, fieldErrors.title ? 'border-danger-500' : '']" data-test="editor-title" />
+            <FieldNote :error="fieldErrors.title" />
           </label>
           <label class="text-sm font-medium sm:col-span-2">{{ t('other_items.partner_directory') }}
             <ClientSearchSelect v-model="form.partner_id" :selected-label="form.partner_name" :role="form.side === 'payable' ? 'vendors' : 'customers'" class="mt-1 block" @selected="onPartnerSelected" />
           </label>
           <label class="text-sm font-medium sm:col-span-2">{{ t('other_items.partner') }}
-            <input v-model="form.partner_name" maxlength="190" class="mt-1 block h-9 w-full rounded-md border border-neutral-300 bg-surface px-2" @input="onPartnerNameInput" />
+            <input v-model="form.partner_name" maxlength="190" :class="['mt-1 block', formInput]" @input="onPartnerNameInput" />
           </label>
-          <label class="text-sm font-medium">{{ t('other_items.issued_on') }}
-            <DateInput v-model="form.issued_on" class="mt-1 block h-9 w-full rounded-md border border-neutral-300 px-2" />
+          <label class="text-sm font-medium">{{ t('other_items.issued_on') }}<RequiredMark />
+            <DateInput v-model="form.issued_on" :aria-invalid="!!fieldErrors.issued_on" :class="['mt-1 block', formDateInput, fieldErrors.issued_on ? 'border-danger-500' : '']" data-test="editor-issued-on" />
+            <FieldNote :error="fieldErrors.issued_on" />
           </label>
-          <label class="text-sm font-medium">{{ t('other_items.due_on') }}
-            <DateInput v-model="form.due_on" class="mt-1 block h-9 w-full rounded-md border border-neutral-300 px-2" />
+          <label class="text-sm font-medium">{{ t('other_items.due_on') }}<RequiredMark />
+            <DateInput v-model="form.due_on" :aria-invalid="!!fieldErrors.due_on" :class="['mt-1 block', formDateInput, fieldErrors.due_on ? 'border-danger-500' : '']" data-test="editor-due-on" />
+            <FieldNote :error="fieldErrors.due_on" />
           </label>
-          <label class="text-sm font-medium">{{ t('other_items.amount') }}
-            <input v-model.number="form.amount" required type="number" min="0.01" step="0.01" class="mt-1 block h-9 w-full rounded-md border border-neutral-300 bg-surface px-2 text-right" />
+          <label class="text-sm font-medium">{{ t('other_items.amount') }}<RequiredMark />
+            <input v-model.number="form.amount" type="number" min="0.01" step="0.01" :aria-invalid="!!fieldErrors.amount" :class="['mt-1 block text-right', formInput, fieldErrors.amount ? 'border-danger-500' : '']" data-test="editor-amount" />
+            <FieldNote :error="fieldErrors.amount" />
           </label>
           <label class="text-sm font-medium">{{ t('other_items.currency') }}
-            <input value="CZK" readonly class="mt-1 block h-9 w-full rounded-md border border-neutral-300 bg-neutral-50 px-2" />
+            <input value="CZK" readonly :class="['mt-1 block bg-neutral-50', formInput]" />
           </label>
           <label class="text-sm font-medium">{{ t('other_items.variable_symbol') }}
-            <input v-model="form.variable_symbol" maxlength="20" inputmode="numeric" pattern="[0-9]*" class="mt-1 block h-9 w-full rounded-md border border-neutral-300 bg-surface px-2" />
+            <input v-model="form.variable_symbol" maxlength="20" inputmode="numeric" pattern="[0-9]*" :aria-invalid="!!fieldErrors.variable_symbol" :class="['mt-1 block', formInput, fieldErrors.variable_symbol ? 'border-danger-500' : '']" data-test="editor-vs" />
+            <FieldNote :error="fieldErrors.variable_symbol" />
           </label>
           <label class="text-sm font-medium">{{ t('other_items.counterparty_account') }}
-            <input v-model="form.counterparty_account" maxlength="60" autocomplete="off" spellcheck="false" :placeholder="t('other_items.counterparty_account_placeholder')" data-test="counterparty-account" class="mt-1 block h-9 w-full rounded-md border border-neutral-300 bg-surface px-2 font-mono" />
-            <span class="mt-1 block text-xs font-normal text-neutral-500">{{ t('other_items.counterparty_account_hint') }}</span>
+            <input v-model="form.counterparty_account" maxlength="60" autocomplete="off" spellcheck="false" :placeholder="t('other_items.counterparty_account_placeholder')" :aria-invalid="!!fieldErrors.counterparty_account" data-test="counterparty-account" :class="['mt-1 block font-mono', formInput, fieldErrors.counterparty_account ? 'border-danger-500' : '']" />
+            <FieldNote :error="fieldErrors.counterparty_account" />
+            <span v-if="!fieldErrors.counterparty_account" class="mt-1 block text-xs font-normal text-neutral-500">{{ t('other_items.counterparty_account_hint') }}</span>
           </label>
           <div v-if="docDims.enabled.value" class="sm:col-span-2" data-test="other-item-dimensions">
             <p class="mb-1 block text-sm font-medium text-neutral-700">{{ t('dimensions.header_title') }}</p>
@@ -357,14 +432,13 @@ onMounted(load)
           </div>
         </div>
       </section>
-      <section v-if="isDoubleEntry" class="rounded-lg border border-neutral-200 bg-surface p-4">
-        <h2 class="mb-1 font-semibold">{{ t('other_items.accounting') }}</h2>
+      <section v-if="isDoubleEntry" class="rounded-lg border border-neutral-200 bg-surface p-4 shadow-sm">
+        <h2 class="mb-1 text-sm font-semibold uppercase tracking-wide text-neutral-500">{{ t('other_items.accounting') }}</h2>
         <p class="mb-4 text-sm text-neutral-500">{{ t('other_items.accounting_hint') }}</p>
-        <div class="grid gap-4 sm:grid-cols-2">
-          <label class="text-sm font-medium">{{ t('other_items.accounting_on') }}
-            <DateInput v-model="form.accounting_on" class="mt-1 block h-9 w-full rounded-md border border-neutral-300 px-2" />
+        <div class="grid items-start gap-4 sm:grid-cols-2">
+          <label class="text-sm font-medium sm:col-span-2 sm:max-w-[calc(50%-0.5rem)]">{{ t('other_items.accounting_on') }}
+            <DateInput v-model="form.accounting_on" :class="['mt-1 block', formDateInput]" />
           </label>
-          <div></div>
           <label class="text-sm font-medium">{{ t('other_items.account_code') }}
             <ChartAccountSelect v-model="form.account_code" :accounts="balanceAccountChoices" :placeholder="accountPlaceholder" class="mt-1 block" />
           </label>
@@ -374,19 +448,26 @@ onMounted(load)
         </div>
         <div v-if="originSuggestion" class="mt-2 flex flex-wrap items-center gap-2 text-xs" data-test="origin-suggestion">
           <span class="text-neutral-600">{{ t('other_items.posting.suggested_for_kind', { kind: selectedKind?.name || t(`other_items.kind_by_side.${form.side}.${form.kind}`), debit: originSuggestion.debit, credit: originSuggestion.credit }) }}</span>
-          <button type="button" :class="[btnOutlineSm('neutral'), 'whitespace-nowrap']" data-test="origin-suggestion-use" @click="applySuggestion">{{ t('other_items.posting.suggestion_use') }}</button>
-          <button v-if="canSaveKindProfile" type="button" :disabled="savingSuggestion" :class="[btnOutlineSm('primary'), 'whitespace-nowrap']" data-test="origin-suggestion-save" @click="saveSuggestionAsDefault">{{ t('other_items.posting.suggestion_save') }}</button>
+          <button type="button" :class="[btnOutlineSm('neutral'), 'whitespace-nowrap']" data-test="origin-suggestion-use" @click="applySuggestion">
+            <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.check" /></svg>
+            {{ t('other_items.posting.suggestion_use') }}
+          </button>
+          <button v-if="canSaveKindProfile" type="button" :disabled="savingSuggestion" :class="[btnOutlineSm('primary'), 'whitespace-nowrap']" data-test="origin-suggestion-save" @click="saveSuggestionAsDefault">
+            <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.tag" /></svg>
+            {{ t('other_items.posting.suggestion_save') }}
+          </button>
         </div>
         <p v-if="originProfile" class="mt-2 text-xs text-neutral-500" data-test="origin-inherited">{{ t('other_items.posting.inherited_note') }}</p>
         <div v-if="splitPosting" class="mt-4">
           <OtherItemPostingLines v-model="postingLines" :accounts="accountChoices" :total="Number(form.amount || 0)" />
+          <FieldNote :error="fieldErrors.posting_lines" />
         </div>
         <button v-if="!splitPosting" type="button" :class="[btnOutline('neutral'), 'mt-4 whitespace-nowrap']" @click="startSplitPosting">
-          <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.plus" /></svg>
+          <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.plus" /></svg>
           {{ t('other_items.split_posting') }}
         </button>
         <button v-else type="button" :class="[btnOutline('neutral'), 'mt-3 whitespace-nowrap']" @click="stopSplitPosting">
-          <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.x" /></svg>
+          <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.x" /></svg>
           {{ t('other_items.single_posting') }}
         </button>
       </section>
@@ -395,18 +476,18 @@ onMounted(load)
           :upload-folder-path="documentFolderPath" :title="t('linked_documents.title')" />
         <PendingDocumentsPanel v-else v-model="pendingDocuments" :folder-path="documentFolderPath" :title="t('linked_documents.title')" />
       </template>
-      <section class="rounded-lg border border-neutral-200 bg-surface p-4">
+      <section class="rounded-lg border border-neutral-200 bg-surface p-4 shadow-sm">
         <label class="text-sm font-medium">{{ t('other_items.note') }}
-          <textarea v-model="form.note" rows="3" maxlength="2000" class="mt-1 block w-full rounded-md border border-neutral-300 bg-surface p-2" />
+          <textarea v-model="form.note" rows="3" maxlength="2000" :class="['mt-1 block', formTextarea]" />
         </label>
       </section>
       <div class="flex flex-wrap gap-2">
-        <button type="submit" :disabled="saving" :class="btnFilled('primary')">
-          <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.check" /></svg>
-          {{ t('common.save') }}
+        <button type="submit" :disabled="saving" :class="[btnFilled('primary'), 'whitespace-nowrap']" :title="t('other_items.save_hotkey')" data-test="editor-save">
+          <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.check" /></svg>
+          {{ t(saving ? 'common.saving' : 'common.save') }}
         </button>
-        <RouterLink :to="isEdit ? { name: 'other-item-detail', params: { id: editId } } : { name: 'other-items' }" :class="btnOutline('neutral')">
-          <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.x" /></svg>
+        <RouterLink :to="isEdit ? { name: 'other-item-detail', params: { id: editId } } : { name: 'other-items' }" :class="[btnOutline('neutral'), 'whitespace-nowrap']">
+          <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.x" /></svg>
           {{ t('common.cancel') }}
         </RouterLink>
       </div>

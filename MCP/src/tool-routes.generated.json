@@ -2331,6 +2331,10 @@
       ],
       [
         "GET",
+        "/api/accounting/journal/for-document/other-items/{id}"
+      ],
+      [
+        "GET",
         "/api/accounting/journal/for-document/purchase-invoices/{id}"
       ]
     ]

@@ -85,14 +85,14 @@ final class OtherItemScheduleService
         return $this->get($supplierId, $id);
     }
 
-    public function list(int $supplierId): array
+    public function list(int $supplierId, ?int $sourceItemId = null): array
     {
         $stmt = $this->db->pdo()->prepare('SELECT s.id, s.source_item_id, s.frequency, s.anchor_on, s.due_days,
             s.ends_on, s.next_index, s.status, s.auto_post, s.template_json, s.created_at, oi.status AS source_status
             FROM other_item_schedules s
             JOIN other_items oi ON oi.id = s.source_item_id AND oi.supplier_id = s.supplier_id
-            WHERE s.supplier_id = ? ORDER BY s.id DESC');
-        $stmt->execute([$supplierId]);
+            WHERE s.supplier_id = ?' . ($sourceItemId !== null ? ' AND s.source_item_id = ?' : '') . ' ORDER BY s.id DESC');
+        $stmt->execute($sourceItemId !== null ? [$supplierId, $sourceItemId] : [$supplierId]);
         return array_map(self::decode(...), $stmt->fetchAll(PDO::FETCH_ASSOC));
     }
 

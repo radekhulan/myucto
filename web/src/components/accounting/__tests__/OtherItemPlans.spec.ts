@@ -108,6 +108,9 @@ describe('OtherItemPlans', () => {
     await flushPromises()
     expect(wrapper.find('[data-test="installment-components"]').exists()).toBe(false)
     expect(wrapper.text()).toContain('other_items.plans.paid_locked')
-    expect(wrapper.findAll('[data-test="installment-principal_amount"]')).toHaveLength(2)
+    // Zamčený kalendář je jen přehled: tabulka bez zamčených polí.
+    expect(wrapper.findAll('[data-test="installments-table"] [data-test="installment-row"]')).toHaveLength(2)
+    expect(wrapper.findAll('[data-test="installment-principal_amount"]')).toHaveLength(0)
+    expect(wrapper.get('[data-test="installments-table"]').text()).toContain('other_items.plans.interest_amount')
   })
 })

@@ -22691,10 +22691,13 @@ paths:
     get:
       tags: [Accounting]
       summary: Rozvrhy opakovaných ostatních položek
-      parameters: [{ $ref: '#/components/parameters/SupplierIdHeader' }]
+      parameters:
+        - { $ref: '#/components/parameters/SupplierIdHeader' }
+        - { in: query, name: source_item_id, required: false, description: Jen rozvrh této zdrojové položky., schema: { type: integer, minimum: 1 } }
       responses:
         '200': { description: Rozvrhy, content: { application/json: { schema: { type: object, properties: { items: { type: array, items: { $ref: '#/components/schemas/OtherItemSchedule' } } } } } } }
         '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
 
   /api/v1/accounting/other-items/schedules/{id}:
     get:
@@ -34113,7 +34116,7 @@ paths:
     get:
       tags:
       - Accounting
-      summary: Účetní zápisy faktury včetně storen
+      summary: Účetní zápisy faktury nebo ostatní položky včetně storen
       parameters:
       - $ref: '#/components/parameters/SupplierIdHeader'
       - in: path
@@ -34124,6 +34127,7 @@ paths:
           enum:
           - invoices
           - purchase-invoices
+          - other-items
       - in: path
         name: id
         required: true
@@ -46931,6 +46935,16 @@ components:
         total: { type: integer }
         page: { type: integer }
         per_page: { type: integer }
+        totals:
+          type: array
+          description: Jen na první stránce. Zbývá uhradit za celý výběr ručních položek (stejné filtry jako items, bez stránkování) po straně a měně; počítá jen potvrzené a zaúčtované položky, koncepty a storna ne. Přeplatek položky se počítá jako nula.
+          items:
+            type: object
+            required: [side, currency, remaining_amount]
+            properties:
+              side: { type: string, enum: [receivable, payable] }
+              currency: { type: string }
+              remaining_amount: { type: number }
         sources:
           type: array
           description: Převzaté položky ze mzdového a daňového modulu, pouze ke čtení
@@ -47100,6 +47114,9 @@ components:
           enum: [other_item_vs_account, other_item_vs_installment, other_item_vs_remaining, other_item_account_installment, bank_rule, null]
           description: Kód automatického přiřazení (shoda VS s účtem protistrany, příští splátkou nebo celým zbytkem, účet protistrany s příští splátkou, nebo pravidlo účtování banky). Null u ručního přiřazení.
         reversed_on: { type: [string, 'null'], format: date }
+        bank_statement_id: { type: [integer, 'null'], format: int64, description: Bankovní výpis pohybu úhrady. Null u pokladní platby. }
+        cash_doc_number: { type: [string, 'null'], description: Číslo pokladního dokladu úhrady. Null u bankovní platby. }
+        journal_entry_id: { type: [integer, 'null'], format: int64, description: Živý (nestornovaný) zaúčtovaný zápis platby v deníku. Null bez zaúčtování platby, u stornované úhrady nebo bez práva číst účetnictví. }
     OtherItemBankCandidate:
       type: object
       description: Ostatní položka nabídnutá k bankovnímu pohybu; tvar odpovídá kandidátům faktur v párování pohybu.

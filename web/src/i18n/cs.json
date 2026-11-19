@@ -206,7 +206,6 @@
       "suggested_for_kind": "Navržené účty pro druh {kind}: MD {debit} / D {credit}",
       "suggestion_use": "Použít",
       "suggestion_save": "Uložit jako výchozí pro druh",
-      "repost_hint": "Účet položky se mění přeúčtováním vzniku, úhrady ho pak následují.",
       "inherited_note": "Prázdný účet položky a protiúčet doplní při zaúčtování účetní profil druhu.",
       "kinds": {
         "button": "Účtování",
@@ -237,7 +236,7 @@
     "sources_section": "Položky z jiných modulů",
     "sources_hint": "Mzdy a daně se upravují ve svém zdrojovém modulu.",
     "not_found": "Položka nebyla nalezena.",
-    "form_hint": "Dokumenty připojíte po uložení položky v jejím detailu.",
+    "form_hint": "Dokumenty můžete připojit hned, uloží se spolu s položkou.",
     "side_label": "Směr",
     "side": {
       "receivable": "Pohledávka",
@@ -404,7 +403,6 @@
     "result_posted": "Zaúčtováno",
     "result_draft": "Koncepty",
     "open_journal": "Otevřít účetní zápis",
-    "journal_context": "Poznámky a přílohy účetního zápisu",
     "journal_documents": "Přílohy účetního zápisu",
     "repost": "Přeúčtovat",
     "repost_hint": "Původní zápis se stornuje a nový vznikne k vybranému dni. Datum musí být v otevřeném období.",
@@ -432,7 +430,6 @@
     "confirmed": "Položka byla potvrzena.",
     "reversed": "Položka byla stornována.",
     "cancelled": "Položka byla zrušena.",
-    "validation_required": "Vyplňte název, druh, data a kladnou částku.",
     "previous": "Předchozí",
     "next": "Další",
     "plans": {
@@ -518,7 +515,27 @@
     "delete_posted_locked": "Doklad spadá do uzamčeného období. Před smazáním budete požádáni o vědomé potvrzení.",
     "delete_posted_done": "Doklad i jeho zápis v deníku byly smazány.",
     "delete_posted_cancelled": "Zápis v deníku byl smazán a výskyt opakování zrušen, aby ho opakování nevytvořilo znovu.",
-    "delete_posted_blocked": "Smazat nelze: {reason} Doklad můžete stornovat."
+    "delete_posted_blocked": "Smazat nelze: {reason} Doklad můžete stornovat.",
+    "document_count": "žádný dokument | 1 dokument | {count} dokumenty | {count} dokumentů",
+    "totals_by_side": {
+      "receivable": "Pohledávky zbývá",
+      "payable": "Závazky zbývá"
+    },
+    "totals_hint": "Zbývá uhradit u ručně zadaných položek za celý výběr (všechny stránky, ve zvoleném rozmezí splatnosti). Počítá jen potvrzené a zaúčtované položky, ne koncepty, storna, přeplatky ani položky z mezd a daní.",
+    "empty_title": "Zatím žádná ostatní pohledávka ani závazek",
+    "empty_hint": "Zapište sem nájem, kauci, půjčku, pojistné plnění a další pohledávky či závazky mimo faktury.",
+    "load_failed_stale": "Seznam se nepodařilo obnovit, zobrazená data mohou být zastaralá.",
+    "post_preview": "Zaúčtuje se",
+    "no_payment_candidates": "Žádná volná platba k přiřazení.",
+    "no_payment_candidates_search": "Hledání neodpovídá žádná volná platba.",
+    "save_hotkey": "Uložit (Ctrl+S)",
+    "side_change_confirm": "Změna strany vymaže druh, účty a rozpad na protiúčty. Pokračovat?",
+    "errors": {
+      "required": "Vyplňte toto pole.",
+      "amount_positive": "Zadejte kladnou částku.",
+      "form_invalid": "Položku nejde uložit, opravte zvýrazněná pole.",
+      "variable_symbol_digits": "Variabilní symbol smí obsahovat jen číslice."
+    }
   },
   "internal_documents": {
     "title": "Interní doklady",

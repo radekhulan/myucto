@@ -206,7 +206,6 @@
       "suggested_for_kind": "Suggested accounts for kind {kind}: Dr {debit} / Cr {credit}",
       "suggestion_use": "Use",
       "suggestion_save": "Save as kind default",
-      "repost_hint": "The item account is changed by re-posting the origin; payments then follow it.",
       "inherited_note": "An empty item account and counter account are filled in from the kind's posting profile when posting.",
       "kinds": {
         "button": "Posting",
@@ -237,7 +236,7 @@
     "sources_section": "Items from other modules",
     "sources_hint": "Payroll and taxes are managed in their source module.",
     "not_found": "Item not found.",
-    "form_hint": "You can attach documents after saving the item, from its detail page.",
+    "form_hint": "You can attach documents right away; they are saved together with the item.",
     "side_label": "Side",
     "side": {
       "receivable": "Receivable",
@@ -404,7 +403,6 @@
     "result_posted": "Posted",
     "result_draft": "Drafts",
     "open_journal": "Open journal entry",
-    "journal_context": "Journal entry notes and attachments",
     "journal_documents": "Journal entry attachments",
     "repost": "Repost",
     "repost_hint": "The original entry will be reversed and a new one posted on the selected date. The date must be in an open period.",
@@ -432,7 +430,6 @@
     "confirmed": "Item confirmed.",
     "reversed": "Item reversed.",
     "cancelled": "Item cancelled.",
-    "validation_required": "Enter a title, kind, dates and a positive amount.",
     "previous": "Previous",
     "next": "Next",
     "plans": {
@@ -518,7 +515,27 @@
     "delete_posted_locked": "The document falls into a locked period. You will be asked to confirm the deletion explicitly.",
     "delete_posted_done": "The document and its journal entry have been deleted.",
     "delete_posted_cancelled": "The journal entry was deleted and the recurring occurrence cancelled so that the schedule does not create it again.",
-    "delete_posted_blocked": "Cannot be deleted: {reason} You can reverse the document."
+    "delete_posted_blocked": "Cannot be deleted: {reason} You can reverse the document.",
+    "document_count": "no documents | 1 document | {count} documents",
+    "totals_by_side": {
+      "receivable": "Receivables remaining",
+      "payable": "Payables remaining"
+    },
+    "totals_hint": "Remaining for manually entered items in the whole selection (all pages, within the chosen due date range). Only confirmed and posted items count, not drafts, reversals, overpayments or payroll and tax items.",
+    "empty_title": "No other receivables or payables yet",
+    "empty_hint": "Record rent, deposits, loans, insurance claims and other receivables or payables outside invoices here.",
+    "load_failed_stale": "The list could not be refreshed; the data shown may be out of date.",
+    "post_preview": "Will be posted as",
+    "no_payment_candidates": "No unallocated payment to link.",
+    "no_payment_candidates_search": "No unallocated payment matches the search.",
+    "save_hotkey": "Save (Ctrl+S)",
+    "side_change_confirm": "Changing the side clears the kind, accounts and counter-account split. Continue?",
+    "errors": {
+      "required": "Fill in this field.",
+      "amount_positive": "Enter a positive amount.",
+      "form_invalid": "The item cannot be saved, fix the highlighted fields.",
+      "variable_symbol_digits": "The variable symbol may contain digits only."
+    }
   },
   "internal_documents": {
     "title": "Internal documents",

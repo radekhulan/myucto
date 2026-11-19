@@ -125,7 +125,38 @@ final class OtherItemRepository
         );
         $stmt->execute($params);
         $items = $stmt->fetchAll(PDO::FETCH_ASSOC);
-        return ['items' => $items, 'total' => $total, 'page' => $page, 'per_page' => $perPage];
+        $result = ['items' => $items, 'total' => $total, 'page' => $page, 'per_page' => $perPage];
+        if ($page === 1) {
+            $result['totals'] = $this->remainingTotals($whereSql, $params);
+        }
+        return $result;
+    }
+
+    /**
+     * Zbývá uhradit za celý výběr (ne jen načtenou stránku), po straně a měně: pohledávky
+     * a závazky ani dvě měny se nesčítají. Jen potvrzené a zaúčtované položky — koncept
+     * ještě dluhem není, storno už ne. Přeplatek jedné položky nesnižuje dluh jiné (záporný zůstatek se počítá jako nula).
+     *
+     * @param list<mixed> $params
+     * @return list<array{side:string,currency:string,remaining_amount:float}>
+     */
+    private function remainingTotals(string $whereSql, array $params): array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT oi.side, oi.currency,
+                    SUM(GREATEST(oi.amount - oi.settled_outside_amount - COALESCE((SELECT SUM(a.amount) FROM other_item_allocations a
+                         WHERE a.supplier_id = oi.supplier_id AND a.other_item_id = oi.id AND a.reversed_on IS NULL), 0), 0)) remaining_amount
+               FROM other_items oi
+              WHERE " . $whereSql . " AND oi.status IN ('confirmed','posted')
+              GROUP BY oi.side, oi.currency
+              ORDER BY oi.side, oi.currency"
+        );
+        $stmt->execute($params);
+        return array_map(static fn (array $row): array => [
+            'side' => (string) $row['side'],
+            'currency' => (string) $row['currency'],
+            'remaining_amount' => round((float) $row['remaining_amount'], 2),
+        ], $stmt->fetchAll(PDO::FETCH_ASSOC));
     }
 
     public function insert(int $supplierId, array $data, ?int $userId): int

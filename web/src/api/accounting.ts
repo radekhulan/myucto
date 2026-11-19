@@ -237,6 +237,12 @@ export interface JournalEntry {
 export type JournalDocumentSource = 'invoices' | 'purchase-invoices'
 
 /**
+ * Doklad se sekcí Zaúčtování. Ostatní položka zápis v deníku má, přeúčtuje se ale vlastním
+ * dialogem položky (saldokonto, rozpad), takže do {@link JournalPostingSource} nepatří.
+ */
+export type JournalSectionSource = JournalDocumentSource | 'other-items'
+
+/**
  * Doklad, jehož ZÁPIS se přeúčtovává nebo u kterého se ptáme na původ kontace.
  * Širší než {@link JournalDocumentSource}: bankovní pohyb vlastní sekci Zaúčtování
  * nemá (kontace visí na řádku výpisu), ale zápis v deníku má a opravit se dá taky.
@@ -2892,7 +2898,7 @@ export const accountingApi = {
    * seznam znamená „nezaúčtováno" nebo firmu mimo podvojné účetnictví; sekce
    * se v obou případech nezobrazí.
    */
-  journalForDocument: (source: JournalDocumentSource, docId: number) =>
+  journalForDocument: (source: JournalSectionSource, docId: number) =>
     api.get<{ items: JournalEntryWithLines[] }>(`/accounting/journal/for-document/${source}/${docId}`)
       .then(r => r.data.items ?? []),
 

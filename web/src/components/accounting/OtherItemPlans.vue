@@ -42,7 +42,7 @@ async function load() {
   loan.value.first_due_on = splitFirstDue.value
   try {
     const id = Number(props.item.id)
-    const [all, rows] = await Promise.all([otherItemPlansApi.schedules(), otherItemPlansApi.installments(id)])
+    const [all, rows] = await Promise.all([otherItemPlansApi.schedules(id), otherItemPlansApi.installments(id)])
     const found = all.find(row => Number(row.source_item_id) === id)
     schedule.value = found ? await otherItemPlansApi.schedule(found.id) : null
     installments.value = rows
@@ -250,8 +250,8 @@ watch(() => [props.item.id, props.item.paid_amount], () => void load(), { immedi
 
 <template>
   <div id="other-item-plans" class="mt-4 grid scroll-mt-4 gap-4 lg:grid-cols-2">
-    <section class="rounded-lg border border-neutral-200 bg-surface p-4">
-      <h2 class="font-semibold">{{ t('other_items.plans.schedule_title') }}</h2>
+    <section class="rounded-lg border border-neutral-200 bg-surface p-4 shadow-sm">
+      <h2 class="text-sm font-semibold uppercase tracking-wide text-neutral-500">{{ t('other_items.plans.schedule_title') }}</h2>
       <p class="mt-1 text-sm text-neutral-500">{{ t('other_items.plans.schedule_hint') }}</p>
       <p v-if="loading" class="mt-3 text-sm text-neutral-500">{{ t('common.loading') }}</p>
       <template v-else-if="schedule">
@@ -269,16 +269,16 @@ watch(() => [props.item.id, props.item.paid_amount], () => void load(), { immedi
               <DateInput v-model="through" class="mt-1 block h-9 rounded-md border border-neutral-300 px-2" />
             </label>
             <button type="button" :disabled="busy || schedule.status !== 'active' || (schedule.auto_post && !canPost)" :class="[btnOutline('success'), 'whitespace-nowrap']" @click="generate">
-              <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.plus" /></svg>
+              <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.plus" /></svg>
               {{ t('other_items.plans.generate') }}
             </button>
             <button type="button" :disabled="busy || (schedule.status !== 'active' && schedule.auto_post && !canPost)" :class="[btnOutline('warning'), 'whitespace-nowrap']" @click="toggleSchedule">
-              <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="schedule.status === 'active' ? ICONS.pause : ICONS.play" /></svg>
+              <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" :d="schedule.status === 'active' ? ICONS.pause : ICONS.play" /></svg>
               {{ t(schedule.status === 'active' ? 'other_items.plans.pause' : 'other_items.plans.resume') }}
             </button>
           </template>
           <button type="button" :disabled="busy" :class="[btnOutline('danger'), 'whitespace-nowrap']" @click="deleteSchedule">
-            <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.trash" /></svg>
+            <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.trash" /></svg>
             {{ t('other_items.plans.delete_schedule') }}
           </button>
         </div>
@@ -308,14 +308,14 @@ watch(() => [props.item.id, props.item.paid_amount], () => void load(), { immedi
         </label>
         <p class="w-full text-xs text-neutral-500">{{ t(canAutoPost ? 'other_items.plans.auto_post_hint' : 'other_items.plans.auto_post_source') }}</p>
         <button type="submit" :disabled="busy" :class="btnOutline('primary')">
-          <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.calendar" /></svg>
+          <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.calendar" /></svg>
           {{ t('other_items.plans.create_schedule') }}
         </button>
       </form>
     </section>
 
-    <section class="rounded-lg border border-neutral-200 bg-surface p-4">
-      <h2 class="font-semibold">{{ t('other_items.plans.installments_title') }}</h2>
+    <section class="rounded-lg border border-neutral-200 bg-surface p-4 shadow-sm">
+      <h2 class="text-sm font-semibold uppercase tracking-wide text-neutral-500">{{ t('other_items.plans.installments_title') }}</h2>
       <p class="mt-1 text-sm text-neutral-500">{{ t('other_items.plans.installments_hint') }}</p>
       <p v-if="loading" class="mt-3 text-sm text-neutral-500">{{ t('common.loading') }}</p>
       <template v-else>
@@ -335,7 +335,7 @@ watch(() => [props.item.id, props.item.paid_amount], () => void load(), { immedi
               <DateInput v-model="splitFirstDue" class="mt-1 block h-9 rounded-md border border-neutral-300 px-2" />
             </label>
             <button type="button" :disabled="!canSplit" :class="[btnOutline('primary'), 'whitespace-nowrap']" @click="splitInstallments">
-              <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.calendar" /></svg>
+              <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.calendar" /></svg>
               {{ t('other_items.plans.split') }}
             </button>
           </div>
@@ -371,13 +371,44 @@ watch(() => [props.item.id, props.item.paid_amount], () => void load(), { immedi
               <input v-model.number="loan.fee" type="number" min="0" step="0.01" class="mt-1 block h-9 w-24 rounded-md border border-neutral-300 bg-surface px-2 text-right" />
             </label>
             <button type="button" :disabled="!canPlanLoan || busy" :class="[btnOutline('primary'), 'whitespace-nowrap']" data-test="loan-plan-run" @click="planLoan">
-              <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.calendar" /></svg>
+              <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.calendar" /></svg>
               {{ t('other_items.plans.loan_plan') }}
             </button>
             <p class="w-full text-xs text-neutral-500">{{ t('other_items.plans.loan_hint') }}</p>
           </div>
         </div>
-        <div v-for="(row, index) in installments" :key="row.id || index" class="mt-3 flex flex-wrap items-end gap-2" data-test="installment-row">
+        <!-- Kalendář, který už nejde měnit (uhrazená nebo uzavřená položka), je jen přehled: tabulka místo zamčených polí. -->
+        <div v-if="!canEditInstallments && installments.length" class="mt-3 overflow-x-auto" data-test="installments-table">
+          <table class="w-full text-sm">
+            <thead class="bg-neutral-50 text-xs uppercase tracking-wide text-neutral-500">
+              <tr>
+                <th class="px-2 py-1.5 text-left font-medium">#</th>
+                <th class="px-2 py-1.5 text-left font-medium">{{ t('other_items.due_on') }}</th>
+                <template v-if="components">
+                  <th v-for="part in (['principal_amount', 'interest_amount', 'fee_amount'] as const)" :key="part" class="px-2 py-1.5 text-right font-medium">{{ t(`other_items.plans.${part}`) }}</th>
+                </template>
+                <th class="px-2 py-1.5 text-right font-medium">{{ t('other_items.amount') }}</th>
+                <th class="px-2 py-1.5 text-left font-medium">{{ t('other_items.status_label') }}</th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-neutral-100">
+              <tr v-for="(row, index) in installments" :key="row.id || index" data-test="installment-row">
+                <td class="px-2 py-1.5 tabular-nums text-neutral-500">{{ index + 1 }}</td>
+                <td class="whitespace-nowrap px-2 py-1.5">{{ row.due_on ? formatDate(row.due_on) : '–' }}</td>
+                <template v-if="components">
+                  <td v-for="part in (['principal_amount', 'interest_amount', 'fee_amount'] as const)" :key="part" class="whitespace-nowrap px-2 py-1.5 text-right tabular-nums">{{ formatMoney(Number(row[part] ?? 0), item.currency) }}</td>
+                </template>
+                <td class="whitespace-nowrap px-2 py-1.5 text-right font-medium tabular-nums" data-test="installment-amount">{{ formatMoney(rowAmount(row), item.currency) }}</td>
+                <td class="px-2 py-1.5">
+                  <span v-if="row.status" :class="INSTALLMENT_STATUS_CLASS[row.status]" class="whitespace-nowrap rounded px-2 py-0.5 text-xs font-medium" data-test="installment-status">
+                    {{ t(`other_items.plans.installment_status.${row.status}`) }}<template v-if="row.status === 'partial' || (row.status === 'overdue' && Number(row.paid_amount || 0) > 0)"> · {{ t('other_items.plans.installment_remaining', { amount: formatMoney(row.remaining_amount ?? 0, item.currency) }) }}</template>
+                  </span>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <div v-for="(row, index) in (canEditInstallments ? installments : [])" :key="row.id || index" class="mt-3 flex flex-wrap items-end gap-2" data-test="installment-row">
           <label class="text-sm font-medium">{{ t('other_items.plans.due_number', { number: index + 1 }) }}
             <DateInput v-model="row.due_on" :disabled="!canEditInstallments" class="mt-1 block h-9 rounded-md border border-neutral-300 px-2" />
           </label>
@@ -394,7 +425,7 @@ watch(() => [props.item.id, props.item.paid_amount], () => void load(), { immedi
             {{ t(`other_items.plans.installment_status.${row.status}`) }}<template v-if="row.status === 'partial' || (row.status === 'overdue' && Number(row.paid_amount || 0) > 0)"> · {{ t('other_items.plans.installment_remaining', { amount: formatMoney(row.remaining_amount ?? 0, item.currency) }) }}</template>
           </span>
           <button v-if="canEditInstallments" type="button" :class="btnOutline('danger')" @click="installments.splice(index, 1)">
-            <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.trash" /></svg>
+            <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.trash" /></svg>
             {{ t('common.delete') }}
           </button>
         </div>
@@ -404,15 +435,15 @@ watch(() => [props.item.id, props.item.paid_amount], () => void load(), { immedi
         </p>
         <div v-if="canEditInstallments" class="mt-3 flex flex-wrap gap-2">
           <button type="button" :class="btnOutline('neutral')" @click="addInstallment">
-            <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.plus" /></svg>
+            <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.plus" /></svg>
             {{ t('other_items.plans.add_installment') }}
           </button>
           <button v-if="installments.length >= 2" type="button" :disabled="busy" :class="btnOutline('success')" @click="saveInstallments">
-            <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.check" /></svg>
+            <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.check" /></svg>
             {{ t('common.save') }}
           </button>
           <button v-if="installments.some(row => row.id)" type="button" :disabled="busy" :class="btnOutline('danger')" @click="clearInstallments">
-            <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.trash" /></svg>
+            <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.trash" /></svg>
             {{ t('other_items.plans.clear_installments') }}
           </button>
         </div>

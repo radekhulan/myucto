@@ -43,7 +43,8 @@ export interface OtherItemLoanPlanInput {
 }
 
 export const otherItemPlansApi = {
-  schedules: () => api.get<{ items: OtherItemSchedule[] }>('/accounting/other-items/schedules').then(r => r.data.items),
+  schedules: (sourceItemId?: number) => api.get<{ items: OtherItemSchedule[] }>('/accounting/other-items/schedules',
+    sourceItemId ? { params: { source_item_id: sourceItemId } } : undefined).then(r => r.data.items),
   schedule: (id: number) => api.get<OtherItemSchedule>(`/accounting/other-items/schedules/${id}`).then(r => r.data),
   createSchedule: (itemId: number, payload: { frequency: OtherItemSchedule['frequency']; ends_on: string | null; auto_post?: boolean }) =>
     api.post<OtherItemSchedule>(`/accounting/other-items/${itemId}/schedule`, payload).then(r => r.data),

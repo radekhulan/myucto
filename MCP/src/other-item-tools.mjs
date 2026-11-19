@@ -296,7 +296,8 @@ export const OTHER_ITEM_TOOLS = [
   read('list_other_items', 'Ostatní pohledávky a závazky',
     'Ruční ostatní pohledávky a závazky (nájem, půjčky, úvěry, kauce, pojistné, poplatky) se stavem a zbývající '
     + 'částkou, k tomu odděleně převzaté předpisy ze mzdového a daňového modulu (`sources`, jen ke čtení). '
-    + 'Bez filtru data vrací splatnosti od roku zpět do roku dopředu.', {
+    + 'Bez filtru data vrací splatnosti od roku zpět do roku dopředu. První stránka nese `totals`: zbývá uhradit za celý '
+    + 'výběr ručních položek po straně a měně (jen potvrzené a zaúčtované, přeplatek = 0).', {
       side: str('Strana.', { enum: ['receivable', 'payable'] }),
       status: str('Stav: open = neuhrazené aktivní, all = vše.', {
         enum: ['open', 'all', 'draft', 'confirmed', 'posted', 'reversed', 'cancelled'],
@@ -321,7 +322,9 @@ export const OTHER_ITEM_TOOLS = [
     + '`posting_overrides` vlastní kontaci úhrad.',
     { id: id('ID dokladu.') }, (a) => `${BASE}/${seg(a.id)}`, () => null, ['id']),
   read('list_other_item_allocations', 'Úhrady ostatní položky',
-    'Spárované bankovní a pokladní úhrady dokladu. Párování se dělá ve webovém rozhraní.',
+    'Spárované bankovní a pokladní úhrady dokladu s odkazem na výpis (`bank_statement_id`), číslem pokladního '
+    + 'dokladu (`cash_doc_number`) a živým zaúčtovaným zápisem platby (`journal_entry_id`, jen s právem číst '
+    + 'účetnictví). Párování se dělá ve webovém rozhraní.',
     { id: id('ID dokladu.') }, (a) => `${BASE}/${seg(a.id)}/allocations`, () => null, ['id']),
   read('other_item_payment_candidates', 'Kandidáti úhrady ostatní položky',
     'Volné bankovní a pokladní platby v Kč, které by mohly doklad uhradit. Jen k přehledu, nic nepáruje. '
@@ -342,8 +345,10 @@ export const OTHER_ITEM_TOOLS = [
     + '(`posting_suggestion`). Nastavení druhů a profilů se mění ve webovém rozhraní.',
     {}, () => `${BASE}/kinds`),
   read('list_other_item_schedules', 'Opakování ostatních položek',
-    'Rozvrhy opakování (měsíčně, čtvrtletně, ročně) se šablonou, stavem a příznakem automatického účtování.',
-    {}, () => `${BASE}/schedules`),
+    'Rozvrhy opakování (měsíčně, čtvrtletně, ročně) se šablonou, stavem a příznakem automatického účtování. '
+    + '`source_item_id` vrátí jen rozvrh dané zdrojové položky.',
+    { source_item_id: id('ID zdrojové položky; bez něj všechny rozvrhy firmy.') }, () => `${BASE}/schedules`,
+    (a) => (a.source_item_id !== undefined ? { source_item_id: a.source_item_id } : null)),
   read('get_other_item_schedule', 'Detail opakování ostatní položky',
     'Rozvrh opakování včetně všech vygenerovaných dokladů a jejich stavu.',
     { id: id('ID rozvrhu.') }, (a) => `${BASE}/schedules/${seg(a.id)}`, () => null, ['id']),

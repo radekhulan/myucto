@@ -300,9 +300,13 @@ final class OtherItemAction
         return $this->run($response, function () use ($request, $args): array {
             $canReadBank = RequestAuthorization::allows($request, 'bank', AccessLevel::READ);
             $canReadCash = RequestAuthorization::allows($request, 'cash', AccessLevel::READ);
+            $canReadJournal = RequestAuthorization::allows($request, 'accounting', AccessLevel::READ);
             $rows = $this->service->allocations($this->currentSupplierId($request), (int) $args['id']);
-            return ['items' => array_values(array_filter($rows, static fn (array $row): bool =>
-                $row['bank_transaction_id'] !== null ? $canReadBank : $canReadCash))];
+            $visible = array_filter($rows, static fn (array $row): bool =>
+                $row['bank_transaction_id'] !== null ? $canReadBank : $canReadCash);
+            // Odkaz do deníku jen tomu, kdo deník smí číst.
+            return ['items' => array_values(array_map(static fn (array $row): array =>
+                $canReadJournal ? $row : ['journal_entry_id' => null] + $row, $visible))];
         });
     }
 

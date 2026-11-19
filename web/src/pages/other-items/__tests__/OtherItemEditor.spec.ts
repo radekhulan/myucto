@@ -12,6 +12,9 @@ const m = vi.hoisted(() => ({
   dimsSave: vi.fn(),
   dimsLoad: vi.fn(),
   toastError: vi.fn(),
+  toastInfo: vi.fn(),
+  auth: { isDemo: false, documents: true } as { isDemo: boolean; documents: boolean; move?: boolean },
+  params: { id: '42' } as Record<string, string>,
   supplier: { accounting_mode: 'tax_evidence' },
 }))
 
@@ -27,18 +30,19 @@ vi.mock('@/stores/supplier', () => ({
   useSupplierStore: () => ({ currentSupplier: m.supplier }),
 }))
 
-vi.mock('@/stores/auth', () => ({ useAuthStore: () => ({ canWrite: () => true, canRead: () => true }) }))
+vi.mock('@/stores/auth', () => ({ useAuthStore: () => ({ canWrite: (key: string) => key !== 'documents.move' || m.auth.move !== false,
+  canRead: (key: string) => key !== 'documents' || m.auth.documents, get isDemo() { return m.auth.isDemo } }) }))
 vi.mock('@/api/otherItemSettings', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/api/otherItemSettings')>()),
   otherItemSettingsApi: { get: vi.fn().mockResolvedValue({ document_folder: 'Smlouvy/{YYYY}', document_folder_default: 'Ostatní pohledávky a závazky/{YYYY}/{MM}', is_default: false }), update: vi.fn() },
 }))
 
 vi.mock('@/composables/useToast', () => ({
-  useToast: () => ({ error: m.toastError, success: vi.fn() }),
+  useToast: () => ({ error: m.toastError, success: vi.fn(), info: m.toastInfo }),
 }))
 
 vi.mock('vue-router', () => ({
-  useRoute: () => ({ params: { id: '42' }, query: {} }),
+  useRoute: () => ({ params: m.params, query: {} }),
   useRouter: () => ({ push: m.routerPush, replace: m.routerReplace }),
   RouterLink: { template: '<a><slot /></a>' },
 }))
@@ -63,6 +67,8 @@ describe('OtherItemEditor partner', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     m.supplier.accounting_mode = 'tax_evidence'
+    m.auth = { isDemo: false, documents: true }
+    m.params = { id: '42' }
     m.get.mockResolvedValue({
       id: 42,
       status: 'draft',
@@ -158,9 +164,57 @@ describe('OtherItemEditor partner', () => {
     await flushPromises()
     const kind = wrapper.findAll('select')[1]!
     expect(kind.find('option[value="loan"]').text()).toBe('other_items.kind_by_side.payable.loan')
+    // Vyplněný druh by změna strany zahodila: bez souhlasu zůstane strana i druh.
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValueOnce(false)
+    await wrapper.findAll('select')[0]!.setValue('receivable')
+    expect(confirm).toHaveBeenCalledWith('other_items.side_change_confirm')
+    expect((wrapper.findAll('select')[0]!.element as HTMLSelectElement).value).toBe('payable')
+    expect((kind.element as HTMLSelectElement).value).toBe('rent')
+
+    confirm.mockReturnValueOnce(true)
     await wrapper.findAll('select')[0]!.setValue('receivable')
     expect(kind.find('option[value="loan"]').text()).toBe('other_items.kind_by_side.receivable.loan')
     expect((kind.element as HTMLSelectElement).value).toBe('other')
+    confirm.mockRestore()
+  })
+
+  it('obecnou položku bez účtů přepne na druhou stranu bez ptaní', async () => {
+    m.get.mockResolvedValue({ ...(await m.get()), kind: 'other' })
+    const wrapper = shallowMount(OtherItemEditor)
+    await flushPromises()
+    const confirm = vi.spyOn(window, 'confirm')
+    await wrapper.findAll('select')[0]!.setValue('receivable')
+    expect(confirm).not.toHaveBeenCalled()
+    expect((wrapper.findAll('select')[0]!.element as HTMLSelectElement).value).toBe('receivable')
+    confirm.mockRestore()
+  })
+
+  it('chybějící údaje ukáže u polí a trvale nad formulářem, opravou chyba pole zmizí', async () => {
+    const wrapper = shallowMount(OtherItemEditor, { global: { stubs: { FieldNote: { props: ['error'], template: '<span class="field-note">{{ error }}</span>' } } } })
+    await flushPromises()
+    await wrapper.get('[data-test="editor-title"]').setValue('  ')
+    await wrapper.get('[data-test="editor-amount"]').setValue('0')
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+
+    expect(m.update).not.toHaveBeenCalled()
+    expect(wrapper.get('[data-test="form-error"]').attributes('role')).toBe('alert')
+    expect(wrapper.get('[data-test="form-error"]').text()).toBe('other_items.errors.form_invalid')
+    const notes = () => wrapper.findAll('.field-note').map(note => note.text()).filter(Boolean)
+    expect(notes()).toEqual(['other_items.errors.required', 'other_items.errors.amount_positive'])
+    await wrapper.get('[data-test="editor-title"]').setValue('Opraveno')
+    expect(notes()).toEqual(['other_items.errors.amount_positive'])
+  })
+
+  it('odmítnutí serverem zůstane jako hláška nad formulářem a Ctrl+S uloží', async () => {
+    m.update.mockRejectedValueOnce({ response: { data: { error: { message: 'Období je uzavřené.' } } } })
+    const wrapper = shallowMount(OtherItemEditor, { attachTo: document.body })
+    await flushPromises()
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 's', ctrlKey: true }))
+    await flushPromises()
+    expect(m.update).toHaveBeenCalledTimes(1)
+    expect(wrapper.get('[data-test="form-error"]').text()).toBe('Období je uzavřené.')
+    wrapper.unmount()
   })
 
   it('nabídne vlastní druhy své strany a uloží je jako kind_id', async () => {
@@ -252,7 +306,8 @@ describe('OtherItemEditor partner', () => {
     await flushPromises()
 
     expect(m.update).not.toHaveBeenCalled()
-    expect(m.toastError).toHaveBeenCalledWith('other_items.counterparty_account_invalid')
+    expect(wrapper.findAllComponents({ name: 'FieldNote' }).map(note => note.props('error')).filter(Boolean))
+      .toEqual(['other_items.counterparty_account_invalid'])
   })
 
   it('prázdný účet protistrany pošle jako null', async () => {
@@ -337,5 +392,160 @@ describe('OtherItemEditor partner', () => {
     const wrapper = shallowMount(OtherItemEditor)
     await flushPromises()
     expect(wrapper.find('[data-test="origin-suggestion"]').exists()).toBe(false)
+  })
+})
+
+describe('OtherItemEditor chyby a pojistky', () => {
+  const FieldNoteStub = { props: ['error'], template: '<span class="field-note">{{ error }}</span>' }
+  const PostingLinesStub = { name: 'OtherItemPostingLines', props: ['modelValue'], template: '<div class="posting-lines" />' }
+  const draft = {
+    id: 42, status: 'draft', side: 'payable', kind: 'other', title: 'Syntetický závazek', partner_id: null, partner_name: '',
+    issued_on: '2099-01-01', accounting_on: '2099-01-01', due_on: '2099-01-20', currency: 'CZK', exchange_rate: null,
+    amount: 1200, variable_symbol: null, counterparty_account: null, counterparty_bank_code: null,
+    account_code: null, counter_account_code: null, posting_lines: [], note: null,
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    m.supplier.accounting_mode = 'tax_evidence'
+    m.auth = { isDemo: false, documents: true }
+    m.params = { id: '42' }
+    m.get.mockResolvedValue({ ...draft })
+    m.update.mockResolvedValue({ ...draft })
+    m.listKinds.mockResolvedValue([])
+    m.listAccounts.mockResolvedValue([])
+    m.dimsLoad.mockResolvedValue(undefined)
+    m.dimsSave.mockResolvedValue(undefined)
+    m.routerPush.mockResolvedValue(undefined)
+  })
+
+  const notes = (wrapper: ReturnType<typeof shallowMount>) => wrapper.findAll('.field-note').map(note => note.text()).filter(Boolean)
+
+  it('souhrn nad formulářem zmizí, když je opravené poslední chybné pole', async () => {
+    const wrapper = shallowMount(OtherItemEditor, { global: { stubs: { FieldNote: FieldNoteStub } } })
+    await flushPromises()
+    await wrapper.get('[data-test="editor-title"]').setValue('')
+    await wrapper.get('[data-test="editor-amount"]').setValue('0')
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+    expect(wrapper.find('[data-test="form-error"]').exists()).toBe(true)
+    await wrapper.get('[data-test="editor-title"]').setValue('Opraveno')
+    expect(wrapper.find('[data-test="form-error"]').exists()).toBe(true)
+    await wrapper.get('[data-test="editor-amount"]').setValue('100')
+    expect(wrapper.find('[data-test="form-error"]').exists()).toBe(false)
+  })
+
+  it('chybějící datum zvýrazní i samotné pole data', async () => {
+    const wrapper = shallowMount(OtherItemEditor, { global: { stubs: { FieldNote: FieldNoteStub } } })
+    await flushPromises()
+    wrapper.findAllComponents({ name: 'DateInput' }).find(input => input.attributes('data-test') === 'editor-due-on')!.vm.$emit('update:modelValue', '')
+    await flushPromises()
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+    const due = wrapper.get('[data-test="editor-due-on"]')
+    expect(due.attributes('aria-invalid')).toBe('true')
+    expect(due.classes()).toContain('border-danger-500')
+    expect(wrapper.get('[data-test="editor-issued-on"]').attributes('aria-invalid')).toBe('false')
+  })
+
+  it('nápovědu k dokumentům ukáže jen v novém konceptu s právem k dokumentům', async () => {
+    let wrapper = shallowMount(OtherItemEditor)
+    await flushPromises()
+    expect(wrapper.find('[data-test="form-hint"]').exists()).toBe(false)
+
+    m.params = {}
+    wrapper = shallowMount(OtherItemEditor)
+    await flushPromises()
+    expect(wrapper.find('[data-test="form-hint"]').exists()).toBe(true)
+
+    m.auth.documents = false
+    wrapper = shallowMount(OtherItemEditor)
+    await flushPromises()
+    expect(wrapper.find('[data-test="form-hint"]').exists()).toBe(false)
+  })
+
+  it('variabilní symbol s písmenem odmítne u pole a neodešle', async () => {
+    const wrapper = shallowMount(OtherItemEditor, { global: { stubs: { FieldNote: FieldNoteStub } } })
+    await flushPromises()
+    await wrapper.get('[data-test="editor-vs"]').setValue('12A')
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+    expect(m.update).not.toHaveBeenCalled()
+    expect(notes(wrapper)).toEqual(['other_items.errors.variable_symbol_digits'])
+  })
+
+  it('nesedící rozpad ukáže u rozpadu a oprava částky chybu zruší', async () => {
+    m.supplier.accounting_mode = 'double_entry'
+    m.get.mockResolvedValue({ ...draft, posting_lines: [{ account_code: '518', amount: 700 }, { account_code: '548', amount: 400 }] })
+    const wrapper = shallowMount(OtherItemEditor, { global: { stubs: { FieldNote: FieldNoteStub, OtherItemPostingLines: PostingLinesStub } } })
+    await flushPromises()
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+    expect(m.update).not.toHaveBeenCalled()
+    expect(notes(wrapper)).toEqual(['other_items.posting_lines_invalid'])
+    await wrapper.get('[data-test="editor-amount"]').setValue('1100')
+    expect(notes(wrapper)).toEqual([])
+  })
+
+  it.each([
+    ['vyplněný účet položky', { account_code: '378' }],
+    ['vyplněný protiúčet', { counter_account_code: '648' }],
+    ['rozpad na protiúčty', { posting_lines: [{ account_code: '518', amount: 700 }, { account_code: '548', amount: 500 }] }],
+  ])('před změnou strany se zeptá, když má obecná položka %s', async (_label, changes) => {
+    m.supplier.accounting_mode = 'double_entry'
+    m.get.mockResolvedValue({ ...draft, ...changes })
+    const wrapper = shallowMount(OtherItemEditor, { global: { stubs: { OtherItemPostingLines: PostingLinesStub } } })
+    await flushPromises()
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValueOnce(false)
+    await wrapper.get('[data-test="editor-side"]').setValue('receivable')
+    expect(confirm).toHaveBeenCalledWith('other_items.side_change_confirm')
+    expect((wrapper.get('[data-test="editor-side"]').element as HTMLSelectElement).value).toBe('payable')
+    confirm.mockRestore()
+  })
+
+  it('v demu položku neuloží', async () => {
+    m.auth.isDemo = true
+    const wrapper = shallowMount(OtherItemEditor)
+    await flushPromises()
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+    expect(m.update).not.toHaveBeenCalled()
+    expect(m.toastInfo).toHaveBeenCalledWith('demo.read_only')
+  })
+})
+
+describe('OtherItemEditor selhané načtení úpravy', () => {
+  it('bez načteného konceptu nenabídne formulář, jen opakování', async () => {
+    vi.clearAllMocks()
+    m.supplier.accounting_mode = 'tax_evidence'
+    m.auth = { isDemo: false, documents: true }
+    m.params = { id: '42' }
+    m.listKinds.mockResolvedValue([])
+    m.dimsLoad.mockResolvedValue(undefined)
+    m.get.mockRejectedValueOnce({ response: { status: 500, data: { error: { message: 'Výpadek' } } } })
+    const wrapper = shallowMount(OtherItemEditor)
+    await flushPromises()
+    expect(wrapper.find('form').exists()).toBe(false)
+    expect(wrapper.findComponent({ name: 'EmptyState' }).props('variant')).toBe('failed')
+    expect(m.update).not.toHaveBeenCalled()
+
+    m.get.mockResolvedValueOnce({ id: 42, status: 'draft', side: 'payable', kind: 'other', title: 'Načteno', issued_on: '2099-01-01',
+      due_on: '2099-01-20', amount: 10, posting_lines: [] })
+    wrapper.findComponent({ name: 'EmptyState' }).vm.$emit('action')
+    await flushPromises()
+    expect(wrapper.find('form').exists()).toBe(true)
+  })
+})
+
+describe('OtherItemEditor nápověda k dokumentům', () => {
+  it('bez práva připojovat dokumenty nápovědu neukáže', async () => {
+    vi.clearAllMocks()
+    m.supplier.accounting_mode = 'tax_evidence'
+    m.auth = { isDemo: false, documents: true, move: false }
+    m.params = {}
+    m.listKinds.mockResolvedValue([])
+    const wrapper = shallowMount(OtherItemEditor)
+    await flushPromises()
+    expect(wrapper.find('[data-test="form-hint"]').exists()).toBe(false)
   })
 })

@@ -266,4 +266,101 @@ describe('DocumentPostingPanel', () => {
     const badges = wrapper.findAll('span').filter(s => s.text() === 'accounting.journal.document_posting.reversal')
     expect(badges).toHaveLength(1)
   })
+
+  it('ostatní položka: přeúčtování vyšle vlastnímu dialogu, bez fakturového dialogu a původu kontace', async () => {
+    journalForDocumentMock.mockReset()
+    canWriteMock.mockReturnValue(false)
+    journalForDocumentMock.mockResolvedValue([entry(5, { source_type: 'other_item', source_id: 9, document_no: 'OZ-2099-0001' })])
+    const wrapper = mount(DocumentPostingPanel, {
+      props: { source: 'other-items' as const, docId: 9, externalRepost: { disabled: false } },
+      global: { stubs: { RouterLink: { template: '<a><slot /></a>' } } },
+    })
+    await flushPromises()
+    expect(journalForDocumentMock).toHaveBeenCalledWith('other-items', 9)
+    await wrapper.find('button').trigger('click')
+    expect(wrapper.find('.origin').exists()).toBe(false)
+    await wrapper.get('[data-test="posting-panel-repost"]').trigger('click')
+    expect(wrapper.emitted('repost')).toHaveLength(1)
+    expect(wrapper.find('.repost-modal').exists()).toBe(false)
+
+    await wrapper.setProps({ externalRepost: { disabled: true, reason: 'Uhrazeno' } })
+    const blocked = wrapper.get('[data-test="posting-panel-repost"]')
+    expect(blocked.attributes('disabled')).toBeDefined()
+    expect(blocked.attributes('title')).toBe('Uhrazeno')
+
+    await wrapper.setProps({ externalRepost: null })
+    expect(wrapper.find('[data-test="posting-panel-repost"]').exists()).toBe(false)
+    canWriteMock.mockReturnValue(true)
+  })
+})
+
+describe('DocumentPostingPanel pořadí odpovědí', () => {
+  it('pozdní odpověď předchozího dokladu nepřepíše zápisy nového', async () => {
+    journalForDocumentMock.mockReset()
+    let finishOld!: (entries: JournalEntryWithLines[]) => void
+    journalForDocumentMock.mockImplementationOnce(() => new Promise(resolve => { finishOld = resolve }))
+    journalForDocumentMock.mockResolvedValueOnce([entry(10, { document_no: 'FV-NOVA' })])
+    const wrapper = mount(DocumentPostingPanel, {
+      props: { source: 'invoices' as const, docId: 9 },
+      global: { stubs: { RouterLink: { template: '<a><slot /></a>' } } },
+    })
+    await wrapper.setProps({ docId: 10 })
+    await flushPromises()
+    finishOld([entry(9, { document_no: 'FV-STARA' })])
+    await flushPromises()
+    expect(wrapper.text()).toContain('FV-NOVA')
+    expect(wrapper.text()).not.toContain('FV-STARA')
+  })
+})
+
+describe('DocumentPostingPanel obnova a reload', () => {
+  it('reload po akci nechá zápisy na místě a tichá obnova odeslaná dřív ho nepřepíše', async () => {
+    journalForDocumentMock.mockReset()
+    journalForDocumentMock.mockResolvedValueOnce([entry(1, { document_no: 'FV-PUVODNI' })])
+    const wrapper = mount(DocumentPostingPanel, {
+      props: { source: 'invoices' as const, docId: 271 },
+      global: {
+        stubs: { RouterLink: { template: '<a><slot /></a>' } },
+        provide: { [windowContextKey as symbol]: { active: computed(() => true), paneId: computed(() => 'primary'), root: document.body, portal: document.body } },
+      },
+    })
+    await flushPromises()
+
+    let finishRefresh!: (entries: JournalEntryWithLines[]) => void
+    journalForDocumentMock.mockImplementationOnce(() => new Promise(resolve => { finishRefresh = resolve }))
+    window.dispatchEvent(new CustomEvent('myucto:window-data-changed', { detail: { supplierId: 1, resource: 'accounting', self: true } }))
+    await flushPromises()
+
+    let finishReload!: (entries: JournalEntryWithLines[]) => void
+    journalForDocumentMock.mockImplementationOnce(() => new Promise(resolve => { finishReload = resolve }))
+    void (wrapper.vm as unknown as { reload: () => Promise<void> }).reload()
+    await flushPromises()
+    expect(wrapper.text()).toContain('FV-PUVODNI')
+
+    finishReload([entry(3, { document_no: 'FV-PO-AKCI' })])
+    await flushPromises()
+    finishRefresh([entry(2, { document_no: 'FV-STARA-OBNOVA' })])
+    await flushPromises()
+    expect(wrapper.text()).toContain('FV-PO-AKCI')
+    expect(wrapper.text()).not.toContain('FV-STARA-OBNOVA')
+    wrapper.unmount()
+  })
+})
+
+describe('DocumentPostingPanel nepovedený reload', () => {
+  it('po nepovedeném reloadu neukáže starý zápis s tlačítkem Přeúčtovat', async () => {
+    journalForDocumentMock.mockReset()
+    canWriteMock.mockReturnValue(true)
+    journalForDocumentMock.mockResolvedValueOnce([entry(1, { document_no: 'FV-ZIVY' })])
+    const wrapper = mount(DocumentPostingPanel, {
+      props: { source: 'invoices' as const, docId: 271 },
+      global: { stubs: { RouterLink: { template: '<a><slot /></a>' } } },
+    })
+    await flushPromises()
+    expect(wrapper.text()).toContain('FV-ZIVY')
+    journalForDocumentMock.mockRejectedValueOnce(new Error('500'))
+    await (wrapper.vm as unknown as { reload: () => Promise<void> }).reload()
+    await flushPromises()
+    expect(wrapper.text()).not.toContain('FV-ZIVY')
+  })
 })

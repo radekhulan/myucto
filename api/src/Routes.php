@@ -2983,7 +2983,7 @@ final class Routes
             $g->get   ('/journal/{id:[0-9]+}/source',         JournalSourceAction::class);
             // Zaúčtování prvotního dokladu pro sekci „Zaúčtování" na detailu faktury —
             // KONKRÉTNÍ cesta PŘED generickým /journal/{id} (segment 'for-document' není číselný).
-            $g->get   ('/journal/for-document/{source:invoices|purchase-invoices}/{id:[0-9]+}',
+            $g->get   ('/journal/for-document/{source:invoices|purchase-invoices|other-items}/{id:[0-9]+}',
                                                              JournalForDocumentAction::class);
             // Protějšky zápisu (doklad ↔ úhrada) — KONKRÉTNÍ cesta PŘED generickým /journal/{id}.
             $g->get   ('/journal/{id:[0-9]+}/related',        JournalRelatedAction::class);

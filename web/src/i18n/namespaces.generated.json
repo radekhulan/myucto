@@ -628,6 +628,7 @@
       "dimensions",
       "documents",
       "linked_documents",
+      "list_nav",
       "other_items"
     ],
     "other-item-edit": [

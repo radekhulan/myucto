@@ -26,7 +26,16 @@ final class OtherItemScheduleAction
     public function list(Request $request, Response $response): Response
     {
         if (!$this->requirePermission($request, $response, 'other_items', AccessLevel::READ, $err)) return $err;
-        return $this->run($response, fn () => ['items' => $this->service->list($this->currentSupplierId($request))]);
+        // Detail položky chce jen její plán; bez parametru zůstává přehled všech plánů firmy.
+        $raw = $request->getQueryParams()['source_item_id'] ?? null;
+        $sourceItemId = null;
+        if ($raw !== null && $raw !== '') {
+            $sourceItemId = is_scalar($raw) ? filter_var($raw, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]) : false;
+            if ($sourceItemId === false) {
+                return Json::error($response, 'validation_failed', 'Neplatné id položky.', 422);
+            }
+        }
+        return $this->run($response, fn () => ['items' => $this->service->list($this->currentSupplierId($request), $sourceItemId)]);
     }
 
     public function get(Request $request, Response $response, array $args): Response

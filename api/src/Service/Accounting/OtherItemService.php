@@ -684,16 +684,37 @@ final class OtherItemService
             : ['id' => (int) $row['id'], 'varsymbol' => $row['varsymbol'] !== null ? (string) $row['varsymbol'] : null, 'status' => (string) $row['status']];
     }
 
+    /**
+     * Úhrady položky i s tím, kam vedou: bankovní výpis pohybu, číslo pokladního dokladu
+     * a živý (nestornovaný, zaúčtovaný) zápis platby v deníku — stejný klíč `active_source_id`,
+     * kterým deník drží nejvýš jeden aktivní zápis dokladu. Stornovaná úhrada odkaz do deníku nemá:
+     * živý zápis téhož pohybu už může patřit jinému dokladu.
+     */
     public function allocations(int $supplierId, int $id): array
     {
         $this->get($supplierId, $id);
         $stmt = $this->db->pdo()->prepare(
-            'SELECT id, installment_id, bank_transaction_id, cash_document_id, amount, interest_amount, fee_amount,
-                    amount + interest_amount + fee_amount AS total_amount, payment_on, auto_match_reason, reversed_on, created_at
-               FROM other_item_allocations WHERE supplier_id = ? AND other_item_id = ? ORDER BY payment_on, id'
+            "SELECT a.id, a.installment_id, a.bank_transaction_id, a.cash_document_id, a.amount, a.interest_amount, a.fee_amount,
+                    a.amount + a.interest_amount + a.fee_amount AS total_amount, a.payment_on, a.auto_match_reason,
+                    a.reversed_on, a.created_at, bs.id bank_statement_id, cd.doc_number cash_doc_number,
+                    je.id journal_entry_id
+               FROM other_item_allocations a
+          LEFT JOIN bank_transactions bt ON bt.id = a.bank_transaction_id
+          LEFT JOIN bank_statements bs ON bs.id = bt.statement_id AND bs.supplier_id = a.supplier_id
+          LEFT JOIN cash_documents cd ON cd.supplier_id = a.supplier_id AND cd.id = a.cash_document_id
+          LEFT JOIN journal_entries je ON je.supplier_id = a.supplier_id
+                AND je.source_type = IF(a.bank_transaction_id IS NULL, 'cash', 'bank')
+                AND je.active_source_id = COALESCE(a.bank_transaction_id, a.cash_document_id)
+                AND je.posted_at IS NOT NULL AND a.reversed_on IS NULL
+              WHERE a.supplier_id = ? AND a.other_item_id = ? ORDER BY a.payment_on, a.id"
         );
         $stmt->execute([$supplierId, $id]);
-        return $stmt->fetchAll(PDO::FETCH_ASSOC);
+        return array_map(static function (array $row): array {
+            foreach (['bank_statement_id', 'journal_entry_id'] as $key) {
+                $row[$key] = $row[$key] !== null ? (int) $row[$key] : null;
+            }
+            return $row;
+        }, $stmt->fetchAll(PDO::FETCH_ASSOC));
     }
 
     /**

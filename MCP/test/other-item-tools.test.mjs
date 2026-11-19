@@ -102,6 +102,7 @@ test('čtecí nástroje volají konkrétní cesty a mapují hledání na q', asy
       { limit: 10, q: 'nájem' }],
     ['list_other_item_kinds', {}, '/accounting/other-items/kinds', null],
     ['list_other_item_schedules', {}, '/accounting/other-items/schedules', null],
+    ['list_other_item_schedules', { source_item_id: 7 }, '/accounting/other-items/schedules', { source_item_id: 7 }],
     ['get_other_item_schedule', { id: 3 }, '/accounting/other-items/schedules/3', null],
     ['get_other_item_installments', { item_id: 12 }, '/accounting/other-items/12/installments', null],
   ];

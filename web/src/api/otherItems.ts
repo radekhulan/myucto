@@ -112,6 +112,7 @@ export interface OtherItem {
   posting_lines?: OtherItemPostingLine[]
   note?: string | null
   journal_entry_id?: number | null
+  posted_at?: string | null
   /** Jen detail zaúčtované položky: smí se smazat i se zápisem? */
   posted_deletion?: PostedDeletion
   /** Vlastní kontace úhrad položky (podvojné účetnictví). */
@@ -152,7 +153,14 @@ export interface OtherItemsResult {
   total: number
   page: number
   per_page: number
-  totals?: Record<string, unknown>
+  /** Zbývá uhradit za celý výběr po straně a měně (jen první stránka; potvrzené a zaúčtované položky). */
+  totals?: OtherItemRemainingTotal[]
+}
+
+export interface OtherItemRemainingTotal {
+  side: OtherItemSide
+  currency: string
+  remaining_amount: number
 }
 
 export interface OtherItemAllocation {
@@ -171,6 +179,12 @@ export interface OtherItemAllocation {
   /** Kód automatického přiřazení (OtherItemAutoMatchPolicy, pravidlo banky); null = ručně. */
   auto_match_reason?: OtherItemAutoMatchReason | null
   reversed_on: string | null
+  /** Výpis bankovního pohybu úhrady. */
+  bank_statement_id?: number | null
+  /** Číslo pokladního dokladu úhrady. */
+  cash_doc_number?: string | null
+  /** Živý zápis úhrady v deníku; null bez zaúčtování nebo bez práva číst deník. */
+  journal_entry_id?: number | null
 }
 
 export type OtherItemAutoMatchReason = 'other_item_vs_account' | 'other_item_vs_installment' | 'other_item_vs_remaining'

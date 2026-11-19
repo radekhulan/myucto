@@ -223,6 +223,32 @@ final class OtherItemScheduleServiceTest extends TestCase
         self::assertSame(3, (int) $stmt->fetchColumn());
     }
 
+    public function testListFiltersBySourceItem(): void
+    {
+        $first = $this->items->create($this->supplierId, $this->input(), null);
+        $second = $this->items->create($this->supplierId, $this->input(), null);
+        $firstSchedule = $this->schedules->create($this->supplierId, (int) $first['id'], ['frequency' => 'monthly'], null);
+        $secondSchedule = $this->schedules->create($this->supplierId, (int) $second['id'], ['frequency' => 'monthly'], null);
+
+        self::assertSame([(int) $secondSchedule['id']],
+            array_map('intval', array_column($this->schedules->list($this->supplierId, (int) $second['id']), 'id')));
+        self::assertSame([(int) $secondSchedule['id'], (int) $firstSchedule['id']],
+            array_map('intval', array_column($this->schedules->list($this->supplierId), 'id')), 'Bez filtru všechny plány firmy.');
+
+        $action = new OtherItemScheduleAction($this->schedules, $this->items);
+        $request = (new ServerRequestFactory())->createServerRequest('GET', '/')
+            ->withAttribute(SupplierScopeMiddleware::ATTR_CURRENT_ID, $this->supplierId)
+            ->withAttribute('auth.effective_role', new EffectiveRole(0, 'Test', 'staff', true, ['other_items' => 1], 'custom'));
+        $response = $action->list($request->withQueryParams(['source_item_id' => (string) $first['id']]), new Response());
+        self::assertSame(200, $response->getStatusCode());
+        $response->getBody()->rewind();
+        $body = json_decode((string) $response->getBody(), true);
+        self::assertSame([(int) $firstSchedule['id']], array_map('intval', array_column($body['data']['items'] ?? $body['items'], 'id')));
+        foreach (['0', 'abc', '-3'] as $invalid) {
+            self::assertSame(422, $action->list($request->withQueryParams(['source_item_id' => $invalid]), new Response())->getStatusCode(), $invalid);
+        }
+    }
+
     public function testRecurringDraftCopiesSplitPostingLinesWithoutPosting(): void
     {
         $first = $this->items->create($this->supplierId, $this->input([
