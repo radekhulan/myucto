@@ -912,18 +912,23 @@ final class BankPostingSuggestionRepository
     public function listIds(int $supplierId, array $filters, int $limit): array
     {
         [$scopeSql, $scopeParams] = $this->movementScope($supplierId, ['strict_ownership' => true] + $filters);
-        $pdo = $this->db->pdo();
-        $count = $pdo->prepare("SELECT COUNT(*) FROM bank_transactions bt JOIN bank_statements bs ON bs.id = bt.statement_id WHERE {$scopeSql}");
-        $count->execute($scopeParams);
-        $total = (int) $count->fetchColumn();
-        if ($total === 0 || $limit <= 0) {
-            return ['ids' => [], 'total' => $total];
+        if ($limit <= 0) {
+            return ['ids' => [], 'total' => 0];
         }
+        $pdo = $this->db->pdo();
+        // Bez řazení: výběr jen sbírá id (volající je seřadí) a dotaz skončí po `$limit`
+        // shodách. Celkový počet se počítá, jen když výběr limit přesáhl (hláška o počtu).
         $limit = (int) $limit;
         $stmt = $pdo->prepare("SELECT bt.id FROM bank_transactions bt JOIN bank_statements bs ON bs.id = bt.statement_id
-                                WHERE {$scopeSql} ORDER BY bt.id LIMIT {$limit}");
+                                WHERE {$scopeSql} LIMIT {$limit}");
         $stmt->execute($scopeParams);
-        return ['ids' => array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN)), 'total' => $total];
+        $ids = array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN));
+        if (count($ids) < $limit) {
+            return ['ids' => $ids, 'total' => count($ids)];
+        }
+        $count = $pdo->prepare("SELECT COUNT(*) FROM bank_transactions bt JOIN bank_statements bs ON bs.id = bt.statement_id WHERE {$scopeSql}");
+        $count->execute($scopeParams);
+        return ['ids' => $ids, 'total' => (int) $count->fetchColumn()];
     }
 
     /**
@@ -939,8 +944,11 @@ final class BankPostingSuggestionRepository
         // Klientský bankovní přehled vyžaduje vlastnictví výpisu i při poškozené
         // vazbě na vlastní doklad. Účetní fronta si ponechává rozsah pro opravy vazeb.
         if (!empty($filters['strict_ownership'])) {
-            $scopeSql .= ' AND ' . BankStatementOwnershipResolver::sql();
-            array_push($scopeParams, ...BankStatementOwnershipResolver::params($supplierId));
+            // Výpisy firmy (a starší bez firmy, o kterých rozhodne vlastník účtu) vybere index
+            // podle firmy; pohyby se pak čtou jen z nich, ne napříč všemi firmami.
+            $scopeSql = '(bs.supplier_id = ? OR bs.supplier_id IS NULL) AND ' . $scopeSql
+                . ' AND ' . BankStatementOwnershipResolver::sql();
+            $scopeParams = [$supplierId, ...$scopeParams, ...BankStatementOwnershipResolver::params($supplierId)];
         }
 
         $status = $unpostedOnly ? null : ($filters['status'] ?? null);
