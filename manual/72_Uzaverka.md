@@ -668,6 +668,7 @@ kontroly zaměřené na **inventarizaci zůstatků**:
 | Krok je dostupný až po zahájení uzávěrky | Období je ještě Otevřené | Klikněte na **Zahájit uzávěrku**. |
 | Znovuotevření odmítnuto, existují uzávěrkové zápisy | Zaúčtovaná uzavření a otevírací zápisy | Nejdřív vezměte zpět kroky **Otevření nového roku** a **Uzavření knih**. |
 | Schválení odmítnuto: *„… automatické sekce přílohy k závěrce nejsou zmražené …“* | Při uzavření knih ani při schválení se nepodařilo zmrazit přílohu, typicky nejde vyhodnotit kategorii účetní jednotky | Doplňte podklady kategorizace (mapování rozvahy, počet zaměstnanců) a schválení zopakujte. |
+| Kontrola *Kategorii účetní jednotky nelze určit* | Nastavení **Čistý obrat: výnosy obchodního modelu** zahrnuje výnosy jen v jednom členění výsledovky (druhovém, nebo účelovém), případně mapování účtů do výkazů není úplné. Důvod uvádí kontrola. | V nastavení účetnictví zahrňte tytéž výnosy v obou členěních a kontroly spusťte znovu. Do té doby nejde ověřit povinné přehledy podle § 18 odst. 2 ZoÚ. |
 | Schválenou závěrku nelze zrušit ani změnit přechodem stavu | Zákonné schválení je nevratné (§ 17 odst. 7) | Opravte chybu v období zjištění (§ 35). |
 | Otevření roku zablokované, panel ukazuje **Rozdíl** | Převzatý otevírací zápis nesouhlasí s konečnými stavy | Rozdíl dohledejte a opravte, nebo použijte **Nahradit převzaté stavy vypočtenými**. |
 | Odpisy nejde zaúčtovat z Majetku, hlásí neotevřené období | Období je ve stavu Uzavírá se | Použijte **Zaúčtovat odpisy roku** v panelu kroku. |

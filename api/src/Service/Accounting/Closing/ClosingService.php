@@ -6137,9 +6137,22 @@ final class ClosingService
         // kdy se výkazy nedaly vygenerovat a účetní je musela přiložit ručně. Nově se
         // ptá na to, co jediné může být špatně: SEDÍ oba výkazy? Nesedící přehled je vada
         // v datech (typicky pohyb, jehož protiúčet nejde zařadit) a takhle se odevzdat nedá.
-        $category = $wants('section18_statements_required')
-            ? $this->categories->evaluate($supplierId, $periodId)
-            : null;
+        $category = null;
+        if ($wants('section18_statements_required', 'entity_category_unavailable')) {
+            try {
+                $category = $this->categories->evaluate($supplierId, $periodId);
+            } catch (\MyInvoice\Service\Accounting\Reports\ReportException $e) {
+                // Kategorii nejde určit (typicky nastavení čistého obratu vybírá jiné řádky
+                // v druhovém a účelovém členění výsledovky). Kontrola § 18 pak nemá z čeho
+                // vycházet; průvodce to ohlásí s důvodem, ale zbytek kontrol musí doběhnout.
+                $checks[] = [
+                    'key' => 'entity_category_unavailable',
+                    'severity' => 'warning',
+                    'ok' => false,
+                    'value' => $e->getMessage(),
+                ];
+            }
+        }
         $needsSection18 = $category !== null
             && (in_array((string) $category['category'], ['large', 'medium'], true)
                 || ($category['scope_override'] === null && (string) $category['scope'] === 'full'));

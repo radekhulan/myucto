@@ -462,6 +462,36 @@ final class ClosingWorkflowTest extends TestCase
         self::assertEqualsWithDelta(500.0, $release['112']['credit'], 0.001);
     }
 
+    /**
+     * Nastavení čistého obratu vybírá řádek jen v druhovém členění výsledovky, takže kategorii
+     * účetní jednotky nejde určit. Precheck musí doběhnout a důvod ohlásit jako varování.
+     */
+    public function testPrecheckReportsUndeterminableEntityCategory(): void
+    {
+        $this->seedScenario();
+        $this->manual([self::l('221', 'debit', 100.00), self::l('648', 'credit', 100.00)], self::YEAR . '-03-01');
+        (new \MyInvoice\Repository\AccountingSupplierSettingsRepository($this->db))->setNetTurnoverExtraRows($this->supplierId, [
+            'income_statement' => ['III.3.'], 'income_statement_purpose' => [],
+        ]);
+        try {
+            $this->categories->evaluate($this->supplierId, $this->periodId);
+            self::fail('Předpoklad testu: kategorie nejde určit.');
+        } catch (\MyInvoice\Service\Accounting\Reports\ReportException $e) {
+            self::assertSame('net_turnover_membership_conflict', $e->errorCode);
+        }
+
+        $this->closing->start($this->supplierId, $this->periodId, $this->rv(), $this->meta());
+        $precheck = $this->closing->runPrecheck($this->supplierId, $this->periodId, $this->rv(), $this->meta());
+
+        $check = $this->findCheck($precheck['checks'], 'entity_category_unavailable');
+        self::assertNotNull($check);
+        self::assertSame('warning', $check['severity']);
+        self::assertFalse($check['ok']);
+        self::assertStringContainsString('Čistý obrat', (string) $check['value']);
+        self::assertNull($this->findCheck($precheck['checks'], 'section18_statements_required'));
+        self::assertNotNull($this->findCheck($precheck['checks'], 'unposted_invoices'), 'Ostatní kontroly doběhnou.');
+    }
+
     // ── I2: bilanční kontinuita 702↔701 ─────────────────────────────────────
 
     public function testI2OpenNextMirrorsClosingIntoOpening(): void

@@ -22085,6 +22085,7 @@
         "cancelled_with_entry": "Stornované doklady, jejichž zápis je v deníku pořád aktivní (knihy a evidence si protiřečí)",
         "entries_without_description": "Zaúčtované zápisy bez obsahu účetního případu (§ 11 odst. 1 písm. b) ZoÚ) - doplňte popis",
         "section18_statements_required": "Kategorie účetní jednotky vyžaduje i přehled o peněžních tocích a o změnách vlastního kapitálu (§ 18 odst. 2 ZoÚ) - bez nich není závěrka úplná",
+        "entity_category_unavailable": "Kategorii účetní jednotky nelze určit, a proto ani ověřit povinné přehledy podle § 18 odst. 2 ZoÚ. Důvod je uveden u kontroly",
         "vat_registration_due": "Obrat překročil limit pro registraci k DPH (§ 6 ZDPH) - plátcovství vzniká ze zákona, zkontrolujte datum a podejte přihlášku",
         "vat_status_s79_missing": "Přechod plátcovství DPH v období bez korekce odpočtu na ř. 45 (§ 79 nárok na odpočet při registraci / § 79a snížení odpočtu při zrušení) - posuďte obchodní majetek ke dni přechodu a případné položky zaevidujte v agendě Opravy DPH",
         "estimates_unreleased": "Dohadné položky z minulého období se nerozpustily (ČÚS 019) - náklad může být v knihách dvakrát",

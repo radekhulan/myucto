@@ -22077,6 +22077,7 @@
         "cancelled_with_entry": "Cancelled documents whose journal entry is still active (books and records contradict each other)",
         "entries_without_description": "Posted journal entries with no description of the accounting case (§ 11(1)(b) of the Accounting Act) — add a description",
         "section18_statements_required": "The entity category also requires a cash flow statement and a statement of changes in equity (§ 18(2) of the Accounting Act) — without them the financial statements are incomplete",
+        "entity_category_unavailable": "The accounting entity category cannot be determined, so the statements required by Section 18(2) of the Accounting Act cannot be verified either. The reason is shown with the check",
         "vat_registration_due": "Turnover exceeded the VAT registration threshold (§ 6 VAT Act) — liability arises by law; check the date and file the registration",
         "vat_status_s79_missing": "VAT payer status changed during the period without a line-45 deduction adjustment (§ 79 deduction claim on registration / § 79a deduction reduction on deregistration) — assess the business assets as of the transition date and record any items in the VAT corrections agenda",
         "estimates_unreleased": "Estimated liabilities/assets carried from the previous period were not released (CAS 019) — the cost may be booked twice",
