@@ -52,6 +52,42 @@ final class SyntheticPohodaMdbExport
         ]);
     }
 
+    /** Přijatá faktura s různým DUZP a datem odpočtu ({@see writeSplitVatDates()}). */
+    public const SPLIT_PURCHASE = '26PF0071';
+
+    /**
+     * Agenda s přijatou fakturou 26PF0071 (10 000 + 2 100 Kč, členění `PD`): „Datum KH DPH"
+     * (`DatKHDPH`, DUZP z dokladu dodavatele) 27. 2. 2026, „Datum odp./doruč." (`DatZdPln`)
+     * 1. 3. 2026. Stejný doklad jako {@see SyntheticPohodaExport::withSplitVatDates()} v XML.
+     *
+     * @return string složka agendy
+     */
+    public static function writeSplitVatDates(string $root): string
+    {
+        $journal = static fn (string $id, string $agenda, string $source, string $number, string $day, string $amount, string $md, string $d): array =>
+            ['ID' => $id, 'RelUdAg' => $agenda, 'RelAgID' => $source, 'Cislo' => $number, 'Datum' => $day, 'Kc' => $amount, 'UMD' => $md, 'UD' => $d, 'SText' => 'Řádek'];
+        return self::write($root, [
+            'pOS' => array_map(static fn (string $code, string $name): array => ['Ucet' => $code, 'Nazev' => $name],
+                ['221001', '321001', '343011', '411000', '518000', '701000'],
+                ['Bankovní účet', 'Dodavatelé', 'DPH na vstupu', 'Základní kapitál', 'Ostatní služby', 'Počáteční účet rozvažný']),
+            'sDPHTp' => [['ID' => '1', 'Radky' => '40, 41']],
+            'sDPH' => [['ID' => '283', 'IDS' => 'PD', 'SText' => 'Tuzemské plnění', 'RefTpDph' => '1', 'RelVlivKHDPH' => '10']],
+            'pUD' => [
+                $journal('1', '63', '0', '', '2026-01-01T00:00:00', '100000', '221001', '701000'),
+                $journal('2', '63', '0', '', '2026-01-01T00:00:00', '100000', '701000', '411000'),
+                $journal('3', '3', '1', self::SPLIT_PURCHASE, '2026-03-01T00:00:00', '10000', '518000', '321001'),
+                $journal('4', '3', '1', self::SPLIT_PURCHASE, '2026-03-01T00:00:00', '2100', '343011', '321001'),
+            ],
+            'FA' => [[
+                'ID' => '1', 'Cislo' => self::SPLIT_PURCHASE, 'RelTpFak' => '11', 'Datum' => '2026-03-01T00:00:00', 'DatZdPln' => '2026-03-01T00:00:00',
+                'DatUcP' => '2026-03-01T00:00:00', 'DatSplat' => '2026-03-15T00:00:00', 'DatKHDPH' => '2026-02-27T00:00:00',
+                'PDoklad' => 'D-' . self::SPLIT_PURCHASE, 'VarSym' => '20260071', 'RelTpDPH' => '283',
+                'Firma' => 'Dodavatel Test s.r.o.', 'ICO' => SyntheticPohodaExport::VENDOR_ICO, 'DIC' => 'CZ' . SyntheticPohodaExport::VENDOR_ICO,
+                'Kc0' => '0', 'Kc1' => '0', 'KcDPH1' => '0', 'Kc2' => '10000', 'KcDPH2' => '2100', 'Kc3' => '0', 'KcDPH3' => '0', 'KcZaokr' => '0', 'KcLikv' => '12100',
+            ]],
+        ]);
+    }
+
     /**
      * Zapíše tabulky do složky agendy `<kořen>/<IČO>_<rok>`.
      *

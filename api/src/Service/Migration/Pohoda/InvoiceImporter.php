@@ -20,6 +20,7 @@ use MyInvoice\Service\Migration\Shared\MigrationHomeCurrency;
 use MyInvoice\Service\Migration\Shared\MigrationVatRateLookup;
 use MyInvoice\Service\Migration\Shared\VatReturnLineClassifier;
 use MyInvoice\Repository\Section74bCorrectionRepository;
+use MyInvoice\Service\Report\VatLedgerService;
 use MyInvoice\Service\Stats\StatsRecomputer;
 use MyInvoice\Support\PohodaPaymentType;
 use MyInvoice\Support\Sql\PayablePredicate;
@@ -480,6 +481,10 @@ final class InvoiceImporter
             $p->count($step, 'later_year_skipped');
             return;
         }
+        // DUZP z dokladu dodavatele a datum odpočtu ({@see PohodaPurchaseVatDates}); `tax`
+        // dál nese DUZP, u zahraničního přenesení ho upraví až země dodavatele níž.
+        $deduction = $doc['tax'];
+        $doc['tax'] = $doc['kh'] ?? $doc['tax'];
         $amounts = $this->amounts($ctx, $step, $doc, $r, $prefix);
         $class = $this->classifyPurchase($ctx, $kind, $doc['vat_class'], $amounts);
         if (($agenda === 'commitment' || $agenda === 'internal') && !$class['in_return']) {
@@ -497,16 +502,14 @@ final class InvoiceImporter
                 $class['reasons'][] = 'samovyměření z interního dokladu ' . $sa['doc'] . ': ' . $sa['error'];
             } else {
                 $used[$doc['number']] = true;
+                // Data samovyměření nese interní doklad s vyměřením daně, se stejným
+                // významem jako u faktury: dateKHDPH = DUZP, dateTax = přiznání a odpočet.
+                // Interní doklad bez data KH DPH přebírá DUZP z faktury.
+                $deduction = $sa['date'] ?? $deduction;
+                $doc['tax'] = $sa['kh'] ?? $doc['kh'] ?? $sa['date'] ?? $doc['tax'];
                 $amounts = $this->applySelfAssessment($sa, $amounts, $doc['tax'] ?? $doc['issue']);
-                $doc['tax'] = $sa['date'] ?? $doc['tax'];
                 $p->count($step, 'self_assessed');
             }
-        }
-        // Přijatá strana OSS nezná (režim je pro plnění, která poskytujeme), takže se sazba
-        // páruje tuzemsky - jen až tady, protože `amounts()` ji kvůli vydané větvi nechává
-        // nenapárovanou. Nenalezená sazba je pořád tvrdá chyba celého běhu jako dřív.
-        foreach ($amounts['items'] as $i => $item) {
-            $amounts['items'][$i]['rate_id'] ??= $this->rateId((float) $item['rate'], $doc['tax'] ?? $doc['issue']);
         }
         $type = $kind === 'invoice' && $amounts['gross_total'] < 0 ? 'credit_note' : $kind;
         $review = $class['reasons'] !== [];
@@ -518,6 +521,27 @@ final class InvoiceImporter
         }
         $snapshot = PartnerImporter::snapshot(PohodaXml::get($doc['h'], 'partnerIdentity'));
         $vendorId = $this->partners->resolvePartner($ctx, $snapshot);
+        $foreignReverse = VatLedgerService::purchaseClaimFollowsTaxDate(
+            $class['reverse'], null, array_column($amounts['items'], 'code'), $this->clientCountry->iso2($ctx->supplierId, $vendorId),
+        );
+        $dates = PohodaPurchaseVatDates::fromPohoda($doc['tax'], $deduction, $foreignReverse);
+        if ($dates['kept_deduction']) {
+            $p->count($step, 'foreign_reverse_dppd_kept');
+            $p->info($step, 'foreign_reverse_dppd_kept', sprintf(
+                'Doklad %s: zahraniční plnění v přenesení daňové povinnosti má DUZP %s (datum KH DPH) v jiném měsíci než datum, '
+                    . 'ke kterému POHODA daň přiznala (%s). Evidence DPH řadí samovyměření podle DUZP, proto převod jako DUZP '
+                    . 'ponechal %s - přiznání sedí na podané z POHODY, kontrolní hlášení ponese toto datum místo %s.',
+                $doc['number'], $doc['tax'], $deduction, $deduction, $doc['tax'],
+            ), ['document_no' => $doc['number']]);
+        }
+        $doc['tax'] = $dates['tax'];
+        // Přijatá strana OSS nezná (režim je pro plnění, která poskytujeme), takže se sazba
+        // páruje tuzemsky - jen až tady, protože `amounts()` ji kvůli vydané větvi nechává
+        // nenapárovanou. Sazba platí ke dni plnění (DUZP). Nenalezená sazba je pořád tvrdá
+        // chyba celého běhu jako dřív.
+        foreach ($amounts['items'] as $i => $item) {
+            $amounts['items'][$i]['rate_id'] ??= $this->rateId((float) $item['rate'], $doc['tax'] ?? $doc['issue']);
+        }
         $vendorNumber = mb_substr(self::vendorDocumentNumber($doc), 0, 50);
         $duplicate = $this->stmt('purchase_duplicate', 'SELECT 1 FROM purchase_invoices WHERE supplier_id = ? AND vendor_id = ? AND vendor_invoice_number = ? AND issue_date = ? LIMIT 1');
         $duplicate->execute([$ctx->supplierId, $vendorId, $vendorNumber, $doc['issue']]);
@@ -529,9 +553,6 @@ final class InvoiceImporter
             : self::payment($doc, $amounts);
         $unbooked = $review || $type === 'advance' || self::postedLater($doc);
         $status = $review ? 'draft' : ($pay['settled'] ? 'paid' : ($unbooked ? 'received' : 'booked'));
-        // Datum pro KH je v Pohodě den, ke kterému účetní odpočet uplatnila - MyÚčto
-        // ho respektuje jen jako ručně zadané datum přijetí (§ 73).
-        $claim = $doc['claim'];
         $assets = array_map(static fn (array $item): bool => MigratedDocumentItem::fixedAssetLine($class['fixed_asset'], (float) $item['rate'], (float) $item['vat'],
             ($item['code'] ?? null) === VatReturnLineClassifier::PURCHASE_OUTSIDE_SCOPE_CODE ? null : ($item['code'] ?? null)), $amounts['items']);
         if ($doc['foreign'] !== '') {
@@ -554,8 +575,9 @@ final class InvoiceImporter
                 issueDate: $doc['issue'],
                 taxDate: $doc['tax'] ?? $doc['issue'],
                 dueDate: $doc['due'],
-                receivedAt: $claim ?? ($doc['tax'] ?? $doc['issue']),
-                receivedAtSource: $claim !== null ? 'manual' : 'import',
+                // Odpočet uplatněný v POHODĚ po DUZP je ručně zadané datum přijetí (§ 73).
+                receivedAt: $dates['received'] ?? ($doc['tax'] ?? $doc['issue']),
+                receivedAtSource: $dates['received'] !== null ? 'manual' : 'import',
                 currencyId: $fx->currencyId ?? $this->homeCurrency->id($ctx->supplierId),
                 exchangeRate: $fx->rate,
                 // Položky i rekapitulace Pohody jsou bez DPH.
@@ -601,7 +623,7 @@ final class InvoiceImporter
             );
         }
         $this->writer->insertPurchaseItems($id, $items);
-        $this->claimPeriod($ctx, $step, $doc, $type);
+        $this->claimPeriod($ctx, $step, $doc, $type, $deduction, $foreignReverse);
         ForeignCurrencyTakeover::report($p, $step, $doc['number'], $fx);
         $this->map->put($ctx->supplierId, PohodaImportRepository::KIND_PURCHASE_INVOICE, $key, $id, $ctx->runId);
         $this->remember($ctx, $bucket, $doc['number'], $id);
@@ -645,7 +667,10 @@ final class InvoiceImporter
             // Doklad bez zaúčtování (předkontace „Bez“): v deníku ani v počátečních stavech není.
             'without_accounting' => PohodaXml::text($h, 'accounting/accountingType') === 'withoutAccounting',
             'due' => PohodaXml::date($h, 'dateDue') ?? $issue,
-            'claim' => PohodaXml::date($h, 'dateKHDPH'),
+            // „Datum KH DPH": u přijatého dokladu DUZP z dokladu dodavatele (DPPD v KH),
+            // `dateTax` je tam datum odpočtu ({@see PohodaPurchaseVatDates}). Vydaný doklad ho
+            // nevede nebo je shodné s DUZP, převod ho u něj nepoužívá.
+            'kh' => PohodaXml::date($h, 'dateKHDPH'),
             'vat_class' => PohodaXml::text($h, 'classificationVAT/ids'),
             'text' => PohodaXml::text($h, 'text'),
             'symvar' => PohodaXml::text($h, 'symVar'),
@@ -1079,7 +1104,7 @@ final class InvoiceImporter
      * (`PD…` - ř. 43, 44). Rozhoduje jen u faktury, která sama členění samovyměření nemá
      * ({@see selfAssessedByInternalDocuments()}).
      *
-     * @return array<string,array{doc:string,date:?string,lines:list<array{base:float,rate:float,code:string}>,error:?string,deducted:bool}>
+     * @return array<string,array{doc:string,date:?string,kh:?string,lines:list<array{base:float,rate:float,code:string}>,error:?string,deducted:bool}>
      */
     private function selfAssessments(PohodaContext $ctx): array
     {
@@ -1102,7 +1127,7 @@ final class InvoiceImporter
                 continue;
             }
             $docNo = PohodaXml::text($h, 'number/numberRequested');
-            $entry = ['doc' => $docNo, 'date' => PohodaXml::date($h, 'dateTax'), 'lines' => [], 'error' => null];
+            $entry = ['doc' => $docNo, 'date' => PohodaXml::date($h, 'dateTax'), 'kh' => PohodaXml::date($h, 'dateKHDPH'), 'lines' => [], 'error' => null];
             foreach (PohodaXml::all($r, 'intDocDetail/intDocItem') as $it) {
                 $code = $ctx->vat->selfAssessmentCode(PohodaXml::text($it, 'classificationVAT/ids')) ?? $headerCode;
                 $rate = PohodaXml::attr($it, 'rateVAT', 'value');
@@ -1318,30 +1343,31 @@ final class InvoiceImporter
     }
 
     /**
-     * Odpočet, který Pohoda uplatnila (datum pro KH) dřív, než ho MyÚčto připustí - před
-     * datem plnění nebo vystavení (§ 73). Evidence DPH ho zařadí až do období plnění,
-     * protokol na posun upozorní stejně jako převod z PREMIER.
+     * Odpočet, který POHODA uplatnila (datum odp./doruč.) dřív, než ho MyÚčto připustí -
+     * před DUZP z dokladu dodavatele nebo před datem vystavení (§ 73). Evidence DPH ho
+     * zařadí až do období DUZP, protokol na posun upozorní stejně jako převod z PREMIER.
+     * Odpočet po DUZP je běžný stav (doklad došel později) a varování nedostane.
      *
-     * Doklad minulého období s datem pro KH v minulém roce zařadí Pohoda do prvního
-     * období agendy - tam ho porovnává i tato kontrola. DPH takového dokladu převod
-     * nevyřazuje: odvody DPH v Pohodě ukazují, že ho přiznání převáděného roku obsahuje.
+     * Doklad minulého období s odpočtem v minulém roce zařadí POHODA do prvního období
+     * agendy - tam ho porovnává i tato kontrola. DPH takového dokladu převod nevyřazuje:
+     * odvody DPH v POHODĚ ukazují, že ho přiznání převáděného roku obsahuje. Zahraniční
+     * přenesení se řadí podle DUZP, období drží {@see PohodaPurchaseVatDates}.
      *
-     * @param array<string,mixed> $doc
+     * @param array<string,mixed> $doc `tax` = DUZP, jak se zapsalo do `tax_date`
      */
-    private function claimPeriod(PohodaContext $ctx, string $step, array $doc, string $type): void
+    private function claimPeriod(PohodaContext $ctx, string $step, array $doc, string $type, ?string $deduction, bool $foreignReverse): void
     {
-        $claim = $doc['claim'];
-        if ($claim === null || $type === 'advance') {
+        if ($deduction === null || $type === 'advance' || $foreignReverse) {
             return;
         }
         $earliest = max((string) ($doc['tax'] ?? $doc['issue']), (string) $doc['issue']);
-        $claim = max($claim, $ctx->periodStart());
-        if ($claim >= $earliest || substr($claim, 0, 7) === substr($earliest, 0, 7)) {
+        $deduction = max($deduction, $ctx->periodStart());
+        if ($deduction >= $earliest || PohodaPurchaseVatDates::sameMonth($deduction, $earliest)) {
             return;
         }
         $ctx->protocol->warn($step, 'claim_before_document', sprintf(
-            'Doklad %s: Pohoda uplatnila odpočet k %s, dřív než je datum plnění nebo vystavení (%s). MyÚčto odpočet před držením dokladu nepřipustí - doklad je v DPH v období %s.',
-            $doc['number'], $claim, $earliest, substr($earliest, 0, 7)
+            'Doklad %s: POHODA uplatnila odpočet k %s (datum odp./doruč.), dřív než je DUZP z dokladu dodavatele (datum KH DPH) nebo datum vystavení (%s). MyÚčto odpočet před DUZP nepřipustí - doklad je v DPH v období %s.',
+            $doc['number'], $deduction, $earliest, substr($earliest, 0, 7)
         ), ['document_no' => $doc['number']]);
         $ctx->protocol->count($step, 'claim_moved');
     }

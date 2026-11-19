@@ -159,6 +159,15 @@ final class CashBankImporter
                     }
                 }
             }
+            // Pokladní doklad má v MyÚčtu jediné datum DPH, které určuje období i datum v KH.
+            // Bere se datum odpočtu z POHODY (`dateTax`), aby přiznání sedělo na podané;
+            // DUZP z dokladu dodavatele („Datum KH DPH") v jiném dni protokol ohlásí.
+            $taxDate = PohodaXml::date($h, 'dateTax') ?? $issue;
+            $khDate = PohodaXml::date($h, 'dateKHDPH');
+            if ($vatLines !== [] && $khDate !== null && $khDate !== $taxDate) {
+                $p->count(self::STEP_CASH, 'kh_date_differs');
+                $p->info(self::STEP_CASH, 'kh_date_differs', "Pokladní doklad {$number}: DUZP z dokladu (datum KH DPH {$khDate}) se liší od data odpočtu {$taxDate}. Pokladní doklad nese jediné datum DPH, převzato datum odpočtu - v kontrolním hlášení bude {$taxDate}.", ['document_no' => $number]);
+            }
             $numberText = $this->cashNumbers->allocate($ctx->supplierId, [$number, $number . '/' . substr($issue, 0, 4)], $p, self::STEP_CASH, $number . ' z ' . $issue);
             $rule = mb_substr(PohodaXml::text($h, 'accounting/ids'), 0, 64);
             $ruleKey = null;
@@ -180,7 +189,7 @@ final class CashBankImporter
                 $withoutAccounting ? 'other' : ($isOut ? 'purchase' : 'sale'),
                 $numberText,
                 $issue,
-                PohodaXml::date($h, 'dateTax') ?? $issue,
+                $taxDate,
                 $partner['name'] !== '' ? mb_substr($partner['name'], 0, 255) : null,
                 $partner['ico'] !== '' ? $partner['ico'] : null,
                 $partner['dic'] !== '' ? mb_substr($partner['dic'], 0, 20) : null,

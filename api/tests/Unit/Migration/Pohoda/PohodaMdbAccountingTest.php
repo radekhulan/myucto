@@ -518,6 +518,24 @@ final class PohodaMdbAccountingTest extends TestCase
         self::assertSame('20', $invoice['invoiceDetail']['invoiceItem'][0]['rateVAT']['@value']);
     }
 
+    /**
+     * Přijatý doklad má DUZP z dokladu dodavatele v „Datum KH DPH" (`DatKHDPH`), `DatZdPln`
+     * je datum odpočtu. Sazby platí ke dni plnění: faktura s plněním 28. 12. 2023 a odpočtem
+     * v lednu 2024 má sníženou sazbu 15 %, ne 12 %. Vydaná faktura `DatKHDPH` nepoužívá.
+     */
+    public function testReceivedDocumentTakesRatesValidOnSupplierDuzp(): void
+    {
+        $row = ['Datum' => '2024-01-03', 'DatZdPln' => '2024-01-03', 'DatKHDPH' => '2023-12-28', 'Kc1' => '100', 'KcDPH1' => '15'];
+        $mapper = $this->mapper([
+            'FA' => [['ID' => '1', 'Cislo' => 'TEST-PF', 'RelTpFak' => '11'] + $row, ['ID' => '2', 'Cislo' => 'TEST-FV', 'RelTpFak' => '1'] + $row],
+        ]);
+        $received = iterator_to_array($mapper->records('received'))[0];
+        self::assertSame('15', $received['invoiceSummary']['homeCurrency']['priceLowVAT']['@rate']);
+        self::assertSame(['2024-01-03', '2023-12-28'], [$received['invoiceHeader']['dateTax'], $received['invoiceHeader']['dateKHDPH']]);
+        $issued = iterator_to_array($mapper->records('issued'))[0];
+        self::assertSame('12', $issued['invoiceSummary']['homeCurrency']['priceLowVAT']['@rate']);
+    }
+
     public function testAccessEmptyTaxDateFallsBackToDocumentDate(): void
     {
         $mapper = $this->mapper([

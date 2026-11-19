@@ -1072,22 +1072,94 @@ final class SyntheticPohodaExport
     public const EARLY_CLAIM_CURRENT = '26PF0050';
 
     /**
-     * Přijaté faktury, u kterých POHODA uplatnila odpočet (datum pro KH) dřív než k datu
-     * plnění, obě 1 000 + 210 Kč:
-     *  - 25PF0900: doklad minulého období (vystaven a uplatněn 10. 12. 2025, plnění
-     *    1. 1. 2026), DPH je podané v přiznání agendy 2025;
-     *  - 26PF0050: vystaven a uplatněn 20. 1. 2026, plnění až 1. 3. 2026.
+     * Přijaté faktury 1 000 + 210 Kč, u kterých se v POHODĚ liší datum odpočtu („Datum
+     * odp./doruč.", `dateTax`) od DUZP z dokladu dodavatele („Datum KH DPH", `dateKHDPH`):
+     *  - 25PF0900: doklad minulého období, vystaven 10. 12. 2025 s DUZP 10. 12. 2025,
+     *    odpočet uplatněn až 1. 1. 2026 - za období odpočtu je v přiznání agendy;
+     *  - 26PF0050: vystaven 20. 1. 2026 a odpočet uplatněn 20. 1. 2026, DUZP až 1. 3. 2026.
+     *    Odpočet před DUZP MyÚčto nepřipustí.
      */
     public static function withEarlyClaims(string $agendaDir): void
     {
-        $early = static fn (string $number, string $date, string $supply): string =>
-            str_replace('<inv:dateTax>' . $date . '</inv:dateTax>', '<inv:dateTax>' . $supply . '</inv:dateTax>',
-                self::invoice('receivedInvoice', $number, substr($number, -4), $date, 1000, 210));
         self::append($agendaDir . '/20_faktury_receivedInvoice.xml', '</lst:listInvoice>',
-            $early(self::EARLY_CLAIM_PREVIOUS, '2025-12-10', '2026-01-01') . $early(self::EARLY_CLAIM_CURRENT, '2026-01-20', '2026-03-01'));
+            self::receivedWithDates(self::EARLY_CLAIM_PREVIOUS, '2025-12-10', '2026-01-01', '2025-12-10', 1000, 210)
+            . self::receivedWithDates(self::EARLY_CLAIM_CURRENT, '2026-01-20', '2026-01-20', '2026-03-01', 1000, 210));
         self::append($agendaDir . '/01_ucetni_denik.xml', '</lst:accountancy>',
             self::entry('Přijaté faktury', self::EARLY_CLAIM_CURRENT, 'Služby', 1000, '518000', '321001', '2026-01-20')
             . self::entry('Přijaté faktury', self::EARLY_CLAIM_CURRENT, 'DPH', 210, '343011', '321001', '2026-01-20'));
+    }
+
+    /** Doklady s různým DUZP a datem odpočtu ({@see withSplitVatDates()}). */
+    public const SPLIT_DOMESTIC = '26PF0061';
+    public const SPLIT_FOREIGN_SAME_MONTH = '26PF0062';
+    public const SPLIT_FOREIGN_OTHER_MONTH = '26PF0063';
+    public const SPLIT_JANUARY = '26PF0064';
+
+    /**
+     * Přijaté faktury, u kterých POHODA vede DUZP z dokladu dodavatele (`dateKHDPH`) před
+     * datem odpočtu (`dateTax`):
+     *  - 26PF0061: tuzemská faktura 10 000 + 2 100 Kč (KH B.2), DUZP 27. 2. 2026, odpočet
+     *    1. 3. 2026 - odpočet v březnu, v KH DPPD 27. 2.;
+     *  - 26PF0062: služba z EU 2 500 Kč se samovyměřením (interní doklad 26DD0062 bez data
+     *    KH DPH, DUZP nese jen faktura), DUZP 5. 3., přiznáno 20. 3. 2026 - stejný měsíc;
+     *  - 26PF0063: služba z EU 2 000 Kč se samovyměřením (26DD0063), DUZP 26. 2., přiznáno
+     *    2. 3. 2026 - samovyměření je v POHODĚ v březnu;
+     *  - 26PF0064: tuzemská faktura 1 000 + 210 Kč, DUZP 12. 1., odpočet 15. 1. 2026.
+     */
+    public static function withSplitVatDates(string $agendaDir): void
+    {
+        $foreign = static function (string $number, string $deduction, string $duzp, float $base): string {
+            $none = '<inv:invoiceSummary><inv:homeCurrency><typ:priceNone>' . $base . '</typ:priceNone><typ:priceLow>0</typ:priceLow><typ:priceLowVAT rate="12">0</typ:priceLowVAT>'
+                . '<typ:priceLowSum>0</typ:priceLowSum><typ:priceHigh>0</typ:priceHigh><typ:priceHighVAT rate="21">0</typ:priceHighVAT>'
+                . '<typ:priceHighSum>0</typ:priceHighSum><typ:round><typ:priceRound>0</typ:priceRound></typ:round></inv:homeCurrency></inv:invoiceSummary>';
+            $xml = str_replace(
+                [self::summary('inv', $base, 0), '<typ:ids>PD</typ:ids>'],
+                [$none, '<typ:ids>PDslRegEU</typ:ids>'],
+                self::receivedWithDates($number, $deduction, $deduction, $duzp, $base, 0),
+            );
+            return (string) preg_replace('~<inv:partnerIdentity>.*?</inv:partnerIdentity>~s',
+                '<inv:partnerIdentity><typ:address><typ:company>Lieferant Test GmbH</typ:company><typ:city>Berlin</typ:city><typ:street>Teststraße 1</typ:street>'
+                . '<typ:zip>10115</typ:zip><typ:country><typ:ids>DE</typ:ids></typ:country><typ:dic>DE999999999</typ:dic></typ:address></inv:partnerIdentity>', $xml);
+        };
+        $selfAssessment = static fn (string $number, string $invoice, string $deduction, ?string $duzp, float $base): string =>
+            '<lst:intDoc version="2.0"><int:intDocHeader><int:number><typ:numberRequested>' . $number . '</typ:numberRequested></int:number>'
+            . '<int:date>' . $deduction . '</int:date><int:dateTax>' . $deduction . '</int:dateTax><int:dateAccounting>' . $deduction . '</int:dateAccounting>'
+            . ($duzp !== null ? '<int:dateKHDPH>' . $duzp . '</int:dateKHDPH>' : '')
+            . '<int:classificationVAT><typ:ids>DDslRegEU</typ:ids></int:classificationVAT><int:text>Vyměření DPH k ' . $invoice . '</int:text></int:intDocHeader>'
+            . '<int:intDocDetail><int:intDocItem><int:text>Služba z EU</int:text><int:rateVAT value="21">high</int:rateVAT>'
+            . '<int:homeCurrency><typ:price>' . $base . '</typ:price><typ:priceVAT>' . round($base * 0.21, 2) . '</typ:priceVAT></int:homeCurrency></int:intDocItem></int:intDocDetail>'
+            . '<int:linkedDocuments><typ:link><typ:sourceAgenda>receivedInvoice</typ:sourceAgenda><typ:sourceDocument><typ:number>' . $invoice . '</typ:number></typ:sourceDocument></typ:link></int:linkedDocuments>'
+            . '</lst:intDoc>';
+        self::append($agendaDir . '/20_faktury_receivedInvoice.xml', '</lst:listInvoice>',
+            self::receivedWithDates(self::SPLIT_DOMESTIC, '2026-03-01', '2026-03-01', '2026-02-27', 10000, 2100)
+            . $foreign(self::SPLIT_FOREIGN_SAME_MONTH, '2026-03-20', '2026-03-05', 2500)
+            . $foreign(self::SPLIT_FOREIGN_OTHER_MONTH, '2026-03-02', '2026-02-26', 2000)
+            . self::receivedWithDates(self::SPLIT_JANUARY, '2026-01-15', '2026-01-15', '2026-01-12', 1000, 210));
+        $internal = $agendaDir . '/27_interni_doklady.xml';
+        $documents = $selfAssessment('26DD0062', self::SPLIT_FOREIGN_SAME_MONTH, '2026-03-20', null, 2500)
+            . $selfAssessment('26DD0063', self::SPLIT_FOREIGN_OTHER_MONTH, '2026-03-02', '2026-02-26', 2000);
+        is_file($internal)
+            ? self::append($internal, '</lst:listIntDoc>', $documents)
+            : self::file($internal, '<lst:listIntDoc version="2.0" state="ok">' . $documents . '</lst:listIntDoc>');
+        self::append($agendaDir . '/01_ucetni_denik.xml', '</lst:accountancy>',
+            self::entry('Přijaté faktury', self::SPLIT_DOMESTIC, 'Služby', 10000, '518000', '321001', '2026-03-01')
+            . self::entry('Přijaté faktury', self::SPLIT_DOMESTIC, 'DPH', 2100, '343011', '321001', '2026-03-01')
+            . self::entry('Přijaté faktury', self::SPLIT_FOREIGN_SAME_MONTH, 'Služba z EU', 2500, '518000', '321001', '2026-03-20')
+            . self::entry('Interní doklady', '26DD0062', 'DPH samovyměření', 525, '343011', '343021', '2026-03-20')
+            . self::entry('Přijaté faktury', self::SPLIT_FOREIGN_OTHER_MONTH, 'Služba z EU', 2000, '518000', '321001', '2026-03-02')
+            . self::entry('Interní doklady', '26DD0063', 'DPH samovyměření', 420, '343011', '343021', '2026-03-02')
+            . self::entry('Přijaté faktury', self::SPLIT_JANUARY, 'Služby', 1000, '518000', '321001', '2026-01-15')
+            . self::entry('Přijaté faktury', self::SPLIT_JANUARY, 'DPH', 210, '343011', '321001', '2026-01-15'));
+    }
+
+    /** Přijatá faktura od tuzemského dodavatele s datem vystavení, datem odpočtu (`dateTax`) a DUZP (`dateKHDPH`). */
+    private static function receivedWithDates(string $number, string $date, string $deduction, string $duzp, float $base, float $vat): string
+    {
+        return str_replace(
+            ['<inv:dateTax>' . $date . '</inv:dateTax>', '<inv:dateKHDPH>' . $date . '</inv:dateKHDPH>'],
+            ['<inv:dateTax>' . $deduction . '</inv:dateTax>', '<inv:dateKHDPH>' . $duzp . '</inv:dateKHDPH>'],
+            self::invoice('receivedInvoice', $number, substr($number, -4), $date, $base, $vat),
+        );
     }
 
     /** Doklady s předkontací „Nevím" ({@see withNotYetPosted()}). */

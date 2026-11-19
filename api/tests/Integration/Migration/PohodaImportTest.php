@@ -1149,10 +1149,10 @@ final class PohodaImportTest extends TestCase
     }
 
     /**
-     * Odpočet uplatněný v POHODĚ před datem plnění. Doklad běžného období zařadí evidence
-     * DPH do období plnění a protokol na posun upozorní. Doklad minulého období s datem
-     * pro KH v minulém roce má POHODA v prvním období agendy, stejně jako evidence DPH
-     * podle data plnění - v lednu zůstává a varování nedostane.
+     * Odpočet uplatněný v POHODĚ (datum odp./doruč.) před DUZP z dokladu dodavatele (datum
+     * KH DPH). Doklad běžného období zařadí evidence DPH do období DUZP a protokol na posun
+     * upozorní. Doklad minulého období s DUZP v minulém roce a odpočtem v lednu je v lednu
+     * u POHODY i v evidenci DPH a varování nedostane - odpočet po DUZP je běžný stav.
      */
     public function testEarlyClaimIsReportedOnlyWhenThePeriodDiffers(): void
     {
@@ -1179,6 +1179,85 @@ final class PohodaImportTest extends TestCase
         };
         self::assertEqualsWithDelta(210.0, $delta(1, '40'), 0.005, 'Doklad minulého období v prvním období agendy.');
         self::assertEqualsWithDelta(210.0, $delta(3, '40'), 0.005, 'Odpočet běžného dokladu v období plnění.');
+    }
+
+    /**
+     * DUZP a datum odpočtu přijatého dokladu (issue s doklady 26FP0194/0196/0198): POHODA
+     * vede DUZP z dokladu dodavatele v „Datum KH DPH" a odpočet v „Datum odp./doruč.".
+     * DUZP jde do `tax_date` (DPPD v KH), odpočet do ručního data přijetí - přiznání je
+     * v měsíci odpočtu, KH nese DUZP. Zahraniční přenesení s DUZP v jiném měsíci drží
+     * období POHODY, protože evidence DPH ho řadí podle `tax_date`.
+     */
+    public function testReceivedDocumentSplitsDuzpAndDeductionDate(): void
+    {
+        $base = $this->supplier();
+        $baseDir = $this->tmp . DIRECTORY_SEPARATOR . 'base';
+        mkdir($baseDir);
+        self::assertFalse($this->importer->run($base, $this->userId, PohodaExport::open(SyntheticPohodaExport::write($baseDir)), false)->hasErrors());
+
+        $supplierId = $this->supplier();
+        $dir = SyntheticPohodaExport::write($this->tmp);
+        SyntheticPohodaExport::withSplitVatDates($dir);
+        $protocol = $this->importer->run($supplierId, $this->userId, PohodaExport::open($dir), false);
+        self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
+
+        $dates = $this->purchaseDates($supplierId);
+        self::assertSame(['2026-02-27', '2026-03-01', 'manual'], $dates[SyntheticPohodaExport::SPLIT_DOMESTIC] ?? null, $this->explain($protocol));
+        self::assertSame(['2026-03-05', '2026-03-20', 'manual'], $dates[SyntheticPohodaExport::SPLIT_FOREIGN_SAME_MONTH] ?? null);
+        self::assertSame(['2026-03-02', '2026-03-02', 'import'], $dates[SyntheticPohodaExport::SPLIT_FOREIGN_OTHER_MONTH] ?? null);
+        self::assertSame(['2026-01-12', '2026-01-15', 'manual'], $dates[SyntheticPohodaExport::SPLIT_JANUARY] ?? null);
+
+        // Žádný doklad nemá odpočet před DUZP - falešné varování o posunu nevzniká.
+        self::assertSame([], $this->messages($protocol, 'claim_before_document'), $this->explain($protocol));
+        self::assertSame([SyntheticPohodaExport::SPLIT_FOREIGN_OTHER_MONTH],
+            array_column(array_column($this->messages($protocol, 'foreign_reverse_dppd_kept'), 'context'), 'document_no'));
+
+        // Přiznání: únor beze změny, březen nese tuzemský odpočet i obě samovyměření.
+        $dph = Bootstrap::buildContainer()->get(\MyInvoice\Service\Report\DphPriznaniBuilder::class);
+        $lines = static fn (int $sid, int $month): array => $dph->build($sid, SyntheticPohodaExport::YEAR, $month, 'monthly')['summary']['lines'];
+        self::assertSame($lines($base, 2), $lines($supplierId, 2));
+        $delta = static fn (int $month, string $line, string $col): float
+            => (float) ($lines($supplierId, $month)[$line][$col] ?? 0) - (float) ($lines($base, $month)[$line][$col] ?? 0);
+        self::assertEqualsWithDelta(10000.0, $delta(3, '40', 'base'), 0.005);
+        self::assertEqualsWithDelta(2100.0, $delta(3, '40', 'vat'), 0.005);
+        self::assertEqualsWithDelta(4500.0, $delta(3, '5', 'base'), 0.005);
+        self::assertEqualsWithDelta(1000.0, $delta(1, '40', 'base'), 0.005);
+
+        // KH za březen: DPPD je DUZP z dokladu dodavatele, u přenesení v jiném měsíci datum POHODY.
+        $kh = Bootstrap::buildContainer()->get(\MyInvoice\Service\Report\KontrolniHlaseniBuilder::class)->build($supplierId, SyntheticPohodaExport::YEAR, 3);
+        self::assertSame('27.02.2026', self::khDppd((string) $kh['xml'], 'VetaB2', 'D-' . SyntheticPohodaExport::SPLIT_DOMESTIC), (string) $kh['xml']);
+        self::assertSame('05.03.2026', self::khDppd((string) $kh['xml'], 'VetaA2', 'D-' . SyntheticPohodaExport::SPLIT_FOREIGN_SAME_MONTH));
+        self::assertSame('02.03.2026', self::khDppd((string) $kh['xml'], 'VetaA2', 'D-' . SyntheticPohodaExport::SPLIT_FOREIGN_OTHER_MONTH));
+    }
+
+    /** Datový soubor (MDB): „Datum KH DPH" (`DatKHDPH`) je DUZP, `DatZdPln` datum odpočtu - stejně jako v XML. */
+    public function testMdbReceivedDocumentSplitsDuzpAndDeductionDate(): void
+    {
+        $supplierId = $this->supplier();
+        $protocol = $this->importer->run($supplierId, $this->userId, PohodaExport::open(\MyInvoice\Tests\Fixtures\Pohoda\SyntheticPohodaMdbExport::writeSplitVatDates($this->tmp)), false);
+        self::assertSame(['2026-02-27', '2026-03-01', 'manual'], $this->purchaseDates($supplierId)[\MyInvoice\Tests\Fixtures\Pohoda\SyntheticPohodaMdbExport::SPLIT_PURCHASE] ?? null, $this->explain($protocol));
+        self::assertSame([], $this->messages($protocol, 'claim_before_document'));
+        $kh = Bootstrap::buildContainer()->get(\MyInvoice\Service\Report\KontrolniHlaseniBuilder::class)->build($supplierId, SyntheticPohodaExport::YEAR, 3);
+        self::assertSame('27.02.2026', self::khDppd((string) $kh['xml'], 'VetaB2', 'D-' . \MyInvoice\Tests\Fixtures\Pohoda\SyntheticPohodaMdbExport::SPLIT_PURCHASE), (string) $kh['xml']);
+    }
+
+    /** @return array<string,array{0:string,1:string,2:string}> číslo dokladu => [tax_date, received_at, received_at_source] */
+    private function purchaseDates(int $supplierId): array
+    {
+        $stmt = $this->db->pdo()->prepare('SELECT varsymbol, tax_date, received_at, received_at_source FROM purchase_invoices WHERE supplier_id = ? ORDER BY varsymbol');
+        $stmt->execute([$supplierId]);
+        $out = [];
+        foreach ($stmt->fetchAll(\PDO::FETCH_NUM) as [$number, $tax, $received, $source]) {
+            $out[(string) $number] = [(string) $tax, (string) $received, (string) $source];
+        }
+        return $out;
+    }
+
+    /** DPPD věty KH s daným evidenčním číslem dokladu, nebo null. */
+    private static function khDppd(string $xml, string $veta, string $number): ?string
+    {
+        return preg_match('~<' . $veta . '\b[^>]*c_evid_dd="' . preg_quote($number, '~') . '"[^>]*/>~', $xml, $m) === 1
+            && preg_match('~dppd="([^"]*)"~', $m[0], $d) === 1 ? $d[1] : null;
     }
 
     /** Předkontace „Nevím": doklad bez zápisu v deníku POHODY zůstane nezaúčtovaný a půjde zaúčtovat. */
