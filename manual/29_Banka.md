@@ -29,6 +29,7 @@ Klient potřebuje pro párování i jeho zrušení čtení všech dotčených do
 |---|---|---|
 | denně nebo týdně | Nahrát nový výpis (nebo nechat stáhnout přes API) | **Nahrát GPC/ABO nebo PDF**, [§ 29.3](#293-krok-za-krokem-nahrani-vypisu) |
 | po každém importu | Projít nespárované platby | filtr **Nespárováno** v detailu výpisu nebo záložka **Všechny pohyby**, [§ 29.4](#294-krok-za-krokem-parovani-plateb-s-fakturami) |
+| když plátci nezadali VS | Opravit variabilní symbol u mnoha pohybů najednou | **Všechny pohyby** → **…** → **Hromadné akce**, [§ 29.13.3.1](#291331-hromadna-oprava-variabilniho-symbolu) |
 | po importu (podvojné účetnictví) | Schválit návrhy zaúčtování | záložka **K zaúčtování**, [§ 29.8](#298-krok-za-krokem-zauctovani-pohybu-podvojne-ucetnictvi) |
 | při opakované platbě bez faktury | Založit účtovací pravidlo | **…** u pohybu → **Vytvořit účtovací pravidlo**, [§ 29.9](#299-krok-za-krokem-pravidlo-pro-opakovane-platby) |
 | před uzávěrkou | Zkontrolovat, že nezbývají nezaúčtované pohyby | filtr **Výpisy s nezaúčtovanými pohyby** |
@@ -325,6 +326,17 @@ Měsíční výpis API skládá pohyby z jednotlivých stažení. Stažení s po
 Záložka **Všechny pohyby** je společný přehled transakcí napříč výpisy, účty a roky. Má ji každá firma bez ohledu na způsob vedení účetnictví, stačí nahrané výpisy. Ukazuje i již spárované a ignorované pohyby. U každého řádku vidíte náš zdrojový účet, účet protistrany, výpis a párování. Firma s podvojným účetnictvím navíc vidí stav zaúčtování a protiúčet a na rozdíl od fronty **K zaúčtování** i zaúčtované pohyby. Filtr **Stav** nabízí stejné stavy párování jako detail výpisu. Pod **Nespárováno** jsou pouze pohyby čekající na fakturu; vlastní převody, mzdy a pohyby zaúčtované mimo saldokonto se vynechají. Filtr **Ignorováno** ukáže i dříve ignorované položky.
 
 Akce jsou stejné jako v detailu konkrétního výpisu: otevření nebo zrušení párování, rozdělené párování, vytvoření dokladu, přiložení podkladu, vyžádání dokladu, ignorování a v podvojném účetnictví i ruční zaúčtování. Po provedené akci se aktualizuje tentýž řádek; není nutné dohledávat původní výpis. Filtry podle našeho účtu, data, částky, protistrany, párování a v podvojném účetnictví i zaúčtování lze kombinovat.
+
+#### 29.13.3.1 Hromadná oprava variabilního symbolu
+
+Na záložkách **Všechny pohyby** a **K zaúčtování** jde opravit variabilní symbol mnoha nespárovaných pohybů najednou, například když plátci psali číslo faktury do zprávy pro příjemce místo do VS.
+
+1. Nastavte filtr tak, aby seznam ukazoval jen pohyby, které chcete opravit, například stav **Nespárováno** a hledaný text. Případně pohyby zaškrtněte v prvním sloupci; políčko v záhlaví zaškrtne všechny načtené řádky.
+2. V nabídce **…** zvolte **Hromadné akce** a v ní **Opravit variabilní symbol**. Zvolte **Vybrané (N)**, nebo **Všech N podle filtru** (nejvýš 500 pohybů).
+3. Zadejte **Stálou hodnotu**, nebo zvolte **Podle vzoru** a zadejte **Vzor**, například `{zprava}` (první skupina číslic ze zprávy pro příjemce).
+4. Klikněte na **Spustit nanečisto**, zkontrolujte nové symboly a důvody vynechání a klikněte na **Provést**.
+
+Po provedení se opravené pohyby hned automaticky párují, jako po **Přepárovat** u výpisu. Spárované, ignorované a zaúčtované pohyby se nemění. Provedení jde vrátit u pohybů, které zůstaly nespárované. Pravidla a značky vzoru jsou v [§ 52.14.18](52_Ucetni_denik.md#521418-hromadne-akce-v-seznamech). Akci spustí správce firmy nebo role s právem **Hromadné změny dokladů a zápisů**, která smí bankovní pohyby párovat.
 
 ### 29.13.4 Výpis s nezpracovanými pohyby
 
