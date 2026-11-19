@@ -273,6 +273,9 @@ export interface ClosingState {
   /** Daň z příjmů je potřeba přepočítat: po jejím zaúčtování nebo potvrzení se vrátil
    *  krok, který mění výsledek hospodaření. Do přepočtu nejde uzavřít knihy. */
   income_tax_stale?: { caused_by: ClosingStepKey[]; at: string | null } | null
+  /** Rok uzavřel už původní systém (převedené uzávěrkové zápisy bez source_id). Průvodce nic
+   *  znovu neúčtuje a dimenze roku jsou kvůli převzaté uzávěrce zmrazené. */
+  closing_taken_over?: boolean
   /** Chybějící posouzení, bez kterých server uzavření knih odmítne (pak can_close = false). */
   close_blockers?: ('deferred_tax_assessment' | 'nonprofit_tax_assessment')[]
 }
@@ -298,6 +301,8 @@ export interface OpeningTakeover {
   accounts: number
   /** Porovnání před uzavřením knih počítá ze zůstatků, ne ze zaúčtovaného uzávěrkového zápisu. */
   preliminary: boolean
+  /** Po uzávěrce převzaté z původního systému se porovnává jen po účtech, bez dimenzí. */
+  compare_level?: 'account'
   message?: string
 }
 

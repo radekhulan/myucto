@@ -686,6 +686,110 @@ final class ClosingWorkflowTest extends TestCase
         return null;
     }
 
+    /**
+     * Rok převedený i s uzávěrkou původního systému (zápisy `closing` bez source_id) a
+     * s převzatou otevírací rozvahou dalšího roku: uzavření knih nic znovu nezaúčtuje,
+     * uloží skutečný výsledek hospodaření (bez převzaté uzávěrky, ne nulu) a otevření
+     * roku převzaté počáteční stavy přijme.
+     */
+    public function testTakenOverClosingStoresRealProfitAndAcceptsTakenOverOpening(): void
+    {
+        $this->seedScenario();
+        // Zůstatek s dimenzí: původní systém otevírací rozvahu převádí bez dimenzí, převzetí
+        // se proto po převzaté uzávěrce porovnává po účtech.
+        [$typeId, $a] = $this->createClosingDimensions();
+        $this->manual([self::l('378', 'debit', 100.00) + ['dimensions' => [$typeId => $a]], self::l('379', 'credit', 100.00)], self::YEAR . '-04-01');
+        $takenOverIds = $this->postTakenOverClosingAndOpening(
+            [self::l('702', 'debit', 100.00), self::l('378', 'credit', 100.00), self::l('379', 'debit', 100.00), self::l('702', 'credit', 100.00)],
+            [self::l('378', 'debit', 100.00), self::l('701', 'credit', 100.00), self::l('701', 'debit', 100.00), self::l('379', 'credit', 100.00)],
+        );
+
+        self::assertTrue($this->closing->state($this->supplierId, $this->periodId)['closing_taken_over']);
+        self::assertSame($takenOverIds, $this->closing->takenOverClosingEntryIds($this->supplierId, $this->periodId));
+        $this->runStepsUntilCloseReady();
+        $preview = $this->closing->state($this->supplierId, $this->periodId)['opening_takeover'];
+        self::assertSame('match', $preview['status'], json_encode($preview['diff'] ?? null));
+        self::assertSame('account', $preview['compare_level'] ?? null);
+
+        $closed = $this->closing->closeBooks($this->supplierId, $this->periodId, $this->rv(), $this->meta());
+        self::assertNull($closed['entry_id'], 'Převzatá uzávěrka se znovu neúčtuje.');
+        self::assertSame(0, $closed['lines_count']);
+        self::assertSame(self::cents(6000.00), self::cents((float) $closed['profit']), 'Skutečný VH bez převzatých zápisů, ne nula.');
+        self::assertTrue($closed['closing_taken_over']);
+        self::assertNull($this->journal->findBySource($this->supplierId, 'closing', $this->periodId));
+
+        $opened = $this->closing->openNext($this->supplierId, $this->periodId, $this->rv(), $this->meta());
+        self::assertSame('taken_over', $opened['opening_source'] ?? null);
+        $nextId = (int) $this->periods->nextPeriod($this->supplierId, self::ENDS_ON)['id'];
+        self::assertCount(1, $this->closing->state($this->supplierId, $this->periodId)['steps'][array_search('open_next', array_column($this->closing->state($this->supplierId, $this->periodId)['steps'], 'step_key'), true)]['payload']['taken_over_entry_ids']);
+        self::assertSame(1, (int) $this->db->pdo()->query('SELECT COUNT(*) FROM journal_entries WHERE supplier_id = ' . $this->supplierId . " AND source_type = 'opening' AND period_id = " . $nextId)->fetchColumn());
+    }
+
+    /** Převzatá uzávěrka a za ní zápis z doby po převodu: nesmíšené uzávěrky se odmítnou. */
+    public function testTakenOverClosingWithLaterEntryRefusesToCloseBooks(): void
+    {
+        $this->seedScenario();
+        $this->postTakenOverClosingAndOpening();
+        $this->manual([self::l('518', 'debit', 100.00), self::l('321', 'credit', 100.00)], self::ENDS_ON);
+        $this->runStepsUntilCloseReady();
+        try {
+            $this->closing->closeBooks($this->supplierId, $this->periodId, $this->rv(), $this->meta());
+            self::fail('Zůstatek po převzaté uzávěrce musí uzavření knih odmítnout.');
+        } catch (ClosingException $e) {
+            self::assertSame('closing_taken_over_residual', $e->errorCode);
+        }
+    }
+
+    /** Stornovaný převzatý zápis ani storno samo převzatou uzávěrkou nejsou. */
+    public function testReversedClosingEntryIsNotTakenOverClosing(): void
+    {
+        $this->seedScenario();
+        $entryId = $this->posting->postDocument($this->supplierId, 'closing', null, [
+            self::l('602', 'debit', 10000.00), self::l('710', 'credit', 10000.00),
+        ], ['entry_date' => self::ENDS_ON, 'posted_by' => $this->userId, 'user_id' => $this->userId]);
+        $this->posting->reverse($this->supplierId, $entryId, ['entry_date' => self::ENDS_ON, 'posted_by' => $this->userId, 'user_id' => $this->userId]);
+
+        self::assertSame([], $this->closing->takenOverClosingEntryIds($this->supplierId, $this->periodId));
+        self::assertFalse($this->closing->state($this->supplierId, $this->periodId)['closing_taken_over']);
+    }
+
+    /**
+     * Uzávěrka a otevírací rozvaha tak, jak je převede import z jiného systému
+     * (bez source_id). VH scénáře je 6 000.
+     *
+     * @return list<int> id převzatých uzávěrkových zápisů
+     */
+    private function postTakenOverClosingAndOpening(array $extraClosing = [], array $extraOpening = []): array
+    {
+        $meta = ['entry_date' => self::ENDS_ON, 'posted_by' => $this->userId, 'user_id' => $this->userId];
+        $ids = [
+            $this->posting->postDocument($this->supplierId, 'closing', null, [
+                self::l('602', 'debit', 10000.00), self::l('710', 'credit', 10000.00),
+                self::l('710', 'debit', 4000.00), self::l('518', 'credit', 4000.00),
+                self::l('710', 'debit', 6000.00), self::l('702', 'credit', 6000.00),
+            ], $meta),
+            $this->posting->postDocument($this->supplierId, 'closing', null, [
+                self::l('702', 'debit', 7100.00), self::l('311', 'credit', 7100.00),
+                self::l('702', 'debit', 5000.00), self::l('221', 'credit', 5000.00),
+                self::l('321', 'debit', 4840.00), self::l('702', 'credit', 4840.00),
+                self::l('343', 'debit', 1260.00), self::l('702', 'credit', 1260.00),
+                ...$extraClosing,
+            ], $meta),
+        ];
+        $nextYear = self::YEAR + 1;
+        $this->periods->create($this->supplierId, $nextYear, $nextYear . '-01-01', $nextYear . '-12-31');
+        $this->posting->postDocument($this->supplierId, 'opening', null, [
+            self::l('311', 'debit', 7100.00), self::l('701', 'credit', 7100.00),
+            self::l('221', 'debit', 5000.00), self::l('701', 'credit', 5000.00),
+            self::l('701', 'debit', 4840.00), self::l('321', 'credit', 4840.00),
+            self::l('701', 'debit', 1260.00), self::l('343', 'credit', 1260.00),
+            self::l('701', 'debit', 6000.00), self::l('431', 'credit', 6000.00),
+            ...$extraOpening,
+        ], ['entry_date' => $nextYear . '-01-01', 'posted_by' => $this->userId, 'user_id' => $this->userId]);
+        sort($ids);
+        return $ids;
+    }
+
     /** Nové zaúčtování daně po vrácení kroku příznak přepočtu také zruší. */
     public function testRerunningIncomeTaxClearsStaleFlag(): void
     {

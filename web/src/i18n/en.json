@@ -22291,7 +22291,8 @@
         "replace_confirm": "Replace and open the year",
         "done_taken_over": "Opening balances taken over — they match on {count} accounts, nothing was booked.",
         "done_replaced": "The taken-over opening balances were replaced with the calculated ones. Reason: {reason}",
-        "revert_keeps": "Undoing this step does not delete the taken-over entry."
+        "revert_keeps": "Undoing this step does not delete the taken-over entry.",
+        "account_level": "The year-end closing was taken over from the original system, which migrates the opening balance sheet without dimensions. Opening balances are therefore compared by account only."
       },
       "revert": {
         "confirm": "Really undo this step? Its closing entries will be deleted (with an audit trail).",
@@ -22531,6 +22532,11 @@
         "book": "Post deferred tax",
         "booked": "Deferred tax has been posted.",
         "amount_required": "Enter a non-zero amount. Do not post zero deferred tax, skip the step instead."
+      },
+      "taken_over": {
+        "title": "Closing taken over from the original system",
+        "text": "This year was already closed in the original accounting program and its closing entries were migrated with the data. The wizard does not post the closing again: confirm or skip the steps without new entries, Close books only stores the actual profit or loss and Open new year takes over the migrated opening balances if they match.",
+        "dimensions": "Because of the taken-over closing, dimensions of this year's documents are frozen and cannot be changed."
       }
     },
     "monthly_check": {

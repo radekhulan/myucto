@@ -45213,6 +45213,9 @@ components:
           type: array
           items:
             type: string
+        closing_taken_over:
+          type: boolean
+          description: Rok uzavřel už původní systém (převedené zápisy closing bez source_id, které nejsou storny). Uzavření knih pak nic neúčtuje a uloží skutečný VH bez převzatých zápisů; otevření roku porovnává převzaté počáteční stavy se zůstatky bez převzaté uzávěrky, a to jen po účtech (opening_takeover.compare_level = account). U 504 start vrátí 422 closing_taken_over, zůstatek po převzaté uzávěrce 422 closing_taken_over_residual.
         close_blockers:
           type: array
           description: Chybějící posouzení, bez kterých uzavření knih odmítne (deferred_tax_assessment u 504, nonprofit_tax_assessment); can_close je pak false.

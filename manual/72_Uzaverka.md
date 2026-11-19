@@ -423,6 +423,21 @@ použijete **Nahradit převzaté stavy vypočtenými**. Náhrada vyžaduje **pov
 otevírací zápisy smaže (jejich obsah se uloží do auditní události spolu s důvodem a tabulkou rozdílů) a zaúčtuje
 vypočtený otevírací zápis z řady OT. Potvrdíte ji tlačítkem **Nahradit a otevřít rok**.
 
+#### Převzatá uzávěrka roku
+
+Převedete-li data z jiného účetního programu (například z POHODY) i s uzávěrkou roku, leží v roce uzávěrkové
+zápisy původního systému, které už vynulovaly výsledkové i rozvahové účty. Průvodce takový rok pozná a nad kroky
+zobrazí upozornění **Uzávěrka převzatá z původního systému**:
+
+- kroky potvrďte nebo přeskočte bez nových zápisů (kurzové rozdíly, zásoby i daň už zaúčtoval původní systém),
+- **Uzavřít knihy** nic znovu nezaúčtuje, období jen uzavře a uloží skutečný výsledek hospodaření spočtený bez převzatých uzávěrkových zápisů,
+- **Otevřít nový rok** porovná převedené počáteční stavy dalšího roku s konečnými stavy spočtenými bez převzaté uzávěrky a při shodě je převezme. Porovnává se jen po účtech, bez dimenzí, protože původní systém otevírací rozvahu převádí bez nich. Haléřový zbytek na účtu 701, který původní systém přenáší z roku do roku, se nese dál stejně,
+- dimenze dokladů tohoto roku jsou kvůli převzaté uzávěrce zmrazené a nejdou měnit.
+
+Zaúčtujete-li do takového roku něco až po převodu, zůstanou po převzaté uzávěrce nenulové zůstatky a uzavření knih
+se odmítne. Zápis přesuňte do dalšího roku, nebo zůstatek vyrovnejte v původní uzávěrce. U neziskové organizace
+(vyhláška 504) průvodce převzatou uzávěrku zatím nenavazuje a zahájení uzávěrky odmítne.
+
 > [!WARNING]
 > **Vzít zpět otevření roku** převzatý zápis nesmaže, protože patří k dalšímu roku, ne k uzávěrce. Smažou se jen
 > zápisy, které krok sám zaúčtoval (storno přecenění, rozpuštění časového rozlišení, počáteční stav zásob).

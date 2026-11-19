@@ -283,9 +283,10 @@ final class ClosingRepository
      *
      * @return list<array{account_id:int, account_code:string, name:string, bal:float}>
      */
-    public function plBalances(int $supplierId, int $periodId, string $startsOn, string $endsOn, bool $currentRead = false): array
+    public function plBalances(int $supplierId, int $periodId, string $startsOn, string $endsOn, bool $currentRead = false, array $excludeEntryIds = []): array
     {
         if ($currentRead && !$this->db->pdo()->inTransaction()) throw new \LogicException('Current native balances require caller locks.');
+        $exclude = self::excludeEntriesSql($excludeEntryIds);
         $stmt = $this->db->pdo()->prepare(
             "SELECT l.account_id, a.account_code, a.name,
                     SUM(CASE WHEN l.side = 'debit' THEN l.signed_amount ELSE -l.signed_amount END) AS bal
@@ -296,11 +297,12 @@ final class ClosingRepository
                 AND e.entry_date BETWEEN ? AND ?
                 AND a.account_type IN ('revenue','expense')
                 AND NOT (e.source_type = 'closing' AND e.period_id = ? AND e.source_id <=> ?)
+                {$exclude}
               GROUP BY l.account_id, a.account_code, a.name
              HAVING bal <> 0
               ORDER BY a.account_code" . ($currentRead ? ' FOR UPDATE' : '')
         );
-        $stmt->execute([$supplierId, $startsOn, $endsOn, $periodId, $periodId]);
+        $stmt->execute([$supplierId, $startsOn, $endsOn, $periodId, $periodId, ...$excludeEntryIds]);
         return array_map(self::castBalance(...), $stmt->fetchAll(PDO::FETCH_ASSOC));
     }
 
@@ -312,12 +314,13 @@ final class ClosingRepository
      *
      * @return list<array{account_id:int, account_code:string, name:string, bal:float}>
      */
-    public function bsBalances(int $supplierId, int $periodId, string $endsOn, bool $currentRead = false): array
+    public function bsBalances(int $supplierId, int $periodId, string $endsOn, bool $currentRead = false, array $excludeEntryIds = []): array
     {
         $anchor = (new LedgerReportRepository($this->db))->openingAnchor($supplierId, $endsOn, $currentRead);
         $where = "e.entry_date <= ? AND a.account_type IN ('asset','liability','equity')
-                  AND NOT (e.source_type = 'closing' AND e.period_id = ? AND e.source_id <=> ?)";
-        $params = [$endsOn, $periodId, $periodId];
+                  AND NOT (e.source_type = 'closing' AND e.period_id = ? AND e.source_id <=> ?) "
+                  . self::excludeEntriesSql($excludeEntryIds);
+        $params = [$endsOn, $periodId, $periodId, ...$excludeEntryIds];
         if ($anchor !== null) {
             $where .= ' AND e.entry_date >= ?';
             $params[] = $anchor;
@@ -328,6 +331,57 @@ final class ClosingRepository
             $params,
             $currentRead,
         );
+    }
+
+    /** @param list<int> $entryIds */
+    private static function excludeEntriesSql(array $entryIds): string
+    {
+        return $entryIds === [] ? '' : 'AND e.id NOT IN (' . implode(',', array_fill(0, count($entryIds), '?')) . ')';
+    }
+
+    /**
+     * Uzávěrka převzatá z původního systému (převod z POHODY apod.): zaúčtované zápisy
+     * `closing` období bez source_id, které nejsou stornem jiného zápisu a samy stornované
+     * nejsou. Průvodce je do zůstatků počítá záměrně (jinak by rok uzavřel podruhé), ale
+     * skutečný výsledek hospodaření a očekávané počáteční stavy dalšího roku se počítají
+     * bez nich ({@see \MyInvoice\Service\Accounting\Closing\ClosingService::takenOverClosingEntryIds()}).
+     *
+     * @return list<int>
+     */
+    public function takenOverClosingEntryIds(int $supplierId, int $periodId): array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT e.id FROM journal_entries e
+              WHERE e.supplier_id = ? AND e.period_id = ? AND e.source_type = 'closing'
+                AND e.source_id IS NULL AND e.posted_at IS NOT NULL AND e.reversed_by IS NULL
+                AND NOT EXISTS (SELECT 1 FROM journal_entries o
+                                 WHERE o.supplier_id = e.supplier_id AND o.reversed_by = e.id)
+              ORDER BY e.id"
+        );
+        $stmt->execute([$supplierId, $periodId]);
+        return array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN));
+    }
+
+    /**
+     * Netto zůstatek účtu (prefix kódu, MD kladně) ze zápisů dat období bez vybraných zápisů.
+     * U převzaté uzávěrky jde o haléřový zbytek na počátečním účtu rozvažném, který původní
+     * systém přenáší z roku do roku.
+     *
+     * @param list<int> $excludeEntryIds
+     */
+    public function periodBalanceExcluding(int $supplierId, string $accountCode, string $from, string $to, array $excludeEntryIds): float
+    {
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT COALESCE(SUM(CASE WHEN l.side = 'debit' THEN l.signed_amount ELSE -l.signed_amount END), 0)
+               FROM journal_entry_lines l
+               JOIN journal_entries e   ON e.id = l.entry_id
+               JOIN chart_of_accounts a ON a.id = l.account_id
+              WHERE l.supplier_id = ? AND e.posted_at IS NOT NULL
+                AND e.entry_date BETWEEN ? AND ?
+                AND a.account_code LIKE CONCAT(?, '%') " . self::excludeEntriesSql($excludeEntryIds)
+        );
+        $stmt->execute([$supplierId, $from, $to, $accountCode, ...$excludeEntryIds]);
+        return round((float) $stmt->fetchColumn(), 2);
     }
 
     public function plBalancesWithDimensions(int $supplierId, int $periodId, string $startsOn, string $endsOn): array

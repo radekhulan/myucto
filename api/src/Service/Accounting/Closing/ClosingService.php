@@ -314,6 +314,7 @@ final class ClosingService
 
         $framework = $this->roleProfile($supplierId, (string) $period['ends_on'])->framework;
         $assessmentBlockers = $period['status'] === 'closing' ? $this->closeAssessmentBlockers($supplierId, $periodId, $framework) : [];
+        $takenOverClosing = $this->closing->takenOverClosingEntryIds($supplierId, $periodId) !== [];
         return ($framework === AccountingFrameworkService::CZ_504 ? ['accounting_framework' => $framework] : []) + [
             'step_order' => self::stepOrder($framework),
             'period' => $period,
@@ -323,6 +324,9 @@ final class ClosingService
             'next_period' => $next,
             'can_start' => $period['status'] === 'open' && $prevOk,
             'precheck_stale' => $this->precheckStale($supplierId, $period, $steps),
+            // Rok uzavřel už původní systém (převod dat s uzávěrkovými zápisy bez source_id).
+            // Průvodce pak nic neúčtuje znovu a dimenze roku jsou kvůli převzaté uzávěrce zmrazené.
+            'closing_taken_over' => $takenOverClosing,
             'can_abort' => $period['status'] === 'closing' && !$hasClosingEntries,
             'can_close' => $period['status'] === 'closing' && $preCloseDone && $incomeTaxStale === null && $assessmentBlockers === [],
             // Posouzení, bez kterých uzavření knih odmítne (stejné kontroly jako closeBooks).
@@ -394,21 +398,46 @@ final class ClosingService
             if ($entries === []) {
                 return ['status' => 'to_create'] + $base;
             }
+            $accountLevel = $this->openingComparedByAccount($supplierId, $period);
             $cmp = $this->compareOpeningBalances(
                 $supplierId,
                 (int) $next['id'],
                 $this->expectedOpeningLines($supplierId, $period, $steps),
+                $accountLevel,
             );
         } catch (ClosingException $e) {
             // Nevyvážené zůstatky (rozbitý deník) hlásí precheck; stav průvodce kvůli
             // tomu padat nesmí.
             return ['status' => 'unavailable', 'message' => $e->getMessage()] + $base;
         }
-        return ['status' => $cmp['diff'] === [] ? 'match' : 'mismatch', 'diff' => $cmp['diff'], 'accounts' => $cmp['accounts']] + $base;
+        return ['status' => $cmp['diff'] === [] ? 'match' : 'mismatch', 'diff' => $cmp['diff'], 'accounts' => $cmp['accounts']]
+            + ($accountLevel ? ['compare_level' => 'account'] : []) + $base;
     }
 
-    private function compareOpeningBalances(int $supplierId, int $nextPeriodId, array $expectedLines): array
+    /**
+     * Po uzávěrce převzaté z původního systému se počáteční stavy dalšího roku porovnávají
+     * jen po účtech: původní systém otevírací rozvahu převádí bez dimenzí, kdežto zůstatky
+     * roku je v MyÚčtu nesou. Převzatou rozvahu by tak nešlo převzít nikdy, ač účetně sedí.
+     * Rok i jeho uzávěrka zůstávají tak, jak je převod přinesl. Neziskové organizace (504)
+     * převzatou uzávěrku nenavazují vůbec ({@see start()}).
+     *
+     * @param array<string,mixed> $period
+     */
+    private function openingComparedByAccount(int $supplierId, array $period): bool
     {
+        return $this->roleProfile($supplierId, (string) $period['ends_on'])->framework !== AccountingFrameworkService::CZ_504
+            && $this->closing->takenOverClosingEntryIds($supplierId, (int) $period['id']) !== [];
+    }
+
+    private function compareOpeningBalances(int $supplierId, int $nextPeriodId, array $expectedLines, bool $accountLevel = false): array
+    {
+        if ($accountLevel) {
+            return OpeningTakeoverComparison::compare(
+                $expectedLines,
+                $this->closing->openingBalancesInPeriod($supplierId, $nextPeriodId),
+                $this->roleProfile($supplierId, (string) $this->periods->findById($supplierId, $nextPeriodId)['starts_on']),
+            );
+        }
         $linkedTypes = [];
         $dimensions = new DimensionRepository($this->db);
         $types = array_column($dimensions->listTypes($supplierId), null, 'id');
@@ -499,6 +528,10 @@ final class ClosingService
         $next = $this->periods->nextPeriod($supplierId, (string) $period['ends_on']);
         $openingDate = $next['starts_on'] ?? (new \DateTimeImmutable((string) $period['ends_on']))->modify('+1 day')->format('Y-m-d');
         $profile = $this->assertOpeningFramework($supplierId, (string) $period['ends_on'], $openingDate);
+        $takenOver = $this->closing->takenOverClosingEntryIds($supplierId, $periodId);
+        if ($takenOver !== [] && $profile->framework !== AccountingFrameworkService::CZ_504) {
+            return $this->takenOverOpeningLines($supplierId, $period, $profile, $takenOver);
+        }
         if ($steps['close_books']['status'] === 'done') {
             $closingEntry = $this->findEntryWithLines($supplierId, 'closing', $periodId);
             $profit = round((float) ($steps['close_books']['payload']['profit'] ?? 0.0), 2);
@@ -508,6 +541,46 @@ final class ClosingService
         $bs = $this->bsBalancesForProfile($supplierId, $period, $profile);
         $profit = round((float) $this->builder->closingLines($pl, $bs, $profile)['profit'], 2);
         return $this->builder->openingLines($bs, $profit, $profile, ClosingEntryBuilder::resultBalances($pl));
+    }
+
+    /**
+     * Očekávané počáteční stavy dalšího roku po uzávěrce převzaté z původního systému:
+     * konečné zůstatky a výsledek hospodaření spočtené BEZ převzatých uzávěrkových zápisů
+     * (s nimi jsou všechny účty nulové). Haléřový zbytek na počátečním účtu rozvažném,
+     * který rok zdědil z převzaté otevírací rozvahy, se nese dál stejně jako v původním systému.
+     *
+     * @param array<string,mixed> $period
+     * @param list<int> $takenOver
+     * @return list<array{account_code:string, side:'debit'|'credit', amount:float}>
+     */
+    private function takenOverOpeningLines(int $supplierId, array $period, AccountingRoleProfile $profile, array $takenOver): array
+    {
+        $periodId = (int) $period['id'];
+        $pl = $this->closing->plBalances($supplierId, $periodId, (string) $period['starts_on'], (string) $period['ends_on'], false, $takenOver);
+        $bs = $this->closing->bsBalances($supplierId, $periodId, (string) $period['ends_on'], false, $takenOver);
+        $residue = $this->closing->periodBalanceExcluding($supplierId, $profile->account('closing.opening_balance'),
+            (string) $period['starts_on'], (string) $period['ends_on'], $takenOver);
+        return $this->builder->openingLines($bs, self::profitFromPl($pl), $profile, null, (int) round($residue * 100));
+    }
+
+    /**
+     * Výsledek hospodaření ze zůstatků výsledkových účtů (kreditní netto = zisk).
+     *
+     * @param list<array{bal:float}> $pl
+     */
+    private static function profitFromPl(array $pl): float
+    {
+        $cents = 0;
+        foreach ($pl as $row) {
+            $cents -= (int) round((float) $row['bal'] * 100);
+        }
+        return $cents / 100;
+    }
+
+    /** @return list<int> zápisy uzávěrky převzaté z původního systému ({@see ClosingRepository::takenOverClosingEntryIds()}) */
+    public function takenOverClosingEntryIds(int $supplierId, int $periodId): array
+    {
+        return $this->closing->takenOverClosingEntryIds($supplierId, $periodId);
     }
 
     // ── start / abort ─────────────────────────────────────────────────────────
@@ -559,6 +632,12 @@ final class ClosingService
                         422,
                     );
                 }
+            }
+            if ($this->closing->takenOverClosingEntryIds($supplierId, $periodId) !== []
+                && $this->roleProfile($supplierId, (string) $period['ends_on'])->framework === AccountingFrameworkService::CZ_504) {
+                throw new ClosingException('closing_taken_over',
+                    'Rok ' . $period['fiscal_year'] . ' už uzavřel původní systém (převzaté uzávěrkové zápisy). U neziskové organizace '
+                    . 'průvodce převzatou uzávěrku zatím nenavazuje - rok nechte uzavřený tak, jak byl převeden.', 422);
             }
             // Nerozdělený výsledek na 431 blokuje uzavření knih (precheck vh_431_undistributed),
             // ale rozdělení se účtuje do TOHOTO období — a jakmile je ve stavu 'closing',
@@ -4575,6 +4654,34 @@ final class ClosingService
             $lines = $built['lines'];
             $profit = round((float) $built['profit'], 2);
 
+            // Rok uzavřený už původním systémem: převzaté uzávěrkové zápisy vynulovaly všechny
+            // účty, takže se nic znovu neúčtuje. Výsledek hospodaření se ale musí uložit
+            // skutečný (bez převzatých zápisů), ne nula. Zbyl-li po převzaté uzávěrce zůstatek
+            // (zápis přidaný až po převodu), dvě různé uzávěrky by se mísily: to se odmítne.
+            $takenOverClosing = $this->closing->takenOverClosingEntryIds($supplierId, $periodId);
+            if ($takenOverClosing !== []) {
+                if ($profile->framework === AccountingFrameworkService::CZ_504) {
+                    throw new ClosingException('closing_taken_over', 'Rok už uzavřel původní systém. U neziskové organizace průvodce převzatou uzávěrku zatím nenavazuje.', 422);
+                }
+                // Po účtech, ne po dimenzích: původní systém uzavírá účty bez dimenzí, takže
+                // řádky s dimenzí a bez ní se v součtu účtu vyruší.
+                $byAccount = [];
+                foreach ([...$pl, ...$bs] as $row) {
+                    $code = (string) $row['account_code'];
+                    $byAccount[$code] = ($byAccount[$code] ?? 0) + (int) round((float) $row['bal'] * 100);
+                }
+                $residual = array_keys(array_filter($byAccount, static fn (int $cents): bool => $cents !== 0));
+                if ($residual !== []) {
+                    $example = (string) $residual[0];
+                    throw new ClosingException('closing_taken_over_residual',
+                        'Rok už uzavřel původní systém, ale po převzaté uzávěrce zůstaly nenulové zůstatky (např. účet ' . $example . '). '
+                        . 'Zápisy zaúčtované do roku až po převodu přesuňte do dalšího roku, nebo zůstatek vyrovnejte v původní uzávěrce.', 422);
+                }
+                $profit = round(self::profitFromPl($this->closing->plBalances($supplierId, $periodId, $startsOn, $endsOn, false, $takenOverClosing)), 2);
+                // Převzatá uzávěrka účty už uzavřela; dimenzní zbytky uvnitř účtu se znovu neúčtují.
+                $lines = [];
+            }
+
             $entryId = null;
             $docNo = null;
             if ($lines !== []) {
@@ -4646,7 +4753,7 @@ final class ClosingService
                 'document_no' => $docNo,
                 'lines_count' => count($lines),
                 'category_frozen' => $categoryFrozen,
-            ];
+            ] + ($takenOverClosing !== [] ? ['closing_taken_over' => true, 'taken_over_entry_ids' => $takenOverClosing] : []);
             if ($unpostedOverride !== null) {
                 // Výjimka do závěrkového balíčku (EP-10b) — auditovatelný záznam, že se
                 // knihy uzavřely přes nezaúčtované doklady, s důvodem a seznamem dokladů.
@@ -4811,7 +4918,8 @@ final class ClosingService
             $takenOverIds = [];
             $takenOverAccounts = 0;
             if ($takenOver !== []) {
-                $cmp = $this->compareOpeningBalances($supplierId, $nextId, $lines);
+                $accountLevel = $this->openingComparedByAccount($supplierId, $period);
+                $cmp = $this->compareOpeningBalances($supplierId, $nextId, $lines, $accountLevel);
                 if ($replaceTakenOverReason !== null) {
                     $replacedDumps = [];
                     foreach ($takenOver as $entry) {
@@ -5060,6 +5168,9 @@ final class ClosingService
             if ($openingSource === 'taken_over') {
                 $payload['taken_over_entry_ids'] = $takenOverIds;
                 $payload['taken_over_accounts'] = $takenOverAccounts;
+                if ($accountLevel ?? false) {
+                    $payload['taken_over_compare_level'] = 'account';
+                }
             } elseif ($openingSource === 'replaced') {
                 $payload['replace_reason'] = mb_substr((string) $replaceTakenOverReason, 0, 500);
             }

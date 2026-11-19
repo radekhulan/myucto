@@ -192,4 +192,20 @@ describe('PeriodClosing.vue - daň z příjmů a odložená daň', () => {
     expect(wrapper.text()).toContain('accounting.closing.close.blocked_assessment')
     expect(wrapper.text()).not.toContain('accounting.closing.close.blocked_steps')
   })
+
+  it('převzatou uzávěrku ohlásí bannerem i se zmrazenými dimenzemi', async () => {
+    m.state.mockResolvedValue(makeState({ closing_taken_over: true }))
+    const wrapper = mount(PeriodClosing)
+    await flushPromises()
+    const banner = wrapper.get('[data-test="closing-taken-over"]').text()
+    expect(banner).toContain('accounting.closing.taken_over.title')
+    expect(banner).toContain('accounting.closing.taken_over.dimensions')
+  })
+
+  it('bez převzaté uzávěrky banner nezobrazí', async () => {
+    m.state.mockResolvedValue(makeState())
+    const wrapper = mount(PeriodClosing)
+    await flushPromises()
+    expect(wrapper.find('[data-test="closing-taken-over"]').exists()).toBe(false)
+  })
 })

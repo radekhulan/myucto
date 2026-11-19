@@ -928,6 +928,15 @@ const canOpenNextStage = computed(() => ['closed', 'reviewed', 'approved'].inclu
       </div>
     </div>
 
+    <!-- Rok převedený i s uzávěrkou původního systému: průvodce ji znovu neúčtuje a dimenze
+         roku jsou kvůli převzaté uzávěrce zmrazené (jinak by se ptali, proč nejdou změnit). -->
+    <div v-if="state?.closing_taken_over" data-test="closing-taken-over"
+      class="mb-4 rounded-lg border border-primary-200 bg-primary-50 dark:bg-primary-500/[0.06] px-4 py-3 text-sm text-primary-800 dark:text-primary-200 space-y-1">
+      <p class="font-medium">{{ t('accounting.closing.taken_over.title') }}</p>
+      <p>{{ t('accounting.closing.taken_over.text') }}</p>
+      <p>{{ t('accounting.closing.taken_over.dimensions') }}</p>
+    </div>
+
     <div v-if="loading && !state" class="text-center text-neutral-500 py-12 text-sm">{{ t('common.loading') }}</div>
 
     <div v-else-if="state" class="grid grid-cols-1 lg:grid-cols-[280px_1fr] gap-4">
@@ -1851,6 +1860,9 @@ const canOpenNextStage = computed(() => ['closed', 'reviewed', 'approved'].inclu
               <p class="text-sm text-neutral-600">{{ t(`accounting.closing.opening_takeover.${openingTakeover.status}_hint`) }}</p>
               <p v-if="openingTakeover.status !== 'to_create' && openingTakeover.preliminary" class="text-xs text-warning-700">
                 {{ t('accounting.closing.opening_takeover.preliminary') }}
+              </p>
+              <p v-if="openingTakeover.compare_level === 'account'" class="text-xs text-neutral-500" data-test="opening-takeover-account-level">
+                {{ t('accounting.closing.opening_takeover.account_level') }}
               </p>
               <div v-if="openingTakeover.entries.length" class="text-xs text-neutral-500">
                 {{ t('accounting.closing.opening_takeover.entries') }}:
