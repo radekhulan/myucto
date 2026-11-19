@@ -157,6 +157,18 @@ final class RequestAuthorization
             === \MyInvoice\Service\Auth\LoginPolicyService::BACKGROUND_AUTH_METHOD;
     }
 
+    /**
+     * Požadavek úlohy, kterou spustil člověk přihlášený v aplikaci a která jedná za něj
+     * (Hromadné akce v seznamech). Nese metodu ověření relace, ze které úloha vznikla,
+     * takže úkony vyhrazené relaci ({@see actsAsSession()}) projdou stejně jako na detailu
+     * záznamu. Volá ho jen kód, který spuštění z relace zaznamenal
+     * ({@see \MyInvoice\Service\Accounting\Bulk\BulkRecordCall}); role se ověřuje zvlášť.
+     */
+    public static function asSessionStartedJob(Request $request): Request
+    {
+        return $request->withAttribute(\MyInvoice\Middleware\AuthMiddleware::ATTR_METHOD, 'session');
+    }
+
     /** Syntetický požadavek úlohy na pozadí; protějšek {@see isBackgroundAuth()}. */
     public static function asBackground(Request $request): Request
     {

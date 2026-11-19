@@ -15,8 +15,11 @@ use MyInvoice\Service\Accounting\DocumentRepostService;
 use MyInvoice\Service\Accounting\JournalRebookService;
 use MyInvoice\Service\Accounting\PostingException;
 use MyInvoice\Service\Accounting\PostingService;
+use MyInvoice\Service\Accounting\TaxNeutralReclassification;
 use MyInvoice\Service\Ai\AiPostingOverrideResolver;
 use MyInvoice\Service\Invoice\InvoiceItemKind;
+use MyInvoice\Service\Vat\FiledVatPeriodLookup;
+use MyInvoice\Service\Vat\PurchaseFiledVatPeriod;
 use PDO;
 use Psr\Http\Message\ServerRequestInterface as Request;
 
@@ -35,6 +38,13 @@ use Psr\Http\Message\ServerRequestInterface as Request;
  * Změna položek a přeúčtování běží v jedné transakci. Nezaúčtovaný doklad dostane jen
  * novou předkontaci položek.
  *
+ * Podané období DPH (přiznání, kontrolní hlášení) se posuzuje výslovně
+ * ({@see FiledVatPeriodLookup}, u přijaté faktury období odpočtu přes {@see PurchaseFiledVatPeriod}):
+ * zápis v něm se přepíše na místě jen jako daňově neutrální přesun mezi účty, tedy
+ * stejně, jako ho chrání zámek k datu, který podání posouvá, a jak to dělá přeúčtování
+ * účtu (Přeúčtovat). Kdyby správce zámek posunul zpět přes podané období, přepis
+ * s daňovým dopadem se přeskočí s důvodem `period_filed`.
+ *
  * Vrácení obnoví předchozí předkontaci a účty položek a doklad znovu přeúčtuje.
  */
 final class SetPostingRuleOperation implements BulkOperation
@@ -49,6 +59,8 @@ final class SetPostingRuleOperation implements BulkOperation
         private readonly PostingService $posting,
         private readonly DocumentLockService $locks,
         private readonly AiPostingOverrideResolver $aiOverrides,
+        private readonly FiledVatPeriodLookup $filedPeriods,
+        private readonly PurchaseFiledVatPeriod $purchaseFiledPeriods,
     ) {}
 
     public function key(): string
@@ -124,6 +136,9 @@ final class SetPostingRuleOperation implements BulkOperation
                     $item['after'] = $after;
                     if ($preview['strategy'] === DocumentRepostService::STRATEGY_BLOCKED) {
                         return ['status' => 'skipped', 'strategy' => null] + $item;
+                    }
+                    if (($filed = $this->filedRewriteBlocker($ctx->supplierId, $type, $docId, $preview)) !== null) {
+                        return ['status' => 'skipped', 'strategy' => null, 'reason_code' => 'period_filed', 'message' => $filed] + $item;
                     }
                     if ($preview['strategy'] === DocumentRepostService::STRATEGY_REVERSE && $ctx->params['mode'] === JournalRebookService::MODE_REWRITE) {
                         return ['status' => 'skipped', 'strategy' => null, 'reason_code' => $preview['reason_code'] ?? 'needs_reverse'] + $item;
@@ -210,7 +225,12 @@ final class SetPostingRuleOperation implements BulkOperation
             if (($state['plan']['posting_entries'] ?? []) !== []) {
                 $meta['expected_posting_entries'] = $state['plan']['posting_entries'];
             }
-            $result = $this->repost->repost($ctx->supplierId, $type, $docId, $this->build($ctx->supplierId, $type, $docId), $meta,
+            $lines = $this->build($ctx->supplierId, $type, $docId);
+            $filed = $this->filedRewriteBlocker($ctx->supplierId, $type, $docId, $this->repost->previewPlan($ctx->supplierId, $type, $docId, $lines));
+            if ($filed !== null) {
+                throw new PostingException('period_filed', $filed, 409);
+            }
+            $result = $this->repost->repost($ctx->supplierId, $type, $docId, $lines, $meta,
                 $mode === JournalRebookService::MODE_REWRITE_OR_REVERSE);
         }
         $now = $this->state($ctx->supplierId, $type, $docId);
@@ -357,6 +377,34 @@ final class SetPostingRuleOperation implements BulkOperation
         return null;
     }
 
+    /**
+     * Přepis zápisu na místě v podaném období DPH, který není daňově neutrální. Zamčené
+     * datum to rozhodne samo (plán pak storno nebo odmítnutí); tady jde o podané období,
+     * přes které správce zámek posunul zpět. NULL = smí se.
+     *
+     * @param array<string,mixed> $preview plán přeúčtování s opravenými řádky
+     */
+    private function filedRewriteBlocker(int $supplierId, string $type, int $docId, array $preview): ?string
+    {
+        if ($preview['strategy'] !== DocumentRepostService::STRATEGY_REPLACE || $preview['tax_neutral_violation'] === null
+            || $preview['reason_code'] === 'tax_neutral_rewrite') {
+            return null;
+        }
+        if ($type === 'invoice') {
+            $stmt = $this->db->pdo()->prepare('SELECT effective_tax_date FROM invoices WHERE id = ? AND supplier_id = ?');
+            $stmt->execute([$docId, $supplierId]);
+            $refDate = (string) $stmt->fetchColumn();
+            $filed = $refDate === '' ? null : $this->filedPeriods->describe($supplierId, $refDate);
+        } else {
+            $filed = $this->purchaseFiledPeriods->describe($supplierId, $docId);
+        }
+        if ($filed === null) {
+            return null;
+        }
+        return 'Období dokladu už je podané (' . $filed . '). Zápis v něm jde přepsat jen přesunem bez daňového dopadu, '
+            . 'nová předkontace ale ' . TaxNeutralReclassification::describe((string) $preview['tax_neutral_violation']) . '.';
+    }
+
     private function assertMayRepost(BulkContext $ctx, string $type): void
     {
         $request = $ctx->request();
@@ -385,7 +433,7 @@ final class SetPostingRuleOperation implements BulkOperation
             'repost_strategy_changed' => (string) ($e->context['reason_code'] ?? 'needs_reverse'),
             'version_conflict' => 'changed_after_dry_run',
             'repost_date_shift_confirmation_required' => 'needs_reverse',
-            'period_not_open', 'date_locked', 'entry_reversed', 'taken_over', 'forbidden', 'invalid_posting_rule',
+            'period_not_open', 'date_locked', 'period_filed', 'entry_reversed', 'taken_over', 'forbidden', 'invalid_posting_rule',
             'mixed_counter_accounts', 'dimension_required' => $e->errorCode,
             default => 'repost_failed',
         };

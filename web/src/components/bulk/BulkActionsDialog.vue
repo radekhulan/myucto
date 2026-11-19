@@ -33,6 +33,9 @@ import BulkJobProgress from '@/components/accounting/BulkJobProgress.vue'
 import BulkJobTabs from '@/components/accounting/BulkJobTabs.vue'
 import DimensionPicker from '@/components/dimensions/DimensionPicker.vue'
 import PostingRuleSelect from './PostingRuleSelect.vue'
+import NoteParams from './NoteParams.vue'
+import VariableSymbolParams from './VariableSymbolParams.vue'
+import { showsReasonWhenApplied } from './noteSymbolForm'
 import { ICONS, btnFilled, btnOutline, btnOutlineSm } from '@/components/ui/buttonStyles'
 import { buildCsv, downloadCsv, fetchAllPages } from '@/utils/bulkJobCsv'
 import {
@@ -349,6 +352,12 @@ onUnmounted(stopPolling)
             </div>
           </div>
 
+          <!-- Poznámka faktur -->
+          <NoteParams v-else-if="form.operation === 'set_note'" v-model="form.note" :disabled="isRunning" />
+
+          <!-- Variabilní symbol pohybů -->
+          <VariableSymbolParams v-else-if="form.operation === 'set_variable_symbol'" v-model="form.symbol" :disabled="isRunning" />
+
           <!-- Smazat -->
           <div v-else-if="form.operation === 'delete'" class="space-y-3" data-test="bulk-params-delete">
             <p class="bg-danger-50 border border-danger-500/40 text-danger-600 rounded-md p-3" role="alert">{{ t('bulk_actions.delete_warning') }}</p>
@@ -423,7 +432,7 @@ onUnmounted(stopPolling)
                     <span class="font-mono"> {{ c.from }} → {{ c.to }}</span>
                   </div>
                   <div v-if="changesOf(item).length === 0 && !showReason" class="text-xs text-neutral-400">{{ t('bulk_actions.no_change') }}</div>
-                  <div v-if="showReason" class="text-xs text-neutral-600" data-test="bulk-item-reason">{{ bulkReasonText(item, t) }}</div>
+                  <div v-if="showReason || showsReasonWhenApplied(item)" class="text-xs text-neutral-600" data-test="bulk-item-reason">{{ bulkReasonText(item, t) }}</div>
                 </div>
                 <div class="font-mono md:text-right whitespace-nowrap">{{ formatMoney(item.amount) }}</div>
               </div>

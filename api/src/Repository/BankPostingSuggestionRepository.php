@@ -697,60 +697,7 @@ final class BankPostingSuggestionRepository
      */
     public function paginateUnposted(int $supplierId, int $limit, int $offset, array $filters = []): array
     {
-        $unpostedOnly = ($filters['scope'] ?? 'unposted') !== 'all';
-        [$scopeSql, $scopeParams] = $this->transactionScope($supplierId, $unpostedOnly);
-        // Klientský bankovní přehled vyžaduje vlastnictví výpisu i při poškozené
-        // vazbě na vlastní doklad. Účetní fronta si ponechává rozsah pro opravy vazeb.
-        if (!empty($filters['strict_ownership'])) {
-            $scopeSql .= ' AND ' . BankStatementOwnershipResolver::sql();
-            array_push($scopeParams, ...BankStatementOwnershipResolver::params($supplierId));
-        }
-
-
-        $status = $unpostedOnly ? null : ($filters['status'] ?? null);
-        if (in_array($status, ['unmatched', 'auto_exact', 'auto_partial', 'manual', 'ignored'], true)) {
-            $scopeSql .= ' AND bt.match_status = ?';
-            $scopeParams[] = $status;
-            if ($status === 'unmatched') {
-                $scopeSql .= ' AND NOT ' . NonInvoiceBankTransactionScope::sql($supplierId, 'bt.id');
-            }
-        }
-
-        $posting = $filters['posting_status'] ?? null;
-        if (!$unpostedOnly && in_array($posting, ['unposted', 'posted'], true)) {
-            $scopeSql .= ' AND ' . ($posting === 'unposted' ? 'NOT ' : '')
-                . BankTransactionPostingScope::existsSql($supplierId, 'bt.id');
-        }
-
-        if (isset($filters['id']) && (int) $filters['id'] > 0) {
-            $scopeSql .= ' AND bt.id = ?';
-            $scopeParams[] = (int) $filters['id'];
-        }
-
-        $year = isset($filters['year']) && (int) $filters['year'] > 0 ? (int) $filters['year'] : null;
-        if ($year !== null) {
-            $scopeSql .= ' AND YEAR(bt.posted_at) = ?';
-            $scopeParams[] = $year;
-        }
-        $account = isset($filters['account']) ? trim((string) $filters['account']) : '';
-        if ($account !== '') {
-            $scopeSql .= " AND TRIM(LEADING '0' FROM REGEXP_REPLACE(IFNULL(bs.account_number, ''), '[^0-9]', ''))
-                              = TRIM(LEADING '0' FROM REGEXP_REPLACE(?, '[^0-9]', ''))";
-            $scopeParams[] = $account;
-        }
-        $q = isset($filters['q']) ? trim((string) $filters['q']) : '';
-        if ($q !== '') {
-            // Escape wildcardů, ať uživatelský vstup nedělá slow-query ani nečekanou shodu.
-            $like = '%' . addcslashes($q, '%_\\') . '%';
-            $amount = \MyInvoice\Service\Bank\BankAmountSearch::normalize($q);
-            $scopeSql .= " AND (bt.counterparty_name LIKE ? OR bt.description LIKE ?
-                             OR bt.counterparty_account LIKE ? OR bt.variable_symbol LIKE ?"
-                . ($amount !== null ? ' OR ABS(bt.amount) = CAST(? AS DECIMAL(18,2))' : '') . ')';
-            array_push($scopeParams, $like, $like, $like, $like);
-            if ($amount !== null) {
-                $scopeParams[] = $amount;
-            }
-        }
+        [$scopeSql, $scopeParams] = $this->movementScope($supplierId, $filters);
         $sort = BankTransactionSort::fromQuery(
             ['sort' => $filters['sort'] ?? null, 'direction' => $filters['direction'] ?? null],
             BankTransactionSort::KEYS,
@@ -951,6 +898,105 @@ final class BankPostingSuggestionRepository
         $stmt->execute($params);
 
         return (int) $stmt->fetchColumn();
+    }
+
+    /**
+     * Id pohybů seznamu „Všechny pohyby" / „K zaúčtování" se stejnými filtry jako
+     * {@see paginateUnposted()}, nejvýš `$limit`, a jejich celkový počet. Výběr
+     * „všech N podle filtru" hromadné akce; vždy jen pohyby z výpisů firmy
+     * (`strict_ownership`), ne cizí pohyby spárované s jejími doklady.
+     *
+     * @param array<string,mixed> $filters
+     * @return array{ids:list<int>, total:int}
+     */
+    public function listIds(int $supplierId, array $filters, int $limit): array
+    {
+        [$scopeSql, $scopeParams] = $this->movementScope($supplierId, ['strict_ownership' => true] + $filters);
+        if ($limit <= 0) {
+            return ['ids' => [], 'total' => 0];
+        }
+        $pdo = $this->db->pdo();
+        // Bez řazení: výběr jen sbírá id (volající je seřadí) a dotaz skončí po `$limit`
+        // shodách. Celkový počet se počítá, jen když výběr limit přesáhl (hláška o počtu).
+        $limit = (int) $limit;
+        $stmt = $pdo->prepare("SELECT bt.id FROM bank_transactions bt JOIN bank_statements bs ON bs.id = bt.statement_id
+                                WHERE {$scopeSql} LIMIT {$limit}");
+        $stmt->execute($scopeParams);
+        $ids = array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN));
+        if (count($ids) < $limit) {
+            return ['ids' => $ids, 'total' => count($ids)];
+        }
+        $count = $pdo->prepare("SELECT COUNT(*) FROM bank_transactions bt JOIN bank_statements bs ON bs.id = bt.statement_id WHERE {$scopeSql}");
+        $count->execute($scopeParams);
+        return ['ids' => $ids, 'total' => (int) $count->fetchColumn()];
+    }
+
+    /**
+     * WHERE seznamu pohybů podle filtrů {@see paginateUnposted()}.
+     *
+     * @param array<string,mixed> $filters
+     * @return array{0:string, 1:list<mixed>}
+     */
+    private function movementScope(int $supplierId, array $filters): array
+    {
+        $unpostedOnly = ($filters['scope'] ?? 'unposted') !== 'all';
+        [$scopeSql, $scopeParams] = $this->transactionScope($supplierId, $unpostedOnly);
+        // Klientský bankovní přehled vyžaduje vlastnictví výpisu i při poškozené
+        // vazbě na vlastní doklad. Účetní fronta si ponechává rozsah pro opravy vazeb.
+        if (!empty($filters['strict_ownership'])) {
+            // Výpisy firmy (a starší bez firmy, o kterých rozhodne vlastník účtu) vybere index
+            // podle firmy; pohyby se pak čtou jen z nich, ne napříč všemi firmami.
+            $scopeSql = '(bs.supplier_id = ? OR bs.supplier_id IS NULL) AND ' . $scopeSql
+                . ' AND ' . BankStatementOwnershipResolver::sql();
+            $scopeParams = [$supplierId, ...$scopeParams, ...BankStatementOwnershipResolver::params($supplierId)];
+        }
+
+        $status = $unpostedOnly ? null : ($filters['status'] ?? null);
+        if (in_array($status, ['unmatched', 'auto_exact', 'auto_partial', 'manual', 'ignored'], true)) {
+            $scopeSql .= ' AND bt.match_status = ?';
+            $scopeParams[] = $status;
+            if ($status === 'unmatched') {
+                $scopeSql .= ' AND NOT ' . NonInvoiceBankTransactionScope::sql($supplierId, 'bt.id');
+            }
+        }
+
+        $posting = $filters['posting_status'] ?? null;
+        if (!$unpostedOnly && in_array($posting, ['unposted', 'posted'], true)) {
+            $scopeSql .= ' AND ' . ($posting === 'unposted' ? 'NOT ' : '')
+                . BankTransactionPostingScope::existsSql($supplierId, 'bt.id');
+        }
+
+        if (isset($filters['id']) && (int) $filters['id'] > 0) {
+            $scopeSql .= ' AND bt.id = ?';
+            $scopeParams[] = (int) $filters['id'];
+        }
+
+        $year = isset($filters['year']) && (int) $filters['year'] > 0 ? (int) $filters['year'] : null;
+        if ($year !== null) {
+            // Rozsah, ne YEAR(): podmínka na sloupci nesmí bránit indexu podle data.
+            $scopeSql .= ' AND bt.posted_at >= ? AND bt.posted_at < ?';
+            array_push($scopeParams, sprintf('%04d-01-01', $year), sprintf('%04d-01-01', $year + 1));
+        }
+        $account = isset($filters['account']) ? trim((string) $filters['account']) : '';
+        if ($account !== '') {
+            $scopeSql .= " AND TRIM(LEADING '0' FROM REGEXP_REPLACE(IFNULL(bs.account_number, ''), '[^0-9]', ''))
+                              = TRIM(LEADING '0' FROM REGEXP_REPLACE(?, '[^0-9]', ''))";
+            $scopeParams[] = $account;
+        }
+        $q = isset($filters['q']) ? trim((string) $filters['q']) : '';
+        if ($q !== '') {
+            // Escape wildcardů, ať uživatelský vstup nedělá slow-query ani nečekanou shodu.
+            $like = '%' . addcslashes($q, '%_\\') . '%';
+            $amount = \MyInvoice\Service\Bank\BankAmountSearch::normalize($q);
+            $scopeSql .= " AND (bt.counterparty_name LIKE ? OR bt.description LIKE ?
+                             OR bt.counterparty_account LIKE ? OR bt.variable_symbol LIKE ?"
+                . ($amount !== null ? ' OR ABS(bt.amount) = CAST(? AS DECIMAL(18,2))' : '') . ')';
+            array_push($scopeParams, $like, $like, $like, $like);
+            if ($amount !== null) {
+                $scopeParams[] = $amount;
+            }
+        }
+        return [$scopeSql, $scopeParams];
     }
 
     /**

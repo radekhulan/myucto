@@ -16041,7 +16041,8 @@ paths:
       summary: Hromadné akce v seznamech - dostupné operace a poslední běhy
       description: >
         Hromadné akce nad vybranými záznamy seznamu (Účetní deník, Vydané faktury, Přijaté
-        faktury): přeúčtování účtu, nastavení dimenzí, změna předkontace a smazání. Vrací,
+        faktury, bankovní pohyby): přeúčtování účtu, nastavení dimenzí, změna předkontace,
+        smazání, změna poznámky faktur a oprava variabilního symbolu pohybů. Vrací,
         které operace smí aktuální uživatel nad daným druhem záznamů spustit, a posledních
         10 běhů (nanečisto, provedení, vrácení). Spuštění, vrácení a zrušení jsou jen
         v aplikaci (právo Hromadné změny dokladů a zápisů), přes token dostupné nejsou.
@@ -16050,7 +16051,7 @@ paths:
         - in: query
           name: target
           required: true
-          schema: { type: string, enum: [invoice, purchase_invoice, journal_entry] }
+          schema: { type: string, enum: [invoice, purchase_invoice, journal_entry, bank_transaction] }
       responses:
         '200':
           description: OK
@@ -16066,7 +16067,7 @@ paths:
                     items:
                       type: object
                       properties:
-                        key: { type: string, enum: [rebook_account, set_dimensions, set_posting_rule, delete] }
+                        key: { type: string, enum: [rebook_account, set_dimensions, set_posting_rule, delete, set_note, set_variable_symbol] }
                         available: { type: boolean }
                         reason: { type: [string, "null"], description: 'Proč operace není k dispozici.' }
                         rollback: { type: boolean, description: 'Jde ostrý běh vrátit (smazání ne).' }
@@ -58996,8 +58997,8 @@ components:
       type: object
       properties:
         id: { type: integer }
-        operation: { type: string, enum: [rebook_account, set_dimensions, set_posting_rule, delete] }
-        target: { type: string, enum: [invoice, purchase_invoice, journal_entry] }
+        operation: { type: string, enum: [rebook_account, set_dimensions, set_posting_rule, delete, set_note, set_variable_symbol] }
+        target: { type: string, enum: [invoice, purchase_invoice, journal_entry, bank_transaction] }
         selection_count: { type: integer, description: 'Počet záznamů výběru.' }
         rollback_supported: { type: boolean }
         kind: { type: string, enum: [dry_run, apply, rollback] }
@@ -59015,7 +59016,7 @@ components:
         finished_at: { type: [string, "null"] }
         params:
           type: object
-          description: 'Parametry operace (účty, dimenze s režimem set/fill/clear, předkontace, volba u smazání).'
+          description: 'Parametry operace (účty, dimenze s režimem set/fill/clear, předkontace, volba u smazání, poznámka note_field/note_mode/note_text/include_issued, symbol vs_mode/vs_value/vs_pattern).'
           additionalProperties: true
         dry_run_job_id: { type: [integer, "null"] }
         rollback_of_job_id: { type: [integer, "null"] }
@@ -59028,7 +59029,7 @@ components:
       properties:
         id: { type: integer }
         entry_id: { type: [integer, "null"] }
-        source_type: { type: string, description: 'Druh záznamu: invoice, purchase_invoice, journal_entry (source_id je id zápisu); přeúčtování i bank, manual, cash' }
+        source_type: { type: string, description: 'Druh záznamu: invoice, purchase_invoice, journal_entry (source_id je id zápisu), bank (bankovní pohyb); přeúčtování i manual, cash' }
         source_id: { type: integer }
         document_no: { type: [string, "null"] }
         entry_date: { type: string, format: date }

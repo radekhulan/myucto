@@ -5,10 +5,13 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Accounting\Bulk;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Repository\BankStatementOwnershipResolver;
 use PDO;
 
 /**
- * Výběr záznamů hromadné akce: vydané faktury, přijaté faktury nebo zápisy deníku.
+ * Výběr záznamů hromadné akce: vydané faktury, přijaté faktury, zápisy deníku nebo
+ * bankovní pohyby. Bankovní pohyb vlastní sloupec firmy nemá, patří firmě, které patří
+ * jeho výpis ({@see BankStatementOwnershipResolver}).
  *
  * Úloha pracuje vždy s pevným seznamem id, který vznikne při spuštění běhu nanečisto
  * (ruční výběr ze seznamu, nebo „všech N podle filtru" vyhodnocené kódem seznamu).
@@ -17,13 +20,14 @@ use PDO;
 final class BulkSelection
 {
     public const LIMIT = 500;
-    public const TARGETS = ['invoice', 'purchase_invoice', 'journal_entry'];
+    public const TARGETS = ['invoice', 'purchase_invoice', 'journal_entry', 'bank_transaction'];
 
     /** Druh záznamu => [tabulka, zdroj zápisu v deníku]. */
     private const TABLES = [
         'invoice' => ['invoices', 'invoice'],
         'purchase_invoice' => ['purchase_invoices', 'purchase_invoice'],
         'journal_entry' => ['journal_entries', null],
+        'bank_transaction' => ['bank_transactions', 'bank'],
     ];
 
     public function __construct(private readonly Connection $db) {}
@@ -58,8 +62,14 @@ final class BulkSelection
         }
         $table = self::TABLES[$target][0];
         $marks = implode(',', array_fill(0, count($ids), '?'));
-        $stmt = $this->db->pdo()->prepare("SELECT id FROM {$table} WHERE supplier_id = ? AND id IN ({$marks})");
-        $stmt->execute([$supplierId, ...$ids]);
+        if ($target === 'bank_transaction') {
+            $stmt = $this->db->pdo()->prepare("SELECT bt.id FROM bank_transactions bt JOIN bank_statements bs ON bs.id = bt.statement_id
+                                                WHERE bt.id IN ({$marks}) AND " . BankStatementOwnershipResolver::sql());
+            $stmt->execute([...$ids, ...BankStatementOwnershipResolver::params($supplierId)]);
+        } else {
+            $stmt = $this->db->pdo()->prepare("SELECT id FROM {$table} WHERE supplier_id = ? AND id IN ({$marks})");
+            $stmt->execute([$supplierId, ...$ids]);
+        }
         $found = array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN));
         if (count($found) !== count($ids)) {
             throw new BulkActionException('foreign_ids',
@@ -110,14 +120,26 @@ final class BulkSelection
                        LEFT JOIN journal_entries je ON je.supplier_id = pi.supplier_id AND je.source_type = 'purchase_invoice'
                                  AND je.active_source_id = pi.id AND je.posted_at IS NOT NULL
                            WHERE pi.supplier_id = ? AND pi.id IN ({$marks})",
+            'bank_transaction' => "SELECT bt.id AS source_id,
+                                 (SELECT MIN(je.id) FROM journal_entries je WHERE je.supplier_id = ? AND je.source_type = 'bank'
+                                     AND je.source_id = bt.id AND je.reversed_by IS NULL AND je.posted_at IS NOT NULL) AS entry_id,
+                                 bt.posted_at AS entry_date, bt.variable_symbol AS document_no,
+                                 COALESCE(NULLIF(bt.counterparty_name, ''), bt.description) AS description
+                            FROM bank_transactions bt
+                            JOIN bank_statements bs ON bs.id = bt.statement_id
+                           WHERE bt.id IN ({$marks}) AND " . BankStatementOwnershipResolver::sql(),
             default => "SELECT je.id AS source_id, je.id AS entry_id, je.entry_date, je.document_no, je.description
                           FROM journal_entries je
                          WHERE je.supplier_id = ? AND je.id IN ({$marks})",
         };
         $stmt = $this->db->pdo()->prepare($sql . ' ORDER BY 3, 1');
-        $stmt->execute([$supplierId, ...$ids]);
+        $stmt->execute($target === 'bank_transaction'
+            ? [$supplierId, ...$ids, ...BankStatementOwnershipResolver::params($supplierId)]
+            : [$supplierId, ...$ids]);
+        // Položka nese zdroj zápisu v deníku (bankovní pohyb = `bank`), u zápisu deníku druh výběru.
+        $sourceType = self::TABLES[$target][1] ?? $target;
         return array_map(static fn (array $r): array => [
-            'source_type' => $target,
+            'source_type' => $sourceType,
             'source_id'   => (int) $r['source_id'],
             'entry_id'    => $r['entry_id'] === null ? null : (int) $r['entry_id'],
             'entry_date'  => (string) $r['entry_date'],

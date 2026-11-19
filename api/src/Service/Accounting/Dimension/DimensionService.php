@@ -1001,6 +1001,7 @@ final class DimensionService
             if ($expected !== null && self::snapshotFingerprint($before) !== $expected) {
                 throw new DimensionException('changed_after_dry_run', 'Dimenze dokladu se od běhu nanečisto změnily.', 409);
             }
+            $cascadeBefore = $this->cascadeLineSnapshot($supplierId, $docType, $docId);
             $header = $before[0];
             $set = [];
             $remove = [];
@@ -1061,6 +1062,7 @@ final class DimensionService
             ), false);
             $after = $this->documentSnapshot($supplierId, $docType, $docId);
             $this->assertBulkRules($supplierId, $sourceType, $before, $after);
+            $this->assertBulkCascadeRules($supplierId, $docType, $docId, $cascadeBefore);
             return [
                 'changed' => $result['changed'],
                 'before' => $before,
@@ -1090,6 +1092,7 @@ final class DimensionService
             if (self::snapshotFingerprint($before) !== $expected) {
                 throw new DimensionException('changed_after_apply', 'Dimenze dokladu se od hromadné změny znovu změnily.', 409);
             }
+            $cascadeBefore = $this->cascadeLineSnapshot($supplierId, $docType, $docId);
             $header = [];
             $items = [];
             $splits = [];
@@ -1113,6 +1116,7 @@ final class DimensionService
             );
             $after = $this->documentSnapshot($supplierId, $docType, $docId);
             $this->assertBulkRules($supplierId, $sourceType, $before, $after);
+            $this->assertBulkCascadeRules($supplierId, $docType, $docId, $cascadeBefore);
             return [
                 'changed' => $result['changed'],
                 'before' => $before,
@@ -1474,6 +1478,47 @@ final class DimensionService
             } catch (PostingException $e) {
                 throw new DimensionException($e->errorCode, $e->getMessage(), $e->httpStatus);
             }
+        }
+    }
+
+    /**
+     * Řádky živých zápisů, které uložení dimenzí dokladu přerazítkuje mimo jeho vlastní
+     * zápis ({@see cascadeSources()}: bankovní a pokladní úhrady, zápočty, karty majetku),
+     * podle zdroje zápisu. Hromadná změna je ověřuje stejnými pravidly povinných dimenzí
+     * jako řádky dokladu: uložení dimenzí jednoho dokladu je přerazítkuje taky.
+     *
+     * @return array<string,list<array<string,mixed>>> zdroj zápisu => řádky
+     */
+    private function cascadeLineSnapshot(int $supplierId, string $docType, int $docId): array
+    {
+        $bySource = [];
+        foreach ($this->cascadeSources($supplierId, $docType, $docId) as [$source, $sourceId]) {
+            $bySource[(string) $source][] = (int) $sourceId;
+        }
+        $out = [];
+        foreach ($bySource as $source => $ids) {
+            $marks = implode(',', array_fill(0, count($ids), '?'));
+            $stmt = $this->db->pdo()->prepare(
+                "SELECT l.id FROM journal_entries je
+                   JOIN journal_entry_lines l ON l.entry_id = je.id AND l.supplier_id = je.supplier_id
+                  WHERE je.supplier_id = ? AND je.source_type = ? AND je.source_id IN ({$marks})
+                    AND je.reversed_by IS NULL AND je.posted_at IS NOT NULL
+                  ORDER BY je.id, l.line_no, l.id"
+            );
+            $stmt->execute([$supplierId, $source, ...$ids]);
+            $lineIds = array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN));
+            if ($lineIds !== []) {
+                $out[$source] = $this->lineSnapshotRows($supplierId, $lineIds);
+            }
+        }
+        return $out;
+    }
+
+    /** @param array<string,list<array<string,mixed>>> $before {@see cascadeLineSnapshot()} před uložením */
+    private function assertBulkCascadeRules(int $supplierId, string $docType, int $docId, array $before): void
+    {
+        foreach ($this->cascadeLineSnapshot($supplierId, $docType, $docId) as $source => $after) {
+            $this->assertBulkRules($supplierId, $source, $before[$source] ?? [], $after);
         }
     }
 

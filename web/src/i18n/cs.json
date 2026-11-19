@@ -44910,7 +44910,8 @@
     "target": {
       "invoice": "Vydané faktury",
       "purchase_invoice": "Přijaté faktury",
-      "journal_entry": "Zápisy v účetním deníku"
+      "journal_entry": "Zápisy v účetním deníku",
+      "bank_transaction": "Bankovní pohyby"
     },
     "selection_summary": "{target}: {n} záznamů",
     "over_limit": "Výběr má {n} záznamů, najednou jde zpracovat nejvýš {limit}. Zužte filtr nebo výběr.",
@@ -44921,13 +44922,17 @@
       "rebook_account": "Přeúčtovat účet",
       "set_dimensions": "Nastavit dimenze",
       "set_posting_rule": "Změnit předkontaci",
-      "delete": "Smazat"
+      "delete": "Smazat",
+      "set_note": "Změnit poznámku",
+      "set_variable_symbol": "Opravit variabilní symbol"
     },
     "operation_hint": {
       "rebook_account": "Změní účet X na Y v zápisech vybraných záznamů.",
       "set_dimensions": "Nastaví, doplní nebo vymaže dimenze na více typech najednou.",
       "set_posting_rule": "Nastaví předkontaci položkám dokladů a doklady znovu zaúčtuje.",
-      "delete": "Smaže vybrané záznamy, které smazat jde."
+      "delete": "Smaže vybrané záznamy, které smazat jde.",
+      "set_note": "Přepíše, doplní nebo vymaže text nad položkami nebo pod položkami dokladů.",
+      "set_variable_symbol": "Nastaví VS nespárovaným pohybům stálou hodnotou nebo podle vzoru a znovu je spáruje."
     },
     "unavailable": "Nedostupné: {reason}",
     "from_account": "Z účtu",
@@ -45087,6 +45092,62 @@
       "failed": "Chyba při zpracování"
     },
     "rebook_hint": "Pro ručně vybrané doklady nebo zápisy použijte v seznamu Vydaných faktur, Přijatých faktur nebo v Účetním deníku nabídku „…“ a Hromadné akce.",
-    "bank_link": "Bankovní pohyby podle filtru"
+    "bank_link": "Bankovní pohyby podle filtru",
+    "note": {
+      "field_label": "Poznámka",
+      "mode_label": "Způsob změny",
+      "mode": {
+        "replace": "Přepsat",
+        "append": "Připojit na konec",
+        "clear": "Vymazat"
+      },
+      "mode_hint": {
+        "replace": "Stávající text se nahradí zadaným.",
+        "append": "Zadaný text se připojí na nový řádek za stávající text.",
+        "clear": "Poznámka se vymaže."
+      },
+      "text_label": "Text poznámky",
+      "text_counter": "{n} / {max} znaků",
+      "text_required": "Zadejte text poznámky.",
+      "text_too_long": "Text může mít nejvýš {max} znaků.",
+      "include_issued": "Upravit i vystavené doklady",
+      "include_issued_hint": "Jako Upravit vystavený doklad: přepíše snapshoty a PDF. Jen s právem upravit vystavený doklad. Bez této volby se změní jen koncepty.",
+      "issued_doc": "vystavený doklad"
+    },
+    "vs": {
+      "mode_label": "Nový variabilní symbol",
+      "mode": {
+        "constant": "Stálá hodnota",
+        "pattern": "Podle vzoru"
+      },
+      "value_label": "Variabilní symbol",
+      "value_invalid": "Jen číslice, nejvýš 10.",
+      "pattern_label": "Vzor",
+      "pattern_placeholder": "např. {'{zprava}'}",
+      "pattern_invalid": "Vzor smí mít nejvýš 40 znaků, jen číslice a značky níže a alespoň jednu značku.",
+      "tokens_title": "Značky ve vzoru",
+      "token": {
+        "ss": "specifický symbol",
+        "ks": "konstantní symbol",
+        "vs": "dosavadní variabilní symbol",
+        "zprava": "první skupina 2 až 10 číslic ve zprávě pro příjemce"
+      },
+      "hint": "Mění se jen nespárovaný pohyb, který nic nevyřídil a není zaúčtovaný. Po změně se pohyb znovu nabídne automatickému párování.",
+      "change_label": "Variabilní symbol",
+      "match_label": "Párování"
+    },
+    "ns_reason": {
+      "not_draft": "Doklad není koncept (volba Upravit i vystavené doklady je vypnutá)",
+      "session_required": "Vystavený doklad jde upravit jen z úlohy spuštěné v aplikaci",
+      "period_closed": "Doklad spadá do uzavřeného účetního období",
+      "note_too_long": "Poznámka by byla příliš dlouhá",
+      "invalid_variable_symbol": "Ze vzoru nevyšel platný variabilní symbol",
+      "ignored": "Pohyb je ignorovaný",
+      "already_matched": "Pohyb je spárovaný, nejdřív zrušte spárování",
+      "already_settled": "Pohyb už hradí doklad, ostatní položku nebo mzdu",
+      "posted": "Pohyb je zaúčtovaný, nejdřív zrušte zaúčtování",
+      "notice_superseded": "Avízo převzal výpis, symbol se opravuje na pohybu výpisu",
+      "rematch_failed": "Symbol změněn, automatické párování selhalo"
+    }
   }
 }

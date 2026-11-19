@@ -29,7 +29,7 @@ Deník je dostupný jen firmám v podvojném účetnictví. Firmy na [daňové e
 | při přesunu peněz mezi účty | Převod přes 261 | **Převod banka ↔ pokladna**, [§ 52.5](#525-krok-za-krokem-prevod-mezi-ucty-pres-261) |
 | u opakovaných zápisů | Použít šablonu, importovat CSV | **Nový ze šablony**, [§ 52.6](#526-krok-za-krokem-rucni-zapis-ze-sablony-a-import-z-csv) |
 | když je zápis špatně | Opravit, stornovat, přeúčtovat | [§ 52.7](#527-krok-za-krokem-oprava-nebo-storno-zapisu) a [§ 52.8](#528-krok-za-krokem-preuctovani-z-dokladu) |
-| když se mění mnoho dokladů najednou | Přeúčtovat, nastavit dimenze, změnit předkontaci nebo smazat vybrané záznamy | **…** → **Hromadné akce** v seznamu, [§ 52.8.2](#5282-krok-za-krokem-hromadne-akce-v-seznamech) |
+| když se mění mnoho dokladů najednou | Přeúčtovat, nastavit dimenze, změnit předkontaci nebo poznámku, smazat vybrané záznamy, opravit VS bankovních pohybů | **…** → **Hromadné akce** v seznamu, [§ 52.8.2](#5282-krok-za-krokem-hromadne-akce-v-seznamech) |
 | když je stejný účet špatně na mnoha dokladech | Hromadně přeúčtovat podle filtru | `Účetnictví → Přeúčtovat doklady`, [§ 52.8.1](#5281-krok-za-krokem-hromadne-preuctovani-dokladu) |
 | po importu z jiného systému | Doúčtovat doklady | `Účetnictví → Doúčtovat doklady`, [§ 52.9](#529-krok-za-krokem-douctovani-dokladu-z-jineho-systemu) |
 | u mnoha nespárovaných bankovních pohybů | Zaúčtovat na protiúčet nebo spárovat s jedním dokladem | box **Bankovní pohyby podle filtru**, [§ 52.9.1](#5291-krok-za-krokem-bankovni-pohyby-podle-filtru) |
@@ -217,7 +217,7 @@ Doklady nebo zápisy, které máte vybrané v seznamu, přeúčtujete stejně z 
 
 ### 52.8.2 Krok za krokem: hromadné akce v seznamech
 
-Použijte, když chcete změnit mnoho záznamů, které máte před sebou v seznamu: například všem fakturám jednoho dodavatele nastavit středisko, stovkám zápisů v deníku doplnit zakázku, změnit předkontaci přijatých faktur, nebo smazat doklady po zkušebním importu. Akce je v seznamech **Účetní deník**, **Vydané faktury** a **Přijaté faktury**.
+Použijte, když chcete změnit mnoho záznamů, které máte před sebou v seznamu: například všem fakturám jednoho dodavatele nastavit středisko, stovkám zápisů v deníku doplnit zakázku, změnit předkontaci přijatých faktur, doplnit poznámku na faktury, opravit variabilní symbol nespárovaných bankovních pohybů, nebo smazat doklady po zkušebním importu. Akce je v seznamech **Účetní deník**, **Vydané faktury**, **Přijaté faktury** a v bance na záložkách **Všechny pohyby** a **K zaúčtování**.
 
 1. V seznamu nastavte filtr tak, aby ukazoval jen záznamy, které chcete změnit. Případně je zaškrtněte. V účetním deníku má každý řádek zaškrtávací políčko, v záhlaví tabulky se zaškrtnou všechny načtené řádky.
 2. Otevřete nabídku **…** v záhlaví seznamu a zvolte **Hromadné akce**. Máte-li zaškrtnuté řádky, stejné tlačítko **Hromadné akce s vybranými (N)** je i v liště výběru dole.
@@ -227,15 +227,17 @@ Použijte, když chcete změnit mnoho záznamů, které máte před sebou v sezn
    - **Nastavit dimenze**: u každého typu dimenze (Středisko, Zakázka, Činnost a další typy firmy) zvolte **Beze změny**, **Přepsat**, **Jen kde je prázdné** nebo **Vymazat** a u prvních dvou hodnotu. Najednou jde změnit víc typů. U faktur zvolte, **Kam dimenze zapsat**: **Hlavička dokladu** (platí pro všechny řádky zápisu), nebo **Jen položky** (v deníku jen nákladové a výnosové řádky). V deníku můžete změnu omezit polem **Jen řádky na účtech začínajících**, například `5, 6`.
    - **Změnit předkontaci**: zvolte **Novou předkontaci** a **Způsob změny**. Jen u vydaných a přijatých faktur.
    - **Smazat**: v deníku zvolte, co se stane se zápisem, který smazat nejde: **Přeskočit**, nebo **Stornovat**.
+   - **Změnit poznámku**: zvolte **Poznámka nad položkami** nebo **Poznámka pod položkami**, způsob **Přepsat**, **Připojit na konec** nebo **Vymazat** a text. Doklady, které už nejsou koncept, změní jen zaškrtnutá volba **Upravit i vystavené doklady**. Jen u vydaných a přijatých faktur.
+   - **Opravit variabilní symbol**: zadejte **Stálou hodnotu**, nebo zvolte **Podle vzoru** a zadejte **Vzor** se značkami, které se doplní z pohybu ([§ 52.14.18](#521418-hromadne-akce-v-seznamech)). Jen u bankovních pohybů.
 5. Klikněte na **Spustit nanečisto**. Úloha běží na pozadí a nic nezmění. Výsledek má záložky **Změní se**, **Vynechané** a **Beze změny**. Sloupec **Před a po** ukazuje původní a nový stav (účty, hodnoty dimenzí na hlavičce, položkách a řádcích zápisu, předkontaci), u vynechaných je **Důvod**.
 6. Záznamy, které měnit nechcete, odškrtněte v záložce **Změní se**.
 7. Klikněte na **Provést** a potvrďte. U operace **Smazat** napište do pole počet záznamů, které se smažou; tlačítko **Smazat N záznamů** se odemkne, až počet sedí. Provede se přesně výsledek běhu nanečisto bez odškrtnutých záznamů a jen u záznamů, které se od té doby nezměnily.
 8. Projděte výsledek v záložkách **Provedené**, **Chyby**, **Vynechané**, **Vyřazené** a **Beze změny**. Tlačítkem **Stáhnout CSV** si výsledek kteréhokoli běhu uložíte.
-9. Omyl? V části **Poslední běhy** klikněte u provedení na **Vrátit**. Vrátit jde přeúčtování, dimenze i předkontaci, smazání ne. Záznamy, které od provedení někdo změnil, se nevrátí a vypíšou se s důvodem.
+9. Omyl? V části **Poslední běhy** klikněte u provedení na **Vrátit**. Vrátit jde přeúčtování, dimenze, předkontaci, poznámku i variabilní symbol, smazání ne. Záznamy, které od provedení někdo změnil, se nevrátí a vypíšou se s důvodem.
 
 **Jak poznáte, že je hotovo:** Provedení má v **Posledních bězích** stav **Hotovo** a záložka **Chyby** je prázdná. Každý změněný záznam má v auditní stopě záznam s číslem úlohy a stavem před a po. Pravidla jednotlivých operací jsou v [§ 52.14.18](#521418-hromadne-akce-v-seznamech).
 
-Nespárované bankovní pohyby se hromadně zaúčtují v boxu **Bankovní pohyby podle filtru** ([§ 52.9.1](#5291-krok-za-krokem-bankovni-pohyby-podle-filtru)), odkaz na něj je v seznamu nezaúčtovaných pohybů banky.
+Nespárované bankovní pohyby se hromadně zaúčtují v boxu **Bankovní pohyby podle filtru** ([§ 52.9.1](#5291-krok-za-krokem-bankovni-pohyby-podle-filtru)), odkaz na něj je v seznamu nezaúčtovaných pohybů banky. **Hromadné akce** v seznamu bankovních pohybů nabízejí opravu variabilního symbolu ([Banka](29_Banka.md)).
 
 ## 52.9 Krok za krokem: doúčtování dokladů z jiného systému
 
@@ -1414,7 +1416,7 @@ leží v jiném kalendářním roce, zápis se vytvoří, ale odpověď vrátí 
 | Stornovat zaúčtovaný zápis | - | ✓ |
 | Znovuotevřít uzavřené období (pro opravu) | - | právo Spravovat období, přihlášení v aplikaci a splněné ochrany uzávěrky |
 | Nastavit/posunout zámek účtování k datu | - | právo Spravovat období nebo interní Posunout zámek účtování k datu; ochrana podaných a uzavřených období platí dál |
-| Hromadné akce v seznamech (dimenze, předkontace, smazání) | - | správce firmy nebo právo Hromadné změny dokladů a zápisů, k tomu právo dané akce na jednom záznamu |
+| Hromadné akce v seznamech (dimenze, předkontace, poznámka, smazání, VS pohybů) | - | správce firmy nebo právo Hromadné změny dokladů a zápisů, k tomu právo dané akce na jednom záznamu |
 
 - Deník je **jen pro podvojné účetnictví** - firmy na daňové evidenci modul v menu
   vůbec nevidí.
@@ -2256,7 +2258,7 @@ Pravidla:
 
 ### 52.14.18 Hromadné akce v seznamech
 
-**Účetní deník, Vydané faktury, Přijaté faktury → … → Hromadné akce.**
+**Účetní deník, Vydané faktury, Přijaté faktury, Banka → Všechny pohyby nebo K zaúčtování → … → Hromadné akce.**
 
 Postup je v [§ 52.8.2](#5282-krok-za-krokem-hromadne-akce-v-seznamech). Všechny operace běží stejně: běh nanečisto, provedení přesně jeho výsledku bez ručně vyřazených záznamů a vrácení. Každý záznam se mění touž cestou jako úprava jednoho záznamu v aplikaci, se stejnými kontrolami.
 
@@ -2283,7 +2285,7 @@ Pravidla společná všem operacím:
 
 - **Hlavička dokladu** se do deníku promítne na všechny řádky zápisu dokladu i na zápisy jeho úhrad a zápočtů, stejně jako panel **Dimenze** na detailu dokladu. **Jen položky** se v deníku promítnou jen na nákladové a výnosové řádky. Rozvahové řádky (311, 321, 343) hodnotu položek nedostanou.
 - U zápisů v deníku se dimenze mění přímo na řádcích, jako úprava dimenzí řádků v detailu zápisu. Pole **Jen řádky na účtech začínajících** omezí změnu na řádky s účtem začínajícím některým ze zadaných čísel.
-- Vynechá se záznam, jehož zápis leží v uzavřeném účetním období nebo v období se zmrazenými dimenzemi (uzavřené knihy), a změna, po které by řádek porušil pravidlo povinné dimenze ([Dimenze](114_Dimenze.md)). Běh nanečisto takové záznamy ukáže s důvodem, provedení je nezmění.
+- Vynechá se záznam, jehož zápis leží v uzavřeném účetním období nebo v období se zmrazenými dimenzemi (uzavřené knihy), a změna, po které by řádek porušil pravidlo povinné dimenze ([Dimenze](114_Dimenze.md)). Povinné dimenze se ověřují na řádcích zápisu dokladu i na zápisech jeho úhrad a zápočtů, které změna hlavičky přepíše. Běh nanečisto takové záznamy ukáže s důvodem, provedení je nezmění.
 - Změna účtotvorné dimenze, která by přesunula řádek na jiný analytický účet, se vynechá. Doklad je potřeba přeúčtovat.
 - Vrácení obnoví přesně předchozí hodnoty, i to, že typ hodnotu neměl, a rozpady.
 
@@ -2292,7 +2294,34 @@ Pravidla společná všem operacím:
 - Nastaví předkontaci všem běžným položkám vydaných a přijatých faktur. Účet položky a protiúčet, které předkontace určuje, se z položky odeberou, aby předkontace platila. Stranu, kterou předkontace neurčuje, položka ponechá.
 - Zaúčtovaný doklad se zaúčtuje znovu z dokladu, stejně jako **Přeúčtovat** na detailu ([§ 52.14.9.2](#521492-preuctovani-z-dokladu-sekce-zauctovani)): v otevřeném období oprava na místě, v uzavřeném nebo zamčeném podle **Způsobu změny** vynechání, nebo storno a nový zápis. Nezaúčtovaný doklad dostane jen novou předkontaci.
 - Stornovaný doklad a nezaúčtovaný doklad v uzavřeném období se vynechají. Vystavenou fakturu mění jen role s právem upravit vystavenou fakturu, znovu zaúčtovat jen role s právem zaúčtovat.
-- DPH se nemění.
+- DPH se nemění. V období, za které je podané přiznání k DPH nebo kontrolní hlášení (u přijaté faktury období odpočtu), se zápis přepíše na místě jen jako přesun mezi účty bez daňového dopadu, stejně jako při přeúčtování v zamčeném datu. Jinak se doklad vynechá s důvodem **Podané období DPH**, i když zámek k datu někdo posunul zpět.
+
+**Změnit poznámku:**
+
+- Mění poznámku nad položkami nebo pod položkami vydaných a přijatých faktur. **Přepsat** nahradí celý text, **Připojit na konec** přidá text na nový řádek za stávající, **Vymazat** text odebere. Text má nejvýš 2 000 znaků.
+- Každý doklad se uloží jako tlačítkem **Uložit** v editoru, se stejnými kontrolami a záznamem v historii dokladu. Částky, položky ani zaúčtování se nemění.
+- Koncept změní každý, kdo smí doklad upravit. Doklad mimo koncept se změní jen se zaškrtnutou volbou **Upravit i vystavené doklady** a se stejnými právy jako **Upravit vystavený doklad**: vydanou fakturu správce firmy nebo role s právem upravit vystavenou fakturu, přijatou jen správce. Úprava vystavené faktury, stejně jako v editoru, obnoví údaje odběratele a dodavatele na dokladu a vytvoří nové PDF. Stornovaný doklad se nemění.
+- Doklad v uzavřeném účetním období se vynechá. Přebití uzavřeného období hromadná akce nenabízí, takový doklad upravte jednotlivě.
+- Vrácení obnoví původní text, jen když poznámku ani stav dokladu od provedení nikdo nezměnil.
+
+**Opravit variabilní symbol:**
+
+- Mění variabilní symbol bankovních pohybů, například když plátce symbol nezadal a číslo faktury napsal do zprávy pro příjemce. Nový symbol je **Stálá hodnota**, nebo **Podle vzoru** z číslic a značek:
+
+<!-- cols: 22 78 -->
+| Značka | Co se doplní |
+|---|---|
+| `{ss}` | specifický symbol pohybu |
+| `{ks}` | konstantní symbol pohybu |
+| `{vs}` | dosavadní variabilní symbol |
+| `{zprava}` | první skupina 2 až 10 číslic ve zprávě pro příjemce |
+
+- Výsledek musí být platný variabilní symbol: jen číslice, nejvýš 10. Jinak se pohyb vynechá s důvodem.
+- Symbol se změní jen u pohybu, který ještě nic nevyřídil: nespárovaný, neignorovaný, bez úhrady faktury, přijaté faktury, ostatní položky nebo mzdy a bez zápisu v deníku. Spárovaný nebo zaúčtovaný pohyb se vynechá, nejdřív zrušte spárování nebo zaúčtování.
+- Po změně symbolu se pohyb hned znovu automaticky páruje, stejně jako tlačítkem **Přepárovat** u výpisu, a podle nastavení firmy se po spárování zaúčtuje. Sloupec **Před a po** ukazuje nový symbol i stav spárování.
+- Vrácení obnoví původní symbol, jen když pohyb zůstal nespárovaný. Spárovaný pohyb vrácení vynechá, nejdřív zrušte spárování.
+- Výběr podle filtru i ručně vybrané pohyby platí jen pro výpisy aktuální firmy.
+- Variabilní symbol faktur hromadné akce nemění: u vydané faktury je to číslo dokladu, u přijaté interní číslo z číselné řady.
 
 **Smazat:**
 
@@ -2309,7 +2338,7 @@ Pravidla společná všem operacím:
 - Převzaté doklady (import z jiného programu) se mažou podle stejných pravidel jako ostatní.
 - Smazání vrátit nejde. Provedení vyžaduje opsat počet záznamů, které se smažou.
 
-**Oprávnění:** Hromadné akce spustí správce firmy a role s právem **Hromadné změny dokladů a zápisů** (skupina Účetnictví). Systémové role správců ho mají, účetní a vlastní role ho dostanou v editoru rolí, stejně jako právo hromadně přeúčtovat. Právo jen otevírá hromadný mechanismus: k nastavení dimenzí je potřeba zápis do účetnictví, ke smazání právo smazat fakturu, přijatou fakturu nebo zápisy v deníku, ke změně předkontace právo upravovat doklady. Operace **Přeúčtovat účet** dál vyžaduje právo **Hromadně přeúčtovat a doúčtovat doklady**. Bez práv nabídka **Hromadné akce** v seznamu není. API token hromadné akce nespustí, přes API jde jen číst jejich stav a výsledek.
+**Oprávnění:** Hromadné akce spustí správce firmy a role s právem **Hromadné změny dokladů a zápisů** (skupina Účetnictví). Systémové role správců ho mají, účetní a vlastní role ho dostanou v editoru rolí, stejně jako právo hromadně přeúčtovat. Právo jen otevírá hromadný mechanismus: k nastavení dimenzí je potřeba zápis do účetnictví, ke smazání právo smazat fakturu, přijatou fakturu nebo zápisy v deníku, ke změně předkontace a poznámky právo upravovat doklady, k opravě variabilního symbolu právo párovat bankovní pohyby. Operace **Přeúčtovat účet** dál vyžaduje právo **Hromadně přeúčtovat a doúčtovat doklady**. Bez práv nabídka **Hromadné akce** v seznamu není. API token hromadné akce nespustí, přes API jde jen číst jejich stav a výsledek.
 
 ## 52.15 Související kapitoly
 

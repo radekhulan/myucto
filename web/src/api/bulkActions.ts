@@ -7,8 +7,8 @@ import type { JournalRebookItemLine, JournalRebookMode, JournalRebookSide } from
  * ostrý běh převezme přesně jeho výsledek bez ručně vyřazených položek a jde vrátit
  * (kromě smazání).
  */
-export type BulkTarget = 'invoice' | 'purchase_invoice' | 'journal_entry'
-export type BulkOperation = 'rebook_account' | 'set_dimensions' | 'set_posting_rule' | 'delete'
+export type BulkTarget = 'invoice' | 'purchase_invoice' | 'journal_entry' | 'bank_transaction'
+export type BulkOperation = 'rebook_account' | 'set_dimensions' | 'set_posting_rule' | 'delete' | 'set_note' | 'set_variable_symbol'
 export type BulkJobKind = 'dry_run' | 'apply' | 'rollback'
 export type BulkJobStatus = 'queued' | 'running' | 'completed' | 'completed_with_warnings' | 'failed' | 'cancelled'
 export type BulkItemStatus = 'would_change' | 'unchanged' | 'skipped' | 'excluded' | 'applied' | 'failed'
@@ -41,7 +41,19 @@ export interface SetPostingRuleParams {
 export interface DeleteParams {
   journal_fallback?: 'skip' | 'reverse'
 }
+/** Poznámka faktur (text nad / pod položkami); bez `include_issued` jen koncepty. */
+export interface SetNoteParams {
+  note_field: 'note_above_items' | 'note_below_items'
+  note_mode: 'replace' | 'append' | 'clear'
+  note_text?: string
+  include_issued: boolean
+}
+/** Variabilní symbol bankovních pohybů: stálá hodnota, nebo vzor se značkami {ss}, {ks}, {vs}, {zprava}. */
+export type SetVariableSymbolParams =
+  | { vs_mode: 'constant'; vs_value: string }
+  | { vs_mode: 'pattern'; vs_pattern: string }
 export type BulkParams = RebookAccountParams | SetDimensionsParams | SetPostingRuleParams | DeleteParams
+  | SetNoteParams | SetVariableSymbolParams
 
 export interface BulkOperationInfo {
   key: BulkOperation

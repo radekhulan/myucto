@@ -27,13 +27,14 @@ use MyInvoice\Service\Accounting\Dimension\DimensionService;
 use MyInvoice\Service\Accounting\JournalRebookService;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\BackgroundProcess;
+use MyInvoice\Service\Bank\BankMovementListService;
 use MyInvoice\Service\Document\DocumentViewerResolver;
 use MyInvoice\Service\IpMatcher;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 
 /**
- * Hromadné akce v seznamech (Účetní deník, Vydané faktury, Přijaté faktury).
+ * Hromadné akce v seznamech (Účetní deník, Vydané faktury, Přijaté faktury, bankovní pohyby).
  *
  *   GET  /api/accounting/bulk-actions?target=          … dostupné operace + poslední běhy
  *   POST /api/accounting/bulk-actions/start            … běh nanečisto, nebo ostrý běh podle něj
@@ -58,6 +59,7 @@ final class BulkActionAction
     private const HISTORY = 10;
     private const PARAMS = [
         'from_account', 'to_account', 'side', 'mode', 'dimensions', 'scope', 'account_prefixes', 'rule_key', 'journal_fallback',
+        'note_field', 'note_mode', 'note_text', 'include_issued', 'vs_mode', 'vs_value', 'vs_pattern',
     ];
 
     public function __construct(
@@ -71,6 +73,7 @@ final class BulkActionAction
         private readonly DimensionService $dimensions,
         private readonly ActivityLogger $logger,
         private readonly IpMatcher $ipMatcher,
+        private readonly BankMovementListService $bankMovements,
     ) {}
 
     /** GET /api/accounting/bulk-actions?target= */
@@ -162,7 +165,10 @@ final class BulkActionAction
                 ['existing_job_id' => $running['id']]);
         }
         unset($params['dry_run_job_id'], $params['excluded_item_ids'], $params['confirm_count']);
-        return $this->spawn($request, $response, $supplierId, ['kind' => 'rollback', 'rollback_of_job_id' => (int) $job['id']] + $params);
+        // Původ se určuje podle požadavku, který vrácení spouští, ne podle převzatého běhu:
+        // úkony vyhrazené relaci nesmí zdědit API token po běhu spuštěném v aplikaci.
+        return $this->spawn($request, $response, $supplierId, ['kind' => 'rollback', 'rollback_of_job_id' => (int) $job['id'],
+            'origin' => RequestAuthorization::actsAsSession($request) ? 'session' : 'background'] + $params);
     }
 
     /** GET /api/accounting/bulk-actions/{id} */
@@ -267,6 +273,9 @@ final class BulkActionAction
             'target' => $target,
             'selection_count' => count($ids),
             'ids' => $ids,
+            // Úkony vyhrazené relaci provede úloha jen tehdy, když ji člověk spustil v aplikaci
+            // ({@see \MyInvoice\Service\Accounting\Bulk\BulkRecordCall::request()}).
+            'origin' => RequestAuthorization::actsAsSession($request) ? 'session' : 'background',
         ] + $params;
     }
 
@@ -308,6 +317,9 @@ final class BulkActionAction
             'kind' => 'apply',
             'dry_run_job_id' => $dryJobId,
             'excluded_item_ids' => $excluded,
+            // Původ podle požadavku, který provedení spouští: běh nanečisto z aplikace
+            // nesmí API tokenu propůjčit úkony vyhrazené relaci.
+            'origin' => RequestAuthorization::actsAsSession($request) ? 'session' : 'background',
         ]);
     }
 
@@ -327,6 +339,8 @@ final class BulkActionAction
         $limit = BulkSelection::LIMIT + 1;
         if ($target === 'journal_entry') {
             $result = $this->journal->bulkSelection($scoped, $supplierId, $limit);
+        } elseif ($target === 'bank_transaction') {
+            $result = $this->bankMovements->listIds($supplierId, $query, ($query['scope'] ?? '') === 'unposted' ? 'unposted' : 'all', $limit);
         } else {
             $filters = $target === 'invoice' ? InvoiceListFilters::issued($scoped) : InvoiceListFilters::purchase($scoped);
             if (is_string($filters)) {
@@ -359,6 +373,7 @@ final class BulkActionAction
         $module = match ($target) {
             'invoice' => 'invoices',
             'purchase_invoice' => 'purchase_invoices',
+            'bank_transaction' => 'bank',
             default => 'accounting',
         };
         return RequestAuthorization::allows($request, $module, AccessLevel::READ);

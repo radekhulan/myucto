@@ -44910,7 +44910,8 @@
     "target": {
       "invoice": "Issued invoices",
       "purchase_invoice": "Received invoices",
-      "journal_entry": "Journal entries"
+      "journal_entry": "Journal entries",
+      "bank_transaction": "Bank transactions"
     },
     "selection_summary": "{target}: {n} records",
     "over_limit": "The selection has {n} records, at most {limit} can be processed at once. Narrow the filter or selection.",
@@ -44921,13 +44922,17 @@
       "rebook_account": "Repost account",
       "set_dimensions": "Set dimensions",
       "set_posting_rule": "Change posting rule",
-      "delete": "Delete"
+      "delete": "Delete",
+      "set_note": "Change note",
+      "set_variable_symbol": "Fix variable symbol"
     },
     "operation_hint": {
       "rebook_account": "Changes account X to Y in the entries of the selected records.",
       "set_dimensions": "Sets, fills in or clears dimensions of several types at once.",
       "set_posting_rule": "Sets the posting rule on document items and reposts the documents.",
-      "delete": "Deletes the selected records that can be deleted."
+      "delete": "Deletes the selected records that can be deleted.",
+      "set_note": "Replaces, appends to or clears the text above or below the items of documents.",
+      "set_variable_symbol": "Sets the variable symbol of unmatched transactions to a fixed value or from a pattern and matches them again."
     },
     "unavailable": "Unavailable: {reason}",
     "from_account": "From account",
@@ -45087,6 +45092,62 @@
       "failed": "Processing error"
     },
     "rebook_hint": "For manually selected documents or entries, use the \"…\" menu and Bulk actions in the Issued invoices, Received invoices or Accounting journal list.",
-    "bank_link": "Bank transactions by filter"
+    "bank_link": "Bank transactions by filter",
+    "note": {
+      "field_label": "Note",
+      "mode_label": "Change",
+      "mode": {
+        "replace": "Replace",
+        "append": "Append",
+        "clear": "Clear"
+      },
+      "mode_hint": {
+        "replace": "The current text is replaced with the entered one.",
+        "append": "The entered text is added on a new line after the current text.",
+        "clear": "The note is cleared."
+      },
+      "text_label": "Note text",
+      "text_counter": "{n} / {max} characters",
+      "text_required": "Enter the note text.",
+      "text_too_long": "The text can have at most {max} characters.",
+      "include_issued": "Edit issued documents too",
+      "include_issued_hint": "Like Edit issued document: rewrites snapshots and the PDF. Only with the permission to edit issued documents. Without this option only drafts are changed.",
+      "issued_doc": "issued document"
+    },
+    "vs": {
+      "mode_label": "New variable symbol",
+      "mode": {
+        "constant": "Fixed value",
+        "pattern": "From a pattern"
+      },
+      "value_label": "Variable symbol",
+      "value_invalid": "Digits only, at most 10.",
+      "pattern_label": "Pattern",
+      "pattern_placeholder": "e.g. {'{zprava}'}",
+      "pattern_invalid": "The pattern can have at most 40 characters, only digits and the tokens below, and at least one token.",
+      "tokens_title": "Pattern tokens",
+      "token": {
+        "ss": "specific symbol",
+        "ks": "constant symbol",
+        "vs": "current variable symbol",
+        "zprava": "first group of 2 to 10 digits in the message for the recipient"
+      },
+      "hint": "Only an unmatched transaction that settles nothing and is not posted is changed. After the change the transaction is offered to automatic matching again.",
+      "change_label": "Variable symbol",
+      "match_label": "Matching"
+    },
+    "ns_reason": {
+      "not_draft": "The document is not a draft (Edit issued documents too is off)",
+      "session_required": "An issued document can only be edited by a job started in the app",
+      "period_closed": "The document falls into a closed accounting period",
+      "note_too_long": "The note would be too long",
+      "invalid_variable_symbol": "The pattern did not produce a valid variable symbol",
+      "ignored": "The transaction is ignored",
+      "already_matched": "The transaction is matched, unmatch it first",
+      "already_settled": "The transaction already settles a document, other item or payroll",
+      "posted": "The transaction is posted, unpost it first",
+      "notice_superseded": "The notice was taken over by a statement, fix the symbol on the statement transaction",
+      "rematch_failed": "Symbol changed, automatic matching failed"
+    }
   }
 }
