@@ -615,6 +615,77 @@ final class ClosingWorkflowTest extends TestCase
         self::assertSame('closed', $this->closing->closeBooks($sid, $pid, $this->rv(), $this->meta())['status']);
     }
 
+    /**
+     * Zaúčtovaná daň 591 proti spočtené dani: rozdíl nad zaokrouhlení je varování (nikdy
+     * blok), shoda prochází, nezaúčtovaná daň u nehotového kroku jen informuje.
+     */
+    public function testIncomeTaxCheckWarnsWhenPosted591DiffersFromComputedTax(): void
+    {
+        $this->seedScenario();
+        $this->runStepsUntilCloseReady();
+        $sid = $this->supplierId;
+        $pid = $this->periodId;
+        $check = fn (): ?array => $this->findCheck($this->closing->buildChecks($sid, $this->period()), 'income_tax_591_mismatch');
+
+        $suggested = (float) $this->closing->incomeTaxPreview($sid, $pid)['suggested_amount'];
+        self::assertGreaterThan(0.0, $suggested);
+        $this->closing->runIncomeTax($sid, $pid, $suggested + 500.0, $this->rv(), $this->meta());
+        $mismatch = $check();
+        self::assertNotNull($mismatch);
+        self::assertSame('warning', $mismatch['severity']);
+        self::assertFalse($mismatch['ok']);
+        self::assertEqualsWithDelta(500.0, (float) $mismatch['value']['difference'], 0.001);
+        self::assertEqualsWithDelta($suggested + 500.0, (float) $mismatch['value']['posted'], 0.001);
+
+        // Varování neblokuje uzavření knih a uzavření knih kontrolu nevynuluje (591 → 710 se nepočítá).
+        $this->completeInventory($sid, $pid, $this->userId);
+        $this->closing->closeBooks($sid, $pid, $this->rv(), $this->meta());
+        self::assertEqualsWithDelta(500.0, (float) $check()['value']['difference'], 0.001);
+    }
+
+    public function testIncomeTaxCheckPassesWhenPostedTaxMatchesAndInformsWhilePending(): void
+    {
+        $this->seedScenario();
+        $this->runStepsUntilCloseReady();
+        $sid = $this->supplierId;
+        $pid = $this->periodId;
+        $check = fn (): ?array => $this->findCheck($this->closing->buildChecks($sid, $this->period()), 'income_tax_591_mismatch');
+
+        // runStepsUntilCloseReady daň přeskočí; zisková firma bez 591 tedy varuje.
+        self::assertFalse($check()['ok']);
+        $this->closing->revertStep($sid, $pid, 'income_tax', $this->rv(), $this->meta());
+        $pending = $check();
+        self::assertSame(['info', true, 'not_posted_yet'], [$pending['severity'], $pending['ok'], $pending['value']['reason']]);
+
+        $suggested = (float) $this->closing->incomeTaxPreview($sid, $pid)['suggested_amount'];
+        $this->closing->runIncomeTax($sid, $pid, $suggested + 0.4, $this->rv(), $this->meta());
+        self::assertTrue($check()['ok'], 'Haléřový rozdíl pod korunu nevaruje.');
+    }
+
+    public function testIncomeTaxCheckDoesNotWarnLossMakingCompanyWithout591(): void
+    {
+        $this->manual([self::l('518', 'debit', 4000.00), self::l('321', 'credit', 4000.00)], self::YEAR . '-03-05');
+        $this->runStepsUntilCloseReady();
+        $check = $this->findCheck($this->closing->buildChecks($this->supplierId, $this->period()), 'income_tax_591_mismatch');
+        self::assertNotNull($check);
+        self::assertTrue($check['ok']);
+        self::assertEqualsWithDelta(0.0, (float) $check['value']['computed'], 0.001);
+    }
+
+    /**
+     * @param list<array<string,mixed>> $checks
+     * @return array<string,mixed>|null
+     */
+    private function findCheck(array $checks, string $key): ?array
+    {
+        foreach ($checks as $c) {
+            if (($c['key'] ?? null) === $key) {
+                return $c;
+            }
+        }
+        return null;
+    }
+
     /** Nové zaúčtování daně po vrácení kroku příznak přepočtu také zruší. */
     public function testRerunningIncomeTaxClearsStaleFlag(): void
     {

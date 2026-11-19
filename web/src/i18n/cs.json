@@ -22097,7 +22097,8 @@
         "property_reconciliation": "Shoda salda SVJ s hlavní knihou",
         "deferred_tax_assessment": "Aktuální doložené posouzení odložené daně",
         "nonprofit_tax_assessment": "Aktuální potvrzené daňové posouzení činností 504",
-        "property_funding_reconciliation": "Shoda záloh a příjmů vlastníků s hlavní knihou"
+        "property_funding_reconciliation": "Shoda záloh a příjmů vlastníků s hlavní knihou",
+        "income_tax_591_mismatch": "Zaúčtovaná daň z příjmů (591) neodpovídá spočtené dani"
       },
       "payment_match_audit": {
         "currency_mismatch": "Měna platby neodpovídá měně dokladu",
@@ -24854,7 +24855,10 @@
       "completed": "dokončeno",
       "unresolved_count": "nevyřešeno",
       "041": "účet 041",
-      "042": "účet 042"
+      "042": "účet 042",
+      "posted": "zaúčtováno",
+      "computed": "spočtená daň",
+      "source": "zdroj"
     },
     "value": {
       "monthly": "měsíční",
@@ -24871,7 +24875,13 @@
       "false": "ne",
       "completed": "dokončeno",
       "not_applicable": "Nevztahuje se",
-      "pending": "chybí aktuální posouzení"
+      "pending": "chybí aktuální posouzení",
+      "not_posted_yet": "daň zatím není zaúčtovaná",
+      "not_computable": "daň zatím nejde spočítat",
+      "finalized_return": "finalizované přiznání",
+      "computed_from_ledger": "dopočet z účetnictví",
+      "computed_from_assessment": "dopočet z daňového posouzení",
+      "check_failed": "kontrolu se nepodařilo provést, spusťte ji znovu, při opakování kontaktujte podporu"
     },
     "findings_count": "Nálezů: {count}",
     "showing_capped": "Zobrazeno {shown} z {total} nálezů",

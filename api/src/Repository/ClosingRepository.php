@@ -546,6 +546,30 @@ final class ClosingRepository
     }
 
     /**
+     * Netto obrat účtu (prefix kódu, MD kladně) mezi daty BEZ zápisů uzavření knih
+     * ({@see ClosingSourceId::closeBooksSql()}, včetně uzávěrky převzaté z jiného programu).
+     * Podklad kontroly zaúčtované daně z příjmů: uzavření knih převádí 591 na 710, takže
+     * by obrat roku po uzávěrce vyšel nulový.
+     */
+    public function turnoverWithoutCloseBooks(int $supplierId, string $accountCode, string $from, string $to): float
+    {
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT COALESCE(SUM(CASE WHEN l.side = 'debit' THEN l.signed_amount ELSE -l.signed_amount END), 0)
+               FROM journal_entry_lines l
+               JOIN journal_entries e   ON e.id = l.entry_id
+               JOIN chart_of_accounts a ON a.id = l.account_id
+               LEFT JOIN chart_of_accounts p ON p.id = a.parent_id
+              WHERE l.supplier_id = ? AND e.posted_at IS NOT NULL
+                AND e.entry_date BETWEEN ? AND ?
+                AND NOT (" . ClosingSourceId::closeBooksSql('e') . ")
+                AND (a.account_code LIKE CONCAT(?, '%')
+                     OR COALESCE(p.account_code, a.account_code) LIKE CONCAT(?, '%'))"
+        );
+        $stmt->execute([$supplierId, $from, $to, $accountCode, $accountCode]);
+        return round((float) $stmt->fetchColumn(), 2);
+    }
+
+    /**
      * Náhled čte skutečný 431; opakované rozdělení vynechá pouze aktivní vlastní zápis.
      * Historické originály a jejich storna s NULL source_id zůstávají společně v saldu.
      * Zamykající varianta vyžaduje předchozí period-first zámky volajícího.

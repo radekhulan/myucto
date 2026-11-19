@@ -5980,6 +5980,15 @@ final class ClosingService
             $checks[] = $this->checkVatClearingFresh($supplierId, $rangeFrom, $rangeTo);
         }
 
+        // Zaúčtovaná splatná daň proti spočtené. Jen za celé období (měsíční kontrola nemá
+        // s roční daní co porovnávat) a jen jako varování: částku daně vždy určuje účetní.
+        if ($wants('income_tax_591_mismatch') && $rangeFrom === $startsOn && $rangeTo === $endsOn) {
+            $incomeTaxCheck = $this->checkIncomeTaxBooked($supplierId, $period);
+            if ($incomeTaxCheck !== null) {
+                $checks[] = $incomeTaxCheck;
+            }
+        }
+
         if ($wants('income_tax_hint')) {
             $checks[] = [
                 'key' => 'income_tax_hint',
@@ -6006,6 +6015,55 @@ final class ClosingService
         // a seznam bez stropu nafoukl payload kroku u velké firmy na jednotky MB, které
         // se posílaly při každém načtení stránky. `$cap = 0` vrací vše (CSV export).
         return (new CheckFindingNormalizer())->normalizeAll($checks, $cap);
+    }
+
+    /**
+     * Zaúčtovaná splatná daň z příjmů běžného roku (obrat účtu MD pravidla
+     * `income_tax.payable`, výchozí 591, bez uzavření knih) proti dani, kterou by dnes
+     * navrhl krok Daň z příjmů: finalizované přiznání, jinak dopočet z účetnictví
+     * ({@see incomeTaxFromLedger}). Rozdíl nad haléřové zaokrouhlení (DPPO je v celých
+     * korunách) je VAROVÁNÍ, nikdy blok. Dokud krok daně nečeká na rozhodnutí a nic
+     * zaúčtováno není, kontrola jen informuje; ztrátová firma bez 591 tak nevaruje.
+     * Fyzická osoba daň na 591 neúčtuje, kontrolu nedostane.
+     *
+     * @param array<string,mixed> $period
+     * @return array{key:string,severity:string,ok:bool,value:array<string,mixed>}|null
+     */
+    private function checkIncomeTaxBooked(int $supplierId, array $period): ?array
+    {
+        if ($this->supplierTaxpayerType($supplierId) === 'fo') {
+            return null;
+        }
+        $periodId = (int) $period['id'];
+        $rule = $this->rules->resolve($supplierId, 'income_tax.payable');
+        $account = $rule !== null && $rule['debit_account_code'] !== null ? (string) $rule['debit_account_code'] : '591';
+        $posted = $this->closing->turnoverWithoutCloseBooks($supplierId, $account, (string) $period['starts_on'], (string) $period['ends_on']);
+        $status = $this->stepsMap($supplierId, $periodId)['income_tax']['status'];
+        if (abs($posted) < 0.005 && $status === 'pending') {
+            return ['key' => 'income_tax_591_mismatch', 'severity' => 'info', 'ok' => true,
+                'value' => ['reason' => 'not_posted_yet', 'account' => $account]];
+        }
+        $fromReturn = $this->taxReturns->findLastKnownTax($supplierId, (int) $period['fiscal_year'], 'po');
+        $ledger = $fromReturn === null ? $this->incomeTaxFromLedger($supplierId, (int) $period['fiscal_year']) : null;
+        $computed = $fromReturn ?? ($ledger['amount'] ?? null);
+        if ($computed === null) {
+            return ['key' => 'income_tax_591_mismatch', 'severity' => 'info', 'ok' => true,
+                'value' => ['reason' => 'not_computable', 'account' => $account, 'posted' => $posted]];
+        }
+        $computed = round((float) $computed, 2);
+        $difference = round($posted - $computed, 2);
+        return [
+            'key' => 'income_tax_591_mismatch',
+            'severity' => 'warning',
+            'ok' => abs($difference) < 1.0,
+            'value' => [
+                'account' => $account,
+                'posted' => $posted,
+                'computed' => $computed,
+                'difference' => $difference,
+                'source' => $fromReturn !== null ? 'finalized_return' : (string) ($ledger['source'] ?? 'computed_from_ledger'),
+            ],
+        ];
     }
 
     /**

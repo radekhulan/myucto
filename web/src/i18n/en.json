@@ -22097,7 +22097,8 @@
         "deferred_tax_assessment": "Current documented deferred tax assessment",
         "nonprofit_tax_assessment": "Current confirmed tax assessment of activities under Decree 504",
         "property_service_reconciliation": "Property services reconcile to the general ledger",
-        "property_funding_reconciliation": "Owner advances and income reconcile to the general ledger"
+        "property_funding_reconciliation": "Owner advances and income reconcile to the general ledger",
+        "income_tax_591_mismatch": "Posted income tax (591) does not match the computed tax"
       },
       "payment_match_audit": {
         "currency_mismatch": "Payment currency does not match the document currency",
@@ -24854,7 +24855,10 @@
       "completed": "completed",
       "unresolved_count": "unresolved",
       "041": "account 041",
-      "042": "account 042"
+      "042": "account 042",
+      "posted": "posted",
+      "computed": "computed tax",
+      "source": "source"
     },
     "value": {
       "monthly": "monthly",
@@ -24871,7 +24875,13 @@
       "false": "no",
       "pending": "current assessment required",
       "completed": "complete",
-      "not_applicable": "Not applicable"
+      "not_applicable": "Not applicable",
+      "not_posted_yet": "tax not posted yet",
+      "not_computable": "tax cannot be computed yet",
+      "finalized_return": "finalized return",
+      "computed_from_ledger": "computed from the ledger",
+      "computed_from_assessment": "computed from the tax assessment",
+      "check_failed": "the check could not be run, run it again and contact support if it keeps failing"
     },
     "findings_count": "Findings: {count}",
     "showing_capped": "Showing {shown} of {total} findings",
