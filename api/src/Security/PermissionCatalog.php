@@ -81,6 +81,7 @@ final class PermissionCatalog
             ['accounting.journal.write', 'accounting', 'Zápisy v deníku', $staffOnly],
             ['accounting.journal.post', 'accounting', 'Zaúčtovat doklad', $staffOnly],
             ['accounting.journal.bulk_repost', 'accounting', 'Hromadně přeúčtovat a doúčtovat doklady', $staffOnly],
+            ['accounting.bulk_changes', 'accounting', 'Hromadné změny dokladů a zápisů', $staffOnly],
             ['accounting.periods.manage', 'accounting', 'Spravovat období', $staffOnly],
             ['accounting.periods.close', 'accounting', 'Uzavřít období', $staffOnly],
             ['accounting.periods.close_override', 'accounting', 'Uzavřít období přes nezaúčtované doklady', $staffOnly],
@@ -245,6 +246,9 @@ final class PermissionCatalog
                 // přidělí správce v editoru rolí, výchozí účetní ji nemá.
                 'invoices.edit_issued',
                 'accounting.periods.close', 'accounting.periods.manage', 'accounting.period_lock', 'accounting.journal.bulk_repost',
+                // Hromadné změny mění stovky dokladů jedním krokem; stejně jako hromadné
+                // přeúčtování je roli přidělí správce v editoru rolí.
+                'accounting.bulk_changes',
                 'property.registry.confirm', 'property.receivables.confirm', 'property.charges.confirm', 'property.charges.reverse', 'property.payments.reverse', 'property.opening.revise', 'property.settlements.reverse', 'property.funds.reverse',
                 'settings.ai_provider', 'settings.bank_accounts', 'settings.branding', 'settings.invoice_defaults',
                 'settings.company.write', 'settings.domains', 'settings.email_profiles', 'settings.email_templates', 'settings.payment_qr', 'utilities.import',

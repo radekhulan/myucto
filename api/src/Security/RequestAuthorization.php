@@ -436,6 +436,21 @@ final class RequestAuthorization
     }
 
     /**
+     * Hromadné změny dokladů a zápisů ze seznamů (Hromadné akce: dimenze, předkontace,
+     * smazání): správce firmy, nebo interní role s vlastním právem `accounting.bulk_changes`.
+     * Právo jen otevírá hromadný mechanismus. Každý záznam pak projde týmiž právy
+     * a pojistkami jako úprava jednoho záznamu, takže roli nic dalšího nepřidá. API token
+     * hromadnou změnu nespustí nikdy a klient ji nedostane.
+     */
+    public static function canBulkChange(Request $request): bool
+    {
+        return self::mayOverridePeriodProtection($request)
+            && (self::isCompanyAdmin($request)
+                || (!self::isClientType($request)
+                    && self::allows($request, 'accounting.bulk_changes', AccessLevel::WRITE)));
+    }
+
+    /**
      * Ruční posun zámku účtování k datu (§ 52.14.10): kdo spravuje účetní období
      * (`accounting.periods.manage`, správci), nebo interní role s vlastním právem
      * `accounting.period_lock` (typicky hlavní účetní). Klient ho nedostane.
