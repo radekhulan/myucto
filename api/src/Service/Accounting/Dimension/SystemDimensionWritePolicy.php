@@ -176,9 +176,29 @@ final class SystemDimensionWritePolicy
             )));
             $result = DimensionRuleEngine::apply($selected, [$line + ['account_code' => $account['account_code']]], (string) $header['entry_date'], null, false);
             if ($result['violations'] !== []) {
-                throw new PostingException('dimension_required', 'Zápis nelze zaúčtovat bez povinných systémových dimenzí.', 422, ['violations' => $result['violations']]);
+                throw new PostingException('dimension_required', $this->requiredMessage($supplierId, $result['violations']), 422, ['violations' => $result['violations']]);
             }
         }
+    }
+
+    /**
+     * Hláška chybějící systémové dimenze: účet, dimenze a co s tím udělat. Automatický zápis
+     * (poplatek, uzavření platby, cestovní náhrada) tak neskončí jen obecným odmítnutím.
+     *
+     * @param list<array{account_code:string, type_id:int}> $violations
+     */
+    private function requiredMessage(int $supplierId, array $violations): string
+    {
+        $ids = array_values(array_unique(array_map(static fn (array $v): int => (int) $v['type_id'], $violations)));
+        $stmt = $this->db->pdo()->prepare('SELECT id, name FROM dimension_types WHERE supplier_id = ? AND id IN (' . implode(',', array_fill(0, count($ids), '?')) . ')');
+        $stmt->execute([$supplierId, ...$ids]);
+        $names = $stmt->fetchAll(PDO::FETCH_KEY_PAIR);
+        $parts = [];
+        foreach ($violations as $v) {
+            $parts[] = sprintf('řádek %s nemá dimenzi „%s"', $v['account_code'], (string) ($names[$v['type_id']] ?? ('#' . $v['type_id'])));
+        }
+        return 'Zápis nelze zaúčtovat bez povinných systémových dimenzí: ' . implode('; ', array_unique($parts))
+            . '. Doplňte dimenzi na doklad nebo zápis, nebo nastavte výchozí hodnotu v pravidle dimenze (Firma → Dimenze → Pravidla).';
     }
 
     public function assertAssignments(int $supplierId, array $lines, ?string $date = null, array $previousLines = []): void

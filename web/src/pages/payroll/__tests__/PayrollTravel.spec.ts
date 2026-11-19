@@ -13,6 +13,7 @@ const m = vi.hoisted(() => ({
   context: vi.fn(),
   canWrite: vi.fn(),
   toastWarning: vi.fn(),
+  toastError: vi.fn(),
 }))
 
 // Stránka čte předvýběr z adresy (odkaz z karty zaměstnance), takže potřebuje
@@ -44,7 +45,7 @@ vi.mock('@/stores/auth', () => ({
 }))
 
 vi.mock('@/composables/useToast', () => ({
-  useToast: () => ({ error: vi.fn(), success: vi.fn(), warning: m.toastWarning, info: vi.fn() }),
+  useToast: () => ({ error: m.toastError, success: vi.fn(), warning: m.toastWarning, info: vi.fn() }),
 }))
 
 // `useFormat` (sdílené formátování) táhne @/i18n, které volá skutečné
@@ -305,6 +306,40 @@ describe('PayrollTravel', () => {
     await flushPromises()
 
     expect(m.toastWarning).toHaveBeenCalledWith('payroll_travel.settlement.refund_notice')
+  })
+
+  it('shows a posting error from cash settlement instead of hiding it as skipped', async () => {
+    m.listPage.mockResolvedValue(tripsPage([trip({ status: 'approved', advance_minor: 10000 })]))
+    m.materialize.mockResolvedValue({
+      status: 'materialized',
+      trip_id: 7,
+      period: '2026-06',
+      created_count: 1,
+      replayed_count: 0,
+      created: [],
+      replayed: [],
+      settlement: {
+        mode: 'cash',
+        entitlement_minor: 20000,
+        exempt_minor: 18500,
+        taxable_minor: 1500,
+        advance_minor: 10000,
+        payroll_exempt_minor: 0,
+        payroll_advance_offset_minor: 0,
+        payroll_net_minor: 1500,
+        cash_payout_minor: 8500,
+        employee_refund_minor: 0,
+      },
+      posting: { status: 'error', journal_entry_id: null, reason: 'dimension_required', message: 'Chybí činnost.' },
+    })
+    const wrapper = mount(PayrollTravel)
+    await flushPromises()
+
+    await wrapper.find('[data-test="travel-materialize"]').trigger('click')
+    await flushPromises()
+
+    expect(m.toastError).toHaveBeenCalledWith('payroll_travel.settlement.posting_failed')
+    expect(m.toastWarning).not.toHaveBeenCalledWith('payroll_travel.settlement.posting_skipped')
   })
 
   it('filters employment relations by the employee selected in the editor', async () => {

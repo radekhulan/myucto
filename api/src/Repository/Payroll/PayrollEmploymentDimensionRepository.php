@@ -68,6 +68,37 @@ final class PayrollEmploymentDimensionRepository
         return $result;
     }
 
+    /**
+     * Dimenze firmy (Firma → Dimenze), na které vztah ke dni ukazuje přes mzdové dimenze
+     * s navázanou hodnotou. Jen aktivní hodnoty; podíly jednoho typu v procentech.
+     *
+     * @return array<int,array<int,float>> typ dimenze firmy => hodnota => podíl v %
+     */
+    public function companyDimensionsOn(int $supplierId, int $employmentId, string $date): array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT v.type_id, v.id AS value_id, ed.share_percent
+               FROM payroll_employment_dimensions ed
+               JOIN payroll_dimensions d
+                 ON d.supplier_id = ed.supplier_id AND d.id = ed.dimension_id
+               JOIN dimension_values v
+                 ON v.supplier_id = ed.supplier_id AND v.id = d.dimension_value_id
+              WHERE ed.supplier_id = ? AND ed.employment_id = ?
+                AND ed.valid_from <= ? AND (ed.valid_to IS NULL OR ed.valid_to >= ?)
+                AND v.is_active = 1
+              ORDER BY v.type_id, v.id',
+        );
+        $stmt->execute([$supplierId, $employmentId, $date, $date]);
+        $out = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $typeId = (int) $row['type_id'];
+            $valueId = (int) $row['value_id'];
+            $out[$typeId][$valueId] = ($out[$typeId][$valueId] ?? 0.0) + (float) $row['share_percent'];
+        }
+
+        return $out;
+    }
+
     /** @return array<string,mixed> */
     public function create(
         int $supplierId,

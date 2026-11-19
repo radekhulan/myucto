@@ -697,7 +697,13 @@ hodnotu určí pravidlo s delší předponou a vynucení to nejpřísnější.
 
 Pravidla platí pro zaúčtování vystavených a přijatých faktur, pokladních dokladů,
 bankovních pohybů a ručních zápisů. Automatické zápisy (uzávěrka, otevření účtů,
-odpisy, mzdy, přeúčtování DPH, kurzové rozdíly) pravidla neblokují. Při ruční
+odpisy, mzdy, přeúčtování DPH, kurzové rozdíly) pravidla neblokují. Výchozí hodnotu
+pravidla dostanou navíc poplatky a dobropisy poplatků GoPay, uzavření platby kartou
+bez dokladu a nezdaněná část cestovní náhrady vypořádané pokladnou. Tyto zápisy
+před pravidly přebírají i dimenze svého kontextu: GoPay výchozí dimenze bankovního
+účtu, na který chodí výplaty (jen náklady a výnosy), uzavření platby kartou dimenze
+pohybu a výchozí dimenze účtu výpisu, cestovní náhrada mzdové dimenze pracovního
+vztahu navázané na dimenze firmy. Při ruční
 úpravě dimenzí řádků v deníku nejde povinnou dimenzi z řádku odebrat.
 
 Firma bez pravidel účtuje stejně jako dřív.
@@ -1057,7 +1063,10 @@ původu zůstává původ neznámý; opětovné uložení stejné hodnoty jej ne
 odhadem.
 
 Povinné systémové dimenze rámce 504 platí také pro systémové účetní zdroje.
-U závěrky a otevření se kontrolují rozvahové řádky. Nezávislé procentní rozpady
+U závěrky a otevření se kontrolují rozvahové řádky. Když zápis činnost nebo jinou
+povinnou systémovou dimenzi nemá ani po výchozích hodnotách, odmítne se hláškou
+s účtem a chybějící dimenzí. Doplňte ji na doklad nebo zápis, případně nastavte
+pravidlo dimenze s výchozí hodnotou (**Firma → Dimenze → Pravidla**). Nezávislé procentní rozpady
 více systémových os na jednom řádku se odmítnou, protože neurčují jejich
 společné kombinace.
 

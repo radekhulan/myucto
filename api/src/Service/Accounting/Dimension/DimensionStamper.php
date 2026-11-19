@@ -56,6 +56,9 @@ final class DimensionStamper
         'invoice' => ['invoice', 'invoice_items', 'invoice_id'],
         'cash' => ['cash_document', null, null],
         'bank' => ['bank_transaction', null, null],
+        // Uzavření platby kartou bez dokladu (source_id = pohyb): dimenze pohybu, pravidla
+        // účtování a účtu výpisu stejně jako bankovní zápis téže platby.
+        'card_writeoff' => ['bank_transaction', null, null],
         'other_item' => ['other_item', null, null],
         'asset' => ['asset', null, null],
         'asset_disposal' => ['asset', null, null],
@@ -147,7 +150,49 @@ final class DimensionStamper
         if ($bankAccount !== null) {
             $resolved = self::fillBankAccount($resolved, $bankAccount, $this->lineAccountCodes($supplierId, $resolved), $this->transferCodes($supplierId));
         }
+        if ($sourceType === 'gopay' && $sourceId !== null && $enabled) {
+            // GoPay pohyb nemá doklad ani pohyb výpisu: náklad a výnos (poplatky) dostanou
+            // výchozí dimenze cílového bankovního účtu vyúčtování, stejně jako protiúčet
+            // bankovního pohybu, který nehradí doklad. Saldokonto zůstává bez nich.
+            $resolved = self::fillResultLines($resolved, $this->defaults()->gopayAccountLayer($supplierId, $sourceId), $this->accountTypes($supplierId));
+        }
         return $this->syncLinkedColumns($supplierId, $resolved);
+    }
+
+    /**
+     * Doplní výsledkovým řádkům (náklad, výnos) typy vrstvy, které řádek nemá.
+     *
+     * @param list<array<string,mixed>> $lines
+     * @param array{header:array<int,int>, origins:array<int,array<string,mixed>>} $layer
+     * @param array<int,string> $accountTypes id účtu => typ účtu
+     * @return list<array<string,mixed>>
+     */
+    public static function fillResultLines(array $lines, array $layer, array $accountTypes): array
+    {
+        if ($layer['header'] === []) {
+            return $lines;
+        }
+        foreach ($lines as $i => $line) {
+            if (!in_array($accountTypes[(int) ($line['account_id'] ?? 0)] ?? '', ['expense', 'revenue'], true)) {
+                continue;
+            }
+            $dims = array_map('intval', (array) ($line['dimensions'] ?? []));
+            $lineSplits = (array) ($line['dimension_splits'] ?? []);
+            $added = false;
+            foreach ($layer['header'] as $typeId => $valueId) {
+                if (isset($dims[$typeId]) || isset($lineSplits[$typeId])) {
+                    continue;
+                }
+                $dims[$typeId] = $valueId;
+                $lines[$i]['dimension_origins'][$typeId] = DimensionAssignmentOrigin::normalize($layer['origins'][$typeId] ?? []);
+                $added = true;
+            }
+            if ($added) {
+                ksort($dims);
+                $lines[$i]['dimensions'] = $dims;
+            }
+        }
+        return array_values($lines);
     }
 
     /**

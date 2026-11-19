@@ -169,7 +169,7 @@ final class DimensionDefaults
         return match ($sourceType) {
             'invoice', 'purchase_invoice', 'other_item' => $this->forDocumentWithOrigins($supplierId, $sourceType, $sourceId) + ['splits' => [], 'split_origins' => []],
             'cash' => $this->forCash($supplierId, $sourceId, true),
-            'bank' => $this->forBank($supplierId, $sourceId, true, $includeInactiveBankAccount),
+            'bank', 'card_writeoff' => $this->forBank($supplierId, $sourceId, true, $includeInactiveBankAccount),
             'offset' => $this->forOffset($supplierId, $sourceId, true),
             'settlement' => $this->forSettlement($supplierId, $sourceId),
             'asset', 'asset_disposal', 'depreciation' => $this->forAsset($supplierId, $this->assetId($supplierId, $sourceType, $sourceId)),
@@ -488,6 +488,41 @@ final class DimensionDefaults
             'bank_account' => $this->bankAccountLayer($supplierId, $bank, $includeInactiveAccount),
             'bank_rule' => $this->bankRuleLayer($supplierId, $transactionId, $bank, $includeInactiveAccount),
         ];
+    }
+
+    /**
+     * Výchozí dimenze cílového bankovního účtu vyúčtování GoPay (nastavení GoPay v měně
+     * pohybu). Nastavení drží analytiku 221.x, účet firmy se k ní dohledá přes
+     * `analytic_suffix` ({@see \MyInvoice\Service\Accounting\Bank\BankAnalyticAssigner}).
+     * Pohyb GoPay jiný kontext nemá; hodnota musí být aktivní a typ viditelný.
+     *
+     * @return array{header:array<int,int>, origins:array<int,array{origin:string,ref:string}>}
+     */
+    public function gopayAccountLayer(int $supplierId, int $movementId): array
+    {
+        $none = ['header' => [], 'origins' => []];
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT sba.id
+               FROM gopay_movements gm
+          LEFT JOIN gopay_clearings gc ON gc.id = gm.clearing_id AND gc.supplier_id = gm.supplier_id
+               JOIN gopay_settings gs ON gs.supplier_id = gm.supplier_id AND gs.currency = COALESCE(gc.currency, gm.currency)
+               JOIN chart_of_accounts coa ON coa.id = gs.destination_bank_account_id AND coa.supplier_id = gm.supplier_id
+               JOIN supplier_bank_accounts sba ON sba.supplier_id = gm.supplier_id
+                AND coa.account_code = CONCAT(?, sba.analytic_suffix)
+              WHERE gm.id = ? AND gm.supplier_id = ?
+              LIMIT 1'
+        );
+        $stmt->execute([BankAnalyticAssigner::BANK_SYNTHETIC . '.', $movementId, $supplierId]);
+        $accountId = (int) $stmt->fetchColumn();
+        if ($accountId <= 0) {
+            return $none;
+        }
+        $layer = (new DimensionDefaultRepository($this->db))->forEntity($supplierId, 'bank_account', $accountId);
+        if ($layer === []) {
+            return $none;
+        }
+        $merged = $this->merge($supplierId, ['bank_account:' . $accountId => $layer]);
+        return ['header' => $merged['header'], 'origins' => $merged['origins']];
     }
 
     /** @var array<string,array{id:int, kind:string, layer:array<int,int>}|null> (firma, číslo účtu, kód banky, i neaktivní) => účet */
