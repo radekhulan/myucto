@@ -17,6 +17,8 @@ final class BulkOperations
         SetDimensionsOperation::KEY   => ['invoice', 'purchase_invoice', 'journal_entry'],
         SetPostingRuleOperation::KEY  => ['invoice', 'purchase_invoice'],
         DeleteOperation::KEY          => ['invoice', 'purchase_invoice', 'journal_entry'],
+        SetNoteOperation::KEY         => ['invoice', 'purchase_invoice'],
+        SetVariableSymbolOperation::KEY => ['bank_transaction'],
     ];
 
     public function __construct(
@@ -24,6 +26,8 @@ final class BulkOperations
         private readonly SetDimensionsOperation $dimensions,
         private readonly SetPostingRuleOperation $postingRule,
         private readonly DeleteOperation $delete,
+        private readonly SetNoteOperation $note,
+        private readonly SetVariableSymbolOperation $variableSymbol,
     ) {}
 
     /** @throws BulkActionException neznámá operace nebo druh záznamů */
@@ -36,6 +40,8 @@ final class BulkOperations
             JournalRebookService::KEY => $this->rebook,
             SetDimensionsOperation::KEY => $this->dimensions,
             SetPostingRuleOperation::KEY => $this->postingRule,
+            SetNoteOperation::KEY => $this->note,
+            SetVariableSymbolOperation::KEY => $this->variableSymbol,
             default => $this->delete,
         };
     }
