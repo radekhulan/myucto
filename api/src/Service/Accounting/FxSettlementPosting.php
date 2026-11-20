@@ -63,12 +63,43 @@ final class FxSettlementPosting
     }
 
     /**
+     * Saldokontní účet dokladu z počátečních stavů. Otevírací zápis nese všechny účty firmy
+     * a doklad v něm vlastní řádek nemá, takže účet jde určit jen tehdy, když saldokonto
+     * pravidla (311, 321) vede počáteční stav na jediném účtu: syntetice, nebo právě jedné
+     * její analytice. Víc analytik nebo žádný řádek = odhad by nechal saldo otevřené na
+     * jiném účtu, úhrada se proto automaticky nezaúčtuje.
+     *
+     * @param array{grouped:bool, entry_ids:list<int>, doc_type:string, doc_id:int, opening?:bool} $predpis
+     */
+    private function openingSaldoCode(int $supplierId, array $predpis, string $code): string
+    {
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT DISTINCT a.account_code
+               FROM journal_entry_lines l
+               JOIN chart_of_accounts a ON a.id = l.account_id AND a.supplier_id = l.supplier_id
+              WHERE l.supplier_id = ? AND l.entry_id = ? AND (a.account_code = ? OR a.account_code LIKE CONCAT(?, '.%'))"
+        );
+        $stmt->execute([$supplierId, $predpis['entry_ids'][0], $code, $code]);
+        $codes = array_map('strval', $stmt->fetchAll(PDO::FETCH_COLUMN));
+        if (count($codes) === 1) {
+            return $codes[0];
+        }
+        $label = ($predpis['doc_type'] === 'invoice' ? 'Vydaná faktura #' : 'Přijatá faktura #') . $predpis['doc_id'];
+        throw new PostingException(
+            'opening_saldo_ambiguous',
+            $label . ' je v počátečních stavech, ale saldokonto ' . $code . ' v nich '
+                . ($codes === [] ? 'nemá řádek' : 'vede na více účtech (' . implode(', ', $codes) . ')')
+                . '. Úhradu zaúčtujte ručně.',
+        );
+    }
+
+    /**
      * Aktivní předpis dokladu, proti kterému se úhrada odúčtuje. Nativní doklad (jen přímý
      * zápis, případně skupina s jediným přímým členem) se čte beze změny přes findBySource.
      * Doklad se skupinou zaúčtování ({@see DocumentPostingGroup}) má předpis, dokud skupina
      * drží aktivní člen: ruční storno přímého člena převzatého dokladu předpis neruší.
      *
-     * @return array{grouped:bool, entry_ids:list<int>, doc_type:string, doc_id:int}
+     * @return array{grouped:bool, entry_ids:list<int>, doc_type:string, doc_id:int, opening?:bool}
      */
     public function predpis(int $supplierId, string $docType, int $docId, bool $requirePosted, string $notPostedMessage): array
     {
@@ -82,6 +113,12 @@ final class FxSettlementPosting
             ];
         }
         $entry = $this->journal->findBySource($supplierId, $docType, $docId);
+        if ($entry === null) {
+            $opening = $this->openingEntryId($supplierId, $docType, $docId);
+            if ($opening !== null) {
+                return ['grouped' => false, 'entry_ids' => [$opening], 'doc_type' => $docType, 'doc_id' => $docId, 'opening' => true];
+            }
+        }
         if ($entry === null
             || ($requirePosted && ($entry['posted_at'] ?? null) === null)
             || ($entry['reversed_by'] ?? null) !== null
@@ -92,6 +129,33 @@ final class FxSettlementPosting
     }
 
     /**
+     * Otevírací zápis, ve kterém je doklad zastoupený ({@see OpeningBalanceDocuments}):
+     * faktura minulého roku převzatá do počátečních stavů vlastní zápis nemá a mít nesmí,
+     * jejím předpisem je řádek saldokonta v počátečním stavu. Saldokonto ji tak už vede
+     * ({@see \MyInvoice\Repository\SaldoRepository} fetchOpeningDocuments), úhrada z banky
+     * nebo pokladny ji musí umět odúčtovat stejně jako fakturu s vlastním zápisem.
+     * Bere se jen zaúčtovaný a nestornovaný otevírací zápis.
+     */
+    private function openingEntryId(int $supplierId, string $docType, int $docId): ?int
+    {
+        if (!in_array($docType, ['invoice', 'purchase_invoice'], true)) {
+            return null;
+        }
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT e.id
+               FROM journal_entry_document_links l
+               JOIN journal_entries e ON e.id = l.entry_id AND e.supplier_id = l.supplier_id
+              WHERE l.supplier_id = ? AND l.doc_type = ? AND l.doc_id = ?
+                AND e.source_type = 'opening' AND e.posted_at IS NOT NULL AND e.reversed_by IS NULL
+              ORDER BY e.entry_date DESC, e.id DESC
+              LIMIT 1"
+        );
+        $stmt->execute([$supplierId, $docType, $docId]);
+        $id = $stmt->fetchColumn();
+        return $id === false ? null : (int) $id;
+    }
+
+    /**
      * Saldokontní účet předpisu a zápisy, které ho nesou. U nativního předpisu beze změny
      * {@see predpisSaldoCode}. Ve skupině se účet bere jen z aktivních členů, které saldokontní
      * řádek (účet z pravidla nebo jeho analytika) skutečně nesou; každý člen se vyhodnotí
@@ -99,11 +163,19 @@ final class FxSettlementPosting
      * úhrada se automaticky nezaúčtuje: odhad by nechal otevřené saldo na jiném účtu.
      * Kurz předpisu se u skupiny bere z cizoměnové stopy saldokontních řádků nosičů.
      *
-     * @param array{grouped:bool, entry_ids:list<int>, doc_type:string, doc_id:int} $predpis
-     * @return array{code:string, entry_ids:list<int>, fx_rate:?float}
+     * @param array{grouped:bool, entry_ids:list<int>, doc_type:string, doc_id:int, opening?:bool} $predpis
+     * @return array{code:string, entry_ids:list<int>, fx_rate:?float, opening?:bool}
      */
     public function predpisSaldo(int $supplierId, array $predpis, string $code): array
     {
+        if ($predpis['opening'] ?? false) {
+            return [
+                'code' => $this->openingSaldoCode($supplierId, $predpis, $code),
+                'entry_ids' => $predpis['entry_ids'],
+                'fx_rate' => null,
+                'opening' => true,
+            ];
+        }
         if (!$predpis['grouped']) {
             return [
                 'code' => $this->predpisSaldoCode($supplierId, $predpis['entry_ids'][0], $code),
@@ -164,11 +236,19 @@ final class FxSettlementPosting
      * Skupina zaúčtování bere kurz ze saldokontních řádků svých nosičů ({@see predpisSaldo}),
      * bez stopy z ostatních řádků těchže nosičů.
      *
-     * @param array{code:string, entry_ids:list<int>, fx_rate:?float} $saldo
+     * @param array{code:string, entry_ids:list<int>, fx_rate:?float, opening?:bool} $saldo
      * @param array<string,mixed> $doc
      */
     public function predpisFxRate(int $supplierId, array $saldo, array $doc): float
     {
+        // Počáteční stav cizoměnové pohledávky nese kurz k rozvahovému dni (přecenění),
+        // ne kurz dokladu; otevírací zápis kurz jednotlivého dokladu nezná.
+        if ($saldo['opening'] ?? false) {
+            throw new PostingException(
+                'fx_not_supported',
+                'Cizoměnový doklad z počátečních stavů se automaticky neúčtuje, úhradu zaúčtujte ručně.',
+            );
+        }
         if ($saldo['fx_rate'] !== null) {
             return $saldo['fx_rate'];
         }

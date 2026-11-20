@@ -1248,7 +1248,7 @@ final class BankPostingService
     /**
      * Aktivní předpis dokladu, proti kterému se úhrada odúčtuje ({@see FxSettlementPosting::predpis()}).
      *
-     * @return array{grouped:bool, entry_ids:list<int>, doc_type:string, doc_id:int}
+     * @return array{grouped:bool, entry_ids:list<int>, doc_type:string, doc_id:int, opening?:bool}
      */
     private function predpis(int $supplierId, string $docType, int $docId, bool $requirePosted, string $notPostedMessage): array
     {
@@ -1258,8 +1258,8 @@ final class BankPostingService
     /**
      * Saldokontní účet předpisu a zápisy, které ho nesou ({@see FxSettlementPosting::predpisSaldo()}).
      *
-     * @param array{grouped:bool, entry_ids:list<int>, doc_type:string, doc_id:int} $predpis
-     * @return array{code:string, entry_ids:list<int>, fx_rate:?float}
+     * @param array{grouped:bool, entry_ids:list<int>, doc_type:string, doc_id:int, opening?:bool} $predpis
+     * @return array{code:string, entry_ids:list<int>, fx_rate:?float, opening?:bool}
      */
     private function predpisSaldo(int $supplierId, array $predpis, string $code): array
     {
@@ -1742,7 +1742,7 @@ final class BankPostingService
     /**
      * Kurz předpisu ({@see FxSettlementPosting::predpisFxRate()}).
      *
-     * @param array{code:string, entry_ids:list<int>, fx_rate:?float} $saldo
+     * @param array{code:string, entry_ids:list<int>, fx_rate:?float, opening?:bool} $saldo
      * @param array<string,mixed> $doc
      */
     private function predpisFxRate(int $supplierId, array $saldo, array $doc): float
