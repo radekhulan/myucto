@@ -1,252 +1,53 @@
 <script setup lang="ts">
-import { ref, computed, watch, nextTick, onBeforeUnmount } from 'vue'
+import { ref, watch, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useHotkey } from '@/composables/useHotkey'
 import { markTipUsed } from '@/composables/useTips'
-import { searchApi, type SearchResults } from '@/api/search'
-import { useWorkspaceNavigation } from '@/composables/useWorkspaceNavigation'
 import { formatShortcut } from '@/composables/useKeyboardShortcuts'
-import { useSupplierStore } from '@/stores/supplier'
-import { matchSwitchableSuppliers, useSupplierSwitch } from '@/composables/useSupplierSwitch'
+import { useGlobalSearch, type SearchMenuItem, type SearchQuickAction } from '@/composables/useGlobalSearch'
 import WorkspaceTeleport from '@/components/workspace/WorkspaceTeleport.vue'
 
 /**
  * Paleta příkazů (Ctrl/⌘ + K).
  *
- * Why: aplikace měla našeptávač, ale ten uměl jen skákat na stránky a entity —
- * na akci („vystav fakturu", „nahraj výpis") jsi musel doklikat menu. Paleta
- * spojuje obojí do jednoho vstupu: zakládání, navigaci i hledání v datech.
- *
- * Bez dotazu ukazuje rychlé akce — prázdná paleta by nutila uživatele hádat, co
- * do ní může napsat.
+ * Výsledky dává {@link useGlobalSearch}, stejně jako hledací pole (Alt+Q).
+ * Paleta je jen jiný vzhled téhož hledání: modální okno s ikonami a bez dotazu
+ * ukazuje rychlé akce, ať prázdná paleta nenutí uživatele hádat, co do ní napsat.
  */
 
-interface PaletteNavItem {
-  to: string
-  label: string
-  icon: string
-  external?: boolean
-  /** Nadpis sekce menu — v paletě slouží jako popisek pod názvem. */
-  section: string
-  /** Accent sekce; barví ikonu, aby řádky nebyly jednolitě šedé. */
-  accent: string
-}
-
-interface PaletteAction {
-  to: string
-  label: string
-  icon: string
-}
-
 const props = defineProps<{
-  navItems: PaletteNavItem[]
-  quickActions: PaletteAction[]
+  navItems: readonly SearchMenuItem[]
+  quickActions: readonly SearchQuickAction[]
 }>()
 
 const { t } = useI18n()
-const workspaceNavigation = useWorkspaceNavigation()
-const supplierStore = useSupplierStore()
-const supplierSwitch = useSupplierSwitch()
 const paletteShortcutLabel = formatShortcut('ctrl+k')
+const { q, loading, options, groupHeaderFor, clear } = useGlobalSearch({
+  menuItems: () => props.navItems,
+  quickActions: () => props.quickActions,
+  quickActionsWhenEmpty: true,
+})
 
 const open = ref(false)
-const q = ref('')
 const activeIndex = ref(0)
-const loading = ref(false)
-const results = ref<SearchResults>({ q: '', clients: [], invoices: [], purchase_invoices: [] })
 const inputEl = ref<HTMLInputElement | null>(null)
 const listEl = ref<HTMLElement | null>(null)
 
-let debounceTimer: ReturnType<typeof setTimeout> | undefined
-let seq = 0
-
-type Group = 'action' | 'nav' | 'company' | 'client' | 'invoice' | 'purchase'
-
-interface Option {
-  group: Group
-  label: string
-  sub: string
-  icon: string
-  /** Klíč accentu pro barvu ikony (viz [data-accent] v styles/main.css). */
-  accent: string
-  run: () => void
-}
-
-const GROUP_LABEL: Record<Group, string> = {
-  action: 'command.group_actions',
-  nav: 'search.group_menu',
-  company: 'search.group_companies',
-  client: 'search.group_clients',
-  invoice: 'search.group_invoices',
-  purchase: 'search.group_purchase',
-}
-
-const ICON_PLUS = 'M12 6v6m0 0v6m0-6h6m-6 0H6'
-const ICON_USER = 'M16 7a4 4 0 1 1-8 0 4 4 0 0 1 8 0zM12 14a7 7 0 0 0-7 7h14a7 7 0 0 0-7-7z'
-const ICON_DOC = 'M9 12h6m-6 4h6m2 5H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5.586a1 1 0 0 1 .707.293l5.414 5.414a1 1 0 0 1 .293.707V19a2 2 0 0 1-2 2z'
-const ICON_BUILDING = 'M19 21V5a2 2 0 0 0-2-2H7a2 2 0 0 0-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1v5m-4 0h4'
-const ICON_CART = 'M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 1 0 0 4 2 2 0 0 0 0-4zm-8 2a2 2 0 1 1-4 0 2 2 0 0 1 4 0z'
-
-/**
- * Fuzzy shoda: nejdřív souvislý podřetězec (nejsilnější signál), pak písmena
- * v pořadí kdekoli v textu („vyfa" najde „Vydané faktury"). Vrací skóre, nebo
- * -1 když neodpovídá — palety, které jen filtrují `includes()`, neumí zkratky.
- */
-function fuzzyScore(text: string, needle: string): number {
-  const hay = text.toLowerCase()
-  const idx = hay.indexOf(needle)
-  if (idx === 0) return 1000
-  if (idx > 0) return 700 - idx
-  let score = 0
-  let pos = 0
-  for (const ch of needle) {
-    const found = hay.indexOf(ch, pos)
-    if (found === -1) return -1
-    // Shoda na začátku slova váží víc než uprostřed.
-    score += found === 0 || hay[found - 1] === ' ' ? 10 : 3
-    pos = found + 1
-  }
-  return score
-}
-
-/**
- * Skóre víceslovného dotazu: KAŽDÉ slovo musí někde v textu sedět, výsledek je
- * součet dílčích skóre.
- *
- * Why: uživatel přirozeně napíše „nová faktura", jenže akce se jmenuje „Vydaná
- * faktura" — souvislý podřetězec neexistuje a hledání po znacích by dalo
- * nesmyslné pořadí. Po slovech to funguje, jak člověk čeká: „nová" trefí klíčové
- * slovo akce, „faktura" její název. Zároveň to drží pořadí slov nezávazné
- * („faktura nová" najde totéž).
- */
-function matchScore(haystack: string, query: string): number {
-  const tokens = query.split(/\s+/).filter(Boolean)
-  if (tokens.length === 0) return -1
-  let total = 0
-  for (const token of tokens) {
-    const score = fuzzyScore(haystack, token)
-    if (score < 0) return -1
-    total += score
-  }
-  return total / tokens.length
-}
-
-const needle = computed(() => q.value.trim().toLowerCase())
-
-const options = computed<Option[]>(() => {
-  const out: Option[] = []
-  const n = needle.value
-
-  // Bez dotazu: rychlé akce jako rozcestník, ať paleta není prázdná.
-  if (!n) {
-    for (const a of props.quickActions) {
-      out.push({ group: 'action', label: a.label, sub: t('command.action_hint'), icon: a.icon || ICON_PLUS, accent: 'primary', run: () => void workspaceNavigation.navigate(a.to, { fresh: true }) })
-    }
-    return out
-  }
-
-  const scored: Array<{ opt: Option; score: number }> = []
-
-  // Klíčová slova zakládání („nová", „vytvořit", „založit"…) se přidávají do
-  // prohledávaného textu akce, aby „nová faktura" našla akci „Vydaná faktura“.
-  const createKeywords = t('command.kw_create')
-
-  for (const a of props.quickActions) {
-    const score = matchScore(`${createKeywords} ${a.label}`, n)
-    if (score >= 0) {
-      scored.push({ score: score + 50, opt: { group: 'action', label: a.label, sub: t('command.action_hint'), icon: a.icon || ICON_PLUS, accent: 'primary', run: () => void workspaceNavigation.navigate(a.to, { fresh: true }) } })
-    }
-  }
-
-  for (const item of props.navItems) {
-    const score = matchScore(`${item.section} ${item.label}`, n)
-    if (score >= 0) {
-      scored.push({
-        score,
-        opt: {
-          group: 'nav',
-          label: item.label,
-          sub: item.section,
-          icon: item.icon,
-          accent: item.accent,
-          run: () => { item.external ? workspaceNavigation.openExternal(item.to) : void workspaceNavigation.navigate(item.to) },
-        },
-      })
-    }
-  }
-
-  scored.sort((a, b) => b.score - a.score)
-  out.push(...scored.slice(0, 12).map(s => s.opt))
-
-  // Víc firem: přepnutí na firmu podle názvu nebo IČ (aktuální se nenabízí).
-  for (const s of matchSwitchableSuppliers(supplierStore.availableSuppliers, supplierStore.currentSupplierId, n, supplierStore.hasMultiple)) {
-    out.push({
-      group: 'company',
-      label: s.company_name,
-      sub: s.ic ? t('search.company_ic', { ic: s.ic }) : t('search.company_switch'),
-      icon: ICON_BUILDING,
-      accent: 'teal',
-      run: () => void supplierSwitch.switchTo(s.id),
-    })
-  }
-
-  for (const c of results.value.clients) {
-    out.push({ group: 'client', label: c.company_name, sub: c.main_email || '', icon: ICON_USER, accent: 'success', run: () => void workspaceNavigation.navigate(`/clients/${c.id}`) })
-  }
-  for (const i of results.value.invoices) {
-    out.push({ group: 'invoice', label: i.varsymbol || `#${i.id}`, sub: i.company_name, icon: ICON_DOC, accent: 'primary', run: () => void workspaceNavigation.navigate(`/invoices/${i.id}`) })
-  }
-  for (const p of results.value.purchase_invoices) {
-    out.push({ group: 'purchase', label: p.varsymbol || p.vendor_invoice_number || `#${p.id}`, sub: p.company_name, icon: ICON_CART, accent: 'warning', run: () => void workspaceNavigation.navigate(`/purchase-invoices/${p.id}`) })
-  }
-
-  return out
-})
-
-function groupHeaderFor(i: number): string | null {
-  const opt = options.value[i]
-  if (!opt) return null
-  if (i === 0 || options.value[i - 1].group !== opt.group) return t(GROUP_LABEL[opt.group])
-  return null
-}
-
-watch(q, (val) => {
-  activeIndex.value = 0
-  clearTimeout(debounceTimer)
-  const text = val.trim()
-  if (text.length < 2) {
-    results.value = { q: text, clients: [], invoices: [], purchase_invoices: [] }
-    loading.value = false
-    return
-  }
-  loading.value = true
-  debounceTimer = setTimeout(async () => {
-    const mySeq = ++seq
-    try {
-      const r = await searchApi.query(text)
-      if (mySeq === seq) results.value = r
-    } catch {
-      if (mySeq === seq) results.value = { q: text, clients: [], invoices: [], purchase_invoices: [] }
-    } finally {
-      if (mySeq === seq) loading.value = false
-    }
-  }, 220)
-})
+watch(q, () => { activeIndex.value = 0 })
 
 async function show() {
   // Jakmile paletu jednou otevřel, tip na ni v patičce mizí — už ji zná.
   markTipUsed('palette')
   open.value = true
-  q.value = ''
+  clear()
   activeIndex.value = 0
-  results.value = { q: '', clients: [], invoices: [], purchase_invoices: [] }
   await nextTick()
   inputEl.value?.focus()
 }
 
 function hide() {
   open.value = false
-  clearTimeout(debounceTimer)
+  clear()
 }
 
 function select(i: number) {
@@ -285,7 +86,6 @@ useHotkey('ctrl+k', (e) => {
   open.value ? hide() : void show()
 })
 
-onBeforeUnmount(() => clearTimeout(debounceTimer))
 defineExpose({ show })
 </script>
 

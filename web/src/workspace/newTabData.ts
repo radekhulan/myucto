@@ -13,6 +13,19 @@ export interface WorkspaceMenuItem {
   label: string
   icon: string
   external?: boolean
+  /** Nadpis sekce menu, hledá se i podle něj. */
+  section?: string
+  /** Accent sekce pro barvu ikony. */
+  accent?: string
+}
+
+const ACCENT = /^[a-z][a-z0-9-]{0,29}$/
+
+function menuItemContext(section: unknown, accent: unknown): Pick<WorkspaceMenuItem, 'section' | 'accent'> {
+  return {
+    ...(typeof section === 'string' && section !== '' ? { section: section.slice(0, 120) } : {}),
+    ...(typeof accent === 'string' && ACCENT.test(accent) ? { accent } : {}),
+  }
 }
 
 /** Otevřená záložka v přehledu nové záložky. */
@@ -42,7 +55,10 @@ const MAX_OPEN_TABS = 20
 const WINDOW_ID = /^window-\d{1,9}$/
 
 export function plainMenuItems(items: readonly WorkspaceMenuItem[]): WorkspaceMenuItem[] {
-  return items.map(item => ({ to: item.to, label: item.label, icon: item.icon, ...(item.external ? { external: true } : {}) }))
+  return items.map(item => ({
+    to: item.to, label: item.label, icon: item.icon, ...(item.external ? { external: true } : {}),
+    ...menuItemContext(item.section, item.accent),
+  }))
 }
 
 /** Záložky podle posledního použití, bez prázdných nových záložek. */
@@ -64,11 +80,11 @@ export function sanitizeMenuItems(value: unknown): WorkspaceMenuItem[] {
   if (!Array.isArray(value)) return []
   return value.slice(0, MAX_MENU_ITEMS).flatMap(item => {
     if (!item || typeof item !== 'object') return []
-    const { to, label, icon, external } = item as Record<string, unknown>
+    const { to, label, icon, external, section, accent } = item as Record<string, unknown>
     if (typeof to !== 'string' || typeof label !== 'string' || typeof icon !== 'string') return []
     if (external !== undefined && typeof external !== 'boolean') return []
     const valid = external ? /^https?:\/\//i.test(to) : to.startsWith('/') && !to.startsWith('//')
-    return valid ? [{ to, label, icon, ...(external ? { external: true } : {}) }] : []
+    return valid ? [{ to, label, icon, ...(external ? { external: true } : {}), ...menuItemContext(section, accent) }] : []
   })
 }
 

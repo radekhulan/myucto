@@ -1222,7 +1222,8 @@
         "2316_bulk_changes_permission.sql",
         "2317_document_item_search.sql",
         "2318_payroll_posting_code_maps.sql",
-        "2319_purchase_advance_deductions_document_source.sql"
+        "2319_purchase_advance_deductions_document_source.sql",
+        "2320_purchase_invoices_vendor_number_search_index.sql"
     ],
     "tables": {
         "abra_flexi_connections": {
@@ -24095,6 +24096,7 @@
                 "idx_pi_supplier_vs_key": "BTREE (supplier_id, varsymbol_match_key)",
                 "idx_pi_tax_date": "BTREE (supplier_id, tax_date)",
                 "idx_pi_vendor": "BTREE (vendor_id, issue_date)",
+                "ix_pi_supplier_vendor_number": "BTREE (supplier_id, vendor_invoice_number)",
                 "uq_pi_advance_link": "UNIQUE BTREE (advance_purchase_invoice_id)",
                 "uq_pi_supplier_varsymbol": "UNIQUE BTREE (supplier_id, varsymbol)",
                 "uq_pi_vendor_invoice": "UNIQUE BTREE (supplier_id, vendor_id, vendor_invoice_number, issue_date, vendor_number_seq)",

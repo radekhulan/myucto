@@ -3339,6 +3339,56 @@ final class PurchaseInvoiceRepository
     }
 
     /**
+     * Rychlé hledání přijatých faktur ve více firmách naráz, když je aktivní firma
+     * nenašla. O tom, zda smí uživatel výsledek firmy vidět, rozhoduje VOLAJÍCÍ.
+     *
+     * Naše číslo i číslo dodavatele se porovnávají od začátku, aby obě větve šly po
+     * indexech (supplier_id, varsymbol) a (supplier_id, vendor_invoice_number).
+     *
+     * @param list<int> $supplierIds
+     * @return list<array{id:int, supplier_id:int, varsymbol:?string, vendor_invoice_number:?string,
+     *   document_kind:?string, status:string, issue_date:?string, total_with_vat:float,
+     *   currency:string, company_name:string}>
+     */
+    public function searchQuickAcrossSuppliers(array $supplierIds, string $q, int $limit): array
+    {
+        $supplierIds = array_values(array_unique(array_filter($supplierIds, static fn (int $id): bool => $id > 0)));
+        $q = trim($q);
+        if ($q === '' || $supplierIds === []) return [];
+        $prefix = addcslashes($q, '%_\\') . '%';
+        $in = implode(',', array_fill(0, count($supplierIds), '?'));
+        $limit = max(1, min(100, $limit));
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT pi.id, pi.supplier_id, pi.varsymbol, pi.vendor_invoice_number, pi.document_kind,
+                    pi.status, pi.issue_date, pi.total_with_vat,
+                    COALESCE(cur.code, 'CZK') AS currency, c.company_name
+               FROM (
+                     (SELECT id FROM purchase_invoices WHERE supplier_id IN ($in) AND varsymbol LIKE ? LIMIT $limit)
+                     UNION
+                     (SELECT id FROM purchase_invoices WHERE supplier_id IN ($in) AND vendor_invoice_number LIKE ? LIMIT $limit)
+                    ) hit
+               JOIN purchase_invoices pi ON pi.id = hit.id
+               JOIN clients c ON c.id = pi.vendor_id
+          LEFT JOIN currencies cur ON cur.id = pi.currency_id
+              ORDER BY pi.issue_date DESC, pi.id DESC
+              LIMIT $limit"
+        );
+        $stmt->execute([...$supplierIds, $prefix, ...$supplierIds, $prefix]);
+        return array_map(static fn (array $r) => [
+            'id'                    => (int) $r['id'],
+            'supplier_id'           => (int) $r['supplier_id'],
+            'varsymbol'             => $r['varsymbol'] !== null ? (string) $r['varsymbol'] : null,
+            'vendor_invoice_number' => $r['vendor_invoice_number'] !== null ? (string) $r['vendor_invoice_number'] : null,
+            'document_kind'         => $r['document_kind'] !== null ? (string) $r['document_kind'] : null,
+            'status'                => (string) $r['status'],
+            'issue_date'            => $r['issue_date'] !== null ? (string) $r['issue_date'] : null,
+            'total_with_vat'        => (float) $r['total_with_vat'],
+            'currency'              => (string) $r['currency'],
+            'company_name'          => (string) $r['company_name'],
+        ], $stmt->fetchAll(PDO::FETCH_ASSOC) ?: []);
+    }
+
+    /**
      * Najde nespárovanou zálohu (advance) téhož dodavatele, jejíž číslo dokladu nebo
      * variabilní symbol odpovídá odkazu z faktury (např. "zaplaceno zálohou č. X").
      * Porovnává bez mezer (variabilní symbol může být na dokladu rozdělený). Vrací

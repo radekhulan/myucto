@@ -1511,17 +1511,12 @@ function onGlobalShortcut(event: KeyboardEvent): void {
   }
 }
 
-/** Ploché položky menu pro globální search (našeptávač skáče přímo na body menu). */
-const flatNavItems = computed(() =>
-  navSections.value.flatMap(s => s.items.map(it => ({ to: it.to, label: it.label, icon: it.icon, external: it.external })))
-)
-
 /**
- * Totéž pro paletu příkazů, ale s kontextem sekce: název jde pod položku jako
- * popisek („Vydané faktury" / Prodej) a accent barví ikonu, takže se výsledky
- * dají rozeznat podle barev, ne jen čtením.
+ * Ploché položky menu pro globální hledání (pole Alt+Q, paleta Ctrl+K i nová
+ * záložka) s kontextem sekce: název jde pod položku jako popisek („Vydané
+ * faktury" / Prodej) a accent barví ikonu.
  */
-const paletteNavItems = computed(() =>
+const searchMenuItems = computed(() =>
   navSections.value.flatMap(s => s.items.map(it => ({
     to: it.to,
     label: it.label,
@@ -2149,7 +2144,7 @@ onBeforeUnmount(() => {
         <nav class="min-h-0 flex-1 overflow-y-auto overscroll-contain scrollbar-slim px-2.5 py-3">
           <!-- Globální vyhledávač (před Přehled) — našeptává menu + hledá klienty/faktury -->
           <div class="lg:hidden">
-            <GlobalSearch ref="mobileSearchRef" :menu-items="flatNavItems" @navigated="mobileOpen = false" />
+            <GlobalSearch ref="mobileSearchRef" :menu-items="searchMenuItems" :quick-actions="quickActions" @navigated="mobileOpen = false" />
           </div>
 
           <template v-for="(section, si) in orderedNav" :key="section.key">
@@ -2417,7 +2412,7 @@ onBeforeUnmount(() => {
         <WorkspaceWindowTabs :accent-for="sectionAccent" :disabled="tabletNavigationRail" />
         <!-- Paleta příkazů (Ctrl/⌘+K) — sama si registruje zkratku i teleport,
              stačí ji mít v layoutu jednou. -->
-        <CommandPalette ref="paletteRef" :nav-items="paletteNavItems" :quick-actions="quickActions" />
+        <CommandPalette ref="paletteRef" :nav-items="searchMenuItems" :quick-actions="quickActions" />
         <WorkspaceWindowSwitcher />
         <WorkspaceFavorites />
 
@@ -2451,7 +2446,7 @@ onBeforeUnmount(() => {
               </WorkspaceNavLink>
             </span>
           </div>
-          <WorkspaceHost :accent-for="sectionAccent" :agenda-for="sectionAgenda" :menu-items="flatNavItems" />
+          <WorkspaceHost :accent-for="sectionAccent" :agenda-for="sectionAgenda" :menu-items="searchMenuItems" />
         </main>
 
         <!-- Patička je stejné „chrome" jako topbar (globální hledání, jazyk, motiv),
@@ -2466,7 +2461,8 @@ onBeforeUnmount(() => {
               <div class="min-w-0 flex-1">
                 <GlobalSearch
                   ref="desktopSearchRef"
-                  :menu-items="flatNavItems"
+                  :menu-items="searchMenuItems"
+                  :quick-actions="quickActions"
                   placement="above"
                   compact
                   :shortcut="searchShortcutLabel"

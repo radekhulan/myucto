@@ -263,9 +263,16 @@ Na desktopu má aplikace dvě stálé lišty:
 - **spodní lišta** - vlevo společné hledání v menu, klientech a dokladech, uprostřed přepínač firem (jen v režimu horního menu) a vpravo jazyk, světlý nebo tmavý motiv a na širokém desktopu také verze a odkazy aplikace. Na užším desktopu se sem z horní lišty přesune přepínač panelů, rychlé vytvoření a nápověda, verze a odkazy ustoupí.
 - **režim levého menu** - přepínač firem se přesune do pravé části hlavičky, kde je od ostatních akcí oddělený svislou čárou.
 
-Máte-li víc firem, hledání (**Alt+Q**) i paleta příkazů (**Ctrl+K**) nabízí ve skupině **Přepnout firmu** i firmy podle názvu nebo IČ. Aktuální firma se nenabízí.
+Hledání v patičce (**Alt+Q**), paleta příkazů (**Ctrl+K**) a hledání na nové záložce najdou totéž. Liší se jen vzhledem: paleta je okno uprostřed obrazovky s barevnými ikonami a bez zadaného textu nabízí rychlé akce. Hledá se v těchto skupinách:
 
-Hledání (**Alt+Q**) najde také zaměstnance podle jména, příjmení nebo osobního čísla, a to ve všech firmách, kde smíte číst mzdy. U zaměstnance z jiné firmy je uveden její název; jeho volbou se firma přepne a otevře se karta osoby.
+- **Akce** - založení nového záznamu, například „nová faktura" najde akci **Vydaná faktura**.
+- **Menu** - položky menu podle názvu i sekce. Stačí i počáteční písmena slov, „vyfa" najde **Vydané faktury**.
+- **Přepnout firmu** - máte-li víc firem, firmy podle názvu nebo IČ. Aktuální firma se nenabízí.
+- **Klienti** - podle názvu, e-mailu, IČ nebo DIČ.
+- **Zaměstnanci** - podle jména, příjmení nebo osobního čísla, vždy ve všech firmách, kde smíte číst mzdy.
+- **Vydané faktury** a **Přijaté faktury** - podle čísla dokladu, variabilního symbolu nebo čísla dokladu dodavatele.
+
+Klienty a faktury hledá aplikace nejdřív v aktuální firmě. Když tam v dané skupině nic nenajde, prohledá od třetího znaku i ostatní vaše firmy, ve kterých smíte klienty, vydané nebo přijaté faktury číst. Číslo dokladu se v ostatních firmách porovnává od začátku, takže zadejte jeho počátek nebo celé číslo. U výsledku z jiné firmy je uveden její název; jeho volbou se firma přepne a otevře se karta klienta, doklad nebo karta zaměstnance.
 
 Otevřete-li odkaz na doklad jiné firmy (vydaná či přijatá faktura, zápis v deníku, pokladní doklad, ostatní položka, bankovní výpis, dokument, skladový doklad nebo objednávka) a máte do té firmy přístup, aplikace na ni přepne sama a doklad otevře. Do firmy, ke které přístup nemáte, se nepřepíná a doklad se nezobrazí.
 
@@ -338,7 +345,7 @@ tato zkratka nepřebírá.
 
 Obrazovka **Klávesové zkratky** umožňuje nastavit kombinaci pro každý viditelný bod menu, položky **Přidat / Nová** i hledání ve spodní liště. Nastavení je uložené u uživatelského účtu, takže se přenáší mezi prohlížeči a není společné s ostatními uživateli. Stejnou obrazovku najdete jako pátou záložku v **Profilu**, na mobilu ji vyberete z nabídky záložek pod nadpisem Profil.
 
-Na Windows a Linuxu jsou výchozí kombinace **Alt+Q** pro hledání, **Alt+1** vydaná faktura, **Alt+2** přijatá faktura, **Alt+3** klient, **Alt+4** dodavatel, **Alt+5** účetní zápis, **Alt+6** pravidelná fakturace a **Alt+7** přehled firem. Na macOS se klávesy zobrazují jako **Cmd** a **Option**. Samostatné hledání tam nemá rizikovou výchozí kombinaci Option+Q, **Cmd+K** otevře paletu příkazů, která vyhledává také v menu, klientech a fakturách. Číselné zkratky se zobrazí jako **Option+1** až **Option+7**. Poslední zkratka se nabízí jen uživatelům s přístupem k více firmám. Kolizní nebo prohlížečem vyhrazenou kombinaci nelze uložit.
+Na Windows a Linuxu jsou výchozí kombinace **Alt+Q** pro hledání, **Alt+1** vydaná faktura, **Alt+2** přijatá faktura, **Alt+3** klient, **Alt+4** dodavatel, **Alt+5** účetní zápis, **Alt+6** pravidelná fakturace a **Alt+7** přehled firem. Na macOS se klávesy zobrazují jako **Cmd** a **Option**. Samostatné hledání tam nemá rizikovou výchozí kombinaci Option+Q, **Cmd+K** otevře paletu příkazů, která najde totéž co hledání v patičce. Číselné zkratky se zobrazí jako **Option+1** až **Option+7**. Poslední zkratka se nabízí jen uživatelům s přístupem k více firmám. Kolizní nebo prohlížečem vyhrazenou kombinaci nelze uložit.
 
 ### 10.10.12 Vzhled: jazyk, světlý a tmavý režim
 

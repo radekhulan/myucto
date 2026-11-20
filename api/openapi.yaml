@@ -15406,10 +15406,16 @@ paths:
     get:
       tags: [Lookup]
       summary: Globální vyhledávač (klienti/dodavatelé + vydané/přijaté faktury)
-      description: Min. 2 znaky, jinak prázdné výsledky. Tenant scope dle supplier-a.
+      description: >-
+        Min. 2 znaky, jinak prázdné výsledky. Hledá v aktivní firmě a každou skupinu
+        jen s právem ke čtení dané agendy (clients, invoices, purchase_invoices);
+        klientská role nedostane nic. Přihlášená relace v aplikaci navíc od 3 znaků
+        hledá skupinu, kterou aktivní firma nenašla, v ostatních firmách uživatele
+        s tímto právem; takové položky nesou `supplier_id` a `supplier_name`.
+        API token hledá vždy jen v aktivní firmě a zaměstnance nedostane.
       parameters:
         - $ref: '#/components/parameters/SupplierIdHeader'
-        - { in: query, name: q, required: true, schema: { type: string, minLength: 2 } }
+        - { in: query, name: q, required: true, schema: { type: string, minLength: 2, maxLength: 100 } }
       responses:
         '200':
           description: OK
@@ -15419,9 +15425,53 @@ paths:
                 type: object
                 properties:
                   q: { type: string }
-                  clients: { type: array, items: { type: object } }
-                  invoices: { type: array, items: { type: object } }
-                  purchase_invoices: { type: array, items: { type: object } }
+                  clients:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id: { type: integer }
+                        company_name: { type: string }
+                        main_email: { type: [string, "null"] }
+                        is_customer: { type: boolean }
+                        is_vendor: { type: boolean }
+                        supplier_id: { type: integer, description: Jen u výsledku z jiné firmy }
+                        supplier_name: { type: string, description: Jen u výsledku z jiné firmy }
+                  invoices:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id: { type: integer }
+                        varsymbol: { type: [string, "null"] }
+                        invoice_type: { type: string }
+                        status: { type: string }
+                        issue_date: { type: [string, "null"], format: date }
+                        total_with_vat: { type: number }
+                        currency: { type: string }
+                        company_name: { type: string }
+                        supplier_id: { type: integer, description: Jen u výsledku z jiné firmy }
+                        supplier_name: { type: string, description: Jen u výsledku z jiné firmy }
+                  purchase_invoices:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id: { type: integer }
+                        varsymbol: { type: [string, "null"] }
+                        vendor_invoice_number: { type: [string, "null"] }
+                        document_kind: { type: [string, "null"] }
+                        status: { type: string }
+                        issue_date: { type: [string, "null"], format: date }
+                        total_with_vat: { type: number }
+                        currency: { type: string }
+                        company_name: { type: string }
+                        supplier_id: { type: integer, description: Jen u výsledku z jiné firmy }
+                        supplier_name: { type: string, description: Jen u výsledku z jiné firmy }
+                  employees:
+                    type: array
+                    description: Jen pro přihlášenou relaci; přes API token vždy prázdné.
+                    items: { type: object }
 
   # ── Reports — doplňující endpointy ───────────────────────────────────────
   /api/v1/reports/dphdp3/settings:

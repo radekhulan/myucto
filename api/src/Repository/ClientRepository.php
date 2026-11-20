@@ -69,6 +69,44 @@ final class ClientRepository
         ], $stmt->fetchAll(PDO::FETCH_ASSOC) ?: []);
     }
 
+    /**
+     * Rychlé hledání klientů ve více firmách naráz, když je aktivní firma nenašla.
+     * O tom, zda smí uživatel výsledek firmy vidět, rozhoduje VOLAJÍCÍ.
+     *
+     * Název se hledá jako podřetězec, IČ, DIČ a e-mail od začátku. Podřetězec index
+     * nevyužije, proto drží strop prohlížených řádků: u obřího adresáře se raději
+     * vrátí neúplný výběr, než aby každé písmeno procházelo klienty všech firem.
+     *
+     * @param list<int> $supplierIds
+     * @return list<array{id:int, supplier_id:int, company_name:string, main_email:?string, is_customer:bool, is_vendor:bool}>
+     */
+    public function searchQuickAcrossSuppliers(array $supplierIds, string $q, int $limit): array
+    {
+        $supplierIds = array_values(array_unique(array_filter($supplierIds, static fn (int $id): bool => $id > 0)));
+        $q = trim($q);
+        if ($q === '' || $supplierIds === []) return [];
+        $esc = addcslashes($q, '%_\\');
+        $in = implode(',', array_fill(0, count($supplierIds), '?'));
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT id, supplier_id, company_name, main_email, is_customer, is_vendor
+               FROM clients
+              WHERE supplier_id IN ($in) AND archived_at IS NULL AND is_walk_in = 0
+                AND (company_name LIKE ? OR main_email LIKE ? OR ic LIKE ? OR dic LIKE ?)
+              LIMIT " . max(1, min(100, $limit)) . ' ROWS EXAMINED 20000'
+        );
+        $stmt->execute([...$supplierIds, '%' . $esc . '%', $esc . '%', $esc . '%', $esc . '%']);
+        $rows = array_map(static fn (array $r) => [
+            'id'           => (int) $r['id'],
+            'supplier_id'  => (int) $r['supplier_id'],
+            'company_name' => (string) $r['company_name'],
+            'main_email'   => $r['main_email'] !== null ? (string) $r['main_email'] : null,
+            'is_customer'  => (bool) $r['is_customer'],
+            'is_vendor'    => (bool) $r['is_vendor'],
+        ], $stmt->fetchAll(PDO::FETCH_ASSOC) ?: []);
+        usort($rows, static fn (array $a, array $b): int => [$a['supplier_id'], mb_strtolower($a['company_name'])] <=> [$b['supplier_id'], mb_strtolower($b['company_name'])]);
+        return $rows;
+    }
+
     public function list(array $filters = [], int $page = 1, int $perPage = 20, string $sort = 'name'): array
     {
         $where = ['1=1'];

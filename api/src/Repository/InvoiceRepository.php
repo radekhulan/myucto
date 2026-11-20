@@ -840,6 +840,55 @@ final class InvoiceRepository
     }
 
     /**
+     * Rychlé hledání vystavených faktur ve více firmách naráz, když je aktivní firma
+     * nenašla. O tom, zda smí uživatel výsledek firmy vidět, rozhoduje VOLAJÍCÍ.
+     *
+     * Číslo dokladu a variabilní symbol se porovnávají od začátku, aby obě větve šly
+     * po indexech (supplier_id, varsymbol) a (supplier_id, payment_variable_symbol).
+     * Podřetězec by znamenal projít doklady všech firem uživatele.
+     *
+     * @param list<int> $supplierIds
+     * @return list<array{id:int, supplier_id:int, varsymbol:?string, invoice_type:string, status:string,
+     *                    issue_date:?string, total_with_vat:float, currency:string, company_name:string}>
+     */
+    public function searchQuickAcrossSuppliers(array $supplierIds, string $q, int $limit): array
+    {
+        $supplierIds = array_values(array_unique(array_filter($supplierIds, static fn (int $id): bool => $id > 0)));
+        $q = trim($q);
+        if ($q === '' || $supplierIds === []) return [];
+        $prefix = addcslashes($q, '%_\\') . '%';
+        $in = implode(',', array_fill(0, count($supplierIds), '?'));
+        $limit = max(1, min(100, $limit));
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT i.id, i.supplier_id, i.varsymbol, i.invoice_type, i.status, i.issue_date,
+                    i.total_with_vat, COALESCE(cur.code, 'CZK') AS currency,
+                    c.company_name
+               FROM (
+                     (SELECT id FROM invoices WHERE supplier_id IN ($in) AND varsymbol LIKE ? LIMIT $limit)
+                     UNION
+                     (SELECT id FROM invoices WHERE supplier_id IN ($in) AND payment_variable_symbol LIKE ? LIMIT $limit)
+                    ) hit
+               JOIN invoices i ON i.id = hit.id
+               JOIN clients c ON c.id = i.client_id
+          LEFT JOIN currencies cur ON cur.id = i.currency_id
+              ORDER BY i.issue_date DESC, i.id DESC
+              LIMIT $limit"
+        );
+        $stmt->execute([...$supplierIds, $prefix, ...$supplierIds, $prefix]);
+        return array_map(static fn (array $r) => [
+            'id'             => (int) $r['id'],
+            'supplier_id'    => (int) $r['supplier_id'],
+            'varsymbol'      => $r['varsymbol'] !== null ? (string) $r['varsymbol'] : null,
+            'invoice_type'   => (string) $r['invoice_type'],
+            'status'         => (string) $r['status'],
+            'issue_date'     => $r['issue_date'] !== null ? (string) $r['issue_date'] : null,
+            'total_with_vat' => (float) $r['total_with_vat'],
+            'currency'       => (string) $r['currency'],
+            'company_name'   => (string) $r['company_name'],
+        ], $stmt->fetchAll(PDO::FETCH_ASSOC) ?: []);
+    }
+
+    /**
      * Normalizace `filter[oss_review]` na rozsah {@see VatLedgerService::MANUAL_REVIEW_SCOPES}.
      *
      * `true` / `'1'` musí zůstat funkční: přesně tuhle hodnotu nesou uložené filtry
