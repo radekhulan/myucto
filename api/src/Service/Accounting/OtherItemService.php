@@ -6,10 +6,12 @@ namespace MyInvoice\Service\Accounting;
 
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Infrastructure\Database\TransactionFailure;
+use MyInvoice\Repository\AccountingPeriodRepository;
 use MyInvoice\Repository\ChartOfAccountsRepository;
 use MyInvoice\Repository\DimensionAssignmentRepository;
 use MyInvoice\Repository\OtherItemRepository;
 use MyInvoice\Service\ActivityLogger;
+use MyInvoice\Service\Accounting\Accrual\AccrualPeriodDetector;
 use MyInvoice\Service\Accounting\Closing\DocumentSeriesService;
 use MyInvoice\Service\Accounting\Dimension\DimensionDefaults;
 use MyInvoice\Service\Bank\NonInvoiceBankTransactionScope;
@@ -160,6 +162,14 @@ final class OtherItemService
 
     public function update(int $supplierId, int $id, array $input, ?int $userId): array
     {
+        // Změna období konceptu se zaúčtovanou historií zamyká období ({@see assertAccrualChangeAllowed()}).
+        return TransactionFailure::retrying($this->db->pdo(),
+            fn (): array => $this->updateOnce($supplierId, $id, $input, $userId));
+    }
+
+    /** @return array<string,mixed> */
+    private function updateOnce(int $supplierId, int $id, array $input, ?int $userId): array
+    {
         $pdo = $this->db->pdo();
         $ownTx = !$pdo->inTransaction();
         if ($ownTx) $pdo->beginTransaction();
@@ -170,6 +180,19 @@ final class OtherItemService
                 throw new OtherItemException('not_draft', 'Upravovat lze jen koncept.', 409);
             }
             $data = $this->normalize($supplierId, $this->mergeStored($supplierId, $id, $existing, $input), $existing);
+            // Koncept vrácený odúčtováním může mít zápisy, ze kterých uzávěrka už odložila, i po
+            // přechodu do daňové evidence (rozpuštění čte uložené období).
+            $accrualBefore = [self::dateOrNull($existing['accrual_from']), self::dateOrNull($existing['accrual_to'])];
+            $accrualAfter = [$data['accrual_from'], $data['accrual_to']];
+            if ($accrualAfter !== $accrualBefore) {
+                $this->assertAccrualChangeAllowed($supplierId, $id);
+                // Období je vstup uzávěrky: změna se zapíše do aktivity firmy jako přes route
+                // `/accrual` (služba IP a prohlížeč nezná).
+                $this->activity->log('other_item.accrual_changed', $userId, 'other_item', $id, [
+                    'accrual_from' => ['before' => $accrualBefore[0], 'after' => $accrualAfter[0]],
+                    'accrual_to' => ['before' => $accrualBefore[1], 'after' => $accrualAfter[1]],
+                ], supplierId: $supplierId);
+            }
             // Částka položky je jistina; rozdělená splátka nese úrok a poplatek navíc (migrace 2241).
             $planned = $pdo->prepare('SELECT COALESCE(SUM(COALESCE(principal_amount, amount)), 0) AS total, MIN(due_on) AS first_due
                 FROM other_item_installments WHERE supplier_id = ? AND other_item_id = ?');
@@ -261,8 +284,22 @@ final class OtherItemService
         if (array_key_exists('counterparty_account', $input) && !array_key_exists('counterparty_bank_code', $input)) {
             $input['counterparty_bank_code'] = null;
         }
+        // Rozlišení výnosu má jen pohledávka v podvojném účetnictví: přepnutí na závazek
+        // uložené období zahodí. Daňová evidence ho ponechá beze změny: z něj rozpouští odklad
+        // zaúčtovaný ještě v podvojném účetnictví ({@see accrualPeriod()}).
+        $unchanged = true;
+        foreach (['accrual_from', 'accrual_to'] as $key) {
+            if (array_key_exists($key, $input) && self::dateOrNull($input[$key]) !== self::dateOrNull($existing[$key] ?? null)) {
+                $unchanged = false;
+            }
+        }
+        // Závazek zahodí i období poslané beze změny (klient, který vrací uložený stav, např.
+        // MCP); nové období u něj odmítne validace.
+        if ($unchanged && ($input['side'] ?? $existing['side'] ?? null) === 'payable') {
+            $input['accrual_from'] = $input['accrual_to'] = null;
+        }
         foreach (['side', 'kind', 'kind_id', 'title', 'partner_id', 'partner_name', 'issued_on', 'accounting_on', 'due_on',
-            'currency', 'amount', 'variable_symbol', 'counterparty_account', 'counterparty_bank_code',
+            'accrual_from', 'accrual_to', 'currency', 'amount', 'variable_symbol', 'counterparty_account', 'counterparty_bank_code',
             'account_code', 'counter_account_code', 'note'] as $key) {
             if (!array_key_exists($key, $input)) {
                 $input[$key] = $existing[$key] ?? null;
@@ -317,6 +354,130 @@ final class OtherItemService
     }
 
     /**
+     * Období časového rozlišení výnosu zaúčtované pohledávky. Zápis položky se nemění,
+     * období čte až uzávěrka ({@see accrualPeriod()}), proto jde nastavit i po zaúčtování,
+     * podobně jako u řádků vydané faktury (`PUT /invoices/{id}/accrual`). Pojistka je ale
+     * přísnější: faktura hlídá jen uzavřené období podle data DPH, položka všechna data
+     * svých zápisů, přezkoumané a schválené období i zaúčtovaný krok uzávěrky
+     * ({@see assertAccrualChangeAllowed()}). Vynechaný klíč
+     * = uložená hodnota, obě prázdné = bez rozlišení. Koncept se upravuje celý, položka
+     * bez vlastního zápisu (ze zůstatku deníku) výnos v deníku nemá.
+     *
+     * Rozpuštění v dalším roce počítá z uloženého období, ne z odkladu, proto se období
+     * nesmí měnit, jakmile ho uzávěrka použila: v uzavřeném (i přezkoumaném a schváleném)
+     * období zápisu nikdy, v probíhající uzávěrce až po vrácení kroku Časové rozlišení.
+     * Zámek řádku období serializuje změnu s během kroku uzávěrky.
+     *
+     * @param array<string,mixed> $input
+     * @return array{item:array<string,mixed>, before:array{0:?string,1:?string}, after:array{0:?string,1:?string}}
+     */
+    public function updateAccrual(int $supplierId, int $id, array $input, ?int $userId): array
+    {
+        return TransactionFailure::retrying($this->db->pdo(),
+            fn (): array => $this->updateAccrualOnce($supplierId, $id, $input, $userId));
+    }
+
+    /**
+     * @param array<string,mixed> $input
+     * @return array{item:array<string,mixed>, before:array{0:?string,1:?string}, after:array{0:?string,1:?string}}
+     */
+    private function updateAccrualOnce(int $supplierId, int $id, array $input, ?int $userId): array
+    {
+        $pdo = $this->db->pdo();
+        $ownTx = !$pdo->inTransaction();
+        if ($ownTx) $pdo->beginTransaction();
+        try {
+            $existing = $this->items->find($supplierId, $id, true)
+                ?? throw new OtherItemException('not_found', 'Doklad nebyl nalezen.', 404);
+            if ($existing['status'] === 'draft') {
+                throw new OtherItemException('is_draft', 'Koncept upravte v editaci dokladu.', 409);
+            }
+            // Bez vlastního zápisu (potvrzeno v daňové evidenci, ze zůstatku deníku) období nic
+            // neodkládá: jde jen odebrat, třeba uložené z konceptu před přechodem na daňovou evidenci.
+            $clears = array_key_exists('accrual_from', $input) && array_key_exists('accrual_to', $input)
+                && in_array($input['accrual_from'], [null, ''], true) && in_array($input['accrual_to'], [null, ''], true);
+            if (($existing['status'] !== 'posted' || $existing['journal_entry_id'] === null) && !$clears) {
+                throw new OtherItemException('accrual_not_posted', 'Časové rozlišení výnosu jde nastavit jen u zaúčtovaného dokladu s vlastním zápisem.', 409);
+            }
+            $before = [self::dateOrNull($existing['accrual_from']), self::dateOrNull($existing['accrual_to'])];
+            $after = $this->accrualPeriod($supplierId, [
+                'accrual_from' => array_key_exists('accrual_from', $input) ? $input['accrual_from'] : $before[0],
+                'accrual_to' => array_key_exists('accrual_to', $input) ? $input['accrual_to'] : $before[1],
+            ], (string) $existing['side'], $existing);
+            if ($before !== $after) {
+                $this->assertAccrualChangeAllowed($supplierId, $id);
+                $pdo->prepare('UPDATE other_items SET accrual_from = ?, accrual_to = ?, updated_by = ?, row_version = row_version + 1
+                    WHERE id = ? AND supplier_id = ? AND deleted_at IS NULL')
+                    ->execute([$after[0], $after[1], $userId, $id, $supplierId]);
+            }
+            if ($ownTx) $pdo->commit();
+        } catch (\Throwable $e) {
+            if ($ownTx && $pdo->inTransaction()) $pdo->rollBack();
+            throw $e;
+        }
+        return ['item' => $this->get($supplierId, $id), 'before' => $before, 'after' => $after];
+    }
+
+    /**
+     * Pojistka změny období rozlišení: odklad i rozpuštění čtou všechny zápisy položky
+     * k jejich období, i ten, který přeúčtování nebo odúčtování položky později stornovalo
+     * ({@see \MyInvoice\Service\Accounting\Closing\AccrualDeferralService}). Rozpuštění počítá
+     * z uloženého období, proto se nesmí měnit, jakmile ho uzávěrka některého z těch období
+     * použila: v uzavřeném (i přezkoumaném a schváleném) období nikdy, v probíhající
+     * uzávěrce až po vrácení kroku Časové rozlišení. Volá se v transakci, zamyká období.
+     */
+    private function assertAccrualChangeAllowed(int $supplierId, int $id): void
+    {
+        $periods = new AccountingPeriodRepository($this->db);
+        foreach (Closing\AccrualDeferralService::otherItemSourceDates($this->db, $supplierId, $id) as $entryDate) {
+            $period = $periods->findForDateForUpdate($supplierId, substr((string) $entryDate, 0, 10));
+            if ($period !== null && AccountingPeriodStatus::isClosed((string) $period['status'])) {
+                throw new OtherItemException('period_closed', 'Doklad patří do uzavřeného účetního období, jeho časové rozlišení už je součástí uzávěrky.', 409);
+            }
+            // Krok Časové rozlišení platí jen v probíhající uzávěrce. Po jejím přerušení (abort
+            // jde jen bez závěrkových zápisů) může zůstat krok potvrzený, ale nic neodložil
+            // a v otevřeném období ho vrátit nejde: neblokuje.
+            if ($period !== null && (string) $period['status'] === 'closing' && $this->deferralPosted($supplierId, (int) $period['id'])) {
+                throw new OtherItemException('accrual_deferral_posted', 'Krok Časové rozlišení uzávěrky je už zaúčtovaný, dokončený nebo přeskočený. Vraťte ho v uzávěrce, změňte období a krok spusťte znovu.', 409);
+            }
+        }
+    }
+
+    /**
+     * Zaúčtoval krok uzávěrky období odklad výnosů (384), nebo je krok Časové rozlišení
+     * dokončený či přeskočený (i s nulovým návrhem, kdy zápis nevznikl)? Zamykací čtení po
+     * zámku období: vidí i krok potvrzený souběžnou transakcí, ne jen snímek před čekáním na zámek.
+     */
+    private function deferralPosted(int $supplierId, int $periodId): bool
+    {
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT 1 FROM journal_entries
+              WHERE supplier_id = ? AND source_type = 'deferred_revenue_accrual' AND source_id = ?
+                AND posted_at IS NOT NULL AND reversed_by IS NULL LIMIT 1 LOCK IN SHARE MODE"
+        );
+        $stmt->execute([$supplierId, Closing\ClosingSourceId::deferredRevenueAccrual($periodId)]);
+        if ($stmt->fetchColumn() !== false) {
+            return true;
+        }
+        $step = $this->db->pdo()->prepare(
+            "SELECT 1 FROM accounting_closing_steps
+              WHERE supplier_id = ? AND period_id = ? AND step_key = 'deferrals' AND status IN ('done', 'skipped')
+              LIMIT 1 LOCK IN SHARE MODE"
+        );
+        $step->execute([$supplierId, $periodId]);
+        return $step->fetchColumn() !== false;
+    }
+
+    private static function dateOrNull(mixed $value): ?string
+    {
+        if ($value === null || $value === '') return null;
+        // Pole či objekt z JSON se nerovná žádnému uloženému datu; odmítne ho až validace
+        // ({@see accrualPeriod()}) jako 422, ne převod na text s varováním PHP.
+        if (!is_scalar($value)) return '#';
+        return substr((string) $value, 0, 10);
+    }
+
+    /**
      * Smazání zaúčtovaného dokladu i s jeho zápisem, bez storna. Zápis maže
      * {@see DocumentJournalPurge::purgeEntry()} se stejnými branami jako mazání v deníku
      * (otevřené období, uzamčené datum jen s potvrzením, saldokonto, párování, navazující
@@ -332,6 +493,15 @@ final class OtherItemService
      * @return array{item: array<string,mixed>, entry_id: int, result_status: string, locked_override: ?string}
      */
     public function deletePosted(int $supplierId, int $id, array $audit, bool $lockedAcknowledged): array
+    {
+        // Smazání zamyká období před položkou, změna období položku před obdobím: případný
+        // deadlock se zopakuje.
+        return TransactionFailure::retrying($this->db->pdo(),
+            fn (): array => $this->deletePostedOnce($supplierId, $id, $audit, $lockedAcknowledged));
+    }
+
+    /** @return array<string,mixed> */
+    private function deletePostedOnce(int $supplierId, int $id, array $audit, bool $lockedAcknowledged): array
     {
         $userId = isset($audit['user_id']) ? (int) $audit['user_id'] : null;
         $pdo = $this->db->pdo();
@@ -434,6 +604,12 @@ final class OtherItemService
 
     public function deleteDraft(int $supplierId, int $id): void
     {
+        // Koncept s obdobím rozlišení zamyká období ({@see assertAccrualChangeAllowed()}).
+        TransactionFailure::retrying($this->db->pdo(), fn () => $this->deleteDraftOnce($supplierId, $id));
+    }
+
+    private function deleteDraftOnce(int $supplierId, int $id): void
+    {
         $pdo = $this->db->pdo();
         $ownTx = !$pdo->inTransaction();
         if ($ownTx) $pdo->beginTransaction();
@@ -442,6 +618,11 @@ final class OtherItemService
                 ?? throw new OtherItemException('not_found', 'Doklad nebyl nalezen.', 404);
             if ($item['status'] !== 'draft') {
                 throw new OtherItemException('not_draft', 'Smazat lze jen koncept.', 409);
+            }
+            // Smazaný doklad uzávěrka neodkládá ani nerozpouští: u konceptu se zaúčtovanou
+            // historií je smazání totéž jako zrušení období, hlídá ho stejná pojistka.
+            if ($item['accrual_from'] !== null || $item['accrual_to'] !== null) {
+                $this->assertAccrualChangeAllowed($supplierId, $id);
             }
             $scheduled = $pdo->prepare('SELECT occurrence_index, schedule_id FROM other_item_schedule_occurrences
                 WHERE supplier_id = ? AND item_id = ? LIMIT 1');
@@ -537,6 +718,9 @@ final class OtherItemService
         if ($item['status'] !== 'posted' || (int) $item['journal_entry_id'] !== $entryId) {
             throw new OtherItemException('not_posted', 'Zápis není aktuálním zaúčtováním této položky.', 409);
         }
+        // Pojistka období rozlišení se tu neptá: smazat jde jen zápis v otevřeném období
+        // (JournalEntryDeletionRules) a jeho zdroj leží v témže období, ze kterého uzávěrka
+        // ještě neodkládala.
         $this->assertNoLinkedInvoice($supplierId, $id);
         $payments = $pdo->prepare('SELECT id FROM other_item_allocations
             WHERE supplier_id = ? AND other_item_id = ? AND reversed_on IS NULL FOR UPDATE');
@@ -1541,6 +1725,7 @@ final class OtherItemService
         $due = (string) ($input['due_on'] ?? '');
         self::assertDate($issued, 'issued_on');
         self::assertDate($due, 'due_on');
+        [$accrualFrom, $accrualTo] = $this->accrualPeriod($supplierId, $input, $side, $stored);
         $accounting = $input['accounting_on'] ?? null;
         if ($accounting !== null && $accounting !== '') self::assertDate((string) $accounting, 'accounting_on');
         else $accounting = $issued;
@@ -1590,6 +1775,7 @@ final class OtherItemService
             'partner_id' => $partnerId,
             'partner_name' => $partnerName,
             'issued_on' => $issued, 'accounting_on' => $accounting, 'due_on' => $due,
+            'accrual_from' => $accrualFrom, 'accrual_to' => $accrualTo,
             'currency' => $currency, 'amount' => round((float) $amount, 2),
             'exchange_rate' => $rate, 'amount_czk' => round((float) $amount * $rate, 2),
             'variable_symbol' => $vs === '' ? null : $vs,
@@ -1600,6 +1786,49 @@ final class OtherItemService
             'posting_lines' => $postingLines,
             'note' => self::optional($input['note'] ?? null, 10000),
         ];
+    }
+
+    /**
+     * Období časového rozlišení výnosu (`accrual_from`/`accrual_to`): obě data, nebo žádné.
+     * Uzávěrka z něj odkládá na 384 výnos zaúčtovaný zápisem položky
+     * ({@see \MyInvoice\Service\Accounting\Closing\AccrualDeferralService::deferredRevenueRows()}),
+     * proto jde jen u pohledávky a jen v podvojném účetnictví; daňová evidence ani závazek
+     * výnos v deníku nemají. Platnost dvojice posuzuje stejné pravidlo jako u řádků faktur
+     * ({@see AccrualPeriodDetector::normalizePair()}).
+     *
+     * @param array<string,mixed> $input
+     * @param ?array<string,mixed> $stored uložený doklad: jeho období beze změny daňová
+     *        evidence ponechá (odklad z dřívějšího podvojného účetnictví se z něj rozpouští)
+     * @return array{0:?string,1:?string}
+     */
+    private function accrualPeriod(int $supplierId, array $input, string $side, ?array $stored = null): array
+    {
+        foreach (['accrual_from', 'accrual_to'] as $key) {
+            if (isset($input[$key]) && !is_string($input[$key])) {
+                throw new OtherItemException('accrual_period_invalid', 'Období časového rozlišení potřebuje platná data RRRR-MM-DD a začátek nejpozději v den konce.');
+            }
+        }
+        $from = trim((string) ($input['accrual_from'] ?? ''));
+        $to = trim((string) ($input['accrual_to'] ?? ''));
+        if ($from === '' && $to === '') {
+            return [null, null];
+        }
+        if ($from === '' || $to === '') {
+            throw new OtherItemException('accrual_period_incomplete', 'Období časového rozlišení potřebuje začátek i konec.');
+        }
+        $pair = AccrualPeriodDetector::normalizePair($from, $to);
+        if ($pair === null) {
+            throw new OtherItemException('accrual_period_invalid', 'Období časového rozlišení potřebuje platná data RRRR-MM-DD a začátek nejpozději v den konce.');
+        }
+        if ($side !== 'receivable') {
+            throw new OtherItemException('accrual_receivable_only', 'Časové rozlišení výnosu jde nastavit jen u pohledávky.');
+        }
+        $kept = $stored !== null
+            && [$pair['from'], $pair['to']] === [self::dateOrNull($stored['accrual_from'] ?? null), self::dateOrNull($stored['accrual_to'] ?? null)];
+        if (!$kept && !$this->isDoubleEntry($supplierId)) {
+            throw new OtherItemException('accrual_double_entry_only', 'Časové rozlišení výnosu jde nastavit jen v podvojném účetnictví.');
+        }
+        return [$pair['from'], $pair['to']];
     }
 
     private static function optional(mixed $value, int $limit): ?string

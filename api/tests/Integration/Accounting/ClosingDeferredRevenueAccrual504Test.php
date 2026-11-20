@@ -12,9 +12,11 @@ use MyInvoice\Repository\JournalEntryRepository;
 use MyInvoice\Service\Accounting\ChartOfAccountsSeeder;
 use MyInvoice\Service\Accounting\Closing\ClosingService;
 use MyInvoice\Service\Accounting\Closing\ClosingSourceId;
+use MyInvoice\Service\Accounting\Dimension\DimensionService;
 use MyInvoice\Service\Accounting\Dimension\SystemDimensionCatalog;
 use MyInvoice\Service\Accounting\EntryForm\EntryForm;
 use MyInvoice\Service\Accounting\EntryForm\EntryFormService;
+use MyInvoice\Service\Accounting\OtherItemService;
 use MyInvoice\Service\Accounting\PostingService;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Group;
@@ -131,6 +133,89 @@ final class ClosingDeferredRevenueAccrual504Test extends TestCase
         $entry = $this->journal->findBySource($this->supplierId, 'deferred_revenue_accrual', ClosingSourceId::deferredRevenueAccrual($this->periodId));
         self::assertNotNull($entry);
         $this->assertCarriesAxes((int) $entry['id'], '684.100', 'debit', 18200.00);
+    }
+
+    /** Ostatní pohledávka ve 504: odklad nese osy činnosti řádku výnosu jejího zápisu. */
+    public function testOtherItemDeferralCarriesActivityAxes(): void
+    {
+        $container = Bootstrap::buildContainer();
+        $items = $container->get(OtherItemService::class);
+        $item = $items->create($this->supplierId, [
+            'side' => 'receivable', 'kind' => 'claim', 'title' => 'Syntetický nájem spolku', 'partner_id' => $this->clientId,
+            'issued_on' => self::YEAR . '-07-01', 'due_on' => self::YEAR . '-07-15', 'currency' => 'CZK', 'amount' => 36600.00,
+            'account_code' => '311', 'counter_account_code' => '684.100',
+            'accrual_from' => self::YEAR . '-07-01', 'accrual_to' => (self::YEAR + 1) . '-06-30',
+        ], $this->userId);
+        $container->get(DimensionService::class)->saveDocument($this->supplierId, 'other_item', (int) $item['id'], $this->axes, []);
+        $items->post($this->supplierId, (int) $item['id'], $this->userId);
+        $this->db->pdo()->prepare("UPDATE accounting_periods SET status = 'closing' WHERE id = ?")->execute([$this->periodId]);
+
+        $run = $this->closing->runDeferredRevenueAccrual($this->supplierId, $this->periodId, $this->rv(), $this->meta());
+
+        self::assertEqualsWithDelta(18200.00, (float) $run['total'], 0.001);
+        $entry = $this->journal->findBySource($this->supplierId, 'deferred_revenue_accrual', ClosingSourceId::deferredRevenueAccrual($this->periodId));
+        self::assertNotNull($entry);
+        $lines = $this->linesOn((int) $entry['id'], '684.100');
+        self::assertCount(1, $lines);
+        self::assertSame('debit', $lines[0]['side']);
+        $actual = (new DimensionAssignmentRepository($this->db))->entryLineDimensions($this->supplierId, (int) $entry['id'])[(int) $lines[0]['id']] ?? [];
+        ksort($actual);
+        $expected = $this->axes;
+        ksort($expected);
+        self::assertSame($expected, $actual, 'Odklad nese osy činnosti řádku výnosu zápisu pohledávky.');
+
+        $this->periods->create($this->supplierId, self::YEAR + 1, (self::YEAR + 1) . '-01-01', (self::YEAR + 1) . '-12-31');
+        $release = $this->invokePrivate('deferredRevenueReleaseForPeriod', self::YEAR . '-12-31', (self::YEAR + 1) . '-01-01', (self::YEAR + 1) . '-12-31');
+        self::assertEqualsWithDelta(18200.00, (float) $release['total'], 0.001);
+        $lines = $this->invokePrivate('deferredRevenueLines', $release['lines'], (float) $release['total'], true, (self::YEAR + 1) . '-01-01');
+        $releaseId = $this->posting->postDocument($this->supplierId, 'deferred_revenue_accrual', ClosingSourceId::deferredRevenueAccrualRelease($this->periodId), $lines, [
+            'entry_date' => (self::YEAR + 1) . '-01-01', 'posted' => true, 'posted_by' => $this->userId, 'user_id' => $this->userId,
+        ]);
+        $released = $this->linesOn($releaseId, '684.100');
+        self::assertCount(1, $released);
+        self::assertSame('credit', $released[0]['side']);
+        $actual = (new DimensionAssignmentRepository($this->db))->entryLineDimensions($this->supplierId, $releaseId)[(int) $released[0]['id']] ?? [];
+        ksort($actual);
+        self::assertSame($expected, $actual, 'Rozpuštění vrací výnos pohledávky se stejnými osami a ve 504 jde zaúčtovat.');
+    }
+
+    /**
+     * Zápis pohledávky z roku N stornovaný až v N+1 zůstává zdrojem odkladu N (storno je
+     * samostatný záporný zdroj, jako dobropis). Rozpuštění jeho odkladu proto nese osy
+     * stornovaného řádku a ve 504 jde zaúčtovat i s hodnotou uzavřenou po stornu.
+     */
+    public function testOtherItemReleaseFromRootReversedNextYearCarriesClosedValue(): void
+    {
+        $container = Bootstrap::buildContainer();
+        $items = $container->get(OtherItemService::class);
+        $item = $items->create($this->supplierId, [
+            'side' => 'receivable', 'kind' => 'claim', 'title' => 'Syntetický nájem spolku', 'partner_id' => $this->clientId,
+            'issued_on' => self::YEAR . '-07-01', 'due_on' => self::YEAR . '-07-15', 'currency' => 'CZK', 'amount' => 36600.00,
+            'account_code' => '311', 'counter_account_code' => '684.100',
+            'accrual_from' => self::YEAR . '-07-01', 'accrual_to' => (self::YEAR + 1) . '-06-30',
+        ], $this->userId);
+        $container->get(DimensionService::class)->saveDocument($this->supplierId, 'other_item', (int) $item['id'], $this->axes, []);
+        $items->post($this->supplierId, (int) $item['id'], $this->userId);
+        $this->db->pdo()->prepare("UPDATE accounting_periods SET status = 'closing' WHERE id = ?")->execute([$this->periodId]);
+        $this->closing->runDeferredRevenueAccrual($this->supplierId, $this->periodId, $this->rv(), $this->meta());
+
+        $this->periods->create($this->supplierId, self::YEAR + 1, (self::YEAR + 1) . '-01-01', (self::YEAR + 1) . '-12-31');
+        $items->reverse($this->supplierId, (int) $item['id'], 'Syntetické storno v dalším roce', $this->userId, (self::YEAR + 1) . '-02-01');
+        $this->closeActivityKind();
+
+        $release = $this->invokePrivate('deferredRevenueReleaseForPeriod', self::YEAR . '-12-31', (self::YEAR + 1) . '-01-01', (self::YEAR + 1) . '-12-31');
+        self::assertEqualsWithDelta(18200.00, (float) $release['total'], 0.001, 'Storno z N+1 rozpuštění odkladu N neruší.');
+        $lines = $this->invokePrivate('deferredRevenueLines', $release['lines'], (float) $release['total'], true, (self::YEAR + 1) . '-01-01');
+        $releaseId = $this->posting->postDocument($this->supplierId, 'deferred_revenue_accrual', ClosingSourceId::deferredRevenueAccrualRelease($this->periodId), $lines, [
+            'entry_date' => (self::YEAR + 1) . '-01-01', 'posted' => true, 'posted_by' => $this->userId, 'user_id' => $this->userId,
+        ]);
+        $released = $this->linesOn($releaseId, '684.100');
+        self::assertCount(1, $released);
+        $actual = (new DimensionAssignmentRepository($this->db))->entryLineDimensions($this->supplierId, $releaseId)[(int) $released[0]['id']] ?? [];
+        ksort($actual);
+        $expected = $this->axes;
+        ksort($expected);
+        self::assertSame($expected, $actual);
     }
 
     /** Rozpuštění v novém roce vrací výnos se stejnými osami a ve 504 jde zaúčtovat. */

@@ -98,6 +98,9 @@ export interface OtherItem {
   issued_on: string | null
   accounting_on?: string | null
   due_on: string | null
+  /** Období časového rozlišení výnosu pohledávky (384); null = bez rozlišení. */
+  accrual_from?: string | null
+  accrual_to?: string | null
   currency: string
   exchange_rate?: number | null
   amount_czk?: number | null
@@ -147,6 +150,8 @@ export interface OtherItemPayload {
   issued_on: string
   accounting_on: string
   due_on: string
+  accrual_from?: string | null
+  accrual_to?: string | null
   currency: string
   exchange_rate: number | null
   amount: number
@@ -312,6 +317,9 @@ export const otherItemsApi = {
   /** Poznámka vystaveného dokladu (popisný údaj mimo účetnictví). */
   updateText: (id: number, note: string | null) =>
     api.put<OtherItem>(`/accounting/other-items/${id}/text`, { note }).then(r => r.data),
+  /** Období časového rozlišení výnosu zaúčtované pohledávky; obě null = bez rozlišení. */
+  updateAccrual: (id: number, accrualFrom: string | null, accrualTo: string | null) =>
+    api.put<OtherItem>(`/accounting/other-items/${id}/accrual`, { accrual_from: accrualFrom, accrual_to: accrualTo }).then(r => r.data),
   /** Smaže zaúčtovaný doklad i se zápisem v deníku; `ackLocked` = potvrzený zásah do uzamčeného období. */
   removePosted: (id: number, ackLocked = false) =>
     api.delete<{ deleted: boolean; journal_entry_id: number; status: string }>(`/accounting/other-items/${id}/posted`, {

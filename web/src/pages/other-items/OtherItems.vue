@@ -38,6 +38,7 @@ import { ensurePrefsLoaded } from '@/composables/useUserPrefs'
 import { useFillViewportHeight } from '@/composables/useFillViewportHeight'
 import { useScrollLoadMore } from '@/composables/useScrollLoadMore'
 import { ICONS, btnFilled, btnOutlineSm } from '@/components/ui/buttonStyles'
+import { DRAFT_ACCRUAL_ERRORS, accrualErrorKey } from './accrualError'
 
 const { t } = useI18n()
 const route = useRoute()
@@ -435,7 +436,8 @@ async function removeItem(item: OtherItem) {
     toast.success(t('common.deleted'))
     await load()
   } catch (error: any) {
-    toast.error(error?.response?.data?.error?.message || t('common.error'))
+    const key = accrualErrorKey(error, DRAFT_ACCRUAL_ERRORS)
+    toast.error(key ? t(key) : error?.response?.data?.error?.message || t('common.error'))
   } finally {
     removingId.value = null
   }

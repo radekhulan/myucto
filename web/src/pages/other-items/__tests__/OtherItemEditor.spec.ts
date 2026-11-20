@@ -63,6 +63,9 @@ vi.mock('@/composables/useDocumentDimensions', async () => {
 
 import OtherItemEditor from '../OtherItemEditor.vue'
 
+/** Pole data podle data-test (shallowMount: stub DateInput nese atributy). */
+const dateInput = (wrapper: any, test: string): any => wrapper.findAllComponents({ name: 'DateInput' }).find((c: any) => c.attributes('data-test') === test)
+
 describe('OtherItemEditor partner', () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -91,6 +94,131 @@ describe('OtherItemEditor partner', () => {
     m.update.mockResolvedValue({ id: 42 })
     m.routerPush.mockResolvedValue(undefined)
     m.listKinds.mockResolvedValue([])
+  })
+
+  it('odmítnuté uložení kvůli období ohlásí přeloženou hláškou nad formulářem i u pole', async () => {
+    m.update.mockRejectedValue({ response: { data: { error: { code: 'other_items.error.accrual_deferral_posted', message: 'Serverová hláška' } } } })
+    const wrapper = shallowMount(OtherItemEditor)
+    await flushPromises()
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+    // V daňové evidenci pole období vidět nejsou: hláška jen nad formulářem.
+    expect((wrapper.vm as any).formError).toBe('other_items.accrual.error.accrual_deferral_posted')
+    expect((wrapper.vm as any).fieldErrors.accrual).toBeUndefined()
+    expect(m.toastError).not.toHaveBeenCalled()
+  })
+
+  it('odmítnutí období serverem v podvojném účetnictví ukáže hlášku přímo u polí období', async () => {
+    m.supplier.accounting_mode = 'double_entry'
+    m.listAccounts.mockResolvedValue([])
+    m.get.mockResolvedValue({ ...(await m.get()), side: 'receivable', kind: 'claim', accrual_from: '2099-07-01', accrual_to: '2100-06-30' })
+    m.update.mockRejectedValue({ response: { data: { error: { code: 'other_items.error.period_closed', message: 'Serverová hláška' } } } })
+    const wrapper = shallowMount(OtherItemEditor)
+    await flushPromises()
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+    expect(wrapper.get('[data-test="accrual-fields"]').findComponent({ name: 'FieldNote' }).props('error'))
+      .toBe('other_items.accrual.error.period_closed')
+  })
+
+  it('neúplné či obrácené období zastaví uložení s hláškou u pole', async () => {
+    m.supplier.accounting_mode = 'double_entry'
+    m.listAccounts.mockResolvedValue([])
+    m.get.mockResolvedValue({ ...(await m.get()), side: 'receivable', kind: 'claim', accrual_from: null, accrual_to: null })
+    const wrapper = shallowMount(OtherItemEditor)
+    await flushPromises()
+    dateInput(wrapper, 'editor-accrual-from').vm.$emit('update:modelValue', '2099-07-01')
+    await flushPromises()
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+    expect(m.update).not.toHaveBeenCalled()
+    expect((wrapper.vm as any).fieldErrors.accrual).toBe('other_items.accrual.error.accrual_period_incomplete')
+    dateInput(wrapper, 'editor-accrual-to').vm.$emit('update:modelValue', '2099-06-30')
+    await flushPromises()
+    expect((wrapper.vm as any).fieldErrors.accrual).toBeUndefined()
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+    expect(m.update).not.toHaveBeenCalled()
+    expect((wrapper.vm as any).fieldErrors.accrual).toBe('other_items.accrual.error.accrual_period_invalid')
+  })
+
+  it('období rozlišení výnosu nabídne jen u pohledávky v podvojném účetnictví a uloží ho', async () => {
+    m.get.mockResolvedValue({ ...(await m.get()), side: 'receivable', kind: 'claim', accrual_from: '2099-07-01', accrual_to: '2100-06-30' })
+    const taxEvidence = shallowMount(OtherItemEditor)
+    await flushPromises()
+    expect(taxEvidence.find('[data-test="accrual-fields"]').exists()).toBe(false)
+    await taxEvidence.get('form').trigger('submit')
+    await flushPromises()
+    // Skryté pole v daňové evidenci pošle uložené období beze změny, server ho ponechá.
+    expect(m.update).toHaveBeenLastCalledWith(42, expect.objectContaining({ accrual_from: '2099-07-01', accrual_to: '2100-06-30' }))
+
+    m.supplier.accounting_mode = 'double_entry'
+    m.listAccounts.mockResolvedValue([])
+    const wrapper = shallowMount(OtherItemEditor)
+    await flushPromises()
+    expect(wrapper.get('[data-test="accrual-fields"]').text()).toContain('other_items.accrual.hint')
+    expect(dateInput(wrapper, 'editor-accrual-from').props('modelValue')).toBe('2099-07-01')
+    dateInput(wrapper, 'editor-accrual-to').vm.$emit('update:modelValue', '2100-12-31')
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+    expect(m.update).toHaveBeenLastCalledWith(42, expect.objectContaining({ accrual_from: '2099-07-01', accrual_to: '2100-12-31' }))
+
+    // Vyplněné období se při změně strany ztratí, editor se proto nejdřív zeptá.
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    await wrapper.get('[data-test="editor-side"]').setValue('payable')
+    expect(confirm).toHaveBeenCalledWith('other_items.side_change_confirm')
+    confirm.mockRestore()
+    expect(wrapper.find('[data-test="accrual-fields"]').exists()).toBe(false)
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+    expect(m.update).toHaveBeenLastCalledWith(42, expect.objectContaining({ side: 'payable', accrual_from: null, accrual_to: null }))
+  })
+
+  it('návrh období z názvu převezme do polí a po odmítnutí ho pro tentýž název nenabídne', async () => {
+    m.supplier.accounting_mode = 'double_entry'
+    m.listAccounts.mockResolvedValue([])
+    m.get.mockResolvedValue({ ...(await m.get()), side: 'receivable', kind: 'claim', title: 'Předplatné na rok 2099', accrual_from: null, accrual_to: null })
+    const wrapper = shallowMount(OtherItemEditor)
+    await flushPromises()
+    const hint = wrapper.getComponent({ name: 'AccrualSuggestionHint' })
+    expect(hint.props()).toEqual({ from: '2099-01-01', to: '2099-12-31' })
+    hint.vm.$emit('apply')
+    await flushPromises()
+    expect(dateInput(wrapper, 'editor-accrual-from').props('modelValue')).toBe('2099-01-01')
+    expect(dateInput(wrapper, 'editor-accrual-to').props('modelValue')).toBe('2099-12-31')
+    expect(wrapper.findComponent({ name: 'AccrualSuggestionHint' }).exists()).toBe(false)
+
+    dateInput(wrapper, 'editor-accrual-from').vm.$emit('update:modelValue', '')
+    dateInput(wrapper, 'editor-accrual-to').vm.$emit('update:modelValue', '')
+    await flushPromises()
+    wrapper.getComponent({ name: 'AccrualSuggestionHint' }).vm.$emit('dismiss')
+    await flushPromises()
+    expect(wrapper.findComponent({ name: 'AccrualSuggestionHint' }).exists()).toBe(false)
+  })
+
+  it('v daňové evidenci se změna strany zeptá kvůli skrytému uloženému období', async () => {
+    m.get.mockResolvedValue({ ...(await m.get()), side: 'receivable', kind: 'other', account_code: null, counter_account_code: null,
+      accrual_from: '2099-07-01', accrual_to: '2100-06-30' })
+    const wrapper = shallowMount(OtherItemEditor)
+    await flushPromises()
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
+    await wrapper.get('[data-test="editor-side"]').setValue('payable')
+    expect(confirm).toHaveBeenCalledWith('other_items.side_change_confirm')
+    confirm.mockRestore()
+  })
+
+  it('změna strany se zeptá i tehdy, když je vyplněné jen období rozlišení', async () => {
+    m.supplier.accounting_mode = 'double_entry'
+    m.listAccounts.mockResolvedValue([])
+    m.get.mockResolvedValue({ ...(await m.get()), side: 'receivable', kind: 'other', account_code: null, counter_account_code: null,
+      accrual_from: '2099-07-01', accrual_to: '2100-06-30' })
+    const wrapper = shallowMount(OtherItemEditor)
+    await flushPromises()
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
+    await wrapper.get('[data-test="editor-side"]').setValue('payable')
+    expect(confirm).toHaveBeenCalledWith('other_items.side_change_confirm')
+    confirm.mockRestore()
+    expect(dateInput(wrapper, 'editor-accrual-from').props('modelValue')).toBe('2099-07-01')
   })
 
   it('při uložení konceptu zachová vazbu na načteného partnera', async () => {

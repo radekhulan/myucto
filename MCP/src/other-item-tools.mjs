@@ -90,6 +90,9 @@ const ITEM_INPUT = {
   issued_on: date('Datum vzniku pohledávky nebo závazku (YYYY-MM-DD).'),
   accounting_on: nullable(date('Datum účetního případu; bez zadání stejné jako datum vzniku.')),
   due_on: date('Splatnost (YYYY-MM-DD).'),
+  accrual_from: nullable(date('Časové rozlišení výnosu pohledávky od (YYYY-MM-DD), spolu s accrual_to. Jen pohledávka v podvojném účetnictví; '
+    + 'uzávěrka odloží na 384 část výnosu za koncem roku. Null = bez rozlišení.')),
+  accrual_to: nullable(date('Časové rozlišení výnosu pohledávky do (YYYY-MM-DD), nejdříve v den accrual_from.')),
   amount: num('Celková částka v Kč na haléře. Agenda je jen v CZK.', { exclusiveMinimum: 0 }),
   variable_symbol: nullable(str('Variabilní symbol, jen číslice.', { pattern: '^[0-9]{1,20}$' })),
   counterparty_account: nullable(str('Účet protistrany pro párování úhrad: český účet ve tvaru '
@@ -110,7 +113,7 @@ const ITEM_INPUT = {
 /** Pole hlavičky, která PUT přepisuje vždy celá. Kontace se skládá zvlášť. */
 const HEAD_KEYS = [
   'side', 'kind', 'kind_id', 'title', 'partner_id', 'partner_name', 'issued_on', 'accounting_on',
-  'due_on', 'amount', 'variable_symbol', 'counterparty_account', 'counterparty_bank_code', 'account_code', 'note',
+  'due_on', 'accrual_from', 'accrual_to', 'amount', 'variable_symbol', 'counterparty_account', 'counterparty_bank_code', 'account_code', 'note',
 ];
 const ITEM_KEYS = [...HEAD_KEYS, 'counter_account_code', 'posting_lines', 'posting_overrides'];
 
@@ -181,6 +184,11 @@ function updateBody(current, a) {
   if (a.kind !== undefined && a.kind !== 'other' && a.kind_id === undefined) body.kind_id = null;
   // Nový účet nese kód banky za lomítkem nebo je to IBAN; uložený kód by mu odporoval (shodně se serverem).
   if (a.counterparty_account !== undefined && a.counterparty_bank_code === undefined) body.counterparty_bank_code = null;
+  // Rozlišení výnosu má jen pohledávka: přepnutí na závazek uložené období zahodí (shodně se serverem).
+  if (body.side === 'payable' && (current?.accrual_from || current?.accrual_to) && a.accrual_from === undefined && a.accrual_to === undefined) {
+    body.accrual_from = null;
+    body.accrual_to = null;
+  }
   if (a.issued_on !== undefined && a.accounting_on === undefined
     && current?.accounting_on && current.accounting_on === current.issued_on) {
     body.accounting_on = a.issued_on;

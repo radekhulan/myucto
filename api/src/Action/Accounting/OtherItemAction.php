@@ -187,6 +187,30 @@ final class OtherItemAction
     }
 
     /**
+     * Období časového rozlišení výnosu zaúčtované pohledávky (`accrual_from`, `accrual_to`).
+     * Zápis v deníku se nemění, období čte uzávěrka.
+     */
+    public function updateAccrual(Request $request, Response $response, array $args): Response
+    {
+        if (!$this->requirePermission($request, $response, 'other_items', AccessLevel::WRITE, $err)) return $err;
+        return $this->run($response, function () use ($request, $args) {
+            $id = (int) $args['id'];
+            $body = (array) ($request->getParsedBody() ?? []);
+            if (!array_key_exists('accrual_from', $body) && !array_key_exists('accrual_to', $body)) {
+                throw new OtherItemException('validation_failed', 'Chybí pole accrual_from nebo accrual_to.');
+            }
+            $result = $this->service->updateAccrual($this->currentSupplierId($request), $id, $body, $this->userId($request));
+            if ($result['before'] !== $result['after']) {
+                $this->log($request, 'other_item.accrual_changed', $id, [
+                    'accrual_from' => ['before' => $result['before'][0], 'after' => $result['after'][0]],
+                    'accrual_to' => ['before' => $result['before'][1], 'after' => $result['after'][1]],
+                ]);
+            }
+            return $result['item'];
+        });
+    }
+
+    /**
      * Smazání zaúčtovaného dokladu i s jeho zápisem v deníku, bez storna. Práva jako
      * mazání zápisu ostatní položky v deníku (JournalAction::delete): `other_items`,
      * `accounting`, `accounting.journal.write` a `accounting.journal.post`.

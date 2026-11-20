@@ -27,6 +27,9 @@ import { useDocumentDimensions } from '@/composables/useDocumentDimensions'
 import PendingDocumentsPanel, { commitPendingDocuments, type PendingDocuments } from '@/components/documents/PendingDocumentsPanel.vue'
 import LinkedDocumentsPanel from '@/components/documents/LinkedDocumentsPanel.vue'
 import { OTHER_ITEM_DEFAULT_FOLDER, otherItemSettingsApi, resolveOtherItemFolder } from '@/api/otherItemSettings'
+import { DRAFT_ACCRUAL_ERRORS, accrualErrorKey, accrualPeriodErrorKey } from './accrualError'
+import AccrualSuggestionHint from '@/components/accounting/AccrualSuggestionHint.vue'
+import { detectAccrualPeriod } from '@/utils/accrualPeriod'
 
 const { t } = useI18n()
 const route = useRoute()
@@ -62,6 +65,8 @@ const form = reactive({
   issued_on: today,
   accounting_on: today,
   due_on: today,
+  accrual_from: null as string | null,
+  accrual_to: null as string | null,
   amount: null as number | null,
   variable_symbol: '',
   counterparty_account: '',
@@ -70,7 +75,7 @@ const form = reactive({
   note: '',
 })
 
-type FieldKey = 'title' | 'issued_on' | 'due_on' | 'amount' | 'variable_symbol' | 'counterparty_account' | 'posting_lines'
+type FieldKey = 'title' | 'issued_on' | 'due_on' | 'amount' | 'variable_symbol' | 'counterparty_account' | 'posting_lines' | 'accrual'
 /** Chyby u polí zůstávají vidět, dokud uživatel pole neopraví (toast by zmizel dřív, než ho najde). */
 const fieldErrors = reactive<Partial<Record<FieldKey, string>>>({})
 /** Trvalá hláška nad formulářem: souhrn chyb polí nebo odmítnutí serverem. */
@@ -191,6 +196,7 @@ function onSideChange(event: Event) {
   const select = event.target as HTMLSelectElement
   const next = select.value as OtherItemSide
   const filled = form.kind !== 'other' || !!form.account_code || !!form.counter_account_code || splitPosting.value
+    || !!form.accrual_from || !!form.accrual_to
   if (filled && !window.confirm(t('other_items.side_change_confirm'))) {
     select.value = form.side
     return
@@ -249,6 +255,8 @@ async function load() {
       form.issued_on = item.issued_on || today
       form.accounting_on = item.accounting_on || item.issued_on || today
       form.due_on = item.due_on || today
+      form.accrual_from = item.accrual_from ? item.accrual_from.slice(0, 10) : null
+      form.accrual_to = item.accrual_to ? item.accrual_to.slice(0, 10) : null
       form.amount = Number(item.amount)
       form.variable_symbol = item.variable_symbol || ''
       form.counterparty_account = joinAccountBankCode(item.counterparty_account, item.counterparty_bank_code)
@@ -288,6 +296,23 @@ watch(() => form.amount, () => { delete fieldErrors.amount; delete fieldErrors.p
 watch(() => form.variable_symbol, () => { delete fieldErrors.variable_symbol })
 watch(() => form.counterparty_account, () => { delete fieldErrors.counterparty_account })
 watch(postingLines, () => { delete fieldErrors.posting_lines }, { deep: true })
+watch(() => [form.accrual_from, form.accrual_to, form.side], () => { delete fieldErrors.accrual })
+
+// Období rozlišení výnosu má jen pohledávka v podvojném účetnictví (uzávěrka odkládá na 384).
+const showAccrualFields = computed(() => isDoubleEntry.value && form.side === 'receivable')
+// Návrh období z názvu položky (jako u řádků faktur); zamítnutí platí pro konkrétní text.
+const accrualDismissedFor = ref<string | null>(null)
+const accrualSuggestion = computed(() => {
+  if (!showAccrualFields.value || form.accrual_from || form.accrual_to || accrualDismissedFor.value === form.title) return null
+  return detectAccrualPeriod(form.title)
+})
+function applyAccrualSuggestion() {
+  // Návrh se po zápisu prvního data přepočítá na null: převzít ho celý předem.
+  const suggestion = accrualSuggestion.value
+  if (!suggestion) return
+  form.accrual_from = suggestion.from
+  form.accrual_to = suggestion.to
+}
 
 function validate(): boolean {
   for (const key of Object.keys(fieldErrors) as FieldKey[]) delete fieldErrors[key]
@@ -306,6 +331,8 @@ function validate(): boolean {
   if (form.counterparty_account.trim() && !isCounterpartyAccountFormat(form.counterparty_account)) {
     fieldErrors.counterparty_account = t('other_items.counterparty_account_invalid')
   }
+  const accrualKey = showAccrualFields.value ? accrualPeriodErrorKey(form.accrual_from, form.accrual_to) : null
+  if (accrualKey) fieldErrors.accrual = t(accrualKey)
   return Object.keys(fieldErrors).length === 0
 }
 
@@ -327,6 +354,10 @@ async function save() {
     issued_on: form.issued_on,
     accounting_on: form.accounting_on || form.issued_on,
     due_on: form.due_on,
+    // Rozlišení výnosu jen u pohledávky; po přepnutí na závazek se zahodí. V daňové evidenci
+    // je pole skryté a jde uložené období beze změny (server ho ponechá, rozpouští se z něj).
+    accrual_from: form.side === 'receivable' ? form.accrual_from || null : null,
+    accrual_to: form.side === 'receivable' ? form.accrual_to || null : null,
     currency: 'CZK',
     exchange_rate: null,
     amount: Number(form.amount),
@@ -352,7 +383,9 @@ async function save() {
     toast.success(t('common.saved'))
     await router.push({ name: 'other-item-detail', params: { id: result.source_id || result.id } })
   } catch (error: any) {
-    formError.value = error?.response?.data?.error?.message || t('common.error')
+    const key = accrualErrorKey(error, DRAFT_ACCRUAL_ERRORS)
+    if (key && showAccrualFields.value) fieldErrors.accrual = t(key)
+    formError.value = key ? t(key) : error?.response?.data?.error?.message || t('common.error')
   } finally {
     saving.value = false
   }
@@ -470,6 +503,21 @@ onMounted(load)
           <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.x" /></svg>
           {{ t('other_items.single_posting') }}
         </button>
+        <div v-if="showAccrualFields" class="mt-4 border-t border-neutral-100 pt-4" data-test="accrual-fields">
+          <h3 class="text-sm font-medium">{{ t('other_items.accrual.label') }}</h3>
+          <p class="mt-1 text-xs text-neutral-500">{{ t('other_items.accrual.hint') }}</p>
+          <div class="mt-2 grid items-start gap-4 sm:grid-cols-2">
+            <label class="text-sm font-medium">{{ t('accrual_period.from') }}
+              <DateInput v-model="form.accrual_from" :aria-invalid="!!fieldErrors.accrual" :class="['mt-1 block', formDateInput, fieldErrors.accrual ? 'border-danger-500' : '']" data-test="editor-accrual-from" />
+            </label>
+            <label class="text-sm font-medium">{{ t('accrual_period.to') }}
+              <DateInput v-model="form.accrual_to" :aria-invalid="!!fieldErrors.accrual" :class="['mt-1 block', formDateInput, fieldErrors.accrual ? 'border-danger-500' : '']" data-test="editor-accrual-to" />
+            </label>
+          </div>
+          <AccrualSuggestionHint v-if="accrualSuggestion" :from="accrualSuggestion.from" :to="accrualSuggestion.to"
+            @apply="applyAccrualSuggestion" @dismiss="accrualDismissedFor = form.title" />
+          <FieldNote :error="fieldErrors.accrual" />
+        </div>
       </section>
       <template v-if="canReadDocuments">
         <LinkedDocumentsPanel v-if="isEdit" entity-type="other_item" :entity-id="editId" uploadable

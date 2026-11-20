@@ -21,6 +21,8 @@ import OtherItemPlans, { type OtherItemPlansState } from '@/components/accountin
 import DocumentPostingPanel from '@/components/accounting/DocumentPostingPanel.vue'
 import Modal from '@/components/ui/Modal.vue'
 import DateInput from '@/components/ui/DateInput.vue'
+import FieldNote from '@/components/ui/FieldNote.vue'
+import { formDateInput } from '@/components/ui/formStyles'
 import ChartAccountSelect from '@/components/accounting/ChartAccountSelect.vue'
 import OtherItemPostingLines from '@/components/accounting/OtherItemPostingLines.vue'
 import OtherItemPostingRules from '@/components/accounting/OtherItemPostingRules.vue'
@@ -35,6 +37,7 @@ import ListNavArrows from '@/components/ui/ListNavArrows.vue'
 import ClientQuickLinks from '@/components/clients/ClientQuickLinks.vue'
 import { useIsPhone } from '@/composables/useIsPhone'
 import { useListNavigation } from '@/composables/useListNavigation'
+import { ACCRUAL_ERRORS, DRAFT_ACCRUAL_ERRORS, accrualErrorKey, accrualPeriodErrorKey } from './accrualError'
 
 const { t } = useI18n()
 const route = useRoute()
@@ -306,6 +309,69 @@ async function saveCounterparty() {
   }
 }
 
+// Období časového rozlišení výnosu zaúčtované pohledávky: zápis se nemění, čte ho uzávěrka.
+// V daňové evidenci jen ke čtení, a jen s uloženým obdobím (z dřívějšího podvojného účetnictví).
+const showAccrual = computed(() => item.value?.side === 'receivable' && (isDoubleEntry.value || !!item.value?.accrual_from))
+const canEditAccrual = computed(() => isDoubleEntry.value && auth.canWrite('other_items') && item.value?.status === 'posted' && !!item.value?.journal_entry_id)
+// Bez vlastního zápisu (daňová evidence, položka ze zůstatku deníku) období nic neodkládá a server
+// ho dovolí jen odebrat, např. uložené z konceptu před přechodem na daňovou evidenci.
+const canClearAccrual = computed(() => !canEditAccrual.value && auth.canWrite('other_items') && !!item.value
+  && item.value.status !== 'draft' && !!item.value.accrual_from)
+const accrualEditing = ref(false)
+const accrualFrom = ref<string | null>(null)
+const accrualTo = ref<string | null>(null)
+/** Odmítnutí období zůstane u polí, dokud ho uživatel neopraví nebo úpravu nezavře. */
+const accrualError = ref('')
+watch([accrualFrom, accrualTo], () => { accrualError.value = '' })
+function startAccrualEdit() {
+  accrualFrom.value = item.value?.accrual_from?.slice(0, 10) ?? null
+  accrualTo.value = item.value?.accrual_to?.slice(0, 10) ?? null
+  accrualError.value = ''
+  accrualEditing.value = true
+}
+function saveAccrual() {
+  const key = accrualPeriodErrorKey(accrualFrom.value, accrualTo.value)
+  if (key) {
+    accrualError.value = t(key)
+    return
+  }
+  void storeAccrual(accrualFrom.value || null, accrualTo.value || null)
+}
+function closeAccrualEdit() {
+  accrualEditing.value = false
+  accrualError.value = ''
+}
+// Zrušení bez vlastního zápisu je nevratné (období jde zadat jen u zaúčtované položky), proto potvrzení.
+function clearAccrual() {
+  if (!window.confirm(t('other_items.accrual.clear_confirm'))) return
+  void storeAccrual(null, null)
+}
+async function storeAccrual(from: string | null, to: string | null) {
+  if (!item.value || busy.value) return
+  busy.value = true
+  // Uložení je také načtení: odpověď platí jen pro tutéž položku a zneplatní obnovu, která běží
+  // ještě se starým obdobím (jako u účtu protistrany).
+  const seq = ++loadSeq
+  const itemId = id.value
+  // Odpověď změny nese jen doklad; posouzení smazání se zápisem (detail GET) období nemění.
+  const postedDeletionBefore = item.value.posted_deletion
+  try {
+    const saved = await otherItemsApi.updateAccrual(itemId, from, to)
+    if (seq !== loadSeq || itemId !== id.value) return
+    item.value = { ...saved, posted_deletion: postedDeletionBefore }
+    accrualEditing.value = false
+    toast.success(t('accrual_period.saved'))
+  } catch (error: any) {
+    if (seq !== loadSeq || itemId !== id.value) return
+    const key = accrualErrorKey(error, ACCRUAL_ERRORS)
+    accrualError.value = key ? t(key) : error?.response?.data?.error?.message || t('common.error')
+  } finally {
+    busy.value = false
+    // Uložení zneplatnilo případné probíhající načtení; jeho `finally` by `loading` neshodilo.
+    if (seq === loadSeq) loading.value = false
+  }
+}
+
 // Poznámku vystaveného dokladu jde doplnit kdykoli, do účetnictví se nepromítá.
 const canEditNote = computed(() => auth.canWrite('other_items') && !!item.value && item.value.status !== 'draft')
 const noteEditing = ref(false)
@@ -481,7 +547,8 @@ async function remove() {
     toast.success(t('common.deleted'))
     await router.push(backToList.value)
   } catch (error: any) {
-    toast.error(error?.response?.data?.error?.message || t('common.error'))
+    const key = accrualErrorKey(error, DRAFT_ACCRUAL_ERRORS)
+    toast.error(key ? t(key) : error?.response?.data?.error?.message || t('common.error'))
   } finally {
     busy.value = false
   }
@@ -490,7 +557,7 @@ async function remove() {
 // Až po deklaraci všech stavů úprav: useWindowRefresh podmínku čte hned při založení (watch),
 // dřívější volání by sáhlo na ještě nedeklarovaný ref (ReferenceError, detail bez lišty akcí).
 const editingSomething = computed(() => busy.value || postOpen.value || reverseOpen.value || repostOpen.value || deleteOpen.value
-  || counterpartyEditing.value || noteEditing.value || !!selectedPayment.value || paymentQuery.value !== ''
+  || counterpartyEditing.value || noteEditing.value || accrualEditing.value || !!selectedPayment.value || paymentQuery.value !== ''
   || plansState.value.editing)
 useWindowRefresh(refresh, () => !loading.value && !editingSomething.value)
 const actions = computed<ActionItem[]>(() => {
@@ -541,6 +608,8 @@ watch(id, () => {
   if (paymentTimer) clearTimeout(paymentTimer)
   noteEditing.value = false
   counterpartyEditing.value = false
+  accrualEditing.value = false
+  accrualError.value = ''
   postOpen.value = false
   reverseOpen.value = false
   repostOpen.value = false
@@ -691,6 +760,49 @@ onMounted(load)
                   </button>
                 </form>
                 <p class="mt-1 text-xs text-neutral-500">{{ t('other_items.counterparty_edit_hint') }}</p>
+              </div>
+            </div>
+            <div v-if="showAccrual" data-test="accrual">
+              <div class="flex justify-between gap-3">
+                <dt class="text-neutral-500">{{ t('other_items.accrual.label') }}</dt>
+                <dd v-if="!accrualEditing" class="flex flex-wrap items-center justify-end gap-1">
+                  <span class="font-mono" data-test="accrual-period">{{ item.accrual_from && item.accrual_to
+                    ? t('other_items.accrual.period', { from: formatDate(item.accrual_from), to: formatDate(item.accrual_to) })
+                    : t('other_items.accrual.none') }}</span>
+                  <button v-if="canEditAccrual" type="button" data-test="accrual-edit" class="inline-flex h-6 w-6 items-center justify-center rounded text-neutral-400 hover:bg-neutral-100 hover:text-primary-700"
+                    :title="`${t('common.edit')}: ${t('other_items.accrual.label')}`" :aria-label="`${t('common.edit')}: ${t('other_items.accrual.label')}`" @click="startAccrualEdit">
+                    <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.edit" /></svg>
+                  </button>
+                  <button v-if="canClearAccrual" type="button" data-test="accrual-clear" :disabled="busy" class="inline-flex h-6 w-6 items-center justify-center rounded text-neutral-400 hover:bg-neutral-100 hover:text-danger-600"
+                    :title="t('other_items.accrual.clear')" :aria-label="t('other_items.accrual.clear')" @click="clearAccrual">
+                    <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.x" /></svg>
+                  </button>
+                </dd>
+              </div>
+              <FieldNote v-if="!accrualEditing" :error="accrualError" />
+              <div v-if="accrualEditing" class="mt-2">
+                <form class="space-y-2" data-test="accrual-form" @submit.prevent="saveAccrual">
+                  <div class="grid grid-cols-2 gap-2">
+                    <label class="text-xs text-neutral-600">{{ t('accrual_period.from') }}
+                      <DateInput v-model="accrualFrom" :aria-invalid="!!accrualError" :class="['mt-1 block', formDateInput, accrualError ? 'border-danger-500' : '']" data-test="accrual-from" />
+                    </label>
+                    <label class="text-xs text-neutral-600">{{ t('accrual_period.to') }}
+                      <DateInput v-model="accrualTo" :aria-invalid="!!accrualError" :class="['mt-1 block', formDateInput, accrualError ? 'border-danger-500' : '']" data-test="accrual-to" />
+                    </label>
+                  </div>
+                  <p class="text-xs text-neutral-500" data-test="accrual-hint">{{ t('other_items.accrual.hint') }}</p>
+                  <FieldNote :error="accrualError" />
+                  <div class="flex flex-wrap items-center gap-2">
+                    <button type="submit" :disabled="busy" :class="btnFilled('primary')" class="whitespace-nowrap">
+                      <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.check" /></svg>
+                      {{ t('common.save') }}
+                    </button>
+                    <button type="button" :class="btnOutline('neutral')" class="whitespace-nowrap" @click="closeAccrualEdit">
+                      <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.x" /></svg>
+                      {{ t('common.cancel') }}
+                    </button>
+                  </div>
+                </form>
               </div>
             </div>
           </dl>

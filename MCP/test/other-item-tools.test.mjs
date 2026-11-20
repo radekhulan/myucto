@@ -207,6 +207,17 @@ test('úprava konceptu složí celý doklad a jediný protiřádek přepočte', 
   }]);
 });
 
+test('úprava konceptu drží období rozlišení výnosu, přepnutí na závazek ho zahodí', async () => {
+  const client = new FakeClient({ 'GET /accounting/other-items/12': draft({ side: 'receivable', accrual_from: '2094-07-01', accrual_to: '2095-06-30' }) });
+  await tool('update_other_item').run(client, { id: 12, title: 'Syntetický nájem' }, 'update_other_item');
+  assert.equal(writes(client)[0].body.accrual_from, '2094-07-01');
+  assert.equal(writes(client)[0].body.accrual_to, '2095-06-30');
+
+  await tool('update_other_item').run(client, { id: 12, side: 'payable' }, 'update_other_item');
+  assert.equal(writes(client)[1].body.accrual_from, null);
+  assert.equal(writes(client)[1].body.accrual_to, null);
+});
+
 test('úprava konceptu s vlastním druhem ho drží, vestavěný druh ho zruší', async () => {
   const client = new FakeClient({ 'GET /accounting/other-items/12': draft({ kind: 'other', kind_id: '5' }) });
   await tool('update_other_item').run(client, { id: 12, title: 'Syntetický nájem klubovny' }, 'update_other_item');

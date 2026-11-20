@@ -511,6 +511,30 @@ nabízí úhrady z banky. U potvrzené nebo zaúčtované položky účet dopln�
 opravíte přímo v detailu tlačítkem **Upravit** u pole **Účet protistrany**.
 Změna nemění zaúčtování ani saldo a zapíše se do aktivity položky.
 
+U pohledávky v podvojném účetnictví lze v sekci **Účtování** vyplnit **Časové rozlišení výnosu**,
+tedy období **Od**–**Do**, do kterého výnos patří (roční nájem, licence, předplatné). Pozná-li
+aplikace období z názvu položky (např. „Předplatné na rok 2027“ nebo „Nájem od 1. 10. 2026 do 30. 9. 2027“), nabídne ho k převzetí.
+Pohledávka se zaúčtuje celá. Uzávěrka pak z výnosových účtů jejího zápisu
+(třída 6, včetně přeúčtování dvojic) odloží na 384 část připadající na dny za
+rozvahovým dnem a otevření dalšího roku ji rozpustí zpět do výnosů. Pohledávka
+zaúčtovaná jen proti rozvahovému nebo nákladovému účtu výnos nemá a uzávěrka
+z ní nic neodloží. Storno nebo přeúčtování pohledávky (i jen její dvojice) v pozdějším
+roce funguje jako dobropis: uzávěrka roku storna vrátí zbylou odloženou část do výnosů
+na původní účty a nový zápis se odloží znovu na své účty. Stejně se započte i storno nebo
+oprava zpětně datovaná do dřívějšího roku
+(viz [§ 72.4.4](72_Uzaverka.md#7244-kroky-4-a-5-dohadne-polozky-a-casove-rozliseni)).
+Období se zadává spolu se začátkem i koncem. U závazku ani v daňové evidenci
+ho zadat nejde. U zaúčtované položky ho nastavíte nebo zrušíte v detailu
+ikonou tužky u pole **Časové rozlišení výnosu** v kartě **Údaje položky** (prázdná pole Od a Do
+rozlišení zruší). U položky bez vlastního zápisu (v daňové evidenci, potvrzené, stornované
+nebo převzaté ze zůstatku deníku) uložené období jen zrušíte ikonou křížku u stejného pole;
+znovu ho jde zadat až u zaúčtované položky s vlastním zápisem. Zápis v deníku se
+tím nemění a změna se zapíše do aktivity položky. Položku v uzavřeném účetním
+období (kteréhokoli zápisu, ze kterého uzávěrka odkládá) už změnit nelze, rozlišení je součástí uzávěrky. Je-li v probíhající
+uzávěrce už zaúčtovaný, dokončený nebo přeskočený krok **Časové rozlišení**, nejdřív ho v uzávěrce vraťte,
+pak období změňte a krok spusťte znovu. Stejně se hlídá smazání konceptu s obdobím. Opakování období
+do nově vzniklých položek nepřenáší.
+
 Na detailu lze připojit originály ze [skladu dokumentů](34_Dokumenty.md) a
 akcí **Připojit úhradu** přiřadit volnou bankovní či pokladní úhradu. Bez
 zapnutého automatického párování (níže) se úhrady párují jen ručně. Výběr

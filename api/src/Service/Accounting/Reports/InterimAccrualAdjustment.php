@@ -85,9 +85,7 @@ final class InterimAccrualAdjustment
                     $add($deltas, (string) $account, $part);
                 }
                 $revenue = round($revenue + $deferred, 2);
-                $documents[$row['membership_case_id'] === null
-                    ? 'invoice:' . (int) $row['invoice_id']
-                    : 'membership:' . (int) $row['membership_case_id']] = true;
+                $documents[AccrualDeferralService::deferredRevenueDocumentKey($row)] = true;
             }
 
             if ((int) round($prepaid * 100) !== 0) {

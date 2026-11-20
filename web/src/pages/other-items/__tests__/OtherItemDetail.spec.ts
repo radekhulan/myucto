@@ -4,14 +4,17 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const m = vi.hoisted(() => ({
   canWriteOtherItems: true,
+  toastSuccess: vi.fn(),
   get: vi.fn(),
   allocations: vi.fn(),
   paymentCandidates: vi.fn(),
   updateCounterpartyAccount: vi.fn(),
   updateText: vi.fn(),
+  updateAccrual: vi.fn(),
   removePosted: vi.fn(),
   post: vi.fn(),
   listAccounts: vi.fn(),
+  toastError: vi.fn(),
   mode: 'tax_evidence',
   phone: false,
   route: null as any,
@@ -29,7 +32,7 @@ const m = vi.hoisted(() => ({
 
 vi.mock('@/api/otherItems', () => ({
   otherItemsApi: { get: m.get, allocations: m.allocations, paymentCandidates: m.paymentCandidates,
-    updateCounterpartyAccount: m.updateCounterpartyAccount, updateText: m.updateText, removePosted: m.removePosted, post: m.post, list: m.list, remove: m.remove },
+    updateCounterpartyAccount: m.updateCounterpartyAccount, updateText: m.updateText, updateAccrual: m.updateAccrual, removePosted: m.removePosted, post: m.post, list: m.list, remove: m.remove },
 }))
 vi.mock('@/api/accounting', () => ({ accountingApi: { listAccounts: m.listAccounts } }))
 vi.mock('@/composables/useWindowRefresh', async (importOriginal) => {
@@ -56,7 +59,7 @@ vi.mock('@/api/otherItemSettings', async (importOriginal) => ({
 vi.mock('@/stores/auth', () => ({ useAuthStore: () => ({ canWrite: (key: string) => key !== 'other_items' || m.canWriteOtherItems, canRead: (key: string) => !m.noRead.includes(key) }) }))
 vi.mock('@/composables/useIsPhone', () => ({ useIsPhone: () => ({ get value() { return m.phone } }) }))
 vi.mock('@/stores/supplier', () => ({ useSupplierStore: () => ({ currentSupplier: { accounting_mode: m.mode } }) }))
-vi.mock('@/composables/useToast', () => ({ useToast: () => ({ error: vi.fn(), success: vi.fn() }) }))
+vi.mock('@/composables/useToast', () => ({ useToast: () => ({ error: m.toastError, success: m.toastSuccess }) }))
 vi.mock('@/composables/useFormat', () => ({ formatDate: (v: string) => v, formatMoney: (v: number) => `${v} Kč`,
   statusBadgeClass: (status: string) => `badge badge-${status}` }))
 vi.mock('vue-router', () => ({
@@ -82,6 +85,9 @@ const stubs = { RouterLink: RouterLinkStub, Modal: ModalStub }
 
 // Režim telefonu nesmí přetéct do dalších bloků, ani když telefonní test spadne.
 beforeEach(() => { m.phone = false })
+
+/** Pole data podle data-test (shallowMount: stub DateInput nese atributy). */
+const dateInput = (wrapper: any, test: string): any => wrapper.findAllComponents({ name: 'DateInput' }).find((c: any) => c.attributes('data-test') === test)
 
 describe('OtherItemDetail', () => {
   beforeEach(() => {
@@ -190,6 +196,235 @@ describe('OtherItemDetail', () => {
     expect(wrapper.get('[data-test="allocation-split"]').text())
       .toBe('other_items.allocation_split:{"principal":"1000 Kč","interest":"100 Kč","fee":"20 Kč"}')
     expect(wrapper.text()).toContain('1120 Kč')
+  })
+
+  it('období rozlišení výnosu ukáže u pohledávky v podvojném účetnictví a u zaúčtované ho upraví', async () => {
+    m.mode = 'double_entry'
+    const posted = { id: 9, side: 'receivable', kind: 'claim', title: 'Syntetický nájem', partner_name: null, issued_on: '2099-07-01',
+      due_on: '2099-07-15', currency: 'CZK', amount: 3000, paid_amount: 0, remaining_amount: 3000, status: 'posted',
+      journal_entry_id: 77, accrual_from: null, accrual_to: null }
+    m.get.mockResolvedValue(posted)
+    m.updateAccrual.mockResolvedValue({ ...posted, accrual_from: '2099-07-01', accrual_to: '2100-06-30' })
+    const wrapper = shallowMount(OtherItemDetail)
+    await flushPromises()
+    expect(wrapper.get('[data-test="accrual-period"]').text()).toBe('other_items.accrual.none')
+    await wrapper.get('[data-test="accrual-edit"]').trigger('click')
+    // Pole Od/Do se otevřou rovnou, nápověda je vidět u nich (ne jen v title).
+    expect(wrapper.get('[data-test="accrual-hint"]').text()).toBe('other_items.accrual.hint')
+    dateInput(wrapper, 'accrual-from').vm.$emit('update:modelValue', '2099-07-01')
+    dateInput(wrapper, 'accrual-to').vm.$emit('update:modelValue', '2100-06-30')
+    await wrapper.get('[data-test="accrual-form"]').trigger('submit')
+    await flushPromises()
+    expect(m.updateAccrual).toHaveBeenCalledWith(9, '2099-07-01', '2100-06-30')
+    expect(wrapper.get('[data-test="accrual-period"]').text()).toBe('other_items.accrual.period:{"from":"2099-07-01","to":"2100-06-30"}')
+    expect(m.toastSuccess).toHaveBeenCalledWith('accrual_period.saved')
+  })
+
+  it('zrušení rozlišení v detailu pošle prázdné období a zachová posouzení smazání se zápisem', async () => {
+    m.mode = 'double_entry'
+    const posted = { id: 9, side: 'receivable', kind: 'claim', title: 'Syntetický nájem', partner_name: null, issued_on: '2099-07-01',
+      due_on: '2099-07-15', currency: 'CZK', amount: 3000, paid_amount: 0, remaining_amount: 3000, status: 'posted',
+      journal_entry_id: 77, accrual_from: '2099-07-01', accrual_to: '2100-06-30',
+      posted_deletion: { allowed: true, needs_ack: false, message: null } }
+    m.get.mockResolvedValue(posted)
+    const { posted_deletion: _omitted, ...withoutDeletion } = posted
+    m.updateAccrual.mockResolvedValue({ ...withoutDeletion, accrual_from: null, accrual_to: null })
+    const wrapper = shallowMount(OtherItemDetail)
+    await flushPromises()
+    await wrapper.get('[data-test="accrual-edit"]').trigger('click')
+    const from = dateInput(wrapper, 'accrual-from')
+    expect(from.props('modelValue')).toBe('2099-07-01')
+    from.vm.$emit('update:modelValue', '')
+    dateInput(wrapper, 'accrual-to').vm.$emit('update:modelValue', '')
+    await wrapper.get('[data-test="accrual-form"]').trigger('submit')
+    await flushPromises()
+    expect(m.updateAccrual).toHaveBeenCalledWith(9, null, null)
+    expect(wrapper.get('[data-test="accrual-period"]').text()).toBe('other_items.accrual.none')
+    expect((wrapper.vm as any).item.posted_deletion).toEqual({ allowed: true, needs_ack: false, message: null })
+  })
+
+  it.each([
+    'period_closed', 'accrual_deferral_posted', 'accrual_period_incomplete', 'accrual_period_invalid',
+    'accrual_not_posted', 'is_draft', 'accrual_receivable_only', 'accrual_double_entry_only',
+  ])('odmítnutou změnu období %s ohlásí přeloženou hláškou u polí', async (code) => {
+    m.mode = 'double_entry'
+    m.get.mockResolvedValue({ id: 9, side: 'receivable', kind: 'claim', title: 'Syntetický nájem', partner_name: null,
+      issued_on: '2099-07-01', due_on: '2099-07-15', currency: 'CZK', amount: 3000, paid_amount: 0, remaining_amount: 3000,
+      status: 'posted', journal_entry_id: 77, accrual_from: null, accrual_to: null })
+    m.updateAccrual.mockRejectedValue({ response: { data: { error: { code: `other_items.error.${code}`, message: 'Serverová hláška' } } } })
+    const wrapper = shallowMount(OtherItemDetail)
+    await flushPromises()
+    await wrapper.get('[data-test="accrual-edit"]').trigger('click')
+    await wrapper.get('[data-test="accrual-form"]').trigger('submit')
+    await flushPromises()
+    // Hláška zůstane u polí (toast by zmizel), úprava zůstane otevřená.
+    expect(wrapper.getComponent({ name: 'FieldNote' }).props('error')).toBe(`other_items.accrual.error.${code}`)
+    expect(wrapper.find('[data-test="accrual-form"]').exists()).toBe(true)
+    expect(m.toastError).not.toHaveBeenCalled()
+    // Oprava data hlášku schová.
+    dateInput(wrapper, 'accrual-from').vm.$emit('update:modelValue', '2099-07-01')
+    await flushPromises()
+    expect(wrapper.getComponent({ name: 'FieldNote' }).props('error')).toBe('')
+  })
+
+  it('v daňové evidenci uložené období neupraví, ale jde ho zrušit', async () => {
+    // Potvrzená položka v daňové evidenci nemá vlastní zápis; období zbylo z podvojného účetnictví.
+    const confirmed = { id: 9, side: 'receivable', kind: 'claim', title: 'Syntetický nájem', partner_name: null,
+      issued_on: '2099-07-01', due_on: '2099-07-15', currency: 'CZK', amount: 3000, paid_amount: 0, remaining_amount: 3000,
+      status: 'confirmed', journal_entry_id: null, accrual_from: '2099-07-01', accrual_to: '2100-06-30' }
+    m.get.mockResolvedValue(confirmed)
+    m.updateAccrual.mockResolvedValue({ ...confirmed, accrual_from: null, accrual_to: null })
+    const wrapper = shallowMount(OtherItemDetail)
+    await flushPromises()
+    expect(wrapper.get('[data-test="accrual-period"]').text()).toBe('other_items.accrual.period:{"from":"2099-07-01","to":"2100-06-30"}')
+    expect(wrapper.find('[data-test="accrual-edit"]').exists()).toBe(false)
+    // Zrušení je nevratné: bez souhlasu se nic neodešle.
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValueOnce(false)
+    await wrapper.get('[data-test="accrual-clear"]').trigger('click')
+    expect(confirm).toHaveBeenCalledWith('other_items.accrual.clear_confirm')
+    expect(m.updateAccrual).not.toHaveBeenCalled()
+    confirm.mockReturnValueOnce(true)
+    await wrapper.get('[data-test="accrual-clear"]').trigger('click')
+    await flushPromises()
+    confirm.mockRestore()
+    expect(m.updateAccrual).toHaveBeenCalledWith(9, null, null)
+    expect(wrapper.find('[data-test="accrual"]').exists()).toBe(false)
+  })
+
+  it('zrušení odmítnuté serverem ohlásí u pole', async () => {
+    m.get.mockResolvedValue({ id: 9, side: 'receivable', kind: 'claim', title: 'Syntetický nájem', partner_name: null,
+      issued_on: '2099-07-01', due_on: '2099-07-15', currency: 'CZK', amount: 3000, paid_amount: 0, remaining_amount: 3000,
+      status: 'confirmed', journal_entry_id: null, accrual_from: '2099-07-01', accrual_to: '2100-06-30' })
+    m.updateAccrual.mockRejectedValue({ response: { data: { error: { code: 'other_items.error.period_closed', message: 'x' } } } })
+    const wrapper = shallowMount(OtherItemDetail)
+    await flushPromises()
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValueOnce(true)
+    await wrapper.get('[data-test="accrual-clear"]').trigger('click')
+    await flushPromises()
+    confirm.mockRestore()
+    expect(wrapper.getComponent({ name: 'FieldNote' }).props('error')).toBe('other_items.accrual.error.period_closed')
+  })
+
+  it.each([
+    ['položka ze zůstatku v podvojném účetnictví', 'double_entry', 'posted'],
+    ['stornovaná položka', 'double_entry', 'reversed'],
+  ])('%s bez vlastního zápisu období neupraví, jen zruší', async (_label, mode, status) => {
+    m.mode = mode
+    m.get.mockResolvedValue({ id: 9, side: 'receivable', kind: 'claim', title: 'Syntetický nájem', partner_name: null,
+      issued_on: '2099-07-01', due_on: '2099-07-15', currency: 'CZK', amount: 3000, paid_amount: 0, remaining_amount: 3000,
+      status, journal_entry_id: null, accrual_from: '2099-07-01', accrual_to: '2100-06-30' })
+    const wrapper = shallowMount(OtherItemDetail)
+    await flushPromises()
+    expect(wrapper.find('[data-test="accrual-edit"]').exists()).toBe(false)
+    expect(wrapper.find('[data-test="accrual-clear"]').exists()).toBe(true)
+  })
+
+  it('zrušení úprav po odmítnutí serverem schová i jeho hlášku', async () => {
+    m.mode = 'double_entry'
+    m.get.mockResolvedValue({ id: 9, side: 'receivable', kind: 'claim', title: 'Syntetický nájem', partner_name: null,
+      issued_on: '2099-07-01', due_on: '2099-07-15', currency: 'CZK', amount: 3000, paid_amount: 0, remaining_amount: 3000,
+      status: 'posted', journal_entry_id: 77, accrual_from: null, accrual_to: null })
+    m.updateAccrual.mockRejectedValue({ response: { data: { error: { code: 'other_items.error.accrual_deferral_posted', message: 'x' } } } })
+    const wrapper = shallowMount(OtherItemDetail)
+    await flushPromises()
+    await wrapper.get('[data-test="accrual-edit"]').trigger('click')
+    await wrapper.get('[data-test="accrual-form"]').trigger('submit')
+    await flushPromises()
+    const cancel = wrapper.get('[data-test="accrual-form"]').findAll('button').find(b => b.text().includes('common.cancel'))!
+    await cancel.trigger('click')
+    expect(wrapper.getComponent({ name: 'FieldNote' }).props('error')).toBe('')
+  })
+
+  it('uložení období během načítání nenechá tichou obnovu trvale vypnutou', async () => {
+    m.get.mockResolvedValue({ id: 9, side: 'receivable', kind: 'claim', title: 'Syntetický nájem', partner_name: null,
+      issued_on: '2099-07-01', due_on: '2099-07-15', currency: 'CZK', amount: 3000, paid_amount: 0, remaining_amount: 3000,
+      status: 'confirmed', journal_entry_id: null, accrual_from: '2099-07-01', accrual_to: '2100-06-30' })
+    m.updateAccrual.mockResolvedValue({ id: 9, side: 'receivable', status: 'confirmed', journal_entry_id: null, accrual_from: null, accrual_to: null })
+    const wrapper = shallowMount(OtherItemDetail)
+    await flushPromises()
+    let resolveGet!: (value: unknown) => void
+    m.get.mockReturnValueOnce(new Promise(resolve => { resolveGet = resolve }))
+    void (wrapper.vm as any).load()
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValueOnce(true)
+    await wrapper.get('[data-test="accrual-clear"]').trigger('click')
+    await flushPromises()
+    confirm.mockRestore()
+    resolveGet({ id: 9, side: 'receivable', status: 'confirmed', journal_entry_id: null, accrual_from: '2099-07-01', accrual_to: '2100-06-30' })
+    await flushPromises()
+    expect(m.canRefresh!()).toBe(true)
+  })
+
+  it('neúplné či obrácené období v detailu na server neposílá', async () => {
+    m.mode = 'double_entry'
+    m.get.mockResolvedValue({ id: 9, side: 'receivable', kind: 'claim', title: 'Syntetický nájem', partner_name: null, issued_on: '2099-07-01',
+      due_on: '2099-07-15', currency: 'CZK', amount: 3000, paid_amount: 0, remaining_amount: 3000, status: 'posted',
+      journal_entry_id: 77, accrual_from: null, accrual_to: null })
+    const wrapper = shallowMount(OtherItemDetail)
+    await flushPromises()
+    await wrapper.get('[data-test="accrual-edit"]').trigger('click')
+    dateInput(wrapper, 'accrual-from').vm.$emit('update:modelValue', '2099-07-01')
+    await flushPromises()
+    await wrapper.get('[data-test="accrual-form"]').trigger('submit')
+    await flushPromises()
+    expect(wrapper.getComponent({ name: 'FieldNote' }).props('error')).toBe('other_items.accrual.error.accrual_period_incomplete')
+    dateInput(wrapper, 'accrual-to').vm.$emit('update:modelValue', '2099-06-30')
+    await flushPromises()
+    await wrapper.get('[data-test="accrual-form"]').trigger('submit')
+    await flushPromises()
+    expect(wrapper.getComponent({ name: 'FieldNote' }).props('error')).toBe('other_items.accrual.error.accrual_period_invalid')
+    expect(m.updateAccrual).not.toHaveBeenCalled()
+  })
+
+  it('odpověď uložení období po přepnutí na jinou položku nepřepíše její detail', async () => {
+    m.mode = 'double_entry'
+    m.get.mockResolvedValue({ id: 9, side: 'receivable', kind: 'claim', title: 'Syntetický nájem', partner_name: null, issued_on: '2099-07-01',
+      due_on: '2099-07-15', currency: 'CZK', amount: 3000, paid_amount: 0, remaining_amount: 3000, status: 'posted',
+      journal_entry_id: 77, accrual_from: null, accrual_to: null })
+    let resolveSave!: (value: unknown) => void
+    m.updateAccrual.mockReturnValue(new Promise(resolve => { resolveSave = resolve }))
+    const wrapper = shallowMount(OtherItemDetail)
+    await flushPromises()
+    await wrapper.get('[data-test="accrual-edit"]').trigger('click')
+    dateInput(wrapper, 'accrual-from').vm.$emit('update:modelValue', '2099-07-01')
+    dateInput(wrapper, 'accrual-to').vm.$emit('update:modelValue', '2100-06-30')
+    await wrapper.get('[data-test="accrual-form"]').trigger('submit')
+    m.get.mockResolvedValue({ id: 10, side: 'receivable', kind: 'claim', title: 'Jiná položka', partner_name: null, issued_on: '2099-08-01',
+      due_on: '2099-08-15', currency: 'CZK', amount: 500, paid_amount: 0, remaining_amount: 500, status: 'posted',
+      journal_entry_id: 78, accrual_from: null, accrual_to: null })
+    m.route.params.id = '10'
+    await flushPromises()
+    resolveSave({ id: 9, side: 'receivable', status: 'posted', journal_entry_id: 77, accrual_from: '2099-07-01', accrual_to: '2100-06-30' })
+    await flushPromises()
+    expect((wrapper.vm as any).item.id).toBe(10)
+    expect(wrapper.get('[data-test="accrual-period"]').text()).toBe('other_items.accrual.none')
+  })
+
+  it('smazání konceptu odmítnuté kvůli období ohlásí přeloženou hláškou', async () => {
+    m.get.mockResolvedValue({ id: 9, side: 'receivable', kind: 'claim', title: 'Koncept', partner_name: null,
+      issued_on: '2099-01-01', due_on: '2099-03-10', currency: 'CZK', amount: 3000, paid_amount: 0, remaining_amount: 3000, status: 'draft' })
+    m.remove.mockRejectedValue({ response: { data: { error: { code: 'other_items.error.accrual_deferral_posted', message: 'Serverová hláška' } } } })
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValueOnce(true)
+    const wrapper = shallowMount(OtherItemDetail, { global: { stubs } })
+    await flushPromises()
+    ;(wrapper.findComponent(ActionBar).props('actions') as ActionItem[]).find(a => a.key === 'delete')!.run!()
+    await flushPromises()
+    confirm.mockRestore()
+    expect(m.toastError).toHaveBeenCalledWith('other_items.accrual.error.accrual_deferral_posted')
+  })
+
+  it('období rozlišení výnosu neukáže u závazku, v daňové evidenci ani úpravu u konceptu', async () => {
+    const wrapper = shallowMount(OtherItemDetail)
+    await flushPromises()
+    expect(wrapper.find('[data-test="accrual"]').exists()).toBe(false)
+
+    m.mode = 'double_entry'
+    m.get.mockResolvedValue({ id: 9, side: 'receivable', kind: 'claim', title: 'Syntetický nájem', partner_name: null,
+      issued_on: '2099-07-01', due_on: '2099-07-15', currency: 'CZK', amount: 3000, paid_amount: 0, remaining_amount: 3000,
+      status: 'draft', journal_entry_id: null })
+    const draft = shallowMount(OtherItemDetail)
+    await flushPromises()
+    expect(draft.find('[data-test="accrual"]').exists()).toBe(true)
+    expect(draft.find('[data-test="accrual-edit"]').exists()).toBe(false)
   })
 
   it('doplní poznámku potvrzeného dokladu bez úpravy konceptu', async () => {
@@ -614,6 +849,23 @@ describe('OtherItemDetail obnova a přepínání', () => {
     wrapper.findComponent({ name: 'OtherItemPlans' }).vm.$emit('state', { canSchedule: false, canSplit: false, editing: true })
     await flushPromises()
     expect(m.canRefresh!()).toBe(false)
+  })
+
+  it('rozepsané období rozlišení tichou obnovu odloží a přepnutí na jinou položku ho zavře', async () => {
+    m.mode = 'double_entry'
+    const posted = { id: 9, side: 'receivable', kind: 'claim', title: 'Syntetický nájem', partner_name: null, issued_on: '2099-07-01',
+      due_on: '2099-07-15', currency: 'CZK', amount: 3000, paid_amount: 0, remaining_amount: 3000, status: 'posted',
+      journal_entry_id: 77, accrual_from: null, accrual_to: null }
+    m.get.mockResolvedValue(posted)
+    const wrapper = shallowMount(OtherItemDetail, { global: { stubs } })
+    await flushPromises()
+    expect(m.canRefresh!()).toBe(true)
+    await wrapper.get('[data-test="accrual-edit"]').trigger('click')
+    expect(m.canRefresh!()).toBe(false)
+    m.route.params.id = '10'
+    await flushPromises()
+    expect(wrapper.find('[data-test="accrual-form"]').exists()).toBe(false)
+    expect(m.canRefresh!()).toBe(true)
   })
 
   it('obnova po smazání položky v jiném okně ukáže, že položka neexistuje', async () => {

@@ -208,15 +208,15 @@ final class OtherItemRepository
         $stmt = $this->db->pdo()->prepare(
             'INSERT INTO other_items
               (supplier_id, side, kind, kind_id, title, partner_id, partner_name, issued_on, accounting_on,
-               due_on, currency, amount, exchange_rate, amount_czk, variable_symbol,
+               due_on, accrual_from, accrual_to, currency, amount, exchange_rate, amount_czk, variable_symbol,
                counterparty_account, counterparty_bank_code,
                account_code, counter_account_code, note, created_by, updated_by)
-             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
+             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
         );
         $stmt->execute([
             $supplierId, $data['side'], $data['kind'], $data['kind_id'] ?? null, $data['title'], $data['partner_id'],
             $data['partner_name'], $data['issued_on'], $data['accounting_on'], $data['due_on'],
-            $data['currency'], $data['amount'], $data['exchange_rate'], $data['amount_czk'],
+            $data['accrual_from'] ?? null, $data['accrual_to'] ?? null, $data['currency'], $data['amount'], $data['exchange_rate'], $data['amount_czk'],
             $data['variable_symbol'], $data['counterparty_account'] ?? null, $data['counterparty_bank_code'] ?? null,
             $data['account_code'], $data['counter_account_code'],
             $data['note'], $userId, $userId,
@@ -228,7 +228,7 @@ final class OtherItemRepository
     {
         $stmt = $this->db->pdo()->prepare(
             'UPDATE other_items SET side = ?, kind = ?, kind_id = ?, title = ?, partner_id = ?, partner_name = ?,
-                    issued_on = ?, accounting_on = ?, due_on = ?, currency = ?, amount = ?,
+                    issued_on = ?, accounting_on = ?, due_on = ?, accrual_from = ?, accrual_to = ?, currency = ?, amount = ?,
                     exchange_rate = ?, amount_czk = ?, variable_symbol = ?, counterparty_account = ?,
                     counterparty_bank_code = ?, account_code = ?,
                     counter_account_code = ?, note = ?, updated_by = ?, row_version = row_version + 1
@@ -236,7 +236,8 @@ final class OtherItemRepository
         );
         $stmt->execute([
             $data['side'], $data['kind'], $data['kind_id'] ?? null, $data['title'], $data['partner_id'], $data['partner_name'],
-            $data['issued_on'], $data['accounting_on'], $data['due_on'], $data['currency'], $data['amount'],
+            $data['issued_on'], $data['accounting_on'], $data['due_on'], $data['accrual_from'] ?? null, $data['accrual_to'] ?? null,
+            $data['currency'], $data['amount'],
             $data['exchange_rate'], $data['amount_czk'], $data['variable_symbol'],
             $data['counterparty_account'] ?? null, $data['counterparty_bank_code'] ?? null, $data['account_code'],
             $data['counter_account_code'], $data['note'], $userId, $id, $supplierId,

@@ -3453,6 +3453,7 @@ final class Routes
             $g->delete('/other-items/{id:[0-9]+}',             [\MyInvoice\Action\Accounting\OtherItemAction::class, 'delete']);
             $g->put   ('/other-items/{id:[0-9]+}/counterparty-account', [\MyInvoice\Action\Accounting\OtherItemAction::class, 'updateCounterpartyAccount']);
             $g->put   ('/other-items/{id:[0-9]+}/text',        [\MyInvoice\Action\Accounting\OtherItemAction::class, 'updateText']);
+            $g->put   ('/other-items/{id:[0-9]+}/accrual',     [\MyInvoice\Action\Accounting\OtherItemAction::class, 'updateAccrual']);
             $g->delete('/other-items/{id:[0-9]+}/posted',      [\MyInvoice\Action\Accounting\OtherItemAction::class, 'deletePosted']);
             $g->post  ('/other-items/{id:[0-9]+}/post',        [\MyInvoice\Action\Accounting\OtherItemAction::class, 'post']);
             $g->post  ('/other-items/{id:[0-9]+}/reverse',     [\MyInvoice\Action\Accounting\OtherItemAction::class, 'reverse']);

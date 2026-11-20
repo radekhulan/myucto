@@ -2445,15 +2445,17 @@ final class ClosingService
             ));
             $membershipCaseId = $row['membership_case_id'] === null ? null : (int) $row['membership_case_id'];
             $invoiceId = $row['invoice_id'] === null ? null : (int) $row['invoice_id'];
+            $otherItemId = $row['other_item_id'] === null ? null : (int) $row['other_item_id'];
             if ($row['source'] === 'invoice') {
                 // Členský předpis nese období na účetním případu a rozpouští se dál z něj.
                 $snapshot[] = AccrualDeferralService::snapshotItem((int) $row['item_id'], (int) $invoiceId, $from, $to, $netCzk, $accounts);
             }
-            $documentKey = $membershipCaseId === null ? 'invoice:' . $invoiceId : 'membership:' . $membershipCaseId;
+            $documentKey = AccrualDeferralService::deferredRevenueDocumentKey($row);
             $documents[$documentKey] = [
                 'source' => (string) $row['source'],
                 'invoice_id' => $invoiceId,
                 'membership_case_id' => $membershipCaseId,
+                'other_item_id' => $otherItemId,
                 'invoice_number' => (string) $row['varsymbol'],
                 'deferred_amount' => round(($documents[$documentKey]['deferred_amount'] ?? 0.0) + $deferred, 2),
             ];
@@ -2462,6 +2464,7 @@ final class ClosingService
                 'item_id' => (int) $row['item_id'],
                 'invoice_id' => $invoiceId,
                 'membership_case_id' => $membershipCaseId,
+                'other_item_id' => $otherItemId,
                 'invoice_number' => (string) $row['varsymbol'],
                 'description' => (string) $row['description'],
                 'currency_code' => (string) $row['currency_code'],

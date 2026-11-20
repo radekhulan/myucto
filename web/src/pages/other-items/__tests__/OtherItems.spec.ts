@@ -167,6 +167,17 @@ describe('OtherItems', () => {
     expect(m.list).toHaveBeenCalledTimes(2)
   })
 
+  it('smazání konceptu odmítnuté kvůli období ohlásí přeloženou hláškou', async () => {
+    m.list.mockResolvedValue({ items: [item('draft')], sources: [], total: 1, per_page: 50 })
+    m.remove.mockRejectedValue({ response: { data: { error: { code: 'other_items.error.accrual_deferral_posted', message: 'Serverová hláška' } } } })
+    const wrapper = mountList()
+    await flushPromises()
+    const remove = wrapper.findAll('button').find(button => button.text().includes('common.delete'))
+    await remove!.trigger('click')
+    await flushPromises()
+    expect(m.toastError).toHaveBeenCalledWith('other_items.accrual.error.accrual_deferral_posted')
+  })
+
   it('u zaúčtované položky nenabídne úpravu ani smazání a detail otevře klikem na řádek', async () => {
     m.list.mockResolvedValue({ items: [item('posted')], sources: [], total: 1, per_page: 50 })
     const wrapper = mountList()
