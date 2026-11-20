@@ -462,13 +462,14 @@ watch(() => [props.item.id, props.item.paid_amount, props.item.status], () => vo
         </button>
       </div>
       <dl class="grid gap-x-6 gap-y-2 text-sm sm:grid-cols-2">
+        <!-- Dvojice v řádku: četnost s koncem, příští termín s jeho názvem; žádný údaj nezůstane sám v levém sloupci. -->
         <div class="flex justify-between gap-3"><dt class="text-neutral-500">{{ t('other_items.plans.frequency') }}</dt><dd>{{ t(`other_items.plans.${schedule.frequency}`) }}</dd></div>
-        <div class="flex justify-between gap-3"><dt class="text-neutral-500">{{ t('other_items.plans.next_on') }}</dt><dd class="font-mono" data-test="schedule-next">{{ schedule.next_on ? formatDate(schedule.next_on) : '—' }}</dd></div>
-        <div v-if="schedule.next_title" class="flex justify-between gap-3 sm:col-span-2"><dt class="shrink-0 text-neutral-500">{{ t('other_items.plans.next_title') }}</dt><dd class="min-w-0 break-words text-right" data-test="schedule-next-title">{{ schedule.next_title }}</dd></div>
         <div class="flex justify-between gap-3"><dt class="text-neutral-500">{{ t('other_items.plans.ends_label') }}</dt><dd class="font-mono">{{ schedule.ends_on ? formatDate(schedule.ends_on) : t('other_items.plans.no_end') }}</dd></div>
+        <div class="flex justify-between gap-3"><dt class="text-neutral-500">{{ t('other_items.plans.next_on') }}</dt><dd class="font-mono" data-test="schedule-next">{{ schedule.next_on ? formatDate(schedule.next_on) : '—' }}</dd></div>
+        <div v-if="schedule.next_title" class="flex justify-between gap-3"><dt class="shrink-0 text-neutral-500">{{ t('other_items.plans.next_title') }}</dt><dd class="min-w-0 break-words text-right" data-test="schedule-next-title">{{ schedule.next_title }}</dd></div>
         <!-- Kdo smí rozvrh měnit, vidí volbu jako zaškrtávátko níž; ostatním stačí údaj. -->
         <div v-if="!(canWrite && sourceActive)" class="flex justify-between gap-3"><dt class="text-neutral-500">{{ t('other_items.plans.auto_post_short') }}</dt><dd data-test="schedule-auto-post">{{ t(schedule.auto_post ? 'common.yes' : 'common.no') }}</dd></div>
-        <div v-if="schedule.created_at" class="flex justify-between gap-3 sm:col-span-2"><dt class="text-neutral-500">{{ t('other_items.plans.created_by') }}</dt><dd data-test="schedule-created-by">{{ schedule.created_by_name || t('other_items.plans.unknown_user') }} · {{ formatDate(schedule.created_at) }}</dd></div>
+        <div v-if="schedule.created_at" class="flex justify-between gap-3" :class="{ 'sm:col-span-2': canWrite && sourceActive }"><dt class="text-neutral-500">{{ t('other_items.plans.created_by') }}</dt><dd data-test="schedule-created-by">{{ schedule.created_by_name || t('other_items.plans.unknown_user') }} · {{ formatDate(schedule.created_at) }}</dd></div>
       </dl>
       <p v-if="!sourceActive" class="mt-3 text-sm text-neutral-500">{{ t('other_items.plans.source_inactive') }}</p>
       <label v-if="canWrite && sourceActive" class="mt-3 flex items-center gap-2 text-sm">

@@ -168,6 +168,26 @@ final class OtherItemScheduleTitleTest extends TestCase
         self::assertSame([$preview['title']], $this->titles($result['created_ids']));
     }
 
+    /**
+     * Znovu naplánovaný zdroj navazuje na položky zrušeného opakování. Náhled názvu musí
+     * ukázat stejný první termín, jaký založení skutečně vytvoří, ne první měsíc po zdroji.
+     */
+    public function testPreviewAfterCancelledScheduleMatchesFirstCreatedOccurrence(): void
+    {
+        $source = $this->items->create($this->supplierId, $this->input(), null);
+        $old = $this->schedules->create($this->supplierId, (int) $source['id'], ['frequency' => 'monthly'], null);
+        self::assertCount(2, $this->schedules->generate($this->supplierId, (int) $old['id'], '2099-03-31', null)['created_ids']);
+        $this->schedules->delete($this->supplierId, (int) $old['id']);
+
+        $settings = ['frequency' => 'monthly', 'title_template' => 'Nájem {MM}/{YYYY}'];
+        $preview = $this->schedules->previewTitle($this->supplierId, (int) $source['id'], $settings);
+        self::assertSame(['title' => 'Nájem 04/2099', 'issued_on' => '2099-04-30'], $preview);
+        $schedule = $this->schedules->create($this->supplierId, (int) $source['id'], $settings, null);
+        self::assertSame('2099-04-30', $schedule['next_on']);
+        $result = $this->schedules->generate($this->supplierId, (int) $schedule['id'], '2099-04-30', null);
+        self::assertSame([$preview['title']], $this->titles($result['created_ids']));
+    }
+
     /** Automaticky zaúčtovaný výskyt má v popisu zápisu dosazený název. */
     public function testAutoPostedOccurrenceUsesSubstitutedTitleInJournal(): void
     {

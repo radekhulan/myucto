@@ -12,13 +12,14 @@ const m = vi.hoisted(() => ({
   createSchedule: vi.fn(),
   setStatus: vi.fn(),
   deleteSchedule: vi.fn(),
+  setTitle: vi.fn(),
   translated: [] as string[],
 }))
 
 vi.mock('@/api/otherItemPlans', () => ({
   otherItemPlansApi: { schedules: m.schedules, installments: m.installments, schedule: m.schedule,
     planLoan: m.planLoan, setInstallments: m.setInstallments, createSchedule: m.createSchedule,
-    setStatus: m.setStatus, deleteSchedule: m.deleteSchedule },
+    setStatus: m.setStatus, deleteSchedule: m.deleteSchedule, setTitle: m.setTitle },
 }))
 vi.mock('@/stores/auth', () => ({ useAuthStore: () => ({ canWrite: () => m.canWrite }) }))
 vi.mock('@/stores/supplier', () => ({ useSupplierStore: () => ({ currentSupplier: { accounting_mode: 'tax_evidence' } }) }))
@@ -31,6 +32,7 @@ vi.mock('vue-i18n', () => ({
 }))
 
 import OtherItemPlans from '../OtherItemPlans.vue'
+import OtherItemScheduleTitleFields from '../OtherItemScheduleTitleFields.vue'
 
 /** Dialog se slotem i patičkou, ať jdou ovládat jeho pole a tlačítka. */
 const ModalStub = { template: '<div data-test="modal"><slot /><slot name="footer" /></div>' }
@@ -290,7 +292,7 @@ describe('OtherItemPlans', () => {
     await wrapper.get('[data-test="schedule-form"] select').setValue('quarterly')
     await wrapper.get('[data-test="schedule-form"]').trigger('submit')
     await flushPromises()
-    expect(m.createSchedule).toHaveBeenCalledWith(9, { frequency: 'quarterly', ends_on: null, auto_post: false })
+    expect(m.createSchedule).toHaveBeenCalledWith(9, { frequency: 'quarterly', ends_on: null, auto_post: false, title_template: null, title_sync_period: false })
     expect(wrapper.find('[data-test="modal"]').exists()).toBe(false)
     expect(wrapper.find('[data-test="schedule-card"]').exists()).toBe(true)
   })
@@ -437,5 +439,212 @@ describe('OtherItemPlans', () => {
     await wrapper.setProps({ item: item({ paid_amount: 0, remaining_amount: 3000 }) })
     await flushPromises()
     expect(m.schedules).toHaveBeenCalledTimes(2)
+  })
+
+  it('karta opakování řadí údaje do dvojic: četnost s koncem, příští termín s názvem', async () => {
+    m.installments.mockResolvedValue([])
+    m.schedules.mockResolvedValue([{ id: 4, source_item_id: 9 }])
+    m.schedule.mockResolvedValue({ id: 4, source_item_id: 9, frequency: 'monthly', anchor_on: '2099-01-01', due_days: 14,
+      ends_on: null, next_index: 1, status: 'active', auto_post: false, template: {}, next_on: '2099-02-01', next_title: 'Nájem 02',
+      occurrences: [], created_at: '2099-01-01 10:00:00', created_by_name: 'Syntetický uživatel', finished: false, source_active: true })
+    const wrapper = shallowMount(OtherItemPlans, { props: { item: item({ paid_amount: 0, remaining_amount: 3000 }) }, global: { stubs } })
+    await flushPromises()
+    const rows = wrapper.findAll('[data-test="schedule-card"] dl > div')
+    expect(rows.map(row => row.get('dt').text())).toEqual([
+      'other_items.plans.frequency', 'other_items.plans.ends_label',
+      'other_items.plans.next_on', 'other_items.plans.next_title',
+      'other_items.plans.created_by',
+    ])
+    expect(rows.map(row => row.classes().includes('sm:col-span-2'))).toEqual([false, false, false, false, true])
+  })
+
+  describe('název opakování v dialozích', () => {
+    const open = { item: item({ paid_amount: 0, remaining_amount: 3000 }) }
+    const base = { id: 4, source_item_id: 9, frequency: 'monthly', anchor_on: '2099-01-01', due_days: 14, ends_on: null,
+      next_index: 2, status: 'active', auto_post: false, next_on: '2099-03-01', occurrences: [], template: { title: 'A' },
+      next_title: 'A', finished: false, source_active: true }
+    const fields = (wrapper: ReturnType<typeof shallowMount>) => wrapper.getComponent(OtherItemScheduleTitleFields)
+    beforeEach(() => { m.installments.mockResolvedValue([]) })
+
+    it('založení: náhled dostane četnost a konec, šablona jde do založení, chyba s polem zůstane u pole', async () => {
+      m.createSchedule.mockRejectedValueOnce({ response: { data: { error: {
+        code: 'other_items.error.unknown_title_placeholder', field: 'title_template', message: 'Neznámý znak {FOO}.' } } } })
+      const wrapper = shallowMount(OtherItemPlans, { props: open, global: { stubs } })
+      await flushPromises()
+      ;(wrapper.vm as unknown as { openSchedule: () => void }).openSchedule()
+      await flushPromises()
+      expect(fields(wrapper).props('frequency')).toBe('monthly')
+      expect(fields(wrapper).props('endsOn')).toBeNull()
+      expect(fields(wrapper).props('itemId')).toBe(9)
+      await wrapper.get('[data-test="schedule-form"] select').setValue('quarterly')
+      await flushPromises()
+      expect(fields(wrapper).props('frequency')).toBe('quarterly')
+      fields(wrapper).vm.$emit('update:modelValue', { title_template: 'Nájem {FOO}', title_sync_period: true })
+      await flushPromises()
+      await wrapper.get('[data-test="schedule-form"]').trigger('submit')
+      await flushPromises()
+      expect(m.createSchedule).toHaveBeenCalledWith(9, expect.objectContaining({ frequency: 'quarterly', title_template: 'Nájem {FOO}', title_sync_period: true }))
+      expect(wrapper.find('[data-test="modal"]').exists()).toBe(true)
+      expect(fields(wrapper).props('submitError')).toMatchObject({ code: 'other_items.error.unknown_title_placeholder', field: 'title_template' })
+      expect(toastError).not.toHaveBeenCalled()
+      // Oprava textu starou hlášku u pole smaže.
+      fields(wrapper).vm.$emit('update:modelValue', { title_template: 'Nájem {MM}', title_sync_period: true })
+      await flushPromises()
+      expect(fields(wrapper).props('submitError')).toBeNull()
+    })
+
+    it('založení: změna četnosti smaže starou chybu u pole, chyba bez pole jde do toastu, chyba konce k poli Konec', async () => {
+      m.createSchedule
+        .mockRejectedValueOnce({ response: { data: { error: { code: 'other_items.error.occurrence_title_too_long', field: 'title_template', message: 'x' } } } })
+        .mockRejectedValueOnce({ response: { data: { error: { code: 'other_items.error.invalid_status', message: 'Neaktivní.' } } } })
+        .mockRejectedValueOnce({ response: { data: { error: { code: 'other_items.error.invalid_end', field: 'ends_on', message: 'x' } } } })
+      const wrapper = shallowMount(OtherItemPlans, { props: open, global: { stubs } })
+      await flushPromises()
+      ;(wrapper.vm as unknown as { openSchedule: () => void }).openSchedule()
+      await flushPromises()
+      await wrapper.get('[data-test="schedule-form"]').trigger('submit')
+      await flushPromises()
+      expect(fields(wrapper).props('submitError')).not.toBeNull()
+      await wrapper.get('[data-test="schedule-form"] select').setValue('quarterly')
+      await flushPromises()
+      expect(fields(wrapper).props('submitError')).toBeNull()
+      await wrapper.get('[data-test="schedule-form"]').trigger('submit')
+      await flushPromises()
+      expect(toastError).toHaveBeenCalledTimes(1)
+      expect(fields(wrapper).props('submitError')).toBeNull()
+      await wrapper.get('[data-test="schedule-form"]').trigger('submit')
+      await flushPromises()
+      expect(wrapper.find('[data-test="schedule-ends-error"]').exists()).toBe(true)
+      expect(toastError).toHaveBeenCalledTimes(1)
+    })
+
+    it('úprava: dialog načte rozvrh znovu, převezme šablonu, Uložit název ji uloží a karta ukáže název příští položky', async () => {
+      m.schedules.mockResolvedValue([{ id: 4, source_item_id: 9 }])
+      m.schedule.mockResolvedValue({ ...base, template: { title: 'Nájem', title_template: 'Nájem {MM}' }, next_title: 'Nájem 03',
+        occurrences: [{ occurrence_index: 0, item_id: 9, issued_on: '2099-01-01', status: 'confirmed' },
+          { occurrence_index: 1, item_id: 10, issued_on: '2099-02-01', status: 'draft' },
+          { occurrence_index: 2, item_id: 11, issued_on: '2099-03-01', status: 'cancelled' }] })
+      const wrapper = shallowMount(OtherItemPlans, { props: open, global: { stubs } })
+      await flushPromises()
+      expect(wrapper.get('[data-test="schedule-next-title"]').text()).toBe('Nájem 03')
+      const loads = m.schedule.mock.calls.length
+      await wrapper.get('[data-test="schedule-edit"]').trigger('click')
+      await flushPromises()
+      expect(m.schedule.mock.calls.length).toBe(loads + 1)
+      expect(wrapper.find('[data-test="schedule-edit-form"]').exists()).toBe(true)
+      expect(fields(wrapper).props('modelValue')).toEqual({ title_template: 'Nájem {MM}', title_sync_period: false })
+      // Už vytvořené položky se nepřejmenují; i stornovaný výskyt posunul hranici nové šablony.
+      expect(wrapper.get('[data-test="schedule-title-created-until"]').text()).toContain('"date":"2099-03-01"')
+      // Existující rozvrh: náhled bere jeho příští termín, četnost se nepředává.
+      expect(fields(wrapper).props('frequency')).toBeUndefined()
+      expect(wrapper.emitted('state')!.at(-1)![0]).toMatchObject({ editing: true })
+      fields(wrapper).vm.$emit('update:modelValue', { title_template: 'Nájem Q{Q}', title_sync_period: false })
+      await flushPromises()
+      let finish: () => void = () => {}
+      m.setTitle.mockImplementationOnce(() => new Promise(resolve => {
+        finish = () => resolve({ ...base, template: { title: 'Nájem', title_template: 'Nájem Q{Q}' }, next_title: 'Nájem Q1' })
+      }))
+      await wrapper.get('[data-test="schedule-title-form"]').trigger('submit')
+      await flushPromises()
+      // Během ukládání dialog nejde zavřít ani rozvrh zrušit.
+      expect(wrapper.get('[data-test="schedule-close"]').attributes('disabled')).toBeDefined()
+      expect(wrapper.get('[data-test="schedule-title-submit"]').attributes('disabled')).toBeDefined()
+      expect(wrapper.get('[data-test="schedule-delete"]').attributes('disabled')).toBeDefined()
+      finish()
+      await flushPromises()
+      expect(m.setTitle).toHaveBeenCalledWith(4, { title_template: 'Nájem Q{Q}', title_sync_period: false })
+      expect(wrapper.find('[data-test="modal"]').exists()).toBe(false)
+      expect(wrapper.get('[data-test="schedule-next-title"]').text()).toBe('Nájem Q1')
+    })
+
+    it('úprava: chyba názvu s polem zůstane u pole a dialog otevřený, bez pole jde do toastu', async () => {
+      m.schedules.mockResolvedValue([{ id: 4, source_item_id: 9 }])
+      m.schedule.mockResolvedValue(base)
+      m.setTitle
+        .mockRejectedValueOnce({ response: { data: { error: { code: 'other_items.error.occurrence_title_too_long', field: 'title_template', message: 'x' } } } })
+        .mockRejectedValueOnce({ response: { status: 409, data: { error: { code: 'other_items.error.schedule_finished', message: 'Skončilo.' } } } })
+      const wrapper = shallowMount(OtherItemPlans, { props: open, global: { stubs } })
+      await flushPromises()
+      await wrapper.get('[data-test="schedule-edit"]').trigger('click')
+      await flushPromises()
+      await wrapper.get('[data-test="schedule-title-form"]').trigger('submit')
+      await flushPromises()
+      expect(wrapper.find('[data-test="schedule-edit-form"]').exists()).toBe(true)
+      expect(fields(wrapper).props('submitError')).toMatchObject({ field: 'title_template' })
+      expect(toastError).not.toHaveBeenCalled()
+      fields(wrapper).vm.$emit('update:modelValue', { title_template: 'Kratší', title_sync_period: false })
+      await flushPromises()
+      expect(fields(wrapper).props('submitError')).toBeNull()
+      await wrapper.get('[data-test="schedule-title-form"]').trigger('submit')
+      await flushPromises()
+      expect(toastError).toHaveBeenCalledTimes(1)
+      expect(fields(wrapper).props('submitError')).toBeNull()
+    })
+
+    it('Uložit název chybí u skončeného rozvrhu a stornovaného zdroje; pozastavený před koncem ho má', async () => {
+      m.schedules.mockResolvedValue([{ id: 4, source_item_id: 9 }])
+      const variants: Array<[Record<string, unknown>, Partial<OtherItem>, boolean]> = [
+        [{ finished: true, next_on: null, next_title: null, ends_on: '2099-02-28' }, {}, false],
+        [{ status: 'paused', next_on: null, finished: false }, {}, true],
+        [{ status: 'paused', next_on: null, next_title: null, finished: true }, {}, false],
+        [{}, { status: 'cancelled' }, false],
+      ]
+      for (const [schedule, overrides, editable] of variants) {
+        m.schedule.mockResolvedValue({ ...base, ...schedule })
+        const wrapper = shallowMount(OtherItemPlans, { props: { item: item({ paid_amount: 0, remaining_amount: 3000, ...overrides }) }, global: { stubs } })
+        await flushPromises()
+        await wrapper.get('[data-test="schedule-edit"]').trigger('click')
+        await flushPromises()
+        expect(wrapper.find('[data-test="schedule-edit-form"]').exists()).toBe(true)
+        expect(wrapper.find('[data-test="schedule-title-form"]').exists()).toBe(editable)
+        expect(wrapper.find('[data-test="schedule-title-submit"]').exists()).toBe(editable)
+        expect(wrapper.find('[data-test="schedule-close"]').exists()).toBe(true)
+        wrapper.unmount()
+      }
+    })
+
+    it('zastaralé odpovědi: znovunačtení ani uložení názvu pro předchozí položku neotevře dialog ani nepřepíše kartu', async () => {
+      m.schedules.mockImplementation((id: number) => Promise.resolve([{ id: id === 9 ? 4 : 5, source_item_id: id }]))
+      m.schedule.mockImplementation((id: number) => Promise.resolve({ ...base, id, source_item_id: id === 4 ? 9 : 12,
+        template: { title: id === 4 ? 'A' : 'B' }, next_title: id === 4 ? 'A' : 'B' }))
+      const wrapper = shallowMount(OtherItemPlans, { props: open, global: { stubs } })
+      await flushPromises()
+      let resolveOld: (v: unknown) => void = () => {}
+      m.schedule.mockImplementationOnce(() => new Promise(resolve => { resolveOld = resolve }))
+      await wrapper.get('[data-test="schedule-edit"]').trigger('click')
+      await wrapper.setProps({ item: item({ id: 12, paid_amount: 0, remaining_amount: 3000 }) })
+      await flushPromises()
+      resolveOld({ ...base, id: 4, source_item_id: 9, template: { title: 'A' }, next_title: 'A' })
+      await flushPromises()
+      expect(wrapper.find('[data-test="modal"]').exists()).toBe(false)
+      expect(wrapper.get('[data-test="schedule-next-title"]').text()).toBe('B')
+
+      await wrapper.get('[data-test="schedule-edit"]').trigger('click')
+      await flushPromises()
+      let resolveSave: (v: unknown) => void = () => {}
+      m.setTitle.mockImplementationOnce(() => new Promise(resolve => { resolveSave = resolve }))
+      await wrapper.get('[data-test="schedule-title-form"]').trigger('submit')
+      await wrapper.setProps({ item: item({ id: 9, paid_amount: 0, remaining_amount: 3000 }) })
+      await flushPromises()
+      resolveSave({ ...base, id: 5, source_item_id: 12, template: { title: 'B' }, next_title: 'B uložený' })
+      await flushPromises()
+      expect(wrapper.get('[data-test="schedule-next-title"]').text()).toBe('A')
+    })
+
+    it('úprava smazaného rozvrhu (404): hláška a karta zmizí bez nového načtení plánů', async () => {
+      m.schedules.mockResolvedValue([{ id: 4, source_item_id: 9 }])
+      m.schedule.mockResolvedValue(base)
+      const wrapper = shallowMount(OtherItemPlans, { props: open, global: { stubs } })
+      await flushPromises()
+      const loads = m.schedules.mock.calls.length
+      m.schedule.mockRejectedValueOnce({ response: { status: 404, data: { error: { code: 'other_items.error.schedule_not_found', message: 'x' } } } })
+      await wrapper.get('[data-test="schedule-edit"]').trigger('click')
+      await flushPromises()
+      expect(toastError).toHaveBeenCalledTimes(1)
+      expect(wrapper.find('[data-test="modal"]').exists()).toBe(false)
+      expect(wrapper.find('[data-test="schedule-card"]').exists()).toBe(false)
+      expect(m.schedules.mock.calls.length).toBe(loads)
+      expect(wrapper.emitted('state')!.at(-1)![0]).toMatchObject({ canSchedule: true })
+    })
   })
 })
