@@ -7,6 +7,8 @@ namespace MyInvoice\Action\PurchaseInvoice;
 use MyInvoice\Http\GuardsDocumentLock;
 use MyInvoice\Http\Json;
 use MyInvoice\Http\SupplierGuard;
+use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Infrastructure\Database\TransactionFailure;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Repository\PurchaseInvoiceRepository;
 use MyInvoice\Service\Accounting\DocumentLockService;
@@ -39,6 +41,7 @@ final class SetPurchaseInvoiceItemsAction
         private readonly \MyInvoice\Service\Accounting\Dimension\DraftItemDimensionRealign $itemDimensions,
         private readonly \MyInvoice\Service\PurchaseInvoice\PurchaseAdvanceDeduction $advanceDeduction,
         private readonly PurchaseAdvanceLinks $advanceLinks,
+        private readonly Connection $db,
     ) {}
 
     public function __invoke(Request $request, Response $response, array $args): Response
@@ -101,16 +104,39 @@ final class SetPurchaseInvoiceItemsAction
         // Dimenze položek konceptu vrátí k položkám podle `id` z těla ({@see DraftItemDimensionRealign}).
         $isDraft = (string) ($existing['status'] ?? '') === 'draft';
         $dimensionsBefore = $isDraft ? $this->itemDimensions->snapshot('purchase_invoice', $id) : [];
-        $this->repo->replaceItems($id, $items, (bool) ($existing['reverse_charge'] ?? false));
-        if ($isDraft) {
-            $this->itemDimensions->realign($supplierId, 'purchase_invoice', $id, $dimensionsBefore, $items);
+        // Řádky a přepočet záloh faktury (PurchaseAdvanceLinks::sync) v jedné transakci:
+        // odpočet zálohy nad její částku řádky neuloží a doklad zůstane beze změny.
+        $pdo = $this->db->pdo();
+        $ownTx = !$pdo->inTransaction();
+        if ($ownTx) {
+            $pdo->beginTransaction();
+        } else {
+            $pdo->exec('SAVEPOINT set_purchase_items');
         }
-        $this->calc->recompute($id);
-        $this->advanceDeduction->clearHeaderAdvanceWhenDeducted($supplierId, $id);
         try {
+            $this->repo->replaceItems($id, $items, (bool) ($existing['reverse_charge'] ?? false));
+            if ($isDraft) {
+                $this->itemDimensions->realign($supplierId, 'purchase_invoice', $id, $dimensionsBefore, $items);
+            }
+            $this->calc->recompute($id);
+            $this->advanceDeduction->clearHeaderAdvanceWhenDeducted($supplierId, $id);
             $this->advanceLinks->sync($supplierId, $id);
-        } catch (PurchaseAdvanceLinkException $e) {
-            return Json::error($response, $e->errorCode, $e->getMessage(), $e->status);
+            if ($ownTx) {
+                $pdo->commit();
+            } else {
+                $pdo->exec('RELEASE SAVEPOINT set_purchase_items');
+            }
+        } catch (\Throwable $e) {
+            if ($ownTx && $pdo->inTransaction()) {
+                $pdo->rollBack();
+            } elseif (!$ownTx && $pdo->inTransaction() && !TransactionFailure::aborted($e)) {
+                $pdo->exec('ROLLBACK TO SAVEPOINT set_purchase_items');
+                $pdo->exec('RELEASE SAVEPOINT set_purchase_items');
+            }
+            if ($e instanceof PurchaseAdvanceLinkException) {
+                return Json::error($response, $e->errorCode, $e->getMessage(), $e->status);
+            }
+            throw $e;
         }
 
         $user =(array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);

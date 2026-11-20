@@ -529,7 +529,9 @@ function addAdvanceDeductionLines(advance: PurchaseInvoiceBrief) {
   const unit = units.value.find(u => u.is_default)?.code || 'ks'
   for (const line of lines) {
     form.value.items.push({
-      description: t('purchase_invoice.advance_deduction.line_description', { number: line.tax_document_number }),
+      description: line.opening_balance
+        ? t('purchase_invoice.advance_deduction.line_description_opening', { number: advanceLabel(advance) })
+        : t('purchase_invoice.advance_deduction.line_description', { number: line.tax_document_number }),
       quantity: 1,
       duration_minutes: null,
       unit,
@@ -2403,6 +2405,8 @@ useWindowTitle(
               <p v-if="advanceHasDdkp(adv.id) && !hasAdvanceDeductionLine(adv.id)" class="text-xs text-warning-700">{{ t('purchase_invoice.advance_deduction.missing') }}</p>
               <p v-else-if="hasAdvanceDeductionLine(adv.id)" class="text-xs text-neutral-600">{{ t('purchase_invoice.advance_deduction.present') }}</p>
               <p v-else-if="advanceDeductionLines[adv.id]" class="text-xs text-neutral-600">{{ t('purchase_invoice.advance_deduction.no_ddkp') }}</p>
+              <p v-if="advanceDeductionLines[adv.id]?.some(l => l.opening_balance)" class="text-xs text-neutral-600"
+                data-test="advance-opening-hint">{{ t('purchase_invoice.advance_deduction.opening_hint') }}</p>
             </li>
           </ul>
         </div>

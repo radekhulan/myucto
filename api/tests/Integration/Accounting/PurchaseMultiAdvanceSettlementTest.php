@@ -243,7 +243,164 @@ final class PurchaseMultiAdvanceSettlementTest extends BankPostingTestCase
         self::assertSame([], $this->documentRows($plain));
     }
 
+    /**
+     * Záloha z počátečních stavů (DDKP i úhrada v předchozím programu, na 314 jen základ)
+     * vedle zálohy s DDKP: odečte ji řádek s DPH dopočtenou z částky zálohy, daň řádku
+     * vrátí odpočet (343 D) a základ zúčtuje 314 zálohy na nulu.
+     */
+    public function testOpeningBalanceAdvanceIsDeductedByLineWithVat(): void
+    {
+        $vendor = $this->client('Dodavatel energie POCSTAV');
+        [$a1, $e1, $d1] = $this->paidAdvanceWithDdkp('ZAL-P1', $vendor, 1000.00, 210.00);
+        [$opening, $openingEntry] = $this->openingAdvance('ZAL-P0', $vendor, 1210.00, 1000.00);
+
+        $deduction = new PurchaseAdvanceDeduction($this->db);
+        self::assertTrue($deduction->isOpeningAdvance($this->supplierId, $opening));
+        self::assertFalse($deduction->isOpeningAdvance($this->supplierId, $a1), 'Záloha s DDKP není z počátečních stavů.');
+        $proposal = $deduction->linesFromTaxDocuments($this->supplierId, $opening);
+        self::assertCount(1, $proposal);
+        self::assertTrue($proposal[0]['opening_balance']);
+        self::assertNull($proposal[0]['tax_document_id']);
+        self::assertSame([-100000, -21000, -121000], [self::cents($proposal[0]['base']), self::cents($proposal[0]['vat']), self::cents($proposal[0]['gross'])]);
+        self::assertSame($this->vatRateId, $proposal[0]['vat_rate_id']);
+
+        $final = $this->purchase('VYU-P', $vendor, 'invoice', null, null, '2099-12-15', [
+            [4000.00, 840.00],
+            [-1000.00, -210.00, $a1],
+            [$proposal[0]['base'], $proposal[0]['vat'], $opening],
+        ]);
+        $this->linkAll($final, [$a1, $opening]);
+        self::assertSame([$a1 => 100000, $opening => 100000], $this->documentRows($final), 'Čerpání zálohy z počátečních stavů = základ řádku.');
+        self::assertSame(0, self::cents($this->piRow($final)['advance_paid_amount']), 'Hlavička zálohu z počátečních stavů neodečítá.');
+        self::assertSame([], $deduction->finalsMissingDeduction($this->supplierId, self::YEAR . '-12-31'));
+
+        $entryId = $this->postFinal($final);
+        $byAcc = $this->linesByAccountCode($entryId);
+        self::assertSame(400000, self::cents($byAcc[$this->expenseAccount($byAcc)]['debit']));
+        self::assertSame(84000, self::cents($byAcc['343.100']['debit']));
+        self::assertSame(42000, self::cents($byAcc['343.100']['credit']), '343 D = vrácení odpočtu z DDKP i ze zálohy z počátečních stavů.');
+        self::assertSame(442000, self::cents($byAcc['321']['credit']));
+        self::assertSame([100000, 100000], $this->pairAmounts($entryId, '314'), '314 D = základ každé zálohy.');
+        $this->assertBalanced($entryId);
+        self::assertSame(0, self::cents($this->accountSums([$e1, $d1, $openingEntry, $entryId])['314'] ?? 0),
+            '314 obou záloh (i zálohy z počátečních stavů) po vyúčtování na nule.');
+    }
+
+    /** Bez odpočtového řádku se faktura se zálohou z počátečních stavů nezaúčtuje a kontrola ji najde. */
+    public function testOpeningBalanceAdvanceWithoutDeductionLineIsRejected(): void
+    {
+        $vendor = $this->client('Dodavatel energie POCSTAV2');
+        [$a1] = $this->paidAdvanceWithDdkp('ZAL-Q1', $vendor, 1000.00, 210.00);
+        [$opening] = $this->openingAdvance('ZAL-Q0', $vendor, 1210.00, 1000.00);
+        $final = $this->purchase('VYU-Q', $vendor, 'invoice', null, null, '2099-12-15', [
+            [4000.00, 840.00],
+            [-1000.00, -210.00, $a1],
+        ]);
+        $this->linkAll($final, [$a1, $opening]);
+
+        $missing = (new PurchaseAdvanceDeduction($this->db))->finalsMissingDeduction($this->supplierId, self::YEAR . '-12-31');
+        self::assertSame([[$final, $opening, true]], array_map(static fn (array $m): array => [$m['id'], $m['advance_id'], $m['opening_balance']], $missing));
+        self::assertSame(21000, self::cents($missing[0]['amount']), 'Daň, kterou by faktura uplatnila podruhé.');
+        $this->assertPostingRejected($final, 'počátečních stavech');
+
+        // Jediná záloha v hlavičce: stejné pravidlo.
+        [$single] = $this->openingAdvance('ZAL-Q2', $vendor, 605.00, 500.00);
+        $headerOnly = $this->purchase('VYU-Q2', $vendor, 'invoice', $single, null, '2099-12-15', [[1000.00, 210.00]]);
+        $this->assertPostingRejected($headerOnly, 'počátečních stavech');
+        $withLine = $this->purchase('VYU-Q3', $vendor, 'invoice', null, null, '2099-12-15', [[1000.00, 210.00], [-500.00, -105.00, $single]]);
+        $this->db->pdo()->prepare('UPDATE purchase_invoices SET advance_purchase_invoice_id = NULL WHERE id = ?')->execute([$headerOnly]);
+        $this->container->get(PurchaseInvoiceRepository::class)->linkAdvance($withLine, $single, $this->supplierId);
+        $this->db->pdo()->prepare('UPDATE purchase_invoices SET advance_paid_amount = 0 WHERE id = ?')->execute([$withLine]);
+        $byAcc = $this->linesByAccountCode($this->postFinal($withLine));
+        self::assertSame(10500, self::cents($byAcc['343.100']['credit']));
+        self::assertSame(50000, self::cents($byAcc['314']['credit']), 'Jediná záloha z počátečních stavů: 314 D = základ řádku.');
+    }
+
+    /** `PUT …/items`: odpočet nad částku zálohy řádky neuloží (422, doklad beze změny). */
+    public function testSetItemsRollsBackOnOverdeduction(): void
+    {
+        $vendor = $this->client('Dodavatel energie RADKY');
+        [$a1] = $this->paidAdvanceWithDdkp('ZAL-R1', $vendor, 1000.00, 210.00);
+        $a2 = $this->purchase('ZAL-R2', $vendor, 'advance', null, null, '2099-03-05', [[800.00, 0.00]]);
+        $final = $this->purchase('VYU-R', $vendor, 'invoice', null, null, '2099-12-15', [
+            [4000.00, 840.00],
+            [-1000.00, -210.00, $a1],
+        ]);
+        $this->linkAll($final, [$a1, $a2]);
+        $this->db->pdo()->prepare("UPDATE purchase_invoices SET status = 'draft' WHERE id = ?")->execute([$final]);
+        $before = $this->itemsSnapshot($final);
+        $rowsBefore = $this->documentRows($final);
+
+        $action = $this->container->get(\MyInvoice\Action\PurchaseInvoice\SetPurchaseInvoiceItemsAction::class);
+        $res = $this->callAction($action, '__invoke', 'PUT', 'admin', ['items' => [
+            ['description' => 'Spotřeba', 'quantity' => 1, 'unit' => 'ks', 'unit_price_without_vat' => 4000, 'vat_rate_id' => $this->vatRateId],
+            ['description' => 'Odpočet', 'quantity' => 1, 'unit' => 'ks', 'unit_price_without_vat' => -2000, 'vat_rate_id' => $this->vatRateId,
+                'advance_purchase_invoice_id' => $a1],
+        ]], ['id' => (string) $final]);
+
+        self::assertSame(422, $res['status'], json_encode($res['body'], JSON_UNESCAPED_UNICODE) ?: '');
+        self::assertSame('advance_overdeducted', $res['body']['error']['code'] ?? $res['body']['code'] ?? null);
+        self::assertSame($before, $this->itemsSnapshot($final), 'Řádky se neuložily.');
+        self::assertSame($rowsBefore, $this->documentRows($final), 'Čerpání záloh beze změny.');
+        self::assertTrue($this->db->pdo()->inTransaction(), 'Transakce testu zůstala otevřená.');
+    }
+
     // ── fixtury ──────────────────────────────────────────────────────────────
+
+    /**
+     * Záloha převzatá z předchozího programu: stav uhrazeno, v MyÚčtu bez úhrady a bez DDKP,
+     * zastoupená v otevíracím zápisu (314 MD jen základ) vazbou na doklad.
+     *
+     * @return array{0:int, 1:int} záloha, otevírací zápis
+     */
+    private function openingAdvance(string $number, int $vendor, float $gross, float $base): array
+    {
+        $advance = $this->purchase($number, $vendor, 'advance', null, null, '2098-11-05', [[$gross, 0.00]]);
+        $this->db->pdo()->prepare("UPDATE purchase_invoices SET status = 'paid', paid_at = '2098-11-05' WHERE id = ?")->execute([$advance]);
+        $map = $this->accounts->codeToIdMap($this->supplierId);
+        $entry = $this->journal->insert([
+            'supplier_id' => $this->supplierId,
+            'period_id'   => $this->periodId,
+            'entry_date'  => self::YEAR . '-01-01',
+            'document_no' => 'PS-' . $number,
+            'description' => 'Počáteční stav zálohy',
+            'source_type' => 'opening',
+            'source_id'   => null,
+            'posted_at'   => date('Y-m-d H:i:s'),
+            'posted_by'   => $this->userId,
+        ], [
+            ['account_id' => $map['314']['id'], 'side' => 'debit', 'amount' => $base],
+            ['account_id' => $map['701']['id'], 'side' => 'credit', 'amount' => $base],
+        ]);
+        $this->db->pdo()->prepare(
+            "INSERT INTO journal_entry_document_links (supplier_id, entry_id, doc_type, doc_id) VALUES (?, ?, 'purchase_invoice', ?)"
+        )->execute([$this->supplierId, $entry, $advance]);
+        return [$advance, $entry];
+    }
+
+    private function assertPostingRejected(int $finalId, string $message): void
+    {
+        try {
+            $this->posting->buildFromPurchaseInvoice($this->supplierId, $finalId);
+            self::fail('Faktura se zálohou z počátečních stavů bez odpočtu se nesmí zaúčtovat.');
+        } catch (\MyInvoice\Service\Accounting\PostingException $e) {
+            self::assertSame('advance_settlement_ambiguous', $e->errorCode);
+            self::assertStringContainsString($message, $e->getMessage());
+        }
+    }
+
+    /** @return list<array{0:string, 1:int, 2:?int}> */
+    private function itemsSnapshot(int $id): array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT description, total_with_vat, advance_purchase_invoice_id FROM purchase_invoice_items WHERE purchase_invoice_id = ? ORDER BY id'
+        );
+        $stmt->execute([$id]);
+        return array_map(
+            static fn (array $r): array => [(string) $r['description'], self::cents($r['total_with_vat']), $r['advance_purchase_invoice_id'] !== null ? (int) $r['advance_purchase_invoice_id'] : null],
+            $stmt->fetchAll(\PDO::FETCH_ASSOC),
+        );
+    }
 
     /** @param list<int> $advanceIds první jde do hlavičky, další se přidají */
     private function linkAll(int $finalId, array $advanceIds): void

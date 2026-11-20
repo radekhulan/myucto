@@ -3692,6 +3692,10 @@ final class PostingService
             $this->appendDeductedAdvanceSettlementPurchase($supplierId, $pi, $adv, $advIsStandaloneDdkp, $lines, $deduction);
             return;
         }
+        if ((new PurchaseAdvanceDeduction($this->db))->isOpeningAdvance($supplierId, $advId)) {
+            $this->appendOpeningAdvanceSettlementPurchase($supplierId, $pi, $adv, $lines, $deduction);
+            return;
+        }
         if ($deduction['active']) {
             throw new PostingException(
                 'advance_settlement_ambiguous',
@@ -3719,11 +3723,74 @@ final class PostingService
     }
 
     /**
+     * Zúčtování zálohy z počátečních stavů ({@see PurchaseAdvanceDeduction::advanceFromOpeningSql()}):
+     * zálohová faktura převzatá z předchozího programu, kde proběhla úhrada i DDKP. DPH z ní
+     * je uplatněná a na 314 leží jen základ, v MyÚčtu ale DDKP ani úhrada zaúčtované nejsou.
+     * Faktura ji proto musí odečíst odpočtovým řádkem s DPH, jak ji uvádí doklad dodavatele;
+     * daň řádku vrací odpočet (343 D) stejně jako u zálohy s DDKP. Místo kontroly proti DDKP
+     * musí hrubá částka odpočtu sedět s částkou zálohy v toleranci
+     * {@see ADVANCE_DEDUCTION_TOLERANCE_CZK}. Zúčtuje se základ odpočtu 321 MD / 314 D
+     * (zbytek zálohy na 314 po DPH), takže 314 zálohy skončí na nule.
+     *
+     * @param array<string,mixed> $pi
+     * @param array<string,mixed> $adv
+     * @param list<array{account_code:string, side:'debit'|'credit', amount:float, cost_center?:?string}> $lines
+     * @param array{active:bool, base:float, foreign_base:float, vat:float, gross:float, item_ids:list<int>} $deduction odpočet této zálohy
+     */
+    private function appendOpeningAdvanceSettlementPurchase(int $supplierId, array $pi, array $adv, array &$lines, array $deduction, bool $headerHoldsOtherAdvances = false): void
+    {
+        $advId = (int) $adv['id'];
+        $finalId = (int) $pi['id'];
+        $advanceGross = round((float) ($adv['total_with_vat'] ?? 0) * $this->fxRate($adv), 2);
+        if (!$deduction['active']) {
+            throw new PostingException(
+                'advance_settlement_ambiguous',
+                'Záloha #' . $advId . ' je převzatá v počátečních stavech: DPH z ní byla uplatněná v předchozím programu '
+                    . 'a na účtu záloh zůstal jen základ. Konečná faktura #' . $finalId . ' ji musí odečíst řádkem s DPH, '
+                    . 'jak ji uvádí doklad dodavatele (' . number_format($advanceGross, 2, ',', ' ') . ' Kč). Doplňte na fakturu '
+                    . 'odpočet zálohy („Doplnit odpočet zálohy").',
+            );
+        }
+        if (abs($deduction['gross'] - $advanceGross) > self::ADVANCE_DEDUCTION_TOLERANCE_CZK) {
+            throw new PostingException(
+                'advance_settlement_ambiguous',
+                sprintf(
+                    'Konečná faktura #%d odečítá zálohu #%d z počátečních stavů částkou %.2f Kč s DPH, ale záloha je na %.2f Kč. '
+                        . 'Odpočet zálohy musí odpovídat její částce. Opravte odpočtový řádek, nebo zaúčtujte ručně.',
+                    $finalId,
+                    $advId,
+                    $deduction['gross'],
+                    $advanceGross,
+                ),
+            );
+        }
+        if (!$headerHoldsOtherAdvances && self::cents((float) ($pi['advance_paid_amount'] ?? 0)) !== 0) {
+            throw new PostingException(
+                'advance_settlement_ambiguous',
+                'Konečná faktura #' . $finalId . ' odečítá zálohu odpočtovým řádkem a zároveň v hlavičce (Uhrazená záloha '
+                    . number_format((float) $pi['advance_paid_amount'], 2, ',', ' ') . '). Záloha by se odečetla dvakrát. '
+                    . 'Uhrazenou zálohu v hlavičce vynulujte.',
+            );
+        }
+        if (self::cents($deduction['base']) <= 0) {
+            return;
+        }
+        ['debit' => $draw, 'credit' => $advAcc] = $this->advanceSettlementAccounts($supplierId, 'purchase');
+        if ($draw === $advAcc) {
+            return;
+        }
+        $lines[] = $this->pairHint($this->line($draw, 'debit', $deduction['base'], null), 'pair_group', 'advance');
+        $lines[] = $this->pairHint($this->line($advAcc, 'credit', $deduction['base'], null), 'pair_group', 'advance');
+    }
+
+    /**
      * Zúčtování záloh konečné faktury, která vyúčtovává víc záloh ({@see PurchaseAdvanceLinks}).
      * Každá záloha dostane vlastní pár 321 MD / 314 D podle stejných pravidel jako jediná
      * záloha v hlavičce:
      *   - záloha s DDKP zbytkem po dani DDKP, který musí sedět se základem JEJÍCH
      *     odpočtových řádků ({@see appendDeductedAdvanceSettlementPurchase}),
+     *   - záloha z počátečních stavů základem svých odpočtových řádků
+     *     ({@see appendOpeningAdvanceSettlementPurchase}),
      *   - záloha bez DDKP zaúčtovanou úhradou (faktura ji odečítá v hlavičce jako uhrazenou
      *     zálohu). Bez stropu výší faktury: přeplatek záloh nad vyúčtované plnění zůstane
      *     na 321 jako pohledávka za dodavatelem, stejně jako u zálohy s DDKP. Stejnou částku
@@ -3754,6 +3821,10 @@ final class PostingService
             $own = $deduction['by_advance'][$advId] ?? self::noPurchaseDeduction();
             if ($this->purchaseTaxDocumentIds($supplierId, $advId, $advIsStandaloneDdkp) !== []) {
                 $this->appendDeductedAdvanceSettlementPurchase($supplierId, $pi, $adv, $advIsStandaloneDdkp, $lines, $own, true);
+                continue;
+            }
+            if ((new PurchaseAdvanceDeduction($this->db))->isOpeningAdvance($supplierId, $advId)) {
+                $this->appendOpeningAdvanceSettlementPurchase($supplierId, $pi, $adv, $lines, $own, true);
                 continue;
             }
             if ($own['active']) {

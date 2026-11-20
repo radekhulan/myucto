@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Service\PurchaseInvoice;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Service\Accounting\Activation\OpeningBalanceDocuments;
 use PDO;
 
 /**
@@ -69,8 +70,45 @@ final class PurchaseAdvanceDeduction
     }
 
     /**
-     * Dvojice konečná faktura × záloha s živým DDKP, kde faktura odpočet té zálohy nenese:
-     * daň z DDKP je uplatněná a konečná faktura ji v plné výši uplatní podruhé. Faktura
+     * Záloha z počátečních stavů (alias zálohy): zálohová faktura převzatá z předchozího
+     * programu jako doklad zastoupený v počátečních stavech
+     * ({@see OpeningBalanceDocuments}), bez živého DDKP v systému. DDKP i úhrada proběhly
+     * v předchozím programu, DPH z ní je uplatněná a na 314 leží jen základ. Konečná
+     * faktura ji proto musí odečíst řádkem s DPH stejně jako zálohu s DDKP.
+     */
+    public static function advanceFromOpeningSql(string $advance): string
+    {
+        self::assertAlias($advance);
+        return "({$advance}.document_kind = 'advance' AND NOT " . self::advanceHasTaxDocumentSql($advance) . '
+                 AND ' . OpeningBalanceDocuments::inOpeningSql('purchase_invoice', $advance) . ')';
+    }
+
+    /** Zálohu `$advance` musí konečná faktura odečíst odpočtovým řádkem (DDKP nebo počáteční stavy). */
+    public static function advanceRequiresDeductionLineSql(string $advance): string
+    {
+        return '(' . self::advanceHasTaxDocumentSql($advance) . ' OR ' . self::advanceFromOpeningSql($advance) . ')';
+    }
+
+    /** Je záloha zálohou z počátečních stavů ({@see advanceFromOpeningSql()})? */
+    public function isOpeningAdvance(int $supplierId, int $advanceId): bool
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT 1 FROM purchase_invoices a WHERE a.id = ? AND a.supplier_id = ? AND ' . self::advanceFromOpeningSql('a')
+        );
+        $stmt->execute([$advanceId, $supplierId]);
+        return $stmt->fetchColumn() !== false;
+    }
+
+    /** Odečítá se záloha odpočtovým řádkem (má živý DDKP, nebo je z počátečních stavů)? */
+    public function requiresDeductionLine(int $supplierId, int $advanceId): bool
+    {
+        return $this->taxDocuments($supplierId, $advanceId) !== [] || $this->isOpeningAdvance($supplierId, $advanceId);
+    }
+
+    /**
+     * Dvojice konečná faktura × záloha s živým DDKP nebo z počátečních stavů
+     * ({@see advanceFromOpeningSql()}), kde faktura odpočet té zálohy nenese: daň zálohy
+     * je uplatněná a konečná faktura ji v plné výši uplatní podruhé. Faktura
      * s víc zálohami ({@see PurchaseAdvanceLinks}) se posuzuje po zálohách, takže chybějící
      * odpočet jediné z nich se ukáže i vedle odpočtů ostatních.
      * Bere se všechno s DUZP (bez DUZP datem vystavení) do `$to` včetně starších období,
@@ -104,21 +142,31 @@ final class PurchaseAdvanceDeduction
                JOIN purchase_invoices f ON f.id = l.final_id
                JOIN purchase_invoices a ON a.id = l.advance_id AND a.supplier_id = f.supplier_id
               WHERE f.supplier_id = ? AND f.document_kind = 'invoice' AND f.status NOT IN ('draft', 'cancelled'){$where}
-                AND " . self::advanceHasTaxDocumentSql('a') . '
+                AND " . self::advanceRequiresDeductionLineSql('a') . '
                 AND NOT ' . self::finalDeductsAdvanceSql('f', 'a.id') . '
               ORDER BY f.tax_date, f.id, a.id'
         );
         $stmt->execute($params);
-        return array_map(static fn (array $r): array => [
-            'id'                    => (int) $r['id'],
-            'vendor_invoice_number' => $r['vendor_invoice_number'] !== null ? (string) $r['vendor_invoice_number'] : null,
-            'varsymbol'             => $r['varsymbol'] !== null ? (string) $r['varsymbol'] : null,
-            'tax_date'              => $r['tax_date'] !== null ? (string) $r['tax_date'] : null,
-            'advance_id'            => (int) $r['advance_id'],
-            'total_vat'             => round((float) $r['total_vat'], 2),
-            'tax_document_vat'      => round((float) $r['tax_document_vat'], 2),
-            'amount'                => round((float) $r['tax_document_vat'], 2),
-        ], $stmt->fetchAll(PDO::FETCH_ASSOC) ?: []);
+        $out = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) ?: [] as $r) {
+            $taxDocumentVat = round((float) $r['tax_document_vat'], 2);
+            // Záloha z počátečních stavů DDKP v systému nemá: daň, kterou faktura uplatní
+            // podruhé, je daň navrženého odpočtového řádku.
+            $opening = $this->isOpeningAdvance($supplierId, (int) $r['advance_id']);
+            $amount = $opening ? round(-(float) ($this->openingAdvanceLine($supplierId, (int) $r['advance_id'])['vat'] ?? 0.0), 2) : $taxDocumentVat;
+            $out[] = [
+                'id'                    => (int) $r['id'],
+                'vendor_invoice_number' => $r['vendor_invoice_number'] !== null ? (string) $r['vendor_invoice_number'] : null,
+                'varsymbol'             => $r['varsymbol'] !== null ? (string) $r['varsymbol'] : null,
+                'tax_date'              => $r['tax_date'] !== null ? (string) $r['tax_date'] : null,
+                'advance_id'            => (int) $r['advance_id'],
+                'total_vat'             => round((float) $r['total_vat'], 2),
+                'tax_document_vat'      => $taxDocumentVat,
+                'amount'                => $amount,
+                'opening_balance'       => $opening,
+            ];
+        }
+        return $out;
     }
 
     /**
@@ -132,7 +180,7 @@ final class PurchaseAdvanceDeduction
                JOIN purchase_invoices f ON f.id = l.final_id
                JOIN purchase_invoices a ON a.id = l.advance_id AND a.supplier_id = f.supplier_id
               WHERE l.final_id = ? AND f.supplier_id = ? AND f.document_kind = 'invoice'
-                AND " . self::advanceHasTaxDocumentSql('a') . '
+                AND " . self::advanceRequiresDeductionLineSql('a') . '
                 AND NOT ' . self::finalDeductsAdvanceSql('f', 'a.id') . '
               LIMIT 1'
         );
@@ -206,17 +254,19 @@ final class PurchaseAdvanceDeduction
 
     /**
      * Řádky odpočtu zálohy podle jejích živých DDKP: za každý DDKP a sazbu DPH jeden
-     * záporný řádek se základem a daní DDKP (v měně dokladu). Editor je vloží do konečné
-     * faktury, popis řádku skládá podle jazyka uživatele.
+     * záporný řádek se základem a daní DDKP (v měně dokladu). Záloha z počátečních stavů
+     * bez DDKP dostane jeden navržený řádek ({@see openingAdvanceLine()}). Editor je vloží
+     * do konečné faktury, popis řádku skládá podle jazyka uživatele.
      *
-     * @return list<array{tax_document_id:int, tax_document_number:string, vat_rate_id:int, vat_rate:float,
-     *                    vat_classification_code:?string, base:float, vat:float, gross:float}>
+     * @return list<array{tax_document_id:?int, tax_document_number:?string, vat_rate_id:int, vat_rate:float,
+     *                    vat_classification_code:?string, base:float, vat:float, gross:float, opening_balance:bool}>
      */
     public function linesFromTaxDocuments(int $supplierId, int $advanceId): array
     {
         $docs = $this->taxDocuments($supplierId, $advanceId);
         if ($docs === []) {
-            return [];
+            $opening = $this->isOpeningAdvance($supplierId, $advanceId) ? $this->openingAdvanceLine($supplierId, $advanceId) : null;
+            return $opening !== null ? [$opening] : [];
         }
         $byId = [];
         foreach ($docs as $doc) {
@@ -253,9 +303,68 @@ final class PurchaseAdvanceDeduction
                 'base'                    => -$base,
                 'vat'                     => -$vat,
                 'gross'                   => -round($base + $vat, 2),
+                'opening_balance'         => false,
             ];
         }
         return $out;
+    }
+
+    /**
+     * Navržený odpočtový řádek zálohy z počátečních stavů ({@see advanceFromOpeningSql()}):
+     * hrubá částka = částka zálohy, sazba z řádků zálohy (nese-li nějakou), jinak základní
+     * sazba DPH k datu zálohy. Daň se dopočte shora z hrubé částky, základ je zbytek.
+     * Dodavatel ji na konečné faktuře odečítá s DPH stejně jako zálohy s DDKP.
+     *
+     * @return array{tax_document_id:null, tax_document_number:null, vat_rate_id:int, vat_rate:float,
+     *               vat_classification_code:null, base:float, vat:float, gross:float, opening_balance:true}|null
+     */
+    public function openingAdvanceLine(int $supplierId, int $advanceId): ?array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT a.total_with_vat, COALESCE(a.tax_date, a.issue_date) AS doc_date,
+                    (SELECT pii.vat_rate_id FROM purchase_invoice_items pii
+                      WHERE pii.purchase_invoice_id = a.id AND pii.vat_rate_snapshot > 0
+                      ORDER BY pii.vat_rate_snapshot DESC, pii.id LIMIT 1) AS item_rate_id,
+                    (SELECT MAX(pii.vat_rate_snapshot) FROM purchase_invoice_items pii
+                      WHERE pii.purchase_invoice_id = a.id AND pii.vat_rate_snapshot > 0) AS item_rate
+               FROM purchase_invoices a
+              WHERE a.id = ? AND a.supplier_id = ?"
+        );
+        $stmt->execute([$advanceId, $supplierId]);
+        $advance = $stmt->fetch(PDO::FETCH_ASSOC);
+        if ($advance === false) {
+            return null;
+        }
+        $rateId = $advance['item_rate_id'] !== null ? (int) $advance['item_rate_id'] : null;
+        $rate = $advance['item_rate'] !== null ? (float) $advance['item_rate'] : null;
+        if ($rateId === null || $rate === null) {
+            // Základní sazba = nejvyšší tuzemská sazba platná k datu zálohy.
+            $base = $this->db->pdo()->prepare(
+                "SELECT id, rate_percent FROM vat_rates
+                  WHERE country = 'CZ' AND is_reverse_charge = 0 AND valid_from <= ? AND (valid_to IS NULL OR valid_to >= ?)
+                  ORDER BY rate_percent DESC, id LIMIT 1"
+            );
+            $base->execute([$advance['doc_date'], $advance['doc_date']]);
+            $row = $base->fetch(PDO::FETCH_ASSOC);
+            if ($row === false) {
+                return null;
+            }
+            $rateId = (int) $row['id'];
+            $rate = (float) $row['rate_percent'];
+        }
+        $gross = round((float) $advance['total_with_vat'], 2);
+        $vat = round($gross * $rate / (100 + $rate), 2);
+        return [
+            'tax_document_id'         => null,
+            'tax_document_number'     => null,
+            'vat_rate_id'             => $rateId,
+            'vat_rate'                => $rate,
+            'vat_classification_code' => null,
+            'base'                    => -round($gross - $vat, 2),
+            'vat'                     => -$vat,
+            'gross'                   => -$gross,
+            'opening_balance'         => true,
+        ];
     }
 
     /**

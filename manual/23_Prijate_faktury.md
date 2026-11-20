@@ -284,6 +284,9 @@ přinést jen rozdíl.
 Když faktura vyúčtovává víc záloh, nabídka **Doplnit odpočet zálohy z DDKP** je u každé zálohy s DDKP zvlášť
 a tlačítko **Vložit odpočty všech záloh** je doplní najednou. Každý odpočtový řádek nese číslo své zálohy.
 Záloha bez DDKP odpočtový řádek nemá: faktura ji odečte v hlavičce jako **Uhrazenou zálohu**.
+Výjimkou je záloha převzatá v počátečních stavech, jejíž DDKP i úhrada proběhly v předchozím programu: odečte se
+odpočtovým řádkem v plné částce zálohy s DPH dopočtenou ze základní sazby (nebo ze sazby na záloze), stejně jako
+ji uvádí doklad dodavatele.
 
 **Jak poznáte, že je hotovo:** faktura má celkovou částku po odečtu zálohy (při přeplatku zápornou), **Uhrazená záloha**
 v hlavičce je nulová a zápis v deníku obsahuje náklad za plnění, DPH faktury (MD 343), vrácení DPH z DDKP (D 343)

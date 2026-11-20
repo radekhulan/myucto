@@ -14648,7 +14648,7 @@ paths:
     get:
       tags: [Purchase invoices]
       summary: Řádky odpočtu poskytnuté zálohy podle jejích daňových dokladů k platbě
-      description: Za každý živý DDKP zálohy a sazbu DPH jeden řádek se základem a daní DDKP se znaménkem minus (v měně dokladu). Záloha bez DDKP vrací prázdný seznam. Řádek vložený na konečnou fakturu nese `advance_purchase_invoice_id` zálohy.
+      description: Za každý živý DDKP zálohy a sazbu DPH jeden řádek se základem a daní DDKP se znaménkem minus (v měně dokladu). Záloha bez DDKP vrací prázdný seznam, kromě zálohy převzaté v počátečních stavech (`opening_balance`); ta dostane jeden navržený řádek s částkou zálohy, sazbou z řádků zálohy nebo základní sazbou k jejímu datu a DPH dopočtenou shora. Řádek vložený na konečnou fakturu nese `advance_purchase_invoice_id` zálohy.
       parameters:
         - { in: query, name: advance_id, required: true, schema: { type: integer, format: int64 } }
       responses:
@@ -14660,13 +14660,15 @@ paths:
                 type: object
                 properties:
                   advance_id: { type: integer, format: int64 }
+                  opening_balance: { type: boolean, description: "Záloha převzatá v počátečních stavech bez DDKP v systému, řádek je navržený z její částky." }
                   lines:
                     type: array
                     items:
                       type: object
                       properties:
-                        tax_document_id: { type: integer, format: int64 }
-                        tax_document_number: { type: string }
+                        tax_document_id: { type: [integer, "null"], format: int64 }
+                        tax_document_number: { type: [string, "null"] }
+                        opening_balance: { type: boolean }
                         vat_rate_id: { type: integer }
                         vat_rate: { type: number }
                         vat_classification_code: { type: [string, "null"] }

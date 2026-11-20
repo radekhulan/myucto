@@ -774,10 +774,14 @@ export interface PurchaseInvoicePayload {
   }>
 }
 
-/** Řádek odpočtu zálohy podle DDKP (GET /purchase-invoices/advance-deduction-lines). Částky záporné. */
+/**
+ * Řádek odpočtu zálohy podle DDKP (GET /purchase-invoices/advance-deduction-lines). Částky záporné.
+ * Záloha z počátečních stavů DDKP v systému nemá: řádek je navržený z její částky (`opening_balance`).
+ */
 export interface PurchaseAdvanceDeductionLine {
-  tax_document_id: number
-  tax_document_number: string
+  tax_document_id: number | null
+  tax_document_number: string | null
+  opening_balance?: boolean
   vat_rate_id: number
   vat_rate: number
   vat_classification_code: string | null

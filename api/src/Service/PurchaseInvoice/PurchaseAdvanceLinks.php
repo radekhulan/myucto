@@ -30,8 +30,9 @@ use PDO;
  * `amount` řádku = Kč, o které faktura sníží zálohu na 314, stejně jako u čerpání
  * z převodu a ze saldokonta, a stejné číslo, které zaúčtuje
  * {@see \MyInvoice\Service\Accounting\PostingService} párem 321 MD / 314 D:
- *   - záloha s daňovým dokladem k platbě (DDKP): základ jejích odpočtových řádků
- *     ({@see PurchaseAdvanceDeduction}) v Kč po řádcích,
+ *   - záloha s daňovým dokladem k platbě (DDKP) a záloha z počátečních stavů
+ *     ({@see PurchaseAdvanceDeduction::advanceFromOpeningSql()}): základ jejích odpočtových
+ *     řádků ({@see PurchaseAdvanceDeduction}) v Kč po řádcích,
  *   - záloha bez DDKP: uhrazená částka ({@see LinkedAdvanceAmount}), kterou faktura odečte
  *     v hlavičce (`advance_paid_amount` = součet těchto záloh). Na rozdíl od jediné zálohy
  *     bez stropu výší faktury: vyúčtování energií končí přeplatkem běžně a ten zůstane
@@ -278,7 +279,8 @@ final class PurchaseAdvanceLinks
                 continue;
             }
             $lines = $linesByAdvance[$advanceId] ?? [];
-            if ($deduction->taxDocuments($supplierId, $advanceId) !== []) {
+            // Záloha s DDKP i záloha z počátečních stavů se odečítá řádkem: čerpání = základ řádků.
+            if ($deduction->requiresDeductionLine($supplierId, $advanceId)) {
                 $base = 0.0;
                 $gross = 0.0;
                 foreach ($lines as $line) {

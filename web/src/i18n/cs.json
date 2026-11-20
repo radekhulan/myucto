@@ -23359,6 +23359,8 @@
       "no_ddkp": "Záloha nemá daňový doklad k platbě, faktura ji odečte v hlavičce jako uhrazenou zálohu.",
       "pick_vendor": "Zálohu lze navázat po výběru dodavatele a měny.",
       "line_description": "Odpočet zálohy, daňový doklad {number}",
+      "line_description_opening": "Odpočet zálohy {number} z počátečních stavů",
+      "opening_hint": "Záloha z počátečních stavů: DPH z ní byla uplatněná v předchozím programu, faktura ji odečte řádkem s DPH dopočtenou z částky zálohy.",
       "badge": "Odpočet zálohy",
       "badge_hint": "Řádek odečítá zálohu s daňovým dokladem k platbě. Nejde na náklad, zúčtuje zálohu na 314."
     },
