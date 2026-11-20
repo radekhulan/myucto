@@ -538,7 +538,9 @@
     },
     "summary_count": "no manual items | 1 manual item | {count} manual items",
     "col_documents": "Documents",
-    "col_posting": "Entry"
+    "col_posting": "Entry",
+    "back_to_list": "← Back to list",
+    "phone_details": "Details"
   },
   "internal_documents": {
     "title": "Internal documents",

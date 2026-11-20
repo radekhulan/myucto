@@ -12,6 +12,7 @@ const m = vi.hoisted(() => ({
   post: vi.fn(),
   listAccounts: vi.fn(),
   mode: 'tax_evidence',
+  phone: false,
   route: null as any,
   refresh: null as null | (() => Promise<unknown>),
   canRefresh: null as null | (() => boolean),
@@ -43,6 +44,7 @@ vi.mock('@/api/otherItemSettings', async (importOriginal) => ({
   otherItemSettingsApi: { get: vi.fn().mockResolvedValue({ document_folder: 'Smlouvy/{YYYY}', document_folder_default: 'Ostatní pohledávky a závazky/{YYYY}/{MM}', is_default: false }), update: vi.fn() },
 }))
 vi.mock('@/stores/auth', () => ({ useAuthStore: () => ({ canWrite: () => true, canRead: (key: string) => !m.noRead.includes(key) }) }))
+vi.mock('@/composables/useIsPhone', () => ({ useIsPhone: () => ({ get value() { return m.phone } }) }))
 vi.mock('@/stores/supplier', () => ({ useSupplierStore: () => ({ currentSupplier: { accounting_mode: m.mode } }) }))
 vi.mock('@/composables/useToast', () => ({ useToast: () => ({ error: vi.fn(), success: vi.fn() }) }))
 vi.mock('@/composables/useFormat', () => ({ formatDate: (v: string) => v, formatMoney: (v: number) => `${v} Kč`,
@@ -57,6 +59,7 @@ vi.mock('vue-i18n', () => ({
 }))
 
 import OtherItemDetail from '../OtherItemDetail.vue'
+import PostingBadge from '@/components/ui/PostingBadge.vue'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import DocumentPostingPanel from '@/components/accounting/DocumentPostingPanel.vue'
@@ -65,10 +68,14 @@ const RouterLinkStub = { props: ['to'], template: '<a :data-to="JSON.stringify(t
 const ModalStub = { template: '<div><slot /><slot name="footer" /></div>' }
 const stubs = { RouterLink: RouterLinkStub, Modal: ModalStub }
 
+// Režim telefonu nesmí přetéct do dalších bloků, ani když telefonní test spadne.
+beforeEach(() => { m.phone = false })
+
 describe('OtherItemDetail', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     m.mode = 'tax_evidence'
+    m.phone = false
     m.noRead = []
     m.route = reactive({ params: { id: '9' } })
     m.listAccounts.mockResolvedValue([])
@@ -205,6 +212,57 @@ describe('OtherItemDetail', () => {
     // Mock překladu vrací klíč, stránka pak ukáže kód stavu. Po splatnosti nese jen štítek v záhlaví.
     expect(wrapper.get('[data-test="payment-state"]').text()).toBe('partial')
     expect(wrapper.get('[data-test="payment-state"]').classes()).toContain('badge-partially_paid')
+  })
+
+  it('záhlaví a karty jako přijatá faktura: číslo s odznaky, název s protistranou, bez kotvy na plány', async () => {
+    m.mode = 'double_entry'
+    m.get.mockResolvedValue({ id: 9, side: 'payable', kind: 'rent', title: 'Syntetický nájem', partner_id: 5, partner_name: 'Syntetická protistrana',
+      issued_on: '2099-01-01', due_on: '2099-02-01', currency: 'CZK', amount: 3000, paid_amount: 0, remaining_amount: 3000, status: 'posted',
+      document_no: 'OZ-2099-0008', journal_entry_id: 41, posted_at: '2099-01-01 10:00:00' })
+    const wrapper = shallowMount(OtherItemDetail, { global: { stubs } })
+    await flushPromises()
+    expect(wrapper.get('[data-test="detail-heading"]').text()).not.toContain('Syntetický nájem')
+    expect(wrapper.get('[data-test="detail-title"]').text()).toBe('Syntetický nájem')
+    expect(wrapper.get('[data-test="detail-kind"]').text()).toContain('other_items.side.payable')
+    expect(wrapper.get('[data-test="detail-partner"]').text()).toContain('Syntetická protistrana')
+    expect(wrapper.findComponent({ name: 'ClientQuickLinks' }).props()).toMatchObject({ clientId: 5, vendor: true })
+    expect(wrapper.findAll('[data-test="detail-cards"] > div')).toHaveLength(3)
+    expect(wrapper.find('a[href="#other-item-plans"]').exists()).toBe(false)
+    expect(wrapper.find('a[href^="#"]').exists()).toBe(false)
+    // Stav „Zaúčtováno“ nese text, štítek jen odkaz; u uhrazené ho pojmenuje.
+    expect(wrapper.findComponent(PostingBadge).props('withLabel')).toBe(false)
+  })
+
+  it('koncept bez protistrany: číslo nahradí #id, bez odkazů na klienta, telefon schová karty za Podrobnosti', async () => {
+    m.mode = 'double_entry'
+    m.phone = true
+    m.get.mockResolvedValue({ id: 12, side: 'receivable', kind: 'fee', title: 'Syntetický poplatek', partner_id: null, partner_name: null,
+      issued_on: '2099-01-01', due_on: '2000-02-01', currency: 'CZK', amount: 500, paid_amount: 0, remaining_amount: 500, status: 'draft', document_no: null })
+    const wrapper = shallowMount(OtherItemDetail, { global: { stubs } })
+    await flushPromises()
+    expect(wrapper.get('[data-test="detail-heading"] .font-mono').text()).toBe('#12')
+    expect(wrapper.findComponent({ name: 'ClientQuickLinks' }).exists()).toBe(false)
+    expect(wrapper.get('[data-test="detail-partner"]').text()).toContain('other_items.no_partner')
+    expect(wrapper.get('[data-test="phone-summary"]').text()).toContain('500')
+    const hidden = () => [wrapper.get('[data-test="detail-cards"]'), wrapper.findComponent({ name: 'DocumentPostingPanel' }),
+      wrapper.findComponent({ name: 'DocumentDimensionsPanel' })].map(part => (part.attributes('style') ?? '').includes('display: none'))
+    expect(hidden()).toEqual([true, true, true])
+    await wrapper.get('[data-test="phone-details-toggle"]').trigger('click')
+    expect(hidden()).toEqual([false, false, false])
+  })
+
+  it('štítek Zaúčtováno pojmenuje u uhrazené položky a u storna chybí', async () => {
+    m.mode = 'double_entry'
+    const base = { id: 9, side: 'payable', kind: 'rent', title: 'Syntetický nájem', partner_name: null, issued_on: '2099-01-01', due_on: '2099-02-01',
+      currency: 'CZK', amount: 3000, document_no: 'OZ-2099-0009', journal_entry_id: 41, posted_at: '2099-01-01 10:00:00' }
+    m.get.mockResolvedValue({ ...base, paid_amount: 3000, remaining_amount: 0, status: 'posted' })
+    const paid = shallowMount(OtherItemDetail, { global: { stubs } })
+    await flushPromises()
+    expect(paid.findComponent(PostingBadge).props('withLabel')).toBe(true)
+    m.get.mockResolvedValue({ ...base, paid_amount: 0, remaining_amount: 3000, status: 'reversed' })
+    const reversed = shallowMount(OtherItemDetail, { global: { stubs } })
+    await flushPromises()
+    expect(reversed.findComponent(PostingBadge).exists()).toBe(false)
   })
 
   it('rozliší neexistující položku od výpadku načtení a při chybě obnovy nechá data', async () => {

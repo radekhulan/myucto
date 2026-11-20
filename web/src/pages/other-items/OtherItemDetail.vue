@@ -32,6 +32,8 @@ import { appIsoDate } from '@/utils/date'
 import { formatAccountNumber } from '@/utils/bankAccount'
 import { cashDocumentLink, journalEntryLink } from '@/utils/journalSourceLink'
 import ListNavArrows from '@/components/ui/ListNavArrows.vue'
+import ClientQuickLinks from '@/components/clients/ClientQuickLinks.vue'
+import { useIsPhone } from '@/composables/useIsPhone'
 import { useListNavigation } from '@/composables/useListNavigation'
 
 const { t } = useI18n()
@@ -63,6 +65,9 @@ const repostLines = ref<OtherItemPostingLine[]>([])
 const repostDate = ref(appIsoDate())
 const repostReason = ref('')
 const postingAccounts = ref<ChartAccount[]>([])
+// Telefon jako u přijaté faktury: souhrn nahoře, karty a účetní panely za tlačítkem Podrobnosti.
+const isPhone = useIsPhone()
+const phoneDetailsOpen = ref(false)
 const isDoubleEntry = computed(() => supplier.currentSupplier?.accounting_mode === 'double_entry')
 const isTaxEvidence = computed(() => supplier.currentSupplier?.accounting_mode === 'tax_evidence')
 const canEdit = computed(() => item.value?.status === 'draft' && auth.canWrite('other_items'))
@@ -509,6 +514,7 @@ const actions = computed<ActionItem[]>(() => {
 })
 
 watch(id, () => {
+  phoneDetailsOpen.value = false
   // Jiná položka ve stejném okně: stará data, rozepsané úpravy, otevřené dialogy ani stav
   // předchozího načtení k ní nepatří (uložení by jinak zapsalo text jedné položky do druhé).
   item.value = null
@@ -539,33 +545,39 @@ onMounted(load)
     <EmptyState v-else-if="notFound" boxed icon="doc" :title="t('other_items.not_found')" :cta="t('other_items.back')" :to="listNav.listPath.value ?? '/other-items'" />
     <EmptyState v-else-if="!item" boxed variant="failed" @action="load" />
     <template v-else>
-      <div class="mb-4 flex flex-wrap items-start justify-between gap-3">
-        <div class="min-w-0">
-          <div class="flex flex-wrap items-center gap-2">
-            <RouterLink :to="backToList" class="text-sm text-primary-700 hover:underline" data-test="back-to-list">← {{ t('other_items.back') }}</RouterLink>
-            <ListNavArrows v-if="listNav.active.value" :has-previous="listNav.hasPrevious.value" :has-next="listNav.hasNext.value"
-              :busy="listNav.busy.value || editingSomething" @previous="listNav.previous" @next="listNav.next" />
-          </div>
-          <div class="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1">
-            <h1 class="text-2xl font-semibold" data-test="detail-heading">
-              <span class="font-mono">{{ item.document_no || t('other_items.status.draft') }}</span>
-              <span class="mx-2 text-neutral-300" aria-hidden="true">·</span>
-              <span>{{ item.title }}</span>
-            </h1>
-            <span class="text-sm" :class="otherItemStatusClass(displayStatus)" data-test="detail-status">{{ statusLabel(displayStatus) }}</span>
-            <span v-if="overdue" class="badge badge-loud rounded px-2 py-0.5 text-xs bg-danger-50 text-danger-700" data-test="detail-overdue">{{ t('other_items.status.overdue') }}</span>
-            <PostingBadge v-if="isDoubleEntry && item.journal_entry_id" :booked-at="item.posted_at ?? item.accounting_on" :journal-entry-id="Number(item.journal_entry_id)" with-label />
-          </div>
-          <p class="mt-0.5 text-sm text-neutral-500">{{ t(`other_items.side.${item.side}`) }} · {{ otherItemKindLabel(t, item) }}<span v-if="item.partner_name"> · {{ item.partner_name }}</span></p>
-          <a href="#other-item-plans" class="mt-2 inline-flex items-center gap-1 text-sm font-medium text-primary-700 hover:underline">
-            <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.calendar" /></svg>
-            {{ t('other_items.plans.schedule_title') }} · {{ t('other_items.plans.installments_title') }}
-          </a>
-        </div>
+      <div class="max-w-5xl space-y-4" data-test="detail-layout">
+      <div class="flex items-center gap-2">
+        <ListNavArrows v-if="listNav.active.value" :has-previous="listNav.hasPrevious.value" :has-next="listNav.hasNext.value"
+          :busy="listNav.busy.value || editingSomething" @previous="listNav.previous" @next="listNav.next" />
+        <RouterLink :to="backToList" class="text-sm text-neutral-600 hover:text-neutral-900" data-test="back-to-list">{{ t('other_items.back_to_list') }}</RouterLink>
+      </div>
+
+      <!-- Záhlaví jako u přijaté faktury: číslo a odznaky v nadpisu, akce vpravo. -->
+      <div class="flex flex-col gap-3 md:flex-row md:items-start md:justify-between md:gap-4">
+        <h1 class="flex min-w-0 flex-wrap items-center gap-3 text-2xl font-semibold" data-test="detail-heading">
+          <span v-if="item.document_no" class="font-mono">{{ item.document_no }}</span>
+          <span v-else class="font-mono text-neutral-400">#{{ item.id }}</span>
+          <span class="rounded px-2 py-0.5 text-xs font-normal" :class="otherItemStatusClass(displayStatus)" data-test="detail-status">{{ statusLabel(displayStatus) }}</span>
+          <span v-if="overdue" class="badge badge-loud rounded bg-danger-50 px-2 py-0.5 text-xs font-normal text-danger-700" data-test="detail-overdue">{{ t('other_items.status.overdue') }}</span>
+          <span class="rounded bg-neutral-100 px-2 py-0.5 text-xs font-normal text-neutral-600" data-test="detail-kind">{{ t(`other_items.side.${item.side}`) }} · {{ otherItemKindLabel(t, item) }}</span>
+          <!-- Jen živý zápis: u storna by štítek stál vedle stavu Stornováno (zápis i protizápis ukazuje Zaúčtování, stejně jako výpis).
+               Stav „Zaúčtováno“ už text nese, štítek pak jen odkazuje na zápis; u uhrazené položky ho i pojmenuje. -->
+          <PostingBadge v-if="isDoubleEntry && item.status === 'posted' && item.journal_entry_id" :booked-at="item.posted_at ?? item.accounting_on" :journal-entry-id="Number(item.journal_entry_id)" :with-label="displayStatus !== 'posted'" data-test="detail-posting" />
+        </h1>
         <ActionBar :actions="actions" />
       </div>
 
-      <p v-if="failed" role="alert" class="mb-4 flex flex-wrap items-center gap-2 rounded-md border border-danger-500/40 bg-danger-50 p-3 text-sm text-danger-600">
+      <!-- Název a protistrana (řádek pod záhlavím, paralela s dodavatelem u přijaté faktury). -->
+      <div class="min-w-0 space-y-1">
+        <div class="text-lg font-semibold text-neutral-900" data-test="detail-title">{{ item.title }}</div>
+        <div class="text-sm text-neutral-600" data-test="detail-partner">
+          <span class="text-neutral-500">{{ t('other_items.partner') }}:</span>
+          <span class="ml-1" :class="item.partner_name ? 'font-medium' : 'text-neutral-400'">{{ item.partner_name || t('other_items.no_partner') }}</span>
+          <ClientQuickLinks v-if="item.partner_id" :client-id="Number(item.partner_id)" :vendor="item.side === 'payable'" />
+        </div>
+      </div>
+
+      <p v-if="failed" role="alert" class="flex flex-wrap items-center gap-2 rounded-md border border-danger-500/40 bg-danger-50 p-3 text-sm text-danger-600">
         {{ t('other_items.load_failed_stale') }}
         <button type="button" :class="btnOutlineSm('danger')" @click="load">
           <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.cycle" /></svg>
@@ -573,28 +585,75 @@ onMounted(load)
         </button>
       </p>
 
-      <div class="grid gap-4 lg:grid-cols-3">
-        <section class="rounded-lg border border-neutral-200 bg-surface p-4 shadow-sm lg:col-span-2">
-          <h2 class="mb-3 text-sm font-semibold uppercase tracking-wide text-neutral-500">{{ t('other_items.details') }}</h2>
-          <dl class="grid gap-x-6 gap-y-3 text-sm sm:grid-cols-2">
-            <div><dt class="text-neutral-500">{{ t('other_items.partner') }}</dt><dd>{{ item.partner_name || t('other_items.no_partner') }}</dd></div>
-            <div><dt class="text-neutral-500">{{ t('other_items.kind_label') }}</dt><dd>{{ otherItemKindLabel(t, item) }}</dd></div>
-            <div><dt class="text-neutral-500">{{ t('other_items.issued_on') }}</dt><dd>{{ item.issued_on ? formatDate(item.issued_on) : '–' }}</dd></div>
-            <div><dt class="text-neutral-500">{{ t('other_items.due_on') }}</dt><dd :class="overdue ? 'font-medium text-danger-500' : ''">{{ item.due_on ? formatDate(item.due_on) : '–' }}</dd></div>
-            <div v-if="isDoubleEntry"><dt class="text-neutral-500">{{ t('other_items.accounting_on') }}</dt><dd>{{ item.accounting_on ? formatDate(item.accounting_on) : '–' }}</dd></div>
-            <div><dt class="text-neutral-500">{{ t('other_items.variable_symbol') }}</dt><dd class="font-mono">{{ item.variable_symbol || '–' }}</dd></div>
+      <template v-if="isPhone">
+        <div class="space-y-3 rounded-lg border border-neutral-200 bg-surface p-4 shadow-sm" data-test="phone-summary">
+          <div class="flex items-start justify-between gap-3">
+            <div class="min-w-0">
+              <div class="text-xs text-neutral-500">{{ t(item.has_split_installments ? 'other_items.remaining_payment' : 'other_items.remaining') }}</div>
+              <div class="break-words font-mono text-2xl font-semibold text-neutral-900">{{ formatMoney(item.has_split_installments ? payableAmount : item.remaining_amount, item.currency) }}</div>
+              <div class="mt-0.5 text-xs text-neutral-500">{{ t('other_items.amount') }}: <span class="font-mono">{{ formatMoney(item.amount, item.currency) }}</span></div>
+            </div>
+            <span v-if="paymentState" class="shrink-0 rounded px-2 py-0.5 text-xs" :class="otherItemStatusClass(paymentState)">{{ statusLabel(paymentState) }}</span>
+          </div>
+          <dl class="grid grid-cols-2 gap-3 border-t border-neutral-100 pt-3 text-sm">
+            <div><dt class="text-xs text-neutral-500">{{ t('other_items.due_on') }}</dt><dd class="font-mono" :class="overdue ? 'font-semibold text-danger-600' : ''">{{ item.due_on ? formatDate(item.due_on) : '—' }}</dd></div>
+            <div><dt class="text-xs text-neutral-500">{{ t('other_items.issued_on') }}</dt><dd class="font-mono">{{ item.issued_on ? formatDate(item.issued_on) : '—' }}</dd></div>
+          </dl>
+        </div>
+        <button type="button" data-test="phone-details-toggle" :aria-expanded="phoneDetailsOpen"
+          class="inline-flex min-h-11 w-full cursor-pointer items-center justify-between gap-2 rounded-lg border border-neutral-200 bg-surface px-4 text-sm font-medium text-neutral-700 shadow-sm"
+          @click="phoneDetailsOpen = !phoneDetailsOpen">
+          <span>{{ t('other_items.phone_details') }}</span>
+          <svg class="h-4 w-4 transition-transform" :class="phoneDetailsOpen ? 'rotate-180' : ''" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7" /></svg>
+        </button>
+      </template>
+
+      <!-- Tři karty jako u přijaté faktury: data, úhrada, údaje. -->
+      <div v-show="!isPhone || phoneDetailsOpen" class="grid grid-cols-1 gap-4 md:grid-cols-3" data-test="detail-cards">
+        <div class="rounded-lg border border-neutral-200 bg-surface p-5 shadow-sm">
+          <h3 class="mb-3 text-sm font-medium text-neutral-700">{{ t('other_items.issued_on') }}<template v-if="isDoubleEntry"> / {{ t('other_items.accounting_on') }}</template> / {{ t('other_items.due_on') }}</h3>
+          <dl class="space-y-2 text-sm">
+            <div class="flex justify-between gap-3"><dt class="text-neutral-500">{{ t('other_items.issued_on') }}</dt><dd class="font-mono">{{ item.issued_on ? formatDate(item.issued_on) : '—' }}</dd></div>
+            <div v-if="isDoubleEntry" class="flex justify-between gap-3"><dt class="text-neutral-500">{{ t('other_items.accounting_on') }}</dt><dd class="font-mono">{{ item.accounting_on ? formatDate(item.accounting_on) : '—' }}</dd></div>
+            <div class="flex justify-between gap-3"><dt class="text-neutral-500">{{ t('other_items.due_on') }}</dt><dd class="font-mono" :class="overdue ? 'font-medium text-danger-500' : ''">{{ item.due_on ? formatDate(item.due_on) : '—' }}</dd></div>
+          </dl>
+        </div>
+        <div class="rounded-lg border border-neutral-200 bg-surface p-5 shadow-sm">
+          <div class="mb-3 flex flex-wrap items-center justify-between gap-2">
+            <h3 class="text-sm font-medium text-neutral-700">{{ t('other_items.payment') }}</h3>
+            <span v-if="paymentState" class="rounded px-2 py-0.5 text-xs" :class="otherItemStatusClass(paymentState)" data-test="payment-state">{{ statusLabel(paymentState) }}</span>
+          </div>
+          <dl class="space-y-2 text-sm">
+            <div class="flex justify-between gap-3"><dt class="text-neutral-500">{{ t('other_items.amount') }}</dt><dd class="font-mono">{{ formatMoney(item.amount, item.currency) }}</dd></div>
+            <div class="flex justify-between gap-3"><dt class="text-neutral-500">{{ t('other_items.paid_amount') }}</dt><dd class="font-mono">{{ formatMoney(item.paid_amount, item.currency) }}</dd></div>
+            <div v-if="Number(item.settled_outside_amount || 0) > 0" class="flex justify-between gap-3 pl-3" :title="t('other_items.settled_outside_hint')"><dt class="text-neutral-500">{{ t('other_items.settled_outside') }}</dt><dd class="font-mono text-neutral-500">{{ formatMoney(item.settled_outside_amount ?? 0, item.currency) }}</dd></div>
+            <div class="flex justify-between gap-3 border-t border-neutral-200 pt-2 font-semibold"><dt>{{ t(item.has_split_installments ? 'other_items.remaining_principal' : 'other_items.remaining') }}</dt><dd class="font-mono">{{ formatMoney(item.remaining_amount, item.currency) }}</dd></div>
+            <div v-if="item.has_split_installments" class="flex justify-between gap-3" :title="t('other_items.remaining_payment_hint')" data-test="remaining-payment"><dt class="text-neutral-500">{{ t('other_items.remaining_payment') }}</dt><dd class="font-mono">{{ formatMoney(payableAmount, item.currency) }}</dd></div>
+          </dl>
+        </div>
+        <div class="rounded-lg border border-neutral-200 bg-surface p-5 shadow-sm">
+          <h3 class="mb-3 text-sm font-medium text-neutral-700">{{ t('other_items.details') }}</h3>
+          <dl class="space-y-2 text-sm">
+            <div class="flex justify-between gap-3"><dt class="text-neutral-500">{{ t('other_items.variable_symbol') }}</dt><dd class="font-mono">{{ item.variable_symbol || '—' }}</dd></div>
+            <div v-if="item.currency !== 'CZK'" class="flex justify-between gap-3"><dt class="text-neutral-500">{{ t('other_items.exchange_rate') }}</dt><dd class="font-mono">{{ item.exchange_rate || '—' }}</dd></div>
+            <div v-if="item.linked_invoice" class="flex justify-between gap-3" data-test="linked-invoice">
+              <dt class="text-neutral-500">{{ t('other_items.linked_invoice') }}</dt>
+              <dd><RouterLink :to="`/invoices/${item.linked_invoice.id}`" class="font-mono text-primary-700 hover:underline">{{ item.linked_invoice.varsymbol || `#${item.linked_invoice.id}` }}</RouterLink></dd>
+            </div>
             <div>
-              <dt class="text-neutral-500">{{ t('other_items.counterparty_account') }}</dt>
-              <dd v-if="!counterpartyEditing" class="flex flex-wrap items-center gap-2">
-                <span class="font-mono" data-test="counterparty-account">{{ formatAccountNumber(item.counterparty_account, item.counterparty_bank_code) || '–' }}</span>
-                <button v-if="canEditCounterparty" type="button" data-test="counterparty-edit" class="inline-flex items-center gap-1 whitespace-nowrap text-xs text-primary-700 hover:underline" @click="startCounterpartyEdit">
-                  <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.edit" /></svg>
-                  {{ t('common.edit') }}
-                </button>
-              </dd>
-              <dd v-else>
+              <div class="flex justify-between gap-3">
+                <dt class="text-neutral-500">{{ t('other_items.counterparty_account') }}</dt>
+                <dd v-if="!counterpartyEditing" class="flex flex-wrap items-center justify-end gap-1">
+                  <span class="font-mono" data-test="counterparty-account">{{ formatAccountNumber(item.counterparty_account, item.counterparty_bank_code) || '—' }}</span>
+                  <button v-if="canEditCounterparty" type="button" data-test="counterparty-edit" class="inline-flex h-6 w-6 items-center justify-center rounded text-neutral-400 hover:bg-neutral-100 hover:text-primary-700"
+                    :title="`${t('common.edit')}: ${t('other_items.counterparty_account')}`" :aria-label="`${t('common.edit')}: ${t('other_items.counterparty_account')}`" @click="startCounterpartyEdit">
+                    <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.edit" /></svg>
+                  </button>
+                </dd>
+              </div>
+              <div v-if="counterpartyEditing" class="mt-2">
                 <form class="flex flex-wrap items-center gap-2" data-test="counterparty-form" @submit.prevent="saveCounterparty">
-                  <input v-model="counterpartyInput" type="text" maxlength="60" :aria-label="t('other_items.counterparty_account')" :placeholder="t('other_items.counterparty_account_placeholder')" class="h-9 w-56 rounded-md border border-neutral-300 bg-surface px-2 font-mono text-sm" />
+                  <input v-model="counterpartyInput" type="text" maxlength="60" :aria-label="t('other_items.counterparty_account')" :placeholder="t('other_items.counterparty_account_placeholder')" class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-2 font-mono text-sm" />
                   <button type="submit" :disabled="busy" :class="btnFilled('primary')" class="whitespace-nowrap">
                     <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.check" /></svg>
                     {{ t('common.save') }}
@@ -605,70 +664,27 @@ onMounted(load)
                   </button>
                 </form>
                 <p class="mt-1 text-xs text-neutral-500">{{ t('other_items.counterparty_edit_hint') }}</p>
-              </dd>
-            </div>
-            <div v-if="item.currency !== 'CZK'"><dt class="text-neutral-500">{{ t('other_items.exchange_rate') }}</dt><dd>{{ item.exchange_rate || '–' }}</dd></div>
-            <div v-if="item.linked_invoice" data-test="linked-invoice">
-              <dt class="text-neutral-500">{{ t('other_items.linked_invoice') }}</dt>
-              <dd><RouterLink :to="`/invoices/${item.linked_invoice.id}`" class="font-mono text-primary-700 hover:underline">{{ item.linked_invoice.varsymbol || `#${item.linked_invoice.id}` }}</RouterLink></dd>
-            </div>
-            <div class="sm:col-span-2">
-              <dt class="text-neutral-500">{{ t('other_items.note') }}</dt>
-              <dd v-if="!noteEditing" class="flex flex-wrap items-start gap-2">
-                <span class="whitespace-pre-wrap" data-test="note">{{ item.note || '–' }}</span>
-                <button v-if="canEditNote" type="button" data-test="note-edit" class="inline-flex items-center gap-1 whitespace-nowrap text-xs text-primary-700 hover:underline" @click="startNoteEdit">
-                  <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.edit" /></svg>
-                  {{ t('other_items.edit_note') }}
-                </button>
-              </dd>
-              <dd v-else>
-                <form class="space-y-2" data-test="note-form" @submit.prevent="saveNote">
-                  <textarea v-model="noteInput" maxlength="10000" rows="4" :aria-label="t('other_items.note')" class="block w-full rounded-md border border-neutral-300 bg-surface p-2 text-sm" />
-                  <div class="flex flex-wrap items-center gap-2">
-                    <button type="submit" :disabled="busy" :class="btnFilled('primary')" class="whitespace-nowrap">
-                      <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.check" /></svg>
-                      {{ t('common.save') }}
-                    </button>
-                    <button type="button" :class="btnOutline('neutral')" class="whitespace-nowrap" @click="noteEditing = false">
-                      <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.x" /></svg>
-                      {{ t('common.cancel') }}
-                    </button>
-                  </div>
-                </form>
-                <p class="mt-1 text-xs text-neutral-500">{{ t('other_items.edit_note_hint') }}</p>
-              </dd>
+              </div>
             </div>
           </dl>
-        </section>
-        <section class="rounded-lg border border-neutral-200 bg-surface p-4 shadow-sm">
-          <div class="mb-3 flex flex-wrap items-center justify-between gap-2">
-            <h2 class="text-sm font-semibold uppercase tracking-wide text-neutral-500">{{ t('other_items.payment') }}</h2>
-            <span v-if="paymentState" class="text-xs" :class="otherItemStatusClass(paymentState)" data-test="payment-state">{{ statusLabel(paymentState) }}</span>
-          </div>
-          <dl class="space-y-3 text-sm">
-            <div class="flex justify-between gap-3"><dt class="text-neutral-500">{{ t('other_items.amount') }}</dt><dd class="tabular-nums">{{ formatMoney(item.amount, item.currency) }}</dd></div>
-            <div class="flex justify-between gap-3"><dt class="text-neutral-500">{{ t('other_items.paid_amount') }}</dt><dd class="tabular-nums">{{ formatMoney(item.paid_amount, item.currency) }}</dd></div>
-            <div v-if="Number(item.settled_outside_amount || 0) > 0" class="flex justify-between gap-3 pl-3" :title="t('other_items.settled_outside_hint')"><dt class="text-neutral-500">{{ t('other_items.settled_outside') }}</dt><dd class="tabular-nums text-neutral-500">{{ formatMoney(item.settled_outside_amount ?? 0, item.currency) }}</dd></div>
-            <div class="flex justify-between gap-3 border-t border-neutral-200 pt-3 font-semibold"><dt>{{ t(item.has_split_installments ? 'other_items.remaining_principal' : 'other_items.remaining') }}</dt><dd class="tabular-nums">{{ formatMoney(item.remaining_amount, item.currency) }}</dd></div>
-            <div v-if="item.has_split_installments" class="flex justify-between gap-3" :title="t('other_items.remaining_payment_hint')" data-test="remaining-payment"><dt class="text-neutral-500">{{ t('other_items.remaining_payment') }}</dt><dd class="tabular-nums">{{ formatMoney(payableAmount, item.currency) }}</dd></div>
-          </dl>
-        </section>
+        </div>
       </div>
-      <DocumentDimensionsPanel class="mt-4" doc-type="other-items" :doc-id="id" :readonly="item.status === 'cancelled'"
-                               :prefill="{ client_id: item.partner_id ?? null }" @saved="postingPanel?.reload()" />
-      <DocumentPostingPanel v-if="isDoubleEntry && canReadJournal" ref="postingPanel" class="mt-4" source="other-items" :doc-id="id" :doc-label="item.document_no"
+
+      <DocumentPostingPanel v-if="isDoubleEntry && canReadJournal" v-show="!isPhone || phoneDetailsOpen" ref="postingPanel" source="other-items" :doc-id="id" :doc-label="item.document_no"
                             :external-repost="externalRepost" @repost="openRepost">
         <LinkedDocumentsPanel v-if="auth.canRead('documents') && item.journal_entry_id" :key="Number(item.journal_entry_id)"
           entity-type="journal_entry" :entity-id="Number(item.journal_entry_id)" readonly collapsible
           :title="t('other_items.journal_documents')" />
       </DocumentPostingPanel>
-      <OtherItemPostingRules v-if="isDoubleEntry && item.posting_rules?.payment_bank" :item="item" :accounts="postingAccounts"
+      <!-- Pořadí jako u přijaté faktury: dimenze za Zaúčtováním. Zůstávají rozbalené, chybějící povinnou
+           dimenzi (u faktury otevírá panel) detail položky nezná. -->
+      <DocumentDimensionsPanel v-show="!isPhone || phoneDetailsOpen" doc-type="other-items" :doc-id="id" :readonly="item.status === 'cancelled'"
+                               :prefill="{ client_id: item.partner_id ?? null }" @saved="postingPanel?.reload()" />
+      <OtherItemPostingRules v-show="!isPhone || phoneDetailsOpen" v-if="isDoubleEntry && item.posting_rules?.payment_bank" :item="item" :accounts="postingAccounts"
                              :can-write="auth.canWrite('other_items')" :show-posted-origin="!canReadJournal"
                              :can-repost="canRepost && !canReadJournal" @changed="item = $event" @repost="openRepost" />
-      <LinkedDocumentsPanel v-if="auth.canRead('documents')" class="mt-4" entity-type="other_item" :entity-id="id" uploadable :upload-folder-path="documentFolderPath" :title="t('linked_documents.title')" />
-      <OtherItemPlans :item="item" />
-      <section class="mt-4 rounded-lg border border-neutral-200 bg-surface p-4 shadow-sm">
-        <h2 class="mb-3 text-sm font-semibold uppercase tracking-wide text-neutral-500">{{ t('other_items.payments') }}</h2>
+      <section class="rounded-lg border border-neutral-200 bg-surface p-5 shadow-sm" data-test="payments-card">
+        <h3 class="mb-3 text-sm font-medium text-neutral-700">{{ t('other_items.payments') }}</h3>
         <p v-if="isTaxEvidence && allocations.some(allocation => !allocation.reversed_on)" class="mb-3 text-sm text-warning-700">
           {{ t('other_items.tax_classification_hint') }}
           <RouterLink v-if="auth.canRead('tax_evidence')" :to="{ name: 'tax-evidence-cash-journal' }" class="font-medium underline">{{ t('other_items.open_cash_journal') }}</RouterLink>
@@ -740,6 +756,35 @@ onMounted(load)
         </form>
         <p v-else-if="item.currency !== 'CZK'" class="mt-3 text-sm text-neutral-500">{{ t('other_items.foreign_payment_hint') }}</p>
       </section>
+      <OtherItemPlans :item="item" />
+      <div class="rounded-lg border border-neutral-200 bg-surface p-5 shadow-sm" data-test="note-card">
+        <div class="mb-3 flex flex-wrap items-center justify-between gap-2">
+          <h3 class="text-sm font-medium text-neutral-700">{{ t('other_items.note') }}</h3>
+          <button v-if="canEditNote && !noteEditing" type="button" data-test="note-edit" :class="btnOutlineSm('neutral')" class="whitespace-nowrap" @click="startNoteEdit">
+            <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.edit" /></svg>
+            {{ t('other_items.edit_note') }}
+          </button>
+        </div>
+        <p v-if="!noteEditing" class="whitespace-pre-wrap text-sm" :class="item.note ? 'text-neutral-800' : 'text-neutral-400'" data-test="note">{{ item.note || '—' }}</p>
+        <div v-else>
+          <form class="space-y-2" data-test="note-form" @submit.prevent="saveNote">
+            <textarea v-model="noteInput" maxlength="10000" rows="4" :aria-label="t('other_items.note')" class="block w-full rounded-md border border-neutral-300 bg-surface p-2 text-sm" />
+            <div class="flex flex-wrap items-center gap-2">
+              <button type="submit" :disabled="busy" :class="btnFilled('primary')" class="whitespace-nowrap">
+                <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.check" /></svg>
+                {{ t('common.save') }}
+              </button>
+              <button type="button" :class="btnOutline('neutral')" class="whitespace-nowrap" @click="noteEditing = false">
+                <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.x" /></svg>
+                {{ t('common.cancel') }}
+              </button>
+            </div>
+          </form>
+          <p class="mt-1 text-xs text-neutral-500">{{ t('other_items.edit_note_hint') }}</p>
+        </div>
+      </div>
+      <LinkedDocumentsPanel v-if="auth.canRead('documents')" class="block" entity-type="other_item" :entity-id="id" uploadable :upload-folder-path="documentFolderPath" :title="t('linked_documents.title')" />
+      </div>
     </template>
     <Modal v-if="postOpen && item" :title="t(isDoubleEntry ? 'other_items.post' : 'other_items.confirm')" width-class="max-w-lg" @close="postOpen = false">
       <div class="space-y-3 text-sm" data-test="post-confirm">

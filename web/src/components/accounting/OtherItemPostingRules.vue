@@ -105,8 +105,8 @@ async function save(event: OtherItemOverrideEvent, reset = false) {
 </script>
 
 <template>
-  <section class="mt-4 rounded-lg border border-neutral-200 bg-surface p-4" data-test="other-item-posting-rules">
-    <h2 class="font-semibold">{{ t('other_items.posting.title') }}</h2>
+  <section class="rounded-lg border border-neutral-200 bg-surface p-5 shadow-sm" data-test="other-item-posting-rules">
+    <h3 class="text-sm font-medium text-neutral-700">{{ t('other_items.posting.title') }}</h3>
     <p class="mt-1 text-sm text-neutral-500">{{ t('other_items.posting.hint') }}</p>
     <div v-if="showPosted" class="mt-3 border-b border-neutral-100 pb-3" data-test="posted-origin">
       <div class="flex flex-wrap items-start justify-between gap-3">

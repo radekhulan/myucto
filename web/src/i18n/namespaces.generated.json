@@ -629,7 +629,8 @@
       "documents",
       "linked_documents",
       "list_nav",
-      "other_items"
+      "other_items",
+      "purchase_invoice"
     ],
     "other-item-edit": [
       "dimensions",

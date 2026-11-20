@@ -1588,9 +1588,20 @@ jde seznam řadit; řazení si seznam pamatuje a tlačítko **×** v záhlaví v
 Kliknutím na řádek otevřete detail, s Ctrl (nebo prostředním tlačítkem myši)
 v novém panelu; řádek jde do panelu také přetáhnout za úchyt na jeho začátku.
 Klávesami `j` a `k` se pohybujete po řádcích a `Enter` otevře detail. Rozpracovaný
-koncept upravíte nebo smažete z nabídky **…** na konci řádku. Odkaz **Zpět**
+koncept upravíte nebo smažete z nabídky **…** na konci řádku. Odkaz **Zpět na seznam**
 v detailu vrátí seznam se stejnými filtry a šipkami (nebo klávesami `[` a `]`)
 přejdete na předchozí či další položku téhož výběru.
+
+Detail položky je uspořádaný jako detail přijaté faktury. V záhlaví je číslo dokladu
+se stavem, štítkem **Po splatnosti**, směrem s druhem a u zaúčtované položky odkazem
+na její zápis; akce jsou vpravo. Pod záhlavím je název položky a protistrana (s odkazy
+na kartu klienta, je-li vybraná z adresáře). Tři karty ukazují data (vznik, v podvojném
+účetnictví i datum zaúčtování, splatnost), **Stav úhrady** a údaje položky (variabilní
+symbol, účet protistrany, u cizí měny kurz, navázaná faktura). V podvojném účetnictví
+následují **Zaúčtování** (pro role, které smí číst účetnictví) a dimenze, jsou-li zapnuté,
+pak **Účtování**, **Přiřazené úhrady**, opakování a splátky, poznámka a nakonec připojené
+dokumenty. Na telefonu je nahoře souhrn (zbývá uhradit, stav úhrady, splatnost a datum
+vzniku); karty, zaúčtování, dimenze a účtování rozbalí tlačítko **Podrobnosti**.
 
 Nad seznamem je součet **zbývá uhradit** za celý výběr (všechny stránky, ne jen
 zobrazené řádky), zvlášť pro pohledávky a závazky a zvlášť pro každou měnu. Počítá

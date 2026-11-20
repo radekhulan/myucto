@@ -249,9 +249,9 @@ watch(() => [props.item.id, props.item.paid_amount], () => void load(), { immedi
 </script>
 
 <template>
-  <div id="other-item-plans" class="mt-4 grid scroll-mt-4 gap-4 lg:grid-cols-2">
-    <section class="rounded-lg border border-neutral-200 bg-surface p-4 shadow-sm">
-      <h2 class="text-sm font-semibold uppercase tracking-wide text-neutral-500">{{ t('other_items.plans.schedule_title') }}</h2>
+  <div class="grid gap-4 lg:grid-cols-2">
+    <section class="rounded-lg border border-neutral-200 bg-surface p-5 shadow-sm">
+      <h3 class="text-sm font-medium text-neutral-700">{{ t('other_items.plans.schedule_title') }}</h3>
       <p class="mt-1 text-sm text-neutral-500">{{ t('other_items.plans.schedule_hint') }}</p>
       <p v-if="loading" class="mt-3 text-sm text-neutral-500">{{ t('common.loading') }}</p>
       <template v-else-if="schedule">
@@ -314,8 +314,8 @@ watch(() => [props.item.id, props.item.paid_amount], () => void load(), { immedi
       </form>
     </section>
 
-    <section class="rounded-lg border border-neutral-200 bg-surface p-4 shadow-sm">
-      <h2 class="text-sm font-semibold uppercase tracking-wide text-neutral-500">{{ t('other_items.plans.installments_title') }}</h2>
+    <section class="rounded-lg border border-neutral-200 bg-surface p-5 shadow-sm">
+      <h3 class="text-sm font-medium text-neutral-700">{{ t('other_items.plans.installments_title') }}</h3>
       <p class="mt-1 text-sm text-neutral-500">{{ t('other_items.plans.installments_hint') }}</p>
       <p v-if="loading" class="mt-3 text-sm text-neutral-500">{{ t('common.loading') }}</p>
       <template v-else>
