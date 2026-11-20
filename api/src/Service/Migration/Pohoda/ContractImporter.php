@@ -21,10 +21,13 @@ use MyInvoice\Service\Migration\Shared\MigrationHomeCurrency;
  *   hodnotu se stejným kódem i názvem.
  * - Řádky deníku (`pUD.CisloZAK`, `act:contract`) a doklady dostanou hodnotu podle pravidel
  *   společných s činnostmi ({@see PohodaSplitDimension}).
- * - Zakázka MyÚčta (`projects`, vázaná na klienta) vznikne jen u zakázky s vlastním partnerem
- *   v POHODĚ (vazba na adresář převedená na klienta). Hodnota dimenze se na ni naváže
- *   a faktury i řádky deníku s touto zakázkou dostanou `project_id`, kde ho ještě nemají.
- *   Klient se z dokladů neodvozuje.
+ * - Zakázka MyÚčta (`projects`, vázaná na klienta) vznikne u zakázky s vlastním partnerem
+ *   v POHODĚ (vazba na adresář převedená na klienta). Zakázka bez partnera dostane klienta
+ *   z vydaných faktur, když jdou všechny jedinému odběrateli (i faktury dřívějších převodů);
+ *   při více odběratelích nebo bez vydané faktury zůstane jen hodnotou dimenze. Partner
+ *   zakázky, který mezi převedenými kontakty chybí, se z faktur nenahrazuje. Hodnota dimenze
+ *   se na zakázku naváže a faktury i řádky deníku s touto zakázkou dostanou `project_id`,
+ *   kde ho ještě nemají.
  *
  * Opakovaný převod doplní hodnoty a vazby i dokladům a řádkům z dřívějšího převodu, nic
  * nezdvojí a hodnotu změněnou v MyÚčtu nepřepíše. Zápisy a doklady v uzavřeném období nebo
@@ -107,12 +110,21 @@ final class ContractImporter
 
         $dimensionOnly = [];
         $partnerMissing = [];
+        $fromInvoices = [];
+        $ambiguous = [];
+        $invoiceClients = $this->invoiceClients($ctx, $values);
         foreach ($contracts as $code => $contract) {
             $code = (string) $code;
             $clientId = $contract['partner'] !== '' ? ($ctx->clientsByPohodaId[$contract['partner']] ?? null) : null;
+            if ($clientId === null && $contract['partner'] === '' && count($invoiceClients[$code] ?? []) === 1) {
+                $clientId = $invoiceClients[$code][0];
+                $fromInvoices[] = $code;
+            }
             if ($clientId === null) {
                 if ($contract['partner'] !== '') {
                     $partnerMissing[] = $code;
+                } elseif (count($invoiceClients[$code] ?? []) > 1) {
+                    $ambiguous[] = $code;
                 } else {
                     $dimensionOnly[] = $code;
                 }
@@ -135,9 +147,21 @@ final class ContractImporter
             $tally('contract_lines'), $tally('contract_documents'),
             $tally('contract_projects_created') + $tally('contract_projects_existing'),
         ), ['codes' => $listed]);
+        if ($fromInvoices !== []) {
+            $p->info(self::STEP, 'contract_client_from_invoices', sprintf(
+                'Zakázky bez partnera v POHODĚ s jediným odběratelem na vydaných fakturách: zakázka MyÚčta vznikla u tohoto odběratele: %s.',
+                PohodaSplitDimension::list($fromInvoices),
+            ), ['codes' => $fromInvoices]);
+        }
+        if ($ambiguous !== []) {
+            $p->info(self::STEP, 'contract_client_ambiguous', sprintf(
+                'Vydané faktury zakázky jdou více odběratelům, zakázka MyÚčta nevznikla a zakázka je jen hodnotou dimenze Zakázka: %s.',
+                PohodaSplitDimension::list($ambiguous),
+            ), ['codes' => $ambiguous]);
+        }
         if ($dimensionOnly !== []) {
             $p->info(self::STEP, 'contract_dimension_only', sprintf(
-                'Zakázky bez vlastního partnera v POHODĚ jsou jen hodnotou dimenze Zakázka, zakázka MyÚčta u klienta nevznikla: %s.',
+                'Zakázky bez partnera v POHODĚ a bez vydané faktury jsou jen hodnotou dimenze Zakázka, zakázka MyÚčta u klienta nevznikla: %s.',
                 PohodaSplitDimension::list($dimensionOnly),
             ), ['codes' => $dimensionOnly]);
         }
@@ -154,6 +178,54 @@ final class ContractImporter
             ), ['codes' => $unlisted]);
         }
         $this->split->reportLocked($ctx, self::STEP, 'contract_period_not_open', 'Zakázka', $locked);
+    }
+
+    /**
+     * Odběratelé vydaných faktur zakázky: faktury tohoto převodu podle členění hlavičky
+     * z exportu (bez něj podle shodného členění položek) a faktury dřívějších převodů
+     * podle hodnoty dimenze na hlavičce. Kalendáře splátek jsou interní doklady a nepočítají se.
+     *
+     * @param array<string,array{value:int,project:?int}> $values
+     * @return array<string,list<int>> číslo zakázky => různí klienti
+     */
+    private function invoiceClients(PohodaContext $ctx, array $values): array
+    {
+        $byValue = [];
+        foreach ($values as $code => $value) {
+            $byValue[$value['value']] = (string) $code;
+        }
+        $docs = [];
+        foreach ($ctx->splitDocuments[PohodaSplitDimension::CONTRACT]['invoice'] ?? [] as $id => $split) {
+            $items = array_values(array_unique(array_filter($split['items'], static fn (string $c): bool => $c !== '')));
+            $code = $split['header'] !== '' ? $split['header'] : (count($items) === 1 ? $items[0] : '');
+            if ($code !== '' && isset($values[$code])) {
+                $docs[(int) $id] = $code;
+            }
+        }
+        $pdo = $this->db->pdo();
+        $types = "'invoice','proforma','credit_note','tax_document'";
+        $pairs = [];
+        foreach (array_chunk(array_keys($docs), self::BATCH) as $chunk) {
+            $marks = implode(',', array_fill(0, count($chunk), '?'));
+            $st = $pdo->prepare("SELECT id, client_id FROM invoices WHERE supplier_id = ? AND id IN ({$marks}) AND invoice_type IN ({$types})");
+            $st->execute([$ctx->supplierId, ...$chunk]);
+            foreach ($st->fetchAll(\PDO::FETCH_NUM) as [$id, $clientId]) {
+                $pairs[$docs[(int) $id]][(int) $clientId] = true;
+            }
+        }
+        foreach (array_chunk(array_keys($byValue), self::BATCH) as $chunk) {
+            $marks = implode(',', array_fill(0, count($chunk), '?'));
+            $st = $pdo->prepare("SELECT DISTINCT dd.dimension_value_id, i.client_id
+                  FROM document_dimensions dd
+                  JOIN invoices i ON i.id = dd.doc_id AND i.supplier_id = dd.supplier_id
+                 WHERE dd.supplier_id = ? AND dd.dimension_value_id IN ({$marks}) AND dd.doc_type = 'invoice' AND dd.item_no = 0
+                   AND i.invoice_type IN ({$types})");
+            $st->execute([$ctx->supplierId, ...$chunk]);
+            foreach ($st->fetchAll(\PDO::FETCH_NUM) as [$valueId, $clientId]) {
+                $pairs[$byValue[(int) $valueId]][(int) $clientId] = true;
+            }
+        }
+        return array_map(static fn (array $clients): array => array_keys($clients), $pairs);
     }
 
     /** Zakázka MyÚčta u klienta partnera zakázky: z mapy převodu, nebo nová. */

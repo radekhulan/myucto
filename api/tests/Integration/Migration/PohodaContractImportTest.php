@@ -79,7 +79,8 @@ final class PohodaContractImportTest extends TestCase
     /**
      * Každá zakázka je hodnota dimenze, i nevyužitá. Zakázka s partnerem má zakázku MyÚčta
      * u jeho klienta a faktura i řádky deníku na ni ukazují; zakázka bez partnera je jen
-     * hodnotou, přestože ji nese přijatá faktura (klient se z dokladů neodvozuje).
+     * hodnotou, přestože ji nese přijatá faktura a položka vydané faktury s jinou zakázkou
+     * na hlavičce (odběratele dává jen hlavička vydané faktury).
      */
     public function testContractsBecomeDimensionValuesAndProjectsOnlyWithPartner(): void
     {
@@ -98,6 +99,29 @@ final class PohodaContractImportTest extends TestCase
         self::assertSame(2, $counts['contract_dimension_only'] ?? null);
         self::assertSame(3, $counts['contract_documents'] ?? null, 'vydaná, přijatá faktura a bankovní pohyb');
         self::assertStringContainsString(SyntheticPohodaExport::CONTRACT_UNUSED, $this->message($protocol, 'contract_dimension_only'));
+    }
+
+    /**
+     * Zakázka bez partnera v POHODĚ, jejíž vydané faktury jdou jedinému odběrateli, dostane
+     * zakázku MyÚčta u tohoto odběratele stejně jako zakázka s partnerem.
+     */
+    public function testContractWithoutPartnerTakesClientFromIssuedInvoices(): void
+    {
+        $supplierId = $this->supplier();
+        $dir = SyntheticPohodaExport::write($this->tmp);
+        SyntheticPohodaExport::withContracts($dir);
+        $file = $dir . '/35_zakazky.xml';
+        file_put_contents($file, preg_replace('~<con:partnerIdentity>.*?</con:partnerIdentity>~s', '', (string) file_get_contents($file)));
+
+        $protocol = $this->importer->run($supplierId, $this->userId, PohodaExport::open($dir), false);
+
+        self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
+        $this->assertContractsImported($supplierId);
+        $counts = $this->counts($protocol);
+        self::assertSame(1, $counts['contract_projects_created'] ?? null, $this->explain($protocol));
+        self::assertSame(2, $counts['contract_dimension_only'] ?? null);
+        self::assertStringContainsString(SyntheticPohodaExport::CONTRACT_PARTNER, $this->message($protocol, 'contract_client_from_invoices'));
+        self::assertStringNotContainsString(SyntheticPohodaExport::CONTRACT_OWN, $this->message($protocol, 'contract_client_from_invoices'));
     }
 
     /**

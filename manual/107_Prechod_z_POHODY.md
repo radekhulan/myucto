@@ -241,7 +241,7 @@ Pravidla (perioda resetu, zděděná šablona) jsou v
 | Zkouška selhala jen na rozdílech k přijetí | Doklad se nepřevedl, nebo výsledek nesedí na POHODU | Zaškrtněte **Převést i přes rozdíly**, nebo opravte a zopakujte |
 | Doklad je koncept | Nejistá daňová povaha | Opravte klasifikaci DPH a potvrďte |
 | Faktura uhrazená v nevybraném roce zůstala neuhrazená | Pozdější rok jste nevybrali | Převeďte pozdější rok opakovaným převodem ([§ 107.9.7](#10797-opakovany-prevod)) |
-| Převod kopie MDB odmítl doklad kvůli sazbám DPH | Doklad má DPH ze sazeb před 1. 5. 2004, částku v druhé snížené sazbě před rokem 2015, nebo zaškrtnuté historické sazby; číslo dokladu je v hlášení | Opravte doklad v POHODĚ, nebo převeďte agendu XML exportem POHODY (cesta 1). Starší neuhrazené doklady převedené do nového roku jinak převod přijme se sazbami platnými k datu plnění |
+| Převod kopie MDB odmítl doklad kvůli sazbám DPH | Doklad má DPH ze sazeb před 1. 5. 2004, částku v druhé snížené sazbě před rokem 2015, nebo zaškrtnuté historické sazby a DPH, které neodpovídá sazbám platným k datu plnění ani předchozím; číslo dokladu je v hlášení | Opravte doklad v POHODĚ, nebo převeďte agendu XML exportem POHODY (cesta 1). Starší neuhrazené doklady převedené do nového roku jinak převod přijme se sazbami platnými k datu plnění, doklad se zaškrtnutými historickými sazbami se sazbami, kterým odpovídá jeho DPH |
 | Přeskočený doklad s neznámým typem | Neznámý typ faktury, banky, pokladny nebo zdroj úhrady | Doklad doplňte ručně, číslo a důvod uvádí protokol |
 | Karta majetku je koncept | Neznámý typ majetku nebo odpisu, jiná vstupní cena, chybí plán nebo účet | Zkontrolujte kartu podle důvodu v protokolu |
 | Nástroj hlásí, že datový soubor je chráněný heslem databáze | MDB má heslo databáze | Spusťte nástroj znovu a heslo zadejte, když se zeptá, nebo parametrem `-Heslo` |
@@ -513,7 +513,7 @@ Soubory `90_majetek.xml`, `91_mzdy.xml` a `92_sklad.xml` jsou stejné jako u dat
 | ceníky (`92_sklad.xml`) | cenové hladiny s cenou bez DPH u každé karty |
 | střediska na řádcích deníku | střediska firmy a hodnoty dimenze Středisko, viz níže |
 | činnosti a činnost na dokladech a v deníku | hodnoty firemní dimenze Činnost, u neziskové organizace Činnost POHODY, viz níže |
-| zakázky a číslo zakázky na dokladech a v deníku | hodnoty firemní dimenze Zakázka; zakázka u klienta jen u zakázky s vlastním partnerem, viz níže |
+| zakázky a číslo zakázky na dokladech a v deníku | hodnoty firemní dimenze Zakázka; zakázka u klienta u zakázky s vlastním partnerem nebo s jediným odběratelem na vydaných fakturách, viz níže |
 | členění skladu, alternativní jednotky, dodavatel karty (`92_sklad.xml`) | kategorie skladu, balení karty, dodavatel karty s nákupní cenou |
 
 **Středisko, činnost a zakázka.** POHODA vede tři analytická členění a převod každé
@@ -554,15 +554,19 @@ sestavy po dimenzích. Převod dimenze u firmy zapne. Hodnotu dostanou:
 - pokladní doklady, bankovní pohyby a faktury bez zakázky na dokladu do hlavičky,
   když ji nesou všechny řádky jejich zápisu v deníku se zakázkou.
 
-Zakázka v MyÚčtu (`Zakázky`, vždy u jednoho klienta) vznikne jen u zakázky, která
+Zakázka v MyÚčtu (`Zakázky`, vždy u jednoho klienta) vznikne u zakázky, která
 má v POHODĚ vlastního partnera z adresáře. Klient je partner zakázky, číslo zakázky
 je číslo z POHODY a měna je výchozí měna firmy. Zakázka je aktivní, stav zakázky
 z POHODY se nepřebírá. Hodnota dimenze se na ni naváže a faktury i řádky deníku
-s touto zakázkou ji dostanou jako zakázku dokladu. Zakázka bez partnera zůstane jen
-hodnotou dimenze, klienta převod z dokladů neodvozuje. Protokol v kroku Zakázky
-uvede počet zakázek, nových a existujících hodnot dimenze, označených řádků deníku
-a dokladů a zakázek založených u klienta, a vyjmenuje zakázky, které zůstaly jen
-dimenzí.
+s touto zakázkou ji dostanou jako zakázku dokladu.
+
+Zakázka bez partnera dostane klienta z vydaných faktur: jdou-li všechny vydané
+faktury se zakázkou na hlavičce jedinému odběrateli (počítají se i faktury dříve
+převedených roků), vznikne zakázka u tohoto odběratele. Jdou-li více odběratelům,
+nebo zakázku žádná vydaná faktura nenese, zůstane zakázka jen hodnotou dimenze.
+Protokol v kroku Zakázky uvede počet zakázek, nových a existujících hodnot dimenze,
+označených řádků deníku a dokladů a zakázek založených u klienta. Vyjmenuje zakázky,
+kterým převod klienta odvodil z faktur, i zakázky, které zůstaly jen dimenzí.
 
 Zakázky a činnosti nese export z aktuální verze nástroje: převodník MDB a POHODA SQL
 čte agendy Zakázky (`sZAK`) a Činnosti (`sCIN`), číslo zakázky a činnost dokladů,
