@@ -214,10 +214,6 @@ async function refresh() {
   allocations.value = linked
   failed.value = false
 }
-const editingSomething = computed(() => busy.value || postOpen.value || reverseOpen.value || repostOpen.value || deleteOpen.value
-  || counterpartyEditing.value || noteEditing.value || !!selectedPayment.value || paymentQuery.value !== ''
-  || plansState.value.editing)
-useWindowRefresh(refresh, () => !loading.value && !editingSomething.value)
 
 async function searchPayments(query: string) {
   const request = ++paymentRequest
@@ -491,6 +487,12 @@ async function remove() {
   }
 }
 
+// Až po deklaraci všech stavů úprav: useWindowRefresh podmínku čte hned při založení (watch),
+// dřívější volání by sáhlo na ještě nedeklarovaný ref (ReferenceError, detail bez lišty akcí).
+const editingSomething = computed(() => busy.value || postOpen.value || reverseOpen.value || repostOpen.value || deleteOpen.value
+  || counterpartyEditing.value || noteEditing.value || !!selectedPayment.value || paymentQuery.value !== ''
+  || plansState.value.editing)
+useWindowRefresh(refresh, () => !loading.value && !editingSomething.value)
 const actions = computed<ActionItem[]>(() => {
   const current = item.value
   if (!current) return []

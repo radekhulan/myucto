@@ -1,5 +1,5 @@
 import { flushPromises, shallowMount } from '@vue/test-utils'
-import { defineComponent, h, reactive } from 'vue'
+import { computed, defineComponent, h, reactive } from 'vue'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const m = vi.hoisted(() => ({
@@ -17,6 +17,7 @@ const m = vi.hoisted(() => ({
   route: null as any,
   refresh: null as null | (() => Promise<unknown>),
   canRefresh: null as null | (() => boolean),
+  realWindowRefresh: false,
   panelReload: vi.fn(),
   noRead: [] as string[],
   listPath: null as string | null,
@@ -31,9 +32,17 @@ vi.mock('@/api/otherItems', () => ({
     updateCounterpartyAccount: m.updateCounterpartyAccount, updateText: m.updateText, removePosted: m.removePosted, post: m.post, list: m.list, remove: m.remove },
 }))
 vi.mock('@/api/accounting', () => ({ accountingApi: { listAccounts: m.listAccounts } }))
-vi.mock('@/composables/useWindowRefresh', () => ({
-  useWindowRefresh: (refresh: () => Promise<unknown>, canRefresh: () => boolean) => { m.refresh = refresh; m.canRefresh = canRefresh },
-}))
+vi.mock('@/composables/useWindowRefresh', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/composables/useWindowRefresh')>()
+  return {
+    useWindowRefresh: (refresh: () => Promise<unknown>, canRefresh: () => boolean, options?: { partial?: boolean }) => {
+      m.refresh = refresh
+      m.canRefresh = canRefresh
+      // Skutečný composable v okně pracovní plochy čte podmínku obnovy hned při založení.
+      return m.realWindowRefresh ? actual.useWindowRefresh(refresh, canRefresh, options) : undefined
+    },
+  }
+})
 vi.mock('@/composables/useWindowTitle', () => ({ useWindowTitle: vi.fn() }))
 vi.mock('@/composables/useListNavigation', async () => {
   const { ref } = await import('vue')
@@ -64,6 +73,8 @@ import PostingBadge from '@/components/ui/PostingBadge.vue'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import DocumentPostingPanel from '@/components/accounting/DocumentPostingPanel.vue'
+import { windowContextKey } from '@/workspace/windowContext'
+import { installWindowSupplierScope } from '@/workspace/supplierContext'
 
 const RouterLinkStub = { props: ['to'], template: '<a :data-to="JSON.stringify(to)"><slot /></a>' }
 const ModalStub = { template: '<div><slot /><slot name="footer" /></div>' }
@@ -93,6 +104,25 @@ describe('OtherItemDetail', () => {
       { source: 'bank', id: 42, payment_on: '2099-03-30', amount: 999, currency: 'CZK', description: 'Jiná platba',
         match_score: 0, match_reasons: [], installment: null },
     ])
+  })
+
+  it('v okně pracovní plochy s firmou okna se založí celý i s lištou akcí', async () => {
+    // Skutečná obnova okna čte podmínku „nic se neupravuje“ hned při založení; stav úprav
+    // deklarovaný až pod ní dřív skončil ReferenceError a detail v okně byl bez lišty akcí.
+    m.realWindowRefresh = true
+    installWindowSupplierScope({ windowId: 'w-detail', supplierId: 3 })
+    const root = document.createElement('div')
+    const context = { paneId: computed(() => null), active: computed(() => true), visible: computed(() => true), root, portal: root }
+    try {
+      const wrapper = shallowMount(OtherItemDetail, { global: { stubs, provide: { [windowContextKey as symbol]: context } } })
+      await flushPromises()
+      const actions = wrapper.findComponent({ name: 'ActionBar' }).props('actions') as Array<{ key: string }>
+      expect(actions.map(action => action.key)).toContain('edit')
+      expect(m.canRefresh!()).toBe(true)
+      wrapper.unmount()
+    } finally {
+      m.realWindowRefresh = false
+    }
   })
 
   it('ukáže účet protistrany a u kandidátů úhrady důvody shody', async () => {
