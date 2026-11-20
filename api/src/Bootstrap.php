@@ -1245,6 +1245,8 @@ final class Bootstrap
                 $c->get(\MyInvoice\Service\Bank\Pdf\CeskaSporitelnaStatementPdfParser::class),
                 // Novější layout KB před starším: oba nesou patičku Komerční banky.
                 $c->get(\MyInvoice\Service\Bank\Pdf\KbAccountStatementPdfParser::class),
+                // Výpis vytištěný z internetového bankovnictví („Vytištěno dne … pro účet").
+                $c->get(\MyInvoice\Service\Bank\Pdf\KbPrintedStatementPdfParser::class),
                 $c->get(\MyInvoice\Service\Bank\Pdf\KbStatementPdfParser::class),
                 $c->get(\MyInvoice\Service\Bank\Pdf\MonetaStatementPdfParser::class),
                 $c->get(\MyInvoice\Service\Bank\Pdf\RaiffeisenbankStatementPdfParser::class),
