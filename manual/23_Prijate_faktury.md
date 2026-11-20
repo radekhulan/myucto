@@ -255,11 +255,15 @@ Bez propojení by se náklad počítal dvakrát.
 2. V boxu **Zálohová faktura** klikněte na **Spárovat se zálohou** a vyberte zálohu od stejného dodavatele.
 3. Nevyúčtovanou zálohu můžete spárovat i z jejího detailu tlačítkem **Spárovat s fakturou**.
 
-**Jak poznáte, že je hotovo:** v boxu je odkaz na zálohu a tlačítko **Zrušit propojení**. V detailu zálohy
-vidíte, kterou fakturou je vyúčtována.
+**Jak poznáte, že je hotovo:** v boxu je seznam navázaných záloh, u každé odkaz a tlačítko **Odpojit**. V detailu
+zálohy vidíte, kterou fakturou je vyúčtována.
 
-Zálohu můžete navázat i přímo v editoru finální faktury: v boxu pod druhem dokladu klikněte na **Spárovat se zálohou**.
-U nové faktury se vazba uloží spolu s dokladem.
+Vyúčtovává-li finální faktura víc záloh téhož dodavatele (třeba roční vyúčtování energií s měsíčními zálohami),
+klikněte v boxu na **Přidat zálohu** a vyberte další. Navázané zálohy zůstávají, **Odpojit** zruší vazbu jen
+u jedné z nich.
+
+Zálohy můžete navázat i přímo v editoru finální faktury: v boxu pod druhem dokladu klikněte na **Spárovat se zálohou**,
+další přidáte tlačítkem **Přidat zálohu**. U nové faktury se vazby uloží spolu s dokladem.
 
 Pravidla propojení a jejich dopad na náklady, daň a DPH jsou v [§ 23.11.16](#231116-propojeni-zalohy-s-vyuctovaci-fakturou-proti-dvojimu-zapocteni).
 
@@ -276,6 +280,13 @@ přinést jen rozdíl.
 4. Klikněte na **Doplnit odpočet zálohy z DDKP**. Aplikace přidá za každý DDKP a sazbu DPH záporný řádek se základem
    a daní DDKP, označený jako **Odpočet zálohy**. Částky porovnejte s odpočtem zálohy na dokladu dodavatele.
 5. Doklad uložte a zaúčtujte.
+
+Když faktura vyúčtovává víc záloh, nabídka **Doplnit odpočet zálohy z DDKP** je u každé zálohy s DDKP zvlášť
+a tlačítko **Vložit odpočty všech záloh** je doplní najednou. Každý odpočtový řádek nese číslo své zálohy.
+Záloha bez DDKP odpočtový řádek nemá: faktura ji odečte v hlavičce jako **Uhrazenou zálohu**.
+Výjimkou je záloha převzatá v počátečních stavech, jejíž DDKP i úhrada proběhly v předchozím programu: odečte se
+odpočtovým řádkem v plné částce zálohy s DPH dopočtenou ze základní sazby (nebo ze sazby na záloze), stejně jako
+ji uvádí doklad dodavatele.
 
 **Jak poznáte, že je hotovo:** faktura má celkovou částku po odečtu zálohy (při přeplatku zápornou), **Uhrazená záloha**
 v hlavičce je nulová a zápis v deníku obsahuje náklad za plnění, DPH faktury (MD 343), vrácení DPH z DDKP (D 343)
@@ -1117,13 +1128,18 @@ V detailu **finální** faktury je box **Zálohová faktura**:
 - Pokud vazba není, klikněte na **Spárovat se zálohou** a vyberte zálohu od stejného dodavatele. Propojit lze jen
   nestornovanou zálohu ve **stejné měně**. Nabídka řadí zálohy s **nejbližší částkou** (porovnává hrubou částku faktury
   *před* odečtem zálohy, takže i faktura uhrazená zálohou „na 0 Kč" se napáruje správně).
-- Po spárování se zobrazí odkaz na zálohu a tlačítko **Zrušit propojení**. Na finální fakturu se zároveň doplní odečet
+- Po spárování se zobrazí odkaz na zálohu a tlačítko **Odpojit**. Na finální fakturu se zároveň doplní odečet
   skutečně uhrazené části zálohy, nejvýše do částky finální faktury, pokud byl nulový.
+- Finální faktura může vyúčtovat **víc záloh** téhož dodavatele: další přidáte tlačítkem **Přidat zálohu**. Záloha
+  s daňovým dokladem k platbě se odečte odpočtovými řádky podle DDKP ([§ 23.8.1](#2381-vyuctovani-zalohy-ke-ktere-dodavatel-vystavil-danovy-doklad-k-platbe)),
+  záloha bez DDKP v hlavičce jako uhrazená záloha. Zálohu lze přidat jen k nezaúčtované faktuře, musí být od
+  stejného dodavatele, ve stejné měně a přijatá (ne koncept ani storno). Převyšují-li zálohy vyúčtované plnění,
+  má faktura zápornou částku k úhradě a přeplatek zůstane v účetnictví jako pohledávka za dodavatelem (MD 321).
 - V detailu **zálohy** vidíte reverzně, kterou fakturou je vyúčtována. Nevyúčtovanou zálohu lze spárovat i **odtud**,
   tlačítkem **Spárovat s fakturou** (nabídne nepropojené vyúčtovací faktury téhož dodavatele). Tlačítka se zobrazí jen,
   když existuje vhodný protějšek.
 
-Jedna záloha může být navázaná **jen na jednu** finální fakturu.
+Jedna záloha může být vyúčtovaná **jen jednou** finální fakturou, jedna finální faktura ale může vyúčtovat víc záloh.
 
 **Nákup zaplacený kartou (bez zálohové faktury).** Když dodavatel žádnou zálohovou fakturu nevystaví a místo ní pošle
 rovnou **daňový doklad k platbě** (typ dokladu *Daňový doklad k platbě*, § 28 odst. 8 ZDPH), typicky u platby kartou,

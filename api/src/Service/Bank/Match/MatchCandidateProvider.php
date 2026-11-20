@@ -10,6 +10,7 @@ use MyInvoice\Service\Bank\FxPaymentSettlement;
 use MyInvoice\Service\Bank\PurchasePaymentKinds;
 use MyInvoice\Service\Bank\VariableSymbolNormalizer;
 use MyInvoice\Service\Invoice\InvoiceOtherItemPayments;
+use MyInvoice\Service\PurchaseInvoice\PurchaseAdvanceLinks;
 use MyInvoice\Support\Sql\PurchaseSettledExpr;
 use PDO;
 
@@ -227,19 +228,23 @@ final class MatchCandidateProvider
                     (" . PurchaseSettledExpr::settled('p') . ") AS paid_total,
                     p.document_kind AS invoice_type, p.status, p.exchange_rate,
                     p.issue_date, p.due_date, cur.code AS currency, c.company_name AS party, p.card_last4,
-                    p.advance_purchase_invoice_id,
+                    COALESCE(p.advance_purchase_invoice_id,
+                             (SELECT MIN(lnk.advance_invoice_id) FROM purchase_advance_deductions lnk
+                               WHERE lnk.supplier_id = p.supplier_id AND lnk.final_invoice_id = p.id
+                                 AND lnk.source = '" . PurchaseAdvanceLinks::SOURCE . "')) AS advance_purchase_invoice_id,
                     fin.final_ref
                FROM purchase_invoices p
                JOIN currencies cur ON cur.id = p.currency_id
                JOIN clients c ON c.id = p.vendor_id AND c.supplier_id = p.supplier_id
-               -- Konečná faktura, která zálohu vyúčtovává: platba pod JEJÍM VS je u neuhrazené
-               -- zálohy platbou zálohy (AdvanceFinalMatchGuard ji na fakturu nepustí).
-               LEFT JOIN (SELECT f.advance_purchase_invoice_id AS advance_id,
+               -- Konečná faktura, která zálohu vyúčtovává (hlavičkou i jako jedna z víc záloh):
+               -- platba pod JEJÍM VS je u neuhrazené zálohy platbou zálohy
+               -- (AdvanceFinalMatchGuard ji na fakturu nepustí).
+               LEFT JOIN (SELECT l.advance_id,
                                  MIN(COALESCE(NULLIF(f.vendor_invoice_number, ''), f.varsymbol)) AS final_ref
-                            FROM purchase_invoices f
-                           WHERE f.supplier_id = ? AND f.advance_purchase_invoice_id IS NOT NULL
-                             AND f.status <> 'cancelled'
-                           GROUP BY f.advance_purchase_invoice_id) fin ON fin.advance_id = p.id
+                            FROM (" . PurchaseAdvanceLinks::linksSql((string) $supplierId) . ") l
+                            JOIN purchase_invoices f ON f.id = l.final_id
+                           WHERE f.supplier_id = ? AND f.status <> 'cancelled'
+                           GROUP BY l.advance_id) fin ON fin.advance_id = p.id
               WHERE p.supplier_id = ?
                 AND {$statusCondition}
                 AND " . PurchasePaymentKinds::bankPayableSql('p') . "

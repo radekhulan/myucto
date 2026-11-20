@@ -18,8 +18,8 @@ namespace MyInvoice\Support\Sql;
  *
  * Odpočtové řádky se předagregují po dokladu v odvozené tabulce omezené firmou, takže se
  * k přehledu připojují LEFT JOINem bez korelovaného poddotazu na každý doklad. Odvozená
- * tabulka vychází z konečných faktur firmy s vyplněnou zálohou (`idx_pi_supplier_advance`)
- * a řádky odpočtu dohledá po `ix_pii_advance_purchase_invoice`. Index řádků firmu nezná,
+ * tabulka vychází z vazeb firmy na zálohy (hlavička po `idx_pi_supplier_advance`, víc záloh
+ * po `ix_pad_final_source`) a řádky odpočtu dohledá po dokladu. Index řádků firmu nezná,
  * takže jako první tabulka by dotaz procházel odpočtové řádky všech firem.
  *
  * Použití: `FROM purchase_invoices pi ` . deductionJoin('pi', $supplierId) a v SELECT
@@ -88,26 +88,27 @@ final class PurchaseCostSql
     }
 
     /**
-     * FROM a WHERE odpočtových řádků zálohy (`ded_i`) na konečných fakturách (`ded_f`).
-     * S firmou vychází z jejích konečných faktur s vyplněnou zálohou a STRAIGHT_JOIN pořadí
-     * drží i při statistikách, podle kterých by optimalizátor začal řádky všech firem.
+     * FROM a WHERE odpočtových řádků zálohy (`ded_i`) na konečných fakturách. Odpočet patří
+     * záloze, kterou faktura vyúčtovává: hlavičkou, nebo u faktury s víc zálohami řádkem
+     * čerpání `document` ({@see \MyInvoice\Service\PurchaseInvoice\PurchaseAdvanceLinks}).
+     * S firmou vychází z jejích vazeb na zálohy a STRAIGHT_JOIN pořadí drží i při
+     * statistikách, podle kterých by optimalizátor začal řádky všech firem.
      */
     private static function deductionRowsFrom(?int $supplierId): string
     {
         if ($supplierId === null) {
-            return 'FROM purchase_invoice_items ded_i
+            return "FROM purchase_invoice_items ded_i
                     JOIN purchase_invoices ded_f ON ded_f.id = ded_i.purchase_invoice_id
                    WHERE ded_i.advance_purchase_invoice_id IS NOT NULL
-                     AND ded_i.advance_purchase_invoice_id = ded_f.advance_purchase_invoice_id
+                     AND " . \MyInvoice\Service\PurchaseInvoice\PurchaseAdvanceLinks::finalLinksAdvanceSql('ded_f', 'ded_i.advance_purchase_invoice_id') . '
                      AND ded_i.total_with_vat < 0';
         }
 
-        return "FROM purchase_invoices ded_f
+        return 'FROM (' . \MyInvoice\Service\PurchaseInvoice\PurchaseAdvanceLinks::linksSql((string) $supplierId) . ") ded_l
                 STRAIGHT_JOIN purchase_invoice_items ded_i
-                     ON ded_i.advance_purchase_invoice_id = ded_f.advance_purchase_invoice_id
-                    AND ded_i.purchase_invoice_id = ded_f.id
-               WHERE ded_f.supplier_id = {$supplierId} AND ded_f.advance_purchase_invoice_id IS NOT NULL
-                 AND ded_i.total_with_vat < 0";
+                     ON ded_i.purchase_invoice_id = ded_l.final_id
+                    AND ded_i.advance_purchase_invoice_id = ded_l.advance_id
+               WHERE ded_i.total_with_vat < 0";
     }
 
     private static function assertAlias(string $alias): void

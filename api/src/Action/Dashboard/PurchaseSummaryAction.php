@@ -149,10 +149,15 @@ final class PurchaseSummaryAction
     {
         $p     = $alias === '' ? '' : $alias . '.';
         $idRef = $alias === '' ? 'purchase_invoices.id' : $alias . '.id';
+        $supplierRef = $alias === '' ? 'purchase_invoices.supplier_id' : $alias . '.supplier_id';
+        // Spárovaná = vazba hlavičkou i záloha jedné z faktur s víc zálohami (PurchaseAdvanceLinks).
         return " AND NOT (COALESCE({$p}document_kind, '') = 'advance'"
              . " AND ({$p}status <> 'paid'"
              . " OR EXISTS (SELECT 1 FROM purchase_invoices adv_s"
-             . " WHERE adv_s.advance_purchase_invoice_id = {$idRef})))"
+             . " WHERE adv_s.advance_purchase_invoice_id = {$idRef})"
+             . " OR EXISTS (SELECT 1 FROM purchase_advance_deductions adv_d"
+             . " WHERE adv_d.supplier_id = {$supplierRef} AND adv_d.advance_invoice_id = {$idRef}"
+             . " AND adv_d.source = '" . \MyInvoice\Service\PurchaseInvoice\PurchaseAdvanceLinks::SOURCE . "')))"
              // DDKP (daňový doklad k platbě) není náklad ani závazek — jen odpočet DPH ze
              // zálohy (343/314); jeho základ vzniká jako náklad až u vyúčtovací faktury. Proto
              // BEZPODMÍNEČNĚ ven z nákladových/závazkových sum (na rozdíl od 'advance' výše).

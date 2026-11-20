@@ -13,11 +13,16 @@ use MyInvoice\Repository\PurchaseInvoiceRepository;
 use MyInvoice\Service\Accounting\DocumentLockService;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\IpMatcher;
+use MyInvoice\Service\PurchaseInvoice\PurchaseAdvanceLinkException;
+use MyInvoice\Service\PurchaseInvoice\PurchaseAdvanceLinks;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 
 /**
- * POST /api/purchase-invoices/{id}/link-advance  body: {advance_id}
+ * POST /api/purchase-invoices/{id}/link-advance  body: {advance_id, append?}
+ *
+ * `append: true` přidá zálohu k zálohám, které faktura už vyúčtovává
+ * ({@see PurchaseAdvanceLinks}: vyúčtování víc záloh jednou fakturou).
  *
  * Propojí finální přijatou fakturu se zálohovou (advance), aby se náklad
  * nepočítal dvakrát (záloha + vyúčtovací faktura). Vazba se ukládá na finální
@@ -63,13 +68,23 @@ final class LinkAdvancePurchaseInvoiceAction
             return Json::error($response, 'invalid_advance', 'Chybí advance_id.', 400);
         }
 
+        $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
+        // `append` přidá zálohu k už vyúčtovaným (faktura s víc zálohami). Bez něj zůstává
+        // vazba jedinou zálohou; faktuře s víc zálohami by ostatní nahradila, proto ji odmítne.
+        $append = filter_var($body['append'] ?? false, FILTER_VALIDATE_BOOLEAN);
+        $links = new PurchaseAdvanceLinks($this->db);
         try {
-            $this->repo->linkAdvance($id, $advanceId, $supplierId);
+            if ($append && $links->advanceIds($supplierId, $id) !== []) {
+                $links->append($supplierId, $id, $advanceId, isset($user['id']) ? (int) $user['id'] : null);
+            } else {
+                $this->repo->linkAdvance($id, $advanceId, $supplierId);
+            }
+        } catch (PurchaseAdvanceLinkException $e) {
+            return Json::error($response, $e->errorCode, $e->getMessage(), $e->status);
         } catch (\Throwable $e) {
             return Json::error($response, 'link_failed', $e->getMessage(), 409);
         }
 
-        $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
         $ip = $this->ipMatcher->clientIpFromRequest($request->getServerParams());
         $this->logger->log('purchase_invoice.advance_linked', $user['id'] ?? null, 'purchase_invoice', $id, [
             'advance_id' => $advanceId,

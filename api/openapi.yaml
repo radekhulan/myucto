@@ -14626,7 +14626,7 @@ paths:
     get:
       tags: [Purchase invoices]
       summary: Nespárované zálohy dodavatele pro konečnou fakturu, která ještě není uložená
-      description: Stejný výběr a řazení jako `/purchase-invoices/{id}/advance-candidates`. Vazbu založí uložení dokladu s `advance_purchase_invoice_id`.
+      description: Stejný výběr a řazení jako `/purchase-invoices/{id}/advance-candidates`. Vazbu založí uložení dokladu s `advance_purchase_invoice_id`, víc záloh s `advance_purchase_invoice_ids`.
       parameters:
         - { in: query, name: vendor_id, required: true, schema: { type: integer, format: int64 } }
         - { in: query, name: currency_id, required: true, schema: { type: integer, format: int64 } }
@@ -14648,7 +14648,7 @@ paths:
     get:
       tags: [Purchase invoices]
       summary: Řádky odpočtu poskytnuté zálohy podle jejích daňových dokladů k platbě
-      description: Za každý živý DDKP zálohy a sazbu DPH jeden řádek se základem a daní DDKP se znaménkem minus (v měně dokladu). Záloha bez DDKP vrací prázdný seznam. Řádek vložený na konečnou fakturu nese `advance_purchase_invoice_id` zálohy.
+      description: Za každý živý DDKP zálohy a sazbu DPH jeden řádek se základem a daní DDKP se znaménkem minus (v měně dokladu). Záloha bez DDKP vrací prázdný seznam, kromě zálohy převzaté v počátečních stavech (`opening_balance`); ta dostane jeden navržený řádek s částkou zálohy, sazbou z řádků zálohy nebo základní sazbou k jejímu datu a DPH dopočtenou shora. Řádek vložený na konečnou fakturu nese `advance_purchase_invoice_id` zálohy.
       parameters:
         - { in: query, name: advance_id, required: true, schema: { type: integer, format: int64 } }
       responses:
@@ -14660,13 +14660,15 @@ paths:
                 type: object
                 properties:
                   advance_id: { type: integer, format: int64 }
+                  opening_balance: { type: boolean, description: "Záloha převzatá v počátečních stavech bez DDKP v systému, řádek je navržený z její částky." }
                   lines:
                     type: array
                     items:
                       type: object
                       properties:
-                        tax_document_id: { type: integer, format: int64 }
-                        tax_document_number: { type: string }
+                        tax_document_id: { type: [integer, "null"], format: int64 }
+                        tax_document_number: { type: [string, "null"] }
+                        opening_balance: { type: boolean }
                         vat_rate_id: { type: integer }
                         vat_rate: { type: number }
                         vat_classification_code: { type: [string, "null"] }
@@ -14705,6 +14707,7 @@ paths:
     post:
       tags: [Purchase invoices]
       summary: Propojí finální přijatou fakturu se zálohovou (proti dvojímu nákladu)
+      description: "Konečná faktura může vyúčtovat víc záloh téhož dodavatele ve stejné měně: `append: true` přidá zálohu k zálohám, které už vyúčtovává. Záloha se vyúčtuje jedinou fakturou; koncept, storno, záloha jiného dodavatele nebo v jiné měně a zaúčtovaná faktura vrátí 4xx s hláškou."
       requestBody:
         required: true
         content:
@@ -14714,14 +14717,20 @@ paths:
               required: [advance_id]
               properties:
                 advance_id: { type: integer, format: int64 }
+                append: { type: boolean, description: "Přidat zálohu k už navázaným (faktura s víc zálohami). Bez něj vazba jedinou zálohou." }
       responses:
-        '200': { description: 'OK (aktualizovaná faktura vč. linked_advance)' }
-        '409': { description: Propojení selhalo }
+        '200': { description: 'OK (aktualizovaná faktura vč. linked_advance a linked_advances)' }
+        '404': { description: Doklad nenalezen }
+        '409': { description: Propojení selhalo (záloha vyúčtovaná jinou fakturou, storno, koncept, zaúčtovaná faktura) }
+        '422': { description: Záloha jiného dodavatele nebo v jiné měně, doklad, který zálohy nevyúčtovává }
     delete:
       tags: [Purchase invoices]
       summary: Zruší propojení se zálohou
+      parameters:
+        - { in: query, name: advance_id, required: false, schema: { type: integer, format: int64 }, description: "Odpojí jednu zálohu faktury s víc zálohami. Bez něj se odpojí všechny." }
       responses:
         '200': { description: OK }
+        '409': { description: Zaúčtovaná faktura nebo záloha, kterou faktura nevyúčtovává }
 
   /api/v1/purchase-invoices/{id}/advance-suggestion:
     parameters:
@@ -56709,7 +56718,7 @@ components:
         intrastat_country_of_origin: { type: [string, "null"], minLength: 2, maxLength: 2, description: "Země původu (ISO alpha-2) z dokladu. Příjemka ji doplní na kartu, pokud tam chybí." }
         advance_purchase_invoice_id:
           type: [integer, "null"]
-          description: "Odpočet poskytnuté zálohy: záporný řádek konečné faktury se základem a daní daňového dokladu k platbě (DDKP) zálohy, kterou faktura vyúčtovává (`advance_purchase_invoice_id` dokladu). Základ odpočtu nejde na náklad, zaúčtování z něj zúčtuje zálohu 321/314. NULL = běžná položka."
+          description: "Odpočet poskytnuté zálohy: záporný řádek konečné faktury se základem a daní daňového dokladu k platbě (DDKP) zálohy, kterou faktura vyúčtovává (`advance_purchase_invoice_id` dokladu, u faktury s víc zálohami některá z `linked_advances`). Základ odpočtu nejde na náklad, zaúčtování z něj zúčtuje zálohu 321/314. NULL = běžná položka."
         is_fixed_asset:
           type: boolean
           default: false
@@ -56756,7 +56765,7 @@ components:
         item_ean: { type: [string, "null"], maxLength: 20, description: "EAN zboží, jen číslice v délce 8, 12, 13 nebo 14, jinak se uloží null. Vynechání a `null` stejně jako u `seller_item_code`." }
         intrastat_cn8_code: { type: [string, "null"], description: "Kód KN8, tečky se odstraní; co nemá 8 číslic, se neuloží. Vynechání a `null` stejně jako u `seller_item_code`." }
         intrastat_country_of_origin: { type: [string, "null"], description: "Země původu (ISO alpha-2); jiný tvar se neuloží. Vynechání a `null` stejně jako u `seller_item_code`." }
-        advance_purchase_invoice_id: { type: [integer, "null"], description: "Označí záporný řádek jako odpočet poskytnuté zálohy (zálohová faktura nebo samostatný DDKP firmy, jinak se uloží null). Záloha musí být ta, kterou faktura vyúčtovává, jinak zaúčtování vrátí `advance_settlement_ambiguous`. Vynechání a `null` stejně jako u `seller_item_code`." }
+        advance_purchase_invoice_id: { type: [integer, "null"], description: "Označí záporný řádek jako odpočet poskytnuté zálohy (zálohová faktura nebo samostatný DDKP firmy, jinak se uloží null). Záloha musí být některá z těch, které faktura vyúčtovává, jinak zaúčtování vrátí `advance_settlement_ambiguous`. Vynechání a `null` stejně jako u `seller_item_code`." }
         stock_item_id:
           type: [integer, "null"]
           description: |
@@ -57079,7 +57088,7 @@ components:
         vendor_invoice_number: { type: string }
         external_barcode: { type: [string, "null"], description: "Čárový kód dokladu z předchozího systému (nálepka na papírovém dokladu). Plní ho převod dat; slouží jako jistý klíč při připojování skenů." }
         document_kind: { type: string, enum: [invoice, receipt, credit_note, advance, tax_document] }
-        advance_purchase_invoice_id: { type: [integer, "null"], description: "FK na zálohovou fakturu, kterou tento doklad vyúčtovává (párování zálohy)" }
+        advance_purchase_invoice_id: { type: [integer, "null"], description: "FK na zálohovou fakturu, kterou tento doklad vyúčtovává (párování zálohy). Faktura s víc zálohami má null, zálohy jsou v `linked_advances`." }
         advance_link_suggested_id: { type: [integer, "null"], description: "AI/auto návrh na propojení zálohy (čeká na potvrzení)" }
         issue_date: { type: string, format: date }
         tax_date: { type: [string, "null"], format: date }
@@ -57269,7 +57278,11 @@ components:
         vendor_main_email: { type: [string, "null"] }
         linked_advance:
           type: [object, "null"]
-          description: "Brief zálohy, kterou tento doklad vyúčtovává ({ id, varsymbol, document_kind, status, total_with_vat, currency })"
+          description: "Brief zálohy, kterou tento doklad vyúčtovává ({ id, varsymbol, document_kind, status, total_with_vat, currency }). U faktury s víc zálohami první z `linked_advances`."
+        linked_advances:
+          type: array
+          items: { type: object }
+          description: "Briefy všech záloh, které konečná faktura vyúčtovává (stejný tvar jako `linked_advance`). Jedna záloha se váže hlavičkou (`advance_purchase_invoice_id`), faktura s víc zálohami hlavičku nemá (`null`) a vazbu nese seznam."
         advance_link_suggestion: { type: [object, "null"], description: "Brief AI-navržené zálohy k propojení" }
         settled_by: { type: [object, "null"], description: "Jen u zálohy — brief finální faktury, která ji vyúčtovává" }
         has_advance_candidates: { type: boolean }

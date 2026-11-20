@@ -105,13 +105,25 @@ final class AdvanceDeductionRepository
         $pdo->prepare("SELECT id FROM {$docTable} WHERE supplier_id = ? AND id IN (" . implode(',', $ids) . ') ORDER BY id FOR UPDATE')
             ->execute([$supplierId]);
         $table = self::table($docType);
+        // Řádky `document` nese jen přijatá faktura vyúčtovávající víc záloh
+        // ({@see \MyInvoice\Service\PurchaseInvoice\PurchaseAdvanceLinks}); vazbu hlavičkou
+        // s nimi kombinovat nelze, záloha se tam přidává k ostatním.
+        $document = $docType === 'purchase_invoice' ? "source = 'document'" : '0';
         $stmt = $pdo->prepare(
             "SELECT
                 (SELECT COUNT(*) FROM {$table} WHERE supplier_id = ? AND advance_invoice_id = ?) AS advance_rows,
-                (SELECT COUNT(*) FROM {$table} WHERE supplier_id = ? AND final_invoice_id = ?) AS final_rows"
+                (SELECT COUNT(*) FROM {$table} WHERE supplier_id = ? AND final_invoice_id = ?) AS final_rows,
+                (SELECT COUNT(*) FROM {$table} WHERE supplier_id = ? AND advance_invoice_id = ? AND {$document}) AS advance_document_rows,
+                (SELECT COUNT(*) FROM {$table} WHERE supplier_id = ? AND final_invoice_id = ? AND {$document}) AS final_document_rows"
         );
-        $stmt->execute([$supplierId, (int) $advanceId, $supplierId, $finalId]);
-        $r = $stmt->fetch(PDO::FETCH_ASSOC) ?: ['advance_rows' => 0, 'final_rows' => 0];
+        $stmt->execute([$supplierId, (int) $advanceId, $supplierId, $finalId, $supplierId, (int) $advanceId, $supplierId, $finalId]);
+        $r = $stmt->fetch(PDO::FETCH_ASSOC) ?: ['advance_rows' => 0, 'final_rows' => 0, 'advance_document_rows' => 0, 'final_document_rows' => 0];
+        if ((int) $r['advance_document_rows'] > 0) {
+            throw new \RuntimeException('Záloha je už vyúčtovaná jinou fakturou spolu s dalšími zálohami.');
+        }
+        if ((int) $r['final_document_rows'] > 0) {
+            throw new \RuntimeException('Faktura vyúčtovává víc záloh. Další zálohu přidejte k ostatním, vazba jedinou zálohou by je nahradila.');
+        }
         if ((int) $r['advance_rows'] > 0) {
             throw new \RuntimeException('Záloha je už čerpaná konečnou fakturou v saldokontu. Zbytek zálohy vyrovnejte tam (Saldokonto, Vyrovnat), vazba by čerpání zdvojila.');
         }

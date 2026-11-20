@@ -17,7 +17,9 @@ use Psr\Http\Message\ServerRequestInterface as Request;
  * DDKP a sazbu jeden záporný řádek se základem a daní DDKP. Editor konečné faktury je
  * vloží jako odpočtové řádky zálohy ({@see PurchaseAdvanceDeduction}). Funguje i pro
  * doklad, který ještě není uložený, proto se ptá na zálohu, ne na konečnou fakturu.
- * Záloha bez živého DDKP vrací prázdný seznam.
+ * Záloha bez živého DDKP vrací prázdný seznam, kromě zálohy z počátečních stavů: ta dostane
+ * jeden navržený řádek s DPH dopočtenou z částky zálohy (`opening_balance`,
+ * {@see PurchaseAdvanceDeduction::openingAdvanceLine()}).
  */
 final class AdvanceDeductionLinesAction
 {
@@ -31,9 +33,11 @@ final class AdvanceDeductionLinesAction
         }
         $supplierId = SupplierGuard::currentId($request);
 
+        $lines = $this->deduction->linesFromTaxDocuments($supplierId, $advanceId);
         return Json::ok($response, [
-            'advance_id' => $advanceId,
-            'lines'      => $this->deduction->linesFromTaxDocuments($supplierId, $advanceId),
+            'advance_id'      => $advanceId,
+            'opening_balance' => $lines !== [] && ($lines[0]['opening_balance'] ?? false) === true,
+            'lines'           => $lines,
         ]);
     }
 }

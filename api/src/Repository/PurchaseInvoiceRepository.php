@@ -15,6 +15,7 @@ use MyInvoice\Service\Invoice\OverduePolicy;
 use MyInvoice\Service\Invoice\TimeBilling;
 use MyInvoice\Service\License\CommercialFeatureAccess;
 use MyInvoice\Service\PurchaseInvoice\ExtractionReviewSync;
+use MyInvoice\Service\PurchaseInvoice\PurchaseAdvanceLinks;
 use MyInvoice\Service\PurchaseInvoice\PurchaseNumberSeries;
 use MyInvoice\Service\PurchaseInvoice\PurchaseVatTreatment;
 use MyInvoice\Service\PurchaseInvoice\VendorNumberDuplicates;
@@ -122,9 +123,16 @@ final class PurchaseInvoiceRepository
         //  - linked_advance   = záloha, kterou tato finální faktura vyúčtovává
         //  - settled_by       = finální faktura vyúčtovávající tuto zálohu (reverzně)
         //  - advance_link_suggestion = AI návrh (suggest & confirm), čeká na potvrzení
-        $row['linked_advance'] = $row['advance_purchase_invoice_id'] !== null
-            ? $this->briefFor((int) $row['advance_purchase_invoice_id'], $supplierId)
-            : null;
+        //  - linked_advances  = všechny vyúčtované zálohy (faktura s víc zálohami nemá hlavičku,
+        //                       {@see PurchaseAdvanceLinks}); linked_advance je první z nich
+        $row['linked_advances'] = [];
+        foreach ((new PurchaseAdvanceLinks($this->db))->advanceIds($supplierId, $id) as $linkedId) {
+            $brief = $this->briefFor($linkedId, $supplierId);
+            if ($brief !== null) {
+                $row['linked_advances'][] = $brief;
+            }
+        }
+        $row['linked_advance'] = $row['linked_advances'][0] ?? null;
         $row['advance_link_suggestion'] = $row['advance_link_suggested_id'] !== null
             ? $this->briefFor((int) $row['advance_link_suggested_id'], $supplierId)
             : null;
@@ -203,6 +211,8 @@ final class PurchaseInvoiceRepository
                            WHERE pi.supplier_id = ? AND pi.vendor_id = ?
                              AND pi.document_kind != 'advance' AND pi.status != 'cancelled'
                              AND pi.advance_purchase_invoice_id IS NULL AND pi.id <> ?
+                             AND NOT EXISTS (SELECT 1 FROM purchase_advance_deductions pad
+                                              WHERE pad.supplier_id = pi.supplier_id AND pad.final_invoice_id = pi.id)
                         )"
             );
             $q->execute([$supplierId, $vendorId, $id]);
@@ -228,7 +238,7 @@ final class PurchaseInvoiceRepository
         // o zaúčtování (viz PostingService::appendAdvanceSettlementPurchase).
         // Konečná faktura k záloze s DDKP bez odpočtu zálohy: detail nabídne „Doplnit odpočet
         // zálohy z DDKP" (jinak dvojí odpočet DPH a doklad nejde zaúčtovat).
-        $row['advance_deduction_missing'] = $documentKind === 'invoice' && $row['advance_purchase_invoice_id'] !== null
+        $row['advance_deduction_missing'] = $documentKind === 'invoice' && $row['linked_advances'] !== []
             && (new \MyInvoice\Service\PurchaseInvoice\PurchaseAdvanceDeduction($this->db))->finalMissingDeduction($supplierId, $id);
 
         $row['unsettled_notice'] = null;
@@ -308,13 +318,20 @@ final class PurchaseInvoiceRepository
         // zúčtování 321/314 v jejím zápisu, takže „uhrazeno bez zaúčtované úhrady" tu
         // není pravda. Nezaplacená záloha naopak znamená, že zúčtování chybí — platbu
         // patří spárovat se zálohou, ne s fakturou ({@see linked_advance_unpaid}).
-        $linkedAdvanceId = (string) ($row['document_kind'] ?? 'invoice') === 'invoice'
-            && is_array($row['linked_advance'] ?? null)
-            && (string) ($row['linked_advance']['document_kind'] ?? '') === 'advance'
-                ? (int) $row['linked_advance']['id']
-                : null;
-        $linkedAdvancePaid = $linkedAdvanceId !== null && $this->paidAdvanceAmount($linkedAdvanceId, $supplierId) > 0.0;
-        $row['linked_advance_unpaid'] = $linkedAdvanceId !== null && $isDoubleEntry && !$linkedAdvancePaid
+        // U faktury s víc zálohami platí obojí za všechny zálohové faktury: kryje ji jen
+        // úhrada každé z nich a upozornění stačí na kteroukoli neuhrazenou.
+        $linkedAdvanceIds = (string) ($row['document_kind'] ?? 'invoice') === 'invoice'
+            ? array_values(array_map(
+                static fn (array $a): int => (int) $a['id'],
+                array_filter($row['linked_advances'], static fn (array $a): bool => (string) ($a['document_kind'] ?? '') === 'advance'),
+            ))
+            : [];
+        $unpaidAdvanceIds = array_values(array_filter(
+            $linkedAdvanceIds,
+            fn (int $advanceId): bool => $this->paidAdvanceAmount($advanceId, $supplierId) <= 0.0,
+        ));
+        $linkedAdvancePaid = $linkedAdvanceIds !== [] && $unpaidAdvanceIds === [];
+        $row['linked_advance_unpaid'] = $unpaidAdvanceIds !== [] && $isDoubleEntry
             && ($row['status'] ?? '') !== 'cancelled';
         $coveredByAdvance = $linkedAdvancePaid && (float) ($row['amount_to_pay'] ?? 0) <= 0.005;
 
@@ -488,16 +505,11 @@ final class PurchaseInvoiceRepository
         ];
     }
 
-    /** Finální faktura, která vyúčtovává tuto zálohu (reverzní pohled). */
+    /** Finální faktura, která vyúčtovává tuto zálohu (reverzní pohled), i jako jednu z víc záloh. */
     private function settledByFor(int $advanceId, int $supplierId): ?array
     {
-        $id = $this->db->pdo()->prepare(
-            'SELECT id FROM purchase_invoices
-              WHERE advance_purchase_invoice_id = ? AND supplier_id = ? LIMIT 1'
-        );
-        $id->execute([$advanceId, $supplierId]);
-        $finalId = $id->fetchColumn();
-        return $finalId !== false ? $this->briefFor((int) $finalId, $supplierId) : null;
+        $finalId = (new PurchaseAdvanceLinks($this->db))->finalIds($supplierId, $advanceId)[0] ?? null;
+        return $finalId !== null ? $this->briefFor($finalId, $supplierId) : null;
     }
 
     /**
@@ -3116,8 +3128,20 @@ final class PurchaseInvoiceRepository
      *
      * @throws \RuntimeException když je doklad zaúčtovaný
      */
-    public function unlinkAdvance(int $finalId, int $supplierId): void
+    public function unlinkAdvance(int $finalId, int $supplierId, ?int $advanceId = null): void
     {
+        // Faktura s víc zálohami: vazbu nesou řádky čerpání, odpojí je vlastník vazby.
+        if ((new PurchaseAdvanceLinks($this->db))->unlinkDocument($supplierId, $finalId, $advanceId)) {
+            return;
+        }
+        if ($advanceId !== null) {
+            $q = $this->db->pdo()->prepare('SELECT advance_purchase_invoice_id FROM purchase_invoices WHERE id = ? AND supplier_id = ?');
+            $q->execute([$finalId, $supplierId]);
+            $current = $q->fetchColumn();
+            if ($current === false || $current === null || (int) $current !== $advanceId) {
+                throw new \RuntimeException('Faktura tuto zálohu nevyúčtovává.');
+            }
+        }
         if ($this->hasActivePostedEntry($finalId, $supplierId)) {
             throw new \RuntimeException(
                 'Zaúčtovanou fakturu nelze odpojit od zálohy — zúčtování zálohy je součástí '

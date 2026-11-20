@@ -15,7 +15,8 @@ use PDO;
  * Stav „uhrazeno" přijatých dokladů, který plyne z evidovaných úhrad a ze zálohy.
  *
  * Týká se JEN záloh (`document_kind = 'advance'`) a jejich konečných faktur navázaných
- * přes `advance_purchase_invoice_id`. Běžná faktura se nemění: ruční „uhrazeno" i ruční
+ * přes `advance_purchase_invoice_id`, u faktury s víc zálohami řádky čerpání `document`
+ * ({@see PurchaseAdvanceLinks}). Běžná faktura se nemění: ruční „uhrazeno" i ruční
  * datum úhrady zůstávají a zrušení párování je nevrací.
  *
  * Dvě pravidla, obě odvozená od téže evidence úhrad ({@see PurchaseSettledExpr}):
@@ -34,7 +35,7 @@ use PDO;
  * faktuře uhrazená záloha ({@see LinkedAdvanceAmount}); pravidlo 2 pak vidí její
  * skutečnou zbývající částku.
  *
- * Čerpání zálohy po dvojicích (`purchase_advance_deductions`, převod nebo Vyrovnat
+ * Čerpání zálohy po dvojicích (`purchase_advance_deductions` ze zdroje převod nebo Vyrovnat
  * v saldokontu) sem záměrně nepatří: nemění `advance_paid_amount` ani `amount_to_pay`
  * konečné faktury, takže úhradu faktury nekryje. Je to účetní přiřazení odpočtu na 314;
  * stav „uhrazeno" konečné faktury dál nese její vlastní úhrada nebo vazba na zálohu.
@@ -76,7 +77,8 @@ final class AdvanceCoveredPaidStatus
             }
             if ((string) $doc['document_kind'] === 'advance') {
                 $this->syncFinalsOfAdvance($supplierId, $id);
-            } elseif ($doc['advance_purchase_invoice_id'] !== null) {
+            } elseif ($doc['advance_purchase_invoice_id'] !== null
+                || (new PurchaseAdvanceLinks($this->db))->isMulti($supplierId, $id)) {
                 $this->syncFinal($supplierId, $id, true);
             }
         }
@@ -146,19 +148,27 @@ final class AdvanceCoveredPaidStatus
         ?string $advancePaidAtOverride = null,
         bool $currentRead = false,
     ): ?array {
+        // Zálohy faktury: hlavička, nebo u faktury s víc zálohami všechny (PurchaseAdvanceLinks).
+        // Krytá je jen tehdy, když jsou to zálohové faktury a uhrazené jsou VŠECHNY; datem
+        // úhrady faktury je den úhrady poslední z nich.
+        $advanceIds = (new PurchaseAdvanceLinks($this->db))->advanceIds($supplierId, $finalId);
+        if ($advanceIds === []) {
+            return null;
+        }
         $settled = PurchaseSettledExpr::settled('f', currentRead: $currentRead);
         $stmt = $this->db->pdo()->prepare(
             "SELECT f.status, f.paid_at, f.amount_to_pay, f.total_with_vat, ({$settled}) AS own_settled,
-                    a.status AS advance_status, a.paid_at AS advance_paid_at
+                    a.document_kind AS advance_kind, a.status AS advance_status, a.paid_at AS advance_paid_at
                FROM purchase_invoices f
                JOIN purchase_invoices a
-                 ON a.id = f.advance_purchase_invoice_id AND a.supplier_id = f.supplier_id
-                AND a.document_kind = 'advance'
+                 ON a.id IN (" . implode(',', $advanceIds) . ") AND a.supplier_id = f.supplier_id
               WHERE f.id = ? AND f.supplier_id = ? AND f.document_kind = 'invoice'
-                AND f.status IN ('received', 'booked', 'paid')" . ($currentRead ? ' FOR UPDATE' : '')
+                AND f.status IN ('received', 'booked', 'paid')
+              ORDER BY a.id" . ($currentRead ? ' FOR UPDATE' : '')
         );
         $stmt->execute([$finalId, $supplierId]);
-        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+        $row = $rows[0] ?? false;
         // Jen faktura krytá zálohou CELÁ a bez vlastní úhrady: zbytek k doplacení nebo
         // úhrada přímo na faktuře o stavu rozhodují samy (párování, pokladna).
         if ($row === false
@@ -167,13 +177,27 @@ final class AdvanceCoveredPaidStatus
             || abs((float) $row['own_settled']) >= 0.005) {
             return null;
         }
+        $advancesPaid = true;
+        $lastAdvancePaidAt = null;
+        foreach ($rows as $advance) {
+            if ((string) $advance['advance_kind'] !== 'advance') {
+                return null;
+            }
+            $advancePaidOn = $advance['advance_paid_at'] !== null ? substr((string) $advance['advance_paid_at'], 0, 10) : null;
+            if ((string) $advance['advance_status'] !== 'paid' || ($advancePaidOn === null && count($rows) > 1)) {
+                $advancesPaid = false;
+                continue;
+            }
+            if ($advancePaidOn !== null) {
+                $lastAdvancePaidAt = max($lastAdvancePaidAt ?? '', $advancePaidOn);
+            }
+        }
 
         $status = (string) $row['status'];
         $paidAt = $row['paid_at'] !== null ? substr((string) $row['paid_at'], 0, 10) : null;
-        $advancePaidAt = $advancePaidAtOverride
-            ?? ($row['advance_paid_at'] !== null ? substr((string) $row['advance_paid_at'], 0, 10) : null);
+        $advancePaidAt = $advancePaidAtOverride ?? $lastAdvancePaidAt;
 
-        if ((string) $row['advance_status'] === 'paid' && $advancePaidAt !== null) {
+        if ($advancesPaid && $advancePaidAt !== null) {
             if ($status === 'paid' && $paidAt === $advancePaidAt) {
                 return null;
             }
@@ -325,12 +349,13 @@ final class AdvanceCoveredPaidStatus
     private function finalIds(int $supplierId, int $advanceId): array
     {
         $stmt = $this->db->pdo()->prepare(
-            "SELECT id FROM purchase_invoices
-              WHERE supplier_id = ? AND advance_purchase_invoice_id = ? AND document_kind = 'invoice'
-                AND status IN ('received', 'booked', 'paid')
-              ORDER BY id"
+            'SELECT pi.id FROM (' . PurchaseAdvanceLinks::finalIdsSql('?', '?') . ") fx
+               JOIN purchase_invoices pi ON pi.id = fx.id
+              WHERE pi.supplier_id = ? AND pi.document_kind = 'invoice'
+                AND pi.status IN ('received', 'booked', 'paid')
+              ORDER BY pi.id"
         );
-        $stmt->execute([$supplierId, $advanceId]);
+        $stmt->execute([$supplierId, $advanceId, $supplierId, $advanceId, $supplierId]);
         return array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN) ?: []);
     }
 

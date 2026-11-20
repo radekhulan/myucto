@@ -2371,11 +2371,16 @@ final class ClosingRepository
                 -- Podmínka „záloha nemá vlastní předpis na 321\" brání dvojímu započtení:
                 -- když účetní zálohu na saldokonto předepsala, vyrovná si ji sama ve své
                 -- vlastní skupině a konečná faktura si na ni nesmí sáhnout podruhé.
+                --
+                -- Konečná faktura s víc zálohami (PurchaseAdvanceLinks) přebírá úhrady všech
+                -- svých záloh, proto vazby z linksSql a součet po faktuře.
                 SELECT pi.id AS purchase_invoice_id,
-                       COALESCE(sb.settled, 0) + COALESCE(sc.settled, 0) AS settled
+                       SUM(COALESCE(sb.settled, 0) + COALESCE(sc.settled, 0)) AS settled
                   FROM purchase_invoices pi
+                  JOIN (" . \MyInvoice\Service\PurchaseInvoice\PurchaseAdvanceLinks::linksSql((string) $supplierId) . ") lnk
+                    ON lnk.final_id = pi.id
                   JOIN purchase_invoices adv
-                    ON adv.id = pi.advance_purchase_invoice_id AND adv.supplier_id = pi.supplier_id
+                    ON adv.id = lnk.advance_id AND adv.supplier_id = pi.supplier_id
                   LEFT JOIN settled_bank sb ON sb.purchase_invoice_id = adv.id
                   LEFT JOIN settled_cash sc ON sc.purchase_invoice_id = adv.id
                  WHERE pi.supplier_id = ?
@@ -2412,6 +2417,7 @@ final class ClosingRepository
                           AND (ea.reversed_by IS NULL OR reva.entry_date > ?)
                           AND (caa.account_code LIKE '321%' OR COALESCE(paa.account_code, '') LIKE '321%')
                    )
+                 GROUP BY pi.id
             ), settled_manual AS (
                 " . self::linkedManualSettledSql('purchase_invoice', '321', 'debit') . "
             ), doc AS (
@@ -2432,6 +2438,13 @@ final class ClosingRepository
                                  WHERE fin.supplier_id = pi.supplier_id
                                    AND fin.advance_purchase_invoice_id = pi.parent_purchase_invoice_id
                                    AND fin.document_kind NOT IN ('advance', 'tax_document')
+                                   AND fin.cancelled_at IS NULL
+                            ), (
+                                SELECT MIN(fin.id) FROM purchase_advance_deductions lnk
+                                  JOIN purchase_invoices fin ON fin.id = lnk.final_invoice_id
+                                 WHERE lnk.supplier_id = pi.supplier_id
+                                   AND lnk.advance_invoice_id = pi.parent_purchase_invoice_id
+                                   AND lnk.source = '" . \MyInvoice\Service\PurchaseInvoice\PurchaseAdvanceLinks::SOURCE . "'
                                    AND fin.cancelled_at IS NULL
                             ), pi.id)
                             ELSE pi.id END AS group_id,

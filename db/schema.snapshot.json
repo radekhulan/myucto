@@ -1221,7 +1221,8 @@
         "2315_bulk_actions.sql",
         "2316_bulk_changes_permission.sql",
         "2317_document_item_search.sql",
-        "2318_payroll_posting_code_maps.sql"
+        "2318_payroll_posting_code_maps.sql",
+        "2319_purchase_advance_deductions_document_source.sql"
     ],
     "tables": {
         "abra_flexi_connections": {
@@ -23692,7 +23693,7 @@
                 "created_by": "bigint(20) unsigned NULL DEFAULT NULL",
                 "final_invoice_id": "bigint(20) unsigned NOT NULL",
                 "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
-                "source": "enum('import','saldo') NOT NULL DEFAULT 'import'",
+                "source": "enum('import','saldo','document') NOT NULL DEFAULT 'import'",
                 "supplier_id": "int(10) unsigned NOT NULL"
             },
             "indexes": {
@@ -23700,6 +23701,7 @@
                 "fk_pad_advance": "BTREE (advance_invoice_id)",
                 "fk_pad_user": "BTREE (created_by)",
                 "ix_pad_advance": "BTREE (supplier_id, advance_invoice_id)",
+                "ix_pad_final_source": "BTREE (supplier_id, final_invoice_id, source)",
                 "uq_pad_pair": "UNIQUE BTREE (final_invoice_id, advance_invoice_id)"
             },
             "foreign_keys": {
@@ -23709,7 +23711,7 @@
                 "fk_pad_user": "(created_by) -> users (id) ON UPDATE RESTRICT ON DELETE SET NULL"
             },
             "checks": {
-                "chk_pad_amount": "`amount` > 0"
+                "chk_pad_amount": "`amount` > 0 or `source` = 'document' and `amount` >= 0"
             }
         },
         "purchase_invoice_approvals": {

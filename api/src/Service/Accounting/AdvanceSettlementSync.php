@@ -11,6 +11,7 @@ use MyInvoice\Repository\JournalEntryRepository;
 use MyInvoice\Service\ActivityLogger;
 use PDO;
 use MyInvoice\Support\Sql\AdvanceDrawSql;
+use MyInvoice\Service\PurchaseInvoice\PurchaseAdvanceLinks;
 
 /**
  * Dorovná zúčtování zálohy v zápisu KONEČNÉ faktury, když se úhrada zálohy zaúčtuje,
@@ -357,14 +358,16 @@ final class AdvanceSettlementSync
                  JOIN invoices i ON i.id = fx.id
                 WHERE i.status NOT IN ('draft', 'cancelled')
                 ORDER BY i.id"
-            : "SELECT id FROM purchase_invoices
-                WHERE supplier_id = ? AND advance_purchase_invoice_id = ? AND document_kind = 'invoice'
-                  AND status NOT IN ('draft', 'cancelled')
-                ORDER BY id";
+            // Přijatá strana: vazba hlavičkou i faktura vyúčtovávající víc záloh (PurchaseAdvanceLinks).
+            : 'SELECT pi.id FROM (' . PurchaseAdvanceLinks::finalIdsSql('?', '?') . ") fx
+                 JOIN purchase_invoices pi ON pi.id = fx.id
+                WHERE pi.supplier_id = ? AND pi.document_kind = 'invoice'
+                  AND pi.status NOT IN ('draft', 'cancelled')
+                ORDER BY pi.id";
         $stmt = $this->db->pdo()->prepare($sql);
         $stmt->execute($side === 'sale'
             ? [$supplierId, $advanceId, $advanceId, $supplierId]
-            : [$supplierId, $advanceId]);
+            : [$supplierId, $advanceId, $supplierId, $advanceId, $supplierId]);
         $ids = array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN) ?: []);
         // Víc konečných faktur k jedné proformě builder odmítne (advance_settlement_ambiguous);
         // první z nich to zaloguje přes stale().

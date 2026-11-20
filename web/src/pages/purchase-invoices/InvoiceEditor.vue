@@ -74,7 +74,7 @@ import DocumentPreviewSplit from '@/components/documents/DocumentPreviewSplit.vu
 import PaymentCurrencyBlock from '@/components/purchase/PaymentCurrencyBlock.vue'
 import ExchangeRateInput from '@/components/purchase/ExchangeRateInput.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
-import { btnFilled, btnOutline, ICONS } from '@/components/ui/buttonStyles'
+import { btnFilled, btnFilledSm, btnOutline, btnOutlineSm, ICONS } from '@/components/ui/buttonStyles'
 import { formControl, formInput } from '@/components/ui/formStyles'
 import { useAuthStore } from '@/stores/auth'
 import { useSupplierStore } from '@/stores/supplier'
@@ -416,55 +416,78 @@ watch(
 // a ruší hned (link-advance, stejně jako v detailu), u nového se pošle s uložením.
 // Záloha s DDKP se odečítá označenými odpočtovými řádky se základem a daní DDKP
 // („Doplnit odpočet zálohy z DDKP"), jinak by se DPH zálohy uplatnila podruhé.
-const linkedAdvance = ref<PurchaseInvoiceBrief | null>(null)
+// Konečná faktura může vyúčtovat víc záloh téhož dodavatele; odpočtové řádky se vkládají
+// za každou zálohu zvlášť a nesou id své zálohy. Záloha bez DDKP se odečte v hlavičce.
+const linkedAdvances = ref<PurchaseInvoiceBrief[]>([])
 const advancePickerOpen = ref(false)
 const advanceBusy = ref(false)
-const advanceDeductionLines = ref<PurchaseAdvanceDeductionLine[]>([])
+const advanceDeductionLines = ref<Record<number, PurchaseAdvanceDeductionLine[]>>({})
 const advanceLinkDisabledReason = computed(() =>
   !form.value.vendor_id || !form.value.currency_id ? t('purchase_invoice.advance_deduction.pick_vendor') : null)
-const hasAdvanceDeductionLine = computed(() =>
-  linkedAdvance.value !== null
-  && form.value.items.some(it => it.advance_purchase_invoice_id === linkedAdvance.value?.id))
 let autoAddAdvanceDeduction = route.query.advance_deduction === '1'
 
-watch(() => linkedAdvance.value?.id ?? null, async (advanceId) => {
-  advanceDeductionLines.value = []
-  if (advanceId === null) return
+function advanceLabel(a: PurchaseInvoiceBrief): string {
+  return a.varsymbol || a.vendor_invoice_number || ('#' + a.id)
+}
+function hasAdvanceDeductionLine(advanceId: number): boolean {
+  return form.value.items.some(it => it.advance_purchase_invoice_id === advanceId)
+}
+function advanceHasDdkp(advanceId: number): boolean {
+  return (advanceDeductionLines.value[advanceId]?.length ?? 0) > 0
+}
+const advancesMissingDeduction = computed(() =>
+  linkedAdvances.value.filter(a => advanceHasDdkp(a.id) && !hasAdvanceDeductionLine(a.id)))
+
+watch(() => linkedAdvances.value.map(a => a.id).join(','), async () => {
+  const ids = linkedAdvances.value.map(a => a.id)
+  const known = advanceDeductionLines.value
+  const next: Record<number, PurchaseAdvanceDeductionLine[]> = {}
+  for (const id of ids) if (known[id]) next[id] = known[id]
+  const missing = ids.filter(id => !next[id])
   try {
-    advanceDeductionLines.value = await purchaseInvoicesApi.advanceDeductionLines(advanceId)
+    const loaded = await Promise.all(missing.map(id => purchaseInvoicesApi.advanceDeductionLines(id)))
+    missing.forEach((id, i) => { next[id] = loaded[i] })
   } catch (e) {
     toast.error(apiErrorMessage(e))
   }
-  if (autoAddAdvanceDeduction && !hasAdvanceDeductionLine.value) addAdvanceDeductionLines()
-  autoAddAdvanceDeduction = false
+  advanceDeductionLines.value = next
+  if (autoAddAdvanceDeduction && ids.length > 0) addAllAdvanceDeductionLines()
+  if (ids.length > 0) autoAddAdvanceDeduction = false
 })
 
-// Nový doklad: jiný dodavatel, měna nebo druh dokladu vybranou zálohu ruší (vazba by neprošla).
+// Nový doklad: jiný dodavatel, měna nebo druh dokladu vybrané zálohy ruší (vazba by neprošla).
 watch(() => [form.value.vendor_id, form.value.currency_id, form.value.document_kind] as const, () => {
-  if (invoiceId.value === null) linkedAdvance.value = null
+  if (invoiceId.value === null) linkedAdvances.value = []
 })
 
-function loadAdvanceCandidates(): Promise<PurchaseInvoiceBrief[]> {
+async function loadAdvanceCandidates(): Promise<PurchaseInvoiceBrief[]> {
   if (invoiceId.value !== null) return purchaseInvoicesApi.advanceCandidates(invoiceId.value)
-  if (!form.value.vendor_id || !form.value.currency_id) return Promise.resolve([])
-  return purchaseInvoicesApi.newInvoiceAdvanceCandidates({
+  if (!form.value.vendor_id || !form.value.currency_id) return []
+  const candidates = await purchaseInvoicesApi.newInvoiceAdvanceCandidates({
     vendor_id: form.value.vendor_id,
     currency_id: form.value.currency_id,
     total: totals.value.with_vat,
   })
+  const picked = new Set(linkedAdvances.value.map(a => a.id))
+  return candidates.filter(c => !picked.has(c.id))
+}
+
+function applyLinkedAdvances(inv: PurchaseInvoice) {
+  linkedAdvances.value = inv.linked_advances ?? (inv.linked_advance ? [inv.linked_advance] : [])
+  form.value.advance_paid_amount = inv.advance_paid_amount
 }
 
 async function pickAdvance(advanceId: number, candidate: PurchaseInvoiceBrief) {
   if (invoiceId.value === null) {
-    linkedAdvance.value = candidate
+    if (!linkedAdvances.value.some(a => a.id === advanceId)) linkedAdvances.value = [...linkedAdvances.value, candidate]
     advancePickerOpen.value = false
     return
   }
   advanceBusy.value = true
   try {
-    const inv = await purchaseInvoicesApi.linkAdvance(invoiceId.value, advanceId)
-    linkedAdvance.value = inv.linked_advance ?? candidate
-    form.value.advance_paid_amount = inv.advance_paid_amount
+    const append = linkedAdvances.value.length > 0
+    const inv = await purchaseInvoicesApi.linkAdvance(invoiceId.value, advanceId, append ? { append: true } : undefined)
+    applyLinkedAdvances(inv)
     advancePickerOpen.value = false
     toast.success(t('purchase_invoice.advance_link.linked'))
   } catch (e) {
@@ -474,19 +497,18 @@ async function pickAdvance(advanceId: number, candidate: PurchaseInvoiceBrief) {
   }
 }
 
-async function unlinkAdvanceInEditor() {
-  if (!linkedAdvance.value || advanceBusy.value) return
-  if (!confirm(t('purchase_invoice.advance_link.unlink_confirm'))) return
+async function unlinkAdvanceInEditor(advance: PurchaseInvoiceBrief) {
+  if (advanceBusy.value) return
+  if (!confirm(t('purchase_invoice.advance_link.unlink_one_confirm', { advance: advanceLabel(advance) }))) return
   if (invoiceId.value === null) {
-    linkedAdvance.value = null
+    linkedAdvances.value = linkedAdvances.value.filter(a => a.id !== advance.id)
     return
   }
   advanceBusy.value = true
   try {
-    const inv = await purchaseInvoicesApi.unlinkAdvance(invoiceId.value)
-    linkedAdvance.value = null
-    form.value.advance_paid_amount = inv.advance_paid_amount
-    toast.success(t('purchase_invoice.advance_link.unlinked'))
+    const inv = await purchaseInvoicesApi.unlinkAdvance(invoiceId.value, advance.id)
+    applyLinkedAdvances(inv)
+    toast.success(t('purchase_invoice.advance_link.unlinked_one'))
   } catch (e) {
     toast.error(apiErrorMessage(e))
   } finally {
@@ -494,15 +516,22 @@ async function unlinkAdvanceInEditor() {
   }
 }
 
+function addAllAdvanceDeductionLines() {
+  for (const advance of advancesMissingDeduction.value) addAdvanceDeductionLines(advance)
+}
+
 // Odpočtový řádek za každý DDKP a sazbu: základ a daň DDKP se znaménkem minus. Hlavička
-// zálohu pak neodečítá (server Uhrazenou zálohu u dokladu s odpočtem vynuluje).
-function addAdvanceDeductionLines() {
-  const advance = linkedAdvance.value
-  if (!advance || advanceDeductionLines.value.length === 0) return
+// tuto zálohu pak neodečítá (server Uhrazenou zálohu u odečtené zálohy nepočítá); zálohy
+// bez DDKP v hlavičce zůstávají.
+function addAdvanceDeductionLines(advance: PurchaseInvoiceBrief) {
+  const lines = advanceDeductionLines.value[advance.id] ?? []
+  if (lines.length === 0 || hasAdvanceDeductionLine(advance.id)) return
   const unit = units.value.find(u => u.is_default)?.code || 'ks'
-  for (const line of advanceDeductionLines.value) {
+  for (const line of lines) {
     form.value.items.push({
-      description: t('purchase_invoice.advance_deduction.line_description', { number: line.tax_document_number }),
+      description: line.opening_balance
+        ? t('purchase_invoice.advance_deduction.line_description_opening', { number: advanceLabel(advance) })
+        : t('purchase_invoice.advance_deduction.line_description', { number: line.tax_document_number }),
       quantity: 1,
       duration_minutes: null,
       unit,
@@ -520,7 +549,11 @@ function addAdvanceDeductionLines() {
       advance_purchase_invoice_id: advance.id,
     })
   }
-  form.value.advance_paid_amount = 0
+  const headerOnly = linkedAdvances.value.some(a => !hasAdvanceDeductionLine(a.id))
+  const current = Number(form.value.advance_paid_amount) || 0
+  form.value.advance_paid_amount = headerOnly
+    ? Math.max(0, Math.round((current - Number(advance.total_with_vat)) * 100) / 100)
+    : 0
 }
 
 // PDF state
@@ -1062,7 +1095,7 @@ function populate(inv: PurchaseInvoice) {
     expense_account_code: it.expense_account_code ?? null,
     vat_classification_code: it.vat_classification_code ?? null,
   }))
-  linkedAdvance.value = inv.linked_advance ?? null
+  linkedAdvances.value = inv.linked_advances ?? (inv.linked_advance ? [inv.linked_advance] : [])
   // Faktura s už zadaným časovým rozlišením → odkryj celý blok (jinak by řádek s pickery byl schovaný).
   showAccrual.value = form.value.items.some(it => !!it.accrual_from || !!it.accrual_to)
   // §DM legacy: doklad označený hlavičkovým `is_fixed_asset` z doby před item-level
@@ -1828,9 +1861,11 @@ function buildPayload(): PurchaseInvoicePayload {
         form.value.document_kind === 'credit_note' || form.value.document_kind === 'tax_document'
           ? form.value.parent_purchase_invoice_id
           : null,
-      // Záloha vybraná u nového dokladu; uložený doklad má vazbu už založenou (link-advance).
-      ...(invoiceId.value === null && form.value.document_kind === 'invoice' && linkedAdvance.value
-        ? { advance_purchase_invoice_id: linkedAdvance.value.id }
+      // Zálohy vybrané u nového dokladu; uložený doklad má vazby už založené (link-advance).
+      ...(invoiceId.value === null && form.value.document_kind === 'invoice' && linkedAdvances.value.length > 0
+        ? (linkedAdvances.value.length === 1
+            ? { advance_purchase_invoice_id: linkedAdvances.value[0].id }
+            : { advance_purchase_invoice_ids: linkedAdvances.value.map(a => a.id) })
         : {}),
       // Ruční rekapitulace DPH dle dokladu (§ 73) — [] vyčistí případný starý override.
       vat_overrides: buildVatOverridesPayload(),
@@ -2327,36 +2362,53 @@ useWindowTitle(
              class="rounded-md border border-primary-200 bg-primary-50/60 px-3 py-2.5 space-y-2" data-test="editor-advance">
           <div class="flex flex-wrap items-center justify-between gap-2">
             <span class="text-sm text-neutral-700 min-w-0">
-              <template v-if="linkedAdvance">
-                {{ t('purchase_invoice.advance_link.linked_to') }}
-                <span class="font-mono font-medium">{{ linkedAdvance.varsymbol || linkedAdvance.vendor_invoice_number || ('#' + linkedAdvance.id) }}</span>
-                <span class="text-neutral-500 font-mono">({{ formatMoney(linkedAdvance.total_with_vat, linkedAdvance.currency) }})</span>
-              </template>
-              <template v-else>{{ t('purchase_invoice.advance_link.none') }}</template>
+              {{ linkedAdvances.length > 0
+                ? (linkedAdvances.length === 1 ? t('purchase_invoice.advance_link.linked_to') : t('purchase_invoice.advance_link.linked_to_many'))
+                : t('purchase_invoice.advance_link.none') }}
             </span>
             <div class="flex flex-wrap gap-2">
-              <button v-if="!linkedAdvance" type="button" :class="btnOutline('primary')"
+              <button type="button" :class="btnOutline('primary')" data-test="editor-advance-add"
                 :disabled="advanceBusy || advanceLinkDisabledReason !== null"
                 :title="advanceLinkDisabledReason ?? undefined" @click="advancePickerOpen = true">
-                <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.link" /></svg>
-                {{ t('purchase_invoice.advance_link.pair') }}
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" :d="linkedAdvances.length > 0 ? ICONS.plus : ICONS.link" /></svg>
+                {{ linkedAdvances.length > 0 ? t('purchase_invoice.advance_link.add_more') : t('purchase_invoice.advance_link.pair') }}
               </button>
-              <button v-else type="button" :class="btnOutline('neutral')" :disabled="advanceBusy" @click="unlinkAdvanceInEditor">
-                <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.x" /></svg>
-                {{ t('purchase_invoice.advance_link.unlink') }}
+              <button v-if="advancesMissingDeduction.length > 1" type="button" :class="btnFilled('warning')"
+                @click="addAllAdvanceDeductionLines" data-test="add-advance-deduction-all">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.plus" /></svg>
+                {{ t('purchase_invoice.advance_deduction.add_all') }}
               </button>
             </div>
           </div>
-          <p v-if="!linkedAdvance && advanceLinkDisabledReason" class="text-xs text-neutral-500">{{ advanceLinkDisabledReason }}</p>
-          <div v-if="linkedAdvance && advanceDeductionLines.length > 0 && !hasAdvanceDeductionLine"
-               class="flex flex-wrap items-center justify-between gap-2 rounded-md bg-warning-50 border border-warning-200 px-3 py-2">
-            <span class="text-sm text-warning-700 min-w-0">{{ t('purchase_invoice.advance_deduction.missing') }}</span>
-            <button type="button" :class="btnFilled('warning')" @click="addAdvanceDeductionLines" data-test="add-advance-deduction">
-              <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.plus" /></svg>
-              {{ t('purchase_invoice.advance_deduction.add') }}
-            </button>
-          </div>
-          <p v-else-if="linkedAdvance && hasAdvanceDeductionLine" class="text-xs text-neutral-600">{{ t('purchase_invoice.advance_deduction.present') }}</p>
+          <p v-if="linkedAdvances.length === 0 && advanceLinkDisabledReason" class="text-xs text-neutral-500">{{ advanceLinkDisabledReason }}</p>
+          <ul v-if="linkedAdvances.length > 0" class="space-y-2">
+            <li v-for="adv in linkedAdvances" :key="adv.id" data-test="editor-advance-row"
+                class="rounded-md border border-primary-200 bg-surface px-3 py-2 space-y-1.5">
+              <div class="flex flex-wrap items-center justify-between gap-2">
+                <span class="text-sm min-w-0">
+                  <span class="font-mono font-medium">{{ advanceLabel(adv) }}</span>
+                  <span class="text-neutral-500 font-mono ml-1">({{ formatMoney(adv.total_with_vat, adv.currency) }})</span>
+                </span>
+                <div class="flex flex-wrap gap-2">
+                  <button v-if="advanceHasDdkp(adv.id) && !hasAdvanceDeductionLine(adv.id)" type="button" :class="btnFilledSm('warning')"
+                    @click="addAdvanceDeductionLines(adv)" data-test="add-advance-deduction">
+                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.plus" /></svg>
+                    {{ t('purchase_invoice.advance_deduction.add') }}
+                  </button>
+                  <button type="button" :class="btnOutlineSm('neutral')" :disabled="advanceBusy"
+                    @click="unlinkAdvanceInEditor(adv)" data-test="editor-advance-unlink">
+                    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.x" /></svg>
+                    {{ t('purchase_invoice.advance_link.unlink_one') }}
+                  </button>
+                </div>
+              </div>
+              <p v-if="advanceHasDdkp(adv.id) && !hasAdvanceDeductionLine(adv.id)" class="text-xs text-warning-700">{{ t('purchase_invoice.advance_deduction.missing') }}</p>
+              <p v-else-if="hasAdvanceDeductionLine(adv.id)" class="text-xs text-neutral-600">{{ t('purchase_invoice.advance_deduction.present') }}</p>
+              <p v-else-if="advanceDeductionLines[adv.id]" class="text-xs text-neutral-600">{{ t('purchase_invoice.advance_deduction.no_ddkp') }}</p>
+              <p v-if="advanceDeductionLines[adv.id]?.some(l => l.opening_balance)" class="text-xs text-neutral-600"
+                data-test="advance-opening-hint">{{ t('purchase_invoice.advance_deduction.opening_hint') }}</p>
+            </li>
+          </ul>
         </div>
         <AdvancePickerModal :open="advancePickerOpen"
           :title="t('purchase_invoice.advance_link.modal_title')"

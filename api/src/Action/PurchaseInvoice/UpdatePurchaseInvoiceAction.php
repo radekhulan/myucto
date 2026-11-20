@@ -31,6 +31,8 @@ use MyInvoice\Service\Invoice\DocumentItemsPayload;
 use MyInvoice\Service\Invoice\PurchaseInvoiceCalculator;
 use MyInvoice\Service\IpMatcher;
 use MyInvoice\Service\PurchaseInvoice\PurchaseAdvanceDeduction;
+use MyInvoice\Service\PurchaseInvoice\PurchaseAdvanceLinkException;
+use MyInvoice\Service\PurchaseInvoice\PurchaseAdvanceLinks;
 use MyInvoice\Service\PurchaseInvoice\PurchaseVatTreatment;
 use MyInvoice\Service\PurchaseInvoice\PurchaseVatTreatmentConflict;
 use MyInvoice\Service\PurchaseInvoice\StoredPurchaseItemColumns;
@@ -435,6 +437,8 @@ final class UpdatePurchaseInvoiceAction
             // Odpočet zálohy na řádku už zálohu z celkové částky odečetl; hlavička ji
             // odečíst nesmí, jinak by K úhradě zálohu odečetlo podruhé.
             (new PurchaseAdvanceDeduction($this->db))->clearHeaderAdvanceWhenDeducted($supplierId, $id);
+            // Faktura s víc zálohami: částky čerpání a uhrazené zálohy v hlavičce podle řádků.
+            (new PurchaseAdvanceLinks($this->db))->sync($supplierId, $id);
             if (array_key_exists('rounding', $body)) {
                 $this->repo->setRounding($id, $supplierId, (float) $body['rounding']);
             }
@@ -448,6 +452,9 @@ final class UpdatePurchaseInvoiceAction
             $this->repo->reprefixVarsymbol($id, $supplierId);
             $this->clients->markAsVendor((int) $vendor['id'], $supplierId);
             if ($ownTransaction) $pdo->commit();
+        } catch (PurchaseAdvanceLinkException $e) {
+            if ($ownTransaction && $pdo->inTransaction()) $pdo->rollBack();
+            return Json::error($response, $e->errorCode, $e->getMessage(), $e->status);
         } catch (\InvalidArgumentException $e) {
             if ($ownTransaction && $pdo->inTransaction()) $pdo->rollBack();
             $code = str_contains($e->getMessage(), 'alokac') ? 'invalid_vat_allocations' : 'integrity_violation';
