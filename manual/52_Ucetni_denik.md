@@ -323,7 +323,7 @@ Agenda slouží pro nároky a dluhy, které nepatří do faktur, mezd ani daní:
 3. V podvojném účetnictví zvolte v části **Účtování** účet pohledávky nebo závazku a protiúčet. Chybí-li volba, použije se 315 nebo 325.
 4. Klikněte na **Zaúčtovat** (v daňové evidenci **Potvrdit**) a akci potvrďte; v podvojném účetnictví dialog ukáže, na které účty se položka zaúčtuje. Položka dostane číslo z řady OP (pohledávky) nebo OZ (závazky), u druhu s vlastní řadou z řady druhu, a vznikne zápis. V daňové evidenci se položka potvrdí a žádný zápis nevzniká.
 5. Po uhrazení klikněte na **Hledat volnou platbu**, vyberte bankovní pohyb nebo pokladní doklad a přiřaďte úhradu.
-6. Opakuje-li se položka, nastavte v části **Opakování položky** četnost. Rozkládá-li se úhrada, nastavte splátkový kalendář.
+6. Opakuje-li se položka, zvolte v liště detailu **Nastavit opakování** a četnost. Rozkládá-li se úhrada, zvolte **Rozložit na splátky**.
 
 **Jak poznáte, že je hotovo:** Položka je ve stavu uhrazená, nebo jí zbývá uhradit nula, a z filtru **Otevřené** zmizí.
 
@@ -1802,19 +1802,31 @@ v deníku, účty mění **Přeúčtovat**, částky a data storno. Účet proti
 
 #### 52.14.14.7 Opakování a splátkový kalendář
 
-V detailu v části **Opakování položky** nastavíte měsíční, čtvrtletní nebo roční
-opakování a případně datum konce. Každá kopie dostane datum vzniku posunuté
+Akce **Nastavit opakování** v liště detailu otevře dialog, ve kterém nastavíte měsíční,
+čtvrtletní nebo roční opakování, případně datum konce a automatické účtování vzniklých
+položek. Akce se nabízí jen uživateli s právem zápisu u konceptu, potvrzené nebo zaúčtované
+položky, která ještě nemá rozvrh a sama nevznikla opakováním. Když se opakování a splátky
+nepodaří načíst, detail to napíše a nabídne **Zkusit znovu**. Každá kopie dostane datum vzniku posunuté
 o dané období (u kratšího měsíce na jeho poslední den) a stejný odstup splatnosti
 jako zdrojová položka. Přebírá směr, druh, název, protistranu, částku,
 variabilní symbol, účty včetně rozdělené kontace, poznámku i připojené dokumenty.
 
 Denní úloha připravuje koncepty až 90 dní dopředu, aby se ukázaly v predikci.
-Ručně je vytvoříte polem **Vytvořit do** a tlačítkem **Vytvořit položky** (nejvýš 120 najednou). Vzniklé koncepty se nikdy nezaúčtují samy. Pod rozvrhem
-se vypisují vytvořené položky s datem a stavem. Opakování lze **Pozastavit**
+Ručně je vytvoříte polem **Vytvořit do** a tlačítkem **Vytvořit položky** (nejvýš 120 najednou).
+Bez volby **Automaticky účtovat vzniklé položky** se vzniklé koncepty nezaúčtují samy.
+
+Detail zdrojové položky ukazuje kartu **Opakování položky**: četnost, stav (aktivní nebo
+pozastavené), datum příští položky, konec opakování, automatické účtování, kdo a kdy rozvrh
+založil a seznam vytvořených položek s číslem, datem a stavem. Opakování lze **Pozastavit**
 a **Obnovit**; po stornu zdrojové položky se pozastaví natrvalo a už vytvořené
 koncepty zůstávají samostatnými položkami k posouzení.
 
-**Splátkový kalendář** rozloží jednu pohledávku nebo závazek na 2 až 120 splátek
+Položka, kterou vytvořilo opakování, má pod záhlavím štítek **Vytvořeno opakováním**
+s pořadím výskytu, odkazem na zdrojovou položku a s tím, kdo a kdy rozvrh založil.
+Nové opakování se u ní nenabízí.
+
+Akce **Rozložit na splátky** v liště detailu otevře kartu **Splátkový kalendář**; bez
+splátek se karta neukazuje. **Splátkový kalendář** rozloží jednu pohledávku nebo závazek na 2 až 120 splátek
 s rostoucími daty (ne dřívějšími než datum vzniku). Součet splátek musí odpovídat
 částce položky. Kalendář nevytváří žádné účetní zápisy, jen rozloží očekávané
 platby v cash-flow; úhrady se započítávají od nejstarší splátky. Splátky úvěru
@@ -1824,6 +1836,7 @@ první úhrady už kalendář měnit nejde, ani když úhrada pokryla jen úrok;
 ukáže jako tabulku splátek se stavem každé z nich. Koncept se splátkovým kalendářem lze dál
 upravovat, dokud částka odpovídá součtu splátek a datum vzniku není pozdější než
 první splátka; před změnou částky kalendář zrušte tlačítkem **Zrušit kalendář**.
+Neuložený rozepsaný kalendář zavře tlačítko **Zrušit**.
 
 #### 52.14.14.8 Dokumenty a vazba na deník
 
@@ -1832,8 +1845,9 @@ dokumentů. Nově nahraný sken se uloží do složky **Ostatní pohledávky a z
 rok / měsíc** podle data vzniku. Originál zůstává ve skladu a stejná smlouva
 může být podkladem více položek či období.
 
-Záhlaví detailu nese číslo dokladu a název, stav položky, u otevřené položky po
-splatnosti štítek **Po splatnosti** a u zaúčtované odznak **Zaúčtováno**.
+Záhlaví detailu nese číslo dokladu, stav položky, u otevřené položky po
+splatnosti štítek **Po splatnosti**, směr s druhem a u zaúčtované odznak **Zaúčtováno**;
+název položky je pod záhlavím.
 
 U zaúčtované položky ukazuje sbalená sekce **Zaúčtování** zápis v deníku stejně jako
 detail faktury: řádky s účty a jejich názvy, po stornu nebo přeúčtování i protizápis,
@@ -2036,7 +2050,7 @@ Půjčka s částkou 100 000 Kč, například s účtem položky 461 (dlouhodob�
 a poplatky do předpisu nepatří. Poskytnutou půjčku vedete stejně jako pohledávku
 (například MD 378 / D 261).
 
-**Rozdělení splátek.** V části **Splátkový kalendář** zaškrtněte **Rozdělit splátky
+**Rozdělení splátek.** Akcí **Rozložit na splátky** otevřete **Splátkový kalendář** a zaškrtněte **Rozdělit splátky
 na jistinu, úrok a poplatek**. Každá splátka pak má jistinu, úrok a poplatek a její
 částka je jejich součet. Součet jistiny všech splátek musí odpovídat částce položky.
 Rozdělit jde i jen některé splátky; nerozdělená splátka je celá jistinou.

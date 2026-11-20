@@ -11,7 +11,13 @@ export interface OtherItemSchedule {
   status: 'active' | 'paused'
   auto_post: boolean
   template: Record<string, unknown>
-  occurrences?: Array<{ occurrence_index: number; item_id: number; issued_on: string; status: string }>
+  created_at?: string
+  /** Kdo rozvrh založil (null = neznámý nebo smazaný uživatel). */
+  created_by_name?: string | null
+  source_document_no?: string | null
+  /** Datum příští položky; null u pozastaveného rozvrhu a po konci opakování. */
+  next_on?: string | null
+  occurrences?: Array<{ occurrence_index: number; item_id: number; issued_on: string; status: string; document_no?: string | null }>
 }
 
 export type OtherItemInstallmentStatus = 'unpaid' | 'partial' | 'paid' | 'overdue'

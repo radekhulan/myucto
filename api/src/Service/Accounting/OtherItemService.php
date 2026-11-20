@@ -56,6 +56,7 @@ final class OtherItemService
         $item['has_split_installments'] = OtherItemInstallmentCoverage::hasSplit($coverage);
         $item['remaining_payment'] = self::payableOf($item, $coverage);
         $item['linked_invoice'] = $this->linkedInvoice($supplierId, $id);
+        $item['occurrence'] = $this->scheduleOccurrence($supplierId, $id);
         if ($this->isDoubleEntry($supplierId)) {
             $item['posting_overrides'] = (object) $this->postingProfiles->overridesForItem($supplierId, $id);
             $item['posting_rules'] = (object) $this->postingResolver->forItem($supplierId, $item);
@@ -672,6 +673,39 @@ final class OtherItemService
                 'Ostatní pohledávka účtuje fakturu %s. Nejprve fakturu od pohledávky odpojte.',
                 $linked['varsymbol'] ?? ('#' . $linked['id'])), 409);
         }
+    }
+
+    /**
+     * Položku vytvořilo opakování: rozvrh, zdrojová položka a kdo rozvrh založil. Zdroj rozvrhu
+     * (výskyt 0) a položky mimo rozvrh vrací null. Zdroj smazat nejde: deleteDraft ho odmítne
+     * (has_schedule) a jeho výskyt 0 drží cizí klíč ON DELETE RESTRICT.
+     *
+     * @return array{schedule_id:int,occurrence_index:int,source_item_id:int,source_document_no:?string,
+     *               source_title:string,schedule_created_at:string,created_by_name:?string}|null
+     */
+    public function scheduleOccurrence(int $supplierId, int $id): ?array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT o.schedule_id, o.occurrence_index, s.source_item_id, src.document_no AS source_document_no,
+                    src.title AS source_title, s.created_at AS schedule_created_at, u.name AS created_by_name
+               FROM other_item_schedule_occurrences o
+               JOIN other_item_schedules s ON s.id = o.schedule_id AND s.supplier_id = o.supplier_id
+               JOIN other_items src ON src.id = s.source_item_id AND src.supplier_id = s.supplier_id
+               LEFT JOIN users u ON u.id = s.created_by
+              WHERE o.supplier_id = ? AND o.item_id = ? AND o.occurrence_index > 0'
+        );
+        $stmt->execute([$supplierId, $id]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        if ($row === false) return null;
+        return [
+            'schedule_id' => (int) $row['schedule_id'],
+            'occurrence_index' => (int) $row['occurrence_index'],
+            'source_item_id' => (int) $row['source_item_id'],
+            'source_document_no' => $row['source_document_no'],
+            'source_title' => $row['source_title'],
+            'schedule_created_at' => (string) $row['schedule_created_at'],
+            'created_by_name' => $row['created_by_name'],
+        ];
     }
 
     /** @return array{id:int,varsymbol:?string,status:string}|null */

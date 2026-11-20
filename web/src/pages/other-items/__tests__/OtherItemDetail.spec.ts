@@ -1,5 +1,5 @@
 import { flushPromises, shallowMount } from '@vue/test-utils'
-import { reactive } from 'vue'
+import { defineComponent, h, reactive } from 'vue'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const m = vi.hoisted(() => ({
@@ -251,6 +251,52 @@ describe('OtherItemDetail', () => {
     expect(hidden()).toEqual([false, false, false])
   })
 
+  it('vygenerovaná položka ukáže zdroj opakování a akce opakování a splátek řídí komponenta plánů', async () => {
+    m.get.mockResolvedValue({ id: 9, side: 'payable', kind: 'rent', title: 'Syntetický nájem', partner_name: null, issued_on: '2099-02-01',
+      due_on: '2099-02-15', currency: 'CZK', amount: 3000, paid_amount: 0, remaining_amount: 3000, status: 'confirmed', document_no: 'OZ-2099-0011',
+      occurrence: { schedule_id: 4, occurrence_index: 2, source_item_id: 7, source_document_no: 'OZ-2099-0001', source_title: 'Zdroj',
+        schedule_created_at: '2099-01-01 10:00:00', created_by_name: 'Syntetický účetní' } })
+    const wrapper = shallowMount(OtherItemDetail, { global: { stubs } })
+    await flushPromises()
+    const source = wrapper.get('[data-test="occurrence-source"]')
+    expect(source.text()).toContain('other_items.occurrence.label')
+    expect(wrapper.get('[data-test="occurrence-source-link"]').text()).toBe('OZ-2099-0001')
+    expect(wrapper.get('[data-test="occurrence-source-link"]').attributes('data-to')).toContain('"id":7')
+    const actionKeys = () => (wrapper.findComponent({ name: 'ActionBar' }).props('actions') as Array<{ key: string; show?: boolean }>)
+      .filter(action => action.show !== false).map(action => action.key)
+    expect(actionKeys()).not.toContain('schedule')
+    expect(actionKeys()).not.toContain('installments')
+    wrapper.findComponent({ name: 'OtherItemPlans' }).vm.$emit('state', { canSchedule: false, canSplit: true })
+    await flushPromises()
+    expect(actionKeys()).toContain('installments')
+    expect(actionKeys()).not.toContain('schedule')
+  })
+
+  it('akce v liště otevřou dialog opakování a kalendář splátek v komponentě plánů', async () => {
+    const openSchedule = vi.fn()
+    const openInstallments = vi.fn()
+    const PlansStub = defineComponent({ name: 'OtherItemPlans', emits: ['state'], setup(_props, { expose }) {
+      expose({ openSchedule, openInstallments })
+      return () => h('div')
+    } })
+    const wrapper = shallowMount(OtherItemDetail, { global: { stubs: { ...stubs, OtherItemPlans: PlansStub } } })
+    await flushPromises()
+    wrapper.findComponent({ name: 'OtherItemPlans' }).vm.$emit('state', { canSchedule: true, canSplit: true, editing: false })
+    await flushPromises()
+    const actions = wrapper.findComponent({ name: 'ActionBar' }).props('actions') as Array<{ key: string; run?: () => void }>
+    actions.find(action => action.key === 'schedule')!.run!()
+    expect(openSchedule).toHaveBeenCalledTimes(1)
+    expect(openInstallments).not.toHaveBeenCalled()
+    actions.find(action => action.key === 'installments')!.run!()
+    expect(openInstallments).toHaveBeenCalledTimes(1)
+  })
+
+  it('položka mimo rozvrh řádek se zdrojem nemá', async () => {
+    const wrapper = shallowMount(OtherItemDetail, { global: { stubs } })
+    await flushPromises()
+    expect(wrapper.find('[data-test="occurrence-source"]').exists()).toBe(false)
+  })
+
   it('štítek Zaúčtováno pojmenuje u uhrazené položky a u storna chybí', async () => {
     m.mode = 'double_entry'
     const base = { id: 9, side: 'payable', kind: 'rent', title: 'Syntetický nájem', partner_name: null, issued_on: '2099-01-01', due_on: '2099-02-01',
@@ -429,6 +475,15 @@ describe('OtherItemDetail obnova a přepínání', () => {
     await wrapper.get('[data-test="note-form"] button[type="button"]').trigger('click')
     expect(m.canRefresh!()).toBe(true)
     await wrapper.get('input[type="search"]').setValue('platba')
+    expect(m.canRefresh!()).toBe(false)
+  })
+
+  it('rozepsaný kalendář nebo dialog opakování tichou obnovu odloží', async () => {
+    const wrapper = shallowMount(OtherItemDetail, { global: { stubs } })
+    await flushPromises()
+    expect(m.canRefresh!()).toBe(true)
+    wrapper.findComponent({ name: 'OtherItemPlans' }).vm.$emit('state', { canSchedule: false, canSplit: false, editing: true })
+    await flushPromises()
     expect(m.canRefresh!()).toBe(false)
   })
 

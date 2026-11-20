@@ -443,7 +443,6 @@
       "monthly": "Monthly",
       "quarterly": "Quarterly",
       "yearly": "Yearly",
-      "ends_on": "End date:",
       "active": "Active",
       "paused": "Paused",
       "source_inactive": "The source item was reversed. Recurrence has stopped; existing drafts remain listed.",
@@ -454,7 +453,6 @@
       "generated": "Items created: {count}.",
       "pause": "Pause",
       "resume": "Resume",
-      "created_for": "Item for {date}",
       "no_generated": "No later items have been created yet.",
       "installments_title": "Payment installments",
       "installments_hint": "Installments spread the payment of one document across the cash flow. The schedule itself creates no journal entries.",
@@ -497,7 +495,16 @@
       "principal_amount": "Principal",
       "interest_amount": "Interest",
       "fee_amount": "Fee",
-      "principal_total": "Principal total {amount} (document amount {item})"
+      "principal_total": "Principal total {amount} (document amount {item})",
+      "next_on": "Next item",
+      "ends_label": "Recurrence ends",
+      "no_end": "no end",
+      "auto_post_short": "Post automatically",
+      "created_by": "Schedule created by",
+      "unknown_user": "unknown user",
+      "created_items": "Created items",
+      "split_action": "Split into installments",
+      "load_failed": "Recurrence and installments could not be loaded."
     },
     "remaining_principal": "Principal remaining",
     "remaining_payment": "Left to pay incl. interest and fee",
@@ -540,7 +547,13 @@
     "col_documents": "Documents",
     "col_posting": "Entry",
     "back_to_list": "← Back to list",
-    "phone_details": "Details"
+    "phone_details": "Details",
+    "occurrence": {
+      "label": "Created by recurrence",
+      "source": "from source item",
+      "created_by": "schedule created by {name} on {date}",
+      "index": "occurrence {index}"
+    }
   },
   "internal_documents": {
     "title": "Internal documents",

@@ -17,7 +17,7 @@ import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import PostingBadge from '@/components/ui/PostingBadge.vue'
 import LinkedDocumentsPanel from '@/components/documents/LinkedDocumentsPanel.vue'
-import OtherItemPlans from '@/components/accounting/OtherItemPlans.vue'
+import OtherItemPlans, { type OtherItemPlansState } from '@/components/accounting/OtherItemPlans.vue'
 import DocumentPostingPanel from '@/components/accounting/DocumentPostingPanel.vue'
 import Modal from '@/components/ui/Modal.vue'
 import DateInput from '@/components/ui/DateInput.vue'
@@ -67,6 +67,9 @@ const repostReason = ref('')
 const postingAccounts = ref<ChartAccount[]>([])
 // Telefon jako u přijaté faktury: souhrn nahoře, karty a účetní panely za tlačítkem Podrobnosti.
 const isPhone = useIsPhone()
+// Opakování a splátky nastavují akce v liště; komponenta plánů říká, co je k dispozici.
+const plans = ref<InstanceType<typeof OtherItemPlans> | null>(null)
+const plansState = ref<OtherItemPlansState>({ canSchedule: false, canSplit: false, editing: false })
 const phoneDetailsOpen = ref(false)
 const isDoubleEntry = computed(() => supplier.currentSupplier?.accounting_mode === 'double_entry')
 const isTaxEvidence = computed(() => supplier.currentSupplier?.accounting_mode === 'tax_evidence')
@@ -216,7 +219,8 @@ async function refresh() {
   failed.value = false
 }
 const editingSomething = computed(() => busy.value || postOpen.value || reverseOpen.value || repostOpen.value || deleteOpen.value
-  || counterpartyEditing.value || noteEditing.value || !!selectedPayment.value || paymentQuery.value !== '')
+  || counterpartyEditing.value || noteEditing.value || !!selectedPayment.value || paymentQuery.value !== ''
+  || plansState.value.editing)
 useWindowRefresh(refresh, () => !loading.value && !editingSomething.value)
 
 async function searchPayments(query: string) {
@@ -497,6 +501,10 @@ const actions = computed<ActionItem[]>(() => {
       show: current.status === 'draft' && canPost.value, disabled: busy.value, run: () => { postOpen.value = true } },
     { key: 'edit', label: t('common.edit'), icon: 'edit', tier: 'secondary', variant: 'neutral',
       show: canEdit.value, to: { name: 'other-item-edit', params: { id: id.value } } },
+    { key: 'schedule', label: t('other_items.plans.create_schedule'), icon: 'cycle', tier: 'secondary', variant: 'neutral',
+      show: plansState.value.canSchedule, disabled: busy.value, run: () => plans.value?.openSchedule() },
+    { key: 'installments', label: t('other_items.plans.split_action'), icon: 'calendar', tier: 'secondary', variant: 'neutral',
+      show: plansState.value.canSplit, disabled: busy.value, run: () => plans.value?.openInstallments() },
     { key: 'reverse', label: t(isDoubleEntry.value ? 'other_items.reverse' : 'other_items.cancel'), icon: 'uturn', tier: 'overflow', variant: 'warning',
       show: (current.status === 'posted' || current.status === 'confirmed') && canPost.value,
       disabled: busy.value || Number(current.paid_amount) > 0,
@@ -570,6 +578,17 @@ onMounted(load)
       <!-- Název a protistrana (řádek pod záhlavím, paralela s dodavatelem u přijaté faktury). -->
       <div class="min-w-0 space-y-1">
         <div class="text-lg font-semibold text-neutral-900" data-test="detail-title">{{ item.title }}</div>
+        <p v-if="item.occurrence" class="flex flex-wrap items-center gap-x-1.5 gap-y-1 text-sm text-neutral-600" data-test="occurrence-source">
+          <span class="inline-flex items-center gap-1 rounded bg-primary-50 px-2 py-0.5 text-xs font-medium text-primary-700">
+            <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.cycle" /></svg>
+            {{ t('other_items.occurrence.label') }}
+          </span>
+          <span>{{ t('other_items.occurrence.index', { index: item.occurrence.occurrence_index }) }}</span>
+          <span>{{ t('other_items.occurrence.source') }}</span>
+          <RouterLink :to="{ name: 'other-item-detail', params: { id: item.occurrence.source_item_id } }" class="font-mono text-primary-700 hover:underline" data-test="occurrence-source-link"
+              :title="item.occurrence.source_title">{{ item.occurrence.source_document_no || `#${item.occurrence.source_item_id}` }}</RouterLink>
+          <span class="text-neutral-500">· {{ t('other_items.occurrence.created_by', { name: item.occurrence.created_by_name || t('other_items.plans.unknown_user'), date: formatDate(item.occurrence.schedule_created_at) }) }}</span>
+        </p>
         <div class="text-sm text-neutral-600" data-test="detail-partner">
           <span class="text-neutral-500">{{ t('other_items.partner') }}:</span>
           <span class="ml-1" :class="item.partner_name ? 'font-medium' : 'text-neutral-400'">{{ item.partner_name || t('other_items.no_partner') }}</span>
@@ -756,7 +775,7 @@ onMounted(load)
         </form>
         <p v-else-if="item.currency !== 'CZK'" class="mt-3 text-sm text-neutral-500">{{ t('other_items.foreign_payment_hint') }}</p>
       </section>
-      <OtherItemPlans :item="item" />
+      <OtherItemPlans ref="plans" :item="item" @state="plansState = $event" />
       <div class="rounded-lg border border-neutral-200 bg-surface p-5 shadow-sm" data-test="note-card">
         <div class="mb-3 flex flex-wrap items-center justify-between gap-2">
           <h3 class="text-sm font-medium text-neutral-700">{{ t('other_items.note') }}</h3>

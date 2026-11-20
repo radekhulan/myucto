@@ -13,6 +13,10 @@ use PDO;
 final class OtherItemScheduleService
 {
     private const MONTHS = ['monthly' => 1, 'quarterly' => 3, 'yearly' => 12];
+    /** Sloupce rozvrhu pro seznam i detail; jméno zakladatele z users (smazaný uživatel = null). */
+    private const COLUMNS = 's.id, s.source_item_id, s.frequency, s.anchor_on, s.due_days,
+            s.ends_on, s.next_index, s.status, s.auto_post, s.template_json, s.created_at, oi.status AS source_status,
+            oi.document_no AS source_document_no, u.name AS created_by_name';
 
     public function __construct(
         private readonly Connection $db,
@@ -87,10 +91,10 @@ final class OtherItemScheduleService
 
     public function list(int $supplierId, ?int $sourceItemId = null): array
     {
-        $stmt = $this->db->pdo()->prepare('SELECT s.id, s.source_item_id, s.frequency, s.anchor_on, s.due_days,
-            s.ends_on, s.next_index, s.status, s.auto_post, s.template_json, s.created_at, oi.status AS source_status
+        $stmt = $this->db->pdo()->prepare('SELECT ' . self::COLUMNS . '
             FROM other_item_schedules s
             JOIN other_items oi ON oi.id = s.source_item_id AND oi.supplier_id = s.supplier_id
+            LEFT JOIN users u ON u.id = s.created_by
             WHERE s.supplier_id = ?' . ($sourceItemId !== null ? ' AND s.source_item_id = ?' : '') . ' ORDER BY s.id DESC');
         $stmt->execute($sourceItemId !== null ? [$supplierId, $sourceItemId] : [$supplierId]);
         return array_map(self::decode(...), $stmt->fetchAll(PDO::FETCH_ASSOC));
@@ -98,16 +102,16 @@ final class OtherItemScheduleService
 
     public function get(int $supplierId, int $id): array
     {
-        $stmt = $this->db->pdo()->prepare('SELECT s.id, s.source_item_id, s.frequency, s.anchor_on, s.due_days,
-            s.ends_on, s.next_index, s.status, s.auto_post, s.template_json, s.created_at, oi.status AS source_status
+        $stmt = $this->db->pdo()->prepare('SELECT ' . self::COLUMNS . '
             FROM other_item_schedules s
             JOIN other_items oi ON oi.id = s.source_item_id AND oi.supplier_id = s.supplier_id
+            LEFT JOIN users u ON u.id = s.created_by
             WHERE s.supplier_id = ? AND s.id = ?');
         $stmt->execute([$supplierId, $id]);
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
         if ($row === false) throw new OtherItemException('schedule_not_found', 'Rozvrh nebyl nalezen.', 404);
         $row = self::decode($row);
-        $stmt = $this->db->pdo()->prepare('SELECT o.occurrence_index, o.item_id, oi.issued_on, oi.status
+        $stmt = $this->db->pdo()->prepare('SELECT o.occurrence_index, o.item_id, oi.issued_on, oi.status, oi.document_no
             FROM other_item_schedule_occurrences o
             JOIN other_items oi ON oi.id = o.item_id AND oi.supplier_id = o.supplier_id
             WHERE o.supplier_id = ? AND o.schedule_id = ? ORDER BY o.occurrence_index');
@@ -412,6 +416,9 @@ final class OtherItemScheduleService
     {
         $row['auto_post'] = (bool) $row['auto_post'];
         if (!in_array($row['source_status'], ['draft', 'confirmed', 'posted'], true)) $row['status'] = 'paused';
+        // Další termín počítá stejně jako generate(); po konci opakování nebo u pozastaveného rozvrhu žádný.
+        $next = self::occurrenceDate(new \DateTimeImmutable($row['anchor_on']), (int) $row['next_index'] * self::MONTHS[$row['frequency']]);
+        $row['next_on'] = $row['status'] === 'active' && ($row['ends_on'] === null || $next <= $row['ends_on']) ? $next : null;
         $row['template'] = json_decode($row['template_json'], true, 512, JSON_THROW_ON_ERROR);
         unset($row['template_json'], $row['source_status']);
         return $row;

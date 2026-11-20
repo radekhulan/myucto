@@ -443,7 +443,6 @@
       "monthly": "Měsíčně",
       "quarterly": "Čtvrtletně",
       "yearly": "Ročně",
-      "ends_on": "Konec opakování:",
       "active": "Aktivní",
       "paused": "Pozastaveno",
       "source_inactive": "Zdrojová položka byla stornována. Opakování skončilo; již vytvořené koncepty zůstávají v seznamu.",
@@ -454,7 +453,6 @@
       "generated": "Vytvořeno položek: {count}.",
       "pause": "Pozastavit",
       "resume": "Obnovit",
-      "created_for": "Položka k {date}",
       "no_generated": "Další položky zatím nevznikly.",
       "installments_title": "Splátkový kalendář",
       "installments_hint": "Splátky rozkládají úhradu jednoho dokladu do cash-flow. Samotný kalendář účetní zápisy nevytváří.",
@@ -497,7 +495,16 @@
       "principal_amount": "Jistina",
       "interest_amount": "Úrok",
       "fee_amount": "Poplatek",
-      "principal_total": "Jistina celkem {amount} (částka dokladu {item})"
+      "principal_total": "Jistina celkem {amount} (částka dokladu {item})",
+      "next_on": "Další položka",
+      "ends_label": "Konec opakování",
+      "no_end": "bez konce",
+      "auto_post_short": "Automaticky účtovat",
+      "created_by": "Rozvrh založil",
+      "unknown_user": "neznámý uživatel",
+      "created_items": "Vytvořené položky",
+      "split_action": "Rozložit na splátky",
+      "load_failed": "Opakování a splátky se nepodařilo načíst."
     },
     "remaining_principal": "Zbývá jistina",
     "remaining_payment": "Zbývá zaplatit vč. úroku a poplatku",
@@ -540,7 +547,13 @@
     "col_documents": "Dokumenty",
     "col_posting": "Zápis",
     "back_to_list": "← Zpět na seznam",
-    "phone_details": "Podrobnosti"
+    "phone_details": "Podrobnosti",
+    "occurrence": {
+      "label": "Vytvořeno opakováním",
+      "source": "ze zdrojové položky",
+      "created_by": "rozvrh založil {name} {date}",
+      "index": "{index}. opakování"
+    }
   },
   "internal_documents": {
     "title": "Interní doklady",

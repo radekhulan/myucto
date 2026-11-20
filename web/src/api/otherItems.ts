@@ -68,6 +68,17 @@ export interface OtherItemEffectivePosting {
 
 export type OtherItemPostingOverridesInput = Partial<Record<OtherItemOverrideEvent, OtherItemPostingRuleInput | null>>
 
+export interface OtherItemOccurrence {
+  schedule_id: number
+  occurrence_index: number
+  source_item_id: number
+  /** Číslo zdroje; null, dokud ho nemá (koncept). */
+  source_document_no: string | null
+  source_title: string
+  schedule_created_at: string
+  created_by_name: string | null
+}
+
 export interface OtherItem {
   id: string | number
   source_kind: string
@@ -96,6 +107,8 @@ export interface OtherItem {
   remaining_payment?: number
   /** Kalendář má splátku rozdělenou na jistinu, úrok a poplatek (jen detail). */
   has_split_installments?: boolean
+  /** Položku vytvořilo opakování (jen detail; zdroj rozvrhu a položka mimo rozvrh mají null). */
+  occurrence?: OtherItemOccurrence | null
   /** Vydaná faktura, kterou zápis pohledávky účtuje (jen detail). */
   linked_invoice?: { id: number; varsymbol: string | null; status: string } | null
   status: OtherItemStatus | string

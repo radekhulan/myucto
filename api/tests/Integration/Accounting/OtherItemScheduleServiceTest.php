@@ -179,6 +179,58 @@ final class OtherItemScheduleServiceTest extends TestCase
         self::assertSame(200, $itemAction->delete($bearer, new Response(), ['id' => (string) $draftIds[1]])->getStatusCode());
     }
 
+    public function testGeneratedItemDetailShowsSourceAndScheduleNextDate(): void
+    {
+        $userId = (int) $this->pdo->query('SELECT MIN(id) FROM users')->fetchColumn();
+        $userName = (string) $this->pdo->query('SELECT name FROM users WHERE id = ' . $userId)->fetchColumn();
+        $source = $this->items->create($this->supplierId, $this->input(), null);
+        $this->pdo->prepare("UPDATE other_items SET document_no = 'OZ-2099-0100' WHERE id = ?")->execute([(int) $source['id']]);
+        $schedule = $this->schedules->create($this->supplierId, (int) $source['id'], ['frequency' => 'monthly', 'ends_on' => '2099-04-30'], $userId);
+        $created = $this->schedules->generate($this->supplierId, (int) $schedule['id'], '2099-02-28', null);
+        $generatedId = (int) $created['created_ids'][0];
+
+        $occurrence = $this->items->get($this->supplierId, $generatedId)['occurrence'];
+        self::assertSame((int) $schedule['id'], $occurrence['schedule_id']);
+        self::assertSame(1, $occurrence['occurrence_index']);
+        self::assertSame((int) $source['id'], $occurrence['source_item_id']);
+        self::assertSame('OZ-2099-0100', $occurrence['source_document_no']);
+        self::assertSame('Syntetické nájemné', $occurrence['source_title']);
+        self::assertSame($userName, $occurrence['created_by_name']);
+        // Zdroj rozvrhu ani položka mimo rozvrh výskytem nejsou.
+        self::assertNull($this->items->get($this->supplierId, (int) $source['id'])['occurrence']);
+        $plain = $this->items->create($this->supplierId, $this->input(['title' => 'Mimo rozvrh']), null);
+        self::assertNull($this->items->get($this->supplierId, (int) $plain['id'])['occurrence']);
+
+        $listed = $this->schedules->list($this->supplierId, (int) $source['id'])[0];
+        self::assertSame('2099-03-31', $listed['next_on']);
+        self::assertSame($userName, $listed['created_by_name']);
+        self::assertSame('OZ-2099-0100', $listed['source_document_no']);
+        $detail = $this->schedules->get($this->supplierId, (int) $schedule['id']);
+        self::assertSame('2099-03-31', $detail['next_on']);
+        self::assertSame(['OZ-2099-0100', null], array_column($detail['occurrences'], 'document_no'));
+        $this->pdo->prepare("UPDATE other_items SET document_no = 'OZ-2099-0101' WHERE id = ?")->execute([$generatedId]);
+        self::assertSame('OZ-2099-0101', $this->schedules->get($this->supplierId, (int) $schedule['id'])['occurrences'][1]['document_no']);
+        // Neznámý zakladatel (smazaný uživatel, FK SET NULL): jméno null.
+        $this->pdo->prepare('UPDATE other_item_schedules SET created_by = NULL WHERE id = ?')->execute([(int) $schedule['id']]);
+        self::assertNull($this->items->get($this->supplierId, $generatedId)['occurrence']['created_by_name']);
+        self::assertNull($this->schedules->get($this->supplierId, (int) $schedule['id'])['created_by_name']);
+        $this->pdo->prepare('UPDATE other_item_schedules SET created_by = ? WHERE id = ?')->execute([$userId, (int) $schedule['id']]);
+        // Pozastavený rozvrh další termín nemá, po obnovení zase ano.
+        $this->schedules->setStatus($this->supplierId, (int) $schedule['id'], 'paused');
+        self::assertNull($this->schedules->list($this->supplierId)[0]['next_on']);
+        $this->schedules->setStatus($this->supplierId, (int) $schedule['id'], 'active');
+        self::assertSame('2099-03-31', $this->schedules->list($this->supplierId)[0]['next_on']);
+        // Stornovaný (zrušený) zdroj rozvrh pozastaví, další termín pak není.
+        $this->pdo->prepare("UPDATE other_items SET status = 'cancelled' WHERE id = ?")->execute([(int) $source['id']]);
+        $cancelled = $this->schedules->list($this->supplierId)[0];
+        self::assertSame('paused', $cancelled['status']);
+        self::assertNull($cancelled['next_on']);
+        $this->pdo->prepare("UPDATE other_items SET status = 'draft' WHERE id = ?")->execute([(int) $source['id']]);
+        // Po konci opakování také ne.
+        $this->schedules->generate($this->supplierId, (int) $schedule['id'], '2099-12-31', null);
+        self::assertNull($this->schedules->get($this->supplierId, (int) $schedule['id'])['next_on']);
+    }
+
     protected function setUp(): void
     {
         $container = Bootstrap::buildContainer();

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { otherItemPlansApi, type OtherItemInstallment, type OtherItemInstallmentStatus, type OtherItemSchedule } from '@/api/otherItemPlans'
 import type { OtherItem } from '@/api/otherItems'
@@ -8,10 +8,21 @@ import { useSupplierStore } from '@/stores/supplier'
 import { useToast } from '@/composables/useToast'
 import { formatDate, formatMoney } from '@/composables/useFormat'
 import DateInput from '@/components/ui/DateInput.vue'
-import { ICONS, btnOutline } from '@/components/ui/buttonStyles'
+import Modal from '@/components/ui/Modal.vue'
+import { ICONS, btnFilled, btnOutline, btnOutlineSm } from '@/components/ui/buttonStyles'
 import { appIsoDate } from '@/utils/date'
+import { otherItemStatusClass } from '@/utils/otherItemStatus'
+
+/** Co detail nabídne v liště akcí: nastavit opakování, rozložit na splátky. */
+export interface OtherItemPlansState {
+  canSchedule: boolean
+  canSplit: boolean
+  /** Otevřený dialog nebo rozepsaný kalendář: tichá obnova detailu by je přepsala. */
+  editing: boolean
+}
 
 const props = defineProps<{ item: OtherItem }>()
+const emit = defineEmits<{ (e: 'state', value: OtherItemPlansState): void }>()
 const { t } = useI18n()
 const auth = useAuthStore()
 const supplier = useSupplierStore()
@@ -35,23 +46,68 @@ const canEditInstallments = computed(() => canWrite.value && ['draft', 'posted',
   && Number(props.item.paid_amount) === 0 && !hasPayments.value)
 /** Splátky rozdělené na jistinu, úrok a poplatek (úvěr, leasing). Částka dokladu je pak jistina. */
 const components = ref(false)
+const loaded = ref(false)
+/** Načtení selhalo: místo akcí karta s opakováním, ať nastavení nezmizí beze slova. */
+const failed = ref(false)
+const installmentsCard = ref<HTMLElement | null>(null)
+let loadSeq = 0
+/** Dialog nastavení opakování a rozepsaný kalendář otevírají akce v liště detailu. */
+const scheduleOpen = ref(false)
+const installmentsOpen = ref(false)
+const hasSavedInstallments = computed(() => installments.value.some(row => row.id))
+const showInstallments = computed(() => installmentsOpen.value || hasSavedInstallments.value)
+// Vygenerovaná položka nový rozvrh nenabízí: zdroj ukazuje detail nad kartami.
+const state = computed<OtherItemPlansState>(() => ({
+  canSchedule: loaded.value && !schedule.value && !props.item.occurrence && canWrite.value
+    && ['draft', 'posted', 'confirmed'].includes(props.item.status),
+  canSplit: loaded.value && !showInstallments.value && canEditInstallments.value,
+  editing: scheduleOpen.value || (installmentsOpen.value && !hasSavedInstallments.value),
+}))
+watch(state, value => emit('state', value), { immediate: true })
+function openSchedule() {
+  if (!state.value.canSchedule) return
+  frequency.value = 'monthly'
+  endsOn.value = ''
+  autoPost.value = false
+  scheduleOpen.value = true
+}
+async function openInstallments() {
+  if (!state.value.canSplit) return
+  installmentsOpen.value = true
+  // Karta je pod úhradami: posunout k ní, jinak by akce z lišty vypadala, že nic neudělala.
+  await nextTick()
+  installmentsCard.value?.scrollIntoView?.({ block: 'start', behavior: 'smooth' })
+}
+function cancelInstallments() {
+  installments.value = installments.value.filter(row => row.id)
+  installmentsOpen.value = false
+}
+defineExpose({ openSchedule, openInstallments })
 
 async function load() {
+  const seq = ++loadSeq
   loading.value = true
+  failed.value = false
   splitFirstDue.value = addMonths(props.item.issued_on || appIsoDate(), 1)
   loan.value.first_due_on = splitFirstDue.value
   try {
     const id = Number(props.item.id)
     const [all, rows] = await Promise.all([otherItemPlansApi.schedules(id), otherItemPlansApi.installments(id)])
     const found = all.find(row => Number(row.source_item_id) === id)
-    schedule.value = found ? await otherItemPlansApi.schedule(found.id) : null
+    const detail = found ? await otherItemPlansApi.schedule(found.id) : null
+    // Rychlé přepnutí položky: pozdní odpověď předchozí položky se nepoužije.
+    if (seq !== loadSeq) return
+    schedule.value = detail
     installments.value = rows
     hasPayments.value = rows.some(row => Number(row.paid_amount || 0) > 0)
     components.value = rows.some(row => row.principal_amount !== null && row.principal_amount !== undefined)
+    loaded.value = true
   } catch (error: any) {
+    if (seq !== loadSeq) return
+    failed.value = true
     toast.error(error?.response?.data?.error?.message || t('common.error'))
   } finally {
-    loading.value = false
+    if (seq === loadSeq) loading.value = false
   }
 }
 
@@ -63,6 +119,7 @@ async function createSchedule() {
       frequency: frequency.value, ends_on: endsOn.value || null,
       auto_post: autoPost.value && canAutoPost.value,
     })
+    scheduleOpen.value = false
     toast.success(t('other_items.plans.schedule_saved'))
   } catch (error: any) {
     toast.error(error?.response?.data?.error?.message || t('common.error'))
@@ -229,6 +286,7 @@ async function clearInstallments() {
   busy.value = true
   try {
     installments.value = await otherItemPlansApi.setInstallments(Number(props.item.id), [])
+    installmentsOpen.value = false
     toast.success(t('other_items.plans.installments_cleared'))
   } catch (error: any) {
     toast.error(error?.response?.data?.error?.message || t('common.error'))
@@ -244,77 +302,81 @@ const INSTALLMENT_STATUS_CLASS: Record<OtherItemInstallmentStatus, string> = {
   unpaid: 'bg-neutral-100 text-neutral-600',
 }
 
-// Přiřazená nebo odpojená úhrada mění stav splátek, proto se načítá i při změně uhrazené částky.
-watch(() => [props.item.id, props.item.paid_amount], () => void load(), { immediate: true })
+// Jiná položka: rozepsaný kalendář ani dialog k ní nepatří.
+watch(() => props.item.id, () => {
+  loaded.value = false
+  scheduleOpen.value = false
+  installmentsOpen.value = false
+})
+// Přiřazená nebo odpojená úhrada mění stav splátek, storno zdroje pozastaví rozvrh: načítá se i při změně
+// uhrazené částky a stavu položky.
+watch(() => [props.item.id, props.item.paid_amount, props.item.status], () => void load(), { immediate: true })
 </script>
 
 <template>
-  <div class="grid gap-4 lg:grid-cols-2">
-    <section class="rounded-lg border border-neutral-200 bg-surface p-5 shadow-sm">
-      <h3 class="text-sm font-medium text-neutral-700">{{ t('other_items.plans.schedule_title') }}</h3>
-      <p class="mt-1 text-sm text-neutral-500">{{ t('other_items.plans.schedule_hint') }}</p>
-      <p v-if="loading" class="mt-3 text-sm text-neutral-500">{{ t('common.loading') }}</p>
-      <template v-else-if="schedule">
-        <p class="mt-3 text-sm">{{ t(`other_items.plans.${schedule.frequency}`) }} · {{ t(`other_items.plans.${schedule.status}`) }}</p>
-        <label v-if="canWrite && sourceActive" class="mt-3 flex items-center gap-2 text-sm">
-          <input type="checkbox" :checked="schedule.auto_post" :disabled="busy || ((!canAutoPost || !canPost) && !schedule.auto_post)" @change="toggleAutoPost" />
-          {{ t('other_items.plans.auto_post') }}
-        </label>
-        <p v-else-if="schedule.auto_post" class="mt-3 text-sm font-medium text-success-700">{{ t('other_items.plans.auto_post') }}</p>
-        <p class="mt-1 text-xs text-neutral-500">{{ t(canAutoPost ? 'other_items.plans.auto_post_hint' : 'other_items.plans.auto_post_source') }}</p>
-        <p v-if="!sourceActive" class="mt-2 text-sm text-neutral-500">{{ t('other_items.plans.source_inactive') }}</p>
-        <div v-if="canWrite" class="mt-3 flex flex-wrap items-end gap-2">
-          <template v-if="sourceActive">
-            <label class="text-sm font-medium">{{ t('other_items.plans.generate_through') }}
-              <DateInput v-model="through" class="mt-1 block h-9 rounded-md border border-neutral-300 px-2" />
-            </label>
-            <button type="button" :disabled="busy || schedule.status !== 'active' || (schedule.auto_post && !canPost)" :class="[btnOutline('success'), 'whitespace-nowrap']" @click="generate">
-              <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.plus" /></svg>
-              {{ t('other_items.plans.generate') }}
-            </button>
-            <button type="button" :disabled="busy || (schedule.status !== 'active' && schedule.auto_post && !canPost)" :class="[btnOutline('warning'), 'whitespace-nowrap']" @click="toggleSchedule">
-              <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" :d="schedule.status === 'active' ? ICONS.pause : ICONS.play" /></svg>
-              {{ t(schedule.status === 'active' ? 'other_items.plans.pause' : 'other_items.plans.resume') }}
-            </button>
-          </template>
-          <button type="button" :disabled="busy" :class="[btnOutline('danger'), 'whitespace-nowrap']" @click="deleteSchedule">
-            <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.trash" /></svg>
-            {{ t('other_items.plans.delete_schedule') }}
+  <div class="space-y-4" :hidden="!(schedule || showInstallments || failed)" data-test="other-item-plans">
+    <!-- Jeden kořen: bez rozvrhu a splátek je skrytý (dialog nastavení opakování se teleportuje ven). -->
+    <p v-if="failed" role="alert" class="flex flex-wrap items-center gap-2 rounded-md border border-danger-500/40 bg-danger-50 p-3 text-sm text-danger-600" data-test="plans-failed">
+      {{ t('other_items.plans.load_failed') }}
+      <button type="button" :class="btnOutlineSm('danger')" @click="load">
+        <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.cycle" /></svg>
+        {{ t('common.retry') }}
+      </button>
+    </p>
+    <!-- Zdroj opakování: přehled rozvrhu. Nastavení je akce v liště detailu, ne trvale rozbalený formulář. -->
+    <section v-if="schedule" class="rounded-lg border border-neutral-200 bg-surface p-5 shadow-sm" data-test="schedule-card">
+      <div class="mb-3 flex flex-wrap items-center justify-between gap-2">
+        <h3 class="text-sm font-medium text-neutral-700">{{ t('other_items.plans.schedule_title') }}</h3>
+        <span class="rounded px-2 py-0.5 text-xs" :class="schedule.status === 'active' ? 'bg-success-50 text-success-700' : 'bg-neutral-100 text-neutral-600'" data-test="schedule-status">{{ t(`other_items.plans.${schedule.status}`) }}</span>
+      </div>
+      <dl class="grid gap-x-6 gap-y-2 text-sm sm:grid-cols-2">
+        <div class="flex justify-between gap-3"><dt class="text-neutral-500">{{ t('other_items.plans.frequency') }}</dt><dd>{{ t(`other_items.plans.${schedule.frequency}`) }}</dd></div>
+        <div class="flex justify-between gap-3"><dt class="text-neutral-500">{{ t('other_items.plans.next_on') }}</dt><dd class="font-mono" data-test="schedule-next">{{ schedule.next_on ? formatDate(schedule.next_on) : '—' }}</dd></div>
+        <div class="flex justify-between gap-3"><dt class="text-neutral-500">{{ t('other_items.plans.ends_label') }}</dt><dd class="font-mono">{{ schedule.ends_on ? formatDate(schedule.ends_on) : t('other_items.plans.no_end') }}</dd></div>
+        <!-- Kdo smí rozvrh měnit, vidí volbu jako zaškrtávátko níž; ostatním stačí údaj. -->
+        <div v-if="!(canWrite && sourceActive)" class="flex justify-between gap-3"><dt class="text-neutral-500">{{ t('other_items.plans.auto_post_short') }}</dt><dd data-test="schedule-auto-post">{{ t(schedule.auto_post ? 'common.yes' : 'common.no') }}</dd></div>
+        <div v-if="schedule.created_at" class="flex justify-between gap-3 sm:col-span-2"><dt class="text-neutral-500">{{ t('other_items.plans.created_by') }}</dt><dd data-test="schedule-created-by">{{ schedule.created_by_name || t('other_items.plans.unknown_user') }} · {{ formatDate(schedule.created_at) }}</dd></div>
+      </dl>
+      <p v-if="!sourceActive" class="mt-3 text-sm text-neutral-500">{{ t('other_items.plans.source_inactive') }}</p>
+      <label v-if="canWrite && sourceActive" class="mt-3 flex items-center gap-2 text-sm">
+        <input type="checkbox" :checked="schedule.auto_post" :disabled="busy || loading || ((!canAutoPost || !canPost) && !schedule.auto_post)" data-test="schedule-auto-post-toggle" @change="toggleAutoPost" />
+        {{ t('other_items.plans.auto_post') }}
+      </label>
+      <p v-if="canWrite && sourceActive" class="mt-1 text-xs text-neutral-500">{{ t(canAutoPost ? 'other_items.plans.auto_post_hint' : 'other_items.plans.auto_post_source') }}</p>
+      <div v-if="canWrite" class="mt-3 flex flex-wrap items-end gap-2">
+        <template v-if="sourceActive">
+          <label class="text-sm font-medium">{{ t('other_items.plans.generate_through') }}
+            <DateInput v-model="through" class="mt-1 block h-9 rounded-md border border-neutral-300 px-2" />
+          </label>
+          <button type="button" :disabled="busy || loading || schedule.status !== 'active' || (schedule.auto_post && !canPost)" :class="[btnOutline('success'), 'whitespace-nowrap']" data-test="schedule-generate" @click="generate">
+            <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.plus" /></svg>
+            {{ t('other_items.plans.generate') }}
           </button>
-        </div>
-        <ul v-if="generatedOccurrences.length" class="mt-3 space-y-1 text-sm">
-          <li v-for="occurrence in generatedOccurrences" :key="occurrence.occurrence_index">
-            <RouterLink :to="`/other-items/${occurrence.item_id}`" class="text-primary-700 hover:underline">
-              {{ t('other_items.plans.created_for', { date: formatDate(occurrence.issued_on) }) }} · {{ t(`other_items.status.${occurrence.status}`) }}
-            </RouterLink>
-          </li>
-        </ul>
-        <p v-else class="mt-3 text-sm text-neutral-500">{{ t('other_items.plans.no_generated') }}</p>
-      </template>
-      <form v-else-if="canWrite && ['draft', 'posted', 'confirmed'].includes(item.status)" class="mt-3 flex flex-wrap items-end gap-2" @submit.prevent="createSchedule">
-        <label class="text-sm font-medium">{{ t('other_items.plans.frequency') }}
-          <select v-model="frequency" class="mt-1 block h-9 rounded-md border border-neutral-300 bg-surface px-2">
-            <option value="monthly">{{ t('other_items.plans.monthly') }}</option>
-            <option value="quarterly">{{ t('other_items.plans.quarterly') }}</option>
-            <option value="yearly">{{ t('other_items.plans.yearly') }}</option>
-          </select>
-        </label>
-        <label class="text-sm font-medium">{{ t('other_items.plans.ends_on') }}
-          <DateInput v-model="endsOn" class="mt-1 block h-9 rounded-md border border-neutral-300 px-2" />
-        </label>
-        <label class="flex items-center gap-2 text-sm">
-          <input v-model="autoPost" type="checkbox" :disabled="!canAutoPost || !canPost || busy" />
-          {{ t('other_items.plans.auto_post') }}
-        </label>
-        <p class="w-full text-xs text-neutral-500">{{ t(canAutoPost ? 'other_items.plans.auto_post_hint' : 'other_items.plans.auto_post_source') }}</p>
-        <button type="submit" :disabled="busy" :class="btnOutline('primary')">
-          <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.calendar" /></svg>
-          {{ t('other_items.plans.create_schedule') }}
+          <button type="button" :disabled="busy || loading || (schedule.status !== 'active' && schedule.auto_post && !canPost)" :class="[btnOutline('warning'), 'whitespace-nowrap']" @click="toggleSchedule">
+            <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" :d="schedule.status === 'active' ? ICONS.pause : ICONS.play" /></svg>
+            {{ t(schedule.status === 'active' ? 'other_items.plans.pause' : 'other_items.plans.resume') }}
+          </button>
+        </template>
+        <button type="button" :disabled="busy || loading" :class="[btnOutline('danger'), 'whitespace-nowrap']" @click="deleteSchedule">
+          <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.trash" /></svg>
+          {{ t('other_items.plans.delete_schedule') }}
         </button>
-      </form>
+      </div>
+      <h4 class="mb-1 mt-4 text-xs font-medium uppercase tracking-wide text-neutral-500">{{ t('other_items.plans.created_items') }}</h4>
+      <ul v-if="generatedOccurrences.length" class="divide-y divide-neutral-100 text-sm" data-test="schedule-occurrences">
+        <li v-for="occurrence in generatedOccurrences" :key="occurrence.occurrence_index" class="flex flex-wrap items-center justify-between gap-2 py-1.5">
+          <RouterLink :to="`/other-items/${occurrence.item_id}`" class="text-primary-700 hover:underline">
+            <span class="font-mono">{{ occurrence.document_no || `#${occurrence.item_id}` }}</span>
+            <span class="ml-2 text-neutral-500">{{ formatDate(occurrence.issued_on) }}</span>
+          </RouterLink>
+          <span class="rounded px-2 py-0.5 text-xs" :class="otherItemStatusClass(occurrence.status)">{{ t(`other_items.status.${occurrence.status}`) }}</span>
+        </li>
+      </ul>
+      <p v-else class="text-sm text-neutral-500">{{ t('other_items.plans.no_generated') }}</p>
     </section>
 
-    <section class="rounded-lg border border-neutral-200 bg-surface p-5 shadow-sm">
+    <!-- Splátkový kalendář: jen u položky se splátkami, nebo po akci „Rozložit na splátky“. -->
+    <section v-if="showInstallments" ref="installmentsCard" class="scroll-mt-4 rounded-lg border border-neutral-200 bg-surface p-5 shadow-sm" data-test="installments-card">
       <h3 class="text-sm font-medium text-neutral-700">{{ t('other_items.plans.installments_title') }}</h3>
       <p class="mt-1 text-sm text-neutral-500">{{ t('other_items.plans.installments_hint') }}</p>
       <p v-if="loading" class="mt-3 text-sm text-neutral-500">{{ t('common.loading') }}</p>
@@ -446,9 +508,48 @@ watch(() => [props.item.id, props.item.paid_amount], () => void load(), { immedi
             <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.trash" /></svg>
             {{ t('other_items.plans.clear_installments') }}
           </button>
+          <button v-else type="button" :class="btnOutline('neutral')" data-test="installments-cancel" @click="cancelInstallments">
+            <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.x" /></svg>
+            {{ t('common.cancel') }}
+          </button>
         </div>
         <p v-else-if="installments.length" class="mt-3 text-sm text-neutral-500">{{ t('other_items.plans.paid_locked') }}</p>
       </template>
     </section>
+
+  <Modal v-if="scheduleOpen" :title="t('other_items.plans.create_schedule')" width-class="max-w-lg" @close="scheduleOpen = false">
+    <form id="other-item-schedule" class="space-y-4" data-test="schedule-form" @submit.prevent="createSchedule">
+      <p class="text-sm text-neutral-600">{{ t('other_items.plans.schedule_hint') }}</p>
+      <label class="block text-sm font-medium">{{ t('other_items.plans.frequency') }}
+        <select v-model="frequency" class="mt-1 block h-9 w-full rounded-md border border-neutral-300 bg-surface px-2">
+          <option value="monthly">{{ t('other_items.plans.monthly') }}</option>
+          <option value="quarterly">{{ t('other_items.plans.quarterly') }}</option>
+          <option value="yearly">{{ t('other_items.plans.yearly') }}</option>
+        </select>
+      </label>
+      <label class="block text-sm font-medium">{{ t('other_items.plans.ends_label') }}
+        <DateInput v-model="endsOn" class="mt-1 block h-9 w-full rounded-md border border-neutral-300 px-2" />
+      </label>
+      <div>
+        <label class="flex items-center gap-2 text-sm">
+          <input v-model="autoPost" type="checkbox" :disabled="!canAutoPost || !canPost || busy" />
+          {{ t('other_items.plans.auto_post') }}
+        </label>
+        <p class="mt-1 text-xs text-neutral-500">{{ t(canAutoPost ? 'other_items.plans.auto_post_hint' : 'other_items.plans.auto_post_source') }}</p>
+      </div>
+    </form>
+    <template #footer>
+      <div class="flex flex-wrap justify-end gap-2">
+        <button type="button" :class="btnOutline('neutral')" class="whitespace-nowrap" @click="scheduleOpen = false">
+          <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.x" /></svg>
+          {{ t('common.cancel') }}
+        </button>
+        <button type="submit" form="other-item-schedule" :disabled="busy" :class="btnFilled('primary')" class="whitespace-nowrap" data-test="schedule-submit">
+          <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.cycle" /></svg>
+          {{ t('other_items.plans.create_schedule') }}
+        </button>
+      </div>
+    </template>
+  </Modal>
   </div>
 </template>

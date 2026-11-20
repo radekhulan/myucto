@@ -320,7 +320,8 @@ export const OTHER_ITEM_TOOLS = [
   read('get_other_item', 'Detail ostatní pohledávky nebo závazku',
     'Detail dokladu včetně kontace (`posting_lines`), stavu, uhrazené a zbývající částky. `posting_rules` ukazuje '
     + 'účinnou kontaci vzniku a úhrad s původem (item = vlastní, kind = účetní profil druhu, default = výchozí), '
-    + '`posting_overrides` vlastní kontaci úhrad.',
+    + '`posting_overrides` vlastní kontaci úhrad. `occurrence` u dokladu vytvořeného opakováním uvádí rozvrh, '
+    + 'zdrojovou položku a kdo rozvrh založil.',
     { id: id('ID dokladu.') }, (a) => `${BASE}/${seg(a.id)}`, () => null, ['id']),
   read('list_other_item_allocations', 'Úhrady ostatní položky',
     'Spárované bankovní a pokladní úhrady dokladu s odkazem na výpis (`bank_statement_id`), číslem pokladního '
@@ -346,12 +347,13 @@ export const OTHER_ITEM_TOOLS = [
     + '(`posting_suggestion`). Nastavení druhů a profilů se mění ve webovém rozhraní.',
     {}, () => `${BASE}/kinds`),
   read('list_other_item_schedules', 'Opakování ostatních položek',
-    'Rozvrhy opakování (měsíčně, čtvrtletně, ročně) se šablonou, stavem a příznakem automatického účtování. '
+    'Rozvrhy opakování (měsíčně, čtvrtletně, ročně) se šablonou, stavem a příznakem automatického účtování, '
+    + 'datem příští položky (`next_on`), číslem zdrojové položky a kdo rozvrh založil (`created_by_name`). '
     + '`source_item_id` vrátí jen rozvrh dané zdrojové položky.',
     { source_item_id: id('ID zdrojové položky; bez něj všechny rozvrhy firmy.') }, () => `${BASE}/schedules`,
     (a) => (a.source_item_id !== undefined ? { source_item_id: a.source_item_id } : null)),
   read('get_other_item_schedule', 'Detail opakování ostatní položky',
-    'Rozvrh opakování včetně všech vygenerovaných dokladů a jejich stavu.',
+    'Rozvrh opakování včetně všech vygenerovaných dokladů (číslo, datum, stav) a data příští položky (`next_on`).',
     { id: id('ID rozvrhu.') }, (a) => `${BASE}/schedules/${seg(a.id)}`, () => null, ['id']),
   read('get_other_item_installments', 'Splátkový kalendář ostatní položky',
     'Termíny a částky splátek dokladu. Prázdný seznam znamená, že doklad kalendář nemá.',

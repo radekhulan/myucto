@@ -46709,7 +46709,11 @@ components:
             counter_account_code: { type: [string, 'null'] }
             posting_lines: { type: array, items: { $ref: '#/components/schemas/OtherItemPostingLine' } }
             note: { type: [string, 'null'] }
-        occurrences: { type: array, items: { type: object, properties: { occurrence_index: { type: integer }, item_id: { type: integer }, issued_on: { type: string, format: date }, status: { type: string } } } }
+        created_at: { type: string, format: date-time }
+        created_by_name: { type: [string, 'null'], description: 'Jméno uživatele, který rozvrh založil; null u neznámého nebo smazaného uživatele.' }
+        source_document_no: { type: [string, 'null'], description: 'Číslo zdrojové položky rozvrhu.' }
+        next_on: { type: [string, 'null'], format: date, description: 'Datum příští položky rozvrhu; null u pozastaveného rozvrhu a po konci opakování.' }
+        occurrences: { type: array, description: 'Jen v detailu rozvrhu. Výskyt 0 je zdrojová položka.', items: { type: object, properties: { occurrence_index: { type: integer }, item_id: { type: integer }, issued_on: { type: string, format: date }, status: { type: string }, document_no: { type: [string, 'null'] } } } }
     OtherItemInstallmentInput:
       type: object
       required: [due_on]
@@ -46919,6 +46923,17 @@ components:
             reversal_entry_id: { type: [integer, 'null'], format: int64 }
             posted_at: { type: [string, 'null'], format: date-time }
             document_count: { type: integer, description: 'Jen v seznamu a jen s právem číst dokumenty: počet připojených dokumentů.' }
+            occurrence:
+              type: [object, 'null']
+              description: 'Jen v detailu. Položku vytvořilo opakování (výskyt 1 a další); zdroj rozvrhu a položka mimo rozvrh mají null.'
+              properties:
+                schedule_id: { type: integer, format: int64 }
+                occurrence_index: { type: integer }
+                source_item_id: { type: integer, format: int64 }
+                source_document_no: { type: [string, 'null'], description: 'Číslo zdrojové položky; null, dokud ho nemá (koncept).' }
+                source_title: { type: string }
+                schedule_created_at: { type: string, format: date-time }
+                created_by_name: { type: [string, 'null'], description: 'Kdo rozvrh založil; null u neznámého nebo smazaného uživatele.' }
             posting_rules:
               type: object
               description: Účinná kontace vzniku a úhrad (prázdný objekt v daňové evidenci).
