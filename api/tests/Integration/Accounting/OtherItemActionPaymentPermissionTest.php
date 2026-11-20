@@ -210,6 +210,35 @@ final class OtherItemActionPaymentPermissionTest extends TestCase
         self::assertSame(0, $this->data($response)['total']);
     }
 
+    public function testListWithoutDatesLimitsManualItemsAndTotalsToYearWindow(): void
+    {
+        $ids = [];
+        foreach (['today' => date('Y-m-d'), 'old' => date('Y-m-d', strtotime('-3 years'))] as $key => $due) {
+            $item = $this->service->create($this->supplierId, [
+                'side' => 'payable', 'kind' => 'rent', 'title' => 'Syntetický nájem ' . $key,
+                'issued_on' => $due, 'due_on' => $due, 'amount' => $key === 'today' ? 300 : 7000, 'currency' => 'CZK',
+            ], null);
+            $this->service->post($this->supplierId, (int) $item['id'], null);
+            $ids[$key] = (int) $item['id'];
+        }
+        $list = $this->data($this->call('list', 'GET', ['other_items' => 1]));
+        // Bez data jen splatnost rok zpět až rok dopředu: stará položka ani položka z roku 2099 nejsou ve výběru ani v součtu.
+        self::assertSame([$ids['today']], array_column($list['items'], 'id'));
+        self::assertSame(1, $list['total']);
+        self::assertEquals([['side' => 'payable', 'currency' => 'CZK', 'remaining_amount' => 300]], $list['totals']);
+        $all = $this->data($this->call('list', 'GET', ['other_items' => 1], [], null, ['to' => '2099-12-31']));
+        self::assertSame(3, $all['total']);
+        // Otevřené nemají dolní mez: starý neuhrazený dluh zůstane ve výběru i v součtu, horní mez je rok dopředu.
+        $open = $this->data($this->call('list', 'GET', ['other_items' => 1], [], null, ['status' => 'open']));
+        self::assertEqualsCanonicalizing([$ids['today'], $ids['old']], array_column($open['items'], 'id'));
+        self::assertEquals([['side' => 'payable', 'currency' => 'CZK', 'remaining_amount' => 7300]], $open['totals']);
+        $allStatuses = $this->data($this->call('list', 'GET', ['other_items' => 1], [], null, ['status' => 'all']));
+        self::assertSame([$ids['today']], array_column($allStatuses['items'], 'id'));
+        // Hledání bez data okno nemá: najde i položku splatnou před třemi lety.
+        $found = $this->data($this->call('list', 'GET', ['other_items' => 1], [], null, ['status' => 'all', 'q' => 'nájem old']));
+        self::assertSame([$ids['old']], array_column($found['items'], 'id'));
+    }
+
     public function testListShowsDocumentCountOnlyWithDocumentsRead(): void
     {
         $without = $this->data($this->call('list', 'GET', ['other_items' => 1], [], null, ['from' => '2099-01-01']));

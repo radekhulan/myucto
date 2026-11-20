@@ -296,11 +296,11 @@ export const OTHER_ITEM_TOOLS = [
   read('list_other_items', 'Ostatní pohledávky a závazky',
     'Ruční ostatní pohledávky a závazky (nájem, půjčky, úvěry, kauce, pojistné, poplatky) se stavem a zbývající '
     + 'částkou, k tomu odděleně převzaté předpisy ze mzdového a daňového modulu (`sources`, jen ke čtení). '
-    + 'Bez filtru data vrací splatnosti od roku zpět do roku dopředu. První stránka nese `totals`: zbývá uhradit za celý '
+    + 'Bez filtru data vrací ruční položky i předpisy se splatností od roku zpět do roku dopředu (i pro `totals`); ruční položky ve stavu open bez dolní meze. První stránka nese `totals`: zbývá uhradit za celý '
     + 'výběr ručních položek po straně a měně (jen potvrzené a zaúčtované, přeplatek = 0). S právem číst dokumenty '
     + 'nese každá ruční položka `document_count` (počet připojených dokumentů).', {
       side: str('Strana.', { enum: ['receivable', 'payable'] }),
-      status: str('Stav: open = neuhrazené aktivní, all = vše.', {
+      status: str('Stav: open = neuhrazené aktivní (zbývá jistina, nebo úrok či poplatek rozdělené splátky), all = vše.', {
         enum: ['open', 'all', 'draft', 'confirmed', 'posted', 'reversed', 'cancelled'],
       }),
       kind: str('Vestavěný druh dokladu (položky bez vlastního druhu).', { enum: KINDS }),
@@ -321,7 +321,7 @@ export const OTHER_ITEM_TOOLS = [
     'Detail dokladu včetně kontace (`posting_lines`), stavu, uhrazené a zbývající částky. `posting_rules` ukazuje '
     + 'účinnou kontaci vzniku a úhrad s původem (item = vlastní, kind = účetní profil druhu, default = výchozí), '
     + '`posting_overrides` vlastní kontaci úhrad. `occurrence` u dokladu vytvořeného opakováním uvádí rozvrh, '
-    + 'zdrojovou položku a kdo rozvrh založil.',
+    + 'zdrojovou položku a kdo rozvrh založil; po zrušení opakování zůstane se zdrojem a `schedule_id` null.',
     { id: id('ID dokladu.') }, (a) => `${BASE}/${seg(a.id)}`, () => null, ['id']),
   read('list_other_item_allocations', 'Úhrady ostatní položky',
     'Spárované bankovní a pokladní úhrady dokladu s odkazem na výpis (`bank_statement_id`), číslem pokladního '

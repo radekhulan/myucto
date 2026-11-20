@@ -54,6 +54,13 @@ final class OtherItemAction
             || $toDate === false || $toDate->format('Y-m-d') !== $to || $from > $to) {
             return Json::error($response, 'other_items.error.invalid_date', 'Neplatný rozsah splatnosti.', 422);
         }
+        // Bez data platí okno splatnosti rok zpět až rok dopředu, aby součty a počet nešly přes celou
+        // historii firmy. Výjimky jen pro ruční položky: výběr Otevřené nemá dolní mez (starý neuhrazený
+        // dluh z něj nesmí zmizet) a hledání okno nemá (číslo dokladu z předloňska se musí najít).
+        // Převzaté předpisy z mezd a daní mají okno vždy, hledání se na ně nevztahuje.
+        $searching = ($filters['q'] ?? '') !== '' && !$hasFrom && !$hasTo;
+        $filters['from'] = $searching || (($filters['status'] ?? '') === 'open' && !$hasFrom) ? null : $from;
+        $filters['to'] = $searching ? null : $to;
         $result = $this->service->list(
             $this->currentSupplierId($request), $filters,
             (int) ($q['page'] ?? 1), (int) ($q['per_page'] ?? 50),

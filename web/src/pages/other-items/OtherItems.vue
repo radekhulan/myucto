@@ -4,10 +4,11 @@ import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter, type LocationQuery } from 'vue-router'
 import { otherItemKindsApi, otherItemsApi, type OtherItem, type OtherItemKind, type OtherItemRemainingTotal, type OtherItemSide } from '@/api/otherItems'
 import { kindSettingLabel, otherItemKindLabel } from '@/utils/otherItemKind'
-import { isOtherItemOverdue, otherItemDisplayStatus, otherItemStatusClass } from '@/utils/otherItemStatus'
+import { isOtherItemOverdue, otherItemDisplayStatus, otherItemRemainingPayment, otherItemStatusClass } from '@/utils/otherItemStatus'
 import { useAuthStore } from '@/stores/auth'
 import { useToast } from '@/composables/useToast'
 import { formatDate, formatMoney } from '@/composables/useFormat'
+import { isCalendarIsoDate } from '@/utils/date'
 import { useRowLink } from '@/composables/useRowLink'
 import { useListNavigationSource } from '@/composables/useListNavigation'
 import { useSupplierStore } from '@/stores/supplier'
@@ -144,11 +145,18 @@ function readQuery(q: LocationQuery) {
   source.value = (['manual', 'payroll', 'tax'] as const).find(value => value === qSource) ?? ''
   const qKind = str(q.kind)
   // Druh patří jedné straně; ručně upravený odkaz s druhem druhé strany se nepoužije.
-  kindFilter.value = /^(receivable|payable)\|[a-z_]+(?::\d+)?$/.test(qKind)
+  // Id vlastního druhu nejvýš 15 číslic: delší číslo by v Number ztratilo přesnost a server ho odmítl.
+  kindFilter.value = /^(receivable|payable)\|[a-z_]+(?::[1-9]\d{0,14})?$/.test(qKind)
     && (!side.value || qKind.startsWith(`${side.value}|`)) ? qKind : ''
   search.value = str(q.q)
-  dueFrom.value = /^\d{4}-\d{2}-\d{2}$/.test(str(q.from)) ? str(q.from) : ''
-  dueTo.value = /^\d{4}-\d{2}-\d{2}$/.test(str(q.to)) ? str(q.to) : ''
+  // Neplatné datum nebo obrácené rozmezí z ručně upravené adresy se vynechá (server by ho odmítl 422).
+  const qFrom = str(q.from)
+  const qTo = str(q.to)
+  const validFrom = isCalendarIsoDate(qFrom)
+  const validTo = isCalendarIsoDate(qTo)
+  const reversed = validFrom && validTo && qFrom > qTo
+  dueFrom.value = validFrom && !reversed ? qFrom : ''
+  dueTo.value = validTo && !reversed ? qTo : ''
 }
 function buildQuery(): Record<string, string> {
   const q: Record<string, string> = {}
@@ -254,7 +262,11 @@ function clearFilter(key: string) {
   if (key === 'from') dueFrom.value = ''
   if (key === 'to') dueTo.value = ''
 }
+/** Jedno načtení: bez toho by změna filtrů načetla hned a vymazané hledání ještě jednou po prodlevě. */
 function clearFilters() {
+  applyingQuery = true
+  if (searchTimer) clearTimeout(searchTimer)
+  searchPending.value = false
   side.value = ''
   status.value = 'open'
   kindFilter.value = ''
@@ -262,6 +274,9 @@ function clearFilters() {
   dueFrom.value = ''
   dueTo.value = ''
   search.value = ''
+  void Promise.resolve().then(() => { applyingQuery = false })
+  writeUrl()
+  void load()
 }
 
 const actions = computed<ActionItem[]>(() => [
@@ -585,6 +600,10 @@ onMounted(async () => {
         <span class="whitespace-nowrap">{{ t('other_items.due_to') }}</span>
         <DateInput v-model="dueTo" class="h-9 w-40 rounded-md border border-neutral-300 px-2 text-sm" />
       </label>
+      <!-- Výchozí okno splatnosti platí na serveru; bez téhle věty by výběr vypadal jako úplný. -->
+      <p v-if="!dueFrom && !dueTo && !search.trim()" class="w-full text-xs text-neutral-500" data-test="due-window-hint">
+        {{ t(status === 'open' ? 'other_items.window_hint_open' : 'other_items.window_hint') }}
+      </p>
       <template #actions>
         <SavedFiltersMenu :ctrl="saved" />
         <!-- Karty na telefonu mají pevný obsah, sloupce ani hustota je nemění. -->
@@ -617,6 +636,7 @@ onMounted(async () => {
               <span class="text-neutral-500">{{ t(`other_items.totals_by_side.${group.side}`) }}:</span>
               <span v-for="row in group.rows" :key="row.currency" class="ml-1.5 font-semibold text-neutral-900">{{ formatMoney(row.remaining_amount, row.currency) }}</span>
             </span>
+            <span class="text-neutral-500" data-test="other-items-totals-scope">{{ t('other_items.totals_scope') }}</span>
           </div>
         </header>
         <EmptyState v-if="!visibleItems.length" boxed dense accent="neutral" icon="doc" :title="t('other_items.no_manual')" />
@@ -667,7 +687,7 @@ onMounted(async () => {
                   <td v-else-if="column.key === 'amount'" class="whitespace-nowrap px-3 py-2.5 text-right font-mono font-semibold text-neutral-900">{{ formatMoney(item.amount, item.currency) }}</td>
                   <td v-else-if="column.key === 'paid_amount'" class="whitespace-nowrap px-3 py-2.5 text-right font-mono text-xs">{{ formatMoney(item.paid_amount, item.currency) }}</td>
                   <td v-else-if="column.key === 'remaining_amount'" class="whitespace-nowrap px-3 py-2.5 text-right font-mono text-xs"
-                    :class="Number(item.remaining_amount) > 0 ? 'text-neutral-900' : 'text-neutral-400'">{{ formatMoney(item.remaining_amount, item.currency) }}</td>
+                    :class="otherItemRemainingPayment(item) > 0 ? 'text-neutral-900' : 'text-neutral-400'" data-test="remaining-cell">{{ formatMoney(otherItemRemainingPayment(item), item.currency) }}</td>
                   <td v-else-if="column.key === 'status'" class="whitespace-nowrap px-3 py-2.5 text-center"><span class="rounded px-2 py-0.5 text-xs" :class="otherItemStatusClass(otherItemDisplayStatus(item))" data-test="status-badge">{{ statusLabel(otherItemDisplayStatus(item)) }}</span></td>
                   <td v-else-if="column.key === 'variable_symbol'" class="whitespace-nowrap px-3 py-2.5 font-mono text-xs"><span v-if="item.variable_symbol">{{ item.variable_symbol }}</span><span v-else class="text-neutral-300">—</span></td>
                   <td v-else-if="column.key === 'documents'" class="whitespace-nowrap px-3 py-2.5 text-xs" data-test="document-count"><span v-if="item.document_count">{{ t('other_items.document_count', item.document_count) }}</span><span v-else class="text-neutral-300">—</span></td>
@@ -712,9 +732,9 @@ onMounted(async () => {
               <span class="min-w-0 truncate" :class="item.partner_name ? '' : 'text-neutral-400'">{{ item.partner_name || t('other_items.no_partner') }}</span>
               <span class="whitespace-nowrap" :class="isOtherItemOverdue(item) ? 'font-medium text-danger-500' : ''">{{ t('other_items.due_on') }}: {{ item.due_on ? formatDate(item.due_on) : '—' }}</span>
             </div>
-            <div v-if="Number(item.paid_amount) > 0.005 && Number(item.remaining_amount) > 0.005" class="mt-1 flex flex-wrap items-center justify-between gap-x-2 gap-y-1 text-xs">
+            <div v-if="Number(item.paid_amount) > 0.005 && otherItemRemainingPayment(item) > 0.005" data-test="card-remaining" class="mt-1 flex flex-wrap items-center justify-between gap-x-2 gap-y-1 text-xs">
               <span class="text-neutral-500">{{ t('other_items.paid_amount') }}: <span class="font-mono text-neutral-700">{{ formatMoney(item.paid_amount, item.currency) }}</span></span>
-              <span class="text-neutral-900">{{ t('other_items.remaining') }}: <span class="font-mono">{{ formatMoney(item.remaining_amount, item.currency) }}</span></span>
+              <span class="text-neutral-900">{{ t('other_items.remaining') }}: <span class="font-mono">{{ formatMoney(otherItemRemainingPayment(item), item.currency) }}</span></span>
             </div>
           </div>
         </div>

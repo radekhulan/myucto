@@ -10,21 +10,31 @@ const m = vi.hoisted(() => ({
   setInstallments: vi.fn(),
   schedule: vi.fn(),
   createSchedule: vi.fn(),
+  setStatus: vi.fn(),
+  deleteSchedule: vi.fn(),
+  translated: [] as string[],
 }))
 
 vi.mock('@/api/otherItemPlans', () => ({
   otherItemPlansApi: { schedules: m.schedules, installments: m.installments, schedule: m.schedule,
-    planLoan: m.planLoan, setInstallments: m.setInstallments, createSchedule: m.createSchedule },
+    planLoan: m.planLoan, setInstallments: m.setInstallments, createSchedule: m.createSchedule,
+    setStatus: m.setStatus, deleteSchedule: m.deleteSchedule },
 }))
 vi.mock('@/stores/auth', () => ({ useAuthStore: () => ({ canWrite: () => m.canWrite }) }))
 vi.mock('@/stores/supplier', () => ({ useSupplierStore: () => ({ currentSupplier: { accounting_mode: 'tax_evidence' } }) }))
-vi.mock('@/composables/useToast', () => ({ useToast: () => ({ error: vi.fn(), success: vi.fn() }) }))
+const toastError = vi.hoisted(() => vi.fn())
+vi.mock('@/composables/useToast', () => ({ useToast: () => ({ error: toastError, success: vi.fn() }) }))
 vi.mock('@/composables/useFormat', () => ({ formatDate: (v: string) => v, formatMoney: (v: number) => `${v} Kč`, statusBadgeClass: (s: string) => `badge badge-${s}` }))
 vi.mock('vue-i18n', () => ({
-  useI18n: () => ({ t: (key: string, params?: Record<string, unknown>) => params ? `${key}:${JSON.stringify(params)}` : key }),
+  useI18n: () => ({ t: (key: string, params?: Record<string, unknown>) => params ? `${key}:${JSON.stringify(params)}` : key,
+    te: (key: string) => m.translated.includes(key) }),
 }))
 
 import OtherItemPlans from '../OtherItemPlans.vue'
+
+/** Dialog se slotem i patičkou, ať jdou ovládat jeho pole a tlačítka. */
+const ModalStub = { template: '<div data-test="modal"><slot /><slot name="footer" /></div>' }
+const stubs = { RouterLink: true, Modal: ModalStub }
 
 const item = (overrides: Partial<OtherItem> = {}): OtherItem => ({
   id: 9, source_kind: 'manual', source_id: 9, side: 'payable', kind: 'loan', title: 'Syntetický úvěr',
@@ -37,6 +47,7 @@ describe('OtherItemPlans', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     m.canWrite = true
+    m.translated = []
     m.schedules.mockResolvedValue([])
     m.installments.mockResolvedValue([
       { id: 1, position: 1, due_on: '2099-01-10', amount: 1000, paid_amount: 1000, remaining_amount: 0, status: 'paid' },
@@ -72,34 +83,39 @@ describe('OtherItemPlans', () => {
       { due_on: '2099-02-01', amount: 1530, principal_amount: 1500, interest_amount: 20, fee_amount: 10 },
       { due_on: '2099-03-01', amount: 1520, principal_amount: 1500, interest_amount: 10, fee_amount: 10 },
     ])
-    m.setInstallments.mockImplementation((_id: number, rows: unknown[]) => Promise.resolve(rows))
+    m.setInstallments.mockImplementation((_id: number, rows: object[]) => Promise.resolve(rows.map((row, index) => ({ ...row, id: index + 1 }))))
     const wrapper = shallowMount(OtherItemPlans, {
       props: { item: item({ paid_amount: 0, remaining_amount: 3000 }) },
-      global: { stubs: { RouterLink: true } },
+      global: { stubs },
     })
     await flushPromises()
-    // Prázdný kalendář se ukáže až po akci „Rozložit na splátky“ v liště detailu.
+    // Kalendář se zakládá v dialogu z akce „Rozložit na splátky“; karta je jen přehled uložených splátek.
     expect(wrapper.find('[data-test="installments-card"]').exists()).toBe(false)
     ;(wrapper.vm as unknown as { openInstallments: () => void }).openInstallments()
     await flushPromises()
+    expect(wrapper.find('[data-test="installments-form"]').exists()).toBe(true)
+    expect(wrapper.find('[data-test="installments-card"]').exists()).toBe(false)
     expect(wrapper.find('[data-test="loan-plan"]').exists()).toBe(false)
     await wrapper.find('[data-test="installment-components"]').trigger('change')
     await wrapper.find('[data-test="loan-plan-run"]').trigger('click')
     await flushPromises()
     expect(m.planLoan).toHaveBeenCalledWith(9, expect.objectContaining({ method: 'annuity', frequency: 'monthly', count: 12 }))
-    expect(wrapper.findAll('[data-test="installment-row"]')).toHaveLength(2)
+    expect(wrapper.findAll('[data-test="installment-draft-row"]')).toHaveLength(2)
     expect(wrapper.find('[data-test="installment-principal-total"]').classes()).not.toContain('text-danger-700')
 
     // Úprava úroku přepočítá částku splátky.
     await wrapper.findAll('[data-test="installment-interest_amount"]')[1]!.setValue(15)
-    expect(wrapper.findAll('[data-test="installment-amount"]')[1]!.text()).toContain('1525 Kč')
-    const save = wrapper.findAll('button').find(button => button.text() === 'common.save')!
-    await save.trigger('click')
+    expect(wrapper.findAll('[data-test="installment-draft-amount"]')[1]!.text()).toContain('1525 Kč')
+    await wrapper.get('[data-test="installments-save"]').trigger('click')
     await flushPromises()
     expect(m.setInstallments).toHaveBeenCalledWith(9, [
       { due_on: '2099-02-01', amount: 1530, principal_amount: 1500, interest_amount: 20, fee_amount: 10 },
       { due_on: '2099-03-01', amount: 1525, principal_amount: 1500, interest_amount: 15, fee_amount: 10 },
     ])
+    // Po uložení se dialog zavře a karta ukáže přehled se složkami splátky.
+    expect(wrapper.find('[data-test="modal"]').exists()).toBe(false)
+    expect(wrapper.findAll('[data-test="installments-card"] [data-test="installment-row"]')).toHaveLength(2)
+    expect(wrapper.findAll('[data-test="installment-amount"]')[1]!.text()).toBe('1525 Kč')
   })
 
   it('úhrada samotného úroku kalendář zamkne, i když jistina zůstala celá', async () => {
@@ -137,16 +153,105 @@ describe('OtherItemPlans', () => {
     expect(generated.emitted('state')!.at(-1)![0]).toMatchObject({ canSchedule: false, canSplit: true })
   })
 
-  it('zrušení rozepsaného kalendáře sekci zase schová', async () => {
+  it('zrušení rozepsaného kalendáře dialog zavře a nic neuloží', async () => {
     m.installments.mockResolvedValue([])
-    const wrapper = shallowMount(OtherItemPlans, { props: { item: item({ paid_amount: 0, remaining_amount: 3000 }) }, global: { stubs: { RouterLink: true } } })
+    const wrapper = shallowMount(OtherItemPlans, { props: { item: item({ paid_amount: 0, remaining_amount: 3000 }) }, global: { stubs } })
     await flushPromises()
     ;(wrapper.vm as unknown as { openInstallments: () => void }).openInstallments()
     await flushPromises()
-    expect(wrapper.find('[data-test="installments-card"]').exists()).toBe(true)
-    expect(wrapper.emitted('state')!.at(-1)![0]).toMatchObject({ canSchedule: true, canSplit: false })
+    expect(wrapper.find('[data-test="installments-form"]').exists()).toBe(true)
+    expect(wrapper.emitted('state')!.at(-1)![0]).toMatchObject({ canSchedule: true, canSplit: true, editing: true })
+    await wrapper.get('[data-test="installments-split"]').trigger('click')
+    expect(wrapper.findAll('[data-test="installment-draft-row"]')).toHaveLength(12)
     await wrapper.get('[data-test="installments-cancel"]').trigger('click')
+    expect(wrapper.find('[data-test="modal"]').exists()).toBe(false)
     expect(wrapper.find('[data-test="installments-card"]').exists()).toBe(false)
+    expect(m.setInstallments).not.toHaveBeenCalled()
+    expect(wrapper.emitted('state')!.at(-1)![0]).toMatchObject({ editing: false })
+  })
+
+  it('úprava uloženého kalendáře v dialogu kartu nezmění, dokud se neuloží', async () => {
+    m.installments.mockResolvedValue([
+      { id: 1, position: 1, due_on: '2099-02-01', amount: 1500, paid_amount: 0, remaining_amount: 1500, status: 'unpaid' },
+      { id: 2, position: 2, due_on: '2099-03-01', amount: 1500, paid_amount: 0, remaining_amount: 1500, status: 'unpaid' },
+    ])
+    const wrapper = shallowMount(OtherItemPlans, { props: { item: item({ paid_amount: 0, remaining_amount: 3000 }) }, global: { stubs } })
+    await flushPromises()
+    await wrapper.get('[data-test="installments-edit"]').trigger('click')
+    expect(wrapper.findAll('[data-test="installment-draft-row"]')).toHaveLength(2)
+    await wrapper.findAll('[data-test="installment-amount-input"]')[0]!.setValue(1000)
+    expect(wrapper.findAll('[data-test="installments-card"] [data-test="installment-amount"]')[0]!.text()).toBe('1500 Kč')
+    await wrapper.get('[data-test="installments-cancel"]').trigger('click')
+    expect(wrapper.findAll('[data-test="installment-amount"]')[0]!.text()).toBe('1500 Kč')
+    // Znovu otevřený dialog začíná z uloženého stavu, ne z neuložené úpravy.
+    await wrapper.get('[data-test="installments-edit"]').trigger('click')
+    expect((wrapper.findAll('[data-test="installment-amount-input"]')[0]!.element as HTMLInputElement).value).toBe('1500')
+  })
+
+  it('kalendář s úhradou má Upravit zamčené s důvodem', async () => {
+    const wrapper = shallowMount(OtherItemPlans, { props: { item: item() }, global: { stubs } })
+    await flushPromises()
+    const edit = wrapper.get('[data-test="installments-edit"]')
+    expect(edit.attributes('disabled')).toBeDefined()
+    expect(edit.attributes('title')).toBe('other_items.plans.paid_locked')
+    expect(edit.attributes('aria-describedby')).toBe('other-item-installments-locked')
+    expect(wrapper.get('[data-test="installments-locked"]').text()).toBe('other_items.plans.paid_locked')
+    await edit.trigger('click')
+    expect(wrapper.find('[data-test="modal"]').exists()).toBe(false)
+    // Stornovaná položka kalendář neupravuje vůbec; zámek „po přiřazení úhrady“ by tu lhal.
+    const reversed = shallowMount(OtherItemPlans, { props: { item: item({ status: 'reversed', paid_amount: 0, remaining_amount: 3000 }) }, global: { stubs } })
+    await flushPromises()
+    expect(reversed.find('[data-test="installments-card"]').exists()).toBe(true)
+    expect(reversed.find('[data-test="installments-edit"]').exists()).toBe(false)
+    expect(reversed.find('[data-test="installments-locked"]').exists()).toBe(false)
+    m.canWrite = false
+    const reader = shallowMount(OtherItemPlans, { props: { item: item() }, global: { stubs } })
+    await flushPromises()
+    expect(reader.find('[data-test="installments-edit"]').exists()).toBe(false)
+    expect(reader.find('[data-test="installments-locked"]').exists()).toBe(false)
+  })
+
+  it('úprava opakování je dialog z karty: pozastavení a zrušení tam, generování a automatika zůstávají v kartě', async () => {
+    m.installments.mockResolvedValue([])
+    const active = { id: 4, source_item_id: 9, frequency: 'monthly', anchor_on: '2099-01-01', due_days: 14, ends_on: null,
+      next_index: 1, status: 'active', auto_post: false, template: {}, next_on: '2099-02-01', occurrences: [] }
+    m.schedules.mockResolvedValue([{ id: 4, source_item_id: 9 }])
+    m.schedule.mockResolvedValue(active)
+    m.setStatus.mockResolvedValue({ ...active, status: 'paused', next_on: null })
+    m.deleteSchedule.mockResolvedValue(undefined)
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const wrapper = shallowMount(OtherItemPlans, { props: { item: item({ paid_amount: 0, remaining_amount: 3000 }) }, global: { stubs } })
+    await flushPromises()
+    const card = wrapper.get('[data-test="schedule-card"]')
+    expect(card.find('[data-test="schedule-generate"]').exists()).toBe(true)
+    expect(card.find('[data-test="schedule-auto-post-toggle"]').exists()).toBe(true)
+    expect(card.find('[data-test="schedule-toggle"]').exists()).toBe(false)
+    expect(card.find('[data-test="schedule-delete"]').exists()).toBe(false)
+    await wrapper.get('[data-test="schedule-edit"]').trigger('click')
+    expect(wrapper.find('[data-test="schedule-edit-form"]').exists()).toBe(true)
+    expect(wrapper.emitted('state')!.at(-1)![0]).toMatchObject({ editing: true })
+    await wrapper.get('[data-test="schedule-toggle"]').trigger('click')
+    await flushPromises()
+    expect(m.setStatus).toHaveBeenCalledWith(4, 'paused')
+    expect(wrapper.get('[data-test="schedule-status"]').text()).toBe('other_items.plans.paused')
+    await wrapper.get('[data-test="schedule-delete"]').trigger('click')
+    await flushPromises()
+    expect(m.deleteSchedule).toHaveBeenCalledWith(4)
+    expect(wrapper.find('[data-test="modal"]').exists()).toBe(false)
+    expect(wrapper.find('[data-test="schedule-card"]').exists()).toBe(false)
+    expect(wrapper.emitted('state')!.at(-1)![0]).toMatchObject({ canSchedule: true, editing: false })
+  })
+
+  it('chyba s kódem other_items.error.* se ukáže přeloženě, jinak hláška serveru', async () => {
+    m.translated = ['other_items.error.invalid_source_item']
+    m.schedules.mockRejectedValueOnce({ response: { data: { error: { code: 'other_items.error.invalid_source_item', message: 'Česká hláška.' } } } })
+    shallowMount(OtherItemPlans, { props: { item: item() }, global: { stubs } })
+    await flushPromises()
+    expect(toastError).toHaveBeenLastCalledWith('other_items.error.invalid_source_item')
+    m.schedules.mockRejectedValueOnce({ response: { data: { error: { code: 'other_items.error.unknown', message: 'Česká hláška.' } } } })
+    shallowMount(OtherItemPlans, { props: { item: item({ id: 10 }) }, global: { stubs } })
+    await flushPromises()
+    expect(toastError).toHaveBeenLastCalledWith('Česká hláška.')
   })
 
   it('zdroj opakování ukáže přehled: další termín, kdo založil a vytvořené položky s čísly', async () => {
@@ -210,13 +315,15 @@ describe('OtherItemPlans', () => {
     ])
     m.setInstallments.mockResolvedValue([])
     vi.spyOn(window, 'confirm').mockReturnValue(true)
-    const wrapper = shallowMount(OtherItemPlans, { props: { item: item({ paid_amount: 0, remaining_amount: 3000 }) }, global: { stubs: { RouterLink: true } } })
+    const wrapper = shallowMount(OtherItemPlans, { props: { item: item({ paid_amount: 0, remaining_amount: 3000 }) }, global: { stubs } })
     await flushPromises()
     expect(wrapper.find('[data-test="installments-card"]').exists()).toBe(true)
     expect(wrapper.emitted('state')!.at(-1)![0]).toMatchObject({ canSplit: false })
-    await wrapper.findAll('button').find(button => button.text().includes('other_items.plans.clear_installments'))!.trigger('click')
+    await wrapper.get('[data-test="installments-edit"]').trigger('click')
+    await wrapper.get('[data-test="installments-clear"]').trigger('click')
     await flushPromises()
     expect(wrapper.find('[data-test="installments-card"]').exists()).toBe(false)
+    expect(wrapper.find('[data-test="modal"]').exists()).toBe(false)
     expect(wrapper.emitted('state')!.at(-1)![0]).toMatchObject({ canSplit: true })
   })
 
@@ -228,14 +335,17 @@ describe('OtherItemPlans', () => {
     ]
     m.setInstallments.mockResolvedValueOnce(saved).mockResolvedValueOnce([])
     vi.spyOn(window, 'confirm').mockReturnValue(true)
-    const wrapper = shallowMount(OtherItemPlans, { props: { item: item({ paid_amount: 0, remaining_amount: 3000 }) }, global: { stubs: { RouterLink: true } } })
+    const wrapper = shallowMount(OtherItemPlans, { props: { item: item({ paid_amount: 0, remaining_amount: 3000 }) }, global: { stubs } })
     await flushPromises()
-    await (wrapper.vm as unknown as { openInstallments: () => Promise<void> }).openInstallments()
+    ;(wrapper.vm as unknown as { openInstallments: () => void }).openInstallments()
     await flushPromises()
-    await wrapper.findAll('button').find(button => button.text().includes('other_items.plans.split'))!.trigger('click')
-    await wrapper.findAll('button').find(button => button.text().includes('common.save'))!.trigger('click')
+    await wrapper.get('[data-test="installments-split"]').trigger('click')
+    await wrapper.get('[data-test="installments-save"]').trigger('click')
     await flushPromises()
-    await wrapper.findAll('button').find(button => button.text().includes('other_items.plans.clear_installments'))!.trigger('click')
+    expect(wrapper.find('[data-test="modal"]').exists()).toBe(false)
+    expect(wrapper.findAll('[data-test="installments-card"] [data-test="installment-row"]')).toHaveLength(2)
+    await wrapper.get('[data-test="installments-edit"]').trigger('click')
+    await wrapper.get('[data-test="installments-clear"]').trigger('click')
     await flushPromises()
     expect(wrapper.find('[data-test="installments-card"]').exists()).toBe(false)
   })

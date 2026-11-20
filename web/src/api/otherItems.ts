@@ -69,13 +69,15 @@ export interface OtherItemEffectivePosting {
 export type OtherItemPostingOverridesInput = Partial<Record<OtherItemOverrideEvent, OtherItemPostingRuleInput | null>>
 
 export interface OtherItemOccurrence {
-  schedule_id: number
+  /** Rozvrh; null po zrušení opakování (původ položky zůstává). */
+  schedule_id: number | null
   occurrence_index: number
-  source_item_id: number
+  /** Zdroj; null, když byl zdroj smazán. */
+  source_item_id: number | null
   /** Číslo zdroje; null, dokud ho nemá (koncept). */
   source_document_no: string | null
-  source_title: string
-  schedule_created_at: string
+  source_title: string | null
+  schedule_created_at: string | null
   created_by_name: string | null
 }
 

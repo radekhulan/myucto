@@ -159,6 +159,15 @@
     "dismiss": "Dismiss"
   },
   "other_items": {
+    "edit_locked": {
+      "posted": "A posted item cannot be edited. Wrong accounts are fixed by reposting, other details by a reversal and a new item.",
+      "confirmed": "A confirmed item cannot be edited. Details are fixed by cancelling it and creating a new item.",
+      "reversed": "A reversed item cannot be edited.",
+      "cancelled": "A cancelled item cannot be edited."
+    },
+    "error": {
+      "invalid_source_item": "Invalid item id."
+    },
     "documents_settings": {
       "title": "Documents folder",
       "hint": "Files uploaded to an other receivable or payable are stored in this folder in Documents. {'{'}YYYY{'}'} and {'{'}MM{'}'} are replaced with the year and month of the issue date.",
@@ -253,7 +262,8 @@
       "partial": "Partly paid",
       "forecast": "Estimate",
       "open": "Open",
-      "overdue": "Overdue"
+      "overdue": "Overdue",
+      "overpaid": "Overpaid"
     },
     "source_label": "Source",
     "search": "Search title, counterparty, number or reference",
@@ -393,8 +403,6 @@
       "installment_due": "Near due date",
       "remaining_amount": "Full balance"
     },
-    "documents": "documents",
-    "forecast": "Forecast",
     "result_impact_title": "Other items in the profit forecast",
     "result_impact_hint": "Current year total by revenue or expense counter account. Includes posted items and labeled drafts; balance sheet items are excluded.",
     "result_revenue": "Revenue from other items",
@@ -430,9 +438,11 @@
     "confirmed": "Item confirmed.",
     "reversed": "Item reversed.",
     "cancelled": "Item cancelled.",
-    "previous": "Previous",
-    "next": "Next",
     "plans": {
+      "edit_schedule": "Edit recurrence",
+      "edit_installments": "Edit installments",
+      "schedule_fixed_hint": "The frequency and end of a recurrence cannot be changed. For different settings, cancel the recurrence and create a new one; items already created stay.",
+      "group": "Plans",
       "schedule_title": "Recurring item",
       "schedule_hint": "A daily task creates items up to 90 days ahead; you can also create them manually. Documents linked to the source item are linked to each item.",
       "auto_post": "Automatically post items when they arise",
@@ -528,7 +538,10 @@
       "receivable": "Receivables remaining",
       "payable": "Payables remaining"
     },
-    "totals_hint": "Remaining for manually entered items in the whole selection (all pages, within the chosen due date range). Only confirmed and posted items count, not drafts, reversals, overpayments or payroll and tax items.",
+    "window_hint": "Without a date, items due from one year back to one year ahead are shown; search finds manually entered items outside this range too.",
+    "window_hint_open": "Without a date, unpaid manually entered items of any age and payroll and tax items from one year back are shown, all due at most one year ahead; search finds manually entered items outside this range too.",
+    "totals_scope": "(drafts excluded)",
+    "totals_hint": "Remaining principal balance of manually entered items in the whole selection (all pages, within the chosen due date range); loan instalment interest and fees are not included. Only confirmed and posted items count, not drafts, reversals, overpayments or payroll and tax items.",
     "empty_title": "No other receivables or payables yet",
     "empty_hint": "Record rent, deposits, loans, insurance claims and other receivables or payables outside invoices here.",
     "load_failed_stale": "The list could not be refreshed; the data shown may be out of date.",
@@ -552,7 +565,8 @@
       "label": "Created by recurrence",
       "source": "from source item",
       "created_by": "schedule created by {name} on {date}",
-      "index": "occurrence {index}"
+      "index": "occurrence {index}",
+      "cancelled": "recurrence was cancelled"
     }
   },
   "internal_documents": {

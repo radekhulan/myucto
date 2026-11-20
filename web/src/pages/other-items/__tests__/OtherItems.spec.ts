@@ -183,13 +183,23 @@ describe('OtherItems', () => {
       item('posted', { id: 'manual:1', remaining_amount: 0, paid_amount: 1200 }),
       item('posted', { id: 'manual:2', remaining_amount: 200, paid_amount: 1000 }),
       item('draft', { id: 'manual:3' }),
-    ], sources: [], total: 3, per_page: 50 })
+      item('posted', { id: 'manual:4', remaining_amount: -50, paid_amount: 1250 }),
+      // Jistina vyrovnaná, úrok splátky zbývá: stav podle zbývající platby, stejně jako detail.
+      item('posted', { id: 'manual:5', remaining_amount: 0, paid_amount: 1200, remaining_payment: 40, has_split_installments: true }),
+    ], sources: [], total: 5, per_page: 50 })
     const wrapper = mountList()
     await flushPromises()
 
     const badges = wrapper.findAll('[data-test="status-badge"]')
-    expect(badges.map(badge => badge.text())).toEqual(['S:paid', 'S:partial', 'S:draft'])
-    expect(badges.map(badge => badge.classes().join(' '))).toEqual(['rounded px-2 py-0.5 text-xs badge badge-paid', 'rounded px-2 py-0.5 text-xs badge badge-partially_paid', 'rounded px-2 py-0.5 text-xs badge badge-draft'])
+    expect(badges.map(badge => badge.text())).toEqual(['S:paid', 'S:partial', 'S:draft', 'S:overpaid', 'S:partial'])
+    expect(badges.map(badge => badge.classes().join(' '))).toEqual(['rounded px-2 py-0.5 text-xs badge badge-paid',
+      'rounded px-2 py-0.5 text-xs badge badge-partially_paid', 'rounded px-2 py-0.5 text-xs badge badge-draft',
+      'rounded px-2 py-0.5 text-xs badge badge-overpaid', 'rounded px-2 py-0.5 text-xs badge badge-partially_paid'])
+    // Sloupec zbývá ukazuje totéž, podle čeho se řídí stav: zbývající platbu včetně úroku splátek.
+    m.prefs.value = { shown: ['remaining_amount'] }
+    const withColumn = mountList()
+    await flushPromises()
+    expect(withColumn.findAll('[data-test="remaining-cell"]').map(cell => cell.text())[4]).toBe('40 CZK')
   })
 
   it('zvýrazní jen otevřenou položku po splatnosti a počet dokumentů skloňuje přes překlad', async () => {
@@ -223,6 +233,62 @@ describe('OtherItems', () => {
     expect(totals).toContain('200 EUR')
     expect(totals).toContain('other_items.totals_by_side.payable:')
     expect(totals).toContain('700 CZK')
+    // Výchozí okno splatnosti je vidět jako věta u filtrů; se zadaným datem nebo hledáním zmizí.
+    expect(wrapper.get('[data-test="due-window-hint"]').text()).toBe('other_items.window_hint_open')
+    const all = mountList({ status: 'all' })
+    await flushPromises()
+    expect(all.get('[data-test="due-window-hint"]').text()).toBe('other_items.window_hint')
+    for (const query of [{ from: '2099-01-01' }, { to: '2099-12-31' }, { q: 'nájem' }] as Record<string, string>[]) {
+      const narrowed = mountList(query)
+      await flushPromises()
+      expect(narrowed.find('[data-test="due-window-hint"]').exists()).toBe(false)
+    }
+    // Že koncepty nejsou v součtu, říká popisek přímo u něj, ne jen tooltip.
+    expect(wrapper.get('[data-test="other-items-totals-scope"]').text()).toBe('other_items.totals_scope')
+  })
+
+  it('neplatné datum, obrácené rozmezí a nulový druh z adresy vynechá, místo aby server vrátil 422', async () => {
+    m.list.mockResolvedValue({ items: [], sources: [], total: 0, per_page: 50 })
+    mountList({ from: '2099-02-31', to: '2099-13-01', kind: 'receivable|custom:0' })
+    await flushPromises()
+    m.list.mockClear()
+    mountList({ kind: 'receivable|custom:99999999999999999999' })
+    await flushPromises()
+    const params = m.list.mock.calls.at(-1)![0]
+    expect(params).not.toHaveProperty('from')
+    expect(params).not.toHaveProperty('to')
+    expect(params).not.toHaveProperty('kind_id')
+    expect(params).not.toHaveProperty('kind')
+    m.list.mockClear()
+    mountList({ from: '2099-03-01', to: '2099-01-01' })
+    await flushPromises()
+    expect(m.list.mock.calls.at(-1)![0]).not.toHaveProperty('from')
+    expect(m.list.mock.calls.at(-1)![0]).not.toHaveProperty('to')
+    m.list.mockClear()
+    mountList({ from: '2099-02-28', to: '2099-03-01' })
+    await flushPromises()
+    expect(m.list).toHaveBeenLastCalledWith(expect.objectContaining({ from: '2099-02-28', to: '2099-03-01' }))
+  })
+
+  it('Zrušit vše s vyplněným hledáním načte seznam jen jednou', async () => {
+    vi.useFakeTimers()
+    try {
+      m.list.mockResolvedValue({ items: [], sources: [], total: 0, per_page: 50 })
+      const wrapper = mountList({ side: 'receivable', q: 'nájem', from: '2099-01-01' })
+      await flushPromises()
+      m.list.mockClear()
+      wrapper.findComponent({ name: 'FilterBar' }).vm.$emit('clear-all')
+      await flushPromises()
+      vi.advanceTimersByTime(1000)
+      await flushPromises()
+      expect(m.list).toHaveBeenCalledTimes(1)
+      const params = m.list.mock.calls[0][0]
+      expect(params).not.toHaveProperty('q')
+      expect(params).not.toHaveProperty('side')
+      expect(m.replace).toHaveBeenLastCalledWith({ query: {} })
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('načte filtry z URL a řazení z předvoleb, změnu filtru zapíše do URL bez řazení', async () => {

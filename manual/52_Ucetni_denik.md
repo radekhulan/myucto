@@ -323,7 +323,7 @@ Agenda slouží pro nároky a dluhy, které nepatří do faktur, mezd ani daní:
 3. V podvojném účetnictví zvolte v části **Účtování** účet pohledávky nebo závazku a protiúčet. Chybí-li volba, použije se 315 nebo 325.
 4. Klikněte na **Zaúčtovat** (v daňové evidenci **Potvrdit**) a akci potvrďte; v podvojném účetnictví dialog ukáže, na které účty se položka zaúčtuje. Položka dostane číslo z řady OP (pohledávky) nebo OZ (závazky), u druhu s vlastní řadou z řady druhu, a vznikne zápis. V daňové evidenci se položka potvrdí a žádný zápis nevzniká.
 5. Po uhrazení klikněte na **Hledat volnou platbu**, vyberte bankovní pohyb nebo pokladní doklad a přiřaďte úhradu.
-6. Opakuje-li se položka, zvolte v liště detailu **Nastavit opakování** a četnost. Rozkládá-li se úhrada, zvolte **Rozložit na splátky**.
+6. Opakuje-li se položka, zvolte v nabídce **…** detailu pod nadpisem **Plány** **Nastavit opakování** a četnost. Rozkládá-li se úhrada, zvolte tamtéž **Rozložit na splátky**.
 
 **Jak poznáte, že je hotovo:** Položka je ve stavu uhrazená, nebo jí zbývá uhradit nula, a z filtru **Otevřené** zmizí.
 
@@ -1570,8 +1570,10 @@ nezadává; patří do faktur, aby jeho řádky vstoupily do knihy DPH a výkaz�
 Seznam ukazuje ruční položky a pod nimi položky z jiných modulů. U ruční položky
 vidíte číslo dokladu (koncept ho ještě nemá), název, druh, protistranu,
 splatnost, částku, **zbývá uhradit**, stav a ve sloupci **Zápis** u zaúčtované
-položky ikonu **Zaúčtováno**, která otevře její zápis v deníku. Stav uhrazené nebo částečně
-uhrazené položky má přednost před stavem Zaúčtováno. Otevřená položka po splatnosti
+položky ikonu **Zaúčtováno**, která otevře její zápis v deníku. Stav uhrazené, částečně
+uhrazené nebo přeplacené položky (štítek **Přeplaceno** jako u faktur) má přednost před stavem
+Zaúčtováno. Stav se řídí tím, kolik zbývá zaplatit, u úvěru s rozdělenými splátkami tedy i úrokem
+a poplatkem, takže seznam i detail ukazují u položky stejný stav. Otevřená položka po splatnosti
 má zvýrazněný řádek i datum splatnosti. Pod nadpisem je počet ručně zadaných
 položek ve výběru (při filtru zdroje mzdy nebo daně se neukazuje).
 
@@ -1580,8 +1582,11 @@ Sloupce se nastavují stejně jako u faktur: tlačítko **Sloupce** je zapíná 
 dokumenty počet dokumentů a poznámka), přetažením záhlaví změníte jejich pořadí
 a přepínač hustoty zmenší řádky. Sloupec **Zápis** je jen v podvojném účetnictví
 pro role, které smí číst účetnictví. Účty zaúčtování ukazuje detail položky.
-Na telefonu je seznam v kartách s pevným obsahem (položka, částka, číslo, druh, stav,
-protistrana a splatnost), proto se tam sloupce ani hustota nenastavují. Podle čísla, položky, protistrany, splatnosti, částky a zbývající částky
+Na telefonu je seznam v kartách s pevným obsahem (název, částka, číslo dokladu, u konceptu
+místo něj **Rozpracováno**, druh, odznak **Zaúčtováno**, stav, protistrana a splatnost;
+u částečně uhrazené položky navíc uhrazeno a zbývá), proto se tam sloupce ani hustota
+nenastavují. Sloupec i řádek **zbývá** ukazují totéž, podle čeho se řídí stav: zbývající
+platbu včetně úroku a poplatku splátek. Podle čísla, položky, protistrany, splatnosti, částky a zbývající částky
 jde seznam řadit; řazení si seznam pamatuje a tlačítko **×** v záhlaví vrátí výchozí
 řazení podle splatnosti.
 
@@ -1593,28 +1598,39 @@ v detailu vrátí seznam se stejnými filtry a šipkami (nebo klávesami `[` a `
 přejdete na předchozí či další položku téhož výběru.
 
 Detail položky je uspořádaný jako detail přijaté faktury. V záhlaví je číslo dokladu
-se stavem, štítkem **Po splatnosti**, směrem s druhem a u zaúčtované položky odkazem
-na její zápis; akce jsou vpravo. Pod záhlavím je název položky a protistrana (s odkazy
-na kartu klienta, je-li vybraná z adresáře). Tři karty ukazují data (vznik, v podvojném
-účetnictví i datum zaúčtování, splatnost), **Stav úhrady** a údaje položky (variabilní
-symbol, účet protistrany, u cizí měny kurz, navázaná faktura). V podvojném účetnictví
-následují **Zaúčtování** (pro role, které smí číst účetnictví) a dimenze, jsou-li zapnuté,
-pak **Účtování**, **Přiřazené úhrady**, opakování a splátky, poznámka a nakonec připojené
-dokumenty. Na telefonu je nahoře souhrn (zbývá uhradit, stav úhrady, splatnost a datum
+se stavem, štítkem **Po splatnosti**, směrem s druhem a u zaúčtované položky odznakem
+**Zaúčtováno** s odkazem na její zápis (jen pro role, které smí číst účetnictví); akce jsou
+vpravo. **Upravit** otevře editor konceptu; u potvrzené, zaúčtované, stornované či zrušené
+položky je zamčené v nabídce **…** a řekne proč, stejně jako zamčené **Stornovat**. Plány položky jsou v nabídce **…**
+pod nadpisem **Plány** ([§ 52.14.14.7](#5214147-opakovani-a-splatkovy-kalendar)). Pod
+záhlavím je název položky a protistrana (s odkazy na kartu klienta, je-li vybraná
+z adresáře). Tři karty ukazují data (vznik, v podvojném účetnictví i datum zaúčtování,
+splatnost), **Stav úhrady** a údaje položky (variabilní symbol, účet protistrany, u cizí
+měny kurz, navázaná faktura). Pak následuje **Zaúčtování** (jen v podvojném účetnictví
+a pro role, které smí číst účetnictví), dimenze, jsou-li zapnuté (v podvojném účetnictví
+i v daňové evidenci), **Účtování** (jen v podvojném účetnictví), **Přiřazené úhrady**,
+karty opakování a splátek, poznámka a nakonec připojené dokumenty. Na telefonu je nahoře souhrn (zbývá uhradit, stav úhrady, splatnost a datum
 vzniku); karty, zaúčtování, dimenze a účtování rozbalí tlačítko **Podrobnosti**.
 
 Nad seznamem je součet **zbývá uhradit** za celý výběr (všechny stránky, ne jen
 zobrazené řádky), zvlášť pro pohledávky a závazky a zvlášť pro každou měnu. Počítá
 jen ručně zadané potvrzené a zaúčtované položky ve zvoleném rozmezí splatnosti;
-koncepty, storna ani položky z mezd a daní ne. Přeplatek jedné položky nesnižuje
-dluh ostatních, u úvěru s rozdělenými splátkami se počítá zbývající jistina.
+koncepty (stav **Rozpracováno**), storna ani položky z mezd a daní ne; že rozpracované položky
+v součtu nejsou, říká popisek **(bez rozpracovaných)** přímo u něj. Přeplatek jedné položky
+nesnižuje dluh ostatních. Součet je saldo, tedy zbývající jistina: úrok a poplatek splátek
+úvěru do něj nepatří, i když se podle nich řídí stav a výběr **Otevřené**.
 
 Filtry jsou vidět v liště nad seznamem (na telefonu za tlačítkem **Filtry**)
 a zvolené se ukazují jako štítky, které jde jednotlivě zrušit. Filtry se ukládají
 do adresy stránky, takže je zachová obnovení stránky, odkaz i návrat z detailu;
-kliknutí na položku v menu je vrátí na výchozí. Často používaný výběr uložíte
-v nabídce **Uložené filtry** jako pohled; uložené pohledy jsou nad seznamem
-jako záložky a výchozí pohled se použije při otevření seznamu bez filtrů. Když se
+kliknutí na položku v menu na otevřeném seznamu je vrátí na základní nastavení (stav
+**Otevřené**, bez dalších filtrů). Často používaný výběr uložíte v nabídce **Uložené filtry**
+jako pohled; uložené pohledy jsou nad seznamem jako záložky. Pohled označený jako výchozí
+se použije, když seznam otevřete bez filtrů odjinud (z menu na jiné stránce, z detailu
+přes menu), stejně jako u faktur. Řazení se do pohledu ani do adresy neukládá, pamatují si ho
+předvolby tabulky stejně jako u přijatých faktur. **Zrušit vše** vrátí základní nastavení
+jedním načtením i s vyplněným hledáním. Neplatné datum nebo obrácené rozmezí splatnosti
+v ručně upravené adrese se vynechá. Když se
 seznam nepodaří obnovit, zůstanou zobrazená poslední načtená data s upozorněním
 a tlačítkem **Zkusit znovu**.
 
@@ -1625,12 +1641,20 @@ Filtry:
   směrem jen jeho druhy. Výběr druhu filtruje i jeho stranu. Nabízejí se i skryté druhy,
   aby šly dohledat jejich starší doklady.
 - **Stav**: výchozí **Otevřené** ukazuje koncepty, potvrzené a zaúčtované
-  položky, u kterých ještě zbývá něco uhradit; **Vše** ukáže i uhrazené,
+  položky, u kterých ještě zbývá něco uhradit (u úvěru s rozdělenými splátkami i úrok
+  nebo poplatek splátky); **Vše** ukáže i uhrazené,
   stornované a zrušené.
 - **Zdroj**: ručně zadané, mzdy, nebo daně.
 - **Hledat**: název, protistrana, číslo dokladu a variabilní symbol.
-- **Splatnost od / do**: bez zadaného rozmezí se ukáží položky se splatností
-  rok zpět až rok dopředu.
+- **Splatnost od / do**: bez zadaného rozmezí se ukáží ručně zadané položky
+  i předpisy ze mezd a daní se splatností rok zpět až rok dopředu; ve stejném
+  okně se počítají i součty. Výjimkou je stav **Otevřené**: ruční položky v něm
+  dolní mez nemají, takže neuhrazený dluh zůstane vidět i víc než rok po splatnosti
+  (horní mez rok dopředu platí). Vyplněné **Hledat** bez data okno u ručních položek
+  nepoužije, takže najde i starý doklad. Předpisy z mezd a daní mají okno vždy. Výchozí
+  okno připomíná věta pod filtry. Starší nebo vzdálenější
+  položky najdete zadáním data; vyplněné jen **od** nebo jen **do** okno na druhé straně
+  neomezí.
 
 Tlačítko **Nová ostatní položka** založí koncept se směrem podle aktuálního filtru.
 Tlačítko **Druhy** otevře nastavení druhů: skrytí a vlastní číselné řady ([§ 52.14.14.11](#52141411-druhy-a-ciselne-rady)).
@@ -1766,7 +1790,8 @@ položky bez přiřazených úhrad; úhrady nejdřív odpojte. Zadáte důvod a 
 přejde do stavu Stornováno. Storno zároveň pozastaví opakování položky.
 
 **Přeúčtovat** (jen podvojné účetnictví, zaúčtovaná položka bez úhrad; tlačítko je
-u živého zápisu v sekci **Zaúčtování**) opraví chybné účty. U položky s úhradou je
+u živého zápisu v sekci **Zaúčtování**, pro role bez práva číst účetnictví v části
+**Účtování**) opraví chybné účty. U položky s úhradou je
 tlačítko neaktivní a po najetí myší řekne proč. Dialog ukáže dosavadní kontaci; zadáte nový účet pohledávky nebo
 závazku, protiúčet nebo rozdělenou kontaci, datum a důvod. Aspoň jeden účet se
 musí změnit. Původní zápis se stornuje a vznikne nový se **stejným číslem
@@ -1796,47 +1821,70 @@ položky i do auditu deníku.
 **Poznámku** vystavené položky (potvrzené, zaúčtované i stornované) doplníte v detailu
 odkazem **Upravit poznámku** u pole Poznámka. Poznámka se nepromítá do zaúčtování ani
 saldokonta, proto ji jde změnit i po uzávěrce. Změna se zapíše do historie položky
-s hodnotou před a po. Ostatní údaje zůstávají zamčené: název tvoří popis zápisu
-v deníku, účty mění **Přeúčtovat**, částky a data storno. Účet protistrany má vlastní
+s hodnotou před a po. Ostatní údaje zůstávají zamčené, proto je **Upravit** u vystavené
+položky neaktivní: název tvoří popis zápisu v deníku, účty mění **Přeúčtovat**, částky
+a data storno. Účet protistrany má vlastní
 úpravu u svého pole.
 
 #### 52.14.14.7 Opakování a splátkový kalendář
 
-Akce **Nastavit opakování** v liště detailu otevře dialog, ve kterém nastavíte měsíční,
-čtvrtletní nebo roční opakování, případně datum konce a automatické účtování vzniklých
-položek. Akce se nabízí jen uživateli s právem zápisu u konceptu, potvrzené nebo zaúčtované
-položky, která ještě nemá rozvrh a sama nevznikla opakováním. Když se opakování a splátky
-nepodaří načíst, detail to napíše a nabídne **Zkusit znovu**. Každá kopie dostane datum vzniku posunuté
+Plány položky jsou v nabídce **…** detailu pod nadpisem **Plány**: **Nastavit opakování**
+a **Rozložit na splátky**. Obě akce stojí vždy pohromadě, bez ohledu na šířku okna; každá
+se nabízí jen tehdy, když jde plán založit. Oba plány se zakládají i upravují ve stejném
+dialogu, detail ukazuje jen jejich přehled v kartě. Existující plán upravíte tlačítkem
+**Upravit** v záhlaví jeho karty. Když se opakování a splátky nepodaří načíst, detail to
+napíše a nabídne **Zkusit znovu**.
+
+**Nastavit opakování** otevře dialog, ve kterém nastavíte měsíční, čtvrtletní nebo roční
+opakování, případně datum konce a automatické účtování vzniklých položek. Akce se nabízí
+jen uživateli s právem zápisu u konceptu, potvrzené nebo zaúčtované položky, která ještě
+nemá rozvrh a sama nevznikla opakováním. Každá kopie dostane datum vzniku posunuté
 o dané období (u kratšího měsíce na jeho poslední den) a stejný odstup splatnosti
 jako zdrojová položka. Přebírá směr, druh, název, protistranu, částku,
 variabilní symbol, účty včetně rozdělené kontace, poznámku i připojené dokumenty.
 
 Denní úloha připravuje koncepty až 90 dní dopředu, aby se ukázaly v predikci.
-Ručně je vytvoříte polem **Vytvořit do** a tlačítkem **Vytvořit položky** (nejvýš 120 najednou).
-Bez volby **Automaticky účtovat vzniklé položky** se vzniklé koncepty nezaúčtují samy.
+Ručně je vytvoříte v kartě polem **Vytvořit do** a tlačítkem **Vytvořit položky** (nejvýš
+120 najednou). Bez volby **Automaticky účtovat vzniklé položky**, kterou přepnete také
+přímo v kartě, se vzniklé koncepty nezaúčtují samy.
 
 Detail zdrojové položky ukazuje kartu **Opakování položky**: četnost, stav (aktivní nebo
 pozastavené), datum příští položky, konec opakování, automatické účtování, kdo a kdy rozvrh
-založil a seznam vytvořených položek s číslem, datem a stavem. Opakování lze **Pozastavit**
-a **Obnovit**; po stornu zdrojové položky se pozastaví natrvalo a už vytvořené
-koncepty zůstávají samostatnými položkami k posouzení.
+založil a seznam vytvořených položek s číslem, datem a stavem. **Upravit** v záhlaví karty
+otevře dialog **Upravit opakování**, ve kterém opakování **Pozastavíte**, **Obnovíte** nebo
+**Zrušíte opakování**. Četnost ani konec existujícího opakování změnit nejde; pro jiné
+nastavení opakování zrušte a založte nové. Po stornu zdrojové položky se opakování pozastaví
+natrvalo a už vytvořené koncepty zůstávají samostatnými položkami k posouzení.
+
+**Zrušit opakování** odstraní rozvrh, nové položky už nevznikají. Už vytvořené položky
+zůstávají samostatnými doklady a svůj původ si drží: dál mají štítek **Vytvořeno
+opakováním** s odkazem na zdrojovou položku a poznámkou, že opakování bylo zrušeno,
+a nové opakování se u nich nenabízí. Zdrojová položka se uvolní, jde ji znovu naplánovat
+a koncept i smazat; vytvořená položka pak štítek zachová, jen bez odkazu na zdroj.
+Nové opakování téže zdrojové položky naváže na položky zrušeného opakování: první termín
+je až po poslední z nich, už vytvořené termíny nevzniknou podruhé.
 
 Položka, kterou vytvořilo opakování, má pod záhlavím štítek **Vytvořeno opakováním**
 s pořadím výskytu, odkazem na zdrojovou položku a s tím, kdo a kdy rozvrh založil.
 Nové opakování se u ní nenabízí.
 
-Akce **Rozložit na splátky** v liště detailu otevře kartu **Splátkový kalendář**; bez
-splátek se karta neukazuje. **Splátkový kalendář** rozloží jednu pohledávku nebo závazek na 2 až 120 splátek
-s rostoucími daty (ne dřívějšími než datum vzniku). Součet splátek musí odpovídat
-částce položky. Kalendář nevytváří žádné účetní zápisy, jen rozloží očekávané
-platby v cash-flow; úhrady se započítávají od nejstarší splátky. Splátky úvěru
+**Rozložit na splátky** otevře dialog **Rozložit na splátky** (u uloženého kalendáře **Upravit
+splátky**), který rozloží jednu pohledávku
+nebo závazek na 2 až 120 splátek s rostoucími daty (ne dřívějšími než datum vzniku). Součet
+splátek musí odpovídat částce položky. Kalendář nevytváří žádné účetní zápisy, jen rozloží
+očekávané platby v cash-flow; úhrady se započítávají od nejstarší splátky. Splátky úvěru
 nebo leasingu lze rozdělit na jistinu, úrok a poplatek a nechat si je spočítat
-(viz [§ 52.14.14.13](#52141413-uvery-a-leasing-jistina-urok-a-poplatek)). Po přiřazení
-první úhrady už kalendář měnit nejde, ani když úhrada pokryla jen úrok; detail ho pak
-ukáže jako tabulku splátek se stavem každé z nich. Koncept se splátkovým kalendářem lze dál
-upravovat, dokud částka odpovídá součtu splátek a datum vzniku není pozdější než
-první splátka; před změnou částky kalendář zrušte tlačítkem **Zrušit kalendář**.
-Neuložený rozepsaný kalendář zavře tlačítko **Zrušit**.
+(viz [§ 52.14.14.13](#52141413-uvery-a-leasing-jistina-urok-a-poplatek)). Po uložení se
+dialog zavře a karta **Splátkový kalendář** ukáže tabulku splátek se stavem každé z nich
+a součtem; bez uložených splátek se karta neukazuje. Uložený kalendář změníte tlačítkem
+**Upravit** v záhlaví karty, v dialogu ho také zrušíte tlačítkem **Zrušit kalendář**.
+Neuložené úpravy zahodí tlačítko **Zrušit**; karta se změní až uložením. Po přiřazení
+první úhrady už kalendář měnit nejde, ani když úhrada pokryla jen úrok: **Upravit** je pak
+zamčené a karta řekne proč. U stornované či zrušené položky se kalendář už jen zobrazuje. Koncept se splátkovým kalendářem lze dál upravovat, dokud částka
+odpovídá součtu splátek a datum vzniku není pozdější než první splátka; před změnou částky
+kalendář zrušte. Úvěr s rozdělenými splátkami, jehož jistinu převod z jiného programu
+označil za uhrazenou mimo aplikaci, ukazuje dál zbývající plánovaný úrok a poplatek splátek:
+zůstává ve stavu **Částečně uhrazeno** a ve výběru **Otevřené**, dokud se úrok neuhradí.
 
 #### 52.14.14.8 Dokumenty a vazba na deník
 
@@ -1844,10 +1892,6 @@ Panel **Dokumenty** v detailu připojí smlouvy, skeny a další podklady ze skl
 dokumentů. Nově nahraný sken se uloží do složky **Ostatní pohledávky a závazky /
 rok / měsíc** podle data vzniku. Originál zůstává ve skladu a stejná smlouva
 může být podkladem více položek či období.
-
-Záhlaví detailu nese číslo dokladu, stav položky, u otevřené položky po
-splatnosti štítek **Po splatnosti**, směr s druhem a u zaúčtované odznak **Zaúčtováno**;
-název položky je pod záhlavím.
 
 U zaúčtované položky ukazuje sbalená sekce **Zaúčtování** zápis v deníku stejně jako
 detail faktury: řádky s účty a jejich názvy, po stornu nebo přeúčtování i protizápis,
@@ -2050,7 +2094,7 @@ Půjčka s částkou 100 000 Kč, například s účtem položky 461 (dlouhodob�
 a poplatky do předpisu nepatří. Poskytnutou půjčku vedete stejně jako pohledávku
 (například MD 378 / D 261).
 
-**Rozdělení splátek.** Akcí **Rozložit na splátky** otevřete **Splátkový kalendář** a zaškrtněte **Rozdělit splátky
+**Rozdělení splátek.** Akcí **Rozložit na splátky** (u uloženého kalendáře **Upravit** v jeho kartě) otevřete dialog splátek a zaškrtněte **Rozdělit splátky
 na jistinu, úrok a poplatek**. Každá splátka pak má jistinu, úrok a poplatek a její
 částka je jejich součet. Součet jistiny všech splátek musí odpovídat částce položky.
 Rozdělit jde i jen některé splátky; nerozdělená splátka je celá jistinou.

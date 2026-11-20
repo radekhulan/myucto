@@ -1222,8 +1222,8 @@
         "2316_bulk_changes_permission.sql",
         "2317_document_item_search.sql",
         "2318_payroll_posting_code_maps.sql",
-        "2319_purchase_advance_deductions_document_source.sql",
-        "2320_purchase_invoices_vendor_number_search_index.sql"
+        "2321_other_item_occurrence_origin.sql",
+        "2322_other_item_due_index.sql"
     ],
     "tables": {
         "abra_flexi_connections": {
@@ -11031,18 +11031,21 @@
                 "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
                 "item_id": "bigint(20) unsigned NOT NULL",
                 "occurrence_index": "int(10) unsigned NOT NULL",
-                "schedule_id": "bigint(20) unsigned NOT NULL",
+                "schedule_id": "bigint(20) unsigned NULL DEFAULT NULL",
+                "source_item_id": "bigint(20) unsigned NULL DEFAULT NULL",
                 "supplier_id": "int(10) unsigned NOT NULL"
             },
             "indexes": {
                 "PRIMARY": "UNIQUE BTREE (id)",
+                "idx_other_occurrence_source": "BTREE (source_item_id)",
                 "idx_other_occurrence_supplier": "BTREE (supplier_id, schedule_id)",
                 "uq_other_occurrence": "UNIQUE BTREE (schedule_id, occurrence_index)",
                 "uq_other_occurrence_item": "UNIQUE BTREE (item_id)"
             },
             "foreign_keys": {
                 "fk_other_occurrence_item": "(item_id) -> other_items (id) ON UPDATE RESTRICT ON DELETE RESTRICT",
-                "fk_other_occurrence_schedule": "(schedule_id) -> other_item_schedules (id) ON UPDATE RESTRICT ON DELETE CASCADE",
+                "fk_other_occurrence_schedule": "(schedule_id) -> other_item_schedules (id) ON UPDATE RESTRICT ON DELETE SET NULL",
+                "fk_other_occurrence_source": "(source_item_id) -> other_items (id) ON UPDATE RESTRICT ON DELETE SET NULL",
                 "fk_other_occurrence_supplier": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE CASCADE"
             },
             "checks": []
@@ -11147,6 +11150,7 @@
                 "fk_other_item_reversal": "BTREE (reversal_entry_id)",
                 "fk_other_item_updated_by": "BTREE (updated_by)",
                 "idx_other_item_counterparty": "BTREE (supplier_id, counterparty_account)",
+                "idx_other_item_due": "BTREE (supplier_id, deleted_at, due_on)",
                 "idx_other_item_kind": "BTREE (kind_id, supplier_id)",
                 "idx_other_item_open": "BTREE (supplier_id, side, status, due_on)",
                 "idx_other_item_partner": "BTREE (supplier_id, partner_id, status)",
@@ -23694,7 +23698,7 @@
                 "created_by": "bigint(20) unsigned NULL DEFAULT NULL",
                 "final_invoice_id": "bigint(20) unsigned NOT NULL",
                 "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
-                "source": "enum('import','saldo','document') NOT NULL DEFAULT 'import'",
+                "source": "enum('import','saldo') NOT NULL DEFAULT 'import'",
                 "supplier_id": "int(10) unsigned NOT NULL"
             },
             "indexes": {
@@ -23702,7 +23706,6 @@
                 "fk_pad_advance": "BTREE (advance_invoice_id)",
                 "fk_pad_user": "BTREE (created_by)",
                 "ix_pad_advance": "BTREE (supplier_id, advance_invoice_id)",
-                "ix_pad_final_source": "BTREE (supplier_id, final_invoice_id, source)",
                 "uq_pad_pair": "UNIQUE BTREE (final_invoice_id, advance_invoice_id)"
             },
             "foreign_keys": {
@@ -23712,7 +23715,7 @@
                 "fk_pad_user": "(created_by) -> users (id) ON UPDATE RESTRICT ON DELETE SET NULL"
             },
             "checks": {
-                "chk_pad_amount": "`amount` > 0 or `source` = 'document' and `amount` >= 0"
+                "chk_pad_amount": "`amount` > 0"
             }
         },
         "purchase_invoice_approvals": {
@@ -24096,7 +24099,6 @@
                 "idx_pi_supplier_vs_key": "BTREE (supplier_id, varsymbol_match_key)",
                 "idx_pi_tax_date": "BTREE (supplier_id, tax_date)",
                 "idx_pi_vendor": "BTREE (vendor_id, issue_date)",
-                "ix_pi_supplier_vendor_number": "BTREE (supplier_id, vendor_invoice_number)",
                 "uq_pi_advance_link": "UNIQUE BTREE (advance_purchase_invoice_id)",
                 "uq_pi_supplier_varsymbol": "UNIQUE BTREE (supplier_id, varsymbol)",
                 "uq_pi_vendor_invoice": "UNIQUE BTREE (supplier_id, vendor_id, vendor_invoice_number, issue_date, vendor_number_seq)",

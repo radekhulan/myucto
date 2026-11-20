@@ -3,6 +3,7 @@ import { defineComponent, h, reactive } from 'vue'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const m = vi.hoisted(() => ({
+  canWriteOtherItems: true,
   get: vi.fn(),
   allocations: vi.fn(),
   paymentCandidates: vi.fn(),
@@ -43,7 +44,7 @@ vi.mock('@/api/otherItemSettings', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/api/otherItemSettings')>()),
   otherItemSettingsApi: { get: vi.fn().mockResolvedValue({ document_folder: 'Smlouvy/{YYYY}', document_folder_default: 'Ostatní pohledávky a závazky/{YYYY}/{MM}', is_default: false }), update: vi.fn() },
 }))
-vi.mock('@/stores/auth', () => ({ useAuthStore: () => ({ canWrite: () => true, canRead: (key: string) => !m.noRead.includes(key) }) }))
+vi.mock('@/stores/auth', () => ({ useAuthStore: () => ({ canWrite: (key: string) => key !== 'other_items' || m.canWriteOtherItems, canRead: (key: string) => !m.noRead.includes(key) }) }))
 vi.mock('@/composables/useIsPhone', () => ({ useIsPhone: () => ({ get value() { return m.phone } }) }))
 vi.mock('@/stores/supplier', () => ({ useSupplierStore: () => ({ currentSupplier: { accounting_mode: m.mode } }) }))
 vi.mock('@/composables/useToast', () => ({ useToast: () => ({ error: vi.fn(), success: vi.fn() }) }))
@@ -214,6 +215,16 @@ describe('OtherItemDetail', () => {
     expect(wrapper.get('[data-test="payment-state"]').classes()).toContain('badge-partially_paid')
   })
 
+  it('přeplacená položka nese štítek Přeplaceno jako faktura', async () => {
+    m.get.mockResolvedValue({ id: 9, side: 'payable', kind: 'loan', title: 'Syntetický úvěr', partner_name: null, issued_on: '2099-01-01',
+      due_on: '2099-02-01', currency: 'CZK', amount: 3000, paid_amount: 3100, remaining_amount: -100, status: 'confirmed', document_no: 'OZ-2099-0008' })
+    const wrapper = shallowMount(OtherItemDetail, { global: { stubs } })
+    await flushPromises()
+    expect(wrapper.get('[data-test="detail-status"]').classes()).toContain('badge-overpaid')
+    expect(wrapper.get('[data-test="payment-state"]').text()).toBe('overpaid')
+    expect(wrapper.get('[data-test="payment-state"]').classes()).toContain('badge-overpaid')
+  })
+
   it('záhlaví a karty jako přijatá faktura: číslo s odznaky, název s protistranou, bez kotvy na plány', async () => {
     m.mode = 'double_entry'
     m.get.mockResolvedValue({ id: 9, side: 'payable', kind: 'rent', title: 'Syntetický nájem', partner_id: 5, partner_name: 'Syntetická protistrana',
@@ -289,6 +300,66 @@ describe('OtherItemDetail', () => {
     expect(openInstallments).not.toHaveBeenCalled()
     actions.find(action => action.key === 'installments')!.run!()
     expect(openInstallments).toHaveBeenCalledTimes(1)
+  })
+
+  it('po zrušení opakování položka dál ukáže zdroj a nenabídne nové opakování', async () => {
+    m.get.mockResolvedValue({ id: 9, side: 'payable', kind: 'rent', title: 'Syntetický nájem', partner_name: null, issued_on: '2099-02-01',
+      due_on: '2099-02-15', currency: 'CZK', amount: 3000, paid_amount: 0, remaining_amount: 3000, status: 'draft', document_no: null,
+      occurrence: { schedule_id: null, occurrence_index: 1, source_item_id: 7, source_document_no: 'OZ-2099-0001', source_title: 'Zdroj',
+        schedule_created_at: null, created_by_name: null } })
+    const wrapper = shallowMount(OtherItemDetail, { global: { stubs } })
+    await flushPromises()
+    expect(wrapper.get('[data-test="occurrence-source-link"]').text()).toBe('OZ-2099-0001')
+    expect(wrapper.get('[data-test="occurrence-cancelled"]').text()).toContain('other_items.occurrence.cancelled')
+    expect(wrapper.get('[data-test="occurrence-source"]').text()).not.toContain('other_items.occurrence.created_by')
+    // Smazaný zdroj: štítek zůstane, odkaz zmizí.
+    m.get.mockResolvedValue({ ...(await m.get.mock.results[0].value), occurrence: { schedule_id: null, occurrence_index: 1, source_item_id: null,
+      source_document_no: null, source_title: null, schedule_created_at: null, created_by_name: null } })
+    const orphan = shallowMount(OtherItemDetail, { global: { stubs } })
+    await flushPromises()
+    expect(orphan.get('[data-test="occurrence-source"]').text()).toContain('other_items.occurrence.label')
+    expect(orphan.find('[data-test="occurrence-source-link"]').exists()).toBe(false)
+  })
+
+  it('opakování a splátky jsou vždy pohromadě v „…“ pod skupinou Plány', async () => {
+    const wrapper = shallowMount(OtherItemDetail, { global: { stubs } })
+    await flushPromises()
+    wrapper.findComponent({ name: 'OtherItemPlans' }).vm.$emit('state', { canSchedule: true, canSplit: true, editing: false })
+    await flushPromises()
+    const plans = (wrapper.findComponent({ name: 'ActionBar' }).props('actions') as Array<{ key: string; tier?: string; group?: string }>)
+      .filter(action => action.key === 'schedule' || action.key === 'installments')
+    expect(plans.map(action => [action.key, action.tier, action.group])).toEqual([
+      ['schedule', 'overflow', 'other_items.plans.group'],
+      ['installments', 'overflow', 'other_items.plans.group'],
+    ])
+  })
+
+  it('Upravit je u nekonceptu vidět, zamčené s důvodem a bez odkazu na editor', async () => {
+    const actionOf = async (status: string) => {
+      m.get.mockResolvedValue({ id: 9, side: 'payable', kind: 'loan', title: 'Syntetický úvěr', partner_name: null, issued_on: '2099-01-01',
+        due_on: '2099-03-10', currency: 'CZK', amount: 3000, paid_amount: 0, remaining_amount: 3000, status })
+      const wrapper = shallowMount(OtherItemDetail, { global: { stubs } })
+      await flushPromises()
+      return (wrapper.findComponent({ name: 'ActionBar' }).props('actions') as Array<{ key: string; show?: unknown; disabled?: boolean; disabledReason?: string; to?: unknown; tier?: string }>)
+        .find(action => action.key === 'edit')!
+    }
+    const draft = await actionOf('draft')
+    expect(draft.disabled).toBeFalsy()
+    expect(draft.tier).toBe('secondary')
+    expect(draft.to).toEqual({ name: 'other-item-edit', params: { id: 9 } })
+    for (const status of ['posted', 'confirmed', 'reversed', 'cancelled']) {
+      const locked = await actionOf(status)
+      expect(locked.show).not.toBe(false)
+      expect(locked.disabled).toBe(true)
+      // Zamčené Upravit je v „…“ jako zamčené Stornovat, ne trvalý text pod lištou.
+      expect(locked.tier).toBe('overflow')
+      expect(locked.disabledReason).toBe(`other_items.edit_locked.${status}`)
+      expect(locked.to).toBeUndefined()
+    }
+    // Bez práva zápisu se zamčené Upravit vůbec nenabízí.
+    m.canWriteOtherItems = false
+    expect((await actionOf('posted')).show).toBe(false)
+    m.canWriteOtherItems = true
   })
 
   it('položka mimo rozvrh řádek se zdrojem nemá', async () => {
@@ -405,6 +476,24 @@ describe('OtherItemDetail', () => {
     expect(m.post).toHaveBeenCalledWith(9)
   })
 
+  it('bez protiúčtu je Zaúčtovat v dialogu zamčené s důvodem', async () => {
+    m.mode = 'double_entry'
+    m.get.mockResolvedValue({ id: 9, side: 'payable', kind: 'loan', title: 'Koncept', partner_name: null, issued_on: '2099-01-01',
+      due_on: '2099-03-10', currency: 'CZK', amount: 3000, paid_amount: 0, remaining_amount: 3000, status: 'draft',
+      posting_rules: { origin: { event: 'origin', source: 'default', posting_lines: [], lines: [{ account_code: '325', side: 'credit', amount: 3000 }] } } })
+    const wrapper = shallowMount(OtherItemDetail, { global: { stubs } })
+    await flushPromises()
+    ;(wrapper.findComponent(ActionBar).props('actions') as ActionItem[]).find(a => a.key === 'post')!.run!()
+    await flushPromises()
+    const submit = wrapper.get('[data-test="post-confirm-submit"]')
+    expect(submit.attributes('disabled')).toBeDefined()
+    expect(submit.attributes('title')).toBe('other_items.posting.missing_counter')
+    expect(submit.attributes('aria-describedby')).toBe('other-item-post-missing-counter')
+    expect(wrapper.get('[data-test="post-missing-counter"]').text()).toBe('other_items.posting.missing_counter')
+    await submit.trigger('click')
+    expect(m.post).not.toHaveBeenCalled()
+  })
+
   it('úhrady vedou na výpis, pokladní doklad a zápis v deníku a odpojení je tlačítko', async () => {
     m.allocations.mockResolvedValue([
       { id: 1, bank_transaction_id: 41, cash_document_id: null, amount: 100, payment_on: '2099-02-10', reversed_on: null,
@@ -455,7 +544,7 @@ describe('OtherItemDetail obnova a přepínání', () => {
 
   it('po zaúčtování a po uložení dimenzí obnoví sekci Zaúčtování', async () => {
     m.mode = 'double_entry'
-    m.get.mockResolvedValue({ ...base, status: 'draft', posting_rules: { origin: { lines: [], posting_lines: [] } } })
+    m.get.mockResolvedValue({ ...base, status: 'draft', posting_rules: { origin: { lines: [], posting_lines: [{ account_code: '518', amount: 3000 }] } } })
     m.post.mockResolvedValue({})
     const wrapper = shallowMount(OtherItemDetail, { global: { stubs: { ...stubs, DocumentPostingPanel: PanelStub } } })
     await flushPromises()
@@ -568,6 +657,28 @@ describe('OtherItemDetail kolo 2', () => {
     await flushPromises()
     expect(withJournal.findComponent(DocumentPostingPanel).exists()).toBe(true)
     expect(withJournal.findComponent({ name: 'OtherItemPostingRules' }).props('canRepost')).toBe(false)
+  })
+
+  it('účet protistrany se během opakovaného načtení neuloží a tichá obnova pak zase běží', async () => {
+    const wrapper = shallowMount(OtherItemDetail, { global: { stubs } })
+    await flushPromises()
+    m.updateText.mockResolvedValueOnce({ ...base, note: 'Nová' })
+    m.get.mockRejectedValueOnce(new Error('500'))
+    await wrapper.get('[data-test="note-edit"]').trigger('click')
+    await wrapper.get('[data-test="note-form"]').trigger('submit')
+    await flushPromises()
+    let finish!: (value: unknown) => void
+    m.get.mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+    await wrapper.get('[role="alert"] button').trigger('click')
+    await wrapper.get('[data-test="counterparty-edit"]').trigger('click')
+    expect(wrapper.get('[data-test="counterparty-save"]').attributes('disabled')).toBeDefined()
+    await wrapper.get('[data-test="counterparty-form"]').trigger('submit')
+    expect(m.updateCounterpartyAccount).not.toHaveBeenCalled()
+    finish({ ...base, title: 'Načteno znovu' })
+    await flushPromises()
+    expect(wrapper.text()).toContain('Načteno znovu')
+    await wrapper.get('[data-test="counterparty-form"] button[type="button"]').trigger('click')
+    expect(m.canRefresh!()).toBe(true)
   })
 
   it('uložený účet protistrany předchozí položky nepřepíše nově otevřenou', async () => {

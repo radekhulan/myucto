@@ -32,7 +32,7 @@ final class OtherItemScheduleAction
         if ($raw !== null && $raw !== '') {
             $sourceItemId = is_scalar($raw) ? filter_var($raw, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]) : false;
             if ($sourceItemId === false) {
-                return Json::error($response, 'validation_failed', 'Neplatné id položky.', 422);
+                return Json::error($response, 'other_items.error.invalid_source_item', 'Neplatné id položky.', 422);
             }
         }
         return $this->run($response, fn () => ['items' => $this->service->list($this->currentSupplierId($request), $sourceItemId)]);

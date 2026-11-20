@@ -347,6 +347,31 @@ describe('DocumentPostingPanel obnova a reload', () => {
   })
 })
 
+describe('DocumentPostingPanel nepovedená tichá obnova', () => {
+  it('nezahodí rozběhnuté načtení jiného dokladu', async () => {
+    journalForDocumentMock.mockReset()
+    journalForDocumentMock.mockResolvedValueOnce([entry(1, { document_no: 'FV-PRVNI' })])
+    const wrapper = mount(DocumentPostingPanel, {
+      props: { source: 'invoices' as const, docId: 271 },
+      global: {
+        stubs: { RouterLink: { template: '<a><slot /></a>' } },
+        provide: { [windowContextKey as symbol]: { active: computed(() => true), paneId: computed(() => 'primary'), root: document.body, portal: document.body } },
+      },
+    })
+    await flushPromises()
+    let finishOther!: (entries: JournalEntryWithLines[]) => void
+    journalForDocumentMock.mockImplementationOnce(() => new Promise(resolve => { finishOther = resolve }))
+    await wrapper.setProps({ docId: 272 })
+    journalForDocumentMock.mockRejectedValueOnce(new Error('500'))
+    window.dispatchEvent(new CustomEvent('myucto:window-data-changed', { detail: { supplierId: 1, resource: 'accounting', self: true } }))
+    await flushPromises()
+    finishOther([entry(2, { document_no: 'FV-DRUHY' })])
+    await flushPromises()
+    expect(wrapper.text()).toContain('FV-DRUHY')
+    wrapper.unmount()
+  })
+})
+
 describe('DocumentPostingPanel nepovedený reload', () => {
   it('po nepovedeném reloadu neukáže starý zápis s tlačítkem Přeúčtovat', async () => {
     journalForDocumentMock.mockReset()

@@ -16,12 +16,9 @@ final class OtherItemRepository
     public function find(int $supplierId, int $id, bool $lock = false): ?array
     {
         $stmt = $this->db->pdo()->prepare(
-            'SELECT oi.*, COALESCE(a.paid_amount, 0) + oi.settled_outside_amount AS paid_amount,
-                    oi.amount - oi.settled_outside_amount - COALESCE(a.paid_amount, 0) AS remaining_amount
+            'SELECT oi.*, ' . self::PAID_SQL . ' + oi.settled_outside_amount AS paid_amount,
+                    oi.amount - oi.settled_outside_amount - ' . self::PAID_SQL . ' AS remaining_amount
                FROM other_items oi
-               LEFT JOIN (SELECT other_item_id, SUM(amount) paid_amount FROM other_item_allocations
-                           WHERE reversed_on IS NULL GROUP BY other_item_id) a
-                 ON a.other_item_id = oi.id
               WHERE oi.supplier_id = ? AND oi.id = ? AND oi.deleted_at IS NULL' . ($lock ? ' FOR UPDATE' : '')
         );
         $stmt->execute([$supplierId, $id]);
@@ -67,6 +64,27 @@ final class OtherItemRepository
         }
     }
 
+    /**
+     * Spárované úhrady jedné položky (bez storen) po indexu uq_other_item_bank; sdílí je detail
+     * (find) i výpis, takže stav položky je v obou stejný. Úhrady se čtou jen pro položky ve výběru
+     * (okno splatnosti), ne jedním souhrnem přes všechny úhrady firmy: ten by s historií rostl,
+     * i když výběr zůstává stejný (měření v PR).
+     */
+    private const PAID_SQL = '(SELECT COALESCE(SUM(a.amount), 0) FROM other_item_allocations a
+        WHERE a.supplier_id = oi.supplier_id AND a.other_item_id = oi.id AND a.reversed_on IS NULL)';
+
+    /**
+     * Otevřená = ještě je co zaplatit: zbytek jistiny, nebo u splátek rozdělených na jistinu, úrok
+     * a poplatek nezaplacený úrok či poplatek (stejně jako stav ve výpisu a v detailu podle
+     * OtherItemService::payableOf). Úhrada nese úrok a poplatek nejvýš do výše plánovaných,
+     * takže rozdíl součtů je přesně zbývající úrok a poplatek splátek.
+     */
+    private const OPEN_PAYMENT_SQL = '(oi.amount - oi.settled_outside_amount > ' . self::PAID_SQL . '
+        OR (SELECT COALESCE(SUM(COALESCE(ins.interest_amount, 0) + COALESCE(ins.fee_amount, 0)), 0) FROM other_item_installments ins
+             WHERE ins.supplier_id = oi.supplier_id AND ins.other_item_id = oi.id)
+         > (SELECT COALESCE(SUM(a.interest_amount + a.fee_amount), 0) FROM other_item_allocations a
+             WHERE a.supplier_id = oi.supplier_id AND a.other_item_id = oi.id AND a.reversed_on IS NULL))';
+
     public function list(int $supplierId, array $filters, int $page, int $perPage): array
     {
         $where = ['oi.supplier_id = ?', 'oi.deleted_at IS NULL'];
@@ -87,7 +105,7 @@ final class OtherItemRepository
         if (!empty($filters['status']) && $filters['status'] !== 'all') {
             if ($filters['status'] === 'open') {
                 $where[] = "oi.status IN ('draft','confirmed','posted')";
-                $where[] = 'oi.amount - oi.settled_outside_amount > COALESCE((SELECT SUM(a.amount) FROM other_item_allocations a WHERE a.other_item_id = oi.id AND a.supplier_id = oi.supplier_id AND a.reversed_on IS NULL), 0)';
+                $where[] = self::OPEN_PAYMENT_SQL;
             } else {
                 $where[] = 'oi.status = ?';
                 $params[] = $filters['status'];
@@ -107,18 +125,18 @@ final class OtherItemRepository
             $params[] = $filters['to'];
         }
         $whereSql = implode(' AND ', $where);
-        $count = $this->db->pdo()->prepare('SELECT COUNT(*) FROM other_items oi WHERE ' . $whereSql);
+        // S oknem splatnosti optimalizátor podíl okna přeceňuje a volí sken celé tabulky (všech firem),
+        // i když index splatnosti čte jen výběr; práce pak roste s historií, ne s oknem (měření v PR).
+        $table = 'other_items oi' . (!empty($filters['from']) || !empty($filters['to']) ? ' FORCE INDEX (idx_other_item_due)' : '');
+        $count = $this->db->pdo()->prepare('SELECT COUNT(*) FROM ' . $table . ' WHERE ' . $whereSql);
         $count->execute($params);
         $total = (int) $count->fetchColumn();
         $offset = ($page - 1) * $perPage;
         $stmt = $this->db->pdo()->prepare(
-            'SELECT oi.*, COALESCE(a.paid_amount, 0) + oi.settled_outside_amount paid_amount,
-                    oi.amount - oi.settled_outside_amount - COALESCE(a.paid_amount, 0) remaining_amount,
+            'SELECT oi.*, ' . self::PAID_SQL . ' + oi.settled_outside_amount paid_amount,
+                    oi.amount - oi.settled_outside_amount - ' . self::PAID_SQL . ' remaining_amount,
                     k.name kind_name
-               FROM other_items oi
-               LEFT JOIN (SELECT other_item_id, SUM(amount) paid_amount FROM other_item_allocations
-                           WHERE reversed_on IS NULL GROUP BY other_item_id) a
-                 ON a.other_item_id = oi.id
+               FROM ' . $table . '
                LEFT JOIN other_item_kinds k ON k.id = oi.kind_id AND k.supplier_id = oi.supplier_id
               WHERE ' . $whereSql . '
               ORDER BY ' . OtherItemSort::orderBy($filters) . ' LIMIT ' . (int) $perPage . ' OFFSET ' . (int) $offset
@@ -132,7 +150,7 @@ final class OtherItemRepository
         unset($item);
         $result = ['items' => $items, 'total' => $total, 'page' => $page, 'per_page' => $perPage];
         if ($page === 1) {
-            $result['totals'] = $this->remainingTotals($whereSql, $params);
+            $result['totals'] = $this->remainingTotals($table, $whereSql, $params);
         }
         return $result;
     }
@@ -166,13 +184,12 @@ final class OtherItemRepository
      * @param list<mixed> $params
      * @return list<array{side:string,currency:string,remaining_amount:float}>
      */
-    private function remainingTotals(string $whereSql, array $params): array
+    private function remainingTotals(string $table, string $whereSql, array $params): array
     {
         $stmt = $this->db->pdo()->prepare(
             "SELECT oi.side, oi.currency,
-                    SUM(GREATEST(oi.amount - oi.settled_outside_amount - COALESCE((SELECT SUM(a.amount) FROM other_item_allocations a
-                         WHERE a.supplier_id = oi.supplier_id AND a.other_item_id = oi.id AND a.reversed_on IS NULL), 0), 0)) remaining_amount
-               FROM other_items oi
+                    SUM(GREATEST(oi.amount - oi.settled_outside_amount - " . self::PAID_SQL . ", 0)) remaining_amount
+               FROM " . $table . "
               WHERE " . $whereSql . " AND oi.status IN ('confirmed','posted')
               GROUP BY oi.side, oi.currency
               ORDER BY oi.side, oi.currency"

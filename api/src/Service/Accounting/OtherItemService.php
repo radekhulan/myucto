@@ -68,7 +68,17 @@ final class OtherItemService
     {
         $page = max(1, $page);
         $perPage = max(1, min(200, $perPage));
-        return $this->items->list($supplierId, $filters, $page, $perPage);
+        $result = $this->items->list($supplierId, $filters, $page, $perPage);
+        // Stav ve výpisu se řídí tím, kolik zbývá zaplatit, stejně jako v detailu (get): u rozdělených
+        // splátek i úrok a poplatek. Pokrytí splátek jedním dávkovým čtením za řádky stránky.
+        $coverage = $this->items->installmentCoverage($supplierId, array_map(static fn (array $row): int => (int) $row['id'], $result['items']));
+        foreach ($result['items'] as &$row) {
+            $rowCoverage = $coverage[(int) $row['id']] ?? [];
+            $row['has_split_installments'] = OtherItemInstallmentCoverage::hasSplit($rowCoverage);
+            $row['remaining_payment'] = self::payableOf($row, $rowCoverage);
+        }
+        unset($row);
+        return $result;
     }
 
     /**
@@ -433,14 +443,16 @@ final class OtherItemService
             if ($item['status'] !== 'draft') {
                 throw new OtherItemException('not_draft', 'Smazat lze jen koncept.', 409);
             }
-            $scheduled = $pdo->prepare('SELECT occurrence_index FROM other_item_schedule_occurrences
+            $scheduled = $pdo->prepare('SELECT occurrence_index, schedule_id FROM other_item_schedule_occurrences
                 WHERE supplier_id = ? AND item_id = ? LIMIT 1');
             $scheduled->execute([$supplierId, $id]);
             $occurrence = $scheduled->fetch(PDO::FETCH_ASSOC);
             if ($occurrence !== false && (int) $occurrence['occurrence_index'] === 0) {
                 throw new OtherItemException('has_schedule', 'Zdrojový doklad rozvrhu nelze smazat.', 409);
             }
-            if ($occurrence !== false) {
+            // Výskyt živého rozvrhu se ruší, aby rozvrh termín nevytvořil znovu. Po zrušení opakování
+            // už nic nevzniká, koncept se maže jako každý jiný (původ zůstane u smazaného řádku).
+            if ($occurrence !== false && $occurrence['schedule_id'] !== null) {
                 $this->items->cancelDraft($supplierId, $id);
             } else {
                 $this->items->softDeleteDraft($supplierId, $id);
@@ -677,20 +689,22 @@ final class OtherItemService
 
     /**
      * Položku vytvořilo opakování: rozvrh, zdrojová položka a kdo rozvrh založil. Zdroj rozvrhu
-     * (výskyt 0) a položky mimo rozvrh vrací null. Zdroj smazat nejde: deleteDraft ho odmítne
-     * (has_schedule) a jeho výskyt 0 drží cizí klíč ON DELETE RESTRICT.
+     * (výskyt 0) a položky mimo rozvrh vrací null. Po zrušení opakování zůstane výskyt bez
+     * rozvrhu (schedule_id, schedule_created_at a created_by_name jsou null) a zdroj si nese sám;
+     * starší výskyty bez vlastního zdroje ho berou z rozvrhu. Smazaný zdroj vrací zdroj null.
      *
-     * @return array{schedule_id:int,occurrence_index:int,source_item_id:int,source_document_no:?string,
-     *               source_title:string,schedule_created_at:string,created_by_name:?string}|null
+     * @return array{schedule_id:?int,occurrence_index:int,source_item_id:?int,source_document_no:?string,
+     *               source_title:?string,schedule_created_at:?string,created_by_name:?string}|null
      */
     public function scheduleOccurrence(int $supplierId, int $id): ?array
     {
         $stmt = $this->db->pdo()->prepare(
-            'SELECT o.schedule_id, o.occurrence_index, s.source_item_id, src.document_no AS source_document_no,
+            'SELECT o.schedule_id, o.occurrence_index, src.id AS source_item_id, src.document_no AS source_document_no,
                     src.title AS source_title, s.created_at AS schedule_created_at, u.name AS created_by_name
                FROM other_item_schedule_occurrences o
-               JOIN other_item_schedules s ON s.id = o.schedule_id AND s.supplier_id = o.supplier_id
-               JOIN other_items src ON src.id = s.source_item_id AND src.supplier_id = s.supplier_id
+               LEFT JOIN other_item_schedules s ON s.id = o.schedule_id AND s.supplier_id = o.supplier_id
+               LEFT JOIN other_items src ON src.id = COALESCE(o.source_item_id, s.source_item_id)
+                    AND src.supplier_id = o.supplier_id AND src.deleted_at IS NULL
                LEFT JOIN users u ON u.id = s.created_by
               WHERE o.supplier_id = ? AND o.item_id = ? AND o.occurrence_index > 0'
         );
@@ -698,12 +712,12 @@ final class OtherItemService
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
         if ($row === false) return null;
         return [
-            'schedule_id' => (int) $row['schedule_id'],
+            'schedule_id' => $row['schedule_id'] !== null ? (int) $row['schedule_id'] : null,
             'occurrence_index' => (int) $row['occurrence_index'],
-            'source_item_id' => (int) $row['source_item_id'],
+            'source_item_id' => $row['source_item_id'] !== null ? (int) $row['source_item_id'] : null,
             'source_document_no' => $row['source_document_no'],
             'source_title' => $row['source_title'],
-            'schedule_created_at' => (string) $row['schedule_created_at'],
+            'schedule_created_at' => $row['schedule_created_at'] !== null ? (string) $row['schedule_created_at'] : null,
             'created_by_name' => $row['created_by_name'],
         ];
     }

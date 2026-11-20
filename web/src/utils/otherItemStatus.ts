@@ -9,14 +9,26 @@ import { isInvoiceDateOverdue } from '@/utils/invoiceOverdue'
  * (`displayStatus` v useFormat): uhrazený a částečně uhrazený nese víc informace
  * než „Zaúčtováno". Převzaté položky (mzdy, daně) chodí rovnou s odvozeným stavem.
  */
-type StatusSource = Pick<OtherItem, 'status' | 'paid_amount' | 'remaining_amount'> & { source_kind?: string }
+type StatusSource = Pick<OtherItem, 'status' | 'paid_amount' | 'remaining_amount'> & { source_kind?: string; remaining_payment?: number }
 
 const LIVE = ['posted', 'confirmed']
+
+/**
+ * Kolik zbývá ZAPLATIT: u rozdělených splátek i úrok a poplatek (`remaining_payment` posílá výpis
+ * i detail), jinak zbytek jistiny. Výpis a detail z něj odvozují stav stejně; jinak by výpis hlásil
+ * „Uhrazeno“ a detail téže položky „Částečně uhrazeno“ s nabídkou další úhrady.
+ */
+export function otherItemRemainingPayment(item: StatusSource): number {
+  return Number(item.remaining_payment ?? item.remaining_amount ?? 0)
+}
 
 export function otherItemDisplayStatus(item: StatusSource): string {
   const status = String(item.status)
   if (!LIVE.includes(status)) return status
-  if (Number(item.remaining_amount) <= 0) return 'paid'
+  const remaining = otherItemRemainingPayment(item)
+  // Přeplatek jako u faktur; haléřová tolerance 0,005.
+  if (remaining < -0.005) return 'overpaid'
+  if (remaining <= 0) return 'paid'
   if (Number(item.paid_amount) > 0) return 'partial'
   return status
 }
@@ -31,6 +43,7 @@ export function otherItemStatusClass(status: string): string {
     open: 'issued',
     paid: 'paid',
     partial: 'partially_paid',
+    overpaid: 'overpaid',
     overdue: 'reminded',
     reversed: 'cancelled',
     cancelled: 'cancelled',
@@ -40,6 +53,6 @@ export function otherItemStatusClass(status: string): string {
 
 /** Po splatnosti je jen živý doklad, na kterém ještě něco zbývá. */
 export function isOtherItemOverdue(item: StatusSource & Pick<OtherItem, 'due_on'>): boolean {
-  return LIVE.includes(String(item.status)) && Number(item.remaining_amount) > 0
+  return LIVE.includes(String(item.status)) && otherItemRemainingPayment(item) > 0
     && !!item.due_on && isInvoiceDateOverdue(item.due_on)
 }

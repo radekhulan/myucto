@@ -159,6 +159,15 @@
     "dismiss": "Nepoužívat"
   },
   "other_items": {
+    "edit_locked": {
+      "posted": "Zaúčtovanou položku nejde upravit. Chybné účty opraví přeúčtování, ostatní údaje storno a nová položka.",
+      "confirmed": "Potvrzenou položku nejde upravit. Údaje opraví zrušení a nová položka.",
+      "reversed": "Stornovanou položku nejde upravit.",
+      "cancelled": "Zrušenou položku nejde upravit."
+    },
+    "error": {
+      "invalid_source_item": "Neplatné id položky."
+    },
     "documents_settings": {
       "title": "Složka dokumentů",
       "hint": "Soubory nahrané k ostatní pohledávce nebo závazku se uloží do této složky v Dokumentech. {'{'}YYYY{'}'} a {'{'}MM{'}'} se nahradí rokem a měsícem data vystavení.",
@@ -253,7 +262,8 @@
       "partial": "Částečně uhrazeno",
       "forecast": "Odhad",
       "open": "Otevřeno",
-      "overdue": "Po splatnosti"
+      "overdue": "Po splatnosti",
+      "overpaid": "Přeplaceno"
     },
     "source_label": "Zdroj",
     "search": "Hledat název, protistranu, číslo nebo VS",
@@ -393,8 +403,6 @@
       "installment_due": "U splatnosti",
       "remaining_amount": "Celý zbytek"
     },
-    "documents": "dokumentů",
-    "forecast": "Odhad",
     "result_impact_title": "Ostatní položky ve výsledku hospodaření",
     "result_impact_hint": "Součet za aktuální rok podle výnosového nebo nákladového protiúčtu. Zahrnuje zaúčtované položky a označené koncepty; rozvahové položky se nezapočítají.",
     "result_revenue": "Výnosy z ostatních položek",
@@ -430,9 +438,11 @@
     "confirmed": "Položka byla potvrzena.",
     "reversed": "Položka byla stornována.",
     "cancelled": "Položka byla zrušena.",
-    "previous": "Předchozí",
-    "next": "Další",
     "plans": {
+      "edit_schedule": "Upravit opakování",
+      "edit_installments": "Upravit splátky",
+      "schedule_fixed_hint": "Frekvenci a konec opakování nejde změnit. Pro jiné nastavení opakování zrušte a založte nové; už vytvořené položky zůstanou.",
+      "group": "Plány",
       "schedule_title": "Opakování položky",
       "schedule_hint": "Denní úloha vytváří položky až 90 dní dopředu; můžete je vytvořit i ručně. Podklady ze zdrojové položky se připojí ke každé položce.",
       "auto_post": "Automaticky účtovat vzniklé položky",
@@ -528,7 +538,10 @@
       "receivable": "Pohledávky zbývá",
       "payable": "Závazky zbývá"
     },
-    "totals_hint": "Zbývá uhradit u ručně zadaných položek za celý výběr (všechny stránky, ve zvoleném rozmezí splatnosti). Počítá jen potvrzené a zaúčtované položky, ne koncepty, storna, přeplatky ani položky z mezd a daní.",
+    "window_hint": "Bez zadaného data jsou vidět položky se splatností rok zpět až rok dopředu; ručně zadanou položku najde hledání i mimo toto rozmezí.",
+    "window_hint_open": "Bez zadaného data jsou vidět neuhrazené ručně zadané položky bez ohledu na stáří a předpisy z mezd a daní od roku zpět, vše se splatností nejvýš rok dopředu; ručně zadanou položku najde hledání i mimo toto rozmezí.",
+    "totals_scope": "(bez rozpracovaných)",
+    "totals_hint": "Zbývá uhradit u ručně zadaných položek za celý výběr (všechny stránky, ve zvoleném rozmezí splatnosti) jako saldo jistiny: úrok a poplatek splátek úvěru se nepočítají. Počítá jen potvrzené a zaúčtované položky, ne rozpracované, storna, přeplatky ani položky z mezd a daní.",
     "empty_title": "Zatím žádná ostatní pohledávka ani závazek",
     "empty_hint": "Zapište sem nájem, kauci, půjčku, pojistné plnění a další pohledávky či závazky mimo faktury.",
     "load_failed_stale": "Seznam se nepodařilo obnovit, zobrazená data mohou být zastaralá.",
@@ -552,7 +565,8 @@
       "label": "Vytvořeno opakováním",
       "source": "ze zdrojové položky",
       "created_by": "rozvrh založil {name} {date}",
-      "index": "{index}. opakování"
+      "index": "{index}. opakování",
+      "cancelled": "opakování bylo zrušeno"
     }
   },
   "internal_documents": {

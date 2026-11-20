@@ -4,7 +4,7 @@ import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
 import { otherItemsApi, type OtherItem, type OtherItemAllocation, type OtherItemPaymentCandidate, type OtherItemPostingLine } from '@/api/otherItems'
 import { otherItemKindLabel } from '@/utils/otherItemKind'
-import { isOtherItemOverdue, otherItemDisplayStatus, otherItemStatusClass } from '@/utils/otherItemStatus'
+import { isOtherItemOverdue, otherItemDisplayStatus, otherItemRemainingPayment, otherItemStatusClass } from '@/utils/otherItemStatus'
 import { OTHER_ITEM_DEFAULT_FOLDER, otherItemSettingsApi, resolveOtherItemFolder } from '@/api/otherItemSettings'
 import { accountingApi, type ChartAccount } from '@/api/accounting'
 import { useAuthStore } from '@/stores/auth'
@@ -104,28 +104,24 @@ const candidatesLoading = ref(false)
 const searchedQuery = ref<string | null>(null)
 const selectedPayment = ref<OtherItemPaymentCandidate | null>(null)
 /** Kolik zbývá zaplatit: u rozdělených splátek úvěru i úrok a poplatek, jinak saldo. */
-const payableAmount = computed(() => Number(item.value?.remaining_payment ?? item.value?.remaining_amount ?? 0))
+const payableAmount = computed(() => item.value ? otherItemRemainingPayment(item.value) : 0)
 const allocationAmount = ref<number | null>(null)
 let paymentTimer: ReturnType<typeof setTimeout> | null = null
 let paymentRequest = 0
 
-/**
- * Stav se řídí tím, kolik zbývá ZAPLATIT: u rozdělených splátek i úrok a poplatek, ne jen jistina.
- * Jinak by detail hlásil „Uhrazeno“ a zároveň nabízel přiřazení další úhrady.
- */
-const statusSource = computed(() => item.value ? { ...item.value, remaining_amount: payableAmount.value } : null)
-const displayStatus = computed(() => statusSource.value ? otherItemDisplayStatus(statusSource.value) : '')
-const overdue = computed(() => !!statusSource.value && isOtherItemOverdue(statusSource.value))
+/** Stav se řídí tím, kolik zbývá ZAPLATIT (otherItemRemainingPayment), stejně jako ve výpisu. */
+const displayStatus = computed(() => item.value ? otherItemDisplayStatus(item.value) : '')
+const overdue = computed(() => !!item.value && isOtherItemOverdue(item.value))
 /** Stav úhrady živého dokladu; koncept a storno žádný nemají. Po splatnosti nese štítek v záhlaví. */
 const paymentState = computed(() => {
-  const current = statusSource.value
-  if (!current || !['posted', 'confirmed'].includes(String(current.status))) return null
-  if (Number(current.remaining_amount) <= 0) return 'paid'
-  return Number(current.paid_amount) > 0 ? 'partial' : 'open'
+  if (!item.value || !['posted', 'confirmed'].includes(String(item.value.status))) return null
+  return ['paid', 'partial', 'overpaid'].includes(displayStatus.value) ? displayStatus.value : 'open'
 })
 const postingPanel = ref<InstanceType<typeof DocumentPostingPanel> | null>(null)
 /** Kontace vzniku, kterou zaúčtování konceptu zapíše (týž výpočet jako server při zaúčtování). */
 const originPreview = computed(() => item.value?.posting_rules?.origin ?? null)
+/** Vznik bez protiúčtu zaúčtovat nejde: tlačítko v dialogu je zamčené a důvod stojí přímo nad ním. */
+const postMissingCounter = computed(() => isDoubleEntry.value && !!originPreview.value && (originPreview.value.posting_lines || []).length === 0)
 
 // Výběr seznamu, ze kterého se detail otevřel: šipky listují v něm a „Zpět“ vrátí jeho filtry.
 const listNav = useListNavigation({
@@ -293,12 +289,14 @@ function startCounterpartyEdit() {
   counterpartyEditing.value = true
 }
 async function saveCounterparty() {
-  if (!item.value || busy.value) return
+  // Během načtení (Zkusit znovu) se neukládá: uložení by načtení zneplatnilo a to by nikdy
+  // nevypnulo příznak načítání, takže by se zastavila i tichá obnova.
+  if (!item.value || busy.value || loading.value) return
   busy.value = true
   // Uložení je také načtení: odpověď platí jen pro tutéž položku a zneplatní obnovu, která běží
   // ještě se starým účtem.
   const seq = ++loadSeq
-  const itemId = id.value
+  const itemId = Number(item.value.id)
   try {
     const saved = await otherItemsApi.updateCounterpartyAccount(itemId, counterpartyInput.value.trim() || null)
     if (seq !== loadSeq || itemId !== id.value) return
@@ -499,11 +497,16 @@ const actions = computed<ActionItem[]>(() => {
   return [
     { key: 'post', label: t(isDoubleEntry.value ? 'other_items.post' : 'other_items.confirm'), icon: 'check', tier: 'primary', variant: 'success',
       show: current.status === 'draft' && canPost.value, disabled: busy.value, run: () => { postOpen.value = true } },
-    { key: 'edit', label: t('common.edit'), icon: 'edit', tier: 'secondary', variant: 'neutral',
-      show: canEdit.value, to: { name: 'other-item-edit', params: { id: id.value } } },
-    { key: 'schedule', label: t('other_items.plans.create_schedule'), icon: 'cycle', tier: 'secondary', variant: 'neutral',
+    // Upravit je u nekonceptu vidět zamčené v „…“ s důvodem, stejně jako zamčené Stornovat u uhrazené
+    // položky. Zamčená akce je tlačítko bez cíle: odkaz by navigoval i zašedlý.
+    canEdit.value
+      ? { key: 'edit', label: t('common.edit'), icon: 'edit', tier: 'secondary', variant: 'neutral', to: { name: 'other-item-edit', params: { id: id.value } } }
+      : { key: 'edit', label: t('common.edit'), icon: 'edit', tier: 'overflow', variant: 'neutral', show: auth.canWrite('other_items'),
+          disabled: true, disabledReason: t(`other_items.edit_locked.${current.status}`) },
+    // Plány jsou vždy pohromadě v „…“ pod jedním nadpisem, nerozdělí je šířka okna.
+    { key: 'schedule', label: t('other_items.plans.create_schedule'), icon: 'cycle', tier: 'overflow', group: t('other_items.plans.group'), variant: 'neutral',
       show: plansState.value.canSchedule, disabled: busy.value, run: () => plans.value?.openSchedule() },
-    { key: 'installments', label: t('other_items.plans.split_action'), icon: 'calendar', tier: 'secondary', variant: 'neutral',
+    { key: 'installments', label: t('other_items.plans.split_action'), icon: 'calendar', tier: 'overflow', group: t('other_items.plans.group'), variant: 'neutral',
       show: plansState.value.canSplit, disabled: busy.value, run: () => plans.value?.openInstallments() },
     { key: 'reverse', label: t(isDoubleEntry.value ? 'other_items.reverse' : 'other_items.cancel'), icon: 'uturn', tier: 'overflow', variant: 'warning',
       show: (current.status === 'posted' || current.status === 'confirmed') && canPost.value,
@@ -584,10 +587,13 @@ onMounted(load)
             {{ t('other_items.occurrence.label') }}
           </span>
           <span>{{ t('other_items.occurrence.index', { index: item.occurrence.occurrence_index }) }}</span>
-          <span>{{ t('other_items.occurrence.source') }}</span>
-          <RouterLink :to="{ name: 'other-item-detail', params: { id: item.occurrence.source_item_id } }" class="font-mono text-primary-700 hover:underline" data-test="occurrence-source-link"
-              :title="item.occurrence.source_title">{{ item.occurrence.source_document_no || `#${item.occurrence.source_item_id}` }}</RouterLink>
-          <span class="text-neutral-500">· {{ t('other_items.occurrence.created_by', { name: item.occurrence.created_by_name || t('other_items.plans.unknown_user'), date: formatDate(item.occurrence.schedule_created_at) }) }}</span>
+          <template v-if="item.occurrence.source_item_id">
+            <span>{{ t('other_items.occurrence.source') }}</span>
+            <RouterLink :to="{ name: 'other-item-detail', params: { id: item.occurrence.source_item_id } }" class="font-mono text-primary-700 hover:underline" data-test="occurrence-source-link"
+                :title="item.occurrence.source_title ?? undefined">{{ item.occurrence.source_document_no || `#${item.occurrence.source_item_id}` }}</RouterLink>
+          </template>
+          <span v-if="item.occurrence.schedule_created_at" class="text-neutral-500">· {{ t('other_items.occurrence.created_by', { name: item.occurrence.created_by_name || t('other_items.plans.unknown_user'), date: formatDate(item.occurrence.schedule_created_at) }) }}</span>
+          <span v-else class="text-neutral-500" data-test="occurrence-cancelled">· {{ t('other_items.occurrence.cancelled') }}</span>
         </p>
         <div class="text-sm text-neutral-600" data-test="detail-partner">
           <span class="text-neutral-500">{{ t('other_items.partner') }}:</span>
@@ -673,7 +679,7 @@ onMounted(load)
               <div v-if="counterpartyEditing" class="mt-2">
                 <form class="flex flex-wrap items-center gap-2" data-test="counterparty-form" @submit.prevent="saveCounterparty">
                   <input v-model="counterpartyInput" type="text" maxlength="60" :aria-label="t('other_items.counterparty_account')" :placeholder="t('other_items.counterparty_account_placeholder')" class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-2 font-mono text-sm" />
-                  <button type="submit" :disabled="busy" :class="btnFilled('primary')" class="whitespace-nowrap">
+                  <button type="submit" :disabled="busy || loading" :class="btnFilled('primary')" class="whitespace-nowrap" data-test="counterparty-save">
                     <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.check" /></svg>
                     {{ t('common.save') }}
                   </button>
@@ -817,7 +823,7 @@ onMounted(load)
               <span class="text-neutral-500">{{ formatMoney(line.amount, 'CZK') }}</span>
             </li>
           </ul>
-          <p v-if="(originPreview.posting_lines || []).length === 0" class="mt-1 text-warning-700">{{ t('other_items.posting.missing_counter') }}</p>
+          <p v-if="postMissingCounter" id="other-item-post-missing-counter" class="mt-1 text-warning-700" data-test="post-missing-counter">{{ t('other_items.posting.missing_counter') }}</p>
         </div>
       </div>
       <template #footer>
@@ -826,7 +832,9 @@ onMounted(load)
             <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.x" /></svg>
             {{ t('common.cancel') }}
           </button>
-          <button type="button" :disabled="busy" :class="btnFilled('success')" class="whitespace-nowrap" data-test="post-confirm-submit" @click="post">
+          <button type="button" :disabled="busy || postMissingCounter" :class="btnFilled('success')" class="whitespace-nowrap" data-test="post-confirm-submit"
+            :title="postMissingCounter ? t('other_items.posting.missing_counter') : undefined"
+            :aria-describedby="postMissingCounter ? 'other-item-post-missing-counter' : undefined" @click="post">
             <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.check" /></svg>
             {{ t(isDoubleEntry ? 'other_items.post' : 'other_items.confirm') }}
           </button>

@@ -61,7 +61,11 @@ const originRef = ref<InstanceType<typeof PostingOriginRow> | null>(null)
  * ji může zpřístupnit i bez zápisu, například pro klasifikaci přijaté faktury. */
 const visible = computed(() => props.alwaysVisible || entries.value.length > 0)
 
-/** Pořadí všech načtení (přepnutí dokladu, reload po akci, tichá obnova): platí jen poslední odpověď. */
+/**
+ * Pořadí načtení (přepnutí dokladu, reload po akci): platí jen poslední odpověď. Tichá obnova
+ * pořadí jen čte: nepovedená obnova by jinak zahodila rozběhnuté načtení jiného dokladu
+ * a sekce by zůstala prázdná.
+ */
 let loadSeq = 0
 async function load(docId: number, keep = false): Promise<void> {
   // Pozdní odpověď k dokladu, ze kterého se mezitím přešlo, nesmí přepsat zápisy nového.
@@ -91,8 +95,9 @@ watch(() => props.docId, id => { void load(id) }, { immediate: true })
 useWindowRefresh(async () => {
   const docId = props.docId
   if (!(docId > 0)) return
-  const seq = ++loadSeq
+  const seq = loadSeq
   const updated = await accountingApi.journalForDocument(props.source, docId)
+  // Mezitím začalo jiné načtení (přepnutí dokladu, reload po akci): má přednost jeho výsledek.
   if (seq !== loadSeq || docId !== props.docId) return
   entries.value = updated
   failed.value = false

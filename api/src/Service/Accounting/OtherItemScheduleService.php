@@ -44,9 +44,14 @@ final class OtherItemScheduleService
                 throw new OtherItemException('invalid_status', 'Opakování lze založit jen z aktivního dokladu.', 409);
             }
             if ($autoPost) self::assertConfirmedSource($item);
-            $linked = $pdo->prepare('SELECT 1 FROM other_item_schedule_occurrences WHERE supplier_id = ? AND item_id = ? LIMIT 1');
+            $linked = $pdo->prepare('SELECT schedule_id FROM other_item_schedule_occurrences WHERE supplier_id = ? AND item_id = ? LIMIT 1');
             $linked->execute([$supplierId, $itemId]);
-            if ($linked->fetchColumn()) {
+            $linkedRow = $linked->fetch(PDO::FETCH_ASSOC);
+            if ($linkedRow !== false && $linkedRow['schedule_id'] === null) {
+                // Výskyt zrušeného opakování si drží původ; nové opakování z něj nevzniká.
+                throw new OtherItemException('created_by_schedule', 'Doklad vznikl opakováním, nové opakování z něj založit nejde.', 409);
+            }
+            if ($linkedRow !== false) {
                 throw new OtherItemException('already_scheduled', 'Doklad už patří do rozvrhu opakování.', 409);
             }
             if ($endsOn !== null && $endsOn < $item['issued_on']) {
@@ -74,11 +79,28 @@ final class OtherItemScheduleService
                 ];
             }
             if ($overrides !== []) $template['posting_overrides'] = $overrides;
+            // Znovu naplánovaný zdroj navazuje na položky zrušeného opakování: první termín nového
+            // rozvrhu je až po poslední z nich, už vytvořené termíny nevzniknou podruhé. Smazané
+            // koncepty se nepočítají, jejich termíny nový rozvrh vytvoří znovu. Rozhoduje skutečné
+            // datum vzniku položky (zrušený rozvrh s četností už není).
+            $orphans = $pdo->prepare('SELECT MAX(oi.issued_on) FROM other_item_schedule_occurrences o
+                JOIN other_items oi ON oi.id = o.item_id AND oi.supplier_id = o.supplier_id
+                WHERE o.supplier_id = ? AND o.source_item_id = ? AND o.schedule_id IS NULL AND o.occurrence_index > 0
+                  AND oi.deleted_at IS NULL');
+            $orphans->execute([$supplierId, $itemId]);
+            $lastOrphan = $orphans->fetchColumn();
+            $nextIndex = 1;
+            if (is_string($lastOrphan)) {
+                $anchor = new \DateTimeImmutable($item['issued_on']);
+                while ($nextIndex < 10000 && self::occurrenceDate($anchor, $nextIndex * self::MONTHS[$frequency]) <= $lastOrphan) {
+                    $nextIndex++;
+                }
+            }
             $stmt = $pdo->prepare('INSERT INTO other_item_schedules
-                (supplier_id, source_item_id, frequency, anchor_on, due_days, ends_on, template_json, created_by, auto_post)
-                VALUES (?,?,?,?,?,?,?,?,?)');
+                (supplier_id, source_item_id, frequency, anchor_on, due_days, ends_on, template_json, created_by, auto_post, next_index)
+                VALUES (?,?,?,?,?,?,?,?,?,?)');
             $stmt->execute([$supplierId, $itemId, $frequency, $item['issued_on'], $dueDays, $endsOn,
-                json_encode($template, JSON_THROW_ON_ERROR), $userId, (int) $autoPost]);
+                json_encode($template, JSON_THROW_ON_ERROR), $userId, (int) $autoPost, $nextIndex]);
             $id = (int) $pdo->lastInsertId();
             $this->link($supplierId, $id, 0, $itemId);
             if ($ownTx) $pdo->commit();
@@ -150,14 +172,41 @@ final class OtherItemScheduleService
     }
 
     /**
-     * Zruší rozvrh opakování. Už vytvořené položky zůstávají jako samostatné
-     * doklady (vazby výskytů smaže cascade), zdrojový doklad jde pak smazat.
+     * Zruší rozvrh opakování. Už vytvořené položky zůstávají jako samostatné doklady a svůj
+     * původ si drží (vazba výskytu na rozvrh se vynuluje cizím klíčem ON DELETE SET NULL),
+     * takže dál ukazují zdroj a nové opakování nenabídnou. Vazba zdroje (výskyt 0) se maže:
+     * zdrojový doklad jde pak smazat i znovu naplánovat.
      */
     public function delete(int $supplierId, int $id): void
     {
-        $this->sourceId($supplierId, $id);
-        $this->db->pdo()->prepare('DELETE FROM other_item_schedules WHERE supplier_id = ? AND id = ?')
-            ->execute([$supplierId, $id]);
+        TransactionFailure::retrying($this->db->pdo(), fn () => $this->deleteOnce($supplierId, $id));
+    }
+
+    private function deleteOnce(int $supplierId, int $id): void
+    {
+        $pdo = $this->db->pdo();
+        $ownTx = !$pdo->inTransaction();
+        if ($ownTx) $pdo->beginTransaction();
+        try {
+            // Zámky ve stejném pořadí jako generování: zdrojová položka, rozvrh, výskyty. Opačné pořadí
+            // by se se souběžným generováním zablokovalo (doplnění zdroje níž sdíleně zamyká i položku).
+            $this->items->find($supplierId, $this->sourceId($supplierId, $id), true);
+            $this->sourceId($supplierId, $id, true);
+            // Výskyty převzaté importem nebo obnovou ze starší verze zdroj u sebe nemají: doplní se
+            // dřív, než vazba na rozvrh zmizí, jinak by původ položky zrušení nepřežil.
+            $pdo->prepare('UPDATE other_item_schedule_occurrences o
+                JOIN other_item_schedules s ON s.id = o.schedule_id AND s.supplier_id = o.supplier_id
+                SET o.source_item_id = s.source_item_id
+                WHERE o.supplier_id = ? AND o.schedule_id = ? AND o.source_item_id IS NULL')->execute([$supplierId, $id]);
+            $pdo->prepare('DELETE FROM other_item_schedule_occurrences WHERE supplier_id = ? AND schedule_id = ? AND occurrence_index = 0')
+                ->execute([$supplierId, $id]);
+            $pdo->prepare('DELETE FROM other_item_schedules WHERE supplier_id = ? AND id = ?')
+                ->execute([$supplierId, $id]);
+            if ($ownTx) $pdo->commit();
+        } catch (\Throwable $e) {
+            if ($ownTx && $pdo->inTransaction()) $pdo->rollBack();
+            throw $e;
+        }
     }
 
     public function generate(int $supplierId, int $id, string $through, ?int $userId, bool $allowAutoPost = true): array
@@ -361,14 +410,17 @@ final class OtherItemScheduleService
 
     private function link(int $supplierId, int $scheduleId, int $index, int $itemId): void
     {
+        // Zdroj si výskyt drží sám, aby po zrušení rozvrhu zůstal vidět původ položky.
         $stmt = $this->db->pdo()->prepare('INSERT INTO other_item_schedule_occurrences
-            (supplier_id, schedule_id, occurrence_index, item_id) VALUES (?,?,?,?)');
-        $stmt->execute([$supplierId, $scheduleId, $index, $itemId]);
+            (supplier_id, schedule_id, occurrence_index, item_id, source_item_id)
+            SELECT supplier_id, id, ?, ?, source_item_id FROM other_item_schedules WHERE supplier_id = ? AND id = ?');
+        $stmt->execute([$index, $itemId, $supplierId, $scheduleId]);
     }
 
-    private function sourceId(int $supplierId, int $id): int
+    private function sourceId(int $supplierId, int $id, bool $lock = false): int
     {
-        $stmt = $this->db->pdo()->prepare('SELECT source_item_id FROM other_item_schedules WHERE supplier_id = ? AND id = ?');
+        $stmt = $this->db->pdo()->prepare('SELECT source_item_id FROM other_item_schedules WHERE supplier_id = ? AND id = ?'
+            . ($lock ? ' FOR UPDATE' : ''));
         $stmt->execute([$supplierId, $id]);
         $sourceId = $stmt->fetchColumn();
         if ($sourceId === false) throw new OtherItemException('schedule_not_found', 'Rozvrh nebyl nalezen.', 404);

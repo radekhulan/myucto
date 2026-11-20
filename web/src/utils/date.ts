@@ -75,6 +75,15 @@ function parseIsoDate(value: string): [number, number, number] | null {
   return parsed.every(Number.isFinite) ? parsed : null
 }
 
+/** Skutečné kalendářní datum `YYYY-MM-DD` (31. 2. ani 2099-13-01 neprojdou), např. z ručně upravené adresy. */
+export function isCalendarIsoDate(value: string): boolean {
+  const parts = parseIsoDate(value)
+  if (!parts) return false
+  const [year, month, day] = parts
+  const date = new Date(Date.UTC(year, month - 1, day))
+  return date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day
+}
+
 /**
  * `YYYY-MM-DD` + N dnů, čistě kalendářně.
  *

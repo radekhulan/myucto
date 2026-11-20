@@ -22318,11 +22318,11 @@ paths:
       parameters:
         - { $ref: '#/components/parameters/SupplierIdHeader' }
         - { in: query, name: side, schema: { type: string, enum: [receivable, payable] } }
-        - { in: query, name: status, schema: { type: string, enum: [open, all, draft, confirmed, posted, reversed, cancelled] } }
+        - { in: query, name: status, schema: { type: string, enum: [open, all, draft, confirmed, posted, reversed, cancelled] }, description: 'open = aktivní položky, u kterých zbývá zaplatit jistinu, nebo úrok či poplatek rozdělené splátky (remaining_payment); totals jsou saldo jistiny.' }
         - { in: query, name: kind, schema: { type: string }, description: Vestavěný druh; vrací jen položky bez vlastního druhu (kind_id null). }
         - { in: query, name: kind_id, schema: { type: integer, minimum: 1 }, description: Vlastní druh firmy (GET /accounting/other-items/kinds); má přednost před kind a vynechá převzaté zdroje. }
-        - { in: query, name: from, schema: { type: string, format: date } }
-        - { in: query, name: to, schema: { type: string, format: date } }
+        - { in: query, name: from, schema: { type: string, format: date }, description: 'Splatnost od. Bez from i to platí pro ruční položky, součty i převzaté zdroje okno rok zpět až rok dopředu; ruční položky ve stavu open dolní mez nemají. Jen to = bez dolní meze.' }
+        - { in: query, name: to, schema: { type: string, format: date }, description: 'Splatnost do. Jen from = bez horní meze.' }
         - { in: query, name: q, schema: { type: string } }
         - { in: query, name: page, schema: { type: integer, minimum: 1 } }
         - { in: query, name: per_page, schema: { type: integer, minimum: 1, maximum: 200 } }
@@ -46917,22 +46917,22 @@ components:
             paid_amount: { type: number, description: Alokované úhrady z banky a pokladny včetně settled_outside_amount. }
             posted_deletion: { $ref: '#/components/schemas/PostedDeletion', description: Jen v detailu zaúčtovaného dokladu se zápisem v deníku }
             remaining_amount: { type: number, description: Saldo položky. U úvěru s rozdělenými splátkami jen jistina. }
-            remaining_payment: { type: number, description: Kolik zbývá zaplatit; u rozdělených splátek i úrok a poplatek, jinak rovno remaining_amount. Jen detail. }
-            has_split_installments: { type: boolean, description: Splátkový kalendář má aspoň jednu splátku rozdělenou na jistinu, úrok a poplatek. Jen detail. }
+            remaining_payment: { type: number, description: Kolik zbývá zaplatit; u rozdělených splátek i úrok a poplatek, jinak rovno remaining_amount. Podle něj se odvozuje stav úhrady ve výpisu i v detailu. }
+            has_split_installments: { type: boolean, description: Splátkový kalendář má aspoň jednu splátku rozdělenou na jistinu, úrok a poplatek. }
             journal_entry_id: { type: [integer, 'null'], format: int64 }
             reversal_entry_id: { type: [integer, 'null'], format: int64 }
             posted_at: { type: [string, 'null'], format: date-time }
             document_count: { type: integer, description: 'Jen v seznamu a jen s právem číst dokumenty: počet připojených dokumentů.' }
             occurrence:
               type: [object, 'null']
-              description: 'Jen v detailu. Položku vytvořilo opakování (výskyt 1 a další); zdroj rozvrhu a položka mimo rozvrh mají null.'
+              description: 'Jen v detailu. Položku vytvořilo opakování (výskyt 1 a další); zdroj rozvrhu a položka mimo rozvrh mají null. Po zrušení opakování výskyt zůstává se zdrojem, rozvrh je null.'
               properties:
-                schedule_id: { type: integer, format: int64 }
+                schedule_id: { type: [integer, 'null'], format: int64, description: 'Rozvrh opakování; null po jeho zrušení.' }
                 occurrence_index: { type: integer }
-                source_item_id: { type: integer, format: int64 }
+                source_item_id: { type: [integer, 'null'], format: int64, description: 'Zdrojová položka; null, když byla zdrojová položka smazána.' }
                 source_document_no: { type: [string, 'null'], description: 'Číslo zdrojové položky; null, dokud ho nemá (koncept).' }
-                source_title: { type: string }
-                schedule_created_at: { type: string, format: date-time }
+                source_title: { type: [string, 'null'] }
+                schedule_created_at: { type: [string, 'null'], format: date-time, description: 'Kdy byl rozvrh založen; null po zrušení opakování.' }
                 created_by_name: { type: [string, 'null'], description: 'Kdo rozvrh založil; null u neznámého nebo smazaného uživatele.' }
             posting_rules:
               type: object
