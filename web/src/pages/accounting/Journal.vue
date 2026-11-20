@@ -560,7 +560,16 @@ const COLUMNS: ColumnDef[] = [
   { key: 'date', labelKey: 'accounting.journal.entry_date', required: true },
   { key: 'document_no', labelKey: 'accounting.journal.document_no' },
   { key: 'document_date', labelKey: 'accounting.journal.col_document_date', defaultHidden: true },
+  { key: 'tax_date', labelKey: 'accounting.journal.col_tax_date', defaultHidden: true },
+  { key: 'received_date', labelKey: 'accounting.journal.col_received_date', defaultHidden: true },
+  { key: 'due_date', labelKey: 'accounting.journal.col_due_date', defaultHidden: true },
+  { key: 'paid_date', labelKey: 'accounting.journal.col_paid_date', defaultHidden: true },
   { key: 'description', labelKey: 'accounting.journal.description', required: true },
+  { key: 'partner_name', labelKey: 'accounting.journal.col_partner', defaultHidden: true },
+  { key: 'partner_ic', labelKey: 'accounting.journal.col_partner_ic', defaultHidden: true },
+  { key: 'variable_symbol', labelKey: 'accounting.journal.col_variable_symbol', defaultHidden: true },
+  { key: 'vendor_document_no', labelKey: 'accounting.journal.col_vendor_document_no', defaultHidden: true },
+  { key: 'counterparty_account', labelKey: 'accounting.journal.col_counterparty_account', defaultHidden: true },
   { key: 'source', labelKey: 'accounting.journal.source_col' },
   { key: 'amount', labelKey: 'accounting.journal.col_amount' },
   { key: 'status', labelKey: 'accounting.journal.status_col' },
@@ -581,7 +590,7 @@ const colors = useTableColors('journal')
 const columnDrag = useColumnDrag(tbl)
 const COLUMN_PRESETS = [
   { key: 'default', labelKey: 'common.columns_preset_default', visibleKeys: null, columnLabels: false },
-  { key: 'accounting', labelKey: 'common.columns_preset_accounting', visibleKeys: ['date', 'document_no', 'description', 'source', 'amount', 'status', 'entry_id', 'created_at', 'vat_breakdown', 'debit_accounts', 'credit_accounts'] },
+  { key: 'accounting', labelKey: 'common.columns_preset_accounting', visibleKeys: ['date', 'document_no', 'description', 'partner_name', 'variable_symbol', 'source', 'amount', 'status', 'entry_id', 'created_at', 'vat_breakdown', 'debit_accounts', 'credit_accounts'] },
   { key: 'complete', labelKey: 'common.columns_preset_full', visibleKeys: COLUMNS.map(c => c.key) },
 ]
 function onListScroll(event: Event) {
@@ -593,8 +602,22 @@ watch(() => [tbl.isVisible('vat_breakdown'), tbl.isVisible('debit_accounts'), tb
 function postingAccounts(entry: JournalEntry, side: 'debit' | 'credit'): string {
   return [...new Set(entry.posting_lines?.filter(line => line.side === side).map(line => line.account_code) ?? [])].join(', ') || '—'
 }
+/** Údaje prvotního dokladu dopočítané v listu; podle nich server neřadí. */
+const DOCUMENT_FACT_KEYS = ['partner_name', 'partner_ic', 'variable_symbol', 'vendor_document_no', 'counterparty_account', 'tax_date', 'received_date', 'due_date', 'paid_date'] as const
+type DocumentFactKey = typeof DOCUMENT_FACT_KEYS[number]
+const DOCUMENT_FACT_DATES = new Set<string>(['tax_date', 'received_date', 'due_date', 'paid_date'])
+const DOCUMENT_FACT_MONO = new Set<string>(['partner_ic', 'variable_symbol', 'vendor_document_no', 'counterparty_account'])
+function isDocumentFact(key: string): key is DocumentFactKey {
+  return (DOCUMENT_FACT_KEYS as readonly string[]).includes(key)
+}
+function documentFact(entry: JournalEntry, key: DocumentFactKey): string {
+  const value = entry[key]
+  if (!value) return '—'
+  return DOCUMENT_FACT_DATES.has(key) ? formatDate(value) : value
+}
 function mobileExtraFields(entry: JournalEntry): Array<{ key: string; label: string; value: string }> {
   const values: Record<string, string> = {
+    ...Object.fromEntries(DOCUMENT_FACT_KEYS.map(k => [k, documentFact(entry, k)])),
     document_date: entry.document_date ? formatDate(entry.document_date) : '—',
     posted_at: entry.posted_at ? formatDate(entry.posted_at) : '—',
     posted_by: entry.posted_by_name || '—',
@@ -1339,7 +1362,7 @@ function entryRange(entry: JournalEntryDetail): { from: string; to: string } {
                   :aria-label="t('common.select_all')" data-test="journal-select-all" @change="toggleAllLoaded" />
               </th>
               <template v-for="c in tbl.orderedColumns.value.filter(c => tbl.isVisible(c.key))" :key="c.key">
-                <th v-if="c.key === 'dimensions'" scope="col" class="px-3 py-2 text-left font-medium" v-bind="columnDrag.headerAttrs(c.key)"><ColumnDragHandle /> {{ t(c.labelKey) }}</th>
+                <th v-if="c.key === 'dimensions' || isDocumentFact(c.key)" scope="col" class="px-3 py-2 text-left font-medium whitespace-nowrap" v-bind="columnDrag.headerAttrs(c.key)"><ColumnDragHandle /> {{ t(c.labelKey) }}</th>
                 <SortableTh v-else v-bind="columnDrag.headerAttrs(c.key)" reorderable :label="t(c.labelKey)" :sort-key="c.key" :sort="tbl.sort.value"
                   :align="c.key === 'amount' ? 'right' : 'left'" :data-adaptive-weight="c.key === 'description' ? 2 : undefined" :class="c.key === 'description' ? 'wrap-cell' : ''" @toggle="onSortToggle" />
               </template>
@@ -1456,6 +1479,9 @@ function entryRange(entry: JournalEntryDetail): { from: string; to: string } {
                   </span>
                   <span v-else class="text-neutral-400">—</span>
                 </td>
+                <td v-else-if="isDocumentFact(c.key)" :data-custom-color="!!colors.color(c.key)" :style="colors.cellStyle(c.key)"
+                  class="px-3 py-2" :class="[DOCUMENT_FACT_MONO.has(c.key) ? 'font-mono text-xs whitespace-nowrap' : '', DOCUMENT_FACT_DATES.has(c.key) ? 'whitespace-nowrap' : '', c.key === 'partner_name' ? 'truncate max-w-[16rem]' : '']"
+                  :title="c.key === 'partner_name' ? (e.partner_name || undefined) : undefined">{{ documentFact(e, c.key) }}</td>
                 <td v-else-if="c.key === 'dimensions'" :data-custom-color="!!colors.color('dimensions')" :style="colors.cellStyle('dimensions')" class="px-3 py-2 text-xs max-w-64 truncate" :title="e.dimension_labels?.join(' · ')">{{ e.dimension_labels?.join(' · ') || '—' }}</td>
                 </template>
                 <td class="w-8"></td>
@@ -1534,7 +1560,7 @@ function entryRange(entry: JournalEntryDetail): { from: string; to: string } {
             <div class="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-neutral-500">
               <span class="font-mono" :data-custom-color="!!colors.color('date')" :style="colors.cellStyle('date')">{{ formatDate(e.entry_date) }}</span>
               <span class="text-neutral-400">·</span>
-              <span :data-custom-color="!!colors.color('source')" :style="colors.cellStyle('source')">{{ sourceLabel(e.source_type) }}<template v-if="journalSourceRefLabel(e)"> {{ journalSourceRefLabel(e) }}</template></span>
+              <span :data-custom-color="!!colors.color('source')" :style="colors.cellStyle('source')">{{ sourceLabel(e.source_type) }}<span v-if="journalSourceRefLabel(e)" class="ml-1">{{ journalSourceRefLabel(e) }}</span></span>
               <AutomationBadge v-if="e.automation?.mode === 'auto'" variant="auto" />
               <span v-if="e.pair_status === 'composite_mn'" :title="t('accounting.pairs.badge_mn_title')"
                 class="whitespace-nowrap text-[10px] px-1.5 py-0.5 rounded bg-warning-50 text-warning-600 font-medium">{{ t('accounting.pairs.badge_mn') }}</span>

@@ -347,6 +347,49 @@ final class JournalExportAndHistoryTest extends TestCase
         self::assertSame($registerId, (int) $row['source_register_id']);
     }
 
+    public function testListCarriesFactsOfPurchaseInvoiceAndItsReversal(): void
+    {
+        $pdo = $this->db->pdo();
+        $currencyId = (int) $pdo->query("SELECT id FROM currencies WHERE code = 'CZK'")->fetchColumn();
+        $countryId = (int) $pdo->query("SELECT id FROM countries ORDER BY id LIMIT 1")->fetchColumn();
+        $pdo->prepare(
+            'INSERT INTO clients (supplier_id, company_name, ic, street, city, zip, country_id, main_email,
+                                  language, currency_default_id, is_customer, is_vendor)
+             VALUES (?, "Dodavatel Deník s.r.o.", "12345679", "Test 1", "Praha", "11000", ?, "denik@example.invalid", "cs", ?, 0, 1)'
+        )->execute([$this->supplierId, $countryId, $currencyId]);
+        $vendorId = (int) $pdo->lastInsertId();
+        $pdo->prepare(
+            'INSERT INTO purchase_invoices
+                (supplier_id, varsymbol, vendor_id, vendor_invoice_number, payment_variable_symbol, document_kind,
+                 issue_date, tax_date, due_date, received_at, currency_id, vendor_snapshot, total_with_vat, status, created_by)
+             VALUES (?, "PF2099001", ?, "DOD-77", "770077", "invoice", ?, ?, ?, ?, ?, "{}", 1210, "received", ?)'
+        )->execute([$this->supplierId, $vendorId, self::YEAR . '-04-01', self::YEAR . '-03-31', self::YEAR . '-04-15',
+            self::YEAR . '-04-02', $currencyId, $this->userId]);
+        $invoiceId = (int) $pdo->lastInsertId();
+
+        $entryId = $this->posting->postDocument($this->supplierId, 'purchase_invoice', $invoiceId, [
+            ['account_code' => '518', 'side' => 'debit', 'amount' => 1210.00],
+            ['account_code' => '321', 'side' => 'credit', 'amount' => 1210.00],
+        ], ['entry_date' => self::YEAR . '-04-02', 'user_id' => $this->userId, 'posted_by' => $this->userId]);
+        $reversalId = $this->posting->reverse($this->supplierId, $entryId, [
+            'entry_date' => self::YEAR . '-04-03', 'user_id' => $this->userId, 'posted_by' => $this->userId,
+        ]);
+
+        $items = $this->journalRepo->paginate($this->supplierId, ['source_type' => 'purchase_invoice'], 50, 0)['items'];
+        foreach ([$entryId, $reversalId] as $id) {
+            $row = $this->findItem($items, $id);
+            self::assertNotNull($row);
+            self::assertSame('PF2099001', $row['source_ref'], 'Štítek zdroje nese číslo dokladu, ne interní ID.');
+            self::assertSame('Dodavatel Deník s.r.o.', $row['partner_name']);
+            self::assertSame('12345679', $row['partner_ic']);
+            self::assertSame('770077', $row['variable_symbol']);
+            self::assertSame('DOD-77', $row['vendor_document_no']);
+            self::assertSame(self::YEAR . '-03-31', $row['tax_date']);
+            self::assertSame(self::YEAR . '-04-02', $row['received_date']);
+            self::assertSame(self::YEAR . '-04-15', $row['due_date']);
+        }
+    }
+
     public function testJournalExposesAndFiltersAutomationProvenance(): void
     {
         $autoEntry = $this->bankEntryWithProvenance('auto_posted', 'Automatické pravidlo');

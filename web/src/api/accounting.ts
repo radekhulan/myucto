@@ -184,6 +184,18 @@ export interface JournalEntry {
    */
   source_settlement_doc_type?: 'invoice' | 'purchase_invoice' | null
   source_settlement_doc_id?: number | null
+  /** Číslo prvotního dokladu pro štítek zdroje (faktura, přijatá faktura, pokladní doklad, ostatní položka). */
+  source_ref?: string | null
+  /** Údaje prvotního dokladu pro volitelné sloupce deníku, jen v listu. */
+  partner_name?: string | null
+  partner_ic?: string | null
+  variable_symbol?: string | null
+  vendor_document_no?: string | null
+  tax_date?: string | null
+  received_date?: string | null
+  due_date?: string | null
+  paid_date?: string | null
+  counterparty_account?: string | null
   /**
    * Obohaceno v listu — zápis má protějšek v grafu doklad ↔ úhrada (banka/pokladna/
    * zápočet). Podklad pro odznak ve sloupci Zdroj; obsah panelu dodá /journal/{id}/related.
