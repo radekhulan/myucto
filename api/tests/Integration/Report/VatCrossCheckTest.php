@@ -719,6 +719,59 @@ final class VatCrossCheckTest extends TestCase
         self::assertEqualsWithDelta((float) $acc['counter'], $sumCounter, 0.005, 'Σ booked per-doklad == headline counter.');
     }
 
+    /** @return iterable<string, array{0:string, 1:float}> */
+    public static function selfAssessedDeductionCases(): iterable
+    {
+        yield 'bez nároku' => ['none', 100.0];
+        yield 'poměrný nárok 50 %' => ['proportional', 50.0];
+    }
+
+    // Pořízení zboží z JČS bez plného nároku: přiznání odpočet ř. 43 potlačí nebo zkrátí,
+    // předpis 343 tomu odpovídá → rozpis nesmí hlásit falešný extra_entry a Σ == headline.
+    #[DataProvider('selfAssessedDeductionCases')]
+    public function testSelfAssessedEuAcquisitionWithoutFullDeductionReconciles343(string $deduction, float $percent): void
+    {
+        $deId = (int) ($this->db->pdo()->query("SELECT id FROM countries WHERE iso2 = 'DE' LIMIT 1")->fetchColumn() ?: 0);
+        if ($deId === 0) {
+            self::markTestSkipped('Chybí země DE v číselníku.');
+        }
+        $vend = $this->client('Dodavatel RC JČS', 'DE123456789', $deId);
+        $cust = $this->client('Odběratel RC JČS', 'CZ11111118');
+        $sale = $this->sale('FV-2048-RCN', $cust, '1', false, 50000.0, 10500.0, 21.0);
+        $pf = $this->purchase('PF-2048-RCN', $vend, '23', 10000.0, 0.0, 21.0, ['reverse_charge' => 1]);
+        $this->db->pdo()->prepare('UPDATE purchase_invoices SET vat_deduction = ?, vat_deduction_percent = ? WHERE id = ?')
+            ->execute([$deduction, $percent, $pf]);
+        $this->autoPoster->post($this->supplierId, 'invoice', $sale);
+        $this->autoPoster->post($this->supplierId, 'purchase_invoice', $pf);
+
+        $findings = $this->crossCheck->check($this->supplierId, self::YEAR, self::MONTH, 'monthly');
+        self::assertNull(
+            $this->findingByCheck($findings, 'account_343_vs_return'),
+            'Zaúčtovaný doklad sedí s přiznáním → kontrola 343 bez nálezu.',
+        );
+
+        // Rozpis se počítá jen při rozdílu v headline: ruční zápis ho vyvolá a v rozpisu
+        // smí být jen on, ne samovyměřený doklad.
+        $entryId = $this->manualEntry343(sprintf('%04d-%02d-20', self::YEAR, self::MONTH), 1000.0);
+        $acc = $this->findingByCheck(
+            $this->crossCheck->check($this->supplierId, self::YEAR, self::MONTH, 'monthly'),
+            'account_343_vs_return',
+        );
+        self::assertNotNull($acc);
+        $docs = $acc['documents'];
+        foreach ($docs as $d) {
+            self::assertFalse(
+                (int) $d['invoice_id'] === $pf && $d['source'] === 'purchase',
+                'Samovyměřený doklad bez plného nároku nesmí v rozpisu 343 vyjít jako rozdíl (' . ($d['reason'] ?? '') . ').',
+            );
+        }
+        self::assertCount(1, $docs);
+        self::assertSame($entryId, (int) $docs[0]['invoice_id']);
+        self::assertSame('extra_entry', $docs[0]['reason']);
+        $sumDiff = round(array_sum(array_map(static fn (array $d): float => (float) $d['difference'], $docs)), 2);
+        self::assertEqualsWithDelta((float) $acc['difference'], $sumDiff, 0.005, 'Σ documents.difference == difference.');
+    }
+
     // T7: měsíční kontrola — timing-only rozdíl je ✓ (ok=true) s info nálezem v hodnotě.
     public function testMonthlyCheckIsOkForTimingOnlyDifference(): void
     {

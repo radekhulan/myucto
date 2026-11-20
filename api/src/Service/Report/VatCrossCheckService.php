@@ -361,14 +361,17 @@ final class VatCrossCheckService
                 . "\0" . ($r['code'] ?? '')
                 . "\0" . (empty($r['is_reverse_charge']) ? '0' : '1')
                 . (empty($r['classification_reverse_charge']) ? '0' : '1')
-                . (empty($r['rc_self_assessed_vat']) ? '0' : '1');
+                . (empty($r['rc_self_assessed_vat']) ? '0' : '1')
+                . (empty($r['vat_deduction_none']) ? '0' : '1');
             if (!isset($groups[$key])) {
                 $groups[$key] = array_intersect_key($r, self::GROUP_FIELDS);
                 $groups[$key]['base_czk'] = 0.0;
                 $groups[$key]['vat_czk'] = 0.0;
+                $groups[$key]['deduction_vat_czk'] = 0.0;
             }
             $groups[$key]['base_czk'] += (float) $r['base_czk'];
             $groups[$key]['vat_czk']  += (float) $r['vat_czk'];
+            $groups[$key]['deduction_vat_czk'] += (float) ($r['deduction_vat_czk'] ?? $r['vat_czk']);
         }
         return array_values($groups);
     }
@@ -381,6 +384,7 @@ final class VatCrossCheckService
         'country_iso2' => true, 'country_is_eu' => true,
         'dphdp3_line' => true, 'code' => true,
         'is_reverse_charge' => true, 'classification_reverse_charge' => true, 'rc_self_assessed_vat' => true,
+        'vat_deduction_none' => true,
     ];
 
     /** Má aspoň jeden nález blokovat stažení (nenulový tvrdý rozdíl)? */
@@ -967,8 +971,9 @@ final class VatCrossCheckService
 
     /**
      * Příspěvek dokladu k dani z přiznání (výstup − vstup), týž klíč jako booked343ByDoc.
-     * sale → +vat_czk; purchase → −vat_czk; purchase RC samovyměření → 0 (výstup i vstup
-     * se vyruší — shodně s předpisem MD 343 / D 343). Mapování klíče = countUnpostedDphDocs:
+     * sale → +vat_czk; purchase → −vat_czk; purchase RC samovyměření → výstup − zrcadlový
+     * odpočet (plný nárok 0, bez nároku +vat_czk, § 75 jen nekrácená část — shodně
+     * s předpisem 343 v PostingService::reverseChargeVatSplit()). Mapování klíče = countUnpostedDphDocs:
      * document_kind='cash' → 'cash', sale → 'invoice', jinak 'purchase_invoice'.
      *
      * @param list<array<string,mixed>> $rows
@@ -987,7 +992,17 @@ final class VatCrossCheckService
             if ($r['source'] === 'sale') {
                 $contribution = (float) $r['vat_czk'];
             } elseif (VatLedgerService::isSelfAssessedRow($r)) {
-                $contribution = 0.0;
+                // Shodně s VatClassificationMapper::projectDphLines(): bez nároku (§ 72/4)
+                // přiznání zrcadlový odpočet ř. 43/44 potlačí, takže zbývá jen daň na výstupu.
+                // U poměrného nároku § 75 jde do odpočtu jen deduction_vat_czk. Řádek bez
+                // řádku přiznání do přiznání nevstupuje vůbec.
+                if (($r['dphdp3_line'] ?? null) === null) {
+                    $contribution = 0.0;
+                } elseif (!empty($r['vat_deduction_none'])) {
+                    $contribution = (float) $r['vat_czk'];
+                } else {
+                    $contribution = (float) $r['vat_czk'] - (float) ($r['deduction_vat_czk'] ?? $r['vat_czk']);
+                }
             } else {
                 $contribution = -(float) $r['vat_czk'];
             }
