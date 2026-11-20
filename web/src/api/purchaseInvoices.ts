@@ -502,6 +502,8 @@ export interface PurchaseInvoice {
   advance_link_suggested_id: number | null
   /** Shrnutí navázané zálohy (pokud advance_purchase_invoice_id != null). */
   linked_advance?: PurchaseInvoiceBrief | null
+  /** Všechny zálohy, které tato konečná faktura vyúčtovává (linked_advance = první z nich). */
+  linked_advances?: PurchaseInvoiceBrief[]
   /** Dobropis (credit_note): opravovaná přijatá faktura (migrace 1096). */
   parent_purchase_invoice_id?: number | null
   /** Shrnutí opravované faktury (pokud parent_purchase_invoice_id != null). */
@@ -730,6 +732,8 @@ export interface PurchaseInvoicePayload {
   parent_purchase_invoice_id?: number | null
   /** Jen při založení: záloha, kterou nová konečná faktura vyúčtovává (u uloženého dokladu link-advance). */
   advance_purchase_invoice_id?: number | null
+  /** Jen při založení: víc záloh téhož dodavatele, které nová konečná faktura vyúčtovává. */
+  advance_purchase_invoice_ids?: number[]
   /** Ruční rekapitulace DPH dle dokladu (§ 73). null/[] = počítat standardně. */
   vat_overrides?: PurchaseVatOverride[] | null
   /** Prázdné pole = použít hlavičkový režim faktury. */
@@ -1046,11 +1050,15 @@ export const purchaseInvoicesApi = {
   settlementCandidates: (id: number) =>
     api.get<{ candidates: PurchaseInvoiceBrief[] }>(`/purchase-invoices/${id}/settlement-candidates`)
       .then(r => r.data.candidates),
-  linkAdvance: (id: number, advanceId: number) =>
-    api.post<PurchaseInvoice>(`/purchase-invoices/${id}/link-advance`, { advance_id: advanceId })
+  // append = přidat další zálohu k už navázaným (konečná faktura vyúčtuje víc záloh).
+  linkAdvance: (id: number, advanceId: number, opts?: { append?: boolean }) =>
+    api.post<PurchaseInvoice>(`/purchase-invoices/${id}/link-advance`,
+      opts?.append ? { advance_id: advanceId, append: true } : { advance_id: advanceId })
       .then(r => r.data),
-  unlinkAdvance: (id: number) =>
-    api.delete<PurchaseInvoice>(`/purchase-invoices/${id}/link-advance`).then(r => r.data),
+  // Bez advanceId odpojí všechny navázané zálohy.
+  unlinkAdvance: (id: number, advanceId?: number) =>
+    api.delete<PurchaseInvoice>(`/purchase-invoices/${id}/link-advance`,
+      advanceId !== undefined ? { params: { advance_id: advanceId } } : undefined).then(r => r.data),
   dismissAdvanceSuggestion: (id: number) =>
     api.delete<PurchaseInvoice>(`/purchase-invoices/${id}/advance-suggestion`).then(r => r.data),
   // Nová (neuložená) konečná faktura: zálohy dodavatele k navázání při uložení.

@@ -225,12 +225,25 @@ function addAdvanceDeduction() {
   router.push({ name: 'purchase-invoice-edit', params: { id: invoice.value.id }, query: { advance_deduction: '1' } })
 }
 
+// Zálohy, které konečná faktura vyúčtovává (víc záloh téhož dodavatele).
+const linkedAdvances = computed<PurchaseInvoiceBrief[]>(() => {
+  const inv = invoice.value
+  if (!inv) return []
+  return inv.linked_advances ?? (inv.linked_advance ? [inv.linked_advance] : [])
+})
+
+function advanceLabel(a: PurchaseInvoiceBrief): string {
+  return a.varsymbol || a.vendor_invoice_number || ('#' + a.id)
+}
+
 // Jsem na vyúčtovací faktuře, advanceId = záloha → vazba na current (i AI návrh).
+// Má-li faktura už navázanou zálohu, další se přidává (append), stávající zůstávají.
 async function linkAdvance(advanceId: number) {
   if (!invoice.value || linkingAdvance.value) return
   linkingAdvance.value = true
   try {
-    invoice.value = await purchaseInvoicesApi.linkAdvance(invoice.value.id, advanceId)
+    const append = linkedAdvances.value.length > 0
+    invoice.value = await purchaseInvoicesApi.linkAdvance(invoice.value.id, advanceId, append ? { append: true } : undefined)
     advanceModalOpen.value = false
     toast.success(t('purchase_invoice.advance_link.linked'))
     purchaseInvoicesApi.activity(id.value).then(a => { activity.value = a }).catch(() => {})
@@ -261,19 +274,23 @@ async function pickCandidate(candId: number) {
 }
 
 // targetId = id vyúčtovací faktury, jejíž vazbu rušíme. Default = aktuální doklad
-// (jsem na vyúčtovací). Z detailu zálohy předáme id navázané faktury → reload.
-async function unlinkAdvance(targetId?: number) {
+// (jsem na vyúčtovací, advance = odpojovaná záloha). Z detailu zálohy předáme id
+// navázané faktury a odpojí se jen tato záloha → reload.
+async function unlinkAdvance(targetId?: number, advance?: PurchaseInvoiceBrief) {
   if (!invoice.value || linkingAdvance.value) return
-  if (!confirm(t('purchase_invoice.advance_link.unlink_confirm'))) return
+  const message = advance
+    ? t('purchase_invoice.advance_link.unlink_one_confirm', { advance: advanceLabel(advance) })
+    : t('purchase_invoice.advance_link.unlink_confirm')
+  if (!confirm(message)) return
   linkingAdvance.value = true
   try {
     if (targetId && targetId !== invoice.value.id) {
-      await purchaseInvoicesApi.unlinkAdvance(targetId)
+      await purchaseInvoicesApi.unlinkAdvance(targetId, invoice.value.id)
       await load()
     } else {
-      invoice.value = await purchaseInvoicesApi.unlinkAdvance(invoice.value.id)
+      invoice.value = await purchaseInvoicesApi.unlinkAdvance(invoice.value.id, advance?.id)
     }
-    toast.success(t('purchase_invoice.advance_link.unlinked'))
+    toast.success(advance ? t('purchase_invoice.advance_link.unlinked_one') : t('purchase_invoice.advance_link.unlinked'))
     purchaseInvoicesApi.activity(id.value).then(a => { activity.value = a }).catch(() => {})
   } catch (e) {
     toast.error(apiErrorMessage(e))
@@ -1274,23 +1291,36 @@ useWindowRefresh(async () => {
           {{ t('purchase_invoice.advance_link.unlink') }}
         </button>
       </div>
-      <!-- Vyúčtovací faktura → odkaz na započtenou zálohu (+ odpojení) -->
-      <div v-else-if="invoice.linked_advance"
-        class="flex items-center justify-between gap-3 bg-primary-50 border border-primary-200 rounded-lg px-4 py-2.5 text-sm">
-        <span class="text-primary-700 min-w-0">
-          {{ t('purchase_invoice.advance_link.linked_to') }}
-          <RouterLink :to="`/purchase-invoices/${invoice.linked_advance.id}`" class="font-mono font-medium hover:underline">
-            {{ invoice.linked_advance.varsymbol || invoice.linked_advance.vendor_invoice_number || ('#' + invoice.linked_advance.id) }}
-          </RouterLink>
-          <span class="text-primary-700/70 font-mono">(−{{ formatMoney(invoice.linked_advance.total_with_vat, invoice.linked_advance.currency) }})</span>
-        </span>
-        <button v-if="auth.canWrite('purchase_invoices') && !lockedForMe" type="button" @click="unlinkAdvance()" :disabled="linkingAdvance"
-          class="cursor-pointer text-xs px-2 py-1 border border-neutral-300 rounded text-neutral-600 hover:bg-neutral-50 disabled:opacity-50 shrink-0 bg-surface">
-          {{ t('purchase_invoice.advance_link.unlink') }}
-        </button>
+      <!-- Vyúčtovací faktura → odkazy na započtené zálohy (+ odpojení jednotlivé, přidání další) -->
+      <div v-else-if="linkedAdvances.length > 0"
+        class="bg-primary-50 border border-primary-200 rounded-lg px-4 py-2.5 text-sm space-y-2" data-test="linked-advances">
+        <div class="flex flex-wrap items-center justify-between gap-2">
+          <span class="text-primary-700 font-medium min-w-0">
+            {{ linkedAdvances.length === 1 ? t('purchase_invoice.advance_link.linked_to') : t('purchase_invoice.advance_link.linked_to_many') }}
+          </span>
+          <button v-if="auth.canWrite('purchase_invoices') && !lockedForMe && invoice.status !== 'cancelled'" type="button"
+            @click="openPairModal('advance')" :disabled="linkingAdvance" :class="btnOutlineSm('primary')" data-test="linked-advance-add">
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.plus" /></svg>
+            {{ t('purchase_invoice.advance_link.add_more') }}
+          </button>
+        </div>
+        <ul class="divide-y divide-primary-200/60">
+          <li v-for="adv in linkedAdvances" :key="adv.id" data-test="linked-advance-row"
+            class="flex flex-wrap items-center justify-between gap-2 py-1.5 first:pt-0 last:pb-0">
+            <span class="text-primary-700 min-w-0">
+              <RouterLink :to="`/purchase-invoices/${adv.id}`" class="font-mono font-medium hover:underline">{{ advanceLabel(adv) }}</RouterLink>
+              <span class="text-primary-700/70 font-mono ml-1">(−{{ formatMoney(adv.total_with_vat, adv.currency) }})</span>
+            </span>
+            <button v-if="auth.canWrite('purchase_invoices') && !lockedForMe" type="button" @click="unlinkAdvance(undefined, adv)" :disabled="linkingAdvance"
+              :class="btnOutlineSm('neutral')" data-test="linked-advance-unlink">
+              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.x" /></svg>
+              {{ t('purchase_invoice.advance_link.unlink_one') }}
+            </button>
+          </li>
+        </ul>
       </div>
       <!-- Záloha s DDKP, ale faktura zálohu neodečítá → dvojí odpočet DPH, doklad nejde zaúčtovat -->
-      <div v-if="invoice.linked_advance && invoice.advance_deduction_missing"
+      <div v-if="linkedAdvances.length > 0 && invoice.advance_deduction_missing"
         class="flex flex-wrap items-center justify-between gap-3 bg-warning-50 border border-warning-200 rounded-lg px-4 py-2.5 text-sm"
         data-test="advance-deduction-missing">
         <span class="text-warning-700 min-w-0">{{ t('purchase_invoice.advance_deduction.missing') }}</span>
@@ -1905,7 +1935,7 @@ useWindowRefresh(async () => {
       </div>
 
       <!-- ═══ Správa propojení se zálohou — jen nelinkované stavy (linkované jsou v banneru pod headerem) ═══ -->
-      <div v-if="!invoice.settled_by && !invoice.linked_advance"
+      <div v-if="!invoice.settled_by && linkedAdvances.length === 0"
         class="bg-surface border border-neutral-200 rounded-lg shadow-sm p-5">
         <h3 class="text-sm font-medium text-neutral-700 mb-3">
           {{ invoice.document_kind === 'advance'

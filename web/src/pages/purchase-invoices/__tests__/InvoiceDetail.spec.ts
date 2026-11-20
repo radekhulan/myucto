@@ -9,6 +9,7 @@ const m = vi.hoisted(() => ({
   activity: vi.fn(),
   receiptPropose: vi.fn(),
   receiptList: vi.fn(),
+  unlinkAdvance: vi.fn(),
   push: vi.fn(),
   route: null as null | { params: { id: string } },
   stockEnabled: false,
@@ -38,6 +39,7 @@ vi.mock('@/api/purchaseInvoices', () => ({
   purchaseInvoicesApi: {
     get: m.get,
     activity: m.activity,
+    unlinkAdvance: m.unlinkAdvance,
     pdfUrl: () => '',
     sourceUrl: () => '',
     ourPdfUrl: () => '',
@@ -480,6 +482,58 @@ describe('InvoiceDetail.vue — vazba daňového dokladu k platbě', () => {
 
     expect(wrapper.text()).toContain('purchase_invoice.advance_link.settled_by')
     expect(wrapper.text()).not.toContain('purchase_invoice.tax_document_link.missing')
+  })
+})
+
+describe('InvoiceDetail.vue — víc navázaných záloh', () => {
+  const advance = (id: number, total: number) => ({
+    id,
+    varsymbol: `ZAL-${id}`,
+    vendor_invoice_number: `Z-${id}`,
+    document_kind: 'advance' as const,
+    issue_date: '2026-01-15',
+    total_with_vat: total,
+    currency: 'CZK',
+    status: 'paid' as const,
+  })
+
+  beforeEach(() => {
+    m.get.mockReset()
+    m.activity.mockReset()
+    m.activity.mockResolvedValue([])
+    m.receiptPropose.mockReset()
+    m.receiptPropose.mockResolvedValue({ lines: [], cost_candidates: [], purchase_invoice_id: 258, not_receivable_kind: 'advance' })
+    m.receiptList.mockReset()
+    m.receiptList.mockResolvedValue([])
+    m.unlinkAdvance.mockReset()
+    m.stockEnabled = false
+    if (m.route) m.route.params.id = '258'
+  })
+
+  it('zobrazí všechny navázané zálohy a odpojí jen vybranou', async () => {
+    const advances = [advance(901, 1500), advance(902, 1600), advance(903, 1700)]
+    m.get.mockResolvedValue(makeInvoice({ linked_advance: advances[0], linked_advances: advances }))
+    m.unlinkAdvance.mockResolvedValue(makeInvoice({ linked_advance: advances[0], linked_advances: [advances[0], advances[2]] }))
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const wrapper = mount(InvoiceDetail, { global: { stubs } })
+    await flushPromises()
+
+    const rows = wrapper.findAll('[data-test="linked-advance-row"]')
+    expect(rows).toHaveLength(3)
+    expect(rows.map(r => r.text())).toEqual([
+      expect.stringContaining('ZAL-901'),
+      expect.stringContaining('ZAL-902'),
+      expect.stringContaining('ZAL-903'),
+    ])
+    expect(wrapper.text()).toContain('purchase_invoice.advance_link.linked_to_many')
+    expect(wrapper.find('[data-test="linked-advance-add"]').exists()).toBe(true)
+
+    await rows[1].find('[data-test="linked-advance-unlink"]').trigger('click')
+    await flushPromises()
+
+    expect(m.unlinkAdvance).toHaveBeenCalledWith(258, 902)
+    expect(wrapper.findAll('[data-test="linked-advance-row"]')).toHaveLength(2)
+    confirmSpy.mockRestore()
   })
 })
 
