@@ -36313,7 +36313,7 @@
     "payroll_dry_run_hint": "Proběhne celý převod mezd vybraných roků ({years}): založení chybějících zaměstnanců a vztahů a import všech měsíců. Na konci se ale všechno vrátí, v MyÚčtu nic nezůstane.",
     "payroll_import_confirm": "Rozumím: převod založí ve firmě zaměstnance a pracovní vztahy, které v ní chybí, a naimportuje mzdy roků {years} z agendy {company} jako měsíční dávky importu mezd. Opakovaný převod nic nezdvojí.",
     "payroll_rights_missing": "Převod mezd zakládá zaměstnance, pracovní vztahy a mzdové vstupy. Chybí vám oprávnění k zápisu: {rights}. Požádejte správce firmy.",
-    "payroll_identifiers_confirm": "Potvrzuji, že OIČ a ID PPV vedená v PAMICA (na kartách i v odeslaných hlášeních JMHZ a registracích) pocházejí z protokolů ČSSZ. Převod je uloží k zaměstnancům a vztahům, podle nich se pak párují hlášení JMHZ. Bez potvrzení se tato čísla nepřevezmou.",
+    "payroll_identifiers_confirm": "Potvrzuji, že OIČ a ID PPV vedená v PAMICA (na kartách i v odeslaných hlášeních JMHZ a registracích) pocházejí z protokolů ČSSZ. Převod je uloží k zaměstnancům a vztahům, podle nich se pak párují hlášení JMHZ. Čísla, která nesou hlášení JMHZ přijatá ČSSZ, převod převezme i bez potvrzení; ostatní bez něj nepřevezme.",
     "open_payroll": "Otevřít importy mezd",
     "other_company": "jiná firma",
     "supplier_ico": "Převést lze jen agendu s IČO firmy v MyÚčtu ({ico}).",

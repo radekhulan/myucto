@@ -36313,7 +36313,7 @@
     "payroll_dry_run_hint": "The whole payroll transfer of the selected years ({years}) runs: missing employees and relations are created and all months are imported. Everything is then rolled back, nothing stays in MyÚčto.",
     "payroll_import_confirm": "I understand: the transfer creates the employees and employment relations missing in this company and imports the payroll of {years} from the agenda {company} as monthly payroll import batches. Repeating the transfer duplicates nothing.",
     "payroll_rights_missing": "The payroll transfer creates employees, employment relations and payroll inputs. You are missing write permission: {rights}. Ask the company administrator.",
-    "payroll_identifiers_confirm": "I confirm that the OIČ and ID PPV numbers kept in PAMICA (on the cards and in the sent JMHZ reports and registrations) come from the social security administration protocols. The transfer stores them with the employees and relations, JMHZ reports are matched by them. Without this confirmation these numbers are not transferred.",
+    "payroll_identifiers_confirm": "I confirm that the OIČ and ID PPV numbers kept in PAMICA (on the cards and in the sent JMHZ reports and registrations) come from the social security administration protocols. The transfer stores them with the employees and relations, JMHZ reports are matched by them. Numbers carried by JMHZ reports accepted by the social security administration are transferred even without this confirmation; others are not.",
     "open_payroll": "Open payroll imports",
     "other_company": "other company",
     "supplier_ico": "Only an agenda with the company ID of the MyÚčto company ({ico}) can be transferred.",

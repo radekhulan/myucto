@@ -176,12 +176,40 @@ final class PohodaPayrollJmhzImportTest extends TestCase
         self::assertSame(10332, $this->scalar($target, [$supplierId]));
     }
 
-    public function testIdentifiersFromReportsNeedConfirmation(): void
+    /**
+     * OIČ a ID PPV, která nesou hlášení přijatá ČSSZ, převod převezme bez potvrzení v průvodci:
+     * ČSSZ by hlášení s neznámým identifikátorem nepřijala. Janina čísla z karty i Petrovo ID PPV
+     * jen z hlášení.
+     */
+    public function testIdentifiersFromAcceptedReportsNeedNoConfirmation(): void
     {
         $supplierId = $this->payrollSupplier();
         $protocol = $this->importer->run($supplierId, $this->userId, SyntheticPohodaPayroll::writeWithReports($this->tmp), SyntheticPohodaPayroll::YEAR, false, startDecision: PohodaPayrollImporter::START_KEEP);
         self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
+        self::assertArrayNotHasKey('jmhz_identifiers_unconfirmed', self::stepCounts($protocol, PohodaPayrollImporter::STEP_JMHZ), $this->explain($protocol));
+        $people = self::stepCounts($protocol, PohodaPayrollImporter::STEP_PEOPLE);
+        self::assertArrayNotHasKey('identifiers_unconfirmed', $people, $this->explain($protocol));
+        self::assertSame(2, $people['identifiers_from_accepted_reports'] ?? 0, $this->explain($protocol));
+        $jana = $this->employment($supplierId, '1001');
+        $petr = $this->employment($supplierId, '1002');
+        $idPpv = "SELECT COUNT(*) FROM payroll_employment_external_ids WHERE supplier_id = ? AND employment_id = ? AND identifier_type = 'id_ppv'";
+        self::assertSame(1, $this->scalar($idPpv, [$supplierId, $jana['id']]), $this->explain($protocol));
+        self::assertSame(1, $this->scalar($idPpv, [$supplierId, $petr['id']]), $this->explain($protocol));
+    }
+
+    /** Hlášení odeslané, ale ČSSZ nepřijaté, původ čísel nedokládá: bez potvrzení se nepřevezmou. */
+    public function testIdentifiersFromUnacceptedReportsNeedConfirmation(): void
+    {
+        $supplierId = $this->payrollSupplier();
+        $file = SyntheticPohodaPayroll::writeWithReports($this->tmp);
+        file_put_contents($file, (string) preg_replace_callback('~<MH>.*?</MH>~s',
+            static fn (array $m): string => (string) preg_replace(['~<RelStavDP>7</RelStavDP>~', '~<DatPrij>[^<]*</DatPrij>~'], ['<RelStavDP>3</RelStavDP>', ''], $m[0]),
+            (string) file_get_contents($file)));
+
+        $protocol = $this->importer->run($supplierId, $this->userId, $file, SyntheticPohodaPayroll::YEAR, false, startDecision: PohodaPayrollImporter::START_KEEP);
+        self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
         self::assertSame(2, self::stepCounts($protocol, PohodaPayrollImporter::STEP_JMHZ)['jmhz_identifiers_unconfirmed'] ?? 0, $this->explain($protocol));
+        self::assertSame(2, self::stepCounts($protocol, PohodaPayrollImporter::STEP_PEOPLE)['identifiers_unconfirmed'] ?? 0, $this->explain($protocol));
         self::assertSame(0, $this->scalar('SELECT COUNT(*) FROM payroll_employment_external_ids WHERE supplier_id = ?', [$supplierId]));
     }
 

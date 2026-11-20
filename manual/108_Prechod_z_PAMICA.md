@@ -120,7 +120,8 @@ nehlásí chybu. Parametry a konfigurace jsou v
 4. Nastavte volby:
    - **Převáděné měsíce** (od - do, prázdné = všechny uzavřené měsíce exportu),
    - **Převzatou docházku a mzdové vstupy rovnou schválit** (výchozí zapnuto),
-   - potvrzení původu OIČ a ID PPV z protokolů ČSSZ (jen pokud tomu tak je),
+   - potvrzení původu OIČ a ID PPV z protokolů ČSSZ (jen pokud tomu tak je; čísla
+     z hlášení JMHZ přijatých ČSSZ se převezmou i bez něj),
    - u začátku vedení mezd před zpracovanými měsíci volbu **Posunout začátek na
      MM/RRRR a převést** (výchozí), nebo **Převést bez posunu začátku**
      (vyžaduje potvrzení). Firma bez začátku vedení mezd žádnou volbu nemá;
@@ -370,7 +371,7 @@ jen údaje, které v MyÚčtu chybí; vyplněný údaj nepřepíše:
 | děti s daňovým zvýhodněním (1., 2. a 3. dítě) | vyživované osoby s nárokem daného pořadí, od měsíce podepsaného prohlášení |
 | prohlášení poplatníka u zpracovaných mezd | prohlášení poplatníka po měsících |
 | pracoviště s kódem obce, CZ-ISCO | podmínky vztahu (pracoviště JMHZ) |
-| OIČ a ID PPV | identifikátory ČSSZ, jen s potvrzením v průvodci |
+| OIČ a ID PPV | identifikátory ČSSZ: z přijatých hlášení JMHZ samy, jinak s potvrzením v průvodci |
 | datum skončení pracovního poměru | skončení vztahu k tomuto dni |
 | odeslané registrace a odhlášky ČSSZ, oznámení pojišťovnám, ELDP | splněné položky Zákonných termínů |
 | úhrny mezd za měsíce před začátkem vedení mezd v MyÚčtu | počáteční stavy kumulací |
@@ -388,8 +389,10 @@ zapíše jako *neověřenou* a protokol vypíše osobní čísla. Důvod (např�
 státní pojištěnec nebo držitel průkazu ZTP/P) doplňte v zákonné evidenci
 osoby; dokud chybí, mzdový běh za tyto měsíce nepůjde spočítat.
 
-OIČ a ID PPV se převezmou jen tehdy, když v kroku *Náhled a volby* potvrdíte,
-že čísla v PAMICA pocházejí z protokolů ČSSZ. OIČ s chybnou kontrolní číslicí
+OIČ a ID PPV, která nesou hlášení JMHZ přijatá ČSSZ, převod převezme sám:
+ČSSZ by hlášení s neznámým číslem nepřijala. Ostatní čísla (jen na kartě, nebo
+v hlášení odeslaném, ale nepřijatém) se převezmou jen tehdy, když v kroku
+*Náhled a volby* potvrdíte, že pocházejí z protokolů ČSSZ. OIČ s chybnou kontrolní číslicí
 převod vynechá a vypíše osobní čísla.
 
 Položku Zákonných termínů převod odškrtne jen tam, kde PAMICA nese doklad:
@@ -856,7 +859,7 @@ chybí, a to stejnými zápisy jako údaje z karet:
 | fond pracovní doby a stanovená týdenní doba | týdenní pracovní doba a úvazek, jen vztahu bez týdenní doby |
 | druh činnosti, upřesnění vztahu, CZ-ISCO | podmínky vztahu, jen prázdná pole |
 | obec, kód obce a stát pracoviště, sjednané místo výkonu práce | pracoviště JMHZ, jen vztahu bez kódu obce a se shodným místem výkonu práce |
-| OIČ a ID PPV | identifikátory ČSSZ, jen s potvrzením v průvodci a jen chybějící |
+| OIČ a ID PPV | identifikátory ČSSZ, jen chybějící: z přijatých hlášení samy, jinak s potvrzením v průvodci |
 | průměrný hodinový výdělek | schválený průměr čtvrtletí, které průměr ze zpracovaných mezd nemá |
 | vyživované děti z prohlášení poplatníka | vyživované osoby, jen osobě, která žádnou nemá |
 | zda tytéž děti vyživuje jiná osoba v domácnosti a kdo to je | odpověď u nároků na zvýhodnění (jen dosud nezodpovězených), u kladné odpovědi i jméno a datum narození té osoby (z rodného čísla, když ho hlášení neuvádí) |
