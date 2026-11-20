@@ -1541,6 +1541,28 @@ final class SyntheticAgenda
     }
 
     /**
+     * Agenda, ve které daňový doklad k přijaté platbě DPP25005 (tuzemská DPH 21 %) sdílí
+     * číslice s licencí z EU FP25005 a v `PFaktury` stojí před ní. Samovyměření „RCH k FP25005"
+     * patří jen FP25005.
+     *
+     * @return array<string,string>
+     */
+    public static function filesWithTaxDocumentSharingSelfAssessmentDigits(): array
+    {
+        $files = self::files();
+        $existing = iterator_to_array(Ms3Table::fromString($files['ROK.002/PFaktury.DAT'], 'PFAKTURY')->rows(), false);
+        $files['ROK.002/PFaktury.DAT'] = Ms3FixtureWriter::table(self::PURCHASE_FIELDS, array_merge([[
+            'D_ICO' => self::VENDOR_ICO, 'D_DIC' => 'CZ' . self::VENDOR_ICO, 'D_Nazev' => 'Dodavatel Alfa s.r.o.',
+            'D_Ulice' => 'Vzorová 1', 'D_Mesto' => 'Praha', 'D_Psc' => '110 00',
+            'SazbaDPH1' => 12.0, 'SazbaDPH2' => 21.0, 'Druh' => 'D', 'KodDPH' => self::KOD_DPH_PURCHASE, 'Uhrada' => 'převodem',
+            'Doklad' => 'DPP25005', 'PrijatDokl' => 'DD-2025-005', 'VarSymbol' => '2025505',
+            'Vystaveno' => '2025-07-12', 'DatUcPr' => '2025-07-12', 'PlnenoDPH' => '2025-07-12', 'Splatno' => '2025-07-12', 'Doruceno' => '2025-07-12',
+            'Zaklad_2' => 1000.0, 'DPH_2' => 210.0, 'CelkemSDPH' => 1210.0, 'Popis' => 'Doklad k přijaté platbě',
+        ]], $existing));
+        return $files;
+    }
+
+    /**
      * Agenda, ve které FP25005 nese příznak přenesené povinnosti (`RevCH`), ale interní
      * doklad se samovyměřením k ní v záloze není.
      *

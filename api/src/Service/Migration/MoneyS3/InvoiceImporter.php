@@ -85,6 +85,12 @@ final class InvoiceImporter
         $claimShifts = $this->claimShifts($ctx);
         $selfAssessed = $this->selfAssessments($ctx);
         $usedSelfAssessments = [];
+        $purchaseNumbers = [];
+        if ($selfAssessed !== []) {
+            foreach ($ctx->backup->rowsAcrossYears('PFaktury', ['Doklad']) as $r) {
+                $purchaseNumbers[mb_strtoupper(preg_replace('/\s+/u', '', (string) ($r['Doklad'] ?? '')) ?? '')] = true;
+            }
+        }
         $duplicate = $pdo->prepare(
             'SELECT 1 FROM purchase_invoices
               WHERE supplier_id = ? AND vendor_id = ? AND vendor_invoice_number = ? AND issue_date = ? LIMIT 1'
@@ -143,7 +149,7 @@ final class InvoiceImporter
                 continue;
             }
             $taxDate = self::date($r, ['PlnenoDPH']) ?? $issue;
-            $selfAssessment = $review ? null : self::pickSelfAssessment($selfAssessed, $docNo, $year, (string) ($r['PrijatDokl'] ?? ''), $usedSelfAssessments);
+            $selfAssessment = $review ? null : self::pickSelfAssessment($selfAssessed, $docNo, $year, (string) ($r['PrijatDokl'] ?? ''), $usedSelfAssessments, $purchaseNumbers);
             if (!$review && $selfAssessment === null && (int) ($r['RevCH'] ?? 0) === 1) {
                 // Přenesená povinnost bez dohledaného samovyměření by v přiznání skončila
                 // jako plnění bez daně (ř. 40 s nulovou daní, bez ř. 10 a 43).
@@ -782,7 +788,7 @@ final class InvoiceImporter
      * „PDP k FP 241001", „Přiznání daně z 241003") nebo z čísla dokladu dodavatele, které
      * interní doklad přebírá z faktury ({@see selfAssessmentKeys()}).
      *
-     * @return array<string,array<int,list<array{key:string,doc:string,date:?string,lines:list<array{base:float,rate:float,code:string}>,deduction:string,fixed_asset:bool,error:?string}>>>
+     * @return array<string,array<int,list<array{key:string,doc:string,date:?string,ref:?string,lines:list<array{base:float,rate:float,code:string}>,deduction:string,fixed_asset:bool,error:?string}>>>
      *   klíč faktury => rok interního dokladu => samovyměření (jeden doklad pod více klíči)
      */
     private function selfAssessments(ImportContext $ctx): array
@@ -815,7 +821,9 @@ final class InvoiceImporter
             if ($output === []) {
                 continue;
             }
+            $keys = self::selfAssessmentKeys((string) ($h['Popis'] ?? ''), (string) ($h['PrijatDokl'] ?? ''));
             $entry = ['key' => $year . '|' . $docNo, 'doc' => $docNo, 'date' => self::date($h, ['DatUplDPH', 'DatPln', 'DatUcPr']),
+                'ref' => $keys[0] !== '' && $keys[0][0] !== '@' ? $keys[0] : null,
                 'lines' => [], 'deduction' => 'full', 'fixed_asset' => false, 'error' => null];
             foreach ($output as $l) {
                 $resolved = Ms3VatCode::reverseCharge((string) $l['Cleneni'], $mirror, (string) ($l['PredmPln'] ?? ''));
@@ -831,7 +839,7 @@ final class InvoiceImporter
                 $entry['deduction'] = $resolved['deduction'];
                 $entry['fixed_asset'] = $resolved['fixed_asset'];
             }
-            foreach (self::selfAssessmentKeys((string) ($h['Popis'] ?? ''), (string) ($h['PrijatDokl'] ?? '')) as $ref) {
+            foreach ($keys as $ref) {
                 $out[$ref][$year][] = $entry;
             }
         }
@@ -864,15 +872,20 @@ final class InvoiceImporter
      * Samovyměření k faktuře: interní doklad z roku faktury, z následujícího (faktura
      * z prosince samovyměřená v lednu) nebo z předchozího. Hledá se podle čísla faktury,
      * pak podle jeho číslic a nakonec podle čísla dokladu dodavatele; doklad už přiřazený
-     * jiné faktuře se přeskočí.
+     * jiné faktuře se přeskočí. Podle číslic ani dokladu dodavatele se nepřiřadí interní
+     * doklad, jehož popis jmenuje jiný doklad z `PFaktury` („PDP k PF260029" nepatří
+     * k dokladu k platbě DPP260029, i když ten je převáděný dřív nebo PF260029 už převzatý
+     * minulým převodem).
      *
      * @param array<string,array<int,list<array<string,mixed>>>> $selfAssessed
      * @param array<string,bool> $used
+     * @param array<string,bool> $purchaseNumbers čísla všech přijatých dokladů agendy (velkými písmeny bez mezer)
      * @return array<string,mixed>|null
      */
-    private static function pickSelfAssessment(array $selfAssessed, string $docNo, int $year, string $vendorDocument = '', array $used = []): ?array
+    private static function pickSelfAssessment(array $selfAssessed, string $docNo, int $year, string $vendorDocument = '', array $used = [], array $purchaseNumbers = []): ?array
     {
-        $keys = [mb_strtoupper(preg_replace('/\s+/u', '', $docNo) ?? '')];
+        $own = mb_strtoupper(preg_replace('/\s+/u', '', $docNo) ?? '');
+        $keys = [$own];
         $digits = preg_replace('/\D+/', '', $docNo) ?? '';
         if (strlen($digits) >= 4) {
             $keys[] = '#' . $digits;
@@ -881,15 +894,19 @@ final class InvoiceImporter
         if ($vendor !== '') {
             $keys[] = '@' . $vendor;
         }
-        foreach ($keys as $key) {
+        foreach ($keys as $i => $key) {
             if ($key === '' || !isset($selfAssessed[$key])) {
                 continue;
             }
             foreach ([$year, $year + 1, $year - 1] as $y) {
                 foreach ($selfAssessed[$key][$y] ?? [] as $sa) {
-                    if (!isset($used[$sa['key']])) {
-                        return $sa;
+                    if (isset($used[$sa['key']])) {
+                        continue;
                     }
+                    if ($i > 0 && ($sa['ref'] ?? null) !== null && $sa['ref'] !== $own && isset($purchaseNumbers[$sa['ref']])) {
+                        continue;
+                    }
+                    return $sa;
                 }
             }
         }
