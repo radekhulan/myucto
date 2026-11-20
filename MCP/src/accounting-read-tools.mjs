@@ -78,7 +78,8 @@ export const ACCOUNTING_READ_TOOLS = [
     }),
   read('get_journal_entry_context', 'Kontext účetního zápisu',
     'Doplňuje get_journal_entry: `section` history = auditní historie změn zápisu, links = připojené doklady, notes = '
-    + 'poznámky, related = související zápisy dokladu a úhrad, source = souhrn zdrojového dokladu. Nic nemění.', {
+    + 'poznámky, related = související doklady a úhrady i s jejich zápisy (faktury, ostatní pohledávky a závazky, '
+    + 'bankovní a pokladní úhrady, zápočty), source = souhrn zdrojového dokladu. Nic nemění.', {
       id: id('ID účetního zápisu.'),
       section: str('Co načíst.', { enum: ['source', 'related', 'links', 'notes', 'history'] }),
     }, (a) => `/accounting/journal/${seg(a.id)}/${seg(a.section)}`, { required: ['id', 'section'] }),

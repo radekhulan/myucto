@@ -94,7 +94,7 @@ const relatedLines = ref<Record<number, JournalLine[]>>({})
 const relatedNotes = ref<Record<number, JournalNote[]>>({})
 
 async function loadRelatedLines(): Promise<void> {
-  const ids = items.value.map(i => i.entry_id).filter((id): id is number => id !== null)
+  const ids = items.value.map(i => i.entry_id).filter((id): id is number => id !== null && id !== props.entryId)
   await Promise.all(ids.map(async (id) => {
     if (relatedLines.value[id]) return
     try {
@@ -105,7 +105,7 @@ async function loadRelatedLines(): Promise<void> {
 }
 
 async function loadRelatedNotes(): Promise<void> {
-  const ids = items.value.map(i => i.entry_id).filter((id): id is number => id !== null)
+  const ids = items.value.map(i => i.entry_id).filter((id): id is number => id !== null && id !== props.entryId)
   await Promise.all(ids.map(async (id) => {
     if (relatedNotes.value[id]) return
     try {
@@ -135,10 +135,16 @@ function relationBadge(relation: JournalRelatedItem['relation']): string {
   return 'bg-accent-50 text-accent-700'
 }
 
-/** Alokovaná částka se ukazuje jen když se liší od celkové (splátka, souhrnná platba). */
+/**
+ * Alokovaná částka se ukazuje jen když se liší od celkové (splátka, souhrnná platba).
+ * Částka výdaje je záporná, kladná alokace na doklad ale vyjadřuje velikost — u ní se
+ * srovnává s absolutní částkou. Záporná alokace (dobropis v souhrnné platbě) se srovnává
+ * se znaménkem jako dosud, aby nezmizela u platby se stejnou absolutní částkou.
+ */
 function showsAllocation(it: JournalRelatedItem): boolean {
-  return it.allocated_amount !== null && it.amount !== null
-    && Math.abs(it.allocated_amount - it.amount) >= 0.005
+  if (it.allocated_amount === null || it.amount === null) return false
+  const amount = it.allocated_amount >= 0 ? Math.abs(it.amount) : it.amount
+  return Math.abs(it.allocated_amount - amount) >= 0.005
 }
 
 function canOpenDocument(it: JournalRelatedItem): boolean {
@@ -215,6 +221,13 @@ function onEntryClick(e: MouseEvent, entryId: number): void {
                 class="rounded bg-warning-50 px-1.5 py-0.5 text-xs font-medium text-warning-600 whitespace-nowrap">
             {{ t('accounting.journal.related.not_posted') }}
           </span>
+          <!-- Doklad zaúčtovaný právě prohlíženým zápisem (položka ze zůstatku v zápisu
+               původu, faktura krytá pohledávkou v zápisu položky) — odkaz sám na sebe nedává smysl. -->
+          <span v-else-if="it.entry_id === entryId && it.entry_posted"
+                data-test="related-posted-by-this-entry"
+                class="rounded bg-neutral-100 px-1.5 py-0.5 text-xs font-medium text-neutral-600 whitespace-nowrap">
+            {{ t('accounting.journal.related.posted_by_this_entry') }}
+          </span>
           <template v-else>
             <button v-if="showPreview" type="button" @click="emit('preview', it.entry_id!)"
                     :class="btnOutlineSm('primary')">
@@ -248,9 +261,9 @@ function onEntryClick(e: MouseEvent, entryId: number): void {
       <!-- Jak je protějšek zaúčtovaný. Přesně tohle účetní u vazby doklad ↔
            úhrada ověřuje nejčastěji a dosud kvůli tomu musel odskočit do deníku.
            Tatáž komponenta jako u prohlíženého zápisu, jen kompaktní. -->
-      <JournalLinesTable v-if="it.entry_id !== null && relatedLines[it.entry_id]?.length"
+      <JournalLinesTable v-if="it.entry_id !== null && it.entry_id !== entryId && relatedLines[it.entry_id]?.length"
         class="mt-2" dense :lines="relatedLines[it.entry_id]!" :context-date="it.date" />
-      <ul v-if="it.entry_id !== null && relatedNotes[it.entry_id]?.length" class="mt-2 space-y-1" data-test="related-entry-notes">
+      <ul v-if="it.entry_id !== null && it.entry_id !== entryId && relatedNotes[it.entry_id]?.length" class="mt-2 space-y-1" data-test="related-entry-notes">
         <li v-for="n in relatedNotes[it.entry_id]" :key="n.id" class="flex items-start gap-1 text-xs"
           :class="n.pinned ? 'text-warning-600' : 'text-neutral-700'" :title="t('accounting.journal.related.note_title')">
           <svg class="mt-0.5 h-3 w-3 shrink-0 text-neutral-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.doc" /></svg>

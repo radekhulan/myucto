@@ -498,6 +498,28 @@ final class JournalSettlementTest extends BankPostingTestCase
         return (int) $stmt->fetchColumn();
     }
 
+    /** Panel „Souvisí“: zápis s předpisem položky ze zůstatku ji ukáže, storno položky vazbu zruší. */
+    public function testOtherItemFromResidualIsRelatedToItsOriginEntry(): void
+    {
+        $entry = $this->manual('311', 'debit', 450.0, self::YEAR . '-07-03', 'Souvisí ze zůstatku');
+        $item = (int) $this->settlements->createOtherItem($this->supplierId, [
+            'line_id' => $this->lineId($entry, '311'), 'amount' => 450.0, 'title' => 'Syntetická položka Souvisí',
+        ], $this->userId)['item']['id'];
+        $links = $this->container->get(\MyInvoice\Service\Accounting\JournalLinkService::class);
+        $access = \MyInvoice\Service\Accounting\JournalRelatedAccess::all();
+        $row = $this->journal->find($entry, $this->supplierId);
+
+        $items = $links->related($this->supplierId, $row, $access)['items'];
+        self::assertSame([['other_item', $item, $entry]], array_map(
+            static fn (array $it): array => [$it['source_type'], $it['source_id'], $it['entry_id']], $items
+        ));
+        self::assertSame([$entry => true], $links->hasRelatedMap($this->supplierId, [$row], $access));
+
+        $this->container->get(OtherItemService::class)->reverse($this->supplierId, $item, 'Syntetické storno', $this->userId, self::YEAR . '-12-31');
+        self::assertSame([], $links->related($this->supplierId, $row, $access)['items']);
+        self::assertSame([], $links->hasRelatedMap($this->supplierId, [$row], $access));
+    }
+
     private function manual(string $account, string $side, float $amount, string $date, string $description): int
     {
         return $this->posting->postDocument($this->supplierId, 'manual', null, [

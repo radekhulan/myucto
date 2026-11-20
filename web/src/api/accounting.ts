@@ -504,7 +504,7 @@ export interface SourceAction {
  */
 export interface JournalRelatedItem {
   relation: 'payment' | 'document' | 'linked_document' | 'linked_entry'
-  source_type: 'invoice' | 'purchase_invoice' | 'bank' | 'cash' | 'settlement' | 'journal_entry'
+  source_type: 'invoice' | 'purchase_invoice' | 'bank' | 'cash' | 'settlement' | 'gopay' | 'other_item' | 'journal_entry'
   source_id: number
   /** Právo, které FE ověří přes auth.canRead() než vykreslí proklik na doklad. */
   permission: string

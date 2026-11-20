@@ -7,10 +7,13 @@ namespace MyInvoice\Tests\Integration\Accounting;
 use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\AccountingPeriodRepository;
+use MyInvoice\Repository\JournalEntryRepository;
 use MyInvoice\Service\Accounting\Activation\PendingBackfillCounter;
 use MyInvoice\Service\Accounting\ChartOfAccountsSeeder;
 use MyInvoice\Service\Accounting\DocumentAutoPoster;
 use MyInvoice\Service\Accounting\DocumentPostingGroup;
+use MyInvoice\Service\Accounting\JournalLinkService;
+use MyInvoice\Service\Accounting\JournalRelatedAccess;
 use MyInvoice\Service\Accounting\OtherItemBankMatchService;
 use MyInvoice\Service\Accounting\OtherItemException;
 use MyInvoice\Service\Accounting\OtherItemService;
@@ -260,6 +263,49 @@ final class InvoiceOtherItemLinkTest extends TestCase
         self::assertTrue($candidates[0]['vs_match'] && $candidates[0]['amount_match']);
         $row = $this->container->get(\MyInvoice\Repository\InvoiceRepository::class)->find($invoice);
         self::assertSame($match, $this->links->withLink($this->supplierId, $row)['other_item_suggestion']['id'] ?? null);
+    }
+
+    /**
+     * Panel „Souvisí“ nad skutečným tokem: navázání faktury (storno jejího zápisu),
+     * automatické spárování a zaúčtování platby, uvolnění pohybu (storno přiřazení).
+     */
+    public function testRelatedPanelFollowsLinkMatchAndRelease(): void
+    {
+        $item = $this->postedItem();
+        $invoice = $this->invoice();
+        $ownEntry = $this->container->get(DocumentAutoPoster::class)->post($this->supplierId, 'invoice', $invoice, [], $this->userId);
+        $this->links->link($this->supplierId, $invoice, $item, $this->userId);
+        $txId = $this->transaction(self::AMOUNT);
+        $this->container->get(StatementMatcher::class)->matchBatch([$txId]);
+
+        $itemEntry = (int) $this->items->get($this->supplierId, $item)['journal_entry_id'];
+        $bankEntry = $this->activeEntry('bank', $txId);
+        $related = function (int $entryId): array {
+            $links = $this->container->get(JournalLinkService::class);
+            $entry = $this->container->get(JournalEntryRepository::class)->find($entryId, $this->supplierId);
+            $out = [];
+            foreach ($links->related($this->supplierId, $entry, JournalRelatedAccess::all())['items'] as $it) {
+                $out[$it['source_type'] . ':' . $it['source_id']] = $it['entry_id'];
+            }
+            ksort($out);
+            return $out;
+        };
+
+        self::assertSame(['bank:' . $txId => $bankEntry, 'invoice:' . $invoice => $itemEntry], $related($itemEntry));
+        self::assertSame(['invoice:' . $invoice => $itemEntry, 'other_item:' . $item => $itemEntry], $related($bankEntry));
+        self::assertSame(['other_item:' . $item => $itemEntry], $related($ownEntry),
+            'Stornovaný zápis faktury vede na pohledávku, která ji účtuje; úhradu ukazuje její zápis.');
+
+        $this->container->get(\MyInvoice\Service\Bank\BankTransactionReleaseService::class)
+            ->release($this->supplierId, $txId, \MyInvoice\Service\Bank\BankTransactionReleaseService::MODE_UNMATCH);
+        self::assertSame(['invoice:' . $invoice => $itemEntry], $related($itemEntry), 'Uvolněná platba už položku nehradí.');
+    }
+
+    private function activeEntry(string $sourceType, int $sourceId): int
+    {
+        $stmt = $this->pdo->prepare('SELECT MAX(id) FROM journal_entries WHERE supplier_id = ? AND source_type = ? AND source_id = ? AND reversed_by IS NULL');
+        $stmt->execute([$this->supplierId, $sourceType, $sourceId]);
+        return (int) $stmt->fetchColumn();
     }
 
     private function assertRefused(string $code, int $invoice, int $item): void

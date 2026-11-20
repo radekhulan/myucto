@@ -25,6 +25,16 @@ use PDO;
  *   invoice / purchase_invoice ↔ cash       přes cash_documents.invoice_id / .purchase_invoice_id
  *   invoice / purchase_invoice ↔ settlement přes invoice_settlements.doc_type + .doc_id
  *   invoice          ↔ gopay  přes gopay_movements.invoice_id / credit_note_id
+ *   other_item       ↔ bank / cash přes nezrušené other_item_allocations
+ *                             (reversed_on IS NULL). Jedna platba může hradit víc
+ *                             položek.
+ *   other_item       ↔ invoice přes invoices.other_item_id (faktura krytá
+ *                             pohledávkou, migrace 2246; účtuje ji zápis položky).
+ *   other_item       ↔ JAKÝKOLI zápis s řádkem původu položky převzaté ze zůstatku
+ *                             (journal_settlement_allocations kind 'origin').
+ *                             Hrany ostatních položek vidí jen volající s právem
+ *                             other_items, úhrady položky jen s právem bank / cash
+ *                             ({@see JournalRelatedAccess}); jinak neexistují ani pro odznak.
  *   úhrada zálohy    ↔ daňový doklad k platbě a konečná faktura téže zálohy
  *                             (parent_invoice_id → proforma; u přijatých
  *                             advance_purchase_invoice_id / parent_purchase_invoice_id →
@@ -57,7 +67,7 @@ final class JournalLinkService
      * Typy zápisu, které v grafu vazeb vůbec mají hranu. Cokoli mimo (manual,
      * uzávěrkové typy, odpisy, majetek…) se do DB nedostane.
      */
-    private const LINKABLE = ['invoice', 'purchase_invoice', 'bank', 'cash', 'settlement', 'gopay'];
+    private const LINKABLE = ['invoice', 'purchase_invoice', 'bank', 'cash', 'settlement', 'gopay', 'other_item'];
 
     /** Reálné id dokladu nikdy nedosáhne 1e12, syntetická uzávěrková pásma ano. */
     private const SYNTHETIC_ID_FLOOR = ClosingSourceId::STOCK_SLOT_BASE;
@@ -71,6 +81,7 @@ final class JournalLinkService
         'settlement'       => 'accounting',
         'gopay'            => 'bank',
         'journal_entry'    => 'accounting',
+        'other_item'       => 'other_items',
     ];
 
     public function __construct(
@@ -84,9 +95,9 @@ final class JournalLinkService
      * @param  array<string,mixed> $entry OVĚŘENÝ řádek journal_entries daného tenanta
      * @return array{items:list<array<string,mixed>>, truncated:bool}
      */
-    public function related(int $supplierId, array $entry): array
+    public function related(int $supplierId, array $entry, JournalRelatedAccess $access): array
     {
-        $refs = $this->neighbourRefs($supplierId, $entry);
+        $refs = $this->neighbourRefs($supplierId, $entry, $access);
         if ($refs === []) {
             return ['items' => [], 'truncated' => false];
         }
@@ -102,7 +113,10 @@ final class JournalLinkService
     }
 
     /**
-     * Každý zápis smí panel ukázat nejvýš jednou a nikdy ne ten prohlížený. Když
+     * Každý zápis smí panel ukázat nejvýš jednou a nikdy ne ten prohlížený. Výjimkou
+     * je ostatní položka a faktura, kterou prohlížený zápis sám zaúčtovává (položka
+     * ze zůstatku v zápisu původu, faktura krytá položkou v zápisu položky): protějškem
+     * je tu doklad, ne zápis, a panel ho ukáže se štítkem „zaúčtováno tímto zápisem“. Když
      * je zápis úhrady zároveň ručně navázaný na hrazený doklad, přišel by jednou
      * jako zaúčtování úhrady a podruhé jako „Navázaný zápis" se stejnými řádky —
      * účetní to čte jako dvojí zaúčtování. Doklad nese víc informací (proklik na
@@ -121,7 +135,9 @@ final class JournalLinkService
         }
 
         return array_values(array_filter($items, static function (array $it) use ($ownEntryId, $shownByDocument): bool {
-            if ($it['entry_id'] !== null && $it['entry_id'] === $ownEntryId) return false;
+            if ($it['entry_id'] !== null && $it['entry_id'] === $ownEntryId) {
+                return in_array($it['source_type'], ['other_item', 'invoice'], true);
+            }
             return $it['source_type'] !== 'journal_entry' || !isset($shownByDocument[$it['entry_id']]);
         }));
     }
@@ -143,7 +159,7 @@ final class JournalLinkService
      * @param  list<array<string,mixed>> $entries řádky journal_entries daného tenanta
      * @return array<int,true>                    entry_id => má protějšek
      */
-    public function hasRelatedMap(int $supplierId, array $entries): array
+    public function hasRelatedMap(int $supplierId, array $entries, JournalRelatedAccess $access): array
     {
         /** @var array<string,list<int>> $byRef klíč "typ:id" => entry_id[] */
         $byRef = [];
@@ -177,6 +193,21 @@ final class JournalLinkService
                 if (self::isOwnDocument((string) $r['doc_type'], (int) $r['doc_id'], $r['source_type'], $r['source_id'])) continue;
                 $linked[(int) $r['entry_id']] = true;
             }
+            // Zápis s řádkem původu ostatní položky převzaté ze zůstatku (jakýkoli typ zápisu).
+            // EXISTS skončí na prvním předpisu: počáteční zápis jich může nést tisíce.
+            if ($access->otherItems) {
+                foreach ($this->rows(
+                    "SELECT e.id AS entry_id FROM journal_entries e
+                      WHERE e.supplier_id = ? AND e.id IN (" . $this->placeholders($pageIds) . ")
+                        AND EXISTS (SELECT 1 FROM journal_settlement_allocations a
+                                      JOIN other_items i ON i.id = a.doc_id AND i.supplier_id = a.supplier_id AND i.deleted_at IS NULL
+                                     WHERE a.supplier_id = e.supplier_id AND a.entry_id = e.id
+                                       AND a.doc_type = 'other_item' AND a.kind = 'origin' AND a.released_on IS NULL)",
+                    array_merge([$supplierId], $pageIds)
+                ) as $r) {
+                    $linked[(int) $r['entry_id']] = true;
+                }
+            }
         }
 
         if ($byRef === []) return $linked;
@@ -195,6 +226,7 @@ final class JournalLinkService
         $cash      = $ids($byRef, 'cash');
         $settles   = $ids($byRef, 'settlement');
         $gopay     = $ids($byRef, 'gopay');
+        $others    = $ids($byRef, 'other_item');
 
         $hits = [];
         /** Označí obě strany hrany — na kterékoli z nich může řádek deníku stát. */
@@ -353,6 +385,61 @@ final class JournalLinkService
             }
         }
 
+        // 9) Ostatní položky (jen s právem other_items, shodně s panelem). Samostatné
+        //    dotazy místo jednoho s OR: každý jde po vlastním indexu, OR přes víc sloupců
+        //    by četl všechna přiřazení firmy.
+        if ($access->otherItems && $others !== []) {
+            // Zápis položky: úhrada viditelného druhu, nebo faktura, kterou položka kryje.
+            $kinds = array_values(array_filter([
+                $access->bank ? 'a.bank_transaction_id IS NOT NULL' : null,
+                $access->cash ? 'a.cash_document_id IS NOT NULL' : null,
+            ]));
+            if ($kinds !== []) {
+                foreach ($this->rows(
+                    'SELECT DISTINCT a.other_item_id FROM other_item_allocations a
+                       JOIN other_items o ON o.id = a.other_item_id AND o.supplier_id = a.supplier_id AND o.deleted_at IS NULL
+                      WHERE a.supplier_id = ? AND a.reversed_on IS NULL AND (' . implode(' OR ', $kinds) . ')
+                        AND a.other_item_id IN (' . $this->placeholders($others) . ')',
+                    array_merge([$supplierId], $others)
+                ) as $r) {
+                    $mark((int) $r['other_item_id'], 'other_item');
+                }
+            }
+            foreach ($this->rows(
+                'SELECT i.other_item_id FROM invoices i
+                   JOIN other_items o ON o.id = i.other_item_id AND o.supplier_id = i.supplier_id AND o.deleted_at IS NULL
+                  WHERE i.supplier_id = ? AND i.other_item_id IN (' . $this->placeholders($others) . ')',
+                array_merge([$supplierId], $others)
+            ) as $r) {
+                $mark((int) $r['other_item_id'], 'other_item');
+            }
+        }
+        if ($access->otherItems && $invoices !== []) {
+            // Faktura krytá ostatní pohledávkou.
+            foreach ($this->rows(
+                'SELECT i.id FROM invoices i
+                   JOIN other_items o ON o.id = i.other_item_id AND o.supplier_id = i.supplier_id AND o.deleted_at IS NULL
+                  WHERE i.supplier_id = ? AND i.id IN (' . $this->placeholders($invoices) . ')',
+                array_merge([$supplierId], $invoices)
+            ) as $r) {
+                $mark((int) $r['id'], 'invoice');
+            }
+        }
+        if ($access->otherItems) {
+            foreach (['bank' => [$banks, 'bank_transaction_id'], 'cash' => [$cash, 'cash_document_id']] as $kind => [$paymentIds, $col]) {
+                if ($paymentIds === []) continue;
+                foreach ($this->rows(
+                    "SELECT DISTINCT a.{$col} AS id FROM other_item_allocations a
+                       JOIN other_items i ON i.id = a.other_item_id AND i.supplier_id = a.supplier_id
+                      WHERE a.supplier_id = ? AND a.reversed_on IS NULL AND i.deleted_at IS NULL
+                        AND a.{$col} IN (" . $this->placeholders($paymentIds) . ')',
+                    array_merge([$supplierId], $paymentIds)
+                ) as $r) {
+                    $mark((int) $r['id'], $kind);
+                }
+            }
+        }
+
         $out = $linked;
         foreach ($byRef as $key => $entryIds) {
             if (!isset($hits[$key])) continue;
@@ -375,7 +462,7 @@ final class JournalLinkService
      * @param  array<string,mixed> $entry
      * @return list<array{kind:string, id:int, relation:string, allocated:?float}>
      */
-    private function neighbourRefs(int $supplierId, array $entry): array
+    private function neighbourRefs(int $supplierId, array $entry, JournalRelatedAccess $access): array
     {
         $refs     = [];
         $entryId  = (int) ($entry['id'] ?? 0);
@@ -386,6 +473,11 @@ final class JournalLinkService
             foreach ($this->linkedDocumentRefs($supplierId, $entryId) as $r) {
                 if (self::isOwnDocument($r['kind'], $r['id'], $type, $sourceId)) continue;
                 $this->addRef($refs, $r['kind'], $r['id'], $r['relation'], $r['allocated']);
+            }
+            // Položky převzaté ze zůstatku, jejichž předpis leží v tomto zápisu, i s jejich
+            // úhradami a krytými fakturami. Typ zápisu nehraje roli (obvykle ruční).
+            if ($access->otherItems) {
+                $this->addOtherItems($refs, $supplierId, $this->originItemsOfEntry($supplierId, $entryId), $access, true);
             }
         }
 
@@ -404,6 +496,24 @@ final class JournalLinkService
         foreach ($derived as $r) {
             $this->addRef($refs, $r['kind'], $r['id'], $r['relation'], $r['allocated']);
         }
+
+        if ($access->otherItems) {
+            match ($type) {
+                // Platba → položky, které hradí (a faktury, které ty položky kryjí). Další
+                // úhrady téže položky se neukazují, shodně s fakturou.
+                'bank', 'cash' => $this->addOtherItems($refs, $supplierId, $this->otherItemsOfPayment($supplierId, $type, $sourceId), $access, false),
+                // Zápis položky → její úhrady a faktury, které kryje.
+                'other_item'   => $this->addOtherItemContext($refs, $supplierId, [$sourceId], $access, true),
+                // (Stornovaný) zápis kryté faktury → pohledávka, která fakturu účtuje. Její
+                // úhrady ukazuje zápis položky: detail faktury vykresluje panel pro oba zápisy
+                // a stejný pohyb by se tam objevil dvakrát.
+                'invoice'      => $this->addOtherItems($refs, $supplierId, $this->coveringOtherItems($supplierId, $sourceId), $access, false),
+                default        => null,
+            };
+        }
+        // Doklad nikdy není protějškem sám sobě (faktura krytá položkou by se jinak vrátila
+        // přes kontext položky).
+        unset($refs[$type . ':' . $sourceId]);
 
         // Zpětná hrana měkké vazby: zápisy, které si TENHLE doklad navázaly.
         // Bez ní by vazba fungovala jen jedním směrem — z faktury by se účetní
@@ -790,6 +900,148 @@ final class JournalLinkService
         return array_values($refs);
     }
 
+    // ───────────────────────────────────────────── ostatní pohledávky a závazky ──
+    //
+    // Úhrada položky je nezrušené přiřazení (reversed_on IS NULL); stornované už položku
+    // nehradí. Alokovaná částka je peněžní část přiřazení podle SSOT
+    // OtherItemService::ALLOCATION_TOTAL_SQL (jistina + úrok + poplatek), tedy kolik
+    // z platby připadlo na položku. Smazanou položku (deleted_at) vyřadí až describe()
+    // a dotazy na kontext (úhrady, kryté faktury); vstupní dotazy ji proto nefiltrují.
+
+    /**
+     * Bankovní pohyb nebo pokladní doklad → ostatní položky, které hradí. Rozdělená
+     * platba hradí víc položek, každou vlastním přiřazením.
+     *
+     * @param  'bank'|'cash' $kind
+     * @return list<array{kind:string, id:int, relation:string, allocated:?float}>
+     */
+    private function otherItemsOfPayment(int $supplierId, string $kind, int $paymentId): array
+    {
+        // Sloupec z uzavřené dvojice, ne z requestu.
+        $col  = $kind === 'bank' ? 'bank_transaction_id' : 'cash_document_id';
+        $refs = [];
+        foreach ($this->rows(
+            'SELECT a.other_item_id, ' . self::allocationTotal('a') . " AS paid
+               FROM other_item_allocations a
+              WHERE a.supplier_id = ? AND a.{$col} = ? AND a.reversed_on IS NULL ORDER BY a.id
+              LIMIT " . (self::MAX_ITEMS + 1),
+            // Hromadná platba může hradit stovky položek; panel jich ukáže nejvýš MAX_ITEMS
+            // a kontext (kryté faktury) se nedotahuje pro všechny.
+            [$supplierId, $paymentId]
+        ) as $r) {
+            $this->addRef($refs, 'other_item', (int) $r['other_item_id'], 'document', (float) $r['paid']);
+        }
+        return array_values($refs);
+    }
+
+    /**
+     * Položky převzaté ze zůstatku, jejichž předpis leží v řádku daného zápisu.
+     *
+     * @return list<array{kind:string, id:int, relation:string, allocated:?float}>
+     */
+    private function originItemsOfEntry(int $supplierId, int $entryId): array
+    {
+        $refs = [];
+        foreach ($this->rows(
+            "SELECT DISTINCT a.doc_id FROM journal_settlement_allocations a
+              WHERE a.supplier_id = ? AND a.entry_id = ? AND a.doc_type = 'other_item' AND a.kind = 'origin'
+                AND a.released_on IS NULL
+              ORDER BY a.doc_id
+              LIMIT " . (self::MAX_ITEMS + 1),
+            // Počáteční zápis může nést předpisy tisíců položek; panel jich ukáže nejvýš
+            // MAX_ITEMS (+1 pro příznak truncated), kontext se proto nedotahuje pro všechny.
+            [$supplierId, $entryId]
+        ) as $r) {
+            $this->addRef($refs, 'other_item', (int) $r['doc_id'], 'document', null);
+        }
+        return array_values($refs);
+    }
+
+    /**
+     * Ostatní pohledávka, která kryje fakturu (invoices.other_item_id, migrace 2246).
+     *
+     * @return list<array{kind:string, id:int, relation:string, allocated:?float}>
+     */
+    private function coveringOtherItems(int $supplierId, int $invoiceId): array
+    {
+        $refs = [];
+        foreach ($this->rows(
+            'SELECT i.other_item_id AS id FROM invoices i
+              WHERE i.id = ? AND i.supplier_id = ? AND i.other_item_id IS NOT NULL',
+            [$invoiceId, $supplierId]
+        ) as $r) {
+            $this->addRef($refs, 'other_item', (int) $r['id'], 'document', null);
+        }
+        return array_values($refs);
+    }
+
+    /**
+     * Přidá reference položek a jejich kontext ({@see addOtherItemContext()}).
+     *
+     * @param array<string,array{kind:string, id:int, relation:string, allocated:?float}> $refs
+     * @param list<array{kind:string, id:int, relation:string, allocated:?float}>         $items
+     */
+    private function addOtherItems(array &$refs, int $supplierId, array $items, JournalRelatedAccess $access, bool $withPayments): void
+    {
+        foreach ($items as $r) {
+            $this->addRef($refs, $r['kind'], $r['id'], $r['relation'], $r['allocated']);
+        }
+        $this->addOtherItemContext($refs, $supplierId, array_map(static fn (array $r): int => $r['id'], $items), $access, $withPayments);
+    }
+
+    /**
+     * K položkám přidá faktury, které kryjí, a volitelně jejich úhrady (jen druhy, které
+     * volající smí vidět). Dávkově přes IN, počet dotazů nezávisí na počtu položek.
+     *
+     * @param array<string,array{kind:string, id:int, relation:string, allocated:?float}> $refs
+     * @param list<int> $itemIds
+     */
+    private function addOtherItemContext(array &$refs, int $supplierId, array $itemIds, JournalRelatedAccess $access, bool $withPayments): void
+    {
+        if ($itemIds === []) return;
+        $in = $this->placeholders($itemIds);
+
+        if ($withPayments && ($access->bank || $access->cash)) {
+            // Jedna platba může hradit víc položek téhož zápisu (zápis původu s více
+            // předpisy): částka připadající na tento zápis je součet jejích přiřazení.
+            /** @var array<string,array{kind:string, id:int, paid:float}> $payments */
+            $payments = [];
+            foreach ($this->rows(
+                'SELECT a.bank_transaction_id, a.cash_document_id, ' . self::allocationTotal('a') . " AS paid
+                   FROM other_item_allocations a
+                   JOIN other_items i ON i.id = a.other_item_id AND i.supplier_id = a.supplier_id AND i.deleted_at IS NULL
+                  WHERE a.supplier_id = ? AND a.reversed_on IS NULL AND a.other_item_id IN ({$in})
+                  ORDER BY a.id",
+                array_merge([$supplierId], $itemIds)
+            ) as $r) {
+                $kind = $r['bank_transaction_id'] !== null ? 'bank' : 'cash';
+                if (!$access->seesPayment($kind)) continue;
+                $id  = (int) ($kind === 'bank' ? $r['bank_transaction_id'] : $r['cash_document_id']);
+                $key = $kind . ':' . $id;
+                $payments[$key] ??= ['kind' => $kind, 'id' => $id, 'paid' => 0.0];
+                $payments[$key]['paid'] = round($payments[$key]['paid'] + (float) $r['paid'], 2);
+            }
+            foreach ($payments as $p) {
+                $this->addRef($refs, $p['kind'], $p['id'], 'payment', $p['paid']);
+            }
+        }
+
+        foreach ($this->rows(
+            "SELECT i.id FROM invoices i
+               JOIN other_items o ON o.id = i.other_item_id AND o.supplier_id = i.supplier_id AND o.deleted_at IS NULL
+              WHERE i.supplier_id = ? AND i.other_item_id IN ({$in}) ORDER BY i.id",
+            array_merge([$supplierId], $itemIds)
+        ) as $r) {
+            $this->addRef($refs, 'invoice', (int) $r['id'], 'document', null);
+        }
+    }
+
+    /** Peněžní část přiřazení s aliasem tabulky (SSOT {@see OtherItemService::ALLOCATION_TOTAL_SQL}). */
+    private static function allocationTotal(string $alias): string
+    {
+        return (string) preg_replace('/\b(amount|interest_amount|fee_amount)\b/', $alias . '.$1', OtherItemService::ALLOCATION_TOTAL_SQL);
+    }
+
     /**
      * Zápočet → vyrovnaný doklad.
      *
@@ -1052,6 +1304,28 @@ final class JournalLinkService
             return $out;
         }
 
+        if ($kind === 'other_item') {
+            foreach ($this->rows(
+                "SELECT o.id, o.document_no, o.title, o.partner_name, o.issued_on, o.amount,
+                        UPPER(COALESCE(o.currency, 'CZK')) AS currency
+                   FROM other_items o
+                  WHERE o.supplier_id = ? AND o.id IN ({$in}) AND o.deleted_at IS NULL",
+                array_merge([$supplierId], $ids)
+            ) as $r) {
+                $id = (int) $r['id'];
+                $partner = $r['partner_name'] !== null && $r['partner_name'] !== '' ? (string) $r['partner_name'] : null;
+                $out[$id] = [
+                    'title'    => (string) ($r['document_no'] ?: $r['title'] ?: ('#' . $id)),
+                    'subtitle' => $partner ?? ($r['document_no'] ? (string) $r['title'] : null),
+                    'date'     => $r['issued_on'] !== null ? (string) $r['issued_on'] : null,
+                    'amount'   => (float) $r['amount'],
+                    'currency' => (string) $r['currency'],
+                    'route'    => ['name' => 'other-item-detail', 'params' => ['id' => $id]],
+                ];
+            }
+            return $out;
+        }
+
         if ($kind === 'journal_entry') {
             // Protějškem měkké vazby je sám ÚČETNÍ ZÁPIS (typicky ruční doúčtování),
             // ne doklad — popisná data proto jdou z deníku a částka je Σ MD.
@@ -1132,6 +1406,64 @@ final class JournalLinkService
                 'document_no' => $r['document_no'] !== null ? (string) $r['document_no'] : null,
                 'posted_at'   => $r['posted_at'] !== null ? (string) $r['posted_at'] : null,
             ];
+        }
+
+        // Faktura krytá ostatní pohledávkou vlastní zápis nemá, účtuje ji poslední
+        // nestornovaný zaúčtovaný zápis položky — stejná pravidla jako
+        // JournalForDocumentAction::otherItemEntries (sekce Zaúčtování na detailu faktury).
+        // Navázat lze jen položku s vlastním zápisem (InvoiceOtherItemLinkService::assertLinkable),
+        // zápis původu se tu proto nehledá.
+        $missing = $sourceType === 'invoice' ? array_values(array_diff($ids, array_keys($out))) : [];
+        if ($missing !== []) {
+            foreach ($this->rows(
+                "SELECT invoice_id, id, entry_date, document_no, posted_at FROM (
+                     SELECT i.id AS invoice_id, e.id, e.entry_date, e.document_no, e.posted_at,
+                            ROW_NUMBER() OVER (PARTITION BY i.id ORDER BY e.id DESC) AS rn
+                       FROM invoices i
+                       JOIN journal_entries e ON e.supplier_id = i.supplier_id AND e.source_type = 'other_item'
+                        AND e.source_id = i.other_item_id AND e.reversed_by IS NULL AND e.posted_at IS NOT NULL
+                      WHERE i.supplier_id = ? AND i.other_item_id IS NOT NULL
+                        AND i.id IN (" . $this->placeholders($missing) . ")
+                 ) x WHERE x.rn = 1",
+                array_merge([$supplierId], $missing)
+            ) as $r) {
+                $out[(int) $r['invoice_id']] = [
+                    'id'          => (int) $r['id'],
+                    'entry_date'  => (string) $r['entry_date'],
+                    'document_no' => $r['document_no'] !== null ? (string) $r['document_no'] : null,
+                    'posted_at'   => (string) $r['posted_at'],
+                ];
+            }
+        }
+
+        // Položka převzatá ze zůstatku vlastní zápis nemá: její předpis leží v řádku
+        // původního zápisu (kind 'origin', OtherItemService::createFromJournalLine).
+        // Ten je jejím zaúčtováním, panel ji proto nesmí hlásit jako nezaúčtovanou.
+        // Platí, dokud předpis není zrušený (released_on), stejně jako
+        // OtherItemService::hasJournalOrigin. Stav zápisu původu se nefiltruje: zápis
+        // s rozpadem saldokonta stornovat nejde (JournalAction::reverse →
+        // JournalSettlementUseGuard::assertEntriesFree), dokud se předpis nezruší.
+        $missing = $sourceType === 'other_item' ? array_values(array_diff($ids, array_keys($out))) : [];
+        if ($missing !== []) {
+            foreach ($this->rows(
+                "SELECT doc_id, id, entry_date, document_no, posted_at FROM (
+                     SELECT a.doc_id, e.id, e.entry_date, e.document_no, e.posted_at,
+                            ROW_NUMBER() OVER (PARTITION BY a.doc_id ORDER BY e.id DESC) AS rn
+                       FROM journal_settlement_allocations a
+                       JOIN journal_entries e ON e.id = a.entry_id AND e.supplier_id = a.supplier_id
+                      WHERE a.supplier_id = ? AND a.doc_type = 'other_item' AND a.kind = 'origin'
+                        AND a.released_on IS NULL
+                        AND a.doc_id IN (" . $this->placeholders($missing) . ")
+                 ) x WHERE x.rn = 1",
+                array_merge([$supplierId], $missing)
+            ) as $r) {
+                $out[(int) $r['doc_id']] = [
+                    'id'          => (int) $r['id'],
+                    'entry_date'  => (string) $r['entry_date'],
+                    'document_no' => $r['document_no'] !== null ? (string) $r['document_no'] : null,
+                    'posted_at'   => $r['posted_at'] !== null ? (string) $r['posted_at'] : null,
+                ];
+            }
         }
         return $out;
     }

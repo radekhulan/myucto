@@ -19295,6 +19295,7 @@
         "allocated": "allocated",
         "not_posted": "Not posted",
         "advance_not_postable": "Advance invoice – not posted",
+        "posted_by_this_entry": "Posted by this entry",
         "preview": "Preview",
         "open_entry": "Entry",
         "open_document": "Open document",

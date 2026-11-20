@@ -585,19 +585,24 @@ resp. 5xx/321) a úhradu (221/311, resp. 321/221). Účetní je ale řeší jako
 případ, proto má každý takový zápis panel **Souvisí**: v rozbaleném řádku deníku
 i v postranním náhledu zdrojového dokladu.
 
-Panel u každého protějšku ukazuje typ (banka, pokladna, zápočet, faktura), číslo,
-datum, částku a nabízí tři cesty:
+Stejně funguje i ostatní pohledávka nebo závazek a jeho úhrady
+([52.14.14](#521414-ostatni-pohledavky-a-zavazky)).
+
+Panel u každého protějšku ukazuje typ (banka, pokladna, zápočet, faktura, ostatní
+pohledávka či závazek), číslo, datum, částku a nabízí tři cesty:
 
 - **Náhled** - přepne postranní panel na *zaúčtování protějšku*, aniž byste opustili
   deník; zpět se vrátíte šipkou v hlavičce panelu,
 - **Zápis #…** - odskok na protějšek přímo v deníku (deep-link `?entry_id=`),
-- **Otevřít doklad** - detail faktury, bankovní výpis s danou transakcí nebo
-  předfiltrovaná pokladna.
+- **Otevřít doklad** - detail faktury nebo ostatní položky, bankovní výpis s danou
+  transakcí nebo předfiltrovaná pokladna.
 
 Vazby se hledají přes evidenci plateb, párování bankovních transakcí (včetně
-souhrnných plateb pokrývajících víc dokladů), pokladní doklady navázané na fakturu
-a zápočty. Když transakce pokryla jen část dokladu nebo naopak víc dokladů najednou,
-panel vedle celkové částky pohybu uvádí i **částku připadající na tento doklad**.
+souhrnných plateb pokrývajících víc dokladů), pokladní doklady navázané na fakturu,
+zápočty a úhrady přiřazené ostatním položkám. Když transakce pokryla jen část
+dokladu nebo naopak víc dokladů najednou, panel vedle celkové částky pohybu uvádí
+i **částku připadající na tento doklad** (u zápisu s více ostatními položkami jejich
+součet).
 
 Protějšek, který ještě **není zaúčtovaný**, je označený štítkem *Nezaúčtováno* -
 je to typický důvod, proč saldo nesedí s deníkem, takže se záměrně nezamlčuje.
@@ -1674,6 +1679,24 @@ položek. Jakmile zbývá uhradit nula, položka z filtru Otevřené zmizí.
 Přiřazení zrušíte tlačítkem **Odpojit úhradu**. Stornovaný bankovní zápis
 přiřazení označí jako stornované; pokladní doklad přiřazený k položce stornovat
 nejde, nejdřív ho odpojte.
+
+Přiřazené úhrady vidíte i v deníku v panelu **Souvisí**
+([52.14.3.2](#521432-souvisi-doklad-a-jeho-uhrada)): u zápisu položky jako bankovní
+pohyby a pokladní doklady, u zápisu banky nebo pokladny jako položky, které platba
+hradí. Rozdělená platba ukáže všechny své položky, každou s částkou, která na ni připadá
+(u splátky úvěru včetně úroku a poplatku). Stornované přiřazení se neukazuje.
+
+- **Položka převzatá ze zůstatku** nemá vlastní zápis. Jako její zaúčtování panel ukáže
+  zápis, ve kterém leží její předpis. V tom zápisu naopak ukáže položku se štítkem
+  *Zaúčtováno tímto zápisem* a její úhrady s odkazem na jejich vlastní zápisy. Platí-li
+  jedna platba víc položek téhož zápisu, panel u ní uvede jejich součet.
+- **Faktura krytá pohledávkou** se v panelu ukáže u zápisu položky (se štítkem
+  *Zaúčtováno tímto zápisem*) i u platby, která položku hradí. Ze stornovaného zápisu
+  faktury vede panel na položku, která fakturu účtuje; úhrady ukazuje zápis položky.
+  Bez práva k ostatním pohledávkám a závazkům tuto vazbu neuvidíte.
+
+Položky v panelu vidí jen uživatel s právem k ostatním pohledávkám a závazkům, jejich
+bankovní úhrady jen s právem k bance a pokladní úhrady jen s právem k pokladně.
 
 #### 52.14.14.6 Storno a přeúčtování
 

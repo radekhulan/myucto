@@ -52089,8 +52089,9 @@ components:
               - 'null'
         has_related:
           type: boolean
-          description: Jen v listu — zápis má protějšek v grafu doklad ↔ úhrada (bankovní pohyb, pokladní doklad nebo
-            zápočet).
+          description: Jen v listu — zápis má protějšek v grafu doklad ↔ úhrada (bankovní pohyb, pokladní doklad,
+            zápočet nebo ostatní pohledávka či závazek). Vazby ostatních položek se počítají jen s právem
+            other_items, jejich úhrady jen s právem bank, resp. cash, shodně s /related.
         internal_document:
           type:
           - object
@@ -60045,11 +60046,19 @@ components:
           - bank
           - cash
           - settlement
+          - gopay
+          - other_item
           - journal_entry
+          description: Druh protějšku. other_item = ostatní pohledávka nebo závazek, který platba hradí,
+            který kryje fakturu (invoices.other_item_id) nebo jehož předpis ze zůstatku leží v prohlíženém
+            zápisu. Ze zápisu položky se vrací její úhrady (bank, cash) a krytá faktura. Stornované
+            přiřazení úhrady ani smazaná položka se nevrací. Položky se vrací jen s právem other_items,
+            jejich úhrady jen s právem bank, resp. cash.
         source_id:
           type: integer
         permission:
           type: string
+          description: Právo potřebné k prokliku na doklad (např. invoices, bank, cash, other_items).
         title:
           type:
           - string
@@ -60070,6 +60079,9 @@ components:
           type:
           - number
           - 'null'
+          description: Částka připadající na tuto vazbu. Znaménko se nemusí shodovat s amount
+            (u výdaje je amount záporná, alokace kladná). U ostatní položky peněžní část přiřazení úhrady (jistina + úrok + poplatek);
+            u úhrady v panelu zápisu s více položkami součet jejích přiřazení k těmto položkám.
         currency:
           type:
           - string
@@ -60082,6 +60094,8 @@ components:
           type:
           - number
           - 'null'
+          description: Zápis, který protějšek zaúčtovává. U faktury kryté ostatní pohledávkou zápis
+            položky, u položky převzaté ze zůstatku zápis s jejím předpisem (může jít o prohlížený zápis).
         entry_date:
           type:
           - string

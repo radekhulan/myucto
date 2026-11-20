@@ -19295,6 +19295,7 @@
         "allocated": "na doklad",
         "not_posted": "Nezaúčtováno",
         "advance_not_postable": "Zálohová faktura – neúčtuje se",
+        "posted_by_this_entry": "Zaúčtováno tímto zápisem",
         "preview": "Náhled",
         "open_entry": "Zápis",
         "open_document": "Otevřít doklad",

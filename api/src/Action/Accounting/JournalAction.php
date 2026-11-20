@@ -35,6 +35,7 @@ use MyInvoice\Service\Accounting\JournalEntryDeletionRules;
 use MyInvoice\Service\Accounting\JournalHistoryService;
 use MyInvoice\Service\Accounting\JournalIntegrityService;
 use MyInvoice\Service\Accounting\JournalLinkService;
+use MyInvoice\Service\Accounting\JournalRelatedAccess;
 use MyInvoice\Service\Accounting\InvoicePostingProposal;
 use MyInvoice\Service\Accounting\InternalDocumentException;
 use MyInvoice\Service\Accounting\InternalDocumentService;
@@ -155,7 +156,11 @@ final class JournalAction
         // Odznak „má protějšek" (doklad ↔ úhrada) — batch přes celou stránku,
         // viz JournalLinkService::hasRelatedMap(). Bez něj by účetní musel rozbalit
         // každý řádek, aby zjistil, jestli je zápis na něco navázaný.
-        $related = $this->links->hasRelatedMap($supplierId, $result['items']);
+        $related = $this->links->hasRelatedMap(
+            $supplierId,
+            $result['items'],
+            JournalRelatedAccess::fromRequest($request),
+        );
         $includePosting = ($q['include_posting_accounts'] ?? null) === '1';
         $includeVat = ($q['include_vat_breakdown'] ?? null) === '1';
         $includeDimensions = ($q['include_dimensions'] ?? null) === '1';

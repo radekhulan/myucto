@@ -127,13 +127,13 @@ final class AdvanceFullFlowTest extends BankPostingTestCase
         $links = $this->container->get(JournalLinkService::class);
         $fromBank = array_map(
             static fn (array $i): string => $i['source_type'] . ':' . $i['source_id'],
-            $links->related($this->supplierId, $this->journal->find($bankEntry, $this->supplierId))['items'],
+            $links->related($this->supplierId, $this->journal->find($bankEntry, $this->supplierId), \MyInvoice\Service\Accounting\JournalRelatedAccess::all())['items'],
         );
         self::assertContains('invoice:' . $ddkp, $fromBank);
         self::assertContains('invoice:' . $final, $fromBank);
         foreach ([$ddkpEntry, $finalEntry] as $entryId) {
             $bankRefs = array_filter(
-                $links->related($this->supplierId, $this->journal->find($entryId, $this->supplierId))['items'],
+                $links->related($this->supplierId, $this->journal->find($entryId, $this->supplierId), \MyInvoice\Service\Accounting\JournalRelatedAccess::all())['items'],
                 static fn (array $i): bool => $i['source_type'] === 'bank' && (int) $i['source_id'] === $tx,
             );
             self::assertCount(1, $bankRefs, "Zápis #{$entryId} vede na úhradu zálohy.");
@@ -238,13 +238,13 @@ final class AdvanceFullFlowTest extends BankPostingTestCase
         $links = $this->container->get(JournalLinkService::class);
         $fromBankB = array_map(
             static fn (array $i): string => $i['source_type'] . ':' . $i['source_id'],
-            $links->related($this->supplierId, $this->journal->find($bankB, $this->supplierId))['items'],
+            $links->related($this->supplierId, $this->journal->find($bankB, $this->supplierId), \MyInvoice\Service\Accounting\JournalRelatedAccess::all())['items'],
         );
         self::assertContains('invoice:' . $final, $fromBankB, 'Z úhrady zálohy B vede vazba na konečnou fakturu.');
         $bankRefs = array_values(array_unique(array_map(
             static fn (array $i): int => (int) $i['source_id'],
             array_filter(
-                $links->related($this->supplierId, $this->journal->find($finalEntry, $this->supplierId))['items'],
+                $links->related($this->supplierId, $this->journal->find($finalEntry, $this->supplierId), \MyInvoice\Service\Accounting\JournalRelatedAccess::all())['items'],
                 static fn (array $i): bool => $i['source_type'] === 'bank',
             ),
         )));
