@@ -22,10 +22,13 @@ use MyInvoice\Service\Migration\Pohoda\PohodaXml;
  *  - `KcDov` je náhrada za dovolenou za `HodDov` hodin, doby nese `ZAMpDov` s druhem 35,
  *  - `HodNem` jsou hodiny pracovní neschopnosti (`ZAMpDov` s druhem 4), náhradu mzdy
  *    `KcNahrNem` (mimo hrubou mzdu) rozpisuje `MZnahr`,
- *  - `KcCistaM` = `KcHrubaM` - `KcSoc` - `KcZdr` - `KcZalDan`,
+ *  - `KcCistaM` = `KcHrubaM` - `KcSoc` - `KcZdr` - `KcZalDan` + `KcPreplDanRZ` (přeplatek
+ *    daně z ročního zúčtování),
  *  - `KcDanPrS` je záloha před slevami, `KcDanZal` po slevě na poplatníka, `KcZalDan`
  *    po slevě na dítě a `KcDanBon` daňový bonus,
- *  - `KcVyuct` = `KcCistaM` + `KcNahrNem` + `KcDanBon` + `KcStrav` - `KcSrazky`,
+ *  - `KcVyuct` = `KcCistaM` + `KcNahrNem` + `KcDanBon` + `KcStrav` + `KcDoplDanBonRZ`
+ *    (doplatek daňového bonusu z ročního zúčtování) - `KcSrazky`; `KcDanUpr` je součet
+ *    obou úprav z ročního zúčtování,
  *  - `HodOdpra` jsou odpracované hodiny BEZ svátků (PAMICA je u měsíční mzdy počítá do
  *    odpracovaných), `StanovenyFond` = (`DnyPrac` + `DnyStSv`) × 8.
  *

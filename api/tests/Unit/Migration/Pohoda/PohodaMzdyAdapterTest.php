@@ -188,6 +188,26 @@ final class PohodaMzdyAdapterTest extends TestCase
         self::assertStringContainsString('čistá mzda', $tampered['failures']['2026-01'][0]);
     }
 
+    /**
+     * Roční zúčtování daně: přeplatek daně (`KcPreplDanRZ`) je v čisté mzdě, doplatek
+     * daňového bonusu (`KcDoplDanBonRZ`) jen ve výplatě, `KcDanUpr` je jejich součet.
+     * Mzda s nimi sedí sama se sebou; částky zůstávají nepřevedenými položkami.
+     */
+    public function testAnnualTaxSettlementRefundKeepsPayslipConsistent(): void
+    {
+        $file = SyntheticPohodaMzdy::write($this->tmp);
+        $xml = (string) file_get_contents($file);
+        $xml = str_replace('<KcCistaM>33327</KcCistaM>', '<KcCistaM>34327</KcCistaM><KcPreplDanRZ>1000</KcPreplDanRZ><KcDoplDanBonRZ>500</KcDoplDanBonRZ><KcDanUpr>1500</KcDanUpr>', $xml);
+        $xml = str_replace('<KcVyuct>36046.5</KcVyuct>', '<KcVyuct>37546.5</KcVyuct>', $xml);
+        file_put_contents($file, $xml);
+
+        $prepared = PohodaMzdyAdapter::prepare($file);
+        self::assertNotNull($prepared);
+        self::assertSame([], $prepared['failures']);
+        $items = $prepared['unconverted'][0]['unconverted_items'];
+        self::assertSame(1000.0, $items['component:KcPreplDanRZ']['amount'] ?? null);
+    }
+
     public function testUnknownColumnsAndCardPeriodsAreReportedNotGuessed(): void
     {
         $file = SyntheticPohodaMzdy::write($this->tmp);

@@ -99,7 +99,10 @@ final class PohodaMzdyReconciliation
         if ($parts !== $metrics['gross']) {
             $failures[] = sprintf('hrubá mzda %s Kč, převedené a známé sloupce %s Kč', self::money($metrics['gross']), self::money($parts));
         }
-        $net = $metrics['gross'] - $metrics['employee_social'] - $metrics['employee_health'] - self::minor(PohodaXml::num($mz, 'KcZalDan'));
+        // Přeplatek daně z ročního zúčtování (`KcPreplDanRZ`) POHODA vyplácí v čisté mzdě,
+        // doplatek daňového bonusu z ročního zúčtování (`KcDoplDanBonRZ`) jen ve výplatě.
+        $net = $metrics['gross'] - $metrics['employee_social'] - $metrics['employee_health'] - self::minor(PohodaXml::num($mz, 'KcZalDan'))
+            + self::minor(PohodaXml::num($mz, 'KcPreplDanRZ'));
         if ($net !== self::minor(PohodaXml::num($mz, 'KcCistaM'))) {
             $failures[] = sprintf('čistá mzda %s Kč, hrubá mzda po pojistném a dani %s Kč', self::money(self::minor(PohodaXml::num($mz, 'KcCistaM'))), self::money($net));
         }
@@ -114,7 +117,8 @@ final class PohodaMzdyReconciliation
         if (self::minor($compensation) !== self::minor(PohodaXml::num($mz, 'KcNahrNem'))) {
             $failures[] = sprintf('náhrada mzdy při nemoci %s Kč, rozpis náhrad %s Kč', self::money(self::minor(PohodaXml::num($mz, 'KcNahrNem'))), self::money(self::minor($compensation)));
         }
-        $payout = self::minor(PohodaXml::num($mz, 'KcCistaM')) + self::minor(PohodaXml::num($mz, 'KcNahrNem')) + self::minor(PohodaXml::num($mz, 'KcDanBon')) + self::minor(PohodaXml::num($mz, 'KcStrav')) - self::minor(PohodaXml::num($mz, 'KcSrazky')) - self::minor(PohodaXml::num($mz, 'KcZaloha'));
+        $payout = self::minor(PohodaXml::num($mz, 'KcCistaM')) + self::minor(PohodaXml::num($mz, 'KcNahrNem')) + self::minor(PohodaXml::num($mz, 'KcDanBon')) + self::minor(PohodaXml::num($mz, 'KcStrav'))
+            + self::minor(PohodaXml::num($mz, 'KcDoplDanBonRZ')) - self::minor(PohodaXml::num($mz, 'KcSrazky')) - self::minor(PohodaXml::num($mz, 'KcZaloha'));
         if ($payout !== $metrics['payout']) {
             $failures[] = sprintf('k výplatě %s Kč, čistá mzda s náhradou, bonusem a stravným po srážkách %s Kč', self::money($metrics['payout']), self::money($payout));
         }
