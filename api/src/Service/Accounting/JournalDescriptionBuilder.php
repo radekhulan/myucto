@@ -359,6 +359,123 @@ final class JournalDescriptionBuilder
         return ($text === null || $text === '') ? null : $text;
     }
 
+    // ─────────────────────────────────────────────────── rozklad pro sloupce deníku ──
+
+    /**
+     * Rozloží uložený popis na části, které deník umí ukázat samostatnými sloupci, aby
+     * je při zapnutém sloupci nezdvojoval v popisu. Čte gramatiku {@see composeParts()}:
+     * hlavička dokladu (u {@see BUILDABLE} první segment, u banky i směr platby, u pokladny
+     * název pokladny), protistrana s VS a zbytek jako věcný text. Hlavičkou je i segment
+     * převzatý z převodu, který jen opakuje číslo dokladu („PF 26FP00013").
+     *
+     * `kind` nese druh dokladu z hlavičky faktury, který jinde vidět není (Dobropis, Účtenka).
+     * Ručně zadaný popis nemá identifikátory ani protistranu, zůstane celý jako text.
+     *
+     * @param array{document_no?:?string, source_ref?:?string, vendor_document_no?:?string,
+     *              source_doc_number?:?string, source_bank_ref?:?string, partner_name?:?string,
+     *              variable_symbol?:?string, counterparty_account?:?string} $facts
+     * @return array{kind:?string, partner:?string, vs:?string, text:?string}
+     */
+    public static function parts(?string $description, string $sourceType, array $facts): array
+    {
+        $segments = [];
+        foreach (explode(self::SEPARATOR, (string) $description) as $piece) {
+            $piece = self::clean($piece);
+            if ($piece !== null) {
+                $segments[] = $piece;
+            }
+        }
+
+        $ids = [];
+        foreach (['document_no', 'source_ref', 'vendor_document_no', 'source_doc_number', 'source_bank_ref'] as $key) {
+            $id = self::clean($facts[$key] ?? null);
+            if ($id !== null) {
+                $ids[] = self::normalize($id);
+            }
+        }
+        $partnerNames = [];
+        foreach (['partner_name', 'counterparty_account'] as $key) {
+            $name = self::clean($facts[$key] ?? null);
+            if ($name !== null) {
+                $partnerNames[] = self::normalize($name);
+            }
+        }
+
+        $kind = null;
+        $partner = null;
+        $vs = null;
+        $text = [];
+        $buildable = in_array($sourceType, self::BUILDABLE, true);
+        foreach ($segments as $i => $segment) {
+            $norm = self::normalize($segment);
+            if ($i === 0 && $buildable && ($sourceType !== 'bank' || str_starts_with($norm, 'banka'))) {
+                $kind = self::documentKind($segment, $sourceType);
+                continue;
+            }
+            if ($sourceType === 'bank' && ($norm === 'příchozí platba' || $norm === 'odchozí platba')) {
+                continue;
+            }
+            if ($partner === null && preg_match('/^(.*?)\s*\(VS ([^)]+)\)$/u', $segment, $m) === 1) {
+                $partner = self::clean($m[1]);
+                $vs = self::clean($m[2]);
+                continue;
+            }
+            if ($vs === null && preg_match('/^VS (\S+)$/u', $segment, $m) === 1) {
+                $vs = $m[1];
+                continue;
+            }
+            if ($partner === null && in_array($norm, $partnerNames, true)) {
+                $partner = $segment;
+                continue;
+            }
+            if ($sourceType === 'cash' && $i === 1 && count($segments) > 2) {
+                continue;
+            }
+            if (self::repeatsDocumentNumber($norm, $ids)) {
+                continue;
+            }
+            $text[] = $segment;
+        }
+
+        return [
+            'kind'    => $kind,
+            'partner' => $partner,
+            'vs'      => $vs,
+            'text'    => $text === [] ? null : implode(self::SEPARATOR, $text),
+        ];
+    }
+
+    /** Druh faktury z hlavičky, jen když nese víc než běžné FV/PF (Dobropis FV, Účtenka). */
+    private static function documentKind(string $head, string $sourceType): ?string
+    {
+        if ($sourceType !== 'invoice' && $sourceType !== 'purchase_invoice') {
+            return null;
+        }
+        $head = (string) preg_replace('/\s*\/\s*dod\..*$/u', '', $head);
+        $label = self::clean(preg_replace('/\s+\S+$/u', '', $head));
+
+        return $label === null || in_array($label, ['FV', 'PF'], true) ? null : $label;
+    }
+
+    /** Krátký segment (nejvýš čtyři slova), který jen pojmenuje doklad jeho číslem. */
+    private static function repeatsDocumentNumber(string $norm, array $ids): bool
+    {
+        if ($ids === []) {
+            return false;
+        }
+        $words = preg_split('/\s+/u', $norm) ?: [];
+        if (count($words) > 4) {
+            return false;
+        }
+        foreach ($words as $word) {
+            if (in_array($word, $ids, true)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     // ─────────────────────────────────────────────────────────────── popisky typů ──
 
     /** Zkratka vydaného dokladu; „FV" je to, jak doklad v deníku pojmenuje účetní. */

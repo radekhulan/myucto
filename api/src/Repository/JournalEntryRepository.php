@@ -10,6 +10,7 @@ use MyInvoice\Service\Accounting\Dimension\DimensionFilter;
 use MyInvoice\Service\Accounting\Dimension\DimensionPeriodGuard;
 use MyInvoice\Service\Accounting\Dimension\SystemDimensionWritePolicy;
 use MyInvoice\Service\Accounting\PostingException;
+use MyInvoice\Service\Accounting\JournalDescriptionBuilder;
 use MyInvoice\Service\Accounting\JournalLineAmount;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Accounting\Allocation\JointAllocationJournalProof;
@@ -2763,6 +2764,11 @@ final class JournalEntryRepository
             ? (string) $r['source_settlement_doc_type'] : null;
         $r['source_settlement_doc_id'] = $r['source_settlement_doc_id'] !== null
             ? (int) $r['source_settlement_doc_id'] : null;
+        $r['description_parts'] = JournalDescriptionBuilder::parts(
+            $r['description'] ?? null,
+            (string) $r['source_type'],
+            $r,
+        );
         return $r;
     }
 }

@@ -388,6 +388,9 @@ final class JournalExportAndHistoryTest extends TestCase
             self::assertSame(self::YEAR . '-04-02', $row['received_date']);
             self::assertSame(self::YEAR . '-04-15', $row['due_date']);
         }
+        $row = $this->findItem($items, $entryId);
+        self::assertSame('Dodavatel Deník s.r.o.', $row['description_parts']['partner'],
+            'Popis se rozkládá i v listu, jinak by deník zdvojoval firmu v popisu.');
     }
 
     public function testJournalExposesAndFiltersAutomationProvenance(): void

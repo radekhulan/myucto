@@ -25,12 +25,18 @@ export function useAdaptiveTableRows(targets: Readonly<Ref<HTMLElement[]>>, enab
       .filter((table): table is HTMLTableElement => table !== null && table.parentElement!.clientWidth > 0)
     if (tables.length === 0) return
     const widths: number[] = []
+    // Sloupec s `data-adaptive-max` (popis) nese text, který se smí zalomit. Do rozhodnutí
+    // o víceřádkovém režimu se počítá jen do svého stropu a v jednořádkovém režimu dostane
+    // přes `--adaptive-text-max` zbytek volného místa. Tabulka tak raději zalomí dlouhý
+    // text, než aby rozdělila každý řádek do dvou.
+    let textColumn = -1
     for (const table of tables) {
       const clone = table.cloneNode(true) as HTMLTableElement
       clone.classList.remove('adaptive-table', 'multirow-table', 'column-labels')
       clone.setAttribute('aria-hidden', 'true')
       clone.inert = true
       Object.assign(clone.style, { position: 'fixed', visibility: 'hidden', pointerEvents: 'none', width: 'max-content', minWidth: '0', top: '-10000px' })
+      clone.style.removeProperty('--adaptive-text-max')
       clone.querySelectorAll<HTMLElement>('th, td').forEach(cell => cell.style.removeProperty('flex-basis'))
       clone.querySelectorAll('.table-detail-row').forEach(row => row.remove())
       document.body.append(clone)
@@ -38,15 +44,25 @@ export function useAdaptiveTableRows(targets: Readonly<Ref<HTMLElement[]>>, enab
         const cells = Array.from(clone.tHead?.rows[0]?.cells ?? [])
         cells.forEach((cell, index) => {
           if (index === 0 || index === cells.length - 1) return
-          widths[index] = Math.max(widths[index] ?? 0, Math.min(320, Math.ceil(cell.getBoundingClientRect().width)))
+          const textCap = Number(cell.dataset.adaptiveMax) || 0
+          if (textCap > 0) textColumn = index
+          widths[index] = Math.max(widths[index] ?? 0, Math.min(textCap || 320, Math.ceil(cell.getBoundingClientRect().width)))
         })
       } finally { clone.remove() }
     }
+    const total = widths.reduce((sum, width) => sum + width, 0)
     for (const table of tables) {
       const gutter = gutterWidth(table)
       table.style.setProperty('--adaptive-gutter', `${gutter}px`)
+      // Se stropem textu se počítá i poslední ovládací buňka, jinak by roztažený text
+      // přetekl právě o ni.
+      const headCells = table.tHead?.rows[0]?.cells
+      const trailing = textColumn > 0 && headCells?.length ? Math.ceil(headCells[headCells.length - 1]!.getBoundingClientRect().width) : 0
       const available = table.parentElement!.clientWidth - gutter
-      const wrapped = enabled?.value !== false && window.innerWidth >= 768 && widths.reduce((sum, width) => sum + width, 0) > available
+      const singleLine = available - trailing
+      const wrapped = enabled?.value !== false && window.innerWidth >= 768 && total > singleLine
+      if (!wrapped && textColumn > 0) table.style.setProperty('--adaptive-text-max', `${widths[textColumn]! + Math.max(0, singleLine - total)}px`)
+      else table.style.removeProperty('--adaptive-text-max')
       const weights = Array.from(table.tHead?.rows[0]?.cells ?? []).slice(1, -1)
         .map(cell => Number(cell.dataset.adaptiveWeight) || 1)
       const layout = wrapped ? adaptiveTableWidths(widths.slice(1), available, weights) : []

@@ -19596,6 +19596,11 @@
         "journal_entry": "Journal entry",
         "unit_charge": "Owners association charge"
       },
+      "source_short": {
+        "invoice": "Inv.",
+        "purchase_invoice": "Bill",
+        "other_item": "Other"
+      },
       "history": {
         "title": "History",
         "current": "current",

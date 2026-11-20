@@ -323,4 +323,62 @@ final class JournalDescriptionBuilderTest extends TestCase
     {
         self::assertSame(['invoice', 'purchase_invoice', 'bank', 'cash'], B::BUILDABLE);
     }
+
+    /** @return iterable<string, array{string, string, array<string,string>, array<string,?string>}> */
+    public static function partsCases(): iterable
+    {
+        yield 'přijatá faktura' => [
+            'PF PF-2099-0008 / dod. DOD-77 — Ukázka s.r.o. — Vývojářské licence', 'purchase_invoice',
+            ['source_ref' => 'PF-2099-0008', 'document_no' => 'DOD-77', 'partner_name' => 'Ukázka s.r.o.'],
+            ['kind' => null, 'partner' => 'Ukázka s.r.o.', 'vs' => null, 'text' => 'Vývojářské licence'],
+        ];
+        yield 'převzatá přijatá faktura opakuje číslo' => [
+            'PF 99FP00013 / dod. 1784 — Dodavatel a.s. — PF 99FP00013 — tiskárna', 'purchase_invoice',
+            ['source_ref' => '99FP00013', 'partner_name' => 'Dodavatel a.s.'],
+            ['kind' => null, 'partner' => 'Dodavatel a.s.', 'vs' => null, 'text' => 'tiskárna'],
+        ];
+        yield 'dobropis nese druh' => [
+            'Dobropis FV 2099005 — Odběratel s.r.o. — vrácení', 'invoice',
+            ['source_ref' => '2099005', 'partner_name' => 'Odběratel s.r.o.'],
+            ['kind' => 'Dobropis FV', 'partner' => 'Odběratel s.r.o.', 'vs' => null, 'text' => 'vrácení'],
+        ];
+        yield 'banka s VS' => [
+            'Banka CSOB 017/2099 — odchozí platba — Dodavatel a.s. (VS 4028931144) — Banka CSOB0170001 — Úhrada FP č. 99FP0001', 'bank',
+            ['document_no' => 'CSOB0170001', 'partner_name' => 'Dodavatel a.s.', 'variable_symbol' => '4028931144'],
+            ['kind' => null, 'partner' => 'Dodavatel a.s.', 'vs' => '4028931144', 'text' => 'Úhrada FP č. 99FP0001'],
+        ];
+        yield 'banka jen s protiúčtem' => [
+            'Banka 1000000005/0100 — odchozí platba — 2000000003/0300 (VS 102099) — úklid', 'bank',
+            ['counterparty_account' => '2000000003/0300', 'variable_symbol' => '102099'],
+            ['kind' => null, 'partner' => '2000000003/0300', 'vs' => '102099', 'text' => 'úklid'],
+        ];
+        yield 'pokladna' => [
+            '99HV00006 — Hlavní pokladna — Obchod s.r.o. — Pokladna 99HV00006 — vybavení', 'cash',
+            ['source_ref' => '99HV00006', 'partner_name' => 'Obchod s.r.o.'],
+            ['kind' => null, 'partner' => 'Obchod s.r.o.', 'vs' => null, 'text' => 'vybavení'],
+        ];
+        yield 'interní doklad' => [
+            'Interní doklady 99IN00067 — Přiznání DPH z poskytnutí služby ze státu EU', 'manual',
+            ['document_no' => '99IN00067'],
+            ['kind' => null, 'partner' => null, 'vs' => null, 'text' => 'Přiznání DPH z poskytnutí služby ze státu EU'],
+        ];
+        yield 'ruční popis zůstane celý' => [
+            'Účetní odpis - M00002', 'manual', ['document_no' => 'ID-1'],
+            ['kind' => null, 'partner' => null, 'vs' => null, 'text' => 'Účetní odpis - M00002'],
+        ];
+        yield 'faktura bez textu' => [
+            'FV 2099008 — Odběratel s.r.o.', 'invoice', ['source_ref' => '2099008', 'partner_name' => 'Odběratel s.r.o.'],
+            ['kind' => null, 'partner' => 'Odběratel s.r.o.', 'vs' => null, 'text' => null],
+        ];
+    }
+
+    /**
+     * @param array<string,string> $facts
+     * @param array<string,?string> $expected
+     */
+    #[\PHPUnit\Framework\Attributes\DataProvider('partsCases')]
+    public function testPartsSplitDescriptionIntoColumnsAndText(string $description, string $type, array $facts, array $expected): void
+    {
+        self::assertSame($expected, B::parts($description, $type, $facts));
+    }
 }

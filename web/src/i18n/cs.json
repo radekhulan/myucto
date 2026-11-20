@@ -19596,6 +19596,11 @@
         "journal_entry": "Účetní zápis",
         "unit_charge": "Předpis SVJ"
       },
+      "source_short": {
+        "invoice": "FV",
+        "purchase_invoice": "PF",
+        "other_item": "OP/OZ"
+      },
       "history": {
         "title": "Historie",
         "current": "aktuální",

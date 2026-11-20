@@ -54,6 +54,7 @@ import { apiErrorText, hasAnySingle } from '@/utils/entryForm'
 import LockedPeriodAckModal from '@/components/accounting/LockedPeriodAckModal.vue'
 import { useLockedPeriodAck } from '@/composables/useLockedPeriodAck'
 import { journalSourceLink, journalSourceRefLabel } from '@/utils/journalSourceLink'
+import { compactJournalDescription } from '@/utils/journalDescription'
 import { findAccountingPeriod } from '@/utils/accountingPeriod'
 import DateInput from '@/components/ui/DateInput.vue'
 import DimensionReportFilters from '@/components/dimensions/DimensionReportFilters.vue'
@@ -565,14 +566,14 @@ const COLUMNS: ColumnDef[] = [
   { key: 'due_date', labelKey: 'accounting.journal.col_due_date', defaultHidden: true },
   { key: 'paid_date', labelKey: 'accounting.journal.col_paid_date', defaultHidden: true },
   { key: 'description', labelKey: 'accounting.journal.description', required: true },
-  { key: 'partner_name', labelKey: 'accounting.journal.col_partner', defaultHidden: true },
+  { key: 'partner_name', labelKey: 'accounting.journal.col_partner' },
   { key: 'partner_ic', labelKey: 'accounting.journal.col_partner_ic', defaultHidden: true },
-  { key: 'variable_symbol', labelKey: 'accounting.journal.col_variable_symbol', defaultHidden: true },
+  { key: 'variable_symbol', labelKey: 'accounting.journal.col_variable_symbol' },
   { key: 'vendor_document_no', labelKey: 'accounting.journal.col_vendor_document_no', defaultHidden: true },
   { key: 'counterparty_account', labelKey: 'accounting.journal.col_counterparty_account', defaultHidden: true },
   { key: 'source', labelKey: 'accounting.journal.source_col' },
   { key: 'amount', labelKey: 'accounting.journal.col_amount' },
-  { key: 'status', labelKey: 'accounting.journal.status_col' },
+  { key: 'status', labelKey: 'accounting.journal.status_col', defaultHidden: true },
   { key: 'posted_at', labelKey: 'accounting.journal.col_posted_at', defaultHidden: true },
   { key: 'posted_by', labelKey: 'accounting.journal.col_posted_by', defaultHidden: true },
   { key: 'entry_id', labelKey: 'accounting.journal.col_entry_id', defaultHidden: true },
@@ -590,7 +591,7 @@ const colors = useTableColors('journal')
 const columnDrag = useColumnDrag(tbl)
 const COLUMN_PRESETS = [
   { key: 'default', labelKey: 'common.columns_preset_default', visibleKeys: null, columnLabels: false },
-  { key: 'accounting', labelKey: 'common.columns_preset_accounting', visibleKeys: ['date', 'document_no', 'description', 'partner_name', 'variable_symbol', 'source', 'amount', 'status', 'entry_id', 'created_at', 'vat_breakdown', 'debit_accounts', 'credit_accounts'] },
+  { key: 'accounting', labelKey: 'common.columns_preset_accounting', visibleKeys: ['date', 'tax_date', 'document_no', 'vendor_document_no', 'description', 'partner_name', 'partner_ic', 'variable_symbol', 'due_date', 'source', 'amount', 'status', 'vat_breakdown', 'debit_accounts', 'credit_accounts'] },
   { key: 'complete', labelKey: 'common.columns_preset_full', visibleKeys: COLUMNS.map(c => c.key) },
 ]
 function onListScroll(event: Event) {
@@ -630,7 +631,7 @@ function mobileExtraFields(entry: JournalEntry): Array<{ key: string; label: str
     note: entry.note_preview || '—',
     documents: entry.document_count ? String(entry.document_count) : '—',
   }
-  return tbl.orderedColumns.value.filter(c => c.defaultHidden && c.key !== 'vat_breakdown' && tbl.isVisible(c.key))
+  return tbl.orderedColumns.value.filter(c => (c.defaultHidden || isDocumentFact(c.key)) && c.key !== 'vat_breakdown' && c.key !== 'status' && tbl.isVisible(c.key))
     .map(c => ({ key: c.key, label: t(c.labelKey), value: values[c.key] ?? '—' }))
 }
 function onSortToggle(key: string) {
@@ -1104,6 +1105,16 @@ function sourceLabel(type: string): string {
   const v = t(key)
   return v === key ? type : v
 }
+/** Štítek s číslem dokladu stačí se zkratkou typu (FV, PF); plný název je v tooltipu. */
+function sourceBadgeLabel(entry: JournalEntry): string {
+  const key = `accounting.journal.source_short.${entry.source_type}`
+  const short = entry.source_ref ? t(key) : key
+  return short === key ? sourceLabel(entry.source_type) : short
+}
+/** Popis v seznamu bez údajů, které ukazují zapnuté sloupce (Doklad, Zdroj, Firma, VS). */
+function listDescription(entry: JournalEntry): string {
+  return compactJournalDescription(entry.description, entry.description_parts, key => tbl.isVisible(key))
+}
 
 /**
  * Cíl drill-down odkazu na zdrojový doklad. Mapování source_type → routa je sdílené
@@ -1364,7 +1375,7 @@ function entryRange(entry: JournalEntryDetail): { from: string; to: string } {
               <template v-for="c in tbl.orderedColumns.value.filter(c => tbl.isVisible(c.key))" :key="c.key">
                 <th v-if="c.key === 'dimensions' || isDocumentFact(c.key)" scope="col" class="px-3 py-2 text-left font-medium whitespace-nowrap" v-bind="columnDrag.headerAttrs(c.key)"><ColumnDragHandle /> {{ t(c.labelKey) }}</th>
                 <SortableTh v-else v-bind="columnDrag.headerAttrs(c.key)" reorderable :label="t(c.labelKey)" :sort-key="c.key" :sort="tbl.sort.value"
-                  :align="c.key === 'amount' ? 'right' : 'left'" :data-adaptive-weight="c.key === 'description' ? 2 : undefined" :class="c.key === 'description' ? 'wrap-cell' : ''" @toggle="onSortToggle" />
+                  :align="c.key === 'amount' ? 'right' : 'left'" :data-adaptive-weight="c.key === 'description' ? 2 : undefined" :data-adaptive-max="c.key === 'description' ? 224 : undefined" :class="c.key === 'description' ? 'wrap-cell' : ''" @toggle="onSortToggle" />
               </template>
               <th class="px-1 py-2 w-8">
                 <button v-if="tbl.sort.value" type="button" class="inline-flex h-6 w-6 items-center justify-center rounded text-neutral-500 hover:bg-neutral-200 hover:text-neutral-800"
@@ -1396,7 +1407,7 @@ function entryRange(entry: JournalEntryDetail): { from: string; to: string } {
                 <td v-else-if="c.key === 'document_no'" :data-custom-color="!!colors.color('document_no')" :style="colors.cellStyle('document_no')" class="px-3 py-2 font-mono text-xs">
                   {{ e.document_no || '—' }}
                   <div v-if="e.source_bank_ref && e.source_bank_ref !== e.document_no"
-                       class="text-[10px] text-neutral-400 whitespace-nowrap"
+                       class="text-[10px] text-neutral-400 whitespace-nowrap truncate max-w-[9rem]"
                        :title="t('accounting.journal.bank_ref_hint', { ref: e.source_bank_ref })">{{ e.source_bank_ref }}</div>
                   <RouterLink v-if="e.internal_document" :to="{ name: 'accounting-internal-document-detail', params: { id: e.internal_document.id } }"
                     class="block whitespace-nowrap font-sans text-[10px] text-primary-700 hover:underline" data-test="journal-internal-document" @click.stop>
@@ -1405,8 +1416,11 @@ function entryRange(entry: JournalEntryDetail): { from: string; to: string } {
                 </td>
                 <td v-else-if="c.key === 'document_date'" :data-custom-color="!!colors.color('document_date')" :style="colors.cellStyle('document_date')" class="px-3 py-2 whitespace-nowrap">{{ e.document_date ? formatDate(e.document_date) : '—' }}</td>
                 <td v-else-if="c.key === 'description'" :data-custom-color="!!colors.color('description')" :style="colors.cellStyle('description')" class="px-3 py-2 wrap-cell" :title="e.description || undefined">
-                  <span class="adaptive-primary-text">{{ e.description || '—' }}</span>
-                  <span v-if="e.reversed_by" class="ml-1 text-xs px-1.5 py-0.5 rounded bg-neutral-100 text-neutral-500">{{ t('accounting.journal.reversed_badge') }}</span>
+                  <div class="adaptive-text-cap">
+                    <span class="adaptive-primary-text">{{ listDescription(e) || '—' }}</span>
+                    <span v-if="e.reversed_by" class="ml-1 text-xs px-1.5 py-0.5 rounded bg-neutral-100 text-neutral-500">{{ t('accounting.journal.reversed_badge') }}</span>
+                    <span v-if="!e.posted_at && !tbl.isVisible('status')" class="ml-1 text-xs px-1.5 py-0.5 rounded bg-neutral-100 text-neutral-500" data-test="journal-draft-badge">{{ t('accounting.journal.draft') }}</span>
+                  </div>
                 </td>
                 <td v-else-if="c.key === 'source'" :data-custom-color="!!colors.color('source')" :style="colors.cellStyle('source')" class="px-3 py-2 whitespace-nowrap clip-cell">
                   <!-- Jeden řádek: `flex-wrap` lámal odznak automatu a značku
@@ -1423,12 +1437,12 @@ function entryRange(entry: JournalEntryDetail): { from: string; to: string } {
                          navigaci pryč. Stejná akce má vypadat stejně. -->
                     <button v-if="sourceLink(e)" type="button" @click.stop="openSourceDrawer(e)"
                       :class="btnOutlineSm('primary')"
-                      :title="t('accounting.journal.source_drawer.open')">
+                      :title="`${sourceLabel(e.source_type)} ${journalSourceRefLabel(e)} · ${t('accounting.journal.source_drawer.open')}`">
                       <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                         <path stroke-linecap="round" stroke-linejoin="round"
                           d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0z M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
                       </svg>
-                      {{ sourceLabel(e.source_type) }} {{ journalSourceRefLabel(e) }}
+                      {{ sourceBadgeLabel(e) }} {{ journalSourceRefLabel(e) }}
                     </button>
                     <span v-else class="text-neutral-500 text-xs">{{ sourceLabel(e.source_type) }}</span>
                     <AutomationBadge v-if="e.automation?.mode === 'auto'" variant="auto" />
@@ -1554,7 +1568,7 @@ function entryRange(entry: JournalEntryDetail): { from: string; to: string } {
               </span>
             </div>
             <div class="text-sm text-neutral-900" :data-custom-color="!!colors.color('description')" :style="colors.cellStyle('description')">
-              {{ e.description || '—' }}
+              {{ listDescription(e) || '—' }}
               <span v-if="e.reversed_by" class="ml-1 text-xs px-1.5 py-0.5 rounded bg-neutral-100 text-neutral-500">{{ t('accounting.journal.reversed_badge') }}</span>
             </div>
             <div class="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-neutral-500">
