@@ -200,6 +200,54 @@ final class PohodaPayrollJmhzReports
     }
 
     /**
+     * OIČ a ID PPV z hlášení, která ČSSZ přijala. ČSSZ hlášení s identifikátorem, který
+     * nezná, odmítne, takže číslo z přijatého hlášení je doložené protokolem ČSSZ a převod
+     * ho převezme bez potvrzení v průvodci. Hlášení odeslané, ale nepřijaté, doklad není.
+     *
+     * @param list<array<string,mixed>> $reports {@see self::read()}
+     * @return array<string,array{oic?:array<string,true>,id_ppv?:array<string,true>}> vztah (RefPomer) => druh => hodnoty
+     */
+    public static function acceptedIdentifiers(array $reports): array
+    {
+        $out = [];
+        foreach ($reports as $report) {
+            if ($report['sent'] !== true || !self::accepted($report)) {
+                continue;
+            }
+            foreach ($report['forms'] as $form) {
+                if ($form['form'] === null || $form['relation_key'] === '') {
+                    continue;
+                }
+                foreach (['oic' => $form['form']->personIdentifier, 'id_ppv' => $form['form']->employmentIdentifier] as $kind => $value) {
+                    $value = trim((string) $value);
+                    if ($value !== '') {
+                        $out[$form['relation_key']][$kind][$value] = true;
+                    }
+                }
+            }
+        }
+
+        return $out;
+    }
+
+    /**
+     * Všechny identifikátory vztahu, které převod zapisuje, nesou přijatá hlášení téhož vztahu.
+     *
+     * @param array<string,array{oic?:array<string,true>,id_ppv?:array<string,true>}> $accepted {@see self::acceptedIdentifiers()}
+     */
+    public static function identifiersAccepted(array $accepted, string $relationKey, ?string $oic, ?string $idPpv): bool
+    {
+        $values = array_filter(['oic' => trim((string) $oic), 'id_ppv' => trim((string) $idPpv)], static fn (string $v): bool => $v !== '');
+        foreach ($values as $kind => $value) {
+            if (!isset($accepted[$relationKey][$kind][$value])) {
+                return false;
+            }
+        }
+
+        return $values !== [];
+    }
+
+    /**
      * Registrace zaměstnanců (REGZEC) a předregistrace ze všech let, s obsahem vět po atributech.
      *
      * @return list<array{source_key:string, kind:string, id:string, sent:bool, state:string, filled_at:?string,

@@ -34,7 +34,7 @@ use MyInvoice\Service\Payroll\Migration\PayrollTakeoverRunState;
  * |--------------------------------------------------|-------------------------------------------------|
  * | pracoviště, APZ, funkční požitky, dočasné přidělení, fond a týdenní doba, druh činnosti (hlášení) | podmínky vztahu, jen prázdná pole ({@see PayrollTakeoverEmploymentWriter::fillTerms()}) |
  * | CZ-ISCO, druh činnosti, upřesnění vztahu, obec a místo výkonu práce (registrace) | podmínky vztahu, jen prázdná pole |
- * | OIČ a ID PPV (hlášení)                          | identifikátory vztahu, jen s potvrzením původu, jen chybějící |
+ * | OIČ a ID PPV (hlášení)                          | identifikátory vztahu, jen chybějící; z hlášení přijatého ČSSZ samy, jinak s potvrzením původu |
  * | průměrný hodinový výdělek 10345 (hlášení)       | schválený průměr čtvrtletí, které nemá průměr   |
  * | vyživované děti (hlášení)                        | vyživované osoby, jen osobě bez vyživovaných osob |
  * | celé podání (hlavička, GUIDy, stav, všechny atributy) | historie podání předchozím programem ({@see JmhzExternalSubmissionStore}) |
@@ -200,6 +200,8 @@ final class PohodaPayrollJmhzWriter
         $state = new PayrollTakeoverRunState();
         $byPerson = [];
         $unconfirmed = 0;
+        $verified = 0;
+        $acceptedIdentifiers = PohodaPayrollJmhzReports::acceptedIdentifiers($context['reports']);
         foreach ($records as $record) {
             $relationKey = (string) $record['relation_key'];
             $number = (string) $record['personal_number'];
@@ -225,7 +227,9 @@ final class PohodaPayrollJmhzWriter
             $this->part($protocol, $step, $number, 'Průměrný výdělek z hlášení',
                 fn (): array => self::prefixed('jmhz_', $this->employments->averageEarnings($supplierId, $employmentId, $relation, $userId, $policy)));
             if ($relation->oic !== null || $relation->idPpv !== null) {
-                if ($confirmIdentifiers) {
+                $accepted = PohodaPayrollJmhzReports::identifiersAccepted($acceptedIdentifiers, $relationKey, $relation->oic, $relation->idPpv);
+                if ($confirmIdentifiers || $accepted) {
+                    $verified += $accepted && !$confirmIdentifiers ? 1 : 0;
                     $this->part($protocol, $step, $number, 'OIČ a ID PPV z hlášení',
                         fn (): array => self::prefixed('jmhz_', $this->employments->identifiers(
                             $supplierId, (int) $pair['employee_id'], $employmentId, $relation, $userId, $policy, $state,
@@ -261,9 +265,12 @@ final class PohodaPayrollJmhzWriter
                     fn (): array => self::prefixed('jmhz_', $this->people->otherCaregiverPresent($supplierId, $employeeId, $caregiver, $userId)));
             }
         }
+        if ($verified > 0) {
+            $protocol->count($step, 'identifiers_from_accepted_reports', $verified);
+        }
         if ($unconfirmed > 0) {
             $protocol->count($step, 'jmhz_identifiers_unconfirmed', $unconfirmed);
-            $protocol->warn($step, 'jmhz_identifiers_unconfirmed', "OIČ nebo ID PPV z odeslaných hlášení má {$unconfirmed} vztahů. "
+            $protocol->warn($step, 'jmhz_identifiers_unconfirmed', "OIČ nebo ID PPV z odeslaných, ale ČSSZ nepřijatých hlášení má {$unconfirmed} vztahů. "
                 . 'Bez potvrzení, že čísla pocházejí z protokolů ČSSZ, je převod nepřevzal. Potvrďte to v průvodci a převod zopakujte.');
         }
         if ($state->invalidOic !== []) {

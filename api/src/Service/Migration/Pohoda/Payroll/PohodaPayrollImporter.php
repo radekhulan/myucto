@@ -403,7 +403,9 @@ final class PohodaPayrollImporter
     /**
      * @param (callable(string,int,int):void)|null $progress
      * @param (callable():bool)|null $shouldCancel
-     * @param bool $confirmIdentifiers uživatel potvrdil, že OIČ a ID PPV v PAMICA pocházejí z protokolů ČSSZ
+     * @param bool $confirmIdentifiers uživatel potvrdil, že OIČ a ID PPV v PAMICA pocházejí z protokolů ČSSZ;
+     *        čísla, která nesou hlášení přijatá ČSSZ, se převezmou i bez potvrzení
+     *        ({@see PohodaPayrollJmhzReports::acceptedIdentifiers()})
      * @param bool $approveTakenOver převzatá docházka a mzdové vstupy se rovnou schválí (viz {@see approveTakenOverInputs()})
      * @param ?string $startDecision rozhodnutí k začátku vedení mezd, který leží před měsíci zpracovanými
      *        PAMICA ({@see self::START_ADVANCE} / {@see self::START_KEEP}); ostrý převod bez něj skončí chybou
@@ -951,7 +953,8 @@ final class PohodaPayrollImporter
                     ));
                 }
                 $this->people->write($supplierId, $userOrNull, $records, $year, $confirmIdentifiers, $protocol, self::STEP_PEOPLE,
-                    PohodaPayrollPeople::institutions($file), PohodaPayrollPeople::cards($file, $year, $exportedOn));
+                    PohodaPayrollPeople::institutions($file), PohodaPayrollPeople::cards($file, $year, $exportedOn),
+                    PohodaPayrollJmhzReports::acceptedIdentifiers($jmhz['reports']));
                 [$sourceTotals, $sourceSkipped] = $this->storeReferenceTotals($supplierId, $file, $year, $protocol, $exportedOn, $range, basename($sourceFile));
                 $this->accidentInsuranceRate($supplierId, $file, $year, $userOrNull, $protocol);
                 // Náhrady mzdy z hodin docházky až po osobách: stojí na průměrném výdělku,

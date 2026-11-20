@@ -115,9 +115,13 @@ final class PohodaPayrollPeopleWriter
      *     ČSSZ, finanční úřad) - {@see PohodaPayrollPeople::institutions()}
      * @param list<array<string,mixed>> $cards karty osob se vztahem bez mzdy v roce
      *     ({@see PohodaPayrollPeople::cards()}); zapíší se jen údaje osoby
+     * @param array<string,array{oic?:array<string,true>,id_ppv?:array<string,true>}> $acceptedIdentifiers OIČ a ID PPV
+     *     z hlášení přijatých ČSSZ ({@see PohodaPayrollJmhzReports::acceptedIdentifiers()}); shodná čísla z karty
+     *     se převezmou i bez potvrzení
      */
-    public function write(int $supplierId, ?int $userId, array $records, int $year, bool $confirmIdentifiers, ImportProtocol $protocol, string $step, array $institutions = [], array $cards = []): void
+    public function write(int $supplierId, ?int $userId, array $records, int $year, bool $confirmIdentifiers, ImportProtocol $protocol, string $step, array $institutions = [], array $cards = [], array $acceptedIdentifiers = []): void
     {
+        $verified = 0;
         $this->messages = 0;
         $this->state = $state = new PayrollTakeoverRunState();
         $this->matched = [];
@@ -186,7 +190,9 @@ final class PohodaPayrollPeopleWriter
                     . 'a stav slevy zadejte v zákonné evidenci osoby.', $number);
             }
             if ($relation->oic !== null || $relation->idPpv !== null) {
-                if ($confirmIdentifiers) {
+                $accepted = PohodaPayrollJmhzReports::identifiersAccepted($acceptedIdentifiers, (string) $record['relation_key'], $relation->oic, $relation->idPpv);
+                if ($confirmIdentifiers || $accepted) {
+                    $verified += $accepted && !$confirmIdentifiers ? 1 : 0;
                     $this->part($protocol, $step, $number, 'OIČ a ID PPV', fn (): array => $this->employments->identifiers($supplierId, $employeeId, $employmentId, $relation, $userId, $policy, $state));
                 } else {
                     $unconfirmed++;
@@ -236,9 +242,13 @@ final class PohodaPayrollPeopleWriter
             $this->part($protocol, $step, $number, 'Výplatní účty', fn (): array => $this->people->payoutAccounts($supplierId, $employeeId, $person, $start, $userId, $policy, $state));
         }
 
+        if ($verified > 0) {
+            $protocol->count($step, 'identifiers_from_accepted_reports', $verified);
+            $protocol->info($step, 'identifiers_from_accepted_reports', "OIČ a ID PPV z PAMICA u {$verified} vztahů převod převzal bez potvrzení: stejná čísla nesou hlášení JMHZ, která ČSSZ přijala.");
+        }
         if ($unconfirmed > 0) {
             $protocol->count($step, 'identifiers_unconfirmed', $unconfirmed);
-            $protocol->warn($step, 'identifiers_unconfirmed', "OIČ nebo ID PPV z PAMICA má {$unconfirmed} vztahů. Převod je bez potvrzení, že čísla pocházejí z protokolů ČSSZ, nepřevzal. Potvrďte to v průvodci a převod zopakujte.");
+            $protocol->warn($step, 'identifiers_unconfirmed', "OIČ nebo ID PPV z PAMICA má {$unconfirmed} vztahů, která přijaté hlášení JMHZ nedokládá. Převod je bez potvrzení, že čísla pocházejí z protokolů ČSSZ, nepřevzal. Potvrďte to v průvodci a převod zopakujte.");
         }
         if ($state->invalidOic !== []) {
             $protocol->warn($step, 'oic_invalid', sprintf(
