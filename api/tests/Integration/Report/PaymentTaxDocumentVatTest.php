@@ -104,10 +104,12 @@ final class PaymentTaxDocumentVatTest extends TestCase
         }
 
         // Daňový doklad k platbě vystavuje jen plátce — vynutit a v tearDown vrátit.
+        // Zálohy tu hradí ruční úhrada, kterou podvojné účetnictví vyúčtovat nedovolí
+        // (advance_receipt_not_posted); výkazy DPH na formě účetnictví nezávisí.
         $this->origVatFlags = $pdo->query(
-            "SELECT is_vat_payer, is_identified FROM supplier WHERE id = {$this->supplierId}"
+            "SELECT is_vat_payer, is_identified, accounting_mode FROM supplier WHERE id = {$this->supplierId}"
         )->fetch(PDO::FETCH_ASSOC) ?: [];
-        $pdo->prepare('UPDATE supplier SET is_vat_payer = 1, is_identified = 0 WHERE id = ?')
+        $pdo->prepare("UPDATE supplier SET is_vat_payer = 1, is_identified = 0, accounting_mode = 'tax_evidence' WHERE id = ?")
             ->execute([$this->supplierId]);
         $mode = $pdo->prepare('SELECT proforma_payment_document FROM supplier WHERE id = ?');
         $mode->execute([$this->supplierId]);
@@ -134,10 +136,11 @@ final class PaymentTaxDocumentVatTest extends TestCase
         }
         $pdo = $this->db->pdo();
         if ($this->origVatFlags !== null && $this->supplierId > 0) {
-            $pdo->prepare('UPDATE supplier SET is_vat_payer = ?, is_identified = ?, proforma_payment_document = ? WHERE id = ?')
+            $pdo->prepare('UPDATE supplier SET is_vat_payer = ?, is_identified = ?, accounting_mode = ?, proforma_payment_document = ? WHERE id = ?')
                 ->execute([
                     (int) ($this->origVatFlags['is_vat_payer'] ?? 1),
                     (int) ($this->origVatFlags['is_identified'] ?? 0),
+                    (string) ($this->origVatFlags['accounting_mode'] ?? 'double_entry'),
                     $this->originalPaymentDocumentMode ?? ProformaPaymentDocuments::MODE_ALWAYS_TAX_DOCUMENT,
                     $this->supplierId,
                 ]);

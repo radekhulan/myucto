@@ -27,6 +27,7 @@ final class AdvanceWorkflowClientActionTest extends BankPostingTestCase
     public function testManualPaymentDocumentAndFinalAreDraftsAndIdempotent(bool $grossPrices): void
     {
         $f = $this->fixture($grossPrices);
+        $this->withoutDoubleEntry();
         $tax = $this->data($this->invoke(CreatePaymentTaxDocumentAction::class, '__invoke', $f['proforma'], [], $f['payment']));
         $taxId = $tax['tax_document_id'];
         $repo = $this->container->get(InvoiceRepository::class);
@@ -49,6 +50,7 @@ final class AdvanceWorkflowClientActionTest extends BankPostingTestCase
     public function testDrawdownCanBeReplacedButCannotBeOverdrawnAndCanBeRemoved(): void
     {
         $f = $this->fixture();
+        $this->withoutDoubleEntry();
         $tax = $this->data($this->invoke(CreatePaymentTaxDocumentAction::class, '__invoke', $f['proforma'], [], $f['payment']));
         $this->data($this->invoke(IssueInvoiceAction::class, '__invoke', $tax['tax_document_id']));
         $second = $this->makeInvoice($f['client'], 'invoice', 'draft');
@@ -128,6 +130,16 @@ final class AdvanceWorkflowClientActionTest extends BankPostingTestCase
         return ['client' => $client, 'proforma' => $proforma, 'payment' => $payment['payment_id'],
             'invoice' => $this->makeInvoice($client, 'invoice', 'draft'), 'purchase_advance' => $purchaseAdvance,
             'purchase' => $this->purchaseInvoice('SYNTHETIC-FINAL', $client, 2000)];
+    }
+
+    /**
+     * Klientský cyklus zálohy hradí ruční úhradou, kterou podvojné účetnictví čerpat ani
+     * vyúčtovat nedovolí (advance_receipt_not_posted). Firma tu proto vede daňovou evidenci;
+     * vrací ji rollback testu.
+     */
+    private function withoutDoubleEntry(): void
+    {
+        $this->db->pdo()->prepare("UPDATE supplier SET accounting_mode = 'tax_evidence' WHERE id = ?")->execute([$this->supplierId]);
     }
 
     private function makeInvoice(int $client, string $type, string $status, bool $gross = false): int

@@ -60,6 +60,12 @@ final class FinalFromProformaCreator
      *                                 zkopírovaných položek, doplní se rozdílový řádek —
      *                                 viz {@see self::appendRemainder()}. null = jen
      *                                 rozsah proformy (dosavadní chování).
+     * @param bool        $requirePostedReceipt Proforma s DDKP s daní ve firmě s podvojným
+     *                                 účetnictvím: přijatá záloha v deníku musí pokrýt, co faktura
+     *                                 odečte ({@see AdvanceReceiptGuard}), jinak
+     *                                 {@see AdvanceReceiptNotPostedException}. False jen pro
+     *                                 automatické vyúčtování uvnitř zápisu úhrady, kdy úhrada
+     *                                 ještě zaúčtovaná být nemůže.
      * @return int  ID nového draftu (nebo již existující final faktury)
      */
     public function create(
@@ -69,10 +75,11 @@ final class FinalFromProformaCreator
         ?string $dueDate = null,
         ?float $advance = null,
         ?float $finalTotal = null,
+        bool $requirePostedReceipt = true,
     ): int {
         return $this->cycleLock->synchronized(
             $proformaId,
-            fn (): int => $this->createUnlocked($proformaId, $userId, $taxDate, $dueDate, $advance, $finalTotal),
+            fn (): int => $this->createUnlocked($proformaId, $userId, $taxDate, $dueDate, $advance, $finalTotal, $requirePostedReceipt),
         );
     }
 
@@ -83,6 +90,7 @@ final class FinalFromProformaCreator
         ?string $dueDate,
         ?float $advance,
         ?float $finalTotal = null,
+        bool $requirePostedReceipt = true,
     ): int {
         $proforma = $this->repo->find($proformaId);
         if ($proforma === null) {
@@ -177,6 +185,19 @@ final class FinalFromProformaCreator
         }
         if ($advance < 0) {
             throw new \RuntimeException('Záloha nesmí být záporná.');
+        }
+
+        // Proforma s DDKP s daní: zaúčtování konečné faktury zúčtuje jen přijatou zálohu,
+        // kterou nese deník (stejně jako čerpání v AdvancePartialDrawdown). Faktura odečte
+        // DDKP odpočtovými řádky a úhradu bez DDKP v hlavičce, obojí musí přijatá záloha krýt.
+        $taxDocVat = round(array_sum(array_map(static fn (array $r): float => (float) $r['vat'], $taxDocRates)), 2);
+        if ($requirePostedReceipt && abs($taxDocVat) >= 0.005) {
+            (new AdvanceReceiptGuard($this->db))->assertCovers(
+                (int) $proforma['supplier_id'],
+                $proformaId,
+                (string) ($proforma['varsymbol'] ?? ''),
+                round($taxDocGross + $advance, 2),
+            );
         }
 
         $noteAbove = ($proforma['language'] ?? 'cs') === 'en'

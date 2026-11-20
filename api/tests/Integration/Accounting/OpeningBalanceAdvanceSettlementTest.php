@@ -6,6 +6,8 @@ namespace MyInvoice\Tests\Integration\Accounting;
 
 use MyInvoice\Action\Accounting\OpeningBalanceDocumentAction;
 use MyInvoice\Action\Invoice\AdvanceDrawdownAction;
+use MyInvoice\Action\Invoice\IssueFinalFromProformaAction;
+use MyInvoice\Service\Invoice\FinalFromProformaCreator;
 use MyInvoice\Middleware\ApiScopeMiddleware;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Middleware\SupplierScopeMiddleware;
@@ -159,6 +161,47 @@ final class OpeningBalanceAdvanceSettlementTest extends BankPostingTestCase
         self::assertSame(422, $this->callOpening('markInvoice', 'PUT', $proforma)['status'], 'Záloha z doby po otevření knih se nepřevezme.');
     }
 
+    public function testFinalFromProformaRefusesAdvanceWithoutPostedReceipt(): void
+    {
+        $client = $this->client('Odběratel vyúčtování k záloze');
+        $proforma = $this->document('proforma', 'ZL-VF-1', $client, 500.00, 60.00, self::YEAR . '-02-01');
+        $this->manualPayment($proforma, self::YEAR . '-02-02', 560.00);
+        $this->db->pdo()->prepare("UPDATE invoices SET status = 'paid', paid_total = 560 WHERE id = ?")->execute([$proforma]);
+        $this->document('tax_document', 'DD-VF-1', $client, 500.00, 60.00, self::YEAR . '-02-02', $proforma);
+
+        $creator = $this->container->get(FinalFromProformaCreator::class);
+        try {
+            $creator->create($proforma, $this->userId, self::YEAR . '-02-10');
+            self::fail('Vyúčtování zálohy jen s ruční úhradou nejde v podvojném účetnictví vytvořit.');
+        } catch (AdvanceReceiptNotPostedException $e) {
+            self::assertStringContainsString('ZL-VF-1', $e->getMessage());
+        }
+        self::assertSame(0, $this->finalCount($proforma), 'Koncept nevznikl.');
+
+        $res = $this->callAction(
+            $this->container->get(IssueFinalFromProformaAction::class), '__invoke', 'POST', 'admin',
+            ['tax_date' => self::YEAR . '-02-10'], ['id' => (string) $proforma],
+        );
+        self::assertSame(409, $res['status'], json_encode($res['body'], JSON_UNESCAPED_UNICODE) ?: '');
+        self::assertSame('advance_receipt_not_posted', $this->errorCode($res));
+
+        // Převzatá záloha z počátečních stavů vyúčtování vytvořit dovolí.
+        [$taken] = $this->takenOverAdvance($client, 'ZL-VF-2', 'DD-VF-2');
+        $this->callOpening('markInvoice', 'PUT', $taken);
+        self::assertGreaterThan(0, $creator->create($taken, $this->userId, self::YEAR . '-02-10'));
+
+        // Úhrada zaúčtovaná bankou, která nepokrývá odpočet daňového dokladu, nestačí.
+        $partial = $this->document('proforma', 'ZL-VF-3', $client, 500.00, 60.00, self::YEAR . '-02-01');
+        $tx = $this->transaction($this->statement(), 100.00, ['match_status' => 'auto_exact', 'matched_invoice_id' => $partial]);
+        $this->invoicePayment($partial, $tx, 100.00);
+        self::assertSame('posted', $this->service->handleTransaction($tx, $this->userId)['action']);
+        $this->manualPayment($partial, self::YEAR . '-02-02', 460.00);
+        $this->db->pdo()->prepare("UPDATE invoices SET status = 'paid', paid_total = 560 WHERE id = ?")->execute([$partial]);
+        $this->document('tax_document', 'DD-VF-3', $client, 500.00, 60.00, self::YEAR . '-02-02', $partial);
+        $this->expectException(AdvanceReceiptNotPostedException::class);
+        $creator->create($partial, $this->userId, self::YEAR . '-02-10');
+    }
+
     public function testMarkingGuardsAndApiAccess(): void
     {
         $client = $this->client('Odběratel pojistek');
@@ -259,6 +302,13 @@ final class OpeningBalanceAdvanceSettlementTest extends BankPostingTestCase
         $id = $this->document('invoice', '', $client, $base, $vat, self::YEAR . '-02-10');
         $this->db->pdo()->prepare("UPDATE invoices SET status = 'draft', varsymbol = NULL WHERE id = ?")->execute([$id]);
         return $id;
+    }
+
+    private function finalCount(int $proformaId): int
+    {
+        $stmt = $this->db->pdo()->prepare("SELECT COUNT(*) FROM invoices WHERE parent_invoice_id = ? AND invoice_type = 'invoice'");
+        $stmt->execute([$proformaId]);
+        return (int) $stmt->fetchColumn();
     }
 
     private function issue(int $invoiceId, string $vs): void

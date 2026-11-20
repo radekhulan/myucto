@@ -167,7 +167,9 @@ odeberete tlačítkem **Odebrat čerpání záloh** v nabídce akcí.
 > pokladnou, nebo musí být převzatá z počátečních stavů (viz
 > [Záloha přijatá před otevřením knih](#zaloha-prijata-pred-otevrenim-knih)). Záloha jen s ruční
 > úhradou se čerpat nedá: okno ji označí a čerpání odmítne s hláškou, že úhrada zálohy není
-> zaúčtovaná. Konečnou fakturu by jinak nešlo zaúčtovat.
+> zaúčtovaná. Konečnou fakturu by jinak nešlo zaúčtovat. Totéž platí pro **Vystavit fakturu
+> k záloze** u zálohy s daňovým dokladem k platbě: zaúčtovaná nebo převzatá úhrada musí
+> pokrýt vše, co faktura odečte.
 
 **Jak poznáte, že je hotovo:** faktura čerpající jednu zálohu má odkaz na zálohovou fakturu,
 faktura čerpající víc záloh má pruh **Faktura čerpá zálohy** s odkazy na všechny. V položkách

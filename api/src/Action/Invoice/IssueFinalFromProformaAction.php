@@ -12,6 +12,7 @@ use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Repository\InvoiceRepository;
 use MyInvoice\Service\Accounting\DocumentLockService;
 use MyInvoice\Service\ActivityLogger;
+use MyInvoice\Service\Invoice\AdvanceReceiptNotPostedException;
 use MyInvoice\Service\Invoice\FinalFromProformaCreator;
 use MyInvoice\Service\IpMatcher;
 use Psr\Http\Message\ResponseInterface as Response;
@@ -92,6 +93,8 @@ final class IssueFinalFromProformaAction
 
         try {
             $finalId = $this->creator->create($proformaId, $userId, $taxDate, $dueDate, $advance, $finalTotal);
+        } catch (AdvanceReceiptNotPostedException $e) {
+            return Json::error($response, AdvanceReceiptNotPostedException::ERROR_CODE, $e->getMessage(), 409);
         } catch (\Throwable $e) {
             return Json::internalError($response, 'create_failed', $e->getMessage(), 500);
         }

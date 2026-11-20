@@ -6,7 +6,6 @@ namespace MyInvoice\Service\Invoice;
 
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\AdvanceDeductionRepository;
-use MyInvoice\Service\Accounting\AdvanceSettlementEvidenceReader;
 use MyInvoice\Support\Sql\AdvanceDrawSql;
 
 /**
@@ -144,7 +143,8 @@ final class AdvancePartialDrawdown
         );
         $stmt->execute([$supplierId, (int) $invoice['client_id'], (int) $invoice['currency_id']]);
         $out = [];
-        $doubleEntry = $this->isDoubleEntry($supplierId);
+        $receipts = new AdvanceReceiptGuard($this->db);
+        $doubleEntry = $receipts->isDoubleEntry($supplierId);
         foreach ($stmt->fetchAll(\PDO::FETCH_ASSOC) as $row) {
             $id = (int) $row['id'];
             $groups = $this->taxDocumentGroups($supplierId, $id, false);
@@ -169,9 +169,9 @@ final class AdvancePartialDrawdown
                 'drawn'          => $own[$id]['gross'] ?? 0.0,
                 'drawn_base'     => $own[$id]['base'] ?? 0.0,
                 'tax_documents'  => $groups === [] ? '' : (string) reset($groups)['label'],
-                // Lze čerpání zaúčtovat ({@see receiptPostable()})? Bez zaúčtované nebo převzaté
+                // Lze čerpání zaúčtovat ({@see AdvanceReceiptGuard})? Bez zaúčtované nebo převzaté
                 // úhrady zálohy čerpání POST odmítne (advance_receipt_not_posted).
-                'receipt_posted' => $this->receiptPostable($supplierId, $id, $doubleEntry),
+                'receipt_posted' => $receipts->covers($supplierId, $id, 0.0, $doubleEntry),
             ];
         }
         return $out;
@@ -278,13 +278,9 @@ final class AdvancePartialDrawdown
         if ($groups === []) {
             throw new \DomainException('K záloze není vystavený daňový doklad k přijaté platbě. Čerpat lze jen zálohu s daňovým dokladem.');
         }
-        if (!$this->receiptPostable($supplierId, $proformaId)) {
-            throw new AdvanceReceiptNotPostedException(sprintf(
-                'Úhrada zálohy %s není zaúčtovaná bankou ani pokladnou, konečnou fakturu by s jejím čerpáním nešlo zaúčtovat. '
-                    . 'Zaúčtujte úhradu zálohy, nebo zálohu označte jako převzatou z počátečních stavů.',
-                trim((string) ($p['varsymbol'] ?? '')) !== '' ? trim((string) $p['varsymbol']) : '#' . $proformaId,
-            ));
-        }
+        // Postupné čerpání: stačí, že záloha nějakou přijatou úhradu v deníku má; pokrytí
+        // částky po fakturách hlídá zaúčtování.
+        (new AdvanceReceiptGuard($this->db))->assertCovers($supplierId, $proformaId, (string) ($p['varsymbol'] ?? ''));
         $drawn = $this->drawnGroups($supplierId, $proformaId, $invoiceId);
 
         $rest = [];
@@ -401,29 +397,6 @@ final class AdvancePartialDrawdown
             'available'   => $availableGross,
             'remaining'   => max(0.0, round($availableGross - $drawGross, 2)),
         ];
-    }
-
-    /**
-     * Půjde čerpání zálohy zaúčtovat? Ve firmě s podvojným účetnictvím zúčtuje konečná
-     * faktura jen přijatou zálohu, kterou deník nese: úhradu zaúčtovanou bankou nebo
-     * pokladnou, nebo úhradu převzatou z počátečních stavů
-     * ({@see AdvanceSettlementEvidenceReader::advanceReceived()}, týž zdroj jako zaúčtování).
-     * Záloha jen s ruční úhradou by fakturu nechala vystavenou a nezaúčtovatelnou, proto
-     * se odmítne už tady. Daňová evidence zúčtování záloh nevede, tam platí dosavadní chování.
-     */
-    private function receiptPostable(int $supplierId, int $proformaId, ?bool $doubleEntry = null): bool
-    {
-        if (!($doubleEntry ?? $this->isDoubleEntry($supplierId))) {
-            return true;
-        }
-        return (new AdvanceSettlementEvidenceReader($this->db))->advanceReceived($supplierId, $proformaId) >= self::TOLERANCE;
-    }
-
-    private function isDoubleEntry(int $supplierId): bool
-    {
-        $mode = $this->db->pdo()->prepare('SELECT accounting_mode FROM supplier WHERE id = ?');
-        $mode->execute([$supplierId]);
-        return (string) $mode->fetchColumn() === 'double_entry';
     }
 
     private static function lineDescription(bool $isEn, string $proformaNo, string $taxDocuments): string
