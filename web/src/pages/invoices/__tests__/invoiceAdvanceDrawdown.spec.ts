@@ -148,6 +148,21 @@ describe('modal čerpání záloh v detailu konceptu faktury', () => {
     unmount()
   })
 
+  it('zálohu bez zaúčtované úhrady nepředvybere a nedovolí ji čerpat', async () => {
+    m.candidates = [candidate({ id: 6, varsymbol: 'PF-6', receipt_posted: false }), candidate({ receipt_posted: true })]
+    const { vm, unmount } = await detail()
+    await vm.openDrawdownModal()
+    const dvm = vm as unknown as DrawdownVm & { drawdownProformaId: number | null; drawdownSelectable: (c: AdvanceDrawdownCandidate) => boolean }
+    expect(dvm.drawdownProformaId).toBe(7)
+    expect(dvm.drawdownSelectable(m.candidates[0])).toBe(false)
+    expect(dvm.drawdownSelectable(candidate({}))).toBe(true)
+    vm.selectDrawdown(6)
+    expect(vm.drawdownAmountValid).toBe(false)
+    await vm.confirmDrawdown()
+    expect(m.apply).not.toHaveBeenCalled()
+    unmount()
+  })
+
   it('odebere čerpání jen jedné zálohy', async () => {
     const { vm, unmount } = await detail()
     await vm.openDrawdownModal()

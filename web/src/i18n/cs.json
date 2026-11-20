@@ -19871,6 +19871,19 @@
       "repost_date_shift_confirmation_required": "Původní datum je uzavřené nebo zamčené - potvrďte, že storno i oprava padnou na jiné datum.",
       "version_conflict": "Zaúčtování dokladu se mezitím změnilo. Obnovte náhled přeúčtování a zkontrolujte jeho zápisy."
     },
+    "opening_balance_document": {
+      "mark": "Převzato z počátečních stavů",
+      "mark_tooltip": "Doklad z doby před otevřením knih, jehož částku už nese otevírací zápis",
+      "mark_title": "Převzít doklad z počátečních stavů",
+      "mark_confirm": "Doklad se nebude zaúčtovávat, jeho částka je už v otevíracím zápisu počátečních stavů. Úhrada nebo čerpání zálohy se pak zúčtuje proti počátečnímu stavu. Pokračovat?",
+      "unmark": "Zrušit převzetí z počátečních stavů",
+      "unmark_title": "Zrušit převzetí z počátečních stavů",
+      "unmark_confirm": "Doklad přestane být navázaný na otevírací zápis a bude ho možné zaúčtovat. Pokračovat?",
+      "marked": "Doklad je označený jako převzatý z počátečních stavů.",
+      "unmarked": "Převzetí z počátečních stavů bylo zrušeno.",
+      "badge": "Převzato z počátečních stavů",
+      "badge_tooltip": "Částku dokladu nese otevírací zápis ze dne {date}."
+    },
     "repost": {
       "action": "Přeúčtovat",
       "title": "Přeúčtování dokladu",
@@ -25887,6 +25900,7 @@
       "removed": "Čerpání zálohy bylo odebráno.",
       "remove_one": "Odebrat",
       "remove_one_confirm": "Odebrat z faktury odpočet zálohy {number}?",
+      "receipt_not_posted": "Úhrada zálohy není zaúčtovaná bankou ani pokladnou. Zaúčtujte ji, nebo zálohu označte jako převzatou z počátečních stavů.",
       "mode_gross": "s DPH",
       "mode_net": "bez DPH",
       "mode_percent": "% z plnění faktury",

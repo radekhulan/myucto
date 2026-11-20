@@ -16,7 +16,12 @@ const m = vi.hoisted(() => ({
   stockRead: true,
   stockWrite: true,
   offsetsWrite: true,
+  journalPost: true,
+  accountingMode: 'double_entry',
   isClientRole: false,
+  openingBalance: vi.fn(),
+  markOpeningBalance: vi.fn(),
+  unmarkOpeningBalance: vi.fn(),
 }))
 
 // vue-router — useRoute (id), useRouter (push), RouterLink jako jednoduchý stub.
@@ -40,6 +45,9 @@ vi.mock('@/api/purchaseInvoices', () => ({
     get: m.get,
     activity: m.activity,
     unlinkAdvance: m.unlinkAdvance,
+    openingBalance: m.openingBalance,
+    markOpeningBalance: m.markOpeningBalance,
+    unmarkOpeningBalance: m.unmarkOpeningBalance,
     pdfUrl: () => '',
     sourceUrl: () => '',
     ourPdfUrl: () => '',
@@ -72,7 +80,8 @@ vi.mock('@/api/errors', () => ({
 vi.mock('@/stores/auth', () => ({
   useAuthStore: () => ({
     canRead: (permission: string) => permission === 'stock' ? m.stockRead : true,
-    canWrite: (permission: string) => permission === 'stock' ? m.stockWrite : permission === 'accounting.offsets' ? m.offsetsWrite : true,
+    canWrite: (permission: string) => permission === 'stock' ? m.stockWrite : permission === 'accounting.offsets' ? m.offsetsWrite
+      : permission === 'accounting.journal.post' ? m.journalPost : true,
     hasCommercialFeatures: true,
     get isClientRole() { return m.isClientRole },
     isSuperadmin: false,
@@ -83,7 +92,7 @@ vi.mock('@/stores/auth', () => ({
 vi.mock('@/stores/supplier', () => ({
   useSupplierStore: () => ({
     currentSupplier: {
-      accounting_mode: 'double_entry',
+      get accounting_mode() { return m.accountingMode },
       get stock_enabled() { return m.stockEnabled },
     },
   }),
@@ -534,6 +543,97 @@ describe('InvoiceDetail.vue — víc navázaných záloh', () => {
     expect(m.unlinkAdvance).toHaveBeenCalledWith(258, 902)
     expect(wrapper.findAll('[data-test="linked-advance-row"]')).toHaveLength(2)
     confirmSpy.mockRestore()
+  })
+})
+
+describe('InvoiceDetail.vue — převzato z počátečních stavů', () => {
+  const opening = (inOpening: boolean) => inOpening
+    ? { in_opening: true, entry_id: 50, entry_date: '2026-01-01' }
+    : { in_opening: false, entry_id: null, entry_date: null }
+  const confirmStubs = {
+    ...stubs,
+    ConfirmDialog: { name: 'ConfirmDialog', props: ['title', 'message', 'confirmLabel', 'variant', 'busy'], emits: ['confirm', 'cancel'],
+      template: '<button data-test="confirm-ok" @click="$emit(\'confirm\')">{{ message }}</button>' },
+  }
+  const actionsOf = (wrapper: ReturnType<typeof mount>) =>
+    wrapper.getComponent({ name: 'ActionBar' }).props('actions') as { key: string; show?: boolean; tier?: string; variant?: string; run?: () => void }[]
+
+  beforeEach(() => {
+    m.get.mockReset()
+    m.get.mockResolvedValue(makeInvoice({ status: 'received', issue_date: '2025-12-01', tax_date: '2025-12-01' }))
+    m.activity.mockReset()
+    m.activity.mockResolvedValue([])
+    m.stockEnabled = false
+    m.journalPost = true
+    m.accountingMode = 'double_entry'
+    m.isClientRole = false
+    m.openingBalance.mockReset().mockResolvedValue(opening(false))
+    m.markOpeningBalance.mockReset().mockResolvedValue(opening(true))
+    m.unmarkOpeningBalance.mockReset().mockResolvedValue(opening(false))
+    if (m.route) m.route.params.id = '258'
+  })
+
+  it('označí doklad po potvrzení v dialogu (PUT) a ukáže štítek', async () => {
+    const wrapper = mount(InvoiceDetail, { global: { stubs: confirmStubs } })
+    await flushPromises()
+    const mark = actionsOf(wrapper).find(a => a.key === 'opening-balance-mark')
+    expect(mark?.show).toBe(true)
+    expect(mark?.tier).toBe('advanced')
+    expect(actionsOf(wrapper).find(a => a.key === 'opening-balance-unmark')?.show).toBe(false)
+    expect(wrapper.find('[data-test="opening-balance-badge"]').exists()).toBe(false)
+
+    mark?.run?.()
+    await flushPromises()
+    expect(m.markOpeningBalance).not.toHaveBeenCalled()
+    expect(wrapper.getComponent({ name: 'ConfirmDialog' }).props('message')).toBe('accounting.opening_balance_document.mark_confirm')
+    m.openingBalance.mockResolvedValue(opening(true))
+    wrapper.getComponent({ name: 'ConfirmDialog' }).vm.$emit('confirm')
+    await flushPromises()
+
+    expect(m.markOpeningBalance).toHaveBeenCalledWith(258)
+    expect(wrapper.find('[data-test="opening-balance-badge"]').exists()).toBe(true)
+    expect(actionsOf(wrapper).find(a => a.key === 'opening-balance-unmark')?.show).toBe(true)
+    expect(actionsOf(wrapper).find(a => a.key === 'post')?.show).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('zruší označení po potvrzení (DELETE)', async () => {
+    m.openingBalance.mockResolvedValue(opening(true))
+    const wrapper = mount(InvoiceDetail, { global: { stubs: confirmStubs } })
+    await flushPromises()
+    expect(wrapper.find('[data-test="opening-balance-badge"]').exists()).toBe(true)
+    actionsOf(wrapper).find(a => a.key === 'opening-balance-unmark')?.run?.()
+    await flushPromises()
+    m.openingBalance.mockResolvedValue(opening(false))
+    wrapper.getComponent({ name: 'ConfirmDialog' }).vm.$emit('confirm')
+    await flushPromises()
+    expect(m.unmarkOpeningBalance).toHaveBeenCalledWith(258)
+    expect(wrapper.find('[data-test="opening-balance-badge"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('bez práva zaúčtovat, klientovi ani v daňové evidenci akci nenabídne', async () => {
+    m.journalPost = false
+    let wrapper = mount(InvoiceDetail, { global: { stubs: confirmStubs } })
+    await flushPromises()
+    expect(actionsOf(wrapper).find(a => a.key === 'opening-balance-mark')?.show).toBe(false)
+    wrapper.unmount()
+
+    m.journalPost = true
+    m.isClientRole = true
+    wrapper = mount(InvoiceDetail, { global: { stubs: confirmStubs } })
+    await flushPromises()
+    expect(actionsOf(wrapper).find(a => a.key === 'opening-balance-mark')?.show).toBe(false)
+    wrapper.unmount()
+
+    m.isClientRole = false
+    m.accountingMode = 'tax_records'
+    m.openingBalance.mockClear()
+    wrapper = mount(InvoiceDetail, { global: { stubs: confirmStubs } })
+    await flushPromises()
+    expect(m.openingBalance).not.toHaveBeenCalled()
+    expect(actionsOf(wrapper).find(a => a.key === 'opening-balance-mark')?.show).toBe(false)
+    wrapper.unmount()
   })
 })
 

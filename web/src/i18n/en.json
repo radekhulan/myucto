@@ -19871,6 +19871,19 @@
       "repost_date_shift_confirmation_required": "The original date is closed or locked — confirm that both the reversal and the correction will land on a different date.",
       "version_conflict": "The document posting has changed. Reload the reposting preview and review its entries."
     },
+    "opening_balance_document": {
+      "mark": "Taken over from opening balances",
+      "mark_tooltip": "A document from before the books were opened whose amount is already carried by the opening entry",
+      "mark_title": "Take over the document from opening balances",
+      "mark_confirm": "The document will not be posted, its amount is already in the opening balances entry. Its payment or advance drawdown will then be settled against the opening balance. Continue?",
+      "unmark": "Cancel takeover from opening balances",
+      "unmark_title": "Cancel takeover from opening balances",
+      "unmark_confirm": "The document will no longer be linked to the opening entry and can be posted. Continue?",
+      "marked": "The document is marked as taken over from opening balances.",
+      "unmarked": "The takeover from opening balances was cancelled.",
+      "badge": "Taken over from opening balances",
+      "badge_tooltip": "The document amount is carried by the opening entry dated {date}."
+    },
     "repost": {
       "action": "Re-post",
       "title": "Re-post document",
@@ -25887,6 +25900,7 @@
       "removed": "Advance drawdown removed.",
       "remove_one": "Remove",
       "remove_one_confirm": "Remove the deduction of advance {number} from the invoice?",
+      "receipt_not_posted": "The advance payment is not posted from a bank or cash register. Post it, or mark the advance as taken over from opening balances.",
       "mode_gross": "incl. VAT",
       "mode_net": "excl. VAT",
       "mode_percent": "% of invoice supply",

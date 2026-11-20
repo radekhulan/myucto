@@ -4,7 +4,7 @@ import { purchaseListFilterParams } from './listQueries'
 import type { DocumentLock } from './locks'
 import type { JournalSourceSummary } from './accounting'
 import type { DocItem } from './documents'
-import type { CashSettlementResult, CnbRateDeviationMeta, PaymentMethod, PaymentMethodSource } from './invoices'
+import type { CashSettlementResult, CnbRateDeviationMeta, OpeningBalanceState, PaymentMethod, PaymentMethodSource } from './invoices'
 import { appIsoDate } from '@/utils/date'
 import type { PurchaseApprovalRow, PurchaseApprovalStatus } from './purchaseApprovals'
 
@@ -921,7 +921,13 @@ export const purchaseInvoicesApi = {
   },
 
   get:    (id: number) => api.get<PurchaseInvoice>(`/purchase-invoices/${id}`).then(r => r.data),
-  items: (id: number) => api.get<{ items: PurchaseInvoiceItem[] }>(`/purchase-invoices/${id}/items`).then(r => r.data.items),
+  openingBalance: (id: number) =>
+    api.get<{ opening_balance: OpeningBalanceState }>(`/purchase-invoices/${id}/opening-balance`).then(r => r.data.opening_balance),
+  markOpeningBalance: (id: number) =>
+    api.put<{ opening_balance: OpeningBalanceState }>(`/purchase-invoices/${id}/opening-balance`).then(r => r.data.opening_balance),
+  unmarkOpeningBalance: (id: number) =>
+    api.delete<{ opening_balance: OpeningBalanceState }>(`/purchase-invoices/${id}/opening-balance`).then(r => r.data.opening_balance),
+  items:(id: number) => api.get<{ items: PurchaseInvoiceItem[] }>(`/purchase-invoices/${id}/items`).then(r => r.data.items),
   preview: (id: number) => api.get<JournalSourceSummary>(`/purchase-invoices/${id}/preview`).then(r => r.data),
   acceptAiPostingSuggestion: (id: number, override?: Partial<AiPostingSuggestion['payload']>) =>
     api.post<{ status: 'accepted'; applied: AiPostingSuggestion['payload'] }>(

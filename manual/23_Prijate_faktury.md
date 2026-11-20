@@ -1260,6 +1260,16 @@ ostatní), na konci je souhrn *„Zaúčtováno {ok}, chyby: {err}"*. Maximáln�
 **Automatické zaúčtování při přijetí** (volitelné, nastavuje administrátor, spustí se při přechodu na stav Přijatá), viz
 [§ 96.11](96_Nastaveni.md#969-krok-za-krokem-automaticke-uctovani).
 
+**Převzato z počátečních stavů.** Neuhrazená faktura nebo záloha z doby před otevřením knih, jejíž částku už nese
+otevírací zápis, se nezaúčtovává. V detailu ji označte přes **Další akce → Pokročilé → Převzato z počátečních stavů**
+a potvrďte. Doklad se naváže na nejbližší zaúčtovaný otevírací zápis po svém datu, v hlavičce dostane štítek
+**Převzato z počátečních stavů** a tlačítko **Zaúčtovat** zmizí. Úhrada nebo vyúčtování zálohy se pak zúčtuje proti
+počátečnímu stavu. Akci vidí uživatel s právem zaúčtovat doklady ve firmě s podvojným účetnictvím, jen u přijatého
+dokladu bez vlastního zápisu v deníku, datovaného před otevíracím zápisem v otevřeném účetním období. Zrušit označení
+jde na stejném místě (**Zrušit převzetí z počátečních stavů**), dokud zálohu nečerpá konečná faktura a proti dokladu
+není zaúčtovaná úhrada. Postup u vydaných záloh popisuje
+[Záloha přijatá před otevřením knih](15_Faktura_editor.md#zaloha-prijata-pred-otevrenim-knih).
+
 ### 23.11.19 Nákladové pravidlo a přeúčtování
 
 Sekce **Zaúčtování** na detailu ukazuje kromě kontace i řádek **Nákladové pravidlo**, tedy podle čeho se určil druh nákladu

@@ -48,6 +48,8 @@ import { useDimensions } from '@/composables/useDimensions'
 import WorkspaceTeleport from '@/components/workspace/WorkspaceTeleport.vue'
 import ListNavArrows from '@/components/ui/ListNavArrows.vue'
 import { useListNavigation } from '@/composables/useListNavigation'
+import { useOpeningBalanceDocument } from '@/composables/useOpeningBalanceDocument'
+import ConfirmDialog from '@/components/ui/ConfirmDialog.vue'
 
 const ExtractionReviewModal = defineAsyncComponent(() => import('@/components/purchase/ExtractionReviewModal.vue'))
 const PaymentCalendarModal = defineAsyncComponent(() => import('@/components/purchase/PaymentCalendarModal.vue'))
@@ -382,10 +384,12 @@ async function load() {
   stockReceipts.value = []
   stockError.value = ''
   stockLoading.value = stockIntegrationVisible.value
+  openingBalance.reset()
   try {
     const loadedInvoice = await purchaseInvoicesApi.get(purchaseInvoiceId)
     if (generation !== loadGeneration) return
     invoice.value = loadedInvoice
+    void openingBalance.load(purchaseInvoiceId)
   } catch (e) {
     if (generation !== loadGeneration) return
     error.value = apiErrorMessage(e)
@@ -830,11 +834,24 @@ function transitionLabel(target: PurchaseInvoiceStatus): string {
   return t(`purchase_invoice.actions.mark_${target}`)
 }
 
+// Doklad převzatý z počátečních stavů: částku nese otevírací zápis, vlastní zápis nemá.
+const openingBalance = useOpeningBalanceDocument({
+  api: { get: purchaseInvoicesApi.openingBalance, mark: purchaseInvoicesApi.markOpeningBalance, unmark: purchaseInvoicesApi.unmarkOpeningBalance },
+  agenda: 'purchase_invoices',
+  enabled: () => isDoubleEntry.value && !!invoice.value && invoice.value.status !== 'draft',
+  onChanged: () => load(),
+})
+const canMarkOpeningBalance = computed(() => !!invoice.value && openingBalance.canManage.value
+  && !openingBalance.inOpening.value && invoice.value.status !== 'cancelled'
+  && !invoice.value.locked?.journal_entry_id)
+const canUnmarkOpeningBalance = computed(() => openingBalance.canManage.value && openingBalance.inOpening.value)
+
 // Zaúčtování do deníku (podvojné účetnictví). BE je idempotentní (source_type+source_id),
 // po úspěchu přenačteme detail (booked_at → badge „Zaúčtováno" + proklik do deníku).
 const canPostToJournal = computed(() =>
   !!invoice.value
   && isDoubleEntry.value
+  && !openingBalance.inOpening.value
   && !invoice.value.locked?.journal_entry_id
   && invoice.value.document_kind !== 'advance'
   && invoice.value.status !== 'draft'
@@ -1029,6 +1046,13 @@ const purchaseActions = computed<ActionItem[]>(() => {
       !!inv.bank_payments?.length || !!inv.cash_payments?.length || !!inv.settlement_payments?.length,
       Array.isArray(inv.bank_payments) && Array.isArray(inv.cash_payments) && Array.isArray(inv.settlement_payments))), disabled: acting.value, run: remove })
 
+  items.push({ key: 'opening-balance-mark', label: t('accounting.opening_balance_document.mark'), icon: 'archive', tier: 'advanced', variant: 'warning',
+    show: canMarkOpeningBalance.value, disabled: acting.value || openingBalance.busy.value,
+    title: t('accounting.opening_balance_document.mark_tooltip') as string, run: () => { openingBalance.confirming.value = 'mark' } })
+  items.push({ key: 'opening-balance-unmark', label: t('accounting.opening_balance_document.unmark'), icon: 'uturn', tier: 'advanced', variant: 'neutral',
+    show: canUnmarkOpeningBalance.value, disabled: acting.value || openingBalance.busy.value,
+    run: () => { openingBalance.confirming.value = 'unmark' } })
+
   // admin „force" smazání (pod „Pokročilé")
   items.push({ key: 'force-delete', label: t('purchase_invoice.force_delete'), icon: 'trash', tier: 'advanced', variant: 'danger',
     show: canForceDelete.value, title: t('purchase_invoice.confirm.force_delete_warning') as string, run: forceDelete })
@@ -1046,10 +1070,12 @@ useWindowRefresh(async () => {
   if (generation !== loadGeneration || invoiceId !== id.value) return
   invoice.value = updated
   activity.value = events
+  void openingBalance.load(invoiceId)
   if (stockIntegrationVisible.value) void loadStockIntegration(invoiceId, generation)
 }, () => !loading.value && !acting.value && !qrEditing.value && !qrSaving.value && !reviewOpen.value
   && !markPaidOpen.value && !settleRestOpen.value && !advanceModalOpen.value
-  && !stockReceiptOpen.value && !paymentCalendarOpen.value && !bankMatchTarget.value)
+  && !stockReceiptOpen.value && !paymentCalendarOpen.value && !bankMatchTarget.value
+  && !openingBalance.confirming.value && !openingBalance.busy.value)
 </script>
 
 <template>
@@ -1167,6 +1193,11 @@ useWindowRefresh(async () => {
           <PostingBadge v-if="invoice.locked?.journal_entry_id"
             :booked-at="invoice.booked_at" :journal-entry-id="invoice.locked.journal_entry_id" with-label />
           <LockedBadge v-else-if="invoice.locked" :lock="invoice.locked" />
+          <span v-if="openingBalance.inOpening.value" data-test="opening-balance-badge"
+            class="text-xs px-2 py-0.5 rounded font-normal bg-neutral-100 text-neutral-600 border border-neutral-200"
+            :title="t('accounting.opening_balance_document.badge_tooltip', { date: formatDate(openingBalance.state.value?.entry_date ?? null) })">
+            {{ t('accounting.opening_balance_document.badge') }}
+          </span>
           <WhyChip v-if="!invoice.locked?.journal_entry_id && invoice.ai_posting_suggestion" :provenance="{
             source: 'ai',
             mode: 'approved',
@@ -2254,6 +2285,13 @@ useWindowRefresh(async () => {
         @close="postingRuleOpen = false" @saved="postingRuleOpen = false" />
       <InvoiceBankMatchModal v-if="bankMatchTarget" doc-type="purchase_invoice" :doc-id="bankMatchTarget.id" :doc-ref="bankMatchTarget.ref"
         @close="bankMatchTarget = null" @done="load" />
+      <ConfirmDialog v-if="invoice && openingBalance.confirming.value"
+        :title="openingBalance.confirming.value === 'mark' ? t('accounting.opening_balance_document.mark_title') : t('accounting.opening_balance_document.unmark_title')"
+        :message="openingBalance.confirming.value === 'mark' ? t('accounting.opening_balance_document.mark_confirm') : t('accounting.opening_balance_document.unmark_confirm')"
+        :confirm-label="openingBalance.confirming.value === 'mark' ? t('accounting.opening_balance_document.mark') : t('accounting.opening_balance_document.unmark')"
+        :variant="openingBalance.confirming.value === 'mark' ? 'warning' : 'neutral'"
+        :busy="openingBalance.busy.value"
+        @confirm="openingBalance.confirm(invoice.id)" @cancel="openingBalance.confirming.value = null" />
     </WorkspaceTeleport>
 
 </template>

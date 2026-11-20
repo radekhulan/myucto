@@ -101,6 +101,15 @@ export interface AdvanceDrawdownCandidate {
   drawn_base?: number
   /** Čísla daňových dokladů k platbě zálohy. */
   tax_documents?: string
+  /** Podvojné účetnictví: úhrada zálohy je zaúčtovaná (banka, pokladna nebo počáteční stavy). */
+  receipt_posted?: boolean
+}
+
+/** Vazba dokladu na otevírací zápis (doklad převzatý z počátečních stavů). */
+export interface OpeningBalanceState {
+  in_opening: boolean
+  entry_id: number | null
+  entry_date: string | null
 }
 
 export interface AdvanceDrawdownResult {
@@ -1097,6 +1106,12 @@ export const invoicesApi = {
     api.post<Invoice>(`/invoices/${id}/other-item-link`, { other_item_id: otherItemId }).then(r => r.data),
   unlinkOtherItem: (id: number) =>
     api.delete<Invoice>(`/invoices/${id}/other-item-link`).then(r => r.data),
+  openingBalance: (id: number) =>
+    api.get<{ opening_balance: OpeningBalanceState }>(`/invoices/${id}/opening-balance`).then(r => r.data.opening_balance),
+  markOpeningBalance: (id: number) =>
+    api.put<{ opening_balance: OpeningBalanceState }>(`/invoices/${id}/opening-balance`).then(r => r.data.opening_balance),
+  unmarkOpeningBalance: (id: number) =>
+    api.delete<{ opening_balance: OpeningBalanceState }>(`/invoices/${id}/opening-balance`).then(r => r.data.opening_balance),
   // Postupné čerpání zálohy (koncept faktury odečte část daňového dokladu k záloze)
   advanceDrawdownCandidates: (id: number) =>
     api.get<AdvanceDrawdownCandidate[]>(`/invoices/${id}/advance-drawdown`).then(r => r.data),

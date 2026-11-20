@@ -64,6 +64,8 @@ import WorkspaceTeleport from '@/components/workspace/WorkspaceTeleport.vue'
 import ListNavArrows from '@/components/ui/ListNavArrows.vue'
 import { useIsPhone } from '@/composables/useIsPhone'
 import { useListNavigation } from '@/composables/useListNavigation'
+import { useOpeningBalanceDocument } from '@/composables/useOpeningBalanceDocument'
+import ConfirmDialog from '@/components/ui/ConfirmDialog.vue'
 
 const PaymentMethodModal = defineAsyncComponent(() => import('@/components/invoices/PaymentMethodModal.vue'))
 const RefundPaymentDialog = defineAsyncComponent(() => import('@/components/invoices/RefundPaymentDialog.vue'))
@@ -343,10 +345,12 @@ async function load() {
   sourceReceipts.value = []
   stockDocumentsError.value = ''
   stockDocumentsLoading.value = stockIntegrationVisible.value
+  openingBalance.reset()
   try {
     const loadedInvoice = await invoicesApi.get(invoiceId)
     if (generation !== loadGeneration) return
     invoice.value = loadedInvoice
+    void openingBalance.load(invoiceId)
   } catch (e) {
     if (generation !== loadGeneration) return
     error.value = apiErrorMessage(e)
@@ -1384,10 +1388,15 @@ const drawdownPercentPreview = computed(() => {
 })
 const drawdownAmountValid = computed(() => {
   const a = Number(drawdownAmount.value)
-  if (!selectedDrawdown.value || !Number.isFinite(a) || a <= 0) return false
+  if (!selectedDrawdown.value || !drawdownSelectable(selectedDrawdown.value) || !Number.isFinite(a) || a <= 0) return false
   if (drawdownMode.value === 'percent') return a <= 100 && drawdownPercentPreview.value <= drawdownLimit.value + 0.005
   return a <= drawdownLimit.value + 0.005
 })
+
+/** Zálohu bez zaúčtované úhrady čerpání v podvojném účetnictví odmítne (advance_receipt_not_posted). */
+function drawdownSelectable(c: AdvanceDrawdownCandidate): boolean {
+  return c.receipt_posted !== false
+}
 
 function drawdownLimitFor(c: AdvanceDrawdownCandidate, mode: AdvanceDrawdownMode): number {
   return mode === 'net' ? Number(c.available_base ?? c.available) : Number(c.available)
@@ -1413,8 +1422,9 @@ async function loadDrawdownCandidates() {
   drawdownLoading.value = true
   try {
     drawdownCandidates.value = await invoicesApi.advanceDrawdownCandidates(invoice.value.id)
-    const pre = drawdownCandidates.value.find(c => !Number(c.drawn) && Number(c.available) > 0.005)
-      ?? drawdownCandidates.value[0]
+    const selectable = drawdownCandidates.value.filter(drawdownSelectable)
+    const pre = selectable.find(c => !Number(c.drawn) && Number(c.available) > 0.005)
+      ?? selectable[0]
     if (pre) selectDrawdown(pre.id)
     else drawdownProformaId.value = null
   } catch (e) {
@@ -2064,11 +2074,24 @@ async function updateApprovalStatus() {
   }
 }
 
+// Doklad převzatý z počátečních stavů: částku nese otevírací zápis, vlastní zápis nemá.
+const openingBalance = useOpeningBalanceDocument({
+  api: { get: invoicesApi.openingBalance, mark: invoicesApi.markOpeningBalance, unmark: invoicesApi.unmarkOpeningBalance },
+  agenda: 'invoices',
+  enabled: () => isDoubleEntry.value && !!invoice.value && invoice.value.status !== 'draft',
+  onChanged: () => load(),
+})
+const canMarkOpeningBalance = computed(() => !!invoice.value && openingBalance.canManage.value
+  && !openingBalance.inOpening.value && invoice.value.status !== 'cancelled'
+  && !invoice.value.locked?.journal_entry_id && !lockedForMe.value)
+const canUnmarkOpeningBalance = computed(() => openingBalance.canManage.value && openingBalance.inOpening.value)
+
 // Zaúčtování do deníku (podvojné účetnictví). BE je idempotentní (source_type+source_id),
 // po úspěchu přenačteme detail (booked_at → badge „Zaúčtováno" + proklik do deníku).
 const canPostToJournal = computed(() =>
   !!invoice.value
   && isDoubleEntry.value
+  && !openingBalance.inOpening.value
   && !invoice.value.locked?.journal_entry_id
   && !invoice.value.other_item_id
   && invoice.value.status !== 'draft'
@@ -2285,6 +2308,12 @@ const invoiceActions = computed<ActionItem[]>(() => {
     { key: 'rebuild-snapshots', label: t('invoice.rebuild_snapshots'), icon: 'cycle', tier: 'advanced', variant: 'warning',
       show: isAdmin.value && !isDraft.value && inv.status !== 'cancelled',
       disabled: b, loading: busy.value === 'rebuild-snapshots', run: rebuildSnapshots },
+    { key: 'opening-balance-mark', label: t('accounting.opening_balance_document.mark'), icon: 'archive', tier: 'advanced', variant: 'warning',
+      show: canMarkOpeningBalance.value, disabled: b || openingBalance.busy.value,
+      title: t('accounting.opening_balance_document.mark_tooltip') as string, run: () => { openingBalance.confirming.value = 'mark' } },
+    { key: 'opening-balance-unmark', label: t('accounting.opening_balance_document.unmark'), icon: 'uturn', tier: 'advanced', variant: 'neutral',
+      show: canUnmarkOpeningBalance.value, disabled: b || openingBalance.busy.value,
+      run: () => { openingBalance.confirming.value = 'unmark' } },
     { key: 'cancel', label: isCalendar.value ? t('invoice.calendar.cancel_action')
         : isCalendarInstalment.value ? t('invoice.modals.cancel_credit_note')
         : isCreditNoteSource.value ? t('invoice.cancel_credit_note') : t('invoice.cancel_or_credit'),
@@ -2313,11 +2342,13 @@ useWindowRefresh(async () => {
   invoice.value = updated
   activity.value = events
   loadPayments(invoiceId, generation)
+  void openingBalance.load(invoiceId)
   if (stockIntegrationVisible.value) void loadStockDocuments(invoiceId, generation)
 }, () => !loading.value && !busy.value && !accrualEditing.value && !accrualSaving.value
   && !sendOpen.value && !reminderOpen.value && !cancelOpen.value && !partialOpen.value
   && !markPaidOpen.value && !advanceModalOpen.value && !drawdownOpen.value && !penaltyOpen.value
-  && !approvalStatusOpen.value && !wrModalOpen.value && !refundDialogOpen.value && !bankMatchTarget.value)
+  && !approvalStatusOpen.value && !wrModalOpen.value && !refundDialogOpen.value && !bankMatchTarget.value
+  && !openingBalance.confirming.value && !openingBalance.busy.value)
 </script>
 
 <template>
@@ -2347,6 +2378,11 @@ useWindowRefresh(async () => {
           <PostingBadge v-if="invoice.locked?.journal_entry_id"
             :booked-at="invoice.booked_at" :journal-entry-id="invoice.locked.journal_entry_id" />
           <LockedBadge v-else-if="invoice.locked" :lock="invoice.locked" />
+          <span v-if="openingBalance.inOpening.value" data-test="opening-balance-badge"
+            class="text-xs px-2 py-0.5 rounded font-normal bg-neutral-100 text-neutral-600 border border-neutral-200"
+            :title="t('accounting.opening_balance_document.badge_tooltip', { date: formatDate(openingBalance.state.value?.entry_date ?? null) })">
+            {{ t('accounting.opening_balance_document.badge') }}
+          </span>
           <span v-if="invoice.income_tax_exempt"
             class="text-xs px-2 py-0.5 rounded font-normal bg-amber-100 text-amber-800 border border-amber-200"
             :title="invoice.income_tax_exempt_reason || ''">
@@ -2939,13 +2975,18 @@ useWindowRefresh(async () => {
             <template v-else-if="drawdownCandidates.length > 0">
               <h4 v-if="drawdownList.length > 0" class="text-xs font-medium uppercase tracking-wide text-neutral-500 -mb-2">{{ t('invoice.advance_drawdown.pick') }}</h4>
               <ul class="space-y-2" data-test="drawdown-candidates">
-                <li v-for="cand in drawdownCandidates" :key="cand.id">
-                  <label class="cursor-pointer flex items-center gap-3 px-3 py-2 border rounded-md"
-                    :class="drawdownProformaId === cand.id ? 'border-primary-500 bg-primary-50' : 'border-neutral-200 hover:border-primary-400'">
-                    <input type="radio" name="drawdown-proforma" :value="cand.id" :checked="drawdownProformaId === cand.id" @change="selectDrawdown(cand.id)" />
+                <li v-for="cand in drawdownCandidates" :key="cand.id" :data-test="`drawdown-candidate-${cand.id}`">
+                  <label class="flex items-center gap-3 px-3 py-2 border rounded-md"
+                    :class="!drawdownSelectable(cand) ? 'cursor-not-allowed opacity-60 border-neutral-200 bg-neutral-50'
+                      : drawdownProformaId === cand.id ? 'cursor-pointer border-primary-500 bg-primary-50' : 'cursor-pointer border-neutral-200 hover:border-primary-400'">
+                    <input type="radio" name="drawdown-proforma" :value="cand.id" :checked="drawdownProformaId === cand.id"
+                      :disabled="!drawdownSelectable(cand)" @change="selectDrawdown(cand.id)" />
                     <span class="min-w-0">
                       <span class="font-mono text-sm">{{ cand.varsymbol || ('#' + cand.id) }}</span>
                       <span v-if="cand.tax_documents" class="block text-xs text-neutral-500 truncate">{{ cand.tax_documents }}</span>
+                      <span v-if="!drawdownSelectable(cand)" class="block text-xs text-warning-700" data-test="drawdown-receipt-not-posted">
+                        {{ t('invoice.advance_drawdown.receipt_not_posted') }}
+                      </span>
                     </span>
                     <span class="text-xs text-neutral-500 ml-auto text-right">
                       {{ cand.issue_date ? formatDate(cand.issue_date) : '' }} · {{ t('invoice.advance_drawdown.total') }} {{ formatMoney(cand.total_with_vat, invoice.currency) }}
@@ -4159,6 +4200,13 @@ useWindowRefresh(async () => {
     </WorkspaceTeleport>
     <LockedPeriodAckModal :ref="(el: any) => { lockedAck.modal.value = el }" />
     <InsufficientStockDialog v-if="insufficientStock" :items="insufficientStock" @close="insufficientStock = null" />
+    <ConfirmDialog v-if="invoice && openingBalance.confirming.value"
+      :title="openingBalance.confirming.value === 'mark' ? t('accounting.opening_balance_document.mark_title') : t('accounting.opening_balance_document.unmark_title')"
+      :message="openingBalance.confirming.value === 'mark' ? t('accounting.opening_balance_document.mark_confirm') : t('accounting.opening_balance_document.unmark_confirm')"
+      :confirm-label="openingBalance.confirming.value === 'mark' ? t('accounting.opening_balance_document.mark') : t('accounting.opening_balance_document.unmark')"
+      :variant="openingBalance.confirming.value === 'mark' ? 'warning' : 'neutral'"
+      :busy="openingBalance.busy.value"
+      @confirm="openingBalance.confirm(invoice.id)" @cancel="openingBalance.confirming.value = null" />
   </div>
     <WorkspaceTeleport>
       <InvoiceBankMatchModal v-if="bankMatchTarget" doc-type="invoice" :doc-id="bankMatchTarget.id" :doc-ref="bankMatchTarget.ref"

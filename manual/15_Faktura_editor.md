@@ -166,8 +166,7 @@ odeberete tlačítkem **Odebrat čerpání záloh** v nabídce akcí.
 > Ve firmě s podvojným účetnictvím musí mít čerpaná záloha úhradu zaúčtovanou bankou nebo
 > pokladnou, nebo musí být převzatá z počátečních stavů (viz
 > [Záloha přijatá před otevřením knih](#zaloha-prijata-pred-otevrenim-knih)). Záloha jen s ruční
-> úhradou se čerpat nedá: okno ji označí a čerpání odmítne s hláškou, že úhrada zálohy není
-> zaúčtovaná. Konečnou fakturu by jinak nešlo zaúčtovat. Totéž platí pro **Vystavit fakturu
+> úhradou se čerpat nedá: okno **Odečíst zálohu** ji ukáže zašedlou s důvodem a vybrat ji nejde. Konečnou fakturu by jinak nešlo zaúčtovat. Totéž platí pro **Vystavit fakturu
 > k záloze** u zálohy s daňovým dokladem k platbě: zaúčtovaná nebo převzatá úhrada musí
 > pokrýt vše, co faktura odečte.
 
@@ -1153,10 +1152,13 @@ v MyÚčtu nemají a mít nemají. Taková záloha se eviduje jako **převzatá 
    s datem přijetí platby, také před otevřením knih).
 2. Daňový doklad k platbě založte s jeho vlastním číslem a datem přijetí úplaty a vystavte ho.
    **Nezaúčtovávejte ho**, jeho daň už nese otevírací zápis.
-3. Zálohovou fakturu i daňový doklad označte jako převzaté z počátečních stavů. Doklad se tím
-   naváže na nejbližší zaúčtovaný otevírací zápis po svém datu. Označení jde přes REST API
-   (`PUT /api/v1/invoices/{id}/opening-balance`, zrušení `DELETE`), přijaté doklady stejně
-   (`/api/v1/purchase-invoices/{id}/opening-balance`). API token potřebuje plný zápis.
+3. Zálohovou fakturu i daňový doklad označte jako převzaté z počátečních stavů: v detailu
+   dokladu **Další akce → Pokročilé → Převzato z počátečních stavů** a potvrďte. Doklad se tím
+   naváže na nejbližší zaúčtovaný otevírací zápis po svém datu a v hlavičce dostane štítek
+   **Převzato z počátečních stavů**. Akci vidí uživatel s právem zaúčtovat doklady ve firmě
+   s podvojným účetnictvím. Zrušit ji jde na stejném místě (**Zrušit převzetí z počátečních
+   stavů**). Integrace mohou použít REST API (`PUT /api/v1/invoices/{id}/opening-balance`,
+   zrušení `DELETE`), přijaté doklady stejně (`/api/v1/purchase-invoices/{id}/opening-balance`).
 4. Konečnou fakturu vystavte a zálohu na ní odečtěte jako obvykle (**Odečíst zálohu**).
 
 Konečná faktura pak převzatý daňový doklad bere jako uplatněný a při zaúčtování doplní
