@@ -128,6 +128,28 @@ if [[ "${MODE}" == "source" ]]; then
   echo "==> Rebuilding app image…"
   "${DC[@]}" build --pull app
 else
+  # Tlačítko v aplikaci předá přes watcher cílovou verzi. S připnutou verzí
+  # v compose by `pull` stáhl zase tutéž, proto ji přepíšeme na cílovou.
+  # Ručně: MYINVOICE_TARGET_VERSION=X.Y.Z bash cmd/docker-update.sh
+  if [[ -n "${MYINVOICE_TARGET_VERSION:-}" && -n "$COMPOSE_ARGS" ]]; then
+    if [[ -f "${PROJECT_ROOT}/cmd/lib/image-tag.sh" ]]; then
+      # shellcheck source=lib/image-tag.sh
+      . "${PROJECT_ROOT}/cmd/lib/image-tag.sh"
+      bump="$(image_tag_bump "${COMPOSE_ARGS#-f }" "$MYINVOICE_TARGET_VERSION")"
+      if [[ -n "$bump" ]]; then
+        read -r pinned_image target_image <<< "$bump"
+        echo "==> Připnutá verze ${pinned_image##*:} → cílová ${target_image##*:}"
+        # Nejdřív stáhnout, compose přepsat až po úspěchu (nedostupná verze compose nezmění).
+        docker pull "$target_image"
+        image_tag_write "${COMPOSE_ARGS#-f }" "$pinned_image" "$target_image"
+        echo "    ${COMPOSE_ARGS#-f }: ${target_image}"
+      else
+        echo "==> Cílová verze ${MYINVOICE_TARGET_VERSION}: compose nemá nižší připnutou verzi, značka se nemění."
+      fi
+    else
+      echo "WARN: chybí cmd/lib/image-tag.sh, připnutá verze se nemění (dotáhni repo)." >&2
+    fi
+  fi
   echo "==> Pulling latest image from registry…"
   "${DC[@]}" pull app
 fi

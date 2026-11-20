@@ -177,6 +177,28 @@ if ($mode -eq 'source') {
     & docker compose @composeArgs build --pull app
     if ($LASTEXITCODE -ne 0) { Write-Error "docker compose build failed" }
 } else {
+    # Tlacitko v aplikaci preda pres watcher cilovou verzi. S pripnutou verzi
+    # v compose by `pull` stahl zase tutez, proto ji prepiseme na cilovou.
+    # Rucne: $env:MYINVOICE_TARGET_VERSION='X.Y.Z'; .\cmd\docker-update.ps1
+    if ($env:MYINVOICE_TARGET_VERSION -and $composeArgs.Count -gt 0) {
+        $imageTagLib = Join-Path $PSScriptRoot 'lib\image-tag.ps1'
+        if (Test-Path -LiteralPath $imageTagLib) {
+            . $imageTagLib
+            $tagBump = Get-ImageTagBump -Compose $composeArgs[1] -Target $env:MYINVOICE_TARGET_VERSION
+            if ($tagBump) {
+                Write-Host "==> Pripnuta verze $($tagBump.Old.Split(':')[-1]) -> cilova $($tagBump.New.Split(':')[-1])"
+                # Nejdriv stahnout, compose prepsat az po uspechu.
+                & docker pull $tagBump.New
+                if ($LASTEXITCODE -ne 0) { Write-Error "docker pull $($tagBump.New) failed" }
+                Set-ImageTag -Compose $composeArgs[1] -Old $tagBump.Old -New $tagBump.New
+                Write-Host "    $($composeArgs[1]): $($tagBump.New)"
+            } else {
+                Write-Host "==> Cilova verze $($env:MYINVOICE_TARGET_VERSION): compose nema nizsi pripnutou verzi, znacka se nemeni."
+            }
+        } else {
+            Write-Warning "Chybi cmd\lib\image-tag.ps1, pripnuta verze se nemeni (dotahni repo)."
+        }
+    }
     Write-Host "==> Pulling latest image from registry..."
     & docker compose @composeArgs pull app
     if ($LASTEXITCODE -ne 0) { Write-Error "docker compose pull failed" }

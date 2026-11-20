@@ -57,6 +57,7 @@ konkrétní postup závisí na typu instalace.
    **Upgrade zařazen do fronty**.
 4. Do 30 sekund požadavek převezme update watcher na hostu, aktualizuje image,
    restartuje stack a spustí migrace. Stav se obnovuje každých 5 sekund.
+   Připnutou verzi v compose (například `:6.70.1`) přepíše na verzi z tlačítka.
 
 **Jak poznáte, že je hotovo:** Stránka ukáže **Upgrade úspěšně dokončen**
 s časem **Dokončeno** a **Aktuální verze** odpovídá nové verzi.

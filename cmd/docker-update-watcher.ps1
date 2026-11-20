@@ -133,6 +133,8 @@ while ($true) {
             # `exit`/Write-Error s EAP=Stop, které by jinak shodily watcher smyčku),
             # ale TÍMŽE PS hostem jako watcher ($PwshExe = pwsh/powershell), ne natvrdo
             # `powershell` (issue #153). 2>&1 mergne stderr → success stream.
+            # Cílová verze z tlačítka: docker-update.ps1 jí přepíše připnutou verzi v compose.
+            $env:MYINVOICE_TARGET_VERSION = $target
             & $PwshExe -NoProfile -ExecutionPolicy Bypass -File (Join-Path $ProjectRoot 'cmd\docker-update.ps1') 2>&1 | Tee-Object -FilePath $log | Out-Host
             if ($LASTEXITCODE -eq 0) {
                 $status  = 'applied'

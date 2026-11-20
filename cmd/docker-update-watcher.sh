@@ -92,7 +92,7 @@ while true; do
         dc exec -T app mv -f "${STORAGE_DIR}/upgrade-requested.json" "${STORAGE_DIR}/upgrade-inflight.json" 2>/dev/null || true
 
         LOG="/tmp/myucto-upgrade-$(date -u +%Y%m%dT%H%M%SZ).log"
-        if bash "$PROJECT_ROOT/cmd/docker-update.sh" >"$LOG" 2>&1; then
+        if MYINVOICE_TARGET_VERSION="$TARGET" bash "$PROJECT_ROOT/cmd/docker-update.sh" >"$LOG" 2>&1; then
             STATUS="applied"
             MESSAGE="Upgrade dokončen. Log na hostu: ${LOG}"
             echo "[watcher] OK"

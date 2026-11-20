@@ -381,6 +381,8 @@ Než z watcheru uděláte službu, vyzkoušejte ho v běžícím okně.
 
 2. Ověřte, že vidíte `[watcher] start, polling storage/upgrade-requested.json inside container every 30s`.
 3. V aplikaci klikněte na **Aktualizovat na {verze}**. Do 30 sekund watcher příznak zachytí, spustí `cmd/docker-update.(sh/ps1)` a výsledek zapíše zpět.
+
+   Když máte v compose připnutou konkrétní verzi (například `:6.70.1`), aktualizace ji přepíše na verzi z tlačítka. Nižší verzi ani plovoucí značku `:latest` nemění. Ručně totéž uděláte příkazem `MYINVOICE_TARGET_VERSION=X.Y.Z bash cmd/docker-update.sh`.
 4. Watcher zastavíte klávesou `Ctrl+C`.
 
 Watcher spouští aktualizaci stejným PowerShell hostem, pod kterým sám běží (`pwsh` i `powershell`), a cesty řeší z umístění skriptu. Funguje proto i z jiného adresáře a na strojích jen s PowerShell 7.
