@@ -6,6 +6,7 @@ namespace MyInvoice\Repository;
 
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Accounting\Activation\OpeningBalanceDocuments;
+use MyInvoice\Service\Accounting\AdvanceSettlementEvidenceReader;
 use MyInvoice\Service\Accounting\DocumentPostingGroup;
 use MyInvoice\Support\Sql\AdvanceDrawSql;
 use MyInvoice\Support\Sql\CreditNoteRefundExpr;
@@ -1283,6 +1284,49 @@ final class SaldoRepository
         $settledTotal = $onReceivable
             ? 'CASE WHEN COALESCE(dd.full_cover, 0) = 1 THEN c.collected_czk ELSE COALESCE(s.settled_czk, 0) + COALESCE(dd.amount, 0) END'
             : 'COALESCE(s.settled_czk, 0) + COALESCE(dd.amount, 0)';
+        // Záloha přijatá před otevřením knih (proforma v počátečních stavech): inkasem je
+        // úhrada převzatá z počátečních stavů ({@see AdvanceSettlementEvidenceReader::openingReceiptSql()})
+        // proti otevíracímu zápisu s řádkem na zálohovém účtu. Daň jejího převzatého DDKP
+        // odčerpal předchozí systém (otevírací zápis nese 324 už po dani), proto se počítá
+        // jako vyrovnaná stejně jako debet zaúčtovaného DDKP. Jen pro zálohový účet.
+        $openingCollected = '';
+        $openingVatCte = '';
+        $openingVatJoin = '';
+        if (!$onReceivable && !$overdrawn) {
+            $openingCollected = '
+                       OR (' . AdvanceSettlementEvidenceReader::openingReceiptSql('ip', 'ipf', 'x.as_of') . '
+                           AND EXISTS (
+                               SELECT 1
+                                 FROM journal_entry_document_links ocl
+                                 JOIN journal_entries oce ON oce.id = ocl.entry_id AND oce.supplier_id = ocl.supplier_id
+                                 JOIN journal_entry_lines ocn ON ocn.entry_id = oce.id AND ocn.supplier_id = oce.supplier_id
+                                 JOIN chart_of_accounts oca ON oca.id = ocn.account_id
+                                WHERE ocl.supplier_id = ipf.supplier_id AND ocl.doc_type = \'invoice\' AND ocl.doc_id = ipf.id
+                                  AND oce.source_type = \'opening\' AND oce.posted_at IS NOT NULL AND oce.reversed_by IS NULL
+                                  AND oce.entry_date <= x.as_of AND ocn.side = \'credit\'
+                                  AND (oca.id = x.account_id OR oca.parent_id = x.account_id)
+                           ))';
+            $openingVatCte = ",
+            opening_vat AS (
+                SELECT td.parent_invoice_id AS invoice_id,
+                       SUM(CASE WHEN tdc.code = 'CZK' OR td.exchange_rate IS NULL THEN td.total_vat
+                                ELSE ROUND(td.total_vat * td.exchange_rate, 2) END) AS vat_czk
+                  FROM invoices td
+                  CROSS JOIN params x
+                  JOIN currencies tdc ON tdc.id = td.currency_id
+                 WHERE td.supplier_id = x.supplier_id AND td.invoice_type = 'tax_document'
+                   AND td.parent_invoice_id IS NOT NULL AND td.status NOT IN ('draft', 'cancelled')
+                   AND td.id IN (SELECT tdl.doc_id
+                                   FROM journal_entries tde
+                                   JOIN journal_entry_document_links tdl
+                                     ON tdl.supplier_id = tde.supplier_id AND tdl.entry_id = tde.id AND tdl.doc_type = 'invoice'
+                                  WHERE tde.supplier_id = x.supplier_id AND tde.source_type = 'opening'
+                                    AND tde.posted_at IS NOT NULL AND tde.reversed_by IS NULL AND tde.entry_date <= x.as_of)
+                 GROUP BY td.parent_invoice_id
+            )";
+            $openingVatJoin = ' LEFT JOIN opening_vat ov ON ov.invoice_id = p.id';
+            $settledTotal = 'COALESCE(s.settled_czk, 0) + COALESCE(ov.vat_czk, 0) + COALESCE(dd.amount, 0)';
+        }
 
         $sql =
             "WITH params AS (
@@ -1324,7 +1368,7 @@ final class SaldoRepository
                               AND (e.reversed_by IS NULL OR rev.entry_date > x.as_of)
                               AND l.side = 'credit'
                               AND (ca.id = x.account_id OR ca.parent_id = x.account_id)
-                       )
+                       ){$openingCollected}
                    )
                  GROUP BY ip.invoice_id
             ), settled AS (
@@ -1342,7 +1386,7 @@ final class SaldoRepository
                    {$settledFilter}
                    AND (ca.id = x.account_id OR ca.parent_id = x.account_id)
                  GROUP BY child.parent_invoice_id
-            ){$deductedCte}
+            ){$deductedCte}{$openingVatCte}
             SELECT p.id AS doc_id,
                    COALESCE(NULLIF(p.varsymbol, ''), CONCAT('#', p.id)) AS doc_no,
                    p.issue_date, p.due_date, p.status,
@@ -1363,7 +1407,7 @@ final class SaldoRepository
               JOIN params x ON x.supplier_id = p.supplier_id
               JOIN clients cl ON cl.id = p.client_id
               JOIN currencies cur ON cur.id = p.currency_id
-              LEFT JOIN settled s ON s.invoice_id = p.id{$deductedJoin}
+              LEFT JOIN settled s ON s.invoice_id = p.id{$deductedJoin}{$openingVatJoin}
              WHERE p.invoice_type = 'proforma'
                AND " . ($overdrawn
                    // Zcela neuhrazená korunová záloha, kterou konečná faktura už čerpala. Uhrazená

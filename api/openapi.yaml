@@ -14538,6 +14538,13 @@ paths:
                     drawn: { type: number, description: Kolik ze zálohy koncept čerpá teď (s DPH). }
                     drawn_base: { type: number, description: Totéž bez DPH. }
                     tax_documents: { type: string, description: Čísla daňových dokladů k platbě zálohy. }
+                    receipt_posted:
+                      type: boolean
+                      description: >-
+                        Lze čerpání zaúčtovat: v podvojném účetnictví má záloha úhradu zaúčtovanou bankou nebo
+                        pokladnou, nebo úhradu převzatou z počátečních stavů (`PUT /invoices/{id}/opening-balance`
+                        na zálohovém listu). Bez ní čerpání POST odmítne (`advance_receipt_not_posted`).
+                        V daňové evidenci vždy true.
         '409': { description: Doklad není koncept běžné faktury }
     post:
       tags: [InvoiceOps]
@@ -14580,7 +14587,15 @@ paths:
                       remaining: { type: number }
                   invoice: { $ref: '#/components/schemas/Invoice' }
         '400': { description: Neplatný vstup }
-        '409': { description: Čerpání selhalo }
+        '409':
+          description: >-
+            Čerpání selhalo (`drawdown_failed`), nebo `advance_receipt_not_posted`: ve firmě s podvojným
+            účetnictvím úhrada zálohy není zaúčtovaná bankou ani pokladnou ani převzatá z počátečních
+            stavů, takže by konečnou fakturu nešlo zaúčtovat. Zaúčtujte úhradu zálohy, nebo zálohový
+            list označte jako převzatý z počátečních stavů.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
     delete:
       tags: [InvoiceOps]
       summary: Odebere z konceptu faktury čerpání zálohy
@@ -14598,6 +14613,158 @@ paths:
               schema: { $ref: '#/components/schemas/Invoice' }
         '400': { description: Neplatná záloha }
         '409': { description: Doklad není koncept běžné faktury, nebo faktura ze zálohy nečerpá }
+
+  /api/v1/invoices/{id}/opening-balance:
+    parameters:
+      - $ref: '#/components/parameters/SupplierIdHeader'
+      - in: path
+        name: id
+        required: true
+        schema: { type: integer, format: int64 }
+    get:
+      tags: [InvoiceOps]
+      summary: Je vydaný doklad převzatý z počátečních stavů?
+      description: Vazba dokladu na živý otevírací zápis (`journal_entries.source_type = opening`).
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OpeningBalanceDocumentResult' }
+        '404':
+          $ref: '#/components/responses/NotFound'
+    put:
+      tags: [InvoiceOps]
+      summary: Označí vydaný doklad jako převzatý z počátečních stavů
+      description: |
+        Doklad z doby před otevřením knih v MyÚčtu (zálohový list, daňový doklad k přijaté platbě,
+        neuhrazená faktura) naváže na nejbližší zaúčtovaný otevírací zápis po datu dokladu (DUZP,
+        jinak datum vystavení). Částku dokladu pak nese otevírací zápis: doklad se nedoúčtovává,
+        daňový doklad k platbě nejde zaúčtovat (`document_in_opening_balance`) a konečná faktura
+        ho při odpočtu zálohy bere jako uplatněný. Úhrady zálohového listu evidované s datem před
+        otevíracím zápisem bez banky a pokladny (`POST /invoices/{id}/payments`) jsou přijatou
+        zálohou, kterou konečná faktura zúčtuje 324 MD / 311 D. Saldokonto 324 zálohu ukáže
+        proti počátečnímu stavu.
+
+        Pojistky: podvojné účetnictví (`not_double_entry`), vystavený doklad
+        (`document_not_eligible`), bez vlastního živého zápisu v deníku (`document_posted`),
+        datum před otevíracím zápisem (`opening_entry_missing`, `document_after_opening`),
+        otevřené účetní období otevíracího zápisu (`period_closed`). Opakované označení nic nemění.
+        Vyžaduje `accounting.journal.post` a zápis faktur; API token jen s plným zápisem (`system_write`).
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OpeningBalanceDocumentResult' }
+        '403':
+          $ref: '#/components/responses/SystemWriteRequired'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: '`document_posted`, `opening_entry_missing` nebo `period_closed`.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '422':
+          description: '`not_double_entry`, `document_not_eligible` nebo `document_after_opening`.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+    delete:
+      tags: [InvoiceOps]
+      summary: Zruší označení vydaného dokladu jako převzatého z počátečních stavů
+      description: |
+        Odmítne doklad, který označený není (`not_in_opening`), zálohu (i přes její daňový doklad
+        k platbě), kterou už čerpá konečná faktura, a doklad se zaúčtovanou úhradou z banky nebo
+        pokladny (`opening_document_in_use`). Účetní období otevíracího zápisu musí být otevřené
+        (`period_closed`). API token jen s plným zápisem (`system_write`).
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OpeningBalanceDocumentResult' }
+        '403':
+          $ref: '#/components/responses/SystemWriteRequired'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: '`not_in_opening`, `opening_document_in_use` nebo `period_closed`.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /api/v1/purchase-invoices/{id}/opening-balance:
+    parameters:
+      - $ref: '#/components/parameters/SupplierIdHeader'
+      - in: path
+        name: id
+        required: true
+        schema: { type: integer, format: int64 }
+    get:
+      tags: [Purchase invoices]
+      summary: Je přijatý doklad převzatý z počátečních stavů?
+      description: Vazba dokladu na živý otevírací zápis (`journal_entries.source_type = opening`).
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OpeningBalanceDocumentResult' }
+        '404':
+          $ref: '#/components/responses/NotFound'
+    put:
+      tags: [Purchase invoices]
+      summary: Označí přijatý doklad jako převzatý z počátečních stavů
+      description: |
+        Zrcadlo `PUT /invoices/{id}/opening-balance` pro přijaté doklady: neuhrazená faktura nebo
+        poskytnutá záloha z doby před otevřením knih. Záloha bez daňového dokladu k platbě je pak
+        zálohou z počátečních stavů a konečná faktura ji odečte odpočtovým řádkem s DPH.
+        Pojistky i chybové kódy jako u vydaného dokladu. Vyžaduje `accounting.journal.post`
+        a zápis přijatých faktur; API token jen s plným zápisem (`system_write`).
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OpeningBalanceDocumentResult' }
+        '403':
+          $ref: '#/components/responses/SystemWriteRequired'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: '`document_posted`, `opening_entry_missing` nebo `period_closed`.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '422':
+          description: '`not_double_entry`, `document_not_eligible` nebo `document_after_opening`.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+    delete:
+      tags: [Purchase invoices]
+      summary: Zruší označení přijatého dokladu jako převzatého z počátečních stavů
+      description: |
+        Odmítne doklad, který označený není (`not_in_opening`), zálohu, kterou už vyúčtovává
+        konečná faktura, a doklad se zaúčtovanou úhradou (`opening_document_in_use`), i zásah
+        do uzavřeného období (`period_closed`). API token jen s plným zápisem (`system_write`).
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OpeningBalanceDocumentResult' }
+        '403':
+          $ref: '#/components/responses/SystemWriteRequired'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: '`not_in_opening`, `opening_document_in_use` nebo `period_closed`.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
 
   # ── Přijaté faktury — párování zálohy ────────────────────────────────────
   /api/v1/purchase-invoices/{id}/advance-candidates:
@@ -52557,6 +52724,16 @@ components:
             social: { type: number }
             health: { type: number }
         warnings: { type: array, items: { type: string } }
+    OpeningBalanceDocumentResult:
+      type: object
+      description: Stav vazby dokladu na počáteční stavy (otevírací zápis).
+      properties:
+        opening_balance:
+          type: object
+          properties:
+            in_opening: { type: boolean, description: Doklad je převzatý z počátečních stavů. }
+            entry_id: { type: [integer, "null"], format: int64, description: Otevírací zápis, na který je doklad navázaný. }
+            entry_date: { type: [string, "null"], format: date, description: Datum otevíracího zápisu. }
     Error:
       type: object
       required: [error]

@@ -287,6 +287,60 @@ final class AdvanceSettlementEvidenceReader
         return round($bank + $cash, 2);
     }
 
+    /**
+     * Přijatá záloha převzatá z počátečních stavů: proforma navázaná na živý zaúčtovaný
+     * otevírací zápis ({@see \MyInvoice\Service\Accounting\Activation\OpeningBalanceDocuments}),
+     * uhrazená ještě v předchozím systému. Úhrada je evidovaná jen v `invoice_payments`
+     * (ruční, označení zaplacení, převod), ne bankou ani pokladnou, a s datem PŘED datem
+     * otevíracího zápisu. Zůstatek takové zálohy nese otevírací zápis na 324, ne bankovní
+     * zápis MyÚčta. Pozdější ruční úhrada se nepočítá: po otevření knih musí úhradu
+     * zálohy zaúčtovat banka nebo pokladna ({@see postedAdvanceReceived()}).
+     *
+     * Částka je v měně proformy, stejně jako u {@see postedAdvanceReceived()}.
+     */
+    public function openingAdvanceReceived(int $supplierId, int $proformaId): float
+    {
+        return round($this->scalarFloat(
+            "SELECT COALESCE(SUM(ip.amount), 0) FROM invoice_payments ip
+               JOIN invoices p ON p.id = ip.invoice_id AND p.supplier_id = ip.supplier_id AND p.invoice_type = 'proforma'
+              WHERE ip.supplier_id = ? AND ip.invoice_id = ? AND " . self::openingReceiptSql('ip', 'p'),
+            [$supplierId, $proformaId],
+        ), 2);
+    }
+
+    /**
+     * Přijatá záloha, kterou může zúčtovat konečná faktura: úhrady zaúčtované bankou
+     * nebo pokladnou ({@see postedAdvanceReceived()}) a úhrady převzaté z počátečních
+     * stavů ({@see openingAdvanceReceived()}). V měně proformy.
+     */
+    public function advanceReceived(int $supplierId, int $proformaId): float
+    {
+        return round($this->postedAdvanceReceived($supplierId, $proformaId) + $this->openingAdvanceReceived($supplierId, $proformaId), 2);
+    }
+
+    /**
+     * SQL podmínka „úhrada `$payment` (alias `invoice_payments`) proformy `$proforma` je
+     * převzatá z počátečních stavů" ({@see openingAdvanceReceived()}). `$asOf` = SQL výraz
+     * rozvahového dne (saldokonto); otevírací zápis po něm se nepočítá.
+     */
+    public static function openingReceiptSql(string $payment, string $proforma, ?string $asOf = null): string
+    {
+        foreach ([$payment, $proforma] as $alias) {
+            if (preg_match('/^[a-z_][a-z0-9_]*$/', $alias) !== 1) {
+                throw new \InvalidArgumentException('Neplatný alias.');
+            }
+        }
+        return "{$payment}.bank_transaction_id IS NULL AND {$payment}.source IN ('manual', 'mark_paid', 'legacy')
+                AND NOT EXISTS (SELECT 1 FROM cash_documents orc
+                                 WHERE orc.supplier_id = {$payment}.supplier_id AND orc.invoice_payment_id = {$payment}.id)
+                AND EXISTS (SELECT 1 FROM journal_entry_document_links orl
+                              JOIN journal_entries ore ON ore.id = orl.entry_id AND ore.supplier_id = orl.supplier_id
+                             WHERE orl.supplier_id = {$proforma}.supplier_id AND orl.doc_type = 'invoice' AND orl.doc_id = {$proforma}.id
+                               AND ore.source_type = 'opening' AND ore.posted_at IS NOT NULL AND ore.reversed_by IS NULL
+                               AND {$payment}.paid_on < ore.entry_date"
+            . ($asOf !== null ? " AND ore.entry_date <= {$asOf}" : '') . ')';
+    }
+
     public function postedAdvancePaid(int $supplierId, array $advance, \Closure $rateResolver): float
     {
         $advanceId = (int) $advance['id'];

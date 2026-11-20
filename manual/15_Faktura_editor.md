@@ -162,6 +162,13 @@ odeberete tlačítkem **Odebrat čerpání záloh** v nabídce akcí.
 > nebo v saldokontu. Fakturu s odečtenou úhradou zálohy bez daňového dokladu nejde kombinovat
 > s čerpáním dalších záloh.
 
+> [!IMPORTANT]
+> Ve firmě s podvojným účetnictvím musí mít čerpaná záloha úhradu zaúčtovanou bankou nebo
+> pokladnou, nebo musí být převzatá z počátečních stavů (viz
+> [Záloha přijatá před otevřením knih](#zaloha-prijata-pred-otevrenim-knih)). Záloha jen s ruční
+> úhradou se čerpat nedá: okno ji označí a čerpání odmítne s hláškou, že úhrada zálohy není
+> zaúčtovaná. Konečnou fakturu by jinak nešlo zaúčtovat.
+
 **Jak poznáte, že je hotovo:** faktura čerpající jednu zálohu má odkaz na zálohovou fakturu,
 faktura čerpající víc záloh má pruh **Faktura čerpá zálohy** s odkazy na všechny. V položkách
 je odpočet každé zálohy. Při zaúčtování faktura zúčtuje z každé zálohy (MD 324 / D 311) jen
@@ -1132,6 +1139,34 @@ Z pohledu [Účetního deníku](52_Ucetni_denik.md) fungují tři doklady záloh
 > nebo odečítá víc, než daňové doklady přiznaly, a postupné čerpání, ke kterému chybí
 > zaúčtovaná úhrada zálohy. Částka zúčtování zálohy by nebyla jednoznačná, systém takový
 > doklad automaticky nezaúčtuje a je potřeba dořešit ho ručním zápisem.
+
+#### Záloha přijatá před otevřením knih
+
+Při přechodu z jiného systému v průběhu roku mohou existovat zálohy, které odběratel zaplatil
+a ke kterým jste vystavili daňový doklad k přijaté platbě ještě v předchozím systému. Daň
+z nich je přiznaná a otevírací zápis nese na účtu 324 zbytek zálohy po dani. Bankovní pohyb
+v MyÚčtu nemají a mít nemají. Taková záloha se eviduje jako **převzatá z počátečních stavů**:
+
+1. Zálohovou fakturu založte s datem před otevřením knih a evidujte její úhradu (ruční úhrada
+   s datem přijetí platby, také před otevřením knih).
+2. Daňový doklad k platbě založte s jeho vlastním číslem a datem přijetí úplaty a vystavte ho.
+   **Nezaúčtovávejte ho**, jeho daň už nese otevírací zápis.
+3. Zálohovou fakturu i daňový doklad označte jako převzaté z počátečních stavů. Doklad se tím
+   naváže na nejbližší zaúčtovaný otevírací zápis po svém datu. Označení jde přes REST API
+   (`PUT /api/v1/invoices/{id}/opening-balance`, zrušení `DELETE`), přijaté doklady stejně
+   (`/api/v1/purchase-invoices/{id}/opening-balance`). API token potřebuje plný zápis.
+4. Konečnou fakturu vystavte a zálohu na ní odečtěte jako obvykle (**Odečíst zálohu**).
+
+Konečná faktura pak převzatý daňový doklad bere jako uplatněný a při zaúčtování doplní
+MD 324 / D 311 do výše převzaté zálohy po dani daňového dokladu. V [Saldokontu](60_Saldokonto.md)
+na účtu 324 je převzatá záloha otevřenou položkou proti počátečnímu stavu, dokud ji konečná
+faktura nevyčerpá.
+
+Za převzatou zálohu se počítá jen úhrada s datem před otevíracím zápisem, která neprošla bankou
+ani pokladnou. Pozdější úhrady musí zaúčtovat banka nebo pokladna. Označit jde jen vystavený doklad
+bez vlastního zápisu v deníku, datovaný před otevíracím zápisem, v otevřeném účetním období.
+Převzatý daňový doklad zaúčtovat nejde. Označení nejde zrušit, když zálohu už čerpá konečná
+faktura nebo je proti dokladu zaúčtovaná úhrada.
 
 ### 15.9.9 Storno vs. dobropis
 

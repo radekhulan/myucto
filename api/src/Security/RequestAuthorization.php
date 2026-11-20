@@ -447,6 +447,21 @@ final class RequestAuthorization
     }
 
     /**
+     * Označení vydaného či přijatého dokladu jako převzatého z počátečních stavů a jeho
+     * zrušení (vazba na otevírací zápis): interní role s právem zaúčtovat
+     * (`accounting.journal.post`) a zapisovat doklady dané agendy. Z přihlášené relace,
+     * nebo tokenem s plným zápisem; běžný API token účetní vrstvu jen čte. Klient ne.
+     *
+     * @param 'invoice'|'purchase_invoice' $docType
+     */
+    public static function canMarkOpeningBalanceDocument(Request $request, string $docType): bool
+    {
+        return self::actsAsSession($request) && !self::isClientType($request)
+            && self::allows($request, 'accounting.journal.post', AccessLevel::WRITE)
+            && self::allows($request, $docType === 'invoice' ? 'invoices' : 'purchase_invoices', AccessLevel::WRITE);
+    }
+
+    /**
      * Hromadné doúčtování bankovních pohybů podle filtru: správce firmy, nebo interní role
      * s právem zaúčtovat (`accounting.journal.post`) a zároveň s vlastním právem
      * `accounting.journal.bulk_repost`. Jedním krokem zaúčtuje stovky pohybů, proto ho

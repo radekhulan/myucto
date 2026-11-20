@@ -117,6 +117,9 @@ final class RoutePermissionMap
         ['*', '#^/api/invoices/[0-9]+/stock-documents(/|$)#', 'stock', AccessLevel::WRITE],
         ['GET', '#^/api/invoices/[0-9]+/source-receipts$#', 'stock', AccessLevel::READ],
         ['*', '#^/api/invoices/[0-9]+/book$#', 'accounting.journal.post', AccessLevel::WRITE],
+        // Doklad převzatý z počátečních stavů: vazba na otevírací zápis je účetní úkon.
+        ['GET', '#^/api/invoices/[0-9]+/opening-balance$#', 'invoices', AccessLevel::READ],
+        ['*', '#^/api/invoices/[0-9]+/opening-balance$#', 'accounting.journal.post', AccessLevel::WRITE],
         // Faktura krytá ostatní pohledávkou: výběr čte ostatní položky, vazba mění zaúčtování.
         ['GET', '#^/api/invoices/[0-9]+/other-item-candidates$#', 'other_items', AccessLevel::READ],
         ['*', '#^/api/invoices/[0-9]+/other-item-link$#', 'accounting.journal.post', AccessLevel::WRITE],
@@ -166,6 +169,9 @@ final class RoutePermissionMap
         ['POST', '#^/api/purchase-invoices/[0-9]+/approvals/(request|cancel)$#', 'purchase_invoices.transition', AccessLevel::WRITE],
         ['POST', '#^/api/purchase-invoice-approvals/[0-9]+/remind$#', 'purchase_invoices.transition', AccessLevel::WRITE],
         ['*', '#^/api/purchase-invoice-approvals(/|$)#', 'purchase_invoices.approve', AccessLevel::READ],
+        // Doklad převzatý z počátečních stavů: vazba na otevírací zápis je účetní úkon.
+        ['GET', '#^/api/purchase-invoices/[0-9]+/opening-balance$#', 'purchase_invoices', AccessLevel::READ],
+        ['*', '#^/api/purchase-invoices/[0-9]+/opening-balance$#', 'accounting.journal.post', AccessLevel::WRITE],
         ['DELETE', '#^/api/purchase-invoices/[0-9]+/(link-advance|advance-suggestion|pdf)$#', 'purchase_invoices', AccessLevel::WRITE],
         ['DELETE', '#^/api/purchase-invoices/[0-9]+(/|$)#', 'purchase_invoices.delete', AccessLevel::WRITE],
         ['POST', '#^/api/purchase-invoices$#', 'purchase_invoices.create', AccessLevel::WRITE],

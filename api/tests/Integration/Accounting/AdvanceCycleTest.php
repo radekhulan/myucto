@@ -464,6 +464,8 @@ final class AdvanceCycleTest extends BankPostingTestCase
     {
         $client   = $this->client('Odběratel s.r.o.');
         $proforma = $this->saleWithItem('PRO-F4C', $client, 1000.00, 210.00, 'proforma');
+        // Podvojné účetnictví čerpá jen zálohu se zaúčtovanou úhradou (advance_receipt_not_posted).
+        $this->payProformaViaBank($proforma, 1210.00);
         $this->saleWithItem('DDKP-F4C', $client, 1000.00, 210.00, 'tax_document', $proforma, 1);
         $drawdown = $this->container->get(\MyInvoice\Service\Invoice\AdvancePartialDrawdown::class);
 

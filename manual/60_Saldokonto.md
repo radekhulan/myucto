@@ -194,7 +194,11 @@ zaúčtovanou platbu a její následné čerpání:
   také pro samostatný daňový doklad k platbě použitý jako záloha při nákupu bez
   samostatné zálohové faktury,
 - na **324** je přijatá platba vydané proformy snížena o daňový doklad k
-  přijaté platbě a o vyúčtovací fakturu,
+  přijaté platbě a o vyúčtovací fakturu. Záloha přijatá před otevřením knih
+  (proforma převzatá z počátečních stavů, viz
+  [Záloha přijatá před otevřením knih](15_Faktura_editor.md#zaloha-prijata-pred-otevrenim-knih))
+  je otevřená proti otevíracímu zápisu: platbou je její úhrada z doby před otevřením knih
+  a sníží ji daň převzatého daňového dokladu k platbě a vyúčtovací faktura,
 - na obou účtech snižuje zálohu i čerpání konečnou fakturou zadané v saldokontu
   nebo převzaté z převodu (jedna faktura může čerpat víc záloh a jedna záloha
   víc faktur), a to ode dne zaúčtování faktury.

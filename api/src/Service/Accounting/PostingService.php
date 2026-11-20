@@ -12,6 +12,7 @@ use MyInvoice\Repository\JournalEntryRepository;
 use MyInvoice\Repository\PostingRuleRepository;
 use MyInvoice\Repository\DimensionAccountMapRepository;
 use MyInvoice\Repository\DimensionAssignmentRepository;
+use MyInvoice\Service\Accounting\Activation\OpeningBalanceDocuments;
 use MyInvoice\Service\Accounting\Bank\BankDocumentNumber;
 use MyInvoice\Service\Accounting\Dimension\DimensionAccountRouter;
 use MyInvoice\Service\Accounting\Dimension\DimensionStamper;
@@ -1899,6 +1900,9 @@ final class PostingService
         // DDKP (daňový doklad k přijaté platbě, §28/2/d ZDPH) NENÍ běžná faktura:
         // zákazník už zaplatil zálohu (zaúčtováno 221/324), doklad jen přiznává DPH ze
         // zálohy → 324/343, ŽÁDNÉ 311, ŽÁDNÝ výnos 602 (viz buildAdvanceVatDocumentLines).
+        if ($invoiceType === 'tax_document' && OpeningBalanceDocuments::isInOpening($this->db->pdo(), $supplierId, 'invoice', $invoiceId)) {
+            throw self::openingTaxDocumentException('Daňový doklad k přijaté platbě #' . $invoiceId);
+        }
         if (in_array($invoiceType, ['tax_document', 'penalty'], true)) {
             // Doklad bez pohledávky: protiúčet z řádků tu nemá kam jít, chyba je hlasitá.
             $this->itemCounterAccount(
@@ -2242,6 +2246,10 @@ final class PostingService
         // DPH ze zálohy 343/314, NIKDY náklad. Musí být PŘED běžnou větví, jinak by se základ
         // chybně naúčtoval na 518 (dvojí náklad s vyúčtovací fakturou). Zrcadlo vydané strany
         // (invoice_type='tax_document' → buildAdvanceVatDocumentLines).
+        if ((string) ($pi['document_kind'] ?? '') === 'tax_document'
+            && OpeningBalanceDocuments::isInOpening($this->db->pdo(), $supplierId, 'purchase_invoice', $purchaseInvoiceId)) {
+            throw self::openingTaxDocumentException('Přijatý daňový doklad k platbě #' . $purchaseInvoiceId);
+        }
         if ((string) ($pi['document_kind'] ?? '') === 'tax_document') {
             // DDKP nemá závazek: protiúčet z řádků tu nemá kam jít, chyba je hlasitá.
             $this->itemCounterAccount(
@@ -3472,6 +3480,11 @@ final class PostingService
      * vyúčtovací fakturou (nejednoznačná částka) a proforma s DDKP, u které po odečtení
      * jeho daně nezbývá žádná zaúčtovaná úhrada k zúčtování.
      *
+     * Záloha přijatá před otevřením knih (proforma i DDKP navázané na otevírací zápis)
+     * nemá bankovní ani pokladní zápis: přijatou zálohu tvoří úhrady převzaté z počátečních
+     * stavů ({@see advanceReceived}) a daň převzatého DDKP se bere jako odčerpaná
+     * ({@see advanceTaxDocuments}), takže se zúčtuje zůstatek 324 z otevíracího zápisu.
+     *
      * @param array<string,mixed> $inv hlavička vyúčtovací faktury (z fetchDocHeader)
      * @param list<array{account_code:string, side:'debit'|'credit', amount:float, cost_center?:?string}> $lines
      * @param float $receivable předpis na 311 v tomhle zápisu (strop zúčtování)
@@ -3529,7 +3542,7 @@ final class PostingService
         // invoice_payments.amount je v měně proformy, daň DDKP v Kč → přepočet kurzem
         // proformy. Kurz se čte jen tam, kde je co přepočítávat, aby cizoměnová proforma
         // bez kurzu nerozbila vyúčtování, které zálohu stejně nezúčtovává.
-        $received = $this->postedAdvanceReceived($supplierId, $parentId);
+        $received = $this->advanceReceived($supplierId, $parentId);
         if (self::cents($received) > 0 && (string) ($parent['currency_code'] ?? 'CZK') !== 'CZK') {
             $received = round($received * $this->fxRate($parent), 2);
         }
@@ -3585,7 +3598,7 @@ final class PostingService
         float $receivable,
         array $deduction,
     ): void {
-        $received = $this->postedAdvanceReceived($supplierId, $parentId);
+        $received = $this->advanceReceived($supplierId, $parentId);
         if (self::cents($received) > 0 && (string) ($parent['currency_code'] ?? 'CZK') !== 'CZK') {
             $received = round($received * $this->fxRate($parent), 2);
         }
@@ -3904,10 +3917,14 @@ final class PostingService
      * IS NULL). Sčítá se alokace ke KONKRÉTNÍ proformě, ne řádky účtu 324 celého zápisu —
      * sloučená úhrada na víc proforem nese v jednom zápisu víc 324 řádků, a entry-wide součet
      * by cizí zálohu přesčítal (a při vyúčtování druhé proformy načetl tentýž zápis znovu).
+     *
+     * K tomu úhrady proformy převzaté z počátečních stavů (záloha přijatá před otevřením
+     * knih, zůstatek nese otevírací zápis na 324,
+     * {@see AdvanceSettlementEvidenceReader::openingAdvanceReceived()}).
      */
-    private function postedAdvanceReceived(int $supplierId, int $proformaId): float
+    private function advanceReceived(int $supplierId, int $proformaId): float
     {
-        return (new AdvanceSettlementEvidenceReader($this->db))->postedAdvanceReceived($supplierId, $proformaId);
+        return (new AdvanceSettlementEvidenceReader($this->db))->advanceReceived($supplierId, $proformaId);
     }
 
     /**
@@ -3964,6 +3981,21 @@ final class PostingService
         return new PostingException(
             'invoice_covered_by_other_item',
             'Vydaná faktura #' . $invoiceId . ' je navázaná na ostatní pohledávku, která ji zaúčtovala. Vlastní zápis faktura nemá.',
+            409,
+        );
+    }
+
+    /**
+     * DDKP převzatý z počátečních stavů ({@see OpeningBalanceDocuments}) vlastní zápis mít
+     * nesmí: jeho daň přiznal předchozí systém a otevírací zápis ji už nese. Zaúčtování
+     * by ji přiznalo podruhé.
+     */
+    private static function openingTaxDocumentException(string $label): PostingException
+    {
+        return new PostingException(
+            'document_in_opening_balance',
+            $label . ' je převzatý z počátečních stavů: jeho daň přiznal předchozí systém a nese ji otevírací zápis. '
+                . 'Nezaúčtovává se. Má-li se zaúčtovat, nejdřív zrušte jeho označení jako převzatého z počátečních stavů.',
             409,
         );
     }
@@ -4218,13 +4250,18 @@ final class PostingService
      * (DPH evidence, stejný zdroj jako zaúčtování DDKP). Nezaúčtovaný DDKP s daní je hlasitá
      * chyba, stejně jako DDKP jen s daní OSS.
      *
+     * DDKP převzatý z počátečních stavů ({@see OpeningBalanceDocuments}) se jako uplatněný
+     * bere bez vlastního zápisu: daň přiznal předchozí systém a otevírací zápis nese na 324
+     * už jen zálohu po dani. Zaúčtovat ho nejde ({@see buildFromInvoice}).
+     *
      * @return array{0:int, 1:float, 2:float}
      */
     private function advanceTaxDocuments(int $supplierId, int $proformaId): array
     {
         $stmt = $this->db->pdo()->prepare(
             "SELECT td.id, td.varsymbol, td.tax_date, td.issue_date, "
-                    . DocumentPostingGroup::activePostingExistsSql("'invoice'", 'td.id', 'td.supplier_id') . " AS posted
+                    . DocumentPostingGroup::activePostingExistsSql("'invoice'", 'td.id', 'td.supplier_id') . " AS posted, "
+                    . OpeningBalanceDocuments::inOpeningSql('invoice', 'td') . " AS in_opening
                FROM invoices td
               WHERE td.supplier_id = ? AND td.invoice_type = 'tax_document'
                 AND td.status NOT IN ('draft', 'cancelled')
@@ -4251,7 +4288,7 @@ final class PostingService
             [$tdOssNet, $tdOssVat] = $this->ossItemTotals((int) $td['id'], $this->fxRate($tdHeader ?? []));
             $ddkpGross += $tdNet + $tdVat + $tdOssNet + $tdOssVat;
 
-            if ((int) $td['posted'] !== 1) {
+            if ((int) $td['posted'] !== 1 && (int) $td['in_opening'] !== 1) {
                 if (self::cents($tdVat) === 0 && self::cents($tdOssVat) !== 0) {
                     throw new PostingException(
                         'advance_tax_document_oss',

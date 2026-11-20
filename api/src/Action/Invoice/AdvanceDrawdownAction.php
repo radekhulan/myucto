@@ -12,6 +12,7 @@ use MyInvoice\Repository\InvoiceRepository;
 use MyInvoice\Service\Accounting\DocumentLockService;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Invoice\AdvancePartialDrawdown;
+use MyInvoice\Service\Invoice\AdvanceReceiptNotPostedException;
 use MyInvoice\Service\IpMatcher;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
@@ -76,6 +77,8 @@ final class AdvanceDrawdownAction
                 : $this->drawdown->apply($supplierId, $id, $proformaId, (float) $amount, $basis);
         } catch (\InvalidArgumentException $e) {
             return Json::error($response, 'invalid_input', $e->getMessage(), 400);
+        } catch (AdvanceReceiptNotPostedException $e) {
+            return Json::error($response, AdvanceReceiptNotPostedException::ERROR_CODE, $e->getMessage(), 409);
         } catch (\DomainException $e) {
             return Json::error($response, 'drawdown_failed', $e->getMessage(), 409);
         } catch (\RuntimeException $e) {

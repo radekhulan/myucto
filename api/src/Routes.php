@@ -778,6 +778,10 @@ final class Routes
         $app->get    ('/api/invoices/{id:[0-9]+}/advance-drawdown', [\MyInvoice\Action\Invoice\AdvanceDrawdownAction::class, 'candidates']);
         $app->post   ('/api/invoices/{id:[0-9]+}/advance-drawdown', [\MyInvoice\Action\Invoice\AdvanceDrawdownAction::class, 'apply']);
         $app->delete ('/api/invoices/{id:[0-9]+}/advance-drawdown', [\MyInvoice\Action\Invoice\AdvanceDrawdownAction::class, 'remove']);
+        // Doklad převzatý z počátečních stavů (vazba na otevírací zápis)
+        $app->get    ('/api/invoices/{id:[0-9]+}/opening-balance', [\MyInvoice\Action\Accounting\OpeningBalanceDocumentAction::class, 'invoiceState']);
+        $app->put    ('/api/invoices/{id:[0-9]+}/opening-balance', [\MyInvoice\Action\Accounting\OpeningBalanceDocumentAction::class, 'markInvoice']);
+        $app->delete ('/api/invoices/{id:[0-9]+}/opening-balance', [\MyInvoice\Action\Accounting\OpeningBalanceDocumentAction::class, 'unmarkInvoice']);
         $app->post   ('/api/invoices/bulk-reissue',          BulkReissueAction::class);
         $app->post   ('/api/invoices/bulk-reminder',         BulkSendRemindersAction::class);
         // Hromadné nastavení OSS nad výběrem dokladů (OSS-7). Náhled je povinný, proto
@@ -832,6 +836,9 @@ final class Routes
         $app->put    ('/api/purchase-invoices/{id:[0-9]+}/items',          SetPurchaseInvoiceItemsAction::class);
         $app->post   ('/api/purchase-invoices/{id:[0-9]+}/exchange-rate', SetPurchaseInvoiceExchangeRateAction::class);
         $app->post   ('/api/purchase-invoices/{id:[0-9]+}/transition',     TransitionPurchaseInvoiceStatusAction::class);
+        $app->get    ('/api/purchase-invoices/{id:[0-9]+}/opening-balance', [\MyInvoice\Action\Accounting\OpeningBalanceDocumentAction::class, 'purchaseState']);
+        $app->put    ('/api/purchase-invoices/{id:[0-9]+}/opening-balance', [\MyInvoice\Action\Accounting\OpeningBalanceDocumentAction::class, 'markPurchase']);
+        $app->delete ('/api/purchase-invoices/{id:[0-9]+}/opening-balance', [\MyInvoice\Action\Accounting\OpeningBalanceDocumentAction::class, 'unmarkPurchase']);
         // Platební kalendář (issue #140): další platby se stejným číslem dokladu podle vzoru.
         $app->post   ('/api/purchase-invoices/{id:[0-9]+}/payment-calendar', \MyInvoice\Action\PurchaseInvoice\PurchasePaymentCalendarAction::class);
         $app->get    ('/api/purchase-invoices/{id:[0-9]+}/credit-note-offset', [\MyInvoice\Action\Invoice\CreditNoteOffsetAction::class, 'getPurchase']);

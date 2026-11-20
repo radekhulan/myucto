@@ -220,6 +220,10 @@ final class ApiScopeMiddleware implements MiddlewareInterface
         '#^/api/invoices/[0-9]+/book$#',
         '#^/api/invoices/[0-9]+/rebuild-snapshots$#',
         '#^/api/bank-transactions/[0-9]+/(post|unpost)$#',
+        // Vazba dokladu na otevírací zápis (převzato z počátečních stavů) mění, co deník
+        // a saldokonto považují za zaúčtované. Čtení stavu smí každý token, změnu jen
+        // token s plným zápisem (system_write) nebo člověk v aplikaci.
+        '#^/api/(invoices|purchase-invoices)/[0-9]+/opening-balance$#',
         // Měnové účty nesou bankovní spojení firmy (číslo účtu, IBAN, BIC), které
         // se tiskne na faktury a do QR platby. Token je smí jen číst; změnu
         // příjemce plateb dělá správce ve webovém rozhraní (openapi: mutace jen přes UI).
