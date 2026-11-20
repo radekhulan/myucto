@@ -345,7 +345,8 @@ final class PohodaMdbAccountingTest extends TestCase
 
     public static function unknownTypes(): iterable
     {
-        yield 'historical VAT' => [['FA' => [['ID' => '1', 'Cislo' => 'TEST-F1', 'RelTpFak' => '1', 'HistSzDPH' => 'true']]], 'issued', 'mdb_historical_vat'];
+        yield 'historical VAT not matching amounts' => [['FA' => [['ID' => '1', 'Cislo' => 'TEST-F1', 'RelTpFak' => '1', 'Datum' => '2024-06-14',
+            'HistSzDPH' => 'true', 'Kc1' => '1000', 'KcDPH1' => '50']]], 'issued', 'mdb_historical_vat'];
     }
 
     public function testUnknownDocumentAndPaymentTypesAreReportedAndDoNotStopOtherRecords(): void
@@ -534,6 +535,35 @@ final class PohodaMdbAccountingTest extends TestCase
         self::assertSame(['2024-01-03', '2023-12-28'], [$received['invoiceHeader']['dateTax'], $received['invoiceHeader']['dateKHDPH']]);
         $issued = iterator_to_array($mapper->records('issued'))[0];
         self::assertSame('12', $issued['invoiceSummary']['homeCurrency']['priceLowVAT']['@rate']);
+    }
+
+    /**
+     * Zaškrtnuté historické sazby: sazby se určí z částek slotů. Vyúčtování zálohy z roku
+     * 2023 má odpočet zálohy v historické sazbě 15 % a hlavičku v sazbě 12 % roku 2024;
+     * doklad s DPH předchozích sazeb (15 %) je dostane i na položky bez vlastního procenta.
+     */
+    public function testHistoricalVatFlagTakesRatesMatchingAmounts(): void
+    {
+        $row = ['RelTpFak' => '1', 'Datum' => '2024-06-14', 'DatZdPln' => '2024-06-14', 'HistSzDPH' => 'true'];
+        $mapper = $this->mapper([
+            'FA' => [
+                ['ID' => '1', 'Cislo' => 'TEST-CURRENT', 'Kc1' => '100000', 'KcDPH1' => '12000'] + $row,
+                ['ID' => '2', 'Cislo' => 'TEST-PREVIOUS', 'Kc1' => '1000', 'KcDPH1' => '150', 'Kc2' => '100', 'KcDPH2' => '21'] + $row,
+                ['ID' => '3', 'Cislo' => 'TEST-NO-VAT', 'Kc0' => '500'] + $row,
+                ['ID' => '4', 'Cislo' => 'TEST-ADVANCE', 'RelTpFak' => '4', 'Datum' => '2023-11-20', 'Kc0' => '10000'],
+            ],
+            'FApol' => [
+                ['ID' => '1', 'RefAg' => '2', 'RelSzDPH' => '1', 'Kc' => '1000', 'KcDPH' => '150', 'KcJedn' => '1000', 'Mnozstvi' => '1'],
+                ['ID' => '2', 'RefAg' => '1', 'RelSzDPH' => '1', 'Kc' => '100000', 'KcDPH' => '12000', 'KcJedn' => '100000', 'Mnozstvi' => '1'],
+                ['ID' => '3', 'RefAg' => '1', 'RelAgID' => '43', 'RefPol' => '4', 'RelSzDPH' => '101', 'ProcentoDPH' => '15', 'Kc' => '-10000', 'KcDPH' => '-1500', 'KcJedn' => '-10000', 'Mnozstvi' => '1'],
+            ],
+        ]);
+        $invoices = iterator_to_array($mapper->records('issued'), false);
+        $rates = array_map(static fn (array $i): array => [$i['invoiceSummary']['homeCurrency']['priceLowVAT']['@rate'], $i['invoiceSummary']['homeCurrency']['priceHighVAT']['@rate']], $invoices);
+        self::assertSame([['12', '21'], ['15', '21'], ['12', '21']], $rates);
+        self::assertSame('15', $invoices[1]['invoiceDetail']['invoiceItem'][0]['rateVAT']['@value']);
+        self::assertSame('12', $invoices[0]['invoiceDetail']['invoiceItem'][0]['rateVAT']['@value']);
+        self::assertSame('15', $invoices[0]['invoiceDetail']['invoiceAdvancePaymentItem'][0]['rateVAT']['@value']);
     }
 
     public function testAccessEmptyTaxDateFallsBackToDocumentDate(): void

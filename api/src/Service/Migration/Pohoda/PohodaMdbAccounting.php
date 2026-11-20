@@ -143,8 +143,8 @@ final class PohodaMdbAccounting
             return;
         }
         self::assertRatesKnown($r);
-        if (in_array(strtolower($r['HistSzDPH'] ?? ''), ['true', '1', '-1'], true)) {
-            throw new PohodaException('mdb_historical_vat', 'Doklad ' . self::label($r) . ' má zaškrtnuté historické sazby DPH, které MDB export nenese. Použijte standardní XML export.');
+        if (self::historicalRates($r)) {
+            self::rates($r);
         }
         if ($table === 'FA' && (($r['Cislo'] ?? '') !== '' || ($r['Datum'] ?? '') !== '') && !isset(self::INVOICES[(int) ($r['RelTpFak'] ?? 0)])) {
             throw new PohodaException('mdb_invoice_type', 'Nepodporovaný typ faktury ' . ($r['RelTpFak'] ?? '0') . '.');
@@ -348,9 +348,6 @@ final class PohodaMdbAccounting
 
     private function document(array $r, string $prefix, string $itemsTable): array
     {
-        if (in_array(strtolower($r['HistSzDPH'] ?? ''), ['true', '1', '-1'], true)) {
-            throw new PohodaException('mdb_historical_vat', 'Doklad ' . self::label($r) . ' má zaškrtnuté historické sazby DPH, které MDB export nenese. Použijte standardní XML export.');
-        }
         $payment = $this->lookup('sFormUh', $r['RelForUh'] ?? '');
         $h = [
             'id' => $r['ID'],
@@ -684,14 +681,69 @@ final class PohodaMdbAccounting
     private static function rates(array $r): array
     {
         $date = self::taxDate($r);
-        return match (true) {
-            $date === '' || $date >= '2024-01-01' => [1 => 12, 2 => 21, 3 => 10],
-            $date >= '2013-01-01' => [1 => 15, 2 => 21, 3 => 10],
-            $date >= '2012-01-01' => [1 => 14, 2 => 20, 3 => 10],
-            $date >= '2010-01-01' => [1 => 10, 2 => 20, 3 => 10],
-            $date >= '2008-01-01' => [1 => 9, 2 => 19, 3 => 10],
-            default => [1 => 5, 2 => 19, 3 => 10],
-        };
+        $index = 0;
+        while ($date !== '' && $index < count(self::RATE_SETS) - 1 && $date < self::RATE_SETS[$index][0]) {
+            $index++;
+        }
+        if (!self::historicalRates($r)) {
+            return self::RATE_SETS[$index][1];
+        }
+        return self::ratesFromAmounts($r, array_column(array_slice(self::RATE_SETS, $index, 2), 1));
+    }
+
+    /** Sazby DPH (1 snížená, 2 základní, 3 druhá snížená) platné od data, od nejnovějších. */
+    private const RATE_SETS = [
+        ['2024-01-01', [1 => 12, 2 => 21, 3 => 10]],
+        ['2013-01-01', [1 => 15, 2 => 21, 3 => 10]],
+        ['2012-01-01', [1 => 14, 2 => 20, 3 => 10]],
+        ['2010-01-01', [1 => 10, 2 => 20, 3 => 10]],
+        ['2008-01-01', [1 => 9, 2 => 19, 3 => 10]],
+        ['', [1 => 5, 2 => 19, 3 => 10]],
+    ];
+
+    /** @param array<string,string> $r */
+    private static function historicalRates(array $r): bool
+    {
+        return in_array(strtolower($r['HistSzDPH'] ?? ''), ['true', '1', '-1'], true);
+    }
+
+    /**
+     * Doklad se zaškrtnutými historickými sazbami: POHODA počítá DPH sazbami platnými před
+     * poslední změnou, MDB export ale sazbu u hlavičky nenese. Sazby se proto určí z částek
+     * slotů: platí ta sada (aktuální ke dni plnění, nebo předchozí), se kterou souhlasí DPH
+     * všech slotů s částkou, při shodě obou ta bližší. Typicky jde o vyúčtování zálohy
+     * přijaté před změnou sazeb: odpočet zálohy je v historické sazbě (slot 101-103,
+     * procento nese `FApol.ProcentoDPH`) a hlavička v aktuálních sazbách. Doklad bez DPH
+     * dostane aktuální sazby. Doklad, jehož DPH neodpovídá žádné sadě, převod odmítne.
+     *
+     * @param array<string,string> $r
+     * @param list<array{1:int,2:int,3:int}> $candidates
+     * @return array{1:int,2:int,3:int}
+     */
+    private static function ratesFromAmounts(array $r, array $candidates): array
+    {
+        $best = null;
+        $bestDeviation = INF;
+        foreach ($candidates as $rates) {
+            $deviation = 0.0;
+            foreach ($rates as $slot => $rate) {
+                $base = (float) ($r['Kc' . $slot] ?? 0);
+                $vat = (float) ($r['KcDPH' . $slot] ?? 0);
+                $expected = $base * $rate / 100;
+                $diff = abs($vat - $expected);
+                if ($diff > max(1.0, abs($expected) * 0.01)) {
+                    continue 2;
+                }
+                $deviation += $diff;
+            }
+            if ($deviation < $bestDeviation) {
+                [$best, $bestDeviation] = [$rates, $deviation];
+            }
+        }
+        if ($best === null) {
+            throw new PohodaException('mdb_historical_vat', 'Doklad ' . self::label($r) . ' má zaškrtnuté historické sazby DPH a jeho DPH neodpovídá sazbám platným ke dni plnění ani předchozím. Použijte standardní XML export.');
+        }
+        return $best;
     }
 
     /**
