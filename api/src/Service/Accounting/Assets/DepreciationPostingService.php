@@ -314,6 +314,98 @@ final class DepreciationPostingService
     }
 
     /**
+     * Průběžný účetní odpis k rozvahovému dni mimo deník (volba výkazu, {@see
+     * \MyInvoice\Service\Accounting\Reports\InterimAccrualAdjustment}).
+     *
+     * {@see bookYear()} zaúčtuje odpis celého roku až k poslednímu dni období. Výkaz k datu
+     * uvnitř roku s touto volbou ukáže odpis za uplynulé celé měsíce, jako by se účtoval
+     * měsíčně. Výběr karet a roční řádek jsou stejné jako u bookYear; karta, jejíž odpis
+     * roku už v evidenci leží (zaúčtovaný, převzatý z jiného programu nebo zaúčtovaný při
+     * vyřazení), se přeskočí, protože ho nese deník. Rok uzavřený původním systémem se
+     * neupravuje vůbec. Do deníku se nic nezapisuje.
+     *
+     * Měsíční rozpis bere z ročního řádku (rovnoměrné účetní odpisy a převzatý plán). Řádek
+     * bez rozpisu (účetní odpisy podle daňových) se rozloží rovným dílem na měsíce, v nichž
+     * karta v období odpisuje. Rozpuštění investičního zdroje neziskové organizace, které
+     * zaúčtování odpisu doprovází, se tu nepromítá.
+     *
+     * @return array{lines: list<array{expense:string, accumulated:string, amount:float}>, total: float, assets: int}
+     */
+    public function interimAccounting(int $supplierId, string $periodStartsOn, string $asOf): array
+    {
+        $out = ['lines' => [], 'total' => 0.0, 'assets' => 0];
+        if ($asOf < $periodStartsOn || $this->isTaxEvidence($supplierId)) {
+            return $out;
+        }
+        $period = $this->periods->findForDate($supplierId, $periodStartsOn);
+        if ($period === null || (string) $period['starts_on'] !== $periodStartsOn) {
+            return $out;
+        }
+        $fiscalYear = (int) $period['fiscal_year'];
+        $periodEnd = (string) $period['ends_on'];
+        if ($this->closingTakenOver($supplierId, $fiscalYear, false)) {
+            return $out;
+        }
+
+        $firstMonth = self::monthIndex($periodStartsOn);
+        $lastMonth = self::monthIndex($periodEnd);
+        // Započítávají se jen celé uplynulé měsíce: k 15. 10. odpis za září, k 31. 10. i za říjen.
+        $elapsedTo = $asOf >= $periodEnd
+            ? $lastMonth
+            : self::monthIndex($asOf) - ($asOf === date('Y-m-t', (int) strtotime($asOf)) ? 0 : 1);
+        if ($elapsedTo < $firstMonth) {
+            return $out;
+        }
+        $expense = (string) ($this->rules->resolve($supplierId, 'depreciation.booking')['debit_account_code'] ?? '551');
+
+        $lines = [];
+        foreach ($this->assets->listForBooking($supplierId, $fiscalYear, $periodStartsOn, $periodEnd) as $asset) {
+            if ($asset['accumulated_account_code'] === null
+                || $this->entries->findYear((int) $asset['id'], 'accounting', $fiscalYear) !== null) {
+                continue;
+            }
+            $row = $this->accountingRowToBook($asset, $this->buildContext($asset), $fiscalYear, false);
+            if ($row === null) {
+                continue;
+            }
+            if (is_array($row['months'] ?? null) && $row['months'] !== []) {
+                $amount = 0.0;
+                foreach ($row['months'] as $month) {
+                    if (self::monthIndex((string) $month['month'] . '-01') <= $elapsedTo) {
+                        $amount += (float) $month['amount'];
+                    }
+                }
+            } else {
+                $from = max($firstMonth, self::monthIndex((string) $asset['put_into_use_date']) + 1);
+                $to = $asset['disposal_date'] !== null ? min($lastMonth, self::monthIndex((string) $asset['disposal_date'])) : $lastMonth;
+                $months = $to - $from + 1;
+                $amount = $months > 0
+                    ? (float) $row['amount'] * max(0, min($elapsedTo, $to) - $from + 1) / $months
+                    : 0.0;
+            }
+            $amount = round($amount, 2);
+            if ((int) round($amount * 100) === 0) {
+                continue;
+            }
+            $accumulated = (string) $asset['accumulated_account_code'];
+            $lines[$accumulated] = round(($lines[$accumulated] ?? 0.0) + $amount, 2);
+            $out['total'] = round($out['total'] + $amount, 2);
+            $out['assets']++;
+        }
+        ksort($lines, SORT_STRING);
+        foreach ($lines as $accumulated => $amount) {
+            $out['lines'][] = ['expense' => $expense, 'accumulated' => (string) $accumulated, 'amount' => $amount];
+        }
+
+        return $out;
+    }
+
+    private static function monthIndex(string $date): int
+    {
+        return ((int) substr($date, 0, 4)) * 12 + ((int) substr($date, 5, 2)) - 1;
+    }
+
+    /**
      * Účetní roční řádek, který bookYear pro majetek zaúčtuje, nebo null (daňová evidence,
      * karta bez účtu oprávek, rok zaúčtovaný převzatým deníkem, nulový odpis).
      *

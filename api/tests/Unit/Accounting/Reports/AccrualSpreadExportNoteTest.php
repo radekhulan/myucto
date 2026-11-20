@@ -26,7 +26,7 @@ final class AccrualSpreadExportNoteTest extends TestCase
             'dimension' => null, 'accrual_spread' => self::SPREAD,
         ]));
         $note = (string) $is->getSheet(0)->getCell('A5')->getValue();
-        self::assertStringStartsWith('Průběžné časové rozlišení mimo deník', $note);
+        self::assertStringStartsWith('Průběžné časové rozlišení a odpisy mimo deník', $note);
         self::assertStringContainsString('6 100,00 Kč', $note);
         self::assertStringContainsString('24 300,00 Kč', $note);
 
@@ -34,7 +34,7 @@ final class AccrualSpreadExportNoteTest extends TestCase
             'entity' => self::ENTITY, 'as_of' => '2094-10-31', 'scope' => 'full', 'assets' => [], 'liabilities' => [], 'checks' => [],
             'dimension' => null, 'accrual_spread' => self::SPREAD,
         ]));
-        self::assertStringStartsWith('Průběžné časové rozlišení mimo deník', (string) $bs->getSheet(0)->getCell('A5')->getValue());
+        self::assertStringStartsWith('Průběžné časové rozlišení a odpisy mimo deník', (string) $bs->getSheet(0)->getCell('A5')->getValue());
 
         $plain = $this->load((new ReportXlsxExporter())->incomeStatement([
             'entity' => self::ENTITY, 'as_of' => '2094-10-31', 'scope' => 'full', 'rows' => [], 'checks' => [], 'dimension' => null,
@@ -62,7 +62,7 @@ final class AccrualSpreadExportNoteTest extends TestCase
         ];
         foreach (['income_statement.twig', 'balance_sheet.twig'] as $template) {
             $html = $renderer->html($template, $base + ['accrual_spread' => self::SPREAD]);
-            self::assertStringContainsString('Průběžné časové rozlišení mimo deník', $html, $template);
+            self::assertStringContainsString('Průběžné časové rozlišení a odpisy mimo deník', $html, $template);
             self::assertStringContainsString('6 100,00 Kč', $html, $template);
             self::assertStringNotContainsString('Průběžné časové rozlišení', $renderer->html($template, $base), $template);
         }

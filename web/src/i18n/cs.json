@@ -20703,11 +20703,11 @@
       "total": "Celkem"
     },
     "accrual_spread": {
-      "toggle": "Průběžné časové rozlišení",
-      "toggle_hint": "Náklady a výnosy dokladů s obdobím od–do započte k rozvahovému dni jen poměrně podle dnů, zbytek ukáže jako náklady (381) a výnosy (384) příštích období. Do deníku se nic nezapisuje.",
-      "note_title": "Průběžné časové rozlišení mimo deník.",
-      "note": "Náklady a výnosy dokladů s obdobím od–do jsou rozložené poměrně podle dnů do rozvahového dne. Na náklady příštích období (381) jde {prepaid}, na výnosy příštích období (384) {deferred}, upravených dokladů: {documents}. Úprava není zaúčtovaná v deníku; v účetnictví ji zaúčtuje až krok uzávěrky Časové rozlišení.",
-      "skipped_dimension": "Výkaz za hodnotu dimenze průběžné časové rozlišení neuplatní a ukazuje stav deníku."
+      "toggle": "Průběžné časové rozlišení a odpisy",
+      "toggle_hint": "Náklady a výnosy dokladů s obdobím od–do započte k rozvahovému dni jen poměrně podle dnů, zbytek ukáže jako náklady (381) a výnosy (384) příštích období. Započte i účetní odpisy majetku za uplynulé celé měsíce, které ještě nejsou zaúčtované (551 / oprávky). Do deníku se nic nezapisuje.",
+      "note_title": "Průběžné časové rozlišení a odpisy mimo deník.",
+      "note": "Náklady a výnosy dokladů s obdobím od–do jsou rozložené poměrně podle dnů do rozvahového dne. Na náklady příštích období (381) jde {prepaid}, na výnosy příštích období (384) {deferred}, upravených dokladů: {documents}. Účetní odpisy majetku za uplynulé celé měsíce, které ještě nejsou zaúčtované: {depreciation} (karet: {assets}). Úprava není zaúčtovaná v deníku; v účetnictví ji zaúčtují až kroky uzávěrky Časové rozlišení a Odpisy majetku.",
+      "skipped_dimension": "Výkaz za hodnotu dimenze průběžné časové rozlišení a odpisy neuplatní a ukazuje stav deníku."
     },
     "balance_sheet": {
       "title": "Rozvaha",

@@ -39544,7 +39544,9 @@ components:
         od–do se k rozvahovému dni započtou poměrně podle dnů a zbytek se vykáže jako náklady
         (381) či výnosy (384) příštích období. Do deníku se nic nezapisuje; doklady, jejichž
         odklad už zaúčtovala uzávěrka, se neupravují. Výkaz za hodnotu dimenze a výkazy
-        podle vyhlášky 504 volbu neuplatní. Výchozí `0` = výkaz z deníku beze změny.
+        podle vyhlášky 504 volbu neuplatní. Volba zároveň započte průběžné účetní odpisy: u karet,
+        jejichž odpis roku ještě není zaúčtovaný, odpis za uplynulé celé měsíce do rozvahového dne
+        (MD 551 / D oprávky). Výchozí `0` = výkaz z deníku beze změny.
       schema: { type: integer, enum: [0, 1], default: 0 }
 
     PropertyAsOf:
@@ -67937,23 +67939,27 @@ components:
 
     StatementAccrualSpread:
       type: object
-      description: Jen při `accrual_spread=1`. Souhrn průběžného časového rozlišení mimo deník.
-      required: [applied, skipped_reason, prepaid_expense, deferred_revenue, documents, prev]
+      description: Jen při `accrual_spread=1`. Souhrn průběžného časového rozlišení a průběžných odpisů mimo deník.
+      required: [applied, skipped_reason, prepaid_expense, deferred_revenue, documents, depreciation, depreciation_assets, prev]
       properties:
         applied: { type: boolean, description: false = volba se neuplatnila (výkaz za hodnotu dimenze) }
         skipped_reason: { type: [string, 'null'], enum: [dimension, null] }
         prepaid_expense: { type: number, description: Částka přesunutá z nákladů na náklady příštích období (381) }
         deferred_revenue: { type: number, description: Částka přesunutá z výnosů na výnosy příštích období (384) }
         documents: { type: integer, description: Počet upravených dokladů }
+        depreciation: { type: number, description: Průběžný účetní odpis za uplynulé celé měsíce (MD 551 / D oprávky) u karet, jejichž odpis roku ještě není zaúčtovaný }
+        depreciation_assets: { type: integer, description: Počet karet s průběžným odpisem }
         prev:
           description: Táž úprava sloupce minulého období (null = bez minulého období)
           anyOf:
           - type: object
-            required: [prepaid_expense, deferred_revenue, documents]
+            required: [prepaid_expense, deferred_revenue, documents, depreciation, depreciation_assets]
             properties:
               prepaid_expense: { type: number }
               deferred_revenue: { type: number }
               documents: { type: integer }
+              depreciation: { type: number }
+              depreciation_assets: { type: integer }
           - type: 'null'
     BalanceSheetReport:
       type: object

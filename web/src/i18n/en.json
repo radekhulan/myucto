@@ -20703,11 +20703,11 @@
       "total": "Total"
     },
     "accrual_spread": {
-      "toggle": "Interim accruals",
-      "toggle_hint": "Counts expenses and revenues of documents with a from–to period only pro rata by days up to the reporting date and shows the rest as prepaid expenses (381) and deferred revenue (384). Nothing is posted to the journal.",
-      "note_title": "Interim accruals outside the journal.",
-      "note": "Expenses and revenues of documents with a from–to period are spread pro rata by days up to the reporting date. Prepaid expenses (381): {prepaid}, deferred revenue (384): {deferred}, documents adjusted: {documents}. The adjustment is not posted to the journal; the Accruals step of the year-end closing posts it.",
-      "skipped_dimension": "A statement filtered by a dimension value does not apply interim accruals and shows the journal balances."
+      "toggle": "Interim accruals and depreciation",
+      "toggle_hint": "Counts expenses and revenues of documents with a from–to period only pro rata by days up to the reporting date and shows the rest as prepaid expenses (381) and deferred revenue (384). Also includes accounting depreciation of assets for elapsed full months not yet posted (551 / accumulated depreciation). Nothing is posted to the journal.",
+      "note_title": "Interim accruals and depreciation outside the journal.",
+      "note": "Expenses and revenues of documents with a from–to period are spread pro rata by days up to the reporting date. Prepaid expenses (381): {prepaid}, deferred revenue (384): {deferred}, documents adjusted: {documents}. Accounting depreciation of assets for elapsed full months not yet posted: {depreciation} (assets: {assets}). The adjustment is not posted to the journal; the Accruals and Asset depreciation steps of the year-end closing post it.",
+      "skipped_dimension": "A statement filtered by a dimension value does not apply interim accruals and depreciation and shows the journal balances."
     },
     "balance_sheet": {
       "title": "Balance sheet",

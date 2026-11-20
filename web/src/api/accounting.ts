@@ -1645,7 +1645,7 @@ export interface StatementParams {
   columns?: 0 | 1
   hide_zero?: 0 | 1
   analytics?: 0 | 1
-  /** Průběžné časové rozlišení mimo deník (381/384 k rozvahovému dni), jen pohled výkazu. */
+  /** Průběžné časové rozlišení (381/384) a odpisy k rozvahovému dni mimo deník, jen pohled výkazu. */
   accrual_spread?: 0 | 1
 }
 
@@ -1657,7 +1657,10 @@ export interface StatementAccrualSpread {
   prepaid_expense: number
   deferred_revenue: number
   documents: number
-  prev: { prepaid_expense: number; deferred_revenue: number; documents: number } | null
+  /** Průběžný účetní odpis za uplynulé celé měsíce u karet, jejichž odpis roku ještě není zaúčtovaný. */
+  depreciation: number
+  depreciation_assets: number
+  prev: { prepaid_expense: number; deferred_revenue: number; documents: number; depreciation: number; depreciation_assets: number } | null
 }
 
 export interface StatementRowAccount {

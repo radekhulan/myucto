@@ -1841,10 +1841,14 @@ final class ReportXlsxExporter
             return;
         }
         $money = static fn (mixed $v): string => number_format((float) $v, 2, ',', ' ') . ' Kč';
-        $sheet->setCellValueExplicit($cell, 'Průběžné časové rozlišení mimo deník: náklady a výnosy dokladů s obdobím od–do'
+        $depreciation = (float) ($spread['depreciation'] ?? 0);
+        $sheet->setCellValueExplicit($cell, 'Průběžné časové rozlišení a odpisy mimo deník: náklady a výnosy dokladů s obdobím od–do'
             . ' rozložené poměrně podle dnů do rozvahového dne, zbytek jako náklady příštích období ('
             . $money($spread['prepaid_expense'] ?? 0) . ') a výnosy příštích období (' . $money($spread['deferred_revenue'] ?? 0)
-            . '). Úprava není zaúčtovaná v deníku, nejde o výkaz účetní závěrky.', DataType::TYPE_STRING);
+            . ').' . ((int) round($depreciation * 100) !== 0
+                ? ' Účetní odpisy majetku za uplynulé měsíce, které ještě nejsou zaúčtované: ' . $money($depreciation) . '.'
+                : '')
+            . ' Úprava není zaúčtovaná v deníku, nejde o výkaz účetní závěrky.', DataType::TYPE_STRING);
         $sheet->getStyle($cell)->getFont()->setBold(true);
     }
 

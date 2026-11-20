@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Accounting\Reports;
 
+use MyInvoice\Service\Accounting\Assets\AssetException;
+use MyInvoice\Service\Accounting\Assets\DepreciationPostingService;
 use MyInvoice\Service\Accounting\Closing\AccrualDeferralService;
 use MyInvoice\Service\Accounting\Closing\ClosingException;
 use MyInvoice\Service\Accounting\PostingException;
@@ -23,19 +25,27 @@ use MyInvoice\Service\Accounting\PostingException;
  * na 381/384 je (odklad uzávěrky, rozpuštění v dalším roce, doklad rozúčtovaný rovnou na
  * 381/384), se znovu neupravuje.
  *
+ * Stejná volba přidává průběžné účetní odpisy: odpis roku, který zaúčtuje až krok
+ * uzávěrky, se k rozvahovému dni ukáže za uplynulé celé měsíce jako MD 551 / D oprávky
+ * ({@see DepreciationPostingService::interimAccounting()}).
+ *
  * Výsledkem jsou rozdíly zůstatků (MD − D) po účtech. Výkazy je přičtou k zůstatkům
  * deníku, takže rozvaha bilancuje: o co klesne náklad, o to vzroste 381 a výsledek
- * běžného období; o co klesne výnos, o to vzroste 384 a klesne výsledek.
+ * běžného období; o co klesne výnos, o to vzroste 384 a klesne výsledek; o co vzroste
+ * odpis, o to vzrostou oprávky a klesne výsledek.
  */
 final class InterimAccrualAdjustment
 {
     public function __construct(
         private readonly AccrualDeferralService $accruals,
+        private readonly DepreciationPostingService $depreciation,
     ) {}
 
     /**
-     * @return array{deltas: array<string,float>, prepaid_expense: float, deferred_revenue: float, documents: int}
-     *   deltas = účet => změna zůstatku MD − D; prepaid_expense = přírůstek 381; deferred_revenue = přírůstek 384
+     * @return array{deltas: array<string,float>, prepaid_expense: float, deferred_revenue: float, documents: int,
+     *   depreciation: float, depreciation_assets: int}
+     *   deltas = účet => změna zůstatku MD − D; prepaid_expense = přírůstek 381; deferred_revenue = přírůstek 384;
+     *   depreciation = průběžný účetní odpis karet, jejichž odpis roku deník ještě nenese
      */
     public function compute(int $supplierId, string $periodStartsOn, string $asOf): array
     {
@@ -86,10 +96,18 @@ final class InterimAccrualAdjustment
             if ((int) round($revenue * 100) !== 0) {
                 $add($deltas, $this->accruals->deferralAccount($supplierId, AccrualDeferralService::RULE_DEFERRED_REVENUE), -$revenue);
             }
+
+            $depreciation = $this->depreciation->interimAccounting($supplierId, $periodStartsOn, $asOf);
+            foreach ($depreciation['lines'] as $line) {
+                $add($deltas, $line['expense'], $line['amount']);
+                $add($deltas, $line['accumulated'], -$line['amount']);
+            }
         } catch (ClosingException $e) {
             throw new ReportException($e->errorCode, $e->getMessage(), $e->httpStatus);
         } catch (PostingException $e) {
             throw new ReportException($e->errorCode, $e->getMessage());
+        } catch (AssetException $e) {
+            throw new ReportException($e->errorCode, $e->getMessage(), $e->httpStatus);
         }
 
         return [
@@ -97,6 +115,8 @@ final class InterimAccrualAdjustment
             'prepaid_expense' => $prepaid,
             'deferred_revenue' => $revenue,
             'documents' => count($documents),
+            'depreciation' => $depreciation['total'],
+            'depreciation_assets' => $depreciation['assets'],
         ];
     }
 }

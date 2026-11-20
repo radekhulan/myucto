@@ -785,10 +785,14 @@ final class FinancialStatementService
                 'prepaid_expense' => $spread['prepaid_expense'] ?? 0.0,
                 'deferred_revenue' => $spread['deferred_revenue'] ?? 0.0,
                 'documents' => $spread['documents'] ?? 0,
+                'depreciation' => $spread['depreciation'] ?? 0.0,
+                'depreciation_assets' => $spread['depreciation_assets'] ?? 0,
                 'prev' => $spreadPrev === null ? null : [
                     'prepaid_expense' => $spreadPrev['prepaid_expense'],
                     'deferred_revenue' => $spreadPrev['deferred_revenue'],
                     'documents' => $spreadPrev['documents'],
+                    'depreciation' => $spreadPrev['depreciation'],
+                    'depreciation_assets' => $spreadPrev['depreciation_assets'],
                 ],
             ],
         ];
