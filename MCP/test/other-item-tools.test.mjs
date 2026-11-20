@@ -365,6 +365,24 @@ test('opakování se zakládá vždy bez automatického účtování', async () 
   }]);
 });
 
+test('šablona názvu opakování jde do založení i úpravy; vynechané pole úprava zachová', async () => {
+  const client = new FakeClient();
+  await tool('create_other_item_schedule').run(client, {
+    item_id: 12, frequency: 'quarterly', title_template: 'Pojistné Q{Q}/{YYYY}', title_sync_period: true,
+  }, 'c');
+  await tool('set_other_item_schedule_title').run(client, { id: 5, title_template: 'Nájem {MM}/{YYYY}' }, 't');
+  await tool('set_other_item_schedule_title').run(client, { id: 5, title_sync_period: false }, 't');
+  await tool('set_other_item_schedule_title').run(client, { id: 5, title_template: null }, 't');
+  assert.equal(tool('set_other_item_schedule_title').write, true);
+  assert.deepEqual(writes(client), [
+    { method: 'POST', path: '/accounting/other-items/12/schedule',
+      body: { frequency: 'quarterly', title_template: 'Pojistné Q{Q}/{YYYY}', title_sync_period: true, auto_post: false }, tool: 'c' },
+    { method: 'PUT', path: '/accounting/other-items/schedules/5/title', body: { title_template: 'Nájem {MM}/{YYYY}' }, tool: 't' },
+    { method: 'PUT', path: '/accounting/other-items/schedules/5/title', body: { title_sync_period: false }, tool: 't' },
+    { method: 'PUT', path: '/accounting/other-items/schedules/5/title', body: { title_template: null }, tool: 't' },
+  ]);
+});
+
 test('obnovení opakování s automatikou odmítne, pozastavení projde', async () => {
   const client = new FakeClient({ 'GET /accounting/other-items/schedules/3': { id: 3, auto_post: true, status: 'paused' } });
   await assert.rejects(

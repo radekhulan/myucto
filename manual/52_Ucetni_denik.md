@@ -1843,16 +1843,40 @@ o dané období (u kratšího měsíce na jeho poslední den) a stejný odstup s
 jako zdrojová položka. Přebírá směr, druh, název, protistranu, částku,
 variabilní symbol, účty včetně rozdělené kontace, poznámku i připojené dokumenty.
 
+Název kopií může obsahovat měsíc, čtvrtletí nebo rok podle výskytu. Do pole **Šablona názvu
+položek** napište název se zástupnými znaky, například `Nájem {MM}/{YYYY}` nebo
+`Pojistné Q{Q}/{YYYY}`. Platí stejné znaky jako u pravidelné fakturace: `{YYYY}`, `{YY}`,
+`{M}`, `{MM}`, `{MMMM}` (český název měsíce), `{Q}`, `{D}`, `{DD}`, `{DATE}`, `{BOM}`
+a `{EOM}`, včetně posunu, například `{MM+1}/{YYYY+1M}` pro nájem placený na příští
+měsíc. Seznam s příklady ukáže odkaz **Zástupné znaky** v dialogu. Hodnoty se dosazují
+podle data vzniku každé kopie, které je zároveň jejím datem zaúčtování. Volba **Srovnat období
+v názvu s datem položky** navíc přepíše měsíc a rok zapsaný v názvu (například `03/2027`
+nebo `2027-03`) na měsíc kopie. Pod poli je náhled názvu další vytvořené položky. Neznámý
+zástupný znak nebo název delší než 255 znaků (u kterékoli z dvanácti příštích kopií do konce
+opakování) dialog odmítne a chybu ukáže u pole.
+Prázdná šablona znamená, že kopie dostanou název zdrojové položky. Doslovné složené
+závorky šablona nepřijme, protože je bere jako zástupný znak. Zdrojová položka
+si svůj název nechává a zástupné znaky se ukládají jen v nastavení opakování.
+Šablonu změníte v dialogu **Upravit opakování**; u stornované zdrojové
+položky a po konci opakování se nenabízí. Změna platí pro kopie vytvořené po uložení;
+už vytvořené položky se nepřejmenují. Denní úloha chystá koncepty až 90 dní dopředu, proto
+dialog upozorní, do kterého data položky už vznikly. Koncepty můžete přejmenovat ručně
+v detailu položky, potvrzené a zaúčtované položky zůstanou beze změny. Smazaná položka
+se znovu nevytvoří.
+U opakování s automatickým účtováním jde název
+změnit jen ve webovém rozhraní, ne přes API token. Dosazený název se použije
+i jako popis účetního zápisu automaticky zaúčtované položky.
+
 Denní úloha připravuje koncepty až 90 dní dopředu, aby se ukázaly v predikci.
 Ručně je vytvoříte v kartě polem **Vytvořit do** a tlačítkem **Vytvořit položky** (nejvýš
 120 najednou). Bez volby **Automaticky účtovat vzniklé položky**, kterou přepnete také
 přímo v kartě, se vzniklé koncepty nezaúčtují samy.
 
 Detail zdrojové položky ukazuje kartu **Opakování položky**: četnost, stav (aktivní nebo
-pozastavené), datum příští položky, konec opakování, automatické účtování, kdo a kdy rozvrh
+pozastavené), datum a název další vytvořené položky, konec opakování, automatické účtování, kdo a kdy rozvrh
 založil a seznam vytvořených položek s číslem, datem a stavem. **Upravit** v záhlaví karty
-otevře dialog **Upravit opakování**, ve kterém opakování **Pozastavíte**, **Obnovíte** nebo
-**Zrušíte opakování**. Četnost ani konec existujícího opakování změnit nejde; pro jiné
+otevře dialog **Upravit opakování**, ve kterém změníte název budoucích položek, opakování
+**Pozastavíte**, **Obnovíte** nebo **Zrušíte opakování**. Četnost ani konec existujícího opakování změnit nejde; pro jiné
 nastavení opakování zrušte a založte nové. Po stornu zdrojové položky se opakování pozastaví
 natrvalo a už vytvořené koncepty zůstávají samostatnými položkami k posouzení.
 

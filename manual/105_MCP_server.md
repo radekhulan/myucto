@@ -1118,7 +1118,7 @@ potvrdí a zaúčtuje ho účetní v aplikaci, kde vidí kontext a krok potvrzuj
 | Koncept | `create_other_item`, `update_other_item`, `delete_other_item` |
 | Splátkový kalendář | `set_other_item_installments`, `clear_other_item_installments` |
 | Úhrada | `allocate_other_item_payment` (po potvrzení uživatele) |
-| Opakování | `create_other_item_schedule`, `set_other_item_schedule_status` |
+| Opakování | `create_other_item_schedule`, `set_other_item_schedule_status`, `set_other_item_schedule_title` (šablona názvu budoucích položek; ne u opakování s automatickým účtováním) |
 | Analytické účty | `chart_of_accounts` (čtení), `create_analytic_account`, `update_analytic_account` |
 | Smlouva a další dokumenty | `upload_document` nebo `link_document` s typem `other_item`, `list_entity_documents`, `unlink_document` |
 | Dimenze (středisko, projekt) | `list_dimensions`, `get_document_dimensions` (typ `other-items`), `set_other_item_dimensions` |

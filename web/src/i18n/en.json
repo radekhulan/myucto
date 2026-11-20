@@ -457,6 +457,70 @@
       "paused": "Paused",
       "source_inactive": "The source item was reversed. Recurrence has stopped; existing drafts remain listed.",
       "create_schedule": "Set recurrence",
+      "title_template": "Item title template",
+      "title_template_placeholder": "e.g. Rent {'{MM}'}/{'{YYYY}'}",
+      "title_template_hint": "Empty = every item gets the title of this item. Placeholders are filled in from the date each item is created.",
+      "title_sync_period": "Align the period in the title (e.g. 03/2027) with the item date",
+      "title_preview": "Title of the next created item ({date}):",
+      "title_preview_loading": "Calculating preview…",
+      "title_help_toggle": "Placeholders ({'{YYYY}'}, {'{MM}'}, {'{Q}'}…)",
+      "title_help_intro": "The same placeholders as in recurring invoices. An unknown placeholder is rejected. Examples for an item created on May 15, 2026:",
+      "title_help_rows": [
+        {
+          "c": "{'{YYYY}'}, {'{YY}'}",
+          "d": "year → 2026, 26 · shift by years: {'{YYYY+1}'} → 2027 · year of a shifted month: {'{YYYY+8M}'} → 2027"
+        },
+        {
+          "c": "{'{M}'}, {'{MM}'}",
+          "d": "month → 5, 05 · shift by months incl. year rollover: {'{MM+8}'} → 01"
+        },
+        {
+          "c": "{'{MMMM}'}",
+          "d": "month name in Czech → květen · {'{MMMM+1}'} → červen"
+        },
+        {
+          "c": "{'{Q}'}",
+          "d": "quarter → 2 · {'{Q+1}'} → 3"
+        },
+        {
+          "c": "{'{D}'}, {'{DD}'}",
+          "d": "day → 15, 15 · shift by days: {'{D+14}'} → 29"
+        },
+        {
+          "c": "{'{DATE}'}",
+          "d": "full date in Czech format → 15. 5. 2026 · ±D/M/Y arithmetic: {'{DATE+1Y-1D}'} → 14. 5. 2027"
+        },
+        {
+          "c": "{'{BOM}'}, {'{EOM}'}",
+          "d": "first and last day of the month → 1. 5. 2026, 31. 5. 2026 · {'{EOM+1}'} → 30. 6. 2026"
+        }
+      ],
+      "title_help_example": "Example: \"Rent {'{MM}'}/{'{YYYY}'}\" → \"Rent 05/2026\", \"Insurance Q{'{Q}'}/{'{YYYY}'}\" → \"Insurance Q2/2026\". Rent paid for the next month: \"Rent {'{MM+1}'}/{'{YYYY+1M}'}\".",
+      "next_title": "Title of the next created item",
+      "edit_title": "Edit title",
+      "edit_title_hint": "The change applies to items created after saving. Items already created keep their title.",
+      "save_title": "Save title",
+      "edit_title_created_until": "Items up to {date} already exist (the daily task prepares them up to 90 days ahead) and the new template will not rename them. You can rename drafts manually in the item detail; confirmed and posted items stay unchanged. A deleted item is not created again.",
+      "title_errors": {
+        "invalid_due_offset": "The source item must be due no more than ten years after issue.",
+        "schedule_source_unconfirmed": "Confirm the source item before enabling automatic posting.",
+        "forbidden": "You do not have permission for this action.",
+        "schedule_not_found": "The recurrence was not found.",
+        "invalid_end": "The end of the recurrence is before the first document.",
+        "invalid_date": "Enter a valid end date.",
+        "not_found": "The item was not found.",
+        "invalid_title_template": "The title template must be text.",
+        "title_template_too_long": "The title template can have at most 255 characters.",
+        "unknown_title_placeholder": "The template contains an unknown placeholder {tokens}. See the list of placeholders below.",
+        "occurrence_title_too_long": "The title of one of the next items would exceed 255 characters after substitution.",
+        "invalid_title_sync_period": "The period alignment option must be on or off.",
+        "invalid_frequency": "Choose monthly, quarterly or yearly recurrence.",
+        "schedule_finished": "The recurrence has ended; no further item will be created.",
+        "schedule_source_inactive": "The source item is reversed; no further item will be created.",
+        "already_scheduled": "The item already belongs to another recurrence.",
+        "invalid_status": "Recurrence can only be set on an active item."
+      },
+      "title_saved": "Title template saved.",
       "schedule_saved": "Recurrence saved.",
       "generate_through": "Generate through",
       "generate": "Create items",

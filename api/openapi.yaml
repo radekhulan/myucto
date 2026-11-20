@@ -22752,6 +22752,24 @@ paths:
         '200': { description: Rozvrh, content: { application/json: { schema: { $ref: '#/components/schemas/OtherItemSchedule' } } } }
         '403': { $ref: '#/components/responses/Forbidden' }
 
+  /api/v1/accounting/other-items/schedules/{id}/title:
+    put:
+      tags: [Accounting]
+      summary: Nastaví šablonu názvu budoucích položek opakování
+      description: Vynechané pole zachová uloženou hodnotu; šablonu zruší title_template null nebo prázdný text. Změna platí jen pro položky vytvořené po uložení; už vytvořené položky se nepřejmenují. Šablona se při uložení zkusí dosadit do dvanácti nejbližších položek do konce rozvrhu; název delší než 255 znaků vrátí 422 other_items.error.occurrence_title_too_long s polem `error.field`. Stornovaný zdroj vrátí 409 other_items.error.schedule_source_inactive, skončený rozvrh (po ends_on) 409 other_items.error.schedule_finished. U rozvrhu s automatickým účtováním smí název změnit jen session; API token se scope read_write dostane 403 other_items.error.auto_post_session_only (doklady by se zaúčtovaly bez kontroly člověkem).
+      parameters:
+        - { $ref: '#/components/parameters/SupplierIdHeader' }
+        - { in: path, name: id, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, properties: { title_template: { $ref: '#/components/schemas/OtherItemScheduleTitleTemplate' }, title_sync_period: { $ref: '#/components/schemas/OtherItemScheduleTitleSync' } } } } }
+      responses:
+        '200': { description: Rozvrh, content: { application/json: { schema: { $ref: '#/components/schemas/OtherItemSchedule' } } } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { description: 'Stornovaný zdroj nebo skončený rozvrh (other_items.error.schedule_source_inactive, schedule_finished).', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+
   /api/v1/accounting/other-items/{item_id}/schedule:
     post:
       tags: [Accounting]
@@ -22762,10 +22780,30 @@ paths:
         - { in: path, name: item_id, required: true, schema: { type: integer } }
       requestBody:
         required: true
-        content: { application/json: { schema: { type: object, required: [frequency], properties: { frequency: { type: string, enum: [monthly, quarterly, yearly] }, ends_on: { type: [string, 'null'], format: date }, auto_post: { type: boolean, default: false, description: Zapnutí vyžaduje potvrzený nebo zaúčtovaný zdrojový doklad. Samotné založení rozvrhu neúčtuje. } } } } }
+        content: { application/json: { schema: { type: object, required: [frequency], properties: { frequency: { type: string, enum: [monthly, quarterly, yearly] }, ends_on: { type: [string, 'null'], format: date }, auto_post: { type: boolean, default: false, description: Zapnutí vyžaduje potvrzený nebo zaúčtovaný zdrojový doklad. Samotné založení rozvrhu neúčtuje. }, title_template: { $ref: '#/components/schemas/OtherItemScheduleTitleTemplate' }, title_sync_period: { $ref: '#/components/schemas/OtherItemScheduleTitleSync' } } } } }
       responses:
         '201': { description: Rozvrh, content: { application/json: { schema: { $ref: '#/components/schemas/OtherItemSchedule' } } } }
         '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+
+  /api/v1/accounting/other-items/{item_id}/schedule/title-preview:
+    get:
+      tags: [Accounting]
+      summary: Náhled názvu nejbližší položky opakování
+      description: Nic neukládá. Má-li položka rozvrh, použije jeho příští termín (stornovaný zdroj nebo skončený rozvrh vrátí 409 jako uložení); jinak první položku nového rozvrhu se zadanou četností (frequency je pak povinná, jinak 422 s `error.field` = frequency) a doklad, ze kterého rozvrh založit nejde, vrátí 409 jako založení. Chyby šablony jsou stejné jako při uložení, s polem `error.field`; neznámé zástupné znaky vrací i v `error.tokens`.
+      parameters:
+        - { $ref: '#/components/parameters/SupplierIdHeader' }
+        - { in: path, name: item_id, required: true, schema: { type: integer } }
+        - { in: query, name: frequency, schema: { type: string, enum: [monthly, quarterly, yearly] } }
+        - { in: query, name: title_template, schema: { type: string, maxLength: 255 }, description: 'Šablona k náhledu; prázdná = bez šablony. U existujícího rozvrhu vynechání = uložená šablona (jako PUT …/title), u nového = bez šablony.' }
+        - { in: query, name: title_sync_period, schema: { type: boolean }, description: 'U existujícího rozvrhu vynechání = uložená volba, u nového = false.' }
+        - { in: query, name: ends_on, schema: { type: string, format: date }, description: 'Konec nového rozvrhu; délka názvu se kontroluje jen do něj. U existujícího rozvrhu se nepoužije.' }
+      responses:
+        '200': { description: Název a datum nejbližší položky, content: { application/json: { schema: { type: object, properties: { title: { type: string }, issued_on: { type: string, format: date } } } } } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { description: 'Doklad nebo rozvrh další položku nevytvoří (other_items.error.schedule_source_inactive, schedule_finished, already_scheduled, invalid_status).', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
 
   /api/v1/accounting/other-items/{item_id}/installments:
     get:
@@ -46679,6 +46717,14 @@ components:
         currency: { type: string }
         amount_foreign: { type: [number, 'null'] }
         pairing_id: { type: [integer, 'null'], format: int64 }
+    OtherItemScheduleTitleTemplate:
+      type: [string, 'null']
+      maxLength: 255
+      description: 'Šablona názvu budoucích položek se zástupnými znaky opakované faktury ({YYYY}, {YY}, {M}, {MM}, {MMMM}, {Q}, {D}, {DD}, {DATE}, {BOM}, {EOM} včetně posunů jako {MM+1}); dosazují se podle data vzniku položky. Neznámý zástupný znak vrátí 422 other_items.error.unknown_title_placeholder. Prázdné nebo null = název zdrojové položky.'
+    OtherItemScheduleTitleSync:
+      type: boolean
+      default: false
+      description: 'Srovnat měsíc a rok ve tvaru M/RRRR, RRRR-MM a podobně v názvu na datum vzniku položky (jako u opakované faktury). Výchozí false.'
     OtherItemSchedule:
       type: object
       properties:
@@ -46696,7 +46742,7 @@ components:
           properties:
             side: { type: string, enum: [receivable, payable] }
             kind: { type: string }
-            title: { type: string }
+            title: { type: string, description: 'Název zdrojové položky uložený při založení rozvrhu. Se šablonou nebo srovnáním období to není název budoucích položek; ten je v next_title.' }
             partner_id: { type: [integer, 'null'] }
             partner_name: { type: [string, 'null'] }
             currency: { type: string }
@@ -46709,7 +46755,12 @@ components:
             counter_account_code: { type: [string, 'null'] }
             posting_lines: { type: array, items: { $ref: '#/components/schemas/OtherItemPostingLine' } }
             note: { type: [string, 'null'] }
+            title_template: { type: string, description: 'Jen u rozvrhu se šablonou názvu.' }
+            title_sync_period: { type: boolean, description: 'Jen u rozvrhu se zapnutým srovnáním období v názvu (true).' }
         created_at: { type: string, format: date-time }
+        next_title: { type: [string, 'null'], description: 'Název příští položky rozvrhu po dosazení šablony; null spolu s next_on.' }
+        source_active: { type: boolean, description: 'Zdrojová položka je aktivní (koncept, potvrzená, zaúčtovaná); jinak rozvrh další položky nevytvoří a název nejde měnit (409 other_items.error.schedule_source_inactive).' }
+        finished: { type: boolean, description: 'Rozvrh po konci opakování (ends_on), i pozastavený; další položka nevznikne a název nejde měnit (409 other_items.error.schedule_finished).' }
         created_by_name: { type: [string, 'null'], description: 'Jméno uživatele, který rozvrh založil; null u neznámého nebo smazaného uživatele.' }
         source_document_no: { type: [string, 'null'], description: 'Číslo zdrojové položky rozvrhu.' }
         next_on: { type: [string, 'null'], format: date, description: 'Datum příští položky rozvrhu; null u pozastaveného rozvrhu a po konci opakování.' }
@@ -52913,6 +52964,8 @@ components:
           properties:
             code: { type: string, example: validation_failed }
             message: { type: string, example: "Pole 'name' je povinné." }
+            field: { type: string, description: 'Pole vstupu, ke kterému chyba patří (např. title_template u opakování ostatní položky).' }
+            tokens: { type: array, items: { type: string }, description: 'Neznámé zástupné znaky šablony názvu (other_items.error.unknown_title_placeholder).' }
             fields:
               type: object
               description: |

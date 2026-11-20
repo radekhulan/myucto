@@ -457,6 +457,70 @@
       "paused": "Pozastaveno",
       "source_inactive": "Zdrojová položka byla stornována. Opakování skončilo; již vytvořené koncepty zůstávají v seznamu.",
       "create_schedule": "Nastavit opakování",
+      "title_template": "Šablona názvu položek",
+      "title_template_placeholder": "např. Nájem {'{MM}'}/{'{YYYY}'}",
+      "title_template_hint": "Prázdné = každá položka dostane název této položky. Zástupné znaky se dosadí podle data vzniku položky.",
+      "title_sync_period": "Srovnat období v názvu (např. 03/2027) s datem položky",
+      "title_preview": "Název další vytvořené položky ({date}):",
+      "title_preview_loading": "Počítám náhled…",
+      "title_help_toggle": "Zástupné znaky ({'{YYYY}'}, {'{MM}'}, {'{Q}'}…)",
+      "title_help_intro": "Stejné znaky jako u opakované faktury. Neznámý znak se odmítne. Příklady pro položku vzniklou 15. 5. 2026:",
+      "title_help_rows": [
+        {
+          "c": "{'{YYYY}'}, {'{YY}'}",
+          "d": "rok → 2026, 26 · posun po letech: {'{YYYY+1}'} → 2027 · rok posunutého měsíce: {'{YYYY+8M}'} → 2027"
+        },
+        {
+          "c": "{'{M}'}, {'{MM}'}",
+          "d": "měsíc → 5, 05 · posun po měsících vč. přelomu roku: {'{MM+8}'} → 01"
+        },
+        {
+          "c": "{'{MMMM}'}",
+          "d": "název měsíce → květen · {'{MMMM+1}'} → červen"
+        },
+        {
+          "c": "{'{Q}'}",
+          "d": "čtvrtletí → 2 · {'{Q+1}'} → 3"
+        },
+        {
+          "c": "{'{D}'}, {'{DD}'}",
+          "d": "den → 15, 15 · posun po dnech: {'{D+14}'} → 29"
+        },
+        {
+          "c": "{'{DATE}'}",
+          "d": "celé datum → 15. 5. 2026 · posun ±D/M/Y: {'{DATE+1Y-1D}'} → 14. 5. 2027"
+        },
+        {
+          "c": "{'{BOM}'}, {'{EOM}'}",
+          "d": "první a poslední den měsíce → 1. 5. 2026, 31. 5. 2026 · {'{EOM+1}'} → 30. 6. 2026"
+        }
+      ],
+      "title_help_example": "Příklad: „Nájem {'{MM}'}/{'{YYYY}'}“ → „Nájem 05/2026“, „Pojistné Q{'{Q}'}/{'{YYYY}'}“ → „Pojistné Q2/2026“. Nájem placený na příští měsíc: „Nájem {'{MM+1}'}/{'{YYYY+1M}'}“.",
+      "next_title": "Název další vytvořené položky",
+      "edit_title": "Upravit název",
+      "edit_title_hint": "Změna platí pro položky vytvořené po uložení. Už vytvořené položky si nechají svůj název.",
+      "save_title": "Uložit název",
+      "edit_title_created_until": "Položky do {date} už vznikly (denní úloha je chystá až 90 dní dopředu) a nová šablona je nepřejmenuje. Koncepty můžete přejmenovat ručně v detailu položky, potvrzené a zaúčtované zůstanou beze změny. Smazaná položka se znovu nevytvoří.",
+      "title_errors": {
+        "invalid_due_offset": "Splatnost zdrojové položky musí být nejvýše deset let od vystavení.",
+        "schedule_source_unconfirmed": "Před automatickým účtováním potvrďte zdrojovou položku.",
+        "forbidden": "Pro tuto akci nemáte oprávnění.",
+        "schedule_not_found": "Rozvrh nebyl nalezen.",
+        "invalid_end": "Konec opakování předchází prvnímu dokladu.",
+        "invalid_date": "Zadejte platné datum konce.",
+        "not_found": "Položka nebyla nalezena.",
+        "invalid_title_template": "Šablona názvu musí být text.",
+        "title_template_too_long": "Šablona názvu může mít nejvýše 255 znaků.",
+        "unknown_title_placeholder": "Šablona obsahuje neznámý zástupný znak {tokens}. Seznam znaků najdete v nápovědě níže.",
+        "occurrence_title_too_long": "Název některé z příštích položek by po dosazení přesáhl 255 znaků.",
+        "invalid_title_sync_period": "Volba srovnání období musí být zapnutá nebo vypnutá.",
+        "invalid_frequency": "Vyberte měsíční, čtvrtletní nebo roční opakování.",
+        "schedule_finished": "Opakování už skončilo, další položka nevznikne.",
+        "schedule_source_inactive": "Zdrojová položka je stornovaná, další položka nevznikne.",
+        "already_scheduled": "Položka už patří do jiného opakování.",
+        "invalid_status": "Opakování lze nastavit jen u aktivní položky."
+      },
+      "title_saved": "Šablona názvu uložena.",
       "schedule_saved": "Opakování bylo nastaveno.",
       "generate_through": "Vytvořit do",
       "generate": "Vytvořit položky",

@@ -17,7 +17,19 @@ export interface OtherItemSchedule {
   source_document_no?: string | null
   /** Datum příští položky; null u pozastaveného rozvrhu a po konci opakování. */
   next_on?: string | null
+  /** Název příští položky po dosazení šablony; null spolu s next_on. */
+  next_title?: string | null
+  /** Rozvrh po konci opakování (i pozastavený): další položka nevznikne. */
+  finished?: boolean
+  /** Zdrojová položka je aktivní (koncept, potvrzená, zaúčtovaná); po stornu rozvrh další položky nevytvoří. */
+  source_active?: boolean
   occurrences?: Array<{ occurrence_index: number; item_id: number; issued_on: string; status: string; document_no?: string | null }>
+}
+
+/** Šablona názvu výskytů: zástupné znaky jako u opakované faktury a volitelné srovnání M/RRRR v názvu. */
+export interface OtherItemScheduleTitleSettings {
+  title_template: string | null
+  title_sync_period: boolean
 }
 
 export type OtherItemInstallmentStatus = 'unpaid' | 'partial' | 'paid' | 'overdue'
@@ -52,8 +64,18 @@ export const otherItemPlansApi = {
   schedules: (sourceItemId?: number) => api.get<{ items: OtherItemSchedule[] }>('/accounting/other-items/schedules',
     sourceItemId ? { params: { source_item_id: sourceItemId } } : undefined).then(r => r.data.items),
   schedule: (id: number) => api.get<OtherItemSchedule>(`/accounting/other-items/schedules/${id}`).then(r => r.data),
-  createSchedule: (itemId: number, payload: { frequency: OtherItemSchedule['frequency']; ends_on: string | null; auto_post?: boolean }) =>
+  createSchedule: (itemId: number, payload: { frequency: OtherItemSchedule['frequency']; ends_on: string | null; auto_post?: boolean }
+    & Partial<OtherItemScheduleTitleSettings>) =>
     api.post<OtherItemSchedule>(`/accounting/other-items/${itemId}/schedule`, payload).then(r => r.data),
+  setTitle: (id: number, payload: OtherItemScheduleTitleSettings) =>
+    api.put<OtherItemSchedule>(`/accounting/other-items/schedules/${id}/title`, payload).then(r => r.data),
+  /** Náhled názvu nejbližší položky; má-li položka rozvrh, bere jeho příští termín a frequency/ends_on ignoruje. */
+  titlePreview: (itemId: number, params: OtherItemScheduleTitleSettings
+    & { frequency?: OtherItemSchedule['frequency']; ends_on?: string | null }) =>
+    api.get<{ title: string; issued_on: string }>(`/accounting/other-items/${itemId}/schedule/title-preview`, {
+      params: { ...params, title_template: params.title_template ?? '', title_sync_period: params.title_sync_period ? 1 : 0,
+        ends_on: params.ends_on || undefined },
+    }).then(r => r.data),
   generate: (id: number, through: string) =>
     api.post<{ created_ids: number[]; posted_ids: number[]; schedule: OtherItemSchedule }>(`/accounting/other-items/schedules/${id}/generate`, { through }).then(r => r.data),
   setStatus: (id: number, status: OtherItemSchedule['status'], auto_post?: boolean) =>

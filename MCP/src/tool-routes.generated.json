@@ -4111,6 +4111,15 @@
       ]
     ]
   },
+  "set_other_item_schedule_title": {
+    "write": true,
+    "api": [
+      [
+        "PUT",
+        "/api/accounting/other-items/schedules/{id}/title"
+      ]
+    ]
+  },
   "set_product_prices": {
     "write": true,
     "api": [

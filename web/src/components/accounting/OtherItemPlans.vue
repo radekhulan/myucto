@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { otherItemPlansApi, type OtherItemInstallment, type OtherItemInstallmentStatus, type OtherItemSchedule } from '@/api/otherItemPlans'
+import { otherItemPlansApi, type OtherItemInstallment, type OtherItemInstallmentStatus, type OtherItemSchedule,
+  type OtherItemScheduleTitleSettings } from '@/api/otherItemPlans'
 import type { OtherItem } from '@/api/otherItems'
 import { useAuthStore } from '@/stores/auth'
 import { useSupplierStore } from '@/stores/supplier'
@@ -9,6 +10,8 @@ import { useToast } from '@/composables/useToast'
 import { formatDate, formatMoney } from '@/composables/useFormat'
 import DateInput from '@/components/ui/DateInput.vue'
 import Modal from '@/components/ui/Modal.vue'
+import OtherItemScheduleTitleFields from '@/components/accounting/OtherItemScheduleTitleFields.vue'
+import { scheduleTitleErrorText, type ScheduleTitleError } from '@/utils/otherItemScheduleTitleError'
 import { ICONS, btnFilled, btnOutline, btnOutlineSm } from '@/components/ui/buttonStyles'
 import { appIsoDate } from '@/utils/date'
 import { otherItemStatusClass } from '@/utils/otherItemStatus'
@@ -36,11 +39,30 @@ const frequency = ref<OtherItemSchedule['frequency']>('monthly')
 const endsOn = ref('')
 const through = ref(appIsoDate())
 const autoPost = ref(false)
+const emptyTitle = (): OtherItemScheduleTitleSettings => ({ title_template: null, title_sync_period: false })
+/** Šablona názvu v dialogu založení i úpravy opakování; chyba uložení patří k poli. */
+const titleSettings = ref<OtherItemScheduleTitleSettings>(emptyTitle())
+const titleError = ref<ScheduleTitleError | null>(null)
+// Úprava šablony po neúspěšném uložení: stará hláška u pole už neplatí, aktuální chybu ukáže náhled.
+// Na četnosti závisí i délka dosazeného názvu, proto i její změna.
+watch([titleSettings, frequency, endsOn], () => { titleError.value = null })
 const canAutoPost = computed(() => ['posted', 'confirmed'].includes(props.item.status))
 const canPost = computed(() => supplier.currentSupplier?.accounting_mode !== 'double_entry' || auth.canWrite('accounting.journal.post'))
 const canWrite = computed(() => auth.canWrite('other_items'))
-const sourceActive = computed(() => ['draft', 'posted', 'confirmed'].includes(props.item.status))
+// Čerstvý rozvrh (openScheduleEdit) může vědět o stornu zdroje dřív než položka v detailu.
+const sourceActive = computed(() => ['draft', 'posted', 'confirmed'].includes(props.item.status)
+  && schedule.value?.source_active !== false)
+/** Rozvrh po konci opakování (i pozastavený): název už žádné položce nepatří. */
+const scheduleFinished = computed(() => schedule.value?.finished === true)
+/** Název budoucích položek jde změnit jen u aktivního zdroje a neskončeného rozvrhu. */
+const canEditTitle = computed(() => canWrite.value && sourceActive.value && !scheduleFinished.value)
 const generatedOccurrences = computed(() => schedule.value?.occurrences?.filter(row => row.occurrence_index > 0) || [])
+/**
+ * Datum poslední už vytvořené položky, i smazané (stornované): po ní začne nová šablona.
+ * Denní úloha je tvoří až 90 dní dopředu a změna názvu je nepřejmenuje.
+ */
+const lastCreatedOn = computed(() => generatedOccurrences.value
+  .reduce<string | null>((last, row) => (last === null || row.issued_on > last ? row.issued_on : last), null))
 // Kalendář zamyká každá úhrada, i ta, která pokryla jen úrok nebo poplatek (jistina zůstala celá).
 const hasPayments = ref(false)
 const canEditInstallments = computed(() => canWrite.value && ['draft', 'posted', 'confirmed'].includes(props.item.status)
@@ -77,13 +99,53 @@ function openSchedule() {
   frequency.value = 'monthly'
   endsOn.value = ''
   autoPost.value = false
+  titleSettings.value = emptyTitle()
+  titleError.value = null
   scheduleMode.value = 'create'
   scheduleOpen.value = true
 }
-function openScheduleEdit() {
-  if (!schedule.value || !canWrite.value) return
+/**
+ * Před otevřením úpravy načte rozvrh znovu: denní úloha mezitím mohla vytvořit další položky
+ * a dialog ukazuje, do kterého data už vznikly. Odpověď patří jen položce, ze které se kliklo.
+ */
+async function openScheduleEdit() {
+  if (!schedule.value || !canWrite.value || busy.value) return
+  const itemId = props.item.id
+  busy.value = true
+  let fresh: OtherItemSchedule
+  try {
+    fresh = await otherItemPlansApi.schedule(schedule.value.id)
+  } catch (error: any) {
+    if (itemId !== props.item.id) return
+    toast.error(scheduleTitleErrorText(error?.response?.data?.error || {}, t, te))
+    // Rozvrh smazaný v jiné záložce: karta nesmí dál ukazovat neexistující rozvrh. Bez load(),
+    // ten by přepsal i rozepsaný splátkový kalendář.
+    if (error?.response?.status === 404) schedule.value = null
+    return
+  } finally {
+    busy.value = false
+  }
+  if (itemId !== props.item.id) return
+  schedule.value = fresh
+  const template = fresh.template
+  titleSettings.value = {
+    title_template: typeof template.title_template === 'string' ? template.title_template : null,
+    title_sync_period: template.title_sync_period === true,
+  }
+  titleError.value = null
   scheduleMode.value = 'edit'
   scheduleOpen.value = true
+}
+/** Chyba s polem formuláře zůstane u pole v dialogu, ostatní jako toast. */
+const FIELD_ERRORS = ['title_template', 'title_sync_period', 'frequency', 'ends_on']
+const fieldErrorText = (field: string) => titleError.value?.field === field ? scheduleTitleErrorText(titleError.value, t, te) : ''
+function showSaveError(error: any) {
+  const data = error?.response?.data?.error
+  if (FIELD_ERRORS.includes(data?.field)) {
+    titleError.value = data
+  } else {
+    toast.error(scheduleTitleErrorText(data || {}, t, te))
+  }
 }
 function openInstallments() {
   if (!state.value.canSplit) return
@@ -139,18 +201,47 @@ async function load() {
   }
 }
 
+/**
+ * Odpověď uložení patří jen položce, na které se ukládalo: po přepnutí na jinou položku se zahodí.
+ * Obnova téže položky (tichý refresh detailu) výsledek nezahazuje, uložení by jinak tiše zmizelo.
+ */
+function staleGuard() {
+  const itemId = props.item.id
+  return () => itemId !== props.item.id
+}
+
 async function createSchedule() {
   if (busy.value) return
   busy.value = true
+  const stale = staleGuard()
   try {
-    schedule.value = await otherItemPlansApi.createSchedule(Number(props.item.id), {
+    const created = await otherItemPlansApi.createSchedule(Number(props.item.id), {
       frequency: frequency.value, ends_on: endsOn.value || null,
-      auto_post: autoPost.value && canAutoPost.value,
+      auto_post: autoPost.value && canAutoPost.value, ...titleSettings.value,
     })
+    if (stale()) return
+    schedule.value = created
     scheduleOpen.value = false
     toast.success(t('other_items.plans.schedule_saved'))
   } catch (error: any) {
-    toast.error(errorMessage(error))
+    if (!stale()) showSaveError(error)
+  } finally {
+    busy.value = false
+  }
+}
+
+async function saveTitle() {
+  if (!schedule.value || busy.value || !canEditTitle.value) return
+  busy.value = true
+  const stale = staleGuard()
+  try {
+    const saved = await otherItemPlansApi.setTitle(schedule.value.id, titleSettings.value)
+    if (stale()) return
+    schedule.value = saved
+    scheduleOpen.value = false
+    toast.success(t('other_items.plans.title_saved'))
+  } catch (error: any) {
+    if (!stale()) showSaveError(error)
   } finally {
     busy.value = false
   }
@@ -373,6 +464,7 @@ watch(() => [props.item.id, props.item.paid_amount, props.item.status], () => vo
       <dl class="grid gap-x-6 gap-y-2 text-sm sm:grid-cols-2">
         <div class="flex justify-between gap-3"><dt class="text-neutral-500">{{ t('other_items.plans.frequency') }}</dt><dd>{{ t(`other_items.plans.${schedule.frequency}`) }}</dd></div>
         <div class="flex justify-between gap-3"><dt class="text-neutral-500">{{ t('other_items.plans.next_on') }}</dt><dd class="font-mono" data-test="schedule-next">{{ schedule.next_on ? formatDate(schedule.next_on) : '—' }}</dd></div>
+        <div v-if="schedule.next_title" class="flex justify-between gap-3 sm:col-span-2"><dt class="shrink-0 text-neutral-500">{{ t('other_items.plans.next_title') }}</dt><dd class="min-w-0 break-words text-right" data-test="schedule-next-title">{{ schedule.next_title }}</dd></div>
         <div class="flex justify-between gap-3"><dt class="text-neutral-500">{{ t('other_items.plans.ends_label') }}</dt><dd class="font-mono">{{ schedule.ends_on ? formatDate(schedule.ends_on) : t('other_items.plans.no_end') }}</dd></div>
         <!-- Kdo smí rozvrh měnit, vidí volbu jako zaškrtávátko níž; ostatním stačí údaj. -->
         <div v-if="!(canWrite && sourceActive)" class="flex justify-between gap-3"><dt class="text-neutral-500">{{ t('other_items.plans.auto_post_short') }}</dt><dd data-test="schedule-auto-post">{{ t(schedule.auto_post ? 'common.yes' : 'common.no') }}</dd></div>
@@ -453,7 +545,7 @@ watch(() => [props.item.id, props.item.paid_amount, props.item.status], () => vo
     </section>
 
     <!-- Oba plány se upravují ve stejném typu dialogu. -->
-    <Modal v-if="scheduleOpen" :title="t(scheduleMode === 'create' ? 'other_items.plans.create_schedule' : 'other_items.plans.edit_schedule')" width-class="max-w-2xl" @close="scheduleOpen = false">
+    <Modal v-if="scheduleOpen" :title="t(scheduleMode === 'create' ? 'other_items.plans.create_schedule' : 'other_items.plans.edit_schedule')" width-class="max-w-2xl" @close="!busy && (scheduleOpen = false)">
       <form v-if="scheduleMode === 'create'" id="other-item-schedule" class="space-y-4" data-test="schedule-form" @submit.prevent="createSchedule">
         <p class="text-sm text-neutral-600">{{ t('other_items.plans.schedule_hint') }}</p>
         <label class="block text-sm font-medium">{{ t('other_items.plans.frequency') }}
@@ -463,9 +555,11 @@ watch(() => [props.item.id, props.item.paid_amount, props.item.status], () => vo
             <option value="yearly">{{ t('other_items.plans.yearly') }}</option>
           </select>
         </label>
+        <p v-if="fieldErrorText('frequency')" role="alert" class="-mt-3 text-xs text-danger-600">{{ fieldErrorText('frequency') }}</p>
         <label class="block text-sm font-medium">{{ t('other_items.plans.ends_label') }}
           <DateInput v-model="endsOn" class="mt-1 block h-9 w-full rounded-md border border-neutral-300 px-2" />
         </label>
+        <p v-if="fieldErrorText('ends_on')" role="alert" class="-mt-3 text-xs text-danger-600" data-test="schedule-ends-error">{{ fieldErrorText('ends_on') }}</p>
         <div>
           <label class="flex items-center gap-2 text-sm">
             <input v-model="autoPost" type="checkbox" :disabled="!canAutoPost || !canPost || busy" />
@@ -473,6 +567,7 @@ watch(() => [props.item.id, props.item.paid_amount, props.item.status], () => vo
           </label>
           <p class="mt-1 text-xs text-neutral-500">{{ t(canAutoPost ? 'other_items.plans.auto_post_hint' : 'other_items.plans.auto_post_source') }}</p>
         </div>
+        <OtherItemScheduleTitleFields v-model="titleSettings" :item-id="Number(item.id)" :frequency="frequency" :ends-on="endsOn || null" :submit-error="titleError" />
       </form>
       <div v-else-if="schedule" class="space-y-4 text-sm" data-test="schedule-edit-form">
         <dl class="grid gap-x-6 gap-y-2 sm:grid-cols-2">
@@ -481,11 +576,18 @@ watch(() => [props.item.id, props.item.paid_amount, props.item.status], () => vo
         </dl>
         <p class="text-neutral-600">{{ t('other_items.plans.schedule_fixed_hint') }}</p>
         <p v-if="!sourceActive" class="text-neutral-500">{{ t('other_items.plans.source_inactive') }}</p>
+        <form v-if="canEditTitle" id="other-item-schedule-title" class="space-y-4 border-t border-neutral-200 pt-4" data-test="schedule-title-form" @submit.prevent="saveTitle">
+          <p class="text-neutral-600">{{ t('other_items.plans.edit_title_hint') }}</p>
+          <p v-if="lastCreatedOn" class="rounded-md border border-warning-500/40 bg-warning-50 px-3 py-2 text-warning-700" data-test="schedule-title-created-until">
+            {{ t('other_items.plans.edit_title_created_until', { date: formatDate(lastCreatedOn) }) }}
+          </p>
+          <OtherItemScheduleTitleFields v-model="titleSettings" :item-id="Number(item.id)" :submit-error="titleError" />
+        </form>
       </div>
       <template #footer>
         <div class="flex flex-wrap justify-end gap-2">
           <template v-if="scheduleMode === 'create'">
-            <button type="button" :class="btnOutline('neutral')" class="whitespace-nowrap" @click="scheduleOpen = false">
+            <button type="button" :disabled="busy" :class="btnOutline('neutral')" class="whitespace-nowrap" @click="scheduleOpen = false">
               <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.x" /></svg>
               {{ t('common.cancel') }}
             </button>
@@ -503,7 +605,17 @@ watch(() => [props.item.id, props.item.paid_amount, props.item.status], () => vo
               <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" :d="schedule.status === 'active' ? ICONS.pause : ICONS.play" /></svg>
               {{ t(schedule.status === 'active' ? 'other_items.plans.pause' : 'other_items.plans.resume') }}
             </button>
-            <button type="button" :class="btnFilled('primary')" class="whitespace-nowrap" data-test="schedule-close" @click="scheduleOpen = false">
+            <template v-if="canEditTitle">
+              <button type="button" :disabled="busy" :class="btnOutline('neutral')" class="whitespace-nowrap" data-test="schedule-close" @click="scheduleOpen = false">
+                <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.x" /></svg>
+                {{ t('common.close') }}
+              </button>
+              <button type="submit" form="other-item-schedule-title" :disabled="busy" :class="btnFilled('primary')" class="whitespace-nowrap" data-test="schedule-title-submit">
+                <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.check" /></svg>
+                {{ t('other_items.plans.save_title') }}
+              </button>
+            </template>
+            <button v-else type="button" :class="btnFilled('primary')" class="whitespace-nowrap" data-test="schedule-close" @click="scheduleOpen = false">
               <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.check" /></svg>
               {{ t('common.close') }}
             </button>

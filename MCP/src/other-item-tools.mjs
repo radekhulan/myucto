@@ -29,6 +29,10 @@ const schema = (properties = {}, required = []) => ({
 });
 
 const BASE = '/accounting/other-items';
+const TITLE_TEMPLATE = 'Šablona názvu budoucích dokladů se zástupnými znaky opakované faktury: {YYYY} {YY} {M} {MM} '
+  + '{MMMM} (český název měsíce) {Q} {D} {DD} {DATE} {BOM} {EOM}, s posunem např. {MM+1} nebo {YYYY+1M}. '
+  + 'Dosazují se podle data vzniku dokladu. Neznámý znak server odmítne. Prázdné nebo null = název vzorového dokladu.';
+const TITLE_SYNC = 'Srovnat měsíc a rok ve tvaru 03/2027 nebo 2027-03 v názvu s datem vzniku dokladu (jako u opakované faktury).';
 const NO_POSTING = 'Nic se nezaúčtuje: potvrzení a zaúčtování provede účetní ve webovém rozhraní.';
 const KINDS = ['other', 'rent', 'loan', 'deposit', 'insurance', 'fee', 'claim'];
 const ACTIVE = ['draft', 'confirmed', 'posted'];
@@ -583,12 +587,37 @@ export const OTHER_ITEM_TOOLS = [
       item_id: id('ID vzorového dokladu (koncept, potvrzený nebo zaúčtovaný).'),
       frequency: str('Četnost.', { enum: ['monthly', 'quarterly', 'yearly'] }),
       ends_on: date('Poslední možné datum vzniku dokladu; bez zadání bez konce.'),
+      title_template: nullable(str(TITLE_TEMPLATE, { maxLength: 255 })),
+      title_sync_period: { type: 'boolean', description: TITLE_SYNC },
     }, ['item_id', 'frequency']),
     write: true,
     run: (c, a, tool) => c.post(`${BASE}/${seg(a.item_id)}/schedule`, {
       frequency: a.frequency,
       ...(a.ends_on !== undefined ? { ends_on: a.ends_on } : {}),
+      ...(a.title_template !== undefined ? { title_template: a.title_template } : {}),
+      ...(a.title_sync_period !== undefined ? { title_sync_period: a.title_sync_period } : {}),
       auto_post: false,
+    }, tool),
+  },
+  {
+    name: 'set_other_item_schedule_title',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
+    title: 'Nastavit název dokladů opakování',
+    description:
+      'Nastaví šablonu názvu dokladů, které opakování ostatní položky vytvoří od teď. Už vytvořené doklady se '
+      + 'nepřejmenují. Vynechané pole zachová uloženou hodnotu (server); šablonu zrušíte hodnotou null. U opakování '
+      + `s automatickým účtováním název mění jen účetní ve webovém rozhraní. ${NO_POSTING}`,
+    inputSchema: schema({
+      id: id('ID rozvrhu opakování.'),
+      title_template: nullable(str(TITLE_TEMPLATE, { maxLength: 255 })),
+      title_sync_period: { type: 'boolean', description: TITLE_SYNC },
+    }, ['id']),
+    write: true,
+    // Vynechané pole server zachová, proto se posílají jen zadaná.
+    run: (c, a, tool) => c.put(`${BASE}/schedules/${seg(a.id)}/title`, {
+      ...(a.title_template !== undefined ? { title_template: a.title_template } : {}),
+      ...(a.title_sync_period !== undefined ? { title_sync_period: a.title_sync_period } : {}),
     }, tool),
   },
   {

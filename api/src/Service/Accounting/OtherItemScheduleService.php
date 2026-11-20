@@ -8,11 +8,17 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Infrastructure\Database\TransactionFailure;
 use MyInvoice\Repository\DimensionAssignmentRepository;
 use MyInvoice\Repository\OtherItemRepository;
+use MyInvoice\Service\Invoice\DescriptionPlaceholders;
+use MyInvoice\Service\Invoice\MonthSynchronizer;
 use PDO;
 
 final class OtherItemScheduleService
 {
     private const MONTHS = ['monthly' => 1, 'quarterly' => 3, 'yearly' => 12];
+    /** Nastavení názvu výskytu v šabloně rozvrhu; na doklad se nepřenáší. */
+    private const TITLE_SETTINGS = ['title_template' => true, 'title_sync_period' => true];
+    /** Kolik nejbližších výskytů se při uložení šablony názvu zkusí dosadit (měsíční rozvrh = celý rok). */
+    private const TITLE_CHECK_COUNT = 12;
     /** Sloupce rozvrhu pro seznam i detail; jméno zakladatele z users (smazaný uživatel = null). */
     private const COLUMNS = 's.id, s.source_item_id, s.frequency, s.anchor_on, s.due_days,
             s.ends_on, s.next_index, s.status, s.auto_post, s.template_json, s.created_at, oi.status AS source_status,
@@ -27,35 +33,28 @@ final class OtherItemScheduleService
 
     public function create(int $supplierId, int $itemId, array $input, ?int $userId): array
     {
-        $frequency = (string) ($input['frequency'] ?? '');
-        if (!isset(self::MONTHS[$frequency])) {
-            throw new OtherItemException('invalid_frequency', 'Vyberte měsíční, čtvrtletní nebo roční opakování.');
+        $frequency = $input['frequency'] ?? '';
+        if (!is_string($frequency) || !isset(self::MONTHS[$frequency])) {
+            throw new OtherItemException('invalid_frequency', 'Vyberte měsíční, čtvrtletní nebo roční opakování.', 422, 'frequency');
         }
         $autoPost = self::autoPost($input['auto_post'] ?? false);
-        $endsOn = isset($input['ends_on']) && $input['ends_on'] !== '' ? (string) $input['ends_on'] : null;
-        if ($endsOn !== null) self::date($endsOn);
+        $titleSettings = self::titleSettings($input);
+        $endsOn = $input['ends_on'] ?? null;
+        if ($endsOn !== null && !is_string($endsOn)) {
+            throw new OtherItemException('invalid_date', 'Zadejte platné datum.', 422, 'ends_on');
+        }
+        $endsOn = $endsOn === '' ? null : $endsOn;
+        if ($endsOn !== null) self::endsOn($endsOn);
         $pdo = $this->db->pdo();
         $ownTx = !$pdo->inTransaction();
         if ($ownTx) $pdo->beginTransaction();
         try {
             $item = $this->items->find($supplierId, $itemId, true)
                 ?? throw new OtherItemException('not_found', 'Doklad nebyl nalezen.', 404);
-            if (!in_array($item['status'], ['draft', 'confirmed', 'posted'], true)) {
-                throw new OtherItemException('invalid_status', 'Opakování lze založit jen z aktivního dokladu.', 409);
-            }
+            $this->assertSchedulable($supplierId, $item);
             if ($autoPost) self::assertConfirmedSource($item);
-            $linked = $pdo->prepare('SELECT schedule_id FROM other_item_schedule_occurrences WHERE supplier_id = ? AND item_id = ? LIMIT 1');
-            $linked->execute([$supplierId, $itemId]);
-            $linkedRow = $linked->fetch(PDO::FETCH_ASSOC);
-            if ($linkedRow !== false && $linkedRow['schedule_id'] === null) {
-                // Výskyt zrušeného opakování si drží původ; nové opakování z něj nevzniká.
-                throw new OtherItemException('created_by_schedule', 'Doklad vznikl opakováním, nové opakování z něj založit nejde.', 409);
-            }
-            if ($linkedRow !== false) {
-                throw new OtherItemException('already_scheduled', 'Doklad už patří do rozvrhu opakování.', 409);
-            }
             if ($endsOn !== null && $endsOn < $item['issued_on']) {
-                throw new OtherItemException('invalid_end', 'Konec opakování předchází prvnímu dokladu.');
+                throw new OtherItemException('invalid_end', 'Konec opakování předchází prvnímu dokladu.', 422, 'ends_on');
             }
             $dueDays = (new \DateTimeImmutable($item['issued_on']))->diff(new \DateTimeImmutable($item['due_on']))->days;
             if ($item['due_on'] < $item['issued_on'] || $dueDays > 3650) {
@@ -79,23 +78,9 @@ final class OtherItemScheduleService
                 ];
             }
             if ($overrides !== []) $template['posting_overrides'] = $overrides;
-            // Znovu naplánovaný zdroj navazuje na položky zrušeného opakování: první termín nového
-            // rozvrhu je až po poslední z nich, už vytvořené termíny nevzniknou podruhé. Smazané
-            // koncepty se nepočítají, jejich termíny nový rozvrh vytvoří znovu. Rozhoduje skutečné
-            // datum vzniku položky (zrušený rozvrh s četností už není).
-            $orphans = $pdo->prepare('SELECT MAX(oi.issued_on) FROM other_item_schedule_occurrences o
-                JOIN other_items oi ON oi.id = o.item_id AND oi.supplier_id = o.supplier_id
-                WHERE o.supplier_id = ? AND o.source_item_id = ? AND o.schedule_id IS NULL AND o.occurrence_index > 0
-                  AND oi.deleted_at IS NULL');
-            $orphans->execute([$supplierId, $itemId]);
-            $lastOrphan = $orphans->fetchColumn();
-            $nextIndex = 1;
-            if (is_string($lastOrphan)) {
-                $anchor = new \DateTimeImmutable($item['issued_on']);
-                while ($nextIndex < 10000 && self::occurrenceDate($anchor, $nextIndex * self::MONTHS[$frequency]) <= $lastOrphan) {
-                    $nextIndex++;
-                }
-            }
+            $nextIndex = $this->firstOccurrenceIndex($supplierId, $item, $frequency);
+            $template = self::withTitleSettings($template, $titleSettings);
+            self::assertTitles($template, new \DateTimeImmutable($item['issued_on']), $nextIndex, self::MONTHS[$frequency], $endsOn);
             $stmt = $pdo->prepare('INSERT INTO other_item_schedules
                 (supplier_id, source_item_id, frequency, anchor_on, due_days, ends_on, template_json, created_by, auto_post, next_index)
                 VALUES (?,?,?,?,?,?,?,?,?,?)');
@@ -172,6 +157,100 @@ final class OtherItemScheduleService
     }
 
     /**
+     * Změní šablonu názvu budoucích výskytů. Už vytvořené položky se nepřejmenují.
+     * Vynechané pole zachová uloženou hodnotu (šablona se ruší hodnotou null).
+     * Stornovaný zdroj ani skončený rozvrh další výskyt nevytvoří, změna je pak chyba (409).
+     * `$session` = požadavek člověka v aplikaci; API token u rozvrhu s automatikou název nemění.
+     */
+    public function setTitle(int $supplierId, int $id, array $input, bool $session): array
+    {
+        $pdo = $this->db->pdo();
+        $ownTx = !$pdo->inTransaction();
+        if ($ownTx) $pdo->beginTransaction();
+        try {
+            $stmt = $pdo->prepare('SELECT source_item_id, anchor_on, frequency, next_index, ends_on, auto_post, template_json
+                FROM other_item_schedules WHERE supplier_id = ? AND id = ? FOR UPDATE');
+            $stmt->execute([$supplierId, $id]);
+            $schedule = $stmt->fetch(PDO::FETCH_ASSOC)
+                ?: throw new OtherItemException('schedule_not_found', 'Rozvrh nebyl nalezen.', 404);
+            // Automatika by doklady s názvem od API tokenu zaúčtovala, aniž je kdo viděl
+            // (stejné pravidlo jako úprava konceptu z automatického opakování).
+            if ((bool) $schedule['auto_post'] && !$session) {
+                throw new OtherItemException('auto_post_session_only',
+                    'Název opakování s automatickým účtováním lze změnit jen ve webovém rozhraní.', 403);
+            }
+            $source = $schedule['source_item_id'] === null ? null : $this->items->find($supplierId, (int) $schedule['source_item_id']);
+            self::assertActiveSource($source ?? ['status' => 'cancelled']);
+            self::assertNotFinished($schedule);
+            $stored = json_decode($schedule['template_json'], true, 512, JSON_THROW_ON_ERROR);
+            $settings = self::titleSettings($input + [
+                'title_template' => $stored['title_template'] ?? null,
+                'title_sync_period' => ($stored['title_sync_period'] ?? false) === true,
+            ]);
+            $template = self::withTitleSettings($stored, $settings);
+            self::assertTitles($template, new \DateTimeImmutable($schedule['anchor_on']), (int) $schedule['next_index'],
+                self::MONTHS[$schedule['frequency']], $schedule['ends_on']);
+            $pdo->prepare('UPDATE other_item_schedules SET template_json = ? WHERE supplier_id = ? AND id = ?')
+                ->execute([json_encode($template, JSON_THROW_ON_ERROR), $supplierId, $id]);
+            if ($ownTx) $pdo->commit();
+        } catch (\Throwable $e) {
+            if ($ownTx && $pdo->inTransaction()) $pdo->rollBack();
+            throw $e;
+        }
+        return $this->get($supplierId, $id);
+    }
+
+    /**
+     * Náhled názvu nejbližšího výskytu pro rozepsané nastavení; nic neukládá.
+     * Má-li položka rozvrh, bere jeho šablonu a příští termín, jinak první
+     * výskyt nového rozvrhu se zadanou četností. Chyby jsou stejné jako při uložení.
+     *
+     * @return array{title: string, issued_on: string}
+     */
+    public function previewTitle(int $supplierId, int $itemId, array $input): array
+    {
+        $item = $this->items->find($supplierId, $itemId)
+            ?? throw new OtherItemException('not_found', 'Doklad nebyl nalezen.', 404);
+        $stmt = $this->db->pdo()->prepare('SELECT anchor_on, frequency, next_index, ends_on, template_json FROM other_item_schedules
+            WHERE supplier_id = ? AND source_item_id = ? ORDER BY id DESC LIMIT 1');
+        $stmt->execute([$supplierId, $itemId]);
+        $schedule = $stmt->fetch(PDO::FETCH_ASSOC);
+        // Stejné podmínky jako uložení: náhled nenabídne název, který by uložení odmítlo.
+        if ($schedule !== false) {
+            self::assertActiveSource($item);
+            self::assertNotFinished($schedule);
+            $template = json_decode($schedule['template_json'], true, 512, JSON_THROW_ON_ERROR);
+            // Vynechané pole = uložená hodnota, stejně jako úprava (setTitle).
+            $input += ['title_template' => $template['title_template'] ?? null,
+                'title_sync_period' => ($template['title_sync_period'] ?? false) === true];
+            $anchor = new \DateTimeImmutable($schedule['anchor_on']);
+            $index = (int) $schedule['next_index'];
+            $months = self::MONTHS[$schedule['frequency']];
+            $endsOn = $schedule['ends_on'];
+        } else {
+            $frequency = (string) ($input['frequency'] ?? '');
+            if (!isset(self::MONTHS[$frequency])) {
+                throw new OtherItemException('invalid_frequency', 'Vyberte měsíční, čtvrtletní nebo roční opakování.', 422, 'frequency');
+            }
+            $this->assertSchedulable($supplierId, $item);
+            $template = ['title' => $item['title']];
+            $anchor = new \DateTimeImmutable($item['issued_on']);
+            $index = $this->firstOccurrenceIndex($supplierId, $item, $frequency);
+            $months = self::MONTHS[$frequency];
+            // Konec rozepsaného rozvrhu: délka se kontroluje do něj stejně jako při založení.
+            $endsOn = isset($input['ends_on']) && $input['ends_on'] !== '' ? (string) $input['ends_on'] : null;
+            if ($endsOn !== null) self::endsOn($endsOn);
+            if ($endsOn !== null && $endsOn < $item['issued_on']) {
+                throw new OtherItemException('invalid_end', 'Konec opakování předchází prvnímu dokladu.', 422, 'ends_on');
+            }
+        }
+        $template = self::withTitleSettings($template, self::titleSettings($input));
+        self::assertTitles($template, $anchor, $index, $months, $endsOn);
+        $issuedOn = self::occurrenceDate($anchor, $index * $months);
+        return ['title' => self::occurrenceTitle($template, $issuedOn), 'issued_on' => $issuedOn];
+    }
+
+    /**
      * Zruší rozvrh opakování. Už vytvořené položky zůstávají jako samostatné doklady a svůj
      * původ si drží (vazba výskytu na rozvrh se vynuluje cizím klíčem ON DELETE SET NULL),
      * takže dál ukazují zdroj a nové opakování nenabídnou. Vazba zdroje (výskyt 0) se maže:
@@ -239,9 +318,10 @@ final class OtherItemScheduleService
                 $issued = self::occurrenceDate($anchor, $index * self::MONTHS[$schedule['frequency']]);
                 if ($issued > $through || $schedule['ends_on'] !== null && $issued > $schedule['ends_on']) break;
                 $due = (new \DateTimeImmutable($issued))->modify('+' . (int) $schedule['due_days'] . ' days')->format('Y-m-d');
-                $item = $this->service->create($supplierId, $template + [
+                $item = $this->service->create($supplierId, [
+                    'title' => self::occurrenceTitle($template, $issued),
                     'issued_on' => $issued, 'accounting_on' => $issued, 'due_on' => $due,
-                ], $userId, [
+                ] + $template, $userId, [
                     'kind' => (string) ($template['kind'] ?? 'other'), 'side' => (string) ($template['side'] ?? ''),
                     'kind_id' => isset($template['kind_id']) ? (int) $template['kind_id'] : null,
                 ]);
@@ -427,6 +507,59 @@ final class OtherItemScheduleService
         return (int) $sourceId;
     }
 
+    /** Z dokladu jde založit rozvrh: aktivní a sám není výskytem jiného rozvrhu (založení i náhled). */
+    private function assertSchedulable(int $supplierId, array $item): void
+    {
+        if (!in_array($item['status'], ['draft', 'confirmed', 'posted'], true)) {
+            throw new OtherItemException('invalid_status', 'Opakování lze založit jen z aktivního dokladu.', 409);
+        }
+        $linked = $this->db->pdo()->prepare('SELECT schedule_id FROM other_item_schedule_occurrences WHERE supplier_id = ? AND item_id = ? LIMIT 1');
+        $linked->execute([$supplierId, (int) $item['id']]);
+        $linkedRow = $linked->fetch(PDO::FETCH_ASSOC);
+        if ($linkedRow !== false && $linkedRow['schedule_id'] === null) {
+            // Výskyt zrušeného opakování si drží původ; nové opakování z něj nevzniká.
+            throw new OtherItemException('created_by_schedule', 'Doklad vznikl opakováním, nové opakování z něj založit nejde.', 409);
+        }
+        if ($linkedRow !== false) {
+            throw new OtherItemException('already_scheduled', 'Doklad už patří do rozvrhu opakování.', 409);
+        }
+    }
+
+    /**
+     * První index nového rozvrhu. Znovu naplánovaný zdroj navazuje na položky zrušeného
+     * opakování: první termín je až po poslední z nich, už vytvořené termíny nevzniknou
+     * podruhé. Smazané koncepty se nepočítají, jejich termíny nový rozvrh vytvoří znovu.
+     * Rozhoduje skutečné datum vzniku položky (zrušený rozvrh s četností už není).
+     * Sdílí ho založení i náhled názvu, aby náhled ukázal termín, který založení vytvoří.
+     */
+    private function firstOccurrenceIndex(int $supplierId, array $item, string $frequency): int
+    {
+        $orphans = $this->db->pdo()->prepare('SELECT MAX(oi.issued_on) FROM other_item_schedule_occurrences o
+            JOIN other_items oi ON oi.id = o.item_id AND oi.supplier_id = o.supplier_id
+            WHERE o.supplier_id = ? AND o.source_item_id = ? AND o.schedule_id IS NULL AND o.occurrence_index > 0
+              AND oi.deleted_at IS NULL');
+        $orphans->execute([$supplierId, (int) $item['id']]);
+        $lastOrphan = $orphans->fetchColumn();
+        $nextIndex = 1;
+        if (is_string($lastOrphan)) {
+            $anchor = new \DateTimeImmutable($item['issued_on']);
+            while ($nextIndex < 10000 && self::occurrenceDate($anchor, $nextIndex * self::MONTHS[$frequency]) <= $lastOrphan) {
+                $nextIndex++;
+            }
+        }
+        return $nextIndex;
+    }
+
+    /** Rozvrh po konci opakování už žádný výskyt nevytvoří; stejný výpočet jako next_on v decode(). */
+    private static function assertNotFinished(array $schedule): void
+    {
+        $next = self::occurrenceDate(new \DateTimeImmutable($schedule['anchor_on']),
+            (int) $schedule['next_index'] * self::MONTHS[$schedule['frequency']]);
+        if ($schedule['ends_on'] !== null && $next > $schedule['ends_on']) {
+            throw new OtherItemException('schedule_finished', 'Opakování už skončilo, další položka nevznikne.', 409);
+        }
+    }
+
     private static function assertActiveSource(array $source): void
     {
         if (!in_array($source['status'], ['draft', 'confirmed', 'posted'], true)) {
@@ -449,11 +582,100 @@ final class OtherItemScheduleService
         return $value;
     }
 
+    /**
+     * Název výskytu ze šablony rozvrhu. Stejné pořadí jako opakovaná faktura
+     * ({@see \MyInvoice\Service\Invoice\RecurringInvoiceGenerator}): nejdřív zástupné znaky,
+     * pak volitelné srovnání „MM/RRRR“ v textu. Referenční datum je datum vzniku výskytu
+     * (u výskytu zároveň datum zaúčtování), obdoba DUZP faktury. Bez šablony a bez
+     * srovnání zůstává název zdroje beze změny.
+     */
+    public static function occurrenceTitle(array $template, string $issuedOn): string
+    {
+        $ref = new \DateTimeImmutable($issuedOn);
+        $custom = $template['title_template'] ?? null;
+        $title = is_string($custom) ? DescriptionPlaceholders::apply($custom, $ref) : (string) ($template['title'] ?? '');
+        if (($template['title_sync_period'] ?? false) === true) {
+            $title = MonthSynchronizer::syncTo($title, $ref);
+        }
+        return $title;
+    }
+
+    /** @return array{title_template: ?string, title_sync_period: bool} */
+    private static function titleSettings(array $input): array
+    {
+        $raw = $input['title_template'] ?? null;
+        if ($raw !== null && !is_string($raw)) {
+            throw new OtherItemException('invalid_title_template', 'Šablona názvu musí být text.', 422, 'title_template');
+        }
+        if ($raw !== null && !mb_check_encoding($raw, 'UTF-8')) {
+            throw new OtherItemException('invalid_title_template', 'Šablona názvu musí být text.', 422, 'title_template');
+        }
+        $template = $raw === null || trim($raw) === '' ? null : trim($raw);
+        if ($template !== null && mb_strlen($template) > 255) {
+            throw new OtherItemException('title_template_too_long', 'Šablona názvu může mít nejvýše 255 znaků.', 422, 'title_template');
+        }
+        $unknown = $template === null ? [] : DescriptionPlaceholders::unknownTokens($template);
+        if ($unknown !== []) {
+            throw new OtherItemException('unknown_title_placeholder',
+                'Šablona názvu obsahuje neznámý zástupný znak ' . implode(', ', $unknown) . '.', 422, 'title_template',
+                ['tokens' => $unknown]);
+        }
+        $sync = $input['title_sync_period'] ?? false;
+        if (!is_bool($sync)) {
+            throw new OtherItemException('invalid_title_sync_period',
+                'Volba srovnání období v názvu musí být boolean.', 422, 'title_sync_period');
+        }
+        return ['title_template' => $template, 'title_sync_period' => $sync];
+    }
+
+    /** Uloží nastavení názvu do šablony; výchozí hodnoty se nezapisují, starý rozvrh zůstane stejný. */
+    private static function withTitleSettings(array $template, array $settings): array
+    {
+        $template = array_diff_key($template, self::TITLE_SETTINGS);
+        if ($settings['title_template'] !== null) $template['title_template'] = $settings['title_template'];
+        if ($settings['title_sync_period']) $template['title_sync_period'] = true;
+        return $template;
+    }
+
+    /**
+     * Dosadí šablonu do nejbližších výskytů (nejvýš do konce rozvrhu): příliš dlouhý název
+     * je chyba hned při uložení, ne až v denní úloze (doklad má název nejvýše 255 znaků).
+     * Dvanáct výskytů vystřídá všechny měsíce, čtvrtletí i zkrácení dne na konec měsíce.
+     * Delší výsledek až za tímto oknem (jen umělé řetězení posunů roku přes rok 9999)
+     * odmítne při generování OtherItemService::create (invalid_title). Prázdný výsledek nastat
+     * nemůže: šablona bez neznámých znaků není prázdná a každý znak dosadí aspoň číslici.
+     */
+    private static function assertTitles(array $template, \DateTimeImmutable $anchor, int $fromIndex, int $months,
+        ?string $endsOn): void
+    {
+        if (!isset($template['title_template']) && !isset($template['title_sync_period'])) return;
+        $field = isset($template['title_template']) ? 'title_template' : 'title_sync_period';
+        for ($i = 0; $i < self::TITLE_CHECK_COUNT; $i++) {
+            $issuedOn = self::occurrenceDate($anchor, ($fromIndex + $i) * $months);
+            if ($endsOn !== null && $issuedOn > $endsOn) break;
+            $title = self::occurrenceTitle($template, $issuedOn);
+            if (mb_strlen($title) > 255) {
+                throw new OtherItemException('occurrence_title_too_long',
+                    'Název položky po dosazení přesáhne 255 znaků.', 422, $field);
+            }
+        }
+    }
+
     private static function occurrenceDate(\DateTimeImmutable $anchor, int $months): string
     {
         $first = $anchor->modify('first day of this month')->modify('+' . $months . ' months');
         $day = min((int) $anchor->format('d'), (int) $first->format('t'));
         return $first->setDate((int) $first->format('Y'), (int) $first->format('m'), $day)->format('Y-m-d');
+    }
+
+    /** Konec opakování ze vstupu: neplatné datum je chyba u pole (založení i náhled). */
+    private static function endsOn(string $value): void
+    {
+        try {
+            self::date($value);
+        } catch (OtherItemException) {
+            throw new OtherItemException('invalid_date', 'Zadejte platné datum.', 422, 'ends_on');
+        }
     }
 
     private static function date(string $value): void
@@ -470,8 +692,12 @@ final class OtherItemScheduleService
         if (!in_array($row['source_status'], ['draft', 'confirmed', 'posted'], true)) $row['status'] = 'paused';
         // Další termín počítá stejně jako generate(); po konci opakování nebo u pozastaveného rozvrhu žádný.
         $next = self::occurrenceDate(new \DateTimeImmutable($row['anchor_on']), (int) $row['next_index'] * self::MONTHS[$row['frequency']]);
-        $row['next_on'] = $row['status'] === 'active' && ($row['ends_on'] === null || $next <= $row['ends_on']) ? $next : null;
+        // Skončený = po konci opakování (i pozastavený); UI pak nenabízí změnu názvu.
+        $row['finished'] = $row['ends_on'] !== null && $next > $row['ends_on'];
+        $row['next_on'] = $row['status'] === 'active' && !$row['finished'] ? $next : null;
         $row['template'] = json_decode($row['template_json'], true, 512, JSON_THROW_ON_ERROR);
+        $row['source_active'] = in_array($row['source_status'], ['draft', 'confirmed', 'posted'], true);
+        $row['next_title'] = $row['next_on'] !== null ? self::occurrenceTitle($row['template'], $row['next_on']) : null;
         unset($row['template_json'], $row['source_status']);
         return $row;
     }
