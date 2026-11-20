@@ -769,13 +769,17 @@ final class VatCrossCheckService
         }
 
         $claimIds = $bookedOnlyPurchase;
+        $cashClaimIds = $bookedOnlyCash;
         foreach ($declaredOnly as $k) {
             [$type, $id] = array_pad(explode(':', (string) $k, 2), 2, '0');
             if ($type === 'purchase_invoice') {
                 $claimIds[] = (int) $id;
+            } elseif ($type === 'cash') {
+                $cashClaimIds[] = (int) $id;
             }
         }
         $claimInfo = $this->ledger->purchaseClaimInfo($supplierId, $claimIds);
+        $cashClaim = $this->ledger->cashClaimInfo($supplierId, $cashClaimIds);
         $outside = $this->entry343Outside($supplierId, $accountId, $declaredOnly, $start, $end);
         $saleNo = $this->docNumbersByIds($supplierId, 'invoices', 'varsymbol', $bookedOnlySale);
         $cashNo = $this->docNumbersByIds($supplierId, 'cash_documents', 'doc_number', $bookedOnlyCash);
@@ -796,7 +800,8 @@ final class VatCrossCheckService
             if (abs($v['declared']) <= self::EPS && abs($v['booked']) > self::EPS) {
                 // Deník ano, přiznání ne. timing_73 smí dostat JEN doklad, který v claim
                 // období reálně vstoupí do přiznání — tj. splní tytéž filtry jako
-                // fetchPurchases (status, advance, nárok na odpočet). Poměrný nárok § 75
+                // fetchPurchases (status, advance, nárok na odpočet); výdajový pokladní
+                // doklad viz větev 'cash' níže. Poměrný nárok § 75
                 // timing nedostane nikdy (procento krácení je per doklad). Krácený nárok
                 // § 76 ano: evidence nese plnou daň (ř. 40k/41k) stejně jako předpis 343
                 // a koeficient se uplatní až souhrnně na ř. 52, takže posun je přesný.
@@ -820,16 +825,40 @@ final class VatCrossCheckService
                     $number ??= $saleNo[$id] ?? null;
                 } elseif ($type === 'cash') {
                     $number ??= $cashNo[$id] ?? null;
+                    // Výdajový pokladní doklad je přijaté plnění jako přijatá faktura: zápis
+                    // 343 k datu účetního případu, odpočet až v období daňového data dokladu
+                    // (§ 73, typicky účtenka proplacená později). timing_73 jen když evidence
+                    // DPH doklad zařadí do jiného období a jeho příspěvek k dani tam odpovídá
+                    // zaúčtovanému netu. Zařazení i příspěvek určuje VatLedgerService
+                    // (cashClaimInfo), ne vlastní kopie filtrů.
+                    $cinfo = $cashClaim[$id] ?? null;
+                    if ($cinfo !== null
+                        && $cinfo['doc_type'] === 'out'
+                        && !$cinfo['proportional']
+                        && ($cinfo['claim_date'] > $end || $cinfo['claim_date'] < $start)
+                        && abs($cinfo['tax_contribution'] - $v['booked']) <= self::ACCOUNT_343_TOLERANCE
+                    ) {
+                        $reason = 'timing_73';
+                        $claimPeriod = substr($cinfo['claim_date'], 0, 7);
+                    }
                 }
             } elseif (abs($v['booked']) <= self::EPS && abs($v['declared']) > self::EPS) {
                 // Přiznání ano, deník v období ne. Zrcadlový timing_73 náleží JEN přijatému
-                // dokladu s plným nárokem, jehož živý net mimo období odpovídá přiznanému
-                // příspěvku — sale/cash zápis v jiném období není § 73 posun a odlišná
-                // částka je věcný rozdíl.
+                // plnění s plným nárokem (přijatá faktura nebo výdajový pokladní doklad),
+                // jehož živý net mimo období odpovídá přiznanému příspěvku. Zápis vydané
+                // faktury nebo příjmového pokladního dokladu (tržby) v jiném období není
+                // § 73 posun a odlišná částka je věcný rozdíl.
                 if (isset($outside[$k])) {
-                    $info = $type === 'purchase_invoice' ? ($claimInfo[$id] ?? null) : null;
-                    $isTiming = $info !== null
-                        && $info['vat_deduction'] !== 'proportional'
+                    if ($type === 'purchase_invoice') {
+                        $info = $claimInfo[$id] ?? null;
+                        $fullClaim = $info !== null && $info['vat_deduction'] !== 'proportional';
+                    } elseif ($type === 'cash') {
+                        $cinfo = $cashClaim[$id] ?? null;
+                        $fullClaim = $cinfo !== null && $cinfo['doc_type'] === 'out' && !$cinfo['proportional'];
+                    } else {
+                        $fullClaim = false;
+                    }
+                    $isTiming = $fullClaim
                         && abs($outside[$k]['net'] - $v['declared']) <= self::ACCOUNT_343_TOLERANCE;
                     if ($isTiming) {
                         $reason = 'timing_73';

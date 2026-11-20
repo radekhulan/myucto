@@ -597,6 +597,54 @@ final class VatCrossCheckTest extends TestCase
     }
 
     /**
+     * T2c: výdajový pokladní doklad s posunem odpočtu (§ 73) — účetní případ k DUZP
+     * v září (zápis MD 343), účtenka proplacena a DPH uplatněna v říjnu (tax_date).
+     * Evidence DPH ho dává do října, deník do září. Obě strany jsou časový posun
+     * stejně jako u přijaté faktury a stažení neblokují.
+     */
+    public function testCashPurchaseClaimShiftIsTimingInBothPeriods(): void
+    {
+        $cash = $this->cashPurchase(sprintf('%04d-09-22', self::YEAR), sprintf('%04d-10-06', self::YEAR), 311.33, 65.38);
+        $this->entry343(sprintf('%04d-09-22', self::YEAR), 65.38, 'debit', 'cash', $cash);
+
+        // (a) říjen: přiznáno, zápis 343 v září → zrcadlový timing_73.
+        $oct =$this->findingByCheck($this->crossCheck->check($this->supplierId, self::YEAR, 10, 'monthly'), 'account_343_vs_return');
+        self::assertNotNull($oct);
+        self::assertFalse($oct['blocking'], 'Posun odpočtu výdajového pokladního dokladu neblokuje.');
+        self::assertSame('info', $oct['severity']);
+        self::assertCount(1, $oct['documents']);
+        self::assertSame($cash, $oct['documents'][0]['invoice_id']);
+        self::assertSame('cash', $oct['documents'][0]['doc_type']);
+        self::assertSame('timing_73', $oct['documents'][0]['reason']);
+        self::assertSame(sprintf('%04d-09-22', self::YEAR), $oct['documents'][0]['entry_date']);
+
+        // (b) září: zápis 343, DPH v říjnu → timing_73 s obdobím odpočtu.
+        $sep = $this->findingByCheck($this->crossCheck->check($this->supplierId, self::YEAR, 9, 'monthly'), 'account_343_vs_return');
+        self::assertNotNull($sep);
+        self::assertFalse($sep['blocking']);
+        self::assertCount(1, $sep['documents']);
+        self::assertSame('timing_73', $sep['documents'][0]['reason']);
+        self::assertSame(sprintf('%04d-10', self::YEAR), $sep['documents'][0]['claim_period']);
+    }
+
+    /** T2d: zápis 343 výdajového pokladního dokladu s jinou částkou než DPH dokladu není § 73 posun. */
+    public function testCashPurchaseClaimShiftWithWrongAmountBlocks(): void
+    {
+        $cash = $this->cashPurchase(sprintf('%04d-09-22', self::YEAR), sprintf('%04d-10-06', self::YEAR), 311.33, 65.38);
+        $this->entry343(sprintf('%04d-09-22', self::YEAR), 75.38, 'debit', 'cash', $cash);
+
+        $oct = $this->findingByCheck($this->crossCheck->check($this->supplierId, self::YEAR, 10, 'monthly'), 'account_343_vs_return');
+        self::assertNotNull($oct);
+        self::assertTrue($oct['blocking']);
+        self::assertSame('value_mismatch', $oct['documents'][0]['reason'] ?? null);
+
+        $sep = $this->findingByCheck($this->crossCheck->check($this->supplierId, self::YEAR, 9, 'monthly'), 'account_343_vs_return');
+        self::assertNotNull($sep);
+        self::assertTrue($sep['blocking']);
+        self::assertSame('extra_entry', $sep['documents'][0]['reason'] ?? null);
+    }
+
+    /**
      * T2b: uzavření a otevření knih (ČÚS 002) NENÍ daňová transakce a do obratu 343 nepatří.
      *
      * K rozvahovému dni se zůstatek 343 převede na 702, k 1. dni dalšího období se přes 701
@@ -1219,6 +1267,27 @@ final class VatCrossCheckTest extends TestCase
         $line->execute([$entryId, $this->supplierId, $acc343, 'credit', $amount, 2]);
         $line->execute([$entryId, $this->supplierId, $acc311, 'debit', $amount, 3]);
         return $entryId;
+    }
+
+    /** Zaúčtovaný výdajový pokladní doklad s DPH (jeden řádek 21 %) bez vazby na fakturu. */
+    private function cashPurchase(string $issueDate, string $taxDate, float $base, float $vat): int
+    {
+        $pdo = $this->db->pdo();
+        $pdo->prepare("INSERT INTO cash_registers (supplier_id, name, account_code) VALUES (?, 'Syntetická pokladna 343', '211')")
+            ->execute([$this->supplierId]);
+        $register = (int) $pdo->lastInsertId();
+        $pdo->prepare(
+            "INSERT INTO cash_documents
+                (supplier_id, register_id, doc_type, purpose, doc_number, issue_date, tax_date, description,
+                 vat_mode, total_amount, currency_code, status, created_by)
+             VALUES (?, ?, 'out', 'purchase', ?, ?, ?, 'Syntetický nákup za hotové', 'vat', ?, 'CZK', 'posted', ?)"
+        )->execute([$this->supplierId, $register, 'VPD-T-' . bin2hex(random_bytes(3)), $issueDate, $taxDate, round($base + $vat, 2), $this->userId]);
+        $id = (int) $pdo->lastInsertId();
+        $pdo->prepare(
+            'INSERT INTO cash_document_vat_lines (cash_document_id, vat_rate, base_amount, vat_amount)
+             VALUES (?, 21.00, ?, ?)'
+        )->execute([$id, $base, $vat]);
+        return $id;
     }
 
     private function accountId(string $code): int

@@ -318,6 +318,52 @@ final class VatLedgerService
     }
 
     /**
+     * Zařazení daňových pokladních dokladů do evidence DPH pro klasifikaci časových
+     * posunů § 73 v kontrole 343. Tytéž filtry i normalizace jako pokladní větev
+     * {@see rows()} ({@see fetchCash}: vat_mode, bez vazby na fakturu, nárok na odpočet,
+     * jen zaúčtované, období podle COALESCE(tax_date, issue_date)), jen bez omezení
+     * na období. Doklad, který do evidence nevstoupí, ve výsledku chybí.
+     *
+     * `tax_contribution` = příspěvek dokladu k dani z přiznání (výstup − vstup): příjmový
+     * doklad +vat_czk, výdajový −vat_czk (pokladní doklad nikdy není samovyměření).
+     * `proportional` = aspoň jeden řádek s poměrným nárokem § 75.
+     *
+     * @param list<int> $cashIds
+     * @return array<int, array{claim_date:string, doc_type:string, doc_number:?string,
+     *                          tax_contribution:float, proportional:bool}>
+     */
+    public function cashClaimInfo(int $supplierId, array $cashIds): array
+    {
+        if ($cashIds === []) {
+            return [];
+        }
+        $map = $this->classificationMap($supplierId);
+        // Práh sazby ovlivňuje jen odhad řádku přiznání (40/41), ne daň dokladu, kterou
+        // tahle metoda vrací. Rok proto stačí aktuální.
+        $bucketYear = (int) date('Y');
+        $bucket = $this->taxConstants->vatBucketThreshold($bucketYear);
+        $out = [];
+        $ids = array_values(array_unique(array_map('intval', $cashIds)));
+        foreach ($this->fetchCash($supplierId, null, null, false, $ids, $bucketYear) as $r) {
+            $row = $this->normalize($r, $r['doc_type'] === 'in' ? 'sale' : 'purchase', $map, $bucket);
+            $id = $row['invoice_id'];
+            $out[$id] ??= [
+                'claim_date'       => substr((string) $row['tax_date'], 0, 10),
+                'doc_type'         => (string) $r['doc_type'],
+                'doc_number'       => $row['doc_number'],
+                'tax_contribution' => 0.0,
+                'proportional'     => false,
+            ];
+            $out[$id]['tax_contribution'] = round(
+                $out[$id]['tax_contribution'] + ($row['source'] === 'sale' ? $row['vat_czk'] : -$row['vat_czk']),
+                2,
+            );
+            $out[$id]['proportional'] = $out[$id]['proportional'] || $row['vat_deduction_partial'];
+        }
+        return $out;
+    }
+
+    /**
      * Přijaté doklady, které stojí ve schvalování (`approval_status` pending/rejected),
      * a proto jako koncept chybí v přiznání i KH za období, kam by po schválení patřily.
      *
@@ -1609,12 +1655,22 @@ final class VatLedgerService
      *
      * Směr řádku určuje `doc_type` ('in' = příjem = sale, jinak purchase).
      *
+     * `$cashIds` zúží výběr na vybrané doklady (po indexu supplier_id + id). S `$start`
+     * a `$end` = null se období nefiltruje: tak se ptá {@see cashClaimInfo()}, do kterého
+     * období evidence doklad zařadí. Práh sazby pak bere `$bucketYear`.
+     *
+     * @param list<int>|null $cashIds
      * @return iterable<array<string,mixed>>
      */
-    private function fetchCash(int $supplierId, string $start, string $end, bool $includeDrafts): iterable
+    private function fetchCash(int $supplierId, ?string $start, ?string $end, bool $includeDrafts, ?array $cashIds = null, ?int $bucketYear = null): iterable
     {
-        $bucket = $this->taxConstants->vatBucketThreshold((int) substr($start, 0, 4));
+        $bucket = $this->taxConstants->vatBucketThreshold($bucketYear ?? (int) substr((string) $start, 0, 4));
         $statusFilter = $includeDrafts ? "cd.status != 'reversed'" : "cd.status = 'posted'";
+        [$idWhere, $idParams] = self::idFilter('cd.id', $cashIds);
+        $periodWhere = $start !== null && $end !== null
+            ? 'AND COALESCE(cd.tax_date, cd.issue_date) BETWEEN ? AND ?'
+            : '';
+        $periodParams = $periodWhere !== '' ? [$start, $end] : [];
         $stmt = $this->db->pdo()->prepare("
             SELECT cd.id AS invoice_id, cd.doc_number, cd.doc_number AS vendor_invoice_number,
                    'cash' AS document_kind, cd.status, cd.doc_type,
@@ -1648,10 +1704,11 @@ final class VatLedgerService
                -- z konstrukce tuzemské zdanitelné plnění (rc_flag = 0, viz komentář výše).
                AND (cd.doc_type = 'in' OR cl.vat_deduction <> 'none')
                AND {$statusFilter}
-               AND COALESCE(cd.tax_date, cd.issue_date) BETWEEN ? AND ?
+               {$idWhere}
+               {$periodWhere}
           ORDER BY COALESCE(cd.tax_date, cd.issue_date), cd.id, cl.id
         ");
-        $stmt->execute([$bucket, $bucket, $supplierId, $start, $end]);
+        $stmt->execute([$bucket, $bucket, $supplierId, ...$idParams, ...$periodParams]);
         $stmt->setFetchMode(\PDO::FETCH_ASSOC);
         return $stmt;
     }
