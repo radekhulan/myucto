@@ -319,4 +319,13 @@ describe('OtherItemPlans', () => {
     await flushPromises()
     expect(wrapper.get('[data-test="schedule-generate"]').attributes('disabled')).toBeDefined()
   })
+
+  it('tichá obnova detailu (nový objekt položky se stejnými údaji) plány načte znovu', async () => {
+    m.installments.mockResolvedValue([])
+    const wrapper = shallowMount(OtherItemPlans, { props: { item: item({ paid_amount: 0, remaining_amount: 3000 }) }, global: { stubs: { RouterLink: true } } })
+    await flushPromises()
+    await wrapper.setProps({ item: item({ paid_amount: 0, remaining_amount: 3000 }) })
+    await flushPromises()
+    expect(m.schedules).toHaveBeenCalledTimes(2)
+  })
 })

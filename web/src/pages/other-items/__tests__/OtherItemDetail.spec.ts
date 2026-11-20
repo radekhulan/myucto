@@ -297,6 +297,16 @@ describe('OtherItemDetail', () => {
     expect(wrapper.find('[data-test="occurrence-source"]').exists()).toBe(false)
   })
 
+  it('štítek Zaúčtováno (odkaz do deníku) nemá role bez práva číst účetnictví, stejně jako výpis', async () => {
+    m.mode = 'double_entry'
+    m.noRead = ['accounting']
+    m.get.mockResolvedValue({ id: 9, side: 'payable', kind: 'rent', title: 'Syntetický nájem', partner_name: null, issued_on: '2099-01-01', due_on: '2099-02-01',
+      currency: 'CZK', amount: 3000, paid_amount: 0, remaining_amount: 3000, status: 'posted', document_no: 'OZ-2099-0012', journal_entry_id: 41 })
+    const wrapper = shallowMount(OtherItemDetail, { global: { stubs } })
+    await flushPromises()
+    expect(wrapper.findComponent(PostingBadge).exists()).toBe(false)
+  })
+
   it('štítek Zaúčtováno pojmenuje u uhrazené položky a u storna chybí', async () => {
     m.mode = 'double_entry'
     const base = { id: 9, side: 'payable', kind: 'rent', title: 'Syntetický nájem', partner_name: null, issued_on: '2099-01-01', due_on: '2099-02-01',

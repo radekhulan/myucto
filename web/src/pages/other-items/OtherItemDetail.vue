@@ -570,7 +570,7 @@ onMounted(load)
           <span class="rounded bg-neutral-100 px-2 py-0.5 text-xs font-normal text-neutral-600" data-test="detail-kind">{{ t(`other_items.side.${item.side}`) }} · {{ otherItemKindLabel(t, item) }}</span>
           <!-- Jen živý zápis: u storna by štítek stál vedle stavu Stornováno (zápis i protizápis ukazuje Zaúčtování, stejně jako výpis).
                Stav „Zaúčtováno“ už text nese, štítek pak jen odkazuje na zápis; u uhrazené položky ho i pojmenuje. -->
-          <PostingBadge v-if="isDoubleEntry && item.status === 'posted' && item.journal_entry_id" :booked-at="item.posted_at ?? item.accounting_on" :journal-entry-id="Number(item.journal_entry_id)" :with-label="displayStatus !== 'posted'" data-test="detail-posting" />
+          <PostingBadge v-if="isDoubleEntry && canReadJournal && item.status === 'posted' && item.journal_entry_id" :booked-at="item.posted_at ?? item.accounting_on" :journal-entry-id="Number(item.journal_entry_id)" :with-label="displayStatus !== 'posted'" data-test="detail-posting" />
         </h1>
         <ActionBar :actions="actions" />
       </div>
