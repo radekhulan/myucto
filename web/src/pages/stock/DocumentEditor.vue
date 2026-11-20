@@ -80,8 +80,11 @@ const lines = ref<LineRow[]>([blankLine()])
 const locations = ref<WarehouseLocation[]>([])
 
 // L3: částky drž jako string (DECIMAL konvence) — přepočet do haléřů až v alokátoru.
-interface LandedCostRow { description: string; amount: string; allocation: LandedCostAllocation }
+interface LandedCostRow { description: string; amount: string; allocation: LandedCostAllocation; purchase_invoice_id?: number; purchase_invoice_item_id?: number }
 const landedCosts = ref<LandedCostRow[]>([])
+// Příjemka s uloženými náklady (z přijaté faktury nebo objednávky): server rozpouští jen je
+// a extra_cost z řádků nebere, proto se přidaný náklad posílá do jejich seznamu.
+const hasStoredLandedCosts = computed(() => (doc.value?.landed_costs?.length ?? 0) > 0)
 
 /**
  * Klientský port PHP `LandedCostAllocator` (deterministický, shodný výsledek):
@@ -199,6 +202,16 @@ function rowAvailability(row: LineRow): string | null {
   return availabilityMap.value[String(row.stock_item_id)] ?? '0'
 }
 
+function landedCostRows(d: StockDocument): LandedCostRow[] {
+  return (d.landed_costs ?? []).map(c => ({
+    description: c.description,
+    amount: c.amount,
+    allocation: c.allocation,
+    purchase_invoice_id: c.purchase_invoice_id ?? undefined,
+    purchase_invoice_item_id: c.purchase_invoice_item_id ?? undefined,
+  }))
+}
+
 async function loadDocument() {
   if (!docId.value) return
   loading.value = true
@@ -233,6 +246,7 @@ async function loadDocument() {
     })
     await Promise.all(lines.value.filter(row => row.stock_item_id !== null).map(row => loadTrackingUnits(row, row.stock_item_id as number)))
     if (lines.value.length === 0) lines.value = [blankLine()]
+    landedCosts.value = landedCostRows(d)
     await refreshAvailability()
   } catch (e: any) {
     error.value = e?.response?.data?.error?.message || t('common.error')
@@ -259,10 +273,11 @@ function mapError(e: any): string {
 function buildPayload(): StockDocumentPayload {
   const rows = lines.value.filter(l => l.stock_item_id != null && Number(l.qty) > 0)
 
-  // H1: backend /stock/documents čte jen per-řádkový `extra_cost`, NE pole `landed_costs`.
+  // H1: bez uložených nákladů backend /stock/documents čte jen per-řádkový `extra_cost`.
   // Vedlejší náklady proto rozpustíme klientsky do extra_cost (deterministicky, shodně s PHP).
+  // Příjemka s uloženými náklady je posílá seznamem `landed_costs` a rozpustí je server.
   let allocated: number[] = new Array<number>(rows.length).fill(0)
-  if (isReceipt.value && landedCosts.value.length > 0) {
+  if (isReceipt.value && landedCosts.value.length > 0 && !hasStoredLandedCosts.value) {
     const baseLines = rows.map(l => ({
       value: Math.round(Number(l.qty) * Number(l.unit_cost || 0) * 100),
       qty: Math.round(Number(l.qty) * 1000),
@@ -285,6 +300,9 @@ function buildPayload(): StockDocumentPayload {
     invoice_id: doc.value?.invoice_id ?? undefined,
     purchase_invoice_id: doc.value?.purchase_invoice_id ?? undefined,
     stock_take_id: doc.value?.stock_take_id ?? undefined,
+    landed_costs: isReceipt.value && hasStoredLandedCosts.value
+      ? landedCosts.value.filter(c => Number(c.amount) > 0).map(c => ({ ...c, amount: Number(c.amount) }))
+      : undefined,
     lines: rows.map((l, i) => {
       const manualExtraH = isReceipt.value && l.extra_cost ? Math.round(Number(l.extra_cost) * 100) : 0
       const totalExtraH = manualExtraH + (allocated[i] ?? 0)
@@ -337,8 +355,9 @@ async function saveDraft() {
       doc.value = await stockApi.createDocument(payload)
       router.replace(`/stock/documents/${doc.value.id}`)
     }
-    // Částky už jsou v extra_cost řádků, další uložení by je přičetlo znovu.
-    landedCosts.value = []
+    // Rozpuštěné částky už jsou v extra_cost řádků, další uložení by je přičetlo znovu.
+    // Uložené náklady bere z odpovědi, aby je nesmazalo další uložení, když znovunačtení selže.
+    landedCosts.value = landedCostRows(doc.value)
     toast.success(t('common.saved'))
     await loadDocument()
   } catch (e: any) {

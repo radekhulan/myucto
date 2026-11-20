@@ -770,6 +770,8 @@ export interface StockDocument {
   lines?: StockDocumentLine[]
   /** Jen detail příjemky: vydané faktury vzniklé z jejích řádků. */
   sales_invoices?: ReceiptSalesInvoice[]
+  /** Jen příjemka: uložené vedlejší náklady. Dokud nějaké jsou, řídí extra_cost řádků. */
+  landed_costs?: Array<Required<Pick<StockReceiptLandedCost, 'description' | 'allocation'>> & { id: number; amount: string; purchase_invoice_id: number | null; purchase_invoice_item_id: number | null }>
   warnings?: string[]
 }
 
@@ -784,6 +786,8 @@ export interface StockDocumentPayload {
   invoice_id?: number
   purchase_invoice_id?: number
   stock_take_id?: number
+  /** Nahradí uložené vedlejší náklady příjemky (přidání, úprava i smazání). */
+  landed_costs?: StockReceiptLandedCost[]
   lines: Array<{
     stock_item_id: number
     qty: string | number

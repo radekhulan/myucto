@@ -75,6 +75,7 @@ final class StockDocumentService
         private readonly StockCommitmentService $commitments,
         private readonly UnitPrecision $unitPrecision,
         private readonly ReceiptCardUpdater $cardUpdates,
+        private readonly StockAcquisitionCostService $acquisitionCosts,
     ) {}
 
     // ── CRUD draftu ──────────────────────────────────────────────────────────────
@@ -143,20 +144,53 @@ final class StockDocumentService
             }
             // Desetinná místa (2036) jen u poslaných řádků, uložené zůstávají, jak jsou.
             [$header, $lines] = $this->validateBody($supplierId, $body, blockInactiveItems: $linesSent, checkUnitDecimals: $checkUnitDecimals && $linesSent);
-            $persistedCosts = $this->landedCosts->listForDocument($supplierId, $id);
+            // Poslané landed_costs nahradí uložené vedlejší náklady (přidání, úprava i smazání).
+            // Příjemka s uloženými náklady jimi řídí extra_cost řádků, poslané extra_cost se nebere.
+            $costsSent = array_key_exists('landed_costs', $body);
+            if ($costsSent) {
+                self::assertLandedCostList($header['doc_type'], $body['landed_costs']);
+            }
+            $storedCosts = $this->landedCosts->listForDocument($supplierId, $id);
+            // Příjemka bez uložených nákladů drží extra_cost řádků tak, jak je klient poslal
+            // (ruční částky i náklad rozpuštěný editorem); seznam by je přepsal.
+            if ($costsSent && $storedCosts === [] && $body['landed_costs'] !== []) {
+                throw new StockException('invalid_document', 'Seznam vedlejších nákladů jde upravit jen u příjemky, která uložené náklady má. Jinak je zadejte do řádků.', 422);
+            }
             if (!$this->docs->updateDraftHeader($supplierId, $id, $header)) {
                 throw new StockException('not_draft', 'Doklad se během úpravy změnil.', 409);
             }
             $this->docs->replaceLines($supplierId, $id, $lines);
-            if ($persistedCosts !== []) {
+            if ($costsSent) {
+                $this->acquisitionCosts->replaceLandedCosts($supplierId, $id, array_values($body['landed_costs']));
+            }
+            $persistedCosts = $this->landedCosts->listForDocument($supplierId, $id);
+            // Smazání posledního nákladu vynuluje jeho podíl.
+            if ($persistedCosts !== [] || $storedCosts !== []) {
                 $this->reallocateLandedCosts($supplierId, $id, (string) $header['doc_date'], $persistedCosts);
             }
             $doc = $this->docs->findWithLines($supplierId, $id);
             if ($doc === null) {
                 throw new StockException('not_found', 'Skladový doklad nenalezen.', 404);
             }
+            if ($doc['doc_type'] === 'receipt') {
+                $doc['landed_costs'] = $persistedCosts;
+            }
             return $doc;
         });
+    }
+
+    /** Seznam vedlejších nákladů z těla úpravy: jen u příjemky, každá položka s kladnou částkou. */
+    private static function assertLandedCostList(string $docType, mixed $costs): void
+    {
+        if ($docType !== 'receipt' || !is_array($costs) || !array_is_list($costs)) {
+            throw new StockException('invalid_document', 'Vedlejší náklady patří jen ke konceptu příjemky jako seznam.', 422);
+        }
+        foreach ($costs as $i => $cost) {
+            $amount = is_array($cost) ? ($cost['amount'] ?? null) : null;
+            if (!is_numeric($amount) || (float) $amount <= 0 || (float) $amount >= 1e12) {
+                throw new StockException('invalid_document', 'Vedlejší náklad musí mít kladnou částku.', 422, ['index' => $i]);
+            }
+        }
     }
 
     /** @param list<array<string,mixed>> $costs */
