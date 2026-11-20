@@ -450,6 +450,162 @@ final class StockSalesTraceabilityTest extends StockTestCase
         self::assertSame(403, $this->call(StockReportAction::class, 'export', $supplierId, $query + ['format' => 'xlsx'], ['name' => 'sales'], $stockOnly)->getStatusCode());
     }
 
+    // ── převzaté faktury spárované podle kódu ───────────────────────────────
+
+    public function testImportedLinesMatchedByCodeOnlyWithOptionAndWithoutStockEffect(): void
+    {
+        $supplierId = $this->createSupplier();
+        $whId = $this->warehouse($supplierId);
+        $itemId = $this->item($supplierId, 'IMP-A');
+        $this->receiveStock($supplierId, $whId, $itemId, '5.000', 10.0);
+        $client = $this->client($supplierId, 'Převzatý odběratel');
+        $this->issuedInvoice($supplierId, $client, [[$itemId, $whId, '1.000', 100.0]], date: '2099-05-02');
+        $imported = $this->importedInvoice($supplierId, $client, [['IMP-A', '2.000', 300.0], ['NEZNAMY', '1.000', 50.0]], date: '2099-05-03');
+        // Ručně psaný řádek s kódem, ale bez importu, zůstává mimo.
+        $this->importedInvoice($supplierId, $client, [['IMP-A', '7.000', 10.0]], date: '2099-05-04', batch: null);
+        $period = ['date_from' => '2099-05-01', 'date_to' => '2099-05-31'];
+
+        $off = $this->sales($supplierId, $period);
+        self::assertSame(1, $off['totals']['lines']);
+        self::assertFalse($off['items'][0]['matched_by_code']);
+
+        $on = $this->sales($supplierId, $period + ['include_imported' => '1']);
+        self::assertSame(2, $on['totals']['lines']);
+        self::assertSame('3.000', $on['totals']['qty']);
+        $matched = array_values(array_filter($on['items'], static fn (array $r): bool => $r['matched_by_code']));
+        self::assertCount(1, $matched);
+        self::assertSame([$imported, $itemId, '2.000'], [$matched[0]['invoice_id'], $matched[0]['stock_item_id'], $matched[0]['qty']]);
+
+        // Sklad se nepohnul: 5 přijato, 1 vydáno skladovou fakturou, převzaté řádky nic.
+        self::assertSame(4000, $this->level($supplierId, $whId, $itemId)['qtyT']);
+        $docs = $this->db->pdo()->prepare('SELECT COUNT(*) FROM stock_documents WHERE supplier_id = ? AND invoice_id = ?');
+        $docs->execute([$supplierId, $imported]);
+        self::assertSame(0, (int) $docs->fetchColumn());
+    }
+
+    public function testImportedCreditNoteSubtractsQuantityOfItsLine(): void
+    {
+        $supplierId = $this->createSupplier();
+        $this->item($supplierId, 'IMP-DOB');
+        $client = $this->client($supplierId, 'Dobropisový odběratel');
+        $sale = $this->importedInvoice($supplierId, $client, [['IMP-DOB', '3.000', 100.0]], date: '2099-06-02');
+        $this->importedInvoice($supplierId, $client, [['IMP-DOB', '1.000', 100.0]], type: 'credit_note', date: '2099-06-03', parentId: $sale);
+
+        $report = $this->sales($supplierId, ['date_from' => '2099-06-01', 'date_to' => '2099-06-30', 'include_imported' => '1']);
+
+        self::assertSame('2.000', $report['totals']['qty']);
+        self::assertSame([['currency' => 'CZK', 'total_without_vat' => '200.00']], $report['totals']['amounts']);
+    }
+
+    /** Dobropis vystavený v aplikaci k převzaté faktuře importní dávku nemá, odečte se přes původní fakturu. */
+    public function testInAppCreditNoteToImportedInvoiceSubtractsQuantity(): void
+    {
+        $supplierId = $this->createSupplier();
+        $this->item($supplierId, 'IMP-DOB2');
+        $client = $this->client($supplierId);
+        $sale = $this->importedInvoice($supplierId, $client, [['IMP-DOB2', '3.000', 100.0]], date: '2099-06-02');
+        $this->importedInvoice($supplierId, $client, [['IMP-DOB2', '1.000', 100.0]], type: 'credit_note', date: '2099-06-03', parentId: $sale, batch: null);
+
+        $report = $this->sales($supplierId, ['date_from' => '2099-06-01', 'date_to' => '2099-06-30', 'include_imported' => '1', 'group_by' => 'item']);
+
+        self::assertSame('2.000', $report['totals']['qty']);
+        self::assertSame('2.000', $report['groups'][0]['qty'], 'Souhrn po kartách sedí s celkem.');
+    }
+
+    public function testImportedLinesNeverMatchAnotherCompanysCard(): void
+    {
+        $supplierId = $this->createSupplier();
+        $other = $this->createSupplier();
+        $this->item($other, 'IMP-CIZI');
+        $this->importedInvoice($supplierId, $this->client($supplierId), [['IMP-CIZI', '1.000', 10.0]], date: '2099-07-02');
+
+        $report = $this->sales($supplierId, ['date_from' => '2099-07-01', 'date_to' => '2099-07-31', 'include_imported' => '1']);
+
+        self::assertSame(0, $report['totals']['lines']);
+    }
+
+    public function testImportedLinesFollowItemFilter(): void
+    {
+        $supplierId = $this->createSupplier();
+        $wanted = $this->item($supplierId, 'IMP-K1');
+        $this->item($supplierId, 'IMP-K2');
+        $this->importedInvoice($supplierId, $this->client($supplierId), [['IMP-K1', '1.000', 10.0], ['IMP-K2', '1.000', 20.0]], date: '2099-07-02');
+
+        $report = $this->sales($supplierId, ['date_from' => '2099-07-01', 'date_to' => '2099-07-31', 'include_imported' => '1', 'stock_item_id' => (string) $wanted]);
+
+        self::assertSame(['IMP-K1'], array_column($report['items'], 'sku'));
+    }
+
+    public function testImportedLinesFollowClientFilter(): void
+    {
+        $supplierId = $this->createSupplier();
+        $this->item($supplierId, 'IMP-C');
+        $alpha = $this->client($supplierId, 'Alfa převzatá');
+        $beta = $this->client($supplierId, 'Beta převzatá');
+        $this->importedInvoice($supplierId, $alpha, [['IMP-C', '1.000', 10.0]], date: '2099-07-02');
+        $this->importedInvoice($supplierId, $beta, [['IMP-C', '2.000', 10.0]], date: '2099-07-03');
+
+        $report = $this->sales($supplierId, ['date_from' => '2099-07-01', 'date_to' => '2099-07-31', 'include_imported' => '1', 'client_id' => (string) $beta]);
+
+        self::assertSame(['Beta převzatá'], array_column($report['items'], 'client_name'));
+    }
+
+    public function testImportedLinesFollowPeriod(): void
+    {
+        $supplierId = $this->createSupplier();
+        $this->item($supplierId, 'IMP-P');
+        $client = $this->client($supplierId);
+        $this->importedInvoice($supplierId, $client, [['IMP-P', '1.000', 10.0]], date: '2015-03-10');
+        $this->importedInvoice($supplierId, $client, [['IMP-P', '4.000', 10.0]], date: '2016-03-10');
+
+        $report = $this->sales($supplierId, ['date_from' => '2015-01-01', 'date_to' => '2015-12-31', 'include_imported' => '1']);
+
+        self::assertSame('1.000', $report['totals']['qty']);
+    }
+
+    public function testImportedLinesFollowTextSearchInCardNameAndTextParameter(): void
+    {
+        $supplierId = $this->createSupplier();
+        $byName = $this->item($supplierId, 'IMP-T1');
+        $this->db->pdo()->prepare('UPDATE stock_items SET name = ? WHERE id = ?')->execute(['Motorka ZDMTSTNAME0001', $byName]);
+        $byParam = $this->item($supplierId, 'IMP-T2');
+        $this->attributeValue($supplierId, $byParam, $this->attribute($supplierId, 'vin', 'text'), 'ZDMTSTPARAM0002');
+        $this->item($supplierId, 'IMP-T3');
+        $this->importedInvoice($supplierId, $this->client($supplierId), [['IMP-T1', '1.000', 10.0], ['IMP-T2', '1.000', 10.0], ['IMP-T3', '1.000', 10.0]], date: '2099-08-02');
+        $query = ['date_from' => '2099-08-01', 'date_to' => '2099-08-31', 'include_imported' => '1'];
+
+        self::assertSame(['IMP-T1'], array_column($this->sales($supplierId, $query + ['q' => 'TSTNAME0001'])['items'], 'sku'));
+        self::assertSame(['IMP-T2'], array_column($this->sales($supplierId, $query + ['q' => 'TSTPARAM0002'])['items'], 'sku'));
+        self::assertSame(['IMP-T3'], array_column($this->sales($supplierId, $query + ['q' => 'IMP-T3'])['items'], 'sku'));
+    }
+
+    public function testImportedLinesFollowCategoryFilter(): void
+    {
+        $supplierId = $this->createSupplier();
+        $inCategory = $this->item($supplierId, 'IMP-CAT1');
+        $this->item($supplierId, 'IMP-CAT2');
+        $this->assignCategory($supplierId, $inCategory, $this->category($supplierId, 'MOTO', null));
+        $categoryId = (int) $this->db->pdo()->query('SELECT MAX(id) FROM stock_categories')->fetchColumn();
+        $this->importedInvoice($supplierId, $this->client($supplierId), [['IMP-CAT1', '1.000', 10.0], ['IMP-CAT2', '1.000', 10.0]], date: '2099-08-02');
+
+        $report = $this->sales($supplierId, ['date_from' => '2099-08-01', 'date_to' => '2099-08-31', 'include_imported' => '1', 'category_id' => (string) $categoryId]);
+
+        self::assertSame(['IMP-CAT1'], array_column($report['items'], 'sku'));
+    }
+
+    public function testSalesExportMarksImportedLines(): void
+    {
+        $supplierId = $this->createSupplier();
+        $this->item($supplierId, 'IMP-X');
+        $this->importedInvoice($supplierId, $this->client($supplierId), [['IMP-X', '1.000', 10.0]], date: '2099-09-02');
+        $query = ['date_from' => '2099-09-01', 'date_to' => '2099-09-30', 'include_imported' => '1', 'format' => 'xlsx'];
+
+        $xlsx = $this->call(StockReportAction::class, 'export', $supplierId, $query, ['name' => 'sales']);
+
+        self::assertSame(200, $xlsx->getStatusCode());
+        self::assertContains('Faktura (převzatá, spárováno podle kódu)', array_column($this->xlsxRows($xlsx, 'Řádky'), 2));
+    }
+
     // ── pomocníci ────────────────────────────────────────────────────────────
 
     private function serialItem(int $supplierId, string $sku): int
@@ -549,6 +705,36 @@ final class StockSalesTraceabilityTest extends StockTestCase
             $pdo->rollBack();
             throw $e;
         }
+        return $invoiceId;
+    }
+
+    /**
+     * Vystavený doklad jako po importu z jiného systému: řádky bez karty, jen s kódem
+     * položky, a značka importní dávky. Sklad se při importu nehýbe.
+     *
+     * @param list<array{0:string,1:string,2:float}> $lines kód, množství, cena
+     */
+    private function importedInvoice(
+        int $supplierId,
+        int $clientId,
+        array $lines,
+        string $type = 'invoice',
+        string $date = '2099-06-10',
+        ?int $parentId = null,
+        ?string $batch = 'import-test',
+    ): int {
+        $invoiceId = $this->invoiceDraft($supplierId, $clientId, $type, [
+            'issue_date' => $date, 'parent_invoice_id' => $parentId, 'varsymbol' => (string) random_int(1000000, 9999999),
+        ]);
+        foreach ($lines as $i => [$code, $qty, $price]) {
+            $itemId = $this->invoiceItem($invoiceId, null, null, $qty, $price, $i);
+            $this->db->pdo()->prepare('UPDATE invoice_items SET seller_item_code = ? WHERE id = ?')->execute([$code, $itemId]);
+        }
+        $stmt = $this->db->pdo()->prepare('SELECT company_name FROM clients WHERE id = ?');
+        $stmt->execute([$clientId]);
+        $snapshot = json_encode(['company_name' => (string) $stmt->fetchColumn()], JSON_UNESCAPED_UNICODE);
+        $this->db->pdo()->prepare("UPDATE invoices SET status = 'issued', client_snapshot = ?, import_batch_id = ? WHERE id = ?")
+            ->execute([$snapshot, $batch, $invoiceId]);
         return $invoiceId;
     }
 

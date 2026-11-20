@@ -97,6 +97,7 @@ const salesFilters = reactive({
   item_label: null as string | null,
   q: '',
   group_by: 'none' as 'none' | 'client' | 'item',
+  include_imported: false,
   page: 1,
 })
 let salesSearchTimer: ReturnType<typeof setTimeout> | undefined
@@ -111,6 +112,7 @@ function salesParams() {
     stock_item_id: salesFilters.stock_item_id ?? undefined,
     q: salesFilters.q.trim() || undefined,
     group_by: salesFilters.group_by,
+    include_imported: salesFilters.include_imported || undefined,
   }
 }
 
@@ -568,6 +570,11 @@ onBeforeUnmount(() => { clearValuationTimer(); ++valuationGeneration; void aband
             {{ t(`stock.reports.sales.group_${g}`) }}
           </button>
         </div>
+        <label class="inline-flex items-center gap-1.5 h-8 text-xs sm:text-sm text-neutral-600 cursor-pointer" :title="t('stock.reports.sales.include_imported_hint')">
+          <input v-model="salesFilters.include_imported" type="checkbox" @change="reloadSales()" class="rounded border-neutral-300" />
+          {{ t('stock.reports.sales.include_imported') }}
+        </label>
+        <p v-if="salesFilters.include_imported" class="basis-full text-xs text-neutral-500">{{ t('stock.reports.sales.include_imported_hint') }}</p>
         <button v-if="salesFilters.stock_item_id" type="button" @click="clearItemFilter"
           class="cursor-pointer inline-flex items-center gap-1 h-8 px-2 rounded-md bg-neutral-100 text-xs text-neutral-700 hover:bg-neutral-200 whitespace-nowrap">
           {{ t('stock.reports.sales.item_filter', { sku: salesFilters.item_label ?? `#${salesFilters.stock_item_id}` }) }}
@@ -705,6 +712,7 @@ onBeforeUnmount(() => { clearValuationTimer(); ++valuationGeneration; void aband
                     <td class="px-3 py-2 whitespace-nowrap">
                       <RouterLink :to="`/invoices/${r.invoice_id}`" class="font-mono text-xs text-primary-600 hover:text-primary-700">{{ r.invoice_number || `#${r.invoice_id}` }}</RouterLink>
                       <span v-if="r.invoice_type === 'credit_note'" class="ml-1 text-xs px-1.5 py-0.5 rounded bg-warning-50 text-warning-700">{{ t('stock.item_detail.credit_note') }}</span>
+                      <span v-if="r.matched_by_code" class="ml-1 text-xs px-1.5 py-0.5 rounded bg-neutral-100 text-neutral-600" :title="t('stock.reports.sales.include_imported_hint')">{{ t('stock.reports.sales.matched_by_code') }}</span>
                     </td>
                     <td class="px-3 py-2">
                       <RouterLink v-if="r.client_id" :to="`/clients/${r.client_id}`" class="hover:text-primary-700">{{ r.client_name || `#${r.client_id}` }}</RouterLink>
@@ -732,6 +740,7 @@ onBeforeUnmount(() => { clearValuationTimer(); ++valuationGeneration; void aband
                 <span class="flex items-center gap-1">
                   <RouterLink :to="`/invoices/${r.invoice_id}`" class="font-mono text-primary-600">{{ r.invoice_number || `#${r.invoice_id}` }}</RouterLink>
                   <span v-if="r.invoice_type === 'credit_note'" class="px-1.5 py-0.5 rounded bg-warning-50 text-warning-700">{{ t('stock.item_detail.credit_note') }}</span>
+                  <span v-if="r.matched_by_code" class="px-1.5 py-0.5 rounded bg-neutral-100 text-neutral-600">{{ t('stock.reports.sales.matched_by_code') }}</span>
                 </span>
                 <span class="text-neutral-500">{{ formatDate(r.tax_date) }}</span>
               </div>
