@@ -920,6 +920,14 @@ input[type="date"]::-webkit-calendar-picker-indicator:hover { opacity: 1; }
       overflow-wrap: anywhere;
       min-width: 16rem;
     }
+    /* Buňka tabulky max-width ignoruje, strop volného místa (useAdaptiveTableRows,
+       data-adaptive-max) proto nese text uvnitř. */
+    .singleline-list-table:not(.multirow-table) > tbody > tr:not(.table-detail-row) > td.wrap-cell:has(> .adaptive-text-cap) {
+      min-width: 14rem;
+    }
+    .singleline-list-table:not(.adaptive-table) > tbody > tr:not(.table-detail-row) > td.wrap-cell .adaptive-text-cap {
+      max-width: calc(var(--adaptive-text-max, 100vw) - 1.5rem);
+    }
   }
 
   @media (min-width: 768px) {

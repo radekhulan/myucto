@@ -33,12 +33,14 @@ export interface JournalSourceRef {
 }
 
 /**
- * Doplněk štítku zdroje v deníku. Protizápis (storno) nese `source_id` NULL a jeho zdroj
- * je dohledaný přes stornovaný zápis (`source_link_id`); bez žádného ID se nevypíše nic,
- * nikdy „#null".
+ * Doplněk štítku zdroje v deníku. Přednost má číslo dokladu (`source_ref`), interní ID
+ * je jen náhrada pro zdroje bez čísla. Protizápis (storno) nese `source_id` NULL a jeho
+ * zdroj je dohledaný přes stornovaný zápis (`source_link_id`); bez žádného ID se nevypíše
+ * nic, nikdy „#null".
  */
-export function journalSourceRefLabel(entry: JournalSourceRef & { source_asset_name?: string | null }): string {
+export function journalSourceRefLabel(entry: JournalSourceRef & { source_asset_name?: string | null, source_ref?: string | null }): string {
   if (entry.source_asset_name) return entry.source_asset_name
+  if (entry.source_ref) return entry.source_ref
   const id = entry.source_id ?? entry.source_link_id
   return id ? `#${id}` : ''
 }

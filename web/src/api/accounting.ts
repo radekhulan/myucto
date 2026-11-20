@@ -131,6 +131,16 @@ export interface JournalLine {
   account_name?: string | null
 }
 
+/** Části uloženého popisu zápisu (JournalDescriptionBuilder::parts). */
+export interface JournalDescriptionParts {
+  /** Druh dokladu, který jinde vidět není (Dobropis FV, Účtenka). */
+  kind: string | null
+  partner: string | null
+  vs: string | null
+  /** Věcný text bez hlavičky dokladu, protistrany a VS. */
+  text: string | null
+}
+
 export interface JournalEntry {
   id: number
   supplier_id: number
@@ -184,6 +194,20 @@ export interface JournalEntry {
    */
   source_settlement_doc_type?: 'invoice' | 'purchase_invoice' | null
   source_settlement_doc_id?: number | null
+  /** Číslo prvotního dokladu pro štítek zdroje (faktura, přijatá faktura, pokladní doklad, ostatní položka). */
+  source_ref?: string | null
+  /** Údaje prvotního dokladu pro volitelné sloupce deníku, jen v listu. */
+  partner_name?: string | null
+  partner_ic?: string | null
+  variable_symbol?: string | null
+  vendor_document_no?: string | null
+  tax_date?: string | null
+  received_date?: string | null
+  due_date?: string | null
+  paid_date?: string | null
+  counterparty_account?: string | null
+  /** Rozklad popisu na části, které deník ukazuje i samostatnými sloupci (jen v listu). */
+  description_parts?: JournalDescriptionParts
   /**
    * Obohaceno v listu — zápis má protějšek v grafu doklad ↔ úhrada (banka/pokladna/
    * zápočet). Podklad pro odznak ve sloupci Zdroj; obsah panelu dodá /journal/{id}/related.

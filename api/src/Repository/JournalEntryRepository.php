@@ -10,6 +10,7 @@ use MyInvoice\Service\Accounting\Dimension\DimensionFilter;
 use MyInvoice\Service\Accounting\Dimension\DimensionPeriodGuard;
 use MyInvoice\Service\Accounting\Dimension\SystemDimensionWritePolicy;
 use MyInvoice\Service\Accounting\PostingException;
+use MyInvoice\Service\Accounting\JournalDescriptionBuilder;
 use MyInvoice\Service\Accounting\JournalLineAmount;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Accounting\Allocation\JointAllocationJournalProof;
@@ -2166,7 +2167,8 @@ final class JournalEntryRepository
                        -- co stornuje. Bez tohohle na něm chybí proklik na prvotní doklad
                        -- i cesta zpět na stornovaný zápis, takže ze storna nevede nikam nic.
                        rev_src.id AS reverses_entry_id,
-                       COALESCE(je.source_id, rev_src.source_id) AS source_link_id
+                       COALESCE(je.source_id, rev_src.source_id) AS source_link_id,
+                       " . self::DOCUMENT_FACT_SELECT . "
                   FROM (SELECT je.id, {$sortExpression} AS sort_value
                           FROM journal_entries je
                          WHERE {$whereSql}
@@ -2200,6 +2202,7 @@ final class JournalEntryRepository
                         WHEN je.source_type = 'depreciation' THEN dep.asset_id
                         ELSE NULL
                     END
+             " . self::DOCUMENT_FACT_JOINS . "
                  ORDER BY pick.sort_value {$sortDir}, je.id DESC";
         $stmt = $pdo->prepare($sql);
         $stmt->execute([...$selectParams, ...$sortParams, ...$params]);
@@ -2216,6 +2219,67 @@ final class JournalEntryRepository
                     SELECT 1 FROM bank_transactions bt_ref
                      WHERE bt_ref.id = je.source_id AND bt_ref.bank_ref LIKE ? ESCAPE '='
                 ))";
+
+    /**
+     * Údaje prvotního dokladu do volitelných sloupců deníku (Firma, IČ, VS, číslo dokladu
+     * dodavatele, DUZP, datum přijetí, splatnost, úhrada, účet protistrany) a čitelný
+     * štítek zdroje (`source_ref`). Doklad se hledá stejně jako proklik: přímý zdroj, zdroj
+     * stornovaného zápisu, doklad vyrovnaný zápočtem a faktura uhrazená pokladním dokladem.
+     * Převzaté zápisy z převodů mají tytéž vazby, takže sloupce plní i ony.
+     *
+     * Počítá se jen pro vybranou stránku (poddotaz `pick` v paginate()), každý JOIN jde po
+     * primárním nebo unikátním klíči. Podle těchto sloupců se proto neřadí ani nefiltruje.
+     */
+    private const DOCUMENT_FACT_SELECT = "
+                       CASE je.source_type
+                           WHEN 'invoice' THEN fi.varsymbol
+                           WHEN 'purchase_invoice' THEN fpi.varsymbol
+                           WHEN 'other_item' THEN foi.document_no
+                           WHEN 'cash' THEN COALESCE(cd.doc_number, rev_cd.doc_number)
+                           ELSE NULL
+                       END AS source_ref,
+                       COALESCE(foi.partner_name, fid.partner_name, cd.partner_name, rev_cd.partner_name,
+                                NULLIF(fc.company_name, ''), NULLIF(TRIM(CONCAT_WS(' ', fc.first_name, fc.last_name)), ''),
+                                bt.counterparty_name, rev_bt.counterparty_name) AS partner_name,
+                       COALESCE(NULLIF(cd.partner_ic, ''), NULLIF(rev_cd.partner_ic, ''), NULLIF(fc.ic, '')) AS partner_ic,
+                       COALESCE(NULLIF(fi.payment_variable_symbol, ''), fi.varsymbol,
+                                NULLIF(fpi.payment_variable_symbol, ''), fpi.vendor_invoice_number,
+                                NULLIF(foi.variable_symbol, ''),
+                                NULLIF(bt.variable_symbol, ''), NULLIF(rev_bt.variable_symbol, '')) AS variable_symbol,
+                       fpi.vendor_invoice_number AS vendor_document_no,
+                       COALESCE(fi.tax_date, fpi.tax_date, cd.tax_date, rev_cd.tax_date) AS tax_date,
+                       fpi.received_at AS received_date,
+                       COALESCE(fi.due_date, fpi.due_date, foi.due_on) AS due_date,
+                       COALESCE(fi.paid_at, fpi.paid_at) AS paid_date,
+                       COALESCE(
+                           NULLIF(CONCAT_WS('/', NULLIF(COALESCE(bt.counterparty_account, rev_bt.counterparty_account), ''),
+                                                 NULLIF(COALESCE(bt.counterparty_bank, rev_bt.counterparty_bank), '')), ''),
+                           NULLIF(CONCAT_WS('/', NULLIF(foi.counterparty_account, ''), NULLIF(foi.counterparty_bank_code, '')), ''),
+                           NULLIF(CONCAT_WS('/', NULLIF(fpi.payment_account_number, ''), NULLIF(fpi.payment_bank_code, '')), ''),
+                           NULLIF(fpi.payment_iban, '')
+                       ) AS counterparty_account";
+
+    /** JOINy k DOCUMENT_FACT_SELECT, předpokládají aliasy z paginate() (je, rev_src, cd, rev_cd, stl). */
+    private const DOCUMENT_FACT_JOINS = "
+             LEFT JOIN invoices fi ON fi.supplier_id = je.supplier_id
+                    AND fi.id = CASE
+                        WHEN je.source_type = 'invoice' THEN COALESCE(je.source_id, rev_src.source_id)
+                        WHEN je.source_type = 'settlement' AND stl.doc_type = 'invoice' THEN stl.doc_id
+                        WHEN je.source_type = 'cash' THEN COALESCE(cd.invoice_id, rev_cd.invoice_id)
+                        ELSE NULL
+                    END
+             LEFT JOIN purchase_invoices fpi ON fpi.supplier_id = je.supplier_id
+                    AND fpi.id = CASE
+                        WHEN je.source_type = 'purchase_invoice' THEN COALESCE(je.source_id, rev_src.source_id)
+                        WHEN je.source_type = 'settlement' AND stl.doc_type = 'purchase_invoice' THEN stl.doc_id
+                        WHEN je.source_type = 'cash' THEN COALESCE(cd.purchase_invoice_id, rev_cd.purchase_invoice_id)
+                        ELSE NULL
+                    END
+             LEFT JOIN other_items foi ON je.source_type = 'other_item'
+                    AND foi.id = COALESCE(je.source_id, rev_src.source_id) AND foi.supplier_id = je.supplier_id
+             LEFT JOIN internal_documents fid ON je.source_type = 'manual'
+                    AND fid.supplier_id = je.supplier_id AND fid.journal_entry_id = je.id
+             LEFT JOIN clients fc ON fc.id = COALESCE(fi.client_id, fpi.vendor_id, foi.partner_id, fid.partner_id)";
 
     /** Korelovaný subselect s celkovou částkou zápisu (Σ MD = Σ Dal u vyváženého zápisu). */
     private const AMOUNT_SUBQUERY =
@@ -2700,6 +2764,11 @@ final class JournalEntryRepository
             ? (string) $r['source_settlement_doc_type'] : null;
         $r['source_settlement_doc_id'] = $r['source_settlement_doc_id'] !== null
             ? (int) $r['source_settlement_doc_id'] : null;
+        $r['description_parts'] = JournalDescriptionBuilder::parts(
+            $r['description'] ?? null,
+            (string) $r['source_type'],
+            $r,
+        );
         return $r;
     }
 }

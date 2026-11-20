@@ -32,4 +32,9 @@ describe('journalSourceRefLabel', () => {
     expect(journalSourceRefLabel({ source_type: 'invoice', source_id: null })).toBe('')
     expect(journalSourceRefLabel({ source_type: 'asset', source_id: 5, source_asset_name: 'Stroj' })).toBe('Stroj')
   })
+  it('ukáže číslo dokladu místo interního ID', () => {
+    expect(journalSourceRefLabel({ source_type: 'purchase_invoice', source_id: 59312, source_ref: 'NU2610155' })).toBe('NU2610155')
+    expect(journalSourceRefLabel({ source_type: 'invoice', source_id: null, source_link_id: 12485, source_ref: '202603162' })).toBe('202603162')
+    expect(journalSourceRefLabel({ source_type: 'bank', source_id: 7, source_ref: null })).toBe('#7')
+  })
 })

@@ -52012,6 +52012,81 @@ components:
           - integer
           - 'null'
           description: Jen source_type=cash — ID pokladny (audit 2026-07).
+        source_ref:
+          type:
+          - string
+          - 'null'
+          description: Jen v listu. Číslo prvotního dokladu (vydaná a přijatá faktura, pokladní doklad, ostatní položka).
+        partner_name:
+          type:
+          - string
+          - 'null'
+          description: Jen v listu. Firma z prvotního dokladu, u bankovního pohybu název protistrany.
+        partner_ic:
+          type:
+          - string
+          - 'null'
+          description: Jen v listu. IČ firmy z prvotního dokladu.
+        variable_symbol:
+          type:
+          - string
+          - 'null'
+          description: Jen v listu. Variabilní symbol dokladu nebo bankovního pohybu.
+        vendor_document_no:
+          type:
+          - string
+          - 'null'
+          description: Jen v listu. Číslo dokladu dodavatele u přijaté faktury.
+        tax_date:
+          type:
+          - string
+          - 'null'
+          format: date
+          description: Jen v listu. DUZP prvotního dokladu.
+        received_date:
+          type:
+          - string
+          - 'null'
+          format: date
+          description: Jen v listu. Datum přijetí přijaté faktury.
+        due_date:
+          type:
+          - string
+          - 'null'
+          format: date
+          description: Jen v listu. Splatnost prvotního dokladu.
+        paid_date:
+          type:
+          - string
+          - 'null'
+          format: date
+          description: Jen v listu. Datum úhrady faktury.
+        counterparty_account:
+          type:
+          - string
+          - 'null'
+          description: Jen v listu. Účet protistrany (bankovní pohyb, ostatní položka, platební účet přijaté faktury).
+        description_parts:
+          type: object
+          description: Jen v listu. Popis rozložený na druh dokladu, protistranu, VS a věcný text, aby seznam mohl
+            vynechat údaje ukázané samostatnými sloupci.
+          properties:
+            kind:
+              type:
+              - string
+              - 'null'
+            partner:
+              type:
+              - string
+              - 'null'
+            vs:
+              type:
+              - string
+              - 'null'
+            text:
+              type:
+              - string
+              - 'null'
         has_related:
           type: boolean
           description: Jen v listu — zápis má protějšek v grafu doklad ↔ úhrada (bankovní pohyb, pokladní doklad nebo
