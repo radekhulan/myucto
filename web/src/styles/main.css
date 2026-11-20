@@ -1167,6 +1167,22 @@ input[type="date"]::-webkit-calendar-picker-indicator:hover { opacity: 1; }
     .adaptive-table > tbody > tr:not(.table-detail-row) > :last-child {
       bottom: 0;
     }
+    /* Žlábek se šipkou rozbalení lícuje s hodnotou prvního řádku buněk, ne s horní
+       hranou řádku: posun = odsazení řádku + odsazení buňky + výška popisku sloupce. */
+    .adaptive-table.list-gutter-first-line {
+      --gutter-row-pt: 0.25rem;
+      --gutter-cell-pt: 0.4rem;
+      --gutter-label: 0rem;
+      --gutter-line: 1.25rem;
+    }
+    .adaptive-table.list-gutter-first-line.column-labels { --gutter-label: 1.04375rem; }
+    .adaptive-table.list-gutter-first-line.tbl-comfortable { --gutter-row-pt: 0.35rem; --gutter-cell-pt: 0.6rem; }
+    .adaptive-table.list-gutter-first-line.tbl-compact { --gutter-row-pt: 0rem; --gutter-cell-pt: 0.2rem; --gutter-line: 1.015625rem; }
+    .adaptive-table.list-gutter-first-line.tbl-compact.column-labels { --gutter-label: 0.84375rem; }
+    .singleline-list-table.adaptive-table.list-gutter-first-line > tbody > tr:not(.table-detail-row) > :first-child {
+      top: calc(var(--gutter-row-pt) + var(--gutter-cell-pt) + var(--gutter-label));
+      height: var(--gutter-line);
+    }
     .adaptive-table > tbody > tr.table-detail-row,
     .adaptive-table > tbody > tr.table-detail-row > td {
       display: block;

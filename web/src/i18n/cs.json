@@ -19265,6 +19265,8 @@
       }
     },
     "journal": {
+      "bulk_mode_on": "Zapnout hromadné akce",
+      "bulk_mode_off": "Vypnout hromadné akce",
       "red_storno": "Červené storno",
       "red_storno_template_unsupported": "Zápis s červeným stornem zatím nelze uložit jako šablonu.",
       "notes": {

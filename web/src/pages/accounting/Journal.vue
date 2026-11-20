@@ -48,6 +48,7 @@ import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
 import BulkActionBar from '@/components/ui/BulkActionBar.vue'
 import BulkActionsDialog from '@/components/bulk/BulkActionsDialog.vue'
 import { useListBulkActions } from '@/components/bulk/useListBulkActions'
+import { useListKeyboard } from '@/composables/useListKeyboard'
 import { journalListFilterParams } from '@/api/listQueries'
 import { apiErrorText, hasAnySingle } from '@/utils/entryForm'
 import LockedPeriodAckModal from '@/components/accounting/LockedPeriodAckModal.vue'
@@ -213,7 +214,26 @@ const bulk = useListBulkActions({
   listQuery: () => journalListFilterParams(listFilters()),
   total,
 })
-const headerActions = computed<ActionItem[]>(() => [bulk.menuItem.value])
+// Zaškrtávátka v seznamu slouží jen hromadným akcím, proto se ukážou až po jejich zapnutí
+// v „…" a seznam jinak zůstane čistý.
+const bulkMode = ref(false)
+const bulkActive = computed(() => bulk.canUse.value && bulkMode.value)
+function setBulkMode(on: boolean) {
+  bulkMode.value = on
+  if (!on) selectedIds.value = []
+}
+const headerActions = computed<ActionItem[]>(() => [
+  {
+    key: 'bulk-mode',
+    label: t(bulkMode.value ? 'accounting.journal.bulk_mode_off' : 'accounting.journal.bulk_mode_on'),
+    icon: bulkMode.value ? 'x' : 'check',
+    tier: 'overflow',
+    variant: 'neutral',
+    show: bulk.canUse.value,
+    run: () => setBulkMode(!bulkMode.value),
+  },
+  { ...bulk.menuItem.value, show: bulkActive.value },
+])
 const allLoadedSelected = computed(() => entries.value.length > 0 && entries.value.every(e => selectedIds.value.includes(e.id)))
 function toggleSelected(id: number) {
   selectedIds.value = selectedIds.value.includes(id)
@@ -835,6 +855,19 @@ async function toggleExpand(entry: JournalEntry) {
   }
 }
 
+// Pohyb po zápisech klávesnicí (šipky, j/k), Enter rozbalí detail, x označí zápis
+// pro hromadné akce, jsou-li zapnuté.
+const { activeIndex } = useListKeyboard({
+  count: () => entries.value.length,
+  open: (i) => { const e = entries.value[i]; if (e) void toggleExpand(e) },
+  toggle: (i) => { const e = entries.value[i]; if (e && bulkActive.value) toggleSelected(e.id) },
+  clear: () => { selectedIds.value = [] },
+})
+function onRowClick(entry: JournalEntry, index: number) {
+  activeIndex.value = index
+  void toggleExpand(entry)
+}
+
 // ── Drawer se zdrojovým dokladem ───────────────────────────────────────────
 // Akordeon (řádky, historie, přílohy, poznámky) zůstává; drawer je navíc a visí
 // na ikoně ve sloupci ZDROJ. Drží se ID ZÁPISU, ne source_type/source_id.
@@ -1296,13 +1329,13 @@ function entryRange(entry: JournalEntryDetail): { from: string; to: string } {
            vodorovným posunem — rozbalený detail se schová do buňky široké jako
            obrazovka a čte se přes scrollbar. Proto stack karet. -->
       <div ref="listBox" class="hidden md:block overflow-auto scrollbar-slim" @scroll.passive="onListScroll">
-        <table v-column-labels="tbl" class="w-max min-w-full text-sm singleline-list-table list-gutter-mini" :class="tbl.densityClass.value">
+        <table v-column-labels="tbl" class="w-max min-w-full text-sm singleline-list-table list-gutter-first-line" :class="[tbl.densityClass.value, bulkActive ? '' : 'list-gutter-mini']">
           <thead class="bg-neutral-50 text-xs text-neutral-500 uppercase tracking-wide sticky top-0 z-20 shadow-sm">
             <tr>
               <!-- Výběr řádku sdílí první buňku se šipkou rozbalení: useAdaptiveTableRows
                    bere první a poslední buňku jako ovládací a do rozložení sloupců je nepočítá. -->
-              <th class="px-3 py-2" :class="bulk.canUse.value ? 'w-14' : 'w-8'">
-                <input v-if="bulk.canUse.value" type="checkbox" class="h-4 w-4 cursor-pointer" :checked="allLoadedSelected"
+              <th class="px-3 py-2" :class="bulkActive ? 'w-16' : 'w-8'">
+                <input v-if="bulkActive" type="checkbox" class="h-4 w-4 cursor-pointer align-middle" :checked="allLoadedSelected"
                   :aria-label="t('common.select_all')" data-test="journal-select-all" @change="toggleAllLoaded" />
               </th>
               <template v-for="c in tbl.orderedColumns.value.filter(c => tbl.isVisible(c.key))" :key="c.key">
@@ -1317,21 +1350,23 @@ function entryRange(entry: JournalEntryDetail): { from: string; to: string } {
             </tr>
           </thead>
           <tbody class="divide-y divide-neutral-100">
-            <template v-for="e in entries" :key="e.id">
+            <template v-for="(e, rowIndex) in entries" :key="e.id">
               <!-- Rozbalený zápis je podbarvený i s hlavičkou a nese levou lištu
                    v akcentu: detail je vysoký přes celou obrazovku a bez toho se
                    při odrolování ztratí, na kterém řádku vlastně pracuju. -->
-              <tr class="cursor-pointer scroll-mt-12" :data-journal-entry="e.id" :aria-current="entryIdFilter === e.id ? 'true' : undefined" :class="[
+              <tr class="cursor-pointer scroll-mt-12" :data-journal-entry="e.id" :data-row-active="rowIndex === activeIndex" :aria-current="entryIdFilter === e.id ? 'true' : undefined" :class="[
                     e.reversed_by && !colors.hasColors.value ? 'opacity-60' : '',
                     entryIdFilter === e.id ? 'ring-2 ring-inset ring-primary-500' : '',
                     isExpanded(e.id)
                       ? 'bg-primary-50/60 border-x-2 border-t-2 border-primary-500/60'
                       : entryIdFilter === e.id ? 'bg-primary-50' : 'hover:bg-neutral-50',
-                  ]" @click="toggleExpand(e)">
+                  ]" @click="onRowClick(e, rowIndex)">
                 <td class="px-3 py-2 text-neutral-400 whitespace-nowrap">
-                  <input v-if="bulk.canUse.value" type="checkbox" class="mr-2 h-4 w-4 cursor-pointer align-middle" :checked="selectedIds.includes(e.id)"
-                    :aria-label="e.document_no || String(e.id)" data-test="journal-row-select" @click.stop @change="toggleSelected(e.id)" />
-                  <span class="inline-block transition-transform" :class="{ 'rotate-90': isExpanded(e.id) }">▸</span>
+                  <div class="flex items-center gap-2" :class="bulkActive ? '' : 'justify-center'">
+                    <input v-if="bulkActive" type="checkbox" class="h-4 w-4 shrink-0 cursor-pointer" :checked="selectedIds.includes(e.id)"
+                      :aria-label="e.document_no || String(e.id)" data-test="journal-row-select" @click.stop @change="toggleSelected(e.id)" />
+                    <span class="inline-flex h-4 w-3 shrink-0 items-center justify-center leading-none transition-transform" :class="{ 'rotate-90': isExpanded(e.id) }" aria-hidden="true">▸</span>
+                  </div>
                 </td>
                 <template v-for="c in tbl.orderedColumns.value.filter(c => tbl.isVisible(c.key))" :key="c.key">
                 <td v-if="c.key === 'date'" :data-custom-color="!!colors.color('date')" :style="colors.cellStyle('date')" class="px-3 py-2 whitespace-nowrap">{{ formatDate(e.entry_date) }}</td>
@@ -1466,7 +1501,7 @@ function entryRange(entry: JournalEntryDetail): { from: string; to: string } {
         <div v-for="e in entries" :key="`m-${e.id}`" :data-journal-entry="e.id" :aria-current="entryIdFilter === e.id ? 'true' : undefined" class="scroll-mt-12"
           :class="[isExpanded(e.id) || entryIdFilter === e.id ? 'bg-primary-50/60' : '', entryIdFilter === e.id ? 'ring-2 ring-inset ring-primary-500' : '']">
           <div class="flex items-start">
-          <label v-if="bulk.canUse.value" class="shrink-0 pl-3 pt-3.5 cursor-pointer">
+          <label v-if="bulkActive" class="shrink-0 pl-3 pt-3.5 cursor-pointer">
             <input type="checkbox" class="h-4 w-4 cursor-pointer" :checked="selectedIds.includes(e.id)"
               :aria-label="e.document_no || String(e.id)" data-test="journal-card-select" @change="toggleSelected(e.id)" />
           </label>
@@ -1567,7 +1602,7 @@ function entryRange(entry: JournalEntryDetail): { from: string; to: string } {
     </div>
     <ListLoadingSpinner :show="loading || loadingMore" />
 
-    <BulkActionBar v-if="bulk.canUse.value" :count="selectedIds.length" @clear="selectedIds = []">
+    <BulkActionBar v-if="bulkActive" :count="selectedIds.length" @clear="selectedIds = []">
       <button type="button" :class="btnOutline('warning')" class="whitespace-nowrap" data-test="journal-bulk-open" @click="bulk.open">
         <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.table" /></svg>
         {{ t('bulk_actions.menu') }}

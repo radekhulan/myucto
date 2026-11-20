@@ -19265,6 +19265,8 @@
       }
     },
     "journal": {
+      "bulk_mode_on": "Enable bulk actions",
+      "bulk_mode_off": "Disable bulk actions",
       "red_storno": "Red storno",
       "red_storno_template_unsupported": "An entry with red storno cannot be saved as a template yet.",
       "notes": {

@@ -53,7 +53,7 @@ Z bankovního výpisu použijte u pohybu **Otevřít v účetním deníku**. Ote
 1. Otevřete `Účetnictví → Účetní deník`. Zápisy jsou seřazené od nejnovějších a načítají se po 50 (další při posunu dolů, nebo tlačítkem **Načíst další**).
 2. Nad tabulkou zúžte výběr filtry: **Číslo dokladu**, **Hledat** (hledá v čísle dokladu, popisu a údajích zdroje, kód účtu jako `221.400` omezí výsledky na pohyby účtu), **Období**, **Datum od / Datum do**, **Zdroj**, **Původ**, **Účet od / Účet do**, **Částka od / Částka do**, **Stav**, **Storno** a **Nesrovnalosti doklad ↔ deník**. Filtry zrušíte odkazem **Zrušit filtry**.
 3. Řadit lze kliknutím na záhlaví sloupce. První kliknutí řadí sestupně, druhé vzestupně a třetí vrátí výchozí pořadí.
-4. Kliknutím na řádek zápis rozbalte. Uvidíte řádky MD a Dal, součet **Celkem**, popis, přílohy, poznámky, historii a u automatických zápisů panel **Proč se to stalo**.
+4. Kliknutím na řádek zápis rozbalte. Po řádcích se pohybujete i klávesnicí: šipkou dolů a nahoru (nebo **J** a **K**) přejdete na další a předchozí zápis, **Enter** ho rozbalí nebo sbalí, **X** ho při zapnutých hromadných akcích zaškrtne a **Esc** zruší výběr. Uvidíte řádky MD a Dal, součet **Celkem**, popis, přílohy, poznámky, historii a u automatických zápisů panel **Proč se to stalo**.
 5. Kliknutím na **Zdroj** otevřete postranní souhrn zdrojového dokladu. Z něj přejdete do plného detailu faktury, bankovního výpisu, pokladny, karty majetku nebo vypořádání.
 6. V panelu **Souvisí** vidíte protějšek (faktura a její úhrada) a můžete přejít na **Náhled**, **Zápis #…** nebo **Otevřít doklad**.
 7. Kliknutím na kód nebo název účtu v rozbaleném zápisu otevřete opis pohybů účtu.
@@ -219,7 +219,7 @@ Doklady nebo zápisy, které máte vybrané v seznamu, přeúčtujete stejně z 
 
 Použijte, když chcete změnit mnoho záznamů, které máte před sebou v seznamu: například všem fakturám jednoho dodavatele nastavit středisko, stovkám zápisů v deníku doplnit zakázku, změnit předkontaci přijatých faktur, doplnit poznámku na faktury, opravit variabilní symbol nespárovaných bankovních pohybů, nebo smazat doklady po zkušebním importu. Akce je v seznamech **Účetní deník**, **Vydané faktury**, **Přijaté faktury** a v bance na záložkách **Všechny pohyby** a **K zaúčtování**.
 
-1. V seznamu nastavte filtr tak, aby ukazoval jen záznamy, které chcete změnit. Případně je zaškrtněte. V účetním deníku má každý řádek zaškrtávací políčko, v záhlaví tabulky se zaškrtnou všechny načtené řádky.
+1. V seznamu nastavte filtr tak, aby ukazoval jen záznamy, které chcete změnit. Případně je zaškrtněte. V účetním deníku zaškrtávací políčka zapnete v nabídce **…** volbou **Zapnout hromadné akce**. Pak má každý řádek zaškrtávací políčko a v záhlaví tabulky se zaškrtnou všechny načtené řádky. Volba **Vypnout hromadné akce** políčka skryje a výběr zruší.
 2. Otevřete nabídku **…** v záhlaví seznamu a zvolte **Hromadné akce**. Máte-li zaškrtnuté řádky, stejné tlačítko **Hromadné akce s vybranými (N)** je i v liště výběru dole.
 3. V části **Na co akci použít** zvolte **Vybrané (N)**, nebo **Všech N podle filtru**. Volba podle filtru vezme přesně to, co seznam s aktuálním filtrem ukazuje. Nad 500 záznamů akce nejde spustit, zužte filtr.
 4. Zvolte **Operaci**. Nedostupná operace ukáže důvod (například chybí právo nebo firma nemá zapnuté dimenze).

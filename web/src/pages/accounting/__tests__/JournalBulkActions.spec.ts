@@ -94,6 +94,10 @@ function entry(id: number) {
   return { id, entry_date: '2026-02-01', document_no: `ID${id}`, description: 'Nájem', source_type: 'manual', source_id: null, amount: 100, posted_at: '2026-02-02', reversed_by: null }
 }
 
+async function enableBulk(wrapper: ReturnType<typeof mountJournal>) {
+  await wrapper.get('[data-test="action-bulk-mode"]').trigger('click')
+}
+
 describe('Journal – hromadné akce', () => {
   beforeEach(() => {
     for (const fn of [m.listPeriods, m.listAccounts, m.listJournal, m.exportReport, m.replace, m.toastError]) fn.mockReset()
@@ -109,14 +113,33 @@ describe('Journal – hromadné akce', () => {
     m.perms = ['accounting.journal.bulk_repost']
     const wrapper = mountJournal()
     await flushPromises()
+    expect(wrapper.find('[data-test="action-bulk-mode"]').exists()).toBe(false)
     expect(wrapper.find('[data-test="action-bulk-actions"]').exists()).toBe(false)
     expect(wrapper.find('[data-test="journal-row-select"]').exists()).toBe(false)
+  })
+
+  it('zaškrtávátka a položku hromadných akcí ukáže až zapnutí hromadných akcí', async () => {
+    m.perms = ['accounting.bulk_changes']
+    const wrapper = mountJournal()
+    await flushPromises()
+    expect(wrapper.find('[data-test="journal-row-select"]').exists()).toBe(false)
+    expect(wrapper.find('[data-test="journal-card-select"]').exists()).toBe(false)
+    expect(wrapper.find('[data-test="action-bulk-actions"]').exists()).toBe(false)
+    await enableBulk(wrapper)
+    expect(wrapper.findAll('[data-test="journal-row-select"]')).toHaveLength(2)
+    await wrapper.findAll('[data-test="journal-row-select"]')[0]!.trigger('change')
+    await enableBulk(wrapper)
+    expect(wrapper.find('[data-test="journal-row-select"]').exists()).toBe(false)
+    await enableBulk(wrapper)
+    await wrapper.get('[data-test="action-bulk-actions"]').trigger('click')
+    expect(wrapper.getComponent(DialogStub).props('selectionCount')).toBe(40)
   })
 
   it('bez výběru pošle „všech N podle filtru" s query seznamu bez stránkování', async () => {
     m.perms = ['accounting.bulk_changes']
     const wrapper = mountJournal()
     await flushPromises()
+    await enableBulk(wrapper)
     await wrapper.get('[data-test="action-bulk-actions"]').trigger('click')
     const dialog = wrapper.getComponent(DialogStub)
     expect(dialog.props('target')).toBe('journal_entry')
@@ -129,6 +152,7 @@ describe('Journal – hromadné akce', () => {
     m.admin = true
     const wrapper = mountJournal()
     await flushPromises()
+    await enableBulk(wrapper)
     await wrapper.findAll('[data-test="journal-row-select"]')[1]!.trigger('change')
     await wrapper.get('[data-test="action-bulk-actions"]').trigger('click')
     const dialog = wrapper.getComponent(DialogStub)
@@ -142,6 +166,7 @@ describe('Journal – hromadné akce', () => {
     m.perms = ['accounting.bulk_changes']
     const wrapper = mountJournal()
     await flushPromises()
+    await enableBulk(wrapper)
     const box = wrapper.findAll('[data-test="journal-card-select"]')
     expect(box).toHaveLength(2)
     expect(box[0]!.element.closest('button')).toBeNull()
