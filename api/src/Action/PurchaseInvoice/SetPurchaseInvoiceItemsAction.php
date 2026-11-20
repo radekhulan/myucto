@@ -13,6 +13,8 @@ use MyInvoice\Service\Accounting\DocumentLockService;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Invoice\PurchaseInvoiceCalculator;
 use MyInvoice\Service\IpMatcher;
+use MyInvoice\Service\PurchaseInvoice\PurchaseAdvanceLinkException;
+use MyInvoice\Service\PurchaseInvoice\PurchaseAdvanceLinks;
 use MyInvoice\Service\PurchaseInvoice\StoredPurchaseItemColumns;
 use MyInvoice\Service\Validation\InvoiceAmountPolicy;
 use Psr\Http\Message\ResponseInterface as Response;
@@ -36,6 +38,7 @@ final class SetPurchaseInvoiceItemsAction
         private readonly DocumentLockService $locks,
         private readonly \MyInvoice\Service\Accounting\Dimension\DraftItemDimensionRealign $itemDimensions,
         private readonly \MyInvoice\Service\PurchaseInvoice\PurchaseAdvanceDeduction $advanceDeduction,
+        private readonly PurchaseAdvanceLinks $advanceLinks,
     ) {}
 
     public function __invoke(Request $request, Response $response, array $args): Response
@@ -104,6 +107,11 @@ final class SetPurchaseInvoiceItemsAction
         }
         $this->calc->recompute($id);
         $this->advanceDeduction->clearHeaderAdvanceWhenDeducted($supplierId, $id);
+        try {
+            $this->advanceLinks->sync($supplierId, $id);
+        } catch (PurchaseAdvanceLinkException $e) {
+            return Json::error($response, $e->errorCode, $e->getMessage(), $e->status);
+        }
 
         $user =(array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
         $ip = $this->ipMatcher->clientIpFromRequest($request->getServerParams());

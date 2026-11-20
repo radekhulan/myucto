@@ -360,8 +360,9 @@ final class JournalSourceSummaryService
             $this->kv('reverse_charge', 'reverse_charge', (bool) $row['reverse_charge'], 'bool'),
             $this->kv('is_fixed_asset', 'is_fixed_asset', (bool) $row['is_fixed_asset'], 'bool'),
         ];
-        if ($row['advance_purchase_invoice_id'] !== null) {
-            $fields[] = $this->kv('advance_link', 'advance_link', (int) $row['advance_purchase_invoice_id'], 'doc_ref');
+        // Vyúčtovaná záloha, u faktury s víc zálohami každá (PurchaseAdvanceLinks).
+        foreach ((new \MyInvoice\Service\PurchaseInvoice\PurchaseAdvanceLinks($this->db))->advanceIds($supplierId, $id) as $advanceId) {
+            $fields[] = $this->kv('advance_link', 'advance_link', $advanceId, 'doc_ref');
         }
         // „Uhrazeno, ale nezaúčtováno" — typický zdroj rozdílu mezi saldem a deníkem.
         if ($row['paid_at'] !== null && $row['booked_at'] === null) {

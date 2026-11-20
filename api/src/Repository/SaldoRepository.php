@@ -1476,7 +1476,14 @@ final class SaldoRepository
                AND NOT EXISTS (
                    SELECT 1 FROM purchase_invoices fin
                     WHERE fin.supplier_id = p.supplier_id AND fin.advance_purchase_invoice_id = p.id
-                      AND " . self::purchaseBookedOnAccountSql('fin.id') . '
+                      AND " . self::purchaseBookedOnAccountSql('fin.id') . "
+               )
+               -- Totéž pro zálohu faktury s víc zálohami (PurchaseAdvanceLinks).
+               AND NOT EXISTS (
+                   SELECT 1 FROM purchase_advance_deductions lnk
+                    WHERE lnk.supplier_id = p.supplier_id AND lnk.advance_invoice_id = p.id
+                      AND lnk.source = '" . \MyInvoice\Service\PurchaseInvoice\PurchaseAdvanceLinks::SOURCE . "'
+                      AND " . self::purchaseBookedOnAccountSql('lnk.final_invoice_id') . '
                )';
             $links = "SELECT id AS child_id, supplier_id, parent_purchase_invoice_id AS advance_id
                         FROM purchase_invoices
@@ -2049,8 +2056,12 @@ final class SaldoRepository
             $from = "FROM payment_matches pip
                      JOIN purchase_invoices pf ON pf.id = pip.purchase_invoice_id AND pf.supplier_id = pip.supplier_id
                                               AND pf.document_kind = 'advance'";
-            $childExists = "EXISTS (SELECT 1 FROM purchase_invoices ch
-                                     WHERE ch.supplier_id = pf.supplier_id AND ch.advance_purchase_invoice_id = pf.id{$lock})";
+            // Navazující doklad: vazba hlavičkou, nebo konečná faktura s víc zálohami (PurchaseAdvanceLinks).
+            $childExists = "(EXISTS (SELECT 1 FROM purchase_invoices ch
+                                     WHERE ch.supplier_id = pf.supplier_id AND ch.advance_purchase_invoice_id = pf.id{$lock})
+                             OR EXISTS (SELECT 1 FROM purchase_advance_deductions lnk
+                                         WHERE lnk.supplier_id = pf.supplier_id AND lnk.advance_invoice_id = pf.id
+                                           AND lnk.source = '" . \MyInvoice\Service\PurchaseInvoice\PurchaseAdvanceLinks::SOURCE . "'{$lock}))";
             $cashLink = 'cd.purchase_invoice_id = pf.id';
         }
 
@@ -2218,7 +2229,11 @@ final class SaldoRepository
               JOIN currencies cur      ON cur.id = d.currency_id
               LEFT JOIN matches m      ON m.doc_id = d.id
               LEFT JOIN cash ch        ON ch.doc_id = d.id
-              LEFT JOIN advances adv   ON adv.advance_id = d.advance_purchase_invoice_id
+              -- Zálohy faktury: hlavička i víc záloh (PurchaseAdvanceLinks), součet po faktuře.
+              LEFT JOIN (SELECT lnk.final_id, SUM(a.advance_sum) AS advance_sum
+                           FROM (" . \MyInvoice\Service\PurchaseInvoice\PurchaseAdvanceLinks::linksSql((string) $supplierId) . ") lnk
+                           JOIN advances a ON a.advance_id = lnk.advance_id
+                          GROUP BY lnk.final_id) adv ON adv.final_id = d.id
               LEFT JOIN man            ON man.doc_id = d.id
              WHERE d.status <> 'draft'
                AND (d.status <> 'cancelled' OR d.cancelled_at IS NULL OR DATE(d.cancelled_at) > ?)

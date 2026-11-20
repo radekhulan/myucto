@@ -335,8 +335,19 @@ final class JournalLinkService
                     AND (EXISTS (SELECT 1 FROM payment_matches pm
                                   WHERE pm.supplier_id = adv.supplier_id AND pm.purchase_invoice_id = adv.id)
                          OR EXISTS (SELECT 1 FROM cash_documents cd
+                                     WHERE cd.supplier_id = adv.supplier_id AND cd.purchase_invoice_id = adv.id))
+                 UNION
+                 -- Konečná faktura s víc zálohami (PurchaseAdvanceLinks).
+                 SELECT lnk.final_invoice_id FROM purchase_advance_deductions lnk
+                   JOIN purchase_invoices adv ON adv.id = lnk.advance_invoice_id AND adv.supplier_id = lnk.supplier_id
+                  WHERE lnk.supplier_id = ? AND lnk.source = '" . \MyInvoice\Service\PurchaseInvoice\PurchaseAdvanceLinks::SOURCE . "'
+                    AND adv.document_kind = 'advance'
+                    AND lnk.final_invoice_id IN (" . $this->placeholders($purchases) . ")
+                    AND (EXISTS (SELECT 1 FROM payment_matches pm
+                                  WHERE pm.supplier_id = adv.supplier_id AND pm.purchase_invoice_id = adv.id)
+                         OR EXISTS (SELECT 1 FROM cash_documents cd
                                      WHERE cd.supplier_id = adv.supplier_id AND cd.purchase_invoice_id = adv.id))",
-                array_merge([$supplierId], $purchases)
+                array_merge([$supplierId], $purchases, [$supplierId], $purchases)
             ) as $r) {
                 $mark((int) $r['id'], 'purchase_invoice');
             }
@@ -612,6 +623,18 @@ final class JournalLinkService
                                     ELSE d.advance_purchase_invoice_id END
                 WHERE d.id = ? AND d.supplier_id = ? AND adv.document_kind = 'advance'";
         $rows = $this->rows($sql, [$docId, $supplierId]);
+        if ($rows === [] && $docType === 'purchase_invoice') {
+            // Přijatá faktura s víc zálohami nese vazbu řádky čerpání (PurchaseAdvanceLinks).
+            $multi = (new \MyInvoice\Service\PurchaseInvoice\PurchaseAdvanceLinks($this->db))->advanceIds($supplierId, $docId);
+            if ($multi === []) {
+                return [];
+            }
+            return array_map(static fn (array $r): int => (int) $r['id'], $this->rows(
+                "SELECT id FROM purchase_invoices WHERE supplier_id = ? AND document_kind = 'advance'
+                    AND id IN (" . $this->placeholders($multi) . ') ORDER BY id',
+                array_merge([$supplierId], $multi),
+            ));
+        }
         return $rows === [] ? [] : [(int) $rows[0]['id']];
     }
 
@@ -665,8 +688,13 @@ final class JournalLinkService
                                       ELSE ch.advance_purchase_invoice_id END
                   WHERE ch.supplier_id = ? AND adv.document_kind = 'advance' AND ch.status <> 'cancelled'
                     AND adv.id IN ({$in})
-                  ORDER BY ch.id",
-                array_merge([$supplierId], $advances)
+                 UNION
+                 SELECT ch.id FROM purchase_advance_deductions lnk
+                   JOIN purchase_invoices ch ON ch.id = lnk.final_invoice_id AND ch.supplier_id = lnk.supplier_id
+                  WHERE lnk.supplier_id = ? AND lnk.source = '" . \MyInvoice\Service\PurchaseInvoice\PurchaseAdvanceLinks::SOURCE . "'
+                    AND lnk.advance_invoice_id IN ({$in}) AND ch.status <> 'cancelled'
+                  ORDER BY id",
+                array_merge([$supplierId], $advances, [$supplierId], $advances)
             ) as $r) {
                 $this->addRef($byKey, 'purchase_invoice', (int) $r['id'], 'document', null);
             }

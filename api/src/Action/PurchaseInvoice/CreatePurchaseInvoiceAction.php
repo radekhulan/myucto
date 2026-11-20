@@ -26,6 +26,8 @@ use MyInvoice\Service\Currency\CnbRateDeviationChecker;
 use MyInvoice\Service\Invoice\PurchaseInvoiceCalculator;
 use MyInvoice\Service\IpMatcher;
 use MyInvoice\Service\PurchaseInvoice\PurchaseAdvanceDeduction;
+use MyInvoice\Service\PurchaseInvoice\PurchaseAdvanceLinkException;
+use MyInvoice\Service\PurchaseInvoice\PurchaseAdvanceLinks;
 use MyInvoice\Service\PurchaseInvoice\PurchaseInvoiceSubmissionCompletionService;
 use MyInvoice\Service\PurchaseInvoice\PurchaseInvoiceSubmissionException;
 use MyInvoice\Service\PurchaseInvoice\VendorNumberDuplicates;
@@ -264,15 +266,29 @@ final class CreatePurchaseInvoiceAction
             $this->repo->syncHeaderClassificationFromItems($id, $supplierId);
             // Záloha vybraná už v editoru nového dokladu: vazba vzniká v téže transakci,
             // aby přijetí dokladu níž zaúčtovalo konečnou fakturu i s vyúčtováním zálohy.
-            $advanceToLink = (int) ($body['advance_purchase_invoice_id'] ?? 0);
-            if ($advanceToLink > 0) {
-                try {
-                    $this->repo->linkAdvance($id, $advanceToLink, $supplierId);
-                } catch (\RuntimeException $e) {
-                    throw new PurchaseInvoiceSubmissionException('link_failed', $e->getMessage(), 409);
+            // Víc záloh (`advance_purchase_invoice_ids`): první jde do hlavičky, další se přidají
+            // a faktura přejde na vazbu řádky čerpání ({@see PurchaseAdvanceLinks}).
+            $advancesToLink = self::advanceIdsFromBody($body);
+            $links = new PurchaseAdvanceLinks($this->db);
+            try {
+                foreach ($advancesToLink as $i => $advanceToLink) {
+                    if ($i === 0) {
+                        $this->repo->linkAdvance($id, $advanceToLink, $supplierId);
+                    } else {
+                        $links->append($supplierId, $id, $advanceToLink, $userId > 0 ? $userId : null);
+                    }
                 }
+            } catch (PurchaseAdvanceLinkException $e) {
+                throw new PurchaseInvoiceSubmissionException($e->errorCode, $e->getMessage(), $e->status);
+            } catch (\RuntimeException $e) {
+                throw new PurchaseInvoiceSubmissionException('link_failed', $e->getMessage(), 409);
             }
             (new PurchaseAdvanceDeduction($this->db))->clearHeaderAdvanceWhenDeducted($supplierId, $id);
+            try {
+                $links->sync($supplierId, $id);
+            } catch (PurchaseAdvanceLinkException $e) {
+                throw new PurchaseInvoiceSubmissionException($e->errorCode, $e->getMessage(), $e->status);
+            }
             // Zaokrouhlení dokladu jako v PUT ({@see UpdatePurchaseInvoiceAction}), až po přepočtu.
             if (array_key_exists('rounding', $body) && is_numeric($body['rounding'])) {
                 $this->repo->setRounding($id, $supplierId, (float) $body['rounding']);
@@ -477,6 +493,28 @@ final class CreatePurchaseInvoiceAction
         );
         $stmt->execute([$parentId, $supplierId, $requiredParentKind]);
         return $stmt->fetchColumn() !== false ? $parentId : null;
+    }
+
+    /**
+     * Zálohy k propojení z těla POST: `advance_purchase_invoice_ids` (víc záloh), jinak
+     * `advance_purchase_invoice_id`. Kladná id bez duplicit v pořadí z formuláře.
+     *
+     * @param array<string,mixed> $body
+     * @return list<int>
+     */
+    private static function advanceIdsFromBody(array $body): array
+    {
+        $raw = is_array($body['advance_purchase_invoice_ids'] ?? null)
+            ? $body['advance_purchase_invoice_ids']
+            : [$body['advance_purchase_invoice_id'] ?? 0];
+        $ids = [];
+        foreach ($raw as $value) {
+            $id = is_numeric($value) ? (int) $value : 0;
+            if ($id > 0 && !in_array($id, $ids, true)) {
+                $ids[] = $id;
+            }
+        }
+        return $ids;
     }
 
     /**

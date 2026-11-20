@@ -99,12 +99,19 @@ final class DocumentBackfill
               WHERE pi.supplier_id = :sid{$dateWhere}
                 AND " . self::scopeSql('purchase_invoice', 'pi')
                 . ($settlementsOnly
-                    ? " AND EXISTS (
+                    // Zálohy faktury: hlavička i víc záloh (PurchaseAdvanceLinks).
+                    ? " AND (EXISTS (
                             SELECT 1 FROM purchase_invoices adv
                              WHERE adv.id = pi.advance_purchase_invoice_id
                                AND adv.supplier_id = pi.supplier_id
                                AND adv.document_kind = 'advance'
-                        )"
+                        ) OR EXISTS (
+                            SELECT 1 FROM purchase_advance_deductions lnk
+                              JOIN purchase_invoices adv ON adv.id = lnk.advance_invoice_id AND adv.supplier_id = lnk.supplier_id
+                             WHERE lnk.supplier_id = pi.supplier_id AND lnk.final_invoice_id = pi.id
+                               AND lnk.source = '" . \MyInvoice\Service\PurchaseInvoice\PurchaseAdvanceLinks::SOURCE . "'
+                               AND adv.document_kind = 'advance'
+                        ))"
                     : '')
                 . ($onlyUnposted
                     ? ' AND NOT ' . DocumentPostingGroup::activePostingExistsSql("'purchase_invoice'", 'pi.id', 'pi.supplier_id', false)

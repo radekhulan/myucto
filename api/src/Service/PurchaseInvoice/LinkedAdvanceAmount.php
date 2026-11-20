@@ -23,6 +23,10 @@ use PDO;
  * Konečná faktura, která zálohu odečítá odpočtovým řádkem ({@see PurchaseAdvanceDeduction}),
  * má zálohu odečtenou už v celkové částce. Hlavička ji pak neodečítá (0), jinak by
  * `amount_to_pay` zálohu odečetl podruhé.
+ *
+ * Faktura s víc zálohami ({@see PurchaseAdvanceLinks}) nese v hlavičce součet uhrazených
+ * záloh bez DDKP; ten skládá {@see PurchaseAdvanceLinks::sync()} z {@see forFinal()}
+ * po zálohách. Backfill níž ({@see candidates()}) prochází jen vazbu hlavičkou.
  */
 final class LinkedAdvanceAmount
 {
@@ -77,7 +81,9 @@ final class LinkedAdvanceAmount
         $update = $pdo->prepare(
             'UPDATE purchase_invoices SET advance_paid_amount = ? WHERE id = ? AND supplier_id = ? AND advance_paid_amount = 0'
         );
-        $filled = [];
+        // Faktura s víc zálohami má uhrazené zálohy v hlavičce jako součet, ten přepočítá
+        // vlastník vazby celý (nejen z nuly).
+        $filled = (new PurchaseAdvanceLinks($this->db))->syncFinalsOfAdvance($supplierId, $advanceId);
         foreach ($finals->fetchAll(PDO::FETCH_ASSOC) ?: [] as $final) {
             $amount = round($this->forFinal($supplierId, $advance, (float) $final['total_with_vat']), 2);
             if ($amount <= 0.0) {

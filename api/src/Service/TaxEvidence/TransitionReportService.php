@@ -230,6 +230,10 @@ final class TransitionReportService
           LEFT JOIN bank_transactions bt ON bt.id=pm.bank_transaction_id AND bt.posted_at <= ?
               WHERE pi.supplier_id=? AND pi.document_kind='advance' AND pi.is_fixed_asset=0
                 AND pi.issue_date<=? AND NOT EXISTS (SELECT 1 FROM purchase_invoices f WHERE f.advance_purchase_invoice_id=pi.id)
+                -- Záloha vyúčtovaná fakturou s víc zálohami (PurchaseAdvanceLinks) taky není otevřená.
+                AND NOT EXISTS (SELECT 1 FROM purchase_advance_deductions lnk
+                                 WHERE lnk.supplier_id=pi.supplier_id AND lnk.advance_invoice_id=pi.id
+                                   AND lnk.source='" . \MyInvoice\Service\PurchaseInvoice\PurchaseAdvanceLinks::SOURCE . "')
            GROUP BY pi.id HAVING amount > 0"
         );
         $stmt->execute([$asOf, $asOf, $supplierId, $asOf]);

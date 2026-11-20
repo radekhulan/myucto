@@ -34,6 +34,7 @@ use MyInvoice\Service\Invoice\MultiPurposeVoucher;
 use MyInvoice\Service\Payroll\Payment\PayrollBankEvidenceGuard;
 use MyInvoice\Service\Property\Charges\Issuance\IssuancePostingBatchContext;
 use MyInvoice\Service\PurchaseInvoice\PurchaseAdvanceDeduction;
+use MyInvoice\Service\PurchaseInvoice\PurchaseAdvanceLinks;
 use MyInvoice\Service\Report\VatLedgerService;
 use MyInvoice\Service\Vat\VatStatusService;
 use MyInvoice\Support\Sql\AdvanceDrawSql;
@@ -3409,6 +3410,7 @@ final class PostingService
         }
         $advance = $direction === 'purchase'
             ? (int) ($doc['advance_purchase_invoice_id'] ?? 0) > 0
+                || (new PurchaseAdvanceLinks($this->db))->isMulti($supplierId, $docId)
             : $this->issuedSettlesProforma($supplierId, (int) ($doc['parent_invoice_id'] ?? 0));
         if ($advance) {
             throw new PostingException(
@@ -3659,6 +3661,7 @@ final class PostingService
         }
         $advId = (int) ($pi['advance_purchase_invoice_id'] ?? 0);
         if ($advId <= 0) {
+            $this->appendMultiAdvanceSettlementPurchase($supplierId, $pi, $lines, $deduction);
             return;
         }
         $adv = $this->fetchDocHeader('purchase_invoices', $supplierId, $advId);
@@ -3713,6 +3716,61 @@ final class PostingService
         }
         $lines[] = $this->pairHint($this->line($draw, 'debit', $paid, null), 'pair_group', 'advance');
         $lines[] = $this->pairHint($this->line($advAcc, 'credit', $paid, null), 'pair_group', 'advance');
+    }
+
+    /**
+     * Zúčtování záloh konečné faktury, která vyúčtovává víc záloh ({@see PurchaseAdvanceLinks}).
+     * Každá záloha dostane vlastní pár 321 MD / 314 D podle stejných pravidel jako jediná
+     * záloha v hlavičce:
+     *   - záloha s DDKP zbytkem po dani DDKP, který musí sedět se základem JEJÍCH
+     *     odpočtových řádků ({@see appendDeductedAdvanceSettlementPurchase}),
+     *   - záloha bez DDKP zaúčtovanou úhradou (faktura ji odečítá v hlavičce jako uhrazenou
+     *     zálohu). Bez stropu výší faktury: přeplatek záloh nad vyúčtované plnění zůstane
+     *     na 321 jako pohledávka za dodavatelem, stejně jako u zálohy s DDKP. Stejnou částku
+     *     zapisuje do řádku čerpání a hlavičky {@see PurchaseAdvanceLinks::sync()}.
+     * Odpočtový řádek zálohy, kterou faktura nevyúčtovává, odmítl už {@see purchaseAdvanceDeduction}.
+     *
+     * @param array<string,mixed> $pi
+     * @param list<array{account_code:string, side:'debit'|'credit', amount:float, cost_center?:?string}> $lines
+     * @param array{active:bool, base:float, foreign_base:float, vat:float, gross:float, item_ids:list<int>, by_advance?:array<int,array<string,mixed>>} $deduction
+     */
+    private function appendMultiAdvanceSettlementPurchase(int $supplierId, array $pi, array &$lines, array $deduction): void
+    {
+        $advanceIds = (new PurchaseAdvanceLinks($this->db))->advanceIds($supplierId, (int) $pi['id']);
+        if ($advanceIds === []) {
+            return;
+        }
+        ['debit' => $draw, 'credit' => $advAcc] = $this->advanceSettlementAccounts($supplierId, 'purchase');
+        foreach ($advanceIds as $advId) {
+            $adv = $this->fetchDocHeader('purchase_invoices', $supplierId, $advId);
+            if ($adv === null) {
+                continue;
+            }
+            $advKind = (string) ($adv['document_kind'] ?? '');
+            $advIsStandaloneDdkp = $advKind === 'tax_document' && ($adv['parent_purchase_invoice_id'] ?? null) === null;
+            if ($advKind !== 'advance' && !$advIsStandaloneDdkp) {
+                continue;
+            }
+            $own = $deduction['by_advance'][$advId] ?? self::noPurchaseDeduction();
+            if ($this->purchaseTaxDocumentIds($supplierId, $advId, $advIsStandaloneDdkp) !== []) {
+                $this->appendDeductedAdvanceSettlementPurchase($supplierId, $pi, $adv, $advIsStandaloneDdkp, $lines, $own, true);
+                continue;
+            }
+            if ($own['active']) {
+                throw new PostingException(
+                    'advance_settlement_ambiguous',
+                    'Přijatá faktura #' . (int) $pi['id'] . ' odečítá řádkem zálohu #' . $advId . ', která nemá daňový doklad '
+                        . 'k platbě. Řádkem se odečítá jen záloha s daňovým dokladem; uhrazenou zálohu bez něj odečte '
+                        . 'faktura v hlavičce (Uhrazená záloha). Zrušte označení odpočtu zálohy na řádku.',
+                );
+            }
+            $paid = $this->postedAdvancePaid($supplierId, $adv);
+            if (self::cents($paid) <= 0 || $draw === $advAcc) {
+                continue;
+            }
+            $lines[] = $this->pairHint($this->line($draw, 'debit', $paid, null), 'pair_group', 'advance');
+            $lines[] = $this->pairHint($this->line($advAcc, 'credit', $paid, null), 'pair_group', 'advance');
+        }
     }
 
     /**
@@ -4217,10 +4275,13 @@ final class PostingService
      * {@see appendDeductedAdvanceSettlementPurchase}.
      *
      * Hlasitě odmítá odpočet na jiném dokladu než konečné faktuře a odpočet zálohy, kterou
-     * faktura v hlavičce nevyúčtovává (vazba 1:1, jedna faktura čerpá jen svou zálohu).
+     * faktura nevyúčtovává: jedinou zálohu nese hlavička, víc záloh řádky čerpání
+     * ({@see PurchaseAdvanceLinks}). `by_advance` = tentýž odpočet po zálohách pro
+     * zúčtování každé zálohy zvlášť.
      *
      * @param array<string,mixed> $pi
-     * @return array{active:bool, base:float, foreign_base:float, vat:float, gross:float, item_ids:list<int>}
+     * @return array{active:bool, base:float, foreign_base:float, vat:float, gross:float, item_ids:list<int>,
+     *               by_advance?:array<int,array{active:bool, base:float, foreign_base:float, vat:float, gross:float, item_ids:list<int>}>}
      */
     private function purchaseAdvanceDeduction(int $supplierId, int $purchaseInvoiceId, array $pi, float $rate): array
     {
@@ -4236,25 +4297,39 @@ final class PostingService
             );
         }
         $headerAdvance = (int) ($pi['advance_purchase_invoice_id'] ?? 0);
+        $linked = $headerAdvance > 0 ? [$headerAdvance] : (new PurchaseAdvanceLinks($this->db))->advanceIds($supplierId, $purchaseInvoiceId);
         $base = 0.0;
         $foreignBase = 0.0;
         $vat = 0.0;
         $ids = [];
+        $byAdvance = [];
         foreach ($rows as $row) {
-            if ($row['advance_purchase_invoice_id'] !== $headerAdvance) {
+            $advanceId = $row['advance_purchase_invoice_id'];
+            if (!in_array($advanceId, $linked, true)) {
                 throw new PostingException(
                     'advance_settlement_ambiguous',
-                    'Přijatá faktura #' . $purchaseInvoiceId . ' odečítá řádkem zálohu #' . $row['advance_purchase_invoice_id']
+                    'Přijatá faktura #' . $purchaseInvoiceId . ' odečítá řádkem zálohu #' . $advanceId
                         . ($headerAdvance > 0
                             ? ', ale vyúčtovává zálohu #' . $headerAdvance . '.'
-                            : ', ale není se zálohou propojená.')
+                            : ($linked !== []
+                                ? ', ale vyúčtovává zálohy #' . implode(', #', $linked) . '.'
+                                : ', ale není se zálohou propojená.'))
                         . ' Propojte fakturu se zálohou, kterou odečítá, nebo opravte odpočtový řádek.',
                 );
             }
+            $rowBase = round(-$row['total_without_vat'] * $rate, 2);
+            $rowVat = round(-$row['total_vat'] * $rate, 2);
             $ids[] = $row['id'];
             $foreignBase += -$row['total_without_vat'];
-            $base += round(-$row['total_without_vat'] * $rate, 2);
-            $vat += round(-$row['total_vat'] * $rate, 2);
+            $base += $rowBase;
+            $vat += $rowVat;
+            $byAdvance[$advanceId] ??= self::noPurchaseDeduction();
+            $byAdvance[$advanceId]['active'] = true;
+            $byAdvance[$advanceId]['item_ids'][] = $row['id'];
+            $byAdvance[$advanceId]['foreign_base'] = round($byAdvance[$advanceId]['foreign_base'] - $row['total_without_vat'], 2);
+            $byAdvance[$advanceId]['base'] = round($byAdvance[$advanceId]['base'] + $rowBase, 2);
+            $byAdvance[$advanceId]['vat'] = round($byAdvance[$advanceId]['vat'] + $rowVat, 2);
+            $byAdvance[$advanceId]['gross'] = round($byAdvance[$advanceId]['base'] + $byAdvance[$advanceId]['vat'], 2);
         }
         return [
             'active'       => true,
@@ -4263,6 +4338,7 @@ final class PostingService
             'vat'          => round($vat, 2),
             'gross'        => round($base + $vat, 2),
             'item_ids'     => $ids,
+            'by_advance'   => $byAdvance,
         ];
     }
 
@@ -4297,7 +4373,7 @@ final class PostingService
      * @param list<array{account_code:string, side:'debit'|'credit', amount:float, cost_center?:?string}> $lines
      * @param array{active:bool, base:float, foreign_base:float, vat:float, gross:float, item_ids:list<int>} $deduction
      */
-    private function appendDeductedAdvanceSettlementPurchase(int $supplierId, array $pi, array $adv, bool $advIsStandaloneDdkp, array &$lines, array $deduction): void
+    private function appendDeductedAdvanceSettlementPurchase(int $supplierId, array $pi, array $adv, bool $advIsStandaloneDdkp, array &$lines, array $deduction, bool $headerHoldsOtherAdvances = false): void
     {
         $advId = (int) $adv['id'];
         $finalId = (int) $pi['id'];
@@ -4357,7 +4433,9 @@ final class PostingService
                 ),
             );
         }
-        if (self::cents((float) ($pi['advance_paid_amount'] ?? 0)) !== 0) {
+        // Faktura s víc zálohami nese v hlavičce uhrazené zálohy BEZ DDKP; ty se zúčtují
+        // každá zvlášť a tuhle zálohu hlavička neodečítá.
+        if (!$headerHoldsOtherAdvances && self::cents((float) ($pi['advance_paid_amount'] ?? 0)) !== 0) {
             throw new PostingException(
                 'advance_settlement_ambiguous',
                 'Konečná faktura #' . $finalId . ' odečítá zálohu odpočtovým řádkem a zároveň v hlavičce (Uhrazená záloha '

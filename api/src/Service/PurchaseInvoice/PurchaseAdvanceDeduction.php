@@ -17,9 +17,10 @@ use PDO;
  * (`purchase_invoices.advance_purchase_invoice_id`: zálohová faktura nebo samostatný DDKP).
  * Samotné záporné znaménko nestačí, záporný řádek bývá i vratka nebo sleva.
  *
- * Vydaná strana má obdobu v {@see \MyInvoice\Support\Sql\AdvanceDrawSql}. Tam odpočtový
- * řádek vystavujeme sami a faktura může čerpat víc záloh; přijatá faktura je na zálohu
- * vázaná 1:1 hlavičkou, takže řádek smí odečítat jen zálohu z hlavičky.
+ * Vydaná strana má obdobu v {@see \MyInvoice\Support\Sql\AdvanceDrawSql}. Přijatá faktura
+ * může vyúčtovat víc záloh ({@see PurchaseAdvanceLinks}): jednu hlavičkou, víc řádky
+ * čerpání se zdrojem `document`. Řádek smí odečítat jen zálohu, kterou faktura takto
+ * vyúčtovává; řádek cizí zálohy zaúčtování odmítne.
  *
  * Čtou ho zaúčtování ({@see \MyInvoice\Service\Accounting\PostingService}), částka uhrazené
  * zálohy v hlavičce ({@see LinkedAdvanceAmount}), nabídka řádků odpočtu pro editor
@@ -36,7 +37,11 @@ final class PurchaseAdvanceDeduction
         return "{$item}.advance_purchase_invoice_id IS NOT NULL AND {$item}.total_with_vat < 0";
     }
 
-    /** Nese konečná faktura `$final` odpočtový řádek zálohy, kterou vyúčtovává? */
+    /**
+     * Nese konečná faktura `$final` odpočtový řádek zálohy z hlavičky? Jen pro vazbu jedinou
+     * zálohou (uhrazená záloha v hlavičce, {@see LinkedAdvanceAmount}); faktura s víc zálohami
+     * hlavičku nemá a její odpočty přepočítává {@see PurchaseAdvanceLinks::sync()}.
+     */
     public static function finalHasDeductionSql(string $final): string
     {
         self::assertAlias($final);
@@ -64,11 +69,14 @@ final class PurchaseAdvanceDeduction
     }
 
     /**
-     * Konečné faktury firmy navázané na zálohu s živým DDKP, které odpočet zálohy nenesou:
-     * daň z DDKP je uplatněná a konečná faktura ji v plné výši uplatní podruhé.
+     * Dvojice konečná faktura × záloha s živým DDKP, kde faktura odpočet té zálohy nenese:
+     * daň z DDKP je uplatněná a konečná faktura ji v plné výši uplatní podruhé. Faktura
+     * s víc zálohami ({@see PurchaseAdvanceLinks}) se posuzuje po zálohách, takže chybějící
+     * odpočet jediné z nich se ukáže i vedle odpočtů ostatních.
      * Bere se všechno s DUZP (bez DUZP datem vystavení) do `$to` včetně starších období,
      * aby šly dohledat i dřívější doklady. Vazbu na zálohu nese jen menšina dokladů, dotaz
-     * proto jde po indexu vazby (`uq_pi_advance_link`), ne po všech dokladech firmy.
+     * proto vychází z vazeb firmy (`idx_pi_supplier_advance`, `ix_pad_advance`), ne ze
+     * všech dokladů firmy.
      *
      * `amount` = daň DDKP, kterou by faktura uplatnila podruhé (v měně dokladů).
      *
@@ -78,7 +86,7 @@ final class PurchaseAdvanceDeduction
     public function finalsMissingDeduction(int $supplierId, ?string $to): array
     {
         $where = '';
-        $params = [$supplierId];
+        $params = [$supplierId, $supplierId, $supplierId];
         if ($to !== null) {
             $where .= ' AND (f.tax_date <= ? OR (f.tax_date IS NULL AND f.issue_date <= ?))';
             $params[] = $to;
@@ -86,19 +94,19 @@ final class PurchaseAdvanceDeduction
         }
         $stmt = $this->db->pdo()->prepare(
             "SELECT f.id, f.vendor_invoice_number, f.varsymbol, COALESCE(f.tax_date, f.issue_date) AS tax_date,
-                    f.advance_purchase_invoice_id AS advance_id, f.total_vat,
+                    a.id AS advance_id, f.total_vat,
                     (SELECT COALESCE(SUM(td.total_vat), 0) FROM purchase_invoices td
                       WHERE td.supplier_id = a.supplier_id AND td.document_kind = 'tax_document'
                         AND td.status NOT IN ('draft', 'cancelled')
                         AND (td.parent_purchase_invoice_id = a.id OR (td.id = a.id AND td.parent_purchase_invoice_id IS NULL))
                     ) AS tax_document_vat
-               FROM purchase_invoices f
-               JOIN purchase_invoices a ON a.id = f.advance_purchase_invoice_id AND a.supplier_id = f.supplier_id
-              WHERE f.supplier_id = ? AND f.document_kind = 'invoice' AND f.status NOT IN ('draft', 'cancelled')
-                AND f.advance_purchase_invoice_id IS NOT NULL{$where}
+               FROM (" . PurchaseAdvanceLinks::linksSql('?') . ") l
+               JOIN purchase_invoices f ON f.id = l.final_id
+               JOIN purchase_invoices a ON a.id = l.advance_id AND a.supplier_id = f.supplier_id
+              WHERE f.supplier_id = ? AND f.document_kind = 'invoice' AND f.status NOT IN ('draft', 'cancelled'){$where}
                 AND " . self::advanceHasTaxDocumentSql('a') . '
-                AND NOT ' . self::finalHasDeductionSql('f') . '
-              ORDER BY f.tax_date, f.id'
+                AND NOT ' . self::finalDeductsAdvanceSql('f', 'a.id') . '
+              ORDER BY f.tax_date, f.id, a.id'
         );
         $stmt->execute($params);
         return array_map(static fn (array $r): array => [
@@ -120,14 +128,26 @@ final class PurchaseAdvanceDeduction
     public function finalMissingDeduction(int $supplierId, int $finalId): bool
     {
         $stmt = $this->db->pdo()->prepare(
-            "SELECT 1 FROM purchase_invoices f
-               JOIN purchase_invoices a ON a.id = f.advance_purchase_invoice_id AND a.supplier_id = f.supplier_id
-              WHERE f.id = ? AND f.supplier_id = ? AND f.document_kind = 'invoice'
+            "SELECT 1 FROM (" . PurchaseAdvanceLinks::linksSql('?') . ") l
+               JOIN purchase_invoices f ON f.id = l.final_id
+               JOIN purchase_invoices a ON a.id = l.advance_id AND a.supplier_id = f.supplier_id
+              WHERE l.final_id = ? AND f.supplier_id = ? AND f.document_kind = 'invoice'
                 AND " . self::advanceHasTaxDocumentSql('a') . '
-                AND NOT ' . self::finalHasDeductionSql('f')
+                AND NOT ' . self::finalDeductsAdvanceSql('f', 'a.id') . '
+              LIMIT 1'
         );
-        $stmt->execute([$finalId, $supplierId]);
+        $stmt->execute([$supplierId, $supplierId, $finalId, $supplierId]);
         return $stmt->fetchColumn() !== false;
+    }
+
+    /** Nese konečná faktura `$final` (alias) odpočtový řádek zálohy `$advanceExpr`? */
+    public static function finalDeductsAdvanceSql(string $final, string $advanceExpr): string
+    {
+        self::assertAlias($final);
+        return "EXISTS (SELECT 1 FROM purchase_invoice_items adv_pii
+                         WHERE adv_pii.purchase_invoice_id = {$final}.id
+                           AND adv_pii.advance_purchase_invoice_id = {$advanceExpr}
+                           AND adv_pii.total_with_vat < 0)";
     }
 
     /** Nese konečná faktura odpočtový řádek zálohy, kterou vyúčtovává? */

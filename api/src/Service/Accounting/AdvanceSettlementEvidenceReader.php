@@ -27,6 +27,9 @@ final class AdvanceSettlementEvidenceReader
         $none = ['complete' => true, 'findings' => [], 'active' => false, 'applied_foreign' => '0.00', 'applied_czk' => '0.00', 'members' => [], 'sources' => []];
         if ((string) $document[$kind] !== 'invoice') return $none;
         $parentId = (int) ($document[$link] ?? 0);
+        // Přijatá faktura s víc zálohami (PurchaseAdvanceLinks) hlavičku nemá: s uhrazenou
+        // zálohou v hlavičce skončí jako nedoložená (advance_lineage_missing), kurzový rozdíl
+        // se pak dopočítat odmítne a nic neodhaduje.
         if ($parentId === 0) {
             return bccomp((string) $document['advance_paid_amount'], '0', 2) === 0 ? $none
                 : array_replace($none, ['complete' => false, 'findings' => ['advance_lineage_missing']]);

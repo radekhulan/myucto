@@ -148,8 +148,10 @@ final class JournalForDocumentAction
                 'bank' => 'SELECT DISTINCT bank_transaction_id FROM payment_matches
                             WHERE supplier_id = ? AND purchase_invoice_id = ? AND bank_transaction_id IS NOT NULL',
                 'cash' => 'SELECT id FROM cash_documents WHERE supplier_id = ? AND purchase_invoice_id = ?',
-                'purchase_invoice' => "SELECT id FROM purchase_invoices
-                            WHERE supplier_id = ? AND advance_purchase_invoice_id = ? AND status <> 'cancelled'",
+                // Konečná faktura zálohy, i ta, která vyúčtovává víc záloh (PurchaseAdvanceLinks).
+                'purchase_invoice' => 'SELECT pi.id FROM (' . \MyInvoice\Service\PurchaseInvoice\PurchaseAdvanceLinks::linksSql((string) $supplierId) . ") l
+                            JOIN purchase_invoices pi ON pi.id = l.final_id
+                            WHERE pi.supplier_id = ? AND l.advance_id = ? AND pi.status <> 'cancelled'",
             ];
         } else {
             $kind = $pdo->prepare('SELECT invoice_type FROM invoices WHERE id = ? AND supplier_id = ?');
