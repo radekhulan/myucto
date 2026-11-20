@@ -1222,6 +1222,8 @@
         "2316_bulk_changes_permission.sql",
         "2317_document_item_search.sql",
         "2318_payroll_posting_code_maps.sql",
+        "2319_purchase_advance_deductions_document_source.sql",
+        "2320_purchase_invoices_vendor_number_search_index.sql",
         "2321_other_item_occurrence_origin.sql",
         "2322_other_item_due_index.sql"
     ],
@@ -23698,7 +23700,7 @@
                 "created_by": "bigint(20) unsigned NULL DEFAULT NULL",
                 "final_invoice_id": "bigint(20) unsigned NOT NULL",
                 "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
-                "source": "enum('import','saldo') NOT NULL DEFAULT 'import'",
+                "source": "enum('import','saldo','document') NOT NULL DEFAULT 'import'",
                 "supplier_id": "int(10) unsigned NOT NULL"
             },
             "indexes": {
@@ -23706,6 +23708,7 @@
                 "fk_pad_advance": "BTREE (advance_invoice_id)",
                 "fk_pad_user": "BTREE (created_by)",
                 "ix_pad_advance": "BTREE (supplier_id, advance_invoice_id)",
+                "ix_pad_final_source": "BTREE (supplier_id, final_invoice_id, source)",
                 "uq_pad_pair": "UNIQUE BTREE (final_invoice_id, advance_invoice_id)"
             },
             "foreign_keys": {
@@ -23715,7 +23718,7 @@
                 "fk_pad_user": "(created_by) -> users (id) ON UPDATE RESTRICT ON DELETE SET NULL"
             },
             "checks": {
-                "chk_pad_amount": "`amount` > 0"
+                "chk_pad_amount": "`amount` > 0 or `source` = 'document' and `amount` >= 0"
             }
         },
         "purchase_invoice_approvals": {
@@ -24099,6 +24102,7 @@
                 "idx_pi_supplier_vs_key": "BTREE (supplier_id, varsymbol_match_key)",
                 "idx_pi_tax_date": "BTREE (supplier_id, tax_date)",
                 "idx_pi_vendor": "BTREE (vendor_id, issue_date)",
+                "ix_pi_supplier_vendor_number": "BTREE (supplier_id, vendor_invoice_number)",
                 "uq_pi_advance_link": "UNIQUE BTREE (advance_purchase_invoice_id)",
                 "uq_pi_supplier_varsymbol": "UNIQUE BTREE (supplier_id, varsymbol)",
                 "uq_pi_vendor_invoice": "UNIQUE BTREE (supplier_id, vendor_id, vendor_invoice_number, issue_date, vendor_number_seq)",
