@@ -34,6 +34,37 @@ final class AiExtractionTaxDateFromIssueDateTest extends StockTestCase
         self::assertStringContainsString('Datum dodání se z dokladu nepodařilo vytěžit', (string) $row['extraction_warning']);
     }
 
+    /** Zboží s vedlejší dopravou (supply_nature 'mixed') z JČS je pořízení zboží i s DUZP dle § 25. */
+    public function testEuMixedGoodsWithTransportGetsSection25TaxDate(): void
+    {
+        $row = $this->draft('PL', 'invoice', 'mixed', self::lateOctoberDelivery());
+
+        self::assertSame('23', $row['vat_classification_code']);
+        self::assertSame('2026-11-02', $row['tax_date'], 'Vystaveno před 15. dnem následujícího měsíce → DUZP = den vystavení.');
+    }
+
+    public function testEuServicesKeepTaxDateWithoutSection25(): void
+    {
+        $row = $this->draft('PL', 'invoice', 'services', self::lateOctoberDelivery());
+
+        self::assertSame('24e', $row['vat_classification_code']);
+        self::assertSame('2026-10-31', $row['tax_date']);
+    }
+
+    public function testThirdCountryMixedSupplyIsNotEuAcquisition(): void
+    {
+        $row = $this->draft('US', 'invoice', 'mixed', self::lateOctoberDelivery());
+
+        self::assertSame('24', $row['vat_classification_code']);
+        self::assertSame('2026-10-31', $row['tax_date']);
+    }
+
+    /** @return array<string,mixed> */
+    private static function lateOctoberDelivery(): array
+    {
+        return ['issue_date' => '2026-11-02', 'tax_date' => '2026-10-31', 'delivery_date' => '2026-10-31', 'due_date' => '2026-11-16'];
+    }
+
     public function testAdvanceStaysEmpty(): void
     {
         self::assertNull($this->draft('CZ', 'advance', 'services')['tax_date']);

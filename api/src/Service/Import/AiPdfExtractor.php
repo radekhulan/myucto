@@ -17,6 +17,7 @@ use MyInvoice\Service\Invoice\PurchaseInvoiceCalculator;
 use MyInvoice\Service\Invoice\UnitPricePrecision;
 use MyInvoice\Service\PurchaseInvoice\VendorNumberDuplicates;
 use MyInvoice\Service\Report\KontrolniHlaseniBuilder;
+use MyInvoice\Service\Tax\Vat\EuAcquisitionTaxDate;
 use MyInvoice\Support\AdvanceTaxDocumentText;
 use MyInvoice\Support\PaymentMethods;
 use MyInvoice\Support\PdfBytes;
@@ -914,15 +915,11 @@ final class AiPdfExtractor
         // neplátce sem nespadá: inferReverseCharge je u CZ dodavatele false.)
         if ($reverseCharge) {
             $nature = strtolower(trim((string) ($data['supply_nature'] ?? '')));
-            $isGoods = $nature === 'goods';
             // Přednost prefixu DIČ před zemí sídla jen u SLUŽEB (§ 9 odst. 1 se řídí
             // registrací k DPH). U zboží rozhoduje fyzický pohyb — pořízení z JČS (§ 16)
             // vs. dovoz (§ 20/§ 23) — o kterém registrace dodavatele nevypovídá nic.
-            $country = $this->vendorCountryInfo($vendorId, preferVatIdCountry: !$isGoods);
-            // Služba: EU → 24e (ř.5), 3. země → 24 (ř.12). Zboží: EU → 23 (ř.3), 3. země → 25 (ř.7).
-            $rcClassification = $country['is_eu']
-                ? ($isGoods ? '23' : '24e')
-                : ($isGoods ? '25' : '24');
+            $country = $this->vendorCountryInfo($vendorId, preferVatIdCountry: !in_array($nature, ['goods', 'mixed'], true));
+            $rcClassification = self::reverseChargeClassification($nature, $country['is_eu']);
             // Základní sazba pro rok dokladu z číselníku daňových konstant (ne natvrdo 21).
             $rcDate = (string) ($data['tax_date'] ?? $data['issue_date'] ?? '');
             $rcYear = $rcDate !== '' ? (int) substr($rcDate, 0, 4) : (int) date('Y');
@@ -937,7 +934,7 @@ final class AiPdfExtractor
             unset($it);
 
             $duzpNote = '';
-            if ($rcClassification === '23') {
+            if (in_array($rcClassification, EuAcquisitionTaxDate::GOODS_ACQUISITION_CODES, true)) {
                 // Datum dodání má od migrace 1785 vlastní sloupec. Dokud ho neměl,
                 // sloužilo k tomu vytěžené `tax_date` (které se hned přepsalo dopočteným
                 // DUZP) — fallback zůstává kvůli odpovědím bez `delivery_date`.
@@ -996,7 +993,9 @@ final class AiPdfExtractor
         }
 
         // Náhradní datum vystavení (dnešek) není údaj z dokladu, DUZP se z něj neodvozuje.
-        if ($rcClassification !== '23' && ($data[self::ISSUE_DATE_FALLBACK] ?? false) !== true) {
+        if (!in_array($rcClassification, EuAcquisitionTaxDate::GOODS_ACQUISITION_CODES, true)
+            && ($data[self::ISSUE_DATE_FALLBACK] ?? false) !== true
+        ) {
             $data['tax_date'] = ImportedTaxDatePolicy::resolve(
                 $data['tax_date'] ?? null,
                 $data['delivery_date'] ?? null,
@@ -2709,7 +2708,24 @@ final class AiPdfExtractor
      */
     public static function euAcquisitionTaxDate(?string $deliveryDate, string $issueDate): ?string
     {
-        return \MyInvoice\Service\Tax\Vat\EuAcquisitionTaxDate::for($deliveryDate, $issueDate);
+        return EuAcquisitionTaxDate::for($deliveryDate, $issueDate);
+    }
+
+    /**
+     * Klasifikace RC dokladu podle povahy plnění (AI pole supply_nature) a země dodavatele.
+     *
+     * Služba: EU → 24e (ř. 5), 3. země → 24 (ř. 12). Zboží: EU → 23 (ř. 3), 3. země → 25
+     * (ř. 7). Smíšené plnění z EU je pořízení zboží: vedlejší náklady jako doprava jsou
+     * součástí základu daně zboží (§ 36 odst. 3 ZDPH) a sdílí jeho režim včetně DUZP
+     * dle § 25. U 3. země zůstává smíšené plnění službou — dovoz zboží (§ 23) se řídí
+     * propuštěním celním úřadem a samovyměření z faktury ho nevystihne.
+     */
+    public static function reverseChargeClassification(string $supplyNature, bool $vendorIsEu): string
+    {
+        if ($vendorIsEu) {
+            return in_array($supplyNature, ['goods', 'mixed'], true) ? '23' : '24e';
+        }
+        return $supplyNature === 'goods' ? '25' : '24';
     }
 
     /**

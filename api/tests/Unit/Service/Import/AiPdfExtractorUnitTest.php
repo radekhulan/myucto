@@ -955,6 +955,18 @@ final class AiPdfExtractorUnitTest extends TestCase
         );
     }
 
+    public function testReverseChargeClassification_mixedFromEuIsGoodsAcquisition(): void
+    {
+        $classify = \MyInvoice\Service\Import\AiPdfExtractor::reverseChargeClassification(...);
+        self::assertSame('23', $classify('goods', true));
+        self::assertSame('23', $classify('mixed', true), 'Zboží s vedlejší dopravou z JČS = pořízení zboží.');
+        self::assertSame('24e', $classify('services', true));
+        self::assertSame('24e', $classify('', true));
+        self::assertSame('25', $classify('goods', false));
+        self::assertSame('24', $classify('mixed', false), 'Dovoz ze 3. země se z faktury nesamovyměřuje jako zboží.');
+        self::assertSame('24', $classify('services', false));
+    }
+
     public function testLinesAreGross_noRecap_false(): void
     {
         $items = $this->grossEshopItems();
