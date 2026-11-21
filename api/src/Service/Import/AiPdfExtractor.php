@@ -251,6 +251,7 @@ final class AiPdfExtractor
             }
         }
         $data = self::withIssueDateFallback($extracted['data'], date('Y-m-d'));
+        $data = (new AiExtractedDataClipper($this->db))->clipPurchase($data);
 
         $validationError = $this->validateAiData($data);
         if ($validationError !== null) {
