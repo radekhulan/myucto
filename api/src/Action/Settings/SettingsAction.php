@@ -926,11 +926,16 @@ final class SettingsAction
                 }
                 if ($currentMode === 'double_entry' && $body['accounting_mode'] === 'tax_evidence') {
                     $doubleEntrySince = $this->accountingModes->continuousDoubleEntrySince($id, $modeEffectiveFrom);
+                    // Podvojné účetnictví zapsané až od data, ke kterému se teď mění,
+                    // nemá za sebou žádné účetní období. Změna jen přepíše tentýž řádek
+                    // historie, takže jde o opravu omylem zvoleného režimu (typicky při
+                    // založení firmy od 1. 1. letošního roku), ne o ukončení účetnictví
+                    // podle § 4 odst. 7 ZoÚ. Chybějící historie dál končí chybou.
                     if ($doubleEntrySince === null) {
-                        return Json::error($response, 'accounting_mode_history_missing', 'Nelze ověřit zákonnou dobu vedení účetnictví; zkontrolujte historii účetního režimu.', 422);
-                    }
-                    $completedPeriods = (int) substr($modeEffectiveFrom, 0, 4) - (int) substr($doubleEntrySince, 0, 4);
-                    if ($completedPeriods < 5) {
+                        if ($this->accountingModes->recordedModeOn($id, $modeEffectiveFrom) !== 'double_entry') {
+                            return Json::error($response, 'accounting_mode_history_missing', 'Nelze ověřit zákonnou dobu vedení účetnictví; zkontrolujte historii účetního režimu.', 422);
+                        }
+                    } elseif ((int) substr($modeEffectiveFrom, 0, 4) - (int) substr($doubleEntrySince, 0, 4) < 5) {
                         $earliestYear = (int) substr($doubleEntrySince, 0, 4) + 5;
                         return Json::error(
                             $response,

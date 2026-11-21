@@ -80,6 +80,16 @@ final class AccountingModeRepository
         return $fallback->fetchColumn() !== false;
     }
 
+    public function recordedModeOn(int $supplierId, string $effectiveFrom): ?string
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT accounting_mode FROM supplier_accounting_modes WHERE supplier_id = ? AND effective_from = ?'
+        );
+        $stmt->execute([$supplierId, $effectiveFrom]);
+        $mode = $stmt->fetchColumn();
+        return is_string($mode) && $mode !== '' ? $mode : null;
+    }
+
     public function continuousDoubleEntrySince(int $supplierId, string $before): ?string
     {
         $stmt = $this->db->pdo()->prepare(
