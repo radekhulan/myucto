@@ -221,11 +221,16 @@ final class PohodaImporter
     }
 
     /**
-     * Účetní deník existuje, ale POHODA ho nevydala (stav jiný než `ok`) a agenda nemá
-     * ani jeden zápis: znak agendy v daňové evidenci, která deník vůbec nevede.
+     * Agenda v daňové evidenci: typ účetní jednotky z přehledu jednotek, nebo účetní deník,
+     * který POHODA nevydala (stav jiný než `ok`) a nemá ani jeden zápis. Na export deníku
+     * taková agenda často odpoví jen prázdným seznamem se stavem `ok`, pak ji pozná jen
+     * typ jednotky.
      */
     private static function isTaxEvidenceAgenda(PohodaExport $export): bool
     {
+        if ($export->unitType() === PohodaExport::UNIT_TYPE_TAX_EVIDENCE) {
+            return true;
+        }
         foreach ($export->files() as $f) {
             if ($f['key'] === 'journal') {
                 if (!$f['exists'] || $f['state'] === 'ok' || $f['note'] === 'MDB') {

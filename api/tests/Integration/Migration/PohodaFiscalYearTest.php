@@ -173,6 +173,39 @@ final class PohodaFiscalYearTest extends TestCase
     }
 
     /**
+     * Agenda v daňové evidenci, na jejíž export účetního deníku POHODA odpoví prázdným
+     * seznamem se stavem `ok`. Pozná ji jen typ jednotky `singleEntry` z přehledu
+     * jednotek; dřív prošla jako podvojné účetnictví bez zápisů a převod firmu přepnul
+     * do podvojného účetnictví.
+     */
+    public function testSingleEntryUnitWithEmptyJournalStaysTaxEvidence(): void
+    {
+        $dir = SyntheticPohodaExport::write($this->tmp);
+        $units = $this->tmp . '/' . PohodaExport::UNITS_FILE;
+        file_put_contents($units, str_replace('<acu:unitType>doubleEntry</acu:unitType>', '<acu:unitType>singleEntry</acu:unitType>', (string) file_get_contents($units)));
+        file_put_contents($dir . '/01_ucetni_denik.xml', (string) iconv('UTF-8', 'Windows-1250',
+            '<?xml version="1.0" encoding="Windows-1250"?>'
+            . '<rsp:responsePack version="2.0" id="001" state="ok" programVersion="SYNTETICKY 1.0" ico="' . SyntheticPohodaExport::ICO . '"'
+            . ' xmlns:rsp="http://www.stormware.cz/schema/version_2/response.xsd">'
+            . '<rsp:responsePackItem version="2.0" id="001-1" state="ok"></rsp:responsePackItem>'
+            . '</rsp:responsePack>'));
+        $export = PohodaExport::open($dir);
+        self::assertSame('singleEntry', $export->unitType());
+        $supplierId = $this->supplier(1);
+
+        $codes = array_column($this->importer->preflight($supplierId, $export), 'code');
+        self::assertContains('tax_evidence_agenda_unsupported', $codes);
+        self::assertNotContains('switch_to_double_entry', $codes);
+
+        $protocol = $this->importer->run($supplierId, $this->userId, $export, false);
+        self::assertTrue($protocol->hasErrors());
+        $stmt = $this->db->pdo()->prepare('SELECT accounting_mode FROM supplier WHERE id = ?');
+        $stmt->execute([$supplierId]);
+        self::assertSame('tax_evidence', $stmt->fetchColumn());
+        self::assertSame([], $this->periods($supplierId));
+    }
+
+    /**
      * Agenda ze {@see SyntheticPohodaExport::write()} posunutá na hospodářský rok od srpna:
      * leden 2026 → srpen 2025 (počáteční stavy 1. 8. 2025), minulý rok prosinec → červenec.
      * Navíc zápis 15. 3. 2026 (stejný hospodářský rok, jiný kalendářní) a 10. 9. 2026

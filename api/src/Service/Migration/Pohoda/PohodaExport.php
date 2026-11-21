@@ -23,6 +23,11 @@ final class PohodaExport
     private bool $warningsScanned = false;
     /** Osnova pro neziskové organizace ({@see hasNonprofitChart()}), spočtená při prvním dotazu. */
     private ?bool $nonprofitChart = null;
+    /** Typ účetní jednotky z přehledu jednotek ({@see unitType()}); `false` = ještě nečteno. */
+    private string|null|false $unitType = false;
+
+    /** Typ účetní jednotky POHODY pro daňovou evidenci (`acu:unitType`). */
+    public const UNIT_TYPE_TAX_EVIDENCE = 'singleEntry';
 
     public const FILES = [
         'journal' => '01_ucetni_denik.xml',
@@ -172,6 +177,32 @@ final class PohodaExport
             $equity504 = $equity504 || str_starts_with($code, '901') || str_starts_with($code, '931');
         }
         return $this->nonprofitChart = $equity504;
+    }
+
+    /**
+     * Typ účetní jednotky agendy (`doubleEntry`, `doubleEntryNonProfit`, `singleEntry` …)
+     * z přehledu účetních jednotek v kořeni exportu. Agenda daňové evidence odpoví na
+     * export účetního deníku i bez chyby, jen prázdným seznamem, takže spolehlivě ji
+     * pozná jen tenhle údaj. Export bez přehledu jednotek vrací `null`.
+     */
+    public function unitType(): ?string
+    {
+        if ($this->unitType !== false) {
+            return $this->unitType;
+        }
+        $this->unitType = null;
+        $file = dirname($this->dir) . DIRECTORY_SEPARATOR . self::UNITS_FILE;
+        if (!is_file($file)) {
+            return null;
+        }
+        foreach (PohodaXml::records($file, 'itemAccountingUnit') as $unit) {
+            $ico = CompanyIdNormalizer::ic((string) self::firstValue($unit, 'ico')) ?? '';
+            if ($ico === $this->ico && (int) self::firstValue($unit, 'year') === $this->year) {
+                $type = (string) self::firstValue($unit, 'unitType');
+                return $this->unitType = $type !== '' ? $type : null;
+            }
+        }
+        return null;
     }
 
     /**
