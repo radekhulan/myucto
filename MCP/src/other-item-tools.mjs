@@ -325,7 +325,7 @@ export const OTHER_ITEM_TOOLS = [
       from: date('Splatnost od.'),
       to: date('Splatnost do.'),
       query: str('Hledaný text v popisu, protistraně, čísle dokladu nebo VS.'),
-      sort_by: str('Řazení.', { enum: ['document_no', 'title', 'partner_name', 'due_on', 'amount', 'remaining_amount', 'status'] }),
+      sort_by: str('Řazení; číslo dokladu přirozeně (OP-2026-9 před OP-2026-10).', { enum: ['document_no', 'title', 'partner_name', 'due_on', 'amount', 'remaining_amount', 'status'] }),
       sort_dir: str('Směr řazení.', { enum: ['asc', 'desc'] }),
       page: int('Stránka od 1.', { minimum: 1 }),
       per_page: int('Záznamů na stránce (1 až 200).', { minimum: 1, maximum: 200 }),

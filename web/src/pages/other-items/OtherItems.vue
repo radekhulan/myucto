@@ -2,7 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter, type LocationQuery } from 'vue-router'
-import { otherItemKindsApi, otherItemsApi, type OtherItem, type OtherItemKind, type OtherItemRemainingTotal, type OtherItemSide } from '@/api/otherItems'
+import { otherItemKindsApi, otherItemsApi, type OtherItem, type OtherItemKind, type OtherItemListFilter, type OtherItemRemainingTotal, type OtherItemSide } from '@/api/otherItems'
 import { kindSettingLabel, otherItemKindLabel } from '@/utils/otherItemKind'
 import { isOtherItemOverdue, otherItemDisplayStatus, otherItemRemainingPayment, otherItemStatusClass } from '@/utils/otherItemStatus'
 import { useAuthStore } from '@/stores/auth'
@@ -14,6 +14,7 @@ import { useListNavigationSource } from '@/composables/useListNavigation'
 import { useSupplierStore } from '@/stores/supplier'
 import { useWindowRefresh } from '@/composables/useWindowRefresh'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
+import InvoiceBookMenu from '@/components/invoices/InvoiceBookMenu.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import FilterBar, { type FilterChip } from '@/components/ui/FilterBar.vue'
 import RowActionsMenu, { type RowAction } from '@/components/ui/RowActionsMenu.vue'
@@ -337,12 +338,25 @@ function rowActions(item: OtherItem): RowAction[] {
   ]
 }
 
-function listParams(nextPage: number, pageSize?: number) {
+/** Výběr výpisu bez stránkování a řazení; tentýž výběr (a zvolené řazení) dostane kniha. */
+function listFilter(): OtherItemListFilter {
   return {
     ...(side.value ? { side: side.value } : {}), status: status.value, ...kindQuery.value,
     ...(search.value.trim() ? { q: search.value.trim() } : {}),
     ...(dueFrom.value ? { from: dueFrom.value } : {}),
     ...(dueTo.value ? { to: dueTo.value } : {}),
+  }
+}
+const bookUrl = (format: 'pdf' | 'xlsx') => otherItemsApi.bookUrl({
+  ...listFilter(),
+  ...(sort.value ? { sort_by: sort.value.key, sort_dir: sort.value.dir } : {}),
+}, format)
+/** Kniha obsahuje jen ruční položky; při zdroji Mzdy nebo Daně je výpis nemá, kniha by byla prázdná. */
+const showsBook = computed(() => auth.canRead('other_items') && source.value !== 'payroll' && source.value !== 'tax')
+
+function listParams(nextPage: number, pageSize?: number) {
+  return {
+    ...listFilter(),
     page: nextPage,
     ...(pageSize ? { per_page: pageSize } : {}),
     ...(sort.value ? { sort_by: sort.value.key, sort_dir: sort.value.dir } : {}),
@@ -538,6 +552,16 @@ onMounted(async () => {
         </p>
       </div>
       <div class="flex flex-wrap items-center gap-2 max-md:w-full">
+        <InvoiceBookMenu
+          v-if="showsBook"
+          :label="t('other_items.book')"
+          :url-for="bookUrl"
+          :failed-message="t('other_items.book_failed')"
+          :scope-text="t('other_items.book_scope')"
+          :hint="t('other_items.book_hint')"
+          fallback-filename="kniha-ostatnich-pohledavek-a-zavazku"
+          class="max-md:-order-1"
+        />
         <ActionBar :actions="actions" />
         <RouterLink v-if="auth.canWrite('other_items')" :to="newItemRoute" data-test="other-items-new"
           :class="[btnFilled('primary'), 'whitespace-nowrap max-md:order-first max-md:h-10 max-md:flex-1 max-md:justify-center']">

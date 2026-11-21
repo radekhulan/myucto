@@ -12,6 +12,11 @@ const props = defineProps<{
   /** URL knihy pro aktuální filtr seznamu. */
   urlFor: (format: BookFormat) => string
   fallbackFilename: string
+  /** Hláška při chybě bez zprávy ze serveru; výchozí patří knize faktur. */
+  failedMessage?: string
+  /** Rozsah knihy v nabídce a nápověda tlačítka; výchozí patří knize faktur. */
+  scopeText?: string
+  hint?: string
 }>()
 
 const { t } = useI18n()
@@ -25,7 +30,7 @@ async function download(format: BookFormat) {
   try {
     await downloadApiFile(props.urlFor(format), `${props.fallbackFilename}.${format}`)
   } catch (e: any) {
-    toast.error(e?.response?.data?.error?.message || t('invoice.book_failed'))
+    toast.error(e?.response?.data?.error?.message || props.failedMessage || t('invoice.book_failed'))
   } finally {
     busy.value = null
   }
@@ -42,7 +47,7 @@ async function download(format: BookFormat) {
       :aria-expanded="open"
       :aria-busy="busy !== null"
       :disabled="busy !== null"
-      :title="t('invoice.book_hint')"
+      :title="hint || t('invoice.book_hint')"
       @click="open = !open"
     >
       <svg v-if="busy !== null" class="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" /><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 0 1 8-8v4a4 4 0 0 0-4 4H4z" /></svg>
@@ -58,7 +63,7 @@ async function download(format: BookFormat) {
         class="absolute right-0 z-[61] mt-1 w-64 max-w-[calc(100vw-2rem)] rounded-lg border border-neutral-200 bg-surface py-1 text-sm shadow-xl"
         @keydown.esc="open = false"
       >
-        <p class="border-b border-neutral-100 px-3 py-2 text-xs text-neutral-500">{{ t('invoice.book_scope') }}</p>
+        <p class="border-b border-neutral-100 px-3 py-2 text-xs text-neutral-500">{{ scopeText || t('invoice.book_scope') }}</p>
         <button type="button" role="menuitem" data-test="invoice-book-pdf" class="flex w-full cursor-pointer items-center gap-2.5 px-3 py-2 text-left text-neutral-700 hover:bg-neutral-50" @click="download('pdf')">
           <svg class="h-4 w-4 shrink-0 text-neutral-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path :d="ICONS.download" /></svg>
           {{ t('invoice.book_pdf') }}
