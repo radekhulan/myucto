@@ -37,7 +37,7 @@ import { useSavedFilters, savedFilterTone, type SavedFilterTone } from '@/compos
 import { ensurePrefsLoaded } from '@/composables/useUserPrefs'
 import { useFillViewportHeight } from '@/composables/useFillViewportHeight'
 import { useScrollLoadMore } from '@/composables/useScrollLoadMore'
-import { ICONS, btnOutlineSm } from '@/components/ui/buttonStyles'
+import { ICONS, btnFilled, btnOutlineSm } from '@/components/ui/buttonStyles'
 
 const { t } = useI18n()
 const route = useRoute()
@@ -279,9 +279,9 @@ function clearFilters() {
   void load()
 }
 
+// Nová položka je samostatné plné tlačítko za lištou (vzor přijatých faktur), ostatní akce v liště.
+const newItemRoute = computed(() => ({ name: 'other-item-new', query: side.value ? { side: side.value } : {} }))
 const actions = computed<ActionItem[]>(() => [
-  { key: 'new', label: t('other_items.new'), icon: 'plus', tier: 'primary', variant: 'primary',
-    show: auth.canWrite('other_items'), to: { name: 'other-item-new', query: side.value ? { side: side.value } : {} } },
   { key: 'kinds', label: t('other_items.kinds.title'), icon: 'tag', variant: 'neutral', run: () => { showKinds.value = true } },
   { key: 'documents', label: t('other_items.documents_settings.title'), icon: 'folderOpen', variant: 'neutral',
     show: auth.canRead('documents'), run: () => { showDocumentSettings.value = true } },
@@ -535,7 +535,14 @@ onMounted(async () => {
           </template>
         </p>
       </div>
-      <ActionBar :actions="actions" />
+      <div class="flex flex-wrap items-center gap-2 max-md:w-full">
+        <ActionBar :actions="actions" />
+        <RouterLink v-if="auth.canWrite('other_items')" :to="newItemRoute" data-test="other-items-new"
+          :class="[btnFilled('primary'), 'whitespace-nowrap max-md:order-first max-md:h-10 max-md:flex-1 max-md:justify-center']">
+          <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.plus" /></svg>
+          {{ t('other_items.new') }}
+        </RouterLink>
+      </div>
     </div>
 
     <!-- Řádek pohledů: uložené filtry jako záložky (vzor přijatých faktur); bez pohledu se nekreslí. -->
@@ -557,7 +564,7 @@ onMounted(async () => {
     </div>
 
     <!-- Bez `collapsible`: šest filtrů se na desktopu vejde do lišty, na telefonu jsou za tlačítkem Filtry. -->
-    <FilterBar :active-count="activeFilterCount" :chips="filterChips" @clear="clearFilter" @clear-all="clearFilters">
+    <FilterBar :active-count="activeFilterCount" collapsible :chips="filterChips" @clear="clearFilter" @clear-all="clearFilters">
       <template #primary>
         <div class="relative min-w-56 flex-1">
           <svg class="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-neutral-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
@@ -600,10 +607,6 @@ onMounted(async () => {
         <span class="whitespace-nowrap">{{ t('other_items.due_to') }}</span>
         <DateInput v-model="dueTo" class="h-9 w-40 rounded-md border border-neutral-300 px-2 text-sm" />
       </label>
-      <!-- Výchozí okno splatnosti platí na serveru; bez téhle věty by výběr vypadal jako úplný. -->
-      <p v-if="!dueFrom && !dueTo && !search.trim()" class="w-full text-xs text-neutral-500" data-test="due-window-hint">
-        {{ t(status === 'open' ? 'other_items.window_hint_open' : 'other_items.window_hint') }}
-      </p>
       <template #actions>
         <SavedFiltersMenu :ctrl="saved" />
         <!-- Karty na telefonu mají pevný obsah, sloupce ani hustota je nemění. -->
@@ -611,6 +614,11 @@ onMounted(async () => {
         <DensityToggle class="hidden md:block" :ctrl="tbl" />
       </template>
     </FilterBar>
+    <!-- Výchozí okno splatnosti platí na serveru; bez téhle věty by výběr vypadal jako úplný.
+         Je mimo sbalitelné filtry, aby zůstala vidět i se sbalenou lištou. -->
+    <p v-if="!dueFrom && !dueTo && !search.trim()" class="-mt-2 mb-4 px-1 text-xs text-neutral-500" data-test="due-window-hint">
+      {{ t(status === 'open' ? 'other_items.window_hint_open' : 'other_items.window_hint') }}
+    </p>
 
     <div v-if="loading && !items.length && !sources.length" class="overflow-hidden rounded-lg border border-neutral-200 bg-surface shadow-sm">
       <TableSkeleton :rows="6" :cols="7" />

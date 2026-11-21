@@ -1620,8 +1620,9 @@ v součtu nejsou, říká popisek **(bez rozpracovaných)** přímo u něj. Pře
 nesnižuje dluh ostatních. Součet je saldo, tedy zbývající jistina: úrok a poplatek splátek
 úvěru do něj nepatří, i když se podle nich řídí stav a výběr **Otevřené**.
 
-Filtry jsou vidět v liště nad seznamem (na telefonu za tlačítkem **Filtry**)
-a zvolené se ukazují jako štítky, které jde jednotlivě zrušit. Filtry se ukládají
+Filtry rozbalíte tlačítkem **Filtry** vedle hledání (stejně jako u přijatých faktur)
+a zvolené se ukazují jako štítky, které jde jednotlivě zrušit i se sbalenou lištou.
+Věta o výchozím okně splatnosti zůstává pod lištou vidět vždy. Filtry se ukládají
 do adresy stránky, takže je zachová obnovení stránky, odkaz i návrat z detailu;
 kliknutí na položku v menu na otevřeném seznamu je vrátí na základní nastavení (stav
 **Otevřené**, bez dalších filtrů). Často používaný výběr uložíte v nabídce **Uložené filtry**

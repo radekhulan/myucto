@@ -633,12 +633,12 @@ describe('OtherItems prvky seznamu jako přijaté faktury', () => {
     m.replace.mockImplementation(({ query }: { query: Record<string, string> }) => { m.route.query = query })
   })
 
-  it('filtry nejsou sbalené a lišta nabízí uložené pohledy, sloupce a hustotu', async () => {
+  it('filtry jsou sbalené jako u přijatých faktur a lišta nabízí uložené pohledy, sloupce a hustotu', async () => {
     m.list.mockResolvedValue({ items: [item('posted')], sources: [], total: 1, per_page: 50 })
     const wrapper = mountList()
     await flushPromises()
 
-    expect(wrapper.findComponent({ name: 'FilterBar' }).props('collapsible')).toBeFalsy()
+    expect(wrapper.findComponent({ name: 'FilterBar' }).props('collapsible')).toBe(true)
     expect(wrapper.findComponent({ name: 'SavedFiltersMenu' }).exists()).toBe(true)
     expect(wrapper.findComponent({ name: 'ColumnPicker' }).props('reorderable')).not.toBe(false)
     expect(wrapper.findComponent({ name: 'DensityToggle' }).exists()).toBe(true)
@@ -859,5 +859,20 @@ describe('OtherItems adresa pro návrat z detailu', () => {
     await wrapper.get('[data-test="other-item-row"]').trigger('click')
     expect(m.navSnapshot.snapshot.params).toEqual(expect.objectContaining({ side: 'payable' }))
     expect(m.navSnapshot.listPath).toBe('/other-items?side=payable')
+  })
+
+  it('záhlaví a filtry jako přijaté faktury: primární akce za lištou akcí, filtry sbalitelné, věta o okně mimo ně', async () => {
+    const wrapper = mountList()
+    await flushPromises()
+    const bar = wrapper.findComponent({ name: 'ActionBar' })
+    expect((bar.props('actions') as Array<{ key: string }>).map(action => action.key)).not.toContain('new')
+    const primary = wrapper.get('[data-test="other-items-new"]')
+    expect(primary.text()).toContain('other_items.new')
+    expect(bar.element.compareDocumentPosition(primary.element) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    const filters = wrapper.findComponent({ name: 'FilterBar' })
+    expect(filters.props('collapsible')).toBe(true)
+    // Věta o výchozím okně splatnosti vysvětluje, proč ve výpisu chybí starší položky: nesmí se sbalit s filtry.
+    expect(filters.find('[data-test="due-window-hint"]').exists()).toBe(false)
+    expect(wrapper.find('[data-test="due-window-hint"]').exists()).toBe(true)
   })
 })
