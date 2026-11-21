@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Payroll\Document;
 
+use MyInvoice\Service\Payroll\PayrollChildReference;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\Payroll\PayrollAnnualDocumentRepository;
 use MyInvoice\Repository\Payroll\PayrollAnnualSettlementRepository;
@@ -1572,15 +1573,12 @@ class AnnualTaxCertificateSnapshotBuilder
         int $employeeId,
         array $claims,
     ): array {
-        ksort($claims);
         $rows = [];
-        foreach ($claims as $reference => $months) {
-            if (preg_match('/^dependant-([1-9][0-9]*)$/D', $reference, $match) !== 1) {
-                throw new \DomainException(
+        foreach (PayrollChildReference::sortByDependantId($claims) as $reference => $months) {
+            $dependantId = PayrollChildReference::dependantId((string) $reference)
+                ?? throw new \DomainException(
                     'Odkaz dítěte v daňovém potvrzení není platný.',
                 );
-            }
-            $dependantId = (int) $match[1];
             $statement = $this->db->pdo()->prepare(
                 'SELECT id, full_name, birth_date, birth_number_ciphertext
                    FROM payroll_dependants

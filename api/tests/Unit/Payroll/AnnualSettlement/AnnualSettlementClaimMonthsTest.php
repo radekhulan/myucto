@@ -276,6 +276,27 @@ final class AnnualSettlementClaimMonthsTest extends TestCase
     }
 
     /** § 35c odst. 7: měsíce s průkazem ZTP/P jsou podmnožinou měsíců nároku. */
+    /**
+     * Děti jdou v pořadí id dítěte. Odkaz `dependant-<id>` řazený jako text by dal
+     * `dependant-100` před `dependant-99` a roční zúčtování by ukázalo 2. dítě před 1.
+     */
+    public function testChildrenFollowNumericDependantIdAcrossDigitBoundary(): void
+    {
+        $result = (new AnnualSettlementClaimMonths())->children(
+            [
+                $this->childRow('dependant-100', 2, sprintf('%04d-01-01', self::YEAR), null),
+                $this->childRow('dependant-99', 1, sprintf('%04d-01-01', self::YEAR), null),
+            ],
+            self::YEAR,
+        );
+
+        self::assertSame([], $result['blockers']);
+        self::assertSame(
+            ['dependant-99', 'dependant-100'],
+            array_map(static fn ($child): string => $child->childReference, $result['children']),
+        );
+    }
+
     public function testChildZtpPMonthsAreASubsetOfClaimedMonths(): void
     {
         $result = (new AnnualSettlementClaimMonths())->children(

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Payroll\AnnualSettlement;
 
+use MyInvoice\Service\Payroll\PayrollChildReference;
 use MyInvoice\Service\Payroll\IncomeTax\StudentTaxCredit;
 use MyInvoice\Service\Payroll\IncomeTax\TaxCreditKind;
 use MyInvoice\Service\Payroll\IncomeTax\TaxEvidenceStatus;
@@ -246,7 +247,8 @@ final class AnnualSettlementClaimMonths
             }
         }
 
-        ksort($byChild);
+        // Pořadí id dítěte, ne textu odkazu (PayrollChildReference).
+        $byChild = PayrollChildReference::sortByDependantId($byChild);
         $children = [];
         $claimedByOtherChildren = [];
         $orders = [];
