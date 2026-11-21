@@ -66,14 +66,15 @@
             <th style="width:8%;">Doklad</th>
             <th style="width:6%;">Směr</th>
             <th style="width:10%;">Druh</th>
-            <th style="width:{{ book.showPosting ? 15 : 20 }}%;">Položka</th>
+            <th style="width:{{ book.showPosting ? 13 : 18 }}%;">Položka</th>
             <th style="width:13%;">Protistrana</th>
             <th style="width:6%;">Datum vzniku</th>
             <th style="width:6%;">Splatnost</th>
             <th class="num" style="width:8%;">Částka</th>
             <th class="num" style="width:8%;">Uhrazeno</th>
             <th class="num" style="width:8%;">Zbývá uhradit</th>
-            <th style="width:7%;">Stav</th>
+            <th style="width:4%;">Měna</th>
+            <th style="width:6%;">Stav</th>
             {% if book.showPosting %}<th style="width:5%;">Zaúčtováno</th>{% endif %}
         </tr>
     </thead>
@@ -82,14 +83,15 @@
         <tr{% if not row.counted %} class="muted"{% endif %}>
             <td>{{ row.document_no ?: '–' }}</td>
             <td>{{ row.side_label }}</td>
-            <td>{{ row.kind_label|slice(0, 40) }}</td>
-            <td>{{ row.title|slice(0, 90) }}</td>
+            <td>{{ row.kind_label }}</td>
+            <td>{{ row.title }}</td>
             <td>{{ (row.partner_name ?? '')|slice(0, 45) }}</td>
             <td>{{ row.issued_on|cz_date }}</td>
             <td>{{ row.due_on|cz_date }}</td>
-            <td class="num">{{ row.amount|cz_money }}{% if row.currency != book.domesticCurrency %} {{ row.currency }}{% endif %}</td>
+            <td class="num">{{ row.amount|cz_money }}</td>
             <td class="num">{{ row.paid_amount|cz_money }}</td>
             <td class="num">{{ row.remaining_payment|cz_money }}</td>
+            <td>{{ row.currency }}</td>
             <td>{{ row.status_label }}</td>
             {% if book.showPosting %}<td>{{ row.posted_on ? row.posted_on|cz_date : '' }}</td>{% endif %}
         </tr>
@@ -107,7 +109,7 @@
         <tr>
             <th class="thl" style="width:16%;">Strana</th>
             <th class="thl" style="width:10%;">Měna</th>
-            <th style="width:12%;">Počet položek</th>
+            <th style="width:12%;">Počet v součtu</th>
             <th style="width:20%;">Částka</th>
             <th style="width:20%;">Uhrazeno</th>
             <th style="width:22%;">Zbývá uhradit</th>
@@ -127,7 +129,7 @@
     </tbody>
 </table>
 {% endif %}
-<div class="note">Součty jsou po straně a měně, bez přepočtu kurzem; pohledávky a závazky se nesčítají. Do součtů vstupují jen potvrzené a zaúčtované položky (koncepty, stornované a zrušené jsou v přehledu šedě). Zbývá uhradit v součtech je saldo jistiny a přeplatek jedné položky nesnižuje jinou; u splátek rozdělených na jistinu, úrok a poplatek ukazuje řádek i nezaplacený úrok a poplatek, stejně jako výpis.</div>
+<div class="note">Součty jsou po straně a měně, bez přepočtu kurzem; pohledávky a závazky se nesčítají. Do součtů (i do počtu) vstupují jen potvrzené a zaúčtované položky; koncepty, stornované a zrušené jsou v přehledu šedě a nepočítají se. Zbývá uhradit v součtech je saldo jistiny a přeplatek jedné položky nesnižuje jinou; u splátek rozdělených na jistinu, úrok a poplatek ukazuje řádek i nezaplacený úrok a poplatek, stejně jako výpis.</div>
 
 </body>
 </html>

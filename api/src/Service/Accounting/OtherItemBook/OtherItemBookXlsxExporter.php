@@ -116,7 +116,7 @@ final class OtherItemBookXlsxExporter
         $this->text($sheet, 1, $r, 'Součty');
         $sheet->getStyle([1, $r])->getFont()->setBold(true)->setSize(11);
         $r++;
-        foreach (['Strana', 'Měna', 'Počet položek', 'Částka', 'Uhrazeno', 'Zbývá uhradit'] as $i => $h) {
+        foreach (['Strana', 'Měna', 'Počet v součtu', 'Částka', 'Uhrazeno', 'Zbývá uhradit'] as $i => $h) {
             $this->text($sheet, $i + 1, $r, $h);
         }
         $sheet->getStyle("A{$r}:F{$r}")->getFont()->setBold(true);
@@ -130,7 +130,7 @@ final class OtherItemBookXlsxExporter
             $this->money($sheet, 6, $r, (float) $t['remaining_amount']);
             $r++;
         }
-        $this->text($sheet, 1, $r + 1, 'Součty jsou po straně a měně, bez přepočtu kurzem. Vstupují do nich jen potvrzené '
+        $this->text($sheet, 1, $r + 1, 'Součty jsou po straně a měně, bez přepočtu kurzem. Vstupují do nich (i do počtu) jen potvrzené '
             . 'a zaúčtované položky; zbývá uhradit je saldo jistiny a přeplatek nesnižuje jiné položky.');
         $sheet->getStyle([1, $r + 1])->getFont()->setItalic(true);
 

@@ -893,6 +893,9 @@ describe('OtherItems adresa pro návrat z detailu', () => {
     expect(book.props('label')).toBe('other_items.book')
     expect(book.props('fallbackFilename')).toBe('kniha-ostatnich-pohledavek-a-zavazku')
     expect(book.props('failedMessage')).toBe('other_items.book_failed')
+    // Kniha nemá předpisy z mezd a daní: nabídka to musí říct, ne slibovat vše podle filtru jako u faktur.
+    expect(book.props('scopeText')).toBe('other_items.book_scope')
+    expect(book.props('hint')).toBe('other_items.book_hint')
     const bar = wrapper.findComponent({ name: 'ActionBar' })
     expect(book.element.compareDocumentPosition(bar.element) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     expect(book.element.compareDocumentPosition(wrapper.get('[data-test="other-items-new"]').element) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()

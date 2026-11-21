@@ -552,6 +552,8 @@ onMounted(async () => {
           :label="t('other_items.book')"
           :url-for="bookUrl"
           :failed-message="t('other_items.book_failed')"
+          :scope-text="t('other_items.book_scope')"
+          :hint="t('other_items.book_hint')"
           fallback-filename="kniha-ostatnich-pohledavek-a-zavazku"
           class="max-md:-order-1"
         />

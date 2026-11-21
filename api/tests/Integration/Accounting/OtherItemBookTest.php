@@ -157,6 +157,8 @@ final class OtherItemBookTest extends TestCase
 
         $parsed = OtherItemListFilters::fromRequest($this->request(['status' => 'all']));
         $book = $this->books->build($this->supplierId, $parsed, true, []);
+        $rows = iterator_to_array($book->rows(), false);
+        self::assertCount(8, $rows, 'koncept, storno i zrušená jsou v knize, jen ne v součtech');
         $totals = array_map(static fn (array $t): array => [$t['side'], $t['currency'], $t['count'], $t['amount'], $t['paid_amount'], $t['remaining_amount']], $book->totals());
         self::assertSame([
             ['receivable', 'CZK', 3, 1800.0, 800.0, 1100.0],
@@ -193,6 +195,40 @@ final class OtherItemBookTest extends TestCase
         self::assertFalse($this->books->build($this->supplierId, $parsed, false, [])->showPosting, 'bez práva číst účetnictví');
         $this->pdo->prepare("UPDATE supplier SET accounting_mode = 'tax_evidence' WHERE id = ?")->execute([$this->supplierId]);
         self::assertFalse($this->books->build($this->supplierId, $parsed, true, [])->showPosting, 'daňová evidence nemá zápisy');
+    }
+
+    public function testSplitInstallmentRowShowsUnpaidInterestLikeListWhileTotalsStayPrincipal(): void
+    {
+        // Úvěr: jistina 1000 uhrazena, úrok 100 splátky ne. Výpis: zbývá 100, stav Částečně uhrazeno.
+        $loan = $this->item('payable', 'CZK', 1000, 'posted', title: 'Syntetický úvěr', kind: 'loan');
+        $this->pdo->prepare('INSERT INTO other_item_installments (supplier_id, other_item_id, position, due_on, amount,
+                principal_amount, interest_amount, fee_amount) VALUES (?, ?, 1, ?, 1100, 1000, 100, 0)')
+            ->execute([$this->supplierId, $loan, $this->day(15)]);
+        $this->allocate($loan, 1000);
+        $parsed = OtherItemListFilters::fromRequest($this->request(['status' => 'all']));
+
+        $listed = $this->list->list($this->supplierId, $parsed['filters'], 1, 50)['items'][0];
+        $book = $this->books->build($this->supplierId, $parsed, true, []);
+        $row = iterator_to_array($book->rows(), false)[0];
+        self::assertTrue($row['has_split_installments']);
+        self::assertSame((float) $listed['remaining_payment'], (float) $row['remaining_payment']);
+        self::assertEqualsWithDelta(100.0, (float) $row['remaining_payment'], 0.001);
+        self::assertSame('Částečně uhrazeno', $row['status_label']);
+        self::assertSame(0.0, $book->totals()[0]['remaining_amount'], 'součet je saldo jistiny jako výpis');
+    }
+
+    public function testRowsCrossBatchBoundariesAndTotalsFollowPrintedRows(): void
+    {
+        $ids = [];
+        foreach ([1, 1, 1, 2, 2] as $i => $offset) {
+            $ids[] = $this->item('receivable', 'CZK', 10 * ($i + 1), 'confirmed', due: $this->day($offset));
+        }
+        $parsed = OtherItemListFilters::fromRequest($this->request(['status' => 'all']));
+        $book = $this->books->build($this->supplierId, $parsed, true, [], batchSize: 2);
+        $rows = iterator_to_array($book->rows(), false);
+        self::assertSame($ids, array_map(static fn (array $row): int => (int) $row['id'], $rows));
+        self::assertSame(5, $book->totals()[0]['count']);
+        self::assertSame(150.0, $book->totals()[0]['amount']);
     }
 
     public function testPostedDateOnlyForPostedItemWithEntryWhenShown(): void

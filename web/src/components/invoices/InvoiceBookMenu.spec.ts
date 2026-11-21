@@ -60,6 +60,22 @@ describe('Kniha faktur', () => {
     expect(mocks.toastError).toHaveBeenCalledWith('Knihu ostatních položek se nepodařilo vytvořit')
   })
 
+  it('rozsah a nápovědu bere od stránky, jinak zůstanou texty knihy faktur', async () => {
+    const i18n = () => createI18n({ legacy: false, locale: 'cs', missingWarn: false, fallbackWarn: false, messages: { cs: {} } })
+    const own = mount(InvoiceBookMenu, {
+      props: { label: 'Kniha', urlFor: () => '', fallbackFilename: 'kniha', scopeText: 'Jen ručně zadané položky', hint: 'Sestava ručních položek' },
+      global: { plugins: [i18n()] },
+    })
+    expect(own.get('[data-test="invoice-book-toggle"]').attributes('title')).toBe('Sestava ručních položek')
+    await own.get('[data-test="invoice-book-toggle"]').trigger('click')
+    expect(own.get('[data-test="invoice-book-menu"]').text()).toContain('Jen ručně zadané položky')
+
+    const invoices = mountMenu()
+    expect(invoices.get('[data-test="invoice-book-toggle"]').attributes('title')).toBe('invoice.book_hint')
+    await invoices.get('[data-test="invoice-book-toggle"]').trigger('click')
+    expect(invoices.get('[data-test="invoice-book-menu"]').text()).toContain('invoice.book_scope')
+  })
+
   it('bez předané hlášky zůstane hláška knihy faktur', async () => {
     mocks.download.mockRejectedValue(new Error('network'))
     const wrapper = mountMenu()

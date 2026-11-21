@@ -22359,8 +22359,8 @@ paths:
         Sloupce: číslo dokladu, směr, druh, položka, protistrana, datum vzniku,
         splatnost, částka, uhrazeno, zbývá uhradit (u splátek rozdělených na jistinu,
         úrok a poplatek včetně nezaplaceného úroku a poplatku, jako `remaining_payment`),
-        měna, stav jako ve výpisu a s právem číst účetnictví v podvojném účetnictví datum
-        zaúčtování. XLSX má navíc strojové sloupce `side`, `kind`, `kind_id` a `status`
+        stav jako ve výpisu a s právem číst účetnictví v podvojném účetnictví datum
+        zaúčtování. Měna je v PDF u částky v cizí měně, v XLSX samostatný sloupec. XLSX má navíc strojové sloupce `side`, `kind`, `kind_id` a `status`
         s uloženou hodnotou.
 
         Součty jsou po straně a měně bez přepočtu kurzem, stejné jako `totals` výpisu:

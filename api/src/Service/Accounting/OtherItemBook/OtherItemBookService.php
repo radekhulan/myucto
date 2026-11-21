@@ -66,7 +66,8 @@ final class OtherItemBookService
      *        a v podvojném účetnictví, stejně jako sloupec Zápis ve výpisu
      * @param array{name?:string, email?:string} $user
      */
-    public function build(int $supplierId, array $parsed, bool $canReadAccounting, array $user, ?\DateTimeImmutable $now = null): OtherItemBook
+    public function build(int $supplierId, array $parsed, bool $canReadAccounting, array $user, ?\DateTimeImmutable $now = null,
+        int $batchSize = OtherItemBook::BATCH_SIZE): OtherItemBook
     {
         $filters = $parsed['filters'];
         $stmt = $this->db->pdo()->prepare('SELECT company_name, ic, dic, accounting_mode FROM supplier WHERE id = ?');
@@ -87,9 +88,9 @@ final class OtherItemBookService
         return new OtherItemBook(
             $this->meta($supplierId, $supplier, $parsed, $user, $now),
             $fetch,
-            $this->items->bookTotals($supplierId, $filters),
             $showPosting,
             $this->domesticCurrency($supplierId),
+            $batchSize,
         );
     }
 

@@ -194,41 +194,16 @@ final class OtherItemRepository
      * Zbývá uhradit za celý výběr (ne jen načtenou stránku), po straně a měně: pohledávky
      * a závazky ani dvě měny se nesčítají. Jen potvrzené a zaúčtované položky — koncept
      * ještě dluhem není, storno už ne. Přeplatek jedné položky nesnižuje dluh jiné (záporný zůstatek se počítá jako nula).
+     * Totéž pravidlo sčítá kniha za běhu z tisknutých řádků ({@see \MyInvoice\Service\Accounting\OtherItemBook\OtherItemBook}),
+     * shodu hlídá OtherItemBookTest.
      *
      * @param list<mixed> $params
      * @return list<array{side:string,currency:string,remaining_amount:float}>
      */
     private function remainingTotals(string $table, string $whereSql, array $params): array
     {
-        return array_map(static fn (array $row): array => [
-            'side' => $row['side'],
-            'currency' => $row['currency'],
-            'remaining_amount' => $row['remaining_amount'],
-        ], $this->selectionTotals($table, $whereSql, $params));
-    }
-
-    /**
-     * Součty knihy za celý výběr výpisu: stejné pravidlo jako součty výpisu ({@see remainingTotals()}),
-     * navíc počet, částka a uhrazeno (včetně vyrovnaného mimo úhrady).
-     *
-     * @param array<string,mixed> $filters výstup {@see \MyInvoice\Http\OtherItemListFilters}
-     * @return list<array{side:string,currency:string,count:int,amount:float,paid_amount:float,remaining_amount:float}>
-     */
-    public function bookTotals(int $supplierId, array $filters): array
-    {
-        [$table, $whereSql, $params] = $this->listWhere($supplierId, $filters);
-        return $this->selectionTotals($table, $whereSql, $params);
-    }
-
-    /**
-     * @param list<mixed> $params
-     * @return list<array{side:string,currency:string,count:int,amount:float,paid_amount:float,remaining_amount:float}>
-     */
-    private function selectionTotals(string $table, string $whereSql, array $params): array
-    {
         $stmt = $this->db->pdo()->prepare(
-            "SELECT oi.side, oi.currency, COUNT(*) item_count, SUM(oi.amount) amount,
-                    SUM(oi.settled_outside_amount + " . self::PAID_SQL . ") paid_amount,
+            "SELECT oi.side, oi.currency,
                     SUM(GREATEST(oi.amount - oi.settled_outside_amount - " . self::PAID_SQL . ", 0)) remaining_amount
                FROM " . $table . "
               WHERE " . $whereSql . " AND oi.status IN ('confirmed','posted')
@@ -239,9 +214,6 @@ final class OtherItemRepository
         return array_map(static fn (array $row): array => [
             'side' => (string) $row['side'],
             'currency' => (string) $row['currency'],
-            'count' => (int) $row['item_count'],
-            'amount' => round((float) $row['amount'], 2),
-            'paid_amount' => round((float) $row['paid_amount'], 2),
             'remaining_amount' => round((float) $row['remaining_amount'], 2),
         ], $stmt->fetchAll(PDO::FETCH_ASSOC));
     }
