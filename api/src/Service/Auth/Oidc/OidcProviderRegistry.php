@@ -15,6 +15,11 @@ use MyInvoice\Infrastructure\Config\Config;
  * šla podvrhnout hlavičkou a vlastní domény firem by každá potřebovala vlastní
  * zápis u poskytovatele. Na vlastní doménu se uživatel vrací přes domain-login.
  *
+ * Výjimka je `redirect_base` v nastavení poskytovatele: pevná https adresa
+ * z konfigurace pro poskytovatele, kteří `app.url` jako návratovou adresu
+ * nepřijmou (Google ani Apple nevezmou doménu `.local`). Na `app.url` ji musí
+ * přesměrovat webserver se zachováním dotazu, aby callback dostal cookies toku.
+ *
  * Neúplně nastavený poskytovatel se nezapne a {@see configurationErrors()} ho
  * vypíše do Diagnostiky; aplikace kvůli němu nespadne.
  */
@@ -28,6 +33,8 @@ final class OidcProviderRegistry
     private ?array $providers = null;
     /** @var array<string,string> */
     private array $errors = [];
+    /** @var array<string,string> */
+    private array $redirectBases = [];
 
     public function __construct(private readonly Config $config) {}
 
@@ -49,6 +56,7 @@ final class OidcProviderRegistry
         }
         $this->providers = [];
         $this->errors = [];
+        $this->redirectBases = [];
         if (!(bool) $this->config->get('auth.oidc.enabled', false)) {
             return $this->providers;
         }
@@ -62,6 +70,14 @@ final class OidcProviderRegistry
                 continue;
             }
             try {
+                $redirectBase = trim((string) ($settings['redirect_base'] ?? ''));
+                if ($redirectBase !== '') {
+                    $origin = self::httpsOrigin($redirectBase);
+                    if ($origin === null) {
+                        throw new \InvalidArgumentException('redirect_base musí být absolutní https adresa bez cesty.');
+                    }
+                    $this->redirectBases[$id] = $origin;
+                }
                 $this->providers[$id] = match ($id) {
                     'entra' => $this->entra($settings),
                     'google' => $this->google($settings),
@@ -100,7 +116,8 @@ final class OidcProviderRegistry
 
     public function redirectUri(OidcProvider $provider): string
     {
-        $base = $this->appUrl();
+        $this->enabled();
+        $base = $this->redirectBases[$provider->id] ?? $this->appUrl();
         if ($base === null) {
             throw new \LogicException('app.url není nastavené.');
         }
@@ -263,7 +280,12 @@ final class OidcProviderRegistry
 
     private function appUrl(): ?string
     {
-        $url = rtrim(trim((string) $this->config->get('app.url', '')), '/');
+        return self::httpsOrigin((string) $this->config->get('app.url', ''));
+    }
+
+    private static function httpsOrigin(string $url): ?string
+    {
+        $url = rtrim(trim($url), '/');
         $parts = parse_url($url);
         if (!is_array($parts)
             || ($parts['scheme'] ?? '') !== 'https'

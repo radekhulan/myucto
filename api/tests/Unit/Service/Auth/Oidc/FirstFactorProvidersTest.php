@@ -162,4 +162,31 @@ final class FirstFactorProvidersTest extends TestCase
         self::assertTrue($registry->get('entra')->supportsLoginPolicy());
         self::assertFalse($registry->publicList()[0]['strong']);
     }
+
+    public function testRedirectBaseOverridesAppUrlOnlyForItsProvider(): void
+    {
+        $registry = new OidcProviderRegistry(new Config([
+            'app' => ['url' => 'https://ucto.local'],
+            'auth' => ['oidc' => ['enabled' => true, 'providers' => [
+                'google' => ['enabled' => true, 'client_id' => FakeOidcIdp::GOOGLE_CLIENT, 'client_secret' => 's', 'redirect_base' => 'https://ucto.example.test/'],
+                'seznam' => ['enabled' => true, 'client_id' => 'c', 'client_secret' => 's'],
+            ]]],
+        ]));
+        self::assertSame('https://ucto.example.test/api/auth/oidc/google/callback', $registry->redirectUri($registry->get('google')));
+        self::assertSame('https://ucto.local/api/auth/oidc/seznam/callback', $registry->redirectUri($registry->get('seznam')));
+    }
+
+    public function testInvalidRedirectBaseDisablesProvider(): void
+    {
+        foreach (['http://ucto.example.test', 'https://ucto.example.test/cesta', 'https://user@ucto.example.test', 'ucto.example.test'] as $base) {
+            $registry = new OidcProviderRegistry(new Config([
+                'app' => ['url' => 'https://ucto.local'],
+                'auth' => ['oidc' => ['enabled' => true, 'providers' => [
+                    'google' => ['enabled' => true, 'client_id' => FakeOidcIdp::GOOGLE_CLIENT, 'client_secret' => 's', 'redirect_base' => $base],
+                ]]],
+            ]));
+            self::assertNull($registry->get('google'), $base);
+            self::assertArrayHasKey('google', $registry->configurationErrors(), $base);
+        }
+    }
 }
