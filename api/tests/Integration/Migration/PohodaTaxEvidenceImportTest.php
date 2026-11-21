@@ -165,6 +165,39 @@ final class PohodaTaxEvidenceImportTest extends TestCase
         self::assertSame([], array_values(array_filter($journal['rows'], static fn (array $r): bool => in_array($r['purchase_invoice_id'], $ids, true))));
     }
 
+    /**
+     * Pokladna bez zápisů v deníku (agenda daňové evidence deník nemá): převod ji založí
+     * podle jejích dokladů a převezme výdaj i příjem. Výdajový doklad uhradí přijatou fakturu
+     * a peněžní deník ji započte jednou, pokladním řádkem. Dřív převod pokladnu přeskočil
+     * a všechny pokladní doklady hlásil „nemá pokladnu, nepřevzat".
+     */
+    public function testCashRegisterWithoutJournalIsImported(): void
+    {
+        $dir = SyntheticPohodaExport::writeTaxEvidence($this->tmp);
+        SyntheticPohodaExport::withPurchasePaidByCash($dir);
+        $supplierId = $this->supplier();
+
+        $protocol = $this->importer->run($supplierId, $this->userId, PohodaExport::open($dir), false);
+        self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
+        self::assertNotContains('register_missing', array_column($this->messages($protocol), 'code'), $this->explain($protocol));
+        self::assertSame(1, (int) $this->row('SELECT COUNT(*) AS n FROM cash_registers WHERE supplier_id = ?', [$supplierId])['n']);
+
+        $purchase = $this->row('SELECT id, status, paid_at FROM purchase_invoices WHERE supplier_id = ? AND varsymbol = ?', [$supplierId, SyntheticPohodaExport::PURCHASE_PAID_BY_CASH]);
+        self::assertSame('paid', $purchase['status']);
+        self::assertSame('2026-02-15', substr((string) $purchase['paid_at'], 0, 10));
+        $payment = $this->row('SELECT purchase_invoice_id, purpose FROM cash_documents WHERE supplier_id = ? AND doc_number LIKE ?', [$supplierId, SyntheticPohodaExport::CASH_PAYMENT . '%']);
+        self::assertSame((int) $purchase['id'], (int) $payment['purchase_invoice_id']);
+        self::assertSame('purchase_payment', $payment['purpose']);
+
+        $journal = $this->cashJournal->build($supplierId, '2026-01-01', '2026-12-31', ['year' => 2026]);
+        $rows = array_values(array_filter($journal['rows'], static fn (array $r): bool => $r['purchase_invoice_id'] === (int) $purchase['id']));
+        self::assertCount(1, $rows, json_encode($rows, JSON_UNESCAPED_UNICODE));
+        self::assertSame('cash', $rows[0]['source_type']);
+        self::assertSame(400.0, (float) $rows[0]['expense']);
+        $receipts = array_values(array_filter($journal['rows'], static fn (array $r): bool => $r['source_type'] === 'cash' && (float) ($r['income'] ?? 0) === 300.0));
+        self::assertCount(1, $receipts, json_encode($journal['rows'], JSON_UNESCAPED_UNICODE));
+    }
+
     public function testDryRunLeavesNothing(): void
     {
         $export = PohodaExport::open(SyntheticPohodaExport::writeTaxEvidence($this->tmp));

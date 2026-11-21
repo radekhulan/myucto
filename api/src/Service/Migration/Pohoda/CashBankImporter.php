@@ -52,14 +52,20 @@ final class CashBankImporter
             }
         }
         $vouchers = iterator_to_array($ctx->export->records('cash', 'voucher'), false);
-        // Pokladna bez účtu v číselníku: účet 211 z deníku jejích dokladů.
+        // Pokladna bez účtu v číselníku: účet 211 z deníku jejích dokladů. Pokladnu zakládají
+        // její doklady v roce, ne zápisy v deníku: agenda daňové evidence deník nemá a doklad
+        // bez zaúčtování (počáteční stav pokladny) v něm chybí i v podvojném účetnictví.
         $votes = [];
+        $used = [];
         foreach ($vouchers as $r) {
             $h = PohodaXml::get($r, 'voucherHeader');
             if ($ctx->skipsDate(PohodaXml::date($h, 'date') ?? PohodaXml::date($h, 'datePayment'))) {
                 continue;
             }
             $code = PohodaXml::text($h, 'cashAccount/ids');
+            if ($code !== '') {
+                $used[$code] = true;
+            }
             $account = $ctx->cashAccountsByNumber[PohodaXml::text($h, 'number/numberRequested')] ?? null;
             if ($account !== null) {
                 $votes[$code][$account] = ($votes[$code][$account] ?? 0) + 1;
@@ -72,7 +78,7 @@ final class CashBankImporter
                 arsort($votes[$code]);
                 $reg['account'] = (string) array_key_first($votes[$code]);
             }
-            if (!isset($votes[$code]) && $this->map->get($ctx->supplierId, PohodaImportRepository::KIND_CASH_REGISTER, $code) === null) {
+            if (!isset($used[$code]) && !isset($votes[$code]) && $this->map->get($ctx->supplierId, PohodaImportRepository::KIND_CASH_REGISTER, $code) === null) {
                 continue; // pokladna bez dokladů v roce se nezakládá
             }
             $registerIds[$code] = $this->ensureRegister($ctx, $code, $reg['name'], $reg['account']);

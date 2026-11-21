@@ -503,6 +503,49 @@ final class SyntheticPohodaExport
             . '<typ:sourceDocument><typ:number>ZAP0001</typ:number></typ:sourceDocument><typ:amount>300</typ:amount></typ:liquidation></inv:liquidations></lst:invoice>');
     }
 
+    /** Přijatá faktura uhrazená pokladnou ({@see withPurchasePaidByCash()}). */
+    public const PURCHASE_PAID_BY_CASH = '26PF0060';
+    public const CASH_PAYMENT = '26VP0060';
+    public const CASH_RECEIPT = '26PP0061';
+
+    /**
+     * Přijatá faktura 400 Kč mimo DPH uhrazená výdajovým pokladním dokladem 26VP0060
+     * a samostatný pokladní příjem 26PP0061 za 300 Kč bez faktury. Pokladna `HP` není
+     * v číselníku a v deníku agendy nemá žádný zápis.
+     */
+    public static function withPurchasePaidByCash(string $dir): void
+    {
+        self::append($dir . '/20_faktury_receivedInvoice.xml', '</lst:listInvoice>',
+            '<lst:invoice version="2.0"><inv:invoiceHeader><inv:invoiceType>receivedInvoice</inv:invoiceType>'
+            . '<inv:number><typ:numberRequested>' . self::PURCHASE_PAID_BY_CASH . '</typ:numberRequested></inv:number>'
+            . '<inv:symVar>2026060</inv:symVar><inv:originalDocument>RE-2026-60</inv:originalDocument><inv:date>2026-02-12</inv:date><inv:dateTax>2026-02-12</inv:dateTax>'
+            . '<inv:dateAccounting>2026-02-12</inv:dateAccounting><inv:dateDue>2026-02-26</inv:dateDue>'
+            . '<inv:classificationVAT><typ:ids>PN</typ:ids></inv:classificationVAT><inv:text>Kancelářské potřeby</inv:text>'
+            . self::partner('inv', 'Dodavatel Test s.r.o.', self::VENDOR_ICO, 'CZ' . self::VENDOR_ICO)
+            . '<inv:liquidation><typ:amountHome>0</typ:amountHome><typ:date>2026-02-15</typ:date></inv:liquidation></inv:invoiceHeader>'
+            . '<inv:invoiceSummary><inv:homeCurrency><typ:priceNone>400</typ:priceNone><typ:priceLow>0</typ:priceLow><typ:priceLowVAT>0</typ:priceLowVAT>'
+            . '<typ:priceHigh>0</typ:priceHigh><typ:priceHighVAT>0</typ:priceHighVAT></inv:homeCurrency></inv:invoiceSummary>'
+            . '<inv:liquidations><typ:liquidation><typ:id>' . abs(crc32('26PF0060liq')) . '</typ:id><typ:date>2026-02-15</typ:date><typ:sourceAgenda>voucher</typ:sourceAgenda>'
+            . '<typ:sourceDocument><typ:number>' . self::CASH_PAYMENT . '</typ:number></typ:sourceDocument><typ:amount>400</typ:amount></typ:liquidation></inv:liquidations></lst:invoice>');
+        $voucher = static fn (string $type, string $number, string $date, float $amount, string $text): string =>
+            '<lst:voucher version="2.0"><vch:voucherHeader>'
+            . '<vch:voucherType>' . $type . '</vch:voucherType><vch:cashAccount><typ:ids>HP</typ:ids></vch:cashAccount>'
+            . '<vch:number><typ:numberRequested>' . $number . '</typ:numberRequested></vch:number>'
+            . '<vch:date>' . $date . '</vch:date><vch:datePayment>' . $date . '</vch:datePayment><vch:text>' . $text . '</vch:text>'
+            . '<vch:classificationVAT><typ:ids>PN</typ:ids></vch:classificationVAT>'
+            . '</vch:voucherHeader><vch:voucherSummary><vch:homeCurrency><typ:priceNone>' . $amount . '</typ:priceNone>'
+            . '<typ:priceLow>0</typ:priceLow><typ:priceLowVAT>0</typ:priceLowVAT><typ:priceHigh>0</typ:priceHigh><typ:priceHighVAT>0</typ:priceHighVAT>'
+            . '</vch:homeCurrency></vch:voucherSummary></lst:voucher>';
+        $vouchers = $voucher('expense', self::CASH_PAYMENT, '2026-02-15', 400, 'Úhrada kancelářských potřeb')
+            . $voucher('receipt', self::CASH_RECEIPT, '2026-02-20', 300, 'Tržba v hotovosti');
+        $file = $dir . '/28_pokladna.xml';
+        if (is_file($file)) {
+            self::append($file, '</lst:listVoucher>', $vouchers);
+        } else {
+            self::file($file, '<lst:listVoucher version="2.0" state="ok">' . $vouchers . '</lst:listVoucher>');
+        }
+    }
+
     /** Doklady, jejichž skupinu párovacího symbolu má POHODA vyrovnanou ({@see withClosedPairingGroups()}). */
     public const PAIRED_ISSUED = '26FV0090';
     public const PAIRED_PURCHASE = '26PF0090';
