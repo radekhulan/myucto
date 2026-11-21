@@ -334,6 +334,41 @@ final class AnnualTaxCertificateSnapshotBuilderIntegrationTest extends TestCase
         }
     }
 
+    /**
+     * Řádek 11: děti jdou v pořadí id dítěte i přes hranici řádu. Odkaz řazený jako text by dal
+     * `dependant-1000000` před `dependant-999999` a řádky prvního a druhého dítěte by se prohodily.
+     */
+    public function testChildRowsFollowNumericDependantIdAcrossDigitBoundary(): void
+    {
+        $container = \MyInvoice\Tests\Support\PayrollTestContainer::build();
+        $connection = $container->get(Connection::class);
+        $builder = $container->get(AnnualTaxCertificateSnapshotBuilder::class);
+        $sensitive = $container->get(PayrollSensitiveData::class);
+        $pdo = $connection->pdo();
+        $sourceSupplierId = (int) $pdo->query('SELECT id FROM supplier ORDER BY id LIMIT 1')->fetchColumn();
+        $pdo->beginTransaction();
+        try {
+            [$supplierId, $employeeId] = $this->fixture($pdo, $sourceSupplierId, $sensitive);
+            $insert = $pdo->prepare("INSERT INTO payroll_dependants
+                (id, supplier_id, employee_id, full_name, birth_date, existence_from, relation)
+                VALUES (?, ?, ?, ?, ?, ?, 'child_own')");
+            $insert->execute([999_999, $supplierId, $employeeId, 'Syntetické první dítě', '2018-05-01', '2018-05-01']);
+            $insert->execute([1_000_000, $supplierId, $employeeId, 'Syntetické druhé dítě', '2020-09-01', '2020-09-01']);
+            $method = new \ReflectionMethod(AnnualTaxCertificateSnapshotBuilder::class, 'childTaxBenefits');
+
+            $rows = $method->invoke($builder, $supplierId, $employeeId, [
+                'dependant-1000000' => [1 => ['order' => 2, 'ztp_p' => false]],
+                'dependant-999999' => [1 => ['order' => 1, 'ztp_p' => false]],
+            ]);
+
+            self::assertSame(['Syntetické první dítě', 'Syntetické druhé dítě'], array_column($rows, 'name'));
+            self::assertSame(['1', ''], [$rows[0]['first_child_period'], $rows[0]['second_child_period']]);
+            self::assertSame(['', '1'], [$rows[1]['first_child_period'], $rows[1]['second_child_period']]);
+        } finally {
+            if ($pdo->inTransaction()) $pdo->rollBack();
+        }
+    }
+
     public function testBuildsDocumentedChildrenDisabilityAndAnnualSettlement(): void
     {
         $container = \MyInvoice\Tests\Support\PayrollTestContainer::build();

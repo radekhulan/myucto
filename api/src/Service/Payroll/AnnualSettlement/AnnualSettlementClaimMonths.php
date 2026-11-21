@@ -8,6 +8,7 @@ use MyInvoice\Service\Payroll\IncomeTax\StudentTaxCredit;
 use MyInvoice\Service\Payroll\IncomeTax\TaxCreditKind;
 use MyInvoice\Service\Payroll\IncomeTax\TaxEvidenceStatus;
 use MyInvoice\Service\Payroll\IncomeTax\TaxpayerCreditEntitlement;
+use MyInvoice\Service\Payroll\PayrollChildReference;
 
 /**
  * Převod evidovaných intervalů nároku na POČET MĚSÍCŮ v roce.
@@ -246,7 +247,8 @@ final class AnnualSettlementClaimMonths
             }
         }
 
-        ksort($byChild);
+        // Pořadí id dítěte, ne textu odkazu (PayrollChildReference).
+        $byChild = PayrollChildReference::sortByDependantId($byChild);
         $children = [];
         $claimedByOtherChildren = [];
         $orders = [];
