@@ -106,7 +106,7 @@ describe('Kniha faktur', () => {
     expect(received.searchParams.get('filter[unpaid_only]')).toBe('1')
     expect(received.searchParams.has('page')).toBe(false)
 
-    // Ostatní položky: výběr výpisu (stejné názvy parametrů jako GET /accounting/other-items), bez stránkování a řazení.
+    // Ostatní položky: výběr a řazení výpisu (stejné názvy parametrů jako GET /accounting/other-items), bez stránkování.
     const other = new URL(otherItemsApi.bookUrl({
       side: 'receivable', status: 'all', kind: 'rent', q: 'nájem', from: '2099-01-01', to: '2099-12-31',
       page: 3, per_page: 50, sort_by: 'amount', sort_dir: 'asc',
@@ -114,6 +114,7 @@ describe('Kniha faktur', () => {
     expect(other.pathname).toBe('/api/accounting/other-items/book')
     expect(Object.fromEntries(other.searchParams)).toEqual({
       format: 'xlsx', side: 'receivable', status: 'all', kind: 'rent', q: 'nájem', from: '2099-01-01', to: '2099-12-31',
+      sort_by: 'amount', sort_dir: 'asc',
     })
   })
 })

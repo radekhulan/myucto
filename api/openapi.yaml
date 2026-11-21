@@ -22354,13 +22354,14 @@ paths:
         filtru výpisu `GET /api/v1/accounting/other-items` (stejné parametry včetně
         výchozího okna splatnosti rok zpět až rok dopředu; výběr `open` nemá dolní mez
         a hledání bez data okno nemá), bez stránkování. Převzaté předpisy z mezd a daní,
-        které výpis vrací zvlášť v `sources`, kniha neobsahuje. Řazení podle splatnosti.
+        které výpis vrací zvlášť v `sources`, kniha neobsahuje. Řazení převezme `sort_by`
+        a `sort_dir` výpisu, bez nich je podle čísla dokladu vzestupně (koncepty bez čísla první).
 
         Sloupce: číslo dokladu, směr, druh, položka, protistrana, datum vzniku,
         splatnost, částka, uhrazeno, zbývá uhradit (u splátek rozdělených na jistinu,
         úrok a poplatek včetně nezaplaceného úroku a poplatku, jako `remaining_payment`),
         stav jako ve výpisu a s právem číst účetnictví v podvojném účetnictví datum
-        zaúčtování. Měna je v PDF u částky v cizí měně, v XLSX samostatný sloupec. XLSX má navíc strojové sloupce `side`, `kind`, `kind_id` a `status`
+        zaúčtování. Měna je samostatný sloupec v PDF i XLSX. XLSX má navíc strojové sloupce `side`, `kind`, `kind_id` a `status`
         s uloženou hodnotou.
 
         Součty jsou po straně a měně bez přepočtu kurzem, stejné jako `totals` výpisu:
@@ -22378,6 +22379,8 @@ paths:
         - { in: query, name: from, schema: { type: string, format: date }, description: Splatnost od. }
         - { in: query, name: to, schema: { type: string, format: date }, description: Splatnost do. }
         - { in: query, name: q, schema: { type: string } }
+        - { in: query, name: sort_by, schema: { type: string, enum: [document_no, title, partner_name, due_on, amount, remaining_amount, status] }, description: Řazení jako ve výpisu; bez něj podle čísla dokladu. }
+        - { in: query, name: sort_dir, schema: { type: string, enum: [asc, desc], default: desc }, description: Směr řazení podle sort_by. }
       responses:
         '200':
           description: Soubor knihy (Content-Disposition attachment)

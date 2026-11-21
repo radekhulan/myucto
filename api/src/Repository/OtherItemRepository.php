@@ -220,18 +220,24 @@ final class OtherItemRepository
 
     /**
      * Dávka řádků knihy nad výběrem výpisu ({@see listWhere()}), bez stránkování: klíč
-     * (splatnost, id) místo OFFSET, takže každá dávka čte jen svůj úsek indexu splatnosti
-     * (InnoDB nese id v sekundárním indexu, řazení tedy obejde filesort).
+     * (řadicí hodnota, id) místo OFFSET, takže každá dávka pokračuje přesně za předchozí.
+     *
+     * Řazení převezme zvolené řazení výpisu ({@see OtherItemSort::selected()}), jinak je podle
+     * čísla dokladu jako kniha faktur. Prázdné číslo (koncept) a prázdná protistrana se řadí
+     * jako prázdný text, aby šel klíč porovnat; od výpisu se liší jen pořadím NULL a ''
+     * mezi sebou, které vypadají stejně.
      *
      * @param array<string,mixed> $filters výstup {@see \MyInvoice\Http\OtherItemListFilters}
-     * @param array{0:string,1:int}|null $after splatnost a id posledního řádku předchozí dávky
+     * @param array{0:string,1:int}|null $after řadicí hodnota (`book_sort_key`) a id posledního řádku předchozí dávky
      * @return list<array<string,mixed>>
      */
     public function bookBatch(int $supplierId, array $filters, ?array $after, int $limit): array
     {
-        [, $whereSql, $params] = $this->listWhere($supplierId, $filters);
+        [$table, $whereSql, $params] = $this->listWhere($supplierId, $filters);
+        [$key, $dir] = self::bookOrder($filters);
         if ($after !== null) {
-            $whereSql .= ' AND (oi.due_on > ? OR (oi.due_on = ? AND oi.id > ?))';
+            $cmp = $dir === 'ASC' ? '>' : '<';
+            $whereSql .= " AND ({$key} {$cmp} ? OR ({$key} = ? AND oi.id {$cmp} ?))";
             array_push($params, $after[0], $after[0], $after[1]);
         }
         $stmt = $this->db->pdo()->prepare(
@@ -239,15 +245,38 @@ final class OtherItemRepository
                     oi.document_no, oi.variable_symbol, oi.issued_on, oi.accounting_on, oi.due_on,
                     oi.currency, oi.amount, oi.status, oi.journal_entry_id, oi.posted_at,
                     ' . self::PAID_SQL . ' + oi.settled_outside_amount paid_amount,
-                    oi.amount - oi.settled_outside_amount - ' . self::PAID_SQL . ' remaining_amount
-               FROM other_items oi FORCE INDEX (idx_other_item_due)
+                    oi.amount - oi.settled_outside_amount - ' . self::PAID_SQL . ' remaining_amount,
+                    ' . $key . ' book_sort_key
+               FROM ' . $table . '
                LEFT JOIN other_item_kinds k ON k.id = oi.kind_id AND k.supplier_id = oi.supplier_id
               WHERE ' . $whereSql . '
-              ORDER BY oi.due_on, oi.id
+              ORDER BY ' . $key . ' ' . $dir . ', oi.id ' . $dir . '
               LIMIT ' . max(1, $limit)
         );
         $stmt->execute($params);
         return $stmt->fetchAll(PDO::FETCH_ASSOC);
+    }
+
+    /**
+     * Řadicí výraz knihy a směr. Výraz musí jít použít i ve WHERE (klíč dávky), proto
+     * zbývá uhradit jako celý výraz, ne alias.
+     *
+     * @param array<string,mixed> $filters
+     * @return array{0:string, 1:'ASC'|'DESC'}
+     */
+    private static function bookOrder(array $filters): array
+    {
+        $sort = OtherItemSort::selected($filters) ?? ['key' => 'document_no', 'dir' => 'ASC'];
+        $key = match ($sort['key']) {
+            'document_no' => "COALESCE(oi.document_no, '')",
+            'partner_name' => "COALESCE(oi.partner_name, '')",
+            'remaining_amount' => '(oi.amount - oi.settled_outside_amount - ' . self::PAID_SQL . ')',
+            // ENUM řadí ORDER BY podle pořadí v definici, porovnání s parametrem ale jako text;
+            // číselný index drží klíč dávky ve shodě s řazením výpisu.
+            'status' => '(oi.status + 0)',
+            default => 'oi.' . $sort['key'],
+        };
+        return [$key, $sort['dir']];
     }
 
     public function insert(int $supplierId, array $data, ?int $userId): int

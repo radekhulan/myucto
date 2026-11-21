@@ -337,7 +337,7 @@ function rowActions(item: OtherItem): RowAction[] {
   ]
 }
 
-/** Výběr výpisu bez stránkování a řazení; tentýž výběr dostane kniha. */
+/** Výběr výpisu bez stránkování a řazení; tentýž výběr (a zvolené řazení) dostane kniha. */
 function listFilter(): OtherItemListFilter {
   return {
     ...(side.value ? { side: side.value } : {}), status: status.value, ...kindQuery.value,
@@ -346,7 +346,10 @@ function listFilter(): OtherItemListFilter {
     ...(dueTo.value ? { to: dueTo.value } : {}),
   }
 }
-const bookUrl = (format: 'pdf' | 'xlsx') => otherItemsApi.bookUrl(listFilter(), format)
+const bookUrl = (format: 'pdf' | 'xlsx') => otherItemsApi.bookUrl({
+  ...listFilter(),
+  ...(sort.value ? { sort_by: sort.value.key, sort_dir: sort.value.dir } : {}),
+}, format)
 /** Kniha obsahuje jen ruční položky; při zdroji Mzdy nebo Daně je výpis nemá, kniha by byla prázdná. */
 const showsBook = computed(() => auth.canRead('other_items') && source.value !== 'payroll' && source.value !== 'tax')
 

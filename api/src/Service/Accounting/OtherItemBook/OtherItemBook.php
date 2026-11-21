@@ -23,6 +23,7 @@ final class OtherItemBook
     /** @var array<string, array{side:string,currency:string,count:int,amount:float,paid_amount:float,remaining_amount:float}> */
     private array $totals = [];
     private bool $consumed = false;
+    private bool $exhausted = false;
 
     /**
      * @param array<string,mixed> $meta title, supplier, period_label, selection, scope_note, printed_by, printed_at
@@ -52,8 +53,9 @@ final class OtherItemBook
                 yield $row;
             }
             $last = $batch === [] ? null : $batch[count($batch) - 1];
-            $after = $last === null ? null : [(string) $last['due_on'], (int) $last['id']];
+            $after = $last === null ? null : [(string) $last['book_sort_key'], (int) $last['id']];
         } while (count($batch) === $this->batchSize);
+        $this->exhausted = true;
     }
 
     /**
@@ -63,6 +65,9 @@ final class OtherItemBook
      */
     public function totals(): array
     {
+        if (!$this->exhausted) {
+            throw new \LogicException('Součty knihy ostatních položek platí až po projití všech řádků.');
+        }
         $totals = array_values($this->totals);
         usort($totals, fn (array $a, array $b): int =>
             [$a['side'] !== 'receivable', $a['currency'] !== $this->domesticCurrency, $a['currency']]

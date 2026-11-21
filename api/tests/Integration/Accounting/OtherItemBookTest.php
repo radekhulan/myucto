@@ -92,6 +92,8 @@ final class OtherItemBookTest extends TestCase
             'vlastní druh' => ['status' => 'all', 'kind_id' => (string) $kindId],
             'hledání ruší okno' => ['status' => 'all', 'q' => 'Stará'],
             'jen od' => ['status' => 'all', 'from' => $this->day(100)],
+            'otevřené s hledáním' => ['status' => 'open', 'q' => 'Stará'],
+            'otevřené jen do' => ['status' => 'open', 'to' => $this->day(15)],
             'rozmezí' => ['status' => 'all', 'from' => $this->day(0), 'to' => $this->day(25)],
         ];
         foreach ($cases as $label => $query) {
@@ -116,29 +118,49 @@ final class OtherItemBookTest extends TestCase
         self::assertContains($oldPaid, $this->bookIds(['status' => 'all', 'q' => 'Stará']));
     }
 
-    public function testBatchesFollowDueDateKeyWithoutGapsOrDuplicates(): void
+    public function testBookFollowsListSortOrDocumentNumberAcrossBatches(): void
     {
-        $ids = [];
-        foreach ([3, 1, 1, 1, 2, 2] as $offset) {
-            $ids[] = $this->item('payable', 'CZK', 10, 'confirmed', due: $this->day($offset));
+        // Shody v každém klíči (splatnost, částka, zbývá, stav, název), koncepty bez čísla a protistrany.
+        $rows = [
+            ['OP-SYNT-3', 'Beta', 'Protistrana A', 2, 100, 'posted', 0],
+            [null, 'Alfa', null, 1, 100, 'draft', 0],
+            ['OP-SYNT-1', 'Alfa', 'Protistrana C', 1, 300, 'confirmed', 100],
+            ['OP-SYNT-2', 'Gama', 'Protistrana B', 3, 200, 'posted', 100],
+            [null, 'Beta', null, 2, 300, 'draft', 0],
+            ['OP-SYNT-4', 'Gama', 'Protistrana A', 1, 200, 'confirmed', 0],
+        ];
+        foreach ($rows as [$no, $title, $partner, $due, $amount, $status, $paid]) {
+            $id = $this->item('receivable', 'CZK', $amount, $status, title: $title, due: $this->day($due), documentNo: $no);
+            if ($partner !== null) {
+                $this->pdo->prepare('UPDATE other_items SET partner_name = ? WHERE id = ?')->execute([$partner, $id]);
+            }
+            if ($paid > 0) $this->allocate($id, $paid);
         }
-        $parsed = OtherItemListFilters::fromRequest($this->request(['status' => 'all']));
-        $seen = [];
-        $after = null;
-        do {
-            $batch = $this->repo->bookBatch($this->supplierId, $parsed['filters'], $after, 2);
-            foreach ($batch as $row) $seen[] = [(string) $row['due_on'], (int) $row['id']];
-            $last = $batch === [] ? null : end($batch);
-            $after = $last === null ? null : [(string) $last['due_on'], (int) $last['id']];
-        } while (count($batch) === 2);
-
-        $expected = $seen;
-        sort($expected);
-        self::assertSame($expected, $seen, 'řazení podle splatnosti a id');
-        $seenIds = array_column($seen, 1);
-        sort($seenIds);
-        sort($ids);
-        self::assertSame($ids, $seenIds);
+        $cases = [
+            'bez řazení = číslo' => [[], ['sort_by' => 'document_no', 'sort_dir' => 'asc']],
+            'číslo sestupně' => [['sort_by' => 'document_no', 'sort_dir' => 'desc'], null],
+            'položka' => [['sort_by' => 'title', 'sort_dir' => 'asc'], null],
+            'protistrana' => [['sort_by' => 'partner_name', 'sort_dir' => 'desc'], null],
+            'splatnost' => [['sort_by' => 'due_on', 'sort_dir' => 'asc'], null],
+            'částka' => [['sort_by' => 'amount', 'sort_dir' => 'desc'], null],
+            'zbývá' => [['sort_by' => 'remaining_amount', 'sort_dir' => 'asc'], null],
+            'stav' => [['sort_by' => 'status'], null],
+        ];
+        foreach ($cases as $label => [$sort, $listSort]) {
+            $parsed = OtherItemListFilters::fromRequest($this->request(['status' => 'all'] + $sort));
+            $listParsed = OtherItemListFilters::fromRequest($this->request(['status' => 'all'] + ($listSort ?? $sort)));
+            $listed = array_map(static fn (array $row): int => (int) $row['id'],
+                $this->list->list($this->supplierId, $listParsed['filters'], 1, 200)['items']);
+            $book = $this->books->build($this->supplierId, $parsed, true, [], batchSize: 2);
+            $booked = array_map(static fn (array $row): int => (int) $row['id'], iterator_to_array($book->rows(), false));
+            self::assertSame($listed, $booked, $label);
+            self::assertCount(6, $booked, $label);
+        }
+        $meta = $this->books->build($this->supplierId, OtherItemListFilters::fromRequest($this->request([])), true, [])->meta;
+        self::assertContains(['label' => 'Řazení', 'value' => 'Číslo dokladu, vzestupně'], $meta['selection']);
+        $meta = $this->books->build($this->supplierId, OtherItemListFilters::fromRequest(
+            $this->request(['sort_by' => 'amount', 'sort_dir' => 'asc'])), true, [])->meta;
+        self::assertContains(['label' => 'Řazení', 'value' => 'Částka, vzestupně'], $meta['selection']);
     }
 
     public function testTotalsMatchListTotalsPerSideAndCurrency(): void
@@ -257,13 +279,8 @@ final class OtherItemBookTest extends TestCase
 
         $xlsx = $this->call(['format' => 'xlsx', 'status' => 'all'], ['other_items' => 1]);
         self::assertSame(200, $xlsx->getStatusCode());
-        $tmp = tempnam(sys_get_temp_dir(), 'oibook_test_');
-        file_put_contents($tmp, (string) $xlsx->getBody());
-        try {
-            $sheet = IOFactory::load($tmp)->getActiveSheet()->toArray(null, false, false, false);
-        } finally {
-            @unlink($tmp);
-        }
+        $sheet = $this->sheet($xlsx);
+        self::assertContains(OtherItemBookService::SCOPE_NOTE, array_column($sheet, 0), 'hlavička říká, že předpisy z mezd a daní chybí');
         $headerIndex = null;
         foreach ($sheet as $i => $line) {
             if (($line[0] ?? null) === 'Doklad') { $headerIndex = $i; break; }
@@ -287,6 +304,8 @@ final class OtherItemBookTest extends TestCase
 
         $withAccounting = $this->call(['format' => 'xlsx', 'status' => 'all'], ['other_items' => 1, 'accounting' => 1]);
         self::assertSame(200, $withAccounting->getStatusCode());
+        $headerRow = array_values(array_filter($this->sheet($withAccounting), static fn (array $line): bool => ($line[0] ?? null) === 'Doklad'))[0];
+        self::assertContains('Zaúčtováno', $headerRow, 'akce předá právo číst účetnictví');
 
         self::assertSame(403, $this->call(['format' => 'pdf'], ['accounting' => 1])->getStatusCode());
         self::assertSame(422, $this->call(['format' => 'csv'], ['other_items' => 1])->getStatusCode());
@@ -308,6 +327,19 @@ final class OtherItemBookTest extends TestCase
         self::assertSame('splatnost 1. 1. 2099 – 31. 12. 2099', $label(['from' => '2099-01-01', 'to' => '2099-12-31']));
         self::assertSame('splatnost od 1. 1. 2099', $label(['from' => '2099-01-01']));
         self::assertSame('splatnost do 31. 12. 2099', $label(['status' => 'all', 'to' => '2099-12-31']));
+    }
+
+    public function testTotalsAreOnlyValidAfterAllRowsAndEmptyXlsxTotalsSaySo(): void
+    {
+        $this->item('payable', 'CZK', 10, 'draft');
+        $book = $this->books->build($this->supplierId, OtherItemListFilters::fromRequest($this->request(['status' => 'all'])), true, []);
+        try {
+            $book->totals();
+            self::fail('součty před projitím řádků');
+        } catch (\LogicException) {
+        }
+        $lines = array_column($this->sheet($this->call(['format' => 'xlsx', 'status' => 'all'], ['other_items' => 1])), 0);
+        self::assertContains('Výběru neodpovídá žádná potvrzená ani zaúčtovaná položka, která by vstupovala do součtů.', $lines);
     }
 
     public function testBookIsTenantScoped(): void
@@ -332,6 +364,18 @@ final class OtherItemBookTest extends TestCase
     private function request(array $query): \Psr\Http\Message\ServerRequestInterface
     {
         return (new ServerRequestFactory())->createServerRequest('GET', '/api/accounting/other-items/book')->withQueryParams($query);
+    }
+
+    /** @return list<list<mixed>> */
+    private function sheet(ResponseInterface $xlsx): array
+    {
+        $tmp = tempnam(sys_get_temp_dir(), 'oibook_test_');
+        file_put_contents($tmp, (string) $xlsx->getBody());
+        try {
+            return IOFactory::load($tmp)->getActiveSheet()->toArray(null, false, false, false);
+        } finally {
+            @unlink($tmp);
+        }
     }
 
     private function call(array $query, array $permissions): ResponseInterface

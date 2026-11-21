@@ -882,7 +882,7 @@ describe('OtherItems adresa pro návrat z detailu', () => {
     expect(filters.find('[data-test="due-window-hint"]').exists()).toBe(false)
     expect(wrapper.find('[data-test="due-window-hint"]').exists()).toBe(true)
   })
-  it('kniha je v záhlaví před lištou akcí a primárním tlačítkem a nese výběr výpisu bez stránkování a řazení', async () => {
+  it('kniha je v záhlaví před lištou akcí a primárním tlačítkem a nese výběr i řazení výpisu bez stránkování', async () => {
     m.list.mockResolvedValue({ items: [item('posted')], sources: [], total: 1, per_page: 50 })
     m.prefs.value = { sort: { key: 'amount', dir: 'asc' } }
     const wrapper = mountList({ status: 'all', kind: 'payable|custom:5', q: 'nájem', from: '2099-01-01', to: '2099-12-31' })
@@ -904,6 +904,7 @@ describe('OtherItems adresa pro návrat z detailu', () => {
     expect(url.pathname).toBe('/api/accounting/other-items/book')
     expect(Object.fromEntries(url.searchParams)).toEqual({
       format: 'xlsx', side: 'payable', status: 'all', kind_id: '5', q: 'nájem', from: '2099-01-01', to: '2099-12-31',
+      sort_by: 'amount', sort_dir: 'asc',
     })
     // Kniha jde z aktuálního filtru: po změně směru a stavu nese nový výběr.
     await wrapper.find('[data-test="filter-status"]').setValue('open')
@@ -913,7 +914,7 @@ describe('OtherItems adresa pro návrat z detailu', () => {
     expect(open.searchParams.get('format')).toBe('pdf')
   })
 
-  it('výchozí výpis pošle knize stav Otevřené bez data, aby platilo výchozí okno serveru', async () => {
+  it('výchozí výpis pošle knize stav Otevřené bez data a bez řazení (server: okno splatnosti, řazení podle čísla)', async () => {
     m.list.mockResolvedValue({ items: [], sources: [], total: 0, per_page: 50 })
     const wrapper = mountList()
     await flushPromises()

@@ -1661,17 +1661,20 @@ Filtry:
 
 **Kniha ostatních pohledávek a závazků.** Tlačítko vpravo nahoře v seznamu (vlevo od tlačítek
 **Druhy** a **Dokumenty**) stáhne sestavu ručně zadaných položek odpovídajících aktuálnímu filtru jako PDF na šířku
-nebo tabulku XLSX, bez stránkování a seřazenou podle splatnosti. Výběr je stejný jako v seznamu
+nebo tabulku XLSX, bez stránkování. Seřazená je stejně jako seznam, když v něm řazení zvolíte
+kliknutím na záhlaví sloupce; jinak podle čísla dokladu (koncepty bez čísla první). Výběr je stejný jako v seznamu
 včetně výchozího okna splatnosti a jeho výjimek pro stav **Otevřené** a hledání; hlavička uvádí
-firmu, použitou splatnost a nastavení výběru. Předpisy z mezd a daní kniha neobsahuje (říká to
+firmu, použitou splatnost, nastavení výběru a řazení. Předpisy z mezd a daní kniha neobsahuje (říká to
 její hlavička), proto při filtru zdroje mzdy nebo daně tlačítko není. Sloupce: číslo dokladu,
-směr, druh, položka, protistrana, datum vzniku, splatnost, částka, uhrazeno, zbývá uhradit (v XLSX i měna
-zvlášť, v PDF kód cizí měny u částky), stav jako v seznamu a v podvojném účetnictví pro role, které smí číst účetnictví, datum zaúčtování.
+směr, druh, položka, protistrana, datum vzniku, splatnost, částka, uhrazeno, zbývá uhradit, měna,
+stav jako v seznamu a v podvojném účetnictví pro role, které smí číst účetnictví, datum zaúčtování.
 Koncepty, storna a zrušené položky jsou šedě. Tabulka XLSX má za nimi navíc sloupce s uloženými
 kódy směru, druhu a stavu (`side`, `kind`, `kind_id`, `status`), podle kterých jde dál filtrovat
 i párovat. Součty jsou po straně a měně jako součet nad seznamem: jen potvrzené a zaúčtované
 položky, zbývá uhradit jako saldo jistiny a přeplatek jedné položky nesnižuje jinou; navíc
-počet položek, částka a uhrazeno. Pohledávky a závazky se nesčítají dohromady.
+počet položek v součtu, částka a uhrazeno. Pohledávky a závazky se nesčítají dohromady. U úvěru
+s rozdělenými splátkami ukazuje řádek ve sloupci zbývá uhradit i nezaplacený úrok a poplatek (jako
+seznam), součet ale jen zbývající jistinu, takže se součet sloupce může od řádku Součty lišit.
 
 Tlačítko **Nová ostatní položka** založí koncept se směrem podle aktuálního filtru.
 Tlačítko **Druhy** otevře nastavení druhů: skrytí a vlastní číselné řady ([§ 52.14.14.11](#52141411-druhy-a-ciselne-rady)).

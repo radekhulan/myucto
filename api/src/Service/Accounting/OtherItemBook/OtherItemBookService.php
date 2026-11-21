@@ -8,6 +8,7 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\OtherItemRepository;
 use MyInvoice\Service\Accounting\OtherItemInstallmentCoverage;
 use MyInvoice\Service\Accounting\OtherItemService;
+use MyInvoice\Service\Accounting\OtherItemSort;
 use PDO;
 
 /**
@@ -196,6 +197,9 @@ final class OtherItemBookService
         });
         self::add($out, 'Druh', $this->kindLabel($supplierId, $filters, $side));
         self::add($out, 'Hledání', is_scalar($filters['q'] ?? null) ? trim((string) $filters['q']) : '');
+        $sort = OtherItemSort::selected($filters);
+        $sort ??= ['key' => 'document_no', 'dir' => 'ASC'];
+        self::add($out, 'Řazení', OtherItemSort::LABELS[$sort['key']] . ($sort['dir'] === 'ASC' ? ', vzestupně' : ', sestupně'));
         return $out;
     }
 

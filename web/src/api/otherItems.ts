@@ -305,10 +305,10 @@ export const otherItemsApi = {
         source_url: `/other-items/${item.id}`,
       })),
     })),
-  /** Kniha ostatních pohledávek a závazků nad filtrem výpisu (bez stránkování a řazení). */
-  bookUrl: (filter: OtherItemListFilter, format: 'pdf' | 'xlsx') => {
+  /** Kniha ostatních pohledávek a závazků nad filtrem a řazením výpisu (bez stránkování); bez řazení řadí podle čísla. */
+  bookUrl: (filter: OtherItemListFilter & { sort_by?: string; sort_dir?: 'asc' | 'desc' }, format: 'pdf' | 'xlsx') => {
     const query = new URLSearchParams({ format })
-    for (const key of ['side', 'status', 'kind', 'kind_id', 'q', 'from', 'to'] as const) {
+    for (const key of ['side', 'status', 'kind', 'kind_id', 'q', 'from', 'to', 'sort_by', 'sort_dir'] as const) {
       const value = filter[key]
       if (value !== undefined && value !== '') query.set(key, String(value))
     }

@@ -121,7 +121,12 @@ final class OtherItemBookXlsxExporter
         }
         $sheet->getStyle("A{$r}:F{$r}")->getFont()->setBold(true);
         $r++;
-        foreach ($book->totals() as $t) {
+        $totals = $book->totals();
+        if ($totals === []) {
+            $this->text($sheet, 1, $r, 'Výběru neodpovídá žádná potvrzená ani zaúčtovaná položka, která by vstupovala do součtů.');
+            $r++;
+        }
+        foreach ($totals as $t) {
             $this->text($sheet, 1, $r, (string) $t['side_label']);
             $this->text($sheet, 2, $r, (string) $t['currency']);
             $sheet->setCellValue([3, $r], (int) $t['count']);
@@ -131,7 +136,9 @@ final class OtherItemBookXlsxExporter
             $r++;
         }
         $this->text($sheet, 1, $r + 1, 'Součty jsou po straně a měně, bez přepočtu kurzem. Vstupují do nich (i do počtu) jen potvrzené '
-            . 'a zaúčtované položky; zbývá uhradit je saldo jistiny a přeplatek nesnižuje jiné položky.');
+            . 'a zaúčtované položky; zbývá uhradit je saldo jistiny a přeplatek nesnižuje jiné položky. '
+            . 'U splátek rozdělených na jistinu, úrok a poplatek ukazuje řádek i nezaplacený úrok a poplatek, '
+            . 'součet jen jistinu.');
         $sheet->getStyle([1, $r + 1])->getFont()->setItalic(true);
 
         $widths = [14, 11, 24, 40, 28, 12, 12, 14, 14, 14, 7, 18];
