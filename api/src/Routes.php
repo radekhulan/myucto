@@ -3425,6 +3425,7 @@ final class Routes
             $g->get   ('/internal-documents/renumber',         [\MyInvoice\Action\Accounting\RenumberAgendaDocumentsAction::class, 'internalPreview']);
             $g->post  ('/internal-documents/renumber',         [\MyInvoice\Action\Accounting\RenumberAgendaDocumentsAction::class, 'internalRenumber']);
             $g->get   ('/other-items',                         [\MyInvoice\Action\Accounting\OtherItemAction::class, 'list']);
+            $g->get   ('/other-items/book',                    [\MyInvoice\Action\Accounting\OtherItemBookAction::class, 'book']);
             $g->post  ('/other-items',                         [\MyInvoice\Action\Accounting\OtherItemAction::class, 'create']);
             $g->get   ('/other-items/bank-candidates',         [\MyInvoice\Action\Accounting\OtherItemAction::class, 'bankMatchCandidates']);
             $g->get   ('/other-items/settings',                [\MyInvoice\Action\Accounting\OtherItemSettingsAction::class, 'get']);

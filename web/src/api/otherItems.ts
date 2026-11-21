@@ -287,8 +287,11 @@ export const otherItemKindsApi = {
       : `/accounting/other-items/kinds/${kind.id}/posting-profiles`, profiles).then(r => r.data),
 }
 
+/** Filtr výpisu ostatních položek; tentýž výběr čte i kniha (`OtherItemListFilters` na serveru). */
+export type OtherItemListFilter = { side?: OtherItemSide; status?: 'open' | 'all'; kind?: string; kind_id?: number; q?: string; from?: string; to?: string }
+
 export const otherItemsApi = {
-  list: (params: { side?: OtherItemSide; status?: 'open' | 'all'; kind?: string; kind_id?: number; q?: string; from?: string; to?: string; page?: number; sort_by?: string; sort_dir?: 'asc' | 'desc' }) =>
+  list: (params: OtherItemListFilter & { page?: number; per_page?: number; sort_by?: string; sort_dir?: 'asc' | 'desc' }) =>
     api.get<OtherItemsResult>('/accounting/other-items', { params }).then(r => ({
       ...r.data,
       items: r.data.items.map(item => ({
@@ -302,6 +305,15 @@ export const otherItemsApi = {
         source_url: `/other-items/${item.id}`,
       })),
     })),
+  /** Kniha ostatních pohledávek a závazků nad filtrem výpisu (bez stránkování a řazení). */
+  bookUrl: (filter: OtherItemListFilter, format: 'pdf' | 'xlsx') => {
+    const query = new URLSearchParams({ format })
+    for (const key of ['side', 'status', 'kind', 'kind_id', 'q', 'from', 'to'] as const) {
+      const value = filter[key]
+      if (value !== undefined && value !== '') query.set(key, String(value))
+    }
+    return `/api/accounting/other-items/book?${query.toString()}`
+  },
   get: (id: number) => api.get<OtherItem>(`/accounting/other-items/${id}`).then(r => r.data),
   create: (payload: OtherItemPayload) => api.post<OtherItem>('/accounting/other-items', payload).then(r => r.data),
   update: (id: number, payload: OtherItemPayload) => api.put<OtherItem>(`/accounting/other-items/${id}`, payload).then(r => r.data),

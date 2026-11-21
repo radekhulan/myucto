@@ -16,6 +16,7 @@ const m = vi.hoisted(() => ({
   navSnapshot: null as any,
   prefs: null as any,
   canReadAccounting: true,
+  canReadOtherItems: true,
   mode: 'double_entry',
   savedFilters: [] as Array<{ id: number; name: string; payload: Record<string, string> }>,
   savedActive: null as number | null,
@@ -25,12 +26,17 @@ const m = vi.hoisted(() => ({
   keyboard: null as null | { count: () => number; open: (index: number) => void },
 }))
 
-vi.mock('@/api/otherItems', () => ({
-  otherItemsApi: { list: m.list, remove: m.remove },
-  otherItemKindsApi: { list: m.listKinds },
-}))
+vi.mock('@/api/otherItems', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/api/otherItems')>()
+  // Skutečná bookUrl: test ověřuje, jaký výběr dostane kniha.
+  return {
+    otherItemsApi: { list: m.list, remove: m.remove, bookUrl: actual.otherItemsApi.bookUrl },
+    otherItemKindsApi: { list: m.listKinds },
+  }
+})
 vi.mock('@/stores/auth', () => ({
-  useAuthStore: () => ({ canWrite: m.canWrite, canRead: (module: string) => module !== 'accounting' || m.canReadAccounting }),
+  useAuthStore: () => ({ canWrite: m.canWrite, canRead: (module: string) => module === 'other_items' ? m.canReadOtherItems
+    : module !== 'accounting' || m.canReadAccounting }),
 }))
 // Předvolby tabulky (sloupce, pořadí, hustota, řazení) žijí v uživatelských předvolbách jako u faktur.
 vi.mock('@/composables/useUserPrefs', () => ({
@@ -134,6 +140,7 @@ function mountList(query: Record<string, string> = {}) {
 beforeEach(() => {
   m.prefs = ref({})
   m.canReadAccounting = true
+  m.canReadOtherItems = true
   m.mode = 'double_entry'
   m.savedFilters = []
   m.savedActive = null
@@ -874,5 +881,54 @@ describe('OtherItems adresa pro návrat z detailu', () => {
     // Věta o výchozím okně splatnosti vysvětluje, proč ve výpisu chybí starší položky: nesmí se sbalit s filtry.
     expect(filters.find('[data-test="due-window-hint"]').exists()).toBe(false)
     expect(wrapper.find('[data-test="due-window-hint"]').exists()).toBe(true)
+  })
+  it('kniha je v záhlaví před lištou akcí a primárním tlačítkem a nese výběr výpisu bez stránkování a řazení', async () => {
+    m.list.mockResolvedValue({ items: [item('posted')], sources: [], total: 1, per_page: 50 })
+    m.prefs.value = { sort: { key: 'amount', dir: 'asc' } }
+    const wrapper = mountList({ status: 'all', kind: 'payable|custom:5', q: 'nájem', from: '2099-01-01', to: '2099-12-31' })
+    await flushPromises()
+
+    const book = wrapper.findComponent({ name: 'InvoiceBookMenu' })
+    expect(book.exists()).toBe(true)
+    expect(book.props('label')).toBe('other_items.book')
+    expect(book.props('fallbackFilename')).toBe('kniha-ostatnich-pohledavek-a-zavazku')
+    expect(book.props('failedMessage')).toBe('other_items.book_failed')
+    const bar = wrapper.findComponent({ name: 'ActionBar' })
+    expect(book.element.compareDocumentPosition(bar.element) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(book.element.compareDocumentPosition(wrapper.get('[data-test="other-items-new"]').element) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+
+    const url = new URL((book.props('urlFor') as (format: 'pdf' | 'xlsx') => string)('xlsx'), 'http://localhost')
+    expect(url.pathname).toBe('/api/accounting/other-items/book')
+    expect(Object.fromEntries(url.searchParams)).toEqual({
+      format: 'xlsx', side: 'payable', status: 'all', kind_id: '5', q: 'nájem', from: '2099-01-01', to: '2099-12-31',
+    })
+    // Kniha jde z aktuálního filtru: po změně směru a stavu nese nový výběr.
+    await wrapper.find('[data-test="filter-status"]').setValue('open')
+    await flushPromises()
+    const open = new URL((book.props('urlFor') as (format: 'pdf' | 'xlsx') => string)('pdf'), 'http://localhost')
+    expect(open.searchParams.get('status')).toBe('open')
+    expect(open.searchParams.get('format')).toBe('pdf')
+  })
+
+  it('výchozí výpis pošle knize stav Otevřené bez data, aby platilo výchozí okno serveru', async () => {
+    m.list.mockResolvedValue({ items: [], sources: [], total: 0, per_page: 50 })
+    const wrapper = mountList()
+    await flushPromises()
+    const urlFor = wrapper.findComponent({ name: 'InvoiceBookMenu' }).props('urlFor') as (format: 'pdf' | 'xlsx') => string
+    expect(urlFor('pdf')).toBe('/api/accounting/other-items/book?format=pdf&status=open')
+  })
+
+  it.each(['payroll', 'tax'])('kniha ručních položek chybí při zdroji %s', async (source) => {
+    m.list.mockResolvedValue({ items: [item('posted')], sources: [], total: 1, per_page: 50 })
+    const wrapper = mountList({ source })
+    await flushPromises()
+    expect(wrapper.findComponent({ name: 'InvoiceBookMenu' }).exists()).toBe(false)
+  })
+
+  it('kniha je i při zdroji Ručně a chybí bez práva číst ostatní položky', async () => {
+    m.list.mockResolvedValue({ items: [item('posted')], sources: [], total: 1, per_page: 50 })
+    expect(mountList({ source: 'manual' }).findComponent({ name: 'InvoiceBookMenu' }).exists()).toBe(true)
+    m.canReadOtherItems = false
+    expect(mountList().findComponent({ name: 'InvoiceBookMenu' }).exists()).toBe(false)
   })
 })

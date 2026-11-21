@@ -12,6 +12,8 @@ const props = defineProps<{
   /** URL knihy pro aktuální filtr seznamu. */
   urlFor: (format: BookFormat) => string
   fallbackFilename: string
+  /** Hláška při chybě bez zprávy ze serveru; výchozí patří knize faktur. */
+  failedMessage?: string
 }>()
 
 const { t } = useI18n()
@@ -25,7 +27,7 @@ async function download(format: BookFormat) {
   try {
     await downloadApiFile(props.urlFor(format), `${props.fallbackFilename}.${format}`)
   } catch (e: any) {
-    toast.error(e?.response?.data?.error?.message || t('invoice.book_failed'))
+    toast.error(e?.response?.data?.error?.message || props.failedMessage || t('invoice.book_failed'))
   } finally {
     busy.value = null
   }

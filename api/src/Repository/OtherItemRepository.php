@@ -85,7 +85,14 @@ final class OtherItemRepository
          > (SELECT COALESCE(SUM(a.interest_amount + a.fee_amount), 0) FROM other_item_allocations a
              WHERE a.supplier_id = oi.supplier_id AND a.other_item_id = oi.id AND a.reversed_on IS NULL))';
 
-    public function list(int $supplierId, array $filters, int $page, int $perPage): array
+    /**
+     * Výběr ručních položek výpisu: tabulka (s indexem okna splatnosti), WHERE a parametry.
+     * Jediné místo podmínek filtru; sdílí ho výpis, jeho součty a kniha ({@see bookBatch()}).
+     *
+     * @param array<string,mixed> $filters výstup {@see \MyInvoice\Http\OtherItemListFilters}
+     * @return array{0:string, 1:string, 2:list<mixed>}
+     */
+    private function listWhere(int $supplierId, array $filters): array
     {
         $where = ['oi.supplier_id = ?', 'oi.deleted_at IS NULL'];
         $params = [$supplierId];
@@ -129,6 +136,12 @@ final class OtherItemRepository
         // i když index splatnosti čte jen výběr (měření v PR). Otevřené bez dolní meze čtou po indexu
         // historii firmy do konce okna: uhrazenost se neukládá, index ji přeskočit nemůže.
         $table = 'other_items oi' . (!empty($filters['from']) || !empty($filters['to']) ? ' FORCE INDEX (idx_other_item_due)' : '');
+        return [$table, $whereSql, $params];
+    }
+
+    public function list(int $supplierId, array $filters, int $page, int $perPage): array
+    {
+        [$table, $whereSql, $params] = $this->listWhere($supplierId, $filters);
         $count = $this->db->pdo()->prepare('SELECT COUNT(*) FROM ' . $table . ' WHERE ' . $whereSql);
         $count->execute($params);
         $total = (int) $count->fetchColumn();
@@ -187,8 +200,35 @@ final class OtherItemRepository
      */
     private function remainingTotals(string $table, string $whereSql, array $params): array
     {
+        return array_map(static fn (array $row): array => [
+            'side' => $row['side'],
+            'currency' => $row['currency'],
+            'remaining_amount' => $row['remaining_amount'],
+        ], $this->selectionTotals($table, $whereSql, $params));
+    }
+
+    /**
+     * Součty knihy za celý výběr výpisu: stejné pravidlo jako součty výpisu ({@see remainingTotals()}),
+     * navíc počet, částka a uhrazeno (včetně vyrovnaného mimo úhrady).
+     *
+     * @param array<string,mixed> $filters výstup {@see \MyInvoice\Http\OtherItemListFilters}
+     * @return list<array{side:string,currency:string,count:int,amount:float,paid_amount:float,remaining_amount:float}>
+     */
+    public function bookTotals(int $supplierId, array $filters): array
+    {
+        [$table, $whereSql, $params] = $this->listWhere($supplierId, $filters);
+        return $this->selectionTotals($table, $whereSql, $params);
+    }
+
+    /**
+     * @param list<mixed> $params
+     * @return list<array{side:string,currency:string,count:int,amount:float,paid_amount:float,remaining_amount:float}>
+     */
+    private function selectionTotals(string $table, string $whereSql, array $params): array
+    {
         $stmt = $this->db->pdo()->prepare(
-            "SELECT oi.side, oi.currency,
+            "SELECT oi.side, oi.currency, COUNT(*) item_count, SUM(oi.amount) amount,
+                    SUM(oi.settled_outside_amount + " . self::PAID_SQL . ") paid_amount,
                     SUM(GREATEST(oi.amount - oi.settled_outside_amount - " . self::PAID_SQL . ", 0)) remaining_amount
                FROM " . $table . "
               WHERE " . $whereSql . " AND oi.status IN ('confirmed','posted')
@@ -199,8 +239,43 @@ final class OtherItemRepository
         return array_map(static fn (array $row): array => [
             'side' => (string) $row['side'],
             'currency' => (string) $row['currency'],
+            'count' => (int) $row['item_count'],
+            'amount' => round((float) $row['amount'], 2),
+            'paid_amount' => round((float) $row['paid_amount'], 2),
             'remaining_amount' => round((float) $row['remaining_amount'], 2),
         ], $stmt->fetchAll(PDO::FETCH_ASSOC));
+    }
+
+    /**
+     * Dávka řádků knihy nad výběrem výpisu ({@see listWhere()}), bez stránkování: klíč
+     * (splatnost, id) místo OFFSET, takže každá dávka čte jen svůj úsek indexu splatnosti
+     * (InnoDB nese id v sekundárním indexu, řazení tedy obejde filesort).
+     *
+     * @param array<string,mixed> $filters výstup {@see \MyInvoice\Http\OtherItemListFilters}
+     * @param array{0:string,1:int}|null $after splatnost a id posledního řádku předchozí dávky
+     * @return list<array<string,mixed>>
+     */
+    public function bookBatch(int $supplierId, array $filters, ?array $after, int $limit): array
+    {
+        [, $whereSql, $params] = $this->listWhere($supplierId, $filters);
+        if ($after !== null) {
+            $whereSql .= ' AND (oi.due_on > ? OR (oi.due_on = ? AND oi.id > ?))';
+            array_push($params, $after[0], $after[0], $after[1]);
+        }
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT oi.id, oi.side, oi.kind, oi.kind_id, k.name kind_name, oi.title, oi.partner_name,
+                    oi.document_no, oi.variable_symbol, oi.issued_on, oi.accounting_on, oi.due_on,
+                    oi.currency, oi.amount, oi.status, oi.journal_entry_id, oi.posted_at,
+                    ' . self::PAID_SQL . ' + oi.settled_outside_amount paid_amount,
+                    oi.amount - oi.settled_outside_amount - ' . self::PAID_SQL . ' remaining_amount
+               FROM other_items oi FORCE INDEX (idx_other_item_due)
+               LEFT JOIN other_item_kinds k ON k.id = oi.kind_id AND k.supplier_id = oi.supplier_id
+              WHERE ' . $whereSql . '
+              ORDER BY oi.due_on, oi.id
+              LIMIT ' . max(1, $limit)
+        );
+        $stmt->execute($params);
+        return $stmt->fetchAll(PDO::FETCH_ASSOC);
     }
 
     public function insert(int $supplierId, array $data, ?int $userId): int

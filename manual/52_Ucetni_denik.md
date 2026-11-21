@@ -327,6 +327,8 @@ Agenda slouží pro nároky a dluhy, které nepatří do faktur, mezd ani daní:
 
 **Jak poznáte, že je hotovo:** Položka je ve stavu uhrazená, nebo jí zbývá uhradit nula, a z filtru **Otevřené** zmizí.
 
+Přehled vybraných položek k tisku nebo do tabulky stáhnete tlačítkem **Kniha ostatních pohledávek a závazků** nad seznamem ([§ 52.14.14.1](#5214141-prehled)).
+
 > [!WARNING]
 > Zdanitelné plnění se sem nezadává. Patří do faktur, aby jeho řádky vstoupily do knihy DPH a výkazů.
 
@@ -1656,6 +1658,20 @@ Filtry:
   okno připomíná věta pod filtry. Starší nebo vzdálenější
   položky najdete zadáním data; vyplněné jen **od** nebo jen **do** okno na druhé straně
   neomezí.
+
+**Kniha ostatních pohledávek a závazků.** Tlačítko vpravo nahoře v seznamu (vlevo od nabídky
+**…**) stáhne sestavu ručně zadaných položek odpovídajících aktuálnímu filtru jako PDF na šířku
+nebo tabulku XLSX, bez stránkování a seřazenou podle splatnosti. Výběr je stejný jako v seznamu
+včetně výchozího okna splatnosti a jeho výjimek pro stav **Otevřené** a hledání; hlavička uvádí
+firmu, použitou splatnost a nastavení výběru. Předpisy z mezd a daní kniha neobsahuje (říká to
+její hlavička), proto při filtru zdroje mzdy nebo daně tlačítko není. Sloupce: číslo dokladu,
+směr, druh, položka, protistrana, datum vzniku, splatnost, částka, uhrazeno, zbývá uhradit, stav
+jako v seznamu a v podvojném účetnictví pro role, které smí číst účetnictví, datum zaúčtování.
+Koncepty, storna a zrušené položky jsou šedě. Tabulka XLSX má za nimi navíc sloupce s uloženými
+kódy směru, druhu a stavu (`side`, `kind`, `kind_id`, `status`), podle kterých jde dál filtrovat
+i párovat. Součty jsou po straně a měně jako součet nad seznamem: jen potvrzené a zaúčtované
+položky, zbývá uhradit jako saldo jistiny a přeplatek jedné položky nesnižuje jinou; navíc
+počet položek, částka a uhrazeno. Pohledávky a závazky se nesčítají dohromady.
 
 Tlačítko **Nová ostatní položka** založí koncept se směrem podle aktuálního filtru.
 Tlačítko **Druhy** otevře nastavení druhů: skrytí a vlastní číselné řady ([§ 52.14.14.11](#52141411-druhy-a-ciselne-rady)).

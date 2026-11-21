@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Action\Accounting;
 
 use MyInvoice\Http\Json;
+use MyInvoice\Http\OtherItemListFilters;
 use MyInvoice\Security\AccessLevel;
 use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\Accounting\Closing\ClosingException;
@@ -32,35 +33,14 @@ final class OtherItemAction
     public function list(Request $request, Response $response): Response
     {
         if (!$this->requirePermission($request, $response, 'other_items', AccessLevel::READ, $err)) return $err;
+        $parsed = OtherItemListFilters::fromRequest($request);
+        if (isset($parsed['error'])) {
+            return Json::error($response, $parsed['error'], $parsed['message'], 422);
+        }
         $q = $request->getQueryParams();
-        $filters = [];
-        foreach (['side', 'status', 'kind', 'q', 'from', 'to', 'sort_by', 'sort_dir'] as $field) {
-            if (isset($q[$field]) && is_scalar($q[$field])) $filters[$field] = trim((string) $q[$field]);
-        }
-        if (isset($q['kind_id']) && is_scalar($q['kind_id']) && trim((string) $q['kind_id']) !== '') {
-            $kindId = filter_var($q['kind_id'], FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]);
-            if ($kindId === false) {
-                return Json::error($response, 'other_items.error.invalid_kind', 'Neplatný druh dokladu.', 422);
-            }
-            $filters['kind_id'] = $kindId;
-        }
-        $hasFrom = isset($filters['from']);
-        $hasTo = isset($filters['to']);
-        $from = $hasFrom ? $filters['from'] : ($hasTo ? '1000-01-01' : date('Y-m-d', strtotime('-1 year')));
-        $to = $hasTo ? $filters['to'] : ($hasFrom ? '9999-12-31' : date('Y-m-d', strtotime('+1 year')));
-        $fromDate = \DateTimeImmutable::createFromFormat('!Y-m-d', $from);
-        $toDate = \DateTimeImmutable::createFromFormat('!Y-m-d', $to);
-        if ($fromDate === false || $fromDate->format('Y-m-d') !== $from
-            || $toDate === false || $toDate->format('Y-m-d') !== $to || $from > $to) {
-            return Json::error($response, 'other_items.error.invalid_date', 'Neplatný rozsah splatnosti.', 422);
-        }
-        // Bez data platí okno splatnosti rok zpět až rok dopředu, aby součty a počet nešly přes celou
-        // historii firmy. Výjimky jen pro ruční položky: výběr Otevřené nemá dolní mez (starý neuhrazený
-        // dluh z něj nesmí zmizet) a hledání okno nemá (číslo dokladu z předloňska se musí najít).
-        // Převzaté předpisy z mezd a daní mají okno vždy, hledání se na ně nevztahuje.
-        $searching = ($filters['q'] ?? '') !== '' && !$hasFrom && !$hasTo;
-        $filters['from'] = $searching || (($filters['status'] ?? '') === 'open' && !$hasFrom) ? null : $from;
-        $filters['to'] = $searching ? null : $to;
+        $filters = $parsed['filters'];
+        $from = $parsed['window_from'];
+        $to = $parsed['window_to'];
         $result = $this->service->list(
             $this->currentSupplierId($request), $filters,
             (int) ($q['page'] ?? 1), (int) ($q['per_page'] ?? 50),

@@ -13,6 +13,7 @@ vi.mock('@/composables/useToast', () => ({ useToast: () => ({ error: mocks.toast
 import InvoiceBookMenu from './InvoiceBookMenu.vue'
 import { invoicesApi } from '@/api/invoices'
 import { purchaseInvoicesApi } from '@/api/purchaseInvoices'
+import { otherItemsApi } from '@/api/otherItems'
 
 function mountMenu(urlFor = (format: 'pdf' | 'xlsx') => `/api/invoices/book?format=${format}`) {
   return mount(InvoiceBookMenu, {
@@ -47,6 +48,27 @@ describe('Kniha faktur', () => {
     expect(mocks.toastError).toHaveBeenCalledWith('Neplatný formát')
   })
 
+  it('bez zprávy ze serveru ukáže hlášku knihy, kterou předá stránka', async () => {
+    mocks.download.mockRejectedValue(new Error('network'))
+    const wrapper = mount(InvoiceBookMenu, {
+      props: { label: 'Kniha', urlFor: () => '/api/accounting/other-items/book?format=pdf', fallbackFilename: 'kniha', failedMessage: 'Knihu ostatních položek se nepodařilo vytvořit' },
+      global: { plugins: [createI18n({ legacy: false, locale: 'cs', missingWarn: false, fallbackWarn: false, messages: { cs: {} } })] },
+    })
+    await wrapper.get('[data-test="invoice-book-toggle"]').trigger('click')
+    await wrapper.get('[data-test="invoice-book-pdf"]').trigger('click')
+    await flushPromises()
+    expect(mocks.toastError).toHaveBeenCalledWith('Knihu ostatních položek se nepodařilo vytvořit')
+  })
+
+  it('bez předané hlášky zůstane hláška knihy faktur', async () => {
+    mocks.download.mockRejectedValue(new Error('network'))
+    const wrapper = mountMenu()
+    await wrapper.get('[data-test="invoice-book-toggle"]').trigger('click')
+    await wrapper.get('[data-test="invoice-book-pdf"]').trigger('click')
+    await flushPromises()
+    expect(mocks.toastError).toHaveBeenCalledWith('invoice.book_failed')
+  })
+
   it('URL nese filtr seznamu, ale ne stránkování ani doplňkové sloupce', () => {
     const issued = new URL(invoicesApi.bookUrl({
       q: 'servis', status: ['issued', 'paid'], client_id: 7, year: 2026, page: 3, per_page: 50,
@@ -67,5 +89,15 @@ describe('Kniha faktur', () => {
     expect(received.searchParams.get('filter[vendor_id]')).toBe('4')
     expect(received.searchParams.get('filter[unpaid_only]')).toBe('1')
     expect(received.searchParams.has('page')).toBe(false)
+
+    // Ostatní položky: výběr výpisu (stejné názvy parametrů jako GET /accounting/other-items), bez stránkování a řazení.
+    const other = new URL(otherItemsApi.bookUrl({
+      side: 'receivable', status: 'all', kind: 'rent', q: 'nájem', from: '2099-01-01', to: '2099-12-31',
+      page: 3, per_page: 50, sort_by: 'amount', sort_dir: 'asc',
+    } as Parameters<typeof otherItemsApi.bookUrl>[0], 'xlsx'), 'http://localhost')
+    expect(other.pathname).toBe('/api/accounting/other-items/book')
+    expect(Object.fromEntries(other.searchParams)).toEqual({
+      format: 'xlsx', side: 'receivable', status: 'all', kind: 'rent', q: 'nájem', from: '2099-01-01', to: '2099-12-31',
+    })
   })
 })
