@@ -1225,7 +1225,8 @@
         "2319_purchase_advance_deductions_document_source.sql",
         "2320_purchase_invoices_vendor_number_search_index.sql",
         "2321_other_item_occurrence_origin.sql",
-        "2322_other_item_due_index.sql"
+        "2322_other_item_due_index.sql",
+        "2323_other_items_accrual_period.sql"
     ],
     "tables": {
         "abra_flexi_connections": {
@@ -11112,6 +11113,8 @@
             "columns": {
                 "account_code": "varchar(20) NULL DEFAULT NULL",
                 "accounting_on": "date NULL DEFAULT NULL",
+                "accrual_from": "date NULL DEFAULT NULL",
+                "accrual_to": "date NULL DEFAULT NULL",
                 "amount": "decimal(14,2) NOT NULL",
                 "amount_czk": "decimal(14,2) NULL DEFAULT NULL",
                 "counter_account_code": "varchar(20) NULL DEFAULT NULL",
@@ -11151,6 +11154,7 @@
                 "fk_other_item_partner": "BTREE (partner_id)",
                 "fk_other_item_reversal": "BTREE (reversal_entry_id)",
                 "fk_other_item_updated_by": "BTREE (updated_by)",
+                "idx_other_item_accrual_to": "BTREE (supplier_id, accrual_to)",
                 "idx_other_item_counterparty": "BTREE (supplier_id, counterparty_account)",
                 "idx_other_item_due": "BTREE (supplier_id, deleted_at, due_on)",
                 "idx_other_item_kind": "BTREE (kind_id, supplier_id)",
