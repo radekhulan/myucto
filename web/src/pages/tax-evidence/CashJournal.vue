@@ -256,6 +256,18 @@ async function onClassify(row: CashJournalRow, value: string, select: HTMLSelect
 // R10: blokující varování (nezařazené příchozí pohyby mimo daňový základ).
 const blockingWarnings = computed(() => (report.value?.warnings ?? []).filter(w => w.blocking))
 const unclassifiedCount = computed(() => report.value?.blocking_unclassified_count ?? 0)
+// Nezařazené pohyby shrnuje nadpis s počtem a tlačítkem, po jednom se nevypisují.
+// Ostatní varování se seskupí podle textu, aby se stejná věta neopakovala.
+const WARNING_LIST_LIMIT = 10
+const warningGroups = computed(() => {
+  const groups = new Map<string, number>()
+  for (const w of blockingWarnings.value) {
+    if (unclassifiedCount.value > 0 && !w.type && (w.source_type === 'bank' || w.source_type === 'cash')) continue
+    groups.set(w.message, (groups.get(w.message) ?? 0) + (w.count ?? 1))
+  }
+  return [...groups].map(([message, count]) => ({ message, count }))
+})
+const warningGroupsShown = computed(() => warningGroups.value.slice(0, WARNING_LIST_LIMIT))
 
 const checksOpen = ref(false)
 
@@ -372,8 +384,9 @@ function onNotesChanged(notes: CashJournalNote[]) {
             <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.search" /></svg>
             {{ t('tax_evidence.cash_journal.show_unclassified') }}
           </button>
-          <ul class="mt-1.5 space-y-0.5 text-danger-500">
-            <li v-for="(w, i) in blockingWarnings" :key="i">{{ w.message }}</li>
+          <ul v-if="warningGroupsShown.length > 0" class="mt-1.5 space-y-0.5 text-danger-500" data-test="cash-journal-warning-list">
+            <li v-for="g in warningGroupsShown" :key="g.message">{{ g.message }}<span v-if="g.count > 1" class="ml-1 font-medium">({{ t('tax_evidence.cash_journal.warning_times', { n: g.count }) }})</span></li>
+            <li v-if="warningGroups.length > warningGroupsShown.length" class="text-danger-400">{{ t('tax_evidence.cash_journal.warning_more', { n: warningGroups.length - warningGroupsShown.length }) }}</li>
           </ul>
         </div>
       </div>

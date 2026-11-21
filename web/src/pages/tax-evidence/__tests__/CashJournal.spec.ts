@@ -23,7 +23,7 @@ function report(overrides: Partial<CashJournalReport> = {}): CashJournalReport {
     is_vat_payer: false, opening_balance: 111, closing_balance: 999, balances: [],
     totals: { prijem_danovy: 777, prijem_osvobozeny: 0, prijem_nedanovy: 0, vydaj_danovy: 0, vydaj_nedanovy: 0, prevody: 0, private: 0, nezarazeno: 123, net: 777 },
     checks: null as unknown as CashJournalReport['checks'],
-    warnings: [{ source_type: 'bank', source_id: 9, date: '2026-01-02', direction: 'in', amount: 123, blocking: true, message: 'Global warning' }],
+    warnings: [{ type: 'bank_allocation_exceeds_movement', source_type: 'bank', source_id: 9, date: '2026-01-02', direction: 'in', amount: 123, blocking: true, message: 'Global warning' }],
     rows: [{ source_type: 'bank', source_id: 1, invoice_id: null, purchase_invoice_id: null, date: '2026-01-01', doc_no: 'SYNTH-1', partner: '', description: '', direction: 'in', income: 10, expense: null, running_balance: 555, bucket: 'income_taxable', base: 10, vat: 0, unclassified: false, blocking: false, fx_rate_missing: false, instrument: 'bank', gopay_clearing_id: null }],
     ...overrides,
   }
@@ -126,6 +126,19 @@ describe('cash journal classification filter', () => {
     expect(wrapper.text()).toContain('tax_evidence.cash_journal.rows_shown{"shown":1,"total":9}')
     await button(wrapper, 'tax_evidence.cash_journal.show_unclassified').trigger('click'); await flushPromises()
     expect(api.cashJournal).toHaveBeenLastCalledWith({ year: 2026, classification: 'nezarazeno' })
+  })
+
+  it('summarises unclassified movements once and groups repeated warnings', async () => {
+    const unclassified = (id: number) => ({ source_type: 'bank', source_id: id, date: '2026-01-02', direction: 'in', amount: 10, blocking: true, message: 'Unclassified movement' })
+    const gopay = (id: number) => ({ source_type: 'gopay', source_id: id, date: '2026-01-03', direction: 'in', amount: 5, blocking: true, message: 'GoPay warning' })
+    api.cashJournal.mockResolvedValue(report({ blocking_unclassified_count: 58, warnings: [...Array.from({ length: 58 }, (_, i) => unclassified(i + 1)), gopay(1), gopay(2)] }))
+    const { wrapper } = await setup()
+    const list = wrapper.get('[data-test="cash-journal-warning-list"]')
+    expect(wrapper.text()).toContain('tax_evidence.cash_journal.unclassified_warning{"n":58}')
+    expect(list.text()).not.toContain('Unclassified movement')
+    expect(list.findAll('li')).toHaveLength(1)
+    expect(list.text()).toContain('GoPay warning')
+    expect(list.text()).toContain('tax_evidence.cash_journal.warning_times{"n":2}')
   })
 
   it('distinguishes an empty filtered result and clears only classification', async () => {

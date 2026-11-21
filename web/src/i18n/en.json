@@ -31618,6 +31618,8 @@
       "totals_net": "Tax base (income − expense)",
       "blocking_warning": "Warning: {n} issues prevent the tax base from being built correctly — see the list below.",
       "unclassified_warning": "Warning: {n} unclassified incoming movements are outside the tax base — classify them or you will understate income (tax-office risk).",
+      "warning_times": "{n}×",
+      "warning_more": "and {n} more warnings",
       "checks_title": "Reconciliation vs reported income",
       "check_denik_income": "Taxable income from journal",
       "check_annual_income": "Annual income (invoice-based)",

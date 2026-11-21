@@ -31618,6 +31618,8 @@
       "totals_net": "Daňový základ (příjem − výdaj)",
       "blocking_warning": "Pozor: {n} problémů brání správnému sestavení daňového základu - viz seznam níže.",
       "unclassified_warning": "Pozor: {n} nezařazených příchozích pohybů je mimo daňový základ - zařaďte je, jinak podhodnotíte příjem (riziko FÚ).",
+      "warning_times": "{n}×",
+      "warning_more": "a další varování ({n})",
       "checks_title": "Kontrola vůči přiznanému příjmu",
       "check_denik_income": "Daňový příjem z deníku",
       "check_annual_income": "Roční příjem (fakturační)",
