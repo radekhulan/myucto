@@ -766,7 +766,7 @@ onMounted(load)
               <div class="flex justify-between gap-3">
                 <dt class="text-neutral-500">{{ t(`other_items.accrual.label_${item.side}`) }}</dt>
                 <dd v-if="!accrualEditing" class="flex flex-wrap items-center justify-end gap-1">
-                  <span class="font-mono" data-test="accrual-period">{{ item.accrual_from && item.accrual_to
+                  <span :class="{ 'font-mono': item.accrual_from && item.accrual_to }" data-test="accrual-period">{{ item.accrual_from && item.accrual_to
                     ? t('other_items.accrual.period', { from: formatDate(item.accrual_from), to: formatDate(item.accrual_to) })
                     : t('other_items.accrual.none') }}</span>
                   <button v-if="canEditAccrual" type="button" data-test="accrual-edit" class="inline-flex h-6 w-6 items-center justify-center rounded text-neutral-400 hover:bg-neutral-100 hover:text-primary-700"

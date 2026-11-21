@@ -208,6 +208,8 @@ describe('OtherItemDetail', () => {
     const wrapper = shallowMount(OtherItemDetail)
     await flushPromises()
     expect(wrapper.get('[data-test="accrual-period"]').text()).toBe('other_items.accrual.none')
+    // Text „Bez rozlišení“ je věta, ne údaj: bez neproporcionálního písma dat.
+    expect(wrapper.get('[data-test="accrual-period"]').classes()).not.toContain('font-mono')
     await wrapper.get('[data-test="accrual-edit"]').trigger('click')
     // Pole Od/Do se otevřou rovnou, nápověda je vidět u nich (ne jen v title).
     expect(wrapper.get('[data-test="accrual-hint"]').text()).toBe('other_items.accrual.hint_receivable')
@@ -217,6 +219,7 @@ describe('OtherItemDetail', () => {
     await flushPromises()
     expect(m.updateAccrual).toHaveBeenCalledWith(9, '2099-07-01', '2100-06-30')
     expect(wrapper.get('[data-test="accrual-period"]').text()).toBe('other_items.accrual.period:{"from":"2099-07-01","to":"2100-06-30"}')
+    expect(wrapper.get('[data-test="accrual-period"]').classes()).toContain('font-mono')
     expect(m.toastSuccess).toHaveBeenCalledWith('accrual_period.saved')
   })
 
