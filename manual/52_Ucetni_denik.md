@@ -1662,7 +1662,8 @@ Filtry:
 **Kniha ostatních pohledávek a závazků.** Tlačítko vpravo nahoře v seznamu (vlevo od tlačítek
 **Druhy** a **Dokumenty**) stáhne sestavu ručně zadaných položek odpovídajících aktuálnímu filtru jako PDF na šířku
 nebo tabulku XLSX, bez stránkování. Seřazená je stejně jako seznam, když v něm řazení zvolíte
-kliknutím na záhlaví sloupce; jinak podle čísla dokladu (koncepty bez čísla první). Výběr je stejný jako v seznamu
+kliknutím na záhlaví sloupce; jinak podle čísla dokladu (koncepty bez čísla první). Čísla se řadí
+podle hodnoty, ne jako text: OP-2026-9 je před OP-2026-10, stejně jako v seznamu. Výběr je stejný jako v seznamu
 včetně výchozího okna splatnosti a jeho výjimek pro stav **Otevřené** a hledání; hlavička uvádí
 firmu, použitou splatnost, nastavení výběru a řazení. Předpisy z mezd a daní kniha neobsahuje (říká to
 její hlavička), proto při filtru zdroje mzdy nebo daně tlačítko není. Sloupce: číslo dokladu,

@@ -22355,7 +22355,8 @@ paths:
         výchozího okna splatnosti rok zpět až rok dopředu; výběr `open` nemá dolní mez
         a hledání bez data okno nemá), bez stránkování. Převzaté předpisy z mezd a daní,
         které výpis vrací zvlášť v `sources`, kniha neobsahuje. Řazení převezme `sort_by`
-        a `sort_dir` výpisu, bez nich je podle čísla dokladu vzestupně (koncepty bez čísla první).
+        a `sort_dir` výpisu, bez nich je podle čísla dokladu vzestupně (koncepty bez čísla první). Číslo dokladu
+        se řadí přirozeně (OP-2026-9 před OP-2026-10) ve výpisu i v knize.
 
         Sloupce: číslo dokladu, směr, druh, položka, protistrana, datum vzniku,
         splatnost, částka, uhrazeno, zbývá uhradit (u splátek rozdělených na jistinu,

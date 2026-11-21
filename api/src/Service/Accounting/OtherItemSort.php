@@ -7,7 +7,8 @@ namespace MyInvoice\Service\Accounting;
 final class OtherItemSort
 {
     private const COLUMNS = [
-        'document_no' => 'oi.document_no',
+        // Číslo přirozeně (OP-2026-9 před OP-2026-10), i u řad bez pevné šířky a převzatých čísel.
+        'document_no' => 'NATURAL_SORT_KEY(oi.document_no)',
         'title' => 'oi.title',
         'partner_name' => 'oi.partner_name',
         'due_on' => 'oi.due_on',
@@ -27,6 +28,12 @@ final class OtherItemSort
         $sort = self::selected($filters);
         if ($sort === null) return 'oi.due_on DESC, oi.id DESC';
         return self::COLUMNS[$sort['key']] . ' ' . $sort['dir'] . ', oi.id ' . $sort['dir'];
+    }
+
+    /** Řadicí výraz sloupce (stejný pro výpis i knihu). */
+    public static function column(string $key): string
+    {
+        return self::COLUMNS[$key];
     }
 
     /**

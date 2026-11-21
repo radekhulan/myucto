@@ -329,6 +329,21 @@ final class OtherItemBookTest extends TestCase
         self::assertSame('splatnost do 31. 12. 2099', $label(['status' => 'all', 'to' => '2099-12-31']));
     }
 
+    public function testDocumentNumberSortsNaturallyInBookAndList(): void
+    {
+        $ten = $this->item('receivable', 'CZK', 10, 'confirmed', documentNo: 'OP-SYNT-10');
+        $nine = $this->item('receivable', 'CZK', 10, 'confirmed', documentNo: 'OP-SYNT-9');
+        $draft = $this->item('receivable', 'CZK', 10, 'draft');
+        $hundred = $this->item('receivable', 'CZK', 10, 'confirmed', documentNo: 'OP-SYNT-100');
+        $expected = [$draft, $nine, $ten, $hundred];
+
+        $book = $this->books->build($this->supplierId, OtherItemListFilters::fromRequest($this->request(['status' => 'all'])), true, []);
+        self::assertSame($expected, array_map(static fn (array $row): int => (int) $row['id'], iterator_to_array($book->rows(), false)));
+        $parsed = OtherItemListFilters::fromRequest($this->request(['status' => 'all', 'sort_by' => 'document_no', 'sort_dir' => 'asc']));
+        self::assertSame($expected, array_map(static fn (array $row): int => (int) $row['id'],
+            $this->list->list($this->supplierId, $parsed['filters'], 1, 50)['items']), 'výpis řadí stejně');
+    }
+
     public function testChangeOfSortValueDuringExportNeitherDropsNorDuplicatesRows(): void
     {
         $ids = [];

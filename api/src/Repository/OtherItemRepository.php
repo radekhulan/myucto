@@ -273,9 +273,8 @@ final class OtherItemRepository
     }
 
     /**
-     * Řadicí výraz knihy a směr; odpovídá ORDER BY výpisu ({@see OtherItemSort::orderBy()}).
-     * Prázdné číslo a protistrana jako prázdný text (od výpisu se liší jen pořadím NULL a ''
-     * mezi sebou, které vypadají stejně).
+     * Řadicí výraz knihy a směr, stejný jako ORDER BY výpisu ({@see OtherItemSort::orderBy()}).
+     * Dotaz knihy vybírá jen id, proto zbývá uhradit jako celý výraz místo aliasu výpisu.
      *
      * @param array<string,mixed> $filters
      * @return array{0:string, 1:'ASC'|'DESC'}
@@ -283,12 +282,9 @@ final class OtherItemRepository
     private static function bookOrder(array $filters): array
     {
         $sort = OtherItemSort::selected($filters) ?? ['key' => 'document_no', 'dir' => 'ASC'];
-        $key = match ($sort['key']) {
-            'document_no' => "COALESCE(oi.document_no, '')",
-            'partner_name' => "COALESCE(oi.partner_name, '')",
-            'remaining_amount' => '(oi.amount - oi.settled_outside_amount - ' . self::PAID_SQL . ')',
-            default => 'oi.' . $sort['key'],
-        };
+        $key = $sort['key'] === 'remaining_amount'
+            ? '(oi.amount - oi.settled_outside_amount - ' . self::PAID_SQL . ')'
+            : OtherItemSort::column($sort['key']);
         return [$key, $sort['dir']];
     }
 
