@@ -15,7 +15,7 @@ use Psr\Http\Message\ServerRequestInterface as Request;
 
 /**
  * GET /api/accounting/journal/for-document/{source}/{id} — zaúčtování faktury
- * (vydané i přijaté) i s řádky.
+ * (vydané i přijaté) nebo ostatní pohledávky či závazku i s řádky.
  *
  * Podklad pro sbalenou sekci „Zaúčtování" na detailu faktury. Detail dosud uměl
  * jen odskok do deníku, takže účetní musel kvůli jednomu pohledu na kontaci
@@ -40,6 +40,7 @@ final class JournalForDocumentAction
     private const SOURCES = [
         'invoices'           => 'invoice',
         'purchase-invoices'  => 'purchase_invoice',
+        'other-items'        => 'other_item',
     ];
 
     public function __construct(
@@ -66,7 +67,9 @@ final class JournalForDocumentAction
             static fn (array $e): array => $e + ['relation' => 'own'],
             $this->journal->listBySourceWithLines($supplierId, $sourceType, $docId),
         );
-        if ($entries === []) {
+        // Zálohu bez vlastního zápisu mají jen faktury; ostatní položka by se jinak
+        // hledala mezi proformami podle svého id.
+        if ($entries === [] && $sourceType !== 'other_item') {
             $entries = $this->advanceEntries($supplierId, $sourceType, $docId);
         }
         if ($sourceType === 'invoice') {

@@ -928,6 +928,38 @@ final class MyuctoImportTest extends TestCase
         self::assertSame(0, $this->targetCount('clients')); self::assertSame(0, $this->targetCount('external_entity_map'));
     }
 
+    /**
+     * Zápis odkladu Časového rozlišení (výnosy 384 i náklady 381) převod nepřijímá a zastaví celý.
+     * Proto rozpad odkladu v záznamu kroku (`*_accrual.items` s řádky faktur i ostatních
+     * položek, `item_costs`) přemapování nepotřebuje: čte se jen u období s živým zápisem
+     * odkladu ({@see \MyInvoice\Service\Accounting\Closing\AccrualDeferralService::closingDeferralSnapshots()}),
+     * který v cílové firmě po převodu být nemůže. Kdyby převod tyto zápisy začal přijímat,
+     * test spadne a rozpad je nutné přemapovat ({@see \MyInvoice\Service\Accounting\Closing\ClosingStepPayloadRemapper}).
+     */
+    #[\PHPUnit\Framework\Attributes\DataProvider('closingDeferralSources')]
+    public function testClosingDeferralEntryIsRejectedBeforeAnyWrite(string $sourceType): void
+    {
+        $package = self::readArrays($this->archive);
+        $entry = array_key_first($package['tables']['journal_entries']);
+        $period = (int) $package['tables']['journal_entries'][$entry]['period_id'];
+        $package['tables']['journal_entries'][$entry] = array_replace($package['tables']['journal_entries'][$entry],
+            ['source_type' => $sourceType, 'source_id' => $period]);
+        try {
+            $this->importer->import($package, $this->target, $this->actor, 'synthetic-deferral-' . $sourceType, false);
+            self::fail('Zápis odkladu uzávěrky nesmí převodem projít.');
+        } catch (\RuntimeException $e) {
+            self::assertStringContainsString('Nepodporovaný zdroj účetního zápisu: ' . $sourceType, $e->getMessage());
+        }
+        self::assertSame(0, $this->targetCount('journal_entries'));
+        self::assertSame(0, $this->targetCount('external_entity_map'));
+    }
+
+    /** @return array<string, array{string}> */
+    public static function closingDeferralSources(): array
+    {
+        return ['výnosy příštích období' => ['deferred_revenue_accrual'], 'náklady příštích období' => ['prepaid_expense_accrual']];
+    }
+
     public function testChangedSourceIsRejectedAfterApply(): void
     {
         $package = self::readArrays($this->archive);

@@ -54,10 +54,24 @@ final class OtherItemAction
             || $toDate === false || $toDate->format('Y-m-d') !== $to || $from > $to) {
             return Json::error($response, 'other_items.error.invalid_date', 'Neplatný rozsah splatnosti.', 422);
         }
+        // Bez data platí okno splatnosti rok zpět až rok dopředu, aby součty a počet nešly přes celou
+        // historii firmy. Výjimky jen pro ruční položky: výběr Otevřené nemá dolní mez (starý neuhrazený
+        // dluh z něj nesmí zmizet) a hledání okno nemá (číslo dokladu z předloňska se musí najít).
+        // Převzaté předpisy z mezd a daní mají okno vždy, hledání se na ně nevztahuje.
+        $searching = ($filters['q'] ?? '') !== '' && !$hasFrom && !$hasTo;
+        $filters['from'] = $searching || (($filters['status'] ?? '') === 'open' && !$hasFrom) ? null : $from;
+        $filters['to'] = $searching ? null : $to;
         $result = $this->service->list(
             $this->currentSupplierId($request), $filters,
             (int) ($q['page'] ?? 1), (int) ($q['per_page'] ?? 50),
         );
+        // Počet připojených dokumentů jen tomu, kdo smí dokumenty číst.
+        if (!RequestAuthorization::allows($request, 'documents', AccessLevel::READ)) {
+            $result['items'] = array_map(static function (array $item): array {
+                unset($item['document_count']);
+                return $item;
+            }, $result['items']);
+        }
         $derived = [];
         $sid = $this->currentSupplierId($request);
         $forecastFrom = max($from, date('Y-m-d'));
@@ -167,6 +181,30 @@ final class OtherItemAction
             if ($result['before'] !== $result['after']) {
                 $this->log($request, 'other_item.text_updated', $id,
                     ['note' => ['before' => $result['before'], 'after' => $result['after']]]);
+            }
+            return $result['item'];
+        });
+    }
+
+    /**
+     * Období časového rozlišení zaúčtované pohledávky (výnos) či závazku (náklad) (`accrual_from`, `accrual_to`).
+     * Zápis v deníku se nemění, období čte uzávěrka.
+     */
+    public function updateAccrual(Request $request, Response $response, array $args): Response
+    {
+        if (!$this->requirePermission($request, $response, 'other_items', AccessLevel::WRITE, $err)) return $err;
+        return $this->run($response, function () use ($request, $args) {
+            $id = (int) $args['id'];
+            $body = (array) ($request->getParsedBody() ?? []);
+            if (!array_key_exists('accrual_from', $body) && !array_key_exists('accrual_to', $body)) {
+                throw new OtherItemException('validation_failed', 'Chybí pole accrual_from nebo accrual_to.');
+            }
+            $result = $this->service->updateAccrual($this->currentSupplierId($request), $id, $body, $this->userId($request));
+            if ($result['before'] !== $result['after']) {
+                $this->log($request, 'other_item.accrual_changed', $id, [
+                    'accrual_from' => ['before' => $result['before'][0], 'after' => $result['after'][0]],
+                    'accrual_to' => ['before' => $result['before'][1], 'after' => $result['after'][1]],
+                ]);
             }
             return $result['item'];
         });
@@ -300,9 +338,13 @@ final class OtherItemAction
         return $this->run($response, function () use ($request, $args): array {
             $canReadBank = RequestAuthorization::allows($request, 'bank', AccessLevel::READ);
             $canReadCash = RequestAuthorization::allows($request, 'cash', AccessLevel::READ);
+            $canReadJournal = RequestAuthorization::allows($request, 'accounting', AccessLevel::READ);
             $rows = $this->service->allocations($this->currentSupplierId($request), (int) $args['id']);
-            return ['items' => array_values(array_filter($rows, static fn (array $row): bool =>
-                $row['bank_transaction_id'] !== null ? $canReadBank : $canReadCash))];
+            $visible = array_filter($rows, static fn (array $row): bool =>
+                $row['bank_transaction_id'] !== null ? $canReadBank : $canReadCash);
+            // Odkaz do deníku jen tomu, kdo deník smí číst.
+            return ['items' => array_values(array_map(static fn (array $row): array =>
+                $canReadJournal ? $row : ['journal_entry_id' => null] + $row, $visible))];
         });
     }
 

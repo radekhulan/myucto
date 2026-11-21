@@ -2331,6 +2331,10 @@
       ],
       [
         "GET",
+        "/api/accounting/journal/for-document/other-items/{id}"
+      ],
+      [
+        "GET",
         "/api/accounting/journal/for-document/purchase-invoices/{id}"
       ]
     ]
@@ -4104,6 +4108,15 @@
       [
         "PUT",
         "/api/accounting/other-items/schedules/{id}/status"
+      ]
+    ]
+  },
+  "set_other_item_schedule_title": {
+    "write": true,
+    "api": [
+      [
+        "PUT",
+        "/api/accounting/other-items/schedules/{id}/title"
       ]
     ]
   },

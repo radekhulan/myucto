@@ -22318,11 +22318,11 @@ paths:
       parameters:
         - { $ref: '#/components/parameters/SupplierIdHeader' }
         - { in: query, name: side, schema: { type: string, enum: [receivable, payable] } }
-        - { in: query, name: status, schema: { type: string, enum: [open, all, draft, confirmed, posted, reversed, cancelled] } }
+        - { in: query, name: status, schema: { type: string, enum: [open, all, draft, confirmed, posted, reversed, cancelled] }, description: 'open = aktivní položky, u kterých zbývá zaplatit jistinu, nebo úrok či poplatek rozdělené splátky (remaining_payment); totals jsou saldo jistiny.' }
         - { in: query, name: kind, schema: { type: string }, description: Vestavěný druh; vrací jen položky bez vlastního druhu (kind_id null). }
         - { in: query, name: kind_id, schema: { type: integer, minimum: 1 }, description: Vlastní druh firmy (GET /accounting/other-items/kinds); má přednost před kind a vynechá převzaté zdroje. }
-        - { in: query, name: from, schema: { type: string, format: date } }
-        - { in: query, name: to, schema: { type: string, format: date } }
+        - { in: query, name: from, schema: { type: string, format: date }, description: 'Splatnost od. Bez from i to platí pro ruční položky, součty i převzaté zdroje okno rok zpět až rok dopředu; ruční položky ve stavu open dolní mez nemají. Jen to = bez dolní meze.' }
+        - { in: query, name: to, schema: { type: string, format: date }, description: 'Splatnost do. Jen from = bez horní meze.' }
         - { in: query, name: q, schema: { type: string } }
         - { in: query, name: page, schema: { type: integer, minimum: 1 } }
         - { in: query, name: per_page, schema: { type: integer, minimum: 1, maximum: 200 } }
@@ -22451,12 +22451,23 @@ paths:
         jediný protiúčet. Změní-li se `issued_on` a `accounting_on` je vynechané, `accounting_on` ho
         následuje, pokud se dosud rovnalo uloženému `issued_on`; jinak zůstane. `due_on` se při
         vynechání zachová.
+
+        Období časového rozlišení (`accrual_from`, `accrual_to`) se při vynechání zachová. Změna
+        `side` ho zahodí, i když je poslané beze změny (u pohledávky jde o výnos, u závazku o náklad);
+        jiné období poslané spolu se změnou strany zůstane, shodné s uloženým jen s `accrual_side` rovným
+        nové straně (pojistka níže pak prověří obě strany). Koncept
+        se zaúčtovanou historií (vrácený odúčtováním) ho nesmí změnit, pokud některý jeho zápis leží
+        v uzavřeném, revidovaném či schváleném období (`409 other_items.error.period_closed`) nebo v probíhající
+        uzávěrce, jejíž krok Časové rozlišení už zaúčtoval odklad strany položky (výnosy u pohledávky, náklady u závazku;
+        `409 other_items.error.accrual_deferral_posted`).
       requestBody:
         required: true
         content: { application/json: { schema: { $ref: '#/components/schemas/OtherItemInput' } } }
       responses:
         '200': { description: Změněný koncept, content: { application/json: { schema: { $ref: '#/components/schemas/OtherItem' } } } }
         '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { description: 'Doklad není koncept (`other_items.error.not_draft`), nebo změna období rozlišení u konceptu se zaúčtovanou historií (`other_items.error.period_closed`, `other_items.error.accrual_deferral_posted`)', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '422': { description: 'Neplatný vstup, mimo jiné období rozlišení (`other_items.error.accrual_period_incomplete`, `accrual_period_invalid`, `accrual_double_entry_only`)', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
     delete:
       tags: [Accounting]
       summary: Měkce smaže pouze koncept
@@ -22464,6 +22475,7 @@ paths:
       responses:
         '200': { description: Smazáno }
         '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { description: 'Doklad není koncept (`other_items.error.not_draft`), zdroj opakování (`other_items.error.has_schedule`), nebo koncept s obdobím rozlišení a zaúčtovanou historií v uzavřeném období či po kroku Časové rozlišení uzávěrky (`other_items.error.period_closed`, `other_items.error.accrual_deferral_posted`)', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
 
   /api/v1/accounting/other-items/{id}/post:
     post:
@@ -22580,6 +22592,40 @@ paths:
         '409': { description: Doklad je koncept (`other_items.error.is_draft`), content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
         '422': { description: Chybí pole note nebo je delší než 10 000 znaků, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
 
+  /api/v1/accounting/other-items/{id}/accrual:
+    put:
+      tags: [Accounting]
+      summary: Nastaví období časového rozlišení zaúčtované pohledávky či závazku
+      description: |
+        Změní `accrual_from`/`accrual_to` zaúčtované ostatní položky s vlastním zápisem: u pohledávky období
+        výnosu (odklad na 384), u závazku období nákladu (odklad na 381). Zápis v deníku se nemění,
+        období čte až uzávěrka (krok Časové rozlišení). Vynechaný klíč ponechá uloženou hodnotu, obě prázdné
+        hodnoty rozlišení zruší. Koncept vrací `409 other_items.error.is_draft` (upravuje se přes `PUT /accounting/other-items/{id}`),
+        doklad bez vlastního zápisu nebo nezaúčtovaný `409 other_items.error.accrual_not_posted`, doklad v uzavřeném,
+        revidovaném či schváleném účetním období `409 other_items.error.period_closed` a doklad v probíhající uzávěrce,
+        jejíž krok Časové rozlišení už zaúčtoval odklad strany položky (výnosy u pohledávky, náklady u závazku),
+        `409 other_items.error.accrual_deferral_posted` (krok je
+        nutné vrátit). Stejné pravidlo jako `PUT /invoices/{id}/accrual`. Změna se zapíše do aktivity dokladu (`other_item.accrual_changed`).
+        Přes API token nedostupné (403 token_write_forbidden).
+      parameters:
+        - { $ref: '#/components/parameters/SupplierIdHeader' }
+        - { in: path, name: id, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                accrual_from: { type: [string, 'null'], format: date }
+                accrual_to: { type: [string, 'null'], format: date }
+      responses:
+        '200': { description: Upravený doklad, content: { application/json: { schema: { $ref: '#/components/schemas/OtherItem' } } } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { description: 'Koncept (`other_items.error.is_draft`), doklad bez vlastního zápisu (`other_items.error.accrual_not_posted`), v uzavřeném, revidovaném či schváleném období (`other_items.error.period_closed`) nebo po zaúčtovaném kroku odkladu (`other_items.error.accrual_deferral_posted`)', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '422': { description: 'Neúplné nebo neplatné období (`other_items.error.accrual_period_incomplete`, `other_items.error.accrual_period_invalid`), daňová evidence (`other_items.error.accrual_double_entry_only`) nebo tělo bez obou polí', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+
   /api/v1/accounting/other-items/{id}/posted:
     delete:
       tags: [Accounting]
@@ -22691,10 +22737,13 @@ paths:
     get:
       tags: [Accounting]
       summary: Rozvrhy opakovaných ostatních položek
-      parameters: [{ $ref: '#/components/parameters/SupplierIdHeader' }]
+      parameters:
+        - { $ref: '#/components/parameters/SupplierIdHeader' }
+        - { in: query, name: source_item_id, required: false, description: Jen rozvrh této zdrojové položky., schema: { type: integer, minimum: 1 } }
       responses:
         '200': { description: Rozvrhy, content: { application/json: { schema: { type: object, properties: { items: { type: array, items: { $ref: '#/components/schemas/OtherItemSchedule' } } } } } } }
         '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
 
   /api/v1/accounting/other-items/schedules/{id}:
     get:
@@ -22749,6 +22798,24 @@ paths:
         '200': { description: Rozvrh, content: { application/json: { schema: { $ref: '#/components/schemas/OtherItemSchedule' } } } }
         '403': { $ref: '#/components/responses/Forbidden' }
 
+  /api/v1/accounting/other-items/schedules/{id}/title:
+    put:
+      tags: [Accounting]
+      summary: Nastaví šablonu názvu budoucích položek opakování
+      description: Vynechané pole zachová uloženou hodnotu; šablonu zruší title_template null nebo prázdný text. Změna platí jen pro položky vytvořené po uložení; už vytvořené položky se nepřejmenují. Šablona se při uložení zkusí dosadit do dvanácti nejbližších položek do konce rozvrhu; název delší než 255 znaků vrátí 422 other_items.error.occurrence_title_too_long s polem `error.field`. Stornovaný zdroj vrátí 409 other_items.error.schedule_source_inactive, skončený rozvrh (po ends_on) 409 other_items.error.schedule_finished. U rozvrhu s automatickým účtováním smí název změnit jen session; API token se scope read_write dostane 403 other_items.error.auto_post_session_only (doklady by se zaúčtovaly bez kontroly člověkem).
+      parameters:
+        - { $ref: '#/components/parameters/SupplierIdHeader' }
+        - { in: path, name: id, required: true, schema: { type: integer } }
+      requestBody:
+        required: true
+        content: { application/json: { schema: { type: object, properties: { title_template: { $ref: '#/components/schemas/OtherItemScheduleTitleTemplate' }, title_sync_period: { $ref: '#/components/schemas/OtherItemScheduleTitleSync' } } } } }
+      responses:
+        '200': { description: Rozvrh, content: { application/json: { schema: { $ref: '#/components/schemas/OtherItemSchedule' } } } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { description: 'Stornovaný zdroj nebo skončený rozvrh (other_items.error.schedule_source_inactive, schedule_finished).', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+
   /api/v1/accounting/other-items/{item_id}/schedule:
     post:
       tags: [Accounting]
@@ -22759,10 +22826,31 @@ paths:
         - { in: path, name: item_id, required: true, schema: { type: integer } }
       requestBody:
         required: true
-        content: { application/json: { schema: { type: object, required: [frequency], properties: { frequency: { type: string, enum: [monthly, quarterly, yearly] }, ends_on: { type: [string, 'null'], format: date }, auto_post: { type: boolean, default: false, description: Zapnutí vyžaduje potvrzený nebo zaúčtovaný zdrojový doklad. Samotné založení rozvrhu neúčtuje. } } } } }
+        content: { application/json: { schema: { type: object, required: [frequency], properties: { frequency: { type: string, enum: [monthly, quarterly, yearly] }, ends_on: { type: [string, 'null'], format: date }, auto_post: { type: boolean, default: false, description: Zapnutí vyžaduje potvrzený nebo zaúčtovaný zdrojový doklad. Samotné založení rozvrhu neúčtuje. }, title_template: { $ref: '#/components/schemas/OtherItemScheduleTitleTemplate' }, title_sync_period: { $ref: '#/components/schemas/OtherItemScheduleTitleSync' } } } } }
       responses:
         '201': { description: Rozvrh, content: { application/json: { schema: { $ref: '#/components/schemas/OtherItemSchedule' } } } }
         '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { description: 'Z dokladu opakování založit nejde (other_items.error.invalid_status, already_scheduled, created_by_schedule).', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+
+  /api/v1/accounting/other-items/{item_id}/schedule/title-preview:
+    get:
+      tags: [Accounting]
+      summary: Náhled názvu nejbližší položky opakování
+      description: Nic neukládá. Má-li položka rozvrh, použije jeho příští termín (stornovaný zdroj nebo skončený rozvrh vrátí 409 jako uložení); jinak první položku nového rozvrhu se zadanou četností (frequency je pak povinná, jinak 422 s `error.field` = frequency) a doklad, ze kterého rozvrh založit nejde, vrátí 409 jako založení. Chyby šablony jsou stejné jako při uložení, s polem `error.field`; neznámé zástupné znaky vrací i v `error.tokens`.
+      parameters:
+        - { $ref: '#/components/parameters/SupplierIdHeader' }
+        - { in: path, name: item_id, required: true, schema: { type: integer } }
+        - { in: query, name: frequency, schema: { type: string, enum: [monthly, quarterly, yearly] } }
+        - { in: query, name: title_template, schema: { type: string, maxLength: 255 }, description: 'Šablona k náhledu; prázdná = bez šablony. U existujícího rozvrhu vynechání = uložená šablona (jako PUT …/title), u nového = bez šablony.' }
+        - { in: query, name: title_sync_period, schema: { type: boolean }, description: 'U existujícího rozvrhu vynechání = uložená volba, u nového = false.' }
+        - { in: query, name: ends_on, schema: { type: string, format: date }, description: 'Konec nového rozvrhu; délka názvu se kontroluje jen do něj. U existujícího rozvrhu se nepoužije.' }
+      responses:
+        '200': { description: Název a datum nejbližší položky, content: { application/json: { schema: { type: object, properties: { title: { type: string }, issued_on: { type: string, format: date } } } } } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { description: 'Doklad nebo rozvrh další položku nevytvoří (other_items.error.schedule_source_inactive, schedule_finished, already_scheduled, created_by_schedule, invalid_status).', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
 
   /api/v1/accounting/other-items/{item_id}/installments:
     get:
@@ -34113,7 +34201,7 @@ paths:
     get:
       tags:
       - Accounting
-      summary: Účetní zápisy faktury včetně storen
+      summary: Účetní zápisy faktury nebo ostatní položky včetně storen
       parameters:
       - $ref: '#/components/parameters/SupplierIdHeader'
       - in: path
@@ -34124,6 +34212,7 @@ paths:
           enum:
           - invoices
           - purchase-invoices
+          - other-items
       - in: path
         name: id
         required: true
@@ -46675,6 +46764,14 @@ components:
         currency: { type: string }
         amount_foreign: { type: [number, 'null'] }
         pairing_id: { type: [integer, 'null'], format: int64 }
+    OtherItemScheduleTitleTemplate:
+      type: [string, 'null']
+      maxLength: 255
+      description: 'Šablona názvu budoucích položek se zástupnými znaky opakované faktury ({YYYY}, {YY}, {M}, {MM}, {MMMM}, {Q}, {D}, {DD}, {DATE}, {BOM}, {EOM} včetně posunů jako {MM+1}); dosazují se podle data vzniku položky. Neznámý zástupný znak vrátí 422 other_items.error.unknown_title_placeholder. Prázdné nebo null = název zdrojové položky.'
+    OtherItemScheduleTitleSync:
+      type: boolean
+      default: false
+      description: 'Srovnat měsíc a rok ve tvaru M/RRRR, RRRR-MM a podobně v názvu na datum vzniku položky (jako u opakované faktury). Výchozí false.'
     OtherItemSchedule:
       type: object
       properties:
@@ -46692,7 +46789,7 @@ components:
           properties:
             side: { type: string, enum: [receivable, payable] }
             kind: { type: string }
-            title: { type: string }
+            title: { type: string, description: 'Název zdrojové položky uložený při založení rozvrhu. Se šablonou nebo srovnáním období to není název budoucích položek; ten je v next_title.' }
             partner_id: { type: [integer, 'null'] }
             partner_name: { type: [string, 'null'] }
             currency: { type: string }
@@ -46705,7 +46802,16 @@ components:
             counter_account_code: { type: [string, 'null'] }
             posting_lines: { type: array, items: { $ref: '#/components/schemas/OtherItemPostingLine' } }
             note: { type: [string, 'null'] }
-        occurrences: { type: array, items: { type: object, properties: { occurrence_index: { type: integer }, item_id: { type: integer }, issued_on: { type: string, format: date }, status: { type: string } } } }
+            title_template: { type: string, description: 'Jen u rozvrhu se šablonou názvu.' }
+            title_sync_period: { type: boolean, description: 'Jen u rozvrhu se zapnutým srovnáním období v názvu (true).' }
+        created_at: { type: string, format: date-time }
+        next_title: { type: [string, 'null'], description: 'Název příští položky rozvrhu po dosazení šablony; null spolu s next_on.' }
+        source_active: { type: boolean, description: 'Zdrojová položka je aktivní (koncept, potvrzená, zaúčtovaná); jinak rozvrh další položky nevytvoří a název nejde měnit (409 other_items.error.schedule_source_inactive).' }
+        finished: { type: boolean, description: 'Rozvrh po konci opakování (ends_on), i pozastavený; další položka nevznikne a název nejde měnit (409 other_items.error.schedule_finished).' }
+        created_by_name: { type: [string, 'null'], description: 'Jméno uživatele, který rozvrh založil; null u neznámého nebo smazaného uživatele.' }
+        source_document_no: { type: [string, 'null'], description: 'Číslo zdrojové položky rozvrhu.' }
+        next_on: { type: [string, 'null'], format: date, description: 'Datum příští položky rozvrhu; null u pozastaveného rozvrhu a po konci opakování.' }
+        occurrences: { type: array, description: 'Jen v detailu rozvrhu. Výskyt 0 je zdrojová položka.', items: { type: object, properties: { occurrence_index: { type: integer }, item_id: { type: integer }, issued_on: { type: string, format: date }, status: { type: string }, document_no: { type: [string, 'null'] } } } }
     OtherItemInstallmentInput:
       type: object
       required: [due_on]
@@ -46766,6 +46872,9 @@ components:
         issued_on: { type: string, format: date }
         accounting_on: { type: [string, 'null'], format: date }
         due_on: { type: string, format: date }
+        accrual_from: { type: [string, "null"], format: date, description: "Začátek období, do kterého patří výnos pohledávky (časové rozlišení výnosů 384), resp. náklad závazku (náklady příštích období 381). Zadává se spolu s accrual_to, jen v podvojném účetnictví (jinak 422 other_items.error.accrual_period_incomplete / accrual_period_invalid / accrual_double_entry_only). NULL = bez rozlišení. PUT konceptu bez obou polí uložené období zachová (i v daňové evidenci, kde ho nejde změnit, jen ponechat nebo smazat). Změna strany (side) období poslané beze změny zahodí, protože období výnosu není obdobím nákladu; nové období zadané spolu se stranou zůstane. Změnu či smazání období dokladu, ze kterého už uzávěrka odložila, odmítne 409 (other_items.error.period_closed / accrual_deferral_posted)." }
+        accrual_to: { type: [string, "null"], format: date, description: "Konec období výnosu pohledávky či nákladu závazku (nejdříve v den accrual_from). Uzávěrka odloží na 384 (výnos) či 381 (náklad) část výsledku zaúčtovaného zápisem položky, která připadá na dny za rozvahovým dnem, a další rok ji rozpustí." }
+        accrual_side: { type: string, enum: [receivable, payable], writeOnly: true, description: "Strana, ke které patří poslané období. Při změně strany (side) se období shodné s uloženým bere jako vrácený uložený stav a zahodí se; s accrual_side rovným nové straně zůstane (období zadané záměrně pro novou stranu). Bez změny strany se ignoruje. Neukládá se." }
         currency: { type: string, enum: [CZK], default: CZK }
         amount: { type: number, exclusiveMinimum: 0 }
         exchange_rate: { type: [number, 'null'], description: Ignorováno, pro tuto agendu je podporována pouze CZK }
@@ -46909,11 +47018,23 @@ components:
             paid_amount: { type: number, description: Alokované úhrady z banky a pokladny včetně settled_outside_amount. }
             posted_deletion: { $ref: '#/components/schemas/PostedDeletion', description: Jen v detailu zaúčtovaného dokladu se zápisem v deníku }
             remaining_amount: { type: number, description: Saldo položky. U úvěru s rozdělenými splátkami jen jistina. }
-            remaining_payment: { type: number, description: Kolik zbývá zaplatit; u rozdělených splátek i úrok a poplatek, jinak rovno remaining_amount. Jen detail. }
-            has_split_installments: { type: boolean, description: Splátkový kalendář má aspoň jednu splátku rozdělenou na jistinu, úrok a poplatek. Jen detail. }
+            remaining_payment: { type: number, description: Kolik zbývá zaplatit; u rozdělených splátek i úrok a poplatek, jinak rovno remaining_amount. Podle něj se odvozuje stav úhrady ve výpisu i v detailu. }
+            has_split_installments: { type: boolean, description: Splátkový kalendář má aspoň jednu splátku rozdělenou na jistinu, úrok a poplatek. }
             journal_entry_id: { type: [integer, 'null'], format: int64 }
             reversal_entry_id: { type: [integer, 'null'], format: int64 }
             posted_at: { type: [string, 'null'], format: date-time }
+            document_count: { type: integer, description: 'Jen v seznamu a jen s právem číst dokumenty: počet připojených dokumentů.' }
+            occurrence:
+              type: [object, 'null']
+              description: 'Jen v detailu. Položku vytvořilo opakování (výskyt 1 a další); zdroj rozvrhu a položka mimo rozvrh mají null. Po zrušení opakování výskyt zůstává se zdrojem, rozvrh je null.'
+              properties:
+                schedule_id: { type: [integer, 'null'], format: int64, description: 'Rozvrh opakování; null po jeho zrušení.' }
+                occurrence_index: { type: integer }
+                source_item_id: { type: [integer, 'null'], format: int64, description: 'Zdrojová položka; null, když byla zdrojová položka smazána.' }
+                source_document_no: { type: [string, 'null'], description: 'Číslo zdrojové položky; null, dokud ho nemá (koncept).' }
+                source_title: { type: [string, 'null'] }
+                schedule_created_at: { type: [string, 'null'], format: date-time, description: 'Kdy byl rozvrh založen; null po zrušení opakování.' }
+                created_by_name: { type: [string, 'null'], description: 'Kdo rozvrh založil; null u neznámého nebo smazaného uživatele.' }
             posting_rules:
               type: object
               description: Účinná kontace vzniku a úhrad (prázdný objekt v daňové evidenci).
@@ -46931,6 +47052,16 @@ components:
         total: { type: integer }
         page: { type: integer }
         per_page: { type: integer }
+        totals:
+          type: array
+          description: Jen na první stránce. Zbývá uhradit za celý výběr ručních položek (stejné filtry jako items, bez stránkování) po straně a měně; počítá jen potvrzené a zaúčtované položky, koncepty a storna ne. Přeplatek položky se počítá jako nula.
+          items:
+            type: object
+            required: [side, currency, remaining_amount]
+            properties:
+              side: { type: string, enum: [receivable, payable] }
+              currency: { type: string }
+              remaining_amount: { type: number }
         sources:
           type: array
           description: Převzaté položky ze mzdového a daňového modulu, pouze ke čtení
@@ -47100,6 +47231,9 @@ components:
           enum: [other_item_vs_account, other_item_vs_installment, other_item_vs_remaining, other_item_account_installment, bank_rule, null]
           description: Kód automatického přiřazení (shoda VS s účtem protistrany, příští splátkou nebo celým zbytkem, účet protistrany s příští splátkou, nebo pravidlo účtování banky). Null u ručního přiřazení.
         reversed_on: { type: [string, 'null'], format: date }
+        bank_statement_id: { type: [integer, 'null'], format: int64, description: Bankovní výpis pohybu úhrady. Null u pokladní platby. }
+        cash_doc_number: { type: [string, 'null'], description: Číslo pokladního dokladu úhrady. Null u bankovní platby. }
+        journal_entry_id: { type: [integer, 'null'], format: int64, description: Živý (nestornovaný) zaúčtovaný zápis platby v deníku. Null bez zaúčtování platby, u stornované úhrady nebo bez práva číst účetnictví. }
     OtherItemBankCandidate:
       type: object
       description: Ostatní položka nabídnutá k bankovnímu pohybu; tvar odpovídá kandidátům faktur v párování pohybu.
@@ -52089,8 +52223,9 @@ components:
               - 'null'
         has_related:
           type: boolean
-          description: Jen v listu — zápis má protějšek v grafu doklad ↔ úhrada (bankovní pohyb, pokladní doklad nebo
-            zápočet).
+          description: Jen v listu — zápis má protějšek v grafu doklad ↔ úhrada (bankovní pohyb, pokladní doklad,
+            zápočet nebo ostatní pohledávka či závazek). Vazby ostatních položek se počítají jen s právem
+            other_items, jejich úhrady jen s právem bank, resp. cash, shodně s /related.
         internal_document:
           type:
           - object
@@ -52879,6 +53014,8 @@ components:
           properties:
             code: { type: string, example: validation_failed }
             message: { type: string, example: "Pole 'name' je povinné." }
+            field: { type: string, description: 'Pole vstupu, ke kterému chyba patří (např. title_template u opakování ostatní položky).' }
+            tokens: { type: array, items: { type: string }, description: 'Neznámé zástupné znaky šablony názvu (other_items.error.unknown_title_placeholder).' }
             fields:
               type: object
               description: |
@@ -60045,11 +60182,19 @@ components:
           - bank
           - cash
           - settlement
+          - gopay
+          - other_item
           - journal_entry
+          description: Druh protějšku. other_item = ostatní pohledávka nebo závazek, který platba hradí,
+            který kryje fakturu (invoices.other_item_id) nebo jehož předpis ze zůstatku leží v prohlíženém
+            zápisu. Ze zápisu položky se vrací její úhrady (bank, cash) a krytá faktura. Stornované
+            přiřazení úhrady ani smazaná položka se nevrací. Položky se vrací jen s právem other_items,
+            jejich úhrady jen s právem bank, resp. cash.
         source_id:
           type: integer
         permission:
           type: string
+          description: Právo potřebné k prokliku na doklad (např. invoices, bank, cash, other_items).
         title:
           type:
           - string
@@ -60070,6 +60215,9 @@ components:
           type:
           - number
           - 'null'
+          description: Částka připadající na tuto vazbu. Znaménko se nemusí shodovat s amount
+            (u výdaje je amount záporná, alokace kladná). U ostatní položky peněžní část přiřazení úhrady (jistina + úrok + poplatek);
+            u úhrady v panelu zápisu s více položkami součet jejích přiřazení k těmto položkám.
         currency:
           type:
           - string
@@ -60082,6 +60230,8 @@ components:
           type:
           - number
           - 'null'
+          description: Zápis, který protějšek zaúčtovává. U faktury kryté ostatní pohledávkou zápis
+            položky, u položky převzaté ze zůstatku zápis s jejím předpisem (může jít o prohlížený zápis).
         entry_date:
           type:
           - string
@@ -62149,14 +62299,28 @@ components:
           items:
             type: object
             required:
+            - source
             - purchase_invoice_id
+            - other_item_id
             - vendor_invoice_number
             - deferred_amount
             properties:
+              source:
+                type: string
+                enum:
+                - purchase_invoice
+                - other_item
               purchase_invoice_id:
-                type: integer
+                type:
+                - integer
+                - 'null'
+              other_item_id:
+                type:
+                - integer
+                - 'null'
               vendor_invoice_number:
                 type: string
+                description: Číslo přijaté faktury od dodavatele, u ostatního závazku jeho číslo dokladu.
               deferred_amount:
                 type: number
         by_account:
@@ -62182,8 +62346,10 @@ components:
     PrepaidExpenseAccrualItem:
       type: object
       required:
+      - source
       - item_id
       - purchase_invoice_id
+      - other_item_id
       - vendor_invoice_number
       - description
       - currency_code
@@ -62197,12 +62363,27 @@ components:
       - fraction
       - deferred_amount
       properties:
+        source:
+          type: string
+          enum:
+          - purchase_invoice
+          - other_item
+          description: Řádek přijaté faktury, nebo ostatní závazek (item_id = other_item_id; jeden řádek na
+            nákladový účet zdrojového zápisu, kterým je zápis položky nebo její storno či oprava dvojice z jiného
+            roku, takže jedna položka může mít víc řádků i na témže účtu).
         item_id:
           type: integer
         purchase_invoice_id:
-          type: integer
+          type:
+          - integer
+          - 'null'
+        other_item_id:
+          type:
+          - integer
+          - 'null'
         vendor_invoice_number:
           type: string
+          description: Číslo přijaté faktury od dodavatele, u ostatního závazku jeho číslo dokladu.
         description:
           type: string
         currency_code:
@@ -62212,6 +62393,7 @@ components:
         total_czk:
           type: number
           description: Účetní náklad položky v Kč (základ a neodpočitatelná část DPH), ze kterého se počítá odklad.
+            Ostatní závazek DPH nemá, jeho náklad je čistý obrat nákladového účtu zápisu.
         credit_account:
           type: string
         accrual_from:
@@ -62282,6 +62464,7 @@ components:
             - source
             - invoice_id
             - membership_case_id
+            - other_item_id
             - invoice_number
             - deferred_amount
             properties:
@@ -62290,11 +62473,16 @@ components:
                 enum:
                 - invoice
                 - nonprofit_membership
+                - other_item
               invoice_id:
                 type:
                 - integer
                 - 'null'
               membership_case_id:
+                type:
+                - integer
+                - 'null'
+              other_item_id:
                 type:
                 - integer
                 - 'null'
@@ -62329,6 +62517,7 @@ components:
       - item_id
       - invoice_id
       - membership_case_id
+      - other_item_id
       - invoice_number
       - description
       - currency_code
@@ -62350,7 +62539,11 @@ components:
           enum:
           - invoice
           - nonprofit_membership
-          description: Řádek vydané faktury, nebo členský předpis NNO (item_id = id operace předpisu).
+          - other_item
+          description: Řádek vydané faktury, členský předpis NNO (item_id = id operace předpisu), nebo ostatní
+            pohledávka (item_id = other_item_id; jeden řádek na výnosový účet zdrojového zápisu, kterým je
+            zápis položky nebo její storno či oprava dvojice z jiného roku, takže jedna položka může mít víc
+            řádků i na témže účtu).
         invoice_id:
           type:
           - integer
@@ -62359,9 +62552,13 @@ components:
           type:
           - integer
           - 'null'
+        other_item_id:
+          type:
+          - integer
+          - 'null'
         invoice_number:
           type: string
-          description: Číslo faktury, u členského předpisu klíč právního titulu.
+          description: Číslo faktury, u členského předpisu klíč právního titulu, u ostatní pohledávky její číslo dokladu.
         description:
           type: string
         currency_code:

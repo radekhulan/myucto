@@ -108,6 +108,60 @@ final class OtherItemPostedChangesTest extends TestCase
             new Response(), ['id' => (string) $id])->getStatusCode());
     }
 
+    public function testAccrualOfPostedReceivableIsEditableWithAudit(): void
+    {
+        $draft = $this->service->create($this->supplierId, ['side' => 'receivable', 'kind' => 'claim', 'counter_account_code' => '602'] + $this->input(), null);
+        $posted = $this->service->post($this->supplierId, (int) $draft['id'], null);
+        $id = (int) $posted['id'];
+        $linesBefore = $this->lines((int) $posted['journal_entry_id']);
+
+        $empty = $this->action->updateAccrual($this->request('PUT', ['other_items' => 2])->withParsedBody(['note' => 'x']),
+            new Response(), ['id' => (string) $id]);
+        self::assertSame(422, $empty->getStatusCode());
+        self::assertSame('other_items.error.validation_failed', $this->error($empty));
+
+        $response = $this->action->updateAccrual($this->request('PUT', ['other_items' => 2])
+            ->withParsedBody(['accrual_from' => '2099-07-01', 'accrual_to' => '2100-06-30', 'amount' => 1]), new Response(), ['id' => (string) $id]);
+        self::assertSame(200, $response->getStatusCode());
+        $item = $this->data($response);
+        self::assertSame('2099-07-01', substr((string) $item['accrual_from'], 0, 10));
+        self::assertEquals(1200, $item['amount']);
+        self::assertSame($linesBefore, $this->lines((int) $posted['journal_entry_id']));
+
+        $log = $this->pdo->prepare("SELECT payload FROM activity_log WHERE entity_type = 'other_item' AND entity_id = ?
+            AND action = 'other_item.accrual_changed'");
+        $log->execute([$id]);
+        $payload = json_decode((string) $log->fetchColumn(), true);
+        self::assertSame(['before' => null, 'after' => '2099-07-01'], $payload['accrual_from'] ?? null);
+        self::assertSame(['before' => null, 'after' => '2100-06-30'], $payload['accrual_to'] ?? null);
+
+        // Stejné období znovu: odpověď 200, ale v aktivitě žádný další záznam.
+        self::assertSame(200, $this->action->updateAccrual($this->request('PUT', ['other_items' => 2])
+            ->withParsedBody(['accrual_from' => '2099-07-01', 'accrual_to' => '2100-06-30']), new Response(), ['id' => (string) $id])->getStatusCode());
+        $count = $this->pdo->prepare("SELECT COUNT(*) FROM activity_log WHERE entity_type = 'other_item' AND entity_id = ?
+            AND action = 'other_item.accrual_changed'");
+        $count->execute([$id]);
+        self::assertSame(1, (int) $count->fetchColumn());
+
+        self::assertSame(403, $this->action->updateAccrual($this->request('PUT', ['other_items' => 1])
+            ->withParsedBody(['accrual_from' => null, 'accrual_to' => null]), new Response(), ['id' => (string) $id])->getStatusCode());
+    }
+
+    /** Změna období v editaci konceptu se zapíše do aktivity stejně jako přes route `/accrual`. */
+    public function testDraftPeriodChangeIsAudited(): void
+    {
+        $draft = $this->service->create($this->supplierId, ['side' => 'receivable', 'kind' => 'claim', 'counter_account_code' => '602'] + $this->input(), null);
+        $this->service->update($this->supplierId, (int) $draft['id'], ['accrual_from' => '2099-07-01', 'accrual_to' => '2100-06-30'], $this->userId);
+
+        $log = $this->pdo->prepare("SELECT payload, supplier_id FROM activity_log WHERE entity_type = 'other_item' AND entity_id = ?
+            AND action = 'other_item.accrual_changed'");
+        $log->execute([(int) $draft['id']]);
+        $row = $log->fetch(\PDO::FETCH_ASSOC);
+        $payload = json_decode((string) $row['payload'], true);
+        self::assertSame(['before' => null, 'after' => '2100-06-30'], $payload['accrual_to'] ?? null);
+        self::assertSame($this->supplierId, (int) $row['supplier_id'], 'Záznam patří firmě (filtr aktivity podle firmy).');
+    }
+
     public function testDeletingPostedItemRemovesItemAndEntry(): void
     {
         $posted = $this->posted();

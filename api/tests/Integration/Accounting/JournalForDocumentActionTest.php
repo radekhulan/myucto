@@ -12,6 +12,8 @@ use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Middleware\SupplierScopeMiddleware;
 use MyInvoice\Repository\AccountingPeriodRepository;
 use MyInvoice\Service\Accounting\ChartOfAccountsSeeder;
+use MyInvoice\Service\Accounting\OtherItemService;
+use MyInvoice\Service\Accounting\PostingService;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
 use Slim\Psr7\Factory\ServerRequestFactory;
@@ -36,6 +38,8 @@ final class JournalForDocumentActionTest extends TestCase
     private JournalAction $journalAction;
     private JournalForDocumentAction $forDocumentAction;
     private AccountingPeriodRepository $periods;
+    private PostingService $posting;
+    private OtherItemService $otherItems;
 
     private int $supplierId = 0;
     private int $currencyId = 0;
@@ -57,6 +61,8 @@ final class JournalForDocumentActionTest extends TestCase
             $this->journalAction     = $container->get(JournalAction::class);
             $this->forDocumentAction = $container->get(JournalForDocumentAction::class);
             $this->periods           = $container->get(AccountingPeriodRepository::class);
+            $this->posting           = $container->get(PostingService::class);
+            $this->otherItems        = $container->get(OtherItemService::class);
             $seeder                  = $container->get(ChartOfAccountsSeeder::class);
         } catch (\Throwable $e) {
             $this->markTestSkipped('DI nedostupné: ' . $e->getMessage());
@@ -144,6 +150,63 @@ final class JournalForDocumentActionTest extends TestCase
         self::assertGreaterThan($ids[0], $ids[1]);
     }
 
+    public function testPostedOtherItemReturnsOwnEntry(): void
+    {
+        $itemId = $this->otherItem($this->freeId(), 'posted');
+        $entryId = $this->posting->postDocument($this->supplierId, 'other_item', $itemId, [
+            ['account_code' => '378', 'side' => 'debit', 'amount' => 500.0],
+            ['account_code' => '648', 'side' => 'credit', 'amount' => 500.0],
+        ], ['entry_date' => self::YEAR . '-06-15', 'posted' => true]);
+
+        $res = $this->forDocument('other-items', $itemId);
+
+        self::assertSame(200, $res['status']);
+        self::assertCount(1, $res['body']['items']);
+        $entry = $res['body']['items'][0];
+        self::assertSame($entryId, (int) $entry['id']);
+        self::assertSame('other_item', $entry['source_type']);
+        self::assertSame('own', $entry['relation']);
+        self::assertSame(['378', '648'], array_map(static fn (array $l): string => (string) $l['account_code'], $entry['lines']));
+    }
+
+    public function testReversedOtherItemReturnsEntryAndReversal(): void
+    {
+        $itemId = $this->otherItem($this->freeId(), 'posted');
+        $entryId = $this->posting->postDocument($this->supplierId, 'other_item', $itemId, [
+            ['account_code' => '378', 'side' => 'debit', 'amount' => 500.0],
+            ['account_code' => '648', 'side' => 'credit', 'amount' => 500.0],
+        ], ['entry_date' => self::YEAR . '-06-15', 'posted' => true]);
+        // Storno ostatní položky jde přes její detail (deník ho odmítne), stejně jako v aplikaci.
+        $this->db->pdo()->prepare('UPDATE other_items SET journal_entry_id = ? WHERE id = ?')->execute([$entryId, $itemId]);
+        $this->otherItems->reverse($this->supplierId, $itemId, 'Syntetické storno', $this->userId, self::YEAR . '-06-30');
+
+        $ids = array_map(static fn (array $e): int => (int) $e['id'], $this->forDocument('other-items', $itemId)['body']['items']);
+
+        self::assertCount(2, $ids, 'Po stornu vidí účetní u položky zápis i protizápis.');
+        self::assertSame($entryId, $ids[0]);
+    }
+
+    /**
+     * Zálohy bez vlastního zápisu mají jen faktury. Koncept ostatní položky se stejným id
+     * jako zaplacená proforma nesmí převzít zápis konečné faktury té proformy.
+     */
+    public function testDraftOtherItemDoesNotBorrowEntriesOfProformaWithSameId(): void
+    {
+        $id = $this->freeId();
+        $this->otherItem($id, 'draft');
+        $proformaId = $this->sale('ZF-2099-DOC-1', $this->client('Odběratel s.r.o.'), '1', 1000.00, 210.00, 21.00, $id);
+        $this->db->pdo()->prepare("UPDATE invoices SET invoice_type = 'proforma' WHERE id = ?")->execute([$proformaId]);
+        $finalId = $this->sale('FV-2099-DOC-4', $this->client('Odběratel s.r.o.'), '1', 1000.00, 210.00, 21.00);
+        $this->db->pdo()->prepare('UPDATE invoices SET parent_invoice_id = ? WHERE id = ?')->execute([$proformaId, $finalId]);
+        self::assertSame(200, $this->call('postInvoice', 'POST', ['id' => (string) $finalId])['status']);
+        self::assertNotSame([], $this->forDocument('invoices', $proformaId)['body']['items'], 'Proforma vidí zápis konečné faktury.');
+
+        $res = $this->forDocument('other-items', $id);
+
+        self::assertSame(200, $res['status']);
+        self::assertSame([], $res['body']['items']);
+    }
+
     public function testUnknownSourceIsRejected(): void
     {
         $res = $this->forDocument('cash', 1);
@@ -199,18 +262,38 @@ final class JournalForDocumentActionTest extends TestCase
         return (int) $this->db->pdo()->lastInsertId();
     }
 
-    private function sale(string $varsymbol, int $clientId, string $code, float $base, float $vat, float $rate): int
+    /** Id volné v tabulce faktur i ostatních položek — pro záměrnou shodu id dvou dokladů. */
+    private function freeId(): int
+    {
+        return (int) $this->db->pdo()->query(
+            'SELECT GREATEST(COALESCE((SELECT MAX(id) FROM invoices), 0), COALESCE((SELECT MAX(id) FROM other_items), 0)) + 1000'
+        )->fetchColumn();
+    }
+
+    private function otherItem(int $id, string $status): int
+    {
+        $this->db->pdo()->prepare(
+            'INSERT INTO other_items
+               (id, supplier_id, side, title, issued_on, accounting_on, due_on, currency, amount, amount_czk,
+                account_code, counter_account_code, status, document_no, posted_at)
+             VALUES (?, ?, "receivable", "Náhrada škody", ?, ?, ?, "CZK", 500, 500, "378", "648", ?, ?, ?)'
+        )->execute([$id, $this->supplierId, self::YEAR . '-06-15', self::YEAR . '-06-15', self::YEAR . '-07-15', $status,
+            $status === 'draft' ? null : 'OST-' . $id, $status === 'draft' ? null : self::YEAR . '-06-15 10:00:00']);
+        return $id;
+    }
+
+    private function sale(string $varsymbol, int $clientId, string $code, float $base, float $vat, float $rate, ?int $id = null): int
     {
         $with = $base + $vat;
         $stmt = $this->db->pdo()->prepare(
             'INSERT INTO invoices
-                (supplier_id, varsymbol, invoice_type, client_id, issue_date, tax_date, due_date,
+                (id, supplier_id, varsymbol, invoice_type, client_id, issue_date, tax_date, due_date,
                  currency_id, reverse_charge, total_without_vat, total_vat, total_with_vat,
                  status, vat_classification_code, created_by)
-             VALUES (?, ?, "invoice", ?, ?, ?, ?, ?, 0, ?, ?, ?, "issued", ?, ?)'
+             VALUES (?, ?, ?, "invoice", ?, ?, ?, ?, ?, 0, ?, ?, ?, "issued", ?, ?)'
         );
         $issue = self::YEAR . '-06-15';
-        $stmt->execute([$this->supplierId, $varsymbol, $clientId, $issue, $issue, $issue, $this->currencyId, $base, $vat, $with, $code, $this->userId]);
+        $stmt->execute([$id, $this->supplierId, $varsymbol, $clientId, $issue, $issue, $issue, $this->currencyId, $base, $vat, $with, $code, $this->userId]);
         $id = (int) $this->db->pdo()->lastInsertId();
         $itemStmt = $this->db->pdo()->prepare(
             'INSERT INTO invoice_items

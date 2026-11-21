@@ -326,7 +326,10 @@ final class SystemDimensionWritePolicy
      * Platí jako zachovaná: hodnotu uzavřenou až po zaúčtování dokladu smí odklad nést dál,
      * protože jen zrcadlí řádek, který ji už nese. Uznává se jen u zdrojů uzávěrky, a jen
      * pro dvojici typ–hodnota, kterou některý z uvedených řádků prokazatelně nese
-     * (řádek firmy, zaúčtovaný, nestornovaný, na účtu 5xx/6xx).
+     * (řádek firmy, zaúčtovaný, nestornovaný, na účtu 5xx/6xx). Výjimkou je zápis ostatní
+     * položky: zůstává zdrojem i po stornu či přeúčtování z pozdějšího období (storno je
+     * samostatný záporný zdroj, jako dobropis, {@see \MyInvoice\Service\Accounting\Closing\AccrualDeferralService}),
+     * takže rozpuštění jeho odkladu nese hodnoty stornovaného řádku.
      *
      * @param list<array<string,mixed>> $lines
      * @return array<int,array{dimensions:array<int,int>,dimension_splits:array<int,array<int,true>>}> index řádku => převzaté hodnoty
@@ -357,7 +360,7 @@ final class SystemDimensionWritePolicy
                    JOIN journal_entries e    ON e.id = l.entry_id AND e.supplier_id = l.supplier_id
                    JOIN chart_of_accounts a  ON a.id = l.account_id
                   WHERE l.supplier_id = ? AND l.id IN ({$marks})
-                    AND e.posted_at IS NOT NULL AND e.reversed_by IS NULL
+                    AND e.posted_at IS NOT NULL AND (e.reversed_by IS NULL OR e.source_type = 'other_item')
                     AND (a.account_code LIKE '5%' OR a.account_code LIKE '6%')
                   ORDER BY l.id
                   LOCK IN SHARE MODE"

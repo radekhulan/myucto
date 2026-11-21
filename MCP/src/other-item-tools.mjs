@@ -29,6 +29,10 @@ const schema = (properties = {}, required = []) => ({
 });
 
 const BASE = '/accounting/other-items';
+const TITLE_TEMPLATE = 'Šablona názvu budoucích dokladů se zástupnými znaky opakované faktury: {YYYY} {YY} {M} {MM} '
+  + '{MMMM} (český název měsíce) {Q} {D} {DD} {DATE} {BOM} {EOM}, s posunem např. {MM+1} nebo {YYYY+1M}. '
+  + 'Dosazují se podle data vzniku dokladu. Neznámý znak server odmítne. Prázdné nebo null = název vzorového dokladu.';
+const TITLE_SYNC = 'Srovnat měsíc a rok ve tvaru 03/2027 nebo 2027-03 v názvu s datem vzniku dokladu (jako u opakované faktury).';
 const NO_POSTING = 'Nic se nezaúčtuje: potvrzení a zaúčtování provede účetní ve webovém rozhraní.';
 const KINDS = ['other', 'rent', 'loan', 'deposit', 'insurance', 'fee', 'claim'];
 const ACTIVE = ['draft', 'confirmed', 'posted'];
@@ -86,6 +90,9 @@ const ITEM_INPUT = {
   issued_on: date('Datum vzniku pohledávky nebo závazku (YYYY-MM-DD).'),
   accounting_on: nullable(date('Datum účetního případu; bez zadání stejné jako datum vzniku.')),
   due_on: date('Splatnost (YYYY-MM-DD).'),
+  accrual_from: nullable(date('Časové rozlišení od (YYYY-MM-DD), spolu s accrual_to. Jen v podvojném účetnictví; uzávěrka odloží '
+    + 'část výsledku za koncem roku: výnos pohledávky na 384, náklad závazku na 381. Změna strany uložené období zahodí, pokud ho nezadáte výslovně; období zadané spolu se změnou strany (i shodné s uloženým) patří nové straně. Null = bez rozlišení.')),
+  accrual_to: nullable(date('Časové rozlišení do (YYYY-MM-DD), nejdříve v den accrual_from.')),
   amount: num('Celková částka v Kč na haléře. Agenda je jen v CZK.', { exclusiveMinimum: 0 }),
   variable_symbol: nullable(str('Variabilní symbol, jen číslice.', { pattern: '^[0-9]{1,20}$' })),
   counterparty_account: nullable(str('Účet protistrany pro párování úhrad: český účet ve tvaru '
@@ -106,7 +113,7 @@ const ITEM_INPUT = {
 /** Pole hlavičky, která PUT přepisuje vždy celá. Kontace se skládá zvlášť. */
 const HEAD_KEYS = [
   'side', 'kind', 'kind_id', 'title', 'partner_id', 'partner_name', 'issued_on', 'accounting_on',
-  'due_on', 'amount', 'variable_symbol', 'counterparty_account', 'counterparty_bank_code', 'account_code', 'note',
+  'due_on', 'accrual_from', 'accrual_to', 'amount', 'variable_symbol', 'counterparty_account', 'counterparty_bank_code', 'account_code', 'note',
 ];
 const ITEM_KEYS = [...HEAD_KEYS, 'counter_account_code', 'posting_lines', 'posting_overrides'];
 
@@ -177,6 +184,16 @@ function updateBody(current, a) {
   if (a.kind !== undefined && a.kind !== 'other' && a.kind_id === undefined) body.kind_id = null;
   // Nový účet nese kód banky za lomítkem nebo je to IBAN; uložený kód by mu odporoval (shodně se serverem).
   if (a.counterparty_account !== undefined && a.counterparty_bank_code === undefined) body.counterparty_bank_code = null;
+  // Období je u pohledávky výnos, u závazku náklad: změna strany uložené období zahodí (shodně se serverem).
+  if (a.side !== undefined && a.side !== current?.side && (current?.accrual_from || current?.accrual_to)
+    && a.accrual_from === undefined && a.accrual_to === undefined) {
+    body.accrual_from = null;
+    body.accrual_to = null;
+  }
+  // Období zadané výslovně spolu se změnou strany patří nové straně, i když se shoduje s uloženým.
+  if (a.side !== undefined && a.side !== current?.side && (a.accrual_from !== undefined || a.accrual_to !== undefined)) {
+    body.accrual_side = a.side;
+  }
   if (a.issued_on !== undefined && a.accounting_on === undefined
     && current?.accounting_on && current.accounting_on === current.issued_on) {
     body.accounting_on = a.issued_on;
@@ -296,9 +313,11 @@ export const OTHER_ITEM_TOOLS = [
   read('list_other_items', 'Ostatní pohledávky a závazky',
     'Ruční ostatní pohledávky a závazky (nájem, půjčky, úvěry, kauce, pojistné, poplatky) se stavem a zbývající '
     + 'částkou, k tomu odděleně převzaté předpisy ze mzdového a daňového modulu (`sources`, jen ke čtení). '
-    + 'Bez filtru data vrací splatnosti od roku zpět do roku dopředu.', {
+    + 'Bez filtru data vrací ruční položky i předpisy se splatností od roku zpět do roku dopředu (i pro `totals`); ruční položky ve stavu open bez dolní meze. První stránka nese `totals`: zbývá uhradit za celý '
+    + 'výběr ručních položek po straně a měně (jen potvrzené a zaúčtované, přeplatek = 0). S právem číst dokumenty '
+    + 'nese každá ruční položka `document_count` (počet připojených dokumentů).', {
       side: str('Strana.', { enum: ['receivable', 'payable'] }),
-      status: str('Stav: open = neuhrazené aktivní, all = vše.', {
+      status: str('Stav: open = neuhrazené aktivní (zbývá jistina, nebo úrok či poplatek rozdělené splátky), all = vše.', {
         enum: ['open', 'all', 'draft', 'confirmed', 'posted', 'reversed', 'cancelled'],
       }),
       kind: str('Vestavěný druh dokladu (položky bez vlastního druhu).', { enum: KINDS }),
@@ -318,10 +337,13 @@ export const OTHER_ITEM_TOOLS = [
   read('get_other_item', 'Detail ostatní pohledávky nebo závazku',
     'Detail dokladu včetně kontace (`posting_lines`), stavu, uhrazené a zbývající částky. `posting_rules` ukazuje '
     + 'účinnou kontaci vzniku a úhrad s původem (item = vlastní, kind = účetní profil druhu, default = výchozí), '
-    + '`posting_overrides` vlastní kontaci úhrad.',
+    + '`posting_overrides` vlastní kontaci úhrad. `occurrence` u dokladu vytvořeného opakováním uvádí rozvrh, '
+    + 'zdrojovou položku a kdo rozvrh založil; po zrušení opakování zůstane se zdrojem a `schedule_id` null.',
     { id: id('ID dokladu.') }, (a) => `${BASE}/${seg(a.id)}`, () => null, ['id']),
   read('list_other_item_allocations', 'Úhrady ostatní položky',
-    'Spárované bankovní a pokladní úhrady dokladu. Párování se dělá ve webovém rozhraní.',
+    'Spárované bankovní a pokladní úhrady dokladu s odkazem na výpis (`bank_statement_id`), číslem pokladního '
+    + 'dokladu (`cash_doc_number`) a živým zaúčtovaným zápisem platby (`journal_entry_id`, jen s právem číst '
+    + 'účetnictví). Párování se dělá ve webovém rozhraní.',
     { id: id('ID dokladu.') }, (a) => `${BASE}/${seg(a.id)}/allocations`, () => null, ['id']),
   read('other_item_payment_candidates', 'Kandidáti úhrady ostatní položky',
     'Volné bankovní a pokladní platby v Kč, které by mohly doklad uhradit. Jen k přehledu, nic nepáruje. '
@@ -342,10 +364,13 @@ export const OTHER_ITEM_TOOLS = [
     + '(`posting_suggestion`). Nastavení druhů a profilů se mění ve webovém rozhraní.',
     {}, () => `${BASE}/kinds`),
   read('list_other_item_schedules', 'Opakování ostatních položek',
-    'Rozvrhy opakování (měsíčně, čtvrtletně, ročně) se šablonou, stavem a příznakem automatického účtování.',
-    {}, () => `${BASE}/schedules`),
+    'Rozvrhy opakování (měsíčně, čtvrtletně, ročně) se šablonou, stavem a příznakem automatického účtování, '
+    + 'datem příští položky (`next_on`), číslem zdrojové položky a kdo rozvrh založil (`created_by_name`). '
+    + '`source_item_id` vrátí jen rozvrh dané zdrojové položky.',
+    { source_item_id: id('ID zdrojové položky; bez něj všechny rozvrhy firmy.') }, () => `${BASE}/schedules`,
+    (a) => (a.source_item_id !== undefined ? { source_item_id: a.source_item_id } : null)),
   read('get_other_item_schedule', 'Detail opakování ostatní položky',
-    'Rozvrh opakování včetně všech vygenerovaných dokladů a jejich stavu.',
+    'Rozvrh opakování včetně všech vygenerovaných dokladů (číslo, datum, stav) a data příští položky (`next_on`).',
     { id: id('ID rozvrhu.') }, (a) => `${BASE}/schedules/${seg(a.id)}`, () => null, ['id']),
   read('get_other_item_installments', 'Splátkový kalendář ostatní položky',
     'Termíny a částky splátek dokladu. Prázdný seznam znamená, že doklad kalendář nemá.',
@@ -575,12 +600,37 @@ export const OTHER_ITEM_TOOLS = [
       item_id: id('ID vzorového dokladu (koncept, potvrzený nebo zaúčtovaný).'),
       frequency: str('Četnost.', { enum: ['monthly', 'quarterly', 'yearly'] }),
       ends_on: date('Poslední možné datum vzniku dokladu; bez zadání bez konce.'),
+      title_template: nullable(str(TITLE_TEMPLATE, { maxLength: 255 })),
+      title_sync_period: { type: 'boolean', description: TITLE_SYNC },
     }, ['item_id', 'frequency']),
     write: true,
     run: (c, a, tool) => c.post(`${BASE}/${seg(a.item_id)}/schedule`, {
       frequency: a.frequency,
       ...(a.ends_on !== undefined ? { ends_on: a.ends_on } : {}),
+      ...(a.title_template !== undefined ? { title_template: a.title_template } : {}),
+      ...(a.title_sync_period !== undefined ? { title_sync_period: a.title_sync_period } : {}),
       auto_post: false,
+    }, tool),
+  },
+  {
+    name: 'set_other_item_schedule_title',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
+    title: 'Nastavit název dokladů opakování',
+    description:
+      'Nastaví šablonu názvu dokladů, které opakování ostatní položky vytvoří od teď. Už vytvořené doklady se '
+      + 'nepřejmenují. Vynechané pole zachová uloženou hodnotu (server); šablonu zrušíte hodnotou null. U opakování '
+      + `s automatickým účtováním název mění jen účetní ve webovém rozhraní. ${NO_POSTING}`,
+    inputSchema: schema({
+      id: id('ID rozvrhu opakování.'),
+      title_template: nullable(str(TITLE_TEMPLATE, { maxLength: 255 })),
+      title_sync_period: { type: 'boolean', description: TITLE_SYNC },
+    }, ['id']),
+    write: true,
+    // Vynechané pole server zachová, proto se posílají jen zadaná.
+    run: (c, a, tool) => c.put(`${BASE}/schedules/${seg(a.id)}/title`, {
+      ...(a.title_template !== undefined ? { title_template: a.title_template } : {}),
+      ...(a.title_sync_period !== undefined ? { title_sync_period: a.title_sync_period } : {}),
     }, tool),
   },
   {

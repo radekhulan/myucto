@@ -163,7 +163,7 @@ final class JournalLinkServiceTest extends BankPostingTestCase
         foreach ([$linkedInvoice, $linkedBank, $lonelyInvoice, $lonelyBank, $closing] as $id) {
             $page[] = $this->journal->find($id, $this->supplierId);
         }
-        $map = $this->links->hasRelatedMap($this->supplierId, $page);
+        $map = $this->links->hasRelatedMap($this->supplierId, $page, \MyInvoice\Service\Accounting\JournalRelatedAccess::all());
 
         foreach ($page as $entry) {
             $entryId  = (int) $entry['id'];
@@ -192,7 +192,7 @@ final class JournalLinkServiceTest extends BankPostingTestCase
         ] as [$type, $sourceId]) {
             $related = $this->links->related($this->supplierId, [
                 'id' => 0, 'source_type' => $type, 'source_id' => $sourceId,
-            ]);
+            ], \MyInvoice\Service\Accounting\JournalRelatedAccess::all());
             self::assertSame([], $related['items'], "{$type}/{$sourceId} nesmí mít protějšky.");
         }
     }
@@ -207,7 +207,7 @@ final class JournalLinkServiceTest extends BankPostingTestCase
 
         $related = $this->links->related($this->supplierId + 99999, [
             'id' => 0, 'source_type' => 'invoice', 'source_id' => $invoiceId,
-        ]);
+        ], \MyInvoice\Service\Accounting\JournalRelatedAccess::all());
         self::assertSame([], $related['items'], 'Vazby cizího tenanta nesmí prosáknout.');
     }
 
@@ -275,7 +275,7 @@ final class JournalLinkServiceTest extends BankPostingTestCase
         }
 
         $page = array_map(fn (int $id): array => $this->journal->find($id, $this->supplierId), [$bankEntry, $ddkpEntry, $finalEntry]);
-        $map = $this->links->hasRelatedMap($this->supplierId, $page);
+        $map = $this->links->hasRelatedMap($this->supplierId, $page, \MyInvoice\Service\Accounting\JournalRelatedAccess::all());
         foreach ([$bankEntry, $ddkpEntry, $finalEntry] as $id) {
             self::assertArrayHasKey($id, $map, "Odznak u zápisu #{$id} chybí, panel přitom vazbu má.");
         }
@@ -319,7 +319,7 @@ final class JournalLinkServiceTest extends BankPostingTestCase
         }
 
         $page = array_map(fn (int $id): array => $this->journal->find($id, $this->supplierId), [$ddkpEntry, $finalEntry]);
-        $map = $this->links->hasRelatedMap($this->supplierId, $page);
+        $map = $this->links->hasRelatedMap($this->supplierId, $page, \MyInvoice\Service\Accounting\JournalRelatedAccess::all());
         self::assertArrayHasKey($ddkpEntry, $map);
         self::assertArrayHasKey($finalEntry, $map);
     }
@@ -331,7 +331,7 @@ final class JournalLinkServiceTest extends BankPostingTestCase
     {
         $entry = $this->journal->find($entryId, $this->supplierId);
         self::assertIsArray($entry, "Zápis #{$entryId} nenalezen.");
-        return $this->links->related($this->supplierId, $entry);
+        return $this->links->related($this->supplierId, $entry, \MyInvoice\Service\Accounting\JournalRelatedAccess::all());
     }
 
     /** payment_matches pro VYDANOU fakturu (base třída umí jen přijatou). */

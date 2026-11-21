@@ -218,6 +218,44 @@ final class OtherItemLoanComponentsTest extends TestCase
         }
     }
 
+    public function testListAndDetailShareStateOfLoanPaidByInstallments(): void
+    {
+        $item = $this->loanWithSchedule();
+        $same = function (string $step) use ($item): void {
+            $detail = $this->items->get($this->supplierId, $item);
+            $row = array_values(array_filter($this->items->list($this->supplierId, ['status' => 'all'], 1, 500)['items'],
+                static fn (array $r): bool => (int) $r['id'] === $item))[0];
+            // Výpis i detail odvozují stav (otherItemDisplayStatus) ze stejných polí.
+            self::assertSame((string) $detail['status'], (string) $row['status'], $step);
+            foreach (['paid_amount', 'remaining_amount'] as $field) {
+                self::assertEqualsWithDelta((float) $detail[$field], (float) $row[$field], 0.001, $step . ': ' . $field);
+            }
+            // Stav (otherItemDisplayStatus) se řídí zbývající platbou včetně úroku a poplatku; výpis ji nese stejně jako detail.
+            self::assertEqualsWithDelta((float) $detail['remaining_payment'], (float) $row['remaining_payment'], 0.001, $step . ': remaining_payment');
+            self::assertSame($detail['has_split_installments'], $row['has_split_installments'], $step);
+        };
+        $same('bez úhrady');
+        $this->bankMatch->match($this->supplierId, $this->transaction(-110), $item, null, [], true);
+        $same('jen úrok a poplatek');
+        self::assertEqualsWithDelta(0.0, (float) $this->items->get($this->supplierId, $item)['paid_amount'], 0.001);
+        $this->bankMatch->match($this->supplierId, $this->transaction(-5040), $item, null, [], true);
+        $same('jistina první splátky');
+        $this->pdo->prepare('UPDATE other_items SET settled_outside_amount = 5000 WHERE id = ?')->execute([$item]);
+        $same('zbytek jistiny uhrazen mimo aplikaci');
+        // Jistina je vyrovnaná, úrok další splátky ale zbývá: výpis ani detail nesmí hlásit Uhrazeno.
+        $detail = $this->items->get($this->supplierId, $item);
+        self::assertEqualsWithDelta(0.0, (float) $detail['remaining_amount'], 0.001);
+        self::assertEqualsWithDelta(40.0, (float) $detail['remaining_payment'], 0.001);
+        // Výběr Otevřené se řídí zbývající platbou jako stav: zbývající úrok položku ve výběru drží.
+        $open = $this->items->list($this->supplierId, ['status' => 'open'], 1, 500)['items'];
+        self::assertContains($item, array_map(static fn (array $r): int => (int) $r['id'], $open));
+        // Doplacený úrok a poplatek (úhrada 40 Kč) ji z výběru Otevřené vyřadí.
+        $this->bankMatch->match($this->supplierId, $this->transaction(-40), $item, null, [], true);
+        $same('doplacen úrok');
+        $open = $this->items->list($this->supplierId, ['status' => 'open'], 1, 500)['items'];
+        self::assertNotContains($item, array_map(static fn (array $r): int => (int) $r['id'], $open));
+    }
+
     public function testAlreadyPostedPaymentMustMatchSplitAndOverpaymentIsRejected(): void
     {
         $item = $this->loanWithSchedule();

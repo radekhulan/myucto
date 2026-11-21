@@ -19,6 +19,11 @@ const props = defineProps<{
   item: OtherItem
   accounts: ChartAccount[]
   canWrite: boolean
+  /**
+   * Vznik zaúčtované položky ukázat i tady: role bez práva číst účetnictví sekci Zaúčtování
+   * (zápis z deníku) nevidí, a přeúčtovat smí podle `accounting.journal.post`.
+   */
+  showPostedOrigin?: boolean
   canRepost?: boolean
 }>()
 const emit = defineEmits<{ (e: 'changed', item: OtherItem): void; (e: 'repost'): void }>()
@@ -37,7 +42,10 @@ const events = computed<OtherItemPostingEvent[]>(() => [
   'payment_bank', 'payment_cash',
   ...(showComponents.value ? ['interest' as const, 'fee' as const] : []),
 ])
-const showPosted = computed(() => ['confirmed', 'posted'].includes(String(props.item.status)))
+// Zaúčtovaný vznik i s přeúčtováním ukazuje sekce Zaúčtování z deníku. Tady zůstává u položky
+// bez vlastního zápisu (ze zůstatku), jejíž předpis je v jiném zápisu, a pro roli bez té sekce.
+const showPosted = computed(() => ['confirmed', 'posted'].includes(String(props.item.status))
+  && (!props.item.journal_entry_id || props.showPostedOrigin === true))
 /** Vznik tak, jak je v položce: účet položky a protiúčet nebo rozpad na protiřádky. */
 const postedOrigin = computed(() => {
   const receivable = props.item.side === 'receivable'
@@ -97,8 +105,8 @@ async function save(event: OtherItemOverrideEvent, reset = false) {
 </script>
 
 <template>
-  <section class="mt-4 rounded-lg border border-neutral-200 bg-surface p-4" data-test="other-item-posting-rules">
-    <h2 class="font-semibold">{{ t('other_items.posting.title') }}</h2>
+  <section class="rounded-lg border border-neutral-200 bg-surface p-5 shadow-sm" data-test="other-item-posting-rules">
+    <h3 class="text-sm font-medium text-neutral-700">{{ t('other_items.posting.title') }}</h3>
     <p class="mt-1 text-sm text-neutral-500">{{ t('other_items.posting.hint') }}</p>
     <div v-if="showPosted" class="mt-3 border-b border-neutral-100 pb-3" data-test="posted-origin">
       <div class="flex flex-wrap items-start justify-between gap-3">
@@ -112,11 +120,10 @@ async function save(event: OtherItemOverrideEvent, reset = false) {
             </li>
             <li v-if="postedOrigin.counters.length === 0" class="text-warning-700">{{ t('other_items.posting.missing_counter') }}</li>
           </ul>
-          <p class="mt-1 text-xs text-neutral-500">{{ t('other_items.posting.repost_hint') }}</p>
         </div>
         <button v-if="canRepost" type="button" :disabled="Number(item.paid_amount) > 0" :title="Number(item.paid_amount) > 0 ? t('other_items.repost_paid') : undefined"
                 :class="[btnOutlineSm('warning'), 'whitespace-nowrap']" data-test="posting-repost" @click="emit('repost')">
-          <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.edit" /></svg>
+          <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.edit" /></svg>
           {{ t('other_items.repost') }}
         </button>
       </div>
@@ -152,11 +159,11 @@ async function save(event: OtherItemOverrideEvent, reset = false) {
           </div>
           <div v-if="canWrite && active && event !== 'origin' && editing !== event" class="flex flex-wrap gap-1">
             <button type="button" :disabled="saving" :class="[btnOutlineSm('primary'), 'whitespace-nowrap']" data-test="posting-own" @click="startEdit(event as OtherItemOverrideEvent)">
-              <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.edit" /></svg>
+              <svg class="h-3.5 w-3.5" fill="none" aria-hidden="true" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.edit" /></svg>
               {{ t('other_items.posting.set_own') }}
             </button>
             <button v-if="rule(event)!.source === 'item'" type="button" :disabled="saving" :class="[btnOutlineSm('warning'), 'whitespace-nowrap']" data-test="posting-reset" @click="save(event as OtherItemOverrideEvent, true)">
-              <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.uturn" /></svg>
+              <svg class="h-3.5 w-3.5" fill="none" aria-hidden="true" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.uturn" /></svg>
               {{ t('other_items.posting.reset') }}
             </button>
           </div>
@@ -172,11 +179,11 @@ async function save(event: OtherItemOverrideEvent, reset = false) {
           </label>
           <div class="flex flex-wrap gap-2 sm:col-span-2">
             <button type="submit" :disabled="saving" :class="[btnFilledSm('primary'), 'whitespace-nowrap']">
-              <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.check" /></svg>
+              <svg class="h-3.5 w-3.5" fill="none" aria-hidden="true" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.check" /></svg>
               {{ t('common.save') }}
             </button>
             <button type="button" :class="[btnOutlineSm('neutral'), 'whitespace-nowrap']" @click="editing = null">
-              <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.x" /></svg>
+              <svg class="h-3.5 w-3.5" fill="none" aria-hidden="true" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.x" /></svg>
               {{ t('common.cancel') }}
             </button>
           </div>

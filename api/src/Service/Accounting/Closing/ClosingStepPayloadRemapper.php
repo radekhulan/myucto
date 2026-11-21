@@ -29,8 +29,9 @@ use UnexpectedValueException;
  *   důvodu zůstává beze změny důkaz přenosu § 504 (`carry`), který váže verzi zápisu,
  *   otisk podkladu a id řádků, i rozhodnutí o rozdělení výsledku (`result_decision`). Takový
  *   důkaz po převodu neprokáže shodu se zápisem nové firmy, stejně jako bez přemapování.
- * - Rozpad odkladů Časového rozlišení (`*_accrual.items`, `item_costs`) se čte jen u období se
- *   zápisem odkladu a převod takové zápisy nepřijímá, proto zůstává beze změny.
+ * - Rozpad odkladů Časového rozlišení (`*_accrual.items` s řádky faktur i ostatních pohledávek
+ *   a závazků, `item_costs`) se čte jen u období se zápisem odkladu a převod takové zápisy
+ *   nepřijímá, proto zůstává beze změny (drží to MyuctoImportTest::testClosingDeferralEntryIsRejectedBeforeAnyWrite).
  * - Ostatní kroky se nemění.
  */
 final class ClosingStepPayloadRemapper

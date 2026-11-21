@@ -159,6 +159,15 @@
     "dismiss": "Nepoužívat"
   },
   "other_items": {
+    "edit_locked": {
+      "posted": "Zaúčtovanou položku nejde upravit. Chybné účty opraví přeúčtování, ostatní údaje storno a nová položka.",
+      "confirmed": "Potvrzenou položku nejde upravit. Údaje opraví zrušení a nová položka.",
+      "reversed": "Stornovanou položku nejde upravit.",
+      "cancelled": "Zrušenou položku nejde upravit."
+    },
+    "error": {
+      "invalid_source_item": "Neplatné id položky."
+    },
     "documents_settings": {
       "title": "Složka dokumentů",
       "hint": "Soubory nahrané k ostatní pohledávce nebo závazku se uloží do této složky v Dokumentech. {'{'}YYYY{'}'} a {'{'}MM{'}'} se nahradí rokem a měsícem data vystavení.",
@@ -206,7 +215,6 @@
       "suggested_for_kind": "Navržené účty pro druh {kind}: MD {debit} / D {credit}",
       "suggestion_use": "Použít",
       "suggestion_save": "Uložit jako výchozí pro druh",
-      "repost_hint": "Účet položky se mění přeúčtováním vzniku, úhrady ho pak následují.",
       "inherited_note": "Prázdný účet položky a protiúčet doplní při zaúčtování účetní profil druhu.",
       "kinds": {
         "button": "Účtování",
@@ -237,7 +245,7 @@
     "sources_section": "Položky z jiných modulů",
     "sources_hint": "Mzdy a daně se upravují ve svém zdrojovém modulu.",
     "not_found": "Položka nebyla nalezena.",
-    "form_hint": "Dokumenty připojíte po uložení položky v jejím detailu.",
+    "form_hint": "Dokumenty můžete připojit hned, uloží se spolu s položkou.",
     "side_label": "Směr",
     "side": {
       "receivable": "Pohledávka",
@@ -254,7 +262,8 @@
       "partial": "Částečně uhrazeno",
       "forecast": "Odhad",
       "open": "Otevřeno",
-      "overdue": "Po splatnosti"
+      "overdue": "Po splatnosti",
+      "overpaid": "Přeplaceno"
     },
     "source_label": "Zdroj",
     "search": "Hledat název, protistranu, číslo nebo VS",
@@ -394,8 +403,6 @@
       "installment_due": "U splatnosti",
       "remaining_amount": "Celý zbytek"
     },
-    "documents": "dokumentů",
-    "forecast": "Odhad",
     "result_impact_title": "Ostatní položky ve výsledku hospodaření",
     "result_impact_hint": "Součet za aktuální rok podle výnosového nebo nákladového protiúčtu. Zahrnuje zaúčtované položky a označené koncepty; rozvahové položky se nezapočítají.",
     "result_revenue": "Výnosy z ostatních položek",
@@ -404,7 +411,6 @@
     "result_posted": "Zaúčtováno",
     "result_draft": "Koncepty",
     "open_journal": "Otevřít účetní zápis",
-    "journal_context": "Poznámky a přílohy účetního zápisu",
     "journal_documents": "Přílohy účetního zápisu",
     "repost": "Přeúčtovat",
     "repost_hint": "Původní zápis se stornuje a nový vznikne k vybranému dni. Datum musí být v otevřeném období.",
@@ -432,10 +438,11 @@
     "confirmed": "Položka byla potvrzena.",
     "reversed": "Položka byla stornována.",
     "cancelled": "Položka byla zrušena.",
-    "validation_required": "Vyplňte název, druh, data a kladnou částku.",
-    "previous": "Předchozí",
-    "next": "Další",
     "plans": {
+      "edit_schedule": "Upravit opakování",
+      "edit_installments": "Upravit splátky",
+      "schedule_fixed_hint": "Frekvenci a konec opakování nejde změnit. Pro jiné nastavení opakování zrušte a založte nové; už vytvořené položky zůstanou.",
+      "group": "Plány",
       "schedule_title": "Opakování položky",
       "schedule_hint": "Denní úloha vytváří položky až 90 dní dopředu; můžete je vytvořit i ručně. Podklady ze zdrojové položky se připojí ke každé položce.",
       "auto_post": "Automaticky účtovat vzniklé položky",
@@ -446,18 +453,81 @@
       "monthly": "Měsíčně",
       "quarterly": "Čtvrtletně",
       "yearly": "Ročně",
-      "ends_on": "Konec opakování:",
       "active": "Aktivní",
       "paused": "Pozastaveno",
       "source_inactive": "Zdrojová položka byla stornována. Opakování skončilo; již vytvořené koncepty zůstávají v seznamu.",
       "create_schedule": "Nastavit opakování",
+      "title_template": "Šablona názvu položek",
+      "title_template_placeholder": "např. Nájem {'{MM}'}/{'{YYYY}'}",
+      "title_template_hint": "Prázdné = každá položka dostane název této položky. Zástupné znaky se dosadí podle data vzniku položky.",
+      "title_sync_period": "Srovnat období v názvu (např. 03/2027) s datem položky",
+      "title_preview": "Název další vytvořené položky ({date}):",
+      "title_preview_loading": "Počítám náhled…",
+      "title_help_toggle": "Zástupné znaky ({'{YYYY}'}, {'{MM}'}, {'{Q}'}…)",
+      "title_help_intro": "Stejné znaky jako u opakované faktury. Neznámý znak se odmítne. Příklady pro položku vzniklou 15. 5. 2026:",
+      "title_help_rows": [
+        {
+          "c": "{'{YYYY}'}, {'{YY}'}",
+          "d": "rok → 2026, 26 · posun po letech: {'{YYYY+1}'} → 2027 · rok posunutého měsíce: {'{YYYY+8M}'} → 2027"
+        },
+        {
+          "c": "{'{M}'}, {'{MM}'}",
+          "d": "měsíc → 5, 05 · posun po měsících vč. přelomu roku: {'{MM+8}'} → 01"
+        },
+        {
+          "c": "{'{MMMM}'}",
+          "d": "název měsíce → květen · {'{MMMM+1}'} → červen"
+        },
+        {
+          "c": "{'{Q}'}",
+          "d": "čtvrtletí → 2 · {'{Q+1}'} → 3"
+        },
+        {
+          "c": "{'{D}'}, {'{DD}'}",
+          "d": "den → 15, 15 · posun po dnech: {'{D+14}'} → 29"
+        },
+        {
+          "c": "{'{DATE}'}",
+          "d": "celé datum → 15. 5. 2026 · posun ±D/M/Y: {'{DATE+1Y-1D}'} → 14. 5. 2027"
+        },
+        {
+          "c": "{'{BOM}'}, {'{EOM}'}",
+          "d": "první a poslední den měsíce → 1. 5. 2026, 31. 5. 2026 · {'{EOM+1}'} → 30. 6. 2026"
+        }
+      ],
+      "title_help_example": "Příklad: „Nájem {'{MM}'}/{'{YYYY}'}“ → „Nájem 05/2026“, „Pojistné Q{'{Q}'}/{'{YYYY}'}“ → „Pojistné Q2/2026“. Nájem placený na příští měsíc: „Nájem {'{MM+1}'}/{'{YYYY+1M}'}“.",
+      "next_title": "Název další vytvořené položky",
+      "edit_title": "Upravit název",
+      "edit_title_hint": "Změna platí pro položky vytvořené po uložení. Už vytvořené položky si nechají svůj název.",
+      "save_title": "Uložit název",
+      "edit_title_created_until": "Položky do {date} už vznikly (denní úloha je chystá až 90 dní dopředu) a nová šablona je nepřejmenuje. Koncepty můžete přejmenovat ručně v detailu položky, potvrzené a zaúčtované zůstanou beze změny. Smazaná položka se znovu nevytvoří.",
+      "title_errors": {
+        "invalid_due_offset": "Splatnost zdrojové položky musí být nejvýše deset let od vystavení.",
+        "schedule_source_unconfirmed": "Před automatickým účtováním potvrďte zdrojovou položku.",
+        "forbidden": "Pro tuto akci nemáte oprávnění.",
+        "schedule_not_found": "Rozvrh nebyl nalezen.",
+        "invalid_end": "Konec opakování předchází prvnímu dokladu.",
+        "invalid_date": "Zadejte platné datum konce.",
+        "not_found": "Položka nebyla nalezena.",
+        "invalid_title_template": "Šablona názvu musí být text.",
+        "title_template_too_long": "Šablona názvu může mít nejvýše 255 znaků.",
+        "unknown_title_placeholder": "Šablona obsahuje neznámý zástupný znak {tokens}. Seznam znaků najdete v nápovědě níže.",
+        "occurrence_title_too_long": "Název některé z příštích položek by po dosazení přesáhl 255 znaků.",
+        "invalid_title_sync_period": "Volba srovnání období musí být zapnutá nebo vypnutá.",
+        "invalid_frequency": "Vyberte měsíční, čtvrtletní nebo roční opakování.",
+        "schedule_finished": "Opakování už skončilo, další položka nevznikne.",
+        "schedule_source_inactive": "Zdrojová položka je stornovaná, další položka nevznikne.",
+        "already_scheduled": "Položka už patří do jiného opakování.",
+        "created_by_schedule": "Položka vznikla opakováním, nové opakování z ní založit nejde.",
+        "invalid_status": "Opakování lze nastavit jen u aktivní položky."
+      },
+      "title_saved": "Šablona názvu uložena.",
       "schedule_saved": "Opakování bylo nastaveno.",
       "generate_through": "Vytvořit do",
       "generate": "Vytvořit položky",
       "generated": "Vytvořeno položek: {count}.",
       "pause": "Pozastavit",
       "resume": "Obnovit",
-      "created_for": "Položka k {date}",
       "no_generated": "Další položky zatím nevznikly.",
       "installments_title": "Splátkový kalendář",
       "installments_hint": "Splátky rozkládají úhradu jednoho dokladu do cash-flow. Samotný kalendář účetní zápisy nevytváří.",
@@ -500,7 +570,16 @@
       "principal_amount": "Jistina",
       "interest_amount": "Úrok",
       "fee_amount": "Poplatek",
-      "principal_total": "Jistina celkem {amount} (částka dokladu {item})"
+      "principal_total": "Jistina celkem {amount} (částka dokladu {item})",
+      "next_on": "Další položka",
+      "ends_label": "Konec opakování",
+      "no_end": "bez konce",
+      "auto_post_short": "Automaticky účtovat",
+      "created_by": "Rozvrh založil",
+      "unknown_user": "neznámý uživatel",
+      "created_items": "Vytvořené položky",
+      "split_action": "Rozložit na splátky",
+      "load_failed": "Opakování a splátky se nepodařilo načíst."
     },
     "remaining_principal": "Zbývá jistina",
     "remaining_payment": "Zbývá zaplatit vč. úroku a poplatku",
@@ -511,6 +590,25 @@
     "edit_note": "Upravit poznámku",
     "edit_note_hint": "Poznámka je jen interní text dokladu, do zaúčtování ani saldokonta se nepromítá. Ostatní údaje zůstávají zamčené, jejich opravu řeší storno nebo přeúčtování.",
     "note_saved": "Poznámka uložena.",
+    "accrual": {
+      "label_receivable": "Časové rozlišení výnosu",
+      "label_payable": "Časové rozlišení nákladu",
+      "hint_receivable": "Období, do kterého výnos pohledávky patří (nájem, licence, předplatné). Pohledávka se zaúčtuje celá, část za koncem roku odloží uzávěrka na 384 a další rok ji rozpustí. Odkládá se jen výnos (účty třídy 6) zápisu pohledávky.",
+      "hint_payable": "Období, do kterého náklad závazku patří (nájem, pojistné, předplatné placené předem). Závazek se zaúčtuje celý, část za koncem roku odloží uzávěrka na 381 a další rok ji rozpustí. Odkládá se jen náklad (účty třídy 5) zápisu závazku.",
+      "none": "Bez rozlišení",
+      "clear": "Zrušit časové rozlišení",
+      "clear_confirm": "Zrušit časové rozlišení položky? Znovu ho půjde zadat jen u zaúčtované položky s vlastním zápisem v podvojném účetnictví.",
+      "period": "{from} – {to}",
+      "error": {
+        "period_closed": "Doklad má zápis v uzavřeném, revidovaném či schváleném účetním období, jeho časové rozlišení už je součástí uzávěrky.",
+        "accrual_deferral_posted": "Krok Časové rozlišení uzávěrky už zaúčtoval odklad. Vraťte ho v uzávěrce, změňte období a krok spusťte znovu.",
+        "accrual_period_incomplete": "Období časového rozlišení potřebuje začátek i konec.",
+        "accrual_period_invalid": "Období potřebuje platná data a začátek nejpozději v den konce.",
+        "accrual_not_posted": "Časové rozlišení jde nastavit jen u zaúčtovaného dokladu s vlastním zápisem.",
+        "is_draft": "Koncept upravte v editaci dokladu.",
+        "accrual_double_entry_only": "Časové rozlišení jde nastavit jen v podvojném účetnictví."
+      }
+    },
     "delete_posted": "Smazat i se zápisem",
     "delete_posted_title": "Smazat zaúčtovaný doklad",
     "delete_posted_intro": "Doklad {number} se smaže úplně, včetně svého zápisu v deníku. Storno ani protizápis nevznikne, z účetnictví i saldokonta zmizí.",
@@ -518,7 +616,42 @@
     "delete_posted_locked": "Doklad spadá do uzamčeného období. Před smazáním budete požádáni o vědomé potvrzení.",
     "delete_posted_done": "Doklad i jeho zápis v deníku byly smazány.",
     "delete_posted_cancelled": "Zápis v deníku byl smazán a výskyt opakování zrušen, aby ho opakování nevytvořilo znovu.",
-    "delete_posted_blocked": "Smazat nelze: {reason} Doklad můžete stornovat."
+    "delete_posted_blocked": "Smazat nelze: {reason} Doklad můžete stornovat.",
+    "document_count": "žádný dokument | 1 dokument | {count} dokumenty | {count} dokumentů",
+    "totals_by_side": {
+      "receivable": "Pohledávky zbývá",
+      "payable": "Závazky zbývá"
+    },
+    "window_hint": "Bez zadaného data jsou vidět položky se splatností rok zpět až rok dopředu; ručně zadanou položku najde hledání i mimo toto rozmezí.",
+    "window_hint_open": "Bez zadaného data jsou vidět neuhrazené ručně zadané položky bez ohledu na stáří a předpisy z mezd a daní od roku zpět, vše se splatností nejvýš rok dopředu; ručně zadanou položku najde hledání i mimo toto rozmezí.",
+    "totals_scope": "(bez rozpracovaných)",
+    "totals_hint": "Zbývá uhradit u ručně zadaných položek za celý výběr (všechny stránky, ve zvoleném rozmezí splatnosti) jako saldo jistiny: úrok a poplatek splátek úvěru se nepočítají. Počítá jen potvrzené a zaúčtované položky, ne rozpracované, storna, přeplatky ani položky z mezd a daní.",
+    "empty_title": "Zatím žádná ostatní pohledávka ani závazek",
+    "empty_hint": "Zapište sem nájem, kauci, půjčku, pojistné plnění a další pohledávky či závazky mimo faktury.",
+    "load_failed_stale": "Seznam se nepodařilo obnovit, zobrazená data mohou být zastaralá.",
+    "post_preview": "Zaúčtuje se",
+    "no_payment_candidates": "Žádná volná platba k přiřazení.",
+    "no_payment_candidates_search": "Hledání neodpovídá žádná volná platba.",
+    "save_hotkey": "Uložit (Ctrl+S)",
+    "side_change_confirm": "Změna strany vymaže druh, účty, rozpad na protiúčty a období časového rozlišení. Pokračovat?",
+    "errors": {
+      "required": "Vyplňte toto pole.",
+      "amount_positive": "Zadejte kladnou částku.",
+      "form_invalid": "Položku nejde uložit, opravte zvýrazněná pole.",
+      "variable_symbol_digits": "Variabilní symbol smí obsahovat jen číslice."
+    },
+    "summary_count": "žádná ručně zadaná položka | 1 ručně zadaná položka | {count} ručně zadané položky | {count} ručně zadaných položek",
+    "col_documents": "Dokumenty",
+    "col_posting": "Zápis",
+    "back_to_list": "← Zpět na seznam",
+    "phone_details": "Podrobnosti",
+    "occurrence": {
+      "label": "Vytvořeno opakováním",
+      "source": "ze zdrojové položky",
+      "created_by": "rozvrh založil {name} {date}",
+      "index": "{index}. opakování",
+      "cancelled": "opakování bylo zrušeno"
+    }
   },
   "internal_documents": {
     "title": "Interní doklady",
@@ -19295,6 +19428,7 @@
         "allocated": "na doklad",
         "not_posted": "Nezaúčtováno",
         "advance_not_postable": "Zálohová faktura – neúčtuje se",
+        "posted_by_this_entry": "Zaúčtováno tímto zápisem",
         "preview": "Náhled",
         "open_entry": "Zápis",
         "open_document": "Otevřít doklad",
@@ -22253,14 +22387,14 @@
       },
       "prepaid_expense": {
         "title": "Časové rozlišení nákladů příštích období (381)",
-        "hint": "Z řádků přijatých faktur označených obdobím od–do, jejichž náklad přesahuje konec roku (pojistné, parkovné, předplatné). Systém spočítá poměrně dle dnů část patřící do příštích období a odloží ji na 381 (MD 381 / D nákladový účet). V N+1 se rozpustí automaticky.",
+        "hint": "Z řádků přijatých faktur a ostatních závazků označených obdobím od–do, jejichž náklad přesahuje konec roku (pojistné, parkovné, předplatné). Systém spočítá poměrně dle dnů část patřící do příštích období a odloží ji na 381 (MD 381 / D nákladový účet). V N+1 se rozpustí automaticky.",
         "reload": "Načíst návrh",
         "col_document": "Doklad",
         "col_period": "Období rozlišení",
         "col_account": "Nákladový účet",
         "col_deferred": "Odklad na 381",
         "total_deferred": "Odloženo celkem (MD 381 / D 5xx)",
-        "no_items": "V období nejsou žádné řádky faktur označené k časovému rozlišení.",
+        "no_items": "V období nejsou žádné řádky přijatých faktur ani ostatní závazky označené k časovému rozlišení.",
         "existing": "Zaúčtováno {amount}.",
         "post": "Zaúčtovat rozlišení",
         "posted": "Časové rozlišení nákladů příštích období bylo zaúčtováno.",
@@ -22268,14 +22402,14 @@
       },
       "deferred_revenue": {
         "title": "Časové rozlišení výnosů příštích období (384)",
-        "hint": "Z řádků vydaných faktur označených obdobím od–do, jejichž výnos přesahuje konec roku (roční předplatné, nájem, servisní smlouvy). Systém spočítá poměrně dle dnů část patřící do příštích období a odloží ji na 384 (MD výnosový účet / D 384). V N+1 se rozpustí automaticky.",
+        "hint": "Z řádků vydaných faktur, členských předpisů a ostatních pohledávek označených obdobím od–do, jejichž výnos přesahuje konec roku (roční předplatné, nájem, servisní smlouvy). Systém spočítá poměrně dle dnů část patřící do příštích období a odloží ji na 384 (MD výnosový účet / D 384). V N+1 se rozpustí automaticky.",
         "reload": "Načíst návrh",
-        "col_document": "Faktura",
+        "col_document": "Doklad",
         "col_period": "Období rozlišení",
         "col_account": "Výnosový účet",
         "col_deferred": "Odklad na 384",
         "total_deferred": "Odloženo celkem (MD 6xx / D 384)",
-        "no_items": "V období nejsou žádné řádky vydaných faktur označené k časovému rozlišení.",
+        "no_items": "V období nejsou žádné řádky vydaných faktur, členské předpisy ani ostatní pohledávky označené k časovému rozlišení.",
         "existing": "Zaúčtováno {amount}.",
         "post": "Zaúčtovat rozlišení výnosů",
         "posted": "Časové rozlišení výnosů příštích období bylo zaúčtováno.",

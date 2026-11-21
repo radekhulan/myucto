@@ -1223,7 +1223,10 @@
         "2317_document_item_search.sql",
         "2318_payroll_posting_code_maps.sql",
         "2319_purchase_advance_deductions_document_source.sql",
-        "2320_purchase_invoices_vendor_number_search_index.sql"
+        "2320_purchase_invoices_vendor_number_search_index.sql",
+        "2321_other_item_occurrence_origin.sql",
+        "2322_other_item_due_index.sql",
+        "2323_other_items_accrual_period.sql"
     ],
     "tables": {
         "abra_flexi_connections": {
@@ -11031,18 +11034,21 @@
                 "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
                 "item_id": "bigint(20) unsigned NOT NULL",
                 "occurrence_index": "int(10) unsigned NOT NULL",
-                "schedule_id": "bigint(20) unsigned NOT NULL",
+                "schedule_id": "bigint(20) unsigned NULL DEFAULT NULL",
+                "source_item_id": "bigint(20) unsigned NULL DEFAULT NULL",
                 "supplier_id": "int(10) unsigned NOT NULL"
             },
             "indexes": {
                 "PRIMARY": "UNIQUE BTREE (id)",
+                "idx_other_occurrence_source": "BTREE (source_item_id)",
                 "idx_other_occurrence_supplier": "BTREE (supplier_id, schedule_id)",
                 "uq_other_occurrence": "UNIQUE BTREE (schedule_id, occurrence_index)",
                 "uq_other_occurrence_item": "UNIQUE BTREE (item_id)"
             },
             "foreign_keys": {
                 "fk_other_occurrence_item": "(item_id) -> other_items (id) ON UPDATE RESTRICT ON DELETE RESTRICT",
-                "fk_other_occurrence_schedule": "(schedule_id) -> other_item_schedules (id) ON UPDATE RESTRICT ON DELETE CASCADE",
+                "fk_other_occurrence_schedule": "(schedule_id) -> other_item_schedules (id) ON UPDATE RESTRICT ON DELETE SET NULL",
+                "fk_other_occurrence_source": "(source_item_id) -> other_items (id) ON UPDATE RESTRICT ON DELETE SET NULL",
                 "fk_other_occurrence_supplier": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE CASCADE"
             },
             "checks": []
@@ -11107,6 +11113,8 @@
             "columns": {
                 "account_code": "varchar(20) NULL DEFAULT NULL",
                 "accounting_on": "date NULL DEFAULT NULL",
+                "accrual_from": "date NULL DEFAULT NULL",
+                "accrual_to": "date NULL DEFAULT NULL",
                 "amount": "decimal(14,2) NOT NULL",
                 "amount_czk": "decimal(14,2) NULL DEFAULT NULL",
                 "counter_account_code": "varchar(20) NULL DEFAULT NULL",
@@ -11146,7 +11154,9 @@
                 "fk_other_item_partner": "BTREE (partner_id)",
                 "fk_other_item_reversal": "BTREE (reversal_entry_id)",
                 "fk_other_item_updated_by": "BTREE (updated_by)",
+                "idx_other_item_accrual_to": "BTREE (supplier_id, accrual_to)",
                 "idx_other_item_counterparty": "BTREE (supplier_id, counterparty_account)",
+                "idx_other_item_due": "BTREE (supplier_id, deleted_at, due_on)",
                 "idx_other_item_kind": "BTREE (kind_id, supplier_id)",
                 "idx_other_item_open": "BTREE (supplier_id, side, status, due_on)",
                 "idx_other_item_partner": "BTREE (supplier_id, partner_id, status)",

@@ -111,16 +111,27 @@ describe('OtherItemPostingRules', () => {
     expect(plain.find('[data-test="posting-rule-interest"]').exists()).toBe(false)
   })
 
-  it('u zaúčtované položky ukáže vznik jen ke čtení a vyvolá přeúčtování', async () => {
-    const posted = { ...item('posted'), account_code: '353', counter_account_code: '602', amount: 1200, paid_amount: 0 }
-    const wrapper = factory({ item: posted, canRepost: true })
-    const origin = wrapper.get('[data-test="posted-origin"]')
+  it('vznik ukáže jen ke čtení u položky bez vlastního zápisu; zaúčtovaný nechá sekci Zaúčtování', async () => {
+    const confirmed = { ...item('confirmed'), account_code: '353', counter_account_code: '602', amount: 1200, paid_amount: 0, journal_entry_id: null }
+    const origin = factory({ item: confirmed }).get('[data-test="posted-origin"]')
     expect(origin.text()).toContain('353')
     expect(origin.text()).toContain('602')
-    await wrapper.get('[data-test="posting-repost"]').trigger('click')
-    expect(wrapper.emitted('repost')).toHaveLength(1)
 
+    const posted = { ...confirmed, status: 'posted', journal_entry_id: 91 }
+    expect(factory({ item: posted }).find('[data-test="posted-origin"]').exists()).toBe(false)
     expect(factory({ item: posted }).find('[data-test="posting-repost"]').exists()).toBe(false)
     expect(factory({ item: item('draft') }).find('[data-test="posted-origin"]').exists()).toBe(false)
+  })
+})
+
+describe('OtherItemPostingRules bez sekce Zaúčtování', () => {
+  it('pro roli bez čtení deníku ukáže vznik zaúčtované položky i přeúčtování', async () => {
+    const posted = { ...item('posted'), account_code: '353', counter_account_code: '602', amount: 1200, paid_amount: 0, journal_entry_id: 91 }
+    const wrapper = factory({ item: posted, showPostedOrigin: true, canRepost: true })
+    expect(wrapper.get('[data-test="posted-origin"]').text()).toContain('602')
+    await wrapper.get('[data-test="posting-repost"]').trigger('click')
+    expect(wrapper.emitted('repost')).toHaveLength(1)
+    expect(factory({ item: { ...posted, paid_amount: 10 }, showPostedOrigin: true, canRepost: true })
+      .get('[data-test="posting-repost"]').attributes('disabled')).toBeDefined()
   })
 })

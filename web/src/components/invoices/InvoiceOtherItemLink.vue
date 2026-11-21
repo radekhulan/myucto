@@ -83,6 +83,11 @@ function itemLabel(item: { id: number; document_no: string | null }): string {
   return item.document_no || `#${item.id}`
 }
 
+/*
+ * Stav úhrady pohledávky, která účtuje fakturu. Výpis a detail ostatních položek odvozují stav
+ * ze zbývající platby i s úrokem a poplatkem splátek (otherItemRemainingPayment). Pohledávka
+ * účtující fakturu ale úvěrové splátky nenese a server tu posílá jen jistinu, proto stačí ona.
+ */
 function paidState(item: { paid_amount: number; remaining_amount: number }): string {
   if (item.remaining_amount <= 0.005 && item.paid_amount > 0) return t('invoice.other_item_link.paid')
   if (item.paid_amount > 0) return t('invoice.other_item_link.partially_paid')

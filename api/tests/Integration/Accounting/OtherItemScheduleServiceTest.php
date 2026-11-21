@@ -179,6 +179,58 @@ final class OtherItemScheduleServiceTest extends TestCase
         self::assertSame(200, $itemAction->delete($bearer, new Response(), ['id' => (string) $draftIds[1]])->getStatusCode());
     }
 
+    public function testGeneratedItemDetailShowsSourceAndScheduleNextDate(): void
+    {
+        $userId = (int) $this->pdo->query('SELECT MIN(id) FROM users')->fetchColumn();
+        $userName = (string) $this->pdo->query('SELECT name FROM users WHERE id = ' . $userId)->fetchColumn();
+        $source = $this->items->create($this->supplierId, $this->input(), null);
+        $this->pdo->prepare("UPDATE other_items SET document_no = 'OZ-2099-0100' WHERE id = ?")->execute([(int) $source['id']]);
+        $schedule = $this->schedules->create($this->supplierId, (int) $source['id'], ['frequency' => 'monthly', 'ends_on' => '2099-04-30'], $userId);
+        $created = $this->schedules->generate($this->supplierId, (int) $schedule['id'], '2099-02-28', null);
+        $generatedId = (int) $created['created_ids'][0];
+
+        $occurrence = $this->items->get($this->supplierId, $generatedId)['occurrence'];
+        self::assertSame((int) $schedule['id'], $occurrence['schedule_id']);
+        self::assertSame(1, $occurrence['occurrence_index']);
+        self::assertSame((int) $source['id'], $occurrence['source_item_id']);
+        self::assertSame('OZ-2099-0100', $occurrence['source_document_no']);
+        self::assertSame('Syntetické nájemné', $occurrence['source_title']);
+        self::assertSame($userName, $occurrence['created_by_name']);
+        // Zdroj rozvrhu ani položka mimo rozvrh výskytem nejsou.
+        self::assertNull($this->items->get($this->supplierId, (int) $source['id'])['occurrence']);
+        $plain = $this->items->create($this->supplierId, $this->input(['title' => 'Mimo rozvrh']), null);
+        self::assertNull($this->items->get($this->supplierId, (int) $plain['id'])['occurrence']);
+
+        $listed = $this->schedules->list($this->supplierId, (int) $source['id'])[0];
+        self::assertSame('2099-03-31', $listed['next_on']);
+        self::assertSame($userName, $listed['created_by_name']);
+        self::assertSame('OZ-2099-0100', $listed['source_document_no']);
+        $detail = $this->schedules->get($this->supplierId, (int) $schedule['id']);
+        self::assertSame('2099-03-31', $detail['next_on']);
+        self::assertSame(['OZ-2099-0100', null], array_column($detail['occurrences'], 'document_no'));
+        $this->pdo->prepare("UPDATE other_items SET document_no = 'OZ-2099-0101' WHERE id = ?")->execute([$generatedId]);
+        self::assertSame('OZ-2099-0101', $this->schedules->get($this->supplierId, (int) $schedule['id'])['occurrences'][1]['document_no']);
+        // Neznámý zakladatel (smazaný uživatel, FK SET NULL): jméno null.
+        $this->pdo->prepare('UPDATE other_item_schedules SET created_by = NULL WHERE id = ?')->execute([(int) $schedule['id']]);
+        self::assertNull($this->items->get($this->supplierId, $generatedId)['occurrence']['created_by_name']);
+        self::assertNull($this->schedules->get($this->supplierId, (int) $schedule['id'])['created_by_name']);
+        $this->pdo->prepare('UPDATE other_item_schedules SET created_by = ? WHERE id = ?')->execute([$userId, (int) $schedule['id']]);
+        // Pozastavený rozvrh další termín nemá, po obnovení zase ano.
+        $this->schedules->setStatus($this->supplierId, (int) $schedule['id'], 'paused');
+        self::assertNull($this->schedules->list($this->supplierId)[0]['next_on']);
+        $this->schedules->setStatus($this->supplierId, (int) $schedule['id'], 'active');
+        self::assertSame('2099-03-31', $this->schedules->list($this->supplierId)[0]['next_on']);
+        // Stornovaný (zrušený) zdroj rozvrh pozastaví, další termín pak není.
+        $this->pdo->prepare("UPDATE other_items SET status = 'cancelled' WHERE id = ?")->execute([(int) $source['id']]);
+        $cancelled = $this->schedules->list($this->supplierId)[0];
+        self::assertSame('paused', $cancelled['status']);
+        self::assertNull($cancelled['next_on']);
+        $this->pdo->prepare("UPDATE other_items SET status = 'draft' WHERE id = ?")->execute([(int) $source['id']]);
+        // Po konci opakování také ne.
+        $this->schedules->generate($this->supplierId, (int) $schedule['id'], '2099-12-31', null);
+        self::assertNull($this->schedules->get($this->supplierId, (int) $schedule['id'])['next_on']);
+    }
+
     protected function setUp(): void
     {
         $container = Bootstrap::buildContainer();
@@ -221,6 +273,35 @@ final class OtherItemScheduleServiceTest extends TestCase
         $stmt = $this->pdo->prepare('SELECT COUNT(*) FROM other_item_schedule_occurrences WHERE supplier_id = ? AND schedule_id = ?');
         $stmt->execute([$this->supplierId, $schedule['id']]);
         self::assertSame(3, (int) $stmt->fetchColumn());
+    }
+
+    public function testListFiltersBySourceItem(): void
+    {
+        $first = $this->items->create($this->supplierId, $this->input(), null);
+        $second = $this->items->create($this->supplierId, $this->input(), null);
+        $firstSchedule = $this->schedules->create($this->supplierId, (int) $first['id'], ['frequency' => 'monthly'], null);
+        $secondSchedule = $this->schedules->create($this->supplierId, (int) $second['id'], ['frequency' => 'monthly'], null);
+
+        self::assertSame([(int) $secondSchedule['id']],
+            array_map('intval', array_column($this->schedules->list($this->supplierId, (int) $second['id']), 'id')));
+        self::assertSame([(int) $secondSchedule['id'], (int) $firstSchedule['id']],
+            array_map('intval', array_column($this->schedules->list($this->supplierId), 'id')), 'Bez filtru všechny plány firmy.');
+
+        $action = new OtherItemScheduleAction($this->schedules, $this->items);
+        $request = (new ServerRequestFactory())->createServerRequest('GET', '/')
+            ->withAttribute(SupplierScopeMiddleware::ATTR_CURRENT_ID, $this->supplierId)
+            ->withAttribute('auth.effective_role', new EffectiveRole(0, 'Test', 'staff', true, ['other_items' => 1], 'custom'));
+        $response = $action->list($request->withQueryParams(['source_item_id' => (string) $first['id']]), new Response());
+        self::assertSame(200, $response->getStatusCode());
+        $response->getBody()->rewind();
+        $body = json_decode((string) $response->getBody(), true);
+        self::assertSame([(int) $firstSchedule['id']], array_map('intval', array_column($body['data']['items'] ?? $body['items'], 'id')));
+        foreach (['0', 'abc', '-3'] as $invalid) {
+            $rejected = $action->list($request->withQueryParams(['source_item_id' => $invalid]), new Response());
+            self::assertSame(422, $rejected->getStatusCode(), $invalid);
+            $rejected->getBody()->rewind();
+            self::assertSame('other_items.error.invalid_source_item', json_decode((string) $rejected->getBody(), true)['error']['code'], $invalid);
+        }
     }
 
     public function testRecurringDraftCopiesSplitPostingLinesWithoutPosting(): void
@@ -393,12 +474,102 @@ final class OtherItemScheduleServiceTest extends TestCase
         } catch (OtherItemException $e) {
             self::assertSame('schedule_not_found', $e->errorCode);
         }
+        $this->pdo->prepare("UPDATE other_items SET document_no = 'OZ-2099-0200' WHERE id = ?")->execute([(int) $first['id']]);
         $this->schedules->delete($this->supplierId, (int) $schedule['id']);
         self::assertSame([], $this->schedules->list($this->supplierId));
-        self::assertSame('draft', $this->items->get($this->supplierId, $created[0])['status']);
-        $this->items->deleteDraft($this->supplierId, (int) $first['id']);
-        $again = $this->schedules->create($this->supplierId, $created[0], ['frequency' => 'monthly'], null);
+        $generated = $this->items->get($this->supplierId, $created[0]);
+        self::assertSame('draft', $generated['status']);
+        // Původ vytvořené položky zrušení opakování přežije, rozvrh už není.
+        self::assertNull($generated['occurrence']['schedule_id']);
+        self::assertSame(1, $generated['occurrence']['occurrence_index']);
+        self::assertSame((int) $first['id'], $generated['occurrence']['source_item_id']);
+        self::assertSame('OZ-2099-0200', $generated['occurrence']['source_document_no']);
+        self::assertNull($generated['occurrence']['schedule_created_at']);
+        try {
+            $this->schedules->create($this->supplierId, $created[0], ['frequency' => 'monthly'], null);
+            self::fail('Položka vytvořená opakováním nesmí založit nové opakování.');
+        } catch (OtherItemException $e) {
+            self::assertSame('created_by_schedule', $e->errorCode);
+        }
+        // Zdroj se uvolní: jde znovu naplánovat i smazat; smazaný zdroj už výskyt neukáže.
+        $again = $this->schedules->create($this->supplierId, (int) $first['id'], ['frequency' => 'monthly'], null);
         self::assertCount(1, $again['occurrences']);
+        $this->schedules->delete($this->supplierId, (int) $again['id']);
+        $this->items->deleteDraft($this->supplierId, (int) $first['id']);
+        $orphan = $this->items->get($this->supplierId, $created[0])['occurrence'];
+        self::assertSame(1, $orphan['occurrence_index']);
+        self::assertNull($orphan['source_item_id']);
+        self::assertNull($orphan['source_document_no']);
+        // Koncept zrušeného opakování jde smazat jako každý jiný (dřív ho jen zrušilo, aby ho rozvrh nevytvořil znovu).
+        $this->items->deleteDraft($this->supplierId, $created[0]);
+        $deleted = $this->pdo->prepare('SELECT status, deleted_at FROM other_items WHERE id = ?');
+        $deleted->execute([$created[0]]);
+        $row = $deleted->fetch(\PDO::FETCH_ASSOC);
+        self::assertSame('draft', $row['status']);
+        self::assertNotNull($row['deleted_at']);
+    }
+
+    public function testReplannedSourceContinuesAfterItemsOfCancelledSchedule(): void
+    {
+        $first = $this->items->create($this->supplierId, $this->input(), null);
+        $schedule = $this->schedules->create($this->supplierId, (int) $first['id'], ['frequency' => 'monthly'], null);
+        $old = $this->schedules->generate($this->supplierId, (int) $schedule['id'], '2099-03-31', null)['created_ids'];
+        self::assertCount(2, $old);
+        $this->schedules->delete($this->supplierId, (int) $schedule['id']);
+        $again = $this->schedules->create($this->supplierId, (int) $first['id'], ['frequency' => 'monthly'], null);
+        $created = $this->schedules->generate($this->supplierId, (int) $again['id'], '2099-04-30', null)['created_ids'];
+        // Únor a březen už mají položky zrušeného opakování; nový rozvrh vytvoří jen duben jako 3. opakování.
+        self::assertCount(1, $created);
+        $item = $this->items->get($this->supplierId, $created[0]);
+        self::assertStringStartsWith('2099-04-', $item['issued_on']);
+        self::assertSame(3, $item['occurrence']['occurrence_index']);
+    }
+
+    public function testReplannedSourceRecreatesTermsOfDeletedDrafts(): void
+    {
+        $first = $this->items->create($this->supplierId, $this->input(), null);
+        $schedule = $this->schedules->create($this->supplierId, (int) $first['id'], ['frequency' => 'monthly'], null);
+        $old = $this->schedules->generate($this->supplierId, (int) $schedule['id'], '2099-03-31', null)['created_ids'];
+        $this->schedules->delete($this->supplierId, (int) $schedule['id']);
+        // Chybné koncepty zrušeného opakování uživatel smazal: nový rozvrh jejich termíny vytvoří znovu.
+        foreach ($old as $id) $this->items->deleteDraft($this->supplierId, $id);
+        $again = $this->schedules->create($this->supplierId, (int) $first['id'], ['frequency' => 'monthly'], null);
+        self::assertCount(2, $this->schedules->generate($this->supplierId, (int) $again['id'], '2099-03-31', null)['created_ids']);
+    }
+
+    /**
+     * Nový rozvrh navazuje za nejpozdější zbylou položkou zrušeného opakování: smazaný termín
+     * mezi zbylými nedoplní a koncept stornovaný za živého rozvrhu se počítá jako vytvořený.
+     */
+    public function testReplannedSourceContinuesAfterLatestRemainingItem(): void
+    {
+        $first = $this->items->create($this->supplierId, $this->input(), null);
+        $schedule = $this->schedules->create($this->supplierId, (int) $first['id'], ['frequency' => 'monthly'], null);
+        $ids = $this->schedules->generate($this->supplierId, (int) $schedule['id'], '2099-04-30', null)['created_ids'];
+        self::assertCount(3, $ids);
+        [$feb, , $apr] = $ids;
+        // Za živého rozvrhu se koncept jen stornuje (rozvrh ho nevytvoří znovu), zůstává dokladem.
+        $this->items->deleteDraft($this->supplierId, $apr);
+        self::assertSame('cancelled', $this->items->get($this->supplierId, $apr)['status']);
+        $this->schedules->delete($this->supplierId, (int) $schedule['id']);
+        $this->items->deleteDraft($this->supplierId, $feb);
+        $again = $this->schedules->create($this->supplierId, (int) $first['id'], ['frequency' => 'monthly'], null);
+        $created = $this->schedules->generate($this->supplierId, (int) $again['id'], '2099-05-31', null)['created_ids'];
+        self::assertSame(['2099-05-31'], array_map(fn (int $id): string => (string) $this->items->get($this->supplierId, $id)['issued_on'], $created));
+    }
+
+    public function testCancelledScheduleKeepsSourceOfOccurrencesImportedWithoutIt(): void
+    {
+        $first = $this->items->create($this->supplierId, $this->input(), null);
+        $schedule = $this->schedules->create($this->supplierId, (int) $first['id'], ['frequency' => 'monthly'], null);
+        $created = $this->schedules->generate($this->supplierId, (int) $schedule['id'], '2099-02-28', null)['created_ids'];
+        // Výskyt převzatý importem nebo obnovou ze starší verze zdroj u sebe nemá.
+        $this->pdo->prepare('UPDATE other_item_schedule_occurrences SET source_item_id = NULL WHERE schedule_id = ?')
+            ->execute([(int) $schedule['id']]);
+        $this->schedules->delete($this->supplierId, (int) $schedule['id']);
+        $occurrence = $this->items->get($this->supplierId, $created[0])['occurrence'];
+        self::assertNull($occurrence['schedule_id']);
+        self::assertSame((int) $first['id'], $occurrence['source_item_id']);
     }
 
     public function testPaidAmountSettlesOldestInstallmentFirst(): void

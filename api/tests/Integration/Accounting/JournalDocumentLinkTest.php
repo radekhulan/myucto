@@ -136,7 +136,7 @@ final class JournalDocumentLinkTest extends BankPostingTestCase
         foreach ([$invoiceEntry, $linkedManual, $lonelyManual] as $id) {
             $page[] = $this->journal->find($id, $this->supplierId);
         }
-        $map = $this->links->hasRelatedMap($this->supplierId, $page);
+        $map = $this->links->hasRelatedMap($this->supplierId, $page, \MyInvoice\Service\Accounting\JournalRelatedAccess::all());
 
         foreach ($page as $entry) {
             $entryId = (int) $entry['id'];
@@ -208,7 +208,7 @@ final class JournalDocumentLinkTest extends BankPostingTestCase
         $this->repo->add($bankEntry, $this->supplierId, 'bank', $txId, 'Převzato z Money S3', $this->userId);
 
         self::assertSame([], $this->related($bankEntry)['items']);
-        $map = $this->links->hasRelatedMap($this->supplierId, [$this->journal->find($bankEntry, $this->supplierId)]);
+        $map = $this->links->hasRelatedMap($this->supplierId, [$this->journal->find($bankEntry, $this->supplierId)], \MyInvoice\Service\Accounting\JournalRelatedAccess::all());
         self::assertArrayNotHasKey($bankEntry, $map, 'Odznak svítí, ale panel je prázdný.');
     }
 
@@ -382,7 +382,7 @@ final class JournalDocumentLinkTest extends BankPostingTestCase
     {
         $entry = $this->journal->find($entryId, $this->supplierId);
         self::assertIsArray($entry, "Zápis #{$entryId} nenalezen.");
-        return $this->links->related($this->supplierId, $entry);
+        return $this->links->related($this->supplierId, $entry, \MyInvoice\Service\Accounting\JournalRelatedAccess::all());
     }
 
     /**

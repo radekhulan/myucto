@@ -159,6 +159,15 @@
     "dismiss": "Dismiss"
   },
   "other_items": {
+    "edit_locked": {
+      "posted": "A posted item cannot be edited. Wrong accounts are fixed by reposting, other details by a reversal and a new item.",
+      "confirmed": "A confirmed item cannot be edited. Details are fixed by cancelling it and creating a new item.",
+      "reversed": "A reversed item cannot be edited.",
+      "cancelled": "A cancelled item cannot be edited."
+    },
+    "error": {
+      "invalid_source_item": "Invalid item id."
+    },
     "documents_settings": {
       "title": "Documents folder",
       "hint": "Files uploaded to an other receivable or payable are stored in this folder in Documents. {'{'}YYYY{'}'} and {'{'}MM{'}'} are replaced with the year and month of the issue date.",
@@ -206,7 +215,6 @@
       "suggested_for_kind": "Suggested accounts for kind {kind}: Dr {debit} / Cr {credit}",
       "suggestion_use": "Use",
       "suggestion_save": "Save as kind default",
-      "repost_hint": "The item account is changed by re-posting the origin; payments then follow it.",
       "inherited_note": "An empty item account and counter account are filled in from the kind's posting profile when posting.",
       "kinds": {
         "button": "Posting",
@@ -237,7 +245,7 @@
     "sources_section": "Items from other modules",
     "sources_hint": "Payroll and taxes are managed in their source module.",
     "not_found": "Item not found.",
-    "form_hint": "You can attach documents after saving the item, from its detail page.",
+    "form_hint": "You can attach documents right away; they are saved together with the item.",
     "side_label": "Side",
     "side": {
       "receivable": "Receivable",
@@ -254,7 +262,8 @@
       "partial": "Partly paid",
       "forecast": "Estimate",
       "open": "Open",
-      "overdue": "Overdue"
+      "overdue": "Overdue",
+      "overpaid": "Overpaid"
     },
     "source_label": "Source",
     "search": "Search title, counterparty, number or reference",
@@ -394,8 +403,6 @@
       "installment_due": "Near due date",
       "remaining_amount": "Full balance"
     },
-    "documents": "documents",
-    "forecast": "Forecast",
     "result_impact_title": "Other items in the profit forecast",
     "result_impact_hint": "Current year total by revenue or expense counter account. Includes posted items and labeled drafts; balance sheet items are excluded.",
     "result_revenue": "Revenue from other items",
@@ -404,7 +411,6 @@
     "result_posted": "Posted",
     "result_draft": "Drafts",
     "open_journal": "Open journal entry",
-    "journal_context": "Journal entry notes and attachments",
     "journal_documents": "Journal entry attachments",
     "repost": "Repost",
     "repost_hint": "The original entry will be reversed and a new one posted on the selected date. The date must be in an open period.",
@@ -432,10 +438,11 @@
     "confirmed": "Item confirmed.",
     "reversed": "Item reversed.",
     "cancelled": "Item cancelled.",
-    "validation_required": "Enter a title, kind, dates and a positive amount.",
-    "previous": "Previous",
-    "next": "Next",
     "plans": {
+      "edit_schedule": "Edit recurrence",
+      "edit_installments": "Edit installments",
+      "schedule_fixed_hint": "The frequency and end of a recurrence cannot be changed. For different settings, cancel the recurrence and create a new one; items already created stay.",
+      "group": "Plans",
       "schedule_title": "Recurring item",
       "schedule_hint": "A daily task creates items up to 90 days ahead; you can also create them manually. Documents linked to the source item are linked to each item.",
       "auto_post": "Automatically post items when they arise",
@@ -446,18 +453,81 @@
       "monthly": "Monthly",
       "quarterly": "Quarterly",
       "yearly": "Yearly",
-      "ends_on": "End date:",
       "active": "Active",
       "paused": "Paused",
       "source_inactive": "The source item was reversed. Recurrence has stopped; existing drafts remain listed.",
       "create_schedule": "Set recurrence",
+      "title_template": "Item title template",
+      "title_template_placeholder": "e.g. Rent {'{MM}'}/{'{YYYY}'}",
+      "title_template_hint": "Empty = every item gets the title of this item. Placeholders are filled in from the date each item is created.",
+      "title_sync_period": "Align the period in the title (e.g. 03/2027) with the item date",
+      "title_preview": "Title of the next created item ({date}):",
+      "title_preview_loading": "Calculating preview…",
+      "title_help_toggle": "Placeholders ({'{YYYY}'}, {'{MM}'}, {'{Q}'}…)",
+      "title_help_intro": "The same placeholders as in recurring invoices. An unknown placeholder is rejected. Examples for an item created on May 15, 2026:",
+      "title_help_rows": [
+        {
+          "c": "{'{YYYY}'}, {'{YY}'}",
+          "d": "year → 2026, 26 · shift by years: {'{YYYY+1}'} → 2027 · year of a shifted month: {'{YYYY+8M}'} → 2027"
+        },
+        {
+          "c": "{'{M}'}, {'{MM}'}",
+          "d": "month → 5, 05 · shift by months incl. year rollover: {'{MM+8}'} → 01"
+        },
+        {
+          "c": "{'{MMMM}'}",
+          "d": "month name in Czech → květen · {'{MMMM+1}'} → červen"
+        },
+        {
+          "c": "{'{Q}'}",
+          "d": "quarter → 2 · {'{Q+1}'} → 3"
+        },
+        {
+          "c": "{'{D}'}, {'{DD}'}",
+          "d": "day → 15, 15 · shift by days: {'{D+14}'} → 29"
+        },
+        {
+          "c": "{'{DATE}'}",
+          "d": "full date in Czech format → 15. 5. 2026 · ±D/M/Y arithmetic: {'{DATE+1Y-1D}'} → 14. 5. 2027"
+        },
+        {
+          "c": "{'{BOM}'}, {'{EOM}'}",
+          "d": "first and last day of the month → 1. 5. 2026, 31. 5. 2026 · {'{EOM+1}'} → 30. 6. 2026"
+        }
+      ],
+      "title_help_example": "Example: \"Rent {'{MM}'}/{'{YYYY}'}\" → \"Rent 05/2026\", \"Insurance Q{'{Q}'}/{'{YYYY}'}\" → \"Insurance Q2/2026\". Rent paid for the next month: \"Rent {'{MM+1}'}/{'{YYYY+1M}'}\".",
+      "next_title": "Title of the next created item",
+      "edit_title": "Edit title",
+      "edit_title_hint": "The change applies to items created after saving. Items already created keep their title.",
+      "save_title": "Save title",
+      "edit_title_created_until": "Items up to {date} already exist (the daily task prepares them up to 90 days ahead) and the new template will not rename them. You can rename drafts manually in the item detail; confirmed and posted items stay unchanged. A deleted item is not created again.",
+      "title_errors": {
+        "invalid_due_offset": "The source item must be due no more than ten years after issue.",
+        "schedule_source_unconfirmed": "Confirm the source item before enabling automatic posting.",
+        "forbidden": "You do not have permission for this action.",
+        "schedule_not_found": "The recurrence was not found.",
+        "invalid_end": "The end of the recurrence is before the first document.",
+        "invalid_date": "Enter a valid end date.",
+        "not_found": "The item was not found.",
+        "invalid_title_template": "The title template must be text.",
+        "title_template_too_long": "The title template can have at most 255 characters.",
+        "unknown_title_placeholder": "The template contains an unknown placeholder {tokens}. See the list of placeholders below.",
+        "occurrence_title_too_long": "The title of one of the next items would exceed 255 characters after substitution.",
+        "invalid_title_sync_period": "The period alignment option must be on or off.",
+        "invalid_frequency": "Choose monthly, quarterly or yearly recurrence.",
+        "schedule_finished": "The recurrence has ended; no further item will be created.",
+        "schedule_source_inactive": "The source item is reversed; no further item will be created.",
+        "already_scheduled": "The item already belongs to another recurrence.",
+        "created_by_schedule": "The item was created by a recurrence; a new recurrence cannot be set up from it.",
+        "invalid_status": "Recurrence can only be set on an active item."
+      },
+      "title_saved": "Title template saved.",
       "schedule_saved": "Recurrence saved.",
       "generate_through": "Generate through",
       "generate": "Create items",
       "generated": "Items created: {count}.",
       "pause": "Pause",
       "resume": "Resume",
-      "created_for": "Item for {date}",
       "no_generated": "No later items have been created yet.",
       "installments_title": "Payment installments",
       "installments_hint": "Installments spread the payment of one document across the cash flow. The schedule itself creates no journal entries.",
@@ -500,7 +570,16 @@
       "principal_amount": "Principal",
       "interest_amount": "Interest",
       "fee_amount": "Fee",
-      "principal_total": "Principal total {amount} (document amount {item})"
+      "principal_total": "Principal total {amount} (document amount {item})",
+      "next_on": "Next item",
+      "ends_label": "Recurrence ends",
+      "no_end": "no end",
+      "auto_post_short": "Post automatically",
+      "created_by": "Schedule created by",
+      "unknown_user": "unknown user",
+      "created_items": "Created items",
+      "split_action": "Split into installments",
+      "load_failed": "Recurrence and installments could not be loaded."
     },
     "remaining_principal": "Principal remaining",
     "remaining_payment": "Left to pay incl. interest and fee",
@@ -511,6 +590,25 @@
     "edit_note": "Edit note",
     "edit_note_hint": "The note is internal text of the document and does not affect the posting or the subledger. Other fields stay locked; correct them with a reversal or reposting.",
     "note_saved": "Note saved.",
+    "accrual": {
+      "label_receivable": "Revenue accrual",
+      "label_payable": "Expense accrual",
+      "hint_receivable": "The period the receivable revenue belongs to (rent, licence, subscription). The receivable is posted in full; year-end closing defers the part after the year end to 384 and releases it in the next year. Only revenue (class 6 accounts) of the receivable entry is deferred.",
+      "hint_payable": "The period the payable expense belongs to (rent, insurance, subscription paid in advance). The payable is posted in full; year-end closing defers the part after the year end to 381 and releases it in the next year. Only expense (class 5 accounts) of the payable entry is deferred.",
+      "none": "No accrual",
+      "clear": "Remove accrual period",
+      "clear_confirm": "Remove the accrual period? It can be entered again only for a posted item with its own journal entry in double-entry accounting.",
+      "period": "{from} – {to}",
+      "error": {
+        "period_closed": "The item has an entry in a closed, reviewed or approved accounting period; its accrual is already part of the year-end closing.",
+        "accrual_deferral_posted": "The year-end Accruals step has already posted the deferral. Revert it in the closing, change the period and run the step again.",
+        "accrual_period_incomplete": "The accrual period needs both a start and an end.",
+        "accrual_period_invalid": "The period needs valid dates and must start no later than it ends.",
+        "accrual_not_posted": "The accrual period can be set only on a posted item with its own journal entry.",
+        "is_draft": "Edit a draft in the item editor.",
+        "accrual_double_entry_only": "The accrual period can be set only in double-entry bookkeeping."
+      }
+    },
     "delete_posted": "Delete with entry",
     "delete_posted_title": "Delete posted document",
     "delete_posted_intro": "Document {number} will be deleted completely, including its journal entry. No reversal is created; it disappears from the accounts and the subledger.",
@@ -518,7 +616,42 @@
     "delete_posted_locked": "The document falls into a locked period. You will be asked to confirm the deletion explicitly.",
     "delete_posted_done": "The document and its journal entry have been deleted.",
     "delete_posted_cancelled": "The journal entry was deleted and the recurring occurrence cancelled so that the schedule does not create it again.",
-    "delete_posted_blocked": "Cannot be deleted: {reason} You can reverse the document."
+    "delete_posted_blocked": "Cannot be deleted: {reason} You can reverse the document.",
+    "document_count": "no documents | 1 document | {count} documents",
+    "totals_by_side": {
+      "receivable": "Receivables remaining",
+      "payable": "Payables remaining"
+    },
+    "window_hint": "Without a date, items due from one year back to one year ahead are shown; search finds manually entered items outside this range too.",
+    "window_hint_open": "Without a date, unpaid manually entered items of any age and payroll and tax items from one year back are shown, all due at most one year ahead; search finds manually entered items outside this range too.",
+    "totals_scope": "(drafts excluded)",
+    "totals_hint": "Remaining principal balance of manually entered items in the whole selection (all pages, within the chosen due date range); loan instalment interest and fees are not included. Only confirmed and posted items count, not drafts, reversals, overpayments or payroll and tax items.",
+    "empty_title": "No other receivables or payables yet",
+    "empty_hint": "Record rent, deposits, loans, insurance claims and other receivables or payables outside invoices here.",
+    "load_failed_stale": "The list could not be refreshed; the data shown may be out of date.",
+    "post_preview": "Will be posted as",
+    "no_payment_candidates": "No unallocated payment to link.",
+    "no_payment_candidates_search": "No unallocated payment matches the search.",
+    "save_hotkey": "Save (Ctrl+S)",
+    "side_change_confirm": "Changing the side clears the kind, accounts, counter-account split and accrual period. Continue?",
+    "errors": {
+      "required": "Fill in this field.",
+      "amount_positive": "Enter a positive amount.",
+      "form_invalid": "The item cannot be saved, fix the highlighted fields.",
+      "variable_symbol_digits": "The variable symbol may contain digits only."
+    },
+    "summary_count": "no manual items | 1 manual item | {count} manual items",
+    "col_documents": "Documents",
+    "col_posting": "Entry",
+    "back_to_list": "← Back to list",
+    "phone_details": "Details",
+    "occurrence": {
+      "label": "Created by recurrence",
+      "source": "from source item",
+      "created_by": "schedule created by {name} on {date}",
+      "index": "occurrence {index}",
+      "cancelled": "recurrence was cancelled"
+    }
   },
   "internal_documents": {
     "title": "Internal documents",
@@ -19295,6 +19428,7 @@
         "allocated": "allocated",
         "not_posted": "Not posted",
         "advance_not_postable": "Advance invoice – not posted",
+        "posted_by_this_entry": "Posted by this entry",
         "preview": "Preview",
         "open_entry": "Entry",
         "open_document": "Open document",
@@ -22253,14 +22387,14 @@
       },
       "prepaid_expense": {
         "title": "Prepaid expenses (381)",
-        "hint": "From received-invoice lines marked with a from–to period whose cost extends beyond year-end (insurance, parking, subscriptions). The system pro-rates by days the part belonging to future periods and defers it to 381 (Dr 381 / Cr expense account). Released automatically in N+1.",
+        "hint": "From received-invoice lines and other payables marked with a from–to period whose cost extends beyond year-end (insurance, parking, subscriptions). The system pro-rates by days the part belonging to future periods and defers it to 381 (Dr 381 / Cr expense account). Released automatically in N+1.",
         "reload": "Load proposal",
         "col_document": "Document",
         "col_period": "Accrual period",
         "col_account": "Expense account",
         "col_deferred": "Deferred to 381",
         "total_deferred": "Total deferred (Dr 381 / Cr 5xx)",
-        "no_items": "No invoice lines marked for time accrual in this period.",
+        "no_items": "No received-invoice lines or other payables marked for time accrual in this period.",
         "existing": "Posted {amount}.",
         "post": "Post accrual",
         "posted": "Prepaid expenses were posted.",
@@ -22268,14 +22402,14 @@
       },
       "deferred_revenue": {
         "title": "Deferred revenue (384)",
-        "hint": "From issued invoice lines marked with a from–to period whose revenue extends beyond the year end (annual subscriptions, rent, service contracts). The part belonging to future periods is computed pro rata by days and deferred to 384 (debit revenue account / credit 384). It is released automatically in the next year.",
+        "hint": "From issued invoice lines, membership charges and other receivables marked with a from–to period whose revenue extends beyond the year end (annual subscriptions, rent, service contracts). The part belonging to future periods is computed pro rata by days and deferred to 384 (debit revenue account / credit 384). It is released automatically in the next year.",
         "reload": "Load proposal",
-        "col_document": "Invoice",
+        "col_document": "Document",
         "col_period": "Accrual period",
         "col_account": "Revenue account",
         "col_deferred": "Deferred to 384",
         "total_deferred": "Total deferred (Dr 6xx / Cr 384)",
-        "no_items": "No issued invoice lines in this period are marked for accrual.",
+        "no_items": "No issued invoice lines, membership charges or other receivables in this period are marked for accrual.",
         "existing": "Posted {amount}.",
         "post": "Post revenue deferral",
         "posted": "Deferred revenue was posted.",

@@ -262,12 +262,14 @@ final class ApiScopeMiddleware implements MiddlewareInterface
      * Ostatní pohledávky a závazky (nájem, půjčka, leasing, pojistné, kauce) se
      * pořizují ze smluv a ty má integrace nebo AI asistent v ruce dřív než účetní.
      * Token proto smí založit a upravit KONCEPT, smazat koncept, nastavit splátkový
-     * kalendář a založit nebo pozastavit opakování. Nic z toho nezapisuje do deníku:
+     * kalendář, založit nebo pozastavit opakování a změnit šablonu názvu jeho budoucích
+     * konceptů. Nic z toho nezapisuje do deníku:
      * koncept nemá zápis, splátky slouží jen k plánu cashflow a opakování bez
      * automatiky vyrábí zase jen koncepty. Úprava a smazání nekonceptu odmítne
      * služba (409 `not_draft`). Automatické účtování opakování token nezapne ani
-     * neobnoví a koncept z automaticky účtovaného opakování neupraví ani nesmaže
-     * (smazáním by potlačil jeho zaúčtování); to hlídá akce, protože závisí na
+     * neobnoví, koncept z automaticky účtovaného opakování neupraví ani nesmaže
+     * (smazáním by potlačil jeho zaúčtování) a u takového opakování nezmění název
+     * (OtherItemScheduleService::setTitle); to hlídá akce a služba, protože závisí na
      * těle požadavku a stavu rozvrhu. Vypnout automatiku token smí, účtování
      * tím jen zastaví.
      *
@@ -303,6 +305,7 @@ final class ApiScopeMiddleware implements MiddlewareInterface
         ['POST', '#^/api/accounting/other-items/[0-9]+/allocations$#'],
         ['POST', '#^/api/accounting/other-items/[0-9]+/schedule$#'],
         ['PUT', '#^/api/accounting/other-items/schedules/[0-9]+/status$#'],
+        ['PUT', '#^/api/accounting/other-items/schedules/[0-9]+/title$#'],
         ['POST', '#^/api/accounting/accounts$#'],
         ['PATCH', '#^/api/accounting/accounts/[0-9]+$#'],
         ['PUT', '#^/api/accounting/dimensions/documents/(other-items|invoices|purchase-invoices)/[0-9]+$#'],

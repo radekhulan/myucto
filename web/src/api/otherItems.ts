@@ -68,6 +68,19 @@ export interface OtherItemEffectivePosting {
 
 export type OtherItemPostingOverridesInput = Partial<Record<OtherItemOverrideEvent, OtherItemPostingRuleInput | null>>
 
+export interface OtherItemOccurrence {
+  /** Rozvrh; null po zrušení opakování (původ položky zůstává). */
+  schedule_id: number | null
+  occurrence_index: number
+  /** Zdroj; null, když byl zdroj smazán. */
+  source_item_id: number | null
+  /** Číslo zdroje; null, dokud ho nemá (koncept). */
+  source_document_no: string | null
+  source_title: string | null
+  schedule_created_at: string | null
+  created_by_name: string | null
+}
+
 export interface OtherItem {
   id: string | number
   source_kind: string
@@ -85,6 +98,9 @@ export interface OtherItem {
   issued_on: string | null
   accounting_on?: string | null
   due_on: string | null
+  /** Období časového rozlišení: výnos pohledávky (384), náklad závazku (381); null = bez rozlišení. */
+  accrual_from?: string | null
+  accrual_to?: string | null
   currency: string
   exchange_rate?: number | null
   amount_czk?: number | null
@@ -96,6 +112,8 @@ export interface OtherItem {
   remaining_payment?: number
   /** Kalendář má splátku rozdělenou na jistinu, úrok a poplatek (jen detail). */
   has_split_installments?: boolean
+  /** Položku vytvořilo opakování (jen detail; zdroj rozvrhu a položka mimo rozvrh mají null). */
+  occurrence?: OtherItemOccurrence | null
   /** Vydaná faktura, kterou zápis pohledávky účtuje (jen detail). */
   linked_invoice?: { id: number; varsymbol: string | null; status: string } | null
   status: OtherItemStatus | string
@@ -112,6 +130,7 @@ export interface OtherItem {
   posting_lines?: OtherItemPostingLine[]
   note?: string | null
   journal_entry_id?: number | null
+  posted_at?: string | null
   /** Jen detail zaúčtované položky: smí se smazat i se zápisem? */
   posted_deletion?: PostedDeletion
   /** Vlastní kontace úhrad položky (podvojné účetnictví). */
@@ -131,6 +150,10 @@ export interface OtherItemPayload {
   issued_on: string
   accounting_on: string
   due_on: string
+  accrual_from?: string | null
+  accrual_to?: string | null
+  /** Strana, ke které období patří: shodné s uloženým po změně strany server nezahodí. */
+  accrual_side?: OtherItemSide
   currency: string
   exchange_rate: number | null
   amount: number
@@ -152,7 +175,14 @@ export interface OtherItemsResult {
   total: number
   page: number
   per_page: number
-  totals?: Record<string, unknown>
+  /** Zbývá uhradit za celý výběr po straně a měně (jen první stránka; potvrzené a zaúčtované položky). */
+  totals?: OtherItemRemainingTotal[]
+}
+
+export interface OtherItemRemainingTotal {
+  side: OtherItemSide
+  currency: string
+  remaining_amount: number
 }
 
 export interface OtherItemAllocation {
@@ -171,6 +201,12 @@ export interface OtherItemAllocation {
   /** Kód automatického přiřazení (OtherItemAutoMatchPolicy, pravidlo banky); null = ručně. */
   auto_match_reason?: OtherItemAutoMatchReason | null
   reversed_on: string | null
+  /** Výpis bankovního pohybu úhrady. */
+  bank_statement_id?: number | null
+  /** Číslo pokladního dokladu úhrady. */
+  cash_doc_number?: string | null
+  /** Živý zápis úhrady v deníku; null bez zaúčtování nebo bez práva číst deník. */
+  journal_entry_id?: number | null
 }
 
 export type OtherItemAutoMatchReason = 'other_item_vs_account' | 'other_item_vs_installment' | 'other_item_vs_remaining'
@@ -283,6 +319,9 @@ export const otherItemsApi = {
   /** Poznámka vystaveného dokladu (popisný údaj mimo účetnictví). */
   updateText: (id: number, note: string | null) =>
     api.put<OtherItem>(`/accounting/other-items/${id}/text`, { note }).then(r => r.data),
+  /** Období časového rozlišení zaúčtované pohledávky či závazku; obě null = bez rozlišení. */
+  updateAccrual: (id: number, accrualFrom: string | null, accrualTo: string | null) =>
+    api.put<OtherItem>(`/accounting/other-items/${id}/accrual`, { accrual_from: accrualFrom, accrual_to: accrualTo }).then(r => r.data),
   /** Smaže zaúčtovaný doklad i se zápisem v deníku; `ackLocked` = potvrzený zásah do uzamčeného období. */
   removePosted: (id: number, ackLocked = false) =>
     api.delete<{ deleted: boolean; journal_entry_id: number; status: string }>(`/accounting/other-items/${id}/posted`, {

@@ -102,6 +102,7 @@ test('čtecí nástroje volají konkrétní cesty a mapují hledání na q', asy
       { limit: 10, q: 'nájem' }],
     ['list_other_item_kinds', {}, '/accounting/other-items/kinds', null],
     ['list_other_item_schedules', {}, '/accounting/other-items/schedules', null],
+    ['list_other_item_schedules', { source_item_id: 7 }, '/accounting/other-items/schedules', { source_item_id: 7 }],
     ['get_other_item_schedule', { id: 3 }, '/accounting/other-items/schedules/3', null],
     ['get_other_item_installments', { item_id: 12 }, '/accounting/other-items/12/installments', null],
   ];
@@ -204,6 +205,36 @@ test('úprava konceptu složí celý doklad a jediný protiřádek přepočte', 
       posting_lines: [{ account_code: '221', amount: 13500.5 }],
     },
   }]);
+});
+
+test('úprava konceptu drží období rozlišení, přepnutí strany ho zahodí', async () => {
+  const client = new FakeClient({ 'GET /accounting/other-items/12': draft({ side: 'receivable', accrual_from: '2094-07-01', accrual_to: '2095-06-30' }) });
+  await tool('update_other_item').run(client, { id: 12, title: 'Syntetický nájem' }, 'update_other_item');
+  assert.equal(writes(client)[0].body.accrual_from, '2094-07-01');
+  assert.equal(writes(client)[0].body.accrual_to, '2095-06-30');
+
+  await tool('update_other_item').run(client, { id: 12, side: 'payable' }, 'update_other_item');
+  assert.equal(writes(client)[1].body.accrual_from, null);
+  assert.equal(writes(client)[1].body.accrual_to, null);
+});
+
+test('závazek období nákladu drží, stejná strana ho nezahodí', async () => {
+  const client = new FakeClient({ 'GET /accounting/other-items/12': draft({ side: 'payable', accrual_from: '2094-07-01', accrual_to: '2095-06-30' }) });
+  await tool('update_other_item').run(client, { id: 12, side: 'payable', title: 'Syntetické nájemné' }, 'update_other_item');
+  assert.equal(writes(client)[0].body.accrual_from, '2094-07-01');
+  assert.equal(writes(client)[0].body.accrual_to, '2095-06-30');
+
+  await tool('update_other_item').run(client, { id: 12, side: 'receivable', accrual_from: '2094-08-01', accrual_to: '2095-07-31' }, 'update_other_item');
+  assert.equal(writes(client)[1].body.accrual_from, '2094-08-01');
+  assert.equal(writes(client)[1].body.accrual_side, 'receivable');
+
+  // Shodné období zadané výslovně pro novou stranu nese označení, server ho pak nezahodí.
+  await tool('update_other_item').run(client, { id: 12, side: 'receivable', accrual_from: '2094-07-01', accrual_to: '2095-06-30' }, 'update_other_item');
+  assert.equal(writes(client)[2].body.accrual_from, '2094-07-01');
+  assert.equal(writes(client)[2].body.accrual_side, 'receivable');
+  // Bez změny strany se nic neoznačuje.
+  await tool('update_other_item').run(client, { id: 12, title: 'Syntetické nájemné' }, 'update_other_item');
+  assert.equal(writes(client)[3].body.accrual_side, undefined);
 });
 
 test('úprava konceptu s vlastním druhem ho drží, vestavěný druh ho zruší', async () => {
@@ -362,6 +393,24 @@ test('opakování se zakládá vždy bez automatického účtování', async () 
     method: 'POST', path: '/accounting/other-items/12/schedule',
     body: { frequency: 'monthly', ends_on: '2094-12-31', auto_post: false }, tool: 'create_other_item_schedule',
   }]);
+});
+
+test('šablona názvu opakování jde do založení i úpravy; vynechané pole úprava zachová', async () => {
+  const client = new FakeClient();
+  await tool('create_other_item_schedule').run(client, {
+    item_id: 12, frequency: 'quarterly', title_template: 'Pojistné Q{Q}/{YYYY}', title_sync_period: true,
+  }, 'c');
+  await tool('set_other_item_schedule_title').run(client, { id: 5, title_template: 'Nájem {MM}/{YYYY}' }, 't');
+  await tool('set_other_item_schedule_title').run(client, { id: 5, title_sync_period: false }, 't');
+  await tool('set_other_item_schedule_title').run(client, { id: 5, title_template: null }, 't');
+  assert.equal(tool('set_other_item_schedule_title').write, true);
+  assert.deepEqual(writes(client), [
+    { method: 'POST', path: '/accounting/other-items/12/schedule',
+      body: { frequency: 'quarterly', title_template: 'Pojistné Q{Q}/{YYYY}', title_sync_period: true, auto_post: false }, tool: 'c' },
+    { method: 'PUT', path: '/accounting/other-items/schedules/5/title', body: { title_template: 'Nájem {MM}/{YYYY}' }, tool: 't' },
+    { method: 'PUT', path: '/accounting/other-items/schedules/5/title', body: { title_sync_period: false }, tool: 't' },
+    { method: 'PUT', path: '/accounting/other-items/schedules/5/title', body: { title_template: null }, tool: 't' },
+  ]);
 });
 
 test('obnovení opakování s automatikou odmítne, pozastavení projde', async () => {

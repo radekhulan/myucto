@@ -2018,7 +2018,7 @@ final class ClosingService
         });
     }
 
-    // ── časové rozlišení nákladů příštích období (§DČR / Task 12) — 381 z označených faktur ──
+    // ── časové rozlišení nákladů příštích období (§DČR / Task 12) — 381 z označených faktur a ostatních závazků ──
 
     /**
      * Náhled časového rozlišení nákladů příštích období (381) k rozvahovému dni (GET).
@@ -2033,6 +2033,8 @@ final class ClosingService
      *
      * Bere jen řádky faktur zaúčtovaných DO tohoto období (effective_cost_date v období, status
      * != draft/cancelled) — jinak by se odložil náklad, který v VH tohoto roku vůbec není.
+     * Ostatní závazky s obdobím (other_items.accrual_from/to) se odkládají z obratu nákladových
+     * účtů svého zápisu ({@see AccrualDeferralService::prepaidExpenseRows()}).
      * Vícleté rozlišení (přesah přes víc než 1 hranici): odloží se vše za koncem období, v N+1 se
      * rozpustí a re-účtuje celé do N+1 — u typického ročního pojistného (1 hranice) je to přesné.
      *
@@ -2111,16 +2113,24 @@ final class ClosingService
                 $deferred,
                 $this->accruals->prepaidExpenseAllocations($supplierId, $row, $accounts, $dimensionCache),
             ));
-            $piId = (int) $row['purchase_invoice_id'];
-            $snapshot[] = AccrualDeferralService::snapshotItem((int) $row['item_id'], $piId, $from, $to, $netCzk, $accounts);
-            $documents[$piId] = [
+            $piId = $row['purchase_invoice_id'] === null ? null : (int) $row['purchase_invoice_id'];
+            $snapshot[] = $row['source'] === 'other_item'
+                ? AccrualDeferralService::snapshotOtherItem($row, $from, $to, $netCzk, $accounts)
+                : AccrualDeferralService::snapshotItem((int) $row['item_id'], (int) $piId, $from, $to, $netCzk, $accounts);
+            $otherItemId = $row['other_item_id'] === null ? null : (int) $row['other_item_id'];
+            $documentKey = AccrualDeferralService::prepaidExpenseDocumentKey($row);
+            $documents[$documentKey] = [
+                'source' => (string) $row['source'],
                 'purchase_invoice_id' => $piId,
+                'other_item_id' => $otherItemId,
                 'vendor_invoice_number' => (string) $row['vendor_invoice_number'],
-                'deferred_amount' => round(($documents[$piId]['deferred_amount'] ?? 0.0) + $deferred, 2),
+                'deferred_amount' => round(($documents[$documentKey]['deferred_amount'] ?? 0.0) + $deferred, 2),
             ];
             $items[] = [
+                'source' => (string) $row['source'],
                 'item_id' => (int) $row['item_id'],
                 'purchase_invoice_id' => $piId,
+                'other_item_id' => $otherItemId,
                 'vendor_invoice_number' => (string) $row['vendor_invoice_number'],
                 'description' => (string) $row['description'],
                 'currency_code' => (string) $row['currency_code'],
@@ -2163,7 +2173,7 @@ final class ClosingService
      * = ends_on, R7 flag). Nákladová strana rozpadnuta na účty dle řádků (expense_account_code,
      * jinak expense_kind). Re-run = in-place rewrite; nulový návrh (žádné označené řádky) maže
      * stale zápis, ať odklad „nevisí" (vzor OP/zásoby/DM). Rozpuštění v N+1 (MD 5xx / D 381)
-     * řeší {@see openNext}. Částky jsou dané z faktur (accrual_from/to), účetní je jen potvrzuje.
+     * řeší {@see openNext}. Částky jsou dané z faktur a ostatních závazků (accrual_from/to), účetní je jen potvrzuje.
      *
      * @param array{user_id?:?int, posted_by?:?int, ip?:?string, user_agent?:?string} $meta
      * @return array<string,mixed>
@@ -2222,8 +2232,12 @@ final class ClosingService
                 'document_no' => $docNo,
                 'total' => $total,
                 'by_account' => $preview['by_account'],
-                'item_costs' => array_column($preview['items'], 'total_czk', 'item_id'),
-                // Rozpad po položkách: rozpuštění z něj zrcadlí zaúčtovaný odklad (#384).
+                // Ocenění řádků faktur podle id řádku faktury: zapisuje se kvůli kompatibilitě, rozpuštění
+                // období s rozpadem `items` čte jen jej. Ostatní závazek tu není: jeho id je z jiné řady
+                // a přepsalo by ocenění řádku faktury se stejným id.
+                'item_costs' => array_column(array_filter($preview['items'],
+                    static fn (array $item): bool => $item['source'] === 'purchase_invoice'), 'total_czk', 'item_id'),
+                // Rozpad po řádcích faktur a ostatních závazků: rozpuštění z něj zrcadlí zaúčtovaný odklad (#384).
                 'items' => $preview['snapshot'],
                 'ran_at' => date('Y-m-d H:i:s'),
             ];
@@ -2324,8 +2338,7 @@ final class ClosingService
         $rows = $this->accruals->prepaidExpenseReleaseRows($supplierId, $originEndsOn, $targetEnd, $snapshots['periods']);
         foreach ($snapshots['items'] as $item) {
             if ((string) $item['to'] > $originEndsOn && (string) $item['from'] <= $targetEnd) {
-                $rows[] = ['item_id' => (int) $item['item_id'], 'purchase_invoice_id' => (int) $item['doc_id'],
-                    'accrual_from' => (string) $item['from'], 'accrual_to' => (string) $item['to'], 'snapshot' => $item];
+                $rows[] = AccrualDeferralService::prepaidExpenseSnapshotRow($item);
             }
         }
         $this->accruals->preloadPrepaidExpenseAllocations($supplierId, $rows, $dimensionCache);
@@ -2388,7 +2401,7 @@ final class ClosingService
     /**
      * Náhled {@see deferredRevenueAccrualPreview()} a navíc řádky zápisu odkladu po účtech
      * a dimenzích (`lines`), ze kterých zápis účtuje krok uzávěrky, a rozpad odkladu řádků
-     * vydaných faktur pro záznam kroku (`snapshot`, {@see AccrualDeferralService::snapshotItem()}).
+     * vydaných faktur a ostatních pohledávek pro záznam kroku (`snapshot`, {@see AccrualDeferralService::snapshotItem()}).
      *
      * @return array<string,mixed>
      */
@@ -2445,15 +2458,19 @@ final class ClosingService
             ));
             $membershipCaseId = $row['membership_case_id'] === null ? null : (int) $row['membership_case_id'];
             $invoiceId = $row['invoice_id'] === null ? null : (int) $row['invoice_id'];
+            $otherItemId = $row['other_item_id'] === null ? null : (int) $row['other_item_id'];
             if ($row['source'] === 'invoice') {
                 // Členský předpis nese období na účetním případu a rozpouští se dál z něj.
                 $snapshot[] = AccrualDeferralService::snapshotItem((int) $row['item_id'], (int) $invoiceId, $from, $to, $netCzk, $accounts);
+            } elseif ($row['source'] === 'other_item') {
+                $snapshot[] = AccrualDeferralService::snapshotOtherItem($row, $from, $to, $netCzk, $accounts);
             }
-            $documentKey = $membershipCaseId === null ? 'invoice:' . $invoiceId : 'membership:' . $membershipCaseId;
+            $documentKey = AccrualDeferralService::deferredRevenueDocumentKey($row);
             $documents[$documentKey] = [
                 'source' => (string) $row['source'],
                 'invoice_id' => $invoiceId,
                 'membership_case_id' => $membershipCaseId,
+                'other_item_id' => $otherItemId,
                 'invoice_number' => (string) $row['varsymbol'],
                 'deferred_amount' => round(($documents[$documentKey]['deferred_amount'] ?? 0.0) + $deferred, 2),
             ];
@@ -2462,6 +2479,7 @@ final class ClosingService
                 'item_id' => (int) $row['item_id'],
                 'invoice_id' => $invoiceId,
                 'membership_case_id' => $membershipCaseId,
+                'other_item_id' => $otherItemId,
                 'invoice_number' => (string) $row['varsymbol'],
                 'description' => (string) $row['description'],
                 'currency_code' => (string) $row['currency_code'],
@@ -2558,7 +2576,7 @@ final class ClosingService
                 'document_no' => $docNo,
                 'total' => $total,
                 'by_account' => $preview['by_account'],
-                // Rozpad po položkách vydaných faktur: rozpuštění z něj zrcadlí zaúčtovaný odklad (#384).
+                // Rozpad po řádcích vydaných faktur a ostatních pohledávek: rozpuštění z něj zrcadlí zaúčtovaný odklad (#384).
                 'items' => $preview['snapshot'],
                 'ran_at' => date('Y-m-d H:i:s'),
             ];
@@ -2620,15 +2638,13 @@ final class ClosingService
         $contexts = [];
         $dimensionCache = [AccrualDeferralService::CACHE_POSTING_DATE => $targetStart];
         // Odklad uzávěrky s rozpadem po položkách se rozpouští z něj (zrcadlí zaúčtovaný odklad
-        // i po změně období na řádcích, přeúčtování či stornu faktury, #384); starší odklad bez
-        // rozpadu a členské předpisy podle dnešního stavu dokladů.
+        // i po změně období, přeúčtování či stornu faktury nebo ostatní pohledávky, #384); starší
+        // odklad bez rozpadu a členské předpisy podle dnešního stavu dokladů.
         $snapshots = $this->accruals->closingDeferralSnapshots($supplierId, 'deferred_revenue_accrual', $originEndsOn);
         $rows = $this->accruals->deferredRevenueRows($supplierId, $originEndsOn, null, $originEndsOn, $targetEnd, true, null, $snapshots['periods']);
         foreach ($snapshots['items'] as $item) {
             if ((string) $item['to'] > $originEndsOn && (string) $item['from'] <= $targetEnd) {
-                $rows[] = ['item_id' => (int) $item['item_id'], 'invoice_id' => (int) $item['doc_id'], 'source' => 'invoice',
-                    'membership_case_id' => null, 'journal_entry_id' => null, 'revenue_account_code' => null,
-                    'accrual_from' => (string) $item['from'], 'accrual_to' => (string) $item['to'], 'snapshot' => $item];
+                $rows[] = AccrualDeferralService::deferredRevenueSnapshotRow($item);
             }
         }
         $this->accruals->preloadDeferredRevenueAllocations($supplierId, $rows, $dimensionCache);

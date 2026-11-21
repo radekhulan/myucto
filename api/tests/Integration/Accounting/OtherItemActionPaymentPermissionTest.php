@@ -8,6 +8,8 @@ use MyInvoice\Action\Accounting\OtherItemAction;
 use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\SupplierScopeMiddleware;
+use MyInvoice\Repository\AccountingPeriodRepository;
+use Psr\Container\ContainerInterface;
 use MyInvoice\Security\EffectiveRole;
 use MyInvoice\Service\Accounting\OtherItemService;
 use MyInvoice\Tests\Support\IsolatedSupplierTrait;
@@ -31,10 +33,12 @@ final class OtherItemActionPaymentPermissionTest extends TestCase
     private int $itemId;
     private int $cashId;
     private int $bankId;
+    private int $statementId;
+    private ContainerInterface $container;
 
     protected function setUp(): void
     {
-        $container = Bootstrap::buildContainer();
+        $this->container = $container = Bootstrap::buildContainer();
         $this->db = $container->get(Connection::class);
         $this->pdo = $this->db->pdo();
         $this->action = $container->get(OtherItemAction::class);
@@ -69,7 +73,7 @@ final class OtherItemActionPaymentPermissionTest extends TestCase
              VALUES (?, ?, ?, ?, ?, ?)'
         )->execute([$this->supplierId, 'synteticky-vypis', hash('sha256', uniqid('', true)),
             '1000000005/0100', '2099-01-20', 'CZK']);
-        $statementId = (int) $this->pdo->lastInsertId();
+        $this->statementId = $statementId = (int) $this->pdo->lastInsertId();
         $this->pdo->prepare(
             "INSERT INTO bank_transactions (statement_id, posted_at, amount, currency, description)
              VALUES (?, '2099-01-20', -400, 'CZK', 'Syntetická bankovní platba')"
@@ -128,6 +132,53 @@ final class OtherItemActionPaymentPermissionTest extends TestCase
         self::assertSame(200, $this->call('unallocate', 'DELETE', $bankMatcher, [], $bankAllocationId)->getStatusCode());
     }
 
+    public function testAllocationsLinkStatementCashDocumentAndLiveJournalEntry(): void
+    {
+        $periodId = $this->container->get(AccountingPeriodRepository::class)
+            ->create($this->supplierId, 2099, '2099-01-01', '2099-12-31');
+        $entry = $this->pdo->prepare(
+            'INSERT INTO journal_entries (supplier_id, period_id, entry_date, source_type, source_id, reversed_by, posted_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?)'
+        );
+        $posted = '2099-01-20 10:00:00';
+        $entry->execute([$this->supplierId, $periodId, '2099-01-20', 'manual', null, null, $posted]);
+        $reversalId = (int) $this->pdo->lastInsertId();
+        $entry->execute([$this->supplierId, $periodId, '2099-01-20', 'bank', $this->bankId, $reversalId, $posted]);
+        $entry->execute([$this->supplierId, $periodId, '2099-01-20', 'bank', $this->bankId, null, $posted]);
+        $liveId = (int) $this->pdo->lastInsertId();
+        // Pokladní doklad má zatím jen koncept zápisu (nezaúčtovaný návrh).
+        $entry->execute([$this->supplierId, $periodId, '2099-01-21', 'cash', $this->cashId, null, null]);
+        $cashEntryId = (int) $this->pdo->lastInsertId();
+        $this->service->allocate($this->supplierId, $this->itemId, ['bank_transaction_id' => $this->bankId, 'amount' => 100], null);
+        $this->service->allocate($this->supplierId, $this->itemId, ['cash_document_id' => $this->cashId, 'amount' => 200], null);
+        $reader = ['other_items' => 1, 'bank' => 1, 'cash' => 1];
+
+        $rows = $this->data($this->call('allocations', 'GET', $reader + ['accounting' => 1]))['items'];
+
+        $bank = array_values(array_filter($rows, static fn (array $row): bool => $row['bank_transaction_id'] !== null))[0];
+        $cash = array_values(array_filter($rows, static fn (array $row): bool => $row['cash_document_id'] !== null))[0];
+        self::assertSame($this->statementId, $bank['bank_statement_id']);
+        self::assertSame($liveId, $bank['journal_entry_id'], 'Odkaz vede na živý zápis, ne na stornovaný.');
+        self::assertNull($bank['cash_doc_number']);
+        self::assertSame('SYNTH-CASH-OTHER-1', $cash['cash_doc_number']);
+        self::assertNull($cash['bank_statement_id']);
+        self::assertNull($cash['journal_entry_id'], 'Koncept zápisu není zaúčtování, odkaz nevede nikam.');
+
+        $withoutJournal = $this->data($this->call('allocations', 'GET', $reader))['items'];
+        self::assertSame([null, null], array_column($withoutJournal, 'journal_entry_id'), 'Bez práva k deníku bez odkazu do něj.');
+        self::assertContains($this->statementId, array_column($withoutJournal, 'bank_statement_id'));
+
+        // Po zaúčtování pokladního dokladu vede odkaz na jeho zápis.
+        $this->pdo->prepare('UPDATE journal_entries SET posted_at = ? WHERE id = ?')->execute([$posted, $cashEntryId]);
+        // Stornovaná bankovní úhrada odkaz ztratí: živý zápis pohybu už může patřit jinému dokladu.
+        $this->pdo->prepare("UPDATE other_item_allocations SET reversed_on = '2099-01-25' WHERE supplier_id = ? AND bank_transaction_id = ?")
+            ->execute([$this->supplierId, $this->bankId]);
+        $rows = $this->data($this->call('allocations', 'GET', $reader + ['accounting' => 1]))['items'];
+        $byKind = [];
+        foreach ($rows as $row) $byKind[$row['bank_transaction_id'] !== null ? 'bank' : 'cash'] = $row['journal_entry_id'];
+        self::assertSame(['bank' => null, 'cash' => $cashEntryId], $byKind);
+    }
+
     public function testCashOnlyCandidateSurvivesMoreThanFiftyNewerBankPayments(): void
     {
         $statement = $this->pdo->prepare('SELECT id FROM bank_statements WHERE supplier_id = ? LIMIT 1');
@@ -157,6 +208,43 @@ final class OtherItemActionPaymentPermissionTest extends TestCase
             ['to' => '2020-01-01']);
         self::assertSame(200, $response->getStatusCode());
         self::assertSame(0, $this->data($response)['total']);
+    }
+
+    public function testListWithoutDatesLimitsManualItemsAndTotalsToYearWindow(): void
+    {
+        $ids = [];
+        foreach (['today' => date('Y-m-d'), 'old' => date('Y-m-d', strtotime('-3 years'))] as $key => $due) {
+            $item = $this->service->create($this->supplierId, [
+                'side' => 'payable', 'kind' => 'rent', 'title' => 'Syntetický nájem ' . $key,
+                'issued_on' => $due, 'due_on' => $due, 'amount' => $key === 'today' ? 300 : 7000, 'currency' => 'CZK',
+            ], null);
+            $this->service->post($this->supplierId, (int) $item['id'], null);
+            $ids[$key] = (int) $item['id'];
+        }
+        $list = $this->data($this->call('list', 'GET', ['other_items' => 1]));
+        // Bez data jen splatnost rok zpět až rok dopředu: stará položka ani položka z roku 2099 nejsou ve výběru ani v součtu.
+        self::assertSame([$ids['today']], array_column($list['items'], 'id'));
+        self::assertSame(1, $list['total']);
+        self::assertEquals([['side' => 'payable', 'currency' => 'CZK', 'remaining_amount' => 300]], $list['totals']);
+        $all = $this->data($this->call('list', 'GET', ['other_items' => 1], [], null, ['to' => '2099-12-31']));
+        self::assertSame(3, $all['total']);
+        // Otevřené nemají dolní mez: starý neuhrazený dluh zůstane ve výběru i v součtu, horní mez je rok dopředu.
+        $open = $this->data($this->call('list', 'GET', ['other_items' => 1], [], null, ['status' => 'open']));
+        self::assertEqualsCanonicalizing([$ids['today'], $ids['old']], array_column($open['items'], 'id'));
+        self::assertEquals([['side' => 'payable', 'currency' => 'CZK', 'remaining_amount' => 7300]], $open['totals']);
+        $allStatuses = $this->data($this->call('list', 'GET', ['other_items' => 1], [], null, ['status' => 'all']));
+        self::assertSame([$ids['today']], array_column($allStatuses['items'], 'id'));
+        // Hledání bez data okno nemá: najde i položku splatnou před třemi lety.
+        $found = $this->data($this->call('list', 'GET', ['other_items' => 1], [], null, ['status' => 'all', 'q' => 'nájem old']));
+        self::assertSame([$ids['old']], array_column($found['items'], 'id'));
+    }
+
+    public function testListShowsDocumentCountOnlyWithDocumentsRead(): void
+    {
+        $without = $this->data($this->call('list', 'GET', ['other_items' => 1], [], null, ['from' => '2099-01-01']));
+        self::assertArrayNotHasKey('document_count', $without['items'][0]);
+        $with = $this->data($this->call('list', 'GET', ['other_items' => 1, 'documents' => 1], [], null, ['from' => '2099-01-01']));
+        self::assertSame(0, $with['items'][0]['document_count']);
     }
 
     public function testOpenEndedDueDateFiltersIncludeDerivedTaxAdvances(): void

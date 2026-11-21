@@ -168,6 +168,7 @@ test('čtení účetnictví volá správné cesty', async () => {
     ['accounting_period_check_findings', { period_id: 2, check: 'unposted_documents', date_from: '2026-01-01' }, '/accounting/periods/2/checks/unposted_documents', { date_from: '2026-01-01' }],
     ['get_journal_entry_context', { id: 5, section: 'history' }, '/accounting/journal/5/history', null],
     ['list_document_journal_entries', { source: 'purchase-invoices', id: 5 }, '/accounting/journal/for-document/purchase-invoices/5', null],
+    ['list_document_journal_entries', { source: 'other-items', id: 9 }, '/accounting/journal/for-document/other-items/9', null],
     ['open_items_listing', { as_of: '2026-12-31', account_codes: ['311', '321'] }, '/accounting/reports/open-items-list', { as_of: '2026-12-31', codes: '311,321' }],
     ['vat_clearing_status', { year: 2026, month: 3 }, '/accounting/vat-clearing', { year: 2026, month: 3 }],
     ['get_cash_register_book', { id: 1, doc_type: 'out', query: 'benzín' }, '/accounting/cash-registers/1/book', { doc_type: 'out', q: 'benzín' }],

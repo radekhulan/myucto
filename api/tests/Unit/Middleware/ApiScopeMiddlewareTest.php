@@ -291,6 +291,7 @@ final class ApiScopeMiddlewareTest extends TestCase
             ['PUT', '/api/accounting/other-items/12/installments'],
             ['POST', '/api/accounting/other-items/12/schedule'],
             ['PUT', '/api/accounting/other-items/schedules/3/status'],
+            ['PUT', '/api/accounting/other-items/schedules/3/title'],
             ['POST', '/api/accounting/other-items/12/allocations'],
         ] as [$method, $path]) {
             $r = $this->middleware()->process($this->bearer($method, $path, 'read_write'), $this->okHandler());
@@ -380,6 +381,8 @@ final class ApiScopeMiddlewareTest extends TestCase
             ['PUT', '/api/accounting/other-items/12/schedule'],
             ['POST', '/api/accounting/other-items/schedules'],
             ['POST', '/api/accounting/other-items/schedules/3/status'],
+            ['POST', '/api/accounting/other-items/schedules/3/title'],
+            ['PUT', '/api/accounting/other-items/schedules/3/title/x'],
             ['PUT', '/api/accounting/other-items/schedules/3'],
             ['DELETE', '/api/accounting/other-items/schedules/3'],
             ['POST', '/api/accounting/other-items-extra'],

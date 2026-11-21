@@ -784,7 +784,7 @@ final class DimensionAccountMapPostingTest extends TestCase
             $service = Bootstrap::buildContainer()->get(AccrualDeferralService::class);
             $before = $this->selectCount();
             $cache = [];
-            $service->preloadPrepaidExpenseAllocations($this->supplierId, array_map(static fn (int $id): array => ['purchase_invoice_id' => $id], $ids), $cache);
+            $service->preloadPrepaidExpenseAllocations($this->supplierId, array_map(static fn (int $id): array => ['source' => 'purchase_invoice', 'purchase_invoice_id' => $id], $ids), $cache);
             foreach ($ids as $id) {
                 $allocations = $service->dimensionAllocations($this->supplierId, 'purchase_invoice', $id, $items[$id], ['518' => 1.0], $cache);
                 self::assertSame([$this->fve], array_map(fn (array $a): ?int => $a['dimensions'][$this->centerType] ?? null, $allocations), 'Položka se páruje se svým střediskem.');

@@ -35,6 +35,12 @@ export interface ActionItem {
   /** název ikony z ICONS mapy níže (volitelné) */
   icon?: keyof typeof ICONS
   tier?: ActionTier          // default 'secondary'
+  /**
+   * Nadpis skupiny v nabídce „…" (jen tier `overflow`). Sousední akce se stejnou skupinou
+   * stojí pod jedním nadpisem a od ostatních je dělí čára, takže související akce zůstanou
+   * pohromadě bez ohledu na šířku okna. Akce skupiny drž v poli za sebou.
+   */
+  group?: string
   variant?: ActionVariant    // default 'neutral'
   show?: unknown             // default true; truthy = zobrazit, falsy (false/null/0/'') = skrýt
   disabled?: boolean
@@ -135,12 +141,15 @@ const blockedNotes = computed(() => [...new Set(
   [...primary.value, ...secondary.value].map(reasonOf).filter((r): r is string => !!r),
 )])
 
+// Zamčená akce je vždy tlačítko: odkaz (to/href) by klávesou Enter navigoval i zašedlý.
 function tagOf(a: ActionItem) {
+  if (a.disabled) return 'button'
   if (a.to) return RouterLink
   if (a.href) return 'a'
   return 'button'
 }
 function attrsOf(a: ActionItem): Record<string, unknown> {
+  if (a.disabled) return { type: 'button' }
   if (a.to) return { to: a.to }
   if (a.href) return { href: a.href, target: '_blank', rel: 'noopener', ...(a.download ? { download: '' } : {}) }
   return { type: 'button' }
@@ -175,9 +184,22 @@ async function toggle() {
 }
 function close() { open.value = false; advancedOpen.value = false }
 function runItem(a: ActionItem) {
+  // Zamčená položka nabídky (pointer-events-none) jde vybrat klávesou: nesmí nic spustit.
+  if (a.disabled) return
   close()
   if (a.run) a.run()
 }
+
+/** Akce nabídky „…“ po souvislých skupinách: skupina má nadpis a role=group, ostatní stojí samy. */
+const overflowSegments = computed(() => {
+  const segments: { group: string | undefined; items: ActionItem[] }[] = []
+  for (const a of overflow.value) {
+    const last = segments[segments.length - 1]
+    if (last && last.group === a.group) last.items.push(a)
+    else segments.push({ group: a.group, items: [a] })
+  }
+  return segments
+})
 
 // Nabídka zespodu na telefonu se při posouvání jejího obsahu zavírat nesmí.
 function closeOnScroll(e: Event) {
@@ -269,7 +291,7 @@ onBeforeUnmount(() => {
               :class="['w-full flex items-center gap-2.5 px-3 py-2 cursor-pointer text-left',
                        a.variant === 'danger' ? 'text-danger-600 hover:bg-danger-50' : 'text-neutral-700 hover:bg-neutral-50',
                        a.disabled ? 'opacity-50 pointer-events-none' : '']"
-              :title="titleOf(a)" @click="runItem(a)">
+              :aria-disabled="a.disabled ? 'true' : undefined" :title="titleOf(a)" @click="runItem(a)">
               <svg v-if="a.icon" :class="['w-4 h-4 shrink-0', a.variant === 'danger' ? 'text-danger-600' : MENU_ICON[a.variant ?? 'neutral']]"
                 fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
                 <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS[a.icon]" />
@@ -284,7 +306,7 @@ onBeforeUnmount(() => {
               :class="['w-full flex items-center gap-2.5 px-3 py-2 cursor-pointer text-left',
                        a.variant === 'danger' ? 'text-danger-600 hover:bg-danger-50' : 'text-neutral-700 hover:bg-neutral-50',
                        a.disabled ? 'opacity-50 pointer-events-none' : '']"
-              :title="titleOf(a)" @click="runItem(a)">
+              :aria-disabled="a.disabled ? 'true' : undefined" :title="titleOf(a)" @click="runItem(a)">
               <svg v-if="a.icon" :class="['w-4 h-4 shrink-0', a.variant === 'danger' ? 'text-danger-600' : MENU_ICON[a.variant ?? 'neutral']]"
                 fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
                 <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS[a.icon]" />
@@ -296,7 +318,7 @@ onBeforeUnmount(() => {
                 :class="['w-full flex items-center gap-2.5 px-3 py-2 cursor-pointer text-left',
                          a.variant === 'danger' ? 'text-danger-600 hover:bg-danger-50' : 'text-neutral-700 hover:bg-neutral-50',
                          a.disabled ? 'opacity-50 pointer-events-none' : '']"
-                :title="titleOf(a)" @click="runItem(a)">
+                :aria-disabled="a.disabled ? 'true' : undefined" :title="titleOf(a)" @click="runItem(a)">
                 <svg v-if="a.icon" :class="['w-4 h-4 shrink-0', a.variant === 'danger' ? 'text-danger-600' : MENU_ICON[a.variant ?? 'neutral']]"
                   fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
                   <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS[a.icon]" />
@@ -307,18 +329,26 @@ onBeforeUnmount(() => {
             <div v-if="hasOverflow" :class="['my-1 border-t border-neutral-100', hasSecondaryOverflow ? '' : 'sm:hidden']"></div>
           </template>
 
-          <!-- overflow vždy -->
-          <component :is="tagOf(a)" v-for="a in overflow" :key="a.key" v-bind="attrsOf(a)"
-            :class="['w-full flex items-center gap-2.5 px-3 py-2 cursor-pointer text-left',
-                     a.variant === 'danger' ? 'text-danger-600 hover:bg-danger-50' : 'text-neutral-700 hover:bg-neutral-50',
-                     a.disabled ? 'opacity-50 pointer-events-none' : '']"
-            :title="titleOf(a)" @click="runItem(a)">
-            <svg v-if="a.icon" :class="['w-4 h-4 shrink-0', a.variant === 'danger' ? 'text-danger-600' : MENU_ICON[a.variant ?? 'neutral']]"
-              fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
-              <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS[a.icon]" />
-            </svg>
-            <span class="min-w-0"><span class="block">{{ a.loading ? '…' : a.label }}</span><span v-if="reasonOf(a)" class="mt-0.5 block text-xs leading-snug text-warning-700">{{ reasonOf(a) }}</span></span>
-          </component>
+          <!-- overflow vždy; skupina (group) má nadpis, role=group a od ostatních akcí ji dělí čára -->
+          <template v-for="(segment, index) in overflowSegments" :key="segment.items[0].key">
+            <div v-if="index > 0 && (segment.group || overflowSegments[index - 1].group)" class="my-1 border-t border-neutral-100" data-test="action-bar-group-rule"></div>
+            <div :role="segment.group ? 'group' : undefined" :aria-label="segment.group || undefined"
+              :data-test="segment.group ? 'action-bar-group-items' : undefined">
+              <div v-if="segment.group" data-test="action-bar-group" aria-hidden="true"
+                class="px-3 pb-1 pt-1.5 text-[11px] font-semibold uppercase tracking-wide text-neutral-400">{{ segment.group }}</div>
+              <component :is="tagOf(a)" v-for="a in segment.items" :key="a.key" v-bind="attrsOf(a)"
+                :class="['w-full flex items-center gap-2.5 px-3 py-2 cursor-pointer text-left',
+                         a.variant === 'danger' ? 'text-danger-600 hover:bg-danger-50' : 'text-neutral-700 hover:bg-neutral-50',
+                         a.disabled ? 'opacity-50 pointer-events-none' : '']"
+                :aria-disabled="a.disabled ? 'true' : undefined" :title="titleOf(a)" @click="runItem(a)">
+                <svg v-if="a.icon" :class="['w-4 h-4 shrink-0', a.variant === 'danger' ? 'text-danger-600' : MENU_ICON[a.variant ?? 'neutral']]"
+                  fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
+                  <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS[a.icon]" />
+                </svg>
+                <span class="min-w-0"><span class="block">{{ a.loading ? '…' : a.label }}</span><span v-if="reasonOf(a)" class="mt-0.5 block text-xs leading-snug text-warning-700">{{ reasonOf(a) }}</span></span>
+              </component>
+            </div>
+          </template>
 
           <!-- advanced → rozbalovací „Pokročilé" (méně časté / admin / destruktivní akce) -->
           <template v-if="hasAdvanced">
@@ -343,7 +373,7 @@ onBeforeUnmount(() => {
                 :class="['w-full flex items-center gap-2.5 pl-6 pr-3 py-2 cursor-pointer text-left',
                          a.variant === 'danger' ? 'text-danger-600 hover:bg-danger-50' : 'text-neutral-700 hover:bg-neutral-50',
                          a.disabled ? 'opacity-50 pointer-events-none' : '']"
-                :title="titleOf(a)" @click="runItem(a)">
+                :aria-disabled="a.disabled ? 'true' : undefined" :title="titleOf(a)" @click="runItem(a)">
                 <svg v-if="a.icon" :class="['w-4 h-4 shrink-0', a.variant === 'danger' ? 'text-danger-600' : MENU_ICON[a.variant ?? 'neutral']]"
                   fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8">
                   <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS[a.icon]" />

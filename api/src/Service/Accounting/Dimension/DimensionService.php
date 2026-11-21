@@ -796,6 +796,8 @@ final class DimensionService
      */
     private function syncScheduleDrafts(int $supplierId, int $sourceItemId): void
     {
+        // Jen výskyty živého rozvrhu (JOIN na rozvrh): koncepty zrušeného opakování jsou samostatné
+        // doklady a změna dimenzí zdroje je už nemění.
         $stmt = $this->db->pdo()->prepare(
             "SELECT o.item_id FROM other_item_schedules s
                JOIN other_item_schedule_occurrences o ON o.schedule_id = s.id AND o.supplier_id = s.supplier_id

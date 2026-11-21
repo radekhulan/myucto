@@ -511,6 +511,37 @@ nabízí úhrady z banky. U potvrzené nebo zaúčtované položky účet dopln�
 opravíte přímo v detailu tlačítkem **Upravit** u pole **Účet protistrany**.
 Změna nemění zaúčtování ani saldo a zapíše se do aktivity položky.
 
+V podvojném účetnictví lze v sekci **Účtování** u pohledávky vyplnit **Časové rozlišení výnosu**
+a u závazku **Časové rozlišení nákladu**, tedy období **Od**–**Do**, do kterého výnos
+či náklad patří (roční nájem, licence, pojistné nebo předplatné placené předem). Pozná-li
+aplikace období z názvu položky (např. „Předplatné na rok 2027“ nebo „Nájem od 1. 10. 2026 do 30. 9. 2027“), nabídne ho k převzetí.
+Položka se zaúčtuje celá. Uzávěrka pak z výsledkových účtů jejího zápisu
+(u pohledávky třída 6, u závazku třída 5, včetně přeúčtování dvojic) odloží část
+připadající na dny za rozvahovým dnem, výnos na 384 a náklad na 381, a otevření
+dalšího roku ji rozpustí zpět. Z položky zaúčtované jen proti rozvahovému účtu nebo
+proti účtu opačné strany (pohledávka bez účtu třídy 6, závazek bez účtu třídy 5) uzávěrka
+nic neodloží. Zápis, který už nese účet odkladu (381 u závazku, 384 u pohledávky), se
+neodkládá podruhé; odklad zaúčtovaný ručně samostatným zápisem uzávěrka nepozná, u položky
+s obdobím ho proto nezadávejte. Storno nebo přeúčtování položky
+(i jen její dvojice) v pozdějším roce funguje jako dobropis: uzávěrka roku storna
+vrátí zbylou odloženou část na původní účty a nový zápis se odloží znovu na své účty.
+Stejně se započte i storno nebo oprava zpětně datovaná do dřívějšího roku
+(viz [§ 72.4.4](72_Uzaverka.md#7244-kroky-4-a-5-dohadne-polozky-a-casove-rozliseni)).
+Období se zadává spolu se začátkem i koncem. V daňové evidenci ho zadat nejde.
+Změna strany (pohledávka ↔ závazek) období vymaže, protože se mění jeho význam; návrat na původní stranu před uložením ho vrátí.
+U zaúčtované položky ho nastavíte nebo zrušíte v detailu ikonou tužky
+u pole **Časové rozlišení výnosu**, resp. **Časové rozlišení nákladu** v kartě **Údaje položky**
+(prázdná pole Od a Do rozlišení zruší). U položky bez vlastního zápisu (v daňové evidenci, potvrzené,
+stornované nebo převzaté ze zůstatku deníku) uložené období jen zrušíte ikonou křížku u stejného pole;
+znovu ho jde zadat až u zaúčtované položky s vlastním zápisem. Zápis v deníku se
+tím nemění a změna se zapíše do aktivity položky. Položku v uzavřeném, revidovaném či schváleném
+účetním období (kteréhokoli zápisu, ze kterého uzávěrka odkládá) už změnit nelze, rozlišení je součástí
+uzávěrky. Zaúčtoval-li krok **Časové rozlišení** probíhající uzávěrky odklad (výnosů u pohledávky, nákladů
+u závazku), nejdřív ho v uzávěrce vraťte, pak období změňte a krok spusťte znovu. Stejně se hlídá smazání
+konceptu s obdobím. Uzávěrka si odklad položky uloží a další rok rozpouští právě jej, stejně jako u řádků
+faktur. Opakování období
+do nově vzniklých položek nepřenáší.
+
 Na detailu lze připojit originály ze [skladu dokumentů](34_Dokumenty.md) a
 akcí **Připojit úhradu** přiřadit volnou bankovní či pokladní úhradu. Bez
 zapnutého automatického párování (níže) se úhrady párují jen ručně. Výběr

@@ -26,7 +26,16 @@ final class OtherItemScheduleAction
     public function list(Request $request, Response $response): Response
     {
         if (!$this->requirePermission($request, $response, 'other_items', AccessLevel::READ, $err)) return $err;
-        return $this->run($response, fn () => ['items' => $this->service->list($this->currentSupplierId($request))]);
+        // Detail položky chce jen její plán; bez parametru zůstává přehled všech plánů firmy.
+        $raw = $request->getQueryParams()['source_item_id'] ?? null;
+        $sourceItemId = null;
+        if ($raw !== null && $raw !== '') {
+            $sourceItemId = is_scalar($raw) ? filter_var($raw, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]) : false;
+            if ($sourceItemId === false) {
+                return Json::error($response, 'other_items.error.invalid_source_item', 'Neplatné id položky.', 422);
+            }
+        }
+        return $this->run($response, fn () => ['items' => $this->service->list($this->currentSupplierId($request), $sourceItemId)]);
     }
 
     public function get(Request $request, Response $response, array $args): Response
@@ -81,6 +90,55 @@ final class OtherItemScheduleAction
             }
             return $this->service->setStatus($supplierId, (int) $args['id'], (string) ($body['status'] ?? ''), $body['auto_post'] ?? null, $this->canAutoPost($request, $supplierId));
         });
+    }
+
+    /**
+     * Šablona názvu budoucích výskytů; názvy už vytvořených položek se nemění.
+     * Stačí `other_items` WRITE i u rozvrhu s automatickým účtováním: stejně jako úprava
+     * konceptu z takového rozvrhu v aplikaci mění jen text dokladu, ne účty ani částky;
+     * právo účtovat hlídá zapnutí automatiky a spuštění generování.
+     * U rozvrhu s automatickým účtováním jen člověk v aplikaci: cron by doklady
+     * s názvem od tokenu zaúčtoval, aniž je kdo viděl (jako {@see OtherItemAction} u konceptu).
+     */
+    public function title(Request $request, Response $response, array $args): Response
+    {
+        if (!$this->requirePermission($request, $response, 'other_items', AccessLevel::WRITE, $err)) return $err;
+        $body = (array) ($request->getParsedBody() ?? []);
+        return $this->run($response, fn () => $this->service->setTitle($this->currentSupplierId($request), (int) $args['id'],
+            $body, RequestAuthorization::actsAsSession($request)));
+    }
+
+    /** Náhled názvu nejbližšího výskytu pro rozepsané nastavení; nic neukládá. */
+    public function titlePreview(Request $request, Response $response, array $args): Response
+    {
+        if (!$this->requirePermission($request, $response, 'other_items', AccessLevel::READ, $err)) return $err;
+        $query = $request->getQueryParams();
+        $input = [];
+        foreach (['frequency', 'ends_on'] as $key) {
+            if (isset($query[$key])) {
+                if (!is_string($query[$key])) {
+                    return Json::error($response, 'other_items.error.invalid_' . ($key === 'ends_on' ? 'date' : 'frequency'),
+                        'Neplatný parametr ' . $key . '.', 422, ['field' => $key]);
+                }
+                $input[$key] = $query[$key];
+            }
+        }
+        if (isset($query['title_template'])) {
+            if (!is_string($query['title_template'])) {
+                return Json::error($response, 'other_items.error.invalid_title_template', 'Šablona názvu musí být text.', 422,
+                    ['field' => 'title_template']);
+            }
+            $input['title_template'] = $query['title_template'];
+        }
+        if (isset($query['title_sync_period'])) {
+            $sync = filter_var($query['title_sync_period'], FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE);
+            if ($sync === null) {
+                return Json::error($response, 'other_items.error.invalid_title_sync_period',
+                    'Volba srovnání období v názvu musí být boolean.', 422, ['field' => 'title_sync_period']);
+            }
+            $input['title_sync_period'] = $sync;
+        }
+        return $this->run($response, fn () => $this->service->previewTitle($this->currentSupplierId($request), (int) $args['item_id'], $input));
     }
 
     public function delete(Request $request, Response $response, array $args): Response
@@ -152,7 +210,8 @@ final class OtherItemScheduleAction
         try {
             return Json::ok($response, $callback(), $status);
         } catch (OtherItemException $e) {
-            return Json::error($response, 'other_items.error.' . $e->errorCode, $e->getMessage(), $e->httpStatus);
+            return Json::error($response, 'other_items.error.' . $e->errorCode, $e->getMessage(), $e->httpStatus,
+                ($e->field !== null ? ['field' => $e->field] : []) + $e->details);
         } catch (ClosingException $e) {
             return Json::error($response, $e->errorCode, $e->getMessage(), $e->httpStatus);
         } catch (\Throwable $e) {

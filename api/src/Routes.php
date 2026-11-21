@@ -2983,7 +2983,7 @@ final class Routes
             $g->get   ('/journal/{id:[0-9]+}/source',         JournalSourceAction::class);
             // Zaúčtování prvotního dokladu pro sekci „Zaúčtování" na detailu faktury —
             // KONKRÉTNÍ cesta PŘED generickým /journal/{id} (segment 'for-document' není číselný).
-            $g->get   ('/journal/for-document/{source:invoices|purchase-invoices}/{id:[0-9]+}',
+            $g->get   ('/journal/for-document/{source:invoices|purchase-invoices|other-items}/{id:[0-9]+}',
                                                              JournalForDocumentAction::class);
             // Protějšky zápisu (doklad ↔ úhrada) — KONKRÉTNÍ cesta PŘED generickým /journal/{id}.
             $g->get   ('/journal/{id:[0-9]+}/related',        JournalRelatedAction::class);
@@ -3442,6 +3442,8 @@ final class Routes
             $g->delete('/other-items/schedules/{id:[0-9]+}',   [\MyInvoice\Action\Accounting\OtherItemScheduleAction::class, 'delete']);
             $g->post  ('/other-items/schedules/{id:[0-9]+}/generate', [\MyInvoice\Action\Accounting\OtherItemScheduleAction::class, 'generate']);
             $g->put   ('/other-items/schedules/{id:[0-9]+}/status', [\MyInvoice\Action\Accounting\OtherItemScheduleAction::class, 'status']);
+            $g->put   ('/other-items/schedules/{id:[0-9]+}/title', [\MyInvoice\Action\Accounting\OtherItemScheduleAction::class, 'title']);
+            $g->get   ('/other-items/{item_id:[0-9]+}/schedule/title-preview', [\MyInvoice\Action\Accounting\OtherItemScheduleAction::class, 'titlePreview']);
             $g->post  ('/other-items/{item_id:[0-9]+}/schedule', [\MyInvoice\Action\Accounting\OtherItemScheduleAction::class, 'create']);
             $g->get   ('/other-items/{item_id:[0-9]+}/installments', [\MyInvoice\Action\Accounting\OtherItemScheduleAction::class, 'installments']);
             $g->put   ('/other-items/{item_id:[0-9]+}/installments', [\MyInvoice\Action\Accounting\OtherItemScheduleAction::class, 'setInstallments']);
@@ -3451,6 +3453,7 @@ final class Routes
             $g->delete('/other-items/{id:[0-9]+}',             [\MyInvoice\Action\Accounting\OtherItemAction::class, 'delete']);
             $g->put   ('/other-items/{id:[0-9]+}/counterparty-account', [\MyInvoice\Action\Accounting\OtherItemAction::class, 'updateCounterpartyAccount']);
             $g->put   ('/other-items/{id:[0-9]+}/text',        [\MyInvoice\Action\Accounting\OtherItemAction::class, 'updateText']);
+            $g->put   ('/other-items/{id:[0-9]+}/accrual',     [\MyInvoice\Action\Accounting\OtherItemAction::class, 'updateAccrual']);
             $g->delete('/other-items/{id:[0-9]+}/posted',      [\MyInvoice\Action\Accounting\OtherItemAction::class, 'deletePosted']);
             $g->post  ('/other-items/{id:[0-9]+}/post',        [\MyInvoice\Action\Accounting\OtherItemAction::class, 'post']);
             $g->post  ('/other-items/{id:[0-9]+}/reverse',     [\MyInvoice\Action\Accounting\OtherItemAction::class, 'reverse']);

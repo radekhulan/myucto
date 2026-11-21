@@ -618,6 +618,8 @@
       "other_items"
     ],
     "other-item-new": [
+      "accrual_period",
+      "accrual_suggest",
       "dimensions",
       "documents",
       "linked_documents",
@@ -625,12 +627,17 @@
       "pending_documents"
     ],
     "other-item-detail": [
+      "accrual_period",
       "dimensions",
       "documents",
       "linked_documents",
-      "other_items"
+      "list_nav",
+      "other_items",
+      "purchase_invoice"
     ],
     "other-item-edit": [
+      "accrual_period",
+      "accrual_suggest",
       "dimensions",
       "documents",
       "linked_documents",

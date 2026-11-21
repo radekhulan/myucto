@@ -78,15 +78,16 @@ export const ACCOUNTING_READ_TOOLS = [
     }),
   read('get_journal_entry_context', 'Kontext účetního zápisu',
     'Doplňuje get_journal_entry: `section` history = auditní historie změn zápisu, links = připojené doklady, notes = '
-    + 'poznámky, related = související zápisy dokladu a úhrad, source = souhrn zdrojového dokladu. Nic nemění.', {
+    + 'poznámky, related = související doklady a úhrady i s jejich zápisy (faktury, ostatní pohledávky a závazky, '
+    + 'bankovní a pokladní úhrady, zápočty), source = souhrn zdrojového dokladu. Nic nemění.', {
       id: id('ID účetního zápisu.'),
       section: str('Co načíst.', { enum: ['source', 'related', 'links', 'notes', 'history'] }),
     }, (a) => `/accounting/journal/${seg(a.id)}/${seg(a.section)}`, { required: ['id', 'section'] }),
-  read('list_document_journal_entries', 'Účetní zápisy faktury',
-    'Všechny zápisy vydané (`source: "invoices"`) nebo přijaté (`source: "purchase-invoices"`) faktury včetně storen '
-    + 'a přeúčtování. Nic nemění.', {
-      source: str('Druh dokladu.', { enum: ['invoices', 'purchase-invoices'] }),
-      id: id('ID faktury.'),
+  read('list_document_journal_entries', 'Účetní zápisy dokladu',
+    'Všechny zápisy vydané (`source: "invoices"`) nebo přijaté (`source: "purchase-invoices"`) faktury či ostatní '
+    + 'pohledávky nebo závazku (`source: "other-items"`) včetně storen a přeúčtování. Nic nemění.', {
+      source: str('Druh dokladu.', { enum: ['invoices', 'purchase-invoices', 'other-items'] }),
+      id: id('ID dokladu.'),
     }, (a) => `/accounting/journal/for-document/${seg(a.source)}/${seg(a.id)}`, { required: ['source', 'id'] }),
   custom('list_open_items', 'Otevřené položky účtu',
     'Saldokonto jednoho účtu k datu: řádky deníku spárované do okruhů (doklad, úhrady, zůstatek). S `include_suggestions` '
