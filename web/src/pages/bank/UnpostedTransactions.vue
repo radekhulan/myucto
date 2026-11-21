@@ -136,7 +136,7 @@ function toggleAllLoaded() {
   selectedIds.value = allLoadedSelected.value ? [] : items.value.map(tx => tx.id)
 }
 const toolbarActions = computed<ActionItem[]>(() => [
-  { key: 'export', label: t('bank.unmatched_export.download'), icon: 'download', tier: 'secondary', show: props.scope === 'all' && !auth.isClientRole, run: exportUnmatched },
+  { key: 'export', label: t('bank.unmatched_export.download'), icon: 'download', tier: 'overflow', show: props.scope === 'all' && !auth.isClientRole, run: exportUnmatched },
   { ...bulk.menuItem.value, show: bulkAvailable.value },
   { key: 'bank-bulk-link', label: t('bulk_actions.bank_link'), icon: 'table', tier: 'overflow', variant: 'primary', show: isDoubleEntry.value && auth.canRead('accounting'), to: { name: 'accounting-posting-backfill' } },
 ])
