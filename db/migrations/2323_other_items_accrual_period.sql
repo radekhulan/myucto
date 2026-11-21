@@ -1,8 +1,9 @@
--- MyÚčto.cz: období časového rozlišení výnosu u ostatních pohledávek.
+-- MyÚčto.cz: období časového rozlišení u ostatních pohledávek a závazků.
 --
 -- PROČ: pohledávka za nájem, licenci nebo jiné plnění přes rozvahový den zaúčtuje celý
--- výnos k datu dokladu. Uzávěrka (krok „Časové rozlišení") z ní stejně jako z řádků
--- vydaných faktur odloží na 384 část připadající na příští období a další rok ji rozpustí.
+-- výnos k datu dokladu, závazek (předplatné, pojištění) celý náklad. Uzávěrka (krok
+-- „Časové rozlišení") z nich stejně jako z řádků faktur odloží část připadající na příští
+-- období (výnos na 384, náklad na 381) a další rok ji rozpustí.
 -- Obě data jsou buď vyplněná (od <= do), nebo prázdná; prázdná = bez rozlišení.
 -- Index slouží uzávěrce, která hledá položky s obdobím končícím za rozvahovým dnem.
 
