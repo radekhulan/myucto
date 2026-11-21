@@ -21,6 +21,7 @@
     table.book thead th.num { text-align: right; }
     table.book tbody td { padding: 0.7mm 1.2mm; font-size: 7.5pt; border-bottom: 0.2pt solid #e5e5e5; vertical-align: top; }
     .num { text-align: right; }
+    .nw { white-space: nowrap; }
     .muted { color: #888; }
     .totals-title { font-size: 9pt; font-weight: bold; margin: 4mm 0 1mm 0; }
     table.totals { width: 70%; border-collapse: collapse; }
@@ -64,36 +65,36 @@
     <thead>
         <tr>
             <th style="width:8%;">Doklad</th>
-            <th style="width:6%;">Směr</th>
-            <th style="width:10%;">Druh</th>
-            <th style="width:{{ book.showPosting ? 13 : 18 }}%;">Položka</th>
-            <th style="width:13%;">Protistrana</th>
-            <th style="width:6%;">Datum vzniku</th>
-            <th style="width:6%;">Splatnost</th>
+            <th style="width:7%;">Směr</th>
+            <th style="width:8.5%;">Druh</th>
+            <th style="width:{{ book.showPosting ? 11 : 17.5 }}%;">Položka</th>
+            <th style="width:10.5%;">Protistrana</th>
+            <th style="width:6.5%;">Datum vzniku</th>
+            <th style="width:6.5%;">Splatnost</th>
             <th class="num" style="width:8%;">Částka</th>
-            <th class="num" style="width:8%;">Uhrazeno</th>
+            <th class="num" style="width:7.5%;">Uhrazeno</th>
             <th class="num" style="width:8%;">Zbývá uhradit</th>
-            <th style="width:4%;">Měna</th>
-            <th style="width:6%;">Stav</th>
-            {% if book.showPosting %}<th style="width:5%;">Zaúčtováno</th>{% endif %}
+            <th style="width:3.5%;">Měna</th>
+            <th style="width:8.5%;">Stav</th>
+            {% if book.showPosting %}<th class="nw" nowrap="nowrap" style="width:6.5%;">Zaúčtováno</th>{% endif %}
         </tr>
     </thead>
     <tbody>
         {% for row in book.rows() %}
         <tr{% if not row.counted %} class="muted"{% endif %}>
-            <td>{{ row.document_no ?: '–' }}</td>
-            <td>{{ row.side_label }}</td>
+            <td class="nw" nowrap="nowrap">{{ row.document_no ?: '–' }}</td>
+            <td class="nw" nowrap="nowrap">{{ row.side_label }}</td>
             <td>{{ row.kind_label }}</td>
             <td>{{ row.title }}</td>
             <td>{{ (row.partner_name ?? '')|slice(0, 45) }}</td>
-            <td>{{ row.issued_on|cz_date }}</td>
-            <td>{{ row.due_on|cz_date }}</td>
-            <td class="num">{{ row.amount|cz_money }}</td>
-            <td class="num">{{ row.paid_amount|cz_money }}</td>
-            <td class="num">{{ row.remaining_payment|cz_money }}</td>
+            <td class="nw" nowrap="nowrap">{{ row.issued_on|cz_date }}</td>
+            <td class="nw" nowrap="nowrap">{{ row.due_on|cz_date }}</td>
+            <td class="num nw" nowrap="nowrap">{{ row.amount|cz_money }}</td>
+            <td class="num nw" nowrap="nowrap">{{ row.paid_amount|cz_money }}</td>
+            <td class="num nw" nowrap="nowrap">{{ row.remaining_payment|cz_money }}</td>
             <td>{{ row.currency }}</td>
             <td>{{ row.status_label }}</td>
-            {% if book.showPosting %}<td>{{ row.posted_on ? row.posted_on|cz_date : '' }}</td>{% endif %}
+            {% if book.showPosting %}<td class="nw" nowrap="nowrap">{{ row.posted_on ? row.posted_on|cz_date : '' }}</td>{% endif %}
         </tr>
         {% endfor %}
     </tbody>
