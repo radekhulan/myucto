@@ -477,13 +477,44 @@ final class DocumentLinker
     }
 
     /**
+     * Úhrady ostatních pohledávek a závazků a záloh na daň z příjmů v agendě daňové evidence
+     * ({@see PohodaTaxEvidenceImporter}): přiřazení pohybu stejně jako v {@see matchPayments()},
+     * jen bez vazeb na deník, který daňová evidence nemá. Ostatní položka bez vlastního
+     * zápisu se platbou neúčtuje, předpis zálohy dostane jen vazbu na pohyb.
+     */
+    public function matchOtherItemPayments(PohodaContext $ctx): void
+    {
+        $existing = $this->map->all($ctx->supplierId, PohodaImportRepository::KIND_PAYMENT);
+        $start = $ctx->periodStart();
+        foreach ($ctx->liquidations as $l) {
+            if ($l['doc'] !== 'other_item' && $l['doc'] !== 'tax_advance') {
+                continue;
+            }
+            $mapKey = $l['doc'] . '|' . $l['id'] . '|' . $l['liq'];
+            if (isset($existing[$mapKey])) {
+                $ctx->protocol->count(self::STEP_PAYMENTS, 'existing');
+                continue;
+            }
+            if ($ctx->skipsDate($l['date']) || ($l['date'] !== null && $l['date'] < $start)) {
+                continue;
+            }
+            if ($l['doc'] === 'other_item') {
+                $this->allocateOtherItem($ctx, $l, $mapKey);
+            } else {
+                $this->matchTaxAdvance($ctx, $l, $mapKey);
+            }
+        }
+        $this->restoreOtherItemSettlements($ctx);
+    }
+
+    /**
      * Pohyb, kterým POHODA doklad uhradila. Úhrada nese id bankovního dokladu POHODY - to je
      * jednoznačné i tam, kde se čísla dokladů opakují (číselná řada banky se každý rok
      * začíná znovu).
      *
      * @param array<string,mixed> $l
      */
-    private function bankTransactionFor(PohodaContext $ctx, array $l): ?int
+    public function bankTransactionFor(PohodaContext $ctx, array $l): ?int
     {
         $p = $ctx->protocol;
         $byId = ($l['source_id'] ?? '') !== '' ? ($ctx->bankByPohodaId[$l['source_id']] ?? null) : null;

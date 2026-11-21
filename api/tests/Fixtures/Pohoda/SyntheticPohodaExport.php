@@ -153,6 +153,24 @@ final class SyntheticPohodaExport
     }
 
     /**
+     * Agenda vedená v POHODĚ jako daňová evidence: přehled jednotek s typem `singleEntry`,
+     * účetní deník, osnova a předkontace jsou prázdné odpovědi se stavem `ok` (tak na jejich
+     * export odpoví agenda bez podvojného účetnictví). Doklady a banka jsou z {@see write()}:
+     * vydaná faktura 26FV0001 a přijatá 26PF0001 uhrazené bankou, neuhrazená faktura minulého
+     * roku 25FV0099, poplatek BAN0010003 bez dokladu a počáteční stav účtu 100 000 Kč.
+     */
+    public static function writeTaxEvidence(string $root): string
+    {
+        $dir = self::write($root);
+        $units = rtrim($root, '/\\') . '/00_ucetni_jednotky.xml';
+        file_put_contents($units, str_replace('<acu:unitType>doubleEntry</acu:unitType>', '<acu:unitType>singleEntry</acu:unitType>', (string) file_get_contents($units)));
+        self::file($dir . '/01_ucetni_denik.xml', '<lst:listAccountancy version="2.0" dateTimeStamp="2026-02-01T10:00:00" state="ok"></lst:listAccountancy>');
+        self::file($dir . '/02_uctova_osnova.xml', '<lst:listAccount version="1.1" state="ok"></lst:listAccount>');
+        self::file($dir . '/03_predkontace_pu.xml', '<lst:listAccounting version="1.1" state="ok"></lst:listAccounting>');
+        return $dir;
+    }
+
+    /**
      * Sklad z datového souboru POHODY (`92_sklad.xml`) do složky agendy `$dir`. Hlavní sklad
      * `HL`, materiálový `MAT` a konsignační `KON`; kabel `K-001` je v obou prvních skladech
      * (v hlavním 120,5 m za 1 210,37 Kč, v materiálovém 30 m za 303,33 Kč) a v hlavním
@@ -460,6 +478,29 @@ final class SyntheticPohodaExport
             . '<typ:priceHigh>0</typ:priceHigh><typ:priceHighVAT>0</typ:priceHighVAT></inv:homeCurrency></inv:invoiceSummary>'
             . '<inv:liquidations><typ:liquidation><typ:id>' . abs(crc32('25PF0099liq')) . '</typ:id><typ:date>2025-12-10</typ:date><typ:sourceAgenda>bank</typ:sourceAgenda>'
             . '<typ:sourceDocument><typ:number>BAN9990001</typ:number></typ:sourceDocument><typ:amount>600</typ:amount></typ:liquidation></inv:liquidations></lst:invoice>');
+    }
+
+    /** Přijatá faktura vyrovnaná zápočtem bez pohybu peněz ({@see withPurchaseSettledByOffset()}). */
+    public const PURCHASE_SETTLED_BY_OFFSET = '26PF0050';
+
+    /**
+     * Přijatá faktura 300 Kč mimo DPH, kterou POHODA vede jako uhrazenou interním dokladem
+     * zápočtu (`internalDocuments`), tedy bez bankovního i pokladního dokladu.
+     */
+    public static function withPurchaseSettledByOffset(string $dir): void
+    {
+        self::append($dir . '/20_faktury_receivedInvoice.xml', '</lst:listInvoice>',
+            '<lst:invoice version="2.0"><inv:invoiceHeader><inv:invoiceType>receivedInvoice</inv:invoiceType>'
+            . '<inv:number><typ:numberRequested>' . self::PURCHASE_SETTLED_BY_OFFSET . '</typ:numberRequested></inv:number>'
+            . '<inv:symVar>2026050</inv:symVar><inv:originalDocument>RE-2026-50</inv:originalDocument><inv:date>2026-02-01</inv:date><inv:dateTax>2026-02-01</inv:dateTax>'
+            . '<inv:dateAccounting>2026-02-01</inv:dateAccounting><inv:dateDue>2026-02-15</inv:dateDue>'
+            . '<inv:classificationVAT><typ:ids>PN</typ:ids></inv:classificationVAT><inv:text>Nájem</inv:text>'
+            . self::partner('inv', 'Dodavatel Test s.r.o.', self::VENDOR_ICO, 'CZ' . self::VENDOR_ICO)
+            . '<inv:liquidation><typ:amountHome>0</typ:amountHome><typ:date>2026-02-10</typ:date></inv:liquidation></inv:invoiceHeader>'
+            . '<inv:invoiceSummary><inv:homeCurrency><typ:priceNone>300</typ:priceNone><typ:priceLow>0</typ:priceLow><typ:priceLowVAT>0</typ:priceLowVAT>'
+            . '<typ:priceHigh>0</typ:priceHigh><typ:priceHighVAT>0</typ:priceHighVAT></inv:homeCurrency></inv:invoiceSummary>'
+            . '<inv:liquidations><typ:liquidation><typ:id>' . abs(crc32('26PF0050liq')) . '</typ:id><typ:date>2026-02-10</typ:date><typ:sourceAgenda>internalDocuments</typ:sourceAgenda>'
+            . '<typ:sourceDocument><typ:number>ZAP0001</typ:number></typ:sourceDocument><typ:amount>300</typ:amount></typ:liquidation></inv:liquidations></lst:invoice>');
     }
 
     /** Doklady, jejichž skupinu párovacího symbolu má POHODA vyrovnanou ({@see withClosedPairingGroups()}). */

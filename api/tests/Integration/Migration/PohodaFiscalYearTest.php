@@ -142,11 +142,11 @@ final class PohodaFiscalYearTest extends TestCase
     }
 
     /**
-     * Agenda v daňové evidenci: POHODA účetní deník nevydá (agendu nepoužívá). Průvodce
-     * má říct, že daňovou evidenci převod nepodporuje a čím převést doklady, ne hlásit
-     * chybu souboru a přepnutí firmy do podvojného účetnictví.
+     * Agenda v daňové evidenci: POHODA účetní deník nevydá (agendu nepoužívá). Převod ji
+     * převede jako daňovou evidenci, nehlásí chybu souboru ani přepnutí firmy do podvojného
+     * účetnictví a nezaloží deník.
      */
-    public function testTaxEvidenceAgendaIsReportedAsUnsupported(): void
+    public function testTaxEvidenceAgendaWithJournalErrorIsConvertedAsTaxEvidence(): void
     {
         $dir = SyntheticPohodaExport::write($this->tmp);
         file_put_contents($dir . '/01_ucetni_denik.xml', (string) iconv('UTF-8', 'Windows-1250',
@@ -160,23 +160,22 @@ final class PohodaFiscalYearTest extends TestCase
 
         $preflight = $this->importer->preflight($supplierId, $export);
         $codes = array_column($preflight, 'code');
-        self::assertContains('tax_evidence_agenda_unsupported', $codes, json_encode($preflight, JSON_UNESCAPED_UNICODE));
+        self::assertContains('tax_evidence_kept', $codes, json_encode($preflight, JSON_UNESCAPED_UNICODE));
         self::assertNotContains('switch_to_double_entry', $codes);
         self::assertNotContains('file_state', $codes);
-        $message = $preflight[array_search('tax_evidence_agenda_unsupported', $codes, true)];
-        self::assertSame('error', $message['level']);
-        self::assertStringContainsString('Pohoda XML', $message['message']);
 
         $protocol = $this->importer->run($supplierId, $this->userId, $export, false);
-        self::assertTrue($protocol->hasErrors());
+        self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
         self::assertSame(0, $this->entryCount($supplierId));
+        self::assertSame([], $this->periods($supplierId));
+        self::assertSame('tax_evidence', $this->accountingMode($supplierId));
     }
 
     /**
      * Agenda v daňové evidenci, na jejíž export účetního deníku POHODA odpoví prázdným
      * seznamem se stavem `ok`. Pozná ji jen typ jednotky `singleEntry` z přehledu
      * jednotek; dřív prošla jako podvojné účetnictví bez zápisů a převod firmu přepnul
-     * do podvojného účetnictví.
+     * do podvojného účetnictví. Převede se jako daňová evidence.
      */
     public function testSingleEntryUnitWithEmptyJournalStaysTaxEvidence(): void
     {
@@ -194,15 +193,21 @@ final class PohodaFiscalYearTest extends TestCase
         $supplierId = $this->supplier(1);
 
         $codes = array_column($this->importer->preflight($supplierId, $export), 'code');
-        self::assertContains('tax_evidence_agenda_unsupported', $codes);
+        self::assertContains('tax_evidence_kept', $codes);
         self::assertNotContains('switch_to_double_entry', $codes);
 
         $protocol = $this->importer->run($supplierId, $this->userId, $export, false);
-        self::assertTrue($protocol->hasErrors());
+        self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
+        self::assertSame('tax_evidence', $this->accountingMode($supplierId));
+        self::assertSame([], $this->periods($supplierId));
+        self::assertSame(0, $this->entryCount($supplierId));
+    }
+
+    private function accountingMode(int $supplierId): string
+    {
         $stmt = $this->db->pdo()->prepare('SELECT accounting_mode FROM supplier WHERE id = ?');
         $stmt->execute([$supplierId]);
-        self::assertSame('tax_evidence', $stmt->fetchColumn());
-        self::assertSame([], $this->periods($supplierId));
+        return (string) $stmt->fetchColumn();
     }
 
     /**

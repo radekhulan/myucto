@@ -27,6 +27,7 @@ use PDO;
  * Pořadí: osnova → období a deník → režim účetní jednotky → adresář a předkontace →
  * přijaté a vydané doklady → pokladna a banka → vazby dokladů na deník a úhrady →
  * zakázky a činnosti → majetek → sklad → koeficient krácení odpočtu (§ 76) → rekonciliace. Automatika účtování je po celou dobu vypnutá ({@see AccountingUnitSwitch}).
+ * Agenda vedená v daňové evidenci má vlastní kroky bez účtování ({@see taxEvidenceSteps()}).
  *
  * **Zkouška nanečisto** běží stejným kódem v jedné transakci, která se na konci vrátí.
  * **Ostrý převod** zapisuje po krocích, každý krok je idempotentní ({@see PohodaImportRepository}):
@@ -65,11 +66,36 @@ final class PohodaImporter
         private readonly PayrollModuleAccess $payrollAccess,
         private readonly ContractImporter $contracts,
         private readonly ActivityImporter $activities,
+        private readonly PohodaTaxEvidenceImporter $taxEvidence,
     ) {}
 
-    /** @return list<string> */
-    public static function stepKeys(): array
+    /**
+     * Klíče kroků v pořadí, v jakém běží. `$taxEvidence` = agenda vedená v POHODĚ jako daňová
+     * evidence ({@see taxEvidenceSteps()}).
+     *
+     * @return list<string>
+     */
+    public static function stepKeys(bool $taxEvidence = false): array
     {
+        if ($taxEvidence) {
+            return [
+                PartnerImporter::STEP_PARTNERS,
+                InvoiceImporter::STEP_PURCHASE,
+                InvoiceImporter::STEP_ISSUED,
+                InvoiceImporter::STEP_INTERNAL,
+                OtherItemImporter::STEP,
+                CashBankImporter::STEP_CASH,
+                CashBankImporter::STEP_BANK,
+                PohodaTaxEvidenceImporter::STEP_PAYMENTS,
+                ContractImporter::STEP,
+                ActivityImporter::STEP,
+                AssetImporter::STEP,
+                SmallAssetImporter::STEP,
+                StockImporter::STEP,
+                VatCoefficientSeeder::STEP,
+                PohodaTaxEvidenceImporter::STEP_RECONCILIATION,
+            ];
+        }
         return [
             ChartJournalImporter::STEP_CHART,
             ChartJournalImporter::STEP_JOURNAL,
@@ -118,7 +144,7 @@ final class PohodaImporter
         $add = static function (string $level, string $code, string $message, array $context = []) use (&$out): void {
             $out[] = ['level' => $level, 'code' => $code, 'message' => $message, 'context' => $context];
         };
-        $stmt = $this->db->pdo()->prepare('SELECT id, ic, company_name, accounting_mode FROM supplier WHERE id = ?');
+        $stmt = $this->db->pdo()->prepare('SELECT id, ic, company_name, accounting_mode, taxpayer_type FROM supplier WHERE id = ?');
         $stmt->execute([$supplierId]);
         $supplier = $stmt->fetch(PDO::FETCH_ASSOC);
         if ($supplier === false) {
@@ -130,26 +156,33 @@ final class PohodaImporter
             // Export cizí firmy by se jinak vmíchal do účetnictví téhle.
             $add('error', 'ico_mismatch', "Export je agenda IČO {$export->ico}, firma v MyÚčtu má IČO {$supplierIco}.", ['agenda' => $export->ico, 'supplier' => $supplierIco]);
         }
-        // Agenda vedená v daňové evidenci nemá účetní deník: POHODA na jeho export odpoví
-        // chybou, protože agendu nepoužívá. Převod účetnictví ji neumí a technická chyba
-        // souboru s větou o přepnutí do podvojného by uživatele jen poslala špatným směrem.
-        if (self::isTaxEvidenceAgenda($export)) {
-            $add('error', 'tax_evidence_agenda_unsupported', 'Agenda POHODY je vedená v daňové evidenci (peněžní deník). '
-                . 'Převod z POHODY zatím podporuje jen agendy vedené v podvojném účetnictví, daňovou evidenci nepřevede. '
-                . 'Vydané a přijaté faktury převedete importem souborů Pohoda XML (Prodej → Import a Nákup → Import) '
-                . 'a pohyby na účtu importem bankovních výpisů; firma přitom zůstane v daňové evidenci.');
-            return $out;
-        }
+        // Agenda vedená v daňové evidenci nemá účetní deník ani osnovu: POHODA na jejich export
+        // odpoví chybou nebo prázdným seznamem. Převede se jako daňová evidence a firma v ní
+        // zůstane ({@see PohodaTaxEvidenceImporter}).
+        $taxEvidence = self::isTaxEvidenceAgenda($export);
         foreach ($export->files() as $f) {
             if (!$f['exists']) {
                 continue;
             }
             if ($f['ico'] !== '' && $f['ico'] !== $export->ico) {
                 $add('error', 'file_ico_mismatch', "Soubor {$f['file']} je z agendy IČO {$f['ico']}, ne {$export->ico}.", ['file' => $f['file']]);
+            } elseif ($taxEvidence && in_array($f['key'], ['journal', 'chart', 'posting_rules', 'balance'], true)) {
+                continue;
+            } elseif ($taxEvidence && $f['key'] === 'vat_classes' && $f['state'] !== 'ok') {
+                $add('info', 'file_state', "Soubor {$f['file']}: POHODA vrátila stav „{$f['state']}“. Doklady s členěním DPH, které převod nezná, se převezmou jako koncepty k ruční kontrole.", ['file' => $f['file']]);
             } elseif ($f['state'] !== 'ok') {
                 $add(in_array($f['key'], ['journal', 'chart', 'vat_classes'], true) ? 'error' : 'info', 'file_state',
                     "Soubor {$f['file']}: Pohoda vrátila stav „{$f['state']}“" . ($f['note'] !== '' ? " ({$f['note']})" : '') . '.', ['file' => $f['file']]);
             }
+        }
+        if ($taxEvidence) {
+            // Daňová evidence nemá účetní období ani rámec: kontroly deníku, období a osnovy
+            // neziskovky se jí netýkají. Rok agendy je kalendářní rok exportu.
+            array_push($out, ...$this->taxEvidence->preflight($supplierId, $supplier, $export->year));
+            if ($export->path('payroll') !== null) {
+                $add('info', 'payroll_separate', 'Export obsahuje mzdy z datového souboru POHODY (91_mzdy.xml). Převod daňové evidence je nepřevádí, zaměstnanci a mzdy se převádějí zvlášť.');
+            }
+            return $out;
         }
         // Rok agendy musí sedět na účetní rok firmy: hospodářský rok v kalendářních obdobích
         // (nebo obráceně) by se rozdělil do dvou období a převod se zastaví s návrhem nastavení.
@@ -226,7 +259,7 @@ final class PohodaImporter
      * taková agenda často odpoví jen prázdným seznamem se stavem `ok`, pak ji pozná jen
      * typ jednotky.
      */
-    private static function isTaxEvidenceAgenda(PohodaExport $export): bool
+    public static function isTaxEvidenceAgenda(PohodaExport $export): bool
     {
         if ($export->unitType() === PohodaExport::UNIT_TYPE_TAX_EVIDENCE) {
             return true;
@@ -348,6 +381,10 @@ final class PohodaImporter
         $ctx->skippedYears = array_fill_keys($skipYears, true);
         $ctx->stock = $stock;
         $ctx->relinkOnly = $relinkOnly;
+        $ctx->taxEvidence = self::isTaxEvidenceAgenda($export);
+        // Daňová evidence se neúčtuje: automatika účtování, účetní období ani účetní rámec se
+        // jí netýkají a převod je nemění.
+        $automationManaged = !$ctx->taxEvidence;
         if ($keepOwnJournal) {
             $ctx->ownJournalFrom = $this->journal->firstForeignEntryDate($supplierId);
             if ($ctx->ownJournalFrom !== null) {
@@ -356,7 +393,9 @@ final class PohodaImporter
         }
 
         $frameworkGuard = new AccountingFrameworkImportGuard($this->db, $export->hasNonprofitChart());
-        $frameworkPeriods = $frameworkGuard->periodsForYears($supplierId, [$agendaYear->label, ...array_values(array_diff($agendaYear->laterYears(), $skipYears))]);
+        $frameworkPeriods = $automationManaged
+            ? $frameworkGuard->periodsForYears($supplierId, [$agendaYear->label, ...array_values(array_diff($agendaYear->laterYears(), $skipYears))])
+            : [];
         $pdo = $this->db->pdo();
         // Zkouška nanečisto uvnitř cizí transakce (testy, vnořené volání) jede přes savepoint -
         // vlastní BEGIN by PDO odmítlo a vnější transakci by nesměla vrátit.
@@ -367,18 +406,18 @@ final class PohodaImporter
             $pdo->beginTransaction();
         }
         try {
-            $snapshot = ($dryRun ? null : $this->map->pendingAutomationSnapshot($supplierId)) ?? $this->unit->snapshot($supplierId);
-            if (!$dryRun) {
+            $snapshot = $automationManaged ? (($dryRun ? null : $this->map->pendingAutomationSnapshot($supplierId)) ?? $this->unit->snapshot($supplierId)) : [];
+            if ($automationManaged && !$dryRun) {
                 $frameworkGuard->writeCz500Periods($supplierId, $frameworkPeriods, function () use ($runId, $supplierId, $snapshot, $userId, $ctx): void {
                     if ($runId !== null) $this->map->saveAutomationSnapshot($runId, $supplierId, $snapshot);
                     $this->unit->disableAutomation($supplierId, $ctx->userOrNull());
                 });
-            } else {
+            } elseif ($automationManaged) {
                 $frameworkGuard->assertCz500Periods($supplierId, $frameworkPeriods, true);
             }
-            $automation = ['before' => $snapshot, 'during' => $dryRun ? 'off' : $this->unit->automationLevel($supplierId), 'restored' => false, 'after' => null];
+            $automation = ['before' => $snapshot, 'during' => $dryRun || !$automationManaged ? 'off' : $this->unit->automationLevel($supplierId), 'restored' => false, 'after' => null];
 
-            $steps = $this->steps($ctx);
+            $steps = $ctx->taxEvidence ? $this->taxEvidenceSteps($ctx) : $this->steps($ctx);
             $total = count($steps);
             $index = 0;
             foreach ($steps as $key => $fn) {
@@ -388,7 +427,7 @@ final class PohodaImporter
                 }
                 $ctx->report($key, $index++, $total);
                 $protocol->begin($key);
-                if (!$dryRun && $key === PohodaReconciler::STEP) {
+                if (!$dryRun && ($key === PohodaReconciler::STEP || $key === PohodaTaxEvidenceImporter::STEP_RECONCILIATION)) {
                     $this->statistics->refreshAfterImport(['pohoda_import_map']);
                 }
                 try {
@@ -420,7 +459,7 @@ final class PohodaImporter
             if (!$dryRun) {
                 $this->invoices->recomputeClientStats($ctx);
             }
-            if (!$dryRun && !$protocol->hasErrors()) {
+            if ($automationManaged && !$dryRun && !$protocol->hasErrors()) {
                 $this->unit->restoreAutomation($supplierId, $snapshot, $ctx->userOrNull());
                 $this->map->markAutomationRestored($supplierId);
                 $automation['restored'] = true;
@@ -516,6 +555,43 @@ final class PohodaImporter
                 $this->stampNonprofitActivity($ctx);
                 $this->reconciler->run($ctx);
             },
+        ];
+    }
+
+    /**
+     * Kroky převodu agendy vedené v POHODĚ jako daňová evidence: bez osnovy, deníku, režimu
+     * účetní jednotky, předkontací, vazeb na deník, dopočtených úhrad a rekonciliace deníku.
+     * Doklady, banku a pokladnu převádějí stávající kroky bez zaúčtování, úhrady jen přesné
+     * vazby na pohyby ({@see PohodaTaxEvidenceImporter}). Dlouhodobý majetek převod v daňové
+     * evidenci nepřevádí: karta bez účetních odpisů z deníku by byla neúplná.
+     *
+     * @return array<string,callable():void>
+     */
+    private function taxEvidenceSteps(PohodaContext $ctx): array
+    {
+        return [
+            PartnerImporter::STEP_PARTNERS => fn () => $this->partners->importPartners($ctx),
+            InvoiceImporter::STEP_PURCHASE => fn () => $this->invoices->importPurchases($ctx),
+            InvoiceImporter::STEP_ISSUED => fn () => $this->invoices->importIssued($ctx),
+            InvoiceImporter::STEP_INTERNAL => fn () => $this->invoices->importInternalTaxDocuments($ctx),
+            OtherItemImporter::STEP => fn () => $this->otherItems->run($ctx),
+            CashBankImporter::STEP_CASH => fn () => $this->cashBank->importCash($ctx),
+            CashBankImporter::STEP_BANK => fn () => $this->cashBank->importBank($ctx),
+            PohodaTaxEvidenceImporter::STEP_PAYMENTS => fn () => $this->taxEvidence->payments($ctx),
+            ContractImporter::STEP => fn () => $this->contracts->run($ctx),
+            ActivityImporter::STEP => fn () => $this->activities->run($ctx),
+            AssetImporter::STEP => function () use ($ctx): void {
+                foreach ($ctx->export->records('assets', 'IM') as $ignored) {
+                    $ctx->protocol->info(AssetImporter::STEP, 'tax_evidence_assets_manual', 'Dlouhodobý majetek převod daňové evidence nepřevádí. Karty majetku a daňové odpisy převeďte ručně (Majetek).');
+                    break;
+                }
+            },
+            SmallAssetImporter::STEP => fn () => $this->smallAssets->import($ctx),
+            StockImporter::STEP => fn () => $this->stock->import($ctx),
+            VatCoefficientSeeder::STEP => fn () => $this->coefficients->seedConverted(
+                $ctx->supplierId, $this->taxEvidence->convertedYears($ctx->supplierId), [$ctx->year()], $ctx->userId, $ctx->protocol,
+            ),
+            PohodaTaxEvidenceImporter::STEP_RECONCILIATION => fn () => $this->taxEvidence->reconcile($ctx),
         ];
     }
 

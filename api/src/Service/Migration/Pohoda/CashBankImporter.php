@@ -298,6 +298,8 @@ final class CashBankImporter
                 }
             } elseif (isset($openingDocs[$code])) {
                 $running = $openingDocs[$code];
+            } elseif ($ctx->taxEvidence) {
+                $p->warn(self::STEP_BANK, 'account_without_opening', "Bankovní účet {$code} nemá v POHODĚ doklad počátečního stavu, výpisy jsou bez počátečního stavu.");
             } else {
                 $p->warn(self::STEP_BANK, 'account_without_analytic', "Bankovní účet {$code} nemá v Pohodě analytiku 221, výpisy jsou bez počátečního stavu.");
             }

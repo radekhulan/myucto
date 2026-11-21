@@ -196,7 +196,7 @@ final class PohodaImportJobService extends AbstractImportJobService
             $plan = self::plan($meta, $ico, ImportYears::fromParams($params), $payroll, $supplierId, $token,
                 $payroll ? null : self::companyYears($meta, $ico, $this->importer->companyCalendar($supplierId), $supplierId, $token));
             $planYears = array_column($plan, 'year');
-            $steps = $payroll ? PohodaPayrollImporter::stepKeys() : PohodaImporter::stepKeys();
+            $steps = $payroll ? PohodaPayrollImporter::stepKeys() : self::accountingSteps($meta, $ico, $planYears, $supplierId, $token);
             if ($payroll) {
                 // Začátek vedení mezd firmě bez začátku nastaví úloha až za poslední měsíc
                 // posledního vybraného roku. Začátek, který firma neměla před úlohou, nastavila
@@ -446,6 +446,28 @@ final class PohodaImportJobService extends AbstractImportJobService
             }
         }
         return $newest === $year ? ['warehouses' => $stock['warehouses']] : null;
+    }
+
+    /**
+     * Kroky převodu účetnictví pro průběh úlohy: agenda vedená v daňové evidenci má vlastní
+     * kroky ({@see PohodaImporter::stepKeys()}). Rozhoduje první převáděná agenda.
+     *
+     * @param array<string,mixed> $meta
+     * @param list<int> $planYears
+     * @return list<string>
+     */
+    private static function accountingSteps(array $meta, string $ico, array $planYears, int $supplierId, string $token): array
+    {
+        $agenda = $planYears !== [] ? self::agenda($meta, $ico, $planYears[0]) : null;
+        if ($agenda === null || !$agenda['has_accounting']) {
+            return PohodaImporter::stepKeys();
+        }
+        try {
+            $export = PohodaExport::open(PohodaUploads::exportDir($supplierId, $token) . DIRECTORY_SEPARATOR . $agenda['dir']);
+        } catch (PohodaException) {
+            return PohodaImporter::stepKeys();
+        }
+        return PohodaImporter::stepKeys(PohodaImporter::isTaxEvidenceAgenda($export));
     }
 
     /**

@@ -60,12 +60,11 @@ nástroj přepíše. Jednotlivé změny i souhrn běhu zapisuje do protokolu akt
 
 1. **Firma v MyÚčtu.** Musí existovat a mít vyplněné stejné IČO jako v POHODĚ.
    Převádí se do firmy, ve které právě pracujete; novou firmu nejdřív založte
-   (kapitola [Multi supplier](95_Multi_supplier.md)). Firma, která zatím vede
-   daňovou evidenci, se převodem přepne na podvojné účetnictví od začátku
-   převáděného roku. Převádí se jen agenda POHODY vedená v podvojném účetnictví;
-   agendu v daňové evidenci (peněžní deník) převod nepodporuje. Faktury z ní
-   převedete importem Pohoda XML ([§ 21.3](21_Importy.md#213-krok-za-krokem-import-vydanych-faktur-ze-souboru),
-   [§ 21.4](21_Importy.md#214-krok-za-krokem-import-prijatych-faktur-ze-souboru)).
+   (kapitola [Multi supplier](95_Multi_supplier.md)). Agenda podvojného
+   účetnictví přepne firmu, která zatím vede daňovou evidenci, na podvojné
+   účetnictví od začátku převáděného roku. Agendu, kterou POHODA vede jako
+   daňovou evidenci (peněžní deník), převod převede jen do firmy v daňové
+   evidenci a její režim nemění, viz [§ 107.9.9](#10799-danova-evidence).
 2. **Oprávnění.** Průvodce vidí a zkoušku nanečisto spouští uživatel
    s oprávněním k zápisu importů. Ostrý převod zapisuje účetní deník a mění
    nastavení firmy, proto vyžaduje navíc zápis do účetního deníku a do
@@ -240,6 +239,8 @@ Pravidla (perioda resetu, zděděná šablona) jsou v
 | Doklad OSS se nepřevedl | Firma nemá zapnutý OSS nebo chybí sazba státu spotřeby | Doplňte nastavení ([§ 107.9.2](#10792-co-prevod-prenese)) a převod zopakujte |
 | Zkouška selhala jen na rozdílech k přijetí | Doklad se nepřevedl, nebo výsledek nesedí na POHODU | Zaškrtněte **Převést i přes rozdíly**, nebo opravte a zopakujte |
 | Doklad je koncept | Nejistá daňová povaha | Opravte klasifikaci DPH a potvrďte |
+| Kontrola před převodem hlásí, že firma vede podvojné účetnictví | Agenda vede v POHODĚ daňovou evidenci, firma v MyÚčtu převáděný rok jako podvojné účetnictví | Převeďte agendu do firmy v daňové evidenci; převod režim firmy nemění ([§ 107.9.9](#10799-danova-evidence)) |
+| Pohyb na účtu po převodu daňové evidence nemá zařazení | Vklad, výběr, poplatek nebo odvod bez dokladu převod nezařazuje | Zařaďte pohyb v **Daňová evidence → Peněžní deník** |
 | Faktura uhrazená v nevybraném roce zůstala neuhrazená | Pozdější rok jste nevybrali | Převeďte pozdější rok opakovaným převodem ([§ 107.9.7](#10797-opakovany-prevod)) |
 | Převod kopie MDB odmítl doklad kvůli sazbám DPH | Doklad má DPH ze sazeb před 1. 5. 2004, částku v druhé snížené sazbě před rokem 2015, nebo zaškrtnuté historické sazby a DPH, které neodpovídá sazbám platným k datu plnění ani předchozím; číslo dokladu je v hlášení | Opravte doklad v POHODĚ, nebo převeďte agendu XML exportem POHODY (cesta 1). Starší neuhrazené doklady převedené do nového roku jinak převod přijme se sazbami platnými k datu plnění, doklad se zaškrtnutými historickými sazbami se sazbami, kterým odpovídá jeho DPH |
 | Přeskočený doklad s neznámým typem | Neznámý typ faktury, banky, pokladny nebo zdroj úhrady | Doklad doplňte ručně, číslo a důvod uvádí protokol |
@@ -973,9 +974,11 @@ nanečisto z přehledu smažete, protokol ostrého převodu zůstává.
 
 ### 107.9.6 Režim účetnictví a automatika
 
-Převod zapíše podvojné účetnictví od začátku převáděného roku do nastavení
-firmy. Automatika účtování je během převodu vypnutá: deník přichází hotový
-a každý automatický zápis nad týmiž doklady by byl duplicita.
+Převod agendy podvojného účetnictví zapíše podvojné účetnictví od začátku
+převáděného roku do nastavení firmy. Agenda daňové evidence režim firmy ani
+automatiku účtování nemění ([§ 107.9.9](#10799-danova-evidence)).
+U podvojného účetnictví je automatika účtování během převodu vypnutá: deník
+přichází hotový a každý automatický zápis nad týmiž doklady by byl duplicita.
 
 Po úspěšném převodu se automatika vrátí do stavu před převodem. Firma, která
 podvojné účetnictví zapíná právě převodem, dostane výchozí nastavení účetní
@@ -1052,6 +1055,50 @@ ostrém převodu ho nahrajte zpět, viz [§ 96.13](96_Nastaveni.md#9613-krok-za-
   Obsahuje-li export i `91_mzdy.xml`, nahrajte ho beze změny i do průvodce
   [Přechod z PAMICA](108_Prechod_z_PAMICA.md) - mzdy tento průvodce
   nepřevede.
+
+### 107.9.9 Daňová evidence
+
+Agendu, kterou POHODA vede jako daňovou evidenci (typ účetní jednotky daňová
+evidence, místo účetního deníku peněžní deník), převod převede do firmy
+v MyÚčtu, která vede daňovou evidenci. Firma v daňové evidenci zůstane: převod
+režim firmy nemění, účetní deník, účtovou osnovu, předkontace ani účetní období
+nezakládá a doklady nezaúčtuje. Peněžní deník sestaví MyÚčto z převedených
+dokladů, banky a pokladny. Agendu pozná převod podle typu účetní jednotky
+v exportu, prázdný účetní deník a osnova jsou u ní v pořádku.
+
+Kontrola před převodem převod zastaví, když:
+
+- firma v MyÚčtu je právnická osoba (ta vede účetnictví),
+- firma má nastavený hospodářský rok; daňová evidence se vede po kalendářních
+  letech,
+- firma v MyÚčtu vede převáděný rok jako podvojné účetnictví nebo v něm má
+  účetní období či zápisy deníku,
+- převáděný rok už v MyÚčtu obsahuje doklady, bankovní pohyby nebo pokladní
+  doklady, které nevznikly převodem z POHODY,
+- doklady firmy jsou uzamčené do převáděného roku (při prvním převodu).
+
+| Z POHODY | Do MyÚčta |
+|---|---|
+| adresář | klienti |
+| vydané a přijaté faktury, dobropisy, zálohy, ostatní pohledávky a závazky v přiznání DPH | doklady s DPH bez zaúčtování; uhrazené jen podle úhrad navázaných na pohyb |
+| interní daňové doklady | daňové doklady k platbě a samovyměření DPH |
+| ostatní pohledávky a závazky mimo přiznání DPH | ostatní pohledávky a závazky bez zaúčtování |
+| pokladny a pokladní doklady | pokladní doklady: úhrada faktury, prodej nebo nákup s DPH, ostatní |
+| bankovní účty a bankovní doklady | výpisy se zdrojem „import" a počátečním stavem účtu z POHODY |
+| úhrady dokladů bankou nebo pokladnou | úhrady faktur, ostatních položek a záloh na daň navázané na pohyb |
+| úhrada dokladu z minulého roku | uhrazená část dokladu mimo peněžní deník roku |
+| zakázky, činnosti, drobný majetek, sklad | stejně jako u podvojného účetnictví |
+
+Doklad, který POHODA vede jako uhrazený bez bankovního nebo pokladního dokladu
+(zápočet interním dokladem), zůstane neuhrazený: peněžní deník bez pohybu
+peněz výdaj ani příjem nezapočte. Protokol tyto doklady vyjmenuje, vyrovnání
+doplňte ručně.
+
+Pohyby na účtu bez dokladu (vklad, výběr, poplatky, odvody pojistného a daní)
+převod nezařazuje, předkontace daňové evidence z POHODY nečte. Protokol
+uvede jejich počet; zařaďte je v **Daňová evidence → Peněžní deník**, jinak je
+peněžní deník nezapočte. Dlouhodobý majetek převod daňové evidence nepřevádí,
+karty majetku a daňové odpisy zadejte ručně.
 
 ## 107.10 Související kapitoly
 

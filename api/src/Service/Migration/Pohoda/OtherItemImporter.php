@@ -114,9 +114,11 @@ final class OtherItemImporter
                     $id = $this->insertItem($ctx, $agenda, $header, $number, $issued, $candidate, [
                         'account' => $account, 'counter' => null, 'lines' => [], 'date' => $issued,
                         'posted_at' => null, 'entry_id' => null, 'status' => 'confirmed',
-                        'note' => "Převzato z POHODY, doklad {$number}. V POHODĚ veden bez zaúčtování"
-                            . ($rule !== '' ? " (předkontace {$rule})" : '')
-                            . ', předpis je v deníku jiným dokladem nebo v počátečním stavu - položka se proto neúčtuje.',
+                        'note' => $ctx->taxEvidence
+                            ? "Převzato z POHODY, doklad {$number}. Agenda je vedená v daňové evidenci, položka se neúčtuje."
+                            : "Převzato z POHODY, doklad {$number}. V POHODĚ veden bez zaúčtování"
+                                . ($rule !== '' ? " (předkontace {$rule})" : '')
+                                . ', předpis je v deníku jiným dokladem nebo v počátečním stavu - položka se proto neúčtuje.',
                     ]);
                     if ($id !== null) {
                         $this->map->put($ctx->supplierId, PohodaImportRepository::KIND_OTHER_ITEM, $key, $id, $ctx->runId);

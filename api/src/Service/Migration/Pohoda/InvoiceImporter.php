@@ -78,6 +78,8 @@ final class InvoiceImporter
     /** Limit KH pro jednotlivý doklad (A.4/B.2), vč. DPH. */
     private const KH_LIMIT = 10000.0;
 
+    private const UNPAID = ['paid' => 0.0, 'settled' => false, 'paid_at' => null];
+
     /**
      * Ostatní pohledávka či závazek POHODY v přiznání DPH vstupuje do evidence DPH a KH jen
      * jako faktura; agenda Ostatní pohledávky a závazky řádky DPH nevede. Poznámka dokladu
@@ -351,11 +353,14 @@ final class InvoiceImporter
             $p->info($step, 'kh_a5_forced', "Doklad {$doc['number']} ({$snapshot['name']}, DIČ {$snapshot['dic']}) má v Pohodě členění {$doc['vat_class']}, které ho podle číselníku členění DPH řadí do oddílu A.5 kontrolního hlášení, přestože je nad 10 000 Kč a odběratel má DIČ. Ověřte, že odběratel není plátce DPH.", ['document_no' => $doc['number']]);
             $snapshot['dic'] = '';
         }
-        $pay = $type === 'tax_document'
-            ? ['paid' => $amounts['total'], 'settled' => true, 'paid_at' => $doc['tax'] ?? $doc['issue']]
-            : self::payment($doc, $amounts, $type === 'proforma');
+        $pay = match (true) {
+            $type === 'tax_document' => ['paid' => $amounts['total'], 'settled' => true, 'paid_at' => $doc['tax'] ?? $doc['issue']],
+            // Daňová evidence: zaplaceno až podle navázaných úhrad ({@see PohodaTaxEvidenceImporter::payments()}).
+            $ctx->taxEvidence => self::UNPAID,
+            default => self::payment($doc, $amounts, $type === 'proforma'),
+        };
         $status = $review ? 'draft' : ($pay['settled'] ? 'paid' : 'sent');
-        $booked = !$review && $type !== 'proforma' && !self::postedLater($doc);
+        $booked = !$ctx->taxEvidence && !$review && $type !== 'proforma' && !self::postedLater($doc);
         if ($doc['foreign'] !== '') {
             $amounts['items'] = ForeignCurrencyTakeover::withDerivedAmounts($amounts['items'], $doc['foreign_rate'], $doc['foreign_units'], $doc['foreign_total']);
         }
@@ -382,7 +387,7 @@ final class InvoiceImporter
                 // Tuzemské přenesení daňové povinnosti (ř. 25) nese kód zařazení i příznak hlavičky.
                 reverseCharge: VatReturnLineClassifier::isDomesticReverseSale([$class['code'], ...array_column($amounts['items'], 'code')]),
                 noteAboveItems: $doc['text'] !== '' ? mb_substr($doc['text'], 0, 1000) : null,
-                noteBelowItems: self::note($doc['number'], $class['reasons'], $previous, $fx, $notes),
+                noteBelowItems: self::note($doc['number'], $class['reasons'], $previous && !$ctx->taxEvidence, $fx, $notes),
                 clientSnapshot: PartnerImporter::snapshotJson($snapshot),
                 totalWithoutVat: $amounts['base'],
                 totalVat: $amounts['vat'],
@@ -548,10 +553,15 @@ final class InvoiceImporter
         if ($duplicate->fetchColumn() !== false) {
             $vendorNumber = mb_substr($vendorNumber . ' (' . $doc['number'] . ')', 0, 50);
         }
-        $pay = $type === 'tax_document'
-            ? ['paid' => $amounts['total'], 'settled' => true, 'paid_at' => $doc['tax'] ?? $doc['issue']]
-            : self::payment($doc, $amounts);
-        $unbooked = $review || $type === 'advance' || self::postedLater($doc);
+        // Daňová evidence: zaplaceno až podle navázaných úhrad ({@see PohodaTaxEvidenceImporter::payments()}).
+        // Přijatý doklad zaplacený bez vazby na pohyb by peněžní deník započetl jako virtuální
+        // výdaj vedle skutečného pohybu; u daňového dokladu k záloze by byl výdajem podruhé.
+        $pay = match (true) {
+            $ctx->taxEvidence => self::UNPAID,
+            $type === 'tax_document' => ['paid' => $amounts['total'], 'settled' => true, 'paid_at' => $doc['tax'] ?? $doc['issue']],
+            default => self::payment($doc, $amounts),
+        };
+        $unbooked = $ctx->taxEvidence || $review || $type === 'advance' || self::postedLater($doc);
         $status = $review ? 'draft' : ($pay['settled'] ? 'paid' : ($unbooked ? 'received' : 'booked'));
         $assets = array_map(static fn (array $item): bool => MigratedDocumentItem::fixedAssetLine($class['fixed_asset'], (float) $item['rate'], (float) $item['vat'],
             ($item['code'] ?? null) === VatReturnLineClassifier::PURCHASE_OUTSIDE_SCOPE_CODE ? null : ($item['code'] ?? null)), $amounts['items']);
@@ -592,7 +602,7 @@ final class InvoiceImporter
                 status: $status,
                 vatDeduction: $class['deduction'],
                 noteAboveItems: $doc['text'] !== '' ? mb_substr($doc['text'], 0, 1000) : null,
-                noteBelowItems: self::note($doc['number'], $class['reasons'], $previous, $fx, $bucket === 'commitment' ? [self::OTHER_ITEM_IN_VAT_NOTE['commitment']] : []),
+                noteBelowItems: self::note($doc['number'], $class['reasons'], $previous && !$ctx->taxEvidence, $fx, $bucket === 'commitment' ? [self::OTHER_ITEM_IN_VAT_NOTE['commitment']] : []),
                 createdBy: $ctx->userId,
                 advancePaidAmount: $amounts['advance'],
                 paymentVariableSymbol: preg_match('/^\d{1,10}$/', $doc['symvar']) === 1 ? $doc['symvar'] : null,
@@ -855,6 +865,10 @@ final class InvoiceImporter
      */
     private function refreshSettlement(PohodaContext $ctx, string $step, string $table, int $id, array $doc): void
     {
+        // Daňová evidence vede úhradu jen z navázaných pohybů ({@see PohodaTaxEvidenceImporter::payments()}).
+        if ($ctx->taxEvidence) {
+            return;
+        }
         $remaining = is_numeric($doc['remaining']) ? round((float) $doc['remaining'], 2) : 0.0;
         $settled = abs($remaining) < 0.005;
         if ($table === 'purchase_invoices') {

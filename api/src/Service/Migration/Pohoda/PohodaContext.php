@@ -164,6 +164,13 @@ final class PohodaContext
      */
     public bool $relinkOnly = false;
 
+    /**
+     * Agenda vedená v POHODĚ jako daňová evidence ({@see PohodaTaxEvidenceImporter}): firma
+     * zůstává v daňové evidenci, převod zapisuje doklady, banku a pokladnu bez zaúčtování
+     * a úhrady jen tam, kde je nese navázaný pohyb.
+     */
+    public bool $taxEvidence = false;
+
     /** @var (callable(string,int,int):void)|null */
     public $progress = null;
 

@@ -15,6 +15,8 @@ use MyInvoice\Service\Migration\Pohoda\PohodaException;
 final class PohodaImportRepository extends AbstractMigrationImportRepository
 {
     public const KIND_PERIOD = 'period';
+    /** Rok agendy převedené jako daňová evidence ({@see \MyInvoice\Service\Migration\Pohoda\PohodaTaxEvidenceImporter}): rok => rok. */
+    public const KIND_TAX_EVIDENCE_YEAR = 'tax_evidence_year';
     public const KIND_ACCOUNT = 'account';
     public const KIND_JOURNAL_ENTRY = 'journal_entry';
     public const KIND_CLIENT = 'client';
