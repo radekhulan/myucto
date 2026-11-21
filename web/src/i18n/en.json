@@ -518,6 +518,7 @@
         "schedule_finished": "The recurrence has ended; no further item will be created.",
         "schedule_source_inactive": "The source item is reversed; no further item will be created.",
         "already_scheduled": "The item already belongs to another recurrence.",
+        "created_by_schedule": "The item was created by a recurrence; a new recurrence cannot be set up from it.",
         "invalid_status": "Recurrence can only be set on an active item."
       },
       "title_saved": "Title template saved.",

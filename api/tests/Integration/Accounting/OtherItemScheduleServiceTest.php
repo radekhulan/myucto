@@ -537,6 +537,27 @@ final class OtherItemScheduleServiceTest extends TestCase
         self::assertCount(2, $this->schedules->generate($this->supplierId, (int) $again['id'], '2099-03-31', null)['created_ids']);
     }
 
+    /**
+     * Nový rozvrh navazuje za nejpozdější zbylou položkou zrušeného opakování: smazaný termín
+     * mezi zbylými nedoplní a koncept stornovaný za živého rozvrhu se počítá jako vytvořený.
+     */
+    public function testReplannedSourceContinuesAfterLatestRemainingItem(): void
+    {
+        $first = $this->items->create($this->supplierId, $this->input(), null);
+        $schedule = $this->schedules->create($this->supplierId, (int) $first['id'], ['frequency' => 'monthly'], null);
+        $ids = $this->schedules->generate($this->supplierId, (int) $schedule['id'], '2099-04-30', null)['created_ids'];
+        self::assertCount(3, $ids);
+        [$feb, , $apr] = $ids;
+        // Za živého rozvrhu se koncept jen stornuje (rozvrh ho nevytvoří znovu), zůstává dokladem.
+        $this->items->deleteDraft($this->supplierId, $apr);
+        self::assertSame('cancelled', $this->items->get($this->supplierId, $apr)['status']);
+        $this->schedules->delete($this->supplierId, (int) $schedule['id']);
+        $this->items->deleteDraft($this->supplierId, $feb);
+        $again = $this->schedules->create($this->supplierId, (int) $first['id'], ['frequency' => 'monthly'], null);
+        $created = $this->schedules->generate($this->supplierId, (int) $again['id'], '2099-05-31', null)['created_ids'];
+        self::assertSame(['2099-05-31'], array_map(fn (int $id): string => (string) $this->items->get($this->supplierId, $id)['issued_on'], $created));
+    }
+
     public function testCancelledScheduleKeepsSourceOfOccurrencesImportedWithoutIt(): void
     {
         $first = $this->items->create($this->supplierId, $this->input(), null);

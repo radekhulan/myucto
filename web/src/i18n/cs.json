@@ -518,6 +518,7 @@
         "schedule_finished": "Opakování už skončilo, další položka nevznikne.",
         "schedule_source_inactive": "Zdrojová položka je stornovaná, další položka nevznikne.",
         "already_scheduled": "Položka už patří do jiného opakování.",
+        "created_by_schedule": "Položka vznikla opakováním, nové opakování z ní založit nejde.",
         "invalid_status": "Opakování lze nastavit jen u aktivní položky."
       },
       "title_saved": "Šablona názvu uložena.",

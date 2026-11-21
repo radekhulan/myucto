@@ -527,8 +527,10 @@ final class OtherItemScheduleService
 
     /**
      * První index nového rozvrhu. Znovu naplánovaný zdroj navazuje na položky zrušeného
-     * opakování: první termín je až po poslední z nich, už vytvořené termíny nevzniknou
-     * podruhé. Smazané koncepty se nepočítají, jejich termíny nový rozvrh vytvoří znovu.
+     * opakování: první termín je až po nejpozdější z nich, už vytvořené termíny nevzniknou
+     * podruhé. Smazané koncepty se nepočítají, takže smazané termíny na konci nový rozvrh
+     * vytvoří znovu; mezeru po smazaném termínu mezi zbylými položkami nedoplňuje. Stornovaná
+     * položka (zrušený koncept) zůstává dokladem a počítá se jako vytvořená.
      * Rozhoduje skutečné datum vzniku položky (zrušený rozvrh s četností už není).
      * Sdílí ho založení i náhled názvu, aby náhled ukázal termín, který založení vytvoří.
      */

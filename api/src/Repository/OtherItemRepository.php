@@ -126,7 +126,8 @@ final class OtherItemRepository
         }
         $whereSql = implode(' AND ', $where);
         // S oknem splatnosti optimalizátor podíl okna přeceňuje a volí sken celé tabulky (všech firem),
-        // i když index splatnosti čte jen výběr; práce pak roste s historií, ne s oknem (měření v PR).
+        // i když index splatnosti čte jen výběr (měření v PR). Otevřené bez dolní meze čtou po indexu
+        // historii firmy do konce okna: uhrazenost se neukládá, index ji přeskočit nemůže.
         $table = 'other_items oi' . (!empty($filters['from']) || !empty($filters['to']) ? ' FORCE INDEX (idx_other_item_due)' : '');
         $count = $this->db->pdo()->prepare('SELECT COUNT(*) FROM ' . $table . ' WHERE ' . $whereSql);
         $count->execute($params);

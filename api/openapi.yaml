@@ -22784,6 +22784,7 @@ paths:
       responses:
         '201': { description: Rozvrh, content: { application/json: { schema: { $ref: '#/components/schemas/OtherItemSchedule' } } } }
         '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { description: 'Z dokladu opakování založit nejde (other_items.error.invalid_status, already_scheduled, created_by_schedule).', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
         '422': { $ref: '#/components/responses/ValidationFailed' }
 
   /api/v1/accounting/other-items/{item_id}/schedule/title-preview:
@@ -22802,7 +22803,7 @@ paths:
         '200': { description: Název a datum nejbližší položky, content: { application/json: { schema: { type: object, properties: { title: { type: string }, issued_on: { type: string, format: date } } } } } }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
-        '409': { description: 'Doklad nebo rozvrh další položku nevytvoří (other_items.error.schedule_source_inactive, schedule_finished, already_scheduled, invalid_status).', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '409': { description: 'Doklad nebo rozvrh další položku nevytvoří (other_items.error.schedule_source_inactive, schedule_finished, already_scheduled, created_by_schedule, invalid_status).', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
         '422': { $ref: '#/components/responses/ValidationFailed' }
 
   /api/v1/accounting/other-items/{item_id}/installments:
