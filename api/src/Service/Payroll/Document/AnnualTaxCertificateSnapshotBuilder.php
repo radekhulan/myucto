@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Payroll\Document;
 
-use MyInvoice\Service\Payroll\PayrollChildReference;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\Payroll\PayrollAnnualDocumentRepository;
 use MyInvoice\Repository\Payroll\PayrollAnnualSettlementRepository;
@@ -20,6 +19,7 @@ use MyInvoice\Service\Payroll\IncomeTax\TaxEvidenceStatus;
 use MyInvoice\Service\Payroll\IncomeTax\TaxResidence;
 use MyInvoice\Service\Payroll\Migration\PayrollTakeoverCoverage;
 use MyInvoice\Service\Payroll\Migration\PayrollTakeoverTaxEvidence;
+use MyInvoice\Service\Payroll\PayrollChildReference;
 use MyInvoice\Service\Payroll\Posting\PayrollPartnerSettlementResolver;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
 use MyInvoice\Service\Payroll\Security\PayrollRevealPurpose;

@@ -19,6 +19,11 @@ final class PayrollChildReferenceTest extends TestCase
         self::assertSame(['dependant-99', 'dependant-100', 'dependant-1000', 'child-a'], array_keys($sorted));
     }
 
+    public function testReferencesWithoutIdFallBackToText(): void
+    {
+        self::assertSame(['child-a', 'child-b'], array_keys(PayrollChildReference::sortByDependantId(['child-b' => 2, 'child-a' => 1])));
+    }
+
     public function testReadsIdOnlyFromValidReference(): void
     {
         self::assertSame(42, PayrollChildReference::dependantId('dependant-42'));

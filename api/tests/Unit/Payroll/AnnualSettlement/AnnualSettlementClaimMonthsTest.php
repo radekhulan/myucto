@@ -275,7 +275,6 @@ final class AnnualSettlementClaimMonthsTest extends TestCase
         self::assertSame([], $result['credits']);
     }
 
-    /** § 35c odst. 7: měsíce s průkazem ZTP/P jsou podmnožinou měsíců nároku. */
     /**
      * Děti jdou v pořadí id dítěte. Odkaz `dependant-<id>` řazený jako text by dal
      * `dependant-100` před `dependant-99` a roční zúčtování by ukázalo 2. dítě před 1.
@@ -297,6 +296,25 @@ final class AnnualSettlementClaimMonthsTest extends TestCase
         );
     }
 
+    /** Odkaz jiného tvaru (převzatá data) zúčtování neshodí a jde až za děti s id. */
+    public function testChildReferenceOfOtherShapeGoesAfterDependantIds(): void
+    {
+        $result = (new AnnualSettlementClaimMonths())->children(
+            [
+                $this->childRow('child-a', 1, sprintf('%04d-01-01', self::YEAR), null),
+                $this->childRow('dependant-5', 2, sprintf('%04d-01-01', self::YEAR), null),
+            ],
+            self::YEAR,
+        );
+
+        self::assertSame([], $result['blockers']);
+        self::assertSame(
+            ['dependant-5', 'child-a'],
+            array_map(static fn ($child): string => $child->childReference, $result['children']),
+        );
+    }
+
+    /** § 35c odst. 7: měsíce s průkazem ZTP/P jsou podmnožinou měsíců nároku. */
     public function testChildZtpPMonthsAreASubsetOfClaimedMonths(): void
     {
         $result = (new AnnualSettlementClaimMonths())->children(

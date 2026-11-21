@@ -4,11 +4,11 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Payroll\AnnualSettlement;
 
-use MyInvoice\Service\Payroll\PayrollChildReference;
 use MyInvoice\Service\Payroll\IncomeTax\StudentTaxCredit;
 use MyInvoice\Service\Payroll\IncomeTax\TaxCreditKind;
 use MyInvoice\Service\Payroll\IncomeTax\TaxEvidenceStatus;
 use MyInvoice\Service\Payroll\IncomeTax\TaxpayerCreditEntitlement;
+use MyInvoice\Service\Payroll\PayrollChildReference;
 
 /**
  * Převod evidovaných intervalů nároku na POČET MĚSÍCŮ v roce.
