@@ -296,22 +296,46 @@ final class AnnualSettlementClaimMonthsTest extends TestCase
         );
     }
 
-    /** Odkaz jiného tvaru (převzatá data) zúčtování neshodí a jde až za děti s id. */
-    public function testChildReferenceOfOtherShapeGoesAfterDependantIds(): void
+    /** Odkaz jiného tvaru (převzatá data) zúčtování neshodí a řadí se podle pořadí nároku jako ostatní. */
+    public function testChildReferenceOfOtherShapeFollowsClaimOrder(): void
     {
         $result = (new AnnualSettlementClaimMonths())->children(
             [
-                $this->childRow('child-a', 1, sprintf('%04d-01-01', self::YEAR), null),
                 $this->childRow('dependant-5', 2, sprintf('%04d-01-01', self::YEAR), null),
+                $this->childRow('child-a', 1, sprintf('%04d-01-01', self::YEAR), null),
             ],
             self::YEAR,
         );
 
         self::assertSame([], $result['blockers']);
         self::assertSame(
-            ['dependant-5', 'child-a'],
+            ['child-a', 'dependant-5'],
             array_map(static fn ($child): string => $child->childReference, $result['children']),
         );
+    }
+
+    /**
+     * Issue #420: dítě zadané dřív (nižší id) je 2. dítě, dítě zadané později 1. dítě.
+     * Roční zúčtování je uvádí v pořadí nároku (§ 35c odst. 1), ne v pořadí id. Dítě „N"
+     * stojí podle svého pořadí mezi ostatními.
+     */
+    public function testChildrenFollowClaimOrderNotDependantId(): void
+    {
+        $result = (new AnnualSettlementClaimMonths())->children(
+            [
+                $this->childRow('dependant-7', 3, sprintf('%04d-01-01', self::YEAR), null),
+                $this->childRow('dependant-8', 1, sprintf('%04d-01-01', self::YEAR), null),
+                $this->childRow('dependant-3', 2, sprintf('%04d-01-01', self::YEAR), null, otherExcluded: 0, creditStatus: 'claimed_by_other'),
+            ],
+            self::YEAR,
+        );
+
+        self::assertSame([], $result['blockers']);
+        self::assertSame(
+            ['dependant-8', 'dependant-7'],
+            array_map(static fn ($child): string => $child->childReference, $result['children']),
+        );
+        self::assertSame(['dependant-3'], array_column($result['claimed_by_other'], 'child_reference'));
     }
 
     /** § 35c odst. 7: měsíce s průkazem ZTP/P jsou podmnožinou měsíců nároku. */

@@ -98,7 +98,9 @@ final class PayrollPersonStatutoryEvidenceRepository
                             other_caregiver_birth_date,
                             effective_from, effective_to,
                             evidence_reference, row_version',
-                'order' => 'child_order, child_reference, effective_from, id',
+                // Odkaz `dependant-<id>` se při shodném pořadí řadí číselně (délka, pak text),
+                // jako PayrollChildReference::compareByClaimOrder().
+                'order' => 'child_order, CHAR_LENGTH(child_reference), child_reference, effective_from, id',
             ],
         ],
         'social' => [

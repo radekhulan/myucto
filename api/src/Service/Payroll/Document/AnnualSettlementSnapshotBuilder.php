@@ -8,6 +8,7 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\Payroll\PayrollAnnualDocumentRepository;
 use MyInvoice\Service\Auth\SecretEncryption;
 use MyInvoice\Service\Payroll\AnnualSettlement\AnnualSettlementResult;
+use MyInvoice\Service\Payroll\PayrollChildReference;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
 use MyInvoice\Service\Payroll\Security\PayrollRevealPurpose;
 use MyInvoice\Service\Payroll\Security\PayrollSensitiveData;
@@ -588,6 +589,10 @@ final class AnnualSettlementSnapshotBuilder
             $row['other_household_caregivers'] = $caregivers;
             $result[] = $row;
         }
+        // Roční JMHZ uvádí děti v pořadí nároku, i když je zúčtování uložilo jinak.
+        usort($result, static fn (array $a, array $b): int => PayrollChildReference::compareByClaimOrder(
+            (int) $a['order'], (string) $a['child_reference'], (int) $b['order'], (string) $b['child_reference'],
+        ));
 
         return $result;
     }

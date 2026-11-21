@@ -17,6 +17,7 @@ use MyInvoice\Service\Payroll\IncomeTax\TaxCreditKind;
 use MyInvoice\Service\Payroll\IncomeTax\TaxDeclarationStatus;
 use MyInvoice\Service\Payroll\IncomeTax\TaxEvidenceStatus;
 use MyInvoice\Service\Payroll\Migration\PayrollTakeoverTaxEvidence;
+use MyInvoice\Service\Payroll\PayrollChildReference;
 use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetDomain;
 use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetProvider;
 use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetYearCoverage;
@@ -559,6 +560,10 @@ final class AnnualTaxSettlementService implements AnnualSettlementPerformer
                 ...$childRows,
                 ...$this->claimedByOtherChildRows($children['claimed_by_other']),
             ];
+            // Děti „N" stojí podle svého pořadí nároku mezi ostatními.
+            usort($childRows, static fn (array $a, array $b): int => PayrollChildReference::compareByClaimOrder(
+                (int) $a['order'], (string) $a['child_reference'], (int) $b['order'], (string) $b['child_reference'],
+            ));
         }
 
         return [

@@ -1574,7 +1574,10 @@ class AnnualTaxCertificateSnapshotBuilder
         array $claims,
     ): array {
         $rows = [];
-        foreach (PayrollChildReference::sortByDependantId($claims) as $reference => $months) {
+        // Pořadí nároku dítěte (při změně během roku nejnižší), pak id dítěte.
+        $claims = PayrollChildReference::sortByClaimOrder($claims, static fn (array $months): int =>
+            $months === [] ? 0 : min(array_column($months, 'order')));
+        foreach ($claims as $reference => $months) {
             $dependantId = PayrollChildReference::dependantId((string) $reference)
                 ?? throw new \DomainException(
                     'Odkaz dítěte v daňovém potvrzení není platný.',

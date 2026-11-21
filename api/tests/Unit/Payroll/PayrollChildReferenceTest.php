@@ -24,6 +24,19 @@ final class PayrollChildReferenceTest extends TestCase
         self::assertSame(['child-a', 'child-b'], array_keys(PayrollChildReference::sortByDependantId(['child-b' => 2, 'child-a' => 1])));
     }
 
+    /** Issue #420: pořadí nároku rozhoduje před id, id při shodném pořadí číselně. */
+    public function testSortsByClaimOrderThenNumericId(): void
+    {
+        $sorted = PayrollChildReference::sortByClaimOrder(
+            ['dependant-7' => 2, 'dependant-100' => 1, 'dependant-99' => 1, 'child-a' => 0, 'dependant-8' => 3],
+            static fn (int $order): int => $order,
+        );
+
+        // Neznámé pořadí (0) jde až za známá.
+        self::assertSame(['dependant-99', 'dependant-100', 'dependant-7', 'dependant-8', 'child-a'], array_keys($sorted));
+        self::assertLessThan(0, PayrollChildReference::compareByClaimOrder(1, 'dependant-9', 2, 'dependant-1'));
+    }
+
     public function testReadsIdOnlyFromValidReference(): void
     {
         self::assertSame(42, PayrollChildReference::dependantId('dependant-42'));
