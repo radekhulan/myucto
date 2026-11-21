@@ -240,11 +240,16 @@ final class OtherItemRepository
             'SELECT oi.id FROM ' . $table . ' WHERE ' . $whereSql . ' ORDER BY ' . $key . ' ' . $dir . ', oi.id ' . $dir
         );
         $stmt->execute($params);
-        return array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN));
+        $ids = [];
+        while (($id = $stmt->fetchColumn()) !== false) $ids[] = (int) $id;
+        return $ids;
     }
 
     /**
-     * Řádky knihy pro dávku id v pořadí `$ids`. Položka smazaná během exportu vypadne.
+     * Řádky knihy pro dávku id v pořadí `$ids`. Položka smazaná během exportu vypadne; ostatní
+     * se vytisknou s aktuálními hodnotami, i když mezitím přestaly odpovídat filtru (například
+     * koncept potvrzený během sázení). Pevná je množina a pořadí, ne obsah, stejně jako u knihy
+     * faktur; jinak by byla potřeba transakce přes celé sázení se zámkem metadat.
      *
      * @param list<int> $ids
      * @return list<array<string,mixed>>

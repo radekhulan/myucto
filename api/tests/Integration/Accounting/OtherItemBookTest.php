@@ -366,6 +366,23 @@ final class OtherItemBookTest extends TestCase
         self::assertSame(1050.0, $book->totals()[0]['remaining_amount'], 'součty z tisknutých (aktuálních) řádků');
     }
 
+    public function testItemLeavingTheFilterDuringExportIsPrintedWithCurrentState(): void
+    {
+        $first = $this->item('payable', 'CZK', 10, 'draft', documentNo: 'OZ-SYNT-1');
+        $second = $this->item('payable', 'CZK', 20, 'draft', documentNo: 'OZ-SYNT-2');
+        $book = $this->books->build($this->supplierId, OtherItemListFilters::fromRequest($this->request(['status' => 'draft'])), true, [], batchSize: 1);
+        $rows = $book->rows();
+        self::assertSame($first, (int) $rows->current()['id']);
+        // Rozhodnutí: množina je pevná od začátku exportu, obsah aktuální (jako kniha faktur, bez dlouhé transakce).
+        $this->pdo->prepare("UPDATE other_items SET status = 'confirmed' WHERE id = ?")->execute([$second]);
+        $rows->next();
+        self::assertSame($second, (int) $rows->current()['id']);
+        self::assertSame('Potvrzeno', $rows->current()['status_label']);
+        for ($rows->next(); $rows->valid(); $rows->next()) {
+        }
+        self::assertSame([['payable', 'CZK', 1, 20.0]], array_map(static fn (array $t): array => [$t['side'], $t['currency'], $t['count'], $t['amount']], $book->totals()));
+    }
+
     public function testRowsSkipItemDeletedDuringExportAndForeignIds(): void
     {
         $keep = $this->item('payable', 'CZK', 10, 'draft');
