@@ -329,6 +329,43 @@ final class OtherItemBookTest extends TestCase
         self::assertSame('splatnost do 31. 12. 2099', $label(['status' => 'all', 'to' => '2099-12-31']));
     }
 
+    public function testChangeOfSortValueDuringExportNeitherDropsNorDuplicatesRows(): void
+    {
+        $ids = [];
+        foreach ([100, 200, 300, 400, 500] as $amount) {
+            $ids[$amount] = $this->item('receivable', 'CZK', $amount, 'confirmed');
+        }
+        $parsed = OtherItemListFilters::fromRequest($this->request(['status' => 'all', 'sort_by' => 'remaining_amount', 'sort_dir' => 'asc']));
+        $book = $this->books->build($this->supplierId, $parsed, true, [], batchSize: 2);
+        $rows = $book->rows();
+        $seen = [(int) $rows->current()['id']];
+        $rows->next();
+        $seen[] = (int) $rows->current()['id'];
+        // Párování úhrady během sázení: položka z pozdější dávky klesne pod hranici první dávky.
+        $this->allocate($ids[500], 450);
+        for ($rows->next(); $rows->valid(); $rows->next()) {
+            $seen[] = (int) $rows->current()['id'];
+        }
+        self::assertSame(array_values($ids), $seen, 'každá položka právě jednou, v pořadí ze začátku exportu');
+        self::assertSame(5, $book->totals()[0]['count']);
+        self::assertSame(1050.0, $book->totals()[0]['remaining_amount'], 'součty z tisknutých (aktuálních) řádků');
+    }
+
+    public function testRowsSkipItemDeletedDuringExportAndForeignIds(): void
+    {
+        $keep = $this->item('payable', 'CZK', 10, 'draft');
+        $gone = $this->item('payable', 'CZK', 20, 'draft');
+        $other = $this->createIsolatedSupplier($this->pdo, $this->supplierId);
+        $this->pdo->prepare(
+            'INSERT INTO other_items (supplier_id, side, title, issued_on, accounting_on, due_on, currency, amount, amount_czk, status)
+             VALUES (?, "payable", "Cizí firma", CURDATE(), CURDATE(), CURDATE(), "CZK", 10, 10, "confirmed")'
+        )->execute([$other]);
+        $foreign = (int) $this->pdo->lastInsertId();
+        $this->pdo->prepare('UPDATE other_items SET deleted_at = NOW() WHERE id = ?')->execute([$gone]);
+        self::assertSame([$keep], array_map(static fn (array $row): int => (int) $row['id'],
+            $this->repo->bookRows($this->supplierId, [$gone, $keep, $foreign])));
+    }
+
     public function testTotalsAreOnlyValidAfterAllRowsAndEmptyXlsxTotalsSaySo(): void
     {
         $this->item('payable', 'CZK', 10, 'draft');

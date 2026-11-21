@@ -5,7 +5,8 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Accounting\OtherItemBook;
 
 /**
- * Kniha ostatních pohledávek a závazků: hlavička sestavy a řádky čtené proudem po dávkách.
+ * Kniha ostatních pohledávek a závazků: hlavička sestavy a řádky čtené po dávkách podle
+ * seřazených id výběru (`OtherItemRepository::bookOrderedIds`).
  *
  * Řádky odpovídají výpisu: „Zbývá uhradit“ a stav počítají u rozdělených splátek i úrok
  * a poplatek, stejně jako sloupec a odznak výpisu.
@@ -27,11 +28,13 @@ final class OtherItemBook
 
     /**
      * @param array<string,mixed> $meta title, supplier, period_label, selection, scope_note, printed_by, printed_at
-     * @param \Closure(array{0:string,1:int}|null, int): list<array<string,mixed>> $fetchBatch dávka už normalizovaných řádků
+     * @param list<int> $ids seřazená id celého výběru (pořadí i množina pevné od začátku exportu)
+     * @param \Closure(list<int>): list<array<string,mixed>> $fetchRows už normalizované řádky dávky id v jejich pořadí
      */
     public function __construct(
         public readonly array $meta,
-        private readonly \Closure $fetchBatch,
+        private readonly array $ids,
+        private readonly \Closure $fetchRows,
         public readonly bool $showPosting,
         public readonly string $domesticCurrency = 'CZK',
         private readonly int $batchSize = self::BATCH_SIZE,
@@ -45,16 +48,12 @@ final class OtherItemBook
         }
         $this->consumed = true;
 
-        $after = null;
-        do {
-            $batch = ($this->fetchBatch)($after, $this->batchSize);
-            foreach ($batch as $row) {
+        for ($offset = 0, $n = count($this->ids); $offset < $n; $offset += $this->batchSize) {
+            foreach (($this->fetchRows)(array_slice($this->ids, $offset, $this->batchSize)) as $row) {
                 $this->accumulate($row);
                 yield $row;
             }
-            $last = $batch === [] ? null : $batch[count($batch) - 1];
-            $after = $last === null ? null : [(string) $last['book_sort_key'], (int) $last['id']];
-        } while (count($batch) === $this->batchSize);
+        }
         $this->exhausted = true;
     }
 

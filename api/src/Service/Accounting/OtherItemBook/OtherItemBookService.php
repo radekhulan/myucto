@@ -76,8 +76,8 @@ final class OtherItemBookService
         $supplier = $stmt->fetch(PDO::FETCH_ASSOC) ?: [];
         $showPosting = $canReadAccounting && ($supplier['accounting_mode'] ?? '') === 'double_entry';
         $items = $this->items;
-        $fetch = static function (?array $after, int $limit) use ($items, $supplierId, $filters, $showPosting): array {
-            $batch = $items->bookBatch($supplierId, $filters, $after, $limit);
+        $fetch = static function (array $ids) use ($items, $supplierId, $showPosting): array {
+            $batch = $items->bookRows($supplierId, $ids);
             // Stav a zbývá uhradit u rozdělených splátek jedním dávkovým čtením za dávku (jako výpis).
             $coverage = $items->installmentCoverage($supplierId, array_map(static fn (array $row): int => (int) $row['id'], $batch));
             return array_map(
@@ -88,6 +88,7 @@ final class OtherItemBookService
 
         return new OtherItemBook(
             $this->meta($supplierId, $supplier, $parsed, $user, $now),
+            $items->bookOrderedIds($supplierId, $filters),
             $fetch,
             $showPosting,
             $this->domesticCurrency($supplierId),

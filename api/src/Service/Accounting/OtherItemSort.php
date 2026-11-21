@@ -31,7 +31,7 @@ final class OtherItemSort
 
     /**
      * Řazení zvolené ve výpisu (klíč sloupce a směr), nebo null pro výchozí. Sdílí ho výpis
-     * a kniha, která zvolené řazení převezme ({@see \MyInvoice\Repository\OtherItemRepository::bookBatch()}).
+     * a kniha, která zvolené řazení převezme ({@see \MyInvoice\Repository\OtherItemRepository::bookOrderedIds()}).
      *
      * @return array{key:string, dir:'ASC'|'DESC'}|null
      */
