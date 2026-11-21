@@ -24,7 +24,8 @@ const auth = useAuthStore()
 const supplierStore = useSupplierStore()
 const canCreateSupplier = computed(() => auth.isSuperadmin || auth.isAdminPlusRole)
 const canReviewApprovals = computed(() => auth.canRead('invoices.approval'))
-const isDoubleEntry = computed(() => auth.hasCommercialFeatures && supplierStore.currentSupplier?.accounting_mode === 'double_entry')
+const isDoubleEntry = computed(() => auth.hasCommercialFeatures && supplierStore.currentSupplier?.accounting_mode === 'double_entry'
+  && supplierStore.currentSupplier?.accounting_enabled !== false)
 
 // Onboarding gate (#151): bez dodavatele je dashboard prázdný a všechny zakládací akce
 // padají → místo dat ukážeme výzvu k vytvoření prvního dodavatele.

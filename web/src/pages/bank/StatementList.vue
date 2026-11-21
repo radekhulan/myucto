@@ -37,7 +37,8 @@ const toast = useToast()
 const authStore = useAuthStore()
 const supplierStore = useSupplierStore()
 const isAdmin = computed(() => authStore.isCompanyAdminRole)
-const isDoubleEntry = computed(() => !authStore.isClientRole && authStore.hasCommercialFeatures && supplierStore.currentSupplier?.accounting_mode === 'double_entry')
+const isDoubleEntry = computed(() => !authStore.isClientRole && authStore.hasCommercialFeatures && supplierStore.currentSupplier?.accounting_mode === 'double_entry'
+  && supplierStore.currentSupplier?.accounting_enabled !== false)
 
 const router = useRouter()
 const route = useRoute()

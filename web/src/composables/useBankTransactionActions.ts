@@ -623,6 +623,7 @@ export function useBankTransactionActions(opts: { reload: () => Promise<void> | 
     const auth = useAuthStore()
     const canSettle = !auth.isClientRole && auth.hasCommercialFeatures && auth.canWrite('accounting')
       && useSupplierStore().currentSupplier?.accounting_mode === 'double_entry'
+      && useSupplierStore().currentSupplier?.accounting_enabled !== false
     if (!canSettle) {
       toast.info(t('bank.purchase_shortfall.partial_info', { amount: formatMoney(r.remaining ?? 0, r.currency || 'CZK') }))
       return

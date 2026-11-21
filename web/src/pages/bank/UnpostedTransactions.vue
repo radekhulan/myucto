@@ -72,7 +72,8 @@ function accountLabel(a: BankAccountOption): string {
 const bankActions = useBankTransactionActions({ reload: () => changed(), refresh: () => changed(true) })
 // „Všechny pohyby" vidí každá firma s výpisy; stav zaúčtování, kontace a akce zaúčtování
 // jen podvojné účetnictví s komerčními funkcemi (stejná podmínka jako detail výpisu).
-const isDoubleEntry = computed(() => !auth.isClientRole && auth.hasCommercialFeatures && supplierStore.currentSupplier?.accounting_mode === 'double_entry')
+const isDoubleEntry = computed(() => !auth.isClientRole && auth.hasCommercialFeatures && supplierStore.currentSupplier?.accounting_mode === 'double_entry'
+  && supplierStore.currentSupplier?.accounting_enabled !== false)
 const colspan = computed(() => 7 + (props.scope === 'all' ? 1 : 0) + (isDoubleEntry.value ? 1 : 0) + (bulkAvailable.value ? 1 : 0))
 // Řazení podle sloupce — seznam je stránkovaný na serveru, řadí se tam (výchozí = nejnovější nahoře).
 const txSort = useBankTransactionSort(['posted_at', 'amount', 'account', 'variable_symbol', 'counterparty', 'invoice', 'posting', 'status'])

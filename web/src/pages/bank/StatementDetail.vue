@@ -85,7 +85,8 @@ async function sendUnmatchedToClient() {
     sendingUnmatched.value = false
   }
 }
-const isDoubleEntry = computed(() => !auth.isClientRole && auth.hasCommercialFeatures && supplierStore.currentSupplier?.accounting_mode === 'double_entry')
+const isDoubleEntry = computed(() => !auth.isClientRole && auth.hasCommercialFeatures && supplierStore.currentSupplier?.accounting_mode === 'double_entry'
+  && supplierStore.currentSupplier?.accounting_enabled !== false)
 
 // Počet transakcí s návrhem zaúčtování (pro chip v headeru) — počítá backend přes
 // VŠECHNY transakce výpisu, ne jen aktuálně načtenou stránku (viz transactions_meta).
