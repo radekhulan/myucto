@@ -48,4 +48,15 @@ final class AresNormalizeNaceTest extends TestCase
         self::assertSame('', $n['cz_nace_code']);
         self::assertSame('po', $n['taxpayer_type']);
     }
+
+    /**
+     * Zahraniční fyzická osoba (424) a její odštěpný závod (425) jsou fyzické osoby:
+     * dřív je ARES zařadil jako právnickou osobu a firma vznikla v podvojném účetnictví.
+     */
+    public function testForeignNaturalPersonIsFo(): void
+    {
+        self::assertSame('fo', $this->normalize(['pravniForma' => '424'])['taxpayer_type']);
+        self::assertSame('fo', $this->normalize(['pravniForma' => '425'])['taxpayer_type']);
+        self::assertSame('po', $this->normalize(['pravniForma' => '421'])['taxpayer_type']);
+    }
 }
