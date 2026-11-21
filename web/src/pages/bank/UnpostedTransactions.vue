@@ -16,7 +16,6 @@ import BulkActionBar from '@/components/ui/BulkActionBar.vue'
 import BulkActionsDialog from '@/components/bulk/BulkActionsDialog.vue'
 import { useListBulkActions } from '@/components/bulk/useListBulkActions'
 import { bulkActionsApi } from '@/api/bulkActions'
-import { RouterLink } from 'vue-router'
 import { ICONS, btnOutline } from '@/components/ui/buttonStyles'
 import BankTransactionRow from '@/components/bank/BankTransactionRow.vue'
 import BankTransactionDialogs from '@/components/bank/BankTransactionDialogs.vue'
@@ -139,6 +138,7 @@ function toggleAllLoaded() {
 const toolbarActions = computed<ActionItem[]>(() => [
   { key: 'export', label: t('bank.unmatched_export.download'), icon: 'download', tier: 'secondary', show: props.scope === 'all' && !auth.isClientRole, run: exportUnmatched },
   { ...bulk.menuItem.value, show: bulkAvailable.value },
+  { key: 'bank-bulk-link', label: t('bulk_actions.bank_link'), icon: 'table', tier: 'overflow', variant: 'primary', show: isDoubleEntry.value && auth.canRead('accounting'), to: { name: 'accounting-posting-backfill' } },
 ])
 
 async function exportUnmatched() {
@@ -310,11 +310,6 @@ useWindowRefresh(() => load(true))
         <option value="posted">{{ t('bank.filter_posting_posted') }}</option>
       </select>
       <ActionBar v-if="toolbarActions.some(a => a.show)" :actions="toolbarActions" data-test="bank-more-actions" />
-      <RouterLink v-if="isDoubleEntry && auth.canRead('accounting')" :to="{ name: 'accounting-posting-backfill' }"
-        :class="btnOutline('primary')" class="whitespace-nowrap" data-test="bank-bulk-link">
-        <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.table" /></svg>
-        {{ t('bulk_actions.bank_link') }}
-      </RouterLink>
       <BankTransactionSortSelect v-model="txSort.selectValue.value" class="md:hidden" :keys="sortKeys" />
       <span class="text-xs text-neutral-500 whitespace-nowrap">{{ t('bank.posting.count_found', { n: total }) }}</span>
     </div>
