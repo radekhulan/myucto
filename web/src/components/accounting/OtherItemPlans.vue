@@ -202,7 +202,8 @@ async function load() {
 }
 
 /**
- * Odpověď uložení patří jen položce, na které se ukládalo: po přepnutí na jinou položku se zahodí.
+ * Odpověď akce rozvrhu (založení, název, generování, stav, zrušení) patří jen položce, ze které se
+ * spustila: po přepnutí na jinou položku šipkami (komponenta se znovu nepřipojí) se zahodí.
  * Obnova téže položky (tichý refresh detailu) výsledek nezahazuje, uložení by jinak tiše zmizelo.
  */
 function staleGuard() {
@@ -241,7 +242,13 @@ async function saveTitle() {
     scheduleOpen.value = false
     toast.success(t('other_items.plans.title_saved'))
   } catch (error: any) {
-    if (!stale()) showSaveError(error)
+    if (stale()) return
+    showSaveError(error)
+    // Rozvrh smazaný v jiné záložce: dialog i karta nad ním nemají co ukazovat (jako openScheduleEdit).
+    if (error?.response?.status === 404) {
+      schedule.value = null
+      scheduleOpen.value = false
+    }
   } finally {
     busy.value = false
   }
@@ -250,13 +257,15 @@ async function saveTitle() {
 async function generate() {
   if (!schedule.value || busy.value || !sourceActive.value) return
   busy.value = true
+  const stale = staleGuard()
   try {
     const result = await otherItemPlansApi.generate(schedule.value.id, through.value)
+    if (stale()) return
     schedule.value = result.schedule
     toast.success(t('other_items.plans.generated', { count: result.created_ids.length }))
     if (result.posted_ids.length) toast.success(t('other_items.plans.posted', { count: result.posted_ids.length }))
   } catch (error: any) {
-    toast.error(errorMessage(error))
+    if (!stale()) toast.error(errorMessage(error))
   } finally {
     busy.value = false
   }
@@ -265,11 +274,13 @@ async function generate() {
 async function toggleSchedule() {
   if (!schedule.value || busy.value || !sourceActive.value) return
   busy.value = true
+  const stale = staleGuard()
   try {
-    schedule.value = await otherItemPlansApi.setStatus(schedule.value.id,
+    const saved = await otherItemPlansApi.setStatus(schedule.value.id,
       schedule.value.status === 'active' ? 'paused' : 'active')
+    if (!stale()) schedule.value = saved
   } catch (error: any) {
-    toast.error(errorMessage(error))
+    if (!stale()) toast.error(errorMessage(error))
   } finally {
     busy.value = false
   }
@@ -278,11 +289,14 @@ async function toggleSchedule() {
 async function toggleAutoPost() {
   if (!schedule.value || busy.value) return
   busy.value = true
+  const stale = staleGuard()
   try {
-    schedule.value = await otherItemPlansApi.setStatus(schedule.value.id, schedule.value.status, !schedule.value.auto_post)
+    const saved = await otherItemPlansApi.setStatus(schedule.value.id, schedule.value.status, !schedule.value.auto_post)
+    if (stale()) return
+    schedule.value = saved
     toast.success(t('other_items.plans.schedule_saved'))
   } catch (error: any) {
-    toast.error(errorMessage(error))
+    if (!stale()) toast.error(errorMessage(error))
   } finally {
     busy.value = false
   }
@@ -291,13 +305,15 @@ async function toggleAutoPost() {
 async function deleteSchedule() {
   if (!schedule.value || busy.value || !window.confirm(t('other_items.plans.confirm_delete_schedule'))) return
   busy.value = true
+  const stale = staleGuard()
   try {
     await otherItemPlansApi.deleteSchedule(schedule.value.id)
+    if (stale()) return
     schedule.value = null
     scheduleOpen.value = false
     toast.success(t('other_items.plans.schedule_deleted'))
   } catch (error: any) {
-    toast.error(errorMessage(error))
+    if (!stale()) toast.error(errorMessage(error))
   } finally {
     busy.value = false
   }

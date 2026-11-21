@@ -13,13 +13,14 @@ const m = vi.hoisted(() => ({
   setStatus: vi.fn(),
   deleteSchedule: vi.fn(),
   setTitle: vi.fn(),
+  generate: vi.fn(),
   translated: [] as string[],
 }))
 
 vi.mock('@/api/otherItemPlans', () => ({
   otherItemPlansApi: { schedules: m.schedules, installments: m.installments, schedule: m.schedule,
     planLoan: m.planLoan, setInstallments: m.setInstallments, createSchedule: m.createSchedule,
-    setStatus: m.setStatus, deleteSchedule: m.deleteSchedule, setTitle: m.setTitle },
+    setStatus: m.setStatus, deleteSchedule: m.deleteSchedule, setTitle: m.setTitle, generate: m.generate },
 }))
 vi.mock('@/stores/auth', () => ({ useAuthStore: () => ({ canWrite: () => m.canWrite }) }))
 vi.mock('@/stores/supplier', () => ({ useSupplierStore: () => ({ currentSupplier: { accounting_mode: 'tax_evidence' } }) }))
@@ -645,6 +646,60 @@ describe('OtherItemPlans', () => {
       expect(wrapper.find('[data-test="schedule-card"]').exists()).toBe(false)
       expect(m.schedules.mock.calls.length).toBe(loads)
       expect(wrapper.emitted('state')!.at(-1)![0]).toMatchObject({ canSchedule: true })
+    })
+  })
+
+  describe('pozdní odpovědi akcí rozvrhu po přepnutí položky', () => {
+    const base = { frequency: 'monthly', anchor_on: '2099-01-01', due_days: 14, ends_on: null, next_index: 2, status: 'active',
+      auto_post: false, next_on: '2099-03-01', occurrences: [], finished: false, source_active: true }
+    const scheduleOf = (id: number) => ({ ...base, id, source_item_id: id === 4 ? 9 : 12,
+      template: { title: id === 4 ? 'A' : 'B' }, next_title: id === 4 ? 'A' : 'B' })
+    beforeEach(() => {
+      m.installments.mockResolvedValue([])
+      m.schedules.mockImplementation((id: number) => Promise.resolve([{ id: id === 9 ? 4 : 5, source_item_id: id }]))
+      m.schedule.mockImplementation((id: number) => Promise.resolve(scheduleOf(id)))
+      vi.spyOn(window, 'confirm').mockReturnValue(true)
+    })
+
+    it.each([
+      ['generate', '[data-test="schedule-generate"]', false],
+      ['setStatus', '[data-test="schedule-auto-post-toggle"]', false],
+      ['setStatus', '[data-test="schedule-toggle"]', true],
+      ['deleteSchedule', '[data-test="schedule-delete"]', true],
+    ] as const)('%s (%s) položky A kartu položky B nepřepíše', async (method, selector, inDialog) => {
+      const api = { generate: m.generate, setStatus: m.setStatus, deleteSchedule: m.deleteSchedule }
+      let finish: (v: unknown) => void = () => {}
+      api[method]!.mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+      const wrapper = shallowMount(OtherItemPlans, { props: { item: item({ paid_amount: 0, remaining_amount: 3000 }) }, global: { stubs } })
+      await flushPromises()
+      if (inDialog) {
+        await wrapper.get('[data-test="schedule-edit"]').trigger('click')
+        await flushPromises()
+      }
+      await wrapper.get(selector).trigger(selector.includes('toggle"]') && !inDialog ? 'change' : 'click')
+      await wrapper.setProps({ item: item({ id: 12, paid_amount: 0, remaining_amount: 3000 }) })
+      await flushPromises()
+      expect(wrapper.get('[data-test="schedule-next-title"]').text()).toBe('B')
+      finish(method === 'generate' ? { schedule: { ...scheduleOf(4), next_title: 'A po generování' }, created_ids: [1], posted_ids: [] }
+        : method === 'deleteSchedule' ? undefined : { ...scheduleOf(4), status: 'paused', next_title: 'A změněný' })
+      await flushPromises()
+      expect(wrapper.get('[data-test="schedule-next-title"]').text()).toBe('B')
+      expect(wrapper.emitted('state')!.at(-1)![0]).toMatchObject({ canSchedule: false })
+    })
+
+    it('uložení názvu smazaného rozvrhu (404) kartu schová a dialog zavře', async () => {
+      m.schedules.mockResolvedValue([{ id: 4, source_item_id: 9 }])
+      m.schedule.mockResolvedValue(scheduleOf(4))
+      m.setTitle.mockRejectedValueOnce({ response: { status: 404, data: { error: { code: 'other_items.error.schedule_not_found', message: 'x' } } } })
+      const wrapper = shallowMount(OtherItemPlans, { props: { item: item({ paid_amount: 0, remaining_amount: 3000 }) }, global: { stubs } })
+      await flushPromises()
+      await wrapper.get('[data-test="schedule-edit"]').trigger('click')
+      await flushPromises()
+      await wrapper.get('[data-test="schedule-title-form"]').trigger('submit')
+      await flushPromises()
+      expect(toastError).toHaveBeenCalledTimes(1)
+      expect(wrapper.find('[data-test="modal"]').exists()).toBe(false)
+      expect(wrapper.find('[data-test="schedule-card"]').exists()).toBe(false)
     })
   })
 })
