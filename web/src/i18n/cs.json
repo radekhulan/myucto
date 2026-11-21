@@ -604,10 +604,10 @@
       "payable": "Závazky zbývá"
     },
     "window_hint": "Bez zadaného data jsou vidět položky se splatností rok zpět až rok dopředu; ručně zadanou položku najde hledání i mimo toto rozmezí.",
-    "book": "Kniha ostatních pohledávek a závazků",
+    "book": "Kniha položek",
     "book_failed": "Knihu ostatních pohledávek a závazků se nepodařilo vytvořit",
     "book_scope": "Ručně zadané položky odpovídající aktuálnímu filtru, bez stránkování. Předpisy z mezd a daní v knize nejsou.",
-    "book_hint": "Sestava ručně zadaných položek podle aktuálního filtru výpisu se součty",
+    "book_hint": "Kniha ostatních pohledávek a závazků: sestava ručně zadaných položek podle aktuálního filtru výpisu se součty",
     "window_hint_open": "Bez zadaného data jsou vidět neuhrazené ručně zadané položky bez ohledu na stáří a předpisy z mezd a daní od roku zpět, vše se splatností nejvýš rok dopředu; ručně zadanou položku najde hledání i mimo toto rozmezí.",
     "totals_scope": "(bez rozpracovaných)",
     "totals_hint": "Zbývá uhradit u ručně zadaných položek za celý výběr (všechny stránky, ve zvoleném rozmezí splatnosti) jako saldo jistiny: úrok a poplatek splátek úvěru se nepočítají. Počítá jen potvrzené a zaúčtované položky, ne rozpracované, storna, přeplatky ani položky z mezd a daní.",

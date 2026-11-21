@@ -327,7 +327,7 @@ Agenda slouží pro nároky a dluhy, které nepatří do faktur, mezd ani daní:
 
 **Jak poznáte, že je hotovo:** Položka je ve stavu uhrazená, nebo jí zbývá uhradit nula, a z filtru **Otevřené** zmizí.
 
-Přehled vybraných položek k tisku nebo do tabulky stáhnete tlačítkem **Kniha ostatních pohledávek a závazků** nad seznamem ([§ 52.14.14.1](#5214141-prehled)).
+Přehled vybraných položek k tisku nebo do tabulky (Kniha ostatních pohledávek a závazků) stáhnete tlačítkem **Kniha položek** nad seznamem ([§ 52.14.14.1](#5214141-prehled)).
 
 > [!WARNING]
 > Zdanitelné plnění se sem nezadává. Patří do faktur, aby jeho řádky vstoupily do knihy DPH a výkazů.
@@ -1659,8 +1659,8 @@ Filtry:
   položky najdete zadáním data; vyplněné jen **od** nebo jen **do** okno na druhé straně
   neomezí.
 
-**Kniha ostatních pohledávek a závazků.** Tlačítko vpravo nahoře v seznamu (vlevo od tlačítek
-**Druhy** a **Dokumenty**) stáhne sestavu ručně zadaných položek odpovídajících aktuálnímu filtru jako PDF na šířku
+**Kniha ostatních pohledávek a závazků.** Tlačítko **Kniha položek** vpravo nahoře v seznamu (vlevo od
+tlačítek **Druhy** a **Složka dokumentů**, na telefonu **Kniha**) stáhne sestavu ručně zadaných položek odpovídajících aktuálnímu filtru jako PDF na šířku
 nebo tabulku XLSX, bez stránkování. Seřazená je stejně jako seznam, když v něm řazení zvolíte
 kliknutím na záhlaví sloupce; jinak podle čísla dokladu (koncepty bez čísla první). Čísla se řadí
 podle hodnoty, ne jako text: OP-2026-9 je před OP-2026-10, stejně jako v seznamu. Výběr je stejný jako v seznamu

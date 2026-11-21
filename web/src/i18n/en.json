@@ -604,10 +604,10 @@
       "payable": "Payables remaining"
     },
     "window_hint": "Without a date, items due from one year back to one year ahead are shown; search finds manually entered items outside this range too.",
-    "book": "Other receivables and payables book",
+    "book": "Item book",
     "book_failed": "The other receivables and payables book could not be created",
     "book_scope": "Manually entered items matching the current filter, without paging. Payroll and tax items are not included.",
-    "book_hint": "Report of manually entered items matching the current list filter, with totals",
+    "book_hint": "Other receivables and payables book: report of manually entered items matching the current list filter, with totals",
     "window_hint_open": "Without a date, unpaid manually entered items of any age and payroll and tax items from one year back are shown, all due at most one year ahead; search finds manually entered items outside this range too.",
     "totals_scope": "(drafts excluded)",
     "totals_hint": "Remaining principal balance of manually entered items in the whole selection (all pages, within the chosen due date range); loan instalment interest and fees are not included. Only confirmed and posted items count, not drafts, reversals, overpayments or payroll and tax items.",
