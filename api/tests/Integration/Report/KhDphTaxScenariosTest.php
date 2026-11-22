@@ -279,6 +279,7 @@ final class KhDphTaxScenariosTest extends TestCase
 
         // ř.47 hodnota pořízeného majetku (P8)
         $this->assertSame('40000', (string) $v4['nar_maj'], 'ř.47 = 40000 (P8 majetek)');
+        $this->assertSame('8400', (string) $v4['od_maj'], 'ř.47 odpočet v plné výši = 21 % z 40000 (P8), jen informativně');
 
         // ══ KNIHA DPH (interní žurnál) ═══════════════════════════════════════
         // Pin chování PŘED refaktorem na sdílenou VatLedgerService — Kniha DPH

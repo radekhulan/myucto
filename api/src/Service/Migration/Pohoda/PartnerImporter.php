@@ -40,7 +40,6 @@ final class PartnerImporter
 
     /** @var array<string,int|null> */
     private array $countryIds = [];
-
     public function __construct(
         private readonly Connection $db,
         private readonly PohodaImportRepository $map,
@@ -93,7 +92,28 @@ final class PartnerImporter
                 $ctx->clientsByIco[$s['ico']] = $clientId;
             }
         }
+        $this->completeForeignVatIdsFromDocuments($ctx);
         $p->finish(self::STEP_PARTNERS);
+    }
+
+    /**
+     * DIČ zahraničních dodavatelů z přijatých dokladů ještě před jejich převodem. Převod
+     * dokladu řadí samovyměření podle státu dodavatele ({@see InvoiceImporter}) a evidence
+     * DPH ho čte z kontaktu - kdyby se kontakt opravil až u pozdějšího dokladu, dřívější
+     * doklady téhož dodavatele by se převedly jako tuzemské a období by se jim posunulo.
+     */
+    private function completeForeignVatIdsFromDocuments(PohodaContext $ctx): void
+    {
+        $sources = array_map(static fn (): array => ['invoice', 'invoiceHeader'], InvoiceImporter::PURCHASE_AGENDAS)
+            + ['internal' => ['intDoc', 'intDocHeader']];
+        foreach ($sources as $agenda => [$element, $header]) {
+            foreach ($ctx->export->records($agenda, $element) as $r) {
+                $s = self::snapshot(PohodaXml::get(PohodaXml::get($r, $header), 'partnerIdentity'));
+                if ($s['dic'] !== '' && isset($ctx->clientsByPohodaId[$s['pohoda_id']])) {
+                    $this->completeForeignVatId($ctx, $ctx->clientsByPohodaId[$s['pohoda_id']], $s['dic']);
+                }
+            }
+        }
     }
 
     /**
@@ -107,6 +127,7 @@ final class PartnerImporter
         $name = $s['name'] !== '' ? $s['name'] : 'Neznámý partner z Pohody';
         $mapped = $this->mappedPartner($ctx, $s, $name);
         if ($mapped !== null) {
+            $this->completeForeignVatId($ctx, $mapped, $s['dic']);
             return $mapped;
         }
         $key = PartnerIdentityMatcher::documentKey($s['ico'], $name);
@@ -139,6 +160,27 @@ final class PartnerImporter
             return $mapped;
         }
         return $this->identity->clientByName($ctx->supplierId, mb_substr($s['name'], 0, 190));
+    }
+
+    /**
+     * Adresář POHODY často nevede DIČ zahraničního dodavatele, nese ho až doklad. Kontakt by
+     * zůstal se státem firmy a samovyměření by evidence DPH brala jako tuzemský doklad.
+     * Kontaktu bez DIČ se doplní DIČ z dokladu a stát podle jeho předpony; kontakt, který
+     * DIČ už má, se nemění.
+     */
+    private function completeForeignVatId(PohodaContext $ctx, int $clientId, string $dic): void
+    {
+        $dic = self::vatId($dic);
+        $iso2 = PartnerCountry::fromVatId($dic);
+        if ($iso2 === null || $iso2 === 'CZ') {
+            return;
+        }
+        $countryId = $this->countryId($iso2 === 'EL' ? 'GR' : $iso2);
+        if ($countryId !== null) {
+            $this->db->pdo()->prepare("UPDATE clients SET country_id = ? WHERE id = ? AND supplier_id = ? AND (dic IS NULL OR dic = '') AND country_id <=> ?")
+                ->execute([$countryId, $clientId, $ctx->supplierId, $this->defaults($ctx->supplierId)['country_id']]);
+        }
+        $this->identity->fillMissing($ctx->supplierId, $clientId, ['dic' => $dic, 'street' => '', 'city' => '', 'zip' => '', 'email' => '', 'phone' => '']);
     }
 
     /** @param array{pohoda_id:string,ico:string} $s */

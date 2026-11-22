@@ -91,13 +91,58 @@ final class AssetService
         return $this->createCard($supplierId, $data + ['imported_depreciation_plan' => $plan], $meta);
     }
 
-    private function createCard(int $supplierId, array $data, array $meta): array
+    /**
+     * Interní vstup importérů: historická karta (R23) i s technickými zhodnoceními, která
+     * zdrojový program evidoval už před převodem. Počáteční oprávky takové karty pokrývají
+     * i odpisy zhodnocení, proto je validace porovnává s cenou zvýšenou o zhodnocení.
+     * Zaúčtování zhodnocení nese převedený deník, karta ho jen eviduje (jako {@see addImprovement()}).
+     *
+     * @param array<string,mixed> $data
+     * @param list<array{completed_on:string, amount:float|int|string, description?:?string}> $improvements
+     * @param array{user_id?:?int, posted_by?:?int, ip?:?string, user_agent?:?string} $meta
+     * @return array{asset: array<string,mixed>, warnings: list<array{code:string, message:string}>}
+     */
+    public function createWithImprovements(int $supplierId, array $data, array $improvements, array $meta = []): array
+    {
+        self::assertNoImportedPlanInput($data);
+        if ($improvements === []) {
+            return $this->createCard($supplierId, $data, $meta);
+        }
+        $rows = [];
+        $total = 0.0;
+        foreach ($improvements as $imp) {
+            $completedOn = (string) ($imp['completed_on'] ?? '');
+            $amount = round((float) ($imp['amount'] ?? 0), 2);
+            if (!self::isDate($completedOn)) {
+                throw new AssetException('validation_failed', 'Neplatné datum dokončení TZ (YYYY-MM-DD).');
+            }
+            if ($amount <= 0) {
+                throw new AssetException('validation_failed', 'Částka TZ musí být kladná.');
+            }
+            $description = trim((string) ($imp['description'] ?? ''));
+            $rows[] = ['completed_on' => $completedOn, 'amount' => $amount, 'description' => $description === '' ? null : mb_substr($description, 0, 255)];
+            $total += $amount;
+        }
+        return (new \MyInvoice\Service\Accounting\Dimension\DimensionPeriodGuard($this->db))->transaction(function () use ($supplierId, $data, $meta, $rows, $total): array {
+            $created = $this->createCard($supplierId, $data, $meta, round($total, 2));
+            $asset = $created['asset'];
+            foreach ($rows as $row) {
+                if ($asset['put_into_use_date'] === null || $row['completed_on'] < (string) $asset['put_into_use_date']) {
+                    throw new AssetException('validation_failed', 'Datum dokončení TZ nesmí předcházet datu zařazení do užívání.');
+                }
+                $this->assets->insertImprovement($supplierId, (int) $asset['id'], $row);
+            }
+            return ['asset' => $this->get($supplierId, (int) $asset['id']), 'warnings' => $created['warnings']];
+        });
+    }
+
+    private function createCard(int $supplierId, array $data, array $meta, float $improvementsTotal = 0.0): array
     {
         $card = $this->normalize($data, null);
         if ($card['imported_depreciation_plan'] !== null && !$this->supportsImportedPlan($supplierId)) {
             throw new AssetException('imported_plan_invalid', 'Převzatý odpisový plán lze vést jen ve firmě s podvojným účetnictvím.');
         }
-        [$card, $warnings] = $this->validateCard($supplierId, $card, true);
+        [$card, $warnings] = $this->validateCard($supplierId, $card, true, $improvementsTotal);
         if ($card['imported_depreciation_plan'] !== null) {
             if ($card['kind'] !== 'intangible' || $card['tax_method'] !== 'by_accounting'
                 || $card['acc_method'] !== 'straight_line' || $card['acquisition_date'] < '2021-01-01'
@@ -176,7 +221,11 @@ final class AssetService
                 }
             }
             $this->assertLocks($existing, $card, $data);
-            [$card, $warnings] = $this->validateCard($supplierId, $card, false);
+            $improvementsTotal = 0.0;
+            foreach ($this->assets->improvements($id) as $imp) {
+                $improvementsTotal += (float) $imp['amount'];
+            }
+            [$card, $warnings] = $this->validateCard($supplierId, $card, false, round($improvementsTotal, 2));
 
             (new \MyInvoice\Service\Nonprofit\Capital\CapitalUseGuard($this->db, $this->journal))->assertAssetChange($supplierId, $id, $card);
             (new \MyInvoice\Service\Accounting\Closing\AssetReserveSourceUseGuard($this->db, $this->journal))->assertAssetChange($supplierId, $id, $card);
@@ -1684,11 +1733,13 @@ final class AssetService
 
     /**
      * Validační matice §3.3. Vrací [karta se sjednocenými poli, warningy].
+     * `$improvementsTotal` = technická zhodnocení karty: počáteční oprávky historické karty
+     * smějí pokrýt i jejich odpisy.
      *
      * @param array<string,mixed> $card
      * @return array{0: array<string,mixed>, 1: list<array{code:string, message:string}>}
      */
-    private function validateCard(int $supplierId, array $card, bool $isCreate): array
+    private function validateCard(int $supplierId, array $card, bool $isCreate, float $improvementsTotal = 0.0): array
     {
         $warnings = [];
 
@@ -1859,13 +1910,14 @@ final class AssetService
             $card['acc_residual_value'] = 0.0;
         }
 
-        if ($card['opening_tax_amount'] < 0 || $card['opening_tax_amount'] > $card['input_price']) {
+        $increasedPrice = round($card['input_price'] + $improvementsTotal, 2);
+        if ($card['opening_tax_amount'] < 0 || $card['opening_tax_amount'] > $increasedPrice) {
             throw new AssetException(
                 'validation_failed',
                 'Počáteční daňové oprávky musí být ≥ 0 a nesmí přesáhnout vstupní cenu.',
             );
         }
-        $maxOpeningAcc = round($card['input_price'] - $card['acc_residual_value'], 2);
+        $maxOpeningAcc = round($increasedPrice - $card['acc_residual_value'], 2);
         if ($card['opening_acc_amount'] < 0 || $card['opening_acc_amount'] > $maxOpeningAcc) {
             throw new AssetException(
                 'validation_failed',

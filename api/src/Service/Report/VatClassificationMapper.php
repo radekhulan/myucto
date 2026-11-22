@@ -230,9 +230,13 @@ final class VatClassificationMapper
                     $assetBase = $assetEligibleLine === $secondary
                         ? (float) ($r['deduction_base_czk'] ?? $baseCzk)
                         : $baseCzk;
-                    $assetVat = $assetEligibleLine === $secondary
-                        ? (float) ($r['deduction_vat_czk'] ?? $vatCzk)
-                        : $vatCzk;
+                    // Daň ř.47 jde do sloupce „V plné výši" (od_maj); u kráceného odpočtu
+                    // (ř.40k-44k) se sloupec „Krácený odpočet" zatím neplní.
+                    $assetVat = str_ends_with($assetEligibleLine, 'k')
+                        ? 0.0
+                        : ($assetEligibleLine === $secondary
+                            ? (float) ($r['deduction_vat_czk'] ?? $vatCzk)
+                            : $vatCzk);
                     $this->addLine($byLine, '47', $assetBase, $assetVat, $documentKey, $invoiceLineSeen, 'Hodnota pořízeného majetku (§ 4 odst. 4 písm. c)');
                 }
             }
