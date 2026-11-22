@@ -31,6 +31,7 @@ const TABLES = [
       total_vat: 'součty řádku počítá server',
       total_with_vat: 'součty řádku počítá server',
       line_discount_pct: 'procento slevy dopočítá server z list_unit_price',
+      sales_quote_item_key: 'vazbu na nabídku obnovuje server z uložené položky podle jejího id',
     },
   },
   {
