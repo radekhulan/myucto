@@ -3688,8 +3688,10 @@ useWindowTitle(
               <label class="block text-sm font-medium text-neutral-700 mb-1">
                 {{ t('invoice.exchange_rate_label', { currency: form.currency }) }}
               </label>
-              <input v-model.number="form.exchange_rate" type="number" step="0.0001" min="0"
-                class="w-full h-10 px-3 border border-neutral-300 rounded-md font-mono" />
+              <input v-model.number="form.exchange_rate" type="number" step="any" min="0"
+                class="w-full h-10 px-3 border border-neutral-300 rounded-md font-mono"
+                @keydown.up.prevent @keydown.down.prevent
+                @wheel="($event.target as HTMLInputElement).blur()" />
               <p class="max-md:hidden text-xs text-neutral-500 mt-1">
                 {{ t('invoice.exchange_rate_hint') }}
               </p>

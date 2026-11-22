@@ -1075,12 +1075,23 @@ final class UpdateInvoiceAction
             'discount_percent', 'advance_paid_amount', 'reverse_charge',
             'prices_include_vat', 'vat_classification_code', 'income_tax_exempt', 'language',
             'is_simplified', 'hide_customer_on_pdf', 'price_level_id',
+            'exchange_rate', 'exchange_rate_date',
         ];
 
         $changed = [];
         foreach ($columns as $col) {
+            $o = $old[$col] ?? null;
+            $n = $new[$col] ?? null;
+            if ($col === 'exchange_rate') {
+                // DECIMAL vs float: porovnej numericky, ať „25.000000" ≠ „25" nehlásí falešnou změnu.
+                if (($o === null || $o === '') !== ($n === null || $n === '')
+                    || (is_numeric($o) && is_numeric($n) && abs((float) $o - (float) $n) > 1e-9)) {
+                    $changed[] = $col;
+                }
+                continue;
+            }
             // String cast sjednotí int/float/null/bool porovnání napříč PDO casty.
-            if ((string) ($old[$col] ?? '') !== (string) ($new[$col] ?? '')) {
+            if ((string) ($o ?? '') !== (string) ($n ?? '')) {
                 $changed[] = preg_replace('/_id$/', '', $col); // client_id → client
             }
         }

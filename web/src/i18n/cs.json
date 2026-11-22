@@ -25963,7 +25963,9 @@
       "revenue_category": "kategorie příjmu",
       "language": "jazyk",
       "price_level": "cenová hladina dokladu",
-      "items": "položky"
+      "items": "položky",
+      "exchange_rate": "kurz",
+      "exchange_rate_date": "datum kurzu"
     },
     "more_actions": "Další akce",
     "items": "Položky",
