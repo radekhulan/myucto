@@ -45469,6 +45469,8 @@
     "state_action": "Quote status change",
     "select_state_action": "Choose an action",
     "all_for_client": "All customer quotes",
+    "all_clients": "All customers",
+    "clear_client_filter": "Clear customer filter",
     "open_order": "Open sales order",
     "reopen": "Reopen quote",
     "reopen_hint": "The quote returns to Sent with the same version and expiry date. You can then record a new customer response.",

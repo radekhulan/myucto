@@ -45469,6 +45469,8 @@
     "state_action": "Změna stavu nabídky",
     "select_state_action": "Vyberte akci",
     "all_for_client": "Všechny nabídky klienta",
+    "all_clients": "Všichni odběratelé",
+    "clear_client_filter": "Zrušit filtr odběratele",
     "open_order": "Otevřít prodejní objednávku",
     "reopen": "Znovu otevřít nabídku",
     "reopen_hint": "Nabídka se vrátí mezi odeslané se stejnou verzí a platností. Poté můžete zaznamenat novou odpověď klienta.",

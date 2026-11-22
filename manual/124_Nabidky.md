@@ -11,7 +11,7 @@ Nabídky jsou součástí [licence účetnictví](104_Licence_a_aktivace.md) a j
 3. Do cenové sekce přidejte položky typu **Zboží nebo výrobek**, **Práce nebo služba** nebo **Materiál**. U položky vyplňte popis, množství, jednotku, cenu, slevu a DPH. Položku můžete napsat ručně nebo převzít z dostupného katalogu či ceníku. Karta služby umožňuje pracovat s opakovaně používanými sazbami a nemá zásobu.
 4. Text upravte ve vizuálním editoru nebo přepněte na **Markdown**. Sekce lze přejmenovat a přesunout šipkami. Potom nabídku uložte.
 
-Na detailu klienta najdete pod zakázkami přehled jeho posledních nabídek. Odtud otevřete konkrétní nabídku, celý seznam klienta nebo založíte novou.
+Na detailu klienta najdete pod zakázkami přehled jeho posledních nabídek. Odtud otevřete konkrétní nabídku, celý seznam klienta nebo založíte novou. V přehledu **Prodej → Nabídky** můžete filtr **Odběratel** změnit nebo vymazat.
 
 ## 124.2 Obrázky, PDF a odeslání
 
