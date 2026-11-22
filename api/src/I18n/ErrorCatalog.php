@@ -18,6 +18,12 @@ final class ErrorCatalog
 {
     /** @var array<string,string> CZ → EN */
     private const MAP = [
+        'Vyberte 2 až 100 různých bankovních pohybů a zkontrolujte náhled.' => 'Select 2 to 100 different bank transactions and review the preview.',
+        'Výběr nebo zůstatek faktury se změnil. Načtěte nový náhled.' => 'The selection or outstanding balance has changed. Reload the preview.',
+        'Pohyby se nepodařilo spárovat.' => 'The bank transactions could not be matched.',
+        'Hromadné párování vyžaduje fakturu s kladným zůstatkem k úhradě.' => 'Batch matching requires an invoice with a positive outstanding balance.',
+        'Některý pohyb už není volný nebo nepatří k bankovnímu výpisu této firmy.' => 'One or more transactions are no longer available or do not belong to a bank statement of this company.',
+        'Vybrané pohyby musí mít směr úhrady faktury.' => 'The selected transactions must match the direction of the invoice payment.',
         'Doplňte úplnou přílohu účetní závěrky 504 před sestavením podání.' => 'Complete the full 504 financial statement notes before building the filing.',
         'Daňový můstek vyžaduje úplné a vzájemně shodné posouzení zdrojových řádků a jejich řádků přiznání.' => 'The tax bridge requires complete, mutually consistent source-line assessments and their tax-return lines.',
         'Veřejně prospěšný poplatník nemůže uplatnit odpočet podle § 20 odst. 8.' => 'A public-benefit taxpayer cannot claim the deduction under section 20(8).',

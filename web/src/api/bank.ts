@@ -16,6 +16,23 @@ export interface BankPaymentCandidate {
   bank_code: string | null
 }
 
+export type BankBatchMatchTarget = { type: 'invoice' | 'purchase_invoice'; id: number; ref: string | null }
+export const BANK_BATCH_MATCH_LIMIT = 100
+
+export interface BankBatchMatchPreview {
+  currency: string
+  paid_cents: number
+  remaining_cents: number
+  selected_cents: number | null
+  blocked: 'currency' | 'overpayment' | null
+  items: BankPaymentCandidate[]
+  version: string
+}
+
+export interface BankBatchMatchResult {
+  items: Array<{ id: number; posting: MatchPostingResult | null }>
+}
+
 export interface BankStatement {
   id: number
   /** Zdroj výpisu: 'gpc' = nahraný/importovaný GPC výpis, 'pdf' = rozparsovaný PDF výpis (banka bez GPC exportu), 'email_notice' = měsíční agregát e-mailových avíz, 'idoklad' = měsíční agregát pohybů z iDokladu, 'import' = migrace z jiného účetního systému. */
@@ -551,12 +568,23 @@ export const bankApi = {
     }).then(r => r.data)
   },
   /** `fallback=true` = v ±14 dnech nic nesedělo, vráceny širší (±90 dní) a/nebo cross-currency návrhy. */
-  matchCandidates: (txId: number, search?: string) =>
-    api.get<{ candidates: MatchCandidate[]; fallback: boolean }>(`/bank-transactions/${txId}/match-candidates`, { params: { search } })
+  matchCandidates: (txId: number, search?: string, batch?: boolean) =>
+    api.get<{ candidates: MatchCandidate[]; fallback: boolean }>(`/bank-transactions/${txId}/match-candidates`, { params: { search, batch: batch ? '1' : undefined } })
       .then(r => r.data),
-  paymentCandidates: (params: { invoiceId?: number; purchaseInvoiceId?: number; search?: string; page?: number }) =>
+  paymentCandidates: (params: { invoiceId?: number; purchaseInvoiceId?: number; search?: string; page?: number; batch?: boolean }) =>
     api.get<{ items: BankPaymentCandidate[]; total: number; page: number; pages: number; limit: number }>('/bank-transactions/payment-candidates', {
-      params: { invoice_id: params.invoiceId, purchase_invoice_id: params.purchaseInvoiceId, search: params.search, page: params.page },
+      params: { invoice_id: params.invoiceId, purchase_invoice_id: params.purchaseInvoiceId, search: params.search, page: params.page, batch: params.batch ? '1' : undefined },
+    }).then(r => r.data),
+  previewBatchMatch: (target: BankBatchMatchTarget, ids: number[]) =>
+    api.post<BankBatchMatchPreview>('/bank-transactions/match-document-batch', {
+      [target.type === 'invoice' ? 'invoice_id' : 'purchase_invoice_id']: target.id,
+      transaction_ids: ids,
+    }).then(r => r.data),
+  confirmBatchMatch: (target: BankBatchMatchTarget, ids: number[], version: string) =>
+    api.post<BankBatchMatchResult>('/bank-transactions/match-document-batch', {
+      [target.type === 'invoice' ? 'invoice_id' : 'purchase_invoice_id']: target.id,
+      transaction_ids: ids,
+      confirm_version: version,
     }).then(r => r.data),
   matchDocument: (txId: number, ref: { invoiceId?: number; purchaseInvoiceId?: number; forceAdvanceFinal?: boolean }) =>
     api.post<{

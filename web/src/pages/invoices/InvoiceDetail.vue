@@ -126,7 +126,7 @@ const postingPanelRef = ref<InstanceType<typeof DocumentPostingPanel> | null>(nu
 // Zámek dokladu (F6) — čte se VÝHRADNĚ z BE pole `locked`, FE ze status/booked_at
 // nic neodvozuje. Blokuje mutace jen roli client; staff UI zůstává (autorita je BE).
 const lockedForMe = computed(() => !!invoice.value?.locked?.is_locked && auth.isClientRole)
-const bankMatchTarget = ref<{ id: number; ref: string | null } | null>(null)
+const bankMatchTarget = ref<{ id: number; ref: string | null; batchAvailable: boolean } | null>(null)
 const canMatchBankPayment = computed(() => !!invoice.value && !lockedForMe.value
   && !auth.isClientRole && auth.canRead('bank') && auth.canWrite('bank.match')
   && (Number(invoice.value.amount_to_pay) > 0 || (Number(invoice.value.amount_to_pay) < 0
@@ -135,7 +135,13 @@ const canMatchBankPayment = computed(() => !!invoice.value && !lockedForMe.value
   && ['issued', 'sent', 'reminded', 'paid'].includes(invoice.value.status)
   && ['invoice', 'proforma', 'credit_note'].includes(invoice.value.invoice_type))
 function openBankMatch() {
-  if (invoice.value && canMatchBankPayment.value) bankMatchTarget.value = { id: invoice.value.id, ref: invoice.value.varsymbol }
+  const doc = invoice.value
+  if (doc && canMatchBankPayment.value) {
+    bankMatchTarget.value = {
+      id: doc.id, ref: doc.varsymbol,
+      batchAvailable: doc.status !== 'paid' && doc.amount_to_pay - (doc.paid_total ?? 0) > 0.005,
+    }
+  }
 }
 watch(() => [route.params.id, supplierStore.currentSupplierId], () => { bankMatchTarget.value = null })
 const wrModalOpen = ref(false)
@@ -4210,6 +4216,7 @@ useWindowRefresh(async () => {
   </div>
     <WorkspaceTeleport>
       <InvoiceBankMatchModal v-if="bankMatchTarget" doc-type="invoice" :doc-id="bankMatchTarget.id" :doc-ref="bankMatchTarget.ref"
+        :batch-available="bankMatchTarget.batchAvailable"
         @close="bankMatchTarget = null" @done="load" />
     </WorkspaceTeleport>
 </template>

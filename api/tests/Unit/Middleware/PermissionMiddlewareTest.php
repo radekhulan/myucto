@@ -82,6 +82,7 @@ final class PermissionMiddlewareTest extends TestCase
             ['POST', '/api/bank-statements/7/send-unmatched'],
             ['GET', '/api/bank-statements/export-unmatched'],
             ['POST', '/api/bank-transactions/7/match-document'],
+            ['POST', '/api/bank-transactions/match-document-batch'],
             ['GET', '/api/bank-transactions/payment-candidates'],
             ['POST', '/api/bank-transactions/7/create-purchase-invoice'],
             ['POST', '/api/bank-transactions/7/document-request'],

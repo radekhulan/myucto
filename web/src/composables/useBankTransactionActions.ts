@@ -25,7 +25,7 @@ import { documentRequestsApi } from '@/api/documentRequests'
 import { gopayApi, type GoPayPayoutCandidate } from '@/api/gopay'
 import type { Client } from '@/api/clients'
 
-const POSTING_REASON_KEYS: Record<string, string> = {
+export const POSTING_REASON_KEYS: Record<string, string> = {
   fx_not_supported: 'bank.posting.reason_fx_not_supported',
   document_not_posted: 'bank.posting.reason_document_not_posted',
   posting_group_saldo_ambiguous: 'bank.posting.reason_posting_group_saldo_ambiguous',

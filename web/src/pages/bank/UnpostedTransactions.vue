@@ -20,10 +20,11 @@ import { ICONS, btnOutline } from '@/components/ui/buttonStyles'
 import BankTransactionRow from '@/components/bank/BankTransactionRow.vue'
 import BankTransactionDialogs from '@/components/bank/BankTransactionDialogs.vue'
 import BankMatchModal from '@/components/bank/BankMatchModal.vue'
+import BankBatchMatchModal from '@/components/bank/BankBatchMatchModal.vue'
 import BankCreatePurchaseModal from '@/components/bank/BankCreatePurchaseModal.vue'
 import BankRequestDocModal from '@/components/bank/BankRequestDocModal.vue'
 import { bankPostingApi, type UnpostedBankTransaction } from '@/api/bankPosting'
-import { bankApi, type BankAccountOption, type MatchSuggestion } from '@/api/bank'
+import { BANK_BATCH_MATCH_LIMIT, bankApi, type BankAccountOption, type MatchSuggestion } from '@/api/bank'
 import { useBankTransactionActions } from '@/composables/useBankTransactionActions'
 import { useBankTransactionSort } from '@/composables/useBankTransactionSort'
 import EmptyState from '@/components/ui/EmptyState.vue'
@@ -73,7 +74,7 @@ const bankActions = useBankTransactionActions({ reload: () => changed(), refresh
 // jen podvojné účetnictví s komerčními funkcemi (stejná podmínka jako detail výpisu).
 const isDoubleEntry = computed(() => !auth.isClientRole && auth.hasCommercialFeatures && supplierStore.currentSupplier?.accounting_mode === 'double_entry'
   && supplierStore.currentSupplier?.accounting_enabled !== false)
-const colspan = computed(() => 7 + (props.scope === 'all' ? 1 : 0) + (isDoubleEntry.value ? 1 : 0) + (bulkAvailable.value ? 1 : 0))
+const colspan = computed(() => 7 + (props.scope === 'all' ? 1 : 0) + (isDoubleEntry.value ? 1 : 0) + (showSelection.value ? 1 : 0))
 // Řazení podle sloupce — seznam je stránkovaný na serveru, řadí se tam (výchozí = nejnovější nahoře).
 const txSort = useBankTransactionSort(['posted_at', 'amount', 'account', 'variable_symbol', 'counterparty', 'invoice', 'posting', 'status'])
 const sortKeys = computed(() => txSort.keys.filter(k =>
@@ -114,6 +115,33 @@ const bulk = useListBulkActions({
 })
 /** Výběr a položku v „…" ukáže jen server: oprava VS potřebuje hromadné změny i párování pohybů. */
 const bulkAvailable = ref(false)
+const canBatchMatch = computed(() => props.scope === 'all' && !auth.isClientRole && auth.canRead('bank') && auth.canWrite('bank.match')
+  && (auth.canRead('invoices') || auth.canRead('purchase_invoices')))
+const batchMatchIds = ref<number[] | null>(null)
+function isBatchMatchable(tx: UnpostedBankTransaction) {
+  return tx.source === 'statement' && tx.match_status === 'unmatched' && tx.match_available !== false
+    && !tx.resolution && !tx.matched_other_items?.length && !tx.matched_membership_claims?.length
+    && tx.amount !== 0 && auth.canRead(tx.amount > 0 ? 'invoices' : 'purchase_invoices')
+}
+const selectableItems = computed(() => bulkAvailable.value ? items.value : items.value.filter(isBatchMatchable))
+const showSelection = computed(() => bulkAvailable.value || (canBatchMatch.value && selectableItems.value.length > 0))
+const batchSelectionError = computed(() => {
+  const ids = new Set(selectedIds.value)
+  const selected = items.value.filter(tx => ids.has(tx.id))
+  if (selected.length < 2) return t('bank.batch_match.needs_multiple')
+  if (selected.length > BANK_BATCH_MATCH_LIMIT) return t('bank.batch_match.limit', { limit: BANK_BATCH_MATCH_LIMIT })
+  if (selected.some(tx => !isBatchMatchable(tx)) || new Set(selected.map(tx => Math.sign(tx.amount))).size > 1) {
+    return t('bank.batch_match.incompatible_selection')
+  }
+  if (new Set(selected.map(tx => tx.currency?.toUpperCase() ?? 'CZK')).size > 1) return t('bank.batch_match.currency')
+  return ''
+})
+function openBatchMatch() {
+  if (canBatchMatch.value && selectedIds.value.length > 1 && !batchSelectionError.value) {
+    batchMatchIds.value = [...selectedIds.value]
+  }
+}
+watch(canBatchMatch, allowed => { if (!allowed) batchMatchIds.value = null })
 let bulkGeneration = 0
 async function loadBulkAvailability() {
   const generation = ++bulkGeneration
@@ -126,14 +154,14 @@ async function loadBulkAvailability() {
     if (generation === bulkGeneration) bulkAvailable.value = false
   }
 }
-const allLoadedSelected = computed(() => items.value.length > 0 && items.value.every(tx => selectedIds.value.includes(tx.id)))
+const allLoadedSelected = computed(() => selectableItems.value.length > 0 && selectableItems.value.every(tx => selectedIds.value.includes(tx.id)))
 function toggleSelected(id: number) {
   selectedIds.value = selectedIds.value.includes(id)
     ? selectedIds.value.filter(x => x !== id)
     : [...selectedIds.value, id]
 }
 function toggleAllLoaded() {
-  selectedIds.value = allLoadedSelected.value ? [] : items.value.map(tx => tx.id)
+  selectedIds.value = allLoadedSelected.value ? [] : selectableItems.value.map(tx => tx.id)
 }
 const toolbarActions = computed<ActionItem[]>(() => [
   { key: 'export', label: t('bank.unmatched_export.download'), icon: 'download', tier: 'overflow', show: props.scope === 'all' && !auth.isClientRole, run: exportUnmatched },
@@ -324,7 +352,7 @@ useWindowRefresh(() => load(true))
         <table class="w-full text-sm">
           <thead class="bg-neutral-50 text-xs text-neutral-500 uppercase tracking-wide sticky top-0 z-20 shadow-sm">
             <tr>
-              <th v-if="bulkAvailable" class="pl-3 py-2 w-6">
+              <th v-if="showSelection" class="pl-3 py-2 w-6">
                 <input type="checkbox" class="h-4 w-4 cursor-pointer" :checked="allLoadedSelected"
                   :aria-label="t('common.select_all')" data-test="bank-select-all" @change="toggleAllLoaded" />
               </th>
@@ -345,7 +373,7 @@ useWindowRefresh(() => load(true))
               layout="desktop" :tx="tx" :is-double-entry="isDoubleEntry"
               fallback-currency="CZK" :show-account="scope === 'all'" :show-statement-link="true" :show-counter-account="isDoubleEntry"
               :colspan="colspan" :actions="bankActions"
-              :selectable="bulkAvailable" :selected="selectedIds.includes(tx.id)"
+              :selectable="showSelection" :selection-disabled="!bulkAvailable && !isBatchMatchable(tx)" :selected="selectedIds.includes(tx.id)"
               @changed="changed" @toggle-select="toggleSelected" />
           </tbody>
         </table>
@@ -356,7 +384,7 @@ useWindowRefresh(() => load(true))
           layout="mobile" :tx="tx" :is-double-entry="isDoubleEntry"
           fallback-currency="CZK" :show-account="scope === 'all'" :show-statement-link="true" :show-counter-account="isDoubleEntry"
           :actions="bankActions"
-          :selectable="bulkAvailable" :selected="selectedIds.includes(tx.id)"
+          :selectable="showSelection" :selection-disabled="!bulkAvailable && !isBatchMatchable(tx)" :selected="selectedIds.includes(tx.id)"
           @changed="changed" @toggle-select="toggleSelected" />
       </div>
     </div>
@@ -366,12 +394,22 @@ useWindowRefresh(() => load(true))
       </button>
     </div>
 
-    <BulkActionBar v-if="bulkAvailable" :count="selectedIds.length" @clear="selectedIds = []">
-      <button type="button" :class="btnOutline('warning')" class="whitespace-nowrap" data-test="bank-bulk-open" @click="bulk.open">
+    <BulkActionBar v-if="showSelection" :count="selectedIds.length" @clear="selectedIds = []">
+      <button v-if="canBatchMatch && selectedIds.length > 0" type="button" :class="btnOutline('primary')" class="whitespace-nowrap"
+        data-test="bank-review-batch" :disabled="!!batchSelectionError" :title="batchSelectionError || undefined" @click="openBatchMatch">
+        <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.link" /></svg>
+        {{ t('bank.batch_match.action') }}
+      </button>
+      <p v-if="canBatchMatch && selectedIds.length > 0 && batchSelectionError" class="max-w-56 px-2 text-xs"
+        :class="selectedIds.length === 1 ? 'text-neutral-600' : 'text-danger-700'">
+        {{ batchSelectionError }}
+      </p>
+      <button v-if="bulkAvailable" type="button" :class="btnOutline('warning')" class="whitespace-nowrap" data-test="bank-bulk-open" @click="bulk.open">
         <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.table" /></svg>
         {{ t('bulk_actions.menu') }}
       </button>
     </BulkActionBar>
+    <BankBatchMatchModal v-if="batchMatchIds" :ids="batchMatchIds" @close="batchMatchIds = null" @done="changed()" />
     <BulkActionsDialog v-if="bulk.dialog.value" target="bank_transaction"
       :selection="bulk.dialog.value.selection" :selection-count="bulk.dialog.value.selectionCount"
       :filter-selection="bulk.dialog.value.filterSelection" :filter-count="bulk.dialog.value.filterCount"

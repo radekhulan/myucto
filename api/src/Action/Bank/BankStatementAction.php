@@ -2507,7 +2507,7 @@ final class BankStatementAction
             if (RequestAuthorization::allows($request, 'invoices', AccessLevel::READ)) $types[] = 'invoice';
             if (RequestAuthorization::allows($request, 'purchase_invoices', AccessLevel::READ)) $types[] = 'purchase_invoice';
             $candidates = (new \MyInvoice\Service\Bank\BankMatchSearch($this->db))->searchDocuments(
-                $sid, (float) $tx['amount'], $txCcy, $search, $types,
+                $sid, (float) $tx['amount'], $txCcy, $search, $types, batchOnly: ($query['batch'] ?? '') === '1',
             );
             return Json::ok($response, ['candidates' => $candidates, 'fallback' => false]);
         }

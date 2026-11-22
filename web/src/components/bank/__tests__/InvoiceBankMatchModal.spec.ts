@@ -10,7 +10,7 @@ const m = vi.hoisted(() => ({
   actions: null as null | { purchaseShortfall: Ref<unknown>; matchError: Ref<string> },
   reload: null as null | (() => void),
 }))
-vi.mock('@/api/bank', () => ({ bankApi: { paymentCandidates: m.paymentCandidates } }))
+vi.mock('@/api/bank', () => ({ BANK_BATCH_MATCH_LIMIT: 100, bankApi: { paymentCandidates: m.paymentCandidates } }))
 vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string, params?: Record<string, unknown>) => params ? `${key}:${JSON.stringify(params)}` : key }) }))
 vi.mock('@/stores/auth', () => ({ useAuthStore: () => ({ canRead: () => m.permissions!.read, canWrite: () => m.permissions!.write }) }))
 vi.mock('@/stores/supplier', () => ({ useSupplierStore: () => m.supplier }))
@@ -29,6 +29,9 @@ vi.mock('@/composables/useBankTransactionActions', async () => {
 })
 vi.mock('../BankMatchModal.vue', () => ({
   default: { props: ['actions'], template: '<div v-if="actions.purchaseShortfall.value" data-testid="shortfall">shortfall</div>' },
+}))
+vi.mock('../BankBatchMatchModal.vue', () => ({
+  default: { props: ['ids', 'document'], emits: ['close'], template: '<button data-test="batch-review" @click="$emit(\'close\', false)">{{ ids.join(",") }} {{ document.type }}</button>' },
 }))
 
 const candidate = {
@@ -52,8 +55,8 @@ afterEach(() => {
   vi.useRealTimers()
 })
 
-async function open(docType: 'invoice' | 'purchase_invoice' = 'invoice') {
-  wrapper = mount(InvoiceBankMatchModal, { props: { docType, docId: 19, docRef: 'TEST-DOC-19' } })
+async function open(docType: 'invoice' | 'purchase_invoice' = 'invoice', batchAvailable = false) {
+  wrapper = mount(InvoiceBankMatchModal, { props: { docType, docId: 19, docRef: 'TEST-DOC-19', batchAvailable } })
   await flushPromises()
   return wrapper
 }
@@ -99,6 +102,27 @@ describe('InvoiceBankMatchModal', () => {
     await flushPromises()
     expect(m.paymentCandidates).toHaveBeenLastCalledWith(expect.objectContaining({ page: 2 }))
     expect(w.get('[data-testid="confirm-match"]').attributes('disabled')).toBeDefined()
+  })
+
+  it('keeps the explicit batch selection across pages and restores it from preview', async () => {
+    const w = await open('purchase_invoice', true)
+    expect(w.find('input[type="radio"]').exists()).toBe(true)
+    m.paymentCandidates.mockResolvedValueOnce(result([candidate], 1, 2))
+    await w.get('[data-test="invoice-bank-batch-mode"]').trigger('click')
+    await flushPromises()
+    expect(m.paymentCandidates).toHaveBeenLastCalledWith({ purchaseInvoiceId: 19, invoiceId: undefined, batch: true, search: undefined, page: 1 })
+    await w.get('input[type="checkbox"]').setValue(true)
+    expect(w.get('[data-test="review-invoice-bank-batch"]').attributes('disabled')).toBeDefined()
+    m.paymentCandidates.mockResolvedValueOnce(result([{ ...candidate, id: 32 }], 2, 2))
+    await w.findAll('button').find(button => button.text() === 'bank.invoice_match.next')!.trigger('click')
+    await flushPromises()
+    await w.get('input[type="checkbox"]').setValue(true)
+    await w.get('[data-test="review-invoice-bank-batch"]').trigger('click')
+    expect(w.get('[data-test="batch-review"]').text()).toBe('31,32 purchase_invoice')
+    expect(m.matchDocument).not.toHaveBeenCalled()
+    await w.get('[data-test="batch-review"]').trigger('click')
+    expect((w.get('input[type="checkbox"]').element as HTMLInputElement).checked).toBe(true)
+    expect(w.get('[data-test="review-invoice-bank-batch"]').attributes('disabled')).toBeUndefined()
   })
 
   it('shows candidate loading errors and offers retry', async () => {

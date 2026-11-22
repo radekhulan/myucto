@@ -104,7 +104,7 @@ const postingPanelRef = ref<InstanceType<typeof DocumentPostingPanel> | null>(nu
 // Zámek dokladu (F6) — čte se VÝHRADNĚ z BE pole `locked`, FE ze status/booked_at
 // nic neodvozuje. Blokuje mutace jen roli client; staff UI zůstává (autorita je BE).
 const lockedForMe = computed(() => !!invoice.value?.locked?.is_locked && auth.isClientRole)
-const bankMatchTarget = ref<{ id: number; ref: string | null } | null>(null)
+const bankMatchTarget = ref<{ id: number; ref: string | null; batchAvailable: boolean } | null>(null)
 const canMatchBankPayment = computed(() => !!invoice.value && !lockedForMe.value
   && !auth.isClientRole && auth.canRead('bank') && auth.canWrite('bank.match')
   && Number(invoice.value.amount_to_pay) !== 0
@@ -113,7 +113,13 @@ const canMatchBankPayment = computed(() => !!invoice.value && !lockedForMe.value
   && !((invoice.value.paid_amount ?? 0) > 0.005 && invoice.value.remaining_amount !== undefined
     && Math.abs(invoice.value.remaining_amount) <= 0.005))
 function openBankMatch() {
-  if (invoice.value && canMatchBankPayment.value) bankMatchTarget.value = { id: invoice.value.id, ref: invoice.value.vendor_invoice_number || invoice.value.varsymbol }
+  const doc = invoice.value
+  if (doc && canMatchBankPayment.value) {
+    bankMatchTarget.value = {
+      id: doc.id, ref: doc.vendor_invoice_number || doc.varsymbol,
+      batchAvailable: doc.status !== 'paid' && (doc.remaining_amount ?? doc.amount_to_pay - (doc.paid_amount ?? 0)) > 0.005,
+    }
+  }
 }
 watch(() => [route.params.id, supplierStore.currentSupplierId], () => { bankMatchTarget.value = null })
 const loading = ref(true)
@@ -2284,6 +2290,7 @@ useWindowRefresh(async () => {
         :prefill="{ name: invoice.vendor_company_name || invoice.vendor_invoice_number || '', direction: invoice.total_with_vat < 0 ? 'incoming' : 'outgoing', applies_currency: invoice.currency, variable_symbol: invoice.payment_variable_symbol || invoice.varsymbol || null }"
         @close="postingRuleOpen = false" @saved="postingRuleOpen = false" />
       <InvoiceBankMatchModal v-if="bankMatchTarget" doc-type="purchase_invoice" :doc-id="bankMatchTarget.id" :doc-ref="bankMatchTarget.ref"
+        :batch-available="bankMatchTarget.batchAvailable"
         @close="bankMatchTarget = null" @done="load" />
       <ConfirmDialog v-if="invoice && openingBalance.confirming.value"
         :title="openingBalance.confirming.value === 'mark' ? t('accounting.opening_balance_document.mark_title') : t('accounting.opening_balance_document.unmark_title')"

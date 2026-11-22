@@ -29962,6 +29962,7 @@ paths:
         - { in: query, name: purchase_invoice_id, schema: { type: integer, minimum: 1 } }
         - { in: query, name: search, schema: { type: string, maxLength: 100 }, description: 'Protistrana, VS, popis, bankovní reference nebo přesná částka, například 1 234,50.' }
         - { in: query, name: page, schema: { type: integer, minimum: 1, default: 1 } }
+        - { in: query, name: batch, schema: { type: string, const: '1' }, description: Pro hromadné párování vrátí jen pohyby z výpisu v měně faktury. }
       responses:
         '200':
           description: OK
@@ -29971,6 +29972,39 @@ paths:
         '400': { description: 'Zadejte právě jeden doklad.' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
+  /api/v1/bank-transactions/match-document-batch:
+    parameters:
+      - $ref: '#/components/parameters/SupplierIdHeader'
+    post:
+      tags: [Bank]
+      summary: Připraví nebo potvrdí spárování vybraných bankovních pohybů s jednou fakturou
+      description: |
+        Vyžaduje oprávnění bank.match se zápisem a čtení banky a cílového dokladu.
+        Zadejte právě jedno ID faktury a 2 až 100 různých ID pohybů z výpisu.
+        Bez confirm_version se vrátí náhled, skutečné párování provede až požadavek
+        se stejným výběrem a hodnotou version z náhledu. Pohyby musí mít směr
+        úhrady a měnu cílové faktury. Přeplatek potvrdit nelze. Změna výběru
+        nebo zůstatku po načtení náhledu vyžaduje nový náhled. Úhrady vzniknou
+        společně s původními daty pohybů. Výsledek zaúčtování se vrací u každé úhrady.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/BankBatchMatchRequest' }
+      responses:
+        '200':
+          description: Náhled nebo potvrzené spárování podle přítomnosti confirm_version v požadavku.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/BankBatchMatchPreview'
+                  - $ref: '#/components/schemas/BankBatchMatchResult'
+        '400': { description: Chybí kontext firmy nebo není určen právě jeden doklad. }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { description: Pohyb není dostupný nebo se výběr či stav dokladu od náhledu změnil. }
+        '422': { description: Neplatná ID pohybů, verze náhledu nebo směr úhrady. }
   /api/v1/bank-transactions/{id}/match-document:
     parameters:
       - $ref: '#/components/parameters/SupplierIdHeader'
@@ -30029,6 +30063,7 @@ paths:
         firmu i oprávnění ke čtení dokladů a vrací nejvýše 50 výsledků.
       parameters:
         - { in: query, name: search, schema: { type: string, maxLength: 100 } }
+        - { in: query, name: batch, schema: { type: string, const: '1' }, description: Při neprázdném hledání omezuje výsledek na faktury se zůstatkem k úhradě v měně a směru pohybu. }
       responses:
         '200':
           description: OK
@@ -55928,6 +55963,48 @@ components:
         page: { type: integer, minimum: 1 }
         pages: { type: integer, minimum: 0 }
         limit: { type: integer, const: 25 }
+
+    BankBatchMatchRequest:
+      type: object
+      required: [transaction_ids]
+      oneOf:
+        - required: [invoice_id]
+        - required: [purchase_invoice_id]
+      properties:
+        invoice_id: { type: integer, format: int64, minimum: 1 }
+        purchase_invoice_id: { type: integer, format: int64, minimum: 1 }
+        transaction_ids:
+          type: array
+          minItems: 2
+          maxItems: 100
+          uniqueItems: true
+          items: { type: integer, format: int64, minimum: 1 }
+        confirm_version: { type: string, pattern: '^[a-f0-9]{64}$', description: Hodnota version z náhledu. }
+
+    BankBatchMatchPreview:
+      type: object
+      required: [currency, paid_cents, remaining_cents, selected_cents, blocked, items, version]
+      properties:
+        currency: { type: string, description: Měna faktury. }
+        paid_cents: { type: integer, format: int64, description: Dosavadní úhrady ve setinách měny faktury. }
+        remaining_cents: { type: integer, format: int64, description: Zůstatek před spárováním ve setinách měny faktury. }
+        selected_cents: { type: [integer, "null"], format: int64, description: Součet výběru ve setinách měny faktury nebo null při rozdílné měně. }
+        blocked: { enum: [currency, overpayment, null], description: Důvod blokace nebo null při způsobilém výběru. }
+        items: { type: array, items: { $ref: '#/components/schemas/BankPaymentCandidate' } }
+        version: { type: string, pattern: '^[a-f0-9]{64}$' }
+
+    BankBatchMatchResult:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items:
+            type: object
+            required: [id, posting]
+            properties:
+              id: { type: integer, format: int64 }
+              posting: { $ref: '#/components/schemas/BankPostingSummary' }
 
     BankDocumentMatchResult:
       type: object

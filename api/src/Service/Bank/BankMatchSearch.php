@@ -33,7 +33,23 @@ final class BankMatchSearch
         return $document;
     }
 
-    public function searchDocuments(int $supplierId, float $amount, string $currency, string $search, array $types): array
+    /** @param non-empty-list<int> $ids */
+    public function selectedStatementPayments(int $supplierId, array $ids, bool $lock = false): array
+    {
+        $placeholders = implode(',', array_fill(0, count($ids), '?'));
+        $ownership = BankStatementOwnershipResolver::sql('bs', $lock);
+        $available = BankPaymentCandidateScope::sql($supplierId);
+        $query = $this->db->pdo()->prepare("SELECT bt.id, bt.statement_id, bt.posted_at, bt.amount, bt.counterparty_name,
+                bt.variable_symbol, bt.description, bt.bank_ref, bs.account_number, bs.bank_code,
+                UPPER(COALESCE(NULLIF(bt.currency,''), NULLIF(bs.currency,''), 'CZK')) AS currency
+            FROM bank_transactions bt JOIN bank_statements bs ON bs.id = bt.statement_id
+            WHERE bt.id IN ($placeholders) AND bt.source = 'statement' AND $ownership AND $available
+            ORDER BY bt.posted_at, bt.id" . ($lock ? ' FOR UPDATE' : ''));
+        $query->execute([...$ids, ...BankStatementOwnershipResolver::params($supplierId)]);
+        return $query->fetchAll(PDO::FETCH_ASSOC);
+    }
+
+    public function searchDocuments(int $supplierId, float $amount, string $currency, string $search, array $types, bool $batchOnly = false): array
     {
         $params = [];
         $branches = [];
@@ -51,6 +67,7 @@ final class BankMatchSearch
                 ? "i.status IN ('issued','sent','reminded','paid') AND i.invoice_type IN ('invoice','proforma','credit_note')"
                 : "i.status IN ('received','booked','paid')";
             $direction = ($amount > 0) === $issued ? '>' : '<';
+            if ($batchOnly && $direction !== '>') continue;
             $refund = $issued ? ' AND (i.amount_to_pay > 0 OR ' . RefundDocument::refundDocumentSql('i') . ')' : '';
             $filter = "(i.varsymbol LIKE ? OR $extra LIKE ? OR c.company_name LIKE ?";
             array_push($params, $supplierId, $like, $like, $like);
@@ -59,6 +76,10 @@ final class BankMatchSearch
                 array_push($params, $number, $number, $number);
             }
             $filter .= ')';
+            if ($batchOnly) {
+                $filter .= " AND i.status <> 'paid' AND i.amount_to_pay - ($settled) > 0 AND cur.code = ?";
+                $params[] = $currency;
+            }
             $branches[] = "SELECT '$type' AS type, i.id, $ref AS ref, i.amount_to_pay AS amount,
                     i.exchange_rate, cur.code AS currency, i.issue_date, i.due_date,
                     c.company_name AS party, i.status = 'paid' AS paid
@@ -85,12 +106,18 @@ final class BankMatchSearch
         }, $query->fetchAll(PDO::FETCH_ASSOC));
     }
 
-    public function payments(int $supplierId, string $type, array $document, string $search, int $page, ?int $transactionId = null): array
+    public function payments(int $supplierId, string $type, array $document, string $search, int $page, ?int $transactionId = null, bool $batchOnly = false): array
     {
         $direction = ((float) $document['amount_to_pay'] > 0) === ($type === 'invoice') ? '>' : '<';
         $where = BankStatementOwnershipResolver::sql('bs') . ' AND ' . BankPaymentCandidateScope::sql($supplierId) . " AND bt.amount $direction 0";
         $params = BankStatementOwnershipResolver::params($supplierId);
         if ($transactionId !== null) { $where .= ' AND bt.id = ?'; $params[] = $transactionId; }
+        $currency = strtoupper((string) $document['currency']);
+        $effectiveCurrency = "UPPER(COALESCE(NULLIF(bt.currency,''), NULLIF(bs.currency,''), 'CZK'))";
+        if ($batchOnly) {
+            $where .= " AND bt.source = 'statement' AND $effectiveCurrency = ?";
+            $params[] = $currency;
+        }
         if ($search !== '') {
             $where .= ' AND (bt.counterparty_name LIKE ? OR bt.variable_symbol LIKE ? OR bt.description LIKE ? OR bt.bank_ref LIKE ?';
             $like = '%' . $search . '%';
@@ -108,10 +135,8 @@ final class BankMatchSearch
         $offset = ($page - 1) * $limit;
         $expected = abs((float) $document['remaining']);
         if ($expected < 0.005 || $document['status'] === 'paid') $expected = abs((float) $document['amount_to_pay']);
-        $currency = strtoupper((string) $document['currency']);
         $rate = (float) $document['exchange_rate'];
         if ($rate <= 0) $rate = 1.0;
-        $effectiveCurrency = "UPPER(COALESCE(NULLIF(bt.currency,''), NULLIF(bs.currency,''), 'CZK'))";
         $query = $this->db->pdo()->prepare("SELECT bt.id, bt.statement_id, bt.posted_at, bt.amount,
             $effectiveCurrency AS currency, bt.counterparty_name, bt.variable_symbol, bt.description, bt.bank_ref,
             bs.account_number, bs.bank_code" . $from . " ORDER BY

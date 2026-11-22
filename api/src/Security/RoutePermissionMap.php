@@ -212,6 +212,7 @@ final class RoutePermissionMap
         ['*', '#^/api/projects(/|$)#', 'projects', AccessLevel::WRITE],
 
         ['*', '#^/api/bank-transactions/[0-9]+/match(?:-document)?(/|$)#', 'bank.match', AccessLevel::WRITE],
+        ['POST', '#^/api/bank-transactions/match-document-batch$#D', 'bank.match', AccessLevel::WRITE],
         ['POST', '#^/api/bank-transactions/[0-9]+/unmatch$#', 'bank', AccessLevel::WRITE],
         ['POST', '#^/api/bank-transactions/[0-9]+/(ignore|unignore)$#', 'bank.ignore', AccessLevel::WRITE],
         ['*', '#^/api/bank-match-suggestions/[0-9]+/(accept|reject)$#', 'bank.match', AccessLevel::WRITE],

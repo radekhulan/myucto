@@ -96,6 +96,12 @@ Okno nabízí vedle vydaných a přijatých faktur i **ostatní pohledávky a z�
 
 Párování můžete zahájit i z detailu vydané či přijaté faktury akcí **Spárovat s bankou**: vyberte volný pohyb správného směru a potvrďte přiřazení. U ostatních pohledávek a závazků můžete platbu přiřadit i z jejich detailu akcí **Připojit úhradu**.
 
+**Více plateb na jednu fakturu** můžete spárovat v daňové evidenci i v podvojném účetnictví.
+
+1. Na vydané či přijaté faktuře otevřete **Spárovat s bankou**, klikněte na **Vybrat více pohybů**, označte platby a zvolte **Zkontrolovat výběr**. V **Banka → Všechny pohyby** můžete nejprve označit platby, v liště hromadných akcí zvolit **Spárovat s fakturou** a vyhledat doklad.
+2. Zkontrolujte pohyby, součet, dosud uhrazenou část a zůstatek. Vybrat lze 2 až 100 volných pohybů z výpisu ve stejné měně jako faktura. Pokud součet převyšuje zůstatek, vraťte se k výběru a upravte ho.
+3. Potvrďte spárování. Každá úhrada si ponechá datum původního pohybu. V podvojném účetnictví výsledek u každého pohybu ukáže i stav zaúčtování. Pokud potřebujete opravit přiřazení, použijte **Zrušit spárování** u příslušného pohybu.
+
 **Jak poznáte, že je hotovo:** Transakce má stav **Ručně** (automaticky spárovaná **Auto OK**, částečná úhrada **Částečně**), ve sloupci **Faktura** je klikatelné číslo faktury a faktura je zaplacená, nebo částečně uhrazená (a zůstatek se sníží).
 
 > [!TIP]

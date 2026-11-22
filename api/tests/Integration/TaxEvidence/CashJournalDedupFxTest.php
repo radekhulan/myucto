@@ -4,8 +4,14 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Integration\TaxEvidence;
 
+use MyInvoice\Action\Bank\BankPaymentCandidatesAction;
+use MyInvoice\Middleware\AuthMiddleware;
+use MyInvoice\Middleware\SupplierScopeMiddleware;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Group;
 use PDO;
+use Slim\Psr7\Factory\ServerRequestFactory;
+use Slim\Psr7\Response;
 
 /**
  * Peněžní deník daňové evidence (Epic DE, A2) — obrana proti dvojímu započtení a
@@ -15,6 +21,54 @@ use PDO;
 #[Group('integration')]
 final class CashJournalDedupFxTest extends CashJournalTestCase
 {
+    public static function batchInvoiceDirections(): array
+    {
+        return ['vydaná' => [true], 'přijatá' => [false]];
+    }
+
+    #[DataProvider('batchInvoiceDirections')]
+    public function testBatchPaymentsUseOriginalDaysAndAppearOnceInCashJournal(bool $issued): void
+    {
+        $supplier = $this->supplierId;
+        $opts = ['without' => 5000.0, 'with' => 5000.0];
+        $id = $issued ? $this->saleInvoice($supplier, $opts) : $this->purchaseInvoice($supplier, $opts);
+        $statement = $this->statement($supplier, $this->accountA);
+        $pdo = $this->db->pdo();
+        $pdo->prepare('UPDATE bank_statements SET supplier_id = ? WHERE id = ?')->execute([$supplier, $statement]);
+        $ids = [];
+        $dates = [self::YEAR . '-06-12', self::YEAR . '-06-13', self::YEAR . '-06-14'];
+        foreach ([2000, 1500, 1500] as $i => $amount) {
+            $ids[] = $this->bankTx($statement, $issued ? $amount : -$amount, ['posted_at' => $dates[$i]]);
+        }
+        $body = [$issued ? 'invoice_id' : 'purchase_invoice_id' => $id, 'transaction_ids' => $ids];
+        $request = (new ServerRequestFactory())->createServerRequest('POST', '/api/bank-transactions/match-document-batch')
+            ->withAttribute(SupplierScopeMiddleware::ATTR_CURRENT_ID, $supplier)
+            ->withAttribute(AuthMiddleware::ATTR_USER, ['id' => $this->userId, 'role' => 'admin']);
+        $action = $this->container->get(BankPaymentCandidatesAction::class);
+        $preview = $action->batch($request->withParsedBody($body), new Response());
+        self::assertSame(200, $preview->getStatusCode(), (string) $preview->getBody());
+        $version = json_decode((string) $preview->getBody(), true, flags: JSON_THROW_ON_ERROR)['version'];
+        $confirmed = $action->batch($request->withParsedBody($body + ['confirm_version' => $version]), new Response());
+        self::assertSame(200, $confirmed->getStatusCode(), (string) $confirmed->getBody());
+        $items = json_decode((string) $confirmed->getBody(), true, flags: JSON_THROW_ON_ERROR)['items'];
+        self::assertSame($ids, array_column($items, 'id'));
+        foreach ($items as $item) {
+            self::assertSame('not_double_entry', $item['posting']['reason'] ?? null);
+        }
+        $journal = $this->fullYear($supplier);
+        self::assertCount(3, $journal['rows']);
+        foreach ($ids as $movement) {
+            self::assertSame(1, $this->countRows($journal, 'bank', $movement));
+        }
+        self::assertSame($dates, array_column($journal['rows'], 'date'));
+        $total = $issued ? 'prijem_danovy' : 'vydaj_danovy';
+        self::assertEqualsWithDelta(5000.0, $journal['totals'][$total], 0.01);
+        $table = $issued ? 'invoices' : 'purchase_invoices';
+        $status = $pdo->prepare("SELECT status FROM $table WHERE id = ?");
+        $status->execute([$id]);
+        self::assertSame('paid', $status->fetchColumn());
+    }
+
     /** EUR měna daného supplieru (nedefaultní), pro FX scénáře. */
     private function eurCurrency(int $supplierId): int
     {

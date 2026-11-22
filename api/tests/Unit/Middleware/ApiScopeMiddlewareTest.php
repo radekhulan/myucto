@@ -269,6 +269,7 @@ final class ApiScopeMiddlewareTest extends TestCase
         foreach ([
             ['POST', '/api/bank-transactions/34/match'],
             ['POST', '/api/bank-transactions/34/match-document'],
+            ['POST', '/api/bank-transactions/match-document-batch'],
             ['POST', '/api/bank-transactions/34/unmatch'],
             ['POST', '/api/bank-match-suggestions/5/accept'],
         ] as [$method, $path]) {

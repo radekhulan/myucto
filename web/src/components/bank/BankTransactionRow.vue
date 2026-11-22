@@ -57,6 +57,7 @@ const props = withDefaults(defineProps<{
   actions: BankTransactionActions
   /** Zaškrtávátko výběru pro hromadné akce (seznam pohybů): první buňka řádku, na kartě před částkou. */
   selectable?: boolean
+  selectionDisabled?: boolean
   selected?: boolean
 }>(), {
   fallbackCurrency: null,
@@ -407,7 +408,7 @@ function candidateReject() {
   <template v-if="layout === 'desktop'">
     <tr :data-tx-id="tx.id" :class="{ 'opacity-50': tx.match_status === 'ignored' }">
       <td v-if="selectable" class="pl-3 py-2 w-6">
-        <input type="checkbox" class="h-4 w-4 cursor-pointer" :checked="selected"
+        <input v-if="!selectionDisabled" type="checkbox" class="h-4 w-4 cursor-pointer" :checked="selected"
           :aria-label="tx.variable_symbol || String(tx.id)" data-test="bank-row-select" @change="emit('toggle-select', tx.id)" />
       </td>
       <td class="px-3 py-2 whitespace-nowrap">
@@ -577,7 +578,7 @@ function candidateReject() {
   <div v-else class="p-3 space-y-2" :class="{ 'opacity-50': tx.match_status === 'ignored' }">
     <div class="flex items-baseline justify-between gap-2">
       <div class="flex items-baseline gap-2 min-w-0">
-        <input v-if="selectable" type="checkbox" class="h-4 w-4 shrink-0 cursor-pointer self-center" :checked="selected"
+        <input v-if="selectable && !selectionDisabled" type="checkbox" class="h-4 w-4 shrink-0 cursor-pointer self-center" :checked="selected"
           :aria-label="tx.variable_symbol || String(tx.id)" data-test="bank-card-select" @change="emit('toggle-select', tx.id)" />
         <div class="font-mono text-sm font-semibold whitespace-nowrap"
           :class="tx.amount > 0 ? 'text-success-700 dark:text-success-600' : 'text-danger-500'">

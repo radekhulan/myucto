@@ -8,6 +8,7 @@ import { defineComponent } from 'vue'
 const m = vi.hoisted(() => ({
   listMovements: vi.fn(), listUnposted: vi.fn(), suggestions: vi.fn(), status: vi.fn(),
   perms: ['accounting.bulk_changes'] as string[],
+  mode: 'double_entry',
 }))
 
 vi.mock('vue-router', () => ({
@@ -25,12 +26,12 @@ vi.mock('@/stores/auth', () => ({
   }),
 }))
 vi.mock('@/stores/supplier', () => ({
-  useSupplierStore: () => ({ currentSupplierId: 7, currentSupplier: { id: 7, accounting_mode: 'double_entry' } }),
+  useSupplierStore: () => ({ currentSupplierId: 7, currentSupplier: { id: 7, accounting_mode: m.mode } }),
 }))
 vi.mock('@/api/bankPosting', () => ({
   bankPostingApi: { listMovements: m.listMovements, listUnposted: m.listUnposted, unpostedCount: vi.fn() },
 }))
-vi.mock('@/api/bank', () => ({ bankApi: { matchSuggestions: m.suggestions } }))
+vi.mock('@/api/bank', () => ({ BANK_BATCH_MATCH_LIMIT: 100, bankApi: { matchSuggestions: m.suggestions } }))
 vi.mock('@/api/bulkActions', () => ({ bulkActionsApi: { status: m.status } }))
 vi.mock('@/composables/useBankTransactionActions', () => ({
   useBankTransactionActions: () => ({ setSuggestions: vi.fn() }),
@@ -43,10 +44,10 @@ import UnpostedTransactions from '../UnpostedTransactions.vue'
 // Řádek jako BankTransactionRow: se `selectable` dá zaškrtávátko do první buňky.
 const Row = defineComponent({
   name: 'BankTransactionRow',
-  props: ['tx', 'layout', 'colspan', 'selectable', 'selected', 'isDoubleEntry'],
+  props: ['tx', 'layout', 'colspan', 'selectable', 'selectionDisabled', 'selected', 'isDoubleEntry'],
   emits: ['toggle-select'],
-  template: `<tr v-if="layout === 'desktop'" class="row-stub"><td v-if="selectable"><input type="checkbox" data-test="row-select" :checked="selected" @change="$emit('toggle-select', tx.id)" /></td><td>{{ tx.id }}</td></tr>
-    <div v-else class="card-stub"><input v-if="selectable" type="checkbox" data-test="card-select" :checked="selected" @change="$emit('toggle-select', tx.id)" /></div>`,
+  template: `<tr v-if="layout === 'desktop'" class="row-stub"><td v-if="selectable"><input v-if="!selectionDisabled" type="checkbox" data-test="row-select" :checked="selected" @change="$emit('toggle-select', tx.id)" /></td><td>{{ tx.id }}</td></tr>
+    <div v-else class="card-stub"><input v-if="selectable && !selectionDisabled" type="checkbox" data-test="card-select" :checked="selected" @change="$emit('toggle-select', tx.id)" /></div>`,
 })
 const ActionBarStub = {
   name: 'ActionBar',
@@ -54,10 +55,11 @@ const ActionBarStub = {
   template: `<div data-test="action-bar"><button v-for="a in actions.filter(x => x.show)" :key="a.key" :data-test="'action-' + a.key" @click="a.run()">{{ a.label }}</button></div>`,
 }
 const DialogStub = { name: 'BulkActionsDialog', props: ['target', 'selection', 'selectionCount', 'filterSelection', 'filterCount'], emits: ['close', 'changed'], template: '<div data-test="bulk-dialog" />' }
+const MatchStub = { name: 'BankBatchMatchModal', props: ['ids'], emits: ['close', 'done'], template: '<div data-test="batch-match-dialog" />' }
 const stubs = {
   ActionBar: ActionBarStub, BankTransactionDialogs: true, BankMatchModal: true,
   BankCreatePurchaseModal: true, BankRequestDocModal: true, BankTransactionSortSelect: true,
-  BankTransactionRow: Row, BulkActionsDialog: DialogStub,
+  BankTransactionRow: Row, BulkActionsDialog: DialogStub, BankBatchMatchModal: MatchStub,
   BulkActionBar: { props: ['count'], template: '<div data-test="bulk-bar" :data-count="count"><slot /></div>' },
   SortableTh: defineComponent({ props: ['label', 'sortKey'], template: '<th :data-sort="sortKey">{{ label }}</th>' }),
 }
@@ -79,6 +81,7 @@ describe('Bankovní pohyby – hromadné akce', () => {
     vi.resetAllMocks()
     sessionStorage.clear()
     m.perms = ['accounting.bulk_changes']
+    m.mode = 'double_entry'
     m.listMovements.mockResolvedValue(page)
     m.listUnposted.mockResolvedValue(page)
     m.suggestions.mockResolvedValue({ suggestions: [] })
@@ -112,6 +115,25 @@ describe('Bankovní pohyby – hromadné akce', () => {
     await wrapper.findAll('[data-test="card-select"]')[0]!.trigger('change')
     await wrapper.get('[data-test="bank-bulk-open"]').trigger('click')
     expect(wrapper.getComponent(DialogStub).props('selection')).toEqual({ ids: [32] })
+  })
+
+  it.each(['tax_evidence', 'double_entry'])('nabízí párování vybraných pohybů v režimu %s i bez práva měnit VS', async mode => {
+    m.perms = ['bank.match']
+    m.mode = mode
+    const movement = { statement_id: 3, source: 'statement', amount: -1500, currency: 'CZK', match_status: 'unmatched' }
+    m.listMovements.mockResolvedValue({ ...page, items: [
+      { ...movement, id: 31 }, { ...movement, id: 32 }, { ...movement, id: 33, match_status: 'manual' },
+    ] })
+    const wrapper = await mountList('all')
+    expect(wrapper.findAll('[data-test="row-select"]')).toHaveLength(2)
+    await wrapper.get('[data-test="bank-select-all"]').trigger('change')
+    await wrapper.get('[data-test="bank-review-batch"]').trigger('click')
+    expect(wrapper.getComponent(MatchStub).props('ids')).toEqual([31, 32])
+    expect(wrapper.find('[data-test="bank-bulk-open"]').exists()).toBe(false)
+    wrapper.getComponent(MatchStub).vm.$emit('done')
+    await flushPromises()
+    expect(m.listMovements).toHaveBeenCalledTimes(2)
+    expect(wrapper.get('[data-test="bulk-bar"]').attributes('data-count')).toBe('0')
   })
 
   it('bez výběru pošle „všech N podle filtru" s filtrem seznamu a scope', async () => {
