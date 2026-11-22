@@ -66,3 +66,4 @@ tools/regression/**/__pycache__/
 /production.sh
 /demo.sh
 /cfg.velin-db.php
+/sync-velin.ps1
