@@ -855,6 +855,8 @@ Načtení obrazovky podklady DPPO nesestavuje. Připravenost výpočtu ověřít
 tlačítkem **Ověřit připravenost výpočtu**; teprve potom obrazovka ukáže zjištění
 a nabídne převzetí do přiznání.
 
+V **Uzávěrka → Daňové posouzení** zvolte u nákladu **Posoudit** a zadejte **Uznatelnou část nákladu před vyloučením financování** v Kč. U záporného nákladu zadejte zápornou uznatelnou část nebo nulu. U povinně neuznatelného nebo vyloučeného nákladu aplikace nastaví nulu. Po uložení rozhodnutí spusťte **Náhled**.
+
 Finalizace, export XML a podání DPPO 504 jsou dostupné až po **akceptaci výpočtu**.
 Akceptaci zapíná pouze správce firmy v sekci **Akceptace výpočtu DPPO 504**:
 výslovně potvrdí, že výpočet ověřil, a uvede odkaz na provedené ověření (například

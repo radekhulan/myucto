@@ -857,7 +857,9 @@
       "dimensions"
     ],
     "accounting-nonprofit-tax": [
-      "nonprofitTaxJ6"
+      "nonprofitTax",
+      "nonprofitTaxJ6",
+      "nonprofitTaxNative"
     ],
     "accounting-statement-mapping": [
       "settings"
