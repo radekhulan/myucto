@@ -7,6 +7,13 @@ namespace MyInvoice\Service\Bank\Connector;
 final class CsasBankConnector implements StructuredBankConnector, BankConnectorCredentialKeyProvider, BankPaymentCapabilityProvider,
     SignableBankPaymentConnector
 {
+    /** Jak dlouho platí seznam účtů souhlasu načtený v tomto procesu (sekundy). */
+    private const ACCOUNTS_TTL = 240;
+    private const ACCOUNTS_CACHE_LIMIT = 32;
+
+    /** @var array<string,array{at:int,accounts:list<array<string,mixed>>}> */
+    private array $accountsCache = [];
+
     public function __construct(private readonly CsasApiClient $api, private readonly CsasCredentialVault $vault,
         private readonly CsasTransactionParser $parser, private readonly CsasAboBatchMapper $batchMapper = new CsasAboBatchMapper()) {}
 
@@ -25,7 +32,7 @@ final class CsasBankConnector implements StructuredBankConnector, BankConnectorC
     public function downloadStatement(#[\SensitiveParameter] string $token, string $from, string $to): string
     {
         $credentials = $this->vault->access($token);
-        $accounts = $this->api->accounts($credentials);
+        $accounts = $this->accounts($credentials);
         $matches = array_values(array_filter($accounts, static fn (array $account): bool =>
             ($account['identification']['iban'] ?? null) === $credentials['account_iban']
             && ($account['currency'] ?? null) === $credentials['account_currency']));
@@ -35,6 +42,25 @@ final class CsasBankConnector implements StructuredBankConnector, BankConnectorC
         $this->parser->parse($rows, $credentials['account_iban'], $credentials['account_currency'], $from, $to);
         return json_encode(['account_iban' => $credentials['account_iban'], 'currency' => $credentials['account_currency'],
             'from' => $from, 'to' => $to, 'transactions' => $rows], JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE);
+    }
+
+    /**
+     * Seznam účtů souhlasu. Účty téhož souhlasu sdílejí access token, takže synchronizace
+     * dalšího účtu v tomtéž běhu použije seznam načtený pro předchozí účet a banku znovu nevolá.
+     * Klíčem je otisk access tokenu: nový token (obnova, jiný souhlas) vždy načte seznam znovu.
+     *
+     * @return list<array<string,mixed>>
+     */
+    private function accounts(#[\SensitiveParameter] array $credentials): array
+    {
+        $now = time();
+        $this->accountsCache = array_filter($this->accountsCache, static fn (array $entry): bool => $now - $entry['at'] < self::ACCOUNTS_TTL);
+        $key = hash('sha256', ($credentials['environment'] ?? 'production') . "\0" . $credentials['access_token']);
+        if (isset($this->accountsCache[$key])) return $this->accountsCache[$key]['accounts'];
+        $accounts = $this->api->accounts($credentials);
+        if (count($this->accountsCache) >= self::ACCOUNTS_CACHE_LIMIT) array_shift($this->accountsCache);
+        $this->accountsCache[$key] = ['at' => $now, 'accounts' => $accounts];
+        return $accounts;
     }
 
     public function parseStatement(#[\SensitiveParameter] string $content): array

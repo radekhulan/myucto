@@ -82,6 +82,64 @@ final class CsasConnectorTest extends TestCase
         self::assertTrue($entry['capabilities']['payment_order_submission']);
     }
 
+    public function testAccountsOfOneConsentAreListedOncePerAccessToken(): void
+    {
+        $api = $this->createMock(CsasApiClient::class);
+        $vault = $this->createMock(CsasCredentialVault::class);
+        $eur = ['account_id' => 'remote-eur', 'account_iban' => 'CZ6708000000002000000018', 'account_currency' => 'EUR', 'connection_id' => 10]
+            + $this->credentials();
+        $renewed = ['access_token' => 'synthetic-access-2'] + $this->credentials();
+        $vault->method('access')->willReturnOnConsecutiveCalls($this->credentials(), $eur, $renewed);
+        $api->expects(self::exactly(2))->method('accounts')->willReturn([
+            ['id' => 'remote-czk', 'identification' => ['iban' => 'CZ7508000000001000000005'], 'currency' => 'CZK'],
+            ['id' => 'remote-eur', 'identification' => ['iban' => 'CZ6708000000002000000018'], 'currency' => 'EUR'],
+        ]);
+        $api->expects(self::exactly(3))->method('transactions')->willReturn([]);
+        $connector = new CsasBankConnector($api, $vault, new CsasTransactionParser());
+
+        $connector->downloadStatement('synthetic-czk', '2026-01-01', '2026-01-31');
+        $connector->downloadStatement('synthetic-eur', '2026-01-01', '2026-01-31');
+        // Nový access token (obnova, jiný souhlas) seznam účtů vždy načte znovu.
+        $connector->downloadStatement('synthetic-czk', '2026-01-01', '2026-01-31');
+    }
+
+    public function testRotationIsSharedWithAccountsOfTheSameConsentOnly(): void
+    {
+        $api = $this->createMock(CsasApiClient::class);
+        $repo = $this->createMock(CsasOAuthRepository::class);
+        $secret = $this->createMock(SecretEncryption::class);
+        $flow = $this->inlineRotationFlow();
+        $vault = new CsasCredentialVault($api, $repo, $secret, $flow);
+        $expired = ['access_expires_at' => time() - 1, 'environment' => 'production'] + $this->credentials();
+        $sibling = ['connection_id' => 10, 'account_id' => 'remote-eur', 'account_iban' => 'CZ6708000000002000000018', 'account_currency' => 'EUR',
+            'call_guard_key' => str_repeat('b', 64), 'scope' => 'siblings.accounts'] + $expired;
+        $foreign = ['connection_id' => 11, 'refresh_token' => 'other-consent'] + $sibling;
+        $plain = ['enc:v2:own' => $vault->encode($expired), 'enc:v2:sibling' => $vault->encode($sibling), 'enc:v2:foreign' => $vault->encode($foreign)];
+        $secret->method('decryptFor')->willReturnCallback(static fn (string $cipher, string $context): string => $plain[$cipher]);
+        $repo->method('credential')->willReturn('enc:v2:own');
+        $repo->expects(self::once())->method('connectedCredentials')->with(7)->willReturn([
+            ['id' => 9, 'currency_id' => 3, 'token_ciphertext' => 'enc:v2:own'],
+            ['id' => 10, 'currency_id' => 4, 'token_ciphertext' => 'enc:v2:sibling'],
+            ['id' => 11, 'currency_id' => 5, 'token_ciphertext' => 'enc:v2:foreign'],
+        ]);
+        $api->expects(self::once())->method('refresh')->willReturn(['access_token' => 'rotated-access', 'expires_in' => 300,
+            'scope' => 'siblings.accounts siblings.payments']);
+        $sealed = [];
+        $secret->method('encryptFor')->willReturnCallback(static function (string $raw, string $context) use (&$sealed): string {
+            $sealed[$context] = json_decode($raw, true);
+            return 'enc:v2:' . count($sealed);
+        });
+        $repo->expects(self::exactly(2))->method('rotate')->willReturn(true);
+
+        $vault->access($plain['enc:v2:own']);
+
+        $shared = $sealed[CsasCredentialVault::context(7, 10)];
+        self::assertSame(['rotated-access', 'synthetic-refresh', 10, 'remote-eur', str_repeat('b', 64), 'siblings.accounts'],
+            [$shared['access_token'], $shared['refresh_token'], $shared['connection_id'], $shared['account_id'], $shared['call_guard_key'], $shared['scope']],
+            'Další účet převezme tokeny, ale ponechá si vlastní účet, hlídání volání a rozsah bez plateb.');
+        self::assertArrayNotHasKey(CsasCredentialVault::context(7, 11), $sealed, 'Účet jiného souhlasu se nemění.');
+    }
+
     public function testChangedAccountFailsBeforeTransactions(): void
     {
         $api = $this->createMock(CsasApiClient::class);

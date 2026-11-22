@@ -227,7 +227,7 @@ async function confirmReconciliation() {
         <p v-if="!account.is_active" class="text-xs text-warning-700 mt-1">{{ t('bank_connection.account_inactive') }}</p>
         <p class="text-xs text-neutral-500 mt-1">{{ connection?.has_token ? (connection.enabled ? t('bank_connection.enabled') : t('bank_connection.paused')) : t('bank_connection.disconnected') }}</p>
         <p v-if="connection?.last_sync_at" class="text-xs text-neutral-500">{{ t('bank_connection.last_sync', { date: formatDateTime(connection.last_sync_at) }) }}</p>
-        <p v-if="connection?.last_sync_error_code" class="text-xs text-warning-700">{{ t(connection.provider === 'kb_plus' ? 'bank_connection.last_failed_kb_plus' : 'bank_connection.last_failed') }}</p>
+        <p v-if="connection?.last_sync_error_code" class="text-xs text-warning-700">{{ t(connection.last_sync_error_code === 'statement_reconciliation_required' ? 'bank_connection.last_failed_reconciliation' : connection.provider === 'kb_plus' ? 'bank_connection.last_failed_kb_plus' : 'bank_connection.last_failed') }}</p>
       </div>
       <button v-if="available.length || connection" type="button" :class="btnOutline('neutral')" :aria-expanded="opened" @click="opened = !opened">
         <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path :d="ICONS.link" /></svg>

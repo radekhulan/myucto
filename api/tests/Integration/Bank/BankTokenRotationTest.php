@@ -75,7 +75,7 @@ final class BankTokenRotationTest extends TestCase
             'environment' => 'production'];
         $api = $this->createStub(CsasApiClient::class);
         $api->method('environment')->willReturn('production');
-        $lock = NamedLockName::for($this->db, 'bank-token', $this->supplierId . ':' . $connectionId);
+        $lock = NamedLockName::for($this->db, 'bank-token', CsasCredentialVault::consentLockKey($credentials));
         $calls = [];
         $api->method('refresh')->willReturnCallback(function (array $c) use ($lock, &$calls): array {
             $stmt = $this->pdo->prepare('SELECT IS_USED_LOCK(?) = CONNECTION_ID()');
@@ -95,6 +95,40 @@ final class BankTokenRotationTest extends TestCase
         self::assertSame([['synthetic-refresh-1', 1]], $calls, 'Obnova jednou a pod zámkem napojení.');
         self::assertSame(['synthetic-refresh-2', 'synthetic-refresh-2'], [$first['refresh_token'], $second['refresh_token']]);
         self::assertSame('synthetic-refresh-2', $vault->decode($this->stored($connectionId, CsasCredentialVault::context($this->supplierId, $connectionId)))['refresh_token']);
+    }
+
+    public function testCsasRefreshIsStoredForOtherAccountsOfTheSameConsentSoTheyDoNotRefreshAgain(): void
+    {
+        $first = $this->connection('0800', 'csas');
+        $second = $this->connection('0800', 'csas');
+        $other = $this->connection('0800', 'csas');
+        $base = ['version' => 1, 'supplier_id' => $this->supplierId, 'api_key' => 'synthetic-key', 'client_id' => 'synthetic-client',
+            'client_secret' => 'synthetic-secret', 'redirect_uri' => 'https://example.invalid/callback', 'access_token' => 'synthetic-access-1',
+            'refresh_token' => 'synthetic-refresh', 'access_expires_at' => time() - 1, 'account_id' => 'synthetic-account',
+            'account_iban' => 'CZ7508000000001000000005', 'account_currency' => 'CZK', 'call_guard_key' => str_repeat('a', 64),
+            'environment' => 'production'];
+        $api = $this->createStub(CsasApiClient::class);
+        $api->method('environment')->willReturn('production');
+        $refreshes = 0;
+        $api->method('refresh')->willReturnCallback(static function () use (&$refreshes): array {
+            $refreshes++;
+            return ['access_token' => 'synthetic-access-2', 'expires_in' => 300];
+        });
+        $vault = new CsasCredentialVault($api, new CsasOAuthRepository($this->db), $this->container->get(SecretEncryption::class),
+            $this->container->get(OAuthClientFlow::class));
+        $serialized = [];
+        foreach ([$first => 'synthetic-refresh', $second => 'synthetic-refresh', $other => 'other-consent'] as $id => $refresh) {
+            $serialized[$id] = $vault->encode(['connection_id' => $id, 'refresh_token' => $refresh] + $base);
+            $this->store($id, $serialized[$id], CsasCredentialVault::context($this->supplierId, $id));
+        }
+
+        $vault->access($serialized[$first]);
+        $shared = $vault->access($serialized[$second]);
+
+        self::assertSame(1, $refreshes, 'Další účet souhlasu použije token obnovený pro první účet.');
+        self::assertSame(['synthetic-access-2', $second], [$shared['access_token'], $shared['connection_id']]);
+        self::assertSame('synthetic-access-1', $vault->decode($this->stored($other, CsasCredentialVault::context($this->supplierId, $other)))['access_token'],
+            'Účet jiného souhlasu zůstává beze změny.');
     }
 
     public function testKbPlusRefreshRunsUnderConnectionLockAndConcurrentRequestReusesRotatedToken(): void

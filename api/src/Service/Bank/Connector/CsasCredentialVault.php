@@ -16,8 +16,12 @@ final class CsasCredentialVault
 
     /**
      * Platný přístup. Propadlý access token obnoví přes společnou vrstvu ({@see OAuthClientFlow::rotate()}):
-     * pod zámkem napojení načte uložený přístup znovu (souběžný požadavek ho mohl obnovit)
+     * pod zámkem souhlasu načte uložený přístup znovu (souběžný požadavek ho mohl obnovit)
      * a obnovený refresh token uloží dřív, než se použije.
+     *
+     * Jeden souhlas banky může pokrývat více účtů firmy ({@see CsasSiblingAccountLinker}). Každý účet
+     * má vlastní kopii přístupu, obnovené tokeny se ale hned uloží i ostatním účtům téhož souhlasu.
+     * Další účet pak banku o obnovu nežádá a zámek je proto společný pro celou aplikaci u banky.
      */
     public function access(#[\SensitiveParameter] string $serialized): array
     {
@@ -25,31 +29,79 @@ final class CsasCredentialVault
         if (self::fresh($data)) return $data;
         $supplierId = $data['supplier_id'];
         $connectionId = $data['connection_id'];
+        $rotation = null;
         try {
-            return $this->flow->rotate('bank-token', $supplierId . ':' . $connectionId,
+            return $this->flow->rotate('bank-token', self::consentLockKey($data),
                 fn (): array => $this->stored($supplierId, $connectionId),
                 static fn (array $current): bool => self::fresh($current),
-                function (array $current): array {
+                function (array $current) use (&$rotation): array {
                     $tokens = $this->api->refresh($current);
-                    $current['access_token'] = $tokens['access_token'];
-                    $current['access_expires_at'] = time() + $tokens['expires_in'];
-                    $current['refresh_token'] = $tokens['refresh_token'] ?? $current['refresh_token'];
-                    // Odvolání platebního oprávnění se projeví hned; scope bez platby čtení nezastaví.
-                    // Obnova ale platby nepřidá: připojení jen pro čtení je získá jen novým souhlasem.
-                    if (isset($tokens['scope'])) {
-                        $current['scope'] = CsasApiClient::grantsPayments((string) ($current['scope'] ?? ''))
-                            ? $tokens['scope']
-                            : implode(' ', array_values(array_diff(preg_split('/\s+/', trim($tokens['scope'])) ?: [], ['siblings.payments'])));
-                    }
-                    return $current;
+                    $rotation = ['previous_refresh_token' => $current['refresh_token'], 'tokens' => $tokens];
+                    return self::withTokens($current, $tokens);
                 },
-                function (array $current) use ($supplierId, $connectionId): bool {
+                function (array $current) use ($supplierId, $connectionId, &$rotation): bool {
                     $ciphertext = $this->secrets->encryptFor($this->encode($current), self::context($supplierId, $connectionId));
-                    return str_starts_with($ciphertext, 'enc:v2:') && $this->repository->rotate($supplierId, $connectionId, $ciphertext);
+                    if (!str_starts_with($ciphertext, 'enc:v2:') || !$this->repository->rotate($supplierId, $connectionId, $ciphertext)) return false;
+                    if (is_array($rotation)) $this->shareRotation($current, $rotation['previous_refresh_token'], $rotation['tokens']);
+                    return true;
                 },
                 static fn (): BankConnectorOperationException => new BankConnectorOperationException('bank_connection_busy'));
         } catch (OAuthException) {
             throw new BankConnectorException('credential_rotation_failed', 'Obnovený přístup nelze bezpečně uložit.');
+        }
+    }
+
+    /**
+     * Zámek obnovy: firma a registrace aplikace u banky. Nezávisí na refresh tokenu, aby se
+     * souběžné požadavky účtů téhož souhlasu řadily za sebe i při případné rotaci tokenu.
+     */
+    public static function consentLockKey(#[\SensitiveParameter] array $data): string
+    {
+        return $data['supplier_id'] . ':csas:' . substr(hash('sha256', ($data['environment'] ?? 'production') . "\0" . $data['client_id']), 0, 24);
+    }
+
+    /** Patří oba přístupy k témuž souhlasu banky (stejná aplikace, prostředí a refresh token)? */
+    public static function sameConsent(#[\SensitiveParameter] array $a, #[\SensitiveParameter] array $b): bool
+    {
+        return $a['supplier_id'] === $b['supplier_id'] && ($a['environment'] ?? 'production') === ($b['environment'] ?? 'production')
+            && hash_equals($a['client_id'], $b['client_id']) && hash_equals($a['refresh_token'], $b['refresh_token']);
+    }
+
+    /** @param array<string,mixed> $tokens odpověď banky na obnovu */
+    private static function withTokens(#[\SensitiveParameter] array $current, #[\SensitiveParameter] array $tokens): array
+    {
+        $current['access_token'] = $tokens['access_token'];
+        $current['access_expires_at'] = time() + $tokens['expires_in'];
+        $current['refresh_token'] = $tokens['refresh_token'] ?? $current['refresh_token'];
+        // Odvolání platebního oprávnění se projeví hned; scope bez platby čtení nezastaví.
+        // Obnova ale platby nepřidá: připojení jen pro čtení je získá jen novým souhlasem.
+        if (isset($tokens['scope'])) {
+            $current['scope'] = CsasApiClient::grantsPayments((string) ($current['scope'] ?? ''))
+                ? $tokens['scope']
+                : implode(' ', array_values(array_diff(preg_split('/\s+/', trim($tokens['scope'])) ?: [], ['siblings.payments'])));
+        }
+        return $current;
+    }
+
+    /**
+     * Obnovené tokeny uloží i ostatním účtům téhož souhlasu. Účet, kterému uložení selže,
+     * si přístup obnoví sám při dalším použití (refresh token ČS se obnovou nemění).
+     */
+    private function shareRotation(#[\SensitiveParameter] array $rotated, #[\SensitiveParameter] string $previousRefreshToken,
+        #[\SensitiveParameter] array $tokens): void
+    {
+        $supplierId = $rotated['supplier_id'];
+        $before = ['refresh_token' => $previousRefreshToken] + $rotated;
+        foreach ($this->repository->connectedCredentials($supplierId) as $row) {
+            if ($row['id'] === $rotated['connection_id']) continue;
+            try {
+                $sibling = $this->decode($this->secrets->decryptFor($row['token_ciphertext'], self::context($supplierId, $row['id'])));
+                if ($sibling['connection_id'] !== $row['id'] || !self::sameConsent($sibling, $before)) continue;
+                $ciphertext = $this->secrets->encryptFor($this->encode(self::withTokens($sibling, $tokens)), self::context($supplierId, $row['id']));
+                if (str_starts_with($ciphertext, 'enc:v2:')) $this->repository->rotate($supplierId, $row['id'], $ciphertext);
+            } catch (\Throwable) {
+                continue;
+            }
         }
     }
 

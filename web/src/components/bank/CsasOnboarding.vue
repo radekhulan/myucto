@@ -68,6 +68,7 @@ async function start() {
       <p>{{ t(sandbox ? 'bank_connection.csas_sandbox_hint' : 'bank_connection.csas_hint') }}</p>
       <a href="https://developers.erstegroup.com" target="_blank" rel="noopener noreferrer" class="underline">Erste Developer Portal</a>
       <p>{{ t('bank_connection.csas_read_only') }}</p>
+      <p>{{ t('bank_connection.csas_siblings_hint') }}</p>
       <p>{{ t('bank_connection.csas_payments_hint') }}</p>
       <p class="text-xs text-neutral-600">{{ t('bank_connection.csas_logging') }}</p>
       <p class="text-xs text-neutral-600">{{ t('bank_connection.credentials_storage_hint') }}</p>

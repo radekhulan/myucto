@@ -75,6 +75,7 @@ require __DIR__ . '/../vendor/autoload.php';
     '*/api/src/Security/CrossSupplierAuthorization.php',
     '*/api/src/Service/Bank/Connector/CsasApiClient.php',
     '*/api/src/Service/Bank/Connector/CsasCredentialVault.php',
+    '*/api/src/Service/Bank/Connector/CsasSiblingAccountLinker.php',
     '*/api/src/Service/Bank/Connector/KbPlusApiClient.php',
     '*/api/src/Service/Bank/Connector/KbPlusCredentialVault.php',
     '*/api/src/Service/Bank/Connector/KbPlusRegistrationClient.php',

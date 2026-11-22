@@ -28,7 +28,8 @@ final class CsasOnboardingService
 
     public function __construct(private readonly CsasOAuthRepository $oauth, private readonly BankConnectionRepository $connections,
         private readonly CsasApiClient $api, private readonly CsasCredentialVault $vault, private readonly BankConnectorCallGuard $calls,
-        private readonly SecretEncryption $secrets, private readonly Config $config, private readonly OAuthClientFlow $flow) {}
+        private readonly SecretEncryption $secrets, private readonly Config $config, private readonly OAuthClientFlow $flow,
+        private readonly CsasSiblingAccountLinker $siblings) {}
 
     public function callbackUrl(): string
     {
@@ -148,11 +149,13 @@ final class CsasOnboardingService
         try {
             $account = $this->account($supplierId, $currencyId);
             if (($credentials['redirect_uri'] ?? null) !== $this->callbackUrl()) throw new BankConnectorOperationException('app_url_invalid');
+            $previous = $this->previousCredential($supplierId, $currencyId);
             $tokens = $this->api->exchange($credentials, $code);
             $paymentsRequested = ($credentials['payments_requested'] ?? false) === true;
             unset($credentials['code_verifier'], $credentials['payments_requested']);
             $credentials['access_token'] = $tokens['access_token'];
-            $matches = array_values(array_filter($this->api->accounts($credentials), static fn (array $remote): bool =>
+            $remoteAccounts = $this->api->accounts($credentials);
+            $matches = array_values(array_filter($remoteAccounts, static fn (array $remote): bool =>
                 is_string($remote['identification']['iban'] ?? null)
                 && preg_match('/^CZ\d{2}0800\d{16}$/D', $remote['identification']['iban'])
                 && ($remote['currency'] ?? '') === $account['code']
@@ -171,11 +174,31 @@ final class CsasOnboardingService
             $this->connections->saveValidated($supplierId, $connectionId, 'csas', $ciphertext, true,
                 $remote['identification']['iban'], '0800', $remote['currency']);
             $finish(true);
-            return $currencyId;
         } catch (\Throwable $e) {
             $errorCode = $e instanceof BankConnectorOperationException || $e instanceof BankConnectorException ? $e->errorCode : 'csas_oauth_failed';
             $finish(false, $errorCode);
             throw new BankConnectorOperationException($errorCode);
+        }
+        // Další účty firmy z téhož souhlasu. Připojení účtu už je uložené; chyba propojení
+        // dalších účtů ho nezruší, účty jde propojit znovu dalším přihlášením.
+        try {
+            $this->siblings->link($currencyId, $credentials, $remoteAccounts, $previous);
+        } catch (\Throwable) {
+        }
+        return $currencyId;
+    }
+
+    /** Přístup, kterým byl účet připojený před novým přihlášením; jeho další účty se převezmou na nový souhlas. */
+    private function previousCredential(int $supplierId, int $currencyId): ?array
+    {
+        try {
+            $stored = $this->oauth->connectedCredential($supplierId, $currencyId);
+            if ($stored === null) return null;
+            $data = $this->vault->decode($this->secrets->decryptFor($stored['token_ciphertext'],
+                CsasCredentialVault::context($supplierId, $stored['id'])));
+            return $data['supplier_id'] === $supplierId && $data['connection_id'] === $stored['id'] ? $data : null;
+        } catch (\Throwable) {
+            return null;
         }
     }
 
@@ -195,7 +218,7 @@ final class CsasOnboardingService
      * Accounts v3 vrací u účtu suitableScope; klíč PISP znamená, že účet smí platit přes
      * Premium Payments. Bez suitableScope se účet za vhodný nepovažuje.
      */
-    private static function suitableForPayments(array $remote): bool
+    public static function suitableForPayments(array $remote): bool
     {
         $scope = $remote['suitableScope'] ?? null;
         return is_array($scope) && array_key_exists('PISP', $scope);
