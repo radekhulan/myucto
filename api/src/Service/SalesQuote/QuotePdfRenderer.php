@@ -76,50 +76,58 @@ final class QuotePdfRenderer
             'logo' => PdfBranding::logoPath($supplier),
         ]);
         $pdf = $this->mpdf();
-        $pdf->SetTitle($labels['quote'] . ' ' . (string) ($quote['number'] ?? ''));
-        $pdf->SetCreator('MyÚčto.cz');
-        $pdf->WriteHTML($this->twig()->render('quote.css.twig') . PdfBranding::accentCss($supplier), HTMLParserMode::HEADER_CSS);
-        $pdf->WriteHTML($body, HTMLParserMode::HTML_BODY);
+        try {
+            $pdf->SetTitle($labels['quote'] . ' ' . (string) ($quote['number'] ?? ''));
+            $pdf->SetCreator('MyÚčto.cz');
+            $pdf->WriteHTML($this->twig()->render('quote.css.twig') . PdfBranding::accentCss($supplier), HTMLParserMode::HEADER_CSS);
+            $pdf->WriteHTML($body, HTMLParserMode::HTML_BODY);
 
-        $appended = 0;
-        foreach ($files as $file) {
-            if ($file['mode'] !== 'append') {
-                continue;
-            }
-            $count = $this->appendixPageCount($pdf, $file['path'], (string) $file['name']);
-            $appended += $count;
-            if ($appended > self::MAX_TOTAL_APPENDIX_PAGES) {
-                throw new \InvalidArgumentException('Přílohy nabídky mají dohromady více než 200 stran.');
-            }
-            try {
-                for ($page = 1; $page <= $count; $page++) {
-                    $template = $pdf->importPage($page);
-                    $size = $pdf->getTemplateSize($template);
-                    $pdf->AddPageByArray([
-                        'orientation' => $size['orientation'],
-                        'newformat' => [min($size['width'], $size['height']), max($size['width'], $size['height'])],
-                        'mgl' => 0, 'mgr' => 0, 'mgt' => 0, 'mgb' => 0,
-                    ]);
-                    $pdf->useTemplate($template, 0, 0, null, null, true);
+            $appended = 0;
+            foreach ($files as $file) {
+                if ($file['mode'] !== 'append') {
+                    continue;
                 }
-            } catch (\Exception $error) {
-                throw new \InvalidArgumentException('PDF přílohu nelze vložit do nabídky: ' . $file['name'], 0, $error);
+                $count = $this->appendixPageCount($pdf, $file['path'], (string) $file['name']);
+                $appended += $count;
+                if ($appended > self::MAX_TOTAL_APPENDIX_PAGES) {
+                    throw new \InvalidArgumentException('Přílohy nabídky mají dohromady více než 200 stran.');
+                }
+                try {
+                    for ($page = 1; $page <= $count; $page++) {
+                        $template = $pdf->importPage($page);
+                        $size = $pdf->getTemplateSize($template);
+                        $pdf->AddPageByArray([
+                            'orientation' => $size['orientation'],
+                            'newformat' => [min($size['width'], $size['height']), max($size['width'], $size['height'])],
+                            'mgl' => 0, 'mgr' => 0, 'mgt' => 0, 'mgb' => 0,
+                        ]);
+                        $pdf->useTemplate($template, 0, 0, null, null, true);
+                    }
+                } catch (\Exception $error) {
+                    throw new \InvalidArgumentException('PDF přílohu nelze vložit do nabídky: ' . $file['name'], 0, $error);
+                }
             }
-        }
 
-        return $pdf->Output('', Destination::STRING_RETURN);
+            return $pdf->Output('', Destination::STRING_RETURN);
+        } finally {
+            $pdf->cleanup();
+        }
     }
 
     public function validateAppendix(string $path): void
     {
         $pdf = $this->mpdf();
-        $pages = $this->appendixPageCount($pdf, $path);
         try {
-            for ($page = 1; $page <= $pages; $page++) {
-                $pdf->importPage($page);
+            $pages = $this->appendixPageCount($pdf, $path);
+            try {
+                for ($page = 1; $page <= $pages; $page++) {
+                    $pdf->importPage($page);
+                }
+            } catch (\Exception $error) {
+                throw new \InvalidArgumentException('PDF přílohu nelze vložit do nabídky.', 0, $error);
             }
-        } catch (\Exception $error) {
-            throw new \InvalidArgumentException('PDF přílohu nelze vložit do nabídky.', 0, $error);
+        } finally {
+            $pdf->cleanup();
         }
     }
 

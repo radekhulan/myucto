@@ -40,6 +40,7 @@ final class QuotePdfAndFilesTest extends TestCase
 
     public function testAppendsPdfInOrderWithOriginalPageDimensions(): void
     {
+        $encoding = mb_internal_encoding();
         $landscape = $this->appendix('landscape.pdf', 'Landscape appendix', [100, 190], 'L');
         $portrait = $this->appendix('portrait.pdf', 'Portrait appendix', [115, 169], 'P');
         $hidden = $this->appendix('internal.pdf', 'Internal only', [120, 200], 'P');
@@ -51,13 +52,18 @@ final class QuotePdfAndFilesTest extends TestCase
 
         self::assertStringStartsWith('%PDF-', $bytes);
         $inspection = $this->inspectionPdf();
-        self::assertSame(3, $inspection->setSourceFile(StreamReader::createByString($bytes)));
-        $landscapeSize = $inspection->getTemplateSize($inspection->importPage(2));
-        self::assertEqualsWithDelta(190, $landscapeSize['width'], 0.1);
-        self::assertEqualsWithDelta(100, $landscapeSize['height'], 0.1);
-        $portraitSize = $inspection->getTemplateSize($inspection->importPage(3));
-        self::assertEqualsWithDelta(115, $portraitSize['width'], 0.1);
-        self::assertEqualsWithDelta(169, $portraitSize['height'], 0.1);
+        try {
+            self::assertSame(3, $inspection->setSourceFile(StreamReader::createByString($bytes)));
+            $landscapeSize = $inspection->getTemplateSize($inspection->importPage(2));
+            self::assertEqualsWithDelta(190, $landscapeSize['width'], 0.1);
+            self::assertEqualsWithDelta(100, $landscapeSize['height'], 0.1);
+            $portraitSize = $inspection->getTemplateSize($inspection->importPage(3));
+            self::assertEqualsWithDelta(115, $portraitSize['width'], 0.1);
+            self::assertEqualsWithDelta(169, $portraitSize['height'], 0.1);
+        } finally {
+            $inspection->cleanup();
+        }
+        self::assertSame($encoding, mb_internal_encoding());
 
         $pages = (new Parser())->parseContent($bytes)->getPages();
         self::assertStringContainsString('Montáž rozvaděče', $pages[0]->getText());
@@ -133,10 +139,14 @@ MD);
     private function appendix(string $name, string $label, array $pageSize, string $orientation): string
     {
         $pdf = $this->inspectionPdf(['format' => $pageSize, 'orientation' => $orientation]);
-        $pdf->WriteHTML('<p>' . $label . '</p>');
-        $path = $this->root . '/' . $name;
-        $pdf->Output($path, Destination::FILE);
-        return $path;
+        try {
+            $pdf->WriteHTML('<p>' . $label . '</p>');
+            $path = $this->root . '/' . $name;
+            $pdf->Output($path, Destination::FILE);
+            return $path;
+        } finally {
+            $pdf->cleanup();
+        }
     }
 
     private function makeImage(): string
