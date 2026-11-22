@@ -100,7 +100,7 @@ final class InvoiceImporter
         'receivable' => 'invoice',
     ];
 
-    private const PURCHASE_AGENDAS = [
+    public const PURCHASE_AGENDAS = [
         'received' => 'invoice',
         'received_debit' => 'invoice',
         'received_credit' => 'credit_note',

@@ -92,7 +92,28 @@ final class PartnerImporter
                 $ctx->clientsByIco[$s['ico']] = $clientId;
             }
         }
+        $this->completeForeignVatIdsFromDocuments($ctx);
         $p->finish(self::STEP_PARTNERS);
+    }
+
+    /**
+     * DIČ zahraničních dodavatelů z přijatých dokladů ještě před jejich převodem. Převod
+     * dokladu řadí samovyměření podle státu dodavatele ({@see InvoiceImporter}) a evidence
+     * DPH ho čte z kontaktu - kdyby se kontakt opravil až u pozdějšího dokladu, dřívější
+     * doklady téhož dodavatele by se převedly jako tuzemské a období by se jim posunulo.
+     */
+    private function completeForeignVatIdsFromDocuments(PohodaContext $ctx): void
+    {
+        $sources = array_map(static fn (): array => ['invoice', 'invoiceHeader'], InvoiceImporter::PURCHASE_AGENDAS)
+            + ['internal' => ['intDoc', 'intDocHeader']];
+        foreach ($sources as $agenda => [$element, $header]) {
+            foreach ($ctx->export->records($agenda, $element) as $r) {
+                $s = self::snapshot(PohodaXml::get(PohodaXml::get($r, $header), 'partnerIdentity'));
+                if ($s['dic'] !== '' && isset($ctx->clientsByPohodaId[$s['pohoda_id']])) {
+                    $this->completeForeignVatId($ctx, $ctx->clientsByPohodaId[$s['pohoda_id']], $s['dic']);
+                }
+            }
+        }
     }
 
     /**
