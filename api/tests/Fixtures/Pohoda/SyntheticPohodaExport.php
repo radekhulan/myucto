@@ -35,6 +35,10 @@ final class SyntheticPohodaExport
     /** Karta majetku v tabulkách POHODY (`90_majetek.xml`) a její odpisy v deníku. */
     public const ASSET_NUMBER = '25IM0001';
 
+    /** Karty s pohyby majetku (`$withAssetMovements`): s technickým zhodnocením a s pohybem neznámého druhu. */
+    public const IMPROVED_ASSET = '23IM0002';
+    public const UNKNOWN_MOVEMENT_ASSET = '24IM0003';
+
     /** Doklad v režimu OSS (`$withOss`): 1 000 Kč + SK 23 %, odběratel bez DIČ na Slovensku. */
     public const OSS_DOCUMENT = '26FV0002';
     public const OSS_COUNTRY = 'SK';
@@ -111,9 +115,18 @@ final class SyntheticPohodaExport
      * (předkontace „Nevím"), v deníku tedy chybí. `settled` = účetní platbu mezitím zaúčtovala
      * jako úhradu faktury: faktura zlikvidovaná tímto pohybem, v deníku 321/221. Minulá
      * faktura 25FV0099 je v tomtéž exportu doplacená bez pohybu v bance.
+     *
+     * `$withAssetMovements`: k majetku z `$withAssets` navíc dvě karty s pohyby (`IMpohyb`)
+     * na společném účtu 022002/082002 (počáteční stav je součet karet):
+     * - {@see self::IMPROVED_ASSET}: linka zařazená 10. 1. 2023 za 180 000 Kč, technické
+     *   zhodnocení 84 000 Kč 15. 6. 2024 (`IM.Kc` 264 000), skupina 2 rovnoměrně
+     *   (2023 11 %, od 2024 sazba pro zvýšenou cenu 20 %), samostatný účetní plán 3 000 Kč
+     *   měsíčně do června 2024 a pak 5 000 Kč do prosince 2027, odpisy leden až březen 2026 v deníku;
+     * - {@see self::UNKNOWN_MOVEMENT_ASSET}: vozík za 50 000 Kč s pohybem druhu 16, který převod nezná.
      */
-    public static function write(string $root, bool $withAssets = false, bool $withOss = false, bool $withAdvanceDeduction = false, ?string $laterPayment = null, bool $unbooked = false, string $ossRateForm = self::OSS_RATE_VALUE, ?OssVariant $oss = null): string
+    public static function write(string $root, bool $withAssets = false, bool $withOss = false, bool $withAdvanceDeduction = false, ?string $laterPayment = null, bool $unbooked = false, string $ossRateForm = self::OSS_RATE_VALUE, ?OssVariant $oss = null, bool $withAssetMovements = false): string
     {
+        $withAssets = $withAssets || $withAssetMovements;
         $dir = rtrim($root, '/\\') . '/' . self::ICO . '_' . self::YEAR;
         if (!is_dir($dir)) {
             mkdir($dir, 0755, true);
@@ -121,7 +134,7 @@ final class SyntheticPohodaExport
         self::file($root . '/00_ucetni_jednotky.xml', '<acu:listAccountingUnit version="1.1"><acu:itemAccountingUnit><acu:unitType>doubleEntry</acu:unitType>'
             . '<acu:year>' . self::YEAR . '</acu:year><acu:unitIdentity><typ:address><typ:company>' . self::NAME . '</typ:company><typ:ico>' . self::ICO . '</typ:ico></typ:address></acu:unitIdentity>'
             . '<acu:dataFile>StwPh_' . self::ICO . '_' . self::YEAR . '.mdb</acu:dataFile></acu:itemAccountingUnit></acu:listAccountingUnit>');
-        foreach (self::files($withAssets, $withOss, $withAdvanceDeduction, $laterPayment, $unbooked, $ossRateForm, $oss) as $name => $body) {
+        foreach (self::files($withAssets, $withOss, $withAdvanceDeduction, $laterPayment, $unbooked, $ossRateForm, $oss, $withAssetMovements) as $name => $body) {
             self::file($dir . '/' . $name, $body);
         }
         if ($withAssets) {
@@ -132,11 +145,12 @@ final class SyntheticPohodaExport
             file_put_contents($dir . '/90_majetek.xml', '<?xml version="1.0" encoding="UTF-8"?>' . "\n"
                 . '<mdbExport version="1" ico="' . self::ICO . '" year="' . self::YEAR . '" source="POHODA" state="ok">'
                 . '<IM><ID>1</ID><Cislo>' . self::ASSET_NUMBER . '</Cislo><SText>Testovací stroj</SText><RelTpIM>1</RelTpIM><RelSkOdp>1</RelSkOdp><RelTpOdp>1</RelTpOdp>'
-                . '<Datum>2025-01-15</Datum><DatZar>2025-01-15</DatZar><Kc>120000</Kc><KcDanova>120000</KcDanova></IM>'
+                . '<Datum>2025-01-15</Datum><DatZar>2025-01-15</DatZar><Kc>120000</Kc><KcDanova>120000</KcDanova><KcOdeps>48000</KcOdeps><KcZust>48000</KcZust><KcZustUcetni>120000</KcZustUcetni></IM>'
                 . '<IModpis><ID>1</ID><RefAg>1</RefAg><Rok>2025</Rok><RelUzavreno>1</RelUzavreno><KcOdpis>24000</KcOdpis></IModpis>'
                 . '<IModpis><ID>2</ID><RefAg>1</RefAg><Rok>2026</Rok><KcOdpis>48000</KcOdpis></IModpis>'
                 . '<IModpis><ID>3</ID><RefAg>1</RefAg><Rok>2027</Rok><KcOdpis>48000</KcOdpis></IModpis>'
                 . $months
+                . ($withAssetMovements ? self::assetMovementCards() : '')
                 // Drobný majetek: vrtačka z přijaté faktury (zdroj dohledaný nástrojem) a vyřazené židle bez dokladu.
                 . '<IMmist><ID>1</ID><SText>Dílna</SText></IMmist>'
                 . '<DM><ID>1</ID><Cislo>DM0001</Cislo><SText>Vrtačka</SText><RelTpDM>1</RelTpDM><RelAgID>2</RelAgID><RefPol>77</RefPol><Datum>2026-01-12</Datum>'
@@ -1698,8 +1712,34 @@ final class SyntheticPohodaExport
         $zip->close();
     }
 
+    /** Tabulky `90_majetek.xml` pro karty `$withAssetMovements` ({@see write()}). */
+    private static function assetMovementCards(): string
+    {
+        $xml = '<IM><ID>2</ID><Cislo>' . self::IMPROVED_ASSET . '</Cislo><SText>Testovací linka</SText><RelTpIM>1</RelTpIM><RelSkOdp>2</RelSkOdp><RelTpOdp>1</RelTpOdp>'
+            . '<Datum>2023-01-05</Datum><DatZar>2023-01-10</DatZar><Kc>264000</Kc><KcDanova>264000</KcDanova><KcOdeps>52800</KcOdeps><KcZust>85800</KcZust><KcZustUcetni>60000</KcZustUcetni></IM>'
+            . '<IM><ID>3</ID><Cislo>' . self::UNKNOWN_MOVEMENT_ASSET . '</Cislo><SText>Testovací vozík</SText><RelTpIM>1</RelTpIM><RelSkOdp>1</RelSkOdp><RelTpOdp>1</RelTpOdp>'
+            . '<Datum>2024-02-01</Datum><DatZar>2024-02-01</DatZar><Kc>50000</Kc><KcDanova>50000</KcDanova><KcOdeps>20000</KcOdeps><KcZust>0</KcZust><KcZustUcetni>50000</KcZustUcetni></IM>';
+        $id = 200;
+        foreach ([[2, 2023, 19800, 1], [2, 2024, 52800, 1], [2, 2025, 52800, 1], [2, 2026, 52800, 0], [2, 2027, 52800, 0], [2, 2028, 33000, 0],
+            [3, 2024, 10000, 1], [3, 2025, 20000, 1], [3, 2026, 20000, 0]] as [$card, $year, $amount, $closed]) {
+            $xml .= sprintf('<IModpis><ID>%d</ID><RefAg>%d</RefAg><Rok>%d</Rok><RelUzavreno>%d</RelUzavreno><KcOdpis>%d</KcOdpis></IModpis>', ++$id, $card, $year, $closed, $amount);
+        }
+        // Samostatný účetní plán linky: od zařazení 3 000 Kč, po zhodnocení zbývající cena do konce plánu.
+        for ($i = 0; $i < 60; $i++) {
+            $xml .= sprintf('<IMuodpis><ID>%d</ID><RefAg>2</RefAg><Mesic>%04d-%02d-01</Mesic><KcOdpis>%d</KcOdpis></IMuodpis>', 300 + $i, 2023 + intdiv($i, 12), $i % 12 + 1, $i < 18 ? 3000 : 5000);
+        }
+        for ($i = 0; $i < 25; $i++) {
+            $xml .= sprintf('<IModpisM><ID>%d</ID><RefAg>3</RefAg><Mesic>%04d-%02d-01</Mesic><KcOdpis>2000</KcOdpis></IModpisM>', 400 + $i, 2024 + intdiv($i + 1, 12), ($i + 1) % 12 + 1);
+        }
+        foreach ([[2, 1, '2023-01-05', 180000, ''], [2, 2, '2023-01-10', 180000, ''], [2, 3, '2024-06-15', 84000, 'Přístavba linky'], [2, 7, '2025-12-31', 52800, ''],
+            [2, 8, '2025-12-31', 60000, ''], [3, 2, '2024-02-01', 50000, ''], [3, 16, '2025-05-01', 5000, '']] as [$card, $kind, $date, $amount, $note]) {
+            $xml .= sprintf('<IMpohyb><ID>%d</ID><RefAg>%d</RefAg><RelTpPoh>%d</RelTpPoh><Datum>%s</Datum><Kc>%d</Kc>%s</IMpohyb>', ++$id, $card, $kind, $date, $amount, $note === '' ? '' : '<Pozn>' . $note . '</Pozn>');
+        }
+        return $xml;
+    }
+
     /** @return array<string,string> soubor => obsah listu */
-    private static function files(bool $withAssets = false, bool $withOss = false, bool $withAdvanceDeduction = false, ?string $laterPayment = null, bool $unbooked = false, string $ossRateForm = self::OSS_RATE_VALUE, ?OssVariant $oss = null): array
+    private static function files(bool $withAssets = false, bool $withOss = false, bool $withAdvanceDeduction = false, ?string $laterPayment = null, bool $unbooked = false, string $ossRateForm = self::OSS_RATE_VALUE, ?OssVariant $oss = null, bool $withAssetMovements = false): array
     {
         $oss ??= new OssVariant();
         $journal = self::entry('Počáteční stavy účtů', 'ZAV', 'Počáteční stav účtu', 100000, '221001', '701000', '2026-01-01')
@@ -1720,6 +1760,15 @@ final class SyntheticPohodaExport
             }
             $journal .= self::entry('Přijaté faktury', '26PF0002', 'Nářadí', 1200, '518000', '321001', '2026-02-05')
                 . self::entry('Přijaté faktury', '26PF0002', 'DPH', 252, '343011', '321001', '2026-02-05');
+        }
+        if ($withAssetMovements) {
+            // Linka 264 000 + vozík 50 000 na jednom účtu, oprávky ke konci 2025 144 000 + 46 000.
+            $journal .= self::entry('Počáteční stavy účtů', 'ZAV', 'Počáteční stav účtu', 314000, '022002', '701000', '2026-01-01')
+                . self::entry('Počáteční stavy účtů', 'ZAV', 'Počáteční stav účtu', 190000, '701000', '082002', '2026-01-01')
+                . self::entry('Počáteční stavy účtů', 'ZAV', 'Počáteční stav účtu', 124000, '701000', '411000', '2026-01-01');
+            foreach (['2026-01-31', '2026-02-28', '2026-03-31'] as $date) {
+                $journal .= self::entry('Dlouhodobý majetek', self::IMPROVED_ASSET, 'Odpis - Testovací linka', 5000, '551000', '082002', $date);
+            }
         }
         if ($withOss) {
             $journal .= self::entry('Vydané faktury', '26FV0002', 'Zboží na dálku SK', 1000, '311001', '604000', '2026-02-10')
@@ -1761,6 +1810,11 @@ final class SyntheticPohodaExport
         }
         if ($withAssets) {
             foreach (['022001' => 'Stroje', '042000' => 'Pořízení majetku', '082001' => 'Oprávky ke strojům', '551000' => 'Odpisy'] as $code => $name) {
+                $accounts .= '<lst:itemAccount id="' . $code . '" code="' . $code . '" name="' . $name . '"/>';
+            }
+        }
+        if ($withAssetMovements) {
+            foreach (['022002' => 'Výrobní linky', '082002' => 'Oprávky k výrobním linkám'] as $code => $name) {
                 $accounts .= '<lst:itemAccount id="' . $code . '" code="' . $code . '" name="' . $name . '"/>';
             }
         }
