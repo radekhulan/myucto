@@ -125,14 +125,17 @@ final class SalesOrderService
     {
         $normalized = $this->normalizeDraft($supplierId, $data);
         $pdo = $this->db->pdo();
-        $pdo->beginTransaction();
+        // Převod z jiného programu zakládá objednávky uvnitř své transakce (krok převodu,
+        // zkouška nanečisto); transakci pak potvrzuje nebo vrací on.
+        $own = !$pdo->inTransaction();
+        if ($own) $pdo->beginTransaction();
         try {
             if ($normalized['external_source'] !== null && $normalized['external_id'] !== null) {
                 $existing = $pdo->prepare('SELECT id FROM sales_orders WHERE supplier_id = ? AND external_source = ? AND external_id = ? FOR UPDATE');
                 $existing->execute([$supplierId, $normalized['external_source'], $normalized['external_id']]);
                 $existingId = $existing->fetchColumn();
                 if ($existingId !== false) {
-                    $pdo->commit();
+                    if ($own) $pdo->commit();
                     return $this->detail($supplierId, (int) $existingId) ?? throw new \LogicException('Objednávka zmizela.');
                 }
             }
@@ -164,10 +167,10 @@ final class SalesOrderService
                 'payment_status' => 'unpaid',
                 'fulfillment_status' => 'unfulfilled',
             ]);
-            $pdo->commit();
+            if ($own) $pdo->commit();
             return $this->detail($supplierId, $id) ?? throw new \LogicException('Objednávka nevznikla.');
         } catch (\Throwable $e) {
-            if ($pdo->inTransaction()) $pdo->rollBack();
+            if ($own && $pdo->inTransaction()) $pdo->rollBack();
             throw $e;
         }
     }

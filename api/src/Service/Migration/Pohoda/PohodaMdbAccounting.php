@@ -22,6 +22,15 @@ final class PohodaMdbAccounting
         16 => 'received_proforma',
         18 => 'received_corrective',
     ];
+    /**
+     * Druh objednávky `OBJ.RelTpObj`. Ověřeno na číselné řadě reálné agendy: objednávka typu 2
+     * má řadu agendy 10 (vydané objednávky); typ 1 je druhá z dvojice, přijaté objednávky
+     * (agenda 21). Jiný typ převod nezná a objednávku přeskočí.
+     */
+    private const ORDERS = [
+        1 => 'received',
+        2 => 'issued',
+    ];
     private const SOURCES = [
         2 => PohodaJournal::ISSUED,
         3 => PohodaJournal::RECEIVED,
@@ -162,6 +171,79 @@ final class PohodaMdbAccounting
     public function warnings(): array
     {
         return array_values($this->warnings);
+    }
+
+    /** Export nese objednávky (`OBJ` a `OBJpol`); starší převodník je nevytahoval. */
+    public function hasOrders(): bool
+    {
+        return $this->tables->has('OBJ') && $this->tables->has('OBJpol');
+    }
+
+    /**
+     * Objednávky z tabulky `OBJ` s položkami z `OBJpol`, v pořadí ze souboru. Typ podle
+     * `RelTpObj` ({@see self::ORDERS}, neznámý = `null`). Vyřízení nese příznak `Vyrizeno`
+     * (ručně nebo po přenesení všech položek) a u položky dodané množství `Dodano`, storno
+     * datum `DatStorn`. Položka odkazuje na kartu zásoby `RefSKz` (`SKz.ID` ze skladu).
+     *
+     * @return \Generator<int,array{id:string,type:?string,source_type:string,number:string,date:string,delivery:string,
+     *     fulfilled:bool,cancelled:bool,text:string,partner_reference:string,note:string,
+     *     partner:array<string,mixed>,
+     *     currency:string,rate:float,units:float,items:list<array<string,mixed>>}>
+     */
+    public function orders(): \Generator
+    {
+        if (!$this->hasOrders()) {
+            return;
+        }
+        $items = $this->group('OBJpol', 'RefAg');
+        foreach ($this->tables->each(['OBJ']) as $r) {
+            $currency = $this->lookup('sCMeny', $r['RefCM'] ?? '');
+            $lines = [];
+            foreach ($items[$r['ID'] ?? ''] ?? [] as $it) {
+                $lines[] = [
+                    'id' => (string) ($it['ID'] ?? ''),
+                    'card' => ($it['RefSKz'] ?? '') === '0' ? '' : (string) ($it['RefSKz'] ?? ''),
+                    'code' => trim($it['Kod'] ?? ''),
+                    'text' => trim($it['SText'] ?? ''),
+                    'quantity' => (float) ($it['Mnozstvi'] ?? 0),
+                    'delivered' => (float) ($it['Dodano'] ?? 0),
+                    'unit' => trim($it['MJ'] ?? ''),
+                    'unit_ratio' => is_numeric($it['MJKoef'] ?? null) && (float) $it['MJKoef'] > 0 ? (float) $it['MJKoef'] : 1.0,
+                    'unit_price' => (float) ($it['KcJedn'] ?? 0),
+                    'price' => (float) ($it['Kc'] ?? 0),
+                    'vat' => (float) ($it['KcDPH'] ?? 0),
+                    'vat_slot' => (int) ($it['RelSzDPH'] ?? 0),
+                    'vat_percent' => is_numeric($it['ProcentoDPH'] ?? null) ? (float) $it['ProcentoDPH'] : null,
+                    'prices_include_vat' => self::flag($it['SDph'] ?? ''),
+                    'foreign_unit_price' => is_numeric($it['CmJedn'] ?? null) ? (float) $it['CmJedn'] : null,
+                    'foreign_price' => is_numeric($it['Cm'] ?? null) ? (float) $it['Cm'] : null,
+                ];
+            }
+            yield [
+                'id' => (string) ($r['ID'] ?? ''),
+                'type' => self::ORDERS[(int) ($r['RelTpObj'] ?? 0)] ?? null,
+                'source_type' => (string) ($r['RelTpObj'] ?? ''),
+                'number' => trim($r['Cislo'] ?? ''),
+                'date' => $this->date($r, 'Datum'),
+                'delivery' => $this->date($r, 'DatDod'),
+                'fulfilled' => self::flag($r['Vyrizeno'] ?? ''),
+                'cancelled' => $this->date($r, 'DatStorn') !== '',
+                'text' => trim($r['SText'] ?? ''),
+                'partner_reference' => trim($r['PDoklad'] ?? ''),
+                'note' => trim($r['Pozn'] ?? ''),
+                // Partner ve tvaru `typ:partnerIdentity` jako u dokladů ({@see PartnerImporter::snapshot()}).
+                'partner' => ['id' => ($r['RefAD'] ?? '') === '0' ? '' : (string) ($r['RefAD'] ?? '')] + $this->identity($r),
+                'currency' => strtoupper(trim($currency['Kod'] ?? '')),
+                'rate' => (float) ($r['CmKurs'] ?? 0),
+                'units' => (float) ($r['CmMnoz'] ?? 0),
+                'items' => $lines,
+            ];
+        }
+    }
+
+    private static function flag(string $value): bool
+    {
+        return in_array(strtolower(trim($value)), ['true', '1', '-1'], true);
     }
 
     private static function skippable(PohodaException $error): bool

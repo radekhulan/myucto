@@ -88,6 +88,64 @@ final class SyntheticPohodaMdbExport
         ]);
     }
 
+    /** Otevřená vydaná objednávka s částečně dodanou položkou ({@see writeOrders()}). */
+    public const OPEN_ISSUED_ORDER = '26OV0001';
+    /** Vydaná objednávka s příznakem vyřízeno. */
+    public const FULFILLED_ISSUED_ORDER = '26OV0002';
+    /** Vydaná objednávka bez příznaku, ale se všemi položkami dodanými. */
+    public const DELIVERED_ISSUED_ORDER = '26OV0003';
+    /** Otevřená přijatá objednávka od odběratele. */
+    public const OPEN_RECEIVED_ORDER = '26OP0001';
+
+    /**
+     * Agenda s objednávkami nad kartami skladu {@see SyntheticPohodaExport::withStock()}
+     * (kabel `K-001` je karta 101 v hlavním skladu, šroub `M-001` karta 103 v materiálovém):
+     *   - {@see OPEN_ISSUED_ORDER} dodavateli: kabel 10 m za 950 Kč bez DPH, dodáno 4 m;
+     *     doprava bez karty 150 Kč; položka s kartou 999, která ve skladu není (2 ks za 40 Kč);
+     *     textový řádek bez množství; termín dodání 20. 3. 2026,
+     *   - {@see FULFILLED_ISSUED_ORDER} s příznakem vyřízeno a {@see DELIVERED_ISSUED_ORDER}
+     *     s celou položkou dodanou (bez příznaku) se nepřevedou,
+     *   - {@see OPEN_RECEIVED_ORDER} od odběratele: 100 šroubů za 50 Kč bez DPH.
+     * Partneři jsou v adresáři (AD 5 dodavatel, AD 6 odběratel).
+     *
+     * @return string složka agendy
+     */
+    public static function writeOrders(string $root): string
+    {
+        $journal = static fn (string $id, string $amount, string $md, string $d): array =>
+            ['ID' => $id, 'RelUdAg' => '63', 'RelAgID' => '0', 'Cislo' => '', 'Datum' => '2026-01-01T00:00:00', 'Kc' => $amount, 'UMD' => $md, 'UD' => $d, 'SText' => 'Počáteční stav'];
+        $order = static fn (string $id, string $number, string $type, string $partner, string $fulfilled): array =>
+            ['ID' => $id, 'Cislo' => $number, 'RelTpObj' => $type, 'Datum' => '2026-03-02T00:00:00', 'DatDod' => '2026-03-20T00:00:00',
+                'Vyrizeno' => $fulfilled, 'SText' => 'Objednávka ' . $number, 'RefAD' => $partner, 'RefCM' => '0', 'CmKurs' => '0', 'CmMnoz' => '0'];
+        $item = static fn (string $id, string $order, string $card, string $text, string $qty, string $delivered, string $price, string $unit = 'ks'): array =>
+            ['ID' => $id, 'RefAg' => $order, 'RefSKz' => $card, 'SText' => $text, 'Mnozstvi' => $qty, 'Dodano' => $delivered, 'MJ' => $unit, 'MJKoef' => '1',
+                'Kc' => $price, 'KcDPH' => (string) round((float) $price * 0.21, 2), 'RelSzDPH' => '2', 'ProcentoDPH' => '21', 'SDph' => 'false', 'OrderFld' => $id];
+        return self::write($root, [
+            'pOS' => array_map(static fn (string $code, string $name): array => ['Ucet' => $code, 'Nazev' => $name],
+                ['221001', '411000', '701000'], ['Bankovní účet', 'Základní kapitál', 'Počáteční účet rozvažný']),
+            'pUD' => [$journal('1', '100000', '221001', '701000'), $journal('2', '100000', '701000', '411000')],
+            'AD' => [
+                ['ID' => '5', 'Firma' => 'Dodavatel Test s.r.o.', 'ICO' => SyntheticPohodaExport::VENDOR_ICO, 'Obec' => 'Brno'],
+                ['ID' => '6', 'Firma' => 'Odběratel Test s.r.o.', 'ICO' => SyntheticPohodaExport::CUSTOMER_ICO, 'Obec' => 'Praha'],
+            ],
+            'OBJ' => [
+                $order('1', self::OPEN_ISSUED_ORDER, '2', '5', 'false'),
+                $order('2', self::FULFILLED_ISSUED_ORDER, '2', '5', 'true'),
+                $order('3', self::DELIVERED_ISSUED_ORDER, '2', '5', 'false'),
+                $order('4', self::OPEN_RECEIVED_ORDER, '1', '6', 'false'),
+            ],
+            'OBJpol' => [
+                $item('1', '1', '101', 'Kabel', '10', '4', '950', 'm'),
+                $item('2', '1', '0', 'Doprava', '1', '0', '150'),
+                $item('3', '1', '999', 'Neznámá karta', '2', '0', '40'),
+                $item('4', '1', '0', 'Dodejte prosím do skladu HL', '0', '0', '0'),
+                $item('5', '2', '101', 'Kabel', '5', '0', '475', 'm'),
+                $item('6', '3', '103', 'Šroub', '50', '50', '25'),
+                $item('7', '4', '103', 'Šroub', '100', '0', '50'),
+            ],
+        ]);
+    }
+
     /**
      * Zapíše tabulky do složky agendy `<kořen>/<IČO>_<rok>`.
      *
