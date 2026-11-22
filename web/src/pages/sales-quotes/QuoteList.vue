@@ -71,7 +71,7 @@ onActivated(() => { if (!loading.value) void load() })
 </script>
 
 <template>
-  <div class="mx-auto max-w-screen-2xl p-3 sm:p-5">
+  <div class="min-w-0">
     <header class="mb-4 flex flex-wrap items-center justify-between gap-3">
       <h1 class="text-2xl font-semibold text-neutral-900">{{ t('nav.sales_quotes') }}</h1>
       <RouterLink v-if="auth.canWrite('sales_quotes.write')" :to="newQuote" :class="[btnFilled('primary'), 'whitespace-nowrap']">
@@ -80,7 +80,7 @@ onActivated(() => { if (!loading.value) void load() })
       </RouterLink>
     </header>
 
-    <form class="mb-4 flex flex-wrap items-end gap-3" @submit.prevent="applySearch">
+    <form class="mb-4 flex flex-wrap items-end gap-3 rounded-lg border border-neutral-200 bg-surface p-3" @submit.prevent="applySearch">
       <label class="min-w-40 flex-1 text-sm sm:max-w-sm">
         <span class="mb-1 block font-medium">{{ t('sales_quotes.search') }}</span>
         <input v-model="search" type="search" class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3" :placeholder="t('sales_quotes.search_hint')" />
@@ -106,8 +106,8 @@ onActivated(() => { if (!loading.value) void load() })
     <p v-else-if="rows.length === 0" class="rounded-lg border border-neutral-200 bg-surface p-8 text-center text-sm text-neutral-500">
       {{ t('sales_quotes.no_results') }}
     </p>
-    <div v-else class="rounded-lg border border-neutral-200 bg-surface">
-      <div class="hidden overflow-x-auto md:block">
+    <div v-else>
+      <div class="hidden overflow-x-auto rounded-lg border border-neutral-200 bg-surface md:block">
         <table class="w-full text-sm">
           <thead class="bg-neutral-50 text-neutral-700">
             <tr class="[&>th]:whitespace-nowrap [&>th]:px-3 [&>th]:py-2">
@@ -122,7 +122,7 @@ onActivated(() => { if (!loading.value) void load() })
             </tr>
           </thead>
           <tbody class="divide-y divide-neutral-200">
-            <tr v-for="row in rows" :key="row.id" class="[&>td]:px-3 [&>td]:py-2">
+            <tr v-for="row in rows" :key="row.id" class="hover:bg-neutral-50 [&>td]:px-3 [&>td]:py-2">
               <td class="whitespace-nowrap font-medium">
                 <RouterLink :to="{ name: 'sales-quote-detail', params: { id: row.id } }" class="text-primary-700 hover:underline">{{ row.number || '—' }}</RouterLink>
               </td>
@@ -137,18 +137,28 @@ onActivated(() => { if (!loading.value) void load() })
           </tbody>
         </table>
       </div>
-      <div class="divide-y divide-neutral-200 md:hidden">
-        <RouterLink v-for="row in rows" :key="row.id" :to="{ name: 'sales-quote-detail', params: { id: row.id } }" class="block p-3">
+      <div class="space-y-3 md:hidden">
+        <RouterLink v-for="row in rows" :key="row.id" :to="{ name: 'sales-quote-detail', params: { id: row.id } }" class="block rounded-lg border border-neutral-200 bg-surface p-3">
           <div class="flex flex-wrap items-start justify-between gap-2">
-            <p class="font-medium text-primary-700">{{ row.title }}</p>
+            <p class="min-w-0 font-medium wrap-anywhere text-primary-700">{{ row.title }}</p>
             <span :class="['whitespace-nowrap rounded px-2 py-0.5 text-xs font-medium', quoteStatusBadge[row.status]]">{{ t(`sales_quotes.status.${row.status}`) }}</span>
           </div>
-          <div class="mt-1 text-sm text-neutral-600">{{ row.number }} · {{ row.client_name }}</div>
+          <div class="mt-1 text-sm wrap-anywhere text-neutral-600">{{ row.number }} · {{ row.client_name }}</div>
+          <p v-if="row.project_name" class="text-xs wrap-anywhere text-neutral-500">{{ row.project_name }}</p>
           <div class="mt-1 flex flex-wrap justify-between gap-2 text-sm">
             <span>{{ t('sales_quotes.valid_until') }} {{ formatDate(row.valid_until) }}</span>
             <span class="font-semibold tabular-nums">{{ formatMoney(row.totals?.with_vat, row.currency) }}</span>
           </div>
-          <p v-if="row.status === 'accepted' && row.billing" class="mt-1 text-xs text-neutral-600">{{ t('sales_quotes.remaining') }} {{ formatMoney(row.billing.remaining, row.currency) }}</p>
+          <dl v-if="row.status === 'accepted' && row.billing" class="mt-2 grid grid-cols-2 gap-2 border-t border-neutral-200 pt-2 text-xs">
+            <div>
+              <dt class="text-neutral-600">{{ t('sales_quotes.billed') }}</dt>
+              <dd class="font-medium tabular-nums">{{ formatMoney(row.billing.billed, row.currency) }}</dd>
+            </div>
+            <div>
+              <dt class="text-neutral-600">{{ t('sales_quotes.remaining') }}</dt>
+              <dd class="font-medium tabular-nums">{{ formatMoney(row.billing.remaining, row.currency) }}</dd>
+            </div>
+          </dl>
         </RouterLink>
       </div>
     </div>

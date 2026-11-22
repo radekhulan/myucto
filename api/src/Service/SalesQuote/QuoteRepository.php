@@ -59,9 +59,10 @@ final class QuoteRepository
         $pageSize = max(1, min(100, (int) ($filters['per_page'] ?? 25)));
         $offset = (max(1, min(1000000, (int) ($filters['page'] ?? 1))) - 1) * $pageSize;
         $rows = $pdo->prepare(
-            'SELECT q.*, v.revision, v.data_json, v.id AS version_id
+            'SELECT q.*, p.name AS project_name, v.revision, v.data_json, v.id AS version_id
                FROM sales_quotes q JOIN clients c ON c.id = q.client_id AND c.supplier_id = q.supplier_id
                JOIN sales_quote_versions v ON v.id = q.current_version_id AND v.quote_id = q.id AND v.supplier_id = q.supplier_id
+          LEFT JOIN projects p ON p.id = q.project_id AND p.client_id = q.client_id
               WHERE ' . $conditions . ' ORDER BY q.id DESC LIMIT ' . $pageSize . ' OFFSET ' . $offset
         );
         $rows->execute($params);
@@ -73,7 +74,10 @@ final class QuoteRepository
 
     public function header(int $supplierId, int $id, bool $lock = false): array
     {
-        $query = $this->db->pdo()->prepare('SELECT * FROM sales_quotes WHERE supplier_id = ? AND id = ?' . ($lock ? ' FOR UPDATE' : ''));
+        $query = $this->db->pdo()->prepare(
+            'SELECT q.*, (SELECT p.name FROM projects p WHERE p.id = q.project_id AND p.client_id = q.client_id) AS project_name
+               FROM sales_quotes q WHERE q.supplier_id = ? AND q.id = ?' . ($lock ? ' FOR UPDATE' : '')
+        );
         $query->execute([$supplierId, $id]);
         $row = $query->fetch(PDO::FETCH_ASSOC);
         if ($row === false) {
@@ -104,6 +108,7 @@ final class QuoteRepository
         $selected = $current ? self::decode($head['accepted_section_ids']) : [];
         if ($current) {
             $data['project_id'] = $head['project_id'] === null ? null : (int) $head['project_id'];
+            $data['project_name'] = $head['project_name'];
         }
         return [
             'id' => (int) $head['id'],

@@ -168,7 +168,7 @@ function paste(event: ClipboardEvent) {
 </script>
 
 <template>
-  <div class="rounded-md border border-neutral-300 bg-surface">
+  <div :class="disabled ? 'min-w-0' : 'min-w-0 rounded-md border border-neutral-300 bg-surface'">
     <div v-if="!disabled" class="flex flex-wrap items-center gap-1 border-b border-neutral-200 px-2 py-1.5">
       <button type="button" class="h-7 rounded border border-neutral-300 px-2 text-xs font-bold" :title="t('markdown_editor.bold')" @mousedown.prevent @click="command('bold')">B</button>
       <button type="button" class="h-7 rounded border border-neutral-300 px-2 text-xs italic" :title="t('markdown_editor.italic')" @mousedown.prevent @click="command('italic')">I</button>
@@ -194,7 +194,8 @@ function paste(event: ClipboardEvent) {
       <button type="button" class="px-2 py-1 text-sm font-medium text-primary-700" :disabled="!safeLink(link.trim())" @click="insertLink">{{ t('sales_quotes.insert_link') }}</button>
       <button type="button" class="px-2 py-1 text-sm text-neutral-700" @click="linkOpen = false">{{ t('common.cancel') }}</button>
     </div>
-    <div ref="body" class="visual-body px-2 py-1.5 text-sm outline-none focus-visible:ring-2 focus-visible:ring-primary-500" :style="{ minHeight: rows * 1.5 + 'rem' }"
+    <div ref="body" class="visual-body overflow-x-auto text-sm wrap-anywhere"
+      :class="disabled ? undefined : 'px-2 py-1.5 outline-none focus-visible:ring-2 focus-visible:ring-primary-500'" :style="disabled ? undefined : { minHeight: rows * 1.5 + 'rem' }"
       :contenteditable="disabled ? undefined : true" :tabindex="disabled ? undefined : 0" :role="disabled ? undefined : 'textbox'"
       :aria-label="disabled ? undefined : placeholder || t('sales_quotes.section_text')" :aria-multiline="disabled ? undefined : true"
       @input="update" @focusout="captureSelection" @keyup="captureSelection" @pointerup="captureSelection" @paste="paste" @drop.prevent></div>

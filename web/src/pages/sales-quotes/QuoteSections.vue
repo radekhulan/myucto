@@ -45,6 +45,7 @@ const priceList = ref<PriceListItem[]>([])
 const pricesLoading = ref(false)
 let searchingStock = 0
 let searchingPrices = 0
+const itemGrid = 'grid-cols-2 items-start gap-2 sm:grid-cols-4 xl:grid-cols-[minmax(8rem,1fr)_minmax(10rem,2fr)_6rem_5rem_7rem_5rem_7rem_minmax(5rem,auto)]'
 const inputClass = 'h-9 w-full rounded-md border border-neutral-300 bg-surface px-2 text-sm'
 const totals = computed(() => addTotals(sections.value
   .filter(section => section.kind === 'required' || (props.accepted && props.acceptedSections.includes(section.id)))
@@ -194,6 +195,17 @@ function warehouseAllowed(item: QuoteItem): boolean {
 function linePrice(item: QuoteItem) {
   return item.totals ?? lineTotals(item, props.pricesIncludeVat, props.reverseCharge)
 }
+function itemMetrics(item: QuoteItem) {
+  return [
+    { label: 'quantity', value: formatNumber(Number(item.quantity), { maximumFractionDigits: 3 }) },
+    { label: 'unit', value: item.unit },
+    { label: 'unit_price', value: formatMoney(item.unit_price, props.currency, undefined, locale.value) },
+    { label: 'discount', value: `${Number(item.discount_percent)} %` },
+    { label: 'vat', value: `${Number(item.vat_rate)} %` },
+    { label: 'amount', value: formatMoney(linePrice(item).with_vat, props.currency) },
+  ]
+}
+
 </script>
 
 <template>
@@ -204,7 +216,7 @@ function linePrice(item: QuoteItem) {
           <label class="mb-1 block text-xs font-medium text-neutral-600" :for="`quote-section-${section.id}`">{{ t('sales_quotes.section_title') }}</label>
           <input :id="`quote-section-${section.id}`" v-model="section.title" required maxlength="190" :class="inputClass" />
         </div>
-        <h2 v-else class="flex-1 text-lg font-semibold text-neutral-900">{{ section.title }}</h2>
+        <h2 v-else class="min-w-0 flex-1 text-lg font-semibold wrap-anywhere text-neutral-900">{{ section.title }}</h2>
         <label v-if="editable" class="text-xs font-medium text-neutral-600">
           <span class="mb-1 block">{{ t('sales_quotes.section_kind') }}</span>
           <select v-model="section.kind" :class="inputClass">
@@ -230,66 +242,73 @@ function linePrice(item: QuoteItem) {
 
       <QuoteMarkdownEditor v-if="editable || section.markdown" v-model="section.markdown" :disabled="!editable" :images="images" :rows="3" :placeholder="t('sales_quotes.section_text')" />
       <template v-if="section.kind !== 'info'">
+        <div v-if="!editable && section.items.length" :class="[itemGrid, 'hidden px-2 text-xs font-medium text-neutral-600 xl:grid']" aria-hidden="true">
+          <span v-for="column in ['item_kind', 'description', 'quantity', 'unit', 'unit_price', 'discount', 'vat', 'amount']"
+            :key="column">{{ t(`sales_quotes.${column}`) }}</span>
+        </div>
         <div v-for="(item, itemIndex) in section.items" :key="item.id"
-          class="grid grid-cols-2 items-start gap-2 rounded-md border border-neutral-200 p-2 text-sm sm:grid-cols-4 xl:grid-cols-[minmax(8rem,1fr)_minmax(10rem,2fr)_6rem_5rem_7rem_5rem_7rem_auto]">
-          <label v-if="editable" class="col-span-1 text-xs font-medium text-neutral-600">
-            <span class="mb-1 block">{{ t('sales_quotes.item_kind') }}</span>
-            <select v-model="item.kind" :class="inputClass" :disabled="!!item.stock_item_id" @change="!isTime(item) && (item.duration_minutes = null)">
-              <option v-for="kind in quoteItemKinds" :key="kind" :value="kind">{{ t(`sales_quotes.item_kinds.${kind}`) }}</option>
-            </select>
-          </label>
-          <span v-else class="text-xs text-neutral-600">{{ t(`sales_quotes.item_kinds.${item.kind}`) }}</span>
+          :class="[itemGrid, 'grid rounded-md border border-neutral-200 p-2 text-sm']">
+          <template v-if="editable">
+            <label class="col-span-1 text-xs font-medium text-neutral-600">
+              <span class="mb-1 block">{{ t('sales_quotes.item_kind') }}</span>
+              <select v-model="item.kind" :class="inputClass" :disabled="!!item.stock_item_id" @change="!isTime(item) && (item.duration_minutes = null)">
+                <option v-for="kind in quoteItemKinds" :key="kind" :value="kind">{{ t(`sales_quotes.item_kinds.${kind}`) }}</option>
+              </select>
+            </label>
 
-          <div v-if="editable" class="min-w-0">
-            <span class="mb-1 block text-xs font-medium text-neutral-600">{{ t('sales_quotes.description') }}</span>
-            <StockDescriptionField v-model:description="item.description" :stock-item-id="item.stock_item_id ?? null" :stock-enabled="stockEnabled"
-              :options="stockPickerOptions" :selected-option="selectedStock(item)" :loading="stockLookup" :placeholder="t('sales_quotes.description')"
-              :loading-label="t('common.loading')" :no-results-label="t('sales_quotes.no_catalog_items')"
-              :keep-free-text-label="t('sales_quotes.manual_item')" :unlink-label="t('sales_quotes.unlink_card')"
-              @search="searchStock" @select="selectStock(item, $event)" />
-            <select v-if="warehouseAllowed(item)" v-model="item.warehouse_id" class="mt-1 h-7 w-full rounded border border-neutral-300 bg-surface px-1 text-xs" :aria-label="t('sales_quotes.warehouse')">
-              <option :value="null">{{ t('sales_quotes.no_warehouse') }}</option>
-              <option v-for="warehouse in stockWarehouses" :key="warehouse.id" :value="warehouse.id">{{ warehouse.name }}</option>
-            </select>
-          </div>
-          <div v-else class="whitespace-pre-line font-medium">{{ item.description }}</div>
+            <div class="min-w-0">
+              <span class="mb-1 block text-xs font-medium text-neutral-600">{{ t('sales_quotes.description') }}</span>
+              <StockDescriptionField v-model:description="item.description" :stock-item-id="item.stock_item_id ?? null" :stock-enabled="stockEnabled"
+                :options="stockPickerOptions" :selected-option="selectedStock(item)" :loading="stockLookup"
+                :aria-label="t('sales_quotes.description')" :placeholder="t('sales_quotes.description')"
+                :loading-label="t('common.loading')" :no-results-label="t('sales_quotes.no_catalog_items')"
+                :keep-free-text-label="t('sales_quotes.manual_item')" :unlink-label="t('sales_quotes.unlink_card')"
+                @search="searchStock" @select="selectStock(item, $event)" />
+              <select v-if="warehouseAllowed(item)" v-model="item.warehouse_id" class="mt-1 h-7 w-full rounded border border-neutral-300 bg-surface px-1 text-xs" :aria-label="t('sales_quotes.warehouse')">
+                <option :value="null">{{ t('sales_quotes.no_warehouse') }}</option>
+                <option v-for="warehouse in stockWarehouses" :key="warehouse.id" :value="warehouse.id">{{ warehouse.name }}</option>
+              </select>
+            </div>
 
-          <label v-if="editable" class="text-xs font-medium text-neutral-600">
-            <span class="mb-1 block">{{ t('sales_quotes.quantity') }}</span>
-            <DurationInput v-if="isTime(item)" v-model="item.quantity" v-model:duration-minutes="item.duration_minutes" />
-            <input v-else v-model="item.quantity" required type="number" min="0.001" step="0.001" :class="[inputClass, 'text-right']" />
-          </label>
-          <span v-else class="tabular-nums">{{ formatNumber(Number(item.quantity), { maximumFractionDigits: 3 }) }}</span>
-          <label v-if="editable" class="text-xs font-medium text-neutral-600">
-            <span class="mb-1 block">{{ t('sales_quotes.unit') }}</span>
-            <input v-model="item.unit" maxlength="20" :class="inputClass" @input="!isTime(item) && (item.duration_minutes = null)" />
-          </label>
-          <span v-else>{{ item.unit }}</span>
-          <label v-if="editable" class="text-xs font-medium text-neutral-600">
-            <span class="mb-1 block">{{ t('sales_quotes.unit_price') }}</span>
-            <input v-model="item.unit_price" required type="number" min="0" step="0.000001" :class="[inputClass, 'text-right']" />
-          </label>
-          <span v-else class="whitespace-nowrap tabular-nums">{{ formatMoney(item.unit_price, currency, undefined, locale) }}</span>
-          <label v-if="editable" class="text-xs font-medium text-neutral-600">
-            <span class="mb-1 block">{{ t('sales_quotes.discount') }}</span>
-            <input v-model="item.discount_percent" required type="number" min="0" max="100" step="0.01" :class="[inputClass, 'text-right']" />
-          </label>
-          <span v-else class="text-neutral-600">{{ Number(item.discount_percent) }} %</span>
-          <label v-if="editable" class="text-xs font-medium text-neutral-600">
-            <span class="mb-1 block">{{ t('sales_quotes.vat') }}</span>
-            <select :value="item.vat_rate_id ?? ''" :disabled="!isVatPayer" :class="inputClass" @change="changeVat(item, $event)">
-              <option value="">{{ t('sales_quotes.vat_zero') }}</option>
-              <option v-for="rate in vatRates.filter(rate => !rate.is_reverse_charge || rate.id === item.vat_rate_id)" :key="rate.id" :value="rate.id">{{ rate.rate_percent }} % · {{ rate.code }}</option>
-            </select>
-          </label>
-          <span v-else>{{ Number(item.vat_rate) }} %</span>
+            <label class="text-xs font-medium text-neutral-600">
+              <span class="mb-1 block">{{ t('sales_quotes.quantity') }}</span>
+              <DurationInput v-if="isTime(item)" v-model="item.quantity" v-model:duration-minutes="item.duration_minutes" />
+              <input v-else v-model="item.quantity" required type="number" min="0.001" step="0.001" :class="[inputClass, 'text-right']" />
+            </label>
+            <label class="text-xs font-medium text-neutral-600">
+              <span class="mb-1 block">{{ t('sales_quotes.unit') }}</span>
+              <input v-model="item.unit" maxlength="20" :class="inputClass" @input="!isTime(item) && (item.duration_minutes = null)" />
+            </label>
+            <label class="text-xs font-medium text-neutral-600">
+              <span class="mb-1 block">{{ t('sales_quotes.unit_price') }}</span>
+              <input v-model="item.unit_price" required type="number" min="0" step="0.000001" :class="[inputClass, 'text-right']" />
+            </label>
+            <label class="text-xs font-medium text-neutral-600">
+              <span class="mb-1 block">{{ t('sales_quotes.discount') }}</span>
+              <input v-model="item.discount_percent" required type="number" min="0" max="100" step="0.01" :class="[inputClass, 'text-right']" />
+            </label>
+            <label class="text-xs font-medium text-neutral-600">
+              <span class="mb-1 block">{{ t('sales_quotes.vat') }}</span>
+              <select :value="item.vat_rate_id ?? ''" :disabled="!isVatPayer" :class="inputClass" @change="changeVat(item, $event)">
+                <option value="">{{ t('sales_quotes.vat_zero') }}</option>
+                <option v-for="rate in vatRates.filter(rate => !rate.is_reverse_charge || rate.id === item.vat_rate_id)" :key="rate.id" :value="rate.id">{{ rate.rate_percent }} % · {{ rate.code }}</option>
+              </select>
+            </label>
 
-          <div class="flex flex-wrap items-center justify-between gap-2 sm:justify-end">
-            <span v-if="!editable" class="whitespace-nowrap font-medium tabular-nums">{{ formatMoney(linePrice(item).with_vat, currency) }}</span>
-            <button v-else type="button" :class="[btnOutlineSm('danger'), 'mt-4']" :aria-label="t('sales_quotes.remove_item')" :title="t('sales_quotes.remove_item')" @click="section.items.splice(itemIndex, 1); stockSelections.delete(item.id)">
-              <svg class="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.trash" /></svg>
-            </button>
-          </div>
+            <div class="flex flex-wrap items-center justify-between gap-2 sm:justify-end">
+              <button type="button" :class="[btnOutlineSm('danger'), 'mt-4']" :aria-label="t('sales_quotes.remove_item')" :title="t('sales_quotes.remove_item')" @click="section.items.splice(itemIndex, 1); stockSelections.delete(item.id)">
+                <svg class="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.trash" /></svg>
+              </button>
+            </div>
+          </template>
+          <template v-else>
+            <p class="col-span-2 font-medium wrap-anywhere xl:col-span-1 xl:col-start-2 xl:row-start-1">{{ item.description }}</p>
+            <p class="col-span-2 text-xs text-neutral-600 xl:col-span-1 xl:col-start-1 xl:row-start-1">{{ t(`sales_quotes.item_kinds.${item.kind}`) }}</p>
+            <div v-for="metric in itemMetrics(item)" :key="metric.label" class="min-w-0 tabular-nums wrap-anywhere">
+              <span class="block text-xs text-neutral-600 xl:sr-only">{{ t(`sales_quotes.${metric.label}`) }}</span>
+              <span :class="{ 'font-semibold': metric.label === 'amount' }">{{ metric.value }}</span>
+            </div>
+          </template>
         </div>
 
         <div v-if="editable" class="flex flex-wrap items-center gap-2">

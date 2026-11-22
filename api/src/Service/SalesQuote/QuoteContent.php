@@ -49,10 +49,12 @@ final class QuoteContent
         if ($currency === false) {
             throw new QuoteException('quote_currency', 'Vyberte aktivní měnu z této firmy.');
         }
+        $projectName = null;
         if ($projectId !== null) {
-            $project = $pdo->prepare('SELECT 1 FROM projects p JOIN clients c ON c.id = p.client_id WHERE c.supplier_id = ? AND p.id = ? AND p.client_id = ? AND p.archived_at IS NULL');
+            $project = $pdo->prepare('SELECT p.name FROM projects p JOIN clients c ON c.id = p.client_id WHERE c.supplier_id = ? AND p.id = ? AND p.client_id = ? AND p.archived_at IS NULL');
             $project->execute([$supplierId, $projectId, $clientId]);
-            if ($project->fetchColumn() === false) {
+            $projectName = $project->fetchColumn();
+            if ($projectName === false) {
                 throw new QuoteException('quote_project', 'Zakázka musí patřit zvolenému odběrateli.');
             }
         }
@@ -123,7 +125,7 @@ final class QuoteContent
         return [
             'title' => self::string($body['title'] ?? null, 190, 'Zadejte předmět nabídky.'),
             'client_id' => $clientId, 'client_name' => $client['name'], 'client_snapshot' => $client,
-            'project_id' => $projectId, 'currency_id' => $currencyId, 'currency' => $currency,
+            'project_id' => $projectId, 'project_name' => $projectName, 'currency_id' => $currencyId, 'currency' => $currency,
             'valid_until' => $validUntil, 'language' => $language, 'prices_include_vat' => $pricesIncludeVat,
             'reverse_charge' => $reverseCharge, 'sections' => $normalized,
         ];

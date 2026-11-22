@@ -147,7 +147,7 @@ async function createOrder() {
         <dd class="mt-1 font-semibold tabular-nums">{{ formatMoney(entry.value, quote.currency) }}</dd>
       </div>
     </dl>
-    <div v-if="quote.billing && allItems.length" class="overflow-x-auto">
+    <div v-if="quote.billing && allItems.length" class="hidden overflow-x-auto md:block">
       <table class="w-full text-sm">
         <thead class="text-neutral-600">
           <tr class="[&>th]:whitespace-nowrap [&>th]:px-2 [&>th]:py-1">
@@ -169,6 +169,21 @@ async function createOrder() {
         </tbody>
       </table>
     </div>
+    <ul v-if="quote.billing && allItems.length" class="space-y-2 md:hidden">
+      <li v-for="item in allItems" :key="item.id" class="rounded-md border border-neutral-200 p-3 text-sm">
+        <p class="font-medium wrap-anywhere">{{ item.description }} <span class="text-xs text-neutral-500">({{ item.unit }})</span></p>
+        <dl class="mt-2 grid grid-cols-2 gap-2 text-xs">
+          <div><dt class="text-neutral-600">{{ t('sales_quotes.quantity') }}</dt>
+            <dd class="font-medium tabular-nums">{{ formatNumber(Number(item.quantity), { maximumFractionDigits: 3 }) }}</dd></div>
+          <div><dt class="text-neutral-600">{{ t('sales_quotes.billed') }}</dt>
+            <dd class="font-medium tabular-nums">{{ formatNumber(Number(item.billed_quantity ?? 0), { maximumFractionDigits: 3 }) }}</dd></div>
+          <div><dt class="text-neutral-600">{{ t('sales_quotes.in_drafts') }}</dt>
+            <dd class="font-medium tabular-nums">{{ formatNumber(Number(item.draft_quantity ?? 0), { maximumFractionDigits: 3 }) }}</dd></div>
+          <div><dt class="text-neutral-600">{{ t('sales_quotes.remaining') }}</dt>
+            <dd class="font-medium tabular-nums">{{ formatNumber(Number(item.remaining_quantity ?? item.quantity), { maximumFractionDigits: 3 }) }}</dd></div>
+        </dl>
+      </li>
+    </ul>
     <ul v-if="quote.documents.length" class="divide-y divide-neutral-200 border-t border-neutral-200 text-sm">
       <li v-for="doc in quote.documents" :key="doc.invoice_id" class="flex flex-wrap items-center justify-between gap-2 py-2">
         <div>
@@ -234,14 +249,16 @@ async function createOrder() {
       </div>
     </form>
     <template #footer>
-      <button type="button" :class="btnOutline('neutral')" :disabled="busy" @click="invoiceType = null">
-        <svg class="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.x" /></svg>
-        {{ t('common.cancel') }}
-      </button>
-      <button type="submit" :form="formId" :class="btnFilled('primary')" :disabled="busy || !selected.length || invalidQuantity">
-        <svg class="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.doc" /></svg>
-        {{ t('sales_quotes.create_draft') }}
-      </button>
+      <div class="flex flex-wrap justify-end gap-2">
+        <button type="button" :class="btnOutline('neutral')" :disabled="busy" @click="invoiceType = null">
+          <svg class="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.x" /></svg>
+          {{ t('common.cancel') }}
+        </button>
+        <button type="submit" :form="formId" :class="btnFilled('primary')" :disabled="busy || !selected.length || invalidQuantity">
+          <svg class="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.doc" /></svg>
+          {{ t('sales_quotes.create_draft') }}
+        </button>
+      </div>
     </template>
   </Modal>
 </template>

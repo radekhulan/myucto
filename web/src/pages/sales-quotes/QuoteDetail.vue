@@ -17,6 +17,7 @@ import { useWindowTitle } from '@/composables/useWindowTitle'
 import { useWindowRefresh } from '@/composables/useWindowRefresh'
 import { useToast } from '@/composables/useToast'
 import { useDemoMode } from '@/composables/useDemoMode'
+import { useIsPhone } from '@/composables/useIsPhone'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
 import DateInput from '@/components/ui/DateInput.vue'
@@ -39,6 +40,7 @@ const auth = useAuthStore()
 const suppliers = useSupplierStore()
 const toast = useToast()
 const { blockDemoMutation } = useDemoMode()
+const isPhone = useIsPhone()
 const formId = useId()
 const editor = ref<HTMLFormElement | null>(null)
 const quote = ref<SalesQuote | null>(null)
@@ -106,6 +108,8 @@ const recipients = computed(() => {
 
 useWindowTitle(() => quote.value?.number || t('sales_quotes.new'), () => quote.value?.title ?? null)
 
+const saveDisabled = computed(() => busy.value || loading.value || quote.value?.send_pending === true || (quote.value !== null && !dirty.value))
+
 const actions = computed<ActionItem[]>(() => {
   const current = quote.value
   const state = current?.status
@@ -114,7 +118,7 @@ const actions = computed<ActionItem[]>(() => {
   const currentVersion = !!current && !historical.value
   return [
     { key: 'save', label: t('sales_quotes.save'), icon: 'check', tier: 'primary', variant: 'primary',
-      show: editable.value, disabled: disabled || (current !== null && !dirty.value), run: () => editor.value?.requestSubmit() },
+      show: editable.value && !isPhone.value, disabled: saveDisabled.value, run: () => editor.value?.requestSubmit() },
     { key: 'send', label: t(state === 'sent' || state === 'accepted' ? 'sales_quotes.send_again' : 'sales_quotes.send'), icon: 'send',
       tier: state === 'draft' ? 'secondary' : 'overflow', variant: 'primary', show: canSend.value && sendable && currentVersion,
       disabled: disabled || dirty.value, run: openSend },
@@ -375,16 +379,16 @@ onActivated(() => { if (id.value && !loading.value && !busy.value && !dirty.valu
 </script>
 
 <template>
-  <div class="mx-auto max-w-screen-2xl space-y-4 p-3 sm:p-5">
+  <div class="min-w-0 space-y-4">
     <RouterLink to="/sales-quotes" class="inline-flex items-center gap-1 text-sm font-medium text-primary-700 hover:underline">
       <svg class="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.chevronLeft" /></svg>
       {{ t('nav.sales_quotes') }}
     </RouterLink>
 
     <header class="flex flex-wrap items-start justify-between gap-3">
-      <div>
+      <div class="min-w-0 max-w-full">
         <div class="flex flex-wrap items-center gap-2">
-          <h1 class="text-2xl font-semibold text-neutral-900">{{ quote?.title || t('sales_quotes.new') }}</h1>
+          <h1 class="min-w-0 text-2xl font-semibold wrap-anywhere text-neutral-900">{{ quote?.title || t('sales_quotes.new') }}</h1>
           <span v-if="quote" :class="['whitespace-nowrap rounded px-2 py-0.5 text-xs font-medium', quoteStatusBadge[quote.status]]">{{ t(`sales_quotes.status.${quote.status}`) }}</span>
         </div>
         <p v-if="quote" class="mt-1 text-sm text-neutral-600">{{ quote.number }} · {{ t('sales_quotes.revision_number', { number: quote.revision }) }}</p>
@@ -443,7 +447,7 @@ onActivated(() => { if (id.value && !loading.value && !busy.value && !dirty.valu
               {{ t('sales_quotes.prices_include_vat') }}
             </label>
           </div>
-          <dl v-else-if="quote" class="grid grid-cols-2 gap-3 rounded-lg border border-neutral-200 bg-surface p-3 text-sm sm:grid-cols-4 sm:p-4">
+          <dl v-else-if="quote" class="grid grid-cols-2 gap-3 rounded-lg border border-neutral-200 bg-surface p-3 text-sm wrap-anywhere sm:grid-cols-4 sm:p-4">
             <div>
               <dt class="text-neutral-600">{{ t('sales_quotes.client') }}</dt>
               <dd><RouterLink v-if="auth.canRead('clients')" :to="{ name: 'client-detail', params: { id: quote.client_id } }" class="font-medium text-primary-700 hover:underline">{{ quote.client_name }}</RouterLink>
@@ -462,6 +466,12 @@ onActivated(() => { if (id.value && !loading.value && !busy.value && !dirty.valu
             :currency="currency" :prices-include-vat="form.prices_include_vat" :reverse-charge="contacts?.reverse_charge ?? quote?.reverse_charge ?? false" :accepted="quote?.status === 'accepted'"
             :accepted-sections="quote?.accepted_section_ids ?? []" />
         </fieldset>
+        <div v-if="editable && isPhone" class="sticky bottom-[calc(var(--app-footer-height,0px)+0.5rem)] z-10 rounded-lg border border-neutral-200 bg-surface p-3 shadow-lg">
+          <button type="submit" :class="[btnFilled('primary'), 'h-11 w-full justify-center']" :disabled="saveDisabled">
+            <svg class="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.check" /></svg>
+            {{ t('sales_quotes.save') }}
+          </button>
+        </div>
       </form>
 
       <template v-if="quote">
@@ -541,14 +551,16 @@ onActivated(() => { if (id.value && !loading.value && !busy.value && !dirty.valu
       </fieldset>
     </form>
     <template #footer>
-      <button type="button" :class="btnOutline('neutral')" :disabled="busy" @click="dialog = null">
-        <svg class="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.x" /></svg>
-        {{ t('common.cancel') }}
-      </button>
-      <button type="submit" :form="`${formId}-action`" :class="btnFilled(dialog === 'accepted' ? 'success' : dialog === 'send' ? 'primary' : 'warning')" :disabled="busy">
-        <svg class="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="dialog === 'send' ? ICONS.send : ICONS.check" /></svg>
-        {{ dialogTitle }}
-      </button>
+      <div class="flex flex-wrap justify-end gap-2">
+        <button type="button" :class="btnOutline('neutral')" :disabled="busy" @click="dialog = null">
+          <svg class="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.x" /></svg>
+          {{ t('common.cancel') }}
+        </button>
+        <button type="submit" :form="`${formId}-action`" :class="btnFilled(dialog === 'accepted' ? 'success' : dialog === 'send' ? 'primary' : 'warning')" :disabled="busy">
+          <svg class="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="dialog === 'send' ? ICONS.send : ICONS.check" /></svg>
+          {{ dialogTitle }}
+        </button>
+      </div>
     </template>
   </Modal>
 </template>

@@ -66,6 +66,7 @@ final class QuoteWorkflowTest extends StockTestCase
         $args = ['id' => $id];
         self::assertMatchesRegularExpression('/^NAB-\d{4}-0001$/', $initial['number']);
         self::assertSame(1000.0, (float) $initial['totals']['without_vat']);
+        self::assertSame('Syntetická zakázka', $initial['project_name']);
         self::assertStringStartsWith('%PDF-', (string) $action->pdf($this->request($sid), new Response(), $args)->getBody());
         $foreign = $this->request($this->createSupplier());
         self::assertSame(404, $action->pdf($foreign, new Response(), $args)->getStatusCode());
@@ -106,6 +107,7 @@ final class QuoteWorkflowTest extends StockTestCase
         self::assertSame($original, (string) $action->pdf($this->request($sid), new Response(), $args + ['eventId' => $archive])->getBody());
         $list = $this->json($action->list($this->request($sid)->withQueryParams(['status' => 'accepted']), new Response()));
         self::assertSame(1, $list['total']);
+        self::assertSame('Syntetická zakázka', $list['items'][0]['project_name']);
         self::assertSame(1500.0, (float) $list['items'][0]['billing']['remaining']);
     }
 
