@@ -375,10 +375,11 @@ final class DphPriznaniBuilder
         //                                  nezapočte (viz guard níže). Zbytek ř.45
         //                                  (§ 75 odst. 4, § 77, § 77a) mimo rozsah.
         //   ř.46 odp_sum_nar             = součtový řádek odpočtu (ř.40-45, „V plné výši")
-        //   ř.47 nar_maj/—               = hodnota pořízeného majetku (doplňující údaj).
-        //                                  POZOR: XSD atributy od_maj/odkr_maj (daň v plné
-        //                                  i krácené výši) EXISTUJÍ — generátor je zatím
-        //                                  neplní, není to omezení formuláře.
+        //   ř.47 nar_maj/od_maj          = hodnota pořízeného majetku a odpočet daně z něj
+        //                                  v plné výši (doplňující údaje). Daň je jen
+        //                                  informativní (`info_vat`), už je na ř.40-45 a do
+        //                                  ř.46/62/63 se znovu nepočítá. Krácený odpočet
+        //                                  (odkr_maj) generátor zatím neplní.
         $lineMap = [
             // Veta1 (výstup)
             '1'  => ['veta' => 1, 'base' => 'obrat23',    'vat' => 'dan23'],
@@ -437,7 +438,7 @@ final class DphPriznaniBuilder
             '42' => ['veta' => 4, 'base' => 'dov_cu',     'vat' => 'odp_cu_nar'],
             '43' => ['veta' => 4, 'base' => 'nar_zdp23',  'vat' => 'od_zdp23'],
             '44' => ['veta' => 4, 'base' => 'nar_zdp5',   'vat' => 'od_zdp5'],
-            '47' => ['veta' => 4, 'base' => 'nar_maj',    'vat' => null],
+            '47' => ['veta' => 4, 'base' => 'nar_maj',    'vat' => null, 'info_vat' => 'od_maj'],
             // Veta4 — krácený odpočet § 76 (sloupec „Krácený odpočet", ř.40-44). Klíče
             // 40k/41k/42k (tuzemsko, dovoz) a 43k/44k (zrcadlový odpočet samovyměření)
             // vytváří VatLedgerService pro vat_deduction='reduced'. Základ jde do TÉHOŽ
@@ -490,6 +491,9 @@ final class DphPriznaniBuilder
             $target[$m['base']] = ($target[$m['base']] ?? 0.0) + (float) $data['base'];
             if ($m['vat'] !== null) {
                 $target[$m['vat']] = ($target[$m['vat']] ?? 0.0) + (float) $data['vat'];
+            }
+            if (isset($m['info_vat']) && abs((float) $data['vat']) >= 0.005) {
+                $target[$m['info_vat']] = ($target[$m['info_vat']] ?? 0.0) + (float) $data['vat'];
             }
             unset($target);
 

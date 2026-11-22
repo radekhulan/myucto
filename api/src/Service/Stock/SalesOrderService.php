@@ -121,22 +121,21 @@ final class SalesOrderService
         ];
     }
 
-    public function create(int $supplierId, array $data, ?int $userId, bool $ownsTransaction = true): array
+    public function create(int $supplierId, array $data, ?int $userId): array
     {
         $normalized = $this->normalizeDraft($supplierId, $data);
         $pdo = $this->db->pdo();
-        if ($ownsTransaction) {
-            $pdo->beginTransaction();
-        } elseif (!$pdo->inTransaction()) {
-            throw new \LogicException('Vytvoření objednávky vyžaduje aktivní transakci.');
-        }
+        // Převod z jiného programu zakládá objednávky uvnitř své transakce (krok převodu,
+        // zkouška nanečisto); transakci pak potvrzuje nebo vrací on.
+        $own = !$pdo->inTransaction();
+        if ($own) $pdo->beginTransaction();
         try {
             if ($normalized['external_source'] !== null && $normalized['external_id'] !== null) {
                 $existing = $pdo->prepare('SELECT id FROM sales_orders WHERE supplier_id = ? AND external_source = ? AND external_id = ? FOR UPDATE');
                 $existing->execute([$supplierId, $normalized['external_source'], $normalized['external_id']]);
                 $existingId = $existing->fetchColumn();
                 if ($existingId !== false) {
-                    if ($ownsTransaction) $pdo->commit();
+                    if ($own) $pdo->commit();
                     return $this->detail($supplierId, (int) $existingId) ?? throw new \LogicException('Objednávka zmizela.');
                 }
             }
@@ -168,10 +167,10 @@ final class SalesOrderService
                 'payment_status' => 'unpaid',
                 'fulfillment_status' => 'unfulfilled',
             ]);
-            if ($ownsTransaction) $pdo->commit();
+            if ($own) $pdo->commit();
             return $this->detail($supplierId, $id) ?? throw new \LogicException('Objednávka nevznikla.');
         } catch (\Throwable $e) {
-            if ($ownsTransaction && $pdo->inTransaction()) $pdo->rollBack();
+            if ($own && $pdo->inTransaction()) $pdo->rollBack();
             throw $e;
         }
     }

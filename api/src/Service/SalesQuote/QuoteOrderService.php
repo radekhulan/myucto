@@ -107,7 +107,7 @@ final class QuoteOrderService
                     'currency_id' => $quote['currency_id'],
                     'prices_include_vat' => $quote['prices_include_vat'],
                     'lines' => $lines,
-                ], $userId, ownsTransaction: false);
+                ], $userId);
             } catch (SalesOrderException $e) {
                 throw new QuoteException($e->errorCode, $e->getMessage(), $e->httpStatus);
             }

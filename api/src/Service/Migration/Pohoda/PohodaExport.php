@@ -242,6 +242,15 @@ final class PohodaExport
         }
     }
 
+    /**
+     * Objednávky z převodu datového souboru ({@see PohodaMdbAccounting::orders()}); `null` =
+     * export je nenese (XML export POHODY, převodník před přidáním objednávek).
+     */
+    public function orders(): ?\Generator
+    {
+        return $this->mdb !== null && $this->mdb->hasOrders() ? $this->mdb->orders() : null;
+    }
+
     public function sourceWarnings(): array
     {
         if (!$this->warningsScanned) {

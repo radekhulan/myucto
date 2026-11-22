@@ -26,7 +26,7 @@ use PDO;
  *
  * Pořadí: osnova → období a deník → režim účetní jednotky → adresář a předkontace →
  * přijaté a vydané doklady → pokladna a banka → vazby dokladů na deník a úhrady →
- * zakázky a činnosti → majetek → sklad → koeficient krácení odpočtu (§ 76) → rekonciliace. Automatika účtování je po celou dobu vypnutá ({@see AccountingUnitSwitch}).
+ * zakázky a činnosti → majetek → sklad → otevřené objednávky → koeficient krácení odpočtu (§ 76) → rekonciliace. Automatika účtování je po celou dobu vypnutá ({@see AccountingUnitSwitch}).
  * Agenda vedená v daňové evidenci má vlastní kroky bez účtování ({@see taxEvidenceSteps()}).
  *
  * **Zkouška nanečisto** běží stejným kódem v jedné transakci, která se na konci vrátí.
@@ -67,6 +67,7 @@ final class PohodaImporter
         private readonly ContractImporter $contracts,
         private readonly ActivityImporter $activities,
         private readonly PohodaTaxEvidenceImporter $taxEvidence,
+        private readonly OrderImporter $orders,
     ) {}
 
     /**
@@ -92,6 +93,7 @@ final class PohodaImporter
                 AssetImporter::STEP,
                 SmallAssetImporter::STEP,
                 StockImporter::STEP,
+                OrderImporter::STEP,
                 VatCoefficientSeeder::STEP,
                 PohodaTaxEvidenceImporter::STEP_RECONCILIATION,
             ];
@@ -115,6 +117,7 @@ final class PohodaImporter
             AssetImporter::STEP,
             SmallAssetImporter::STEP,
             StockImporter::STEP,
+            OrderImporter::STEP,
             VatCoefficientSeeder::STEP,
             PohodaReconciler::STEP,
         ];
@@ -491,7 +494,7 @@ final class PohodaImporter
      */
     private const RELINK_SKIPPED_STEPS = [
         self::STEP_ACCOUNTING_MODE, PartnerImporter::STEP_POSTING_RULES, AssetImporter::STEP,
-        StockImporter::STEP, VatCoefficientSeeder::STEP, PohodaReconciler::STEP,
+        StockImporter::STEP, OrderImporter::STEP, VatCoefficientSeeder::STEP, PohodaReconciler::STEP,
     ];
 
     /** @return array<string,callable():void> */
@@ -543,6 +546,7 @@ final class PohodaImporter
             AssetImporter::STEP => fn () => $this->assets->import($ctx),
             SmallAssetImporter::STEP => fn () => $this->smallAssets->import($ctx),
             StockImporter::STEP => fn () => $this->stock->import($ctx),
+            OrderImporter::STEP => fn () => $this->orders->import($ctx),
             VatCoefficientSeeder::STEP => fn () => $this->coefficients->seedConverted(
                 $ctx->supplierId,
                 $this->vatYears($ctx, array_keys($this->map->all($ctx->supplierId, PohodaImportRepository::KIND_PERIOD))),
@@ -588,6 +592,7 @@ final class PohodaImporter
             },
             SmallAssetImporter::STEP => fn () => $this->smallAssets->import($ctx),
             StockImporter::STEP => fn () => $this->stock->import($ctx),
+            OrderImporter::STEP => fn () => $this->orders->import($ctx),
             VatCoefficientSeeder::STEP => fn () => $this->coefficients->seedConverted(
                 $ctx->supplierId, $this->taxEvidence->convertedYears($ctx->supplierId), [$ctx->year()], $ctx->userId, $ctx->protocol,
             ),
