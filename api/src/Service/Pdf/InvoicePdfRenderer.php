@@ -8,6 +8,7 @@ use Mpdf\Mpdf;
 use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Service\Codebook\UnitLabels;
 use MyInvoice\Service\Codebook\UnitPrecision;
 use MyInvoice\Repository\InvoiceRepository;
 use MyInvoice\Repository\SupplierPaymentQrSettingsRepository;
@@ -380,10 +381,11 @@ final class InvoicePdfRenderer
             }
         }
 
-        $invoice['items'] = $this->withQuantityDecimals(TimeBillingPdfPresenter::invoiceItems(
-            $this->withTrackingLines($this->withBaseQuantity($invoice), (int) ($invoice['supplier_id'] ?? 0), (string) $locale),
+        $unitLabels = (new UnitLabels($this->db))->byUnit((string) $locale);
+        $invoice['items'] = self::withUnitLabels($this->withQuantityDecimals(TimeBillingPdfPresenter::invoiceItems(
+            $this->withTrackingLines($this->withBaseQuantity($invoice), (int) ($invoice['supplier_id'] ?? 0), (string) $locale, $unitLabels),
             !empty($invoice['prices_include_vat']),
-        ));
+        )), $unitLabels);
         $lineDiscountColumns = false;
         if (self::hasLineDiscount($invoice['items']) && $this->showsLineDiscount((int) ($invoice['supplier_id'] ?? 0))) {
             $invoice['items'] = self::withLineDiscount(
@@ -399,6 +401,7 @@ final class InvoicePdfRenderer
             : null;
         if ($workReport !== null) {
             $workReport = TimeBillingPdfPresenter::workReport($workReport);
+            $workReport['materials'] = self::withUnitLabels((array) ($workReport['materials'] ?? []), $unitLabels);
         }
 
         $vars = [
@@ -832,9 +835,10 @@ final class InvoicePdfRenderer
      * a firma rozpis balení na PDF netiskne (`base_unit` z withBaseQuantity pak chybí).
      *
      * @param array<int|string,mixed> $items
+     * @param array<string,string> $unitLabels {@see UnitLabels::byUnit()}
      * @return array<int|string,mixed>
      */
-    private function withTrackingLines(array $items, int $supplierId, string $locale): array
+    private function withTrackingLines(array $items, int $supplierId, string $locale, array $unitLabels): array
     {
         $en = $locale === 'en';
         $lotLines = [];
@@ -852,7 +856,7 @@ final class InvoicePdfRenderer
             if (!is_array($allocations) || $allocations === []) {
                 continue;
             }
-            $unit = (string) ($baseUnits[$i] ?? $item['base_unit'] ?? $item['unit'] ?? '');
+            $unit = UnitLabels::label($unitLabels, (string) ($baseUnits[$i] ?? $item['base_unit'] ?? $item['unit'] ?? ''));
             $serials = [];
             $lots = [];
             foreach ($allocations as $a) {
@@ -876,6 +880,29 @@ final class InvoicePdfRenderer
             $items[$i]['tracking_lines'] = $lines;
         }
         return $items;
+    }
+
+    /**
+     * Popisek jednotky z číselníku v jazyce dokladu (`pdf_unit_label`, u rozpisu balení
+     * `pdf_base_unit_label`). Kód v `unit` a `base_unit` zůstává beze změny.
+     *
+     * @param array<int|string,mixed> $rows
+     * @param array<string,string> $unitLabels {@see UnitLabels::byUnit()}
+     * @return array<int|string,mixed>
+     */
+    private static function withUnitLabels(array $rows, array $unitLabels): array
+    {
+        foreach ($rows as &$row) {
+            if (!is_array($row)) {
+                continue;
+            }
+            $row['pdf_unit_label'] = UnitLabels::label($unitLabels, (string) ($row['unit'] ?? ''));
+            if (isset($row['base_unit'])) {
+                $row['pdf_base_unit_label'] = UnitLabels::label($unitLabels, (string) $row['base_unit']);
+            }
+        }
+        unset($row);
+        return $rows;
     }
 
     /**

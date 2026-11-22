@@ -579,7 +579,7 @@ final class InvoiceItemTrackingTest extends StockTestCase
 
         $html = $this->pdfHtml($invoiceId);
         self::assertStringContainsString('Výr. č.: VIN-PDF-1, VIN-PDF-2', $html);
-        self::assertStringContainsString('Šarže: L-PDF-1 (exp. 31. 12. 2099): 2 ks, L-PDF-2: 1 ks', $html);
+        self::assertStringContainsString('Šarže: L-PDF-1 (exp. 31. 12. 2099): 2 kus, L-PDF-2: 1 kus', $html);
         self::assertSame(1, substr_count($html, 'Výr. č.:'), 'Řádek bez výběru nic nevypisuje.');
     }
 
@@ -596,7 +596,7 @@ final class InvoiceItemTrackingTest extends StockTestCase
         $invoiceId = $this->createInvoice($sid, [$carton]);
 
         $html = $this->pdfHtml($invoiceId);
-        self::assertStringContainsString('Šarže: L-KT: 8 ks', $html, 'Množství šarže je v základní jednotce karty, ne v kartonech.');
+        self::assertStringContainsString('Šarže: L-KT: 8 kus', $html, 'Množství šarže je v základní jednotce karty, ne v kartonech.');
         self::assertStringNotContainsString('L-KT: 8 KT', $html);
     }
 

@@ -317,7 +317,7 @@
         {%- endif -%}
         {#- Kompaktní řádky tisknou rozpis balení a sériová čísla za popisem na stejném
             řádku: v úzkém sloupci jednotky by se rozpis lámal na několik řádků. -#}
-        {%- if compact_items and _base_qty is not null -%}<span style="font-size:85%;color:#666666;white-space:nowrap"> · {{ t('celkem', 'total') }}&nbsp;{{ _base_qty }}&nbsp;{{ item.base_unit }}</span>{%- endif -%}
+        {%- if compact_items and _base_qty is not null -%}<span style="font-size:85%;color:#666666;white-space:nowrap"> · {{ t('celkem', 'total') }}&nbsp;{{ _base_qty }}&nbsp;{{ item.pdf_base_unit_label|default(item.base_unit) }}</span>{%- endif -%}
         {#- Vybraná sériová čísla a šarže (InvoicePdfRenderer::withTrackingLines). -#}
         {%- for tracking_line in item.tracking_lines|default([]) -%}
           {#- Popisek („Výr. č.:“) drží pevnými mezerami u prvního čísla, na konci řádku se neodtrhne. -#}
@@ -333,7 +333,7 @@
       <td class="num nowrap">{% if item.duration_display is defined and item.duration_display is not null %}{{ item.duration_display }}{% else %}{{ item.quantity|number_format(item.quantity_decimals ?? (item.quantity == item.quantity|round(0) ? 0 : (item.quantity == item.quantity|round(1) ? 1 : (item.quantity == item.quantity|round(2) ? 2 : 3))), decimal_sep, thousand_sep) }}{% endif %}</td>
       {# Balení (issue #17): řádek v kartonech dostane rozpis na základní jednotky
          karty, pokud ho firma nemá v nastavení vypnutý (InvoicePdfRenderer::withBaseQuantity). #}
-      <td>{{ item.unit }}{% if _base_qty is not null and not compact_items %}<br><span style="font-size:85%;color:#666666;white-space:nowrap">({{ t('celkem', 'total') }} {{ _base_qty }}&nbsp;{{ item.base_unit }})</span>{% endif %}</td>
+      <td>{{ item.pdf_unit_label|default(item.unit) }}{% if _base_qty is not null and not compact_items %}<br><span style="font-size:85%;color:#666666;white-space:nowrap">({{ t('celkem', 'total') }} {{ _base_qty }}&nbsp;{{ item.pdf_base_unit_label|default(item.base_unit) }})</span>{% endif %}</td>
       {# V režimu „ceny s DPH" nese unit_price_without_vat brutto; pro zobrazení dopočítáme
          skutečné netto z řádkového základu (total_without_vat / množství). #}
       {% if line_discount_columns|default(false) %}
@@ -788,7 +788,7 @@
     <tr>
       <td>{{ m.description|nl2br }}</td>
       <td class="num nowrap">{{ m.quantity|number_format(qty_dec, decimal_sep, thousand_sep) }}</td>
-      <td class="nowrap">{{ m.unit }}</td>
+      <td class="nowrap">{{ m.pdf_unit_label|default(m.unit) }}</td>
       <td class="num nowrap">{{ m.unit_price|number_format(mprice_dec, decimal_sep, thousand_sep) }} {{ invoice.currency }}</td>
       <td class="num nowrap">{{ m.total_amount|number_format(mtotal_dec, decimal_sep, thousand_sep) }} {{ invoice.currency }}</td>
     </tr>
