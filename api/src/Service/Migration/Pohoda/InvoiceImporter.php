@@ -244,7 +244,8 @@ final class InvoiceImporter
         $summary = PohodaXml::get($r, 'intDocSummary/homeCurrency');
         $vat = round(PohodaXml::num($summary, 'priceHighVAT') + PohodaXml::num($summary, 'priceLowVAT') + PohodaXml::num($summary, 'price3VAT'), 2);
         $text = PohodaXml::text($h, 'text');
-        $target = preg_match('/dokladu\s+([^\s,]+)/u', $text, $m) === 1 ? $m[1] : '';
+        $target = self::debtorCorrectionTarget($text, static fn (string $number): bool =>
+            isset($ctx->purchaseInvoices[$number]) || isset($ctx->commitments[$number]));
         $invoiceId = $ctx->purchaseInvoices[$target] ?? $ctx->commitments[$target] ?? null;
         if ($invoiceId === null || abs($vat) < 0.005) {
             $p->count(self::STEP_INTERNAL, 's74b_review');
@@ -267,6 +268,28 @@ final class InvoiceImporter
         );
         $this->map->put($ctx->supplierId, PohodaImportRepository::KIND_S74B_CORRECTION, $key, $id, $ctx->runId);
         $p->count(self::STEP_INTERNAL, 's74b_corrections');
+    }
+
+    /**
+     * Číslo opravovaného dokladu z textu opravy § 74b („…dokladu 252 1086, datum splatnosti…").
+     * Číslo dokladu POHODY smí obsahovat mezery, proto vyhrává nejdelší úsek do čárky, který
+     * je mezi převedenými doklady; jinak první slovo (pro hlášení v protokolu).
+     *
+     * @param callable(string):bool $known
+     */
+    public static function debtorCorrectionTarget(string $text, callable $known): string
+    {
+        if (preg_match('/dokladu\s+([^,;]+)/u', $text, $m) !== 1) {
+            return '';
+        }
+        $words = array_slice(preg_split('/\s+/u', trim($m[1])) ?: [], 0, 4);
+        for ($n = count($words); $n > 0; $n--) {
+            $candidate = implode(' ', array_slice($words, 0, $n));
+            if ($known($candidate)) {
+                return $candidate;
+            }
+        }
+        return $words[0] ?? '';
     }
 
     /**

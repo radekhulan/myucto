@@ -1082,6 +1082,26 @@ final class PohodaImportTest extends TestCase
     }
 
     /**
+     * Zahraniční dodavatel, kterého adresář POHODY vede bez DIČ a státu: DIČ z dokladu se
+     * doplní na kontakt i se státem podle předpony, jinak by evidence DPH brala samovyměření
+     * jako tuzemský doklad a zařadila ho podle data vystavení místo DUZP.
+     */
+    public function testForeignVendorGetsVatIdAndCountryFromDocument(): void
+    {
+        $supplierId = $this->supplier();
+        $dir = SyntheticPohodaExport::write($this->tmp);
+        SyntheticPohodaExport::withForeignVendorWithoutVatIdInAddressbook($dir);
+
+        $protocol = $this->importer->run($supplierId, $this->userId, PohodaExport::open($dir), false);
+        self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
+
+        $vendor = $this->db->pdo()->query(sprintf(
+            "SELECT c.dic, co.iso2 FROM purchase_invoices pi JOIN clients c ON c.id = pi.vendor_id LEFT JOIN countries co ON co.id = c.country_id
+              WHERE pi.supplier_id = %d AND pi.varsymbol = '%s'", $supplierId, SyntheticPohodaExport::SELF_ASSESSED_PURCHASE))->fetch(\PDO::FETCH_ASSOC);
+        self::assertSame(['dic' => 'DE999999999', 'iso2' => 'DE'], $vendor, $this->explain($protocol));
+    }
+
+    /**
      * Samovyměření vedené jen dvojicí interních dokladů (vyměření `DD…` + odpočet `PD…`)
      * u faktury v členění mimo přiznání nebo u smíšené tuzemské faktury. Převod dřív tyto
      * interní doklady nepřiřadil („doplňte ručně") a ř. 3–13 i 43, 44 zůstaly prázdné.

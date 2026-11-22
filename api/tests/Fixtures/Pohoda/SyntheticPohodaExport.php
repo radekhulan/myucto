@@ -1013,6 +1013,26 @@ final class SyntheticPohodaExport
             . self::entry('Interní doklady', self::SELF_ASSESSMENT_DOCUMENT, 'DPH samovyměření', 525, '343011', '343021', '2026-02-15'));
     }
 
+    /** Záznam adresáře zahraničního dodavatele bez DIČ a státu ({@see withForeignVendorWithoutVatIdInAddressbook()}). */
+    public const FOREIGN_ADDRESSBOOK_ID = '9001';
+
+    /**
+     * {@see withSelfAssessedForeignPurchase()}, ale dodavatel je v adresáři POHODY bez DIČ
+     * a bez státu a faktura na něj odkazuje (`typ:id`). DIČ nese jen doklad, stát ani on.
+     */
+    public static function withForeignVendorWithoutVatIdInAddressbook(string $agendaDir): void
+    {
+        self::withSelfAssessedForeignPurchase($agendaDir);
+        $invoices = $agendaDir . '/20_faktury_receivedInvoice.xml';
+        $content = (string) file_get_contents($invoices);
+        $content = str_replace('<inv:partnerIdentity><typ:address><typ:company>Lieferant Test GmbH</typ:company>',
+            '<inv:partnerIdentity><typ:id>' . self::FOREIGN_ADDRESSBOOK_ID . '</typ:id><typ:address><typ:company>Lieferant Test GmbH</typ:company>', $content);
+        file_put_contents($invoices, str_replace('<typ:country><typ:ids>DE</typ:ids></typ:country><typ:dic>DE999999999</typ:dic>', '<typ:dic>DE999999999</typ:dic>', $content));
+        self::append($agendaDir . '/30_adresar.xml', '</lAdb:listAddressBook>',
+            '<lAdb:addressbook version="2.0"><adb:addressbookHeader><adb:id>' . self::FOREIGN_ADDRESSBOOK_ID . '</adb:id><adb:identity><typ:address>'
+            . '<typ:company>Lieferant Test GmbH</typ:company><typ:city>Berlin</typ:city></typ:address></adb:identity></adb:addressbookHeader></lAdb:addressbook>');
+    }
+
     /** Faktury se samovyměřením jen na interních dokladech ({@see withSelfAssessmentByInternalDocuments()}). */
     public const PAIR_SERVICE = '26PF0030';
     public const PAIR_MIXED = '26PF0031';
