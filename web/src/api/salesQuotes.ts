@@ -3,6 +3,7 @@ import { requestSupplierId } from '@/workspace/supplierContext'
 
 export const quoteStatuses = ['draft', 'sent', 'accepted', 'declined', 'expired', 'withdrawn'] as const
 export type QuoteStatus = typeof quoteStatuses[number]
+export type QuoteStateAction = Extract<QuoteStatus, 'accepted' | 'declined' | 'withdrawn'> | 'restore'
 export const quoteSectionKinds = ['required', 'optional', 'info'] as const
 export type QuoteSectionKind = typeof quoteSectionKinds[number]
 export const quoteItemKinds = ['product', 'work', 'material'] as const
@@ -135,7 +136,7 @@ export const salesQuotesApi = {
   create: (payload: QuotePayload) => api.post<SalesQuote>('/sales-quotes', payload).then(r => r.data),
   update: (id: number, payload: QuotePayload) => api.put<SalesQuote>(`/sales-quotes/${id}`, payload).then(r => r.data),
   revise: (id: number) => api.post<SalesQuote>(`/sales-quotes/${id}/revise`, {}).then(r => r.data),
-  setState: (id: number, status: QuoteStatus, optionalSectionIds: string[], note: string, rowVersion: number) =>
+  setState: (id: number, status: QuoteStateAction, optionalSectionIds: string[], note: string, rowVersion: number) =>
     api.post<SalesQuote>(`/sales-quotes/${id}/state`, { status, optional_section_ids: optionalSectionIds, note, row_version: rowVersion }).then(r => r.data),
   addHistory: (id: number, kind: QuoteHistoryKind, text: string) =>
     api.post<SalesQuote>(`/sales-quotes/${id}/history`, { kind, text }).then(r => r.data),

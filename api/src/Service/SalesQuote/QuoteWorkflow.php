@@ -139,20 +139,25 @@ final class QuoteWorkflow
 
     public function state(int $supplierId, int $id, int $userId, array $body): void
     {
-        $status = $body['status'] ?? null;
-        if (!in_array($status, ['accepted', 'declined', 'withdrawn'], true)) {
+        $target = $body['status'] ?? null;
+        if (!in_array($target, ['accepted', 'declined', 'withdrawn', 'restore'], true)) {
             throw new QuoteException('quote_status', 'Zvolte platný stav nabídky.');
         }
         $note = QuoteContent::string($body['note'] ?? '', 10000, 'Záznam je příliš dlouhý.', true);
-        $this->quotes->transaction(function () use ($supplierId, $id, $userId, $status, $note, $body): void {
+        $this->quotes->transaction(function () use ($supplierId, $id, $userId, $target, $note, $body): void {
             $header = $this->quotes->header($supplierId, $id, true);
             $this->quotes->guardDelivery($header);
-            if (($header['status'] !== 'sent' && !($header['status'] === 'draft' && $status === 'withdrawn'))
-                || ($status === 'accepted' && QuoteRepository::status($header['status'], $header['valid_until']) === 'expired')
-                || (isset($body['row_version']) && (int) $body['row_version'] !== (int) $header['row_version'])) {
+            $allowedTransition = match ($target) {
+                'restore' => $header['status'] === 'withdrawn',
+                'withdrawn' => in_array($header['status'], ['draft', 'sent'], true),
+                'accepted' => QuoteRepository::status($header['status'], $header['valid_until']) === 'sent',
+                'declined' => $header['status'] === 'sent',
+            };
+            if (!$allowedTransition || (isset($body['row_version']) && (int) $body['row_version'] !== (int) $header['row_version'])) {
                 throw new QuoteException('quote_transition', 'Nabídku v tomto stavu nelze takto změnit.', 409);
             }
             $version = $this->quotes->version($header);
+            $status = $target === 'restore' ? ($version['pdf_key'] === null ? 'draft' : 'sent') : $target;
             $data = QuoteRepository::decode($version['data_json']);
             $selected = $status === 'accepted' ? ($body['optional_section_ids'] ?? []) : [];
             $allowed = array_column(array_filter($data['sections'], static fn (array $section): bool => $section['kind'] === 'optional'), 'id');
@@ -173,7 +178,9 @@ final class QuoteWorkflow
                 'UPDATE sales_quotes SET status = ?, accepted_section_ids = ?, total_without_vat = ?, total_with_vat = ?,
                     row_version = row_version + 1 WHERE supplier_id = ? AND id = ?'
             )->execute([$status, QuoteRepository::encode($selected), $totals['without_vat'], $totals['with_vat'], $supplierId, $id]);
-            $this->quotes->event($supplierId, $id, (int) $version['id'], $userId, $status, ['text' => $note, 'optional_section_ids' => $selected]);
+            $this->quotes->event($supplierId, $id, (int) $version['id'], $userId, $target === 'restore' ? 'restored' : $status, [
+                'text' => $note, 'optional_section_ids' => $selected,
+            ]);
         });
     }
 

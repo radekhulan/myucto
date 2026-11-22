@@ -96,6 +96,15 @@ final class QuoteWorkflowTest extends StockTestCase
         self::assertStringStartsWith('%PDF-', $original);
         self::assertSame(409, $action->update($this->request($sid, $body + ['row_version' => $sent['row_version']]), new Response(), $args)->getStatusCode());
 
+        $withdrawn = $this->json($action->state($this->request($sid, ['status' => 'withdrawn']), new Response(), $args));
+        self::assertSame('withdrawn', $withdrawn['status']);
+        $restored = $this->json($action->state($this->request($sid, ['status' => 'restore']), new Response(), $args));
+        self::assertSame('sent', $restored['status']);
+        self::assertSame($sent['version_id'], $restored['version_id']);
+        self::assertSame($sent['valid_until'], $restored['valid_until']);
+        self::assertSame(['restored', 'withdrawn', 'send', 'created'], array_column($restored['history'], 'event'));
+        self::assertSame($original, (string) $action->pdf($this->request($sid), new Response(), $args)->getBody());
+
         $revised = $this->json($action->revise($this->request($sid), new Response(), $args));
         self::assertSame(2, $revised['revision']);
         self::assertSame('draft', $revised['status']);
@@ -109,6 +118,34 @@ final class QuoteWorkflowTest extends StockTestCase
         self::assertSame(1, $list['total']);
         self::assertSame('Syntetická zakázka', $list['items'][0]['project_name']);
         self::assertSame(1500.0, (float) $list['items'][0]['billing']['remaining']);
+    }
+
+    public function testRestoreMakesWithdrawnDraftEditableAgain(): void
+    {
+        $sid = $this->createSupplier(stockEnabled: false);
+        $action = $this->container->get(QuoteAction::class);
+        $body = $this->body($sid);
+        $draft = $this->json($action->create($this->request($sid, $body), new Response()));
+        $args = ['id' => $draft['id']];
+        $restore = ['status' => 'restore', 'note' => 'Omylem staženo'];
+        self::assertSame(409, $action->state($this->request($sid, $restore), new Response(), $args)->getStatusCode());
+
+        $withdrawn = $this->json($action->state($this->request($sid, ['status' => 'withdrawn']), new Response(), $args));
+        self::assertSame('withdrawn', $withdrawn['status']);
+        $stale = $this->request($sid, $restore + ['row_version' => $draft['row_version']]);
+        self::assertSame(409, $action->state($stale, new Response(), $args)->getStatusCode());
+
+        $request = $this->request($sid, $restore + ['row_version' => $withdrawn['row_version']]);
+        $restored = $this->json($action->state($request, new Response(), $args));
+        self::assertSame('draft', $restored['status']);
+        self::assertSame($draft['version_id'], $restored['version_id']);
+        self::assertSame($withdrawn['row_version'] + 1, $restored['row_version']);
+        self::assertSame(['restored', 'withdrawn', 'created'], array_column($restored['history'], 'event'));
+        self::assertSame('Omylem staženo', $restored['history'][0]['data']['text']);
+        self::assertSame(409, $action->state($request, new Response(), $args)->getStatusCode());
+
+        $edited = $this->request($sid, array_replace($body, ['title' => 'Upravený koncept', 'row_version' => $restored['row_version']]));
+        self::assertSame('Upravený koncept', $this->json($action->update($edited, new Response(), $args))['title']);
     }
 
     public function testQuoteOrderCarriesQuoteRowsToInvoice(): void

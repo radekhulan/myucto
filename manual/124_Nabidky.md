@@ -2,6 +2,8 @@
 
 > V sekci **Prodej → Nabídky** vytvoříte cenový návrh, odešlete jej jako PDF a z přijatého rozsahu vytvoříte fakturu, zálohovou fakturu nebo prodejní objednávku.
 
+Nabídky jsou součástí [licence účetnictví](104_Licence_a_aktivace.md) a jsou dostupné také během zkušební doby.
+
 ## 124.1 Vytvoření nabídky
 
 1. Zvolte **Nová nabídka**. Vyplňte předmět, odběratele a platnost. Podle potřeby přiřaďte zakázku a nastavte měnu a jazyk.
@@ -23,6 +25,8 @@ V **Náhledu PDF nabídky** zkontrolujte výsledek a použijte **Odeslat kliento
 ## 124.3 Přijetí a fakturace
 
 Jakmile klient odpoví, zaznamenejte přijetí nebo odmítnutí. Při přijetí zaškrtněte volitelné sekce, které si klient objednal. Telefonát, odpověď e-mailem nebo interní poznámku lze doplnit v historii.
+
+Pokud jste nabídku omylem stáhli, zvolte **Obnovit nabídku**. Rozpracovaná nabídka se vrátí do konceptu. Odeslaná nabídka se obnoví se stejnou platností a verzí. Stažení i obnovení zůstanou v historii.
 
 Z přijaté nabídky lze vytvořit **vydanou fakturu** nebo **zálohovou fakturu**. Ve výběru ponechte vše, nebo označte jednotlivé sekce, položky a množství. U zálohy lze zadat celou cenu výběru, procento nebo pevnou částku. MyÚčto otevře koncept dokladu k úpravě nebo vystavení.
 

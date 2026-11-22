@@ -3,7 +3,7 @@ import { computed, onActivated, onMounted, ref, useId, watch } from 'vue'
 import { RouterLink, onBeforeRouteLeave, onBeforeRouteUpdate, useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { isAxiosError } from 'axios'
-import { salesQuotesApi, type QuotePayload, type QuoteStatus, type SalesQuote } from '@/api/salesQuotes'
+import { salesQuotesApi, type QuotePayload, type QuoteStateAction, type SalesQuote } from '@/api/salesQuotes'
 import { clientsApi, type Client } from '@/api/clients'
 import { projectsApi, type Project } from '@/api/projects'
 import { codebooksApi, type Currency, type VatRate } from '@/api/codebooks'
@@ -30,8 +30,7 @@ import QuoteFiles from './QuoteFiles.vue'
 import QuoteHistory from './QuoteHistory.vue'
 import { quoteStatusBadge, sectionTotals } from './quotePresentation'
 
-type StateAction = Extract<QuoteStatus, 'accepted' | 'declined' | 'withdrawn'>
-type Dialog = 'send' | 'pdf' | StateAction | null
+type Dialog = 'send' | 'pdf' | QuoteStateAction | null
 
 const { t } = useI18n()
 const route = useRoute()
@@ -124,6 +123,8 @@ const actions = computed<ActionItem[]>(() => {
       disabled: disabled || dirty.value, run: openSend },
     { key: 'accept', label: t('sales_quotes.accept'), icon: 'checkCircle', tier: 'primary', variant: 'success',
       show: canWrite.value && state === 'sent' && currentVersion, disabled, run: () => openState('accepted') },
+    { key: 'restore', label: t('sales_quotes.restore'), icon: 'uturn', tier: 'primary', variant: 'success',
+      show: canWrite.value && state === 'withdrawn' && currentVersion, disabled, run: () => openState('restore') },
     { key: 'pdf', label: t('sales_quotes.pdf_preview'), icon: 'eye', tier: 'secondary', variant: 'neutral',
       show: !!current, disabled: busy.value || dirty.value, run: () => { dialog.value = 'pdf' } },
     { key: 'revise', label: t('sales_quotes.revise'), icon: 'copy', tier: 'secondary', variant: 'primary',
@@ -318,7 +319,7 @@ function openSend() {
   dialog.value = 'send'
 }
 
-function openState(status: StateAction) {
+function openState(status: QuoteStateAction) {
   modalError.value = ''
   stateNote.value = ''
   chosenSections.value = []
@@ -363,6 +364,7 @@ const dialogTitle = computed(() => {
   if (dialog.value === 'send') return t('sales_quotes.send')
   if (dialog.value === 'accepted') return t('sales_quotes.accept')
   if (dialog.value === 'declined') return t('sales_quotes.decline')
+  if (dialog.value === 'restore') return t('sales_quotes.restore')
   return t('sales_quotes.withdraw')
 })
 
@@ -544,6 +546,7 @@ onActivated(() => { if (id.value && !loading.value && !busy.value && !dirty.valu
             <span class="font-medium tabular-nums">{{ formatMoney(sectionTotals(section, quote.prices_include_vat, true).with_vat, quote.currency) }}</span>
           </label>
         </template>
+        <p v-if="dialog === 'restore'" class="text-sm text-neutral-600">{{ t('sales_quotes.restore_hint') }}</p>
         <label v-if="dialog !== 'send'" class="block text-sm">
           <span class="mb-1 block font-medium">{{ t('sales_quotes.internal_note') }}</span>
           <textarea v-model="stateNote" maxlength="6000" rows="3" class="w-full resize-y rounded-md border border-neutral-300 bg-surface px-3 py-2" />
@@ -556,8 +559,8 @@ onActivated(() => { if (id.value && !loading.value && !busy.value && !dirty.valu
           <svg class="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.x" /></svg>
           {{ t('common.cancel') }}
         </button>
-        <button type="submit" :form="`${formId}-action`" :class="btnFilled(dialog === 'accepted' ? 'success' : dialog === 'send' ? 'primary' : 'warning')" :disabled="busy">
-          <svg class="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="dialog === 'send' ? ICONS.send : ICONS.check" /></svg>
+        <button type="submit" :form="`${formId}-action`" :class="btnFilled(dialog === 'accepted' || dialog === 'restore' ? 'success' : dialog === 'send' ? 'primary' : 'warning')" :disabled="busy">
+          <svg class="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="dialog === 'send' ? ICONS.send : dialog === 'restore' ? ICONS.uturn : ICONS.check" /></svg>
           {{ dialogTitle }}
         </button>
       </div>

@@ -271,6 +271,7 @@ const companyAdminRouteNames = new Set([] as string[])
 const selfServiceRouteNames = new Set(['profile-password', 'setup-totp', 'isds-gateway-callback', 'portal-mcp'])
 const commercialOnlyRouteNames = new Set([
   'accounting-activation',
+  'sales-quotes', 'sales-quote-new', 'sales-quote-detail',
   // GoPay vede podvojné účetnictví i daňová evidence (requiresAccountingMode), licence platí stejně.
   'gopay',
   // Majetek je dostupný i v daňové evidenci (requiresAccountingMode), licence platí stejně.

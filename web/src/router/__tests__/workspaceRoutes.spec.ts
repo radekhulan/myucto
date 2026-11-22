@@ -92,6 +92,15 @@ describe('workspace route factory', () => {
     }
   })
 
+  it('vyžaduje komerční licenci ve všech stránkách nabídek', () => {
+    const routes = createWorkspaceRoutes()
+    applyAuthorizationMeta(routes, true)
+    for (const name of ['sales-quotes', 'sales-quote-new', 'sales-quote-detail']) {
+      expect(routes.find(route => route.name === name)?.meta, name).toMatchObject({ commercialOnly: true })
+      expect(router.getRoutes().find(route => route.name === name)?.meta, name).toMatchObject({ commercialOnly: true })
+    }
+  })
+
   it('řídí importy a firemní číselníky jejich skutečnými oprávněními', () => {
     const records: RouteRecordRaw[] = [{
       path: '/',

@@ -45,6 +45,9 @@ final class LicenseMiddlewareTest extends TestCase
         return [
             'degraded accounting GET'       => [LicenseState::DEGRADED, 'GET', '/api/accounting/journal'],
             'expired accounting POST'       => [LicenseState::TRIAL_EXPIRED, 'POST', '/api/accounting/journal'],
+            'degraded quote list'           => [LicenseState::DEGRADED, 'GET', '/api/sales-quotes'],
+            'expired quote PDF'             => [LicenseState::TRIAL_EXPIRED, 'GET', '/api/sales-quotes/12/pdf'],
+            'expired quote state change'    => [LicenseState::TRIAL_EXPIRED, 'POST', '/api/sales-quotes/12/state'],
             'degraded stock GET'            => [LicenseState::DEGRADED, 'GET', '/api/stock/items'],
             'expired e-shop POST'           => [LicenseState::TRIAL_EXPIRED, 'POST', '/api/eshop/import'],
             'degraded invoice stock link'   => [LicenseState::DEGRADED, 'GET', '/api/invoices/12/stock-documents'],
@@ -160,6 +163,20 @@ final class LicenseMiddlewareTest extends TestCase
         self::assertSame(204, $allowed->getStatusCode());
     }
 
+    public function testQuotesRequireTheCommercialEntitlement(): void
+    {
+        $request = $this->request('GET', '/api/sales-quotes');
+        $freePlan = $this->createStub(LicenseService::class);
+        $freePlan->method('current')->willReturn($this->state(LicenseState::ACTIVE, commercial: false));
+        $free = $this->middleware($freePlan)->process($request, $this->handler());
+        self::assertSame(403, $free->getStatusCode());
+
+        foreach ([LicenseState::ACTIVE, LicenseState::TRIAL] as $state) {
+            $allowed = $this->middleware($this->stateReturning($state))->process($request, $this->handler());
+            self::assertSame(204, $allowed->getStatusCode(), $state);
+        }
+    }
+
     public function testRenewSkippedForAnonymousRequest(): void
     {
         $service = $this->createMock(LicenseService::class);
@@ -241,7 +258,7 @@ final class LicenseMiddlewareTest extends TestCase
         return $service;
     }
 
-    private function state(string $state, bool $payrollEnabled = false): LicenseState
+    private function state(string $state, bool $payrollEnabled = false, bool $commercial = true): LicenseState
     {
         return new LicenseState(
             $state,
@@ -257,6 +274,7 @@ final class LicenseMiddlewareTest extends TestCase
             null,
             null,
             true,
+            commercial: $commercial,
             payrollEnabled: $payrollEnabled,
         );
     }

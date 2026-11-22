@@ -492,7 +492,7 @@ const navSections = computed<NavSection[]>(() => {
         // 2) Obchodní data. Předěl nese položka bez zvláštního oprávnění, aby se nikomu neztratil.
         { to: '/clients',          label: t('nav.clients'),    icon: ICONS.clients,   newTo: '/clients/new', dividerBefore: true },
         { to: '/projects',         label: t('nav.projects'),   icon: ICONS.projects },
-        { to: '/sales-quotes',     label: t('nav.sales_quotes'), icon: ICONS.documents, newTo: '/sales-quotes/new', permission: 'sales_quotes', newPermission: 'sales_quotes.write' },
+        ...(auth.hasCommercialFeatures ? [{ to: '/sales-quotes', label: t('nav.sales_quotes'), icon: ICONS.documents, newTo: '/sales-quotes/new', permission: 'sales_quotes' as const, newPermission: 'sales_quotes.write' as const }] : []),
         ...(!isStockEnabled ? [{
           to: '/admin/price-list',
           label: t('nav.price_list'),
