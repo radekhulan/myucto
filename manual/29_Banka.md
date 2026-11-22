@@ -122,7 +122,9 @@ Zaplatil-li klient **víc vydaných faktur jednou platbou**, nebo vy zaplatili v
 
 Pravidla kombinací (okno ±7 dní, jeden klient, přijaté faktury od různých dodavatelů) viz [§ 29.13.9](#29139-sloucena-uhrada).
 
-Souhrnný převod z terminálu lze rozdělit i mezi různé odběratele přes REST API. Do `POST /api/v1/bank-transactions/{id}/match` předá integrace pole `payout_allocations` s ID jednotlivých vydaných faktur nebo záloh a jejich plnými zůstatky v haléřích (`amount_cents`). Pohyb i doklady musí být v CZK a součet musí přesně odpovídat částce na výpisu. Při převodu 560 Kč tedy pošlete například částky `33600` a `22400` ke dvěma různým dokladům.
+**Souhrnný převod mezi různými odběrateli**, například z platebního terminálu, rozdělíte přes pokročilou akci u příchozího pohybu z bankovního výpisu. Otevřete **Detail transakce → Další akce (…) → Pokročilé → Rozdělit souhrnnou úhradu**. Vyhledejte vydané faktury nebo zálohy podle čísla dokladu či odběratele. Každý vybraný doklad se přidá svým plným zbývajícím zůstatkem. Rozpad potvrdíte, jakmile máte 2 až 100 dokladů v CZK a jejich součet přesně odpovídá převodu.
+
+Přes REST API předá integrace do `POST /api/v1/bank-transactions/{id}/match` pole `payout_allocations` s ID dokladů a jejich plnými zůstatky v haléřích (`amount_cents`). Při převodu 560 Kč tedy pošle například částky `33600` a `22400` ke dvěma různým dokladům.
 
 Token bez plného zápisu přiřadí úhrady a předá pohyb k zaúčtování v aplikaci nebo naplánovaným přepočtem podle politiky firmy. V podvojném účetnictví je zaúčtovaná úhrada zálohy podkladem pro její odpočet na konečné faktuře.
 

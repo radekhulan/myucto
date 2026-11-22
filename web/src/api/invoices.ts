@@ -935,14 +935,15 @@ export const invoicesApi = {
 
   /**
    * Plochý seznam OTEVŘENÝCH (nezaplacených) vystavených faktur a proforem pro picker
-   * (např. kotva sloučené úhrady v bankovním párování). Vrací max `limit` položek
-   * seřazených dle splatnosti. Hledá fulltextem (varsymbol + jméno klienta).
+   * (např. rozpad souhrnné úhrady v bance). Vrací max `limit` položek.
+   * Hledá fulltextem (varsymbol + jméno klienta).
    */
-  searchOpen: (q: string, limit = 20): Promise<InvoiceListItem[]> =>
+  searchOpen: (q: string, limit = 20, currency?: string): Promise<InvoiceListItem[]> =>
     invoicesApi.listGrouped({
       q,
       status: ['issued', 'sent', 'reminded'],
       type: ['invoice', 'proforma'],
+      currency,
       unpaid_only: true,
       per_page: limit,
     }).then(r => r.data.flatMap(g => g.invoices)),

@@ -127,6 +127,7 @@ const outsideSaldo = computed(() => props.tx.match_status === 'unmatched'
 const supersededNotice = computed(() => props.tx.notice_superseded === true)
 // Pohyb přiřazený ostatní pohledávce či závazku: doklad má, jen to není faktura.
 const otherItems = computed(() => props.tx.match_status === 'unmatched' ? props.tx.matched_other_items ?? [] : [])
+const hasDistinctInvoiceClients = computed(() => new Set(props.tx.matched_invoices?.map(invoice => invoice.client_name)).size > 1)
 const otherItemMatched = computed(() => otherItems.value.length > 0)
 const otherItemLinks = computed(() => auth.canRead('other_items') ? otherItems.value : [])
 const membershipMatched = computed(() => props.tx.resolution === 'membership' || (props.tx.matched_membership_claims?.length ?? 0) > 0)
@@ -454,11 +455,13 @@ function candidateReject() {
       </td>
       <td class="px-3 py-2">
         <template v-if="(tx.matched_invoices?.length ?? 0) > 1 && auth.canRead('invoices')">
-          <RouterLink v-for="mi in tx.matched_invoices" :key="mi.invoice_id" :to="`/invoices/${mi.invoice_id}`"
-            class="text-primary-600 hover:underline block">
-            {{ mi.varsymbol || `#${mi.invoice_id}` }}
-          </RouterLink>
-          <div v-if="tx.matched_invoices?.[0]?.client_name" class="text-neutral-500 text-xs">{{ tx.matched_invoices[0].client_name }}</div>
+          <div v-for="mi in tx.matched_invoices" :key="mi.invoice_id">
+            <RouterLink :to="`/invoices/${mi.invoice_id}`" class="text-primary-600 hover:underline">
+              {{ mi.varsymbol || `#${mi.invoice_id}` }}
+            </RouterLink>
+            <span v-if="hasDistinctInvoiceClients && mi.client_name" class="text-neutral-500 text-xs"> · {{ mi.client_name }}</span>
+          </div>
+          <div v-if="!hasDistinctInvoiceClients && tx.matched_invoices?.[0]?.client_name" class="text-neutral-500 text-xs">{{ tx.matched_invoices[0].client_name }}</div>
         </template>
         <template v-else-if="(tx.matched_purchase_invoices?.length ?? 0) > 1 && auth.canRead('purchase_invoices')">
           <div v-for="invoice in tx.matched_purchase_invoices" :key="invoice.purchase_invoice_id">
@@ -666,11 +669,13 @@ function candidateReject() {
       </button>
     </div>
     <div v-if="(tx.matched_invoices?.length ?? 0) > 1 && auth.canRead('invoices')" class="text-xs">
-      <RouterLink v-for="mi in tx.matched_invoices" :key="mi.invoice_id" :to="`/invoices/${mi.invoice_id}`"
-        class="text-primary-600 hover:underline font-mono mr-2">
-        {{ mi.varsymbol || `#${mi.invoice_id}` }}
-      </RouterLink>
-      <span v-if="tx.matched_invoices?.[0]?.client_name" class="text-neutral-500">{{ tx.matched_invoices[0].client_name }}</span>
+      <span v-for="mi in tx.matched_invoices" :key="mi.invoice_id" :class="hasDistinctInvoiceClients ? 'block' : 'mr-2'">
+        <RouterLink :to="`/invoices/${mi.invoice_id}`" class="text-primary-600 hover:underline font-mono">
+          {{ mi.varsymbol || `#${mi.invoice_id}` }}
+        </RouterLink>
+        <span v-if="hasDistinctInvoiceClients && mi.client_name" class="text-neutral-500"> · {{ mi.client_name }}</span>
+      </span>
+      <span v-if="!hasDistinctInvoiceClients && tx.matched_invoices?.[0]?.client_name" class="text-neutral-500">{{ tx.matched_invoices[0].client_name }}</span>
     </div>
     <div v-else-if="(tx.matched_purchase_invoices?.length ?? 0) > 1 && auth.canRead('purchase_invoices')" class="text-xs">
       <div v-for="invoice in tx.matched_purchase_invoices" :key="invoice.purchase_invoice_id">

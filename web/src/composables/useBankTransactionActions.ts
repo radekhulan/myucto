@@ -16,6 +16,7 @@ import {
   type MatchSuggestionCandidate,
   type SplitSuggestion,
   type MatchPostingResult,
+  type PayoutAllocation,
 } from '@/api/bank'
 import { invoicesApi } from '@/api/invoices'
 import { otherItemsApi } from '@/api/otherItems'
@@ -36,7 +37,7 @@ export const POSTING_REASON_KEYS: Record<string, string> = {
   ambiguous_supplier: 'bank.posting.reason_ambiguous_supplier',
 }
 
-export type BankDetailAction = 'match' | 'create' | 'request' | 'ignore' | 'unmatch'
+export type BankDetailAction = 'match' | 'payout' | 'create' | 'request' | 'ignore' | 'unmatch'
 
 type AnchorOption = { value: number; label: string; secondary?: string }
 
@@ -49,7 +50,11 @@ type AnchorOption = { value: number; label: string; secondary?: string }
  * request-doc) — StatementDetail typicky reloadne celý výpis, UnpostedTransactions
  * jen aktuální stránku (+ přepočet countů v záložkách).
  */
-export function useBankTransactionActions(opts: { reload: () => Promise<void> | void; refresh?: () => Promise<void> | void }) {
+export function useBankTransactionActions(opts: {
+  reload: () => Promise<void> | void
+  refresh?: () => Promise<void> | void
+  fallbackCurrency?: () => string | null | undefined
+}) {
   const { t, te } = useI18n()
   // Chyby členského párování podle stabilního kódu, aby je anglické rozhraní nehlásilo česky (#345.12).
   const membershipMatchError = (error: unknown) => {
@@ -125,6 +130,16 @@ export function useBankTransactionActions(opts: { reload: () => Promise<void> | 
     if (allocated > 0 && (action !== 'match' || allocated >= Math.abs(tx.amount) - 0.005)) return false
     const auth = useAuthStore()
     const status = tx.match_status
+    if (action === 'payout') {
+      const currency = tx.currency || opts.fallbackCurrency?.() || 'CZK'
+      return !auth.isClientRole && auth.canRead('bank') && auth.canWrite('bank.match')
+        && auth.canRead('invoices') && auth.canWrite('invoices.mark_paid')
+        && tx.source === 'statement' && status === 'unmatched' && tx.amount > 0 && currency.toUpperCase() === 'CZK'
+        && tx.match_available !== false && !tx.notice_superseded && tx.match_reason !== 'migration_review'
+        && !tx.resolution && !tx.posting?.transfer && tx.posting?.status !== 'posted'
+        && !tx.matched_invoice_id && !tx.matched_invoices?.length
+        && !tx.matched_purchase_invoice_id && !tx.matched_purchase_invoices?.length
+    }
     if (action === 'create') return !auth.isClientRole && auth.canWrite('purchase_invoices.create') && tx.amount < 0 && status === 'unmatched'
     if (action === 'request') return !auth.isClientRole && auth.canWrite('documents.requests') && ['unmatched', 'auto_partial'].includes(status)
     if (!auth.isClientRole) {
@@ -156,7 +171,7 @@ export function useBankTransactionActions(opts: { reload: () => Promise<void> | 
     // Odmontovat detail před otevřením dalšího dialogu (scroll lock a Escape).
     await nextTick()
     if (disposed || supplierId !== matchSupplier.currentSupplierId) return
-    const open = { match: startMatch, create: openCreate, request: openRequestDoc, ignore: ignoreTx, unmatch: unmatchTx }
+    const open = { match: startMatch, payout: openPayout, create: openCreate, request: openRequestDoc, ignore: ignoreTx, unmatch: unmatchTx }
     open[action](tx)
   }
 
@@ -414,6 +429,8 @@ export function useBankTransactionActions(opts: { reload: () => Promise<void> | 
     textDetail.value = null
     dismissMatch()
     purchaseShortfall.value = null
+    payoutTarget.value = null
+    savingPayout.value = false
   })
   onBeforeUnmount(() => {
     disposed = true
@@ -803,6 +820,42 @@ export function useBankTransactionActions(opts: { reload: () => Promise<void> | 
     }
   }
 
+  const payoutTarget = ref<BankTransaction | null>(null)
+  const savingPayout = ref(false)
+  const payoutError = ref('')
+
+  function openPayout(tx: BankTransaction) {
+    payoutError.value = ''
+    payoutTarget.value = tx
+  }
+
+  function closePayout() {
+    if (savingPayout.value || !payoutTarget.value) return
+    payoutTarget.value = null
+    void restoreDetail()
+  }
+
+  async function confirmPayout(allocations: PayoutAllocation[]) {
+    const tx = payoutTarget.value
+    if (!tx || savingPayout.value || !canRunDetailAction(tx, 'payout')) return
+    savingPayout.value = true
+    payoutError.value = ''
+    try {
+      const result = await bankApi.matchPayout(tx.id, allocations)
+      if (disposed || payoutTarget.value !== tx) return
+      savingPayout.value = false
+      detailReturnTarget.value = null
+      payoutTarget.value = null
+      toast.success(t('bank.payout.matched'))
+      toastPosting(result.posting)
+      await refreshAfterMutation()
+    } catch (e) {
+      if (payoutTarget.value === tx) payoutError.value = bankActionError(e, t('bank.match_failed'))
+    } finally {
+      if (payoutTarget.value === tx) savingPayout.value = false
+    }
+  }
+
   const ignoreTarget = ref<BankTransaction | null>(null)
   const ignoreNote = ref('')
   const ignoring = ref(false)
@@ -911,6 +964,7 @@ export function useBankTransactionActions(opts: { reload: () => Promise<void> | 
     openCreate, onVendorCreated, submitCreatePurchase, closeCreate,
     // vyžádání dokladu
     requestDocTx, requestDocDeadline, requestingDoc, openRequestDoc, submitRequestDoc, closeRequestDoc,
+    payoutTarget, savingPayout, payoutError, closePayout, confirmPayout,
     // ignorovat / rozpárovat
     textDetail, ignoreTx, ignoreTarget, ignoreNote, ignoring, ignoreError, closeIgnore, confirmIgnore,
     unmatchTx, unmatchTarget, unmatching, unmatchError, closeUnmatch, confirmUnmatch,

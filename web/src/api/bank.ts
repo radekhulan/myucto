@@ -199,6 +199,11 @@ export interface MatchPostingResult {
   reason?: string
 }
 
+export interface PayoutAllocation {
+  invoice_id: number
+  amount_cents: number
+}
+
 /** Jedna vystavená faktura uhrazená bankovní transakcí (z invoice_payments). */
 export interface MatchedInvoice {
   invoice_id: number
@@ -611,6 +616,10 @@ export const bankApi = {
   matchMultiple: (txId: number, invoiceIds: number[]) =>
     api.post<{ matched: true; split: true; paid_at?: string; invoice_ids: number[]; final_draft_ids?: number[]; posting?: MatchPostingResult | null }>(
       `/bank-transactions/${txId}/match`, { invoice_ids: invoiceIds },
+    ).then(r => r.data),
+  matchPayout: (txId: number, allocations: PayoutAllocation[]) =>
+    api.post<{ matched: true; posting?: MatchPostingResult | null }>(
+      `/bank-transactions/${txId}/match`, { payout_allocations: allocations },
     ).then(r => r.data),
   matchMultiplePurchases: (txId: number, purchaseInvoiceIds: number[]) =>
     api.post<{ matched: true; split: true; purchase_invoice_ids: number[]; posting?: MatchPostingResult | null }>(

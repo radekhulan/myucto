@@ -108,7 +108,9 @@ function closeHint() { hintTx.value = null; hintData.value = null }
 // Sdílená akční logika nad transakcí (match/ignore/unmatch/create/request-doc/…) —
 // extrahováno do BankTransactionRow.vue + useBankTransactionActions, ať ji sdílí
 // i „Všechny pohyby" (UnpostedTransactions.vue), #52.
-const bankActions = useBankTransactionActions({ reload: () => refreshTransactions(), refresh: () => refreshTransactions() })
+const bankActions = useBankTransactionActions({
+  reload: () => refreshTransactions(), refresh: () => refreshTransactions(), fallbackCurrency: () => statement.value?.currency,
+})
 
 // E-mailová avíza jsou měsíční agregát (statement_date = 1. den měsíce) → název měsíce.
 function monthLabel(dateStr: string): string {
