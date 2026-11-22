@@ -8,6 +8,8 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\AdvanceDeductionRepository;
 use MyInvoice\Repository\InvoiceRepository;
 use MyInvoice\Service\Oss\OssItemCarryOver;
+use MyInvoice\Service\SalesQuote\QuoteInvoiceOrigin;
+use MyInvoice\Service\SalesQuote\QuoteInvoiceService;
 use MyInvoice\Service\Stats\StatsRecomputer;
 use MyInvoice\Support\Sql\AdvanceDrawSql;
 
@@ -209,6 +211,18 @@ final class FinalFromProformaCreator
             $pdo->beginTransaction();
         }
         try {
+            $quoteOrigins = [];
+            if ($this->db->hasColumn('invoice_items', 'sales_quote_item_key')) {
+                $sourceRows = QuoteInvoiceOrigin::rows($pdo, $proformaId);
+                QuoteInvoiceService::assertFinalCanUseQuoteItems(
+                    $pdo,
+                    $supplierId,
+                    $proformaId,
+                    $sourceRows,
+                    $this->db->hasTable('sales_quote_orders'),
+                );
+                $quoteOrigins = array_column($sourceRows, 'sales_quote_item_key', 'order_index');
+            }
             // Konečná faktura z proformy čerpá celou zálohu vazbou parent_invoice_id; proformu
             // už čerpanou po dvojicích v saldokontu by vyúčtovala podruhé.
             AdvanceDeductionRepository::assertLinkAllowed($pdo, (int) $proforma['supplier_id'], 'invoice', 0, $proformaId);
@@ -328,6 +342,7 @@ final class FinalFromProformaCreator
                 }
                 $maxOrder = max($maxOrder, (int) $item['order_index']);
             }
+            QuoteInvoiceOrigin::writeKeys($pdo, $finalId, $quoteOrigins);
 
             // Doplatek zakázky: proforma bývá jen DÍLČÍ akontace (70 000 Kč ze zakázky
             // za 100 000 Kč). Kopie jejích položek proto popisuje jen rozsah zálohy —

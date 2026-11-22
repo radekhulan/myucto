@@ -41,6 +41,7 @@ nasazuje). Zbytek je psaný pro běžného uživatele — bez programátorského
 17. [Pravidelné faktury](17_Pravidelne_fakturace.md)
 18. [Klienti](18_Klienti.md)
 19. [Zakázky](19_Zakazky.md)
+124. [Nabídky](124_Nabidky.md)
 20. [Exporty](20_Exporty.md)
 21. [Importy](21_Importy.md)
 22. [Upomínky](22_Upominky.md)

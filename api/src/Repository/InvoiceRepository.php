@@ -17,6 +17,7 @@ use MyInvoice\Service\Invoice\InvoiceItemKind;
 use MyInvoice\Service\Invoice\OverduePolicy;
 use MyInvoice\Service\Invoice\TimeBilling;
 use MyInvoice\Service\Report\VatLedgerService;
+use MyInvoice\Service\SalesQuote\QuoteInvoiceOrigin;
 use MyInvoice\Support\PaymentMethods;
 use PDO;
 use MyInvoice\Support\Sql\AdvanceDrawSql;
@@ -1770,7 +1771,7 @@ final class InvoiceRepository
         $hasHideCustomer = $this->supportsHideCustomer()
             && (array_key_exists('hide_customer_on_pdf', $data) || $hasSimplified);
         $currentStmt = $this->db->pdo()->prepare(
-            'SELECT supplier_id, branding_profile_id'
+            'SELECT supplier_id, branding_profile_id, client_id, currency_id, prices_include_vat, invoice_type'
             . ($hasHideCustomer ? ', is_simplified, hide_customer_on_pdf' : '')
             . ' FROM invoices WHERE id = ?'
         );
@@ -1778,6 +1779,24 @@ final class InvoiceRepository
         $current = $currentStmt->fetch(PDO::FETCH_ASSOC);
         if ($current === false) {
             throw new \InvalidArgumentException("Invoice #$id nenalezena.");
+        }
+        if (
+            ((int) $data['client_id'] !== (int) $current['client_id']
+                || (int) $data['currency_id'] !== (int) $current['currency_id']
+                || (bool) ($data['prices_include_vat'] ?? false) !== (bool) $current['prices_include_vat']
+                || ($hasType && $data['invoice_type'] !== $current['invoice_type']))
+            && $this->db->hasTable('sales_quote_documents')
+        ) {
+            $quoteLink = $this->db->pdo()->prepare(
+                'SELECT 1 FROM sales_quote_documents WHERE supplier_id = ? AND invoice_id = ?
+                 UNION ALL
+                 SELECT 1 FROM invoice_items WHERE invoice_id = ? AND sales_quote_item_key IS NOT NULL
+                 LIMIT 1',
+            );
+            $quoteLink->execute([$current['supplier_id'], $id, $id]);
+            if ($quoteLink->fetchColumn() !== false) {
+                throw new \InvalidArgumentException('U dokladu z nabídky nelze změnit typ, odběratele, měnu ani režim cen.');
+            }
         }
         $brandingProfileId = array_key_exists('branding_profile_id', $data)
             ? $this->resolveBrandingProfileId($data['branding_profile_id'], (int) $current['supplier_id'])
@@ -2114,6 +2133,41 @@ final class InvoiceRepository
     }
 
     public function replaceItems(int $invoiceId, array $items): void
+    {
+        $pdo = $this->db->pdo();
+        if (!$this->db->hasColumn('invoice_items', 'sales_quote_item_key') || QuoteInvoiceOrigin::rows($pdo, $invoiceId) === []) {
+            $this->writeItems($invoiceId, $items);
+            return;
+        }
+
+        $ownTransaction = !$pdo->inTransaction();
+        if ($ownTransaction) {
+            $pdo->beginTransaction();
+        }
+        try {
+            $lock = $pdo->prepare('SELECT id FROM invoices WHERE id = ? FOR UPDATE');
+            $lock->execute([$invoiceId]);
+            $existing = $pdo->prepare('SELECT id FROM invoice_items WHERE invoice_id = ? FOR UPDATE');
+            $existing->execute([$invoiceId]);
+            $keys = QuoteInvoiceOrigin::keepKeys(
+                QuoteInvoiceOrigin::rows($pdo, $invoiceId, lock: true),
+                $items,
+                $existing->fetchAll(PDO::FETCH_COLUMN),
+            );
+            $this->writeItems($invoiceId, $items);
+            QuoteInvoiceOrigin::writeKeys($pdo, $invoiceId, $keys);
+            if ($ownTransaction) {
+                $pdo->commit();
+            }
+        } catch (\Throwable $e) {
+            if ($ownTransaction && $pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            throw $e;
+        }
+    }
+
+    private function writeItems(int $invoiceId, array $items): void
     {
         $pdo = $this->db->pdo();
 

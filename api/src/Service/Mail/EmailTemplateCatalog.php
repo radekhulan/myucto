@@ -9,10 +9,10 @@ use MyInvoice\Infrastructure\Config\Config;
 
 final class EmailTemplateCatalog
 {
-    public const CODES = ['invoice_send', 'invoice_payment_thanks', 'invoice_reminder', 'proforma_reminder', 'invoice_approval', 'purchase_invoice_approval', 'recurring_draft_reminder', 'document_request_reminder', 'password_reset', 'user_invite', 'user_sso_invite', 'mfa_reset', 'login_otp', 'email_profile_test', 'work_report_link', 'work_report_access_code', 'payroll_document_secure_link', 'payroll_document_access_code'];
+    public const CODES = ['invoice_send', 'quote_send', 'invoice_payment_thanks', 'invoice_reminder', 'proforma_reminder', 'invoice_approval', 'purchase_invoice_approval', 'recurring_draft_reminder', 'document_request_reminder', 'password_reset', 'user_invite', 'user_sso_invite', 'mfa_reset', 'login_otp', 'email_profile_test', 'work_report_link', 'work_report_access_code', 'payroll_document_secure_link', 'payroll_document_access_code'];
     public const LOCALES = ['cs', 'en'];
 
-    public const SUPPLIER_CODES = ['invoice_send', 'invoice_payment_thanks', 'invoice_reminder', 'proforma_reminder', 'invoice_approval', 'purchase_invoice_approval', 'recurring_draft_reminder', 'document_request_reminder', 'work_report_link', 'work_report_access_code'];
+    public const SUPPLIER_CODES = ['invoice_send', 'quote_send', 'invoice_payment_thanks', 'invoice_reminder', 'proforma_reminder', 'invoice_approval', 'purchase_invoice_approval', 'recurring_draft_reminder', 'document_request_reminder', 'work_report_link', 'work_report_access_code'];
 
     public function __construct(private readonly Config $config) {}
 
@@ -39,6 +39,7 @@ final class EmailTemplateCatalog
         $invoice = ['invoice.varsymbol', 'invoice.currency', 'invoice.issue_date', 'invoice.due_date', 'client_name', 'amount_to_pay', 'payment_varsymbol', 'is_test', 'is_paid', 'payment_method', 'qr_data_uri'];
         $specific = match ($code) {
             'invoice_send' => [...$invoice, 'greeting', 'intro_prefix', 'intro', 'note_lines', 'paid_amount', 'refund_amount', 'public_url'],
+            'quote_send' => ['quote_number', 'quote_title', 'client_name', 'valid_until', 'message'],
             'invoice_payment_thanks' => [...$invoice, 'paid_at', 'amount_paid', 'currency', 'is_proforma'],
             'invoice_reminder', 'proforma_reminder' => [...$invoice, 'days_overdue'],
             'invoice_approval' => ['invoice.varsymbol_or_id', 'invoice.project_name', 'invoice.client_company_name', 'invoice.currency', 'approval_url', 'is_test', 'is_reminder', 'work_report.title', 'work_report.total_hours', 'work_report.total_amount', 'work_report.material_total', 'work_report.material_title'],
@@ -60,6 +61,7 @@ final class EmailTemplateCatalog
             'invoice_approval', 'purchase_invoice_approval' => 'approval_url',
             'work_report_link' => 'tracking_url',
             'work_report_access_code' => 'code',
+            'quote_send' => 'message',
             'document_request_reminder' => 'portal_link',
             'recurring_draft_reminder' => 'edit_link',
             default => null,
@@ -78,6 +80,7 @@ final class EmailTemplateCatalog
                 'login_otp'         => 'Ověřovací kód pro přihlášení — ' . $app,
                 'email_profile_test'=> 'Test odesílacího profilu — ' . $app,
                 'invoice_send'      => 'Faktura — ' . $app,
+                'quote_send'        => 'Cenová nabídka',
                 'invoice_payment_thanks' => 'Poděkování za úhradu — ' . $app,
                 'invoice_reminder'  => 'Upomínka — ' . $app,
                 'proforma_reminder' => 'Připomínka zálohy — ' . $app,
@@ -98,6 +101,7 @@ final class EmailTemplateCatalog
                 'login_otp'         => 'Sign-in verification code — ' . $app,
                 'email_profile_test'=> 'Sending profile test — ' . $app,
                 'invoice_send'      => 'Invoice — ' . $app,
+                'quote_send'        => 'Quote',
                 'invoice_payment_thanks' => 'Thank you for your payment — ' . $app,
                 'invoice_reminder'  => 'Reminder — ' . $app,
                 'proforma_reminder' => 'Advance payment reminder — ' . $app,
@@ -114,6 +118,7 @@ final class EmailTemplateCatalog
     {
         $cs = [
             'invoice_send'      => 'Faktura {{ invoice.varsymbol }}',
+            'quote_send'        => 'Cenová nabídka {{ quote_number }}',
             'invoice_payment_thanks' => 'Děkujeme za úhradu faktury {{ invoice.varsymbol }}',
             'invoice_reminder'  => 'Upomínka — faktura {{ invoice.varsymbol }} ({{ days_overdue }} dní po splatnosti)',
             'proforma_reminder' => 'Připomínka — záloha {{ invoice.varsymbol }} ({{ days_overdue }} dní po splatnosti)',
@@ -134,6 +139,7 @@ final class EmailTemplateCatalog
         ];
         $en = [
             'invoice_send'      => 'Invoice {{ invoice.varsymbol }}',
+            'quote_send'        => 'Quote {{ quote_number }}',
             'invoice_payment_thanks' => 'Thank you for your payment — invoice {{ invoice.varsymbol }}',
             'invoice_reminder'  => 'Reminder — invoice {{ invoice.varsymbol }} ({{ days_overdue }} days overdue)',
             'proforma_reminder' => 'Reminder — proforma {{ invoice.varsymbol }} ({{ days_overdue }} days overdue)',

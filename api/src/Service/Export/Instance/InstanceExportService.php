@@ -1529,6 +1529,7 @@ final class InstanceExportService
             [RuntimePaths::storage('invoices') . '/sup-' . $supplierId . '/_archive', null, 'prilohy/vydane-faktury-archiv'],
             [RuntimePaths::storage('invoices') . '/sup-' . $supplierId . '/attachments', null, 'prilohy/vydane-faktury-prilohy'],
             [RuntimePaths::storage('archives/sup-' . $supplierId), null, 'prilohy/ucetni-archivy'],
+            [RuntimePaths::storage('offers/sup-' . $supplierId), null, 'prilohy/nabidky'],
         ];
         $skipped = [];
         $files = BackupFileCollector::collect(

@@ -73,6 +73,15 @@ describe('závislosti dat mezi okny', () => {
     expect(affected('/payroll/people', '/work-report-billing-templates/7')).toBe(false)
   })
 
+  it('obnoví přehled čerpání nabídky po změně faktury nebo úhrady', () => {
+    expect(affected('/sales-quotes/42', '/invoices/5/issue')).toBe(true)
+    expect(affected('/sales-quotes', '/bank-transactions/4/match')).toBe(true)
+    expect(affected('/sales-quotes', '/sales-quotes/42/state')).toBe(true)
+    expect(affected('/invoices', '/sales-quotes/42/state')).toBe(false)
+    expect(affected('/invoices', '/sales-quotes/42/invoice')).toBe(true)
+    expect(windowDataProfile('/sales-quotes/42').mode).toBe('manual')
+  })
+
   it('každá route aplikace je v mapě zařazená', () => {
     const missing = routePaths(createWorkspaceRoutes())
       .map(path => path.replace(/:id\([^)]*\)|:id/g, '1').replace(/:[a-zA-Z]+(\([^)]*\))?/g, '1'))

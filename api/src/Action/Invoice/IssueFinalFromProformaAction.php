@@ -15,6 +15,7 @@ use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Invoice\AdvanceReceiptNotPostedException;
 use MyInvoice\Service\Invoice\FinalFromProformaCreator;
 use MyInvoice\Service\IpMatcher;
+use MyInvoice\Service\SalesQuote\QuoteException;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 
@@ -93,6 +94,8 @@ final class IssueFinalFromProformaAction
 
         try {
             $finalId = $this->creator->create($proformaId, $userId, $taxDate, $dueDate, $advance, $finalTotal);
+        } catch (QuoteException $e) {
+            return Json::error($response, $e->errorCode, $e->getMessage(), $e->httpStatus);
         } catch (AdvanceReceiptNotPostedException $e) {
             return Json::error($response, AdvanceReceiptNotPostedException::ERROR_CODE, $e->getMessage(), 409);
         } catch (\Throwable $e) {

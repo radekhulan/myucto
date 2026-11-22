@@ -7,7 +7,7 @@
  * Skrytá okna se obnovují až při zobrazení, takže hrubost nestojí skoro nic.
  */
 export type DataArea =
-  | 'sales' | 'purchases' | 'recurring' | 'clients' | 'projects' | 'crm'
+  | 'sales' | 'quotes' | 'purchases' | 'recurring' | 'clients' | 'projects' | 'crm'
   | 'bank' | 'cash' | 'eet' | 'ledger' | 'assets' | 'other-items' | 'tax'
   | 'stock' | 'eshop' | 'documents' | 'payroll' | 'property' | 'logbook' | 'settings'
 
@@ -28,6 +28,7 @@ export interface WindowDataProfile {
 /** Co se kromě zapsané agendy změní. Jen jedna úroveň: tranzitivně by souviselo všechno se vším. */
 const EFFECTS: Record<DataArea, readonly DataArea[]> = {
   sales: ['clients', 'ledger', 'bank', 'cash', 'stock', 'projects', 'recurring', 'documents', 'tax', 'eet'],
+  quotes: [],
   purchases: ['clients', 'ledger', 'bank', 'cash', 'stock', 'projects', 'documents', 'tax'],
   recurring: ['sales', 'clients'],
   clients: ['sales', 'purchases', 'recurring', 'crm', 'projects', 'bank'],
@@ -62,6 +63,9 @@ const MUTATION_RULES: readonly (readonly [RegExp, AreaSet])[] = [
   [/^\/accounting\/(?:bank-|gopay)/, ['bank', 'ledger']],
   [/^\/(?:accounting|tax-evidence)(?:\/|$)/, ['ledger']],
   [/^\/invoices(?:\/|$)/, ['sales']],
+  [/^\/sales-quotes\/\d+\/invoice$/, ['quotes', 'sales']],
+  [/^\/sales-quotes\/\d+\/order$/, ['quotes', 'stock']],
+  [/^\/sales-quotes(?:\/|$)/, ['quotes']],
   [/^\/recurring(?:\/|$)/, ['recurring']],
   [/^\/(?:portal\/)?purchase-invoice(?:s|-submissions|-approvals)(?:\/|$)/, ['purchases']],
   [/^\/clients(?:\/|$)/, ['clients']],
@@ -96,6 +100,8 @@ const ROUTE_RULES: readonly RouteRule[] = [
   [/^invoices\/(?:export|import|ai-import)$/, NOTHING, 'manual'],
   [/^invoices\/\d+\/edit$/, ['sales', 'clients'], 'manual'],
   [/^invoices(?:\/\d+)?$/, ['sales']],
+  [/^sales-quotes\/\d+$/, ['quotes', 'sales'], 'manual'],
+  [/^sales-quotes$/, ['quotes', 'sales']],
   [/^purchase-invoices\/(?:export|import|ai-import|renumber|payment-orders)$/, ['purchases'], 'manual'],
   [/^purchase-invoices\/\d+\/edit$/, ['purchases', 'clients'], 'manual'],
   [/^(?:purchase-invoices(?:\/\d+|\/incoming|\/email)?|purchase-approvals)$/, ['purchases']],

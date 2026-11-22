@@ -28,6 +28,7 @@ use MyInvoice\Service\Invoice\InvoiceOtherItemLinkService;
 use MyInvoice\Service\Invoice\InvoiceCalculator;
 use MyInvoice\Service\Invoice\LineDiscount;
 use MyInvoice\Service\IpMatcher;
+use MyInvoice\Service\SalesQuote\QuoteInvoiceOrigin;
 use MyInvoice\Service\Oss\OssPeriod;
 use MyInvoice\Service\Stats\StatsRecomputer;
 use MyInvoice\Service\Stock\StockException;
@@ -598,6 +599,10 @@ final class CancelInvoiceAction
                     array_push($params, ...LineDiscount::columns($item));
                 }
                 $itemStmt->execute($params);
+            }
+            if ($this->db->hasColumn('invoice_items', 'sales_quote_item_key')) {
+                $quoteOrigins = QuoteInvoiceOrigin::rows($pdo, (int) $invoice['id']);
+                QuoteInvoiceOrigin::writeKeys($pdo, $creditNoteId, array_column($quoteOrigins, 'sales_quote_item_key', 'order_index'));
             }
             // Dobropis nese dimenze původní faktury, jinak by vratka výnosu skončila mimo
             // středisko, ze kterého výnos odešel. Položky leží ve stejném pořadí.

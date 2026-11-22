@@ -116,6 +116,7 @@ const routePermissions: Record<string, [PermissionKey | readonly PermissionKey[]
   clients: ['clients'], 'client-new': ['clients.create', 'write'], 'client-detail': ['clients'], 'client-edit': ['clients', 'write'],
   projects: ['projects'], 'project-new': ['projects.create', 'write'], 'project-detail': ['projects'], 'project-edit': ['projects', 'write'],
   invoices: ['invoices'], 'invoice-new': ['invoices.create', 'write'], 'invoice-detail': ['invoices'], 'invoice-edit': ['invoices', 'write'],
+  'sales-quotes': ['sales_quotes'], 'sales-quote-new': ['sales_quotes.write', 'write'], 'sales-quote-detail': ['sales_quotes'],
   // AI import vydané faktury jede na invoices.create (write) — stejný klíč kontroluje BE AiExtractPdfIssuedAction.
   'invoice-ai-import': ['invoices.create', 'write'],
   // Export/Import vydaných (reorg UX 2026-07) — nav pod Prodej, viz AppLayout.vue.

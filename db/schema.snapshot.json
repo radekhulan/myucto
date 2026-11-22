@@ -1226,7 +1226,11 @@
         "2320_purchase_invoices_vendor_number_search_index.sql",
         "2321_other_item_occurrence_origin.sql",
         "2322_other_item_due_index.sql",
-        "2323_other_items_accrual_period.sql"
+        "2323_other_items_accrual_period.sql",
+        "2324_sales_quotes.sql",
+        "2325_sales_quote_orders.sql",
+        "2326_sales_quote_order_line_origins.sql",
+        "2327_sales_quote_permissions.sql"
     ],
     "tables": {
         "abra_flexi_connections": {
@@ -7405,6 +7409,7 @@
                 "posting_rule_key": "varchar(64) NULL DEFAULT NULL",
                 "quantity": "decimal(10,3) NOT NULL DEFAULT 1.000",
                 "revenue_account_code": "varchar(10) NULL DEFAULT NULL",
+                "sales_quote_item_key": "char(36) NULL DEFAULT NULL COLLATE ascii_general_ci",
                 "seller_item_code": "varchar(64) NULL DEFAULT NULL",
                 "small_asset_id": "bigint(20) unsigned NULL DEFAULT NULL",
                 "stock_item_id": "bigint(20) unsigned NULL DEFAULT NULL",
@@ -7433,7 +7438,8 @@
                 "idx_ii_small_asset": "BTREE (small_asset_id)",
                 "idx_invoice_items_oss": "BTREE (oss_applicable, oss_consumer_country)",
                 "idx_invoice_items_oss_manual_review": "BTREE (oss_needs_manual_review, oss_applicable, invoice_id)",
-                "ix_ii_advance_invoice": "BTREE (advance_invoice_id, invoice_id)"
+                "ix_ii_advance_invoice": "BTREE (advance_invoice_id, invoice_id)",
+                "ix_invoice_item_sales_quote": "BTREE (sales_quote_item_key, invoice_id)"
             },
             "foreign_keys": {
                 "fk_ii_advance_invoice": "(advance_invoice_id) -> invoices (id) ON UPDATE RESTRICT ON DELETE SET NULL",
@@ -24849,6 +24855,219 @@
                 "customer_snapshot": "json_valid(`customer_snapshot`)",
                 "discount_snapshot": "json_valid(`discount_snapshot`)",
                 "shipping_snapshot": "json_valid(`shipping_snapshot`)"
+            }
+        },
+        "sales_quote_counters": {
+            "type": "BASE TABLE",
+            "engine": "InnoDB",
+            "collation": "utf8mb4_unicode_ci",
+            "columns": {
+                "last_number": "int(10) unsigned NOT NULL",
+                "series_year": "smallint(5) unsigned NOT NULL",
+                "supplier_id": "int(10) unsigned NOT NULL"
+            },
+            "indexes": {
+                "PRIMARY": "UNIQUE BTREE (supplier_id, series_year)"
+            },
+            "foreign_keys": {
+                "fk_sales_quote_counter_supplier": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE CASCADE"
+            },
+            "checks": []
+        },
+        "sales_quote_documents": {
+            "type": "BASE TABLE",
+            "engine": "InnoDB",
+            "collation": "utf8mb4_unicode_ci",
+            "columns": {
+                "created_at": "datetime NOT NULL DEFAULT current_timestamp()",
+                "idempotency_key": "varchar(128) NOT NULL",
+                "invoice_id": "bigint(20) unsigned NOT NULL",
+                "quote_id": "bigint(20) unsigned NOT NULL",
+                "request_hash": "char(64) NOT NULL",
+                "supplier_id": "int(10) unsigned NOT NULL",
+                "version_id": "bigint(20) unsigned NOT NULL"
+            },
+            "indexes": {
+                "PRIMARY": "UNIQUE BTREE (invoice_id)",
+                "ix_sales_quote_document_version": "BTREE (version_id)",
+                "uq_sales_quote_document_once": "UNIQUE BTREE (supplier_id, quote_id, idempotency_key)"
+            },
+            "foreign_keys": {
+                "fk_sales_quote_doc_invoice": "(invoice_id) -> invoices (id) ON UPDATE RESTRICT ON DELETE CASCADE",
+                "fk_sales_quote_doc_version": "(version_id) -> sales_quote_versions (id) ON UPDATE RESTRICT ON DELETE CASCADE"
+            },
+            "checks": []
+        },
+        "sales_quote_events": {
+            "type": "BASE TABLE",
+            "engine": "InnoDB",
+            "collation": "utf8mb4_unicode_ci",
+            "columns": {
+                "created_at": "datetime NOT NULL DEFAULT current_timestamp()",
+                "data_json": "longtext NOT NULL",
+                "delivery_status": "enum('pending','deferred','sent','failed') NULL DEFAULT NULL",
+                "event": "varchar(32) NOT NULL",
+                "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
+                "idempotency_key": "varchar(128) NULL DEFAULT NULL",
+                "pdf_key": "varchar(80) NULL DEFAULT NULL",
+                "quote_id": "bigint(20) unsigned NOT NULL",
+                "request_hash": "char(64) NULL DEFAULT NULL",
+                "supplier_id": "int(10) unsigned NOT NULL",
+                "user_id": "bigint(20) unsigned NULL DEFAULT NULL",
+                "version_id": "bigint(20) unsigned NOT NULL"
+            },
+            "indexes": {
+                "PRIMARY": "UNIQUE BTREE (id)",
+                "fk_sales_quote_event_user": "BTREE (user_id)",
+                "fk_sales_quote_event_version": "BTREE (version_id)",
+                "ix_sales_quote_delivery": "BTREE (quote_id, delivery_status, id)",
+                "ix_sales_quote_events": "BTREE (supplier_id, quote_id, id)",
+                "uq_sales_quote_event_once": "UNIQUE BTREE (quote_id, idempotency_key)"
+            },
+            "foreign_keys": {
+                "fk_sales_quote_event_user": "(user_id) -> users (id) ON UPDATE RESTRICT ON DELETE SET NULL",
+                "fk_sales_quote_event_version": "(version_id) -> sales_quote_versions (id) ON UPDATE RESTRICT ON DELETE CASCADE"
+            },
+            "checks": {
+                "data_json": "json_valid(`data_json`)"
+            }
+        },
+        "sales_quote_files": {
+            "type": "BASE TABLE",
+            "engine": "InnoDB",
+            "collation": "utf8mb4_unicode_ci",
+            "columns": {
+                "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
+                "mime_type": "varchar(127) NOT NULL",
+                "name": "varchar(255) NOT NULL",
+                "quote_id": "bigint(20) unsigned NOT NULL",
+                "size_bytes": "int(10) unsigned NOT NULL",
+                "storage_key": "varchar(80) NOT NULL",
+                "supplier_id": "int(10) unsigned NOT NULL"
+            },
+            "indexes": {
+                "PRIMARY": "UNIQUE BTREE (id)",
+                "ix_sales_quote_file_tenant": "BTREE (supplier_id, quote_id, id)",
+                "uq_sales_quote_storage": "UNIQUE BTREE (quote_id, storage_key)"
+            },
+            "foreign_keys": {
+                "fk_sales_quote_file_quote": "(quote_id) -> sales_quotes (id) ON UPDATE RESTRICT ON DELETE CASCADE"
+            },
+            "checks": []
+        },
+        "sales_quote_orders": {
+            "type": "BASE TABLE",
+            "engine": "InnoDB",
+            "collation": "utf8mb4_unicode_ci",
+            "columns": {
+                "created_at": "datetime NOT NULL DEFAULT current_timestamp()",
+                "idempotency_key": "varchar(128) NOT NULL",
+                "line_origins": "longtext NOT NULL DEFAULT '{}'",
+                "order_id": "bigint(20) unsigned NOT NULL",
+                "quote_id": "bigint(20) unsigned NOT NULL",
+                "supplier_id": "int(10) unsigned NOT NULL",
+                "version_id": "bigint(20) unsigned NOT NULL"
+            },
+            "indexes": {
+                "PRIMARY": "UNIQUE BTREE (order_id)",
+                "ix_sales_quote_order_version": "BTREE (version_id)",
+                "uq_sales_quote_order_once": "UNIQUE BTREE (supplier_id, quote_id, idempotency_key)"
+            },
+            "foreign_keys": {
+                "fk_sales_quote_order_order": "(order_id) -> sales_orders (id) ON UPDATE RESTRICT ON DELETE CASCADE",
+                "fk_sales_quote_order_version": "(version_id) -> sales_quote_versions (id) ON UPDATE RESTRICT ON DELETE CASCADE"
+            },
+            "checks": {
+                "line_origins": "json_valid(`line_origins`)"
+            }
+        },
+        "sales_quote_version_files": {
+            "type": "BASE TABLE",
+            "engine": "InnoDB",
+            "collation": "utf8mb4_unicode_ci",
+            "columns": {
+                "file_id": "bigint(20) unsigned NOT NULL",
+                "mode": "enum('inline','append','email','internal') NOT NULL",
+                "position": "smallint(5) unsigned NOT NULL",
+                "version_id": "bigint(20) unsigned NOT NULL"
+            },
+            "indexes": {
+                "PRIMARY": "UNIQUE BTREE (version_id, file_id)",
+                "ix_sales_quote_file_versions": "BTREE (file_id)"
+            },
+            "foreign_keys": {
+                "fk_sales_quote_vfile_file": "(file_id) -> sales_quote_files (id) ON UPDATE RESTRICT ON DELETE CASCADE",
+                "fk_sales_quote_vfile_version": "(version_id) -> sales_quote_versions (id) ON UPDATE RESTRICT ON DELETE CASCADE"
+            },
+            "checks": []
+        },
+        "sales_quote_versions": {
+            "type": "BASE TABLE",
+            "engine": "InnoDB",
+            "collation": "utf8mb4_unicode_ci",
+            "columns": {
+                "created_at": "datetime NOT NULL DEFAULT current_timestamp()",
+                "data_json": "longtext NOT NULL",
+                "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
+                "pdf_key": "varchar(80) NULL DEFAULT NULL",
+                "quote_id": "bigint(20) unsigned NOT NULL",
+                "revision": "int(10) unsigned NOT NULL",
+                "status": "enum('draft','sent','accepted','declined','withdrawn') NOT NULL DEFAULT 'draft'",
+                "supplier_id": "int(10) unsigned NOT NULL"
+            },
+            "indexes": {
+                "PRIMARY": "UNIQUE BTREE (id)",
+                "ix_sales_quote_version_tenant": "BTREE (supplier_id, quote_id, id)",
+                "uq_sales_quote_revision": "UNIQUE BTREE (quote_id, revision)"
+            },
+            "foreign_keys": {
+                "fk_sales_quote_version_quote": "(quote_id) -> sales_quotes (id) ON UPDATE RESTRICT ON DELETE CASCADE"
+            },
+            "checks": {
+                "data_json": "json_valid(`data_json`)"
+            }
+        },
+        "sales_quotes": {
+            "type": "BASE TABLE",
+            "engine": "InnoDB",
+            "collation": "utf8mb4_unicode_ci",
+            "columns": {
+                "accepted_section_ids": "longtext NOT NULL DEFAULT '[]'",
+                "client_id": "bigint(20) unsigned NOT NULL",
+                "created_at": "datetime NOT NULL DEFAULT current_timestamp()",
+                "currency_id": "int(10) unsigned NOT NULL",
+                "current_version_id": "bigint(20) unsigned NULL DEFAULT NULL",
+                "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
+                "project_id": "bigint(20) unsigned NULL DEFAULT NULL",
+                "quote_number": "varchar(50) NOT NULL",
+                "row_version": "int(10) unsigned NOT NULL DEFAULT 1",
+                "status": "enum('draft','sent','accepted','declined','withdrawn') NOT NULL DEFAULT 'draft'",
+                "supplier_id": "int(10) unsigned NOT NULL",
+                "title": "varchar(190) NOT NULL",
+                "total_with_vat": "decimal(14,2) NOT NULL DEFAULT 0.00",
+                "total_without_vat": "decimal(14,2) NOT NULL DEFAULT 0.00",
+                "updated_at": "datetime NOT NULL DEFAULT current_timestamp() ON UPDATE CURRENT_TIMESTAMP()",
+                "valid_until": "date NOT NULL"
+            },
+            "indexes": {
+                "PRIMARY": "UNIQUE BTREE (id)",
+                "fk_sales_quote_client": "BTREE (client_id)",
+                "fk_sales_quote_currency": "BTREE (currency_id)",
+                "fk_sales_quote_project": "BTREE (project_id)",
+                "ix_sales_quote_client": "BTREE (supplier_id, client_id, id)",
+                "ix_sales_quote_project": "BTREE (supplier_id, project_id, id)",
+                "ix_sales_quote_recent": "BTREE (supplier_id, id)",
+                "ix_sales_quote_status": "BTREE (supplier_id, status, valid_until, id)",
+                "uq_sales_quote_number": "UNIQUE BTREE (supplier_id, quote_number)"
+            },
+            "foreign_keys": {
+                "fk_sales_quote_client": "(client_id) -> clients (id) ON UPDATE RESTRICT ON DELETE RESTRICT",
+                "fk_sales_quote_currency": "(currency_id) -> currencies (id) ON UPDATE RESTRICT ON DELETE RESTRICT",
+                "fk_sales_quote_project": "(project_id) -> projects (id) ON UPDATE RESTRICT ON DELETE SET NULL",
+                "fk_sales_quote_supplier": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE CASCADE"
+            },
+            "checks": {
+                "accepted_section_ids": "json_valid(`accepted_section_ids`)"
             }
         },
         "sample_data_entries": {

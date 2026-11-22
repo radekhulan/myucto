@@ -26,6 +26,7 @@ export const MANUAL_CHAPTERS: ManualChapterRule[] = [
   [/^\/invoices\/new(?:\/|$)/, '15_Faktura_editor'],
   [/^\/invoices\/\d+(?:\/|$)/, '16_Faktura_PDF'],
   [/^\/invoices(?:\/|$)/, '14_Faktury'],
+  [/^\/sales-quotes(?:\/|$)/, '124_Nabidky'],
   [/^\/recurring(?:\/|$)/, '17_Pravidelne_fakturace'],
   [/^\/clients(?:\/|$)/, '18_Klienti'],
   [/^\/projects(?:\/|$)/, '19_Zakazky'],

@@ -22,6 +22,9 @@ export function createWorkspaceRoutes(): RouteRecordRaw[] {
       { path: 'projects/:id(\\d+)',     name: 'project-detail', component: () => import('@/pages/projects/ProjectDetail.vue') },
       { path: 'projects/:id(\\d+)/edit', name: 'project-edit',  component: () => import('@/pages/projects/ProjectForm.vue'), meta: { requiresSupplier: true } },
       { path: 'invoices',               name: 'invoices',       component: () => import('@/pages/invoices/InvoiceList.vue'), meta: {  } },
+      { path: 'sales-quotes',            name: 'sales-quotes',    component: () => import('@/pages/sales-quotes/QuoteList.vue') },
+      { path: 'sales-quotes/new',        name: 'sales-quote-new', component: () => import('@/pages/sales-quotes/QuoteDetail.vue') },
+      { path: 'sales-quotes/:id(\\d+)', name: 'sales-quote-detail', component: () => import('@/pages/sales-quotes/QuoteDetail.vue') },
       // AI import vydané faktury — prodejní zrcadlo /purchase-invoices/ai-import.
       // Extrakce (ISDOC priorita, AI fallback) → draft vydané faktury k revizi v editoru.
       // Oprávnění invoices.create (write) zrcadlí BE check v AiExtractPdfIssuedAction.

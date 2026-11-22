@@ -148,6 +148,10 @@ final class RoutePermissionMap
         ['GET', '#^/api/invoices(/|$)#', 'invoices', AccessLevel::READ],
         ['*', '#^/api/invoices(/|$)#', 'invoices', AccessLevel::WRITE],
 
+        ['GET', '#^/api/sales-quotes(/|$)#', 'sales_quotes', AccessLevel::READ],
+        ['POST', '#^/api/sales-quotes/[0-9]+/send$#', 'sales_quotes.send', AccessLevel::WRITE],
+        ['*', '#^/api/sales-quotes(/|$)#', 'sales_quotes.write', AccessLevel::WRITE],
+
         ['GET', '#^/api/purchase-invoices/payment-orders(/|$)#', 'purchase_invoices.payment_orders', AccessLevel::READ],
         ['*', '#^/api/purchase-invoices/payment-orders(/|$)#', 'purchase_invoices.payment_orders', AccessLevel::WRITE],
         ['POST', '#^/api/purchase-invoices/scan-inbox$#', 'purchase_invoices.scan', AccessLevel::WRITE],
