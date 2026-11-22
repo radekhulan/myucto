@@ -12,6 +12,7 @@ use MyInvoice\Service\Invoice\FinalFromProformaCreator;
 use MyInvoice\Service\Invoice\InvoiceCalculator;
 use MyInvoice\Service\SalesQuote\QuoteException;
 use MyInvoice\Service\SalesQuote\QuoteInvoiceService;
+use MyInvoice\Service\SalesQuote\QuoteWorkflow;
 use MyInvoice\Tests\Integration\Stock\StockTestCase;
 use PHPUnit\Framework\Attributes\Group;
 use Slim\Psr7\Factory\ServerRequestFactory;
@@ -114,6 +115,25 @@ final class QuoteInvoiceServiceTest extends StockTestCase
         $this->container->get(FinalFromProformaCreator::class)->create($proformaId, $this->userId);
     }
 
+    public function testDraftProformaBlocksReopeningWhileLinked(): void
+    {
+        [$supplierId, $quote] = $this->offer();
+        $workflow = $this->container->get(QuoteWorkflow::class);
+        $proformaId = $this->container->get(QuoteInvoiceService::class)->convert($supplierId, $this->userId, $quote['id'], [
+            'type' => 'proforma', 'advance_percent' => 50, 'idempotency_key' => 'advance-before-reopen',
+        ]);
+        self::assertTrue($workflow->detail($supplierId, $quote['id'], false)['reopen_blocked']);
+        try {
+            $workflow->state($supplierId, $quote['id'], $this->userId, ['status' => 'reopen']);
+            self::fail('Navázaný doklad musí zablokovat opětovné otevření.');
+        } catch (QuoteException $e) {
+            self::assertSame('quote_has_documents', $e->errorCode);
+        }
+        $this->container->get(InvoiceRepository::class)->delete($proformaId);
+        $workflow->state($supplierId, $quote['id'], $this->userId, ['status' => 'reopen']);
+        self::assertSame('sent', $workflow->detail($supplierId, $quote['id'], false)['status']);
+    }
+
     public function testFinalInvoiceFromQuantityAdvanceRetainsOrigin(): void
     {
         [$supplierId, $quote] = $this->offer();
@@ -209,17 +229,22 @@ final class QuoteInvoiceServiceTest extends StockTestCase
         $currency = $this->currencyIdFor($supplierId);
         $warehouseId = $this->warehouse($supplierId);
         $stockItemId = $this->item($supplierId, 'NAB-001');
+        $goodsVat = round(270 * (float) $this->vatRatePercent / 100, 2);
+        $laborVat = round(360 * (float) $this->vatRatePercent / 100, 2);
         $data = [
             'language' => 'cs', 'prices_include_vat' => false, 'accepted_section_ids' => [],
+            'valid_until' => date('Y-m-d', strtotime('+30 days')),
             'sections' => [
-                ['id' => self::REQUIRED, 'title' => 'Dodávka', 'kind' => 'required', 'items' => [
+                ['id' => self::REQUIRED, 'title' => 'Dodávka', 'kind' => 'required',
+                 'totals' => ['without_vat' => 270, 'vat' => $goodsVat, 'with_vat' => 270 + $goodsVat], 'items' => [
                     [
                         'id' => self::GOODS, 'description' => 'Montážní sada', 'kind' => 'goods', 'quantity' => 3, 'unit' => 'ks',
                         'unit_price' => 100, 'discount_percent' => 10, 'vat_rate' => (float) $this->vatRatePercent,
                         'vat_rate_id' => $this->vatRateId, 'stock_item_id' => $stockItemId, 'warehouse_id' => $warehouseId,
                     ],
                 ]],
-                ['id' => self::OPTIONAL, 'title' => 'Možnosti', 'kind' => 'optional', 'items' => [
+                ['id' => self::OPTIONAL, 'title' => 'Možnosti', 'kind' => 'optional',
+                 'totals' => ['without_vat' => 360, 'vat' => $laborVat, 'with_vat' => 360 + $laborVat], 'items' => [
                     [
                         'id' => self::LABOR, 'description' => 'Montáž', 'kind' => 'service', 'quantity' => 2, 'unit' => 'h',
                         'unit_price' => 180, 'discount_percent' => 0, 'vat_rate' => (float) $this->vatRatePercent,
@@ -231,8 +256,8 @@ final class QuoteInvoiceServiceTest extends StockTestCase
         $pdo = $this->db->pdo();
         $pdo->prepare(
             "INSERT INTO sales_quotes (supplier_id, quote_number, title, client_id, currency_id, valid_until, status)
-             VALUES (?, 'NAB-2026-0001', 'Testovací nabídka', ?, ?, CURDATE() + INTERVAL 30 DAY, 'accepted')",
-        )->execute([$supplierId, $clientId, $currency]);
+             VALUES (?, 'NAB-2026-0001', 'Testovací nabídka', ?, ?, ?, 'accepted')",
+        )->execute([$supplierId, $clientId, $currency, $data['valid_until']]);
         $quoteId = (int) $pdo->lastInsertId();
         $pdo->prepare(
             "INSERT INTO sales_quote_versions (supplier_id, quote_id, revision, status, data_json)

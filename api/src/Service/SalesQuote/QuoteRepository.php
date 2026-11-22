@@ -183,6 +183,16 @@ final class QuoteRepository
         $this->guardDelivery($header);
     }
 
+    public function hasLinkedDocuments(int $supplierId, int $id): bool
+    {
+        $query = $this->db->pdo()->prepare(
+            'SELECT 1 FROM sales_quote_documents WHERE supplier_id = ? AND quote_id = ?
+             UNION ALL SELECT 1 FROM sales_quote_orders WHERE supplier_id = ? AND quote_id = ? LIMIT 1'
+        );
+        $query->execute([$supplierId, $id, $supplierId, $id]);
+        return $query->fetchColumn() !== false;
+    }
+
     public function guardDelivery(array $header): void
     {
         $query = $this->db->pdo()->prepare(

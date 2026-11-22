@@ -11,6 +11,8 @@ Nabídky jsou součástí [licence účetnictví](104_Licence_a_aktivace.md) a j
 3. Do cenové sekce přidejte položky typu **Zboží nebo výrobek**, **Práce nebo služba** nebo **Materiál**. U položky vyplňte popis, množství, jednotku, cenu, slevu a DPH. Položku můžete napsat ručně nebo převzít z dostupného katalogu či ceníku. Karta služby umožňuje pracovat s opakovaně používanými sazbami a nemá zásobu.
 4. Text upravte ve vizuálním editoru nebo přepněte na **Markdown**. Sekce lze přejmenovat a přesunout šipkami. Potom nabídku uložte.
 
+Na detailu klienta najdete pod zakázkami přehled jeho posledních nabídek. Odtud otevřete konkrétní nabídku, celý seznam klienta nebo založíte novou.
+
 ## 124.2 Obrázky, PDF a odeslání
 
 Po uložení nahrajte soubory v části **Obrázky a přílohy**. Zvolte způsob použití:
@@ -24,9 +26,11 @@ V **Náhledu PDF nabídky** zkontrolujte výsledek a použijte **Odeslat kliento
 
 ## 124.3 Přijetí a fakturace
 
-Jakmile klient odpoví, zaznamenejte přijetí nebo odmítnutí. Při přijetí zaškrtněte volitelné sekce, které si klient objednal. Telefonát, odpověď e-mailem nebo interní poznámku lze doplnit v historii.
+Jakmile klient odpoví, zvolte vedle označení stavu **Změnit stav** a zaznamenejte přijetí nebo odmítnutí. Při přijetí zaškrtněte volitelné sekce, které si klient objednal. Telefonát, odpověď e-mailem nebo interní poznámku lze doplnit v historii.
 
-Pokud jste nabídku omylem stáhli, zvolte **Obnovit nabídku**. Rozpracovaná nabídka se vrátí do konceptu. Odeslaná nabídka se obnoví se stejnou platností a verzí. Stažení i obnovení zůstanou v historii.
+Pokud jste nabídku omylem stáhli, zvolte **Změnit stav → Obnovit nabídku**. Rozpracovaná nabídka se vrátí do konceptu. Odeslaná nabídka se obnoví se stejnou platností a verzí. Stažení i obnovení zůstanou v historii.
+
+Chybně zaznamenanou odpověď opravíte přes **Změnit stav → Znovu otevřít nabídku**, pokud k ní zatím není navázaný doklad ani prodejní objednávka. Potom zaznamenejte správnou odpověď. Pokud blokuje změnu navázaný koncept, odstraňte ho v detailu dokladu nebo objednávky.
 
 Z přijaté nabídky lze vytvořit **vydanou fakturu** nebo **zálohovou fakturu**. Ve výběru ponechte vše, nebo označte jednotlivé sekce, položky a množství. U zálohy lze zadat celou cenu výběru, procento nebo pevnou částku. MyÚčto otevře koncept dokladu k úpravě nebo vystavení.
 

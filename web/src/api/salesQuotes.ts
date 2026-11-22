@@ -3,7 +3,7 @@ import { requestSupplierId } from '@/workspace/supplierContext'
 
 export const quoteStatuses = ['draft', 'sent', 'accepted', 'declined', 'expired', 'withdrawn'] as const
 export type QuoteStatus = typeof quoteStatuses[number]
-export type QuoteStateAction = Extract<QuoteStatus, 'accepted' | 'declined' | 'withdrawn'> | 'restore'
+export type QuoteStateAction = Extract<QuoteStatus, 'accepted' | 'declined' | 'withdrawn'> | 'restore' | 'reopen'
 export const quoteSectionKinds = ['required', 'optional', 'info'] as const
 export type QuoteSectionKind = typeof quoteSectionKinds[number]
 export const quoteItemKinds = ['product', 'work', 'material'] as const
@@ -105,6 +105,7 @@ export interface SalesQuote extends QuoteListItem {
   client_snapshot?: { main_email?: string | null }
   reverse_charge?: boolean
   send_pending?: boolean
+  reopen_blocked?: boolean
   mail_defaults?: { to: string; subject: string; message: string }
 }
 

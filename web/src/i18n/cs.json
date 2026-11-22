@@ -45465,6 +45465,14 @@
     "items_load_more": "Načíst další"
   },
   "sales_quotes": {
+    "change_status": "Změnit stav",
+    "state_action": "Změna stavu nabídky",
+    "select_state_action": "Vyberte akci",
+    "all_for_client": "Všechny nabídky klienta",
+    "open_order": "Otevřít prodejní objednávku",
+    "reopen": "Znovu otevřít nabídku",
+    "reopen_hint": "Nabídka se vrátí mezi odeslané se stejnou verzí a platností. Poté můžete zaznamenat novou odpověď klienta.",
+    "reopen_blocked": "Nabídka má navázaný doklad nebo prodejní objednávku. Chcete-li opravit přijetí a navázaný doklad je koncept, nejprve tento koncept odstraňte.",
     "accept": "Zaznamenat přijetí",
     "accept_options": "Vyberte volitelné sekce, které klient přijal.",
     "add_catalog_item": "Přidat z ceníku",
@@ -45624,6 +45632,7 @@
       "declined": "Odmítnutí nabídky",
       "withdrawn": "Nabídka stažena",
       "restored": "Nabídka obnovena",
+      "reopened": "Nabídka znovu otevřena",
       "expired": "Vypršela platnost",
       "note": "Interní poznámka",
       "email": "Záznam e-mailu",

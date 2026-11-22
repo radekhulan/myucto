@@ -45465,6 +45465,14 @@
     "items_load_more": "Load more"
   },
   "sales_quotes": {
+    "change_status": "Change status",
+    "state_action": "Quote status change",
+    "select_state_action": "Choose an action",
+    "all_for_client": "All customer quotes",
+    "open_order": "Open sales order",
+    "reopen": "Reopen quote",
+    "reopen_hint": "The quote returns to Sent with the same version and expiry date. You can then record a new customer response.",
+    "reopen_blocked": "The quote has a linked document or sales order. To correct an acceptance with a linked draft, delete that draft first.",
     "accept": "Record acceptance",
     "accept_options": "Select the optional sections the customer accepted.",
     "add_catalog_item": "Add from price list",
@@ -45624,6 +45632,7 @@
       "declined": "Quote rejected",
       "withdrawn": "Quote withdrawn",
       "restored": "Quote restored",
+      "reopened": "Quote reopened",
       "expired": "Quote expired",
       "note": "Internal note",
       "email": "Email record",

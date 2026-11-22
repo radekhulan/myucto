@@ -77,6 +77,8 @@ describe('závislosti dat mezi okny', () => {
     expect(affected('/sales-quotes/42', '/invoices/5/issue')).toBe(true)
     expect(affected('/sales-quotes', '/bank-transactions/4/match')).toBe(true)
     expect(affected('/sales-quotes', '/sales-quotes/42/state')).toBe(true)
+    expect(affected('/clients/12', '/sales-quotes/42/state')).toBe(true)
+    expect(affected('/clients', '/sales-quotes/42/state')).toBe(false)
     expect(affected('/invoices', '/sales-quotes/42/state')).toBe(false)
     expect(affected('/invoices', '/sales-quotes/42/invoice')).toBe(true)
     expect(windowDataProfile('/sales-quotes/42').mode).toBe('manual')

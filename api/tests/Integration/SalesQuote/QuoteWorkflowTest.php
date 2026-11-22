@@ -118,6 +118,15 @@ final class QuoteWorkflowTest extends StockTestCase
         self::assertSame(1, $list['total']);
         self::assertSame('Syntetická zakázka', $list['items'][0]['project_name']);
         self::assertSame(1500.0, (float) $list['items'][0]['billing']['remaining']);
+
+        $reopened = $this->json($action->state($this->request($sid, ['status' => 'reopen']), new Response(), $args));
+        self::assertSame('sent', $reopened['status']);
+        self::assertSame($accepted['version_id'], $reopened['version_id']);
+        self::assertSame([], $reopened['accepted_section_ids']);
+        self::assertSame(1000.0, (float) $reopened['totals']['without_vat']);
+        self::assertSame('reopened', $reopened['history'][0]['event']);
+        self::assertSame('accepted', $reopened['history'][0]['data']['previous_status']);
+        self::assertSame('declined', $this->json($action->state($this->request($sid, ['status' => 'declined']), new Response(), $args))['status']);
     }
 
     public function testRestoreMakesWithdrawnDraftEditableAgain(): void
@@ -158,6 +167,11 @@ final class QuoteWorkflowTest extends StockTestCase
         $this->db->pdo()->prepare("UPDATE sales_quotes SET status = 'sent' WHERE supplier_id = ? AND id = ?")->execute([$sid, $id]);
         $quoteWorkflow->state($sid, $id, $this->userId, ['status' => 'accepted']);
         $orderId = $orderConverter->convert($sid, $id, $this->userId, ['idempotency_key' => 'first-order']);
+        self::assertTrue($quoteWorkflow->detail($sid, $id, false)['reopen_blocked']);
+        $action = $this->container->get(QuoteAction::class);
+        $reopen = $action->state($this->request($sid, ['status' => 'reopen']), new Response(), ['id' => $id]);
+        self::assertSame(409, $reopen->getStatusCode());
+        self::assertSame('quote_has_documents', $this->json($reopen)['error']['code']);
         self::assertSame($orderId, $orderConverter->convert($sid, $id, $this->userId, ['idempotency_key' => 'first-order']));
         $invoiceConverter = $this->container->get(QuoteInvoiceService::class);
         try {

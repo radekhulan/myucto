@@ -12,7 +12,7 @@ import { apiErrorMessage } from '@/api/errors'
 import { useAuthStore } from '@/stores/auth'
 import { useSupplierStore } from '@/stores/supplier'
 import { addDaysIso, appIsoDate } from '@/utils/date'
-import { formatDate, formatMoney } from '@/composables/useFormat'
+import { formatDate, formatMoney, typeLabel } from '@/composables/useFormat'
 import { useWindowTitle } from '@/composables/useWindowTitle'
 import { useWindowRefresh } from '@/composables/useWindowRefresh'
 import { useToast } from '@/composables/useToast'
@@ -30,7 +30,7 @@ import QuoteFiles from './QuoteFiles.vue'
 import QuoteHistory from './QuoteHistory.vue'
 import { quoteStatusBadge, sectionTotals } from './quotePresentation'
 
-type Dialog = 'send' | 'pdf' | QuoteStateAction | null
+type Dialog = 'send' | 'pdf' | 'state' | null
 
 const { t } = useI18n()
 const route = useRoute()
@@ -59,6 +59,7 @@ const vatRates = ref<VatRate[]>([])
 const warehouses = ref<Warehouse[]>([])
 const chosenSections = ref<string[]>([])
 const stateNote = ref('')
+const stateTarget = ref<QuoteStateAction | ''>('')
 const email = ref({ to: '', subject: '', message: '' })
 let emailRequest: { signature: string; key: string } | null = null
 let loadRequest = 0
@@ -71,7 +72,7 @@ const versionId = computed(() => Number(route.query.version_id) || undefined)
 const historical = computed(() => versionId.value !== undefined)
 const canWrite = computed(() => auth.canWrite('sales_quotes.write'))
 const canSend = computed(() => auth.canWrite('sales_quotes.send'))
-const editable = computed(() => canWrite.value && !historical.value && (!quote.value || quote.value.status === 'draft') && !quote.value?.send_pending)
+const editable = computed(() => canWrite.value && !historical.value && (!id.value || quote.value?.status === 'draft') && !quote.value?.send_pending)
 const dirty = computed(() => editable.value && signature.value !== '' && signature.value !== JSON.stringify(payload()))
 const stockEnabled = computed(() => auth.hasCommercialFeatures && suppliers.currentSupplier?.stock_enabled === true)
 const stockReadable = computed(() => stockEnabled.value && auth.canRead('stock'))
@@ -109,6 +110,25 @@ useWindowTitle(() => quote.value?.number || t('sales_quotes.new'), () => quote.v
 
 const saveDisabled = computed(() => busy.value || loading.value || quote.value?.send_pending === true || (quote.value !== null && !dirty.value))
 
+const stateActions = computed<QuoteStateAction[]>(() => {
+  if (!canWrite.value || historical.value) return []
+  switch (quote.value?.status) {
+    case 'draft': return ['withdrawn']
+    case 'sent': return ['accepted', 'declined', 'withdrawn']
+    case 'expired': return ['declined', 'withdrawn']
+    case 'withdrawn': return ['restore']
+    case 'accepted':
+    case 'declined': return ['reopen']
+    default: return []
+  }
+})
+
+const stateLabels: Record<QuoteStateAction, string> = {
+  accepted: 'sales_quotes.accept', declined: 'sales_quotes.decline', withdrawn: 'sales_quotes.withdraw',
+  restore: 'sales_quotes.restore', reopen: 'sales_quotes.reopen',
+}
+const stateBlocked = computed(() => stateTarget.value === 'reopen' && quote.value?.reopen_blocked === true)
+
 const actions = computed<ActionItem[]>(() => {
   const current = quote.value
   const state = current?.status
@@ -121,19 +141,10 @@ const actions = computed<ActionItem[]>(() => {
     { key: 'send', label: t(state === 'sent' || state === 'accepted' ? 'sales_quotes.send_again' : 'sales_quotes.send'), icon: 'send',
       tier: state === 'draft' ? 'secondary' : 'overflow', variant: 'primary', show: canSend.value && sendable && currentVersion,
       disabled: disabled || dirty.value, run: openSend },
-    { key: 'accept', label: t('sales_quotes.accept'), icon: 'checkCircle', tier: 'primary', variant: 'success',
-      show: canWrite.value && state === 'sent' && currentVersion, disabled, run: () => openState('accepted') },
-    { key: 'restore', label: t('sales_quotes.restore'), icon: 'uturn', tier: 'primary', variant: 'success',
-      show: canWrite.value && state === 'withdrawn' && currentVersion, disabled, run: () => openState('restore') },
     { key: 'pdf', label: t('sales_quotes.pdf_preview'), icon: 'eye', tier: 'secondary', variant: 'neutral',
       show: !!current, disabled: busy.value || dirty.value, run: () => { dialog.value = 'pdf' } },
     { key: 'revise', label: t('sales_quotes.revise'), icon: 'copy', tier: 'secondary', variant: 'primary',
       show: canWrite.value && !!state && ['sent', 'declined', 'expired', 'withdrawn'].includes(state) && currentVersion, disabled, run: revise },
-    { key: 'decline', label: t('sales_quotes.decline'), icon: 'x', tier: 'overflow', variant: 'danger',
-      show: canWrite.value && (state === 'sent' || state === 'expired') && currentVersion, disabled, run: () => openState('declined') },
-    { key: 'withdraw', label: t('sales_quotes.withdraw'), icon: 'archive', tier: 'overflow', variant: 'warning',
-      show: canWrite.value && (state === 'draft' || state === 'sent' || state === 'expired') && currentVersion,
-      disabled: disabled || dirty.value, run: () => openState('withdrawn') },
   ]
 })
 
@@ -319,17 +330,19 @@ function openSend() {
   dialog.value = 'send'
 }
 
-function openState(status: QuoteStateAction) {
+function openState() {
   modalError.value = ''
   stateNote.value = ''
   chosenSections.value = []
-  dialog.value = status
+  stateTarget.value = stateActions.value.length === 1 ? (stateActions.value[0] ?? '') : ''
+  dialog.value = 'state'
 }
 
 async function submitDialog() {
   const current = quote.value
   const action = dialog.value
   if (!current || !action || action === 'pdf' || busy.value || blockDemoMutation()) return
+  if (action === 'state' && (!stateTarget.value || stateBlocked.value || !stateActions.value.includes(stateTarget.value))) return
   busy.value = true
   modalError.value = ''
   try {
@@ -341,8 +354,9 @@ async function submitDialog() {
       apply(updated)
       emailRequest = null
       toast.success(t(updated.send_pending ? 'sales_quotes.send_pending' : 'sales_quotes.email_sent'))
-    } else {
-      apply(await salesQuotesApi.setState(current.id, action, chosenSections.value, stateNote.value.trim(), current.row_version))
+    } else if (stateTarget.value) {
+      const selected = stateTarget.value === 'accepted' ? chosenSections.value : []
+      apply(await salesQuotesApi.setState(current.id, stateTarget.value, selected, stateNote.value.trim(), current.row_version))
     }
     dialog.value = null
   } catch (e) {
@@ -360,13 +374,8 @@ async function submitDialog() {
   }
 }
 
-const dialogTitle = computed(() => {
-  if (dialog.value === 'send') return t('sales_quotes.send')
-  if (dialog.value === 'accepted') return t('sales_quotes.accept')
-  if (dialog.value === 'declined') return t('sales_quotes.decline')
-  if (dialog.value === 'restore') return t('sales_quotes.restore')
-  return t('sales_quotes.withdraw')
-})
+const dialogTitle = computed(() => t(dialog.value === 'send' ? 'sales_quotes.send' : 'sales_quotes.change_status'))
+const dialogSubmitLabel = computed(() => dialog.value === 'state' && stateTarget.value ? t(stateLabels[stateTarget.value]) : dialogTitle.value)
 
 function canLeave() {
   return !dirty.value || window.confirm(t('sales_quotes.leave_unsaved'))
@@ -390,8 +399,12 @@ onActivated(() => { if (id.value && !loading.value && !busy.value && !dirty.valu
     <header class="flex flex-wrap items-start justify-between gap-3">
       <div class="min-w-0 max-w-full">
         <div class="flex flex-wrap items-center gap-2">
-          <h1 class="min-w-0 text-2xl font-semibold wrap-anywhere text-neutral-900">{{ quote?.title || t('sales_quotes.new') }}</h1>
+          <h1 class="min-w-0 text-2xl font-semibold wrap-anywhere text-neutral-900">{{ quote?.title || t(id ? 'nav.sales_quotes' : 'sales_quotes.new') }}</h1>
           <span v-if="quote" :class="['whitespace-nowrap rounded px-2 py-0.5 text-xs font-medium', quoteStatusBadge[quote.status]]">{{ t(`sales_quotes.status.${quote.status}`) }}</span>
+          <button v-if="stateActions.length" type="button" :class="btnOutline('neutral')" :disabled="busy || loading || dirty || quote?.send_pending" @click="openState">
+            <svg class="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.cycle" /></svg>
+            {{ t('sales_quotes.change_status') }}
+          </button>
         </div>
         <p v-if="quote" class="mt-1 text-sm text-neutral-600">{{ quote.number }} · {{ t('sales_quotes.revision_number', { number: quote.revision }) }}</p>
       </div>
@@ -538,7 +551,14 @@ onActivated(() => { if (id.value && !loading.value && !busy.value && !dirty.valu
             </ul>
           </div>
         </template>
-        <template v-if="dialog === 'accepted' && quote.sections.some(section => section.kind === 'optional')">
+        <label v-if="dialog === 'state' && stateActions.length > 1" class="block text-sm">
+          <span class="mb-1 block font-medium">{{ t('sales_quotes.state_action') }}</span>
+          <select v-model="stateTarget" required class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-2">
+            <option value="" disabled>{{ t('sales_quotes.select_state_action') }}</option>
+            <option v-for="target in stateActions" :key="target" :value="target">{{ t(stateLabels[target]) }}</option>
+          </select>
+        </label>
+        <template v-if="dialog === 'state' && stateTarget === 'accepted' && quote.sections.some(section => section.kind === 'optional')">
           <p class="text-sm text-neutral-600">{{ t('sales_quotes.accept_options') }}</p>
           <label v-for="section in quote.sections.filter(section => section.kind === 'optional')" :key="section.id" class="flex flex-wrap items-center gap-2 text-sm">
             <input v-model="chosenSections" type="checkbox" :value="section.id" />
@@ -546,8 +566,23 @@ onActivated(() => { if (id.value && !loading.value && !busy.value && !dirty.valu
             <span class="font-medium tabular-nums">{{ formatMoney(sectionTotals(section, quote.prices_include_vat, true).with_vat, quote.currency) }}</span>
           </label>
         </template>
-        <p v-if="dialog === 'restore'" class="text-sm text-neutral-600">{{ t('sales_quotes.restore_hint') }}</p>
-        <label v-if="dialog !== 'send'" class="block text-sm">
+        <p v-if="dialog === 'state' && stateTarget === 'restore'" class="text-sm text-neutral-600">{{ t('sales_quotes.restore_hint') }}</p>
+        <p v-if="dialog === 'state' && stateTarget === 'reopen'" class="text-sm" :class="stateBlocked ? 'text-warning-800' : 'text-neutral-600'">
+          {{ t(stateBlocked ? 'sales_quotes.reopen_blocked' : 'sales_quotes.reopen_hint') }}
+        </p>
+        <ul v-if="dialog === 'state' && stateBlocked && (quote.documents.length || quote.order_id)" class="space-y-1 text-sm">
+          <li v-for="document in quote.documents" :key="document.invoice_id">
+            <RouterLink :to="{ name: 'invoice-detail', params: { id: document.invoice_id } }" class="font-medium text-primary-700 hover:underline">
+              {{ typeLabel(document.type) }} {{ document.number || `#${document.invoice_id}` }}
+            </RouterLink>
+          </li>
+          <li v-if="quote.order_id">
+            <RouterLink :to="{ name: 'stock-sales-order-detail', params: { id: quote.order_id } }" class="font-medium text-primary-700 hover:underline">
+              {{ t('sales_quotes.open_order') }}
+            </RouterLink>
+          </li>
+        </ul>
+        <label v-if="dialog === 'state' && !stateBlocked" class="block text-sm">
           <span class="mb-1 block font-medium">{{ t('sales_quotes.internal_note') }}</span>
           <textarea v-model="stateNote" maxlength="6000" rows="3" class="w-full resize-y rounded-md border border-neutral-300 bg-surface px-3 py-2" />
         </label>
@@ -559,9 +594,9 @@ onActivated(() => { if (id.value && !loading.value && !busy.value && !dirty.valu
           <svg class="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.x" /></svg>
           {{ t('common.cancel') }}
         </button>
-        <button type="submit" :form="`${formId}-action`" :class="btnFilled(dialog === 'accepted' || dialog === 'restore' ? 'success' : dialog === 'send' ? 'primary' : 'warning')" :disabled="busy">
-          <svg class="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="dialog === 'send' ? ICONS.send : dialog === 'restore' ? ICONS.uturn : ICONS.check" /></svg>
-          {{ dialogTitle }}
+        <button v-if="!stateBlocked || dialog === 'send'" type="submit" :form="`${formId}-action`" :class="btnFilled(dialog === 'send' ? 'primary' : stateTarget === 'declined' || stateTarget === 'withdrawn' ? 'warning' : 'success')" :disabled="busy || (dialog === 'state' && !stateTarget)">
+          <svg class="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="dialog === 'send' ? ICONS.send : stateTarget === 'restore' || stateTarget === 'reopen' ? ICONS.uturn : ICONS.check" /></svg>
+          {{ dialogSubmitLabel }}
         </button>
       </div>
     </template>

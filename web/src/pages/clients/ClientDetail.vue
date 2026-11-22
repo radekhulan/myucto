@@ -2,11 +2,13 @@
 import { useWindowRefresh } from '@/composables/useWindowRefresh'
 import { useWindowTitle } from '@/composables/useWindowTitle'
 import LinkedDocumentsPanel from '@/components/documents/LinkedDocumentsPanel.vue'
-import { ref, onMounted, computed } from 'vue'
+import { ref, onMounted, computed, watch } from 'vue'
 import { useRoute, useRouter, RouterLink } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { clientsApi, TAX_NUMBER_LABELS, type Client, type ClientBankAccount, type BankLookupResult, type ViesLookupResult } from '@/api/clients'
 import { invoicesApi, type InvoiceListItem } from '@/api/invoices'
+import { salesQuotesApi, type QuoteListItem } from '@/api/salesQuotes'
+import { apiErrorMessage } from '@/api/errors'
 import { purchaseInvoicesApi, type PurchaseInvoiceListItem } from '@/api/purchaseInvoices'
 import { recurringApi, type RecurringTemplate } from '@/api/recurring'
 import { formatMoney, formatDate, statusLabel, typeLabel, statusBadgeClass, isOverdue, invoiceRowClass, taxDateClass, paymentDueLabel } from '@/composables/useFormat'
@@ -22,6 +24,7 @@ import { formatAccountNumber } from '@/utils/bankAccount'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import EntityDimensionDefaults from '@/components/dimensions/EntityDimensionDefaults.vue'
 import { useIsPhone } from '@/composables/useIsPhone'
+import { quoteStatusBadge } from '@/pages/sales-quotes/quotePresentation'
 
 const { t } = useI18n()
 const toast = useToast()
@@ -43,6 +46,11 @@ const invoicesPages = ref(1)
 const recurringTemplates = ref<RecurringTemplate[]>([])
 const purchaseInvoices = ref<PurchaseInvoiceListItem[]>([])
 const purchaseInvoicesLoading = ref(false)
+const quotes = ref<QuoteListItem[]>([])
+const quotesTotal = ref(0)
+const quotesLoading = ref(false)
+const quotesError = ref('')
+let quotesRequest = 0
 const bankAccountNumber = ref('')
 const bankCode = ref('')
 const bankAccountSaving = ref(false)
@@ -423,6 +431,31 @@ const telHref = (phone: string | null | undefined) => {
 }
 const mailHref = (email: string | null | undefined) => (email ? `mailto:${email.trim()}` : undefined)
 const canNewInvoice = computed(() => !!client.value && client.value.is_customer !== false && auth.canWrite('invoices.create'))
+const quoteClientId = computed(() => auth.hasCommercialFeatures && auth.canRead('sales_quotes') && client.value?.is_customer !== false ? client.value?.id : undefined)
+const canNewQuote = computed(() => !!quoteClientId.value && !client.value?.archived_at && auth.canWrite('sales_quotes.write'))
+
+async function loadQuotes(id: number | undefined, silent = false) {
+  const request = ++quotesRequest
+  quotesLoading.value = !!id && !silent
+  quotesError.value = ''
+  if (!silent || !id) {
+    quotes.value = []
+    quotesTotal.value = 0
+  }
+  if (!id) return
+  try {
+    const result = await salesQuotesApi.list({ client_id: id, per_page: 10 })
+    if (request !== quotesRequest) return
+    quotes.value = result.items
+    quotesTotal.value = result.total
+  } catch (error) {
+    if (request === quotesRequest) quotesError.value = apiErrorMessage(error)
+  } finally {
+    if (request === quotesRequest) quotesLoading.value = false
+  }
+}
+
+watch(quoteClientId, id => { void loadQuotes(id) }, { immediate: true })
 const showPhoneQuickActions = computed(() => isPhone.value && !!client.value
   && (!!telHref(client.value.phone) || !!client.value.main_email || canNewInvoice.value))
 
@@ -436,10 +469,6 @@ const clientActions = computed<ActionItem[]>(() => {
       show: w, to: `/clients/${c.id}/edit` },
     { key: 'vat', label: vatInfoLoading.value ? t('common.loading') : t('client.vat_payer_details'), icon: 'badgeCheck',
       tier: 'secondary', variant: 'primary', show: !!c.dic, disabled: vatInfoLoading.value, run: loadVatPayerDetails },
-    { key: 'quotes', label: t('nav.sales_quotes'), icon: 'doc', tier: 'secondary', variant: 'neutral',
-      show: auth.hasCommercialFeatures && c.is_customer !== false && auth.canRead('sales_quotes'), to: { name: 'sales-quotes', query: { client_id: c.id } } },
-    { key: 'new-quote', label: t('sales_quotes.new'), icon: 'plus', tier: 'overflow', variant: 'primary',
-      show: auth.hasCommercialFeatures && c.is_customer !== false && !c.archived_at && auth.canWrite('sales_quotes.write'), to: { name: 'sales-quote-new', query: { client_id: c.id } } },
     { key: 'wr-link', label: t('workReportTracking.button'), icon: 'link', tier: 'secondary', variant: 'primary',
       show: auth.canWrite('clients.public_links'), run: () => { showWrLinkModal.value = true } },
     { key: 'archive', label: t('common.archive'), icon: 'archive', tier: 'overflow', variant: 'warning',
@@ -461,6 +490,7 @@ useWindowRefresh(async () => {
     Promise.all(Array.from({ length: invoicesPage.value }, (_, index) => invoicesApi.listGrouped({ client_id: id, page: index + 1 }))),
     recurringApi.list({ client_id: id, per_page: 200 }),
     purchaseInvoicesApi.listGrouped({ vendor_id: id, per_page: 200 }),
+    loadQuotes(quoteClientId.value, true),
   ])
   if (id !== Number(route.params.id)) return
   client.value = updated
@@ -871,6 +901,41 @@ useWindowRefresh(async () => {
         </div>
       </div>
     </div>
+
+    <section v-if="quoteClientId" class="rounded-lg border border-neutral-200 bg-surface shadow-sm" aria-labelledby="client-quotes-heading">
+      <div class="flex flex-wrap items-center justify-between gap-2 border-b border-neutral-200 px-4 py-3 sm:px-5">
+        <h3 id="client-quotes-heading" class="font-semibold">
+          {{ t('nav.sales_quotes') }} <span v-if="quotesTotal" class="font-normal text-neutral-500">({{ quotesTotal }})</span>
+        </h3>
+        <div class="flex flex-wrap gap-2">
+          <RouterLink v-if="quotesTotal" :to="{ name: 'sales-quotes', query: { client_id: quoteClientId } }" :class="btnOutline('neutral')">
+            <svg class="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.chevronRight" /></svg>
+            {{ t('sales_quotes.all_for_client') }}
+          </RouterLink>
+          <RouterLink v-if="canNewQuote" :to="{ name: 'sales-quote-new', query: { client_id: quoteClientId } }" :class="btnFilled('primary')">
+            <svg class="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.plus" /></svg>
+            {{ t('sales_quotes.new') }}
+          </RouterLink>
+        </div>
+      </div>
+      <p v-if="quotesError" role="alert" class="px-4 py-3 text-sm text-danger-700">{{ quotesError }}</p>
+      <p v-else-if="quotesLoading" class="p-4 text-center text-sm text-neutral-500" aria-live="polite">{{ t('common.loading') }}</p>
+      <EmptyState v-else-if="!quotes.length" dense accent="neutral" icon="doc" :title="t('sales_quotes.no_results')" />
+      <ul v-else class="divide-y divide-neutral-100 text-sm">
+        <li v-for="offer in quotes" :key="offer.id">
+          <RouterLink :to="{ name: 'sales-quote-detail', params: { id: offer.id } }" class="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 px-4 py-3 hover:bg-neutral-50 sm:px-5">
+            <span class="min-w-0 flex-1 wrap-anywhere">
+              <span class="block font-medium text-primary-700">{{ offer.title }}</span>
+              <span class="block text-xs text-neutral-600">{{ offer.number }}<template v-if="offer.project_name"> · {{ offer.project_name }}</template></span>
+            </span>
+            <span class="flex flex-wrap items-center gap-2">
+              <span :class="['whitespace-nowrap rounded px-2 py-0.5 text-xs font-medium', quoteStatusBadge[offer.status]]">{{ t(`sales_quotes.status.${offer.status}`) }}</span>
+              <span class="whitespace-nowrap font-medium tabular-nums">{{ formatMoney(offer.totals.with_vat, offer.currency) }}</span>
+            </span>
+          </RouterLink>
+        </li>
+      </ul>
+    </section>
 
     <!-- Vystavené faktury — visible pokud is_customer NEBO existují vystavené faktury -->
     <div v-if="client.is_customer !== false || invoices.length > 0" class="bg-surface border border-neutral-200 rounded-lg shadow-sm">
