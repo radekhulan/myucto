@@ -42,10 +42,16 @@ final class PohodaAssetPlan
     private const TAX_METHODS = [1 => 'straight', 2 => 'accelerated', 4 => 'none', 5 => 'straight', 11 => 'by_accounting'];
 
     /**
-     * `IMpohyb.RelTpPoh`, které karta převezme: 2 zařazení, 7 daňový odpis, 8 účetní odpis,
-     * 14 vyřazení (řeší se datem vyřazení karty `DatLikv`).
+     * `IMpohyb.RelTpPoh` (ověřeno na datech POHODY: `IM.Kc` = zařazení + technická zhodnocení,
+     * `IModpis.KcVstup` roste v roce zhodnocení o jeho částku):
+     * 1 pořízení (před zařazením, jeho částka je v zařazení), 2 zařazení, 3 technické
+     * zhodnocení, 7 daňový odpis, 8 účetní odpis, 14 vyřazení (řeší se datem vyřazení karty
+     * `DatLikv`). Ostatní druhy převod nezná a karta zůstane koncept.
      */
-    private const KNOWN_MOVEMENTS = [2, 7, 8, 14];
+    private const ACQUISITION = 1;
+    private const PUT_INTO_USE = 2;
+    private const IMPROVEMENT = 3;
+    private const KNOWN_MOVEMENTS = [self::ACQUISITION, self::PUT_INTO_USE, self::IMPROVEMENT, 7, 8, 14];
 
     /**
      * @param array<string,mixed> $card řádek `IM`
@@ -53,30 +59,60 @@ final class PohodaAssetPlan
      * @param list<array<string,mixed>> $monthRows měsíční účetní plán karty (`IMuodpis`, jinak `IModpisM`)
      * @param string $lastBooked poslední měsíc (`Y-m`) s odpisem zaúčtovaným v POHODĚ
      * @param list<array<string,mixed>> $movements řádky `IMpohyb` karty
-     * @return array{card:array<string,mixed>, review:list<string>}
+     * @return array{card:array<string,mixed>, review:list<string>, improvements:list<array{completed_on:string, amount:float, description:string}>}
      */
     public static function build(array $card, array $taxRows, array $monthRows, int $year, string $lastBooked, array $movements = []): array
     {
         $review = [];
-        // Jiný pohyb než zařazení a odpisy (technické zhodnocení, přecenění...) převod nepřebírá.
+        $acquired = PohodaXml::date($card, 'Datum');
+        $inUse = PohodaXml::date($card, 'DatZar') ?? $acquired;
+        $increasedPrice = round(PohodaXml::num($card, 'Kc'), 2);
+
+        // Technické zhodnocení se převede na kartu (vstupní cena karty je pak cena zařazení);
+        // jiný pohyb než pořízení, zařazení, zhodnocení a odpisy převod nepřebírá.
+        $improvements = [];
+        $improved = 0.0;
+        $putIntoUse = null;
         $other = [];
         foreach ($movements as $movement) {
             $kind = (int) PohodaXml::text($movement, 'RelTpPoh');
-            if (!in_array($kind, self::KNOWN_MOVEMENTS, true)) {
-                $other[$kind] = ($other[$kind] ?? 0.0) + PohodaXml::num($movement, 'Kc');
+            $amount = round(PohodaXml::num($movement, 'Kc'), 2);
+            $date = PohodaXml::date($movement, 'Datum');
+            if ($kind === self::PUT_INTO_USE) {
+                $putIntoUse = ($putIntoUse ?? 0.0) + $amount;
+            } elseif ($kind === self::IMPROVEMENT) {
+                if ($date === null || $inUse === null || $date < $inUse || $amount <= 0) {
+                    $review[] = 'technické zhodnocení ' . ($date ?? 'bez data') . ' (' . self::money($amount) . ') '
+                        . ($amount <= 0 ? 'není kladné' : 'předchází zařazení') . ', převod ho nepřevzal';
+                    continue;
+                }
+                $note = trim(PohodaXml::text($movement, 'Pozn'));
+                $improvements[] = ['completed_on' => $date, 'amount' => $amount, 'description' => mb_substr($note !== '' ? $note : 'Technické zhodnocení (převod z POHODY)', 0, 255)];
+                $improved += $amount;
+            } elseif ($kind === self::ACQUISITION && $date !== null && $inUse !== null && $date > $inUse) {
+                $review[] = 'pořízení ' . $date . ' (' . self::money($amount) . ') je až po zařazení, převod ho nepřebírá';
+            } elseif (!in_array($kind, self::KNOWN_MOVEMENTS, true)) {
+                $other[$kind] = ($other[$kind] ?? 0.0) + $amount;
             }
         }
         foreach ($other as $kind => $amount) {
-            $review[] = 'pohyb majetku druhu ' . $kind . ' (' . self::money($amount) . ', například technické zhodnocení) převod nepřebírá, doplňte ho na kartě';
+            $review[] = 'pohyb majetku druhu ' . $kind . ' (' . self::money($amount) . ') převod nezná, doplňte ho na kartě';
+        }
+        $inputPrice = round($increasedPrice - $improved, 2);
+        if ($improvements !== [] && $inputPrice <= 0) {
+            $review[] = 'technická zhodnocení (' . self::money($improved) . ') nejsou menší než vstupní cena karty, převod je nepřevzal';
+            $improvements = [];
+            $inputPrice = $increasedPrice;
+        }
+        if ($putIntoUse !== null && abs($putIntoUse - $inputPrice) >= 0.01) {
+            $review[] = 'vstupní cena ' . self::money($increasedPrice) . ' nesedí se zařazením ' . self::money($putIntoUse)
+                . ($improvements === [] ? '' : ' a technickým zhodnocením ' . self::money($improved));
         }
         $number = PohodaXml::text($card, 'Cislo');
-        $inputPrice = round(PohodaXml::num($card, 'Kc'), 2);
         $taxPrice = round(PohodaXml::num($card, 'KcDanova'), 2);
-        if ($taxPrice > 0 && abs($taxPrice - $inputPrice) >= 0.01) {
-            $review[] = 'daňová vstupní cena ' . self::money($taxPrice) . ' se liší od účetní ' . self::money($inputPrice);
+        if ($taxPrice > 0 && abs($taxPrice - $increasedPrice) >= 0.01) {
+            $review[] = 'daňová vstupní cena ' . self::money($taxPrice) . ' se liší od účetní ' . self::money($increasedPrice);
         }
-        $acquired = PohodaXml::date($card, 'Datum');
-        $inUse = PohodaXml::date($card, 'DatZar') ?? $acquired;
 
         $kindCode = (int) PohodaXml::text($card, 'RelTpIM');
         $kind = self::KINDS[$kindCode] ?? null;
@@ -135,7 +171,7 @@ final class PohodaAssetPlan
         } else {
             [$openingMonths, $openingAcc, $usefulLife] = MigratedDepreciation::accountingOpening($inUse, $plan, $lastBooked);
         }
-        $openingAcc = min(round($openingAcc, 2), $inputPrice);
+        $openingAcc = min(round($openingAcc, 2), $increasedPrice);
 
         return [
             'card' => [
@@ -157,6 +193,38 @@ final class PohodaAssetPlan
                 'acc_residual_value' => 0.0,
             ],
             'review' => $review,
+            'improvements' => $improvements,
+        ];
+    }
+
+    /**
+     * Zůstatky karty v POHODĚ ke konci roku agendy (ověřeno na datech POHODY):
+     * `Kc` je vstupní cena zvýšená o zhodnocení, `KcZust` daňová zůstatková cena po odpisech
+     * `IModpis` do roku agendy včetně. `KcZustUcetni` vede POHODA jen u samostatného účetního
+     * plánu (`IMuodpis`), jinak ho nechává ve výši vstupní ceny; účetní zůstatek je pak vstupní
+     * cena bez měsíčního plánu `IModpisM` do konce roku agendy.
+     *
+     * Hodnota, kterou export nenese, se nekontroluje (null).
+     *
+     * @param array<string,mixed> $card řádek `IM`
+     * @param list<array<string,mixed>> $monthRows měsíční účetní plán karty
+     * @return array{input_price:float, tax_residual:?float, acc_residual:?float}
+     */
+    public static function balances(array $card, array $monthRows, bool $ownAccountingPlan, string $periodEnd): array
+    {
+        $price = round(PohodaXml::num($card, 'Kc'), 2);
+        $accumulated = 0.0;
+        foreach ($monthRows as $row) {
+            $month = substr((string) PohodaXml::date($row, 'Mesic'), 0, 7);
+            if ($month !== '' && $month <= substr($periodEnd, 0, 7)) {
+                $accumulated += PohodaXml::num($row, 'KcOdpis');
+            }
+        }
+        $value = static fn (string $field): ?float => PohodaXml::text($card, $field) === '' ? null : round(PohodaXml::num($card, $field), 2);
+        return [
+            'input_price' => $price,
+            'tax_residual' => $value('KcZust'),
+            'acc_residual' => $ownAccountingPlan ? $value('KcZustUcetni') : ($monthRows === [] ? null : round($price - $accumulated, 2)),
         ];
     }
 

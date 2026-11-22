@@ -1461,6 +1461,7 @@ final class PohodaImportTest extends TestCase
         $protocol = $this->importer->run($supplierId, $this->userId, $export, false);
         self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
         self::assertSame(1, self::stepCounts($protocol, 'assets')['created'] ?? 0, $this->explain($protocol));
+        self::assertSame(1, self::stepCounts($protocol, 'assets')['balances_match'] ?? 0, $this->explain($protocol));
 
         $stmt = $this->db->pdo()->prepare('SELECT * FROM assets WHERE supplier_id = ? AND inventory_number = ?');
         $stmt->execute([$supplierId, SyntheticPohodaExport::ASSET_NUMBER]);
@@ -1522,6 +1523,84 @@ final class PohodaImportTest extends TestCase
         self::assertSame((string) $monitor['purchase_invoice_item_id'], (string) $relinked->fetchColumn());
         self::assertSame(1, $this->rows('assets', $supplierId));
         self::assertSame(4, $this->rows('small_assets', $supplierId));
+    }
+
+    /**
+     * Pohyby majetku z POHODY (`IMpohyb`): technické zhodnocení se převede na kartu, karta
+     * se vede od ceny zařazení a zůstatky ke konci roku sedí s POHODOU, takže není koncept.
+     * Pohyb druhu, který převod nezná, nechá kartu jako koncept s varováním. Rozdíl zůstatků
+     * proti POHODĚ pošle jinak hotovou kartu ke kontrole.
+     */
+    public function testAssetMovementsImprovementIsTakenOver(): void
+    {
+        $supplierId = $this->supplier();
+        $dir = SyntheticPohodaExport::write($this->tmp, withAssetMovements: true);
+
+        $protocol = $this->importer->run($supplierId, $this->userId, PohodaExport::open($dir), false);
+        self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
+        $counts = self::stepCounts($protocol, 'assets');
+        self::assertSame([2, 1, 1, 3, 0], [$counts['created'] ?? 0, $counts['drafts'] ?? 0, $counts['improvements'] ?? 0, $counts['balances_match'] ?? 0, $counts['balances_differ'] ?? 0], $this->explain($protocol));
+
+        $card = $this->assetCard($supplierId, SyntheticPohodaExport::IMPROVED_ASSET);
+        self::assertSame('in_use', $card['status'], (string) $card['description']);
+        self::assertNull($card['description']);
+        self::assertSame(['180000.00', '022.002', '082.002'], [(string) $card['input_price'], $card['asset_account_code'], $card['accumulated_account_code']]);
+        self::assertSame([3, '125400.00'], [(int) $card['opening_tax_years'], (string) $card['opening_tax_amount']]);
+        self::assertSame([38, '159000.00', 59], [(int) $card['opening_acc_months'], (string) $card['opening_acc_amount'], (int) $card['acc_useful_life_months']]);
+        $improvements = $this->db->pdo()->prepare('SELECT completed_on, amount, description FROM asset_improvements WHERE supplier_id = ? AND asset_id = ?');
+        $improvements->execute([$supplierId, (int) $card['id']]);
+        self::assertSame([['completed_on' => '2024-06-15', 'amount' => '84000.00', 'description' => 'Přístavba linky']], $improvements->fetchAll(\PDO::FETCH_ASSOC));
+
+        // Odpisy v MyÚčtu navážou na POHODU: daňově sazba pro zvýšenou cenu, účetně 5 000 Kč od dubna.
+        $plan = Bootstrap::buildContainer()->get(AssetService::class)->plan($supplierId, (int) $card['id']);
+        self::assertSame(264000.0, (float) $plan['asset_summary']['increased_input_price']);
+        $tax = array_column($plan['tax'], 'full_amount', 'fiscal_year');
+        self::assertEqualsWithDelta(52800.0, (float) ($tax[SyntheticPohodaExport::YEAR] ?? 0), 0.005, json_encode($plan['tax']));
+        $acc = array_column($plan['accounting'], 'amount', 'fiscal_year');
+        self::assertEqualsWithDelta(45000.0, (float) ($acc[SyntheticPohodaExport::YEAR] ?? 0), 0.005, json_encode($plan['accounting']));
+
+        $unknown = $this->assetCard($supplierId, SyntheticPohodaExport::UNKNOWN_MOVEMENT_ASSET);
+        self::assertSame('draft', $unknown['status']);
+        self::assertStringContainsString('pohyb majetku druhu 16 (5 000,00 Kč) převod nezná, doplňte ho na kartě', (string) $unknown['description']);
+        $reviews = array_column(array_filter($this->messages($protocol, 'asset_review'),
+            static fn (array $m): bool => ($m['context']['document_no'] ?? '') === SyntheticPohodaExport::UNKNOWN_MOVEMENT_ASSET), 'text');
+        self::assertCount(1, $reviews, $this->explain($protocol));
+        self::assertStringContainsString('pohyb majetku druhu 16', $reviews[0]);
+
+        // Opakovaný převod nic nezdvojí.
+        $again = $this->importer->run($supplierId, $this->userId, PohodaExport::open($dir), false);
+        self::assertSame(3, self::stepCounts($again, 'assets')['existing'] ?? 0, $this->explain($again));
+        self::assertSame(3, $this->rows('assets', $supplierId));
+        self::assertSame(1, $this->rows('asset_improvements', $supplierId));
+
+        // Karty převodu smazané s mapou (jako reset) vezmou zhodnocení s sebou. Zůstatek, který
+        // s POHODOU nesedí, pak kartu pošle ke kontrole s varováním.
+        $pdo = $this->db->pdo();
+        $pdo->prepare("DELETE a FROM assets a JOIN pohoda_import_map m ON m.supplier_id = a.supplier_id AND m.target_id = a.id AND m.kind = 'asset' WHERE a.supplier_id = ?")->execute([$supplierId]);
+        $pdo->prepare("DELETE FROM pohoda_import_map WHERE supplier_id = ? AND kind = 'asset'")->execute([$supplierId]);
+        self::assertSame(0, $this->rows('asset_improvements', $supplierId));
+        $file = $dir . '/90_majetek.xml';
+        file_put_contents($file, str_replace('<KcZust>85800</KcZust>', '<KcZust>80000</KcZust>', (string) file_get_contents($file)));
+
+        $differ = $this->importer->run($supplierId, $this->userId, PohodaExport::open($dir), false);
+        self::assertSame(1, self::stepCounts($differ, 'assets')['balances_differ'] ?? 0, $this->explain($differ));
+        $mismatch = $this->messages($differ, 'asset_balance_mismatch');
+        self::assertCount(1, $mismatch, $this->explain($differ));
+        self::assertStringContainsString('daňová zůstatková cena MyÚčto 85 800,00 Kč, POHODA 80 000,00 Kč', $mismatch[0]['text']);
+        $card = $this->assetCard($supplierId, SyntheticPohodaExport::IMPROVED_ASSET);
+        self::assertSame('draft', $card['status']);
+        self::assertStringContainsString('nesedí s POHODOU', (string) $card['description']);
+        self::assertSame(1, $this->rows('asset_improvements', $supplierId));
+    }
+
+    /** @return array<string,mixed> */
+    private function assetCard(int $supplierId, string $number): array
+    {
+        $stmt = $this->db->pdo()->prepare('SELECT * FROM assets WHERE supplier_id = ? AND inventory_number = ?');
+        $stmt->execute([$supplierId, $number]);
+        $card = $stmt->fetch(\PDO::FETCH_ASSOC);
+        self::assertIsArray($card, $number);
+        return $card;
     }
 
     /**
