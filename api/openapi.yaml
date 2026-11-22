@@ -8434,14 +8434,23 @@ paths:
         celému zbytku se v platbě uloží celý zbytek v měně faktury; přesná CZK
         částka zůstává na bankovní transakci.
 
-        Doklad se vybírá právě jedním z pěti způsobů (v tomto pořadí priority):
+        Doklad se vybírá jedním z následujících způsobů:
+
+        - `payout_allocations`: výslovný rozpad příchozího pohybu z bankovního
+          výpisu v CZK na 2 až 100 vystavených faktur nebo zálohových listů téže
+          firmy, i od různých odběratelů. Každý doklad uveďte právě jednou a
+          jeho plný zůstatek zadejte v celých haléřích. Součet musí přesně
+          odpovídat převodu. Požadavek s tímto polem nesmí obsahovat další pole.
+          Vyžaduje interní roli, čtení banky a faktur a zápis `bank.match`
+          a `invoices.mark_paid`. Opakování shodného rozpadu vrátí stav
+          existujícího spárování s `replayed: true`.
 
         - `purchase_invoice_ids` (2 a více): sloučená odchozí úhrada více přijatých
           faktur, zálohových faktur nebo účtenek, i od různých dodavatelů. CZK platbou
           lze takto uhradit i cizoměnové faktury a účtenky (ne zálohové faktury).
           Jediné ID degraduje na 1:1 párování.
         - `invoice_ids` (2 a více) — sloučená úhrada: jedna příchozí platba proti
-          více vystavaným fakturám. Součet musí sedět na částku transakce.
+          více vystaveným fakturám téhož odběratele. Součet musí sedět na částku transakce.
           Jediné ID v poli degraduje na běžné 1:1 párování.
         - `purchase_invoice_id` — **přijatá** faktura (odchozí platba dodavateli).
           Bez tohoto pole nelze přijatou fakturu spárovat vůbec.
@@ -8464,8 +8473,22 @@ paths:
           application/json:
             schema:
               type: object
-              description: "Vyplň právě jedno z: `invoice_ids`, `purchase_invoice_ids`, `purchase_invoice_id`, `invoice_id`, `varsymbol`."
+              description: "Vyplň právě jedno z: `payout_allocations`, `invoice_ids`, `purchase_invoice_ids`, `purchase_invoice_id`, `invoice_id`, `varsymbol`."
               properties:
+                payout_allocations:
+                  type: array
+                  minItems: 2
+                  maxItems: 100
+                  uniqueItems: true
+                  description: Rozpad souhrnného převodu. Každé invoice_id smí být uvedeno pouze jednou.
+                  items:
+                    type: object
+                    additionalProperties: false
+                    required: [invoice_id, amount_cents]
+                    properties:
+                      invoice_id: { type: integer, format: int64, minimum: 1 }
+                      amount_cents: { type: integer, format: int64, minimum: 1, maximum: 999999999999, description: Plný zůstatek dokladu v haléřích. }
+                  example: [{ invoice_id: 123, amount_cents: 33600 }, { invoice_id: 124, amount_cents: 22400 }]
                 invoice_id:
                   type: integer
                   format: int64
@@ -8520,6 +8543,7 @@ paths:
                     properties:
                       matched: { type: boolean }
                       split: { type: boolean, description: Vždy `true` u tohoto tvaru. }
+                      replayed: { type: boolean, const: true, description: Shodný již uložený rozpad. }
                       paid_at: { type: [string, "null"] }
                       invoice_ids:
                         type: array
@@ -8528,6 +8552,10 @@ paths:
                       final_draft_ids:
                         type: array
                         description: ID draftů finálních faktur ke zálohovým, pokud nějaké vznikly.
+                        items: { type: integer, format: int64 }
+                      tax_document_ids:
+                        type: array
+                        description: ID automaticky vytvořených daňových dokladů k přijatým platbám.
                         items: { type: integer, format: int64 }
                   - type: object
                     title: Přijatá faktura
@@ -8562,6 +8590,13 @@ paths:
             (`nothing_to_pay`, `cannot_reconcile`). `invoice_already_settled` =
             fakturu už evidované platby plně kryjí, druhá platba by ji přeplatila.
             Platba vyšší než zbývající částka se zaeviduje jen do výše zbytku.
+            Pro souhrnnou úhradu je `payout_amount_mismatch` nesoulad s plným
+            zůstatkem dokladu a `payment_unavailable` obsazený pohyb.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '422':
+          description: Neplatný rozpad (`invalid_payout_allocations`) nebo výpis či měna pohybu (`invalid_payout_source`).
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }

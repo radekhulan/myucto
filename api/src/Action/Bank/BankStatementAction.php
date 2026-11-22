@@ -28,6 +28,7 @@ use MyInvoice\Service\Bank\StatementImporter;
 use MyInvoice\Service\Bank\StatementProcessingState;
 use MyInvoice\Service\Bank\StatementTransactionScope;
 use MyInvoice\Service\Bank\BankNoticeLifecycle;
+use MyInvoice\Service\Bank\BankPaymentCandidateScope;
 use MyInvoice\Service\Bank\BankTransactionPostingScope;
 use MyInvoice\Service\Bank\NonInvoiceBankTransactionScope;
 use MyInvoice\Service\Bank\BankTransactionReleaseException;
@@ -78,6 +79,7 @@ final class BankStatementAction
     private const SPLIT_DAY_WINDOW_MAX = 60;
     /** Sloučená úhrada: max počet faktur v jedné kombinaci (omezení subset-sum). */
     private const SPLIT_MAX_INVOICES = 6;
+    private const PAYOUT_MAX_INVOICES = 100;
     /** Sloučená úhrada: max velikost poolu faktur na klienta (omezení kombinatoriky). */
     private const SPLIT_POOL_PER_CLIENT = 14;
     /** Sloučená úhrada: max počet vrácených návrhů kombinací. */
@@ -3261,7 +3263,12 @@ final class BankStatementAction
 
     private function manualMatchWithCurrentSource(Request $request, Response $response, array $args): Response
     {
-        $guard = $this->tokenJournalChangeError($request, $response, (int) ($args['id'] ?? 0), false);
+        $txId = (int) ($args['id'] ?? 0);
+        $body = (array) ($request->getParsedBody() ?? []);
+        if (array_key_exists('payout_allocations', $body)) {
+            return $this->manualMatchPayout($request, $response, $txId, $body);
+        }
+        $guard = $this->tokenJournalChangeError($request, $response, $txId, false);
         if ($guard !== null) return $guard;
         if (!RequestAuthorization::isClientType($request)) return $this->performManualMatch($request, $response, $args);
         if (!RequestAuthorization::allows($request, 'bank.match', AccessLevel::WRITE)) {
@@ -3292,6 +3299,61 @@ final class BankStatementAction
             if ($e instanceof \DomainException) return Json::error($response, 'payment_unavailable', $e->getMessage(), self::domainHttpStatus($e));
             throw $e;
         }
+    }
+
+    private function manualMatchPayout(Request $request, Response $response, int $txId, array $body): Response
+    {
+        if (RequestAuthorization::isClientType($request)
+            || !RequestAuthorization::allows($request, 'bank', AccessLevel::READ)
+            || !RequestAuthorization::allows($request, 'bank.match', AccessLevel::WRITE)
+            || !RequestAuthorization::allows($request, 'invoices', AccessLevel::READ)
+            || !RequestAuthorization::allows($request, 'invoices.mark_paid', AccessLevel::WRITE)) {
+            return Json::error($response, 'forbidden', 'Chybí oprávnění pro párování banky nebo změnu úhrady faktury.', 403);
+        }
+        $allocations = $body['payout_allocations'];
+        if (!is_array($allocations) || !array_is_list($allocations) || count($allocations) < 2
+            || count($allocations) > self::PAYOUT_MAX_INVOICES || count($body) !== 1) {
+            return Json::error($response, 'invalid_payout_allocations',
+                'Pro rozpad souhrnné platby zadejte pouze payout_allocations se 2 až 100 doklady.', 422);
+        }
+        $amounts = [];
+        foreach ($allocations as $allocation) {
+            $id = is_array($allocation) ? ($allocation['invoice_id'] ?? null) : null;
+            $cents = is_array($allocation) ? ($allocation['amount_cents'] ?? null) : null;
+            if (!is_array($allocation) || count($allocation) !== 2 || !is_int($id) || $id <= 0
+                || !is_int($cents) || $cents <= 0 || $cents > 999_999_999_999 || isset($amounts[$id])) {
+                return Json::error($response, 'invalid_payout_allocations',
+                    'Každý doklad uveďte právě jednou a zadejte kladnou částku v celých haléřích.', 422);
+            }
+            $amounts[$id] = $cents;
+        }
+        return $this->manualMatchSplit($request, $response, $txId, array_keys($amounts), $amounts);
+    }
+
+    /** @param array<int,int> $amounts */
+    private function payoutMatchReplay(
+        Response $response, int $supplierId, int $txId, string $postedAt, array $amounts,
+    ): Response {
+        $query = $this->db->pdo()->prepare(
+            'SELECT invoice_id, amount, currency, source FROM invoice_payments
+              WHERE bank_transaction_id = ? AND supplier_id = ? FOR UPDATE',
+        );
+        $query->execute([$txId, $supplierId]);
+        $rows = $query->fetchAll(\PDO::FETCH_ASSOC);
+        $stored = [];
+        foreach ($rows as $row) {
+            if ($row['currency'] === 'CZK' && $row['source'] === 'bank') {
+                $stored[(int) $row['invoice_id']] = (int) round((float) $row['amount'] * 100);
+            }
+        }
+        if ($stored != $amounts || count($stored) !== count($rows)) {
+            return Json::error($response, 'tx_already_paired', 'Pohyb už má jiný rozpad úhrady. Nejprve zrušte párování.', 409);
+        }
+        $status = $this->bankPosting->transactionPostingInfo($supplierId, [$txId])[$txId]['status'] ?? null;
+        return Json::ok($response, [
+            'matched' => true, 'split' => true, 'paid_at' => $postedAt, 'invoice_ids' => array_keys($amounts),
+            'posting' => $status === null ? null : ['action' => $status], 'replayed' => true,
+        ]);
     }
 
     private function performManualMatch(Request $request, Response $response, array $args): Response
@@ -3779,9 +3841,9 @@ final class BankStatementAction
      *
      * Pravidla (potvrzeno se zadavatelem):
      *   - jen příchozí platba (amount > 0); přijaté faktury split neřeší (mají vlastní cestu);
-     *   - VŠECHNY faktury musí patřit STEJNÉMU klientovi (tvrdý guard i v potvrzení);
-     *   - každá faktura se uhradí svým PLNÝM zbytkem → součet zbytků (v měně platby) musí
-     *     ≈ částka platby (tolerance jako u kandidátů). Žádné částečné rozpouštění platby.
+     *   - s invoice_ids musí všechny faktury patřit stejnému klientovi;
+     *   - každá faktura se uhradí svým plným zbytkem. Běžné párování má toleranci jako
+     *     návrhy, výslovný rozpad v CZK vyžaduje přesné částky dokladů i pohybu.
      *
      * Každá faktura dostane řádek v invoice_payments se stejným bank_transaction_id
      * (migrace 0119 uvolnila UNIQUE na (bank_transaction_id, invoice_id)). Zaplacená
@@ -3789,8 +3851,9 @@ final class BankStatementAction
      * první fakturu (kvůli kompatibilitě UI/odpárování); úplný seznam drží invoice_payments.
      *
      * @param list<int> $invoiceIds
+     * @param array<int,int>|null $payoutAmounts
      */
-    private function manualMatchSplit(Request $request, Response $response, int $txId, array $invoiceIds): Response
+    private function manualMatchSplit(Request $request, Response $response, int $txId, array $invoiceIds, ?array $payoutAmounts = null): Response
     {
         $this->clientAccess->assertDocuments($request, 'invoice', $invoiceIds);
         $sid = SupplierGuard::currentId($request);
@@ -3799,7 +3862,7 @@ final class BankStatementAction
 
         // Transakce — jen příchozí (sloučená úhrada nám).
         $tx = $pdo->prepare(
-            'SELECT bt.posted_at, bt.statement_id, bt.amount, bt.variable_symbol, bt.bank_ref,
+            'SELECT bt.posted_at, bt.statement_id, bt.amount, bt.variable_symbol, bt.bank_ref, bt.source, bt.match_status,
                     UPPER(COALESCE(NULLIF(bt.currency, ""), NULLIF(bs.currency, ""), "CZK")) AS tx_currency
                FROM bank_transactions bt
                JOIN bank_statements bs ON bs.id = bt.statement_id
@@ -3815,6 +3878,26 @@ final class BankStatementAction
         $postedAt = (string) ($txRow['posted_at'] ?? date('Y-m-d'));
         $statementId = (int) ($txRow['statement_id'] ?? 0);
         $txCcy = (string) ($txRow['tx_currency'] ?? 'CZK');
+        $payoutReplay = $payoutAmounts !== null && $txRow['match_status'] === 'manual';
+        if ($payoutAmounts !== null) {
+            if ($txRow['source'] !== 'statement' || $txCcy !== 'CZK') {
+                return Json::error($response, 'invalid_payout_source', 'Souhrnná úhrada vyžaduje příchozí pohyb v CZK z bankovního výpisu.', 422);
+            }
+            if (array_sum($payoutAmounts) !== (int) round($txAmount * 100)) {
+                return Json::error($response, 'sum_mismatch', 'Součet rozpadu musí přesně odpovídat bankovnímu pohybu.', 409);
+            }
+            if (!$payoutReplay) {
+                $guard = $this->tokenJournalChangeError($request, $response, $txId, false);
+                if ($guard !== null) return $guard;
+                $available = $pdo->prepare('SELECT 1 FROM bank_transactions bt WHERE bt.id = ? AND '
+                    . BankPaymentCandidateScope::sql($sid) . ' AND ' . BankTransactionPostingScope::noMigrationReviewSql('bt')
+                    . ' AND NOT ' . BankTransactionPostingScope::existsSql($sid, 'bt.id'));
+                $available->execute([$txId]);
+                if ($available->fetchColumn() === false) {
+                    return Json::error($response, 'payment_unavailable', 'Bankovní pohyb již není volný pro souhrnnou úhradu.', 409);
+                }
+            }
+        }
 
         // Načti vybrané faktury (supplier scope). Pořadí dle vstupu.
         $place = implode(',', array_fill(0, count($invoiceIds), '?'));
@@ -3828,9 +3911,9 @@ final class BankStatementAction
                       WHERE ip.invoice_id = i.id AND {$reconcilableSql}) AS reconcilable_count
                FROM invoices i
                JOIN currencies cur ON cur.id = i.currency_id
-              WHERE i.id IN ($place)"
+              WHERE i.supplier_id = ? AND i.id IN ($place)" . ($payoutAmounts === null ? '' : ' FOR UPDATE')
         );
-        $stmt->execute($invoiceIds);
+        $stmt->execute([$sid, ...$invoiceIds]);
         $rows = $stmt->fetchAll(\PDO::FETCH_ASSOC) ?: [];
         $byId = [];
         foreach ($rows as $r) {
@@ -3860,13 +3943,25 @@ final class BankStatementAction
             if ($cid <= 0) {
                 return Json::error($response, 'no_client', "Faktura #$iid nemá klienta.", 409);
             }
+            $remaining = round((float) $inv['amount_to_pay'] - (float) $inv['paid_total'], 2);
+            if ($payoutAmounts !== null) {
+                if (strtoupper((string) $inv['currency']) !== 'CZK') {
+                    return Json::error($response, 'currency_mismatch', 'Všechny doklady souhrnné úhrady musí být v CZK.', 409, ['invoice_id' => $iid]);
+                }
+                if ($payoutReplay) continue;
+                if ($inv['status'] === 'paid' || (int) round($remaining * 100) !== $payoutAmounts[$iid]) {
+                    return Json::error($response, 'payout_amount_mismatch', 'Částka souhrnné úhrady musí odpovídat zbývající částce dokladu.', 409, ['invoice_id' => $iid]);
+                }
+                $toPay[$iid] = $remaining;
+                $sumConverted += $remaining;
+                continue;
+            }
             if ($clientId === null) {
                 $clientId = $cid;
             } elseif ($cid !== $clientId) {
                 return Json::error($response, 'client_mismatch',
                     'Sloučená úhrada musí být v rámci jednoho klienta.', 409);
             }
-            $remaining = round((float) $inv['amount_to_pay'] - (float) $inv['paid_total'], 2);
             $isPaid = (string) $inv['status'] === 'paid' || $remaining <= self::CANDIDATE_AMOUNT_TOLERANCE;
             if ($isPaid) {
                 // Zaplacená faktura → rekonciliace (navázat existující platbu, žádné dvojí
@@ -3900,6 +3995,10 @@ final class BankStatementAction
             if (strtoupper((string) $inv['currency']) !== $txCcy) {
                 $hasFx = true;
             }
+        }
+
+        if ($payoutReplay) {
+            return $this->payoutMatchReplay($response, $sid, $txId, $postedAt, $payoutAmounts);
         }
 
         // Guard: součet zbytků (v měně platby) musí ≈ částka platby.
@@ -4040,7 +4139,7 @@ final class BankStatementAction
             'paid_at'         => $postedAt,
             'final_draft_ids' => array_values($finalDraftIds),
             'tax_document_ids' => array_values($taxDocumentIds),
-        ], $ip, $request->getHeaderLine('User-Agent'), $sid);
+        ] + ($payoutAmounts === null ? [] : ['payout_amount_cents_by_invoice' => $payoutAmounts]), $ip, $request->getHeaderLine('User-Agent'), $sid);
 
         // Děkovné e-maily za úhradu — per faktura, best-effort (selhání nesmí rozbít spárování).
         foreach ($paidInvoiceIds as $iid) {

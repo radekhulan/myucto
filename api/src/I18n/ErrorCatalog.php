@@ -18,6 +18,15 @@ final class ErrorCatalog
 {
     /** @var array<string,string> CZ → EN */
     private const MAP = [
+        'Chybí oprávnění pro párování banky nebo změnu úhrady faktury.' => 'You do not have permission to match bank transactions or change invoice payments.',
+        'Pro rozpad souhrnné platby zadejte pouze payout_allocations se 2 až 100 doklady.' => 'For a payout allocation, supply only payout_allocations with 2 to 100 documents.',
+        'Každý doklad uveďte právě jednou a zadejte kladnou částku v celých haléřích.' => 'Specify each document once and enter a positive amount in whole hellers.',
+        'Pohyb už má jiný rozpad úhrady. Nejprve zrušte párování.' => 'The transaction already has a different allocation. Unmatch it first.',
+        'Souhrnná úhrada vyžaduje příchozí pohyb v CZK z bankovního výpisu.' => 'A payout allocation requires an incoming CZK bank statement transaction.',
+        'Součet rozpadu musí přesně odpovídat bankovnímu pohybu.' => 'The allocation total must exactly match the bank transaction.',
+        'Bankovní pohyb již není volný pro souhrnnou úhradu.' => 'The bank transaction is no longer available for payout allocation.',
+        'Všechny doklady souhrnné úhrady musí být v CZK.' => 'All documents in the payout allocation must be in CZK.',
+        'Částka souhrnné úhrady musí odpovídat zbývající částce dokladu.' => 'The payout allocation must equal the remaining amount of the document.',
         'Vyberte 2 až 100 různých bankovních pohybů a zkontrolujte náhled.' => 'Select 2 to 100 different bank transactions and review the preview.',
         'Výběr nebo zůstatek faktury se změnil. Načtěte nový náhled.' => 'The selection or outstanding balance has changed. Reload the preview.',
         'Pohyby se nepodařilo spárovat.' => 'The bank transactions could not be matched.',

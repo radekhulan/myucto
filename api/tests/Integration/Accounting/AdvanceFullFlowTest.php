@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Integration\Accounting;
 
+use MyInvoice\Action\Bank\BankStatementAction;
+use MyInvoice\Action\Invoice\CreatePaymentTaxDocumentAction;
 use MyInvoice\Action\Invoice\IssueInvoiceAction;
 use MyInvoice\Repository\ClosingRepository;
 use MyInvoice\Service\Accounting\JournalLinkService;
@@ -60,6 +62,77 @@ final class AdvanceFullFlowTest extends BankPostingTestCase
     public static function variants(): array
     {
         return ['zálohy přes 324 (výchozí)' => [false], 'záloha přímo na 311' => [true]];
+    }
+
+    public static function payoutVariants(): array
+    {
+        return ['dvě zálohy' => [false], 'dvě zálohy a běžná faktura' => [true]];
+    }
+
+    #[DataProvider('payoutVariants')]
+    public function testPayoutOfDifferentBuyersSupportsSeparateManualTaxDocumentsAndDrawdowns(bool $withInvoice): void
+    {
+        $pdo = $this->db->pdo();
+        $pdo->prepare("UPDATE supplier SET proforma_payment_document = 'manual' WHERE id = ?")->execute([$this->supplierId]);
+        $this->vatRateId = (int) $pdo->query(
+            "SELECT id FROM vat_rates WHERE country = 'CZ' AND rate_percent = 12 AND is_reverse_charge = 0 ORDER BY id LIMIT 1",
+        )->fetchColumn();
+        self::assertGreaterThan(0, $this->vatRateId);
+        $clientA = $this->client('První odběratel zálohy přes terminál');
+        $clientB = $this->client('Druhý odběratel zálohy přes terminál');
+        $proformaA = $this->proforma('41001001', $clientA, 300, 12);
+        $proformaB = $this->proforma('41001002', $clientB, 200, 12);
+        $allocations = [
+            ['invoice_id' => $proformaA, 'amount_cents' => 33600],
+            ['invoice_id' => $proformaB, 'amount_cents' => 22400],
+        ];
+        if ($withInvoice) {
+            $sale = $this->saleInvoice('41001003', $this->client('Odběratel běžné faktury přes terminál'), 100);
+            $this->postPredpis('invoice', $sale, '311', '602', 100);
+            $allocations[] = ['invoice_id' => $sale, 'amount_cents' => 10000];
+        }
+        $day = self::YEAR . '-06-14';
+        $tx = $this->transaction($this->statement(), $withInvoice ? 660 : 560, ['posted_at' => $day]);
+        $match = $this->callAction($this->container->get(BankStatementAction::class), 'manualMatch', 'POST', 'admin',
+            ['payout_allocations' => $allocations], ['id' => (string) $tx]);
+        self::assertSame(200, $match['status'], json_encode($match['body']));
+        self::assertSame('posted', $match['body']['posting']['action'], json_encode($match['body']));
+        self::assertArrayNotHasKey('tax_document_ids', $match['body']);
+
+        $bank = $this->entryFor('bank', $tx);
+        self::assertSame(56000, self::cents($this->side($bank, '324', 'credit')));
+        self::assertSame($withInvoice ? 10000 : 0, self::cents($this->side($bank, '311', 'credit')));
+        self::assertSame($withInvoice ? 66000 : 56000, self::cents($this->side($bank, '221', 'debit')));
+
+        $lookup = $pdo->prepare('SELECT id, paid_on, amount, tax_document_invoice_id FROM invoice_payments WHERE bank_transaction_id = ? AND invoice_id = ?');
+        $entries = [$bank];
+        foreach ([[$proformaA, $clientA, 336, 300, 36], [$proformaB, $clientB, 224, 200, 24]] as [$proforma, $client, $gross, $base, $vat]) {
+            $lookup->execute([$tx, $proforma]);
+            $payment = $lookup->fetch(\PDO::FETCH_ASSOC);
+            self::assertSame($day, $payment['paid_on']);
+            self::assertSame($gross * 100, self::cents((float) $payment['amount']));
+            self::assertNull($payment['tax_document_invoice_id']);
+            $ddkp = $this->callAction($this->container->get(CreatePaymentTaxDocumentAction::class), '__invoke', 'POST', 'admin',
+                [], ['id' => (string) $proforma, 'paymentId' => (string) $payment['id']]);
+            self::assertSame(200, $ddkp['status'], json_encode($ddkp['body']));
+            $taxDocument = $ddkp['body']['tax_document_id'];
+            $this->issue($taxDocument);
+            $taxEntry = $this->ensurePosted($taxDocument);
+            self::assertSame($vat * 100, self::cents($this->side($taxEntry, '324', 'debit')));
+            self::assertSame($vat * 100, self::cents($this->side($taxEntry, '343.200', 'credit')));
+
+            $final = $this->container->get(FinalFromProformaCreator::class)->create($proforma, $this->userId, self::YEAR . '-06-25', self::YEAR . '-07-09');
+            $this->issue($final);
+            $finalEntry = $this->ensurePosted($final);
+            $this->assertSettlementPair($finalEntry, false, $base);
+            self::assertSame(0, self::cents($this->side($finalEntry, '343.200', 'credit')));
+            self::assertNull($this->partnerOf($this->saldo('324', self::YEAR . '-12-31'), $client));
+            $entries[] = $taxEntry;
+            $entries[] = $finalEntry;
+        }
+        $sums = $this->sums($entries);
+        self::assertSame(0, self::cents($sums['324']));
+        self::assertSame(-6000, self::cents($sums['343.200']));
     }
 
     #[DataProvider('variants')]
@@ -383,10 +456,10 @@ final class AdvanceFullFlowTest extends BankPostingTestCase
         return $id;
     }
 
-    private function proforma(string $vs, int $clientId, float $base): int
+    private function proforma(string $vs, int $clientId, float $base, float $vatRate = 21.0): int
     {
         $pdo = $this->db->pdo();
-        $vat = round($base * 0.21, 2);
+        $vat = round($base * ($vatRate / 100), 2);
         $pdo->prepare(
             'INSERT INTO invoices
                 (supplier_id, varsymbol, invoice_type, client_id, issue_date, tax_date, due_date,
@@ -400,8 +473,8 @@ final class AdvanceFullFlowTest extends BankPostingTestCase
             "INSERT INTO invoice_items
                 (invoice_id, description, quantity, unit, unit_price_without_vat, vat_rate_id,
                  vat_rate_snapshot, total_without_vat, total_vat, total_with_vat, order_index)
-             VALUES (?, 'Dílo', 1, 'ks', ?, ?, 21.00, ?, ?, ?, 0)"
-        )->execute([$id, $base, $this->vatRateId, $base, $vat, $base + $vat]);
+             VALUES (?, 'Dílo', 1, 'ks', ?, ?, ?, ?, ?, ?, 0)"
+        )->execute([$id, $base, $this->vatRateId, $vatRate, $base, $vat, $base + $vat]);
         return $id;
     }
 
