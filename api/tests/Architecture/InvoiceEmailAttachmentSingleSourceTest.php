@@ -28,6 +28,7 @@ final class InvoiceEmailAttachmentSingleSourceTest extends TestCase
         'RequestApprovalAction::__invoke'          => 'příloha je PDF výkazu práce, ne faktura',
         'RequestApprovalTestAction::__invoke'      => 'příloha je PDF výkazu práce, ne faktura',
         'MonthlyReportAction::send'                => 'příloha je měsíční účetní výkaz, ne faktura',
+        'QuoteMailer::send'                        => 'příloha je archivovaná verze cenové nabídky',
     ];
 
     /** Cesty, kterými odchází e-mail s PDF faktury; každá musí jít přes pdfAttachment(). */

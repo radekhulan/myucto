@@ -3,6 +3,7 @@ export const PERMISSION_KEYS = [
   'clients', 'clients.create', 'clients.archive', 'clients.public_links',
   'projects', 'projects.create', 'projects.archive',
   'invoices', 'invoices.create', 'invoices.issue', 'invoices.send',
+  'sales_quotes', 'sales_quotes.write', 'sales_quotes.send',
   'invoices.reminder', 'invoices.mark_paid', 'invoices.cancel', 'invoices.clone',
   'invoices.delete', 'invoices.approval', 'invoices.edit_issued',
   'purchase_invoices', 'purchase_invoices.create', 'purchase_invoices.transition',

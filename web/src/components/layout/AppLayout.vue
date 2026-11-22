@@ -482,6 +482,7 @@ const navSections = computed<NavSection[]>(() => {
       items: [
         // 1) Doklady a jejich pořízení.
         { to: '/invoices',         label: t('nav.invoices'),   icon: ICONS.invoices,  newTo: '/invoices/new' },
+        { to: '/sales-quotes',     label: t('nav.sales_quotes'), icon: ICONS.documents, newTo: '/sales-quotes/new', permission: 'sales_quotes', newPermission: 'sales_quotes.write' },
         // AI import vydané faktury — prodejní zrcadlo Nákup → AI import. Nahrát PDF/ISDOC →
         // draft vydané faktury. Permission invoices.create zrcadlí BE AiExtractPdfIssuedAction.
         { to: '/invoices/ai-import', label: t('nav.ai_import'),  icon: ICONS.ai, permission: 'invoices.create' },

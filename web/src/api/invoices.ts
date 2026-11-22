@@ -731,6 +731,7 @@ export interface InvoicePayload {
   revenue_category?: string | null
   revenue_category_id?: number | null
   items: Array<{
+    id?: number | null
     description: string
     quantity: number
     unit: string

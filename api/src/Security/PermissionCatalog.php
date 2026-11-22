@@ -46,6 +46,9 @@ final class PermissionCatalog
             ['invoices.delete', 'invoices', 'Smazat fakturu', $both],
             ['invoices.approval', 'invoices', 'Schvalování faktur', $both],
             ['invoices.edit_issued', 'invoices', 'Upravit vystavenou fakturu', $staffOnly],
+            ['sales_quotes', 'invoices', 'Nabídky', $staffOnly],
+            ['sales_quotes.write', 'invoices', 'Upravovat nabídky', $staffOnly],
+            ['sales_quotes.send', 'invoices', 'Odesílat nabídky', $staffOnly],
             ['purchase_invoices', 'purchase_invoices', 'Přijaté faktury', $both],
             ['purchase_invoices.create', 'purchase_invoices', 'Vytvořit přijatou fakturu', $both],
             ['purchase_invoices.transition', 'purchase_invoices', 'Změnit stav přijaté faktury', $both],
@@ -283,7 +286,7 @@ final class PermissionCatalog
 
         $keys = match ($systemKey) {
             'readonly' => [
-                'dashboard', 'dashboard.portfolio', 'clients', 'projects', 'invoices',
+                'dashboard', 'dashboard.portfolio', 'clients', 'projects', 'invoices', 'sales_quotes',
                 'purchase_invoices', 'purchase_invoices.approve', 'recurring', 'price_list', 'bank', 'documents', 'documents.requests', 'documents.inbox',
                 'accounting', 'property', 'other_items', 'tax_evidence', 'tax_evidence.export', 'reports', 'reports.export',
                 'cash', 'eet', 'assets', 'stock', 'eshop', 'logbook', 'settings.company', 'utilities',

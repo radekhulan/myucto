@@ -31,6 +31,7 @@ final class ResetStorageScope
         'journal',
         'archives',
         'work-reports',
+        'offers',
         'payroll-documents',
         'payroll-payment-exports',
         'payroll-period-exports',

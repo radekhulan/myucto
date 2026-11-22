@@ -694,6 +694,24 @@ final class Routes
         $app->get   ('/api/projects/{id:[0-9]+}/dimensions', [\MyInvoice\Action\Accounting\DimensionDefaultsAction::class, 'getProject']);
         $app->put   ('/api/projects/{id:[0-9]+}/dimensions', [\MyInvoice\Action\Accounting\DimensionDefaultsAction::class, 'saveProject']);
 
+        $quotes = \MyInvoice\Action\SalesQuote\QuoteAction::class;
+        $app->get('/api/sales-quotes', [$quotes, 'list']);
+        $app->post('/api/sales-quotes', [$quotes, 'create']);
+        $app->get('/api/sales-quotes/{id:[0-9]+}', [$quotes, 'get']);
+        $app->put('/api/sales-quotes/{id:[0-9]+}', [$quotes, 'update']);
+        $app->post('/api/sales-quotes/{id:[0-9]+}/revise', [$quotes, 'revise']);
+        $app->post('/api/sales-quotes/{id:[0-9]+}/state', [$quotes, 'state']);
+        $app->post('/api/sales-quotes/{id:[0-9]+}/history', [$quotes, 'history']);
+        $app->post('/api/sales-quotes/{id:[0-9]+}/send', [$quotes, 'send']);
+        $app->post('/api/sales-quotes/{id:[0-9]+}/invoice', [$quotes, 'invoice']);
+        $app->post('/api/sales-quotes/{id:[0-9]+}/order', [$quotes, 'order']);
+        $app->post('/api/sales-quotes/{id:[0-9]+}/files', [$quotes, 'upload']);
+        $app->get('/api/sales-quotes/{id:[0-9]+}/files/{fileId:[0-9]+}', [$quotes, 'file']);
+        $app->delete('/api/sales-quotes/{id:[0-9]+}/files/{fileId:[0-9]+}', [$quotes, 'deleteFile']);
+        $app->get('/api/sales-quotes/{id:[0-9]+}/pdf', [$quotes, 'pdf']);
+        $app->get('/api/sales-quotes/{id:[0-9]+}/history/{eventId:[0-9]+}/files/{fileId:[0-9]+}', [$quotes, 'historyFile']);
+        $app->get('/api/sales-quotes/{id:[0-9]+}/history/{eventId:[0-9]+}/pdf', [$quotes, 'pdf']);
+
         // Invoices (M3 — draft + editor + sumace; vystavení/odeslání/PDF přijde v M4)
         $app->get    ('/api/invoices',              ListInvoicesAction::class);
         $app->get    ('/api/invoices/export.pdf',   ExportSelectedPdfAction::class);

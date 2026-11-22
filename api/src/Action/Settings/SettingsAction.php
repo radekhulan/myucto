@@ -99,6 +99,7 @@ final class SettingsAction
             'recurring_invoice_templates' => ['currency_id'],
             'purchase_orders' => ['currency_id'],
             'sales_orders' => ['currency_id'],
+            'sales_quotes' => ['currency_id'],
         ],
         'clients' => ['clients' => ['currency_default_id']],
         'supplier' => ['supplier' => ['default_currency_id']],

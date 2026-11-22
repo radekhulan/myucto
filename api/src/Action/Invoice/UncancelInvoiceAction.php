@@ -20,6 +20,8 @@ use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Invoice\InvoicePaymentService;
 use MyInvoice\Service\IpMatcher;
 use MyInvoice\Service\Pdf\InvoicePdfRenderer;
+use MyInvoice\Service\SalesQuote\QuoteException;
+use MyInvoice\Service\SalesQuote\QuoteInvoiceService;
 use MyInvoice\Service\Stats\StatsRecomputer;
 use MyInvoice\Service\Stock\StockException;
 use MyInvoice\Service\Stock\StockIssueService;
@@ -144,6 +146,9 @@ final class UncancelInvoiceAction
             $pdo->beginTransaction();
         }
         try {
+            if ($invoice['invoice_type'] === 'invoice' && $this->db->hasColumn('invoice_items', 'sales_quote_item_key')) {
+                QuoteInvoiceService::assertUncancelCanRestoreQuoteItems($pdo, $supplierId, $id, $this->db->hasTable('sales_quote_orders'));
+            }
             $purge = $this->journalPurge->purge($supplierId, 'invoice', [$id, $cancellationId], $meta, 'invoice_uncancel');
             if ($purge['blocked'] !== null) {
                 if ($ownTx && $pdo->inTransaction()) {
@@ -192,6 +197,11 @@ final class UncancelInvoiceAction
             if ($ownTx) {
                 $pdo->commit();
             }
+        } catch (QuoteException $e) {
+            if ($ownTx && $pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            return Json::error($response, $e->errorCode, $e->getMessage(), $e->httpStatus);
         } catch (StockException $e) {
             if ($ownTx && $pdo->inTransaction()) {
                 $pdo->rollBack();

@@ -164,6 +164,7 @@
     "revenue_categories",
     "roles",
     "sales_orders",
+    "sales_quotes",
     "securities504",
     "sent_emails",
     "settings",
@@ -296,6 +297,7 @@
       "project",
       "purchase_invoice",
       "recurring",
+      "sales_quotes",
       "workReportTracking"
     ],
     "client-edit": [
@@ -320,6 +322,7 @@
       "documents",
       "linked_documents",
       "project",
+      "sales_quotes",
       "workReportTracking"
     ],
     "project-edit": [
@@ -341,6 +344,19 @@
       "time_billing",
       "workReportDisplay",
       "work_report_billing"
+    ],
+    "sales-quotes": [
+      "sales_quotes"
+    ],
+    "sales-quote-new": [
+      "markdown_editor",
+      "sales_quotes",
+      "time_billing"
+    ],
+    "sales-quote-detail": [
+      "markdown_editor",
+      "sales_quotes",
+      "time_billing"
     ],
     "invoice-ai-import": [
       "aiGateway",

@@ -560,6 +560,8 @@ final class GlobalSeedTables
         'retention_holds',
         'sales_order_fulfillment_links', 'sales_order_invoice_links', 'sales_order_lines',
         'sales_order_operation_keys', 'sales_order_reservations', 'sales_order_returns', 'sales_orders',
+        'sales_quote_counters', 'sales_quote_documents', 'sales_quote_events', 'sales_quote_files',
+        'sales_quote_orders', 'sales_quote_version_files', 'sales_quote_versions', 'sales_quotes',
         'sample_data_entries',
         'scan_batch_items', 'scan_matches',
         'shoptet_import_batches', 'shoptet_orders',

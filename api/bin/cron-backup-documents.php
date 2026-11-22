@@ -69,6 +69,7 @@ $extra = \MyInvoice\Service\Backup\BackupFileCollector::collect(
         [RuntimePaths::storage('archives'), null, 'storage/archives'],
         [RuntimePaths::storage('closing-packages'), null, 'storage/closing-packages'],
         [RuntimePaths::storage('supplier-logos'), null, 'storage/supplier-logos'],
+        [RuntimePaths::storage('offers'), null, 'storage/offers'],
     ],
     [],
     ['.tmp-'],

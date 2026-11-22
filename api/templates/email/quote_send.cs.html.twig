@@ -1,0 +1,8 @@
+{% extends '_layout.html.twig' %}
+
+{% block content %}
+<h1 style="margin:0 0 16px;font-size:22px;">Cenová nabídka {{ quote_number }}</h1>
+{% if quote_title %}<p><strong>{{ quote_title }}</strong></p>{% endif %}
+<p style="margin:0 0 16px;">{{ message|nl2br }}</p>
+{% if valid_until %}<p>Platí do {{ valid_until|date('j. n. Y') }}.</p>{% endif %}
+{% endblock %}

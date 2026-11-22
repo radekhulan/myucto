@@ -3015,6 +3015,7 @@ function buildPayload(items: InvoiceItem[]): InvoicePayload {
       revenue_category_id: form.value.revenue_category_id,
       // Textový řádek jde jen jako druh + text + pořadí; zbytek si server vynuluje.
       items: items.map((it, i) => isTextItem(it) ? textItemPayload(it, i) : ({
+        id: it.id ?? null,
         description: it.description,
         quantity: itemQuantity(it),
         duration_minutes: isTimeItem(it) ? (it.duration_minutes ?? null) : null,
