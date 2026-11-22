@@ -563,8 +563,8 @@ final class StockImporter
         return (string) UnitPricePrecision::toDecimalString(number_format($price, UnitPricePrecision::DECIMALS, '.', ''));
     }
 
-    /** Sazba DPH karty z pořadí sazby POHODY; snížená podle kalendářního roku konce období agendy. */
-    private static function vatPercent(int $slot, int $year): ?float
+    /** Sazba DPH karty (a položky objednávky, {@see OrderImporter}) z pořadí sazby POHODY; snížená podle kalendářního roku. */
+    public static function vatPercent(int $slot, int $year): ?float
     {
         return match ($slot) {
             0 => 0.0,

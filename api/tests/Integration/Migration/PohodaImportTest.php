@@ -24,6 +24,7 @@ use MyInvoice\Service\Oss\OssLedgerService;
 use MyInvoice\Service\Payroll\PayrollModuleAccess;
 use MyInvoice\Tests\Fixtures\Pohoda\OssVariant;
 use MyInvoice\Tests\Fixtures\Pohoda\SyntheticPohodaExport;
+use MyInvoice\Tests\Fixtures\Pohoda\SyntheticPohodaMdbExport;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
 
@@ -1647,6 +1648,97 @@ final class PohodaImportTest extends TestCase
         $again = $this->importer->run($supplierId, $this->userId, $export, false, stock: ['warehouses' => ['HL' => 'goods', 'MAT' => 'material', 'KON' => 'skip']]);
         self::assertNotContains('stock_module_enabled', $this->messageCodes($again));
         self::assertSame(1, $this->stockActivity($supplierId));
+    }
+
+    /**
+     * Otevřené objednávky z datového souboru ({@see SyntheticPohodaMdbExport::writeOrders()}):
+     * vydaná se převede jako odeslaná nákupní objednávka se zbývajícím množstvím a kartou
+     * ze skladu, takže proti ní jde přijímat; vyřízená a celá dodaná se nepřevedou; položka
+     * s kartou, kterou sklad nepřevedl, zůstane textová s upozorněním; přijatá objednávka je
+     * koncept prodejní objednávky. Opakovaný převod nic nepřidá.
+     */
+    public function testOpenOrdersAreTakenOverWithRemainingQuantityAndStockCards(): void
+    {
+        $supplierId = $this->supplier();
+        $this->db->pdo()->prepare('UPDATE supplier SET stock_enabled = 1 WHERE id = ?')->execute([$supplierId]);
+        $dir = SyntheticPohodaMdbExport::writeOrders($this->tmp);
+        SyntheticPohodaExport::withStock($dir);
+        $export = PohodaExport::open($dir);
+        $stock = ['warehouses' => ['HL' => 'goods', 'MAT' => 'material', 'KON' => 'skip']];
+
+        // Zkouška nanečisto objednávky projde a nic nezanechá.
+        $dry = $this->importer->run($supplierId, $this->userId, $export, true, stock: $stock);
+        self::assertFalse($dry->hasErrors(), $this->explain($dry));
+        self::assertSame(2, self::stepCounts($dry, 'orders')['created'] ?? 0, $this->explain($dry));
+        self::assertSame(0, $this->rows('purchase_orders', $supplierId) + $this->rows('sales_orders', $supplierId));
+
+        $protocol = $this->importer->run($supplierId, $this->userId, $export, false, stock: $stock);
+        self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
+        $counts = self::stepCounts($protocol, 'orders');
+        foreach (['created' => 2, 'purchase_orders' => 1, 'sales_orders' => 1, 'skipped_fulfilled' => 2, 'lines' => 4,
+            'lines_partially_delivered' => 1, 'lines_without_card' => 1, 'lines_skipped_text' => 1] as $key => $expected) {
+            self::assertSame($expected, $counts[$key] ?? 0, $key . ': ' . $this->explain($protocol));
+        }
+        self::assertContains('order_lines_without_card', $this->messageCodes($protocol));
+        self::assertStringContainsString('Neznámá karta', $this->message($protocol, 'order_lines_without_card'));
+
+        $order = $this->db->pdo()->prepare(
+            "SELECT o.id, o.state, o.order_date, o.expected_date, c.ic, w.code AS warehouse FROM purchase_orders o
+               JOIN clients c ON c.id = o.vendor_id JOIN warehouses w ON w.id = o.warehouse_id
+              WHERE o.supplier_id = ? AND o.order_number = ?"
+        );
+        $order->execute([$supplierId, SyntheticPohodaMdbExport::OPEN_ISSUED_ORDER]);
+        $header = $order->fetch(\PDO::FETCH_ASSOC);
+        self::assertIsArray($header, $this->explain($protocol));
+        self::assertSame(['sent', '2026-03-02', '2026-03-20', SyntheticPohodaExport::VENDOR_ICO, 'HL'],
+            [$header['state'], $header['order_date'], $header['expected_date'], $header['ic'], $header['warehouse']]);
+        $lines = $this->db->pdo()->prepare(
+            'SELECT l.description, i.sku, w.code AS warehouse, l.unit, l.qty_ordered, l.unit_price, v.rate_percent
+               FROM purchase_order_lines l LEFT JOIN stock_items i ON i.id = l.stock_item_id
+               LEFT JOIN warehouses w ON w.id = l.warehouse_id LEFT JOIN vat_rates v ON v.id = l.vat_rate_id
+              WHERE l.supplier_id = ? AND l.order_id = ? ORDER BY l.line_no'
+        );
+        $lines->execute([$supplierId, $header['id']]);
+        self::assertSame([
+            ['Kabel', 'K-001', 'HL', 'm', '6.000', '95.000000', '21.00'],
+            ['Doprava', null, null, 'ks', '1.000', '150.000000', '21.00'],
+            ['Neznámá karta', null, null, 'ks', '2.000', '20.000000', '21.00'],
+        ], array_map(static fn (array $r): array => array_values(array_map(static fn ($v) => $v === null ? null : (string) $v, $r)), $lines->fetchAll(\PDO::FETCH_ASSOC)));
+        self::assertSame(0, $this->rows('purchase_orders', $supplierId, "order_number IN ('" . SyntheticPohodaMdbExport::FULFILLED_ISSUED_ORDER . "', '" . SyntheticPohodaMdbExport::DELIVERED_ISSUED_ORDER . "')"));
+
+        // Na skladě zbývá přijmout 6 m kabelu proti objednávce (řádky bez karty se nepřijímají).
+        $detail = Bootstrap::buildContainer()->get(\MyInvoice\Service\Stock\PurchaseOrderService::class)->detail($supplierId, (int) $header['id']);
+        self::assertSame(['6.000', '0.000'], [$detail['qty_remaining_total'] ?? null, $detail['qty_received_total'] ?? null]);
+
+        $sales = $this->db->pdo()->prepare(
+            "SELECT o.commercial_status, o.currency_code, c.ic, l.description, i.sku, w.code AS warehouse, l.quantity, l.unit_price, l.vat_rate_snapshot
+               FROM sales_orders o JOIN clients c ON c.id = o.client_id
+               JOIN sales_order_lines l ON l.order_id = o.id AND l.supplier_id = o.supplier_id
+               LEFT JOIN stock_items i ON i.id = l.stock_item_id LEFT JOIN warehouses w ON w.id = l.warehouse_id
+              WHERE o.supplier_id = ? AND o.order_number = ?"
+        );
+        $sales->execute([$supplierId, SyntheticPohodaMdbExport::OPEN_RECEIVED_ORDER]);
+        self::assertSame([['draft', 'CZK', SyntheticPohodaExport::CUSTOMER_ICO, 'Šroub', 'M-001', 'MAT', '100.000', '0.500000', '21.00']],
+            array_map(static fn (array $r): array => array_values(array_map('strval', $r)), $sales->fetchAll(\PDO::FETCH_ASSOC)), $this->explain($protocol));
+
+        $again = $this->importer->run($supplierId, $this->userId, $export, false, stock: $stock);
+        self::assertFalse($again->hasErrors(), $this->explain($again));
+        $counts = self::stepCounts($again, 'orders');
+        self::assertSame([2, 0, 2], [$counts['existing'] ?? 0, $counts['created'] ?? 0, $counts['skipped_fulfilled'] ?? 0], $this->explain($again));
+        self::assertSame(1, $this->rows('purchase_orders', $supplierId));
+        self::assertSame(3, $this->rows('purchase_order_lines', $supplierId));
+        self::assertSame(1, $this->rows('sales_orders', $supplierId));
+        self::assertSame(1, $this->rows('sales_order_lines', $supplierId));
+    }
+
+    /** Export datového souboru ze staršího převodníku objednávky nenese: krok se přeskočí s informací. */
+    public function testExportWithoutOrderTablesSkipsOrdersWithInfo(): void
+    {
+        $supplierId = $this->supplier();
+        $protocol = $this->importer->run($supplierId, $this->userId, PohodaExport::open(SyntheticPohodaMdbExport::writeSharedBankNumber($this->tmp)), false);
+        self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
+        self::assertContains('no_orders_export', $this->messageCodes($protocol));
+        self::assertSame(0, $this->rows('purchase_orders', $supplierId) + $this->rows('sales_orders', $supplierId));
     }
 
     /**

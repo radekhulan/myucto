@@ -52,6 +52,14 @@ $PohodaAccountingTables = [ordered]@{
     Uhrady   = @('ID', 'RelIDH', 'RelAgH', 'RelAgU', 'DatumU', 'RelIDU', 'CisloU', 'KcU', 'CisloH', 'VarSymH')
     sKonfig  = @('ICO', 'Rok', 'RelRokTp', 'DatRokOd', 'DatRokDo', 'RelUTyp')
     Verze    = @('ID', 'Verze')
+    # Objednávky (RelTpObj 1 = přijatá, 2 = vydaná) a jejich položky. Převod bere jen
+    # nevyřízené: příznak Vyrizeno, storno DatStorn a dodané množství položky Dodano.
+    # Položka odkazuje na kartu zásoby RefSKz (ID karty v 92_sklad.xml). Nejsou povinné,
+    # agenda bez objednávek nebo starší POHODA je nemusí mít.
+    OBJ      = @('ID', 'Cislo', 'RelTpObj', 'Datum', 'DatDod', 'DatStorn', 'Vyrizeno', 'SText', 'PDoklad',
+                 'RefAD', 'Firma', 'Jmeno', 'Ulice', 'Obec', 'PSC', 'ICO', 'DIC', 'RefZeme', 'RefCM', 'CmKurs', 'CmMnoz', 'KcCelkem', 'CmCelkem', 'Pozn')
+    OBJpol   = @('ID', 'RefAg', 'RefSKz', 'Kod', 'SText', 'Mnozstvi', 'Dodano', 'MJ', 'MJKoef', 'KcJedn', 'Sleva',
+                 'RelSzDPH', 'ProcentoDPH', 'SDph', 'Kc', 'KcDPH', 'CmJedn', 'Cm', 'OrderFld')
 }
 
 $PohodaRequiredTables = @(

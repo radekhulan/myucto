@@ -64,6 +64,10 @@ final class PohodaImportRepository extends AbstractMigrationImportRepository
     public const KIND_STOCK_PRICE_LEVEL = 'stock_price_level';
     /** Větev členění skladu (otisk cesty názvů) => stock_categories.id. */
     public const KIND_STOCK_CATEGORY = 'stock_category';
+    /** Otevřená vydaná objednávka POHODY podle čísla => purchase_orders.id. */
+    public const KIND_PURCHASE_ORDER = 'purchase_order';
+    /** Otevřená přijatá objednávka POHODY podle čísla => sales_orders.id. */
+    public const KIND_SALES_ORDER = 'sales_order';
     /** Převedený měsíc mezd: `období|otisk sešitu` => id dávky importu docházky. */
     public const KIND_PAYROLL_MONTH = 'payroll_month';
     /** Převedená trvalá srážka: reference srážky v PAMICA => id případu nebo dohody. */

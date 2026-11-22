@@ -598,6 +598,46 @@ final class PohodaMdbAccountingTest extends TestCase
         $this->mapper(['FA' => [['ID' => '1', 'Cislo' => 'TEST-OLD', 'RelTpFak' => '1', 'Datum' => '2014-06-30', 'Kc3' => '100', 'KcDPH3' => '10']]]);
     }
 
+    /**
+     * Objednávky (`OBJ`, `OBJpol`): druh podle `RelTpObj` (2 vydaná, 1 přijatá, jiný neznámý),
+     * příznak vyřízení, storno, dodané množství a karta položky, měna z číselníku a partner
+     * ve tvaru identity dokladu. Export ze staršího převodníku objednávky nenese.
+     */
+    public function testOrdersCarryTypeFulfilmentDeliveredQuantityAndCard(): void
+    {
+        self::assertFalse($this->mapper([])->hasOrders());
+        self::assertSame([], iterator_to_array($this->mapper([])->orders()));
+
+        $orders = iterator_to_array($this->mapper([
+            'sCMeny' => [['ID' => '9', 'Kod' => 'eur']],
+            'sZeme' => [['ID' => '1', 'IDS' => 'CZ']],
+            'OBJ' => [
+                ['ID' => '1', 'Cislo' => 'OV1', 'RelTpObj' => '2', 'Datum' => '2026-03-02T00:00:00', 'DatDod' => '2026-03-20T00:00:00', 'Vyrizeno' => 'false',
+                    'RefAD' => '5', 'Firma' => 'Dodavatel Test s.r.o.', 'ICO' => '12345679', 'RefZeme' => '1', 'RefCM' => '9', 'CmKurs' => '25.1', 'CmMnoz' => '1'],
+                ['ID' => '2', 'Cislo' => 'OP1', 'RelTpObj' => '1', 'Datum' => '2026-03-03T00:00:00', 'Vyrizeno' => 'true', 'RefAD' => '0', 'DatStorn' => '1899-12-30T00:00:00'],
+                ['ID' => '3', 'Cislo' => 'OX1', 'RelTpObj' => '7', 'DatStorn' => '2026-03-05T00:00:00'],
+            ],
+            'OBJpol' => [
+                ['ID' => '11', 'RefAg' => '1', 'RefSKz' => '0', 'SText' => 'Doprava', 'Mnozstvi' => '1', 'Kc' => '150', 'OrderFld' => '2'],
+                ['ID' => '10', 'RefAg' => '1', 'RefSKz' => '101', 'Kod' => 'K-001', 'SText' => 'Kabel', 'Mnozstvi' => '10', 'Dodano' => '4', 'MJ' => 'm', 'MJKoef' => '1',
+                    'Kc' => '950', 'ProcentoDPH' => '21', 'SDph' => 'false', 'Cm' => '37.85', 'OrderFld' => '1'],
+            ],
+        ])->orders(), false);
+
+        self::assertSame(['issued', 'received', null], array_column($orders, 'type'));
+        self::assertSame([false, true, false], array_column($orders, 'fulfilled'));
+        self::assertSame([false, false, true], array_column($orders, 'cancelled'));
+        self::assertSame(['2026-03-20', 'EUR', 25.1], [$orders[0]['delivery'], $orders[0]['currency'], $orders[0]['rate']]);
+        self::assertSame(['5', 'Dodavatel Test s.r.o.', '12345679', 'CZ'], [$orders[0]['partner']['id'], $orders[0]['partner']['address']['company'],
+            $orders[0]['partner']['address']['ico'], $orders[0]['partner']['address']['country']['ids']]);
+        self::assertSame('', $orders[1]['partner']['id']);
+        $items = $orders[0]['items'];
+        self::assertSame(['101', ''], array_column($items, 'card'));
+        self::assertSame([[10.0, 4.0, 950.0, 21.0, 37.85], [1.0, 0.0, 150.0, null, null]],
+            array_map(static fn (array $i): array => [$i['quantity'], $i['delivered'], $i['price'], $i['vat_percent'], $i['foreign_price']], $items));
+        self::assertSame([], $orders[1]['items']);
+    }
+
     private function mapper(array $data): PohodaMdbAccounting
     {
         $tables = array_fill_keys(['pUD', 'pOS', 'sDPH', 'sDPHTp', 'pPK', 'FA', 'FApol', 'AD', 'sUcet', 'sZeme', 'sCMeny', 'sFormUh', 'BV', 'BVpol', 'HO', 'HOpol', 'pINT', 'pINTpol', 'Uhrady'], []);
