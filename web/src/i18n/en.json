@@ -827,6 +827,12 @@
     "totals": "Basis total {basis} · balance {balance} as of {date}",
     "empty": "No item matches the filter.",
     "empty_title": "No accrual items yet",
+    "unused": {
+      "title": "The agenda has no items yet",
+      "hint": "The balance of the accrual accounts comes from the conversion and is waiting to be taken over. Take over the POHODA items with Take over from POHODA and create or assign the other entries from the rows without an item. The reconciliation difference then drops to zero.",
+      "difference_title": "Balance to take over into the agenda",
+      "empty_hint": "Take over the accrual account balance from the conversion with Take over from POHODA. Create or assign entries the takeover does not cover from the rows without an item in the reconciliation above."
+    },
     "empty_hint": "Create an item manually, from a document or from an account 381/384 line without an item. The agenda releases the balance to expenses or revenue according to the schedule.",
     "book": "Breakdown as of date",
     "book_failed": "The accruals breakdown could not be downloaded.",

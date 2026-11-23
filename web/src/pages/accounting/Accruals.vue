@@ -300,6 +300,9 @@ async function loadReconciliation() {
 function hasDifference(value: number): boolean {
   return Math.abs(Number(value)) >= 0.005
 }
+// Agenda bez jediné položky: zůstatek 381–385 z převodu je „k převzetí“, ne chyba odsouhlasení.
+const agendaUnused = computed(() => !!reconciliation.value && reconciliation.value.accounts.length > 0
+  && reconciliation.value.accounts.every(row => Number(row.items_count) === 0 && !hasDifference(row.items_balance)))
 function filterByAccount(code: string) {
   account.value = code
   tab.value = 'items'
@@ -533,6 +536,17 @@ onActivated(() => { if (mounted) reloadAll(); mounted = true })
       <p v-else-if="reconciliationLoading && !reconciliation" class="px-4 py-3 text-sm text-neutral-500">{{ t('common.loading') }}</p>
       <p v-else-if="reconciliation && !reconciliation.accounts.length" class="px-4 py-3 text-sm text-neutral-500">{{ t('accruals.reconciliation.empty') }}</p>
       <div v-else-if="reconciliation" class="overflow-x-auto">
+        <div v-if="agendaUnused" role="note" data-test="accruals-unused-hint"
+          class="flex flex-wrap items-start justify-between gap-3 border-b border-primary-100 bg-primary-50 px-4 py-3 text-sm text-primary-900">
+          <div class="min-w-0 flex-1">
+            <p class="font-semibold">{{ t('accruals.unused.title') }}</p>
+            <p class="mt-1">{{ t('accruals.unused.hint') }}</p>
+          </div>
+          <RouterLink v-if="canWrite" :to="{ name: 'accounting-accruals-takeover' }" :class="[btnOutlineSm('primary'), 'whitespace-nowrap']">
+            <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.upload" /></svg>
+            {{ t('accruals.takeover.open') }}
+          </RouterLink>
+        </div>
         <table class="w-full text-sm">
           <thead class="bg-neutral-50 text-xs uppercase tracking-wide text-neutral-500">
             <tr>
@@ -555,7 +569,8 @@ onActivated(() => { if (mounted) reloadAll(); mounted = true })
                 <td class="whitespace-nowrap px-3 py-2 text-right font-mono">{{ formatMoney(row.ledger_balance) }}</td>
                 <td class="whitespace-nowrap px-3 py-2 text-right font-mono">{{ formatMoney(row.items_balance) }}</td>
                 <td class="whitespace-nowrap px-3 py-2 text-right font-mono">{{ formatMoney(row.closing_balance) }}</td>
-                <td class="whitespace-nowrap px-3 py-2 text-right font-mono" :class="hasDifference(row.difference) ? 'font-semibold text-danger-600' : 'text-neutral-500'">{{ formatMoney(row.difference) }}</td>
+                <td class="whitespace-nowrap px-3 py-2 text-right font-mono" :class="!hasDifference(row.difference) ? 'text-neutral-500' : agendaUnused ? 'font-semibold text-neutral-700' : 'font-semibold text-danger-600'"
+                  :title="agendaUnused && hasDifference(row.difference) ? t('accruals.unused.difference_title') : undefined">{{ formatMoney(row.difference) }}</td>
                 <td class="px-3 py-2 text-right">
                   <button v-if="hasDifference(row.difference)" type="button" :data-test="`unallocated-toggle-${row.account_code}`"
                     :class="[btnOutlineSm('warning'), 'whitespace-nowrap']" :aria-expanded="unallocatedAccount === row.account_code"
@@ -606,7 +621,7 @@ onActivated(() => { if (mounted) reloadAll(); mounted = true })
               <td class="whitespace-nowrap px-3 py-2 text-right font-mono">{{ formatMoney(reconciliation.totals.ledger_balance) }}</td>
               <td class="whitespace-nowrap px-3 py-2 text-right font-mono">{{ formatMoney(reconciliation.totals.items_balance) }}</td>
               <td class="whitespace-nowrap px-3 py-2 text-right font-mono">{{ formatMoney(reconciliation.totals.closing_balance) }}</td>
-              <td class="whitespace-nowrap px-3 py-2 text-right font-mono" :class="hasDifference(reconciliation.totals.difference) ? 'text-danger-600' : ''" data-test="reconciliation-difference">{{ formatMoney(reconciliation.totals.difference) }}</td>
+              <td class="whitespace-nowrap px-3 py-2 text-right font-mono" :class="hasDifference(reconciliation.totals.difference) && !agendaUnused ? 'text-danger-600' : ''" data-test="reconciliation-difference">{{ formatMoney(reconciliation.totals.difference) }}</td>
               <td></td>
             </tr>
           </tfoot>
@@ -676,6 +691,8 @@ onActivated(() => { if (mounted) reloadAll(); mounted = true })
         <TableSkeleton :rows="6" :cols="7" />
       </div>
       <EmptyState v-else-if="failed && !items.length" boxed variant="failed" @action="load()" />
+      <EmptyState v-else-if="!items.length && agendaUnused" boxed icon="doc" data-test="accruals-unused-empty" :title="t('accruals.empty_title')"
+        :message="t('accruals.unused.empty_hint')" :cta="canWrite ? t('accruals.takeover.open') : undefined" to="/accounting/accruals/takeover" />
       <EmptyState v-else-if="!items.length && hasActiveFilters" boxed variant="filtered" :title="t('accruals.empty')"
         :cta="t('common.empty_state.clear_filters')" @action="clearFilters" />
       <EmptyState v-else-if="!items.length" boxed icon="doc" :title="t('accruals.empty_title')" :message="t('accruals.empty_hint')"

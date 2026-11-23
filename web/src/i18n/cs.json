@@ -827,6 +827,12 @@
     "totals": "Základ celkem {basis} · zůstatek {balance} k {date}",
     "empty": "Filtru neodpovídá žádná položka.",
     "empty_title": "Zatím žádné položky časového rozlišení",
+    "unused": {
+      "title": "Agenda zatím nemá žádné položky",
+      "hint": "Zůstatek účtů časového rozlišení pochází z převodu a čeká na převzetí. Položky z POHODY převezmete tlačítkem Převzít z POHODY, ostatní zápisy založíte nebo přiřadíte z řádků bez položky. Rozdíl v odsouhlasení pak klesne na nulu.",
+      "difference_title": "Zůstatek k převzetí do agendy",
+      "empty_hint": "Zůstatek účtů časového rozlišení z převodu převezmete tlačítkem Převzít z POHODY. Zápisy, které převzetí nepokryje, založte nebo přiřaďte z řádků bez položky v odsouhlasení výše."
+    },
     "empty_hint": "Založte položku ručně, z dokladu nebo z řádku účtu 381/384 bez položky. Agenda podle plánu rozpouští zůstatek do nákladů nebo výnosů.",
     "book": "Rozpis k datu",
     "book_failed": "Rozpis časového rozlišení se nepodařilo stáhnout.",
