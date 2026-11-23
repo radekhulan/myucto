@@ -4,12 +4,15 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Integration\Payroll\Import\Attendance;
 
-use MyInvoice\Bootstrap;
+use DI\Container;
+use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\Payroll\PayrollImportProfileRepository;
+use MyInvoice\Service\Demo\DemoMode;
 use MyInvoice\Service\Payroll\Import\Attendance\AttendanceImportService;
 use MyInvoice\Service\Payroll\Import\Attendance\AttendanceMeaning;
 use MyInvoice\Service\Payroll\Import\Attendance\AttendanceMyUctoSampleProfile;
+use MyInvoice\Service\Payroll\Import\Attendance\AttendancePamicaSampleProfile;
 use MyInvoice\Service\Payroll\Import\Attendance\AttendanceSampleProfile;
 use MyInvoice\Tests\Support\IsolatedSupplierTrait;
 use PDO;
@@ -36,7 +39,7 @@ final class AttendanceSampleSeedTest extends TestCase
 
     protected function setUp(): void
     {
-        $container = Bootstrap::buildContainer();
+        $container = \MyInvoice\Tests\Support\PayrollTestContainer::build();
         $db = $container->get(Connection::class);
         $service = $container->get(AttendanceImportService::class);
         $profiles = $container->get(PayrollImportProfileRepository::class);
@@ -58,7 +61,8 @@ final class AttendanceSampleSeedTest extends TestCase
         }
         $this->supplierId = $this->createIsolatedSupplier($pdo, $sourceSupplierId);
         $pdo->prepare(
-            'UPDATE supplier SET payroll_attendance_sample_seeded_at = NULL, payroll_attendance_myucto_sample_seeded_at = NULL WHERE id = ?',
+            'UPDATE supplier SET payroll_attendance_sample_seeded_at = NULL, payroll_attendance_myucto_sample_seeded_at = NULL,
+                payroll_attendance_pamica_sample_seeded_at = NULL WHERE id = ?',
         )->execute([$this->supplierId]);
     }
 
@@ -79,13 +83,13 @@ final class AttendanceSampleSeedTest extends TestCase
         $this->db->close();
     }
 
-    /** Nová firma dostane oba vzory, každý jednou a s vlastní značkou. */
+    /** Nová firma dostane všechny vzory, každý jednou a s vlastní značkou. */
     public function testNewCompanyGetsBothSamplesOnce(): void
     {
         $this->service->profiles($this->supplierId());
         $this->service->profiles($this->supplierId());
 
-        self::assertSame(['giriton' => 1, 'myucto' => 1], $this->sampleCounts());
+        self::assertSame(['giriton' => 1, 'myucto' => 1, 'pamica' => 1], $this->sampleCounts());
         $samples = $this->samplesByKey();
         self::assertSame(AttendanceSampleProfile::NAME, $samples['giriton']['name']);
         self::assertSame(AttendanceMyUctoSampleProfile::NAME, $samples['myucto']['name']);
@@ -93,6 +97,9 @@ final class AttendanceSampleSeedTest extends TestCase
         self::assertSame(AttendanceMyUctoSampleProfile::VERSION, $samples['myucto']['sample_version']);
         self::assertNotNull($this->marker('payroll_attendance_sample_seeded_at'));
         self::assertNotNull($this->marker('payroll_attendance_myucto_sample_seeded_at'));
+        self::assertSame(AttendancePamicaSampleProfile::NAME, $samples['pamica']['name']);
+        self::assertSame(AttendancePamicaSampleProfile::rules(), $samples['pamica']['rules']);
+        self::assertNotNull($this->marker('payroll_attendance_pamica_sample_seeded_at'));
     }
 
     /**
@@ -107,23 +114,23 @@ final class AttendanceSampleSeedTest extends TestCase
             ->execute([$this->supplierId()]);
 
         $this->service->profiles($this->supplierId());
-        self::assertSame(['giriton' => 1, 'myucto' => 1], $this->sampleCounts());
+        self::assertSame(['giriton' => 1, 'myucto' => 1, 'pamica' => 1], $this->sampleCounts());
         self::assertSame($giriton, $this->samplesByKey()['giriton']['id'], 'Stávající GIRITON zůstal, nový nevznikl.');
 
         $myucto = $this->samplesByKey()['myucto']['id'];
         self::assertTrue($this->service->deleteProfile($this->supplierId(), $myucto));
         $this->service->profiles($this->supplierId());
-        self::assertSame(['giriton' => 1], $this->sampleCounts(), 'Smazaný Vzor MyÚčto se nevrací.');
+        self::assertSame(['giriton' => 1, 'pamica' => 1], $this->sampleCounts(), 'Smazaný Vzor MyÚčto se nevrací.');
 
         self::assertFalse($this->service->restoreSampleProfile($this->supplierId(), $this->userId, 'giriton')['restored']);
-        self::assertSame(['giriton' => 1], $this->sampleCounts());
+        self::assertSame(['giriton' => 1, 'pamica' => 1], $this->sampleCounts());
 
         $restored = $this->service->restoreSampleProfile($this->supplierId(), $this->userId, 'myucto');
         self::assertTrue($restored['restored']);
         self::assertSame('myucto', $restored['profile']['sample_key']);
         self::assertSame(AttendanceMyUctoSampleProfile::NAME, $restored['profile']['name']);
         self::assertFalse($this->service->restoreSampleProfile($this->supplierId(), $this->userId, 'myucto')['restored']);
-        self::assertSame(['giriton' => 1, 'myucto' => 1], $this->sampleCounts());
+        self::assertSame(['giriton' => 1, 'myucto' => 1, 'pamica' => 1], $this->sampleCounts());
 
         $this->expectException(\InvalidArgumentException::class);
         $this->service->restoreSampleProfile($this->supplierId(), $this->userId, 'neznamy');
@@ -168,6 +175,34 @@ final class AttendanceSampleSeedTest extends TestCase
     }
 
     /**
+     * Veřejná ukázka je jen ke čtení: otevření importu nezaloží chybějící vzory,
+     * nenastaví značky na firmě ani nepřevede nedotčený starší vzor na novou verzi.
+     */
+    public function testDemoNeitherSeedsNorUpgradesSamples(): void
+    {
+        $staleMyUcto = array_values(array_filter(
+            AttendanceMyUctoSampleProfile::rules(),
+            static fn (array $rule): bool => $rule['meaning'] !== 'net_other_deduction',
+        ));
+        $myucto = $this->insertSample(AttendanceMyUctoSampleProfile::NAME, $staleMyUcto, AttendanceMyUctoSampleProfile::components(), 0, 'myucto');
+        $container = \MyInvoice\Tests\Support\PayrollTestContainer::build();
+        self::assertInstanceOf(Container::class, $container);
+        $container->set(DemoMode::class, new DemoMode(new Config(['demo' => ['enabled' => true]])));
+        $service = $container->get(AttendanceImportService::class);
+        self::assertInstanceOf(AttendanceImportService::class, $service);
+
+        $profiles = $service->profiles($this->supplierId());
+
+        self::assertSame([$myucto], array_column($profiles, 'id'));
+        self::assertSame(['myucto' => 1], $this->sampleCounts());
+        self::assertSame($staleMyUcto, $this->samplesByKey()['myucto']['rules']);
+        self::assertSame(0, $this->samplesByKey()['myucto']['sample_version']);
+        self::assertNull($this->marker('payroll_attendance_sample_seeded_at'));
+        self::assertNull($this->marker('payroll_attendance_myucto_sample_seeded_at'));
+        self::assertNull($this->marker('payroll_attendance_pamica_sample_seeded_at'));
+    }
+
+    /**
      * Migrace 2206 je opakovatelná a vzorům bez klíče doplní GIRITON; vlastní
      * profily klíč nedostanou.
      */
@@ -201,7 +236,8 @@ final class AttendanceSampleSeedTest extends TestCase
     private function markBothSeeded(): void
     {
         $this->db->pdo()->prepare(
-            'UPDATE supplier SET payroll_attendance_sample_seeded_at = NOW(), payroll_attendance_myucto_sample_seeded_at = NOW() WHERE id = ?',
+            'UPDATE supplier SET payroll_attendance_sample_seeded_at = NOW(), payroll_attendance_myucto_sample_seeded_at = NOW(),
+                payroll_attendance_pamica_sample_seeded_at = NOW() WHERE id = ?',
         )->execute([$this->supplierId()]);
     }
 

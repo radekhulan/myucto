@@ -13,7 +13,8 @@ use Psr\Http\Message\ServerRequestInterface as Request;
 
 /**
  * Opakované ověření přihlášeného uživatele před citlivou operací —
- * **passkey NEBO heslo (+ TOTP, má-li ho účet zapnutý)**.
+ * **passkey NEBO heslo (+ TOTP, má-li ho účet zapnutý)**. Při vynucení
+ * přihlášení přes poskytovatele identity jen step-up proof, heslo nikdy.
  *
  * Sdílené jádro. Vzniklo vytažením z `Service\Epo\EpoStepUpService`, kde tahle
  * logika bydlela pod EPO názvem, ačkoli s daňovými podáními nemá nic společného:
@@ -41,6 +42,7 @@ final class SensitiveOperationReauth
         private readonly PasswordHasher $hasher,
         private readonly BruteForceGuard $bruteForce,
         private readonly MfaStepUpService $stepUp,
+        private readonly LoginPolicyService $loginPolicy,
     ) {}
 
     /**
@@ -96,6 +98,17 @@ final class SensitiveOperationReauth
                 );
             }
             return;
+        }
+
+        // Instalace s vynuceným poskytovatelem identity heslo nepoužívá vůbec.
+        // Operaci potvrdí jen proof z ověření u poskytovatele (nebo místní druhý
+        // faktor, když poskytovatel slouží jen jako první faktor).
+        if ($this->loginPolicy->isEnforced()) {
+            throw new ReauthException(
+                'sso_required',
+                'Operaci potvrďte přihlášením přes poskytovatele identity organizace.',
+                403,
+            );
         }
 
         $password = (string) ($body['password'] ?? '');

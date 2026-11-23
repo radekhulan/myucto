@@ -24,7 +24,7 @@ final class GetWorkReportAction
         if (!SupplierGuard::owns($request, $this->invoices->find($invoiceId))) {
             return Json::error($response, 'not_found', 'Faktura nenalezena.', 404);
         }
-        $wr = $this->repo->findByInvoice($invoiceId);
+        $wr = $this->repo->findByInvoice($invoiceId, SupplierGuard::currentId($request));
         return Json::ok($response, $wr ?? null);
     }
 }

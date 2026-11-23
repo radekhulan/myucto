@@ -3,12 +3,15 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { rememberTotpEnrollment, takeTotpEnrollment } from '@/security/totpEnrollment'
 
 const m = vi.hoisted(() => ({
-  reset: vi.fn(), push: vi.fn(), refresh: vi.fn(),
-  auth: { isAuthenticated: true, mustSetupMfa: true, mustSetupTotp: false, shouldOfferMfa: false, user: { id: 17 } },
+  reset: vi.fn(), push: vi.fn(), refresh: vi.fn(), fetchSetupStatus: vi.fn(),
+  auth: {
+    isAuthenticated: true, mustSetupMfa: true, mustSetupTotp: false, shouldOfferMfa: false, user: { id: 17 },
+    setupStatus: null as { sso_required_provider: string | null } | null,
+  },
 }))
 vi.mock('@/components/layout/AppShell.vue', () => ({ default: { template: '<div><slot /></div>' } }))
 vi.mock('@/api/auth', () => ({ authApi: { reset: m.reset } }))
-vi.mock('@/stores/auth', () => ({ useAuthStore: () => ({ ...m.auth, refresh: m.refresh }) }))
+vi.mock('@/stores/auth', () => ({ useAuthStore: () => ({ ...m.auth, refresh: m.refresh, fetchSetupStatus: m.fetchSetupStatus }) }))
 vi.mock('vue-router', () => ({ useRoute: () => ({ query: { token: 'setup-link' } }), useRouter: () => ({ push: m.push }) }))
 vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }))
 import ResetPassword from '../ResetPassword.vue'
@@ -18,6 +21,20 @@ beforeEach(() => {
   rememberTotpEnrollment(null)
   m.auth.mustSetupMfa = true
   m.auth.shouldOfferMfa = false
+  m.auth.setupStatus = null
+  m.fetchSetupStatus.mockResolvedValue(undefined)
+})
+
+describe('vynucené přihlášení přes organizaci', () => {
+  it('heslo nenastavuje a odkáže na přihlášení', async () => {
+    m.auth.setupStatus = { sso_required_provider: 'entra' }
+    const wrapper = mount(ResetPassword, { global: { stubs: { 'router-link': { template: '<a><slot /></a>' } } } })
+    await flushPromises()
+    expect(wrapper.find('[data-testid="password-login-disabled"]').text()).toContain('sso.password_login_disabled')
+    expect(wrapper.find('input[type="password"]').exists()).toBe(false)
+    expect(m.reset).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
 })
 
 describe('initial password enrollment continuation', () => {

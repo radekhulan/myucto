@@ -8,6 +8,7 @@ const m = vi.hoisted(() => ({
   runStep: vi.fn(),
   revertStep: vi.fn(),
   listAccounts: vi.fn(),
+  warning: vi.fn(),
 }))
 
 // closingApi — v testu se volá jen state() (na mount); ostatní metody komponenta
@@ -41,11 +42,12 @@ vi.mock('vue-router', () => ({
 }))
 
 vi.mock('@/stores/auth', () => ({
-  useAuthStore: () => ({ can: () => true, canWrite: () => true }),
+  // Blok agendy Časové rozlišení (vlastní spec AccrualClosingBlock) tu zůstane skrytý.
+  useAuthStore: () => ({ can: () => true, canWrite: () => true, canRead: () => false }),
 }))
 
 vi.mock('@/composables/useToast', () => ({
-  useToast: () => ({ success: vi.fn(), error: vi.fn(), warning: vi.fn(), info: vi.fn() }),
+  useToast: () => ({ success: vi.fn(), error: vi.fn(), warning: m.warning, info: vi.fn() }),
 }))
 
 // formatMoney/formatDate — deterministické (bez Intl), ať asserty čtou syrové hodnoty.
@@ -58,7 +60,7 @@ import PeriodClosing from '@/pages/accounting/PeriodClosing.vue'
 
 const STEP_ORDER = [
   'precheck', 'depreciation', 'fx_revaluation', 'estimates', 'deferrals',
-  'provisions', 'income_tax', 'stock', 'close_books', 'open_next',
+  'provisions', 'income_tax', 'deferred_tax', 'stock', 'close_books', 'open_next',
 ]
 
 function stockStep(payload: ClosingStepPayload | null, status: ClosingStep['status'] = 'done'): ClosingStep {
@@ -91,11 +93,12 @@ describe('PeriodClosing.vue — krok zásob (stock)', () => {
     m.state.mockReset()
     m.runStep.mockReset()
     m.revertStep.mockReset()
+    m.warning.mockReset()
     m.listAccounts.mockReset()
     m.listAccounts.mockResolvedValue([])
   })
 
-  it('(a) stock je v seznamu kroků mezi income_tax a close_books', async () => {
+  it('(a) stock je v seznamu kroků za daněmi a před close_books', async () => {
     m.state.mockResolvedValue(makeState())
     const wrapper = mount(PeriodClosing)
     await flushPromises()
@@ -105,7 +108,7 @@ describe('PeriodClosing.vue — krok zásob (stock)', () => {
       .map((b) => b.text().match(/steps\.(\w+)\.title/)?.[1])
       .filter(Boolean)
     expect(keys).toEqual(STEP_ORDER)
-    expect(keys.indexOf('stock')).toBe(keys.indexOf('income_tax') + 1)
+    expect(keys.indexOf('stock')).toBe(keys.indexOf('deferred_tax') + 1)
     expect(keys.indexOf('stock')).toBe(keys.indexOf('close_books') - 1)
   })
 
@@ -142,6 +145,22 @@ describe('PeriodClosing.vue — krok zásob (stock)', () => {
     const stockBtns = wrapper.findAll('button').map((b) => b.text())
     expect(stockBtns.some((t) => t.includes('accounting.closing.stock.post'))).toBe(true)
     expect(stockBtns.some((t) => t.includes('accounting.closing.stock.revert'))).toBe(true)
+  })
+
+  it('(d) vzetí kroku zpět ohlásí počet uvolněných párování otevřených položek', async () => {
+    m.state.mockResolvedValue(makeState({ steps: [stockStep({ entry_ids: { closing: 501 } } as unknown as ClosingStepPayload)], can_revert_stock: true }))
+    m.revertStep.mockResolvedValue({ dumps: {}, released_pairings: 2 })
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const wrapper = mount(PeriodClosing)
+    await flushPromises()
+    await selectStock(wrapper)
+
+    const revert = wrapper.findAll('button').find((b) => b.text().includes('accounting.closing.stock.revert'))
+    await revert!.trigger('click')
+    await flushPromises()
+
+    expect(m.revertStep).toHaveBeenCalledWith(1, 'stock', 3)
+    expect(m.warning).toHaveBeenCalledWith('accounting.closing.pairings_released')
   })
 
   it('(c) při vypnutém skladu je krok neblokující — netýká se, žádné akční tlačítko', async () => {

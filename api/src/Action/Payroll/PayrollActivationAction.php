@@ -130,6 +130,12 @@ final class PayrollActivationAction
         }
 
         $supplierId = $this->currentSupplierId($request);
+        if ($startPeriod !== null) {
+            $problem = $this->migrationSetup->startChangeProblem($supplierId, $startPeriod);
+            if ($problem !== null) {
+                return Json::error($response, 'payroll_start_change_blocked', $problem, 409);
+            }
+        }
         try {
             $state = $this->state->setActivation(
                 $supplierId,

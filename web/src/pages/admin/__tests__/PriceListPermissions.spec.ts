@@ -1,8 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { RouterLink } from 'vue-router'
 import { flushPromises, mount } from '@vue/test-utils'
 const m = vi.hoisted(() => ({ write: false, route: 'admin-price-list-view', push: vi.fn(), list: vi.fn(), get: vi.fn(), create: vi.fn(), update: vi.fn(), delete: vi.fn() }))
 vi.mock('@/stores/auth', () => ({ useAuthStore: () => ({ canWrite: () => m.write, canRead: () => true }) }))
-vi.mock('vue-router', () => ({ useRouter: () => ({ push: m.push }), useRoute: () => ({ name: m.route, params: { id: 7 } }) }))
+vi.mock('vue-router', async importOriginal => ({ ...await importOriginal<typeof import('vue-router')>(), useRouter: () => ({ push: m.push }), useRoute: () => ({ name: m.route, params: { id: 7 } }) }))
 vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => key, locale: { value: 'cs' } }) }))
 vi.mock('@/api/priceList', () => ({ priceListApi: m }))
 vi.mock('@/api/codebooks', () => ({ codebooksApi: { currencies: async () => [{ id: 1, code: 'CZK', is_active: true, is_default: true }], units: async () => [], vatRates: async () => [] } }))
@@ -21,8 +22,10 @@ describe('price list delegated permissions', () => {
     m.get.mockResolvedValue(item)
   })
   it('offers readers details without creating, editing or deleting', async () => {
-    const wrapper = mount(PriceList, { global: { stubs: { EmptyState: true } } })
+    const wrapper = mount(PriceList, { global: { stubs: { EmptyState: true, RouterLink: true } } })
     await flushPromises()
+    expect(wrapper.findComponent(RouterLink).exists()).toBe(true)
+    expect(wrapper.findComponent(RouterLink).props('to')).toEqual({ name: 'admin-work-report-billing-templates' })
     expect(wrapper.text()).not.toContain('price_list.new')
     expect(wrapper.text()).not.toContain('common.edit')
     expect(wrapper.text()).not.toContain('common.remove')
@@ -33,7 +36,7 @@ describe('price list delegated permissions', () => {
   })
   it('shows management actions for writers', async () => {
     m.write = true
-    const wrapper = mount(PriceList, { global: { stubs: { EmptyState: true } } })
+    const wrapper = mount(PriceList, { global: { stubs: { EmptyState: true, RouterLink: true } } })
     await flushPromises()
     expect(wrapper.text()).toContain('price_list.new')
     expect(wrapper.text()).toContain('common.edit')

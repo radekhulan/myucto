@@ -62,6 +62,7 @@ má vždy přednost před oběma.
 | `cron-scan-purchase-inbox.{cmd,sh}` | Import nových přijatých dokladů z nastaveného inbox adresáře |
 | `cron-payment-thanks.{cmd,sh}` | Každou minutu zpracuje poděkování za potvrzené úhrady a odložené e-maily; během otevřené účetní transakce se nic neodesílá |
 | `cron-send-reminders.{cmd,sh}` | Odeslání upomínkových e-mailů na faktury po splatnosti (`--days=N`, `--cooldown=N`, `--dry-run`) |
+| `cron-scheduled-pohoda-export.{cmd,sh}` | Plánovaný export vydaných dokladů do Pohody e-mailem účetní (nastavení: Export → Automatický export do Pohody; `--dry-run`). Jen se zapnutou volbou instalace `export.scheduled_pohoda`, jinak skončí bez práce |
 | `cron-send-approval-reminders.{cmd,sh}` | Upomínky zákazníkům, kteří neschválili výkaz víceprací (`--days=N`, `--dry-run`) |
 | `cron-purchase-approval-reminders.{cmd,sh}` | Připomínky schvalovatelům přijatých dokladů (schvalování manažerem střediska; `--days=N`, `--dry-run`) |
 | `cron-document-request-reminders.{cmd,sh}` | Upomínky na nevyřízené požadavky na dodání dokladů |
@@ -78,6 +79,7 @@ má vždy přednost před oběma.
 | `cron-payroll-document-worker.{cmd,ps1,sh}` | Asynchronní generování mzdových PDF po osobách, retry a dokončení měsíčního ZIPu; táhne i frontu ročních dokumentů (mzdový list, potvrzení o zdanitelných příjmech) — měsíční pásky mají přednost (`--limit=N`; PowerShell: `-Limit N`) |
 | `cron-payroll-period-export-worker.{cmd,ps1,sh}` | Asynchronní sestavení mzdového exportu období/roku; durable lease a retry (`--limit=N`; PowerShell: `-Limit N`). Aplikace tentýž worker spouští po zařazení archivu rovnou na pozadí (`--job-id=N --supplier-id=N`, doběhne celý job se stropem `--max-iterations=N` a `--max-seconds=N`); cron je pojistka pro případ, že se spawn nepovede |
 | `cron-payroll-registration-changes.{cmd,sh}` | **Denně** — detekce hlásitelných změn v registru pojištěnců (ČSSZ) u všech firem se zapnutými mzdami. Zakládá jen **návrh povinnosti s termínem**, nikdy nic neodesílá; podání z návrhu vyrobí člověk ve frontě **Mzdy → Podání a hlášení**. Bez cronu se detekce spouští jen při otevření karty zaměstnance nebo na tlačítko ve frontě, takže osmidenní lhůta (§ 19 odst. 5 zákona č. 323/2025 Sb.) tiše utíká. Opakované spuštění je bezpečné — porovnávají se jen vztahy, u kterých se pohnul vodoznak zdroje (`--environment=test`, `--supplier=ID`, `--batch=N`, `--max-batches=N`) |
+| `cron-payroll-end-agreements.{cmd,sh}` | **Denně** — ukončí DPP a DPČ, kterým uplynul sjednaný konec, ke dni tohoto konce. Volá tutéž službu jako ruční **Ukončit skončené dohody** (kontrolní seznam odchodu, auditní stopa s aktérem `system`). Dohodu s mzdovým vstupem, docházkou nebo zúčtovaným během po konci nechá aktivní k posouzení. Opakované spuštění je bezpečné (`--supplier=ID`, `--today=RRRR-MM-DD`) |
 | `cron-ai-rule-miner.{cmd,sh}` | Noční vytěžení návrhových pravidel z potvrzených korekcí a obnova doporučení Automat (`--supplier=N`, `--days=N`, `--dry-run`) |
 | `cron-payroll-post.{cmd,sh}` | **1× měsíčně** — zaúčtuje mzdovou rekapitulaci za předchozí měsíc zaměstnancům, kteří mají na kartě „Účtovat automaticky" a vyplněnou pravidelnou hrubou mzdu (`--dry-run`, `--supplier=ID`, `--period=RRRR-MM`). Jen podvojné účetnictví; datum zápisu je poslední den účtovaného měsíce |
 | `cron-vat-clearing.{cmd,sh}` | **1× měsíčně** — interní doklad zúčtování DPH: převede daň zdaňovacího období z analytik 343.100 (vstup) a 343.200 (výstup) na zúčtovací 343.900 (`--dry-run`, `--supplier=ID`, `--period=RRRR-MM`, `--force`). Jen plátci v podvojném účetnictví; datum zápisu je poslední den období, zaúčtování idempotentní |
@@ -88,6 +90,7 @@ má vždy přednost před oběma.
 | `license-status.{cmd,sh}` | Výpis aktuálního stavu licence (E4) — stav, tarif, počty, platnost, maskovaný klíč |
 | `license-deactivate.{cmd,sh}` | Deaktivace licence (E4) — uvolní vazbu na serveru a smaže klíč/token lokálně |
 | `cron-cnb-rates.{cmd,sh}` | Denní stažení kurzovního lístku ČNB do `exchange_rates` (`--days=N`, `--dry-run`). Bez ní se tabulka plní jen jako ad-hoc cache prvního dotazu, historie zůstává děravá a cizoměnová úhrada ke dni bez kurzu nemá čím ocenit pohyb. Dohání i mezery za posledních 30 dnů; dny, které kurz už mají, přeskočí bez HTTP volání. Jednorázové doplnění celé historie: `api/bin/backfill-cnb-rates.php` |
+| `cron-maintenance-notice.{cmd,sh}` | Každých 15 minut stáhne ohlášení plánované údržby od provozovatele (pruh nad aplikací). Ve spravovaném provozu povinné, jinak `maintenance_notice.enabled` |
 | `cron-version-check.{cmd,sh}` | Denní kontrola GitHub Releases API; cachuje poslední dostupnou verzi + release notes pro **Systém → Aktualizace** |
 | `cron-storage-usage.{cmd,sh}` | Hodinové měření spotřeby místa instance (velikost databáze z `information_schema` + datový prostor **bez adresáře záloh**) do `instance_storage_usage`. Jediné místo, kde se prochází strom souborů — web i `/api/health` pak čtou hotové číslo. Podklad pro upozornění na 90 % a režim jen pro čtení při vyčerpané kvótě (`--force`, `--json`) |
 | `cron-dispatch.{cmd,sh}` | **Plánovač** pro režim „jeden dispatcher" (Systém → Plánované úlohy). Jediná položka běžící každou minutu, která spustí právě ty úlohy, které jsou na řadě a mají co dělat. V default režimu „jednotlivé úlohy" se neplánuje (`--dry-run`, `--at="RRRR-MM-DD HH:MM"`) |
@@ -156,6 +159,7 @@ při přidání nové citlivé cesty rozšiř seznam v něm i tady.
 | `cron-scan-purchase-inbox` | každých 10 minut | `*/10 * * * *` |
 | `cron-payment-thanks` | každou minutu | `* * * * *` |
 | `cron-send-reminders` | 1× denně (pracovní dny) | 09:00, Po–Pá |
+| `cron-scheduled-pohoda-export` | 1× denně; jen po zapnutí `export.scheduled_pohoda` | 06:30 |
 | `cron-send-approval-reminders` | 1× denně (pracovní dny) | 09:15, Po–Pá |
 | `cron-purchase-approval-reminders` | 1× denně (pracovní dny) | 09:20, Po–Pá |
 | `cron-document-request-reminders` | 1× denně (pracovní dny) | 09:30, Po–Pá |
@@ -172,6 +176,7 @@ při přidání nové citlivé cesty rozšiř seznam v něm i tady.
 | `cron-payroll-document-worker` | každou minutu (jen firmy se mzdami, jen když něco leží ve frontě) | `* * * * *` |
 | `cron-payroll-period-export-worker` | každou minutu (jen firmy se mzdami, jen když něco leží ve frontě) | `* * * * *` |
 | `cron-payroll-registration-changes` | 1× denně (jen firmy se mzdami) | 05:00 (`0 5 * * *`) |
+| `cron-payroll-end-agreements` | 1× denně (jen firmy se mzdami) | 00:30 (`30 0 * * *`) |
 | `cron-ai-rule-miner` | 1× denně v noci | 04:00 |
 | `cron-vat-status-apply` | 1× denně (po půlnoci) | 00:30 |
 | `cron-journal-integrity-check` | 1× denně (v noci) | 02:30 |
@@ -179,6 +184,7 @@ při přidání nové citlivé cesty rozšiř seznam v něm i tady.
 | `cron-vat-clearing` | 1× měsíčně, 1. den | 04:30 (`30 4 1 * *`) |
 | `cron-license-renew` | 1× za hodinu; síť běžně jen 1× denně | 15. minuta (`15 * * * *`) |
 | `cron-cnb-rates` | 1× denně (po vyhlášení kurzu ČNB ~14:30) | 15:00 |
+| `cron-maintenance-notice` | každých 15 min | — |
 | `cron-version-check` | 1× denně | 06:00 |
 | `cron-storage-usage` | 1× za hodinu | 15. minuta (`15 * * * *`) |
 | `cron-dispatch` | každou minutu — **jen v režimu dispatcher**, kde nahrazuje všechny položky výše | `* * * * *` |
@@ -254,6 +260,7 @@ schtasks /create /tn "MyUcto BankEmailNotices" /tr "C:\inetpub\wwwroot\myucto.cz
 schtasks /create /tn "MyUcto PurchaseInbox" /tr "C:\inetpub\wwwroot\myucto.cz\cmd\cron-scan-purchase-inbox.cmd" /sc minute /mo 10 /ru SYSTEM
 schtasks /create /tn "MyUcto PaymentThanks" /tr "C:\inetpub\wwwroot\myucto.cz\cmd\cron-payment-thanks.cmd" /sc minute /mo 1 /ru SYSTEM
 schtasks /create /tn "MyUcto Reminders" /tr "C:\inetpub\wwwroot\myucto.cz\cmd\cron-send-reminders.cmd" /sc weekly /d MON,TUE,WED,THU,FRI /st 09:00 /ru SYSTEM
+schtasks /create /tn "MyUcto PohodaExport" /tr "C:\inetpub\wwwroot\myucto.cz\cmd\cron-scheduled-pohoda-export.cmd" /sc daily /st 06:30 /ru SYSTEM
 schtasks /create /tn "MyUcto ApprovalReminders" /tr "C:\inetpub\wwwroot\myucto.cz\cmd\cron-send-approval-reminders.cmd" /sc weekly /d MON,TUE,WED,THU,FRI /st 09:15 /ru SYSTEM
 schtasks /create /tn "MyUcto PurchaseApprovalReminders" /tr "C:\inetpub\wwwroot\myucto.cz\cmd\cron-purchase-approval-reminders.cmd" /sc weekly /d MON,TUE,WED,THU,FRI /st 09:20 /ru SYSTEM
 schtasks /create /tn "MyUcto DocumentRequestReminders" /tr "C:\inetpub\wwwroot\myucto.cz\cmd\cron-document-request-reminders.cmd" /sc weekly /d MON,TUE,WED,THU,FRI /st 09:30 /ru SYSTEM
@@ -270,6 +277,7 @@ schtasks /create /tn "MyUcto Shoptet Orders" /tr "C:\inetpub\wwwroot\myucto.cz\c
 schtasks /create /tn "MyUcto Payroll Documents" /tr "powershell.exe -NoProfile -ExecutionPolicy Bypass -File C:\inetpub\wwwroot\myucto.cz\cmd\cron-payroll-document-worker.ps1" /sc minute /mo 1 /ru SYSTEM
 schtasks /create /tn "MyUcto Payroll Period Export" /tr "powershell.exe -NoProfile -ExecutionPolicy Bypass -File C:\inetpub\wwwroot\myucto.cz\cmd\cron-payroll-period-export-worker.ps1" /sc minute /mo 1 /ru SYSTEM
 schtasks /create /tn "MyUcto PayrollRegistrationChanges" /tr "C:\inetpub\wwwroot\myucto.cz\cmd\cron-payroll-registration-changes.cmd" /sc daily /st 05:00 /ru SYSTEM
+schtasks /create /tn "MyUcto PayrollEndAgreements" /tr "C:\inetpub\wwwroot\myucto.cz\cmd\cron-payroll-end-agreements.cmd" /sc daily /st 00:30 /ru SYSTEM
 schtasks /create /tn "MyUcto AI Rule Miner"     /tr "C:\inetpub\wwwroot\myucto.cz\cmd\cron-ai-rule-miner.cmd" /sc daily /st 04:00 /ru SYSTEM
 schtasks /create /tn "MyUcto VatStatusApply"    /tr "C:\inetpub\wwwroot\myucto.cz\cmd\cron-vat-status-apply.cmd"          /sc daily /st 00:30 /ru SYSTEM
 schtasks /create /tn "MyUcto JournalIntegrity"  /tr "C:\inetpub\wwwroot\myucto.cz\cmd\cron-journal-integrity-check.cmd"     /sc daily /st 02:30 /ru SYSTEM
@@ -277,6 +285,7 @@ schtasks /create /tn "MyUcto PayrollPost"       /tr "C:\inetpub\wwwroot\myucto.c
 schtasks /create /tn "MyUcto VatClearing"       /tr "C:\inetpub\wwwroot\myucto.cz\cmd\cron-vat-clearing.cmd"            /sc monthly /d 1 /st 04:30 /ru SYSTEM
 schtasks /create /tn "MyUcto LicenseRenew"      /tr "C:\inetpub\wwwroot\myucto.cz\cmd\cron-license-renew.cmd"          /sc hourly /mo 1 /st 00:15 /ru SYSTEM
 schtasks /create /tn "MyUcto CnbRates"         /tr "C:\inetpub\wwwroot\myucto.cz\cmd\cron-cnb-rates.cmd"             /sc daily /st 15:00 /ru SYSTEM
+schtasks /create /tn "MyUcto MaintenanceNotice" /tr "C:\inetpub\wwwroot\myucto.cz\cmd\cron-maintenance-notice.cmd"     /sc minute /mo 15 /ru SYSTEM
 schtasks /create /tn "MyUcto VersionCheck"      /tr "C:\inetpub\wwwroot\myucto.cz\cmd\cron-version-check.cmd"           /sc daily /st 06:00 /ru SYSTEM
 schtasks /create /tn "MyUcto StorageUsage"      /tr "C:\inetpub\wwwroot\myucto.cz\cmd\cron-storage-usage.cmd"           /sc hourly /mo 1 /ru SYSTEM
 
@@ -328,6 +337,7 @@ Edituj `crontab -e` (nebo `/etc/cron.d/myucto`):
 */10 *  *   *   *    /var/www/myucto.cz/cmd/cron-scan-purchase-inbox.sh
  *  *  *   *   *    /var/www/myucto.cz/cmd/cron-payment-thanks.sh
  0  9  *   *   1-5  /var/www/myucto.cz/cmd/cron-send-reminders.sh
+ 30  6  *   *   *    /var/www/myucto.cz/cmd/cron-scheduled-pohoda-export.sh
  15  9  *   *   1-5  /var/www/myucto.cz/cmd/cron-send-approval-reminders.sh
  20  9  *   *   1-5  /var/www/myucto.cz/cmd/cron-purchase-approval-reminders.sh
  30  9  *   *   1-5  /var/www/myucto.cz/cmd/cron-document-request-reminders.sh
@@ -345,11 +355,13 @@ Edituj `crontab -e` (nebo `/etc/cron.d/myucto`):
   *  *  *   *   *    /var/www/myucto.cz/cmd/cron-payroll-period-export-worker.sh
   0  4  *   *   *    /var/www/myucto.cz/cmd/cron-ai-rule-miner.sh
   0  5  *   *   *    /var/www/myucto.cz/cmd/cron-payroll-registration-changes.sh
+ 30  0  *   *   *    /var/www/myucto.cz/cmd/cron-payroll-end-agreements.sh
  30  0  *   *   *    /var/www/myucto.cz/cmd/cron-vat-status-apply.sh
  30  2  *   *   *    /var/www/myucto.cz/cmd/cron-journal-integrity-check.sh
   0  4  1   *   *    /var/www/myucto.cz/cmd/cron-payroll-post.sh
  30  4  1   *   *    /var/www/myucto.cz/cmd/cron-vat-clearing.sh
  15  *  *   *   *    /var/www/myucto.cz/cmd/cron-license-renew.sh
+*/15 *  *   *   *    /var/www/myucto.cz/cmd/cron-maintenance-notice.sh
   0 15  *   *   *    /var/www/myucto.cz/cmd/cron-cnb-rates.sh
   0  6  *   *   *    /var/www/myucto.cz/cmd/cron-version-check.sh
  15  *  *   *   *    /var/www/myucto.cz/cmd/cron-storage-usage.sh

@@ -817,10 +817,12 @@ final class OssInvoiceImportTest extends TestCase
         self::assertNull($item['vat_classification_code'],
             'Kódy 20/22 by doklad poslaly do souhrnného hlášení, ačkoli odběratel DIČ nemá.');
 
+        $submissions = new \MyInvoice\Repository\TaxSubmissionRepository($this->db);
         $sh = (new \MyInvoice\Service\Report\SouhrnneHlaseniBuilder(
             $this->db,
             $this->vatLedger,
-            new \MyInvoice\Repository\TaxSubmissionRepository($this->db),
+            $submissions,
+            new \MyInvoice\Service\Report\SubmissionVariantGuard($submissions),
         ))
             ->build($this->supplierId, self::YEAR, self::MONTH, 'monthly');
         self::assertSame(0, (int) $sh['summary']['rows_count'],

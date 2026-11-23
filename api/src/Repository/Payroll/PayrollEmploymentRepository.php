@@ -13,6 +13,7 @@ use MyInvoice\Service\Payroll\PayrollEmploymentJmhzActivityFamily;
 use MyInvoice\Service\Payroll\Deadline\PayrollChecklistDeadlinePolicy;
 use MyInvoice\Service\Payroll\PayrollEmploymentLifecycle;
 use MyInvoice\Service\Payroll\PayrollPredecessorObligationScope;
+use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzReportedEmploymentPeriods;
 use PDO;
 
 /**
@@ -86,6 +87,43 @@ final class PayrollEmploymentRepository
      */
     public const FOLLOW_UP_ITEMS = ['takeover_deductions_review', 'takeover_sickness_review'];
 
+    /** Druhy, mezi kterými jde druh vztahu opravit (viz changeRelationType()). */
+    public const RELATION_TYPE_CORRECTABLE = ['employment', 'small_scale_employment', 'dpp', 'dpc'];
+
+    /**
+     * Údaje podmínek, které jde opravit i u ukončeného vztahu: popisují vztah
+     * pro JMHZ a mzdu ani trvání vztahu nemění (viz assertEndedCorrectable()).
+     */
+    public const ENDED_CORRECTABLE_FIELDS = [
+        'work_place',
+        'regular_workplace',
+        'jmhz_workplace_municipality_code',
+        'jmhz_workplace_country_code',
+        'jmhz_workplace_address_point_code',
+        'jmhz_workplace_street',
+        'jmhz_workplace_house_number',
+        'jmhz_workplace_orientation_number',
+        'jmhz_workplace_postal_code',
+        'jmhz_external_codebook_overlay_key',
+        'jmhz_external_codebook_manifest_sha256',
+        'cz_isco_code',
+        'activity_code',
+        'jmhz_relationship_detail_code',
+        'is_primary',
+        'probable_hourly_earning_minor',
+        'probable_earning_rationale',
+    ];
+
+    /** Druh vztahu do vět pro účetní. */
+    private const RELATION_LABELS = [
+        'employment' => 'pracovní poměr',
+        'small_scale_employment' => 'zaměstnání malého rozsahu',
+        'dpp' => 'DPP',
+        'dpc' => 'DPČ',
+        'partner_dependent' => 'příjem společníka',
+        'statutory_body' => 'statutární orgán',
+    ];
+
     private const CHECKLIST_EXCEPTIONS = [
         'partner_dependent' => ['employment_contract'],
         'statutory_body' => ['employment_contract'],
@@ -98,6 +136,7 @@ final class PayrollEmploymentRepository
         private readonly ActivityLogger $activityLogger,
         private readonly PayrollEmploymentDeletionRepository $deletion,
         private readonly PayrollEmployerSettingsRepository $employerSettings,
+        private readonly PayrollRunMissingEmploymentRepository $missingInRuns,
     ) {}
 
     /**
@@ -138,7 +177,7 @@ final class PayrollEmploymentRepository
         $stmt = $this->db->pdo()->prepare(
             'SELECT employment.id, employment.employee_id, employment.office_id,
                     office.code AS office_code, office.name AS office_name,
-                    employment.code, employment.relation_type,
+                    employment.code, employment.relation_type, employment.statutory_partner,
                     employment.meal_entitlement_basis, employment.status,
                     employment.is_primary, employment.start_date,
                     employment.actual_start_date, employment.start_estimated,
@@ -182,8 +221,19 @@ final class PayrollEmploymentRepository
          */
         $statutoryByDate = [];
 
+        $fetchedRows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        /*
+         * Uzavřené běhy, do jejichž období vztah patří, ale v revizi chybí
+         * (založení nebo posun nástupu až po schválení měsíce). Karta podle
+         * toho řekne „otevřete opravu běhu"; jedním dotazem za osobu.
+         */
+        $lockedRunGaps = $this->missingInRuns->forEmployments(
+            $supplierId,
+            array_map(static fn (array $row): int => (int) $row['id'], $fetchedRows),
+        );
+
         $result = [];
-        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $fetched) {
+        foreach ($fetchedRows as $fetched) {
             $row = $this->row($fetched);
             $employmentId = (int) $row['id'];
             $relationType = (string) $row['relation_type'];
@@ -206,6 +256,7 @@ final class PayrollEmploymentRepository
                 'office_name' => $row['office_name'] === null ? null : (string) $row['office_name'],
                 'code' => (string) $row['code'],
                 'relation_type' => $relationType,
+                'statutory_partner' => (bool) $row['statutory_partner'],
                 'meal_entitlement_basis' => (string) $row['meal_entitlement_basis'],
                 'status' => (string) $row['status'],
                 'is_primary' => (bool) $row['is_primary'],
@@ -236,6 +287,8 @@ final class PayrollEmploymentRepository
                 'tax_declaration' => $taxDeclaration,
                 'health_insurer' => $healthInsurer,
                 'terms' => $this->terms($supplierId, $employmentId),
+                'settled_through' => $this->settledThrough($supplierId, $employmentId),
+                'locked_run_gaps' => $lockedRunGaps[$employmentId] ?? [],
                 'checklist' => $this->checklist($supplierId, $employmentId),
                 'timeline' => $this->events($supplierId, $employmentId),
             ];
@@ -263,11 +316,13 @@ final class PayrollEmploymentRepository
             $userAgent,
         ): array {
             $this->lockEmployee($supplierId, $employeeId);
+            $data['terms'] += ['remuneration_type' => null, 'hourly_rate_minor' => null, 'remuneration_basis_kind' => null, 'remuneration_basis' => null];
             $data['terms']['office_id'] = $this->resolveOffice(
                 $supplierId,
                 $data['terms']['office_id'],
             );
-            $this->assertPrimaryAvailable($supplierId, $employeeId, $data['terms']['is_primary'], null);
+            $primaryFrom = (string) ($data['terms']['planned_start_on'] ?? $data['terms']['effective_from']);
+            $this->assertPrimaryAvailable($supplierId, $employeeId, $data['terms']['is_primary'], null, $primaryFrom);
             /*
              * Druh činnosti pro ČSSZ se u nového vztahu PŘEDVYPLNÍ podle druhu
              * a pořadí: první pracovní poměr „1", druhý souběžný u téhož
@@ -301,6 +356,9 @@ final class PayrollEmploymentRepository
                 $data['code'] = $this->nextEmploymentCode($supplierId, $employeeId);
             }
 
+            $releasedPrimaries = $data['terms']['is_primary']
+                ? $this->releaseEndedPrimaries($supplierId, $employeeId, $primaryFrom)
+                : [];
             $stmt = $this->db->pdo()->prepare(
                 "INSERT INTO payroll_employments
                     (supplier_id, employee_id, office_id, code, relation_type,
@@ -323,7 +381,9 @@ final class PayrollEmploymentRepository
                 $data['monthly_gross_minor'],
             ]);
             $employmentId = (int) $this->db->pdo()->lastInsertId();
+            $this->logReleasedPrimaries($supplierId, $employeeId, $releasedPrimaries, $employmentId, $primaryFrom, $userId);
             $this->insertTerms($supplierId, $employmentId, $data['terms'], $userId);
+            $this->alignIdentityStart($supplierId, $employeeId);
             $this->insertEvent(
                 $supplierId,
                 $employmentId,
@@ -491,6 +551,7 @@ final class PayrollEmploymentRepository
         bool $replaceMonthlyGross = false,
         ?int $monthlyGrossMinor = null,
         bool $correctEffectiveFrom = false,
+        bool $endRecurringBase = false,
     ): array {
         return $this->transaction(function () use (
             $supplierId,
@@ -503,15 +564,17 @@ final class PayrollEmploymentRepository
             $replaceMonthlyGross,
             $monthlyGrossMinor,
             $correctEffectiveFrom,
+            $endRecurringBase,
         ): array {
             $employment = $this->lockEmployment($supplierId, $employmentId, $expectedVersion);
             $employeeId = (int) $employment['employee_id'];
             $status = (string) $employment['status'];
-            if (in_array($status, ['ended', 'archived', 'no_show'], true)) {
+            if (in_array($status, ['archived', 'no_show'], true)) {
                 throw new \DomainException(
-                    'U ukončeného, archivovaného nebo nenastoupeného vztahu nelze podmínky opravit.'
+                    'U archivovaného nebo nenastoupeného vztahu nelze podmínky opravit.'
                 );
             }
+            $ended = $status === 'ended';
             $actualStart = $employment['actual_start_date'] === null
                 ? null
                 : (string) $employment['actual_start_date'];
@@ -530,9 +593,20 @@ final class PayrollEmploymentRepository
             if ($previous === null) {
                 throw new \DomainException('Pracovní vztah nemá žádnou verzi podmínek k opravě.');
             }
-            $data['monthly_gross_minor'] = $replaceMonthlyGross
+            $data += [
+                'remuneration_type' => $previous['remuneration_type'] ?? null,
+                'hourly_rate_minor' => $previous['hourly_rate_minor'] ?? null,
+                'remuneration_basis_kind' => $previous['remuneration_basis_kind'] ?? null,
+                'remuneration_basis' => $previous['remuneration_basis'] ?? null,
+            ];
+            $this->assertMonthlyTransition($previous, $data, $replaceMonthlyGross, $monthlyGrossMinor);
+            $data['monthly_gross_minor'] = $data['remuneration_type'] === 'hourly' ? null : ($replaceMonthlyGross
                 ? $monthlyGrossMinor
-                : ($previous['monthly_gross_minor'] ?? $employment['monthly_gross_minor']);
+                : (($previous['remuneration_type'] ?? 'monthly') === 'hourly'
+                    ? null : ($previous['monthly_gross_minor'] ?? $employment['monthly_gross_minor'])));
+            if ($data['remuneration_type'] === 'hourly' && $replaceMonthlyGross && $monthlyGrossMinor !== null) {
+                throw new \InvalidArgumentException('Hodinové odměňování nesmí mít sjednanou měsíční mzdu.');
+            }
             $storedFrom = (string) $previous['effective_from'];
             $storedTo = $previous['effective_to'] === null
                 ? null
@@ -542,12 +616,21 @@ final class PayrollEmploymentRepository
             if (!$correctEffectiveFrom) {
                 $data['effective_from'] = $storedFrom;
             }
+            $this->assertRemunerationChange($supplierId, $employmentId, $previous, $data, $employment, (int) $previous['id'], $storedTo, $endRecurringBase, $userId);
             $movedFrom = (string) $data['effective_from'];
-            $data['tax_declaration_signed'] = $this->taxDeclarationSigned(
-                $supplierId,
-                $employeeId,
-                $movedFrom,
-            );
+            // Zrcadlo prohlášení se přepočte jen s posunem účinnosti. Oprava
+            // jiného údaje (pravděpodobný výdělek, pracoviště) nesmí zrcadlo
+            // tiše přepsat: mzdový běh bere prohlášení z evidence, ale změna
+            // v historii vztahu by tvrdila, že ji účetní udělala.
+            $data['tax_declaration_signed'] = $movedFrom === $storedFrom
+                ? (bool) ($previous['tax_declaration_signed'] ?? false)
+                : $this->taxDeclarationSigned($supplierId, $employeeId, $movedFrom);
+            if ($ended) {
+                $this->assertEndedCorrectable($supplierId, $employment, $previous, $data, $storedFrom, $storedTo);
+                // Datum konce ukončeného vztahu je skutečnost z ukončení, ne
+                // sjednaný konec z podmínek; oprava údajů pro JMHZ ho nemění.
+                $data['fixed_term_end_on'] = $previous['fixed_term_end_on'] ?? null;
+            }
             $this->assertTermsOpenFrom($supplierId, $employmentId, $storedFrom, $storedTo);
             $predecessor = null;
             if ($movedFrom !== $storedFrom) {
@@ -609,9 +692,9 @@ final class PayrollEmploymentRepository
                 $data['actual_start_on'],
                 $data['planned_start_on'],
                 $data['actual_start_on'],
-                $data['fixed_term_end_on'],
-                (int) $replaceMonthlyGross,
-                $monthlyGrossMinor,
+                $ended ? $employment['end_date'] : $data['fixed_term_end_on'],
+                (int) ($replaceMonthlyGross || $data['remuneration_type'] === 'hourly'),
+                $data['monthly_gross_minor'],
                 $supplierId,
                 $employmentId,
                 $expectedVersion,
@@ -619,6 +702,7 @@ final class PayrollEmploymentRepository
             if ($update->rowCount() !== 1) {
                 throw new PayrollEmploymentConflictException($expectedVersion);
             }
+            $this->alignIdentityStart($supplierId, (int) $employment['employee_id']);
 
             $diff = $this->diff($previous, $data);
             /*
@@ -669,6 +753,7 @@ final class PayrollEmploymentRepository
         ?string $userAgent,
         bool $replaceMonthlyGross = false,
         ?int $monthlyGrossMinor = null,
+        bool $endRecurringBase = false,
     ): array {
         return $this->transaction(function () use (
             $supplierId,
@@ -680,6 +765,7 @@ final class PayrollEmploymentRepository
             $userAgent,
             $replaceMonthlyGross,
             $monthlyGrossMinor,
+            $endRecurringBase,
         ): array {
             $employment = $this->lockEmployment($supplierId, $employmentId, $expectedVersion);
             $employeeId = (int) $employment['employee_id'];
@@ -720,6 +806,13 @@ final class PayrollEmploymentRepository
             );
 
             $previous = $this->latestTermsForUpdate($supplierId, $employmentId);
+            $data += [
+                'remuneration_type' => $previous['remuneration_type'] ?? null,
+                'hourly_rate_minor' => $previous['hourly_rate_minor'] ?? null,
+                'remuneration_basis_kind' => $previous['remuneration_basis_kind'] ?? null,
+                'remuneration_basis' => $previous['remuneration_basis'] ?? null,
+            ];
+            $this->assertMonthlyTransition($previous, $data, $replaceMonthlyGross, $monthlyGrossMinor);
             if ($previous !== null && $data['effective_from'] <= (string) $previous['effective_from']) {
                 throw new \DomainException(
                     'Nová smluvní verze musí začínat později než dosud poslední verze.'
@@ -728,9 +821,14 @@ final class PayrollEmploymentRepository
             // Nová verze platí od svého data napořád — nesmí začít v měsíci,
             // za který je mzda zaúčtovaná nebo vyplacená, ani před ním.
             $this->assertTermsOpenFrom($supplierId, $employmentId, (string) $data['effective_from'], null);
-            $data['monthly_gross_minor'] = $replaceMonthlyGross
+            $this->assertRemunerationChange($supplierId, $employmentId, $previous, $data, $employment, null, null, $endRecurringBase, $userId);
+            $data['monthly_gross_minor'] = $data['remuneration_type'] === 'hourly' ? null : ($replaceMonthlyGross
                 ? $monthlyGrossMinor
-                : ($previous['monthly_gross_minor'] ?? $employment['monthly_gross_minor']);
+                : (($previous['remuneration_type'] ?? 'monthly') === 'hourly'
+                    ? null : ($previous['monthly_gross_minor'] ?? $employment['monthly_gross_minor'])));
+            if ($data['remuneration_type'] === 'hourly' && $replaceMonthlyGross && $monthlyGrossMinor !== null) {
+                throw new \InvalidArgumentException('Hodinové odměňování nesmí mít sjednanou měsíční mzdu.');
+            }
             if ($previous !== null) {
                 $previousEnd = (new \DateTimeImmutable($data['effective_from']))
                     ->modify('-1 day')
@@ -763,8 +861,8 @@ final class PayrollEmploymentRepository
                 $data['planned_start_on'],
                 $data['actual_start_on'],
                 $data['fixed_term_end_on'],
-                (int) $replaceMonthlyGross,
-                $monthlyGrossMinor,
+                (int) ($replaceMonthlyGross || $data['remuneration_type'] === 'hourly'),
+                $data['monthly_gross_minor'],
                 $supplierId,
                 $employmentId,
                 $expectedVersion,
@@ -772,6 +870,7 @@ final class PayrollEmploymentRepository
             if ($update->rowCount() !== 1) {
                 throw new PayrollEmploymentConflictException($expectedVersion);
             }
+            $this->alignIdentityStart($supplierId, (int) $employment['employee_id']);
 
             $diff = $this->diff($previous, $data);
             $this->insertEvent(
@@ -866,6 +965,442 @@ final class PayrollEmploymentRepository
         });
     }
 
+    /**
+     * Oprava druhu vztahu, který vznikl s nesprávným druhem (typicky importem
+     * registrace, kde se dohoda převzala jako pracovní poměr).
+     *
+     * Nejde o změnu smlouvy, ale o opravu evidence: vztah s novým druhem trvá
+     * od téhož dne, docházka i koncepty mzdových vstupů zůstávají u něj. Proto
+     * smí jen dokud vztah nemá nic, co se podle dosavadního druhu už spočítalo
+     * nebo ohlásilo ({@see PayrollEmploymentDeletionRepository::relationTypeChangeBlocker()}).
+     * Druh činnosti pro ČSSZ, který k novému druhu nepatří, se ve všech verzích
+     * podmínek nahradí výchozím kódem nového druhu.
+     *
+     * @return array{employment:array<string,mixed>,warnings:list<array{code:string,message:string}>}
+     */
+    public function changeRelationType(
+        int $supplierId,
+        int $employmentId,
+        string $relationType,
+        int $expectedVersion,
+        ?string $note,
+        ?int $userId,
+        ?string $ip,
+        ?string $userAgent,
+    ): array {
+        return $this->transaction(function () use (
+            $supplierId,
+            $employmentId,
+            $relationType,
+            $expectedVersion,
+            $note,
+            $userId,
+            $ip,
+            $userAgent,
+        ): array {
+            $employment = $this->lockEmployment($supplierId, $employmentId, $expectedVersion);
+            $previous = (string) $employment['relation_type'];
+            if (!in_array($previous, self::RELATION_TYPE_CORRECTABLE, true)) {
+                throw new \InvalidArgumentException('Druh tohoto vztahu opravit nejde, opravit lze jen pracovní poměr, zaměstnání malého rozsahu, DPP a DPČ.');
+            }
+            if ($previous === $relationType) {
+                throw new \InvalidArgumentException('Vztah už tento druh má.');
+            }
+            $blocker = $this->deletion->relationTypeChangeBlocker($supplierId, $employmentId);
+            if ($blocker !== null) {
+                throw new PayrollDeletionException(
+                    $blocker['code'],
+                    $blocker['message'],
+                    $employmentId,
+                    (string) $employment['code'],
+                );
+            }
+
+            $update = $this->db->pdo()->prepare(
+                'UPDATE payroll_employments
+                    SET relation_type = ?, row_version = row_version + 1
+                  WHERE supplier_id = ? AND id = ? AND row_version = ?'
+            );
+            $update->execute([$relationType, $supplierId, $employmentId, $expectedVersion]);
+            if ($update->rowCount() !== 1) {
+                throw new PayrollEmploymentConflictException($expectedVersion);
+            }
+
+            $diff = $this->followRelationType(
+                $supplierId,
+                (int) $employment['employee_id'],
+                $employmentId,
+                $previous,
+                $relationType,
+                (string) ($employment['start_date'] ?? ''),
+            );
+            $this->insertEvent(
+                $supplierId,
+                $employmentId,
+                'relation_type_changed',
+                null,
+                null,
+                (string) ($employment['start_date'] ?? $this->currentTermsEffectiveFrom($supplierId, $employmentId) ?? date('Y-m-d')),
+                $note,
+                $diff,
+                $userId,
+            );
+            $this->activityLogger->log(
+                'payroll.employment.relation_type_changed',
+                $userId,
+                'payroll_employment',
+                $employmentId,
+                $diff + ['note' => $note],
+                $ip,
+                $userAgent,
+                $supplierId,
+            );
+
+            return [
+                'employment' => $this->find($supplierId, (int) $employment['employee_id'], $employmentId),
+                'warnings' => $this->relationTypeChangeWarnings($supplierId, $employmentId),
+            ];
+        });
+    }
+
+    /**
+     * Co po změně druhu vztahu následuje mimo samotný sloupec: souhrnný druh
+     * osoby a druh činnosti pro ČSSZ ve verzích podmínek.
+     *
+     * @return array<string,array{from:string,to:string}>
+     */
+    private function followRelationType(
+        int $supplierId,
+        int $employeeId,
+        int $employmentId,
+        string $previous,
+        string $relationType,
+        string $startOn,
+    ): array {
+        // Starý souhrnný druh osoby (odvozený při jejím založení) platí jen
+        // u osoby s jediným vztahem; u více vztahů ho tahle oprava neurčí.
+        $this->db->pdo()->prepare(
+            "UPDATE payroll_employees person
+                SET person.employment_type = ?
+              WHERE person.supplier_id = ? AND person.id = ?
+                AND NOT EXISTS (SELECT 1 FROM payroll_employments other
+                                 WHERE other.supplier_id = person.supplier_id
+                                   AND other.employee_id = person.id AND other.id <> ?)"
+        )->execute([
+            match ($relationType) { 'dpp' => 'dpp', 'dpc' => 'dpc', default => 'hpp' },
+            $supplierId,
+            $employeeId,
+            $employmentId,
+        ]);
+        $activityChanges = $this->realignActivityCodes($supplierId, $employeeId, $employmentId, $relationType, $startOn);
+        $diff = ['relation_type' => ['from' => $previous, 'to' => $relationType]];
+        if ($activityChanges !== []) {
+            $diff['activity_code'] = [
+                'from' => implode(', ', array_unique(array_column($activityChanges, 'from'))),
+                'to' => implode(', ', array_unique(array_column($activityChanges, 'to'))),
+            ];
+        }
+
+        return $diff;
+    }
+
+    /**
+     * Dokončení sloučení na cílovém vztahu ({@see \MyInvoice\Service\Payroll\PayrollEmploymentMergeService}).
+     * Volá se v transakci sloučení, když data zdroje už leží u cíle a zdroj je
+     * smazaný, takže souběžné druhy činnosti osoby už zdroj nepočítají.
+     *
+     * S `$adoptTerms` cíl převezme od zdroje druh vztahu, dřívější nástup, konec
+     * na dobu určitou a hodinové odměňování se sazbou. Jde o opravu evidence jako
+     * u {@see changeRelationType()} a {@see correctStartEarlier()}: platí jejich
+     * pojistky, jen převzatá registrace druh nedrží, protože sloučení je právě
+     * náprava vztahu založeného z registrace. Bez `$adoptTerms` se podmínky
+     * cíle nemění.
+     *
+     * @param array{id:int,code:string,relation_type:string,start:?string,fixed_term_end_on:?string,end_date:?string,remuneration_type:?string,hourly_rate_minor:?int,remuneration_basis_kind:?string,remuneration_basis:?string} $source
+     * @param array<string,int> $moved
+     * @return array{employment:array<string,mixed>,diff:array<string,mixed>}
+     */
+    public function completeMerge(
+        int $supplierId,
+        int $targetId,
+        array $source,
+        bool $adoptTerms,
+        ?string $note,
+        array $moved,
+        ?int $userId,
+    ): array {
+        return $this->transaction(function () use ($supplierId, $targetId, $source, $adoptTerms, $note, $moved, $userId): array {
+            $target = $this->lockEmployment($supplierId, $targetId, null);
+            $employeeId = (int) $target['employee_id'];
+            $rowVersion = (int) $target['row_version'];
+            $start = (string) ($target['actual_start_date'] ?? $target['start_date'] ?? '');
+            $diff = [
+                'merged_from' => [
+                    'employment_id' => $source['id'],
+                    'code' => $source['code'],
+                    'relation_type' => $source['relation_type'],
+                ],
+                'moved' => $moved,
+            ];
+
+            if ($adoptTerms) {
+                $sourceStart = (string) ($source['start'] ?? '');
+                if ($sourceStart !== '' && $start !== '' && $sourceStart < $start) {
+                    $this->assertTermsOpenFrom($supplierId, $targetId, $sourceStart, $start);
+                    $this->shiftStartEarlier($supplierId, $targetId, $employeeId, $rowVersion, $start, $sourceStart);
+                    ++$rowVersion;
+                    $diff['start_date'] = ['from' => $start, 'to' => $sourceStart];
+                    $start = $sourceStart;
+                }
+
+                $previous = (string) $target['relation_type'];
+                if ($source['relation_type'] !== $previous) {
+                    if (!in_array($source['relation_type'], self::RELATION_TYPE_CORRECTABLE, true)
+                        || !in_array($previous, self::RELATION_TYPE_CORRECTABLE, true)
+                    ) {
+                        throw new PayrollDeletionException(
+                            'payroll_merge_relation_type_unsupported',
+                            'Druh vztahu jde při sloučení převzít jen mezi pracovním poměrem, zaměstnáním malého '
+                            . 'rozsahu, DPP a DPČ. Slučte vztahy bez převzetí podmínek.',
+                            $targetId,
+                            (string) $target['code'],
+                        );
+                    }
+                    $blocker = $this->deletion->relationTypeChangeBlocker($supplierId, $targetId, ['registration']);
+                    if ($blocker !== null) {
+                        throw new PayrollDeletionException($blocker['code'], $blocker['message'], $targetId, (string) $target['code']);
+                    }
+                    $this->db->pdo()->prepare(
+                        'UPDATE payroll_employments SET relation_type = ? WHERE supplier_id = ? AND id = ?'
+                    )->execute([$source['relation_type'], $supplierId, $targetId]);
+                    $diff += $this->followRelationType($supplierId, $employeeId, $targetId, $previous, $source['relation_type'], $start);
+                } elseif (in_array($previous, ['dpp', 'dpc'], true)) {
+                    // Dohoda do dohody: druh se nemění, ale zdroj už mezi souběžnými
+                    // vztahy osoby není. Pořadí dohody (první T / další U) se proto
+                    // určí znovu, jinak by jediná zbylá dohoda zůstala „druhá".
+                    $activityChanges = $this->realignActivityCodes($supplierId, $employeeId, $targetId, $previous, $start, true);
+                    if ($activityChanges !== []) {
+                        $diff['activity_code'] = [
+                            'from' => implode(', ', array_unique(array_column($activityChanges, 'from'))),
+                            'to' => implode(', ', array_unique(array_column($activityChanges, 'to'))),
+                        ];
+                    }
+                }
+
+                $diff += $this->adoptMergedEnd($supplierId, $targetId, $source['fixed_term_end_on']);
+                $diff += $this->adoptMergedRemuneration($supplierId, $targetId, $target, $source);
+            }
+
+            $bump = $this->db->pdo()->prepare(
+                'UPDATE payroll_employments SET row_version = row_version + 1
+                  WHERE supplier_id = ? AND id = ? AND row_version = ?'
+            );
+            $bump->execute([$supplierId, $targetId, $rowVersion]);
+            if ($bump->rowCount() !== 1) {
+                throw new PayrollEmploymentConflictException($rowVersion);
+            }
+            $this->insertEvent(
+                $supplierId,
+                $targetId,
+                'merged',
+                null,
+                null,
+                $start !== '' ? $start : date('Y-m-d'),
+                $note,
+                $diff,
+                $userId,
+            );
+
+            return ['employment' => $this->find($supplierId, $employeeId, $targetId), 'diff' => $diff];
+        });
+    }
+
+    /**
+     * Konec na dobu určitou ze zdroje do všech verzí podmínek cíle.
+     *
+     * @return array<string,array{from:?string,to:?string}>
+     */
+    private function adoptMergedEnd(int $supplierId, int $targetId, ?string $fixedTermEnd): array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT fixed_term_end_on FROM payroll_employment_terms
+              WHERE supplier_id = ? AND employment_id = ?
+              ORDER BY effective_from DESC, id DESC
+              LIMIT 1'
+        );
+        $stmt->execute([$supplierId, $targetId]);
+        $current = $stmt->fetchColumn();
+        $current = is_string($current) && $current !== '' ? $current : null;
+        if ($current === $fixedTermEnd) {
+            return [];
+        }
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_employment_terms SET fixed_term_end_on = ?, row_version = row_version + 1
+              WHERE supplier_id = ? AND employment_id = ?'
+        )->execute([$fixedTermEnd, $supplierId, $targetId]);
+
+        return ['fixed_term_end_on' => ['from' => $current, 'to' => $fixedTermEnd]];
+    }
+
+    /**
+     * Hodinové odměňování se sazbou ze zdroje do všech verzí podmínek cíle.
+     * Aktivní předpis měsíční základní mzdy cíle by vedle hodinového výpočtu
+     * vyplatil mzdu podruhé, proto převzetí odmítne (stejně jako
+     * {@see assertRemunerationChange()} bez výslovného ukončení předpisu).
+     *
+     * @param array<string,string|int|bool|null> $target
+     * @param array<string,mixed> $source
+     * @return array<string,array{from:mixed,to:mixed}>
+     */
+    private function adoptMergedRemuneration(int $supplierId, int $targetId, array $target, array $source): array
+    {
+        if (($source['remuneration_type'] ?? null) !== 'hourly' || !is_int($source['hourly_rate_minor'] ?? null)) {
+            return [];
+        }
+        $latest = $this->latestTermsForUpdate($supplierId, $targetId);
+        if ($latest !== null
+            && ($latest['remuneration_type'] ?? null) === 'hourly'
+            && (int) ($latest['hourly_rate_minor'] ?? 0) === $source['hourly_rate_minor']
+        ) {
+            return [];
+        }
+        $base = $this->db->pdo()->prepare(
+            'SELECT component.name, component.code
+               FROM payroll_recurring_components recurring
+               JOIN payroll_component_definitions component
+                 ON component.supplier_id = recurring.supplier_id AND component.id = recurring.component_id
+              WHERE recurring.supplier_id = ? AND recurring.employment_id = ? AND recurring.is_active = 1
+                AND component.component_kind = "base_wage"
+              LIMIT 1'
+        );
+        $base->execute([$supplierId, $targetId]);
+        $recurring = $base->fetch(PDO::FETCH_ASSOC);
+        if (is_array($recurring)) {
+            throw new PayrollDeletionException(
+                'payroll_merge_target_base_wage',
+                sprintf(
+                    'Cílový vztah má aktivní předpis měsíční základní mzdy „%s" (%s). Vedle hodinového odměňování '
+                    . 'ze slučovaného vztahu by se mzda vyplatila dvakrát. Předpis nejdřív ukončete, nebo slučte '
+                    . 'bez převzetí podmínek.',
+                    (string) $recurring['name'],
+                    (string) $recurring['code'],
+                ),
+                $targetId,
+                (string) $target['code'],
+            );
+        }
+        $this->db->pdo()->prepare(
+            "UPDATE payroll_employment_terms
+                SET remuneration_type = 'hourly', hourly_rate_minor = ?, monthly_gross_minor = NULL,
+                    remuneration_basis_kind = ?, remuneration_basis = ?, row_version = row_version + 1
+              WHERE supplier_id = ? AND employment_id = ?"
+        )->execute([
+            $source['hourly_rate_minor'],
+            $source['remuneration_basis_kind'],
+            $source['remuneration_basis'],
+            $supplierId,
+            $targetId,
+        ]);
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_employments SET monthly_gross_minor = NULL WHERE supplier_id = ? AND id = ?'
+        )->execute([$supplierId, $targetId]);
+
+        return [
+            'remuneration_type' => ['from' => $latest['remuneration_type'] ?? null, 'to' => 'hourly'],
+            'hourly_rate_minor' => ['from' => $latest['hourly_rate_minor'] ?? null, 'to' => $source['hourly_rate_minor']],
+        ];
+    }
+
+    /**
+     * Druh činnosti každé verze podmínek, který k novému druhu vztahu nepatří,
+     * nahradí výchozím kódem nového druhu. Kódy ostatních souběžných vztahů
+     * osoby se při volbě pořadí (první/druhá dohoda) přeskakují.
+     *
+     * @return list<array{from:string,to:string}>
+     */
+    private function realignActivityCodes(
+        int $supplierId,
+        int $employeeId,
+        int $employmentId,
+        string $relationType,
+        string $startOn,
+        bool $recomputeAgreementOrder = false,
+    ): array {
+        if (!PayrollEmploymentJmhzActivityFamily::appliesTo($relationType)) {
+            return [];
+        }
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT id, activity_code, jmhz_relationship_detail_code
+               FROM payroll_employment_terms
+              WHERE supplier_id = ? AND employment_id = ?
+              ORDER BY effective_from, id
+              FOR UPDATE'
+        );
+        $stmt->execute([$supplierId, $employmentId]);
+        $versions = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+        $used = $this->concurrentActivityCodes($supplierId, $employeeId, $startOn !== '' ? $startOn : date('Y-m-d'), $employmentId);
+        [$code, $detail] = PayrollEmploymentJmhzActivityFamily::nextRelationDefaults($relationType, $used);
+        $update = $this->db->pdo()->prepare(
+            'UPDATE payroll_employment_terms
+                SET activity_code = ?, jmhz_relationship_detail_code = ?,
+                    health_association_member = COALESCE(?, health_association_member)
+              WHERE supplier_id = ? AND id = ?'
+        );
+        $changes = [];
+        foreach ($versions as $version) {
+            $current = is_string($version['activity_code']) && $version['activity_code'] !== '' ? $version['activity_code'] : null;
+            $currentDetail = is_string($version['jmhz_relationship_detail_code']) ? $version['jmhz_relationship_detail_code'] : null;
+            $fits = $current !== null
+                && PayrollEmploymentJmhzActivityFamily::matches($relationType, $current, $currentDetail)
+                && (!$recomputeAgreementOrder || $current === $code);
+            $agreement = in_array($relationType, ['dpp', 'dpc'], true);
+            if ($fits && !$agreement) {
+                continue;
+            }
+            $newCode = $fits ? $current : $code;
+            $newDetail = $fits ? $currentDetail : $detail;
+            // Člen družstva se u dohody neposuzuje (viz validátor podmínek).
+            $update->execute([$newCode, $newDetail, $agreement ? 0 : null, $supplierId, (int) $version['id']]);
+            if (!$fits) {
+                $changes[] = ['from' => $current ?? '—', 'to' => $newCode ?? '—'];
+            }
+        }
+
+        return $changes;
+    }
+
+    /** @return list<array{code:string,message:string}> */
+    private function relationTypeChangeWarnings(int $supplierId, int $employmentId): array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT
+                EXISTS (SELECT 1 FROM payroll_registration_a1_profiles profile
+                         WHERE profile.supplier_id = ? AND profile.employment_id = ?) AS registered,
+                (SELECT COUNT(*) FROM payroll_inputs input
+                  WHERE input.supplier_id = ? AND input.employment_id = ? AND input.status = 'draft') AS draft_inputs"
+        );
+        $stmt->execute([$supplierId, $employmentId, $supplierId, $employmentId]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC) ?: [];
+        $warnings = [];
+        if ((int) ($row['registered'] ?? 0) > 0) {
+            $warnings[] = [
+                'code' => 'imported_registration_differs',
+                'message' => 'Vztah má převzatou registraci ČSSZ, která ho vede s původním druhem. '
+                    . 'Pokud jste ho u ČSSZ přihlásili s nesprávným druhem činnosti, podejte opravu registrace.',
+            ];
+        }
+        $drafts = (int) ($row['draft_inputs'] ?? 0);
+        if ($drafts > 0) {
+            $warnings[] = [
+                'code' => 'draft_inputs_follow',
+                'message' => "Mzdové vstupy v konceptu ({$drafts}) zůstávají u tohoto vztahu. Před schválením je zkontrolujte.",
+            ];
+        }
+
+        return $warnings;
+    }
+
     /** @return array<string,mixed> */
     public function setMealEntitlementBasis(
         int $supplierId,
@@ -943,6 +1478,76 @@ final class PayrollEmploymentRepository
             );
 
             return $this->find($supplierId, (int) $employment['employee_id'], $employmentId);
+        });
+    }
+
+    /**
+     * Člen statutárního orgánu je zároveň společníkem: odměna za výkon funkce
+     * se účtuje proti závazku ke společníkům (366), ne proti 331. Platí pro běhy
+     * přepočítané po změně, zaúčtované revize nese jejich zmrazený snímek.
+     *
+     * @return array<string,mixed>
+     */
+    public function setStatutoryPartner(
+        int $supplierId,
+        int $employmentId,
+        bool $partner,
+        int $expectedVersion,
+        ?int $userId,
+        ?string $ip,
+        ?string $userAgent,
+    ): array {
+        return $this->transaction(function () use (
+            $supplierId,
+            $employmentId,
+            $partner,
+            $expectedVersion,
+            $userId,
+            $ip,
+            $userAgent,
+        ): array {
+            $owner = $this->db->pdo()->prepare(
+                'SELECT employee_id, relation_type, statutory_partner
+                   FROM payroll_employments
+                  WHERE supplier_id = ? AND id = ?'
+            );
+            $owner->execute([$supplierId, $employmentId]);
+            $row = $owner->fetch(PDO::FETCH_ASSOC);
+            if (!is_array($row)) {
+                throw new PayrollEmploymentNotFoundException('Pracovní vztah nebyl nalezen.');
+            }
+            if ((string) $row['relation_type'] !== 'statutory_body') {
+                throw new \InvalidArgumentException(
+                    'Společníka lze vyznačit jen u vztahu odměny za výkon funkce člena orgánu.',
+                );
+            }
+            $this->lockEmployee($supplierId, (int) $row['employee_id']);
+            $this->lockEmployment($supplierId, $employmentId, $expectedVersion);
+            $previous = (int) $row['statutory_partner'] === 1;
+            if ($previous === $partner) {
+                return $this->find($supplierId, (int) $row['employee_id'], $employmentId);
+            }
+            $update = $this->db->pdo()->prepare(
+                'UPDATE payroll_employments
+                    SET statutory_partner = ?, row_version = row_version + 1
+                  WHERE supplier_id = ? AND id = ? AND row_version = ?'
+            );
+            $update->execute([(int) $partner, $supplierId, $employmentId, $expectedVersion]);
+            if ($update->rowCount() !== 1) {
+                throw new PayrollEmploymentConflictException($expectedVersion);
+            }
+            $this->activityLogger->log(
+                'payroll.employment.statutory_partner_changed',
+                $userId,
+                'payroll_employment',
+                $employmentId,
+                ['from' => $previous, 'to' => $partner],
+                $ip,
+                $userAgent,
+                $supplierId,
+            );
+
+            return $this->find($supplierId, (int) $row['employee_id'], $employmentId);
         });
     }
 
@@ -1029,6 +1634,7 @@ final class PayrollEmploymentRepository
                 $userId,
             );
             $this->alignCreatedEvent($supplierId, $employmentId, $effectiveOn);
+            $this->alignIdentityStart($supplierId, (int) $employment['employee_id']);
             if ($target === 'ended') {
                 $this->ensureChecklist(
                     $supplierId,
@@ -1111,65 +1717,14 @@ final class PayrollEmploymentRepository
                 throw new \DomainException('Nástup jde posunout jen na dřívější den, než eviduje vztah.');
             }
             $this->assertTermsOpenFrom($supplierId, $employmentId, $newStart, $current);
-            $employeeId = (int) $employment['employee_id'];
-            $pdo = $this->db->pdo();
-
-            $first = $pdo->prepare(
-                'SELECT id, effective_from, planned_start_on, actual_start_on
-                   FROM payroll_employment_terms
-                  WHERE supplier_id = ? AND employment_id = ?
-                  ORDER BY effective_from, id
-                  LIMIT 1
-                  FOR UPDATE'
+            $this->shiftStartEarlier(
+                $supplierId,
+                $employmentId,
+                (int) $employment['employee_id'],
+                (int) $employment['row_version'],
+                $current,
+                $newStart,
             );
-            $first->execute([$supplierId, $employmentId]);
-            $terms = $first->fetch(PDO::FETCH_ASSOC);
-            if ($terms === false || (string) $terms['effective_from'] > $current) {
-                throw new \DomainException('Pracovní vztah nemá verzi podmínek platnou od nástupu.');
-            }
-            $pdo->prepare(
-                'UPDATE payroll_employment_terms
-                    SET effective_from = ?,
-                        planned_start_on = CASE WHEN planned_start_on IS NULL OR planned_start_on > ? THEN ? ELSE planned_start_on END,
-                        actual_start_on = CASE WHEN actual_start_on IS NULL THEN NULL WHEN actual_start_on > ? THEN ? ELSE actual_start_on END,
-                        row_version = row_version + 1
-                  WHERE supplier_id = ? AND id = ?'
-            )->execute([$newStart, $newStart, $newStart, $newStart, $newStart, $supplierId, (int) $terms['id']]);
-
-            $update = $pdo->prepare(
-                'UPDATE payroll_employments
-                    SET start_date = CASE WHEN start_date IS NULL OR start_date > ? THEN ? ELSE start_date END,
-                        actual_start_date = CASE WHEN actual_start_date IS NULL THEN NULL WHEN actual_start_date > ? THEN ? ELSE actual_start_date END,
-                        start_estimated = 0,
-                        row_version = row_version + 1
-                  WHERE supplier_id = ? AND id = ? AND row_version = ?'
-            );
-            $update->execute([$newStart, $newStart, $newStart, $newStart, $supplierId, $employmentId, (int) $employment['row_version']]);
-            if ($update->rowCount() !== 1) {
-                throw new PayrollEmploymentConflictException((int) $employment['row_version']);
-            }
-
-            // Stav vztahu v čase se čte z událostí: aktivace ke starému nástupu
-            // by nechala dobu mezi novým a starým nástupem „plánovanou".
-            $pdo->prepare(
-                "UPDATE payroll_employment_events
-                    SET effective_on = ?
-                  WHERE supplier_id = ? AND employment_id = ?
-                    AND event_type = 'status_changed' AND to_status = 'active' AND effective_on = ?"
-            )->execute([$newStart, $supplierId, $employmentId, $current]);
-            $this->alignCreatedEvent($supplierId, $employmentId, $newStart);
-
-            $this->moveEarliestRows($supplierId, 'payroll_employment_external_ids', 'valid_from',
-                ['employment_id' => $employmentId], ['environment', 'identifier_type'], $current, $newStart);
-            $this->moveEarliestRows($supplierId, 'payroll_person_external_ids', 'valid_from',
-                ['employee_id' => $employeeId], ['environment', 'identifier_type'], $current, $newStart);
-            $this->moveEarliestRows($supplierId, 'payroll_person_identity_history', 'effective_from',
-                ['employee_id' => $employeeId], [], $current, $newStart);
-            $this->moveEarliestRows($supplierId, 'payroll_person_addresses', 'effective_from',
-                ['employee_id' => $employeeId], ['address_type'], $current, $newStart);
-            foreach (['payroll_person_tax_residences', 'payroll_person_social_jurisdictions', 'payroll_person_health_coverage_history'] as $table) {
-                $this->moveEarliestRows($supplierId, $table, 'effective_from', ['employee_id' => $employeeId], [], $current, $newStart);
-            }
 
             $diff = ['start_date' => ['from' => $current, 'to' => $newStart]];
             $this->insertEvent($supplierId, $employmentId, 'terms_corrected', null, null, $newStart, $note, $diff, $userId);
@@ -1186,6 +1741,125 @@ final class PayrollEmploymentRepository
 
             return ['from' => $current, 'to' => $newStart];
         });
+    }
+
+    /**
+     * Posun nástupu na dřívější den ve všech místech, která ho nesou
+     * (viz {@see correctStartEarlier()}). Běží pod zámkem vztahu volajícího,
+     * pojistku zúčtované mzdy ověřuje volající.
+     */
+    private function shiftStartEarlier(
+        int $supplierId,
+        int $employmentId,
+        int $employeeId,
+        int $rowVersion,
+        string $current,
+        string $newStart,
+    ): void {
+        $pdo = $this->db->pdo();
+
+        $first = $pdo->prepare(
+            'SELECT id, effective_from, planned_start_on, actual_start_on
+               FROM payroll_employment_terms
+              WHERE supplier_id = ? AND employment_id = ?
+              ORDER BY effective_from, id
+              LIMIT 1
+              FOR UPDATE'
+        );
+        $first->execute([$supplierId, $employmentId]);
+        $terms = $first->fetch(PDO::FETCH_ASSOC);
+        if ($terms === false || (string) $terms['effective_from'] > $current) {
+            throw new \DomainException('Pracovní vztah nemá verzi podmínek platnou od nástupu.');
+        }
+        $pdo->prepare(
+            'UPDATE payroll_employment_terms
+                SET effective_from = ?,
+                    planned_start_on = CASE WHEN planned_start_on IS NULL OR planned_start_on > ? THEN ? ELSE planned_start_on END,
+                    actual_start_on = CASE WHEN actual_start_on IS NULL THEN NULL WHEN actual_start_on > ? THEN ? ELSE actual_start_on END,
+                    row_version = row_version + 1
+              WHERE supplier_id = ? AND id = ?'
+        )->execute([$newStart, $newStart, $newStart, $newStart, $newStart, $supplierId, (int) $terms['id']]);
+
+        $update = $pdo->prepare(
+            'UPDATE payroll_employments
+                SET start_date = CASE WHEN start_date IS NULL OR start_date > ? THEN ? ELSE start_date END,
+                    actual_start_date = CASE WHEN actual_start_date IS NULL THEN NULL WHEN actual_start_date > ? THEN ? ELSE actual_start_date END,
+                    start_estimated = 0,
+                    row_version = row_version + 1
+              WHERE supplier_id = ? AND id = ? AND row_version = ?'
+        );
+        $update->execute([$newStart, $newStart, $newStart, $newStart, $supplierId, $employmentId, $rowVersion]);
+        if ($update->rowCount() !== 1) {
+            throw new PayrollEmploymentConflictException($rowVersion);
+        }
+
+        // Stav vztahu v čase se čte z událostí: aktivace ke starému nástupu
+        // by nechala dobu mezi novým a starým nástupem „plánovanou".
+        $pdo->prepare(
+            "UPDATE payroll_employment_events
+                SET effective_on = ?
+              WHERE supplier_id = ? AND employment_id = ?
+                AND event_type = 'status_changed' AND to_status = 'active' AND effective_on = ?"
+        )->execute([$newStart, $supplierId, $employmentId, $current]);
+        $this->alignCreatedEvent($supplierId, $employmentId, $newStart);
+
+        $this->moveEarliestRows($supplierId, 'payroll_employment_external_ids', 'valid_from',
+            ['employment_id' => $employmentId], ['environment', 'identifier_type'], $current, $newStart);
+        $this->moveEarliestRows($supplierId, 'payroll_person_external_ids', 'valid_from',
+            ['employee_id' => $employeeId], ['environment', 'identifier_type'], $current, $newStart);
+        $this->moveEarliestRows($supplierId, 'payroll_person_identity_history', 'effective_from',
+            ['employee_id' => $employeeId], [], $current, $newStart);
+        $this->moveEarliestRows($supplierId, 'payroll_person_addresses', 'effective_from',
+            ['employee_id' => $employeeId], ['address_type'], $current, $newStart);
+        foreach (['payroll_person_tax_residences', 'payroll_person_social_jurisdictions', 'payroll_person_health_coverage_history'] as $table) {
+            $this->moveEarliestRows($supplierId, $table, 'effective_from', ['employee_id' => $employeeId], [], $current, $newStart);
+        }
+        $this->alignIdentityStart($supplierId, $employeeId);
+    }
+
+    /**
+     * Identita osoby (jméno, datum narození) platí od začátku jejího prvního
+     * vztahu, ne od vztahu, se kterým byla osoba založena.
+     *
+     * Osoba založená s dohodou od března dostala identitu od března. Když jí
+     * pak přibyl vztah od února (import docházky, další dohoda), únorové
+     * hlášení JMHZ nemělo jméno a kontrola hlásila mezeru, kterou účetní
+     * neuměla opravit jinak než ručně v historii identity. Nejstarší verze se
+     * proto protáhne k nejstaršímu nástupu. Pozdější verze (změna jména) ani
+     * identitu, která nástupu předchází, to nemění.
+     */
+    private function alignIdentityStart(int $supplierId, int $employeeId): void
+    {
+        $pdo = $this->db->pdo();
+        $start = $pdo->prepare(
+            "SELECT MIN(COALESCE(actual_start_date, start_date))
+               FROM payroll_employments
+              WHERE supplier_id = ? AND employee_id = ? AND status <> 'no_show'"
+        );
+        $start->execute([$supplierId, $employeeId]);
+        $firstStart = $start->fetchColumn();
+        if (!is_string($firstStart) || $firstStart === '') {
+            return;
+        }
+        $firstStart = substr($firstStart, 0, 10);
+        $identity = $pdo->prepare(
+            'SELECT id, effective_from
+               FROM payroll_person_identity_history
+              WHERE supplier_id = ? AND employee_id = ?
+              ORDER BY effective_from, id
+              LIMIT 1
+              FOR UPDATE'
+        );
+        $identity->execute([$supplierId, $employeeId]);
+        $earliest = $identity->fetch(PDO::FETCH_ASSOC);
+        if ($earliest === false || (string) $earliest['effective_from'] <= $firstStart) {
+            return;
+        }
+        $pdo->prepare(
+            'UPDATE payroll_person_identity_history
+                SET effective_from = ?, row_version = row_version + 1
+              WHERE supplier_id = ? AND id = ? AND effective_from = ?'
+        )->execute([$firstStart, $supplierId, (int) $earliest['id'], (string) $earliest['effective_from']]);
     }
 
     /**
@@ -1414,7 +2088,7 @@ final class PayrollEmploymentRepository
      *
      * @return list<string>
      */
-    private function concurrentActivityCodes(int $supplierId, int $employeeId, string $startOn): array
+    private function concurrentActivityCodes(int $supplierId, int $employeeId, string $startOn, int $exceptEmploymentId = 0): array
     {
         $stmt = $this->db->pdo()->prepare(
             "SELECT latest.activity_code
@@ -1432,11 +2106,12 @@ final class PayrollEmploymentRepository
                     AND employment.employee_id = ?
                     AND employment.status NOT IN ('ended', 'archived', 'no_show')
                     AND (employment.end_date IS NULL OR employment.end_date >= ?)
+                    AND employment.id <> ?
                ) latest
               WHERE latest.version_rank = 1
                 AND latest.activity_code IS NOT NULL"
         );
-        $stmt->execute([$supplierId, $employeeId, $startOn]);
+        $stmt->execute([$supplierId, $employeeId, $startOn, $exceptEmploymentId]);
 
         return array_values(array_map(strval(...), $stmt->fetchAll(PDO::FETCH_COLUMN)));
     }
@@ -1525,7 +2200,8 @@ final class PayrollEmploymentRepository
                     terms.effective_from, terms.effective_to,
                     terms.contract_signed_on, terms.planned_start_on,
                     terms.actual_start_on, terms.fixed_term_end_on,
-                    terms.monthly_gross_minor,
+                    terms.monthly_gross_minor, terms.remuneration_type,
+                    terms.hourly_rate_minor, terms.remuneration_basis_kind, terms.remuneration_basis,
                     terms.weekly_hours, terms.leave_entitlement_weeks_override,
                     terms.probable_hourly_earning_minor,
                     terms.probable_earning_rationale,
@@ -1684,7 +2360,8 @@ final class PayrollEmploymentRepository
             'INSERT INTO payroll_employment_terms
                 (supplier_id, employment_id, office_id, effective_from,
                  contract_signed_on, planned_start_on, actual_start_on,
-                 fixed_term_end_on, monthly_gross_minor, weekly_hours, leave_entitlement_weeks_override,
+                 fixed_term_end_on, monthly_gross_minor, remuneration_type, hourly_rate_minor,
+                 remuneration_basis_kind, remuneration_basis, weekly_hours, leave_entitlement_weeks_override,
                  probable_hourly_earning_minor, probable_earning_rationale,
                  workload_basis_points,
                  work_place, regular_workplace, cz_isco_code, activity_code,
@@ -1716,7 +2393,7 @@ final class PayrollEmploymentRepository
                  jmhz_workplace_address_point_code, jmhz_workplace_street,
                  jmhz_workplace_house_number, jmhz_workplace_orientation_number,
                  jmhz_workplace_postal_code, jmhz_state_prosecutor)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
                      ?, ?, ?, ?, ?, ?, ?,
                      ?, ?, ?, ?, ?, ?)'
         )->execute([
@@ -1729,6 +2406,10 @@ final class PayrollEmploymentRepository
             $data['actual_start_on'],
             $data['fixed_term_end_on'],
             $data['monthly_gross_minor'],
+            $data['remuneration_type'],
+            $data['hourly_rate_minor'],
+            $data['remuneration_basis_kind'],
+            $data['remuneration_basis'],
             $data['weekly_hours'],
             $data['leave_entitlement_weeks_override'],
             $data['probable_hourly_earning_minor'],
@@ -1812,7 +2493,8 @@ final class PayrollEmploymentRepository
             'UPDATE payroll_employment_terms SET
                  office_id = ?,
                  contract_signed_on = ?, planned_start_on = ?, actual_start_on = ?,
-                 fixed_term_end_on = ?, monthly_gross_minor = ?, weekly_hours = ?,
+                 fixed_term_end_on = ?, monthly_gross_minor = ?, remuneration_type = ?,
+                 hourly_rate_minor = ?, remuneration_basis_kind = ?, remuneration_basis = ?, weekly_hours = ?,
                  leave_entitlement_weeks_override = ?,
                  probable_hourly_earning_minor = ?, probable_earning_rationale = ?,
                  workload_basis_points = ?,
@@ -1852,6 +2534,10 @@ final class PayrollEmploymentRepository
             $data['actual_start_on'],
             $data['fixed_term_end_on'],
             $data['monthly_gross_minor'],
+            $data['remuneration_type'],
+            $data['hourly_rate_minor'],
+            $data['remuneration_basis_kind'],
+            $data['remuneration_basis'],
             $data['weekly_hours'],
             $data['leave_entitlement_weeks_override'],
             $data['probable_hourly_earning_minor'],
@@ -1950,6 +2636,121 @@ final class PayrollEmploymentRepository
         if (is_string($settled) && $settled !== '') {
             throw new PayrollTermsSettledException($settled);
         }
+    }
+
+    /**
+     * Smí se ukončený vztah opravit tímhle tělem?
+     *
+     * „Ukončit skončené dohody" běží často dřív, než je hotové hlášení JMHZ
+     * za poslední měsíc. Dokud ukončený vztah opravit nešlo vůbec, musela
+     * účetní ukončení vrátit, údaj doplnit a vztah ukončit znovu, u každé
+     * dohody zvlášť. Opravit jde proto údaje, které jen popisují vztah pro
+     * JMHZ ({@see self::ENDED_CORRECTABLE_FIELDS}), a to dokud za žádný měsíc
+     * opravované verze není hlášení zmrazené ani podané
+     * ({@see JmhzReportedEmploymentPeriods}). Mzdu, úvazek ani daty se tu
+     * nehýbe: to je změna smlouvy, která patří k vrácení ukončení.
+     *
+     * @param array<string,mixed> $employment
+     * @param array<string,mixed> $previous
+     * @param TermsInput $data
+     */
+    private function assertEndedCorrectable(
+        int $supplierId,
+        array $employment,
+        array $previous,
+        array $data,
+        string $storedFrom,
+        ?string $storedTo,
+    ): void {
+        $code = (string) $employment['code'];
+        $ignored = ['tax_declaration_signed', 'fixed_term_end_on', 'monthly_gross_minor'];
+        if ($previous['office_id'] === null) {
+            // Prázdnou účtárnu doplní resolveOffice() výchozí; to není změna.
+            $ignored[] = 'office_id';
+        }
+        if (($employment['actual_start_date'] ?? null) !== null
+            && ($data['actual_start_on'] ?? null) === (string) $employment['actual_start_date']
+        ) {
+            // Skutečný nástup převezme oprava ze vztahu sama (correctTerms());
+            // verze z importu ho mívá prázdný. Není to změna od účetní.
+            $ignored[] = 'actual_start_on';
+        }
+        $blocked = [];
+        foreach (array_keys($this->diff($previous, $data)) as $field) {
+            if (!array_key_exists($field, $previous)
+                || in_array($field, $ignored, true)
+                || in_array($field, self::ENDED_CORRECTABLE_FIELDS, true)
+            ) {
+                continue;
+            }
+            $blocked[] = $field;
+        }
+        if ((string) $data['effective_from'] !== $storedFrom) {
+            $blocked[] = 'effective_from';
+        }
+        if ($blocked !== []) {
+            throw new \DomainException(sprintf(
+                'Vztah %s je ukončený. Opravit u něj jde jen údaje pro JMHZ (místo výkonu práce, CZ-ISCO, '
+                . 'druh činnosti, primární vztah, pravděpodobný výdělek); měníte i %s. Jinou změnu podmínek '
+                . 'udělejte po vrácení ukončení na kartě vztahu.',
+                $code,
+                implode(', ', $blocked),
+            ));
+        }
+        $end = $employment['end_date'] === null ? $storedTo : (string) $employment['end_date'];
+        if ($storedTo !== null && $end !== null && $storedTo < $end) {
+            $end = $storedTo;
+        }
+        $reported = JmhzReportedEmploymentPeriods::firstWithin(
+            JmhzReportedEmploymentPeriods::forEmployments(
+                $this->db->pdo(),
+                $supplierId,
+                [(int) $employment['id']],
+            )[(int) $employment['id']] ?? [],
+            $storedFrom,
+            $end,
+        );
+        if ($reported !== null) {
+            $period = JmhzReportedEmploymentPeriods::label($reported);
+            throw new \DomainException(sprintf(
+                'Ukončený vztah %s už je v hlášení JMHZ za %s, které je zmrazené nebo podané, takže jeho údaje '
+                . 'nejde opravit tady. Vraťte ukončení vztahu na kartě, údaje opravte, vztah znovu ukončete '
+                . 'a za %s podejte opravné hlášení JMHZ.',
+                $code,
+                $period,
+                $period,
+            ));
+        }
+    }
+
+    /**
+     * Poslední zúčtované mzdové období vztahu (první den měsíce), nebo `null`.
+     *
+     * Karta vztahu se podle něj rozhodne DŘÍV, než uživatel uloží: dokud
+     * platná verze podmínek nezasahuje do zúčtovaného měsíce, jde opravit na
+     * místě, a nová verze začne nejdřív prvním nezúčtovaným měsícem. Je to
+     * totéž pravidlo jako {@see assertTermsOpenFrom()}, jen se na něj ptá
+     * předem a nečeká na chybu `payroll_terms_settled`.
+     */
+    public function settledThrough(int $supplierId, int $employmentId): ?string
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT MAX(run.period_start)
+               FROM payroll_run_employments run_employment
+               JOIN payroll_run_revisions revision
+                 ON revision.supplier_id = run_employment.supplier_id
+                AND revision.id = run_employment.revision_id
+               JOIN payroll_runs run
+                 ON run.supplier_id = revision.supplier_id
+                AND run.id = revision.run_id
+              WHERE run_employment.supplier_id = ?
+                AND run_employment.employment_id = ?
+                AND run.status IN ("posted", "payment_ready", "paid", "closed")'
+        );
+        $stmt->execute([$supplierId, $employmentId]);
+        $settled = $stmt->fetchColumn();
+
+        return is_string($settled) && $settled !== '' ? $settled : null;
     }
 
     /**
@@ -2055,6 +2856,102 @@ final class PayrollEmploymentRepository
         $stmt->execute([$supplierId, $employmentId]);
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
         return $row === false ? null : $this->cast($this->row($row));
+    }
+
+    /** @param array<string,mixed>|null $previous @param array<string,mixed> $data */
+    private function assertMonthlyTransition(?array $previous, array $data, bool $replace, ?int $monthlyGross): void
+    {
+        if (($previous['remuneration_type'] ?? null) !== null && $data['remuneration_type'] === null) {
+            throw new \InvalidArgumentException('Výslovně určený způsob odměňování nelze vrátit na dosavadní režim. Zvolte měsíční nebo hodinové odměňování.');
+        }
+        if (($previous['remuneration_type'] ?? 'monthly') === 'hourly'
+            && $data['remuneration_type'] === 'monthly'
+            && (!$replace || $monthlyGross === null)
+        ) {
+            throw new \InvalidArgumentException('Přechod na měsíční odměňování vyžaduje výslovně zadanou měsíční mzdu.');
+        }
+    }
+
+    /**
+     * Přechod na hodinové odměňování v téže transakci jako zápis podmínek.
+     *
+     * Aktivní předpis měsíční základní mzdy by vedle hodinového výpočtu
+     * vyplatil mzdu podruhé. Bez výslovného `$endRecurringBase` se proto
+     * přechod odmítne s názvem předpisu; s ním se předpis ukončí ke dni před
+     * účinností hodinové verze (jen při přechodu z měsíčního režimu).
+     *
+     * Starší měsíční verze bez vlastní částky dědí mzdu z projekce vztahu,
+     * kterou hodinová verze vynuluje. Částku, kterou dnes reálně dědí, jim
+     * proto zapíšeme výslovně. Výsledná hodnota (`COALESCE` ve snímku běhu)
+     * se nemění, a proto se nemění ani `row_version` verze — otisk snímků
+     * uzavřených měsíců zůstává stejný.
+     *
+     * @param array<string,mixed>|null $previous
+     * @param array<string,mixed> $data
+     * @param array<string,mixed> $employment
+     */
+    private function assertRemunerationChange(int $supplierId, int $employmentId, ?array $previous, array $data, array $employment, ?int $correctingId, ?string $effectiveTo, bool $endRecurringBase = false, ?int $userId = null): void
+    {
+        if ($data['remuneration_type'] !== 'hourly') return;
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT recurring.id, recurring.valid_from, component.code, component.name
+               FROM payroll_recurring_components recurring FORCE INDEX (idx_payroll_recurring_effective)
+              JOIN payroll_component_definitions component ON component.supplier_id = recurring.supplier_id AND component.id = recurring.component_id
+             WHERE recurring.supplier_id = ? AND recurring.employment_id = ? AND recurring.is_active = 1
+               AND component.component_kind = "base_wage" AND (recurring.valid_to IS NULL OR recurring.valid_to >= ?)
+               AND (? IS NULL OR recurring.valid_from <= ?)
+             ORDER BY recurring.valid_from, recurring.id
+             FOR UPDATE'
+        );
+        $stmt->execute([$supplierId, $employmentId, $data['effective_from'], $effectiveTo, $effectiveTo]);
+        $recurring = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        if ($recurring !== []) {
+            $transition = ($previous['remuneration_type'] ?? 'monthly') !== 'hourly';
+            if (!$endRecurringBase || !$transition) {
+                $first = $recurring[0];
+                throw new \MyInvoice\Service\Payroll\PayrollFieldValidationException(sprintf(
+                    'Vztah má aktivní předpis měsíční základní mzdy „%s" (%s) platný od %s. Vedle hodinového '
+                        . 'odměňování by se mzda vyplatila dvakrát. Ukončete předpis ke dni %s, nebo potvrďte, '
+                        . 'že se má ukončit spolu s přechodem na hodinové odměňování.',
+                    (string) $first['name'],
+                    (string) $first['code'],
+                    (string) $first['valid_from'],
+                    (new \DateTimeImmutable((string) $data['effective_from']))->modify('-1 day')->format('Y-m-d'),
+                ), 'remuneration_type', 'recurring_base_wage_active', null, [
+                    'recurring_id' => (int) $first['id'],
+                    'recurring_name' => (string) $first['name'],
+                ]);
+            }
+            $endOn = (new \DateTimeImmutable((string) $data['effective_from']))->modify('-1 day')->format('Y-m-d');
+            $end = $this->db->pdo()->prepare(
+                'UPDATE payroll_recurring_components
+                    SET valid_to = CASE WHEN valid_from <= ? THEN ? ELSE valid_to END,
+                        is_active = CASE WHEN valid_from <= ? THEN is_active ELSE 0 END,
+                        updated_by = ?, row_version = row_version + 1
+                  WHERE supplier_id = ? AND id = ?'
+            );
+            foreach ($recurring as $row) {
+                $end->execute([$endOn, $endOn, $endOn, $userId, $supplierId, (int) $row['id']]);
+            }
+            $this->activityLogger->log(
+                'payroll.employment.recurring_base_ended',
+                $userId,
+                'payroll_employment',
+                $employmentId,
+                ['recurring_component_ids' => array_map('intval', array_column($recurring, 'id')), 'valid_to' => $endOn],
+                null,
+                null,
+                $supplierId,
+            );
+        }
+        if ($employment['monthly_gross_minor'] !== null) {
+            $this->db->pdo()->prepare(
+                'UPDATE payroll_employment_terms SET monthly_gross_minor = ?
+                  WHERE supplier_id = ? AND employment_id = ?
+                    AND monthly_gross_minor IS NULL AND (remuneration_type IS NULL OR remuneration_type = "monthly")
+                    AND (? IS NULL OR id <> ?)'
+            )->execute([(int) $employment['monthly_gross_minor'], $supplierId, $employmentId, $correctingId, $correctingId]);
+        }
     }
 
     /** @param array<string,mixed> $diff */
@@ -2430,26 +3327,160 @@ final class PayrollEmploymentRepository
         return $value === false || $value === null ? null : (int) $value;
     }
 
+    /**
+     * Má osoba primární vztah, který ke dni `$startOn` ještě běží?
+     *
+     * Jediné místo, kde se rozhoduje, zda nový vztah osoby bude hlavní (JMHZ
+     * 10495): ruční založení, import docházky, import registrace i převod.
+     * Primární vztah, jehož konec (`end_date`) leží před nástupem nového, se
+     * s ním nepřekrývá: navazující DPP agentury pak nevznikne jako vedlejší jen
+     * proto, že předchozí dohoda ještě nebyla formálně ukončená. Bez data
+     * nástupu rozhoduje každý živý primární vztah jako dřív.
+     */
+    public function hasOverlappingPrimary(
+        int $supplierId,
+        int $employeeId,
+        ?string $startOn,
+        ?int $exceptEmploymentId = null,
+    ): bool {
+        return $this->overlappingPrimary($supplierId, $employeeId, $startOn, $exceptEmploymentId) !== null;
+    }
+
+    /** @return array<string,mixed>|null */
+    private function overlappingPrimary(
+        int $supplierId,
+        int $employeeId,
+        ?string $startOn,
+        ?int $exceptEmploymentId,
+    ): ?array {
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT code, relation_type,
+                    COALESCE(actual_start_date, start_date) AS start_on, end_date
+               FROM payroll_employments
+              WHERE supplier_id = ? AND employee_id = ? AND is_primary = 1
+                AND status IN ('planned', 'preregistered', 'active', 'suspended')
+                AND (? IS NULL OR id <> ?)
+                AND (? IS NULL OR end_date IS NULL OR end_date >= ?)
+              ORDER BY id
+              LIMIT 1"
+        );
+        $stmt->execute([
+            $supplierId,
+            $employeeId,
+            $exceptEmploymentId,
+            $exceptEmploymentId,
+            $startOn,
+            $startOn,
+        ]);
+        $other = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        return $other === false ? null : $other;
+    }
+
     private function assertPrimaryAvailable(
         int $supplierId,
         int $employeeId,
         bool $isPrimary,
         ?int $exceptEmploymentId,
+        ?string $startOn = null,
     ): void {
         if (!$isPrimary) {
             return;
         }
+        $other = $this->overlappingPrimary($supplierId, $employeeId, $startOn, $exceptEmploymentId);
+        if ($other !== null) {
+            throw new \DomainException(self::primaryTakenMessage($other));
+        }
+    }
+
+    /**
+     * Věta musí říct, KTERÝ vztah primární drží a jak to přepnout. Holé „osoba
+     * už má jiný primární vztah" posílalo účetní hledat mezi desítkami dohod
+     * brigádníka.
+     *
+     * @param array<string,mixed> $other
+     */
+    private static function primaryTakenMessage(array $other): string
+    {
+        $date = static fn (mixed $value): ?string => is_string($value) && $value !== ''
+            ? (new \DateTimeImmutable($value))->format('j. n. Y')
+            : null;
+        $from = $date($other['start_on'] ?? null);
+        $to = $date($other['end_date'] ?? null);
+        $period = match (true) {
+            $from !== null && $to !== null => "{$from} – {$to}",
+            $from !== null => "od {$from}",
+            $to !== null => "do {$to}",
+            default => 'bez data nástupu',
+        };
+        $code = (string) ($other['code'] ?? '');
+        $type = self::RELATION_LABELS[(string) ($other['relation_type'] ?? '')] ?? (string) ($other['relation_type'] ?? '');
+
+        return sprintf(
+            'Osoba už má primární pracovní vztah %s (%s, %s). Primární smí být jen jeden: '
+            . 'chcete-li za primární označit tento vztah, otevřete na kartě osoby vztah %s, '
+            . 'v opravě podmínek zrušte „Primární vztah" a uložte; potom ho nastavte tady.',
+            $code,
+            $type,
+            $period,
+            $code,
+        );
+    }
+
+    /**
+     * Nový primární vztah přebírá roli hlavního vztahu po těch, které skončily
+     * před jeho nástupem. Mění se jen aktuální příznak vztahu stejně jako při
+     * ukončení ({@see transition()}); verze podmínek zůstávají, takže měsíce,
+     * kdy byl hlavní ten předchozí, se vykazují beze změny.
+     *
+     * Volá se před vložením nového vztahu: unikátní `uq_payroll_employment_primary`
+     * dva živé primární vztahy osoby nedovolí ani na okamžik.
+     *
+     * @return list<int> vztahy, které hlavní roli předaly
+     */
+    private function releaseEndedPrimaries(int $supplierId, int $employeeId, string $startOn): array
+    {
         $stmt = $this->db->pdo()->prepare(
             "SELECT id
                FROM payroll_employments
               WHERE supplier_id = ? AND employee_id = ? AND is_primary = 1
-                AND status IN ('planned', 'preregistered', 'active', 'suspended')
-                AND (? IS NULL OR id <> ?)
-              LIMIT 1"
+                AND end_date IS NOT NULL AND end_date < ?
+              FOR UPDATE"
         );
-        $stmt->execute([$supplierId, $employeeId, $exceptEmploymentId, $exceptEmploymentId]);
-        if ($stmt->fetchColumn() !== false) {
-            throw new \DomainException('Osoba už má jiný primární pracovní vztah.');
+        $stmt->execute([$supplierId, $employeeId, $startOn]);
+        $released = array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN));
+        if ($released !== []) {
+            $placeholders = implode(', ', array_fill(0, count($released), '?'));
+            $this->db->pdo()->prepare(
+                "UPDATE payroll_employments
+                    SET is_primary = 0, row_version = row_version + 1
+                  WHERE supplier_id = ? AND id IN ({$placeholders})"
+            )->execute([$supplierId, ...$released]);
+        }
+
+        return $released;
+    }
+
+    /** @param list<int> $released */
+    private function logReleasedPrimaries(
+        int $supplierId,
+        int $employeeId,
+        array $released,
+        int $newEmploymentId,
+        string $startOn,
+        ?int $userId,
+    ): void {
+        foreach ($released as $employmentId) {
+            $this->activityLogger->log(
+                'payroll.employment.primary_released',
+                $userId,
+                'payroll_employment',
+                $employmentId,
+                ['employee_id' => $employeeId, 'primary_employment_id' => $newEmploymentId, 'from' => $startOn],
+                null,
+                null,
+                $supplierId,
+            );
         }
     }
 
@@ -2571,6 +3602,7 @@ final class PayrollEmploymentRepository
             'employee_id',
             'office_id',
             'monthly_gross_minor',
+            'hourly_rate_minor',
             'probable_hourly_earning_minor',
             'workload_basis_points',
             'row_version',

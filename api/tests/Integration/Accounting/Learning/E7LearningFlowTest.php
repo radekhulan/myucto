@@ -284,6 +284,108 @@ final class E7LearningFlowTest extends BankPostingTestCase
         self::assertSame(0, $miner->run($this->supplierId, 180, true)['created']);
     }
 
+    public function testRuleMinerTreatsRuleLimitedToStatementAccountAsCovering(): void
+    {
+        $statement = $this->statement();
+        for ($i = 0; $i < 3; $i++) {
+            $tx = $this->transaction($statement, -1000 - $i, [
+                'counterparty_account' => '904011', 'counterparty_bank' => '0100',
+                'counterparty_name' => 'Testovací dodavatel', 'description' => 'Pravidelná služba',
+            ]);
+            $this->service->postManual($this->supplierId, $tx, [
+                'debit_account_code' => '518', 'credit_account_code' => '221',
+            ], $this->meta());
+        }
+        $ruleId = $this->rule([
+            'direction' => 'outgoing', 'message_contains' => 'pravidelna sluzba',
+            'debit_account_code' => '501', 'credit_account_code' => '221',
+        ]);
+        $other = $this->db->pdo();
+        $other->prepare(
+            "INSERT INTO supplier_bank_accounts (supplier_id, label, account_number, bank_code, bank_code_norm, currency, account_canonical, kind, source, is_active)
+             VALUES (?, '__TEST jiný účet', '3000000004', '0100', '0100', 'CZK', '3000000004', 'current', 'manual', 1)"
+        )->execute([$this->supplierId]);
+        $this->ruleRepo->update($this->supplierId, $ruleId, ['bank_account_id' => (int) $other->lastInsertId()]);
+        $miner = $this->container->get(RuleMiner::class);
+        self::assertSame(1, $miner->run($this->supplierId, 180, false)['proposed'], 'Pravidlo jiného vlastního účtu shluk nepokrývá.');
+
+        $own = $this->db->pdo()->prepare(
+            'SELECT a.id FROM supplier_bank_accounts a JOIN bank_statements s ON s.supplier_id = a.supplier_id
+              WHERE s.id = ? AND a.supplier_id = ? AND a.account_number = s.account_number'
+        );
+        $own->execute([$statement, $this->supplierId]);
+        $ownId = (int) $own->fetchColumn();
+        self::assertGreaterThan(0, $ownId);
+        $this->ruleRepo->update($this->supplierId, $ruleId, ['bank_account_id' => $ownId]);
+        $report = $miner->run($this->supplierId, 180, false);
+        self::assertSame(0, $report['proposed'], 'Pravidlo omezené na účet výpisu shluk pokrývá.');
+        self::assertSame(1, $report['skip_reasons']['covered_by_rule'] ?? 0);
+    }
+
+    public function testRuleMinerProposesWhenSameRuleIsLimitedToAnotherAccount(): void
+    {
+        $statement = $this->statement();
+        for ($i = 0; $i < 3; $i++) {
+            $tx = $this->transaction($statement, -1000 - $i, [
+                'counterparty_account' => '904012', 'counterparty_bank' => '0100',
+                'counterparty_name' => 'Testovací dodavatel', 'description' => 'Servis',
+            ]);
+            $this->service->postManual($this->supplierId, $tx, ['debit_account_code' => '518', 'credit_account_code' => '221'], $this->meta());
+        }
+        $ruleId = $this->rule([
+            'direction' => 'outgoing', 'counterparty_account' => '904012', 'counterparty_bank' => '0100',
+            'debit_account_code' => '518', 'credit_account_code' => '221',
+        ]);
+        $miner = $this->container->get(RuleMiner::class);
+        self::assertSame(1, $miner->run($this->supplierId, 180, false)['skip_reasons']['rule_exists'] ?? 0, 'Obecné pravidlo shluk už má.');
+
+        $this->ruleRepo->update($this->supplierId, $ruleId, ['bank_account_id' => $this->otherOwnAccount()]);
+        $report = $miner->run($this->supplierId, 180, false);
+        self::assertSame(1, $report['proposed'], 'Pravidlo jiného vlastního účtu není pravidlo pro tento shluk: ' . json_encode($report['skip_reasons']));
+    }
+
+    public function testRuleMinerClusterSpanningTwoAccountsIsNotCoveredByOneAccountRule(): void
+    {
+        $statement = $this->statement();
+        $other = $this->otherOwnAccount();
+        $otherStatement = $this->statement('3000000004', '0100');
+        foreach ([$statement, $statement, $otherStatement] as $i => $stmtId) {
+            $tx = $this->transaction($stmtId, -1000 - $i, [
+                'counterparty_account' => '904013', 'counterparty_bank' => '0100',
+                'counterparty_name' => 'Testovací dodavatel', 'description' => 'Pravidelná služba',
+            ]);
+            $this->service->postManual($this->supplierId, $tx, ['debit_account_code' => '518', 'credit_account_code' => '221'], $this->meta());
+        }
+        $ruleId = $this->rule([
+            'direction' => 'outgoing', 'message_contains' => 'pravidelna sluzba',
+            'debit_account_code' => '501', 'credit_account_code' => '221',
+        ]);
+        $miner = $this->container->get(RuleMiner::class);
+        self::assertSame(1, $miner->run($this->supplierId, 180, false)['skip_reasons']['covered_by_rule'] ?? 0, 'Obecné pravidlo pokryje pohyby obou účtů.');
+
+        $own = $this->db->pdo()->prepare(
+            'SELECT a.id FROM supplier_bank_accounts a JOIN bank_statements s ON s.supplier_id = a.supplier_id
+              WHERE s.id = ? AND a.supplier_id = ? AND a.account_number = s.account_number'
+        );
+        $own->execute([$statement, $this->supplierId]);
+        $ownId = (int) $own->fetchColumn();
+        self::assertGreaterThan(0, $ownId);
+        foreach ([$ownId => 'účtu prvních pohybů', $other => 'druhého účtu'] as $accountId => $label) {
+            $this->ruleRepo->update($this->supplierId, $ruleId, ['bank_account_id' => $accountId]);
+            self::assertSame(1, $miner->run($this->supplierId, 180, false)['proposed'], "Pravidlo {$label} shluk z obou účtů nepokryje.");
+        }
+    }
+
+    private function otherOwnAccount(): int
+    {
+        $pdo = $this->db->pdo();
+        $pdo->prepare(
+            "INSERT INTO supplier_bank_accounts (supplier_id, label, account_number, bank_code, bank_code_norm, currency, account_canonical, kind, source, is_active)
+             VALUES (?, '__TEST jiný účet', '3000000004', '0100', '0100', 'CZK', '3000000004', 'current', 'manual', 1)"
+        )->execute([$this->supplierId]);
+        return (int) $pdo->lastInsertId();
+    }
+
     public function testLearningStatsAreTenantScoped(): void
     {
         $statement = $this->statement();

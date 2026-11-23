@@ -25,7 +25,7 @@ const { t } = useI18n()
       :data-test="`takeover-jmhz-form-${row.employee_id}-${row.period}`"
     >
       <p class="font-medium text-neutral-800">
-        {{ t('payroll.takeover_check.jmhz_form_person', { name: row.employee_name, period: formatPeriod(row.period) }) }}
+        {{ t(row.takeover_incomplete ? 'payroll.takeover_check.jmhz_form_incomplete_person' : 'payroll.takeover_check.jmhz_form_person', { name: row.employee_name, period: formatPeriod(row.period) }) }}
       </p>
       <div class="mt-2 overflow-x-auto">
         <table class="min-w-full text-xs">

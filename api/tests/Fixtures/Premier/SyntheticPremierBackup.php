@@ -167,6 +167,8 @@ final class SyntheticPremierBackup
      *                           zálohy" 324/311 bez kódu DPH, záloha zaplacená bankou BV 13 na 324
      *   `payment_reassigned`    VF 250009 (1 210) bez vlastní úhrady: VF 250001 dostala bankou BV 9 o 1 210
      *                           víc a interní doklad INT 1 (325/311) úhradu přeúčtoval z VF 250001 na VF 250009
+     *   `payment_reassigned_cash` původní úhrada VF 250001 v pokladně; přeplatek zůstává v bance
+     *   `payment_reassigned_same_day` obě úhrady ve stejný den, pořadí určuje INTER řádku
      *
      * @param array<string,bool> $flags
      * @return array<string,array{0:list<array{0:string,1:string,2?:int,3?:int}>,1:list<array<string,mixed>>}>
@@ -485,12 +487,21 @@ final class SyntheticPremierBackup
             unset($header);
         }
         if (!empty($flags['payment_reassigned'])) {
+            if (!empty($flags['payment_reassigned_cash'])) {
+                foreach ($tables['PUB_UCTO'][1] as &$row) {
+                    if ($row['INTER'] === 14) {
+                        $row['DOKLAD'] = 'PP';
+                        $row['MD'] = '211001';
+                    }
+                }
+                unset($row);
+            }
             $chart[] = ['325', '000', 'Ostatní závazky'];
             $customer = ['CISLO_ODB' => '1', 'NAZEV_ODB' => 'Odběratel Fiktivní s.r.o.', 'ICO_ODB' => self::CUSTOMER_ICO, 'DIC_ODB' => 'CZ' . self::CUSTOMER_ICO, 'ID_PAR' => 'P1'];
             array_push($tables['PUB_UCTO'][1],
                 self::row(94, '2025-03-01', 'VF', '250009', 'Servis', 1000, '311000', '602100', self::vat(self::CODE_SALE, 'P', 'VF', 10) + $customer),
                 self::row(95, '2025-03-01', 'VF', '250009', 'DPH', 210, '311000', '343021', self::vat(self::CODE_SALE, 'D', 'VF', 10) + $customer),
-                self::row(96, '2025-03-10', 'BV', '9', 'Úhrada VF 250001', 1210, '221001', '311000', $customer),
+                self::row(96, !empty($flags['payment_reassigned_same_day']) ? '2025-02-20' : '2025-03-10', 'BV', '9', 'Úhrada VF 250001', 1210, '221001', '311000', $customer),
                 self::row(97, '2025-03-31', 'INT', '1', 'Úhrada VF 250009', 1210, '325000', '311000', $customer),
                 self::row(98, '2025-03-31', 'INT', '1', 'Úhrada VF 250001', -1210, '325000', '311000', $customer),
             );
@@ -499,6 +510,10 @@ final class SyntheticPremierBackup
                 ['KOD_ZDR' => 'UD', 'INT_ZDR' => 97, 'KOD_TER' => 'VF', 'INT_TER' => 10],
                 ['KOD_ZDR' => 'UD', 'INT_ZDR' => 98, 'KOD_TER' => 'VF', 'INT_TER' => 1],
             );
+            if (!empty($flags['payment_reassigned_same_day'])) {
+                // Fyzické pořadí vazeb nemusí odpovídat pořadí řádků účetního deníku.
+                $tables['VAZBY'][1] = array_reverse($tables['VAZBY'][1]);
+            }
             $tables['FA_OUT'][1][] = self::header(10, 'VF', '250009', '2025-03-01', 'Servis',
                 ['VS' => '250009', 'FORMA' => 'převodem', 'ULICE_ODB' => 'Zkušební 10', 'MESTO_ODB' => 'Praha', 'PSC_ODB' => '110 00', 'STAT_ODB' => 'Česká republika'] + $customer);
             $tables['POLOZKY'][1][] = self::item(10, 1, 'Servis', 1, 'ks', 1000, 210, 21, self::CODE_SALE);

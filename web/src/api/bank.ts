@@ -16,6 +16,23 @@ export interface BankPaymentCandidate {
   bank_code: string | null
 }
 
+export type BankBatchMatchTarget = { type: 'invoice' | 'purchase_invoice'; id: number; ref: string | null }
+export const BANK_BATCH_MATCH_LIMIT = 100
+
+export interface BankBatchMatchPreview {
+  currency: string
+  paid_cents: number
+  remaining_cents: number
+  selected_cents: number | null
+  blocked: 'currency' | 'overpayment' | null
+  items: BankPaymentCandidate[]
+  version: string
+}
+
+export interface BankBatchMatchResult {
+  items: Array<{ id: number; posting: MatchPostingResult | null }>
+}
+
 export interface BankStatement {
   id: number
   /** Zdroj výpisu: 'gpc' = nahraný/importovaný GPC výpis, 'pdf' = rozparsovaný PDF výpis (banka bez GPC exportu), 'email_notice' = měsíční agregát e-mailových avíz, 'idoklad' = měsíční agregát pohybů z iDokladu, 'import' = migrace z jiného účetního systému. */
@@ -129,11 +146,12 @@ export interface BankTransaction {
   matched_purchase_invoices?: MatchedPurchaseInvoice[]
   /** Ostatní pohledávky a závazky, kterým je pohyb přiřazen (match_status zůstává unmatched). */
   matched_other_items?: MatchedOtherItem[]
+  matched_membership_claims?: Array<{ claim_id: number; member_id: number; member_number: string; title_key: string; amount_cents: string }>
   ignore_origin?: string | null
   ignore_note?: string | null
   /** Avízo, jehož pohyb převzal oficiální výpis (jen detail výpisu). */
   notice_superseded?: boolean
-  resolution?: 'payroll' | 'transfer' | 'outside_saldo' | null
+  resolution?: 'payroll' | 'transfer' | 'outside_saldo' | 'membership' | null
   match_available?: boolean
   ignore_available?: boolean
   match_status: MatchStatus
@@ -144,6 +162,8 @@ export interface BankTransaction {
   period_closed?: boolean
   /** Dimenze pohybu (typ → hodnota); jen u firmy se zapnutými dimenzemi. */
   dimensions?: import('./dimensions').DimensionMap
+  /** Typy z `dimensions`, které pohybu zapsalo pravidlo účtování (ostatní jsou zadané ručně). */
+  rule_dimension_types?: number[]
   /** Stav zaúčtování transakce (Epic AUTOMATIZACE) — jen u double_entry firmy, jinak null. */
   posting?: {
     status: 'posted' | 'suggested' | null
@@ -179,6 +199,11 @@ export interface MatchPostingResult {
   reason?: string
 }
 
+export interface PayoutAllocation {
+  invoice_id: number
+  amount_cents: number
+}
+
 /** Jedna vystavená faktura uhrazená bankovní transakcí (z invoice_payments). */
 export interface MatchedInvoice {
   invoice_id: number
@@ -211,6 +236,10 @@ export interface MatchCandidate {
   id: number
   /** Jen u `other_item`: strana položky. */
   side?: 'receivable' | 'payable'
+  /** Jen u `other_item`: síla shody 0 až 100, důvody a splátka, jejíž zbytek odpovídá platbě. */
+  match_score?: number
+  match_reasons?: Array<'variable_symbol' | 'counterparty_account' | 'installment_amount' | 'installment_due' | 'remaining_amount'>
+  installment?: { id: number; position: number; due_on: string; remaining_amount: number } | null
   ref: string | null
   amount: number
   currency: string
@@ -335,11 +364,17 @@ export interface BankTransactionsParams {
  * - `processing_failed`: výpis je uložený, ale párování a zaúčtování pohybů selhalo
  *   (`error` = text chyby). Dokončí ho „Znovu spárovat".
  * - `imported_balances_rebased`: první výpis banky na účtu dorovnal stavy výpisů převzatých
- *   z jiného programu (`shift`, `statements`, `opening` = vypočtený počáteční stav).
+ *   z jiného programu (`shift`, `statements`, `opening` = vypočtený počáteční stav, `currency` = měna účtu).
+ * - `imported_balances_rebase_held`: posun převzatých výpisů je příliš velký, bez potvrzení se neprovedl.
+ * - `imported_balances_rebase_mixed`: převzaté výpisy se stejným číslem účtu pocházejí z různých
+ *   účtů původního programu (`sources`), stavy se neposunuly.
+ * - `transactions_skipped_as_migrated`: výpis v PDF nezaložil pohyby z období `since`–`until`,
+ *   které na účet převzal převod z jiného programu (`skipped` = počet přeskočených).
  * FE si hlášku skládá z i18n — `message` je jen český text pro activity_log.
  */
 export interface ImportWarning {
-  code: 'transactions_skipped_as_duplicate' | 'processing_failed' | 'imported_balances_rebased'
+  code: 'transactions_skipped_as_duplicate' | 'transactions_skipped_as_migrated' | 'processing_failed' | 'imported_balances_rebased'
+    | 'imported_balances_rebase_held' | 'imported_balances_rebase_mixed'
   message?: string
   error?: string
   parsed?: number
@@ -347,7 +382,11 @@ export interface ImportWarning {
   skipped?: number
   shift?: number
   statements?: number
+  currency?: string
+  sources?: string[]
   opening?: number
+  since?: string
+  until?: string
 }
 
 export interface IgnoreNoticeCandidate {
@@ -540,12 +579,23 @@ export const bankApi = {
     }).then(r => r.data)
   },
   /** `fallback=true` = v ±14 dnech nic nesedělo, vráceny širší (±90 dní) a/nebo cross-currency návrhy. */
-  matchCandidates: (txId: number, search?: string) =>
-    api.get<{ candidates: MatchCandidate[]; fallback: boolean }>(`/bank-transactions/${txId}/match-candidates`, { params: { search } })
+  matchCandidates: (txId: number, search?: string, batch?: boolean) =>
+    api.get<{ candidates: MatchCandidate[]; fallback: boolean }>(`/bank-transactions/${txId}/match-candidates`, { params: { search, batch: batch ? '1' : undefined } })
       .then(r => r.data),
-  paymentCandidates: (params: { invoiceId?: number; purchaseInvoiceId?: number; search?: string; page?: number }) =>
+  paymentCandidates: (params: { invoiceId?: number; purchaseInvoiceId?: number; search?: string; page?: number; batch?: boolean }) =>
     api.get<{ items: BankPaymentCandidate[]; total: number; page: number; pages: number; limit: number }>('/bank-transactions/payment-candidates', {
-      params: { invoice_id: params.invoiceId, purchase_invoice_id: params.purchaseInvoiceId, search: params.search, page: params.page },
+      params: { invoice_id: params.invoiceId, purchase_invoice_id: params.purchaseInvoiceId, search: params.search, page: params.page, batch: params.batch ? '1' : undefined },
+    }).then(r => r.data),
+  previewBatchMatch: (target: BankBatchMatchTarget, ids: number[]) =>
+    api.post<BankBatchMatchPreview>('/bank-transactions/match-document-batch', {
+      [target.type === 'invoice' ? 'invoice_id' : 'purchase_invoice_id']: target.id,
+      transaction_ids: ids,
+    }).then(r => r.data),
+  confirmBatchMatch: (target: BankBatchMatchTarget, ids: number[], version: string) =>
+    api.post<BankBatchMatchResult>('/bank-transactions/match-document-batch', {
+      [target.type === 'invoice' ? 'invoice_id' : 'purchase_invoice_id']: target.id,
+      transaction_ids: ids,
+      confirm_version: version,
     }).then(r => r.data),
   matchDocument: (txId: number, ref: { invoiceId?: number; purchaseInvoiceId?: number; forceAdvanceFinal?: boolean }) =>
     api.post<{
@@ -572,6 +622,10 @@ export const bankApi = {
   matchMultiple: (txId: number, invoiceIds: number[]) =>
     api.post<{ matched: true; split: true; paid_at?: string; invoice_ids: number[]; final_draft_ids?: number[]; posting?: MatchPostingResult | null }>(
       `/bank-transactions/${txId}/match`, { invoice_ids: invoiceIds },
+    ).then(r => r.data),
+  matchPayout: (txId: number, allocations: PayoutAllocation[]) =>
+    api.post<{ matched: true; posting?: MatchPostingResult | null }>(
+      `/bank-transactions/${txId}/match`, { payout_allocations: allocations },
     ).then(r => r.data),
   matchMultiplePurchases: (txId: number, purchaseInvoiceIds: number[]) =>
     api.post<{ matched: true; split: true; purchase_invoice_ids: number[]; posting?: MatchPostingResult | null }>(

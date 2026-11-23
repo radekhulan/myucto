@@ -11,6 +11,7 @@ import {
   formatNumber,
   formatPercent,
   formatPeriod,
+  formatPeriodNumeric,
   formatUtcDateTime,
   isOverdue,
 } from '@/composables/useFormat'
@@ -25,6 +26,12 @@ afterEach(() => {
 describe('formatMoney', () => {
   it.each([-0, -0.001, -0.004])('nezobrazí záporné znaménko u nuly (%s)', (value) => {
     expect(formatMoney(value)).toBe('0,00 Kč')
+  })
+
+  it('přečte částku poslanou z API jako text', () => {
+    expect(formatMoney('237600.60')).toBe(formatMoney(237600.6))
+    expect(formatMoney('-0.00')).toBe(formatMoney(0))
+    expect(formatMoney('neni-cislo')).toBe('—')
   })
 
   it('zápornou částku dál zobrazí se znaménkem', () => {
@@ -89,6 +96,15 @@ describe('locale-aware number formatting', () => {
 
     i18n.global.locale.value = 'en'
     expect(formatCompactNumber(8_000_000)).toBe('8.0M')
+  })
+})
+
+describe('formatPeriodNumeric', () => {
+  it('do vět s předložkou dá MM/RRRR místo měsíce v 1. pádě („od únor")', () => {
+    expect(formatPeriodNumeric('2026-02')).toBe('02/2026')
+    expect(formatPeriodNumeric('2026-11')).toBe('11/2026')
+    expect(formatPeriodNumeric('nesmysl')).toBe('nesmysl')
+    expect(formatPeriodNumeric(null)).toBe('—')
   })
 })
 

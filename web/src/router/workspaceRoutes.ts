@@ -4,6 +4,8 @@ import { useAuthStore } from '@/stores/auth'
 export function createWorkspaceRoutes(): RouteRecordRaw[] {
   return [
       { path: '',                       name: 'home',           component: () => import('@/pages/Dashboard.vue') },
+      // Prázdná záložka pracovní plochy (+ v liště záložek); první stránka otevřená z ní v záložce zůstane.
+      { path: 'new-tab',                name: 'workspace-new-tab', component: () => import('@/pages/WorkspaceNewTab.vue') },
       // Klientský portál (Epic F6) — domov role client, náhled pro všechny role.
       { path: 'portal/mcp', name: 'portal-mcp', component: () => import('@/pages/portal/ClientMcp.vue') },
       { path: 'portal',                 name: 'portal',         component: () => import('@/pages/portal/PortalDashboard.vue'), meta: {  } },
@@ -20,6 +22,9 @@ export function createWorkspaceRoutes(): RouteRecordRaw[] {
       { path: 'projects/:id(\\d+)',     name: 'project-detail', component: () => import('@/pages/projects/ProjectDetail.vue') },
       { path: 'projects/:id(\\d+)/edit', name: 'project-edit',  component: () => import('@/pages/projects/ProjectForm.vue'), meta: { requiresSupplier: true } },
       { path: 'invoices',               name: 'invoices',       component: () => import('@/pages/invoices/InvoiceList.vue'), meta: {  } },
+      { path: 'sales-quotes',            name: 'sales-quotes',    component: () => import('@/pages/sales-quotes/QuoteList.vue') },
+      { path: 'sales-quotes/new',        name: 'sales-quote-new', component: () => import('@/pages/sales-quotes/QuoteDetail.vue') },
+      { path: 'sales-quotes/:id(\\d+)', name: 'sales-quote-detail', component: () => import('@/pages/sales-quotes/QuoteDetail.vue') },
       // AI import vydané faktury — prodejní zrcadlo /purchase-invoices/ai-import.
       // Extrakce (ISDOC priorita, AI fallback) → draft vydané faktury k revizi v editoru.
       // Oprávnění invoices.create (write) zrcadlí BE check v AiExtractPdfIssuedAction.
@@ -45,6 +50,7 @@ export function createWorkspaceRoutes(): RouteRecordRaw[] {
       { path: 'purchase-invoices',                 name: 'purchase-invoices',        component: () => import('@/pages/purchase-invoices/InvoiceList.vue'), meta: {  } },
       { path: 'purchase-approvals',                 name: 'purchase-approvals',       component: () => import('@/pages/purchase-invoices/Approvals.vue'), meta: { requiresSupplier: true } },
       { path: 'purchase-invoices/incoming',        name: 'purchase-invoice-submissions', component: () => import('@/pages/purchase-invoices/IncomingDocuments.vue'), meta: { requiresSupplier: true } },
+      { path: 'purchase-invoices/email',           name: 'purchase-invoices-email', component: () => import('@/pages/purchase-invoices/EmailDocuments.vue'), meta: { requiresSupplier: true } },
       // Export/Import přijatých (reorg UX 2026-07) — nav pod Nákup; sdílená stránka
       // DataExchange.vue jen vybere ExportPurchase/ImportPurchase dle props.
       {
@@ -76,6 +82,17 @@ export function createWorkspaceRoutes(): RouteRecordRaw[] {
           const auth = useAuthStore()
           return !auth.isClientRole && auth.canWrite('utilities.import') ? true : { path: '/' }
         },
+      },
+      // Kontrola dat po převodu: kontroly chyb převzatých dat s náhledem a opravou. Poslední
+      // dlaždice přehledu převodů; čtení podle práva účetnictví (routePermissions), opravu
+      // hlídá server (RequestAuthorization::canFixMigrationData).
+      {
+        path: 'imports/checks', name: 'imports-checks',
+        component: () => import('@/pages/imports/MigrationDataChecks.vue'), meta: { requiresSupplier: true },
+      },
+      {
+        path: 'imports/checks/:key([a-z0-9_]+)', name: 'imports-check-detail',
+        component: () => import('@/pages/imports/MigrationDataCheckDetail.vue'), meta: { requiresSupplier: true },
       },
       // Průvodce „Přechod z Money S3" — převod celé účetní agendy ze zálohy Money.
       // Bez requiresDoubleEntry: firmu v daňové evidenci převod sám přepne.
@@ -162,10 +179,13 @@ export function createWorkspaceRoutes(): RouteRecordRaw[] {
       { path: 'document-requests',      name: 'document-requests', component: () => import('@/pages/documents/DocumentRequests.vue') },
       // Úplné mzdy — samostatný bounded context dostupný v obou účetních režimech.
       { path: 'payroll', name: 'payroll-dashboard', component: () => import('@/pages/payroll/PayrollDashboard.vue'), meta: { requiresSupplier: true, requiresPayroll: true } },
+      { path: 'payroll/month-guide', name: 'payroll-month-guide', component: () => import('@/pages/payroll/PayrollMonthGuide.vue'), meta: { requiresSupplier: true, requiresPayroll: true } },
       { path: 'payroll/runs', name: 'payroll-runs', component: () => import('@/pages/payroll/PayrollRuns.vue'), meta: { requiresSupplier: true, requiresPayroll: true } },
       { path: 'payroll/payments', name: 'payroll-payments', component: () => import('@/pages/payroll/PayrollPayments.vue'), meta: { requiresSupplier: true, requiresPayroll: true } },
       // MZ-18-W07 — reconciliation účetního můstku mezd (mzda ↔ deník ↔ platby).
       { path: 'payroll/posting-reconciliation', name: 'payroll-posting-reconciliation', component: () => import('@/pages/payroll/PayrollPostingReconciliation.vue'), meta: { requiresSupplier: true, requiresPayroll: true } },
+      // Podrobné zaúčtování mezd po zaměstnancích a druzích mezd (sestava + export).
+      { path: 'payroll/posting-detail', name: 'payroll-posting-detail', component: () => import('@/pages/payroll/PayrollPostingDetail.vue'), meta: { requiresSupplier: true, requiresPayroll: true } },
       { path: 'payroll/people', name: 'payroll-people', component: () => import('@/pages/payroll/PeopleList.vue'), meta: { requiresSupplier: true, requiresPayroll: true } },
       // Karta člověka má vlastní adresu, aby na ni šlo odkázat z termínů, e-mailu
       // i z jiné agendy. Zůstává to ale JEDNA komponenta (viz komentář v
@@ -201,7 +221,7 @@ export function createWorkspaceRoutes(): RouteRecordRaw[] {
       // nedalo odkázat ani je uložit do záložek a po refreshi spadl uživatel zpět
       // na Transport. Neznámý `:tab` stránka překlopí zpět na výchozí záložku,
       // takže zastaralý odkaz nekončí prázdnem.
-      { path: 'payroll/submissions/:tab([a-z_]+)', name: 'payroll-submissions-tab', component: () => import('@/pages/payroll/PayrollSubmissions.vue'), meta: { requiresSupplier: true, requiresPayroll: true } },
+      { path: 'payroll/submissions/:tab([a-z0-9_]+)', name: 'payroll-submissions-tab', component: () => import('@/pages/payroll/PayrollSubmissions.vue'), meta: { requiresSupplier: true, requiresPayroll: true } },
       // Agenda přechodu z jiného mzdového programu se přestěhovala do Importů
       // jako záložky: je jednorázová a tři samostatné položky menu svítily i
       // firmě, která nikdy nic nepřevzala. Staré adresy vedou na svou záložku,
@@ -242,6 +262,11 @@ export function createWorkspaceRoutes(): RouteRecordRaw[] {
       { path: 'accounting/internal-documents/new', name: 'accounting-internal-document-new', component: () => import('@/pages/internal-documents/InternalDocumentEditor.vue'), meta: { requiresDoubleEntry: true, requiresSupplier: true } },
       { path: 'accounting/internal-documents/:id(\\d+)', name: 'accounting-internal-document-detail', component: () => import('@/pages/internal-documents/InternalDocumentDetail.vue'), meta: { requiresDoubleEntry: true, requiresSupplier: true } },
       { path: 'accounting/internal-documents/:id(\\d+)/edit', name: 'accounting-internal-document-edit', component: () => import('@/pages/internal-documents/InternalDocumentEditor.vue'), meta: { requiresDoubleEntry: true, requiresSupplier: true } },
+      { path: 'accounting/accruals', name: 'accounting-accruals', component: () => import('@/pages/accounting/Accruals.vue'), meta: { requiresDoubleEntry: true, requiresSupplier: true } },
+      { path: 'accounting/accruals/new', name: 'accounting-accrual-new', component: () => import('@/pages/accounting/AccrualEditor.vue'), meta: { requiresDoubleEntry: true, requiresSupplier: true } },
+      { path: 'accounting/accruals/takeover', name: 'accounting-accruals-takeover', component: () => import('@/pages/accounting/AccrualTakeover.vue'), meta: { requiresDoubleEntry: true, requiresSupplier: true } },
+      { path: 'accounting/accruals/:id(\\d+)', name: 'accounting-accrual-detail', component: () => import('@/pages/accounting/AccrualDetail.vue'), meta: { requiresDoubleEntry: true, requiresSupplier: true } },
+      { path: 'accounting/accruals/:id(\\d+)/edit', name: 'accounting-accrual-edit', component: () => import('@/pages/accounting/AccrualEditor.vue'), meta: { requiresDoubleEntry: true, requiresSupplier: true } },
       // AI asistent k účtování — chat s přílohami, návrhy zápisů a zařazení do Dokumentů.
       { path: 'accounting/ai-assistant', name: 'accounting-ai-assistant', component: () => import('@/pages/accounting/AiAssistant.vue'), meta: { requiresDoubleEntry: true, requiresSupplier: true } },
       { path: 'accounting/payroll',       name: 'accounting-payroll',       component: () => import('@/pages/accounting/PayrollRecap.vue'),    meta: { requiresDoubleEntry: true, requiresSupplier: true } },
@@ -249,6 +274,7 @@ export function createWorkspaceRoutes(): RouteRecordRaw[] {
       // takže doklady, které v systému už leží (typicky naimportované), jí neprojdou —
       // a schopnost je projít žila do teď jen uvnitř průvodce aktivací.
       { path: 'accounting/posting-backfill', name: 'accounting-posting-backfill', component: () => import('@/pages/accounting/PostingBackfill.vue'), meta: { requiresDoubleEntry: true, requiresSupplier: true } },
+      { path: 'accounting/journal-rebook', name: 'accounting-journal-rebook', component: () => import('@/pages/accounting/JournalRebook.vue'), meta: { requiresDoubleEntry: true, requiresSupplier: true } },
       { path: 'accounting/setup-assistant', name: 'accounting-setup-assistant', component: () => import('@/pages/accounting/AccountingSetupAssistant.vue'), meta: { requiresDoubleEntry: true, requiresSupplier: true } },
       { path: 'accounting/posting-rules', name: 'accounting-posting-rules', redirect: '/utilities?section=posting-rules' },
       // Účetní sestavy (Epic F2) — read-only, bez requiresWrite
@@ -263,6 +289,7 @@ export function createWorkspaceRoutes(): RouteRecordRaw[] {
       { path: 'accounting/nonprofit-capital', name: 'accounting-nonprofit-capital', component: () => import('@/views/NonprofitCapitalView.vue'), meta: { requiresDoubleEntry: true, frameworkScope: 'nonprofit504' } },
       { path: 'accounting/nonprofit-funding', name: 'accounting-nonprofit-funding', component: () => import('@/views/NonprofitFundingView.vue'), meta: { requiresDoubleEntry: true, frameworkScope: 'nonprofit504' } },
       { path: 'accounting/nonprofit-membership', name: 'accounting-nonprofit-membership', component: () => import('@/views/NonprofitMembershipView.vue'), meta: { requiresDoubleEntry: true, frameworkScope: 'nonprofit504' } },
+      { path: 'accounting/nonprofit-membership/members/:id(\\d+)', name: 'accounting-nonprofit-member-detail', component: () => import('@/views/NonprofitMemberDetailView.vue'), meta: { requiresDoubleEntry: true, frameworkScope: 'nonprofit504' } },
       { path: 'accounting/periods/:id(\\d+)/nonprofit-tax', name: 'accounting-nonprofit-tax', component: () => import('@/pages/accounting/NonprofitTaxAssessment.vue'), meta: { requiresDoubleEntry: true, frameworkScope: 'nonprofit504' } },
       // Výjimky mapování účtů do výkazů pro konkrétní firmu (splatnost, spřízněné osoby, analytiky).
       { path: 'accounting/statement-mapping', name: 'accounting-statement-mapping', component: () => import('@/pages/accounting/StatementMapping.vue'), meta: { requiresDoubleEntry: true, requiresSupplier: true } },
@@ -403,7 +430,7 @@ export function createWorkspaceRoutes(): RouteRecordRaw[] {
       { path: 'admin/sent-emails',      name: 'sent-emails',    component: () => import('@/pages/admin/SentEmails.vue'), meta: {  } },
       { path: 'admin/cron-jobs',        name: 'cron-jobs',      component: () => import('@/pages/admin/CronJobs.vue'),    meta: {  } },
       { path: 'admin/instance', name: 'admin-instance', component: () => import('@/pages/admin/InstanceAdmin.vue') },
-      { path: 'admin/users',            name: 'admin-users',    component: () => import('@/pages/admin/Users.vue'),       meta: {  } },
+      { path: 'admin/users',            name: 'admin-users',    component: () => import('@/pages/admin/Users.vue'),       meta: { demoHidden: true } },
       { path: 'admin/roles',            name: 'admin-roles',    component: () => import('@/pages/admin/Roles.vue'),       meta: { superadminOnly: true } },
       { path: 'admin/settings',         name: 'admin-settings', component: () => import('@/pages/admin/Settings.vue'),    meta: {  } },
       { path: 'admin/accounting-activation', name: 'accounting-activation', component: () => import('@/pages/admin/AccountingActivation.vue'), meta: {  } },
@@ -453,6 +480,7 @@ export function createWorkspaceRoutes(): RouteRecordRaw[] {
       // Bez requiresPayroll: datovkou odchází i daňová podání, takže ji potřebuje i firma bez mezd.
       { path: 'admin/databox', name: 'admin-databox', component: () => import('@/pages/admin/DataBox.vue'), meta: {  } },
       { path: 'admin/isds-gateway', name: 'admin-isds-gateway', component: () => import('@/pages/admin/IsdsGatewaySettings.vue'), meta: {  } },
+      { path: 'admin/access-credentials', name: 'admin-access-credentials', component: () => import('@/pages/admin/IsdsAccessCredentials.vue'), meta: { demoHidden: true } },
       { path: 'isds-gateway/callback', name: 'isds-gateway-callback', component: () => import('@/pages/IsdsGatewayCallback.vue'), meta: { requiresSupplier: true } },
       // Firemní katalog šablon bankovních pravidel má samostatnou stránku v Nástrojích.
       { path: 'admin/bank-rule-templates', name: 'admin-bank-rule-templates', component: () => import('@/pages/admin/BankRuleTemplates.vue'), meta: { requiresDoubleEntry: true } },
@@ -519,6 +547,8 @@ export function createWorkspaceRoutes(): RouteRecordRaw[] {
       { path: 'reports/dph',            name: 'reports-dph',        component: () => import('@/pages/reports/DphPriznaniReport.vue') },
       { path: 'reports/kh',             name: 'reports-kh',         component: () => import('@/pages/reports/KontrolniHlaseniReport.vue') },
       { path: 'reports/dph-book',       name: 'reports-dph-book',   component: () => import('@/pages/reports/DphBookReport.vue') },
+      // DPH podle dimenze — rozpad evidence DPH období po hodnotách jednoho typu dimenze.
+      { path: 'reports/vat-by-dimension', name: 'reports-vat-by-dimension', component: () => import('@/pages/reports/VatByDimensionReport.vue') },
       { path: 'reports/s74b',           name: 'reports-s74b',       component: () => import('@/pages/reports/Section74b.vue') },
       { path: 'reports/related-parties', name: 'reports-related-parties', component: () => import('@/pages/reports/RelatedParties.vue') },
       // § 76 ZDPH — koeficient krácení nároku na odpočet (zálohový + roční vypořádání).
@@ -545,6 +575,7 @@ export function createWorkspaceRoutes(): RouteRecordRaw[] {
       { path: 'admin/emails',           name: 'admin-emails',    component: () => import('@/pages/admin/Emails.vue'), meta: {  } },
       { path: 'admin/approvals',        name: 'admin-approvals', component: () => import('@/pages/admin/Approvals.vue'), meta: {  } },
       { path: 'admin/price-list',       name: 'admin-price-list', component: () => import('@/pages/admin/PriceList.vue'), meta: { requiresSupplier: true, requiresNoStock: true } },
+      { path: 'admin/work-report-billing-templates', name: 'admin-work-report-billing-templates', component: () => import('@/pages/admin/WorkReportBillingTemplates.vue'), meta: { requiresSupplier: true } },
       { path: 'admin/price-list/new',   name: 'admin-price-list-new', component: () => import('@/pages/admin/PriceListForm.vue'), meta: { requiresSupplier: true, requiresNoStock: true } },
       { path: 'admin/price-list/:id(\\d+)/edit', name: 'admin-price-list-edit', component: () => import('@/pages/admin/PriceListForm.vue'), meta: { requiresSupplier: true, requiresNoStock: true } },
       { path: 'admin/price-list/:id(\\d+)', name: 'admin-price-list-view', component: () => import('@/pages/admin/PriceListForm.vue'), meta: { requiresSupplier: true, requiresNoStock: true } },

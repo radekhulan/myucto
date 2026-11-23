@@ -15,6 +15,8 @@ final class RoutePermissionMapTest extends TestCase
     {
         $map = new RoutePermissionMap();
         $cases = [
+            ['GET', '/api/settings/client/invoice-defaults', 'settings.invoice_defaults', AccessLevel::WRITE],
+            ['PUT', '/api/settings/client/invoice-defaults', 'settings.invoice_defaults', AccessLevel::WRITE],
             ['POST', '/api/accounting/assets/7/depreciation/revision', 'assets.depreciation', AccessLevel::WRITE],
             ['POST', '/api/accounting/assets/7/depreciation/revision/preview', 'assets.depreciation', AccessLevel::WRITE],
             ['POST', '/api/recurring/7/reschedule', 'recurring', AccessLevel::WRITE],
@@ -24,6 +26,9 @@ final class RoutePermissionMapTest extends TestCase
             ['POST', '/api/invoices/bulk-reissue', 'invoices.clone', AccessLevel::WRITE],
             ['DELETE', '/api/invoices/7', 'invoices.delete', AccessLevel::WRITE],
             ['GET', '/api/invoices/7', 'invoices', AccessLevel::READ],
+            ['GET', '/api/invoices/7/tax-document-advance-candidates', 'invoices', AccessLevel::READ],
+            ['POST', '/api/invoices/7/tax-document-advance', 'invoices', AccessLevel::WRITE],
+            ['DELETE', '/api/invoices/7/tax-document-advance', 'invoices', AccessLevel::WRITE],
             ['GET', '/api/purchase-invoices/payment-orders/history', 'purchase_invoices.payment_orders', AccessLevel::READ],
             ['POST', '/api/purchase-invoices/scan-inbox', 'purchase_invoices.scan', AccessLevel::WRITE],
             ['POST', '/api/purchase-invoices/import-structured', 'purchase_invoices.create', AccessLevel::WRITE],
@@ -32,6 +37,7 @@ final class RoutePermissionMapTest extends TestCase
             ['POST', '/api/purchase-invoice-submissions', 'documents.inbox', AccessLevel::WRITE],
             ['DELETE', '/api/purchase-invoice-submissions/7', 'documents.inbox.delete', AccessLevel::WRITE],
             ['GET', '/api/purchase-invoice-submissions/7/preview', 'documents.inbox', AccessLevel::READ],
+            ['GET', '/api/purchase-invoice-submissions/email-status', 'documents.inbox', AccessLevel::READ],
             ['POST', '/api/purchase-invoice-submissions/7/extract', 'documents.inbox', AccessLevel::WRITE],
             ['GET', '/api/portal/purchase-invoice-submissions', 'documents.submit', AccessLevel::READ],
             ['POST', '/api/portal/purchase-invoice-submissions/7/resubmit', 'documents.submit', AccessLevel::WRITE],
@@ -467,6 +473,7 @@ final class RoutePermissionMapTest extends TestCase
         self::assertSame(RoutePermissionMap::ADMIN_PLUS, $map->match('GET', '/api/suppliers/carry-over')?->kind);
         self::assertSame(RoutePermissionMap::SUPERADMIN, $map->match('PUT', '/api/suppliers/7')?->kind);
         self::assertSame(RoutePermissionMap::SUPERADMIN, $map->match('DELETE', '/api/suppliers/7')?->kind);
+        self::assertSame(RoutePermissionMap::SUPERADMIN, $map->match('GET', '/api/suppliers/7/delete-preview')?->kind);
     }
 
     /** Metoda mimo pravidlo nesmí propadnout na permission větev (GET nespouští import). */

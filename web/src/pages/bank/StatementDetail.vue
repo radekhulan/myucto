@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { useWindowRefresh } from '@/composables/useWindowRefresh'
 import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
+import { useIsPhone } from '@/composables/useIsPhone'
 import { useRoute, RouterLink, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import {
@@ -16,7 +17,8 @@ import { apiErrorMessage } from '@/api/errors'
 import { useAuthStore } from '@/stores/auth'
 import { useSupplierStore } from '@/stores/supplier'
 import { formatAccountNumber } from '@/utils/bankAccount'
-import { statementClosingBalance, statementGpcUrl, statementGpcTitle, statementHasGpc } from '@/utils/bankStatement'
+import { statementClosingBalance, statementDownloadsWithMovements, statementGpcUrl, statementGpcTitle, statementHasGpc } from '@/utils/bankStatement'
+import Modal from '@/components/ui/Modal.vue'
 import { downloadApiFile } from '@/utils/downloadFile'
 import RuleHintBanner from '@/components/bank/RuleHintBanner.vue'
 import BankTransactionRow from '@/components/bank/BankTransactionRow.vue'
@@ -26,7 +28,7 @@ import BankCreatePurchaseModal from '@/components/bank/BankCreatePurchaseModal.v
 import BankRequestDocModal from '@/components/bank/BankRequestDocModal.vue'
 import type { PostResult } from '@/api/bankPosting'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
-import { ICONS, btnFilled } from '@/components/ui/buttonStyles'
+import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
 import { useBankTransactionActions } from '@/composables/useBankTransactionActions'
 import { useBankTransactionSort } from '@/composables/useBankTransactionSort'
 import { useFillViewportHeight } from '@/composables/useFillViewportHeight'
@@ -83,7 +85,8 @@ async function sendUnmatchedToClient() {
     sendingUnmatched.value = false
   }
 }
-const isDoubleEntry = computed(() => !auth.isClientRole && auth.hasCommercialFeatures && supplierStore.currentSupplier?.accounting_mode === 'double_entry')
+const isDoubleEntry = computed(() => !auth.isClientRole && auth.hasCommercialFeatures && supplierStore.currentSupplier?.accounting_mode === 'double_entry'
+  && supplierStore.currentSupplier?.accounting_enabled !== false)
 
 // Počet transakcí s návrhem zaúčtování (pro chip v headeru) — počítá backend přes
 // VŠECHNY transakce výpisu, ne jen aktuálně načtenou stránku (viz transactions_meta).
@@ -105,7 +108,9 @@ function closeHint() { hintTx.value = null; hintData.value = null }
 // Sdílená akční logika nad transakcí (match/ignore/unmatch/create/request-doc/…) —
 // extrahováno do BankTransactionRow.vue + useBankTransactionActions, ať ji sdílí
 // i „Všechny pohyby" (UnpostedTransactions.vue), #52.
-const bankActions = useBankTransactionActions({ reload: () => refreshTransactions(), refresh: () => refreshTransactions() })
+const bankActions = useBankTransactionActions({
+  reload: () => refreshTransactions(), refresh: () => refreshTransactions(), fallbackCurrency: () => statement.value?.currency,
+})
 
 // E-mailová avíza jsou měsíční agregát (statement_date = 1. den měsíce) → název měsíce.
 function monthLabel(dateStr: string): string {
@@ -384,6 +389,15 @@ async function onDeletePdf() {
   }
 }
 
+// Stažení z banky jsou za jednou akcí, u účtu s feedem jich jsou za měsíc desítky.
+// Prázdná se nenabízejí, duplicita je vždycky stažení s pohyby.
+const bankDownloads = computed(() => statementDownloadsWithMovements(statement.value))
+const bankDownloadsOpen = ref(false)
+function openBankDownload(id: number) {
+  bankDownloadsOpen.value = false
+  void router.push({ name: 'bank-detail', params: { id } })
+}
+
 // Smazání avízo-výpisu (e-mailová avíza, iDoklad) smí každý s bankou k zápisu, kdo
 // není klient — stejně jako backend. Backend ho odmítne, dokud na výpisu visí živě
 // spárovaná položka (typicky před převzetím oficiálním výpisem); tlačítko je pak
@@ -500,13 +514,15 @@ const statementActions = computed<ActionItem[]>(() => {
       tier: 'overflow' as const,
       run: () => { void downloadStatementFile(bankApi.pdfUrl(pdf.id), pdf.pdf_name ?? 'vypis.pdf') },
     })),
-    ...(s.evidence_statements ?? []).map(source => ({
-      key: `evidence_statement_${source.id}`,
-      label: t('bank.evidence_statement', { name: source.file_name ?? String(source.id), count: source.transaction_count }),
-      icon: 'eye' as const,
-      tier: 'overflow' as const,
-      run: () => { void router.push({ name: 'bank-detail', params: { id: source.id } }) },
-    })),
+    {
+      key: 'bank_downloads',
+      label: t('bank.downloads_action', { count: bankDownloads.value.length }),
+      icon: 'eye',
+      tier: 'overflow',
+      show: !auth.isClientRole && bankDownloads.value.length > 0,
+      title: t('bank.downloads_hint'),
+      run: () => { bankDownloadsOpen.value = true },
+    },
     {
       key: 'pdf_upload',
       label: t('bank.pdf_upload'),
@@ -542,6 +558,11 @@ const statementActions = computed<ActionItem[]>(() => {
   ]
 })
 useWindowRefresh(refreshTransactions)
+
+// Telefon: souhrn výpisu ve dvou sloupcích a dlouhé vysvětlení zůstatku za „Podrobnosti".
+const isPhone = useIsPhone()
+const balanceDetailsOpen = ref(false)
+const showBalanceDetails = computed(() => !isPhone.value || balanceDetailsOpen.value)
 </script>
 
 <template>
@@ -590,50 +611,67 @@ useWindowRefresh(refreshTransactions)
 
     <!-- Měsíční avízo-výpis: disponibilní zůstatek z nejnovějšího avíza (nesou ho
          Creditas/Fio/RB) + součty příjmů/výdajů měsíce spočtené z transakcí. -->
-    <div v-if="isVirtual && noticeSummary" class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3 md:gap-4 mt-4 mb-4">
-      <div class="bg-surface border border-neutral-200 rounded-lg p-4 shadow-sm">
-        <div class="text-xs text-neutral-500 uppercase">{{ t('bank.available_balance') }}</div>
-        <div class="text-lg font-mono font-semibold">
+    <div v-if="isVirtual && noticeSummary" class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3 md:gap-4 mt-4 mb-4 max-md:grid-cols-2 max-md:gap-2">
+      <div class="bg-surface border border-neutral-200 rounded-lg p-4 shadow-sm max-md:p-2.5">
+        <div class="text-xs text-neutral-500 uppercase max-md:text-[11px] max-md:leading-tight">{{ t('bank.available_balance') }}</div>
+        <div class="text-lg font-mono max-md:text-sm max-md:break-all font-semibold">
           {{ noticeSummary.balance !== null ? formatMoney(noticeSummary.balance, statement.currency ?? 'CZK') : '—' }}
         </div>
       </div>
-      <div class="bg-surface border border-neutral-200 rounded-lg p-4 shadow-sm">
-        <div class="text-xs text-neutral-500 uppercase">{{ t('bank.available_balance_as_of') }}</div>
-        <div class="text-lg font-mono">
+      <div class="bg-surface border border-neutral-200 rounded-lg p-4 shadow-sm max-md:p-2.5">
+        <div class="text-xs text-neutral-500 uppercase max-md:text-[11px] max-md:leading-tight">{{ t('bank.available_balance_as_of') }}</div>
+        <div class="text-lg font-mono max-md:text-sm max-md:break-all">
           {{ noticeSummary.balanceAt !== null ? formatDate(noticeSummary.balanceAt) : '—' }}
         </div>
       </div>
-      <div class="bg-surface border border-neutral-200 rounded-lg p-4 shadow-sm">
-        <div class="text-xs text-neutral-500 uppercase">{{ t('bank.credit_total') }}</div>
-        <div class="text-lg font-mono text-success-600">+{{ formatMoney(noticeSummary.credit, statement.currency ?? 'CZK') }}</div>
+      <div class="bg-surface border border-neutral-200 rounded-lg p-4 shadow-sm max-md:p-2.5">
+        <div class="text-xs text-neutral-500 uppercase max-md:text-[11px] max-md:leading-tight">{{ t('bank.credit_total') }}</div>
+        <div class="text-lg font-mono max-md:text-sm max-md:break-all text-success-600">+{{ formatMoney(noticeSummary.credit, statement.currency ?? 'CZK') }}</div>
       </div>
-      <div class="bg-surface border border-neutral-200 rounded-lg p-4 shadow-sm">
-        <div class="text-xs text-neutral-500 uppercase">{{ t('bank.debit_total') }}</div>
-        <div class="text-lg font-mono text-danger-500">−{{ formatMoney(noticeSummary.debit, statement.currency ?? 'CZK') }}</div>
-      </div>
-    </div>
-
-    <div v-else-if="!isVirtual" class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3 md:gap-4 mt-4 mb-4">
-      <div class="bg-surface border border-neutral-200 rounded-lg p-4 shadow-sm">
-        <div class="text-xs text-neutral-500 uppercase">{{ t('bank.prev_balance') }}</div>
-        <div class="text-lg font-mono">{{ (statement.prev_balance ?? statement.balance_calculation?.opening) == null ? '-' : formatMoney(statement.prev_balance ?? statement.balance_calculation?.opening, statement.currency ?? 'CZK') }}</div>
-      </div>
-      <div class="bg-surface border border-neutral-200 rounded-lg p-4 shadow-sm">
-        <div class="text-xs text-neutral-500 uppercase">{{ t('bank.curr_balance') }}</div>
-        <div class="text-lg font-mono font-semibold">{{ (statementClosingBalance(statement)) == null ? '-' : formatMoney(statementClosingBalance(statement), statement.currency ?? 'CZK') }}</div>
-      </div>
-      <div class="bg-surface border border-neutral-200 rounded-lg p-4 shadow-sm">
-        <div class="text-xs text-neutral-500 uppercase">{{ t('bank.credit_total') }}</div>
-        <div class="text-lg font-mono text-success-600">+{{ formatMoney(statement.credit_total, statement.currency ?? 'CZK') }}</div>
-      </div>
-      <div class="bg-surface border border-neutral-200 rounded-lg p-4 shadow-sm">
-        <div class="text-xs text-neutral-500 uppercase">{{ t('bank.debit_total') }}</div>
-        <div class="text-lg font-mono text-danger-500">−{{ formatMoney(Math.abs(statement.debit_total), statement.currency ?? 'CZK') }}</div>
+      <div class="bg-surface border border-neutral-200 rounded-lg p-4 shadow-sm max-md:p-2.5">
+        <div class="text-xs text-neutral-500 uppercase max-md:text-[11px] max-md:leading-tight">{{ t('bank.debit_total') }}</div>
+        <div class="text-lg font-mono max-md:text-sm max-md:break-all text-danger-500">−{{ formatMoney(noticeSummary.debit, statement.currency ?? 'CZK') }}</div>
       </div>
     </div>
 
-    <div v-if="statement.balance_calculation" class="mt-4 mb-4 rounded-lg border border-neutral-200 bg-surface p-4 text-sm" role="status">
-      <strong>{{ t(`bank.balance_${statement.balance_calculation.status}`) }}</strong>
+    <div v-else-if="!isVirtual" class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3 md:gap-4 mt-4 mb-4 max-md:grid-cols-2 max-md:gap-2">
+      <div class="bg-surface border border-neutral-200 rounded-lg p-4 shadow-sm max-md:p-2.5">
+        <div class="text-xs text-neutral-500 uppercase max-md:text-[11px] max-md:leading-tight">{{ t('bank.prev_balance') }}</div>
+        <div class="text-lg font-mono max-md:text-sm max-md:break-all">{{ (statement.prev_balance ?? statement.balance_calculation?.opening) == null ? '-' : formatMoney(statement.prev_balance ?? statement.balance_calculation?.opening, statement.currency ?? 'CZK') }}</div>
+      </div>
+      <div class="bg-surface border border-neutral-200 rounded-lg p-4 shadow-sm max-md:p-2.5">
+        <div class="text-xs text-neutral-500 uppercase max-md:text-[11px] max-md:leading-tight">{{ t('bank.curr_balance') }}</div>
+        <div class="text-lg font-mono max-md:text-sm max-md:break-all font-semibold">{{ (statementClosingBalance(statement)) == null ? '-' : formatMoney(statementClosingBalance(statement), statement.currency ?? 'CZK') }}</div>
+      </div>
+      <div class="bg-surface border border-neutral-200 rounded-lg p-4 shadow-sm max-md:p-2.5">
+        <div class="text-xs text-neutral-500 uppercase max-md:text-[11px] max-md:leading-tight">{{ t('bank.credit_total') }}</div>
+        <div class="text-lg font-mono max-md:text-sm max-md:break-all text-success-600">+{{ formatMoney(statement.credit_total, statement.currency ?? 'CZK') }}</div>
+      </div>
+      <div class="bg-surface border border-neutral-200 rounded-lg p-4 shadow-sm max-md:p-2.5">
+        <div class="text-xs text-neutral-500 uppercase max-md:text-[11px] max-md:leading-tight">{{ t('bank.debit_total') }}</div>
+        <div class="text-lg font-mono max-md:text-sm max-md:break-all text-danger-500">−{{ formatMoney(Math.abs(statement.debit_total), statement.currency ?? 'CZK') }}</div>
+      </div>
+    </div>
+
+    <div v-if="statement.balance_calculation" class="mt-4 mb-4 rounded-lg border border-neutral-200 bg-surface p-4 text-sm max-md:p-3" role="status">
+      <div v-if="isPhone" class="flex items-start justify-between gap-2">
+        <strong>{{ t(`bank.balance_${statement.balance_calculation.status}`) }}</strong>
+        <button type="button" data-test="balance-details-toggle" :aria-expanded="balanceDetailsOpen"
+          class="cursor-pointer shrink-0 min-h-10 px-2 -my-2 -mr-2 text-xs text-primary-600 inline-flex items-center"
+          @click="balanceDetailsOpen = !balanceDetailsOpen">
+          {{ balanceDetailsOpen ? t('bank.balance_details_hide') : t('bank.balance_details_show') }}
+        </button>
+      </div>
+      <strong v-else>{{ t(`bank.balance_${statement.balance_calculation.status}`) }}</strong>
+      <template v-if="isPhone && !balanceDetailsOpen">
+        <p v-if="statement.balance_calculation.status === 'mismatch'" class="text-danger-600 mt-1" data-test="balance-difference-short">
+          {{ t('bank.balance_difference_short', { amount: formatMoney(statement.balance_calculation.difference, statement.currency ?? 'CZK') }) }}
+        </p>
+        <p v-if="statement.balance_calculation.unexplained_difference" class="text-danger-600 mt-1" data-testid="balance-unexplained">
+          {{ t('bank.balance_difference_short', { amount: formatMoney(statement.balance_calculation.unexplained_difference, statement.currency ?? 'CZK') }) }}
+        </p>
+      </template>
+      <template v-if="showBalanceDetails">
       <p v-if="statement.balance_calculation.bank_statement_id" class="mt-1">
         <RouterLink :to="`/bank/${statement.balance_calculation.bank_statement_id}`" class="text-primary-600 underline">{{ t('bank.balance_bank_evidence') }}</RouterLink>
       </p>
@@ -649,6 +687,7 @@ useWindowRefresh(refreshTransactions)
         {{ t('bank.balance_difference', { amount: formatMoney(statement.balance_calculation.unexplained_difference, statement.currency ?? 'CZK') }) }}
       </p>
       <p class="text-neutral-500 mt-1">{{ t('bank.gpc_calculated_hint') }}</p>
+      </template>
     </div>
 
     <RuleHintBanner v-if="isDoubleEntry && hintTx && hintData" class="mt-4"
@@ -740,5 +779,21 @@ useWindowRefresh(refreshTransactions)
     <BankMatchModal :actions="bankActions" :fallback-currency="statement.currency" />
     <BankCreatePurchaseModal :actions="bankActions" />
     <BankRequestDocModal :actions="bankActions" />
+
+    <Modal v-if="bankDownloadsOpen" :title="t('bank.downloads_title')" width-class="max-w-lg" @close="bankDownloadsOpen = false">
+      <p class="text-sm text-neutral-500 mb-3">{{ t('bank.downloads_hint') }}</p>
+      <ul class="divide-y divide-neutral-200 max-h-96 overflow-y-auto" data-test="bank-downloads">
+        <li v-for="source in bankDownloads" :key="source.id" class="py-2 flex items-center justify-between gap-3 text-sm">
+          <span>
+            {{ source.statement_date ? formatDate(source.statement_date) : '—' }}
+            <span class="text-neutral-500">· {{ t('bank.downloads_movements', { count: source.transaction_count }) }}</span>
+          </span>
+          <button type="button" :class="btnOutline('neutral')" class="whitespace-nowrap" @click="openBankDownload(source.id)">
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.eye" /></svg>
+            {{ t('bank.downloads_open') }}
+          </button>
+        </li>
+      </ul>
+    </Modal>
   </div>
 </template>

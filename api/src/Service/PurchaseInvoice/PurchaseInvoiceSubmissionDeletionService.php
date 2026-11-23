@@ -21,12 +21,19 @@ final class PurchaseInvoiceSubmissionDeletionService
         private readonly ActivityLogger $logger,
     ) {}
 
-    public static function canDeletePending(array $row, ?int $ownerId): bool
+    /**
+     * Smí klient v portálu své předání smazat? Ano, dokud ho účetní nezačala
+     * zpracovávat, a také když ho odmítla nebo vrátila k doplnění: z takového
+     * předání doklad nevznikl a klient ho jinak nemá jak z přehledu odklidit.
+     * Nikdy ne, když na originál vede doklad, vazba nebo vyřízený požadavek.
+     */
+    public static function canClientDelete(array $row, ?int $ownerId): bool
     {
+        $status = (string) ($row['status'] ?? '');
         return ($ownerId === null || ($ownerId > 0 && (int) ($row['submitted_by'] ?? 0) === $ownerId))
-            && ($row['status'] ?? '') === 'submitted'
+            && (in_array($status, ['rejected', 'needs_information'], true)
+                || ($status === 'submitted' && empty($row['processing_started_at'])))
             && empty($row['purchase_invoice_id'])
-            && empty($row['processing_started_at'])
             && (int) ($row['document_link_count'] ?? 0) === 0
             && (int) ($row['resolved_request_count'] ?? 0) === 0
             && ($row['extraction_status'] ?? '') !== 'running';
@@ -37,7 +44,7 @@ final class PurchaseInvoiceSubmissionDeletionService
         int $supplierId,
         int $userId,
         ?int $ownerId,
-        bool $pendingOnly,
+        bool $clientScope,
         ?string $ip,
         string $userAgent,
     ): array {
@@ -50,11 +57,11 @@ final class PurchaseInvoiceSubmissionDeletionService
             if ($row === null || ($ownerId !== null && ($ownerId <= 0 || (int) ($row['submitted_by'] ?? 0) !== $ownerId))) {
                 throw new PurchaseInvoiceSubmissionException('not_found', 'Podání nebylo nalezeno.', 404);
             }
-            if ($pendingOnly && !self::canDeletePending($row, $ownerId)) {
-                throw new PurchaseInvoiceSubmissionException('invalid_status', 'Zpracovávané ani již vyřízené podání smazat nelze.', 409);
+            if ($clientScope && !self::canClientDelete($row, $ownerId)) {
+                throw new PurchaseInvoiceSubmissionException('invalid_status', 'Předání, které účetní zpracovává nebo z něj vznikl doklad, smazat nelze.', 409);
             }
             $this->requests->reopenBySubmission($id, $supplierId);
-            $deleted = $this->submissions->deleteFromQueue($id, $supplierId, $ownerId, $pendingOnly);
+            $deleted = $this->submissions->deleteFromQueue($id, $supplierId, $ownerId, $clientScope);
             if ($deleted === null) {
                 throw new PurchaseInvoiceSubmissionException('invalid_status', 'Zpracované ani právě zpracovávané podání smazat nelze.', 409);
             }

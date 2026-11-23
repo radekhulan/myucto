@@ -39,6 +39,12 @@ final class PayslipPdfRenderer
      * v patičce, otisky v metadatech PDF.
      */
     public const VERSION = 'mz-16-payslip-v4';
+    public const HOURLY_VERSION = 'mz-16-payslip-v5';
+
+    public static function versionFor(PayslipDocumentData $data): string
+    {
+        return $data->hourlyClaims === [] ? self::VERSION : self::HOURLY_VERSION;
+    }
 
     private ?Environment $twig = null;
 
@@ -65,14 +71,14 @@ final class PayslipPdfRenderer
         ]);
         $mpdf->SetTitle('Výplatní páska ' . $data->period);
         $mpdf->SetSubject('Výplatní páska, revize ' . $data->revisionLabel());
-        $mpdf->SetKeywords('mzdy, výplatní páska, ' . self::VERSION);
+        $mpdf->SetKeywords('mzdy, výplatní páska, ' . self::versionFor($data));
         $mpdf->SetCreator('MyÚčto.cz');
         $mpdf->AddCustomProperty('PayrollRevision', $data->revisionId);
         if ($data->revisionNumber !== null) {
             $mpdf->AddCustomProperty('PayrollRevisionNumber', (string) $data->revisionNumber);
         }
         $mpdf->AddCustomProperty('PayrollSourceSnapshotSHA256', $data->sourceSnapshotSha256);
-        $mpdf->AddCustomProperty('PayrollRendererVersion', self::VERSION);
+        $mpdf->AddCustomProperty('PayrollRendererVersion', self::versionFor($data));
         $mpdf->SetHTMLFooter(self::footerHtml($data));
         $mpdf->WriteHTML($body);
         $pdfBytes = $mpdf->Output('', 'S');
@@ -80,7 +86,7 @@ final class PayslipPdfRenderer
             throw new \UnexpectedValueException('mPDF did not return payslip bytes.');
         }
 
-        return RenderedPayslipDocument::fromPdf($pdfBytes, $data, self::VERSION);
+        return RenderedPayslipDocument::fromPdf($pdfBytes, $data, self::versionFor($data));
     }
 
     public static function footerHtml(PayslipDocumentData $data): string
@@ -103,7 +109,7 @@ final class PayslipPdfRenderer
     public function renderHtml(PayslipDocumentData $data): string
     {
         $templateData = $data->toTemplateData();
-        $templateData['renderer_version'] = self::VERSION;
+        $templateData['renderer_version'] = self::versionFor($data);
 
         return $this->twig()->render('payslip.twig', $templateData);
     }
@@ -138,6 +144,10 @@ final class PayslipPdfRenderer
                 static fn (?int $minutes): string => self::formatMillihours(
                     $minutes === null ? null : (int) round($minutes * 1000 / 60),
                 ),
+            ));
+            $this->twig->addFilter(new \Twig\TwigFilter(
+                'payslip_date',
+                static fn (string $date): string => (new \DateTimeImmutable($date))->format('j. n. Y'),
             ));
             $this->twig->addFilter(new \Twig\TwigFilter(
                 'minor_money',

@@ -8,6 +8,7 @@ let resizeTargets: Set<Element>
 const disposals: (() => void)[] = []
 
 beforeEach(() => {
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
   queue = new Map()
   nextFrame = 0
   resizeTargets = new Set()
@@ -31,6 +32,7 @@ afterEach(() => {
   disposals.splice(0).forEach(dispose => dispose())
   document.body.replaceChildren()
   vi.restoreAllMocks()
+  vi.useRealTimers()
 })
 
 function metric(element: HTMLElement, name: string, value: number) {
@@ -73,7 +75,7 @@ function flush() {
 }
 
 async function mutations() {
-  await new Promise(resolve => setTimeout(resolve, 150))
+  await vi.advanceTimersByTimeAsync(150)
   flush()
 }
 
@@ -485,7 +487,7 @@ describe('viewport table scroll controller', () => {
     expect(queue.size).toBe(0)
     expect(css).not.toHaveBeenCalled()
     table()
-    await new Promise(resolve => setTimeout(resolve, 0))
+    await vi.advanceTimersByTimeAsync(0)
     state.controller.destroy()
     await mutations()
     expect(css).not.toHaveBeenCalled()

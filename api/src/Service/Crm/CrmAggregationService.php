@@ -11,6 +11,8 @@ use MyInvoice\Service\Accounting\AccountingPeriodHealthService;
 use MyInvoice\Service\Accounting\JournalIntegrityService;
 use MyInvoice\Service\Accounting\Obligations\OtherItemForecastService;
 use MyInvoice\Service\Invoice\ProformaPaymentDocuments;
+use MyInvoice\Service\Invoice\ProformaVatRates;
+use MyInvoice\Service\Invoice\TakenOverPayment;
 use MyInvoice\Service\Invoice\OverduePolicy;
 use MyInvoice\Service\Report\CzechWorkingDays;
 use MyInvoice\Service\Report\TaxReportLink;
@@ -24,6 +26,7 @@ use MyInvoice\Service\Tax\VatPaymentInstruction;
 use MyInvoice\Service\Vat\VatStatusService;
 use MyInvoice\Support\Sql\PayablePredicate;
 use MyInvoice\Support\Sql\AdvanceSettledSql;
+use MyInvoice\Support\Sql\PurchaseCostSql;
 
 /**
  * CRM dashboard aggregation queries.
@@ -222,17 +225,19 @@ final class CrmAggregationService
         $conversions = [];
         foreach ([
             ['revenue', 'invoices', 'i', self::REV_DATE, ' AND i.status IN ' . self::REV_STATUS . ' AND i.invoice_type IN ' . self::REV_TYPES
-                . self::relatedPartyExclude('i', 'client_id', $excludeRelated)],
+                . self::relatedPartyExclude('i', 'client_id', $excludeRelated),
+                $payer ? 'i.total_without_vat' : 'i.total_with_vat', ''],
+            // Náklad konečné faktury bez odpočtu zálohy z DDKP ({@see PurchaseCostSql}).
             ['costs', 'purchase_invoices', 'pi', self::COST_DATE, ' AND pi.status IN ' . self::COST_STATUS . $this->advanceCostExclude()
-                . self::relatedPartyExclude('pi', 'vendor_id', $excludeRelated)],
-        ] as [$metric, $table, $alias, $date, $predicate]) {
-            $amount = $alias . ($payer ? '.total_without_vat' : '.total_with_vat');
+                . self::relatedPartyExclude('pi', 'vendor_id', $excludeRelated),
+                PurchaseCostSql::cost('pi', $payer), PurchaseCostSql::deductionJoin('pi', $supplierId)],
+        ] as [$metric, $table, $alias, $date, $predicate, $amount, $join]) {
             $known = "(cur.code = 'CZK' OR {$alias}.exchange_rate > 0 OR COALESCE({$amount}, 0) = 0)";
             $find = $this->db->pdo()->prepare("SELECT cur.code AS currency,
                 SUM(CASE WHEN {$known} THEN COALESCE({$amount}, 0) * IF(cur.code = 'CZK', 1, COALESCE({$alias}.exchange_rate, 1)) ELSE 0 END) AS known_amount,
                 SUM(CASE WHEN {$known} THEN 1 ELSE 0 END) AS known_count,
                 SUM(CASE WHEN {$known} THEN 0 ELSE 1 END) AS missing_count
-                FROM {$table} {$alias} JOIN currencies cur ON cur.id = {$alias}.currency_id
+                FROM {$table} {$alias}{$join} JOIN currencies cur ON cur.id = {$alias}.currency_id
                 WHERE {$alias}.supplier_id = ? AND {$date} >= ? AND {$date} < ? {$predicate}
                 GROUP BY cur.code");
             $find->execute([$supplierId, $from, $toExclusive]);
@@ -296,12 +301,12 @@ final class CrmAggregationService
 
         $cost = $pdo->prepare(
             "SELECT cur.code AS currency,
-                    SUM(COALESCE(pi.total_with_vat, 0))    AS g,
-                    SUM(COALESCE(pi.total_without_vat, 0)) AS n,
-                    SUM(COALESCE(pi.total_with_vat, 0)    * COALESCE(IF(cur.code='CZK',1,pi.exchange_rate),1)) AS gc,
-                    SUM(COALESCE(pi.total_without_vat, 0) * COALESCE(IF(cur.code='CZK',1,pi.exchange_rate),1)) AS nc,
+                    SUM(" . PurchaseCostSql::gross('pi') . ")    AS g,
+                    SUM(" . PurchaseCostSql::net('pi') . ") AS n,
+                    SUM(" . PurchaseCostSql::gross('pi') . "    * COALESCE(IF(cur.code='CZK',1,pi.exchange_rate),1)) AS gc,
+                    SUM(" . PurchaseCostSql::net('pi') . " * COALESCE(IF(cur.code='CZK',1,pi.exchange_rate),1)) AS nc,
                     COUNT(*) AS cnt
-               FROM purchase_invoices pi
+               FROM purchase_invoices pi" . PurchaseCostSql::deductionJoin('pi', $supplierId) . "
                JOIN currencies cur ON cur.id = pi.currency_id
               WHERE pi.supplier_id = ?
                 AND " . self::COST_DATE . " >= ? AND " . self::COST_DATE . " < ?
@@ -568,11 +573,11 @@ final class CrmAggregationService
 
         $cost = $pdo->prepare(
             "SELECT DATE_FORMAT(" . self::COST_DATE . ", '%Y-%m') AS ym, cur.code AS currency,
-                    SUM(COALESCE(pi.total_with_vat,0)) AS g, SUM(COALESCE(pi.total_without_vat,0)) AS n,
-                    SUM(COALESCE(pi.total_with_vat,0)    * COALESCE(IF(cur.code='CZK',1,pi.exchange_rate),1)) AS gc,
-                    SUM(COALESCE(pi.total_without_vat,0) * COALESCE(IF(cur.code='CZK',1,pi.exchange_rate),1)) AS nc,
+                    SUM(" . PurchaseCostSql::gross('pi') . ") AS g, SUM(" . PurchaseCostSql::net('pi') . ") AS n,
+                    SUM(" . PurchaseCostSql::gross('pi') . "    * COALESCE(IF(cur.code='CZK',1,pi.exchange_rate),1)) AS gc,
+                    SUM(" . PurchaseCostSql::net('pi') . " * COALESCE(IF(cur.code='CZK',1,pi.exchange_rate),1)) AS nc,
                     COUNT(*) AS cnt
-               FROM purchase_invoices pi JOIN currencies cur ON cur.id = pi.currency_id
+               FROM purchase_invoices pi" . PurchaseCostSql::deductionJoin('pi', $supplierId) . " JOIN currencies cur ON cur.id = pi.currency_id
               WHERE pi.supplier_id = ?
                 AND " . self::COST_DATE . " >= ? AND " . self::COST_DATE . " < ?
                 AND pi.status IN " . self::COST_STATUS . $this->advanceCostExclude() . "
@@ -679,9 +684,9 @@ final class CrmAggregationService
 
         $cost = $pdo->prepare(
             "SELECT YEAR(" . self::COST_DATE . ") AS yr, cur.code AS currency,
-                    SUM(COALESCE(pi.total_with_vat,0)) AS g, SUM(COALESCE(pi.total_without_vat,0)) AS n,
+                    SUM(" . PurchaseCostSql::gross('pi') . ") AS g, SUM(" . PurchaseCostSql::net('pi') . ") AS n,
                     COUNT(*) AS cnt
-               FROM purchase_invoices pi JOIN currencies cur ON cur.id = pi.currency_id
+               FROM purchase_invoices pi" . PurchaseCostSql::deductionJoin('pi', $supplierId) . " JOIN currencies cur ON cur.id = pi.currency_id
               WHERE pi.supplier_id = ?
                 AND pi.status IN " . self::COST_STATUS . $this->advanceCostExclude() . "
            GROUP BY yr, cur.code"
@@ -724,7 +729,7 @@ final class CrmAggregationService
         // Parametr $currency zachován pro BC (ignoruje se — vždy ranking v CZK).
         unset($currency);
         // Net pro plátce (vstupní DPH je odpočitatelná), gross pro neplátce — jako Náklady.
-        $cost = $this->isVatPayer($supplierId) ? 'pi.total_without_vat' : 'pi.total_with_vat';
+        $cost = PurchaseCostSql::cost('pi', $this->isVatPayer($supplierId));
         $start = self::monthsBack(new \DateTimeImmutable('today'), $monthsBack)->format('Y-m-01');
         $params = [$supplierId, $start];
         $sql = "
@@ -733,7 +738,7 @@ final class CrmAggregationService
                    COUNT(*) AS purchase_count,
                    GROUP_CONCAT(DISTINCT cur.code ORDER BY cur.code SEPARATOR ',') AS currencies,
                    SUM(SUM(COALESCE($cost, 0) * COALESCE(IF(cur.code = 'CZK', 1, pi.exchange_rate), 1))) OVER () AS total_all
-              FROM purchase_invoices pi
+              FROM purchase_invoices pi" . PurchaseCostSql::deductionJoin('pi', $supplierId) . "
               JOIN clients c ON c.id = pi.vendor_id
          LEFT JOIN currencies cur ON cur.id = pi.currency_id
              WHERE pi.supplier_id = ?
@@ -1113,14 +1118,14 @@ final class CrmAggregationService
         // CZK přepočet — bez něj sumace EUR+CZK ve stejné kategorii dává nesmysl
         // (100 EUR + 50 000 CZK = 50 100). Parametr $currency BC, vždy CZK.
         unset($currency);
-        $cost = $this->isVatPayer($supplierId) ? 'pi.total_without_vat' : 'pi.total_with_vat';
+        $cost = PurchaseCostSql::cost('pi', $this->isVatPayer($supplierId));
         $start = self::monthsBack(new \DateTimeImmutable('today'), $monthsBack)->format('Y-m-d');
         $params = [$supplierId, $start];
         $sql = "
             SELECT pi.expense_category_id, ec.code, ec.label,
                    SUM(COALESCE($cost, 0) * COALESCE(IF(cur.code = 'CZK', 1, pi.exchange_rate), 1)) AS total,
                    COUNT(*) AS cnt
-              FROM purchase_invoices pi
+              FROM purchase_invoices pi" . PurchaseCostSql::deductionJoin('pi', $supplierId) . "
          LEFT JOIN expense_categories ec ON ec.id = pi.expense_category_id
          LEFT JOIN currencies cur ON cur.id = pi.currency_id
              WHERE pi.supplier_id = ?
@@ -1454,15 +1459,26 @@ final class CrmAggregationService
         // nic, co by na běžící lhůtu upozornilo — platba by zapadla do výpisu a lhůta
         // by uplynula potichu. Proto je severity odstupňovaná podle STÁŘÍ nejstarší
         // nevyřízené platby, ne podle počtu: jedna zapomenutá dva týdny je horší než
-        // pět včerejších.
-        if (ProformaPaymentDocuments::modeForSupplier($pdo, $supplierId) === ProformaPaymentDocuments::MODE_MANUAL) {
+        // pět včerejších. Platba, ze které daň přiznal původní program (úhrada minulého roku z POHODY, platby
+        // převzaté z Money S3), doklad nečeká ({@see TakenOverPayment::isTaxDeclaredByOrigin()}).
+        //
+        // V automatických režimech doklad vzniká sám, kromě zálohy převzaté bez sazeb DPH,
+        // jejíž DDKP sazbu plnění neurčují ({@see ProformaVatRates}): automatika ji odmítne
+        // a úkol je jediné místo, kde je to vidět.
+        $manualMode = ProformaPaymentDocuments::modeForSupplier($pdo, $supplierId) === ProformaPaymentDocuments::MODE_MANUAL;
+        $moneyConverted = static function () use ($pdo, $supplierId): bool {
+            $stmt = $pdo->prepare("SELECT 1 FROM money_s3_import_map WHERE supplier_id = ? AND kind = 'invoice' LIMIT 1");
+            $stmt->execute([$supplierId]);
+            return $stmt->fetchColumn() !== false;
+        };
+        if ($manualMode || $moneyConverted()) {
             $stmt = $pdo->prepare(
                 "SELECT i.id, MIN(p.paid_on) AS oldest_payment
                    FROM invoices i
-                   JOIN invoice_payments p ON p.invoice_id = i.id
+                   JOIN invoice_payments p ON p.invoice_id = i.id AND NOT " . TakenOverPayment::isTaxDeclaredByOriginSql('p') . "
                   WHERE i.supplier_id = ?
                     AND i.invoice_type = 'proforma'
-                    AND i.status <> 'cancelled'
+                    AND i.status <> 'cancelled'" . ($manualMode ? '' : ' AND ' . ProformaVatRates::withoutRatesSql('i')) . "
                     AND NOT EXISTS (SELECT 1 FROM invoices ch
                                      WHERE ch.parent_invoice_id = i.id
                                        AND ch.invoice_type IN ('invoice', 'tax_document')
@@ -3294,7 +3310,7 @@ final class CrmAggregationService
      *   total_in: float, total_out: float, total_net: float
      * }
      */
-    public function cashFlowForecast(int $supplierId, int $weeksAhead = 4, string $currency = 'CZK'): array
+    public function cashFlowForecast(int $supplierId, int $weeksAhead = 4, string $currency = 'CZK', bool $includeDrafts = false): array
     {
         $pdo = $this->db->pdo();
         $today = new \DateTimeImmutable('today');
@@ -3366,6 +3382,35 @@ final class CrmAggregationService
             $inByBucket[(int) $r['bucket']] = (float) $r['amt'];
         }
 
+        $draftByBucket = [];
+        $unscheduledDraftCount = 0;
+        if ($includeDrafts) {
+            // Pouze uložené částky konceptů; ruční přenos z výkazů se zde neopakuje.
+            $draftStmt = $pdo->prepare(
+                "SELECT CASE{$buildCase('i')} END AS bucket,
+                        SUM(i.amount_to_pay - i.paid_total) AS amt
+                   FROM invoices i
+              LEFT JOIN currencies c ON c.id = i.currency_id
+                  WHERE i.supplier_id = ? AND " . DraftCashFlow::eligibleSql() . "
+                    AND i.due_date BETWEEN ? AND ?
+                    AND COALESCE(c.code, 'CZK') = ?
+               GROUP BY bucket"
+            );
+            $draftStmt->execute([...$caseParams, $supplierId, $globalStart, $globalEnd, $currency]);
+            foreach ($draftStmt->fetchAll(\PDO::FETCH_ASSOC) as $row) {
+                if ($row['bucket'] !== null) $draftByBucket[(int) $row['bucket']] = (float) $row['amt'];
+            }
+            $unscheduled = $pdo->prepare(
+                "SELECT COUNT(*) FROM invoices i
+              LEFT JOIN currencies c ON c.id = i.currency_id
+                  WHERE i.supplier_id = ? AND " . DraftCashFlow::eligibleSql() . "
+                    AND (i.due_date IS NULL OR i.due_date < ?)
+                    AND COALESCE(c.code, 'CZK') = ?"
+            );
+            $unscheduled->execute([$supplierId, $globalStart, $currency]);
+            $unscheduledDraftCount = (int) $unscheduled->fetchColumn();
+        }
+
         // Out: nezaplacené přijaté faktury s due_date v okně.
         $outStmt = $pdo->prepare(
             "SELECT CASE{$buildCase('pi')} END AS bucket,
@@ -3417,13 +3462,22 @@ final class CrmAggregationService
             ];
         }
 
-        return [
+        $forecast = [
             'currency'  => $currency,
             'weeks'     => $weeks,
             'total_in'  => round($totalIn, 2),
             'total_out' => round($totalOut, 2),
             'total_net' => round($totalIn - $totalOut, 2),
         ];
+        if ($includeDrafts) {
+            foreach ($forecast['weeks'] as $idx => &$week) {
+                $week['draft_in'] = round($draftByBucket[$idx] ?? 0.0, 2);
+            }
+            unset($week);
+            $forecast['total_draft_in'] = round(array_sum($draftByBucket), 2);
+            $forecast['unscheduled_draft_count'] = $unscheduledDraftCount;
+        }
+        return DraftCashFlow::withOutlook($forecast);
     }
 
     /**

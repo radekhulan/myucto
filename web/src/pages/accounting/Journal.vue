@@ -11,6 +11,8 @@ import {
   type JournalEntryDetail,
   type AccountingPeriod,
   type ChartAccount,
+  type JournalEntryPair,
+  type JournalFilters,
 } from '@/api/accounting'
 import { usePaneDom } from '@/composables/usePaneDom'
 import { requestSupplierId } from '@/workspace/supplierContext'
@@ -34,17 +36,30 @@ import { ensurePrefsLoaded } from '@/composables/useUserPrefs'
 import { useSavedFilters, savedFilterTone, type SavedFilterTone } from '@/composables/useSavedFilters'
 import type { SavedFilter } from '@/api/preferences'
 import { ICONS, btnFilled, btnOutline, btnOutlineSm } from '@/components/ui/buttonStyles'
+import { errorResponseData, responseFilename } from '@/utils/downloadFile'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import AutomationBadge from '@/components/automation/AutomationBadge.vue'
 import ActivationBanner from '@/components/settings/activation/ActivationBanner.vue'
 import JournalSourceDrawer from '@/components/accounting/JournalSourceDrawer.vue'
 import JournalEntryDetailPanel from '@/components/accounting/JournalEntryDetailPanel.vue'
+import JournalPairsTable from '@/components/accounting/JournalPairsTable.vue'
+import Modal from '@/components/ui/Modal.vue'
+import ConfirmDialog from '@/components/ui/ConfirmDialog.vue'
+import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
+import BulkActionBar from '@/components/ui/BulkActionBar.vue'
+import BulkActionsDialog from '@/components/bulk/BulkActionsDialog.vue'
+import { useListBulkActions } from '@/components/bulk/useListBulkActions'
+import { useListKeyboard } from '@/composables/useListKeyboard'
+import { journalListFilterParams } from '@/api/listQueries'
+import { apiErrorText, hasAnySingle } from '@/utils/entryForm'
 import LockedPeriodAckModal from '@/components/accounting/LockedPeriodAckModal.vue'
 import { useLockedPeriodAck } from '@/composables/useLockedPeriodAck'
-import { journalSourceLink } from '@/utils/journalSourceLink'
+import { journalSourceLink, journalSourceRefLabel } from '@/utils/journalSourceLink'
+import { compactJournalDescription } from '@/utils/journalDescription'
 import { findAccountingPeriod } from '@/utils/accountingPeriod'
 import DateInput from '@/components/ui/DateInput.vue'
-import DimensionReportFilter from '@/components/dimensions/DimensionReportFilter.vue'
+import DimensionReportFilters from '@/components/dimensions/DimensionReportFilters.vue'
+import { dimensionFilterChip, dimensionValueIdsParam, parseDimensionValueIds } from '@/utils/dimensionFilter'
 import VatBreakdownCell from '@/components/ui/VatBreakdownCell.vue'
 import { useDimensions } from '@/composables/useDimensions'
 
@@ -72,6 +87,26 @@ const page = ref(1)
 const listBox = ref<HTMLElement | null>(null)
 useAdaptiveTableRows(computed(() => listBox.value ? [listBox.value] : []))
 useFillViewportHeight(listBox)
+
+// Tabulka deníku je `w-max` a při užším okně se posouvá vodorovně; rozbalený detail (colspan přes
+// celou tabulku) by pak byl široký jako celá tabulka a jeho pravá část (akce, částky) by zůstala
+// mimo obrazovku. Detail proto drží šířku viditelné plochy a při posunu zůstává na místě.
+const listBoxWidth = ref(0)
+let listBoxObserver: ResizeObserver | null = null
+watch(listBox, el => {
+  listBoxObserver?.disconnect()
+  listBoxObserver = null
+  if (!el) return
+  listBoxWidth.value = el.clientWidth
+  if (typeof ResizeObserver === 'undefined') return
+  listBoxObserver = new ResizeObserver(() => { listBoxWidth.value = el.clientWidth })
+  listBoxObserver.observe(el)
+})
+onBeforeUnmount(() => listBoxObserver?.disconnect())
+/** Šířka obsahu detailu = viditelná plocha bez vnitřního odsazení buňky (px-3). */
+const detailViewportStyle = computed(() => listBoxWidth.value > 48
+  ? { position: 'sticky', left: '0.75rem', width: `${listBoxWidth.value - 24}px`, minWidth: `${listBoxWidth.value - 24}px` } as const
+  : undefined)
 const total = ref(0)
 const perPage = ref(50)
 const totalPages = computed(() => Math.max(1, Math.ceil(total.value / perPage.value)))
@@ -96,8 +131,10 @@ const filters = reactive({
   // seznam dotčených zápisů dopočítá naživo — proklik z dashboardu jinak umí
   // ukázat jen JEDEN zápis a u víc nálezů skončí na nefiltrovaném deníku.
   integrity: '' as '' | 'amount_mismatch',
+  // Zápisy označené k ruční úpravě (M : N, které nejde rozdělit na dvojice); jen firmy s jednoduchou formou.
+  pair_status: '' as '' | 'composite_mn',
   // Hodnota dimenze (Firma → Dimenze) včetně podřízených, stejně jako u sestav.
-  dimension_value_id: null as number | null,
+  dimension_value_ids: [] as number[],
   dimension_descendants: true,
 })
 
@@ -113,9 +150,20 @@ function accountName(code: string): string {
   return accounts.value.find(a => a.account_code === code)?.name ?? ''
 }
 
+// Přeúčtování podle filtru jen pro jeden účet (rozsah od-do by na stránce přeúčtování nedával smysl).
+const rebookLink = computed<RouteLocationRaw | null>(() => {
+  const account = filters.account_from
+  if (!account || (filters.account_to && filters.account_to !== account)) return null
+  if (!auth.canWrite('accounting.journal.post')) return null
+  const query: Record<string, string> = { from_account: account }
+  if (filters.date_from) query.date_from = filters.date_from
+  if (filters.date_to) query.date_to = filters.date_to
+  return { name: 'accounting-journal-rebook', query }
+})
+
 const SOURCE_TYPES = [
   'manual', 'invoice', 'purchase_invoice', 'other_item', 'bank', 'gopay', 'cash',
-  'depreciation', 'asset', 'asset_disposal', 'unit_charge',
+  'depreciation', 'payroll', 'asset', 'asset_disposal', 'unit_charge',
   'closing', 'opening', 'fx_revaluation', 'stock',
   'offset', 'settlement', 'vat_clearing', 'card_settlement', 'card_writeoff',
 ] as const
@@ -135,6 +183,82 @@ const sourceIdFilter = ref<number | ''>('')
 // jako součást nálezu.
 const entryIdFilter = ref<number | ''>('')
 
+/** Filtr seznamu tak, jak jde na `GET /accounting/journal` (bez stránkování, řazení a sloupců). */
+function listFilters(): JournalFilters {
+  return {
+    document_no: filters.document_no || undefined,
+    period_id: filters.period_id || undefined,
+    date_from: filters.date_from || undefined,
+    date_to: filters.date_to || undefined,
+    source_type: filters.source_type || undefined,
+    source_id: sourceIdFilter.value || undefined,
+    entry_id: entryIdFilter.value || undefined,
+    posted: filters.posted === '' ? undefined : filters.posted === 'posted',
+    reversal: filters.reversal === '' ? undefined : filters.reversal,
+    automation: filters.automation || undefined,
+    q: filters.q || undefined,
+    account_from: filters.account_from || undefined,
+    account_to: filters.account_to || undefined,
+    amount_from: filters.amount_from === '' ? undefined : Number(filters.amount_from),
+    amount_to: filters.amount_to === '' ? undefined : Number(filters.amount_to),
+    integrity: filters.integrity || undefined,
+    pair_status: filters.pair_status || undefined,
+    dimension_value_id: dimensionValueIdsParam(filters.dimension_value_ids),
+    dimension_descendants: filters.dimension_descendants,
+  }
+}
+
+// ── Výběr řádků a hromadné akce ────────────────────────────────────────────
+const selectedIds = ref<number[]>([])
+const bulk = useListBulkActions({
+  target: 'journal_entry',
+  selectedIds,
+  listQuery: () => journalListFilterParams(listFilters()),
+  total,
+})
+// Zaškrtávátka v seznamu slouží jen hromadným akcím, proto se ukážou až po jejich zapnutí
+// v „…" a seznam jinak zůstane čistý.
+const bulkMode = ref(false)
+const bulkActive = computed(() => bulk.canUse.value && bulkMode.value)
+function setBulkMode(on: boolean) {
+  bulkMode.value = on
+  if (!on) selectedIds.value = []
+}
+const headerActions = computed<ActionItem[]>(() => [
+  {
+    key: 'document-list',
+    label: t('accounting.journal.document_list'),
+    icon: 'clipboardCheck',
+    tier: 'overflow',
+    variant: 'primary',
+    disabled: exporting.value,
+    run: openDocumentList,
+  },
+  {
+    key: 'bulk-mode',
+    label: t(bulkMode.value ? 'accounting.journal.bulk_mode_off' : 'accounting.journal.bulk_mode_on'),
+    icon: bulkMode.value ? 'x' : 'check',
+    tier: 'overflow',
+    variant: 'neutral',
+    show: bulk.canUse.value,
+    run: () => setBulkMode(!bulkMode.value),
+  },
+  { ...bulk.menuItem.value, show: bulkActive.value },
+])
+const allLoadedSelected = computed(() => entries.value.length > 0 && entries.value.every(e => selectedIds.value.includes(e.id)))
+function toggleSelected(id: number) {
+  selectedIds.value = selectedIds.value.includes(id)
+    ? selectedIds.value.filter(x => x !== id)
+    : [...selectedIds.value, id]
+}
+function toggleAllLoaded() {
+  selectedIds.value = allLoadedSelected.value ? [] : entries.value.map(e => e.id)
+}
+async function onBulkChanged() {
+  collapseAll()
+  await load()
+}
+
 let loadSeq = 0
 async function load(reset = true): Promise<boolean> {
   if (!reset && (loading.value || loadingMore.value || page.value >= totalPages.value)) return false
@@ -151,24 +275,7 @@ async function load(reset = true): Promise<boolean> {
   try {
     const r = await accountingApi.listJournal({
       page: page.value,
-      document_no: filters.document_no || undefined,
-      period_id: filters.period_id || undefined,
-      date_from: filters.date_from || undefined,
-      date_to: filters.date_to || undefined,
-      source_type: filters.source_type || undefined,
-      source_id: sourceIdFilter.value || undefined,
-      entry_id: entryIdFilter.value || undefined,
-      posted: filters.posted === '' ? undefined : filters.posted === 'posted',
-      reversal: filters.reversal === '' ? undefined : filters.reversal,
-      automation: filters.automation || undefined,
-      q: filters.q || undefined,
-      account_from: filters.account_from || undefined,
-      account_to: filters.account_to || undefined,
-      amount_from: filters.amount_from === '' ? undefined : Number(filters.amount_from),
-      amount_to: filters.amount_to === '' ? undefined : Number(filters.amount_to),
-      integrity: filters.integrity || undefined,
-      dimension_value_id: filters.dimension_value_id ?? undefined,
-      dimension_descendants: filters.dimension_descendants,
+      ...listFilters(),
       sort_key: tbl.sort.value?.key,
       sort_dir: tbl.sort.value?.dir,
       include_vat_breakdown: tbl.isVisible('vat_breakdown'),
@@ -179,13 +286,15 @@ async function load(reset = true): Promise<boolean> {
     })
     if (seq !== loadSeq || disposed || supplierId !== requestSupplierId()) return false
     entries.value = reset ? r.items : [...entries.value, ...r.items]
+    if (reset) selectedIds.value = []
     total.value = r.total
     perPage.value = r.per_page
     return true
-  } catch (e) {
+  } catch (e: any) {
     if (seq === loadSeq && !disposed && supplierId === requestSupplierId()) {
       if (!reset) page.value--
-      toast.error(t('common.error'))
+      // Neplatný filtr (např. rozsah účtů 6 až 5) vrací server jako 422 s hláškou.
+      toast.error(e?.response?.data?.error?.message || t('common.error'))
     }
     return false
   } finally {
@@ -233,15 +342,16 @@ function resetFilters() {
   filters.amount_from = ''
   filters.amount_to = ''
   filters.integrity = ''
-  filters.dimension_value_id = null
+  filters.pair_status = ''
+  filters.dimension_value_ids = []
   filters.dimension_descendants = true
   sourceIdFilter.value = ''
   entryIdFilter.value = ''
   applyFilters()
 }
 
-function onDimensionValue(valueId: number | null) {
-  filters.dimension_value_id = valueId
+function onDimensionValues(valueIds: number[]) {
+  filters.dimension_value_ids = valueIds
   applyFilters()
 }
 function onDimensionDescendants(value: boolean) {
@@ -265,8 +375,9 @@ function buildQuery(): Record<string, string> {
   if (filters.amount_from !== '') q.amount_from = String(filters.amount_from)
   if (filters.amount_to !== '') q.amount_to = String(filters.amount_to)
   if (filters.integrity) q.integrity = filters.integrity
-  if (filters.dimension_value_id) {
-    q.dimension_value_id = String(filters.dimension_value_id)
+  if (filters.pair_status) q.pair_status = filters.pair_status
+  if (filters.dimension_value_ids.length > 0) {
+    q.dimension_value_id = dimensionValueIdsParam(filters.dimension_value_ids) as string
     if (!filters.dimension_descendants) q.dimension_descendants = '0'
   }
   return q
@@ -313,8 +424,8 @@ function hydrateFilters(q: Record<string, unknown>) {
   filters.amount_from = numberValue('amount_from')
   filters.amount_to = numberValue('amount_to')
   filters.integrity = value('integrity') === 'amount_mismatch' ? 'amount_mismatch' : ''
-  const dimensionValueId = numberValue('dimension_value_id')
-  filters.dimension_value_id = dimensionValueId !== '' && dimensionValueId > 0 ? dimensionValueId : null
+  filters.pair_status = value('pair_status') === 'composite_mn' ? 'composite_mn' : ''
+  filters.dimension_value_ids = parseDimensionValueIds(value('dimension_value_id'))
   filters.dimension_descendants = value('dimension_descendants') !== '0'
 }
 
@@ -349,7 +460,8 @@ const activeFilterCount = computed(() => {
   if (filters.account_from || filters.account_to) n++
   if (filters.amount_from !== '' || filters.amount_to !== '') n++
   if (filters.integrity) n++
-  if (filters.dimension_value_id) n++
+  if (filters.pair_status) n++
+  if (filters.dimension_value_ids.length > 0) n++
   return n
 })
 
@@ -380,14 +492,9 @@ const filterChips = computed<FilterChip[]>(() => {
     chips.push({ key: 'amount_range', label: t('accounting.journal.filter_amount_from'), value: `${filters.amount_from !== '' ? filters.amount_from : '…'} – ${filters.amount_to !== '' ? filters.amount_to : '…'}` })
   }
   if (filters.integrity) chips.push({ key: 'integrity', value: t('accounting.journal.filter_integrity') })
-  if (filters.dimension_value_id) {
-    const value = dims.valueById.value.get(filters.dimension_value_id)
-    chips.push({
-      key: 'dimension',
-      label: (value && dims.typeById.value.get(value.type_id)?.name) || t('dimensions.filter_value'),
-      value: dims.valueLabel(filters.dimension_value_id)
-        + (filters.dimension_descendants ? '' : ` (${t('accounting.journal.filter_dimension_only_value')})`),
-    })
+  if (filters.pair_status) chips.push({ key: 'pair_status', value: t('accounting.pairs.filter_mn') })
+  if (filters.dimension_value_ids.length > 0) {
+    chips.push({ key: 'dimension', ...dimensionFilterChip(dims, filters.dimension_value_ids, filters.dimension_descendants, t) })
   }
   return chips
 })
@@ -405,7 +512,8 @@ function clearFilter(key: string) {
     case 'account_range': filters.account_from = ''; filters.account_to = ''; break
     case 'amount_range': filters.amount_from = ''; filters.amount_to = ''; break
     case 'integrity': filters.integrity = ''; break
-    case 'dimension': filters.dimension_value_id = null; filters.dimension_descendants = true; break
+    case 'pair_status': filters.pair_status = ''; break
+    case 'dimension': filters.dimension_value_ids = []; filters.dimension_descendants = true; break
   }
   applyFilters()
 }
@@ -450,10 +558,19 @@ const COLUMNS: ColumnDef[] = [
   { key: 'date', labelKey: 'accounting.journal.entry_date', required: true },
   { key: 'document_no', labelKey: 'accounting.journal.document_no' },
   { key: 'document_date', labelKey: 'accounting.journal.col_document_date', defaultHidden: true },
+  { key: 'tax_date', labelKey: 'accounting.journal.col_tax_date', defaultHidden: true },
+  { key: 'received_date', labelKey: 'accounting.journal.col_received_date', defaultHidden: true },
+  { key: 'due_date', labelKey: 'accounting.journal.col_due_date', defaultHidden: true },
+  { key: 'paid_date', labelKey: 'accounting.journal.col_paid_date', defaultHidden: true },
   { key: 'description', labelKey: 'accounting.journal.description', required: true },
+  { key: 'partner_name', labelKey: 'accounting.journal.col_partner' },
+  { key: 'partner_ic', labelKey: 'accounting.journal.col_partner_ic', defaultHidden: true },
+  { key: 'variable_symbol', labelKey: 'accounting.journal.col_variable_symbol' },
+  { key: 'vendor_document_no', labelKey: 'accounting.journal.col_vendor_document_no', defaultHidden: true },
+  { key: 'counterparty_account', labelKey: 'accounting.journal.col_counterparty_account', defaultHidden: true },
   { key: 'source', labelKey: 'accounting.journal.source_col' },
   { key: 'amount', labelKey: 'accounting.journal.col_amount' },
-  { key: 'status', labelKey: 'accounting.journal.status_col' },
+  { key: 'status', labelKey: 'accounting.journal.status_col', defaultHidden: true },
   { key: 'posted_at', labelKey: 'accounting.journal.col_posted_at', defaultHidden: true },
   { key: 'posted_by', labelKey: 'accounting.journal.col_posted_by', defaultHidden: true },
   { key: 'entry_id', labelKey: 'accounting.journal.col_entry_id', defaultHidden: true },
@@ -471,7 +588,7 @@ const colors = useTableColors('journal')
 const columnDrag = useColumnDrag(tbl)
 const COLUMN_PRESETS = [
   { key: 'default', labelKey: 'common.columns_preset_default', visibleKeys: null, columnLabels: false },
-  { key: 'accounting', labelKey: 'common.columns_preset_accounting', visibleKeys: ['date', 'document_no', 'description', 'source', 'amount', 'status', 'entry_id', 'created_at', 'vat_breakdown', 'debit_accounts', 'credit_accounts'] },
+  { key: 'accounting', labelKey: 'common.columns_preset_accounting', visibleKeys: ['date', 'tax_date', 'document_no', 'vendor_document_no', 'description', 'partner_name', 'partner_ic', 'variable_symbol', 'due_date', 'source', 'amount', 'status', 'vat_breakdown', 'debit_accounts', 'credit_accounts'] },
   { key: 'complete', labelKey: 'common.columns_preset_full', visibleKeys: COLUMNS.map(c => c.key) },
 ]
 function onListScroll(event: Event) {
@@ -483,8 +600,22 @@ watch(() => [tbl.isVisible('vat_breakdown'), tbl.isVisible('debit_accounts'), tb
 function postingAccounts(entry: JournalEntry, side: 'debit' | 'credit'): string {
   return [...new Set(entry.posting_lines?.filter(line => line.side === side).map(line => line.account_code) ?? [])].join(', ') || '—'
 }
+/** Údaje prvotního dokladu dopočítané v listu; podle nich server neřadí. */
+const DOCUMENT_FACT_KEYS = ['partner_name', 'partner_ic', 'variable_symbol', 'vendor_document_no', 'counterparty_account', 'tax_date', 'received_date', 'due_date', 'paid_date'] as const
+type DocumentFactKey = typeof DOCUMENT_FACT_KEYS[number]
+const DOCUMENT_FACT_DATES = new Set<string>(['tax_date', 'received_date', 'due_date', 'paid_date'])
+const DOCUMENT_FACT_MONO = new Set<string>(['partner_ic', 'variable_symbol', 'vendor_document_no', 'counterparty_account'])
+function isDocumentFact(key: string): key is DocumentFactKey {
+  return (DOCUMENT_FACT_KEYS as readonly string[]).includes(key)
+}
+function documentFact(entry: JournalEntry, key: DocumentFactKey): string {
+  const value = entry[key]
+  if (!value) return '—'
+  return DOCUMENT_FACT_DATES.has(key) ? formatDate(value) : value
+}
 function mobileExtraFields(entry: JournalEntry): Array<{ key: string; label: string; value: string }> {
   const values: Record<string, string> = {
+    ...Object.fromEntries(DOCUMENT_FACT_KEYS.map(k => [k, documentFact(entry, k)])),
     document_date: entry.document_date ? formatDate(entry.document_date) : '—',
     posted_at: entry.posted_at ? formatDate(entry.posted_at) : '—',
     posted_by: entry.posted_by_name || '—',
@@ -497,7 +628,7 @@ function mobileExtraFields(entry: JournalEntry): Array<{ key: string; label: str
     note: entry.note_preview || '—',
     documents: entry.document_count ? String(entry.document_count) : '—',
   }
-  return tbl.orderedColumns.value.filter(c => c.defaultHidden && c.key !== 'vat_breakdown' && tbl.isVisible(c.key))
+  return tbl.orderedColumns.value.filter(c => (c.defaultHidden || isDocumentFact(c.key)) && c.key !== 'vat_breakdown' && c.key !== 'status' && tbl.isVisible(c.key))
     .map(c => ({ key: c.key, label: t(c.labelKey), value: values[c.key] ?? '—' }))
 }
 function onSortToggle(key: string) {
@@ -551,8 +682,9 @@ function exportQueryParams(): Record<string, string | number> {
   if (filters.amount_from !== '') q.amount_from = filters.amount_from
   if (filters.amount_to !== '') q.amount_to = filters.amount_to
   if (filters.integrity) q.integrity = filters.integrity
-  if (filters.dimension_value_id) {
-    q.dimension_value_id = filters.dimension_value_id
+  if (filters.pair_status) q.pair_status = filters.pair_status
+  if (filters.dimension_value_ids.length > 0) {
+    q.dimension_value_id = dimensionValueIdsParam(filters.dimension_value_ids) as string
     if (!filters.dimension_descendants) q.dimension_descendants = 0
   }
   return q
@@ -568,6 +700,45 @@ async function exportFile(format: 'pdf' | 'xlsx') {
     exporting.value = false
   }
 }
+// ── Soupiska dokladů (#356): aktuální filtr + povinný rozsah účtů (výchozí nákladové) ──
+// Rozsah účtů soupisky je samostatný (`line_account_*`): filtr Deníku včetně jeho rozsahu
+// a hledání podle kódu účtu jde na server beze změny, takže soupiska bere tytéž zápisy.
+const documentList = reactive({ open: false, from: '', to: '', error: '' })
+const documentListFrom = ref<HTMLInputElement | null>(null)
+function openDocumentList() {
+  const fromFilter = filters.account_from !== '' && filters.account_to !== ''
+  Object.assign(documentList, {
+    open: true,
+    from: fromFilter ? filters.account_from : '5',
+    to: fromFilter ? filters.account_to : '5',
+    error: '',
+  })
+  nextTick(() => documentListFrom.value?.focus())
+}
+async function downloadDocumentList() {
+  documentList.error = ''
+  if (!documentList.from.trim() || !documentList.to.trim()) {
+    documentList.error = t('accounting.journal.document_list_range_required')
+    return
+  }
+  exporting.value = true
+  try {
+    const r = await accountingApi.exportReport('/accounting/reports/journal/document-list', {
+      // Tentýž filtr jako seznam (journalListFilterParams), aby soupiska brala přesně zápisy z obrazovky.
+      ...journalListFilterParams(listFilters()),
+      line_account_from: documentList.from.trim(),
+      line_account_to: documentList.to.trim(),
+      format: 'xlsx',
+    })
+    // Název se serveru nese období; bez něj by se soupisky za různá období přepisovaly.
+    downloadBlob(r.data as unknown as Blob, responseFilename(r.headers?.['content-disposition'], 'soupiska-dokladu.xlsx'))
+    documentList.open = false
+  } catch (e: any) {
+    documentList.error = (await errorResponseData(e))?.error?.message || t('common.error')
+  } finally {
+    exporting.value = false
+  }
+}
 function downloadBlob(blob: Blob, filename: string) {
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
@@ -578,8 +749,12 @@ function downloadBlob(blob: Blob, filename: string) {
 }
 
 onMounted(async () => {
-  await ensurePrefsLoaded()
-  try { periods.value = await accountingApi.listPeriods() } catch { periods.value = [] }
+  await Promise.all([
+    ensurePrefsLoaded(),
+    accountingApi.listPeriods().then(result => { periods.value = result }).catch(() => { periods.value = [] }),
+  ])
+  // Prvky dvojic (filtr M : N) se ukazují jen firmě, která někdy zapnula jednoduchý zápis.
+  accountingApi.getEntryForm().then(v => { hasSingleForm.value = hasAnySingle(v.history) }).catch(() => { hasSingleForm.value = false })
   // Osnova jen pro našeptávání filtru — výpadek nesmí zabránit načtení deníku.
   accountingApi.listAccounts().then(v => { accounts.value = v }).catch(() => { accounts.value = [] })
   // Číselník dimenzí pro popisek chipu filtru; při vypnutých dimenzích nic nenačte.
@@ -596,6 +771,113 @@ onMounted(async () => {
   await load()
 })
 
+const hasSingleForm = ref(false)
+
+// ── Dvojice jednoduchého zápisu: storno a přeúčtování vybraných dvojic ─────
+// Akce visí na výběru dvojic v tabulce dvojic (JournalPairsTable + ActionBar). Server rozhoduje
+// o pravidlech (zámky, mzdy 409); tady se akce jen neukazují tam, kde je jisté, že nepůjdou:
+// protizápis, stornovaný zápis, mzdy. U dokladů (faktury, banka, pokladna ...) jen přeúčtování,
+// čisté storno dvojice jen u ručních a interních zápisů (jinak by zápis nesedel s dokladem).
+const pairSelection = ref<Record<number, number[]>>({})
+const pairBusy = ref(false)
+const repostPairDialog = reactive({ open: false, entry: null as JournalEntryDetail | null, pair: null as JournalEntryPair | null,
+  debit: '', credit: '', text: '', date: '', saving: false, error: '' })
+
+function selectedPairs(entryId: number): number[] { return pairSelection.value[entryId] ?? [] }
+function setSelectedPairs(entryId: number, nos: number[]) { pairSelection.value = { ...pairSelection.value, [entryId]: nos } }
+function entryHasPairs(d: JournalEntryDetail): boolean { return (d.pairs?.length ?? 0) > 0 }
+function pairsEditable(d: JournalEntryDetail): boolean {
+  return auth.canWrite('accounting') && entryHasPairs(d) && !d.reversed_by && !d.reverses_entry_id
+    && !d.source_type.startsWith('payroll')
+}
+function pairsDisabled(d: JournalEntryDetail): number[] {
+  return (d.pairs ?? []).filter(p => p.reversed_by_entry_id).map(p => p.pair_no)
+}
+function pairActions(d: JournalEntryDetail): ActionItem[] {
+  const picked = selectedPairs(d.id)
+  const canPureReverse = d.source_type === 'manual' || !!d.internal_document
+  return [
+    {
+      key: 'pair-repost', label: t('accounting.pairs.action_repost'), icon: 'edit', tier: 'primary', variant: 'warning',
+      show: pairsEditable(d), disabled: picked.length !== 1 || pairBusy.value,
+      disabledReason: picked.length === 1 ? undefined : t('accounting.pairs.repost_pick_one'),
+      run: () => openRepostPair(d),
+    },
+    {
+      key: 'pair-reverse', label: t('accounting.pairs.action_reverse'), icon: 'uturn', tier: 'secondary', variant: 'danger',
+      show: pairsEditable(d) && canPureReverse, disabled: picked.length === 0 || pairBusy.value,
+      disabledReason: picked.length === 0 ? t('accounting.pairs.reverse_pick_some') : undefined,
+      run: () => reversePairs(d),
+    },
+  ]
+}
+
+/** Čeká na potvrzení stylovaným dialogem (místo nativního confirm()). */
+const reversePairsConfirm = reactive({ open: false, entry: null as JournalEntryDetail | null, nos: [] as number[] })
+
+function reversePairs(d: JournalEntryDetail) {
+  const nos = selectedPairs(d.id)
+  if (nos.length === 0) return
+  Object.assign(reversePairsConfirm, { open: true, entry: d, nos })
+}
+
+async function confirmReversePairs() {
+  const d = reversePairsConfirm.entry
+  const nos = reversePairsConfirm.nos
+  reversePairsConfirm.open = false
+  if (!d || nos.length === 0) return
+  pairBusy.value = true
+  try {
+    const created = await accountingApi.reversePairs(d.id, { pair_nos: nos })
+    toast.success(t('accounting.pairs.reversed', { id: created.id }))
+    pairSelection.value = { ...pairSelection.value, [d.id]: [] }
+    collapseAll()
+    await load()
+  } catch (e) {
+    toast.error(apiErrorText(e, t))
+  } finally {
+    pairBusy.value = false
+  }
+}
+
+function openRepostPair(d: JournalEntryDetail) {
+  const pair = (d.pairs ?? []).find(p => p.pair_no === selectedPairs(d.id)[0]) ?? null
+  if (!pair) return
+  Object.assign(repostPairDialog, {
+    open: true, entry: d, pair, debit: pair.debit_account_code, credit: pair.credit_account_code,
+    text: pair.line_text ?? '', date: '', saving: false, error: '',
+  })
+}
+
+async function submitRepostPair() {
+  const d = repostPairDialog.entry
+  const pair = repostPairDialog.pair
+  if (!d || !pair) return
+  repostPairDialog.error = ''
+  if (!repostPairDialog.debit.trim()) { repostPairDialog.error = t('accounting.error.pair_missing_debit_account'); return }
+  if (!repostPairDialog.credit.trim()) { repostPairDialog.error = t('accounting.error.pair_missing_credit_account'); return }
+  if (repostPairDialog.debit.trim() === repostPairDialog.credit.trim()) { repostPairDialog.error = t('accounting.error.pair_same_account'); return }
+  repostPairDialog.saving = true
+  try {
+    const result = await accountingApi.repostPair(d.id, pair.pair_no, {
+      debit_account_code: repostPairDialog.debit.trim(),
+      credit_account_code: repostPairDialog.credit.trim(),
+      ...(repostPairDialog.text.trim() ? { line_text: repostPairDialog.text.trim() } : {}),
+      ...(repostPairDialog.date ? { entry_date: repostPairDialog.date } : {}),
+    })
+    toast.success(t(['in_place', 'tax_neutral', 'correction_entry'].includes(result.mode)
+      ? `accounting.pairs.repost_done_${result.mode}` : 'accounting.pairs.repost_done'))
+    repostPairDialog.open = false
+    pairSelection.value = { ...pairSelection.value, [d.id]: [] }
+    collapseAll()
+    await load()
+  } catch (e) {
+    repostPairDialog.error = apiErrorText(e, t)
+  } finally {
+    repostPairDialog.saving = false
+  }
+}
+
 // ── Expand / detail ────────────────────────────────────────────────────────
 // Rozbalených zápisů může být VÍC najednou: účetní typicky porovnává doklad s jeho
 // úhradou nebo se stornem, a akordeon, který při otevření druhého zavřel první,
@@ -609,6 +891,7 @@ function isExpanded(id: number): boolean { return expandedIds.value.includes(id)
 function isDetailLoading(id: number): boolean { return detailLoadingIds.value.includes(id) }
 
 function collapseAll() {
+  pairSelection.value = {}
   expandedIds.value = []
   details.value = {}
   detailLoadingIds.value = []
@@ -630,6 +913,19 @@ async function toggleExpand(entry: JournalEntry) {
   } finally {
     detailLoadingIds.value = detailLoadingIds.value.filter(id => id !== entry.id)
   }
+}
+
+// Pohyb po zápisech klávesnicí (šipky, j/k), Enter rozbalí detail, x označí zápis
+// pro hromadné akce, jsou-li zapnuté.
+const { activeIndex } = useListKeyboard({
+  count: () => entries.value.length,
+  open: (i) => { const e = entries.value[i]; if (e) void toggleExpand(e) },
+  toggle: (i) => { const e = entries.value[i]; if (e && bulkActive.value) toggleSelected(e.id) },
+  clear: () => { selectedIds.value = [] },
+})
+function onRowClick(entry: JournalEntry, index: number) {
+  activeIndex.value = index
+  void toggleExpand(entry)
 }
 
 // ── Drawer se zdrojovým dokladem ───────────────────────────────────────────
@@ -795,7 +1091,8 @@ async function focusEntry(entryId: number): Promise<boolean> {
   filters.amount_from = ''
   filters.amount_to = ''
   filters.integrity = ''
-  filters.dimension_value_id = null
+  filters.pair_status = ''
+  filters.dimension_value_ids = []
   filters.dimension_descendants = true
   sourceIdFilter.value = ''
   entryIdFilter.value = entryId
@@ -844,6 +1141,16 @@ function sourceLabel(type: string): string {
   const v = t(key)
   return v === key ? type : v
 }
+/** Štítek s číslem dokladu stačí se zkratkou typu (FV, PF); plný název je v tooltipu. */
+function sourceBadgeLabel(entry: JournalEntry): string {
+  const key = `accounting.journal.source_short.${entry.source_type}`
+  const short = entry.source_ref ? t(key) : key
+  return short === key ? sourceLabel(entry.source_type) : short
+}
+/** Popis v seznamu bez údajů, které ukazují zapnuté sloupce (Doklad, Zdroj, Firma, VS). */
+function listDescription(entry: JournalEntry): string {
+  return compactJournalDescription(entry.description, entry.description_parts, key => tbl.isVisible(key))
+}
 
 /**
  * Cíl drill-down odkazu na zdrojový doklad. Mapování source_type → routa je sdílené
@@ -885,6 +1192,11 @@ function entryRange(entry: JournalEntryDetail): { from: string; to: string } {
           <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.download" /></svg>
           {{ t('accounting.journal.export_xlsx') }}
         </button>
+        <RouterLink v-if="rebookLink" :to="rebookLink" :class="btnOutline('neutral')" class="whitespace-nowrap" data-test="journal-rebook-by-filter">
+          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.swap" /></svg>
+          {{ t('accounting.journal.rebook_by_filter') }}
+        </RouterLink>
+        <ActionBar :actions="headerActions" data-test="journal-more-actions" />
         <RouterLink v-if="auth.canWrite('accounting.journal.write') || auth.isDemo" to="/accounting/journal/new" :class="btnFilled('primary')">
           <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.plus" /></svg>
           {{ t('accounting.journal.new') }}
@@ -1022,7 +1334,14 @@ function entryRange(entry: JournalEntryDetail): { from: string; to: string } {
             <option value="">{{ t('common.all') }}</option>
             <option value="amount_mismatch">{{ t('accounting.journal.filter_integrity_amount_mismatch') }}</option>
           </select>
-          <p class="text-[11px] text-neutral-500 mt-1">{{ t('accounting.journal.filter_integrity_hint') }}</p>
+        </div>
+        <div v-if="hasSingleForm">
+          <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('accounting.pairs.filter_status') }}</label>
+          <select v-model="filters.pair_status" @change="applyFilters"
+            class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm bg-surface">
+            <option value="">{{ t('common.all') }}</option>
+            <option value="composite_mn">{{ t('accounting.pairs.filter_mn') }}</option>
+          </select>
         </div>
         <div>
           <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('accounting.journal.filter_account_from') }}</label>
@@ -1054,9 +1373,9 @@ function entryRange(entry: JournalEntryDetail): { from: string; to: string } {
         </div>
       </div>
       <!-- Hodnota dimenze: jen u firmy se zapnutými dimenzemi (komponenta se jinak nevykreslí). -->
-      <DimensionReportFilter class="mt-3"
-        :value-id="filters.dimension_value_id" :descendants="filters.dimension_descendants"
-        @update:value-id="onDimensionValue" @update:descendants="onDimensionDescendants" />
+      <DimensionReportFilters class="mt-3"
+        :value-ids="filters.dimension_value_ids" :descendants="filters.dimension_descendants"
+        @update:value-ids="onDimensionValues" @update:descendants="onDimensionDescendants" />
       <template #actions>
         <button @click="resetFilters" class="cursor-pointer text-xs text-neutral-500 hover:text-neutral-700">{{ t('accounting.journal.reset_filters') }}</button>
         <SavedFiltersMenu :ctrl="saved" />
@@ -1080,14 +1399,19 @@ function entryRange(entry: JournalEntryDetail): { from: string; to: string } {
            vodorovným posunem — rozbalený detail se schová do buňky široké jako
            obrazovka a čte se přes scrollbar. Proto stack karet. -->
       <div ref="listBox" class="hidden md:block overflow-auto scrollbar-slim" @scroll.passive="onListScroll">
-        <table v-column-labels="tbl" class="w-max min-w-full text-sm singleline-list-table list-gutter-mini" :class="tbl.densityClass.value">
+        <table v-column-labels="tbl" class="w-max min-w-full text-sm singleline-list-table list-gutter-first-line" :class="[tbl.densityClass.value, bulkActive ? '' : 'list-gutter-mini']">
           <thead class="bg-neutral-50 text-xs text-neutral-500 uppercase tracking-wide sticky top-0 z-20 shadow-sm">
             <tr>
-              <th class="px-3 py-2 w-8"></th>
+              <!-- Výběr řádku sdílí první buňku se šipkou rozbalení: useAdaptiveTableRows
+                   bere první a poslední buňku jako ovládací a do rozložení sloupců je nepočítá. -->
+              <th class="px-3 py-2" :class="bulkActive ? 'w-16' : 'w-8'">
+                <input v-if="bulkActive" type="checkbox" class="h-4 w-4 cursor-pointer align-middle" :checked="allLoadedSelected"
+                  :aria-label="t('common.select_all')" data-test="journal-select-all" @change="toggleAllLoaded" />
+              </th>
               <template v-for="c in tbl.orderedColumns.value.filter(c => tbl.isVisible(c.key))" :key="c.key">
-                <th v-if="c.key === 'dimensions'" scope="col" class="px-3 py-2 text-left font-medium" v-bind="columnDrag.headerAttrs(c.key)"><ColumnDragHandle /> {{ t(c.labelKey) }}</th>
+                <th v-if="c.key === 'dimensions' || isDocumentFact(c.key)" scope="col" class="px-3 py-2 text-left font-medium whitespace-nowrap" v-bind="columnDrag.headerAttrs(c.key)"><ColumnDragHandle /> {{ t(c.labelKey) }}</th>
                 <SortableTh v-else v-bind="columnDrag.headerAttrs(c.key)" reorderable :label="t(c.labelKey)" :sort-key="c.key" :sort="tbl.sort.value"
-                  :align="c.key === 'amount' ? 'right' : 'left'" :data-adaptive-weight="c.key === 'description' ? 2 : undefined" :class="c.key === 'description' ? 'wrap-cell' : ''" @toggle="onSortToggle" />
+                  :align="c.key === 'amount' ? 'right' : 'left'" :data-adaptive-weight="c.key === 'description' ? 2 : undefined" :data-adaptive-max="c.key === 'description' ? 224 : undefined" :class="c.key === 'description' ? 'wrap-cell' : ''" @toggle="onSortToggle" />
               </template>
               <th class="px-1 py-2 w-8">
                 <button v-if="tbl.sort.value" type="button" class="inline-flex h-6 w-6 items-center justify-center rounded text-neutral-500 hover:bg-neutral-200 hover:text-neutral-800"
@@ -1096,26 +1420,30 @@ function entryRange(entry: JournalEntryDetail): { from: string; to: string } {
             </tr>
           </thead>
           <tbody class="divide-y divide-neutral-100">
-            <template v-for="e in entries" :key="e.id">
+            <template v-for="(e, rowIndex) in entries" :key="e.id">
               <!-- Rozbalený zápis je podbarvený i s hlavičkou a nese levou lištu
                    v akcentu: detail je vysoký přes celou obrazovku a bez toho se
                    při odrolování ztratí, na kterém řádku vlastně pracuju. -->
-              <tr class="cursor-pointer scroll-mt-12" :data-journal-entry="e.id" :aria-current="entryIdFilter === e.id ? 'true' : undefined" :class="[
+              <tr class="cursor-pointer scroll-mt-12" :data-journal-entry="e.id" :data-row-active="rowIndex === activeIndex" :aria-current="entryIdFilter === e.id ? 'true' : undefined" :class="[
                     e.reversed_by && !colors.hasColors.value ? 'opacity-60' : '',
                     entryIdFilter === e.id ? 'ring-2 ring-inset ring-primary-500' : '',
                     isExpanded(e.id)
                       ? 'bg-primary-50/60 border-x-2 border-t-2 border-primary-500/60'
                       : entryIdFilter === e.id ? 'bg-primary-50' : 'hover:bg-neutral-50',
-                  ]" @click="toggleExpand(e)">
-                <td class="px-3 py-2 text-neutral-400">
-                  <span class="inline-block transition-transform" :class="{ 'rotate-90': isExpanded(e.id) }">▸</span>
+                  ]" @click="onRowClick(e, rowIndex)">
+                <td class="px-3 py-2 text-neutral-400 whitespace-nowrap">
+                  <div class="flex items-center gap-2" :class="bulkActive ? '' : 'justify-center'">
+                    <input v-if="bulkActive" type="checkbox" class="h-4 w-4 shrink-0 cursor-pointer" :checked="selectedIds.includes(e.id)"
+                      :aria-label="e.document_no || String(e.id)" data-test="journal-row-select" @click.stop @change="toggleSelected(e.id)" />
+                    <span class="inline-flex h-4 w-3 shrink-0 items-center justify-center leading-none transition-transform" :class="{ 'rotate-90': isExpanded(e.id) }" aria-hidden="true">▸</span>
+                  </div>
                 </td>
                 <template v-for="c in tbl.orderedColumns.value.filter(c => tbl.isVisible(c.key))" :key="c.key">
                 <td v-if="c.key === 'date'" :data-custom-color="!!colors.color('date')" :style="colors.cellStyle('date')" class="px-3 py-2 whitespace-nowrap">{{ formatDate(e.entry_date) }}</td>
                 <td v-else-if="c.key === 'document_no'" :data-custom-color="!!colors.color('document_no')" :style="colors.cellStyle('document_no')" class="px-3 py-2 font-mono text-xs">
                   {{ e.document_no || '—' }}
                   <div v-if="e.source_bank_ref && e.source_bank_ref !== e.document_no"
-                       class="text-[10px] text-neutral-400 whitespace-nowrap"
+                       class="text-[10px] text-neutral-400 whitespace-nowrap truncate max-w-[9rem]"
                        :title="t('accounting.journal.bank_ref_hint', { ref: e.source_bank_ref })">{{ e.source_bank_ref }}</div>
                   <RouterLink v-if="e.internal_document" :to="{ name: 'accounting-internal-document-detail', params: { id: e.internal_document.id } }"
                     class="block whitespace-nowrap font-sans text-[10px] text-primary-700 hover:underline" data-test="journal-internal-document" @click.stop>
@@ -1124,8 +1452,11 @@ function entryRange(entry: JournalEntryDetail): { from: string; to: string } {
                 </td>
                 <td v-else-if="c.key === 'document_date'" :data-custom-color="!!colors.color('document_date')" :style="colors.cellStyle('document_date')" class="px-3 py-2 whitespace-nowrap">{{ e.document_date ? formatDate(e.document_date) : '—' }}</td>
                 <td v-else-if="c.key === 'description'" :data-custom-color="!!colors.color('description')" :style="colors.cellStyle('description')" class="px-3 py-2 wrap-cell" :title="e.description || undefined">
-                  <span class="adaptive-primary-text">{{ e.description || '—' }}</span>
-                  <span v-if="e.reversed_by" class="ml-1 text-xs px-1.5 py-0.5 rounded bg-neutral-100 text-neutral-500">{{ t('accounting.journal.reversed_badge') }}</span>
+                  <div class="adaptive-text-cap">
+                    <span class="adaptive-primary-text">{{ listDescription(e) || '—' }}</span>
+                    <span v-if="e.reversed_by" class="ml-1 text-xs px-1.5 py-0.5 rounded bg-neutral-100 text-neutral-500">{{ t('accounting.journal.reversed_badge') }}</span>
+                    <span v-if="!e.posted_at && !tbl.isVisible('status')" class="ml-1 text-xs px-1.5 py-0.5 rounded bg-neutral-100 text-neutral-500" data-test="journal-draft-badge">{{ t('accounting.journal.draft') }}</span>
+                  </div>
                 </td>
                 <td v-else-if="c.key === 'source'" :data-custom-color="!!colors.color('source')" :style="colors.cellStyle('source')" class="px-3 py-2 whitespace-nowrap clip-cell">
                   <!-- Jeden řádek: `flex-wrap` lámal odznak automatu a značku
@@ -1142,15 +1473,17 @@ function entryRange(entry: JournalEntryDetail): { from: string; to: string } {
                          navigaci pryč. Stejná akce má vypadat stejně. -->
                     <button v-if="sourceLink(e)" type="button" @click.stop="openSourceDrawer(e)"
                       :class="btnOutlineSm('primary')"
-                      :title="t('accounting.journal.source_drawer.open')">
+                      :title="`${sourceLabel(e.source_type)} ${journalSourceRefLabel(e)} · ${t('accounting.journal.source_drawer.open')}`">
                       <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                         <path stroke-linecap="round" stroke-linejoin="round"
                           d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0z M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
                       </svg>
-                      {{ sourceLabel(e.source_type) }} {{ e.source_asset_name || ('#' + e.source_id) }}
+                      {{ sourceBadgeLabel(e) }} {{ journalSourceRefLabel(e) }}
                     </button>
                     <span v-else class="text-neutral-500 text-xs">{{ sourceLabel(e.source_type) }}</span>
                     <AutomationBadge v-if="e.automation?.mode === 'auto'" variant="auto" />
+                    <span v-if="e.pair_status === 'composite_mn'" :title="t('accounting.pairs.badge_mn_title')"
+                      class="whitespace-nowrap text-[10px] px-1.5 py-0.5 rounded bg-warning-50 text-warning-600 font-medium" data-test="pair-badge-mn">{{ t('accounting.pairs.badge_mn') }}</span>
                     <!--
                       Odznak „má protějšek" (doklad ↔ úhrada). Bez něj by účetní musel
                       rozbalit každý řádek, aby zjistil, jestli je zápis na něco navázaný;
@@ -1196,6 +1529,9 @@ function entryRange(entry: JournalEntryDetail): { from: string; to: string } {
                   </span>
                   <span v-else class="text-neutral-400">—</span>
                 </td>
+                <td v-else-if="isDocumentFact(c.key)" :data-custom-color="!!colors.color(c.key)" :style="colors.cellStyle(c.key)"
+                  class="px-3 py-2" :class="[DOCUMENT_FACT_MONO.has(c.key) ? 'font-mono text-xs whitespace-nowrap' : '', DOCUMENT_FACT_DATES.has(c.key) ? 'whitespace-nowrap' : '', c.key === 'partner_name' ? 'truncate max-w-[16rem]' : '']"
+                  :title="c.key === 'partner_name' ? (e.partner_name || undefined) : undefined">{{ documentFact(e, c.key) }}</td>
                 <td v-else-if="c.key === 'dimensions'" :data-custom-color="!!colors.color('dimensions')" :style="colors.cellStyle('dimensions')" class="px-3 py-2 text-xs max-w-64 truncate" :title="e.dimension_labels?.join(' · ')">{{ e.dimension_labels?.join(' · ') || '—' }}</td>
                 </template>
                 <td class="w-8"></td>
@@ -1204,16 +1540,29 @@ function entryRange(entry: JournalEntryDetail): { from: string; to: string } {
               <tr v-if="isExpanded(e.id)" class="table-detail-row">
                 <td :colspan="visibleColCount"
                   class="px-3 py-3 bg-primary-50/60 border-x-2 border-b-2 border-primary-500/60">
+                  <div data-test="journal-detail-viewport" :style="detailViewportStyle">
                   <div v-if="isDetailLoading(e.id)" class="text-center text-neutral-500 py-4 text-sm">{{ t('common.loading') }}</div>
-                  <JournalEntryDetailPanel v-else-if="details[e.id]"
-                    :detail="details[e.id]!" :related-key="relatedVersion[e.id] ?? 0"
-                    :can-write="auth.canWrite('accounting')" :can-delete="canDeleteEntry(details[e.id]!)"
-                    :can-delete-pair="canDeletePair(details[e.id]!)"
-                    :date-from="entryRange(details[e.id]!).from" :date-to="entryRange(details[e.id]!).to"
-                    @preview="id => sourceDrawerEntryId = id" @focus-entry="onFocusEntry"
-                    @description-updated="onDescriptionUpdated" @links-changed="onLinksChanged"
-                    @reverse="reverse" @remove="deleteEntry" @remove-pair="deleteEntryPair" @open-reversal="openReversal"
-                    @reposted="onReposted" />
+                  <template v-else-if="details[e.id]">
+                    <section v-if="entryHasPairs(details[e.id]!)" class="mb-3" data-test="journal-entry-pairs">
+                      <div class="mb-1 text-xs font-medium text-neutral-600">{{ t('accounting.pairs.title') }}</div>
+                      <JournalPairsTable :pairs="details[e.id]!.pairs!" :selectable="pairsEditable(details[e.id]!)"
+                        :model-value="selectedPairs(e.id)" :disabled-pairs="pairsDisabled(details[e.id]!)"
+                        :actions="pairActions(details[e.id]!)" @update:model-value="nos => setSelectedPairs(e.id, nos)"
+                        @open-entry="onFocusEntry" />
+                      <p v-if="pairsEditable(details[e.id]!) && details[e.id]!.source_type !== 'manual' && !details[e.id]!.internal_document"
+                        class="mt-1 text-xs text-neutral-500">{{ t('accounting.pairs.document_repost_only') }}</p>
+                    </section>
+                    <JournalEntryDetailPanel
+                      :detail="details[e.id]!" :related-key="relatedVersion[e.id] ?? 0"
+                      :can-write="auth.canWrite('accounting')" :can-delete="canDeleteEntry(details[e.id]!)"
+                      :can-delete-pair="canDeletePair(details[e.id]!)"
+                      :date-from="entryRange(details[e.id]!).from" :date-to="entryRange(details[e.id]!).to"
+                      @preview="id => sourceDrawerEntryId = id" @focus-entry="onFocusEntry"
+                      @description-updated="onDescriptionUpdated" @links-changed="onLinksChanged"
+                      @reverse="reverse" @remove="deleteEntry" @remove-pair="deleteEntryPair" @open-reversal="openReversal"
+                      @reposted="onReposted" />
+                  </template>
+                  </div>
                 </td>
               </tr>
             </template>
@@ -1227,7 +1576,12 @@ function entryRange(entry: JournalEntryDetail): { from: string; to: string } {
       <div class="md:hidden divide-y divide-neutral-100">
         <div v-for="e in entries" :key="`m-${e.id}`" :data-journal-entry="e.id" :aria-current="entryIdFilter === e.id ? 'true' : undefined" class="scroll-mt-12"
           :class="[isExpanded(e.id) || entryIdFilter === e.id ? 'bg-primary-50/60' : '', entryIdFilter === e.id ? 'ring-2 ring-inset ring-primary-500' : '']">
-          <button type="button" class="cursor-pointer w-full text-left p-3 space-y-1.5"
+          <div class="flex items-start">
+          <label v-if="bulkActive" class="shrink-0 pl-3 pt-3.5 cursor-pointer">
+            <input type="checkbox" class="h-4 w-4 cursor-pointer" :checked="selectedIds.includes(e.id)"
+              :aria-label="e.document_no || String(e.id)" data-test="journal-card-select" @change="toggleSelected(e.id)" />
+          </label>
+          <button type="button" class="cursor-pointer min-w-0 flex-1 text-left p-3 space-y-1.5"
             :class="e.reversed_by && !colors.hasColors.value ? 'opacity-60' : ''" @click="toggleExpand(e)">
             <div class="flex items-baseline justify-between gap-2">
               <span class="flex items-baseline gap-1.5 min-w-0">
@@ -1250,14 +1604,16 @@ function entryRange(entry: JournalEntryDetail): { from: string; to: string } {
               </span>
             </div>
             <div class="text-sm text-neutral-900" :data-custom-color="!!colors.color('description')" :style="colors.cellStyle('description')">
-              {{ e.description || '—' }}
+              {{ listDescription(e) || '—' }}
               <span v-if="e.reversed_by" class="ml-1 text-xs px-1.5 py-0.5 rounded bg-neutral-100 text-neutral-500">{{ t('accounting.journal.reversed_badge') }}</span>
             </div>
             <div class="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-neutral-500">
               <span class="font-mono" :data-custom-color="!!colors.color('date')" :style="colors.cellStyle('date')">{{ formatDate(e.entry_date) }}</span>
               <span class="text-neutral-400">·</span>
-              <span :data-custom-color="!!colors.color('source')" :style="colors.cellStyle('source')">{{ sourceLabel(e.source_type) }}<template v-if="e.source_asset_name || e.source_id"> {{ e.source_asset_name || ('#' + e.source_id) }}</template></span>
+              <span :data-custom-color="!!colors.color('source')" :style="colors.cellStyle('source')">{{ sourceLabel(e.source_type) }}<span v-if="journalSourceRefLabel(e)" class="ml-1">{{ journalSourceRefLabel(e) }}</span></span>
               <AutomationBadge v-if="e.automation?.mode === 'auto'" variant="auto" />
+              <span v-if="e.pair_status === 'composite_mn'" :title="t('accounting.pairs.badge_mn_title')"
+                class="whitespace-nowrap text-[10px] px-1.5 py-0.5 rounded bg-warning-50 text-warning-600 font-medium">{{ t('accounting.pairs.badge_mn') }}</span>
               <span v-if="e.has_related" :title="t('accounting.journal.related.badge_title')" class="inline-flex items-center text-neutral-400">
                 <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                   <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.link" />
@@ -1277,6 +1633,7 @@ function entryRange(entry: JournalEntryDetail): { from: string; to: string } {
               </div>
             </div>
           </button>
+          </div>
           <!-- Náhled dokladu mimo rozbalovací tlačítko: vnořené tlačítko není
                platné HTML a klik by se protáhl do akordeonu. -->
           <div v-if="sourceLink(e)" class="px-3 pb-3 -mt-1">
@@ -1290,15 +1647,26 @@ function entryRange(entry: JournalEntryDetail): { from: string; to: string } {
           </div>
           <div v-if="isExpanded(e.id)" class="px-3 pb-3 border-t border-primary-500/30">
             <div v-if="isDetailLoading(e.id)" class="text-center text-neutral-500 py-4 text-sm">{{ t('common.loading') }}</div>
-            <JournalEntryDetailPanel v-else-if="details[e.id]" class="pt-3"
-              :detail="details[e.id]!" :related-key="relatedVersion[e.id] ?? 0"
-              :can-write="auth.canWrite('accounting')" :can-delete="canDeleteEntry(details[e.id]!)"
-              :can-delete-pair="canDeletePair(details[e.id]!)"
-              :date-from="entryRange(details[e.id]!).from" :date-to="entryRange(details[e.id]!).to"
-              @preview="id => sourceDrawerEntryId = id" @focus-entry="onFocusEntry"
-              @description-updated="onDescriptionUpdated" @links-changed="onLinksChanged"
-              @reverse="reverse" @remove="deleteEntry" @remove-pair="deleteEntryPair" @open-reversal="openReversal"
-              @reposted="onReposted" />
+            <div v-else-if="details[e.id]" class="pt-3">
+              <section v-if="entryHasPairs(details[e.id]!)" class="mb-3" data-test="journal-entry-pairs">
+                <div class="mb-1 text-xs font-medium text-neutral-600">{{ t('accounting.pairs.title') }}</div>
+                <JournalPairsTable :pairs="details[e.id]!.pairs!" :selectable="pairsEditable(details[e.id]!)"
+                  :model-value="selectedPairs(e.id)" :disabled-pairs="pairsDisabled(details[e.id]!)"
+                  :actions="pairActions(details[e.id]!)" @update:model-value="nos => setSelectedPairs(e.id, nos)"
+                  @open-entry="onFocusEntry" />
+                <p v-if="pairsEditable(details[e.id]!) && details[e.id]!.source_type !== 'manual' && !details[e.id]!.internal_document"
+                  class="mt-1 text-xs text-neutral-500">{{ t('accounting.pairs.document_repost_only') }}</p>
+              </section>
+              <JournalEntryDetailPanel
+                :detail="details[e.id]!" :related-key="relatedVersion[e.id] ?? 0"
+                :can-write="auth.canWrite('accounting')" :can-delete="canDeleteEntry(details[e.id]!)"
+                :can-delete-pair="canDeletePair(details[e.id]!)"
+                :date-from="entryRange(details[e.id]!).from" :date-to="entryRange(details[e.id]!).to"
+                @preview="id => sourceDrawerEntryId = id" @focus-entry="onFocusEntry"
+                @description-updated="onDescriptionUpdated" @links-changed="onLinksChanged"
+                @reverse="reverse" @remove="deleteEntry" @remove-pair="deleteEntryPair" @open-reversal="openReversal"
+                @reposted="onReposted" />
+            </div>
           </div>
         </div>
       </div>
@@ -1310,9 +1678,97 @@ function entryRange(entry: JournalEntryDetail): { from: string; to: string } {
     </div>
     <ListLoadingSpinner :show="loading || loadingMore" />
 
+    <BulkActionBar v-if="bulkActive" :count="selectedIds.length" @clear="selectedIds = []">
+      <button type="button" :class="btnOutline('warning')" class="whitespace-nowrap" data-test="journal-bulk-open" @click="bulk.open">
+        <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.table" /></svg>
+        {{ t('bulk_actions.menu') }}
+      </button>
+    </BulkActionBar>
+    <BulkActionsDialog v-if="bulk.dialog.value" target="journal_entry"
+      :selection="bulk.dialog.value.selection" :selection-count="bulk.dialog.value.selectionCount"
+      :filter-selection="bulk.dialog.value.filterSelection" :filter-count="bulk.dialog.value.filterCount"
+      @close="bulk.close" @changed="onBulkChanged" />
+
     <JournalSourceDrawer v-if="sourceDrawerEntryId" :entry-id="sourceDrawerEntryId"
       @close="sourceDrawerEntryId = null" @focus-entry="onFocusEntry" />
     <LockedPeriodAckModal :ref="(el: any) => { lockedAck.modal.value = el }" />
+
+    <ConfirmDialog v-if="reversePairsConfirm.open"
+      :title="t('accounting.pairs.action_reverse')"
+      :message="t('accounting.pairs.reverse_confirm', { n: reversePairsConfirm.nos.length, nos: reversePairsConfirm.nos.join(', ') }, reversePairsConfirm.nos.length)"
+      :confirm-label="t('accounting.pairs.action_reverse')" variant="danger"
+      @confirm="confirmReversePairs" @cancel="reversePairsConfirm.open = false" />
+
+    <Modal v-if="documentList.open" :title="t('accounting.journal.document_list')" width-class="max-w-lg" @close="documentList.open = false">
+      <form :id="`${pageId}-document-list`" class="space-y-3" novalidate @submit.prevent="downloadDocumentList">
+        <p class="text-sm text-neutral-600">{{ t('accounting.journal.document_list_hint') }}</p>
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div>
+            <label :for="`${pageId}-document-list-from`" class="block text-sm font-medium text-neutral-700 mb-1">{{ t('accounting.journal.filter_account_from') }}</label>
+            <input :id="`${pageId}-document-list-from`" ref="documentListFrom" v-model.trim="documentList.from" type="text" maxlength="10" :list="`${pageId}-journal-coa`"
+              class="w-full h-10 px-3 border border-neutral-300 rounded-md text-sm font-mono" data-test="document-list-from" />
+          </div>
+          <div>
+            <label :for="`${pageId}-document-list-to`" class="block text-sm font-medium text-neutral-700 mb-1">{{ t('accounting.journal.filter_account_to') }}</label>
+            <input :id="`${pageId}-document-list-to`" v-model.trim="documentList.to" type="text" maxlength="10" :list="`${pageId}-journal-coa`"
+              class="w-full h-10 px-3 border border-neutral-300 rounded-md text-sm font-mono" data-test="document-list-to" />
+          </div>
+        </div>
+        <div v-if="documentList.error" class="text-sm text-danger-500" role="alert" data-test="document-list-error">{{ documentList.error }}</div>
+      </form>
+      <template #footer>
+        <div class="flex flex-wrap justify-end gap-2">
+          <button type="button" :class="btnOutline('neutral')" class="whitespace-nowrap" @click="documentList.open = false">{{ t('common.cancel') }}</button>
+          <button type="submit" :form="`${pageId}-document-list`" :class="btnFilled('primary')" class="whitespace-nowrap" :disabled="exporting" data-test="document-list-download">
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.download" /></svg>
+            {{ exporting ? t('accounting.journal.document_list_preparing') : t('accounting.journal.document_list_download') }}
+          </button>
+        </div>
+      </template>
+    </Modal>
+    <!-- Přeúčtování jedné dvojice: nové účty MD/Dal, částka zůstává. Na místě, nebo opravným zápisem
+         rozhodne server podle zámků a období. -->
+    <Modal v-if="repostPairDialog.open && repostPairDialog.pair" :title="t('accounting.pairs.repost_title', { n: repostPairDialog.pair.pair_no })"
+      width-class="max-w-lg" @close="repostPairDialog.open = false">
+      <div class="space-y-3">
+        <p class="text-sm text-neutral-600">{{ t('accounting.pairs.repost_hint', { amount: formatMoney(repostPairDialog.pair.amount) }) }}</p>
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div>
+            <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('accounting.pairs.col_debit') }}</label>
+            <input v-model.trim="repostPairDialog.debit" type="text" :list="`${pageId}-journal-coa`"
+              class="w-full h-10 px-3 border border-neutral-300 rounded-md text-sm font-mono" data-test="repost-debit" />
+            <div v-if="accountName(repostPairDialog.debit)" class="mt-1 text-xs text-neutral-500 truncate">{{ accountName(repostPairDialog.debit) }}</div>
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('accounting.pairs.col_credit') }}</label>
+            <input v-model.trim="repostPairDialog.credit" type="text" :list="`${pageId}-journal-coa`"
+              class="w-full h-10 px-3 border border-neutral-300 rounded-md text-sm font-mono" data-test="repost-credit" />
+            <div v-if="accountName(repostPairDialog.credit)" class="mt-1 text-xs text-neutral-500 truncate">{{ accountName(repostPairDialog.credit) }}</div>
+          </div>
+        </div>
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div>
+            <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('accounting.pairs.col_text') }}</label>
+            <input v-model="repostPairDialog.text" type="text" maxlength="255" class="w-full h-10 px-3 border border-neutral-300 rounded-md text-sm" />
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('accounting.pairs.repost_date') }}</label>
+            <DateInput v-model="repostPairDialog.date" class="w-full h-10 px-3 border border-neutral-300 rounded-md text-sm" />
+            <p class="mt-1 text-xs text-neutral-500">{{ t('accounting.pairs.repost_date_hint') }}</p>
+          </div>
+        </div>
+        <div v-if="repostPairDialog.error" class="text-sm text-danger-500" role="alert" data-test="repost-error">{{ repostPairDialog.error }}</div>
+      </div>
+      <template #footer>
+        <div class="flex flex-wrap justify-end gap-2">
+          <button type="button" :class="btnOutline('neutral')" @click="repostPairDialog.open = false">{{ t('common.cancel') }}</button>
+          <button type="button" :class="btnFilled('warning')" :disabled="repostPairDialog.saving" data-test="repost-save" @click="submitRepostPair">
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.check" /></svg>
+            {{ repostPairDialog.saving ? t('common.saving') : t('accounting.pairs.action_repost') }}
+          </button>
+        </div>
+      </template>
+    </Modal>
 
     <datalist :id="`${pageId}-journal-coa`">
       <option v-for="a in activeAccounts" :key="a.id" :value="a.account_code">

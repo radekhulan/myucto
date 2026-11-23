@@ -33,7 +33,7 @@ final class AnnualTaxCertificateAction
         Response $response,
         array $args,
     ): Response {
-        if (!RequestAuthorization::isSessionAuth($request)) {
+        if (!RequestAuthorization::actsAsSession($request)) {
             return Json::sessionRequired($response, 'Tento endpoint je dostupný pouze z přihlášené webové session.');
         }
         if (!$this->requirePermission(
@@ -51,7 +51,7 @@ final class AnnualTaxCertificateAction
             return $error ?? Json::error(
                 $response,
                 'forbidden',
-                'Pro tuto akci nemáš oprávnění.',
+                'Pro tuto akci nemáte oprávnění.',
                 403,
             );
         }

@@ -9,6 +9,7 @@ use MyInvoice\Repository\AccountingPeriodRepository;
 use MyInvoice\Repository\ChartOfAccountsRepository;
 use MyInvoice\Repository\JournalEntryRepository;
 use MyInvoice\Service\Accounting\ChartOfAccountsSeeder;
+use MyInvoice\Service\Accounting\EntryForm\EntryFormService;
 use MyInvoice\Service\Accounting\FiscalCalendar;
 use MyInvoice\Service\Accounting\PostingService;
 use MyInvoice\Service\Migration\MoneyS3\ImportProtocol;
@@ -16,6 +17,7 @@ use MyInvoice\Service\Migration\Shared\ChartAccountCreator;
 use MyInvoice\Service\Migration\Shared\FiscalYearMismatchException;
 use MyInvoice\Service\Migration\Shared\ImportedAccountCode;
 use MyInvoice\Service\Migration\Shared\MigrationPeriods;
+use MyInvoice\Service\Migration\Shared\SourceJournalPairs;
 use PDO;
 
 /**
@@ -38,7 +40,21 @@ final class StereoNxAccountingWriter
         private readonly AccountingPeriodRepository $periods,
         private readonly JournalEntryRepository $journal,
         private readonly StereoNxImportMap $map,
+        private readonly ?EntryFormService $entryForms = null,
     ) {}
+
+    /** Forma zápisu firmy pro právě zapisovaný deník ({@see write()}). */
+    private ?SourceJournalPairs $pairForms = null;
+
+    private function forms(int $supplierId): SourceJournalPairs
+    {
+        return $this->pairForms ??= SourceJournalPairs::load($this->entryForms ?? new EntryFormService(
+            $this->db,
+            new \MyInvoice\Service\ActivityLogger($this->db, new \MyInvoice\Service\ActivityLogHashChain($this->db)),
+            new \MyInvoice\Repository\AccountingModeRepository($this->db),
+            new \MyInvoice\Security\FrameworkScopePolicy($this->db),
+        ), $supplierId);
+    }
 
     /** Kalendář účetního roku cílové firmy; podle něj se deník řadí do období. */
     public function calendar(int $supplierId): FiscalCalendar
@@ -190,6 +206,7 @@ final class StereoNxAccountingWriter
      */
     public function write(array $prepared, int $supplierId, int $userId): array
     {
+        $this->pairForms = null;
         $pdo = $this->db->pdo();
         if (!$pdo->inTransaction()) {
             throw new StereoNxException('transaction_required', 'Převod účetnictví musí proběhnout v transakci.');
@@ -605,6 +622,15 @@ final class StereoNxAccountingWriter
                 'cost_center' => $entry['cost_center'] !== '' ? $entry['cost_center'] : null],
         ];
         PostingService::assertBalanced($lines);
+        if ($this->forms($supplierId)->singleAt((string) $entry['date'])) {
+            // Kontace Stereo NX je jedna dvojice MD / Dal přímo ze zdroje.
+            $lines = SourceJournalPairs::pair($lines, [(string) $entry['description']])['lines'];
+            if ($lines === []) {
+                throw new StereoNxException('journal_pair_same_account', sprintf(
+                    'Kontace %s účtuje na straně MD i Dal na tentýž účet. V jednoduchém zápisu to není platná dvojice; opravte ji ve Stereo NX a převod spusťte znovu.',
+                    (string) $entry['document_no'] !== '' ? (string) $entry['document_no'] : $key));
+            }
+        }
         $descriptionParts = array_values(array_filter([
             (string) $entry['description'],
             $entry['performance'] !== '' ? 'Výkon ' . $entry['performance'] : '',

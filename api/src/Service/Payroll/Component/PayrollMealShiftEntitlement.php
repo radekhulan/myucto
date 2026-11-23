@@ -77,12 +77,13 @@ final readonly class PayrollMealShiftEntitlement implements \JsonSerializable
     /** @return array<string,mixed> */
     public function jsonSerialize(): array
     {
+        $unknown = in_array(PayrollMealShiftEvidenceService::MANUAL_WORK_SOURCE_REQUIRES_REVIEW, $this->missing, true);
         return [
             'period_start' => $this->periodStart,
             'basis' => $this->basis,
-            'qualifying_count' => $this->qualifyingCount,
-            'second_contribution_count' => $this->secondContributionCount,
-            'count' => $this->count(),
+            'qualifying_count' => $unknown ? null : $this->qualifyingCount,
+            'second_contribution_count' => $unknown ? null : $this->secondContributionCount,
+            'count' => $unknown ? null : $this->count(),
             'complete' => $this->complete,
             'missing' => $this->missing,
         ];

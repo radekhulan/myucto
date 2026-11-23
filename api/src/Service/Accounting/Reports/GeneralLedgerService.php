@@ -25,9 +25,11 @@ final class GeneralLedgerService
      * @param array{vendor?:string, client?:string, item?:string} $filters hledání dle
      *        dodavatele (přijaté faktury) / odběratele (vydané faktury) / textu položky
      *        faktury — viz {@see LedgerReportRepository::counterpartyFilter()}
+     * @param bool $forDetail kniha pro rozpis dokladů: ponechá i účty s pohyby, které se
+     *        vynulovaly (červené storno), a každému účtu doplní `line_count`
      * @return array<string,mixed> struktura dle spec §2.4
      */
-    public function build(int $supplierId, int $periodId, ?string $from, ?string $to, bool $analytics = false, array $filters = [], bool $afterClosing = false): array
+    public function build(int $supplierId, int $periodId, ?string $from, ?string $to, bool $analytics = false, array $filters = [], bool $afterClosing = false, bool $forDetail = false): array
     {
         $period = $this->periods->findById($supplierId, $periodId);
         if ($period === null) {
@@ -45,14 +47,16 @@ final class GeneralLedgerService
             $filters,
             $afterClosing,
             false,
+            $forDetail,
         );
     }
 
     /**
      * @param array{vendor?:string, client?:string, item?:string} $filters
+     * @param bool $forDetail viz {@see build()}
      * @return array<string,mixed>
      */
-    public function buildAllPeriods(int $supplierId, ?string $from = null, ?string $to = null, bool $analytics = false, array $filters = [], bool $afterClosing = false): array
+    public function buildAllPeriods(int $supplierId, ?string $from = null, ?string $to = null, bool $analytics = false, array $filters = [], bool $afterClosing = false, bool $forDetail = false): array
     {
         $periods = $this->periods->listForTenant($supplierId);
         if ($periods === []) {
@@ -74,6 +78,7 @@ final class GeneralLedgerService
             $filters,
             $afterClosing,
             true,
+            $forDetail,
         );
     }
 
@@ -82,7 +87,7 @@ final class GeneralLedgerService
      * @param array{vendor?:string, client?:string, item?:string} $filters
      * @return array<string,mixed>
      */
-    private function buildRange(int $supplierId, ?array $period, string $from, string $to, string $periodStart, bool $analytics, array $filters, bool $afterClosing, bool $allPeriods): array
+    private function buildRange(int $supplierId, ?array $period, string $from, string $to, string $periodStart, bool $analytics, array $filters, bool $afterClosing, bool $allPeriods, bool $forDetail): array
     {
         $excludeAllOpenings = $allPeriods && !$afterClosing;
 
@@ -102,7 +107,8 @@ final class GeneralLedgerService
             $psD  = self::cents($r['ps_d']);
             $tMd  = self::cents($r['to_md']);
             $tD   = self::cents($r['to_d']);
-            if ($psMd === 0 && $psD === 0 && $tMd === 0 && $tD === 0) {
+            if ($psMd === 0 && $psD === 0 && $tMd === 0 && $tD === 0
+                && (!$forDetail || (int) $r['to_count'] === 0)) {
                 continue; // účty bez pohybu i bez PS se vynechávají
             }
             $monthMap = [];
@@ -135,6 +141,10 @@ final class GeneralLedgerService
                 'closing_md'   => $ksMd / 100,
                 'closing_d'    => $ksD / 100,
             ];
+            // Jen pro export s doklady: odhad velikosti rozpisu před sazbou.
+            if ($forDetail) {
+                $accounts[array_key_last($accounts)]['line_count'] = (int) $r['to_count'];
+            }
 
             $totals['opening_md']  += $psMd;
             $totals['opening_d']   += $psD;

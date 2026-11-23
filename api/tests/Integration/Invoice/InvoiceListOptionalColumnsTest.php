@@ -102,6 +102,37 @@ final class InvoiceListOptionalColumnsTest extends TestCase
         }
     }
 
+    public function testTaxIdColumnsComeFromDocumentSnapshotWithClientCardFallback(): void
+    {
+        $pdo = $this->db->pdo();
+        $pdo->prepare("UPDATE clients SET ic = '12345679', dic = 'CZ12345679' WHERE id = ?")->execute([$this->clientId]);
+
+        $draft = $this->document('invoice', 'LC-DIC-DRAFT', '', '100');
+        $issued = $this->document('invoice', 'LC-DIC-ISSUED', '', '200');
+        $pdo->prepare('UPDATE invoices SET client_snapshot = ? WHERE id = ?')
+            ->execute([json_encode(['id' => $this->clientId, 'ic' => '87654321', 'dic' => 'CZ87654321']), $issued]);
+        $repo = $this->container->get(InvoiceRepository::class);
+        $filter = ['supplier_id' => $this->supplierId, 'group_by_month' => false, 'sort_key' => 'client_dic', 'sort_dir' => 'asc'];
+        $first = $repo->listGroupedByMonth($filter, 1, 1)['data'][0]['invoices'][0];
+        $second = $repo->listGroupedByMonth($filter, 2, 1)['data'][0]['invoices'][0];
+        self::assertSame([$draft, '12345679', 'CZ12345679'], [$first['id'], $first['client_ic'], $first['client_dic']]);
+        self::assertSame([$issued, '87654321', 'CZ87654321'], [$second['id'], $second['client_ic'], $second['client_dic']]);
+        $filter['sort_key'] = 'client_ic';
+        $filter['sort_dir'] = 'desc';
+        self::assertSame($issued, $repo->listGroupedByMonth($filter, 1, 1)['data'][0]['invoices'][0]['id']);
+
+        $cardOnly = $this->document('purchase_invoice', 'LC-DIC-CARD', '', '300');
+        $onDocument = $this->document('purchase_invoice', 'LC-DIC-DOC', '', '400');
+        $pdo->prepare('UPDATE purchase_invoices SET vendor_snapshot = ? WHERE id = ?')
+            ->execute([json_encode(['dic' => 'CZ00000001']), $onDocument]);
+        $purchases = $this->container->get(PurchaseInvoiceRepository::class);
+        $filter = ['supplier_id' => $this->supplierId, 'group_by_month' => false, 'sort_key' => 'vendor_dic', 'sort_dir' => 'asc'];
+        $first = $purchases->listGroupedByMonth($filter, 1, 1)['data'][0]['invoices'][0];
+        $second = $purchases->listGroupedByMonth($filter, 2, 1)['data'][0]['invoices'][0];
+        self::assertSame([$onDocument, 'CZ00000001'], [$first['id'], $first['vendor_dic']]);
+        self::assertSame([$cardOnly, 'CZ12345679'], [$second['id'], $second['vendor_dic']]);
+    }
+
     public function testPostingAccountsPreserveBalanceSheetAndPlaceVatLast(): void
     {
         $id = $this->document('purchase_invoice', 'LC-POSTED', 'Posted', '100');

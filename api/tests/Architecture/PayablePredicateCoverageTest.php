@@ -70,7 +70,7 @@ final class PayablePredicateCoverageTest extends TestCase
         // Příkaz k úhradě (= kde by fantomový závazek znamenal reálné peníze) má
         // vlastní filtr v paymentCandidatesWhere (N-008).
         'Repository/PurchaseInvoiceRepository.php' => [
-            'listGroupedByMonth' => 'seznam k prohlížení; měsíční součet vylučuje DDKP v PHP (B-10), platební cíl řeší paymentCandidatesWhere (N-008)',
+            'listWhere' => 'WHERE seznamu a knihy přijatých faktur k prohlížení; měsíční součet vylučuje DDKP v PHP (B-10), kniha ho sčítá zvlášť mimo „k úhradě" (InvoiceBook), platební cíl řeší paymentCandidatesWhere (N-008)',
         ],
 
         // UPDATE jednoho dokladu podle id (dorovnání haléřového rozdílu → status='paid').

@@ -34,7 +34,7 @@ final class SamplePayrollGeneratorTest extends TestCase
 
     protected function setUp(): void
     {
-        $this->container = Bootstrap::buildContainer();
+        $this->container = \MyInvoice\Tests\Support\PayrollTestContainer::build();
         $this->pdo = $this->container->get(Connection::class)->pdo();
         $this->pdo->beginTransaction();
         $source = (int) $this->pdo->query('SELECT MIN(id) FROM supplier')->fetchColumn();
@@ -98,6 +98,17 @@ final class SamplePayrollGeneratorTest extends TestCase
             [$this->supplierId],
         ));
         self::assertSame([], $quickInputs->month($this->supplierId, '2026-06')['items']);
+    }
+
+    /** Ukázková firma musí jít zaregistrovat: kód OSSZ z číselníku ČSSZ, ne zkratka „P". */
+    public function testSampleEmployerHasSocialSecurityOfficeFromCodebook(): void
+    {
+        $this->generate(false);
+        $code = (string) $this->scalar(
+            'SELECT social_security_office_code FROM payroll_employer_settings WHERE supplier_id = ?',
+            [$this->supplierId],
+        );
+        self::assertTrue(\MyInvoice\Service\Payroll\PayrollEmployerSettingsValidator::isValidSocialSecurityOfficeCode($code), $code);
     }
 
     public function testImmutableGuardRequiresExactOwnershipAndSupplier(): void

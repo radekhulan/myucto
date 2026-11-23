@@ -1767,10 +1767,10 @@ final class AbraAccountingImporterTest extends TestCase
             FROM stock_item_prices WHERE supplier_id = ? ORDER BY currency_code');
         $price->execute([$this->supplier]);
         self::assertSame([
-            ['currency_code' => 'CZK', 'price_mode' => 'fixed', 'fixed_price' => '100.00', 'computed_price' => '100.00'],
-            ['currency_code' => 'EUR', 'price_mode' => 'fixed', 'fixed_price' => '100.00', 'computed_price' => '100.00'],
-            ['currency_code' => 'GBP', 'price_mode' => 'fixed', 'fixed_price' => '20.00', 'computed_price' => '20.00'],
-            ['currency_code' => 'USD', 'price_mode' => 'fixed', 'fixed_price' => '24.79', 'computed_price' => '24.79'],
+            ['currency_code' => 'CZK', 'price_mode' => 'fixed', 'fixed_price' => '100.000000', 'computed_price' => '100.000000'],
+            ['currency_code' => 'EUR', 'price_mode' => 'fixed', 'fixed_price' => '100.000000', 'computed_price' => '100.000000'],
+            ['currency_code' => 'GBP', 'price_mode' => 'fixed', 'fixed_price' => '20.000000', 'computed_price' => '20.000000'],
+            ['currency_code' => 'USD', 'price_mode' => 'fixed', 'fixed_price' => '24.793388', 'computed_price' => '24.793388'],
         ], $price->fetchAll(\PDO::FETCH_ASSOC));
         $this->db->pdo()->prepare('UPDATE stock_items SET name = "Manually edited" WHERE supplier_id = ?')->execute([$this->supplier]);
         $changed = $this->catalogImporter->importPage($this->supplier, $rows, $cancelled);
@@ -2009,7 +2009,8 @@ final class AbraAccountingImporterTest extends TestCase
         self::assertSame(1, $this->countRows('other_item_allocations'));
     }
 
-    public function testPayrollPayableStaysOnlyInJournal(): void
+    /** Firma mzdy v MyÚčtu nepočítá: mzdový závazek je ostatní závazek nad svým zápisem a páruje úhradu. */
+    public function testPayrollPayableBecomesPostedOtherItemPaidFromBank(): void
     {
         $snapshot = $this->payableSnapshot('331000', [['518000', '331000', '1000.00']], '1000.00', true);
 
@@ -2017,9 +2018,21 @@ final class AbraAccountingImporterTest extends TestCase
 
         self::assertFalse($report['blocked'], json_encode($report));
         self::assertSame(0, $this->countRows('purchase_invoices'));
-        self::assertSame(0, $this->countRows('other_items'));
-        self::assertSame(1, $report['counts']['other_items_payroll_or_tax_skipped'] ?? 0);
-        self::assertSame(1, $report['counts']['payment_links_not_transferred_skipped'] ?? 0);
+        $item = $this->otherItem();
+        self::assertNotFalse($item);
+        self::assertSame(['payable', 'posted', '331000'], [$item['side'], $item['status'], $item['account_code']]);
+        self::assertEquals(1000.0, (float) $item['allocated']);
+        $owner = $this->db->pdo()->prepare('SELECT source_type, source_id FROM journal_entries WHERE id = ?');
+        $owner->execute([$item['journal_entry_id']]);
+        self::assertSame(['source_type' => 'other_item', 'source_id' => (int) $item['id']], array_map(
+            static fn ($v) => is_numeric($v) ? (int) $v : $v, $owner->fetch(\PDO::FETCH_ASSOC)));
+        self::assertSame(0, $report['counts']['other_items_payroll_or_tax_skipped'] ?? 0);
+        self::assertSame(1, $report['counts']['other_items_payroll_created'] ?? 0);
+
+        $repeat = $this->transfer($snapshot);
+        self::assertFalse($repeat['blocked'], json_encode($repeat));
+        self::assertSame(1, $this->countRows('other_items'));
+        self::assertSame(1, $this->countRows('other_item_allocations'));
     }
 
     public function testLoanInstalmentWithUnchangedPrincipalIsUnpostedAndSettledFromSource(): void

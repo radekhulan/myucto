@@ -99,6 +99,7 @@ final class SicknessCompensationCalculator
         $calculatedSegments = [];
         $numeratorByPeriod = [];
         $minutesByPeriod = [];
+        $hourlyPeriods = [];
         foreach ($segments as $index => $segment) {
             $planned = $segment['planned_minutes'];
             $eligible = $segment['eligible_minutes'];
@@ -106,6 +107,7 @@ final class SicknessCompensationCalculator
                 throw new InvalidArgumentException('Minuty DPN směny nejsou platné.');
             }
             $period = substr((string) $segment['local_date'], 0, 7);
+            if (isset($segment['hourly_minimum_proof'])) $hourlyPeriods[$period] = true;
             // § 354 odst. 1 ZP: průměr platí pro čtvrtletí, do kterého den patří. Volající
             // dává směnám v dalším čtvrtletí jeho průměr; v rámci měsíce je vždy jeden.
             $segmentAverage = (int) ($segment['average_hourly_minor'] ?? $averageHourlyMinor);
@@ -129,6 +131,7 @@ final class SicknessCompensationCalculator
                 'reduced_hourly_minor' => RoundingMode::Ceil->roundFraction($reducedNumerator($segmentAverage), 10_000),
                 'compensation_minor' => 0,
                 'rounding' => 'ceil-to-czk-on-period-total',
+                ...(isset($segment['hourly_minimum_proof']) ? ['hourly_minimum_proof' => $segment['hourly_minimum_proof']] : []),
             ];
         }
 
@@ -175,7 +178,12 @@ final class SicknessCompensationCalculator
         $totalMinor = 0;
         foreach ($totalByPeriod as $period => $periodTotal) {
             $totalMinor += $periodTotal;
-            foreach ($this->distribute($periodTotal, $minutesByPeriod[$period]) as $index => $amount) {
+            // Hodinové podmínky mohou změnit minimum uvnitř měsíce; denní podíl
+            // pak odpovídá přesnému nároku, nikoli jen délce směny.
+            $distributed = isset($hourlyPeriods[$period])
+                ? $this->distributeHourly($periodTotal, $numeratorByPeriod[$period])
+                : $this->distribute($periodTotal, $minutesByPeriod[$period]);
+            foreach ($distributed as $index => $amount) {
                 $calculatedSegments[$index]['compensation_minor'] = $amount;
             }
         }
@@ -298,6 +306,25 @@ final class SicknessCompensationCalculator
             $amounts[$order[$i % count($order)]]++;
         }
 
+        return $amounts;
+    }
+
+    /** @param array<int,int> $weights Přesné čitatele při společném jmenovateli. @return array<int,int> */
+    private function distributeHourly(int $total, array $weights): array
+    {
+        $sum = array_sum($weights);
+        if (!is_int($sum) || $sum <= 0) throw new InvalidArgumentException('Hodinovou náhradu DPN nelze rozdělit bez platného základu.');
+        $amounts = $remainders = [];
+        $assigned = 0;
+        foreach ($weights as $index => $weight) {
+            $fraction = \MyInvoice\Service\Payroll\Hourly\PayrollExactFraction::product([$total, $weight], [$sum]);
+            $amounts[$index] = intdiv($fraction->numerator, $fraction->denominator);
+            $remainders[$index] = new \MyInvoice\Service\Payroll\Hourly\PayrollExactFraction($fraction->numerator % $fraction->denominator, $fraction->denominator);
+            $assigned += $amounts[$index];
+        }
+        $order = array_keys($weights);
+        usort($order, static fn(int $a, int $b): int => $remainders[$b]->compare($remainders[$a]) ?: $a <=> $b);
+        for ($i = 0; $assigned < $total; $i++, $assigned++) $amounts[$order[$i]]++;
         return $amounts;
     }
 }

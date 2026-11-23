@@ -11,21 +11,79 @@ final class StockLedgerReader
 {
     public function __construct(private readonly Connection $db) {}
 
-    public function pairs(int $supplierId, string $date, ?int $warehouseId = null): array
+    public function pairs(int $supplierId, string $date, ?int $warehouseId = null, ?int $categoryId = null): array
     {
-        $stmt = $this->db->pdo()->prepare("SELECT DISTINCT warehouse_id, stock_item_id FROM (
-            SELECT d.warehouse_id, l.stock_item_id FROM stock_document_lines l
+        $cte = '';
+        $lines = 'stock_document_lines l';
+        $params = [];
+        if ($categoryId !== null) {
+            $cte = 'WITH category_items AS (' . StockValuationCategory::itemIdsSql() . ') ';
+            $lines = 'category_items ci STRAIGHT_JOIN stock_document_lines l ON l.stock_item_id = ci.id';
+            $params = [$supplierId, $categoryId];
+        }
+        $stmt = $this->db->pdo()->prepare($cte . "SELECT DISTINCT warehouse_id, stock_item_id FROM (
+            SELECT d.warehouse_id, l.stock_item_id FROM {$lines}
             JOIN stock_documents d ON d.id = l.document_id AND d.supplier_id = l.supplier_id
             WHERE l.supplier_id = ? AND l.doc_date <= ? AND d.status IN ('posted','reversed')
             UNION ALL
-            SELECT d.warehouse_to_id AS warehouse_id, l.stock_item_id FROM stock_document_lines l
+            SELECT d.warehouse_to_id AS warehouse_id, l.stock_item_id FROM {$lines}
             JOIN stock_documents d ON d.id = l.document_id AND d.supplier_id = l.supplier_id
             WHERE l.supplier_id = ? AND l.doc_date <= ? AND d.status IN ('posted','reversed') AND d.doc_type = 'transfer'
         ) legs" . ($warehouseId !== null ? ' WHERE warehouse_id = ?' : '') . ' ORDER BY stock_item_id, warehouse_id');
-        $params = [$supplierId, $date, $supplierId, $date];
+        array_push($params, $supplierId, $date, $supplierId, $date);
         if ($warehouseId !== null) {
             $params[] = $warehouseId;
         }
+        $stmt->execute($params);
+        return $stmt->fetchAll(PDO::FETCH_ASSOC);
+    }
+
+    /**
+     * Sloupce řádku knihy společné všem čtení (průběh {@see StockLedgerReplay} čte právě tyto).
+     * `$warehouseExpr` je sklad, jehož stav řádek mění (parametr nebo sloupec): u převodky je
+     * to pohyb ven ze zdrojového skladu, jinak dovnitř.
+     */
+    private static function lineColumns(string $warehouseExpr): string
+    {
+        return "l.id AS line_id, l.document_id, d.doc_type, d.status, l.doc_date,
+            l.ledger_booked_at AS booked_at, l.line_no, l.qty, l.unit_cost, l.value_total, l.extra_cost,
+            CASE WHEN d.doc_type = 'receipt' THEN 1 WHEN d.doc_type = 'issue' THEN -1 WHEN d.warehouse_id = {$warehouseExpr} THEN -1 ELSE 1 END AS direction,
+            EXISTS(SELECT 1 FROM stock_documents o WHERE o.supplier_id = d.supplier_id AND o.reversal_document_id = d.id) AS is_reversal";
+    }
+
+    /**
+     * Řádky knihy dávky karet (všechny sklady, nebo jen `$warehouseId`) do data `$date`, seřazené
+     * podle karty, skladu a pořadí v knize. Volající zajistí, že dávka je malá (součet pohybů karet
+     * zná předem), výsledek se drží v paměti celý. Sklad řádku je ve sloupci `wh`, karta v `item_id`.
+     *
+     * @param list<int> $itemIds
+     * @return list<array<string,mixed>>
+     */
+    public function linesForItems(int $supplierId, array $itemIds, string $date, ?int $warehouseId = null): array
+    {
+        if ($itemIds === []) {
+            return [];
+        }
+        $in = implode(',', array_map('intval', $itemIds));
+        $legA = $warehouseId !== null ? ' AND d.warehouse_id = ?' : '';
+        $legB = $warehouseId !== null ? ' AND d.warehouse_to_id = ?' : '';
+        $params = [$supplierId, $date];
+        if ($warehouseId !== null) {
+            $params[] = $warehouseId;
+        }
+        array_push($params, $supplierId, $date);
+        if ($warehouseId !== null) {
+            $params[] = $warehouseId;
+        }
+        $stmt = $this->db->pdo()->prepare("SELECT * FROM (
+            SELECT l.stock_item_id AS item_id, d.warehouse_id AS wh, " . self::lineColumns('d.warehouse_id') . "
+            FROM stock_document_lines l JOIN stock_documents d ON d.id = l.document_id AND d.supplier_id = l.supplier_id
+            WHERE l.supplier_id = ? AND l.doc_date <= ? AND d.status IN ('posted','reversed') AND l.stock_item_id IN ({$in}){$legA}
+            UNION ALL
+            SELECT l.stock_item_id, d.warehouse_to_id, " . self::lineColumns('d.warehouse_to_id') . "
+            FROM stock_document_lines l JOIN stock_documents d ON d.id = l.document_id AND d.supplier_id = l.supplier_id
+            WHERE l.supplier_id = ? AND l.doc_date <= ? AND d.status IN ('posted','reversed') AND d.doc_type = 'transfer' AND l.stock_item_id IN ({$in}){$legB}
+        ) x ORDER BY item_id, wh, doc_date, booked_at, document_id, line_no, line_id");
         $stmt->execute($params);
         return $stmt->fetchAll(PDO::FETCH_ASSOC);
     }
@@ -54,10 +112,7 @@ final class StockLedgerReader
             }
             $where .= ' AND (' . implode(' OR ', $branches) . ')';
         }
-        $stmt = $this->db->pdo()->prepare("SELECT l.id AS line_id, l.document_id, d.doc_type, d.status, l.doc_date,
-            l.ledger_booked_at AS booked_at, l.line_no, l.qty, l.unit_cost, l.value_total, l.extra_cost,
-            CASE WHEN d.doc_type = 'receipt' THEN 1 WHEN d.doc_type = 'issue' THEN -1 WHEN d.warehouse_id = ? THEN -1 ELSE 1 END AS direction,
-            EXISTS(SELECT 1 FROM stock_documents o WHERE o.supplier_id = d.supplier_id AND o.reversal_document_id = d.id) AS is_reversal,
+        $stmt = $this->db->pdo()->prepare("SELECT " . self::lineColumns('?') . ",
             si.sku, si.name
             FROM stock_document_lines l FORCE INDEX (idx_sdl_valuation_cursor)
             STRAIGHT_JOIN stock_documents d FORCE INDEX (PRIMARY) ON d.id = l.document_id AND d.supplier_id = l.supplier_id

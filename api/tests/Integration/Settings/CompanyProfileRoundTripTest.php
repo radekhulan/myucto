@@ -37,6 +37,7 @@ final class CompanyProfileRoundTripTest extends TestCase
     private const PREV_YEAR = 2091;
     private const YEAR = 2092;
     private const CLIENT_IC = '10000005';
+    private const BANK_ACCOUNT = '3000000004';
 
     private Connection $db;
     private CompanyProfileExporter $exporter;
@@ -129,10 +130,29 @@ final class CompanyProfileRoundTripTest extends TestCase
 
         $exportB = $this->exporter->export($b);
         self::assertSame($profile['sections'], $exportB['sections'], 'Profil firmy B po nahrání odpovídá profilu firmy A.');
+        self::assertContains(
+            ['entity' => 'bank_account', 'bank_account' => ['account' => self::BANK_ACCOUNT, 'bank_code' => '0100'], 'type_code' => 'lokalita', 'value_code' => 'SEVER'],
+            $exportB['sections']['dimension_defaults'],
+            'Výchozí dimenze bankovního účtu se přenese podle čísla účtu.',
+        );
+        $interest = array_values(array_filter($exportB['sections']['bank_posting_rules'], static fn (array $r): bool => $r['name'] === 'Úroky spořicího účtu'));
+        self::assertSame(['account' => self::BANK_ACCOUNT, 'bank_code' => '0100'], $interest[0]['bank_account'] ?? null, 'Vlastní účet pravidla se přenese číslem.');
+        self::assertSame([['type_code' => 'lokalita', 'value_code' => 'SEVER']], $interest[0]['dimensions'], 'Dimenze pravidla se přenesou kódy.');
         self::assertSame(1, $result['sections']['dimension_rules']['created'] ?? null, 'Pravidlo dimenze se přenese.');
+
+        // Změna dimenzí pravidla v profilu upraví existující pravidlo, nevznikne druhé.
+        $withoutDims = $profile;
+        foreach ($withoutDims['sections']['bank_posting_rules'] as $i => $r) {
+            if ($r['name'] === 'Úroky spořicího účtu') $withoutDims['sections']['bank_posting_rules'][$i]['dimensions'] = [];
+        }
+        $updated = $this->importer->import($b, $withoutDims, false, null, $this->userId);
+        self::assertSame(1, $updated['sections']['bank_posting_rules']['updated']);
+        $left = $this->db->pdo()->prepare('SELECT COUNT(*) FROM bank_posting_rule_dimensions WHERE supplier_id = ?');
+        $left->execute([$b]);
+        self::assertSame(0, (int) $left->fetchColumn(), 'Prázdné dimenze v profilu dimenze pravidla smažou.');
         self::assertSame($this->rulesFingerprint($a), $this->rulesFingerprint($b), 'Pravidla dimenzí firmy B odpovídají firmě A.');
 
-        $rule = $this->db->pdo()->prepare('SELECT mode, mode_set_manually_at FROM bank_posting_rules WHERE supplier_id = ?');
+        $rule = $this->db->pdo()->prepare("SELECT mode, mode_set_manually_at FROM bank_posting_rules WHERE supplier_id = ? AND name = 'Poplatek za vedení účtu'");
         $rule->execute([$b]);
         $row = $rule->fetch(\PDO::FETCH_ASSOC);
         self::assertSame('auto', $row['mode'], 'Automatika pravidla se obnoví auditovaným povýšením.');
@@ -206,6 +226,141 @@ final class CompanyProfileRoundTripTest extends TestCase
         self::assertStringContainsString('budouci_sekce', implode("\n", $result['warnings']), 'Neznámou sekci starší aplikace přeskočí s upozorněním.');
     }
 
+    public function testBankAccountDefaultMatchesNormalizedNumberAndNeedsDoubleEntry(): void
+    {
+        $b = $this->company();
+        $this->dimensions->setEnabled($b, true);
+        $type = $this->dimensions->createType($b, ['code' => 'lokalita', 'name' => 'Lokalita', 'kind' => 'location']);
+        $this->dimensions->createValue($b, (int) $type['id'], ['code' => 'SEVER', 'name' => 'Sever']);
+        $profile = [
+            'format' => 'myucto.company-profile',
+            'version' => 1,
+            'sections' => ['dimension_defaults' => [[
+                'entity' => 'bank_account',
+                'bank_account' => ['account' => '000000-' . self::BANK_ACCOUNT, 'bank_code' => '100'],
+                'type_code' => 'lokalita',
+                'value_code' => 'SEVER',
+            ]]],
+        ];
+        $pdo = $this->db->pdo();
+        $pdo->prepare("UPDATE supplier SET accounting_mode = 'tax_evidence' WHERE id = ?")->execute([$b]);
+        $skipped = $this->importer->import($b, $profile, false, null, $this->userId);
+        self::assertSame(0, $skipped['changed']);
+        self::assertStringContainsString('podvojné účetnictví', implode("\n", $skipped['sections']['dimension_defaults']['warnings']),
+            'Daňová evidence výchozí dimenze účtu nenahraje.');
+
+        $pdo->prepare("UPDATE supplier SET accounting_mode = 'double_entry' WHERE id = ?")->execute([$b]);
+        $imported = $this->importer->import($b, $profile, false, null, $this->userId);
+        self::assertSame(1, $imported['changed'], 'Číslo s předčíslím z nul a kód banky bez nuly se spárují s registrem.');
+
+        // Účet registru bez kódu banky se spáruje stejně jako při zaúčtování pohybu.
+        $pdo->prepare("UPDATE supplier_bank_accounts SET bank_code = NULL, bank_code_norm = '' WHERE supplier_id = ?")->execute([$b]);
+        $pdo->prepare('DELETE FROM dimension_defaults WHERE supplier_id = ?')->execute([$b]);
+        $withoutBank = $this->importer->import($b, $profile, false, null, $this->userId);
+        self::assertSame(1, $withoutBank['changed'], 'Účet bez kódu banky se najde i podle profilu s kódem.');
+
+        $profile['sections']['dimension_defaults'][0]['bank_account'] = ['account' => '1000000005', 'bank_code' => '0100'];
+        $missing = $this->importer->import($b, $profile, false, null, $this->userId);
+        self::assertSame(0, $missing['changed']);
+        self::assertStringContainsString('Bankovní účet 1000000005/0100 ve firmě není', implode("\n", $missing['sections']['dimension_defaults']['warnings']));
+    }
+
+    public function testTemplateBankRuleTakesOwnAccountFromProfile(): void
+    {
+        $b = $this->company();
+        $this->db->pdo()->prepare(
+            "INSERT INTO bank_posting_rules (supplier_id, name, direction, message_contains, debit_account_code, credit_account_code, priority, system_template_key)
+             VALUES (?, 'Úroky', 'incoming', 'urok', '221', '662', 40, 'test.urok')"
+        )->execute([$b]);
+        $profile = [
+            'format' => 'myucto.company-profile',
+            'version' => 1,
+            'sections' => ['bank_posting_rules' => [[
+                'name' => 'Úroky', 'direction' => 'incoming', 'message_contains' => 'urok',
+                'debit_account_code' => '221', 'credit_account_code' => '662', 'priority' => 40,
+                'system_template_key' => 'test.urok',
+                'bank_account' => ['account' => self::BANK_ACCOUNT, 'bank_code' => '0100'],
+            ]]],
+        ];
+        $result = $this->importer->import($b, $profile, false, null, $this->userId);
+
+        self::assertSame(1, $result['sections']['bank_posting_rules']['updated'], json_encode($result['sections']['bank_posting_rules']));
+        $stored = $this->db->pdo()->prepare(
+            'SELECT a.account_number FROM bank_posting_rules r JOIN supplier_bank_accounts a ON a.id = r.bank_account_id
+              WHERE r.supplier_id = ? AND r.system_template_key = ?'
+        );
+        $stored->execute([$b, 'test.urok']);
+        self::assertSame(self::BANK_ACCOUNT, $stored->fetchColumn(), 'Instance šablony převezme omezení na vlastní účet z profilu.');
+        self::assertSame(1, $this->rowCount('bank_posting_rules', $b));
+
+        $older = $profile;
+        unset($older['sections']['bank_posting_rules'][0]['bank_account']);
+        $this->importer->import($b, $older, false, null, $this->userId);
+        $stored->execute([$b, 'test.urok']);
+        self::assertSame(self::BANK_ACCOUNT, $stored->fetchColumn(), 'Starší profil bez vlastního účtu omezení šablony nezruší.');
+
+        $general = $profile;
+        $general['sections']['bank_posting_rules'][0]['bank_account'] = null;
+        $this->importer->import($b, $general, false, null, $this->userId);
+        $stored->execute([$b, 'test.urok']);
+        self::assertFalse($stored->fetchColumn(), 'Profil s obecnou šablonou omezení zruší.');
+    }
+
+    public function testBankRuleOfMissingOwnAccountIsSkippedNotWidened(): void
+    {
+        $b = $this->company();
+        $profile = [
+            'format' => 'myucto.company-profile',
+            'version' => 1,
+            'sections' => ['bank_posting_rules' => [[
+                'name' => 'Úroky', 'direction' => 'incoming', 'message_contains' => 'urok',
+                'debit_account_code' => '221', 'credit_account_code' => '662', 'priority' => 40,
+                'bank_account' => ['account' => '1000000005', 'bank_code' => '0100'],
+                'bank_account_id' => 1,
+                'dimensions' => [['type_code' => 'lokalita', 'value_code' => 'SEVER']],
+            ]]],
+        ];
+        $result = $this->importer->import($b, $profile, false, null, $this->userId);
+
+        self::assertSame(0, $result['changed']);
+        self::assertSame(0, $this->rowCount('bank_posting_rules', $b), 'Bez účtu by pravidlo platilo pro všechny účty, proto se nenahraje.');
+        self::assertStringContainsString('bankovní účet 1000000005/0100 ve firmě není', implode("
+", $result['sections']['bank_posting_rules']['warnings']));
+
+        unset($profile['sections']['bank_posting_rules'][0]['bank_account']);
+        $general = $this->importer->import($b, $profile, false, null, $this->userId);
+        self::assertSame(1, $general['changed']);
+        $stored = $this->db->pdo()->prepare('SELECT bank_account_id FROM bank_posting_rules WHERE supplier_id = ?');
+        $stored->execute([$b]);
+        self::assertNull($stored->fetchColumn(), 'Id účtu z cizí instance se nepoužije.');
+        self::assertStringContainsString('nemá zapnuté dimenze', implode("
+", $general['sections']['bank_posting_rules']['warnings']));
+
+        // Firma bez zapnutých dimenzí: import varuje, dosavadní dimenze pravidla nesmaže.
+        $this->dimensions->setEnabled($b, true);
+        $type = $this->dimensions->createType($b, ['code' => 'lokalita', 'name' => 'Lokalita', 'kind' => 'location']);
+        $north = $this->dimensions->createValue($b, (int) $type['id'], ['code' => 'SEVER', 'name' => 'Sever']);
+        $ruleId = (int) $this->db->pdo()->query('SELECT id FROM bank_posting_rules WHERE supplier_id = ' . $b)->fetchColumn();
+        $this->db->pdo()->prepare('INSERT INTO bank_posting_rule_dimensions (rule_id, supplier_id, dimension_type_id, dimension_value_id) VALUES (?, ?, ?, ?)')
+            ->execute([$ruleId, $b, (int) $type['id'], (int) $north['id']]);
+        $this->dimensions->setEnabled($b, false);
+        $this->importer->import($b, $profile, false, null, $this->userId);
+        $kept = $this->db->pdo()->prepare('SELECT COUNT(*) FROM bank_posting_rule_dimensions WHERE rule_id = ?');
+        $kept->execute([$ruleId]);
+        self::assertSame(1, (int) $kept->fetchColumn(), 'Vypnuté dimenze import nesmí brát jako prázdné dimenze pravidla.');
+        $emptyDims = $profile;
+        $emptyDims['sections']['bank_posting_rules'][0]['dimensions'] = [];
+        $this->importer->import($b, $emptyDims, false, null, $this->userId);
+        $kept->execute([$ruleId]);
+        self::assertSame(1, (int) $kept->fetchColumn(), 'Ani prázdné dimenze z profilu dimenze firmy s vypnutými dimenzemi nesmažou.');
+
+        // Stejná kritéria omezená na vlastní účet jsou jiné pravidlo, ne úprava obecného.
+        $profile['sections']['bank_posting_rules'][0]['bank_account'] = ['account' => self::BANK_ACCOUNT, 'bank_code' => '0100'];
+        $restricted = $this->importer->import($b, $profile, false, null, $this->userId);
+        self::assertSame(1, $restricted['sections']['bank_posting_rules']['created']);
+        self::assertSame(2, $this->rowCount('bank_posting_rules', $b));
+    }
+
     public function testInvalidItemRollsBackWholeImport(): void
     {
         $b = $this->company();
@@ -262,6 +417,11 @@ final class CompanyProfileRoundTripTest extends TestCase
             'INSERT INTO clients (supplier_id, company_name, street, city, zip, country_id, currency_default_id, ic)
              VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
         )->execute([$id, 'Odběratel Test s.r.o.', 'Testovací 1', 'Praha', '11000', $country, $currency, self::CLIENT_IC]);
+        $pdo->prepare(
+            "INSERT INTO supplier_bank_accounts
+                (supplier_id, label, account_number, bank_code, bank_code_norm, currency, account_canonical, kind, source, is_active)
+             VALUES (?, 'Spořicí účet', ?, '0100', '0100', 'CZK', ?, 'savings', 'manual', 1)"
+        )->execute([$id, self::BANK_ACCOUNT, self::BANK_ACCOUNT]);
 
         return $id;
     }
@@ -289,6 +449,10 @@ final class CompanyProfileRoundTripTest extends TestCase
         $client = $pdo->prepare('SELECT id FROM clients WHERE supplier_id = ? AND ic = ?');
         $client->execute([$id, self::CLIENT_IC]);
         $this->dimensions->saveEntityDefaults($id, 'client', (int) $client->fetchColumn(), [(int) $type['id'] => (int) $north['id']]);
+        $account = $pdo->prepare('SELECT id FROM supplier_bank_accounts WHERE supplier_id = ? AND account_canonical = ?');
+        $account->execute([$id, self::BANK_ACCOUNT]);
+        $accountId = (int) $account->fetchColumn();
+        $this->dimensions->saveEntityDefaults($id, 'bank_account', $accountId, [(int) $type['id'] => (int) $north['id']]);
         $this->rules->create($id, [
             'dimension_type_id' => (int) $type['id'],
             'account_mask' => '5, !59',
@@ -307,6 +471,14 @@ final class CompanyProfileRoundTripTest extends TestCase
                                              mode, mode_set_manually_at, priority)
              VALUES (?, 'Poplatek za vedení účtu', 'outgoing', 'poplatek', '568', '221', 'auto', NOW(), 40)"
         )->execute([$id]);
+        // Pravidlo omezené na vlastní účet s dimenzí: přenese se číslem účtu a kódy dimenze.
+        $pdo->prepare(
+            "INSERT INTO bank_posting_rules (supplier_id, name, direction, bank_account_id, message_contains, debit_account_code, credit_account_code, priority)
+             VALUES (?, 'Úroky spořicího účtu', 'incoming', ?, 'urok', '221', '662', 40)"
+        )->execute([$id, $accountId]);
+        $pdo->prepare(
+            'INSERT INTO bank_posting_rule_dimensions (rule_id, supplier_id, dimension_type_id, dimension_value_id) VALUES (?, ?, ?, ?)'
+        )->execute([(int) $pdo->lastInsertId(), $id, (int) $type['id'], (int) $north['id']]);
     }
 
     /** Hodnoty řádků rozvahy (oba sloupce) a výsledovky běžného roku. */

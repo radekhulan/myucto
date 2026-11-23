@@ -45,6 +45,9 @@ export interface CashRegister {
   is_default: boolean; is_active: boolean
   /** L-3: pokladna má vlastní číselnou řadu PPD/VPD; false = společná řada firmy. */
   own_series?: boolean
+  /** Počáteční stav valutové pokladny ve valutě k začátku dne `opening_foreign_date`. */
+  opening_foreign_amount?: number | null
+  opening_foreign_date?: string | null
   documents_count: number
   balance: number; balance_date: string   // v list i detail response (O12 — bez /balance endpointu)
   balance_foreign?: number | null          // duální zůstatek valutové pokladny (§11); null u CZK
@@ -53,17 +56,22 @@ export interface CashRegister {
 
 export interface CashRegisterPayload {
   name: string; account_code: string; currency_code?: string; is_default?: boolean; own_series?: boolean
+  opening_foreign_amount?: string | number | null; opening_foreign_date?: string | null
 }
 
 export interface CashDocument {
   id: number; supplier_id: number; register_id: number
   doc_type: CashDocType; purpose: CashPurpose
   doc_number: string | null               // null jen u draftu (FE v1 drafty nezobrazuje)
+  /** Řada z číselníku: na konceptu volba, u čísla nová řada (null = dosavadní PPD/VPD). */
+  number_series_id?: number | null
   issue_date: string; tax_date: string | null
   partner_name: string | null; partner_ic: string | null; partner_dic: string | null
   description: string
   total_amount: number; currency_code: string
   fx_rate?: number; amount_foreign?: number | null   // valutová pokladna (§11): total_amount = CZK ekvivalent
+  /** Korunová úhrada cizoměnového dokladu: uhrazená částka v měně hrazeného dokladu. */
+  settled_document_amount?: number | null
   vat_mode: 'none' | 'vat'; vat_lines: CashVatLine[]
   invoice_id: number | null; invoice_number?: string | null
   purchase_invoice_id: number | null; purchase_invoice_number?: string | null
@@ -77,6 +85,8 @@ export interface CashDocument {
 
 export interface CreateCashDocumentPayload {
   register_id: number; doc_type: CashDocType; purpose: CashPurpose
+  /** Řada z číselníku (víc řad v jedné pokladně); vynechané = beze změny, null = výchozí řada. */
+  number_series_id?: number | null
   issue_date: string; tax_date?: string | null
   description: string; total_amount: number
   amount_foreign?: number | null; fx_rate?: number | null   // valutová pokladna — částka v cizí měně + volitelný ruční kurz
@@ -132,6 +142,13 @@ export interface UnpaidDocumentOption {
   invoice_type?: string
   /** Přijatá faktura: běžná / daňový doklad k záloze (DDKP). */
   document_kind?: string | null
+  /**
+   * Cizoměnový doklad hrazený korunami: kurz dokladu, zbytek přepočtený tímto kurzem
+   * a kurzová tolerance v Kč, ve které koruny uhradí celý zbytek. U korunového chybí.
+   */
+  exchange_rate?: number
+  remaining_czk?: number
+  czk_tolerance?: number
 }
 
 export interface CashBookItem {

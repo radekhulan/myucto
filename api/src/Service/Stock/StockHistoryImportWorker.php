@@ -343,60 +343,20 @@ final class StockHistoryImportWorker
                 ->execute([$supplierId, $jobId, $error, $supplierId, $jobId]);
         };
         $markFailed("SELECT ordinal FROM (SELECT ordinal,
-                MIN(JSON_VALUE(input_json, '$.header')) OVER (PARTITION BY JSON_VALUE(input_json, '$.doc')) AS first_header,
-                MAX(JSON_VALUE(input_json, '$.header')) OVER (PARTITION BY JSON_VALUE(input_json, '$.doc')) AS last_header
+                FIRST_VALUE(JSON_VALUE(input_json, '$.header')) OVER (PARTITION BY JSON_VALUE(input_json, '$.doc')
+                    ORDER BY JSON_VALUE(input_json, '$.header') IS NULL, JSON_VALUE(input_json, '$.header')) AS first_header,
+                FIRST_VALUE(JSON_VALUE(input_json, '$.header')) OVER (PARTITION BY JSON_VALUE(input_json, '$.doc')
+                    ORDER BY JSON_VALUE(input_json, '$.header') DESC) AS last_header
             FROM catalog_job_items WHERE supplier_id = ? AND job_id = ? AND status = 'ready') headers
             WHERE first_header <> last_header", 'history_import_document_inconsistent');
         $markFailed("SELECT ordinal FROM (SELECT ordinal, status,
-                MAX(status = 'failed') OVER (PARTITION BY JSON_VALUE(input_json, '$.doc')) AS has_failed
+                FIRST_VALUE(status = 'failed') OVER (PARTITION BY JSON_VALUE(input_json, '$.doc')
+                    ORDER BY status = 'failed' DESC) AS has_failed
             FROM catalog_job_items WHERE supplier_id = ? AND job_id = ? AND status IN ('ready','failed')
                 AND JSON_VALUE(input_json, '$.doc') IS NOT NULL) documents
             WHERE status = 'ready' AND has_failed = 1", 'history_import_document_incomplete');
 
-        // Záporný stav: běžící součet nohou dokladů po (sklad, karta) v pořadí aplikace.
-        // Potřebné doplnění = −minimum dosavadního součtu; technická příjemka před řádkem
-        // doplní přírůstek za poslední známou nákupní cenu karty (bez ní 0).
-        $pdo->prepare("UPDATE catalog_job_items target JOIN (
-            WITH staged AS (
-                SELECT ordinal, stock_item_id AS item,
-                    JSON_VALUE(input_json, '$.doc') AS doc,
-                    JSON_VALUE(input_json, '$.values.doc_date') AS doc_date,
-                    JSON_VALUE(input_json, '$.values.doc_type') AS doc_type,
-                    CAST(JSON_VALUE(input_json, '$.values.warehouse_id') AS UNSIGNED) AS wh,
-                    CAST(JSON_VALUE(input_json, '$.values.warehouse_to_id') AS UNSIGNED) AS wh_to,
-                    CAST(JSON_VALUE(input_json, '$.values.quantity') AS DECIMAL(14,3)) AS qty,
-                    CAST(JSON_VALUE(input_json, '$.values.unit_cost') AS DECIMAL(15,6)) AS cost
-                FROM catalog_job_items WHERE supplier_id = ? AND job_id = ? AND status = 'ready'
-            ), ordered AS (
-                SELECT staged.*, MIN(ordinal) OVER (PARTITION BY doc) AS first_ordinal FROM staged
-            ), legs AS (
-                SELECT ordinal, doc_date, first_ordinal, 0 AS leg, wh, item,
-                    CASE WHEN doc_type IN ('receipt','surplus') THEN qty ELSE -qty END AS delta,
-                    CASE WHEN doc_type IN ('receipt','surplus') THEN cost END AS cost
-                FROM ordered
-                UNION ALL
-                SELECT ordinal, doc_date, first_ordinal, 1, wh_to, item, qty, NULL FROM ordered WHERE doc_type = 'transfer'
-            ), running AS (
-                SELECT legs.*,
-                    SUM(delta) OVER (PARTITION BY wh, item ORDER BY doc_date, first_ordinal, ordinal, leg ROWS UNBOUNDED PRECEDING) AS balance,
-                    COUNT(cost) OVER (PARTITION BY item ORDER BY doc_date, first_ordinal, ordinal, leg ROWS UNBOUNDED PRECEDING) AS cost_group
-                FROM legs
-            ), needed AS (
-                SELECT running.*,
-                    GREATEST(0, -MIN(balance) OVER (PARTITION BY wh, item ORDER BY doc_date, first_ordinal, ordinal, leg ROWS UNBOUNDED PRECEDING)) AS total_fill,
-                    FIRST_VALUE(cost) OVER (PARTITION BY item, cost_group ORDER BY doc_date, first_ordinal, ordinal, leg) AS last_cost
-                FROM running
-            )
-            SELECT ordinal, fill, last_cost FROM (
-                SELECT ordinal, last_cost,
-                    total_fill - COALESCE(LAG(total_fill) OVER (PARTITION BY wh, item ORDER BY doc_date, first_ordinal, ordinal, leg), 0) AS fill
-                FROM needed
-            ) fills WHERE fill > 0
-        ) negative ON negative.ordinal = target.ordinal
-        SET target.input_json = JSON_SET(target.input_json, '$.fill', JSON_OBJECT(
-            'quantity', CAST(negative.fill AS CHAR), 'unit_cost', CAST(COALESCE(negative.last_cost, 0) AS CHAR)))
-        WHERE target.supplier_id = ? AND target.job_id = ?")
-            ->execute([$supplierId, $jobId, $supplierId, $jobId]);
+        $this->markNegativeFills($supplierId, $jobId);
         $this->checkReservedNumbers($supplierId, $jobId, $profile);
 
         $stmt = $pdo->prepare("SELECT COUNT(*) FROM catalog_job_items
@@ -460,6 +420,67 @@ final class StockHistoryImportWorker
             'invoice_unlinked_count' => count($unlinked),
             'invoice_unlinked' => array_slice($unlinked, 0, self::REPORT_LIMIT),
         ];
+    }
+
+    /**
+     * Záporný stav: běžící součet nohou dokladů po (sklad, karta) v pořadí aplikace.
+     * Potřebné doplnění = −minimum dosavadního součtu; technická příjemka před řádkem
+     * doplní přírůstek za poslední známou nákupní cenu karty (bez ní 0).
+     */
+    private function markNegativeFills(int $supplierId, int $jobId): void
+    {
+        $pdo = $this->db->pdo();
+        $stmt = $pdo->prepare("SELECT ordinal, item, doc_type, wh, wh_to, qty, cost FROM (
+                SELECT ordinal, stock_item_id AS item,
+                    JSON_VALUE(input_json, '$.values.doc_date') AS doc_date,
+                    JSON_VALUE(input_json, '$.values.doc_type') AS doc_type,
+                    CAST(JSON_VALUE(input_json, '$.values.warehouse_id') AS UNSIGNED) AS wh,
+                    CAST(JSON_VALUE(input_json, '$.values.warehouse_to_id') AS UNSIGNED) AS wh_to,
+                    CAST(JSON_VALUE(input_json, '$.values.quantity') AS DECIMAL(14,3)) AS qty,
+                    CAST(JSON_VALUE(input_json, '$.values.unit_cost') AS DECIMAL(15,6)) AS cost,
+                    FIRST_VALUE(ordinal) OVER (PARTITION BY JSON_VALUE(input_json, '$.doc') ORDER BY ordinal) AS first_ordinal
+                FROM catalog_job_items WHERE supplier_id = ? AND job_id = ? AND status = 'ready'
+            ) staged ORDER BY doc_date, first_ordinal, ordinal");
+        $stmt->execute([$supplierId, $jobId]);
+        $balances = [];
+        $lowest = [];
+        $covered = [];
+        $costs = [];
+        $fills = [];
+        while (($row = $stmt->fetch(PDO::FETCH_NUM)) !== false) {
+            [$ordinal, $item, $type, $warehouse, $warehouseTo, $quantity, $cost] = $row;
+            $receipt = in_array($type, ['receipt', 'surplus'], true);
+            $itemKey = json_encode($item, JSON_THROW_ON_ERROR);
+            if ($receipt && $cost !== null) {
+                $costs[$itemKey] = $cost;
+            }
+            $legs = [[$warehouse, $receipt ? (string) $quantity : bcsub('0', (string) $quantity, 3)]];
+            if ($type === 'transfer') {
+                $legs[] = [$warehouseTo, (string) $quantity];
+            }
+            foreach ($legs as [$legWarehouse, $delta]) {
+                $key = json_encode([$legWarehouse, $item], JSON_THROW_ON_ERROR);
+                $balances[$key] = bcadd($balances[$key] ?? '0', $delta, 3);
+                if (!isset($lowest[$key]) || bccomp($balances[$key], $lowest[$key], 3) < 0) {
+                    $lowest[$key] = $balances[$key];
+                }
+                $needed = bccomp($lowest[$key], '0', 3) < 0 ? bcsub('0', $lowest[$key], 3) : '0';
+                $fill = bcsub($needed, $covered[$key] ?? '0', 3);
+                $covered[$key] = $needed;
+                if (bccomp($fill, '0', 3) > 0) {
+                    $fills[] = [(int) $ordinal, $fill, $costs[$itemKey] ?? null];
+                }
+            }
+        }
+        foreach (array_chunk($fills, 1000) as $chunk) {
+            $pdo->prepare("UPDATE catalog_job_items target JOIN JSON_TABLE(?, '$[*]' COLUMNS (
+                    ordinal INT UNSIGNED PATH '$[0]', fill DECIMAL(65,3) PATH '$[1]', last_cost DECIMAL(15,6) PATH '$[2]')) negative
+                    ON negative.ordinal = target.ordinal
+                SET target.input_json = JSON_SET(target.input_json, '$.fill', JSON_OBJECT(
+                    'quantity', CAST(negative.fill AS CHAR), 'unit_cost', CAST(COALESCE(negative.last_cost, 0) AS CHAR)))
+                WHERE target.supplier_id = ? AND target.job_id = ?")
+                ->execute([json_encode($chunk, JSON_THROW_ON_ERROR), $supplierId, $jobId]);
+        }
     }
 
     /**

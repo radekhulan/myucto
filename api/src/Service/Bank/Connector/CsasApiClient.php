@@ -17,6 +17,11 @@ final class CsasApiClient
     public const SIGN_STATES = ['DONE', 'AUTHORIZATION_NOT_STARTED', 'PROCESSING', 'REJECTED', 'EXPIRED', 'ORDER_PROCESSING_FAILED'];
     /** Stavy platby (GET /my/payments/{signId}/status). */
     public const INSTRUCTION_STATES = ['ACTC', 'ACSP', 'ACSC', 'RJCT'];
+    /** Co se podepisuje: dávka plateb, nebo jediná platba bez dávky. */
+    public const SIGN_SCOPE_BATCH = 'batch';
+    public const SIGN_SCOPE_PAYMENT = 'payment';
+    /** Chyby přístupu, které banka vrací jako 403 s tělem; jde o neplatný token, ne o odmítnutí platby. */
+    private const TOKEN_ERRORS = ['TOKEN_INVALID'];
     /** Chyby banky, které znamenají jisté odmítnutí s vlastní hláškou v aplikaci. */
     private const PAYMENT_ERRORS = [
         'INVALID_DATE_IN_PAST' => 'payment_execution_date_too_early',
@@ -79,7 +84,9 @@ final class CsasApiClient
         return $this->identityBaseUrl() . '/auth?' . http_build_query([
             'response_type' => 'code', 'client_id' => $this->value($credentials, 'client_id'),
             'redirect_uri' => $this->value($credentials, 'redirect_uri'), 'scope' => self::scope($payments),
-            'access_type' => 'offline', 'prompt' => 'consent', 'state' => $state,
+            // „login" vynutí nové přihlášení i při živé relaci banky v prohlížeči. Bez něj banka
+            // použije výchozí pracovní prostor George Business a souhlas vydá za jinou firmu.
+            'access_type' => 'offline', 'prompt' => 'login consent', 'state' => $state,
             'code_challenge' => \MyInvoice\Service\OAuth\Pkce::challenge($this->value($credentials, 'code_verifier')),
             'code_challenge_method' => 'S256',
         ], '', '&', PHP_QUERY_RFC3986);
@@ -151,7 +158,13 @@ final class CsasApiClient
     public function createPayment(#[\SensitiveParameter] array $credentials, array $payment): array
     {
         $this->assertEnvironment($credentials);
-        $data = $this->paymentRequest('POST', $this->paymentsBaseUrl() . '/my/payments', $credentials, 'payment_create', ['json' => $payment], true);
+        try {
+            $body = BankPaymentJson::encode($payment);
+        } catch (\JsonException|\LogicException) {
+            throw new BankConnectorException(BankConnectorException::INVALID_PAYMENT_ORDER, 'Platbu pro Českou spořitelnu nelze sestavit.');
+        }
+        $data = $this->paymentRequest('POST', $this->paymentsBaseUrl() . '/my/payments', $credentials, 'payment_create',
+            ['body' => $body, 'headers' => ['Content-Type' => 'application/json']], true);
         $status = $data['instructionStatus'] ?? null;
         if ($status === 'RJCT') {
             throw new BankConnectorException(BankConnectorException::PAYMENT_REJECTED, 'Česká spořitelna platbu odmítla.');
@@ -188,16 +201,20 @@ final class CsasApiClient
     }
 
     /**
-     * Adresa federovaného podpisu dávky v bance. Po podpisu se uživatel vrátí na `$callbackUri`.
+     * Adresa federovaného podpisu v bance. Po podpisu se uživatel vrátí na `$callbackUri`.
+     * Dávka se podepisuje přes /my/batchpayments, jediná platba bez dávky přes /my/payments.
      *
+     * @param self::SIGN_SCOPE_* $scope
      * @return array{signing_url:string,valid_to:?string,poll_id:string,poll_interval_ms:int}
      */
-    public function federatedSign(#[\SensitiveParameter] array $credentials, string $signId, string $hash, string $callbackUri): array
+    public function federatedSign(#[\SensitiveParameter] array $credentials, string $signId, string $hash, string $callbackUri,
+        string $scope = self::SIGN_SCOPE_BATCH): array
     {
         $this->assertEnvironment($credentials);
         if (!preg_match('#^https://[^\s/?\#]+/[^\s\#]*$#D', $callbackUri) || strlen($callbackUri) > 2048) throw $this->invalid();
-        $data = $this->paymentRequest('GET', $this->paymentsBaseUrl() . '/my/batchpayments/federate/sign/' . rawurlencode($this->identifier($signId))
-            . '/hash/' . rawurlencode($this->hash($hash)), $credentials, 'batch_sign', ['headers' => ['Callback-Uri' => $callbackUri]], false);
+        $data = $this->paymentRequest('GET', $this->paymentsBaseUrl() . '/my/' . self::signResource($scope) . '/federate/sign/'
+            . rawurlencode($this->identifier($signId)) . '/hash/' . rawurlencode($this->hash($hash)), $credentials,
+            $scope === self::SIGN_SCOPE_PAYMENT ? 'payment_sign' : 'batch_sign', ['headers' => ['Callback-Uri' => $callbackUri]], false);
         $url = $data['signingUrl'] ?? null;
         $poll = $data['poll'] ?? null;
         if (!is_string($url) || !$this->trustedSigningUrl($url) || !is_array($poll)) throw $this->invalid();
@@ -211,12 +228,15 @@ final class CsasApiClient
         ];
     }
 
-    /** @return array{state:string,poll_interval_ms:int} */
-    public function pollSign(#[\SensitiveParameter] array $credentials, string $pollId): array
+    /**
+     * @param self::SIGN_SCOPE_* $scope
+     * @return array{state:string,poll_interval_ms:int}
+     */
+    public function pollSign(#[\SensitiveParameter] array $credentials, string $pollId, string $scope = self::SIGN_SCOPE_BATCH): array
     {
         $this->assertEnvironment($credentials);
-        $data = $this->paymentRequest('GET', $this->paymentsBaseUrl() . '/my/batchpayments/sign/poll/' . rawurlencode($this->identifier($pollId)),
-            $credentials, 'batch_sign_poll', [], false);
+        $data = $this->paymentRequest('GET', $this->paymentsBaseUrl() . '/my/' . self::signResource($scope) . '/sign/poll/'
+            . rawurlencode($this->identifier($pollId)), $credentials, $scope === self::SIGN_SCOPE_PAYMENT ? 'payment_sign_poll' : 'batch_sign_poll', [], false);
         $state = $data['state'] ?? null;
         if (!is_string($state) || !in_array($state, self::SIGN_STATES, true)) throw $this->invalid();
         $interval = $data['pollInterval'] ?? 5000;
@@ -270,16 +290,27 @@ final class CsasApiClient
             throw new BankConnectorException($status >= 500 ? BankConnectorException::REMOTE_UNAVAILABLE : BankConnectorException::REMOTE_HTTP_ERROR,
                 'API České spořitelny požadavek nedokončilo.', $mutation, $status);
         }
-        $remote = $this->remoteError($body);
+        $bankError = self::bankError($body);
+        $remote = $bankError['code'] ?? null;
         if ($remote !== null) {
-            $this->logger->info('csas_payment_rejected', ['environment' => $this->environment(), 'operation' => $operation, 'error' => $remote]);
+            $this->logger->info('csas_payment_rejected', ['environment' => $this->environment(), 'operation' => $operation, 'error' => $remote,
+                'scope' => $bankError['scope']]);
         }
         throw new BankConnectorException(match (true) {
-            $status === 401, $status === 403 && $remote === null => BankConnectorException::INVALID_TOKEN,
+            $status === 401, $status === 403 && ($remote === null || in_array($remote, self::TOKEN_ERRORS, true)) => BankConnectorException::INVALID_TOKEN,
             $status === 429 => BankConnectorException::RATE_LIMITED,
             $remote !== null && isset(self::PAYMENT_ERRORS[$remote]) => self::PAYMENT_ERRORS[$remote],
             default => BankConnectorException::PAYMENT_REJECTED,
-        }, 'Česká spořitelna požadavek odmítla.', false, $status);
+        }, 'Česká spořitelna požadavek odmítla.', false, $status, bankError: $bankError);
+    }
+
+    private static function signResource(string $scope): string
+    {
+        return match ($scope) {
+            self::SIGN_SCOPE_BATCH => 'batchpayments',
+            self::SIGN_SCOPE_PAYMENT => 'payments',
+            default => throw new \InvalidArgumentException('Neplatný rozsah podpisu České spořitelny.'),
+        };
     }
 
     private function paymentBody(\Psr\Http\Message\ResponseInterface $response): ?string
@@ -304,8 +335,14 @@ final class CsasApiClient
         }
     }
 
-    /** Kód chyby banky (`errors[0].error`), jen pokud má očekávaný tvar; tělo se jinak nečte ani neloguje. */
-    private function remoteError(?string $body): ?string
+    /**
+     * Důvod odmítnutí z těla chyby (`errors[0]`: `error`, `scope`, případně text v `message`
+     * nebo `description`). Kód se bere jen v očekávaném tvaru; pole a text se očistí od
+     * řídicích znaků a zkrátí na šířku sloupců evidence. Jiný tvar těla vrací null.
+     *
+     * @return array{code:string,scope:?string,message:?string}|null
+     */
+    public static function bankError(?string $body): ?array
     {
         if ($body === null || $body === '') return null;
         try {
@@ -313,8 +350,24 @@ final class CsasApiClient
         } catch (\JsonException) {
             return null;
         }
-        $code = is_array($data) ? ($data['errors'][0]['error'] ?? null) : null;
-        return is_string($code) && preg_match('/^[A-Z][A-Z0-9_]{1,63}$/D', $code) ? $code : null;
+        $error = is_array($data) && is_array($data['errors'] ?? null) ? ($data['errors'][0] ?? null) : null;
+        if (!is_array($error)) return null;
+        $code = $error['error'] ?? null;
+        if (!is_string($code) || !preg_match('/^[A-Z][A-Z0-9_]{1,63}$/D', $code)) return null;
+        $scope = $error['scope'] ?? null;
+        $message = $error['message'] ?? $error['description'] ?? null;
+        return [
+            'code' => $code,
+            'scope' => is_string($scope) && preg_match('/^[A-Za-z0-9_.\[\]-]{1,128}$/D', $scope) ? $scope : null,
+            'message' => self::bankText($message),
+        ];
+    }
+
+    private static function bankText(mixed $value): ?string
+    {
+        if (!is_string($value) || $value === '' || strlen($value) > 4096 || !mb_check_encoding($value, 'UTF-8')) return null;
+        $text = trim((string) preg_replace('/[\p{Cc}\p{Cf}\s]+/u', ' ', $value));
+        return $text === '' ? null : mb_substr($text, 0, 255);
     }
 
     /** @return array{sign_id:string,hash:string} */

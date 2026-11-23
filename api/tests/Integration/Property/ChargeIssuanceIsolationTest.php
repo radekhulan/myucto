@@ -48,7 +48,7 @@ final class ChargeIssuanceIsolationTest extends TestCase
     {
         if(self::$schema!==null&&self::$server!==null) {
             self::assertMatchesRegularExpression('/^myucto_issue_race_[a-f0-9]{10}_test$/D',self::$schema);
-            self::$server->exec('DROP DATABASE IF EXISTS '.DatabaseCloner::quote(self::$schema));
+            DatabaseCloner::dropDatabase(self::$server, self::$schema);
         }
         self::$schema=null; self::$server=null;
     }

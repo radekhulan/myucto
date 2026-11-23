@@ -8,10 +8,16 @@ import { useAuthStore } from '@/stores/auth'
 import { getCredential, webAuthnErrorKey } from '@/security/webauthn'
 import RecoveryCodesOnce from '@/components/security/RecoveryCodesOnce.vue'
 import TotpAppRecommendation from '@/components/security/TotpAppRecommendation.vue'
+import SsoStepUpOption from '@/components/security/SsoStepUpOption.vue'
+import { hasStrongProvider, takeSsoStepUpProof } from '@/security/oidc'
+import { useSsoEnforcement } from '@/composables/useSsoEnforcement'
 
 const { t } = useI18n()
 const toast = useToast()
 const auth = useAuthStore()
+// Volba ověření přes Microsoft jen tam, kde je silný poskytovatel zapnutý.
+const ssoStrongEnabled = computed(() => hasStrongProvider(auth.setupStatus?.sso_providers, 'entra'))
+const { passwordAllowed } = useSsoEnforcement()
 
 const status = ref<{ enabled: boolean } | null>(null)
 const recoveryCodes = ref<string[] | null>(null)
@@ -63,6 +69,10 @@ function applySetupError(e: any) {
 
 async function startSetup() {
   error.value = ''
+  if (!hasPasskey.value && !passwordAllowed.value) {
+    error.value = t('sso.local_factor_setup_unavailable')
+    return
+  }
   if (!hasPasskey.value && !currentPassword.value) {
     error.value = t('mfa_setup.password_required')
     return
@@ -133,7 +143,28 @@ async function activate() {
   }
 }
 
-onMounted(loadStatus)
+/**
+ * Návrat z ověření přes Microsoft: secret se vydá rovnou. Server proof přijme jen
+ * od účtu s passkey; účet bez silného faktoru se prokazuje heslem.
+ */
+async function setupWithSsoProof(proof: string) {
+  busy.value = true
+  error.value = ''
+  try {
+    setup.value = await authApi.totpSetup({ step_up_token: proof })
+    toast.info(t('sso.step_up_done'))
+  } catch (e: any) {
+    applySetupError(e)
+  } finally {
+    busy.value = false
+  }
+}
+
+onMounted(async () => {
+  const proof = takeSsoStepUpProof('totp.enable')
+  await loadStatus()
+  if (proof && status.value && !status.value.enabled) await setupWithSsoProof(proof)
+})
 </script>
 
 <template>
@@ -173,7 +204,10 @@ onMounted(loadStatus)
       <div v-if="status && !status.enabled && !setup" class="space-y-3">
         <!-- Bez passkey je heslo jediný způsob, jak čerstvě ověřit majitele
              účtu před vydáním TOTP secretu. -->
-        <div v-if="!hasPasskey">
+        <p v-if="!hasPasskey && !passwordAllowed" class="text-sm text-warning-700" data-test="totp-needs-passkey">
+          {{ t('sso.local_factor_setup_unavailable') }}
+        </p>
+        <div v-else-if="!hasPasskey">
           <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('auth.current_password') }}</label>
           <input
             v-model="currentPassword"
@@ -205,7 +239,7 @@ onMounted(loadStatus)
         <button
           data-test="totp-start"
           @click="startSetup"
-          :disabled="busy"
+          :disabled="busy || (!hasPasskey && !passwordAllowed)"
           class="cursor-pointer h-10 px-4 bg-primary-600 hover:bg-primary-700 disabled:bg-neutral-300 text-white font-medium rounded-md"
         >
           {{ busy ? '…' : (hasPasskey && !useRecovery ? t('auth.totp_setup_verify_passkey_btn') : t('auth.totp_setup_btn')) }}
@@ -219,6 +253,8 @@ onMounted(loadStatus)
         >
           {{ useRecovery ? t('passkeys.use_passkey_instead') : t('passkeys.use_recovery_instead') }}
         </button>
+        <SsoStepUpOption v-if="ssoStrongEnabled" operation="totp.enable" :disabled="busy"
+          @verified="(proof: string) => setupWithSsoProof(proof)" />
       </div>
 
       <div v-if="setup" class="space-y-4 pt-2 border-t border-neutral-200">

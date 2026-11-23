@@ -68,6 +68,55 @@ final class SeatPolicy
     }
 
     /**
+     * Kolik platných přístupů se zápisem existuje: osobní API tokeny se
+     * zápisem a MCP oprávnění se zápisem.
+     *
+     * Do míst se přičítají jen tehdy, když to stanoví parametr licence
+     * (`count_write_tokens_as_seats`), o tom rozhoduje volající. Token jedná
+     * jménem svého uživatele, takže se počítá jen token uživatele, který sám
+     * smí zapisovat (zabírá místo). MCP oprávnění se počítá jednou za grant,
+     * ne za krátkodobý přístupový token, který se každou hodinu obnovuje.
+     */
+    public function countActiveWriteTokens(): int
+    {
+        if (!$this->db->hasTable('api_tokens') || !$this->supportsPermissionCounting()) {
+            return 0;
+        }
+        $seat = $this->seatConditionSql('u.role_id', 'u.id');
+        $hasAudience = $this->db->hasColumn('api_tokens', 'audience');
+        $sql = "SELECT COUNT(*) FROM api_tokens t
+                  JOIN users u ON u.id = t.user_id AND u.is_active = 1
+                 WHERE t.scope = 'read_write'
+                   AND t.revoked_at IS NULL
+                   AND (t.expires_at IS NULL OR t.expires_at > NOW())"
+            . ($hasAudience ? " AND t.audience = 'api'" : '')
+            . " AND ({$seat})";
+        $statement = $this->db->pdo()->query($sql);
+        if ($statement === false) {
+            throw new \RuntimeException('Počet tokenů se zápisem se nepodařilo načíst.');
+        }
+        $count = (int) $statement->fetchColumn();
+
+        if ($hasAudience && $this->db->hasTable('mcp_oauth_grants')) {
+            $statement = $this->db->pdo()->query(
+                "SELECT COUNT(*) FROM mcp_oauth_grants g
+                   JOIN users u ON u.id = g.user_id AND u.is_active = 1
+                   JOIN api_tokens t ON t.id = g.access_token_id AND t.revoked_at IS NULL
+                  WHERE g.scope = 'read_write'
+                    AND g.revoked_at IS NULL
+                    AND g.expires_at > NOW()
+                    AND ({$seat})"
+            );
+            if ($statement === false) {
+                throw new \RuntimeException('Počet MCP oprávnění se zápisem se nepodařilo načíst.');
+            }
+            $count += (int) $statement->fetchColumn();
+        }
+
+        return $count;
+    }
+
+    /**
      * Zabírá uživatel místo, kdyby měl tuhle výchozí roli a tyhle override role?
      *
      * @param list<int> $overrideRoleIds per-firemní role; prázdné pole = žádné

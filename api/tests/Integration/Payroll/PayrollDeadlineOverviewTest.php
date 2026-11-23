@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Integration\Payroll;
 
-use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\Payroll\PayrollDeadlineOverviewRepository;
 use MyInvoice\Repository\Payroll\PayrollSicknessCaseRepository;
@@ -52,7 +51,7 @@ final class PayrollDeadlineOverviewTest extends TestCase
 
     protected function setUp(): void
     {
-        $container = Bootstrap::buildContainer();
+        $container = \MyInvoice\Tests\Support\PayrollTestContainer::build();
         $db = $container->get(Connection::class);
         if (!$db instanceof Connection) {
             throw new \RuntimeException('Databázové spojení není dostupné.');
@@ -136,7 +135,7 @@ final class PayrollDeadlineOverviewTest extends TestCase
     /** Endpoint musí jít sestavit kontejnerem, ne jen ručně v testu. */
     public function testContainerBuildsTheAction(): void
     {
-        $action = Bootstrap::buildContainer()->get(
+        $action = \MyInvoice\Tests\Support\PayrollTestContainer::build()->get(
             \MyInvoice\Action\Payroll\PayrollDeadlineOverviewAction::class,
         );
 
@@ -313,6 +312,36 @@ final class PayrollDeadlineOverviewTest extends TestCase
         self::assertSame(-17, $items[0]['days_to_due']);
         self::assertTrue($items[0]['is_overdue']);
         self::assertSame(1, $overview['summary']['overdue']);
+    }
+
+    public function testChecklistKeepsEmploymentEndDateWithAndWithoutDeadline(): void
+    {
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_employments
+                SET start_date = "2025-01-01", end_date = "2025-12-31", status = "ended"
+              WHERE supplier_id = ? AND id = ?',
+        )->execute([$this->supplierId, $this->employmentId]);
+        $this->checklistItem('eldp_submission', '2026-08-03');
+        $this->checklistItem('termination_document', null);
+
+        $overview = $this->service->overview($this->supplierId, 'production');
+        $dated = $this->itemsOfSource($overview, 'checklist');
+        $undated = $this->service->groupItems(
+            $this->supplierId,
+            'production',
+            90,
+            PayrollDeadlineOverviewService::UNDATED_PHASE,
+            'checklist',
+            'termination_document',
+        );
+
+        self::assertCount(1, $dated);
+        self::assertSame(1, $undated['total']);
+        foreach ([...$dated, ...$undated['items']] as $item) {
+            self::assertSame('2025-12-31', $item['employment_end_date']);
+            self::assertSame($this->employmentId, $item['employment_id']);
+            self::assertSame($this->employeeId, $item['employee_id']);
+        }
     }
 
     /**
@@ -542,7 +571,7 @@ final class PayrollDeadlineOverviewTest extends TestCase
     public function testTaxableIncomeRequestEndpointRoundTrip(): void
     {
         $this->db->pdo()->prepare('UPDATE supplier SET payroll_enabled = 1 WHERE id = ?')->execute([$this->supplierId]);
-        $action = Bootstrap::buildContainer()->get(
+        $action = \MyInvoice\Tests\Support\PayrollTestContainer::build()->get(
             \MyInvoice\Action\Payroll\PayrollTaxableIncomeConfirmationRequestAction::class,
         );
         self::assertInstanceOf(\MyInvoice\Action\Payroll\PayrollTaxableIncomeConfirmationRequestAction::class, $action);

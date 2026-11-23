@@ -4,11 +4,14 @@ declare(strict_types=1);
 
 namespace MyInvoice\Repository;
 
+use MyInvoice\Service\Accounting\AccountCodeRange;
+use MyInvoice\Service\Accounting\DocumentPartnerName;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Accounting\Dimension\DimensionFilter;
 use MyInvoice\Service\Accounting\Dimension\DimensionPeriodGuard;
 use MyInvoice\Service\Accounting\Dimension\SystemDimensionWritePolicy;
 use MyInvoice\Service\Accounting\PostingException;
+use MyInvoice\Service\Accounting\JournalDescriptionBuilder;
 use MyInvoice\Service\Accounting\JournalLineAmount;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Accounting\Allocation\JointAllocationJournalProof;
@@ -18,7 +21,13 @@ use MyInvoice\Service\Accounting\Allocation\JointAllocationUseGuard;
 use MyInvoice\Service\Property\Charges\Issuance\IssuanceUseGuard;
 use MyInvoice\Service\Nonprofit\Membership\MembershipUseGuard;
 use MyInvoice\Service\Property\Charges\Issuance\IssuanceReversalIntent;
+use MyInvoice\Service\Accounting\Closing\ClosingSourceId;
 use MyInvoice\Service\Accounting\Closing\Fx504JournalProof;
+use MyInvoice\Service\Accounting\EntryForm\EntryFormService;
+use MyInvoice\Service\Accounting\Pair\JournalPairInvariant;
+use MyInvoice\Service\Accounting\Pair\JournalPairer;
+use MyInvoice\Service\Accounting\Pair\TypedJournalPairs;
+use MyInvoice\Security\FrameworkScopePolicy;
 use PDO;
 
 /**
@@ -31,6 +40,9 @@ use PDO;
 final class JournalEntryRepository
 {
     public const int SECURITIES_DEBT_GUARD_VERSION = 1;
+
+    private ?EntryFormService $entryForms = null;
+
     public function __construct(
         private readonly Connection $db,
         private readonly ActivityLogger $activity,
@@ -67,7 +79,7 @@ final class JournalEntryRepository
         return (new DimensionPeriodGuard($this->db))->transaction(function()use($supplier,$conversion):int{
             $proof=\MyInvoice\Service\Accounting\Conversion\FrameworkConversionJournalProof::pending($this->db,$supplier,$conversion);
             (new SystemDimensionWritePolicy($this->db))->assertClosingCarry($proof);
-            $entry=$this->persistJournal($proof->header,$proof->lines);
+            $entry=$this->persistJournal($proof->header,$proof->lines,typedPairs:TypedJournalPairs::CONSECUTIVE);
             $this->activity->log('accounting.posted',(int)$proof->header['posted_by'],'journal_entry',$entry,
                 ['source_type'=>$proof->header['source_type'],'source_id'=>$proof->header['source_id'],'framework_conversion_id'=>$conversion],null,null,$supplier);
             return $entry;
@@ -86,7 +98,8 @@ final class JournalEntryRepository
         }
         try {
             (new SystemDimensionWritePolicy($this->db))->assertJournal($header, $lines);
-            $entryId = $this->persistJournal($header, $lines);
+            $lines = $this->pairGenericLines($header, $lines);
+            $entryId = $this->persistJournal($header, $lines, false);
 
             if ($ownTx) {
                 $pdo->commit();
@@ -100,6 +113,39 @@ final class JournalEntryRepository
         }
     }
 
+    /**
+     * Obecný zápis mimo PostingService (opravné a převzaté zápisy, testovací předpisy):
+     * ve firmě s jednoduchou formou k datu se řádky bez dvojic a bez posouzení rozloží
+     * stejným párovačem jako zaúčtování. Co rozložit nejde, zastaví invariant dvojic.
+     * Složená firma řádky beze změny.
+     *
+     * @param array<string,mixed> $header
+     * @param list<array<string,mixed>> $lines
+     * @return list<array<string,mixed>>
+     */
+    private function pairGenericLines(array $header, array $lines): array
+    {
+        if (isset($header['pair_status']) || array_filter($lines, static fn (array $l): bool => isset($l['pair_no'])) !== []) {
+            return $lines;
+        }
+        $form = $this->entryForms()->formAt((int) $header['supplier_id'], (string) $header['entry_date'], currentRead: true);
+        if (!$form->isSingle()) {
+            return $lines;
+        }
+        $result = JournalPairer::pair($lines);
+        return $result['status'] === JournalPairer::STATUS_PAIRED ? $result['lines'] : $lines;
+    }
+
+    private function entryForms(): EntryFormService
+    {
+        return $this->entryForms ??= new EntryFormService(
+            $this->db,
+            $this->activity,
+            new AccountingModeRepository($this->db),
+            new FrameworkScopePolicy($this->db),
+        );
+    }
+
     public function insertPropertyOpening(\MyInvoice\Service\Property\Opening\OpeningOwnerProof $proof):array
     {
             $original=$proof->original($this->db);$journals=[];
@@ -110,7 +156,7 @@ final class JournalEntryRepository
             }
             $result=['journal_entry_id'=>null,'reversal_entry_id'=>null];
             foreach($journals as $part=>$journal){
-                $entry=$this->persistJournal($journal['header'],$journal['lines']);
+                $entry=$this->persistJournal($journal['header'],$journal['lines'],typedPairs:TypedJournalPairs::SPLIT);
                 if($part==='reversal'){
                     if($original===null||!$this->setReversedByLocked($original['entry']['id'],$proof->supplier,$entry))\MyInvoice\Service\Property\Opening\OpeningException::reject('reversal_conflict');
                     $result['reversal_entry_id']=$entry;
@@ -128,7 +174,7 @@ final class JournalEntryRepository
             if ($proof['header']['source_type'] !== 'cash' || trim($documentNumber) === '' || mb_strlen($documentNumber) > 100) throw new \LogicException('A cash number requires the current cash owner.');
             $proof['header']['document_no'] = $documentNumber;
         }
-        $entry = $this->persistJournal($proof['header'], $proof['lines']);
+        $entry = $this->persistJournal($proof['header'], $proof['lines'], typedPairs: TypedJournalPairs::SPLIT);
         $this->auditTypedPosting($proof['header'], $entry, null, ['property_clearing' => true]);
         $intent->bindJournal($entry);
         return $entry;
@@ -138,7 +184,7 @@ final class JournalEntryRepository
     {
         return (new DimensionPeriodGuard($this->db))->transaction(function () use ($intent): int {
             $proof = $intent->journal($this->db);
-            $entry = $this->persistJournal($proof['header'], $proof['lines']);
+            $entry = $this->persistJournal($proof['header'], $proof['lines'], typedPairs: TypedJournalPairs::SPLIT);
             $this->auditTypedPosting($proof['header'], $entry, null, ['property_source_revision' => true]);
             $intent->complete($this->db, $entry);
             return $entry;
@@ -148,7 +194,7 @@ final class JournalEntryRepository
     public function insertPropertySettlement(\MyInvoice\Service\Property\Payments\Workflow\PaymentSettlementIntent $intent): int
     {
         $proof = $intent->journal($this->db);
-        $entry = $this->persistJournal($proof['header'], $proof['lines']);
+        $entry = $this->persistJournal($proof['header'], $proof['lines'], typedPairs: TypedJournalPairs::SPLIT);
         $this->auditTypedPosting($proof['header'], $entry, null, ['property_settlement' => true]);
         $stmt = $this->db->pdo()->prepare("UPDATE unit_payment_operations SET journal_entry_id=? WHERE supplier_id=? AND id=? AND status='pending' AND journal_entry_id IS NULL");
         $stmt->execute([$entry, $intent->supplier, $intent->operationId]);
@@ -174,7 +220,7 @@ final class JournalEntryRepository
             $journal=$proof->journal($this->db);
             (new SystemDimensionWritePolicy($this->db))->assertPropertyFunding($journal['header'],$journal['lines'],$proof);
             \MyInvoice\Service\Accounting\PostingService::assertBalanced($journal['lines']);
-            $entry=$journal['source_entry_id']===null?$this->persistJournal($journal['header'],$journal['lines']):$this->insertReversalLocked($journal['header'],$journal['lines'],$journal['source_entry_id']);
+            $entry=$journal['source_entry_id']===null?$this->persistJournal($journal['header'],$journal['lines'],typedPairs:TypedJournalPairs::SPLIT):$this->insertReversalLocked($journal['header'],$journal['lines'],$journal['source_entry_id']);
             $this->auditTypedPosting($journal['header'],$entry,$journal['source_entry_id'],['typed_owner'=>$proof::class]);
             $proof->complete($this->db,$entry);return $entry;
         });
@@ -185,7 +231,7 @@ final class JournalEntryRepository
             $journal=$proof->journal($this->db);
             (new SystemDimensionWritePolicy($this->db))->assertPropertyServiceLifecycle($journal['header'],$journal['lines'],$proof);
             \MyInvoice\Service\Accounting\PostingService::assertBalanced($journal['lines']);
-            $entry=$journal['source_entry_id']===null?$this->persistJournal($journal['header'],$journal['lines']):$this->insertReversalLocked($journal['header'],$journal['lines'],$journal['source_entry_id']);
+            $entry=$journal['source_entry_id']===null?$this->persistJournal($journal['header'],$journal['lines'],typedPairs:TypedJournalPairs::SPLIT):$this->insertReversalLocked($journal['header'],$journal['lines'],$journal['source_entry_id']);
             $this->auditTypedPosting($journal['header'],$entry,$journal['source_entry_id'],['typed_owner'=>$proof::class]);
             $proof->complete($this->db,$entry);return $entry;
         });
@@ -199,7 +245,7 @@ final class JournalEntryRepository
             if ($proof['source_entry_id'] !== null) throw new \LogicException('An application cannot reverse a source.');
             (new \MyInvoice\Service\Accounting\Dimension\SystemDimensionWritePolicy($this->db))->assertPropertyServiceSettlementJournal($proof['header'], $proof['lines'], $intent->carrier($this->db));
             \MyInvoice\Service\Accounting\PostingService::assertBalanced($proof['lines']);
-            $entry = $this->persistJournal($proof['header'], $proof['lines']);
+            $entry = $this->persistJournal($proof['header'], $proof['lines'], typedPairs: TypedJournalPairs::SPLIT);
             $this->auditTypedPosting($proof['header'], $entry, null, ['property_service_settlement' => true]);
             $intent->complete($this->db, $entry);
             return $entry;
@@ -224,7 +270,7 @@ final class JournalEntryRepository
         $intent->claim($this->db);
         return (new DimensionPeriodGuard($this->db))->transaction(function () use ($intent): int {
             $proof = $intent->journal($this->db);
-            $entry = $this->persistJournal($proof['header'], $proof['lines']);
+            $entry = $this->persistJournal($proof['header'], $proof['lines'], typedPairs: TypedJournalPairs::SPLIT);
             $this->auditTypedPosting($proof['header'], $entry, null, ['property_setoff' => true]);
             $intent->complete($this->db, $entry);
             return $entry;
@@ -307,7 +353,7 @@ final class JournalEntryRepository
             $proof = \MyInvoice\Service\Accounting\Closing\ClosingLegal504Proof::forPending($this->db, $this, $supplierId, $periodId, $expectedVersion);
             (new SystemDimensionWritePolicy($this->db))->assertLegalClosing($proof);
             if ($proof->pending['status'] === 'written') return (int) $proof->pending['entry_id'];
-            $entryId = $this->persistJournal($proof->header, $proof->lines);
+            $entryId = $this->persistJournal($proof->header, $proof->lines, typedPairs: TypedJournalPairs::CONSECUTIVE);
             $payload = $proof->stepRow['decoded_payload'];
             $payload['entries'][] = ['entry_id' => $entryId] + $proof->record;
             $payload['legal_pending'] = array_replace($proof->pending, ['status' => 'written', 'entry_id' => $entryId,
@@ -334,7 +380,7 @@ final class JournalEntryRepository
             $entryId = null;
             if ($proof->lines !== []) {
                 (new SystemDimensionWritePolicy($this->db))->assertAssetReserveCorrection($proof);
-                $entryId = $this->persistJournal($proof->header, $proof->lines);
+                $entryId = $this->persistJournal($proof->header, $proof->lines, typedPairs: TypedJournalPairs::CONSECUTIVE);
                 $meta = $proof->pending['meta'] ?? [];
                 $this->activity->log('accounting.posted', $meta['user_id'] ?? null, 'journal_entry', $entryId,
                     ['source_type' => $proof->header['source_type'] ?? 'manual', 'source_id' => $proof->header['source_id'] ?? null, 'asset_reserve_correction' => true],
@@ -366,7 +412,7 @@ final class JournalEntryRepository
             foreach (array_keys($proof->batches) as $index) $policy->assertDeferredTax504($proof->batch($index));
             $batches = [];
             foreach ($proof->batches as $batch) {
-                $entryId = $this->persistJournal($batch['header'], $batch['lines']);
+                $entryId = $this->persistJournal($batch['header'], $batch['lines'], typedPairs: TypedJournalPairs::CONSECUTIVE);
                 $batches[] = ['phase' => $batch['phase'], 'entry_id' => $entryId, 'entry_version' => 1];
                 $meta = $proof->pending['meta'] ?? [];
                 $this->activity->log('accounting.posted', $meta['user_id'] ?? null, 'journal_entry', $entryId,
@@ -400,7 +446,7 @@ final class JournalEntryRepository
             if ($proof->lines === []) {
                 if ($previous !== null) throw Fx504JournalProof::changed();
             } elseif ($previous === null) {
-                $entryId = $this->persistJournal($header, $proof->lines);
+                $entryId = $this->persistJournal($header, $proof->lines, typedPairs: TypedJournalPairs::CONSECUTIVE);
             } else {
                 $entryId = (int) $previous['id'];
                 (new \MyInvoice\Service\Accounting\Closing\SecuritiesDebt504UseGuard($this->db))->assertEntriesMutable($supplierId, [$entryId]);
@@ -411,7 +457,8 @@ final class JournalEntryRepository
                     $header['period_id'], $header['entry_date'], $previous['row_version']]);
                 if ($stmt->rowCount() !== 1) throw Fx504JournalProof::changed();
                 $this->deleteLines($entryId, $supplierId);
-                $this->insertLines($this->db->pdo(), $entryId, $supplierId, $proof->lines);
+                [$pairHeader, $lines] = $this->pairTypedLines($header + ['supplier_id' => $supplierId], $proof->lines, TypedJournalPairs::CONSECUTIVE);
+                $this->insertLines($this->db->pdo(), $entryId, $pairHeader + ['pair_typed_owner' => true], $lines);
                 $this->logReleasedPairings($supplierId, $entryId, (new JournalLinePairingRepository($this->db))->releaseStale($supplierId, $entryId), 'repost');
             }
             if ($entryId !== null) {
@@ -454,7 +501,7 @@ final class JournalEntryRepository
             if (($existing === null ? null : (int) $existing['id']) !== ($proof->record['previous_entry_id'] ?? null)
                 || ($existing === null ? null : (int) $existing['row_version']) !== ($proof->record['previous_entry_version'] ?? null)) throw \MyInvoice\Repository\ClosingCarryReadRepository::changed();
             if ($existing === null) {
-                $entryId = $this->persistJournal($header, $proof->lines);
+                $entryId = $this->persistJournal($header, $proof->lines, typedPairs: TypedJournalPairs::CONSECUTIVE);
                 $entryVersion = 1;
             } else {
                 $entryId = (int) $existing['id'];
@@ -493,7 +540,8 @@ final class JournalEntryRepository
             $header['supplier_id'], $entryId, $header['period_id'], $entryVersion]);
         if ($stmt->rowCount() !== 1) throw \MyInvoice\Repository\ClosingCarryReadRepository::changed();
         $this->deleteLines($entryId, $header['supplier_id']);
-        $this->insertLines($this->db->pdo(), $entryId, $header['supplier_id'], $proof->lines);
+        [$pairHeader, $lines] = $this->pairTypedLines($header, $proof->lines, TypedJournalPairs::CONSECUTIVE);
+        $this->insertLines($this->db->pdo(), $entryId, $pairHeader + ['pair_typed_owner' => true], $lines);
         $this->logReleasedPairings($header['supplier_id'], $entryId,
             (new JournalLinePairingRepository($this->db))->releaseStale($header['supplier_id'], $entryId), 'repost');
     }
@@ -509,11 +557,20 @@ final class JournalEntryRepository
             $payload + $context, null, null, (int) $header['supplier_id']);
     }
 
-    private function persistJournal(array $header, array $lines): int
+    /**
+     * @param bool $typedOwner zápis typovaného zapisovače (SVJ, NNO, uzávěrka 504, převod
+     *        rámce): bez `$typedPairs` dvojice netvoří, v jednoduché formě se vede jako `ineligible`
+     * @param ?string $typedPairs režim {@see TypedJournalPairs} typovaného zápisu, jehož důkazy
+     *        přijmou zápis po dvojicích: v jednoduché formě se rozdělí, složená forma beze změny
+     */
+    private function persistJournal(array $header, array $lines, bool $typedOwner = true, ?string $typedPairs = null): int
     {
         $pdo = $this->db->pdo();
         if (!$pdo->inTransaction()) {
             throw new \LogicException('Journal persistence requires a transaction.');
+        }
+        if ($typedOwner && $typedPairs !== null) {
+            [$header, $lines] = $this->pairTypedLines($header, $lines, $typedPairs);
         }
         (new MembershipUseGuard($this->db))->assertHeaderOwner($header);
         if (($header['posted_at'] ?? null) !== null) (new \MyInvoice\Service\Accounting\Funding\NativeCostCoverage($this->db))->assertCreditNotePosting($header);
@@ -535,8 +592,43 @@ final class JournalEntryRepository
             $header['posted_by'] ?? null,
         ]);
         $entryId = (int) $pdo->lastInsertId();
-        $this->insertLines($pdo, $entryId, (int) $header['supplier_id'], $lines);
+        $this->insertLines($pdo, $entryId, $header + ['pair_typed_owner' => $typedOwner], $lines);
         return $entryId;
+    }
+
+    /**
+     * Řádky typovaného zápisu (modul nemovitostí SVJ, kroky uzávěrky 504) ve firmě
+     * s jednoduchou formou k datu zápisu: rozdělí je na dvojice jediným pravidlem
+     * {@see TypedJournalPairs::pair()}, se kterým porovnávají i jejich důkazy. Co rozdělit
+     * nejde, zůstane složené s posouzením `ineligible` a důvodem párovače.
+     *
+     * Číslo dvojice převzaté ze zdrojového zápisu (protiřádek banky, řádek předpisu)
+     * do nového zápisu nepatří a zahodí se v obou formách; firma, která jednoduchou
+     * formu nikdy neměla, takové řádky nemá a zapisuje bajtově stejně.
+     *
+     * @param array<string,mixed> $header
+     * @param list<array<string,mixed>> $lines
+     * @param TypedJournalPairs::SPLIT|TypedJournalPairs::CONSECUTIVE $mode
+     * @return array{array<string,mixed>, list<array<string,mixed>>}
+     */
+    private function pairTypedLines(array $header, array $lines, string $mode = TypedJournalPairs::SPLIT): array
+    {
+        if (isset($header['pair_status'])) {
+            return [$header, $lines];
+        }
+        if (TypedJournalPairs::hasPairs($lines)) {
+            $lines = TypedJournalPairs::withoutCarriedPairs($lines);
+        }
+        if (!$this->entryForms()->formAt((int) $header['supplier_id'], (string) $header['entry_date'], currentRead: true)->isSingle()) {
+            return [$header, $lines];
+        }
+        $result = TypedJournalPairs::pair($lines, $mode);
+        if ($result['status'] === JournalPairer::STATUS_PAIRED) {
+            return [$header, $result['lines']];
+        }
+        $header['pair_status'] = 'ineligible';
+        $header['pair_status_reason'] = TypedJournalPairs::REASON_PREFIX . ($result['reason'] ?? JournalPairer::REASON_MANY_TO_MANY);
+        return [$header, $lines];
     }
 
     public function insertReversal(array $header, array $lines, int $sourceEntryId): int
@@ -595,6 +687,27 @@ final class JournalEntryRepository
         (new JointAllocationUseGuard($this->db))->assertEntriesMutable($supplierId, [$sourceEntryId]);
         (new \MyInvoice\Service\Accounting\Closing\AssetReserveSourceUseGuard($this->db, $this))->assertReversal($supplierId, $sourceEntryId);
         $invalid = static fn (): PostingException => new PostingException('invalid_reversal_source', 'Protizápis neodpovídá živému zaúčtovanému zdroji.', 422);
+        if ($source !== null) {
+            // Dvojice už stornované nebo přeúčtované opravným zápisem dvojice se nezrcadlí znovu.
+            $reversedPairs = array_flip($this->reversedPairNos($supplierId, $sourceEntryId));
+            if ($reversedPairs !== []) {
+                $source['lines'] = array_values(array_filter(
+                    $source['lines'],
+                    static fn (array $line): bool => !isset($line['pair_no']) || !isset($reversedPairs[(int) $line['pair_no']]),
+                ));
+            }
+            // Typovaný vlastník (SVJ) skládá protizápis z plánu v tvaru složeného zápisu, zdroj
+            // po dvojicích ale leží rozdělený. Plán se vezme v tom tvaru dvojic, ve kterém zdroj
+            // leží (totéž deterministické pravidlo jako zápis zdroje); kontrola řádek po řádku
+            // proti živému zdroji níže platí beze změny.
+            if (TypedJournalPairs::hasPairs($source['lines']) && !TypedJournalPairs::hasPairs($lines)
+                && count($source['lines']) !== count($lines)) {
+                $lines = TypedJournalPairs::expectedFor($lines, array_map(
+                    static fn (array $line): array => array_replace($line, JournalLineAmount::reversal($line)),
+                    $source['lines'],
+                ));
+            }
+        }
         if ($source === null || $source['posted_at'] === null || $source['reversed_by'] !== null || $source['source_type'] === 'payroll'
             || ($header['source_type'] ?? 'manual') !== $source['source_type']
             || ($header['source_id'] ?? null) !== null || ($header['posted_at'] ?? null) === null
@@ -624,9 +737,25 @@ final class JournalEntryRepository
             $expected['line_no'] = $index;
             $mirror[] = $expected;
         }
+        // Storno zápisu po dvojicích je zase po dvojicích (čísla 1..k bez stornovaných
+        // dvojic), i když spadne do období se složenou formou. Storno složeného zápisu
+        // zůstává složené; v jednoduché formě se vede jako nezpůsobilé k rozdělení.
+        $pairMap = [];
+        foreach ($mirror as $i => $line) {
+            if (isset($line['pair_no'])) {
+                $pairMap[(int) $line['pair_no']] ??= count($pairMap) + 1;
+                $mirror[$i]['pair_no'] = $pairMap[(int) $line['pair_no']];
+            }
+        }
+        if ($pairMap !== []) {
+            $header['pairs_inherited'] = true;
+        } else {
+            $header['pair_status'] ??= 'ineligible';
+            $header['pair_status_reason'] ??= 'composite_reversal';
+        }
         // Přesné storno ověřeného aktuálního zdroje zachová i chybějící historické
         // dimenze. Nové povinnosti ani alokační pravidla jeho význam nedoplňují.
-        $reversalId = $this->persistJournal($header, $mirror);
+        $reversalId = $this->persistJournal($header, $mirror, false);
         if (!$this->setReversedByLocked($sourceEntryId, $supplierId, $reversalId)) {
             throw new PostingException('already_reversed', 'Zápis #' . $sourceEntryId . ' byl mezitím stornován.');
         }
@@ -701,7 +830,7 @@ final class JournalEntryRepository
         }
 
         $this->deleteLines($id, (int) $header['supplier_id']);
-        $this->insertLines($pdo, $id, (int) $header['supplier_id'], $lines);
+        $this->insertLines($pdo, $id, $header, $lines);
 
         // Okruh drží řádek přes (zápis, pořadí), takže přeúčtování ho přežije. Pokud
         // na stejném pořadí teď sedí jiný účet, položka z okruhu odejde se stopou v auditu.
@@ -721,10 +850,17 @@ final class JournalEntryRepository
      * ({@see \MyInvoice\Service\Accounting\PostingService::replaceEntryLines()}).
      * PŘEDPOKLAD: volající drží transakci.
      *
+     * Invariant dvojic se ověřuje nad VÝSLEDNÝM zápisem (zachované + nové řádky): ve
+     * firmě s jednoduchou formou musí volající odebírat celé dvojice a nové řádky nést
+     * `pair_no` za poslední dvojicí ({@see PostingService::replaceEntryLines()}).
+     *
      * @param list<int> $removeLineIds
      * @param list<array<string,mixed>> $addLines resolved řádky (account_id, side, amount, …)
+     * @param array{pair_status?:?string, pair_status_reason?:?string} $pairHeader posouzení
+     *        zápisu bez dvojic v jednoduché formě (zápis zůstává složený)
+     * @param array<int,int> $renumberPairs přečíslování zachovaných dvojic (staré => nové číslo)
      */
-    public function replaceSomeLines(int $entryId, int $supplierId, int $expectedRowVersion, array $removeLineIds, array $addLines): void
+    public function replaceSomeLines(int $entryId, int $supplierId, int $expectedRowVersion, array $removeLineIds, array $addLines, array $pairHeader = [], array $renumberPairs = []): void
     {
         (new MembershipUseGuard($this->db))->assertEntriesMutable($supplierId, [$entryId]);
         (new IssuanceUseGuard($this->db))->assertPostingEntriesMutable($supplierId, [$entryId]);
@@ -737,6 +873,11 @@ final class JournalEntryRepository
         (new \MyInvoice\Service\Accounting\JournalSettlementUseGuard($this->db))->assertLinesRemovable($supplierId, $entryId, $removeLineIds);
         $remove = array_fill_keys(array_map('intval', $removeLineIds), true);
         $retained = array_values(array_filter($entry['lines'], static fn (array $line): bool => !isset($remove[(int) $line['id']])));
+        foreach ($retained as $i => $line) {
+            if (isset($line['pair_no'], $renumberPairs[(int) $line['pair_no']])) {
+                $retained[$i]['pair_no'] = $renumberPairs[(int) $line['pair_no']];
+            }
+        }
         $nextLineNo = $retained === [] ? 0 : max(array_column($retained, 'line_no')) + 1;
         foreach ($addLines as $i => $line) {
             unset($addLines[$i]['id']);
@@ -772,7 +913,87 @@ final class JournalEntryRepository
         foreach ($addLines as $i => $line) {
             $addLines[$i]['line_no'] = $next + $i;
         }
-        $this->insertLines($pdo, $entryId, $supplierId, array_values($addLines));
+        if ($renumberPairs !== []) {
+            $renumber = $pdo->prepare('UPDATE journal_entry_lines SET pair_no = ? WHERE entry_id = ? AND supplier_id = ? AND pair_no = ?');
+            foreach ($renumberPairs as $from => $to) {
+                $renumber->execute([$to, $entryId, $supplierId, $from]);
+            }
+        }
+        $result = [...$retained, ...array_values($addLines)];
+        // Zápis, který už je po dvojicích, zůstává po dvojicích i ve složené formě
+        // (storno dvojice datované do složeného období, převedený zápis).
+        if (array_filter($entry['lines'], static fn (array $l): bool => isset($l['pair_no'])) !== []) {
+            $pairHeader['pairs_inherited'] = true;
+        }
+        usort($result, static fn (array $a, array $b): int => (int) ($a['line_no'] ?? 0) <=> (int) ($b['line_no'] ?? 0));
+        $this->insertLines($pdo, $entryId, $pairHeader + $entry, array_values($addLines), $result);
+        $this->logReleasedPairings(
+            $supplierId,
+            $entryId,
+            (new JournalLinePairingRepository($this->db))->releaseStale($supplierId, $entryId),
+            'repost',
+        );
+    }
+
+    /**
+     * Přeúčtuje vybrané řádky ŽIVÉHO zápisu na jiný účet: řádek zůstává týž (id, částka,
+     * strana, dvojice, text, měna, dimenze i rozpady), mění se jen `account_id`. Pro
+     * hromadné přeúčtování ručních zápisů, interních a pokladních dokladů, kde zápis
+     * nestaví žádný zdrojový doklad znovu a výměna celých řádků by zbytečně přišla
+     * o dimenze a vazby řádků.
+     *
+     * Pojistky stejné jako {@see replaceSomeLines()}: optimistický zámek `row_version`,
+     * použití zápisu jinými agendami (členské příspěvky, předpisy SVJ, společné náklady,
+     * zúčtování, rezerva majetku, kapitál a daňová úspora neziskovky, platby SVJ) a politika
+     * systémových dimenzí. Vázaná párování saldokonta na změněných řádcích se uvolní.
+     * Kontroly období, zámku k datu a daňové neutrality dělá volající.
+     * PŘEDPOKLAD: volající drží transakci.
+     *
+     * @param list<int> $lineIds
+     */
+    public function reassignLineAccounts(int $entryId, int $supplierId, int $expectedRowVersion, array $lineIds, int $accountId): void
+    {
+        $lineIds = array_values(array_unique(array_map('intval', $lineIds)));
+        (new MembershipUseGuard($this->db))->assertEntriesMutable($supplierId, [$entryId]);
+        (new IssuanceUseGuard($this->db))->assertPostingEntriesMutable($supplierId, [$entryId]);
+        $entry = $this->currentEntryForDimensionWrite($entryId, $supplierId);
+        (new JointAllocationUseGuard($this->db))->assertEntriesMutable($supplierId, [$entryId]);
+        if ($entry === null || $entry['reversed_by'] !== null || (int) $entry['row_version'] !== $expectedRowVersion) {
+            throw new PostingException('version_conflict', 'Zápis #' . $entryId . ' se mezitím změnil nebo byl stornován - načtěte aktuální stav.', 409);
+        }
+        $ids = array_flip($lineIds);
+        $known = array_flip(array_map(static fn (array $l): int => (int) $l['id'], $entry['lines']));
+        if ($lineIds === [] || array_diff_key($ids, $known) !== []) {
+            throw new PostingException('entry_not_found', 'Řádek do zápisu #' . $entryId . ' nepatří.', 404);
+        }
+        (new \MyInvoice\Service\Accounting\JournalSettlementUseGuard($this->db))->assertLinesRemovable($supplierId, $entryId, $lineIds);
+        $result = array_map(static fn (array $l): array => isset($ids[(int) $l['id']]) ? ['account_id' => $accountId] + $l : $l, $entry['lines']);
+        foreach ([
+            new \MyInvoice\Service\Accounting\Closing\AssetReserveSourceUseGuard($this->db, $this),
+            new \MyInvoice\Service\Tax\Nonprofit\NonprofitTaxSavingUseGuard($this->db, $this),
+            new \MyInvoice\Service\Nonprofit\Capital\CapitalUseGuard($this->db, $this),
+        ] as $guard) {
+            // `true` = zápis je použitý jinde a změna je jen beze změny řádků; jiná změna
+            // použitého zápisu v guardu skončí výjimkou. Výměna účtu tedy nikdy `true` nedá.
+            if ($guard->assertEntryChange($supplierId, $entryId, $result, $entry['entry_date'], $entry)) {
+                return;
+            }
+        }
+        (new \MyInvoice\Service\Property\Payments\Workflow\PaymentMutationContext($this->db))->assertEntriesMutable($supplierId, [$entryId]);
+        (new SystemDimensionWritePolicy($this->db))->assertJournal($entry, $result, $entry['lines']);
+
+        $pdo = $this->db->pdo();
+        $stmt = $pdo->prepare(
+            'UPDATE journal_entries SET row_version = row_version + 1
+              WHERE id = ? AND supplier_id = ? AND reversed_by IS NULL AND row_version = ?'
+        );
+        $stmt->execute([$entryId, $supplierId, $expectedRowVersion]);
+        if ($stmt->rowCount() !== 1) {
+            throw new PostingException('version_conflict', 'Zápis #' . $entryId . ' se mezitím změnil nebo byl stornován - načtěte aktuální stav.', 409);
+        }
+        $in = implode(',', array_fill(0, count($lineIds), '?'));
+        $pdo->prepare("UPDATE journal_entry_lines SET account_id = ? WHERE entry_id = ? AND supplier_id = ? AND id IN ({$in})")
+            ->execute([$accountId, $entryId, $supplierId, ...$lineIds]);
         $this->logReleasedPairings(
             $supplierId,
             $entryId,
@@ -1189,15 +1410,390 @@ final class JournalEntryRepository
     }
 
     /**
-     * @param list<array{account_id:int, side:'debit'|'credit', amount:float|string, is_red_storno?:bool, cost_center?:?string, project_id?:?int, line_no?:int}> $lines
+     * Fyzicky rozdělí řádky zaúčtovaného zápisu na dvojice (převod starších zápisů).
+     *
+     * Kontrakt (implementace navazuje): `$pairedLines` je výstup JournalPairer::pair()
+     * nad řádky zápisu, kde každý díl nese `id` původního řádku. První díl řádku zůstane
+     * na původním řádku (stejné `id` a `line_no`, UPDATE `amount`, `amount_foreign`,
+     * `pair_no`, `line_text`), další díly se vloží s novými `line_no` za maximem a se
+     * zkopírovanými dimenzemi a rozpady; řádky se nikdy nemažou. Optimistická
+     * konkurence přes `row_version` (zvýší se), výsledek projde invariantem dvojic.
+     * Volající drží transakci a zámek období a zapisuje audit.
+     *
+     * Každý díl v `$pairedLines` nese `id` původního řádku (díly téhož řádku se stejným
+     * `id`), `pair_no`, `line_text` a částky dílu. Součty po řádcích musí sedět na
+     * původní řádky a výsledek musí projít invariantem dvojic.
+     *
+     * @param list<array<string,mixed>> $pairedLines
+     * @throws PostingException version_conflict | invalid_pair_split
+     * @throws \MyInvoice\Service\Accounting\Pair\JournalPairException
      */
-    private function insertLines(\PDO $pdo, int $entryId, int $supplierId, array $lines): void
+    public function splitIntoPairs(int $entryId, int $supplierId, int $expectedRowVersion, array $pairedLines): void
+    {
+        $pdo = $this->db->pdo();
+        if (!$pdo->inTransaction()) {
+            throw new \LogicException('Rozdělení zápisu na dvojice vyžaduje transakci volajícího.');
+        }
+        $entry = $this->currentEntryForDimensionWrite($entryId, $supplierId);
+        if ($entry === null || $entry['reversed_by'] !== null || (int) $entry['row_version'] !== $expectedRowVersion) {
+            throw new PostingException('version_conflict', 'Zápis #' . $entryId . ' se mezitím změnil nebo byl stornován — načtěte aktuální stav.', 409);
+        }
+        $invalid = static fn (): PostingException => new PostingException('invalid_pair_split', 'Rozdělení na dvojice neodpovídá řádkům zápisu #' . $entryId . '.', 422);
+        $original = [];
+        foreach ($entry['lines'] as $line) {
+            if (isset($line['pair_no'])) {
+                throw $invalid();
+            }
+            $original[(int) $line['id']] = $line;
+        }
+        $pieces = [];
+        foreach ($pairedLines as $piece) {
+            $lineId = (int) ($piece['id'] ?? 0);
+            if (!isset($original[$lineId])) {
+                throw $invalid();
+            }
+            $pieces[$lineId][] = $piece;
+        }
+        if (count($pieces) !== count($original)) {
+            throw $invalid();
+        }
+        foreach ($pieces as $lineId => $parts) {
+            $source = $original[$lineId];
+            $cents = 0;
+            $foreign = 0;
+            foreach ($parts as $part) {
+                if ((int) $part['account_id'] !== (int) $source['account_id'] || $part['side'] !== $source['side']
+                    || !empty($part['is_red_storno']) !== !empty($source['is_red_storno'])) {
+                    throw $invalid();
+                }
+                $cents += JournalLineAmount::cents($part['amount']);
+                $foreign += isset($part['amount_foreign']) ? JournalLineAmount::cents($part['amount_foreign']) : 0;
+            }
+            $sourceForeign = isset($source['amount_foreign']) ? JournalLineAmount::cents($source['amount_foreign']) : 0;
+            if ($cents !== JournalLineAmount::cents($source['amount']) || $foreign !== $sourceForeign) {
+                throw $invalid();
+            }
+        }
+
+        $result = [];
+        foreach ($pairedLines as $piece) {
+            $source = $original[(int) $piece['id']];
+            $result[] = array_replace($source, [
+                'amount'         => $piece['amount'],
+                'amount_foreign' => $piece['amount_foreign'] ?? null,
+                'pair_no'        => $piece['pair_no'] ?? null,
+                'line_text'      => $piece['line_text'] ?? null,
+            ]);
+        }
+        $header = $entry + ['pairs_inherited' => false];
+        $this->assertPairs($header, $result);
+
+        $stmt = $pdo->prepare(
+            'UPDATE journal_entries SET row_version = row_version + 1
+              WHERE id = ? AND supplier_id = ? AND reversed_by IS NULL AND row_version = ?'
+        );
+        $stmt->execute([$entryId, $supplierId, $expectedRowVersion]);
+        if ($stmt->rowCount() !== 1) {
+            throw new PostingException('version_conflict', 'Zápis #' . $entryId . ' se mezitím změnil nebo byl stornován — načtěte aktuální stav.', 409);
+        }
+
+        $update = $pdo->prepare(
+            'UPDATE journal_entry_lines SET amount = ?, amount_foreign = ?, pair_no = ?, line_text = ?
+              WHERE id = ? AND entry_id = ? AND supplier_id = ?'
+        );
+        $max = $pdo->prepare('SELECT COALESCE(MAX(line_no), -1) FROM journal_entry_lines WHERE entry_id = ? AND supplier_id = ?');
+        $max->execute([$entryId, $supplierId]);
+        $nextLineNo = (int) $max->fetchColumn() + 1;
+        $kept = [];
+        $added = [];
+        foreach ($result as $line) {
+            $lineId = (int) $line['id'];
+            if (!isset($kept[$lineId])) {
+                $kept[$lineId] = true;
+                $update->execute([
+                    JournalLineAmount::decimal($line['amount']),
+                    isset($line['amount_foreign']) ? JournalLineAmount::decimal($line['amount_foreign']) : null,
+                    $line['pair_no'],
+                    self::lineText($line),
+                    $lineId,
+                    $entryId,
+                    $supplierId,
+                ]);
+                continue;
+            }
+            unset($line['id'], $line['entry_id']);
+            $line['line_no'] = $nextLineNo++;
+            $added[] = $line;
+        }
+        if ($added !== []) {
+            $this->writeLines($pdo, $entryId, $supplierId, $added);
+        }
+        $pdo->prepare('DELETE FROM journal_entry_pair_status WHERE supplier_id = ? AND entry_id = ?')
+            ->execute([$supplierId, $entryId]);
+    }
+
+    /**
+     * Pohled na dvojice zápisu pro API detailu: `pairs` (jeden prvek na dvojici, MD a Dal
+     * řádek, částka, text, opravný zápis dvojice) a `pair_status` u zápisu bez dvojic
+     * v jednoduché formě. Složený zápis bez posouzení vrací prázdné pole.
+     *
+     * @param list<array<string,mixed>> $lines řádky zápisu (s `id`, volitelně `account_code`)
+     * @return array{pairs?: list<array<string,mixed>>, pair_status?: array{status:string, reason:?string}}
+     */
+    public function pairView(int $supplierId, int $entryId, array $lines): array
+    {
+        $byPair = [];
+        foreach ($lines as $line) {
+            if (isset($line['pair_no'])) {
+                $byPair[(int) $line['pair_no']][] = $line;
+            }
+        }
+        if ($byPair === []) {
+            $stmt = $this->db->pdo()->prepare('SELECT status, reason FROM journal_entry_pair_status WHERE supplier_id = ? AND entry_id = ?');
+            $stmt->execute([$supplierId, $entryId]);
+            $row = $stmt->fetch(PDO::FETCH_ASSOC);
+            return $row === false ? [] : ['pair_status' => ['status' => (string) $row['status'], 'reason' => $row['reason']]];
+        }
+        $stmt = $this->db->pdo()->prepare('SELECT pair_no, reversal_entry_id FROM journal_pair_reversals WHERE supplier_id = ? AND entry_id = ?');
+        $stmt->execute([$supplierId, $entryId]);
+        $reversals = array_map('intval', array_column($stmt->fetchAll(PDO::FETCH_ASSOC), 'reversal_entry_id', 'pair_no'));
+        ksort($byPair);
+        $pairs = [];
+        foreach ($byPair as $pairNo => $pairLines) {
+            $debit = null;
+            $credit = null;
+            foreach ($pairLines as $line) {
+                if (JournalPairInvariant::effectiveSide($line) === 'debit') {
+                    $debit = $line;
+                } else {
+                    $credit = $line;
+                }
+            }
+            $pairs[] = [
+                'pair_no'              => $pairNo,
+                'debit_line_id'        => isset($debit['id']) ? (int) $debit['id'] : null,
+                'credit_line_id'       => isset($credit['id']) ? (int) $credit['id'] : null,
+                'debit_account_code'   => $debit['account_code'] ?? null,
+                'credit_account_code'  => $credit['account_code'] ?? null,
+                'amount'               => (float) ($debit['amount'] ?? $credit['amount'] ?? 0),
+                'is_red_storno'        => !empty(($debit ?? $credit)['is_red_storno']),
+                'line_text'            => $debit['line_text'] ?? $credit['line_text'] ?? null,
+                'reversed_by_entry_id' => $reversals[$pairNo] ?? null,
+            ];
+        }
+        return ['pairs' => $pairs];
+    }
+
+    /**
+     * Posouzení zápisů bez dvojic (`composite_mn` / `ineligible`) pro stránku seznamu
+     * deníku, jedním dotazem po primárním klíči. Zápis bez posouzení v mapě chybí.
+     *
+     * @param list<int> $entryIds
+     * @return array<int,string> entry_id => status
+     */
+    public function pairStatusesForEntries(int $supplierId, array $entryIds): array
+    {
+        if ($entryIds === []) {
+            return [];
+        }
+        $place = implode(',', array_fill(0, count($entryIds), '?'));
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT entry_id, status FROM journal_entry_pair_status WHERE supplier_id = ? AND entry_id IN ({$place})"
+        );
+        $stmt->execute([$supplierId, ...$entryIds]);
+        $out = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $out[(int) $row['entry_id']] = (string) $row['status'];
+        }
+        return $out;
+    }
+
+    /**
+     * Čísla dvojic zápisu, které už storno nebo přeúčtování dvojice odebralo
+     * (`journal_pair_reversals`). Storno celého zápisu je nezrcadlí podruhé.
+     *
+     * @return list<int>
+     */
+    public function reversedPairNos(int $supplierId, int $entryId): array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT pair_no FROM journal_pair_reversals WHERE supplier_id = ? AND entry_id = ? ORDER BY pair_no'
+        );
+        $stmt->execute([$supplierId, $entryId]);
+        return array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN));
+    }
+
+    /**
+     * Opravný zápis vybraných dvojic: zrcadlo dvojic (+ volitelně nové dvojice přeúčtování)
+     * a vazby v `journal_pair_reversals`. Originál zůstává nestornovaný (`reversed_by` NULL).
+     * Zrcadlo se ověří proti živým řádkům dvojic originálu stejně jako storno celého zápisu.
+     *
+     * @param array<string,mixed> $header hlavička opravného zápisu
+     * @param list<array<string,mixed>> $mirror zrcadlo vybraných dvojic (pair_no originálu)
+     * @param list<int> $pairNos stornované dvojice originálu
+     * @param list<array<string,mixed>> $replacement rozřešené řádky nové dvojice (jen u přeúčtování jedné dvojice)
+     * @return int id opravného zápisu
+     */
+    public function insertPairReversal(array $header, array $mirror, int $sourceEntryId, array $pairNos, array $replacement = [], ?int $createdBy = null): int
+    {
+        return (new DimensionPeriodGuard($this->db))->transaction(function () use ($header, $mirror, $sourceEntryId, $pairNos, $replacement, $createdBy): int {
+            $supplierId = (int) $header['supplier_id'];
+            (new IssuanceUseGuard($this->db))->assertPostingEntriesMutable($supplierId, [$sourceEntryId]);
+            (new \MyInvoice\Service\Property\Payments\Workflow\PaymentMutationContext($this->db))->assertEntriesMutable($supplierId, [$sourceEntryId]);
+            (new MembershipUseGuard($this->db))->assertEntriesMutable($supplierId, [$sourceEntryId]);
+            $source = $this->currentEntryForDimensionWrite($sourceEntryId, $supplierId);
+            $invalid = static fn (): PostingException => new PostingException('invalid_reversal_source', 'Protizápis neodpovídá živému zaúčtovanému zdroji.', 422);
+            if ($source === null || $source['posted_at'] === null || $source['reversed_by'] !== null || $source['source_type'] === 'payroll'
+                || ($header['source_type'] ?? 'manual') !== $source['source_type'] || ($header['source_id'] ?? null) !== null
+                || $pairNos === [] || $mirror === [] || ($replacement !== [] && count($pairNos) !== 1)) {
+                throw $invalid();
+            }
+            $already = array_flip($this->reversedPairNos($supplierId, $sourceEntryId));
+            $selected = array_flip($pairNos);
+            $sourcePairs = [];
+            foreach ($source['lines'] as $line) {
+                if (isset($line['pair_no'], $selected[(int) $line['pair_no']])) {
+                    if (isset($already[(int) $line['pair_no']])) {
+                        throw new PostingException('pair_already_reversed', 'Dvojice #' . (int) $line['pair_no'] . ' už byla stornována nebo přeúčtována.', 409);
+                    }
+                    $sourcePairs[] = $line;
+                }
+            }
+            if (count($sourcePairs) !== 2 * count($pairNos) || count($mirror) !== count($sourcePairs)) {
+                throw $invalid();
+            }
+            $lines = [];
+            $map = [];
+            $next = 0;
+            foreach (array_values($mirror) as $index => $line) {
+                $original = $sourcePairs[$index];
+                $expected = array_replace($original, JournalLineAmount::reversal($original));
+                if (!SystemDimensionWritePolicy::sameLedgerLine($line, $expected)
+                    || (int) ($line['pair_no'] ?? 0) !== (int) $original['pair_no']) {
+                    throw $invalid();
+                }
+                $originalPair = (int) $original['pair_no'];
+                $map[$originalPair] ??= ++$next;
+                $line['pair_no'] = $map[$originalPair];
+                $line['line_no'] = $index;
+                $lines[] = $line;
+            }
+            $replacementPairNo = null;
+            if ($replacement !== []) {
+                $replacementPairNo = ++$next;
+                foreach (array_values($replacement) as $i => $line) {
+                    $line['pair_no'] = $replacementPairNo;
+                    $line['line_no'] = count($lines);
+                    $lines[] = $line;
+                }
+            }
+            $header['pairs_inherited'] = true;
+            $reversalId = $this->persistJournal($header, $lines, false);
+            $link = $this->db->pdo()->prepare(
+                'INSERT INTO journal_pair_reversals
+                    (supplier_id, entry_id, pair_no, reversal_entry_id, reversal_pair_no, replacement_pair_no, created_by)
+                 VALUES (?, ?, ?, ?, ?, ?, ?)'
+            );
+            foreach ($map as $originalPair => $reversalPair) {
+                $link->execute([$supplierId, $sourceEntryId, $originalPair, $reversalId, $reversalPair, $replacementPairNo, $createdBy]);
+            }
+            return $reversalId;
+        });
+    }
+
+    /**
+     * Pojistka invariantů dvojic nad VÝSLEDNÝM stavem zápisu (jediné místo, kudy jdou
+     * řádky do deníku). Vrací stav, který se má zapsat do `journal_entry_pair_status`
+     * (zápis bez dvojic ve firmě s jednoduchou formou), nebo null.
+     *
+     * Firma bez řádku historie formy zaplatí jediný dotaz po indexu a dál jde dnešní cestou.
+     * Typované zapisovače (SVJ, NNO, kroky uzávěrky 504, převod rámce) dvojice zatím netvoří:
+     * bez výslovného stavu se jejich zápis v jednoduché formě vede jako `ineligible`
+     * s důvodem `typed_owner` a převod ani noční kontrola ho nerozdělí.
+     *
+     * @param array<string,mixed> $header supplier_id, entry_date, source_type; volitelně
+     *        pair_status, pair_status_reason, pairs_inherited, pair_typed_owner
+     * @param list<array<string,mixed>> $lines
+     * @return array{status:string, reason:?string}|null
+     */
+    private function assertPairs(array $header, array $lines): ?array
+    {
+        $paired = false;
+        foreach ($lines as $line) {
+            if (isset($line['pair_no'])) {
+                $paired = true;
+                break;
+            }
+        }
+        $form = $this->entryForms()->formAt((int) $header['supplier_id'], (string) $header['entry_date'], currentRead: true);
+        if (!$paired && !$form->isSingle()) {
+            return null;
+        }
+        $status = $header['pair_status'] ?? null;
+        $reason = $header['pair_status_reason'] ?? null;
+        if (!$paired && $status === null && !empty($header['pair_typed_owner'])) {
+            $status = 'ineligible';
+            $reason = 'typed_owner';
+        }
+        JournalPairInvariant::assert([
+            'entry_date'      => $header['entry_date'],
+            'pair_status'     => $status,
+            'pairs_inherited' => !empty($header['pairs_inherited']),
+        ], $lines, $form);
+
+        return $paired ? null : ['status' => (string) $status, 'reason' => $reason !== null ? mb_substr((string) $reason, 0, 64) : null];
+    }
+
+    /** Zapíše (nebo po rozdělení na dvojice smaže) posouzení zápisu bez dvojic. */
+    private function recordPairStatus(int $supplierId, int $entryId, ?array $status, bool $paired): void
+    {
+        if ($status !== null) {
+            $this->db->pdo()->prepare(
+                'INSERT INTO journal_entry_pair_status (supplier_id, entry_id, status, reason, run_id, assessed_at)
+                 VALUES (?, ?, ?, ?, NULL, NOW())
+                 ON DUPLICATE KEY UPDATE status = VALUES(status), reason = VALUES(reason), run_id = NULL, assessed_at = VALUES(assessed_at)'
+            )->execute([$supplierId, $entryId, $status['status'], $status['reason']]);
+            return;
+        }
+        if ($paired) {
+            $this->db->pdo()->prepare('DELETE FROM journal_entry_pair_status WHERE supplier_id = ? AND entry_id = ?')
+                ->execute([$supplierId, $entryId]);
+        }
+    }
+
+    /**
+     * Zapíše řádky zápisu. Jediný zapisovač řádků deníku: před zápisem ověří invarianty
+     * dvojic nad výsledným stavem zápisu (`$resultLines`, jinak `$lines`) a po zápisu
+     * zaznamená posouzení zápisu bez dvojic.
+     *
+     * @param array<string,mixed> $header hlavička zápisu (supplier_id, entry_date, source_type, …)
+     * @param list<array{account_id:int, side:'debit'|'credit', amount:float|string, is_red_storno?:bool, cost_center?:?string, project_id?:?int, line_no?:int, pair_no?:?int, line_text?:?string}> $lines
+     * @param list<array<string,mixed>>|null $resultLines celý zápis po zápisu (výměna části řádků)
+     */
+    private function insertLines(\PDO $pdo, int $entryId, array $header, array $lines, ?array $resultLines = null): void
+    {
+        $supplierId = (int) $header['supplier_id'];
+        $result = $resultLines ?? $lines;
+        $status = $this->assertPairs($header, $result);
+        $this->writeLines($pdo, $entryId, $supplierId, $lines);
+        $paired = false;
+        foreach ($result as $line) {
+            if (isset($line['pair_no'])) {
+                $paired = true;
+                break;
+            }
+        }
+        $this->recordPairStatus($supplierId, $entryId, $status, $paired);
+    }
+
+    /** @param list<array<string,mixed>> $lines */
+    private function writeLines(\PDO $pdo, int $entryId, int $supplierId, array $lines): void
     {
         $lineStmt = $pdo->prepare(
             'INSERT INTO journal_entry_lines
                 (entry_id, supplier_id, account_id, side, amount, is_red_storno, currency_code, fx_rate,
-                 amount_foreign, cost_center, project_id, line_no)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+                 amount_foreign, cost_center, project_id, line_no, pair_no, line_text)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
         );
         $n = 0;
         $assignmentLines = [];
@@ -1215,6 +1811,8 @@ final class JournalEntryRepository
                 $line['cost_center'] ?? null,
                 isset($line['project_id']) && (int) $line['project_id'] > 0 ? (int) $line['project_id'] : null,
                 $line['line_no'] ?? $n,
+                isset($line['pair_no']) ? (int) $line['pair_no'] : null,
+                self::lineText($line),
             ]);
             // Dimenze řádku (migrace 1860) — typ => hodnota, zvalidované PostingService
             // resp. volajícím. Řádek se při přepisu maže celý, vazba odejde kaskádou.
@@ -1436,13 +2034,14 @@ final class JournalEntryRepository
     {
         $stmt = $this->db->pdo()->prepare(
             'SELECT id, entry_id, supplier_id, account_id, side, amount, is_red_storno, currency_code, fx_rate,
-                    amount_foreign, cost_center, project_id, line_no
+                    amount_foreign, cost_center, project_id, line_no, pair_no, line_text
                FROM journal_entry_lines
               WHERE entry_id = ? AND supplier_id = ?
               ORDER BY line_no ASC, id ASC' . ($forUpdate ? ' FOR UPDATE' : '')
         );
         $stmt->execute([$entryId, $supplierId]);
         return array_map(static function (array $r): array {
+            $r = self::castPairColumns($r);
             $r['id'] = (int) $r['id'];
             $r['entry_id'] = (int) $r['entry_id'];
             $r['supplier_id'] = (int) $r['supplier_id'];
@@ -1455,6 +2054,27 @@ final class JournalEntryRepository
             $r['line_no'] = (int) $r['line_no'];
             return $r;
         }, $stmt->fetchAll(PDO::FETCH_ASSOC));
+    }
+
+    /**
+     * Id zápisů, které vybírá filtr seznamu deníku ({@see paginate()}), pro hromadné akce:
+     * nejvýš `$limit` id a celkový počet, ať jde odmítnout výběr nad limitem.
+     *
+     * @param array<string,mixed> $filters
+     * @return array{total:int, ids:list<int>}
+     */
+    public function filteredIds(int $supplierId, array $filters, int $limit): array
+    {
+        [$whereSql, $params] = $this->buildWhere($supplierId, $filters);
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT je.id, COUNT(*) OVER() AS total FROM journal_entries je WHERE {$whereSql} ORDER BY je.entry_date, je.id LIMIT " . max(1, $limit)
+        );
+        $stmt->execute($params);
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        return [
+            'total' => $rows === [] ? 0 : (int) $rows[0]['total'],
+            'ids'   => array_map(static fn (array $r): int => (int) $r['id'], $rows),
+        ];
     }
 
     /**
@@ -1545,11 +2165,13 @@ final class JournalEntryRepository
                        ast.name AS source_asset_name,
                        stl.doc_type AS source_settlement_doc_type,
                        stl.doc_id AS source_settlement_doc_id,
+                       acs.accrual_item_id AS source_accrual_item_id,
                        -- Protizápis nese zdroj jen jako typ, ne jako ID: doklad patří tomu,
                        -- co stornuje. Bez tohohle na něm chybí proklik na prvotní doklad
                        -- i cesta zpět na stornovaný zápis, takže ze storna nevede nikam nic.
                        rev_src.id AS reverses_entry_id,
-                       COALESCE(je.source_id, rev_src.source_id) AS source_link_id
+                       COALESCE(je.source_id, rev_src.source_id) AS source_link_id,
+                       " . self::DOCUMENT_FACT_SELECT . "
                   FROM (SELECT je.id, {$sortExpression} AS sort_value
                           FROM journal_entries je
                          WHERE {$whereSql}
@@ -1557,20 +2179,7 @@ final class JournalEntryRepository
                          LIMIT {$limit} OFFSET {$offset}) AS pick
                   JOIN journal_entries je ON je.id = pick.id
              LEFT JOIN users u ON u.id = je.posted_by
-             -- FORCE INDEX: `reversed_by` je skoro všude NULL, optimizér pak odhaduje tisíce
-             -- řádků na lookup a volí BNL přes celou tabulku (0,2 s na stránku u 100 tis. zápisů, roste
-             -- s počtem zápisů). S indexem 1 ms.
-             LEFT JOIN journal_entries rev_src FORCE INDEX (idx_je_supplier_reversed_by)
-                    ON rev_src.supplier_id = je.supplier_id
-                    AND rev_src.reversed_by = je.id
-             LEFT JOIN bank_transactions rev_bt ON rev_src.source_type = 'bank' AND rev_bt.id = rev_src.source_id
-             LEFT JOIN cash_documents rev_cd ON rev_src.source_type = 'cash' AND rev_cd.id = rev_src.source_id
-             LEFT JOIN bank_transactions bt ON je.source_type = 'bank' AND bt.id = je.source_id
-             LEFT JOIN cash_documents cd ON je.source_type = 'cash' AND cd.id = je.source_id
-             -- Zápočet: source_id je ID ZÁPOČTU, ne dokladu. Bez tohohle JOINu nemá deník
-             -- kam prokliknout — uživatel vidí číslo faktury, ale odkaz nikam nevede.
-             LEFT JOIN invoice_settlements stl ON je.source_type = 'settlement'
-                    AND stl.id = je.source_id AND stl.supplier_id = je.supplier_id
+             " . self::DOCUMENT_SOURCE_JOINS . "
              LEFT JOIN invoices src_i ON je.source_type = 'invoice'
                     AND src_i.id = je.source_id AND src_i.supplier_id = je.supplier_id
              LEFT JOIN purchase_invoices src_pi ON je.source_type = 'purchase_invoice'
@@ -1583,6 +2192,9 @@ final class JournalEntryRepository
                         WHEN je.source_type = 'depreciation' THEN dep.asset_id
                         ELSE NULL
                     END
+             LEFT JOIN accrual_schedule acs ON je.source_type IN ('accrual_release', 'accrual_termination')
+                    AND acs.supplier_id = je.supplier_id AND acs.id = COALESCE(je.source_id, rev_src.source_id)
+             " . self::DOCUMENT_FACT_JOINS . "
                  ORDER BY pick.sort_value {$sortDir}, je.id DESC";
         $stmt = $pdo->prepare($sql);
         $stmt->execute([...$selectParams, ...$sortParams, ...$params]);
@@ -1599,6 +2211,88 @@ final class JournalEntryRepository
                     SELECT 1 FROM bank_transactions bt_ref
                      WHERE bt_ref.id = je.source_id AND bt_ref.bank_ref LIKE ? ESCAPE '='
                 ))";
+
+    /**
+     * Údaje prvotního dokladu do volitelných sloupců deníku (Firma, IČ, VS, číslo dokladu
+     * dodavatele, DUZP, datum přijetí, splatnost, úhrada, účet protistrany) a čitelný
+     * štítek zdroje (`source_ref`). Doklad se hledá stejně jako proklik: přímý zdroj, zdroj
+     * stornovaného zápisu, doklad vyrovnaný zápočtem a faktura uhrazená pokladním dokladem.
+     * Převzaté zápisy z převodů mají tytéž vazby, takže sloupce plní i ony.
+     *
+     * Počítá se jen pro vybranou stránku (poddotaz `pick` v paginate()), každý JOIN jde po
+     * primárním nebo unikátním klíči. Podle těchto sloupců se proto neřadí ani nefiltruje.
+     */
+    private const DOCUMENT_FACT_SELECT = "
+                       CASE je.source_type
+                           WHEN 'invoice' THEN fi.varsymbol
+                           WHEN 'purchase_invoice' THEN fpi.varsymbol
+                           WHEN 'other_item' THEN foi.document_no
+                           WHEN 'cash' THEN COALESCE(cd.doc_number, rev_cd.doc_number)
+                           ELSE NULL
+                       END AS source_ref,
+                       COALESCE(foi.partner_name, fid.partner_name, cd.partner_name, rev_cd.partner_name,
+                                NULLIF(fc.company_name, ''), NULLIF(TRIM(CONCAT_WS(' ', fc.first_name, fc.last_name)), ''),
+                                bt.counterparty_name, rev_bt.counterparty_name) AS partner_name,
+                       COALESCE(NULLIF(cd.partner_ic, ''), NULLIF(rev_cd.partner_ic, ''), NULLIF(fc.ic, '')) AS partner_ic,
+                       COALESCE(NULLIF(fi.payment_variable_symbol, ''), fi.varsymbol,
+                                NULLIF(fpi.payment_variable_symbol, ''), fpi.vendor_invoice_number,
+                                NULLIF(foi.variable_symbol, ''),
+                                NULLIF(bt.variable_symbol, ''), NULLIF(rev_bt.variable_symbol, '')) AS variable_symbol,
+                       fpi.vendor_invoice_number AS vendor_document_no,
+                       COALESCE(fi.tax_date, fpi.tax_date, cd.tax_date, rev_cd.tax_date) AS tax_date,
+                       fpi.received_at AS received_date,
+                       COALESCE(fi.due_date, fpi.due_date, foi.due_on) AS due_date,
+                       COALESCE(fi.paid_at, fpi.paid_at) AS paid_date,
+                       COALESCE(
+                           NULLIF(CONCAT_WS('/', NULLIF(COALESCE(bt.counterparty_account, rev_bt.counterparty_account), ''),
+                                                 NULLIF(COALESCE(bt.counterparty_bank, rev_bt.counterparty_bank), '')), ''),
+                           NULLIF(CONCAT_WS('/', NULLIF(foi.counterparty_account, ''), NULLIF(foi.counterparty_bank_code, '')), ''),
+                           NULLIF(CONCAT_WS('/', NULLIF(fpi.payment_account_number, ''), NULLIF(fpi.payment_bank_code, '')), ''),
+                           NULLIF(fpi.payment_iban, '')
+                       ) AS counterparty_account";
+
+    /**
+     * Cesta od zápisu k prvotnímu dokladu, kterou sdílí seznam deníku ({@see paginate()})
+     * a soupiska dokladů ({@see documentSelection()}): stornovaný zápis (`rev_src`),
+     * bankovní pohyb, pokladní doklad a zápočet. Předpokládá alias zápisu `je`.
+     */
+    private const DOCUMENT_SOURCE_JOINS = "
+             -- FORCE INDEX: `reversed_by` je skoro všude NULL, optimizér pak odhaduje tisíce
+             -- řádků na lookup a volí BNL přes celou tabulku (0,2 s na stránku u 100 tis. zápisů, roste
+             -- s počtem zápisů). S indexem 1 ms.
+             LEFT JOIN journal_entries rev_src FORCE INDEX (idx_je_supplier_reversed_by)
+                    ON rev_src.supplier_id = je.supplier_id
+                    AND rev_src.reversed_by = je.id
+             LEFT JOIN bank_transactions rev_bt ON rev_src.source_type = 'bank' AND rev_bt.id = rev_src.source_id
+             LEFT JOIN cash_documents rev_cd ON rev_src.source_type = 'cash' AND rev_cd.id = rev_src.source_id
+             LEFT JOIN bank_transactions bt ON je.source_type = 'bank' AND bt.id = je.source_id
+             LEFT JOIN cash_documents cd ON je.source_type = 'cash' AND cd.id = je.source_id
+             -- Zápočet: source_id je ID ZÁPOČTU, ne dokladu. Bez tohohle JOINu nemá deník
+             -- kam prokliknout — uživatel vidí číslo faktury, ale odkaz nikam nevede.
+             LEFT JOIN invoice_settlements stl ON je.source_type = 'settlement'
+                    AND stl.id = je.source_id AND stl.supplier_id = je.supplier_id";
+
+    /** JOINy k DOCUMENT_FACT_SELECT, předpokládají aliasy z paginate() (je, rev_src, cd, rev_cd, stl). */
+    private const DOCUMENT_FACT_JOINS = "
+             LEFT JOIN invoices fi ON fi.supplier_id = je.supplier_id
+                    AND fi.id = CASE
+                        WHEN je.source_type = 'invoice' THEN COALESCE(je.source_id, rev_src.source_id)
+                        WHEN je.source_type = 'settlement' AND stl.doc_type = 'invoice' THEN stl.doc_id
+                        WHEN je.source_type = 'cash' THEN COALESCE(cd.invoice_id, rev_cd.invoice_id)
+                        ELSE NULL
+                    END
+             LEFT JOIN purchase_invoices fpi ON fpi.supplier_id = je.supplier_id
+                    AND fpi.id = CASE
+                        WHEN je.source_type = 'purchase_invoice' THEN COALESCE(je.source_id, rev_src.source_id)
+                        WHEN je.source_type = 'settlement' AND stl.doc_type = 'purchase_invoice' THEN stl.doc_id
+                        WHEN je.source_type = 'cash' THEN COALESCE(cd.purchase_invoice_id, rev_cd.purchase_invoice_id)
+                        ELSE NULL
+                    END
+             LEFT JOIN other_items foi ON je.source_type = 'other_item'
+                    AND foi.id = COALESCE(je.source_id, rev_src.source_id) AND foi.supplier_id = je.supplier_id
+             LEFT JOIN internal_documents fid ON je.source_type = 'manual'
+                    AND fid.supplier_id = je.supplier_id AND fid.journal_entry_id = je.id
+             LEFT JOIN clients fc ON fc.id = COALESCE(fi.client_id, fpi.vendor_id, foi.partner_id, fid.partner_id)";
 
     /** Korelovaný subselect s celkovou částkou zápisu (Σ MD = Σ Dal u vyváženého zápisu). */
     private const AMOUNT_SUBQUERY =
@@ -1622,6 +2316,297 @@ final class JournalEntryRepository
             JOIN chart_of_accounts c ON c.id = jel.account_id
            WHERE jel.entry_id = je.id AND jel.supplier_id = je.supplier_id
              AND c.account_code BETWEEN ? AND ?)';
+
+    /**
+     * Soupiska dokladů (#356): řádky deníku vybrané filtrem seznamu, sečtené po prvotním
+     * dokladu. Zápisy vybírá tentýž {@see buildWhere()} jako seznam (včetně jeho rozsahu
+     * účtů a hledání), takže soupiska nikdy nevezme zápis, který uživatel na obrazovce
+     * nevidí. Z nich se berou jen ŘÁDKY v rozsahu účtů soupisky a při filtru dimenze jen
+     * řádky, které ho splní, dílem rozpadu ({@see DimensionFilter::lineSource()}, stejný
+     * výklad jako sestavy). Úhrada nese dimenzi na saldokontu, mimo nákladové účty, proto
+     * se v nákladovém rozsahu nezapočte. Uzavření a otevření knih nejsou doklady, jen
+     * převádějí zůstatky, a vynulovaly by součet; soupiska je proto vynechává (skladové
+     * sloty uzávěrky náklady mění a zůstávají).
+     *
+     * Bere jen zaúčtované zápisy (jako výsledovka po dimenzi). Částka je Σ MD − Σ D se
+     * znaménkem červeného storna, u výnosových účtů Σ D − Σ MD, aby výnos byl kladný a vratka
+     * záporná; pravidlo je totéž jako ve výsledovce po dimenzi (DimensionProfitService).
+     * Doklad s účty různých druhů v rozsahu (náklady, výnosy, rozvaha) nese `mixed_sides`
+     * a zůstává i s nulovou částkou, aby se vyrovnaný zápis neztratil bez upozornění. Protizápis a opravný zápis dvojice
+     * nesou jen typ zdroje, doklad patří zápisu na začátku řetězu oprav (`reversed_by`,
+     * `journal_pair_reversals`), takže úplné storno dá nulu a doklad s nulou se vynechá.
+     * Doklad zápisu určuje skupina zaúčtování ({@see \MyInvoice\Service\Accounting\DocumentPostingGroup}), zápočet vede na
+     * vyrovnanou fakturu, ruční zápis na interní doklad, úhrada (banka, pokladna) je vlastní
+     * doklad a zápis bez dokladu tvoří vlastní skupinu. `corrected_outside` označí doklad,
+     * jehož storno nebo oprava leží mimo filtr (typicky v jiném období). Seskupení
+     * i součet počítá databáze, vrátí nejvýš `$limit + 1` dokladů, aby volající poznal
+     * překročení.
+     *
+     * @param array<string,mixed> $filters filtr seznamu Deníku
+     * @return list<array<string,mixed>>
+     */
+    public function documentSelection(int $supplierId, array $filters, string $lineAccountFrom, string $lineAccountTo, int $limit): array
+    {
+        if ($lineAccountFrom === '' || $lineAccountTo === '') {
+            throw new \InvalidArgumentException('Soupiska dokladů vyžaduje rozsah účtů.');
+        }
+        [$whereSql, $whereParams] = $this->buildWhere($supplierId, $filters);
+        [$accountFrom, $accountTo] = AccountCodeRange::sqlBoundsFor($lineAccountFrom, $lineAccountTo);
+        [$lineSource, $lineParams] = $this->documentLineSource($supplierId, $filters);
+
+        // Kořen řetězu oprav: storno (`reversed_by`, i storno storna) a opravný zápis dvojice
+        // (`journal_pair_reversals`, i jeho storno nebo další oprava) nesou jen typ zdroje,
+        // doklad patří zápisu na začátku řetězu. CTE nese jen zápisy v řetězcích, ostatní
+        // zápisy jsou kořenem samy sobě (vzor JournalTaxOrigin, který opravy dvojic nezná).
+        $s = (int) $supplierId;
+        $origins = "doc_origins (id, root_id, reversed_by) AS (
+                SELECT e.id, e.id, e.reversed_by FROM journal_entries e FORCE INDEX (idx_je_supplier_reversed_by)
+                 WHERE e.supplier_id = {$s} AND e.reversed_by IS NOT NULL
+                   AND NOT EXISTS (SELECT 1 FROM journal_entries p WHERE p.supplier_id = {$s} AND p.reversed_by = e.id)
+                   AND NOT EXISTS (SELECT 1 FROM journal_pair_reversals pr WHERE pr.supplier_id = {$s} AND pr.reversal_entry_id = e.id)
+                UNION
+                SELECT e.id, e.id, e.reversed_by FROM journal_pair_reversals r
+                  JOIN journal_entries e ON e.supplier_id = r.supplier_id AND e.id = r.entry_id
+                 WHERE r.supplier_id = {$s}
+                   AND NOT EXISTS (SELECT 1 FROM journal_entries p WHERE p.supplier_id = {$s} AND p.reversed_by = e.id)
+                   AND NOT EXISTS (SELECT 1 FROM journal_pair_reversals pr WHERE pr.supplier_id = {$s} AND pr.reversal_entry_id = e.id)
+                UNION
+                SELECT c.id, o.root_id, c.reversed_by FROM doc_origins o
+                  JOIN journal_entries c ON c.supplier_id = {$s} AND c.id = o.reversed_by
+                UNION
+                SELECT c.id, o.root_id, c.reversed_by FROM doc_origins o
+                  JOIN journal_pair_reversals r ON r.supplier_id = {$s} AND r.entry_id = o.id
+                  JOIN journal_entries c ON c.supplier_id = {$s} AND c.id = r.reversal_entry_id
+            )";
+        // Doklad kořene: vlastnictví skupinou zaúčtování (DocumentPostingGroup, převzaté
+        // doklady účtované více zápisy), zápočet → vyrovnaná faktura, ruční zápis → interní
+        // doklad, jinak zdroj zápisu. Uzavření knih (source_id = období) a otevření knih jen
+        // převádějí zůstatky a vynulovaly by součet; skladové sloty uzávěrky náklady mění, zůstávají.
+        $settled = "kstl.doc_type IN ('invoice', 'purchase_invoice')";
+        $keys = "SELECT je.id AS entry_id, je.entry_date,
+                        COALESCE(NULLIF(je.document_no, ''), CONCAT('#', je.id)) AS entry_label,
+                        CASE
+                            WHEN jdp.entry_id IS NOT NULL THEN jdp.doc_type
+                            WHEN {$settled} THEN kstl.doc_type
+                            WHEN root.source_type = 'manual' AND kid.id IS NOT NULL THEN 'internal_document'
+                            WHEN root.source_type <> 'manual' AND root.source_id IS NOT NULL THEN root.source_type
+                            ELSE 'entry'
+                        END AS doc_kind,
+                        CASE
+                            WHEN jdp.entry_id IS NOT NULL THEN jdp.doc_id
+                            WHEN {$settled} THEN kstl.doc_id
+                            WHEN root.source_type = 'manual' AND kid.id IS NOT NULL THEN kid.id
+                            WHEN root.source_type <> 'manual' AND root.source_id IS NOT NULL THEN root.source_id
+                            ELSE root.id
+                        END AS doc_id,
+                        (origin.root_id IS NULL OR origin.root_id = je.id) AS is_root,
+                        (origin.root_id IS NOT NULL AND EXISTS (
+                            SELECT 1 FROM doc_origins chain WHERE chain.root_id = origin.root_id AND chain.id NOT IN (SELECT id FROM sel)
+                        )) AS corrected_outside
+                   FROM sel
+                   JOIN journal_entries je ON je.id = sel.id
+              LEFT JOIN doc_origins origin ON origin.id = je.id
+                   JOIN journal_entries root ON root.supplier_id = je.supplier_id AND root.id = COALESCE(origin.root_id, je.id)
+              LEFT JOIN journal_document_postings jdp ON jdp.supplier_id = root.supplier_id AND jdp.entry_id = root.id
+              LEFT JOIN invoice_settlements kstl ON root.source_type = 'settlement'
+                        AND kstl.supplier_id = root.supplier_id AND kstl.id = root.source_id
+              LEFT JOIN internal_documents kid ON root.source_type = 'manual'
+                        AND kid.supplier_id = root.supplier_id AND kid.journal_entry_id = root.id
+                  WHERE root.source_type <> 'opening' AND NOT (" . ClosingSourceId::closeBooksSql('root') . ')';
+
+        $sql = "SELECT g.doc_kind, g.doc_id, g.amount, g.first_entry_date, g.corrected_outside, g.mixed_sides, g.entry_ids, g.entry_labels, g.accounts, g.rep_id,
+                       je.description,
+                       -- Doklad smazaný po převzetí zůstává vlastníkem zápisů; číslo pak nese zápis.
+                       COALESCE(CASE g.doc_kind
+                           WHEN 'invoice' THEN di.varsymbol
+                           WHEN 'purchase_invoice' THEN dpi.varsymbol
+                           WHEN 'cash' THEN dcd.doc_number
+                           WHEN 'other_item' THEN doi.document_no
+                           WHEN 'internal_document' THEN did.document_no
+                       END, je.document_no) AS our_no,
+                       IF(g.doc_kind = 'purchase_invoice', dpi.vendor_invoice_number, NULL) AS counterparty_no,
+                       -- Přenesená daňová povinnost: celkem dokladu je bez DPH, kterou si odběratel
+                       -- přiznává sám (u neplátce či identifikované osoby jde do nákladu).
+                       COALESCE(g.doc_kind = 'purchase_invoice' AND dpi.reverse_charge = 1, 0) AS reverse_charge,
+                       dpi.total_vat AS supplier_vat,
+                       COALESCE(dpi.vendor_snapshot, di.client_snapshot) AS partner_snapshot,
+                       CASE g.doc_kind
+                           WHEN 'invoice' THEN di.total_with_vat
+                           WHEN 'purchase_invoice' THEN dpi.total_with_vat
+                           WHEN 'cash' THEN dcd.total_amount
+                           WHEN 'other_item' THEN doi.amount
+                           WHEN 'internal_document' THEN did.amount
+                           WHEN 'bank' THEN ABS(dbt.amount)
+                           ELSE NULL
+                       END AS document_total,
+                       CASE g.doc_kind
+                           WHEN 'invoice' THEN dccy.code
+                           WHEN 'purchase_invoice' THEN dccy.code
+                           WHEN 'cash' THEN 'CZK'
+                           WHEN 'other_item' THEN COALESCE(NULLIF(doi.currency, ''), 'CZK')
+                           WHEN 'internal_document' THEN 'CZK'
+                           WHEN 'bank' THEN COALESCE(NULLIF(dbt.currency, ''), 'CZK')
+                           ELSE NULL
+                       END AS document_currency,
+                       CASE g.doc_kind
+                           WHEN 'invoice' THEN COALESCE(di.tax_date, di.issue_date)
+                           WHEN 'purchase_invoice' THEN COALESCE(dpi.tax_date, dpi.issue_date)
+                           WHEN 'cash' THEN COALESCE(dcd.tax_date, dcd.issue_date)
+                           WHEN 'other_item' THEN doi.issued_on
+                           WHEN 'internal_document' THEN did.document_date
+                           ELSE NULL
+                       END AS document_date,
+                       COALESCE(did.partner_name, doi.partner_name, dcd.partner_name,
+                                NULLIF(dc.company_name, ''), NULLIF(TRIM(CONCAT_WS(' ', dc.first_name, dc.last_name)), ''),
+                                dbt.counterparty_name, cd.partner_name, rev_cd.partner_name,
+                                bt.counterparty_name, rev_bt.counterparty_name) AS partner_name,
+                       COALESCE(NULLIF(dcd.partner_ic, ''), NULLIF(dc.ic, ''), NULLIF(cd.partner_ic, ''), NULLIF(rev_cd.partner_ic, '')) AS partner_ic
+                  FROM (SELECT k.doc_kind, k.doc_id,
+                               SUM((CASE WHEN fl.side = 'debit' THEN fl.signed_amount ELSE -fl.signed_amount END)
+                                   * (CASE WHEN ca.account_type = 'revenue' THEN -1 ELSE 1 END)) AS amount,
+                               COUNT(DISTINCT CASE ca.account_type WHEN 'revenue' THEN 1 WHEN 'expense' THEN 2 ELSE 3 END) > 1 AS mixed_sides,
+                               COALESCE(MIN(CASE WHEN k.is_root THEN k.entry_id END), MIN(k.entry_id)) AS rep_id,
+                               MIN(k.entry_date) AS first_entry_date, MAX(k.corrected_outside) AS corrected_outside,
+                               GROUP_CONCAT(DISTINCT k.entry_id ORDER BY k.entry_id) AS entry_ids,
+                               GROUP_CONCAT(DISTINCT k.entry_label ORDER BY k.entry_label SEPARATOR ', ') AS entry_labels,
+                               GROUP_CONCAT(DISTINCT ca.account_code ORDER BY ca.account_code SEPARATOR ', ') AS accounts
+                          FROM {$lineSource}
+                          JOIN chart_of_accounts ca ON ca.supplier_id = fl.supplier_id AND ca.id = fl.account_id AND ca.account_code BETWEEN ? AND ?
+                          JOIN ({$keys}) k ON k.entry_id = fl.entry_id
+                         GROUP BY k.doc_kind, k.doc_id
+                        HAVING amount <> 0 OR mixed_sides) g
+                  -- Nejdřív skupiny dokladů, pak hlavička zápisu po primárním klíči. Bez
+                  -- STRAIGHT_JOIN optimalizátor četl všechny zápisy firmy přes index období
+                  -- a skupiny k nim dohledával (2 s místo desetin u 300 tis. zápisů firmy).
+                  STRAIGHT_JOIN journal_entries je ON je.id = g.rep_id AND je.supplier_id = ?
+                  " . self::DOCUMENT_SOURCE_JOINS . "
+             LEFT JOIN invoices di ON g.doc_kind = 'invoice' AND di.id = g.doc_id AND di.supplier_id = je.supplier_id
+             LEFT JOIN purchase_invoices dpi ON g.doc_kind = 'purchase_invoice' AND dpi.id = g.doc_id AND dpi.supplier_id = je.supplier_id
+             LEFT JOIN cash_documents dcd ON g.doc_kind = 'cash' AND dcd.id = g.doc_id AND dcd.supplier_id = je.supplier_id
+             LEFT JOIN other_items doi ON g.doc_kind = 'other_item' AND doi.id = g.doc_id AND doi.supplier_id = je.supplier_id
+             LEFT JOIN internal_documents did ON g.doc_kind = 'internal_document' AND did.id = g.doc_id AND did.supplier_id = je.supplier_id
+             LEFT JOIN bank_transactions dbt ON g.doc_kind = 'bank' AND dbt.id = g.doc_id
+             LEFT JOIN currencies dccy ON dccy.id = COALESCE(di.currency_id, dpi.currency_id)
+             LEFT JOIN clients dc ON dc.supplier_id = je.supplier_id AND dc.id = COALESCE(di.client_id, dpi.vendor_id, doi.partner_id, did.partner_id)
+                 LIMIT " . (max(1, $limit) + 1);
+        // Jen zaúčtované zápisy, stejně jako výsledovka po dimenzi; koncept v řetězu oprav
+        // je pro soupisku mimo výběr a doklad se označí (corrected_outside).
+        $sql = "WITH RECURSIVE sel AS (SELECT je.id FROM journal_entries je WHERE {$whereSql} AND je.posted_at IS NOT NULL), {$origins}
+                SELECT d.* FROM ({$sql}) d ORDER BY COALESCE(d.document_date, d.first_entry_date), d.rep_id";
+        $stmt = $this->db->pdo()->prepare($sql);
+        $stmt->execute([...$whereParams, ...$lineParams, $accountFrom, $accountTo, $supplierId]);
+        return array_map(static function (array $r): array {
+            $r['doc_id'] = (int) $r['doc_id'];
+            $r['entry_ids'] = array_map('intval', explode(',', (string) $r['entry_ids']));
+            $r['amount'] = round((float) $r['amount'], 2);
+            $r['document_total'] = $r['document_total'] === null ? null : round((float) $r['document_total'], 2);
+            $r['corrected_outside'] = (bool) $r['corrected_outside'];
+            $r['mixed_sides'] = (bool) $r['mixed_sides'];
+            $r['reverse_charge'] = (bool) $r['reverse_charge'];
+            $snapshot = json_decode((string) $r['partner_snapshot'], true);
+            if (is_array($snapshot)) {
+                $r['partner_name'] = DocumentPartnerName::fromSnapshot($snapshot) ?? $r['partner_name'];
+                if (array_key_exists('ic', $snapshot)) {
+                    $ic = trim((string) $snapshot['ic']);
+                    $r['partner_ic'] = $ic !== '' ? $ic : null;
+                }
+            }
+            unset($r['partner_snapshot']);
+            return $r;
+        }, $stmt->fetchAll(PDO::FETCH_ASSOC));
+    }
+
+    /**
+     * Zaúčtovaná daň i obrat ostatních řádků kromě DPH a závazku jsou v Kč.
+     * Absolutní obrat zachová i řádky, které se navzájem vyruší.
+     *
+     * @param list<int> $entryIds
+     * @param array<string,mixed> $filters
+     * @return array<int,array{vat:string,has_vat:int,cost_turnover:string,selected_cost:string}>
+     */
+    public function reverseChargePostings(int $supplierId, array $entryIds, array $filters, string $accountFrom, string $accountTo): array
+    {
+        if ($entryIds === []) {
+            return [];
+        }
+        $join = '';
+        $lineParams = [];
+        $selected = 'l.signed_amount';
+        if (($filters['dimension'] ?? null) instanceof DimensionFilter) {
+            [$lineSource, $lineParams] = $this->documentLineSource($supplierId, $filters);
+            $join = "LEFT JOIN {$lineSource} ON fl.id = l.id";
+            $selected = 'COALESCE(fl.signed_amount, 0)';
+        }
+
+        $marks = implode(',', array_fill(0, count($entryIds), '?'));
+        $isVat = "a.account_code LIKE '343%'";
+        $isCostCandidate = "a.account_code NOT LIKE '321%' AND a.account_code NOT LIKE '343%'";
+        $stmt = $this->db->pdo()->prepare("SELECT l.entry_id,
+                    SUM(CASE WHEN {$isVat} THEN IF(l.side = 'credit', l.signed_amount, -l.signed_amount) ELSE 0 END) AS vat,
+                    MAX({$isVat}) AS has_vat,
+                    SUM(CASE WHEN {$isCostCandidate} THEN ABS(l.signed_amount) ELSE 0 END) AS cost_turnover,
+                    SUM(CASE WHEN {$isCostCandidate} AND a.account_type IN ('expense', 'asset') AND a.account_code BETWEEN ? AND ?
+                             THEN ABS({$selected}) ELSE 0 END) AS selected_cost
+              FROM journal_entry_lines l
+              JOIN chart_of_accounts a ON a.supplier_id = l.supplier_id AND a.id = l.account_id
+              {$join}
+             WHERE l.supplier_id = ? AND l.entry_id IN ({$marks})
+             GROUP BY l.entry_id");
+        $stmt->execute([...AccountCodeRange::sqlBoundsFor($accountFrom, $accountTo), ...$lineParams, $supplierId, ...$entryIds]);
+        return $stmt->fetchAll(PDO::FETCH_UNIQUE | PDO::FETCH_ASSOC);
+    }
+
+    /**
+     * Počet konceptů, které by filtr seznamu a rozsah účtů soupisky vybraly, ale soupiska je
+     * vynechává ({@see documentSelection()} bere jen zaúčtované zápisy). Do hlavičky soupisky,
+     * aby vynechání nebylo bez stopy.
+     *
+     * @param array<string,mixed> $filters filtr seznamu Deníku
+     */
+    public function documentSelectionDraftCount(int $supplierId, array $filters, string $lineAccountFrom, string $lineAccountTo): int
+    {
+        [$whereSql, $whereParams] = $this->buildWhere($supplierId, $filters);
+        [$accountFrom, $accountTo] = AccountCodeRange::sqlBoundsFor($lineAccountFrom, $lineAccountTo);
+        [$lineSource, $lineParams] = $this->documentLineSource($supplierId, $filters);
+        // Tentýž výběr řádků jako documentSelection() (rozsah i dimenze na témže řádku) a bez
+        // uzavření a otevření knih, které soupiska nevezme ani po zaúčtování.
+        $stmt = $this->db->pdo()->prepare("SELECT COUNT(DISTINCT je.id)
+              FROM {$lineSource}
+              JOIN chart_of_accounts ca ON ca.supplier_id = fl.supplier_id AND ca.id = fl.account_id AND ca.account_code BETWEEN ? AND ?
+              JOIN journal_entries je ON je.id = fl.entry_id
+             WHERE {$whereSql} AND je.posted_at IS NULL
+               AND je.source_type <> 'opening' AND NOT (" . ClosingSourceId::closeBooksSql('je') . ')');
+        $stmt->execute([...$lineParams, $accountFrom, $accountTo, ...$whereParams]);
+        return (int) $stmt->fetchColumn();
+    }
+
+    /**
+     * Řádky deníku pro soupisku jako odvozená tabulka `fl` (entry_id, supplier_id, account_id,
+     * side, signed_amount): s filtrem dimenze jen řádky s její hodnotou dílem rozpadu
+     * ({@see DimensionFilter::lineSource()}), jinak všechny řádky firmy.
+     *
+     * @param array<string,mixed> $filters
+     * @return array{0:string, 1:list<int|string>}
+     */
+    private function documentLineSource(int $supplierId, array $filters): array
+    {
+        $dimension = $filters['dimension'] ?? null;
+        if (!$dimension instanceof DimensionFilter) {
+            return ['(SELECT fl.entry_id, fl.supplier_id, fl.account_id, fl.side, fl.signed_amount FROM journal_entry_lines fl WHERE fl.supplier_id = ?) fl', [$supplierId]];
+        }
+        // Meze data jen zužují poddotaz dimenze, zápisy vybírá buildWhere(). Filtr jen na
+        // období dostane jeho hranice, jinak by poddotaz četl celou historii firmy.
+        $from = $filters['date_from'] ?? null;
+        $to = $filters['date_to'] ?? null;
+        if (!empty($filters['period_id']) && ($from === null || $to === null)) {
+            $period = $this->db->pdo()->prepare('SELECT starts_on, ends_on FROM accounting_periods WHERE supplier_id = ? AND id = ?');
+            $period->execute([$supplierId, (int) $filters['period_id']]);
+            $bounds = $period->fetch(PDO::FETCH_ASSOC) ?: [];
+            $from ??= $bounds['starts_on'] ?? null;
+            $to ??= $bounds['ends_on'] ?? null;
+        }
+        return $dimension->lineSource($supplierId, 'fl', $from, (string) ($to ?? '9999-12-31'));
+    }
 
     /**
      * Export deníku (audit 2026-07, nález „Export a tisk účetního deníku"): VŠECHNY
@@ -1694,20 +2679,24 @@ final class JournalEntryRepository
 
     /**
      * Řádky pro seznam zápisů (export) obohacené o kód/název účtu — jeden dotaz
-     * pro celou dávku (žádné N+1), seskupené podle entry_id.
+     * pro celou dávku (žádné N+1), seskupené podle entry_id. `pair_no` a `line_text`
+     * nese jen řádek, který je má (složený zápis klíče nedostane).
+     *
+     * `$withLineIds` (dvojice exportu deníku): navíc `line_id`, `account_id` a
+     * `amount_foreign`, ze kterých se skládají dvojice i starší zápisy rozložené za běhu.
      *
      * @param list<int> $entryIds
      * @return array<int, list<array<string,mixed>>> keyed entry_id
      */
-    public function linesForEntries(array $entryIds, int $supplierId): array
+    public function linesForEntries(array $entryIds, int $supplierId, bool $withLineIds = false): array
     {
         if ($entryIds === []) {
             return [];
         }
         $place = implode(',', array_fill(0, count($entryIds), '?'));
         $stmt = $this->db->pdo()->prepare(
-            "SELECT jel.entry_id, jel.side, jel.amount, jel.is_red_storno, jel.cost_center, jel.line_no,
-                    c.account_code, c.name AS account_name
+            "SELECT jel.id, jel.entry_id, jel.account_id, jel.side, jel.amount, jel.amount_foreign, jel.is_red_storno,
+                    jel.cost_center, jel.line_no, jel.pair_no, jel.line_text, c.account_code, c.name AS account_name
                FROM journal_entry_lines jel
                JOIN chart_of_accounts c ON c.id = jel.account_id
               WHERE jel.entry_id IN ({$place}) AND jel.supplier_id = ?
@@ -1718,14 +2707,25 @@ final class JournalEntryRepository
         $out = [];
         foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $r) {
             $entryId = (int) $r['entry_id'];
-            $out[$entryId][] = [
+            $line = [
                 'side'         => $r['side'],
                 'amount'       => (float) $r['amount'],
                 'is_red_storno' => (bool) $r['is_red_storno'],
                 'cost_center'  => $r['cost_center'],
                 'account_code' => $r['account_code'],
                 'account_name' => $r['account_name'],
+                'pair_no'      => $r['pair_no'],
+                'line_text'    => $r['line_text'],
             ];
+            if ($withLineIds) {
+                $line += [
+                    'line_id'        => (int) $r['id'],
+                    'account_id'     => (int) $r['account_id'],
+                    'amount_decimal' => (string) $r['amount'],
+                    'amount_foreign' => $r['amount_foreign'] === null ? null : (string) $r['amount_foreign'],
+                ];
+            }
+            $out[$entryId][] = self::castPairColumns($line);
         }
         return $out;
     }
@@ -1761,7 +2761,7 @@ final class JournalEntryRepository
 
         $lineStmt = $pdo->prepare(
             'SELECT jel.id, jel.account_id, jel.side, jel.amount, jel.is_red_storno, jel.cost_center, jel.line_no,
-                    c.account_code, c.name AS account_name,
+                    jel.pair_no, c.account_code, c.name AS account_name,
                     ROW_START AS valid_from, ROW_END AS valid_to
                FROM journal_entry_lines FOR SYSTEM_TIME ALL jel
                JOIN chart_of_accounts c ON c.id = jel.account_id
@@ -1787,6 +2787,7 @@ final class JournalEntryRepository
                 $r['amount'] = (float) $r['amount'];
                 $r['is_red_storno'] = (bool) $r['is_red_storno'];
                 $r['line_no'] = (int) $r['line_no'];
+                $r['pair_no'] = $r['pair_no'] === null ? null : (int) $r['pair_no'];
                 return $r;
             }, $lines),
         ];
@@ -1795,12 +2796,14 @@ final class JournalEntryRepository
     /** Je aktivní filtr na rozsah účtu (account_from/account_to)? SSOT pro buildWhere() i paginate(). */
     private static function hasAccountRangeFilter(array $filters): bool
     {
-        return !empty($filters['account_from']) || !empty($filters['account_to']);
+        // Kód „0“ (třída 0) je platná mez, proto porovnání s prázdným řetězcem, ne empty().
+        return (string) ($filters['account_from'] ?? '') !== '' || (string) ($filters['account_to'] ?? '') !== '';
     }
 
     /**
-     * Normalizované meze rozsahu účtu z filtru — chybějící strana se doplní neutrální
-     * hranicí. SSOT pro EXISTS filtr v buildWhere() i pro FILTERED_NET_AMOUNT_SUBQUERY
+     * Meze rozsahu účtu z filtru pro `BETWEEN ? AND ?`. Rozsah je prefixový včetně krajů
+     * (5 až 5 = třída 5, 501 až 518 včetně 518.100), pravidlo drží
+     * AccountCodeRange. SSOT pro EXISTS filtr v buildWhere() i pro FILTERED_NET_AMOUNT_SUBQUERY
      * v paginate() (obojí musí vidět STEJNÝ rozsah, jinak by se řádek objevil v seznamu,
      * ale sloupec Částka by počítal jiný rozsah účtů, než podle kterého se filtrovalo).
      *
@@ -1808,10 +2811,9 @@ final class JournalEntryRepository
      */
     private static function accountRangeBounds(array $filters): array
     {
-        return [
-            (string) ($filters['account_from'] ?? '0'),
-            (string) ($filters['account_to'] ?? 'ZZZZZZZZZZ'),
-        ];
+        // Vstup od uživatele už ověřil JournalAction (parse); kód z hledání účtu přichází
+        // z databáze a nemusí abecedou projít, proto se tu jen sestaví meze.
+        return AccountCodeRange::sqlBoundsFor((string) ($filters['account_from'] ?? ''), (string) ($filters['account_to'] ?? ''));
     }
 
     /**
@@ -1894,7 +2896,7 @@ final class JournalEntryRepository
         // Hodnota dimenze (včetně podřízených): zápis projde, nese-li ji aspoň jeden
         // jeho řádek. Sémantiku řádku sdílí se sestavami přes DimensionFilter.
         if (($filters['dimension'] ?? null) instanceof DimensionFilter) {
-            [$dimSql, $dimParams] = $filters['dimension']->entrySql('je');
+            [$dimSql, $dimParams] = $filters['dimension']->entrySql('je', $supplierId);
             $where[] = $dimSql;
             array_push($params, ...$dimParams);
         }
@@ -1953,6 +2955,13 @@ final class JournalEntryRepository
                 default    => "(je.reversed_by IS NULL AND NOT {$isReversal})",
             };
         }
+        // Posouzení zápisu bez dvojic (jednoduchý zápis). Podmínka vzniká jen s filtrem,
+        // dotaz firmy bez něj zůstává beze změny; jde po idx_jeps_status.
+        if (in_array($filters['pair_status'] ?? null, ['composite_mn', 'ineligible'], true)) {
+            $where[] = 'je.id IN (SELECT jeps.entry_id FROM journal_entry_pair_status jeps
+                                   WHERE jeps.supplier_id = ? AND jeps.status = ?)';
+            array_push($params, $supplierId, (string) $filters['pair_status']);
+        }
         if (!empty($filters['automation'])) {
             $bankStatus = $filters['automation'] === 'auto' ? 'auto_posted' : 'approved';
             $bankExists = "EXISTS (
@@ -1984,6 +2993,34 @@ final class JournalEntryRepository
     private static function escapeLike(string $value): string
     {
         return strtr($value, ['=' => '==', '%' => '=%', '_' => '=_']);
+    }
+
+    /**
+     * `pair_no` / `line_text` řádku: u řádku dvojice jako int / text, u složeného zápisu
+     * se klíče vynechají, takže firma bez jednoduchého zápisu dostává řádky ve stejném
+     * tvaru jako dřív.
+     *
+     * @param array<string,mixed> $r
+     * @return array<string,mixed>
+     */
+    private static function castPairColumns(array $r): array
+    {
+        if (($r['pair_no'] ?? null) === null) {
+            unset($r['pair_no']);
+        } else {
+            $r['pair_no'] = (int) $r['pair_no'];
+        }
+        if (($r['line_text'] ?? null) === null) {
+            unset($r['line_text']);
+        }
+        return $r;
+    }
+
+    /** Text řádku k zápisu: prázdný text = NULL, delší oříznout na šířku sloupce. */
+    private static function lineText(array $line): ?string
+    {
+        $text = isset($line['line_text']) ? trim((string) $line['line_text']) : '';
+        return $text === '' ? null : mb_substr($text, 0, 255);
     }
 
     private function cast(array $r): array
@@ -2026,11 +3063,17 @@ final class JournalEntryRepository
         $r['source_link_id'] = ($r['source_link_id'] ?? null) === null ? null : (int) $r['source_link_id'];
         $r['source_register_id'] = $r['source_register_id'] === null ? null : (int) $r['source_register_id'];
         $r['source_asset_id'] = $r['source_asset_id'] === null ? null : (int) $r['source_asset_id'];
+        $r['source_accrual_item_id'] = ($r['source_accrual_item_id'] ?? null) === null ? null : (int) $r['source_accrual_item_id'];
         // Zápočet ukazuje na fakturu, kterou vyrovnal (doc_type + doc_id).
         $r['source_settlement_doc_type'] = $r['source_settlement_doc_type'] !== null
             ? (string) $r['source_settlement_doc_type'] : null;
         $r['source_settlement_doc_id'] = $r['source_settlement_doc_id'] !== null
             ? (int) $r['source_settlement_doc_id'] : null;
+        $r['description_parts'] = JournalDescriptionBuilder::parts(
+            $r['description'] ?? null,
+            (string) $r['source_type'],
+            $r,
+        );
         return $r;
     }
 }

@@ -39,7 +39,7 @@ final class PaymentOrderAction
     public function archive(Request $request, Response $response, array $args): Response
     {
         if ($err = $this->denied($request, $response, AccessLevel::WRITE)) return $err;
-        if (!RequestAuthorization::isSessionAuth($request)) return Json::sessionRequired($response);
+        if (!RequestAuthorization::actsAsSession($request)) return Json::sessionRequired($response);
         $body = $request->getParsedBody();
         if (!is_array($body) || ($body['bank_cancellation_confirmed'] ?? null) !== true) {
             return Json::error($response, 'bank_cancellation_confirmation_required', 'Potvrďte zrušení dávky v bance.', 422);
@@ -84,7 +84,7 @@ final class PaymentOrderAction
         if (RequestAuthorization::allows($request, self::PERMISSION, $minimum)) {
             return null;
         }
-        return Json::error($response, 'forbidden', 'Pro tuto akci nemáš oprávnění.', 403);
+        return Json::error($response, 'forbidden', 'Pro tuto akci nemáte oprávnění.', 403);
     }
 
     /** GET candidates + payer accounts (stránkovaně). */
@@ -111,6 +111,7 @@ final class PaymentOrderAction
             $envelope['refund_candidates'] = $result['refund_candidates'];
         }
         $envelope['tax_candidates'] = $result['tax_candidates'] ?? [];
+        $envelope['other_candidates'] = $result['other_candidates'] ?? [];
         return Json::ok($response, $envelope);
     }
 
@@ -130,6 +131,7 @@ final class PaymentOrderAction
                 'refund_invoice_ids' => (array) ($body['refund_invoice_ids'] ?? []),
                 'tax_submission_ids' => (array) ($body['tax_submission_ids'] ?? []),
                 'tax_advance_ids'    => (array) ($body['tax_advance_ids'] ?? []),
+                'other_items'        => (array) ($body['other_items'] ?? []),
                 'payer_currency_id'  => (int) ($body['payer_currency_id'] ?? 0),
                 'payment_date'       => (string) ($body['payment_date'] ?? ''),
                 'constant_symbol'    => $body['constant_symbol'] ?? null,

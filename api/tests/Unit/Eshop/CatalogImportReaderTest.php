@@ -76,6 +76,22 @@ final class CatalogImportReaderTest extends TestCase
         self::assertSame(10001, $count);
     }
 
+    public function testXlsxFormulaCellReadsStoredResultNotFormulaText(): void
+    {
+        $book = new Spreadsheet();
+        $sheet = $book->getActiveSheet();
+        $sheet->setCellValue('A1', 'price');
+        $sheet->setCellValue('A2', 3);
+        $sheet->setCellValue('B2', '=A2*26');
+        $path = $this->file();
+        $writer = new Xlsx($book);
+        $writer->setPreCalculateFormulas(true);
+        $writer->save($path);
+        $book->disconnectWorksheets();
+        $rows = iterator_to_array((new CatalogImportReader())->rows($path, 'xlsx'));
+        self::assertSame(['3', '78'], $rows[2]);
+    }
+
     public function testXlsxCrossesChunkBoundaryAndNeverEvaluatesFormula(): void
     {
         $book = new Spreadsheet();

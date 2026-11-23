@@ -20,7 +20,19 @@ final readonly class SocialPersonMonthInput
         public SocialDiscountEvidence $workingPensionerDiscount = SocialDiscountEvidence::NotClaimed,
         public ?string $jurisdictionEvidenceReference = null,
         public ?string $workingPensionerDiscountEvidenceReference = null,
+        public bool $jurisdictionEvidenceMissing = false,
+        public bool $yearToDateUnknown = false,
     ) {
+        if ($yearToDateUnknown && $yearToDateAssessmentBaseBeforeMonthMinorUnits !== 0) {
+            throw new InvalidArgumentException(
+                'Unknown year-to-date social insurance base must be passed as zero.',
+            );
+        }
+        if ($jurisdictionEvidenceMissing && $jurisdiction !== SocialJurisdictionEvidence::Unverified) {
+            throw new InvalidArgumentException(
+                'Missing social jurisdiction evidence cannot carry a jurisdiction.',
+            );
+        }
         if (preg_match('/^[A-Za-z0-9][A-Za-z0-9_.:-]*$/D', $personId) !== 1) {
             throw new InvalidArgumentException('Social insurance person ID is not canonical.');
         }

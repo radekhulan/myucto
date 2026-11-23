@@ -327,6 +327,69 @@ final class GoPayPendingPaymentTest extends TestCase
         self::assertSame(0.0, $this->receivableInLedger($invoiceId, self::YEAR . '-01-31'));
     }
 
+    /**
+     * Smazání GoPay úhrady i vyúčtování mazalo zápisy i s okruhem párování, ve kterém
+     * byla úhrada spárovaná s fakturou. Okruh zápis drží stejně jako mazání v deníku.
+     */
+    public function testDeletingPaymentKeepsEntryPairedWithInvoice(): void
+    {
+        $this->configureAccounts();
+        [$invoiceId] = $this->documents();
+        $this->postDocuments($invoiceId, null);
+        $recorded = $this->payments->recordPayment($invoiceId, 1000, self::YEAR . '-01-15', [
+            'bank_reference' => 'GOPAY:' . self::SESSION,
+            'source' => 'manual',
+            'created_by' => $this->userId,
+        ]);
+        $paymentEntryId = (int) $this->pendingMovement($invoiceId)['journal_entry_id'];
+        $pairingId = $this->pairReceivable([$this->invoiceEntryId($invoiceId), $paymentEntryId]);
+
+        try {
+            $this->payments->deletePayment($recorded['payment_id']);
+            self::fail('Úhradu spárovanou s fakturou nejde smazat i se zápisem.');
+        } catch (GoPayException $e) {
+            self::assertSame('entry_paired', $e->errorCode);
+            self::assertStringContainsString('Otevřené položky - párování', $e->getMessage());
+        }
+        self::assertNotNull($this->journal->find($paymentEntryId, $this->supplierId));
+        self::assertNotNull($this->payments->findPayment($recorded['payment_id']));
+        self::assertSame(2, $this->pairingItems($pairingId));
+    }
+
+    public function testDeletingClearingKeepsEntryPairedWithAnotherEntry(): void
+    {
+        $this->configureAccounts();
+        [$invoiceId] = $this->documents();
+        $this->postDocuments($invoiceId, null);
+        $this->payments->recordPayment($invoiceId, 1000, self::YEAR . '-01-15', [
+            'bank_reference' => 'GOPAY:' . self::SESSION,
+            'source' => 'manual',
+            'created_by' => $this->userId,
+        ]);
+        $this->bankPayout();
+        $clearingId = (int) $this->service->import($this->supplierId, $this->userId, 'synthetic-pending.xml', $this->xml())['clearing']['id'];
+        $clearingEntries = $this->db->pdo()->prepare(
+            "SELECT e.id FROM journal_entries e
+               JOIN gopay_movements gm ON gm.id = e.source_id AND gm.supplier_id = e.supplier_id
+              WHERE e.supplier_id = ? AND e.source_type = 'gopay' AND gm.clearing_id = ? AND gm.origin = 'clearing'
+              ORDER BY e.id LIMIT 1"
+        );
+        $clearingEntries->execute([$this->supplierId, $clearingId]);
+        $clearingEntryId = (int) $clearingEntries->fetchColumn();
+        self::assertGreaterThan(0, $clearingEntryId, 'Fixture: vyúčtování má vlastní zápis.');
+        $pairingId = $this->pairFirstLines($clearingEntryId, $this->invoiceEntryId($invoiceId));
+
+        try {
+            $this->service->delete($this->supplierId, $clearingId, $this->userId);
+            self::fail('Vyúčtování se spárovaným zápisem nejde smazat.');
+        } catch (GoPayException $e) {
+            self::assertSame('entry_paired', $e->errorCode);
+            self::assertStringStartsWith('Vyúčtování: ', $e->getMessage());
+        }
+        self::assertNotNull($this->journal->find($clearingEntryId, $this->supplierId));
+        self::assertSame(2, $this->pairingItems($pairingId));
+    }
+
     public function testBackfillPostsLegacyPaymentsOnceAndIsIdempotent(): void
     {
         $this->configureAccounts();
@@ -396,6 +459,53 @@ final class GoPayPendingPaymentTest extends TestCase
         $count->execute([$this->supplierId, $invoiceId]);
         self::assertSame(0, (int) $count->fetchColumn());
         self::assertSame(1000.0, $this->receivableInLedger($invoiceId, self::YEAR . '-01-31'));
+    }
+
+    private function invoiceEntryId(int $invoiceId): int
+    {
+        $stmt = $this->db->pdo()->prepare("SELECT id FROM journal_entries WHERE supplier_id=? AND source_type='invoice' AND source_id=?");
+        $stmt->execute([$this->supplierId, $invoiceId]);
+        return (int) $stmt->fetchColumn();
+    }
+
+    /** Okruh na 311 z řádků pohledávky dvou zápisů (syntetická položka okruhu). @param list<int> $entryIds */
+    private function pairReceivable(array $entryIds): int
+    {
+        $account = $this->accountId('311');
+        $pdo = $this->db->pdo();
+        $pdo->prepare('INSERT INTO journal_line_pairings (supplier_id, account_id) VALUES (?, ?)')->execute([$this->supplierId, $account]);
+        $pairingId = (int) $pdo->lastInsertId();
+        $line = $pdo->prepare('SELECT line_no FROM journal_entry_lines WHERE supplier_id=? AND entry_id=? AND account_id=? ORDER BY line_no LIMIT 1');
+        $item = $pdo->prepare('INSERT INTO journal_line_pairing_items (supplier_id, entry_id, line_no, pairing_id, account_id) VALUES (?, ?, ?, ?, ?)');
+        foreach ($entryIds as $entryId) {
+            $line->execute([$this->supplierId, $entryId, $account]);
+            $item->execute([$this->supplierId, $entryId, (int) $line->fetchColumn(), $pairingId, $account]);
+        }
+        return $pairingId;
+    }
+
+    /** Okruh z prvního řádku dvou zápisů; guard účet položky nekontroluje, jen protějšek mimo mazanou sadu. */
+    private function pairFirstLines(int $entryId, int $partnerId): int
+    {
+        $pdo = $this->db->pdo();
+        $line = $pdo->prepare('SELECT line_no, account_id FROM journal_entry_lines WHERE supplier_id=? AND entry_id=? ORDER BY line_no LIMIT 1');
+        $line->execute([$this->supplierId, $entryId]);
+        $first = $line->fetch(PDO::FETCH_ASSOC);
+        $pdo->prepare('INSERT INTO journal_line_pairings (supplier_id, account_id) VALUES (?, ?)')->execute([$this->supplierId, (int) $first['account_id']]);
+        $pairingId = (int) $pdo->lastInsertId();
+        $item = $pdo->prepare('INSERT INTO journal_line_pairing_items (supplier_id, entry_id, line_no, pairing_id, account_id) VALUES (?, ?, ?, ?, ?)');
+        $item->execute([$this->supplierId, $entryId, (int) $first['line_no'], $pairingId, (int) $first['account_id']]);
+        $line->execute([$this->supplierId, $partnerId]);
+        $partner = $line->fetch(PDO::FETCH_ASSOC);
+        $item->execute([$this->supplierId, $partnerId, (int) $partner['line_no'], $pairingId, (int) $partner['account_id']]);
+        return $pairingId;
+    }
+
+    private function pairingItems(int $pairingId): int
+    {
+        $stmt = $this->db->pdo()->prepare('SELECT COUNT(*) FROM journal_line_pairing_items WHERE supplier_id=? AND pairing_id=?');
+        $stmt->execute([$this->supplierId, $pairingId]);
+        return (int) $stmt->fetchColumn();
     }
 
     private function configureAccounts(): void

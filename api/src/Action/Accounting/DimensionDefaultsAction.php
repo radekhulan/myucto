@@ -4,7 +4,9 @@ declare(strict_types=1);
 
 namespace MyInvoice\Action\Accounting;
 
+use MyInvoice\Http\GuardsAccountingMode;
 use MyInvoice\Http\Json;
+use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Security\AccessLevel;
 use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\Accounting\Dimension\DimensionException;
@@ -22,6 +24,8 @@ use Psr\Http\Message\ServerRequestInterface as Request;
  *   GET|PUT /api/projects/{id}/dimensions       — výchozí dimenze zakázky
  *   GET|PUT /api/stock/items/{id}/dimensions    — výchozí dimenze produktu (skladové karty)
  *   GET|PUT /api/eshop/categories/{id}/dimensions — výchozí dimenze kategorie produktů
+ *   GET|PUT /api/accounting/bank-accounts/{id}/dimensions — výchozí dimenze vlastního bankovního
+ *            účtu (jen podvojné účetnictví, jako ostatní úpravy účtu na stránce Kontace účtů)
  *   GET     /api/stock/items/{id}/posting-defaults — účet a dimenze položky z produktu (produkt > kategorie)
  *   GET     /api/accounting/dimensions/prefill  — předvyplnění hlavičky dokladu v editoru
  *            ?client_id=&project_id=&invoice_id=|purchase_invoice_id=
@@ -34,8 +38,10 @@ use Psr\Http\Message\ServerRequestInterface as Request;
 final class DimensionDefaultsAction
 {
     use AccountingActionSupport;
+    use GuardsAccountingMode;
 
     public function __construct(
+        private readonly Connection $db,
         private readonly DimensionService $dimensions,
         private readonly ActivityLogger $logger,
         private readonly IpMatcher $ipMatcher,
@@ -83,6 +89,18 @@ final class DimensionDefaultsAction
     public function saveCategory(Request $request, Response $response, array $args): Response
     {
         return $this->save($request, $response, 'product_category', (int) ($args['id'] ?? 0));
+    }
+
+    public function getBankAccount(Request $request, Response $response, array $args): Response
+    {
+        if (!$this->requireDoubleEntry($this->db, $this->currentSupplierId($request), $response, $err)) return $err;
+        return $this->read($request, $response, 'bank_account', (int) ($args['id'] ?? 0));
+    }
+
+    public function saveBankAccount(Request $request, Response $response, array $args): Response
+    {
+        if (!$this->requireDoubleEntry($this->db, $this->currentSupplierId($request), $response, $err)) return $err;
+        return $this->save($request, $response, 'bank_account', (int) ($args['id'] ?? 0));
     }
 
     /**
@@ -182,6 +200,8 @@ final class DimensionDefaultsAction
             // CategoryAction::requireWrite); routa navíc hlídá stock.items.write / eshop.write.
             'product' => $level === AccessLevel::WRITE ? 'accounting' : 'stock',
             'product_category' => $level === AccessLevel::WRITE ? 'accounting' : 'eshop',
+            // Stejné právo jako ostatní úpravy vlastního účtu (SupplierBankAccountAction).
+            'bank_account' => 'accounting',
             default => 'clients',
         };
     }

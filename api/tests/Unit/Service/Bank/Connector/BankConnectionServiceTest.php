@@ -382,6 +382,60 @@ final class BankConnectionServiceTest extends TestCase
         self::assertSame(1, $importer->calls);
     }
 
+    /**
+     * Připojení založené po převodu z jiného programu nemá watermark. Prvních 14 dní
+     * by sáhlo do převzatého výpisu a pohyby by se s převzatými shodovaly jen datem
+     * a částkou, což cron neumí potvrdit a opakovaně padal.
+     */
+    public function testInitialAutomaticSyncStartsAfterTakenOverStatement(): void
+    {
+        $today = new \DateTimeImmutable('today');
+        $takenOver = $today->modify('-6 days')->format('Y-m-d');
+        $expectedFrom = $today->modify('-5 days')->format('Y-m-d');
+        $connector = new SyncConnector(static function (string $from, string $to) use ($expectedFrom, $today): string {
+            self::assertSame($expectedFrom, $from);
+            self::assertSame($today->format('Y-m-d'), $to);
+            return 'SYNTHETIC-GPC';
+        });
+        $importer = new RecordingStatementImporter(static fn (): array => self::importResult());
+        $h = $this->harness($connector, $importer, $this->connection());
+        $h['connections']->expects(self::once())->method('takenOverThrough')
+            ->with(1, 'CZK', '1000000005', '2010', $today->modify('-13 days')->format('Y-m-d'))
+            ->willReturn($takenOver);
+        $h['connections']->expects(self::once())->method('recordSyncSuccess')->with(1, 101, $today->format('Y-m-d'));
+
+        $result = $h['service']->sync(1, 11);
+
+        self::assertSame(['from' => $expectedFrom, 'to' => $today->format('Y-m-d')], $result['period']);
+    }
+
+    public function testAutomaticOverlapDoesNotReachIntoTakenOverStatement(): void
+    {
+        $today = new \DateTimeImmutable('today');
+        $connector = new SyncConnector(static function (string $from) use ($today): string {
+            self::assertSame($today->modify('-1 day')->format('Y-m-d'), $from);
+            return 'SYNTHETIC-GPC';
+        });
+        $h = $this->harness($connector, new RecordingStatementImporter(static fn (): array => self::importResult()),
+            $this->connection($today->modify('-1 day')->format('Y-m-d')));
+        $h['connections']->method('takenOverThrough')->willReturn($today->modify('-2 days')->format('Y-m-d'));
+
+        $h['service']->sync(1, 11);
+        self::assertSame(1, $connector->downloadCalls);
+    }
+
+    public function testManualSyncFromDayAfterTakeoverSetsInitialCursor(): void
+    {
+        $today = new \DateTimeImmutable('today');
+        $from = $today->modify('-5 days')->format('Y-m-d');
+        $connector = new SyncConnector(static fn (): string => 'SYNTHETIC-GPC');
+        $h = $this->harness($connector, new RecordingStatementImporter(static fn (): array => self::importResult()), $this->connection());
+        $h['connections']->method('takenOverThrough')->willReturn($today->modify('-6 days')->format('Y-m-d'));
+        $h['connections']->expects(self::once())->method('recordSyncSuccess')->with(1, 101, $today->format('Y-m-d'));
+
+        $h['service']->sync(1, 11, $from, $today->format('Y-m-d'), 7);
+    }
+
     public function testManualPeriodLongerThan31InclusiveDaysIsRejectedBeforeDownload(): void
     {
         $today = new \DateTimeImmutable('today');

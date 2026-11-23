@@ -74,7 +74,7 @@ trait PayrollFullFlowTrait
 
     private function bootPayrollFullFlow(): void
     {
-        $this->container = Bootstrap::buildContainer();
+        $this->container = PayrollTestContainer::build();
         $db = $this->container->get(Connection::class);
         $absences = $this->container->get(PayrollAbsenceAction::class);
         $time = $this->container->get(PayrollTimeAction::class);
@@ -565,6 +565,12 @@ trait PayrollFullFlowTrait
             $this->supplierId,
             $person['employment_id'],
         ]);
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_employment_checklist_items
+                SET status = "completed"
+              WHERE supplier_id = ? AND employment_id = ?
+                AND phase = "onboarding" AND item_key = "social_jmhz_registration"',
+        )->execute([$this->supplierId, $person['employment_id']]);
         if (!$withIdentity) {
             return;
         }
@@ -1378,7 +1384,7 @@ trait PayrollFullFlowTrait
      *
      * @return array{status:int,body:array<string,mixed>}
      */
-    private function prepareJmhz(int $revisionId, string $key): array
+    private function prepareJmhz(int $revisionId, string $key, string $environment = 'test'): array
     {
         $prepare = $this->container->get(PayrollJmhzPreparationAction::class);
         if (!$prepare instanceof PayrollJmhzPreparationAction) {
@@ -1387,7 +1393,7 @@ trait PayrollFullFlowTrait
         $response = $prepare(
             $this->request('POST', "/api/payroll/jmhz/preparations/{$revisionId}")
                 ->withHeader('Idempotency-Key', $key)
-                ->withParsedBody(['environment' => 'test']),
+                ->withParsedBody(['environment' => $environment]),
             new Response(),
             ['revisionId' => (string) $revisionId],
         );
@@ -1422,7 +1428,7 @@ trait PayrollFullFlowTrait
      *
      * @return array{status:int,body:array<string,mixed>}
      */
-    private function freezeJmhzSubmission(int $preparationId, int $officeId): array
+    private function freezeJmhzSubmission(int $preparationId, int $officeId, string $environment = 'test'): array
     {
         $freeze = $this->container->get(PayrollJmhzSubmissionFreezeAction::class);
         if (!$freeze instanceof PayrollJmhzSubmissionFreezeAction) {
@@ -1430,9 +1436,63 @@ trait PayrollFullFlowTrait
         }
         $response = $freeze(
             $this->request('POST', "/api/payroll/submissions/jmhz-freeze/{$preparationId}")
-                ->withParsedBody(['environment' => 'test', 'office' => (string) $officeId]),
+                ->withParsedBody(['environment' => $environment, 'office' => (string) $officeId]),
             new Response(),
             ['preparationId' => (string) $preparationId],
+        );
+
+        return ['status' => $response->getStatusCode(), 'body' => $this->json($response)];
+    }
+
+    /**
+     * „Odložit všechny dotčené" jedním důvodem.
+     *
+     * @param list<int>|null $employmentIds
+     * @return array{status:int,body:array<string,mixed>}
+     */
+    private function bulkDeferJmhz(
+        int $preparationId,
+        int $officeId,
+        string $reason,
+        string $environment = 'test',
+        ?array $employmentIds = null,
+    ): array {
+        $response = $this->jmhzDeferrals()->createMany(
+            $this->request('POST', '/api/payroll/submissions/jmhz-deferrals/bulk')->withParsedBody([
+                'environment' => $environment,
+                'preparation_id' => $preparationId,
+                'office' => (string) $officeId,
+                'reason' => $reason,
+                ...($employmentIds === null ? [] : ['employment_ids' => $employmentIds]),
+            ]),
+            new Response(),
+        );
+
+        return ['status' => $response->getStatusCode(), 'body' => $this->json($response)];
+    }
+
+    /** @return array{status:int,body:array<string,mixed>} */
+    private function carryOverJmhzDeferrals(int $preparationId, int $officeId): array
+    {
+        $response = $this->jmhzDeferrals()->carryOver(
+            $this->request('POST', '/api/payroll/submissions/jmhz-deferrals/carry-over')->withParsedBody([
+                'environment' => 'test',
+                'preparation_id' => $preparationId,
+                'office' => (string) $officeId,
+            ]),
+            new Response(),
+        );
+
+        return ['status' => $response->getStatusCode(), 'body' => $this->json($response)];
+    }
+
+    /** @return array{status:int,body:array<string,mixed>} */
+    private function completeAllJmhzDeferrals(int $revisionId): array
+    {
+        $response = $this->jmhzDeferrals()->completeAll(
+            $this->request('POST', '/api/payroll/submissions/jmhz-deferrals/complete-all')
+                ->withParsedBody(['revision' => $revisionId, 'environment' => 'test']),
+            new Response(),
         );
 
         return ['status' => $response->getStatusCode(), 'body' => $this->json($response)];

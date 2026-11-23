@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import { createI18n } from 'vue-i18n'
 import { cs, en, i18nMessages } from '../../../../tests/locales'
-import type { PayrollJmhzXmlDryRunBlocker } from '@/api/payroll'
-import { jmhzBlockerLabel, jmhzErrorMessage, jmhzRemediationKind, jmhzRemediationTarget } from '../jmhzBlockerRemediation'
+import type { PayrollComponent, PayrollComponentJmhzMappingState, PayrollJmhzXmlDryRunBlocker } from '@/api/payroll'
+import { annualSettlementRequestTarget, jmhzBlockerLabel, jmhzErrorMessage, jmhzRemediationKind, jmhzRemediationTarget } from '../jmhzBlockerRemediation'
 import { payrollCodeKey } from '../payrollServerMessage'
 
 function blocker(overrides: Partial<PayrollJmhzXmlDryRunBlocker>): PayrollJmhzXmlDryRunBlocker {
@@ -43,7 +43,8 @@ describe('navigace nálezů měsíčního hlášení', () => {
       blocker({ code: 'jmhz_december_ozp_annual_source_missing', remediation: { kind: 'employer_annual', field: null }, entity_type: 'office' }),
       null,
       context,
-    )).toEqual({ name: 'payroll-settings', query: { tab: 'submissions' }, hash: '#jmhz-employer-annual-evidence' })
+    // Roční údaje zaměstnavatele se vedou po letech: odkaz nese rok hlášeného období.
+    )).toEqual({ name: 'payroll-settings', query: { tab: 'submissions', year: '2026' }, hash: '#jmhz-employer-annual-evidence' })
     expect(jmhzRemediationTarget(
       blocker({ code: 'jmhz_deferred_annual_settlement_income_present', remediation: { kind: 'deferred_income', field: null } }),
       7,
@@ -54,6 +55,73 @@ describe('navigace nálezů měsíčního hlášení', () => {
       7,
       context,
     )).toBeNull()
+  })
+
+  /**
+   * Hlášení vykazuje roční zúčtování za předchozí zdaňovací období. Bez roku
+   * a osoby se stránka otevřela na loňském roce podle dnešního data a celém
+   * seznamu, ne na zaměstnanci a roce, kterého se nález týká.
+   */
+  it('nález ročního zúčtování otevře rok před vykazovaným měsícem a osobu', () => {
+    const target = (entityType: string, id: number | null) => jmhzRemediationTarget(
+      blocker({ code: 'jmhz_annual_request_status_unresolved', entity_type: entityType, remediation: { kind: 'annual_settlement', field: null } }),
+      id,
+      { period: '2027-02', employments: [{ id: 7, employee_id: 3 }] },
+    )
+    const undecided = { state: 'request_undecided' }
+    expect(target('person', 3)).toEqual({ name: 'payroll-annual-settlement', query: { year: '2026', ...undecided, person: '3' } })
+    expect(target('employee', 5)).toEqual({ name: 'payroll-annual-settlement', query: { year: '2026', ...undecided, person: '5' } })
+    expect(target('employment', 7)).toEqual({ name: 'payroll-annual-settlement', query: { year: '2026', ...undecided, person: '3' } })
+    expect(target('run', null)).toEqual({ name: 'payroll-annual-settlement', query: { year: '2026', ...undecided } })
+    expect(jmhzRemediationTarget(
+      blocker({ code: 'jmhz_annual_request_status_unresolved', entity_type: 'run', remediation: { kind: 'annual_settlement', field: null } }),
+      null,
+    )).toEqual({ name: 'payroll-annual-settlement', query: undecided })
+    // Jiný nález ročního zúčtování (provedené zúčtování) zúžení na nerozhodnuté nedostane.
+    expect(jmhzRemediationTarget(
+      blocker({ code: 'jmhz_annual_settlement_request_source_inconsistent', entity_type: 'person', remediation: { kind: 'annual_settlement', field: null } }),
+      4,
+      { period: '2027-02' },
+    )).toEqual({ name: 'payroll-annual-settlement', query: { year: '2026', person: '4' } })
+  })
+
+  /**
+   * Odkaz z testu XML vedl na Roční zúčtování bez filtru: účetní hledala
+   * dotčené osoby mezi všemi lidmi roku. Hromadný odkaz nese rok, zúžení
+   * na nerozhodnuté, osoby hlášení a předvýběr.
+   */
+  it('hromadné „nepožádal" nese rok, nerozhodnuté a osoby hlášení', () => {
+    expect(annualSettlementRequestTarget('2026-02', [12, 5, 12, 0])).toEqual({
+      name: 'payroll-annual-settlement',
+      query: { year: '2025', state: 'request_undecided', employees: '12,5', select: 'all' },
+    })
+    expect(annualSettlementRequestTarget('2026-01', [], false)).toEqual({
+      name: 'payroll-annual-settlement',
+      query: { year: '2025', state: 'request_undecided' },
+    })
+    expect(annualSettlementRequestTarget('2026-02', [3], true, '/payroll/submissions/jmhz?period=2026-02')).toEqual({
+      name: 'payroll-annual-settlement',
+      query: { year: '2025', state: 'request_undecided', employees: '3', select: 'all', return: '/payroll/submissions/jmhz?period=2026-02' },
+    })
+  })
+
+  it('nález složky otevře její zařazení do JMHZ v číselníku, ne Mzdové vstupy', () => {
+    expect(jmhzRemediationTarget(
+      blocker({ code: 'component_jmhz_mapping_missing', entity_type: 'component', remediation: { kind: 'components', field: null } }),
+      12,
+    )).toEqual({ name: 'payroll-components', query: { tab: 'catalog', component: '12', panel: 'jmhz' } })
+    expect(jmhzRemediationTarget(
+      blocker({ code: 'component_jmhz_manual_review', entity_type: 'run', remediation: { kind: 'components', field: null } }),
+      null,
+    )).toEqual({ name: 'payroll-components', query: { tab: 'catalog', jmhz: 'manual_review' } })
+  })
+
+  it('souhrnný nález průměrů vede na čtvrtletí vykazovaného období', () => {
+    expect(jmhzRemediationTarget(
+      blocker({ code: 'jmhz_average_hourly_earning_missing', entity_type: 'run', remediation: { kind: 'averages', field: null } }),
+      null,
+      { period: '2026-08' },
+    )).toEqual({ name: 'payroll-absences', query: { tab: 'averages', year: '2026', quarter: '3' } })
   })
 
   it('popisek je z katalogu kódů v jazyce uživatele, ne česká věta serveru', () => {
@@ -85,5 +153,34 @@ describe('navigace nálezů měsíčního hlášení', () => {
     expect(payrollCodeKey(te, 'zp_insurer_code_missing')).toBe('payroll.server_codes.zp_insurer_code_missing')
     expect(payrollCodeKey(te, 'jmhz_deferral_conflict')).toBe('payroll.jmhz_gate.codes.jmhz_deferral_conflict')
     expect(payrollCodeKey(te, 'not_a_code')).toBeNull()
+  })
+})
+
+describe('zúžení číselníku složek z odkazu ?jmhz=', () => {
+  it('souhrnný nález otevře jen složky s tímtéž stavem zařazení', async () => {
+    const { jmhzComponentQuery } = await import('@/pages/payroll/jmhzBlockerRemediation')
+    const { componentJmhzFilterFromQuery, componentMatchesJmhzFilter } = await import('@/pages/payroll/payrollRemediationQuery')
+    type Treatment = PayrollComponent['jmhz_treatment']
+    type Status = PayrollComponentJmhzMappingState['status']
+    const components: Array<{ id: number, jmhz_treatment: Treatment, status: Status }> = [
+      { id: 1, jmhz_treatment: 'included', status: 'configured' },
+      { id: 2, jmhz_treatment: 'included', status: 'missing' },
+      { id: 3, jmhz_treatment: 'manual_review', status: 'manual_review' },
+      { id: 4, jmhz_treatment: 'neznámé' as Treatment, status: 'excluded' },
+    ]
+    // Cesta odkazu: kód nálezu → `?jmhz=` → filtr stránky → složky číselníku.
+    const narrowed = (code: string): number[] => {
+      const filter = componentJmhzFilterFromQuery(jmhzComponentQuery(code, null))
+      return components
+        .filter(component => filter === null || componentMatchesJmhzFilter(filter, component, component))
+        .map(component => component.id)
+    }
+
+    expect(narrowed('component_jmhz_mapping_missing')).toEqual([2])
+    expect(narrowed('component_jmhz_manual_review')).toEqual([3])
+    expect(narrowed('component_jmhz_treatment_invalid')).toEqual([4])
+    // Neověřené zařazení odměny filtr nenese: číselník zůstane celý.
+    expect(narrowed('component_jmhz_bonus_regularity_unverified')).toEqual([1, 2, 3, 4])
+    expect(componentJmhzFilterFromQuery({})).toBeNull()
   })
 })

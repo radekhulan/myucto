@@ -115,7 +115,7 @@ final class PayrollPersonSensitiveRevealAction
             return Json::error(
                 $response,
                 'forbidden',
-                'Pro tuto akci nemáš oprávnění.',
+                'Pro tuto akci nemáte oprávnění.',
                 403,
             );
         } catch (\InvalidArgumentException $exception) {
@@ -147,7 +147,7 @@ final class PayrollPersonSensitiveRevealAction
         Response $response,
         ?Response &$error,
     ): bool {
-        if (!RequestAuthorization::isSessionAuth($request)) {
+        if (!RequestAuthorization::actsAsSession($request)) {
             $error = Json::sessionRequired($response);
             return false;
         }

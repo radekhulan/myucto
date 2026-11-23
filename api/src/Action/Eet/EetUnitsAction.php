@@ -9,6 +9,7 @@ use MyInvoice\Http\SupplierGuard;
 use MyInvoice\Security\AccessLevel;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Eet\EetException;
+use MyInvoice\Service\Eet\EetUnitDisFormat;
 use MyInvoice\Service\Eet\EetUnitRepository;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
@@ -27,6 +28,57 @@ final class EetUnitsAction
             return $denied;
         }
         return Json::ok($response, ['items' => $this->units->listFor(SupplierGuard::currentId($request))]);
+    }
+
+    /**
+     * Soubor CSV pro hromadný import evidenčních jednotek v DIS+. Bez `all=1`
+     * obsahuje jen účinné jednotky, kterým DIS+ ještě nepřidělil číslo. Když
+     * některé jednotce chybí údaj, vrátí 422 se seznamem, co doplnit.
+     */
+    public function disImport(Request $request, Response $response): Response
+    {
+        if (($denied = EetActionSupport::deny($request, $response, 'eet.settings', AccessLevel::READ)) !== null) {
+            return $denied;
+        }
+        $all = filter_var($request->getQueryParams()['all'] ?? false, FILTER_VALIDATE_BOOL);
+        $units = $this->units->listForDisImport(
+            SupplierGuard::currentId($request),
+            (new \DateTimeImmutable('today'))->format('Y-m-d'),
+            $all,
+        );
+        if ($units === []) {
+            return Json::error($response, 'eet_units_nothing_to_export', $all
+                ? 'Firma nemá žádnou účinnou evidenční jednotku.'
+                : 'Všechny účinné jednotky už mají číslo z DIS+. Pro export všech zvolte „všechny jednotky".', 422);
+        }
+        if (count($units) > EetUnitDisFormat::MAX_ROWS) {
+            return Json::error($response, 'eet_units_too_many', 'DIS+ přijme v jednom souboru nejvýš '
+                . EetUnitDisFormat::MAX_ROWS . ' jednotek.', 422);
+        }
+        $problems = [];
+        foreach ($units as $unit) {
+            foreach (EetUnitDisFormat::problems($unit) as $problem) {
+                $problems[] = ['unit_id' => $unit['id'], 'unit_name' => $unit['name']] + $problem;
+            }
+        }
+        if ($problems !== []) {
+            return Json::error(
+                $response,
+                'eet_units_incomplete',
+                'Některým jednotkám chybí údaje pro DIS+: ' . implode(' ', array_map(
+                    static fn (array $p): string => '„' . $p['unit_name'] . '": ' . $p['message'],
+                    $problems,
+                )),
+                422,
+                ['problems' => $problems],
+            );
+        }
+
+        $response->getBody()->write(EetUnitDisFormat::csv($units));
+        return $response
+            ->withHeader('Content-Type', 'text/csv; charset=utf-8')
+            ->withHeader('Content-Disposition', 'attachment; filename="eet-jednotky-dis.csv"')
+            ->withHeader('Cache-Control', 'no-store');
     }
 
     public function create(Request $request, Response $response): Response

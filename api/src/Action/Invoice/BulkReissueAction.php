@@ -30,7 +30,7 @@ use Psr\Http\Message\ServerRequestInterface as Request;
  *
  * Pro každou source fakturu:
  *   - vytvoří draft (status='draft', varsymbol=null)
- *   - kopie items + work_report (zatím work_report ne — M5)
+ *   - kopie items; u pásmového výkazu pouze hlavička ujednání, bez minulých záznamů
  *   - auto-increment měsíce v popisech (regex /\b(\d{1,2})\/(\d{4})\b/)
  *   - tax_date = today, due_date podle PaymentDueResolver (zakázka → klient → dodavatel)
  *
@@ -46,6 +46,7 @@ final class BulkReissueAction
         private readonly IpMatcher $ipMatcher,
         private readonly TaxConstantsRepository $taxConstants,
         private readonly StatsRecomputer $stats,
+        private readonly \MyInvoice\Repository\WorkReportRepository $workReports,
     ) {}
 
     public function __invoke(Request $request, Response $response): Response
@@ -252,6 +253,10 @@ final class BulkReissueAction
             $params[] = $userId;
             $stmt->execute($params);
             $newId = (int) $pdo->lastInsertId();
+            $supportsBilling = $this->repo->supportsWorkReportBilling();
+            $newWorkReportId = $supportsBilling
+                ? $this->workReports->cloneForInvoice($sourceId, $newId, (int) $source['supplier_id'],
+                    (string) (($source['tax_date'] ?? null) ?: $source['issue_date']), $taxDate ?? $issueDate) : null;
 
             // Zkopíruj položky s případným inkrementem měsíce
             // Zachovává vat_classification_code ze source položky pokud existuje,
@@ -271,14 +276,15 @@ final class BulkReissueAction
                 $ossColumns[] = \MyInvoice\Service\Invoice\LineDiscount::LIST_COLUMN;
                 $ossColumns[] = \MyInvoice\Service\Invoice\LineDiscount::PERCENT_COLUMN;
             }
+            if ($supportsBilling) array_push($ossColumns, 'linked_work_report_id', 'work_report_billing_key');
             $itemStmt = $pdo->prepare(
                 'INSERT INTO invoice_items
                    (invoice_id, description, quantity, duration_minutes, unit, unit_price_without_vat,
                     vat_rate_id, vat_rate_snapshot,
                     total_without_vat, total_vat, total_with_vat, order_index, item_kind, vat_classification_code,
-                    stock_item_id, warehouse_id, revenue_account_code'
+                    stock_item_id, warehouse_id, revenue_account_code, counter_account_code, posting_rule_key'
                 . ($ossColumns !== [] ? ', ' . implode(', ', $ossColumns) : '')
-                . ') VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 0, ?, ?, ?, ?, ?, ?'
+                . ') VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 0, ?, ?, ?, ?, ?, ?, ?, ?'
                 . str_repeat(', ?', count($ossColumns))
                 . ')'
             );
@@ -323,6 +329,9 @@ final class BulkReissueAction
                     $item['warehouse_id'] ?? null,
                     // Výnosový účet položky (F1) je vlastností plnění, kopie ho nese dál.
                     $item['revenue_account_code'] ?? null,
+                    // Protiúčet a předkontace řádku patří k zaúčtování plnění stejně jako účet.
+                    $item['counter_account_code'] ?? null,
+                    $item['posting_rule_key'] ?? null,
                 ];
                 if ($supportsOss) {
                     $ossApplicable = !empty($item['oss_applicable']);
@@ -346,6 +355,10 @@ final class BulkReissueAction
                 }
                 if ($supportsLineDiscount) {
                     array_push($params, ...\MyInvoice\Service\Invoice\LineDiscount::columns($item));
+                }
+                if ($supportsBilling) {
+                    array_push($params, empty($item['linked_work_report_id']) ? null : $newWorkReportId,
+                        $newWorkReportId === null ? null : ($item['work_report_billing_key'] ?? null));
                 }
                 $itemStmt->execute($params);
             }

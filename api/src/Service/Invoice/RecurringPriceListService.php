@@ -196,7 +196,7 @@ final class RecurringPriceListService
     {
         $changed = (string) ($snapshot['catalog_price_source'] ?? '') !== (string) $current['catalog_price_source']
             || (string) ($snapshot['catalog_source_currency_code'] ?? '') !== (string) $current['catalog_source_currency_code']
-            || !$this->sameMoney($snapshot['catalog_source_unit_price'] ?? null, $current['catalog_source_unit_price'])
+            || !$this->sameUnitPrice($snapshot['catalog_source_unit_price'] ?? null, $current['catalog_source_unit_price'])
             || (string) $snapshot['unit'] !== (string) $current['unit']
             || (int) $snapshot['vat_rate_id'] !== (int) $current['vat_rate_id'];
 
@@ -212,10 +212,10 @@ final class RecurringPriceListService
         }
     }
 
-    private function sameMoney(mixed $left, mixed $right): bool
+    private function sameUnitPrice(mixed $left, mixed $right): bool
     {
         if ($left === null || $right === null) return $left === $right;
-        return abs((float) $left - (float) $right) < 0.005;
+        return UnitPricePrecision::normalize((float) $left) === UnitPricePrecision::normalize((float) $right);
     }
 
     private function isAvailable(int $supplierId): bool

@@ -35,22 +35,29 @@ final readonly class J6CurrentProviderFactory
         return $this->reader->page($supplierId, $periodId, $after, $limit, $currentRead);
     }
 
-    public function fingerprint(int $supplierId, int $periodId, bool $currentRead = false): J6CurrentSourceFingerprint
+    /**
+     * @param (callable(array $rows, array $findings): void)|null $onPage odběratel obsahu stránek
+     *        (obsahový otisk podkladů odložené daně), aby se podklady nečetly dvakrát
+     */
+    public function fingerprint(int $supplierId, int $periodId, bool $currentRead = false, ?callable $onPage = null): J6CurrentSourceFingerprint
     {
         $provider = $this->create($supplierId, $periodId, $currentRead);
         $header = $provider->header();
         $root = $this->hasher->startRoot();
+        $content = $this->hasher->startContent();
         $ordinal = $rows = $findings = 0;
         foreach ($provider->pages(null, 500) as $page) {
             if ($page->rows === [] && $page->findings === []) continue;
             $chunk = $this->hasher->chunk($ordinal, $page);
             $this->hasher->updateRoot($root, $chunk['descriptor']);
+            $this->hasher->updateContent($content, $page->rows, $page->findings);
+            if ($onPage !== null) $onPage($page->rows, $page->findings);
             $rows += $chunk['descriptor']['row_count'];
             $findings += $chunk['descriptor']['finding_count'];
             ++$ordinal;
         }
         $rootHash = $this->hasher->finishRoot($root, $ordinal);
-        $inputHash = $this->hasher->input($header, $this->hasher->header($header), $rootHash, $rows, $findings, $ordinal);
+        $inputHash = $this->hasher->contentInput($header, $this->hasher->header($header), $this->hasher->finishContent($content), $rows, $findings);
         return new J6CurrentSourceFingerprint($header, $inputHash, $rootHash, $rows, $findings, $ordinal);
     }
 }

@@ -145,6 +145,7 @@ final class ChangePasswordClearsPendingTotpTest extends TestCase
         ?PasswordHasher $hasher = null,
         ?ApiTokenService $tokens = null,
     ): ChangePasswordAction {
+        $pdo->exec('CREATE TABLE IF NOT EXISTS password_resets (user_id INTEGER, used_at TEXT)');
         $db = $this->createMock(Connection::class);
         $db->method('pdo')->willReturn($pdo);
         if ($hasher === null) {
@@ -167,6 +168,7 @@ final class ChangePasswordClearsPendingTotpTest extends TestCase
             new IpMatcher(),
             $bruteForce,
             $tokens ?? $this->createMock(ApiTokenService::class),
+            $this->createStub(\MyInvoice\Service\Auth\LoginPolicyService::class),
         );
     }
 }

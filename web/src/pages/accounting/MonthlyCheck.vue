@@ -10,6 +10,7 @@ import { useToast } from '@/composables/useToast'
 import { formatMoney, formatDate } from '@/composables/useFormat'
 import { useAccountBalance } from '@/composables/useAccountBalance'
 import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
+import AccrualAgendaCheckValue from '@/components/accounting/AccrualAgendaCheckValue.vue'
 import CheckFindings from '@/components/accounting/CheckFindings.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import DateInput from '@/components/ui/DateInput.vue'
@@ -268,7 +269,7 @@ async function saveLock() {
         <h1 class="text-2xl font-semibold">{{ t('accounting.monthly_check.title') }}</h1>
         <p class="text-sm text-neutral-500 mt-0.5">{{ t('accounting.monthly_check.subtitle') }}</p>
       </div>
-      <button v-if="auth.canWrite('accounting.periods.close')" :class="btnOutline('primary')" @click="openLockDialog">
+      <button v-if="auth.canWrite('accounting.periods.manage') || auth.canWrite('accounting.period_lock')" :class="btnOutline('primary')" @click="openLockDialog">
         <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.lock" /></svg>
         {{ t('accounting.monthly_check.lock_button') }}
       </button>
@@ -384,6 +385,8 @@ async function saveLock() {
                     </span>
                   </template>
 
+
+                  <AccrualAgendaCheckValue v-else-if="c.key === 'deferrals_agenda_difference'" :value="c.value" />
 
                   <!-- ostatní (info/číselné) -->
                   <template v-else>

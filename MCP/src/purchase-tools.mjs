@@ -19,7 +19,10 @@
  * přesně ten krok, který token dělat nemá.
  */
 
-import { CONFIRM, changed, merged, requireConfirm, seg } from './tool-shared.mjs';
+import { NOT_IN_CLIENT_CATALOG } from './api-contracts.mjs';
+import {
+  CONFIRM, PAYMENT_METHODS, PAYMENT_METHOD_HELP, changed, merged, nullIfEmpty, requireConfirm, resolveCurrency, seg,
+} from './tool-shared.mjs';
 
 const str = (description, extra = {}) => ({ type: 'string', description, ...extra });
 const int = (description, extra = {}) => ({ type: 'integer', description, ...extra });
@@ -39,7 +42,6 @@ const BASE = '/purchase-invoices';
 const ORDERS = `${BASE}/payment-orders`;
 
 const DOCUMENT_KINDS = ['invoice', 'receipt', 'credit_note', 'advance', 'tax_document'];
-const PAYMENT_METHODS = ['bank_transfer', 'direct_debit', 'card', 'cash', 'cash_on_delivery', 'offset', 'other'];
 const VAT_DEDUCTIONS = ['full', 'none', 'proportional', 'reduced'];
 const EXPENSE_KINDS = ['service', 'material', 'small_asset', 'small_intangible', 'fixed_asset'];
 
@@ -63,12 +65,25 @@ const PURCHASE_HEADER_FIELDS = [
   'is_fixed_asset', 'expense_category_id',
 ];
 
-/** Všechna pole řádku, která server při náhradě položek přijímá (replaceItems). */
-const PURCHASE_ITEM_FIELDS = [
-  'description', 'quantity', 'duration_minutes', 'unit', 'unit_price_without_vat',
+/**
+ * Všechna pole řádku, která server při náhradě položek přijímá (`replaceItems`, DELETE + INSERT).
+ * Co tu chybí, to úprava konceptu přes MCP na řádku smaže. `id` server neukládá, páruje
+ * podle něj převzetí vynechaných sloupců (`StoredPurchaseItemColumns`).
+ *
+ * Úplnost hlídá test `item-field-coverage.test.mjs` proti sloupcům `purchase_invoice_items`
+ * v `db/schema.snapshot.json`.
+ */
+export const PURCHASE_ITEM_FIELDS = [
+  'id', 'description', 'quantity', 'duration_minutes', 'unit', 'unit_price_without_vat',
   'vat_rate_id', 'order_index', 'vat_classification_code', 'is_fixed_asset',
-  'expense_kind', 'expense_account_code', 'accrual_from', 'accrual_to', 'stock_item_id',
+  'expense_kind', 'expense_account_code', 'counter_account_code', 'posting_rule_key',
+  'accrual_from', 'accrual_to', 'stock_item_id',
+  'seller_item_code', 'item_ean', 'intrastat_cn8_code', 'intrastat_country_of_origin',
+  'advance_purchase_invoice_id',
 ];
+
+/** Účetní pole řádku přijaté faktury, která jde zadat nebo změnit. */
+const PURCHASE_ITEM_ACCOUNTING_KEYS = ['expense_account_code', 'counter_account_code', 'posting_rule_key'];
 
 /**
  * Změna dodavatele nebo přenesené povinnosti mění daňové zařazení řádků (tuzemsko,
@@ -109,25 +124,9 @@ async function loadDraftPurchase(c, invoiceId, tool) {
 function refuseIfPosted(pi, invoiceId, what) {
   if (!isPosted(pi)) return;
   throw new Error(
-    `Přijatá faktura ${purchaseLabel(pi, invoiceId)} je zaúčtovaná. ${what} by ji rozešla `
-    + 's účetním zápisem a přeúčtování je účetní úkon, který přes API nejde. Proveďte to v aplikaci.',
+    `NEPROVEDENO: přijatá faktura ${purchaseLabel(pi, invoiceId)} je zaúčtovaná. ${what} by změnilo `
+    + 'účetní zápis (přeúčtování, storno) a účetní deník je přes MCP jen ke čtení. Proveďte to v aplikaci.',
   );
-}
-
-/** Načte číselník měn a vrátí ID a kód měny zadané kódem nebo ID. */
-async function resolveCurrency(c, a, tool) {
-  const list = await c.get('/codebooks/currencies', { include_inactive: 1 }, tool);
-  const rows = Array.isArray(list) ? list : (list?.data ?? []);
-  if (a.currency_id !== undefined) {
-    const row = rows.find((r) => Number(r.id) === Number(a.currency_id));
-    if (!row) throw new Error(`Měna #${a.currency_id} ve firmě není. Seznam vrátí \`list_currencies\`.`);
-    return { id: Number(row.id), code: String(row.code).toUpperCase() };
-  }
-  const code = String(a.currency ?? '').trim().toUpperCase();
-  const hits = rows.filter((r) => String(r.code).toUpperCase() === code);
-  if (hits.length === 0) throw new Error(`Měna ${code} ve firmě není. Seznam vrátí \`list_currencies\`.`);
-  const row = hits.find((r) => r.is_default) ?? hits.find((r) => r.is_active) ?? hits[0];
-  return { id: Number(row.id), code };
 }
 
 /**
@@ -196,14 +195,19 @@ function applyExpenseKind(line, kind) {
   line.is_fixed_asset = line.expense_kind === 'fixed_asset';
 }
 
+/** Pokladna patří jen k úhradě v hotovosti, jinak by z ní nikdy nevznikl pokladní doklad. */
+function checkPurchaseCashRegister(paymentMethod, cashRegisterId) {
+  if (cashRegisterId != null && cashRegisterId !== 0 && paymentMethod !== 'cash') {
+    throw new Error('Pokladna (`cash_register_id`) patří jen k úhradě v hotovosti (`payment_method: "cash"`).');
+  }
+}
+
 /** Odpověď QR bez obrázku: base64 PNG by jen zabral kontext, soubory MCP nevrací. */
 function withoutQrImage(res) {
   if (!res || typeof res !== 'object') return res;
   const { qr_data_uri: image, ...rest } = res;
   return { ...rest, has_qr_image: Boolean(image) };
 }
-
-const nullIfEmpty = (value) => (value === '' ? null : value);
 
 const ITEM_INPUT = {
   description: str('Text položky.'),
@@ -219,11 +223,48 @@ const ITEM_INPUT = {
   accrual_from: date('Časové rozlišení nákladu od (RRRR-MM-DD).'),
   accrual_to: date('Časové rozlišení nákladu do (RRRR-MM-DD).'),
   stock_item_id: id('Volitelná vazba na skladovou kartu (jen pro předvyplnění příjemky).'),
+  expense_account_code: str(
+    'Nákladový účet řádku (MD), např. 518 nebo analytika 518.100. Bez zadání ho určí druh nákladu, '
+    + 'pravidla klasifikace nebo předkontace dokladu. Seznam účtů vrátí `chart_of_accounts`.',
+    { maxLength: 10 },
+  ),
+  counter_account_code: str('Protiúčet řádku (Dal), závazek, typicky 321. Na dokladu smí být jen jeden.', { maxLength: 10 }),
+  posting_rule_key: str('Předkontace řádku: `key` z `list_posting_rules` (strana `purchase`). Doplní účty, které řádek nemá.', { maxLength: 64 }),
 };
 
 const ITEM_PICK = {
   item_id: id('ID položky.'),
   row: int('Pořadí položky, od 1. Alternativa k `item_id`.', { minimum: 1 }),
+};
+
+/** Pole hlavičky přijaté faktury společná pro založení a úpravu konceptu. */
+const PURCHASE_HEADER_INPUT = {
+  number_series_id: id('Číselná řada interního čísla (`list_purchase_number_series`). Bez zadání výchozí řada.'),
+  cash_register_id: int(
+    'Jen `payment_method: "cash"`: pokladna (`list_cash_registers`), ze které se platilo. Přijetím vznikne '
+    + 'výdajový pokladní doklad. 0 volbu zruší.',
+    { minimum: 0 },
+  ),
+  vat_classification_code: str(
+    'Kód členění DPH hlavičky (`list_vat_classifications`, strana `purchase`), typicky vědomé „bez nároku" (42). '
+    + 'Jen na výslovný pokyn; bez něj ho server převezme z položek.',
+  ),
+  rounding: num('Zaokrouhlení dokladu z dokladu dodavatele (např. -0,40), v měně dokladu.'),
+};
+const PURCHASE_HEADER_INPUT_KEYS = Object.keys(PURCHASE_HEADER_INPUT);
+
+/** Účet dodavatele k úhradě (QR platba, příkaz k úhradě). */
+const PAYMENT_ACCOUNT_INPUT = {
+  type: 'object',
+  description: 'Účet dodavatele z dokladu, na který se má platit. Ověří ho `verify_purchase_payment_account`.',
+  properties: {
+    account_number: str('Číslo účtu (u českého účtu i s předčíslím).'),
+    bank_code: str('Kód banky, 4 číslice.'),
+    iban: str('IBAN.'),
+    bic: str('BIC / SWIFT.'),
+    variable_symbol: str('Variabilní symbol platby, liší-li se od čísla dokladu.'),
+  },
+  additionalProperties: false,
 };
 
 /** Klíče hlavičky, které smí `update_purchase_invoice` změnit. */
@@ -244,6 +285,11 @@ export const PURCHASE_TOOLS = [
   // ──────────────────────────────────────────────────────────────────────────
   {
     name: 'create_purchase_invoice',
+    api: [
+      ['POST', '/api/purchase-invoices'],
+      ['GET', '/api/codebooks/currencies'],
+      ['GET', '/api/codebooks/cnb-rate'],
+    ],
     title: 'Založit přijatou fakturu (koncept)',
     description:
       'Zapíše došlý doklad od dodavatele jako KONCEPT. Do evidence DPH, závazků a účetnictví '
@@ -285,21 +331,29 @@ export const PURCHASE_TOOLS = [
       language: str('Jazyk dokladu.', { enum: ['cs', 'en'] }),
       note: str('Poznámka pod položkami.'),
       note_above_items: str('Poznámka nad položkami.'),
+      ...PURCHASE_HEADER_INPUT,
+      payment: PAYMENT_ACCOUNT_INPUT,
+      advance_paid_amount: num('Záloha odečtená na dokladu dodavatele (částka s DPH v měně dokladu). Spárování se zálohou dělá `link_purchase_advance`.', { minimum: 0 }),
+      vendor_is_vat_payer: bool('Dodavatel byl k datu plnění plátce DPH. Bez zadání podle karty dodavatele.'),
+      allow_duplicate_number: bool(
+        'Vědomě založit doklad se stejným číslem dodavatele a datem, jaké už ve firmě je (server jinak odpoví '
+        + '`vendor_invoice_duplicate`). Jen po potvrzení uživatelem, že nejde o duplicitu.',
+      ),
       items: {
         type: 'array',
-        description: 'Položky dokladu. Součty a DPH spočítá server.',
-        minItems: 1,
+        description: 'Položky dokladu. Součty a DPH spočítá server. Bez položek vznikne koncept jen s hlavičkou.',
         items: schema(ITEM_INPUT, ['description', 'quantity', 'unit_price_without_vat', 'vat_rate_id']),
       },
-    }, ['vendor_id', 'vendor_invoice_number', 'issue_date', 'due_date', 'items']),
+    }, ['vendor_id', 'vendor_invoice_number', 'issue_date', 'due_date']),
     write: true,
     run: async (c, a, tool) => {
       if (a.currency === undefined && a.currency_id === undefined) {
         throw new Error('Zadejte měnu dokladu (`currency`, např. CZK), nebo `currency_id`.');
       }
-      for (const [i, item] of a.items.entries()) {
+      for (const [i, item] of (a.items ?? []).entries()) {
         if (!(Number(item.quantity) !== 0)) throw new Error(`Položka ${i + 1}: množství nesmí být nula.`);
       }
+      checkPurchaseCashRegister(a.payment_method, a.cash_register_id);
       const currency = await resolveCurrency(c, a, tool);
       const body = {
         vendor_id: a.vendor_id,
@@ -311,16 +365,19 @@ export const PURCHASE_TOOLS = [
           'document_kind', 'tax_date', 'delivery_date', 'received_at', 'reverse_charge',
           'prices_include_vat', 'vat_deduction', 'vat_deduction_percent', 'tax_deductible',
           'expense_category_id', 'project_id', 'payment_method', 'parent_purchase_invoice_id',
-          'varsymbol', 'language', 'note_above_items',
+          'varsymbol', 'language', 'note_above_items', 'advance_paid_amount', 'vendor_is_vat_payer',
+          'allow_duplicate_number', ...PURCHASE_HEADER_INPUT_KEYS,
         ]),
       };
+      if (body.cash_register_id === 0) body.cash_register_id = null;
+      if (a.payment !== undefined) body.payment = { ...a.payment, source: 'manual' };
       if (a.note !== undefined) body.note_below_items = a.note;
       if (currency.code !== 'CZK') {
         Object.assign(body, a.exchange_rate !== undefined
           ? { exchange_rate: a.exchange_rate, exchange_rate_date: a.tax_date ?? a.issue_date, exchange_rate_source: 'user' }
           : await cnbRate(c, currency.code, a.tax_date, a.issue_date, tool));
       }
-      body.items = a.items.map((item, index) => {
+      body.items = (a.items ?? []).map((item, index) => {
         const line = {
           description: String(item.description).trim(),
           quantity: Number(item.quantity),
@@ -328,7 +385,7 @@ export const PURCHASE_TOOLS = [
           unit_price_without_vat: Number(item.unit_price_without_vat),
           vat_rate_id: item.vat_rate_id,
           order_index: index,
-          ...changed(item, ['vat_classification_code', 'accrual_from', 'accrual_to', 'stock_item_id']),
+          ...changed(item, ['vat_classification_code', 'accrual_from', 'accrual_to', 'stock_item_id', ...PURCHASE_ITEM_ACCOUNTING_KEYS]),
         };
         if (item.expense_kind !== undefined) applyExpenseKind(line, item.expense_kind);
         return line;
@@ -338,11 +395,19 @@ export const PURCHASE_TOOLS = [
   },
   {
     name: 'update_purchase_invoice',
+    api: [
+      ['GET', '/api/purchase-invoices/{id}'],
+      ['GET', '/api/codebooks/currencies'],
+      ['GET', '/api/clients/{id}'],
+      ['PUT', '/api/purchase-invoices/{id}'],
+    ],
     title: 'Upravit hlavičku konceptu přijaté faktury',
     description:
       'Změní hlavičku KONCEPTU přijaté faktury: dodavatele, číslo dokladu, data, měnu, druh dokladu, '
-      + 'odpočet DPH, kategorii nákladu, zakázku, formu úhrady, poznámky. Zadaná pole se změní, '
-      + 'ostatní zůstanou, položky beze změny. Na položky jsou `add_purchase_invoice_item`, '
+      + 'odpočet DPH, kategorii nákladu, zakázku, formu úhrady a pokladnu, číselnou řadu, zaokrouhlení, '
+      + 'poznámky. Zadaná pole se změní, ostatní zůstanou, položky beze změny včetně účtů a předkontací. '
+      + 'Ruční kurz nastaví `set_purchase_invoice_exchange_rate`, účet k úhradě `set_purchase_invoice_payment_account`. '
+      + 'Na položky jsou `add_purchase_invoice_item`, '
       + '`update_purchase_invoice_item` a `remove_purchase_invoice_item`.\n\n'
       + 'POZOR na daně: DUZP a datum přijetí přesouvají odpočet DPH do jiného období, měnit je jen na výslovný pokyn. '
       + 'Po změně dodavatele nebo přenesené povinnosti server znovu odvodí zařazení všech položek pro přiznání. '
@@ -376,10 +441,13 @@ export const PURCHASE_TOOLS = [
       language: str('Jazyk dokladu.', { enum: ['cs', 'en'] }),
       note: str('Poznámka pod položkami. Prázdný text ji smaže.'),
       note_above_items: str('Poznámka nad položkami. Prázdný text ji smaže.'),
+      ...PURCHASE_HEADER_INPUT,
     }, ['id']),
     write: true,
     run: async (c, a, tool) => {
-      const changes = changed(a, UPDATE_KEYS);
+      const changes = changed(a, [...UPDATE_KEYS, ...PURCHASE_HEADER_INPUT_KEYS]);
+      if (changes.cash_register_id === 0) changes.cash_register_id = null;
+      if (changes.vat_classification_code !== undefined) changes.vat_classification_code = nullIfEmpty(changes.vat_classification_code);
       if (a.note !== undefined) changes.note_below_items = a.note;
       for (const key of ['tax_date', 'delivery_date']) {
         if (changes[key] !== undefined) changes[key] = nullIfEmpty(changes[key]);
@@ -394,9 +462,11 @@ export const PURCHASE_TOOLS = [
 
       const pi = await loadDraftPurchase(c, a.id, tool);
       if (hasCurrency) changes.currency_id = (await resolveCurrency(c, a, tool)).id;
+      checkPurchaseCashRegister(changes.payment_method ?? pi.payment_method,
+        changes.cash_register_id !== undefined ? changes.cash_register_id : null);
 
       const body = merged(pi, changes, PURCHASE_HEADER_FIELDS);
-      for (const key of UPDATE_OPTIONAL) {
+      for (const key of [...UPDATE_OPTIONAL, 'number_series_id', 'cash_register_id', 'rounding']) {
         if (changes[key] !== undefined) body[key] = changes[key];
       }
 
@@ -415,7 +485,7 @@ export const PURCHASE_TOOLS = [
         (key) => changes[key] !== undefined && changes[key] !== pi[key],
       ) || vendorChanged;
       if (rederive) {
-        body.vat_classification_code = null;
+        if (changes.vat_classification_code === undefined) body.vat_classification_code = null;
         body.items = (pi.items ?? []).map((item) => lineForPut(item, { rederive: true }));
       }
 
@@ -425,10 +495,14 @@ export const PURCHASE_TOOLS = [
   },
   {
     name: 'add_purchase_invoice_item',
+    api: [
+      ['GET', '/api/purchase-invoices/{id}'],
+      ['PUT', '/api/purchase-invoices/{id}/items'],
+    ],
     title: 'Přidat položku na koncept přijaté faktury',
     description:
       'Přidá položku na KONCEPT přijaté faktury. Existující položky zůstanou beze změny včetně '
-      + 'skrytých údajů (druh nákladu, účet, časové rozlišení, sklad, pořadí).\n\n'
+      + 'skrytých údajů (druh nákladu, účty a předkontace, časové rozlišení, sklad, pořadí, dimenze).\n\n'
       + 'Sazbu DPH NEHÁDEJ: `vat_rate_id` je povinné a patří z dokladu (`list_vat_rates`). '
       + 'Cena je bez DPH, pokud doklad nemá `prices_include_vat`.',
     inputSchema: schema({
@@ -450,7 +524,7 @@ export const PURCHASE_TOOLS = [
         unit: String(a.unit ?? 'ks').trim() || 'ks',
         unit_price_without_vat: Number(a.unit_price_without_vat),
         vat_rate_id: a.vat_rate_id,
-        ...changed(a, ['vat_classification_code', 'accrual_from', 'accrual_to', 'stock_item_id']),
+        ...changed(a, ['vat_classification_code', 'accrual_from', 'accrual_to', 'stock_item_id', ...PURCHASE_ITEM_ACCOUNTING_KEYS]),
       };
       if (a.expense_kind !== undefined) applyExpenseKind(added, a.expense_kind);
       const at = a.position !== undefined ? Math.min(Number(a.position), lines.length + 1) - 1 : lines.length;
@@ -463,12 +537,17 @@ export const PURCHASE_TOOLS = [
   },
   {
     name: 'update_purchase_invoice_item',
+    api: [
+      ['GET', '/api/purchase-invoices/{id}'],
+      ['PUT', '/api/purchase-invoices/{id}/items'],
+    ],
     title: 'Upravit položku konceptu přijaté faktury',
     description:
       'Změní jednu položku KONCEPTU přijaté faktury, určenou `item_id` nebo pořadím `row` '
       + '(1 = první, jak je vidí uživatel; oboje vrátí `get_purchase_invoice`). Změní se jen '
-      + 'zadaná pole, ostatní pole položky i ostatní položky zůstanou.\n\n'
-      + 'Sazbu DPH měň jen na výslovný pokyn; zařazení řádku pro přiznání pak server odvodí znovu.',
+      + 'zadaná pole, ostatní pole položky (účty, předkontace, sklad, Intrastat) i ostatní položky zůstanou.\n\n'
+      + 'Sazbu DPH měň jen na výslovný pokyn; zařazení řádku pro přiznání pak server odvodí znovu. '
+      + 'Účet, protiúčet nebo předkontaci zrušíš prázdným textem.',
     inputSchema: schema({
       id: id('ID konceptu přijaté faktury.'),
       ...ITEM_PICK,
@@ -481,12 +560,15 @@ export const PURCHASE_TOOLS = [
       expense_kind: str('Druh nákladu; prázdný text ho zruší.', { enum: [...EXPENSE_KINDS, ''] }),
       accrual_from: str('Časové rozlišení od (RRRR-MM-DD); prázdný text ho zruší.'),
       accrual_to: str('Časové rozlišení do (RRRR-MM-DD); prázdný text ho zruší.'),
+      expense_account_code: ITEM_INPUT.expense_account_code,
+      counter_account_code: ITEM_INPUT.counter_account_code,
+      posting_rule_key: ITEM_INPUT.posting_rule_key,
     }, ['id']),
     write: true,
     run: async (c, a, tool) => {
       const changes = changed(a, [
         'description', 'quantity', 'unit', 'unit_price_without_vat', 'vat_rate_id',
-        'vat_classification_code', 'expense_kind', 'accrual_from', 'accrual_to',
+        'vat_classification_code', 'expense_kind', 'accrual_from', 'accrual_to', ...PURCHASE_ITEM_ACCOUNTING_KEYS,
       ]);
       if (Object.keys(changes).length === 0) throw new Error('Není co měnit. Zadejte aspoň jedno pole položky.');
       if (changes.quantity !== undefined && !(Number(changes.quantity) !== 0)) {
@@ -504,7 +586,7 @@ export const PURCHASE_TOOLS = [
       for (const key of ['description', 'quantity', 'unit', 'unit_price_without_vat', 'vat_rate_id']) {
         if (changes[key] !== undefined) line[key] = changes[key];
       }
-      for (const key of ['accrual_from', 'accrual_to', 'vat_classification_code']) {
+      for (const key of ['accrual_from', 'accrual_to', 'vat_classification_code', ...PURCHASE_ITEM_ACCOUNTING_KEYS]) {
         if (changes[key] !== undefined) line[key] = nullIfEmpty(changes[key]);
       }
       if (changes.expense_kind !== undefined) applyExpenseKind(line, changes.expense_kind);
@@ -530,6 +612,10 @@ export const PURCHASE_TOOLS = [
   },
   {
     name: 'remove_purchase_invoice_item',
+    api: [
+      ['GET', '/api/purchase-invoices/{id}'],
+      ['PUT', '/api/purchase-invoices/{id}/items'],
+    ],
     title: 'Odebrat položku z konceptu přijaté faktury',
     description:
       'Odebere jednu položku KONCEPTU přijaté faktury, určenou `item_id` nebo pořadím `row`. '
@@ -552,6 +638,10 @@ export const PURCHASE_TOOLS = [
   },
   {
     name: 'delete_purchase_invoice',
+    api: [
+      ['GET', '/api/purchase-invoices/{id}'],
+      ['DELETE', '/api/purchase-invoices/{id}'],
+    ],
     title: 'Smazat koncept přijaté faktury',
     description:
       'Smaže KONCEPT přijaté faktury i s položkami. Přijatý, uhrazený nebo zaúčtovaný doklad '
@@ -572,12 +662,17 @@ export const PURCHASE_TOOLS = [
   // ──────────────────────────────────────────────────────────────────────────
   {
     name: 'receive_purchase_invoice',
+    api: [
+      ['GET', '/api/purchase-invoices/{id}'],
+      ['POST', '/api/purchase-invoices/{id}/transition'],
+    ],
     title: 'Přijmout přijatou fakturu',
     description:
       'Převede doklad do stavu PŘIJATO. Z konceptu: přidělí interní číslo, doklad vstoupí do evidence '
       + 'DPH (odpočet v období podle DUZP a data přijetí), do závazků a do platebních příkazů. '
-      + 'MÁ-LI FIRMA ZAPNUTÉ AUTOMATICKÉ ÚČTOVÁNÍ PŘIJATÝCH FAKTUR, SERVER DOKLAD ROVNOU ZAÚČTUJE; '
-      + 'u hotovostní úhrady z pokladny vznikne výdajový pokladní doklad.\n\n'
+      + 'Automatické zaúčtování, které má firma zapnuté, se přes MCP ODLOŽÍ (odpověď `posting: {action: '
+      + '"deferred"}`): účetní deník je pro asistenta jen ke čtení, doklad zaúčtuje účetní v aplikaci. '
+      + 'U hotovostní úhrady z pokladny vznikne výdajový pokladní doklad.\n\n'
       + 'Vyžaduje-li koncept schválení manažerem střediska, server ho místo přijetí odešle ke schválení '
       + '(odpověď `approval_requested: true`, doklad zůstane konceptem a přijme se sám po schválení).\n\n'
       + 'Z uhrazeného dokladu tím zrušíš označení úhrady, ze stornovaného obnovíš doklad '
@@ -588,12 +683,14 @@ export const PURCHASE_TOOLS = [
     run: async (c, a, tool) => {
       const pi = await loadPurchase(c, a.id, tool);
       const action = {
-        draft: 'Přijmout se má koncept (vstoupí do evidence DPH a závazků; se zapnutým automatickým účtováním se zaúčtuje)',
+        draft: 'Přijmout se má koncept (vstoupí do evidence DPH a závazků; zaúčtuje ho účetní v aplikaci)',
         paid: 'U přijaté faktury se má zrušit označení úhrady',
         cancelled: 'Obnovit se má stornovaná přijatá faktura (vrátí se do evidence DPH a závazků)',
       }[pi?.status];
       if (!action) {
-        throw new Error(`Přijatá faktura ${purchaseLabel(pi, a.id)} už je přijatá, do stavu „přijato" ji převést nejde.`);
+        throw new Error(pi?.status === 'booked'
+          ? `Přijatá faktura ${purchaseLabel(pi, a.id)} je zaúčtovaná, do stavu „přijato" ji převést nejde.`
+          : `Přijatá faktura ${purchaseLabel(pi, a.id)} už je přijatá, do stavu „přijato" ji převést nejde.`);
       }
       requireConfirm(a, action, purchaseLabel(pi, a.id));
       return c.post(`${BASE}/${seg(a.id)}/transition`, { target: 'received' }, tool);
@@ -601,6 +698,9 @@ export const PURCHASE_TOOLS = [
   },
   {
     name: 'mark_purchase_invoice_paid',
+    api: [
+      ['POST', '/api/purchase-invoices/{id}/transition'],
+    ],
     title: 'Označit přijatou fakturu jako uhrazenou',
     description:
       'Zaeviduje úhradu přijaté faktury. Jen tam, kde úhrada nepřijde z bankovního výpisu nebo '
@@ -617,18 +717,29 @@ export const PURCHASE_TOOLS = [
   },
   {
     name: 'cancel_purchase_invoice',
+    api: [
+      ['GET', '/api/purchase-invoices/{id}'],
+      ['POST', '/api/purchase-invoices/{id}/transition'],
+    ],
     title: 'Stornovat přijatou fakturu',
     description:
-      'Stornuje přijatou fakturu: vypadne z evidence DPH a závazků, aktivní účetní zápis i automaticky '
-      + 'založený pokladní doklad server stornuje. V uzavřeném období server storno odmítne. '
-      + 'Koncept raději smaž (`delete_purchase_invoice`). Bez `confirm: true` jen ukáže, který doklad '
-      + 'by se stornoval.',
+      'Stornuje NEZAÚČTOVANOU přijatou fakturu: vypadne z evidence DPH a závazků. Zaúčtovanou fakturu '
+      + '(nebo s zaúčtovaným pokladním dokladem úhrady) nástroj odmítne, storno zápisu v deníku dělá '
+      + 'účetní v aplikaci. V uzavřeném období server storno odmítne. Koncept raději smaž '
+      + '(`delete_purchase_invoice`). Bez `confirm: true` jen ukáže, který doklad by se stornoval.',
     inputSchema: schema({ id: id('ID přijaté faktury.'), confirm: CONFIRM }, ['id']),
     write: true,
     destructive: true,
     run: async (c, a, tool) => {
       const pi = await loadPurchase(c, a.id, tool);
       if (pi?.status === 'cancelled') throw new Error(`Přijatá faktura ${purchaseLabel(pi, a.id)} už je stornovaná.`);
+      refuseIfPosted(pi, a.id, 'Storno');
+      if ((pi?.cash_payments ?? []).length > 0) {
+        throw new Error(
+          `NEPROVEDENO: přijatá faktura ${purchaseLabel(pi, a.id)} je uhrazená zaúčtovaným pokladním dokladem. `
+          + 'Storno by stornovalo i jeho zápis v deníku, proveďte ho v aplikaci.',
+        );
+      }
       requireConfirm(a, 'Stornovat se má přijatá faktura', purchaseLabel(pi, a.id));
       return c.post(`${BASE}/${seg(a.id)}/transition`, { target: 'cancelled' }, tool);
     },
@@ -639,6 +750,8 @@ export const PURCHASE_TOOLS = [
   // ──────────────────────────────────────────────────────────────────────────
   {
     name: 'set_purchase_invoice_document_kind',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Změnit druh přijatého dokladu',
     description:
       'Rychlá oprava druhu dokladu po importu (faktura, účtenka, dobropis). Částky se nemění. '
@@ -657,6 +770,9 @@ export const PURCHASE_TOOLS = [
   },
   {
     name: 'set_purchase_invoice_project',
+    api: [
+      ['POST', '/api/purchase-invoices/{id}/project'],
+    ],
     title: 'Zařadit přijatou fakturu k zakázce',
     description:
       'Přiřadí náklad k zakázce, nebo ho z ní vyřadí (`project_id: 0`). Jde i u zaúčtovaného dokladu: '
@@ -673,39 +789,60 @@ export const PURCHASE_TOOLS = [
   },
   {
     name: 'set_purchase_invoice_expense_kinds',
-    title: 'Nastavit druh nákladu po položkách',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
+    title: 'Nastavit druh nákladu, účet a členění DPH po položkách',
     description:
-      'Nastaví druh nákladu (služba, materiál, drobný majetek, dlouhodobý majetek…) jednotlivým '
-      + 'položkám přijaté faktury, typicky po importu. Položky neuvedené v seznamu zůstanou. '
-      + 'Volba je ruční rozhodnutí účetní a přebije automatickou klasifikaci. '
+      'Klasifikace položek přijaté faktury, typicky po importu: druh nákladu (služba, materiál, drobný '
+      + 'a dlouhodobý majetek), nákladový účet a kód členění DPH (např. 23 pořízení zboží z EU u smíšeného '
+      + 'dokladu). Funguje i u přijaté a zaplacené faktury, která ještě není zaúčtovaná; položky neuvedené '
+      + 'v seznamu zůstanou. Volba je ruční rozhodnutí účetní a přebije automatickou klasifikaci. '
       + 'Zaúčtovaný doklad nástroj odmítne: změna by vyžadovala přeúčtování.',
     inputSchema: schema({
       id: id('ID přijaté faktury.'),
       items: {
         type: 'array',
         minItems: 1,
-        description: 'Položky a jejich druh nákladu.',
+        description: 'Položky a jejich klasifikace. U každé zadej aspoň jedno z `expense_kind`, `expense_account_code`, `vat_classification_code`.',
         items: schema({
           ...ITEM_PICK,
           expense_kind: { type: ['string', 'null'], enum: [...EXPENSE_KINDS, null], description: 'Druh nákladu; null ho zruší.' },
-        }, ['expense_kind']),
+          expense_account_code: {
+            type: ['string', 'null'],
+            description: 'Nákladový účet řádku (`chart_of_accounts`); null účet zruší a ten se pak odvodí z druhu nákladu.',
+          },
+          vat_classification_code: str('Kód členění DPH položky (`list_vat_classifications`, strana `purchase`). Zrušit ho nejde, jen změnit.'),
+        }),
       },
     }, ['id', 'items']),
     write: true,
     run: async (c, a, tool) => {
       const pi = await loadPurchase(c, a.id, tool);
       if (pi?.status === 'cancelled') throw new Error('Stornovaný doklad nelze upravit.');
-      refuseIfPosted(pi, a.id, 'Změna druhu nákladu');
+      refuseIfPosted(pi, a.id, 'Změna klasifikace položek');
       const items = pi.items ?? [];
-      const body = a.items.map((entry) => ({
-        id: Number(items[pickLine(items, entry)].id),
-        expense_kind: entry.expense_kind ?? null,
-      }));
+      const body = a.items.map((entry, index) => {
+        const item = items[pickLine(items, entry)];
+        const keys = ['expense_kind', 'expense_account_code', 'vat_classification_code'];
+        if (keys.every((key) => entry[key] === undefined)) {
+          throw new Error(`Položka ${index + 1} seznamu: zadej \`expense_kind\`, \`expense_account_code\` nebo \`vat_classification_code\`.`);
+        }
+        const out = { id: Number(item.id) };
+        if (entry.vat_classification_code !== undefined) out.vat_classification_code = entry.vat_classification_code;
+        if (entry.expense_kind !== undefined || entry.expense_account_code !== undefined) {
+          // Server bez klíče `expense_kind` druh smaže; změna jen účtu proto nese současný druh.
+          out.expense_kind = entry.expense_kind !== undefined ? entry.expense_kind : (item.expense_kind ?? null);
+          if (entry.expense_account_code !== undefined) out.expense_account_code = nullIfEmpty(entry.expense_account_code);
+        }
+        return out;
+      });
       return c.put(`${BASE}/${seg(a.id)}/expense-kinds`, { items: body }, tool);
     },
   },
   {
     name: 'set_purchase_invoice_exchange_rate',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Nastavit kurz konceptu přijaté faktury',
     description:
       'Nastaví ruční kurz KONCEPTU přijaté faktury v cizí měně (pevný kurz z dokladu), '
@@ -730,11 +867,109 @@ export const PURCHASE_TOOLS = [
     },
   },
 
+  {
+    name: 'set_purchase_invoice_vat_treatment',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
+    title: 'Opravit nárok na odpočet a členění DPH přijaté faktury',
+    description:
+      'Oprava DPH zařazení PŘIJATÉ (i zaplacené) faktury bez storna: nárok na odpočet (`vat_deduction`, '
+      + 'u poměrného i procento), kód členění hlavičky a kódy položek. Částky, data ani dodavatel se nemění. '
+      + 'Koncept se opravuje `update_purchase_invoice` a `update_purchase_invoice_item`.\n\n'
+      + 'Mění evidenci DPH, proto vždy vyžaduje `confirm: true`. Zaúčtovaný doklad nástroj odmítne (oprava '
+      + 'by ho přeúčtovala, to dělá účetní v aplikaci). Doklad v podaném období DPH server odmítne '
+      + '(`period_filed`): opravu po podání dělá správce firmy v aplikaci. Bez zadaných změn jen vrátí současné zařazení.',
+    inputSchema: schema({
+      id: id('ID přijaté faktury.'),
+      vat_deduction: str('Nárok na odpočet: `full` plný, `none` bez nároku, `proportional` poměrný (§ 75), `reduced` krácený (§ 76).', { enum: VAT_DEDUCTIONS }),
+      vat_deduction_percent: num('Procento odpočtu u `proportional`.', { minimum: 0, maximum: 100 }),
+      vat_classification_code: { type: ['string', 'null'], description: 'Kód členění hlavičky (`list_vat_classifications`, strana `purchase`); null ho smaže.' },
+      items: {
+        type: 'array',
+        description: 'Kódy členění položek. Položku určí `item_id` nebo pořadí `row`.',
+        items: schema({
+          ...ITEM_PICK,
+          vat_classification_code: str('Kód členění položky (`list_vat_classifications`, strana `purchase`).', { minLength: 1 }),
+        }, ['vat_classification_code']),
+      },
+      confirm: CONFIRM,
+    }, ['id']),
+    write: true,
+    destructive: true,
+    run: async (c, a, tool) => {
+      const pi = await loadPurchase(c, a.id, tool);
+      if (pi?.status === 'cancelled') throw new Error('Stornovaný doklad nelze upravit.');
+      refuseIfPosted(pi, a.id, 'Oprava DPH zařazení');
+      const body = changed(a, ['vat_deduction', 'vat_deduction_percent', 'vat_classification_code']);
+      if (a.items !== undefined) {
+        const items = pi.items ?? [];
+        body.items = a.items.map((entry) => ({
+          id: Number(items[pickLine(items, entry)].id), vat_classification_code: entry.vat_classification_code,
+        }));
+      }
+      if (Object.keys(body).length === 0) {
+        // Bez změny jen ukáže současné zařazení, ať model ví, co opravuje.
+        return {
+          id: Number(a.id), changed: false, vat_deduction: pi.vat_deduction ?? null,
+          vat_deduction_percent: pi.vat_deduction_percent ?? null, vat_classification_code: pi.vat_classification_code ?? null,
+          items: (pi.items ?? []).map((item, index) => ({
+            row: index + 1, id: item.id, description: item.description, vat_classification_code: item.vat_classification_code ?? null,
+          })),
+        };
+      }
+      if (body.vat_deduction === 'proportional' && body.vat_deduction_percent === undefined && pi.vat_deduction !== 'proportional') {
+        throw new Error('U poměrného odpočtu zadejte i procento (`vat_deduction_percent`).');
+      }
+      const summary = Object.entries(body).map(([key, value]) => `${key}: ${JSON.stringify(value)}`).join(', ');
+      requireConfirm(a, `U přijaté faktury ${purchaseLabel(pi, a.id)} se má změnit DPH zařazení`, summary);
+      return c.post(`${BASE}/${seg(a.id)}/vat-treatment`, body, tool);
+    },
+  },
+  {
+    name: 'get_purchase_credit_note_offset',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
+    title: 'Zápočet přijatého dobropisu s fakturou',
+    description:
+      'Zápočty, kterých se přijatý doklad účastní (jako dobropis i jako opravovaná faktura), a u dobropisu bez '
+      + 'zápočtu, jestli ho jde započíst (`can_offset`, `reason`). Zápočet sníží částku k úhradě faktury o celý '
+      + 'dobropis; do deníku ani evidence DPH nic nezapisuje.',
+    inputSchema: schema({ id: id('ID přijatého dobropisu nebo faktury.') }, ['id']),
+    write: false,
+    run: (c, a, tool) => c.get(`${BASE}/${seg(a.id)}/credit-note-offset`, null, tool),
+  },
+  {
+    name: 'set_purchase_credit_note_offset',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
+    title: 'Započíst nebo zrušit zápočet přijatého dobropisu',
+    description:
+      '`action: "apply"` započte PŘIJATÝ dobropis (`id`) proti faktuře, kterou opravuje: dodavateli se pak '
+      + 'zaplatí jen rozdíl. Jen v plné výši dobropisu; jinak server vrátí důvod (`credit_note_offset_*`). '
+      + '`action: "revert"` zápočty dokladu zruší; vyžaduje `confirm: true`.',
+    inputSchema: schema({
+      id: id('ID přijatého dobropisu (u `revert` i opravované faktury).'),
+      action: str('Započíst (`apply`), nebo zápočet zrušit (`revert`).', { enum: ['apply', 'revert'] }),
+      confirm: CONFIRM,
+    }, ['id', 'action']),
+    write: true,
+    destructive: true,
+    run: async (c, a, tool) => {
+      const path = `${BASE}/${seg(a.id)}/credit-note-offset`;
+      if (a.action === 'apply') return c.post(path, {}, tool);
+      requireConfirm(a, 'Zrušit se má zápočet přijatého dobropisu u dokladu', `#${a.id}`);
+      return c.del(path, tool);
+    },
+  },
+
   // ──────────────────────────────────────────────────────────────────────────
   // Zálohy
   // ──────────────────────────────────────────────────────────────────────────
   {
     name: 'list_purchase_advance_candidates',
+    api: [
+      ['GET', '/api/purchase-invoices/{id}/advance-candidates'],
+    ],
     title: 'Zálohy k vyúčtování přijaté faktury',
     description:
       'Nespárované zálohové faktury a samostatné daňové doklady k záloze od stejného dodavatele, '
@@ -745,6 +980,9 @@ export const PURCHASE_TOOLS = [
   },
   {
     name: 'list_purchase_settlement_candidates',
+    api: [
+      ['GET', '/api/purchase-invoices/{id}/settlement-candidates'],
+    ],
     title: 'Faktury k vyúčtování zálohy',
     description: 'Opačný směr: z detailu zálohy nepropojené konečné faktury stejného dodavatele.',
     inputSchema: schema({ id: id('ID zálohové faktury.') }, ['id']),
@@ -753,6 +991,10 @@ export const PURCHASE_TOOLS = [
   },
   {
     name: 'link_purchase_advance',
+    api: [
+      ['GET', '/api/purchase-invoices/{id}'],
+      ['POST', '/api/purchase-invoices/{id}/link-advance'],
+    ],
     title: 'Spárovat přijatou fakturu se zálohou',
     description:
       'Spáruje konečnou fakturu se zálohou (nebo samostatným daňovým dokladem k záloze), ať se '
@@ -772,6 +1014,10 @@ export const PURCHASE_TOOLS = [
   },
   {
     name: 'unlink_purchase_advance',
+    api: [
+      ['GET', '/api/purchase-invoices/{id}'],
+      ['DELETE', '/api/purchase-invoices/{id}/link-advance'],
+    ],
     title: 'Zrušit spárování se zálohou',
     description:
       'Zruší vazbu konečné faktury na zálohu. Odečtená záloha na faktuře zůstane, upravuje se ručně. '
@@ -781,6 +1027,7 @@ export const PURCHASE_TOOLS = [
     destructive: true,
     run: async (c, a, tool) => {
       const pi = await loadPurchase(c, a.id, tool);
+      refuseIfPosted(pi, a.id, 'Zrušení vazby na zálohu');
       const advance = pi?.linked_advance;
       if (!advance) throw new Error(`Přijatá faktura ${purchaseLabel(pi, a.id)} se zálohou spárovaná není.`);
       requireConfirm(a, `Od faktury ${purchaseLabel(pi, a.id)} se má odpojit záloha`,
@@ -794,6 +1041,9 @@ export const PURCHASE_TOOLS = [
   // ──────────────────────────────────────────────────────────────────────────
   {
     name: 'get_purchase_invoice_payment',
+    api: [
+      ['GET', '/api/purchase-invoices/{id}/payment-qr'],
+    ],
     title: 'Platební údaje přijaté faktury',
     description:
       'Účet dodavatele, částka k úhradě, měna a variabilní symbol pro zaplacení přijaté faktury. '
@@ -804,6 +1054,8 @@ export const PURCHASE_TOOLS = [
   },
   {
     name: 'set_purchase_invoice_payment_account',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Změnit účet dodavatele na přijaté faktuře',
     description:
       'Uloží účet, na který se má přijatá faktura zaplatit (použije ho QR platba i příkaz k úhradě). '
@@ -838,6 +1090,8 @@ export const PURCHASE_TOOLS = [
   },
   {
     name: 'verify_purchase_payment_account',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Ověřit účet dodavatele v registru plátců',
     description:
       'Zkontroluje účet na přijaté faktuře proti účtům, které dodavatel jako plátce DPH zveřejnil '
@@ -848,6 +1102,8 @@ export const PURCHASE_TOOLS = [
   },
   {
     name: 'list_purchase_payment_candidates',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Faktury k zaplacení příkazem',
     description:
       'Neuhrazené přijaté faktury, které jde zařadit do příkazu k úhradě, a účty firmy, ze kterých '
@@ -865,6 +1121,8 @@ export const PURCHASE_TOOLS = [
   },
   {
     name: 'list_purchase_payment_orders',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Příkazy k úhradě',
     description: 'Historie vytvořených příkazů k úhradě (dávek) s částkou, měnou a stavem odeslání.',
     inputSchema: schema({ ...PAGING }),
@@ -873,6 +1131,8 @@ export const PURCHASE_TOOLS = [
   },
   {
     name: 'get_purchase_payment_order',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Detail příkazu k úhradě',
     description: 'Dávka příkazu k úhradě s jednotlivými platbami (příjemce, účet, částka, VS).',
     inputSchema: schema({ id: id('ID příkazu k úhradě.') }, ['id']),
@@ -881,6 +1141,8 @@ export const PURCHASE_TOOLS = [
   },
   {
     name: 'create_purchase_payment_order',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Vytvořit příkaz k úhradě',
     description:
       'Připraví dávku příkazu k úhradě z vybraných přijatých faktur a označí je „Zařazeno k úhradě". '
@@ -907,6 +1169,8 @@ export const PURCHASE_TOOLS = [
   },
   {
     name: 'mark_purchase_invoices_payment_ordered',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Označit faktury jako zařazené k úhradě',
     description:
       'Jen označí vybrané přijaté faktury „Zařazeno k úhradě" bez vytvoření dávky, třeba když je '
@@ -922,6 +1186,8 @@ export const PURCHASE_TOOLS = [
   },
   {
     name: 'delete_purchase_payment_order',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Smazat příkaz k úhradě',
     description:
       'Smaže připravenou dávku příkazu k úhradě. Příkaz, u kterého je evidovaný pokus o odeslání '
@@ -942,6 +1208,9 @@ export const PURCHASE_TOOLS = [
   // ──────────────────────────────────────────────────────────────────────────
   {
     name: 'get_purchase_invoice_activity',
+    api: [
+      ['GET', '/api/purchase-invoices/{id}/activity'],
+    ],
     title: 'Historie přijaté faktury',
     description: 'Kdo a kdy doklad založil, upravil, přijal, uhradil nebo stornoval.',
     inputSchema: schema({ id: id('ID přijaté faktury.') }, ['id']),
@@ -950,6 +1219,9 @@ export const PURCHASE_TOOLS = [
   },
   {
     name: 'list_expense_categories',
+    api: [
+      ['GET', '/api/expense-categories'],
+    ],
     title: 'Kategorie nákladů',
     description: 'Číselník kategorií nákladů s jejich ID pro `expense_category_id` přijaté faktury.',
     inputSchema: schema({ include_archived: bool('Vrátit i archivované kategorie.') }),

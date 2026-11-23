@@ -76,6 +76,24 @@ final class PayrollPensionStatusTest extends TestCase
         );
     }
 
+    /**
+     * ELDP se vede do měsíce, od něhož výplata náleží, včetně něj (diskuse
+     * JMHZ #363); první měsíc bez ELDP je následující. Bez důchodu se vede vždy.
+     */
+    public function testEldpIsKeptUpToAndIncludingTheMonthOfPaymentStart(): void
+    {
+        self::assertTrue(PayrollPensionStatus::eldpKeptInMonth('2026-04', '2026-03-01'));
+        self::assertTrue(PayrollPensionStatus::eldpKeptInMonth('2026-04', '2026-04-01'));
+        self::assertTrue(PayrollPensionStatus::eldpKeptInMonth('2026-04', '2026-04-30'));
+        self::assertFalse(PayrollPensionStatus::eldpKeptInMonth('2026-04', '2026-05-01'));
+        self::assertFalse(PayrollPensionStatus::eldpKeptInMonth('2026-12', '2027-01-01'));
+        self::assertTrue(PayrollPensionStatus::eldpKeptInMonth(null, '2026-05-01'));
+
+        self::assertSame('2026-05-01', PayrollPensionStatus::eldpNotKeptFrom('2026-04'));
+        self::assertSame('2027-01-01', PayrollPensionStatus::eldpNotKeptFrom('2026-12'));
+        self::assertNull(PayrollPensionStatus::eldpNotKeptFrom(null));
+    }
+
     /** Důchod, který skončil před intervalem, ani budoucí, interval nezasáhne. */
     public function testPensionOutsideIntervalIsIgnored(): void
     {

@@ -103,6 +103,7 @@ const draft = (overrides = {}) => ({
       total_without_vat: 2000, total_vat: 420, total_with_vat: 2420, order_index: 0,
       vat_classification_code: '23', is_fixed_asset: false, expense_kind: 'material',
       expense_account_code: '501300', accrual_from: '2026-09-01', accrual_to: '2027-08-31',
+      counter_account_code: '325', posting_rule_key: 'licence.sw',
       stock_item_id: 12, stock_sku: 'LIC', small_asset: null,
     },
     {
@@ -117,14 +118,15 @@ const draft = (overrides = {}) => ({
   ...overrides,
 });
 
+/** BEZ OPRAVY PADÁ: protiúčet a předkontace řádku se při každé úpravě položek ztrácely. */
 const HIDDEN_FIRST_LINE = {
-  description: 'Licence', quantity: 1, duration_minutes: null, unit: 'ks', unit_price_without_vat: 2000,
+  id: 501, description: 'Licence', quantity: 1, duration_minutes: null, unit: 'ks', unit_price_without_vat: 2000,
   vat_rate_id: 1, order_index: 0, vat_classification_code: '23', is_fixed_asset: false,
-  expense_kind: 'material', expense_account_code: '501300', accrual_from: '2026-09-01',
-  accrual_to: '2027-08-31', stock_item_id: 12,
+  expense_kind: 'material', expense_account_code: '501300', counter_account_code: '325',
+  posting_rule_key: 'licence.sw', accrual_from: '2026-09-01', accrual_to: '2027-08-31', stock_item_id: 12,
 };
 const HIDDEN_SECOND_LINE = {
-  description: 'Konzultace', quantity: 2, duration_minutes: 120, unit: 'hod', unit_price_without_vat: 500,
+  id: 502, description: 'Konzultace', quantity: 2, duration_minutes: 120, unit: 'hod', unit_price_without_vat: 500,
   vat_rate_id: 1, order_index: 1, vat_classification_code: '40', is_fixed_asset: true,
   expense_kind: 'fixed_asset', expense_account_code: null, accrual_from: null, accrual_to: null,
   stock_item_id: null,

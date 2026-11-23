@@ -107,7 +107,10 @@ final class InsolvencyCommencedDepositTest extends TestCase
         self::assertSame(GarnishmentStatus::Supported, $result->status);
         // Dohoda doručená dřív by jinak ubrala exekuci první místo a srazilo
         // by se jen 3 632 Kč; celou kapacitu 8 632 Kč pohledávka nepotřebuje.
-        self::assertSame(800_000, $result->totalWithheldMinorUnits);
+        // K pohledávce 8 000 Kč se sráží náhrada plátce mzdy 50 Kč, kterou
+        // hradí povinný (§ 270 odst. 2 o. s. ř.).
+        self::assertSame(805_000, $result->totalWithheldMinorUnits);
+        self::assertSame(800_000, $result->allocationFor('claim-a')?->totalMinorUnits);
         self::assertSame(0, $calculator->voluntaryDeductionCapacity($result));
     }
 

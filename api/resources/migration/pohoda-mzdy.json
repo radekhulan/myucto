@@ -1,0 +1,1839 @@
+{
+    "meta": {
+        "source": "pohoda-mzdy",
+        "program": "POHODA, agenda Mzdy v datovém souboru StwPh_<IČO>_<rok>.mdb (bez PAMICA), export mdbExport skupiny mzdy (91_mzdy.xml)",
+        "style": "pohoda_xml",
+        "readers": [
+            "api/src/Service/Migration/Pohoda/PayrollBuiltin"
+        ],
+        "unknown_items": "PohodaMzdyPayslip::map() vrací unconverted_items: nenulové sloupce mzdy bez ověřeného významu, základní mzdu neověřeného druhu, hodiny nemoci bez doby na kartě a doby karty neznámého druhu; importér je vypíše do protokolu převodu jako varování (items_not_converted). Mzda, jejíž sloupce nesedí samy se sebou, je rozdíl k přijetí (pohoda_payroll_source_mismatch).",
+        "verified_against": [
+            "POHODA, datový soubor s agendou Mzdy, export 18. 11. 2026: firma A (rok 2026, 4 zaměstnanci, 40 mezd, měsíční mzda, dovolená, svátky, nemoc, stravenkový paušál)",
+            "POHODA, datový soubor s agendou Mzdy (rok 2025, 1 dohoda o pracovní činnosti se srážkovou daní, 12 mezd)"
+        ],
+        "limits": "Tabulky, které převod jen předá beze změny převodu PAMICA, nevypisují sloupce: co z nich čte převod PAMICA, hlídá pamica.json. Sloupec se přiřazuje k tabulce podle souborů čtečky (statické čtení). Sloupec ignored bez vlastního důvodu dědí ignored_columns_reason tabulky."
+    },
+    "tables": {
+        "BP": {
+            "rows_seen": 57,
+            "status": "ignored",
+            "reason": "Bankovní příkazy k výplatě: platební styk, ne údaj o mzdě; MyÚčto příkazy tvoří samo (shodně s pamica.json)."
+        },
+        "BPpol": {
+            "rows_seen": 243,
+            "status": "ignored",
+            "reason": "Položky bankovních příkazů: tentýž důvod jako BP."
+        },
+        "DataBoxSent": {
+            "rows_seen": 72,
+            "status": "mapped",
+            "target": "doručenky podání, beze změny do převodu PAMICA (čtečky api/src/Service/Migration/Pohoda/Payroll, matice pamica.json)"
+        },
+        "ELDP": {
+            "rows_seen": 0,
+            "status": "mapped",
+            "target": "evidenční listy, beze změny do převodu PAMICA (čtečky api/src/Service/Migration/Pohoda/Payroll, matice pamica.json)"
+        },
+        "ELDPpol": {
+            "rows_seen": 0,
+            "status": "mapped",
+            "target": "položky evidenčních listů, beze změny do převodu PAMICA (čtečky api/src/Service/Migration/Pohoda/Payroll, matice pamica.json)"
+        },
+        "EPodani": {
+            "rows_seen": 0,
+            "status": "ignored",
+            "reason": "Stav elektronických podání POHODY; stav odeslání nese DataBoxSent a hlavičky podání."
+        },
+        "HZUPN": {
+            "rows_seen": 0,
+            "status": "mapped",
+            "target": "hlášení o ukončení pracovní neschopnosti, beze změny do převodu PAMICA (čtečky api/src/Service/Migration/Pohoda/Payroll, matice pamica.json)"
+        },
+        "HZUPNpol": {
+            "rows_seen": 0,
+            "status": "mapped",
+            "target": "položky hlášení HZUPN, beze změny do převodu PAMICA (čtečky api/src/Service/Migration/Pohoda/Payroll, matice pamica.json)"
+        },
+        "HZUPNpracoval": {
+            "rows_seen": 0,
+            "status": "ignored",
+            "reason": "Dny práce k hlášení HZUPN, převod je nepotřebuje."
+        },
+        "MH": {
+            "rows_seen": 10,
+            "status": "mapped",
+            "target": "měsíční hlášení JMHZ, beze změny do převodu PAMICA (čtečky api/src/Service/Migration/Pohoda/Payroll, matice pamica.json)"
+        },
+        "MHitems": {
+            "rows_seen": 40,
+            "status": "mapped",
+            "target": "položky měsíčního hlášení JMHZ; doplní se RefPomer = RefZAM, jinak beze změny do převodu PAMICA (čtečky api/src/Service/Migration/Pohoda/Payroll, matice pamica.json)",
+            "columns": {
+                "RefZAM": {
+                    "status": "mapped",
+                    "target": "zaměstnanec (RefPomer poměru = zaměstnanec)"
+                }
+            }
+        },
+        "MZ": {
+            "rows_seen": 52,
+            "status": "mapped",
+            "target": "mzdy v tvaru PAMICA (PohodaMzdyAdapter): RefPomer = RefZAM, účast na pojištění, fond, výplata a srážková daň; složky MZslozky a nepřítomnosti MZneprit ze sloupců mzdy (PohodaMzdyPayslip); úhrny mzdy do kontroly převzetí (PohodaMzdyReconciliation); ostatní sloupce beze změny do převodu PAMICA",
+            "ignored_columns_reason": "Sloupec jde beze změny do převodu PAMICA, který z mzdy čte převzaté úhrny (pamica.json), nebo ho převod nepotřebuje (mezisoučty, technické příznaky, údaje osoby opsané z karty).",
+            "columns": {
+                "BezDane": {
+                    "status": "ignored"
+                },
+                "BezSoc": {
+                    "status": "mapped",
+                    "target": "JeSocPP (bez sociálního pojištění)"
+                },
+                "BezZdr": {
+                    "status": "ignored"
+                },
+                "ClenHZS": {
+                    "status": "ignored"
+                },
+                "CmCastH": {
+                    "status": "ignored"
+                },
+                "CmCastU": {
+                    "status": "ignored"
+                },
+                "CmCelkemMZ": {
+                    "status": "ignored"
+                },
+                "CmKursMZ": {
+                    "status": "ignored"
+                },
+                "Creator": {
+                    "status": "ignored"
+                },
+                "DatCreate": {
+                    "status": "ignored"
+                },
+                "DatSave": {
+                    "status": "ignored"
+                },
+                "Datum": {
+                    "status": "ignored"
+                },
+                "DatZauct": {
+                    "status": "ignored"
+                },
+                "DnyKal": {
+                    "status": "ignored"
+                },
+                "DnyMater": {
+                    "status": "ignored"
+                },
+                "DnyOCR": {
+                    "status": "ignored"
+                },
+                "DnyOCRdlo": {
+                    "status": "ignored"
+                },
+                "DnyOdpra": {
+                    "status": "ignored"
+                },
+                "DnyOPP": {
+                    "status": "ignored"
+                },
+                "DnyPlacAkceDeti": {
+                    "status": "ignored"
+                },
+                "DnyPlacV": {
+                    "status": "ignored"
+                },
+                "DnyPrac": {
+                    "status": "mapped",
+                    "target": "fond měsíce DnyFond2 = DnyPrac + DnyStSv"
+                },
+                "DnyProstoje": {
+                    "status": "ignored"
+                },
+                "DnyStrav": {
+                    "status": "mapped",
+                    "target": "počet směn stravenkového paušálu (Z21 Hodnota3)"
+                },
+                "DnyStSv": {
+                    "status": "mapped",
+                    "target": "fond měsíce; ve mzdě PAMICA 0 (svátek POHODA platí náhradou)"
+                },
+                "DnySvat": {
+                    "status": "mapped",
+                    "target": "hodiny svátku V02 (× DUvazek)"
+                },
+                "DnyVojCv": {
+                    "status": "ignored"
+                },
+                "DnyVojZS": {
+                    "status": "ignored"
+                },
+                "Dovol": {
+                    "status": "ignored"
+                },
+                "DovolZ": {
+                    "status": "ignored"
+                },
+                "DUvazek": {
+                    "status": "mapped",
+                    "target": "denní úvazek pro hodiny nepřítomností"
+                },
+                "Email": {
+                    "status": "ignored"
+                },
+                "HodDov": {
+                    "status": "mapped",
+                    "target": "hodiny dovolené V01"
+                },
+                "HodDovolZ": {
+                    "status": "ignored"
+                },
+                "HodJkor": {
+                    "status": "mapped",
+                    "target": "nepřevedená položka do protokolu (význam na reálných mzdách neověřen); u sloupců hrubé mzdy součást kontroly hrubé mzdy"
+                },
+                "HodJkor2": {
+                    "status": "mapped",
+                    "target": "nepřevedená položka do protokolu (význam na reálných mzdách neověřen); u sloupců hrubé mzdy součást kontroly hrubé mzdy"
+                },
+                "HodJkor3": {
+                    "status": "mapped",
+                    "target": "nepřevedená položka do protokolu (význam na reálných mzdách neověřen); u sloupců hrubé mzdy součást kontroly hrubé mzdy"
+                },
+                "HodJproc": {
+                    "status": "mapped",
+                    "target": "nepřevedená položka do protokolu (význam na reálných mzdách neověřen); u sloupců hrubé mzdy součást kontroly hrubé mzdy"
+                },
+                "HodJproc2": {
+                    "status": "mapped",
+                    "target": "nepřevedená položka do protokolu (význam na reálných mzdách neověřen); u sloupců hrubé mzdy součást kontroly hrubé mzdy"
+                },
+                "HodJproc3": {
+                    "status": "mapped",
+                    "target": "nepřevedená položka do protokolu (význam na reálných mzdách neověřen); u sloupců hrubé mzdy součást kontroly hrubé mzdy"
+                },
+                "HodMater": {
+                    "status": "mapped",
+                    "target": "nepřevedená položka do protokolu (význam na reálných mzdách neověřen); u sloupců hrubé mzdy součást kontroly hrubé mzdy"
+                },
+                "HodNarokDov": {
+                    "status": "ignored"
+                },
+                "HodNarokDovCast": {
+                    "status": "ignored"
+                },
+                "HodNarokDovSvat": {
+                    "status": "ignored"
+                },
+                "HodNem": {
+                    "status": "mapped",
+                    "target": "kontrola hodin nemoci proti době na kartě"
+                },
+                "HodNeoml": {
+                    "status": "mapped",
+                    "target": "nepřevedená položka do protokolu (význam na reálných mzdách neověřen); u sloupců hrubé mzdy součást kontroly hrubé mzdy"
+                },
+                "HodNepl": {
+                    "status": "mapped",
+                    "target": "nepřevedená položka do protokolu (význam na reálných mzdách neověřen); u sloupců hrubé mzdy součást kontroly hrubé mzdy"
+                },
+                "HodNoc": {
+                    "status": "mapped",
+                    "target": "nepřevedená položka do protokolu (význam na reálných mzdách neověřen); u sloupců hrubé mzdy součást kontroly hrubé mzdy"
+                },
+                "HodOCR": {
+                    "status": "mapped",
+                    "target": "nepřevedená položka do protokolu (význam na reálných mzdách neověřen); u sloupců hrubé mzdy součást kontroly hrubé mzdy"
+                },
+                "HodOCRdlo": {
+                    "status": "mapped",
+                    "target": "nepřevedená položka do protokolu (význam na reálných mzdách neověřen); u sloupců hrubé mzdy součást kontroly hrubé mzdy"
+                },
+                "HodOdpra": {
+                    "status": "mapped",
+                    "target": "hodiny základní složky; kontrola hodinové mzdy"
+                },
+                "HodOPP": {
+                    "status": "mapped",
+                    "target": "nepřevedená položka do protokolu (význam na reálných mzdách neověřen); u sloupců hrubé mzdy součást kontroly hrubé mzdy"
+                },
+                "HodPlacAkceDeti": {
+                    "status": "mapped",
+                    "target": "nepřevedená položka do protokolu (význam na reálných mzdách neověřen); u sloupců hrubé mzdy součást kontroly hrubé mzdy"
+                },
+                "HodPlacV": {
+                    "status": "mapped",
+                    "target": "nepřevedená položka do protokolu (význam na reálných mzdách neověřen); u sloupců hrubé mzdy součást kontroly hrubé mzdy"
+                },
+                "HodPohot": {
+                    "status": "mapped",
+                    "target": "nepřevedená položka do protokolu (význam na reálných mzdách neověřen); u sloupců hrubé mzdy součást kontroly hrubé mzdy"
+                },
+                "HodPracDalka": {
+                    "status": "mapped",
+                    "target": "nepřevedená položka do protokolu (význam na reálných mzdách neověřen); u sloupců hrubé mzdy součást kontroly hrubé mzdy"
+                },
+                "HodPracSvat": {
+                    "status": "ignored"
+                },
+                "HodPres": {
+                    "status": "mapped",
+                    "target": "nepřevedená položka do protokolu (význam na reálných mzdách neověřen); u sloupců hrubé mzdy součást kontroly hrubé mzdy"
+                },
+                "HodProplDov": {
+                    "status": "mapped",
+                    "target": "nepřevedená položka do protokolu (význam na reálných mzdách neověřen); u sloupců hrubé mzdy součást kontroly hrubé mzdy"
+                },
+                "HodProst": {
+                    "status": "mapped",
+                    "target": "nepřevedená položka do protokolu (význam na reálných mzdách neověřen); u sloupců hrubé mzdy součást kontroly hrubé mzdy"
+                },
+                "HodProstoje": {
+                    "status": "mapped",
+                    "target": "nepřevedená položka do protokolu (význam na reálných mzdách neověřen); u sloupců hrubé mzdy součást kontroly hrubé mzdy"
+                },
+                "HodSoNe": {
+                    "status": "mapped",
+                    "target": "nepřevedená položka do protokolu (význam na reálných mzdách neověřen); u sloupců hrubé mzdy součást kontroly hrubé mzdy"
+                },
+                "HodSvat": {
+                    "status": "mapped",
+                    "target": "nepřevedená položka do protokolu (význam na reálných mzdách neověřen); u sloupců hrubé mzdy součást kontroly hrubé mzdy"
+                },
+                "HodVojCv": {
+                    "status": "mapped",
+                    "target": "nepřevedená položka do protokolu (význam na reálných mzdách neověřen); u sloupců hrubé mzdy součást kontroly hrubé mzdy"
+                },
+                "ID": {
+                    "status": "mapped",
+                    "target": "identita řádku (vazba mezd, dob a náhrad)"
+                },
+                "IDPPV": {
+                    "status": "ignored"
+                },
+                "JeDohoda10K": {
+                    "status": "ignored"
+                },
+                "JeDuch": {
+                    "status": "ignored"
+                },
+                "JeDuchSpor": {
+                    "status": "ignored"
+                },
+                "JeDuchSporZAM": {
+                    "status": "ignored"
+                },
+                "JeDuchZAM": {
+                    "status": "ignored"
+                },
+                "JeMR": {
+                    "status": "ignored"
+                },
+                "JeMRZAM": {
+                    "status": "ignored"
+                },
+                "JeSocLpripoj": {
+                    "status": "ignored"
+                },
+                "JeSocZAM": {
+                    "status": "mapped",
+                    "target": "JeSocPP (účast na nemocenském pojištění)"
+                },
+                "JeZdrZAM": {
+                    "status": "ignored"
+                },
+                "KcCastH": {
+                    "status": "ignored"
+                },
+                "KcCastHM": {
+                    "status": "ignored"
+                },
+                "KcCistaM": {
+                    "status": "mapped",
+                    "target": "kontrola převzetí: čistá mzda"
+                },
+                "KcDanBon": {
+                    "status": "mapped",
+                    "target": "kontrola převzetí: daňový bonus"
+                },
+                "KcDanPrS": {
+                    "status": "mapped",
+                    "target": "kontrola převzetí: slevy na dani (záloha před slevami)"
+                },
+                "KcDanUpr": {
+                    "status": "mapped",
+                    "target": "nepřevedená položka do protokolu (význam na reálných mzdách neověřen); u sloupců hrubé mzdy součást kontroly hrubé mzdy"
+                },
+                "KcDanZal": {
+                    "status": "mapped",
+                    "target": "kontrola zálohy po slevě na poplatníka"
+                },
+                "KcDavNem": {
+                    "status": "mapped",
+                    "target": "nepřevedená položka do protokolu (význam na reálných mzdách neověřen); u sloupců hrubé mzdy součást kontroly hrubé mzdy"
+                },
+                "KcDavOCR": {
+                    "status": "mapped",
+                    "target": "nepřevedená položka do protokolu (význam na reálných mzdách neověřen); u sloupců hrubé mzdy součást kontroly hrubé mzdy"
+                },
+                "KcDavPPM": {
+                    "status": "mapped",
+                    "target": "nepřevedená položka do protokolu (význam na reálných mzdách neověřen); u sloupců hrubé mzdy součást kontroly hrubé mzdy"
+                },
+                "KcDavVyr": {
+                    "status": "mapped",
+                    "target": "nepřevedená položka do protokolu (význam na reálných mzdách neověřen); u sloupců hrubé mzdy součást kontroly hrubé mzdy"
+                },
+                "KcDIP": {
+                    "status": "ignored"
+                },
+                "KcDoplat": {
+                    "status": "mapped",
+                    "target": "nepřevedená položka do protokolu (význam na reálných mzdách neověřen); u sloupců hrubé mzdy součást kontroly hrubé mzdy"
+                },
+                "KcDoplDanBonRZ": {
+                    "status": "mapped",
+                    "target": "nepřevedená položka do protokolu (význam na reálných mzdách neověřen); u sloupců hrubé mzdy součást kontroly hrubé mzdy"
+                },
+                "KcDov": {
+                    "status": "mapped",
+                    "target": "nepřítomnost V01 (náhrada za dovolenou), rozdělená podle hodin"
+                },
+                "KcDuchSpor": {
+                    "status": "ignored"
+                },
+                "KcDuchSporSniz": {
+                    "status": "ignored"
+                },
+                "KcDuchSporUpr": {
+                    "status": "ignored"
+                },
+                "KcDuchSporZak": {
+                    "status": "ignored"
+                },
+                "KcFiktPovPoj": {
+                    "status": "ignored"
+                },
+                "KcHrubaM": {
+                    "status": "mapped",
+                    "target": "kontrola převzetí: hrubá mzda a součet sloupců"
+                },
+                "KcJkor": {
+                    "status": "mapped",
+                    "target": "nepřevedená položka do protokolu (význam na reálných mzdách neověřen); u sloupců hrubé mzdy součást kontroly hrubé mzdy"
+                },
+                "KcJkor2": {
+                    "status": "mapped",
+                    "target": "nepřevedená položka do protokolu (význam na reálných mzdách neověřen); u sloupců hrubé mzdy součást kontroly hrubé mzdy"
+                },
+                "KcJkor3": {
+                    "status": "mapped",
+                    "target": "nepřevedená položka do protokolu (význam na reálných mzdách neověřen); u sloupců hrubé mzdy součást kontroly hrubé mzdy"
+                },
+                "KcJproc": {
+                    "status": "mapped",
+                    "target": "nepřevedená položka do protokolu (význam na reálných mzdách neověřen); u sloupců hrubé mzdy součást kontroly hrubé mzdy"
+                },
+                "KcJproc2": {
+                    "status": "mapped",
+                    "target": "nepřevedená položka do protokolu (význam na reálných mzdách neověřen); u sloupců hrubé mzdy součást kontroly hrubé mzdy"
+                },
+                "KcJproc3": {
+                    "status": "mapped",
+                    "target": "nepřevedená položka do protokolu (význam na reálných mzdách neověřen); u sloupců hrubé mzdy součást kontroly hrubé mzdy"
+                },
+                "KcNadLimitPrijem": {
+                    "status": "ignored"
+                },
+                "KcNahrJedn": {
+                    "status": "ignored"
+                },
+                "KcNahrN": {
+                    "status": "mapped",
+                    "target": "nepřevedená položka do protokolu (význam na reálných mzdách neověřen); u sloupců hrubé mzdy součást kontroly hrubé mzdy"
+                },
+                "KcNahrN2": {
+                    "status": "mapped",
+                    "target": "nepřevedená položka do protokolu (význam na reálných mzdách neověřen); u sloupců hrubé mzdy součást kontroly hrubé mzdy"
+                },
+                "KcNahrNem": {
+                    "status": "mapped",
+                    "target": "kontrola převzetí: čistá mzda s náhradou mzdy a rozpis MZnahr"
+                },
+                "KcNahrZ": {
+                    "status": "mapped",
+                    "target": "nepřevedená položka do protokolu (význam na reálných mzdách neověřen); u sloupců hrubé mzdy součást kontroly hrubé mzdy"
+                },
+                "KcNatBP": {
+                    "status": "mapped",
+                    "target": "nepřevedená položka do protokolu (význam na reálných mzdách neověřen); u sloupců hrubé mzdy součást kontroly hrubé mzdy"
+                },
+                "KcNatPj": {
+                    "status": "mapped",
+                    "target": "nepřevedená položka do protokolu (význam na reálných mzdách neověřen); u sloupců hrubé mzdy součást kontroly hrubé mzdy"
+                },
+                "KcNoc": {
+                    "status": "mapped",
+                    "target": "nepřevedená položka do protokolu (význam na reálných mzdách neověřen); u sloupců hrubé mzdy součást kontroly hrubé mzdy"
+                },
+                "KcNzdDet": {
+                    "status": "mapped",
+                    "target": "kontrola zálohy: zvýhodnění na dítě"
+                },
+                "KcNzdInv": {
+                    "status": "mapped",
+                    "target": "kontrola zálohy: sleva na invaliditu"
+                },
+                "KcNzdOst": {
+                    "status": "mapped",
+                    "target": "kontrola zálohy: ostatní slevy"
+                },
+                "KcNzdZak": {
+                    "status": "mapped",
+                    "target": "kontrola zálohy: sleva na poplatníka"
+                },
+                "KcOdstup": {
+                    "status": "mapped",
+                    "target": "nepřevedená položka do protokolu (význam na reálných mzdách neověřen); u sloupců hrubé mzdy součást kontroly hrubé mzdy"
+                },
+                "KcOsOhod": {
+                    "status": "ignored"
+                },
+                "KcOsOhoM": {
+                    "status": "mapped",
+                    "target": "nepřevedená položka do protokolu (význam na reálných mzdách neověřen); u sloupců hrubé mzdy součást kontroly hrubé mzdy"
+                },
+                "KcOsvobP": {
+                    "status": "mapped",
+                    "target": "nepřevedená položka do protokolu (význam na reálných mzdách neověřen); u sloupců hrubé mzdy součást kontroly hrubé mzdy"
+                },
+                "KcOsvobP2": {
+                    "status": "mapped",
+                    "target": "nepřevedená položka do protokolu (význam na reálných mzdách neověřen); u sloupců hrubé mzdy součást kontroly hrubé mzdy"
+                },
+                "KcPjDloPc": {
+                    "status": "mapped",
+                    "target": "nepřevedená položka do protokolu (význam na reálných mzdách neověřen); u sloupců hrubé mzdy součást kontroly hrubé mzdy"
+                },
+                "KcPlacAkceDeti": {
+                    "status": "mapped",
+                    "target": "nepřevedená položka do protokolu (význam na reálných mzdách neověřen); u sloupců hrubé mzdy součást kontroly hrubé mzdy"
+                },
+                "KcPlacV": {
+                    "status": "mapped",
+                    "target": "nepřevedená položka do protokolu (význam na reálných mzdách neověřen); u sloupců hrubé mzdy součást kontroly hrubé mzdy"
+                },
+                "KcPohot": {
+                    "status": "mapped",
+                    "target": "nepřevedená položka do protokolu (význam na reálných mzdách neověřen); u sloupců hrubé mzdy součást kontroly hrubé mzdy"
+                },
+                "KcPracDalka": {
+                    "status": "mapped",
+                    "target": "nepřevedená položka do protokolu (význam na reálných mzdách neověřen); u sloupců hrubé mzdy součást kontroly hrubé mzdy"
+                },
+                "KcPracDalkaNad": {
+                    "status": "mapped",
+                    "target": "nepřevedená položka do protokolu (význam na reálných mzdách neověřen); u sloupců hrubé mzdy součást kontroly hrubé mzdy"
+                },
+                "KcPremDl": {
+                    "status": "mapped",
+                    "target": "nepřevedená položka do protokolu (význam na reálných mzdách neověřen); u sloupců hrubé mzdy součást kontroly hrubé mzdy"
+                },
+                "KcPremie": {
+                    "status": "ignored"
+                },
+                "KcPremM": {
+                    "status": "mapped",
+                    "target": "nepřevedená položka do protokolu (význam na reálných mzdách neověřen); u sloupců hrubé mzdy součást kontroly hrubé mzdy"
+                },
+                "KcPreplDanRZ": {
+                    "status": "mapped",
+                    "target": "nepřevedená položka do protokolu (význam na reálných mzdách neověřen); u sloupců hrubé mzdy součást kontroly hrubé mzdy"
+                },
+                "KcPres": {
+                    "status": "mapped",
+                    "target": "nepřevedená položka do protokolu (význam na reálných mzdách neověřen); u sloupců hrubé mzdy součást kontroly hrubé mzdy"
+                },
+                "KcPresZM": {
+                    "status": "mapped",
+                    "target": "nepřevedená položka do protokolu (význam na reálných mzdách neověřen); u sloupců hrubé mzdy součást kontroly hrubé mzdy"
+                },
+                "KcPripoj": {
+                    "status": "ignored"
+                },
+                "KcPripojPov": {
+                    "status": "mapped",
+                    "target": "nepřevedená položka do protokolu (význam na reálných mzdách neověřen); u sloupců hrubé mzdy součást kontroly hrubé mzdy"
+                },
+                "KcPripOs": {
+                    "status": "ignored"
+                },
+                "KcPrispKarantena": {
+                    "status": "mapped",
+                    "target": "nepřevedená položka do protokolu (význam na reálných mzdách neověřen); u sloupců hrubé mzdy součást kontroly hrubé mzdy"
+                },
+                "KcProplacDovol": {
+                    "status": "mapped",
+                    "target": "nepřevedená položka do protokolu (význam na reálných mzdách neověřen); u sloupců hrubé mzdy součást kontroly hrubé mzdy"
+                },
+                "KcProst": {
+                    "status": "mapped",
+                    "target": "nepřevedená položka do protokolu (význam na reálných mzdách neověřen); u sloupců hrubé mzdy součást kontroly hrubé mzdy"
+                },
+                "KcProstoje": {
+                    "status": "mapped",
+                    "target": "nepřevedená položka do protokolu (význam na reálných mzdách neověřen); u sloupců hrubé mzdy součást kontroly hrubé mzdy"
+                },
+                "KcPrum": {
+                    "status": "ignored"
+                },
+                "KcSlevaOvocnar": {
+                    "status": "ignored"
+                },
+                "KcSoc": {
+                    "status": "mapped",
+                    "target": "kontrola převzetí: sociální pojištění zaměstnance"
+                },
+                "KcSocL": {
+                    "status": "mapped",
+                    "target": "kontrola převzetí: sociální pojištění zaměstnavatele"
+                },
+                "KcSocLshm": {
+                    "status": "ignored"
+                },
+                "KcSocLsleva": {
+                    "status": "ignored"
+                },
+                "KcSocLslevaSpec": {
+                    "status": "ignored"
+                },
+                "KcSocPojSlevaPracDuch": {
+                    "status": "ignored"
+                },
+                "KcSocUpr": {
+                    "status": "ignored"
+                },
+                "KcSocUprEdit": {
+                    "status": "ignored"
+                },
+                "KcSocUprLimt": {
+                    "status": "ignored"
+                },
+                "KcSocZak": {
+                    "status": "ignored"
+                },
+                "KcSocZakLimt": {
+                    "status": "ignored"
+                },
+                "KcSocZakSniz": {
+                    "status": "ignored"
+                },
+                "KcSoNe": {
+                    "status": "mapped",
+                    "target": "nepřevedená položka do protokolu (význam na reálných mzdách neověřen); u sloupců hrubé mzdy součást kontroly hrubé mzdy"
+                },
+                "KcSporStari": {
+                    "status": "mapped",
+                    "target": "nepřevedená položka do protokolu (význam na reálných mzdách neověřen); u sloupců hrubé mzdy součást kontroly hrubé mzdy"
+                },
+                "KcSrazky": {
+                    "status": "mapped",
+                    "target": "kontrola výplaty; nepřevedená položka (srážky)"
+                },
+                "KcStrav": {
+                    "status": "mapped",
+                    "target": "složka Z21 stravenkový paušál; kontrola výplaty"
+                },
+                "KcStravNad": {
+                    "status": "mapped",
+                    "target": "nepřevedená položka do protokolu (význam na reálných mzdách neověřen); u sloupců hrubé mzdy součást kontroly hrubé mzdy"
+                },
+                "KcSvat": {
+                    "status": "mapped",
+                    "target": "nepřevedená položka do protokolu (význam na reálných mzdách neověřen); u sloupců hrubé mzdy součást kontroly hrubé mzdy"
+                },
+                "KcSvatN": {
+                    "status": "mapped",
+                    "target": "nepřítomnost V02 (náhrada za svátek)"
+                },
+                "KcSvatZM": {
+                    "status": "mapped",
+                    "target": "nepřevedená položka do protokolu (význam na reálných mzdách neověřen); u sloupců hrubé mzdy součást kontroly hrubé mzdy"
+                },
+                "KcSzM": {
+                    "status": "mapped",
+                    "target": "sazba složky (Hodnota1): sjednaná měsíční mzda / hodinová sazba"
+                },
+                "KcVojCv": {
+                    "status": "mapped",
+                    "target": "nepřevedená položka do protokolu (význam na reálných mzdách neověřen); u sloupců hrubé mzdy součást kontroly hrubé mzdy"
+                },
+                "KcVojZS": {
+                    "status": "mapped",
+                    "target": "nepřevedená položka do protokolu (význam na reálných mzdách neověřen); u sloupců hrubé mzdy součást kontroly hrubé mzdy"
+                },
+                "KcVyuct": {
+                    "status": "mapped",
+                    "target": "KcVyplat; kontrola převzetí: k výplatě"
+                },
+                "KcZaklM": {
+                    "status": "mapped",
+                    "target": "složka M01 měsíční mzda / C01 hodinová mzda; kontrola hrubé mzdy"
+                },
+                "KcZalDan": {
+                    "status": "mapped",
+                    "target": "záloha na daň, u zvláštní sazby srážková daň; kontrola převzetí"
+                },
+                "KcZaloha": {
+                    "status": "mapped",
+                    "target": "kontrola výplaty; nepřevedená položka (záloha)"
+                },
+                "KcZamBenefit": {
+                    "status": "mapped",
+                    "target": "nepřevedená položka do protokolu (význam na reálných mzdách neověřen); u sloupců hrubé mzdy součást kontroly hrubé mzdy"
+                },
+                "KcZamBenefitNad": {
+                    "status": "mapped",
+                    "target": "nepřevedená položka do protokolu (význam na reálných mzdách neověřen); u sloupců hrubé mzdy součást kontroly hrubé mzdy"
+                },
+                "KcZdaM": {
+                    "status": "mapped",
+                    "target": "základ zálohy, u zvláštní sazby základ srážkové daně"
+                },
+                "KcZdr": {
+                    "status": "mapped",
+                    "target": "kontrola převzetí: zdravotní pojištění zaměstnance"
+                },
+                "KcZdrBenefit": {
+                    "status": "mapped",
+                    "target": "nepřevedená položka do protokolu (význam na reálných mzdách neověřen); u sloupců hrubé mzdy součást kontroly hrubé mzdy"
+                },
+                "KcZdrBenefitNad": {
+                    "status": "mapped",
+                    "target": "nepřevedená položka do protokolu (význam na reálných mzdách neověřen); u sloupců hrubé mzdy součást kontroly hrubé mzdy"
+                },
+                "KcZdrL": {
+                    "status": "mapped",
+                    "target": "kontrola převzetí: zdravotní pojištění zaměstnavatele"
+                },
+                "KcZdrLshm": {
+                    "status": "ignored"
+                },
+                "KcZdrUpr": {
+                    "status": "ignored"
+                },
+                "KcZdrUprEdit": {
+                    "status": "ignored"
+                },
+                "KcZdrUprLimt": {
+                    "status": "ignored"
+                },
+                "KcZdrZak": {
+                    "status": "ignored"
+                },
+                "KcZdrZakLimt": {
+                    "status": "ignored"
+                },
+                "KcZivOs": {
+                    "status": "ignored"
+                },
+                "KcZivPoj": {
+                    "status": "mapped",
+                    "target": "nepřevedená položka do protokolu (význam na reálných mzdách neověřen); u sloupců hrubé mzdy součást kontroly hrubé mzdy"
+                },
+                "KcZtratV": {
+                    "status": "mapped",
+                    "target": "nepřevedená položka do protokolu (význam na reálných mzdách neověřen); u sloupců hrubé mzdy součást kontroly hrubé mzdy"
+                },
+                "KcZvZkBP": {
+                    "status": "mapped",
+                    "target": "nepřevedená položka do protokolu (význam na reálných mzdách neověřen); u sloupců hrubé mzdy součást kontroly hrubé mzdy"
+                },
+                "KcZvZkPj": {
+                    "status": "mapped",
+                    "target": "nepřevedená položka do protokolu (význam na reálných mzdách neověřen); u sloupců hrubé mzdy součást kontroly hrubé mzdy"
+                },
+                "MzdaOdch": {
+                    "status": "ignored"
+                },
+                "MzdaPoUkonc": {
+                    "status": "ignored"
+                },
+                "NahrDoby": {
+                    "status": "ignored"
+                },
+                "NahrDobyDP": {
+                    "status": "ignored"
+                },
+                "NemKal": {
+                    "status": "ignored"
+                },
+                "Nemoc": {
+                    "status": "ignored"
+                },
+                "Neomluv": {
+                    "status": "ignored"
+                },
+                "Neplac": {
+                    "status": "ignored"
+                },
+                "NezahrnovatDoMH": {
+                    "status": "ignored"
+                },
+                "OIC": {
+                    "status": "ignored"
+                },
+                "OsCislo": {
+                    "status": "ignored"
+                },
+                "PocJedn": {
+                    "status": "ignored"
+                },
+                "PojStat": {
+                    "status": "ignored"
+                },
+                "PremDlQ": {
+                    "status": "ignored"
+                },
+                "Premie": {
+                    "status": "ignored"
+                },
+                "Prohlas": {
+                    "status": "ignored"
+                },
+                "ProplacDovol": {
+                    "status": "ignored"
+                },
+                "RefPoj": {
+                    "status": "ignored"
+                },
+                "RefStr": {
+                    "status": "ignored"
+                },
+                "RefZAM": {
+                    "status": "mapped",
+                    "target": "zaměstnanec (RefPomer poměru = zaměstnanec)"
+                },
+                "RelDruhM": {
+                    "status": "mapped",
+                    "target": "druh mzdy: 1 měsíční (M01), 2 hodinová (C01, jen se součinem hodin a sazby)"
+                },
+                "RelDruhZ": {
+                    "status": "ignored"
+                },
+                "RelMes": {
+                    "status": "mapped",
+                    "target": "období mzdy"
+                },
+                "RelPracRezim": {
+                    "status": "ignored"
+                },
+                "RelSkZarucMzda": {
+                    "status": "ignored"
+                },
+                "RelVyplM": {
+                    "status": "ignored"
+                },
+                "Riziko": {
+                    "status": "ignored"
+                },
+                "Riziko3": {
+                    "status": "ignored"
+                },
+                "RodCisl": {
+                    "status": "ignored"
+                },
+                "Rok": {
+                    "status": "mapped",
+                    "target": "období mzdy"
+                },
+                "Sel": {
+                    "status": "ignored"
+                },
+                "SlevaOvocnar": {
+                    "status": "ignored"
+                },
+                "SlevaOvocnarZadost": {
+                    "status": "ignored"
+                },
+                "SocPojSlevaNarok": {
+                    "status": "ignored"
+                },
+                "SocPojSlevaPracDuch": {
+                    "status": "ignored"
+                },
+                "SocPojSlevaPracDuchZadost": {
+                    "status": "ignored"
+                },
+                "SocPojSlevaZadost": {
+                    "status": "ignored"
+                },
+                "SocUprMVZ": {
+                    "status": "ignored"
+                },
+                "StanovenyFond": {
+                    "status": "mapped",
+                    "target": "HodFond (fond plného úvazku)"
+                },
+                "SvatkyDohody": {
+                    "status": "ignored"
+                },
+                "TUvazek": {
+                    "status": "mapped",
+                    "target": "týdenní úvazek, když chybí denní"
+                },
+                "Ucetni": {
+                    "status": "ignored"
+                },
+                "Zachranar": {
+                    "status": "ignored"
+                },
+                "Zarazeni": {
+                    "status": "ignored"
+                },
+                "ZdrUprMVZ": {
+                    "status": "ignored"
+                },
+                "ZvlSazD": {
+                    "status": "mapped",
+                    "target": "srážková daň: KcSraDan a KcSraDanZak místo zálohy"
+                }
+            }
+        },
+        "MZdavky": {
+            "rows_seen": 0,
+            "status": "mapped",
+            "target": "dávky nemocenského (jen počet), beze změny do převodu PAMICA (čtečky api/src/Service/Migration/Pohoda/Payroll, matice pamica.json)"
+        },
+        "MZnahr": {
+            "rows_seen": 2,
+            "status": "mapped",
+            "target": "náhrada mzdy při nemoci: částka do nepřítomnosti H01 (MZneprit.KcNahr) podle doby na kartě a kontrola proti KcNahrNem; řádek beze změny do převodu PAMICA (případy nemoci, okno § 192 ZP)",
+            "ignored_columns_reason": "Sloupec čte převod PAMICA pod týmž jménem (pamica.json), nebo ho převod nepotřebuje (sazby a krácení náhrady jsou ve výsledné částce).",
+            "columns": {
+                "Cislo": {
+                    "status": "ignored"
+                },
+                "DatKon": {
+                    "status": "ignored"
+                },
+                "DatZac": {
+                    "status": "ignored"
+                },
+                "DnyKal": {
+                    "status": "ignored"
+                },
+                "DnyPrac": {
+                    "status": "ignored"
+                },
+                "HodKon": {
+                    "status": "ignored"
+                },
+                "HodNahr": {
+                    "status": "ignored"
+                },
+                "HodNahr4": {
+                    "status": "ignored"
+                },
+                "HodZac": {
+                    "status": "ignored"
+                },
+                "ID": {
+                    "status": "mapped",
+                    "target": "identita řádku"
+                },
+                "Kc": {
+                    "status": "mapped",
+                    "target": "náhrada mzdy nepřítomnosti H01; kontrola proti KcNahrNem"
+                },
+                "KcPrispKarantena": {
+                    "status": "ignored"
+                },
+                "KcPrum": {
+                    "status": "ignored"
+                },
+                "KcUpr": {
+                    "status": "ignored"
+                },
+                "Kraceni": {
+                    "status": "ignored"
+                },
+                "NeniPrispKarantena": {
+                    "status": "ignored"
+                },
+                "PrumActual": {
+                    "status": "ignored"
+                },
+                "RefAg": {
+                    "status": "mapped",
+                    "target": "mzda, ke které náhrada patří"
+                },
+                "RefZAMpDov": {
+                    "status": "mapped",
+                    "target": "doba na kartě, ke které náhrada patří (KcNahr nepřítomnosti H01)"
+                },
+                "RelDrNahr": {
+                    "status": "ignored"
+                },
+                "Rucne": {
+                    "status": "ignored"
+                },
+                "Sazba3": {
+                    "status": "ignored"
+                },
+                "Sazba4": {
+                    "status": "ignored"
+                }
+            }
+        },
+        "MZzauct": {
+            "rows_seen": 22,
+            "status": "mapped",
+            "target": "počet řádků do protokolu; tabulka v POHODĚ nenese účty, do převodu PAMICA se nepředává",
+            "ignored_columns_reason": "Bez účtů: POHODA mzdy zaúčtuje interními doklady účetnictví.",
+            "columns": {
+                "ID": {
+                    "status": "ignored"
+                },
+                "KcDanUpS": {
+                    "status": "ignored"
+                },
+                "KcDanUpZ": {
+                    "status": "ignored"
+                },
+                "Ponizovat": {
+                    "status": "ignored"
+                },
+                "RelMes": {
+                    "status": "ignored"
+                },
+                "Rok": {
+                    "status": "ignored"
+                }
+            }
+        },
+        "NEMPRI": {
+            "rows_seen": 1,
+            "status": "mapped",
+            "target": "přílohy k žádosti o dávky, beze změny do převodu PAMICA (čtečky api/src/Service/Migration/Pohoda/Payroll, matice pamica.json)"
+        },
+        "NEMPRIdeti": {
+            "rows_seen": 0,
+            "status": "ignored",
+            "reason": "Děti k žádosti o ošetřovné, převod je nepotřebuje (shodně s pamica.json)."
+        },
+        "NEMPRIpecovalDny": {
+            "rows_seen": 0,
+            "status": "mapped",
+            "target": "dny péče ošetřovného, beze změny do převodu PAMICA (čtečky api/src/Service/Migration/Pohoda/Payroll, matice pamica.json)"
+        },
+        "NEMPRIpol": {
+            "rows_seen": 1,
+            "status": "mapped",
+            "target": "položky příloh k dávkám, beze změny do převodu PAMICA (čtečky api/src/Service/Migration/Pohoda/Payroll, matice pamica.json)"
+        },
+        "NEMPRIpraceVeDnech": {
+            "rows_seen": 0,
+            "status": "ignored",
+            "reason": "Práce ve dnech nemoci k příloze, převod ji nepotřebuje (shodně s pamica.json)."
+        },
+        "NEMPRIpracVolno": {
+            "rows_seen": 0,
+            "status": "ignored",
+            "reason": "Pracovní volno k příloze dávek, převod ho nepotřebuje."
+        },
+        "NEMPRIprilohy": {
+            "rows_seen": 0,
+            "status": "ignored",
+            "reason": "Přílohy k dávkám (soubory), převod je nepotřebuje."
+        },
+        "NEMPRIrozvrhSmen": {
+            "rows_seen": 0,
+            "status": "ignored",
+            "reason": "Rozvrh směn k příloze dávek, převod ho nepotřebuje."
+        },
+        "ONZ": {
+            "rows_seen": 14,
+            "status": "mapped",
+            "target": "oznámení zdravotní pojišťovně, beze změny do převodu PAMICA (čtečky api/src/Service/Migration/Pohoda/Payroll, matice pamica.json)"
+        },
+        "ONZduchPoj": {
+            "rows_seen": 0,
+            "status": "ignored",
+            "reason": "Důchodové pojištění k oznámení pojišťovně, převod ho nepotřebuje (shodně s pamica.json)."
+        },
+        "ONZpol": {
+            "rows_seen": 67,
+            "status": "mapped",
+            "target": "položky oznámení pojišťovně; doplní se RefPomer = RefZam, jinak beze změny do převodu PAMICA (čtečky api/src/Service/Migration/Pohoda/Payroll, matice pamica.json)",
+            "columns": {
+                "RefZam": {
+                    "status": "mapped",
+                    "target": "zaměstnanec (RefPomer)"
+                }
+            }
+        },
+        "ONZprilohy": {
+            "rows_seen": 0,
+            "status": "ignored",
+            "reason": "Přílohy oznámení pojišťovně (soubory), převod je nepotřebuje."
+        },
+        "PDB": {
+            "rows_seen": 0,
+            "status": "ignored",
+            "reason": "Přehled o vyměřovacích základech pro zdravotní pojišťovnu; MyÚčto přehledy tvoří samo (shodně s pamica.json)."
+        },
+        "PDBprilohy": {
+            "rows_seen": 0,
+            "status": "ignored",
+            "reason": "Přílohy přehledů PDB (soubory)."
+        },
+        "pOS": {
+            "rows_seen": 721,
+            "status": "mapped",
+            "target": "účtová osnova (názvy účtů), beze změny do převodu PAMICA (čtečky api/src/Service/Migration/Pohoda/Payroll, matice pamica.json)"
+        },
+        "pOSuSk": {
+            "rows_seen": 218,
+            "status": "ignored",
+            "reason": "Účty v účtových skupinách účetnictví POHODY; převádí je převod účetnictví."
+        },
+        "pPK": {
+            "rows_seen": 787,
+            "status": "mapped",
+            "target": "předkontace (návrh kontací mezd), beze změny do převodu PAMICA (čtečky api/src/Service/Migration/Pohoda/Payroll, matice pamica.json)"
+        },
+        "PredRegZAM": {
+            "rows_seen": 0,
+            "status": "mapped",
+            "target": "předregistrace ČSSZ, beze změny do převodu PAMICA (čtečky api/src/Service/Migration/Pohoda/Payroll, matice pamica.json)"
+        },
+        "PredRegZAMitems": {
+            "rows_seen": 0,
+            "status": "mapped",
+            "target": "věty předregistrací; doplní se RefPomer = RefZAM, jinak beze změny do převodu PAMICA (čtečky api/src/Service/Migration/Pohoda/Payroll, matice pamica.json)"
+        },
+        "RegZAM": {
+            "rows_seen": 4,
+            "status": "mapped",
+            "target": "registrace ČSSZ, beze změny do převodu PAMICA (čtečky api/src/Service/Migration/Pohoda/Payroll, matice pamica.json)"
+        },
+        "RegZAMitems": {
+            "rows_seen": 4,
+            "status": "mapped",
+            "target": "věty registrací ČSSZ; doplní se RefPomer = RefZAM, jinak beze změny do převodu PAMICA (čtečky api/src/Service/Migration/Pohoda/Payroll, matice pamica.json)",
+            "columns": {
+                "RefZAM": {
+                    "status": "mapped",
+                    "target": "zaměstnanec (RefPomer poměru = zaměstnanec)"
+                }
+            }
+        },
+        "RegZAMprilohy": {
+            "rows_seen": 0,
+            "status": "ignored",
+            "reason": "Přílohy registrací (soubory), převod je nepotřebuje."
+        },
+        "sAnalytika": {
+            "rows_seen": 54,
+            "status": "ignored",
+            "reason": "Analytické účty účetnictví POHODY; převádí je převod účetnictví."
+        },
+        "sBanky": {
+            "rows_seen": 111,
+            "status": "ignored",
+            "reason": "Číselník bank; kód banky nese účet zaměstnance (ZAMucet) sám."
+        },
+        "sCMeny": {
+            "rows_seen": 27,
+            "status": "ignored",
+            "reason": "Číselník měn; mzdy jsou v korunách."
+        },
+        "sCRady": {
+            "rows_seen": 58,
+            "status": "ignored",
+            "reason": "Číselné řady dokladů POHODY, převod je nepotřebuje."
+        },
+        "sFormUh": {
+            "rows_seen": 12,
+            "status": "ignored",
+            "reason": "Formy úhrady POHODY, převod je nepotřebuje."
+        },
+        "sKonfig": {
+            "rows_seen": 1,
+            "status": "ignored",
+            "reason": "Konfigurace POHODY (binární nastavení a logo), převod ji nepotřebuje."
+        },
+        "sKSym": {
+            "rows_seen": 660,
+            "status": "ignored",
+            "reason": "Konstantní symboly plateb, MyÚčto je u příkazů volí samo."
+        },
+        "sMJ": {
+            "rows_seen": 10,
+            "status": "ignored",
+            "reason": "Měrné jednotky, mzdy je nepoužívají."
+        },
+        "sMzDIP": {
+            "rows_seen": 62,
+            "status": "ignored",
+            "reason": "Číselník poskytovatelů DIP; příspěvek zaměstnavatele nese mzda (KcDIP)."
+        },
+        "sMzFond": {
+            "rows_seen": 24,
+            "status": "ignored",
+            "reason": "Číselník fondů srážek POHODY; srážky převod z POHODY nepřevádí (viz ZAMpSra)."
+        },
+        "sMzMist": {
+            "rows_seen": 1,
+            "status": "mapped",
+            "target": "pracoviště (obec JMHZ), beze změny do převodu PAMICA (čtečky api/src/Service/Migration/Pohoda/Payroll, matice pamica.json)"
+        },
+        "sMzPoj": {
+            "rows_seen": 21,
+            "status": "mapped",
+            "target": "zdravotní pojišťovny, beze změny do převodu PAMICA (čtečky api/src/Service/Migration/Pohoda/Payroll, matice pamica.json)"
+        },
+        "sMzZivPj": {
+            "rows_seen": 28,
+            "status": "ignored",
+            "reason": "Číselník životních pojišťoven; příspěvky zaměstnavatele převod z POHODY nepřevádí."
+        },
+        "sRecordLabels": {
+            "rows_seen": 6,
+            "status": "ignored",
+            "reason": "Štítky záznamů POHODY, bez významu pro mzdy."
+        },
+        "sSTR": {
+            "rows_seen": 4,
+            "status": "mapped",
+            "target": "střediska, beze změny do převodu PAMICA (čtečky api/src/Service/Migration/Pohoda/Payroll, matice pamica.json)"
+        },
+        "sUcet": {
+            "rows_seen": 13,
+            "status": "ignored",
+            "reason": "Bankovní účty firmy v účetnictví POHODY; převádí je převod účetnictví."
+        },
+        "sZeme": {
+            "rows_seen": 290,
+            "status": "ignored",
+            "reason": "Číselník zemí; kód státu nese karta zaměstnance."
+        },
+        "VDP": {
+            "rows_seen": 0,
+            "status": "ignored",
+            "reason": "Vyúčtování daně z příjmů; MyÚčto ho tvoří samo (shodně s pamica.json)."
+        },
+        "VDPprilohy": {
+            "rows_seen": 0,
+            "status": "ignored",
+            "reason": "Přílohy vyúčtování daně (soubory)."
+        },
+        "Verze": {
+            "rows_seen": 2,
+            "status": "ignored",
+            "reason": "Verze programu POHODA, pro převod nemá význam."
+        },
+        "ZAM": {
+            "rows_seen": 26,
+            "status": "mapped",
+            "target": "osoba beze změny a pracovní poměr ZAMpomer (ID = ZAM.ID, jediný poměr na zaměstnance) z údajů vztahu na kartě; karta dovolené Dovolena ze sloupců DovNarHod, DovStaraHod, DovKracHod, DovCerpHod",
+            "ignored_columns_reason": "Údaj osoby nebo vztahu, který převod PAMICA čte pod týmž jménem (pamica.json) nebo nepotřebuje; převod POHODY ho jen předá.",
+            "columns": {
+                "CizCisPojSP": {
+                    "status": "ignored"
+                },
+                "CizCisPojZP": {
+                    "status": "ignored"
+                },
+                "CizCP": {
+                    "status": "ignored"
+                },
+                "CizDokladStat": {
+                    "status": "ignored"
+                },
+                "CizDokladTyp": {
+                    "status": "ignored"
+                },
+                "Cizinec": {
+                    "status": "ignored"
+                },
+                "CizKdoVydal": {
+                    "status": "ignored"
+                },
+                "CizMisto": {
+                    "status": "ignored"
+                },
+                "CizObec": {
+                    "status": "ignored"
+                },
+                "CizPSC": {
+                    "status": "ignored"
+                },
+                "CizStatNar": {
+                    "status": "ignored"
+                },
+                "CizUlice": {
+                    "status": "ignored"
+                },
+                "ClenHZS": {
+                    "status": "ignored"
+                },
+                "ClenSVJ": {
+                    "status": "ignored"
+                },
+                "COP": {
+                    "status": "ignored"
+                },
+                "CP": {
+                    "status": "ignored"
+                },
+                "Creator": {
+                    "status": "ignored"
+                },
+                "DatCreate": {
+                    "status": "ignored"
+                },
+                "DatNar": {
+                    "status": "ignored"
+                },
+                "DatNast": {
+                    "status": "mapped",
+                    "target": "nástup do mzdy PAMICA (MZ.DatNast) a poměru"
+                },
+                "DatOdch": {
+                    "status": "mapped",
+                    "target": "skončení do mzdy PAMICA (MZ.DatOdch) a poměru"
+                },
+                "DatOdchUrc": {
+                    "status": "ignored"
+                },
+                "DatSave": {
+                    "status": "ignored"
+                },
+                "DatVstup": {
+                    "status": "mapped",
+                    "target": "vstup do mzdy PAMICA (MZ.DatVstup) a poměru"
+                },
+                "DovCerp": {
+                    "status": "ignored"
+                },
+                "DovCerpDny": {
+                    "status": "ignored"
+                },
+                "DovCerpDny2": {
+                    "status": "ignored"
+                },
+                "DovCerpDny3": {
+                    "status": "ignored"
+                },
+                "DovCerpHod": {
+                    "status": "mapped",
+                    "target": "Dovolena.CerpanoHod"
+                },
+                "DovCerpHod2": {
+                    "status": "ignored"
+                },
+                "DovCerpHod3": {
+                    "status": "ignored"
+                },
+                "DovKracHod": {
+                    "status": "mapped",
+                    "target": "Dovolena.KraceniHod"
+                },
+                "DovKracHod2": {
+                    "status": "ignored"
+                },
+                "DovKracHod3": {
+                    "status": "ignored"
+                },
+                "DovNar": {
+                    "status": "ignored"
+                },
+                "DovNarHod": {
+                    "status": "mapped",
+                    "target": "Dovolena.NarokHod"
+                },
+                "DovNarHod2": {
+                    "status": "ignored"
+                },
+                "DovNarHod3": {
+                    "status": "ignored"
+                },
+                "DovPrech": {
+                    "status": "ignored"
+                },
+                "DovProplac": {
+                    "status": "ignored"
+                },
+                "DovStara": {
+                    "status": "ignored"
+                },
+                "DovStaraDny": {
+                    "status": "ignored"
+                },
+                "DovStaraHod": {
+                    "status": "mapped",
+                    "target": "Dovolena.StaraHod"
+                },
+                "DovTyd": {
+                    "status": "ignored"
+                },
+                "DovTyd2": {
+                    "status": "ignored"
+                },
+                "DovTyd3": {
+                    "status": "ignored"
+                },
+                "DovZbyvHod": {
+                    "status": "ignored"
+                },
+                "DovZbyvHod2": {
+                    "status": "ignored"
+                },
+                "DovZbyvHod3": {
+                    "status": "ignored"
+                },
+                "DPredZam": {
+                    "status": "ignored"
+                },
+                "DrzitelZTPP": {
+                    "status": "ignored"
+                },
+                "DUvazek": {
+                    "status": "ignored"
+                },
+                "Email": {
+                    "status": "ignored"
+                },
+                "GlxRidic": {
+                    "status": "ignored"
+                },
+                "ID": {
+                    "status": "mapped",
+                    "target": "identita řádku (vazba mezd, dob a náhrad)"
+                },
+                "IDPPV": {
+                    "status": "ignored"
+                },
+                "JeDovNarok": {
+                    "status": "ignored"
+                },
+                "JeDovRucni": {
+                    "status": "ignored"
+                },
+                "JeDovRucni2": {
+                    "status": "ignored"
+                },
+                "JeDovRucni3": {
+                    "status": "ignored"
+                },
+                "JeSmluvni": {
+                    "status": "ignored"
+                },
+                "JeStudent": {
+                    "status": "ignored"
+                },
+                "Jmeno": {
+                    "status": "ignored"
+                },
+                "KcCastH": {
+                    "status": "ignored"
+                },
+                "KcDanURZ": {
+                    "status": "ignored"
+                },
+                "KcDoplDanBonRZ": {
+                    "status": "ignored"
+                },
+                "KcOsOhod": {
+                    "status": "ignored"
+                },
+                "KcPremie": {
+                    "status": "ignored"
+                },
+                "KcPreplDanRZ": {
+                    "status": "ignored"
+                },
+                "KcPrumL": {
+                    "status": "ignored"
+                },
+                "KcSzM": {
+                    "status": "ignored"
+                },
+                "KcVVZL": {
+                    "status": "ignored"
+                },
+                "KcZaloha": {
+                    "status": "ignored"
+                },
+                "KodBanky": {
+                    "status": "ignored"
+                },
+                "KonCP": {
+                    "status": "ignored"
+                },
+                "KonObec": {
+                    "status": "ignored"
+                },
+                "KonPSC": {
+                    "status": "ignored"
+                },
+                "KonUlice": {
+                    "status": "ignored"
+                },
+                "MistoNar": {
+                    "status": "ignored"
+                },
+                "MzdaOdch": {
+                    "status": "ignored"
+                },
+                "Narodn": {
+                    "status": "ignored"
+                },
+                "Nenastoupil": {
+                    "status": "ignored"
+                },
+                "NepretrProvoz": {
+                    "status": "ignored"
+                },
+                "Nerezident": {
+                    "status": "ignored"
+                },
+                "NezahrnovatDoMH": {
+                    "status": "ignored"
+                },
+                "Obec": {
+                    "status": "ignored"
+                },
+                "OdpracD": {
+                    "status": "ignored"
+                },
+                "OdpracR": {
+                    "status": "ignored"
+                },
+                "OIC": {
+                    "status": "ignored"
+                },
+                "OsCislo": {
+                    "status": "ignored"
+                },
+                "Oznacil": {
+                    "status": "ignored"
+                },
+                "PostaveniICSE": {
+                    "status": "ignored"
+                },
+                "Pozn": {
+                    "status": "ignored"
+                },
+                "PredStarDuch": {
+                    "status": "ignored"
+                },
+                "Premie": {
+                    "status": "ignored"
+                },
+                "Prijmeni": {
+                    "status": "ignored"
+                },
+                "PrislCizimPrav": {
+                    "status": "ignored"
+                },
+                "ProfeseISCO": {
+                    "status": "mapped",
+                    "target": "CZ-ISCO poměru (ResCisCZISCO)"
+                },
+                "PSC": {
+                    "status": "ignored"
+                },
+                "RefMist": {
+                    "status": "ignored"
+                },
+                "RefPoj": {
+                    "status": "ignored"
+                },
+                "RefStr": {
+                    "status": "mapped",
+                    "target": "středisko poměru (ResStr)"
+                },
+                "RelCR": {
+                    "status": "ignored"
+                },
+                "RelDruhM": {
+                    "status": "ignored"
+                },
+                "RelDruhZ": {
+                    "status": "mapped",
+                    "target": "druh zaměstnání poměru; 108 = dohoda o provedení práce (JeDPP)"
+                },
+                "RelDruhZ2011": {
+                    "status": "ignored"
+                },
+                "RelDruhZ2025": {
+                    "status": "ignored"
+                },
+                "RelDruhZOld": {
+                    "status": "ignored"
+                },
+                "RelKKOV": {
+                    "status": "ignored"
+                },
+                "RelMesRZ": {
+                    "status": "ignored"
+                },
+                "RelOdstupne": {
+                    "status": "ignored"
+                },
+                "RelPohl": {
+                    "status": "ignored"
+                },
+                "RelPracRezim": {
+                    "status": "ignored"
+                },
+                "RelSkZarucMzda": {
+                    "status": "ignored"
+                },
+                "RelStav": {
+                    "status": "ignored"
+                },
+                "RelUrceniPPV": {
+                    "status": "ignored"
+                },
+                "RelVypl": {
+                    "status": "ignored"
+                },
+                "RelVyplZ": {
+                    "status": "ignored"
+                },
+                "Riziko": {
+                    "status": "ignored"
+                },
+                "Riziko3": {
+                    "status": "ignored"
+                },
+                "RocZuct": {
+                    "status": "ignored"
+                },
+                "RodCisl": {
+                    "status": "ignored"
+                },
+                "Rozena": {
+                    "status": "ignored"
+                },
+                "Sel": {
+                    "status": "ignored"
+                },
+                "ShowRC": {
+                    "status": "ignored"
+                },
+                "Spolec": {
+                    "status": "ignored"
+                },
+                "StarDuchSnizenyVek": {
+                    "status": "ignored"
+                },
+                "Stat": {
+                    "status": "ignored"
+                },
+                "StatKonAdr": {
+                    "status": "ignored"
+                },
+                "StatPris": {
+                    "status": "ignored"
+                },
+                "Tel": {
+                    "status": "ignored"
+                },
+                "Titul": {
+                    "status": "ignored"
+                },
+                "TUvazek": {
+                    "status": "ignored"
+                },
+                "TydenDni": {
+                    "status": "ignored"
+                },
+                "TypELDP": {
+                    "status": "ignored"
+                },
+                "Ucet": {
+                    "status": "ignored"
+                },
+                "Ucetni": {
+                    "status": "ignored"
+                },
+                "Ulice": {
+                    "status": "ignored"
+                },
+                "Vedouci": {
+                    "status": "ignored"
+                },
+                "Zachranar": {
+                    "status": "ignored"
+                },
+                "Zarazeni": {
+                    "status": "ignored"
+                },
+                "ZmenaPoj": {
+                    "status": "ignored"
+                }
+            }
+        },
+        "ZAMpDet": {
+            "rows_seen": 60,
+            "status": "mapped",
+            "target": "slevy na dani a děti (prohlášení poplatníka), beze změny do převodu PAMICA (čtečky api/src/Service/Migration/Pohoda/Payroll, matice pamica.json)"
+        },
+        "ZAMpDov": {
+            "rows_seen": 20,
+            "status": "mapped",
+            "target": "doby nepřítomnosti s daty: 35 dovolená (MZneprit V01), 4 pracovní neschopnost (MZneprit H01), oříznuté na měsíc mzdy; ostatní druhy jako nepřevedená položka",
+            "ignored_columns_reason": "Doplňkové údaje doby (návaznost, diagnóza, vazby na eNeschopenku), převod je nepotřebuje: dobu nese začátek, konec a počet dnů.",
+            "columns": {
+                "CanHZUPN": {
+                    "status": "ignored"
+                },
+                "DatKon": {
+                    "status": "mapped",
+                    "target": "konec doby nepřítomnosti / náhrady"
+                },
+                "DatKonRO": {
+                    "status": "ignored"
+                },
+                "DatZac": {
+                    "status": "mapped",
+                    "target": "začátek doby nepřítomnosti / náhrady"
+                },
+                "DatZacRO": {
+                    "status": "ignored"
+                },
+                "Diagnoza": {
+                    "status": "ignored"
+                },
+                "Dnu": {
+                    "status": "mapped",
+                    "target": "pracovní dny doby (hodiny = Dnu × DUvazek)"
+                },
+                "DnyKal": {
+                    "status": "ignored"
+                },
+                "DnyPrac": {
+                    "status": "ignored"
+                },
+                "ID": {
+                    "status": "mapped",
+                    "target": "identita řádku (vazba mezd, dob a náhrad)"
+                },
+                "KonPrac": {
+                    "status": "ignored"
+                },
+                "NadZakLimit": {
+                    "status": "ignored"
+                },
+                "RefAg": {
+                    "status": "mapped",
+                    "target": "vazba na zaměstnance nebo mzdu"
+                },
+                "RefEDavky": {
+                    "status": "ignored"
+                },
+                "RefENeschop": {
+                    "status": "ignored"
+                },
+                "RefNavaz": {
+                    "status": "ignored"
+                },
+                "RelDrDov": {
+                    "status": "mapped",
+                    "target": "druh doby: 35 dovolená, 4 pracovní neschopnost"
+                },
+                "RelKonJ": {
+                    "status": "ignored"
+                },
+                "RelNavaz": {
+                    "status": "ignored"
+                },
+                "RelZacJ": {
+                    "status": "ignored"
+                },
+                "VypMMRR": {
+                    "status": "ignored"
+                },
+                "ZacPrac": {
+                    "status": "ignored"
+                }
+            }
+        },
+        "ZAMpSra": {
+            "rows_seen": 0,
+            "status": "mapped",
+            "target": "počet trvalých srážek a exekucí do protokolu (převod z POHODY je nepřevádí, export nenese rozpis po mzdách)",
+            "ignored_columns_reason": "Srážky z POHODY se nepřevádějí; čte se jen počet řádků."
+        },
+        "ZAMucet": {
+            "rows_seen": 25,
+            "status": "mapped",
+            "target": "výplatní účty, beze změny do převodu PAMICA (čtečky api/src/Service/Migration/Pohoda/Payroll, matice pamica.json)"
+        },
+        "ZAMzivPoj": {
+            "rows_seen": 0,
+            "status": "ignored",
+            "reason": "Životní pojištění na kartě zaměstnance; převod z POHODY ho nepřevádí (v exportu prázdné)."
+        },
+        "ZAMzp": {
+            "rows_seen": 8,
+            "status": "mapped",
+            "target": "oznámení pojišťovně na kartě; doplní se RefPomer = RefAg (zaměstnanec), jinak beze změny do převodu PAMICA (čtečky api/src/Service/Migration/Pohoda/Payroll, matice pamica.json)",
+            "columns": {
+                "RefAg": {
+                    "status": "mapped",
+                    "target": "vazba na zaměstnance nebo mzdu"
+                }
+            }
+        }
+    },
+    "catalogs": {
+        "ZAMpDov.RelDrDov": {
+            "table": "ZAMpDov",
+            "key": "RelDrDov",
+            "note": "Druh doby na kartě zaměstnance. Ověřeno na mzdách: hodiny druhu 35 sedí na HodDov, druhu 4 na HodNem a náhrada MZnahr míří na tutéž dobu. Jiný druh převod nezná a vrací ho jako nepřevedenou položku.",
+            "code_sources": [
+                "MyInvoice\\Service\\Migration\\Pohoda\\PayrollBuiltin\\PohodaMzdyPayslip::ABSENCE_KINDS::keys"
+            ],
+            "items": {
+                "35": {
+                    "status": "mapped",
+                    "target": "MZneprit V01 dovolená"
+                },
+                "4": {
+                    "status": "mapped",
+                    "target": "MZneprit H01 pracovní neschopnost (dpn)"
+                }
+            }
+        },
+        "MZ.RelDruhM": {
+            "table": "MZ",
+            "key": "RelDruhM",
+            "note": "Druh mzdy. 1 ověřen na mzdách (KcZaklM = KcSzM krácená podílem pracovních dnů); 2 jen tehdy, když mzda sama doloží KcZaklM = HodOdpra × KcSzM. Ostatní druhy (3 u dohody v exportu) převod nezná.",
+            "code_sources": [
+                "MyInvoice\\Service\\Migration\\Pohoda\\PayrollBuiltin\\PohodaMzdyPayslip::WAGE_KINDS::keys"
+            ],
+            "items": {
+                "1": {
+                    "status": "mapped",
+                    "target": "složka M01 měsíční mzda"
+                },
+                "2": {
+                    "status": "mapped",
+                    "target": "složka C01 hodinová mzda (jen se součinem hodin a sazby)"
+                },
+                "3": {
+                    "status": "warned",
+                    "reason": "Význam druhu mzdy 3 na mzdách neověřen (KcZaklM nesedí na KcSzM ani na součin hodin a sazby); základní mzda jde do protokolu jako nepřevedená položka."
+                }
+            }
+        }
+    }
+}

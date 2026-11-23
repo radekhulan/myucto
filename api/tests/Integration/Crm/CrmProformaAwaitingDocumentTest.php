@@ -8,6 +8,9 @@ use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Crm\CrmAggregationService;
 use MyInvoice\Service\Invoice\ProformaPaymentDocuments;
+use MyInvoice\Service\Invoice\TakenOverPayment;
+use MyInvoice\Service\Migration\MoneyS3\IssuedPaymentRecorder;
+use MyInvoice\Service\Migration\Pohoda\PohodaPriorYearPayments;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
 
@@ -138,6 +141,35 @@ final class CrmProformaAwaitingDocumentTest extends TestCase
         self::assertSame('high', $this->item()['severity'] ?? null, 'Po zákonné lhůtě musí úkol zčervenat.');
     }
 
+    /** Úhrada minulého roku převzatá z POHODY: daň přiznala POHODA, doklad k ní MyÚčto nevystavuje. */
+    public function testPriorYearPohodaPaymentDoesNotSurfaceTheItem(): void
+    {
+        $this->setMode(ProformaPaymentDocuments::MODE_MANUAL);
+        $this->paidProforma(30, PohodaPriorYearPayments::SOURCE, PohodaPriorYearPayments::NOTE);
+
+        self::assertNull($this->item());
+    }
+
+    /**
+     * Platba zálohy převzatá z Money S3 v zamčeném období: daň přiznala Money, doklad k ní
+     * MyÚčto nevystavuje. Táž platba po zámku (otevřené období, bez DDKP z Money) doklad čeká.
+     */
+    public function testMoneyS3PaymentInLockedPeriodDoesNotSurfaceTheItem(): void
+    {
+        $this->setMode(ProformaPaymentDocuments::MODE_MANUAL);
+        $map = $this->pdo->prepare("INSERT INTO money_s3_import_map (supplier_id, kind, money_key, target_id) VALUES (?, 'invoice', ?, ?)");
+        $bank = $this->paidProforma(30, 'bank', IssuedPaymentRecorder::NOTE_PREFIX . 'úhrada BP25001');
+        $settled = $this->paidProforma(25, 'settlement', TakenOverPayment::MONEY_S3_WITHOUT_DOCUMENT_NOTE . ' (ID25001)');
+        $map->execute([$this->supplierId, '2025|ZV1', $bank]);
+        $map->execute([$this->supplierId, '2025|ZV2', $settled]);
+        self::assertNotNull($this->item(), 'Platba z Money bez DDKP v otevřeném období doklad čeká.');
+
+        $this->pdo->prepare('INSERT INTO accounting_supplier_settings (supplier_id, locked_until) VALUES (?, ?)
+                              ON DUPLICATE KEY UPDATE locked_until = VALUES(locked_until)')
+            ->execute([$this->supplierId, (new \DateTimeImmutable('today'))->modify('-20 days')->format('Y-m-d')]);
+        self::assertNull($this->item());
+    }
+
     // ── helpers ──────────────────────────────────────────────────────────────
 
     /** @return array<string,mixed>|null */
@@ -160,7 +192,7 @@ final class CrmProformaAwaitingDocumentTest extends TestCase
     }
 
     /** Zálohová faktura s přijatou platbou starou `$daysAgo` dnů. */
-    private function paidProforma(int $daysAgo): int
+    private function paidProforma(int $daysAgo, string $source = 'manual', ?string $note = null): int
     {
         $paidOn = (new \DateTimeImmutable('today'))->modify("-{$daysAgo} days")->format('Y-m-d');
         $this->pdo->prepare(
@@ -176,9 +208,9 @@ final class CrmProformaAwaitingDocumentTest extends TestCase
 
         $this->pdo->prepare(
             'INSERT INTO invoice_payments
-                (supplier_id, invoice_id, amount, currency, paid_on, source, created_by)
-             VALUES (?, ?, 84700, "CZK", ?, "manual", ?)'
-        )->execute([$this->supplierId, $id, $paidOn, $this->userId]);
+                (supplier_id, invoice_id, amount, currency, paid_on, source, note, created_by)
+             VALUES (?, ?, 84700, "CZK", ?, ?, ?, ?)'
+        )->execute([$this->supplierId, $id, $paidOn, $source, $note, $this->userId]);
 
         return $id;
     }

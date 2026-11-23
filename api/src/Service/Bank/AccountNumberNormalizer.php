@@ -243,7 +243,23 @@ final class AccountNumberNormalizer
             }
         }
         $ibanPart = is_string($iban) ? self::czechSlovakIbanAccountPart($iban) : null;
-        return $ibanPart !== null && self::equals($ibanPart, $statementAccount);
+        if ($ibanPart !== null) {
+            return self::equals($ibanPart, $statementAccount);
+        }
+        // Zahraniční účet (Revolut LT…) nemá domácí číslo účtu: výpis nese celý IBAN
+        // a porovnává se s celým uloženým IBANem.
+        $foreign = is_string($iban) ? self::foreignIban($iban) : null;
+        return $foreign !== null && $foreign === self::foreignIban($statementAccount);
+    }
+
+    /** Kompaktní IBAN mimo CZ/SK, jinak null. */
+    private static function foreignIban(string $value): ?string
+    {
+        $compact = strtoupper((string) preg_replace('/\s+/', '', $value));
+        if (preg_match('/^[A-Z]{2}\d{2}[A-Z0-9]{11,30}$/D', $compact) !== 1 || self::czechSlovakIbanAccountPart($compact) !== null) {
+            return null;
+        }
+        return $compact;
     }
 
     /**
@@ -276,11 +292,18 @@ final class AccountNumberNormalizer
         return $canonical === '' ? null : $canonical;
     }
 
-    /** Kód banky z explicitní hodnoty, případně z českého IBANu. */
+    /**
+     * Český kód banky z explicitní hodnoty, případně z českého IBANu. Vodicí nuly navíc
+     * (`00800`) se zahodí. Delší číslo je zahraniční kód (britský sort code, routing
+     * number) a český kód z něj nevznikne: `608464` není banka `8464`.
+     */
     public static function canonicalBankCode(?string $bankCode, ?string $iban = null): ?string
     {
         $digits = preg_replace('/\D/', '', (string) $bankCode) ?? '';
         if ($digits !== '') {
+            if (strlen($digits) > 4 && ltrim(substr($digits, 0, -4), '0') !== '') {
+                return self::czechIbanBankCode(trim((string) $iban));
+            }
             return str_pad(substr($digits, -4), 4, '0', STR_PAD_LEFT);
         }
         return self::czechIbanBankCode(trim((string) $iban));

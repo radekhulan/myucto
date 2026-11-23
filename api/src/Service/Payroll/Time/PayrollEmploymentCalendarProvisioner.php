@@ -31,6 +31,16 @@ final class PayrollEmploymentCalendarProvisioner
     public const ISSUE_MONTH_APPROVED = 'time_month_approved';
     public const ISSUE_FUND_MISMATCH = 'import_fund_mismatch';
 
+    private const ISSUE_MESSAGES = [
+        self::ISSUE_WEEKLY_HOURS_MISSING =>
+            'Pracovní vztah nemá v podmínkách týdenní pracovní dobu, pracovní kalendář se proto nezaložil '
+            . 'a fond za měsíc chybí. Doplňte úvazek na kartě vztahu.',
+        self::ISSUE_NOT_IN_PERIOD =>
+            'Pracovní vztah v období netrvá ani den, pracovní kalendář se nezaložil.',
+        self::ISSUE_MONTH_APPROVED =>
+            'Pracovní měsíc je schválený, pracovní kalendář se nezaložil.',
+    ];
+
     /** Shodné s PayrollJmhzWorkMonthSummaryBuilder::isAgreement(). */
     private const AGREEMENTS = ['dpp', 'dpc'];
 
@@ -271,6 +281,12 @@ final class PayrollEmploymentCalendarProvisioner
     }
 
     /** @return array{created:bool,issue:?string,skipped:?string,calendar_id:?int,fund_minutes:?int} */
+    /** Věta pro účetní k důvodu, proč se kalendář nezaložil. */
+    public static function issueMessage(string $issue): string
+    {
+        return self::ISSUE_MESSAGES[$issue] ?? $issue;
+    }
+
     private static function result(bool $created, ?string $issue, ?string $skipped, ?int $calendarId, ?int $fund): array
     {
         return [

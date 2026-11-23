@@ -212,6 +212,118 @@ final class PartialWorkReportUpdateTest extends TestCase
         self::assertSame(200, $res['status'], json_encode($res['body'], JSON_UNESCAPED_UNICODE));
     }
 
+    public function testDisplayInheritanceOverrideAndResetKeepRowsAndAmounts(): void
+    {
+        $pdo = $this->db->pdo();
+        $stmt = $pdo->prepare('SELECT work_report_display_options FROM supplier WHERE id = ?');
+        $stmt->execute([$this->supplierId]);
+        $original = $stmt->fetchColumn();
+        try {
+            $pdo->prepare('UPDATE supplier SET work_report_display_options = ? WHERE id = ?')
+                ->execute(['{"rate":false,"amount":false}', $this->supplierId]);
+            $this->saveFullWorkReport();
+            $repo = new \MyInvoice\Repository\WorkReportRepository($this->db);
+            $before = $repo->findByInvoice($this->invoiceId, $this->supplierId);
+            self::assertNull($before['display_options']);
+            self::assertFalse($before['effective_display_options']['rate']);
+            self::assertFalse($before['effective_display_options']['amount']);
+
+            $clientRole = new EffectiveRole(99, 'Klient výkaz', 'client', true, ['invoices' => AccessLevel::WRITE->value]);
+            $result = $this->call($this->work, ['display_options' => ['compact' => true, 'rate' => true]], $clientRole);
+            self::assertSame(200, $result['status']);
+            self::assertTrue($result['body']['effective_display_options']['compact']);
+            self::assertTrue($result['body']['effective_display_options']['rate']);
+            self::assertFalse($result['body']['effective_display_options']['amount']);
+            self::assertEquals($before['items'], $result['body']['items']);
+            self::assertEquals($before['total_amount'], $result['body']['total_amount']);
+
+            $this->call($this->work, ['title' => 'Nový titulek']);
+            $this->saveFullMaterials();
+            $single = $repo->findByInvoice($this->invoiceId, $this->supplierId);
+            $batch = $repo->findByInvoiceIds([$this->invoiceId], $this->supplierId)[$this->invoiceId];
+            self::assertEquals($single, $batch);
+            self::assertSame($single['effective_display_options'], $batch['effective_display_options']);
+            self::assertSame(['compact' => true, 'rate' => true], $single['display_options']);
+
+            $reset = $this->call($this->work, ['display_options' => null]);
+            self::assertSame(200, $reset['status']);
+            self::assertNull($reset['body']['display_options']);
+            self::assertFalse($reset['body']['effective_display_options']['rate']);
+            self::assertFalse($reset['body']['effective_display_options']['compact']);
+            self::assertEquals($before['total_amount'], $reset['body']['total_amount']);
+        } finally {
+            $pdo->prepare('UPDATE supplier SET work_report_display_options = ? WHERE id = ?')
+                ->execute([$original, $this->supplierId]);
+        }
+    }
+
+    public function testApprovalPreviewDoesNotExposeHiddenColumns(): void
+    {
+        $this->saveFullWorkReport();
+        $repo = new \MyInvoice\Repository\WorkReportRepository($this->db);
+        $repo->saveDisplayOptions($this->invoiceId, ['date' => false, 'hours' => false, 'rate' => false, 'amount' => false], $this->supplierId);
+        $token = bin2hex(random_bytes(24));
+        $this->db->pdo()->prepare("UPDATE invoices SET approval_status = 'requested', approval_token = ?, approval_token_expires_at = DATE_ADD(NOW(), INTERVAL 7 DAY) WHERE id = ?")
+            ->execute([$token, $this->invoiceId]);
+        $action = Bootstrap::buildContainer()->get(\MyInvoice\Action\Approval\PublicApprovalGetAction::class);
+        $request = (new ServerRequestFactory())->createServerRequest('GET', '/api/public/approval/' . $token);
+        $response = $action($request, new Psr7Response(), ['token' => $token]);
+        self::assertSame(200, $response->getStatusCode(), (string) $response->getBody());
+        $report = json_decode((string) $response->getBody(), true, flags: JSON_THROW_ON_ERROR)['work_report'];
+        self::assertNull($report['total_hours']);
+        self::assertNull($report['total_amount']);
+        self::assertNull($report['items'][0]['rate']);
+        self::assertNull($report['items'][0]['hours']);
+        self::assertFalse($report['effective_display_options']['amount']);
+        self::assertSame(19500.0, $repo->findByInvoice($this->invoiceId, $this->supplierId)['total_amount']);
+    }
+
+    public function testReadAndDisplayUpdateAreRestrictedToTheSelectedCompany(): void
+    {
+        $this->saveFullWorkReport();
+        $repo = new \MyInvoice\Repository\WorkReportRepository($this->db);
+        $otherSupplier = (int) $this->db->pdo()->query('SELECT id FROM supplier WHERE id <> ' . $this->supplierId . ' ORDER BY id LIMIT 1')->fetchColumn();
+        self::assertGreaterThan(0, $otherSupplier, 'CI fixture musí obsahovat druhou firmu.');
+        $before = $repo->findByInvoice($this->invoiceId, $this->supplierId);
+        self::assertNull($repo->findByInvoice($this->invoiceId, $otherSupplier));
+        self::assertSame([], $repo->findByInvoiceIds([$this->invoiceId], $otherSupplier));
+        $repo->saveDisplayOptions($this->invoiceId, ['amount' => false], $otherSupplier);
+        $repo->deleteByInvoice($this->invoiceId, $otherSupplier);
+        self::assertSame($before, $repo->findByInvoice($this->invoiceId, $this->supplierId));
+    }
+
+    public function testWorkAndMaterialCreationRejectsAnInvoiceFromAnotherCompany(): void
+    {
+        $repo = new \MyInvoice\Repository\WorkReportRepository($this->db);
+        $otherSupplier = (int) $this->db->pdo()->query('SELECT id FROM supplier WHERE id <> ' . $this->supplierId . ' ORDER BY id LIMIT 1')->fetchColumn();
+        self::assertGreaterThan(0, $otherSupplier);
+        foreach (['work', 'material'] as $kind) {
+            try {
+                if ($kind === 'work') {
+                    $repo->save($this->invoiceId, $otherSupplier, null, 'Cizí práce', [['description' => 'Práce', 'hours' => 1, 'rate' => 100]]);
+                } else {
+                    $repo->saveMaterials($this->invoiceId, $otherSupplier, null, 'Cizí materiál', $this->vat21, [['description' => 'Materiál', 'quantity' => 1, 'unit_price' => 100]]);
+                }
+                self::fail('Cizí faktura musí být odmítnuta.');
+            } catch (\InvalidArgumentException $e) {
+                self::assertSame('Faktura nepatří zadané firmě.', $e->getMessage());
+            }
+            self::assertNull($repo->findByInvoice($this->invoiceId, $this->supplierId));
+        }
+    }
+
+    public function testInvalidDisplayOptionsDoNotModifyTheReport(): void
+    {
+        $this->saveFullWorkReport();
+        $repo = new \MyInvoice\Repository\WorkReportRepository($this->db);
+        $before = $repo->findByInvoice($this->invoiceId, $this->supplierId);
+        foreach ([['rate' => 'false'], ['unknown' => true], 'compact'] as $options) {
+            $response = $this->call($this->work, ['title' => 'Nesmí se uložit', 'items' => [], 'display_options' => $options]);
+            self::assertSame(400, $response['status']);
+            self::assertSame($before, $repo->findByInvoice($this->invoiceId, $this->supplierId));
+        }
+    }
+
     private function saveFullWorkReport(): void
     {
         $res = $this->call($this->work, [

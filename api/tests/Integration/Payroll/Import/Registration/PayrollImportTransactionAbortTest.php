@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Integration\Payroll\Import\Registration;
 
-use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Payroll\Import\Registration\RegistrationImportService;
 use MyInvoice\Tests\Support\IsolatedSupplierTrait;
@@ -48,7 +47,7 @@ final class PayrollImportTransactionAbortTest extends TestCase
         if (!is_file(dirname(__DIR__, 6) . '/cfg.php')) {
             self::markTestSkipped('cfg.php neexistuje — test vyžaduje DB.');
         }
-        $container = Bootstrap::buildContainer();
+        $container = \MyInvoice\Tests\Support\PayrollTestContainer::build();
         $this->db = $container->get(Connection::class);
         $this->imports = $container->get(RegistrationImportService::class);
         $pdo = $this->db->pdo();

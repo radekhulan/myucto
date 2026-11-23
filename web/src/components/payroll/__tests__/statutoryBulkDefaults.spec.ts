@@ -6,6 +6,7 @@ import {
   discountObstacleCounts,
   effectiveBasisCounts,
   evidenceRefreshCommand,
+  firstHealthCoverageReviewId,
   firstStatutoryReviewId,
   statutoryReviewEmployeeIds,
 } from '../statutoryBulkDefaults'
@@ -58,6 +59,18 @@ describe('bulkApplyEmployeeIds', () => {
 
   it('s potvrzením přidá osoby bez prohlášení, každou jednou', () => {
     expect(bulkApplyEmployeeIds(preview, true)).toEqual([3, 1, 7])
+  })
+
+  it('cizince s pobytem bez A1 přidá jen s výslovným potvrzením', () => {
+    const withForeign = {
+      ...preview,
+      excluded: [
+        { employee_id: 9, full_name: 'UA', reasons: ['foreign_element'], foreign_elements: ['foreign_permit'], foreign_confirmable: true },
+        { employee_id: 10, full_name: 'SK', reasons: ['foreign_element'], foreign_elements: ['address_abroad'], foreign_confirmable: false },
+      ],
+    }
+    expect(bulkApplyEmployeeIds(withForeign, false)).toEqual([3, 1])
+    expect(bulkApplyEmployeeIds(withForeign, false, true)).toEqual([3, 1, 9])
   })
 })
 
@@ -162,6 +175,17 @@ describe('validace běhu', () => {
     ]
     expect(statutoryReviewEmployeeIds(fixable)).toEqual([42, 43, 44])
     expect(firstStatutoryReviewId(fixable)).toBe(32)
+  })
+
+  it('u nálezu zdravotního pojištění nabízí hromadné zadání pojišťoven, ne výchozí údaje', () => {
+    const health = [
+      validation({ id: 50, entity_id: 60, remediation_path: '/payroll/people?person=60&panel=statutory_evidence&field=statutory.tax_residences' }),
+      validation({ id: 51, entity_id: 61, remediation_path: '/payroll/people?person=61&panel=statutory_evidence&field=statutory.health_coverages' }),
+      validation({ id: 52, entity_id: 62, remediation_path: '/payroll/people?person=62&panel=statutory_evidence&field=statutory.health_coverages' }),
+    ]
+    expect(firstHealthCoverageReviewId(health)).toBe(51)
+    expect(statutoryReviewEmployeeIds(health)).toEqual([60])
+    expect(firstHealthCoverageReviewId(health.slice(0, 1))).toBeNull()
   })
 })
 

@@ -4,32 +4,55 @@
 <meta charset="utf-8">
 <title>{{ title }}</title>
 <style>
-    body { font-family: montserrat, dejavusans, sans-serif; font-size: 8pt; color: #15131D; }
-    .header-table { width: 100%; border-collapse: collapse; margin-bottom: 4mm; }
+    body { font-family: montserrat, dejavusans, sans-serif; font-size: 7pt; color: #15131D; }
+    .header-table { width: 100%; border-collapse: collapse; margin-bottom: 3mm; }
     .header-table td { vertical-align: top; }
     .header-meta { font-size: 8pt; color: #555; }
     .header-title { font-size: 13pt; font-weight: bold; text-align: center; }
     .header-period { text-align: center; font-size: 9pt; margin-top: 1mm; }
-    .note { font-size: 7.5pt; color: #555; margin-bottom: 3mm; }
+    .note { font-size: 7pt; color: #555; margin-bottom: 2mm; }
     table.book { width: 100%; border-collapse: collapse; margin-bottom: 2mm; }
-    table.book thead th { font-size: 7pt; font-weight: normal; color: #555; text-align: right; padding: 1mm 1.5mm; border-bottom: 0.3pt solid #ccc; }
+    table.book thead th { font-size: 6.5pt; font-weight: normal; color: #555; text-align: right; padding: 0.8mm 1mm; border-bottom: 0.3pt solid #ccc; }
     table.book thead th.thl { text-align: left; }
-    table.book tbody td { padding: 0.7mm 1.5mm; border-bottom: 0.2pt solid #eee; }
-    .num { text-align: right; }
-    .col-account { width: 20mm; }
-    .col-amount { width: 30mm; }
-    .group td { font-weight: bold; background-color: #f3f4f6; }
-    .analytic td { color: #555; font-size: 7.5pt; }
-    .subtotal td { font-weight: bold; border-top: 0.4pt solid #999; }
-    .profit td { font-weight: bold; font-size: 9pt; border-top: 0.6pt solid #333; border-bottom: 0.6pt solid #333; background-color: #eef2ff; }
+    table.book thead tr.sides th { font-size: 8pt; font-weight: bold; color: #15131D; text-align: left; }
+    table.book tbody td { padding: 0.5mm 1mm; border-bottom: 0.2pt solid #eee; }
+    .num { text-align: right; white-space: nowrap; }
+    .col-account { width: 14mm; }
+    .col-name { width: 41mm; }
+    .col-amount { width: 21mm; }
+    .gap { width: 2mm; border-bottom: none !important; }
+    .strong { font-weight: bold; }
+    .class { font-weight: bold; background-color: #f3f4f6; }
+    .analytic { color: #555; font-size: 6.5pt; }
+    .unusual { color: #b91c1c; }
+    .section td { font-weight: bold; background-color: #f3f4f6; }
+    .total td { font-weight: bold; border-top: 0.4pt solid #999; }
+    .result td { font-weight: bold; }
     .warn { color: #b91c1c; font-weight: bold; margin-top: 2mm; }
 </style>
 </head>
 <body>
 {% macro amt(v, unit) %}{% if unit == 'thousands' %}{{ (v / 1000)|round|number_format(0, ',', ' ') }}{% else %}{{ v|number_format(2, ',', ' ') }}{% endif %}{% endmacro %}
+{% macro amounts(a, unit, cls) %}{% import _self as m %}
+<td class="num {{ cls }}{% if a.ps_unusual|default(false) %} unusual{% endif %}">{{ m.amt(a.ps, unit) }}</td>
+<td class="num {{ cls }}">{{ m.amt(a.month, unit) }}</td>
+<td class="num {{ cls }}">{{ m.amt(a.ytd, unit) }}</td>
+<td class="num {{ cls }}{% if a.ks_unusual|default(false) %} unusual{% endif %}">{{ m.amt(a.ks, unit) }}</td>
+{% endmacro %}
+{% macro side(c, unit, classLabels) %}{% import _self as m %}
+{% if c is null %}<td colspan="6"></td>
+{% elseif c.kind == 'class' %}<td class="class" colspan="2">Třída {{ c.class }} · {{ classLabels[c.class] ?? '' }}</td>{{ m.amounts(c, unit, 'class') }}
+{% else %}{% set cls = c.kind == 'analytic' ? 'analytic' : 'strong' %}<td class="{{ cls }}">{% if c.kind == 'analytic' %}&nbsp;&nbsp;{% endif %}{{ c.account_code }}</td><td class="{{ cls }}">{{ c.name|slice(0, 34) }}</td>{{ m.amounts(c, unit, cls) }}
+{% endif %}
+{% endmacro %}
 {% import _self as m %}
 {% set classLabels = {'0': 'Dlouhodobý majetek', '1': 'Zásoby', '2': 'Krátkodobý finanční majetek a peněžní prostředky', '3': 'Zúčtovací vztahy', '4': 'Kapitálové účty a dlouhodobé závazky'} %}
 {% set sectionLabels = {'operating': 'Provozní činnost', 'financial': 'Finanční činnost', 'unassigned': 'Účty nezařazené ve výkazu', 'tax': 'Daň z příjmů', 'transfer': 'Převod podílu na výsledku hospodaření společníkům'} %}
+{% set resultLabels = {'profit_row': 'Výsledek hospodaření', 'operating_profit': 'Provozní výsledek hospodaření', 'financial_profit': 'Finanční výsledek hospodaření', 'profit_before_tax': 'Výsledek hospodaření před zdaněním', 'profit_after_tax': 'Výsledek hospodaření po zdanění'} %}
+{% set isBalance = part != 'profit_loss' %}
+{% set data = isBalance ? columns.balance : columns.profit_loss %}
+{% set monthLabel = 'Obrat ' ~ columns.month_from|slice(5, 2) ~ '/' ~ columns.month_from|slice(0, 4) %}
+{% set ytdLabel = 'Obrat od ' ~ columns.ytd_from|cz_date %}
 
 <table class="header-table">
     <tr>
@@ -41,67 +64,34 @@
         <td style="width:30%;" class="header-meta">{% if unit == 'thousands' %}v celých tisících Kč{% else %}v Kč{% endif %}</td>
     </tr>
 </table>
-<div class="note">Zůstatky účtů před uzavřením účetních knih (bez uzávěrkového zápisu).{% if dimension is defined and dimension and dimension.label %} Dimenze: {{ dimension.label }}.{% endif %}</div>
+<div class="note">Zůstatky účtů před uzavřením účetních knih (bez uzávěrkového zápisu), se znaménkem podle typu účtu. Červeně = neobvyklá strana.{% if not columns.hide_zero %} Včetně nulových účtů.{% endif %}{% if not columns.analytics %} Bez analytických účtů.{% endif %}{% if dimension is defined and dimension and dimension.label %} Dimenze: {{ dimension.label }}.{% endif %}</div>
 
-{% if part == 'profit_loss' %}
 <table class="book">
     <thead>
-        <tr><th class="thl col-account">Účet</th><th class="thl">Název</th><th class="col-amount">Náklady (MD)</th><th class="col-amount">Výnosy (D)</th></tr>
+        <tr class="sides"><th colspan="6">{{ isBalance ? 'AKTIVA' : 'NÁKLADY' }}</th><th class="gap"></th><th colspan="6">{{ isBalance ? 'PASIVA' : 'VÝNOSY' }}</th></tr>
+        <tr>
+        {% for s in [1, 2] %}
+            <th class="thl col-account">Účet</th><th class="thl col-name">Název</th><th class="col-amount">Počáteční stav</th><th class="col-amount">{{ monthLabel }}</th><th class="col-amount">{{ ytdLabel }}</th><th class="col-amount">Konečný stav</th>
+            {% if s == 1 %}<th class="gap"></th>{% endif %}
+        {% endfor %}
+        </tr>
     </thead>
     <tbody>
-    {% for s in profit_loss.sections %}
-        {% if s.expenses is not empty or s.revenues is not empty %}
-            <tr class="group"><td colspan="4">{{ sectionLabels[s.key] }}</td></tr>
-            {% for acc in s.expenses|merge(s.revenues) %}
-                <tr><td>{{ acc.account_code }}</td><td>{{ acc.name|slice(0, 60) }}</td>
-                    <td class="num">{{ m.amt(acc.md - acc.d > 0 ? acc.md - acc.d : 0, unit) }}</td>
-                    <td class="num">{{ m.amt(acc.d - acc.md > 0 ? acc.d - acc.md : 0, unit) }}</td></tr>
-                {% for an in acc.analytics %}
-                    <tr class="analytic"><td>&nbsp;&nbsp;{{ an.account_code }}</td><td>{{ an.name|slice(0, 60) }}</td>
-                        <td class="num">{{ m.amt(an.md, unit) }}</td><td class="num">{{ m.amt(an.d, unit) }}</td></tr>
-                {% endfor %}
-            {% endfor %}
-            <tr class="subtotal"><td colspan="2">Výsledek: {{ sectionLabels[s.key] }}</td>
-                <td class="num">{{ m.amt(s.expense_total, unit) }}</td><td class="num">{{ m.amt(s.revenue_total, unit) }}</td></tr>
+    {% for line in data.lines %}
+        {% if line.kind == 'cells' %}
+            <tr>{{ m.side(line.left, unit, classLabels) }}<td class="gap"></td>{{ m.side(line.right, unit, classLabels) }}</tr>
+        {% elseif line.kind == 'section' %}
+            <tr class="section"><td colspan="13">{{ sectionLabels[line.key] ?? line.key }}</td></tr>
+        {% elseif line.kind == 'total' %}
+            {% set leftLabel = line.key == 'section' ? 'Náklady celkem' : 'Aktiva celkem' %}
+            {% set rightLabel = line.key == 'section' ? 'Výnosy celkem' : (line.key == 'balance_with_result' ? 'Pasiva s výsledkem hospodaření' : 'Pasiva celkem') %}
+            <tr class="total"><td colspan="2">{{ leftLabel }}</td>{{ m.amounts(line.left, unit, '') }}<td class="gap"></td><td colspan="2">{{ rightLabel }}</td>{{ m.amounts(line.right, unit, '') }}</tr>
+        {% elseif line.kind == 'result' %}
+            <tr class="result"><td colspan="6"></td><td class="gap"></td><td colspan="2">{{ resultLabels[line.key] ?? line.key }}</td>{{ m.amounts(line.amounts, unit, '') }}</tr>
         {% endif %}
     {% endfor %}
     </tbody>
 </table>
-<table class="book">
-    <tbody>
-        <tr><td>Provozní výsledek hospodaření</td><td class="num col-amount">{{ m.amt(profit_loss.operating_profit, unit) }}</td></tr>
-        <tr><td>Finanční výsledek hospodaření</td><td class="num col-amount">{{ m.amt(profit_loss.financial_profit, unit) }}</td></tr>
-        <tr><td>Výsledek hospodaření před zdaněním</td><td class="num col-amount">{{ m.amt(profit_loss.profit_before_tax, unit) }}</td></tr>
-        <tr><td>Výsledek hospodaření po zdanění</td><td class="num col-amount">{{ m.amt(profit_loss.profit_after_tax, unit) }}</td></tr>
-        <tr class="profit"><td>Výsledek hospodaření za účetní období ({{ profit_loss.profit >= 0 ? 'zisk' : 'ztráta' }})</td><td class="num col-amount">{{ m.amt(profit_loss.profit, unit) }}</td></tr>
-    </tbody>
-</table>
-{% else %}
-<table class="book">
-    <thead>
-        <tr><th class="thl col-account">Účet</th><th class="thl">Název</th><th class="col-amount">Zůstatek MD</th><th class="col-amount">Zůstatek D</th></tr>
-    </thead>
-    <tbody>
-    {% for c in balance.classes %}
-        <tr class="group"><td colspan="4">Třída {{ c.class }} · {{ classLabels[c.class] ?? '' }}</td></tr>
-        {% for acc in c.accounts %}
-            <tr><td>{{ acc.account_code }}</td><td>{{ acc.name|slice(0, 60) }}</td>
-                <td class="num">{{ m.amt(acc.md, unit) }}</td><td class="num">{{ m.amt(acc.d, unit) }}</td></tr>
-            {% for an in acc.analytics %}
-                <tr class="analytic"><td>&nbsp;&nbsp;{{ an.account_code }}</td><td>{{ an.name|slice(0, 60) }}</td>
-                    <td class="num">{{ m.amt(an.md, unit) }}</td><td class="num">{{ m.amt(an.d, unit) }}</td></tr>
-            {% endfor %}
-        {% endfor %}
-        <tr class="subtotal"><td colspan="2">Celkem třída {{ c.class }}</td>
-            <td class="num">{{ m.amt(c.md, unit) }}</td><td class="num">{{ m.amt(c.d, unit) }}</td></tr>
-    {% endfor %}
-        <tr class="subtotal"><td colspan="2">Součet rozvahových účtů</td>
-            <td class="num">{{ m.amt(balance.md, unit) }}</td><td class="num">{{ m.amt(balance.d, unit) }}</td></tr>
-        <tr class="profit"><td colspan="2">Výsledek hospodaření ({{ balance.profit >= 0 ? 'zisk' : 'ztráta' }})</td>
-            <td class="num" colspan="2">{{ m.amt(balance.profit, unit) }}</td></tr>
-    </tbody>
-</table>
-{% endif %}
 
 {% if not checks.profit_matches %}
 <div class="warn">Výsledek hospodaření z rozvahových účtů ({{ m.amt(checks.profit_balance, unit) }}) se neshoduje s výsledkem z výsledkových účtů ({{ m.amt(checks.profit_loss, unit) }}).</div>

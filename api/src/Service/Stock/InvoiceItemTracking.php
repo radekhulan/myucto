@@ -141,6 +141,17 @@ final class InvoiceItemTracking
         return $out;
     }
 
+    /**
+     * JSON výběru z kusů, které výdejka skutečně vydala
+     * ({@see \MyInvoice\Repository\StockTrackingRepository::issuedUnitsByInvoiceItem()}).
+     *
+     * @param list<array<string,mixed>> $units
+     */
+    public static function fromIssuedUnits(array $units): string
+    {
+        return self::encode($units);
+    }
+
     /** @param array<int,mixed> $allocations */
     private static function encode(array $allocations): string
     {

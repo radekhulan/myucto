@@ -6,6 +6,8 @@ import type { PayrollRun, PayrollRunReadiness, PayrollRunValidation } from '@/ap
 const m = vi.hoisted(() => ({
   runs: vi.fn(),
   runDetail: vi.fn(),
+  runPeople: vi.fn(),
+  runPerson: vi.fn(),
   runHistory: vi.fn(),
   peopleOptions: vi.fn(),
   deleteRun: vi.fn(),
@@ -25,6 +27,8 @@ const m = vi.hoisted(() => ({
   advanceStart: vi.fn(),
   monthlyChecklist: vi.fn(),
   hideWarning: vi.fn(),
+  fillProbable: vi.fn(),
+  compensationPreview: vi.fn(),
   push: vi.fn(),
   replace: vi.fn(),
 }))
@@ -32,7 +36,7 @@ const m = vi.hoisted(() => ({
 vi.mock('vue-router', () => ({
   useRouter: () => ({ push: m.push, replace: m.replace }),
   // Období si stránka drží v URL, ať přežije obnovení i sdílený odkaz.
-  useRoute: () => ({ query: {} }),
+  useRoute: () => ({ query: {}, fullPath: '/payroll/runs?period=2026-02' }),
 }))
 
 vi.mock('@/api/payroll', () => ({
@@ -56,6 +60,8 @@ vi.mock('@/api/payroll', () => ({
       })),
     advancePayrollStart: m.advanceStart,
     run: m.runDetail,
+    runPeople: m.runPeople,
+    runPerson: m.runPerson,
     runHistory: m.runHistory,
     peopleOptions: m.peopleOptions,
     deleteRun: m.deleteRun,
@@ -69,6 +75,9 @@ vi.mock('@/api/payroll', () => ({
     monthlyChecklist: m.monthlyChecklist,
     hideWarning: m.hideWarning,
   },
+}))
+vi.mock('@/api/payrollAbsences', () => ({
+  payrollAbsenceApi: { fillProbableFromRate: m.fillProbable, compensationRecalculationPreview: m.compensationPreview },
 }))
 vi.mock('@/stores/auth', () => ({
   useAuthStore: () => ({ canWrite: m.canWrite }),
@@ -151,6 +160,10 @@ describe('PayrollRuns', () => {
       summary: { total: 0, send: 0, generate: 0, manual: 0, done: 0 },
     })
     m.runDetail.mockResolvedValue(run())
+    m.runPeople.mockResolvedValue({
+      run_id: 15, period_start: '2026-04-01', revision_id: 9, revision_no: 1, revision_status: 'approved',
+      items: [], total: 0, limit: 25, offset: 0, sort: 'name', dir: 'asc', totals: null,
+    })
     m.runHistory.mockResolvedValue({ run_id: 15, revisions: [], events: [] })
     m.peopleOptions.mockResolvedValue([])
     m.deleteRun.mockResolvedValue(undefined)
@@ -372,6 +385,33 @@ describe('PayrollRuns', () => {
     expect(m.deleteRun).not.toHaveBeenCalled()
   })
 
+  // Výpočet i schválení jsou jeden synchronní požadavek, u větší firmy na
+  // desítky sekund. Zašedlé tlačítko bez průběhu vypadalo jako zamrzlá stránka.
+  it('shows progress while a run command is in flight and blocks a second click', async () => {
+    m.runs.mockResolvedValue([run({ status: 'calculated', available_commands: ['calculate', 'approve', 'cancel'] })])
+    let finish: (value: unknown) => void = () => {}
+    m.commandRun.mockReturnValue(new Promise((resolve) => { finish = resolve }))
+
+    const wrapper = mount(PayrollRuns)
+    await flushPromises()
+    expect(wrapper.find('[data-testid="payroll-run-15-command-progress"]').exists()).toBe(false)
+
+    await wrapper.get('[data-testid="payroll-run-15-calculate"]').trigger('click')
+    await flushPromises()
+
+    const progress = wrapper.get('[data-testid="payroll-run-15-command-progress"]')
+    expect(progress.attributes('role')).toBe('status')
+    expect(progress.text()).toContain('payroll.runs.command_progress.calculate')
+    expect(progress.text()).toContain('payroll.runs.command_progress.hint')
+    expect(wrapper.get('[data-testid="payroll-run-15-calculate"]').attributes('disabled')).toBeDefined()
+    expect(wrapper.get('[data-testid="payroll-run-15-approve"]').attributes('disabled')).toBeDefined()
+    expect(m.commandRun).toHaveBeenCalledTimes(1)
+
+    finish({ outcome: null })
+    await flushPromises()
+    expect(wrapper.find('[data-testid="payroll-run-15-command-progress"]').exists()).toBe(false)
+  })
+
   // Schované tlačítko účetní nic neřekne. Běh se stane nesmazatelným hned
   // prvním „Uzamknout vstupy" a bez důvodu to vypadá jako závada aplikace.
   it('says why the run cannot be deleted instead of just hiding the button', async () => {
@@ -388,28 +428,60 @@ describe('PayrollRuns', () => {
     expect(blocker.text()).toBe('Mzdový běh už obsahuje neměnnou revizi.')
   })
 
-  // Seznam běhů posílal celý výsledkový snapshot každého běhu včetně osobního
-  // rozpadu — u firmy se stovkou zaměstnanců to server nedokázal ani načíst.
-  // Rozpad se proto dotahuje až na vyžádání, pro jeden konkrétní běh.
-  it('loads the per-employee breakdown only when the user asks for it', async () => {
+  // Detail běhu nesl výsledky všech osob (u 150 lidí 2,8 MB) a stránka z nich
+  // ukázala jednu. Přehled osob se proto stránkuje zvlášť a stahuje se až na
+  // vyžádání; detail běhu se kvůli němu nevolá vůbec.
+  it('opens the paged people table on demand without fetching the whole run', async () => {
     m.runs.mockResolvedValue([run({
       revision_id: 9,
       revision_status: 'approved',
       result_snapshot: { totals: { cash_payable_minor: 100_000 } },
     })])
-    m.runDetail.mockResolvedValue(run({
-      result_snapshot: { totals: { cash_payable_minor: 100_000 }, people: [] },
-    }))
 
     const wrapper = mount(PayrollRuns)
     await flushPromises()
 
-    expect(m.runDetail).not.toHaveBeenCalled()
+    expect(m.runPeople).not.toHaveBeenCalled()
+    expect(wrapper.find('[data-testid="payroll-run-15-people"]').exists()).toBe(false)
 
     await wrapper.get('[data-testid="payroll-run-15-breakdown-toggle"]').trigger('click')
     await flushPromises()
 
-    expect(m.runDetail).toHaveBeenCalledWith(15)
+    expect(m.runPeople).toHaveBeenCalledWith(15, expect.objectContaining({ limit: 25, offset: 0 }))
+    expect(m.runDetail).not.toHaveBeenCalled()
+    expect(wrapper.find('[data-testid="payroll-run-15-people"]').exists()).toBe(true)
+
+    await wrapper.get('[data-testid="payroll-run-15-breakdown-toggle"]').trigger('click')
+    expect(wrapper.find('[data-testid="payroll-run-15-people"]').exists()).toBe(false)
+  })
+
+  // Číselník jmen (13 kB u 150 osob) se stahoval při každém obnovení seznamu
+  // běhů, tedy i po každém příkazu. Stačí jednou; znovu jen když nález
+  // jmenuje osobu, kterou číselník nezná.
+  it('loads the people names once, not on every reload of the run list', async () => {
+    m.peopleOptions.mockResolvedValue([{ id: 2, full_name: 'Jana Syntetická' }])
+    m.runs.mockResolvedValue([run({ status: 'calculated', available_commands: ['calculate', 'approve', 'cancel'] })])
+
+    const wrapper = mount(PayrollRuns)
+    await flushPromises()
+    expect(m.peopleOptions).toHaveBeenCalledTimes(1)
+
+    await wrapper.get('[data-testid="payroll-run-15-calculate"]').trigger('click')
+    await flushPromises()
+    expect(m.runs.mock.calls.length).toBeGreaterThan(1)
+    expect(m.peopleOptions).toHaveBeenCalledTimes(1)
+
+    // Nález na osobu mimo číselník: příští načtení si jména stáhne znovu.
+    m.runs.mockResolvedValue([run({ status: 'calculated', available_commands: ['calculate', 'approve', 'cancel'], validations: [validation({
+      id: 77, code: 'enforcement_manual_review', entity_type: 'employee', entity_id: 3,
+      message: 'Ověřte evidenci pohledávek.', requires_override: false,
+    })] })])
+    await wrapper.get('[data-testid="payroll-run-15-calculate"]').trigger('click')
+    await flushPromises()
+    expect(m.peopleOptions).toHaveBeenCalledTimes(1)
+    await wrapper.get('[data-testid="payroll-run-15-calculate"]').trigger('click')
+    await flushPromises()
+    expect(m.peopleOptions).toHaveBeenCalledTimes(2)
   })
 
   // Bez práva `payroll.enforcement` posílá server součet srážek jako null;
@@ -651,6 +723,54 @@ describe('PayrollRuns', () => {
     expect(finding.text()).toContain('Chybí uzavření docházky Jany.')
     expect(finding.text()).toContain('Chybí schválení docházky Petra.')
     expect(finding.findAll('a').map(link => link.attributes('href'))).toEqual(['/payroll/time?employment=3&period=2026-08', '/payroll/time?employment=4&period=2026-08'])
+  })
+
+  it('chybějící výplatní pravidlo ukáže jako přeložené varování s odkazem na výplatní údaje', async () => {
+    m.runs.mockResolvedValue([run({ status: 'draft' })])
+    m.readiness.mockReturnValue({ period_start: '2026-08-01', payment_date: '2026-09-15', office_id: null, ready: true, has_findings: true, findings: [{
+      code: 'payout_rule_missing', severity: 'warning', impact: 'revision', scope: 'setup',
+      message: 'Serverová zpráva.', remediation_path: null, count: 1,
+      entities: [{ entity_type: 'employee', entity_id: 3, label: 'Syntetická Bez pravidla', remediation_path: '/payroll/people?person=3&panel=accounts' }],
+    }] })
+    const wrapper = mount(PayrollRuns)
+    await flushPromises()
+    const finding = wrapper.get('[data-testid="run-readiness-payout_rule_missing"]')
+    expect(finding.text()).toContain('payroll.runs.readiness.payout_rule_missing')
+    expect(finding.text()).not.toContain('Serverová zpráva.')
+    expect(finding.text()).toContain('Syntetická Bez pravidla')
+    expect(finding.find('a').attributes('href')).toBe('/payroll/people?person=3&panel=accounts')
+    expect(wrapper.get('[data-test="run-readiness-group-revision"]').text()).toContain('payroll.runs.readiness.payout_rule_missing')
+  })
+
+  /**
+   * Nález kontroly před během bez období (přesčasy → `/payroll/time`, test
+   * JMHZ → `/payroll/submissions/jmhz`) otevřel agendu na zpracovávaném
+   * měsíci, ne na měsíci kontroly. Karta běhu období doplňovala, kontrola ne.
+   */
+  it('odkazy předběžné kontroly vedou na měsíc kontroly, ne na dnešní', async () => {
+    m.runs.mockResolvedValue([run({ status: 'draft' })])
+    m.readiness.mockReturnValue({ period_start: '2026-08-01', payment_date: '2026-09-15', office_id: null, ready: false, has_findings: true, findings: [
+      {
+        code: 'overtime_limit_exceeded', severity: 'warning', impact: 'revision', scope: 'monthly',
+        message: 'Přesčasy nad limit.', remediation_path: '/payroll/time', count: 1, entities: [],
+      },
+      {
+        code: 'jmhz_readiness_check_failed', severity: 'info', impact: 'anytime', scope: 'monthly',
+        message: 'Test hlášení nedoběhl.', remediation_path: '/payroll/submissions/jmhz', count: 1, entities: [],
+      },
+      {
+        code: 'time_month_not_approved', severity: 'warning', impact: 'revision', scope: 'monthly',
+        message: 'Docházka vyžaduje kontrolu.', remediation_path: null, count: 1,
+        entities: [{ entity_type: 'employment', entity_id: 3, label: 'Jana Syntetická', message: 'Chybí docházka.', remediation_path: '/payroll/quick-inputs?employment=3' }],
+      },
+    ] })
+    const wrapper = mount(PayrollRuns)
+    await flushPromises()
+
+    const href = (code: string) => wrapper.get(`[data-testid="run-readiness-${code}"]`).findAll('a').map(link => link.attributes('href'))
+    expect(href('overtime_limit_exceeded')).toEqual(['/payroll/time?period=2026-08'])
+    expect(href('jmhz_readiness_check_failed')).toEqual(['/payroll/submissions/jmhz?period=2026-08'])
+    expect(href('time_month_not_approved')).toEqual(['/payroll/quick-inputs?employment=3&period=2026-08'])
   })
 
   it('keeps a grouped validation readable for hundreds of employees', async () => {
@@ -1025,7 +1145,7 @@ describe('PayrollRuns', () => {
     })
   })
 
-  it('reopens a cancelled run from corrected inputs with the required reason', async () => {
+  it('reopens a cancelled run in one click, without asking for a reason again', async () => {
     m.runs.mockResolvedValue([run({
       status: 'cancelled',
       can_delete: false,
@@ -1038,12 +1158,29 @@ describe('PayrollRuns', () => {
     expect(reopen.text()).toContain('payroll.runs.commands.reopen_cancelled')
 
     await reopen.trigger('click')
-    const textarea = document.body.querySelector<HTMLTextAreaElement>(
-      '[data-test="run-command-reason"]',
-    )!
-    textarea.value = 'Opravené vstupy po zrušeném pokusu.'
-    textarea.dispatchEvent(new Event('input'))
     await flushPromises()
+
+    expect(document.body.querySelector('[data-test="run-command-reason"]')).toBeNull()
+    expect(m.commandRun).toHaveBeenCalledWith(
+      15,
+      'reopen',
+      { row_version: 2 },
+      expect.any(String),
+    )
+  })
+
+  it('cancels an unapproved run without a mandatory reason', async () => {
+    m.runs.mockResolvedValue([run({
+      status: 'calculated',
+      can_delete: false,
+      available_commands: ['calculate', 'approve', 'cancel'],
+    })])
+
+    const wrapper = mount(PayrollRuns)
+    await flushPromises()
+    await wrapper.get('[data-testid="payroll-run-15-cancel"]').trigger('click')
+    await flushPromises()
+    expect(document.body.querySelector('[data-test="run-cancel-hint"]')).not.toBeNull()
     document.body.querySelector<HTMLButtonElement>(
       '[data-test="run-command-dialog"] button[type="submit"]',
     )?.click()
@@ -1051,10 +1188,117 @@ describe('PayrollRuns', () => {
 
     expect(m.commandRun).toHaveBeenCalledWith(
       15,
-      'reopen',
-      { row_version: 2, reason: 'Opravené vstupy po zrušeném pokusu.' },
+      'cancel',
+      { row_version: 2 },
       expect.any(String),
     )
+    wrapper.unmount()
+  })
+
+  it('requires a reason to cancel a correction revision of an approved run', async () => {
+    m.runs.mockResolvedValue([run({
+      status: 'calculated',
+      can_delete: false,
+      revision_kind: 'correction',
+      available_commands: ['calculate', 'approve', 'cancel'],
+    })])
+
+    const wrapper = mount(PayrollRuns)
+    await flushPromises()
+    await wrapper.get('[data-testid="payroll-run-15-cancel"]').trigger('click')
+    await flushPromises()
+    const textarea = document.body.querySelector<HTMLTextAreaElement>(
+      '[data-test="run-command-reason"]',
+    )!
+    expect(textarea.required).toBe(true)
+    expect(document.body.querySelector('[data-test="run-cancel-hint"]')?.textContent)
+      .toContain('payroll.runs.cancel_correction_hint')
+    document.body.querySelector<HTMLFormElement>('[data-test="run-command-dialog"]')
+      ?.dispatchEvent(new Event('submit'))
+    await flushPromises()
+    expect(m.commandRun).not.toHaveBeenCalled()
+
+    textarea.value = 'Oprava se nakonec nedělá.'
+    textarea.dispatchEvent(new Event('input'))
+    document.body.querySelector<HTMLFormElement>('[data-test="run-command-dialog"]')
+      ?.dispatchEvent(new Event('submit'))
+    await flushPromises()
+    expect(m.commandRun).toHaveBeenCalledWith(
+      15,
+      'cancel',
+      { row_version: 2, reason: 'Oprava se nakonec nedělá.' },
+      expect.any(String),
+    )
+    wrapper.unmount()
+  })
+  it('guides a run held by unapproved attendance and inputs to refresh instead of cancelling', async () => {
+    m.runs.mockResolvedValue([run({
+      status: 'calculated',
+      can_delete: false,
+      available_commands: ['calculate', 'refresh_inputs', 'approve', 'cancel'],
+      validations: [
+        validation({ id: 91, code: 'time_month_not_approved', severity: 'blocker', requires_override: false }),
+        validation({ id: 92, code: 'draft_inputs_present', severity: 'blocker', requires_override: false }),
+      ],
+    })])
+
+    const wrapper = mount(PayrollRuns)
+    await flushPromises()
+
+    expect(wrapper.find('[data-testid="payroll-run-15-next-step-time"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="payroll-run-15-next-step-inputs"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="payroll-run-15-next-step-refresh"]').exists()).toBe(true)
+    wrapper.unmount()
+  })
+
+  /*
+   * Agentura s DPP: jediný blokátor byla chybějící zdravotní pojišťovna a „Jak
+   * pokračovat" radilo „doplňte mzdu, zadejte 0 Kč". Krok se bere z místa
+   * opravy nálezu, ne jen z kódu ruční kontroly.
+   */
+  it('radí u chybějící zákonné evidence doplnit evidenci, ne zadat mzdu 0 Kč', async () => {
+    m.runs.mockResolvedValue([run({
+      status: 'calculated',
+      can_delete: false,
+      available_commands: ['calculate', 'refresh_inputs', 'approve', 'cancel'],
+      validations: [
+        validation({
+          id: 93, code: 'statutory_calculation_manual_review', severity: 'blocker', requires_override: false,
+          entity_type: 'employee', entity_id: 17,
+          remediation_path: '/payroll/people?person=17&panel=statutory_evidence',
+        }),
+      ],
+    })])
+
+    const wrapper = mount(PayrollRuns)
+    await flushPromises()
+
+    expect(wrapper.find('[data-testid="payroll-run-15-next-step-statutory"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="payroll-run-15-next-step-components"]').exists()).toBe(false)
+    expect(wrapper.text()).toContain('payroll.runs.continue_steps.statutory')
+    expect(wrapper.text()).not.toContain('payroll.runs.continue_steps.components_action')
+    wrapper.unmount()
+  })
+
+  it('u chybějící mzdové složky v ruční kontrole dál radí doplnit mzdu', async () => {
+    m.runs.mockResolvedValue([run({
+      status: 'calculated',
+      can_delete: false,
+      available_commands: ['calculate', 'refresh_inputs', 'approve', 'cancel'],
+      validations: [
+        validation({
+          id: 94, code: 'statutory_calculation_manual_review', severity: 'blocker', requires_override: false,
+          remediation_path: '/payroll/quick-inputs',
+        }),
+      ],
+    })])
+
+    const wrapper = mount(PayrollRuns)
+    await flushPromises()
+
+    expect(wrapper.find('[data-testid="payroll-run-15-next-step-components"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="payroll-run-15-next-step-statutory"]').exists()).toBe(false)
+    wrapper.unmount()
   })
 
   it('keeps distinct readable enforcement findings instead of calling all of them net-pay errors', async () => {
@@ -1503,6 +1747,123 @@ describe('PayrollRuns', () => {
     wrapper.unmount()
   })
 
+  /*
+   * Schválení je závazné a dřív proběhlo jedním kliknutím bez potvrzení.
+   * Dialog řekne, co se uzamkne, a teprve potvrzení příkaz odešle.
+   */
+  it('schválení se nejdřív zeptá, řekne, co uzamkne, a odešle se až po potvrzení', async () => {
+    m.runs.mockResolvedValue([run({
+      status: 'calculated',
+      can_delete: false,
+      available_commands: ['calculate', 'review', 'approve', 'cancel'],
+    })])
+
+    const wrapper = mount(PayrollRuns)
+    await flushPromises()
+    await wrapper.get('[data-testid="payroll-run-15-approve"]').trigger('click')
+    await flushPromises()
+
+    expect(m.commandRun).not.toHaveBeenCalled()
+    const dialog = document.body.querySelector('[data-test="run-approve-dialog"]')
+    expect(dialog).not.toBeNull()
+    expect(dialog!.textContent).toContain('payroll.runs.approve_confirm.intro')
+    expect(dialog!.querySelectorAll('[data-test="run-approve-locks"] li')).toHaveLength(4)
+    expect(dialog!.textContent).toContain('payroll.runs.approve_confirm.locks.result')
+    expect(dialog!.textContent).toContain('payroll.runs.approve_confirm.locks.evidence')
+    expect(dialog!.textContent).toContain('payroll.runs.approve_confirm.undo')
+    // Srpen je 15. 9. už uzavřený měsíc: o kalendáři není co říkat.
+    expect(dialog!.querySelector('[data-test="run-approve-period-timing"]')).toBeNull()
+
+    document.body.querySelector<HTMLButtonElement>('[data-test="confirm-run-approve"]')!.click()
+    await flushPromises()
+
+    expect(m.commandRun).toHaveBeenCalledWith(15, 'approve', { row_version: 2 }, expect.any(String))
+    expect(document.body.querySelector('[data-test="run-approve-dialog"]')).toBeNull()
+    wrapper.unmount()
+  })
+
+  it('zavření potvrzení běh neschválí', async () => {
+    m.runs.mockResolvedValue([run({
+      status: 'calculated',
+      can_delete: false,
+      available_commands: ['calculate', 'approve', 'cancel'],
+    })])
+
+    const wrapper = mount(PayrollRuns)
+    await flushPromises()
+    await wrapper.get('[data-testid="payroll-run-15-approve"]').trigger('click')
+    await flushPromises()
+    const cancel = Array.from(document.body.querySelectorAll<HTMLButtonElement>('button'))
+      .find(button => button.textContent?.includes('common.cancel'))
+    cancel!.click()
+    await flushPromises()
+
+    expect(document.body.querySelector('[data-test="run-approve-dialog"]')).toBeNull()
+    expect(m.commandRun).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it.each([
+    ['2026-09-01', 'payroll.runs.approve_confirm.period_running'],
+    ['2026-10-01', 'payroll.runs.approve_confirm.period_upcoming'],
+  ])('potvrzení schválení upozorní, že období %s ještě neskončilo', async (periodStart, key) => {
+    m.runs.mockResolvedValue([run({
+      status: 'calculated',
+      period_start: periodStart,
+      can_delete: false,
+      available_commands: ['calculate', 'approve', 'cancel'],
+    })])
+
+    const wrapper = mount(PayrollRuns)
+    await flushPromises()
+    await wrapper.get('[data-testid="payroll-run-15-approve"]').trigger('click')
+    await flushPromises()
+
+    expect(document.body.querySelector('[data-test="run-approve-period-timing"]')?.textContent).toContain(key)
+    wrapper.unmount()
+  })
+
+  /*
+   * Po schválení UI nabídlo jen „Zaúčtovat" a „Vyžádat opravu"; o páskách,
+   * výplatách ani podáních mlčelo.
+   */
+  it('schválený běh vede na pásky, výplaty a měsíční přehled podání téhož období', async () => {
+    m.runs.mockResolvedValue([run({
+      status: 'approved',
+      can_delete: false,
+      available_commands: ['post', 'request_correction'],
+    })])
+
+    const wrapper = mount(PayrollRuns, {
+      global: { stubs: { RouterLink: { props: ['to'], template: '<a :data-to="JSON.stringify(to)"><slot /></a>' } } },
+    })
+    await flushPromises()
+
+    const box = wrapper.get('[data-test="payroll-run-15-after-approval"]')
+    expect(box.text()).toContain('payroll.runs.after_approval.subtitle_approved')
+    expect(JSON.parse(box.get('[data-test="payroll-run-15-after-approval-documents"]').attributes('data-to')!))
+      .toEqual({ name: 'payroll-documents', query: { period: '2026-08' } })
+    expect(JSON.parse(box.get('[data-test="payroll-run-15-after-approval-payments"]').attributes('data-to')!))
+      .toEqual({ name: 'payroll-payments', query: { period: '2026-08', run: '15' } })
+    expect(JSON.parse(box.get('[data-test="payroll-run-15-after-approval-submissions"]').attributes('data-to')!))
+      .toEqual({ name: 'payroll-submissions-tab', params: { tab: 'monthly' }, query: { period: '2026-08' } })
+    wrapper.unmount()
+  })
+
+  it('rozpracovaný běh odkazy po schválení nenabízí', async () => {
+    m.runs.mockResolvedValue([run({
+      status: 'calculated',
+      can_delete: false,
+      available_commands: ['calculate', 'approve', 'cancel'],
+    })])
+
+    const wrapper = mount(PayrollRuns)
+    await flushPromises()
+
+    expect(wrapper.find('[data-test="payroll-run-15-after-approval"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
   it('ukáže chybějící běhy před obdobím a nabídne posun začátku za měsíce předchozího programu', async () => {
     m.missing.mockReturnValue(['2026-06', '2026-07', '2026-08'])
     m.advanceTo.mockReturnValue('2026-09')
@@ -1574,6 +1935,7 @@ describe('PayrollRuns', () => {
     employments_added: 0,
     employments_removed: 0,
     statutory_evidence_changed: 1,
+    remuneration_changed: 0,
     snapshot_created_at: '2026-09-01 10:00:00',
   }
 
@@ -1585,7 +1947,7 @@ describe('PayrollRuns', () => {
       revision_no: 2,
       revision_kind: 'correction',
       available_commands: ['calculate', 'refresh_inputs', 'review', 'approve', 'cancel'],
-      source_drift: drift,
+      source_drift: { ...drift, total: 4, remuneration_changed: 1, worked_time_changed: 1 },
     })])
 
     const wrapper = mount(PayrollRuns)
@@ -1595,6 +1957,8 @@ describe('PayrollRuns', () => {
     expect(box.text()).toContain('payroll.runs.source_drift.title')
     expect(box.find('[data-test="payroll-run-source-drift-inputs_added"]').exists()).toBe(true)
     expect(box.find('[data-test="payroll-run-source-drift-statutory_evidence_changed"]').exists()).toBe(true)
+    expect(box.find('[data-test="payroll-run-source-drift-remuneration_changed"]').exists()).toBe(true)
+    expect(box.find('[data-test="payroll-run-source-drift-worked_time_changed"]').exists()).toBe(true)
     // Nulové druhy změn se nevypisují.
     expect(box.find('[data-test="payroll-run-source-drift-inputs_changed"]').exists()).toBe(false)
     expect(box.text()).toContain('payroll.runs.source_drift.action')
@@ -1613,6 +1977,383 @@ describe('PayrollRuns', () => {
       { row_version: 2 },
       expect.any(String),
     )
+
+    wrapper.unmount()
+  })
+
+  /*
+   * „5× Chybí průměr pro JMHZ": odkazy u záznamů otevřely formulář jedné
+   * osoby, hromadné vypočtení průměrů bylo až po dalším kliknutí.
+   */
+  it('nález s více vztahy nabídne vedle odkazů na osoby i agendu pro všechny najednou', async () => {
+    m.runs.mockResolvedValue([])
+    const entity = (id: number) => ({
+      entity_type: 'employment',
+      entity_id: id,
+      label: `Syntetická osoba ${id}`,
+      message: `Chybí průměr pro JMHZ: Syntetická osoba ${id}.`,
+      remediation_path: `/payroll/absences?employment=${id}&tab=averages&year=2027&quarter=1`,
+    })
+    m.readiness.mockReturnValue({
+      period_start: '2027-01-01',
+      payment_date: '2027-02-10',
+      office_id: null,
+      ready: true,
+      has_findings: true,
+      findings: [{
+        code: 'jmhz_average_hourly_earning_missing',
+        severity: 'warning',
+        impact: 'revision',
+        scope: 'monthly',
+        message: 'Chybí průměr pro JMHZ: Syntetická osoba 1, Syntetická osoba 2.',
+        remediation_path: '/payroll/absences?tab=averages&year=2027&quarter=1',
+        count: 2,
+        entity_total: 2,
+        entities: [entity(1), entity(2)],
+        bulk_actions: [],
+      }, {
+        code: 'monthly_wage_below_minimum',
+        severity: 'warning',
+        impact: 'revision',
+        scope: 'monthly',
+        message: 'Sjednaná měsíční mzda je nižší než minimální mzda u 1 vztahu.',
+        remediation_path: '/payroll/people?employment=1&panel=employment_terms&field=monthly_gross_minor',
+        count: 1,
+        entity_total: 1,
+        entities: [{ ...entity(1), remediation_path: '/payroll/people?employment=1&panel=employment_terms' }],
+        bulk_actions: [],
+      }],
+    } satisfies PayrollRunReadiness)
+
+    const wrapper = mount(PayrollRuns)
+    await flushPromises()
+
+    expect(wrapper.get('[data-test="run-readiness-open-all-jmhz_average_hourly_earning_missing"]').attributes('href'))
+      .toBe('/payroll/absences?tab=averages&year=2027&quarter=1')
+    // Jediný dotčený vztah má odkaz u záznamu; druhý stejný by byl šum.
+    expect(wrapper.find('[data-test="run-readiness-open-all-monthly_wage_below_minimum"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  /*
+   * U 150 nálezů bylo dosažitelných jen 25 („dalších 125 se do přehledu
+   * nevešlo") a zbytek nebylo kde najít.
+   */
+  it('nález s oříznutým výčtem vede na seznam zaměstnanců zúžený na všechny jeho osoby', async () => {
+    m.runs.mockResolvedValue([])
+    m.readiness.mockReturnValue({
+      period_start: '2026-10-01',
+      payment_date: '2026-11-10',
+      office_id: null,
+      ready: true,
+      has_findings: true,
+      findings: [{
+        code: 'time_month_missing',
+        severity: 'blocker',
+        impact: 'approval',
+        scope: 'monthly',
+        message: 'Pracovní vztah nemá za období založenou a schválenou pracovní dobu.',
+        remediation_path: '/payroll/time?period=2026-10',
+        count: 150,
+        entity_total: 150,
+        people_total: 148,
+        people_list_path: '/payroll/people?filter=run_finding&finding=time_month_missing&period=2026-10&payment_date=2026-11-10',
+        entities: [{
+          entity_type: 'employment',
+          entity_id: 3,
+          label: 'Syntetický Hromadný 01',
+          message: 'Syntetický Hromadný 01: pracovní vztah nemá za období založenou a schválenou pracovní dobu.',
+          remediation_path: '/payroll/time?employment=3&period=2026-10',
+        }],
+        bulk_actions: [],
+      }, {
+        code: 'employment_without_inputs',
+        severity: 'blocker',
+        impact: 'approval',
+        scope: 'monthly',
+        message: 'Pracovní vztah nemá v období žádnou schválenou mzdovou složku.',
+        remediation_path: null,
+        count: 1,
+        entity_total: 1,
+        entities: [{ entity_type: 'employment', entity_id: 3, label: 'Syntetický Hromadný 01' }],
+        bulk_actions: [],
+      }],
+    } satisfies PayrollRunReadiness)
+
+    const wrapper = mount(PayrollRuns)
+    await flushPromises()
+
+    const link = wrapper.get('[data-test="run-readiness-people-list-time_month_missing"]')
+    expect(link.attributes('href'))
+      .toBe('/payroll/people?filter=run_finding&finding=time_month_missing&period=2026-10&payment_date=2026-11-10')
+    expect(link.text()).toContain('payroll.runs.readiness.people_list')
+    // Nález, který se vešel celý, odkaz na seznam nemá.
+    expect(wrapper.find('[data-test="run-readiness-people-list-employment_without_inputs"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  /*
+   * Chybějící přihláška ČSSZ byla před během „neomezuje běh" a po výpočtu
+   * varování s povinnou výjimkou. Teď má v obou místech stejnou závažnost.
+   */
+  it('nález s povinnou výjimkou řekne už před během, že schválení počká na výjimku', async () => {
+    m.runs.mockResolvedValue([])
+    m.readiness.mockReturnValue({
+      period_start: '2026-10-01',
+      payment_date: '2026-11-10',
+      office_id: null,
+      ready: true,
+      has_findings: true,
+      findings: [{
+        code: 'employment_social_registration_missing',
+        severity: 'warning',
+        impact: 'approval',
+        scope: 'setup',
+        message: 'Syntetický Brigádník: k pracovnímu vztahu chybí přihláška u ČSSZ.',
+        remediation_path: null,
+        count: 1,
+        entity_total: 1,
+        entities: [{ entity_type: 'employment', entity_id: 3, label: 'Syntetický Brigádník' }],
+        requires_override: true,
+        bulk_actions: [],
+      }],
+    } satisfies PayrollRunReadiness)
+
+    const wrapper = mount(PayrollRuns)
+    await flushPromises()
+
+    expect(wrapper.get('[data-test="run-readiness-override-employment_social_registration_missing"]').text())
+      .toContain('payroll.runs.override.awaiting')
+    expect(wrapper.get('[data-testid="run-readiness-employment_social_registration_missing"]').classes())
+      .toContain('bg-danger-50')
+    wrapper.unmount()
+  })
+
+  /*
+   * Zaměstnanec založený až po schválení měsíce v běhu tiše chyběl: stránka
+   * běhu se nezměnila a osoba zůstala bez mzdy i bez měsíčního hlášení.
+   */
+  it('schválený běh jmenuje vztahy, které do období patří a v revizi chybí, a nabídne opravu', async () => {
+    m.runs.mockResolvedValue([run({
+      status: 'approved',
+      can_delete: false,
+      revision_id: 40,
+      revision_no: 1,
+      revision_kind: 'regular',
+      available_commands: ['post', 'request_correction'],
+      missing_employments: [{
+        employment_id: 71,
+        employee_id: 31,
+        full_name: 'Syntetická Pozdní',
+        employment_code: 'HPP-LATE',
+        relation_type: 'employment',
+        start_date: '2026-08-15',
+      }],
+    })])
+
+    const wrapper = mount(PayrollRuns, {
+      global: { stubs: { RouterLink: { props: ['to'], template: '<a :data-to="JSON.stringify(to)"><slot /></a>' } } },
+    })
+    await flushPromises()
+
+    const box = wrapper.get('[data-testid="payroll-run-15-missing-employments"]')
+    expect(box.text()).toContain('payroll.runs.missing_employments.title')
+    expect(box.text()).toContain('Syntetická Pozdní')
+    expect(box.text()).toContain('payroll.runs.missing_employments.body')
+    expect(JSON.parse(box.get('a').attributes('data-to')!)).toEqual({
+      name: 'payroll-people',
+      query: { person: '31', employment: '71' },
+    })
+
+    await box.get('[data-testid="payroll-run-15-missing-employments-correct"]').trigger('click')
+    await flushPromises()
+
+    // Oprava schváleného běhu se ptá na důvod, sama se neodešle.
+    expect(document.body.querySelector('[data-test="run-command-dialog"]')).not.toBeNull()
+    expect(m.commandRun).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it('běh, kterému žádný vztah nechybí, o chybějících vztazích mlčí', async () => {
+    m.runs.mockResolvedValue([run({
+      status: 'approved',
+      can_delete: false,
+      available_commands: ['post', 'request_correction'],
+      missing_employments: [],
+    })])
+
+    const wrapper = mount(PayrollRuns)
+    await flushPromises()
+
+    expect(wrapper.find('[data-testid="payroll-run-15-missing-employments"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  const averageChange = (action: 'request_correction' | 'reopen' | 'refresh_inputs' | null, approved: boolean) => ({
+    approved,
+    action,
+    average_changed_count: 1,
+    compensation_count: 1,
+    compensation_difference_minor: 22_800,
+    compensation_unknown_count: 0,
+    employments: [{
+      employment_id: 71,
+      employee_id: 31,
+      full_name: 'Syntetická Brigádnice',
+      average_changed: true,
+      frozen_average_hourly_minor: 13_440,
+      current_average_hourly_minor: 18_000,
+      compensations: [{
+        input_id: 501,
+        component_name: 'Náhrada za dovolenou',
+        quantity_milliunits: 5_000,
+        amount_minor: 67_200,
+        average_hourly_minor: 13_440,
+        expected_amount_minor: 90_000,
+      }],
+    }],
+  })
+
+  it('schválený běh se změněným průměrem pro náhrady nabídne otevřít opravu a po vyžádání ji rovnou otevře', async () => {
+    const approved = run({
+      status: 'approved',
+      can_delete: false,
+      revision_id: 40,
+      revision_no: 1,
+      revision_kind: 'regular',
+      available_commands: ['post', 'request_correction'],
+      average_change: averageChange('request_correction', true),
+    })
+    const pending = run({
+      status: 'correction_pending',
+      row_version: 3,
+      can_delete: false,
+      available_commands: ['reopen'],
+      average_change: averageChange('reopen', false),
+    })
+    m.runs.mockResolvedValueOnce([approved]).mockResolvedValueOnce([pending]).mockResolvedValue([pending])
+
+    const wrapper = mount(PayrollRuns, {
+      global: { stubs: { RouterLink: { props: ['to'], template: '<a :data-to="JSON.stringify(to)"><slot /></a>' } } },
+    })
+    await flushPromises()
+
+    const box = wrapper.get('[data-testid="payroll-run-15-average-change"]')
+    expect(box.text()).toContain('payroll.runs.average_change.title_approved')
+    expect(box.text()).toContain('Syntetická Brigádnice')
+    expect(box.text()).toContain('payroll.runs.average_change.compensation')
+    expect(box.text()).toContain('payroll.runs.average_change.body_request_correction')
+
+    await box.get('[data-testid="payroll-run-15-average-change-fix"]').trigger('click')
+    await flushPromises()
+    expect(m.commandRun).not.toHaveBeenCalled()
+    const textarea = document.body.querySelector<HTMLTextAreaElement>('[data-test="run-command-reason"]')!
+    expect(textarea.value).toBe('payroll.runs.average_change.reason')
+    document.body.querySelector<HTMLFormElement>('[data-test="run-command-dialog"]')
+      ?.dispatchEvent(new Event('submit'))
+    await flushPromises()
+
+    expect(m.commandRun).toHaveBeenNthCalledWith(
+      1,
+      15,
+      'request_correction',
+      { row_version: 2, reason: 'payroll.runs.average_change.reason' },
+      expect.any(String),
+    )
+    expect(m.commandRun).toHaveBeenNthCalledWith(2, 15, 'reopen', { row_version: 3 }, expect.any(String))
+    expect(m.commandRun.mock.calls.map(call => call[1])).not.toContain('approve')
+    wrapper.unmount()
+  })
+
+  it('spočítaný běh se změněným průměrem nabídne obnovu podkladů, bez práva jen vysvětlí', async () => {
+    m.runs.mockResolvedValue([run({
+      status: 'calculated',
+      can_delete: false,
+      available_commands: ['calculate', 'refresh_inputs', 'review', 'approve', 'cancel'],
+      average_change: averageChange('refresh_inputs', false),
+    })])
+
+    const wrapper = mount(PayrollRuns)
+    await flushPromises()
+    const box = wrapper.get('[data-testid="payroll-run-15-average-change"]')
+    expect(box.text()).toContain('payroll.runs.average_change.title_open')
+    await box.get('[data-testid="payroll-run-15-average-change-fix"]').trigger('click')
+    await flushPromises()
+    expect(m.commandRun).toHaveBeenCalledWith(15, 'refresh_inputs', { row_version: 2 }, expect.any(String))
+    wrapper.unmount()
+
+    m.canWrite.mockImplementation((permission: string) => permission !== 'payroll.calculate')
+    const readonly = mount(PayrollRuns)
+    await flushPromises()
+    const readonlyBox = readonly.get('[data-testid="payroll-run-15-average-change"]')
+    expect(readonlyBox.find('[data-testid="payroll-run-15-average-change-fix"]').exists()).toBe(false)
+    expect(readonlyBox.find('[data-test="payroll-run-average-change-forbidden"]').exists()).toBe(true)
+    readonly.unmount()
+  })
+
+  it('otevřená oprava nabídne přepočet náhrad z nového průměru, schválený běh ne', async () => {
+    m.compensationPreview.mockResolvedValue({ periods: [], can_apply: true, can_approve: true, can_refresh: true })
+    m.runs.mockResolvedValue([run({
+      status: 'reopened',
+      can_delete: false,
+      available_commands: ['calculate', 'refresh_inputs', 'cancel'],
+      average_change: { ...averageChange(null, false), average_changed_count: 0 },
+    })])
+    const wrapper = mount(PayrollRuns)
+    await flushPromises()
+    await wrapper.get('[data-testid="payroll-run-15-compensation-recalculation"]').trigger('click')
+    await flushPromises()
+    expect(m.compensationPreview).toHaveBeenCalledWith(['2026-08'], [71])
+    wrapper.unmount()
+
+    m.runs.mockResolvedValue([run({
+      status: 'approved',
+      can_delete: false,
+      available_commands: ['post', 'request_correction'],
+      average_change: averageChange('request_correction', true),
+    })])
+    const approved = mount(PayrollRuns)
+    await flushPromises()
+    expect(approved.find('[data-testid="payroll-run-15-compensation-recalculation"]').exists()).toBe(false)
+    approved.unmount()
+  })
+
+  it('změněný schválený průměr čtvrtletí vypíše jako samostatný řádek změn podkladů', async () => {
+    m.runs.mockResolvedValue([run({
+      status: 'calculated',
+      can_delete: false,
+      available_commands: ['calculate', 'refresh_inputs', 'review', 'approve', 'cancel'],
+      source_drift: { ...drift, total: 2, inputs_added: 0, statutory_evidence_changed: 0, average_earnings_changed: 2 },
+    })])
+
+    const wrapper = mount(PayrollRuns)
+    await flushPromises()
+
+    const box = wrapper.get('[data-testid="payroll-run-15-source-drift"]')
+    expect(box.find('[data-test="payroll-run-source-drift-average_earnings_changed"]').text())
+      .toContain('payroll.runs.source_drift.average_earnings_changed')
+    expect(box.find('[data-test="payroll-run-source-drift-employment_terms_changed"]').exists()).toBe(false)
+
+    wrapper.unmount()
+  })
+
+
+  it('změněné podmínky vztahu vypíše a jako hlavní krok nabídne obnovu podkladů místo přepočtu', async () => {
+    m.runs.mockResolvedValue([run({
+      status: 'calculated',
+      can_delete: false,
+      available_commands: ['calculate', 'refresh_inputs', 'review', 'approve', 'cancel'],
+      source_drift: { ...drift, total: 1, inputs_added: 0, statutory_evidence_changed: 0, employment_terms_changed: 1 },
+    })])
+
+    const wrapper = mount(PayrollRuns)
+    await flushPromises()
+
+    const box = wrapper.get('[data-testid="payroll-run-15-source-drift"]')
+    expect(box.find('[data-test="payroll-run-source-drift-employment_terms_changed"]').text())
+      .toContain('payroll.runs.source_drift.employment_terms_changed')
+    const buttons = wrapper.findAll('button[data-testid^="payroll-run-15-"]')
+    expect(buttons[0]!.attributes('data-testid')).toBe('payroll-run-15-refresh_inputs')
 
     wrapper.unmount()
   })
@@ -1877,8 +2618,41 @@ describe('PayrollRuns', () => {
       wrapper.unmount()
     })
 
-    it('předběžná kontrola nabídne skrytí jen u skrytelného nálezu', async () => {
+    it('předběžná kontrola doplní chybějící průměr ze sazby jedním tlačítkem', async () => {
       m.runs.mockResolvedValue([])
+      m.readiness.mockReturnValue({
+        period_start: '2026-08-01',
+        payment_date: '2026-09-15',
+        office_id: null,
+        ready: false,
+        has_findings: true,
+        findings: [{
+          code: 'hourly_average_earning_missing',
+          severity: 'blocker',
+          impact: 'approval',
+          scope: 'monthly',
+          message: 'Chybí schválený průměrný výdělek za 3. čtvrtletí 2026.',
+          remediation_path: null,
+          count: 1,
+          entities: [],
+          hideable: false,
+          subject_type: null,
+          subject_ids: [],
+        }],
+      } satisfies PayrollRunReadiness)
+      m.fillProbable.mockResolvedValue({ created: [{ id: 1 }], candidates: 1 })
+
+      const wrapper = mount(PayrollRuns)
+      await flushPromises()
+      await wrapper.get('[data-test="run-readiness-fill-probable-hourly_average_earning_missing"]').trigger('click')
+      await flushPromises()
+
+      expect(m.fillProbable).toHaveBeenCalledTimes(1)
+      expect(m.success).toHaveBeenCalledWith('payroll.runs.readiness.fill_probable_average_done')
+      wrapper.unmount()
+    })
+
+    it('předběžná kontrola nabídne skrytí jen u skrytelného nálezu', async () => {      m.runs.mockResolvedValue([])
       m.readiness.mockReturnValue({
         period_start: '2026-08-01',
         payment_date: '2026-09-15',
@@ -1933,6 +2707,199 @@ describe('PayrollRuns', () => {
 
       expect(m.hideWarning).toHaveBeenCalledWith({ code: 'time_month_missing', subject_ids: [42], reason: null })
 
+      wrapper.unmount()
+    })
+
+    it('nález s hromadnou opravou otevře dialog ze seznamu zaměstnanců na období běhu', async () => {
+      m.runs.mockResolvedValue([])
+      m.readiness.mockReturnValue({
+        period_start: '2026-02-01',
+        payment_date: '2026-03-15',
+        office_id: null,
+        ready: true,
+        has_findings: true,
+        findings: [{
+          code: 'person_data_gap',
+          severity: 'info',
+          impact: 'anytime',
+          scope: 'setup',
+          message: 'Za období 2026-02 chybí zákonné údaje.',
+          remediation_path: '/payroll/people?filter=blocking_data',
+          count: 3,
+          entities: [{
+            entity_type: 'employee',
+            entity_id: 7,
+            label: 'Syntetická Osoba',
+            message: 'Syntetická Osoba: chybí daňová rezidence.',
+            gaps: ['tax_residence'],
+            remediation_path: '/payroll/people?person=7&panel=statutory_evidence',
+          }],
+          bulk_actions: [
+            { kind: 'statutory_defaults', count: 3, employee_ids: [7, 8, 9] },
+            { kind: 'health_insurer', count: 1 },
+          ],
+        }],
+      } satisfies PayrollRunReadiness)
+
+      const wrapper = mount(PayrollRuns, {
+        global: { stubs: { RouterLink: { props: ['to'], template: '<a :data-to="JSON.stringify(to)"><slot /></a>' } } },
+      })
+      await flushPromises()
+
+      const statutory = wrapper.get('[data-test="run-readiness-bulk-action-statutory_defaults"]')
+      expect(JSON.parse(statutory.attributes('data-to')!)).toEqual({
+        name: 'payroll-people',
+        query: { bulk: 'statutory_defaults', period: '2026-02', employees: '7,8,9', back: '/payroll/runs?period=2026-02' },
+      })
+      expect(statutory.text()).toContain('payroll.runs.readiness.bulk.statutory_defaults')
+      expect(wrapper.find('[data-test="run-readiness-bulk-action-health_insurer"]').exists()).toBe(true)
+      expect(wrapper.text()).toContain('Syntetická Osoba: chybí daňová rezidence.')
+      wrapper.unmount()
+    })
+
+    it('nerozhodnutá žádost o roční zúčtování vede na hromadné nastavení za minulý rok', async () => {
+      m.runs.mockResolvedValue([])
+      m.readiness.mockReturnValue({
+        period_start: '2026-02-01',
+        payment_date: '2026-03-15',
+        office_id: null,
+        ready: true,
+        has_findings: true,
+        findings: [{
+          code: 'jmhz_annual_request_status_unresolved',
+          severity: 'info',
+          impact: 'anytime',
+          scope: 'monthly',
+          message: 'Není rozhodnuto, zda o roční zúčtování za minulý rok požádal(a).',
+          remediation_path: '/payroll/annual-settlement',
+          count: 56,
+          entities: [],
+          bulk_actions: [{ kind: 'annual_settlement_request', count: 56 }],
+        }],
+      } satisfies PayrollRunReadiness)
+
+      const wrapper = mount(PayrollRuns, {
+        global: { stubs: { RouterLink: { props: ['to'], template: '<a :data-to="JSON.stringify(to)"><slot /></a>' } } },
+      })
+      await flushPromises()
+
+      const action = wrapper.get('[data-test="run-readiness-bulk-action-annual_settlement_request"]')
+      expect(JSON.parse(action.attributes('data-to')!)).toEqual({
+        name: 'payroll-annual-settlement',
+        query: { year: '2025', state: 'request_undecided', select: 'all', return: '/payroll/runs?period=2026-02' },
+      })
+      expect(action.text()).toContain('payroll.runs.readiness.bulk.annual_settlement_request')
+      wrapper.unmount()
+    })
+
+    it('hromadné „nepožádal" se zúží na osoby hlášení a bezpečnou skupinu nabídne zvlášť', async () => {
+      m.runs.mockResolvedValue([])
+      m.readiness.mockReturnValue({
+        period_start: '2026-02-01',
+        payment_date: '2026-03-15',
+        office_id: null,
+        ready: true,
+        has_findings: true,
+        findings: [{
+          code: 'jmhz_annual_request_status_unresolved',
+          severity: 'info',
+          impact: 'anytime',
+          scope: 'monthly',
+          message: 'Není rozhodnuto, zda o roční zúčtování za minulý rok požádal(a).',
+          remediation_path: '/payroll/annual-settlement?year=2025&state=request_undecided',
+          count: 3,
+          entities: [],
+          bulk_actions: [
+            { kind: 'annual_settlement_request_safe', count: 2, employee_ids: [4, 9] },
+            { kind: 'annual_settlement_request', count: 1, employee_ids: [7] },
+          ],
+        }],
+      } satisfies PayrollRunReadiness)
+
+      const wrapper = mount(PayrollRuns, {
+        global: { stubs: { RouterLink: { props: ['to'], template: '<a :data-to="JSON.stringify(to)"><slot /></a>' } } },
+      })
+      await flushPromises()
+
+      const safe = wrapper.get('[data-test="run-readiness-bulk-action-annual_settlement_request_safe"]')
+      expect(JSON.parse(safe.attributes('data-to')!)).toEqual({
+        name: 'payroll-annual-settlement',
+        query: { year: '2025', state: 'request_undecided', employees: '4,9', select: 'all', return: '/payroll/runs?period=2026-02' },
+      })
+      expect(safe.text()).toContain('payroll.runs.readiness.bulk.annual_settlement_request_safe')
+      const rest = wrapper.get('[data-test="run-readiness-bulk-action-annual_settlement_request"]')
+      expect(JSON.parse(rest.attributes('data-to')!).query.employees).toBe('7')
+      wrapper.unmount()
+    })
+
+    it('chybějící výplatní pravidlo je údaj osoby a vede na hromadné pravidla z karet', async () => {
+      m.runs.mockResolvedValue([])
+      m.readiness.mockReturnValue({
+        period_start: '2026-02-01',
+        payment_date: '2026-03-15',
+        office_id: null,
+        ready: true,
+        has_findings: true,
+        findings: [{
+          code: 'payout_rule_missing',
+          severity: 'warning',
+          impact: 'revision',
+          scope: 'person',
+          message: 'Chybí výplatní pravidlo.',
+          remediation_path: '/payroll/people?person=21&panel=accounts',
+          count: 2,
+          entities: [],
+          bulk_actions: [{ kind: 'payout_defaults', count: 2, employee_ids: [21, 22] }],
+        }],
+      } satisfies PayrollRunReadiness)
+
+      const wrapper = mount(PayrollRuns, {
+        global: { stubs: { RouterLink: { props: ['to'], template: '<a :data-to="JSON.stringify(to)"><slot /></a>' } } },
+      })
+      await flushPromises()
+
+      const finding = wrapper.get('[data-testid="run-readiness-payout_rule_missing"]')
+      expect(finding.text()).toContain('payroll.runs.readiness.scope.person')
+      expect(finding.text()).not.toContain('payroll.runs.readiness.scope.setup')
+      const action = wrapper.get('[data-test="run-readiness-bulk-action-payout_defaults"]')
+      expect(JSON.parse(action.attributes('data-to')!)).toEqual({
+        name: 'payroll-people',
+        query: { bulk: 'payout_defaults', period: '2026-02', employees: '21,22', back: '/payroll/runs?period=2026-02' },
+      })
+      wrapper.unmount()
+    })
+
+    it('hromadný podpis prohlášení z nálezu nese jen dotčené osoby', async () => {
+      m.runs.mockResolvedValue([])
+      m.readiness.mockReturnValue({
+        period_start: '2026-02-01',
+        payment_date: '2026-03-15',
+        office_id: null,
+        ready: false,
+        has_findings: true,
+        findings: [{
+          code: 'tax_declaration_evidence_missing',
+          severity: 'blocker',
+          impact: 'approval',
+          scope: 'monthly',
+          message: 'Chybí ověřený stav daňového prohlášení (2).',
+          remediation_path: '/payroll/people?bulk=declaration_signed',
+          count: 2,
+          entities: [],
+          bulk_actions: [{ kind: 'declaration_signed', count: 2, employee_ids: [14, 15] }],
+        }],
+      } satisfies PayrollRunReadiness)
+
+      const wrapper = mount(PayrollRuns, {
+        global: { stubs: { RouterLink: { props: ['to'], template: '<a :data-to="JSON.stringify(to)"><slot /></a>' } } },
+      })
+      await flushPromises()
+
+      const action = wrapper.get('[data-test="run-readiness-bulk-action-declaration_signed"]')
+      expect(JSON.parse(action.attributes('data-to')!)).toEqual({
+        name: 'payroll-people',
+        query: { bulk: 'declaration_signed', period: '2026-02', employees: '14,15', back: '/payroll/runs?period=2026-02' },
+      })
       wrapper.unmount()
     })
   })

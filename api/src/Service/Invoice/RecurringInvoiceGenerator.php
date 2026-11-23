@@ -71,6 +71,7 @@ final class RecurringInvoiceGenerator
         private readonly OssItemDeriver $ossDeriver,
         private readonly ClientRepository $clients,
         private readonly InvoicePaymentService $payments,
+        private readonly InvoiceIssueTaxGate $taxGate,
     ) {}
 
     /**
@@ -716,21 +717,14 @@ final class RecurringInvoiceGenerator
             return $items;
         }
 
-        $rate = $pdo->prepare(
-            'SELECT id FROM vat_rates
-              WHERE rate_percent = 0 AND is_reverse_charge = 0
-                AND valid_from <= ? AND (valid_to IS NULL OR valid_to >= ?)
-              ORDER BY valid_from DESC LIMIT 1'
-        );
-        $rate->execute([$referenceDate, $referenceDate]);
-        $zeroId = $rate->fetchColumn();
-        if ($zeroId === false) {
+        $zeroId = \MyInvoice\Service\Vat\VatStatusService::exemptRateIdAt($pdo, $referenceDate);
+        if ($zeroId === null) {
             // Žádná platná 0% sazba k datu — nech sazby být, guard případně chybu nahlásí.
             return $items;
         }
 
         foreach ($items as &$item) {
-            $item['vat_rate_id'] = (int) $zeroId;
+            $item['vat_rate_id'] = $zeroId;
             // Uložená klasifikace se sazbou padá taky. Kód jako '1' (tuzemské plnění
             // v základní sazbě) na coercnutém 0% řádku by tvrdil daň, kterou neplátce
             // nepřiznává — a oprava #30 přiřazení kódu neplátci a identifikované osobě
@@ -752,6 +746,10 @@ final class RecurringInvoiceGenerator
         $invoice = $this->invoices->find($invoiceId);
         if ($invoice === null) {
             throw new \RuntimeException("Invoice #$invoiceId not found after generation");
+        }
+        // Drobný zákazník bez adresy (#310): stejná brána jako vystavení z editoru.
+        if (($rejected = $this->taxGate->simplifiedOnlyClientRejection($invoice)) !== null) {
+            throw new \DomainException($rejected['message']);
         }
 
         $supplierId = (int) $invoice['supplier_id'];
@@ -786,22 +784,18 @@ final class RecurringInvoiceGenerator
         if ($ownTransaction) $pdo->exec('SET TRANSACTION ISOLATION LEVEL READ COMMITTED');
         if ($ownTransaction) $pdo->beginTransaction();
         $varsymbol = null;
+        $usedSeriesId = null;
         try {
             // Číslo se čerpá ve stejné transakci jako vystavení: když vystavení zablokuje
             // sklad, rollback vrátí do řady i číslo (dřív v ní zůstala díra).
-            $varsymbol = $this->varsymbol->next(
-                $supplierId,
-                VarsymbolGenerator::seriesTypeFor($invoice),
-                $issueDate,
-                (int) $invoice['client_id'],
-                (int) ($invoice['revenue_category_id'] ?? 0),
-            );
+            [$varsymbol, $usedSeriesId] = $this->varsymbol->nextForInvoice($supplierId, $invoice, $issueDate);
             $issueParams[0] = $varsymbol;
             $issue = $pdo->prepare($issueSql);
             $issue->execute($issueParams);
             if ($issue->rowCount() === 0) {
                 throw new \RuntimeException('Faktura byla mezitím změněna.');
             }
+            $this->varsymbol->recordSeries($invoiceId, $invoice, $usedSeriesId);
             // I dříve otevřený koncept může mít platby; PDF/statistiky obnoví stávající tok po commitu.
             $this->payments->recompute($invoiceId, refreshOutputs: false);
             InvoiceIssuer::record($pdo, $invoiceId, $issuerId);
@@ -827,6 +821,7 @@ final class RecurringInvoiceGenerator
                     $issueDate,
                     (int) $invoice['client_id'],
                     (int) ($invoice['revenue_category_id'] ?? 0),
+                    $usedSeriesId,
                 );
             }
             throw $e;

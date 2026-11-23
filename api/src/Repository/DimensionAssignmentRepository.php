@@ -24,6 +24,18 @@ final class DimensionAssignmentRepository
 {
     public const DOC_TYPES = ['purchase_invoice', 'invoice', 'cash_document', 'bank_transaction', 'journal_template', 'recurring_template', 'other_item', 'asset'];
 
+    /** Tabulka hlavičky dokladu pro každý `doc_type` (polymorfní `doc_id` bez cizího klíče). */
+    public const DOC_TYPE_TABLES = [
+        'purchase_invoice' => 'purchase_invoices',
+        'invoice' => 'invoices',
+        'cash_document' => 'cash_documents',
+        'bank_transaction' => 'bank_transactions',
+        'journal_template' => 'journal_entry_templates',
+        'recurring_template' => 'recurring_invoice_templates',
+        'other_item' => 'other_items',
+        'asset' => 'assets',
+    ];
+
     public function __construct(private readonly Connection $db) {}
 
     /**

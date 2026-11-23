@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Tests\Unit\Middleware;
 
 use MyInvoice\Middleware\ApiScopeMiddleware;
+use MyInvoice\Middleware\ApiVersionRewriteMiddleware;
 use MyInvoice\Middleware\AuthMiddleware;
 use PHPUnit\Framework\TestCase;
 use Psr\Http\Message\ResponseInterface;
@@ -15,6 +16,71 @@ use Slim\Psr7\Factory\ServerRequestFactory;
 
 final class ApiScopeMiddlewareTest extends TestCase
 {
+    public function testBearerCanReadWorkReportBillingTemplatesThroughPublicApi(): void
+    {
+        $scope = $this->middleware();
+        $handler = new class($scope, $this->okHandler()) implements RequestHandlerInterface {
+            public function __construct(
+                private readonly ApiScopeMiddleware $scope,
+                private readonly RequestHandlerInterface $next,
+            ) {}
+
+            public function handle(ServerRequestInterface $request): ResponseInterface
+            {
+                TestCase::assertSame('/api/work-report-billing-templates', $request->getUri()->getPath());
+                return $this->scope->process($request, $this->next);
+            }
+        };
+        $app = \Slim\Factory\AppFactory::create();
+        \MyInvoice\Routes::register($app);
+        foreach (['GET', 'HEAD'] as $method) {
+            self::assertSame(\Slim\Routing\RoutingResults::FOUND,
+                $app->getRouteResolver()->computeRoutingResults('/api/work-report-billing-templates', $method)->getRouteStatus());
+            foreach (['read', 'read_write'] as $tokenScope) {
+                foreach ([false, true] as $clientSurface) {
+                    $request = $this->bearer($method, '/api/v1/work-report-billing-templates', $tokenScope)
+                        ->withAttribute(AuthMiddleware::ATTR_API_TOKEN, ['scope' => $tokenScope, 'mcp_client_surface' => $clientSurface]);
+                    $response = (new ApiVersionRewriteMiddleware())->process($request, $handler);
+                    self::assertSame(204, $response->getStatusCode(), (string) $response->getBody());
+                    self::assertSame('1', $response->getHeaderLine('X-API-Version'));
+                }
+            }
+        }
+    }
+
+    public function testBearerCannotManageWorkReportBillingTemplatesOrReachSiblingEndpoints(): void
+    {
+        foreach (['read', 'read_write'] as $scope) {
+            foreach (['POST', 'PUT', 'PATCH', 'DELETE'] as $method) {
+                $response = $this->middleware()->process($this->bearer($method, '/api/work-report-billing-templates', $scope), $this->okHandler());
+                self::assertSame(403, $response->getStatusCode());
+                self::assertSame('token_write_forbidden', $this->errorCode($response));
+            }
+            foreach (['/api/work-report-billing-templates/7', '/api/work-report-billing-templates-extra', '/api/work-report-billing-preview'] as $path) {
+                foreach (['GET', 'POST', 'PUT', 'DELETE'] as $method) {
+                    $response = $this->middleware()->process($this->bearer($method, $path, $scope), $this->okHandler());
+                    self::assertSame(403, $response->getStatusCode(), $method . ' ' . $path);
+                    self::assertSame('token_endpoint_forbidden', $this->errorCode($response));
+                }
+            }
+        }
+    }
+
+    public function testDelegatedInvoiceDefaultsRemainSessionOnly(): void
+    {
+        foreach (['GET', 'PUT'] as $method) {
+            $path = '/api/settings/client/invoice-defaults';
+            foreach (['read', 'read_write'] as $scope) {
+                $response = $this->middleware()->process($this->bearer($method, $path, $scope), $this->okHandler());
+                self::assertSame(403, $response->getStatusCode());
+                self::assertSame('token_endpoint_forbidden', $this->errorCode($response));
+            }
+            $session = (new ServerRequestFactory())->createServerRequest($method, $path)
+                ->withAttribute(AuthMiddleware::ATTR_METHOD, 'session');
+            self::assertSame(204, $this->middleware()->process($session, $this->okHandler())->getStatusCode());
+        }
+    }
+
     public function testMembershipCatalogTokenReadsRegisteredAccountingRoutesOnly(): void
     {
         $app = \Slim\Factory\AppFactory::create();
@@ -177,8 +243,6 @@ final class ApiScopeMiddlewareTest extends TestCase
             ['POST', '/api/invoices/12/rebuild-snapshots'],
             ['POST', '/api/bank-transactions/34/post'],
             ['POST', '/api/bank-transactions/34/unpost'],
-            // Zrušení párování zaúčtovaného pohybu stornuje zápis stejně jako unpost.
-            ['POST', '/api/bank-transactions/34/unmatch'],
             ['POST', '/api/reports/s74b/record'],
             ['POST', '/api/reports/s46/correction'],
             ['PUT',  '/api/tax/profile'],
@@ -196,6 +260,25 @@ final class ApiScopeMiddlewareTest extends TestCase
     }
 
     /**
+     * Párování banky token smí, včetně zrušení párování. Deník hlídá akce: po spárování
+     * tokenem nic nezaúčtuje a pohyb se zápisem v deníku tokenu neodpáruje
+     * (BankMatchTokenPostingTest). Zaúčtování a jeho zrušení zůstávají zavřené výš.
+     */
+    public function testBearerReadWriteCanMatchAndUnmatchBankTransactions(): void
+    {
+        foreach ([
+            ['POST', '/api/bank-transactions/34/match'],
+            ['POST', '/api/bank-transactions/34/match-document'],
+            ['POST', '/api/bank-transactions/match-document-batch'],
+            ['POST', '/api/bank-transactions/34/unmatch'],
+            ['POST', '/api/bank-match-suggestions/5/accept'],
+        ] as [$method, $path]) {
+            $r = $this->middleware()->process($this->bearer($method, $path, 'read_write'), $this->okHandler());
+            self::assertSame(204, $r->getStatusCode(), "bearer $method $path musí projít");
+        }
+    }
+
+    /**
      * Jediná zápisová výjimka v účetní vrstvě: koncepty ostatních pohledávek
      * a závazků, jejich splátkový kalendář a opakování. Nic z toho nezapisuje
      * do deníku; automatické účtování hlídá samotná akce.
@@ -209,6 +292,8 @@ final class ApiScopeMiddlewareTest extends TestCase
             ['PUT', '/api/accounting/other-items/12/installments'],
             ['POST', '/api/accounting/other-items/12/schedule'],
             ['PUT', '/api/accounting/other-items/schedules/3/status'],
+            ['PUT', '/api/accounting/other-items/schedules/3/title'],
+            ['POST', '/api/accounting/other-items/12/allocations'],
         ] as [$method, $path]) {
             $r = $this->middleware()->process($this->bearer($method, $path, 'read_write'), $this->okHandler());
             self::assertSame(204, $r->getStatusCode(), "bearer $method $path musí projít");
@@ -251,17 +336,23 @@ final class ApiScopeMiddlewareTest extends TestCase
         }
     }
 
-    /** Dimenze smí token zapsat jen ke konceptu ostatní položky; jiné doklady a náhled ne. */
-    public function testBearerReadWriteCanTagOnlyOtherItemDimensions(): void
+    /**
+     * Dimenze smí token zapsat jen ke konceptu ostatní položky a faktury (stav ověřuje
+     * DimensionAction); jiné doklady a náhled ne.
+     */
+    public function testBearerReadWriteCanTagOnlyDraftDocumentDimensions(): void
     {
-        $ok = $this->middleware()->process(
-            $this->bearer('PUT', '/api/accounting/dimensions/documents/other-items/12', 'read_write'),
-            $this->okHandler(),
-        );
-        self::assertSame(204, $ok->getStatusCode());
+        foreach (['other-items', 'invoices', 'purchase-invoices'] as $doc) {
+            $ok = $this->middleware()->process(
+                $this->bearer('PUT', "/api/accounting/dimensions/documents/$doc/12", 'read_write'),
+                $this->okHandler(),
+            );
+            self::assertSame(204, $ok->getStatusCode(), $doc);
+        }
 
         foreach ([
-            ['PUT', '/api/accounting/dimensions/documents/purchase-invoices/12'],
+            ['PUT', '/api/accounting/dimensions/documents/cash-documents/12'],
+            ['POST', '/api/accounting/dimensions/documents/invoices/12/preview'],
             ['PUT', '/api/accounting/dimensions/documents/assets/12'],
             ['POST', '/api/accounting/dimensions/documents/other-items/12/preview'],
             ['PUT', '/api/accounting/dimensions/journal/12'],
@@ -280,7 +371,6 @@ final class ApiScopeMiddlewareTest extends TestCase
             ['POST', '/api/accounting/other-items/12/post'],
             ['POST', '/api/accounting/other-items/12/reverse'],
             ['POST', '/api/accounting/other-items/12/repost'],
-            ['POST', '/api/accounting/other-items/12/allocations'],
             ['DELETE', '/api/accounting/other-items/12/allocations/5'],
             ['POST', '/api/accounting/other-items/schedules/3/generate'],
             ['PUT', '/api/accounting/other-items'],
@@ -292,6 +382,8 @@ final class ApiScopeMiddlewareTest extends TestCase
             ['PUT', '/api/accounting/other-items/12/schedule'],
             ['POST', '/api/accounting/other-items/schedules'],
             ['POST', '/api/accounting/other-items/schedules/3/status'],
+            ['POST', '/api/accounting/other-items/schedules/3/title'],
+            ['PUT', '/api/accounting/other-items/schedules/3/title/x'],
             ['PUT', '/api/accounting/other-items/schedules/3'],
             ['DELETE', '/api/accounting/other-items/schedules/3'],
             ['POST', '/api/accounting/other-items-extra'],
@@ -774,6 +866,114 @@ final class ApiScopeMiddlewareTest extends TestCase
         self::assertSame(204, $this->middleware()->process($this->bearer('POST', '/api/invoices/7/receipt-link', 'read_write'), $this->okHandler())->getStatusCode());
         self::assertSame(403, $this->middleware()->process($this->bearer('DELETE', '/api/invoices/7/receipt-link', 'read'), $this->okHandler())->getStatusCode());
     }
+    /**
+     * Zápis do read-only vrstvy mimo allowlist (SVJ) hlásí běžnému tokenu `token_write_forbidden`,
+     * čtení mimo allowlist a session-only cesty dál `token_endpoint_forbidden` (#371).
+     */
+    public function testPlainTokenWriteOutsideAllowlistReportsWriteForbidden(): void
+    {
+        foreach ([
+            ['POST', '/api/property/houses'],
+            ['POST', '/api/property/units'],
+            ['POST', '/api/property/objects/5/revisions'],
+            ['POST', '/api/property/objects/5/revisions/7/confirm'],
+            ['POST', '/api/property/charges/components'],
+            ['POST', '/api/property/charges/versions'],
+            ['POST', '/api/property/charges/issues/preview'],
+            ['POST', '/api/property/charges/issues/batches/5/post'],
+            ['POST', '/api/property/charges/issues/5/reverse'],
+            ['POST', '/api/property/payments/confirm'],
+            ['POST', '/api/property/payments/bank-proposals/5/plan'],
+        ] as [$method, $path]) {
+            $denied = $this->middleware()->process($this->bearer($method, $path, 'read_write'), $this->okHandler());
+            self::assertSame(403, $denied->getStatusCode(), $path);
+            self::assertSame('token_write_forbidden', $this->errorCode($denied), $path);
+        }
+        foreach ([
+            ['GET', '/api/property/houses'],
+            ['GET', '/api/property/charges/issues/context'],
+            ['POST', '/api/accounting/payroll/post'],
+            ['POST', '/api/purchase-invoices/renumber'],
+            ['GET', '/api/accounting/cash-documents/renumber'],
+            ['POST', '/api/accounting/cash-documents/renumber'],
+            ['GET', '/api/accounting/other-items/renumber'],
+            ['POST', '/api/accounting/internal-documents/renumber'],
+        ] as [$method, $path]) {
+            $denied = $this->middleware()->process($this->bearer($method, $path, 'read_write'), $this->okHandler());
+            self::assertSame(403, $denied->getStatusCode(), $path);
+            self::assertSame('token_endpoint_forbidden', $this->errorCode($denied), $method . ' ' . $path);
+        }
+    }
+
+    /**
+     * Token s plným zápisem (#371) projde read-only účetní vrstvou, session-only cestami
+     * i SVJ zápisem; přihlášení, správu tokenů, licence, instance a přístupové údaje ne.
+     * Bez příznaku (nebo s příznakem, který AuthMiddleware nepotvrdil) zůstává 403.
+     */
+    public function testSystemWriteTokenActsAsSessionExceptSecuritySurfaces(): void
+    {
+        $open = [
+            ['POST', '/api/accounting/other-items/5/post'],
+            ['POST', '/api/accounting/other-items/5/reverse'],
+            ['POST', '/api/invoices/5/book'],
+            ['POST', '/api/bank-transactions/5/post'],
+            ['POST', '/api/property/charges/issues/batches/5/post'],
+            ['POST', '/api/property/houses'],
+            ['POST', '/api/payroll/runs/5/approve'],
+            ['PUT', '/api/settings/client/invoice-defaults'],
+            ['POST', '/api/purchase-invoices/renumber'],
+            ['GET', '/api/auth/api-me'],
+        ];
+        foreach ($open as [$method, $path]) {
+            $response = $this->middleware()->process($this->systemWrite($method, $path), $this->okHandler());
+            self::assertSame(204, $response->getStatusCode(), $method . ' ' . $path);
+
+            $plain = $this->middleware()->process($this->bearer($method, $path, 'read_write'), $this->okHandler());
+            if ($path !== '/api/auth/api-me') {
+                self::assertSame(403, $plain->getStatusCode(), 'bez příznaku ' . $method . ' ' . $path);
+            }
+            $unconfirmed = $this->bearer($method, $path, 'read_write')->withAttribute(
+                AuthMiddleware::ATTR_API_TOKEN,
+                ['scope' => 'read_write', 'allow_system_write' => true],
+            );
+            if ($path !== '/api/auth/api-me') {
+                self::assertSame(403, $this->middleware()->process($unconfirmed, $this->okHandler())->getStatusCode(),
+                    'nepotvrzený příznak ' . $method . ' ' . $path);
+            }
+        }
+
+        $closed = [
+            ['POST', '/api/auth/tokens'],
+            ['DELETE', '/api/auth/tokens/5'],
+            ['POST', '/api/auth/change-password'],
+            ['POST', '/api/auth/totp/setup'],
+            ['GET', '/api/auth/me'],
+            ['POST', '/api/auth/webauthn/register/options'],
+            ['GET', '/api/admin/users'],
+            ['POST', '/api/admin/roles'],
+            ['GET', '/api/instance-admin/status'],
+            ['POST', '/api/license/activate'],
+            ['GET', '/api/mcp/grants'],
+            ['POST', '/api/settings/signing/profiles'],
+            ['POST', '/api/settings/databox'],
+            ['POST', '/api/settings/domains'],
+            ['PUT', '/api/settings/ai-assist'],
+        ];
+        foreach ($closed as [$method, $path]) {
+            $response = $this->middleware()->process($this->systemWrite($method, $path), $this->okHandler());
+            self::assertSame(403, $response->getStatusCode(), $method . ' ' . $path);
+            self::assertSame('token_endpoint_forbidden', $this->errorCode($response));
+        }
+    }
+
+    private function systemWrite(string $method, string $path): ServerRequestInterface
+    {
+        return $this->bearer($method, $path, 'read_write')->withAttribute(
+            AuthMiddleware::ATTR_API_TOKEN,
+            ['scope' => 'read_write', 'allow_system_write' => true, 'system_write' => true],
+        );
+    }
+
     private function middleware(): ApiScopeMiddleware
     {
         return new ApiScopeMiddleware(new ResponseFactory());

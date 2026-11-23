@@ -5,6 +5,7 @@ import { useI18n } from 'vue-i18n'
 import { useAuthStore } from '@/stores/auth'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
 import Modal from '@/components/ui/Modal.vue'
+import BankPayoutDialog from './BankPayoutDialog.vue'
 import { formatMoney, formatDate } from '@/composables/useFormat'
 import { formatAccountNumber } from '@/utils/bankAccount'
 import { BTN_BASE, FILLED, OUTLINE, ICONS } from '@/components/ui/buttonStyles'
@@ -14,7 +15,8 @@ const props = defineProps<{ actions: BankTransactionActions; fallbackCurrency?: 
 const { t } = useI18n()
 const auth = useAuthStore()
 const { textDetail, ignoreTarget, ignoreNote, ignoring, ignoreError, closeIgnore, confirmIgnore,
-  unmatchTarget, unmatching, unmatchError, closeUnmatch, confirmUnmatch } = props.actions
+  unmatchTarget, unmatching, unmatchError, closeUnmatch, confirmUnmatch,
+  payoutTarget, savingPayout, payoutError, closePayout, confirmPayout } = props.actions
 const detailActions = computed<ActionItem[]>(() => {
   const tx = textDetail.value
   if (!tx) return []
@@ -29,6 +31,7 @@ const detailActions = computed<ActionItem[]>(() => {
     action('request', 'bank.document_request.action', 'doc', 'secondary', 'warning'),
     action('ignore', 'bank.ignore', 'x', 'overflow', 'neutral'),
     action('unmatch', tx.match_status === 'ignored' ? 'bank.unignore' : 'bank.unmatch', 'uturn', 'overflow', 'neutral'),
+    action('payout', 'bank.payout.action', 'link', 'advanced', 'neutral'),
   ]
 })
 
@@ -120,6 +123,9 @@ const transactionDetailFields = computed(() => {
         </div>
       </template>
     </Modal>
+
+    <BankPayoutDialog v-if="payoutTarget" :transaction="payoutTarget" :saving="savingPayout" :error="payoutError"
+      @close="closePayout" @confirm="confirmPayout" />
 
     <Modal v-if="unmatchTarget" :title="t(unmatchTarget.match_status === 'ignored' ? 'bank.unignore' : 'bank.unmatch')" width-class="max-w-md" @close="closeUnmatch">
       <p class="text-sm mb-3">{{ t(unmatchTarget.match_status === 'ignored' ? 'bank.unignore_confirm' : 'bank.unmatch_confirm') }}</p>

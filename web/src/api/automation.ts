@@ -41,6 +41,7 @@ export const AUTOMATION_NOTE_CODES = [
   'policy_suggest',
   'already_paid_verify',
   'overpaid_verify',
+  'dimension_required',
 ] as const
 
 export const AI_SOURCES = ['knn', 'llm'] as const

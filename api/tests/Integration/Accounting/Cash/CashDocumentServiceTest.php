@@ -504,14 +504,16 @@ final class CashDocumentServiceTest extends TestCase
         if ($eurId === 0) {
             self::markTestSkipped('Měna EUR není v číselníku.');
         }
+        // Korunová úhrada cizoměnové FV potřebuje kurz dokladu (CashForeignSettlementTest);
+        // faktura bez kurzu se z pokladny uhradit nedá.
         $eurInvoice = $this->saleInvoice('FV-2099-102', $client, 100.00, $eurId);
         try {
             $this->service->create($this->supplierId, $this->doc([
                 'purpose' => 'invoice_payment', 'doc_type' => 'in', 'total_amount' => 100.00, 'invoice_id' => $eurInvoice,
             ], $reg), $this->userId);
-            self::fail('Úhrada cizoměnové FV musí selhat.');
+            self::fail('Úhrada cizoměnové FV bez kurzu musí selhat.');
         } catch (CashException $e) {
-            self::assertSame('foreign_currency_invoice', $e->errorCode);
+            self::assertSame('fx_rate_unavailable', $e->errorCode);
         }
     }
 
@@ -542,7 +544,7 @@ final class CashDocumentServiceTest extends TestCase
             self::assertSame('partial_purchase_payment', $e->errorCode);
         }
 
-        // PF v EUR → chyba.
+        // PF v EUR bez kurzu → chyba (korunová úhrada s kurzem: CashForeignSettlementTest).
         $eurId = (int) ($this->db->pdo()->query("SELECT id FROM currencies WHERE code = 'EUR' ORDER BY id LIMIT 1")->fetchColumn() ?: 0);
         if ($eurId !== 0) {
             $pfEur = $this->purchaseInvoice('PF-2099-102', $vendor, 100.00, $eurId);
@@ -550,9 +552,9 @@ final class CashDocumentServiceTest extends TestCase
                 $this->service->create($this->supplierId, $this->doc([
                     'purpose' => 'purchase_payment', 'doc_type' => 'out', 'total_amount' => 100.00, 'purchase_invoice_id' => $pfEur,
                 ], $reg), $this->userId);
-                self::fail('Úhrada cizoměnové PF musí selhat.');
+                self::fail('Úhrada cizoměnové PF bez kurzu musí selhat.');
             } catch (CashException $e) {
-                self::assertSame('foreign_currency_invoice', $e->errorCode);
+                self::assertSame('fx_rate_unavailable', $e->errorCode);
             }
         }
     }
@@ -835,6 +837,53 @@ final class CashDocumentServiceTest extends TestCase
         } catch (CashException $e) {
             self::assertSame('validation', $e->errorCode);
         }
+    }
+
+    /**
+     * Tvrdé smazání pokladního dokladu mazalo zápis i s okruhem párování a rozpadem
+     * saldokonta. Platí stejné brány jako mazání zápisu v deníku.
+     */
+    public function testDeleteDocumentRefusesPairedOrAllocatedEntry(): void
+    {
+        $reg = $this->makeRegister();
+        $sale = $this->service->create($this->supplierId, $this->sale($reg, 1000.00), $this->userId);
+        $other = $this->service->create($this->supplierId, $this->sale($reg, 1000.00), $this->userId);
+        $entryId = (int) $this->service->get($this->supplierId, $sale['id'])['journal_entry_id'];
+        $otherEntryId = (int) $this->service->get($this->supplierId, $other['id'])['journal_entry_id'];
+        $pdo = $this->db->pdo();
+        $line = $pdo->prepare('SELECT line_no, account_id, side FROM journal_entry_lines WHERE supplier_id = ? AND entry_id = ? ORDER BY line_no LIMIT 1');
+        $line->execute([$this->supplierId, $entryId]);
+        $cashLine = $line->fetch(PDO::FETCH_ASSOC);
+        $line->execute([$this->supplierId, $otherEntryId]);
+        $otherLine = $line->fetch(PDO::FETCH_ASSOC);
+
+        $pdo->prepare('INSERT INTO journal_line_pairings (supplier_id, account_id) VALUES (?, ?)')->execute([$this->supplierId, $cashLine['account_id']]);
+        $pairingId = (int) $pdo->lastInsertId();
+        $item = $pdo->prepare('INSERT INTO journal_line_pairing_items (supplier_id, entry_id, line_no, pairing_id, account_id) VALUES (?, ?, ?, ?, ?)');
+        $item->execute([$this->supplierId, $entryId, $cashLine['line_no'], $pairingId, $cashLine['account_id']]);
+        $item->execute([$this->supplierId, $otherEntryId, $otherLine['line_no'], $pairingId, $otherLine['account_id']]);
+        try {
+            $this->service->deleteDocument($this->supplierId, $sale['id']);
+            self::fail('Spárovaný zápis pokladního dokladu se nesmí smazat.');
+        } catch (PostingException $e) {
+            self::assertSame('entry_paired', $e->errorCode);
+        }
+        self::assertNotNull($this->journal->find($entryId, $this->supplierId));
+        self::assertSame(2, $this->countDocuments($reg));
+
+        $pdo->prepare('DELETE FROM journal_line_pairings WHERE supplier_id = ? AND id = ?')->execute([$this->supplierId, $pairingId]);
+        $pdo->prepare(
+            "INSERT INTO journal_settlement_allocations (supplier_id, entry_id, line_no, account_id, side, doc_type, doc_id, amount, kind)
+             VALUES (?, ?, ?, ?, ?, 'other_item', 1, 100, 'settlement')"
+        )->execute([$this->supplierId, $entryId, $cashLine['line_no'], $cashLine['account_id'], $cashLine['side']]);
+        try {
+            $this->service->deleteDocument($this->supplierId, $sale['id']);
+            self::fail('Zápis s rozpadem saldokonta se nesmí smazat.');
+        } catch (PostingException $e) {
+            self::assertSame('allocation_saldo_in_use', $e->errorCode);
+        }
+        self::assertNotNull($this->journal->find($entryId, $this->supplierId));
+        self::assertSame(2, $this->countDocuments($reg));
     }
 
     public function testDeleteDocumentInClosedPeriodRefused(): void

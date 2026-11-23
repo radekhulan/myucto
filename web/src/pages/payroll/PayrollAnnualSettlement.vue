@@ -41,7 +41,8 @@ import { apiErrorMessage } from '@/api/errors'
 import PayrollJmhzReturnBar from '@/pages/payroll/PayrollJmhzReturnBar.vue'
 import { useAuthStore } from '@/stores/auth'
 import { useToast } from '@/composables/useToast'
-import { btnFilledSm, btnOutline, btnOutlineSm, disabledTitle, BTN_DISABLED_NOTE, ICONS } from '@/components/ui/buttonStyles'
+import { btnFilled, btnFilledSm, btnOutline, btnOutlineSm, disabledTitle, BTN_DISABLED_NOTE, ICONS } from '@/components/ui/buttonStyles'
+import Modal from '@/components/ui/Modal.vue'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import PaginationBar from '@/components/ui/PaginationBar.vue'
@@ -59,8 +60,12 @@ const toast = useToast()
  * loňský — ne letošní, který ještě neskončil.
  */
 // Rok z odkazu (hlídač termínů vede rovnou na zúčtování konkrétního roku).
-const queryYear = Number(useRoute().query.year)
+const routeQuery = useRoute().query
+const queryYear = Number(routeQuery.year)
 const hasQueryYear = Number.isInteger(queryYear) && queryYear >= 2000 && queryYear <= 2199
+// Zúžení z odkazu: kontrola mzdového běhu sem vede na nerozhodnuté žádosti.
+const LIST_STATES: PayrollAnnualSettlementListState[] = ['all', 'requested', 'unsettled', 'settled', 'request_undecided']
+const queryState = LIST_STATES.find(item => item === routeQuery.state) ?? null
 const year = ref(hasQueryYear ? queryYear : new Date().getFullYear() - 1)
 /** Rok z odkazu se respektuje; výchozí se jednou srovná na začátek vedení mezd. */
 let defaultYearResolved = hasQueryYear
@@ -86,7 +91,7 @@ const pageSize = 25
 const total = ref(0)
 const offset = ref(0)
 const search = ref('')
-const state = ref<PayrollAnnualSettlementListState>('all')
+const state = ref<PayrollAnnualSettlementListState>(queryState ?? 'all')
 const currentPage = computed(() => Math.floor(offset.value / pageSize) + 1)
 const previewLoading = ref(false)
 const saving = ref(false)
@@ -98,6 +103,17 @@ let loadSequence = 0
  * člověka, kterého uživatel dávno opustil.
  */
 let pendingFocusPersonId: number | null = payrollQueryId(useRoute().query, 'person')
+/** `?select=all` z odkazu nálezu: po prvním načtení vybrat všechny odpovídající filtru. */
+let pendingSelectAll = routeQuery.select === 'all'
+/**
+ * `?employees=1,2,3` z kontroly před během nebo z testu JMHZ: seznam jen
+ * s osobami hlášení. Bez toho stránka nabídla všechny nerozhodnuté osoby roku.
+ */
+const linkedEmployeeIds = ref<number[]>(
+  typeof routeQuery.employees === 'string' && /^\d+(,\d+)*$/.test(routeQuery.employees)
+    ? [...new Set(routeQuery.employees.split(',').map(Number).filter(id => id > 0))]
+    : [],
+)
 
 const form = ref({
   request_status: 'unknown' as PayrollAnnualSettlementRequestStatus,
@@ -504,7 +520,7 @@ async function load(): Promise<void> {
     const response = await payrollApi.listAnnualSettlements(
       year.value,
       { limit: pageSize, offset: offset.value },
-      { search: search.value.trim(), state: state.value },
+      listFilters(),
     )
     if (sequence !== loadSequence) return
     // Výchozí rok nesmí ležet před začátkem vedení mezd v MyÚčtu (Q8-43):
@@ -529,6 +545,12 @@ async function load(): Promise<void> {
       const focused = pendingFocusPersonId
       pendingFocusPersonId = null
       void select(focused)
+    }
+    // Odkaz z kontroly před během (`?select=all`) rovnou vybere všechny, kdo
+    // zúžení odpovídají, aby hromadné „nepožádal" bylo jedno kliknutí.
+    if (pendingSelectAll) {
+      pendingSelectAll = false
+      if (response.total > 0) void selectAllMatching()
     }
   } catch (error) {
     if (sequence !== loadSequence) return
@@ -1016,15 +1038,53 @@ function toggleBulkPage(): void {
   bulkSelected.value = next
 }
 
-async function bulkSetRequestStatus(status: 'requested' | 'not_requested'): Promise<void> {
+/**
+ * Vybrat VŠECHNY, kdo odpovídají filtru, ne jen načtenou stránku.
+ *
+ * Odkaz z kontroly před během „Nastavit nepožádal (5)" sem vedl na zúžený
+ * seznam, ve kterém nebyl nikdo vybraný; u stovek lidí pak účetní zaškrtávala
+ * stránku po stránce. Server stránkuje, takže se dotáhnou jen ID dalších
+ * stránek téhož filtru.
+ */
+const BULK_SELECT_PAGE = 200
+const bulkSelectingAll = ref(false)
+
+async function selectAllMatching(): Promise<void> {
+  if (bulkSelectingAll.value) return
+  bulkSelectingAll.value = true
+  try {
+    const next = new Set(bulkSelected.value)
+    for (let fetched = 0, expected = 1; fetched < expected;) {
+      const page = await payrollApi.listAnnualSettlements(
+        year.value,
+        { limit: BULK_SELECT_PAGE, offset: fetched },
+        listFilters(),
+      )
+      for (const item of page.items) next.add(item.employee_id)
+      expected = page.total
+      if (page.items.length === 0) break
+      fetched += page.items.length
+    }
+    bulkSelected.value = next
+  } catch (error) {
+    toast.error(apiErrorMessage(error, t('payroll.annual_settlement.load_failed')))
+  } finally {
+    bulkSelectingAll.value = false
+  }
+}
+
+/** Stav žádosti čekající na potvrzení v dialogu; `null` = dialog je zavřený. */
+const pendingBulkStatus = ref<'requested' | 'not_requested' | null>(null)
+
+function bulkSetRequestStatus(status: 'requested' | 'not_requested'): void {
   if (bulkRequestSaving.value || bulkSelected.value.size === 0) return
-  const count = bulkSelected.value.size
-  const label = t(`payroll.annual_settlement.request_status_options.${status}`)
-  if (!window.confirm(t('payroll.annual_settlement.bulk_request.confirm', {
-    count,
-    status: label,
-    year: year.value,
-  }))) return
+  pendingBulkStatus.value = status
+}
+
+async function confirmBulkRequestStatus(): Promise<void> {
+  const status = pendingBulkStatus.value
+  if (status === null || bulkRequestSaving.value || bulkSelected.value.size === 0) return
+  pendingBulkStatus.value = null
   bulkRequestSaving.value = true
   try {
     const response = await payrollApi.bulkSetAnnualSettlementRequestStatus(
@@ -1227,6 +1287,31 @@ function applyFilters(): void {
   void load()
 }
 
+/** Seznam je zúžený stavem nebo hledáním; prázdno pak neznamená firmu bez lidí. */
+const listNarrowed = computed(() =>
+  state.value !== 'all' || search.value.trim() !== '' || linkedEmployeeIds.value.length > 0)
+
+function clearNarrowing(): void {
+  state.value = 'all'
+  search.value = ''
+  linkedEmployeeIds.value = []
+  applyFilters()
+}
+
+function listFilters(): { search: string, state: PayrollAnnualSettlementListState, employees?: number[] } {
+  return {
+    search: search.value.trim(),
+    state: state.value,
+    ...(linkedEmployeeIds.value.length > 0 ? { employees: linkedEmployeeIds.value } : {}),
+  }
+}
+
+function clearLinkedEmployees(): void {
+  linkedEmployeeIds.value = []
+  bulkSelected.value = new Set()
+  applyFilters()
+}
+
 function goToPage(nextPage: number): void {
   offset.value = Math.max(0, (nextPage - 1) * pageSize)
   void load()
@@ -1256,7 +1341,8 @@ const saved = useSavedFilters('payroll-annual-settlement', {
 })
 
 onMounted(async () => {
-  if (await saved.applyDefaultIfAny()) return
+  // Zúžení z odkazu má přednost před uloženým výchozím pohledem.
+  if (queryState === null && await saved.applyDefaultIfAny()) return
   await load()
 })
 </script>
@@ -1435,12 +1521,30 @@ onMounted(async () => {
             <option value="requested">{{ t('payroll.annual_settlement.states.requested') }}</option>
             <option value="unsettled">{{ t('payroll.annual_settlement.states.unsettled') }}</option>
             <option value="settled">{{ t('payroll.annual_settlement.states.settled') }}</option>
+            <option value="request_undecided">{{ t('payroll.annual_settlement.states.request_undecided') }}</option>
           </select>
         </label>
         <div class="flex flex-wrap items-center gap-2 pb-0.5">
           <SavedFiltersMenu :ctrl="saved" />
         </div>
       </div>
+    </div>
+
+    <div
+      v-if="linkedEmployeeIds.length > 0"
+      class="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-payroll-500/30 bg-payroll-50 px-4 py-2 text-sm text-neutral-800"
+      data-test="annual-settlement-linked-employees"
+    >
+      <span>{{ t('payroll.annual_settlement.linked_employees', { count: linkedEmployeeIds.length }, linkedEmployeeIds.length) }}</span>
+      <button
+        type="button"
+        :class="[btnOutlineSm('neutral'), 'whitespace-nowrap']"
+        data-test="annual-settlement-linked-employees-clear"
+        @click="clearLinkedEmployees"
+      >
+        <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.x" /></svg>
+        {{ t('payroll.annual_settlement.linked_employees_clear') }}
+      </button>
     </div>
 
     <div class="grid gap-6 lg:grid-cols-[minmax(0,22rem)_minmax(0,1fr)]">
@@ -1459,6 +1563,17 @@ onMounted(async () => {
             >
             {{ t('payroll.annual_settlement.bulk_request.select_page') }}
           </label>
+          <button
+            v-if="total > items.length && bulkSelected.size < total"
+            type="button"
+            data-test="annual-settlement-select-matching"
+            :class="[btnOutlineSm('neutral'), 'whitespace-nowrap']"
+            :disabled="bulkSelectingAll"
+            @click="selectAllMatching"
+          >
+            <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.check" /></svg>
+            {{ t('payroll.annual_settlement.bulk_request.select_matching', { count: total }, total) }}
+          </button>
           <template v-if="bulkSelected.size > 0">
             <span class="text-xs font-medium text-neutral-700" data-test="annual-settlement-bulk-request-count">
               {{ t('payroll.annual_settlement.bulk_request.selected', { count: bulkSelected.size }) }}
@@ -1503,6 +1618,21 @@ onMounted(async () => {
           accent="primary"
           :cta="t('payroll.annual_settlement.reload')"
           @action="load"
+        />
+        <!-- Prázdný VÝSLEDEK FILTRU není prázdná firma: lidé existují, jen zúžení nikoho nenašlo. -->
+        <EmptyState
+          v-else-if="items.length === 0 && listNarrowed"
+          variant="filtered"
+          accent="primary"
+          data-test="annual-settlement-empty-filtered"
+          :title="t(state === 'request_undecided' && search.trim() === ''
+            ? 'payroll.annual_settlement.no_undecided_title'
+            : 'payroll.annual_settlement.no_match_title')"
+          :message="t(state === 'request_undecided' && search.trim() === ''
+            ? 'payroll.annual_settlement.no_undecided_description'
+            : 'payroll.annual_settlement.no_match_description', { year })"
+          :cta="t('payroll.annual_settlement.show_all')"
+          @action="clearNarrowing"
         />
         <EmptyState
           v-else-if="items.length === 0"
@@ -3073,5 +3203,39 @@ onMounted(async () => {
         </template>
       </section>
     </div>
+
+    <!-- Potvrzení hromadné změny stavu žádosti; dřív nativní confirm() prohlížeče. -->
+    <Modal
+      v-if="pendingBulkStatus"
+      :title="t('payroll.annual_settlement.bulk_request.confirm_title')"
+      width-class="max-w-lg"
+      @close="pendingBulkStatus = null"
+    >
+      <p class="text-sm text-neutral-700" data-test="annual-settlement-bulk-confirm">
+        {{ t('payroll.annual_settlement.bulk_request.confirm', {
+          count: bulkSelected.size,
+          status: t(`payroll.annual_settlement.request_status_options.${pendingBulkStatus}`),
+          year,
+        }) }}
+      </p>
+      <div class="mt-5 flex flex-wrap justify-end gap-2">
+        <button type="button" :class="btnOutline('neutral')" @click="pendingBulkStatus = null">
+          <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.x" /></svg>
+          {{ t('common.cancel') }}
+        </button>
+        <button
+          type="button"
+          :class="btnFilled(pendingBulkStatus === 'requested' ? 'success' : 'warning')"
+          :disabled="bulkRequestSaving"
+          data-test="annual-settlement-bulk-confirm-submit"
+          @click="confirmBulkRequestStatus"
+        >
+          <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="pendingBulkStatus === 'requested' ? ICONS.check : ICONS.x" /></svg>
+          {{ t(pendingBulkStatus === 'requested'
+            ? 'payroll.annual_settlement.bulk_request.set_requested'
+            : 'payroll.annual_settlement.bulk_request.set_not_requested') }}
+        </button>
+      </div>
+    </Modal>
   </div>
 </template>

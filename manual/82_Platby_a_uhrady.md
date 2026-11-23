@@ -1,6 +1,6 @@
 # 82. Mzdové příkazy a úhrady
 
-> Návod, jak z uzavřené mzdy připravit platby čistých mezd, daní, pojistného
+> Návod, jak ze schválené mzdy připravit platby čistých mezd, daní, pojistného
 > a srážek, poslat je do banky a doložit jejich úhradu. Pro mzdové účetní
 > a každého, kdo ve firmě platí výplaty a odvody.
 
@@ -44,7 +44,9 @@ Kapitolu otevřete, když:
 
 1. Na kartě zaúčtovaného běhu klikněte na **Připravit platby**. Otevře se
    `Mzdy → Mzdové příkazy a úhrady` ve správném období se závazky běhu.
-   (Na stránce lze totéž spustit tlačítkem **Připravit závazky**.)
+   Na stránce plateb lze tlačítkem **Připravit závazky** připravit závazky
+   už ze schválené revize, i když ještě není zaúčtovaná. Účetní návaznost
+   ověřte samostatně; příprava plateb nezaúčtuje mzdu.
 2. Zkontrolujte u každého závazku příjemce, účet, částku, splatnost
    a platební symboly. Součet porovnejte se schváleným během a s účetními
    závazky.

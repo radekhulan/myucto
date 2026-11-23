@@ -126,6 +126,9 @@ final class LicenseService
 
     private readonly LicenseConsistency $consistency;
 
+    /** @var array<string,array<string,bool|int>> */
+    private array $paramsMemo = [];
+
     public function current(): LicenseState
     {
         if (!$this->db->hasTable('license')) {
@@ -159,7 +162,7 @@ final class LicenseService
             }
             $row = $this->loadRow();
             $fingerprint = $this->ensureFingerprint($row);
-            $usersActive = $this->countActiveUsers();
+            $usersActive = $this->countActiveUsers($this->writeTokensCountIn($row));
             $companiesActive = $this->countCompanies();
             $payrollEmployeesActive = $this->countActivePayrollEmployees();
             $payrollUsersActive = $this->countActivePayrollUsers();
@@ -307,7 +310,7 @@ final class LicenseService
                     (string) ($row['instance_id'] ?? ''),
                     $fingerprint,
                     $this->appVersion(),
-                    $this->countActiveUsers(),
+                    $this->countActiveUsers($this->writeTokensCountIn($row)),
                     $this->countCompanies(),
                 );
             } catch (LicenseNetworkException $e) {
@@ -450,7 +453,7 @@ final class LicenseService
         }
 
         $counter = (int) $row['counter'] + 1;
-        $usersActive = $this->countActiveUsers();
+        $usersActive = $this->countActiveUsers($this->writeTokensCountIn($row));
         $companiesActive = $this->countCompanies();
         $payrollEmployeesActive = $this->countActivePayrollEmployees();
         $payrollUsersActive = $this->countActivePayrollUsers();
@@ -1689,6 +1692,10 @@ final class LicenseService
         $state = ((string) ($payload['status'] ?? 'ok')) === 'overage'
             ? LicenseState::OVERAGE
             : LicenseState::ACTIVE;
+        $params = self::paramsOf($payload);
+        if (($params[LicenseState::PARAM_COUNT_WRITE_TOKENS_AS_SEATS] ?? false) === true) {
+            $usersActive = $this->countActiveUsers(true);
+        }
 
         return new LicenseState(
             $state, $instanceId, $tier, $maxCompanies, $usersLicensed,
@@ -1696,6 +1703,7 @@ final class LicenseService
             $perpetual, $subscription, $commercial, $this->isManaged(),
             $payrollEnabled, $payrollTier, $payrollMaxEmployees, $payrollUsersLicensed,
             $payrollEmployeesActive, $payrollUsersActive,
+            $params,
         );
     }
 
@@ -1752,7 +1760,11 @@ final class LicenseService
         return hash('sha256', $host . '|' . $dbName . '|' . $appUrl);
     }
 
-    public function countActiveUsers(): int
+    /**
+     * @param bool $includeWriteTokens přičíst tokeny se zápisem; rozhoduje
+     *                                 parametr licence, viz {@see writeTokensCountIn()}
+     */
+    public function countActiveUsers(bool $includeWriteTokens = false): int
     {
         if (!$this->db->hasTable('users')) {
             return 0;
@@ -1760,11 +1772,84 @@ final class LicenseService
 
         // Licenční místa se přepočítávají na každý request, ale mění se jen při
         // zásahu do users/roles — a ten cache invaliduje na úrovni PDO.
-        return (int) $this->cache->remember(
+        $seats = (int) $this->cache->remember(
             EntityCache::GROUP_USER,
             'license:active_users',
             fn (): int => $this->queryActiveUsers(),
         );
+
+        // Tokeny se zápisem se přičítají mimo cache: `api_tokens` cache
+        // neinvaliduje a platnost tokenu navíc běží časem (expires_at).
+        if ($includeWriteTokens) {
+            $seats += (new SeatPolicy($this->db))->countActiveWriteTokens();
+        }
+        return $seats;
+    }
+
+    /**
+     * Započítávají se podle parametrů licence uložené v `$row` tokeny se
+     * zápisem do míst? Pro hlášení počtu licenčnímu serveru.
+     *
+     * Rozhoduje podepsaný parametr, platnost tokenu se tu neposuzuje.
+     * Instalace bez licence žádné parametry nemá a tokeny nepočítá.
+     *
+     * @param array<string,mixed> $row
+     */
+    private function writeTokensCountIn(array $row): bool
+    {
+        $params = $this->verifiedParams($row);
+        return ($params[LicenseState::PARAM_COUNT_WRITE_TOKENS_AS_SEATS] ?? false) === true;
+    }
+
+    /**
+     * Parametry z ověřeného tokenu této instalace; neověřený token = žádné.
+     *
+     * @param array<string,mixed> $row
+     * @return array<string,bool|int>
+     */
+    private function verifiedParams(array $row): array
+    {
+        $token = (string) ($row['token'] ?? '');
+        if ($token === '' || $this->keyOf($row) === null || $this->consistency->isDegraded()) {
+            return [];
+        }
+        $memoKey = hash('sha256', $token);
+        if (!array_key_exists($memoKey, $this->paramsMemo)) {
+            $payload = $this->verifier->verify($token, $this->publicKeys());
+            $this->paramsMemo[$memoKey] = $payload !== null
+                && (string) ($payload['iid'] ?? '') === (string) ($row['instance_id'] ?? '')
+                ? self::paramsOf($payload)
+                : [];
+        }
+        return $this->paramsMemo[$memoKey];
+    }
+
+    /**
+     * Obecné parametry licence z payloadu tokenu (`params`).
+     *
+     * Bere jen skalární bool/int hodnoty s kódem ve tvaru snake_case. Cokoli
+     * jiného se zahodí, takže neznámý nebo poškozený parametr nic nezpřísní
+     * ani neuvolní.
+     *
+     * @param array<string,mixed> $payload
+     * @return array<string,bool|int>
+     */
+    private static function paramsOf(array $payload): array
+    {
+        $raw = $payload['params'] ?? null;
+        if (!is_array($raw)) {
+            return [];
+        }
+        $params = [];
+        foreach ($raw as $code => $value) {
+            if (!is_string($code) || preg_match('/^[a-z][a-z0-9_]{0,63}$/', $code) !== 1) {
+                continue;
+            }
+            if (is_bool($value) || is_int($value)) {
+                $params[$code] = $value;
+            }
+        }
+        return $params;
     }
 
     /**

@@ -1,11 +1,12 @@
 <script setup lang="ts">
 import { computed, onMounted, onBeforeUnmount, ref, watch } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import {
   purchaseInvoiceSubmissionsApi,
   type PurchaseInvoiceSubmission,
   type PurchaseInvoiceSubmissionKindHint,
+  type PurchaseInvoiceSubmissionSource,
   type PurchaseInvoiceSubmissionStatus,
   type SubmissionMoveTargets,
   type SubmissionUploadResult,
@@ -14,26 +15,37 @@ import { useSupplierStore } from '@/stores/supplier'
 import { useAuthStore } from '@/stores/auth'
 import { useToast } from '@/composables/useToast'
 import { apiErrorMessage } from '@/api/errors'
-import { btnFilled, btnOutline } from '@/components/ui/buttonStyles'
+import { btnFilled, btnOutline, ICONS } from '@/components/ui/buttonStyles'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import PdfDropzone from '@/components/purchase/PdfDropzone.vue'
 import CapturePhotoButton from '@/components/upload/CapturePhotoButton.vue'
 import ExtractionReviewModal from '@/components/purchase/ExtractionReviewModal.vue'
 import DimensionFields from '@/components/dimensions/DimensionFields.vue'
 import DimensionChips from '@/components/dimensions/DimensionChips.vue'
+import DocumentPreviewSplit from '@/components/documents/DocumentPreviewSplit.vue'
 import SubmissionPreview from '@/components/documents/SubmissionPreview.vue'
 import { useDimensions } from '@/composables/useDimensions'
+import { useSidePreview } from '@/composables/useSidePreview'
+import { useIsPhone } from '@/composables/useIsPhone'
 import type { DimensionMap } from '@/api/dimensions'
 
 const { t } = useI18n()
 const router = useRouter()
+const route = useRoute()
 const supplierStore = useSupplierStore()
 const auth = useAuthStore()
 const toast = useToast()
+// Fronta je třídění podle obsahu dokladu, proto je náhled ve výchozím stavu otevřený.
+const preview = useSidePreview('purchase_invoices', 'inbox_preview_open', { defaultOpen: true })
 
 const items = ref<PurchaseInvoiceSubmission[]>([])
 const selected = ref<PurchaseInvoiceSubmission | null>(null)
 const status = ref<PurchaseInvoiceSubmissionStatus | ''>('submitted')
+const SOURCES: PurchaseInvoiceSubmissionSource[] = ['portal', 'document_request', 'staff', 'email']
+const initialSource = String(route.query.source ?? '')
+const source = ref<PurchaseInvoiceSubmissionSource | ''>(
+  (SOURCES as string[]).includes(initialSource) ? initialSource as PurchaseInvoiceSubmissionSource : '',
+)
 const reason = ref('')
 const loading = ref(true)
 const acting = ref(false)
@@ -58,6 +70,7 @@ const ALLOWED_FILES = '.pdf,.jpg,.jpeg,.png,.isdoc,.xml,.isdocx,application/pdf,
 const MAX_FILE_BYTES = 50 * 1024 * 1024
 
 const canWrite = computed(() => auth.canWrite('documents.inbox'))
+const canOpenPortal = computed(() => auth.canRead('documents.submit'))
 const canCreateInvoice = computed(() => auth.canWrite('purchase_invoices.create'))
 const canDelete = computed(() => auth.canWrite('documents.inbox.delete'))
 /** U dokladu, který si účetní nahrála sama, není komu psát „co doplnit". */
@@ -130,23 +143,27 @@ function canReview(item: PurchaseInvoiceSubmission): boolean {
     && item.replacement_submission_id === null && item.purchase_invoice_id === null
 }
 const canReviewSelected = computed(() => canWrite.value && selected.value !== null && canReview(selected.value))
-const canDeleteSelected = computed(() =>
-  canDelete.value
-  && selected.value !== null
-  && selected.value.status !== 'processed'
-  && selected.value.status !== 'processing',
-)
+/** Přerušené vytěžení (`processing_stale`) jde spustit znovu i smazat jako čekající podání. */
+function canExtract(item: PurchaseInvoiceSubmission): boolean {
+  return item.status === 'submitted' || !!item.processing_stale
+}
+function canDeleteItem(item: PurchaseInvoiceSubmission): boolean {
+  return item.status !== 'processed' && (item.status !== 'processing' || !!item.processing_stale)
+}
+const canDeleteSelected = computed(() => canDelete.value && selected.value !== null && canDeleteItem(selected.value))
 
 /** Hromadný výběr (checkboxy) je nezávislý na dokladu otevřeném v náhledu. */
 const checkedIds = ref<Set<number>>(new Set())
+// Jednorázová volba vytěžení: doklad bez rozpisu položek, jeden řádek na sazbu DPH.
+const extractWithoutItems = ref(false)
 const bulkReason = ref('')
 const bulkDims = ref<DimensionMap>({})
 const bulkProgress = ref<{ done: number; total: number } | null>(null)
 const checkedItems = computed(() => items.value.filter(i => checkedIds.value.has(i.id)))
 const allChecked = computed(() => items.value.length > 0 && checkedItems.value.length === items.value.length)
-const bulkCanExtract = computed(() => canWrite.value && canCreateInvoice.value && checkedItems.value.some(i => i.status === 'submitted'))
+const bulkCanExtract = computed(() => canWrite.value && canCreateInvoice.value && checkedItems.value.some(canExtract))
 const bulkCanReject = computed(() => canWrite.value && checkedItems.value.some(canReview))
-const bulkCanDelete = computed(() => canDelete.value && checkedItems.value.some(i => i.status !== 'processed' && i.status !== 'processing'))
+const bulkCanDelete = computed(() => canDelete.value && checkedItems.value.some(canDeleteItem))
 const bulkCanDimensions = computed(() => canWrite.value && dims.canEdit.value && dims.documentTypes.value.length > 0)
 const bulkNeedsReason = computed(() =>
   checkedItems.value.some(canReview),
@@ -198,14 +215,14 @@ function reportBulk(result: { ok: number; failed: number; lastError: string }, s
 
 async function bulkExtract() {
   if (acting.value || !bulkCanExtract.value) return
-  const targets = checkedItems.value.filter(i => i.status === 'submitted')
+  const targets = checkedItems.value.filter(canExtract)
   const skipped = checkedItems.value.length - targets.length
   const invoiceIds: number[] = []
   let duplicates = 0
   acting.value = true
   try {
     const result = await runBulk(targets, async item => {
-      const fresh = await purchaseInvoiceSubmissionsApi.extract(item.id)
+      const fresh = await purchaseInvoiceSubmissionsApi.extract(item.id, extractWithoutItems.value)
       if (fresh.duplicate) duplicates++
       else if (fresh.purchase_invoice_id) invoiceIds.push(fresh.purchase_invoice_id)
     })
@@ -244,7 +261,7 @@ async function bulkReject() {
 
 async function bulkDelete() {
   if (acting.value || !bulkCanDelete.value) return
-  const targets = checkedItems.value.filter(i => i.status !== 'processed' && i.status !== 'processing')
+  const targets = checkedItems.value.filter(canDeleteItem)
   const skipped = checkedItems.value.length - targets.length
   if (!confirm(t('purchase_submissions.bulk_delete_confirm', { n: targets.length }))) return
   acting.value = true
@@ -283,7 +300,7 @@ async function load(keepSelection = true) {
   loading.value = true
   error.value = ''
   try {
-    const page = await purchaseInvoiceSubmissionsApi.list(status.value || undefined)
+    const page = await purchaseInvoiceSubmissionsApi.list(status.value || undefined, source.value || undefined)
     if (currentContext !== context || request !== loadRequest) return
     items.value = page.items
     const present = new Set(items.value.map(i => i.id))
@@ -415,7 +432,7 @@ async function extract() {
   if (!selected.value || acting.value) return
   acting.value = true
   try {
-    const fresh = await purchaseInvoiceSubmissionsApi.extract(selected.value.id)
+    const fresh = await purchaseInvoiceSubmissionsApi.extract(selected.value.id, extractWithoutItems.value)
     selected.value = fresh
     if (fresh.duplicate) {
       // Doklad zůstane vybraný i s tlačítkem na existující fakturu, místo aby z fronty
@@ -517,10 +534,153 @@ function kindLabel(item: PurchaseInvoiceSubmission): string {
     : t('purchase_submissions.kind_other')
 }
 
+// ── Telefon: seznam → detail přes celou plochu ──────────────────────────────
+// Na telefonu se detail otevře až klepnutím na doklad, přes celou obsahovou plochu
+// mezi hlavičkou a spodní lištou. Otevřený doklad nese adresa (`?doc=ID`), takže
+// systémové Zpět detail zavře. Mimo telefon se nic z toho neuplatní.
+const isPhone = useIsPhone()
+const phoneOpen = ref(false)
+const phonePreviewOpen = ref(true)
+const phoneIndex = computed(() => selected.value ? items.value.findIndex(i => i.id === selected.value?.id) : -1)
+const reasonInput = ref<HTMLTextAreaElement | null>(null)
+const moveSection = ref<HTMLElement | null>(null)
+/** Doklad zobrazený v detailu a jeho pořadí; po akci, která ho ze seznamu odebere, se pokračuje dalším. */
+let phoneShownId: number | null = null
+let phoneLastIndex = 0
+/** Detail přidal záznam do historie, zavření se pak vrací zpět místo dalšího záznamu. */
+let phonePushed = false
+const SWIPE_MIN_PX = 64
+let swipe: { id: number; x: number; y: number } | null = null
+
+function docQuery(id: number | null) {
+  const query = { ...route.query }
+  delete query.doc
+  return id === null ? query : { ...query, doc: String(id) }
+}
+
+function showPhoneItem(item: PurchaseInvoiceSubmission) {
+  selected.value = item
+  phoneShownId = item.id
+  phoneLastIndex = Math.max(0, items.value.findIndex(i => i.id === item.id))
+}
+
+function openPhoneDetail(item: PurchaseInvoiceSubmission) {
+  showPhoneItem(item)
+  phoneOpen.value = true
+  if (route.query.doc !== String(item.id)) {
+    phonePushed = true
+    void router.push({ query: docQuery(item.id) })
+  }
+}
+
+function stepPhone(delta: number) {
+  const next = items.value[phoneIndex.value + delta]
+  if (!next || phoneIndex.value < 0) return
+  showPhoneItem(next)
+  if (route.query.doc !== undefined) void router.replace({ query: docQuery(next.id) })
+}
+
+function closePhoneDetail() {
+  phoneOpen.value = false
+  phoneShownId = null
+  if (route.query.doc === undefined) return
+  if (phonePushed) {
+    phonePushed = false
+    router.back()
+  } else {
+    void router.replace({ query: docQuery(null) })
+  }
+}
+
+function onSelectItem(item: PurchaseInvoiceSubmission) {
+  if (isPhone.value) openPhoneDetail(item)
+  else selected.value = item
+}
+
+/** Doklad z adresy (návrat Zpět, odkaz) otevře detail, neexistující odkaz se z adresy uklidí. */
+function syncPhoneFromRoute() {
+  if (!isPhone.value || loading.value) return
+  const doc = route.query.doc
+  if (doc === undefined || doc === null) {
+    if (phoneOpen.value) {
+      phoneOpen.value = false
+      phoneShownId = null
+    }
+    phonePushed = false
+    return
+  }
+  // Otevřený detail mění doklad v adrese sám (`replace`), tady by jen dobíhal.
+  if (phoneOpen.value) return
+  const item = items.value.find(i => String(i.id) === String(doc))
+  if (item) {
+    showPhoneItem(item)
+    phoneOpen.value = true
+  } else {
+    void router.replace({ query: docQuery(null) })
+  }
+}
+
+watch(() => route.query.doc, syncPhoneFromRoute)
+// Jen první otevření z adresy; otevřený detail si adresu po akci přepisuje sám
+// a `route` se mění až po dokončení navigace.
+watch(loading, isLoading => { if (!isLoading && !phoneOpen.value) syncPhoneFromRoute() })
+watch(items, list => {
+  if (!isPhone.value || !phoneOpen.value || phoneShownId === null) return
+  if (list.some(i => i.id === phoneShownId)) return
+  const next = list[Math.min(phoneLastIndex, list.length - 1)]
+  if (next) {
+    showPhoneItem(next)
+    if (route.query.doc !== undefined) void router.replace({ query: docQuery(next.id) })
+  } else {
+    closePhoneDetail()
+  }
+})
+
+function focusReason() {
+  reasonInput.value?.scrollIntoView({ block: 'center', behavior: 'smooth' })
+  reasonInput.value?.focus({ preventScroll: true })
+}
+
+function scrollToMove() {
+  moveSection.value?.scrollIntoView({ block: 'center', behavior: 'smooth' })
+}
+
+// Swipe vodorovně = předchozí/další doklad. Svislý pohyb nechává prohlížeči
+// (touch-action: pan-y, scroll pak pošle pointercancel); náhled a pole formuláře
+// gesto nespouští, aby nekolidovalo s posunem dokumentu a výběrem textu.
+function onSwipeStart(event: PointerEvent) {
+  if (event.pointerType === 'mouse' || !event.isPrimary) return
+  if ((event.target as HTMLElement | null)?.closest?.('input, textarea, select, [data-swipe-ignore]')) return
+  swipe = { id: event.pointerId, x: event.clientX, y: event.clientY }
+}
+
+function onSwipeEnd(event: PointerEvent) {
+  if (!swipe || swipe.id !== event.pointerId) return
+  const dx = event.clientX - swipe.x
+  const dy = event.clientY - swipe.y
+  swipe = null
+  if (acting.value || Math.abs(dx) < SWIPE_MIN_PX || Math.abs(dx) < Math.abs(dy) * 2) return
+  stepPhone(dx < 0 ? 1 : -1)
+}
+
+function onSwipeCancel() {
+  swipe = null
+}
+
+/** Posuvná plocha detailu na telefonu; mimo telefon je obal `display: contents` a rozložení se nemění. */
+const phoneScrollAttrs = {
+  class: 'flex-1 min-h-0 overflow-y-auto overscroll-contain p-3 space-y-3 touch-pan-y touch-pinch-zoom',
+  'data-testid': 'inbox-phone-scroll',
+  onPointerdown: onSwipeStart,
+  onPointerup: onSwipeEnd,
+  onPointercancel: onSwipeCancel,
+}
+
 onMounted(() => { void load(false); void dims.load() })
-watch(status, () => { selected.value = null; checkedIds.value = new Set(); void load(false) })
+watch([status, source], () => { selected.value = null; checkedIds.value = new Set(); void load(false) })
 watch(() => selected.value?.id, () => { reason.value = ''; moveOpen.value = false; moveTargets.value = null })
 watch(() => supplierStore.currentSupplierId, () => {
+  if (phoneOpen.value) closePhoneDetail()
   context++
   items.value = []
   selected.value = null
@@ -538,18 +698,43 @@ onBeforeUnmount(() => { context++; loadRequest++ })
         <h1 class="text-2xl font-semibold">{{ t('purchase_submissions.inbox_title') }}</h1>
         <p class="text-sm text-neutral-500 mt-1">{{ t('purchase_submissions.inbox_subtitle') }}</p>
       </div>
-      <label class="text-sm text-neutral-700 whitespace-nowrap">
-        <span class="mr-2">{{ t('purchase_submissions.filter_status') }}</span>
-        <select v-model="status" class="h-9 px-3 border border-neutral-300 rounded-md bg-surface">
-          <option value="">{{ t('common.all') }}</option>
-          <option value="submitted">{{ t('purchase_submissions.status.submitted') }}</option>
-          <option value="processing">{{ t('purchase_submissions.status.processing') }}</option>
-          <option value="needs_information">{{ t('purchase_submissions.status.needs_information') }}</option>
-          <option value="processed">{{ t('purchase_submissions.status.processed') }}</option>
-          <option value="rejected">{{ t('purchase_submissions.status.rejected') }}</option>
-        </select>
-      </label>
+      <div class="flex flex-wrap items-center gap-3">
+        <label class="text-sm text-neutral-700 whitespace-nowrap">
+          <span class="mr-2">{{ t('purchase_submissions.filter_source') }}</span>
+          <select v-model="source" class="h-9 px-3 border border-neutral-300 rounded-md bg-surface max-md:h-10 max-md:text-base" data-testid="inbox-source">
+            <option value="">{{ t('common.all') }}</option>
+            <option v-for="s in SOURCES" :key="s" :value="s">{{ t(`purchase_submissions.source.${s}`) }}</option>
+          </select>
+        </label>
+        <label class="text-sm text-neutral-700 whitespace-nowrap">
+          <span class="mr-2">{{ t('purchase_submissions.filter_status') }}</span>
+          <select v-model="status" class="h-9 px-3 border border-neutral-300 rounded-md bg-surface max-md:h-10 max-md:text-base" data-testid="inbox-status">
+            <option value="">{{ t('common.all') }}</option>
+            <option value="submitted">{{ t('purchase_submissions.status.submitted') }}</option>
+            <option value="processing">{{ t('purchase_submissions.status.processing') }}</option>
+            <option value="needs_information">{{ t('purchase_submissions.status.needs_information') }}</option>
+            <option value="processed">{{ t('purchase_submissions.status.processed') }}</option>
+            <option value="rejected">{{ t('purchase_submissions.status.rejected') }}</option>
+          </select>
+        </label>
+      </div>
     </header>
+
+    <div class="flex items-start gap-2 rounded-md bg-primary-50 border border-primary-200 px-3 py-2.5 text-sm text-primary-800" data-testid="inbox-role-info">
+      <svg class="w-5 h-5 flex-shrink-0 mt-0.5 text-primary-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0z"/></svg>
+      <div class="min-w-0 space-y-1">
+        <p class="font-medium">{{ t('purchase_submissions.role_title') }}</p>
+        <p>{{ t('purchase_submissions.role_text') }}</p>
+        <p class="flex flex-wrap gap-x-4 gap-y-1">
+          <RouterLink v-if="canOpenPortal" to="/portal/purchase-invoice-submissions" class="text-primary-700 underline hover:text-primary-900" data-testid="inbox-role-portal">
+            {{ t('purchase_submissions.role_link_portal') }}
+          </RouterLink>
+          <RouterLink to="/purchase-invoices/email" class="text-primary-700 underline hover:text-primary-900" data-testid="inbox-role-email">
+            {{ t('purchase_submissions.role_link_email') }}
+          </RouterLink>
+        </p>
+      </div>
+    </div>
 
     <section v-if="canWrite" class="bg-surface border border-primary-500/30 rounded-lg shadow-sm p-5 space-y-4">
       <div class="flex items-start gap-3">
@@ -598,9 +783,23 @@ onBeforeUnmount(() => { context++; loadRequest++ })
         </span>
       </label>
 
+      <div v-if="isPhone" class="flex gap-3 [&_[data-testid=capture-photo]]:flex-1 [&_[data-testid=capture-photo]]:min-h-12 [&_[data-testid=capture-photo]]:justify-center [&_[data-testid=capture-photo]]:text-base"
+        data-testid="inbox-phone-upload">
+        <CapturePhotoButton filled :disabled="uploading" @captured="onPhotoCaptured" />
+        <button type="button" :class="btnOutline('neutral')" class="flex-1 min-h-12 justify-center text-base whitespace-nowrap"
+          :disabled="uploading" data-testid="inbox-phone-choose" @click="fileInput?.click()">
+          <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M12 16V4m0 0L7 9m5-5 5 5M5 14v5a1 1 0 001 1h12a1 1 0 001-1v-5" />
+          </svg>
+          {{ t('purchase_submissions.choose_files') }}
+        </button>
+      </div>
+
       <PdfDropzone
+        v-if="!isPhone"
         multiple
         accept-structured
+        crop-photos
         :extra-extensions="['xml']"
         :accept="ALLOWED_FILES"
         :uploading="uploading"
@@ -620,14 +819,14 @@ onBeforeUnmount(() => { context++; loadRequest++ })
       </ul>
 
       <div class="flex flex-wrap items-center gap-3">
-        <label :class="btnOutline('neutral')">
+        <label :class="btnOutline('neutral')" class="max-md:hidden">
           <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
             <path stroke-linecap="round" stroke-linejoin="round" d="M12 16V4m0 0L7 9m5-5 5 5M5 14v5a1 1 0 001 1h12a1 1 0 001-1v-5" />
           </svg>
           {{ t('purchase_submissions.choose_files') }}
           <input ref="fileInput" type="file" multiple :accept="ALLOWED_FILES" class="hidden" @change="selectFiles" />
         </label>
-        <CapturePhotoButton :disabled="uploading" @captured="onPhotoCaptured" />
+        <CapturePhotoButton v-if="!isPhone" :disabled="uploading" @captured="onPhotoCaptured" />
         <span v-if="files.length" class="text-sm text-neutral-600">
           {{ t('purchase_submissions.files_selected', { n: files.length }) }}
         </span>
@@ -638,7 +837,7 @@ onBeforeUnmount(() => { context++; loadRequest++ })
           {{ t('purchase_submissions.clear_files') }}
         </button>
         <button type="button" data-testid="inbox-upload" :disabled="files.length === 0 || uploading"
-          :class="btnFilled('primary')" @click="upload">
+          :class="btnFilled('primary')" class="max-md:min-h-12 max-md:flex-1 max-md:justify-center max-md:text-base" @click="upload">
           <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
             <path stroke-linecap="round" stroke-linejoin="round" d="M5 12l4 4L19 6" />
           </svg>
@@ -655,8 +854,8 @@ onBeforeUnmount(() => { context++; loadRequest++ })
       <div class="space-y-2">
         <div class="bg-surface border border-neutral-200 rounded-lg p-3 space-y-3" data-testid="inbox-bulk">
           <div class="flex flex-wrap items-center justify-between gap-2">
-            <label class="inline-flex items-center gap-2 text-sm text-neutral-700 cursor-pointer whitespace-nowrap">
-              <input type="checkbox" class="w-4 h-4 accent-primary-600" :checked="allChecked"
+            <label class="inline-flex items-center gap-2 text-sm text-neutral-700 cursor-pointer whitespace-nowrap max-md:min-h-11 max-md:text-base">
+              <input type="checkbox" class="w-4 h-4 accent-primary-600 max-md:w-5 max-md:h-5" :checked="allChecked"
                 :indeterminate="checkedItems.length > 0 && !allChecked" data-testid="inbox-check-all" @change="toggleAll" />
               {{ allChecked ? t('purchase_submissions.bulk_clear') : t('purchase_submissions.bulk_select_all') }}
             </label>
@@ -685,8 +884,13 @@ onBeforeUnmount(() => { context++; loadRequest++ })
                 {{ t('purchase_submissions.bulk_delete') }}
               </button>
             </div>
+            <label v-if="bulkCanExtract" class="flex items-center gap-2 text-sm text-neutral-700 cursor-pointer max-md:min-h-11 max-md:text-base"
+              :title="t('purchase_submissions.without_items_hint')" data-testid="inbox-bulk-without-items">
+              <input v-model="extractWithoutItems" type="checkbox" :disabled="acting" class="w-4 h-4 accent-primary-600 max-md:w-5 max-md:h-5" />
+              {{ t('purchase_submissions.without_items') }}
+            </label>
             <input v-if="bulkCanReject" v-model="bulkReason" maxlength="8000"
-              class="w-full h-9 px-3 text-sm border border-neutral-300 rounded-md bg-surface"
+              class="w-full h-9 px-3 text-sm border border-neutral-300 rounded-md bg-surface max-md:h-10 max-md:text-base"
               :placeholder="bulkNeedsReason ? t('purchase_submissions.bulk_reason_placeholder') : t('purchase_submissions.reason_internal_placeholder')" />
 
             <div v-if="bulkCanDimensions" class="space-y-2 pt-2 border-t border-neutral-100" data-testid="inbox-bulk-dimensions">
@@ -705,10 +909,15 @@ onBeforeUnmount(() => { context++; loadRequest++ })
         </div>
 
         <div v-for="item in items" :key="item.id" class="flex items-start gap-2">
-          <input type="checkbox" class="w-4 h-4 mt-3.5 shrink-0 accent-primary-600 cursor-pointer"
+          <label v-if="isPhone" class="w-11 h-11 -ml-2 -mr-1 mt-1 shrink-0 flex items-center justify-center cursor-pointer">
+            <input type="checkbox" class="w-5 h-5 accent-primary-600 cursor-pointer"
+              :checked="checkedIds.has(item.id)" :aria-label="t('purchase_submissions.bulk_select_item', { name: item.original_name })"
+              data-testid="inbox-check" @change="toggleChecked(item.id)" />
+          </label>
+          <input v-else type="checkbox" class="w-4 h-4 mt-3.5 shrink-0 accent-primary-600 cursor-pointer"
             :checked="checkedIds.has(item.id)" :aria-label="t('purchase_submissions.bulk_select_item', { name: item.original_name })"
             data-testid="inbox-check" @change="toggleChecked(item.id)" />
-          <button type="button" @click="selected = item"
+          <button type="button" data-testid="inbox-item" @click="onSelectItem(item)"
             class="flex-1 min-w-0 text-left bg-surface border rounded-lg p-3 transition"
             :class="selected?.id === item.id ? 'border-primary-500 ring-1 ring-primary-500/30' : 'border-neutral-200 hover:border-neutral-400'">
           <div class="flex items-start justify-between gap-2">
@@ -727,8 +936,53 @@ onBeforeUnmount(() => { context++; loadRequest++ })
         </div>
       </div>
 
-      <section v-if="selected" class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-hidden">
-        <div class="p-4 border-b border-neutral-200 space-y-3">
+      <section v-if="selected && (!isPhone || phoneOpen)" :key="isPhone ? 'phone' : 'desktop'"
+        :class="isPhone
+          ? 'fixed inset-x-0 top-[var(--app-header-height,0px)] bottom-[var(--app-footer-height,0px)] z-[15] flex flex-col bg-neutral-50'
+          : 'min-w-0'"
+        :data-testid="isPhone ? 'inbox-phone-detail' : undefined">
+        <div v-if="isPhone" class="shrink-0 flex items-center justify-between gap-2 px-2 py-1 bg-surface border-b border-neutral-200">
+          <button type="button" class="inline-flex items-center gap-1 min-h-11 px-2 -ml-1 rounded-md text-base font-medium text-primary-700 hover:bg-neutral-100"
+            data-testid="inbox-phone-back" @click="closePhoneDetail">
+            <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7" /></svg>
+            {{ t('purchase_submissions.phone_back') }}
+          </button>
+          <span class="text-sm text-neutral-600 tabular-nums" data-testid="inbox-phone-position">
+            {{ t('purchase_submissions.phone_position', { n: phoneIndex + 1, total: items.length }) }}
+          </span>
+          <div class="flex items-center gap-1">
+            <button type="button" class="w-11 h-11 inline-flex items-center justify-center rounded-md text-neutral-700 hover:bg-neutral-100 disabled:opacity-40"
+              :disabled="phoneIndex <= 0" :aria-label="t('purchase_submissions.phone_prev')" data-testid="inbox-phone-prev" @click="stepPhone(-1)">
+              <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7" /></svg>
+            </button>
+            <button type="button" class="w-11 h-11 inline-flex items-center justify-center rounded-md text-neutral-700 hover:bg-neutral-100 disabled:opacity-40"
+              :disabled="phoneIndex < 0 || phoneIndex >= items.length - 1" :aria-label="t('purchase_submissions.phone_next')" data-testid="inbox-phone-next" @click="stepPhone(1)">
+              <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7" /></svg>
+            </button>
+          </div>
+        </div>
+        <div v-bind="isPhone ? phoneScrollAttrs : { class: 'contents' }">
+        <div v-if="isPhone" class="bg-surface border border-neutral-200 rounded-lg overflow-hidden" data-swipe-ignore data-testid="inbox-phone-preview">
+          <div class="flex items-center">
+            <button type="button" class="flex-1 min-w-0 min-h-11 px-3 flex items-center justify-between gap-2 text-sm font-medium text-neutral-700"
+              :aria-expanded="phonePreviewOpen" data-testid="inbox-phone-preview-toggle" @click="phonePreviewOpen = !phonePreviewOpen">
+              <span class="inline-flex items-center gap-2">
+                <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="phonePreviewOpen ? ICONS.eyeOff : ICONS.eye" /></svg>
+                {{ phonePreviewOpen ? t('common.preview_side_hide') : t('common.preview_side_show') }}
+              </span>
+              <svg class="w-4 h-4 transition-transform" :class="phonePreviewOpen ? 'rotate-180' : ''" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7" /></svg>
+            </button>
+            <a :href="purchaseInvoiceSubmissionsApi.downloadUrl(selected.id)" class="w-11 h-11 shrink-0 inline-flex items-center justify-center text-neutral-600 border-l border-neutral-100"
+              :title="t('purchase_submissions.download')" :aria-label="t('purchase_submissions.download')" data-testid="inbox-phone-download">
+              <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4v12m0 0l-4-4m4 4 4-4M5 20h14" /></svg>
+            </a>
+          </div>
+          <SubmissionPreview v-if="phonePreviewOpen" compact :src="purchaseInvoiceSubmissionsApi.previewUrl(selected.id)"
+            :file-name="selected.original_name" :doc-type="selected.doc_type" />
+        </div>
+        <DocumentPreviewSplit :ctrl="preview" :show="!isPhone && preview.open.value" :src="purchaseInvoiceSubmissionsApi.previewUrl(selected.id)"
+          :file-name="selected.original_name" :doc-type="selected.doc_type" :empty-text="t('purchase_submissions.no_inline_preview')"
+          form-class="bg-surface border border-neutral-200 rounded-lg shadow-sm p-4 space-y-3">
           <div class="flex flex-wrap items-start justify-between gap-3">
             <div>
               <h2 class="font-semibold">{{ selected.original_name }}</h2>
@@ -762,9 +1016,20 @@ onBeforeUnmount(() => { context++; loadRequest++ })
           <p v-if="selected.extraction_error" class="text-xs rounded bg-warning-50 text-warning-700 px-3 py-2">
             {{ selected.extraction_error }}
           </p>
+          <p v-if="selected.processing_stale" class="text-xs rounded bg-warning-50 text-warning-700 px-3 py-2">
+            {{ t('purchase_submissions.processing_stale') }}
+          </p>
 
-          <div class="flex flex-wrap gap-2">
-            <button v-if="selected.status === 'submitted' && canWrite && canCreateInvoice" type="button"
+          <label v-if="canExtract(selected) && canWrite && canCreateInvoice"
+            class="flex items-start gap-2 text-sm text-neutral-700 cursor-pointer max-md:min-h-11 max-md:text-base" data-testid="inbox-without-items">
+            <input v-model="extractWithoutItems" type="checkbox" :disabled="acting" class="mt-0.5 w-4 h-4 accent-primary-600 max-md:w-5 max-md:h-5" />
+            <span>
+              {{ t('purchase_submissions.without_items') }}
+              <span class="block text-xs text-neutral-500">{{ t('purchase_submissions.without_items_hint') }}</span>
+            </span>
+          </label>
+          <div v-if="!isPhone" class="flex flex-wrap gap-2">
+            <button v-if="canExtract(selected) && canWrite && canCreateInvoice" type="button"
               :disabled="acting" :class="btnFilled('primary')" @click="extract">
               <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 3v18m9-9H3" /></svg>
               {{ acting ? t('purchase_submissions.processing') : t('purchase_submissions.extract') }}
@@ -782,9 +1047,14 @@ onBeforeUnmount(() => { context++; loadRequest++ })
               <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4v12m0 0l-4-4m4 4 4-4M5 20h14" /></svg>
               {{ t('purchase_submissions.download') }}
             </a>
+            <button type="button" :class="btnOutline('neutral')" data-testid="inbox-preview-toggle"
+              :aria-pressed="preview.open.value" @click="preview.toggle()">
+              <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="preview.open.value ? ICONS.eyeOff : ICONS.eye" /></svg>
+              {{ preview.open.value ? t('common.preview_side_hide') : t('common.preview_side_show') }}
+            </button>
           </div>
 
-          <div v-if="canMove(selected)" class="space-y-2 pt-2 border-t border-neutral-100" data-testid="inbox-move">
+          <div v-if="canMove(selected)" ref="moveSection" class="space-y-2 pt-2 border-t border-neutral-100" data-testid="inbox-move">
             <p v-if="selected.move_suggestion" class="text-sm text-neutral-700">
               {{ t('purchase_submissions.move_suggestion_hint', { company: selected.move_suggestion.supplier_name }) }}
             </p>
@@ -806,7 +1076,7 @@ onBeforeUnmount(() => { context++; loadRequest++ })
                 <p v-if="moveTargets.blocked_reason" class="text-sm text-warning-700">{{ moveTargets.blocked_reason }}</p>
                 <p v-else-if="moveTargets.targets.length === 0" class="text-sm text-neutral-500">{{ t('purchase_submissions.move_no_targets') }}</p>
                 <div v-else class="flex flex-wrap items-center gap-2">
-                  <select v-model="moveTargetId" class="h-9 px-3 border border-neutral-300 rounded-md bg-surface text-sm min-w-[14rem]" data-testid="inbox-move-target">
+                  <select v-model="moveTargetId" class="h-9 px-3 border border-neutral-300 rounded-md bg-surface text-sm min-w-[14rem] max-md:min-w-0 max-md:w-full max-md:h-10 max-md:text-base" data-testid="inbox-move-target">
                     <option v-for="firm in moveTargets.targets" :key="firm.id" :value="firm.id">
                       {{ firm.name }}<template v-if="firm.ic"> · {{ firm.ic }}</template><template v-if="moveTargets.suggestion?.supplier_id === firm.id"> ({{ t('purchase_submissions.move_suggested') }})</template>
                     </option>
@@ -830,7 +1100,7 @@ onBeforeUnmount(() => { context++; loadRequest++ })
               <span class="block mb-1">
                 {{ hasClientToInform ? t('purchase_submissions.reason') : t('purchase_submissions.reason_internal') }}
               </span>
-              <textarea v-model="reason" rows="2" maxlength="8000" class="w-full px-3 py-2 border border-neutral-300 rounded-md bg-surface"
+              <textarea ref="reasonInput" v-model="reason" rows="2" maxlength="8000" class="w-full px-3 py-2 border border-neutral-300 rounded-md bg-surface max-md:text-base"
                 :placeholder="hasClientToInform
                   ? t('purchase_submissions.reason_placeholder')
                   : t('purchase_submissions.reason_internal_placeholder')" />
@@ -857,10 +1127,34 @@ onBeforeUnmount(() => { context++; loadRequest++ })
               {{ t('purchase_submissions.delete') }}
             </button>
           </details>
+        </DocumentPreviewSplit>
         </div>
-
-        <SubmissionPreview :src="purchaseInvoiceSubmissionsApi.previewUrl(selected.id)"
-          :file-name="selected.original_name" :doc-type="selected.doc_type" />
+        <div v-if="isPhone" data-testid="inbox-phone-actions"
+          class="shrink-0 flex flex-wrap gap-2 bg-surface border-t border-neutral-200 px-3 py-2 shadow-[0_-2px_10px_rgba(21,19,29,0.08)] [&>*]:min-h-11 [&>*]:flex-1 [&>*]:justify-center">
+          <button v-if="canExtract(selected) && canWrite && canCreateInvoice" type="button"
+            :disabled="acting" :class="btnFilled('primary')" data-testid="inbox-phone-extract" @click="extract">
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 3v18m9-9H3" /></svg>
+            {{ acting ? t('purchase_submissions.processing') : t('purchase_submissions.extract') }}
+          </button>
+          <RouterLink v-if="selected.status === 'submitted' && canWrite && canCreateInvoice"
+            :to="{ path: '/purchase-invoices/new', query: { submission_id: selected.id } }" :class="btnOutline('primary')">
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 20h9M16.5 3.5a2.12 2.12 0 013 3L8 18l-4 1 1-4L16.5 3.5z" /></svg>
+            {{ t('purchase_submissions.manual') }}
+          </RouterLink>
+          <RouterLink v-if="selected.purchase_invoice_id" :to="`/purchase-invoices/${selected.purchase_invoice_id}`" :class="btnFilled('success')"
+            data-testid="inbox-phone-open-invoice">
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+            {{ t('purchase_submissions.open_invoice') }}
+          </RouterLink>
+          <button v-if="canReviewSelected" type="button" :class="btnOutline('danger')" data-testid="inbox-phone-reject" @click="focusReason">
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+            {{ t('purchase_submissions.reject') }}
+          </button>
+          <button v-if="canMove(selected)" type="button" :class="btnOutline('neutral')" data-testid="inbox-phone-move" @click="scrollToMove">
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" /></svg>
+            {{ t('purchase_submissions.phone_move') }}
+          </button>
+        </div>
       </section>
     </div>
     <ExtractionReviewModal v-if="reviewInvoiceId" :invoice-ids="[reviewInvoiceId]" silent-when-empty @close="onReviewClosed" />

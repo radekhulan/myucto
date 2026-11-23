@@ -7,6 +7,7 @@ namespace MyInvoice\Action\Invoice;
 use MyInvoice\Http\GuardsDocumentLock;
 use MyInvoice\Service\Accounting\Product\ProductPostingDefaults;
 use MyInvoice\Http\Json;
+use MyInvoice\Http\SessionOnlyAccountingAct;
 use MyInvoice\Http\SupplierGuard;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
@@ -23,15 +24,18 @@ use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Invoice\AdvanceCycleLock;
 use MyInvoice\Service\Invoice\InvoiceCalendar;
 use MyInvoice\Service\Invoice\InvoiceIssuer;
+use MyInvoice\Service\Invoice\InvoiceOtherItemLinkService;
 use MyInvoice\Service\Invoice\InvoiceCalculator;
 use MyInvoice\Service\Invoice\LineDiscount;
 use MyInvoice\Service\IpMatcher;
+use MyInvoice\Service\SalesQuote\QuoteInvoiceOrigin;
 use MyInvoice\Service\Oss\OssPeriod;
 use MyInvoice\Service\Stats\StatsRecomputer;
 use MyInvoice\Service\Stock\StockException;
 use MyInvoice\Service\Stock\StockIssueService;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
+use MyInvoice\Support\Sql\AdvanceDrawSql;
 
 /**
  * Storno vystavené faktury. Dvě varianty:
@@ -64,6 +68,7 @@ final class CancelInvoiceAction
         private readonly TaxConstantsRepository $taxConstants,
         private readonly \MyInvoice\Service\Invoice\CreditNoteOffsetService $creditNoteOffsets,
         private readonly \MyInvoice\Service\Eet\EetHistoryGuard $eetHistory,
+        private readonly \MyInvoice\Repository\StockTrackingRepository $stockTracking,
     ) {}
 
     public function __invoke(Request $request, Response $response, array $args): Response
@@ -112,13 +117,15 @@ final class CancelInvoiceAction
                 $payment->execute([$id]);
                 $proformaId = (int) ($payment->fetchColumn() ?: 0);
             }
+            // Finální faktura zálohy: vazba dokladu i čerpání odpočtovým řádkem (AdvanceDrawSql).
             $final = $this->db->pdo()->prepare(
-                "SELECT 1 FROM invoices
-                  WHERE supplier_id = ? AND parent_invoice_id = ?
-                    AND invoice_type = 'invoice' AND status <> 'cancelled'
+                'SELECT 1 FROM (' . AdvanceDrawSql::finalIds('?', '?') . ") fx
+                   JOIN invoices i ON i.id = fx.id
+                  WHERE i.status <> 'cancelled'
                   LIMIT 1"
             );
-            $final->execute([(int) $invoice['supplier_id'], $proformaId]);
+            $supplierId = (int) $invoice['supplier_id'];
+            $final->execute([$supplierId, $proformaId, $proformaId, $supplierId]);
             if ($proformaId > 0 && $final->fetchColumn() !== false) {
                 return Json::error(
                     $response,
@@ -153,6 +160,12 @@ final class CancelInvoiceAction
         }
 
         if ($mode === 'internal') {
+            // Interní storno zaúčtované faktury stornuje i její zápis v deníku: ruční účetní
+            // úkon jen z relace. Dobropis (mode=credit_note) vzniká jako koncept a deníku se nedotkne.
+            if ($this->locks->forInvoice($invoice)->posted
+                && ($deny = SessionOnlyAccountingAct::deny($request, $response, 'Interní storno zaúčtované faktury'))) {
+                return $deny;
+            }
             return $this->internalCancel($request, $response, $invoice, $reason);
         }
         if ($mode === 'credit_note') {
@@ -191,7 +204,12 @@ final class CancelInvoiceAction
                 return Json::error($response, 'calendar_instalment_settled', 'Kalendář má uhrazené nebo dobropisované splátky. Nejdřív odeberte úhrady a stornujte dobropisy.', 409);
             }
             $instalment = $this->repo->find((int) $row['id']);
-            if ($deny = $this->denyIfLocked($request, $response, $this->locks->forInvoice($instalment), 'invoice', (int) $row['id'])) {
+            $instalmentLock = $this->locks->forInvoice($instalment);
+            if ($deny = $this->denyIfLocked($request, $response, $instalmentLock, 'invoice', (int) $row['id'])) {
+                return $deny;
+            }
+            if ($instalmentLock->posted
+                && ($deny = SessionOnlyAccountingAct::deny($request, $response, 'Storno kalendáře se zaúčtovanou splátkou'))) {
                 return $deny;
             }
             $loaded[] = $instalment;
@@ -247,6 +265,10 @@ final class CancelInvoiceAction
             // Zápočet dobropisu (issue #140) padá se stornem kterékoli strany: stornovaný
             // dobropis nic nesnižuje a stornovaná faktura nemá co započíst.
             $this->creditNoteOffsets->revertForDocument($supplierId, 'invoice', (int) $invoice['id']);
+
+            // Vazba na ostatní pohledávku (migrace 2246) padá se stornem i se zrcadlenými
+            // úhradami; pohledávka a její úhrady zůstávají. Obnovení storna ji nevrací.
+            $detachedOtherItem = InvoiceOtherItemLinkService::detachForCancel($pdo, $supplierId, (int) $invoice['id']);
 
             // 1. Vytvoř cancellation záznam (interní, bez varsymbolu)
             $stmt = $pdo->prepare(
@@ -350,6 +372,12 @@ final class CancelInvoiceAction
             'cancellation_id' => $cancellationId,
             'reason' => $reason,
         ], $ip, $request->getHeaderLine('User-Agent'));
+        if ($detachedOtherItem !== null) {
+            $this->logger->log('invoice.other_item_unlinked', $userId, 'invoice', $invoice['id'], [
+                'other_item_id' => $detachedOtherItem,
+                'trigger' => 'cancel',
+            ], $ip, $request->getHeaderLine('User-Agent'));
+        }
 
         // Prodej majetku (1177): stornovaná faktura prodej neuskutečnila → karty navázané na
         // její řádky se vrací do užívání. Mimo transakci storna a s polykáním chyb (AssetService
@@ -382,6 +410,11 @@ final class CancelInvoiceAction
             && $this->db->hasColumn('invoice_items', 'oss_needs_manual_review');
         $supportsTracking = $this->db->hasColumn('invoice_items', 'tracking_json');
         $supportsLineDiscount = $this->db->hasColumn('invoice_items', LineDiscount::LIST_COLUMN);
+        // Dobropis vrací kusy, které výdejka původní faktury skutečně vydala (s aktuálním
+        // textem šarže, i když se kód šarže po vydání opravil); bez výdejky zůstává kopie výběru.
+        $issuedUnits = $supportsTracking
+            ? $this->stockTracking->issuedUnitsByInvoiceItem((int) $invoice['supplier_id'], (int) $invoice['id'])
+            : [];
         $sourcePeriod = OssPeriod::quarterCode((string) ($invoice['tax_date'] ?? $invoice['issue_date'] ?? ''));
         $creditPeriod = OssPeriod::quarterCode(date('Y-m-d'));
         $defaultOriginalPeriod = $sourcePeriod !== null && $creditPeriod !== null && $sourcePeriod < $creditPeriod
@@ -435,6 +468,14 @@ final class CancelInvoiceAction
                 $userId,
             ]);
             $creditNoteId = (int) $pdo->lastInsertId();
+
+            // Drobný zákazník bez adresy (#310): dobropis k zjednodušenému dokladu vzniká
+            // rovnou jako zjednodušený opravný daňový doklad (§ 45 odst. 2 ZDPH), jinou
+            // opravu mu brána vystavení nepustí (InvoiceIssueTaxGate). Běžnému odběrateli
+            // se příznak nedědí: je plátci znám, opravný doklad nese jeho označení.
+            if (\MyInvoice\Service\Invoice\InvoiceIssueTaxGate::creditNoteInheritsSimplified($invoice)) {
+                $pdo->prepare('UPDATE invoices SET is_simplified = 1 WHERE id = ?')->execute([$creditNoteId]);
+            }
 
             // Zkopíruj položky se zápornými quantities — zachovává vat_classification_code
             // (dobropis má jít na stejné DPH řádky jako originální faktura, ale se zápornými hodnotami)
@@ -548,12 +589,20 @@ final class CancelInvoiceAction
                     $params[] = !empty($item['oss_needs_manual_review']) ? 1 : 0;
                 }
                 if ($supportsTracking) {
-                    $params[] = \MyInvoice\Service\Stock\InvoiceItemTracking::storedJson($item);
+                    $stored = \MyInvoice\Service\Stock\InvoiceItemTracking::storedJson($item);
+                    $issued = $issuedUnits[(int) ($item['id'] ?? 0)] ?? [];
+                    $params[] = $stored !== null && $issued !== []
+                        ? \MyInvoice\Service\Stock\InvoiceItemTracking::fromIssuedUnits($issued)
+                        : $stored;
                 }
                 if ($supportsLineDiscount) {
                     array_push($params, ...LineDiscount::columns($item));
                 }
                 $itemStmt->execute($params);
+            }
+            if ($this->db->hasColumn('invoice_items', 'sales_quote_item_key')) {
+                $quoteOrigins = QuoteInvoiceOrigin::rows($pdo, (int) $invoice['id']);
+                QuoteInvoiceOrigin::writeKeys($pdo, $creditNoteId, array_column($quoteOrigins, 'sales_quote_item_key', 'order_index'));
             }
             // Dobropis nese dimenze původní faktury, jinak by vratka výnosu skončila mimo
             // středisko, ze kterého výnos odešel. Položky leží ve stejném pořadí.

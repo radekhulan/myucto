@@ -60,7 +60,7 @@ final class ProductAssemblyAction
 
     private function authorize(Request $request, Response $response, bool $write, ?Response &$error): bool
     {
-        if (!RequestAuthorization::isSessionAuth($request)) {
+        if (!RequestAuthorization::actsAsSession($request)) {
             $error = Json::error($response, 'forbidden', 'Tato operace vyžaduje přihlášenou relaci.', 403);
             return false;
         }

@@ -8,6 +8,7 @@ import { captureCanonicalDomainLogin, canonicalDomainLoginSessionCsrf } from '@/
 
 const mocks = vi.hoisted(() => ({
   me: vi.fn(),
+  setupStatus: vi.fn(),
   login: vi.fn(),
   domainContext: vi.fn(),
   logout: vi.fn(),
@@ -17,6 +18,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock('@/api/auth', () => ({
   authApi: {
     me: mocks.me,
+    setupStatus: mocks.setupStatus,
     login: mocks.login,
     domainContext: mocks.domainContext,
     logout: mocks.logout,
@@ -56,6 +58,7 @@ describe('obnova oprávnění v auth store', () => {
     rememberTotpEnrollment(null)
     setActivePinia(createPinia())
     mocks.me.mockReset()
+    mocks.setupStatus.mockReset()
     mocks.logout.mockReset()
     mocks.logout.mockResolvedValue(undefined)
     mocks.sessionStatus.mockReset()
@@ -68,6 +71,24 @@ describe('obnova oprávnění v auth store', () => {
       supplier_id: null,
       purpose: null,
     })
+  })
+
+  it('v pracovním okně načítá stav instalace souběžně s ověřením firmy a identity', async () => {
+    const auth = useAuthStore()
+    let finishSetup!: (status: unknown) => void
+    mocks.setupStatus.mockReturnValue(new Promise(resolve => { finishSetup = resolve }))
+    mocks.me.mockResolvedValue(session())
+    const boot = auth.bootstrapWorkspace()
+    await flushPromises()
+    expect(mocks.setupStatus).toHaveBeenCalledTimes(1)
+    expect(mocks.domainContext).toHaveBeenCalledTimes(1)
+    expect(mocks.me).toHaveBeenCalledTimes(1)
+    expect(auth.canRead('dashboard')).toBe(true)
+    expect(auth.setupStatus).toBeNull()
+    finishSetup({ needs_setup: false, demo: { enabled: true } })
+    await boot
+    expect(auth.isDemo).toBe(true)
+    expect(mocks.domainContext).toHaveBeenCalledTimes(1)
   })
 
   it('při opakované pomalé nebo neúspěšné obnově zachová poslední ověřená práva', async () => {
@@ -188,6 +209,19 @@ describe('obnova oprávnění v auth store', () => {
     expect(auth.isAuthenticated).toBe(false)
     expect(auth.canRead('dashboard')).toBe(false)
     expect(useSupplierStore().currentSupplierId).toBe(0)
+  })
+
+  it('s lístkem od poskytovatele pošle jen sso_ticket a druhý faktor, bez e-mailu, hesla a captchy', async () => {
+    mocks.login.mockResolvedValue(session())
+    mocks.me.mockResolvedValue(session())
+    const ticket = 'ab'.repeat(32)
+    await useAuthStore().login('ignored@example.test', 'ignored-password', 'captcha-token', '123456', { ssoTicket: ticket })
+    const payload = mocks.login.mock.calls.at(-1)![0]
+    expect(payload.sso_ticket).toBe(ticket)
+    expect(payload.totp).toBe('123456')
+    expect(payload).not.toHaveProperty('email')
+    expect(payload).not.toHaveProperty('password')
+    expect(payload).not.toHaveProperty('cf_turnstile_response')
   })
 
 })

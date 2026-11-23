@@ -18,7 +18,6 @@ vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => key, locale: 
 vi.mock('@/stores/auth', () => ({ useAuthStore: () => ({ can: mocks.can }) }))
 vi.mock('@/stores/supplier', () => ({ useSupplierStore: () => ({ currentSupplierId: 22, domainLocked: true }) }))
 vi.mock('@/workspace/supplierContext', () => ({ requestSupplierId: () => '22' }))
-vi.mock('@/api/errors', () => ({ apiErrorMessage: (error: Error) => error.message }))
 
 const header = {
   header: { schema: 'nonprofit-j6-source.v2', scope: 'current-period-source', supplier_id: 22, period_id: 7,
@@ -79,6 +78,21 @@ async function openNewDraft(wrapper: ReturnType<typeof render>) {
   await flushPromises()
 }
 
+function button(wrapper: ReturnType<typeof render>, key: string) {
+  return wrapper.findAll('button').find(element => element.text() === `nonprofitTaxJ6.${key}`)!
+}
+
+function decisionField(wrapper: ReturnType<typeof render>, key: string, selector = 'input') {
+  return wrapper.findAll('label').find(label => label.text().startsWith(`nonprofitTaxJ6.${key}`))!.get(selector)
+}
+
+async function assessFirstSource(wrapper: ReturnType<typeof render>, title: string) {
+  await button(wrapper, 'assess').trigger('click')
+  await flushPromises()
+  await decisionField(wrapper, 'titleField').setValue(title)
+  await decisionField(wrapper, 'evidence', 'textarea').setValue('Synthetic evidence')
+}
+
 describe('bounded nonprofit J6 assessment workspace', () => {
   it('loads only the period summary, own draft and one history page until the user opens a draft', async () => {
     const wrapper = render()
@@ -116,6 +130,102 @@ describe('bounded nonprofit J6 assessment workspace', () => {
     await flushPromises()
     expect(mocks.draftSource).toHaveBeenNthCalledWith(2, 22, 7, 11, 'opaque-next-source', 100)
     expect(mocks.draftSource).toHaveBeenCalledTimes(2)
+    wrapper.unmount()
+  })
+
+  it.each([
+    [10000, '37,25', 3725],
+    [-10000, '-37.25', -3725],
+    [10000, '0', 0],
+  ])('saves signed deductible cents for expense %s and previews the new revision', async (amount, input, expected) => {
+    const expense = { ...sourcePage.rows[0], kind: 'expense', amount_cents: amount }
+    mocks.draftSource.mockResolvedValueOnce({ ...sourcePage, rows: [expense] })
+    mocks.patchDecisions.mockResolvedValueOnce({ ...envelope, draft: { ...draft, revision_no: 2 } })
+    const wrapper = render()
+    await flushPromises()
+    await openNewDraft(wrapper)
+    await assessFirstSource(wrapper, 'cost')
+    await decisionField(wrapper, 'deductibleBeforeFunding').setValue(input)
+    await button(wrapper, 'save').trigger('click')
+    await flushPromises()
+    expect(mocks.patchDecisions).toHaveBeenCalledWith(22, 7, 11, {
+      expected_revision: 1,
+      upserts: [{ source_id: 'line:1', payload: expect.objectContaining({ deductible_cents: expected }) }],
+      deletes: [],
+    })
+    await wrapper.get('[data-action="preview"]').trigger('click')
+    await flushPromises()
+    expect(mocks.preview).toHaveBeenCalledWith(22, 7, 11, 2)
+    expect(mocks.previewPage).toHaveBeenCalledWith(22, 7, 11, 'f'.repeat(64), 'result', 0)
+    wrapper.unmount()
+  })
+
+  it('identifies the deductible field for blank, malformed, excessive and wrong-sign amounts', async () => {
+    mocks.draftSource.mockResolvedValueOnce({ ...sourcePage, rows: [{ ...sourcePage.rows[0], kind: 'expense' }] })
+    const wrapper = render()
+    await flushPromises()
+    await openNewDraft(wrapper)
+    await assessFirstSource(wrapper, 'cost')
+    const input = decisionField(wrapper, 'deductibleBeforeFunding')
+    for (const [value, error] of [['', 'deductibleRequired'], ['3,123', 'deductibleInvalid'], ['101', 'deductibleRange'], ['-10', 'deductibleRange']] as const) {
+      await input.setValue(value)
+      await button(wrapper, 'save').trigger('click')
+      expect(wrapper.get('[role="alert"]').text()).toBe(`nonprofitTaxJ6.${error}`)
+      expect(input.attributes('aria-describedby')).toBe(wrapper.get('[role="alert"]').attributes('id'))
+    }
+    expect(mocks.patchDecisions).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it.each([[true, 'cost'], [false, 'excluded_cost']])('saves explicit zero for an expense with mandatory exclusion %s and title %s', async (excluded, title) => {
+    mocks.draftSource.mockResolvedValueOnce({ ...sourcePage, rows: [{ ...sourcePage.rows[0], kind: 'expense', mandatory_non_deductible: excluded }] })
+    mocks.patchDecisions.mockResolvedValueOnce(envelope)
+    const wrapper = render()
+    await flushPromises()
+    await openNewDraft(wrapper)
+    await assessFirstSource(wrapper, title)
+    const input = decisionField(wrapper, 'deductibleBeforeFunding').element as HTMLInputElement
+    expect(input.readOnly).toBe(true)
+    expect(input.value).toBe('0.00')
+    await button(wrapper, 'save').trigger('click')
+    await flushPromises()
+    expect(mocks.patchDecisions.mock.calls[0]![3].upserts[0].payload.deductible_cents).toBe(0)
+    wrapper.unmount()
+  })
+
+  it('restores the stored deductible amount for a decision outside the loaded source page', async () => {
+    const row = { source_id: 'line:81', payload: { title: 'cost', evidence: 'Stored evidence', deductible_cents: -150 }, record_hash: 'a'.repeat(64) }
+    mocks.decisions.mockResolvedValueOnce({ draft, rows: [row], after: null })
+    mocks.patchDecisions.mockResolvedValueOnce(envelope)
+    const wrapper = render()
+    await flushPromises()
+    await openNewDraft(wrapper)
+    await button(wrapper, 'tabs.decisions').trigger('click')
+    await flushPromises()
+    await button(wrapper, 'edit').trigger('click')
+    expect((decisionField(wrapper, 'deductibleBeforeFunding').element as HTMLInputElement).value).toBe('-1.50')
+    await button(wrapper, 'save').trigger('click')
+    await flushPromises()
+    expect(mocks.patchDecisions.mock.calls[0]![3].upserts[0]).toEqual({ source_id: 'line:81', payload: { ...row.payload, facts: {} } })
+    expect(mocks.draftSource).toHaveBeenCalledTimes(1)
+    wrapper.unmount()
+  })
+
+  it('saves a revenue decision without an expense field and displays the specific preview error', async () => {
+    mocks.patchDecisions.mockResolvedValueOnce(envelope)
+    const message = 'Čistý bankovní úrok musí souhlasit s doloženým hrubým úrokem a sraženou daní.'
+    mocks.preview.mockRejectedValueOnce({ response: { data: { error: { code: 'nonprofit_tax_facts_incomplete', message } } } })
+    const wrapper = render()
+    await flushPromises()
+    await openNewDraft(wrapper)
+    await assessFirstSource(wrapper, 'bank_interest')
+    expect(wrapper.find('input[inputmode="decimal"]').exists()).toBe(false)
+    await button(wrapper, 'save').trigger('click')
+    await flushPromises()
+    expect(mocks.patchDecisions.mock.calls[0]![3].upserts[0].payload).not.toHaveProperty('deductible_cents')
+    await wrapper.get('[data-action="preview"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.get('[role="alert"]').text()).toBe(message)
     wrapper.unmount()
   })
 

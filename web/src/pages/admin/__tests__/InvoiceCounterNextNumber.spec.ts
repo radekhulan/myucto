@@ -29,6 +29,13 @@ describe('nastavení příštího čísla číselné řady', () => {
     expect(settingsApi).toContain('revenue_category_id: revenueCategoryId')
   })
 
+  it('po načtení ukáže aktuální příští číslo ze serveru', () => {
+    // Bez toho bylo pole po obnovení stránky prázdné a uložené číslo nebylo vidět.
+    expect(settingsApi).toMatch(/getInvoiceCounter:\s*\(/)
+    expect(field).toContain('settingsApi.getInvoiceCounter(')
+    expect(field).toContain('immediate: true')
+  })
+
   it('komponenta se nabízí jen u šablony s čítačem', () => {
     // Bez {C+} je číslo fixní — počítadlo by nemělo co nastavovat.
     expect(field).toContain('hasCounterPlaceholder(template.value)')

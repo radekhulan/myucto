@@ -173,6 +173,24 @@ async function uploadFile(wrapper: ReturnType<typeof mountPage>) {
 }
 
 describe('ProductImport', () => {
+  it('does not show a price change when only the computed price metadata differs', async () => {
+    const same = report('unchanged')
+    const price = { currency_code: 'CZK', fixed_price: '100.00', computed_price: '100.00' }
+    same.items[0].before = { id: 8, row_version: 3, sku: 'A-1', price: '100.00', prices: [{ ...price, computed_context: { internal: true } }] }
+    same.items[0].after = { id: 8, row_version: 3, sku: 'A-1', price: '100.00', prices: [{ ...price, computed_context: { internal: false } }] }
+    mocks.items.mockResolvedValue(same)
+
+    const wrapper = mountPage()
+    await uploadFile(wrapper)
+    await wrapper.get('[data-test="preview-import"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('eshop.import2.status.unchanged')
+    expect(wrapper.text()).not.toContain('eshop.import2.fields.prices')
+
+    wrapper.unmount()
+  })
+
   it('removes the resumed job from the URL when starting a new import', async () => {
     routeState.query = { tab: 'import', import_job: '31' }
     const wrapper = mountPage()
@@ -279,6 +297,43 @@ describe('ProductImport', () => {
     expect(wrapper.find('[data-test="preview-step"]').exists()).toBe(false)
     expect(mocks.items).not.toHaveBeenCalled()
     expect(mocks.getJob).not.toHaveBeenCalled()
+  })
+
+  it('shows category names instead of raw JSON in the preview diff', async () => {
+    const changed = report('ready')
+    Object.assign(changed.items[0].before, { categories: [{ category_id: 1, name: 'A - díly' }] })
+    Object.assign(changed.items[0].after, { categories: [{ category_id: 2, name: 'C - oblečení' }] })
+    mocks.items.mockResolvedValue(changed)
+
+    const wrapper = mountPage()
+    await uploadFile(wrapper)
+    await wrapper.get('[data-test="preview-import"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('A - díly')
+    expect(wrapper.text()).toContain('C - oblečení')
+    expect(wrapper.text()).not.toContain('category_id')
+    expect(wrapper.text()).toContain('eshop.import2.preview_categories')
+    expect(wrapper.text()).not.toContain('eshop.import2.fields.categories')
+
+    wrapper.unmount()
+  })
+
+  it('does not show a row that failed validation as clearing every field', async () => {
+    const failed = report('failed')
+    Object.assign(failed.items[0], { after: null, error_code: 'category_code_not_found' })
+    mocks.items.mockResolvedValue(failed)
+
+    const wrapper = mountPage()
+    await uploadFile(wrapper)
+    await wrapper.get('[data-test="preview-import"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.text()).not.toContain('123.45')
+    expect(wrapper.text()).not.toContain('eshop.import2.empty_value')
+    expect(wrapper.text()).not.toContain('Bez hodnoty')
+
+    wrapper.unmount()
   })
 
   it('cancels an active job, aborts its poll, and allows a retry', async () => {
@@ -484,6 +539,44 @@ describe('ProductImport', () => {
     expect(mocks.getJob).toHaveBeenCalledWith(44)
     expect(mocks.items).toHaveBeenLastCalledWith(44, 1, expect.any(AbortSignal))
     expect(wrapper.text()).toContain('eshop.import2.media_report_title')
+  })
+
+  it('shows row counts per status above the preview report', async () => {
+    mocks.preview.mockResolvedValue(job({ report: { counts: { ready: 3, skipped: 76 } } }))
+    mocks.items.mockResolvedValue(report('skipped'))
+
+    const wrapper = mountPage()
+    await uploadFile(wrapper)
+    await wrapper.get('[data-test="preview-import"]').trigger('click')
+    await flushPromises()
+
+    const counts = wrapper.get('[data-test="report-counts"]').text()
+    expect(counts).toContain('eshop.import2.status.ready: 3')
+    expect(counts).toContain('eshop.import2.status.skipped: 76')
+
+    wrapper.unmount()
+  })
+
+  it('filters the preview report by status and resets the filter', async () => {
+    mocks.preview.mockResolvedValue(job({ report: { counts: { ready: 3, skipped: 76 } } }))
+    mocks.items.mockResolvedValue(report('skipped'))
+
+    const wrapper = mountPage()
+    await uploadFile(wrapper)
+    await wrapper.get('[data-test="preview-import"]').trigger('click')
+    await flushPromises()
+
+    await wrapper.get('[data-test="report-filter-skipped"]').trigger('click')
+    await flushPromises()
+    expect(mocks.items).toHaveBeenLastCalledWith(31, 1, expect.any(AbortSignal), 'skipped')
+    expect(wrapper.get('[data-test="report-filter-skipped"]').attributes('aria-pressed')).toBe('true')
+    expect(wrapper.text()).toContain('"total":79')
+
+    await wrapper.get('[data-test="report-filter-all"]').trigger('click')
+    await flushPromises()
+    expect(mocks.items).toHaveBeenLastCalledWith(31, 1, expect.any(AbortSignal))
+
+    wrapper.unmount()
   })
 
   it('keeps apply conflicts accessible while the media child job runs', async () => {

@@ -13,9 +13,10 @@
  *    (§ 17 odst. 3 zák. 300/2008 Sb.) a rozjede lhůty, takže se zapíná
  *    vědomě, s vysvětlením, a ne přepínačem bez kontextu.
  */
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
+import type { IsdsStoredAccess } from '@/api/isdsAccess'
 import { isAxiosError } from 'axios'
 import { navigateFullPage } from '@/workspace/fullPageNavigation'
 import { pageLocation, replacePageLocation } from '@/workspace/pageLocation'
@@ -38,6 +39,7 @@ import {
   type InboxMessage,
   type InboxPollState,
   type OutboxAttempt,
+  type InboxPollResult,
   type OutboxSubmission,
   type ReceiptBatchResult,
   type ReceiptCandidate,
@@ -65,6 +67,8 @@ import SortableTh from '@/components/ui/SortableTh.vue'
 import InboxCategoryManager from '@/components/submission/InboxCategoryManager.vue'
 import InboxCategoryNav from '@/components/submission/InboxCategoryNav.vue'
 import IsdsSendMethods from '@/components/submission/IsdsSendMethods.vue'
+import IsdsSavedAccessPicker from '@/components/submission/IsdsSavedAccessPicker.vue'
+import { useIsdsSavedAccess } from '@/components/submission/useIsdsSavedAccess'
 import { inboxCategoryLabel, inboxCategoryTone } from '@/utils/databoxInboxCategories'
 import {
   INBOX_QUERY_KEYS,
@@ -369,6 +373,21 @@ async function setInboxRead(message: InboxMessage, read: boolean) {
   }
 }
 
+const inboxMarkingAllRead = ref(false)
+
+async function markAllInboxRead() {
+  inboxMarkingAllRead.value = true
+  try {
+    const count = await dataBoxApi.markAllInboxRead({ ...inboxBrowseParams(), environment: environment.value })
+    toast.success(t('databox.inboxBrowse.markedAllRead', { count }))
+    await reloadInbox()
+  } catch (e) {
+    toast.error(apiErrorMessage(e))
+  } finally {
+    inboxMarkingAllRead.value = false
+  }
+}
+
 /** Otevření zprávy ji označí jako přečtenou; navigaci to nesmí zdržet ani zastavit. */
 function openInboxMessage(message: InboxMessage) {
   if (inboxSupportsCategories.value && !message.read_at) {
@@ -482,8 +501,22 @@ const inboxArchiveFolderOptions = computed(() => {
 // ── Jednorázové ruční načtení inboxu ────────────────────────────────────────
 // Tohle není plánovač ani trvalé povolení. Volba přihlášení je na kartě stále
 // viditelná; uživatel potvrdí právní účinek a spustí právě jeden síťový dotaz.
-type InboxAuthMethod = 'mobile_key' | 'password' | 'sms' | 'certificate'
+type InboxAuthMethod = 'mobile_key' | 'password' | 'saved' | 'sms' | 'certificate'
+
+function inboxMethods(hasSavedAccess: boolean): InboxAuthMethod[] {
+  return hasSavedAccess
+    ? ['mobile_key', 'password', 'saved', 'sms', 'certificate']
+    : ['mobile_key', 'password', 'sms', 'certificate']
+}
+
+function inboxMethodText(method: InboxAuthMethod, type: 'title' | 'description') {
+  return t(method === 'saved' ? `databox.savedAccess.${type}` : `databox.inbox.auth.${method}.${type}`)
+}
+
 const inboxAuthMethod = ref<InboxAuthMethod>('mobile_key')
+const inboxAccess = useIsdsSavedAccess(() => environment.value, 'receive', () => tab.value === 'inbox')
+const canUseInboxSavedAccess = inboxAccess.canUseSelected
+const inboxAuthMethods = computed(() => inboxMethods(inboxAccess.state.choices.length > 0 || inboxAuthMethod.value === 'saved'))
 const inboxAcknowledged = ref(false)
 const inboxUsername = ref('')
 const inboxPassword = ref('')
@@ -591,6 +624,29 @@ function acceptanceTone(state: AcceptanceState): string {
   }
 }
 
+/** Dodáním splněná povinnost: úřad se nevyjádří a nikdo na něj nečeká. */
+function settledByDelivery(row: OutboxSubmission): boolean {
+  return row.settles_on_delivery === true
+    && row.dispatch_state === 'delivered'
+    && row.acceptance_state === 'unknown'
+}
+
+function outboxAcceptanceLabel(row: OutboxSubmission): string {
+  if (settledByDelivery(row)) return t('databox.acceptance.settled_by_delivery')
+  if (row.settles_on_delivery === true && row.acceptance_state === 'unknown') {
+    return t('databox.acceptance.no_authority_result')
+  }
+  return t(`databox.acceptance.${row.acceptance_state}`)
+}
+
+function outboxAcceptanceTone(row: OutboxSubmission): string {
+  return acceptanceTone(settledByDelivery(row) ? 'accepted' : row.acceptance_state)
+}
+
+function scrollToReceiptsBatch() {
+  document.querySelector('[data-test="outbox-receipts-batch"]')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+}
+
 /**
  * Právě jedna plná primární akce podle stavu — zbytek outline.
  *
@@ -619,6 +675,7 @@ function needsManualSteps(row: OutboxSubmission): boolean {
 }
 
 async function loadAll() {
+  const authScope = inboxAccess.scope.value
   loading.value = true
   try {
     const storagePromise = typeof dataBoxApi.inboxStorage === 'function'
@@ -676,18 +733,18 @@ async function loadAll() {
     outboxYears.value = out.years ?? []
     applyInboxResult(inb)
     unmatchedReceipts.value = unmatched
-    savedMobileCredential.value = mobileProfile
     inboxStorageItems.value = storage.items
     inboxArchiveFolders.value = storage.folders
     selectedInboxArchiveFolderId.value = storage.items.find(item => item.environment === environment.value)?.base_folder_id ?? ''
     // Uložený přístup je jeden na firmu, uživatele a prostředí, takže se
     // předvyplní všude, kde se do schránky přihlašuje. Nechat pole prázdné
     // jen v dávce doručenek by vypadalo, že tam uložený přístup neplatí.
-    if (mobileProfile.saved && mobileProfile.username) {
-      if (inboxUsername.value === '') {
+    if (authScope === inboxAccess.scope.value) savedMobileCredential.value = mobileProfile
+    if (authScope === inboxAccess.scope.value && mobileProfile.saved && mobileProfile.username) {
+      if (inboxAuthMethod.value === 'mobile_key' && inboxUsername.value === '') {
         inboxUsername.value = mobileProfile.username
       }
-      if (receiptsUsername.value === '') {
+      if (receiptsAuthMethod.value === 'mobile_key' && receiptsUsername.value === '') {
         receiptsUsername.value = mobileProfile.username
       }
     }
@@ -736,6 +793,30 @@ function canReprocess(message: InboxMessage): boolean {
   return message.local_content_state === 'available'
     && message.document_id !== null
     && message.classification !== 'unclassified'
+    && message.classification !== 'delivery_receipt'
+    && message.direction !== 'sent'
+}
+
+/** Výzvu k odstranění vad posílá úřad nám; naše vlastní odeslaná zpráva jí být nemůže. */
+function canRecordNotice(message: InboxMessage): boolean {
+  return message.direction !== 'sent' && message.classification !== 'delivery_receipt'
+}
+
+/**
+ * Spárovaná zpráva vede na své podání: daňové na detail v Daních, ostatní na
+ * řádek v Odchozích podáních. Bez odkazu vypadala doručenka jako nezpracovaná.
+ */
+function matchedTaxSubmissionLink(message: InboxMessage) {
+  if (message.matched_outbox_artifact_kind !== 'tax_submission' || !message.matched_outbox_artifact_id) return null
+  return { name: 'reports-submissions', query: { submission_id: String(message.matched_outbox_artifact_id) } }
+}
+
+async function showMatchedOutbox(message: InboxMessage) {
+  if (message.matched_outbox_id === null) return
+  focusOutboxId.value = message.matched_outbox_id
+  tab.value = 'outbox'
+  await nextTick()
+  document.querySelector('[data-test="outbox-focused"]')?.scrollIntoView({ behavior: 'smooth', block: 'center' })
 }
 
 async function reprocessInboxMessage(message: InboxMessage) {
@@ -1085,10 +1166,15 @@ async function confirmSend(row: OutboxSubmission) {
   }
 }
 
-async function resolveUncertain(row: OutboxSubmission) {
+async function resolveUncertain(row: OutboxSubmission, access?: IsdsStoredAccess) {
+  const isCurrent = access ? resolveAccess.captureScope() : () => true
   busyId.value = row.id
   try {
-    const updated = await dataBoxApi.resolve(row.id, environment.value)
+    const updated = access
+      ? await dataBoxApi.resolve(row.id, environment.value, access)
+      : await dataBoxApi.resolve(row.id, environment.value)
+    if (!isCurrent()) return
+    if (updated.dispatch_state !== 'send_uncertain' && updated.dispatch_state !== 'sending') resolveRowId.value = null
     if (updated.dispatch_state === 'sent') {
       toast.success(t('databox.outbox.resolvedSent'))
     } else if (updated.dispatch_state === 'failed') {
@@ -1098,7 +1184,7 @@ async function resolveUncertain(row: OutboxSubmission) {
     }
     await loadAll()
   } catch (e) {
-    toast.error(apiErrorMessage(e))
+    if (isCurrent()) toast.error(apiErrorMessage(e))
   } finally {
     busyId.value = null
   }
@@ -1200,6 +1286,7 @@ function clearMobileStatusTimer() {
 }
 
 function resetInboxAuth() {
+  inboxAccess.reset()
   clearMobileStatusTimer()
   mobileFlowToken.value = ''
   mobileStatus.value = ''
@@ -1226,11 +1313,13 @@ async function forgetMobileCredential() {
   }
 }
 
-async function finishInboxPoll(result: { stored: number; failed: number; error?: string | null }) {
+async function finishInboxPoll(result: InboxPollResult) {
+  const attached = result.receipts?.attached ?? 0
+  const receipts = attached > 0 ? ` ${t('databox.outbox.receiptsBatch.done', { attached })}` : ''
   if (result.failed > 0 || result.error) {
-    toast.warning(t('databox.inbox.polledWithErrors', { stored: result.stored, failed: result.failed }))
+    toast.warning(t('databox.inbox.polledWithErrors', { stored: result.stored, failed: result.failed }) + receipts)
   } else {
-    toast.success(t('databox.inbox.polled', { count: result.stored }))
+    toast.success(t('databox.inbox.polled', { count: result.stored }) + receipts)
   }
   inboxAcknowledged.value = false
   resetInboxAuth()
@@ -1278,6 +1367,62 @@ async function onOutboxSent(dispatched: boolean) {
 // Vlastní stav, ne sdílený s vyzvedáváním schránky: obojí se dá rozdělat
 // najednou a sdílený formulář by jedno druhému přepsal rozepsané přihlášení.
 const receiptsAuthMethod = ref<InboxAuthMethod>('mobile_key')
+const receiptsAccess = useIsdsSavedAccess(
+  () => environment.value,
+  'receipts',
+  () => tab.value === 'outbox' && receiptsAwaiting.value.length > 0,
+)
+const canUseReceiptsSavedAccess = receiptsAccess.canUseSelected
+const receiptsAuthMethods = computed(() => inboxMethods(receiptsAccess.state.choices.length > 0 || receiptsAuthMethod.value === 'saved'))
+const receiptRowId = ref<number | null>(null)
+const receiptRowAccess = useIsdsSavedAccess(
+  () => environment.value, 'receipts', () => tab.value === 'outbox' && receiptRowId.value !== null,
+)
+const canUseReceiptRowAccess = receiptRowAccess.canUseSelected
+const resolveRowId = ref<number | null>(null)
+const resolveAccess = useIsdsSavedAccess(
+  () => environment.value, 'send', () => tab.value === 'outbox' && resolveRowId.value !== null,
+)
+const canUseResolveAccess = resolveAccess.canUseSelected
+
+function toggleReceiptRow(id: number) {
+  receiptRowAccess.reset()
+  receiptRowId.value = receiptRowId.value === id ? null : id
+}
+
+function toggleResolve(row: OutboxSubmission) {
+  if (!row.isds_sender_box_id) {
+    void resolveUncertain(row)
+    return
+  }
+  resolveAccess.reset()
+  resolveRowId.value = resolveRowId.value === row.id ? null : row.id
+}
+
+function resolveWithSavedAccess(row: OutboxSubmission) {
+  const selected = resolveAccess.selected.value
+  if (!canUseResolveAccess.value || !selected || selected.box_id !== row.isds_sender_box_id) return
+  void resolveUncertain(row, { access_id: selected.id, authorized: true })
+}
+
+async function fetchReceiptWithSavedAccess(row: OutboxSubmission) {
+  const selected = receiptRowAccess.selected.value
+  if (!canUseReceiptRowAccess.value || !selected || (row.isds_sender_box_id && row.isds_sender_box_id !== selected.box_id)) return
+  const isCurrent = receiptRowAccess.captureScope()
+  busyId.value = row.id
+  try {
+    const result = await dataBoxApi.downloadReceipt(row.id, environment.value, { access_id: selected.id, authorized: true })
+    if (!isCurrent()) return
+    toast.success(result.message)
+    receiptRowId.value = null
+    await loadAll()
+  } catch (error) {
+    if (isCurrent()) toast.error(apiErrorMessage(error))
+  } finally {
+    busyId.value = null
+  }
+}
+
 const receiptsUsername = ref('')
 const receiptsPassword = ref('')
 const receiptsCommunicationCode = ref('')
@@ -1295,6 +1440,7 @@ function clearReceiptsTimer() {
 }
 
 function resetReceiptsAuth() {
+  receiptsAccess.reset()
   clearReceiptsTimer()
   receiptsFlowToken.value = ''
   receiptsSmsFlowToken.value = ''
@@ -1348,6 +1494,9 @@ async function pollReceiptsMobileKey() {
 }
 
 async function downloadReceiptsBatch() {
+  if (receiptsBusy.value) return
+  const useSavedAccess = receiptsAuthMethod.value === 'saved'
+  const isCurrent = receiptsAccess.captureScope()
   receiptsBusy.value = true
   receiptsResult.value = null
   try {
@@ -1360,20 +1509,20 @@ async function downloadReceiptsBatch() {
       await loadAll()
       return
     }
-    if (receiptsUsername.value.trim() === '') {
+    if (!useSavedAccess && receiptsUsername.value.trim() === '') {
       toast.error(t('databox.inbox.usernameRequired'))
       return
     }
-    if (receiptsAuthMethod.value === 'password') {
-      if (receiptsPassword.value === '') {
+    if (receiptsAuthMethod.value === 'password' || useSavedAccess) {
+      if (!useSavedAccess && receiptsPassword.value === '') {
         toast.error(t('databox.inbox.passwordRequired'))
         return
       }
-      finishReceiptsBatch(await dataBoxApi.downloadReceiptsBatchWithPassword(
-        environment.value,
-        receiptsUsername.value,
-        receiptsPassword.value,
-      ))
+      const access = await receiptsAccess.credentials(useSavedAccess, receiptsUsername.value, receiptsPassword.value)
+      if (!access || !isCurrent()) return
+      const result = await dataBoxApi.downloadReceiptsBatchWithPassword(environment.value, access)
+      if (!isCurrent()) return
+      finishReceiptsBatch(result)
       await loadAll()
       return
     }
@@ -1426,6 +1575,8 @@ async function downloadReceiptsBatch() {
   } catch (e) {
     toast.error(apiErrorMessage(e))
   } finally {
+    receiptsPassword.value = ''
+    receiptsAccess.state.confirmed = false
     receiptsBusy.value = false
   }
 }
@@ -1448,6 +1599,9 @@ async function pollMobileKeyStatus() {
 }
 
 async function pollInbox() {
+  if (saving.value) return
+  const useSavedAccess = inboxAuthMethod.value === 'saved'
+  const isCurrent = inboxAccess.captureScope()
   if (!inboxAcknowledged.value) {
     toast.error(t('databox.polling.ackRequired'))
     return
@@ -1462,20 +1616,19 @@ async function pollInbox() {
       await finishInboxPoll(await dataBoxApi.pollInbox(environment.value))
       return
     }
-    if (inboxUsername.value.trim() === '') {
+    if (!useSavedAccess && inboxUsername.value.trim() === '') {
       toast.error(t('databox.inbox.usernameRequired'))
       return
     }
-    if (inboxAuthMethod.value === 'password') {
-      if (inboxPassword.value === '') {
+    if (inboxAuthMethod.value === 'password' || useSavedAccess) {
+      if (!useSavedAccess && inboxPassword.value === '') {
         toast.error(t('databox.inbox.passwordRequired'))
         return
       }
-      await finishInboxPoll(await dataBoxApi.pollInboxWithPassword(
-        environment.value,
-        inboxUsername.value,
-        inboxPassword.value,
-      ))
+      const access = await inboxAccess.credentials(useSavedAccess, inboxUsername.value, inboxPassword.value)
+      if (!access || !isCurrent()) return
+      const result = await dataBoxApi.pollInboxWithPassword(environment.value, access)
+      if (isCurrent()) await finishInboxPoll(result)
       return
     }
     if (inboxAuthMethod.value === 'sms') {
@@ -1528,19 +1681,38 @@ async function pollInbox() {
   } catch (e) {
     toast.error(apiErrorMessage(e))
   } finally {
+    inboxPassword.value = ''
+    inboxAccess.state.confirmed = false
     saving.value = false
   }
 }
 
-async function changeEnvironment() {
+watch(inboxAuthMethod, next => {
+  resetInboxAuth()
+  inboxAcknowledged.value = false
+  rememberMobileCredential.value = false
+  inboxUsername.value = next === 'mobile_key' ? savedMobileCredential.value?.username ?? '' : ''
+}, { flush: 'sync' })
+
+watch(receiptsAuthMethod, next => {
+  resetReceiptsAuth()
+  receiptsUsername.value = next === 'mobile_key' ? savedMobileCredential.value?.username ?? '' : ''
+}, { flush: 'sync' })
+
+watch(inboxAccess.scope, () => {
   resetInboxAuth()
   resetReceiptsAuth()
+  savedMobileCredential.value = null
+  inboxAuthMethod.value = 'mobile_key'
+  receiptsAuthMethod.value = 'mobile_key'
+  inboxUsername.value = ''
   receiptsUsername.value = ''
   receiptsResult.value = null
-  inboxUsername.value = ''
-  savedMobileCredential.value = null
   rememberMobileCredential.value = false
   inboxAcknowledged.value = false
+}, { flush: 'sync' })
+
+async function changeEnvironment() {
   await loadAll()
 }
 
@@ -2111,6 +2283,19 @@ useWindowRefresh(refreshLists, () => !loading.value && !saving.value && !inboxLo
       </div>
 
       <div class="flex flex-wrap gap-2">
+        <button
+          v-if="receiptsAwaiting.length"
+          type="button"
+          class="whitespace-nowrap"
+          :class="btnFilled('primary')"
+          data-test="outbox-receipts-batch-jump"
+          @click="scrollToReceiptsBatch"
+        >
+          <svg class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.download" />
+          </svg>
+          {{ t('databox.outbox.receiptsBatch.title') }} ({{ receiptsAwaiting.length }})
+        </button>
         <button type="button" :class="btnOutline('neutral')" :disabled="saving" @click="openReceiptPicker(null)">
           <svg class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.upload" />
@@ -2180,15 +2365,22 @@ useWindowRefresh(refreshLists, () => !loading.value && !saving.value && !inboxLo
             <span class="rounded-full px-2 py-0.5 text-xs font-medium" :class="dispatchTone(row.dispatch_state)">
               {{ t(`databox.dispatch.${row.dispatch_state}`) }}
             </span>
-            <span class="rounded-full px-2 py-0.5 text-xs font-medium" :class="acceptanceTone(row.acceptance_state)">
-              {{ t(`databox.acceptance.${row.acceptance_state}`) }}
+            <span class="rounded-full px-2 py-0.5 text-xs font-medium" :class="outboxAcceptanceTone(row)" data-test="outbox-acceptance">
+              {{ outboxAcceptanceLabel(row) }}
             </span>
           </div>
         </div>
 
         <!-- Věta, podle které se dá jednat -->
         <p
-          v-if="row.dispatch_state === 'delivered' && row.acceptance_state === 'unknown'"
+          v-if="settledByDelivery(row)"
+          class="mt-3 rounded-md bg-neutral-50 p-2 text-sm text-neutral-600"
+          data-test="outbox-settled-by-delivery"
+        >
+          {{ t('databox.outbox.settledByDelivery') }}
+        </p>
+        <p
+          v-else-if="row.dispatch_state === 'delivered' && row.acceptance_state === 'unknown'"
           class="mt-3 rounded-md bg-neutral-50 p-2 text-sm text-neutral-600"
         >
           {{ t('databox.outbox.deliveredNotProcessed') }}
@@ -2385,6 +2577,19 @@ useWindowRefresh(refreshLists, () => !loading.value && !saving.value && !inboxLo
             {{ t('databox.outbox.uploadReceipt') }}
           </button>
           <button
+            v-if="receiptsAwaiting.some(item => item.id === row.id) && receiptsAccess.state.choices.some(
+              choice => !row.isds_sender_box_id || choice.box_id === row.isds_sender_box_id
+            )"
+            type="button"
+            :class="btnOutline('neutral')"
+            :disabled="busyId === row.id"
+            data-test="outbox-saved-receipt"
+            @click="toggleReceiptRow(row.id)"
+          >
+            <svg class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><path :d="ICONS.download" stroke-linecap="round" stroke-linejoin="round" /></svg>
+            {{ t('databox.savedAccess.downloadReceipt') }}
+          </button>
+          <button
             v-if="primaryAction(row) === 'confirm'"
             type="button"
             :class="btnFilled('success')"
@@ -2401,7 +2606,7 @@ useWindowRefresh(refreshLists, () => !loading.value && !saving.value && !inboxLo
             type="button"
             :class="btnFilled('warning')"
             :disabled="busyId === row.id"
-            @click="resolveUncertain(row)"
+            @click="toggleResolve(row)"
           >
             <svg class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.search" />
@@ -2441,6 +2646,24 @@ useWindowRefresh(refreshLists, () => !loading.value && !saving.value && !inboxLo
               <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.trash" />
             </svg>
             {{ t('databox.outbox.delete') }}
+          </button>
+        </div>
+
+        <div v-if="resolveRowId === row.id" class="mt-3 rounded-md border border-neutral-200 p-3">
+          <IsdsSavedAccessPicker :access="resolveAccess" :box-id="row.isds_sender_box_id" :disabled="busyId === row.id" />
+          <p v-if="!resolveAccess.state.choices.some(choice => choice.box_id === row.isds_sender_box_id)" class="mt-2 text-sm text-neutral-600">
+            {{ t('databox.savedAccess.resolveBox', { box: row.isds_sender_box_id }) }}
+          </p>
+          <button type="button" :class="[btnFilled('warning'), 'mt-3']" :disabled="busyId === row.id || !canUseResolveAccess" data-test="outbox-resolve-saved-submit" @click="resolveWithSavedAccess(row)">
+            <svg class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><path :d="ICONS.search" stroke-linecap="round" stroke-linejoin="round" /></svg>
+            {{ t('databox.outbox.resolve') }}
+          </button>
+        </div>
+        <div v-if="receiptRowId === row.id" class="mt-3 rounded-md border border-neutral-200 p-3">
+          <IsdsSavedAccessPicker :access="receiptRowAccess" :box-id="row.isds_sender_box_id" :disabled="busyId === row.id" />
+          <button type="button" :class="[btnFilled('primary'), 'mt-3']" :disabled="busyId === row.id || !canUseReceiptRowAccess" data-test="outbox-receipt-saved-submit" @click="fetchReceiptWithSavedAccess(row)">
+            <svg class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><path :d="ICONS.download" stroke-linecap="round" stroke-linejoin="round" /></svg>
+            {{ t('databox.savedAccess.downloadReceipt') }}
           </button>
         </div>
 
@@ -2487,15 +2710,15 @@ useWindowRefresh(refreshLists, () => !loading.value && !saving.value && !inboxLo
 
         <div class="mt-4 grid min-w-0 gap-3 md:grid-cols-2 xl:grid-cols-4">
           <label
-            v-for="method in (['mobile_key', 'password', 'sms', 'certificate'] as InboxAuthMethod[])"
+            v-for="method in receiptsAuthMethods"
             :key="method"
             class="flex min-w-0 cursor-pointer gap-3 rounded-lg border p-3"
             :class="receiptsAuthMethod === method ? 'border-primary-500 bg-primary-50' : 'border-neutral-200 bg-surface'"
           >
-            <input v-model="receiptsAuthMethod" type="radio" :value="method" class="mt-0.5" />
+            <input v-model="receiptsAuthMethod" type="radio" :value="method" class="mt-0.5" :disabled="receiptsBusy" />
             <span class="min-w-0 break-words">
-              <span class="block text-sm font-medium text-neutral-900">{{ t(`databox.inbox.auth.${method}.title`) }}</span>
-              <span class="mt-1 block text-xs text-neutral-500">{{ t(`databox.inbox.auth.${method}.description`) }}</span>
+              <span class="block text-sm font-medium text-neutral-900">{{ inboxMethodText(method, 'title') }}</span>
+              <span class="mt-1 block text-xs text-neutral-500">{{ inboxMethodText(method, 'description') }}</span>
               <span v-if="method === 'certificate' && !currentCredential" class="mt-1 block text-xs text-warning-700 dark:text-warning-300">
                 {{ t('databox.inbox.certificateMissing') }}
               </span>
@@ -2510,8 +2733,14 @@ useWindowRefresh(refreshLists, () => !loading.value && !saving.value && !inboxLo
           {{ t('databox.outbox.mobileKey.testEnvironmentWarning') }}
         </p>
 
+        <IsdsSavedAccessPicker
+          v-if="receiptsAuthMethod === 'saved'"
+          class="mt-4"
+          :access="receiptsAccess"
+          :disabled="receiptsBusy"
+        />
         <div
-          v-if="receiptsAuthMethod !== 'certificate' && !(receiptsAuthMethod === 'sms' && receiptsSmsFlowToken)"
+          v-else-if="receiptsAuthMethod !== 'certificate' && !(receiptsAuthMethod === 'sms' && receiptsSmsFlowToken)"
           class="mt-4 grid gap-3 sm:grid-cols-2"
         >
           <label class="block">
@@ -2542,6 +2771,11 @@ useWindowRefresh(refreshLists, () => !loading.value && !saving.value && !inboxLo
             <span class="mt-1 block text-xs text-neutral-500">{{ t('databox.inbox.communicationCodeHint') }}</span>
           </label>
         </div>
+
+        <label v-if="receiptsAuthMethod === 'password'" class="mt-3 flex items-center gap-2 text-sm">
+          <input v-model="receiptsAccess.state.remember" type="checkbox" :disabled="receiptsBusy" data-test="isds-remember-access">
+          <span>{{ t('databox.savedAccess.remember') }}</span>
+        </label>
 
         <!-- Uložený přístup je jeden trezor na firmu, uživatele a prostředí.
              Dávka ho jen používá; zapomenout ho jde tam, kde se ukládá. -->
@@ -2582,7 +2816,7 @@ useWindowRefresh(refreshLists, () => !loading.value && !saving.value && !inboxLo
           <button
             type="button"
             :class="btnFilled('primary')"
-            :disabled="receiptsBusy || receiptsFlowToken !== '' || (receiptsAuthMethod === 'certificate' && !currentCredential)"
+            :disabled="receiptsBusy || receiptsFlowToken !== '' || (receiptsAuthMethod === 'certificate' && !currentCredential) || (receiptsAuthMethod === 'saved' && !canUseReceiptsSavedAccess)"
             data-test="outbox-receipts-batch-submit"
             @click="downloadReceiptsBatch"
           >
@@ -2667,15 +2901,15 @@ useWindowRefresh(refreshLists, () => !loading.value && !saving.value && !inboxLo
 
         <div class="mt-4 grid min-w-0 gap-3 md:grid-cols-2 xl:grid-cols-4">
           <label
-            v-for="method in (['mobile_key', 'password', 'sms', 'certificate'] as InboxAuthMethod[])"
+            v-for="method in inboxAuthMethods"
             :key="method"
             class="flex min-w-0 cursor-pointer gap-3 rounded-lg border p-3"
             :class="inboxAuthMethod === method ? 'border-primary-500 bg-primary-50' : 'border-neutral-200 bg-surface'"
           >
-            <input v-model="inboxAuthMethod" type="radio" :value="method" class="mt-0.5" />
+            <input v-model="inboxAuthMethod" type="radio" :value="method" class="mt-0.5" :disabled="saving" />
             <span class="min-w-0 break-words">
-              <span class="block text-sm font-medium text-neutral-900">{{ t(`databox.inbox.auth.${method}.title`) }}</span>
-              <span class="mt-1 block text-xs text-neutral-500">{{ t(`databox.inbox.auth.${method}.description`) }}</span>
+              <span class="block text-sm font-medium text-neutral-900">{{ inboxMethodText(method, 'title') }}</span>
+              <span class="mt-1 block text-xs text-neutral-500">{{ inboxMethodText(method, 'description') }}</span>
               <span v-if="method === 'certificate' && !currentCredential" class="mt-1 block text-xs text-warning-700 dark:text-warning-300">
                 {{ t('databox.inbox.certificateMissing') }}
               </span>
@@ -2683,8 +2917,14 @@ useWindowRefresh(refreshLists, () => !loading.value && !saving.value && !inboxLo
           </label>
         </div>
 
+        <IsdsSavedAccessPicker
+          v-if="inboxAuthMethod === 'saved'"
+          class="mt-4"
+          :access="inboxAccess"
+          :disabled="saving"
+        />
         <div
-          v-if="inboxAuthMethod !== 'certificate' && !(inboxAuthMethod === 'sms' && smsFlowToken)"
+          v-else-if="inboxAuthMethod !== 'certificate' && !(inboxAuthMethod === 'sms' && smsFlowToken)"
           class="mt-4 grid gap-3 sm:grid-cols-2"
         >
           <label class="block">
@@ -2707,6 +2947,11 @@ useWindowRefresh(refreshLists, () => !loading.value && !saving.value && !inboxLo
             <span class="mt-1 block text-xs text-neutral-500">{{ t('databox.inbox.communicationCodeHint') }}</span>
           </label>
         </div>
+
+        <label v-if="inboxAuthMethod === 'password'" class="mt-3 flex items-center gap-2 text-sm">
+          <input v-model="inboxAccess.state.remember" type="checkbox" :disabled="saving" data-test="isds-remember-access">
+          <span>{{ t('databox.savedAccess.remember') }}</span>
+        </label>
 
         <div v-if="inboxAuthMethod === 'mobile_key'" class="mt-3 flex flex-wrap items-center gap-3 text-sm">
           <label v-if="!savedMobileCredential?.saved || mobileCommunicationCode" class="flex items-center gap-2">
@@ -2749,7 +2994,7 @@ useWindowRefresh(refreshLists, () => !loading.value && !saving.value && !inboxLo
         </div>
 
         <label class="mt-4 flex gap-3 rounded-lg border border-warning-500/50 bg-warning-50 p-3 text-sm text-warning-900 dark:text-warning-100">
-          <input v-model="inboxAcknowledged" type="checkbox" class="mt-0.5" />
+          <input v-model="inboxAcknowledged" type="checkbox" class="mt-0.5" :disabled="saving" data-test="inbox-poll-acknowledge" />
           <span>{{ t('databox.polling.acknowledge') }}</span>
         </label>
 
@@ -2757,7 +3002,8 @@ useWindowRefresh(refreshLists, () => !loading.value && !saving.value && !inboxLo
           <button
             type="button"
             :class="btnFilled('primary')"
-            :disabled="saving || mobileFlowToken !== '' || (inboxAuthMethod === 'certificate' && !currentCredential)"
+            :disabled="saving || mobileFlowToken !== '' || (inboxAuthMethod === 'certificate' && !currentCredential) || (inboxAuthMethod === 'saved' && !canUseInboxSavedAccess)"
+            data-test="inbox-poll-submit"
             @click="pollInbox"
           >
             <svg class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
@@ -2931,6 +3177,18 @@ useWindowRefresh(refreshLists, () => !loading.value && !saving.value && !inboxLo
                   </svg>
                   {{ t('databox.inbox.privacy.hiddenList') }}
                 </button>
+                <button
+                  type="button"
+                  :class="[btnOutline('success'), 'whitespace-nowrap']"
+                  :disabled="loading || inboxMarkingAllRead || !(inboxFacets?.unread ?? 0)"
+                  data-test="inbox-mark-all-read"
+                  @click="markAllInboxRead"
+                >
+                  <svg class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.check" />
+                  </svg>
+                  {{ t('databox.inboxBrowse.markAllRead') }}
+                </button>
               </div>
             </template>
           </FilterBar>
@@ -2985,6 +3243,21 @@ useWindowRefresh(refreshLists, () => !loading.value && !saving.value && !inboxLo
                 <span v-if="m.attachment_count" class="text-neutral-500">{{ t('databox.inboxBrowse.attachments', { count: m.attachment_count }) }}</span>
                 <span v-if="m.sender_ref_number" class="break-all text-neutral-500">{{ t('databox.inboxBrowse.refNumber', { ref: m.sender_ref_number }) }}</span>
                 <span v-if="m.sender_ident" class="break-all text-neutral-500">{{ t('databox.inboxBrowse.fileMark', { mark: m.sender_ident }) }}</span>
+              </div>
+
+              <div v-if="m.matched_outbox_id !== null" class="mt-2 text-xs" data-test="inbox-matched-outbox">
+                <span class="text-success-700">{{ t('databox.inbox.matchedTo') }}</span>
+                <RouterLink
+                  v-if="matchedTaxSubmissionLink(m)"
+                  :to="matchedTaxSubmissionLink(m)!"
+                  class="ml-1 break-words text-primary-700 hover:underline"
+                >{{ m.matched_outbox_subject || t('databox.inbox.matchedSubmission') }}</RouterLink>
+                <button
+                  v-else
+                  type="button"
+                  class="ml-1 cursor-pointer break-words text-left text-primary-700 hover:underline"
+                  @click="showMatchedOutbox(m)"
+                >{{ m.matched_outbox_subject || t('databox.inbox.matchedSubmission') }}</button>
               </div>
 
               <dl class="mt-3 grid gap-3 text-sm sm:grid-cols-2">
@@ -3068,7 +3341,7 @@ useWindowRefresh(refreshLists, () => !loading.value && !saving.value && !inboxLo
                   </svg>
                   {{ m.read_at ? t('databox.inboxBrowse.markUnread') : t('databox.inboxBrowse.markRead') }}
                 </button>
-                <button type="button" :class="btnOutlineSm('warning')" @click="startNoticeFromMessage(m)">
+                <button v-if="canRecordNotice(m)" type="button" :class="btnOutlineSm('warning')" @click="startNoticeFromMessage(m)">
                   <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
                     <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.bell" />
                   </svg>
@@ -3206,6 +3479,20 @@ useWindowRefresh(refreshLists, () => !loading.value && !saving.value && !inboxLo
                     >
                       {{ t(`databox.classification.${m.classification}`) }}
                     </span>
+                    <div v-if="m.matched_outbox_id !== null" class="mt-1 max-w-[14rem] text-xs" data-test="inbox-matched-outbox">
+                      <span class="text-success-700">{{ t('databox.inbox.matchedTo') }}</span>
+                      <RouterLink
+                        v-if="matchedTaxSubmissionLink(m)"
+                        :to="matchedTaxSubmissionLink(m)!"
+                        class="block break-words text-primary-700 hover:underline"
+                      >{{ m.matched_outbox_subject || t('databox.inbox.matchedSubmission') }}</RouterLink>
+                      <button
+                        v-else
+                        type="button"
+                        class="block cursor-pointer break-words text-left text-primary-700 hover:underline"
+                        @click="showMatchedOutbox(m)"
+                      >{{ m.matched_outbox_subject || t('databox.inbox.matchedSubmission') }}</button>
+                    </div>
                   </td>
                   <td class="whitespace-nowrap px-3 py-2">{{ m.delivered_at ?? '—' }}</td>
                   <!--
@@ -3286,7 +3573,7 @@ useWindowRefresh(refreshLists, () => !loading.value && !saving.value && !inboxLo
                         </svg>
                         {{ m.read_at ? t('databox.inboxBrowse.markUnread') : t('databox.inboxBrowse.markRead') }}
                       </button>
-                      <button type="button" :class="btnOutlineSm('warning')" @click="startNoticeFromMessage(m)">
+                      <button v-if="canRecordNotice(m)" type="button" :class="btnOutlineSm('warning')" @click="startNoticeFromMessage(m)">
                         <svg class="h-3.5 w-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
                           <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.bell" />
                         </svg>

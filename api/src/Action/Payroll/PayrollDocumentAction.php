@@ -53,7 +53,7 @@ final class PayrollDocumentAction
             AccessLevel::WRITE,
             $error,
         ) || !$this->requirePayrollEnabled($request, $response, $this->moduleAccess, $error)) {
-            return $error ?? Json::error($response, 'forbidden', 'Pro tuto akci nemáš oprávnění.', 403);
+            return $error ?? Json::error($response, 'forbidden', 'Pro tuto akci nemáte oprávnění.', 403);
         }
         $documentId = (int) ($args['id'] ?? 0);
         if ($documentId <= 0) {
@@ -93,7 +93,7 @@ final class PayrollDocumentAction
             AccessLevel::READ,
             $error,
         ) || !$this->requirePayrollEnabled($request, $response, $this->moduleAccess, $error)) {
-            return $error ?? Json::error($response, 'forbidden', 'Pro tuto akci nemáš oprávnění.', 403);
+            return $error ?? Json::error($response, 'forbidden', 'Pro tuto akci nemáte oprávnění.', 403);
         }
         $query = $request->getQueryParams();
         $period = trim((string) ($query['period'] ?? ''));
@@ -139,7 +139,7 @@ final class PayrollDocumentAction
             AccessLevel::READ,
             $error,
         ) || !$this->requirePayrollEnabled($request, $response, $this->moduleAccess, $error)) {
-            return $error ?? Json::error($response, 'forbidden', 'Pro tuto akci nemáš oprávnění.', 403);
+            return $error ?? Json::error($response, 'forbidden', 'Pro tuto akci nemáte oprávnění.', 403);
         }
         $query = $request->getQueryParams();
         $year = (int) ($query['year'] ?? 0);
@@ -193,7 +193,7 @@ final class PayrollDocumentAction
             AccessLevel::WRITE,
             $error,
         ) || !$this->requirePayrollEnabled($request, $response, $this->moduleAccess, $error)) {
-            return $error ?? Json::error($response, 'forbidden', 'Pro tuto akci nemáš oprávnění.', 403);
+            return $error ?? Json::error($response, 'forbidden', 'Pro tuto akci nemáte oprávnění.', 403);
         }
         $supplierId = $this->currentSupplierId($request);
         $userId = $this->userId($request);
@@ -246,7 +246,7 @@ final class PayrollDocumentAction
             AccessLevel::WRITE,
             $error,
         ) || !$this->requirePayrollEnabled($request, $response, $this->moduleAccess, $error)) {
-            return $error ?? Json::error($response, 'forbidden', 'Pro tuto akci nemáš oprávnění.', 403);
+            return $error ?? Json::error($response, 'forbidden', 'Pro tuto akci nemáte oprávnění.', 403);
         }
         $supplierId = $this->currentSupplierId($request);
         $userId = $this->userId($request);
@@ -313,7 +313,7 @@ final class PayrollDocumentAction
             AccessLevel::WRITE,
             $error,
         ) || !$this->requirePayrollEnabled($request, $response, $this->moduleAccess, $error)) {
-            return $error ?? Json::error($response, 'forbidden', 'Pro tuto akci nemáš oprávnění.', 403);
+            return $error ?? Json::error($response, 'forbidden', 'Pro tuto akci nemáte oprávnění.', 403);
         }
         $supplierId = $this->currentSupplierId($request);
         $userId = $this->userId($request);
@@ -381,7 +381,7 @@ final class PayrollDocumentAction
             AccessLevel::READ,
             $error,
         ) || !$this->requirePayrollEnabled($request, $response, $this->moduleAccess, $error)) {
-            return $error ?? Json::error($response, 'forbidden', 'Pro tuto akci nemáš oprávnění.', 403);
+            return $error ?? Json::error($response, 'forbidden', 'Pro tuto akci nemáte oprávnění.', 403);
         }
         $batch = $this->batch->detail(
             $this->currentSupplierId($request),
@@ -411,7 +411,7 @@ final class PayrollDocumentAction
             AccessLevel::WRITE,
             $error,
         ) || !$this->requirePayrollEnabled($request, $response, $this->moduleAccess, $error)) {
-            return $error ?? Json::error($response, 'forbidden', 'Pro tuto akci nemáš oprávnění.', 403);
+            return $error ?? Json::error($response, 'forbidden', 'Pro tuto akci nemáte oprávnění.', 403);
         }
         $batch = $this->batch->detail(
             $this->currentSupplierId($request),
@@ -454,7 +454,7 @@ final class PayrollDocumentAction
             AccessLevel::READ,
             $error,
         ) || !$this->requirePayrollEnabled($request, $response, $this->moduleAccess, $error)) {
-            return $error ?? Json::error($response, 'forbidden', 'Pro tuto akci nemáš oprávnění.', 403);
+            return $error ?? Json::error($response, 'forbidden', 'Pro tuto akci nemáte oprávnění.', 403);
         }
         $query = $request->getQueryParams();
         try {
@@ -482,7 +482,7 @@ final class PayrollDocumentAction
             AccessLevel::WRITE,
             $error,
         ) || !$this->requirePayrollEnabled($request, $response, $this->moduleAccess, $error)) {
-            return $error ?? Json::error($response, 'forbidden', 'Pro tuto akci nemáš oprávnění.', 403);
+            return $error ?? Json::error($response, 'forbidden', 'Pro tuto akci nemáte oprávnění.', 403);
         }
         try {
             $item = $this->batch->retry(
@@ -513,7 +513,7 @@ final class PayrollDocumentAction
             AccessLevel::READ,
             $error,
         ) || !$this->requirePayrollEnabled($request, $response, $this->moduleAccess, $error)) {
-            return $error ?? Json::error($response, 'forbidden', 'Pro tuto akci nemáš oprávnění.', 403);
+            return $error ?? Json::error($response, 'forbidden', 'Pro tuto akci nemáte oprávnění.', 403);
         }
         $supplierId = $this->currentSupplierId($request);
         $userId = $this->userId($request);
@@ -545,7 +545,7 @@ final class PayrollDocumentAction
             AccessLevel::READ,
             $error,
         ) || !$this->requirePayrollEnabled($request, $response, $this->moduleAccess, $error)) {
-            return $error ?? Json::error($response, 'forbidden', 'Pro tuto akci nemáš oprávnění.', 403);
+            return $error ?? Json::error($response, 'forbidden', 'Pro tuto akci nemáte oprávnění.', 403);
         }
         $supplierId = $this->currentSupplierId($request);
         $userId = $this->userId($request);
@@ -628,7 +628,7 @@ final class PayrollDocumentAction
             AccessLevel::READ,
             $error,
         ) || !$this->requirePayrollEnabled($request, $response, $this->moduleAccess, $error)) {
-            return $error ?? Json::error($response, 'forbidden', 'Pro tuto akci nemáš oprávnění.', 403);
+            return $error ?? Json::error($response, 'forbidden', 'Pro tuto akci nemáte oprávnění.', 403);
         }
         try {
             $events = $this->deliveryLedger->forDocument(
@@ -653,7 +653,7 @@ final class PayrollDocumentAction
             AccessLevel::WRITE,
             $error,
         ) || !$this->requirePayrollEnabled($request, $response, $this->moduleAccess, $error)) {
-            return $error ?? Json::error($response, 'forbidden', 'Pro tuto akci nemáš oprávnění.', 403);
+            return $error ?? Json::error($response, 'forbidden', 'Pro tuto akci nemáte oprávnění.', 403);
         }
         $actorUserId = $this->userId($request);
         $body = (array) $request->getParsedBody();

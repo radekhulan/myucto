@@ -206,7 +206,7 @@ final readonly class SubmissionOutboxService
         // `claimForSending` má v UPDATE podmínku `dispatch_state = 'ready'`,
         // takže uspěje právě jednou. Druhý požadavek dostane null a odejde
         // s aktuálním stavem — bez druhého podání u úřadu.
-        $claimed = $this->outbox->claimForSending($supplierId, $id, $userId);
+        $claimed = $this->outbox->claimForSending($supplierId, $id, $userId, $context->verifiedBoxId);
         if ($claimed === null) {
             $current = $this->outbox->find($supplierId, $id);
             if ($current === null) {
@@ -647,6 +647,17 @@ final readonly class SubmissionOutboxService
         $recoverable = [DispatchState::SendUncertain->value, DispatchState::Sending->value];
         if (!in_array((string) $row['dispatch_state'], $recoverable, true)) {
             return $row;
+        }
+
+        $senderBox = $row['isds_sender_box_id'] ?? null;
+        if ($context->environment !== (string) $row['environment'] || $context->supplierId !== $supplierId
+            || ($senderBox !== null && $context->verifiedBoxId !== $senderBox)
+            || ($senderBox === null && $context->verifiedBoxId !== null)) {
+            throw new SubmissionChannelException(
+                'isds_access_box_mismatch',
+                'Pro dohledání použijte přístup ke schránce, ze které se podání odesílalo.',
+                409,
+            );
         }
 
         $channel = $this->channels->get((string) $row['channel']);

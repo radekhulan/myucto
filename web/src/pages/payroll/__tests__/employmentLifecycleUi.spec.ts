@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest'
 import {
   employmentDiffFields,
   employmentDiffValue,
+  mergedFromCode,
+  openingBalancesHostId,
   todayIso,
   transitionPresentation,
 } from '@/pages/payroll/employmentLifecycleUi'
@@ -35,6 +37,13 @@ describe('employmentLifecycleUi', () => {
   })
 
   describe('employmentDiffValue', () => {
+    it('hodinové sjednání v historii přeloží a sazbu formátuje jako peníze', () => {
+      expect(employmentDiffValue('remuneration_type', null)).toEqual({ kind: 'key', key: 'payroll.people.remuneration.legacy' })
+      expect(employmentDiffValue('remuneration_basis_kind', 'agreement')).toEqual({ kind: 'key', key: 'payroll.people.remuneration.basis_kinds.agreement' })
+      expect(employmentDiffValue('remuneration_type', 'hourly')).toEqual({ kind: 'key', key: 'payroll.people.remuneration.mode.hourly' })
+      expect(employmentDiffValue('hourly_rate_minor', 18050)).toEqual({ kind: 'money', minor: 18050 })
+      expect(employmentDiffValue('remuneration_basis', 'Syntetická dohoda')).toEqual({ kind: 'text', text: 'Syntetická dohoda' })
+    })
     it('stav a typ vztahu překládá, místo aby vypsal databázovou hodnotu', () => {
       expect(employmentDiffValue('status', 'ended'))
         .toEqual({ kind: 'key', key: 'payroll.people.employment_status.ended' })
@@ -101,5 +110,30 @@ describe('employmentLifecycleUi', () => {
     it('chybějící diff nespadne', () => {
       expect(employmentDiffFields(null, true)).toEqual([])
     })
+
+    it('u sloučení vynechá původ dat a počty přesunů, změny podmínek ukáže', () => {
+      const diff = {
+        merged_from: { employment_id: 7, code: 'DPP-1', relation_type: 'dpp' },
+        moved: { payroll_inputs: 1 },
+        relation_type: { from: 'employment', to: 'dpp' },
+      }
+      expect(employmentDiffFields(diff, false)).toEqual(['relation_type'])
+      expect(mergedFromCode(diff)).toBe('DPP-1')
+      expect(mergedFromCode({ relation_type: { from: 'a', to: 'b' } })).toBeNull()
+    })
+  })
+
+  it('počáteční úhrny nese hlavní vztah, bez něj poslední skončený', () => {
+    const base = { status: 'ended' as const, is_primary: false, start_date: '2026-01-05', end_date: '2026-01-31' }
+    expect(openingBalancesHostId([
+      { ...base, id: 1 },
+      { ...base, id: 2, start_date: '2026-02-07', end_date: '2026-02-28' },
+      { ...base, id: 3, status: 'no_show' as const, start_date: '2026-03-01', end_date: null },
+    ])).toBe(2)
+    expect(openingBalancesHostId([
+      { ...base, id: 1, status: 'active' as const, is_primary: true, end_date: null },
+      { ...base, id: 2, start_date: '2026-02-07', end_date: '2026-02-28' },
+    ])).toBe(1)
+    expect(openingBalancesHostId([])).toBeNull()
   })
 })

@@ -51,7 +51,7 @@ final class ChargeIssuanceCaseIdentityIsolationTest extends TestCase
         foreach($this->connections as $db) { if($db->pdo()->inTransaction()) $db->pdo()->rollBack(); $db->close(); }
         if(isset($this->schema,$this->server)) {
             self::assertMatchesRegularExpression('/^myucto_identity_race_[a-f0-9]{10}_test$/D',$this->schema);
-            $this->server->exec('DROP DATABASE IF EXISTS '.DatabaseCloner::quote($this->schema));
+            DatabaseCloner::dropDatabase($this->server, $this->schema);
         }
     }
 

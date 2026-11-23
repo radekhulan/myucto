@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import DateInput from '@/components/ui/DateInput.vue'
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { RouterLink } from 'vue-router'
@@ -268,11 +269,11 @@ function percent(ratio: number): string {
       <div class="flex flex-wrap items-end gap-2">
         <label class="block">
           <span class="block text-xs text-neutral-500 mb-1">{{ t('dimensions.rules.date_from') }}</span>
-          <input v-model="range.date_from" type="date" class="h-10 px-2 border border-neutral-300 rounded-md text-sm" />
+          <DateInput v-model="range.date_from" class="h-10 px-2 border border-neutral-300 rounded-md text-sm" />
         </label>
         <label class="block">
           <span class="block text-xs text-neutral-500 mb-1">{{ t('dimensions.rules.date_to') }}</span>
-          <input v-model="range.date_to" type="date" class="h-10 px-2 border border-neutral-300 rounded-md text-sm" />
+          <DateInput v-model="range.date_to" class="h-10 px-2 border border-neutral-300 rounded-md text-sm" />
         </label>
         <button type="button" :disabled="checking" :class="btnFilled('warning')" class="whitespace-nowrap" data-test="rule-audit-run" @click="runAudit">
           <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.clipboardCheck" /></svg>
@@ -392,11 +393,11 @@ function percent(ratio: number): string {
           </div>
           <label class="block">
             <span class="block text-sm font-medium text-neutral-700 mb-1">{{ t('dimensions.rules.valid_from') }}</span>
-            <input v-model="form.valid_from" type="date" class="w-full h-10 px-2 border border-neutral-300 rounded-md text-sm" />
+            <DateInput v-model="form.valid_from" class="w-full h-10 px-2 border border-neutral-300 rounded-md text-sm" />
           </label>
           <label class="block">
             <span class="block text-sm font-medium text-neutral-700 mb-1">{{ t('dimensions.rules.valid_to') }}</span>
-            <input v-model="form.valid_to" type="date" class="w-full h-10 px-2 border border-neutral-300 rounded-md text-sm" />
+            <DateInput v-model="form.valid_to" class="w-full h-10 px-2 border border-neutral-300 rounded-md text-sm" />
           </label>
         </div>
         <label v-if="formType?.kind === 'vehicle'" class="flex items-center gap-2 text-sm text-neutral-700">

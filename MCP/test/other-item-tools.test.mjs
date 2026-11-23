@@ -81,7 +81,7 @@ test('katalog registruje nástroje ostatních položek a nenabízí účtování
     assert.ok(Object.hasOwn(tool(name).inputSchema.properties, 'confirm'), name);
   }
   for (const forbidden of [
-    'post_other_item', 'reverse_other_item', 'repost_other_item', 'allocate_other_item_payment',
+    'post_other_item', 'reverse_other_item', 'repost_other_item',
     'unallocate_other_item_payment', 'generate_other_item_schedule',
   ]) {
     assert.equal(TOOLS_BY_NAME.has(forbidden), false, forbidden);
@@ -95,11 +95,14 @@ test('čtecí nástroje volají konkrétní cesty a mapují hledání na q', asy
   const routes = [
     ['list_other_items', { side: 'payable', status: 'open', query: 'nájem', page: 2 }, '/accounting/other-items',
       { side: 'payable', status: 'open', page: 2, q: 'nájem' }],
+    ['list_other_items', { kind_id: 5, sort_by: 'document_no' }, '/accounting/other-items', { kind_id: 5, sort_by: 'document_no' }],
     ['get_other_item', { id: 12 }, '/accounting/other-items/12', null],
     ['list_other_item_allocations', { id: 12 }, '/accounting/other-items/12/allocations', null],
     ['other_item_payment_candidates', { id: 12, query: 'nájem', limit: 10 }, '/accounting/other-items/12/payment-candidates',
       { limit: 10, q: 'nájem' }],
+    ['list_other_item_kinds', {}, '/accounting/other-items/kinds', null],
     ['list_other_item_schedules', {}, '/accounting/other-items/schedules', null],
+    ['list_other_item_schedules', { source_item_id: 7 }, '/accounting/other-items/schedules', { source_item_id: 7 }],
     ['get_other_item_schedule', { id: 3 }, '/accounting/other-items/schedules/3', null],
     ['get_other_item_installments', { item_id: 12 }, '/accounting/other-items/12/installments', null],
   ];
@@ -204,6 +207,61 @@ test('úprava konceptu složí celý doklad a jediný protiřádek přepočte', 
   }]);
 });
 
+test('úprava konceptu drží období rozlišení, přepnutí strany ho zahodí', async () => {
+  const client = new FakeClient({ 'GET /accounting/other-items/12': draft({ side: 'receivable', accrual_from: '2094-07-01', accrual_to: '2095-06-30' }) });
+  await tool('update_other_item').run(client, { id: 12, title: 'Syntetický nájem' }, 'update_other_item');
+  assert.equal(writes(client)[0].body.accrual_from, '2094-07-01');
+  assert.equal(writes(client)[0].body.accrual_to, '2095-06-30');
+
+  await tool('update_other_item').run(client, { id: 12, side: 'payable' }, 'update_other_item');
+  assert.equal(writes(client)[1].body.accrual_from, null);
+  assert.equal(writes(client)[1].body.accrual_to, null);
+});
+
+test('závazek období nákladu drží, stejná strana ho nezahodí', async () => {
+  const client = new FakeClient({ 'GET /accounting/other-items/12': draft({ side: 'payable', accrual_from: '2094-07-01', accrual_to: '2095-06-30' }) });
+  await tool('update_other_item').run(client, { id: 12, side: 'payable', title: 'Syntetické nájemné' }, 'update_other_item');
+  assert.equal(writes(client)[0].body.accrual_from, '2094-07-01');
+  assert.equal(writes(client)[0].body.accrual_to, '2095-06-30');
+
+  await tool('update_other_item').run(client, { id: 12, side: 'receivable', accrual_from: '2094-08-01', accrual_to: '2095-07-31' }, 'update_other_item');
+  assert.equal(writes(client)[1].body.accrual_from, '2094-08-01');
+  assert.equal(writes(client)[1].body.accrual_side, 'receivable');
+
+  // Shodné období zadané výslovně pro novou stranu nese označení, server ho pak nezahodí.
+  await tool('update_other_item').run(client, { id: 12, side: 'receivable', accrual_from: '2094-07-01', accrual_to: '2095-06-30' }, 'update_other_item');
+  assert.equal(writes(client)[2].body.accrual_from, '2094-07-01');
+  assert.equal(writes(client)[2].body.accrual_side, 'receivable');
+  // Bez změny strany se nic neoznačuje.
+  await tool('update_other_item').run(client, { id: 12, title: 'Syntetické nájemné' }, 'update_other_item');
+  assert.equal(writes(client)[3].body.accrual_side, undefined);
+});
+
+test('úprava konceptu s vlastním druhem ho drží, vestavěný druh ho zruší', async () => {
+  const client = new FakeClient({ 'GET /accounting/other-items/12': draft({ kind: 'other', kind_id: '5' }) });
+  await tool('update_other_item').run(client, { id: 12, title: 'Syntetický nájem klubovny' }, 'update_other_item');
+  assert.equal(writes(client)[0].body.kind_id, 5);
+
+  await tool('update_other_item').run(client, { id: 12, kind: 'other' }, 'update_other_item');
+  assert.equal(writes(client)[1].body.kind_id, 5);
+
+  await tool('update_other_item').run(client, { id: 12, kind: 'rent' }, 'update_other_item');
+  assert.equal(writes(client)[2].body.kind, 'rent');
+  assert.equal(writes(client)[2].body.kind_id, null);
+});
+
+test('úprava konceptu drží účet protistrany a nový účet bez kódu banky uložený kód zahodí', async () => {
+  const client = new FakeClient({ 'GET /accounting/other-items/12': draft({
+    counterparty_account: '1000000005', counterparty_bank_code: '0100' }) });
+  await tool('update_other_item').run(client, { id: 12, title: 'Syntetický úvěr' }, 'update_other_item');
+  assert.equal(writes(client)[0].body.counterparty_account, '1000000005');
+  assert.equal(writes(client)[0].body.counterparty_bank_code, '0100');
+
+  await tool('update_other_item').run(client, { id: 12, counterparty_account: 'CZ1801000000001000000005' }, 'update_other_item');
+  assert.equal(writes(client)[1].body.counterparty_account, 'CZ1801000000001000000005');
+  assert.equal(writes(client)[1].body.counterparty_bank_code, null);
+});
+
 test('úprava s více protiřádky změnu částky bez nové kontace odmítne', async () => {
   const lines = [{ account_code: '518', amount: 7000 }, { account_code: '548', amount: 5000 }];
   const client = new FakeClient({ 'GET /accounting/other-items/12': draft({ posting_lines: lines, counter_account_code: null }) });
@@ -272,6 +330,29 @@ test('splátkový kalendář odmítne špatný součet, pořadí, datum i počet
   assert.equal(writes(client).length + writes(paid).length, 0);
 });
 
+test('rozdělená splátka úvěru: jistina dává částku dokladu, složky částku splátky', async () => {
+  const client = new FakeClient({ 'GET /accounting/other-items/12': draft() });
+  const run = (installments) => tool('set_other_item_installments').run(client, { item_id: 12, installments }, 's');
+  await assert.rejects(run([
+    { due_on: '2094-02-15', amount: 6100, principal_amount: 6000, interest_amount: 90, fee_amount: 10 },
+    { due_on: '2094-03-15', amount: 6050, principal_amount: 6000, interest_amount: 40 },
+  ]), /splátka 2: jistina, úrok a poplatek dávají 6040\.00 Kč, ale částka splátky je 6050\.00 Kč/);
+  await assert.rejects(run([
+    { due_on: '2094-02-15', amount: 6100, principal_amount: 6000, interest_amount: 100 },
+    { due_on: '2094-03-15', amount: 5050, principal_amount: 5000, interest_amount: 50 },
+  ]), /součet jistiny splátek 11000\.00 Kč neodpovídá částce dokladu 12000\.00 Kč/);
+  assert.equal(writes(client).length, 0);
+
+  await run([
+    { due_on: '2094-02-15', amount: 6100, principal_amount: 6000, interest_amount: 100 },
+    { due_on: '2094-03-15', amount: 6060, principal_amount: 6000, interest_amount: 50, fee_amount: 10 },
+  ]);
+  assert.deepEqual(writes(client)[0].body.items, [
+    { due_on: '2094-02-15', amount: 6100, principal_amount: 6000, interest_amount: 100, fee_amount: 0 },
+    { due_on: '2094-03-15', amount: 6060, principal_amount: 6000, interest_amount: 50, fee_amount: 10 },
+  ]);
+});
+
 test('zrušení splátkového kalendáře vyžaduje potvrzení a pošle prázdný seznam', async () => {
   const client = new FakeClient({
     'GET /accounting/other-items/12': draft(),
@@ -286,6 +367,23 @@ test('zrušení splátkového kalendáře vyžaduje potvrzení a pošle prázdn�
   assert.deepEqual(writes(client), [{ method: 'PUT', path: '/accounting/other-items/12/installments', body: { items: [] }, tool: 'c' }]);
 });
 
+test('přiřazení úhrady je zápisový nástroj a posílá právě jednu platbu', async () => {
+  assert.equal(tool('allocate_other_item_payment').write, true);
+  const client = new FakeClient();
+  await tool('allocate_other_item_payment').run(client, { item_id: 12, bank_transaction_id: 90, amount: 1500.5 }, 'a');
+  await tool('allocate_other_item_payment').run(client, { item_id: 12, cash_document_id: 7, amount: 100 }, 'a');
+  assert.deepEqual(client.calls, [
+    { method: 'POST', path: '/accounting/other-items/12/allocations', body: { bank_transaction_id: 90, amount: 1500.5 }, tool: 'a' },
+    { method: 'POST', path: '/accounting/other-items/12/allocations', body: { cash_document_id: 7, amount: 100 }, tool: 'a' },
+  ]);
+  const bad = new FakeClient();
+  const run = (args) => tool('allocate_other_item_payment').run(bad, { item_id: 12, ...args }, 'a');
+  assert.throws(() => run({ amount: 10 }), /právě jedno/);
+  assert.throws(() => run({ bank_transaction_id: 1, cash_document_id: 2, amount: 10 }), /právě jedno/);
+  assert.throws(() => run({ bank_transaction_id: 1, amount: 10.005 }), /haléře/);
+  assert.equal(bad.calls.length, 0);
+});
+
 test('opakování se zakládá vždy bez automatického účtování', async () => {
   const client = new FakeClient();
   await tool('create_other_item_schedule').run(client, {
@@ -295,6 +393,24 @@ test('opakování se zakládá vždy bez automatického účtování', async () 
     method: 'POST', path: '/accounting/other-items/12/schedule',
     body: { frequency: 'monthly', ends_on: '2094-12-31', auto_post: false }, tool: 'create_other_item_schedule',
   }]);
+});
+
+test('šablona názvu opakování jde do založení i úpravy; vynechané pole úprava zachová', async () => {
+  const client = new FakeClient();
+  await tool('create_other_item_schedule').run(client, {
+    item_id: 12, frequency: 'quarterly', title_template: 'Pojistné Q{Q}/{YYYY}', title_sync_period: true,
+  }, 'c');
+  await tool('set_other_item_schedule_title').run(client, { id: 5, title_template: 'Nájem {MM}/{YYYY}' }, 't');
+  await tool('set_other_item_schedule_title').run(client, { id: 5, title_sync_period: false }, 't');
+  await tool('set_other_item_schedule_title').run(client, { id: 5, title_template: null }, 't');
+  assert.equal(tool('set_other_item_schedule_title').write, true);
+  assert.deepEqual(writes(client), [
+    { method: 'POST', path: '/accounting/other-items/12/schedule',
+      body: { frequency: 'quarterly', title_template: 'Pojistné Q{Q}/{YYYY}', title_sync_period: true, auto_post: false }, tool: 'c' },
+    { method: 'PUT', path: '/accounting/other-items/schedules/5/title', body: { title_template: 'Nájem {MM}/{YYYY}' }, tool: 't' },
+    { method: 'PUT', path: '/accounting/other-items/schedules/5/title', body: { title_sync_period: false }, tool: 't' },
+    { method: 'PUT', path: '/accounting/other-items/schedules/5/title', body: { title_template: null }, tool: 't' },
+  ]);
 });
 
 test('obnovení opakování s automatikou odmítne, pozastavení projde', async () => {
@@ -310,4 +426,24 @@ test('obnovení opakování s automatikou odmítne, pozastavení projde', async 
   const manual = new FakeClient({ 'GET /accounting/other-items/schedules/4': { id: 4, auto_post: false } });
   await tool('set_other_item_schedule_status').run(manual, { id: 4, status: 'active' }, 's');
   assert.deepEqual(writes(manual)[0].body, { status: 'active' });
+});
+
+test('vlastní kontace úhrad jde do konceptu jen výslovně a nezmění kontaci vzniku', async () => {
+  const client = new FakeClient({ 'GET /accounting/other-items/12': draft() });
+  await tool('update_other_item').run(client, {
+    id: 12, posting_overrides: { payment_bank: { credit_account_code: '221', description_template: 'Splátka {title}' } },
+  }, 'update_other_item');
+  const [put] = writes(client);
+  assert.deepEqual(put.body.posting_overrides, {
+    payment_bank: { credit_account_code: '221', description_template: 'Splátka {title}' },
+  });
+  assert.deepEqual(put.body.posting_lines, [{ account_code: '221', amount: 12000 }]);
+
+  await tool('update_other_item').run(client, { id: 12, title: 'Jen popis' }, 'update_other_item');
+  assert.equal(Object.hasOwn(writes(client)[1].body, 'posting_overrides'), false, 'Bez pole se uložená kontace nemění.');
+
+  const posted = new FakeClient({ 'GET /accounting/other-items/12': draft({ status: 'posted' }) });
+  await assert.rejects(tool('update_other_item').run(posted, { id: 12, posting_overrides: { payment_bank: null } }, 'u'),
+    /upravit lze jen koncept/);
+  assert.equal(writes(posted).length, 0);
 });

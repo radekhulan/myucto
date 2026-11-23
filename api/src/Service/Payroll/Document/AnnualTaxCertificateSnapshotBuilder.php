@@ -19,6 +19,7 @@ use MyInvoice\Service\Payroll\IncomeTax\TaxEvidenceStatus;
 use MyInvoice\Service\Payroll\IncomeTax\TaxResidence;
 use MyInvoice\Service\Payroll\Migration\PayrollTakeoverCoverage;
 use MyInvoice\Service\Payroll\Migration\PayrollTakeoverTaxEvidence;
+use MyInvoice\Service\Payroll\PayrollChildReference;
 use MyInvoice\Service\Payroll\Posting\PayrollPartnerSettlementResolver;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
 use MyInvoice\Service\Payroll\Security\PayrollRevealPurpose;
@@ -1572,15 +1573,15 @@ class AnnualTaxCertificateSnapshotBuilder
         int $employeeId,
         array $claims,
     ): array {
-        ksort($claims);
         $rows = [];
+        // Pořadí nároku dítěte (při změně během roku nejnižší), pak id dítěte.
+        $claims = PayrollChildReference::sortByClaimOrder($claims, static fn (array $months): int =>
+            $months === [] ? 0 : min(array_column($months, 'order')));
         foreach ($claims as $reference => $months) {
-            if (preg_match('/^dependant-([1-9][0-9]*)$/D', $reference, $match) !== 1) {
-                throw new \DomainException(
+            $dependantId = PayrollChildReference::dependantId((string) $reference)
+                ?? throw new \DomainException(
                     'Odkaz dítěte v daňovém potvrzení není platný.',
                 );
-            }
-            $dependantId = (int) $match[1];
             $statement = $this->db->pdo()->prepare(
                 'SELECT id, full_name, birth_date, birth_number_ciphertext
                    FROM payroll_dependants

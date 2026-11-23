@@ -7,14 +7,29 @@ namespace MyInvoice\Service\Accounting;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Infrastructure\Database\TransactionFailure;
 use MyInvoice\Repository\ChartOfAccountsRepository;
+use MyInvoice\Repository\DimensionAssignmentRepository;
 use MyInvoice\Repository\OtherItemRepository;
+use MyInvoice\Repository\PostingRuleRepository;
+use MyInvoice\Service\ActivityLogger;
+use MyInvoice\Service\Accounting\Accrual\AccrualPeriodDetector;
 use MyInvoice\Service\Accounting\Closing\DocumentSeriesService;
 use MyInvoice\Service\Accounting\Dimension\DimensionDefaults;
+use MyInvoice\Service\Accounting\Dimension\DimensionPeriodGuard;
+use MyInvoice\Service\Bank\NonInvoiceBankTransactionScope;
+use MyInvoice\Service\Invoice\InvoiceOtherItemPayments;
+use MyInvoice\Service\Nonprofit\Membership\MembershipBankPaymentGuard;
 use PDO;
 
 final class OtherItemService
 {
     private const KINDS = ['other', 'rent', 'loan', 'deposit', 'insurance', 'fee', 'claim'];
+
+    /**
+     * Peněžní částka úhrady (jistina, úrok a poplatek, migrace 2241). Čerpání platby
+     * (kolik z pohybu či pokladního dokladu je už použito) se počítá z ní; saldo položky
+     * jen z jistiny (`amount`).
+     */
+    public const ALLOCATION_TOTAL_SQL = 'amount + interest_amount + fee_amount';
 
     public function __construct(
         private readonly Connection $db,
@@ -22,30 +37,75 @@ final class OtherItemService
         private readonly PostingService $posting,
         private readonly DocumentSeriesService $series,
         private readonly ChartOfAccountsRepository $accounts,
+        private readonly OtherItemKindService $kinds,
+        private readonly OtherItemPostingResolver $postingResolver,
+        private readonly OtherItemPostingProfileService $postingProfiles,
+        private readonly ActivityLogger $activity,
+        private readonly DocumentJournalPurge $journalPurge,
     ) {}
 
+    /**
+     * Detail položky. Podvojné účetnictví k němu dostane vlastní kontaci úhrad
+     * (`posting_overrides`) a účinnou kontaci událostí s původem (`posting_rules`).
+     */
     public function get(int $supplierId, int $id): array
     {
-        return $this->items->find($supplierId, $id)
+        $item = $this->items->find($supplierId, $id)
             ?? throw new OtherItemException('not_found', 'Doklad nebyl nalezen.', 404);
+        $item['posting_overrides'] = (object) [];
+        $item['posting_rules'] = (object) [];
+        // Rozdělené splátky (migrace 2241): saldo položky je jistina, platit se má i úrok a poplatek.
+        $coverage = $this->installmentCoverage($supplierId, $id);
+        $item['has_split_installments'] = OtherItemInstallmentCoverage::hasSplit($coverage);
+        $item['remaining_payment'] = self::payableOf($item, $coverage);
+        $item['linked_invoice'] = $this->linkedInvoice($supplierId, $id);
+        $item['occurrence'] = $this->scheduleOccurrence($supplierId, $id);
+        if ($this->isDoubleEntry($supplierId)) {
+            $item['posting_overrides'] = (object) $this->postingProfiles->overridesForItem($supplierId, $id);
+            $item['posting_rules'] = (object) $this->postingResolver->forItem($supplierId, $item);
+        }
+        return $item;
     }
 
     public function list(int $supplierId, array $filters, int $page, int $perPage): array
     {
         $page = max(1, $page);
         $perPage = max(1, min(200, $perPage));
-        return $this->items->list($supplierId, $filters, $page, $perPage);
+        $result = $this->items->list($supplierId, $filters, $page, $perPage);
+        // Stav ve výpisu se řídí tím, kolik zbývá zaplatit, stejně jako v detailu (get): u rozdělených
+        // splátek i úrok a poplatek. Pokrytí splátek jedním dávkovým čtením za řádky stránky.
+        $coverage = $this->items->installmentCoverage($supplierId, array_map(static fn (array $row): int => (int) $row['id'], $result['items']));
+        foreach ($result['items'] as &$row) {
+            $rowCoverage = $coverage[(int) $row['id']] ?? [];
+            $row['has_split_installments'] = OtherItemInstallmentCoverage::hasSplit($rowCoverage);
+            $row['remaining_payment'] = self::payableOf($row, $rowCoverage);
+        }
+        unset($row);
+        return $result;
     }
 
-    public function create(int $supplierId, array $input, ?int $userId): array
+    /**
+     * @param array{kind:string,kind_id:?int}|null $templateKind druh, který nese šablona opakování —
+     *                                                         výskyt ho dostane, i když druh mezitím skryli
+     */
+    public function create(int $supplierId, array $input, ?int $userId, ?array $templateKind = null): array
     {
-        $data = $this->normalize($supplierId, $input);
+        $data = $this->normalize($supplierId, $input, $templateKind);
         $pdo = $this->db->pdo();
         $ownTx = !$pdo->inTransaction();
         if ($ownTx) $pdo->beginTransaction();
         try {
             $id = $this->items->insert($supplierId, $data, $userId);
             $this->items->replacePostingLines($supplierId, $id, $data['posting_lines']);
+            if (array_key_exists('posting_overrides', $input) && $input['posting_overrides'] !== null) {
+                $this->postingProfiles->saveItemOverrides($supplierId, ['id' => $id, 'side' => $data['side']],
+                    $input['posting_overrides'], $userId);
+            }
+            // Výskyt opakování dostane dimenze zdroje ({@see OtherItemScheduleService::generate}),
+            // výchozí dimenze druhu jen nově pořízený doklad.
+            if ($templateKind === null) {
+                $this->applyKindDimensions($supplierId, $id, $data);
+            }
             if ($ownTx) $pdo->commit();
         } catch (\Throwable $e) {
             if ($ownTx && $pdo->inTransaction()) $pdo->rollBack();
@@ -73,12 +133,8 @@ final class OtherItemService
         }
         $data = $this->normalize($supplierId, $input);
         $id = $this->items->insert($supplierId, $data, $userId);
-        $number = $this->series->next(
-            $supplierId,
-            $data['side'] === 'receivable' ? 'other_receivable' : 'other_payable',
-            (int) substr((string) $data['issued_on'], 0, 4),
-        );
-        $this->items->setPosted($supplierId, $id, 'confirmed', $number, null);
+        $number = $this->nextNumber($supplierId, $data, (string) $data['issued_on']);
+        $this->setPosted($supplierId, $id, 'confirmed', $number, null);
         return $this->get($supplierId, $id);
     }
 
@@ -93,7 +149,27 @@ final class OtherItemService
         return $stmt->fetchColumn() !== false;
     }
 
+    /**
+     * Má položka aktivní úhradu? Úhrada samotného úroku či poplatku rozdělené splátky
+     * (migrace 2241) má jistinu 0, takže ji `paid_amount` nevidí.
+     */
+    public function hasActivePayments(int $supplierId, int $id): bool
+    {
+        $stmt = $this->db->pdo()->prepare('SELECT 1 FROM other_item_allocations
+            WHERE supplier_id = ? AND other_item_id = ? AND reversed_on IS NULL LIMIT 1');
+        $stmt->execute([$supplierId, $id]);
+        return $stmt->fetchColumn() !== false;
+    }
+
     public function update(int $supplierId, int $id, array $input, ?int $userId): array
+    {
+        // Změna období konceptu se zaúčtovanou historií zamyká období ({@see assertAccrualChangeAllowed()}).
+        return TransactionFailure::retrying($this->db->pdo(),
+            fn (): array => $this->updateOnce($supplierId, $id, $input, $userId));
+    }
+
+    /** @return array<string,mixed> */
+    private function updateOnce(int $supplierId, int $id, array $input, ?int $userId): array
     {
         $pdo = $this->db->pdo();
         $ownTx = !$pdo->inTransaction();
@@ -104,8 +180,34 @@ final class OtherItemService
             if ($existing['status'] !== 'draft') {
                 throw new OtherItemException('not_draft', 'Upravovat lze jen koncept.', 409);
             }
-            $data = $this->normalize($supplierId, $this->mergeStored($supplierId, $id, $existing, $input));
-            $planned = $pdo->prepare('SELECT COALESCE(SUM(amount), 0) AS total, MIN(due_on) AS first_due
+            $data = $this->normalize($supplierId, $this->mergeStored($supplierId, $id, $existing, $input), $existing);
+            // Koncept vrácený odúčtováním může mít zápisy, ze kterých uzávěrka už odložila, i po
+            // přechodu do daňové evidence (rozpuštění čte uložené období).
+            $accrualBefore = [self::dateOrNull($existing['accrual_from']), self::dateOrNull($existing['accrual_to'])];
+            $accrualAfter = [$data['accrual_from'], $data['accrual_to']];
+            // Stejné období u jiné strany (`accrual_side`) je také změna: výnos se stává nákladem.
+            $sideChanged = (string) $data['side'] !== (string) $existing['side'];
+            if ($accrualAfter !== $accrualBefore || ($sideChanged && $accrualAfter !== [null, null])) {
+                // Uložené období mohla uzávěrka použít pro zdroje uložené strany, nové ho použije
+                // pro zdroje nové strany (při změně strany i zápis s protiúčtem opačné třídy,
+                // např. pohledávka s nákladem 5xx). Obojí musí být mimo uzavřené a odložené období;
+                // strana bez období se neprověřuje, uzávěrka z ní nic neodkládá.
+                $guarded = [];
+                if ($accrualBefore !== [null, null]) $guarded[] = (string) $existing['side'];
+                if ($accrualAfter !== [null, null]) $guarded[] = (string) $data['side'];
+                foreach (array_unique($guarded) as $guardedSide) {
+                    $this->assertAccrualChangeAllowed($supplierId, $id, $guardedSide);
+                }
+                // Období je vstup uzávěrky: změna se zapíše do aktivity firmy jako přes route
+                // `/accrual` (služba IP a prohlížeč nezná).
+                $this->activity->log('other_item.accrual_changed', $userId, 'other_item', $id, [
+                    'accrual_from' => ['before' => $accrualBefore[0], 'after' => $accrualAfter[0]],
+                    'accrual_to' => ['before' => $accrualBefore[1], 'after' => $accrualAfter[1]],
+                ] + ($sideChanged ? ['side' => ['before' => (string) $existing['side'], 'after' => (string) $data['side']]] : []),
+                    supplierId: $supplierId);
+            }
+            // Částka položky je jistina; rozdělená splátka nese úrok a poplatek navíc (migrace 2241).
+            $planned = $pdo->prepare('SELECT COALESCE(SUM(COALESCE(principal_amount, amount)), 0) AS total, MIN(due_on) AS first_due
                 FROM other_item_installments WHERE supplier_id = ? AND other_item_id = ?');
             $planned->execute([$supplierId, $id]);
             $plan = $planned->fetch(PDO::FETCH_ASSOC);
@@ -117,12 +219,56 @@ final class OtherItemService
             }
             $this->items->updateDraft($supplierId, $id, $data, $userId);
             $this->items->replacePostingLines($supplierId, $id, $data['posting_lines']);
+            if (array_key_exists('posting_overrides', $input) && $input['posting_overrides'] !== null) {
+                $this->postingProfiles->saveItemOverrides($supplierId, ['id' => $id, 'side' => $data['side']],
+                    $input['posting_overrides'], $userId);
+            } elseif ($data['side'] !== $existing['side']) {
+                $this->postingProfiles->flipItemOverrides($supplierId, $id, $userId);
+            }
             if ($ownTx) $pdo->commit();
         } catch (\Throwable $e) {
             if ($ownTx && $pdo->inTransaction()) $pdo->rollBack();
             throw $e;
         }
         return $this->get($supplierId, $id);
+    }
+
+    /**
+     * Účet protistrany jde změnit i u potvrzeného nebo zaúčtovaného dokladu: zaúčtování
+     * ani saldo neovlivní, slouží jen k párování úhrad. Stornovaný a zrušený doklad se už
+     * nepáruje, koncept se upravuje celý ({@see update}). Bez kódu banky v těle se uložený
+     * kód smaže stejně jako v {@see mergeStored}.
+     *
+     * @return array{item:array<string,mixed>,before:array{counterparty_account:?string,counterparty_bank_code:?string},
+     *     after:array{counterparty_account:?string,counterparty_bank_code:?string}}
+     */
+    public function updateCounterpartyAccount(int $supplierId, int $id, array $input): array
+    {
+        $pdo = $this->db->pdo();
+        $ownTx = !$pdo->inTransaction();
+        if ($ownTx) $pdo->beginTransaction();
+        try {
+            $existing = $this->items->find($supplierId, $id, true)
+                ?? throw new OtherItemException('not_found', 'Doklad nebyl nalezen.', 404);
+            if (!in_array($existing['status'], ['confirmed', 'posted'], true)) {
+                throw new OtherItemException('counterparty_not_editable',
+                    'Účet protistrany lze takto změnit jen u potvrzeného nebo zaúčtovaného dokladu.', 409);
+            }
+            $after = OtherItemCounterpartyAccount::normalize($input['counterparty_account'] ?? null,
+                $input['counterparty_bank_code'] ?? null);
+            $before = [
+                'counterparty_account' => $existing['counterparty_account'] ?? null,
+                'counterparty_bank_code' => $existing['counterparty_bank_code'] ?? null,
+            ];
+            $pdo->prepare('UPDATE other_items SET counterparty_account = ?, counterparty_bank_code = ?, row_version = row_version + 1
+                WHERE id = ? AND supplier_id = ? AND deleted_at IS NULL')
+                ->execute([$after['counterparty_account'], $after['counterparty_bank_code'], $id, $supplierId]);
+            if ($ownTx) $pdo->commit();
+        } catch (\Throwable $e) {
+            if ($ownTx && $pdo->inTransaction()) $pdo->rollBack();
+            throw $e;
+        }
+        return ['item' => $this->get($supplierId, $id), 'before' => $before, 'after' => $after];
     }
 
     /**
@@ -141,8 +287,41 @@ final class OtherItemService
             && (string) $existing['accounting_on'] === (string) $existing['issued_on']) {
             $input['accounting_on'] = null;
         }
-        foreach (['side', 'kind', 'title', 'partner_id', 'partner_name', 'issued_on', 'accounting_on', 'due_on',
-            'currency', 'amount', 'variable_symbol', 'account_code', 'counter_account_code', 'note'] as $key) {
+        // Jiný vestavěný druh než `other` v těle bez kind_id je přepnutí z vlastního druhu na vestavěný.
+        // `other` bez kind_id vlastní druh nechá: tak hlavičku přeposílá klient, který kind_id nezná
+        // (vlastní druh se v `kind` ukládá jako other). Zrušit ho jde výslovným kind_id: null.
+        if (($input['kind'] ?? 'other') !== 'other' && !array_key_exists('kind_id', $input)) {
+            $input['kind_id'] = null;
+        }
+        // Nový účet bez kódu banky nese kód v sobě (`číslo/kód`) nebo je to IBAN; uložený kód by mu odporoval.
+        if (array_key_exists('counterparty_account', $input) && !array_key_exists('counterparty_bank_code', $input)) {
+            $input['counterparty_bank_code'] = null;
+        }
+        // Období rozlišení je u pohledávky výnos (384), u závazku náklad (381): přepnutí
+        // strany mění jeho význam, proto uložené období zahodí. Daňová evidence ho jinak
+        // ponechá beze změny: z něj rozpouští odklad zaúčtovaný ještě v podvojném účetnictví
+        // ({@see accrualPeriod()}).
+        $unchanged = true;
+        foreach (['accrual_from', 'accrual_to'] as $key) {
+            if (array_key_exists($key, $input) && self::dateOrNull($input[$key]) !== self::dateOrNull($existing[$key] ?? null)) {
+                $unchanged = false;
+            }
+        }
+        // Zahodí i období poslané beze změny (klient, který vrací uložený stav, např. MCP);
+        // nové období zadané spolu se stranou zůstane. Shodné období zadané záměrně pro novou
+        // stranu (editor po vymazání pole, převzatý návrh) klient označí `accrual_side`.
+        $accrualSide = $input['accrual_side'] ?? null;
+        unset($input['accrual_side']);
+        if ($accrualSide !== null && !in_array($accrualSide, ['receivable', 'payable'], true)) {
+            throw new OtherItemException('validation_failed', 'Pole accrual_side musí být receivable nebo payable.');
+        }
+        if ($unchanged && array_key_exists('side', $input) && $input['side'] !== ($existing['side'] ?? null)
+            && $accrualSide !== $input['side']) {
+            $input['accrual_from'] = $input['accrual_to'] = null;
+        }
+        foreach (['side', 'kind', 'kind_id', 'title', 'partner_id', 'partner_name', 'issued_on', 'accounting_on', 'due_on',
+            'accrual_from', 'accrual_to', 'currency', 'amount', 'variable_symbol', 'counterparty_account', 'counterparty_bank_code',
+            'account_code', 'counter_account_code', 'note'] as $key) {
             if (!array_key_exists($key, $input)) {
                 $input[$key] = $existing[$key] ?? null;
             }
@@ -156,7 +335,267 @@ final class OtherItemService
         return $input;
     }
 
+    /**
+     * Poznámka vystaveného dokladu (potvrzeného, zaúčtovaného i stornovaného). Do zápisu
+     * v deníku ani do saldokonta se nepromítá, proto jde měnit kdykoli. Ostatní pole
+     * zůstávají zamčená: popis zápisu skládá zaúčtování z názvu a profilu druhu
+     * (deník ho u zápisu ostatní položky nechá měnit jen přes zdroj), účet protistrany
+     * má vlastní úpravu ({@see updateCounterpartyAccount()}), koncept se upravuje celý.
+     *
+     * @return array{item:array<string,mixed>, before:?string, after:?string}
+     */
+    public function updateNote(int $supplierId, int $id, mixed $note, ?int $userId): array
+    {
+        $text = trim(is_scalar($note) ? (string) $note : '');
+        if (mb_strlen($text) > 10000) {
+            throw new OtherItemException('invalid_note', 'Poznámka smí mít nejvýše 10 000 znaků.');
+        }
+        $after = $text === '' ? null : $text;
+        $pdo = $this->db->pdo();
+        $ownTx = !$pdo->inTransaction();
+        if ($ownTx) $pdo->beginTransaction();
+        try {
+            $existing = $this->items->find($supplierId, $id, true)
+                ?? throw new OtherItemException('not_found', 'Doklad nebyl nalezen.', 404);
+            if ($existing['status'] === 'draft') {
+                throw new OtherItemException('is_draft', 'Koncept upravte v editaci dokladu.', 409);
+            }
+            $before = $existing['note'] !== null ? (string) $existing['note'] : null;
+            if ($before !== $after) {
+                $pdo->prepare('UPDATE other_items SET note = ?, updated_by = ?, row_version = row_version + 1
+                    WHERE id = ? AND supplier_id = ? AND deleted_at IS NULL')
+                    ->execute([$after, $userId, $id, $supplierId]);
+            }
+            if ($ownTx) $pdo->commit();
+        } catch (\Throwable $e) {
+            if ($ownTx && $pdo->inTransaction()) $pdo->rollBack();
+            throw $e;
+        }
+        return ['item' => $this->get($supplierId, $id), 'before' => $before, 'after' => $after];
+    }
+
+    /**
+     * Období časového rozlišení zaúčtované pohledávky či závazku. Zápis položky se nemění,
+     * období čte až uzávěrka ({@see accrualPeriod()}), proto jde nastavit i po zaúčtování,
+     * stejně jako u řádků vydané faktury (`PUT /invoices/{id}/accrual`) a se stejnou pojistkou
+     * ({@see assertAccrualChangeAllowed()}). Vynechaný klíč
+     * = uložená hodnota, obě prázdné = bez rozlišení. Koncept se upravuje celý, položka
+     * bez vlastního zápisu (ze zůstatku deníku) výnos ani náklad v deníku nemá.
+     *
+     * @param array<string,mixed> $input
+     * @return array{item:array<string,mixed>, before:array{0:?string,1:?string}, after:array{0:?string,1:?string}}
+     */
+    public function updateAccrual(int $supplierId, int $id, array $input, ?int $userId): array
+    {
+        return TransactionFailure::retrying($this->db->pdo(),
+            fn (): array => $this->updateAccrualOnce($supplierId, $id, $input, $userId));
+    }
+
+    /**
+     * @param array<string,mixed> $input
+     * @return array{item:array<string,mixed>, before:array{0:?string,1:?string}, after:array{0:?string,1:?string}}
+     */
+    private function updateAccrualOnce(int $supplierId, int $id, array $input, ?int $userId): array
+    {
+        $pdo = $this->db->pdo();
+        $ownTx = !$pdo->inTransaction();
+        if ($ownTx) $pdo->beginTransaction();
+        try {
+            $existing = $this->items->find($supplierId, $id, true)
+                ?? throw new OtherItemException('not_found', 'Doklad nebyl nalezen.', 404);
+            if ($existing['status'] === 'draft') {
+                throw new OtherItemException('is_draft', 'Koncept upravte v editaci dokladu.', 409);
+            }
+            // Bez vlastního zápisu (potvrzeno v daňové evidenci, ze zůstatku deníku) období nic
+            // neodkládá: jde jen odebrat, třeba uložené z konceptu před přechodem na daňovou evidenci.
+            $clears = array_key_exists('accrual_from', $input) && array_key_exists('accrual_to', $input)
+                && in_array($input['accrual_from'], [null, ''], true) && in_array($input['accrual_to'], [null, ''], true);
+            if (($existing['status'] !== 'posted' || $existing['journal_entry_id'] === null) && !$clears) {
+                throw new OtherItemException('accrual_not_posted', 'Časové rozlišení jde nastavit jen u zaúčtovaného dokladu s vlastním zápisem.', 409);
+            }
+            $before = [self::dateOrNull($existing['accrual_from']), self::dateOrNull($existing['accrual_to'])];
+            $after = $this->accrualPeriod($supplierId, [
+                'accrual_from' => array_key_exists('accrual_from', $input) ? $input['accrual_from'] : $before[0],
+                'accrual_to' => array_key_exists('accrual_to', $input) ? $input['accrual_to'] : $before[1],
+            ], $existing);
+            if ($before !== $after) {
+                $this->assertAccrualChangeAllowed($supplierId, $id, (string) $existing['side']);
+                $pdo->prepare('UPDATE other_items SET accrual_from = ?, accrual_to = ?, updated_by = ?, row_version = row_version + 1
+                    WHERE id = ? AND supplier_id = ? AND deleted_at IS NULL')
+                    ->execute([$after[0], $after[1], $userId, $id, $supplierId]);
+            }
+            if ($ownTx) $pdo->commit();
+        } catch (\Throwable $e) {
+            if ($ownTx && $pdo->inTransaction()) $pdo->rollBack();
+            throw $e;
+        }
+        return ['item' => $this->get($supplierId, $id), 'before' => $before, 'after' => $after];
+    }
+
+    /**
+     * Pojistka změny období rozlišení: stejné pravidlo jako u řádků faktur
+     * ({@see Closing\AccrualDeferralService::accrualChangeBlocker()}). Odklad zaúčtovaný uzávěrkou
+     * se počítal z uloženého období a jeho rozpuštění zrcadlí záznam kroku, proto se období
+     * nesmí měnit v uzavřeném, přezkoumaném či schváleném období žádného zdrojového zápisu
+     * položky a v probíhající uzávěrce po zaúčtování odkladu její strany. Krok potvrzený bez zápisu
+     * změnu nebrání: rozdíl proti náhledu odmítne uzavření knih (`deferrals_stale`). Volá se
+     * v transakci, zamyká období firmy.
+     *
+     * `$side` je uložená strana položky (zamčený řádek): z ní uzávěrka období použila, u
+     * pohledávky pro odklad výnosu (384), u závazku nákladu (381). Změna strany období zahodí
+     * a prověřuje se proti straně, ze které se dosud odkládalo.
+     */
+    private function assertAccrualChangeAllowed(int $supplierId, int $id, string $side): void
+    {
+        $accruals = new Closing\AccrualDeferralService($this->db, $this->posting, new PostingRuleRepository($this->db));
+        $blocked = $accruals->accrualChangeBlocker($supplierId, 'other_item', $id, null,
+            (new DimensionPeriodGuard($this->db))->lockPeriods($supplierId), $side);
+        if ($blocked !== null) {
+            throw new OtherItemException($blocked[0], $blocked[1], 409);
+        }
+    }
+
+    private static function dateOrNull(mixed $value): ?string
+    {
+        if ($value === null || $value === '') return null;
+        // Pole či objekt z JSON se nerovná žádnému uloženému datu; odmítne ho až validace
+        // ({@see accrualPeriod()}) jako 422, ne převod na text s varováním PHP.
+        if (!is_scalar($value)) return '#';
+        return substr((string) $value, 0, 10);
+    }
+
+    /**
+     * Smazání zaúčtovaného dokladu i s jeho zápisem, bez storna. Zápis maže
+     * {@see DocumentJournalPurge::purgeEntry()} se stejnými branami jako mazání v deníku
+     * (otevřené období, uzamčené datum jen s potvrzením, saldokonto, párování, navazující
+     * agendy), doklad se vrátí do konceptu ({@see prepareEntryDeletion()}) a smaže jako
+     * koncept ({@see deleteDraft()}: výskyt opakování se jen zruší, aby ho rozvrh nevytvořil
+     * znovu). Vše v jedné transakci.
+     *
+     * Doklad s úhradou, v platebním příkazu, s navázanou fakturou nebo s historií
+     * přeúčtování se nesmaže: nejdřív je potřeba zrušit to, co na něm stojí. Číslo
+     * se do řady nevrací, stejně jako po smazání zápisu v deníku a novém zaúčtování.
+     *
+     * @param array<string,mixed> $audit user_id, ip, user_agent
+     * @return array{item: array<string,mixed>, entry_id: int, result_status: string, locked_override: ?string}
+     */
+    public function deletePosted(int $supplierId, int $id, array $audit, bool $lockedAcknowledged): array
+    {
+        // Smazání zamyká období před položkou, změna období položku před obdobím: případný
+        // deadlock se zopakuje.
+        return TransactionFailure::retrying($this->db->pdo(),
+            fn (): array => $this->deletePostedOnce($supplierId, $id, $audit, $lockedAcknowledged));
+    }
+
+    /** @return array<string,mixed> */
+    private function deletePostedOnce(int $supplierId, int $id, array $audit, bool $lockedAcknowledged): array
+    {
+        $userId = isset($audit['user_id']) ? (int) $audit['user_id'] : null;
+        $pdo = $this->db->pdo();
+        $ownTx = !$pdo->inTransaction();
+        if ($ownTx) $pdo->beginTransaction();
+        try {
+            // Položka se zamyká až v detachSource: pořadí zámků jako mazání zápisu v deníku.
+            $item = $this->items->find($supplierId, $id)
+                ?? throw new OtherItemException('not_found', 'Doklad nebyl nalezen.', 404);
+            $this->assertPostedDeletable($supplierId, $item);
+            $entryId = (int) $item['journal_entry_id'];
+            $purged = $this->journalPurge->purgeEntry($supplierId, $entryId, 'other_item', $id, $audit,
+                'other_item_delete', $lockedAcknowledged,
+                function () use ($supplierId, $id, $entryId, $userId): array {
+                    $locked = $this->items->find($supplierId, $id, true);
+                    if ($locked === null || $locked['status'] !== 'posted' || (int) $locked['journal_entry_id'] !== $entryId) {
+                        throw new OtherItemException('changed', 'Doklad mezitím změnil jiný uživatel. Načtěte ho znovu.', 409);
+                    }
+                    $this->assertPostedDeletable($supplierId, $locked);
+                    $this->prepareEntryDeletion($supplierId, $id, $entryId, $userId);
+                    return ['posted', 'deleted'];
+                });
+            $this->deleteDraft($supplierId, $id);
+            $state = $pdo->prepare('SELECT status, deleted_at FROM other_items WHERE id = ? AND supplier_id = ?');
+            $state->execute([$id, $supplierId]);
+            $row = $state->fetch(PDO::FETCH_ASSOC);
+            $resultStatus = $row !== false && $row['deleted_at'] === null ? (string) $row['status'] : 'deleted';
+            if ($ownTx) $pdo->commit();
+        } catch (\Throwable $e) {
+            if ($ownTx && $pdo->inTransaction()) $pdo->rollBack();
+            throw $e;
+        }
+        if ($ownTx) {
+            $this->journalPurge->cleanupAttachments($supplierId, $purged['attachments']);
+        }
+        return ['item' => $item, 'entry_id' => $entryId, 'result_status' => $resultStatus,
+            'locked_override' => $purged['locked_override']];
+    }
+
+    /**
+     * Smí rozhraní nabídnout smazání zaúčtovaného dokladu i se zápisem? Náhled bez zámků,
+     * rozhoduje až {@see deletePosted()}.
+     *
+     * @param array<string,mixed> $item
+     * @return array{allowed:bool, needs_ack:bool, code:?string, message:?string}
+     */
+    public function postedDeletion(int $supplierId, array $item): array
+    {
+        try {
+            $this->assertPostedDeletable($supplierId, $item);
+        } catch (OtherItemException $e) {
+            return ['allowed' => false, 'needs_ack' => false, 'code' => $e->errorCode, 'message' => $e->getMessage()];
+        }
+        return DocumentJournalPurge::verdict($this->journalPurge->entryBlock($supplierId, (int) $item['journal_entry_id']));
+    }
+
+    /** @param array<string,mixed> $item */
+    private function assertPostedDeletable(int $supplierId, array $item): void
+    {
+        $id = (int) $item['id'];
+        if ($item['status'] === 'draft') {
+            throw new OtherItemException('is_draft', 'Doklad je koncept, smažte ho běžným smazáním.', 409);
+        }
+        if ($item['status'] !== 'posted' || $item['journal_entry_id'] === null) {
+            throw new OtherItemException('not_posted',
+                'Smazat i se zápisem lze jen zaúčtovaný doklad. Stornovaný nebo potvrzený doklad bez zápisu se ruší stornem.', 409);
+        }
+        if ((float) $item['paid_amount'] > 0 || $this->hasActivePayments($supplierId, $id)) {
+            throw new OtherItemException('has_payments',
+                'Doklad má spárované úhrady. Nejprve je v detailu dokladu odpojte, pak doklad smažte.', 409);
+        }
+        $this->assertNoLinkedInvoice($supplierId, $id);
+        $ordered = $this->db->pdo()->prepare(
+            'SELECT 1 FROM payment_order_items poi
+               JOIN payment_orders po ON po.id = poi.payment_order_id
+              WHERE poi.other_item_id = ? AND po.supplier_id = ? AND po.archived_at IS NULL LIMIT 1'
+        );
+        $ordered->execute([$id, $supplierId]);
+        if ($ordered->fetchColumn() !== false) {
+            throw new OtherItemException('in_payment_order',
+                'Závazek je v platebním příkazu. Nejdřív ho z příkazu odeberte, pak doklad smažte.', 409);
+        }
+        $scheduled = $this->db->pdo()->prepare('SELECT 1 FROM other_item_schedule_occurrences
+            WHERE supplier_id = ? AND item_id = ? AND occurrence_index = 0 LIMIT 1');
+        $scheduled->execute([$supplierId, $id]);
+        if ($scheduled->fetchColumn() !== false) {
+            throw new OtherItemException('has_schedule', 'Doklad je zdrojem opakování. Smazat ho nelze, stornujte ho.', 409);
+        }
+        // Přeúčtovaný doklad má v deníku i storno dvojici původního zaúčtování. Smazáním
+        // dokladu by dvojice zůstala bez dokladu; takový doklad se ruší stornem.
+        $history = $this->db->pdo()->prepare(
+            "SELECT 1 FROM journal_entries WHERE supplier_id = ? AND source_type = 'other_item' AND source_id = ? AND id <> ? LIMIT 1"
+        );
+        $history->execute([$supplierId, $id, (int) $item['journal_entry_id']]);
+        if ($history->fetchColumn() !== false) {
+            throw new OtherItemException('has_posting_history',
+                'Doklad byl přeúčtován a v deníku má i storno původního zaúčtování. Smazat ho nelze, stornujte ho.', 409);
+        }
+    }
+
     public function deleteDraft(int $supplierId, int $id): void
+    {
+        // Koncept s obdobím rozlišení zamyká období ({@see assertAccrualChangeAllowed()}).
+        TransactionFailure::retrying($this->db->pdo(), fn () => $this->deleteDraftOnce($supplierId, $id));
+    }
+
+    private function deleteDraftOnce(int $supplierId, int $id): void
     {
         $pdo = $this->db->pdo();
         $ownTx = !$pdo->inTransaction();
@@ -167,14 +606,21 @@ final class OtherItemService
             if ($item['status'] !== 'draft') {
                 throw new OtherItemException('not_draft', 'Smazat lze jen koncept.', 409);
             }
-            $scheduled = $pdo->prepare('SELECT occurrence_index FROM other_item_schedule_occurrences
+            // Smazaný doklad uzávěrka neodkládá ani nerozpouští: u konceptu se zaúčtovanou
+            // historií je smazání totéž jako zrušení období, hlídá ho stejná pojistka.
+            if ($item['accrual_from'] !== null || $item['accrual_to'] !== null) {
+                $this->assertAccrualChangeAllowed($supplierId, $id, (string) $item['side']);
+            }
+            $scheduled = $pdo->prepare('SELECT occurrence_index, schedule_id FROM other_item_schedule_occurrences
                 WHERE supplier_id = ? AND item_id = ? LIMIT 1');
             $scheduled->execute([$supplierId, $id]);
             $occurrence = $scheduled->fetch(PDO::FETCH_ASSOC);
             if ($occurrence !== false && (int) $occurrence['occurrence_index'] === 0) {
                 throw new OtherItemException('has_schedule', 'Zdrojový doklad rozvrhu nelze smazat.', 409);
             }
-            if ($occurrence !== false) {
+            // Výskyt živého rozvrhu se ruší, aby rozvrh termín nevytvořil znovu. Po zrušení opakování
+            // už nic nevzniká, koncept se maže jako každý jiný (původ zůstane u smazaného řádku).
+            if ($occurrence !== false && $occurrence['schedule_id'] !== null) {
                 $this->items->cancelDraft($supplierId, $id);
             } else {
                 $this->items->softDeleteDraft($supplierId, $id);
@@ -198,18 +644,18 @@ final class OtherItemService
                 throw new OtherItemException('not_draft', 'Potvrdit lze jen koncept.', 409);
             }
             $doubleEntry = $this->isDoubleEntry($supplierId);
-            $number = $this->series->next(
-                $supplierId,
-                $item['side'] === 'receivable' ? 'other_receivable' : 'other_payable',
-                (int) substr((string) $item['issued_on'], 0, 4),
-            );
+            $number = $this->nextNumber($supplierId, $item, (string) $item['issued_on']);
             $entryId = null;
+            $origin = null;
             if ($doubleEntry) {
-                $postingLines = $item['posting_lines'];
+                // Prázdný účet položky a protiúčet doplní účetní profil druhu, bez profilu
+                // platí dosavadní výchozí účet 315/325 ({@see OtherItemPostingResolver::origin}).
+                $origin = $this->postingResolver->origin($supplierId, ['document_no' => $number] + $item);
+                $postingLines = $origin['posting_lines'];
                 if ($postingLines === []) {
                     throw new OtherItemException('counter_account_required', 'Před zaúčtováním vyberte protiúčet.');
                 }
-                $account = (string) ($item['account_code'] ?: ($item['side'] === 'receivable' ? '315' : '325'));
+                $account = $origin['account_code'];
                 $this->assertPostingAccounts($account, $postingLines);
                 $this->assertBalanceAccount($supplierId, $account, (string) $item['side']);
                 $amount = (float) $item['amount_czk'];
@@ -223,13 +669,23 @@ final class OtherItemService
                     'entry_date' => (string) ($item['accounting_on'] ?: $item['issued_on']),
                     'document_date' => (string) $item['issued_on'],
                     'document_no' => $number,
-                    'description' => (string) $item['title'],
+                    'description' => $origin['description'],
                     'posted' => true,
                     'user_id' => $userId,
                     'posted_by' => $userId,
                 ]);
             }
-            $this->items->setPosted($supplierId, $id, $doubleEntry ? 'posted' : 'confirmed', $number, $entryId);
+            $this->setPosted($supplierId, $id, $doubleEntry ? 'posted' : 'confirmed', $number, $entryId);
+            if ($origin !== null && $origin['source'] === OtherItemPostingResolver::SOURCE_KIND) {
+                // Položka si nese, co se zaúčtovalo: přeúčtování, saldokonto i opakování čtou
+                // účet a protiúčet z ní, ne z profilu, který se mezitím může změnit.
+                $this->items->storePostedAccounts($supplierId, $id, $origin['account_code'],
+                    count($origin['posting_lines']) === 1 ? $origin['posting_lines'][0]['account_code'] : null);
+                if ($origin['counter_source'] === OtherItemPostingResolver::SOURCE_KIND) {
+                    $this->items->replacePostingLines($supplierId, $id, $origin['posting_lines']);
+                }
+                $this->logPostingProvenance($supplierId, $id, $origin, (int) $entryId, $userId);
+            }
             if ($ownTx) $pdo->commit();
         } catch (\Throwable $e) {
             if ($ownTx && $pdo->inTransaction()) $pdo->rollBack();
@@ -249,6 +705,10 @@ final class OtherItemService
         if ($item['status'] !== 'posted' || (int) $item['journal_entry_id'] !== $entryId) {
             throw new OtherItemException('not_posted', 'Zápis není aktuálním zaúčtováním této položky.', 409);
         }
+        // Pojistka období rozlišení se tu neptá: smazat jde jen zápis v otevřeném období
+        // (JournalEntryDeletionRules) a jeho zdroj leží v témže období, ze kterého uzávěrka
+        // ještě neodkládala.
+        $this->assertNoLinkedInvoice($supplierId, $id);
         $payments = $pdo->prepare('SELECT id FROM other_item_allocations
             WHERE supplier_id = ? AND other_item_id = ? AND reversed_on IS NULL FOR UPDATE');
         $payments->execute([$supplierId, $id]);
@@ -280,9 +740,10 @@ final class OtherItemService
             if (!in_array($item['status'], ['posted', 'confirmed'], true)) {
                 throw new OtherItemException('not_posted', 'Stornovat lze jen potvrzený doklad.', 409);
             }
-            if ((float) $item['paid_amount'] > 0) {
+            if ((float) $item['paid_amount'] > 0 || $this->hasActivePayments($supplierId, $id)) {
                 throw new OtherItemException('has_payments', 'Doklad má spárované úhrady. Nejprve je odpojte.', 409);
             }
+            $this->assertNoLinkedInvoice($supplierId, $id);
             // Položka ze zůstatku bez dokladu nemá vlastní zápis, předpis nese řádek převzatého
             // zápisu. Storno ji proto ruší jen od svého dne (saldokonto k dřívějšímu dni ji dál
             // ukazuje) a ten den musí ležet v otevřeném účetním období, stejně jako protizápis.
@@ -338,7 +799,7 @@ final class OtherItemService
             if ($item['status'] !== 'posted' || $item['journal_entry_id'] === null) {
                 throw new OtherItemException('not_posted', 'Přeúčtovat lze jen zaúčtovaný doklad.', 409);
             }
-            if ((float) $item['paid_amount'] > 0) {
+            if ((float) $item['paid_amount'] > 0 || $this->hasActivePayments($supplierId, $id)) {
                 throw new OtherItemException('has_payments', 'Doklad má spárované úhrady. Nejprve je odpojte.', 409);
             }
             $account = $account ?: (string) ($item['account_code'] ?: ($item['side'] === 'receivable' ? '315' : '325'));
@@ -383,17 +844,104 @@ final class OtherItemService
         return $this->get($supplierId, $id);
     }
 
+    /**
+     * Zápis pohledávky účtuje navázanou fakturu (migrace 2246). Storno nebo smazání
+     * zápisu by fakturu nechalo bez předpisu, proto se nejdřív odpojí faktura.
+     */
+    private function assertNoLinkedInvoice(int $supplierId, int $id): void
+    {
+        $linked = $this->linkedInvoice($supplierId, $id);
+        if ($linked !== null) {
+            throw new OtherItemException('linked_invoice', sprintf(
+                'Ostatní pohledávka účtuje fakturu %s. Nejprve fakturu od pohledávky odpojte.',
+                $linked['varsymbol'] ?? ('#' . $linked['id'])), 409);
+        }
+    }
+
+    /**
+     * Položku vytvořilo opakování: rozvrh, zdrojová položka a kdo rozvrh založil. Zdroj rozvrhu
+     * (výskyt 0) a položky mimo rozvrh vrací null. Po zrušení opakování zůstane výskyt bez
+     * rozvrhu (schedule_id, schedule_created_at a created_by_name jsou null) a zdroj si nese sám;
+     * starší výskyty bez vlastního zdroje ho berou z rozvrhu. Smazaný zdroj vrací zdroj null.
+     *
+     * @return array{schedule_id:?int,occurrence_index:int,source_item_id:?int,source_document_no:?string,
+     *               source_title:?string,schedule_created_at:?string,created_by_name:?string}|null
+     */
+    public function scheduleOccurrence(int $supplierId, int $id): ?array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT o.schedule_id, o.occurrence_index, src.id AS source_item_id, src.document_no AS source_document_no,
+                    src.title AS source_title, s.created_at AS schedule_created_at, u.name AS created_by_name
+               FROM other_item_schedule_occurrences o
+               LEFT JOIN other_item_schedules s ON s.id = o.schedule_id AND s.supplier_id = o.supplier_id
+               LEFT JOIN other_items src ON src.id = COALESCE(o.source_item_id, s.source_item_id)
+                    AND src.supplier_id = o.supplier_id AND src.deleted_at IS NULL
+               LEFT JOIN users u ON u.id = s.created_by
+              WHERE o.supplier_id = ? AND o.item_id = ? AND o.occurrence_index > 0'
+        );
+        $stmt->execute([$supplierId, $id]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        if ($row === false) return null;
+        return [
+            'schedule_id' => $row['schedule_id'] !== null ? (int) $row['schedule_id'] : null,
+            'occurrence_index' => (int) $row['occurrence_index'],
+            'source_item_id' => $row['source_item_id'] !== null ? (int) $row['source_item_id'] : null,
+            'source_document_no' => $row['source_document_no'],
+            'source_title' => $row['source_title'],
+            'schedule_created_at' => $row['schedule_created_at'] !== null ? (string) $row['schedule_created_at'] : null,
+            'created_by_name' => $row['created_by_name'],
+        ];
+    }
+
+    /** @return array{id:int,varsymbol:?string,status:string}|null */
+    public function linkedInvoice(int $supplierId, int $id): ?array
+    {
+        $stmt = $this->db->pdo()->prepare('SELECT id, varsymbol, status FROM invoices WHERE supplier_id = ? AND other_item_id = ? LIMIT 1');
+        $stmt->execute([$supplierId, $id]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        return $row === false ? null
+            : ['id' => (int) $row['id'], 'varsymbol' => $row['varsymbol'] !== null ? (string) $row['varsymbol'] : null, 'status' => (string) $row['status']];
+    }
+
+    /**
+     * Úhrady položky i s tím, kam vedou: bankovní výpis pohybu, číslo pokladního dokladu
+     * a živý (nestornovaný, zaúčtovaný) zápis platby v deníku — stejný klíč `active_source_id`,
+     * kterým deník drží nejvýš jeden aktivní zápis dokladu. Stornovaná úhrada odkaz do deníku nemá:
+     * živý zápis téhož pohybu už může patřit jinému dokladu.
+     */
     public function allocations(int $supplierId, int $id): array
     {
         $this->get($supplierId, $id);
         $stmt = $this->db->pdo()->prepare(
-            'SELECT id, bank_transaction_id, cash_document_id, amount, payment_on, reversed_on, created_at
-               FROM other_item_allocations WHERE supplier_id = ? AND other_item_id = ? ORDER BY payment_on, id'
+            "SELECT a.id, a.installment_id, a.bank_transaction_id, a.cash_document_id, a.amount, a.interest_amount, a.fee_amount,
+                    a.amount + a.interest_amount + a.fee_amount AS total_amount, a.payment_on, a.auto_match_reason,
+                    a.reversed_on, a.created_at, bs.id bank_statement_id, cd.doc_number cash_doc_number,
+                    je.id journal_entry_id
+               FROM other_item_allocations a
+          LEFT JOIN bank_transactions bt ON bt.id = a.bank_transaction_id
+          LEFT JOIN bank_statements bs ON bs.id = bt.statement_id AND bs.supplier_id = a.supplier_id
+          LEFT JOIN cash_documents cd ON cd.supplier_id = a.supplier_id AND cd.id = a.cash_document_id
+          LEFT JOIN journal_entries je ON je.supplier_id = a.supplier_id
+                AND je.source_type = IF(a.bank_transaction_id IS NULL, 'cash', 'bank')
+                AND je.active_source_id = COALESCE(a.bank_transaction_id, a.cash_document_id)
+                AND je.posted_at IS NOT NULL AND a.reversed_on IS NULL
+              WHERE a.supplier_id = ? AND a.other_item_id = ? ORDER BY a.payment_on, a.id"
         );
         $stmt->execute([$supplierId, $id]);
-        return $stmt->fetchAll(PDO::FETCH_ASSOC);
+        return array_map(static function (array $row): array {
+            foreach (['bank_statement_id', 'journal_entry_id'] as $key) {
+                $row[$key] = $row[$key] !== null ? (int) $row[$key] : null;
+            }
+            return $row;
+        }, $stmt->fetchAll(PDO::FETCH_ASSOC));
     }
 
+    /**
+     * Volné bankovní a pokladní platby k přiřazení položce. Řadí podle síly shody
+     * ({@see OtherItemPaymentCandidateRanker}: VS, účet protistrany, částka splátky
+     * v okně splatnosti, celý zbývající dluh), pak od nejnovější. Bez hledání nabízí
+     * i nejnovější platby bez shody, jako dřív.
+     */
     public function paymentCandidates(int $supplierId, int $id, string $search, int $limit,
         bool $includeBank = true, bool $includeCash = true): array
     {
@@ -402,6 +950,23 @@ final class OtherItemService
             || !in_array($item['status'], ['posted', 'confirmed'], true) || $item['currency'] !== 'CZK') return [];
         $limit = max(1, min(50, $limit));
         $term = '%' . addcslashes(trim($search), '%_\\') . '%';
+        $coverage = $this->installmentCoverage($supplierId, $id);
+        // Hledané částky: zbývající dluh a zbytky otevřených splátek (nejvýš 12 nejbližších).
+        // U rozdělených splátek je zbývající dluh peněžní: jistina, úrok i poplatek.
+        $amounts = [round((float) $item['remaining_payment'], 2)];
+        foreach (OtherItemInstallmentCoverage::open($coverage) as $row) {
+            $amounts[] = round((float) $row['remaining_amount'], 2);
+        }
+        $amounts = array_slice(array_values(array_unique($amounts)), 0, 13);
+        $tolerance = sprintf('%.4F', OtherItemPaymentCandidateRanker::AMOUNT_TOLERANCE + 0.0001);
+        $amountMatch = static fn (string $free): string => '(' . implode(' OR ',
+            array_fill(0, count($amounts), "ABS({$free} - ?) <= {$tolerance}")) . ')';
+        $vs = (string) ($item['variable_symbol'] ?? '');
+        // Předvýběr účtu protistrany podle čísla bez předčíslí (GPC, národní tvar i IBAN ho obsahují);
+        // přesnou shodu rozhodne OtherItemCounterpartyAccount v řazení.
+        $account = (string) ($item['counterparty_account'] ?? '');
+        $accountTerm = $account === '' ? '' : '%' . addcslashes(
+            str_contains($account, '-') ? substr($account, strpos($account, '-') + 1) : $account, '%_\\') . '%';
         $rows = [];
         if ($includeBank) {
             $direction = $item['side'] === 'receivable' ? 'bt.amount > 0' : 'bt.amount < 0';
@@ -409,10 +974,11 @@ final class OtherItemService
                 'SELECT bt.id, bt.posted_at payment_on, ABS(bt.amount) amount,
                         COALESCE(bt.currency, bs.currency, \'CZK\') currency,
                         COALESCE(bt.description, bt.counterparty_name, \'\') description,
+                        bt.variable_symbol, bt.counterparty_account, bt.counterparty_bank,
                         COALESCE(a.used_amount, 0) used_amount
                    FROM bank_transactions bt
                    JOIN bank_statements bs ON bs.id = bt.statement_id AND bs.supplier_id = ?
-              LEFT JOIN (SELECT bank_transaction_id, SUM(amount) used_amount FROM other_item_allocations
+              LEFT JOIN (SELECT bank_transaction_id, SUM(' . self::ALLOCATION_TOTAL_SQL . ') used_amount FROM other_item_allocations
                          WHERE supplier_id = ? AND bank_transaction_id IS NOT NULL AND reversed_on IS NULL
                          GROUP BY bank_transaction_id) a
                      ON a.bank_transaction_id = bt.id
@@ -428,15 +994,21 @@ final class OtherItemService
                                       AND previous.other_item_id = ? AND previous.reversed_on IS NOT NULL)
                     )
                     AND (bt.variable_symbol LIKE ? OR bt.counterparty_name LIKE ? OR bt.description LIKE ?)
-                  ORDER BY bt.posted_at DESC, bt.id DESC LIMIT ' . $limit
+                  ORDER BY COALESCE(? <> \'\' AND bt.variable_symbol = ?, 0) * 4
+                         + COALESCE(' . $amountMatch('ABS(bt.amount) - COALESCE(a.used_amount, 0)') . ', 0) * 2
+                         + COALESCE(? <> \'\' AND bt.counterparty_account LIKE ?, 0) DESC,
+                           bt.posted_at DESC, bt.id DESC LIMIT ' . $limit
             );
-            $stmt->execute([$supplierId, $supplierId, $id, $term, $term, $term]);
+            $stmt->execute([$supplierId, $supplierId, $id, $term, $term, $term, $vs, $vs, ...$amounts,
+                $accountTerm, $accountTerm]);
             foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
                 $rows[] = [
                     'source' => 'bank', 'id' => (int) $row['id'], 'payment_on' => $row['payment_on'],
                     'amount' => (float) $row['amount'] - (float) $row['used_amount'],
                     'currency' => $row['currency'], 'description' => $row['description'],
                     'used_amount' => (float) $row['used_amount'],
+                    'variable_symbol' => $row['variable_symbol'], 'counterparty_account' => $row['counterparty_account'],
+                    'counterparty_bank' => $row['counterparty_bank'],
                 ];
             }
         }
@@ -446,7 +1018,7 @@ final class OtherItemService
                 'SELECT cd.id, cd.issue_date payment_on, cd.total_amount amount, cd.currency_code currency,
                         cd.description, COALESCE(a.used_amount, 0) used_amount
                    FROM cash_documents cd
-              LEFT JOIN (SELECT cash_document_id, SUM(amount) used_amount FROM other_item_allocations
+              LEFT JOIN (SELECT cash_document_id, SUM(' . self::ALLOCATION_TOTAL_SQL . ') used_amount FROM other_item_allocations
                          WHERE supplier_id = ? AND cash_document_id IS NOT NULL AND reversed_on IS NULL
                          GROUP BY cash_document_id) a
                      ON a.cash_document_id = cd.id
@@ -464,15 +1036,17 @@ final class OtherItemService
                                       AND previous.other_item_id = ? AND previous.reversed_on IS NOT NULL)
                     )
                     AND (cd.doc_number LIKE ? OR cd.partner_name LIKE ? OR cd.description LIKE ?)
-                  ORDER BY cd.issue_date DESC, cd.id DESC LIMIT ' . $limit
+                  ORDER BY COALESCE(' . $amountMatch('cd.total_amount - COALESCE(a.used_amount, 0)') . ', 0) DESC,
+                           cd.issue_date DESC, cd.id DESC LIMIT ' . $limit
             );
-            $stmt->execute([$supplierId, $supplierId, $cashDirection, $id, $term, $term, $term]);
+            $stmt->execute([$supplierId, $supplierId, $cashDirection, $id, $term, $term, $term, ...$amounts]);
             foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
                 $rows[] = [
                     'source' => 'cash', 'id' => (int) $row['id'], 'payment_on' => $row['payment_on'],
                     'amount' => (float) $row['amount'] - (float) $row['used_amount'],
                     'currency' => $row['currency'], 'description' => $row['description'],
                     'used_amount' => (float) $row['used_amount'],
+                    'variable_symbol' => null, 'counterparty_account' => null, 'counterparty_bank' => null,
                 ];
             }
         }
@@ -489,8 +1063,27 @@ final class OtherItemService
                 }
             }));
         }
-        $rows = array_map(static function (array $row): array { unset($row['used_amount']); return $row; }, $rows);
-        usort($rows, static fn (array $a, array $b): int => [$b['payment_on'], $b['id']] <=> [$a['payment_on'], $a['id']]);
+        $matchItem = [
+            'variable_symbol' => $item['variable_symbol'] ?? null,
+            'counterparty_account' => $item['counterparty_account'] ?? null,
+            'counterparty_bank_code' => $item['counterparty_bank_code'] ?? null,
+            'remaining_amount' => (float) $item['remaining_payment'],
+            'installments' => $coverage,
+        ];
+        $rows = array_map(static function (array $row) use ($matchItem): array {
+            $match = OtherItemPaymentCandidateRanker::evaluate([
+                'amount' => (float) $row['amount'], 'variable_symbol' => $row['variable_symbol'],
+                'counterparty_account' => $row['counterparty_account'], 'counterparty_bank' => $row['counterparty_bank'],
+                'payment_on' => (string) $row['payment_on'],
+            ], $matchItem);
+            unset($row['used_amount'], $row['variable_symbol'], $row['counterparty_account'], $row['counterparty_bank']);
+            return $row + [
+                'match_score' => $match['score'], 'match_confidence' => $match['confidence'],
+                'match_reasons' => $match['reasons'], 'installment' => $match['installment'],
+            ];
+        }, $rows);
+        usort($rows, static fn (array $a, array $b): int =>
+            [$b['match_score'], $b['payment_on'], $b['id']] <=> [$a['match_score'], $a['payment_on'], $a['id']]);
         return array_slice($rows, 0, $limit);
     }
 
@@ -552,30 +1145,35 @@ final class OtherItemService
             if ((string) $payment['currency'] !== 'CZK') {
                 throw new OtherItemException('currency_mismatch', 'Měna úhrady se liší od měny dokladu.');
             }
-            if ($amount > round((float) $item['remaining_amount'], 2)) {
-                throw new OtherItemException('overpayment', 'Párovaná částka převyšuje zbývající dluh.', 409);
-            }
+            $sourceColumn = $bankId > 0 ? 'bank_transaction_id' : 'cash_document_id';
+            $sourceId = $bankId > 0 ? $bankId : $cashId;
+            $sourceType = $bankId > 0 ? 'bank' : 'cash';
+            // Opětovné přiřazení po stornu míří na původní splátku.
+            $priorInstallment = $pdo->prepare("SELECT installment_id FROM other_item_allocations
+                WHERE supplier_id = ? AND other_item_id = ? AND {$sourceColumn} = ? AND reversed_on IS NOT NULL");
+            $priorInstallment->execute([$supplierId, $id, $sourceId]);
+            $priorTarget = $priorInstallment->fetchColumn();
+            $split = $this->splitPayment($supplierId, $item, $amount,
+                $priorTarget !== false && $priorTarget !== null ? (int) $priorTarget : null);
             $stmt = $pdo->prepare(
-                'SELECT COALESCE(SUM(amount), 0) FROM other_item_allocations
-                  WHERE supplier_id = ? AND reversed_on IS NULL AND '
-                    . ($bankId > 0 ? 'bank_transaction_id' : 'cash_document_id') . ' = ?'
+                'SELECT COALESCE(SUM(' . self::ALLOCATION_TOTAL_SQL . '), 0) FROM other_item_allocations
+                  WHERE supplier_id = ? AND reversed_on IS NULL AND ' . $sourceColumn . ' = ?'
             );
-            $stmt->execute([$supplierId, $bankId > 0 ? $bankId : $cashId]);
+            $stmt->execute([$supplierId, $sourceId]);
             $used = (float) $stmt->fetchColumn();
             if ($amount + $used > abs((float) $payment['amount']) + 0.001) {
                 throw new OtherItemException('payment_overallocated', 'Platba nemá dostatek volné částky.', 409);
             }
             if ($item['journal_entry_id'] !== null) {
                 $accountId = $this->settlementAccountId($supplierId, $item);
-                $this->assertPaymentPosting($supplierId, $bankId > 0 ? 'bank' : 'cash',
-                    $bankId > 0 ? $bankId : $cashId, $accountId, (string) $item['side'],
-                    $amount + $this->allocatedOnAccount($supplierId, $bankId > 0 ? 'bank' : 'cash',
-                        $bankId > 0 ? $bankId : $cashId, $accountId));
+                $this->assertPaymentPosting($supplierId, $sourceType, $sourceId, $accountId, (string) $item['side'],
+                    $split['principal'] + $this->allocatedOnAccount($supplierId, $sourceType, $sourceId, $accountId));
             }
-            $sourceColumn = $bankId > 0 ? 'bank_transaction_id' : 'cash_document_id';
-            $sourceId = $bankId > 0 ? $bankId : $cashId;
+            if ($split['interest'] + $split['fee'] > 0 && $this->settlementAccountCode($supplierId, $item) !== null) {
+                $this->assertComponentPosting($supplierId, $sourceType, $sourceId, $item, $split);
+            }
             $previous = $pdo->prepare(
-                "SELECT id, other_item_id, amount, reversed_on FROM other_item_allocations
+                "SELECT id, other_item_id, amount + interest_amount + fee_amount AS amount, reversed_on FROM other_item_allocations
                   WHERE supplier_id = ? AND {$sourceColumn} = ? FOR UPDATE"
             );
             $previous->execute([$supplierId, $sourceId]);
@@ -597,29 +1195,135 @@ final class OtherItemService
                     throw new OtherItemException('payment_reallocation_amount',
                         'Po stornu lze znovu přiřadit stejnou částku původní úhrady.', 409);
                 }
+                // Vazba na splátku zůstává; po novém splátkovém kalendáři (smazaná splátka) se dopočítá.
+                // Složky se rozdělí znovu podle současného stavu splátek (stejně je ověřilo zaúčtování).
                 $reactivate = $pdo->prepare(
-                    'UPDATE other_item_allocations SET reversed_on = NULL
+                    'UPDATE other_item_allocations SET reversed_on = NULL, installment_id = COALESCE(installment_id, ?),
+                            amount = ?, interest_amount = ?, fee_amount = ?
                       WHERE id = ? AND supplier_id = ? AND reversed_on IS NOT NULL'
                 );
-                $reactivate->execute([(int) $prior['id'], $supplierId]);
-                $this->posting->restampDimensions($supplierId, $bankId > 0 ? 'bank' : 'cash', $sourceId, true);
+                $reactivate->execute([$split['installment_id'], $split['principal'], $split['interest'], $split['fee'],
+                    (int) $prior['id'], $supplierId]);
+                $this->posting->restampDimensions($supplierId, $sourceType, $sourceId, true);
+                InvoiceOtherItemPayments::syncForItems($pdo, $supplierId, [$id]);
                 if ($ownTx) $pdo->commit();
                 return $this->get($supplierId, $id);
             }
             $stmt = $pdo->prepare(
                 'INSERT INTO other_item_allocations
-                   (supplier_id, other_item_id, bank_transaction_id, cash_document_id, amount, payment_on, created_by)
-                 VALUES (?,?,?,?,?,?,?)'
+                   (supplier_id, other_item_id, installment_id, bank_transaction_id, cash_document_id, amount,
+                    interest_amount, fee_amount, payment_on, created_by)
+                 VALUES (?,?,?,?,?,?,?,?,?,?)'
             );
-            $stmt->execute([$supplierId, $id, $bankId ?: null, $cashId ?: null, $amount, $payment['payment_on'], $userId]);
+            $stmt->execute([$supplierId, $id, $split['installment_id'],
+                $bankId ?: null, $cashId ?: null, $split['principal'], $split['interest'], $split['fee'],
+                $payment['payment_on'], $userId]);
             // Úhrada přebírá dimenze položky (DimensionDefaults::bankDocuments / forCash).
             $this->posting->restampDimensions($supplierId, $bankId > 0 ? 'bank' : 'cash', $sourceId, true);
+            InvoiceOtherItemPayments::syncForItems($pdo, $supplierId, [$id]);
             if ($ownTx) $pdo->commit();
         } catch (\Throwable $e) {
             if ($ownTx && $pdo->inTransaction()) $pdo->rollBack();
             throw $e;
         }
         return $this->get($supplierId, $id);
+    }
+
+    /**
+     * Rozdělení peněžní částky úhrady na jistinu, úrok a poplatek a splátka, kterou hradí
+     * ({@see OtherItemInstallmentCoverage::target}: přesná shoda s otevřenou splátkou, jinak
+     * první otevřená). Volá se pod zámkem položky a jejích úhrad ({@see lockForAllocation}).
+     *
+     * Bez rozdělené splátky je celá částka jistina a přeplatek se měří zbývajícím dluhem,
+     * přesně jako dřív. S rozdělenými splátkami pokryje částka nejdřív úrok, pak poplatek
+     * a teprve potom jistinu splátky (obvyklé pořadí započtení u úvěrů), přebytek
+     * stejně další splátky; částka nad zbytek všech splátek je přeplatek.
+     *
+     * @param array<string,mixed> $item zamčená položka s remaining_amount
+     * @return array{installment_id:?int,principal:float,interest:float,fee:float}
+     */
+    public function splitPayment(int $supplierId, array $item, float $amount, ?int $target = null): array
+    {
+        $coverage = $this->items->installmentCoverage($supplierId, [(int) $item['id']])[(int) $item['id']] ?? [];
+        if ($target !== null && !in_array($target, array_map(static fn (array $row): int => (int) $row['id'], $coverage), true)) {
+            $target = null;
+        }
+        $target ??= OtherItemInstallmentCoverage::target($coverage, $amount);
+        if (!OtherItemInstallmentCoverage::hasSplit($coverage)) {
+            if ($amount > round((float) $item['remaining_amount'], 2)) {
+                throw new OtherItemException('overpayment', 'Párovaná částka převyšuje zbývající dluh.', 409);
+            }
+            return ['installment_id' => $target, 'principal' => $amount, 'interest' => 0.0, 'fee' => 0.0];
+        }
+        $split = OtherItemInstallmentCoverage::split($coverage, $amount, $target);
+        if ($split['unallocated'] > 0.001 || $split['principal'] > round((float) $item['remaining_amount'], 2) + 0.001) {
+            throw new OtherItemException('overpayment', 'Párovaná částka převyšuje zbývající splátky včetně úroku a poplatku.', 409);
+        }
+        return ['installment_id' => $target, 'principal' => $split['principal'],
+            'interest' => $split['interest'], 'fee' => $split['fee']];
+    }
+
+    /**
+     * Kolik má protistrana ještě zaplatit: u rozdělených splátek zbytek všech splátek
+     * (jistina, úrok i poplatek), jinak zbývající dluh (saldo).
+     *
+     * @param array<string,mixed> $item
+     * @param list<array<string,mixed>> $coverage
+     */
+    public static function payableOf(array $item, array $coverage): float
+    {
+        return OtherItemInstallmentCoverage::hasSplit($coverage)
+            ? OtherItemInstallmentCoverage::remainingTotal($coverage)
+            : round((float) $item['remaining_amount'], 2);
+    }
+
+    /**
+     * Zaúčtovaná platba nese úrok a poplatek rozdělené splátky na jejich účtech
+     * ({@see OtherItemPostingResolver::component}) aspoň v částce úhrady. Jinak by úhrada
+     * snížila saldo jistiny, ale úrok by v účetnictví chyběl nebo ležel jinde.
+     *
+     * @param array<string,mixed> $item
+     * @param array{principal:float,interest:float,fee:float} $split
+     */
+    private function assertComponentPosting(int $supplierId, string $sourceType, int $sourceId, array $item, array $split): void
+    {
+        $required = [];
+        foreach ([OtherItemPostingEvent::Interest, OtherItemPostingEvent::Fee] as $event) {
+            $amount = (int) round($split[$event->value] * 100);
+            if ($amount <= 0) continue;
+            $code = $this->postingResolver->component($supplierId, $item, $event)['account_code'];
+            $required[$code] = ($required[$code] ?? 0) + $amount;
+        }
+        $side = $item['side'] === 'receivable' ? 'credit' : 'debit';
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT COALESCE(SUM(CASE WHEN l.side = ? THEN l.signed_amount ELSE -l.signed_amount END), 0)
+               FROM journal_entries e
+               JOIN journal_entry_lines l ON l.entry_id = e.id AND l.supplier_id = e.supplier_id
+               JOIN chart_of_accounts a ON a.id = l.account_id AND a.supplier_id = e.supplier_id
+              WHERE e.supplier_id = ? AND e.source_type = ? AND e.source_id = ?
+                AND e.posted_at IS NOT NULL AND e.reversed_by IS NULL
+                AND (a.account_code = ? OR a.account_code LIKE ?)"
+        );
+        foreach ($required as $code => $cents) {
+            $code = (string) $code;
+            $stmt->execute([$side, $supplierId, $sourceType, $sourceId, $code, addcslashes($code, '%_\\') . '.%']);
+            if ((int) round((float) $stmt->fetchColumn() * 100) < $cents) {
+                throw new OtherItemException('payment_split_mismatch', sprintf(
+                    'Zaúčtování platby neodpovídá rozdělení splátky: úrok %s Kč a poplatek %s Kč patří na účet %s, jistina %s Kč na účet položky. Zaúčtování platby opravte nebo ji nechte zaúčtovat při párování.',
+                    number_format($split['interest'], 2, ',', ' '), number_format($split['fee'], 2, ',', ' '),
+                    $code, number_format($split['principal'], 2, ',', ' ')), 409);
+            }
+        }
+    }
+
+    /**
+     * Stav splátek položky (zaplaceno, zbývá, unpaid / partial / paid / overdue).
+     *
+     * @return list<array<string,mixed>>
+     */
+    public function installmentCoverage(int $supplierId, int $id): array
+    {
+        return $this->items->installmentCoverage($supplierId, [$id])[$id] ?? [];
     }
 
     public function unallocate(int $supplierId, int $id, int $allocationId): array
@@ -640,11 +1344,17 @@ final class OtherItemService
             $stmt = $pdo->prepare('DELETE FROM other_item_allocations WHERE id = ? AND supplier_id = ? AND other_item_id = ?');
             $stmt->execute([$allocationId, $supplierId, $id]);
             if ($stmt->rowCount() === 0) throw new OtherItemException('payment_not_found', 'Úhrada nebyla nalezena.', 404);
+            if ($paymentRow !== false && $paymentRow['bank_transaction_id'] !== null) {
+                // Zrušené přiřazení automatika neobnoví ({@see OtherItemAutoMatcher}).
+                $pdo->prepare('INSERT IGNORE INTO other_item_auto_match_blocks (supplier_id, bank_transaction_id, other_item_id)
+                    VALUES (?, ?, ?)')->execute([$supplierId, (int) $paymentRow['bank_transaction_id'], $id]);
+            }
             if ($paymentRow !== false) {
                 $this->posting->restampDimensions($supplierId,
                     $paymentRow['bank_transaction_id'] !== null ? 'bank' : 'cash',
                     (int) ($paymentRow['bank_transaction_id'] ?? $paymentRow['cash_document_id']), true, $released);
             }
+            InvoiceOtherItemPayments::syncForItems($pdo, $supplierId, [$id]);
             if ($ownTx) $pdo->commit();
         } catch (\Throwable $e) {
             if ($ownTx && $pdo->inTransaction()) $pdo->rollBack();
@@ -655,6 +1365,7 @@ final class OtherItemService
 
     private function bankPayment(int $supplierId, int $id, string $side): array
     {
+        (new MembershipBankPaymentGuard($this->db))->assertSourceMutable($supplierId, 'bank', $id);
         $stmt = $this->db->pdo()->prepare(
             'SELECT bt.amount, bt.posted_at payment_on, COALESCE(bt.currency, bs.currency, \'CZK\') currency,
                     bt.matched_invoice_id, bt.match_status
@@ -700,12 +1411,13 @@ final class OtherItemService
 
     /**
      * Bankovní pohyb je volný k přiřazení ostatní položce: CZK, nespárovaný s fakturou,
-     * mzdou ani zálohou na daň a má nevyčerpanou částku. Předpokládá aliasy `bt`
+     * mzdou, zálohou na daň ani členským předpisem a má nevyčerpanou částku. Členské párování
+     * smí členskou úhradu zopakovat (`$membershipReplay`); shodu předpisů ověří samo. Předpokládá aliasy `bt`
      * (bank_transactions), `bs` (bank_statements) a `a` (součet aktivních přiřazení
      * pohybu jako `used_amount`). Sdílí ji výběr plateb z detailu položky i párování
      * z banky ({@see OtherItemBankMatchService}), aby se pravidla nerozešla.
      */
-    public static function freeBankPaymentSql(): string
+    public static function freeBankPaymentSql(bool $membershipReplay = false): string
     {
         return 'COALESCE(bt.currency, bs.currency, \'CZK\') = \'CZK\'
                     AND bt.match_status = \'unmatched\' AND bt.matched_invoice_id IS NULL
@@ -717,7 +1429,8 @@ final class OtherItemService
                     AND NOT EXISTS (SELECT 1 FROM payroll_payment_matches ppm
                                      WHERE ppm.bank_transaction_id = bt.id AND ppm.supplier_id = bs.supplier_id)
                     AND NOT EXISTS (SELECT 1 FROM tax_advance_schedules tas
-                                     WHERE tas.matched_transaction_id = bt.id AND tas.supplier_id = bs.supplier_id)';
+                                     WHERE tas.matched_transaction_id = bt.id AND tas.supplier_id = bs.supplier_id)'
+            . ($membershipReplay ? '' : ' AND NOT ' . NonInvoiceBankTransactionScope::membershipSql('bs.supplier_id', 'bt.id'));
     }
 
     /**
@@ -810,11 +1523,108 @@ final class OtherItemService
         return (bool) $stmt->fetchColumn();
     }
 
+    /**
+     * Číslo položky z řady jejího druhu: vlastní řada druhu ({@see OtherItemKindService::seriesScope}),
+     * jinak společná OP/OZ. Rok řady je rok vzniku.
+     *
+     * @param array<string,mixed> $item side, kind, kind_id
+     */
+    private function nextNumber(int $supplierId, array $item, string $issuedOn): string
+    {
+        $year = (int) substr($issuedOn, 0, 4);
+        $side = (string) $item['side'];
+        $kindId = $item['kind_id'] !== null ? (int) $item['kind_id'] : null;
+        return $this->series->next($supplierId, OtherItemKindService::seriesCode($side), $year,
+            $this->kinds->seriesScope($supplierId, $kindId, (string) $item['kind'], $side, $year));
+    }
+
+    /**
+     * Čísla všech řad ostatních položek sdílejí unikátnost `uq_other_item_doc_no`. Kolizi
+     * (čítač snížený pod vydané číslo, šablona bez prefixu) ohlásí jako opravitelnou
+     * chybu řady, ne jako chybu serveru.
+     */
+    private function setPosted(int $supplierId, int $id, string $status, string $number, ?int $entryId): void
+    {
+        try {
+            $this->items->setPosted($supplierId, $id, $status, $number, $entryId);
+        } catch (\PDOException $e) {
+            if (TransactionFailure::aborted($e) || (int) ($e->errorInfo[1] ?? 0) !== 1062) {
+                throw $e;
+            }
+            throw new OtherItemException('document_no_taken',
+                'Číslo ' . $number . ' už má jiný doklad. Upravte prefix nebo čítač řady v Nástrojích → Číselné řady.', 409);
+        }
+    }
+
     public function isDoubleEntry(int $supplierId): bool
     {
-        $stmt = $this->db->pdo()->prepare('SELECT accounting_mode FROM supplier WHERE id = ?');
-        $stmt->execute([$supplierId]);
-        return $stmt->fetchColumn() !== 'tax_evidence';
+        return $this->postingResolver->isDoubleEntry($supplierId);
+    }
+
+    /**
+     * Vlastní kontace úhrad položky mimo koncept (potvrzená či zaúčtovaná položka).
+     * Platí pro budoucí úhrady, zaúčtované úhrady se nemění. Vznik se tu nemění: jeho
+     * kontaci nese koncept, zaúčtovanou položku mění přeúčtování.
+     *
+     * @return array{item:array<string,mixed>,before:array<string,mixed>,after:array<string,mixed>}
+     */
+    public function setPostingOverrides(int $supplierId, int $id, mixed $input, ?int $userId): array
+    {
+        if (!$this->isDoubleEntry($supplierId)) {
+            throw new OtherItemException('not_double_entry', 'Vlastní kontaci má jen podvojné účetnictví.', 409);
+        }
+        $pdo = $this->db->pdo();
+        $ownTx = !$pdo->inTransaction();
+        if ($ownTx) $pdo->beginTransaction();
+        try {
+            $item = $this->items->find($supplierId, $id, true)
+                ?? throw new OtherItemException('not_found', 'Doklad nebyl nalezen.', 404);
+            if (!in_array($item['status'], ['draft', 'confirmed', 'posted'], true)) {
+                throw new OtherItemException('invalid_status', 'Kontaci úhrad lze nastavit jen aktivnímu dokladu.', 409);
+            }
+            $changes = $this->postingProfiles->saveItemOverrides($supplierId, $item, $input, $userId);
+            if ($ownTx) $pdo->commit();
+        } catch (\Throwable $e) {
+            if ($ownTx && $pdo->inTransaction()) $pdo->rollBack();
+            throw $e;
+        }
+        return ['item' => $this->get($supplierId, $id)] + $changes;
+    }
+
+    /**
+     * Výchozí dimenze z profilu vzniku druhu doplní hlavičce nového dokladu typy, které
+     * ještě nemá (ruční volba má přednost).
+     *
+     * @param array<string,mixed> $data
+     */
+    private function applyKindDimensions(int $supplierId, int $id, array $data): void
+    {
+        if (!$this->isDoubleEntry($supplierId)) return;
+        $origin = $this->postingResolver->origin($supplierId, $data + ['amount_czk' => 0, 'posting_lines' => []]);
+        if ($origin['dimensions'] === []) return;
+        $assignments = new DimensionAssignmentRepository($this->db);
+        foreach ($origin['dimensions'] as $dimension) {
+            $assignments->addHeaderDimensionIfMissing($supplierId, 'other_item', $id,
+                $dimension['type_id'], $dimension['value_id'],
+                ['origin' => 'rule_default', 'ref' => 'other_item_posting_profile:' . $origin['profile_id']]);
+        }
+    }
+
+    /**
+     * Původ kontace v auditu: zápis vznikl z účetního profilu druhu nebo z vlastní kontace
+     * úhrad položky (výchozí kontace se nezapisuje, chová se jako dřív).
+     *
+     * @param array<string,mixed> $rule výsledek {@see OtherItemPostingResolver}
+     */
+    public function logPostingProvenance(int $supplierId, int $id, array $rule, int $entryId, ?int $userId): void
+    {
+        $this->activity->log('other_item.posting_profile_applied', $userId, 'other_item', $id, [
+            'event' => $rule['event'],
+            'source' => $rule['source'],
+            'kind_id' => $rule['kind_id'],
+            'profile_id' => $rule['profile_id'],
+            'journal_entry_id' => $entryId,
+        ], null, null, $supplierId);
     }
 
     private function assertBalanceAccount(int $supplierId, string $code, string $side): void
@@ -865,7 +1675,11 @@ final class OtherItemService
         return $lines;
     }
 
-    private function normalize(int $supplierId, array $input): array
+    /**
+     * @param array<string,mixed>|null $stored kind a kind_id, které koncept nebo šablona už nese —
+     *                                         druh smí zůstat, i když ho mezitím skryli
+     */
+    private function normalize(int $supplierId, array $input, ?array $stored = null): array
     {
         $side = (string) ($input['side'] ?? '');
         if (!in_array($side, ['receivable', 'payable'], true)) {
@@ -875,6 +1689,21 @@ final class OtherItemService
         if (!in_array($kind, self::KINDS, true)) {
             throw new OtherItemException('invalid_kind', 'Neplatný druh dokladu.');
         }
+        $kindId = null;
+        if (isset($input['kind_id']) && $input['kind_id'] !== '' && $input['kind_id'] !== 0 && $input['kind_id'] !== '0') {
+            $kindId = filter_var($input['kind_id'], FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]);
+            if ($kindId === false) {
+                throw new OtherItemException('invalid_kind', 'Neplatný druh dokladu.');
+            }
+            $storedKindId = isset($stored['kind_id']) ? (int) $stored['kind_id'] : null;
+            $this->kinds->assertUsable($supplierId, $kindId, $side, $kindId === $storedKindId);
+            // Vlastní druh nemá vestavěný protějšek; filtr a API podle `kind` ho vedou jako ostatní.
+            $kind = 'other';
+        } else {
+            $this->kinds->assertBuiltinUsable($supplierId, $kind, $side,
+                $stored !== null && ($stored['kind_id'] ?? null) === null && ($stored['kind'] ?? null) === $kind
+                    && ($stored['side'] ?? $side) === $side);
+        }
         $title = trim((string) ($input['title'] ?? ''));
         if ($title === '' || mb_strlen($title) > 255) {
             throw new OtherItemException('invalid_title', 'Zadejte popis dokladu do 255 znaků.');
@@ -883,6 +1712,7 @@ final class OtherItemService
         $due = (string) ($input['due_on'] ?? '');
         self::assertDate($issued, 'issued_on');
         self::assertDate($due, 'due_on');
+        [$accrualFrom, $accrualTo] = $this->accrualPeriod($supplierId, $input, $stored);
         $accounting = $input['accounting_on'] ?? null;
         if ($accounting !== null && $accounting !== '') self::assertDate((string) $accounting, 'accounting_on');
         else $accounting = $issued;
@@ -913,6 +1743,8 @@ final class OtherItemService
         if ($vs !== '' && !preg_match('/^[0-9]{1,20}$/', $vs)) {
             throw new OtherItemException('invalid_variable_symbol', 'Variabilní symbol smí obsahovat jen číslice.');
         }
+        $counterparty = OtherItemCounterpartyAccount::normalize($input['counterparty_account'] ?? null,
+            $input['counterparty_bank_code'] ?? null);
         $account = trim((string) ($input['account_code'] ?? ''));
         $counter = trim((string) ($input['counter_account_code'] ?? ''));
         if (strlen($account) > 20 || strlen($counter) > 20) {
@@ -926,18 +1758,64 @@ final class OtherItemService
             $counter = count($postingLines) === 1 ? $postingLines[0]['account_code'] : '';
         }
         return [
-            'side' => $side, 'kind' => $kind, 'title' => $title,
+            'side' => $side, 'kind' => $kind, 'kind_id' => $kindId, 'title' => $title,
             'partner_id' => $partnerId,
             'partner_name' => $partnerName,
             'issued_on' => $issued, 'accounting_on' => $accounting, 'due_on' => $due,
+            'accrual_from' => $accrualFrom, 'accrual_to' => $accrualTo,
             'currency' => $currency, 'amount' => round((float) $amount, 2),
             'exchange_rate' => $rate, 'amount_czk' => round((float) $amount * $rate, 2),
             'variable_symbol' => $vs === '' ? null : $vs,
+            'counterparty_account' => $counterparty['counterparty_account'],
+            'counterparty_bank_code' => $counterparty['counterparty_bank_code'],
             'account_code' => $account === '' ? null : $account,
             'counter_account_code' => $counter === '' ? null : $counter,
             'posting_lines' => $postingLines,
             'note' => self::optional($input['note'] ?? null, 10000),
         ];
+    }
+
+    /**
+     * Období časového rozlišení (`accrual_from`/`accrual_to`): obě data, nebo žádné.
+     * Uzávěrka z něj odkládá výnos pohledávky na 384 a náklad závazku na 381, vždy z obratu
+     * zápisu položky ({@see \MyInvoice\Service\Accounting\Closing\AccrualDeferralService::deferredRevenueRows()},
+     * {@see \MyInvoice\Service\Accounting\Closing\AccrualDeferralService::prepaidExpenseRows()}),
+     * proto jde jen v podvojném účetnictví; daňová evidence výnos ani náklad v deníku nemá.
+     * Platnost dvojice posuzuje stejné pravidlo jako u řádků faktur
+     * ({@see AccrualPeriodDetector::normalizePair()}).
+     *
+     * @param array<string,mixed> $input
+     * @param ?array<string,mixed> $stored uložený doklad: jeho období beze změny daňová
+     *        evidence ponechá (odklad z dřívějšího podvojného účetnictví se z něj rozpouští)
+     * @return array{0:?string,1:?string}
+     */
+    private function accrualPeriod(int $supplierId, array $input, ?array $stored = null): array
+    {
+        foreach (['accrual_from', 'accrual_to'] as $key) {
+            if (isset($input[$key]) && !is_string($input[$key])) {
+                throw new OtherItemException('accrual_period_invalid', 'Období časového rozlišení potřebuje platná data RRRR-MM-DD a začátek nejpozději v den konce.');
+            }
+        }
+        $from = trim((string) ($input['accrual_from'] ?? ''));
+        $to = trim((string) ($input['accrual_to'] ?? ''));
+        if ($from === '' && $to === '') {
+            return [null, null];
+        }
+        if ($from === '' || $to === '') {
+            throw new OtherItemException('accrual_period_incomplete', 'Období časového rozlišení potřebuje začátek i konec.');
+        }
+        $pair = AccrualPeriodDetector::normalizePair($from, $to);
+        if ($pair === null) {
+            throw new OtherItemException('accrual_period_invalid', 'Období časového rozlišení potřebuje platná data RRRR-MM-DD a začátek nejpozději v den konce.');
+        }
+        // Ponechat jde jen uložené období téže strany: u jiné strany by výnos přešel v náklad.
+        $kept = $stored !== null
+            && (string) ($input['side'] ?? $stored['side'] ?? '') === (string) ($stored['side'] ?? '')
+            && [$pair['from'], $pair['to']] === [self::dateOrNull($stored['accrual_from'] ?? null), self::dateOrNull($stored['accrual_to'] ?? null)];
+        if (!$kept && !$this->isDoubleEntry($supplierId)) {
+            throw new OtherItemException('accrual_double_entry_only', 'Časové rozlišení jde nastavit jen v podvojném účetnictví.');
+        }
+        return [$pair['from'], $pair['to']];
     }
 
     private static function optional(mixed $value, int $limit): ?string

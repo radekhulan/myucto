@@ -10,6 +10,11 @@
 @custom-variant lg (@container workspace (width >= 64rem));
 @custom-variant xl (@container workspace (width >= 80rem));
 @custom-variant 2xl (@container workspace (width >= 96rem));
+/* Telefonní varianty se řídí šířkou OKNA PROHLÍŽEČE, ne panelu: stránky běží v panelech
+   (iframe), kde by media dotaz měřil panel a úzký panel na desktopu by dostal telefonní
+   vzhled. Atribut data-phone / data-phone-sm nastavuje composables/useIsPhone.ts. */
+@custom-variant max-md (&:where([data-phone], [data-phone] *));
+@custom-variant max-sm (&:where([data-phone-sm], [data-phone-sm] *));
 
 html {
   scrollbar-gutter: stable;
@@ -34,6 +39,24 @@ main.workspace-main-single > .workspace-host {
 @container workspace (width >= 40rem) {
   main.workspace-main-single > .workspace-host {
     margin-inline: -2rem;
+  }
+}
+
+/* Okno bez firmy (prvotní nastavení) se nevykresluje v iframu, ale přímo
+   v panelu. Okraje, které jednopanelový host ruší, mu proto vrací stejně
+   jako `body.workspace-window-single #app` uvnitř rámu. */
+main.workspace-main-single .workspace-inline-window {
+  padding-inline: 1.25rem;
+  padding-bottom: 1.5rem;
+}
+
+main.workspace-main-single:has(> .workspace-host:only-child) .workspace-inline-window {
+  padding-top: 1.5rem;
+}
+
+@container workspace (width >= 40rem) {
+  main.workspace-main-single .workspace-inline-window {
+    padding-inline: 2rem;
   }
 }
 
@@ -151,15 +174,35 @@ input[type="file"].form-input::file-selector-button {
 
   /* ─── Semantic (pastel) ─── */
   --color-success-50:  #ECF6F0;
+  --color-success-100: #D6EDDF;
+  --color-success-200: #B3DCC3;
+  --color-success-300: #8BC9A3;
+  --color-success-400: #6BBB8D;
   --color-success-500: #4CAF7A;   /* soft sage */
   --color-success-600: #3B9665;   /* primary „go/potvrdit" button (Vystavit, Zaplaceno…) */
   --color-success-700: #2E7B53;   /* hover plného success tlačítka */
+  --color-success-800: #245F41;
+  --color-success-900: #1A4530;
   --color-warning-50:  #FDF6E9;
+  --color-warning-100: #FAEACB;
+  --color-warning-200: #F4D79E;
+  --color-warning-300: #EEC077;
+  --color-warning-400: #EBB15E;
   --color-warning-500: #E8A547;   /* soft amber */
   --color-warning-600: #C68A30;
+  --color-warning-700: #95661E;   /* text varování */
+  --color-warning-800: #765017;
+  --color-warning-900: #573B11;
   --color-danger-50:   #FBEDED;
+  --color-danger-100:  #F7DADA;
+  --color-danger-200:  #EFBDBD;
+  --color-danger-300:  #E39595;
+  --color-danger-400:  #DA7676;
   --color-danger-500:  #D45B5B;   /* soft coral */
   --color-danger-600:  #B84545;
+  --color-danger-700:  #9C3535;   /* text chyby */
+  --color-danger-800:  #7E2A2A;
+  --color-danger-900:  #5E2020;
 
   /* ─── Status badges (faktury) ─── */
   --color-status-draft-bg:     #F4F2F8;
@@ -253,6 +296,28 @@ input[type="file"].form-input::file-selector-button {
   --color-success-500: #56A98A;   /* border Upravit */
   --color-success-600: #46A074;   /* text + ikona Upravit (a ostatní success text) */
   --color-success-700: #2A6446;   /* hover bg tint */
+  /* Škály stavů v dark: tinty (100-200) tmavé, okraje (300-400) tlumené,
+     text (700-900, u success 800-900) zesvětlený, jinak by byl na tmavém nečitelný. */
+  --color-success-100: #1C3426;
+  --color-success-200: #244531;
+  --color-success-300: #336B4C;
+  --color-success-400: #3F8A62;
+  --color-success-800: #8FD1AE;
+  --color-success-900: #B8E3CA;
+  --color-warning-100: #3A2D15;
+  --color-warning-200: #4D3B18;
+  --color-warning-300: #7A5D22;
+  --color-warning-400: #B88A3A;
+  --color-warning-700: #E2AE5C;
+  --color-warning-800: #EBC27F;
+  --color-warning-900: #F3D8A8;
+  --color-danger-100:  #3A1D1D;
+  --color-danger-200:  #4E2525;
+  --color-danger-300:  #7A3838;
+  --color-danger-400:  #B05050;
+  --color-danger-700:  #E58A8A;
+  --color-danger-800:  #F0A8A8;
+  --color-danger-900:  #F7CACA;
   --color-accent-50:  #122231;
   /* accent-100 (soft pill bg — badge Proforma) — bez tohoto override by zůstal
      světlý #D7E8F6 a v dark módu zářil. Laděno k ostatním -50 stavům. */
@@ -294,6 +359,12 @@ input[type="file"].form-input::file-selector-button {
  *
  * Accent tečky sekcí (-400/-500/-600) jsou dost syté, aby na tmavém podkladu
  * držely čitelnost — ty se schválně nepřepisují. */
+/* „.cz" ve slovní značce MyÚčto.cz má barvu amber jako na webu myucto.cz. Na světlé
+   ploše je o stupeň tmavší, aby byl čitelný; v tmavé liště a v dark režimu plný amber. */
+.brand-tld { color: #D97706; font-weight: 400; }
+.dark .brand-tld,
+.nav-inverted .brand-tld { color: #F59E0B; }
+
 .nav-inverted {
   color-scheme: dark;
   /* Text, který si barvu nikde nenastavuje, dědí `color` z <body> — a to je
@@ -331,6 +402,7 @@ input[type="file"].form-input::file-selector-button {
   --color-warning-100: #3D3013;
   --color-warning-700: #E7B968;
   --color-danger-50:  #34191C;
+  --color-danger-700: #EE9A9A;
   --color-accent-50:  #172B3D;
   --color-accent-100: #1C3A52;
   --color-teal-50:    #12313A;
@@ -416,6 +488,19 @@ body.workspace-window-frame::after {
 
 body.workspace-window-frame #app {
   padding-bottom: 1rem;
+}
+
+/* Vystředěný dialog nesmí na nízkém displeji utéct z obrazovky: bez scrollu by šlo
+   k Uložit dojít jen přes zoom. Auto okraje středí jako items-center, ale při přetečení
+   začínají nahoře, takže zůstane dostupná i hlavička. Pravidlo drží všechny ruční
+   dialogy, hlídá ho dialogOverflowStructure.spec.ts. */
+.fixed.inset-0.flex.items-center.justify-center:not(.pointer-events-none) {
+  align-items: flex-start;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.fixed.inset-0.flex.items-center.justify-center:not(.pointer-events-none) > * {
+  margin-block: auto;
 }
 
 body.workspace-window-single #app {
@@ -715,11 +800,39 @@ input[type="date"]::-webkit-calendar-picker-indicator:hover { opacity: 1; }
     background-color: var(--color-neutral-50);
     z-index: 2;
   }
+  /*
+   * Lepivá buňka musí být neprůhledná, jinak pod ní při posunu prosvítají
+   * odjeté buňky. Barva řádku ale bývá poloprůhledná (zebra, hover, aktivní
+   * řádek, row-flash, utility typu bg-danger-50/40), takže samotné
+   * `inherit` nestačí. Skládáme proto dvě vrstvy:
+   *   1. background-image = neprůhledný podklad plochy (kreslí se nad
+   *      zděděnou barvou buňky, ta je tím schovaná),
+   *   2. ::after = zděděná barva řádku přes podklad.
+   * Buňka je sticky se z-indexem, tedy vlastní kontext vrstvení, takže
+   * ::after se z-index:-1 leží nad jejím pozadím a pod obsahem.
+   * Barvu dál určuje řádek (stavové tinty, utility na <tr>), tady se jen
+   * vrství. box-shadow: inherit přenese na ::after i lištu aktivního řádku,
+   * jinak by ji neprůhledná barva řádku (hover:bg-neutral-50) zakryla.
+   * ::after, ne ::before: ::before buňky patří popisku sloupce
+   * (`.column-labels td[data-column-label]::before`).
+   * Stránka sem nepřidává vlastní pozadí první buňky (scoped styl mimo vrstvu
+   * by podklad i tint přebil); hlídá to stickyFirstColumn.spec.ts.
+   */
   .table-sticky-first tbody td:first-child {
     background-color: inherit;
+    background-image: linear-gradient(var(--color-surface), var(--color-surface));
     z-index: 1;
   }
-  /* Default bg pro řádky aby td:first-child{bg:inherit} nebyl průhledný.
+  .table-sticky-first tbody td:first-child::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    background-color: inherit;
+    box-shadow: inherit;
+    pointer-events: none;
+  }
+  /* Default bg pro řádky (liché řádky bez zebry).
      :where() drží specificitu na 0, takže Tailwind utility (bg-warning-50,
      hover:bg-neutral-50, …) na <tr> stále vyhrávají. */
   :where(.table-sticky-first tbody tr) {
@@ -806,6 +919,14 @@ input[type="date"]::-webkit-calendar-picker-indicator:hover { opacity: 1; }
       white-space: normal;
       overflow-wrap: anywhere;
       min-width: 16rem;
+    }
+    /* Buňka tabulky max-width ignoruje, strop volného místa (useAdaptiveTableRows,
+       data-adaptive-max) proto nese text uvnitř. */
+    .singleline-list-table:not(.multirow-table) > tbody > tr:not(.table-detail-row) > td.wrap-cell:has(> .adaptive-text-cap) {
+      min-width: 14rem;
+    }
+    .singleline-list-table:not(.adaptive-table) > tbody > tr:not(.table-detail-row) > td.wrap-cell .adaptive-text-cap {
+      max-width: calc(var(--adaptive-text-max, 100vw) - 1.5rem);
     }
   }
 
@@ -1053,6 +1174,22 @@ input[type="date"]::-webkit-calendar-picker-indicator:hover { opacity: 1; }
     .adaptive-table > thead > tr > :last-child,
     .adaptive-table > tbody > tr:not(.table-detail-row) > :last-child {
       bottom: 0;
+    }
+    /* Žlábek se šipkou rozbalení lícuje s hodnotou prvního řádku buněk, ne s horní
+       hranou řádku: posun = odsazení řádku + odsazení buňky + výška popisku sloupce. */
+    .adaptive-table.list-gutter-first-line {
+      --gutter-row-pt: 0.25rem;
+      --gutter-cell-pt: 0.4rem;
+      --gutter-label: 0rem;
+      --gutter-line: 1.25rem;
+    }
+    .adaptive-table.list-gutter-first-line.column-labels { --gutter-label: 1.04375rem; }
+    .adaptive-table.list-gutter-first-line.tbl-comfortable { --gutter-row-pt: 0.35rem; --gutter-cell-pt: 0.6rem; }
+    .adaptive-table.list-gutter-first-line.tbl-compact { --gutter-row-pt: 0rem; --gutter-cell-pt: 0.2rem; --gutter-line: 1.015625rem; }
+    .adaptive-table.list-gutter-first-line.tbl-compact.column-labels { --gutter-label: 0.84375rem; }
+    .singleline-list-table.adaptive-table.list-gutter-first-line > tbody > tr:not(.table-detail-row) > :first-child {
+      top: calc(var(--gutter-row-pt) + var(--gutter-cell-pt) + var(--gutter-label));
+      height: var(--gutter-line);
     }
     .adaptive-table > tbody > tr.table-detail-row,
     .adaptive-table > tbody > tr.table-detail-row > td {
@@ -1527,4 +1664,21 @@ input[type="date"]::-webkit-calendar-picker-indicator:hover { opacity: 1; }
 }
 @media (prefers-reduced-motion: reduce) {
   .field-flash { animation-duration: 1ms; box-shadow: 0 0 0 3px rgb(245 158 11 / 0.55); }
+}
+
+/* iOS přiblíží stránku při psaní do pole s písmem pod 16 px. Jen telefon (data-phone). */
+[data-phone] input:not([type='checkbox']):not([type='radio']):not([type='range']):not([type='file']):not([type='color']),
+[data-phone] select,
+[data-phone] textarea {
+  font-size: 16px;
+}
+
+/* Nabídka akcí zespodu na telefonu (ActionBar): položky na palec. */
+.phone-action-sheet :is(a, button) {
+  min-height: 3rem;
+}
+
+/* Select s pevnou minimální šířkou nesmí na telefonu přetéct mimo obrazovku (panel se do strany neposouvá). */
+[data-phone] select {
+  max-width: 100%;
 }

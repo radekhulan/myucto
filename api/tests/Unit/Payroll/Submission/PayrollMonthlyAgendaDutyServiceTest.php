@@ -122,6 +122,22 @@ final class PayrollMonthlyAgendaDutyServiceTest extends TestCase
         );
     }
 
+    /**
+     * Agentura s DPP pod rozhodným příjmem: pojišťovny ve snímku jsou, ale
+     * vypočtený zdravotní výsledek nemá u žádné závazek. Přehled o platbě
+     * se podává jen pojišťovně, u které měl zaměstnavatel pojištěnce.
+     */
+    public function testInsurerWithoutInsuredPeopleGetsNoPaymentOverview(): void
+    {
+        $none = $this->service([$this->runRow(insurerCodes: ['111', '201'], insuredCodes: [])])
+            ->unprepared(11, self::PERIOD, []);
+        self::assertSame([JmhzSubmissionBridgeService::AGENDA_CODE], array_column($none, 'agenda_code'));
+
+        $one = $this->service([$this->runRow(insurerCodes: ['111', '201'], insuredCodes: ['201'])])
+            ->unprepared(11, self::PERIOD, []);
+        self::assertSame([null, '201'], array_column($one, 'insurer_code'));
+    }
+
     public function testInvalidPeriodIsRejected(): void
     {
         $this->expectException(\InvalidArgumentException::class);
@@ -130,15 +146,17 @@ final class PayrollMonthlyAgendaDutyServiceTest extends TestCase
 
     /**
      * @param list<string> $insurerCodes
-     * @return array{run_id:int,revision_id:int,person_count:int,insurer_codes:list<string>}
+     * @param ?list<string> $insuredCodes
+     * @return array{run_id:int,revision_id:int,person_count:int,insurer_codes:list<string>,insured_codes:?list<string>}
      */
-    private function runRow(array $insurerCodes, int $personCount = 3): array
+    private function runRow(array $insurerCodes, int $personCount = 3, ?array $insuredCodes = null): array
     {
         return [
             'run_id' => 3,
             'revision_id' => 7,
             'person_count' => $personCount,
             'insurer_codes' => $insurerCodes,
+            'insured_codes' => $insuredCodes,
         ];
     }
 

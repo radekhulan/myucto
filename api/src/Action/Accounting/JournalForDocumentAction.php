@@ -15,7 +15,7 @@ use Psr\Http\Message\ServerRequestInterface as Request;
 
 /**
  * GET /api/accounting/journal/for-document/{source}/{id} — zaúčtování faktury
- * (vydané i přijaté) i s řádky.
+ * (vydané i přijaté) nebo ostatní pohledávky či závazku i s řádky.
  *
  * Podklad pro sbalenou sekci „Zaúčtování" na detailu faktury. Detail dosud uměl
  * jen odskok do deníku, takže účetní musel kvůli jednomu pohledu na kontaci
@@ -40,6 +40,7 @@ final class JournalForDocumentAction
     private const SOURCES = [
         'invoices'           => 'invoice',
         'purchase-invoices'  => 'purchase_invoice',
+        'other-items'        => 'other_item',
     ];
 
     public function __construct(
@@ -66,8 +67,13 @@ final class JournalForDocumentAction
             static fn (array $e): array => $e + ['relation' => 'own'],
             $this->journal->listBySourceWithLines($supplierId, $sourceType, $docId),
         );
-        if ($entries === []) {
+        // Zálohu bez vlastního zápisu mají jen faktury; ostatní položka by se jinak
+        // hledala mezi proformami podle svého id.
+        if ($entries === [] && $sourceType !== 'other_item') {
             $entries = $this->advanceEntries($supplierId, $sourceType, $docId);
+        }
+        if ($sourceType === 'invoice') {
+            array_push($entries, ...$this->otherItemEntries($supplierId, $docId));
         }
         if ($entries !== []) {
             $accMap = $this->accounts->idToAccountMap($supplierId);
@@ -94,6 +100,37 @@ final class JournalForDocumentAction
     }
 
     /**
+     * Faktura krytá ostatní pohledávkou (migrace 2246) vlastní zápis nemá, účtuje ji živý
+     * zápis pohledávky. Sekce ho ukáže jen ke čtení, opravuje se v detailu pohledávky.
+     *
+     * @return list<array<string,mixed>>
+     */
+    private function otherItemEntries(int $supplierId, int $invoiceId): array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT oi.id, oi.document_no FROM invoices i
+               JOIN other_items oi ON oi.supplier_id = i.supplier_id AND oi.id = i.other_item_id
+              WHERE i.id = ? AND i.supplier_id = ?'
+        );
+        $stmt->execute([$invoiceId, $supplierId]);
+        $item = $stmt->fetch(\PDO::FETCH_ASSOC);
+        if ($item === false) {
+            return [];
+        }
+        $out = [];
+        foreach ($this->journal->listBySourceWithLines($supplierId, 'other_item', (int) $item['id']) as $entry) {
+            if ($entry['reversed_by'] !== null || $entry['posted_at'] === null || $entry['source_id'] === null) {
+                continue;
+            }
+            $entry['relation'] = 'other_item';
+            $entry['other_item_id'] = (int) $item['id'];
+            $entry['other_item_document_no'] = $item['document_no'];
+            $out[] = $entry;
+        }
+        return $out;
+    }
+
+    /**
      * Záloha (zálohová PF, proforma) vlastní zápis nemá — zaúčtuje se její úhrada
      * (314/221, 221/324) a zúčtování v konečné faktuře. Prázdná sekce Zaúčtování
      * vypadala jako chyba „nic se nezaúčtovalo", proto se ukážou živé zápisy úhrad
@@ -114,8 +151,10 @@ final class JournalForDocumentAction
                 'bank' => 'SELECT DISTINCT bank_transaction_id FROM payment_matches
                             WHERE supplier_id = ? AND purchase_invoice_id = ? AND bank_transaction_id IS NOT NULL',
                 'cash' => 'SELECT id FROM cash_documents WHERE supplier_id = ? AND purchase_invoice_id = ?',
-                'purchase_invoice' => "SELECT id FROM purchase_invoices
-                            WHERE supplier_id = ? AND advance_purchase_invoice_id = ? AND status <> 'cancelled'",
+                // Konečná faktura zálohy, i ta, která vyúčtovává víc záloh (PurchaseAdvanceLinks).
+                'purchase_invoice' => 'SELECT pi.id FROM (' . \MyInvoice\Service\PurchaseInvoice\PurchaseAdvanceLinks::linksSql((string) $supplierId) . ") l
+                            JOIN purchase_invoices pi ON pi.id = l.final_id
+                            WHERE pi.supplier_id = ? AND l.advance_id = ? AND pi.status <> 'cancelled'",
             ];
         } else {
             $kind = $pdo->prepare('SELECT invoice_type FROM invoices WHERE id = ? AND supplier_id = ?');

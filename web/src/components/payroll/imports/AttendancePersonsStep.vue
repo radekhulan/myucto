@@ -16,15 +16,19 @@ import { BTN_DISABLED_NOTE, btnFilled, btnIconSm, btnOutlineSm, disabledTitle, I
 import {
   buildPersonsPayload,
   effectiveEmploymentId,
+  existingPersonNeedsConfirmation,
   firstDayOfPeriod,
-  guessRelationType,
   personCanBeCreated,
   personCreateDetails,
   type PersonCreateDetailKey,
+  relationTypeForCreate,
+  reusableOpenAgreement,
+  sourceRelationType,
   splitDisplayName,
   type ManualLinks,
   type PersonDraft,
 } from './importHelpers'
+import { registrationSummary } from './attendanceRegistration'
 
 const props = withDefaults(defineProps<{
   persons: AttendancePerson[]
@@ -47,12 +51,15 @@ const emit = defineEmits<{
 const { t } = useI18n()
 
 type Filter = 'all' | 'attention' | AttendanceMatchStatus
-const FILTERS: Filter[] = ['all', 'attention', 'linked', 'matched', 'ambiguous', 'not_found']
+const FILTERS: Filter[] = ['all', 'attention', 'linked', 'matched', 'ambiguous', 'conflict', 'not_found']
 const RELATION_TYPES: RegistrationRelationType[] = ['employment', 'small_scale_employment', 'dpp', 'dpc', 'statutory_body']
 
 const filter = ref<Filter>('all')
 const createKeys = ref<string[]>([])
 const drafts = ref<Record<string, PersonDraft>>({})
+const newAgreementKeys = ref<string[]>([])
+/** Volba u shody jména a data narození: tatáž osoba z evidence, nebo nová karta. */
+const existingChoices = ref<Record<string, 'existing' | 'new'>>({})
 const createForm = ref({
   relation_type: 'employment' as RegistrationRelationType,
   weekly_hours: '40',
@@ -64,7 +71,7 @@ watch(() => props.period, value => { createForm.value.planned_start_on = firstDa
 
 const optionById = computed(() => new Map(props.options.map(option => [option.employment_id, option])))
 const counts = computed(() => {
-  const result: Record<Filter, number> = { all: 0, attention: 0, linked: 0, matched: 0, ambiguous: 0, not_found: 0 }
+  const result: Record<Filter, number> = { all: 0, attention: 0, linked: 0, matched: 0, ambiguous: 0, conflict: 0, not_found: 0 }
   for (const person of props.persons) {
     result.all += 1
     result[person.match.status] += 1
@@ -79,6 +86,8 @@ const visiblePersons = computed(() => props.persons.filter(person => {
 }))
 const creatable = computed(() => props.persons.filter(canBeCreated))
 const createPersons = computed(() => props.persons.filter(person => createKeys.value.includes(person.key)))
+/** Kolika vybraným osobám určí druh vztahu společná volba (podklady ho neuvádějí). */
+const withoutSourceRelationCount = computed(() => createPersons.value.filter(person => sourceRelationType(person) === null).length)
 const resultByKey = computed(() => new Map((props.createResults?.results ?? []).map(item => [item.person_key, item])))
 
 const createBlockedReason = computed(() => {
@@ -87,6 +96,10 @@ const createBlockedReason = computed(() => {
   if (!createForm.value.planned_start_on) return t('payroll_imports.attendance.persons.create_no_start')
   if (createPersons.value.some(person => draftFor(person).last_name.trim() === '' || draftFor(person).first_name.trim() === '')) {
     return t('payroll_imports.attendance.persons.create_names_missing')
+  }
+  const unconfirmed = createPersons.value.find(person => existingPersonNeedsConfirmation(person) && !existingChoices.value[person.key])
+  if (unconfirmed?.existing_person) {
+    return t('payroll_imports.attendance.persons.existing_person_confirm.title', { name: unconfirmed.existing_person.employee_name })
   }
   return ''
 })
@@ -99,6 +112,7 @@ watch(() => props.persons, persons => {
 
 function needsAttention(person: AttendancePerson): boolean {
   return effectiveEmploymentId(person, props.manualLinks) === null || person.match.status === 'ambiguous'
+    || person.match.status === 'conflict'
 }
 
 function canBeCreated(person: AttendancePerson): boolean {
@@ -110,6 +124,7 @@ function statusClass(status: AttendanceMatchStatus): string {
     linked: 'bg-success-50 text-success-700',
     matched: 'bg-primary-50 text-primary-700',
     ambiguous: 'bg-warning-50 text-warning-700',
+    conflict: 'bg-danger-100 text-danger-700',
     not_found: 'bg-danger-50 text-danger-600',
   }[status]
 }
@@ -164,7 +179,6 @@ function toggleCreate(person: AttendancePerson) {
     return
   }
   ensureDraft(person)
-  if (createKeys.value.length === 0) createForm.value.relation_type = guessRelationType(person.relation_label)
   createKeys.value = [...createKeys.value, person.key]
 }
 
@@ -176,13 +190,29 @@ function selectAllCreatable() {
 function detailValue(key: PersonCreateDetailKey, value: string, invalid: boolean): string {
   if (invalid) return t('payroll_imports.attendance.persons.details.unreadable', { value })
   if (key === 'start_on' || key === 'agreed_end_on') return formatDate(value)
-  if (key === 'hourly_rate' || key === 'monthly_wage') return formatMoneyMinor(Math.round(Number(value) * 100))
+  if (key === 'hourly_rate' || key === 'probable_earning' || key === 'monthly_wage') return formatMoneyMinor(Math.round(Number(value) * 100))
   return value
+}
+
+/** Otevřená DPP osoby, kterou jde použít místo nové; výchozí volba je použít ji. */
+function openAgreementFor(person: AttendancePerson) {
+  return reusableOpenAgreement(person, relationTypeFor(person))
+}
+
+/** Druh vztahu, se kterým se osoba založí: z podkladů, jinak společná volba. */
+function relationTypeFor(person: AttendancePerson): RegistrationRelationType {
+  return relationTypeForCreate(person, createForm.value.relation_type)
+}
+
+function setNewAgreement(person: AttendancePerson, createNew: boolean) {
+  newAgreementKeys.value = createNew
+    ? [...new Set([...newAgreementKeys.value, person.key])]
+    : newAgreementKeys.value.filter(key => key !== person.key)
 }
 
 function submitCreate() {
   if (createBlockedReason.value !== '') return
-  emit('create', buildPersonsPayload(createPersons.value, drafts.value, createForm.value))
+  emit('create', buildPersonsPayload(createPersons.value, drafts.value, createForm.value, undefined, new Set(newAgreementKeys.value), existingChoices.value))
 }
 
 const SELECT_CLASS = 'h-8 w-full min-w-48 rounded-md border border-neutral-300 bg-surface px-2 text-sm disabled:bg-neutral-100'
@@ -203,7 +233,7 @@ const SELECT_CLASS = 'h-8 w-full min-w-48 rounded-md border border-neutral-300 b
     <section class="rounded-xl border border-neutral-200 bg-surface shadow-sm">
       <div class="flex flex-wrap items-center justify-between gap-2 border-b border-neutral-100 px-4 py-3">
         <p class="text-sm text-neutral-600">{{ t('payroll_imports.attendance.persons.hint') }}</p>
-        <button v-if="canCreate && creatable.length" type="button" :class="btnOutlineSm('primary')" :disabled="disabled" @click="selectAllCreatable">
+        <button v-if="canCreate && creatable.length" type="button" data-testid="attendance-select-all-creatable" :class="btnOutlineSm('primary')" :disabled="disabled" @click="selectAllCreatable">
           <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.plus" /></svg>
           {{ t('payroll_imports.attendance.persons.select_all_creatable', { count: creatable.length }) }}
         </button>
@@ -233,6 +263,17 @@ const SELECT_CLASS = 'h-8 w-full min-w-48 rounded-md border border-neutral-300 b
                   <span v-if="person.birth_number_masked" class="font-mono">{{ person.birth_number_masked }}</span>
                 </p>
                 <p v-if="person.relation_label || person.department" class="text-xs text-neutral-500">{{ [person.relation_label, person.department].filter(Boolean).join(' · ') }}</p>
+                <ul v-if="person.errors?.length" class="mt-1 space-y-0.5 text-xs font-medium text-danger-600" data-testid="attendance-person-errors">
+                  <li v-for="error in person.errors" :key="error">{{ error }}</li>
+                </ul>
+                <!-- Řádek s chybou (neplatné RČ) import nezaloží; bez cesty dál by tiše zůstal „Nenalezeno". -->
+                <div v-if="person.errors?.length && effectiveEmploymentId(person, manualLinks) === null" class="mt-1 max-w-sm space-y-1 text-xs text-neutral-600" data-testid="attendance-person-error-next">
+                  <p>{{ t('payroll_imports.attendance.persons.error_row_next', { number: person.personal_number ?? '—' }) }}</p>
+                  <RouterLink :to="{ path: '/payroll/people', query: { new: '1' } }" :class="[btnOutlineSm('primary'), 'whitespace-nowrap']" data-testid="attendance-person-create-manually">
+                    <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.user" /></svg>
+                    {{ t('payroll_imports.attendance.persons.create_manually') }}
+                  </RouterLink>
+                </div>
                 <ul v-if="person.warnings.length" class="mt-1 space-y-0.5 text-xs text-warning-700">
                   <li v-for="warning in person.warnings" :key="warning">{{ warning }}</li>
                 </ul>
@@ -285,6 +326,16 @@ const SELECT_CLASS = 'h-8 w-full min-w-48 rounded-md border border-neutral-300 b
             <option value="">{{ noEmploymentLabel(person) }}</option>
             <option v-for="option in options" :key="option.employment_id" :value="String(option.employment_id)">{{ option.label }}</option>
           </select>
+          <ul v-if="person.errors?.length" class="mt-2 space-y-0.5 text-xs font-medium text-danger-600">
+            <li v-for="error in person.errors" :key="error">{{ error }}</li>
+          </ul>
+          <div v-if="person.errors?.length && effectiveEmploymentId(person, manualLinks) === null" class="mt-1 space-y-1 text-xs text-neutral-600">
+            <p>{{ t('payroll_imports.attendance.persons.error_row_next', { number: person.personal_number ?? '—' }) }}</p>
+            <RouterLink :to="{ path: '/payroll/people', query: { new: '1' } }" :class="[btnOutlineSm('primary'), 'whitespace-nowrap']">
+              <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.user" /></svg>
+              {{ t('payroll_imports.attendance.persons.create_manually') }}
+            </RouterLink>
+          </div>
           <ul v-if="person.warnings.length" class="mt-2 space-y-0.5 text-xs text-warning-700">
             <li v-for="warning in person.warnings" :key="warning">{{ warning }}</li>
           </ul>
@@ -303,9 +354,13 @@ const SELECT_CLASS = 'h-8 w-full min-w-48 rounded-md border border-neutral-300 b
       <div class="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <label class="block">
           <span class="mb-1 block text-xs font-medium text-neutral-600">{{ t('payroll_imports.attendance.persons.relation_type') }}</span>
-          <select v-model="createForm.relation_type" class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm" :disabled="disabled">
+          <select v-model="createForm.relation_type" class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm" :disabled="disabled"
+            data-testid="attendance-create-relation-type">
             <option v-for="type in RELATION_TYPES" :key="type" :value="type">{{ t(`payroll_imports.relation_types.${type}`) }}</option>
           </select>
+          <span class="mt-1 block text-[11px] text-neutral-500" data-testid="attendance-create-relation-type-hint">{{ withoutSourceRelationCount === 0
+            ? t('payroll_imports.attendance.persons.relation_type_all_from_source')
+            : t('payroll_imports.attendance.persons.relation_type_fallback_hint', { count: withoutSourceRelationCount }) }}</span>
         </label>
         <label class="block">
           <span class="mb-1 block text-xs font-medium text-neutral-600">{{ t('payroll_imports.attendance.persons.weekly_hours') }}</span>
@@ -331,6 +386,56 @@ const SELECT_CLASS = 'h-8 w-full min-w-48 rounded-md border border-neutral-300 b
               <dd :class="detail.invalid ? 'text-warning-700' : 'text-neutral-800'">{{ detailValue(detail.key, detail.value, detail.invalid) }}</dd>
             </div>
           </dl>
+          <p class="order-last w-full text-[11px] text-neutral-600" data-testid="attendance-create-relation">
+            <span class="text-neutral-500">{{ t('payroll_imports.attendance.persons.relation_type') }}:</span>
+            {{ t(`payroll_imports.relation_types.${relationTypeFor(person)}`) }}
+            <span class="text-neutral-500">({{ sourceRelationType(person) === null
+              ? t('payroll_imports.attendance.persons.relation_origin_common')
+              : t('payroll_imports.attendance.persons.relation_origin_source') }})</span>
+          </p>
+          <fieldset v-if="person.existing_person && existingPersonNeedsConfirmation(person)" class="order-last w-full rounded-md border border-warning-500/30 bg-warning-50 px-3 py-2 text-xs" data-testid="attendance-existing-confirm">
+            <legend class="sr-only">{{ t('payroll_imports.attendance.persons.existing_person_confirm.title', { name: person.existing_person.employee_name }) }}</legend>
+            <p class="font-medium text-warning-700">{{ t('payroll_imports.attendance.persons.existing_person_confirm.title', { name: person.existing_person.employee_name }) }}</p>
+            <p class="mt-0.5 text-neutral-600">{{ t('payroll_imports.attendance.persons.existing_person_confirm.hint') }}</p>
+            <div class="mt-1.5 flex flex-wrap gap-x-4 gap-y-1">
+              <label v-for="choice in (['existing', 'new'] as const)" :key="choice" class="inline-flex items-center gap-1.5 text-neutral-800">
+                <input type="radio" :name="`existing-person-${person.key}`" :checked="existingChoices[person.key] === choice" :disabled="disabled"
+                  :data-testid="`attendance-existing-confirm-${choice}`" @change="existingChoices = { ...existingChoices, [person.key]: choice }">
+                {{ t(`payroll_imports.attendance.persons.existing_person_confirm.${choice}`) }}
+              </label>
+            </div>
+          </fieldset>
+          <p v-else-if="person.existing_person" class="order-last w-full text-[11px] font-medium text-payroll-700" data-testid="attendance-create-existing">
+            {{ t('payroll_imports.attendance.persons.existing_person', { name: person.existing_person.employee_name }) }}
+          </p>
+          <p v-if="person.registration?.length" class="order-last w-full text-[11px] text-neutral-600" data-testid="attendance-create-registration">
+            <span class="text-neutral-500">{{ t('payroll_imports.attendance.persons.registration_label') }}:</span> {{ registrationSummary(person, t) }}
+          </p>
+          <fieldset v-if="openAgreementFor(person)" class="order-last w-full rounded-md border border-warning-500/30 bg-warning-50 px-3 py-2 text-xs" data-testid="attendance-open-agreement">
+            <legend class="sr-only">{{ t('payroll_imports.attendance.persons.open_agreement.legend', { name: person.display_name }) }}</legend>
+            <p class="font-medium text-warning-700">
+              {{ t('payroll_imports.attendance.persons.open_agreement.title', {
+                code: openAgreementFor(person)?.code,
+                start: formatDate(openAgreementFor(person)?.start_date ?? ''),
+                end: openAgreementFor(person)?.end_date ? formatDate(openAgreementFor(person)?.end_date ?? '') : t('payroll_imports.attendance.persons.open_agreement.no_end'),
+              }) }}
+            </p>
+            <p class="mt-0.5 text-neutral-600">{{ t('payroll_imports.attendance.persons.open_agreement.guidance') }}</p>
+            <div class="mt-1.5 flex flex-wrap gap-x-4 gap-y-1">
+              <label class="inline-flex items-center gap-1.5 text-neutral-800">
+                <input type="radio" :name="`open-agreement-${person.key}`" :checked="!newAgreementKeys.includes(person.key)" :disabled="disabled"
+                  data-testid="attendance-open-agreement-reuse" @change="setNewAgreement(person, false)">
+                {{ openAgreementFor(person)?.extend_to
+                  ? t('payroll_imports.attendance.persons.open_agreement.reuse_extend', { date: formatDate(openAgreementFor(person)?.extend_to ?? '') })
+                  : t('payroll_imports.attendance.persons.open_agreement.reuse') }}
+              </label>
+              <label class="inline-flex items-center gap-1.5 text-neutral-800">
+                <input type="radio" :name="`open-agreement-${person.key}`" :checked="newAgreementKeys.includes(person.key)" :disabled="disabled"
+                  data-testid="attendance-open-agreement-new" @change="setNewAgreement(person, true)">
+                {{ t('payroll_imports.attendance.persons.open_agreement.create_new') }}
+              </label>
+            </div>
+          </fieldset>
           <label class="block min-w-36 flex-1">
             <span class="mb-0.5 block text-[11px] text-neutral-500">{{ t('payroll_imports.attendance.persons.first_name') }}</span>
             <input :value="draftFor(person).first_name" class="h-8 w-full rounded-md border border-neutral-300 bg-surface px-2 text-sm" :disabled="disabled"

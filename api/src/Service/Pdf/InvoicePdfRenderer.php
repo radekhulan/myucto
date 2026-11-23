@@ -8,6 +8,7 @@ use Mpdf\Mpdf;
 use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Service\Codebook\UnitLabels;
 use MyInvoice\Service\Codebook\UnitPrecision;
 use MyInvoice\Repository\InvoiceRepository;
 use MyInvoice\Repository\SupplierPaymentQrSettingsRepository;
@@ -97,6 +98,7 @@ final class InvoicePdfRenderer
             @filemtime(Bootstrap::rootDir() . '/styles/invoice.css') ?: 0,
             @filemtime(Bootstrap::rootDir() . '/' . PdfBranding::MONOCHROME_CSS) ?: 0,
             @filemtime(Bootstrap::rootDir() . '/api/templates/invoice/invoice.twig') ?: 0,
+            @filemtime(Bootstrap::rootDir() . '/api/templates/invoice/work_report_items.twig') ?: 0,
             @filemtime(__DIR__ . '/TimeBillingPdfPresenter.php') ?: 0,
             @filemtime(__FILE__) ?: 0,
         );
@@ -379,10 +381,11 @@ final class InvoicePdfRenderer
             }
         }
 
-        $invoice['items'] = $this->withQuantityDecimals(TimeBillingPdfPresenter::invoiceItems(
-            $this->withTrackingLines($this->withBaseQuantity($invoice), (int) ($invoice['supplier_id'] ?? 0), (string) $locale),
+        $unitLabels = (new UnitLabels($this->db))->byUnit((string) $locale);
+        $invoice['items'] = self::withUnitLabels($this->withQuantityDecimals(TimeBillingPdfPresenter::invoiceItems(
+            $this->withTrackingLines($this->withBaseQuantity($invoice), (int) ($invoice['supplier_id'] ?? 0), (string) $locale, $unitLabels),
             !empty($invoice['prices_include_vat']),
-        ));
+        )), $unitLabels);
         $lineDiscountColumns = false;
         if (self::hasLineDiscount($invoice['items']) && $this->showsLineDiscount((int) ($invoice['supplier_id'] ?? 0))) {
             $invoice['items'] = self::withLineDiscount(
@@ -394,10 +397,11 @@ final class InvoicePdfRenderer
             $lineDiscountColumns = true;
         }
         $workReport = $includeWorkReport
-            ? $this->workReports->findByInvoice((int) $invoice['id'])
+            ? $this->workReports->findByInvoice((int) $invoice['id'], (int) ($invoice['supplier_id'] ?? 0))
             : null;
         if ($workReport !== null) {
             $workReport = TimeBillingPdfPresenter::workReport($workReport);
+            $workReport['materials'] = self::withUnitLabels((array) ($workReport['materials'] ?? []), $unitLabels);
         }
 
         $vars = [
@@ -812,7 +816,13 @@ final class InvoicePdfRenderer
         if (empty($row)) return null;
         $hasCzk = !empty($row['account_number']) && !empty($row['bank_code']);
         $hasIban = !empty($row['iban']);
-        return ($hasCzk || $hasIban) ? $row : null;
+        if (!$hasCzk && !$hasIban) return null;
+        // Zahraniční kód banky (sort code) se netiskne jako „číslo / kód": má vlastní řádek.
+        $row['foreign_bank_code'] = \MyInvoice\Service\Bank\CurrencyBankAccountFields::foreignBankCode(
+            isset($row['bank_code']) ? (string) $row['bank_code'] : null,
+            isset($row['iban']) ? (string) $row['iban'] : null,
+        );
+        return $row;
     }
 
     /**
@@ -825,9 +835,10 @@ final class InvoicePdfRenderer
      * a firma rozpis balení na PDF netiskne (`base_unit` z withBaseQuantity pak chybí).
      *
      * @param array<int|string,mixed> $items
+     * @param array<string,string> $unitLabels {@see UnitLabels::byUnit()}
      * @return array<int|string,mixed>
      */
-    private function withTrackingLines(array $items, int $supplierId, string $locale): array
+    private function withTrackingLines(array $items, int $supplierId, string $locale, array $unitLabels): array
     {
         $en = $locale === 'en';
         $lotLines = [];
@@ -845,7 +856,7 @@ final class InvoicePdfRenderer
             if (!is_array($allocations) || $allocations === []) {
                 continue;
             }
-            $unit = (string) ($baseUnits[$i] ?? $item['base_unit'] ?? $item['unit'] ?? '');
+            $unit = UnitLabels::label($unitLabels, (string) ($baseUnits[$i] ?? $item['base_unit'] ?? $item['unit'] ?? ''));
             $serials = [];
             $lots = [];
             foreach ($allocations as $a) {
@@ -869,6 +880,29 @@ final class InvoicePdfRenderer
             $items[$i]['tracking_lines'] = $lines;
         }
         return $items;
+    }
+
+    /**
+     * Popisek jednotky z číselníku v jazyce dokladu (`pdf_unit_label`, u rozpisu balení
+     * `pdf_base_unit_label`). Kód v `unit` a `base_unit` zůstává beze změny.
+     *
+     * @param array<int|string,mixed> $rows
+     * @param array<string,string> $unitLabels {@see UnitLabels::byUnit()}
+     * @return array<int|string,mixed>
+     */
+    private static function withUnitLabels(array $rows, array $unitLabels): array
+    {
+        foreach ($rows as &$row) {
+            if (!is_array($row)) {
+                continue;
+            }
+            $row['pdf_unit_label'] = UnitLabels::label($unitLabels, (string) ($row['unit'] ?? ''));
+            if (isset($row['base_unit'])) {
+                $row['pdf_base_unit_label'] = UnitLabels::label($unitLabels, (string) $row['base_unit']);
+            }
+        }
+        unset($row);
+        return $rows;
     }
 
     /**
@@ -1012,6 +1046,11 @@ final class InvoicePdfRenderer
         if (!empty($invoice['is_simplified']) && ($invoice['invoice_type'] ?? '') === 'invoice' && $isVatPayer) {
             return $locale === 'en' ? 'Simplified tax document' : 'Zjednodušený daňový doklad';
         }
+        // § 45 odst. 2 ZDPH: opravný doklad k zjednodušenému dokladu drobného zákazníka
+        // smí vynechat označení odběratele; titulek vysvětlí proč.
+        if (!empty($invoice['is_simplified']) && ($invoice['invoice_type'] ?? '') === 'credit_note' && $isVatPayer) {
+            return $locale === 'en' ? 'Simplified credit note (tax adjustment)' : 'Zjednodušený opravný daňový doklad';
+        }
         return $labels[$locale][$invoice['invoice_type']] ?? $labels['cs'][$invoice['invoice_type']] ?? '';
     }
 
@@ -1032,7 +1071,14 @@ final class InvoicePdfRenderer
 
     private function parentVarsymbol(array $invoice): ?string
     {
-        if (!$invoice['parent_invoice_id']) return null;
+        if (!$invoice['parent_invoice_id']) {
+            // Faktura čerpající víc záloh vazbu dokladu nemá: odkaz nese čísla všech záloh.
+            $numbers = array_filter(array_map(
+                static fn (array $d): string => (string) ($d['varsymbol'] ?? ''),
+                (array) ($invoice['advance_drawdown']['drawdowns'] ?? []),
+            ), static fn (string $vs): bool => $vs !== '');
+            return $numbers === [] ? null : implode(', ', $numbers);
+        }
         $stmt = $this->db->pdo()->prepare('SELECT varsymbol FROM invoices WHERE id = ?');
         $stmt->execute([$invoice['parent_invoice_id']]);
         return $stmt->fetchColumn() ?: null;

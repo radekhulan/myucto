@@ -59,7 +59,7 @@ final class OwnedCloneCleanupTest extends TestCase
     {
         $failure=self::dropError(1010,'Directory not empty');$server=new OwnedCloneDropPdo(array_fill(0,5,$failure));
         try {self::cleanup($class,$fields,$server);self::fail('Persistent failure was swallowed.');}
-        catch (PDOException $error) {self::assertSame($failure,$error);}
+        catch (\RuntimeException $error) {self::assertNotInstanceOf(PDOException::class,$error);self::assertSame($failure,$error->getPrevious());}
         self::assertSame(array_fill(0,5,'DROP DATABASE IF EXISTS `'.$schemas[0].'`'),$server->statements);
         self::assertSame([],$server->remaining());
     }
@@ -90,5 +90,6 @@ final class OwnedCloneDropPdo extends PDO
         if ($outcome instanceof PDOException) throw $outcome;
         return 0;
     }
+    public function query(string $query, ?int $fetchMode = null, mixed ...$fetchModeArgs): \PDOStatement|false {return false;}
     public function remaining(): array {return $this->outcomes;}
 }

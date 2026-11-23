@@ -36,9 +36,9 @@ final readonly class PaymentReversalIntent
         if(!$original||$original['status']!=='posted'||$original['kind']==='reversal'||(int)$original['row_version']!==$request['expected_version']||$original['snapshot_hash']!==$snapshot['original_snapshot_hash']||$row['accounting_date']<$original['accounting_date'])PaymentException::reject('reversal_intent');
         $before=json_decode($original['snapshot_json'],true,flags:JSON_THROW_ON_ERROR);if(!hash_equals($original['snapshot_hash'],PropertyInput::hash($before)))PaymentException::reject('reversal_intent');
         $current=(new PaymentJournalProof($db))->current($supplier,(int)$original['journal_entry_id']);
-        if($current['entry']['reversed_by']!==null||PropertyInput::hash(PaymentJournalProof::canonicalLines($current['lines']))!==PropertyInput::hash(PaymentJournalProof::canonicalLines($before['lines'])))PaymentException::reject('reversal_intent');
+        if($current['entry']['reversed_by']!==null||!PaymentJournalProof::matches($current['lines'], $before['lines']))PaymentException::reject('reversal_intent');
         $expected=$before['lines'];foreach($expected as &$line)$line['side']=$line['side']==='debit'?'credit':'debit';unset($line);
-        if(PropertyInput::hash(PaymentJournalProof::canonicalLines($expected))!==PropertyInput::hash(PaymentJournalProof::canonicalLines($snapshot['lines'])))PaymentException::reject('reversal_intent');
+        if(!PaymentJournalProof::matches($expected, $snapshot['lines']))PaymentException::reject('reversal_intent');
         if($current['entry']['source_type']!=='unit_payment'||$current['entry']['source_id']!==(int)$original['id']||$current['entry']['entry_date']!==$original['accounting_date'])PaymentException::reject('reversal_intent');
         if($original['kind']==='correction'){
             \MyInvoice\Service\Property\Payments\Workflow\PaymentReliefReversalProof::assertPending($db,$supplier,$row,$original,$request);

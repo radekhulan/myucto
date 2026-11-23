@@ -1,5 +1,7 @@
+import type { WorkReportBillingSnapshot, WorkReportBillingPreview } from './workReportBilling'
 import { requestSupplierId } from '@/workspace/supplierContext'
 import { api } from './client'
+import { invoiceListFilterParams } from './listQueries'
 import type { DocumentLock } from './locks'
 import type { EetCreditNoteRefundResult } from './eet'
 import { appIsoDate } from '@/utils/date'
@@ -54,6 +56,16 @@ export interface InvoicePayment {
   tax_document_invoice_id: number | null
   tax_document_varsymbol?: string | null
   tax_document_status?: InvoiceStatus | null
+  /** Platbu založil převod z jiného systému (POHODA, Money S3). */
+  taken_over?: boolean
+  /** Převzatá platba bez protějšku v MyÚčtu: server ji nesmaže. */
+  taken_over_locked?: boolean
+  /** Úhrada minulého roku převzatá z POHODY: daňový doklad k ní se nevystavuje. */
+  prior_year?: boolean
+  /** Daň z platby přiznal původní program (POHODA minulý rok, Money S3): daňový doklad k ní se nevystavuje. */
+  tax_declared_by_origin?: boolean
+  /** Výplň Money S3 (úhrada bez dokladu úhrady): smaže ji správce nebo právo invoices.edit_issued v nezamčeném období. */
+  money_s3_filler?: boolean
   created_at: string
 }
 
@@ -90,12 +102,69 @@ export interface AdvanceDrawdownCandidate {
   varsymbol: string | null
   issue_date: string | null
   total_with_vat: number
+  /** Nevyčerpaná částka zálohy s DPH (bez čerpání tohoto konceptu). */
   available: number
+  /** Totéž bez DPH. */
+  available_base?: number
+  /** Kolik z ní koncept čerpá teď (s DPH / bez DPH). */
+  drawn?: number
+  drawn_base?: number
+  /** Čísla daňových dokladů k platbě zálohy. */
+  tax_documents?: string
+  /** Podvojné účetnictví: úhrada zálohy je zaúčtovaná (banka, pokladna nebo počáteční stavy). */
+  receipt_posted?: boolean
+}
+
+/** Vazba dokladu na otevírací zápis (doklad převzatý z počátečních stavů). */
+export interface OpeningBalanceState {
+  in_opening: boolean
+  entry_id: number | null
+  entry_date: string | null
 }
 
 export interface AdvanceDrawdownResult {
-  drawdown: { proforma_id: number; amount: number; available: number; remaining: number }
+  drawdown: { proforma_id: number; amount: number; base?: number; available: number; remaining: number }
   invoice: Invoice
+}
+
+/** Čerpání zálohy fakturou podle odpočtových řádků § 37a (v měně dokladu). */
+export interface InvoiceAdvanceDrawdown {
+  proforma_id: number
+  varsymbol: string | null
+  gross: number
+  base: number
+  vat: number
+}
+
+export interface InvoiceAdvanceDrawdownSummary {
+  /** Plnění faktury: součet řádků mimo odpočty záloh. */
+  supply: { gross: number; base: number }
+  drawdowns: InvoiceAdvanceDrawdown[]
+}
+
+export type AdvanceDrawdownBasis = 'gross' | 'net'
+
+export interface InvoiceOtherItem {
+  id: number
+  document_no: string | null
+  title: string
+  partner_name: string | null
+  variable_symbol: string | null
+  issued_on: string
+  amount: number
+  currency: string
+  status: string
+  journal_entry_id: number | null
+  paid_amount: number
+  remaining_amount: number
+}
+
+export interface InvoiceOtherItemCandidate extends InvoiceOtherItem {
+  partner_id: number | null
+  due_on: string
+  vs_match: boolean
+  partner_match: boolean
+  amount_match: boolean
 }
 
 export interface AdvanceCandidate {
@@ -106,6 +175,13 @@ export interface AdvanceCandidate {
   issue_date: string | null
   total_with_vat: number
   currency: string
+}
+
+export interface TaxDocumentAdvanceLink {
+  advance_id: number
+  payment_id: number | null
+  filed_vat_period: string | null
+  accounting_period_locked: boolean
 }
 
 /** Vybraný kus (sériové číslo) nebo šarže na řádku faktury; množství v základní jednotce karty. */
@@ -129,6 +205,8 @@ export interface InvoiceItem {
    * Round-trip jako karta, jinak ji replaceItems (DELETE+INSERT) smaže.
    */
   list_unit_price?: number | null
+  /** Cenu řádku má zadat člověk (cena je zatím 0). Round-trip jako karta, zhasne se zadanou cenou. */
+  manual_price?: boolean
   /** Sleva z ceníkové ceny v %, dopočítá ji server (záporná = přirážka). Jen ke čtení. */
   line_discount_pct?: number | null
   vat_rate_id: number
@@ -142,6 +220,7 @@ export interface InvoiceItem {
   // 'text' = textový řádek mezi položkami: jen popis, do částek ani DPH nevstupuje.
   item_kind?: 'standard' | 'discount' | 'text'
   linked_work_report_id?: number | null
+  work_report_billing_key?: string | null
   vat_code?: string
   vat_label_cs?: string
   vat_label_en?: string
@@ -165,8 +244,14 @@ export interface InvoiceItem {
   accrual_to?: string | null
   /** Výnosový účet položky (6xx); null = produkt > kategorie > předkontace dokladu. Round-trip jako ostatní pole položky. */
   revenue_account_code?: string | null
+  /** Účet MD řádku (pohledávka, analytika 311); NULL = z předkontace řádku nebo dokladu. Jeden na doklad. */
+  counter_account_code?: string | null
+  /** Předkontace řádku — doplní účty, které řádek sám nemá. */
+  posting_rule_key?: string | null
   /** Kód položky prodávajícího z importu (ISDOC SellersItemIdentification), páruje podle něj pravidla výnosů. */
   seller_item_code?: string | null
+  /** Záloha, ze které odpočtový řádek § 37a čerpá. Round-trip, jinak replaceItems vazbu zahodí. */
+  advance_invoice_id?: number | null
   /** Název karty z JOINu (read-only) — našeptávač jím zobrazí vybranou položku bez dalšího dotazu. */
   small_asset_name?: string | null
   asset_name?: string | null
@@ -264,6 +349,38 @@ export interface PaymentScheduleRow {
   note: string | null
 }
 
+/** Metadata uloženého originálu PDF vydané faktury. */
+export interface InvoiceOriginalPdfMeta {
+  imported_pdf_path: string
+  imported_pdf_hash: string
+  imported_pdf_size_bytes: number
+  imported_pdf_original_name: string
+  replaced: boolean
+}
+
+export interface InvoiceOriginalPdfCandidate {
+  id: number
+  varsymbol: string | null
+  payment_variable_symbol: string | null
+  invoice_type: string
+  status: string
+  issue_date: string | null
+  total_with_vat: number | null
+  currency: string | null
+  client_name: string | null
+  has_original: boolean
+}
+
+export interface InvoiceOriginalPdfMatch {
+  file: string
+  status: 'matched' | 'unmatched' | 'ambiguous'
+  reason: 'multiple_invoices' | 'duplicate_file' | null
+  invoice_id: number | null
+  candidate_ids: number[]
+  invoice: InvoiceOriginalPdfCandidate | null
+  candidates: InvoiceOriginalPdfCandidate[]
+}
+
 export interface Invoice {
   id: number
   varsymbol: string | null
@@ -312,6 +429,8 @@ export interface Invoice {
   note_above_items: string | null
   note_below_items: string | null
   revenue_category_id: number | null
+  /** Řada z číselníku: na konceptu volba, na vystaveném dokladu nová řada (null = dosavadní číslování). */
+  number_series_id?: number | null
   revenue_category_label?: string | null
   revenue_category_code?: string | null
   /** Klasifikace plnění pro DPHDP3/KH nastavená na hlavičce (položky mohou mít vlastní). */
@@ -320,10 +439,19 @@ export interface Invoice {
   // u dokladu s parent_invoice_id → rodič (proforma / původní faktura).
   final_invoice?: { id: number; varsymbol: string | null; status: InvoiceStatus } | null
   parent_invoice?: { id: number; varsymbol: string | null; status: InvoiceStatus; invoice_type: InvoiceType } | null
+  advance_tax_documents?: { id: number; varsymbol: string | null; status: InvoiceStatus }[]
+  can_unlink_tax_document_advance?: boolean
+  /** Konečná faktura: plnění a čerpání záloh odpočtovými řádky (i víc záloh). */
+  advance_drawdown?: InvoiceAdvanceDrawdownSummary | null
   // U daňového dokladu bez vazby: existují u odběratele nespárované zálohy k propojení?
   has_advance_candidates?: boolean
   // U nepropojené proformy: existují u odběratele nepropojené daňové doklady k propojení?
   has_final_candidates?: boolean
+  /** Ostatní pohledávka, jejíž zápis fakturu účtuje (faktura vlastní zápis nemá). */
+  other_item_id?: number | null
+  other_item_link?: InvoiceOtherItem | null
+  /** Jediná pohledávka se shodným VS i částkou, na kterou lze fakturu navázat. */
+  other_item_suggestion?: InvoiceOtherItem | null
   recurring_template_id: number | null
   advance_paid_amount: number
   discount_percent: number
@@ -365,7 +493,7 @@ export interface Invoice {
   booked_at?: string | null
   cancelled_at: string | null
   pdf_path: string | null
-  /** Zdrojové PDF z importu (iDoklad/Fakturoid) — oddělené od našeho rendered `pdf_path`. */
+  /** Originál PDF (z importu iDoklad/Fakturoid nebo ručně nahraný) — oddělený od našeho rendered `pdf_path`. */
   imported_pdf_path: string | null
   imported_pdf_original_name?: string | null
   imported_pdf_size_bytes?: number | string | null
@@ -383,7 +511,10 @@ export interface Invoice {
   client_reverse_charge?: boolean
   /** Odběratelem je systémový koncový zákazník (zjednodušený doklad bez odběratele, § 30). */
   client_is_walk_in?: boolean
+  /** Odběratel je drobný zákazník bez adresy (#310): jen zjednodušený doklad do limitu § 30. */
+  client_simplified_only?: boolean
   project_name?: string | null
+  project_billing_template_id?: number | null
   project_hourly_rate?: number | null
   project_payment_due_days?: number | null
   currency_symbol?: string
@@ -525,6 +656,8 @@ export interface InvoiceListItem {
   cancelled_at: string | null
   booked_at?: string | null
   client_company_name: string
+  client_ic?: string | null
+  client_dic?: string | null
   project_name: string | null
   project_requires_approval?: boolean
   has_work_report?: boolean
@@ -566,6 +699,8 @@ export interface MonthGroup {
 
 export interface InvoicePayload {
   invoice_type?: InvoiceType
+  /** Řada z číselníku (jen koncept); vynechané = beze změny, null = výchozí řada druhu. */
+  number_series_id?: number | null
   /** null jen u zjednodušeného dokladu (§ 30) — backend doplní koncového zákazníka. */
   client_id: number | null
   project_id?: number | null
@@ -615,14 +750,18 @@ export interface InvoicePayload {
   revenue_category?: string | null
   revenue_category_id?: number | null
   items: Array<{
+    id?: number | null
     description: string
     quantity: number
     unit: string
     duration_minutes?: number | null
     unit_price_without_vat: number
     list_unit_price?: number | null
+    manual_price?: boolean
     vat_rate_id: number
     order_index: number
+    linked_work_report_id?: number | null
+    work_report_billing_key?: string | null
     stock_item_id?: number | null
     warehouse_id?: number | null
     tracking_allocations?: InvoiceItemTrackingAllocation[]
@@ -680,6 +819,7 @@ export interface ListFilters {
   date_to?: string
   currency?: string
   unpaid_only?: boolean
+  cashflow_draft_unscheduled?: boolean
   overdue?: boolean
   /**
    * Neuhrazené K DATU X (YYYY-MM-DD) — na rozdíl od `unpaid_only` (dnešní status) jde
@@ -710,6 +850,13 @@ export interface ListFilters {
    * bez kategorie zůstávají, dokud se nevyloučí i sentinel `none`.
    */
   revenue_category_exclude?: string[]
+  /**
+   * Hodnoty dimenzí oddělené čárkou (max 10). Doklad vyhovuje, když hodnotu (nebo
+   * podřízenou) má na hlavičce, na položce nebo ve splitu; rozdělený doklad se ukáže celý.
+   */
+  dimension_value_id?: string
+  /** false = jen vybrané hodnoty bez podřízených (výchozí je včetně podřízených). */
+  dimension_descendants?: boolean
   q?: string
   page?: number
   per_page?: number
@@ -793,34 +940,10 @@ export interface OssBulkFailure {
   pdf_not_invalidated: number[]
 }
 
+
 export const invoicesApi = {
   listGrouped: (filters: ListFilters = {}) => {
-    const params: Record<string, string | number> = {}
-    if (filters.q) params.q = filters.q
-    if (filters.status) {
-      params['filter[status]'] = Array.isArray(filters.status) ? filters.status.join(',') : filters.status
-    }
-    if (filters.type) {
-      params['filter[type]'] = Array.isArray(filters.type) ? filters.type.join(',') : filters.type
-    }
-    if (filters.client_id)   params['filter[client_id]']   = filters.client_id
-    if (filters.project_id)  params['filter[project_id]']  = filters.project_id
-    if (filters.year)        params['filter[year]']        = filters.year
-    if (filters.month)       params['filter[month]']       = filters.month
-    if (filters.date_from)   params['filter[date_from]']   = filters.date_from
-    if (filters.date_to)     params['filter[date_to]']     = filters.date_to
-    if (filters.currency)    params['filter[currency]']    = filters.currency
-    if (filters.unpaid_only) params['filter[unpaid_only]'] = 1
-    if (filters.overdue)     params['filter[overdue]']     = 1
-    if (filters.unpaid_as_of) params['filter[unpaid_as_of]'] = filters.unpaid_as_of
-    if (filters.booked)      params['filter[booked]']      = filters.booked
-    if (filters.oss_review)  params['filter[oss_review]']  = filters.oss_review
-    if (filters.revenue_category_id?.length) {
-      params['filter[revenue_category_id]'] = filters.revenue_category_id.join(',')
-    }
-    if (filters.revenue_category_exclude?.length) {
-      params['filter[revenue_category_exclude]'] = filters.revenue_category_exclude.join(',')
-    }
+    const params = invoiceListFilterParams(filters)
     if (filters.page)        params.page                   = filters.page
     if (filters.per_page)    params.per_page               = filters.per_page
     if (filters.sort_key)    params.sort_key               = filters.sort_key
@@ -838,14 +961,15 @@ export const invoicesApi = {
 
   /**
    * Plochý seznam OTEVŘENÝCH (nezaplacených) vystavených faktur a proforem pro picker
-   * (např. kotva sloučené úhrady v bankovním párování). Vrací max `limit` položek
-   * seřazených dle splatnosti. Hledá fulltextem (varsymbol + jméno klienta).
+   * (např. rozpad souhrnné úhrady v bance). Vrací max `limit` položek.
+   * Hledá fulltextem (varsymbol + jméno klienta).
    */
-  searchOpen: (q: string, limit = 20): Promise<InvoiceListItem[]> =>
+  searchOpen: (q: string, limit = 20, currency?: string): Promise<InvoiceListItem[]> =>
     invoicesApi.listGrouped({
       q,
       status: ['issued', 'sent', 'reminded'],
       type: ['invoice', 'proforma'],
+      currency,
       unpaid_only: true,
       per_page: limit,
     }).then(r => r.data.flatMap(g => g.invoices)),
@@ -862,6 +986,13 @@ export const invoicesApi = {
       type: ['invoice', 'proforma'],
       per_page: limit,
     }).then(r => r.data.flatMap(g => g.invoices)),
+
+  /** Kniha vystavených faktur nad filtrem seznamu (bez stránkování). */
+  bookUrl: (filters: ListFilters, format: 'pdf' | 'xlsx') => {
+    const query = new URLSearchParams({ format })
+    for (const [key, value] of Object.entries(invoiceListFilterParams(filters))) query.set(key, String(value))
+    return `/api/invoices/book?${query.toString()}`
+  },
 
   exportSelectedPdf: (ids: number[], signPdf = false) =>
     api.get<Blob>('/invoices/export.pdf', {
@@ -888,6 +1019,8 @@ export const invoicesApi = {
     revenueCategoryId?: number,
     /** Zjednodušený daňový doklad, může mít vlastní řadu firmy. */
     simplified?: boolean,
+    /** Řada z číselníku vybraná v hlavičce (bez ní výchozí řada druhu). */
+    numberSeriesId?: number | null,
   ) =>
     api.get<{ varsymbol: string; has_template: boolean }>(
       `/invoices/preview-varsymbol`,
@@ -898,6 +1031,7 @@ export const invoicesApi = {
           ...(clientId ? { client_id: clientId } : {}),
           ...(revenueCategoryId ? { revenue_category_id: revenueCategoryId } : {}),
           ...(simplified ? { simplified: 1 } : {}),
+          ...(numberSeriesId ? { number_series_id: numberSeriesId } : {}),
         },
       },
     ).then(r => r.data),
@@ -960,9 +1094,10 @@ export const invoicesApi = {
       `/invoices/${id}/payments/${paymentId}`,
     ).then(r => r.data),
   // Daňový doklad k přijaté platbě (DUZP = datum platby) — DRAFT, idempotentní
-  createPaymentTaxDocument: (id: number, paymentId: number) =>
+  createPaymentTaxDocument: (id: number, paymentId: number, vatRateId?: number) =>
     api.post<{ tax_document_id: number; payments: InvoicePayment[] }>(
       `/invoices/${id}/payments/${paymentId}/tax-document`,
+      vatRateId ? { vat_rate_id: vatRateId } : undefined,
     ).then(r => r.data),
   // Koncept vyúčtovací faktury k záloze → daňový doklad k přijaté platbě (koncept se odstraní)
   convertToTaxDocument: (id: number) =>
@@ -992,13 +1127,34 @@ export const invoicesApi = {
     api.post<Invoice>(`/invoices/${id}/link-advance`, { advance_id: advanceId }).then(r => r.data),
   unlinkAdvance: (id: number) =>
     api.delete<Invoice>(`/invoices/${id}/link-advance`).then(r => r.data),
+  taxDocumentAdvanceCandidates: (id: number) =>
+    api.get<{ candidates: AdvanceCandidate[] }>(`/invoices/${id}/tax-document-advance-candidates`).then(r => r.data.candidates),
+  linkTaxDocumentAdvance: (id: number, advanceId: number) =>
+    api.post<TaxDocumentAdvanceLink>(`/invoices/${id}/tax-document-advance`, { advance_id: advanceId }).then(r => r.data),
+  unlinkTaxDocumentAdvance: (id: number) =>
+    api.delete<{ advance_id: number }>(`/invoices/${id}/tax-document-advance`).then(r => r.data),
+  // Faktura krytá ostatní pohledávkou (prodej zaúčtovaný už smlouvou)
+  otherItemCandidates: (id: number, q = '') =>
+    api.get<{ items: InvoiceOtherItemCandidate[] }>(`/invoices/${id}/other-item-candidates`, { params: q ? { q } : {} })
+      .then(r => r.data.items),
+  linkOtherItem: (id: number, otherItemId: number) =>
+    api.post<Invoice>(`/invoices/${id}/other-item-link`, { other_item_id: otherItemId }).then(r => r.data),
+  unlinkOtherItem: (id: number) =>
+    api.delete<Invoice>(`/invoices/${id}/other-item-link`).then(r => r.data),
+  openingBalance: (id: number) =>
+    api.get<{ opening_balance: OpeningBalanceState }>(`/invoices/${id}/opening-balance`).then(r => r.data.opening_balance),
+  markOpeningBalance: (id: number) =>
+    api.put<{ opening_balance: OpeningBalanceState }>(`/invoices/${id}/opening-balance`).then(r => r.data.opening_balance),
+  unmarkOpeningBalance: (id: number) =>
+    api.delete<{ opening_balance: OpeningBalanceState }>(`/invoices/${id}/opening-balance`).then(r => r.data.opening_balance),
   // Postupné čerpání zálohy (koncept faktury odečte část daňového dokladu k záloze)
   advanceDrawdownCandidates: (id: number) =>
     api.get<AdvanceDrawdownCandidate[]>(`/invoices/${id}/advance-drawdown`).then(r => r.data),
-  applyAdvanceDrawdown: (id: number, body: { proforma_id: number; amount: number }) =>
+  applyAdvanceDrawdown: (id: number, body: { proforma_id: number; amount?: number; percent?: number; basis?: AdvanceDrawdownBasis }) =>
     api.post<AdvanceDrawdownResult>(`/invoices/${id}/advance-drawdown`, body).then(r => r.data),
-  removeAdvanceDrawdown: (id: number) =>
-    api.delete<Invoice>(`/invoices/${id}/advance-drawdown`).then(r => r.data),
+  /** Bez `proformaId` odebere čerpání všech záloh. */
+  removeAdvanceDrawdown: (id: number, proformaId?: number) =>
+    api.delete<Invoice>(`/invoices/${id}/advance-drawdown`, proformaId ? { params: { proforma_id: proformaId } } : undefined).then(r => r.data),
   clone: (id: number, opts?: { increment_month_in_descriptions?: boolean; issue_date?: string }) =>
     api.post<{ draft_id: number }>(`/invoices/${id}/clone`, opts || {}).then(r => r.data),
   bulkReissue: (invoiceIds: number[], opts?: { increment_month_in_descriptions?: boolean; issue_date?: string }) =>
@@ -1029,6 +1185,15 @@ export const invoicesApi = {
     return `/api/invoices/${id}/pdf${qs ? '?' + qs : ''}`
   },
 
+  /** Samostatný ISDOC; přímý odkaz potřebuje firmu okna místo axios hlavičky. */
+  isdocUrl: (id: number) => {
+    const sid = requestSupplierId()
+    const params = new URLSearchParams()
+    if (sid && /^\d+$/.test(sid)) params.set('supplier_id', sid)
+    const qs = params.toString()
+    return `/api/invoices/${id}/isdoc${qs ? '?' + qs : ''}`
+  },
+
   importedPdfUrl: (id: number, inline: boolean = false) => {
     // Přímá navigace / iframe / <a href> neposílá X-Supplier-Id header (na rozdíl od
     // axios) — proto přidáváme supplier_id jako query param (middleware ho čte jako fallback).
@@ -1039,6 +1204,19 @@ export const invoicesApi = {
     const qs = params.toString()
     return `/api/invoices/${id}/imported-pdf${qs ? '?' + qs : ''}`
   },
+
+  /** Nahraje nebo nahradí originál PDF vydané faktury. */
+  uploadImportedPdf: (id: number, file: File) => {
+    const fd = new FormData()
+    fd.append('file', file, file.name)
+    return api.post<InvoiceOriginalPdfMeta>(`/invoices/${id}/imported-pdf`, fd,
+      { headers: { 'Content-Type': 'multipart/form-data' } }).then(r => r.data)
+  },
+  deleteImportedPdf: (id: number) =>
+    api.delete<{ ok: boolean }>(`/invoices/${id}/imported-pdf`).then(r => r.data),
+  /** Náhled hromadného nahrání: spáruje názvy souborů s fakturami firmy (nic neukládá). */
+  matchImportedPdfs: (files: string[]) =>
+    api.post<{ items: InvoiceOriginalPdfMatch[] }>('/invoices/imported-pdf/match', { files }).then(r => r.data.items),
 
   listPdfs: (id: number) =>
     api.get<{ items: Array<{
@@ -1224,7 +1402,24 @@ export interface WorkReportMaterial {
   order_index: number
 }
 
+export interface WorkReportDisplayOptions {
+  compact: boolean
+  date: boolean
+  hours: boolean
+  rate: boolean
+  amount: boolean
+}
+
 export interface WorkReport {
+  billing_preview?: WorkReportBillingPreview | null
+  billing_template_id?: number | null
+  billing_snapshot?: WorkReportBillingSnapshot | null
+  billing_period?: string | null
+  billing_stale?: boolean
+  /** Důvod, proč uložené ujednání nejde vyhodnotit; rekapitulace pak chybí. */
+  billing_error?: string | null
+  display_options?: Partial<WorkReportDisplayOptions> | null
+  effective_display_options?: WorkReportDisplayOptions
   id: number
   invoice_id: number
   project_id: number | null
@@ -1241,6 +1436,11 @@ export interface WorkReport {
 }
 
 export interface WorkReportPayload {
+  billing_template_id?: number | null
+  billing_snapshot?: WorkReportBillingSnapshot | null
+  billing_period?: string | null
+  billing_stale?: boolean
+  display_options?: Partial<WorkReportDisplayOptions> | null
   project_id: number | null
   title: string
   vat_rate_id?: number | null

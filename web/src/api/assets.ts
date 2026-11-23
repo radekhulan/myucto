@@ -265,6 +265,8 @@ export interface BookYearResult {
   total_accounting: number
   total_tax: number
   errors: { asset_id: number; code: string }[]
+  /** Rok uzavřel původní program (převzatá uzávěrka): účetní odpisy se neúčtovaly. */
+  accounting_skipped?: 'closing_taken_over'
 }
 
 export interface DisposePayload {

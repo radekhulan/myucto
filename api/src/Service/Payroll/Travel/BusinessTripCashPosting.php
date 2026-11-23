@@ -5,8 +5,10 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Payroll\Travel;
 
 use MyInvoice\Repository\AccountingModeRepository;
+use MyInvoice\Repository\DimensionRepository;
 use MyInvoice\Repository\JournalEntryRepository;
 use MyInvoice\Repository\Payroll\PayrollEmployerSettingsRepository;
+use MyInvoice\Repository\Payroll\PayrollEmploymentDimensionRepository;
 use MyInvoice\Repository\Payroll\PayrollTimeValue;
 use MyInvoice\Service\Accounting\PostingException;
 use MyInvoice\Service\Accounting\PostingService;
@@ -26,23 +28,33 @@ use MyInvoice\Service\Payroll\PayrollAccountingDefaults;
  * Účty jsou firemní předkontace mezd (`travel_expense_debit`,
  * `employee_receivable_debit`), tytéž, které použije vypořádání mzdou.
  *
+ * Náklad nese dimenze firmy, na které ukazují mzdové dimenze pracovního vztahu
+ * (stejně jako mzdový předpis), zbytek doplní pravidla dimenzí podle účtu.
+ *
  * Zápis nesmí shodit promítnutí: zamčené nebo uzavřené období se vrátí jako
- * `skipped` s důvodem a opakované promítnutí zápis dožene.
+ * `skipped` s důvodem a opakované promítnutí zápis dožene. Jiná chyba zaúčtování
+ * (např. chybějící povinná dimenze) se vrátí jako `error` s hláškou, aby náhrada
+ * nezůstala nezaúčtovaná potichu.
  */
 final class BusinessTripCashPosting
 {
     public const SOURCE_TYPE = 'payroll_travel';
+
+    /** Důvody, kdy zápis počká na opakované promítnutí (období zamčené, uzavřené, chybí). */
+    private const SKIP_CODES = ['period_not_open', 'date_locked', 'no_accounting_period'];
 
     public function __construct(
         private readonly PostingService $posting,
         private readonly AccountingModeRepository $accountingModes,
         private readonly JournalEntryRepository $journal,
         private readonly PayrollEmployerSettingsRepository $settings,
+        private readonly PayrollEmploymentDimensionRepository $employmentDimensions,
+        private readonly DimensionRepository $dimensions,
     ) {}
 
     /**
      * @param array<string,mixed> $trip
-     * @return array{status:string,journal_entry_id:?int,reason:?string}
+     * @return array{status:string,journal_entry_id:?int,reason:?string,message:?string}
      */
     public function post(
         int $supplierId,
@@ -77,7 +89,8 @@ final class BusinessTripCashPosting
                 self::SOURCE_TYPE,
                 $tripId,
                 [
-                    ['account_code' => $debit, 'side' => 'debit', 'amount' => $amount],
+                    ['account_code' => $debit, 'side' => 'debit', 'amount' => $amount]
+                        + $this->expenseDimensions($supplierId, $trip, $entryDate),
                     ['account_code' => $credit, 'side' => 'credit', 'amount' => $amount],
                 ],
                 [
@@ -90,7 +103,10 @@ final class BusinessTripCashPosting
                 ],
             );
         } catch (PostingException $exception) {
-            return self::outcome('skipped', null, $exception->errorCode);
+            if (in_array($exception->errorCode, self::SKIP_CODES, true)) {
+                return self::outcome('skipped', null, $exception->errorCode);
+            }
+            return self::outcome('error', null, $exception->errorCode, $exception->getMessage());
         }
 
         return self::outcome('posted', $entryId);
@@ -111,6 +127,36 @@ final class BusinessTripCashPosting
             : date('Y-m-d');
     }
 
+    /**
+     * Dimenze nákladového řádku z mzdových dimenzí vztahu platných v den vyúčtování:
+     * jediná hodnota typu jako hodnota, více podílů jako rozpad.
+     *
+     * @param array<string,mixed> $trip
+     * @return array<string,mixed>
+     */
+    private function expenseDimensions(int $supplierId, array $trip, string $entryDate): array
+    {
+        $employmentId = (int) ($trip['employment_id'] ?? 0);
+        if ($employmentId <= 0 || !$this->dimensions->enabled($supplierId)) {
+            return [];
+        }
+        $ref = 'payroll_employment:' . $employmentId;
+        $line = [];
+        foreach ($this->employmentDimensions->companyDimensionsOn($supplierId, $employmentId, $entryDate) as $typeId => $shares) {
+            if (count($shares) === 1) {
+                $line['dimensions'][$typeId] = (int) array_key_first($shares);
+                $line['dimension_origins'][$typeId] = ['origin' => 'module', 'ref' => $ref];
+                continue;
+            }
+            $line['dimension_splits'][$typeId] = $shares;
+            foreach (array_keys($shares) as $valueId) {
+                $line['dimension_split_origins'][$typeId][$valueId] = ['origin' => 'module', 'ref' => $ref];
+            }
+        }
+
+        return $line;
+    }
+
     /** @param array<string,mixed> $accounts */
     private static function account(array $accounts, string $key): string
     {
@@ -122,16 +168,18 @@ final class BusinessTripCashPosting
         return $code;
     }
 
-    /** @return array{status:string,journal_entry_id:?int,reason:?string} */
+    /** @return array{status:string,journal_entry_id:?int,reason:?string,message:?string} */
     private static function outcome(
         string $status,
         ?int $journalEntryId = null,
         ?string $reason = null,
+        ?string $message = null,
     ): array {
         return [
             'status' => $status,
             'journal_entry_id' => $journalEntryId,
             'reason' => $reason,
+            'message' => $message,
         ];
     }
 }

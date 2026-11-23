@@ -78,7 +78,14 @@ final class AdvancePaymentRelink
         return ['candidates' => count($rows), 'fixed' => $fixed, 'rows' => $rows];
     }
 
-    /** @return list<array<string,mixed>> */
+    /**
+     * Jen vazba hlavičkou: oprava historických dat z doby před AdvanceFinalMatchGuard.
+     * Faktura s víc zálohami (PurchaseAdvanceLinks) vznikla až s ním, platbu zálohy na ni
+     * guard nepustí, takže tu kandidátem být nemůže a přesun platby by nešel jednoznačně
+     * přiřadit jedné záloze.
+     *
+     * @return list<array<string,mixed>>
+     */
     private function candidates(?int $supplierId): array
     {
         $sql = "SELECT f.supplier_id, f.id AS final_id, a.id AS advance_id,

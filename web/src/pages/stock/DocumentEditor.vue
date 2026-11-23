@@ -9,15 +9,16 @@ import {
 } from '@/api/stock'
 import { useAuthStore } from '@/stores/auth'
 import { useToast } from '@/composables/useToast'
-import { formatMoney } from '@/composables/useFormat'
+import { formatMoney, formatUnitPrice, statusBadgeClass, statusLabel } from '@/composables/useFormat'
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
-import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
+import { ICONS, btnFilled, btnOutline, btnOutlineSm } from '@/components/ui/buttonStyles'
 import { appIsoDate } from '@/utils/date'
 import DateInput from '@/components/ui/DateInput.vue'
 import { codebooksApi, type Unit } from '@/api/codebooks'
 import { useUnitDecimals } from '@/composables/useUnitDecimals'
 import InsufficientStockDialog from '@/components/stock/InsufficientStockDialog.vue'
+import ReceiptInvoiceModal from '@/components/stock/ReceiptInvoiceModal.vue'
 import { insufficientStockItems, type InsufficientStockItem } from '@/components/stock/insufficientStock'
 
 const { t } = useI18n()
@@ -51,6 +52,8 @@ interface LineRow {
   // H2: vazba na PF řádek (načtená příjemka) — MUSÍ se přenášet zpět, jinak update
   // vynuluje remaining-qty / over-receipt / „Přijato X/Y" / PF-changed warning.
   purchase_invoice_item_id: number | null
+  remember_seller_code: boolean
+  fill_intrastat: boolean
   source_description: string | null
   source_qty: string | null
   tracking_mode: StockTrackingMode
@@ -60,7 +63,7 @@ interface LineRow {
 function blankLine(): LineRow {
   return {
     stock_item_id: null, qty: '1', unit_cost: '', extra_cost: '', note: '', unit: '', option: null,
-    purchase_invoice_item_id: null, source_description: null, source_qty: null,
+    purchase_invoice_item_id: null, remember_seller_code: false, fill_intrastat: false, source_description: null, source_qty: null,
     tracking_mode: 'none', tracking_allocations: [], tracking_units: [],
   }
 }
@@ -77,8 +80,12 @@ const lines = ref<LineRow[]>([blankLine()])
 const locations = ref<WarehouseLocation[]>([])
 
 // L3: částky drž jako string (DECIMAL konvence) — přepočet do haléřů až v alokátoru.
-interface LandedCostRow { description: string; amount: string; allocation: LandedCostAllocation }
+interface LandedCostRow { description: string; amount: string | number; allocation: LandedCostAllocation; purchase_invoice_id?: number; purchase_invoice_item_id?: number }
+const maxLandedCostAmount = 999_999_999_999.99
 const landedCosts = ref<LandedCostRow[]>([])
+// Příjemka s uloženými náklady (z přijaté faktury nebo objednávky): server rozpouští jen je
+// a extra_cost z řádků nebere, proto se přidaný náklad posílá do jejich seznamu.
+const hasStoredLandedCosts = computed(() => (doc.value?.landed_costs?.length ?? 0) > 0)
 
 /**
  * Klientský port PHP `LandedCostAllocator` (deterministický, shodný výsledek):
@@ -121,6 +128,7 @@ const rowOptions = reactive<Record<number, { value: number; label: string; secon
 const rowLoading = reactive<Record<number, boolean>>({})
 const itemsCache = new Map<number, StockItemSearchResult>()
 
+const invoiceOpen = ref(false)
 const isPosted = computed(() => doc.value?.status === 'posted')
 const isReversed = computed(() => doc.value?.status === 'reversed')
 /** Převzatý doklad (import historie skladu): storno backend odmítne, opravuje se vrácením importu. */
@@ -143,7 +151,7 @@ async function onSearch(rowIndex: number, q: string) {
     rowOptions[rowIndex] = res.map(r => ({
       value: r.id,
       label: `${r.sku} - ${r.name}`,
-      secondary: r.sale_price_without_vat != null ? `${r.unit} · ${formatMoney(Number(r.sale_price_without_vat))}` : r.unit,
+      secondary: r.sale_price_without_vat != null ? `${r.unit} · ${formatUnitPrice(Number(r.sale_price_without_vat))}` : r.unit,
     }))
   } catch { rowOptions[rowIndex] = [] } finally { rowLoading[rowIndex] = false }
 }
@@ -195,6 +203,16 @@ function rowAvailability(row: LineRow): string | null {
   return availabilityMap.value[String(row.stock_item_id)] ?? '0'
 }
 
+function landedCostRows(d: StockDocument): LandedCostRow[] {
+  return (d.landed_costs ?? []).map(c => ({
+    description: c.description,
+    amount: c.amount,
+    allocation: c.allocation,
+    purchase_invoice_id: c.purchase_invoice_id ?? undefined,
+    purchase_invoice_item_id: c.purchase_invoice_item_id ?? undefined,
+  }))
+}
+
 async function loadDocument() {
   if (!docId.value) return
   loading.value = true
@@ -217,6 +235,8 @@ async function loadDocument() {
         unit: l.unit ?? '',
         option: l.sku ? { value: l.stock_item_id, label: `${l.sku} - ${l.name}`, secondary: l.unit } : null,
         purchase_invoice_item_id: l.purchase_invoice_item_id ?? null,
+        remember_seller_code: l.remember_seller_code === true,
+        fill_intrastat: l.fill_intrastat === true,
         source_description: l.source_description ?? null,
         source_qty: l.source_qty != null ? String(l.source_qty) : null,
         tracking_mode: l.tracking_mode ?? 'none',
@@ -227,6 +247,7 @@ async function loadDocument() {
     })
     await Promise.all(lines.value.filter(row => row.stock_item_id !== null).map(row => loadTrackingUnits(row, row.stock_item_id as number)))
     if (lines.value.length === 0) lines.value = [blankLine()]
+    landedCosts.value = landedCostRows(d)
     await refreshAvailability()
   } catch (e: any) {
     error.value = e?.response?.data?.error?.message || t('common.error')
@@ -250,21 +271,18 @@ function mapError(e: any): string {
   return e?.response?.data?.error?.message || t('common.error')
 }
 
-function buildPayload(): StockDocumentPayload {
-  const rows = lines.value.filter(l => l.stock_item_id != null && Number(l.qty) > 0)
-
-  // H1: backend /stock/documents čte jen per-řádkový `extra_cost`, NE pole `landed_costs`.
+function buildPayload(rows: LineRow[]): StockDocumentPayload {
+  // H1: bez uložených nákladů backend /stock/documents čte jen per-řádkový `extra_cost`.
   // Vedlejší náklady proto rozpustíme klientsky do extra_cost (deterministicky, shodně s PHP).
+  // Příjemka s uloženými náklady je posílá seznamem `landed_costs` a rozpustí je server.
   let allocated: number[] = new Array<number>(rows.length).fill(0)
-  if (isReceipt.value && landedCosts.value.length > 0) {
+  if (isReceipt.value && landedCosts.value.length > 0 && !hasStoredLandedCosts.value) {
     const baseLines = rows.map(l => ({
       value: Math.round(Number(l.qty) * Number(l.unit_cost || 0) * 100),
       qty: Math.round(Number(l.qty) * 1000),
     }))
-    const costs = landedCosts.value
-      .filter(c => Number(c.amount) > 0)
-      .map(c => ({ amount: Math.round(Number(c.amount) * 100), allocation: c.allocation }))
-    if (costs.length > 0) allocated = allocateLandedCosts(baseLines, costs)
+    const costs = landedCosts.value.map(c => ({ amount: Math.round(Number(c.amount) * 100), allocation: c.allocation }))
+    allocated = allocateLandedCosts(baseLines, costs)
   }
 
   return {
@@ -279,6 +297,9 @@ function buildPayload(): StockDocumentPayload {
     invoice_id: doc.value?.invoice_id ?? undefined,
     purchase_invoice_id: doc.value?.purchase_invoice_id ?? undefined,
     stock_take_id: doc.value?.stock_take_id ?? undefined,
+    landed_costs: isReceipt.value && hasStoredLandedCosts.value
+      ? landedCosts.value.map(c => ({ ...c, amount: Number(c.amount) }))
+      : undefined,
     lines: rows.map((l, i) => {
       const manualExtraH = isReceipt.value && l.extra_cost ? Math.round(Number(l.extra_cost) * 100) : 0
       const totalExtraH = manualExtraH + (allocated[i] ?? 0)
@@ -289,6 +310,8 @@ function buildPayload(): StockDocumentPayload {
         extra_cost: isReceipt.value && totalExtraH > 0 ? (totalExtraH / 100).toFixed(2) : undefined,
         // H2: per-řádek vazba na PF řádek — backend validateBody je čte, replaceLines uloží.
         purchase_invoice_item_id: l.purchase_invoice_item_id ?? undefined,
+        remember_seller_code: l.remember_seller_code || undefined,
+        fill_intrastat: l.fill_intrastat || undefined,
         source_description: l.source_description ?? undefined,
         source_qty: l.source_qty ?? undefined,
         note: l.note.trim() || undefined,
@@ -315,20 +338,44 @@ function validate(): boolean {
   if (lines.value.some(l => l.stock_item_id != null && quantityTooPrecise(l.qty, l.unit))) {
     error.value = t('stock.error.quantity_decimals'); return false
   }
+  if (isReceipt.value) {
+    for (const [index, cost] of landedCosts.value.entries()) {
+      const amount = Number(cost.amount)
+      if (!(amount >= 0.01 && amount <= maxLandedCostAmount)) {
+        error.value = t('stock.documents.landed_cost_invalid_amount', { row: index + 1 })
+        return false
+      }
+      if ([...cost.description].length > 255) {
+        error.value = t('stock.documents.landed_cost_invalid_description', { row: index + 1 })
+        return false
+      }
+    }
+  }
   return true
+}
+
+async function saveDocument(): Promise<number> {
+  const rows = lines.value.filter(l => l.stock_item_id != null && Number(l.qty) > 0)
+  const payload = buildPayload(rows)
+  const id = docId.value
+  const saved = id ? await stockApi.updateDocument(id, payload) : await stockApi.createDocument(payload)
+  doc.value = saved
+  if (saved.doc_type === 'receipt') {
+    landedCosts.value = landedCostRows(saved)
+    saved.lines?.forEach((line, index) => {
+      const row = rows[index]
+      if (row) row.extra_cost = line.extra_cost == null ? '' : String(line.extra_cost)
+    })
+  }
+  if (!id) router.replace(`/stock/documents/${saved.id}`)
+  return saved.id
 }
 
 async function saveDraft() {
   if (!validate()) return
   saving.value = true
   try {
-    const payload = buildPayload()
-    if (isEdit.value && docId.value) {
-      doc.value = await stockApi.updateDocument(docId.value, payload)
-    } else {
-      doc.value = await stockApi.createDocument(payload)
-      router.replace(`/stock/documents/${doc.value.id}`)
-    }
+    await saveDocument()
     toast.success(t('common.saved'))
     await loadDocument()
   } catch (e: any) {
@@ -342,16 +389,8 @@ async function post() {
   if (!validate()) return
   posting.value = true
   try {
-    let id = docId.value
-    const payload = buildPayload()
-    if (id) {
-      doc.value = await stockApi.updateDocument(id, payload)
-    } else {
-      doc.value = await stockApi.createDocument(payload)
-      id = doc.value.id
-      router.replace(`/stock/documents/${id}`)
-    }
-    doc.value = await stockApi.postDocument(id!)
+    const id = await saveDocument()
+    doc.value = await stockApi.postDocument(id)
     toast.success(t('common.saved'))
     if (doc.value.warnings?.length) {
       for (const w of doc.value.warnings) toast.warning(w)
@@ -406,6 +445,11 @@ const actions = computed<ActionItem[]>(() => [
   {
     key: 'print', label: t('stock.documents.print_pdf'), icon: 'download', tier: 'secondary', variant: 'neutral',
     show: !!docId.value, run: () => window.open(stockApi.documentPdfUrl(docId.value!), '_blank', 'noopener'),
+  },
+  {
+    // Jen zaúčtovaná: API koncept příjemky odmítne.
+    key: 'invoice', label: t('stock.receipt_invoice.action'), icon: 'doc', tier: 'secondary', variant: 'neutral',
+    show: auth.canWrite('stock.documents.write') && auth.canWrite('invoices.create') && isPosted.value && isReceipt.value, run: () => { invoiceOpen.value = true },
   },
   {
     key: 'reverse', label: t('stock.documents.cancel'), icon: 'uturn', tier: 'overflow', variant: 'danger',
@@ -549,6 +593,20 @@ onMounted(async () => {
               <p v-if="!isReceipt && row.stock_item_id" class="text-xs mt-0.5 text-neutral-400">
                 {{ t('stock.documents.col_available') }}: {{ rowAvailability(row) }}
               </p>
+              <div v-if="row.remember_seller_code && !readOnly" class="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-neutral-500">
+                <span>{{ t('stock.receipt.remember_line_note') }}</span>
+                <button type="button" :class="btnOutlineSm('neutral')" @click="row.remember_seller_code = false">
+                  <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.x" /></svg>
+                  {{ t('stock.receipt.remember_line_cancel') }}
+                </button>
+              </div>
+              <div v-if="row.fill_intrastat && !readOnly" class="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-neutral-500">
+                <span>{{ t('stock.receipt.intrastat_line_note') }}</span>
+                <button type="button" :class="btnOutlineSm('neutral')" @click="row.fill_intrastat = false">
+                  <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.x" /></svg>
+                  {{ t('stock.receipt.intrastat_line_cancel') }}
+                </button>
+              </div>
             </div>
             <div class="sm:col-span-2">
               <label class="block text-xs font-medium text-neutral-500 mb-1 sm:hidden">{{ t('stock.documents.col_qty') }}</label>
@@ -566,8 +624,8 @@ onMounted(async () => {
               <!-- Rozpuštěné vedlejší náklady jsou na řádku už uložené, ale sekce
                    níž se při načtení dokladu neplní. Bez tohohle řádku uživatel
                    nevidí, že tam nějaká částka je, a další náklad přičte navrch. -->
-              <p v-if="isReceipt && Number(row.extra_cost) > 0" class="text-xs mt-0.5 text-right text-neutral-500 font-mono">
-                {{ t('stock.documents.extra_cost_allocated') }}: {{ row.extra_cost }}
+              <p v-if="isReceipt && Number(row.extra_cost) > 0" class="text-xs mt-0.5 text-right text-neutral-500">
+                {{ t('stock.documents.extra_cost_allocated') }}: <span class="whitespace-nowrap">{{ formatMoney(row.extra_cost) }}</span>
               </p>
             </div>
             <div class="sm:col-span-3">
@@ -593,7 +651,7 @@ onMounted(async () => {
               <div v-for="(allocation, ai) in row.tracking_allocations" :key="ai" class="grid grid-cols-1 sm:grid-cols-7 gap-2 mb-2">
                 <input v-if="row.tracking_mode === 'serial'" v-model="allocation.serial_number" :disabled="readOnly" :placeholder="t('stock.tracking.serial_number')" class="h-9 px-2 border border-neutral-300 rounded-md text-sm font-mono" />
                 <input v-else v-model="allocation.lot_code" :disabled="readOnly" :placeholder="t('stock.tracking.lot_code')" class="h-9 px-2 border border-neutral-300 rounded-md text-sm font-mono" />
-                <input v-if="row.tracking_mode === 'lot'" v-model="allocation.expires_on" type="date" :disabled="readOnly" class="h-9 px-2 border border-neutral-300 rounded-md text-sm" />
+                <DateInput v-if="row.tracking_mode === 'lot'" v-model="allocation.expires_on" :disabled="readOnly" class="h-9 px-2 border border-neutral-300 rounded-md text-sm" />
                 <input v-model="allocation.quantity" type="number" step="0.001" min="0.001" :disabled="readOnly || row.tracking_mode === 'serial'" class="h-9 px-2 border border-neutral-300 rounded-md text-sm text-right font-mono" />
                 <select v-model="allocation.unit_code" :disabled="readOnly || row.tracking_mode === 'serial'" class="h-9 px-2 border border-neutral-300 rounded-md bg-surface text-sm">
                   <option value="">{{ t('stock.tracking.base_unit', { unit: row.option?.secondary ?? '' }) }}</option>
@@ -628,8 +686,8 @@ onMounted(async () => {
         </div>
         <div v-if="landedCosts.length" class="divide-y divide-neutral-100">
           <div v-for="(c, i) in landedCosts" :key="i" class="p-3 grid grid-cols-1 sm:grid-cols-12 gap-2 items-center">
-            <input v-model="c.description" type="text" :placeholder="t('stock.documents.field_description')" class="sm:col-span-5 h-9 px-2 border border-neutral-300 rounded-md text-sm" />
-            <input v-model="c.amount" type="number" step="0.01" min="0" class="sm:col-span-3 h-9 px-2 border border-neutral-300 rounded-md text-right font-mono text-sm" />
+            <input v-model="c.description" type="text" :placeholder="t('stock.documents.field_description')" :aria-label="t('stock.documents.field_description')" class="sm:col-span-5 h-9 px-2 border border-neutral-300 rounded-md text-sm" />
+            <input v-model="c.amount" type="number" step="0.01" min="0.01" :max="maxLandedCostAmount" :aria-label="t('stock.documents.landed_cost_amount')" class="sm:col-span-3 h-9 px-2 border border-neutral-300 rounded-md text-right font-mono text-sm" />
             <select v-model="c.allocation" class="sm:col-span-3 h-9 px-2 border border-neutral-300 rounded-md bg-surface text-sm">
               <option value="by_value">{{ t('stock.documents.allocation_by_value') }}</option>
               <option value="by_qty">{{ t('stock.documents.allocation_by_qty') }}</option>
@@ -660,6 +718,26 @@ onMounted(async () => {
           </div>
         </div>
       </div>
+
+      <!-- Vydané faktury vzniklé z řádků příjemky -->
+      <div v-if="auth.canRead('invoices') && doc?.sales_invoices?.length" data-test="receipt-sales-invoices" class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-hidden mb-4">
+        <div class="px-5 py-3 border-b border-neutral-200">
+          <h3 class="text-sm font-semibold uppercase tracking-wide text-neutral-500">{{ t('stock.receipt_invoice.list_title') }}</h3>
+        </div>
+        <div class="divide-y divide-neutral-100">
+          <RouterLink v-for="i in doc.sales_invoices" :key="i.invoice_id" :to="`/invoices/${i.invoice_id}`"
+            class="flex flex-wrap items-center justify-between gap-2 px-5 py-2.5 text-sm hover:bg-neutral-50">
+            <span class="flex flex-wrap items-center gap-2">
+              <span class="font-mono text-xs text-neutral-500">{{ i.varsymbol || t('stock.receipt_invoice.draft') }}</span>
+              <span>{{ i.client_name }}</span>
+              <span class="text-xs text-neutral-500">{{ t('stock.receipt_invoice.lines', { lines: i.line_nos.join(', ') }) }}</span>
+            </span>
+            <span class="text-xs px-2 py-0.5 rounded" :class="statusBadgeClass(i.status ?? '')">{{ statusLabel(i.status ?? '') }}</span>
+          </RouterLink>
+        </div>
+      </div>
+
+      <ReceiptInvoiceModal v-if="invoiceOpen && doc" :document="doc" @close="invoiceOpen = false" />
 
       <div v-if="!readOnly" class="flex justify-end">
         <RouterLink to="/stock/documents" class="text-sm text-neutral-500 hover:text-neutral-700">{{ t('common.cancel') }}</RouterLink>

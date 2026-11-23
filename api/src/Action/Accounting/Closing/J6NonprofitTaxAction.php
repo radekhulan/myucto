@@ -464,7 +464,7 @@ final class J6NonprofitTaxAction
 
     private function handle(Request $request, Response $response, bool $write, callable $work, bool $sessionOnly = false): Response
     {
-        if (($write || $sessionOnly) && !RequestAuthorization::isSessionAuth($request)) return Json::error($response, 'nonprofit_tax_session_only', 'Koncept daňového posouzení vyžaduje přihlášenou relaci.', 403);
+        if (($write || $sessionOnly) && !RequestAuthorization::actsAsSession($request)) return Json::error($response, 'nonprofit_tax_session_only', 'Koncept daňového posouzení vyžaduje přihlášenou relaci.', 403);
         if (!($write ? $this->requireClose($request, $response, $error) : $this->requirePermission($request, $response, 'accounting', AccessLevel::READ, $error))) return $error;
         try {
             $result = $work($this->currentSupplierId($request));

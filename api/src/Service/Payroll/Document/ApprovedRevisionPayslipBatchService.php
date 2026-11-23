@@ -159,6 +159,7 @@ final class ApprovedRevisionPayslipBatchService
                     $revisionId,
                     $employeeId,
                     $prepared['source_hash'],
+                    $artifact->rendererVersion,
                 ),
                 $actorUserId,
                 null,
@@ -241,6 +242,7 @@ final class ApprovedRevisionPayslipBatchService
                         $revisionId,
                         $item['employee_id'],
                         $item['source_hash'],
+                        $item['artifact']->rendererVersion,
                     ),
                     $actorUserId,
                     null,
@@ -537,6 +539,7 @@ final class ApprovedRevisionPayslipBatchService
         int $revisionId,
         int $employeeId,
         string $sourceHash,
+        string $rendererVersion = PayslipPdfRenderer::VERSION,
     ): string {
         return 'approved-payslip:' . hash('sha256', implode("\0", [
             (string) $supplierId,
@@ -544,7 +547,7 @@ final class ApprovedRevisionPayslipBatchService
             (string) $revisionId,
             (string) $employeeId,
             $sourceHash,
-            PayslipPdfRenderer::VERSION,
+            $rendererVersion,
         ]));
     }
 

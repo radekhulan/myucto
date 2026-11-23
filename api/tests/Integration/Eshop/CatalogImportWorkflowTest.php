@@ -124,6 +124,105 @@ final class CatalogImportWorkflowTest extends StockTestCase
         self::assertSame(1, $repeat['report']['counts']['unchanged']);
     }
 
+    private function category(int $supplierId, string $code, ?int $parentId = null): int
+    {
+        $this->db->pdo()->prepare('INSERT INTO stock_categories (supplier_id, parent_id, code, name) VALUES (?, ?, ?, ?)')
+            ->execute([$supplierId, $parentId, $code, 'Skupina ' . $code]);
+        return (int) $this->db->pdo()->lastInsertId();
+    }
+
+    public function testCategoryCodeReplacesOnlySiblingCategoryAndKeepsOtherBranches(): void
+    {
+        $sid = $this->createSupplier();
+        $groups = $this->category($sid, 'skupiny');
+        $a = $this->category($sid, 'A', $groups);
+        $c = $this->category($sid, 'C', $groups);
+        $other = $this->category($sid, 'typ', $this->category($sid, 'typy'));
+        $id = $this->itemsRepo->insert($sid, ['sku' => 'DIL', 'name' => 'Fixture']);
+        $categories = $this->container->get(\MyInvoice\Repository\StockItemCategoryRepository::class);
+        $categories->add($sid, $id, $a, true, 0);
+        $categories->add($sid, $id, $other, false, 1);
+        $config = ['mode' => 'update', 'mapping' => ['sku' => 'sku', 'category_code' => 'skupina']];
+
+        $preview = $this->preview($sid, "sku;skupina\nDIL;C\n", $config);
+        self::assertSame(1, $preview['report']['counts']['ready']);
+        $this->container->get(CatalogImportService::class)->apply($sid, $preview['id'], $this->userId);
+        $applied = $this->container->get(CatalogImportWorker::class)->tickKind($sid, CatalogImportService::APPLY_KIND);
+        self::assertSame(1, $applied['report']['counts']['applied']);
+
+        $rows = [];
+        foreach ($categories->listForItem($sid, $id) as $row) {
+            $rows[$row['category_id']] = $row['is_primary'];
+        }
+        self::assertSame([$c => true, $other => false], $rows);
+
+        $repeat = $this->preview($sid, "sku;skupina\nDIL;C\n", $config);
+        self::assertSame(1, $repeat['report']['counts']['unchanged']);
+    }
+
+    public function testCategoryRenameBetweenPreviewAndApplyIsNotConflict(): void
+    {
+        $sid = $this->createSupplier();
+        $groups = $this->category($sid, 'skupiny');
+        $a = $this->category($sid, 'A', $groups);
+        $c = $this->category($sid, 'C', $groups);
+        $id = $this->itemsRepo->insert($sid, ['sku' => 'DIL', 'name' => 'Fixture']);
+        $this->container->get(\MyInvoice\Repository\StockItemCategoryRepository::class)->add($sid, $id, $a, true, 0);
+
+        $preview = $this->preview($sid, "sku;skupina\nDIL;C\n", ['mode' => 'update', 'mapping' => ['sku' => 'sku', 'category_code' => 'skupina']]);
+        $this->db->pdo()->prepare('UPDATE stock_categories SET name = ? WHERE id = ?')->execute(['C - přejmenovaná', $c]);
+        $this->container->get(CatalogImportService::class)->apply($sid, $preview['id'], $this->userId);
+        $applied = $this->container->get(CatalogImportWorker::class)->tickKind($sid, CatalogImportService::APPLY_KIND);
+
+        self::assertSame(1, $applied['report']['counts']['applied']);
+        self::assertSame(0, $applied['report']['counts']['failed']);
+    }
+
+    public function testCategoryCodeChangesDealerPriceThroughCategoryRule(): void
+    {
+        $sid = $this->createSupplier();
+        $groups = $this->category($sid, 'skupiny');
+        $a = $this->category($sid, 'A', $groups);
+        $c = $this->category($sid, 'C', $groups);
+        $id = $this->itemsRepo->insert($sid, ['sku' => 'DIL', 'name' => 'Fixture']);
+        $this->container->get(\MyInvoice\Service\Eshop\Pricing\PriceWriteService::class)->save($sid, $id, [
+            ['currency_code' => 'CZK', 'price_mode' => 'fixed', 'fixed_price' => '1000.00'],
+        ]);
+        $this->container->get(\MyInvoice\Repository\StockItemCategoryRepository::class)->add($sid, $id, $a, true, 0);
+        $levels = $this->container->get(\MyInvoice\Repository\StockPriceLevelRepository::class);
+        $level = $levels->insert($sid, ['code' => 'DEALER', 'name' => 'Dealer', 'default_discount_pct' => '0.00', 'is_active' => true, 'display_order' => 0]);
+        foreach ([[$a, '25.00'], [$c, '40.00']] as [$category, $discount]) {
+            $levels->insertRule($sid, $level, ['match_type' => 'category', 'match_id' => $category, 'rule_type' => 'discount_pct',
+                'discount_pct' => $discount, 'fixed_price' => null, 'currency_code' => null, 'priority' => 0]);
+        }
+        $client = $this->client($sid, 'Dealer');
+        $this->db->pdo()->prepare('UPDATE clients SET price_level_id = ? WHERE id = ?')->execute([$level, $client]);
+        $resolver = $this->container->get(\MyInvoice\Service\Eshop\Pricing\EffectivePriceResolver::class);
+        $price = static fn (): string => (string) $resolver->resolve($sid, $id, 'CZK', '1', '2026-11-09', $client)['unit_price'];
+        self::assertSame(750.0, (float) $price());
+
+        $preview = $this->preview($sid, "sku;skupina\nDIL;C\n", ['mode' => 'update', 'mapping' => ['sku' => 'sku', 'category_code' => 'skupina']]);
+        $this->container->get(CatalogImportService::class)->apply($sid, $preview['id'], $this->userId);
+        $this->container->get(CatalogImportWorker::class)->tickKind($sid, CatalogImportService::APPLY_KIND);
+
+        self::assertSame(600.0, (float) $price());
+    }
+
+    public function testCategoryCodeRejectsUnknownAndRootCategory(): void
+    {
+        $sid = $this->createSupplier();
+        $this->category($sid, 'koren');
+        $this->itemsRepo->insert($sid, ['sku' => 'DIL', 'name' => 'Fixture']);
+        $config = ['mode' => 'update', 'mapping' => ['sku' => 'sku', 'category_code' => 'skupina']];
+
+        foreach (['NEEXISTUJE', 'koren'] as $code) {
+            $preview = $this->preview($sid, "sku;skupina\nDIL;{$code}\n", $config);
+            self::assertSame(1, $preview['report']['counts']['failed'], $code);
+            $items = $this->container->get(CatalogJobItemRepository::class)->page($sid, $preview['id'])['items'];
+            self::assertSame('import_category_invalid', $items[0]['error_code'], $code);
+        }
+    }
+
     public function testOneHundredAndOneRowsResumeWithoutDuplicateItems(): void
     {
         $sid = $this->createSupplier();
@@ -151,6 +250,26 @@ final class CatalogImportWorkflowTest extends StockTestCase
         $stmt = $this->db->pdo()->prepare('SELECT COUNT(*) FROM stock_items WHERE supplier_id = ?');
         $stmt->execute([$sid]);
         self::assertSame(101, (int) $stmt->fetchColumn());
+    }
+
+    public function testUpdateModeReportsUnknownSkuAsSkippedAndApplyIgnoresIt(): void
+    {
+        $sid = $this->createSupplier();
+        $id = $this->itemsRepo->insert($sid, ['sku' => '00001', 'name' => 'Known']);
+        $config = ['mode' => 'update', 'mapping' => ['sku' => 'sku', 'min_qty' => 'min']];
+        $preview = $this->preview($sid, "sku;min\n00001;5\n00002;7\n", $config);
+        self::assertSame(1, $preview['report']['counts']['ready']);
+        self::assertSame(1, $preview['report']['counts']['skipped']);
+        self::assertSame(0, $preview['report']['counts']['failed']);
+        $this->container->get(CatalogImportService::class)->apply($sid, $preview['id'], $this->userId);
+        $applied = $this->container->get(CatalogImportWorker::class)->tickKind($sid, CatalogImportService::APPLY_KIND);
+        self::assertSame(1, $applied['report']['counts']['applied']);
+        self::assertSame(0, $applied['report']['counts']['failed']);
+        self::assertNull($this->itemsRepo->findBySku($sid, '00002'));
+        self::assertSame('5.000', $this->itemsRepo->find($sid, $id)['min_qty']);
+        // Režim upsert beze změny: neznámá karta se založí.
+        $upsert = $this->preview($sid, "sku;name\n00002;New\n", ['mapping' => ['sku' => 'sku', 'name' => 'name']]);
+        self::assertSame(1, $upsert['report']['counts']['ready']);
     }
 
     public function testExternalIdentityDoesNotFallBackToMatchingSku(): void

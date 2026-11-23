@@ -155,7 +155,7 @@ final class BankIgnoreNoteTest extends TestCase
     #[DataProvider('unmatchCases')]
     public function testUnmatchClearsPersistedIgnoreNote(bool $closed): void
     {
-        $sqlite = new PDO('sqlite::memory:');
+        $sqlite = new \Pdo\Sqlite('sqlite::memory:');
         $sqlite->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
         $sqlite->exec('CREATE TABLE bank_transactions (id INTEGER, statement_id INTEGER, match_status TEXT, matched_invoice_id INTEGER, ignore_note TEXT, posted_at TEXT, matched_at TEXT, matched_by INTEGER, ignore_origin TEXT)');
         $sqlite->exec("INSERT INTO bank_transactions VALUES (1, 2, 'ignored', NULL, 'Test note', '2099-01-01', NULL, NULL, 'manual')");
@@ -167,6 +167,8 @@ final class BankIgnoreNoteTest extends TestCase
         $sqlite->exec('CREATE TABLE invoices (id INTEGER, status TEXT)');
         $sqlite->exec('CREATE TABLE payment_matches (bank_transaction_id INTEGER, supplier_id INTEGER, purchase_invoice_id INTEGER, invoice_id INTEGER)');
         $sqlite->exec('CREATE TABLE journal_entries (supplier_id INTEGER, source_type TEXT, source_id INTEGER, reversed_by INTEGER, posted_at TEXT)');
+        $sqlite->exec('CREATE TABLE other_item_allocations (supplier_id INTEGER, bank_transaction_id INTEGER, reversed_on TEXT)');
+        $sqlite->createFunction('CURDATE', static fn (): string => '2099-01-01', 0);
 
         // MariaDB ownership SQL is covered separately; all writes execute against SQLite.
         $scope = $this->createStub(\PDOStatement::class);

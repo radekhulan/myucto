@@ -16,6 +16,7 @@ import { ICONS, BTN_BASE, OUTLINE, btnFilled, btnOutline } from '@/components/ui
 import BulkActionBar from '@/components/ui/BulkActionBar.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import CapturePhotoButton from '@/components/upload/CapturePhotoButton.vue'
+import { useIsPhone } from '@/composables/useIsPhone'
 
 const route = useRoute()
 const router = useRouter()
@@ -86,6 +87,8 @@ const selCount = computed(() => selDocCount.value + selFolderCount.value)
 // Mobilní odkrytí akcí složky: bez hoveru jsou ikony přejmenovat/smazat skryté.
 // První ťuk je jen odkryje (canHover=false → pointer-events vypnuté), teprve další ťuk akci spustí.
 const canHover = ref(true)
+// Telefon: seznam dokumentů jako karty místo tabulky (výběr s plochou 44 px).
+const isPhone = useIsPhone()
 const revealedFolderId = ref<number | null>(null)
 function revealFolderActions(f: DocFolder) { revealedFolderId.value = f.id }
 
@@ -607,14 +610,14 @@ onMounted(() => {
           @click="toggleTrash"
         >
           <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.trash" /></svg>
-          {{ t('documents.trash') }}
+          <span class="max-sm:sr-only">{{ t('documents.trash') }}</span>
         </button>
         <template v-if="auth.canWrite('documents.upload') && !trashMode">
           <button type="button" :class="btnOutline('neutral')" @click="newFolder">
             <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.plus" /></svg>
-            {{ t('documents.new_folder') }}
+            <span class="max-sm:sr-only">{{ t('documents.new_folder') }}</span>
           </button>
-          <button type="button" :class="btnOutline('primary')" :title="t('documents.upload_folder_hint')" @click="folderInput?.click()">
+          <button type="button" :class="[btnOutline('primary'), 'max-sm:hidden']" :title="t('documents.upload_folder_hint')" @click="folderInput?.click()">
             <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.upload" /></svg>
             {{ t('documents.upload_folder') }}
           </button>
@@ -687,12 +690,12 @@ onMounted(() => {
     </div>
 
     <!-- ZIP mode -->
-    <div v-if="auth.canWrite('documents') && !trashMode" class="flex items-center gap-3 mb-3 text-xs text-neutral-500">
-      <span>{{ t('documents.zip_mode') }}:</span>
-      <label class="inline-flex items-center gap-1 cursor-pointer"><input type="radio" value="explode" v-model="zipMode" /> {{ t('documents.zip_explode') }}</label>
-      <label class="inline-flex items-center gap-1 cursor-pointer"><input type="radio" value="keep" v-model="zipMode" /> {{ t('documents.zip_keep') }}</label>
-      <span class="text-neutral-400" :title="phpMaxUpload ? t('documents.php_limit_note', { mb: Math.round(phpMaxUpload / 1024 / 1024) }) : ''">· {{ t('documents.limit_info', { mb: Math.round(maxFileBytes / 1024 / 1024) }) }}</span>
-      <span class="ml-auto inline-flex items-center gap-1 text-neutral-400">
+    <div v-if="auth.canWrite('documents') && !trashMode" class="flex flex-wrap items-center gap-x-3 gap-y-1 mb-3 text-xs text-neutral-500">
+      <span class="whitespace-nowrap">{{ t('documents.zip_mode') }}:</span>
+      <label class="inline-flex items-center gap-1 cursor-pointer whitespace-nowrap"><input type="radio" value="explode" v-model="zipMode" /> {{ t('documents.zip_explode') }}</label>
+      <label class="inline-flex items-center gap-1 cursor-pointer whitespace-nowrap"><input type="radio" value="keep" v-model="zipMode" /> {{ t('documents.zip_keep') }}</label>
+      <span class="text-neutral-400 max-md:hidden" :title="phpMaxUpload ? t('documents.php_limit_note', { mb: Math.round(phpMaxUpload / 1024 / 1024) }) : ''">· {{ t('documents.limit_info', { mb: Math.round(maxFileBytes / 1024 / 1024) }) }}</span>
+      <span class="ml-auto inline-flex items-center gap-1 text-neutral-400 max-md:hidden pointer-coarse:hidden">
         <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M7 16a4 4 0 0 1-.88-7.9A5 5 0 0 1 15.9 6.1 4.5 4.5 0 0 1 17 15M12 12v8m-3-3l3 3 3-3" /></svg>
         {{ t('documents.drop_here') }}
       </span>
@@ -843,7 +846,7 @@ onMounted(() => {
       <div v-if="loading" class="text-sm text-neutral-400 py-8 text-center">…</div>
       <div v-else>
         <!-- folders -->
-        <div v-if="folders.length" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2 mb-4">
+        <div v-if="folders.length" class="grid grid-cols-1 sm:grid-cols-3 md:grid-cols-4 gap-2 mb-4">
           <div
             v-for="f in folders"
             :key="f.id"
@@ -879,11 +882,11 @@ onMounted(() => {
           boxed
           icon="folderOpen"
           :title="t('documents.empty_folder')"
-          :message="auth.canWrite('documents') ? t('documents.drop_here') : undefined"
+          :message="auth.canWrite('documents') && canHover ? t('documents.drop_here') : undefined"
         />
 
         <!-- documents: grid -->
-        <div v-else-if="documents.length && view === 'grid'" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
+        <div v-else-if="documents.length && view === 'grid'" class="grid grid-cols-1 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
           <div
             v-for="d in sortedDocuments"
             :key="d.id"
@@ -903,7 +906,35 @@ onMounted(() => {
           </div>
         </div>
 
-        <!-- documents: list -->
+        <!-- documents: list (telefon = karty) -->
+        <div v-else-if="documents.length && isPhone" data-test="documents-phone-list">
+          <label class="flex items-center gap-2 min-h-11 px-1 text-xs text-neutral-500 cursor-pointer">
+            <span class="inline-flex items-center justify-center w-11 h-11 -my-1.5 -ml-1">
+              <input type="checkbox" class="w-5 h-5 cursor-pointer" :checked="selDocCount === documents.length && documents.length > 0"
+                @change="selDocCount === documents.length ? clearSel() : selectAll()" />
+            </span>
+            {{ t('documents.select_all') }}
+          </label>
+          <ul class="divide-y divide-neutral-100 border border-neutral-200 rounded-lg bg-surface overflow-hidden">
+            <li v-for="d in sortedDocuments" :key="d.id" data-test="documents-phone-card"
+              :class="['flex items-center gap-1 pr-3 cursor-pointer', selected.has(d.id) ? 'bg-primary-50' : 'active:bg-neutral-50']"
+              @click="openDoc(d)">
+              <label class="shrink-0 inline-flex items-center justify-center w-11 h-11 my-1 cursor-pointer" @click.stop>
+                <input type="checkbox" class="w-5 h-5 cursor-pointer" :checked="selected.has(d.id)" :aria-label="d.title" @change="toggleSel(d.id)" />
+              </label>
+              <div class="min-w-0 flex-1 py-2.5">
+                <RouterLink class="row-link block text-sm font-medium text-neutral-800 truncate"
+                  :to="{ name: 'document-detail', params: { id: d.id } }" @click.stop @auxclick.stop>{{ d.title }}</RouterLink>
+                <span v-if="d.ai_summary_short" class="block text-xs text-neutral-400 line-clamp-1">{{ d.ai_summary_short }}</span>
+                <span class="mt-1 flex items-center gap-2 text-xs text-neutral-500 tabular-nums">
+                  <span :class="['px-1.5 py-0.5 rounded text-[10px] font-semibold', docTypeBadge(d.doc_type).class]">{{ docTypeBadge(d.doc_type).label }}</span>
+                  <span>{{ formatBytes(d.size_bytes) }}</span>
+                  <span class="text-neutral-400">{{ uploadedDate(d.created_at) }}</span>
+                </span>
+              </div>
+            </li>
+          </ul>
+        </div>
         <table v-else-if="documents.length" class="w-full text-sm">
           <thead><tr class="text-left text-xs text-neutral-400 border-b border-neutral-200">
             <th class="py-2 w-8"><input type="checkbox" :checked="selDocCount === documents.length && documents.length > 0" @change="selDocCount === documents.length ? clearSel() : selectAll()" /></th>

@@ -41,6 +41,8 @@ final class SupplierAccessResolver
     /** @var array<int, array<int, ?int>> memo membership mapy per user */
     private array $assignmentsMemo = [];
 
+    private array $existenceMemo = [];
+
     /**
      * @param DefaultSupplierService|null $defaultSupplier výchozí firma uživatele pro
      *        požadavek bez výběru firmy; null = dřívější nejnižší id (unit testy)
@@ -57,6 +59,48 @@ final class SupplierAccessResolver
     private readonly EntityCache $cache;
 
     public function resolve(Request $request): SupplierAccess
+    {
+        return $this->resolveMembership($request);
+    }
+
+    /**
+     * Z firem, které volající už povolil podle členství, ponechá jen ty, kam požadavek
+     * pustí i jeho vazba (vlastní doména, token vázaný na firmu).
+     *
+     * Členství se tu znovu nerozhoduje: každý volající má vlastní, otestovaný výklad
+     * (globální správce, klient bez členství), a druhý výklad by ho tiše zúžil.
+     *
+     * @param list<int|string> $supplierIds
+     * @return list<int>
+     */
+    public function filterAllowedSupplierIds(Request $request, array $supplierIds): array
+    {
+        $supplierIds = array_values(array_unique(array_filter(array_map('intval', $supplierIds), static fn (int $id): bool => $id > 0)));
+        if ($supplierIds === []) return [];
+        $boundSupplierId = \MyInvoice\Security\RequestAuthorization::boundSupplierId($request);
+        $allowed = [];
+        foreach ($supplierIds as $id) {
+            if ($boundSupplierId !== null && $id !== $boundSupplierId) continue;
+            $allowed[] = $id;
+        }
+        return $allowed;
+    }
+
+    public function preloadSupplierIds(array $supplierIds): void
+    {
+        $supplierIds = array_values(array_unique(array_filter(array_map('intval', $supplierIds), static fn (int $id): bool => $id > 0)));
+        if ($supplierIds === []) return;
+        $missing = array_values(array_filter($supplierIds, fn (int $id): bool => !array_key_exists($id, $this->existenceMemo)));
+        if ($missing !== []) {
+            $marks = implode(',', array_fill(0, count($missing), '?'));
+            $stmt = $this->db->pdo()->prepare("SELECT id FROM supplier WHERE id IN ($marks)");
+            $stmt->execute($missing);
+            foreach ($missing as $id) $this->existenceMemo[$id] = false;
+            foreach ($stmt->fetchAll(\PDO::FETCH_COLUMN) as $id) $this->existenceMemo[(int) $id] = true;
+        }
+    }
+
+    private function resolveMembership(Request $request): SupplierAccess
     {
         $user     = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
         if (\MyInvoice\Security\InstanceAdminRoutePolicy::isTechnicalUser($user)) {
@@ -185,9 +229,10 @@ final class SupplierAccessResolver
 
     private function exists(int $supplierId): bool
     {
+        if (array_key_exists($supplierId, $this->existenceMemo)) return $this->existenceMemo[$supplierId];
         $stmt = $this->db->pdo()->prepare('SELECT id FROM supplier WHERE id = ? LIMIT 1');
         $stmt->execute([$supplierId]);
-        return (int) $stmt->fetchColumn() > 0;
+        return $this->existenceMemo[$supplierId] = (int) $stmt->fetchColumn() > 0;
     }
 
     /**

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useIsPhone } from '@/composables/useIsPhone'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
@@ -17,6 +18,9 @@ const route = useRoute()
 const router = useRouter()
 const auth = useAuthStore()
 const toast = useToast()
+// Telefon: dlouhé úvodní vysvětlení importu je sbalené za tlačítkem.
+const isPhone = useIsPhone()
+const introOpen = ref(false)
 
 type Tab = 'accounts' | 'settings'
 const tabs: Tab[] = ['accounts', 'settings']
@@ -107,9 +111,17 @@ function differenceLabel(a: CreditCardAccount): string {
       <input ref="fileInput" type="file" accept="application/pdf,.pdf" class="hidden" data-testid="credit-card-file" @change="onFile" />
     </div>
 
-    <div class="mb-4 rounded-lg border border-primary-200 bg-primary-50 px-4 py-3 text-sm text-neutral-700">
-      <p>{{ t('credit_cards.supported_banks') }}</p>
-      <p class="mt-1">{{ t('credit_cards.import_destination') }}</p>
+    <div class="mb-4 rounded-lg border border-primary-200 bg-primary-50 px-4 py-3 text-sm text-neutral-700 max-md:px-3 max-md:py-1">
+      <button v-if="isPhone" type="button" data-testid="credit-card-intro-toggle" :aria-expanded="introOpen"
+        class="cursor-pointer w-full min-h-10 flex items-center justify-between gap-2 text-left font-medium text-primary-700"
+        @click="introOpen = !introOpen">
+        {{ t('credit_cards.intro_toggle') }}
+        <svg class="w-4 h-4 shrink-0 transition-transform" :class="{ 'rotate-180': introOpen }" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7" /></svg>
+      </button>
+      <template v-if="!isPhone || introOpen">
+        <p :class="{ 'pt-1': isPhone }">{{ t('credit_cards.supported_banks') }}</p>
+        <p class="mt-1" :class="{ 'pb-2': isPhone }">{{ t('credit_cards.import_destination') }}</p>
+      </template>
     </div>
 
     <div class="border-b border-neutral-200 mb-4 flex gap-1 overflow-x-auto">

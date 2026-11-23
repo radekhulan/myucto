@@ -28,8 +28,8 @@ final class ChargeAction
     public function components(Request $request,Response $response): Response
     {
         return $this->run($request,$response,'property',false,fn($supplier)=>['items'=>$this->read->components($supplier),
-            'capabilities'=>['manage'=>RequestAuthorization::isSessionAuth($request)&&RequestAuthorization::allows($request,'property.charges.manage',AccessLevel::WRITE),
-            'confirm'=>RequestAuthorization::isSessionAuth($request)&&RequestAuthorization::allows($request,'property.charges.confirm',AccessLevel::WRITE)]]);
+            'capabilities'=>['manage'=>RequestAuthorization::actsAsSession($request)&&RequestAuthorization::allows($request,'property.charges.manage',AccessLevel::WRITE),
+            'confirm'=>RequestAuthorization::actsAsSession($request)&&RequestAuthorization::allows($request,'property.charges.confirm',AccessLevel::WRITE)]]);
     }
     public function createComponent(Request $request,Response $response): Response
     {
@@ -82,7 +82,7 @@ final class ChargeAction
     }
     private function run(Request $request,Response $response,string $permission,bool $write,callable $work): Response
     {
-        if($write&&!RequestAuthorization::isSessionAuth($request)) return Json::sessionRequired($response);
+        if($write&&!RequestAuthorization::actsAsSession($request)) return Json::sessionRequired($response);
         if(!RequestAuthorization::allows($request,$permission,$write?AccessLevel::WRITE:AccessLevel::READ)) return Json::error($response,'forbidden','Pro tuto operaci nemáte oprávnění.',403);
         try { return Json::ok($response,$work($this->currentSupplierId($request))); }
         catch(ChargeException|PropertyException $e) { return Json::error($response,$e->errorCode,$e->getMessage(),$e->httpStatus,['details'=>$e->details]); }

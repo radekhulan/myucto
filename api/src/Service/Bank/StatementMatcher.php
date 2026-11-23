@@ -7,14 +7,18 @@ namespace MyInvoice\Service\Bank;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Infrastructure\Database\TransactionFailure;
 use MyInvoice\Repository\ClientBankAccountRepository;
+use MyInvoice\Service\Accounting\PostingException;
 use MyInvoice\Service\ActivityLogger;
+use MyInvoice\Service\Invoice\AdvanceDrawLinks;
 use MyInvoice\Service\Invoice\FinalFromProformaCreator;
 use MyInvoice\Service\Invoice\ProformaPaymentDocuments;
+use MyInvoice\Service\Invoice\InvoiceOtherItemPayments;
 use MyInvoice\Service\Invoice\InvoicePaymentService;
 use MyInvoice\Service\Invoice\PaymentTaxDocumentCreator;
 use MyInvoice\Service\Invoice\RefundDocument;
 use MyInvoice\Service\Mail\PaymentThanksMailer;
 use MyInvoice\Service\Bank\Match\MatchSuggestionService;
+use MyInvoice\Service\Nonprofit\Membership\MembershipBankPaymentGuard;
 use MyInvoice\Service\Payroll\Payment\PayrollBankEvidenceGuard;
 use MyInvoice\Support\Sql\PurchaseSettledExpr;
 use PDO;
@@ -87,6 +91,12 @@ final class StatementMatcher
         // Jistý převod mezi vlastními účty se spáruje dřív, než by se pohyb nabídl
         // k úhradě dokladu (i bez VS). Nullable kvůli izolovaným konstrukcím v testech.
         private readonly ?\MyInvoice\Service\Accounting\Bank\TransferPairService $ownTransfers = null,
+        // Ostatní pohledávky a závazky se zkouší až po fakturách, jen u firmy se zapnutým
+        // automatickým párováním. Nullable kvůli izolovaným konstrukcím v testech.
+        private readonly ?\MyInvoice\Service\Accounting\OtherItemAutoMatcher $otherItems = null,
+        // Pravidlo účtování s předností před párováním si pohyb vezme dřív, než by se
+        // spároval s dokladem. Nullable kvůli izolovaným konstrukcím v testech.
+        private readonly ?\MyInvoice\Service\Accounting\Bank\DocumentMatchingRulePrecedence $rulePrecedence = null,
     ) {}
 
     /**
@@ -223,13 +233,14 @@ final class StatementMatcher
      * dotaz vrátí obě — to ale není nejednoznačnost, jen dva pohledy na týž obchodní případ.
      * Vrací proformu; kam platbu navázat, rozhodne až logika přesměrování v doMatch().
      *
-     * Zúží jen PRÁVĚ pár 1 proforma + 1 finál s parent_invoice_id na ni. Tři a víc shod, dvě
+     * Zúží jen PRÁVĚ pár 1 proforma + 1 finál, který ji čerpá (parent_invoice_id, nebo u faktury
+     * čerpající víc záloh odpočtový řádek, {@see AdvanceDrawLinks}). Tři a víc shod, dvě
      * proformy nebo dva nepříbuzné doklady zůstanou nedotčené → dál `ambiguous_vs` (správně).
      *
      * @param list<array<string,mixed>> $matches
      * @return list<array<string,mixed>>
      */
-    private function collapseProformaFinalPair(array $matches): array
+    private function collapseProformaFinalPair(array $matches, int $supplierId): array
     {
         if (count($matches) !== 2) {
             return $matches;
@@ -239,7 +250,9 @@ final class StatementMatcher
             $final    = $matches[$f];
             if (($proforma['invoice_type'] ?? '') === 'proforma'
                 && ($final['invoice_type'] ?? '') === 'invoice'
-                && (int) ($final['parent_invoice_id'] ?? 0) === (int) $proforma['id']
+                && ((int) ($final['parent_invoice_id'] ?? 0) === (int) $proforma['id']
+                    || ((int) ($final['parent_invoice_id'] ?? 0) === 0
+                        && AdvanceDrawLinks::finalDrawsAdvance($this->db->pdo(), $supplierId, (int) $final['id'], (int) $proforma['id'])))
             ) {
                 return [$proforma];
             }
@@ -304,7 +317,10 @@ final class StatementMatcher
 
     public function match(int $transactionId): array
     {
-        return $this->rememberReason($transactionId, $this->afterMatch($transactionId, $this->doMatch($transactionId, false)));
+        return $this->rememberReason($transactionId, $this->matchOtherItem(
+            $transactionId,
+            $this->afterMatch($transactionId, $this->doMatch($transactionId, false)),
+        ));
     }
 
     /**
@@ -321,6 +337,18 @@ final class StatementMatcher
             array_map('intval', $transactionIds),
             static fn (int $id): bool => $id > 0,
         )));
+        // Pravidla s předností před párováním se načtou jednou za dávku, ne za každý pohyb.
+        return $this->rulePrecedence === null
+            ? $this->matchBatchIds($ids)
+            : $this->rulePrecedence->withinBatch(fn (): array => $this->matchBatchIds($ids));
+    }
+
+    /**
+     * @param list<int> $ids
+     * @return array<int,array<string,mixed>>
+     */
+    private function matchBatchIds(array $ids): array
+    {
         $results = [];
         foreach ($ids as $transactionId) {
             $results[$transactionId] = $this->doMatch($transactionId, false);
@@ -345,10 +373,48 @@ final class StatementMatcher
                 $results[$transactionId] = $fallback;
             }
         }
+        // Ostatní položky až po všech průchodech: pohyb, který si nárokuje faktura (i až
+        // shodou částky a data), jim nepřipadne.
         foreach ($results as $transactionId => $result) {
-            $results[$transactionId] = $this->rememberReason($transactionId, $result);
+            $results[$transactionId] = $this->rememberReason($transactionId, $this->matchOtherItem($transactionId, $result));
         }
         return $results;
+    }
+
+    /**
+     * Pohyb, který fakturační párování nespárovalo ani nenavrhlo, zkusí přiřadit ostatní
+     * pohledávce nebo závazku ({@see \MyInvoice\Service\Accounting\OtherItemAutoMatcher}).
+     * Přiřazení běží v savepointu: odmítnuté (přeplatek, uzavřené období, pohyb zaúčtovaný
+     * jinam) se celé vrátí a pohyb zůstane k ručnímu výběru v dialogu Spárovat.
+     *
+     * @param array<string,mixed> $result
+     * @return array<string,mixed>
+     */
+    private function matchOtherItem(int $transactionId, array $result): array
+    {
+        if ($this->otherItems === null || !\MyInvoice\Service\Accounting\OtherItemAutoMatcher::eligible($result)) {
+            return $result;
+        }
+        $pdo = $this->db->pdo();
+        try {
+            $other = TransactionFailure::retrying($pdo, function () use ($pdo, $transactionId): ?array {
+                $this->begin($pdo);
+                try {
+                    $found = $this->otherItems?->matchTransaction($transactionId);
+                    $this->commit($pdo);
+                    return $found;
+                } catch (\Throwable $e) {
+                    $this->rollBackIfOpen($pdo, $e);
+                    throw $e;
+                }
+            });
+        } catch (\MyInvoice\Service\Accounting\OtherItemException
+            | PostingException
+            | \MyInvoice\Service\Accounting\Closing\ClosingException) {
+            return ['status' => 'unmatched', 'reason' => \MyInvoice\Service\Accounting\OtherItemAutoMatcher::RESULT_CANDIDATES]
+                + array_diff_key($result, ['reason' => true]);
+        }
+        return $other === null ? $result : $other + array_diff_key($result, ['reason' => true, 'status' => true]);
     }
 
     /**
@@ -372,7 +438,9 @@ final class StatementMatcher
             if ($supplierId === 0) $supplierId = $this->discoverSupplier($row);
             try {
                 if ($supplierId > 0) (new BankTransactionContext($this->db))->mutableTransaction($supplierId, $transactionId);
-            } catch (\MyInvoice\Service\Accounting\PostingException $e) {
+            } catch (PostingException $e) {
+                // Členskou vazbu ukazuje řádek pohybu sám; důvod se k neměnnému pohybu nezapisuje.
+                if ($e->errorCode === 'nonprofit_membership_payment_in_use') return ['status' => 'unmatched', 'reason' => 'membership_settled'];
                 if ($e->errorCode !== 'property_payment_source_immutable') throw $e;
                 return self::propertyPaymentResult();
             }
@@ -540,7 +608,11 @@ final class StatementMatcher
                 return $result;
             } catch (\Throwable $e) {
                 $this->rollBackIfOpen($pdo, $e);
-                if ($e instanceof \MyInvoice\Service\Accounting\PostingException && $e->errorCode === 'property_payment_source_immutable') return self::propertyPaymentResult();
+                if ($e instanceof PostingException && $e->errorCode === 'property_payment_source_immutable') return self::propertyPaymentResult();
+                // Pohyb uhradil členský předpis: jeden takový nesmí shodit přepárování celého výpisu.
+                if ($e instanceof PostingException && $e->errorCode === 'nonprofit_membership_payment_in_use') {
+                    return ['status' => 'unmatched', 'reason' => 'membership_settled'];
+                }
                 throw $e;
             }
         });
@@ -684,6 +756,13 @@ final class StatementMatcher
             return ['status' => 'unmatched', 'reason' => 'own_transfer_matched'];
         }
 
+        // Pravidlo účtování s předností (faktoring, inkasní agentura, leasing s VS naší
+        // faktury): pohyb se s doklady automaticky nepáruje a zaúčtuje ho pravidlo. Důvod
+        // není mezi důvody návrhů párování ani automatiky ostatních položek.
+        if ($this->rulePrecedence?->skipsDocumentMatching($supplierId, $row) === true) {
+            return ['status' => 'unmatched', 'reason' => \MyInvoice\Service\Accounting\Bank\DocumentMatchingRulePrecedence::REASON];
+        }
+
         // ── Outgoing → purchase_invoice (přijaté faktury) ────────────────
         if ($isOutgoing) {
             // Vrácení peněz odběrateli k dokladu k vyplacení (dobropis, záporná faktura): 311/221.
@@ -811,6 +890,7 @@ final class StatementMatcher
                    AND {$candidateSql}
                    AND i.status IN ('issued', 'sent', 'reminded', 'paid')
                    AND i.invoice_type IN ('invoice', 'proforma')
+                   AND " . InvoiceOtherItemPayments::notLinkedSql('i') . "
                  ORDER BY vs_match_rank DESC, i.id LIMIT 100";
         $stmt = $pdo->prepare($sql);
         $stmt->execute([$vs, $vs, $vsKey, $supplierId, ...$candidateParams]);
@@ -818,7 +898,7 @@ final class StatementMatcher
         // Pořadí je podstatné: pár „proforma + její finál" se zúží DŘÍV, než se sáhne po
         // doslovné shodě — jinak by přednost dostal finál („2408001") před proformou
         // („Z2408001") a přesměrování platby proforma→finál by se nikdy nespustilo.
-        $matches = $this->preferExactVsMatches($this->collapseProformaFinalPair($matches));
+        $matches = $this->preferExactVsMatches($this->collapseProformaFinalPair($matches, $supplierId));
         if (count($matches) > 1) {
             $matches = $this->resolveSharedPaymentVs($matches, $amount, $txCurrency, $exactTolerance);
             if (count($matches) !== 1) {
@@ -844,17 +924,8 @@ final class StatementMatcher
         // by spustila daňový doklad k platbě, který už finál nikdy neodečte (§ 37a).
         if (($inv['invoice_type'] ?? '') === 'proforma') {
             $proformaPaid = ($inv['status'] === 'paid');
-            $fin = $pdo->prepare(
-                "SELECT i.id, i.varsymbol, i.amount_to_pay, i.paid_total, i.exchange_rate, i.status, i.invoice_type,
-                        i.parent_invoice_id, cur.code AS currency
-                   FROM invoices i
-                   JOIN currencies cur ON cur.id = i.currency_id
-                  WHERE i.parent_invoice_id = ? AND i.invoice_type = 'invoice'
-                    AND i.status IN ('issued', 'sent', 'reminded', 'paid')
-                  ORDER BY i.id LIMIT 1"
-            );
-            $fin->execute([(int) $inv['id']]);
-            $finRow = $fin->fetch(PDO::FETCH_ASSOC);
+            // Finál = vazba dokladu i faktura čerpající zálohu odpočtovým řádkem (víc záloh).
+            $finRow = AdvanceDrawLinks::firstFinalOf($pdo, $supplierId, (int) $inv['id'], ['issued', 'sent', 'reminded', 'paid']);
             if ($finRow) {
                 // Přesměruj na finál JEN když je co vybrat — finál nese otevřenou pohledávku
                 // NEBO proforma sama ještě není uhrazená (finál je doklad k úhradě). Když je
@@ -874,8 +945,10 @@ final class StatementMatcher
         // Zrcadlo přijaté strany ({@see AdvanceFinalMatchGuard}): platba, která odpovídá
         // neuhrazené proformě a ne zbytku vyúčtovací faktury, patří na PROFORMU — i když
         // VS (nebo přesměrování výš) míří na vyúčtovací fakturu.
-        if (($inv['invoice_type'] ?? '') === 'invoice' && !empty($inv['parent_invoice_id'])
-            && $this->advanceGuard()->issuedViolation($supplierId, (int) $inv['id'], $amount) !== null) {
+        // Faktura čerpající víc záloh vazbu dokladu nemá: zálohu, na kterou platba patří, určí strážce.
+        if (($inv['invoice_type'] ?? '') === 'invoice'
+            && (!empty($inv['parent_invoice_id']) || AdvanceDrawLinks::drawingByLines($pdo, [(int) $inv['id']]) !== [])
+            && ($advanceViolation = $this->advanceGuard()->issuedViolation($supplierId, (int) $inv['id'], $amount)) !== null) {
             $proforma = $pdo->prepare(
                 "SELECT i.id, i.varsymbol, i.amount_to_pay, i.paid_total, i.exchange_rate, i.status, i.invoice_type,
                         i.parent_invoice_id, cur.code AS currency
@@ -883,7 +956,7 @@ final class StatementMatcher
                    JOIN currencies cur ON cur.id = i.currency_id
                   WHERE i.id = ? AND i.supplier_id = ? AND i.invoice_type = 'proforma'"
             );
-            $proforma->execute([(int) $inv['parent_invoice_id'], $supplierId]);
+            $proforma->execute([$advanceViolation['advance_id'], $supplierId]);
             $proformaRow = $proforma->fetch(PDO::FETCH_ASSOC);
             if ($proformaRow !== false) {
                 $inv = $proformaRow;
@@ -1496,7 +1569,28 @@ final class StatementMatcher
             'SELECT 1 FROM bank_transfer_matches WHERE out_transaction_id = ? OR in_transaction_id = ? LIMIT 1'
         );
         $stmt->execute([$transactionId, $transactionId]);
-        return $stmt->fetchColumn() !== false ? 'own_transfer_matched' : null;
+        if ($stmt->fetchColumn() !== false) {
+            return 'own_transfer_matched';
+        }
+        // Členská úhrada nechává pohyb `unmatched` (vazba je jen v párování deníku), proto ji
+        // matcher musí poznat sám, jinak by tutéž platbu podle VS použil ještě na fakturu.
+        // SSOT podmínky je MembershipBankPaymentGuard::entryUsedSql (sdílí ji NonInvoiceBankTransactionScope).
+        // Firmu volající neznají. Hledá se jen ve firmách s členskými předpisy (volné čtení indexu
+        // předpisů), u každé po idx_je_supplier_source; instance bez členství tak nečte deník vůbec.
+        // Platí pro příchozí úhrady i pro odchozí vratku spárovanou v členském okruhu; TAKEN_ELSEWHERE_SQL
+        // členský okruh nezná, proto tato kontrola běží v takenElsewhereReason pro každý pohyb.
+        // Jednotkové testy nad SQLite (viz claimTransaction) členský modul ani deník nemají.
+        if ($pdo->getAttribute(PDO::ATTR_DRIVER_NAME) !== 'mysql') {
+            return null;
+        }
+        $stmt = $pdo->prepare(
+            "SELECT STRAIGHT_JOIN 1 FROM (SELECT DISTINCT supplier_id FROM nonprofit_membership_charge_claims) ms
+               JOIN journal_entries je FORCE INDEX(idx_je_supplier_source) ON je.supplier_id = ms.supplier_id AND je.source_type = 'bank'
+                AND je.source_id = ? AND je.reversed_by IS NULL
+              WHERE " . MembershipBankPaymentGuard::entryUsedSql('je') . ' LIMIT 1'
+        );
+        $stmt->execute([$transactionId]);
+        return $stmt->fetchColumn() !== false ? 'membership_settled' : null;
     }
 
     private ?\MyInvoice\Service\Bank\Card\CardPaymentCandidates $cardCandidatesInstance = null;
@@ -1863,8 +1957,8 @@ final class StatementMatcher
                    JOIN currencies cur ON cur.id = pi.currency_id
                   WHERE pi.supplier_id = ?
                     AND pi.status IN ('received', 'booked', 'paid')
-                    -- Zálohová faktura zaplacená kartou nemá na pohybu VS, jinak se chová jako faktura.
-                    AND pi.document_kind IN ('invoice', 'advance')
+                    -- Zálohová faktura i účtenka zaplacená kartou nemá na pohybu VS, jinak se chová jako faktura.
+                    AND " . PurchasePaymentKinds::bankPayableSql('pi') . "
                     AND pi.cash_register_id IS NULL
                     AND pi.payment_method IN ('bank_transfer', 'card', 'direct_debit')
                     AND (ABS(DATEDIFF(pi.due_date, ?)) <= ? OR ABS(DATEDIFF(pi.issue_date, ?)) <= ?)

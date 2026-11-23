@@ -30,6 +30,7 @@ use PDO;
 final class PayrollTakeoverInvariants
 {
     public const ORPHAN_TOTALS = 'takeover_totals_without_employment';
+    public const INCOMPLETE_MANUAL_TOTALS = 'takeover_manual_totals_incomplete';
     public const RELATION_MISSING = 'takeover_relation_missing';
     public const TOTALS_MISMATCH = 'takeover_totals_mismatch';
     public const SOURCE_ROWS_SKIPPED = 'takeover_source_rows_skipped';
@@ -41,6 +42,7 @@ final class PayrollTakeoverInvariants
     /** Všechny kódy porušení, jak jdou po drátě na Kontrolu převzetí. */
     public const CODES = [
         self::ORPHAN_TOTALS,
+        self::INCOMPLETE_MANUAL_TOTALS,
         self::RELATION_MISSING,
         self::TOTALS_MISMATCH,
         self::SOURCE_ROWS_SKIPPED,
@@ -51,7 +53,7 @@ final class PayrollTakeoverInvariants
     ];
 
     /** Kódy, které počítá stránka znovu z vlastních dat (zbytek je uložený výsledek převodu). */
-    public const LIVE_CODES = [self::ORPHAN_TOTALS, self::DUPLICATE_PERSON, self::TERMS_OVERLAP, self::COMPONENT_OVERLAP, self::RECURRING_OVERLAP];
+    public const LIVE_CODES = [self::ORPHAN_TOTALS, self::INCOMPLETE_MANUAL_TOTALS, self::DUPLICATE_PERSON, self::TERMS_OVERLAP, self::COMPONENT_OVERLAP, self::RECURRING_OVERLAP];
 
     /** Veličiny, jejichž součty po osobě a měsíci musí sedět na zdroj. */
     public const METRICS = [
@@ -124,6 +126,7 @@ final class PayrollTakeoverInvariants
     {
         return [
             ...$this->orphanTotals($supplierId, $year, $source),
+            ...$this->incompleteManualTotals($supplierId, $year, $source),
             ...$this->duplicatePersons($supplierId),
             ...$this->termsOverlaps($supplierId),
             ...$this->componentOverlaps($supplierId),
@@ -350,6 +353,56 @@ final class PayrollTakeoverInvariants
                 'external_relationship_ref' => (string) $row['external_relationship_ref'],
                 'external_person_ref' => (string) $row['external_person_ref'],
                 'employee_id' => $row['employee_id'] === null ? null : (int) $row['employee_id'],
+                'periods' => $periods,
+            ]);
+        }
+
+        return self::limited($out);
+    }
+
+    /**
+     * Ručně nebo tabulkou převzatý měsíc se základem pojištění, ale bez dnů účasti
+     * nebo pojistného zaměstnance. Výpočtu to nevadí, jenže evidenční list a mzdový
+     * list by z něj vyšly špatně až na konci roku. Převody z pojmenovaných programů
+     * mají úplnost hlídanou proti zdroji.
+     *
+     * @return list<array{code:string,text:string,context:array<string,mixed>}>
+     */
+    private function incompleteManualTotals(int $supplierId, ?int $year, ?string $source): array
+    {
+        if ($source !== null && $source !== 'other') {
+            return [];
+        }
+        $where = '';
+        $params = [$supplierId];
+        if ($year !== null) {
+            $where = ' AND t.period_start BETWEEN ? AND ?';
+            $params[] = sprintf('%04d-01-01', $year);
+            $params[] = sprintf('%04d-12-01', $year);
+        }
+        $statement = $this->db->pdo()->prepare(
+            "SELECT t.employee_id, t.employment_id,
+                    GROUP_CONCAT(DATE_FORMAT(t.period_start, '%Y-%m') ORDER BY t.period_start SEPARATOR ',') AS periods
+               FROM payroll_migration_reference_totals t
+              WHERE t.supplier_id = ? AND t.source = 'other'{$where}
+                AND t.pension_participation = 1 AND t.social_base_minor > 0
+                AND (t.insurance_days = 0 OR t.employee_social_minor = 0)
+              GROUP BY t.employee_id, t.employment_id
+              ORDER BY t.employment_id",
+        );
+        $statement->execute($params);
+        $out = [];
+        foreach ($statement->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $periods = explode(',', (string) $row['periods']);
+            $out[] = self::violation(self::INCOMPLETE_MANUAL_TOTALS, sprintf(
+                'Převzaté měsíce %s pracovního vztahu #%d mají vyměřovací základ, ale chybí jim dny účasti '
+                . 'nebo pojistné zaměstnance. Evidenční list a mzdový list by vyšly špatně; doplňte je '
+                . 'v ručním zadání převzatých mezd.',
+                implode(', ', $periods),
+                (int) $row['employment_id'],
+            ), [
+                'employee_id' => $row['employee_id'] === null ? null : (int) $row['employee_id'],
+                'employment_id' => $row['employment_id'] === null ? null : (int) $row['employment_id'],
                 'periods' => $periods,
             ]);
         }

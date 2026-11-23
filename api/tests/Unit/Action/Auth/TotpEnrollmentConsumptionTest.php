@@ -58,6 +58,7 @@ final class TotpEnrollmentConsumptionTest extends TestCase
             $this->createStub(BruteForceGuard::class),
             $this->createStub(MfaProtectedOperationService::class),
             $this->createStub(PasskeyCredentialRepository::class),
+            $this->createStub(\MyInvoice\Service\Auth\LoginPolicyService::class),
         );
         $request = (new ServerRequestFactory())->createServerRequest('POST', '/api/auth/totp/enable')
             ->withAttribute(AuthMiddleware::ATTR_USER, ['id' => 1])

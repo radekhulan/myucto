@@ -26,17 +26,19 @@
 
 ## 106.2 Než začnete
 
-Účetní převody z Money S3, POHODY, PREMIERU a Stereo NX podporují pouze období vedená po celou dobu podle vyhlášky 500. Historické období 500 lze převést i tehdy, když firma později přešla na rámec 504. Převod zahrnující rámec 504 se odmítne před zápisem účetnictví. Samostatný převod dokladů toto omezení nepřebírá.
+Účetní převody z Money S3, PREMIERU a Stereo NX podporují pouze období vedená po celou dobu podle vyhlášky 500. Historické období 500 lze převést i tehdy, když firma později přešla na rámec 504. Převod zahrnující rámec 504 se odmítne před zápisem účetnictví. Samostatný převod dokladů toto omezení nepřebírá. POHODA má vlastní podporu převodu neziskové osnovy do rámce 504, viz [§ 107.2](107_Prechod_z_POHODY.md#1072-nez-zacnete).
 
-Převody z cizích programů nebyly ověřeny pro neziskové organizace (spolky, nadace, ústavy, SVJ a další účetní jednotky podle vyhlášky 504/2002 Sb.). Neznají osnovu a výkazy podle vyhlášky 504, hlavní a hospodářskou činnost ani fondy. Je-li cílová firma podle právní formy nezisková organizace nebo SVJ, nebo vedla-li někdy účetnictví podle vyhlášky 504, ukáže průvodce každého převodu výrazné upozornění. V takovém případě před převodem kontaktujte podporu.
+Převody Money S3, PREMIER a Stereo NX nebyly ověřeny pro neziskové organizace (spolky, nadace, ústavy, SVJ a další účetní jednotky podle vyhlášky 504/2002 Sb.). Neznají osnovu a výkazy podle vyhlášky 504, hlavní a hospodářskou činnost ani fondy. Je-li cílová firma podle právní formy nezisková organizace nebo SVJ, nebo vedla-li někdy účetnictví podle vyhlášky 504, ukáže průvodce těchto převodů výrazné upozornění. V takovém případě před převodem kontaktujte podporu.
 
-1. **Podvojné účetnictví v Money.** Převod přenáší účetní deník podvojného
-   účetnictví. Agendu, kterou Money vede jako daňovou evidenci (peněžní deník),
-   převést nejde, viz [§ 106.10.10](#1061010-omezeni).
+1. **Podvojné účetnictví, nebo daňová evidence v Money.** Agendu podvojného
+   účetnictví převod převede s účetním deníkem. Agendu, kterou Money vede jako
+   daňovou evidenci (peněžní deník), převede do daňové evidence firmy, viz
+   [§ 106.10.10](#1061010-danova-evidence).
 2. **Cílová firma.** Vyberte (nebo založte) firmu v MyÚčtu, do které se bude
-   převádět. Firma, která v MyÚčtu dosud vede daňovou evidenci, se převodem
-   přepne na podvojné účetnictví. Má-li se skupina firem sdílet jako projekty,
-   založte skupinu před převodem.
+   převádět. Agenda podvojného účetnictví přepne firmu, která v MyÚčtu dosud
+   vede daňovou evidenci, na podvojné účetnictví. Agendu daňové evidence převod
+   převede jen do firmy v daňové evidenci a její režim nemění. Má-li se skupina
+   firem sdílet jako projekty, založte skupinu před převodem.
 3. **Účetní rok.** Vede-li firma v Money hospodářský rok, nastavte před
    převodem v `Firma → Nastavení` na záložce **Daně a účetnictví** pole
    **Účetní rok začíná** na měsíc, kterým rok v Money začíná. Každý účetní rok Money se převede jako jedno
@@ -86,6 +88,9 @@ Instalace Money se zálohou nijak nemění.
    - **Převést od roku** (výchozí je rok, od kterého navazují stavy; **Všechny
      roky zálohy** převede celou zálohu; rokem je účetní rok firmy jako
      v tabulce let),
+   - **Převést do roku** (výchozí **Automaticky**: převedou se roky až po
+     poslední rok, který v MyÚčtu ještě nemá vlastní zápisy; pozdější roky
+     zálohy se nepřevedou, viz [§ 106.10.8](#106108-opakovany-prevod)),
    - **Uzavřít historické roky průvodcem uzávěrkou** (výchozí zapnuto),
    - **Začátek prvního účetního období** jen u firmy založené během prvního
      převáděného roku,
@@ -103,13 +108,15 @@ Instalace Money se zálohou nijak nemění.
 **S upozorněními** a rekonciliace nehlásí chybu. Selže-li zkouška jen na
 **Rozdílech k přijetí**, rozhodnete se podle [§ 106.10.5.1](#1061051-chyby-upozorneni-a-rozdily-k-prijeti).
 
-Kontrola před převodem zastaví převod, když agenda vede v Money daňovou evidenci,
-záloha patří firmě s jiným IČO, účetní období v MyÚčtu už obsahuje zápisy, které nevznikly převodem, období je
-uzavřené, nebo by se účetní rok Money rozdělil do dvou účetních období firmy
+Kontrola před převodem zastaví převod, když se agenda v Money z podvojného
+účetnictví vrátila do daňové evidence, záloha patří firmě s jiným IČO, účetní období v MyÚčtu už obsahuje zápisy, které nevznikly převodem, období je
+uzavřené, rok, do kterého má převod zapisovat, zasahuje do zámku účtování k datu,
+nebo by se účetní rok Money rozdělil do dvou účetních období firmy
 (agenda vede jiný účetní rok, než má firma nastavený; hlášení navrhne měsíc
 pro nastavení **Účetní rok začíná**). Chybí-li
 IČO v záloze nebo ve firmě, zkouška jen upozorní a ostrý převod se spustí až po
-výslovném potvrzení.
+výslovném potvrzení. U agendy daňové evidence kontrola projde peněžní deník
+a zastaví převod z důvodů v [§ 106.10.10](#1061010-danova-evidence).
 
 ## 106.5 Krok za krokem: ostrý převod
 
@@ -149,10 +156,14 @@ jedné firmy běží vždy jen jeden, druhý se do jeho konce nespustí.
    [§ 106.10.6](#106106-uzaverka-historickych-let)).
 7. Doplňte, co se nepřevádí: skeny dokladů v `Dokumenty → Skeny k dokladům`,
    zaměstnance importem podání JMHZ v `Mzdy → Importy`.
+8. Spusťte [Kontrolu dat po převodu](126_Kontrola_dat_po_prevodu.md#1262-krok-za-krokem-kontrola-a-oprava)
+   (tlačítko **Zkontrolovat data po převodu** na konci průvodce): zápočty a úhrady bez dokladu úhrady,
+   krytí přijatých dokladů, stavy převzatých výpisů, saldokonto a DPH ze zálohy podruhé.
 
 **Jak poznáte, že je hotovo:** Všechny kontroly K1 až K4 (viz
 [§ 106.10.9](#106109-davkovy-prevod-vice-firem)) projdou, nezbývají doklady bez
-zápisu ani nepřijaté rozdíly a obraty v MyÚčtu odpovídají Money.
+zápisu ani nepřijaté rozdíly, Kontrola dat po převodu nemá nálezy k opravě a obraty
+v MyÚčtu odpovídají Money.
 
 ## 106.7 Krok za krokem: navázání číselné řady
 
@@ -197,7 +208,10 @@ Pravidla dávky včetně příkazové řádky jsou v
 | Co vidíte | Proč | Co udělat |
 |---|---|---|
 | Kontrola před převodem hlásí chybu | Jiné IČO, zápisy v období, uzavřené období, nebo agenda vede jiný účetní rok než firma | Opravte příčinu a nahrajte zálohu znovu; u účetního roku nastavte ve firmě měsíc z hlášení (**Účetní rok začíná**) a převod spusťte znovu |
-| Kontrola před převodem hlásí, že agenda vede daňovou evidenci | Money vede agendu jako daňovou evidenci (peněžní deník), ne podvojné účetnictví | Převod z Money S3 ji nepřevede. Faktury vyexportujte z Money jako ISDOC a převezměte [importem](21_Importy.md), nebo se obraťte na podporu |
+| Kontrola před převodem hlásí, že peněžní deník nesedí s bankou nebo pokladnou | Řádky peněžního deníku Money nesedí s bankovními nebo pokladními doklady, nebo odkazují na doklad, který v záloze není | Opravte doklad v Money, zálohujte agendu znovu a nahrajte ji |
+| Kontrola před převodem hlásí, že firma vede podvojné účetnictví | Agenda vede v Money daňovou evidenci, firma v MyÚčtu převáděné roky jako podvojné účetnictví | Převeďte agendu do firmy v daňové evidenci; převod režim firmy nemění |
+| Kontrola před převodem hlásí, že Money vede od roku znovu daňovou evidenci | Firma v Money přešla z podvojného účetnictví zpět na daňovou evidenci | Převod by firmu přepnul do podvojného účetnictví i pro roky daňové evidence, proto ji nepřevede |
+| Import výpisu z banky hlásí, že pohyby do dne přeskočil | Pohyby účtu do toho dne převod převzal z Money | Pohyb z toho dne, který v Money nebyl, doplňte ručně; další výpisy importujte od následujícího dne |
 | Nahrávání se přerušilo | Výpadek spojení | Vyberte soubor a nahrajte ho znovu |
 | Zkouška selhala jen na rozdílech k přijetí | Doklad se nepřevedl nebo výsledek nesedí na Money | Zaškrtněte **Převést i přes rozdíly**, nebo rozdíl opravte a zkoušku zopakujte |
 | Rok se neuzavřel | Konečné stavy nesedí na počáteční stavy dalšího roku | Rok zůstává otevřený; důvod je v protokolu, rozdíl opravte a převod zopakujte |
@@ -244,9 +258,10 @@ firmy a uzavírá roky, proto navíc vyžaduje zápis do účetního deníku
 s uzávěrkou historických let i uzavírání období (`accounting.periods.close`).
 Chybějící oprávnění průvodce ukáže a převod nespustí.
 
-Průvodce je dostupný i firmě, která v MyÚčtu zatím vede daňovou evidenci: převod
-ji sám přepne do podvojného účetnictví. Agenda v Money ale musí vést podvojné
-účetnictví, viz [§ 106.10.10](#1061010-omezeni).
+Průvodce je dostupný i firmě, která v MyÚčtu zatím vede daňovou evidenci: agenda
+podvojného účetnictví ji převodem přepne do podvojného účetnictví. Agendu, kterou
+Money vede jako daňovou evidenci, převod převede do daňové evidence firmy a režim
+firmy nemění, viz [§ 106.10.10](#1061010-danova-evidence).
 
 ### 106.10.2 Co převod přenese
 
@@ -408,9 +423,12 @@ bankovních účtech nebo ve dvou pokladnách.
   deníku; zaměstnance převezmete z podání JMHZ (viz [§ 106.10.2.2](#1061022-mzdy)), zásoby se zakládají
   v MyÚčtu.
 - **Interní doklady, kniha pohledávek a závazků.** V deníku jsou jako ruční
-  zápisy s původním číslem dokladu, samostatný doklad z nich nevzniká.
+  zápisy s původním číslem dokladu, samostatný doklad z nich nevzniká. U daňové
+  evidence vzniknou ostatní závazky a pohledávky jen z neuhrazených, viz
+  [§ 106.10.10](#1061010-danova-evidence).
 - **Číselné řady a řádky DPH pokladních dokladů.** Podaná přiznání k DPH za
-  převáděné roky zůstávají v Money.
+  převáděné roky zůstávají v Money; u daňové evidence je převod zapíše jako
+  podaná mimo MyÚčto (bez XML).
 
 ### 106.10.4 Postup
 
@@ -419,10 +437,18 @@ bankovních účtech nebo ve dvou pokladnách.
    u velké zálohy i několik minut; obnovení stránky mezitím průvodce nepřeruší.
 2. **Náhled a volby.** Zkontrolujte firmu, IČO, verzi Money a účetní roky.
    Kontrola před převodem zastaví převod, když:
-   - agenda vede v Money daňovou evidenci, ne podvojné účetnictví,
+   - agenda se v Money z podvojného účetnictví vrátila do daňové evidence
+     (rok daňové evidence leží po roce podvojného účetnictví),
    - záloha patří firmě s jiným IČO,
-   - účetní období v MyÚčtu už obsahuje zápisy, které nevznikly převodem,
-   - období je v MyÚčtu uzavřené,
+   - účetní období v MyÚčtu už obsahuje zápisy, které nevznikly převodem
+     (rok s vlastními zápisy, který leží za převáděnými roky, automatická volba
+     **Převést do roku** vynechá sama a kontrola to ohlásí jako upozornění),
+   - období je v MyÚčtu uzavřené a převod ho ještě nezaložil, nebo je to rok
+     zvolený v **Převést do roku**, případně jsou uzavřené všechny vybrané roky,
+   - rok, do kterého převod zapisuje (otevřené nebo nové období), zasahuje do
+     [zámku účtování k datu](72_Uzaverka.md#72123-zamek-uctovani-k-datu). Zámek se
+     kontroluje znovu na začátku každého kroku převodu; nastavíte-li ho během
+     převodu, převod se zastaví dřív, než pod zámek cokoli zapíše,
    - účetní rok Money by se rozdělil do dvou účetních období firmy, protože
      agenda vede jiný účetní rok, než má firma nastavený (`Firma → Nastavení`,
      záložka **Daně a účetnictví**, pole **Účetní rok začíná**). Hlášení
@@ -434,6 +460,11 @@ bankovních účtech nebo ve dvou pokladnách.
    výslovném potvrzení.
 
    Volby:
+   - *Převést do roku* - poslední převáděný účetní rok. Pozdější adresáře zálohy
+     (deník, doklady, banka, pokladna) se nepřevedou a protokol je vyjmenuje.
+     Automatická volba skončí posledním rokem, který v MyÚčtu ještě nemá vlastní
+     zápisy, pokud po něm následují roky, které už v MyÚčtu účtujete; jinak
+     převede všechny roky zálohy. U daňové evidence se volba nenabízí.
    - *Uzavřít historické roky* - viz [§ 106.10.6](#106106-uzaverka-historickych-let), ve výchozím stavu zapnuto.
    - *Začátek prvního účetního období* - jen u firmy založené během prvního
      převáděného roku. Bez něj začíná první období prvním dnem účetního roku
@@ -509,6 +540,14 @@ kterou Money vede pod symbolem dobropisu, převod spáruje se zálohou. Deník s
 nemění. Vazbu na zálohu nebo čerpání, které jste v MyÚčtu zadali nebo smazali
 (i čerpání ze saldokonta), převod nepřepíše.
 
+Stejně převod páruje čerpání přijatých záloh (proformy na účtu 324) vydanými
+konečnými fakturami: podle položky odpočtu v dokladu Money, čísla zálohy v textu
+zápisu a párovacího symbolu řádku na 324 (číslo proformy nebo jeho číslice), jinak
+po odběrateli od nejstarší zaplacené zálohy. Jedna faktura tak může čerpat víc
+záloh, i když je Money vede pod symbolem jen jedné z nich. Úhrada na zálohovém
+účtu se symbolem proformy patří proformě; konečnou fakturu, kterou záloha pokryla
+celou, převod úhradou zálohy nevyrovnává, vyrovná ji čerpání.
+
 Protokoly všech běhů zůstávají v přehledu pod průvodcem. Protokol zkoušky
 nanečisto z přehledu smažete, protokol ostrého převodu zůstává.
 
@@ -575,17 +614,98 @@ natrvalo: další úspěšný běh ji vrátí na stav před prvním převodem.
 Záznam daňové evidence, který v historii režimů firmy leží uvnitř převáděných
 let, převod odstraní, protože v Money byly tyto roky podvojné.
 
+Agenda daňové evidence režim firmy ani automatiku účtování nemění
+([§ 106.10.10](#1061010-danova-evidence)).
+
 ### 106.10.8 Opakovaný převod
 
 Převod si pamatuje, co z které agendy už vzniklo. Opakovaný převod téže nebo
 novější zálohy založí jen to, co ještě chybí, a nic nezdvojí. Převod přerušený
-chybou tak stačí po opravě spustit znovu. Do uzavřeného roku už převod nic
-nepřidá.
+chybou tak stačí po opravě spustit znovu.
 
-Už převedené doklady ani zápisy deníku opakovaný převod nepřepisuje, protože
-mohly být mezitím zaúčtované, spárované nebo upravené v MyÚčtu. Změnila-li se
-v Money celková částka faktury, protokol ji vypíše jako změněnou v Money
-a ponechanou v MyÚčtu; upravte ji ručně.
+**Uzavřené roky a zámek k datu.** Do uzavřeného roku převod nic nepřidá:
+deník, doklady, banku ani pokladnu takového roku přeskočí a v uzavřených
+letech nezakládá ani nová párování úhrad, čerpání záloh a vazby dokladů na
+deník. Ty v uzavřených letech doplní jen opravný převod vazeb (dávka, volba
+**Firma už v MyÚčtu je: opravný převod vazeb**). Rok, do kterého převod
+zapisuje, nesmí zasahovat do zámku účtování k datu, jinak se převod nespustí.
+Opravný převod vazeb deník ani DPH nemění, zámek k datu ho proto nezastaví;
+kontrola před převodem upozorní, že vazby, párování a úhrady opraví i
+v zamčeném období.
+
+**Převod roku vedle běžícího dalšího roku.** Firma může v MyÚčtu účtovat nový
+rok (třeba 2027), zatímco předchozí rok (2026) se ještě účtuje v Money a do
+MyÚčta se převádí znovu, průběžně i po uzávěrce v Money:
+
+1. Ve volbě **Převést do roku** nechte **Automaticky**, nebo zvolte rok 2026.
+   Obsahuje-li záloha z Money už adresář roku 2027 (Money ho založí s počátečními
+   stavy), převod ho vynechá a nic z něj nepřimíchá k dokladům a zápisům zadaným
+   v MyÚčtu.
+2. Zámek účtování k datu nastavujte jen do konce roku, který už se z Money
+   nepřevádí. Zámek zasahující do roku 2026 převod zastaví.
+3. Vlastní zápisy, doklady a období roku 2027 převod nemění; popisy přepisuje
+   jen u zápisů, které v daném běhu navázal na převzaté doklady.
+
+**Úhrady po konci převáděných let.** Datum úhrady z Money (`Uhrazeno`) převod
+převezme jen do konce posledního převáděného roku. Faktura 2026 zaplacená
+v lednu 2027, kterou Money už zná, přijde jako neuhrazená a lednovou platbu
+spárujete v MyÚčtu. Částečná úhrada pohybem z roku 2026 se převezme jako platba
+a zbytek zůstane k úhradě.
+
+**Doklady a zápisy změněné v Money.** V otevřeném roce mimo zámek převod
+aktualizuje to, co Money od minulého převodu změnilo:
+
+- zápis deníku převzatý z Money, který Money změnilo, přepíše podle Money
+  (zápis zůstává tentýž, vazby na doklad zůstanou a dimenze přiřazená v MyÚčtu
+  zůstane na řádku se stejným účtem; přesunulo-li Money řádek jinam, zápis se
+  nepřepíše),
+  a zápis, který Money smazalo, smaže. Doklad, kterému Money změnilo datum nebo
+  číslo, se převede jako nový zápis a starý se smaže,
+- u vydané a přijaté faktury přepíše částky po sazbách, data vystavení, plnění
+  a splatnosti a položky. Uložené PDF aktualizované faktury se zahodí a vytvoří
+  se znovu s novými částkami.
+
+Jen u záznamů, se kterými se v MyÚčtu nepracovalo. Zápis upravený v MyÚčtu,
+stornovaný, spárovaný v saldokontu, s poznámkou, přílohou, dokumentem nebo
+vazbou zadanou v MyÚčtu převod nezmění. Nezmění ani doklad odeslaný nebo
+upomínaný z MyÚčta, s přílohou, dokumentem, splátkovým kalendářem, úhradou nebo
+párováním zadaným v MyÚčtu, zápočtem, navázaným dobropisem, daňovým dokladem,
+čerpáním zálohy, opravou základu DPH, opravnou položkou, přijatý doklad
+s nahraným skenem, schvalováním, majetkem nebo skladem z položky, a doklad
+v období, za které je podané přiznání DPH, kontrolní nebo OSS hlášení. Takový
+doklad a jeho zápis v deníku zůstanou oba, aby se nerozešly; stejně tak zůstane
+zápis dokladu, který převod změnit nesmí. Změnu druhu dokladu,
+členění DPH, měny, čísla dokladu dodavatele, data doručení, variabilního symbolu
+nebo odečtené zálohy převod nepřenese. Všechny tyto záznamy protokol vypíše jako
+změněné v Money a ponechané v MyÚčtu; upravte je ručně podle Money a rekonciliace
+do té doby ukáže rozdíl k přijetí.
+
+Doklady a zápisy deníku převedené dřív, než převod začal změny sledovat, převod
+při rozdílu proti Money nikdy sám nepřepíše ani nesmaže, protože nepozná, zda je
+změnilo Money, nebo oprava v MyÚčtu. Vypíše je k porovnání s Money; jakmile se
+shodují, začne je sledovat.
+
+**Pohyby stažené z banky.** Stahuje-li MyÚčto pohyby účtu, který dosud vede
+Money (bankovní API, nahrané výpisy GPC nebo PDF), převod je na tomto účtu od
+začátku převáděného roku do data posledního pohybu v Money (nejvýš do konce
+roku) porovná s pohyby Money podle data, částky a variabilního symbolu:
+
+- pohyb, který má v Money protějšek, smaže a nahradí pohybem z Money; smazané
+  pohyby vyjmenuje v protokolu,
+- pohyb bez protějšku v Money nechá a vyjmenuje k ověření, zda v Money nechybí,
+- pohyb s protějškem, který je v MyÚčtu spárovaný, zaúčtovaný, ignorovaný nebo
+  jinak navázaný (zařazení v peněžním deníku, záloha na daň, tankování), nesmaže
+  a převod se zastaví s jeho výpisem: zrušte u něj párování a zaúčtování (nebo
+  ho smažte) a převod spusťte znovu.
+
+Pohyby po posledním pohybu v Money zůstanou. Nemá-li účet v Money kód banky ani
+IBAN a v MyÚčtu jsou výpisy stejného čísla účtu u více bank, převod se zastaví;
+doplňte v Money kód banky. Dokud firma účtuje banku v Money, pohyby těchto účtů
+v MyÚčtu nepárujte ani neúčtujte.
+
+Daňovou uznatelnost nákladových účtů převezme převod z osnovy Money jen u účtů,
+které zakládá, a při prvním převodu firmy. Opakovaný převod ji u existujících
+účtů nemění, takže úprava v `Účetnictví → Účtová osnova` zůstane.
 
 Převádíte-li firmu znovu od začátku (firmu smažete a převedete znovu), ztratí
 se s ní i nastavení, které převod nezakládá: výjimky mapování výkazů, volby
@@ -669,7 +789,7 @@ php api/bin/money-s3-batch.php --dir=<adresář se zálohami> --all --dry-run
 php api/bin/money-s3-batch.php --dir=<adresář se zálohami> --all --dppo-dir=<adresář s XML> --report=souhrn.json
 ```
 
-Volby odpovídají průvodci (`--from-year=auto|RRRR|all`, `--existing=skip|update`,
+Volby odpovídají průvodci (`--from-year=auto|RRRR|all`, `--to-year=auto|RRRR`, `--existing=skip|update`,
 `--group="Název"`, `--related-parties`, `--no-close`, `--no-registry`), na konci
 je souhrn po firmách s K1 až K4.
 
@@ -679,13 +799,114 @@ MyÚčto s výstupy Money nebo s novou zálohou agendy na stránce
 [Souběh se starým systémem](111_Soubeh_se_starym_systemem.md)). Záloha se tam
 čte bez zápisu do MyÚčta.
 
-### 106.10.10 Omezení
+### 106.10.10 Daňová evidence
 
-- Převod přenáší jen podvojné účetnictví. Rok, který Money vede jako daňovou
-  evidenci (peněžní deník místo účetního deníku), převod vynechá i s jeho
-  doklady a náhled ho vypíše v upozornění. Agendu vedenou celou jako daňová
-  evidence kontrola před převodem zastaví a dávka ji odmítne dřív, než firmu
-  založí.
+Agendu, kterou Money vede jako daňovou evidenci (místo účetního deníku peněžní
+deník), převod převede do firmy v MyÚčtu, která vede daňovou evidenci. Firma
+v daňové evidenci zůstane: převod režim firmy nemění a účetní deník, účtovou
+osnovu ani účetní období nezakládá. Rok a režim každého roku čte převod
+z nastavení roku v Money. Dávka agendu daňové evidence převede do nové firmy
+v daňové evidenci.
+
+Kontrola před převodem projde peněžní deník proti bankovním, pokladním
+a interním dokladům, vazby řádků na uhrazené doklady a navázání počátečních
+stavů účtů a pokladen a vypíše souhrn každého roku. Převod zastaví, když:
+
+- peněžní deník nesedí s bankovním nebo pokladním dokladem, má řádek bez
+  dokladu nebo odkazuje na uhrazený doklad, který v záloze není,
+- peněžní deník používá typ pohybu nebo sloupec, který převod nezná, nebo
+  obsahuje bankovní nebo interní pohyb v cizí měně,
+- pokladní doklad ve valutě nemá v Money částku v Kč (hláška uvede čísla
+  dokladů),
+- agenda má v Money majetek nebo mzdy,
+- firma v MyÚčtu vede převáděné roky jako podvojné účetnictví,
+- převáděné roky už v MyÚčtu obsahují doklady, bankovní pohyby nebo pokladní
+  doklady, které nevznikly převodem,
+- doklady firmy jsou uzamčené do převáděného období (při prvním převodu),
+- firma má nastavený hospodářský rok; daňová evidence se vede po kalendářních
+  letech.
+
+| Z Money | Do MyÚčta |
+|---|---|
+| adresář a bankovní spojení partnerů | klienti a jejich bankovní účty |
+| vydané a přijaté faktury, ostatní pohledávky v přiznání DPH | doklady s DPH; uhrazené jen podle úhrad z peněžního deníku |
+| zálohová faktura, daňový doklad k záloze, vyúčtování zálohy | záloha, daňový doklad, faktura s odečtenou zálohou |
+| předkontace daňové evidence přijaté faktury | daňová uznatelnost dokladu |
+| pokladny a pokladní doklady | pokladní doklady: úhrada faktury, prodej nebo nákup s DPH bez faktury, ostatní (vklad, výběr, nedaňové) |
+| bankovní účty a bankovní doklady | měsíční výpisy se zdrojem „import" a počátečním stavem účtu z Money |
+| vazby řádků peněžního deníku na uhrazené doklady | úhrady faktur bankou nebo pokladnou |
+| zápočet faktury a dobropisu téhož dokladu | zápočet dobropisu |
+| sloupec peněžního deníku u pohybu bez dokladu | zařazení pohybu v peněžním deníku (vklad a výběr, nedaňový příjem a výdaj, pojistné, daň, DPH, dar) |
+| neuhrazené ostatní závazky a pohledávky | ostatní závazky a pohledávky na zbývající částku |
+| plátcovství DPH (nastavení roku, první podané přiznání) | historie plátcovství DPH a zdaňovací období |
+| podaná přiznání DPH a kontrolní hlášení | podání mimo MyÚčto, viz níže |
+
+Peněžní deník Money se nepřebírá jako další platby: MyÚčto peněžní deník
+počítá z převzatých dokladů, banky a pokladny. Rekonciliace ho za každý rok
+porovná s peněžním deníkem Money, a to za každý uhrazený doklad (pohyb bez
+dokladu sám za sebe), a protokol ukáže daňové příjmy a výdaje obou. Rozdíly
+k přijetí ([§ 106.10.5.1](#1061051-chyby-upozorneni-a-rozdily-k-prijeti))
+vznikají typicky tam, kde Money:
+
+- rozdělil úhradu na základ a DPH jinak než MyÚčto (například celou úhradu
+  zapsal do DPH),
+- při vyúčtování zálohy přeúčtoval DPH zálohy nulovým dokladem; MyÚčto nulové
+  doklady nepřebírá a zaplacenou zálohu uplatní jako výdaj při její úhradě,
+- vedl zaokrouhlení úhrady jako samostatný řádek bez dokladu; v MyÚčtu zůstane
+  nezařazené,
+- vedl nepeněžní pohyb (zápočet) s daňovým příjmem nebo výdajem.
+
+Hláška rozdílu vypíše každý doklad zvlášť: uhrazený doklad se základem a DPH,
+jeho vyrovnání bez peněz (zápočet s dobropisem, odečtenou zálohu), číslo
+a datum pohybu a rozdělení úhrady na daňovou část a DPH v peněžním deníku
+Money (s kódem pohybu, podle něj pohyb v Money dohledáte) a v MyÚčtu. Dál
+uvede, o kolik je daňový příjem nebo výdaj v MyÚčtu vyšší nebo nižší. Je-li
+částka úhrady v obou stejná, uvede i opačný rozdíl DPH: částka se jen přelila
+mezi daňovou částí a DPH. Kde příčina nevyplývá z čísel, uvede pravděpodobnou
+příčinu. U běžné faktury nebo dobropisu hláška navíc ověří, jak úhrada
+připadá na daňovou část a DPH podle dokladu (po odečtení započtených
+dobropisů). Když dokladu odpovídá rozdělení v MyÚčtu, hláška řekne, že se
+použije a oprava není potřeba: součet roku v MyÚčtu se jen bude lišit od
+Money. Když mu neodpovídá, vypíše i rozdělení podle dokladu a řekne, zda mu
+odpovídá Money.
+
+Zápočet ostatní pohledávky proti ostatnímu závazku daňová evidence MyÚčta
+nemá: doklady zůstanou neuhrazené a převod to ohlásí.
+
+**Valutová pokladna.** Daňová evidence vede pokladny jen v korunách, peněžní
+deník Money je v korunách také. Pokladnu, kterou Money vede v cizí měně,
+převod založí jako korunovou a protokol to ohlásí. Pokladní doklady převezme
+v korunách přesně podle Money, valutu nepřepočítává. Částku ve valutě a kurz,
+jak je Money uložilo, uvede v popisu dokladu, například
+*Ubytování (Money: 120,00 EUR, kurz 25,000 Kč)*. Zůstatek pokladny ve valutě
+se nepřevádí.
+
+**Podaná přiznání DPH.** Se zapnutou volbou **Zapsat podaná přiznání DPH
+a uzamknout převzaté období** převod zapíše přiznání DPH a kontrolní hlášení,
+která Money eviduje jako podaná, jako podaná mimo MyÚčto. Za období se zapíše
+jedno podání. Money v záloze nemá jejich XML ani datum podání: záznam je bez
+XML a s časem převodu a dodatečné přiznání k takovému období MyÚčto nesestaví.
+Podání uzamkne doklady firmy do konce posledního podaného období.
+
+**Pokračování v MyÚčtu.** Neuhrazené faktury a ostatní závazky z Money se
+doplácejí v MyÚčtu. Výpis z banky za období, které převod převzal, převzaté
+pohyby nezdvojí. Výpis GPC a stažení z napojené banky je rozpoznají, výpis
+v PDF přeskočí pohyby účtu do dne posledního pohybu převzatého z Money a ohlásí
+to (kapitola [Banka](29_Banka.md)). Pohyb z toho dne, který v Money nebyl,
+doplňte ručně.
+
+### 106.10.11 Omezení
+
+- Daňovou evidenci převod převede jen u agendy vedené jako daňová evidence ve
+  všech letech a bez majetku a mezd. Bankovní účty musí být v korunách,
+  valutovou pokladnu převod převede jako korunovou. Rok, který Money vede jako
+  daňovou evidenci v agendě, která vede i podvojné účetnictví, převod vynechá
+  i s jeho doklady a náhled ho vypíše v upozornění.
+- Převod nikdy nezapíše podvojné účetnictví pro rok, který Money vede jako
+  daňovou evidenci. Agendu, která se v Money z podvojného účetnictví vrátila
+  do daňové evidence, kontrola před převodem zastaví a dávka ji odmítne.
+  Přechod z daňové evidence na podvojné účetnictví převod převede od prvního
+  roku podvojného účetnictví.
 - Formát dat Money není veřejně dokumentovaný. Čtení je ověřené na verzi
   Money S3 26.600; u jiné verze průvodce upozorní a výsledek je o to důležitější
   porovnat se sestavami z Money.
@@ -701,6 +922,7 @@ MyÚčto s výstupy Money nebo s novou zálohou agendy na stránce
 
 ## 106.11 Související kapitoly
 
+- [Kontrola dat po převodu](126_Kontrola_dat_po_prevodu.md) - kontroly a opravy převzatých dat
 - [Souběh se starým systémem](111_Soubeh_se_starym_systemem.md)
 - [Účetní deník](52_Ucetni_denik.md)
 - [Uzávěrka](72_Uzaverka.md)

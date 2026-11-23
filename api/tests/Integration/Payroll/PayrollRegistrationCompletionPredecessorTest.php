@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Integration\Payroll;
 
-use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\Payroll\PayrollRegistrationCompletionRepository;
 use MyInvoice\Service\Payroll\Import\Jmhz\JmhzExternalSubmissionStore;
@@ -29,7 +28,7 @@ final class PayrollRegistrationCompletionPredecessorTest extends TestCase
 
     protected function setUp(): void
     {
-        $container = Bootstrap::buildContainer();
+        $container = \MyInvoice\Tests\Support\PayrollTestContainer::build();
         $this->db = $container->get(Connection::class);
         foreach (['payroll_external_jmhz_submissions', 'payroll_module_state', 'payroll_employment_external_ids'] as $table) {
             if (!$this->db->hasTable($table)) {

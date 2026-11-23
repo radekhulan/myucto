@@ -475,7 +475,7 @@ final class PayrollRegistrationRegzecVariantMatrixTest extends TestCase
                     'contract_workplace' => 'Testov',
                     'workplace_city' => 'Testov',
                     'workplace_municipality_code' => '554782',
-                    'profession_code' => '24110',
+                    'profession_code' => '24111',
                     'required_education_code' => 'T',
                     'position_name' => 'Účetní',
                     'leadership' => false,

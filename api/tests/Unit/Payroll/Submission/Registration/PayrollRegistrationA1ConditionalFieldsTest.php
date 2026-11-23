@@ -86,7 +86,7 @@ final class PayrollRegistrationA1ConditionalFieldsTest extends TestCase
 
         self::assertStringContainsString(' foreigninst="Municipal office, Testov"', $xml);
         self::assertStringContainsString(' preplace="Sídlo zaměstnavatele"', $xml);
-        self::assertStringContainsString('<prof clas="24110" edu="T"/>', $xml);
+        self::assertStringContainsString('<prof clas="24111" edu="T"/>', $xml);
         self::assertStringContainsString('<taxidrezid type="D" num="SK123456789" stat="SK"/>', $xml);
     }
 

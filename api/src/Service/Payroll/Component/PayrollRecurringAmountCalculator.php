@@ -8,6 +8,7 @@ use MyInvoice\Service\Payroll\Calculation\DecimalRate;
 use MyInvoice\Service\Payroll\Calculation\Money;
 use MyInvoice\Service\Payroll\Calculation\MoneyRateCalculator;
 use MyInvoice\Service\Payroll\Calculation\RoundingMode;
+use MyInvoice\Service\Payroll\Employment\PayrollHourlyRemuneration;
 
 final class PayrollRecurringAmountCalculator
 {
@@ -27,6 +28,9 @@ final class PayrollRecurringAmountCalculator
             throw new \InvalidArgumentException('Období musí začínat prvním dnem měsíce.');
         }
 
+        if (PayrollHourlyRemuneration::blocksMonthlyComponent($recurring)) {
+            return $this->manualReview(PayrollHourlyRemuneration::monthlyComponentMessage($recurring));
+        }
         $calculation = $this->string($recurring, 'calculation_kind');
         if ($calculation === 'manual_review') {
             return $this->manualReview('Předpis vyžaduje ruční určení částky.');

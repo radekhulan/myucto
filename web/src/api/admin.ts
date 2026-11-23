@@ -133,6 +133,9 @@ export interface AdminUser {
   is_active: boolean
   created_at: string
   last_login_at: string | null
+  mfa?: { totp: boolean; passkeys: number }
+  /** Napojený účet organizace; jen při vynuceném přihlášení přes poskytovatele, jinak null. */
+  sso_identity?: { provider: string | null; email: string | null; display_name: string | null; last_used_at: string | null } | null
 }
 
 /** Epic F0 — membership uživatel ↔ firma (user_suppliers). role null = zdědit globální users.role. */
@@ -227,6 +230,11 @@ export const adminApi = {
   /** Pošle existujícímu uživateli jednorázový odkaz na nastavení hesla. */
   sendUserPasswordLink: (id: number) =>
     api.post<{ ok: boolean }>(`/admin/users/${id}/password-link`).then(r => r.data),
+  /** Superadmin resetuje MFA jinému uživateli; `stepUpToken` je proof vlastního MFA pro `user.mfa_reset:{id}`. */
+  resetUserMfa: (id: number, reason: string, stepUpToken: string) =>
+    api.post<{ ok: boolean; mail_sent: boolean; passkeys_revoked: number; sessions_invalidated: number; totp_was_enabled: boolean }>(
+      `/admin/users/${id}/mfa-reset`, { reason, step_up_token: stepUpToken },
+    ).then(r => r.data),
   // Epic F0 — přiřazení firem uživateli (prázdné = bez omezení, vidí všechny firmy)
   listUserSuppliers: (id: number) =>
     api.get<UserSupplierAssignment[]>(`/admin/users/${id}/suppliers`).then(r => r.data),
@@ -379,7 +387,8 @@ export interface CronJobsResponse {
   /** Úlohy, které instalace nehlídá, protože nemají co dělat: skript => důvod. */
   inactive?: Record<string, string> | []
   server_time: string
-  install?: CronInstallContext
+  /** Ve spravovaném provozu null: cesty serveru nájemníkovi nepatří. */
+  install?: CronInstallContext | null
   schedule?: CronScheduleContext
 }
 

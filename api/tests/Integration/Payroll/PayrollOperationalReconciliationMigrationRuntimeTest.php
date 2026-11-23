@@ -45,7 +45,7 @@ final class PayrollOperationalReconciliationMigrationRuntimeTest extends TestCas
             if (preg_match('/^myucto_reconciliation_[0-9a-f]{12}_test$/D', $this->database) !== 1) {
                 throw new \LogicException('Neplatný název izolované testovací DB.');
             }
-            $this->server->exec('DROP DATABASE IF EXISTS `' . $this->database . '`');
+            \MyInvoice\Service\Anonymization\DatabaseCloner::dropDatabase($this->server, $this->database);
         }
     }
 

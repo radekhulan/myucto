@@ -11,6 +11,7 @@ use MyInvoice\Repository\Payroll\PayrollInputRepository;
 use MyInvoice\Repository\Payroll\PayrollTimeValue;
 use MyInvoice\Service\Payroll\Calculation\PayrollWageRoundingPolicy;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
+use MyInvoice\Service\Payroll\PayrollHourlyAverageSegments;
 use MyInvoice\Service\Payroll\Time\CzechHolidayCalendar;
 use MyInvoice\Service\Payroll\Time\PayrollWorkCalendarSchedule;
 use PDO;
@@ -87,12 +88,15 @@ final class PayrollObstacleInputMaterializer
             (string) $absence['date_from'],
             (string) $absence['date_to'],
         );
+        $compensatedSegments = array_values(array_filter($segments, static fn(array $segment): bool => !array_key_exists((string) $segment['local_date'], $holidays)));
+        $floor = (new PayrollHourlyAverageSegments($this->db))->forEmployment($supplierId, $employmentId, $compensatedSegments, $averageHourly);
         $result = PaidObstacleCompensationCalculator::calculate(
             $averageHourly,
             $rate,
             $segments,
             $holidays,
             $rounding = PayrollWageRoundingPolicy::forSupplier($this->db, $supplierId),
+            $floor['averages'],
         );
         if ($result['minutes'] === []) {
             // Bez rozvržené směny nevznikne ani krácení mzdy (měří se týmiž
@@ -133,6 +137,7 @@ final class PayrollObstacleInputMaterializer
                 'rounding' => $rounding->traceLabel(),
                 'rounding_basis' => $rounding->basisLabel(),
                 'entitlement_basis' => $kind->statutoryBasis(),
+                ...(isset($floor['proofs'][$period]) ? ['hourly_average_floor' => $floor['proofs'][$period], 'hourly_average_segments' => array_values(array_filter($compensatedSegments, static fn(array $segment): bool => substr((string) $segment['local_date'], 0, 7) === substr($period, 0, 7)))] : []),
             ]);
             $employeeId ??= $this->employeeId($supplierId, $employmentId);
             $input = $this->inputs->create($supplierId, [

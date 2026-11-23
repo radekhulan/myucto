@@ -8,6 +8,7 @@ use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\ActivityLogHashChain;
+use MyInvoice\Service\Nonprofit\Membership\MembershipErasureService;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
 
@@ -33,10 +34,13 @@ final class ActivityLogHashChainTest extends TestCase
     private ActivityLogger $logger;
     private ActivityLogHashChain $chain;
     private bool $cleanup = false;
-    private int $deferredFrom = 0;
+    /** Hranice odloženého pečetění před testem; NULL se obnoví jako NULL. */
+    private ?int $deferredFrom = null;
     /** Id, od kterého se ověřuje — cizí záznamy v sadě jsou pro tenhle test šum. */
     private int $from = 0;
     private ?\Closure $restorePruneMark = null;
+    /** @var list<int> návrhy výmazu založené testem (úklid v tearDown) */
+    private array $erasureProposals = [];
 
     protected function setUp(): void
     {
@@ -64,7 +68,8 @@ final class ActivityLogHashChainTest extends TestCase
         // Do `activity_log` zapisují i jiné testy sady; ověřuje se proto jen úsek od `from`.
         $pdo = $this->db->pdo();
         $this->from = 1 + (int) $pdo->query('SELECT COALESCE(MAX(id), 0) FROM activity_log')->fetchColumn();
-        $this->deferredFrom = (int) $pdo->query('SELECT deferred_from_id FROM activity_log_chain_head WHERE id = 1')->fetchColumn();
+        $deferredFrom = $pdo->query('SELECT deferred_from_id FROM activity_log_chain_head WHERE id = 1')->fetchColumn();
+        $this->deferredFrom = $deferredFrom === false || $deferredFrom === null ? null : (int) $deferredFrom;
         $this->cleanup = true;
     }
 
@@ -83,6 +88,10 @@ final class ActivityLogHashChainTest extends TestCase
         if ($this->cleanup) {
             $pdo->prepare('DELETE FROM activity_log WHERE id >= ?')->execute([$this->from]);
             $pdo->prepare('UPDATE activity_log_chain_head SET deferred_from_id = ? WHERE id = 1')->execute([$this->deferredFrom]);
+            foreach ($this->erasureProposals as $proposal) {
+                $pdo->prepare('DELETE FROM nonprofit_membership_erasure_items WHERE proposal_id = ?')->execute([$proposal]);
+                $pdo->prepare('DELETE FROM nonprofit_membership_erasure_proposals WHERE id = ?')->execute([$proposal]);
+            }
         }
         $this->db->close();
     }
@@ -313,14 +322,299 @@ final class ActivityLogHashChainTest extends TestCase
     }
 
     /**
+     * Schválený výmaz osobních údajů (#321, krok 10) přepíše payload auditu oprav člena.
+     * Uložený hash zůstane, řetěz dál navazuje a ověření přijme redigovaný obsah jen s otiskem redakce.
+     */
+    public function testRedactionKeepsChainVerifiable(): void
+    {
+        [$supplier, $item] = $this->erasureItem('done');
+        $this->write('test.a');
+        $id = $this->write('nonprofit_membership_member_update', ['before' => ['member_number' => 'SYN-1', 'client_id' => 5]], $supplier);
+        $this->write('test.c');
+        $hash = $this->row($id)['hash'];
+        self::assertNotNull($hash);
+
+        $this->redactInTransaction($id, ['before' => ['member_number' => '[vymazáno]', 'client_id' => null]], MembershipErasureService::REDACTION_SOURCE, $item);
+
+        self::assertSame($hash, $this->row($id)['hash'], 'Hash redigovaného záznamu se nemění.');
+        $attestation = $this->db->pdo()->prepare('SELECT hash FROM activity_log WHERE action = ? AND entity_id = ? AND id >= ?');
+        $attestation->execute([ActivityLogHashChain::REDACTION_ACTION, $id, $this->from]);
+        self::assertNotNull($attestation->fetchColumn(), 'Atestace redakce se zapečetí hned po commitu, je článkem řetězu.');
+        self::assertTrue($this->chain->verify($this->from)['ok'], 'Redigovaný záznam s otiskem redakce řetěz neporuší.');
+        self::assertStringNotContainsString('SYN-1', (string) $this->payload($id));
+
+        // Další změna redigovaného obsahu se pozná stejně jako u neredigovaného záznamu.
+        $this->db->pdo()->prepare('UPDATE activity_log SET payload = ? WHERE id = ?')->execute(['{"before":{"member_number":"SYN-1"}}', $id]);
+        $r = $this->chain->verify($this->from);
+        self::assertFalse($r['ok']);
+        self::assertContains($id, array_column($r['broken'], 'id'));
+    }
+
+    public function testRedactionIsLimitedToAllowlistedActionsAndProvenRecords(): void
+    {
+        $other = $this->write('invoice.sent', ['to' => 'synthetic@example.test']);
+        try {
+            $this->redactInTransaction($other, []);
+            self::fail('Redakce mimo allowlist prošla.');
+        } catch (\LogicException) {
+        }
+        $tampered = $this->write('nonprofit_membership_revision_void', ['reason' => 'Synthetic reason']);
+        $this->db->pdo()->prepare('UPDATE activity_log SET payload = ? WHERE id = ?')->execute(['{"reason":"Changed"}', $tampered]);
+        try {
+            $this->redactInTransaction($tampered, ['reason' => '[vymazáno]']);
+            self::fail('Redakce zakryla dřívější zásah do záznamu.');
+        } catch (\RuntimeException) {
+        }
+        self::assertSame('{"reason":"Changed"}', $this->payload($tampered), 'Odmítnutá redakce nic nezměnila.');
+    }
+
+    /**
+     * Redakce musí stát na skutečně provedeném výmazu: atestaci i otisk redakce dopočítá každý, kdo může
+     * zapisovat do databáze (stejně jako redact()). Zdroj mimo výmaz členů, nedokončená nebo neexistující
+     * položka, položka jiné firmy a payload jiného tvaru, než jaký výmaz zapisuje, verify() neprojdou.
+     */
+    public function testRedactionWithoutCompletedErasureOrWithForeignPayloadIsDetected(): void
+    {
+        [$supplier, $done] = $this->erasureItem('done');
+        [, $pending] = $this->erasureItem('pending');
+        $missing = $done + 1_000_000;
+        $source = MembershipErasureService::REDACTION_SOURCE;
+        $member = ['member_number' => 'SYN-3', 'reason' => 'Synthetic reason', 'client_id' => 7];
+        $redacted = MembershipErasureService::redactAuditPayload($member);
+        $cases = [
+            'legit' => ['nonprofit_membership_member_update', $supplier, $redacted, $source, $done, true],
+            'legit_client' => ['client.updated', $supplier, ['redacted' => MembershipErasureService::REDACTED], $source, $done, true],
+            'pending_item' => ['nonprofit_membership_member_update', $supplier, $redacted, $source, $pending, false],
+            'missing_item' => ['nonprofit_membership_member_update', $supplier, $redacted, $source, $missing, false],
+            'foreign_source' => ['nonprofit_membership_member_update', $supplier, $redacted, 'test', $done, false],
+            'foreign_supplier' => ['nonprofit_membership_member_update', null, $redacted, $source, $done, false],
+            'member_payload' => ['nonprofit_membership_revision_void', $supplier, ['reason' => 'Rewritten history'], $source, $done, false],
+            'client_payload' => ['client.updated', $supplier, ['redacted' => MembershipErasureService::REDACTED, 'name' => 'Rewritten'], $source, $done, false],
+        ];
+        $ids = [];
+        foreach ($cases as $label => [$action, $owner, , , , ]) {
+            $ids[$label] = $this->write($action, $member, $owner);
+        }
+        $this->write('test.c');
+        foreach ($cases as $label => [, , $payload, $redactionSource, $sourceId, ]) {
+            $this->redactInTransaction($ids[$label], $payload, $redactionSource, $sourceId);
+        }
+
+        $broken = array_column($this->chain->verify($this->from)['broken'], 'id');
+        foreach ($cases as $label => [, , , , , $valid]) {
+            $valid
+                ? self::assertNotContains($ids[$label], $broken, 'Platná redakce: ' . $label)
+                : self::assertContains($ids[$label], $broken, 'Podvržená redakce: ' . $label);
+        }
+    }
+
+    /**
+     * Položka výmazu (s vlastním návrhem) u existující firmy; zapisuje se mimo transakci, uklízí tearDown.
+     *
+     * @return array{0:int,1:int} firma, položka
+     */
+    private function erasureItem(string $outcome): array
+    {
+        if (!$this->db->hasTable('nonprofit_membership_erasure_items')) {
+            self::markTestSkipped('Migrace 2305 neproběhla.');
+        }
+        $pdo = $this->db->pdo();
+        $supplier = $pdo->query('SELECT MIN(id) FROM supplier')->fetchColumn();
+        self::assertNotNull($supplier, 'Test DB nemá žádnou firmu.');
+        $pdo->prepare("INSERT INTO nonprofit_membership_erasure_proposals (supplier_id, status, as_of) VALUES (?, 'executed', '2032-01-02')")->execute([(int) $supplier]);
+        $proposal = (int) $pdo->lastInsertId();
+        $this->erasureProposals[] = $proposal;
+        $pdo->prepare("INSERT INTO nonprofit_membership_erasure_items (supplier_id, proposal_id, member_id, subject, governing_rule, ended_on, retained_until, outcome)
+            VALUES (?, ?, 999999999, 'member', 'membership_only', '2026-06-30', '2031-12-31', ?)")->execute([(int) $supplier, $proposal, $outcome]);
+        return [(int) $supplier, (int) $pdo->lastInsertId()];
+    }
+
+    private function redactInTransaction(int $id, array $payload, string $source = 'test', int $sourceId = 1): void
+    {
+        $pdo = $this->db->pdo();
+        $pdo->beginTransaction();
+        try {
+            $this->chain->redact($id, $payload, $source, $sourceId);
+            $pdo->commit();
+        } catch (\Throwable $e) {
+            $pdo->rollBack();
+            throw $e;
+        }
+    }
+
+    private function payload(int $id): ?string
+    {
+        $stmt = $this->db->pdo()->prepare('SELECT payload FROM activity_log WHERE id = ?');
+        $stmt->execute([$id]);
+        $value = $stmt->fetchColumn();
+        return $value === false ? null : (string) $value;
+    }
+
+    /**
+     * Redakce bez zřetězené atestace, nebo u akce mimo allowlist, verify() neprojde, i když otisk
+     * redakce sedí. Jinak by stačil jeden UPDATE a jeden INSERT a zásah do minulosti by zmizel.
+     */
+    public function testForgedRedactionWithoutAttestationOrOutsideAllowlistIsDetected(): void
+    {
+        // Řádek s id nižším než redigovaný (zapečetí ho další zápis); jeho id později převezme atestace.
+        // Jeho smazání přeruší řetěz u následujícího článku; test proto kontroluje jen redigovaný záznam.
+        $this->db->pdo()->prepare("INSERT INTO activity_log (action, payload) VALUES ('test.placeholder', NULL)")->execute();
+        $placeholder = (int) $this->db->pdo()->lastInsertId();
+        // Redakce stojí na dokončené položce výmazu a má jeho tvar; chybět smí jen atestace.
+        [$supplier, $item] = $this->erasureItem('done');
+        $forged = $this->write('nonprofit_membership_member_update', ['member_number' => 'SYN-2'], $supplier);
+        $other = $this->write('invoice.sent', ['to' => 'synthetic@example.test'], $supplier);
+        $this->write('test.c');
+        $pdo = $this->db->pdo();
+        foreach ([$forged, $other] as $id) {
+            $pdo->prepare('UPDATE activity_log SET payload = ? WHERE id = ?')->execute(['{"changed":true}', $id]);
+            $digest = $this->redactionDigestOf($id);
+            $pdo->prepare('INSERT INTO activity_log_redactions (activity_log_id, supplier_id, redacted_digest, source, source_id) VALUES (?, ?, ?, ?, ?)')
+                ->execute([$id, $supplier, $digest, MembershipErasureService::REDACTION_SOURCE, $item]);
+        }
+        // Atestace jen pro záznam mimo allowlist (a zapečetěná jako běžný článek).
+        $this->logger->log(ActivityLogHashChain::REDACTION_ACTION, null, 'activity_log', $other, ['digest' => $this->redactionDigestOf($other)]);
+        $broken = array_column($this->chain->verify($this->from)['broken'], 'id');
+        self::assertContains($forged, $broken, 'Redakce bez atestace.');
+        self::assertContains($other, $broken, 'Redakce akce mimo allowlist.');
+
+        // Nezapečetěná atestace v mezeře pod hranicí odloženého pečetění (po promazání) se neuznává.
+        $pdo->prepare("INSERT INTO activity_log (action, entity_type, entity_id, payload) VALUES (?, 'activity_log', ?, ?)")
+            ->execute([ActivityLogHashChain::REDACTION_ACTION, $forged, json_encode(['digest' => $this->redactionDigestOf($forged)])]);
+        $unsealed = (int) $pdo->lastInsertId();
+        // V okně odloženého pečetění se nezapečetěná atestace uzná (dopečetí ji další zápis)...
+        self::assertNotContains($forged, array_column($this->chain->verify($this->from)['broken'], 'id'));
+        // ...ale jen za redigovaným záznamem: atestace s nižším id (zapsaná „předem“) neplatí.
+        $pdo->prepare('DELETE FROM activity_log WHERE id = ?')->execute([$placeholder]);
+        $pdo->prepare('UPDATE activity_log SET id = ? WHERE id = ?')->execute([$placeholder, $unsealed]);
+        self::assertContains($forged, array_column($this->chain->verify($this->from)['broken'], 'id'), 'Atestace před záznamem.');
+        $pdo->prepare('UPDATE activity_log SET id = ? WHERE id = ?')->execute([$unsealed, $placeholder]);
+        // ...pod hranicí okna (mezera po promazání) ne; tearDown hranici vrací.
+        $pdo->prepare('UPDATE activity_log_chain_head SET deferred_from_id = ? WHERE id = 1')->execute([$unsealed + 1]);
+        self::assertContains($forged, array_column($this->chain->verify($this->from)['broken'], 'id'), 'Atestace mimo řetěz.');
+    }
+
+    /** Redakce dosud nezapečetěného záznamu: zapečetí se nad novým obsahem a řetěz projde. */
+    public function testRedactionOfUnsealedRecordIsSealedOverTheNewContent(): void
+    {
+        $this->write('test.a');
+        $pdo = $this->db->pdo();
+        $pdo->prepare("INSERT INTO activity_log (action, payload) VALUES ('nonprofit_membership_revision_void', ?)")->execute(['{"reason":"Synthetic reason"}']);
+        $id = (int) $pdo->lastInsertId();
+        self::assertNull($this->row($id)['hash'] ?? null);
+        $this->redactInTransaction($id, ['reason' => '[vymazáno]']);
+        $this->chain->sealPending();
+        self::assertNotNull($this->row($id)['hash']);
+        self::assertTrue($this->chain->verify($this->from)['ok']);
+        self::assertSame('{"reason":"[vymazáno]"}', $this->payload($id));
+    }
+
+    /**
+     * Souběh s odloženým pečetěním: pečetění během nedokončené redakce nesmí zapečetit původní obsah
+     * (verify() by pak hlásil podvržený záznam) ani na redakci čekat; řádek přeskočí a zapečetí ho až
+     * další běh nad redigovaným obsahem.
+     */
+    public function testSealingSkipsRecordUnderRedactionAndSealsItsRedactedContent(): void
+    {
+        $this->write('test.a');
+        $pdo = $this->db->pdo();
+        $pdo->prepare("INSERT INTO activity_log (action, payload) VALUES ('client.updated', ?)")->execute(['{"name":"Synthetic Person"}']);
+        $id = (int) $pdo->lastInsertId();
+        $pdo->beginTransaction();
+        $this->chain->redact($id, ['name' => '[vymazáno]'], 'test', 1);
+
+        $base = tempnam(sys_get_temp_dir(), 'seal');
+        $script = $base . '.php';
+        // Potomek nejdřív ohlásí id svého spojení, aby rodič sledoval právě jeho čekání na zámek.
+        file_put_contents($script, '<?php require ' . var_export(dirname(__DIR__, 2) . '/vendor/autoload.php', true) . ';'
+            . ' $c = \MyInvoice\Bootstrap::buildContainer();'
+            . ' echo $c->get(\MyInvoice\Infrastructure\Database\Connection::class)->pdo()->query("SELECT CONNECTION_ID()")->fetchColumn(), "\n"; fflush(STDOUT);'
+            . ' $c->get(\MyInvoice\Service\ActivityLogHashChain::class)->sealPending();');
+        $env = getenv();
+        $env['MYINVOICE_DB_NAME'] = (string) $pdo->query('SELECT DATABASE()')->fetchColumn();
+        $pipes = [];
+        $child = proc_open([PHP_BINARY, $script], [1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $pipes, null, $env, ['bypass_shell' => true]);
+        $exit = null;
+        $output = '';
+        try {
+            self::assertIsResource($child);
+            // Výstup potomka se čte průběžně: plná roura by ho zablokovala a příčina pádu by se ztratila.
+            foreach ([1, 2] as $stream) stream_set_blocking($pipes[$stream], false);
+            // Čekání na zámek jen spojení potomka (sdílený server může mít jiná čekání). INNODB_LOCK_WAITS
+            // MariaDB 11.8 neplní; stav transakce potomka v INNODB_TRX ano.
+            $waits = $pdo->prepare("SELECT COUNT(*) FROM information_schema.INNODB_TRX WHERE trx_mysql_thread_id = ? AND trx_state = 'LOCK WAIT'");
+            $waited = false;
+            for ($i = 0; $i < 600; $i++) {
+                foreach ([1, 2] as $stream) $output .= (string) stream_get_contents($pipes[$stream]);
+                $status = proc_get_status($child);
+                if (!$status['running']) {
+                    $exit = $status['exitcode'];
+                    break;
+                }
+                if (preg_match('/^(\d+)\n/', $output, $match) !== 1) {
+                    usleep(50_000);
+                    continue;
+                }
+                $waits->execute([(int) $match[1]]);
+                if ((int) $waits->fetchColumn() > 0) {
+                    $waited = true;
+                    break;
+                }
+                usleep(50_000);
+            }
+            self::assertTrue($waited || $exit !== null, 'Pečetění ve druhém spojení do 30 s nedoběhlo, visí na nedokončené redakci: ' . $output);
+            $pdo->commit();
+            // Obě roury se dočítají souběžně bez blokování: potomek plnící stderr by jinak čekal na rodiče
+            // čtoucího stdout do konce a test by visel.
+            for ($i = 0; $i < 600 && $exit === null; $i++) {
+                foreach ([1, 2] as $stream) $output .= (string) stream_get_contents($pipes[$stream]);
+                $status = proc_get_status($child);
+                if (!$status['running']) $exit = $status['exitcode'];
+                else usleep(50_000);
+            }
+            foreach ([1, 2] as $stream) $output .= (string) stream_get_contents($pipes[$stream]);
+            if ($exit === null) {
+                proc_terminate($child);
+                self::fail('Pečetění ve druhém spojení po commitu redakce nedoběhlo: ' . $output);
+            }
+            proc_close($child);
+            $child = null;
+            self::assertFalse($waited, 'Pečetění čekalo na nedokončenou redakci místo přeskočení řádku.');
+            self::assertSame(0, $exit, $output);
+        } finally {
+            if (is_resource($child)) {
+                proc_terminate($child);
+                proc_close($child);
+            }
+            foreach ($pipes as $pipe) if (is_resource($pipe)) fclose($pipe);
+            @unlink($script);
+            @unlink($base);
+        }
+        // Commit redakce záznam zapečetí sám (háček po commitu); jinak ho dopečetí další běh.
+        $this->chain->sealPending();
+        self::assertNotNull($this->row($id)['hash']);
+        self::assertSame('{"name":"[vymazáno]"}', $this->payload($id));
+        self::assertTrue($this->chain->verify($this->from)['ok']);
+    }
+
+    private function redactionDigestOf(int $id): string
+    {
+        $method = new \ReflectionMethod(ActivityLogHashChain::class, 'redactionDigest');
+        $select = new \ReflectionMethod(ActivityLogHashChain::class, 'selectList');
+        $row = $this->db->pdo()->query('SELECT ' . $select->invoke(null) . ', prev_hash, hash FROM activity_log WHERE id = ' . $id)->fetch(\PDO::FETCH_ASSOC);
+        $data = array_diff_key($row, ['prev_hash' => 1, 'hash' => 1]);
+        return $method->invoke(null, (string) $row['hash'], $data, $row['prev_hash']);
+    }
+
+    /**
      * Zapíše záznam a vrátí jeho id.
      *
      * `lastInsertId()` se použít NEDÁ: zapečetění uvnitř `log()` provede UPDATE, po kterém
      * už hodnota neodpovídá vloženému řádku. Id se proto dohledá podle akce.
      */
-    private function write(string $action, ?array $payload = null): int
+    private function write(string $action, ?array $payload = null, ?int $supplier = null): int
     {
-        $this->logger->log($action, null, null, null, $payload);
+        $this->logger->log($action, null, null, null, $payload, null, null, $supplier);
 
         $stmt = $this->db->pdo()->prepare(
             'SELECT id FROM activity_log WHERE action = ? ORDER BY id DESC LIMIT 1'

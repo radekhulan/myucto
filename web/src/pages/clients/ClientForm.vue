@@ -17,6 +17,8 @@ import InvoiceCounterField from '@/components/settings/InvoiceCounterField.vue'
 import EntityDimensionDefaults from '@/components/dimensions/EntityDimensionDefaults.vue'
 import { formatDate } from '@/composables/useFormat'
 import { addDaysIso, appIsoDate } from '@/utils/date'
+import NumberTemplateInput from '@/components/ui/NumberTemplateInput.vue'
+import { numberTemplateState, type NumberTemplateOptions } from '@/utils/numberTemplate'
 import {
   CLIENT_EMAIL_DEFAULT_ATTACHMENT_NAME,
   CLIENT_EMAIL_DEFAULT_SUBJECT,
@@ -145,6 +147,8 @@ const form = ref<ClientPayload>({
   is_customer: route.query.role !== 'vendor',
   is_vendor: route.query.role === 'vendor',
   is_fuel_station: false,
+  // Drobný zákazník (#310): bez adresy, jen zjednodušené daňové doklady (§ 30 ZDPH).
+  simplified_only: false,
   auto_send_reminders: true,
   payment_due_default: null,
   payment_due_unit: null,
@@ -284,6 +288,7 @@ const aresError = ref('')
 const viesLoading = ref(false)
 const viesError = ref('')
 const viesResult = ref<import('@/api/clients').ViesLookupResult | null>(null)
+const simplifiedHintOpen = ref(false)
 const duplicateIc = ref<{ id: number; name: string } | null>(null)
 const duplicateDic = ref<{ id: number; name: string } | null>(null)
 
@@ -363,6 +368,12 @@ watch(() => route.query.role, (role) => {
   form.value.is_customer = !vendor
 })
 
+// Drobný zákazník nesmí být v přenesené daňové povinnosti (§ 30 odst. 2 ZDPH), server
+// by kombinaci odmítl.
+function onSimplifiedOnlyToggle() {
+  if (form.value.simplified_only) form.value.reverse_charge = false
+}
+
 function sanitize(c: Client): Partial<ClientPayload> {
   return {
     company_name: c.company_name,
@@ -389,6 +400,7 @@ function sanitize(c: Client): Partial<ClientPayload> {
     is_customer: c.is_customer !== false,
     is_vendor:   c.is_vendor   === true,
     is_fuel_station: c.is_fuel_station === true,
+    simplified_only: c.simplified_only === true,
     auto_send_reminders: c.auto_send_reminders ?? true,
     payment_due_default: c.payment_due_default ?? null,
     payment_due_unit: c.payment_due_unit ?? null,
@@ -503,6 +515,12 @@ function warnDuplicateCandidates(candidates?: ClientDuplicateMatch[]) {
   }
 }
 
+/** Chybný tvar čísla v řadě klienta; do opravy nejde uložit. Období se posuzuje jen u vlastního přepsání. */
+const numberingOptions = computed<NumberTemplateOptions>(() => ({ period: form.value.invoice_number_period || null }))
+const numberingInvalid = computed(() =>
+  [form.value.invoice_number_format, form.value.proforma_number_format, form.value.credit_note_number_format]
+    .some((v) => numberTemplateState(t, v).invalid))
+
 async function submit() {
   if (blockDemoMutation()) return
   submitting.value = true
@@ -604,9 +622,9 @@ if (!props.embedded) {
               <div class="flex gap-2">
                 <input autocomplete="off" v-model="form.ic" maxlength="8" placeholder="12345678"
                   @blur="checkDuplicateIc"
-                  class="min-w-0 flex-1 h-9 px-3 border border-neutral-300 rounded-md font-mono text-sm focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 outline-none" />
+                  class="min-w-0 flex-1 h-9 px-3 border border-neutral-300 rounded-md font-mono text-sm max-md:h-10 max-md:text-base focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 outline-none" />
                 <button type="button" @click="loadFromAres" :disabled="!form.ic || aresLoading"
-                  class="shrink-0 whitespace-nowrap px-3 h-9 text-sm bg-surface border border-primary-300 text-primary-700 rounded-md hover:bg-primary-100 disabled:opacity-50">
+                  class="shrink-0 whitespace-nowrap px-3 h-9 text-sm max-md:h-10 max-md:px-4 bg-surface border border-primary-300 text-primary-700 rounded-md hover:bg-primary-100 disabled:opacity-50">
                   {{ aresLoading ? '…' : 'ARES' }}
                 </button>
               </div>
@@ -624,9 +642,9 @@ if (!props.embedded) {
               <div class="flex gap-2">
                 <input autocomplete="off" v-model="form.dic" :placeholder="isSkClient ? 'SK2022638992' : 'CZ12345678'"
                   @blur="checkDuplicateDic"
-                  class="min-w-0 flex-1 h-9 px-3 border border-neutral-300 rounded-md font-mono text-sm focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 outline-none" />
+                  class="min-w-0 flex-1 h-9 px-3 border border-neutral-300 rounded-md font-mono text-sm max-md:h-10 max-md:text-base focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 outline-none" />
                 <button type="button" @click="checkVies" :disabled="!form.dic || viesLoading"
-                  class="shrink-0 whitespace-nowrap px-3 h-9 text-sm bg-surface border border-primary-300 text-primary-700 rounded-md hover:bg-primary-100 disabled:opacity-50">
+                  class="shrink-0 whitespace-nowrap px-3 h-9 text-sm max-md:h-10 max-md:px-4 bg-surface border border-primary-300 text-primary-700 rounded-md hover:bg-primary-100 disabled:opacity-50">
                   {{ viesLoading ? '…' : 'VIES' }}
                 </button>
               </div>
@@ -708,6 +726,18 @@ if (!props.embedded) {
           </div>
         </div>
 
+        <!-- Drobný zákazník (#310) — karta jen se jménem a kontaktem. Server ji pak pustí
+             jen na zjednodušený daňový doklad do limitu § 30 ZDPH. -->
+        <div v-if="form.is_customer" class="rounded-md border border-neutral-200 p-3" data-test="client-simplified-only">
+          <label class="flex items-center gap-2 text-sm font-medium text-neutral-700 cursor-pointer">
+            <input v-model="form.simplified_only" type="checkbox" class="rounded border-neutral-300 text-primary-600"
+              @change="onSimplifiedOnlyToggle" />
+            <span>{{ t('client.simplified_only_label') }}</span>
+          </label>
+          <p class="text-xs text-neutral-500 mt-1 ml-6 max-md:cursor-pointer" :class="simplifiedHintOpen ? '' : 'max-md:line-clamp-2'"
+            @click="simplifiedHintOpen = !simplifiedHintOpen">{{ t('client.simplified_only_hint') }}</p>
+        </div>
+
         <!-- Základní -->
         <div>
           <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('client.company_name') }} *</label>
@@ -716,14 +746,14 @@ if (!props.embedded) {
           <p data-field-error v-if="errors.company_name" class="text-xs text-danger-500 mt-1">{{ errors.company_name[0] }}</p>
         </div>
 
-        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <div>
+        <div class="grid grid-cols-2 gap-3">
+          <div class="min-w-0">
             <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('client.first_name') }}</label>
             <input autocomplete="off" v-model="form.first_name" maxlength="60"
               class="w-full h-10 px-3 border border-neutral-300 rounded-md focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 outline-none" />
             <p data-field-error v-if="errors.first_name" class="text-xs text-danger-500 mt-1">{{ errors.first_name[0] }}</p>
           </div>
-          <div>
+          <div class="min-w-0">
             <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('client.last_name') }}</label>
             <input autocomplete="off" v-model="form.last_name" maxlength="60"
               class="w-full h-10 px-3 border border-neutral-300 rounded-md focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 outline-none" />
@@ -731,19 +761,20 @@ if (!props.embedded) {
           </div>
         </div>
 
-        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <div>
-            <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('client.main_email') }}</label>
+        <div class="grid grid-cols-2 gap-3">
+          <div class="min-w-0">
+            <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('client.main_email') }}{{ form.simplified_only ? ' *' : '' }}</label>
             <input autocomplete="off" v-model="form.main_email" type="email"
               class="w-full h-10 px-3 border border-neutral-300 rounded-md focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 outline-none" />
             <p data-field-error v-if="errors.main_email" class="text-xs text-danger-500 mt-1">{{ errors.main_email[0] }}</p>
           </div>
-          <div>
+          <div class="min-w-0">
             <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('client.phone') }}</label>
             <input autocomplete="off" v-model="form.phone"
               class="w-full h-10 px-3 border border-neutral-300 rounded-md focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 outline-none" />
             <p data-field-error v-if="errors.phone" class="text-xs text-danger-500 mt-1">{{ errors.phone[0] }}</p>
           </div>
+          <p v-if="form.simplified_only" class="col-span-2 text-xs text-neutral-500 -mt-1">{{ t('client.simplified_only_contact_hint') }}</p>
         </div>
 
         <!-- E-mailové kontakty dle účelu (#86) — plný editor i embedded modal (faktura/new) -->
@@ -814,14 +845,14 @@ if (!props.embedded) {
 
         <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
           <div class="sm:col-span-2">
-            <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('client.street') }} *</label>
-            <input autocomplete="off" v-model="form.street" required
+            <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('client.street') }}{{ form.simplified_only ? '' : ' *' }}</label>
+            <input autocomplete="off" v-model="form.street" :required="!form.simplified_only"
               class="w-full h-10 px-3 border border-neutral-300 rounded-md focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 outline-none" />
             <p data-field-error v-if="errors.street" class="text-xs text-danger-500 mt-1">{{ errors.street[0] }}</p>
           </div>
           <div>
-            <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('client.zip') }} *</label>
-            <input autocomplete="off" v-model="form.zip" required maxlength="10"
+            <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('client.zip') }}{{ form.simplified_only ? '' : ' *' }}</label>
+            <input autocomplete="off" v-model="form.zip" :required="!form.simplified_only" maxlength="10"
               class="w-full h-10 px-3 border border-neutral-300 rounded-md focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 outline-none" />
             <p data-field-error v-if="errors.zip" class="text-xs text-danger-500 mt-1">{{ errors.zip[0] }}</p>
           </div>
@@ -829,8 +860,8 @@ if (!props.embedded) {
 
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div>
-            <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('client.city') }} *</label>
-            <input autocomplete="off" v-model="form.city" required
+            <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('client.city') }}{{ form.simplified_only ? '' : ' *' }}</label>
+            <input autocomplete="off" v-model="form.city" :required="!form.simplified_only"
               class="w-full h-10 px-3 border border-neutral-300 rounded-md focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 outline-none" />
             <p data-field-error v-if="errors.city" class="text-xs text-danger-500 mt-1">{{ errors.city[0] }}</p>
           </div>
@@ -919,8 +950,9 @@ if (!props.embedded) {
 
         <div class="space-y-2">
           <label class="flex items-center gap-2 text-sm">
-            <input v-model="form.reverse_charge" type="checkbox" class="rounded border-neutral-300 text-primary-600" />
-            <span>{{ t('client.reverse_charge') }}</span>
+            <input v-model="form.reverse_charge" type="checkbox" class="rounded border-neutral-300 text-primary-600"
+              :disabled="form.simplified_only" />
+            <span :class="form.simplified_only ? 'text-neutral-400' : ''">{{ t('client.reverse_charge') }}</span>
           </label>
 
           <!-- § 36a ZDPH / § 23 odst. 7 ZDP — spojená osoba. Typ vztahu se eviduje zvlášť,
@@ -1122,8 +1154,7 @@ if (!props.embedded) {
           <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label class="block text-xs font-medium text-neutral-700 mb-1">{{ t('client.invoice_number_format') }}</label>
-              <input v-model="form.invoice_number_format" type="text" maxlength="60" placeholder="{YY}{CCCC}"
-                class="w-full h-10 px-3 border border-neutral-300 rounded-md font-mono text-sm focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 outline-none" />
+              <NumberTemplateInput v-model="form.invoice_number_format" :options="numberingOptions" placeholder="{YY}{CCCC}" input-class="h-10 px-3 rounded-md text-sm" />
               <!--
                 Počítadlo vlastní řady klienta (issue #74) — jen u už uloženého klienta:
                 endpoint míří na jeho id a na šablonu, kterou zná server.
@@ -1133,15 +1164,13 @@ if (!props.embedded) {
             </div>
             <div>
               <label class="block text-xs font-medium text-neutral-700 mb-1">{{ t('client.proforma_number_format') }}</label>
-              <input v-model="form.proforma_number_format" type="text" maxlength="60" placeholder="9{YY}{CCCC}"
-                class="w-full h-10 px-3 border border-neutral-300 rounded-md font-mono text-sm focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 outline-none" />
+              <NumberTemplateInput v-model="form.proforma_number_format" :options="numberingOptions" placeholder="9{YY}{CCCC}" input-class="h-10 px-3 rounded-md text-sm" />
               <InvoiceCounterField v-if="clientId" type="proforma" :template="form.proforma_number_format"
                 :period="form.invoice_number_period" :client-id="clientId" />
             </div>
             <div>
               <label class="block text-xs font-medium text-neutral-700 mb-1">{{ t('client.credit_note_number_format') }}</label>
-              <input v-model="form.credit_note_number_format" type="text" maxlength="60" placeholder=""
-                class="w-full h-10 px-3 border border-neutral-300 rounded-md font-mono text-sm focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 outline-none" />
+              <NumberTemplateInput v-model="form.credit_note_number_format" :options="numberingOptions" placeholder="" input-class="h-10 px-3 rounded-md text-sm" />
               <InvoiceCounterField v-if="clientId" type="credit_note" :template="form.credit_note_number_format"
                 :period="form.invoice_number_period" :client-id="clientId" />
             </div>
@@ -1173,7 +1202,7 @@ if (!props.embedded) {
         <button v-if="embedded" type="button" @click="emit('cancel')"
           class="px-4 h-10 border border-neutral-300 rounded-md text-neutral-700 hover:bg-surface text-sm font-medium">{{ t('common.cancel') }}</button>
         <RouterLink v-else to="/clients" class="px-4 h-10 leading-10 border border-neutral-300 rounded-md text-neutral-700 hover:bg-surface text-sm font-medium">{{ t('common.cancel') }}</RouterLink>
-        <button type="submit" :disabled="submitting"
+        <button type="submit" :disabled="submitting || numberingInvalid"
           class="px-5 h-10 bg-primary-600 hover:bg-primary-700 disabled:bg-neutral-300 text-white text-sm font-medium rounded-md">
           {{ submitting ? t('common.saving') : (isEdit ? t('common.save') : t('common.create')) }}
         </button>

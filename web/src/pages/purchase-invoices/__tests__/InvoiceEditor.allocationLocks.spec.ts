@@ -21,6 +21,12 @@ vi.mock('vue-router', () => ({
   RouterLink: { name: 'RouterLink', props: ['to'], template: '<a><slot /></a>' },
 }))
 
+vi.mock('@/composables/useUserPrefs', () => ({
+  ensurePrefsLoaded: () => Promise.resolve(),
+  getPagePrefs: () => ({ value: {} }),
+  patchPagePrefs: vi.fn(),
+}))
+
 vi.mock('vue-i18n', () => ({
   useI18n: () => ({ t: (key: string) => key, locale: { value: 'cs' } }),
 }))
@@ -191,5 +197,21 @@ describe('InvoiceEditor.vue — nárok a účty při účetních alokacích', ()
 
     expect(wrapper.get('[data-test="header-vat-deduction"]').attributes('disabled')).toBeUndefined()
     expect(wrapper.find('[data-test="header-differs-from-allocations"]').exists()).toBe(true)
+  })
+
+  it('plný nárok nastavený u všech alokací se propíše do nároku v Klasifikaci', async () => {
+    m.get.mockReset().mockResolvedValue({ ...makeInvoice(), vat_deduction: 'none', vat_deduction_percent: 0,
+      vat_allocations: [allocation('full', 150, '512'), { ...allocation('none', 50, '513'), usage_type: 'non_deductible' }] })
+    const wrapper = mount(InvoiceEditor, { global: { stubs } })
+    await flushPromises()
+    const header = wrapper.get<HTMLSelectElement>('[data-test="header-vat-deduction"]')
+    expect(header.element.value).toBe('none')
+
+    await wrapper.findAll('[data-test="allocation-vat-deduction"]')[1].setValue('full')
+    await flushPromises()
+
+    expect(header.attributes('disabled')).toBeUndefined()
+    expect(header.element.value).toBe('full')
+    expect(wrapper.find('[data-test="header-differs-from-allocations"]').exists()).toBe(false)
   })
 })

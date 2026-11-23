@@ -213,6 +213,7 @@ final class FxCaseCarryingProjection
             $anchor = max($anchor ?? '', $known?->startsOn ?? $entry['entry_date']);
         }
         $before = [];
+        $ledgerForeign = [];
         $foreignCzk = [];
         $foreignNominal = [];
         $projectedOpenings = [];
@@ -228,6 +229,10 @@ final class FxCaseCarryingProjection
             $id = (int) $line['account_id'];
             $tupleKey = $id . '|' . FxCaseTuple::hash($line['source_tuple']);
             $before[$tupleKey] = ($before[$tupleKey] ?? 0) + $this->signed($line);
+            if ($line['currency_code'] !== null && $line['currency_code'] !== 'CZK') {
+                $ledgerKey = $id . '|' . $line['currency_code'] . '|' . FxCaseTuple::hash($line['source_tuple']);
+                $ledgerForeign[$ledgerKey] = ($ledgerForeign[$ledgerKey] ?? 0) + $this->signed($line, true);
+            }
             if (isset($closedHomeLines[(int) $line['id']])) continue;
             $entryId = (int) $line['entry_id'];
             if ($line['source_type'] === 'opening' && isset($openingProjections[$entryId])) {
@@ -272,7 +277,23 @@ final class FxCaseCarryingProjection
         $foreignNominal = array_filter($foreignNominal, $filter, ARRAY_FILTER_USE_KEY);
         $this->require($this->clean($before) === $this->clean($closed) && $this->clean($before) === $this->clean($opened), 'historical_opening_anchor_mismatch');
         $this->require($this->clean($caseBalances) === $this->clean($foreignCzk) && $this->clean($caseForeign) === $this->clean($foreignNominal), 'historical_case_currency_mismatch');
-        if ($openedForeign !== []) $this->require($this->clean($caseForeign) === $this->clean($openedForeign), 'historical_opening_currency_mismatch');
+        // Otevření nese buď cizí měnu doložených případů (převzaté počáteční stavy), nebo cizoměnový
+        // zůstatek účtu z deníku, jak ho přenáší uzávěrka (ClosingRepository::bsBalances). Ten
+        // zahrnuje i pozice uzavřené v korunách; buňku, kterou přenést nešlo, nese bez měny.
+        if ($openedForeign !== []) $this->require($this->clean($caseForeign) === $this->clean($openedForeign)
+            || $this->mirrorsLedgerForeign($this->clean($openedForeign), $ledgerForeign), 'historical_opening_currency_mismatch');
+    }
+
+    /**
+     * @param array<string,int> $opened
+     * @param array<string,int> $ledger
+     */
+    private function mirrorsLedgerForeign(array $opened, array $ledger): bool
+    {
+        foreach ($opened as $key => $cents) {
+            if (($ledger[$key] ?? 0) !== $cents) return false;
+        }
+        return true;
     }
 
     private function currencyTotals(array $lines): array

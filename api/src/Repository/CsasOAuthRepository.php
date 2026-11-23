@@ -100,4 +100,40 @@ final class CsasOAuthRepository
         $stmt->execute([$ciphertext, $supplierId, $connectionId]);
         return $stmt->rowCount() === 1;
     }
+
+    /** @return list<array{id:int,currency_id:int,token_ciphertext:string}> napojení ČS firmy s uloženým přístupem */
+    public function connectedCredentials(int $supplierId): array
+    {
+        $stmt = $this->db->pdo()->prepare("SELECT id, currency_id, token_ciphertext FROM bank_connections
+            WHERE supplier_id = ? AND provider = 'csas' AND token_ciphertext IS NOT NULL ORDER BY id");
+        $stmt->execute([$supplierId]);
+        return array_map(static fn (array $row): array => ['id' => (int) $row['id'], 'currency_id' => (int) $row['currency_id'],
+            'token_ciphertext' => (string) $row['token_ciphertext']], $stmt->fetchAll(PDO::FETCH_ASSOC) ?: []);
+    }
+
+    /**
+     * Další aktivní účty firmy u České spořitelny (kód banky 0800) a stav jejich napojení.
+     *
+     * @return list<array{currency_id:int,code:string,account_number:string,connection_id:?int,provider:?string,
+     *     token_ciphertext:?string,disconnected:bool}>
+     */
+    public function siblingAccounts(int $supplierId, int $excludeCurrencyId): array
+    {
+        $stmt = $this->db->pdo()->prepare("SELECT c.id, c.code, COALESCE(NULLIF(c.account_number, ''), c.iban, '') AS account_number,
+                bc.id AS connection_id, bc.provider, bc.token_ciphertext, bc.disconnected_at
+            FROM currencies c
+            LEFT JOIN bank_connections bc ON bc.currency_id = c.id AND bc.supplier_id = c.supplier_id
+            WHERE c.supplier_id = ? AND c.id <> ? AND c.is_active = 1 AND c.bank_code = '0800'
+            ORDER BY c.id");
+        $stmt->execute([$supplierId, $excludeCurrencyId]);
+        return array_map(static fn (array $row): array => [
+            'currency_id' => (int) $row['id'],
+            'code' => strtoupper((string) $row['code']),
+            'account_number' => (string) $row['account_number'],
+            'connection_id' => $row['connection_id'] === null ? null : (int) $row['connection_id'],
+            'provider' => $row['provider'] === null ? null : (string) $row['provider'],
+            'token_ciphertext' => $row['token_ciphertext'] === null ? null : (string) $row['token_ciphertext'],
+            'disconnected' => $row['disconnected_at'] !== null,
+        ], $stmt->fetchAll(PDO::FETCH_ASSOC) ?: []);
+    }
 }

@@ -23,6 +23,7 @@ try {
     $internal = new McpInternalRequest(
         (string) $config->get('app.url', ''),
         RuntimePaths::storage('tmp/mcp-uploads'),
+        (string) $config->get('session.cookie_name', '__Host-myinvoice_session'),
     );
     try {
         $request = $internal->build($input);

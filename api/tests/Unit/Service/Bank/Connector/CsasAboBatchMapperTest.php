@@ -35,7 +35,8 @@ final class CsasAboBatchMapperTest extends TestCase
         $body = $payment['body'];
         self::assertSame($payment['instruction_identification'], $body['paymentIdentification']['instructionIdentification']);
         self::assertSame('NORM', $body['paymentTypeInformation']['instructionPriority']);
-        self::assertSame(['value' => 1234.56, 'currency' => 'CZK'], $body['amount']['instructedAmount']);
+        self::assertSame(123456, $body['amount']['instructedAmount']['value']->minor);
+        self::assertSame('CZK', $body['amount']['instructedAmount']['currency']);
         self::assertSame('2026-11-02', $body['requestedExecutionDate']);
         self::assertSame(self::PAYER_IBAN, $body['debtorAccount']['identification']['iban']);
         self::assertSame('CZ1801000000001000000005', $body['creditorAccount']['identification']['iban']);
@@ -59,7 +60,9 @@ final class CsasAboBatchMapperTest extends TestCase
         $again = $mapper->map($this->abo($items, '000101'), self::PAYER_IBAN);
         $other = $mapper->map($this->abo($items, '000102'), self::PAYER_IBAN);
 
-        self::assertSame($first, $again, 'Stejné ABO dá po přerušení stejné položky.');
+        self::assertEquals($first, $again, 'Stejné ABO dá po přerušení stejné položky.');
+        self::assertSame(\MyInvoice\Service\Bank\Connector\BankPaymentJson::encode($first['payments']),
+            \MyInvoice\Service\Bank\Connector\BankPaymentJson::encode($again['payments']));
         $ids = array_column($first['payments'], 'instruction_identification');
         self::assertCount(2, array_unique($ids), 'Každý řádek dávky má vlastní identifikátor.');
         self::assertNotSame($ids, array_column($other['payments'], 'instruction_identification'));

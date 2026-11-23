@@ -57,10 +57,10 @@ final class FinancialHistoryRepository
         foreach($operations as $op){
             if(!in_array($op['status'],['posted','reversed'],true))continue;
             $snapshot=self::decode($op);$actual=$ledgers[(int)$op['journal_entry_id']];
-            if($actual['entry']['source_type']!=='unit_payment'||$actual['entry']['source_id']!==($op['kind']==='reversal'?null:(int)$op['id'])||$actual['entry']['reversed_by']!==($op['status']==='reversed'?(int)$op['reversal_entry_id']:null)||$actual['entry']['entry_date']!==$op['accounting_date']||PropertyInput::hash(\MyInvoice\Service\Property\Payments\PaymentJournalProof::canonicalLines($actual['lines']))!==PropertyInput::hash(\MyInvoice\Service\Property\Payments\PaymentJournalProof::canonicalLines($snapshot['lines'])))ReceivableException::reject('history_corrupt');
+            if($actual['entry']['source_type']!=='unit_payment'||$actual['entry']['source_id']!==($op['kind']==='reversal'?null:(int)$op['id'])||$actual['entry']['reversed_by']!==($op['status']==='reversed'?(int)$op['reversal_entry_id']:null)||$actual['entry']['entry_date']!==$op['accounting_date']||!\MyInvoice\Service\Property\Payments\PaymentJournalProof::matches($actual['lines'], $snapshot['lines']))ReceivableException::reject('history_corrupt');
             if($op['status']==='reversed'){
                 $mirror=$ledgers[(int)$op['reversal_entry_id']];$lines=$snapshot['lines'];foreach($lines as &$line)$line['side']=$line['side']==='debit'?'credit':'debit';unset($line);
-                if($mirror['entry']['source_type']!=='unit_payment'||$mirror['entry']['source_id']!==null||$mirror['entry']['reversed_by']!==null||PropertyInput::hash(\MyInvoice\Service\Property\Payments\PaymentJournalProof::canonicalLines($mirror['lines']))!==PropertyInput::hash(\MyInvoice\Service\Property\Payments\PaymentJournalProof::canonicalLines($lines)))ReceivableException::reject('history_corrupt');
+                if($mirror['entry']['source_type']!=='unit_payment'||$mirror['entry']['source_id']!==null||$mirror['entry']['reversed_by']!==null||!\MyInvoice\Service\Property\Payments\PaymentJournalProof::matches($mirror['lines'], $lines))ReceivableException::reject('history_corrupt');
             }
         }
     }

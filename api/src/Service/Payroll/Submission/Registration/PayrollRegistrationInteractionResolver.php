@@ -104,7 +104,16 @@ final class PayrollRegistrationInteractionResolver
                 10,
             );
         }
-        if ($context['employment_ended'] ?? false) {
+        // Skončený vztah, který u ČSSZ přihlášený NENÍ (nemá ID PPV), se
+        // přihlašuje dodatečně přihláškou A1 a skončení pak hlásí odhláška A2
+        // jako u každého jiného vztahu: A2 bez přihlášky (bez ID PPV) podat
+        // nejde. Bez toho by brigáda, kterou noční úloha po sjednaném konci
+        // ukončila dřív, než za ni účetní podala A1, zůstala nepřihlášená bez
+        // cesty dál. Údaje pro podporu v nezaměstnanosti a 10224 nese až A2;
+        // A1 s vyplněným 10224 by je podle EDV (ID 10224, 10376 a násl.)
+        // musela nést sama.
+        $registered = is_string($snapshot->employmentExternalIdentifier['value'] ?? null);
+        if (($context['employment_ended'] ?? false) && $registered) {
             $this->invalid(
                 'registration_regzec_a2_source_missing',
                 'Pracovní vztah už skončil, takže za něj nejde znovu podat '

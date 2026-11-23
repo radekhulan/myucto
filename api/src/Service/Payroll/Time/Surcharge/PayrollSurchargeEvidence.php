@@ -523,6 +523,34 @@ final class PayrollSurchargeEvidence
     }
 
     /**
+     * Čisté minuty práce přesčas, jejichž místní začátek padá do měsíce.
+     *
+     * Na rozdíl od {@see collect()} nezávisí na způsobu odměnění: dosažená mzda
+     * (§ 114 odst. 1 ZP) náleží za každou odpracovanou hodinu přesčasu, i když
+     * se místo příplatku poskytuje náhradní volno.
+     *
+     * @param list<array<string,mixed>> $entries řádky `payroll_time_entries`
+     */
+    public function overtimeMinutes(array $entries, string $periodStart): int
+    {
+        $period = substr($this->assertDate($periodStart, 'periodStart'), 0, 7);
+        $minutes = 0;
+        foreach ($entries as $entry) {
+            if ($this->text($entry, 'status', 'draft') === 'superseded'
+                || $this->text($entry, 'category', '') !== PayrollSurchargeKind::Overtime->timeEntryCategory()
+            ) {
+                continue;
+            }
+            [$localStart, , $netMinutes] = $this->localBounds($entry);
+            if ($localStart->format('Y-m') === $period) {
+                $minutes += $netMinutes;
+            }
+        }
+
+        return $minutes;
+    }
+
+    /**
      * @param array<string,mixed> $entry
      * @return array{0:DateTimeImmutable,1:DateTimeImmutable,2:int}
      */

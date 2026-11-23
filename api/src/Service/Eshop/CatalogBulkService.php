@@ -10,6 +10,7 @@ use MyInvoice\Repository\StockItemCategoryRepository;
 use MyInvoice\Repository\StockItemRepository;
 use MyInvoice\Repository\StockItemTagRepository;
 use MyInvoice\Repository\StockItemVendorRepository;
+use MyInvoice\Service\Invoice\UnitPricePrecision;
 use PDO;
 
 final class CatalogBulkService
@@ -353,7 +354,7 @@ final class CatalogBulkService
         return [
             'client_id' => (int) $vendor['client_id'],
             'vendor_sku' => $vendor['vendor_sku'] === null ? null : (string) $vendor['vendor_sku'],
-            'purchase_price' => $vendor['purchase_price'] === null ? null : (string) $vendor['purchase_price'],
+            'purchase_price' => $vendor['purchase_price'] === null ? null : (string) UnitPricePrecision::toDecimalString($vendor['purchase_price']),
             'currency_code' => (string) $vendor['currency_code'],
             'delivery_days' => $vendor['delivery_days'] === null ? null : (int) $vendor['delivery_days'],
             'stock_qty' => $vendor['stock_qty'] === null ? null : (string) $vendor['stock_qty'],

@@ -90,6 +90,86 @@ final class PohodaYearSelectionTest extends TestCase
         self::assertSame([], PohodaExport::overview($plain)[0]['counts']['later_years']);
     }
 
+    public function testLaterUnpostedInvoiceIsOfferedAndSkipped(): void
+    {
+        $dir = SyntheticPohodaExport::write($this->tmp);
+        $journal = $dir . '/01_ucetni_denik.xml';
+        $original = file_get_contents($journal);
+        $next = SyntheticPohodaExport::NEXT_YEAR;
+        SyntheticPohodaExport::withIssuedInvoice($dir, 'FV2027TEST', '270099', $next . '-01-08', 1000);
+        file_put_contents($journal, $original);
+
+        $supplierId = $this->supplier();
+        $result = $this->importer->run($supplierId, $this->userId, PohodaExport::open($dir), false, skipYears: [$next]);
+        self::assertFalse($result->hasErrors(), $this->explain($result));
+        self::assertSame(0, $this->rows('invoices', $supplierId, "issue_date >= '{$next}-01-01'"));
+        self::assertSame([$next], PohodaExport::overview($this->tmp)[0]['counts']['later_years']);
+    }
+
+    public function testRepeatImportOfClosedPeriodAddsNoDocuments(): void
+    {
+        $dir = SyntheticPohodaExport::write($this->tmp);
+        $supplierId = $this->supplier();
+        $initial = $this->importer->run($supplierId, $this->userId, PohodaExport::open($dir), false);
+        self::assertFalse($initial->hasErrors(), $this->explain($initial));
+        $this->db->pdo()->prepare("UPDATE accounting_periods SET status = 'closed' WHERE supplier_id = ?")->execute([$supplierId]);
+
+        SyntheticPohodaExport::withIssuedInvoice($dir, 'FVCLOSED', '260098', '2026-11-08', 1000);
+        $before = $this->snapshot($supplierId);
+        $result = $this->importer->run($supplierId, $this->userId, PohodaExport::open($dir), false);
+        self::assertSame($before, $this->snapshot($supplierId));
+        self::assertContains('period_not_open', array_column((array) $result->get('preflight'), 'code'));
+    }
+
+    public function testRepeatImportRespectsCompanyDateLock(): void
+    {
+        $dir = SyntheticPohodaExport::write($this->tmp);
+        $supplierId = $this->supplier();
+        $initial = $this->importer->run($supplierId, $this->userId, PohodaExport::open($dir), false);
+        self::assertFalse($initial->hasErrors(), $this->explain($initial));
+        $this->db->pdo()->prepare("INSERT INTO accounting_supplier_settings(supplier_id, locked_until) VALUES (?, '2027-01-31') ON DUPLICATE KEY UPDATE locked_until = VALUES(locked_until)")->execute([$supplierId]);
+
+        SyntheticPohodaExport::withIssuedInvoice($dir, 'FVDATELOCK', '260097', '2026-11-08', 1000);
+        $before = $this->snapshot($supplierId);
+        $result = $this->importer->run($supplierId, $this->userId, PohodaExport::open($dir), false);
+        self::assertSame($before, $this->snapshot($supplierId));
+        self::assertContains('date_locked', array_column((array) $result->get('preflight'), 'code'));
+    }
+
+    public function testFinishingAgendaYearLeavesNextYearDocumentsAndJournalUntouched(): void
+    {
+        $dir = SyntheticPohodaExport::write($this->tmp, unbooked: true);
+        $supplierId = $this->supplier();
+        $next = SyntheticPohodaExport::NEXT_YEAR;
+        $initial = $this->importer->run($supplierId, $this->userId, PohodaExport::open($dir), false);
+        self::assertFalse($initial->hasErrors(), $this->explain($initial));
+        $pdo = $this->db->pdo();
+        $nextPeriod = $pdo->prepare('SELECT id FROM accounting_periods WHERE supplier_id = ? AND fiscal_year = ?');
+        $nextPeriod->execute([$supplierId, $next]);
+        $periodId = (int) $nextPeriod->fetchColumn();
+        self::assertGreaterThan(0, $periodId);
+        $pdo->prepare("DELETE m FROM pohoda_import_map m JOIN journal_entries e ON e.id = m.target_id AND e.supplier_id = m.supplier_id
+                      WHERE m.kind = 'journal_entry' AND e.period_id = ? AND e.supplier_id = ?")
+            ->execute([$periodId, $supplierId]);
+        $snapshot = static function () use ($pdo, $supplierId, $next, $periodId): array {
+            $invoices = $pdo->prepare('SELECT id, status, paid_total, paid_at, parent_invoice_id FROM invoices WHERE supplier_id = ? AND issue_date >= ? ORDER BY id');
+            $invoices->execute([$supplierId, $next . '-01-01']);
+            $journal = $pdo->prepare('SELECT id, entry_date, description, source_type, source_id FROM journal_entries WHERE supplier_id = ? AND period_id = ? ORDER BY id');
+            $journal->execute([$supplierId, $periodId]);
+            return [$invoices->fetchAll(), $journal->fetchAll()];
+        };
+        $before = $snapshot();
+        SyntheticPohodaExport::withIssuedInvoice($dir, 'FVFINAL', '260096', '2026-12-30', 1000);
+        $export = PohodaExport::open($dir);
+
+        $result = $this->importer->run($supplierId, $this->userId, $export, false, selectedYears: [SyntheticPohodaExport::YEAR]);
+        self::assertFalse($result->hasErrors(), $this->explain($result));
+        self::assertSame(1, $this->rows('invoices', $supplierId, "varsymbol = 'FVFINAL'"));
+        self::assertSame($before, $snapshot());
+        $withNext = $this->importer->preflight($supplierId, $export);
+        self::assertContains('journal_not_empty', array_column($withNext, 'code'));
+    }
+
     /**
      * Jen rok agendy: deník, banka, pokladna, doklady ani úhrady následujícího roku se
      * nepřevedou, rekonciliace proti deníku POHODY bez nich sedí a faktura uhrazená až

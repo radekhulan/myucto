@@ -23,6 +23,8 @@ const m = vi.hoisted(() => ({
   receiptCandidates: vi.fn(),
   matchReceipt: vi.fn(),
   downloadReceiptsBatch: vi.fn(),
+  downloadReceiptsBatchWithPassword: vi.fn(),
+  choices: vi.fn().mockResolvedValue([]),
   toastSuccess: vi.fn(),
   toastError: vi.fn(),
   toastInfo: vi.fn(),
@@ -39,8 +41,11 @@ vi.mock('@/api/dataBox', () => ({
     receiptCandidates: m.receiptCandidates,
     matchReceipt: m.matchReceipt,
     downloadReceiptsBatch: m.downloadReceiptsBatch,
+    downloadReceiptsBatchWithPassword: m.downloadReceiptsBatchWithPassword,
   },
 }))
+
+vi.mock('@/api/isdsAccess', () => ({ isdsAccessApi: { choices: m.choices } }))
 
 vi.mock('vue-router', async (importOriginal) => ({
   ...(await importOriginal<typeof import('vue-router')>()),
@@ -300,6 +305,27 @@ describe('DataBox — ruční odeslání a doručenka', () => {
     expect(result.text()).toContain('Doručenka je připojená k podání.')
     // Ruční nahrání u řádku zůstává vedle jako záloha, ne náhrada.
     expect(wrapper.text()).toContain('databox.outbox.uploadReceipt')
+  })
+
+  it('doručenky stáhne uloženým přístupem až po potvrzení účtu', async () => {
+    m.choices.mockResolvedValueOnce([{ id: 83, label: 'Kancelář', box_id: 'abcdefg', scope: 'shared', method: 'password' }])
+    m.downloadReceiptsBatchWithPassword.mockResolvedValue({ attached: 0, pending: 1, failed: 0, items: [] })
+    const wrapper = await mountWith([
+      submission({ dispatch_state: 'sent', external_message_id: '9900001', sent_at: '2026-08-15 09:00:00' }),
+    ])
+    await flushPromises()
+
+    const block = wrapper.get('[data-test="outbox-receipts-batch"]')
+    await block.get('input[type="radio"][value="saved"]').setValue(true)
+    await block.get('[data-test="isds-saved-access-select"]').setValue('83')
+    const submit = block.get('[data-test="outbox-receipts-batch-submit"]')
+    expect(submit.attributes('disabled')).toBeDefined()
+    await block.get('[data-test="isds-saved-access-confirm"]').setValue(true)
+    await submit.trigger('click')
+    await flushPromises()
+
+    expect(m.choices).toHaveBeenCalledWith('production', 'receipts')
+    expect(m.downloadReceiptsBatchWithPassword).toHaveBeenCalledWith('production', { access_id: 83, authorized: true })
   })
 
   /**

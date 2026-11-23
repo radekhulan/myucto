@@ -476,57 +476,6 @@ final class PayrollSubmissionQueueRepository
     }
 
     /**
-     * Jména zaměstnanců k `subject_reference` tvaru `employment:{id}`.
-     *
-     * Tohle je hlavní důvod, proč fronta existuje: u registrací a ELDP je
-     * předmětem povinnosti pracovní VZTAH a bez jména by účetní musela každý
-     * řádek rozklikávat, aby zjistila, koho se týká.
-     * {@see \MyInvoice\Service\Payroll\Submission\PayrollObligationSubjectFormatter}
-     * to schválně neumí — pracuje nad daty, která jméno nemají; tady se
-     * dohledává dotazem.
-     *
-     * @param list<int> $employmentIds
-     * @return array<int,array{full_name:string,employee_id:int}> `employment_id` → osoba
-     */
-    public function employmentNames(int $supplierId, array $employmentIds): array
-    {
-        $employmentIds = array_values(array_unique(array_filter(
-            $employmentIds,
-            static fn (int $id): bool => $id > 0,
-        )));
-        if ($employmentIds === []) {
-            return [];
-        }
-        $placeholders = implode(', ', array_fill(0, count($employmentIds), '?'));
-        $statement = $this->db->pdo()->prepare(
-            'SELECT employment.id, employee.id AS employee_id, employee.full_name
-               FROM payroll_employments employment
-               JOIN payroll_employees employee
-                 ON employee.supplier_id = employment.supplier_id
-                AND employee.id = employment.employee_id
-              WHERE employment.supplier_id = ?
-                AND employment.id IN (' . $placeholders . ')',
-        );
-        $statement->execute([$supplierId, ...$employmentIds]);
-
-        $names = [];
-        foreach ($statement->fetchAll(PDO::FETCH_ASSOC) as $row) {
-            if (!is_array($row)) {
-                continue;
-            }
-            $name = trim((string) $row['full_name']);
-            if ($name !== '') {
-                $names[(int) $row['id']] = [
-                    'full_name' => $name,
-                    'employee_id' => (int) $row['employee_id'],
-                ];
-            }
-        }
-
-        return $names;
-    }
-
-    /**
      * Akce registrace ČSSZ (A1 přihláška, A2 odhláška, A3 změna, A4 oprava).
      * Agenda REGZEC nese všechny, takže samotný název „Změna v registraci"
      * u nového nástupu mátl (Q15-28). Podání bez události je prvotní

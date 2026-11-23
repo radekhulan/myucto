@@ -74,11 +74,19 @@ final class AbraMappersTest extends TestCase
 
         self::assertSame([], $plan['blockers']);
         self::assertSame('SYN-GOODS-1', $plan['card']['sku']);
-        self::assertSame('123.46', $plan['card']['sale_price_without_vat']);
+        self::assertSame('123.4567', $plan['card']['sale_price_without_vat']);
         self::assertSame(21.0, $plan['card']['vat_rate_percent']);
         self::assertTrue($plan['card']['is_stocked']);
-        self::assertSame(['EUR' => '100.00', 'GBP' => '20.00', 'USD' => '24.79'], $plan['price_rows']);
-        self::assertContains('catalog_price_rounded', $plan['warnings']);
+        self::assertSame(['EUR' => '100.00', 'GBP' => '20.00', 'USD' => '24.793388'], $plan['price_rows']);
+        self::assertSame(['EUR' => '100.00', 'GBP' => '20.00', 'USD' => '30.00'], $plan['legacy_price_rows']);
+        self::assertNotContains('catalog_price_rounded', $plan['warnings']);
+
+        $rounded = (new AbraCatalogMapper())->map([
+            'id' => 6, 'kod' => 'SYN-GOODS-2', 'nazev' => 'Syntetické zboží', 'mj1' => 'code:KS',
+            'typZasobyK' => 'typZasoby.zbozi', 'cenaZaklBezDph' => '0.0040004',
+        ]);
+        self::assertSame('0.004', $rounded['card']['sale_price_without_vat']);
+        self::assertContains('catalog_price_rounded', $rounded['warnings']);
     }
 
     public function testCatalogCurrencyPriceWithoutVatIsNeverDividedByRate(): void
@@ -206,6 +214,27 @@ final class AbraMappersTest extends TestCase
 
         self::assertSame('sent', $document['status']);
         self::assertSame('20', $document['items'][0]['vat_classification']);
+    }
+
+    /** Ř. 26: tuzemský odběratel (i bez státu na dokladu) = § 71i, zahraniční = služba mimo tuzemsko. */
+    public function testIssuedLine26SplitsByCustomerCountry(): void
+    {
+        $row = static fn (int $id, array $partner): array => $partner + [
+            'id' => $id, 'datVyst' => '2026-03-01', 'datSplat' => '2026-03-15',
+            'mena' => 'code:CZK', 'zuctovano' => true,
+            'sumZklCelkem' => 100, 'sumDphCelkem' => 0, 'sumCelkem' => 100,
+            'polozkyDokladu' => [[
+                'id' => 1, 'mnozMj' => 1, 'sumZkl' => 100, 'sumDph' => 0,
+                'sumCelkem' => 100, 'szbDph' => 0, 'clenDph' => 'code:26',
+            ]],
+        ];
+
+        foreach ([[112, ['stat' => 'code:CZ'], '71i'], [113, [], '71i'], [114, ['stat' => 'code:US'], '26s']] as [$id, $partner, $code]) {
+            $document = (new AbraDocumentMapper())->map($row($id, $partner), 'faktura-vydana');
+            self::assertSame($code, $document['items'][0]['vat_classification'], (string) $id);
+        }
+        $purchase = (new AbraDocumentMapper())->map($row(115, ['stat' => 'code:CZ']), 'faktura-prijata');
+        self::assertNotSame('71i', $purchase['items'][0]['vat_classification'], 'Přijatý doklad se nepřeřazuje.');
     }
 
     public function testPurchasedDomesticVatUsesSharedReturnClassification(): void

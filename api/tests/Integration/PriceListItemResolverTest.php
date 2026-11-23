@@ -325,6 +325,26 @@ final class PriceListItemResolverTest extends TestCase
         self::assertNotNull($this->items->find($this->createdItemId, $this->supplierId));
     }
 
+    public function testSubCentCatalogPriceKeepsSixDecimalsAndRejectsMorePrecision(): void
+    {
+        $this->createdItemId = $this->createItem(false, 0.004);
+        self::assertSame(0.004, $this->items->find($this->createdItemId, $this->supplierId)['prices'][0]['unit_price']);
+        $resolved = $this->resolver->resolveMany(
+            [$this->createdItemId], $this->supplierId, $this->clientId, $this->currencyId, false, new DateTimeImmutable('2026-01-15'),
+        )[$this->createdItemId];
+        self::assertSame(0.004, $resolved['unit_price_without_vat']);
+
+        $request = $this->catalogRequest(new EffectiveRole(52, 'Synthetic catalog manager', 'client', true, ['price_list' => 2]));
+        $args = ['id' => $this->createdItemId, 'currencyCode' => $this->currencyCode, 'clientId' => $this->clientId];
+        self::assertSame(200, $this->action->upsertCustomerOverride($request->withParsedBody(['unit_price' => '0.0108']), new Psr7Response(), $args)->getStatusCode());
+        self::assertSame(0.0108, $this->items->customerOverrides($this->supplierId, $this->createdItemId)[0]['unit_price']);
+        foreach (['upsertPrice', 'upsertCustomerOverride'] as $method) {
+            $response = $this->action->$method($request->withParsedBody(['unit_price' => '0.0000001']), new Psr7Response(), $args);
+            self::assertSame(400, $response->getStatusCode(), $method);
+        }
+        self::assertSame(0.004, $this->items->find($this->createdItemId, $this->supplierId)['prices'][0]['unit_price']);
+    }
+
     public function testReadOnlyAndPickerRolesCannotMutateOrReadAllCustomerOverrides(): void
     {
         $this->createdItemId = $this->createItem(false, 1250.00);

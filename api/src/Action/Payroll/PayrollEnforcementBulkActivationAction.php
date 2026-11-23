@@ -48,7 +48,7 @@ final class PayrollEnforcementBulkActivationAction
         }
         $error = null;
         if (!$this->requirePermission($request, $response, 'documents', AccessLevel::READ, $error)) {
-            return $error ?? Json::error($response, 'forbidden', 'Pro tuto akci nemáš oprávnění.', 403);
+            return $error ?? Json::error($response, 'forbidden', 'Pro tuto akci nemáte oprávnění.', 403);
         }
         $body = $request->getParsedBody();
         $rawItems = is_array($body) ? ($body['items'] ?? null) : null;
@@ -95,7 +95,7 @@ final class PayrollEnforcementBulkActivationAction
 
     private function authorize(Request $request, Response $response, AccessLevel $level): ?Response
     {
-        if (!RequestAuthorization::isSessionAuth($request)) {
+        if (!RequestAuthorization::actsAsSession($request)) {
             return Json::sessionRequired($response);
         }
         $error = null;

@@ -34,7 +34,7 @@ Kapitolu otevřete, když:
 1. Otevřete `Účetnictví → Měsíční přehled`.
 2. V poli **Období** zvolte rok a měsíc.
 3. Ověřte v náhledu měsíc a rozhodné datum (dřívější z posledního dne měsíce a dnešního dne).
-4. Volitelně doplňte **Komentář účetní**. Zobrazí se v PDF i v e-mailu. Mají-li doklady období od–do a chcete je rozložit do měsíců, zaškrtněte **Průběžné časové rozlišení** ([§ 63.6.2.1](#63621-vysledovka-za-mesic)).
+4. Volitelně doplňte **Komentář účetní**. Zobrazí se v PDF i v e-mailu. Mají-li doklady období od–do a chcete je rozložit do měsíců nebo mít ve výsledku měsíční odpisy majetku, zaškrtněte **Průběžné časové rozlišení a odpisy** ([§ 63.6.2.1](#63621-vysledovka-za-mesic)).
 5. Klikněte na **Obnovit náhled** a zkontrolujte KPI: **Výsledek hospodaření (YTD)**, **DPH k úhradě** (nebo **Nadměrný odpočet**) s termínem podání, **Pohledávky po splatnosti** a **Závazky po splatnosti**.
 6. Ověřte výsledovku, rozvahu, saldokonto a DPH v jejich samostatných sestavách.
 7. Klikněte na **Stáhnout PDF** a projděte i sekce, které webový náhled nezobrazuje celé (plná rozvaha, kumulovaná výsledovka, nadcházející termíny).
@@ -110,10 +110,10 @@ mapování účtů se nepřepočítávají v reportu; přebírají se ze samosta
 KPI **Výsledek hospodaření (YTD)** je kontrolní hodnota výsledku za období, nikoli prostý součet libovolně
 zobrazených detailních řádků na stránce.
 
-Volba **Průběžné časové rozlišení** platí pro náhled, PDF i odeslání a sestaví výsledovku
-i rozvahu stejně jako samostatné výkazy ([§ 58.7.7](58_Vysledovka_druhova.md#5877-prubezne-casove-rozliseni)).
+Volba **Průběžné časové rozlišení a odpisy** platí pro náhled, PDF i odeslání a sestaví výsledovku
+i rozvahu stejně jako samostatné výkazy ([§ 58.7.7](58_Vysledovka_druhova.md#5877-prubezne-casove-rozliseni-a-odpisy)).
 Oba kumulované snímky se počítají s rozlišením ke svému dni, takže v měsíci je jen poměrná
-část dokladu připadající na tento měsíc. Úprava není zaúčtovaná v deníku a PDF na ni
+část dokladu připadající na tento měsíc a odpis majetku za tento měsíc. Úprava není zaúčtovaná v deníku a PDF na ni
 upozorňuje. Rámec 504 volbu nenabízí. Zapamatovaná volba je společná s Výsledovkou a Rozvahou.
 
 #### 63.6.2.2 Rozvaha

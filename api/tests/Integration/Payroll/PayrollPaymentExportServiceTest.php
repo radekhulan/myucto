@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Integration\Payroll;
 
-use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\Payroll\PayrollModuleStateRepository;
 use MyInvoice\Repository\Payroll\PayrollPaymentBatchDiscardRepository;
@@ -55,7 +54,7 @@ final class PayrollPaymentExportServiceTest extends TestCase
         self::assertTrue(mkdir($this->runtimeDir, 0750, true));
         putenv('MYINVOICE_DATA_DIR=' . $this->runtimeDir);
 
-        $container = Bootstrap::buildContainer();
+        $container = \MyInvoice\Tests\Support\PayrollTestContainer::build();
         $connection = $container->get(Connection::class);
         $encryption = $container->get(SecretEncryption::class);
         self::assertInstanceOf(Connection::class, $connection);
@@ -755,7 +754,7 @@ final class PayrollPaymentExportServiceTest extends TestCase
             new PayrollPaymentBatchDiscardRepository($this->db),
             new PayrollPaymentBatchBuilder(
                 new PayrollPaymentBatchRepository($this->db),
-                Bootstrap::buildContainer()->get(PayrollSensitiveData::class),
+                \MyInvoice\Tests\Support\PayrollTestContainer::build()->get(PayrollSensitiveData::class),
                 $this->encryption,
                 new IbanValidator(),
                 new CzechBankAccountValidator(),

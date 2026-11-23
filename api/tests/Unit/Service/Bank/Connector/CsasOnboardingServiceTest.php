@@ -7,7 +7,7 @@ namespace MyInvoice\Tests\Unit\Service\Bank\Connector;
 use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Repository\{BankConnectionRepository, CsasOAuthRepository};
 use MyInvoice\Service\Auth\SecretEncryption;
-use MyInvoice\Service\Bank\Connector\{CsasApiClient, CsasCredentialVault, CsasOnboardingService, BankConnectorCallGuard, BankConnectorOperationException};
+use MyInvoice\Service\Bank\Connector\{CsasApiClient, CsasCredentialVault, CsasOnboardingService, CsasSiblingAccountLinker, BankConnectorCallGuard, BankConnectorOperationException};
 use MyInvoice\Service\OAuth\{OAuthAuthorization, OAuthCallback, OAuthClientFlow, OAuthSession, Pkce};
 use PHPUnit\Framework\TestCase;
 
@@ -29,10 +29,58 @@ final class CsasOnboardingServiceTest extends TestCase
         $oauth->method('account')->willReturn(['id' => 3, 'supplier_id' => 7, 'bank_code' => '0800', 'code' => 'CZK',
             'account_number' => '1000000005', 'iban' => null, 'is_active' => true]);
         $this->flow = $this->createMock(OAuthClientFlow::class);
-        return [new CsasOnboardingService($oauth, $connections, $api, $vault, $calls, $secrets, $config, $this->flow), $oauth, $connections, $api, $vault, $secrets];
+        $this->siblings = $this->createMock(CsasSiblingAccountLinker::class);
+        return [new CsasOnboardingService($oauth, $connections, $api, $vault, $calls, $secrets, $config, $this->flow, $this->siblings),
+            $oauth, $connections, $api, $vault, $secrets];
     }
 
     private OAuthClientFlow&\PHPUnit\Framework\MockObject\MockObject $flow;
+    private CsasSiblingAccountLinker&\PHPUnit\Framework\MockObject\MockObject $siblings;
+
+    private function sharedSession(): OAuthSession
+    {
+        return new OAuthSession(str_repeat('d', 64), 7, 11, 'bank', 'csas', 3, OAuthClientFlow::FLOW_REDIRECT, 'oauth', 'processing', false,
+            ['api_key' => 'synthetic-key', 'client_id' => 'synthetic-client', 'client_secret' => 'synthetic-secret',
+                'redirect_uri' => 'https://example.invalid/api/settings/bank-connections/csas/oauth/callback', 'environment' => 'production'],
+            str_repeat('v', 64));
+    }
+
+    public function testConnectedAccountLinksOtherAccountsOfTheConsentWithThePreviousLoginOfTheAccount(): void
+    {
+        [$service, $oauth, $connections, $api, $vault, $secrets] = $this->setupService();
+        $this->flow->method('claim')->willReturn($this->sharedSession());
+        $oauth->expects(self::once())->method('connectedCredential')->with(7, 3)->willReturn(['id' => 9, 'token_ciphertext' => 'enc:v2:previous']);
+        $secrets->method('decryptFor')->willReturn('previous-serialized');
+        $vault->expects(self::once())->method('decode')->with('previous-serialized')->willReturn(['supplier_id' => 7, 'connection_id' => 9, 'refresh_token' => 'old-refresh']);
+        $api->method('exchange')->willReturn(['access_token' => 'synthetic-access', 'refresh_token' => 'synthetic-refresh', 'expires_in' => 300]);
+        $remote = [['id' => 'synthetic-remote', 'identification' => ['iban' => 'CZ7508000000001000000005'], 'currency' => 'CZK'],
+            ['id' => 'synthetic-eur', 'identification' => ['iban' => 'CZ6708000000002000000018'], 'currency' => 'EUR']];
+        $api->method('accounts')->willReturn($remote);
+        $connections->method('ensure')->willReturn(9);
+        $vault->method('encode')->willReturn('synthetic-encoded');
+        $secrets->method('encryptFor')->willReturn('enc:v2:saved');
+        $this->siblings->expects(self::once())->method('link')->with(3, self::callback(static fn (array $primary): bool =>
+            $primary['connection_id'] === 9 && $primary['refresh_token'] === 'synthetic-refresh' && !isset($primary['code_verifier'])),
+            $remote, ['supplier_id' => 7, 'connection_id' => 9, 'refresh_token' => 'old-refresh'])->willReturn([]);
+
+        self::assertSame(3, $service->completeCallback($this->oauthCallback(str_repeat('a', 64), 'synthetic-code')));
+    }
+
+    public function testFailureOfOtherAccountsDoesNotUndoTheConnectedOne(): void
+    {
+        [$service, , $connections, $api, $vault, $secrets] = $this->setupService();
+        $this->flow->method('claim')->willReturn($this->sharedSession());
+        $api->method('exchange')->willReturn(['access_token' => 'synthetic-access', 'refresh_token' => 'synthetic-refresh', 'expires_in' => 300]);
+        $api->method('accounts')->willReturn([['id' => 'synthetic-remote', 'identification' => ['iban' => 'CZ7508000000001000000005'], 'currency' => 'CZK']]);
+        $connections->method('ensure')->willReturn(9);
+        $vault->method('encode')->willReturn('synthetic-encoded');
+        $secrets->method('encryptFor')->willReturn('enc:v2:saved');
+        $connections->expects(self::once())->method('saveValidated');
+        $this->flow->expects(self::once())->method('finish')->with(self::anything(), true);
+        $this->siblings->method('link')->willThrowException(new \RuntimeException('synthetic failure'));
+
+        self::assertSame(3, $service->completeCallback($this->oauthCallback(str_repeat('a', 64), 'synthetic-code')));
+    }
 
     public function testExpiredOrReplayedStateCannotExchangeTokens(): void
     {

@@ -25,7 +25,7 @@ final class KhEvidencePdfRenderer
             'section_labels' => KhEvidenceService::SECTION_LABELS,
             'status_labels'  => KhEvidenceService::STATUS_LABELS,
             'source_label'   => KhEvidenceService::sourceLabel($report),
-            'filter_label'   => KhEvidenceService::filterLabel((string) $report['section']),
+            'filter_label'   => KhEvidenceService::filterLabel((string) $report['section'], $report['dimension'] ?? null),
         ]);
 
         $tmpDir = \MyInvoice\Infrastructure\Config\RuntimePaths::storage('cache/mpdf');

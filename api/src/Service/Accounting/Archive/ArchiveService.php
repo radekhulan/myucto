@@ -7,6 +7,7 @@ namespace MyInvoice\Service\Accounting\Archive;
 use MyInvoice\Infrastructure\Config\RuntimePaths;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Accounting\Closing\ClosingException;
+use MyInvoice\Service\Accounting\Dimension\SharedDimensionReferences;
 use MyInvoice\Service\Backup\BackupZipPermissions;
 use MyInvoice\Service\Document\JournalAttachmentStorage;
 use PDO;
@@ -37,10 +38,16 @@ final class ArchiveService
     /** Tabulky s přímým supplier_id (pořadí = pořadí exportu, respektuje FK). */
     private const DIRECT_TABLES = [
         'accounting_periods',
+        // Zachovat celou časovou osu rámce, ne jen aktuální hodnotu pro sazby.
+        'supplier_accounting_frameworks',
         'chart_of_accounts',
         'posting_rules',
         'bank_rule_templates',
         'cost_centers',
+        // Sazby obsahují ID dimenzí v JSON; archiv musí obsahovat i jejich rodiče.
+        'dimension_types',
+        'dimension_values',
+        'nonprofit_membership_rates',
         'accounting_supplier_settings',
         'accounting_closing_steps',
         'accounting_receivable_provisions',
@@ -65,6 +72,7 @@ final class ArchiveService
         'tax_loss_applications',
         'tax_advance_schedules',     // zálohy na daň (1044)
         'journal_entry_attachments', // §33a přílohy zápisů (metadata; binárky viz files)
+        'other_item_kinds',          // vlastní druhy ostatních položek (2228)
         'other_items',
         'other_item_schedules',
         'other_item_schedule_occurrences',
@@ -72,6 +80,23 @@ final class ArchiveService
         'other_item_allocations',
         'internal_documents',
         'internal_document_lines',
+        // Nastavení účtotvorných dimenzí (1876, 1952) a výchozí dimenze karet (1861).
+        'dimension_account_rules',
+        'dimension_account_map',
+        'dimension_defaults',
+    ];
+
+    /**
+     * Přiřazení dimenzí řádkům deníku a dokladům (1860). Tabulky nemají `id`, export
+     * jde keysetem po primárním klíči. Dokladové tabulky se navíc dělí podle `doc_type`:
+     * ENUM se řadí podle pořadí členů, ale s řetězcem se porovnává abecedně, takže
+     * v keysetu být nesmí.
+     */
+    private const DIMENSION_ASSIGNMENT_TABLES = [
+        'journal_entry_line_dimensions'       => [null, ['line_id', 'dimension_type_id']],
+        'journal_entry_line_dimension_splits' => [null, ['line_id', 'dimension_type_id', 'dimension_value_id']],
+        'document_dimensions'                 => ['doc_type', ['doc_id', 'item_no', 'dimension_type_id']],
+        'document_dimension_splits'           => ['doc_type', ['doc_id', 'item_no', 'dimension_type_id', 'dimension_value_id']],
     ];
 
     /**
@@ -84,6 +109,7 @@ final class ArchiveService
         'warehouses'                  => 'id',
         'warehouse_locations'         => 'id',
         'stock_items'                 => 'id',
+        'stock_sales_retired_skus'    => 'id',
         'stock_item_units'            => 'id',
         'stock_packaging_units'       => 'id',
         'stock_tracking_units'        => 'id',
@@ -132,6 +158,7 @@ final class ArchiveService
         'sales_order_reservations'    => 'id',
         'sales_order_operation_keys'  => 'operation, idempotency_key',
         'sales_order_invoice_links'   => 'order_id',
+        'stock_receipt_invoice_links' => 'document_id, line_no, invoice_id',
         'sales_order_fulfillment_links' => 'order_id, shipment_id',
         'sales_order_returns'         => 'id',
         'fulfillment_tasks'           => 'id',
@@ -199,6 +226,7 @@ final class ArchiveService
                 foreach ($this->tableSpecs($supplierId) as $table => $spec) {
                     $tables[$table] = $this->exportTable($table, $spec, $tmpDir . '/' . $table . '.jsonl');
                 }
+                $sharedDimensions = $this->collectSharedDimensions($supplierId);
                 // §33a průkaznost: k přílohám deníku patří i samotné binárky (ne jen
                 // metadata). Sbíráme distinct (sha256, filename) ještě ve snapshotu.
                 $attachmentFiles = $this->collectJournalAttachments($supplierId);
@@ -248,6 +276,9 @@ final class ArchiveService
                 'exported_by' => $userId,
                 'note_pdf' => 'PDF binárky faktur nejsou součástí archivu — kryje je celoinstanční zálohování (cron-backup-pdf). Přílohy účetního deníku (§33a) jsou v sekci files.',
                 'tables' => $tables,
+                // Hodnoty dimenzí skupiny firem (supplier_id IS NULL), na které přiřazení
+                // odkazují. Neexportují se jako řádky, obnova je jen ověří v cílové instanci.
+                'shared_dimensions' => $sharedDimensions,
                 'files' => array_map(
                     static fn (array $f): array => array_diff_key($f, ['disk_path' => true]),
                     $files,
@@ -415,6 +446,16 @@ final class ArchiveService
                 },
             ];
         }
+        foreach (self::DIMENSION_ASSIGNMENT_TABLES as $table => [$partition, $keyset]) {
+            $specs[$table] = [
+                'where' => 'supplier_id = ?',
+                'params' => [$supplierId],
+                'pk' => null,
+                'partition' => $partition,
+                'keyset' => $keyset,
+                'order' => implode(', ', $keyset),
+            ];
+        }
         // Pokladní DPH řádky nemají supplier_id — filtr přes rodičovský cash_documents.
         $specs['cash_document_vat_lines'] = [
             'where' => 'cash_document_id IN (SELECT id FROM cash_documents WHERE supplier_id = ?)',
@@ -448,7 +489,11 @@ final class ArchiveService
             'pk' => 'id',
             'order' => 'id',
         ];
-        $txWhere = '(id IN (SELECT bank_transaction_id FROM payment_matches WHERE supplier_id = ?)'
+        // Pohyby výpisů firmy se exportují všechny, i nespárované (poplatky, pohyby zaúčtované
+        // přímo, přiřazené dimenze) — jinak by obnovené zápisy deníku ztratily zdrojový pohyb.
+        // Ostatní větve kryjí starší výpisy bez supplier_id (vlastnictví přes párování).
+        $txWhere = '(statement_id IN (SELECT id FROM bank_statements WHERE supplier_id = ?)'
+            . ' OR id IN (SELECT bank_transaction_id FROM payment_matches WHERE supplier_id = ?)'
             . ' OR id IN (SELECT bank_transaction_id FROM other_item_allocations'
             . ' WHERE supplier_id = ? AND bank_transaction_id IS NOT NULL)'
             . ' OR matched_invoice_id IN (SELECT id FROM invoices WHERE supplier_id = ?)'
@@ -456,13 +501,13 @@ final class ArchiveService
             . ' WHERE supplier_id = ? AND last_bank_transaction_id IS NOT NULL))';
         $specs['bank_transactions'] = [
             'where' => $txWhere,
-            'params' => [$supplierId, $supplierId, $supplierId, $supplierId],
+            'params' => [$supplierId, $supplierId, $supplierId, $supplierId, $supplierId],
             'pk' => 'id',
             'order' => 'id',
         ];
         $specs['bank_statements'] = [
             'where' => 'id IN (SELECT statement_id FROM bank_transactions WHERE statement_id IS NOT NULL AND ' . $txWhere . ')',
-            'params' => [$supplierId, $supplierId, $supplierId, $supplierId],
+            'params' => [$supplierId, $supplierId, $supplierId, $supplierId, $supplierId],
             'pk' => 'id',
             'order' => 'id',
         ];
@@ -490,7 +535,7 @@ final class ArchiveService
      * Streamovaný export tabulky do JSONL (dávky po 1000: keyset přes PK, jinak
      * LIMIT/OFFSET). Vrací {rows, sha256} pro manifest.
      *
-     * @param array{where:string, params:list<mixed>, pk:?string, order:string} $spec
+     * @param array{where:string, params:list<mixed>, pk:?string, order:string, keyset?:list<string>, partition?:?string} $spec
      * @return array{rows:int, sha256:string}
      */
     private function exportTable(string $table, array $spec, string $filePath): array
@@ -504,48 +549,133 @@ final class ArchiveService
         $hash = hash_init('sha256');
         $rows = 0;
         try {
-            $lastId = null;
-            $offset = 0;
-            while (true) {
-                if ($spec['pk'] !== null) {
-                    $sql = 'SELECT ' . $columns . ' FROM ' . $table . ' WHERE ' . $spec['where']
-                        . ($lastId !== null ? ' AND ' . $spec['pk'] . ' > ?' : '')
-                        . ' ORDER BY ' . $spec['pk'] . ' LIMIT 1000';
-                    $params = $lastId !== null ? array_merge($spec['params'], [$lastId]) : $spec['params'];
-                } else {
-                    $sql = 'SELECT ' . $columns . ' FROM ' . $table . ' WHERE ' . $spec['where']
-                        . ' ORDER BY ' . $spec['order'] . ' LIMIT 1000 OFFSET ' . $offset;
-                    $params = $spec['params'];
+            $partitions = [null];
+            if (($spec['partition'] ?? null) !== null) {
+                $stmt = $pdo->prepare('SELECT DISTINCT `' . $spec['partition'] . '` FROM ' . $table . ' WHERE ' . $spec['where']);
+                $stmt->execute($spec['params']);
+                $partitions = $stmt->fetchAll(PDO::FETCH_COLUMN);
+            }
+            foreach ($partitions as $partition) {
+                $where = $spec['where'];
+                $baseParams = $spec['params'];
+                if ($partition !== null) {
+                    $where .= ' AND `' . $spec['partition'] . '` = ?';
+                    $baseParams[] = $partition;
                 }
-                $stmt = $pdo->prepare($sql);
-                $stmt->execute($params);
-                $batch = $stmt->fetchAll(PDO::FETCH_ASSOC);
-                if ($batch === []) {
-                    break;
-                }
-                foreach ($batch as $row) {
-                    $line = json_encode($row, JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE | JSON_PRESERVE_ZERO_FRACTION);
-                    if ($line === false) {
-                        throw new \RuntimeException('JSON encode selhal pro ' . $table . ' (řádek ' . ($rows + 1) . ').');
+                $lastId = null;
+                $lastKey = null;
+                $offset = 0;
+                $keyset = $spec['keyset'] ?? null;
+                while (true) {
+                    if ($keyset !== null) {
+                        [$after, $afterParams] = $lastKey === null ? ['', []] : self::keysetAfter($keyset, $lastKey);
+                        $sql = 'SELECT ' . $columns . ' FROM ' . $table . ' WHERE ' . $where
+                            . ($after !== '' ? ' AND ' . $after : '')
+                            . ' ORDER BY ' . $spec['order'] . ' LIMIT 1000';
+                        $params = array_merge($baseParams, $afterParams);
+                    } elseif ($spec['pk'] !== null) {
+                        $sql = 'SELECT ' . $columns . ' FROM ' . $table . ' WHERE ' . $where
+                            . ($lastId !== null ? ' AND ' . $spec['pk'] . ' > ?' : '')
+                            . ' ORDER BY ' . $spec['pk'] . ' LIMIT 1000';
+                        $params = $lastId !== null ? array_merge($baseParams, [$lastId]) : $baseParams;
+                    } else {
+                        $sql = 'SELECT ' . $columns . ' FROM ' . $table . ' WHERE ' . $where
+                            . ' ORDER BY ' . $spec['order'] . ' LIMIT 1000 OFFSET ' . $offset;
+                        $params = $baseParams;
                     }
-                    $line .= "\n";
-                    fwrite($fh, $line);
-                    hash_update($hash, $line);
-                    $rows++;
-                }
-                if ($spec['pk'] !== null) {
-                    $lastId = $batch[count($batch) - 1][$spec['pk']];
-                } else {
-                    $offset += count($batch);
-                }
-                if (count($batch) < 1000) {
-                    break;
+                    $stmt = $pdo->prepare($sql);
+                    $stmt->execute($params);
+                    $batch = $stmt->fetchAll(PDO::FETCH_ASSOC);
+                    if ($batch === []) {
+                        break;
+                    }
+                    foreach ($batch as $row) {
+                        $line = json_encode($row, JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE | JSON_PRESERVE_ZERO_FRACTION);
+                        if ($line === false) {
+                            throw new \RuntimeException('JSON encode selhal pro ' . $table . ' (řádek ' . ($rows + 1) . ').');
+                        }
+                        $line .= "\n";
+                        fwrite($fh, $line);
+                        hash_update($hash, $line);
+                        $rows++;
+                    }
+                    if ($keyset !== null) {
+                        $lastKey = $batch[count($batch) - 1];
+                    } elseif ($spec['pk'] !== null) {
+                        $lastId = $batch[count($batch) - 1][$spec['pk']];
+                    } else {
+                        $offset += count($batch);
+                    }
+                    if (count($batch) < 1000) {
+                        break;
+                    }
                 }
             }
         } finally {
             fclose($fh);
         }
         return ['rows' => $rows, 'sha256' => hash_final($hash)];
+    }
+
+    /**
+     * Podmínka „za posledním řádkem dávky" pro složený klíč, rozepsaná do OR větví
+     * (a > ? OR (a = ? AND b > ?) …), aby šla po indexu jako rozsah.
+     *
+     * @param list<string> $keyset
+     * @param array<string,mixed> $last
+     * @return array{0:string, 1:list<mixed>}
+     */
+    private static function keysetAfter(array $keyset, array $last): array
+    {
+        $column = array_pop($keyset);
+        $sql = '`' . $column . '` > ?';
+        $params = [$last[$column]];
+        while ($keyset !== []) {
+            $column = array_pop($keyset);
+            $sql = '`' . $column . '` > ? OR (`' . $column . '` = ? AND (' . $sql . '))';
+            $params = [$last[$column], $last[$column], ...$params];
+        }
+        return ['(' . $sql . ')', $params];
+    }
+
+    /**
+     * Sdílené (skupinové, supplier_id IS NULL) typy a hodnoty dimenzí, na které odkazují
+     * data firmy. Obnova je nepřenáší ani neduplikuje: ověří, že v cílové instanci existují
+     * se stejným id, kódem a skupinou, jinak obnovu zastaví.
+     *
+     * @return array{types: list<array<string,mixed>>, values: list<array<string,mixed>>}
+     */
+    private function collectSharedDimensions(int $supplierId): array
+    {
+        $pdo = $this->db->pdo();
+        $refs = SharedDimensionReferences::collect($pdo, $supplierId);
+        $values = [];
+        foreach (array_chunk($refs['value_ids'], 500) as $chunk) {
+            $stmt = $pdo->prepare('SELECT id, type_id, code, supplier_group_id FROM dimension_values WHERE id IN ('
+                . implode(', ', array_fill(0, count($chunk), '?')) . ') ORDER BY id');
+            $stmt->execute($chunk);
+            foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+                $values[] = ['id' => (int) $row['id'], 'type_id' => (int) $row['type_id'], 'code' => (string) $row['code'],
+                    'supplier_group_id' => $row['supplier_group_id'] === null ? null : (int) $row['supplier_group_id']];
+            }
+        }
+        $typeIds = array_fill_keys($refs['type_ids'], true);
+        $types = [];
+        if ($typeIds !== []) {
+            $ids = array_keys($typeIds);
+            sort($ids);
+            $stmt = $pdo->prepare('SELECT id, code, supplier_id, supplier_group_id FROM dimension_types WHERE id IN ('
+                . implode(', ', array_fill(0, count($ids), '?')) . ') ORDER BY id');
+            $stmt->execute($ids);
+            foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+                if ($row['supplier_id'] !== null) {
+                    continue; // typ firmy se exportuje jako řádek a obnova ho přemapuje
+                }
+                $types[] = ['id' => (int) $row['id'], 'code' => (string) $row['code'],
+                    'supplier_group_id' => $row['supplier_group_id'] === null ? null : (int) $row['supplier_group_id']];
+            }
+        }
+        return ['types' => $types, 'values' => $values];
     }
 
     /** Explicitní seznam sloupců (bez vyloučených BLOBů / credentials), jinak `*`. */

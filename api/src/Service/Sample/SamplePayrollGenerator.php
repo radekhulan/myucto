@@ -82,7 +82,7 @@ final class SamplePayrollGenerator
         $track('payroll_office', $officeId);
         $this->execute('INSERT INTO payroll_office_registration_versions (supplier_id, office_id, effective_from, social_security_variable_symbol, source_reference) VALUES (?, ?, ?, "1101234563", "sample:skoleni")', [$supplierId, $officeId, $start]);
         if (($before['payroll_employer_settings'] ?? []) === []) {
-            $this->execute('INSERT INTO payroll_employer_settings (supplier_id, default_office_id, social_security_office_code) VALUES (?, ?, "P")', [$supplierId, $officeId]);
+            $this->execute('INSERT INTO payroll_employer_settings (supplier_id, default_office_id, social_security_office_code) VALUES (?, ?, "110")', [$supplierId, $officeId]);
         }
         $existingPolicies = $pdo->prepare('SELECT valid_from, valid_to FROM payroll_employer_policies WHERE supplier_id = ? ORDER BY valid_from');
         $existingPolicies->execute([$supplierId]);
@@ -102,7 +102,7 @@ final class SamplePayrollGenerator
         $preparePayments = ($before['payroll_institution_accounts'] ?? []) === [];
         $settings = $pdo->prepare('SELECT social_security_office_code FROM payroll_employer_settings WHERE supplier_id = ?');
         $settings->execute([$supplierId]);
-        $socialCode = trim((string) $settings->fetchColumn()) ?: 'P';
+        $socialCode = trim((string) $settings->fetchColumn()) ?: '110';
         foreach ($preparePayments ? [['social_security', $socialCode, 'Ukázková správa sociálního zabezpečení'], ['health_insurer', '111', 'Ukázková zdravotní pojišťovna'], ['tax_office', 'advance_tax', 'Ukázkový finanční úřad'], ['tax_office', 'withholding_tax', 'Ukázkový finanční úřad']] : [] as [$kind, $code, $name]) {
             $account = $this->institutionAccounts->create($supplierId, [
                 'institution_type' => $kind, 'institution_code' => $code,

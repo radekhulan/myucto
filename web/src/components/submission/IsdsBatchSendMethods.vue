@@ -11,7 +11,7 @@
  * Odesílací brána se pro dávku nenabízí: ISDS schvaluje každý koncept zvlášť
  * s přesměrováním na svou stránku, takže „jedním přihlášením" to nejde.
  */
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { apiErrorMessage } from '@/api/errors'
 import {
@@ -22,9 +22,11 @@ import {
 } from '@/api/dataBox'
 import { ICONS, btnFilled, btnOutlineSm } from '@/components/ui/buttonStyles'
 import IsdsSendMethods from '@/components/submission/IsdsSendMethods.vue'
+import IsdsSavedAccessPicker from '@/components/submission/IsdsSavedAccessPicker.vue'
+import { useIsdsSavedAccess } from '@/components/submission/useIsdsSavedAccess'
 import MobileKeyBatchSendButton from '@/components/submission/MobileKeyBatchSendButton.vue'
 
-type Method = 'gateway' | 'mobile_key' | 'password' | 'sms' | 'certificate'
+type Method = 'gateway' | 'mobile_key' | 'password' | 'sms' | 'certificate' | 'saved'
 
 const props = defineProps<{
   outboxIds: number[]
@@ -38,7 +40,6 @@ const emit = defineEmits<{
 }>()
 const { t } = useI18n()
 
-const METHODS: Method[] = ['gateway', 'mobile_key', 'password', 'sms', 'certificate']
 const ACCESS_LINK = '/admin/databox?tab=access'
 
 const single = computed(() => props.outboxIds.length === 1)
@@ -52,10 +53,18 @@ const smsFlowToken = ref('')
 const smsStatus = ref('')
 const smsCode = ref('')
 const certificateConfirmed = ref(false)
+const savedAccess = useIsdsSavedAccess(() => props.environment, 'send', () => !single.value)
+const canUseSavedAccess = savedAccess.canUseSelected
+const methods = computed<Method[]>(() => {
+  const items: Method[] = ['gateway', 'mobile_key', 'password', 'sms', 'certificate']
+  if (savedAccess.state.choices.length || method.value === 'saved') items.splice(2, 0, 'saved')
+  return items
+})
 
 function available(option: Method): boolean {
   if (option === 'gateway') return false
   if (option === 'certificate') return certificateStored.value
+  if (option === 'saved') return savedAccess.state.choices.length > 0
   return true
 }
 
@@ -63,6 +72,7 @@ function methodTitle(option: Method): string {
   switch (option) {
     case 'gateway': return t('databox.send.gateway.title')
     case 'mobile_key': return t('databox.send.mobile_key.title')
+    case 'saved': return t('databox.savedAccess.title')
     case 'password': return t('databox.send.password.title')
     case 'sms': return t('databox.send.sms.title')
     default: return t('databox.send.certificate.title')
@@ -73,6 +83,7 @@ function methodDescription(option: Method): string {
   switch (option) {
     case 'gateway': return t('databox.send.gateway.description')
     case 'mobile_key': return t('databox.send.mobile_key.description')
+    case 'saved': return t('databox.savedAccess.description')
     case 'password': return t('databox.send.password.description')
     case 'sms': return t('databox.send.sms.description')
     default: return t('databox.send.certificate.description')
@@ -91,6 +102,9 @@ function select(option: Method) {
   smsFlowToken.value = ''
   smsStatus.value = ''
   resetSecrets()
+  username.value = ''
+  certificateConfirmed.value = false
+  savedAccess.reset()
 }
 
 function finish(results: MobileKeyBatchItemResult[], receiptSession: MobileKeyReceiptSession | null = null) {
@@ -123,17 +137,18 @@ async function run(action: () => Promise<void>) {
 }
 
 async function sendWithPassword() {
-  if (!credentialsFilled()) return
+  const useSaved = method.value === 'saved'
+  const isCurrent = savedAccess.captureScope()
+  if (useSaved ? !canUseSavedAccess.value : !credentialsFilled()) return
   await run(async () => {
     try {
-      finish(await dataBoxApi.passwordSendBatch(
-        props.outboxIds,
-        props.environment,
-        username.value.trim(),
-        password.value,
-      ))
+      const access = await savedAccess.credentials(useSaved, username.value, password.value)
+      if (!access || !isCurrent()) return
+      const result = await dataBoxApi.passwordSendBatch(props.outboxIds, props.environment, access)
+      if (isCurrent()) finish(result)
     } finally {
       resetSecrets()
+      savedAccess.state.confirmed = false
     }
   })
 }
@@ -196,6 +211,14 @@ onMounted(async () => {
   const credentials = await Promise.resolve().then(() => dataBoxApi.credentials()).catch(() => [])
   certificateStored.value = credentials.some(c => c.environment === props.environment && !c.credential_missing)
 })
+watch(savedAccess.scope, () => {
+  resetSecrets()
+  username.value = ''
+  smsFlowToken.value = ''
+  smsStatus.value = ''
+  certificateConfirmed.value = false
+  method.value = 'mobile_key'
+}, { flush: 'sync' })
 onBeforeUnmount(resetSecrets)
 </script>
 
@@ -212,7 +235,7 @@ onBeforeUnmount(resetSecrets)
     <p class="text-sm text-neutral-700">{{ t('databox.send.batch.intro', { count: outboxIds.length }) }}</p>
     <div class="grid min-w-0 gap-2 sm:grid-cols-2" role="radiogroup" :aria-label="t('databox.send.title')">
       <label
-        v-for="option in METHODS"
+        v-for="option in methods"
         :key="option"
         class="flex min-w-0 gap-3 rounded-lg border p-3"
         :class="!available(option)
@@ -267,6 +290,22 @@ onBeforeUnmount(resetSecrets)
         @sent="finish"
       />
 
+      <template v-else-if="method === 'saved'">
+        <IsdsSavedAccessPicker :access="savedAccess" :disabled="busy" />
+        <button
+          type="button"
+          :class="[btnFilled('primary'), 'mt-3 whitespace-nowrap']"
+          :disabled="busy || !canUseSavedAccess"
+          data-test="isds-batch-saved-submit"
+          @click="sendWithPassword"
+        >
+          <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true">
+            <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.send" />
+          </svg>
+          {{ busy ? t('common.loading') : t('databox.send.batch.submit', { count: outboxIds.length }) }}
+        </button>
+      </template>
+
       <template v-else-if="method === 'password' || method === 'sms'">
         <p class="text-sm text-neutral-700">
           {{ method === 'sms' ? t('databox.send.sms.intro') : t('databox.outbox.passwordSend.intro') }}
@@ -296,6 +335,10 @@ onBeforeUnmount(resetSecrets)
             >
           </label>
         </template>
+        <label v-if="method === 'password'" class="mt-3 flex items-center gap-2 text-sm">
+          <input v-model="savedAccess.state.remember" type="checkbox" :disabled="busy" data-test="isds-remember-access">
+          <span>{{ t('databox.savedAccess.remember') }}</span>
+        </label>
         <div class="mt-3 flex flex-wrap gap-2">
           <button
             v-if="method === 'password'"

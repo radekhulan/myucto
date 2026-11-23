@@ -29,6 +29,7 @@ const m = vi.hoisted(() => ({
   closeJmhzTransportAttempt: vi.fn(),
   jmhzExternalSubmissions: vi.fn(() => Promise.resolve({ environment: 'production', items: [] })),
   routeParams: {} as Record<string, string>,
+  routeQuery: {} as Record<string, string>,
   testAllowed: true,
   routerReplace: vi.fn(),
 }))
@@ -38,7 +39,7 @@ const m = vi.hoisted(() => ({
 // exporty (RouterLink).
 vi.mock('vue-router', async (importOriginal) => ({
   ...(await importOriginal<typeof import('vue-router')>()),
-  useRoute: () => ({ name: 'payroll-submissions', params: m.routeParams, query: {} }),
+  useRoute: () => ({ name: 'payroll-submissions', params: m.routeParams, query: m.routeQuery }),
   useRouter: () => ({ replace: m.routerReplace }),
 }))
 
@@ -512,6 +513,7 @@ describe('PayrollSubmissions', () => {
     // předat dalšímu testu.
     sessionStorage.clear()
     m.routeParams = {}
+    m.routeQuery = {}
     m.testAllowed = true
     setup()
   })
@@ -567,6 +569,7 @@ describe('PayrollSubmissions', () => {
     expect(extraordinary).toEqual([
       'payroll.submissions.tabs.statutory',
       'payroll.submissions.tabs.regzel',
+      'payroll.submissions.tabs.registration_a1',
       'payroll.submissions.tabs.registration_completion',
       'payroll.submissions.tabs.discount_intents',
       'payroll.submissions.tabs.sickness',
@@ -595,7 +598,7 @@ describe('PayrollSubmissions', () => {
     await flushPromises()
 
     expect((wrapper.get('[data-test="submissions-period"]').element as HTMLInputElement).value).toBe('2026-05')
-    expect(m.routerReplace).toHaveBeenCalledWith({ query: { period: '2026-05' } })
+    expect(m.routerReplace).toHaveBeenCalledWith({ query: { period: '2026-05', submission: undefined } })
     await clickTab(wrapper, 'health')
     expect(m.monthlyChecklist).toHaveBeenLastCalledWith('production', '2026-05')
   })
@@ -624,6 +627,23 @@ describe('PayrollSubmissions', () => {
     expect(card.find('[data-test="monthly-checklist-panel"]').exists()).toBe(true)
   })
 
+  it('odkaz na zmrazené JMHZ rozbalí podrobnosti a předá ID podání', async () => {
+    m.routeParams = { tab: 'jmhz' }
+    m.routeQuery = { period: '2026-04', environment: 'test', submission: '15' }
+    const wrapper = mount(PayrollSubmissions, {
+      global: {
+        directives: { 'column-labels': {} },
+        stubs: { PayrollSubmissionOverviewPanel: { name: 'PayrollSubmissionOverviewPanel', props: ['submissionId', 'period', 'environment'], template: '<div />' } },
+      },
+    })
+    await flushPromises()
+    expect(wrapper.get('[data-test="submissions-details-jmhz"]').attributes('open')).toBeDefined()
+    const panel = wrapper.findComponent({ name: 'PayrollSubmissionOverviewPanel' })
+    expect(panel.props('submissionId')).toBe(15)
+    expect(panel.props('period')).toBe('2026-04')
+    expect(panel.props('environment')).toBe('test')
+  })
+
   it('oddělí test a produkci, používá standardní záložky a SearchableSelect', async () => {
     const wrapper = mount(PayrollSubmissions)
     await flushPromises()
@@ -637,8 +657,10 @@ describe('PayrollSubmissions', () => {
     // Čtrnáctá je Dohlášení údajů (REGZEC A3) za zaměstnance přihlášené přes ONZ.
     // Patnáctá je roční vyúčtování daně (DPZVD6/DPSVD2), které se podává do EPO
     // a mezi daňová přiznání nepatří.
+    // Šestnáctá jsou přihlášky k podání (REGZEC A1) připravované hromadně.
     const tabs = wrapper.findAll('[role="tab"]')
-    expect(tabs).toHaveLength(15)
+    expect(tabs).toHaveLength(16)
+    expect(tabs.some(tab => tab.text().includes('payroll.submissions.tabs.registration_a1'))).toBe(true)
     expect(tabs.some(tab => tab.text().includes('payroll.submissions.tabs.statutory'))).toBe(true)
     expect(tabs.some(tab => tab.text().includes('payroll.submissions.tabs.registration_completion'))).toBe(true)
     await clickTab(wrapper, 'regzel')

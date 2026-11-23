@@ -1,12 +1,14 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import ImapOAuthFields from '@/components/settings/ImapOAuthFields.vue'
 import { useRoute, useRouter } from 'vue-router'
 import { bankNameByCode, isKnownBankName } from '@/utils/czBankCodes'
 import {
   settingsApi,
   type BankEmailAccountMapping,
   type BankEmailImapSettings,
+  type BankEmailImapPayload,
   type BankEmailProcessedMessage,
   type BankEmailAttachmentIngest,
   type BankEmailProvider,
@@ -15,7 +17,7 @@ import {
 } from '@/api/settings'
 import { clientsApi, type CrpDphAccount } from '@/api/clients'
 import { bankApi, type AccountBalancesResponse } from '@/api/bank'
-import { apiErrorMessage } from '@/api/errors'
+import { apiErrorCode, apiErrorMessage } from '@/api/errors'
 import { useToast } from '@/composables/useToast'
 import { formatMoney, formatDate, formatDateTime } from '@/composables/useFormat'
 import { useChartColors } from '@/composables/useTheme'
@@ -24,6 +26,8 @@ import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
 import { useDemoMode } from '@/composables/useDemoMode'
 import { useAuthStore } from '@/stores/auth'
 import EmptyState from '@/components/ui/EmptyState.vue'
+import RequiredMark from '@/components/ui/RequiredMark.vue'
+import Modal from '@/components/ui/Modal.vue'
 import DateInput from '@/components/ui/DateInput.vue'
 import BankConnectionsPanel from '@/components/bank/BankConnectionsPanel.vue'
 
@@ -190,7 +194,30 @@ watch(() => currencyDraft.bank_code, (code) => {
     currencyDraft.bank_name = name
   }
 })
-const imapDraft = reactive<Partial<BankEmailImapSettings> & { password?: string }>(defaultImapDraft())
+const imapDraft = reactive<BankEmailImapPayload>(defaultImapDraft())
+const imapUsesMicrosoft = computed(() => imapDraft.auth_mode === 'microsoft365')
+const imapOAuthSecretSaved = computed(() => {
+  const account = imapAccounts.value.find(row => row.id === editingImapId.value)
+  const normalize = (value: string | null | undefined) => (value ?? '').trim().toLowerCase()
+  return account?.has_oauth_client_secret === true
+    && normalize(imapDraft.username) === normalize(account.username)
+    && normalize(imapDraft.oauth_tenant_id) === normalize(account.oauth_tenant_id)
+    && normalize(imapDraft.oauth_client_id) === normalize(account.oauth_client_id)
+})
+// Uložené heslo server použije jen pro stejný server, port, šifrování a uživatele.
+const imapPasswordRequired = computed(() => {
+  if (imapUsesMicrosoft.value || imapDraft.password?.trim()) return false
+  const account = imapAccounts.value.find(row => row.id === editingImapId.value)
+  if (!account || account.auth_mode === 'microsoft365' || !account.has_password) return false
+  return (imapDraft.host ?? '').trim().toLowerCase() !== (account.host ?? '').trim().toLowerCase()
+    || Number(imapDraft.port) !== Number(account.port)
+    || imapDraft.encryption !== account.encryption
+    || (imapDraft.username ?? '').trim() !== (account.username ?? '').trim()
+})
+const imapPasswordInput = ref<HTMLInputElement | null>(null)
+watch(() => [imapDraft.auth_mode, imapDraft.username, imapDraft.oauth_tenant_id, imapDraft.oauth_client_id], () => {
+  folderOptions.value = []
+})
 const regexFieldDefinitions = [
   { key: 'amount', required: true },
   { key: 'currency', required: true },
@@ -204,6 +231,8 @@ const regexFieldDefinitions = [
   { key: 'message', required: false },
   { key: 'bank_ref', required: false },
   { key: 'balance', required: false },
+  { key: 'original_amount', required: false },
+  { key: 'original_currency', required: false },
 ] as const
 type RegexFieldKey = typeof regexFieldDefinitions[number]['key']
 interface RegexProviderDraft {
@@ -219,7 +248,7 @@ interface RegexProviderDraft {
 }
 const providerDraft = reactive<RegexProviderDraft>(defaultRegexProviderDraft())
 
-function defaultImapDraft(): Partial<BankEmailImapSettings> & { password?: string } {
+function defaultImapDraft(): BankEmailImapPayload {
   return {
     id: null,
     name: '',
@@ -241,6 +270,11 @@ function defaultImapDraft(): Partial<BankEmailImapSettings> & { password?: strin
     email_auth_serv_id: '',
     username: '',
     password: '',
+    auth_mode: 'password',
+    oauth_tenant_id: '',
+    oauth_client_id: '',
+    oauth_client_secret: '',
+    has_oauth_client_secret: false,
     folder: 'INBOX',
     max_messages_per_run: 50,
     process_from_date: null,
@@ -520,7 +554,7 @@ function startNewImapAccount() {
 }
 
 function startEditImapAccount(account: BankEmailImapSettings) {
-  Object.assign(imapDraft, { ...account, password: '' })
+  Object.assign(imapDraft, defaultImapDraft(), account, { password: '', oauth_client_secret: '' })
   editingImapId.value = account.id
   folderOptions.value = []
   imapFormOpen.value = true
@@ -533,7 +567,35 @@ function closeImapForm() {
   imapFormOpen.value = false
 }
 
+function imapPayload(): BankEmailImapPayload {
+  return {
+    ...imapDraft,
+    password: imapUsesMicrosoft.value ? undefined : imapDraft.password,
+    oauth_client_secret: imapUsesMicrosoft.value ? imapDraft.oauth_client_secret : undefined,
+  }
+}
+
+function validateImapOAuthSecret(): boolean {
+  if (imapUsesMicrosoft.value && !imapOAuthSecretSaved.value && !imapDraft.oauth_client_secret?.trim()) {
+    toast.error(t('settings.imap_oauth_secret_required'))
+    return false
+  }
+  return true
+}
+
+function promptImapPassword() {
+  toast.error(t('bank_accounts.imap_password_required'))
+  void nextTick(() => imapPasswordInput.value?.focus())
+}
+
+function validateImapPassword(): boolean {
+  if (!imapPasswordRequired.value) return true
+  promptImapPassword()
+  return false
+}
+
 async function saveImapAccount() {
+  if (!validateImapOAuthSecret() || !validateImapPassword()) return
   if (imapDraft.require_email_auth && !imapDraft.email_auth_serv_id?.trim()) {
     toast.error(t('bank_accounts.email_auth_serv_id_hint'))
     return
@@ -541,16 +603,17 @@ async function saveImapAccount() {
   saving.value = true
   try {
     if (editingImapId.value !== null) {
-      await settingsApi.updateBankEmailImapAccount(editingImapId.value, imapDraft)
+      await settingsApi.updateBankEmailImapAccount(editingImapId.value, imapPayload())
       toast.success(t('bank_accounts.imap_saved'))
     } else {
-      await settingsApi.createBankEmailImapAccount(imapDraft)
+      await settingsApi.createBankEmailImapAccount(imapPayload())
       toast.success(t('bank_accounts.imap_created'))
     }
     closeImapForm()
     await load()
   } catch (e) {
-    toast.error(apiErrorMessage(e, t('bank_accounts.imap_save_failed')))
+    if (apiErrorCode(e) === 'imap_password_required') promptImapPassword()
+    else toast.error(apiErrorMessage(e, t('bank_accounts.imap_save_failed')))
   } finally {
     saving.value = false
   }
@@ -570,10 +633,11 @@ async function testImapAccount(account: BankEmailImapSettings) {
 }
 
 async function browseImapFolders() {
+  if (!validateImapOAuthSecret() || !validateImapPassword()) return
   browsingFolders.value = true
   folderOptions.value = []
   try {
-    const result = await settingsApi.browseBankEmailImapFolders(imapDraft, editingImapId.value)
+    const result = await settingsApi.browseBankEmailImapFolders(imapPayload(), editingImapId.value)
     folderOptions.value = result.folders ?? []
     if (folderOptions.value.length > 0) {
       toast.success(t('bank_accounts.folders_loaded', { count: folderOptions.value.length }))
@@ -581,7 +645,8 @@ async function browseImapFolders() {
       toast.info(t('bank_accounts.folders_none'))
     }
   } catch (e: any) {
-    toast.error(e?.response?.data?.message || apiErrorMessage(e, t('bank_accounts.folders_failed')))
+    if (apiErrorCode(e) === 'imap_password_required') promptImapPassword()
+    else toast.error(e?.response?.data?.message || apiErrorMessage(e, t('bank_accounts.folders_failed')))
   } finally {
     browsingFolders.value = false
   }
@@ -1215,7 +1280,13 @@ async function deleteMessage(m: BankEmailProcessedMessage) {
                     {{ t('bank_accounts.distribute_badge', { n: account.distribute_supplier_count ?? 0 }) }}
                   </span>
                 </td>
-                <td class="px-3 py-2 font-mono text-xs">{{ account.host || '—' }}<span v-if="account.port">:{{ account.port }}</span></td>
+                <td class="px-3 py-2">
+                  <div class="font-mono text-xs">{{ account.host || '—' }}<span v-if="account.port">:{{ account.port }}</span></div>
+                  <span data-testid="imap-auth-badge" class="inline-flex items-center mt-1 px-2 py-0.5 rounded-full text-xs whitespace-nowrap"
+                    :class="account.auth_mode === 'microsoft365' ? 'bg-primary-50 text-primary-700' : 'bg-neutral-100 text-neutral-700'">
+                    {{ account.auth_mode === 'microsoft365' ? t('settings.imap_auth_microsoft365_short') : t('settings.imap_auth_password') }}
+                  </span>
+                </td>
                 <td class="px-3 py-2">{{ account.folder || 'INBOX' }}</td>
                 <td class="px-3 py-2">{{ account.max_messages_per_run }}</td>
                 <td class="px-3 py-2">
@@ -1249,15 +1320,22 @@ async function deleteMessage(m: BankEmailProcessedMessage) {
               <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('bank_accounts.th_name') }}</label>
               <input v-model="imapDraft.name" type="text" class="w-full h-10 px-3 bg-surface border border-neutral-300 rounded-md text-sm" />
             </div>
-            <div>
+            <label class="block text-sm font-medium text-neutral-700">
+              {{ t('settings.imap_auth_mode') }}
+              <select v-model="imapDraft.auth_mode" class="mt-1 h-10 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm">
+                <option value="password">{{ t('settings.imap_auth_password') }}</option>
+                <option value="microsoft365">{{ t('settings.imap_auth_microsoft365') }}</option>
+              </select>
+            </label>
+            <div v-if="!imapUsesMicrosoft">
               <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('bank_accounts.host') }}</label>
               <input v-model="imapDraft.host" type="text" class="w-full h-10 px-3 bg-surface border border-neutral-300 rounded-md text-sm" />
             </div>
-            <div>
+            <div v-if="!imapUsesMicrosoft">
               <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('bank_accounts.port') }}</label>
               <input v-model.number="imapDraft.port" type="number" class="w-full h-10 px-3 bg-surface border border-neutral-300 rounded-md text-sm" />
             </div>
-            <div>
+            <div v-if="!imapUsesMicrosoft">
               <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('bank_accounts.encryption') }}</label>
               <select v-model="imapDraft.encryption" class="w-full h-10 px-3 bg-surface border border-neutral-300 rounded-md text-sm">
                 <option value="ssl">{{ t('bank_accounts.enc_ssl') }}</option>
@@ -1265,13 +1343,19 @@ async function deleteMessage(m: BankEmailProcessedMessage) {
                 <option value="none">{{ t('bank_accounts.enc_none') }}</option>
               </select>
             </div>
-            <div>
-              <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('bank_accounts.username') }}</label>
-              <input v-model="imapDraft.username" type="text" class="w-full h-10 px-3 bg-surface border border-neutral-300 rounded-md text-sm" />
-            </div>
-            <div>
-              <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('bank_accounts.password') }}</label>
-              <input v-model="imapDraft.password" type="password" :placeholder="imapDraft.has_password ? t('bank_accounts.password_saved_placeholder') : ''"
+            <label class="block text-sm font-medium text-neutral-700">
+              <span class="block mb-1">{{ t(imapUsesMicrosoft ? 'settings.imap_oauth_mailbox' : 'bank_accounts.username') }}<RequiredMark v-if="imapUsesMicrosoft" /></span>
+              <input v-model="imapDraft.username" :type="imapUsesMicrosoft ? 'email' : 'text'" :required="imapUsesMicrosoft" class="w-full h-10 px-3 bg-surface border border-neutral-300 rounded-md text-sm" />
+            </label>
+            <ImapOAuthFields v-if="imapUsesMicrosoft"
+              v-model:tenant-id="imapDraft.oauth_tenant_id" v-model:client-id="imapDraft.oauth_client_id"
+              v-model:client-secret="imapDraft.oauth_client_secret" :secret-saved="imapOAuthSecretSaved"
+              label-class="block text-sm font-medium text-neutral-700"
+              input-class="mt-1 w-full h-10 px-3 bg-surface border border-neutral-300 rounded-md text-sm" />
+            <div v-else>
+              <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('bank_accounts.password') }}<RequiredMark v-if="imapPasswordRequired" /></label>
+              <input ref="imapPasswordInput" v-model="imapDraft.password" type="password" :required="imapPasswordRequired"
+                :placeholder="imapPasswordRequired ? t('bank_accounts.imap_password_required_placeholder') : imapDraft.has_password ? t('bank_accounts.password_saved_placeholder') : ''"
                 class="w-full h-10 px-3 bg-surface border border-neutral-300 rounded-md text-sm" />
             </div>
             <div>
@@ -1299,7 +1383,7 @@ async function deleteMessage(m: BankEmailProcessedMessage) {
               <DateInput v-model="imapDraft.process_from_date"
                 class="w-full h-10 px-3 bg-surface border border-neutral-300 rounded-md text-sm" />
             </div>
-            <label class="flex items-center gap-2 text-sm mt-7">
+            <label v-if="!imapUsesMicrosoft" class="flex items-center gap-2 text-sm mt-7">
               <input v-model="imapDraft.validate_cert" type="checkbox" class="rounded border-neutral-300 text-primary-600" />
               {{ t('bank_accounts.validate_cert') }}
             </label>
@@ -1641,9 +1725,9 @@ async function deleteMessage(m: BankEmailProcessedMessage) {
       </div>
     </div>
 
-    <div v-if="canManageAccounts && currencyFormOpen" class="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
-      <div class="bg-surface rounded-xl shadow-lg max-w-md w-full p-5">
-        <h3 class="text-lg font-semibold mb-3">{{ editingCurrency === null ? t('bank_accounts.new_account') : t('bank_accounts.edit_account_title', { label: editingCurrencyLabel }) }}</h3>
+    <Modal v-if="canManageAccounts && currencyFormOpen" width-class="max-w-md"
+      :title="editingCurrency === null ? t('bank_accounts.new_account') : t('bank_accounts.edit_account_title', { label: editingCurrencyLabel })"
+      @close="closeCurrencyForm">
         <div class="space-y-3">
           <div class="grid grid-cols-3 gap-3">
             <div>
@@ -1702,8 +1786,9 @@ async function deleteMessage(m: BankEmailProcessedMessage) {
           </div>
           <div>
             <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('bank_accounts.bank_code') }}</label>
-            <input v-model="currencyDraft.bank_code" type="text"
+            <input v-model="currencyDraft.bank_code" type="text" maxlength="10"
               class="w-full h-10 px-3 bg-surface border border-neutral-300 rounded-md text-sm font-mono" />
+            <p class="mt-1 text-xs text-neutral-500">{{ t('bank_accounts.bank_code_hint') }}</p>
           </div>
           <div>
             <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('bank_accounts.bank_name') }}</label>
@@ -1728,7 +1813,9 @@ async function deleteMessage(m: BankEmailProcessedMessage) {
             <input v-model="currencyDraft.is_default" type="checkbox" class="rounded border-neutral-300 text-primary-600" />
             {{ t('bank_accounts.default_for_currency') }}
           </label>
-          <div class="flex justify-end gap-2 pt-2">
+        </div>
+        <template #footer>
+          <div class="flex flex-wrap justify-end gap-2">
             <button type="button" @click="closeCurrencyForm"
               :class="btnOutline('neutral')">
               <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.x" /></svg>
@@ -1738,9 +1825,8 @@ async function deleteMessage(m: BankEmailProcessedMessage) {
               <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.check" /></svg>
               {{ t('common.save') }}</button>
           </div>
-        </div>
-      </div>
-    </div>
+        </template>
+    </Modal>
 
     <div v-if="providerFormOpen" class="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
       <div class="bg-surface rounded-xl shadow-lg max-w-5xl w-full max-h-[90vh] overflow-y-auto p-5">

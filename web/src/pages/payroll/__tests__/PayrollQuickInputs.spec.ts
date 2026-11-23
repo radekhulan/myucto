@@ -23,6 +23,8 @@ const m = vi.hoisted(() => ({
   materialize: vi.fn(),
   approveBatch: vi.fn(),
   canWrite: vi.fn(),
+  canRead: vi.fn(),
+  hourlyEvidence: vi.fn(),
   success: vi.fn(),
   error: vi.fn(),
 }))
@@ -38,6 +40,7 @@ vi.mock('vue-router', async (importOriginal) => ({
 vi.mock('@/api/payroll', () => ({
   payrollApi: {
     quickInputs: m.load,
+    hourlyEvidence: m.hourlyEvidence,
     saveQuickInputs: m.save,
     materializeRecurringComponents: m.materialize,
     approveInputsBatch: m.approveBatch,
@@ -50,17 +53,22 @@ vi.mock('@/api/preferences', () => ({
   },
 }))
 vi.mock('@/stores/auth', () => ({
-  useAuthStore: () => ({ canWrite: m.canWrite }),
+  useAuthStore: () => ({ canWrite: m.canWrite, canRead: m.canRead }),
 }))
 vi.mock('@/composables/useToast', () => ({
   useToast: () => ({ success: m.success, error: m.error }),
 }))
 // `useFormat` (sdílené formátování) táhne @/i18n, které volá skutečné
 // `createI18n` — továrna proto musí původní modul rozprostřít, ne nahradit.
-vi.mock('vue-i18n', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('vue-i18n')>()),
-  useI18n: () => ({ t: (key: string) => key, locale: ref('cs-CZ') }),
-}))
+vi.mock('vue-i18n', async (importOriginal) => {
+  const original = await importOriginal<typeof import('vue-i18n')>()
+  const { default: cs } = await import('@/i18n/cs.json')
+  const { te } = original.createI18n({ legacy: false, locale: 'cs', messages: { cs } }).global
+  return {
+    ...original,
+    useI18n: () => ({ t: (key: string) => key, te, locale: ref('cs-CZ') }),
+  }
+})
 
 // Preference tabulek (přepínač příplatků, zvolené sloupce složek) drží stav,
 // aby šlo ověřit, co stránka ukládá a jak čte uloženou volbu.
@@ -205,6 +213,8 @@ describe('PayrollQuickInputs', () => {
     m.pagePrefs.value = {}
     m.routeQuery = {}
     m.canWrite.mockReturnValue(true)
+    m.canRead.mockReturnValue(true)
+    m.hourlyEvidence.mockResolvedValue({ work_source: 'manual_summary', options: { nonworked_holidays: [], holiday_time_off_entitlements: [], overtime_time_off_entitlements: [], time_off_absences: [] }, period: '2026-11', employment_id: 12, can_write: true, row_version: 0, work_source_hash: 'a'.repeat(64), segments_suggested: [], evidence: null, history: [], history_offset: 0, history_has_more: false })
     m.load.mockImplementation(async period => ({
       period,
       items: [fixture()],
@@ -213,6 +223,47 @@ describe('PayrollQuickInputs', () => {
       month: { period: payload.period, items: [], total: 0 },
       failures: [],
     }))
+  })
+
+  it('uloží vybraným dohodám bez příjmu 0 Kč jednou akcí', async () => {
+    const dpp = (id: number, overrides: Partial<PayrollQuickInputRow> = {}) => fixture({
+      employment_id: id,
+      employment_code: `DPP-${id}`,
+      relation_type: 'dpp',
+      base_amount_minor: 0,
+      base_requires_entry: true,
+      overtime_amount_minor: 0,
+      bonus_amount_minor: 0,
+      gross_preview_minor: 0,
+      ...overrides,
+    })
+    m.load.mockImplementation(async period => ({
+      period,
+      total: 4,
+      items: [
+        fixture(),
+        dpp(21),
+        dpp(22),
+        dpp(23, { inputs: { base: inputRef('approved'), overtime: null, bonus: null } }),
+      ],
+    }))
+
+    const wrapper = mountPage()
+    await flushPromises()
+    await wrapper.get('[data-testid="quick-zero-income-open"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('[data-testid="quick-zero-income-row-12"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="quick-zero-income-row-23"]').exists()).toBe(false)
+    await wrapper.get('[data-testid="quick-zero-income-row-22"]').setValue(false)
+    await wrapper.get('[data-testid="quick-zero-income-save"]').trigger('click')
+    await flushPromises()
+
+    expect(m.save).toHaveBeenCalledTimes(1)
+    const payload = m.save.mock.calls[0][0]
+    expect(payload.rows.map((row: { employment_id: number }) => row.employment_id)).toEqual([21])
+    expect(payload.rows[0].base_amount_minor).toBe(0)
+    expect(m.success).toHaveBeenCalledWith('payroll.quick_inputs.zero_income.saved')
   })
 
   it('keeps two employments of one person separate and labels statutory income correctly', async () => {
@@ -397,6 +448,185 @@ describe('PayrollQuickInputs', () => {
     expect(wrapper.get('[data-testid="quick-payroll-save"]').classes()).toContain('w-full')
     expect(wrapper.get('[data-testid="quick-payroll-runs"]').text())
       .toContain('payroll.quick_inputs.continue_to_runs')
+  })
+
+  it('importovaný měsíc měsíčně odměňovaného vztahu nenabízí podklady hodin ani výměnu zdroje', async () => {
+    m.routeQuery = { period: '2026-11', employment: '12', hours: '1' }
+    m.load.mockImplementation(async period => ({ period, total: 1, items: [fixture({ hourly_remuneration_in_period: false, worked_time: {
+      month: { id: 1, row_version: 2, revision_no: 1, status: 'open', work_source: 'import_summary' },
+      manual_summary: null, suggested_segments: [{ date_from: '2026-11-01', date_to: '2026-11-30' }],
+      worked_duration_units: 22500, overtime_duration_units: null, worked_days: null, jmhz_confirmed: false,
+      available_sources: ['entries', 'import_summary'],
+    } })] }))
+    const wrapper = mountPage()
+    await flushPromises()
+    expect(wrapper.find('[data-testid="quick-worked-hours-12"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="quick-worked-hours-mobile-12"]').exists()).toBe(false)
+    expect(wrapper.find('[data-test="worked-hours-panel"]').exists()).toBe(false)
+    expect(wrapper.find('[data-test="worked-hours-restore-panel"]').exists()).toBe(false)
+    expect(wrapper.get('[data-testid="quick-base-12"]').attributes('disabled')).toBeUndefined()
+  })
+
+  it('přeloží blokaci hodinové mzdy podle kódu a serverový text použije jen jako zálohu', async () => {
+    m.load.mockImplementation(async period => ({ period, items: [fixture({
+      hourly_remuneration_in_period: true,
+      blockers: ['hourly_time_missing'],
+      hourly_wage_preview: { complete: false, blockers: [{ code: 'hourly_time_missing', message: 'Doložte skutečně odpracovanou dobu.', context: {} }], rounding: 'ceil', evidence_hash: 'a'.repeat(64), payable_total_minor: null, claims: [], entitlements: [], included_allocations: [] },
+    })] }))
+    const wrapper = mountPage()
+    await flushPromises()
+    expect(wrapper.text()).toContain('payroll.hourly_preview.blockers.hourly_time_missing')
+    expect(wrapper.text()).not.toContain('Doložte skutečně odpracovanou dobu.')
+  })
+
+  it('opens historical hourly settlement evidence while keeping current monthly base editable', async () => {
+    m.load.mockImplementation(async period => ({ period, items: [fixture({ hourly_remuneration_in_period: false,
+      hourly_wage_preview: { settlement_only: true, complete: true, blockers: [], rounding: 'ceil', evidence_hash: 'c'.repeat(64), payable_total_minor: 0, claims: [], entitlements: [], included_allocations: [] },
+      worked_time: { month: { id: 1, row_version: 2, revision_no: 1, status: 'approved', work_source: 'entries' }, manual_summary: null, suggested_segments: [], worked_duration_units: 22500, overtime_duration_units: 0, worked_days: 1, jmhz_confirmed: true },
+    })], total: 1 }))
+    const wrapper = mountPage(); await flushPromises()
+    expect(wrapper.get('[data-testid="quick-base-12"]').attributes('disabled')).toBeUndefined()
+    expect(wrapper.get('[data-testid="quick-base-mobile-12"]').attributes('disabled')).toBeUndefined()
+    await wrapper.get('[data-testid="quick-worked-hours-12"] [data-test="worked-hours-open"]').trigger('click'); await flushPromises()
+    expect(wrapper.find('[data-test="hourly-evidence-panel"]').exists()).toBe(true)
+    expect(wrapper.find('[data-test="worked-hours-current"]').exists()).toBe(false)
+    expect(wrapper.find('[data-test="worked-hours-save"]').exists()).toBe(false)
+    expect(m.hourlyEvidence).toHaveBeenCalledTimes(1)
+    expect(wrapper.get('[data-testid="quick-base-12"]').attributes('disabled')).toBeUndefined()
+  })
+
+  it('hodinové podklady načte dávkově a panel nepovolí zápisem peněžních vstupů', async () => {
+    m.canWrite.mockImplementation(permission => permission === 'payroll.inputs.write')
+    m.load.mockImplementation(async period => ({ period, items: [fixture({ hourly_remuneration_in_period: true, worked_time: {
+      month: { id: 1, row_version: 2, revision_no: 1, status: 'approved', work_source: 'manual_summary' },
+      manual_summary: { id: 2, time_month_revision_no: 1, content_sha256: 'a'.repeat(64), reason: 'Syntetický výkaz', segments: [] },
+      suggested_segments: [{ date_from: '2026-11-01', date_to: '2026-11-30' }],
+      worked_duration_units: 22500, overtime_duration_units: null, worked_days: null, jmhz_confirmed: false,
+    } })], total: 1 }))
+    const wrapper = mountPage()
+    await flushPromises()
+    expect(wrapper.get('[data-testid="quick-worked-hours-12"]').text()).toContain('7:30')
+    expect(wrapper.get('[data-testid="quick-worked-hours-mobile-12"]').text()).toContain('jmhz_pending')
+    expect(m.hourlyEvidence).not.toHaveBeenCalled()
+    await wrapper.get('[data-testid="quick-worked-hours-12"] [data-test="worked-hours-open"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.findAll('[data-test="worked-hours-panel"]')).toHaveLength(1)
+    expect(wrapper.find('[data-test="worked-hours-save"]').exists()).toBe(false)
+    expect(wrapper.find('[data-test="worked-hours-reopen"]').exists()).toBe(false)
+    expect(m.hourlyEvidence).toHaveBeenCalledTimes(1)
+    expect(wrapper.find('[data-test="hourly-evidence-save"]').exists()).toBe(false)
+    expect(m.load).toHaveBeenCalledTimes(1)
+  })
+
+  it('v hodinovém měsíci pouze ukáže existující základ a zablokuje jeho změnu', async () => {
+    m.load.mockImplementation(async period => ({ period, items: [fixture({
+      hourly_remuneration_in_period: true,
+      blockers: ['hourly_remuneration_calculation_unsupported'],
+    })] }))
+    const wrapper = mountPage()
+    await flushPromises()
+    expect(wrapper.get('[data-testid="quick-base-12"]').attributes('disabled')).toBeDefined()
+    expect(wrapper.get('[data-testid="quick-base-mobile-12"]').attributes('disabled')).toBeDefined()
+    expect(wrapper.get('[data-testid="quick-base-12"]').element).toHaveProperty('value', '42000,00')
+    expect(wrapper.find('[data-testid="quick-base-suggested-12"]').exists()).toBe(false)
+    expect(wrapper.text()).toContain('payroll.quick_inputs.blockers.hourly_remuneration_calculation_unsupported')
+  })
+
+  it('hodiny a náhled hodinové mzdy dá do samostatného řádku přes celou šířku, ne do sloupce se jménem', async () => {
+    m.load.mockImplementation(async period => ({ period, total: 1, items: [fixture({
+      hourly_remuneration_in_period: true,
+      worked_time: {
+        month: { id: 1, row_version: 2, revision_no: 1, status: 'open', work_source: 'manual_summary' },
+        manual_summary: null, suggested_segments: [{ date_from: '2026-11-01', date_to: '2026-11-30' }],
+        worked_duration_units: 22500, overtime_duration_units: null, worked_days: null, jmhz_confirmed: false,
+      },
+      hourly_wage_preview: { complete: true, blockers: [], rounding: 'ceil', evidence_hash: 'a'.repeat(64), payable_total_minor: 450000, claims: [], entitlements: [], included_allocations: [] },
+    })] }))
+    const wrapper = mountPage()
+    await flushPromises()
+    const hourlyRow = wrapper.get('[data-testid="quick-hourly-row-12"]')
+    expect(hourlyRow.element.tagName).toBe('TR')
+    const cell = hourlyRow.get('td')
+    expect(Number(cell.attributes('colspan'))).toBe(wrapper.findAll('thead th').length)
+    expect(hourlyRow.find('[data-testid="quick-worked-hours-12"]').exists()).toBe(true)
+    expect(hourlyRow.find('[data-test="hourly-wage-preview"]').exists()).toBe(true)
+    const personCell = hourlyRow.element.previousElementSibling!.querySelector('td')!
+    expect(personCell.querySelector('[data-test="hourly-wage-preview"]')).toBeNull()
+    expect(personCell.querySelector('[data-test="worked-hours-summary"]')).toBeNull()
+    expect(wrapper.get('[data-testid="quick-hourly-card-12"]').find('[data-test="hourly-wage-preview"]').exists()).toBe(true)
+  })
+
+  it('tlačítko na mzdový běh zachová zvolené období', async () => {
+    m.routeQuery = { period: '2026-02' }
+    const wrapper = mountPage()
+    await flushPromises()
+    expect(JSON.parse(wrapper.get('[data-testid="quick-payroll-runs"]').attributes('data-to')!))
+      .toEqual({ name: 'payroll-runs', query: { period: '2026-02' } })
+  })
+
+  it.each([
+    [false, '4725000'],
+    [true, '4275000'],
+  ])('náhled hrubého příjmu přičte úplný hodinový náhled, jen když hodinová mzda není ve vstupech (%s)', async (inInputs, digits) => {
+    m.load.mockImplementation(async period => ({ period, total: 1, items: [fixture({
+      hourly_remuneration_in_period: true,
+      hourly_claims_in_inputs: inInputs,
+      hourly_wage_preview: { complete: true, blockers: [], rounding: 'ceil', evidence_hash: 'a'.repeat(64), payable_total_minor: 450000, claims: [], entitlements: [], included_allocations: [] },
+    })] }))
+    const wrapper = mountPage()
+    await flushPromises()
+    expect(wrapper.get('[data-testid="quick-gross-12"]').text().replace(/\D/g, '')).toBe(digits)
+    expect(wrapper.find('[data-testid="quick-gross-hourly-12"]').exists()).toBe(!inInputs)
+  })
+
+  it('neúplný hodinový náhled k hrubému příjmu nepřičte', async () => {
+    m.load.mockImplementation(async period => ({ period, total: 1, items: [fixture({
+      hourly_remuneration_in_period: true,
+      hourly_wage_preview: { complete: false, blockers: [], rounding: 'ceil', evidence_hash: 'a'.repeat(64), payable_total_minor: null, claims: [], entitlements: [], included_allocations: [] },
+    })] }))
+    const wrapper = mountPage()
+    await flushPromises()
+    expect(wrapper.get('[data-testid="quick-gross-12"]').text().replace(/\D/g, '')).toBe('4275000')
+  })
+
+  it('měsíční řádek žádný hodinový řádek nemá', async () => {
+    const wrapper = mountPage()
+    await flushPromises()
+    expect(wrapper.find('[data-testid="quick-hourly-row-12"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="quick-hourly-card-12"]').exists()).toBe(false)
+  })
+
+  it('blokaci, kterou už říká náhled hodinové mzdy, neopakuje u osoby a stejnou větu ukáže jednou', async () => {
+    m.load.mockImplementation(async period => ({ period, total: 1, items: [fixture({
+      hourly_remuneration_in_period: true,
+      blockers: ['hourly_premium_evidence_missing', 'hourly_time_missing'],
+      hourly_wage_preview: { complete: false, blockers: [
+        { code: 'hourly_premium_evidence_missing', message: 'Doložte příplatkové vrstvy ke každému úseku pracovní doby.', context: {} },
+        { code: 'hourly_premium_evidence_missing', message: 'Doložte příplatkové vrstvy ke každému úseku pracovní doby.', context: { segment: 2 } },
+        { code: 'hourly_premium_evidence_missing', message: 'Doložte příplatkové vrstvy ke každému úseku pracovní doby.', context: { segment: 3 } },
+        { code: 'hourly_time_missing', message: 'Doložte skutečně odpracovanou dobu.', context: {} },
+      ], rounding: 'ceil', evidence_hash: 'a'.repeat(64), payable_total_minor: null, claims: [], entitlements: [], included_allocations: [] },
+    })] }))
+    const wrapper = mountPage()
+    await flushPromises()
+    const hourlyRow = wrapper.get('[data-testid="quick-hourly-row-12"]')
+    const items = hourlyRow.findAll('[data-test="hourly-preview-blockers"] li').map(item => item.text())
+    expect(items).toEqual(['payroll.hourly_preview.blockers.hourly_premium_evidence_missing', 'payroll.hourly_preview.blockers.hourly_time_missing'])
+    const personCell = hourlyRow.element.previousElementSibling!.querySelector('td')!
+    expect(personCell.textContent).not.toContain('hourly_premium_evidence_missing')
+    expect(personCell.textContent).not.toContain('hourly_time_missing')
+  })
+
+  it('zobrazí konkrétní serverovou příčinu hodinové blokace místo kódu překladu', async () => {
+    m.load.mockImplementation(async period => ({ period, items: [fixture({
+      hourly_remuneration_in_period: true,
+      blockers: ['hourly_specific_evidence_missing'],
+      hourly_wage_preview: { complete: false, blockers: [{ code: 'hourly_specific_evidence_missing', message: 'Doložte přesný podklad nároku.', context: {} }], rounding: 'ceil', evidence_hash: 'a'.repeat(64), payable_total_minor: null, claims: [], entitlements: [], included_allocations: [] },
+    })] }))
+    const wrapper = mountPage()
+    await flushPromises()
+    expect(wrapper.text()).toContain('Doložte přesný podklad nároku.')
+    expect(wrapper.text()).not.toContain('payroll.quick_inputs.blockers.hourly_specific_evidence_missing')
   })
 
   it('keeps hour mode unavailable without an average and sends employment concurrency version', async () => {
@@ -873,6 +1103,32 @@ describe('PayrollQuickInputs', () => {
     expect(m.putPref).not.toHaveBeenCalled()
   })
 
+  it('vysvětlí příplatky z hodinové docházky a nenabízí nový ruční příplatek', async () => {
+    m.pagePrefs.value = { flags: { surcharges: true } }
+    m.load.mockImplementation(async period => ({ period, total: 1, items: [fixture({ hourly_remuneration_in_period: true })] }))
+    const wrapper = mountPage()
+    await flushPromises()
+    expect(wrapper.get('[data-testid="quick-surcharge-night-12"]').attributes('disabled')).toBeDefined()
+    expect(wrapper.get('[data-testid="quick-surcharge-mobile-night-12"]').attributes('disabled')).toBeDefined()
+    expect(wrapper.text()).toContain('payroll.quick_inputs.surcharges.unavailable.hourly_attendance')
+  })
+
+  it('dovolí vymazat dřívější ruční příplatek hodinového zaměstnance', async () => {
+    m.load.mockImplementation(async period => ({ period, total: 1, items: [fixture({
+      hourly_remuneration_in_period: true,
+      surcharges: surchargeStates({ night: { hours_milli: 4000, amount_minor: 10_000, row_version: 2, status: 'draft' } }),
+    })] }))
+    const wrapper = mountPage()
+    await flushPromises()
+    const hours = wrapper.get('[data-testid="quick-surcharge-night-12"]')
+    expect(hours.attributes('disabled')).toBeUndefined()
+    await hours.setValue('')
+    await wrapper.get('[data-testid="quick-payroll-save"]').trigger('click')
+    await flushPromises()
+    expect(m.save.mock.calls[0][0].rows[0].surcharges.night).toEqual({ hours_milli: null, factors: null })
+    expect(m.save.mock.calls[0][0].rows[0].surcharges.weekend).toBeUndefined()
+  })
+
   /** Uložená preference přepínač zapne ještě před prvním kliknutím. */
   it('restores the remembered toggle state', async () => {
     m.pagePrefs.value = { flags: { surcharges: true } }
@@ -993,6 +1249,12 @@ describe('PayrollQuickInputs', () => {
 
     const note = wrapper.get('[data-testid="quick-surcharge-column-note-holiday"]')
     expect(note.text()).toContain('holiday_arrangement_missing')
+    // Kde to řešit: dotčení lidé s odkazem na kartu vztahu.
+    const people = wrapper.get('[data-testid="quick-surcharge-column-note-people-holiday"]')
+    expect(people.text()).toContain('payroll.quick_inputs.surcharge_fix.holiday_arrangement_missing')
+    const links = people.findAll('a')
+    expect(links).toHaveLength(2)
+    expect(links[1]!.attributes('data-to')).toContain('employment=13')
     // V buňce žádná značka pod polem: neaktivní pole s placeholderem,
     // důvod v `title` pole a pro odečítače v `sr-only`.
     for (const id of [12, 13]) {

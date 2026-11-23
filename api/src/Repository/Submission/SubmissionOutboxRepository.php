@@ -32,7 +32,7 @@ final class SubmissionOutboxRepository
     public const LIST_MAX_LIMIT = 200;
 
     private const COLUMNS = 'id, supplier_id, environment, channel, dispatch_mode, agenda_code, recipient_id,
-        recipient_box_id, subject, artifact_kind, artifact_id, artifact_filename, artifact_sha256,
+        recipient_box_id, isds_sender_box_id, subject, artifact_kind, artifact_id, artifact_filename, artifact_sha256,
         dispatch_state, acceptance_state, acceptance_evidence_kind, acceptance_note,
         correlation_reference, external_message_id, artifact_validation_status, artifact_validated_at,
         recipient_box_verified_at, receipt_document_id, receipt_signature_status,
@@ -311,16 +311,16 @@ final class SubmissionOutboxRepository
      * odešla, a druhý pokus by mohl založit druhé podání. Ten se řeší
      * rekonciliací (`resolveUncertain`), ne opakováním.
      */
-    public function claimForSending(int $supplierId, int $id, int $confirmedBy): ?array
+    public function claimForSending(int $supplierId, int $id, int $confirmedBy, ?string $isdsSenderBoxId = null): ?array
     {
         $this->assertAvailable();
         $stmt = $this->db->pdo()->prepare(
             'UPDATE ' . self::TABLE . '
                 SET dispatch_state = \'sending\', confirmed_by = ?, confirmed_at = UTC_TIMESTAMP(),
-                    row_version = row_version + 1
+                    isds_sender_box_id = ?, row_version = row_version + 1
               WHERE supplier_id = ? AND id = ? AND dispatch_state IN (\'ready\', \'failed\')'
         );
-        $stmt->execute([$confirmedBy, $supplierId, $id]);
+        $stmt->execute([$confirmedBy, $isdsSenderBoxId, $supplierId, $id]);
         if ($stmt->rowCount() !== 1) {
             return null;
         }
@@ -633,9 +633,11 @@ final class SubmissionOutboxRepository
         int $supplierId,
         string $environment,
         int $limit = 50,
+        ?string $isdsSenderBoxId = null,
     ): array {
         $this->assertAvailable();
         $limit = max(1, min(100, $limit));
+        $boxFilter = $isdsSenderBoxId === null ? '' : ' AND (isds_sender_box_id IS NULL OR isds_sender_box_id = ?)';
         $stmt = $this->db->pdo()->prepare(
             'SELECT ' . self::COLUMNS . ' FROM ' . self::TABLE . '
               WHERE supplier_id = ? AND environment = ? AND channel = \'isds\'
@@ -643,10 +645,15 @@ final class SubmissionOutboxRepository
                 AND external_message_id IS NOT NULL
                 AND external_message_id <> \'\'
                 AND dispatch_state IN (\'sent\', \'delivered\')
+              ' . $boxFilter . '
               ORDER BY sent_at DESC, id DESC
               LIMIT ' . $limit,
         );
-        $stmt->execute([$supplierId, $environment]);
+        $params = [$supplierId, $environment];
+        if ($isdsSenderBoxId !== null) {
+            $params[] = $isdsSenderBoxId;
+        }
+        $stmt->execute($params);
 
         return array_map(self::normalize(...), $stmt->fetchAll(PDO::FETCH_ASSOC) ?: []);
     }

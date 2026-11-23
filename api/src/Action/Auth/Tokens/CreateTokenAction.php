@@ -19,6 +19,7 @@ use MyInvoice\Service\Auth\SecretEncryption;
 use MyInvoice\Service\Auth\StepUpOperationException;
 use MyInvoice\Service\Auth\TotpService;
 use MyInvoice\Service\IpMatcher;
+use MyInvoice\Service\License\LicenseSeatLimitExceeded;
 use MyInvoice\Repository\UserSupplierRepository;
 use MyInvoice\Security\RequestAuthorization;
 use Psr\Http\Message\ResponseInterface as Response;
@@ -28,7 +29,8 @@ use Psr\Http\Message\ServerRequestInterface as Request;
  * POST /api/auth/tokens — vytvoří nový API token.
  *
  * Body: { name, password, supplier_id?, scope: 'read'|'read_write',
- *         expires_at?, never_expires?, totp_code? }
+ *         expires_at?, never_expires?, allow_payroll_submission_docs?,
+ *         allow_issued_invoice_edit?, allow_system_write?, totp_code? }
  *
  * Vyžaduje:
  *   - aktivní session (NE bearer — token by si nemohl vytvořit další token)
@@ -44,9 +46,6 @@ use Psr\Http\Message\ServerRequestInterface as Request;
  */
 final class CreateTokenAction
 {
-    /** Výchozí životnost tokenu, když volající expiraci neuvede. */
-    private const DEFAULT_EXPIRY_DAYS = 90;
-
     /** Horní strop explicitní expirace — delší = fakticky věčný token. */
     private const MAX_EXPIRY_DAYS = 730;
 
@@ -63,6 +62,9 @@ final class CreateTokenAction
         private readonly MfaPolicyService $mfaPolicy,
         private readonly BruteForceGuard $bruteForce,
         private readonly MfaProtectedOperationService $protectedOperations,
+        private readonly \MyInvoice\Service\Auth\LoginPolicyService $loginPolicy,
+        private readonly \MyInvoice\Security\CrossSupplierAuthorization $crossSupplier,
+        private readonly \MyInvoice\Service\Auth\SystemWriteTokenFeature $systemWrite,
     ) {}
 
     public function __invoke(Request $request, Response $response): Response
@@ -82,7 +84,7 @@ final class CreateTokenAction
         // defense-in-depth pro případ změny pravidel; fail-open BC větev membershipu
         // níže by jinak pro klienta bez řádků byla eskalace).
         if (RequestAuthorization::isClientType($request)) {
-            return Json::error($response, 'forbidden', 'Pro tuto akci nemáš oprávnění.', 403);
+            return Json::error($response, 'forbidden', 'Pro tuto akci nemáte oprávnění.', 403);
         }
 
         $body = (array) ($request->getParsedBody() ?? []);
@@ -97,6 +99,8 @@ final class CreateTokenAction
         // ji člověk výslovně nezaškrtne. Zbytek mzdové evidence nejde odemknout
         // vůbec — viz RequestAuthorization::tokenAllowsPayrollSubmissionDocs().
         $allowPayrollSubmissionDocs = !empty($body['allow_payroll_submission_docs']);
+        $allowIssuedInvoiceEdit = !empty($body['allow_issued_invoice_edit']);
+        $allowSystemWrite = !empty($body['allow_system_write']);
         $expiresRaw = trim((string) ($body['expires_at'] ?? ''));
         $neverExpires = ($body['never_expires'] ?? false) === true;
         $totpCode = trim((string) ($body['totp_code'] ?? ''));
@@ -125,7 +129,63 @@ final class CreateTokenAction
             // (bound PAT jinak firmu forcuje). Bez membershipu = BC (bez omezení).
             $allowed = $this->memberships->allowedSupplierIds($userId);
             if (($user['is_superadmin'] ?? false) !== true && !in_array($supplierId, $allowed, true)) {
-                return Json::error($response, 'forbidden_supplier', 'K této firmě nemáš oprávnění.', 403);
+                return Json::error($response, 'forbidden_supplier', 'K této firmě nemáte oprávnění.', 403);
+            }
+        }
+
+        // Vynucená úprava vystavené faktury přes token (#355): jen token vázaný na firmu,
+        // se zápisem, a jen od toho, kdo ji ve firmě smí provést sám. Před spotřebou proofu.
+        if ($allowIssuedInvoiceEdit) {
+            if ($supplierId === null || $scope !== 'read_write') {
+                return Json::error(
+                    $response,
+                    'issued_invoice_edit_not_allowed',
+                    'Úpravu vystavených faktur lze povolit jen tokenu vázanému na jednu firmu s právem zápisu.',
+                    422,
+                );
+            }
+            $scoped = $this->crossSupplier->scopedRequest($request, $supplierId);
+            if ($scoped === null || !RequestAuthorization::canEditIssuedInvoice($scoped)) {
+                return Json::error(
+                    $response,
+                    'issued_invoice_edit_not_allowed',
+                    'Úpravu vystavených faktur může tokenu povolit jen správce firmy nebo role s právem upravit vystavenou fakturu.',
+                    422,
+                );
+            }
+        }
+
+        // Plný zápis (#371): jen na instanci, která ho povoluje, jen se zápisem a jen od toho,
+        // kdo za firmu rozhoduje (RequestAuthorization::canGrantSystemWriteToken()). Před
+        // spotřebou proofu.
+        if ($allowSystemWrite) {
+            if (!$this->systemWrite->isEnabled()) {
+                return Json::error(
+                    $response,
+                    'system_write_disabled',
+                    'Plný zápis přes API token tato instalace nepovoluje (api.allow_system_write_tokens).',
+                    422,
+                );
+            }
+            if ($scope !== 'read_write') {
+                return Json::error(
+                    $response,
+                    'system_write_not_allowed',
+                    'Plný zápis lze povolit jen tokenu s právem zápisu.',
+                    422,
+                );
+            }
+            $scoped = $supplierId !== null ? $this->crossSupplier->scopedRequest($request, $supplierId) : $request;
+            $mayGrant = $scoped !== null && RequestAuthorization::canGrantSystemWriteToken($scoped, $supplierId !== null);
+            if (!$mayGrant) {
+                return Json::error(
+                    $response,
+                    'system_write_not_allowed',
+                    $supplierId !== null
+                        ? 'Plný zápis může tokenu vázanému na firmu povolit jen správce této firmy.'
+                        : 'Plný zápis tokenu bez vazby na firmu může povolit jen superadmin; ostatní ho vážou na firmu, kterou spravují.',
+                    422,
+                );
             }
         }
 
@@ -134,7 +194,7 @@ final class CreateTokenAction
         // Věčný token je teď vědomá volba (`never_expires`) a pro read_write ho
         // smí zvolit jen superadmin. Formát: ISO-8601 nebo YYYY-MM-DD.
         $now = new \DateTimeImmutable();
-        $expiresAt = $now->modify('+' . self::DEFAULT_EXPIRY_DAYS . ' days');
+        $expiresAt = $now->modify('+' . ApiTokenService::DEFAULT_EXPIRY_DAYS . ' days');
 
         if ($expiresRaw !== '') {
             try {
@@ -194,6 +254,8 @@ final class CreateTokenAction
                     $scope,
                     $expiresAt,
                     $allowPayrollSubmissionDocs,
+                    $allowIssuedInvoiceEdit,
+                    $allowSystemWrite,
                 );
             } catch (OneTimeTokenException|StepUpOperationException) {
                 return Json::error(
@@ -204,7 +266,19 @@ final class CreateTokenAction
                 );
             } catch (\DomainException) {
                 return Json::error($response, 'session_expired', 'Session vypršela.', 401);
+            } catch (LicenseSeatLimitExceeded) {
+                return self::seatLimitError($response);
             }
+        } elseif ($this->loginPolicy->isEnforced()) {
+            // Vynucený poskytovatel identity: heslo ani přímý TOTP kód neplatí,
+            // token vznikne jen s jednorázovým step-up proofem.
+            return Json::error(
+                $response,
+                'step_up_required',
+                'Pro vytvoření tokenu je vyžadováno ověření přes poskytovatele identity organizace.',
+                401,
+                ['methods' => ['sso']],
+            );
         } elseif ($totpAvailable) {
             if ($totpCode === '') {
                 return Json::error(
@@ -260,14 +334,26 @@ final class CreateTokenAction
             }
         }
 
-        $out ??= $this->tokens->generate(
-            $userId,
-            $supplierId,
-            $name,
-            $scope,
-            $expiresAt,
-            $allowPayrollSubmissionDocs,
-        );
+        try {
+            $out ??= $this->tokens->generate(
+                $userId,
+                $supplierId,
+                $name,
+                $scope,
+                $expiresAt,
+                $allowPayrollSubmissionDocs,
+                $allowIssuedInvoiceEdit,
+                $allowSystemWrite,
+            );
+        } catch (LicenseSeatLimitExceeded) {
+            return self::seatLimitError($response);
+        }
+
+        // Firma vyžadující poskytovatele identity přijme jen token vydaný ze sezení
+        // tohoto poskytovatele (SupplierScopeMiddleware).
+        $session = (array) $request->getAttribute(AuthMiddleware::ATTR_SESSION, []);
+        $this->db->pdo()->prepare('UPDATE api_tokens SET issued_auth_method = ? WHERE id = ?')
+            ->execute([isset($session['auth_method']) ? (string) $session['auth_method'] : null, $out['id']]);
 
         $this->activity->log(
             'api_token.created',
@@ -282,6 +368,8 @@ final class CreateTokenAction
                 'expires_at' => $expiresAt?->format('Y-m-d H:i:s'),
                 'never_expires' => $expiresAt === null,
                 'allow_payroll_submission_docs' => $allowPayrollSubmissionDocs,
+                'allow_issued_invoice_edit' => $allowIssuedInvoiceEdit,
+                'allow_system_write' => $allowSystemWrite,
             ],
             $ip,
             $userAgent,
@@ -293,5 +381,22 @@ final class CreateTokenAction
             'prefix' => $out['prefix'],
             'warning' => 'Plain-text token se zobrazí pouze jednou. Ulož si ho — později už ho znovu neuvidíš.',
         ], 201);
+    }
+
+    /**
+     * Token se zápisem by podle parametru licence zabral další licenční místo.
+     * Token jen pro čtení jde vytvořit vždy. Sdílí ji výměna hesla za token
+     * (PasswordTokenAction).
+     */
+    public static function seatLimitError(Response $response): Response
+    {
+        return Json::error(
+            $response,
+            'license_user_limit',
+            'Token s právem zápisu se podle vaší licence započítává jako aktivní uživatel '
+                . 'a počet uživatelů podle licence je vyčerpaný. Vytvořte token jen pro čtení, '
+                . 'zrušte jiný token se zápisem, nebo rozšiřte předplatné.',
+            403,
+        );
     }
 }

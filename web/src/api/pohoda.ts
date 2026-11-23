@@ -1,5 +1,5 @@
 import { api } from './client'
-import { createMigrationApi, type MigrationNonprofitNotice } from './migrationApi'
+import { createMigrationApi, type MigrationNonprofitNotice, type MigrationPayrollNotice } from './migrationApi'
 import { downloadApiFile } from '@/utils/downloadFile'
 import type { AcceptedDifference, MoneyS3Diff, MoneyS3RunStatus, MoneyS3Step, SourceDifference } from './moneyS3'
 
@@ -22,6 +22,10 @@ export interface PohodaAgendaCounts {
   cash: number
   bank: number
   partners: number
+  /** Zakázky agendy (chybí u přehledu nahraného dřív). */
+  contracts?: number
+  /** Činnosti agendy (chybí u přehledu nahraného dřív). */
+  activities?: number
 }
 
 export interface PohodaAgendaFile {
@@ -37,6 +41,8 @@ export interface PohodaPayrollSummary {
   payslips: number
   first: string | null
   last: string | null
+  /** Kdo mzdy vedl: `pohoda` = agenda Mzdy přímo v POHODĚ, `pamica` = PAMICA (chybí u přehledu nahraného dřív). */
+  source?: 'pohoda' | 'pamica'
 }
 
 /** Jak převést karty skladu POHODY bez druhu zásoby; `skip` = sklad se nepřevádí. */
@@ -98,6 +104,10 @@ export interface PohodaMessage {
 
 export interface PohodaUpload {
   nonprofit_notice?: MigrationNonprofitNotice
+  /** Mzdy firmy v exportu, které nejde převzít (licence, modul Mzdy); chybí, když převzít jdou. */
+  payroll_notice?: MigrationPayrollNotice
+  /** Modul Sklad firmy: vypnutý sklad ostrý převod zapne sám, jde-li to (`can_enable`). */
+  stock_module?: { enabled: boolean; can_enable: boolean }
   token: string
   status: 'ready'
   file_name: string

@@ -31,6 +31,7 @@ final class GroupDashboardAccess
         $ids = $superadmin
             ? array_map('intval', $this->db->pdo()->query('SELECT id FROM supplier ORDER BY id')->fetchAll(\PDO::FETCH_COLUMN))
             : $this->memberships->allowedSupplierIds($userId);
+        $ids = $this->supplierAccess->filterAllowedSupplierIds($request, $ids);
         $find = $this->db->pdo()->prepare(
             "SELECT id, COALESCE(NULLIF(display_name, ''), company_name) AS name,
                     accounting_mode, is_vat_payer FROM supplier WHERE id = ?"

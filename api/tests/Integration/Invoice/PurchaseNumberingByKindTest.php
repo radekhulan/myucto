@@ -261,6 +261,40 @@ final class PurchaseNumberingByKindTest extends TestCase
             'Přepíše se jen celé číslo, ne začátek delšího čísla.');
     }
 
+    public function testRenumberRewritesReversalLinkedOnlyByReversedBy(): void
+    {
+        $second = $this->draft('2099-08-20');
+        $first = $this->draft('2099-08-01');
+        $this->repo->ensureVarsymbol($second, $this->supplierId);
+        $this->repo->ensureVarsymbol($first, $this->supplierId);
+
+        $pdo = $this->db->pdo();
+        $periodId = $pdo->query("SELECT id FROM accounting_periods WHERE supplier_id = {$this->supplierId} AND fiscal_year = 2099")->fetchColumn();
+        if ($periodId === false) {
+            $pdo->prepare("INSERT INTO accounting_periods (supplier_id, fiscal_year, starts_on, ends_on, status) VALUES (?, 2099, '2099-01-01', '2099-12-31', 'open')")
+                ->execute([$this->supplierId]);
+            $periodId = $this->createdPeriodId = (int) $pdo->lastInsertId();
+        }
+        // Storno nese source_id NULL, s originálem ho váže jen reversed_by.
+        $pdo->prepare(
+            "INSERT INTO journal_entries (supplier_id, period_id, entry_date, document_no, description, source_type, source_id)
+             VALUES (?, ?, '2099-08-25', 'STORNO PF9908001', 'Storno PF9908001', 'purchase_invoice', NULL)"
+        )->execute([$this->supplierId, (int) $periodId]);
+        $reversal = (int) $pdo->lastInsertId();
+        $this->journal[] = $reversal;
+        $pdo->prepare(
+            "INSERT INTO journal_entries (supplier_id, period_id, entry_date, document_no, description, source_type, source_id, reversed_by)
+             VALUES (?, ?, '2099-08-20', 'PF9908001', 'PF PF9908001', 'purchase_invoice', ?, ?)"
+        )->execute([$this->supplierId, (int) $periodId, $second, $reversal]);
+        $this->journal[] = (int) $pdo->lastInsertId();
+
+        $this->renumber->renumber($this->supplierId, '2099-08', $this->userId);
+
+        $row = $pdo->query('SELECT document_no, description FROM journal_entries WHERE id = ' . $reversal)->fetch(PDO::FETCH_ASSOC);
+        self::assertSame('STORNO PF9908002', $row['document_no']);
+        self::assertSame('Storno PF9908002', $row['description']);
+    }
+
     public function testRenumberRefusesMonthAfterFinalTaxEvidenceClosing(): void
     {
         $late = $this->draft('2099-08-28');

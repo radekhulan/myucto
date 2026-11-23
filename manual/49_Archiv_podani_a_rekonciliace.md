@@ -40,7 +40,8 @@ Související výpočty jsou popsány v kapitolách [Výkazy DPH](41_Vykazy_DPH.
 Účetní může připravit XML a vlastní podání přenechat klientovi. Správce v **Systém → Role a oprávnění**
 u vlastní role typu **client** povolí čtení **Připravená podání DPH, KH a SH** (`reports.submissions`).
 Výchozí klientská role zůstává bez přístupu. Přístup platí i na klientské doméně a vždy jen pro vybranou
-firmu, ke které je klient přiřazen.
+firmu, ke které je klient přiřazen. Stejné právo lze dát i interní roli; bez modulu **Daně a výkazy** pak
+pracuje s archivem ve stejném rozsahu jako klient a nastavení podání nespravuje.
 
 Samotné čtení dovoluje prohlížet archiv přiznání k DPH, kontrolních a souhrnných hlášení, stáhnout
 jejich připravené XML a přiložená potvrzení a zobrazit platební údaje DPH včetně QR platby.
@@ -109,7 +110,7 @@ Přímý režim vytvoří uznávaný elektronický podpis ZAREP, provede test of
 
 Přiznání k DPH, kontrolní hlášení, souhrnné hlášení a přiznání k dani z příjmů (DPPO, DPFO) můžete místo přes EPO poslat datovou zprávou z datové schránky firmy. Do zprávy jde přesně archivovaný XML snapshot, stejný jako pro EPO. Podpis ani ZAREP nejsou potřeba, totožnost dokládá odeslání z vaší schránky.
 
-1. Zkontrolujte, kam se podání pošle. V nastavení stránky `Daně → EPO podání a archív` je část **Datové schránky finančního úřadu** se čtyřmi řádky: DPH, kontrolní hlášení, souhrnné hlášení a DPPO/DPFO. Výchozí je schránka krajského finančního úřadu podle **Kódu finančního úřadu** v nastavení firmy, u kódu 13 Specializovaný finanční úřad. Pro kterýkoli řádek můžete vybrat jinou schránku z číselníku příjemců.
+1. Zkontrolujte, kam se podání pošle. V nastavení stránky `Daně → EPO podání a archív` je část **Datové schránky finančního úřadu** se čtyřmi řádky: DPH, kontrolní hlášení, souhrnné hlášení a DPPO/DPFO. Výchozí je schránka krajského finančního úřadu podle **Finančního úřadu** vybraného v nastavení firmy, u kódu 13 Specializovaný finanční úřad. Pro kterýkoli řádek můžete vybrat jinou schránku z číselníku příjemců.
 2. U validního snapshotu (**XSD · OK**), který ještě nebyl podaný, klikněte na **Odeslat datovou schránkou**.
 3. V dialogu zkontrolujte finanční úřad a ID jeho schránky, věc zprávy a přílohu. Výchozí cíl se bere z kódu finančního úřadu zapsaného v samotném XML. Když vybraná schránka patří jinému úřadu, než kterému je XML adresované, dialog na to upozorní.
 4. Zvolte způsob přihlášení k datové schránce: **Odesílací brána**, **Mobilní klíč**, **Jméno a heslo**, nebo **Systémový certifikát**. Jednotlivé způsoby popisuje kapitola [Datová schránka](97_Datova_schranka.md). Jméno a heslo se nikam neukládá.

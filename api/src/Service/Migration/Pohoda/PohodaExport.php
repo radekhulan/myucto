@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Migration\Pohoda;
 
+use MyInvoice\Service\Accounting\FiscalCalendar;
+use MyInvoice\Service\Migration\Pohoda\PayrollBuiltin\PohodaMzdyAdapter;
 use MyInvoice\Service\Migration\Pohoda\Payroll\PohodaPayrollConverter;
 use MyInvoice\Support\CompanyIdNormalizer;
 
@@ -20,6 +22,14 @@ final class PohodaExport
     private ?PohodaMdbAccounting $mdb = null;
     private array $warnings = [];
     private bool $warningsScanned = false;
+    private array $countsByPeriod = [];
+    /** Osnova pro neziskové organizace ({@see hasNonprofitChart()}), spočtená při prvním dotazu. */
+    private ?bool $nonprofitChart = null;
+    /** Typ účetní jednotky z přehledu jednotek ({@see unitType()}); `false` = ještě nečteno. */
+    private string|null|false $unitType = false;
+
+    /** Typ účetní jednotky POHODY pro daňovou evidenci (`acu:unitType`). */
+    public const UNIT_TYPE_TAX_EVIDENCE = 'singleEntry';
 
     public const FILES = [
         'journal' => '01_ucetni_denik.xml',
@@ -48,6 +58,8 @@ final class PohodaExport
         'addressbook' => '30_adresar.xml',
         'bank_accounts' => '31_bankovni_ucty.xml',
         'cash_registers' => '32_pokladny.xml',
+        'activities' => '34_cinnosti.xml',
+        'contracts' => '35_zakazky.xml',
         // Tabulky z datového souboru POHODY (XML export je nemá), vytváří je exportní nástroj.
         'assets' => '90_majetek.xml',
         'payroll' => '91_mzdy.xml',
@@ -155,15 +167,44 @@ final class PohodaExport
      */
     public function hasNonprofitChart(): bool
     {
+        if ($this->nonprofitChart !== null) {
+            return $this->nonprofitChart;
+        }
         $equity504 = false;
         foreach ($this->records('chart', 'itemAccount') as $r) {
             $code = (string) ($r['@code'] ?? '');
             if (str_starts_with($code, '411')) {
-                return false;
+                return $this->nonprofitChart = false;
             }
             $equity504 = $equity504 || str_starts_with($code, '901') || str_starts_with($code, '931');
         }
-        return $equity504;
+        return $this->nonprofitChart = $equity504;
+    }
+
+    /**
+     * Typ účetní jednotky agendy (`doubleEntry`, `doubleEntryNonProfit`, `singleEntry` …)
+     * z přehledu účetních jednotek v kořeni exportu. Agenda daňové evidence odpoví na
+     * export účetního deníku i bez chyby, jen prázdným seznamem, takže spolehlivě ji
+     * pozná jen tenhle údaj. Export bez přehledu jednotek vrací `null`.
+     */
+    public function unitType(): ?string
+    {
+        if ($this->unitType !== false) {
+            return $this->unitType;
+        }
+        $this->unitType = null;
+        $file = dirname($this->dir) . DIRECTORY_SEPARATOR . self::UNITS_FILE;
+        if (!is_file($file)) {
+            return null;
+        }
+        foreach (PohodaXml::records($file, 'itemAccountingUnit') as $unit) {
+            $ico = CompanyIdNormalizer::ic((string) self::firstValue($unit, 'ico')) ?? '';
+            if ($ico === $this->ico && (int) self::firstValue($unit, 'year') === $this->year) {
+                $type = (string) self::firstValue($unit, 'unitType');
+                return $this->unitType = $type !== '' ? $type : null;
+            }
+        }
+        return null;
     }
 
     /**
@@ -201,6 +242,15 @@ final class PohodaExport
             }
             yield $record;
         }
+    }
+
+    /**
+     * Objednávky z převodu datového souboru ({@see PohodaMdbAccounting::orders()}); `null` =
+     * export je nenese (XML export POHODY, převodník před přidáním objednávek).
+     */
+    public function orders(): ?\Generator
+    {
+        return $this->mdb !== null && $this->mdb->hasOrders() ? $this->mdb->orders() : null;
     }
 
     public function sourceWarnings(): array
@@ -419,6 +469,10 @@ final class PohodaExport
                         $stock = null;
                     }
                 }
+                $counts = $export->counts();
+                if (PohodaImporter::isTaxEvidenceAgenda($export)) {
+                    $counts['later_years'] = [];
+                }
                 $out[] = [
                     'dir' => basename($dir),
                     'ico' => $export->ico,
@@ -426,7 +480,8 @@ final class PohodaExport
                     'company' => $names[$export->ico . '_' . $export->year] ?? '',
                     'program' => $export->info['program'],
                     'exported_at' => $export->info['timestamp'] !== '' ? $export->info['timestamp'] : null,
-                    'counts' => $export->counts(),
+                    'counts' => $counts,
+                    'later_years_complete' => true,
                     'files' => array_map(static fn (array $f): array => ['file' => $f['file'], 'state' => $f['state'], 'note' => $f['note']], $export->files()),
                     'has_accounting' => true,
                     'has_payroll' => $payroll !== null,
@@ -448,7 +503,7 @@ final class PohodaExport
                 'company' => $names[$ico . '_' . $year] ?? '',
                 'program' => 'POHODA Mzdy',
                 'exported_at' => null,
-                'counts' => ['journal' => 0, 'opening' => 0, 'first_date' => null, 'last_date' => null, 'issued' => 0, 'purchase' => 0, 'internal' => 0, 'cash' => 0, 'bank' => 0, 'partners' => 0],
+                'counts' => ['journal' => 0, 'opening' => 0, 'first_date' => null, 'last_date' => null, 'issued' => 0, 'purchase' => 0, 'internal' => 0, 'cash' => 0, 'bank' => 0, 'partners' => 0, 'contracts' => 0, 'activities' => 0],
                 'files' => [['file' => self::FILES['payroll'], 'state' => 'ok', 'note' => '']],
                 'has_accounting' => false,
                 'has_payroll' => true,
@@ -470,7 +525,10 @@ final class PohodaExport
      * Přehled se počítá v jobu nahrání a z `meta.json` ho čte náhled průvodce, takže
      * kontrola před převodem soubor mezd znovu nečte. Jeden průchod souborem.
      *
-     * @return array{ico:string,employees:int,months:int,payslips:int,first:?string,last:?string,last_overall:?string,exported_on:?string,open:array<string,int>}
+     * `source` = kdo mzdy vedl: `pamica`, nebo `pohoda` (agenda Mzdy přímo v POHODĚ bez
+     * pracovních poměrů, {@see PohodaMzdyAdapter}).
+     *
+     * @return array{ico:string,employees:int,months:int,payslips:int,first:?string,last:?string,last_overall:?string,exported_on:?string,open:array<string,int>,source:string}
      */
     public static function payrollSummary(string $file, int $year): array
     {
@@ -480,11 +538,18 @@ final class PohodaExport
         $open = [];
         $lastOverall = null;
         $employees = 0;
-        foreach (PohodaXml::scan($file, ['MZ', 'ZAM']) as $tag => $row) {
+        $relations = 0;
+        $payslipWithRelation = false;
+        foreach (PohodaXml::scan($file, ['MZ', 'ZAM', 'ZAMpomer']) as $tag => $row) {
             if ($tag === 'ZAM') {
                 $employees++;
                 continue;
             }
+            if ($tag === 'ZAMpomer') {
+                $relations++;
+                continue;
+            }
+            $payslipWithRelation = $payslipWithRelation || PohodaXml::text($row, 'RefPomer') !== '';
             $rowYear = (int) PohodaXml::text($row, 'Rok');
             $period = sprintf('%04d-%02d', $rowYear, (int) PohodaXml::text($row, 'RelMes'));
             if (PohodaPayrollConverter::openPeriod($period, $exportedOn)) {
@@ -508,23 +573,35 @@ final class PohodaExport
             'last_overall' => $lastOverall,
             'exported_on' => $exportedOn,
             'open' => $open,
+            'source' => PohodaMzdyAdapter::variant($employees, $relations, $payslipWithRelation),
         ];
     }
 
     /**
      * Počty záznamů agendy pro náhled: řádky deníku (z toho počáteční stavy), rozsah dat,
-     * vydané a přijaté doklady, interní doklady, pokladna, banka a adresář. `later_years` =
-     * roky po roce agendy, do kterých padají zápisy deníku ({@see PohodaJournal::laterYear()}).
+     * vydané a přijaté doklady, interní doklady, pokladna, banka, adresář, zakázky a činnosti. `later_years` =
+     * roky po roce agendy, do kterých padají zápisy, doklady nebo úhrady.
      *
-     * @return array{journal:int,opening:int,first_date:?string,last_date:?string,later_years:list<int>,issued:int,purchase:int,internal:int,cash:int,bank:int,partners:int}
+     * @return array{journal:int,opening:int,first_date:?string,last_date:?string,later_years:list<int>,issued:int,purchase:int,internal:int,cash:int,bank:int,partners:int,contracts:int,activities:int}
      */
-    public function counts(): array
+    public function counts(?FiscalCalendar $calendar = null, ?int $year = null): array
     {
+        $calendar ??= FiscalCalendar::calendar();
+        $year ??= $this->year;
+        $periodKey = $calendar->periodStart($year);
+        if (isset($this->countsByPeriod[$periodKey])) {
+            return $this->countsByPeriod[$periodKey];
+        }
         $journal = 0;
         $opening = 0;
         $first = null;
         $last = null;
         $later = [];
+        $rememberLaterYear = static function (?string $date) use ($calendar, $year, &$later): void {
+            if ($date !== null && ($laterYear = $calendar->fiscalYearOfDate($date)) > $year) {
+                $later[$laterYear] = true;
+            }
+        };
         $groups = [
             'issued' => [['issued', 'issued_credit', 'issued_debit', 'issued_advance', 'issued_proforma', 'issued_corrective', 'receivable'], 'invoice'],
             'purchase' => [['received', 'received_credit', 'received_debit', 'received_advance', 'received_proforma', 'received_corrective', 'commitment'], 'invoice'],
@@ -532,10 +609,12 @@ final class PohodaExport
             'cash' => [['cash'], 'voucher'],
             'bank' => [['bank'], 'bank'],
             'partners' => [['addressbook'], 'addressbook'],
+            'contracts' => [['contracts'], 'contract'],
+            'activities' => [['activities'], 'activity'],
         ];
         // Z MDB převodu se deník i všechny počítané agendy čtou jedním průchodem souborem.
         $tally = [];
-        $journalItems = (function () use ($groups, &$tally): \Generator {
+        $journalItems = (function () use ($groups, &$tally, $rememberLaterYear): \Generator {
             if ($this->mdb === null) {
                 yield from $this->records('journal', 'accountingItem');
                 return;
@@ -550,6 +629,9 @@ final class PohodaExport
                     continue;
                 }
                 $tally[$key] = ($tally[$key] ?? 0) + 1;
+                foreach (self::documentDates($key, $record) as $date) {
+                    $rememberLaterYear($date);
+                }
             }
         })();
         foreach ($journalItems as $item) {
@@ -558,21 +640,29 @@ final class PohodaExport
                 $opening++;
                 continue;
             }
-            $laterYear = PohodaJournal::laterYear($item, $this->year);
-            if ($laterYear !== null) {
-                $later[$laterYear] = true;
-            }
             $date = PohodaXml::date($item, 'date');
+            if (!PohodaJournal::isYearEndClosing($item)) {
+                $rememberLaterYear($date);
+            }
             if ($date !== null) {
                 $first = $first === null || $date < $first ? $date : $first;
                 $last = $last === null || $date > $last ? $date : $last;
             }
         }
-        $sum = function (array $keys, string $tag) use (&$tally): int {
+        $sum = function (array $keys, string $tag) use (&$tally, $rememberLaterYear): int {
             $n = 0;
             foreach ($keys as $key) {
                 if ($this->mdb !== null && $this->mdb->has($key)) {
                     $n += $tally[$key] ?? 0;
+                    continue;
+                }
+                if (in_array($tag, ['invoice', 'intDoc', 'voucher', 'bank'], true)) {
+                    foreach ($this->records($key, $tag) as $record) {
+                        $n++;
+                        foreach (self::documentDates($key, $record) as $date) {
+                            $rememberLaterYear($date);
+                        }
+                    }
                     continue;
                 }
                 $path = $this->path($key);
@@ -580,18 +670,38 @@ final class PohodaExport
             }
             return $n;
         };
-        ksort($later);
         $out = [
             'journal' => $journal,
             'opening' => $opening,
             'first_date' => $first,
             'last_date' => $last,
-            'later_years' => array_keys($later),
+            'later_years' => [],
         ];
         foreach ($groups as $name => [$keys, $tag]) {
             $out[$name] = $sum($keys, $tag);
         }
-        return $out;
+        ksort($later);
+        $out['later_years'] = array_keys($later);
+        return $this->countsByPeriod[$periodKey] = $out;
+    }
+
+    private static function documentDates(string $key, array $record): \Generator
+    {
+        if (in_array($key, ['addressbook', 'contracts', 'activities'], true)) {
+            return;
+        }
+        $header = PohodaXml::get($record, match ($key) {
+            'cash' => 'voucherHeader', 'bank' => 'bankHeader', 'internal' => 'intDocHeader', default => 'invoiceHeader',
+        });
+        yield match ($key) {
+            'cash' => PohodaXml::date($header, 'date') ?? PohodaXml::date($header, 'datePayment'),
+            'bank' => PohodaXml::date($header, 'datePayment') ?? PohodaXml::date($header, 'dateStatement'),
+            default => PohodaXml::date($header, 'dateAccounting') ?? PohodaXml::date($header, 'date'),
+        };
+        yield PohodaXml::date($header, 'liquidation/date');
+        foreach (PohodaXml::all($record, 'liquidations/liquidation') as $liquidation) {
+            yield PohodaXml::date($liquidation, 'date');
+        }
     }
 
     /** První hodnota klíče v libovolné hloubce záznamu (přehled účetních jednotek). */

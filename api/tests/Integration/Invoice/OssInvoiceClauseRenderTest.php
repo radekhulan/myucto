@@ -137,7 +137,7 @@ final class OssInvoiceClauseRenderTest extends TestCase
         $html = $this->renderer->renderHtml($invoice, includeCss: false);
 
         self::assertStringNotContainsString('Přepočet do CZK', $html);
-        self::assertStringNotContainsString('Kurz ČNB', $html);
+        self::assertStringNotContainsString('Kurz:', $html);
         self::assertStringNotContainsString('CZK', $html);
     }
 
@@ -149,7 +149,7 @@ final class OssInvoiceClauseRenderTest extends TestCase
         $html = $this->renderer->renderHtml($invoice, includeCss: false);
 
         self::assertStringNotContainsString('Přepočet do CZK', $html);
-        self::assertStringNotContainsString('Kurz ČNB', $html);
+        self::assertStringNotContainsString('Kurz:', $html);
         self::assertStringContainsString('DPH v CZK', $html);
         self::assertStringContainsString('511,67 CZK', $html);
         self::assertSame(2, substr_count($html, 'CZK'));
@@ -166,7 +166,7 @@ final class OssInvoiceClauseRenderTest extends TestCase
         $html = $this->renderer->renderHtml($invoice, includeCss: false);
 
         self::assertStringContainsString('Přepočet do CZK', $html);
-        self::assertStringContainsString('Kurz ČNB', $html);
+        self::assertStringContainsString('Kurz:', $html);
         self::assertStringNotContainsString('DPH v CZK', $html);
     }
 

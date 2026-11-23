@@ -599,6 +599,33 @@ final class JmhzOfficialSourceMonitorTest extends TestCase
         self::assertSame(4, $report['sources'][0]['document_count']);
     }
 
+    /**
+     * Navigace stránky 2027 odkazuje na `index.html`, který portál
+     * přesměrovává na `…/`. Je to týž index, ne další stránka ke stažení.
+     */
+    public function testSitePagesSkipIndexHtmlOfTheSameDirectory(): void
+    {
+        $index = 'https://developers.mpsv.cz/jmhz/2027/';
+        $sources = [
+            'site' => [
+                'label' => 'Přehled 2027',
+                'index_url' => $index,
+                'index_format' => 'site_pages',
+                'document_hosts' => ['developers.mpsv.cz'],
+                'document_path_prefixes' => ['/jmhz/2027/'],
+                'document_extensions' => ['html'],
+            ],
+        ];
+        $responses = [
+            $index => '<a href="index.html">Úvod</a><a href="mh/mzda.html">Mzda</a>',
+            $index . 'mh/mzda.html' => 'mzda',
+        ];
+
+        $report = $this->monitorWith($sources, $responses)->monitor($this->statePath());
+
+        self::assertSame(2, $report['sources'][0]['document_count']);
+    }
+
     public function testRelativeLinksResolveAgainstFileIndex(): void
     {
         $index = 'https://developers.mpsv.cz/jmhz/2027/index.html';

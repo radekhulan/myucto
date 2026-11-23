@@ -37,24 +37,27 @@ final class CostCenterImporter
 
     public function run(PohodaContext $ctx): void
     {
-        if ($ctx->costCenters === []) {
+        $periodIds = $ctx->periodIds();
+        if ($ctx->costCenters === [] || $periodIds === []) {
             return;
         }
         $this->dimensionService->setEnabled($ctx->supplierId, true);
         $typeId = (int) $this->dimensionService->ensureDefaultTypes($ctx->supplierId, ['stredisko'])['cost_center'];
         $pdo = $this->db->pdo();
+        $periodFilter = implode(',', array_fill(0, count($periodIds), '?'));
         $stamp = $pdo->prepare("INSERT IGNORE INTO journal_entry_line_dimensions
                 (line_id, dimension_type_id, supplier_id, dimension_value_id, assignment_origin, assignment_origin_ref)
             SELECT l.id, ?, l.supplier_id, ?, 'explicit', 'pohoda_import'
               FROM journal_entry_lines l
-             WHERE l.supplier_id = ? AND l.cost_center = ?");
+              JOIN journal_entries e ON e.id = l.entry_id AND e.supplier_id = l.supplier_id
+             WHERE l.supplier_id = ? AND l.cost_center = ? AND e.period_id IN ({$periodFilter})");
         $lines = 0;
         foreach ($ctx->costCenters as $code => $name) {
             $code = (string) $code;
-            $stamp->execute([$typeId, $this->value($ctx, $typeId, $code, $name), $ctx->supplierId, $code]);
+            $stamp->execute([$typeId, $this->value($ctx, $typeId, $code, $name), $ctx->supplierId, $code, ...$periodIds]);
             $lines += $stamp->rowCount();
         }
-        $this->stampDocuments($ctx->supplierId, $typeId);
+        $this->stampDocuments($ctx->supplierId, $typeId, $periodIds);
         $ctx->protocol->info(PohodaReconciler::STEP, 'cost_centers', sprintf(
             'Střediska z POHODY: %d (%s), %d řádků deníku. Dimenze jsou zapnuté v Firma → Dimenze.',
             count($ctx->costCenters), implode(', ', array_map('strval', array_keys($ctx->costCenters))), $lines,
@@ -78,21 +81,23 @@ final class CostCenterImporter
         ]);
     }
 
-    private function stampDocuments(int $supplierId, int $typeId): void
+    private function stampDocuments(int $supplierId, int $typeId, array $periodIds): void
     {
         $pdo = $this->db->pdo();
         $insert = $pdo->prepare('INSERT IGNORE INTO document_dimensions
             (supplier_id, doc_type, doc_id, item_no, dimension_type_id, dimension_value_id) VALUES (?, ?, ?, 0, ?, ?)');
+        $periodFilter = implode(',', array_fill(0, count($periodIds), '?'));
         // STRAIGHT_JOIN jako u Money S3: čerstvě naplněné tabulky nemají statistiky.
         $rows = $pdo->prepare("SELECT je.source_id, MIN(jd.dimension_value_id) AS value_id
               FROM journal_entries je
               STRAIGHT_JOIN journal_entry_lines jel ON jel.entry_id = je.id AND jel.supplier_id = je.supplier_id
               STRAIGHT_JOIN journal_entry_line_dimensions jd ON jd.line_id = jel.id
              WHERE je.supplier_id = ? AND je.source_type = ? AND je.source_id IS NOT NULL AND jd.dimension_type_id = ?
+               AND je.period_id IN ({$periodFilter})
              GROUP BY je.source_id
             HAVING COUNT(DISTINCT jd.dimension_value_id) = 1");
         foreach (self::DOCUMENT_SOURCES as $sourceType => $docType) {
-            $rows->execute([$supplierId, $sourceType, $typeId]);
+            $rows->execute([$supplierId, $sourceType, $typeId, ...$periodIds]);
             foreach ($rows->fetchAll(\PDO::FETCH_ASSOC) as $row) {
                 $insert->execute([$supplierId, $docType, (int) $row['source_id'], $typeId, (int) $row['value_id']]);
             }

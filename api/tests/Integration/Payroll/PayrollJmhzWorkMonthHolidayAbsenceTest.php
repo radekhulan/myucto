@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Integration\Payroll;
 
-use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Payroll\Time\PayrollJmhzWorkMonthSummaryBuilder;
 use MyInvoice\Tests\Support\IsolatedSupplierTrait;
@@ -41,7 +40,7 @@ final class PayrollJmhzWorkMonthHolidayAbsenceTest extends TestCase
             self::markTestSkipped('cfg.php neexistuje — test vyžaduje DB.');
         }
         try {
-            $container = Bootstrap::buildContainer();
+            $container = \MyInvoice\Tests\Support\PayrollTestContainer::build();
             $this->db = $container->get(Connection::class);
             $this->builder = $container->get(PayrollJmhzWorkMonthSummaryBuilder::class);
         } catch (\Throwable $e) {

@@ -11,6 +11,7 @@ use MyInvoice\Repository\ChartOfAccountsRepository;
 use MyInvoice\Repository\JournalEntryRepository;
 use MyInvoice\Repository\PostingRuleRepository;
 use MyInvoice\Repository\VatClearingRunRepository;
+use MyInvoice\Service\Accounting\Pair\PairGroups;
 use MyInvoice\Service\Accounting\PostingException;
 use MyInvoice\Service\Accounting\PostingService;
 use MyInvoice\Service\Accounting\TakenOverRecord;
@@ -434,7 +435,7 @@ final class VatClearingService
             $supplierId,
             self::SOURCE_TYPE,
             $result['source_id'],
-            $lines,
+            PairGroups::consecutive($lines, 'vat_clearing'),
             [
                 'entry_date'  => $result['period_end'],
                 'document_no' => 'DPH-' . $result['period_label'],
@@ -488,6 +489,9 @@ final class VatClearingService
         try {
             (new \MyInvoice\Service\Property\Charges\Issuance\IssuanceUseGuard($this->db))->assertPostingEntriesMutable($supplierId, [$entryId]);
             (new \MyInvoice\Service\Accounting\Allocation\JointAllocationUseGuard($this->db))->assertEntriesMutable($supplierId, [$entryId]);
+            // Řádek 343 spárovaný v okruhu s platbou daně by smazání odneslo kaskádou.
+            (new \MyInvoice\Service\Accounting\JournalPairingUseGuard($this->db))->assertEntriesFree($supplierId, [$entryId]);
+            (new \MyInvoice\Service\Accounting\JournalSettlementUseGuard($this->db))->assertEntriesFree($supplierId, [$entryId]);
             $stmt = $pdo->prepare('DELETE FROM journal_entries WHERE id = ? AND supplier_id = ? AND source_type = ?');
             $stmt->execute([$entryId, $supplierId, self::SOURCE_TYPE]);
             $pdo->prepare("INSERT INTO activity_log (action, user_id, entity_type, entity_id, payload, ip, user_agent, supplier_id)
@@ -752,7 +756,7 @@ final class VatClearingService
             );
         if (!$status['writable']) {
             $note .= $status['writable_reason'] === 'date_locked'
-                ? ' Období je uzamčené — přepočet až po posunutí zámku (jen admin).'
+                ? ' Období je uzamčené — přepočet až po posunutí zámku (smí správce nebo role s právem posunout zámek).'
                 : ' Období není otevřené — rozdíl patří do dodatečného přiznání, ne do zavřených knih.';
         }
 

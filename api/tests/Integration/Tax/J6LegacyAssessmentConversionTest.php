@@ -39,7 +39,7 @@ final class J6LegacyAssessmentConversionTest extends TestCase
         $configured = getenv('MYINVOICE_DB_NAME');
         self::assertStringEndsWith('_test', $database);
         if (is_string($configured) && $configured !== '') self::assertSame($configured, $database);
-        self::assertContains((string) $container->get(Config::class)->get('db.host'), ['localhost', '127.0.0.1', '::1']);
+        self::assertTrue(\MyInvoice\Tests\Support\TestDatabaseHost::isAllowed((string) ((string) $container->get(Config::class)->get('db.host'))), 'Testovací DB musí být lokální nebo v db.test_allowed_hosts.');
         $this->pdo->beginTransaction();
         $seed = (int) $this->pdo->query('SELECT id FROM supplier ORDER BY id LIMIT 1')->fetchColumn();
         $this->actor = (int) $this->pdo->query('SELECT id FROM users ORDER BY id LIMIT 1')->fetchColumn();

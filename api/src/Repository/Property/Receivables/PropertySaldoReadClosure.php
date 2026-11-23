@@ -145,7 +145,8 @@ final class PropertySaldoReadClosure
         }if($definitions!==[])$parts[]="EXISTS (SELECT 1 FROM JSON_TABLE(r.".$column.",'$' COLUMNS(".implode(',',$definitions).")) refs WHERE ".implode(' OR ',$matches).")";}
         if($parts===[])return [];
         $exclude=$excluded===[]?'':' AND NOT ('.$this->condition('r.id',$excluded,$params).')';
-        return $this->query('SELECT r.* FROM '.$table.' r WHERE r.supplier_id=? AND ('.implode(' OR ',$parts).')'.$exclude.' ORDER BY '.$order,$params);
+        $select=$table==='journal_entry_lines'?\MyInvoice\Repository\JournalLineProofColumns::select('r'):'r.*';
+        return $this->query('SELECT '.$select.' FROM '.$table.' r WHERE r.supplier_id=? AND ('.implode(' OR ',$parts).')'.$exclude.' ORDER BY '.$order,$params);
     }
     private function condition(string $column,array $ids,array &$params):string
     {

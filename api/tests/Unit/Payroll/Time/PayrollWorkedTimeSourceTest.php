@@ -137,6 +137,53 @@ final class PayrollWorkedTimeSourceTest extends TestCase
         self::assertNull($suggestions['unworked_total_hours']);
     }
 
+    public function testManualSummaryKeepsExactMixedUnitsAndUnknownDaysOvertime(): void
+    {
+        $worked = Source::fromSnapshot(['work_source' => 'manual_summary', 'manual_summary' => ['segments' => [[
+            'date_from' => '2026-07-01', 'date_to' => '2026-07-31',
+            'worked_duration_units' => 53, 'overtime_duration_units' => null, 'worked_days' => null,
+        ]]]], '2026-07-01');
+        self::assertSame([], $worked['issues']);
+        self::assertSame(53, $worked['worked_duration_units']);
+        self::assertNull($worked['worked_minutes']);
+        self::assertNull($worked['worked_millihours']);
+        self::assertNull($worked['worked_days']);
+        self::assertNull($worked['overtime_duration_units']);
+        self::assertSame(300, Source::fromImportSummary(['values' => ['worked_hours' => 100]])['worked_duration_units']);
+    }
+
+    public function testEmptyCanonicalEntriesAreMissingButManualZeroIsExplicit(): void
+    {
+        $missing = Source::fromSnapshot(['schema_version' => 'payroll-worked-time.v1', 'time_entries' => []], '2026-07-01');
+        self::assertNull($missing['worked_duration_units']);
+        self::assertSame(['worked_source_missing'], array_column($missing['issues'], 'code'));
+        $zero = Source::fromManualSummary(['segments' => [[
+            'date_from' => '2026-07-01', 'date_to' => '2026-07-31',
+            'worked_duration_units' => 0, 'overtime_duration_units' => 0, 'worked_days' => 0,
+        ]]], '2026-07-01');
+        self::assertSame([], $zero['issues']);
+        self::assertSame(0, $zero['worked_duration_units']);
+        self::assertSame(0, $zero['overtime_duration_units']);
+        self::assertSame(0, $zero['worked_days']);
+    }
+
+    public function testMixedAndMismatchedSourceKeysAreNeverSilentlyPrioritized(): void
+    {
+        foreach ([['time_entries' => [], 'manual_summary' => []], ['work_source' => 'manual_summary', 'time_entries' => []]] as $source) {
+            $worked = Source::fromSnapshot($source, '2026-07-01');
+            self::assertSame(['work_source_conflict'], array_column($worked['issues'], 'code'));
+            self::assertNull($worked['worked_duration_units']);
+        }
+    }
+
+    public function testManualIntervalsCannotDuplicateOrInventDays(): void
+    {
+        $segment = ['date_from' => '2026-07-01', 'date_to' => '2026-07-01', 'worked_duration_units' => 3000, 'overtime_duration_units' => 0, 'worked_days' => 1];
+        self::assertSame(['manual_segments_overlap'], array_column(Source::fromManualSummary(['segments' => [$segment, $segment]], '2026-07-01')['issues'], 'code'));
+        $segment['worked_days'] = 0;
+        self::assertSame(['manual_segment_invalid'], array_column(Source::fromManualSummary(['segments' => [$segment]], '2026-07-01')['issues'], 'code'));
+    }
+
     /** @return array<string,mixed> */
     private static function entry(string $startsAtUtc, string $endsAtUtc, int $breakMinutes, string $category = 'regular'): array
     {

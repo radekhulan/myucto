@@ -13,6 +13,8 @@ use MyInvoice\Service\Accounting\DocumentLockService;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Invoice\InvoicePaymentService;
 use MyInvoice\Service\Invoice\PaymentTaxDocumentCreator;
+use MyInvoice\Service\Invoice\PaymentTaxDocumentNotApplicableException;
+use MyInvoice\Service\Invoice\ProformaVatRates;
 use MyInvoice\Service\IpMatcher;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
@@ -57,9 +59,19 @@ final class CreatePaymentTaxDocumentAction
             return $deny;
         }
 
+        // Sazba plnění zvolená uživatelem jen pro zálohu převzatou bez sazeb DPH (ProformaVatRates).
+        $body = (array) ($request->getParsedBody() ?? []);
+        $vatRateId = isset($body['vat_rate_id']) && $body['vat_rate_id'] !== '' && $body['vat_rate_id'] !== null ? (int) $body['vat_rate_id'] : null;
+        if ($vatRateId !== null && $vatRateId <= 0) {
+            return Json::error($response, 'invalid_vat_rate', 'Neplatná sazba DPH.', 400);
+        }
+
         $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
         try {
-            $taxDocId = $this->creator->createForPayment($paymentId, (int) ($user['id'] ?? 0));
+            $taxDocId = $this->creator->createForPayment($paymentId, (int) ($user['id'] ?? 0), $vatRateId);
+        } catch (PaymentTaxDocumentNotApplicableException $e) {
+            return Json::error($response, $e->getCode() === ProformaVatRates::RATE_REQUIRED ? ProformaVatRates::ERROR_CODE : 'tax_document_failed',
+                $e->getMessage(), 409, $e->getCode() === ProformaVatRates::RATE_REQUIRED ? ['paid_on' => substr((string) $payment['paid_on'], 0, 10)] : []);
         } catch (\RuntimeException $e) {
             return Json::error($response, 'tax_document_failed', $e->getMessage(), 409);
         }

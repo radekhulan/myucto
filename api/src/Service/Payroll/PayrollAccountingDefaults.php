@@ -14,6 +14,11 @@ final class PayrollAccountingDefaults
         'partner_gross_credit' => ['code' => '366', 'type' => 'liability'],
         'statutory_gross_debit' => ['code' => '523', 'type' => 'expense'],
         'statutory_gross_credit' => ['code' => '366', 'type' => 'liability'],
+        // Odměna za výkon funkce jednatele, který NENÍ společníkem: věřitelem je
+        // jako zaměstnanec, takže 523/331. U společníka (příznak vztahu
+        // `statutory_partner`) zůstává 523/366 ze `statutory_gross_credit`.
+        // Nenastavená (prázdná) předkontace = dosavadní zápis 523/366 pro všechny.
+        'statutory_nonpartner_gross_credit' => ['code' => '331', 'type' => 'liability'],
         'employer_insurance_debit' => ['code' => '524', 'type' => 'expense'],
         // Sociální a zdravotní pojištění MÁ KAŽDÉ SVOU ANALYTIKU.
         //
@@ -191,6 +196,7 @@ final class PayrollAccountingDefaults
         'enforcement_fee_revenue_credit',
         'accident_insurance_debit',
         'accident_insurance_credit',
+        'statutory_nonpartner_gross_credit',
     ];
 
     /**
@@ -206,7 +212,28 @@ final class PayrollAccountingDefaults
      */
     public const NULLABLE_ACCOUNTS = [
         'enforcement_fee_revenue_credit',
+        'statutory_nonpartner_gross_credit',
     ];
+
+    /**
+     * Nenastavitelná předkontace, kterou klient, který ji neposlal, NEZAPNE.
+     *
+     * U výnosu z paušálu plátce mzdy se chybějící klíč doplní výchozím účtem,
+     * má-li ho firma v osnově. Závazek odměny jednatele by tím ale stávající firmě
+     * při prvním uložení nastavení jiným klientem (import, převod) tiše přesunul
+     * z 366 na 331. Nastavuje se proto jen výslovně; nově zakládané firmě ji
+     * předvyplní formulář nastavení ({@see \MyInvoice\Repository\Payroll\PayrollEmployerSettingsRepository}).
+     *
+     * @var list<string>
+     */
+    public const EXPLICIT_ONLY_ACCOUNTS = [
+        'statutory_nonpartner_gross_credit',
+    ];
+
+    public static function isExplicitOnly(string $key): bool
+    {
+        return in_array($key, self::EXPLICIT_ONLY_ACCOUNTS, true);
+    }
 
     public static function isNullable(string $key): bool
     {
@@ -272,6 +299,9 @@ final class PayrollAccountingDefaults
         // závazku 379.200. Převod na výnos by zápis dřív schválené revize
         // ZMĚNIL, takže platí jen pro snapshot, který klíč nese.
         'enforcement_fee_revenue_credit',
+        // Odměna jednatele se dosud účtovala vždy proti 366; 331 u jednatele,
+        // který není společníkem, platí jen pro snapshot, který klíč nese.
+        'statutory_nonpartner_gross_credit',
     ];
 
     /** Výchozí účet klíče, nebo `null` u neznámého klíče. */
@@ -314,12 +344,18 @@ final class PayrollAccountingDefaults
         return self::PRE_SPLIT_ACCOUNTS[$key] ?? null;
     }
 
-    /** @return array<string,string> */
+    /**
+     * Výchozí sada předkontací. Předkontace {@see EXPLICIT_ONLY_ACCOUNTS} v ní
+     * nejsou: změnily by zápis, který firma odjakživa dělá, takže se zapínají jen
+     * výslovně (nově zakládané firmě je nabídne formulář nastavení).
+     *
+     * @return array<string,string>
+     */
     public static function codes(): array
     {
         return array_map(
             static fn (array $definition): string => $definition['code'],
-            self::ACCOUNTS,
+            array_diff_key(self::ACCOUNTS, array_flip(self::EXPLICIT_ONLY_ACCOUNTS)),
         );
     }
 
@@ -387,6 +423,35 @@ final class PayrollAccountingDefaults
             'employer_insurance_debit' => 'employer_insurance_debit',
             'employer_insurance_credit' => 'social_insurance_credit',
         ];
+    }
+
+    /**
+     * Závazkový účet hrubé odměny pracovního vztahu.
+     *
+     * U výkonu funkce (`statutory_body`) jednatele, který není společníkem, je to
+     * `statutory_nonpartner_gross_credit` — ale jen když ho zmrazená sada
+     * předkontací nese. Bez klíče (dřívější snapshot, firma, která předkontaci
+     * nenastavila) zůstává `statutory_gross_credit` jako dřív.
+     *
+     * @param array<string,mixed> $configuredAccounts surová sada ze snapshotu
+     * @param array<string,string> $accounts doplněná sada předkontací
+     * @param array<string,mixed> $employment zmrazený pracovní vztah
+     */
+    public static function relationGrossCredit(
+        string $relationType,
+        array $configuredAccounts,
+        array $accounts,
+        array $employment,
+    ): string {
+        $default = self::forRelation($relationType, $accounts)['gross_credit'];
+        if ($relationType !== 'statutory_body'
+            || ($employment['statutory_partner'] ?? false) === true
+            || !self::snapshotAllowsSplit($configuredAccounts, 'statutory_nonpartner_gross_credit')
+        ) {
+            return $default;
+        }
+
+        return self::account($accounts, 'statutory_nonpartner_gross_credit');
     }
 
     /** @param array<string,mixed> $accounts */

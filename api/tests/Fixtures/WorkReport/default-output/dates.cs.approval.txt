@@ -1,0 +1,26 @@
+MyÚčto.cz — Fakturační systém================================
+
+Dobrý den,
+------------
+
+
+v příloze posíláme výkaz víceprací za zakázku „Syntetická zakázka" pro Testovací odběratel s.r.o. ke schválení.
+
+Výkaz:           Syntetický výkaz
+Hodin celkem:    3,50 h
+K vyúčtování:    3 800,75 CZK
+
+Po schválení Vám obratem pošleme fakturu — vše je automatizované,
+není potřeba na nic odpovídat. Schválit/zamítnout můžete na adrese:
+
+  https://example.test/approval/token
+
+Detailní výpis víceprací je v PDF příloze (Vykaz-20960001.pdf).
+
+
+--
+Testovací dodavatel
+
+ 
+--
+Používá účetní systém MyÚčto.cz od MyWebdesign.cz — https://myucto.cz/ · https://mywebdesign.cz/

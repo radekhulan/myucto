@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace MyInvoice\Repository\Nonprofit\Membership;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Service\Nonprofit\Membership\MembershipErasureAnchor;
+use MyInvoice\Service\Nonprofit\Membership\MembershipErasureSeal;
 use MyInvoice\Service\Nonprofit\Membership\MembershipException;
 use MyInvoice\Service\Nonprofit\Membership\MembershipRecordedTime;
 use MyInvoice\Service\Nonprofit\Membership\MembershipRevisionTimeline;
@@ -13,6 +15,8 @@ use PDO;
 
 final class MembershipRepository
 {
+    private ?MembershipErasureAnchor $anchor = null;
+
     public function __construct(private readonly Connection $db) {}
 
     public function member(int $supplier, int $member, bool $currentRead = false): ?array
@@ -24,30 +28,21 @@ final class MembershipRepository
         return $row === false ? null : $this->memberRow($row);
     }
 
-    public function page(int $supplier, int $afterId = 0, int $limit = 100): array
+    /**
+     * Jméno kontaktu člena pro samostatnou stránku detailu; stejné sloupce jako řádek seznamu členů.
+     *
+     * @return array{company_name: ?string, first_name: ?string, last_name: ?string}
+     */
+    public function contactName(int $supplier, int $client): array
     {
-        $limit = max(1, min(100, $limit));
-        $q = $this->db->pdo()->prepare(
-            "SELECT m.*,c.company_name,r.revision_no,r.effective_from,r.status
-               FROM nonprofit_members m
-               JOIN clients c ON c.supplier_id=m.supplier_id AND c.id=m.client_id
-          LEFT JOIN nonprofit_member_revisions r
-                 ON r.supplier_id=m.supplier_id AND r.member_id=m.id
-                AND NOT EXISTS(SELECT 1 FROM nonprofit_member_revisions newer
-                                WHERE newer.supplier_id=r.supplier_id AND newer.member_id=r.member_id
-                                  AND newer.revision_no>r.revision_no)
-              WHERE m.supplier_id=? AND m.id>?
-              ORDER BY m.id
-              LIMIT {$limit}"
-        );
-        $q->execute([$supplier, max(0, $afterId)]);
-        $rows = [];
-        foreach ($q->fetchAll(PDO::FETCH_ASSOC) as $row) {
-            foreach (['id', 'supplier_id', 'client_id', 'created_by'] as $field) $row[$field] = (int) $row[$field];
-            $row['revision_no'] = $row['revision_no'] === null ? null : (int) $row['revision_no'];
-            $rows[] = $row;
-        }
-        return $rows;
+        $q = $this->db->pdo()->prepare('SELECT company_name,first_name,last_name FROM clients WHERE supplier_id=? AND id=?');
+        $q->execute([$supplier, $client]);
+        $row = $q->fetch(PDO::FETCH_ASSOC);
+        return [
+            'company_name' => $row === false ? null : $row['company_name'],
+            'first_name' => $row === false ? null : $row['first_name'],
+            'last_name' => $row === false ? null : $row['last_name'],
+        ];
     }
 
     public function byIdentity(int $supplier, int $client, string $number, bool $currentRead = false): ?array
@@ -61,6 +56,42 @@ final class MembershipRepository
             throw new MembershipException('nonprofit_membership_identity_conflict', 'Klient nebo členské číslo už patří jinému členovi.', 409);
         }
         return $this->memberRow($rows[0]);
+    }
+
+    /** Podklady jedné stránky dávky načtené společně; poškozená historie neodřízne ostatní členy. */
+    public function batchContexts(int $supplier, array $ids): array
+    {
+        if ($ids === [] || count($ids) > 50) throw new \InvalidArgumentException('Stránka dávky vyžaduje 1–50 členů.');
+        $marks = implode(',', array_fill(0, count($ids), '?'));
+        $q = $this->db->pdo()->prepare("SELECT * FROM nonprofit_members WHERE supplier_id=? AND id IN ({$marks}) ORDER BY id");
+        $q->execute([$supplier, ...$ids]);
+        $out = [];
+        foreach ($q->fetchAll(PDO::FETCH_ASSOC) as $row) $out[(int) $row['id']] = ['member' => $this->memberRow($row), 'history' => []];
+        $q = $this->db->pdo()->prepare("SELECT * FROM nonprofit_member_revisions WHERE supplier_id=? AND member_id IN ({$marks}) ORDER BY member_id,revision_no,id");
+        $q->execute([$supplier, ...$ids]);
+        foreach ($q->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $id = (int) $row['member_id'];
+            if (!isset($out[$id])) continue;
+            try { $out[$id]['history'][] = $this->revisionRow($row); }
+            catch (\JsonException) { $out[$id]['error'] = new MembershipException('nonprofit_membership_revision_corrupt', 'Historie členství není průkazná.', 409); }
+        }
+        foreach ($out as &$context) {
+            if (isset($context['error'])) continue;
+            try { $context['history'] = $this->validateHistory($context['history'], false); }
+            catch (\Throwable $e) { $context['error'] = $e; }
+        }
+        unset($context);
+        // Kotvy pečetí celé stránky jedním dotazem; jen při chybě se dohledá, kterého člena se týká.
+        $valid = array_filter($out, static fn (array $context): bool => !isset($context['error']));
+        try {
+            $this->assertAnchored($supplier, array_merge([], ...array_values(array_column($valid, 'history'))));
+        } catch (MembershipException) {
+            foreach ($valid as $id => $context) {
+                try { $this->assertAnchored($supplier, $context['history']); }
+                catch (MembershipException $e) { $out[$id]['error'] = $e; }
+            }
+        }
+        return $out;
     }
 
     public function insertMember(int $supplier, int $client, string $number, int $actor): array
@@ -83,13 +114,13 @@ final class MembershipRepository
             $row = $this->revisionRow($raw);
             if ($row['revision_no'] !== ($previous['revision_no'] ?? 0) + 1 || $row['previous_id'] !== ($previous['id'] ?? null)
                 || !hash_equals($row['parent_hash'], $previous['record_hash'] ?? str_repeat('0', 64))
-                || !hash_equals($row['request_hash'], NonprofitTaxRules::hash($row['request']))
-                || !hash_equals($row['record_hash'], NonprofitTaxRules::hash(self::revisionRecord($row)))) {
+                || !MembershipErasureSeal::revisionProven($row)) {
                 throw new MembershipException('nonprofit_membership_revision_corrupt', 'Historie členství není průkazná.', 409);
             }
             $rows[] = $row;
             $previous = $row;
         }
+        $this->assertAnchored($supplier, $rows);
         MembershipRevisionTimeline::intervals($rows);
         return $rows;
     }
@@ -110,7 +141,8 @@ final class MembershipRepository
             if ($knownAtSql !== null && $raw['recorded_at_utc'] === null) $this->recordedTimeUnproven();
             $groups[(int) $raw['member_id']][] = $this->revisionRow($raw);
         }
-        foreach ($groups as $member => $rows) $groups[$member] = $this->validateHistory($rows);
+        foreach ($groups as $member => $rows) $groups[$member] = $this->validateHistory($rows, false);
+        $this->assertAnchored($supplier, array_merge([], ...array_values($groups)));
         return $groups;
     }
 
@@ -155,30 +187,35 @@ final class MembershipRepository
     public function publicMembersPage(int $supplier, string $asOf, string $knownAtSql, int $afterId, int $limit): array
     {
         $limit = max(1, min(101, $limit));
-        $q = $this->db->pdo()->prepare("SELECT m.id,m.client_id,m.recorded_at_utc
+        // Skalární poddotaz s LIMIT se vyhodnotí po členech přes index. EXISTS optimalizátor podle statistik
+        // materializoval přes všechny revize firmy (20 000 členů: 35 000 řádků a 57 ms na stránku, takto 101 řádků a 1 ms).
+        $q = $this->db->pdo()->prepare("SELECT m.id,m.client_id,m.recorded_at_utc," . MembershipListRepository::erasedSql('m') . " erased
             FROM nonprofit_members m FORCE INDEX(uq_nm_tenant)
             WHERE m.supplier_id=? AND m.id>?
               AND (m.recorded_at_utc<=? OR m.recorded_at_utc IS NULL)
-              AND EXISTS(SELECT 1 FROM nonprofit_member_revisions r FORCE INDEX(ix_nmr_effective_lookup)
+              AND (SELECT 1 FROM nonprofit_member_revisions r FORCE INDEX(ix_nmr_effective_lookup)
                           WHERE r.supplier_id=m.supplier_id AND r.member_id=m.id AND r.effective_from<=?
-                            AND (r.recorded_at_utc<=? OR r.recorded_at_utc IS NULL))
+                            AND (r.recorded_at_utc<=? OR r.recorded_at_utc IS NULL) AND r.voids_revision_id IS NULL
+                            AND NOT EXISTS(SELECT 1 FROM nonprofit_member_revisions v FORCE INDEX(uq_nmr_voids)
+                                            WHERE v.supplier_id=r.supplier_id AND v.member_id=r.member_id AND v.voids_revision_id=r.id
+                                              AND (v.recorded_at_utc<=? OR v.recorded_at_utc IS NULL)) LIMIT 1) IS NOT NULL
             ORDER BY m.id LIMIT {$limit}");
-        $q->execute([$supplier, max(0, $afterId), $knownAtSql, $asOf, $knownAtSql]);
+        $q->execute([$supplier, max(0, $afterId), $knownAtSql, $asOf, $knownAtSql, $knownAtSql]);
         $rows = $q->fetchAll(PDO::FETCH_ASSOC);
         if ($rows !== []) $this->assertRecordedTimeProven($supplier, array_map('intval', array_column($rows, 'id')));
         return array_map(static fn (array $row): array => ['id' => (int) $row['id'], 'client_id' => (int) $row['client_id'],
-            'recorded_at_utc' => $row['recorded_at_utc']], $rows);
+            'recorded_at_utc' => $row['recorded_at_utc'], 'erased' => (int) $row['erased'] === 1], $rows);
     }
 
     public function publicMember(int $supplier, int $member, string $knownAtSql): ?array
     {
-        $q = $this->db->pdo()->prepare('SELECT id,client_id,recorded_at_utc FROM nonprofit_members WHERE supplier_id=? AND id=?');
+        $q = $this->db->pdo()->prepare('SELECT id,client_id,recorded_at_utc,' . MembershipListRepository::erasedSql('nonprofit_members') . ' erased FROM nonprofit_members WHERE supplier_id=? AND id=?');
         $q->execute([$supplier, $member]);
         $row = $q->fetch(PDO::FETCH_ASSOC);
         if ($row === false) return null;
         if ($row['recorded_at_utc'] === null) $this->recordedTimeUnproven();
         if ($row['recorded_at_utc'] > $knownAtSql) return null;
-        return ['id' => (int) $row['id'], 'client_id' => (int) $row['client_id'], 'recorded_at_utc' => $row['recorded_at_utc']];
+        return ['id' => (int) $row['id'], 'client_id' => (int) $row['client_id'], 'recorded_at_utc' => $row['recorded_at_utc'], 'erased' => (int) $row['erased'] === 1];
     }
 
     public function revisionByKey(int $supplier, string $key, bool $currentRead = false): ?array
@@ -203,8 +240,8 @@ final class MembershipRepository
         $row['recorded_at_utc'] = MembershipRecordedTime::nowSql();
         $record = self::revisionRecord($row);
         $row['record_hash'] = NonprofitTaxRules::hash($record);
-        $q = $this->db->pdo()->prepare('INSERT INTO nonprofit_member_revisions(supplier_id,member_id,revision_no,previous_id,effective_from,status,legal_basis_json,request_json,idempotency_key,request_hash,parent_hash,record_hash,created_by,created_at,recorded_at_utc) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)');
-        $q->execute([$row['supplier_id'], $row['member_id'], $row['revision_no'], $row['previous_id'], $row['effective_from'], $row['status'],
+        $q = $this->db->pdo()->prepare('INSERT INTO nonprofit_member_revisions(supplier_id,member_id,revision_no,previous_id,voids_revision_id,effective_from,status,legal_basis_json,request_json,idempotency_key,request_hash,parent_hash,record_hash,created_by,created_at,recorded_at_utc) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)');
+        $q->execute([$row['supplier_id'], $row['member_id'], $row['revision_no'], $row['previous_id'], $row['voids_revision_id'] ?? null, $row['effective_from'], $row['status'],
             NonprofitTaxRules::canonicalJson($row['legal_basis']), NonprofitTaxRules::canonicalJson($row['request']), $row['idempotency_key'], $row['request_hash'], $row['parent_hash'], $row['record_hash'], $row['created_by'], $row['recorded_at_utc'], $row['recorded_at_utc']]);
         return $this->revision((int) $row['supplier_id'], (int) $row['member_id'], (int) $this->db->pdo()->lastInsertId(), true)
             ?? throw new \LogicException('Inserted membership revision disappeared.');
@@ -215,6 +252,8 @@ final class MembershipRepository
         $record = array_intersect_key($row, array_flip(['supplier_id', 'member_id', 'revision_no', 'previous_id', 'effective_from', 'status', 'legal_basis',
             'request', 'idempotency_key', 'request_hash', 'parent_hash', 'created_by']));
         if (($row['recorded_at_utc'] ?? null) !== null) $record['recorded_at_utc'] = $row['recorded_at_utc'];
+        // Rušící článek nese odkaz v hashi; otisk běžných revizí zůstává beze změny.
+        if (($row['voids_revision_id'] ?? null) !== null) $record['voids_revision_id'] = (int) $row['voids_revision_id'];
         return $record;
     }
 
@@ -222,6 +261,7 @@ final class MembershipRepository
     {
         foreach (['id', 'supplier_id', 'member_id', 'revision_no', 'created_by'] as $field) $row[$field] = (int) $row[$field];
         $row['previous_id'] = $row['previous_id'] === null ? null : (int) $row['previous_id'];
+        $row['voids_revision_id'] = ($row['voids_revision_id'] ?? null) === null ? null : (int) $row['voids_revision_id'];
         foreach (['legal_basis', 'request'] as $field) {
             $row[$field] = json_decode($row[$field . '_json'], true, flags: JSON_THROW_ON_ERROR);
             unset($row[$field . '_json']);
@@ -229,20 +269,29 @@ final class MembershipRepository
         return $row;
     }
 
-    private function validateHistory(array $rows): array
+    private function validateHistory(array $rows, bool $anchor = true): array
     {
         $previous = null;
         foreach ($rows as $row) {
             if ($row['revision_no'] !== ($previous['revision_no'] ?? 0) + 1 || $row['previous_id'] !== ($previous['id'] ?? null)
                 || !hash_equals($row['parent_hash'], $previous['record_hash'] ?? str_repeat('0', 64))
-                || !hash_equals($row['request_hash'], NonprofitTaxRules::hash($row['request']))
-                || !hash_equals($row['record_hash'], NonprofitTaxRules::hash(self::revisionRecord($row)))) {
+                || !MembershipErasureSeal::revisionProven($row)) {
                 throw new MembershipException('nonprofit_membership_revision_corrupt', 'Historie členství není průkazná.', 409);
             }
             $previous = $row;
         }
+        if ($anchor && $rows !== []) $this->assertAnchored((int) $rows[0]['supplier_id'], $rows);
         MembershipRevisionTimeline::intervals($rows);
         return $rows;
+    }
+
+    /** Zapečetěné revize (výmaz, krok 10) musí odpovídat kotvě své položky v řetězu auditu. */
+    private function assertAnchored(int $supplier, array $rows): void
+    {
+        if ($rows === []) return;
+        $this->anchor ??= new MembershipErasureAnchor($this->db);
+        $this->anchor->assertRows($supplier,
+            array_map(static fn (array $row): array => [MembershipErasureAnchor::REVISION, $row], $rows), 'nonprofit_membership_revision_corrupt', 'Historie členství není průkazná.');
     }
 
     private function scanVerified(int $supplier, array $memberIds, ?string $knownAtSql, ?array $targets, ?string $asOf): array
@@ -254,6 +303,7 @@ final class MembershipRepository
         $cursorMember = null;
         $cursorId = 0;
         $state = [];
+        $sealed = [];
         foreach ($memberIds as $member) $state[$member] = ['previous' => null, 'effective' => null, 'next_effective' => null, 'target' => []];
         do {
             $after = $cursorMember === null ? '' : ' AND (member_id>? OR (member_id=? AND id>?))';
@@ -270,25 +320,35 @@ final class MembershipRepository
                 $previous = $state[$member]['previous'];
                 if ($row['revision_no'] !== ($previous['revision_no'] ?? 0) + 1 || $row['previous_id'] !== ($previous['id'] ?? null)
                     || !hash_equals($row['parent_hash'], $previous['record_hash'] ?? str_repeat('0', 64))
-                    || !hash_equals($row['request_hash'], NonprofitTaxRules::hash($row['request']))
-                || !hash_equals($row['record_hash'], NonprofitTaxRules::hash(self::revisionRecord($row)))) {
+                    || !MembershipErasureSeal::revisionProven($row)) {
                     throw new MembershipException('nonprofit_membership_revision_corrupt', 'Historie členství není průkazná.', 409);
                 }
                 MembershipRevisionTimeline::date($row['effective_from']);
+                // Pro kotvu stačí identita a pečeť; celý dekódovaný řádek se pro dávku 500 členů nedrží.
+                if (MembershipErasureSeal::sealed($row)) $sealed[] = ['id' => $row['id'], 'erasure_item_id' => $row['erasure_item_id'], 'erased_digest' => $row['erased_digest']];
                 if ($targets !== null && isset($targets[$member][$row['id']])) $state[$member]['target'][$row['id']] = $row;
-                if ($asOf !== null) {
-                    if ($row['effective_from'] <= $asOf && ($state[$member]['effective'] === null || $row['effective_from'] > $state[$member]['effective']['effective_from'])) {
-                        $state[$member]['effective'] = $row;
-                    } elseif ($row['effective_from'] > $asOf
-                        && ($state[$member]['next_effective'] === null || $row['effective_from'] < $state[$member]['next_effective'])) {
-                        $state[$member]['next_effective'] = $row['effective_from'];
-                    }
-                }
+                if ($asOf !== null) $state[$member]['rows'][] = $row;
                 $state[$member]['previous'] = $row;
                 $cursorMember = $member;
                 $cursorId = $row['id'];
             }
         } while (count($batch) === 500);
+        $this->assertAnchored($supplier, $sealed);
+        if ($asOf !== null) {
+            // Platná revize k datu se počítá jen z platných revizí; zrušené a rušící články se vynechají.
+            foreach ($state as $member => $item) {
+                $previousValid = null;
+                foreach (MembershipRevisionTimeline::intervals($item['rows'] ?? []) as $interval) {
+                    if ($interval['effective_from'] > $asOf) break;
+                    // Předchozí platná revize; bez zrušení je totožná s previous_id článku řetězu.
+                    $interval['previous_valid_id'] = $previousValid;
+                    $state[$member]['effective'] = $interval;
+                    $state[$member]['next_effective'] = $interval['effective_to'];
+                    $previousValid = $interval['id'];
+                }
+                unset($state[$member]['rows']);
+            }
+        }
         return $state;
     }
 

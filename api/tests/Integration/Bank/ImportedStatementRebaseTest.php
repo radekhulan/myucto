@@ -56,7 +56,7 @@ final class ImportedStatementRebaseTest extends TestCase
         $february = $this->statement('import', '2099-02-28', '-100.00', '-150.00', [['2099-02-15', '-50.00']]);
         $march = $this->statement('gpc', '2099-03-31', '950.00', '1000.00', [['2099-03-10', '50.00']]);
 
-        self::assertSame(['shift' => 1100.0, 'statements' => 2, 'opening' => 1100.0], $this->rebase->rebase($this->supplierId, $march));
+        self::assertSame(['status' => 'rebased', 'shift' => 1100.0, 'statements' => 2, 'opening' => 1100.0], $this->rebase->rebase($this->supplierId, $march));
         self::assertSame(['1100.00', '1000.00'], $this->balances($january));
         self::assertSame(['1000.00', '950.00'], $this->balances($february));
         self::assertSame(['950.00', '1000.00'], $this->balances($march));

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Tests\Integration\Migration;
 
 use MyInvoice\Service\Accounting\Reports\SaldoService;
+use MyInvoice\Service\Invoice\InvoicePaymentService;
 use MyInvoice\Service\Migration\MoneyS3\ImportOptions;
 use MyInvoice\Service\Migration\MoneyS3\ImportProtocol;
 use MyInvoice\Tests\Fixtures\MoneyS3\SyntheticAgenda;
@@ -95,6 +96,8 @@ final class MoneyS3SettlementGapsTest extends MoneyS3ImportTestCase
         $pdo->prepare("DELETE FROM money_s3_import_map WHERE supplier_id = ? AND kind = 'payment'
                          AND target_id IN (SELECT id FROM payment_matches WHERE supplier_id = ? AND invoice_id = ?)")->execute([$sid, $sid, $fv27]);
         $pdo->prepare('DELETE FROM payment_matches WHERE supplier_id = ? AND invoice_id = ?')->execute([$sid, $fv27]);
+        // Zrušené párování v MyÚčtu přepočte uhrazenou částku z plateb (jako odpárování pohybu).
+        $this->container(InvoicePaymentService::class)->recompute($fv27, false);
 
         $repair = $this->relink();
         self::assertFalse($repair->hasErrors(), $this->explain($repair));
@@ -131,6 +134,8 @@ final class MoneyS3SettlementGapsTest extends MoneyS3ImportTestCase
         $fv27 = $this->invoice('FV25027');
         $pdo->prepare('DELETE FROM invoice_payments WHERE supplier_id = ? AND invoice_id = ?')->execute([$sid, $fv27]);
         $pdo->prepare('DELETE FROM payment_matches WHERE supplier_id = ? AND invoice_id = ?')->execute([$sid, $fv27]);
+        // Zrušené párování v MyÚčtu přepočte uhrazenou částku z plateb (jako odpárování pohybu).
+        $this->container(InvoicePaymentService::class)->recompute($fv27, false);
 
         $repair = $this->relink();
         self::assertFalse($repair->hasErrors(), $this->explain($repair));

@@ -130,6 +130,36 @@ final class SchemaIntegrityServiceTest extends TestCase
         );
     }
 
+    public function testAutomaticForeignKeyNameOfMariaDb12MatchesIbfkNameFromSnapshot(): void
+    {
+        $expected = self::snapshot();
+        $definition = $expected['tables']['journal_entries']['foreign_keys']['fk_period'];
+        unset($expected['tables']['journal_entries']['foreign_keys']['fk_period']);
+        $expected['tables']['journal_entries']['foreign_keys']['journal_entries_ibfk_3'] = $definition;
+        $actual = self::snapshot();
+        unset($actual['tables']['journal_entries']['foreign_keys']['fk_period']);
+        $actual['tables']['journal_entries']['foreign_keys']['2'] = $definition;
+
+        self::assertSame([], self::codes(SchemaIntegrityService::compare($expected, $actual)));
+        self::assertSame([], self::codes(SchemaIntegrityService::compare($actual, $expected)));
+    }
+
+    public function testAutomaticForeignKeyWithDifferentDefinitionIsStillReported(): void
+    {
+        $expected = self::snapshot();
+        $definition = $expected['tables']['journal_entries']['foreign_keys']['fk_period'];
+        unset($expected['tables']['journal_entries']['foreign_keys']['fk_period']);
+        $expected['tables']['journal_entries']['foreign_keys']['journal_entries_ibfk_1'] = $definition;
+        $actual = self::snapshot();
+        unset($actual['tables']['journal_entries']['foreign_keys']['fk_period']);
+        $actual['tables']['journal_entries']['foreign_keys']['1'] = str_replace('RESTRICT', 'CASCADE', $definition) . ' x';
+
+        self::assertSame(
+            ['fail foreign_key_missing journal_entries.journal_entries_ibfk_1', 'warn foreign_key_extra journal_entries.1'],
+            self::codes(SchemaIntegrityService::compare($expected, $actual)),
+        );
+    }
+
     public function testMissingTriggerFailsAndChangedTriggerOnlyWarns(): void
     {
         $actual = self::snapshot();

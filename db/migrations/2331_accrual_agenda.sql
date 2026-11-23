@@ -1,0 +1,107 @@
+SET NAMES utf8mb4 COLLATE utf8mb4_unicode_ci;
+
+-- Agenda Časové rozlišení: položky na účtech 381 až 385, plán rozpouštění a vazby na zápisy
+-- deníku. Zůstatek položky se neukládá, počítá se z vazeb na zaúčtované zápisy.
+
+CREATE TABLE IF NOT EXISTS accrual_items (
+  id                       BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  supplier_id              INT UNSIGNED NOT NULL,
+  item_no                  VARCHAR(50) NOT NULL,
+  title                    VARCHAR(255) NOT NULL,
+  contract_ref             VARCHAR(100) NULL,
+  note                     TEXT NULL,
+  kind                     ENUM('prepaid_expense','complex_cost','accrued_expense','deferred_revenue','accrued_revenue') NOT NULL,
+  accrual_account_code     VARCHAR(20) NOT NULL,
+  counter_account_code     VARCHAR(20) NULL,
+  termination_account_code VARCHAR(20) NULL,
+  partner_id               BIGINT UNSIGNED NULL,
+  partner_name             VARCHAR(190) NULL,
+  source_type              ENUM('invoice','purchase_invoice','other_item','internal_document','manual','migration') NOT NULL DEFAULT 'manual',
+  source_id                BIGINT UNSIGNED NULL,
+  source_item_id           BIGINT UNSIGNED NULL,
+  source_document_no       VARCHAR(50) NULL,
+  managed_by               ENUM('agenda','closing') NOT NULL DEFAULT 'agenda',
+  basis_amount             DECIMAL(15,2) NOT NULL,
+  opening_balance          DECIMAL(15,2) NULL,
+  opening_as_of            DATE NULL,
+  period_from              DATE NULL,
+  period_to                DATE NULL,
+  method                   ENUM('monthly_days','monthly_equal','yearly','manual') NOT NULL DEFAULT 'monthly_days',
+  status                   ENUM('draft','active','completed','terminated','cancelled') NOT NULL DEFAULT 'draft',
+  terminated_on            DATE NULL,
+  termination_entry_id     BIGINT UNSIGNED NULL,
+  termination_reason       VARCHAR(500) NULL,
+  cost_center              VARCHAR(50) NULL,
+  project_id               BIGINT UNSIGNED NULL,
+  dimensions_json          LONGTEXT NULL,
+  import_key               VARCHAR(190) NULL,
+  created_by               BIGINT UNSIGNED NULL,
+  updated_by               BIGINT UNSIGNED NULL,
+  created_at               TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at               TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  row_version              INT UNSIGNED NOT NULL DEFAULT 1,
+  UNIQUE KEY uq_accrual_item_no (supplier_id, item_no),
+  UNIQUE KEY uq_accrual_item_import (supplier_id, import_key),
+  KEY idx_accrual_item_status (supplier_id, status, accrual_account_code),
+  KEY idx_accrual_item_period_to (supplier_id, period_to),
+  KEY idx_accrual_item_source (supplier_id, source_type, source_id),
+  KEY idx_accrual_item_partner (supplier_id, partner_id),
+  CONSTRAINT fk_accrual_item_supplier FOREIGN KEY (supplier_id) REFERENCES supplier(id) ON DELETE CASCADE,
+  CONSTRAINT fk_accrual_item_partner FOREIGN KEY (partner_id) REFERENCES clients(id) ON DELETE SET NULL,
+  CONSTRAINT fk_accrual_item_termination FOREIGN KEY (termination_entry_id) REFERENCES journal_entries(id) ON DELETE SET NULL,
+  CONSTRAINT fk_accrual_item_created_by FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL,
+  CONSTRAINT fk_accrual_item_updated_by FOREIGN KEY (updated_by) REFERENCES users(id) ON DELETE SET NULL,
+  CONSTRAINT chk_accrual_item_period CHECK (method = 'manual' OR (period_from IS NOT NULL AND period_to IS NOT NULL AND period_to >= period_from)),
+  CONSTRAINT chk_accrual_item_dimensions CHECK (dimensions_json IS NULL OR JSON_VALID(dimensions_json))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS accrual_schedule (
+  id               BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  supplier_id      INT UNSIGNED NOT NULL,
+  accrual_item_id  BIGINT UNSIGNED NOT NULL,
+  kind             ENUM('release','termination','adjustment') NOT NULL DEFAULT 'release',
+  due_on           DATE NOT NULL,
+  from_on          DATE NULL,
+  to_on            DATE NULL,
+  days             INT UNSIGNED NULL,
+  amount_planned   DECIMAL(15,2) NOT NULL,
+  journal_entry_id BIGINT UNSIGNED NULL,
+  posted_at        DATETIME NULL,
+  status           ENUM('planned','posted','linked','cancelled') NOT NULL DEFAULT 'planned',
+  created_at       TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at       TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  UNIQUE KEY uq_accrual_schedule_row (accrual_item_id, kind, due_on),
+  KEY idx_accrual_schedule_due (supplier_id, due_on, status),
+  KEY idx_accrual_schedule_entry (supplier_id, journal_entry_id),
+  CONSTRAINT fk_accrual_schedule_item FOREIGN KEY (accrual_item_id) REFERENCES accrual_items(id) ON DELETE CASCADE,
+  CONSTRAINT fk_accrual_schedule_supplier FOREIGN KEY (supplier_id) REFERENCES supplier(id) ON DELETE CASCADE,
+  CONSTRAINT fk_accrual_schedule_entry FOREIGN KEY (journal_entry_id) REFERENCES journal_entries(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS accrual_entry_links (
+  id               BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+  supplier_id      INT UNSIGNED NOT NULL,
+  accrual_item_id  BIGINT UNSIGNED NOT NULL,
+  journal_entry_id BIGINT UNSIGNED NOT NULL,
+  account_id       BIGINT UNSIGNED NOT NULL,
+  schedule_id      BIGINT UNSIGNED NULL,
+  amount           DECIMAL(15,2) NOT NULL,
+  role             ENUM('origin','release','termination','deferral','closing_release','adjustment') NOT NULL,
+  matched_by       ENUM('schedule','auto_document_no','auto_description','reconstruction','manual') NOT NULL DEFAULT 'manual',
+  created_by       BIGINT UNSIGNED NULL,
+  created_at       TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY uq_accrual_link (accrual_item_id, journal_entry_id, account_id, role),
+  KEY idx_accrual_link_entry (supplier_id, journal_entry_id, account_id),
+  KEY idx_accrual_link_account (supplier_id, account_id, accrual_item_id),
+  CONSTRAINT fk_accrual_link_item FOREIGN KEY (accrual_item_id) REFERENCES accrual_items(id) ON DELETE CASCADE,
+  CONSTRAINT fk_accrual_link_supplier FOREIGN KEY (supplier_id) REFERENCES supplier(id) ON DELETE CASCADE,
+  CONSTRAINT fk_accrual_link_entry FOREIGN KEY (journal_entry_id) REFERENCES journal_entries(id) ON DELETE CASCADE,
+  CONSTRAINT fk_accrual_link_account FOREIGN KEY (account_id) REFERENCES chart_of_accounts(id) ON DELETE CASCADE,
+  CONSTRAINT fk_accrual_link_schedule FOREIGN KEY (schedule_id) REFERENCES accrual_schedule(id) ON DELETE SET NULL,
+  CONSTRAINT fk_accrual_link_user FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL,
+  CONSTRAINT chk_accrual_link_amount CHECK (amount <> 0)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+SET @@system_versioning_alter_history = KEEP;
+
+ALTER TABLE journal_entries MODIFY source_type ENUM('invoice','purchase_invoice','bank','cash','asset','manual','closing','opening','depreciation','asset_disposal','fx_revaluation','stock','provision','income_tax','profit_distribution','offset','small_asset_accrual','prepaid_expense_accrual','settlement','deferred_tax','payroll','vat_clearing','payroll_payment','gopay','card_settlement','card_writeoff','other_item','payroll_accident_insurance','payroll_travel','deferred_revenue_accrual','unit_charge','unit_payment','unit_payment_revision','property_service_settlement','property_service_lifecycle','property_funding','nonprofit_capital','nonprofit_membership','accrual_release','accrual_termination') NOT NULL DEFAULT 'manual';

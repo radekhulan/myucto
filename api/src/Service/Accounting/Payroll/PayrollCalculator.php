@@ -425,6 +425,26 @@ final class PayrollCalculator
     }
 
     /**
+     * Skupiny dvojic jednoduchého zápisu pro řádky z {@see self::lines()}: každá operace
+     * (hrubá mzda, pojistné zaměstnavatele, pojistné zaměstnance, záloha na daň,
+     * zápočet čisté mzdy) je samostatná skupina, takže párovač z jinak M : N zápisu
+     * (331 na obou stranách, 336 rozdělená na sociální a zdravotní) udělá dvojice
+     * 521/331, 524/336.x, 331/336.x, 331/342 a 331/365. Skupinu určuje popis řádku
+     * bez upřesnění za pomlčkou. Složená firma klíč nevidí, zaúčtování ho zahodí.
+     *
+     * @param list<array{account_code:string,side:string,amount:float,description?:string}> $lines
+     * @return list<array<string,mixed>>
+     */
+    public static function pairGroups(array $lines): array
+    {
+        return array_map(static function (array $line): array {
+            $description = (string) ($line['description'] ?? '');
+            $line['pair_group'] = 'payroll:' . explode(' — ', $description, 2)[0];
+            return $line;
+        }, $lines);
+    }
+
+    /**
      * Zaokrouhlení pojistného na celé koruny nahoru. `ceil()` na floatu je citlivý
      * na binární reprezentaci (0,045 × 4 500 = 202,49999…), proto se hodnota
      * nejdřív srovná na haléře.

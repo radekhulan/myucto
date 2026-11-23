@@ -164,6 +164,7 @@ final class ForgotPasswordTimingTest extends TestCase
             $turnstile,
             new RateLimitMiddleware($this->config, $redis, new ResponseFactory(), new IpMatcher(), $this->db),
             $tasks,
+            $this->createStub(\MyInvoice\Service\Auth\LoginPolicyService::class),
         );
 
         $request = (new ServerRequestFactory())

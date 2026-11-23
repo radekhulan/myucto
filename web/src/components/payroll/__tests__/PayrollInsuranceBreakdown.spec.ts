@@ -4,7 +4,10 @@ import { flushPromises, mount } from '@vue/test-utils'
 import type { PayrollRunResultPerson } from '@/api/payroll'
 import type { PayrollInsuranceBreakdown } from '@/api/payrollInsurance'
 
-vi.mock('vue-i18n', () => ({
+// Sdílené formátování (`useFormat`) táhne @/i18n se skutečným `createI18n`,
+// proto továrna původní modul rozprostírá a přepisuje jen `useI18n`.
+vi.mock('vue-i18n', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('vue-i18n')>()),
   useI18n: () => ({
     locale: ref('cs-CZ'),
     t: (key: string, params?: Record<string, unknown>) =>

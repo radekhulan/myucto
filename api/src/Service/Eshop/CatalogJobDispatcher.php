@@ -15,6 +15,7 @@ final class CatalogJobDispatcher
     public const HANDLERS = [
         'price_recompute' => CatalogPriceJobService::class,
         'stock_valuation' => StockValuationJobService::class,
+        'stock_value_trend' => \MyInvoice\Service\Stock\StockValueTrendService::class,
         'stock_cycle_prepare' => \MyInvoice\Service\Stock\CycleCountService::class,
         'sales_order_expiry' => \MyInvoice\Service\Stock\SalesOrderExpiryJobService::class,
         'catalog_bulk_preview' => CatalogBulkWorker::class,

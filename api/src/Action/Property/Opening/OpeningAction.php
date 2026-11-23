@@ -30,7 +30,7 @@ final class OpeningAction
     }
     private function run(Request $request,Response $response,string $permission,bool $write,callable $work):Response
     {
-        if(!RequestAuthorization::isSessionAuth($request))return Json::sessionRequired($response);
+        if(!RequestAuthorization::actsAsSession($request))return Json::sessionRequired($response);
         if(!RequestAuthorization::allows($request,$permission,$write?AccessLevel::WRITE:AccessLevel::READ))return Json::error($response,'forbidden','Pro tuto operaci nemáte oprávnění.',403);
         return $this->handle($request,$response,$work);
     }

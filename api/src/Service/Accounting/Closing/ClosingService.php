@@ -14,6 +14,8 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Accounting\Closing;
 
+use MyInvoice\Service\Accounting\Accrual\AccrualAgendaGuard;
+use MyInvoice\Service\Accounting\Accrual\AccrualScheduleCalculator;
 use MyInvoice\Service\Accounting\AccountingPeriodStatus;
 use MyInvoice\Service\Accounting\AccountRoleResolver;
 use MyInvoice\Service\Accounting\AccountingFrameworkException;
@@ -24,6 +26,7 @@ use MyInvoice\Service\Accounting\JournalLineComparison;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Infrastructure\Database\TransactionFailure;
 use MyInvoice\Service\Accounting\Dimension\DimensionPeriodGuard;
+use MyInvoice\Service\Accounting\Dimension\DimensionValueLabel;
 use MyInvoice\Repository\AccountingPeriodRepository;
 use MyInvoice\Repository\AccountingSupplierSettingsRepository;
 use MyInvoice\Repository\AssetRepository;
@@ -39,6 +42,10 @@ use MyInvoice\Repository\TaxConstantsRepository;
 use MyInvoice\Repository\TaxReturnRepository;
 use MyInvoice\Repository\SaldoRepository;
 use MyInvoice\Service\Accounting\Assets\DepreciationPostingService;
+use MyInvoice\Repository\AccountingModeRepository;
+use MyInvoice\Security\FrameworkScopePolicy;
+use MyInvoice\Service\Accounting\EntryForm\EntryFormService;
+use MyInvoice\Service\Accounting\Pair\PairGroups;
 use MyInvoice\Service\Accounting\PostingException;
 use MyInvoice\Service\Accounting\PostingService;
 use MyInvoice\Service\Accounting\JournalLineAmount;
@@ -86,9 +93,29 @@ use Psr\Log\LoggerInterface;
  */
 final class ClosingService
 {
-    // `deferred_tax` následuje AŽ po `income_tax`: odložená daň stojí na rozdílech, které
-    // jsou známé teprve po zaúčtování odpisů a po vyčíslení splatné daně.
-    public const STEP_KEYS = ['precheck', 'depreciation', 'fx_revaluation', 'estimates', 'deferrals', 'provisions', 'income_tax', 'deferred_tax', 'stock', 'close_books', 'open_next'];
+    /** @see ClosingSteps::ALL */
+    public const STEP_KEYS = ClosingSteps::ALL;
+
+    /**
+     * Kroky, jejichž vrácení mění výsledek hospodaření, a tím i základ daně z příjmů.
+     * Vrátí-li se některý po zaúčtování nebo potvrzení daně, daň se označí k přepočtu
+     * ({@see markIncomeTaxStale}) a knihy nejde uzavřít, dokud se krok daně znovu nespustí
+     * nebo nepotvrdí.
+     */
+    private const INCOME_TAX_INPUT_STEPS = ['depreciation', 'fx_revaluation', 'estimates', 'deferrals', 'provisions', 'stock'];
+
+    /** Kontroly posouzení, které zastarání snímku předběžných kontrol nesledují ({@see precheckStale}). */
+    private const PRECHECK_STALE_IGNORED_KEYS = ['nonprofit_tax_assessment', 'deferred_tax_assessment'];
+
+    /** Názvy kroků do chybových hlášek (shodně s průvodcem). */
+    private const STEP_LABELS = [
+        'depreciation' => 'Odpisy majetku',
+        'fx_revaluation' => 'Kurzové rozdíly',
+        'estimates' => 'Dohadné položky',
+        'deferrals' => 'Časové rozlišení',
+        'provisions' => 'Opravné položky',
+        'stock' => 'Zásoby',
+    ];
 
     /**
      * Klíče kontrol, které staví {@see buildErrorChecks} v jednom průchodu.
@@ -168,6 +195,16 @@ final class ClosingService
     private const ESTIMATE_MIN_RECURRING_MONTHS = 3;
     private const ESTIMATE_SAMPLE_SIZE = 3;
 
+    /** Hloubka vnoření {@see tx()}: počet uvolněných párování se čte jen v nejvnějším volání. */
+    private int $txDepth = 0;
+
+    /**
+     * Návrh daně z příjmů po hotovém kroku Kurzové rozdíly: jeho dopad už leží v deníku,
+     * projekce uzávěrky ho tedy nemá počítat znovu ({@see incomeTaxFromLedger}). Náhled
+     * kurzových rozdílů je navíc u velké firmy nejdražší část projekce.
+     */
+    private bool $projectionSkipsFx = false;
+    private ?EntryFormService $entryForms = null;
 
     public function __construct(
         private readonly Connection $db,
@@ -197,7 +234,7 @@ final class ClosingService
         // neexistuje finalizované přiznání (běžný stav během uzávěrky). DppoReturnDataProvider
         // se NEinjektuje přímo (jeho produkční binding v Bootstrapu sám závisí na ClosingService
         // — cyklus), proto jen jeho čisté stavební kameny; instance se skládá lokálně bez
-        // ClosingService (closing_projection Feature 1 se přeskočí — tady chceme jen posted stav).
+        // ClosingService (projekci Feature 1 dostává ClosingService sám sebou, viz incomeTaxFromLedger).
         private readonly TaxConstantsRepository $taxConstants,
         // § 99a — posouzení nároku na čtvrtletní zdaňovací období z obratu.
         private readonly \MyInvoice\Service\Report\VatPeriodEntitlementService $vatPeriodEntitlement,
@@ -239,7 +276,23 @@ final class ClosingService
         // Časové rozlišení z řádků dokladů s obdobím (381/384): výběr řádků, účty a poměr
         // dnů sdílí uzávěrka s výkazy s průběžným časovým rozlišením.
         private readonly AccrualDeferralService $accruals,
+        // Agenda Časové rozlišení: roční a splatná rozpuštění zaúčtuje krok uzávěrky.
+        private readonly \MyInvoice\Service\Accounting\Accrual\AccrualPostingService $accrualPosting,
+        private readonly \MyInvoice\Service\Accounting\Accrual\AccrualReconciliationService $accrualReconciliation,
+        private readonly \MyInvoice\Service\Accounting\OtherItemMonthlyCheck $otherItemChecks,
+        // Nativní zdroj DPPO 504 pro návrh daně v kroku Daň z příjmů (#400). Mimo 504 ho
+        // DppoReturnDataProvider::gather nepoužije, takže ostatní firmy počítají jako dosud.
+        private readonly \MyInvoice\Service\Tax\Nonprofit\NonprofitDppoDataProvider $nonprofitDppo,
     ) {}
+
+    /**
+     * @see ClosingSteps::order()
+     * @return list<string>
+     */
+    public static function stepOrder(?string $framework): array
+    {
+        return ClosingSteps::order($framework);
+    }
 
     // ── stav pro FE ───────────────────────────────────────────────────────────
 
@@ -261,6 +314,7 @@ final class ClosingService
         $prevOk = $prev === null || AccountingPeriodStatus::isClosed((string) $prev['status']);
         $requiredPreClose = $this->preCloseStepKeys($supplierId, $period);
         $preCloseDone = $this->stepsComplete($steps, $requiredPreClose);
+        $incomeTaxStale = $this->incomeTaxStale($steps);
         $hasClosingEntries = $this->closing->hasClosingEntries($supplierId, $periodId);
         $nextAllowsRevert = $next === null || (!AccountingPeriodStatus::isClosed((string) $next['status'])
             && !$this->closing->hasClosingEntries($supplierId, (int) $next['id']));
@@ -271,7 +325,23 @@ final class ClosingService
         }
 
         $framework = $this->roleProfile($supplierId, (string) $period['ends_on'])->framework;
+        $closeBlockers = $period['status'] === 'closing' ? $this->closeAssessmentBlockers($supplierId, $periodId, $framework) : [];
+        $takenOverClosing = $this->closing->takenOverClosingEntryIds($supplierId, $periodId) !== [];
+        // Zbytek po převzaté uzávěrce: stejná kontrola, na které closeBooks odmítne
+        // (closing_taken_over_residual). U 504 převzatý rok uzávěrku vůbec nezahájí.
+        $takenOverResidual = [];
+        if ($takenOverClosing && $period['status'] === 'closing' && $framework !== AccountingFrameworkService::CZ_504) {
+            $profile = $this->roleProfile($supplierId, (string) $period['ends_on']);
+            $takenOverResidual = self::takenOverResidualAccounts([
+                ...$this->plBalancesForProfile($supplierId, $period, $profile),
+                ...$this->bsBalancesForProfile($supplierId, $period, $profile),
+            ]);
+            if ($takenOverResidual !== []) {
+                $closeBlockers[] = 'closing_taken_over_residual';
+            }
+        }
         return ($framework === AccountingFrameworkService::CZ_504 ? ['accounting_framework' => $framework] : []) + [
+            'step_order' => self::stepOrder($framework),
             'period' => $period,
             'row_version' => (int) $period['row_version'],
             'steps' => $stepList,
@@ -279,8 +349,16 @@ final class ClosingService
             'next_period' => $next,
             'can_start' => $period['status'] === 'open' && $prevOk,
             'precheck_stale' => $this->precheckStale($supplierId, $period, $steps),
+            // Rok uzavřel už původní systém (převod dat s uzávěrkovými zápisy bez source_id).
+            // Průvodce pak nic neúčtuje znovu a dimenze roku jsou kvůli převzaté uzávěrce zmrazené.
+            'closing_taken_over' => $takenOverClosing,
             'can_abort' => $period['status'] === 'closing' && !$hasClosingEntries,
-            'can_close' => $period['status'] === 'closing' && $preCloseDone,
+            'can_close' => $period['status'] === 'closing' && $preCloseDone && $incomeTaxStale === null && $closeBlockers === [],
+            // Posouzení a stavy, bez kterých uzavření knih odmítne (stejné kontroly jako closeBooks).
+            'close_blockers' => $closeBlockers,
+            // Účty se zbytkem po převzaté uzávěrce (blocker closing_taken_over_residual).
+            'taken_over_residual_accounts' => $takenOverResidual,
+            'income_tax_stale' => $incomeTaxStale,
             'stock_step_required' => in_array('stock', $requiredPreClose, true),
             'depreciation_step_required' => in_array('depreciation', $requiredPreClose, true),
             'can_open_next' => AccountingPeriodStatus::isClosed((string) $period['status'])
@@ -299,6 +377,26 @@ final class ClosingService
                 ? null
                 : $this->openingTakeoverPreview($supplierId, $period, $steps, $next),
         ];
+    }
+
+    /**
+     * Posouzení, která {@see closeBooks} vyžaduje před uzavřením knih: aktuální posouzení
+     * metody odložené daně (504) a potvrzené daňové posouzení činností. Čte bez zámků,
+     * jen aby průvodce nenabízel uzavření, které server odmítne.
+     *
+     * @return list<string> klíče chybějících posouzení
+     */
+    private function closeAssessmentBlockers(int $supplierId, int $periodId, ?string $framework): array
+    {
+        $blockers = [];
+        if ($framework === AccountingFrameworkService::CZ_504
+            && !(new DeferredTax504Service($this->db, $this->journal, $this->periods, $this->closing, $this->series))->closingCheck($supplierId, $periodId)['complete']) {
+            $blockers[] = 'deferred_tax_assessment';
+        }
+        if (!$this->nonprofitTaxAssessment->closingCheck($supplierId, $periodId)['complete']) {
+            $blockers[] = 'nonprofit_tax_assessment';
+        }
+        return $blockers;
     }
 
     /**
@@ -327,21 +425,84 @@ final class ClosingService
             if ($entries === []) {
                 return ['status' => 'to_create'] + $base;
             }
+            $accountLevel = $this->openingComparedByAccount($supplierId, $period, $steps, $entries);
             $cmp = $this->compareOpeningBalances(
                 $supplierId,
                 (int) $next['id'],
                 $this->expectedOpeningLines($supplierId, $period, $steps),
+                $accountLevel !== null,
             );
         } catch (ClosingException $e) {
             // Nevyvážené zůstatky (rozbitý deník) hlásí precheck; stav průvodce kvůli
             // tomu padat nesmí.
             return ['status' => 'unavailable', 'message' => $e->getMessage()] + $base;
         }
-        return ['status' => $cmp['diff'] === [] ? 'match' : 'mismatch', 'diff' => $cmp['diff'], 'accounts' => $cmp['accounts']] + $base;
+        return ['status' => $cmp['diff'] === [] ? 'match' : 'mismatch', 'diff' => $cmp['diff'], 'accounts' => $cmp['accounts']]
+            + ($accountLevel !== null ? ['compare_level' => 'account', 'compare_reason' => $accountLevel] : []) + $base;
     }
 
-    private function compareOpeningBalances(int $supplierId, int $nextPeriodId, array $expectedLines): array
+    /**
+     * Kdy se počáteční stavy dalšího roku porovnávají jen po účtech (vrací důvod, jinak null).
+     *
+     * - `taken_over_closing`: uzávěrka roku je převzatá z původního systému.
+     * - `opening_without_dimensions`: převzaté otevírací zápisy dalšího roku nenesou žádnou
+     *   dimenzi (převod z Money S3 a jiných systémů, ruční otevírací rozvaha bez členění).
+     *
+     * Původní systém otevírací rozvahu převádí bez dimenzí, kdežto zůstatky roku je
+     * v MyÚčtu nesou (střediska, vozidla). Porovnání po dimenzích by pak hlásilo rozdíl
+     * u každé hodnoty, ač každý účet sedí, a převzatou rozvahu by nešlo převzít nikdy.
+     * Nese-li převzatá rozvaha aspoň jednu dimenzi, porovnává se dál i členění. Zápis,
+     * který zaúčtoval sám krok open_next, za převzatý nepovažujeme. Neziskové organizace
+     * (504) se porovnávají vždy po dimenzích a převzatou uzávěrku nenavazují vůbec
+     * ({@see start()}).
+     *
+     * @param array<string,mixed> $period
+     * @param array<string, array<string,mixed>> $steps
+     * @param list<array{id:int}> $openingEntries živé otevírací zápisy dalšího roku
+     */
+    private function openingComparedByAccount(int $supplierId, array $period, array $steps, array $openingEntries): ?string
     {
+        if ($this->roleProfile($supplierId, (string) $period['ends_on'])->framework === AccountingFrameworkService::CZ_504) {
+            return null;
+        }
+        if ($this->closing->takenOverClosingEntryIds($supplierId, (int) $period['id']) !== []) {
+            return 'taken_over_closing';
+        }
+        $ownEntryId = ($steps['open_next']['status'] ?? 'pending') === 'done'
+            ? (int) ($steps['open_next']['payload']['entry_id'] ?? 0)
+            : 0;
+        $ids = [];
+        foreach ($openingEntries as $entry) {
+            if ((int) $entry['id'] === $ownEntryId) {
+                return null;
+            }
+            $ids[] = (int) $entry['id'];
+        }
+        if ($ids === []) {
+            return null;
+        }
+        $marks = implode(',', array_fill(0, count($ids), '?'));
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT 1 FROM journal_entry_lines l
+              WHERE l.supplier_id = ? AND l.entry_id IN ({$marks})
+                AND (l.cost_center IS NOT NULL OR l.project_id IS NOT NULL
+                     OR EXISTS (SELECT 1 FROM journal_entry_line_dimensions d WHERE d.supplier_id = l.supplier_id AND d.line_id = l.id)
+                     OR EXISTS (SELECT 1 FROM journal_entry_line_dimension_splits s WHERE s.supplier_id = l.supplier_id AND s.line_id = l.id))
+              LIMIT 1"
+        );
+        $stmt->execute([$supplierId, ...$ids]);
+        return $stmt->fetchColumn() === false ? 'opening_without_dimensions' : null;
+    }
+
+    private function compareOpeningBalances(int $supplierId, int $nextPeriodId, array $expectedLines, bool $accountLevel = false): array
+    {
+        if ($accountLevel) {
+            return OpeningTakeoverComparison::compare(
+                $expectedLines,
+                $this->closing->openingBalancesInPeriod($supplierId, $nextPeriodId),
+                $this->roleProfile($supplierId, (string) $this->periods->findById($supplierId, $nextPeriodId)['starts_on']),
+            );
+        }
         $linkedTypes = [];
         $dimensions = new DimensionRepository($this->db);
         $types = array_column($dimensions->listTypes($supplierId), null, 'id');
@@ -371,7 +532,7 @@ final class ClosingService
                             $share = $part === null ? '' : ' ('
                                 . rtrim(rtrim(number_format(100 * $part / $row['allocation_amount'], 4, '.', ''), '0'), '.') . ' %)';
                             $row['dimension_labels'][] = $types[$typeId]['name'] . ': '
-                                . $values[$valueId]['code'] . ' ' . $values[$valueId]['name'] . $share;
+                                . DimensionValueLabel::full($values[$valueId]) . $share;
                         }
                     }
                 }
@@ -432,6 +593,10 @@ final class ClosingService
         $next = $this->periods->nextPeriod($supplierId, (string) $period['ends_on']);
         $openingDate = $next['starts_on'] ?? (new \DateTimeImmutable((string) $period['ends_on']))->modify('+1 day')->format('Y-m-d');
         $profile = $this->assertOpeningFramework($supplierId, (string) $period['ends_on'], $openingDate);
+        $takenOver = $this->closing->takenOverClosingEntryIds($supplierId, $periodId);
+        if ($takenOver !== [] && $profile->framework !== AccountingFrameworkService::CZ_504) {
+            return $this->takenOverOpeningLines($supplierId, $period, $profile, $takenOver);
+        }
         if ($steps['close_books']['status'] === 'done') {
             $closingEntry = $this->findEntryWithLines($supplierId, 'closing', $periodId);
             $profit = round((float) ($steps['close_books']['payload']['profit'] ?? 0.0), 2);
@@ -441,6 +606,66 @@ final class ClosingService
         $bs = $this->bsBalancesForProfile($supplierId, $period, $profile);
         $profit = round((float) $this->builder->closingLines($pl, $bs, $profile)['profit'], 2);
         return $this->builder->openingLines($bs, $profit, $profile, ClosingEntryBuilder::resultBalances($pl));
+    }
+
+    /**
+     * Očekávané počáteční stavy dalšího roku po uzávěrce převzaté z původního systému:
+     * konečné zůstatky a výsledek hospodaření spočtené BEZ převzatých uzávěrkových zápisů
+     * (s nimi jsou všechny účty nulové). Haléřový zbytek na počátečním účtu rozvažném,
+     * který rok zdědil z převzaté otevírací rozvahy, se nese dál stejně jako v původním systému.
+     *
+     * @param array<string,mixed> $period
+     * @param list<int> $takenOver
+     * @return list<array{account_code:string, side:'debit'|'credit', amount:float}>
+     */
+    private function takenOverOpeningLines(int $supplierId, array $period, AccountingRoleProfile $profile, array $takenOver): array
+    {
+        $periodId = (int) $period['id'];
+        $pl = $this->closing->plBalances($supplierId, $periodId, (string) $period['starts_on'], (string) $period['ends_on'], false, $takenOver);
+        $bs = $this->closing->bsBalances($supplierId, $periodId, (string) $period['ends_on'], false, $takenOver);
+        $residue = $this->closing->periodBalanceExcluding($supplierId, $profile->account('closing.opening_balance'),
+            (string) $period['starts_on'], (string) $period['ends_on'], $takenOver);
+        return $this->builder->openingLines($bs, self::profitFromPl($pl), $profile, null, (int) round($residue * 100));
+    }
+
+    /**
+     * Výsledek hospodaření ze zůstatků výsledkových účtů (kreditní netto = zisk).
+     *
+     * @param list<array{bal:float}> $pl
+     */
+    private static function profitFromPl(array $pl): float
+    {
+        $cents = 0;
+        foreach ($pl as $row) {
+            $cents -= (int) round((float) $row['bal'] * 100);
+        }
+        return $cents / 100;
+    }
+
+    /**
+     * Účty, na kterých po uzávěrce převzaté z původního systému zůstal nenulový zůstatek
+     * (typicky zápis zaúčtovaný do roku až po převodu). Uzavření knih takový rok odmítne
+     * ({@see closeBooks}) a stav průvodce ho hlásí v close_blockers ({@see state}).
+     * Po účtech, ne po dimenzích: původní systém uzavírá účty bez dimenzí, takže řádky
+     * s dimenzí a bez ní se v součtu účtu vyruší.
+     *
+     * @param list<array{account_code:string, bal:float|int|string}> $balances zůstatky výsledkových i rozvahových účtů
+     * @return list<string> kódy účtů se zbytkem
+     */
+    private static function takenOverResidualAccounts(array $balances): array
+    {
+        $byAccount = [];
+        foreach ($balances as $row) {
+            $code = (string) $row['account_code'];
+            $byAccount[$code] = ($byAccount[$code] ?? 0) + (int) round((float) $row['bal'] * 100);
+        }
+        return array_map('strval', array_keys(array_filter($byAccount, static fn (int $cents): bool => $cents !== 0)));
+    }
+
+    /** @return list<int> zápisy uzávěrky převzaté z původního systému ({@see ClosingRepository::takenOverClosingEntryIds()}) */
+    public function takenOverClosingEntryIds(int $supplierId, int $periodId): array
+    {
+        return $this->closing->takenOverClosingEntryIds($supplierId, $periodId);
     }
 
     // ── start / abort ─────────────────────────────────────────────────────────
@@ -493,6 +718,12 @@ final class ClosingService
                     );
                 }
             }
+            if ($this->closing->takenOverClosingEntryIds($supplierId, $periodId) !== []
+                && $this->roleProfile($supplierId, (string) $period['ends_on'])->framework === AccountingFrameworkService::CZ_504) {
+                throw new ClosingException('closing_taken_over',
+                    'Rok ' . $period['fiscal_year'] . ' už uzavřel původní systém (převzaté uzávěrkové zápisy). U neziskové organizace '
+                    . 'průvodce převzatou uzávěrku zatím nenavazuje - rok nechte uzavřený tak, jak byl převeden.', 422);
+            }
             // Nerozdělený výsledek na 431 blokuje uzavření knih (precheck vh_431_undistributed),
             // ale rozdělení se účtuje do TOHOTO období — a jakmile je ve stavu 'closing',
             // uživatel se k němu dostane hůř. Řekneme to rovnou na vstupu, ať to nezjistí
@@ -512,6 +743,13 @@ final class ClosingService
                     . 'se do období účtuje hůř a uzavření knih by stejně neprošlo.',
                     422,
                 );
+            }
+            // Potvrzení kroku Časové rozlišení z přerušené uzávěrky nemá zápis (přerušit jde jen
+            // bez uzávěrkových zápisů) a platilo pro tehdejší doklady. Mezitím zaúčtovaný doklad
+            // s obdobím přes rozvahový den by jinak prošel bez odkladu: krok se vrací k potvrzení.
+            $deferrals = $this->stepsMap($supplierId, $periodId)['deferrals'];
+            if ((string) $deferrals['status'] !== 'pending') {
+                $this->closing->upsertStep($supplierId, $periodId, 'deferrals', 'pending', $deferrals['payload'], $deferrals['note'], $meta['user_id'] ?? null);
             }
             $this->casStatus($supplierId, $periodId, 'closing', $rowVersion, $meta);
             $this->audit($supplierId, 'accounting.closing_started', $periodId, [], $meta);
@@ -774,16 +1012,33 @@ final class ClosingService
      */
     public function confirmStep(int $supplierId, int $periodId, string $stepKey, string $status, ?string $note, int $rowVersion, array $meta = []): array
     {
-        if (!in_array($stepKey, ['depreciation', 'estimates', 'deferrals', 'provisions', 'income_tax', 'deferred_tax'], true)) {
+        // Kurzové rozdíly a zásoby jde přeskočit jen v roce s uzávěrkou převzatou z původního
+        // systému: ten je už zaúčtoval a nový zápis by po převzaté uzávěrce zůstal neuzavřený.
+        $takenOverSkip = in_array($stepKey, ['fx_revaluation', 'stock'], true) && $status === 'skipped';
+        if (!in_array($stepKey, ClosingSteps::CONFIRMABLE, true) && !$takenOverSkip) {
             throw new ClosingException('unknown_step', 'Krok "' . $stepKey . '" nelze potvrdit tímto způsobem.');
         }
         if (!in_array($status, ['done', 'skipped'], true)) {
             throw new ClosingException('invalid_step_status', 'Stav kroku musí být done|skipped.');
         }
-        return $this->tx(function () use ($supplierId, $periodId, $stepKey, $status, $note, $rowVersion, $meta): array {
+        return $this->tx(function () use ($supplierId, $periodId, $stepKey, $status, $note, $rowVersion, $meta, $takenOverSkip): array {
             $period = $this->lockPeriod($supplierId, $periodId, $rowVersion);
             $this->assertStatus($period, $stepKey === 'depreciation' ? ['open', 'closing'] : ['closing']);
+            if ($takenOverSkip && ($this->closing->takenOverClosingEntryIds($supplierId, $periodId) === []
+                || $this->roleProfile($supplierId, (string) $period['ends_on'])->framework === AccountingFrameworkService::CZ_504)) {
+                throw new ClosingException('step_not_skippable',
+                    'Krok "' . $stepKey . '" jde přeskočit jen v roce s uzávěrkou převzatou z původního systému.', 422);
+            }
+            if ($stepKey === 'income_tax' && $status === 'done') {
+                $this->assertStockBeforeIncomeTax($supplierId, $periodId,
+                    $this->roleProfile($supplierId, (string) $period['ends_on'])->framework === AccountingFrameworkService::CZ_504);
+            }
             $existing = $this->stepsMap($supplierId, $periodId)[$stepKey];
+            // Nové potvrzení daně je vědomé rozhodnutí nad aktuálními čísly: příznak přepočtu
+            // po vrácení kroku se tím ruší ({@see markIncomeTaxStale}).
+            if ($stepKey === 'income_tax' && is_array($existing['payload'])) {
+                unset($existing['payload']['stale']);
+            }
             $this->closing->upsertStep(
                 $supplierId,
                 $periodId,
@@ -797,6 +1052,98 @@ final class ClosingService
             $this->audit($supplierId, 'accounting.closing_step_done', $periodId, ['step' => $stepKey, 'status' => $status], $meta);
             return ['step' => $stepKey, 'status' => $status];
         });
+    }
+
+    /**
+     * Potvrzení už zaúčtované daně z příjmů beze změny částky. Slouží po vrácení kroku,
+     * který mění výsledek hospodaření ({@see markIncomeTaxStale}): účetní ověří, že částka
+     * platí dál, a příznak přepočtu se zruší. Potvrdí i daň zaúčtovanou mimo průvodce
+     * (ruční zápis, uzávěrka převzatá z původního systému), kterou krok znovu neúčtuje
+     * ({@see assertIncomeTaxNotBookedOutside}). Nezaúčtovanou daň takto potvrdit nejde.
+     *
+     * @param array{user_id?:?int, ip?:?string, user_agent?:?string} $meta
+     * @return array<string,mixed>
+     */
+    public function reconfirmIncomeTax(int $supplierId, int $periodId, ?string $note, int $rowVersion, array $meta = []): array
+    {
+        return $this->tx(function () use ($supplierId, $periodId, $note, $rowVersion, $meta): array {
+            $period = $this->lockPeriod($supplierId, $periodId, $rowVersion);
+            $step = $this->stepsMap($supplierId, $periodId, true)['income_tax'];
+            $bookedOutside = is_array($step['payload']) && isset($step['payload']['booked_outside']);
+            if ($step['status'] === 'done' && !$bookedOutside) {
+                return $this->confirmStep($supplierId, $periodId, 'income_tax', 'done', $note, $rowVersion, $meta);
+            }
+
+            // Daň zaúčtovaná mimo průvodce (ruční zápis, uzávěrka převzatá z původního
+            // systému): krok se potvrdí jako hotový bez nového zápisu, s částkou z deníku.
+            $this->assertStatus($period, ['closing']);
+            $booked = $this->incomeTaxBooked($supplierId, $period);
+            if (abs($booked['outside']) < 0.005) {
+                throw new ClosingException('income_tax_not_posted', 'Daň z příjmů ještě není zaúčtovaná - zadejte částku splatné daně.', 422);
+            }
+            $this->assertStockBeforeIncomeTax($supplierId, $periodId,
+                $this->roleProfile($supplierId, (string) $period['ends_on'])->framework === AccountingFrameworkService::CZ_504);
+            $source = $this->closing->takenOverClosingEntryIds($supplierId, $periodId) !== [] ? 'taken_over' : 'other_entries';
+            $payload = [
+                'amount' => $booked['outside'],
+                'booked_outside' => $source,
+                'account' => $booked['account'],
+                'confirmed_at' => date('Y-m-d H:i:s'),
+            ];
+            $this->closing->upsertStep($supplierId, $periodId, 'income_tax', 'done', $payload, $note, $meta['user_id'] ?? null);
+            $this->bumpVersion($supplierId, $periodId, $rowVersion);
+            $this->audit($supplierId, 'accounting.closing_step_done', $periodId, [
+                'step' => 'income_tax', 'status' => 'done', 'amount' => $booked['outside'], 'booked_outside' => $source,
+            ], $meta);
+            return ['step' => 'income_tax', 'status' => 'done', 'amount' => $booked['outside'], 'booked_outside' => $source];
+        });
+    }
+
+    /**
+     * Daň z příjmů zaúčtovaná v roce na nákladový účet předpisu (syntetika účtu z pravidla
+     * income_tax.payable, výchozí 591) bez zápisů uzavření knih: celkem a z toho mimo
+     * vlastní zápis průvodce (ruční zápis, převod z jiného programu). Uzávěrka převzatá
+     * z původního systému se do obratu nepočítá ({@see ClosingSourceId::closeBooksSql()}).
+     *
+     * @param array<string,mixed> $period
+     * @return array{account:string, booked:float, outside:float}
+     */
+    private function incomeTaxBooked(int $supplierId, array $period): array
+    {
+        $rule = $this->rules->resolve($supplierId, 'income_tax.payable');
+        $ruleAccount = $rule !== null && $rule['debit_account_code'] !== null ? (string) $rule['debit_account_code'] : '591';
+        $account = substr($ruleAccount, 0, 3);
+        $from = (string) $period['starts_on'];
+        $to = (string) $period['ends_on'];
+        return [
+            'account' => $account,
+            'booked' => $this->closing->turnoverWithoutCloseBooks($supplierId, $account, $from, $to),
+            'outside' => $this->closing->turnoverWithoutCloseBooks($supplierId, $account, $from, $to, 'income_tax', (int) $period['id']),
+        ];
+    }
+
+    /**
+     * Krok Daň z příjmů účtuje celou daň roku. Leží-li daň v roce už jinde, nový předpis by
+     * ji zdvojil (a v roce s převzatou uzávěrkou by navíc zůstal neuzavřený), proto se
+     * odmítne a krok se jen potvrdí jako zaúčtovaný ({@see reconfirmIncomeTax}). Odmítá se
+     * při jakékoli takové částce, ne jen při shodě: výsledek by byl vždy součet obou zápisů,
+     * nikdy částka, kterou účetní zadala.
+     *
+     * @param array<string,mixed> $period
+     */
+    private function assertIncomeTaxNotBookedOutside(int $supplierId, array $period): void
+    {
+        if ($this->closing->takenOverClosingEntryIds($supplierId, (int) $period['id']) !== []) {
+            throw new ClosingException('closing_taken_over',
+                'Rok už uzavřel původní systém a daň z příjmů zaúčtoval s převedenými daty. Nový předpis by po převzaté uzávěrce '
+                . 'zůstal neuzavřený: krok potvrďte jako zaúčtovaný v původním systému.', 422);
+        }
+        $booked = $this->incomeTaxBooked($supplierId, $period);
+        if (abs($booked['outside']) >= 0.005) {
+            throw new ClosingException('income_tax_booked_outside',
+                'Daň z příjmů roku už je zaúčtovaná jiným zápisem (' . number_format($booked['outside'], 2, ',', ' ') . ' Kč na účtu '
+                . $booked['account'] . '). Nový předpis by ji zdvojil: krok potvrďte jako zaúčtovaný, nebo jiný zápis nejdřív stornujte.', 422);
+        }
     }
 
     /**
@@ -842,6 +1189,9 @@ final class ClosingService
      */
     public function fxPreview(int $supplierId, int $periodId, array $bankRows = [], ?array $accountDecisions = null, ?array $caseDecisions = null, ?array $securitiesEvidence = null): array
     {
+        if ($this->projectionSkipsFx) {
+            throw new ClosingException('fx_projection_skipped', 'Kurzové rozdíly jsou vyřešené krokem uzávěrky, do projekce se nepočítají.', 409);
+        }
         $jointFx = new Fx504Service($this->db, $this->journal, $this->series, $this->closing, $this->posting, $this->activity);
         if ($jointFx->handles($supplierId, $periodId)) return $jointFx->preview($supplierId, $periodId, $accountDecisions, false, $caseDecisions, $securitiesEvidence);
         if ($accountDecisions !== null || $caseDecisions !== null || $securitiesEvidence !== null) throw new ClosingException('fx_case_framework_unsupported', 'Podrobné posouzení kurzových případů je dostupné pouze pro účetní rámec 504.', 422);
@@ -891,7 +1241,7 @@ final class ClosingService
                     $docNo = $existing !== null && $existing['document_no'] !== null
                         ? (string) $existing['document_no']
                         : $this->series->next($supplierId, 'fx', $fiscalYear);
-                    $entryIds[$slot] = $this->posting->postDocument($supplierId, 'fx_revaluation', $sourceId, $lines, [
+                    $entryIds[$slot] = $this->posting->postDocument($supplierId, 'fx_revaluation', $sourceId, PairGroups::consecutive($lines, 'fx'), [
                         'entry_date' => $endsOn,
                         'document_no' => $docNo,
                         'description' => 'Kurzové rozdíly k rozvahovému dni',
@@ -1010,7 +1360,7 @@ final class ClosingService
                     $docNo = $existing !== null && $existing['document_no'] !== null
                         ? (string) $existing['document_no']
                         : $this->series->next($supplierId, 'closing', $fiscalYear);
-                    $entryIds[$slot] = $this->posting->postDocument($supplierId, 'closing', $sourceId, $def['lines'], [
+                    $entryIds[$slot] = $this->posting->postDocument($supplierId, 'closing', $sourceId, PairGroups::consecutive($def['lines'], 'stock'), [
                         'entry_date' => $endsOn,
                         'document_no' => $docNo,
                         'description' => (string) $def['description'],
@@ -1357,7 +1707,8 @@ final class ClosingService
                 $payload['reversed'][] = $record;
                 $this->closing->upsertStep($supplierId, $periodId, $stepKey, $step['status'], $payload, $step['note'], $meta['user_id'] ?? null);
                 $this->bumpVersion($supplierId, $periodId, $rowVersion);
-                return ['entry_id' => $entryId, 'reversal_entry_id' => $reversalId, 'step' => $stepKey];
+                $stale = $this->markIncomeTaxStale($supplierId, $periodId, $stepKey);
+                return ['entry_id' => $entryId, 'reversal_entry_id' => $reversalId, 'step' => $stepKey] + ($stale ? ['income_tax_stale' => true] : []);
             };
             return $is504 ? (new DimensionPeriodGuard($this->db))->transaction($work) : $work();
         });
@@ -1416,7 +1767,7 @@ final class ClosingService
         $items = [];
         $total = 0.0;
         $cardsTotal = 0.0;
-        foreach ($this->smallAssets->additionsBetween($supplierId, $startsOn, $endsOn) as $card) {
+        foreach ($this->smallAssets->costAdditionsBetween($supplierId, $startsOn, $endsOn) as $card) {
             $price = round((float) ($card['price'] ?? 0), 2);
             $cardsTotal = round($cardsTotal + $price, 2);
             // EP-15: kotva = datum uvedení do užívání (fallback pořízení); doba dle doložených měsíců.
@@ -1451,9 +1802,9 @@ final class ClosingService
 
         // §DM báze pro flat_pct = ČISTÝ OBRAT 501.200 (net dobropisů), NE báze karet.
         // Účetní odkládá % ze skutečného nákladu drobného majetku (§7 ZoÚ / ČÚS), ne z
-        // evidence karet: ta bývá neúplná (řádek bez karty) a naopak by započítala i majetek
-        // pořízený a VRÁCENÝ v témže období (karta zůstává jako `disposed`, ale additionsBetween
-        // ji dá do báze) — net obrat 501 ho správně vynuluje. Karty zůstávají evidencí §28/5;
+        // evidence karet: ta bývá neúplná (řádek bez karty). Majetek pořízený a vrácený
+        // dobropisem v témže období karty nepočítají ({@see SmallAssetRepository::costAdditionsBetween}),
+        // net obrat 501 ho vynuluje stejně. Karty zůstávají evidencí §28/5;
         // per-karta `deferred_amount` u flat_pct proto nedává smysl (null), rozhoduje `total`.
         $materiality = null;
         if ($mode === 'flat_pct') {
@@ -1484,6 +1835,8 @@ final class ClosingService
 
         $existingEntry = $this->journal->findBySource($supplierId, 'small_asset_accrual', ClosingSourceId::smallAssetAccrual($periodId));
         $existingPayload = $this->stepsMap($supplierId, $periodId)['deferrals']['payload']['small_asset_accrual'] ?? null;
+        $bookedOutside = $this->smallAssetDeferralsBookedOutside($supplierId, $startsOn, $endsOn);
+        $takenOver = $this->closing->takenOverClosingEntryIds($supplierId, $periodId) !== [];
 
         return [
             'as_of' => $endsOn,
@@ -1503,7 +1856,34 @@ final class ClosingService
                 'pct' => is_array($existingPayload) ? ($existingPayload['pct'] ?? null) : null,
                 'amount' => is_array($existingPayload) ? round((float) ($existingPayload['total'] ?? 0), 2) : null,
             ],
+            // Odklad drobného majetku zaúčtovaný v roce jinými zápisy než krokem (ruční interní
+            // doklad, převod). Krok ho znovu neúčtuje ({@see runSmallAssetAccrual}).
+            'booked_outside' => $bookedOutside,
+            'closing_taken_over' => $takenOver,
+            // Proč krok nový odklad nezaúčtuje: rok uzavřel původní systém, nebo odklad leží v jiném zápisu.
+            'post_blocked' => $takenOver ? 'closing_taken_over' : ($bookedOutside !== null ? 'booked_outside' : null),
         ];
+    }
+
+    /**
+     * Odklad drobného majetku (MD 381 / D 501 podle pravidla accrual.small_asset.defer, po
+     * syntetikách) zaúčtovaný v rozsahu jinými zápisy než kroky uzávěrky: ruční interní
+     * doklad nebo deník převzatý z jiného programu. Zápisy kroků časového rozlišení,
+     * uzavření knih a otevření roku se nepočítají.
+     *
+     * @return array{amount:float, entries:list<array{entry_id:int, document_no:?string, entry_date:string, amount:float}>}|null
+     */
+    private function smallAssetDeferralsBookedOutside(int $supplierId, string $startsOn, string $endsOn): ?array
+    {
+        $rule = $this->rules->resolve($supplierId, 'accrual.small_asset.defer');
+        $defer = substr((string) ($rule['debit_account_code'] ?? '381'), 0, 3);
+        $expense = substr((string) ($rule['credit_account_code'] ?? '501'), 0, 3);
+        $entries = $this->closing->deferralsByOtherEntries($supplierId, $defer, $expense, $startsOn, $endsOn,
+            ['small_asset_accrual', 'prepaid_expense_accrual', 'deferred_revenue_accrual', 'closing', 'opening']);
+        if ($entries === []) {
+            return null;
+        }
+        return ['amount' => round(array_sum(array_column($entries, 'amount')), 2), 'entries' => $entries];
     }
 
     /**
@@ -1540,6 +1920,20 @@ final class ClosingService
             // Návrh počítej stejně jako preview (zdroj pravdy = karty + režim).
             $preview = $this->smallAssetAccrualPreview($supplierId, $periodId, $mode, $pct);
             $total = round((float) $preview['total'], 2);
+
+            // Rok uzavřený původním systémem nový odklad nedostane (po převzaté uzávěrce by
+            // zůstal neuzavřený, stejně jako odpisy) a odklad zaúčtovaný jiným zápisem
+            // (ruční interní doklad) se nezdvojí. Nulový návrh jen uklidí vlastní zápis.
+            if ((int) round($total * 100) !== 0 && $preview['post_blocked'] === 'closing_taken_over') {
+                throw new ClosingException('closing_taken_over',
+                    'Rok už uzavřel původní systém. Časové rozlišení drobného majetku se v něm znovu neúčtuje: krok Časové rozlišení potvrďte.', 422);
+            }
+            if ((int) round($total * 100) !== 0 && $preview['post_blocked'] === 'booked_outside') {
+                throw new ClosingException('small_asset_accrual_booked_outside',
+                    'Odklad drobného majetku už je v roce zaúčtovaný jiným zápisem (' . number_format((float) $preview['booked_outside']['amount'], 2, ',', ' ')
+                    . ' Kč, ' . implode(', ', array_map(static fn (array $e): string => (string) ($e['document_no'] ?? ('#' . $e['entry_id'])), $preview['booked_outside']['entries']))
+                    . '). Nový zápis by ho zdvojil: krok Časové rozlišení potvrďte, nebo jiný zápis nejdřív stornujte.', 422);
+            }
 
             // EP-15: paušál jen pro nevýznamný homogenní soubor s testem přiměřenosti.
             if ($mode === 'flat_pct') {
@@ -1583,10 +1977,18 @@ final class ClosingService
             }
             $debit = (string) ($rule['debit_account_code'] ?? '381');
             $credit = (string) ($rule['credit_account_code'] ?? '501');
-            $lines = [
-                ['account_code' => $debit, 'side' => 'debit', 'amount' => $total],
-                ['account_code' => $credit, 'side' => 'credit', 'amount' => $total],
-            ];
+            $expenseLines = [];
+            foreach ($this->smallAssetAccrualCreditLines($supplierId, $period, $preview, $credit, $total) as $line) {
+                $amount = round((float) $line['amount'], 2);
+                if ((int) round($amount * 100) !== 0) {
+                    $expenseLines[] = ['side' => $amount > 0 ? 'credit' : 'debit', 'amount' => abs($amount)] + $line;
+                }
+            }
+            // Dobropis na jiné kombinaci dá řádek 501 i na straně MD. Jednoduchá forma zápisu
+            // takový zápis 1 : N nerozloží (501 proti 501), proto v ní má každý řádek 501 vlastní
+            // protějšek na 381 stejně jako odklad 381 z faktur; složená nese saldo jedním řádkem.
+            $lines = $this->accrualPairs($supplierId, $endsOn, $expenseLines, $debit, true)
+                ?? [['account_code' => $debit, 'side' => 'debit', 'amount' => $total], ...$expenseLines];
             $this->assertKnownCodes($supplierId, $lines);
 
             $existing = $this->journal->findBySource($supplierId, 'small_asset_accrual', $sourceId);
@@ -1621,7 +2023,7 @@ final class ClosingService
         });
     }
 
-    // ── časové rozlišení nákladů příštích období (§DČR / Task 12) — 381 z označených faktur ──
+    // ── časové rozlišení nákladů příštích období (§DČR / Task 12) — 381 z označených faktur a ostatních závazků ──
 
     /**
      * Náhled časového rozlišení nákladů příštích období (381) k rozvahovému dni (GET).
@@ -1636,12 +2038,28 @@ final class ClosingService
      *
      * Bere jen řádky faktur zaúčtovaných DO tohoto období (effective_cost_date v období, status
      * != draft/cancelled) — jinak by se odložil náklad, který v VH tohoto roku vůbec není.
+     * Ostatní závazky s obdobím (other_items.accrual_from/to) se odkládají z obratu nákladových
+     * účtů svého zápisu ({@see AccrualDeferralService::prepaidExpenseRows()}).
      * Vícleté rozlišení (přesah přes víc než 1 hranici): odloží se vše za koncem období, v N+1 se
      * rozpustí a re-účtuje celé do N+1 — u typického ročního pojistného (1 hranice) je to přesné.
      *
      * @return array<string,mixed>
      */
     public function prepaidExpenseAccrualPreview(int $supplierId, int $periodId): array
+    {
+        $data = $this->prepaidExpenseAccrualData($supplierId, $periodId);
+        unset($data['lines'], $data['snapshot']);
+        return $data;
+    }
+
+    /**
+     * Náhled {@see prepaidExpenseAccrualPreview()} a navíc řádky zápisu odkladu po účtech
+     * a dimenzích (`lines`), ze kterých zápis účtuje krok uzávěrky, a rozpad odkladu po
+     * položkách pro záznam kroku (`snapshot`, {@see AccrualDeferralService::snapshotItem()}).
+     *
+     * @return array<string,mixed>
+     */
+    private function prepaidExpenseAccrualData(int $supplierId, int $periodId): array
     {
         $period = $this->periods->findById($supplierId, $periodId);
         if ($period === null) {
@@ -1653,11 +2071,15 @@ final class ClosingService
 
         $items = [];
         $documents = [];
-        $byAccount = [];
+        $byLine = [];
+        $snapshot = [];
         $total = 0.0;
         $accountsByInvoice = [];
         $costsByInvoice = [];
-        foreach ($this->accruals->prepaidExpenseRows($supplierId, $endsOn, $startsOn, $endsOn) as $row) {
+        $dimensionCache = [AccrualDeferralService::CACHE_POSTING_DATE => $endsOn];
+        $rows = $this->accruals->withoutAgendaItems($supplierId, $this->accruals->prepaidExpenseRows($supplierId, $endsOn, $startsOn, $endsOn));
+        $this->accruals->preloadPrepaidExpenseAllocations($supplierId, $rows, $dimensionCache);
+        foreach ($rows as $row) {
             $from = substr((string) $row['accrual_from'], 0, 10);
             $to = substr((string) $row['accrual_to'], 0, 10);
             $totalDays = self::daysInclusive($from, $to);
@@ -1671,39 +2093,38 @@ final class ClosingService
             $netCzk = $this->accruals->prepaidExpenseCostCzk($supplierId, $row, $costsByInvoice);
             // EP-15: odloží se net − kumulativně uznaný náklad do konce období (kotva pro
             // přesné víceleté rozpouštění; pro jednoleté rozlišení = původní chování).
-            $deferred = AccrualDeferralService::deferredAmount($netCzk, $from, $to, $endsOn);
+            $deferred = AccrualScheduleCalculator::deferredAmount($netCzk, $from, $to, $endsOn);
             if ((int) round($deferred * 100) === 0) {
                 continue;
             }
             // EP-15: harmonogram rozpouštění po (kalendářních) obdobích — kolik odloženého
             // nákladu se uvolní do 5xx v každém následujícím roce. Σ = deferred (telescopuje).
-            $schedule = [];
-            $toYear = (int) substr($to, 0, 4);
-            for ($fy = (int) substr($nextStart, 0, 4); $fy <= $toYear; $fy++) {
-                $rel = round(
-                    AccrualDeferralService::cumRecognized($netCzk, $from, $to, $fy . '-12-31')
-                    - AccrualDeferralService::cumRecognized($netCzk, $from, $to, ($fy - 1) . '-12-31'),
-                    2,
-                );
-                if ((int) round($rel * 100) !== 0) {
-                    $schedule[] = ['fiscal_year' => $fy, 'amount' => $rel];
-                }
-            }
+            $schedule = AccrualScheduleCalculator::fiscalYearTranches($netCzk, $from, $to, (int) substr($nextStart, 0, 4));
             $accounts = $this->accruals->prepaidExpenseAccounts($supplierId, $row, $accountsByInvoice);
 
             $total = round($total + $deferred, 2);
-            foreach (AccrualDeferralService::spreadByAccount($deferred, $accounts) as $account => $part) {
-                $byAccount[$account] = round(($byAccount[$account] ?? 0.0) + $part, 2);
-            }
-            $piId = (int) $row['purchase_invoice_id'];
-            $documents[$piId] = [
+            AccrualDeferralService::addLines($byLine, AccrualDeferralService::spreadByAllocation(
+                $deferred,
+                $this->accruals->prepaidExpenseAllocations($supplierId, $row, $accounts, $dimensionCache),
+            ));
+            $piId = $row['purchase_invoice_id'] === null ? null : (int) $row['purchase_invoice_id'];
+            $snapshot[] = $row['source'] === 'other_item'
+                ? AccrualDeferralService::snapshotOtherItem($row, $from, $to, $netCzk, $accounts)
+                : AccrualDeferralService::snapshotItem((int) $row['item_id'], (int) $piId, $from, $to, $netCzk, $accounts);
+            $otherItemId = $row['other_item_id'] === null ? null : (int) $row['other_item_id'];
+            $documentKey = AccrualDeferralService::prepaidExpenseDocumentKey($row);
+            $documents[$documentKey] = [
+                'source' => (string) $row['source'],
                 'purchase_invoice_id' => $piId,
+                'other_item_id' => $otherItemId,
                 'vendor_invoice_number' => (string) $row['vendor_invoice_number'],
-                'deferred_amount' => round(($documents[$piId]['deferred_amount'] ?? 0.0) + $deferred, 2),
+                'deferred_amount' => round(($documents[$documentKey]['deferred_amount'] ?? 0.0) + $deferred, 2),
             ];
             $items[] = [
+                'source' => (string) $row['source'],
                 'item_id' => (int) $row['item_id'],
                 'purchase_invoice_id' => $piId,
+                'other_item_id' => $otherItemId,
                 'vendor_invoice_number' => (string) $row['vendor_invoice_number'],
                 'description' => (string) $row['description'],
                 'currency_code' => (string) $row['currency_code'],
@@ -1729,12 +2150,14 @@ final class ClosingService
             'next_period_start' => $nextStart,
             'items' => $items,
             'documents' => array_values($documents),
-            'by_account' => $byAccount,
+            'by_account' => AccrualDeferralService::amountsByAccount($byLine),
             'total' => $total,
             'existing' => $existingEntry === null ? null : [
                 'entry_id' => (int) $existingEntry['id'],
                 'amount' => is_array($existingPayload) ? round((float) ($existingPayload['total'] ?? 0), 2) : null,
             ],
+            'lines' => array_values($byLine),
+            'snapshot' => $snapshot,
         ];
     }
 
@@ -1744,7 +2167,7 @@ final class ClosingService
      * = ends_on, R7 flag). Nákladová strana rozpadnuta na účty dle řádků (expense_account_code,
      * jinak expense_kind). Re-run = in-place rewrite; nulový návrh (žádné označené řádky) maže
      * stale zápis, ať odklad „nevisí" (vzor OP/zásoby/DM). Rozpuštění v N+1 (MD 5xx / D 381)
-     * řeší {@see openNext}. Částky jsou dané z faktur (accrual_from/to), účetní je jen potvrzuje.
+     * řeší {@see openNext}. Částky jsou dané z faktur a ostatních závazků (accrual_from/to), účetní je jen potvrzuje.
      *
      * @param array{user_id?:?int, posted_by?:?int, ip?:?string, user_agent?:?string} $meta
      * @return array<string,mixed>
@@ -1757,7 +2180,7 @@ final class ClosingService
             $endsOn = (string) $period['ends_on'];
             $fiscalYear = (int) $period['fiscal_year'];
 
-            $preview = $this->prepaidExpenseAccrualPreview($supplierId, $periodId);
+            $preview = $this->prepaidExpenseAccrualData($supplierId, $periodId);
             $total = round((float) $preview['total'], 2);
             $sourceId = ClosingSourceId::prepaidExpenseAccrual($periodId);
 
@@ -1765,8 +2188,9 @@ final class ClosingService
             $payload = $step['payload'] ?? [];
             $stepStatus = (string) $step['status'];
 
-            // Nulový návrh → smaž stale zápis.
-            if ((int) round($total * 100) === 0) {
+            // Nulový návrh → smaž stale zápis. Rozhodují řádky: kladný a záporný doklad
+            // s různou dimenzí dají celkem nulu, po dimenzi se ale odložit musí.
+            if (!AccrualDeferralService::hasNonZeroLine($preview['lines'])) {
                 $this->closing->deleteClosingEntry($supplierId, 'prepaid_expense_accrual', $sourceId);
                 unset($payload['prepaid_expense_accrual']);
                 $this->closing->upsertStep($supplierId, $periodId, 'deferrals', $stepStatus, $payload, $step['note'], $meta['user_id'] ?? null);
@@ -1776,12 +2200,8 @@ final class ClosingService
             }
 
             // MD 381 z pravidla accrual.prepaid.expense (tenant si účet 381 může přesměrovat);
-            // D strana = nákladové účty z řádků (preview by_account), NE credit z pravidla (221).
-            $deferAccount = $this->accruals->deferralAccount($supplierId, AccrualDeferralService::RULE_PREPAID_EXPENSE);
-            $lines = [['account_code' => $deferAccount, 'side' => 'debit', 'amount' => $total]];
-            foreach ($preview['by_account'] as $account => $amount) {
-                $lines[] = ['account_code' => (string) $account, 'side' => 'credit', 'amount' => round((float) $amount, 2)];
-            }
+            // D strana = nákladové účty a dimenze řádků faktur, NE credit z pravidla (221).
+            $lines = $this->prepaidExpenseLines($supplierId, $preview['lines'], $total, false, $endsOn);
             $this->assertKnownCodes($supplierId, $lines);
 
             $existing = $this->journal->findBySource($supplierId, 'prepaid_expense_accrual', $sourceId);
@@ -1806,7 +2226,13 @@ final class ClosingService
                 'document_no' => $docNo,
                 'total' => $total,
                 'by_account' => $preview['by_account'],
-                'item_costs' => array_column($preview['items'], 'total_czk', 'item_id'),
+                // Ocenění řádků faktur podle id řádku faktury: zapisuje se kvůli kompatibilitě, rozpuštění
+                // období s rozpadem `items` čte jen jej. Ostatní závazek tu není: jeho id je z jiné řady
+                // a přepsalo by ocenění řádku faktury se stejným id.
+                'item_costs' => array_column(array_filter($preview['items'],
+                    static fn (array $item): bool => $item['source'] === 'purchase_invoice'), 'total_czk', 'item_id'),
+                // Rozpad po řádcích faktur a ostatních závazků: rozpuštění z něj zrcadlí zaúčtovaný odklad (#384).
+                'items' => $preview['snapshot'],
                 'ran_at' => date('Y-m-d H:i:s'),
             ];
             $this->closing->upsertStep($supplierId, $periodId, 'deferrals', $stepStatus, $payload, $step['note'], $meta['user_id'] ?? null);
@@ -1817,6 +2243,74 @@ final class ClosingService
     }
 
     /**
+     * Řádky zápisu odkladu (MD 381 / D 5xx) nebo rozpuštění (MD 5xx / D 381). Částky jsou
+     * se znaménkem: záporný řádek (sleva či dobropis s jiným střediskem, který se po dimenzi
+     * nevyruší s kladným) převrací stranu, aby zápis zůstal vyvážený a bez záporných částek.
+     * Zrcadlo {@see deferredRevenueLines()}. Účet 381 je debet pravidla accrual.prepaid.expense.
+     *
+     * @param list<array<string,mixed>> $byLine řádky s `account_code`, `amount` a dimenzemi
+     * @param string $entryDate datum zápisu (forma zápisu {@see accrualPairs()})
+     * @return list<array<string,mixed>>
+     */
+    private function prepaidExpenseLines(int $supplierId, array $byLine, float $total, bool $release, string $entryDate): array
+    {
+        $deferAccount = $this->accruals->deferralAccount($supplierId, AccrualDeferralService::RULE_PREPAID_EXPENSE);
+        $expenseSide = static fn (float $amount): string => (($amount >= 0.0) !== $release) ? 'credit' : 'debit';
+        $expenseLines = [];
+        foreach ($byLine as $line) {
+            $amount = round((float) $line['amount'], 2);
+            if ((int) round($amount * 100) === 0) {
+                continue;
+            }
+            $expenseLines[] = ['side' => $expenseSide($amount), 'amount' => abs($amount)] + $line;
+        }
+        $pairs = $this->accrualPairs($supplierId, $entryDate, $expenseLines, $deferAccount, !$release);
+        if ($pairs !== null) {
+            return $pairs;
+        }
+        // Pořadí řádků jako dosud: odklad 381 první, rozpuštění 381 poslední. Nulový součet
+        // (doklady s opačným znaménkem a různou dimenzí) řádek 381 nemá.
+        if ((int) round($total * 100) === 0) {
+            return $expenseLines;
+        }
+        $deferLine = [
+            'account_code' => $deferAccount,
+            'side' => $expenseSide($total) === 'credit' ? 'debit' : 'credit',
+            'amount' => abs(round($total, 2)),
+        ];
+        return $release ? [...$expenseLines, $deferLine] : [$deferLine, ...$expenseLines];
+    }
+
+    /**
+     * Jednoduchá forma zápisu: výsledkové řádky odkladu či rozpuštění na obou stranách
+     * (dobropis nebo sleva na jiné dimenzi) nejde rozložit 1 : N proti jedinému řádku
+     * 381/384. Každý výsledkový řádek proto dostane vlastní protějšek na účtu časového
+     * rozlišení se stejnou částkou; takové dvojice párovač spáruje v pořadí sám. Řádky na
+     * jedné straně by rozdělil na tytéž dvojice. Složená forma zůstává beze změny (null):
+     * jeden řádek 381/384 proti výsledkovým řádkům.
+     *
+     * @param list<array<string,mixed>> $resultLines výsledkové řádky se stranou a kladnou částkou
+     * @return list<array<string,mixed>>|null
+     */
+    private function accrualPairs(int $supplierId, string $entryDate, array $resultLines, string $deferAccount, bool $deferFirst): ?array
+    {
+        if (!$this->entryForms()->formAt($supplierId, $entryDate, currentRead: true)->isSingle()) {
+            return null;
+        }
+        $lines = [];
+        foreach ($resultLines as $line) {
+            $counterpart = ['account_code' => $deferAccount, 'side' => $line['side'] === 'credit' ? 'debit' : 'credit', 'amount' => $line['amount']];
+            array_push($lines, ...($deferFirst ? [$counterpart, $line] : [$line, $counterpart]));
+        }
+        return $lines;
+    }
+
+    private function entryForms(): EntryFormService
+    {
+        return $this->entryForms ??= new EntryFormService($this->db, $this->activity, new AccountingModeRepository($this->db), new FrameworkScopePolicy($this->db));
+    }
+
+    /**
      * EP-15: kolik odloženého nákladu (381) se rozpustí do 5xx v cílovém období
      * [targetStart..targetEnd] při otevření knih z období končícího `originEndsOn`. Pro každou
      * položku = kumulativně uznaný náklad k targetEnd − k dni před targetStart (= originEndsOn),
@@ -1824,33 +2318,53 @@ final class ClosingService
      * částka, takže 381 dojde na nulu bez zbytku. Jen tranše cílového období — víceletý zbytek
      * zůstává na 381 a rozpustí ho openNext dalšího roku.
      *
-     * @return array{by_account: array<string,float>, total: float}
+     * @return array{by_account: array<string,float>, lines: list<array<string,mixed>>, total: float}
      */
     private function prepaidExpenseReleaseForPeriod(int $supplierId, string $originEndsOn, string $targetStart, string $targetEnd): array
     {
-        $byAccount = [];
+        $byLine = [];
         $total = 0.0;
         $accountsByInvoice = [];
-        foreach ($this->accruals->prepaidExpenseReleaseRows($supplierId, $originEndsOn, $targetEnd) as $row) {
+        $dimensionCache = [AccrualDeferralService::CACHE_POSTING_DATE => $targetStart];
+        // Odklad uzávěrky s rozpadem po položkách se rozpouští z něj (zrcadlí zaúčtovaný odklad
+        // i po změně dokladu, #384); starší odklad bez rozpadu podle dnešního stavu dokladů.
+        $snapshots = $this->accruals->closingDeferralSnapshots($supplierId, 'prepaid_expense_accrual', $originEndsOn);
+        $rows = $this->accruals->prepaidExpenseReleaseRows($supplierId, $originEndsOn, $targetEnd, $snapshots['periods']);
+        foreach ($snapshots['items'] as $item) {
+            if ((string) $item['to'] > $originEndsOn && (string) $item['from'] <= $targetEnd) {
+                $rows[] = AccrualDeferralService::prepaidExpenseSnapshotRow($item);
+            }
+        }
+        // Doklady spravované agendou Časové rozlišení rozpouští agenda, ne otevření roku.
+        $rows = $this->accruals->withoutAgendaItems($supplierId, $rows);
+        $this->accruals->preloadPrepaidExpenseAllocations($supplierId, $rows, $dimensionCache);
+        // Starý odklad bez dimenzí se zrcadlí; ve 504 si rozpuštění ponechá osy činnosti dokladu.
+        $this->accruals->markLegacyDeferrals($supplierId, 'prepaid_expense_accrual', $originEndsOn,
+            $this->roleProfile($supplierId, $targetStart)->framework === AccountingFrameworkService::CZ_504, $dimensionCache);
+        foreach ($rows as $row) {
             $from = substr((string) $row['accrual_from'], 0, 10);
             $to = substr((string) $row['accrual_to'], 0, 10);
-            $netCzk = $this->accruals->prepaidExpenseReleaseBasisCzk($row);
+            $netCzk = isset($row['snapshot']) ? round((float) $row['snapshot']['basis'], 2) : $this->accruals->prepaidExpenseReleaseBasisCzk($row);
             // Tranše cílového období = kumul. uznáno k min(to, targetEnd) − kumul. uznáno
             // k originEndsOn (= den před targetStart). Dolní hranici kotvíme na originEndsOn,
             // aby první rozpouštěné období navazovalo přesně na odloženou částku.
-            $upper = AccrualDeferralService::cumRecognized($netCzk, $from, $to, $targetEnd < $to ? $targetEnd : $to);
-            $lower = AccrualDeferralService::cumRecognized($netCzk, $from, $to, $originEndsOn);
+            $upper = AccrualScheduleCalculator::cumRecognized($netCzk, $from, $to, $targetEnd < $to ? $targetEnd : $to);
+            $lower = AccrualScheduleCalculator::cumRecognized($netCzk, $from, $to, $originEndsOn);
             $release = round($upper - $lower, 2);
             if ((int) round($release * 100) === 0) {
                 continue;
             }
-            $accounts = $this->accruals->prepaidExpenseAccounts($supplierId, $row, $accountsByInvoice);
-            foreach (AccrualDeferralService::spreadByAccount($release, $accounts) as $account => $part) {
-                $byAccount[$account] = round(($byAccount[$account] ?? 0.0) + $part, 2);
-            }
+            $accounts = isset($row['snapshot'])
+                ? AccrualDeferralService::snapshotAccounts($row['snapshot'])
+                : $this->accruals->prepaidExpenseAccounts($supplierId, $row, $accountsByInvoice);
+            AccrualDeferralService::addLines($byLine, AccrualDeferralService::releaseByAllocation(
+                round($netCzk - $lower, 2),
+                round($netCzk - $upper, 2),
+                $this->accruals->prepaidExpenseAllocations($supplierId, $row, $accounts, $dimensionCache),
+            ));
             $total = round($total + $release, 2);
         }
-        return ['by_account' => $byAccount, 'total' => $total];
+        return ['by_account' => AccrualDeferralService::amountsByAccount($byLine), 'lines' => array_values($byLine), 'total' => $total];
     }
 
     // ── časové rozlišení výnosů příštích období — 384 z označených řádků vydaných faktur ──
@@ -1875,6 +2389,20 @@ final class ClosingService
      */
     public function deferredRevenueAccrualPreview(int $supplierId, int $periodId): array
     {
+        $data = $this->deferredRevenueAccrualData($supplierId, $periodId);
+        unset($data['lines'], $data['snapshot']);
+        return $data;
+    }
+
+    /**
+     * Náhled {@see deferredRevenueAccrualPreview()} a navíc řádky zápisu odkladu po účtech
+     * a dimenzích (`lines`), ze kterých zápis účtuje krok uzávěrky, a rozpad odkladu řádků
+     * vydaných faktur a ostatních pohledávek pro záznam kroku (`snapshot`, {@see AccrualDeferralService::snapshotItem()}).
+     *
+     * @return array<string,mixed>
+     */
+    private function deferredRevenueAccrualData(int $supplierId, int $periodId): array
+    {
         $period = $this->periods->findById($supplierId, $periodId);
         if ($period === null) {
             throw new ClosingException('not_found', 'Účetní období #' . $periodId . ' neexistuje.', 404);
@@ -1885,10 +2413,14 @@ final class ClosingService
 
         $items = [];
         $documents = [];
-        $byAccount = [];
+        $byLine = [];
+        $snapshot = [];
         $total = 0.0;
         $contexts = [];
-        foreach ($this->accruals->deferredRevenueRows($supplierId, $endsOn, $startsOn, $endsOn) as $row) {
+        $dimensionCache = [AccrualDeferralService::CACHE_POSTING_DATE => $endsOn];
+        $rows = $this->accruals->withoutAgendaItems($supplierId, $this->accruals->deferredRevenueRows($supplierId, $endsOn, $startsOn, $endsOn));
+        $this->accruals->preloadDeferredRevenueAllocations($supplierId, $rows, $dimensionCache);
+        foreach ($rows as $row) {
             $from = substr((string) $row['accrual_from'], 0, 10);
             $to = substr((string) $row['accrual_to'], 0, 10);
             $totalDays = self::daysInclusive($from, $to);
@@ -1902,30 +2434,28 @@ final class ClosingService
             if ((int) round($deferred * 100) === 0) {
                 continue;
             }
-            $schedule = [];
-            $toYear = (int) substr($to, 0, 4);
-            for ($fy = (int) substr($nextStart, 0, 4); $fy <= $toYear; $fy++) {
-                $rel = round(
-                    AccrualDeferralService::cumRecognized($netCzk, $from, $to, $fy . '-12-31')
-                    - AccrualDeferralService::cumRecognized($netCzk, $from, $to, ($fy - 1) . '-12-31'),
-                    2,
-                );
-                if ((int) round($rel * 100) !== 0) {
-                    $schedule[] = ['fiscal_year' => $fy, 'amount' => $rel];
-                }
-            }
+            $schedule = AccrualScheduleCalculator::fiscalYearTranches($netCzk, $from, $to, (int) substr($nextStart, 0, 4));
 
             $total = round($total + $deferred, 2);
-            foreach (AccrualDeferralService::spreadByAccount($deferred, $accounts) as $account => $part) {
-                $byAccount[$account] = round(($byAccount[$account] ?? 0.0) + $part, 2);
-            }
+            AccrualDeferralService::addLines($byLine, AccrualDeferralService::spreadByAllocation(
+                $deferred,
+                $this->accruals->deferredRevenueAllocations($supplierId, $row, $accounts, $dimensionCache),
+            ));
             $membershipCaseId = $row['membership_case_id'] === null ? null : (int) $row['membership_case_id'];
             $invoiceId = $row['invoice_id'] === null ? null : (int) $row['invoice_id'];
-            $documentKey = $membershipCaseId === null ? 'invoice:' . $invoiceId : 'membership:' . $membershipCaseId;
+            $otherItemId = $row['other_item_id'] === null ? null : (int) $row['other_item_id'];
+            if ($row['source'] === 'invoice') {
+                // Členský předpis nese období na účetním případu a rozpouští se dál z něj.
+                $snapshot[] = AccrualDeferralService::snapshotItem((int) $row['item_id'], (int) $invoiceId, $from, $to, $netCzk, $accounts);
+            } elseif ($row['source'] === 'other_item') {
+                $snapshot[] = AccrualDeferralService::snapshotOtherItem($row, $from, $to, $netCzk, $accounts);
+            }
+            $documentKey = AccrualDeferralService::deferredRevenueDocumentKey($row);
             $documents[$documentKey] = [
                 'source' => (string) $row['source'],
                 'invoice_id' => $invoiceId,
                 'membership_case_id' => $membershipCaseId,
+                'other_item_id' => $otherItemId,
                 'invoice_number' => (string) $row['varsymbol'],
                 'deferred_amount' => round(($documents[$documentKey]['deferred_amount'] ?? 0.0) + $deferred, 2),
             ];
@@ -1934,6 +2464,7 @@ final class ClosingService
                 'item_id' => (int) $row['item_id'],
                 'invoice_id' => $invoiceId,
                 'membership_case_id' => $membershipCaseId,
+                'other_item_id' => $otherItemId,
                 'invoice_number' => (string) $row['varsymbol'],
                 'description' => (string) $row['description'],
                 'currency_code' => (string) $row['currency_code'],
@@ -1959,12 +2490,14 @@ final class ClosingService
             'next_period_start' => $nextStart,
             'items' => $items,
             'documents' => array_values($documents),
-            'by_account' => $byAccount,
+            'by_account' => AccrualDeferralService::amountsByAccount($byLine),
             'total' => $total,
             'existing' => $existingEntry === null ? null : [
                 'entry_id' => (int) $existingEntry['id'],
                 'amount' => is_array($existingPayload) ? round((float) ($existingPayload['total'] ?? 0), 2) : null,
             ],
+            'lines' => array_values($byLine),
+            'snapshot' => $snapshot,
         ];
     }
 
@@ -1985,7 +2518,7 @@ final class ClosingService
             $endsOn = (string) $period['ends_on'];
             $fiscalYear = (int) $period['fiscal_year'];
 
-            $preview = $this->deferredRevenueAccrualPreview($supplierId, $periodId);
+            $preview = $this->deferredRevenueAccrualData($supplierId, $periodId);
             $total = round((float) $preview['total'], 2);
             $sourceId = ClosingSourceId::deferredRevenueAccrual($periodId);
 
@@ -1993,7 +2526,8 @@ final class ClosingService
             $payload = $step['payload'] ?? [];
             $stepStatus = (string) $step['status'];
 
-            if ((int) round($total * 100) === 0) {
+            // Rozhodují řádky, ne součet ({@see runPrepaidExpenseAccrual}).
+            if (!AccrualDeferralService::hasNonZeroLine($preview['lines'])) {
                 $this->closing->deleteClosingEntry($supplierId, 'deferred_revenue_accrual', $sourceId);
                 unset($payload['deferred_revenue_accrual']);
                 $this->closing->upsertStep($supplierId, $periodId, 'deferrals', $stepStatus, $payload, $step['note'], $meta['user_id'] ?? null);
@@ -2002,7 +2536,7 @@ final class ClosingService
                 return ['entry_id' => null, 'total' => 0.0, 'items' => $preview['items'], 'removed' => true];
             }
 
-            $lines = $this->deferredRevenueLines($supplierId, $preview['by_account'], $total, false);
+            $lines = $this->deferredRevenueLines($supplierId, $preview['lines'], $total, false, $endsOn);
             $this->assertKnownCodes($supplierId, $lines);
 
             $existing = $this->journal->findBySource($supplierId, 'deferred_revenue_accrual', $sourceId);
@@ -2027,6 +2561,8 @@ final class ClosingService
                 'document_no' => $docNo,
                 'total' => $total,
                 'by_account' => $preview['by_account'],
+                // Rozpad po řádcích vydaných faktur a ostatních pohledávek: rozpuštění z něj zrcadlí zaúčtovaný odklad (#384).
+                'items' => $preview['snapshot'],
                 'ran_at' => date('Y-m-d H:i:s'),
             ];
             $this->closing->upsertStep($supplierId, $periodId, 'deferrals', $stepStatus, $payload, $step['note'], $meta['user_id'] ?? null);
@@ -2040,27 +2576,36 @@ final class ClosingService
      * Řádky zápisu odkladu (MD 6xx / D 384) nebo rozpuštění (MD 384 / D 6xx). Částky jsou
      * se znaménkem: záporná (dobropis převažuje) převrací stranu, aby zápis zůstal vyvážený
      * a bez záporných částek. Účet 384 je kredit pravidla accrual.deferred.revenue.
+     * Výnosové řádky nesou dimenze řádků dokladů ({@see AccrualDeferralService::dimensionAllocations()}).
      *
-     * @param array<string,float> $byAccount
-     * @return list<array{account_code:string,side:string,amount:float}>
+     * @param list<array<string,mixed>> $byLine řádky s `account_code`, `amount` a dimenzemi
+     * @param string $entryDate datum zápisu (forma zápisu {@see accrualPairs()})
+     * @return list<array<string,mixed>>
      */
-    private function deferredRevenueLines(int $supplierId, array $byAccount, float $total, bool $release): array
+    private function deferredRevenueLines(int $supplierId, array $byLine, float $total, bool $release, string $entryDate): array
     {
         $deferAccount = $this->accruals->deferralAccount($supplierId, AccrualDeferralService::RULE_DEFERRED_REVENUE);
         $revenueSide = static fn (float $amount): string => (($amount >= 0.0) !== $release) ? 'debit' : 'credit';
         $lines = [];
-        foreach ($byAccount as $account => $amount) {
-            $amount = round((float) $amount, 2);
+        foreach ($byLine as $line) {
+            $amount = round((float) $line['amount'], 2);
             if ((int) round($amount * 100) === 0) {
                 continue;
             }
-            $lines[] = ['account_code' => (string) $account, 'side' => $revenueSide($amount), 'amount' => abs($amount)];
+            $lines[] = ['side' => $revenueSide($amount), 'amount' => abs($amount)] + $line;
         }
-        $lines[] = [
-            'account_code' => $deferAccount,
-            'side' => $revenueSide($total) === 'debit' ? 'credit' : 'debit',
-            'amount' => abs(round($total, 2)),
-        ];
+        $pairs = $this->accrualPairs($supplierId, $entryDate, $lines, $deferAccount, false);
+        if ($pairs !== null) {
+            return $pairs;
+        }
+        // Nulový součet (doklady s opačným znaménkem a různou dimenzí) řádek 384 nemá.
+        if ((int) round($total * 100) !== 0) {
+            $lines[] = [
+                'account_code' => $deferAccount,
+                'side' => $revenueSide($total) === 'debit' ? 'credit' : 'debit',
+                'amount' => abs(round($total, 2)),
+            ];
+        }
         return $lines;
     }
 
@@ -2069,29 +2614,287 @@ final class ClosingService
      * {@see prepaidExpenseReleaseForPeriod}: kumulativně uznáno k konci cílového období
      * minus k `originEndsOn`, takže víceletý zbytek zůstává na 384 do dalšího openNext.
      *
-     * @return array{by_account: array<string,float>, total: float}
+     * @return array{by_account: array<string,float>, lines: list<array<string,mixed>>, total: float}
      */
-    private function deferredRevenueReleaseForPeriod(int $supplierId, string $originEndsOn, string $targetEnd): array
+    private function deferredRevenueReleaseForPeriod(int $supplierId, string $originEndsOn, string $targetStart, string $targetEnd): array
     {
-        $byAccount = [];
+        $byLine = [];
         $total = 0.0;
         $contexts = [];
-        foreach ($this->accruals->deferredRevenueRows($supplierId, $originEndsOn, null, $originEndsOn, $targetEnd, true) as $row) {
+        $dimensionCache = [AccrualDeferralService::CACHE_POSTING_DATE => $targetStart];
+        // Odklad uzávěrky s rozpadem po položkách se rozpouští z něj (zrcadlí zaúčtovaný odklad
+        // i po změně období, přeúčtování či stornu faktury nebo ostatní pohledávky, #384); starší
+        // odklad bez rozpadu a členské předpisy podle dnešního stavu dokladů.
+        $snapshots = $this->accruals->closingDeferralSnapshots($supplierId, 'deferred_revenue_accrual', $originEndsOn);
+        $rows = $this->accruals->deferredRevenueRows($supplierId, $originEndsOn, null, $originEndsOn, $targetEnd, true, null, $snapshots['periods']);
+        foreach ($snapshots['items'] as $item) {
+            if ((string) $item['to'] > $originEndsOn && (string) $item['from'] <= $targetEnd) {
+                $rows[] = AccrualDeferralService::deferredRevenueSnapshotRow($item);
+            }
+        }
+        // Doklady spravované agendou Časové rozlišení rozpouští agenda, ne otevření roku.
+        $rows = $this->accruals->withoutAgendaItems($supplierId, $rows);
+        $this->accruals->preloadDeferredRevenueAllocations($supplierId, $rows, $dimensionCache);
+        // Starý odklad bez dimenzí se zrcadlí; ve 504 si rozpuštění ponechá osy činnosti dokladu.
+        $this->accruals->markLegacyDeferrals($supplierId, 'deferred_revenue_accrual', $originEndsOn,
+            $this->roleProfile($supplierId, $targetStart)->framework === AccountingFrameworkService::CZ_504, $dimensionCache);
+        foreach ($rows as $row) {
             $from = substr((string) $row['accrual_from'], 0, 10);
             $to = substr((string) $row['accrual_to'], 0, 10);
-            [$netCzk, $accounts] = $this->accruals->deferredRevenueItem($supplierId, $row, $contexts);
-            $upper = AccrualDeferralService::cumRecognized($netCzk, $from, $to, $targetEnd < $to ? $targetEnd : $to);
-            $lower = AccrualDeferralService::cumRecognized($netCzk, $from, $to, $originEndsOn);
+            [$netCzk, $accounts] = isset($row['snapshot'])
+                ? [round((float) $row['snapshot']['basis'], 2), AccrualDeferralService::snapshotAccounts($row['snapshot'])]
+                : $this->accruals->deferredRevenueItem($supplierId, $row, $contexts);
+            $upper = AccrualScheduleCalculator::cumRecognized($netCzk, $from, $to, $targetEnd < $to ? $targetEnd : $to);
+            $lower = AccrualScheduleCalculator::cumRecognized($netCzk, $from, $to, $originEndsOn);
             $release = round($upper - $lower, 2);
             if ((int) round($release * 100) === 0) {
                 continue;
             }
-            foreach (AccrualDeferralService::spreadByAccount($release, $accounts) as $account => $part) {
-                $byAccount[$account] = round(($byAccount[$account] ?? 0.0) + $part, 2);
-            }
+            AccrualDeferralService::addLines($byLine, AccrualDeferralService::releaseByAllocation(
+                round($netCzk - $lower, 2),
+                round($netCzk - $upper, 2),
+                $this->accruals->deferredRevenueAllocations($supplierId, $row, $accounts, $dimensionCache),
+            ));
             $total = round($total + $release, 2);
         }
-        return ['by_account' => $byAccount, 'total' => $total];
+        return ['by_account' => AccrualDeferralService::amountsByAccount($byLine), 'lines' => array_values($byLine), 'total' => $total];
+    }
+
+    /**
+     * Řádky D 501 zápisu odkladu drobného majetku s dimenzemi nákladu, který se odkládá
+     * ({@see AccrualDeferralService::smallAssetAllocations()}). pro_rata dělí odklad každé
+     * karty podle zápisu jejího dokladu (položka přijaté faktury, pokladní doklad). Paušál
+     * dělí celkovou částku poměrem obratu 501 drobného majetku po kombinacích dimenzí, tedy
+     * podle položek faktur, ze kterých má bázi; bázi z karet (bez zaúčtovaného 501) dělí
+     * podle dokladů karet. Karta bez dokladu dimenze nemá a zůstává na řádku bez nich.
+     * U účetní jednotky podle vyhlášky 504/2002 Sb. ale nákladový řádek osy činnosti nést
+     * musí: karta bez dokladu nebo doklad bez nich je validační chyba s výzvou doplnit vazbu.
+     *
+     * @param array<string,mixed> $period
+     * @param array<string,mixed> $preview výstup {@see smallAssetAccrualPreview()}
+     * @return list<array<string,mixed>> řádky s `account_code`, `amount` (se znaménkem) a dimenzemi
+     */
+    private function smallAssetAccrualCreditLines(int $supplierId, array $period, array $preview, string $credit, float $total): array
+    {
+        $startsOn = (string) $period['starts_on'];
+        $endsOn = (string) $period['ends_on'];
+        $cards = [];
+        foreach ($this->smallAssets->additionsBetween($supplierId, $startsOn, $endsOn) as $card) {
+            $cards[(int) $card['id']] = $card;
+        }
+        $cardSource = static fn (array $card): array => [
+            'purchase_invoice_id' => $card['purchase_invoice_id'] ?? null,
+            'item_id' => $card['purchase_invoice_item_id'] ?? null,
+            'cash_document_id' => $card['cash_document_id'] ?? null,
+            'small_asset_id' => (int) $card['id'],
+        ];
+        // Inventární číslo (jinak id) odliší stejnojmenné karty ve výčtu hlášky.
+        $cardLabel = static function (array $card): string {
+            $inventory = trim((string) ($card['inventory_number'] ?? ''));
+            return 'karta „' . (string) $card['name'] . '“ (' . ($inventory !== '' ? $inventory : '#' . (int) $card['id']) . ')';
+        };
+        // [částka, zdroj, popis pro chybu]
+        $parts = [];
+        if ($preview['mode'] === 'flat_pct') {
+            $expenseItems = (float) $preview['breakdown_501_small_asset'] > 0.005
+                ? $this->smallAssetReport->smallAssetExpenseItems($supplierId, $startsOn, $endsOn)
+                : [];
+            if ($expenseItems !== []) {
+                foreach ($expenseItems as $item) {
+                    $number = trim((string) ($item['vendor_invoice_number'] ?? ''));
+                    // Váha v Kč kurzem dokladu, stejně jako báze rozpisu: součet vah je báze
+                    // a faktor dělení přesně paušální procento.
+                    $vendor = trim((string) ($item['vendor_name'] ?? ''));
+                    $parts[] = [$item['weight_czk'], $item, 'přijatá faktura ' . ($number !== '' ? $number : '#' . $item['purchase_invoice_id'])
+                        . ($vendor !== '' ? ' (' . $vendor . ')' : '')];
+                }
+            } else {
+                foreach ($cards as $card) {
+                    $parts[] = [round((float) ($card['price'] ?? 0), 2), $cardSource($card), $cardLabel($card)];
+                }
+            }
+        } else {
+            foreach ($preview['items'] as $item) {
+                $card = $cards[(int) $item['small_asset_id']] ?? null;
+                if ($card !== null) {
+                    $parts[] = [(float) $item['deferred_amount'], $cardSource($card), $cardLabel($card)];
+                }
+            }
+        }
+        $parts = array_values(array_filter($parts, static fn (array $p): bool => (int) round($p[0] * 100) !== 0));
+
+        // Ve 504 musí každý nákladový řádek nést osu činnosti (SystemDimensionSourcePolicy::activityRule);
+        // ostatní osy vyžadují pravidla účtů a hlídá je až zaúčtování.
+        $activityTypeId = null;
+        if ($this->roleProfile($supplierId, $endsOn)->framework === AccountingFrameworkService::CZ_504) {
+            $stmt = $this->db->pdo()->prepare("SELECT id FROM dimension_types WHERE supplier_id = ? AND system_key = 'activity'");
+            $stmt->execute([$supplierId]);
+            // Bez typu činnosti (katalog nezaložen) zaúčtování osy nevyžaduje, kontrola se vynechá.
+            $found = $stmt->fetchColumn();
+            $activityTypeId = $found === false ? null : (int) $found;
+        }
+        $cache = [AccrualDeferralService::CACHE_POSTING_DATE => $endsOn];
+        $this->accruals->preloadSmallAssetAllocations($supplierId, array_column($parts, 1), $cache);
+        $byLine = [];
+        $unlinked = [];
+        $withoutAxes = [];
+        foreach ($parts as [$amount, $source, $label]) {
+            $allocations = $this->accruals->smallAssetAllocations($supplierId, $source, $credit, $cache);
+            if ($activityTypeId !== null) {
+                if ($allocations === null) {
+                    $unlinked[self::smallAssetPartKey($source)] = $label;
+                } elseif (array_filter($allocations, static fn (array $a): bool => !isset($a['dimensions'][$activityTypeId]) && !isset($a['dimension_splits'][$activityTypeId])) !== []) {
+                    $withoutAxes[self::smallAssetPartKey($source)] = $label;
+                }
+            }
+            AccrualDeferralService::addLines($byLine, AccrualDeferralService::spreadByAllocation(
+                $amount,
+                $allocations ?? [['account_code' => $credit, 'account_share' => 1.0, 'part' => 1.0]],
+            ));
+        }
+        if ($unlinked !== [] || $withoutAxes !== []) {
+            throw new ClosingException(
+                'small_asset_document_missing',
+                'Časové rozlišení drobného majetku nelze zaúčtovat: náklad 501 musí u účetní jednotky podle vyhlášky 504/2002 Sb. '
+                . 'nést osy činnosti zaúčtovaného dokladu.'
+                . ($unlinked === [] ? '' : ' Doplň u karty vazbu na přijatou fakturu nebo pokladní doklad: ' . implode(', ', $unlinked) . '.')
+                . ($withoutAxes === [] ? '' : ' Zaúčtuj doklad s osami činnosti, případně kartu navaž na konečnou fakturu (doklad není zaúčtovaný, je to záloha, nebo jeho náklad osy nenese): ' . implode(', ', $withoutAxes) . '.'),
+                422,
+            );
+        }
+        if ($preview['mode'] !== 'flat_pct') {
+            return array_values($byLine);
+        }
+        // Paušál: celek se dělí poměrem obratu (v Kč) kombinací; haléřový rozdíl proti celku
+        // (zaokrouhlení po řádcích) jde na řádek s největší částkou.
+        // Nezbylo podle čeho dělit (rozpis jen ze záloh, dobropisy vše vyruší): mimo 504 jeden řádek
+        // bez dimenzí jako dosud, ve 504 by řádek bez osy činnosti nešel zaúčtovat.
+        $undivided = static function () use ($activityTypeId, $credit, $total): array {
+            if ($activityTypeId !== null) {
+                throw new ClosingException(
+                    'small_asset_document_missing',
+                    'Časové rozlišení drobného majetku nelze zaúčtovat: náklad 501 musí u účetní jednotky podle vyhlášky 504/2002 Sb. '
+                    . 'nést osy činnosti, ale v rozpisu 501 není zaúčtovaná faktura drobného majetku, podle které by se odklad rozdělil '
+                    . '(jen zálohy, nebo dobropisy faktury vyruší či převáží). Zaúčtuj konečnou fakturu, případně použij poměrné rozlišení.',
+                    422,
+                );
+            }
+            return [['account_code' => $credit, 'amount' => $total]];
+        };
+        // Součet vah se znaménkem opačným, než má celek (dobropisy převáží faktury, celek drží
+        // kladný jen záloha v bázi), by obrátil znaménka všech řádků: odklad by náklad činnosti
+        // naopak přidal. Takové dělení nemá smysl, stejně jako nulový součet.
+        $weightSum = array_sum(array_column($parts, 0));
+        if ($weightSum * $total <= 0.0 || abs($weightSum) < 0.005) {
+            return $undivided();
+        }
+        $factor = $total / $weightSum;
+        $sum = 0.0;
+        $largest = null;
+        foreach ($byLine as $k => $line) {
+            $byLine[$k]['amount'] = round((float) $line['amount'] * $factor, 2);
+            $sum = round($sum + $byLine[$k]['amount'], 2);
+            if ($largest === null || abs($byLine[$k]['amount']) > abs($byLine[$largest]['amount'])) {
+                $largest = $k;
+            }
+        }
+        if ($largest === null) {
+            return $undivided();
+        }
+        $byLine[$largest]['amount'] = round($byLine[$largest]['amount'] + $total - $sum, 2);
+        return array_values($byLine);
+    }
+
+    /** Klíč zdroje ve výčtu hlášky: karta, jinak přijatá faktura (stejné číslo mají i faktury různých dodavatelů). */
+    private static function smallAssetPartKey(array $source): string
+    {
+        return isset($source['small_asset_id']) ? 'card:' . (int) $source['small_asset_id'] : 'invoice:' . (int) ($source['purchase_invoice_id'] ?? 0);
+    }
+
+    /**
+     * Řádky zápisu rozpuštění odkladu drobného majetku k datu `$entryDate`: zrcadlo odkladu
+     * ({@see smallAssetReleaseLines()}) po dvojicích, jak je odklad nesl.
+     *
+     * Odklad ze složené formy nese saldo jedním řádkem 381. S dobropisem na jiné kombinaci
+     * (501 na obou stranách) ho jednoduchá forma k datu rozpuštění 1 : N nerozloží, proto
+     * dostane každý řádek 501 vlastní protějšek na 381 ({@see accrualPairs()}) s přiřazením
+     * řádku 381 odkladu; 381 se po dimenzi rozpustí stejně jako zrcadlo.
+     *
+     * @param array<string,mixed> $deferEntry
+     * @return list<array<string,mixed>>
+     */
+    private function smallAssetReleaseEntryLines(int $supplierId, array $deferEntry, string $entryDate): array
+    {
+        $lines = $this->smallAssetReleaseLines($supplierId, $deferEntry, $entryDate);
+        $paired = PairGroups::consecutive($lines, 'small_asset');
+        $defer = array_values(array_filter($lines, static fn (array $l): bool => !str_starts_with((string) $l['account_code'], '5')));
+        $expense = array_values(array_filter($lines, static fn (array $l): bool => str_starts_with((string) $l['account_code'], '5')));
+        if (count($defer) !== 1 || count(array_unique(array_column($expense, 'side'))) < 2) {
+            return $paired;
+        }
+        $pairs = $this->accrualPairs($supplierId, $entryDate, $expense, (string) $defer[0]['account_code'], false);
+        if ($pairs === null) {
+            return $paired;
+        }
+        $assignment = array_diff_key($defer[0], ['account_code' => 1, 'side' => 1, 'amount' => 1]);
+        return array_map(static fn (array $l): array => $l['account_code'] === $defer[0]['account_code'] ? $l + $assignment : $l, $pairs);
+    }
+
+    /**
+     * Řádky rozpuštění odkladu drobného majetku v N+1: přesné zrcadlo (prohozené strany)
+     * zaúčtovaného zápisu odkladu včetně dimenzí řádků a jejich původu (ve 504 osy činnosti
+     * nákladu 501). Převzetí z řádku odkladu (`dimension_carry_lines`) dovolí nést i hodnotu,
+     * která se mezitím uzavřela, stejně jako odklad sám.
+     *
+     * Odklad bez os činnosti se do roku podle vyhlášky 504/2002 Sb. nedostane: ve 504 ho krok
+     * bez os nezaúčtuje (kromě firmy bez katalogu os, který zakládá už nastavení rámce)
+     * a převod rámce s odkladem drobného majetku ve zdrojovém období odmítne
+     * {@see \MyInvoice\Service\Accounting\Conversion\FrameworkConversionPendingOwners::assertSupported()}.
+     * Proto se tu na rozdíl od {@see AccrualDeferralService::markLegacyDeferrals()} nic nedopočítává.
+     *
+     * @param array<string,mixed> $deferEntry zápis odkladu s řádky ({@see findEntryWithLines()})
+     * @param string $entryDate datum zápisu rozpuštění (osnova k tomu dni)
+     * @return list<array<string,mixed>>
+     */
+    private function smallAssetReleaseLines(int $supplierId, array $deferEntry, string $entryDate): array
+    {
+        $assignments = new DimensionAssignmentRepository($this->db);
+        $origins = $assignments->entryLineOrigins($supplierId, (int) $deferEntry['id']);
+        $splitOrigins = $assignments->entryLineSplitOrigins($supplierId, (int) $deferEntry['id']);
+        // Politika uzná převzetí jen z výsledkového řádku: řádek 381 (v jednoduché formě nese
+        // osy svého protějšku 501) proto odkazuje na řádky 501 odkladu, ne sám na sebe.
+        $expenseIds = [];
+        foreach ($deferEntry['lines'] as $l) {
+            if (str_starts_with((string) $l['account_code'], '5')) {
+                $expenseIds[] = (int) $l['id'];
+            }
+        }
+        // Nákladová analytika odkladu (účet dokladu) k datu rozpuštění deaktivovaná (přestavba
+        // osnovy k 1. 1.): rozpuštění jde na její syntetiku (první tři znaky kódu, i u analytiky
+        // bez tečky), kterou zaúčtování vede podle osnovy k tomu dni, stejně jako odklad z analytiky
+        // neaktivní k rozvahovému dni ({@see AccrualDeferralService::smallAssetAllocations()}).
+        // Řádek 381 se nemění (zůstatek musí odejít z něj).
+        $chart = (new ChartOfAccountsRepository($this->db))->codeToIdMap($supplierId, $entryDate);
+        $lines = [];
+        foreach ($deferEntry['lines'] as $l) {
+            $code = (string) $l['account_code'];
+            if (str_starts_with($code, '5') && strlen($code) > 3 && !($chart[$code]['is_active'] ?? false)) {
+                $code = substr($code, 0, 3);
+            }
+            $carry = str_starts_with((string) $l['account_code'], '5') ? [(int) $l['id']] : $expenseIds;
+            $assignment = array_filter([
+                'dimensions' => $l['dimensions'] ?? [],
+                'dimension_splits' => $l['dimension_splits'] ?? [],
+                'dimension_origins' => $origins[$l['id']] ?? [],
+                'dimension_split_origins' => $splitOrigins[$l['id']] ?? [],
+            ], static fn (array $value): bool => $value !== []);
+            $lines[] = [
+                'account_code' => $code,
+                'side' => $l['side'] === 'debit' ? 'credit' : 'debit',
+                'amount' => (float) $l['amount'],
+            ] + $assignment + ($assignment === [] || $carry === [] ? [] : ['dimension_carry_lines' => $carry]);
+        }
+        return $lines;
     }
 
     /**
@@ -2143,17 +2946,17 @@ final class ClosingService
     /**
      * Část výnosu [from..to], kterou uzávěrka k `endsOn` odloží na 384. Volají ji i náhledy
      * dokladů (členský předpis NNO), aby návrh odkladu seděl s krokem uzávěrky na haléř.
-     * Výpočet žije v {@see AccrualDeferralService::deferredAmount()}.
+     * Výpočet žije v {@see AccrualScheduleCalculator::deferredAmount()}.
      */
     public static function deferredRevenueAmount(float $netCzk, string $from, string $to, string $endsOn): float
     {
-        return AccrualDeferralService::deferredAmount($netCzk, $from, $to, $endsOn);
+        return AccrualScheduleCalculator::deferredAmount($netCzk, $from, $to, $endsOn);
     }
 
     /** Počet dnů intervalu VČETNĚ obou krajů (rozvahový den se počítá). */
     private static function daysInclusive(string $from, string $to): int
     {
-        return AccrualDeferralService::daysInclusive($from, $to);
+        return AccrualScheduleCalculator::daysInclusive($from, $to);
     }
 
     /**
@@ -2195,8 +2998,9 @@ final class ClosingService
                     pi.effective_cost_date,
                     -- CZK pojistka jako ve zbytku kódu: bez ní by se korunový doklad
                     -- se zbloudilým `exchange_rate` vynásobil kurzem.
-                    ROUND(pi.total_without_vat * COALESCE(IF(cur.code = 'CZK', 1, pi.exchange_rate), 1), 2) AS net_base
-               FROM purchase_invoices pi
+                    -- Odpočet zálohy z DDKP nákladem není ({@see PurchaseCostSql}).
+                    ROUND(" . \MyInvoice\Support\Sql\PurchaseCostSql::net('pi') . " * COALESCE(IF(cur.code = 'CZK', 1, pi.exchange_rate), 1), 2) AS net_base
+               FROM purchase_invoices pi" . \MyInvoice\Support\Sql\PurchaseCostSql::deductionJoin('pi', $supplierId) . "
                LEFT JOIN clients c ON c.id = pi.vendor_id AND c.supplier_id = pi.supplier_id
                LEFT JOIN currencies cur ON cur.id = pi.currency_id
               WHERE pi.supplier_id = ?
@@ -2317,12 +3121,20 @@ final class ClosingService
             ClosingSourceId::smallAssetAccrual($priorId),
             ClosingSourceId::smallAssetAccrualRelease($priorId),
         );
+        // Doklady, které převzala agenda Časové rozlišení, otevření roku nerozpouští (rozpouští je
+        // agenda a projekce je přičte z jejího plánu, {@see accrualAgendaProjection()}). Bez
+        // odečtu by se tentýž náklad či výnos v projekci objevil dvakrát.
+        $priorEnds = (string) $this->periods->findById($supplierId, $priorId)['ends_on'];
+        $agenda = new AccrualAgendaGuard($this->db);
         $prepaid = $this->pendingDeferralRelease(
             $supplierId,
             'prepaid_expense_accrual',
             ClosingSourceId::prepaidExpenseAccrual($priorId),
             ClosingSourceId::prepaidExpenseAccrualRelease($priorId),
         );
+        if ((int) round($prepaid * 100) !== 0) {
+            $prepaid = round($prepaid - $agenda->managedDeferredAmount($supplierId, $this->snapshotRowsOf($supplierId, 'prepaid_expense_accrual', $priorId), $priorEnds), 2);
+        }
 
         // Rozpuštění 384 výnos ZVYŠUJE, náklad tedy snižuje — proto se odečítá.
         $deferredRevenue = $this->pendingDeferralRelease(
@@ -2333,6 +3145,9 @@ final class ClosingService
             '384',
             'credit',
         );
+        if ((int) round($deferredRevenue * 100) !== 0) {
+            $deferredRevenue = round($deferredRevenue - $agenda->managedDeferredAmount($supplierId, $this->snapshotRowsOf($supplierId, 'deferred_revenue_accrual', $priorId), $priorEnds), 2);
+        }
 
         $total = round($small + $prepaid - $deferredRevenue, 2);
         return [
@@ -2343,6 +3158,115 @@ final class ClosingService
             'deferred_revenue' => $deferredRevenue,
             'total' => $total,
         ];
+    }
+
+    /**
+     * Předběžná kontrola: rozdíl agendy Časové rozlišení proti hlavní knize po analytikách
+     * 381 až 385 ({@see AccrualReconciliationService::reconcile()}). Firma bez položek agendy
+     * kontrolu nemá (rozdíl by byl celý zůstatek a nic by neříkal).
+     *
+     * @return array<string,mixed>|null
+     */
+    private function accrualAgendaCheck(int $supplierId, string $asOf): ?array
+    {
+        $stmt = $this->db->pdo()->prepare("SELECT 1 FROM accrual_items WHERE supplier_id = ? AND status <> 'cancelled' LIMIT 1");
+        $stmt->execute([$supplierId]);
+        if ($stmt->fetchColumn() === false) {
+            return null;
+        }
+        $rec = $this->accrualReconciliation->reconcile($supplierId, $asOf);
+        $accounts = array_values(array_filter($rec['accounts'], static fn (array $a): bool => (int) round($a['difference'] * 100) !== 0));
+        // Nezaúčtovaná rozpuštění splatná do data: rozdíl proti knize nevytvoří (zatím nikde
+        // nejsou), ale uzavření knih je zablokuje ({@see closeBooks()}).
+        $period = $this->db->pdo()->prepare('SELECT starts_on FROM accounting_periods WHERE supplier_id = ? AND starts_on <= ? AND ends_on >= ? LIMIT 1');
+        $period->execute([$supplierId, $asOf, $asOf]);
+        $startsOn = $period->fetchColumn();
+        $pending = $startsOn === false ? 0 : (new AccrualAgendaGuard($this->db))->pendingRowsCount($supplierId, (string) $startsOn, $asOf);
+        return [
+            'key' => 'deferrals_agenda_difference',
+            'severity' => 'warning',
+            'ok' => $accounts === [] && $pending === 0,
+            'value' => ['as_of' => $asOf, 'difference' => $rec['totals']['difference'], 'accounts' => $accounts, 'pending_rows' => $pending],
+        ];
+    }
+
+    /**
+     * Krok uzávěrky „Časové rozlišení": zaúčtuje všechna nezaúčtovaná rozpuštění položek agendy
+     * splatná do konce období (roční i měsíční), v období ve stavu uzavírání. Zápis účtuje
+     * uzávěrka sama (R7: příznak závěrkového kroku nastavuje jen ClosingService), řádek plánu
+     * a vazbu zapíše agenda. Řádky se berou po jednom od nejstaršího, protože každé
+     * zaúčtování přepočte zbytek plánu položky. Záznam se uloží do kroku `deferrals`.
+     *
+     * @param array<string,mixed> $meta
+     * @return array{posted:int, total:float}
+     */
+    public function runAccrualAgendaRelease(int $supplierId, int $periodId, int $rowVersion, array $meta = []): array
+    {
+        return $this->tx(function () use ($supplierId, $periodId, $rowVersion, $meta): array {
+            $period = $this->lockPeriod($supplierId, $periodId, $rowVersion);
+            if ((string) $period['status'] !== 'closing') {
+                throw new ClosingException('period_not_closing', 'Rozpuštění agendy zaúčtuje uzávěrka jen v období, které se uzavírá. V otevřeném období ho zaúčtujte v agendě.', 409);
+            }
+            $posted = 0;
+            $total = 0.0;
+            $guard = 10000;
+            while ($guard-- > 0) {
+                $pending = $this->accrualPosting->closingPending($supplierId, (string) $period['starts_on'], (string) $period['ends_on']);
+                $row = $pending['yearly'][0] ?? $pending['monthly'][0] ?? null;
+                if ($row === null) {
+                    break;
+                }
+                $prepared = $this->accrualPosting->prepareRelease($supplierId, (int) $row['item_id'], (int) $row['schedule_id'],
+                    ['user_id' => $meta['user_id'] ?? null, 'allow_future' => true, 'closing_step' => true]);
+                $entryId = $this->posting->postDocument($supplierId, 'accrual_release', (int) $row['schedule_id'], $prepared['lines'],
+                    $prepared['meta'] + ['allow_closing_period' => true]);
+                $this->accrualPosting->recordRelease($supplierId, $prepared, $entryId, $meta['user_id'] ?? null);
+                $posted++;
+                $total = round($total + $prepared['amount'], 2);
+            }
+            $step = $this->stepsMap($supplierId, $periodId)['deferrals'];
+            $payload = $step['payload'] ?? [];
+            $payload['accrual_agenda'] = ['posted' => $posted, 'total' => $total, 'at' => date('Y-m-d H:i:s')];
+            $this->closing->upsertStep($supplierId, $periodId, 'deferrals', (string) $step['status'], $payload, $step['note'], $meta['user_id'] ?? null);
+            $this->audit($supplierId, 'accounting.closing_accrual_agenda_posted', $periodId, ['posted' => $posted, 'total' => $total], $meta);
+            return ['posted' => $posted, 'total' => $total];
+        });
+    }
+
+    /**
+     * Projekce nezaúčtovaného rozpuštění položek agendy Časové rozlišení do konce období pro
+     * náhled DPPO ({@see AccrualAgendaGuard::projectionPending()}). Zaúčtované rozpuštění je
+     * ve VH z deníku, položky agendy uzávěrka sama neodkládá ani nerozpouští, takže se nic
+     * nezapočte dvakrát. Read-only.
+     *
+     * @return array{expense: float, revenue: float, items: int}
+     */
+    public function accrualAgendaProjection(int $supplierId, int $periodId): array
+    {
+        $period = $this->periods->findById($supplierId, $periodId);
+        if ($period === null) {
+            return ['expense' => 0.0, 'revenue' => 0.0, 'items' => 0];
+        }
+        return (new AccrualAgendaGuard($this->db))->projectionPending($supplierId, (string) $period['starts_on'], (string) $period['ends_on']);
+    }
+
+    /**
+     * Řádky odkladu ze záznamu kroku uzávěrky období (rozpad po položkách) ve tvaru výběru
+     * uzávěrky, aby je šlo porovnat s doklady spravovanými agendou.
+     *
+     * @return list<array<string,mixed>>
+     */
+    private function snapshotRowsOf(int $supplierId, string $sourceType, int $periodId): array
+    {
+        $rows = [];
+        foreach ($this->accruals->closingDeferralSnapshots($supplierId, $sourceType, '9999-12-31')['items'] as $item) {
+            if ((int) $item['period_id'] === $periodId) {
+                $rows[] = $sourceType === 'prepaid_expense_accrual'
+                    ? AccrualDeferralService::prepaidExpenseSnapshotRow($item)
+                    : AccrualDeferralService::deferredRevenueSnapshotRow($item);
+            }
+        }
+        return $rows;
     }
 
     /**
@@ -3008,7 +3932,7 @@ final class ClosingService
      * Náhled podkladu splatné daně (GET). Přednabídne částku z finalizovaného DPPO
      * přiznání téhož roku (řádné/opravné); pokud takové přiznání ještě neexistuje
      * (běžný stav během uzávěrky), dopočítá ji z AKTUÁLNÍHO účetnictví ({@see
-     * computeIncomeTaxFromLedger}). `suggested_source` rozlišuje zdroj částky —
+     * incomeTaxFromLedger}). `suggested_source` rozlišuje zdroj částky —
      * dopočtenou si účetní musí před zaúčtováním ověřit. Nezaúčtovává nic — účetní
      * částku potvrdí/upraví v {@see runIncomeTax}.
      *
@@ -3027,26 +3951,49 @@ final class ClosingService
         $taxpayerType = $this->supplierTaxpayerType($supplierId);
         $applicable = $taxpayerType !== 'fo';
         $fromReturn = $applicable ? $this->taxReturns->findLastKnownTax($supplierId, $fiscalYear, 'po') : null;
-        $computed = $fromReturn === null && $applicable
-            ? $this->computeIncomeTaxFromLedger($supplierId, $fiscalYear)
-            : null;
+        $ledger = $fromReturn === null && $applicable
+            ? $this->incomeTaxFromLedger($supplierId, $fiscalYear)
+            : ['amount' => null, 'source' => null, 'reason' => null];
+        $computed = $ledger['amount'];
         $suggested = $fromReturn ?? $computed;
         $existing = $this->journal->findBySource($supplierId, 'income_tax', $periodId);
         $step = $this->stepsMap($supplierId, $periodId)['income_tax'];
+        $booked = $applicable ? $this->incomeTaxBooked($supplierId, $period) : null;
+        $startsOn = (string) $period['starts_on'];
 
         return [
             'as_of' => $endsOn,
             'period' => ['id' => (int) $period['id'], 'fiscal_year' => $fiscalYear],
             'suggested_amount' => $suggested,
-            'suggested_source' => $fromReturn !== null ? 'finalized_return' : ($computed !== null ? 'computed_from_ledger' : null),
+            'suggested_source' => $fromReturn !== null ? 'finalized_return' : ($computed !== null ? $ledger['source'] : null),
+            // Proč návrh chybí (např. u 504 chybí aktuální potvrzené daňové posouzení).
+            'suggested_unavailable' => $suggested === null ? $ledger['reason'] : null,
             'has_finalized_return' => $fromReturn !== null,
+            // Návrh z přiznání, jehož VH se od účetnictví drobně liší, ale daň nemění
+            // (přiznání bez otisku, {@see \MyInvoice\Service\Tax\Return\DppoBooksFingerprint::assess()}):
+            // jen informace, návrh daně platí.
+            'return_books' => $fromReturn !== null ? $this->taxReturns->lastFinalizedBooksAssessment($supplierId, $fiscalYear) : null,
             'taxpayer_type' => $taxpayerType,
             'applicable' => $applicable,
             'rate_hint' => (float) ($constants['corporate_tax_rate'] ?? self::CORPORATE_TAX_RATE),
-            'balance_341' => round($this->closing->accountBalance($supplierId, '341', $endsOn), 2),
-            'balance_591' => round($this->closing->accountBalance($supplierId, '591', $endsOn), 2),
+            // Zůstatky před uzávěrkou roku: bez zápisů uzavření knih, i převzatých z původního
+            // systému (ty 591 i 341 vynulují, takže by zaúčtovaná daň vypadala jako nula).
+            'balance_341' => round($this->closing->accountBalance($supplierId, '341', $endsOn)
+                - $this->closing->closeBooksTurnover($supplierId, '341', $startsOn, $endsOn), 2),
+            'balance_591' => round($this->closing->accountBalance($supplierId, '591', $endsOn)
+                - $this->closing->closeBooksTurnover($supplierId, '591', $startsOn, $endsOn), 2),
+            // Daň zaúčtovaná v roce (591 bez uzavření knih) a z toho mimo zápis průvodce
+            // (ruční zápis, převod z původního systému). Tu už průvodce znovu nezaúčtuje,
+            // krok se jen potvrdí ({@see reconfirmIncomeTax}).
+            'booked_amount' => $booked['booked'] ?? null,
+            'booked_outside_wizard' => $booked['outside'] ?? null,
+            'closing_taken_over' => $this->closing->takenOverClosingEntryIds($supplierId, $periodId) !== [],
             'existing_entry_id' => $existing !== null ? (int) $existing['id'] : null,
+            'existing_booked_outside' => $step['payload']['booked_outside'] ?? null,
             'existing_amount' => $step['payload']['amount'] ?? null,
+            // U 504 se daň zařazuje do hlavní nebo hospodářské činnosti ({@see runIncomeTax}).
+            'activity_required' => $this->roleProfile($supplierId, $endsOn)->framework === AccountingFrameworkService::CZ_504,
+            'existing_activity' => $step['payload']['activity'] ?? null,
         ];
     }
 
@@ -3055,27 +4002,63 @@ final class ClosingService
      * finalizované přiznání za rok. Sestavuje podklady stejným VH/nedaňové náklady/odpisy/
      * vyřazení jako náhled DPPO ({@see DppoReturnDataProvider::gather}), bez ručních vstupů
      * poplatníka (dary, ztráta, slevy §35 — ty zná jen rozpracované přiznání, ne uzávěrka) —
-     * proto je výsledek jen orientační odhad, ne závazný základ. DppoReturnDataProvider se
-     * VŽDY konstruuje s $closing = null: Feature 1 (projekce nezaúčtovaných kroků) by tu byla
-     * jednak zbytečná (VH už zahrnuje předchozí posted kroky uzávěrky — FX/dohady/rozlišení
-     * mají vlastní source_type, ne 'closing'), jednak by způsobila cyklus (ClosingService by
-     * si volal sám sebe). Read-only, nic neúčtuje. Chyba v podkladech (chybějící období apod.)
+     * proto je výsledek jen orientační odhad, ne závazný základ. U ostatních firem (500)
+     * počítá se stejnou projekcí nezaúčtovaných kroků uzávěrky jako náhled DPPO (Feature 1)
+     * a vrací projektovanou daň: krok Zásoby jde v jejich pořadí až po dani. Read-only, nic neúčtuje. Chyba v podkladech (chybějící období apod.)
      * dopočet jen tiše přeskočí — nesmí shodit celý náhled kroku.
      */
-    private function computeIncomeTaxFromLedger(int $supplierId, int $fiscalYear): ?float
+    /**
+     * U neziskové organizace (504) staví podklady nativní zdroj DPPO nad potvrzeným daňovým
+     * posouzením ({@see \MyInvoice\Service\Tax\Nonprofit\NonprofitDppoDataProvider}), stejně
+     * jako výpočet přiznání; zdroj návrhu je pak `computed_from_assessment`. Bez aktuálního
+     * posouzení návrh chybí a `reason` řekne proč (#400). Ostatní firmy beze změny.
+     *
+     * @return array{amount:?float, source:?string, reason:?array{code:string, message:string}}
+     */
+    private function incomeTaxFromLedger(int $supplierId, int $fiscalYear): array
     {
         try {
-            $provider = new DppoReturnDataProvider($this->db, $this->periods, $this->nonDeductibleCosts, null);
-            $data = $provider->gather($supplierId, $fiscalYear);
+            // Ostatní firmy (500): stejná projekce uzávěrky jako náhled DPPO přiznání. Krok
+            // Zásoby jde v pořadí 500 až po dani, takže bez projekce by návrh vynechal dopad
+            // nezaúčtovaných zásob a průvodce by ukázal jinou daň než náhled přiznání. Projekce
+            // čte jen náhledy kroků, daň z příjmů nepočítá, cyklus tedy nevzniká. Ruční vstupy
+            // rozpracovaného přiznání (ztráta, dary, slevy) se berou také, aby čísla seděla.
+            $period = $this->periods->findByYear($supplierId, $fiscalYear);
+            $is504 = $period !== null
+                && $this->roleProfile($supplierId, (string) $period['ends_on'])->framework === AccountingFrameworkService::CZ_504;
+            $provider = $is504
+                ? new DppoReturnDataProvider($this->db, $this->periods, $this->nonDeductibleCosts, null,
+                    nonprofit: $this->nonprofitDppo)
+                : new DppoReturnDataProvider($this->db, $this->periods, $this->nonDeductibleCosts, $this,
+                    depreciationPreview: $this->depreciation, nonprofit: $this->nonprofitDppo);
+            $draft = $is504 ? null : $this->taxReturns->find($supplierId, $fiscalYear, 'po');
+            $inputs = $draft !== null && ($draft['status'] ?? null) === 'draft' ? (array) ($draft['inputs'] ?? []) : [];
+            $this->projectionSkipsFx = !$is504 && $period !== null
+                && in_array($this->stepsMap($supplierId, (int) $period['id'])['fx_revaluation']['status'], ['done', 'skipped'], true);
+            try {
+                $data = $provider->gather($supplierId, $fiscalYear, $inputs);
+            } finally {
+                $this->projectionSkipsFx = false;
+            }
             if ($data['period'] === null) {
-                return null;
+                return ['amount' => null, 'source' => null, 'reason' => null];
             }
             $constants = $this->taxConstants->forYear($fiscalYear);
-            $result = $this->dppoCalc->compute($data, [], $constants);
-            return round((float) ($result['tax'] ?? 0), 2);
+            $result = $this->dppoCalc->compute($data, $inputs, $constants);
+            $projection = $result['projection'] ?? null;
+            $tax = !isset($data['nonprofit']) && is_array($projection) && ($projection['is_projection'] ?? false) === true
+                ? (float) ($projection['projected_tax'] ?? 0)
+                : (float) ($result['tax'] ?? 0);
+            return [
+                'amount' => round($tax, 2),
+                'source' => isset($data['nonprofit']) ? 'computed_from_assessment' : 'computed_from_ledger',
+                'reason' => null,
+            ];
+        } catch (\MyInvoice\Service\Tax\Return\TaxReturnException $e) {
+            return ['amount' => null, 'source' => null, 'reason' => ['code' => $e->errorCode, 'message' => $e->getMessage()]];
         } catch (\Throwable $e) {
             $this->logger->warning('Dopočet daně z příjmů z knih se nezdařil: ' . $e->getMessage(), ['exception' => $e]);
-            return null;
+            return ['amount' => null, 'source' => null, 'reason' => null];
         }
     }
 
@@ -3092,7 +4075,7 @@ final class ClosingService
      * @param array{user_id?:?int, posted_by?:?int, ip?:?string, user_agent?:?string} $meta
      * @return array{entry_id:int, amount:float, document_no:string, suggested_amount:?float, suggested_source:?string, difference:?float, reason:?string}
      */
-    public function runIncomeTax(int $supplierId, int $periodId, float $amount, int $rowVersion, array $meta = [], ?string $reason = null): array
+    public function runIncomeTax(int $supplierId, int $periodId, float $amount, int $rowVersion, array $meta = [], ?string $reason = null, ?string $activity = null): array
     {
         if ($this->supplierTaxpayerType($supplierId) === 'fo') {
             throw new ClosingException(
@@ -3106,18 +4089,28 @@ final class ClosingService
             throw new ClosingException('validation_failed', 'Částka splatné daně musí být kladná (nulovou daň krok přeskoč).');
         }
         $reason = $reason !== null && trim($reason) !== '' ? trim($reason) : null;
-        return $this->tx(function () use ($supplierId, $periodId, $amount, $rowVersion, $meta, $reason): array {
+        // Zdroj a hodnota návrhu (stejná logika jako incomeTaxPreview): přednost má
+        // finalizované DPPO přiznání roku, jinak orientační dopočet z aktuálních knih.
+        // Počítá se PŘED zamčením období: dopočet s projekcí uzávěrky je u velké firmy
+        // drahý a návrh je jen evidence odchylky, ne podmínka zaúčtování.
+        $knownPeriod = $this->periods->findById($supplierId, $periodId);
+        $suggestionYear = $knownPeriod !== null ? (int) $knownPeriod['fiscal_year'] : null;
+        $fromReturn = $suggestionYear !== null ? $this->taxReturns->findLastKnownTax($supplierId, $suggestionYear, 'po') : null;
+        $ledger = $fromReturn === null && $suggestionYear !== null
+            ? $this->incomeTaxFromLedger($supplierId, $suggestionYear)
+            : ['amount' => null, 'source' => null];
+        return $this->tx(function () use ($supplierId, $periodId, $amount, $rowVersion, $meta, $reason, $activity, $fromReturn, $ledger): array {
             $period = $this->lockPeriod($supplierId, $periodId, $rowVersion);
             $this->assertStatus($period, ['closing']);
             $endsOn = (string) $period['ends_on'];
             $fiscalYear = (int) $period['fiscal_year'];
+            $is504 = $this->roleProfile($supplierId, $endsOn)->framework === AccountingFrameworkService::CZ_504;
+            $this->assertStockBeforeIncomeTax($supplierId, $periodId, $is504);
+            $this->assertIncomeTaxNotBookedOutside($supplierId, $period);
 
-            // Zdroj a hodnota návrhu (stejná logika jako incomeTaxPreview): přednost má
-            // finalizované DPPO přiznání roku, jinak orientační dopočet z aktuálních knih.
-            $fromReturn = $this->taxReturns->findLastKnownTax($supplierId, $fiscalYear, 'po');
-            $computed = $fromReturn === null ? $this->computeIncomeTaxFromLedger($supplierId, $fiscalYear) : null;
+            $computed = $ledger['amount'];
             $suggested = $fromReturn ?? $computed;
-            $suggestedSource = $fromReturn !== null ? 'finalized_return' : ($computed !== null ? 'computed_from_ledger' : null);
+            $suggestedSource = $fromReturn !== null ? 'finalized_return' : ($computed !== null ? $ledger['source'] : null);
             $difference = $suggested !== null ? round($amount - (float) $suggested, 2) : null;
 
             $rule = $this->rules->resolve($supplierId, 'income_tax.payable');
@@ -3127,6 +4120,17 @@ final class ClosingService
                 ['account_code' => $debit, 'side' => 'debit', 'amount' => $amount],
                 ['account_code' => $credit, 'side' => 'credit', 'amount' => $amount],
             ];
+            // U 504 nese každý řádek 5xx činnost (systémové pravidlo i sloupce výkazu zisku
+            // a ztráty). Zařazení daně do hlavní nebo hospodářské činnosti je rozhodnutí
+            // účetní, proto se nehádá a krok ho vyžaduje.
+            if ($is504) {
+                if (!in_array($activity, ['main', 'economic'], true)) {
+                    throw new ClosingException('income_tax_activity_required',
+                        'U neziskové organizace zvolte, do které činnosti daň z příjmů patří (hlavní nebo hospodářská).', 422);
+                }
+                $catalog = (new \MyInvoice\Service\Accounting\Dimension\SystemDimensionCatalog($this->db))->ensureForFramework($supplierId, $endsOn);
+                $lines[0]['dimensions'] = [(int) $catalog['activity']['id'] => (int) $catalog['activity']['values'][$activity]];
+            }
             $this->assertKnownCodes($supplierId, $lines);
 
             $existing = $this->journal->findBySource($supplierId, 'income_tax', $periodId);
@@ -3155,7 +4159,7 @@ final class ClosingService
                 'difference' => $difference,
                 'reason' => $reason,
                 'ran_at' => date('Y-m-d H:i:s'),
-            ];
+            ] + ($is504 ? ['activity' => $activity] : []);
             $this->closing->upsertStep($supplierId, $periodId, 'income_tax', 'done', $payload, null, $meta['user_id'] ?? null);
             $this->bumpVersion($supplierId, $periodId, $rowVersion);
             $this->audit($supplierId, 'accounting.closing_step_done', $periodId, [
@@ -3388,9 +4392,12 @@ final class ClosingService
         $context = $this->profitDistributionContext($supplierId, $requested);
         $period = $context['source'];
         $target = $context['target'];
-        $sourceId = (int) $period['id'];
+        $sourceId = $context['source_id'];
         $asOf = (string) $target['ends_on'];
         if ($this->roleProfile($supplierId, $asOf)->framework === AccountingFrameworkService::CZ_504) {
+            if ($period === null) {
+                throw new ClosingException('profit_distribution_requires_approved_period', 'Rozhodnutí o výsledku hospodaření vyžaduje bezprostředně předchozí schválené období.', 422);
+            }
             if ($decisionDate !== null && (!self::isIsoDate($decisionDate) || $decisionDate < $target['starts_on'] || $decisionDate > $target['ends_on'])) {
                 throw new ClosingException('validation_failed', 'Datum rozhodnutí musí ležet v cílovém účetním období.', 422);
             }
@@ -3403,7 +4410,10 @@ final class ClosingService
         $resources = $this->distributableResources($snapshot, $available);
 
         return [
-            'approved_period' => ['id' => (int) $period['id'], 'fiscal_year' => (int) $period['fiscal_year'], 'status' => (string) $period['status']],
+            'approved_period' => $period === null ? null : ['id' => (int) $period['id'], 'fiscal_year' => (int) $period['fiscal_year'], 'status' => (string) $period['status']],
+            // `opening`: výsledek minulého roku z převzatých počátečních stavů (rok bez předchozího období).
+            'source' => $period === null ? 'opening' : 'approved_period',
+            'source_fiscal_year' => $context['source_year'],
             'target_period' => [
                 'id' => (int) $target['id'],
                 'fiscal_year' => (int) $target['fiscal_year'],
@@ -3470,9 +4480,8 @@ final class ClosingService
                 throw new ClosingException('not_found', 'Účetní období #' . $periodId . ' neexistuje.', 404);
             }
             $context = $this->profitDistributionContext($supplierId, $requested, true);
-            $period = $context['source'];
             $target = $context['target'];
-            $sourceId = (int) $period['id'];
+            $sourceId = $context['source_id'];
             $targetId = (int) $target['id'];
             $lockedTarget = $this->lockPeriod($supplierId, $targetId, $targetRowVersion);
             $this->assertStatus($lockedTarget, self::PROFIT_DISTRIBUTION_TARGET_STATUSES);
@@ -3516,10 +4525,12 @@ final class ClosingService
                     throw new ClosingException('validation_failed', 'Částka přídělu musí být kladná.');
                 }
                 $sum = round($sum + $amt, 2);
+                // pair_group: příděly proti 431 a srážková daň proti 342 jsou dvě
+                // samostatné skupiny dvojic jednoduchého zápisu (složená firma klíč nevidí).
                 if ($isLoss) {
-                    $lines[] = ['account_code' => $code, 'side' => 'debit', 'amount' => $amt];
+                    $lines[] = ['account_code' => $code, 'side' => 'debit', 'amount' => $amt, 'pair_group' => 'distribution'];
                 } else {
-                    $lines[] = ['account_code' => $code, 'side' => 'credit', 'amount' => $amt];
+                    $lines[] = ['account_code' => $code, 'side' => 'credit', 'amount' => $amt, 'pair_group' => 'distribution'];
                     if ($kind === 'shares') {
                         $sharesGross = round($sharesGross + $amt, 2);
                         $sharesLines[] = ['code' => $code, 'amt' => $amt];
@@ -3545,7 +4556,7 @@ final class ClosingService
                 );
             }
 
-            $lines[] = ['account_code' => '431', 'side' => $isLoss ? 'credit' : 'debit', 'amount' => $sum];
+            $lines[] = ['account_code' => '431', 'side' => $isLoss ? 'credit' : 'debit', 'amount' => $sum, 'pair_group' => 'distribution'];
 
             // Srážková daň §36 odst. 3 ZDP: každý shares řádek představuje jednoho
             // poplatníka; základ i daň se zaokrouhlí na celé Kč dolů per poplatník.
@@ -3555,12 +4566,12 @@ final class ClosingService
                     $tax = (float) floor(floor($sl['amt']) * $withholdingRate);
                     if ($tax > 0) {
                         $withholding += $tax;
-                        $lines[] = ['account_code' => $sl['code'], 'side' => 'debit', 'amount' => $tax];
+                        $lines[] = ['account_code' => $sl['code'], 'side' => 'debit', 'amount' => $tax, 'pair_group' => 'withholding'];
                     }
                 }
                 $withholding = round($withholding, 2);
                 if ($withholding > 0) {
-                    $lines[] = ['account_code' => '342', 'side' => 'credit', 'amount' => $withholding];
+                    $lines[] = ['account_code' => '342', 'side' => 'credit', 'amount' => $withholding, 'pair_group' => 'withholding'];
                 }
             }
 
@@ -3575,7 +4586,7 @@ final class ClosingService
             $entryId = $this->posting->postDocument($supplierId, 'profit_distribution', $sourceId, $lines, [
                 'entry_date' => $decisionDate,
                 'document_no' => $docNo,
-                'description' => 'Rozdělení výsledku hospodaření ' . (int) $period['fiscal_year'] . ' (rozhodnutí VH ' . $decisionDate . ')',
+                'description' => 'Rozdělení výsledku hospodaření ' . $context['source_year'] . ' (rozhodnutí VH ' . $decisionDate . ')',
                 'posted' => true,
                 'posted_by' => $meta['posted_by'] ?? null,
                 'user_id' => $meta['user_id'] ?? null,
@@ -3775,9 +4786,8 @@ final class ClosingService
             $is504 = $this->resultDecisionProfile($supplierId, (string) $requested['ends_on'], true)->framework === AccountingFrameworkService::CZ_504;
             $context = $is504 ? $this->resultDecisionCurrentContext($supplierId, $periodId)
                 : $this->profitDistributionContext($supplierId, $requested, true);
-            $period = $context['source'];
             $target = $context['target'];
-            $sourceId = (int) $period['id'];
+            $sourceId = (int) ($context['source_id'] ?? $context['source']['id']);
             $targetId = (int) $target['id'];
             $lockedTarget = $this->lockPeriod($supplierId, $targetId, $targetRowVersion);
             // Symetrie s zaúčtováním: co jde zaúčtovat do 'closing', musí jít i vzít zpět.
@@ -3850,23 +4860,39 @@ final class ClosingService
     /**
      * Zdrojové schválené a cílové otevřené období pro rozdělení VH. Volání nad
      * otevřeným obdobím kanonicky dohledá jeho bezprostředně předchozí approved rok.
+     * Nemá-li cílový rok v MyÚčtu předchozí období a má otevírací zápis (převod), rozděluje
+     * se výsledek z počátečního stavu 431: `source` je null a klíč zápisu
+     * {@see ClosingSourceId::openingProfitDistribution()}.
      *
      * @param array<string,mixed> $period
-     * @return array{source:array<string,mixed>,target:array<string,mixed>}
+     * @return array{source:array<string,mixed>|null,target:array<string,mixed>,source_id:int,source_year:int}
      */
     private function profitDistributionContext(int $supplierId, array $period, bool $forUpdate = false): array
     {
         if (in_array((string) $period['status'], self::PROFIT_DISTRIBUTION_TARGET_STATUSES, true)) {
             $source = $forUpdate ? $this->closing->adjacentPeriodForUpdate($supplierId, (string) $period['starts_on'], true)
                 : $this->previousPeriod($supplierId, (string) $period['starts_on']);
+            // První rok v MyÚčtu po převodu z jiného systému: předchozí rok tu není a výsledek
+            // minulého roku přišel na 431 převzatou otevírací rozvahou. Bez rozdělení by
+            // zahájení uzávěrky (profit_not_distributed) zůstalo zablokované navždy.
+            if ($source === null && $this->closing->openingEntriesInPeriod($supplierId, (int) $period['id']) !== []) {
+                return [
+                    'source' => null,
+                    'target' => $period,
+                    'source_id' => ClosingSourceId::openingProfitDistribution((int) $period['id']),
+                    'source_year' => (int) $period['fiscal_year'] - 1,
+                ];
+            }
             if ($source === null || (string) $source['status'] !== 'approved') {
                 throw new ClosingException(
                     'profit_distribution_requires_approved_period',
-                    'Rozdělení výsledku hospodaření vyžaduje bezprostředně předchozí schválené období.',
+                    $source === null
+                        ? 'Rozdělení výsledku hospodaření vyžaduje bezprostředně předchozí schválené období, nebo počáteční stavy roku (otevírací zápis), ze kterých výsledek minulého roku pochází.'
+                        : 'Rozdělení výsledku hospodaření vyžaduje bezprostředně předchozí schválené období.',
                     422,
                 );
             }
-            return ['source' => $source, 'target' => $period];
+            return ['source' => $source, 'target' => $period, 'source_id' => (int) $source['id'], 'source_year' => (int) $source['fiscal_year']];
         }
         if ((string) $period['status'] !== 'approved') {
             throw new ClosingException(
@@ -3880,9 +4906,9 @@ final class ClosingService
             throw new ClosingException('next_period_missing', 'Následující období (kam se rozdělení účtuje) neexistuje — nejprve otevři nový rok.');
         }
         if (!in_array((string) $next['status'], self::PROFIT_DISTRIBUTION_TARGET_STATUSES, true)) {
-            throw new ClosingException('next_period_not_open', 'Následující období ' . $next['fiscal_year'] . ' není otevřené (stav: ' . $next['status'] . ').');
+            throw new ClosingException('next_period_not_open', $this->nextPeriodNotOpenMessage($supplierId, $next));
         }
-        return ['source' => $period, 'target' => $next];
+        return ['source' => $period, 'target' => $next, 'source_id' => (int) $period['id'], 'source_year' => (int) $period['fiscal_year']];
     }
 
     /**
@@ -3938,6 +4964,26 @@ final class ClosingService
                 throw new ClosingException(
                     'closing_steps_incomplete',
                     'Kroky průvodce před uzavřením knih musí být done/skipped.',
+                );
+            }
+            if (($stale = $this->incomeTaxStale($steps)) !== null) {
+                throw new ClosingException(
+                    'income_tax_stale',
+                    'Daň z příjmů je potřeba přepočítat: po jejím zaúčtování se vrátil krok '
+                        . implode(', ', array_map(static fn (string $k): string => self::STEP_LABELS[$k] ?? $k, $stale['caused_by']))
+                        . ', který mění výsledek hospodaření. Spusťte krok Daň z příjmů znovu, nebo ho znovu potvrďte.',
+                    422,
+                );
+            }
+            $this->assertAccrualDeferralsCurrent($supplierId, $periodId, $steps['deferrals']);
+            // Agenda Časové rozlišení: rok se nesmí uzavřít s nezaúčtovaným rozpuštěním, které
+            // do něj patří (náklad či výnos by chyběl ve výsledku i v daňovém přiznání).
+            $agendaPending = (new AccrualAgendaGuard($this->db))->pendingRowsCount($supplierId, (string) $period['starts_on'], (string) $period['ends_on']);
+            if ($agendaPending > 0) {
+                throw new ClosingException(
+                    'accrual_agenda_pending',
+                    'V agendě Časové rozlišení zbývá ' . $agendaPending . ' nezaúčtovaných rozpuštění splatných do konce období. Zaúčtujte je v kroku Časové rozlišení.',
+                    409,
                 );
             }
             $failing = $this->failingErrorChecks($supplierId, $period);
@@ -3998,6 +5044,27 @@ final class ClosingService
             $lines = $built['lines'];
             $profit = round((float) $built['profit'], 2);
 
+            // Rok uzavřený už původním systémem: převzaté uzávěrkové zápisy vynulovaly všechny
+            // účty, takže se nic znovu neúčtuje. Výsledek hospodaření se ale musí uložit
+            // skutečný (bez převzatých zápisů), ne nula. Zbyl-li po převzaté uzávěrce zůstatek
+            // (zápis přidaný až po převodu), dvě různé uzávěrky by se mísily: to se odmítne.
+            $takenOverClosing = $this->closing->takenOverClosingEntryIds($supplierId, $periodId);
+            if ($takenOverClosing !== []) {
+                if ($profile->framework === AccountingFrameworkService::CZ_504) {
+                    throw new ClosingException('closing_taken_over', 'Rok už uzavřel původní systém. U neziskové organizace průvodce převzatou uzávěrku zatím nenavazuje.', 422);
+                }
+                $residual = self::takenOverResidualAccounts([...$pl, ...$bs]);
+                if ($residual !== []) {
+                    $example = (string) $residual[0];
+                    throw new ClosingException('closing_taken_over_residual',
+                        'Rok už uzavřel původní systém, ale po převzaté uzávěrce zůstaly nenulové zůstatky (např. účet ' . $example . '). '
+                        . 'Zápisy zaúčtované do roku až po převodu přesuňte do dalšího roku, nebo zůstatek vyrovnejte v původní uzávěrce.', 422);
+                }
+                $profit = round(self::profitFromPl($this->closing->plBalances($supplierId, $periodId, $startsOn, $endsOn, false, $takenOverClosing)), 2);
+                // Převzatá uzávěrka účty už uzavřela; dimenzní zbytky uvnitř účtu se znovu neúčtují.
+                $lines = [];
+            }
+
             $entryId = null;
             $docNo = null;
             if ($lines !== []) {
@@ -4009,7 +5076,7 @@ final class ClosingService
                 if ($profile->framework === AccountingFrameworkService::CZ_504) {
                     $entryId = $this->post504Carry($supplierId, $period, $period, 'close_books', $rowVersion, ['entry_date' => $endsOn, 'document_no' => $docNo, 'description' => 'Uzavření účetních knih ' . $fiscalYear] + $meta);
                 } else {
-                $entryId = $this->posting->postDocument($supplierId, 'closing', $periodId, $lines, [
+                $entryId = $this->posting->postDocument($supplierId, 'closing', $periodId, PairGroups::consecutive($lines, 'closing'), [
                     'entry_date' => $endsOn,
                     'document_no' => $docNo,
                     'description' => 'Uzavření účetních knih ' . $fiscalYear,
@@ -4048,7 +5115,11 @@ final class ClosingService
             // Bez toho se příloha schváleného roku mění spolu s firmou: název, sídlo,
             // IČO i kategorie se braly z AKTUÁLNÍHO supplier, ne ze stavu k rozvahovému
             // dni. Selhání NESMÍ shodit uzavření knih — příloha je textová evidence,
-            // ne účetní zápis; stejný důvod jako u zmražení kategorie výše.
+            // ne účetní zápis; stejný důvod jako u zmražení kategorie výše. Selhání se ale
+            // nesmí spolknout: vrací se varování v odpovědi kroku a schválení zmražení
+            // zopakuje, případně zablokuje (viz AccountingPeriodAction).
+            $notesFrozen = true;
+            $notesFreezeError = null;
             try {
                 $this->statementNotes->freezeAutoValues(
                     $supplierId,
@@ -4057,8 +5128,10 @@ final class ClosingService
                     $meta['user_id'] ?? null,
                 );
             } catch (\Throwable $e) {
+                $notesFrozen = false;
+                $notesFreezeError = $e->getMessage();
                 $this->logger->warning(
-                    'Zmražení přílohy k závěrce selhalo (nezablokuje uzavření knih): ' . $e->getMessage(),
+                    'Zmražení přílohy k závěrce selhalo (nezablokuje uzavření knih, blokuje schválení): ' . $e->getMessage(),
                     ['supplier_id' => $supplierId, 'period_id' => $periodId, 'exception' => $e],
                 );
             }
@@ -4069,7 +5142,8 @@ final class ClosingService
                 'document_no' => $docNo,
                 'lines_count' => count($lines),
                 'category_frozen' => $categoryFrozen,
-            ];
+                'notes_frozen' => $notesFrozen,
+            ] + ($takenOverClosing !== [] ? ['closing_taken_over' => true, 'taken_over_entry_ids' => $takenOverClosing] : []);
             if ($unpostedOverride !== null) {
                 // Výjimka do závěrkového balíčku (EP-10b) — auditovatelný záznam, že se
                 // knihy uzavřely přes nezaúčtované doklady, s důvodem a seznamem dokladů.
@@ -4080,6 +5154,11 @@ final class ClosingService
                 $payload['warning_detail'] = 'Zmražení kategorie účetní jednotky (§1e) se nezdařilo: '
                     . $categoryFreezeError . '. Knihy jsou uzavřené, ale období nelze zákonně schválit, '
                     . 'dokud historická kategorie nebude uložena (zopakuj krok / oprav podklad kategorizace).';
+            }
+            if (!$notesFrozen) {
+                $payload['notes_warning'] = 'statement_notes_freeze_failed';
+                $payload['notes_warning_detail'] = 'Zmražení automatických sekcí přílohy k závěrce se nezdařilo: '
+                    . $notesFreezeError . ' Knihy jsou uzavřené, schválení zmražení zopakuje a bez něj období neschválí.';
             }
             if ($profile->framework === AccountingFrameworkService::CZ_504) {
                 $carryStep = (new \MyInvoice\Repository\ClosingCarryReadRepository($this->db))->step($supplierId, $periodId, 'close_books');
@@ -4094,6 +5173,69 @@ final class ClosingService
             ], $meta);
             return $payload + ['status' => 'closed'];
         });
+    }
+
+    /**
+     * Zaúčtovaný odklad nákladů (381) a výnosů (384) příštích období musí odpovídat aktuálnímu
+     * náhledu kroku Časové rozlišení. Doklad zaúčtovaný nebo změněný po spuštění kroku
+     * (období na řádcích, nový doklad přes rozvahový den) by jinak prošel uzavřením knih se
+     * zastaralým odkladem a rozpuštění v dalším roce by se s ním rozešlo. Porovnává se
+     * po účtech; kontroluje se zaúčtovaný zápis a krok potvrzený jako hotový bez zápisu.
+     * Krok vědomě přeskočený (skipped) bez zápisu se nekontroluje.
+     *
+     * @param array<string,mixed> $step krok `deferrals`
+     */
+    private function assertAccrualDeferralsCurrent(int $supplierId, int $periodId, array $step): void
+    {
+        $kinds = [
+            'prepaid_expense_accrual' => [ClosingSourceId::prepaidExpenseAccrual($periodId), AccrualDeferralService::RULE_PREPAID_EXPENSE, 'credit', 'nákladů'],
+            'deferred_revenue_accrual' => [ClosingSourceId::deferredRevenueAccrual($periodId), AccrualDeferralService::RULE_DEFERRED_REVENUE, 'debit', 'výnosů'],
+        ];
+        foreach ($kinds as $sourceType => [$sourceId, $ruleKey, $positiveSide, $label]) {
+            $entry = $this->journal->findBySource($supplierId, $sourceType, $sourceId);
+            $live = $entry !== null && $entry['posted_at'] !== null && $entry['reversed_by'] === null;
+            if (!$live && (string) $step['status'] !== 'done') {
+                continue;
+            }
+            $preview = $sourceType === 'prepaid_expense_accrual'
+                ? $this->prepaidExpenseAccrualData($supplierId, $periodId)
+                : $this->deferredRevenueAccrualData($supplierId, $periodId);
+            $expected = array_filter(array_map(static fn (float $v): float => round($v, 2), $preview['by_account']), static fn (float $v): bool => (int) round($v * 100) !== 0);
+            $posted = [];
+            if ($live) {
+                $deferAccount = $this->accruals->deferralAccount($supplierId, $ruleKey);
+                $stmt = $this->db->pdo()->prepare(
+                    'SELECT a.account_code, l.side, l.amount
+                       FROM journal_entry_lines l
+                       JOIN chart_of_accounts a ON a.id = l.account_id
+                      WHERE l.supplier_id = ? AND l.entry_id = ?'
+                );
+                $stmt->execute([$supplierId, (int) $entry['id']]);
+                foreach ($stmt->fetchAll(\PDO::FETCH_ASSOC) as $line) {
+                    $code = (string) $line['account_code'];
+                    if (str_starts_with($code, $deferAccount)) {
+                        continue;
+                    }
+                    $posted[$code] = round(($posted[$code] ?? 0.0) + ((string) $line['side'] === $positiveSide ? 1 : -1) * (float) $line['amount'], 2);
+                }
+                $posted = array_filter($posted, static fn (float $v): bool => (int) round($v * 100) !== 0);
+            }
+            ksort($expected);
+            ksort($posted);
+            $stale = array_keys($expected) !== array_keys($posted);
+            foreach ($expected as $code => $amount) {
+                $stale = $stale || (int) round(($posted[$code] ?? 0.0) * 100) !== (int) round($amount * 100);
+            }
+            if ($stale) {
+                throw new ClosingException(
+                    'deferrals_stale',
+                    'Časové rozlišení ' . $label . ' příštích období neodpovídá aktuálnímu stavu dokladů: zaúčtováno '
+                    . number_format(array_sum($posted), 2, ',', ' ') . ' Kč, podle dokladů ' . number_format(array_sum($expected), 2, ',', ' ')
+                    . ' Kč. Doklad se po spuštění kroku změnil nebo přibyl. Spusťte krok Časové rozlišení znovu.',
+                    422,
+                );
+            }
+        }
     }
 
     // ── krok 7: otevření nového roku (R8/R11) ─────────────────────────────────
@@ -4145,10 +5287,7 @@ final class ClosingService
                 $next = $nextLocked;
             }
             if ($next['status'] !== 'open') {
-                throw new ClosingException(
-                    'next_period_not_open',
-                    'Následující období ' . $next['fiscal_year'] . ' není otevřené (stav: ' . $next['status'] . ').',
-                );
+                throw new ClosingException('next_period_not_open', $this->nextPeriodNotOpenMessage($supplierId, $next));
             }
             $nextId = (int) $next['id'];
             $nextFy = (int) $next['fiscal_year'];
@@ -4171,7 +5310,8 @@ final class ClosingService
             $takenOverIds = [];
             $takenOverAccounts = 0;
             if ($takenOver !== []) {
-                $cmp = $this->compareOpeningBalances($supplierId, $nextId, $lines);
+                $accountLevel = $this->openingComparedByAccount($supplierId, $period, $steps, $takenOver);
+                $cmp = $this->compareOpeningBalances($supplierId, $nextId, $lines, $accountLevel !== null);
                 if ($replaceTakenOverReason !== null) {
                     $replacedDumps = [];
                     foreach ($takenOver as $entry) {
@@ -4213,7 +5353,7 @@ final class ClosingService
                 if ($openingProfile->framework === AccountingFrameworkService::CZ_504) {
                     $entryId = $this->post504Carry($supplierId, $period, $next, 'open_next', $rowVersion, ['entry_date' => $nextStart, 'document_no' => $docNo, 'description' => 'Otevření účetních knih ' . $nextFy] + $meta);
                 } else {
-                $entryId = $this->posting->postDocument($supplierId, 'opening', $nextId, $lines, [
+                $entryId = $this->posting->postDocument($supplierId, 'opening', $nextId, PairGroups::consecutive($lines, 'opening'), [
                     'entry_date' => $nextStart,
                     'document_no' => $docNo,
                     'description' => 'Otevření účetních knih ' . $nextFy,
@@ -4260,7 +5400,7 @@ final class ClosingService
                     $revDocNo = $existingRev !== null && $existingRev['document_no'] !== null
                         ? (string) $existingRev['document_no']
                         : $this->series->next($supplierId, 'fx', $nextFy);
-                    $fxReversalId = $this->posting->postDocument($supplierId, 'fx_revaluation', $revSourceId, $revLines, [
+                    $fxReversalId = $this->posting->postDocument($supplierId, 'fx_revaluation', $revSourceId, PairGroups::consecutive($revLines, 'fx'), [
                         'entry_date' => $nextStart,
                         'document_no' => $revDocNo,
                         'description' => 'Storno přecenění saldokonta k 1. dni období',
@@ -4285,9 +5425,9 @@ final class ClosingService
             // (swap stran) zaúčtovaného stock-closing slotu, ne nový výpočet —
             // bilanční kontinuita 112/132 (konečný stav N = počáteční N+1) tak platí
             // po haléřích a na TÝCHŽ účtech i při per-tenant overridu kontací
-            // (seedované stock.opening.* = zrcadlo stock.closing.*). Bez R7 flagu —
-            // N+1 je open (asserted výše). Klíč ('closing', stockOpening(period_id)),
-            // vzor fxReversal; reverte se s krokem open_next.
+            // (seedované stock.opening.* = zrcadlo stock.closing.*). N+1 je open (asserted
+            // výše); R7 flag jen kvůli zámku k datu, stejně jako otevírací zápis. Klíč
+            // ('closing', stockOpening(period_id)), vzor fxReversal; reverte se s krokem open_next.
             $stockReleaseId = null;
             $stockClosingEntry = $this->findEntryWithLines($supplierId, 'closing', ClosingSourceId::stockClosing($periodId));
             if ($stockClosingEntry !== null && $stockClosingEntry['posted_at'] !== null && ($stockClosingEntry['lines'] ?? []) !== []) {
@@ -4304,7 +5444,7 @@ final class ClosingService
                 $relDocNo = $existingRel !== null && $existingRel['document_no'] !== null
                     ? (string) $existingRel['document_no']
                     : $this->series->next($supplierId, 'opening', $nextFy);
-                $stockReleaseId = $this->posting->postDocument($supplierId, 'closing', $relSourceId, $releaseLines, [
+                $stockReleaseId = $this->posting->postDocument($supplierId, 'closing', $relSourceId, PairGroups::consecutive($releaseLines, 'stock'), [
                     'entry_date' => $nextStart,
                     'document_no' => $relDocNo,
                     'description' => 'Počáteční stav zásob do spotřeby (způsob B) ' . $nextFy,
@@ -4313,6 +5453,7 @@ final class ClosingService
                     'user_id' => $meta['user_id'] ?? null,
                     'ip' => $meta['ip'] ?? null,
                     'user_agent' => $meta['user_agent'] ?? null,
+                    'allow_closing_period' => true,
                 ]);
             } else {
                 // Re-run po revertu stock kroku: stale release z dřívějšího běhu
@@ -4324,18 +5465,12 @@ final class ClosingService
             // (swap stran) zaúčtovaného defer zápisu N (MD 381 / D 501) → v N+1 MD 501 / D 381.
             // Bez tohoto kroku by odklad trvale „visel" na 381. Klíč ('small_asset_accrual',
             // release_base + period_id), aby se nesrazil s defer zápisem N; entry_date =
-            // 1. den N+1 (open, bez R7 flagu). Vzor stock/FX storna výše, reverte se s open_next.
+            // 1. den N+1 (open, R7 flag jen kvůli zámku k datu). Vzor stock/FX storna výše,
+            // reverte se s open_next.
             $smallAssetReleaseId = null;
             $saDeferEntry = $this->findEntryWithLines($supplierId, 'small_asset_accrual', ClosingSourceId::smallAssetAccrual($periodId));
             if ($saDeferEntry !== null && $saDeferEntry['posted_at'] !== null && ($saDeferEntry['lines'] ?? []) !== []) {
-                $relLines = [];
-                foreach ($saDeferEntry['lines'] as $l) {
-                    $relLines[] = [
-                        'account_code' => (string) $l['account_code'],
-                        'side' => $l['side'] === 'debit' ? 'credit' : 'debit',
-                        'amount' => (float) $l['amount'],
-                    ];
-                }
+                $relLines = $this->smallAssetReleaseEntryLines($supplierId, $saDeferEntry, $nextStart);
                 $relSourceId = ClosingSourceId::smallAssetAccrualRelease($periodId);
                 $existingRel = $this->journal->findBySource($supplierId, 'small_asset_accrual', $relSourceId);
                 $relDocNo = $existingRel !== null && $existingRel['document_no'] !== null
@@ -4350,6 +5485,7 @@ final class ClosingService
                     'user_id' => $meta['user_id'] ?? null,
                     'ip' => $meta['ip'] ?? null,
                     'user_agent' => $meta['user_agent'] ?? null,
+                    'allow_closing_period' => true,
                 ]);
             } else {
                 // Re-run po revertu deferrals / mode=none: stale rozpuštění z dřívějšího běhu.
@@ -4361,17 +5497,12 @@ final class ClosingService
             // ne celý zbytek odkladu — víceletý zbytek (N+2+) zůstává na 381 a rozpustí ho
             // openNext dalšího roku (nachází ho podle accrual dat i bez re-deferu v N+1). Klíč
             // ('prepaid_expense_accrual', release_base + period_id) beze změny, entry_date =
-            // 1. den N+1 (open, bez R7 flagu). Reverte se s open_next.
+            // 1. den N+1 (open, R7 flag jen kvůli zámku k datu). Reverte se s open_next.
             $prepaidExpenseReleaseId = null;
             $relSourceId = ClosingSourceId::prepaidExpenseAccrualRelease($periodId);
             $peRelease = $this->prepaidExpenseReleaseForPeriod($supplierId, (string) $period['ends_on'], $nextStart, $nextEnds);
-            if ((int) round($peRelease['total'] * 100) !== 0) {
-                $deferAccount = $this->accruals->deferralAccount($supplierId, AccrualDeferralService::RULE_PREPAID_EXPENSE);
-                $relLines = [];
-                foreach ($peRelease['by_account'] as $account => $amount) {
-                    $relLines[] = ['account_code' => (string) $account, 'side' => 'debit', 'amount' => round((float) $amount, 2)];
-                }
-                $relLines[] = ['account_code' => $deferAccount, 'side' => 'credit', 'amount' => round((float) $peRelease['total'], 2)];
+            if (AccrualDeferralService::hasNonZeroLine($peRelease['lines'])) {
+                $relLines = $this->prepaidExpenseLines($supplierId, $peRelease['lines'], (float) $peRelease['total'], true, $nextStart);
                 $this->assertKnownCodes($supplierId, $relLines);
                 $existingRel = $this->journal->findBySource($supplierId, 'prepaid_expense_accrual', $relSourceId);
                 $relDocNo = $existingRel !== null && $existingRel['document_no'] !== null
@@ -4386,6 +5517,7 @@ final class ClosingService
                     'user_id' => $meta['user_id'] ?? null,
                     'ip' => $meta['ip'] ?? null,
                     'user_agent' => $meta['user_agent'] ?? null,
+                    'allow_closing_period' => true,
                 ]);
             } else {
                 // Žádná tranše pro toto období / re-run po revertu: smaž stale rozpuštění.
@@ -4396,9 +5528,9 @@ final class ClosingService
             // nákladové strany výše. Reverte se s open_next.
             $deferredRevenueReleaseId = null;
             $revRelSourceId = ClosingSourceId::deferredRevenueAccrualRelease($periodId);
-            $revRelease = $this->deferredRevenueReleaseForPeriod($supplierId, (string) $period['ends_on'], $nextEnds);
-            if ((int) round($revRelease['total'] * 100) !== 0) {
-                $revRelLines = $this->deferredRevenueLines($supplierId, $revRelease['by_account'], $revRelease['total'], true);
+            $revRelease = $this->deferredRevenueReleaseForPeriod($supplierId, (string) $period['ends_on'], $nextStart, $nextEnds);
+            if (AccrualDeferralService::hasNonZeroLine($revRelease['lines'])) {
+                $revRelLines = $this->deferredRevenueLines($supplierId, $revRelease['lines'], $revRelease['total'], true, $nextStart);
                 $this->assertKnownCodes($supplierId, $revRelLines);
                 $existingRevRel = $this->journal->findBySource($supplierId, 'deferred_revenue_accrual', $revRelSourceId);
                 $revRelDocNo = $existingRevRel !== null && $existingRevRel['document_no'] !== null
@@ -4413,6 +5545,7 @@ final class ClosingService
                     'user_id' => $meta['user_id'] ?? null,
                     'ip' => $meta['ip'] ?? null,
                     'user_agent' => $meta['user_agent'] ?? null,
+                    'allow_closing_period' => true,
                 ]);
             } else {
                 $this->closing->deleteClosingEntry($supplierId, 'deferred_revenue_accrual', $revRelSourceId);
@@ -4432,6 +5565,10 @@ final class ClosingService
             if ($openingSource === 'taken_over') {
                 $payload['taken_over_entry_ids'] = $takenOverIds;
                 $payload['taken_over_accounts'] = $takenOverAccounts;
+                if (($accountLevel ?? null) !== null) {
+                    $payload['taken_over_compare_level'] = 'account';
+                    $payload['taken_over_compare_reason'] = $accountLevel;
+                }
             } elseif ($openingSource === 'replaced') {
                 $payload['replace_reason'] = mb_substr((string) $replaceTakenOverReason, 0, 500);
             }
@@ -4471,7 +5608,15 @@ final class ClosingService
         if (in_array($stepKey, ['fx_revaluation', 'open_next'], true)) {
             $jointFx = new Fx504Service($this->db, $this->journal, $this->series, $this->closing, $this->posting, $this->activity);
             if ($jointFx->handles($supplierId, $periodId, true)) {
-                if ($stepKey === 'fx_revaluation') return $jointFx->revert($supplierId, $periodId, $rowVersion, $meta);
+                if ($stepKey === 'fx_revaluation') {
+                    return $this->tx(function () use ($jointFx, $supplierId, $periodId, $rowVersion, $meta): array {
+                        $result = $jointFx->revert($supplierId, $periodId, $rowVersion, $meta);
+                        if ($this->markIncomeTaxStale($supplierId, $periodId, 'fx_revaluation')) {
+                            $result['income_tax_stale'] = true;
+                        }
+                        return $result;
+                    });
+                }
                 return (new DimensionPeriodGuard($this->db))->transaction(fn (): array => $this->revertStepBody($supplierId, $periodId, $stepKey, $rowVersion, $meta));
             }
         }
@@ -4516,8 +5661,10 @@ final class ClosingService
                     )) {
                         throw new ClosingException(
                             'invalid_status_transition',
-                            'Následující období je uzavřené/schválené nebo má vlastní uzávěrku — '
-                                . 'opening zápis nelze smazat (§17/7). Nejprve znovu otevři následující období.',
+                            AccountingPeriodStatus::isClosed((string) $next['status'])
+                                ? 'Následující období ' . $next['fiscal_year'] . ' je uzavřené nebo schválené, otevírací zápis nelze smazat (§17/7). Nejprve následující období znovu otevřete.'
+                                : 'Následující období ' . $next['fiscal_year'] . ' má rozdělanou vlastní uzávěrku se zaúčtovanými zápisy, otevírací zápis nelze smazat. '
+                                    . 'Nejprve v uzávěrce roku ' . $next['fiscal_year'] . ' vezměte zpět její kroky a klikněte na Přerušit uzávěrku.',
                         );
                     }
                     // Převzatý otevírací zápis (krok ho jen převzal, nic neúčtoval) patří
@@ -4709,6 +5856,10 @@ final class ClosingService
             }
 
             $result['dumps'] = $dumps;
+            if (in_array($stepKey, self::INCOME_TAX_INPUT_STEPS, true)
+                && $this->markIncomeTaxStale($supplierId, $periodId, $stepKey)) {
+                $result['income_tax_stale'] = true;
+            }
             $this->audit($supplierId, 'accounting.closing_step_reverted', $periodId, [
                 'step' => $stepKey,
                 'entry_dump' => $dumps,
@@ -5087,6 +6238,14 @@ final class ClosingService
             }
             $checks[] = ['key' => 'deferrals_balances', 'severity' => 'info', 'ok' => true, 'value' => $deferrals];
         }
+        // Agenda Časové rozlišení proti hlavní knize: rozdíl = řádky 38x bez položky. Jen
+        // varování (uzávěrku neblokuje, rozhodne účetní) a jen u firmy, která agendu používá.
+        if ($wants('deferrals_agenda_difference')) {
+            $agendaCheck = $this->accrualAgendaCheck($supplierId, $rangeTo);
+            if ($agendaCheck !== null) {
+                $checks[] = $agendaCheck;
+            }
+        }
 
         if ($wants('accounts_unusual_side')) {
             $checks[] = $this->checkAccountsOnUnusualSide($supplierId, $periodId, $rangeTo);
@@ -5143,6 +6302,19 @@ final class ClosingService
                 'value' => ['count' => count($paidAdvances), 'items' => $paidAdvances],
             ];
 
+        }
+        // Konečná přijatá faktura navázaná na zálohu s DDKP, která zálohu neodečítá: daň
+        // z DDKP je uplatněná a faktura ji v evidenci DPH uplatní podruhé. Deník takovou
+        // fakturu nezaúčtuje, evidenci DPH to ale nezastaví, proto i starší období.
+        if ($wants('purchase_final_missing_advance_deduction')) {
+            $missingDeduction = (new \MyInvoice\Service\PurchaseInvoice\PurchaseAdvanceDeduction($this->db))
+                ->finalsMissingDeduction($supplierId, $rangeTo);
+            $checks[] = [
+                'key' => 'purchase_final_missing_advance_deduction',
+                'severity' => 'warning',
+                'ok' => $missingDeduction === [],
+                'value' => ['count' => count($missingDeduction), 'items' => $missingDeduction],
+            ];
         }
         // § 11 odst. 1 písm. b) ZoÚ — zaúčtovaný zápis bez OBSAHU účetního případu. Částky
         // i účty sedí, ale z deníku nejde poznat, čeho se případ týkal; auditní stopa pak
@@ -5222,6 +6394,16 @@ final class ClosingService
             $checks[] = $this->checkPaymentMatchAudit($supplierId, $rangeFrom, $rangeTo);
         }
 
+        if ($wants('other_item_installments_overdue')) {
+            $checks[] = $this->otherItemChecks->overdueInstallments($supplierId, $rangeTo);
+        }
+        if ($wants('other_item_account_balance')) {
+            $otherItemBalance = $this->otherItemChecks->accountBalanceDifference($supplierId, $rangeTo);
+            if ($otherItemBalance !== null) {
+                $checks[] = $otherItemBalance;
+            }
+        }
+
         // Doklad × vytěžení jeho přílohy. DUZP přílohy v jiném měsíci než DUZP dokladu, který
         // vstupuje do DPH, posouvá doklad do jiného zdaňovacího období i kontrolního hlášení
         // → warning. Rozdíl částky, IČO nebo VS je informativní. Potvrzené „v pořádku" se
@@ -5277,9 +6459,22 @@ final class ClosingService
         // kdy se výkazy nedaly vygenerovat a účetní je musela přiložit ručně. Nově se
         // ptá na to, co jediné může být špatně: SEDÍ oba výkazy? Nesedící přehled je vada
         // v datech (typicky pohyb, jehož protiúčet nejde zařadit) a takhle se odevzdat nedá.
-        $category = $wants('section18_statements_required')
-            ? $this->categories->evaluate($supplierId, $periodId)
-            : null;
+        $category = null;
+        if ($wants('section18_statements_required', 'entity_category_unavailable')) {
+            try {
+                $category = $this->categories->evaluate($supplierId, $periodId);
+            } catch (\MyInvoice\Service\Accounting\Reports\ReportException $e) {
+                // Kategorii nejde určit (typicky nastavení čistého obratu vybírá jiné řádky
+                // v druhovém a účelovém členění výsledovky). Kontrola § 18 pak nemá z čeho
+                // vycházet; průvodce to ohlásí s důvodem, ale zbytek kontrol musí doběhnout.
+                $checks[] = [
+                    'key' => 'entity_category_unavailable',
+                    'severity' => 'warning',
+                    'ok' => false,
+                    'value' => $e->getMessage(),
+                ];
+            }
+        }
         $needsSection18 = $category !== null
             && (in_array((string) $category['category'], ['large', 'medium'], true)
                 || ($category['scope_override'] === null && (string) $category['scope'] === 'full'));
@@ -5304,14 +6499,16 @@ final class ClosingService
         // odvádět měl, a doměrek jde zpětně od data vzniku. Systém obrat i limity znal,
         // ale datum vzniku z nich nikdy nevyvodil.
         //
-        // `error`, když plátcovství už VZNIKLO a firma plátcem není — to je stav, ve
-        // kterém se každý další doklad vystavuje špatně. Překročení dolního limitu je
-        // `warning`: povinnost nastane teprve od 1. ledna, je čas se registrovat.
+        // `error`, když plátcovství VZNIKLO uvnitř kontrolovaného období (do $rangeTo)
+        // a firma plátcem není: doklady období se pak vystavovaly špatně. Překročení
+        // dolního limitu je `warning`: povinnost nastane teprve od 1. ledna dalšího roku,
+        // tedy až po konci období. Hodnotí se k období, ne k dnešku: uzávěrka roku 2025
+        // dělaná v listopadu 2026 by jinak hlásila jako chybu roku 2025 povinnost roku 2026.
         if ($wants('vat_registration_due')) {
             $vatReg = $this->vatRegistration->evaluate($supplierId, $fiscalYear);
             if ($vatReg['applicable'] && !$vatReg['is_vat_payer'] && $vatReg['status'] !== 'below') {
                 $alreadyPayer = $vatReg['becomes_payer_on'] !== null
-                    && $vatReg['becomes_payer_on'] <= date('Y-m-d');
+                    && $vatReg['becomes_payer_on'] <= $rangeTo;
                 $checks[] = [
                     'key' => 'vat_registration_due',
                     'severity' => $alreadyPayer ? 'error' : 'warning',
@@ -5343,6 +6540,15 @@ final class ClosingService
             $checks[] = $this->checkVatClearingFresh($supplierId, $rangeFrom, $rangeTo);
         }
 
+        // Zaúčtovaná splatná daň proti spočtené. Jen za celé období (měsíční kontrola nemá
+        // s roční daní co porovnávat) a jen jako varování: částku daně vždy určuje účetní.
+        if ($wants('income_tax_591_mismatch') && $rangeFrom === $startsOn && $rangeTo === $endsOn) {
+            $incomeTaxCheck = $this->checkIncomeTaxBooked($supplierId, $period);
+            if ($incomeTaxCheck !== null) {
+                $checks[] = $incomeTaxCheck;
+            }
+        }
+
         if ($wants('income_tax_hint')) {
             $checks[] = [
                 'key' => 'income_tax_hint',
@@ -5369,6 +6575,55 @@ final class ClosingService
         // a seznam bez stropu nafoukl payload kroku u velké firmy na jednotky MB, které
         // se posílaly při každém načtení stránky. `$cap = 0` vrací vše (CSV export).
         return (new CheckFindingNormalizer())->normalizeAll($checks, $cap);
+    }
+
+    /**
+     * Zaúčtovaná splatná daň z příjmů běžného roku (obrat účtu MD pravidla
+     * `income_tax.payable`, výchozí 591, bez uzavření knih) proti dani, kterou by dnes
+     * navrhl krok Daň z příjmů: finalizované přiznání, jinak dopočet z účetnictví
+     * ({@see incomeTaxFromLedger}). Rozdíl nad haléřové zaokrouhlení (DPPO je v celých
+     * korunách) je VAROVÁNÍ, nikdy blok. Dokud krok daně nečeká na rozhodnutí a nic
+     * zaúčtováno není, kontrola jen informuje; ztrátová firma bez 591 tak nevaruje.
+     * Fyzická osoba daň na 591 neúčtuje, kontrolu nedostane.
+     *
+     * @param array<string,mixed> $period
+     * @return array{key:string,severity:string,ok:bool,value:array<string,mixed>}|null
+     */
+    private function checkIncomeTaxBooked(int $supplierId, array $period): ?array
+    {
+        if ($this->supplierTaxpayerType($supplierId) === 'fo') {
+            return null;
+        }
+        $periodId = (int) $period['id'];
+        $rule = $this->rules->resolve($supplierId, 'income_tax.payable');
+        $account = $rule !== null && $rule['debit_account_code'] !== null ? (string) $rule['debit_account_code'] : '591';
+        $posted = $this->closing->turnoverWithoutCloseBooks($supplierId, $account, (string) $period['starts_on'], (string) $period['ends_on']);
+        $status = $this->stepsMap($supplierId, $periodId)['income_tax']['status'];
+        if (abs($posted) < 0.005 && $status === 'pending') {
+            return ['key' => 'income_tax_591_mismatch', 'severity' => 'info', 'ok' => true,
+                'value' => ['reason' => 'not_posted_yet', 'account' => $account]];
+        }
+        $fromReturn = $this->taxReturns->findLastKnownTax($supplierId, (int) $period['fiscal_year'], 'po');
+        $ledger = $fromReturn === null ? $this->incomeTaxFromLedger($supplierId, (int) $period['fiscal_year']) : null;
+        $computed = $fromReturn ?? ($ledger['amount'] ?? null);
+        if ($computed === null) {
+            return ['key' => 'income_tax_591_mismatch', 'severity' => 'info', 'ok' => true,
+                'value' => ['reason' => 'not_computable', 'account' => $account, 'posted' => $posted]];
+        }
+        $computed = round((float) $computed, 2);
+        $difference = round($posted - $computed, 2);
+        return [
+            'key' => 'income_tax_591_mismatch',
+            'severity' => 'warning',
+            'ok' => abs($difference) < 1.0,
+            'value' => [
+                'account' => $account,
+                'posted' => $posted,
+                'computed' => $computed,
+                'difference' => $difference,
+                'source' => $fromReturn !== null ? 'finalized_return' : (string) ($ledger['source'] ?? 'computed_from_ledger'),
+            ],
+        ];
     }
 
     /**
@@ -5606,11 +6861,15 @@ final class ClosingService
      */
     private function checkVatClearingFresh(int $supplierId, string $rangeFrom, string $rangeTo): array
     {
+        // Neplátce bez registrace identifikované osoby nemá co zúčtovávat. Firma bez DPH osnovy
+        // vrací ze služby stav „netýká se" sama, výjimku nečeká.
+        if (!$this->vatRegisteredInRange($supplierId, $rangeFrom, $rangeTo)) {
+            return ['key' => 'vat_clearing_stale', 'severity' => 'info', 'ok' => true, 'value' => null];
+        }
         try {
             $stale = $this->vatClearing->staleForRange($supplierId, $rangeFrom, $rangeTo);
-        } catch (\Throwable) {
-            // Firma bez DPH osnovy / neplátce / jednoduché účetnictví — kontrola nedává smysl.
-            return ['key' => 'vat_clearing_stale', 'severity' => 'info', 'ok' => true, 'value' => null];
+        } catch (\Throwable $e) {
+            return $this->failedCheck('vat_clearing_stale', 'warning', $supplierId, $e);
         }
 
         return [
@@ -5619,6 +6878,30 @@ final class ClosingService
             'ok' => $stale === [],
             'value' => ['count' => count($stale), 'items' => $stale],
         ];
+    }
+
+    /** Byla firma v rozsahu plátcem DPH nebo identifikovanou osobou (na začátku nebo na konci)? */
+    private function vatRegisteredInRange(int $supplierId, string $rangeFrom, string $rangeTo): bool
+    {
+        foreach ([$rangeFrom, $rangeTo] as $date) {
+            $flags = \MyInvoice\Service\Vat\VatStatusService::flagsAt($this->db->pdo(), $supplierId, $date);
+            if ($flags['is_vat_payer'] || $flags['is_identified']) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Kontrola, která se nepodařila spočítat. Hlásí se jako nesplněná s běžnou závažností,
+     * ne jako „v pořádku": tichá zelená by schovala, že se nic neověřilo.
+     *
+     * @return array{key:string,severity:string,ok:bool,value:array{reason:string}}
+     */
+    private function failedCheck(string $key, string $severity, int $supplierId, \Throwable $e): array
+    {
+        error_log(sprintf('Kontrola uzávěrky %s (supplier %d) selhala: %s: %s', $key, $supplierId, $e::class, $e->getMessage()));
+        return ['key' => $key, 'severity' => $severity, 'ok' => false, 'value' => ['reason' => 'check_failed']];
     }
 
     private function checkAccount343VsReturn(int $supplierId, string $rangeFrom, string $rangeTo): array
@@ -5637,11 +6920,14 @@ final class ClosingService
             ];
         }
 
+        if (!$this->vatRegisteredInRange($supplierId, $rangeFrom, $rangeTo)) {
+            // Neplátce (ani identifikovaná osoba) DPH přiznání nepodává, kontrola nedává smysl.
+            return ['key' => 'vat_343_vs_return', 'severity' => 'info', 'ok' => true, 'value' => null];
+        }
         try {
             $findings = $this->vatCrossCheck->checkAccountBalanceVsReturn($supplierId, $year, $month, $vatPeriod);
-        } catch (\Throwable) {
-            // Firma bez DPH osnovy / plátcovství — kontrola nedává smysl, ne chyba.
-            return ['key' => 'vat_343_vs_return', 'severity' => 'info', 'ok' => true, 'value' => null];
+        } catch (\Throwable $e) {
+            return $this->failedCheck('vat_343_vs_return', 'warning', $supplierId, $e);
         }
 
         return [
@@ -5654,9 +6940,11 @@ final class ClosingService
 
     /**
      * Úplnost evidence karet drobného majetku vs obrat 501 „drobný majetek" (§28/5 ZoÚ —
-     * inventarizace). Součet cen karet pořízených v rozsahu ({@see SmallAssetRepository::additionsBetween})
-     * BEZ karet vyřazených ve STEJNÉM rozsahu (nákup-a-vratka v jednom období by jinak sumu
-     * zkreslil) se porovná s NETTO obratem 501.200 z ŘÁDKŮ přijatých faktur
+     * inventarizace). Součet cen karet, jejichž cena je nákladem rozsahu
+     * ({@see SmallAssetRepository::costAdditionsBetween}: pořízené v rozsahu bez karet vrácených
+     * dobropisem v témže rozsahu, karta vyřazená jinak svůj náklad měla), se porovná
+     * se stejnou sadou jako náhled časového rozlišení drobného majetku a s NETTO obratem
+     * 501.200 z ŘÁDKŮ přijatých faktur
      * ({@see SmallAssetReportService::expenseBreakdown}, expense_kind='small_asset', po
      * dobropisech). Materiální rozdíl = mezera v evidenci (nezaevidovaná karta, nebo karta
      * bez odpovídajícího řádku) — přesně ta 52 104 nezaevidovaného majetku z auditu.
@@ -5670,14 +6958,7 @@ final class ClosingService
     private function checkSmallAssetCards(int $supplierId, string $from, string $to): array
     {
         $cardsTotal = 0.0;
-        foreach ($this->smallAssets->additionsBetween($supplierId, $from, $to) as $card) {
-            $disposedAt = $card['disposed_at'] ?? null;
-            if ($disposedAt !== null) {
-                $disposed = substr((string) $disposedAt, 0, 10);
-                if ($disposed >= $from && $disposed <= $to) {
-                    continue; // pořízeno i vyřazeno v témže rozsahu — do přírůstku evidence nepatří
-                }
-            }
+        foreach ($this->smallAssets->costAdditionsBetween($supplierId, $from, $to) as $card) {
             $cardsTotal = round($cardsTotal + (float) ($card['price'] ?? 0), 2);
         }
 
@@ -5897,6 +7178,12 @@ final class ClosingService
         }
         foreach ($this->buildErrorChecks($supplierId, $period) as $c) {
             $key = (string) $c['key'];
+            // Posouzení (daňové posouzení činností, odložená daň 504) se potvrzují až PO
+            // předběžných kontrolách, takže by snímek zastaral pokaždé. Uzavření knih je
+            // kontroluje samo a průvodce je ukazuje u kroku Uzavření knih.
+            if (in_array($key, self::PRECHECK_STALE_IGNORED_KEYS, true)) {
+                continue;
+            }
             $severity = (string) ($c['severity'] ?? 'error');
             $prev = $snapshot[$key] ?? null;
 
@@ -6057,6 +7344,27 @@ final class ClosingService
     // ── interní ───────────────────────────────────────────────────────────────
 
     /**
+     * Proč do následujícího období nejde účtovat a co s tím. Rozdělaná uzávěrka (stav
+     * Uzavírá se) se dá přerušit, jen když ještě nemá uzávěrkové zápisy, jinak je napřed
+     * potřeba vzít zpět její kroky.
+     *
+     * @param array<string,mixed> $next
+     */
+    private function nextPeriodNotOpenMessage(int $supplierId, array $next): string
+    {
+        $year = (string) $next['fiscal_year'];
+        if ((string) $next['status'] === 'closing') {
+            return $this->closing->hasClosingEntries($supplierId, (int) $next['id'])
+                ? 'Následující období ' . $year . ' má rozdělanou uzávěrku (stav Uzavírá se) se zaúčtovanými zápisy. '
+                    . 'Nejprve v uzávěrce roku ' . $year . ' vezměte zpět její kroky, klikněte na Přerušit uzávěrku a akci zopakujte.'
+                : 'Následující období ' . $year . ' má rozdělanou uzávěrku (stav Uzavírá se). '
+                    . 'Nejprve v uzávěrce roku ' . $year . ' klikněte na Přerušit uzávěrku a akci zopakujte.';
+        }
+        return 'Následující období ' . $year . ' není otevřené (stav: ' . $next['status'] . '). '
+            . 'Do uzavřeného nebo schváleného roku se neúčtuje; nejprve ho znovu otevřete.';
+    }
+
+    /**
      * Vlastní/vnořená transakce (vzor PostingService) + mapování PostingException
      * na ClosingException (kód a status se propagují).
      *
@@ -6068,13 +7376,23 @@ final class ClosingService
     {
         $pdo = $this->db->pdo();
         $ownTx = !$pdo->inTransaction();
+        $outermost = $this->txDepth === 0;
+        if ($outermost) {
+            // Počítadlo okruhů párování uvolněných smazanými zápisy ({@see ClosingRepository::takeReleasedPairings()}).
+            $this->closing->takeReleasedPairings();
+        }
         if ($ownTx) {
             $pdo->beginTransaction();
         }
+        $this->txDepth++;
         try {
             $result = $work();
             if ($ownTx) {
                 $pdo->commit();
+            }
+            if ($outermost && is_array($result)) {
+                $released = $this->closing->takeReleasedPairings();
+                $result['released_pairings'] = count(array_unique(array_column($released, 'pairing_id')));
             }
             return $result;
         } catch (PostingException $e) {
@@ -6087,6 +7405,8 @@ final class ClosingService
                 $pdo->rollBack();
             }
             throw $e;
+        } finally {
+            $this->txDepth--;
         }
     }
 
@@ -6208,6 +7528,49 @@ final class ClosingService
     }
 
     /**
+     * Označí zaúčtovanou nebo potvrzenou daň z příjmů k přepočtu, protože se vrátil krok,
+     * který mění výsledek hospodaření ({@see INCOME_TAX_INPUT_STEPS}). Mění jen payload
+     * kroku (čas a autor potvrzení zůstávají). Fyzická osoba daň na 591 neúčtuje, u ní
+     * se nic neoznačuje. Volat jen uvnitř transakce se zamčeným obdobím.
+     *
+     * @return bool true = daň je nově (nebo dál) označená k přepočtu
+     */
+    private function markIncomeTaxStale(int $supplierId, int $periodId, string $causedBy): bool
+    {
+        $step = $this->stepsMap($supplierId, $periodId, true)['income_tax'];
+        if (!in_array($step['status'], ['done', 'skipped'], true) || $this->supplierTaxpayerType($supplierId) === 'fo') {
+            return false;
+        }
+        $payload = $step['payload'] ?? [];
+        $causes = (array) ($payload['stale']['caused_by'] ?? []);
+        if (!in_array($causedBy, $causes, true)) {
+            $causes[] = $causedBy;
+        }
+        $payload['stale'] = ['caused_by' => array_values($causes), 'at' => date('Y-m-d H:i:s')];
+        $this->closing->updateStepPayload($supplierId, $periodId, 'income_tax', $payload);
+        return true;
+    }
+
+    /**
+     * Příznak přepočtu daně z příjmů, platí jen pro hotový nebo přeskočený krok.
+     *
+     * @param array<string, array<string,mixed>> $steps
+     * @return array{caused_by: list<string>, at: ?string}|null
+     */
+    private function incomeTaxStale(array $steps): ?array
+    {
+        $step = $steps['income_tax'] ?? null;
+        if ($step === null || !in_array($step['status'] ?? 'pending', ['done', 'skipped'], true)) {
+            return null;
+        }
+        $stale = $step['payload']['stale'] ?? null;
+        if (!is_array($stale) || ($stale['caused_by'] ?? []) === []) {
+            return null;
+        }
+        return ['caused_by' => array_values(array_map('strval', (array) $stale['caused_by'])), 'at' => $stale['at'] ?? null];
+    }
+
+    /**
      * @param array<string, array{status:string}> $steps
      * @param list<string> $keys
      */
@@ -6219,6 +7582,20 @@ final class ClosingService
             }
         }
         return true;
+    }
+
+    /**
+     * U 504 vstupují zásoby do daňového posouzení: daň se zaúčtuje i potvrdí jako provedená až po kroku
+     * Zásoby ({@see ClosingSteps::order()}, #401). Ostatní firmy pořadí nevynucují.
+     */
+    private function assertStockBeforeIncomeTax(int $supplierId, int $periodId, bool $is504): void
+    {
+        if ($is504
+            && $this->stockStepRequired($supplierId)
+            && !$this->stepsComplete($this->stepsMap($supplierId, $periodId, true), ['stock'])) {
+            throw new ClosingException('stock_step_first',
+                'U neziskové organizace se nejdřív provede krok Zásoby: mění náklady, ze kterých vychází daňové posouzení a výpočet daně.', 409);
+        }
     }
 
     /**

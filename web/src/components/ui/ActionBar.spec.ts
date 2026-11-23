@@ -1,4 +1,5 @@
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { nextTick } from 'vue'
 import { mount } from '@vue/test-utils'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
@@ -119,5 +120,82 @@ describe('EmptyState — varianta failed', () => {
     expect(wrapper.get('[data-empty-state]').attributes('data-empty-state')).toBe('empty')
     expect(wrapper.find('[data-test="empty-state-cta"]').exists()).toBe(false)
     expect(wrapper.text()).toContain(i18n.global.t('common.empty_state.title'))
+  })
+})
+
+describe('ActionBar — skupina v nabídce', () => {
+  it('akce jedné skupiny stojí v „…" pod jedním nadpisem a od ostatních je dělí čára', async () => {
+    const wrapper = mount(ActionBar, {
+      props: { actions: [
+        { key: 'edit', label: 'Upravit', tier: 'secondary', run: () => {} },
+        { key: 'schedule', label: 'Nastavit opakování', tier: 'overflow', group: 'Plány', run: () => {} },
+        { key: 'split', label: 'Rozložit na splátky', tier: 'overflow', group: 'Plány', run: () => {} },
+        { key: 'delete', label: 'Smazat', tier: 'overflow', variant: 'danger', run: () => {} },
+      ] },
+      global: { plugins: [i18n] },
+      attachTo: document.body,
+    })
+    await wrapper.get('button[aria-expanded]').trigger('click')
+    await nextTick()
+    const menu = document.querySelector('[data-test="action-bar-menu"]')!
+    const groups = menu.querySelectorAll('[data-test="action-bar-group"]')
+    expect(Array.from(groups).map(group => group.textContent?.trim())).toEqual(['Plány'])
+    // Akce skupiny jsou pro čtečku v jednom role=group pojmenovaném nadpisem.
+    const group = menu.querySelector('[data-test="action-bar-group-items"]')!
+    expect(group.getAttribute('role')).toBe('group')
+    expect(group.getAttribute('aria-label')).toBe('Plány')
+    expect(Array.from(group.querySelectorAll('button')).map(button => button.textContent?.trim())).toEqual(['Nastavit opakování', 'Rozložit na splátky'])
+    // Jediná čára stojí mezi skupinou a Smazat, ne před skupinou.
+    const rules = menu.querySelectorAll('[data-test="action-bar-group-rule"]')
+    expect(rules).toHaveLength(1)
+    expect(rules[0].previousElementSibling).toBe(group)
+    expect(rules[0].nextElementSibling?.textContent).toContain('Smazat')
+    wrapper.unmount()
+  })
+
+  it('zamčenou akci v nabídce nespustí ani klávesa', async () => {
+    const run = vi.fn()
+    const wrapper = mount(ActionBar, {
+      props: { actions: [{ key: 'reverse', label: 'Stornovat', tier: 'overflow', disabled: true, disabledReason: 'Položka má úhrady.', run }] },
+      global: { plugins: [i18n] },
+      attachTo: document.body,
+    })
+    await wrapper.get('button[aria-expanded]').trigger('click')
+    await nextTick()
+    const item = Array.from(document.querySelectorAll('[data-test="action-bar-menu"] button')).find(button => button.textContent?.includes('Stornovat'))!
+    expect(item.getAttribute('aria-disabled')).toBe('true')
+    ;(item as HTMLButtonElement).click()
+    expect(run).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it('zamčená akce v Pokročilých nese aria-disabled', async () => {
+    const wrapper = mount(ActionBar, {
+      props: { actions: [{ key: 'purge', label: 'Vymazat', tier: 'advanced', disabled: true, disabledReason: 'Nejdřív uzávěrka.', run: () => {} }] },
+      global: { plugins: [i18n] },
+      attachTo: document.body,
+    })
+    await wrapper.get('button[aria-expanded]').trigger('click')
+    await nextTick()
+    const toggle = Array.from(document.querySelectorAll('[data-test="action-bar-menu"] button')).find(button => !button.textContent?.includes('Vymazat'))!
+    ;(toggle as HTMLButtonElement).click()
+    await nextTick()
+    const item = Array.from(document.querySelectorAll('[data-test="action-bar-menu"] button')).find(button => button.textContent?.includes('Vymazat'))!
+    expect(item.getAttribute('aria-disabled')).toBe('true')
+    wrapper.unmount()
+  })
+
+  it('zamčená akce s cílem se vykreslí jako tlačítko, ne odkaz', async () => {
+    const wrapper = mount(ActionBar, {
+      props: { actions: [{ key: 'open', label: 'Otevřít', tier: 'overflow', disabled: true, disabledReason: 'Nejdřív uložte.', to: '/other-items/1' }] },
+      global: { plugins: [i18n], stubs: { RouterLink: { template: '<a data-test="router-link"><slot /></a>' } } },
+      attachTo: document.body,
+    })
+    await wrapper.get('button[aria-expanded]').trigger('click')
+    await nextTick()
+    const menu = document.querySelector('[data-test="action-bar-menu"]')!
+    expect(menu.querySelector('[data-test="router-link"]')).toBeNull()
+    expect(Array.from(menu.querySelectorAll('button')).some(button => button.textContent?.includes('Otevřít'))).toBe(true)
+    wrapper.unmount()
   })
 })

@@ -6,6 +6,7 @@ namespace MyInvoice\Tests\Unit\Migration\Pohoda;
 
 use MyInvoice\Service\Migration\Pohoda\OtherItemImporter;
 use MyInvoice\Service\Migration\Pohoda\PohodaVat;
+use MyInvoice\Service\Migration\Shared\MigratedOtherItemPolicy;
 use PHPUnit\Framework\TestCase;
 
 final class OtherItemImporterTest extends TestCase
@@ -100,13 +101,44 @@ final class OtherItemImporterTest extends TestCase
         self::assertFalse(OtherItemImporter::isTaxAdvance('342.000', 'Záloha na daň ze mzdy'));
     }
 
-    public function testPayrollAndTaxAccountsBelongToTheirModules(): void
+    /** Mzdové závazky převedená firma v MyÚčtu nepočítá, převádějí se jako ostatní závazky. */
+    public function testOnlyTaxAccountsBelongToTheirModule(): void
     {
-        foreach (['331.000', '336', '341.001', '342.000', '343.100'] as $account) {
+        foreach (['341.001', '343.100', '343'] as $account) {
             self::assertTrue(OtherItemImporter::moduleOwned($account), $account);
+            self::assertFalse(MigratedOtherItemPolicy::payroll($account), $account);
+        }
+        foreach (['331.000', '336', '336.100', '342.000'] as $account) {
+            self::assertFalse(OtherItemImporter::moduleOwned($account), $account);
+            self::assertTrue(MigratedOtherItemPolicy::payroll($account), $account);
         }
         foreach (['315.000', '325', '364.000', '379.000'] as $account) {
             self::assertFalse(OtherItemImporter::moduleOwned($account), $account);
+            self::assertFalse(MigratedOtherItemPolicy::payroll($account), $account);
+        }
+    }
+
+    /** MDB export nevede u mezd členění DPH: bez členění a s nulovou daní je doklad mimo přiznání. */
+    public function testOtherItemWithoutVatClassAndWithoutTaxIsOutsideReturn(): void
+    {
+        $vat = $this->vat();
+        $record = $this->record();
+        $record['invoiceHeader']['classificationVAT'] = ['ids' => ''];
+        $record['invoiceHeader']['text'] = 'Sociální pojištění 10/2025';
+        self::assertSame(1200.0, OtherItemImporter::candidate($record, 'commitment', $vat)['amount']);
+        self::assertSame(1200.0, OtherItemImporter::candidate($record, 'receivable', $vat)['amount']);
+        unset($record['invoiceHeader']['classificationVAT']);
+        self::assertSame(1200.0, OtherItemImporter::candidate($record, 'commitment', $vat)['amount']);
+        $record['invoiceSummary']['homeCurrency']['priceHighVAT'] = '252';
+        self::assertNull(OtherItemImporter::candidate($record, 'commitment', $vat));
+
+        self::assertTrue(OtherItemImporter::outsideReturnWithoutVatClass('commitment', '', 0.0));
+        self::assertTrue(OtherItemImporter::outsideReturnWithoutVatClass('receivable', '', 0.004));
+        self::assertFalse(OtherItemImporter::outsideReturnWithoutVatClass('commitment', '', 210.0));
+        self::assertFalse(OtherItemImporter::outsideReturnWithoutVatClass('commitment', 'DOMESTIC', 0.0));
+        // Skutečné přijaté a vydané faktury bez členění zůstávají v přiznání.
+        foreach (['received', 'received_credit', 'issued', 'internal'] as $agenda) {
+            self::assertFalse(OtherItemImporter::outsideReturnWithoutVatClass($agenda, '', 0.0), $agenda);
         }
     }
 

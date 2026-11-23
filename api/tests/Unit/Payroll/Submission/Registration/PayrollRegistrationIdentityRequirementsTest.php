@@ -54,6 +54,30 @@ final class PayrollRegistrationIdentityRequirementsTest extends TestCase
         }
     }
 
+    /** EDV PREZEC 1.5: rodné příjmení je od podání 1. 1. 2027 nepovinné, REGZEC beze změny. */
+    public function testPrezecBirthSurnameIsOptionalOnlyWhenFiledFrom2027(): void
+    {
+        $identity = self::completeIdentity();
+        $identity['birth_surname'] = null;
+        $identifiers = ['birth_number' => '9152031234', 'ecp' => null, 'vcp' => null];
+
+        self::assertSame(['identity.birth_surname'], array_column(
+            Requirements::missing(Requirements::AGENDA_PREZEC, $identity, $identifiers, null, null, null, '2026-12-31'),
+            'field',
+        ));
+        self::assertSame(['identity.birth_surname'], array_column(
+            Requirements::missing(Requirements::AGENDA_PREZEC, $identity, $identifiers),
+            'field',
+        ));
+        self::assertSame([], Requirements::missing(
+            Requirements::AGENDA_PREZEC, $identity, $identifiers, null, null, null, '2027-01-01',
+        ));
+        self::assertSame(['identity.birth_surname'], array_column(
+            Requirements::missing(Requirements::AGENDA_REGZEC, $identity, $identifiers, null, null, null, '2027-01-01'),
+            'field',
+        ));
+    }
+
     public function testPrezecNeedsBirthNumberOrEcp(): void
     {
         $missing = Requirements::missing(

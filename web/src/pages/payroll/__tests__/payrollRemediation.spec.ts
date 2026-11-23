@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { createI18n } from 'vue-i18n'
 import { i18nMessages } from '../../../../tests/locales'
-import { averageEarningsTarget, eldpRemediation, eldpRemediationCodes, workSummaryRemediation, workSummaryRemediationCodes } from '../payrollRemediation'
+import { averageEarningsTarget, eldpRemediation, eldpRemediationCodes, healthOverviewRemediation, ozuspojRemediation, workSummaryRemediation, workSummaryRemediationCodes } from '../payrollRemediation'
 
 describe('mzdové úkony mají konkrétní nápravu', () => {
   it('pokrývá všechny blokace podkladů ELDP a souhrnu docházky', () => {
@@ -70,6 +70,19 @@ describe('mzdové úkony mají konkrétní nápravu', () => {
     expect(workSummaryRemediation('future_code', 12, '2025-03').path).toBe('/admin/support')
   })
 
+  it.each([
+    ['manual_summary_missing', 'manual_missing'],
+    ['manual_segment_invalid', 'manual_values'],
+    ['manual_segments_overlap', 'manual_overlap'],
+    ['manual_worked_days_invalid', 'manual_days'],
+  ])('otevírá podklady hodin správného vztahu a měsíce pro %s', (code, kind) => {
+    const guidance = workSummaryRemediation(code, 44, '2026-11-01')
+    expect(guidance.path).toBe('/payroll/quick-inputs?employment=44&period=2026-11&hours=1')
+    expect(guidance.actionKey).toBe('payroll.remediation.actions.manual_hours')
+    expect(guidance.problemKey).toBe(`payroll.remediation.work.problems.${kind}`)
+    expect(guidance.stepKey).toBe(`payroll.remediation.work.steps.${kind}`)
+  })
+
   it('rozlišuje nápravu převzatého měsíce od nápravy mzdy v MyÚčtu', () => {
     // Chybějící údaj převzatého měsíce se doplňuje v Kontrole převodu mezd;
     // ve mzdách MyÚčta by nebylo co opravovat, ten měsíc modul nepočítal.
@@ -93,5 +106,46 @@ describe('mzdové úkony mají konkrétní nápravu', () => {
       .toBe('/payroll/absences?employment=44&tab=absences&period=2025-03')
     expect(averageEarningsTarget(12, 2026, 3)).toBe('/payroll/absences?employment=12&tab=averages&year=2026&quarter=3')
     expect(averageEarningsTarget(12, 2026, 9)).toBe('/payroll/absences?employment=12&tab=averages')
+  })
+
+  /*
+   * Přehled ZP a oznámení OZUSPOJ vracely jen text „Doplňte … v Nastavení
+   * mezd“. Účetní pak hledala místo sama; náprava musí nést proklik na
+   * konkrétní záložku a vztah.
+   */
+  it('chyby přehledu ZP a záměru OZUSPOJ vedou na konkrétní místo nápravy', () => {
+    for (const code of ['zp_payer_account_missing', 'zp_payer_number_missing', 'zp_payer_number_invalid', 'zp_payer_business_id_missing', 'zp_payer_accounting_unit_invalid']) {
+      expect(healthOverviewRemediation(code)?.path).toBe('/payroll/settings?tab=institutions')
+    }
+    expect(healthOverviewRemediation('zp_unknown_future')).toBeNull()
+    expect(ozuspojRemediation('ozuspoj_discount_reason_missing', 44)?.path)
+      .toBe('/payroll/people?employment=44&panel=employment_terms&field=social_part_time_discount_reason')
+    expect(ozuspojRemediation('ozuspoj_discount_reason_age_not_met', 44)?.path)
+      .toBe('/payroll/people?employment=44&panel=employment_terms&field=social_part_time_discount_reason')
+    expect(ozuspojRemediation('ozuspoj_discount_reason_missing', null)).toBeNull()
+    expect(ozuspojRemediation('ozuspoj_ossz_code_missing', 44)?.path).toBe('/payroll/settings?tab=employer#payroll-employer-registration')
+    expect(ozuspojRemediation('ozuspoj_variable_symbol_missing', 44)?.path).toBe('/payroll/settings?tab=employer#payroll-employer-offices')
+    expect(ozuspojRemediation('ozuspoj_intent_overlaps', 44)).toBeNull()
+    for (const locale of ['cs', 'en']) {
+      const t = createI18n({ legacy: false, locale, messages: i18nMessages }).global.t
+      for (const guidance of [
+        healthOverviewRemediation('zp_payer_account_missing'),
+        ozuspojRemediation('ozuspoj_discount_reason_missing', 44),
+        ozuspojRemediation('ozuspoj_ossz_code_missing', 44),
+        ozuspojRemediation('ozuspoj_variable_symbol_missing', 44),
+      ]) {
+        expect(t(guidance!.actionKey)).not.toBe(guidance!.actionKey)
+      }
+    }
+  })
+
+  it('cíle proklików ZP a OZUSPOJ existují v routeru a nastavení je zná', () => {
+    const routes = readFileSync(resolve(process.cwd(), 'src/router/workspaceRoutes.ts'), 'utf8')
+    expect(routes).toContain("path: 'payroll/settings'")
+    expect(routes).toContain("path: 'payroll/people'")
+    const settings = readFileSync(resolve(process.cwd(), 'src/pages/payroll/EmployerSettings.vue'), 'utf8')
+    expect(settings).toContain("'institutions'")
+    expect(settings).toContain('id="payroll-employer-registration"')
+    expect(settings).toContain('id="payroll-employer-offices"')
   })
 })

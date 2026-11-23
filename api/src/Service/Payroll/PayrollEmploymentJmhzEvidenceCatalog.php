@@ -31,32 +31,150 @@ final class PayrollEmploymentJmhzEvidenceCatalog
         $this->codebooks = new JmhzCodebookCatalog($this->manifest);
     }
 
-    public function requireWorkplace(
-        string $municipalityCode,
-        string $municipalityName,
-        string $countryCode,
-        string $termEffectiveOn,
-    ): void
+    /**
+     * Kód obce pracoviště (10230) proti CISOB. Název obce se tu NEPOROVNÁVÁ:
+     * zdroj pravdy je kód a `work_place` je volný text smlouvy, který se
+     * s úředním názvem srovná zvlášť ({@see workplaceNameMismatch()}).
+     *
+     * Období PŘED připnutými číselníky se NEOVĚŘUJE. JMHZ platí od roku 2026
+     * a starší stav číselníků neexistuje — u vztahu, který začal dřív, tedy
+     * není co ověřit.
+     *
+     * Období PO posledním připnutém číselníku (od 1. 1. 2027 do vyhlášení
+     * číselníku na rok 2027) se ověřuje proti poslednímu vyhlášenému stavu
+     * ({@see validationDate()}): nevyhlášený číselník se neodhaduje, ale
+     * kód, který neexistoval ani v posledním vyhlášeném, je nesmysl a projít
+     * nesmí. Provenience se pro takové období nezapisuje (PayrollEmploymentValidator)
+     * a mzdový běh i příprava JMHZ ověří pracoviště znovu proti číselníku
+     * období, jakmile ho aplikace dostane.
+     */
+    public function requireWorkplaceMunicipality(string $municipalityCode, string $termEffectiveOn): void
     {
-        // Období, na které připnuté číselníky nesahají, se NEOVĚŘUJE. JMHZ platí
-        // od roku 2026 a starší stav číselníků neexistuje — u vztahu, který začal
-        // dřív, tedy není co ověřit. Dokud se tu házela chyba, nešlo uložit
-        // zaměstnance s nástupem v roce 2025 a zákazník s tím nemohl udělat nic:
-        // je to mezera v našich datech, ne v jeho. Fail-closed zůstává tam, kam
-        // patří — při sestavení podání, kde se hodnoty do JMHZ opravdu odesílají.
-        if (!$this->externalCodebooks->coversDate($termEffectiveOn)) {
+        $validOn = $this->validationDate($termEffectiveOn);
+        if ($validOn === null) {
             return;
         }
         try {
-            $this->externalCodebooks->requireKnownMunicipality(
-                $municipalityCode,
-                $municipalityName,
-                $termEffectiveOn,
-            );
-            $this->externalCodebooks->requireKnownCountry($countryCode, $termEffectiveOn);
+            $this->externalCodebooks->requireMunicipalityCode($municipalityCode, $validOn);
         } catch (JmhzCodebookValueException|JmhzCodebookUnavailableException $e) {
-            throw new \InvalidArgumentException($e->getMessage(), 0, $e);
+            throw new \InvalidArgumentException(
+                $validOn === $termEffectiveOn
+                    ? $e->getMessage()
+                    : sprintf(
+                        'Kód obce %s není ani v posledním vyhlášeném číselníku obcí CISOB (platném k %s). '
+                            . 'Číselník pro období od %s ještě nebyl vyhlášen; vyberte obec našeptávačem.',
+                        $municipalityCode,
+                        self::czechDate($validOn),
+                        self::czechDate($termEffectiveOn),
+                    ),
+                0,
+                $e,
+            );
         }
+    }
+
+    /** Kód státu pracoviště (10231) proti CZEMALFA; období se volí jako u obce. */
+    public function requireWorkplaceCountry(string $countryCode, string $termEffectiveOn): void
+    {
+        $validOn = $this->validationDate($termEffectiveOn);
+        if ($validOn === null) {
+            return;
+        }
+        try {
+            $this->externalCodebooks->requireKnownCountry($countryCode, $validOn);
+        } catch (JmhzCodebookValueException|JmhzCodebookUnavailableException $e) {
+            throw new \InvalidArgumentException(
+                $validOn === $termEffectiveOn
+                    ? $e->getMessage()
+                    : sprintf(
+                        'Kód státu %s není ani v posledním vyhlášeném číselníku států (platném k %s). '
+                            . 'Vyberte stát ze seznamu.',
+                        $countryCode,
+                        self::czechDate($validOn),
+                    ),
+                0,
+                $e,
+            );
+        }
+    }
+
+    /**
+     * Pracoviště podmínek účinných v období, pro které číselník obcí ještě
+     * nevyšel: hodnota prošla posledním vyhlášeným stavem, ověřená pro období
+     * ale není. Věta pro účetní, `null` = období číselník má (nebo předchází JMHZ).
+     */
+    public function workplaceUnpublishedPeriodNotice(string $termEffectiveOn): ?string
+    {
+        $validOn = $this->validationDate($termEffectiveOn);
+        if ($validOn === null || $validOn === $termEffectiveOn) {
+            return null;
+        }
+
+        return sprintf(
+            'Obec a stát pracoviště odpovídají poslednímu vyhlášenému číselníku (platnému k %s). Číselník pro období '
+                . 'od %s ještě nebyl vyhlášen, takže pracoviště zatím není ověřené pro měsíční hlášení. Nic dalšího '
+                . 'dělat nemusíte; ověří se znovu po vyhlášení číselníku a aktualizaci aplikace.',
+            self::czechDate($validOn),
+            self::czechDate($termEffectiveOn),
+        );
+    }
+
+    /** Úřední název obce podle kódu; `null` = kód k datu v CISOB není. */
+    public function officialMunicipalityName(string $municipalityCode, string $validOn): ?string
+    {
+        $date = $this->validationDate($validOn) ?? $validOn;
+        $label = $this->externalCodebooks->findMunicipality($municipalityCode, $date)['label'] ?? null;
+
+        return is_string($label) && $label !== '' ? $label : null;
+    }
+
+    /**
+     * Den, ke kterému se pracoviště ověřuje: datum samo, když ho připnuté
+     * číselníky pokrývají; poslední den připnutých číselníků, když datum
+     * leží po nich (číselník na další rok ještě nevyšel); `null` před nimi.
+     */
+    private function validationDate(string $date): ?string
+    {
+        if ($this->externalCodebooks->coversDate($date)) {
+            return $date;
+        }
+        $through = JmhzExternalCodebookCatalog::publishedThrough();
+
+        return preg_match('/^\d{4}-\d{2}-\d{2}$/D', $date) === 1 && $date > $through
+            && $this->externalCodebooks->coversDate($through)
+            ? $through
+            : null;
+    }
+
+    private static function czechDate(string $date): string
+    {
+        return (int) substr($date, 8, 2) . '. ' . (int) substr($date, 5, 2) . '. ' . substr($date, 0, 4);
+    }
+
+    /**
+     * Věta pro účetní, když se místo výkonu práce liší od úředního názvu obce
+     * v CISOB; `null` = shoda, nebo není s čím porovnat.
+     *
+     * Hlášení JMHZ nese v 10229 název obce a běh ho ověřuje proti CISOB, takže
+     * s neshodným názvem se měsíční hlášení nepřipraví. Uložení podmínek tím
+     * ale blokované není — je to varování s návodem, co opravit.
+     */
+    public function workplaceNameMismatch(string $municipalityCode, string $workPlace, string $validOn): ?string
+    {
+        $official = $this->officialMunicipalityName($municipalityCode, $validOn);
+        if ($official === null || hash_equals($official, $workPlace)) {
+            return null;
+        }
+
+        return sprintf(
+            'Místo výkonu práce „%s" neodpovídá úřednímu názvu obce „%s" pro kód %s v číselníku CISOB. '
+                . 'Měsíční hlášení JMHZ ho vykazuje jako název obce, takže se s ním nepřipraví. '
+                . 'Opravte místo výkonu práce na „%s", nebo kód obce pracoviště JMHZ.',
+            $workPlace,
+            $official,
+            $municipalityCode,
+            $official,
+        );
     }
 
     public function requireApzInstrument(string $code): void
@@ -226,6 +344,11 @@ final class PayrollEmploymentJmhzEvidenceCatalog
                     )))),
                 ],
                 $pick('duvod_ukonceni_sluz_pomeru'),
+            ),
+            // Nabídka 2027 je výčet EDV REGZEC27 1.5.0.3 (s 2119), shodný s 2026;
+            // 2219 z iSMS ČSÚ je tisková chyba sdělení č. 401/2024 Sb.
+            'employment_status_codes' => PayrollRegistrationEmploymentStatusCodebook::options(
+                JmhzSpecVersion::V2027,
             ),
         ];
     }

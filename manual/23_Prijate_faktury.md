@@ -32,9 +32,32 @@ Oproti vystaveným fakturám se liší takto:
 |---|---|---|
 | průběžně | Zadat nově došlé faktury | `Nákup → Přijaté faktury`, postup v [§ 23.3](#233-krok-za-krokem-zadat-prijatou-fakturu) |
 | průběžně | Zpracovat doklady z fronty (portál, e-mail) | `Nákup → Příchozí doklady`, postup v [§ 23.5](#235-krok-za-krokem-zpracovat-prichozi-doklady) |
+| jednou | Nastavit načítání faktur z e-mailové schránky | `Nákup → Doklady z e-mailu`, postup v [§ 23.11.26](#231126-doklady-z-e-mailu) |
 | před splatností | Zaplatit faktury, hromadně nebo přes QR | [§ 23.6](#236-krok-za-krokem-zaplatit-fakturu), hromadně [Platební příkazy](26_Platebni_prikazy.md) |
 | po přijetí a uhrazení | Zaúčtovat doklady do deníku | detail faktury nebo seznam, postup v [§ 23.7](#237-krok-za-krokem-zauctovat-fakturu) |
 | po uzávěrce měsíce | Předat doklady účetní | [Export přijatých](24_Export_prijatych.md) |
+
+### Filtry podkladů
+
+V **Filtrech** seznamu přijatých faktur jsou dva nezávislé výběry:
+
+| Filtr | Co kontroluje |
+|---|---|
+| **PDF / sken** | Uložené PDF či nahranou fotku, včetně dostupných PDF a obrázků v připojených Dokumentech. |
+| **ISDOC / XML** | Archivovaný zdroj importu: ISDOC, ISDOCX, Pohoda XML nebo iDoklad/Fakturoid JSON. |
+
+Oba nabízejí vše, přiložen a chybí. Lze je kombinovat s rokem,
+dodavatelem a dalšími filtry a uložit do pohledu. Například **PDF / sken: chybí**
+a **ISDOC / XML: přiložen** vyhledá importované faktury bez vizuálního podkladu.
+
+Filtry kontrolují přítomnost podkladu v aplikaci, nikoli jeho obsah nebo pravost;
+připojeným PDF může být i smlouva či dodací list. Neověřují fyzickou dostupnost
+souboru na disku. Dokumenty v koši nebo bez oprávnění k zobrazení se nezapočítávají.
+Bez práva číst Dokumenty se vizuální podklad počítá jen z vlastního archivu faktury.
+Vlastní tiskové PDF vytvořené myÚčtem ani soubory v externím archivu se nepočítají.
+PDF ve zdrojovém archivu patří pouze mezi vizuální podklady; libovolné XML
+připojené v Dokumentech nenahrazuje strukturovaný zdroj importu.
+Přílohy jsou volitelné a **Chybí** neznamená chybu účetního dokladu.
 
 ## 23.2 Než začnete
 
@@ -73,7 +96,8 @@ Oproti vystaveným fakturám se liší takto:
 2. Přetáhněte PDF nebo fotku (JPG, PNG, WEBP, HEIC) do zóny nad formulářem. Soubor se připraví jako příloha.
 3. Vyplňte povinná pole (viz [§ 23.11.5](#23115-povinna-pole)): **Dodavatel**, **Číslo dokladu dodavatele**, **Typ dokladu**,
    **Datum vystavení**, **DUZP**, **Splatnost**, **Měna faktury**.
-4. Přidejte položky tlačítkem **+ Přidat položku**. Souhrn dole se přepočítá sám.
+4. Přidejte položky tlačítkem **+ Přidat položku**. Souhrn dole se přepočítá sám. Koncept
+   lze uložit i bez položek a doplnit později.
 5. Uložte. Originál se po prvním uložení automaticky archivuje mimo webroot.
 
 Pro nestrukturované PDF můžete podle oprávnění použít také [AI extrakci](25_AI_extrakce.md).
@@ -103,10 +127,13 @@ v sekci **Originální PDF od dodavatele**.
    a **Daňově uznatelný náklad**.
 2. Pokud je dodavatel neplátce, nastavte přepínač **Dodavatel je plátce DPH** podle skutečnosti.
    Aplikace ho vyplní podle ARES a VIES, u neplátce nastaví **Bez nároku na odpočet**.
+   Tlačítko **ARES** (u zahraničního dodavatele bez IČO **VIES**) vedle výběru dodavatele porovná
+   jeho kartu s registrem a zaškrtnuté rozdíly (název, adresa, IČO, DIČ, plátcovství DPH) uloží
+   do karty. Změněné plátcovství se promítne i do rozpracovaného dokladu.
 3. Je-li doklad v režimu přenesené daňové povinnosti, zaškrtněte **Reverse charge** a postupujte podle
    [§ 23.11.10](#231110-reverse-charge-z-eu-porizeni-zbozi-vs-sluzba).
 4. U položek vyberte **Druh nákladu** (**Služba**, **Materiál**, **Drobný majetek**, **Drobný nehmotný majetek**,
-   **Dlouhodobý majetek**). Šipka za druhem nákladu rozbalí podrobnosti položky: **Nákladový účet** a **Členění DPH**.
+   **Dlouhodobý majetek**). Šipka za druhem nákladu rozbalí podrobnosti položky: **Nákladový účet**, **Členění DPH**, **Kód zboží dodavatele** a **EAN**. Podle kódu a EAN se řádek páruje se skladovou kartou, špatně přečtený údaj tu opravíte. EAN s chybnou kontrolní číslicí se neuloží.
    Do výkazů DPH jde členění položky. Liší-li se od hlavičky, je to u položky vidět a u hlavičky se nabídne
    **Použít na všechny položky**; změna hlavičky sama položky nepřepíše. Je-li doklad **Bez nároku na odpočet**,
    ukazuje položka u kódu „bez nároku podle hlavičky" a do DPH nejde; kód s nárokem (40, 41) u ní editor označí jako
@@ -124,14 +151,25 @@ upravit bez administrátorského zásahu.
 
 ## 23.5 Krok za krokem: zpracovat příchozí doklady
 
-1. Otevřete `Nákup → Příchozí doklady`.
-2. Doklady do fronty dostanete z klientského portálu, e-mailem nebo je nahrajete sami tlačítkem **Nahrát do fronty**. Na telefonu a tabletu je vedle něj tlačítko **Vyfotit**: vyfotí doklad fotoaparátem, na fotce ho najde a navrhne ořez (rohy jdou v náhledu posunout, ořez jde vypnout a nahrát celou fotku), doklad narovná a zmenší (zhruba do 150 kB) a po potvrzení ho nahraje stejně jako ostatní soubory. Ořez i zmenšení proběhnou v telefonu, fotka nikam jinam neodchází. Nejlépe se doklad najde na tmavém podkladu. Stejné tlačítko je u nahrání přílohy v editoru nové přijaté faktury.
+1. Otevřete `Nákup → Příchozí doklady`. Stránka je pracovní fronta účetní. Klient sem nechodí, doklady předává v `Dokumenty → Předat doklady účetní` a odtud se objeví tady.
+2. Doklady do fronty dostanete z klientského portálu, e-mailem nebo je nahrajete sami tlačítkem **Nahrát do fronty**. Vedle něj je tlačítko **Vyfotit**: na telefonu a tabletu vyfotí doklad fotoaparátem, na počítači s připojenou kamerou otevře živý náhled z webkamery (bez kamery se tlačítko na počítači neukáže). Na fotce doklad najde a navrhne ořez (rohy jdou v náhledu posunout, ořez jde vypnout a nahrát celou fotku), doklad narovná a zmenší (zhruba do 150 kB) a po potvrzení ho nahraje stejně jako ostatní soubory. Ořez i zmenšení proběhnou v prohlížeči, fotka nikam jinam neodchází. Nejlépe se doklad najde na tmavém podkladu. Stejné tlačítko je u nahrání přílohy v editoru nové přijaté faktury. Stejná obrazovka s návrhem ořezu se otevře i na fotku, kterou vyberete ze souborů nebo přetáhnete do nahrávacího pole — ořez v ní jde vypnout a nahrát celou fotku. U více fotek najednou nabídne **Přeskočit ořez u ostatních**, které zbývající fotky nahraje beze změny. Na počítači se při výběru více než tří fotek ořez nenabízí.
 3. U dokladu zvolte, jak ho zpracovat: vytěžit přes ISDOC nebo AI, přepsat ručně, odmítnout, nebo klienta požádat o náhradu.
+   Zaškrtnutím **Načíst bez položek** před vytěžením dostane AI vytěžený doklad jen jeden řádek na sazbu DPH
+   (viz [§ 25.4](25_AI_extrakce.md#254-krok-za-krokem-importovat-prijate-faktury-z-pdf)).
 4. Patří-li doklad jiné vaší firmě, klikněte na **Přesunout do …** u navržené firmy, nebo na **Přesunout do jiné firmy** a firmu vyberte.
 5. Pro více dokladů najednou je zaškrtněte a použijte hromadnou akci, například **Vytěžit označené**.
 
+Originál vybraného dokladu je vedle údajů o dokladu. Tlačítkem **Skrýt originál** ho schováte; umístění a šířku nastavíte stejně jako v editoru faktury (viz [§ 23.11.4](#23114-nahrani-dokladu-drag-and-drop-isdoc-a-limity)).
+
 **Jak poznáte, že je hotovo:** z dokladu vznikl koncept přijaté faktury a originál se přesunul do archivu
 (složka **Příchozí doklady / Archiv / rok / měsíc**).
+
+Doklad zůstane konceptem, dokud ho nepřijmete. Nese-li vytěžení varování (například přenesená daňová
+povinnost, doklad podle textu už uhrazený nebo dodavatel neplátce DPH), otevře se nejdřív kontrola
+vytěžení a teprve po ní editor.
+
+Pokud se vytěžení nedokončí (například se přeruší spojení), vrátí se doklad po 10 minutách mezi čekající
+s upozorněním, že zpracování bylo přerušeno. Pak ho vytěžte znovu, nebo smažte z fronty.
 
 Podrobnosti o frontě, hromadných akcích a odmítnutí jsou v [§ 23.11.3](#23113-prichozi-doklady).
 
@@ -180,12 +218,33 @@ v kapitole [Platební příkazy](26_Platebni_prikazy.md).
 **Jak poznáte, že je hotovo:** u faktury je účetní ikona **Zaúčtováno** (datum je v tooltipu)
 a funguje proklik **Zobrazit v deníku**.
 
+Box **Náhled zápisu** pod položkami a pole Předkontace a Protiúčet na řádku vidí uživatel s právem zaúčtovat. Je-li na instalaci zapnutá volba
+**Uložit a zaúčtovat** (viz [§ 23.11.18](#231118-zauctovani-do-deniku-a-tlacitko-zauctovat)), zaúčtujete rovnou z editoru
+tlačítkem **Uložit a zaúčtovat**; koncept se při tom zároveň přijme. Jinak doklad uložte a zaúčtujte z detailu.
+
 Tlačítko se u dokladu typu **Záloha** nezobrazuje: zálohová výzva není účetní předpis, účtuje se
 až její skutečná úhrada. Kromě ručního zaúčtování lze zapnout automatické zaúčtování při přijetí
 (viz [§ 96.11](96_Nastaveni.md#969-krok-za-krokem-automaticke-uctovani)).
 
 Pokud zaúčtování selže, ukáže aplikace hlášku (chybějící kurz, uzavřené období, nevyvážený zápis,
 chybějící účet v osnově). Tabulka hlášek je v [§ 16.1.3](16_Faktura_PDF.md#16103-zauctovani-do-deniku).
+
+### 23.7.1 Hromadné akce
+
+Mnoho přijatých faktur najednou změníte z nabídky **…** v záhlaví seznamu, položka
+**Hromadné akce** (se zaškrtnutými fakturami i v liště výběru dole). Akce pracuje s vybranými
+fakturami, nebo se všemi podle filtru seznamu, nejvýš s 500 doklady. Umí nastavit dimenze
+(například středisko všem fakturám jednoho dodavatele, s volbou přepsat, jen kde je prázdné,
+nebo vymazat), změnit předkontaci položek a doklady znovu zaúčtovat, přeúčtovat účet v jejich
+zápisech a smazat koncepty. Vždy nejdřív proběhne běh nanečisto, provedení jde (kromě smazání)
+vrátit. Postup je v [§ 52.8.2](52_Ucetni_denik.md#5282-krok-za-krokem-hromadne-akce-v-seznamech),
+pravidla a oprávnění v [§ 52.14.18](52_Ucetni_denik.md#521418-hromadne-akce-v-seznamech).
+
+Členění DPH položek (například správní poplatek na kód `mimo` nebo `42`) změníte operací
+**Změnit členění DPH**, u vybraných položek napříč doklady v režimu **Položky dokladů**. Samotný
+kód se mění opravou DPH zařazení bez storna ([§ 23.11.24](#231124-oprava-dph-zarazeni-bez-storna)),
+doklady v podaném období DPH a doklady s rozpisem DPH se vynechají. Postup je
+v [§ 52.8.3](52_Ucetni_denik.md#5283-krok-za-krokem-cleneni-dph-a-polozky-dokladu).
 
 ## 23.8 Krok za krokem: spárovat zálohu s vyúčtovací fakturou
 
@@ -196,10 +255,48 @@ Bez propojení by se náklad počítal dvakrát.
 2. V boxu **Zálohová faktura** klikněte na **Spárovat se zálohou** a vyberte zálohu od stejného dodavatele.
 3. Nevyúčtovanou zálohu můžete spárovat i z jejího detailu tlačítkem **Spárovat s fakturou**.
 
-**Jak poznáte, že je hotovo:** v boxu je odkaz na zálohu a tlačítko **Zrušit propojení**. V detailu zálohy
-vidíte, kterou fakturou je vyúčtována.
+**Jak poznáte, že je hotovo:** v boxu je seznam navázaných záloh, u každé odkaz a tlačítko **Odpojit**. V detailu
+zálohy vidíte, kterou fakturou je vyúčtována.
+
+Vyúčtovává-li finální faktura víc záloh téhož dodavatele (třeba roční vyúčtování energií s měsíčními zálohami),
+klikněte v boxu na **Přidat zálohu** a vyberte další. Navázané zálohy zůstávají, **Odpojit** zruší vazbu jen
+u jedné z nich.
+
+Zálohy můžete navázat i přímo v editoru finální faktury: v boxu pod druhem dokladu klikněte na **Spárovat se zálohou**,
+další přidáte tlačítkem **Přidat zálohu**. U nové faktury se vazby uloží spolu s dokladem.
 
 Pravidla propojení a jejich dopad na náklady, daň a DPH jsou v [§ 23.11.16](#231116-propojeni-zalohy-s-vyuctovaci-fakturou-proti-dvojimu-zapocteni).
+
+### 23.8.1 Vyúčtování zálohy, ke které dodavatel vystavil daňový doklad k platbě
+
+Dělejte to, když jste zálohu zaplatili, dodavatel k ní vystavil daňový doklad k přijaté platbě (DDKP) a pak poslal
+konečnou fakturu, která zálohu odečítá. DPH ze zálohy jste uplatnili už z DDKP, konečná faktura proto smí do přiznání
+přinést jen rozdíl.
+
+1. Zadejte zálohovou fakturu, zaplaťte ji z banky nebo pokladny (zaúčtuje se na 314) a zadejte k ní DDKP s vazbou
+   na zálohu (typ dokladu *Daňový doklad k platbě*). DDKP zaúčtujte.
+2. Zadejte konečnou fakturu tak, jak ji poslal dodavatel, tedy položky plnění v plné výši.
+3. Navažte ji na zálohu (**Spárovat se zálohou** v editoru nebo v detailu).
+4. Klikněte na **Doplnit odpočet zálohy z DDKP**. Aplikace přidá za každý DDKP a sazbu DPH záporný řádek se základem
+   a daní DDKP, označený jako **Odpočet zálohy**. Částky porovnejte s odpočtem zálohy na dokladu dodavatele.
+5. Doklad uložte a zaúčtujte.
+
+Když faktura vyúčtovává víc záloh, nabídka **Doplnit odpočet zálohy z DDKP** je u každé zálohy s DDKP zvlášť
+a tlačítko **Vložit odpočty všech záloh** je doplní najednou. Každý odpočtový řádek nese číslo své zálohy.
+Záloha bez DDKP odpočtový řádek nemá: faktura ji odečte v hlavičce jako **Uhrazenou zálohu**.
+Výjimkou je záloha převzatá v počátečních stavech, jejíž DDKP i úhrada proběhly v předchozím programu: odečte se
+odpočtovým řádkem v plné částce zálohy s DPH dopočtenou ze základní sazby (nebo ze sazby na záloze), stejně jako
+ji uvádí doklad dodavatele.
+
+**Jak poznáte, že je hotovo:** faktura má celkovou částku po odečtu zálohy (při přeplatku zápornou), **Uhrazená záloha**
+v hlavičce je nulová a zápis v deníku obsahuje náklad za plnění, DPH faktury (MD 343), vrácení DPH z DDKP (D 343)
+a zúčtování zbytku zálohy (MD 321 / D 314). Účet 314 zálohy skončí na nule. V přiznání k DPH a v kontrolním hlášení
+je za období konečné faktury jen rozdíl mezi daní faktury a DDKP.
+
+Příklad: záloha 890 Kč (735,54 + 154,46 DPH), DDKP v září. Konečná faktura v říjnu: plnění 665,66 + 139,79 DPH,
+odpočet zálohy −735,54 a −154,46 DPH, celkem −84,55 Kč. Za říjen jde do DPH základ −69,88 a daň −14,67.
+V deníku je náklad 665,66, MD 343 139,79, D 343 154,46, D 321 650,99 a zúčtování MD 321 / D 314 735,54.
+Na 321 zůstane přeplatek 84,55 Kč, který vám dodavatel vrátí (po zaokrouhlení dokladu 84,38 Kč).
 
 ## 23.9 Krok za krokem: automatický import ze složky (scan inbox)
 
@@ -233,7 +330,9 @@ Tento postup je pro správce. Dodavatelé vám posílají PDF e-mailem nebo mát
 | Při nahrání hláška, že soubor už byl zpracován | Soubor se stejným otiskem v systému už je | Otevřete existující doklad podle čísla faktury v hlášce |
 | Při skenu inbox hláška „Koncept z tohoto souboru byl smazán“ | Smazaný koncept si aplikace pamatuje | Chcete-li soubor přesto zpracovat, nahrajte ho ručně |
 | Hláška „Nemáte založenou žádnou korunovou pokladnu - doklad zůstane neuhrazený“ | Pro platbu hotově není korunová pokladna | Založte pokladnu v [Pokladně](32_Pokladna.md) |
-| Zaúčtování zálohy neproběhlo automaticky | Záloha nebo DDKP s vlastním daňovým dokladem | Postupujte podle hlášky, zúčtování zapište ručním zápisem |
+| Konečnou fakturu k záloze s DDKP nejde zaúčtovat, detail hlásí chybějící odpočet zálohy | Faktura zálohu neodečítá, DPH z DDKP by se uplatnila podruhé | Klikněte na **Doplnit odpočet zálohy z DDKP**, viz [§ 23.8.1](#2381-vyuctovani-zalohy-ke-ktere-dodavatel-vystavil-danovy-doklad-k-platbe) |
+| Zaúčtování konečné faktury hlásí, že odpočet zálohy nesedí s DDKP nebo s úhradou zálohy | Odpočtový řádek má jiný základ nebo daň než DDKP, nebo úhrada zálohy není celá zaúčtovaná | Opravte odpočtový řádek podle DDKP, zaúčtujte úhradu zálohy, případně zapište zúčtování ručním zápisem |
+| Zaúčtování zálohy neproběhlo automaticky | Odpočet zálohy s DDKP u faktury bez plného nároku na odpočet, s přenesenou daňovou povinností nebo s rozpisem DPH | Postupujte podle hlášky, zúčtování zapište ručním zápisem |
 
 ## 23.11 Podrobnosti a pravidla
 
@@ -309,8 +408,12 @@ Filtr **Neuhrazené k datu** na rozdíl od volby **Pouze neuhrazené** (dnešní
 u kterých k tomu dni nebyl uhrazen celý závazek. Doklad zaplacený až po tomto dni se proto ve výpisu objeví, i když má dnes
 stav **Uhrazená**. Stejná funkce a definice úhrady je i u [vystavených faktur](14_Faktury.md#14114-filtry)
 a sedí na [Saldokonto](60_Saldokonto.md). Další filtry: **Zaúčtování** (Vše, Zaúčtováno, Nezaúčtováno, jen podvojné
-účetnictví) a **Předání k úhradě** (viz [Platební příkazy](26_Platebni_prikazy.md)). Filtry jdou do adresy stránky
-a do uložených filtrů stejně jako u vydaných faktur. Na rozdíl od vydaných faktur seznam přijatých **nemá žádný CSV export**
+účetnictví), **Předání k úhradě** (viz [Platební příkazy](26_Platebni_prikazy.md)) a se zapnutými dimenzemi
+**Dimenze**: doklad vyhovuje, když hodnotu (výchozí včetně podřízených) nese na hlavičce, na některé položce nebo
+v rozpadu, a doklad rozdělený mezi víc hodnot se ukáže u každé z nich celý. Pravidla jsou stejná jako u vydaných faktur
+([§ 14.11.4](14_Faktury.md#14114-filtry)), podíl hodnoty na DPH ukáže Kniha DPH s filtrem dimenze
+([§ 42.6](42_Kniha_DPH.md#426-krok-za-krokem-kniha-dph-a-soupis-kh-podle-dimenze)). Filtry jdou do adresy stránky,
+do uložených filtrů, do knihy přijatých faktur a do hromadných akcí stejně jako u vydaných faktur. Na rozdíl od vydaných faktur seznam přijatých **nemá žádný CSV export**
 v seznamu. Doklady předáte přes [Export přijatých](24_Export_prijatych.md) (ZIP, ISDOC, Pohoda, CSV tabulka).
 
 #### Nákladová šablona a pravidlo účtování z detailu
@@ -328,6 +431,12 @@ Neobsahuje pevnou výchozí částku. Pravidlo samo nemění fakturu. Úhrady fa
 Otevřete-li detail ze seznamu přijatých faktur, vlevo od odkazu **Zpět na seznam** jsou šipky předchozí a další
 faktury (zkratky `[` a `]`), které listují v pořadí a s filtry seznamu, ze kterého jste přišli; detail otevřený
 přímým odkazem šipky nemá.
+
+**Kniha přijatých faktur.** Tlačítko vpravo nahoře v seznamu stáhne sestavu všech dokladů odpovídajících
+aktuálnímu filtru jako PDF na šířku nebo tabulku XLSX, seřazenou podle čísla dokladu. Sloupce, pravidla pro
+koncepty a storna i součty po měnách jsou stejné jako u knihy vystavených faktur
+([§ 14.7.1](14_Faktury.md#1471-kniha-vystavenych-faktur)); místo odběratele uvádí dodavatele a variabilní symbol
+bere z platebního VS, jinak z čísla dokladu dodavatele.
 
 ### 23.11.2 Stavy přijaté faktury
 
@@ -387,6 +496,13 @@ Do fronty vede několik cest:
 | **Nahrát do fronty** přímo na stránce Příchozí doklady, až 5000 souborů najednou, nahrávají se postupně a tlačítko ukazuje průběh | účetní u dokladů, které přišly mimo portál (e-mailem, papírově) |
 | **Nahrát účtenku** u platby kartou bez dokladu, když není AI nebo vytěžení selže | účetní, doklad je rovnou navázaný na platbu kartou |
 | Příloha e-mailu z IMAP schránky, i ze schránky jiné firmy, která rozděluje doklady mezi firmy ([§ 30.11.19](30_Bankovni_ucty.md#301119-jedna-schranka-pro-vice-firem)) | automaticky při skenu schránky |
+
+Filtrem **Zdroj** nad seznamem zobrazíte jen doklady z jedné cesty: **Od klienta (portál)**, **Na vyžádání**,
+**Nahráno ručně** nebo **E-mail**. Odkaz ze stránky `Nákup → Doklady z e-mailu` otevře frontu rovnou se zdrojem E-mail.
+
+Stránka je určená účetní. Nahoře to připomíná informační rámeček s odkazem na předání dokladů klientem
+(`Dokumenty → Předat doklady účetní`, vidí ho jen uživatel s právem předávat doklady) a na stránku
+[Doklady z e-mailu](#231126-doklady-z-e-mailu).
 
 Účetní tak nemusí čekat na klienta: co dostane e-mailem nebo naskenuje, vloží do fronty sama a zpracuje to stejným
 postupem. Při zapnutých dimenzích jde při nahrání zvolit i středisko (a další dimenze), propíše se do hlavičky
@@ -480,8 +596,18 @@ HEIC) aplikace před archivací převede na PDF. Z `.isdocx` se vedle strojovéh
 zdroje (ISDOC, ISDOCX) zůstává náhled sbalený, data jsou tam přesná. U konceptu vytěženého AI z prostého PDF (nebo fotky)
 editor náhled otevře rovnou, ať máte originál na očích při kontrole vytěžených hodnot (sazba DPH, plátcovství dodavatele
 apod.). Jakmile doklad jednou potvrdíte (přejde z konceptu dál), náhled se při dalším otevření editoru nevnucuje. Panel
-můžete kdykoli sbalit nebo otevřít tlačítkem nad ním. Na široké obrazovce se v detailu i editoru otevře vpravo vedle dokladu
-a při posouvání formuláře zůstává viditelný. Na užší obrazovce zůstane pod formulářem.
+můžete kdykoli sbalit nebo otevřít tlačítkem nad ním.
+
+Náhled je v detailu i editoru vpravo vedle dokladu a při posouvání formuláře zůstává viditelný. Vejde se i na 16" notebook;
+když je místa málo (úzké okno, rozdělená pracovní plocha), přesune se sám pod formulář.
+
+- **Vpravo / pod formulářem:** umístění přepnete ikonami v hlavičce náhledu.
+- **Šířka:** táhněte myší svislé rozhraní mezi formulářem a náhledem. Na klávesnici se na rozhraní dostanete tabulátorem a
+  měníte ho šipkami vlevo a vpravo, se Shiftem po větších krocích. **Home** a **End** ho posunou na krajní polohu, **Enter**
+  nebo dvojklik vrátí výchozí šířku. Formulář i náhled si drží minimální šířku, aby zůstaly použitelné.
+
+Otevření, umístění i šířku si aplikace pamatuje u vašeho uživatele, a to zvlášť pro přijaté doklady, vydané doklady, pokladnu,
+frontu příchozích dokladů a okno kontroly vytěžení.
 
 Limity:
 
@@ -502,7 +628,7 @@ jako samostatná položka a promítne se do částky k úhradě, QR platby, plat
 |---|---|
 | **Dodavatel** | Vyberte ze seznamu nebo začněte psát. Vyhledávání nabídne i firmu vedenou pouze jako odběratel, po úspěšném uložení faktury se jí doplní role dodavatele. Bez hledaného textu se nabízejí jen dodavatelé. Pokud firma v adresáři chybí, klikněte na **+ Vytvořit nového dodavatele** a využijte ARES podle IČO. |
 | **Číslo dokladu dodavatele** | Tak, jak je vytištěno na originálu (například `FA-2026-001`). Maximálně 50 znaků. Jedinečné pro dvojici dodavatel a datum vystavení, stejnou fakturu nelze importovat dvakrát. |
-| **Naše číslo** | Volitelné. Pokud ho necháte prázdné, vygeneruje se automaticky podle **šablony** při přechodu na stav Přijatá. Výchozí šablona je `{PP}{YY}{MM}{CCC}` (například `PF2602001`), prefix `{PP}` odpovídá daňovému typu (viz [§ 23.11.7](#23117-danova-uznatelnost-a-narok-na-odpocet)): **PF/PN** plný nárok (uznatelný/ne), **KU/KN** krácený §75, **KR/RN** krácený §76, **NU/NN** bez nároku. Počítadlo je za měsíc (přeteče na 4 a více míst nad 999 dokladů). Šablonu změníte v `Nastavení`, záložce **Číslování faktur**, v části **Přijaté doklady** (například `PF-{YYYY}{MM}-{CCCC}` dá `PF-202605-0001`). Při ručním zadání čísla aplikace hlídá kolize a automatický generátor obsazená čísla přeskakuje. |
+| **Naše číslo** | Volitelné. Pokud ho necháte prázdné, vygeneruje se automaticky podle **šablony** při přechodu na stav Přijatá. Výchozí šablona je `{PP}{YY}{MM}{CCC}` (například `PF2602001`), prefix `{PP}` odpovídá daňovému typu (viz [§ 23.11.7](#23117-danova-uznatelnost-a-narok-na-odpocet)): **PF/PN** plný nárok (uznatelný/ne), **KU/KN** krácený §75, **KR/RN** krácený §76, **NU/NN** bez nároku. Počítadlo je za měsíc (přeteče na 4 a více míst nad 999 dokladů). Měsíc a rok čísla se berou z data podle nastavení **Číslovat přijaté doklady podle data** (výchozí je datum vystavení, viz „Číslování podle data“ v [§ 23.11.7](#23117-danova-uznatelnost-a-narok-na-odpocet)). Šablonu změníte v `Nastavení`, záložce **Číslování faktur**, v části **Přijaté doklady** (například `PF-{YYYY}{MM}-{CCCC}` dá `PF-202605-0001`). Při ručním zadání čísla aplikace hlídá kolize a automatický generátor obsazená čísla přeskakuje. |
 | **Typ dokladu** | Faktura, Účtenka / paragon, Dobropis, Záloha, Daňový doklad k platbě (pro filtrování v seznamu). |
 | **Datum vystavení** | Z faktury. |
 | **DUZP** (datum uskutečnění zdanitelného plnění) | Klíčové pro období DPH. Výchozí je datum vystavení. U **reverse charge** se doklad zařazuje do období DPH právě podle DUZP (povinnost přiznat daň vzniká bez ohledu na doručení dokladu). U **pořízení zboží z EU** je DUZP dle § 25 ZDPH **15. den měsíce následujícího po dodání**, pokud doklad nebyl vystaven dříve, editor to připomene nápovědou. |
@@ -539,9 +665,13 @@ dodavatele**. Starší zápisy si nechávají své číslo. Kontrolní hlášen�
 
 ### 23.11.6 Položky a druh výdaje
 
-U hodinových služeb lze zadat dobu jako `H:MM` a hodinovou sazbu až na šest desetinných míst, stejně jako u
+Cenu za jednotku lze zadat až na šest desetinných míst u každé položky, i u skladové. Levný materiál
+kupovaný po statisících kusů tak drží přesnou cenu: 250 000 ks × 0,0108 EUR dá řádek 2 700,00 EUR. Celkem
+za řádek, rekapitulace DPH i součet dokladu zůstávají na haléře. Detail, PDF a exporty ukazují víc než dvě
+místa jen u ceny, která je má.
+
+U hodinových služeb lze zadat dobu jako `H:MM`, stejně jako u
 [vystavené faktury](15_Faktura_editor.md#1596-vykaz-vicepraci). Čas a sazbu přepište podle dokladu dodavatele.
-Součty a rekapitulace DPH zůstávají v peněžních částkách. Skladové ceny mají nadále dvě desetinná místa.
 
 Tlačítkem **+ Přidat položku** přidáte řádek. U každého řádku se zadává:
 
@@ -579,6 +709,22 @@ Dříve uložený účet zůstává zachovaný. Bez vlastního účtu se účet 
 Má-li syntetický účet více způsobilých analytik, aplikace z nich sama první nevybere. Konkrétní analytiku určí účet
 položky nebo pravidlo; jediná způsobilá analytika se může doplnit automaticky. Již uložený konkrétní účet se zachová.
 Pravidlo v režimu **Jen navrhovat** nabídne také analytický účet, i když se druh nákladu nemění.
+
+#### Předkontace a účet Dal na řádku
+
+V podvojném účetnictví jsou v podrobnostech položky vedle nákladového účtu (strana MD) ještě dvě
+pole, takže řádek nese celou dvojici účtů:
+
+- **Předkontace** vybere předkontaci řádku. Doplní nákladový účet (MD) a závazek (Dal), pokud je
+  řádek ještě nemá. Vyplněný účet má vždy přednost.
+- **Účet Dal (závazek)** je protiúčet řádku, například 325 u účtenky. Prázdné pole použije závazek
+  z předkontace dokladu (obvykle 321). Zadat lze aktivní závazkový účet třídy 3 mimo DPH a zálohy.
+  Všechny řádky dokladu musí mít stejný protiúčet, protože úhrada z banky nebo pokladny uzavírá
+  jeden závazek dokladu. U finální faktury navázané na zálohu a u daňového dokladu k platbě se
+  protiúčet z řádku použít nedá.
+
+Středisko, zakázku a další dimenze řádku zadáte ikonou dimenzí u popisu položky (viz
+[Dimenze](114_Dimenze.md)), do deníku se propíšou na řádky zápisu.
 
 U uložených řádků může aplikace zobrazit návrh se zdrojem, jistotou a stručným důvodem. Druh i účet se do řádku zapíšou až
 po kliknutí na **Použít**, nejasný nebo rozporný návrh se sám neaplikuje. Ruční volba má přednost a u dobropisu se zachová
@@ -654,19 +800,63 @@ aplikace nastavení neuloží. Přepnutí se týká jen nově přijatých doklad
 přečíslováním (viz níže). Změníte-li u očíslovaného dokladu typ, číslo zůstane ze staré řady, dokud měsíc
 nepřečíslujete.
 
+**Číslování podle data.** Ve stejné části nastavení zvolíte v poli **Číslovat přijaté
+doklady podle data**, z kterého data dostane interní číslo měsíc a rok: **Datum vystavení** (výchozí), **Datum přijetí**
+nebo **DUZP**. Faktura vystavená 28. 10. a přijatá 3. 11. dostane podle data přijetí číslo listopadu (`PF2611001`),
+podle data vystavení číslo října (`PF2610001`). Doklad, který zvolené datum nemá (například bez DUZP), se čísluje podle
+data vystavení. Nastavení platí pro každé přidělení čísla, tedy pro ruční přijetí, hromadné přijetí, schválení
+i doklady z AI vytěžení, ISDOC, e-mailové schránky a importů, a také pro řady z číselníku řad. Už očíslované doklady se
+změnou nastavení nemění, do měsíců podle nového data je srovná přečíslování.
+
 **Přečíslování podle data.** Interní číslo dostane doklad při přijetí, takže pořadí čísel v měsíci odpovídá pořadí,
 v jakém jste doklady přijímali, ne datu vystavení. Hromadné **Označit jako přijaté** v seznamu přijímá vybrané
 doklady v pořadí podle data vystavení. Doklady očíslované v jiném pořadí srovnáte v menu `Nákup → Přečíslování`:
 
-1. Zvolte měsíc podle data vystavení. Zobrazí se náhled se současným a novým číslem každého dokladu.
-2. Klikněte na **Přečíslovat** a potvrďte.
+1. V poli **Číslovat podle data** zvolte datum vystavení, datum přijetí nebo DUZP. Předvyplněné je nastavení firmy
+   **Číslovat přijaté doklady podle data**.
+2. Zvolte měsíc. Zobrazí se náhled se sloupci **Vystaveno** a **Přijato** (při řazení podle DUZP i **DUZP**) a se
+   současným a novým číslem každého dokladu.
+3. Klikněte na **Přečíslovat** a potvrďte. Zvolené datum se uloží do nastavení firmy, takže podle něj dostávají číslo
+   i nově přijaté doklady.
 
-Přečíslují se jen automaticky očíslované doklady zvoleného měsíce. Každá řada začne znovu od 1 a doklady jdou podle
-data vystavení. Ručně zadaná a cizí čísla zůstanou beze změny a nová čísla je přeskočí. Interní číslo se přepíše i
+Zvolené datum určuje, které doklady do měsíce patří, i jejich pořadí. Doklad, který zvolené datum nemá, se řadí podle
+data vystavení a náhled u něj uvede „bez data přijetí, řazeno podle data vystavení“ (u DUZP obdobně). Přečíslují se jen
+automaticky očíslované doklady zvoleného měsíce. Každá řada začne znovu od 1 a doklady jdou podle zvoleného data.
+
+Doklad, který podle zvoleného data patří do měsíce, ale má automatické číslo jiného měsíce, dostane číslo tohoto
+měsíce. Například faktura vystavená 30. 7. a přijatá 2. 8., očíslovaná podle data vystavení červencovým číslem, dostane
+při přečíslování srpna podle data přijetí srpnové číslo. Náhled u ní ve sloupci **Poznámka** uvede například „číslo z 07/2026,
+přesune se do tohoto měsíce“. Číslo v původním měsíci se tím uvolní, řada původního měsíce se
+jinak nemění a uvolněné číslo se znovu nevydá. Doklad zůstane beze změny a náhled uvede důvod mezi ponechanými čísly,
+když je sám po uzávěrce nebo uzamčený k datu, když jeho číslo patří do měsíce po uzávěrce nebo uzamčeného, nebo když je
+po uzávěrce či uzamčený přečíslovaný měsíc. Doklad s číslem zvoleného měsíce, jehož zvolené datum leží v jiném měsíci,
+si číslo nechá („číslo tohoto měsíce, zvolené datum leží v jiném měsíci“), nová čísla ho přeskočí a do jeho měsíce ho
+přesune přečíslování toho měsíce.
+
+Ručně zadaná a cizí čísla zůstanou beze změny a nová čísla je přeskočí. Interní číslo se přepíše i
 v účetním deníku (číslo dokladu a popis zápisu, včetně storna) a v popisu příjemky. Do kontrolního hlášení jde číslo
 dodavatele, takže přečíslování na daně vliv nemá. Po uzávěrce se čísla nemění: měsíc v uzavřeném nebo právě
 uzavíraném účetním období, v roce s dokončenou roční uzávěrkou daňové evidence nebo v období uzamčeném k datu
 přečíslovat nejde. Přečíslování je vyhrazené účetní, klient ho nevidí.
+
+**Přečíslování dalších agend.** Stránka má záložky **Přijaté doklady**, **Pokladna**, **Ostatní pohledávky**,
+**Ostatní závazky** a **Interní doklady**. Záložka se ukáže jen tomu, kdo má právo zápisu do dané agendy; na stránku
+vede i položka **Přečíslovat podle data** v nabídce „…" seznamu pokladny, ostatních pohledávek a závazků a interních
+dokladů. Řady těchto agend běží po letech, proto se nečíslují od 1: přečíslování vezme čísla, která automaticky
+očíslované doklady měsíce v řadě už mají, a rozdá je dokladům znovu podle data. Ostatní měsíce ani počítadlo řady se
+nezmění a v řadě nevznikne díra. Rozhoduje datum úhrady u pokladny, datum vzniku u ostatních pohledávek a závazků
+a datum účetního případu u interních dokladů.
+
+- **Pokladna** se přečísluje po jednotlivých pokladnách a jen u výdajových dokladů bez DPH. Příjmový doklad si číslo
+  nechává, protože ho jako stvrzenku, zjednodušený daňový doklad nebo účtenku EET dostal plátce. Výdajový doklad s DPH
+  si číslo nechává, protože jde do evidence DPH a kontrolního hlášení. Číslo si nechává i doklad evidovaný v EET.
+- **Ostatní pohledávky a závazky** se přečíslují zvlášť. Pohledávka navázaná na vydanou fakturu si číslo nechává.
+- **Interní doklady** se přečíslují všechny automaticky očíslované. Ruční zápisy deníku bez interního dokladu se
+  nemění, i když čerpají z téže řady.
+
+Ve všech agendách se přepíše i číslo dokladu a popis zápisu v účetním deníku včetně storna a přeúčtování. Pravidla
+pro uzávěrky a zamčené období platí stejně jako u přijatých dokladů. Vydané faktury a bankovní výpisy se
+nepřečíslovávají: číslo vydané faktury už má odběratel a číslo bankovního dokladu určuje výpis banky.
 
 #### Rekapitulace DPH dle dokladu (§ 73 ZDPH)
 
@@ -886,8 +1076,13 @@ Zrušení volby smaže pokladní doklad i jeho zápis a vrátí fakturu do před
 Ručně vystaveného pokladního dokladu se vyrovnání nikdy nedotkne. Podrobnosti, včetně chování při selhání a při stornu,
 jsou u vydané faktury v [§ 15.2.7](15_Faktura_editor.md#1592-hlavicka), u přijaté faktury platí zrcadlově.
 
-Nepodporuje se **cizoměnová faktura**, **valutová pokladna** a **daňový doklad k poskytnuté záloze (DDKP)**, ten se
-samostatně nehradí. V těchto případech se vyrovnání jen přeskočí (s informativní hláškou) a faktura se normálně uloží.
+Cizoměnovou fakturu nebo účtenku korunová pokladna uhradí v korunách: zbytek přepočtený kurzem dokladu, ke dni dokladu,
+bez kurzového rozdílu. Platili-li jste jinou korunovou částkou, pořiďte úhradu ručně v
+[Pokladně](32_Pokladna.md#326-krok-za-krokem-uhrada-faktury-z-pokladny), rozdíl se zaúčtuje jako kurzový.
+
+Nepodporuje se **valutová pokladna**, **cizoměnová záloha**, cizoměnový doklad bez kurzu a **daňový doklad k poskytnuté
+záloze (DDKP)**, ten se samostatně nehradí. V těchto případech se vyrovnání jen přeskočí (s informativní hláškou)
+a faktura se normálně uloží.
 
 ### 23.11.14 Detail přijaté faktury
 
@@ -962,13 +1157,18 @@ V detailu **finální** faktury je box **Zálohová faktura**:
 - Pokud vazba není, klikněte na **Spárovat se zálohou** a vyberte zálohu od stejného dodavatele. Propojit lze jen
   nestornovanou zálohu ve **stejné měně**. Nabídka řadí zálohy s **nejbližší částkou** (porovnává hrubou částku faktury
   *před* odečtem zálohy, takže i faktura uhrazená zálohou „na 0 Kč" se napáruje správně).
-- Po spárování se zobrazí odkaz na zálohu a tlačítko **Zrušit propojení**. Na finální fakturu se zároveň doplní odečet
+- Po spárování se zobrazí odkaz na zálohu a tlačítko **Odpojit**. Na finální fakturu se zároveň doplní odečet
   skutečně uhrazené části zálohy, nejvýše do částky finální faktury, pokud byl nulový.
+- Finální faktura může vyúčtovat **víc záloh** téhož dodavatele: další přidáte tlačítkem **Přidat zálohu**. Záloha
+  s daňovým dokladem k platbě se odečte odpočtovými řádky podle DDKP ([§ 23.8.1](#2381-vyuctovani-zalohy-ke-ktere-dodavatel-vystavil-danovy-doklad-k-platbe)),
+  záloha bez DDKP v hlavičce jako uhrazená záloha. Zálohu lze přidat jen k nezaúčtované faktuře, musí být od
+  stejného dodavatele, ve stejné měně a přijatá (ne koncept ani storno). Převyšují-li zálohy vyúčtované plnění,
+  má faktura zápornou částku k úhradě a přeplatek zůstane v účetnictví jako pohledávka za dodavatelem (MD 321).
 - V detailu **zálohy** vidíte reverzně, kterou fakturou je vyúčtována. Nevyúčtovanou zálohu lze spárovat i **odtud**,
   tlačítkem **Spárovat s fakturou** (nabídne nepropojené vyúčtovací faktury téhož dodavatele). Tlačítka se zobrazí jen,
   když existuje vhodný protějšek.
 
-Jedna záloha může být navázaná **jen na jednu** finální fakturu.
+Jedna záloha může být vyúčtovaná **jen jednou** finální fakturou, jedna finální faktura ale může vyúčtovat víc záloh.
 
 **Nákup zaplacený kartou (bez zálohové faktury).** Když dodavatel žádnou zálohovou fakturu nevystaví a místo ní pošle
 rovnou **daňový doklad k platbě** (typ dokladu *Daňový doklad k platbě*, § 28 odst. 8 ZDPH), typicky u platby kartou,
@@ -1004,10 +1204,20 @@ faktury se zúčtováním, dokud záloha uhrazená není, říká, že se zaúč
 neúčtuje záměrně, automatické účtování ji proto ani nezkouší a nehlásí chybu.
 
 **Záloha (nebo samostatný DDKP) s vlastním daňovým dokladem k platbě.** Má-li navázaná záloha svůj DDKP, nebo je-li
-zálohou přímo samostatný DDKP, část účtu 314 už vyčerpala DPH (343/314), kterou DDKP uplatnil při platbě. Automatické
-zúčtování na plnou zaplacenou částku by pak 314 přečerpalo do minusu o tuhle už uplatněnou daň, takže se v tomto případě
-**nezaúčtuje automaticky**. Hláška u zaúčtování rovnou spočítá, kolik DPH z finální faktury zbývá doúčtovat na 343 nad rámec
-toho, co DDKP uplatnil už při platbě. Zúčtování zálohy pak zapište ručním zápisem podle této částky.
+zálohou přímo samostatný DDKP, část účtu 314 už vyčerpala DPH (343/314), kterou DDKP uplatnil při platbě. Finální faktura
+pak musí zálohu odečíst **odpočtovým řádkem** se základem a daní DDKP (postup v [§ 23.8.1](#2381-vyuctovani-zalohy-ke-ktere-dodavatel-vystavil-danovy-doklad-k-platbe)).
+Řádek se pozná jen podle označení **Odpočet zálohy**, samotná záporná částka nestačí. Při zaúčtování se základ odpočtu
+nevede na náklad, daň odpočtu vrací DPH uplatněnou z DDKP a zbytek zálohy (zaplaceno minus DPH DDKP) se zúčtuje
+MD 321 / D 314. Odpočet musí s DDKP sedět s tolerancí 1 Kč a zbytek zálohy se základem odpočtu, jinak zaúčtování skončí
+hláškou s čísly. Uhrazenou zálohu v hlavičce faktura s odpočtovým řádkem neodečítá, aby se záloha neodečetla dvakrát.
+
+Finální faktura navázaná na zálohu s DDKP **bez** odpočtového řádku se nezaúčtuje: hláška spočítá, kolik DPH z faktury
+zbývá doúčtovat nad rámec toho, co DDKP uplatnil, a detail faktury nabídne **Doplnit odpočet zálohy z DDKP**. Takové
+doklady (i ze starších období) najdete v [Měsíční kontrole](62_Mesicni_kontrola.md) jako konečné přijaté faktury bez odpočtu
+zálohy, protože v evidenci DPH by se daň zálohy uplatnila podruhé.
+
+Automaticky se neúčtuje odpočet zálohy s DDKP u faktury bez plného nároku na odpočet, s přenesenou daňovou povinností
+nebo s rozpisem DPH podle druhu plnění. Zúčtování zálohy pak zapište ručním zápisem.
 
 **Co propojení (a zaplacení) ovlivní:**
 
@@ -1059,12 +1269,35 @@ potvrzovací dialog, zápis podle [předkontace](73_Ucetni_nastroje.md#735-krok-
 nevyvážený zápis, chybějící účet v osnově) platí i tady, viz [§ 16.1.3](16_Faktura_PDF.md#16103-zauctovani-do-deniku).
 Zaúčtovat smí jen administrátor nebo účetní.
 
+**Náhled zápisu v editoru.** Pod položkami editoru je box **Náhled zápisu**. Ukazuje účty MD a Dal
+s částkami přesně tak, jak se doklad zaúčtuje, včetně DPH a závazku, a přepočítá se chvíli po každé
+změně dokladu. Server ho počítá stejným výpočtem jako **Zaúčtovat**, doklad přitom neuloží. Chybu,
+kvůli které by se doklad neuložil nebo nezaúčtoval (zamčené období, podané DPH, neplatný účet), ukáže
+rovnou v boxu. U zaúčtovaného dokladu náhled jen odkáže na zápis v deníku, změnu kontace pak udělejte
+přes **Přeúčtovat** (viz [§ 23.11.19](#231119-nakladove-pravidlo-a-preuctovani)).
+
+**Uložit a zaúčtovat.** Tlačítko je ve výchozím stavu vypnuté. Zapíná ho volba instalace
+`accounting.save_and_post` v `cfg.php` (proměnná prostředí `MYINVOICE_ACCOUNTING_SAVE_AND_POST=1`).
+Při zapnuté volbě je vedle tlačítka Uložit v editoru, jen v podvojném účetnictví a jen s právem zaúčtovat. Uloží doklad,
+koncept přijme (stejně jako **Označit jako přijaté**) a zaúčtuje ho podle náhledu. Když zaúčtování
+selže, doklad zůstane uložený a aplikace ukáže důvod.
+
 **Hromadné zaúčtování.** Označte více faktur a klikněte na **Zaúčtovat (N)**. Nabídne se jen z vybraných ty přijaté,
 zaúčtované nebo uhrazené, dosud nezaúčtované a jiné než zálohové. Doklady se účtují jeden po druhém (chyba jednoho neblokuje
 ostatní), na konci je souhrn *„Zaúčtováno {ok}, chyby: {err}"*. Maximálně 500 dokladů na dávku.
 
 **Automatické zaúčtování při přijetí** (volitelné, nastavuje administrátor, spustí se při přechodu na stav Přijatá), viz
 [§ 96.11](96_Nastaveni.md#969-krok-za-krokem-automaticke-uctovani).
+
+**Převzato z počátečních stavů.** Neuhrazená faktura nebo záloha z doby před otevřením knih, jejíž částku už nese
+otevírací zápis, se nezaúčtovává. V detailu ji označte přes **Další akce → Pokročilé → Převzato z počátečních stavů**
+a potvrďte. Doklad se naváže na nejbližší zaúčtovaný otevírací zápis po svém datu, v hlavičce dostane štítek
+**Převzato z počátečních stavů** a tlačítko **Zaúčtovat** zmizí. Úhrada nebo vyúčtování zálohy se pak zúčtuje proti
+počátečnímu stavu. Akci vidí uživatel s právem zaúčtovat doklady ve firmě s podvojným účetnictvím, jen u přijatého
+dokladu bez vlastního zápisu v deníku, datovaného před otevíracím zápisem v otevřeném účetním období. Zrušit označení
+jde na stejném místě (**Zrušit převzetí z počátečních stavů**), dokud zálohu nečerpá konečná faktura a proti dokladu
+není zaúčtovaná úhrada. Postup u vydaných záloh popisuje
+[Záloha přijatá před otevřením knih](15_Faktura_editor.md#zaloha-prijata-pred-otevrenim-knih).
 
 ### 23.11.19 Nákladové pravidlo a přeúčtování
 
@@ -1220,6 +1453,78 @@ aplikace řekne, že shodný doklad existuje a je stornovaný, a nabídne:
 Při vytěžení (AI import), skenování složky a zpracování příchozích dokladů se stornovaný doklad za duplikát nepovažuje: ze
 stejného souboru nebo se stejným číslem vznikne nový doklad. Nestornovaný doklad se stejným souborem nebo číslem a datem
 import dál zastaví a ukáže jeho číslo.
+
+**Možná duplicita s jiným datem vystavení.** Tentýž doklad může přijít dvakrát s různě přečteným datem, například jednou
+převzatý z jiného účetního programu a podruhé vytěžený z PDF. Aplikace proto hledá i nestornovaný doklad téhož dodavatele
+se stejným číslem dokladu a jiným datem vystavení, nejvýš rok před nebo po. Čísla se porovnávají bez mezer a oddělovačů,
+takže `FV 2025/0042` a `FV-2025-0042` jsou shoda, `ZF-2025-0042` už ne. Uložení to neblokuje:
+
+- při ručním uložení v editoru se ukáže varování s číslem, datem a částkou existujícího dokladu a tlačítkem
+  **Otevřít doklad**,
+- vytěžení PDF, import ISDOC a Pohoda XML, skenování složky a příchozí doklady založí doklad jako **koncept** (i když
+  dávka zakládá doklady rovnou jako přijaté) a do žlutého hlášení ke kontrole připíší větu „Možná duplicita: doklad č. …
+  od tohoto dodavatele už existuje" s datem vystavení a částkou,
+- převody z Fakturoidu a iDokladu stav dokladu přebírají ze zdrojového systému, hlášení ale připíší také.
+
+Pokud jde opravdu o tentýž doklad, koncept smažte nebo stornujte. Pokud jde o jiný doklad (například další splátka
+s opakovaným číslem), hlášení potvrďte tlačítkem **Beru na vědomí**.
+
+### 23.11.26 Doklady z e-mailu
+
+Stránka `Nákup → Doklady z e-mailu` vysvětluje, jak si aplikace sama vyzvedává faktury z e-mailové schránky,
+a ukazuje, jak načítání právě funguje. Vidí ji každý, kdo má oprávnění k příchozím dokladům.
+
+**K čemu to je.** Dodavatelé posílají faktury jako přílohy e-mailů. Když firma nastaví IMAP schránku a zapne u ní
+**Načítat PDF faktury z příloh**, aplikace schránku zhruba každých 30 minut projde, posoudí PDF přílohy
+a doklady pro vaši firmu založí v `Nákup → Příchozí doklady` se zdrojem **E-mail**. Tam je účetní zpracuje stejně
+jako doklady z portálu. Z e-mailu se nic samo nezaúčtuje. Stejná schránka může načítat i bankovní avíza a PDF
+výpisy, ty se ale ukládají do banky, ne do příchozích dokladů.
+
+**Postup nastavení:**
+
+1. Připravte e-mailovou adresu jen na doklady (například `faktury@vasefirma.cz`), nebo si do ní nastavte přeposílání
+   faktur z jiné schránky. Adresu dejte dodavatelům.
+2. Zjistěte přístup ke schránce přes IMAP: server, port, uživatelské jméno a heslo. U Microsoft 365 se přihlašuje přes
+   účet Microsoft ([§ 96.7.1](96_Nastaveni.md#9671-pripojeni-schranky-microsoft-365-pres-imap)).
+3. Na stránce klikněte na **Nastavit e-mailovou schránku**. Otevře se `Peníze → Bankovní účty`, záložka
+   **Bankovní avíza a PDF z e-mailu**. Založte **Nový IMAP účet**, vyplňte údaje, vyberte složku a spojení ověřte
+   tlačítkem **Test** ([§ 30.7](30_Bankovni_ucty.md#307-krok-za-krokem-nacitani-bankovnich-aviz-z-e-mailu)).
+4. Zapněte **Načítat PDF faktury z příloh** a účet aktivujte. Nechodí-li do schránky bankovní avíza, vypněte
+   **Načítat bankovní avíza**.
+5. Volitelně nastavte, co se má s e-mailem po zpracování stát (označit, přesunout do složky, nechat beze změny).
+   Aplikace e-maily nemaže.
+
+Tlačítko **Nastavit e-mailovou schránku** vidí jen správce firmy s právem zápisu k importu banky. Ostatní uživatelé
+na stránce najdou jen vysvětlení a přehled, nastavení jim zařídí správce.
+
+**Přehled na stránce:**
+
+| Údaj | Význam |
+|---|---|
+| **Stav** | **Doklady se načítají** (schránka je aktivní a má zapnuté načítání faktur), **Faktury se nenačítají** (aktivní schránka bez načítání faktur), **Schránka je vypnutá** |
+| **Poslední načtení** | Kdy se schránka naposledy prošla. Skončilo-li načtení chybou, stránka ji vypíše. |
+| **Načteno za 30 dní** | Počet dokladů, které z e-mailu dorazily do příchozích dokladů této firmy za posledních 30 dní |
+| **Čeká na zpracování** | Doklady z e-mailu, které ve frontě ještě nikdo nezpracoval |
+
+Tlačítko **Zobrazit doklady z e-mailu** otevře příchozí doklady filtrované na zdroj E-mail. Má-li firma víc schránek,
+stránka u každé ukáže čas posledního načtení a stav. Bez nastavené schránky ukáže jen vysvětlení a postup.
+
+**Co aplikace převezme:** PDF faktury, zálohové faktury, dobropisy, účtenky a další doklady, v jejichž textu je
+IČO, DIČ nebo název vaší firmy, a vždy PDF s vloženým ISDOC. Přílohy do 20 MB, nejvýše 20 z jedné zprávy.
+
+**Co nepřevezme:** samostatné soubory ISDOC a XML, obrázky (JPG, PNG), skenované PDF bez textu, doklady pro jinou
+firmu a e-maily, které neprojdou ověřením odesílatele (DKIM/DMARC). Takové doklady nahrajte do příchozích dokladů ručně.
+Pravidla rozpoznání jsou v [§ 30.11.10](30_Bankovni_ucty.md#301110-nacitani-pdf-faktur-z-priloh).
+
+**Typické potíže:**
+
+<!-- cols: 34 66 -->
+| Co vidíte | Co udělat |
+|---|---|
+| Poslední načtení skončilo chybou | V nastavení schránky zkontrolujte přihlašovací údaje a spojení ověřte tlačítkem **Test**. |
+| Stav **Faktury se nenačítají** | U IMAP účtu zapněte **Načítat PDF faktury z příloh**. |
+| Faktura nepřišla | V textu PDF chybí IČO, DIČ nebo název vaší firmy, nebo jde o sken bez textu. Výsledek každé přílohy vidí správce v tabulce **PDF doklady z příloh**. Doklad nahrajte ručně. |
+| Nenačítají se žádné nebo jen staré zprávy | Zkontrolujte vybranou složku a **Zpracovat od data**. |
 
 ## 23.12 Související kapitoly
 

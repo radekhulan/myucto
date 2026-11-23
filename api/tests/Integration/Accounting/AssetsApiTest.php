@@ -376,6 +376,46 @@ final class AssetsApiTest extends TestCase
         )->fetchColumn());
     }
 
+    /**
+     * Smazání karty mazalo zápis zařazení i s okruhem párování (například řádek 042
+     * spárovaný s přijatou fakturou). Okruh zápis drží stejně jako mazání v deníku.
+     */
+    public function testI6DeleteInUseWithPairedActivationEntryRejected(): void
+    {
+        $create = $this->call($this->assetAction, 'create', 'POST', 'accountant', [], $this->cardPayload('M-API-DEL-PAIR'));
+        $assetId = (int) $create['body']['asset']['id'];
+        $putIntoUse = $this->call($this->lifecycleAction, 'putIntoUse', 'POST', 'accountant',
+            ['id' => (string) $assetId], ['date' => self::YEAR . '-01-15', 'book_entry' => true]);
+        self::assertSame(200, $putIntoUse['status']);
+        $pdo = $this->db->pdo();
+        $activationId = (int) $pdo->query(
+            "SELECT id FROM journal_entries WHERE supplier_id = {$this->supplierId} AND source_type = 'asset' AND source_id = {$assetId}"
+        )->fetchColumn();
+        $partner = $this->call($this->journalAction, 'create', 'POST', 'accountant', [], [
+            'entry_date' => self::YEAR . '-01-20',
+            'description' => 'Protějšek v okruhu',
+            'lines' => [
+                ['account_code' => '211', 'side' => 'debit', 'amount' => 100.00],
+                ['account_code' => '602', 'side' => 'credit', 'amount' => 100.00],
+            ],
+        ]);
+        self::assertSame(201, $partner['status']);
+        $first = $pdo->query("SELECT line_no, account_id FROM journal_entry_lines WHERE supplier_id = {$this->supplierId} AND entry_id = {$activationId} ORDER BY line_no LIMIT 1")
+            ->fetch(\PDO::FETCH_ASSOC);
+        $pdo->prepare('INSERT INTO journal_line_pairings (supplier_id, account_id) VALUES (?, ?)')->execute([$this->supplierId, (int) $first['account_id']]);
+        $pairingId = (int) $pdo->lastInsertId();
+        $item = $pdo->prepare('INSERT INTO journal_line_pairing_items (supplier_id, entry_id, line_no, pairing_id, account_id) VALUES (?, ?, ?, ?, ?)');
+        $item->execute([$this->supplierId, $activationId, (int) $first['line_no'], $pairingId, (int) $first['account_id']]);
+        $item->execute([$this->supplierId, (int) $partner['body']['id'], 1, $pairingId, (int) $first['account_id']]);
+
+        $res = $this->call($this->assetAction, 'delete', 'DELETE', 'accountant', ['id' => (string) $assetId]);
+
+        self::assertSame(409, $res['status'], (string) json_encode($res['body'], JSON_UNESCAPED_UNICODE));
+        self::assertSame('entry_paired', $res['body']['error']['code']);
+        self::assertSame(1, (int) $pdo->query("SELECT COUNT(*) FROM journal_entries WHERE supplier_id = {$this->supplierId} AND id = {$activationId}")->fetchColumn());
+        self::assertSame(1, (int) $pdo->query("SELECT COUNT(*) FROM assets WHERE supplier_id = {$this->supplierId} AND id = {$assetId}")->fetchColumn());
+    }
+
     public function testI6DeleteInUseWithConfirmedDepreciationRejected(): void
     {
         $create = $this->call($this->assetAction, 'create', 'POST', 'accountant', [], $this->cardPayload('M-API-DEL-DEP', [

@@ -43,6 +43,7 @@ final class ProformaPaymentDocumentModeTest extends TestCase
     private int $clientId = 0;
     private int $currencyId = 0;
     private ?string $originalMode = null;
+    private string $originalAccountingMode = 'double_entry';
     private bool $columnExists = false;
 
     protected function setUp(): void
@@ -67,10 +68,13 @@ final class ProformaPaymentDocumentModeTest extends TestCase
         }
 
         try {
-            $stmt = $pdo->prepare('SELECT proforma_payment_document FROM supplier WHERE id = ?');
+            $stmt = $pdo->prepare('SELECT proforma_payment_document, accounting_mode FROM supplier WHERE id = ?');
             $stmt->execute([$this->supplierId]);
-            $this->originalMode = (string) $stmt->fetchColumn();
+            [$this->originalMode, $this->originalAccountingMode] = array_map('strval', $stmt->fetch(\PDO::FETCH_NUM) ?: ['', '']);
             $this->columnExists = true;
+            // Zálohy tu hradí ruční úhrada, kterou podvojné účetnictví vyúčtovat nedovolí
+            // (advance_receipt_not_posted); režim dokladů k úhradě na formě účetnictví nezávisí.
+            $pdo->prepare("UPDATE supplier SET accounting_mode = 'tax_evidence' WHERE id = ?")->execute([$this->supplierId]);
         } catch (\PDOException) {
             $this->markTestSkipped('Migrace 1565 zatím neproběhla.');
         }
@@ -86,8 +90,8 @@ final class ProformaPaymentDocumentModeTest extends TestCase
         }
         $pdo = $this->db->pdo();
         if ($this->columnExists && $this->originalMode !== null) {
-            $pdo->prepare('UPDATE supplier SET proforma_payment_document = ? WHERE id = ?')
-                ->execute([$this->originalMode, $this->supplierId]);
+            $pdo->prepare('UPDATE supplier SET proforma_payment_document = ?, accounting_mode = ? WHERE id = ?')
+                ->execute([$this->originalMode, $this->originalAccountingMode, $this->supplierId]);
         }
         if ($this->clientId > 0) {
             $pdo->prepare('DELETE FROM invoice_items WHERE invoice_id IN (SELECT id FROM invoices WHERE client_id = ?)')

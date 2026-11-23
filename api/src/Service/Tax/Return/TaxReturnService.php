@@ -146,6 +146,11 @@ final class TaxReturnService
             $prefinalize = $this->preFinalizeChecks->run($supplierId, $year, $type, (array) $row['inputs'], $computation);
         }
 
+        $booksAssessment = $type === 'po' && $row['status'] === 'final'
+            ? (new DppoBooksFingerprint($this->db))->assess($supplierId, $year, $row['books_fingerprint'] ?? null,
+                is_array($row['computed']) ? $row['computed'] : [], (array) $row['inputs'])
+            : null;
+
         return [
             'return' => $this->publicRow($row),
             'form_code' => $type === 'po' ? 'dppdp9' : 'dpfdp7',
@@ -153,8 +158,18 @@ final class TaxReturnService
             'variant_seq' => $seq,
             'available_variants' => $this->returns->listVariants($supplierId, $year, $type),
             'last_known_tax_suggested' => $variant === 'dodatecne'
-                ? $this->returns->findLastKnownTax($supplierId, $year, $type)
+                ? $this->returns->findLastKnownTax($supplierId, $year, $type, false)
                 : null,
+            // Finalizované DPPO: odpovídá účetnictví období ještě stavu při finalizaci?
+            // null = nelze posoudit (koncept, DPFO, finalizace bez otisku i bez uloženého VH).
+            // Důvod a u přiznání bez otisku rozdíl VH viz books_current_reason / books_vh.
+            'books_current' => $booksAssessment['current'] ?? null,
+            'books_current_reason' => $booksAssessment['reason'] ?? null,
+            'books_vh' => isset($booksAssessment['vh_difference']) ? [
+                'stored' => $booksAssessment['stored_vh'],
+                'current' => $booksAssessment['current_vh'],
+                'difference' => $booksAssessment['vh_difference'],
+            ] : null,
             // Rodná čísla rodiny jen maskovaná (H28) — i u starších finálních přiznání,
             // jejichž uložený výpočet je ještě nese otevřeně.
             'computed' => $this->familyIdentifiers->maskResult($computation['result']),
@@ -537,6 +552,7 @@ final class TaxReturnService
             $seq,
             $snapshotId,
             $userId,
+            $type === 'po' ? (new DppoBooksFingerprint($this->db))->forYear($supplierId, $year) : null,
         );
         if ($updated === null) {
             throw new TaxReturnException('version_conflict', 'Přiznání bylo mezitím změněno — načtěte znovu.', 409);
@@ -1331,7 +1347,7 @@ final class TaxReturnService
             $sideEffects,
             self::FORMA[$variant] ?? 'B',
         );
-        if ($row !== null && $sideEffects) {
+        if ($row !== null && $sideEffects && $archived['submission_id'] !== null) {
             $this->returns->setLastSubmission($supplierId, $year, $type, (int) $archived['submission_id'], $variant, $seq);
         }
 
@@ -2000,7 +2016,7 @@ final class TaxReturnService
     {
         $warnings = [];
         $manualLast = isset($inputs['last_known_tax']) ? (float) $inputs['last_known_tax'] : null;
-        $derivedLast = $this->returns->findLastKnownTax($supplierId, $year, $type);
+        $derivedLast = $this->returns->findLastKnownTax($supplierId, $year, $type, false);
         $lastKnown = $manualLast ?? $derivedLast ?? 0.0;
 
         if ($manualLast === null && $derivedLast === null) {

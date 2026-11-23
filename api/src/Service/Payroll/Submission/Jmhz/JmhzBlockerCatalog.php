@@ -251,6 +251,7 @@ final class JmhzBlockerCatalog
         'jmhz_deferral_regular_missing' => 'submission',
         'jmhz_deferral_regular_not_accepted' => 'submission',
         'jmhz_deferral_revision_missing' => 'runs',
+        'jmhz_deferral_nothing_to_complete' => 'submission',
         'jmhz_deferral_still_blocked' => 'retry',
         'jmhz_delivered_protocol_channel_unsupported' => 'submission',
         'jmhz_delivered_protocol_form_unknown' => 'submission',
@@ -397,6 +398,9 @@ final class JmhzBlockerCatalog
         'jmhz_mapping_not_allowed' => 'components',
         'jmhz_negative_or_deferred_income_unsupported' => 'components',
         'jmhz_obligation_missing' => 'runs',
+        // Období ještě neskončilo: nic se neopravuje, hlášení půjde připravit
+        // od prvního dne následujícího měsíce ({@see JmhzPreparationGate}).
+        'jmhz_period_not_finished' => 'manual',
         'jmhz_office_variable_symbol_invalid' => 'office',
         'jmhz_office_variable_symbol_mismatch' => 'office',
         'jmhz_office_variable_symbol_missing' => 'office',
@@ -643,6 +647,16 @@ final class JmhzBlockerCatalog
         'jmhz_submission_components_missing' => 'correction',
         'jmhz_submission_components_unreadable' => 'retry',
         'jmhz_registration_change_settling' => 'retry',
+        'jmhz_payroll_run_excluded' => 'runs',
+        'jmhz_external_root_confirmation_required' => 'submission',
+        'jmhz_external_root_employment_unknown' => 'submission',
+        'jmhz_external_root_forms_unmatched' => 'submission',
+        'jmhz_external_root_guid_invalid' => 'submission',
+        'jmhz_external_root_not_regular' => 'submission',
+        'jmhz_external_root_preparation_blocked' => 'runs',
+        'jmhz_external_root_regular_exists' => 'submission',
+        'jmhz_external_root_scope_mismatch' => 'submission',
+        'jmhz_external_root_xml_invalid' => 'submission',
         'jmhz_submission_controls_failed' => 'submission',
         'jmhz_submission_form_type_invalid' => 'retry',
         'jmhz_submission_frozen_identity_invalid' => 'retry',
@@ -677,6 +691,8 @@ final class JmhzBlockerCatalog
         'jmhz_work_month_not_approved' => 'time',
         'jmhz_work_summary_v2_missing' => 'time',
         'jmhz_workplace_codebooks_unverified' => 'workplace',
+        // Číselník obcí a států pro období ještě nevyšel: nic opravovat, počkat na aktualizaci.
+        'jmhz_workplace_codebooks_not_published' => 'manual',
         'jmhz_xml_attribute_unresolved' => 'retry',
         // Normalizovaný dokument zatím nenese klíče kontraktu 2027 (doplní je příprava).
         'jmhz_xml_2027_attribute_missing' => 'retry',
@@ -757,6 +773,52 @@ final class JmhzBlockerCatalog
         }
 
         return ['kind' => self::fallbackKind($entityType), 'field' => null];
+    }
+
+    /**
+     * Nález `jmhz_2027_source_missing` nese jeden kód pro údaje z různých
+     * míst aplikace; kam jít, rozhoduje dotčený atribut. Bez toho měl druh
+     * „manual" (bez odkazu) i chybějící adresa pracoviště, kterou účetní
+     * doplní na kartě vztahu.
+     *
+     * @var array<string,array{0:string,1:?string}>
+     */
+    private const SOURCE_MISSING_2027_BY_ATTRIBUTE = [
+        // Adresa místa výkonu práce (10550 až 10554): karta vztahu, podmínky.
+        // Nález nese celou adresu; povinné je číslo popisné a PSČ, ulice ne,
+        // proto skok na číslo popisné.
+        '10550' => ['employment_terms', 'jmhz_workplace_house_number'],
+        '10551' => ['employment_terms', 'jmhz_workplace_house_number'],
+        '10552' => ['employment_terms', 'jmhz_workplace_orientation_number'],
+        '10553' => ['employment_terms', 'jmhz_workplace_postal_code'],
+        '10554' => ['employment_terms', 'jmhz_workplace_address_point_code'],
+        // Příznak státního zástupce (10587): karta vztahu, podmínky.
+        '10587' => ['employment_terms', 'jmhz_state_prosecutor'],
+        // Den podpisu prohlášení poplatníka (10575): zákonná evidence osoby.
+        '10575' => ['statutory_evidence', null],
+        // Typy kolektivních smluv (10214): roční údaje zaměstnavatele.
+        '10214' => ['employer_annual', null],
+    ];
+
+    /**
+     * Druh nápravy s ohledem na dotčené atributy. Pro kódy bez rozpadu podle
+     * atributu je totéž co {@see remediation()}.
+     *
+     * @param list<string> $attributeIds
+     * @return array{kind:string,field:?string}
+     */
+    public static function remediationFor(string $code, string $entityType, array $attributeIds): array
+    {
+        if ($code === 'jmhz_2027_source_missing') {
+            foreach ($attributeIds as $attributeId) {
+                $entry = self::SOURCE_MISSING_2027_BY_ATTRIBUTE[$attributeId] ?? null;
+                if ($entry !== null) {
+                    return ['kind' => $entry[0], 'field' => $entry[1]];
+                }
+            }
+        }
+
+        return self::remediation($code, $entityType);
     }
 
     public static function knows(string $code): bool

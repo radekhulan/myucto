@@ -14,6 +14,9 @@ import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
 import Modal from '@/components/ui/Modal.vue'
 import DateInput from '@/components/ui/DateInput.vue'
 import LinkedDocumentsPanel from '@/components/documents/LinkedDocumentsPanel.vue'
+import AccrualSourcePanel from '@/components/accounting/AccrualSourcePanel.vue'
+import LockedPeriodAckModal from '@/components/accounting/LockedPeriodAckModal.vue'
+import { useLockedPeriodAck } from '@/composables/useLockedPeriodAck'
 import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
 
 const { t } = useI18n()
@@ -30,9 +33,17 @@ const busy = ref(false)
 const reverseOpen = ref(false)
 const reverseReason = ref('')
 const reverseDate = ref(appIsoDate())
+const textOpen = ref(false)
+const textTitle = ref('')
+const textNote = ref('')
+const deleteOpen = ref(false)
+const lockedAck = useLockedPeriodAck()
 
 const canWrite = computed(() => auth.canWrite('accounting.journal.write'))
 const canPost = computed(() => auth.canWrite('accounting.journal.post'))
+// Smazání zaúčtovaného dokladu i se zápisem: stejná práva jako smazání zápisu v deníku.
+const canDeletePosted = computed(() => canWrite.value && canPost.value && auth.canWrite('accounting'))
+const postedDeletion = computed(() => doc.value?.posted_deletion ?? null)
 const accountNames = computed(() => Object.fromEntries(accounts.value.map(a => [a.account_code, a.name])))
 const totals = computed(() => {
   let debit = 0
@@ -131,6 +142,54 @@ async function remove() {
   }
 }
 
+function openText() {
+  if (!doc.value) return
+  textTitle.value = doc.value.title
+  textNote.value = doc.value.note || ''
+  textOpen.value = true
+}
+
+async function saveText() {
+  const current = doc.value
+  if (!current || busy.value || blockDemoMutation()) return
+  const payload: { note?: string | null; title?: string } = {}
+  const note = textNote.value.trim()
+  if (note !== (current.note || '')) payload.note = note || null
+  const title = textTitle.value.trim()
+  if (current.status === 'posted' && title !== current.title) payload.title = title
+  if (!Object.keys(payload).length) {
+    textOpen.value = false
+    return
+  }
+  busy.value = true
+  try {
+    doc.value = await internalDocumentsApi.updateText(id.value, payload)
+    textOpen.value = false
+    toast.success(t('internal_documents.text_saved'))
+    await load()
+  } catch (error: any) {
+    toast.error(errorMessage(error))
+  } finally {
+    busy.value = false
+  }
+}
+
+async function removePosted() {
+  if (!doc.value || busy.value || blockDemoMutation()) return
+  deleteOpen.value = false
+  busy.value = true
+  try {
+    const result = await lockedAck.run(ack => internalDocumentsApi.removePosted(id.value, ack))
+    if (result === null) return
+    toast.success(t('internal_documents.delete_posted_done'))
+    await router.push({ name: 'accounting-internal-documents' })
+  } catch (error: any) {
+    toast.error(errorMessage(error))
+  } finally {
+    busy.value = false
+  }
+}
+
 const actions = computed<ActionItem[]>(() => {
   const current = doc.value
   if (!current) return []
@@ -141,11 +200,19 @@ const actions = computed<ActionItem[]>(() => {
       show: current.status === 'draft' && canWrite.value, to: { name: 'accounting-internal-document-edit', params: { id: id.value } } },
     { key: 'journal', label: t('internal_documents.open_journal'), icon: 'doc', tier: 'secondary', variant: 'primary',
       show: !!current.journal_entry_id, to: { name: 'accounting-journal', query: { entry_id: String(current.journal_entry_id) } } },
+    { key: 'edit_text', label: t('internal_documents.edit_text'), icon: 'edit', tier: 'secondary', variant: 'neutral',
+      show: current.status !== 'draft' && canWrite.value, disabled: busy.value, run: openText },
     { key: 'reverse', label: t('internal_documents.reverse'), icon: 'uturn', tier: 'overflow', variant: 'warning',
       show: current.status === 'posted' && canPost.value, disabled: busy.value,
       run: () => { reverseReason.value = ''; reverseDate.value = appIsoDate(); reverseOpen.value = true } },
     { key: 'delete', label: t('common.delete'), icon: 'trash', tier: 'overflow', variant: 'danger',
       show: current.status === 'draft' && canWrite.value, disabled: busy.value, run: () => void remove() },
+    { key: 'delete_posted', label: t('internal_documents.delete_posted'), icon: 'trash', tier: 'overflow', variant: 'danger',
+      show: current.status === 'posted' && canDeletePosted.value && !!postedDeletion.value,
+      disabled: busy.value || !postedDeletion.value?.allowed,
+      disabledReason: postedDeletion.value && !postedDeletion.value.allowed
+        ? t('internal_documents.delete_posted_blocked', { reason: postedDeletion.value.message || '' }) : undefined,
+      run: () => { deleteOpen.value = true } },
   ]
 })
 
@@ -253,9 +320,57 @@ onMounted(load)
         </ul>
       </section>
 
+      <AccrualSourcePanel v-if="doc.status === 'posted' && auth.canRead('accounting.accruals')" class="mt-4 block" source-type="internal_document" :source-id="id" />
+
       <LinkedDocumentsPanel v-if="auth.canRead('documents')" class="mt-4" entity-type="internal_document" :entity-id="id"
         :uploadable="canWrite" :readonly="!canWrite" :upload-folder-path="documentFolderPath" :title="t('internal_documents.attachments')" />
     </template>
+
+    <Modal v-if="textOpen && doc" :title="t('internal_documents.edit_text_title')" width-class="max-w-lg" @close="textOpen = false">
+      <form id="internal-document-text" class="space-y-4" @submit.prevent="saveText">
+        <p class="text-sm text-neutral-600">{{ t('internal_documents.edit_text_hint') }}</p>
+        <label v-if="doc.status === 'posted'" class="block text-sm font-medium">{{ t('internal_documents.item') }}
+          <input v-model="textTitle" required maxlength="255" type="text" data-test="text-title" class="mt-1 block h-9 w-full rounded-md border border-neutral-300 bg-surface px-2" />
+          <span class="mt-1 block text-xs font-normal text-neutral-500">{{ t('internal_documents.edit_text_title_hint') }}</span>
+        </label>
+        <label class="block text-sm font-medium">{{ t('internal_documents.note') }}
+          <textarea v-model="textNote" maxlength="10000" rows="5" data-test="text-note" class="mt-1 block w-full rounded-md border border-neutral-300 bg-surface p-2" />
+        </label>
+      </form>
+      <template #footer>
+        <div class="flex flex-wrap justify-end gap-2">
+          <button type="button" :class="btnOutline('neutral')" class="whitespace-nowrap" @click="textOpen = false">
+            <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.x" /></svg>
+            {{ t('common.cancel') }}
+          </button>
+          <button type="submit" form="internal-document-text" :disabled="busy" :class="btnFilled('primary')" class="whitespace-nowrap" data-test="text-save">
+            <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.check" /></svg>
+            {{ t('common.save') }}
+          </button>
+        </div>
+      </template>
+    </Modal>
+
+    <Modal v-if="deleteOpen && doc" :title="t('internal_documents.delete_posted_title')" width-class="max-w-lg" @close="deleteOpen = false">
+      <div class="space-y-3 text-sm">
+        <p class="text-neutral-700">{{ t('internal_documents.delete_posted_intro', { number: doc.document_no || '' }) }}</p>
+        <p class="text-neutral-600">{{ t('internal_documents.delete_posted_rules') }}</p>
+        <p v-if="postedDeletion?.needs_ack" class="rounded-md border border-warning-500/40 bg-warning-50 p-3 text-warning-700">{{ t('internal_documents.delete_posted_locked') }}</p>
+      </div>
+      <template #footer>
+        <div class="flex flex-wrap justify-end gap-2">
+          <button type="button" :class="btnOutline('neutral')" class="whitespace-nowrap" @click="deleteOpen = false">
+            <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.x" /></svg>
+            {{ t('common.cancel') }}
+          </button>
+          <button type="button" :disabled="busy" :class="btnFilled('danger')" class="whitespace-nowrap" data-test="delete-posted-confirm" @click="removePosted">
+            <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.trash" /></svg>
+            {{ t('internal_documents.delete_posted') }}
+          </button>
+        </div>
+      </template>
+    </Modal>
+    <LockedPeriodAckModal :ref="(el: any) => { lockedAck.modal.value = el }" />
 
     <Modal v-if="reverseOpen" :title="t('internal_documents.reverse')" width-class="max-w-lg" @close="reverseOpen = false">
       <form id="internal-document-reverse" class="space-y-4" @submit.prevent="reverse">

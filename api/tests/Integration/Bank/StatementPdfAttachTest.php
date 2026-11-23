@@ -362,6 +362,30 @@ final class StatementPdfAttachTest extends TestCase
         (new \MyInvoice\Service\Bank\StatementBalanceService($this->db))->snapshot($this->supplierId, $id);
     }
 
+    /** Jiný soubor téhož výpisu (banka PDF vygeneruje znovu) nesmí založit pohyby podruhé. */
+    public function testRegeneratedPdfDoesNotDuplicateRecordedMovements(): void
+    {
+        $id = $this->apiMonthWithPdf(100, 110);
+        $pdo = $this->db->pdo();
+        $count = static fn (): int => (int) $pdo->query("SELECT COUNT(*) FROM bank_transactions WHERE posted_at >= '2099-01-01'")->fetchColumn();
+        $before = $count();
+        $importer = Bootstrap::buildContainer()->get(\MyInvoice\Service\Bank\StatementImporter::class);
+
+        $result = $importer->importParsedPdf($this->parsedPdf([['2099-07-02', 10]]), '%PDF-jiny-soubor', 'znovu.pdf', null, $this->currencyId, $this->supplierId, []);
+
+        self::assertTrue($result['duplicate']);
+        self::assertSame($id, $result['statement_id']);
+        self::assertSame($before, $count());
+
+        $this->expectException(\InvalidArgumentException::class);
+        $extra = $pdo->prepare("INSERT INTO bank_transactions (statement_id, source, posted_at, amount, currency) VALUES (?, 'statement', '2099-07-02', ?, 'CZK')");
+        foreach ([11, 12, 13, 14] as $amount) {
+            $extra->execute([$id, $amount]);
+        }
+        $mostly = [['2099-07-02', 10], ['2099-07-02', 11], ['2099-07-02', 12], ['2099-07-02', 13], ['2099-07-02', 14], ['2099-07-03', 99]];
+        $importer->importParsedPdf($this->parsedPdf($mostly), '%PDF-castecny', 'castecny.pdf', null, $this->currencyId, $this->supplierId, []);
+    }
+
     /** Nejmenší PDF s textovou vrstvou: registr parserů před parsováním čte text. */
     private static function minimalPdf(): string
     {

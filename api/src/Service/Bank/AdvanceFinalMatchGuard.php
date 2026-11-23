@@ -7,6 +7,7 @@ namespace MyInvoice\Service\Bank;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\AccountingModeRepository;
 use MyInvoice\Service\Accounting\TakenOverRecord;
+use MyInvoice\Service\PurchaseInvoice\PurchaseAdvanceLinks;
 use MyInvoice\Support\Sql\PurchaseSettledExpr;
 
 /**
@@ -21,7 +22,8 @@ use MyInvoice\Support\Sql\PurchaseSettledExpr;
  * ruční párování vydané faktury, potvrzení návrhu i automatické párování (filtr kandidátů).
  *
  * Párování se odmítne, když konečná faktura navázaná na zálohu (přijatá:
- * advance_purchase_invoice_id; vydaná: parent proforma) a záloha:
+ * advance_purchase_invoice_id; vydaná: parent proforma nebo proforma čerpaná odpočtovým
+ * řádkem) a záloha:
  *   - není uhrazená (úhrada se počítá ze VŠECH kanálů — banka, pokladna, zápočty —
  *     přes SSOT {@see PurchaseSettledExpr}, resp. invoices.paid_total),
  *   - není převzatá z jiného programu (tam úhradu nese počáteční stav, ne doklad),
@@ -42,6 +44,8 @@ final class AdvanceFinalMatchGuard
      */
     public function purchaseViolation(int $supplierId, int $purchaseInvoiceId, float $paymentAmount): ?array
     {
+        // Faktura s víc zálohami ({@see PurchaseAdvanceLinks}) se posuzuje proti každé z nich,
+        // stejně jako vydaná faktura čerpající víc proforem.
         $stmt = $this->db->pdo()->prepare(
             "SELECT a.id, COALESCE(NULLIF(a.vendor_invoice_number, ''), a.varsymbol) AS label,
                     a.total_with_vat AS advance_total, (" . PurchaseSettledExpr::settled('a') . ") AS advance_paid,
@@ -49,24 +53,39 @@ final class AdvanceFinalMatchGuard
                     COALESCE(f.tax_date, f.issue_date) AS doc_date, fc.code AS currency
                FROM purchase_invoices f
                JOIN currencies fc ON fc.id = f.currency_id
+               JOIN (" . PurchaseAdvanceLinks::linksSql('?') . ") l ON l.final_id = f.id
                JOIN purchase_invoices a
-                 ON a.id = f.advance_purchase_invoice_id AND a.supplier_id = f.supplier_id
+                 ON a.id = l.advance_id AND a.supplier_id = f.supplier_id
                 AND a.document_kind = 'advance' AND a.status <> 'cancelled'
-              WHERE f.id = ? AND f.supplier_id = ? AND f.document_kind = 'invoice'"
+              WHERE f.id = ? AND f.supplier_id = ? AND f.document_kind = 'invoice'
+              ORDER BY a.id"
         );
         if ($stmt === false) {
             return null; // PDO bez výjimek nad zjednodušeným schématem (jednotkové testy matcheru)
         }
-        $stmt->execute([$purchaseInvoiceId, $supplierId]);
-        $row = $stmt->fetch(\PDO::FETCH_ASSOC);
-        if ($row === false || (new TakenOverRecord($this->db))->isDocument($supplierId, 'purchase_invoice', (int) $row['id'])) {
-            return null;
+        $stmt->execute([$supplierId, $supplierId, $purchaseInvoiceId, $supplierId]);
+        $violations = [];
+        foreach ($stmt->fetchAll(\PDO::FETCH_ASSOC) as $row) {
+            if ((new TakenOverRecord($this->db))->isDocument($supplierId, 'purchase_invoice', (int) $row['id'])) {
+                continue;
+            }
+            $violation = $this->decide($supplierId, $row, $paymentAmount, 'purchase_invoice');
+            if ($violation === null) {
+                continue;
+            }
+            $remaining = round((float) $row['advance_total'] - (float) $row['advance_paid'], 2);
+            if (abs(abs($paymentAmount) - $remaining) <= self::TOLERANCE) {
+                return $violation;
+            }
+            $violations[] = $violation;
         }
-        return $this->decide($supplierId, $row, $paymentAmount, 'purchase_invoice');
+        return $violations[0] ?? null;
     }
 
     /**
-     * Zrcadlo vydané strany: platba proformy spárovaná s vyúčtovací fakturou.
+     * Zrcadlo vydané strany: platba proformy spárovaná s vyúčtovací fakturou. Faktura čerpající
+     * víc záloh ({@see \MyInvoice\Support\Sql\AdvanceDrawSql}) se posuzuje proti každé z nich;
+     * přednost má záloha, jejímuž zbytku platba odpovídá.
      *
      * @return array{advance_id:int, advance_type:'purchase_invoice'|'invoice', message:string}|null
      */
@@ -79,20 +98,37 @@ final class AdvanceFinalMatchGuard
                     COALESCE(f.tax_date, f.issue_date) AS doc_date, fc.code AS currency
                FROM invoices f
                JOIN currencies fc ON fc.id = f.currency_id
+               JOIN (SELECT parent_invoice_id AS advance_id FROM invoices
+                      WHERE id = ? AND parent_invoice_id IS NOT NULL
+                     UNION
+                     SELECT advance_invoice_id FROM invoice_items
+                      WHERE invoice_id = ? AND advance_invoice_id IS NOT NULL) adv
                JOIN invoices p
-                 ON p.id = f.parent_invoice_id AND p.supplier_id = f.supplier_id
+                 ON p.id = adv.advance_id AND p.supplier_id = f.supplier_id
                 AND p.invoice_type = 'proforma' AND p.status <> 'cancelled'
-              WHERE f.id = ? AND f.supplier_id = ? AND f.invoice_type = 'invoice'"
+              WHERE f.id = ? AND f.supplier_id = ? AND f.invoice_type = 'invoice'
+              ORDER BY p.id"
         );
         if ($stmt === false) {
             return null;
         }
-        $stmt->execute([$invoiceId, $supplierId]);
-        $row = $stmt->fetch(\PDO::FETCH_ASSOC);
-        if ($row === false || (new TakenOverRecord($this->db))->isDocument($supplierId, 'invoice', (int) $row['id'])) {
-            return null;
+        $stmt->execute([$invoiceId, $invoiceId, $invoiceId, $supplierId]);
+        $violations = [];
+        foreach ($stmt->fetchAll(\PDO::FETCH_ASSOC) as $row) {
+            if ((new TakenOverRecord($this->db))->isDocument($supplierId, 'invoice', (int) $row['id'])) {
+                continue;
+            }
+            $violation = $this->decide($supplierId, $row, $paymentAmount, 'invoice');
+            if ($violation === null) {
+                continue;
+            }
+            $remaining = round((float) $row['advance_total'] - (float) $row['advance_paid'], 2);
+            if (abs(abs($paymentAmount) - $remaining) <= self::TOLERANCE) {
+                return $violation;
+            }
+            $violations[] = $violation;
         }
-        return $this->decide($supplierId, $row, $paymentAmount, 'invoice');
+        return $violations[0] ?? null;
     }
 
     /**

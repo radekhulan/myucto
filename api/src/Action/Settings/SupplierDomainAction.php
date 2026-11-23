@@ -245,7 +245,7 @@ final class SupplierDomainAction
             return Json::sessionRequired($response, 'Domény lze spravovat jen z webového rozhraní.');
         }
         if (!RequestAuthorization::allows($request, 'settings.domains', $level)) {
-            return Json::error($response, 'forbidden_permission', 'Pro správu domén nemáš oprávnění.', 403);
+            return Json::error($response, 'forbidden_permission', 'Pro správu domén nemáte oprávnění.', 403);
         }
         return null;
     }

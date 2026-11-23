@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Integration\Payroll;
 
-use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use PDO;
 use PDOException;
@@ -48,7 +47,7 @@ final class PayrollImmutabilityGuardTest extends TestCase
             $this->markTestSkipped('cfg.php neexistuje — test vyžaduje DB connection.');
         }
         try {
-            $this->db = Bootstrap::buildContainer()->get(Connection::class);
+            $this->db = \MyInvoice\Tests\Support\PayrollTestContainer::build()->get(Connection::class);
             $this->pdo = $this->db->pdo();
         } catch (\Throwable $e) {
             $this->markTestSkipped('DI/DB nedostupné: ' . $e->getMessage());

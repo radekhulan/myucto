@@ -2,11 +2,13 @@
 import { useWindowRefresh } from '@/composables/useWindowRefresh'
 import { useWindowTitle } from '@/composables/useWindowTitle'
 import LinkedDocumentsPanel from '@/components/documents/LinkedDocumentsPanel.vue'
-import { ref, onMounted, computed } from 'vue'
+import { ref, onMounted, computed, watch } from 'vue'
 import { useRoute, useRouter, RouterLink } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { clientsApi, TAX_NUMBER_LABELS, type Client, type ClientBankAccount, type BankLookupResult, type ViesLookupResult } from '@/api/clients'
 import { invoicesApi, type InvoiceListItem } from '@/api/invoices'
+import { salesQuotesApi, type QuoteListItem } from '@/api/salesQuotes'
+import { apiErrorMessage } from '@/api/errors'
 import { purchaseInvoicesApi, type PurchaseInvoiceListItem } from '@/api/purchaseInvoices'
 import { recurringApi, type RecurringTemplate } from '@/api/recurring'
 import { formatMoney, formatDate, statusLabel, typeLabel, statusBadgeClass, isOverdue, invoiceRowClass, taxDateClass, paymentDueLabel } from '@/composables/useFormat'
@@ -21,6 +23,8 @@ import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
 import { formatAccountNumber } from '@/utils/bankAccount'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import EntityDimensionDefaults from '@/components/dimensions/EntityDimensionDefaults.vue'
+import { useIsPhone } from '@/composables/useIsPhone'
+import { quoteStatusBadge } from '@/pages/sales-quotes/quotePresentation'
 
 const { t } = useI18n()
 const toast = useToast()
@@ -42,6 +46,11 @@ const invoicesPages = ref(1)
 const recurringTemplates = ref<RecurringTemplate[]>([])
 const purchaseInvoices = ref<PurchaseInvoiceListItem[]>([])
 const purchaseInvoicesLoading = ref(false)
+const quotes = ref<QuoteListItem[]>([])
+const quotesTotal = ref(0)
+const quotesLoading = ref(false)
+const quotesError = ref('')
+let quotesRequest = 0
 const bankAccountNumber = ref('')
 const bankCode = ref('')
 const bankAccountSaving = ref(false)
@@ -413,6 +422,43 @@ async function deleteClient() {
   }
 }
 
+// Telefon: řádek velkých tlačítek Zavolat · E-mail · Nová faktura pod nadpisem.
+const isPhone = useIsPhone()
+const PHONE_ICON = 'M3 5a2 2 0 0 1 2-2h3.28a1 1 0 0 1 .948.684l1.498 4.493a1 1 0 0 1-.502 1.21l-2.257 1.13a11.042 11.042 0 0 0 5.516 5.516l1.13-2.257a1 1 0 0 1 1.21-.502l4.493 1.498a1 1 0 0 1 .684.949V19a2 2 0 0 1-2 2h-1C9.716 21 3 14.284 3 6V5z'
+const telHref = (phone: string | null | undefined) => {
+  const digits = (phone ?? '').replace(/[^\d+]/g, '')
+  return digits ? `tel:${digits}` : undefined
+}
+const mailHref = (email: string | null | undefined) => (email ? `mailto:${email.trim()}` : undefined)
+const canNewInvoice = computed(() => !!client.value && client.value.is_customer !== false && auth.canWrite('invoices.create'))
+const quoteClientId = computed(() => auth.hasCommercialFeatures && auth.canRead('sales_quotes') && client.value?.is_customer !== false ? client.value?.id : undefined)
+const canNewQuote = computed(() => !!quoteClientId.value && !client.value?.archived_at && auth.canWrite('sales_quotes.write'))
+
+async function loadQuotes(id: number | undefined, silent = false) {
+  const request = ++quotesRequest
+  quotesLoading.value = !!id && !silent
+  quotesError.value = ''
+  if (!silent || !id) {
+    quotes.value = []
+    quotesTotal.value = 0
+  }
+  if (!id) return
+  try {
+    const result = await salesQuotesApi.list({ client_id: id, per_page: 10 })
+    if (request !== quotesRequest) return
+    quotes.value = result.items
+    quotesTotal.value = result.total
+  } catch (error) {
+    if (request === quotesRequest) quotesError.value = apiErrorMessage(error)
+  } finally {
+    if (request === quotesRequest) quotesLoading.value = false
+  }
+}
+
+watch(quoteClientId, id => { void loadQuotes(id) }, { immediate: true })
+const showPhoneQuickActions = computed(() => isPhone.value && !!client.value
+  && (!!telHref(client.value.phone) || !!client.value.main_email || canNewInvoice.value))
+
 // ─── Lišta akcí (sdílená ActionBar) — sjednocuje horní toolbar i spodní lištu ───
 const clientActions = computed<ActionItem[]>(() => {
   const c = client.value
@@ -444,6 +490,7 @@ useWindowRefresh(async () => {
     Promise.all(Array.from({ length: invoicesPage.value }, (_, index) => invoicesApi.listGrouped({ client_id: id, page: index + 1 }))),
     recurringApi.list({ client_id: id, per_page: 200 }),
     purchaseInvoicesApi.listGrouped({ vendor_id: id, per_page: 200 }),
+    loadQuotes(quoteClientId.value, true),
   ])
   if (id !== Number(route.params.id)) return
   client.value = updated
@@ -476,6 +523,21 @@ useWindowRefresh(async () => {
         </div>
       </div>
       <ActionBar :actions="clientActions" />
+    </div>
+
+    <div v-if="showPhoneQuickActions" class="grid grid-flow-col auto-cols-fr gap-2" data-test="client-phone-actions">
+      <a v-if="telHref(client.phone)" :href="telHref(client.phone)" :class="btnOutline('success')" class="h-12 justify-center" data-test="client-phone-call">
+        <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" :d="PHONE_ICON" /></svg>
+        {{ t('client.phone_actions.call') }}
+      </a>
+      <a v-if="client.main_email" :href="mailHref(client.main_email)" :class="btnOutline('primary')" class="h-12 justify-center" data-test="client-phone-email">
+        <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" :d="ICONS.send" /></svg>
+        {{ t('client.phone_actions.email') }}
+      </a>
+      <RouterLink v-if="canNewInvoice" :to="`/invoices/new?client_id=${client.id}`" :class="btnFilled('primary')" class="h-12 justify-center" data-test="client-phone-invoice">
+        <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" :d="ICONS.plus" /></svg>
+        {{ t('client.phone_actions.new_invoice') }}
+      </RouterLink>
     </div>
 
     <!-- Detaily plátce DPH (na vyžádání z registru plátců DPH / MFČR) -->
@@ -529,11 +591,17 @@ useWindowRefresh(async () => {
         <dl class="space-y-2 text-sm">
           <div>
             <dt class="text-neutral-500">{{ t('client.email') }}</dt>
-            <dd class="text-neutral-900">{{ client.main_email || '—' }}</dd>
+            <dd class="text-neutral-900">
+              <a v-if="client.main_email" :href="mailHref(client.main_email)" class="hover:underline" data-test="client-email-link">{{ client.main_email }}</a>
+              <template v-else>—</template>
+            </dd>
           </div>
           <div v-if="client.phone">
             <dt class="text-neutral-500">{{ t('client.telephone') }}</dt>
-            <dd class="text-neutral-900 font-mono">{{ client.phone }}</dd>
+            <dd class="text-neutral-900 font-mono">
+              <a v-if="telHref(client.phone)" :href="telHref(client.phone)" class="hover:underline" data-test="client-phone-link">{{ client.phone }}</a>
+              <template v-else>{{ client.phone }}</template>
+            </dd>
           </div>
         </dl>
         <!-- E-mailové kontakty dle účelu (#86) -->
@@ -543,7 +611,7 @@ useWindowRefresh(async () => {
             <div v-for="ec in client.email_contacts" :key="ec.id ?? ec.email"
               :class="['text-sm', ec.is_active ? '' : 'opacity-50']">
               <div class="text-neutral-900 break-all">
-                {{ ec.email }}
+                <a :href="mailHref(ec.email)" class="hover:underline">{{ ec.email }}</a>
                 <span v-if="ec.contact_name || ec.label" class="text-neutral-500 text-xs">
                   - {{ [ec.contact_name, ec.label].filter(Boolean).join(', ') }}</span>
                 <span v-if="!ec.is_active" class="text-xs text-neutral-400">({{ t('client.email_contacts.inactive') }})</span>
@@ -833,6 +901,41 @@ useWindowRefresh(async () => {
         </div>
       </div>
     </div>
+
+    <section v-if="quoteClientId" class="rounded-lg border border-neutral-200 bg-surface shadow-sm" aria-labelledby="client-quotes-heading">
+      <div class="flex flex-wrap items-center justify-between gap-2 border-b border-neutral-200 px-4 py-3 sm:px-5">
+        <h3 id="client-quotes-heading" class="font-semibold">
+          {{ t('nav.sales_quotes') }} <span v-if="quotesTotal" class="font-normal text-neutral-500">({{ quotesTotal }})</span>
+        </h3>
+        <div class="flex flex-wrap gap-2">
+          <RouterLink v-if="quotesTotal" :to="{ name: 'sales-quotes', query: { client_id: quoteClientId } }" :class="btnOutline('neutral')">
+            <svg class="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.chevronRight" /></svg>
+            {{ t('sales_quotes.all_for_client') }}
+          </RouterLink>
+          <RouterLink v-if="canNewQuote" :to="{ name: 'sales-quote-new', query: { client_id: quoteClientId } }" :class="btnFilled('primary')">
+            <svg class="size-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.plus" /></svg>
+            {{ t('sales_quotes.new') }}
+          </RouterLink>
+        </div>
+      </div>
+      <p v-if="quotesError" role="alert" class="px-4 py-3 text-sm text-danger-700">{{ quotesError }}</p>
+      <p v-else-if="quotesLoading" class="p-4 text-center text-sm text-neutral-500" aria-live="polite">{{ t('common.loading') }}</p>
+      <EmptyState v-else-if="!quotes.length" dense accent="neutral" icon="doc" :title="t('sales_quotes.no_results')" />
+      <ul v-else class="divide-y divide-neutral-100 text-sm">
+        <li v-for="offer in quotes" :key="offer.id">
+          <RouterLink :to="{ name: 'sales-quote-detail', params: { id: offer.id } }" class="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 px-4 py-3 hover:bg-neutral-50 sm:px-5">
+            <span class="min-w-0 flex-1 wrap-anywhere">
+              <span class="block font-medium text-primary-700">{{ offer.title }}</span>
+              <span class="block text-xs text-neutral-600">{{ offer.number }}<template v-if="offer.project_name"> · {{ offer.project_name }}</template></span>
+            </span>
+            <span class="flex flex-wrap items-center gap-2">
+              <span :class="['whitespace-nowrap rounded px-2 py-0.5 text-xs font-medium', quoteStatusBadge[offer.status]]">{{ t(`sales_quotes.status.${offer.status}`) }}</span>
+              <span class="whitespace-nowrap font-medium tabular-nums">{{ formatMoney(offer.totals.with_vat, offer.currency) }}</span>
+            </span>
+          </RouterLink>
+        </li>
+      </ul>
+    </section>
 
     <!-- Vystavené faktury — visible pokud is_customer NEBO existují vystavené faktury -->
     <div v-if="client.is_customer !== false || invoices.length > 0" class="bg-surface border border-neutral-200 rounded-lg shadow-sm">

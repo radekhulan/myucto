@@ -55,6 +55,11 @@ final class JmhzStatutoryChanges
     }
 
     /**
+     * Stav prohlášení za vykázaný měsíc. Hlášení JMHZ už nese, zda plátce za
+     * ten měsíc ke slevě přihlédl, tedy výsledek § 38k ZDP, ne den podpisu;
+     * první měsíc se proto z dne podpisu znovu neodvozuje
+     * (TaxDeclarationEffectiveMonth) a měsíc hlášení se bere jako fakt.
+     *
      * @param array<string,list<array<string,mixed>>> $sections
      * @return array{sections:array<string,list<array<string,mixed>>>,changed:bool,current:?string,imported:string,warning:?string}
      */

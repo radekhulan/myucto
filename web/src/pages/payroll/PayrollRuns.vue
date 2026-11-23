@@ -6,30 +6,36 @@ import {
   payrollApi,
   type PayrollRun,
   type PayrollRunCommand,
+  type PayrollRunExclusion,
   type PayrollRunHistory,
   type PayrollRunHistoryEvent,
   type PayrollRunHistoryTotalDiff,
   type PayrollRunHistoryTotalKey,
+  type PayrollRunAverageChangeCompensation,
+  type PayrollRunAverageChangeEmployment,
+  type PayrollRunMissingEmployment,
   type PayrollRunReadiness,
+  type PayrollRunReadinessBulkKind,
   type PayrollRunReadinessFinding,
   type PayrollRunRevisionHistory,
-  type PayrollRunResultPerson,
   type PayrollRunValidation,
 } from '@/api/payroll'
 import { apiErrorMessage } from '@/api/errors'
+import type { PermissionKey } from '@/security/permissions'
+import { payrollAbsenceApi } from '@/api/payrollAbsences'
 import { usePayrollYearClosedToast } from '@/composables/usePayrollYearClosedToast'
-import PayrollIncomeTaxBreakdown from '@/components/payroll/PayrollIncomeTaxBreakdown.vue'
-import PayrollInsuranceBreakdown from '@/components/payroll/PayrollInsuranceBreakdown.vue'
-import PayrollNetPayBreakdown from '@/components/payroll/PayrollNetPayBreakdown.vue'
-import { btnFilled, btnFilledSm, btnOutline, btnOutlineSm, disabledTitle, BTN_DISABLED_NOTE, ICONS } from '@/components/ui/buttonStyles'
+import PayrollRunPeopleTable from '@/components/payroll/PayrollRunPeopleTable.vue'
+import { btnFilled, btnFilledSm, btnOutline, btnOutlineSm, btnOutlineSmWrap, disabledTitle, BTN_DISABLED_NOTE, ICONS } from '@/components/ui/buttonStyles'
 // Formátování je sdílené (useFormat) — místní kopie se rozcházely v locale i tvaru.
-import { formatDateTime, formatMoneyMinor as money, formatPeriod } from '@/composables/useFormat'
+import { formatDate, formatDateTime, formatMoneyMinor as money, formatPeriod, formatPeriodNumeric } from '@/composables/useFormat'
 import Modal from '@/components/ui/Modal.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import PaginationBar from '@/components/ui/PaginationBar.vue'
 import ExpandableList from '@/components/ui/ExpandableList.vue'
 import { useAuthStore } from '@/stores/auth'
 import { useToast } from '@/composables/useToast'
+import { useWindowRefresh } from '@/composables/useWindowRefresh'
+import { appIsoDate } from '@/utils/date'
 import { payrollQueryPeriod } from '@/pages/payroll/payrollComponentsUi'
 import { runPayrollInputBatch } from '@/pages/payroll/payrollInputFilters'
 import PayrollMonthlyChecklistPanel from '@/pages/payroll/PayrollMonthlyChecklistPanel.vue'
@@ -38,11 +44,15 @@ import type { PayrollRegzelEnvironment, PayrollStatutoryBulkResult } from '@/api
 import DateInput from '@/components/ui/DateInput.vue'
 import PayrollStatutoryBulkDefaultsDialog from '@/components/payroll/PayrollStatutoryBulkDefaultsDialog.vue'
 import PayrollHideWarningDialog from '@/components/payroll/PayrollHideWarningDialog.vue'
+import PayrollCompensationRecalculationDialog from '@/components/payroll/PayrollCompensationRecalculationDialog.vue'
 import {
   evidenceRefreshCommand,
+  firstHealthCoverageReviewId,
   firstStatutoryReviewId,
   statutoryReviewEmployeeIds,
 } from '@/components/payroll/statutoryBulkDefaults'
+import { runRemediationHref } from './payrollRemediationQuery'
+import { annualSettlementRequestTarget } from './jmhzBlockerRemediation'
 
 const { t } = useI18n()
 const router = useRouter()
@@ -59,6 +69,19 @@ const loading = ref(false)
  */
 const loadFailed = ref(false)
 const saving = ref(false)
+/**
+ * Příkaz běhu, na jehož odpověď se čeká. Výpočet, schválení i oprava jsou jeden
+ * synchronní požadavek, u větší firmy na desítky sekund; samotné zašedlé
+ * tlačítko vypadalo jako zamrzlá stránka.
+ */
+const runningCommand = ref<{ runId: number, command: PayrollRunCommand } | null>(null)
+const COMMANDS_WITH_PROGRESS_TEXT = new Set<PayrollRunCommand>([
+  'lock_and_calculate', 'calculate', 'refresh_inputs', 'approve', 'reopen', 'post', 'prepare_payments',
+])
+
+function commandProgressLabel(command: PayrollRunCommand): string {
+  return t(`payroll.runs.command_progress.${COMMANDS_WITH_PROGRESS_TEXT.has(command) ? command : 'other'}`)
+}
 /*
  * Období drží URL, ne jen stav komponenty. Účetní zpracovává mzdy zpětně — v září
  * dělá srpen — a bez toho ji každé obnovení stránky, návrat z detailu i sdílený
@@ -118,12 +141,12 @@ const paymentDateTouched = ref(false)
 const runs = ref<PayrollRun[]>([])
 const personNames = ref<Record<number, string>>({})
 /**
- * Osobní rozpad běhu (`result_snapshot.people`) je ta objemná část výsledku a
- * seznam ho úmyslně neposílá — server by ho jinak musel načíst pro všechny běhy
- * firmy najednou. Drží se proto stranou a dotahuje se pro jeden rozbalený běh.
+ * U kterých běhů je rozbalený přehled osob. Výsledky osob seznam běhů neposílá;
+ * stránkuje a dotahuje si je `PayrollRunPeopleTable` sama.
  */
-const breakdowns = ref<Record<number, PayrollRunResultPerson[]>>({})
-const breakdownLoading = ref<Record<number, boolean>>({})
+const breakdownOpen = ref<Record<number, boolean>>({})
+/** Číselník jmen se stahuje jednou, ne při každém obnovení seznamu běhů. */
+let personNamesLoaded = false
 const histories = ref<Record<number, PayrollRunHistory>>({})
 const historyOpen = ref<Record<number, boolean>>({})
 const historyLoading = ref<Record<number, boolean>>({})
@@ -132,11 +155,18 @@ const total = ref(0)
 const pageSize = 12
 const offset = ref(0)
 const currentPage = computed(() => Math.floor(offset.value / pageSize) + 1)
-const pendingCommand = ref<{ run: PayrollRun, command: PayrollRunCommand } | null>(null)
+type CommandTarget = { employee_id?: number, employment_id?: number, label: string }
+const pendingCommand = ref<{ run: PayrollRun, command: PayrollRunCommand, target?: CommandTarget } | null>(null)
+const commandPaymentDate = ref('')
 const pendingDelete = ref<PayrollRun | null>(null)
+/** Běh čekající na potvrzení schválení: je to závazný krok, zpět vede jen oprava běhu. */
+const pendingApprove = ref<PayrollRun | null>(null)
 const commandReason = ref('')
+const averageCorrectionRunId = ref<number | null>(null)
+const compensationRecalculationRun = ref<PayrollRun | null>(null)
 const commandError = ref('')
 const commandBlockers = ref<Record<number, string>>({})
+const commandBlockerLinks = ref<Record<number, string>>({})
 /** Proč se koncepty vstupů nepodařilo schválit — seskupené po větě, u běhu. */
 type DraftInputFailure = { message: string, count: number }
 const draftInputFailures = ref<Record<number, DraftInputFailure[]>>({})
@@ -155,6 +185,28 @@ const readiness = ref<PayrollRunReadiness | null>(null)
 const pendingStart = ref<{ run: PayrollRun, command: PayrollRunCommand } | null>(null)
 
 const readinessFindings = computed(() => readiness.value?.findings ?? [])
+
+/*
+ * Chybějící průměrný výdělek hodinového vztahu (příplatek za noc a víkend,
+ * atribut JMHZ). Rozhodnutí maintainera: doplní se pravděpodobný výdělek ze
+ * sjednané sazby hromadně jedním tlačítkem; jde opravit novou revizí.
+ */
+const PROBABLE_AVERAGE_CODES = ['hourly_average_earning_missing', 'jmhz_average_hourly_earning_missing']
+const canFillAverages = computed(() => auth.canWrite('payroll.time.write'))
+const fillingAverages = ref(false)
+async function fillProbableAverages(): Promise<void> {
+  if (fillingAverages.value) return
+  fillingAverages.value = true
+  try {
+    const result = await payrollAbsenceApi.fillProbableFromRate(period.value)
+    toast.success(t('payroll.runs.readiness.fill_probable_average_done', { count: result.created.length }))
+    await load()
+  } catch (error) {
+    toast.error(apiErrorMessage(error, t('payroll.runs.readiness.fill_probable_average_failed')))
+  } finally {
+    fillingAverages.value = false
+  }
+}
 
 const canWrite = computed(() => auth.canWrite('payroll.inputs.write'))
 const checklistEnvironment = ref<PayrollRegzelEnvironment>('production')
@@ -276,11 +328,12 @@ function validationDisplayMessage(validation: PayrollRunValidation, count = 1): 
 
 /** Odkaz k nápravě doplněný o období běhu tam, kde cílová stránka období zná. */
 function remediationHref(remediationPath: string, runPeriod: string): string {
-  let path = remediationPath
-  if ((/^\/payroll\/(runs|time|quick-inputs|insolvency)(?:\?|$)/.test(path) || path.startsWith('/payroll/components?tab=risky_savings')) && !/[?&]period=/.test(path)) {
-    path += `${path.includes('?') ? '&' : '?'}period=${encodeURIComponent(runPeriod.slice(0, 7))}`
-  }
-  return path
+  return runRemediationHref(remediationPath, runPeriod)
+}
+
+/** Odkaz nálezu předběžné kontroly vede na měsíc kontroly, ne na zpracovávaný. */
+function readinessHref(remediationPath: string): string {
+  return runRemediationHref(remediationPath, readiness.value?.period_start)
 }
 
 /*
@@ -570,6 +623,20 @@ function showsNextSteps(run: PayrollRun): boolean {
   return NEXT_STEP_STATUSES.includes(run.status)
 }
 
+/**
+ * Schválený běh a vše za ním: čísla jsou závazná, takže odkazy na pásky,
+ * výplaty a podání za TOTÉŽ období mají smysl. Dřív schválený běh nabídl jen
+ * „Zaúčtovat" a „Vyžádat opravu" a o páskách ani podáních mlčel.
+ */
+const AFTER_APPROVAL_STATUSES: PayrollRun['status'][] = [
+  'approved',
+  ...NEXT_STEP_STATUSES,
+]
+
+function showsAfterApprovalLinks(run: PayrollRun): boolean {
+  return run.run_kind !== 'takeover' && AFTER_APPROVAL_STATUSES.includes(run.status)
+}
+
 /** Varování, na které se čeká: bez rozhodnutí člověka běh dál nepostoupí. */
 function awaitsOverride(validation: PayrollRunValidation): boolean {
   return validation.requires_override && validation.overridden_at === null
@@ -664,6 +731,8 @@ const KNOWN_COMMANDS: PayrollRunCommand[] = [
   'post',
   'prepare_payments',
   'request_correction',
+  'withdraw_correction',
+  'change_payment_date',
   'reopen',
   'cancel',
   'close',
@@ -685,8 +754,76 @@ function hasSourceDrift(run: PayrollRun): boolean {
   return (run.source_drift?.total ?? 0) > 0
 }
 
+function missingEmploymentKey(item: PayrollRunMissingEmployment): number {
+  return item.employment_id
+}
+
+function missingEmploymentSearchText(item: PayrollRunMissingEmployment): string {
+  return `${item.full_name} ${item.employment_code}`
+}
+
+function averageChangeKey(item: PayrollRunAverageChangeEmployment): number {
+  return item.employment_id
+}
+
+function averageChangeSearchText(item: PayrollRunAverageChangeEmployment): string {
+  return item.full_name
+}
+
+function averageChangeAverage(item: PayrollRunAverageChangeEmployment): string {
+  if (!item.average_changed) return ''
+  return item.current_average_hourly_minor === null
+    ? t('payroll.runs.average_change.average_removed', { from: money(item.frozen_average_hourly_minor) })
+    : t('payroll.runs.average_change.average', {
+      from: money(item.frozen_average_hourly_minor),
+      to: money(item.current_average_hourly_minor),
+    })
+}
+
+function averageChangeCompensation(item: PayrollRunAverageChangeCompensation): string {
+  return item.expected_amount_minor === null
+    ? t('payroll.runs.average_change.compensation_unknown', { component: item.component_name, amount: money(item.amount_minor) })
+    : t('payroll.runs.average_change.compensation', {
+      component: item.component_name,
+      amount: money(item.amount_minor),
+      expected: money(item.expected_amount_minor),
+    })
+}
+
+function averageChangeCommand(run: PayrollRun): PayrollRunCommand | null {
+  const action = run.average_change?.action ?? null
+  return action !== null && visibleCommands(run).includes(action) ? action : null
+}
+
+const COMPENSATION_RECALCULATION_STATUSES = new Set(['inputs_locked', 'calculated', 'reviewed', 'reopened'])
+
+function canRecalculateCompensations(run: PayrollRun): boolean {
+  return canWrite.value
+    && (run.average_change?.compensation_count ?? 0) > 0
+    && COMPENSATION_RECALCULATION_STATUSES.has(run.status)
+}
+
+async function onCompensationsRecalculated() {
+  await load({ silent: true })
+}
+
+async function fixAverageChange(run: PayrollRun) {
+  const command = averageChangeCommand(run)
+  if (command === null) return
+  if (command === 'request_correction') {
+    pendingCommand.value = { run, command }
+    commandReason.value = t('payroll.runs.average_change.reason')
+    commandError.value = ''
+    averageCorrectionRunId.value = run.id
+    return
+  }
+  await submitCommand(run, command)
+}
+
 function primaryCommand(run: PayrollRun): PayrollRunCommand | undefined {
-  if (hasSourceDrift(run) && run.available_commands.includes('refresh_inputs')) {
+  if ((hasSourceDrift(run) || sourceBlockerSteps(run).length > 0)
+    && run.available_commands.includes('refresh_inputs')
+  ) {
     return 'refresh_inputs'
   }
   return PRIMARY_COMMAND[run.status]
@@ -697,7 +834,7 @@ function commandClass(run: PayrollRun, command: PayrollRunCommand): string {
     return btnFilled(command === 'approve' ? 'success' : 'primary')
   }
   if (command === 'cancel') return btnOutline('danger')
-  if (command === 'request_correction' || command === 'reopen') {
+  if (command === 'request_correction' || command === 'reopen' || command === 'exclude_employee') {
     return btnOutline('warning')
   }
   return btnOutline('neutral')
@@ -711,7 +848,8 @@ function commandIcon(command: PayrollRunCommand): string {
   if (command === 'review' || command === 'approve' || command === 'close') {
     return ICONS.check
   }
-  if (command === 'cancel') return ICONS.x
+  if (command === 'cancel' || command === 'exclude_employee') return ICONS.x
+  if (command === 'change_payment_date') return ICONS.calendar
   return ICONS.uturn
 }
 
@@ -758,6 +896,8 @@ function commandHint(run: PayrollRun): string {
 }
 
 const SOURCE_DRIFT_KEYS = [
+  'worked_time_changed',
+  'remuneration_changed',
   'inputs_added',
   'inputs_changed',
   'inputs_removed',
@@ -767,6 +907,8 @@ const SOURCE_DRIFT_KEYS = [
   'employments_added',
   'employments_removed',
   'statutory_evidence_changed',
+  'employment_terms_changed',
+  'average_earnings_changed',
 ] as const
 
 /** Jen nenulové druhy změn — u 500 lidí nechceme číst sloupec nul. */
@@ -774,8 +916,61 @@ function sourceDriftLines(run: PayrollRun): { key: string, text: string }[] {
   const drift = run.source_drift
   if (!drift) return []
   return SOURCE_DRIFT_KEYS
-    .filter(key => drift[key] > 0)
+    .filter(key => (drift[key] ?? 0) > 0)
     .map(key => ({ key, text: t(`payroll.runs.source_drift.${key}`, { count: drift[key] }) }))
+}
+
+/*
+ * Práva příkazů běhu — kopie mapy z `PayrollRunsAction::command()`. Tlačítko,
+ * které server odmítne 403, se neukazuje; dřív viděla účetní bez práva
+ * k otevření běhu „Zrušit" a „Začít znovu" a dostala jen chybu.
+ */
+const COMMAND_PERMISSIONS: Partial<Record<PayrollRunCommand, PermissionKey[]>> = {
+  lock_and_calculate: ['payroll.calculate', 'payroll.inputs.write'],
+  refresh_inputs: ['payroll.calculate', 'payroll.inputs.write'],
+  change_payment_date: ['payroll.calculate', 'payroll.inputs.write'],
+  calculate: ['payroll.calculate'],
+  review: ['payroll.review'],
+  request_correction: ['payroll.review'],
+  withdraw_correction: ['payroll.review'],
+  approve: ['payroll.approve'],
+  close: ['payroll.approve'],
+  reopen: ['payroll.reopen'],
+  cancel: ['payroll.reopen'],
+  post: ['payroll.post'],
+  prepare_payments: ['payroll.payments'],
+  mark_paid: ['payroll.payments'],
+  exclude_employee: ['payroll.approve', 'payroll.inputs.write'],
+  include_employee: ['payroll.approve', 'payroll.inputs.write'],
+}
+
+function commandPermissions(command: PayrollRunCommand): PermissionKey[] {
+  return COMMAND_PERMISSIONS[command] ?? ['payroll.inputs.write']
+}
+
+function commandPermitted(command: PayrollRunCommand): boolean {
+  return commandPermissions(command).every(permission => auth.canWrite(permission))
+}
+
+/**
+ * Které kroky běhu účetní nevidí kvůli chybějícímu právu a jaké právo chybí.
+ * Bez téhle věty to vypadalo, že běh žádnou cestu dál nemá.
+ */
+function forbiddenCommandHint(run: PayrollRun): string {
+  const missing = new Map<PermissionKey, string[]>()
+  for (const command of run.available_commands) {
+    if (!KNOWN_COMMANDS.includes(command) || command === 'lock_inputs' || commandPermitted(command)) continue
+    for (const permission of commandPermissions(command)) {
+      if (auth.canWrite(permission)) continue
+      const labels = missing.get(permission) ?? []
+      labels.push(commandLabel(command, run))
+      missing.set(permission, labels)
+    }
+  }
+  return Array.from(missing, ([permission, commands]) => t('payroll.runs.forbidden_command', {
+    commands: commands.join(', '),
+    permission: t(`payroll.runs.permission_names.${permission.replace(/\./g, '_')}`),
+  })).join(' ')
 }
 
 function visibleCommands(run: PayrollRun): PayrollRunCommand[] {
@@ -786,22 +981,79 @@ function visibleCommands(run: PayrollRun): PayrollRunCommand[] {
   return run.available_commands.filter(command => {
     if (!KNOWN_COMMANDS.includes(command)) return false
     if (combined && command === 'lock_inputs') return false
-    if (command === 'lock_and_calculate') {
-      return canWrite.value && auth.canWrite('payroll.calculate')
-    }
-    if (command === 'calculate') return auth.canWrite('payroll.calculate')
-    // Obnova podkladů zamyká nově schválené vstupy — stejné dvě brány jako
-    // sloučený krok „Spočítat mzdy".
-    if (command === 'refresh_inputs') {
-      return canWrite.value && auth.canWrite('payroll.calculate')
-    }
-    if (command === 'request_correction') return auth.canWrite('payroll.review')
-    if (command === 'approve') return auth.canWrite('payroll.approve')
-    if (command === 'reopen') return auth.canWrite('payroll.reopen')
-    if (command === 'post') return auth.canWrite('payroll.post')
-    if (command === 'prepare_payments') return auth.canWrite('payroll.payments')
-    return canWrite.value
+    return commandPermitted(command)
   }).sort((a, b) => commandWeight(run, a) - commandWeight(run, b))
+}
+
+/*
+ * ─── Jak pokračovat, když běh drží neschválené podklady ──────────────────────
+ *
+ * Neschválená docházka, rozpracované vstupy nebo chybějící mzdová složka se
+ * opravují MIMO běh a do běhu se dostanou obnovením podkladů. Dřív karta
+ * ukázala jen červený seznam a text „otevřete novou revizi"; účetní běh
+ * zrušila, znovu otevřela (dvakrát psala důvod) a stála tam, kde předtím.
+ * Každý krok tu má proto vlastní tlačítko a poslední krok běh přepočítá.
+ */
+type SourceStep = 'time' | 'inputs' | 'components' | 'statutory'
+
+const SOURCE_STEP_ORDER: SourceStep[] = ['time', 'inputs', 'components', 'statutory']
+
+const SOURCE_STEP_CODES: Record<string, SourceStep> = {
+  time_month_not_approved: 'time',
+  time_month_missing: 'time',
+  draft_inputs_present: 'inputs',
+  employment_without_inputs: 'components',
+}
+
+/*
+ * Ruční kontrolu zákonného výpočtu způsobí chybějící mzdová složka i chybějící
+ * zákonná evidence (pojišťovna, rezidence). Krok se proto bere z místa opravy
+ * nálezu: mzdové vstupy vedou na „Doplňte mzdu", ostatní na zákonnou evidenci.
+ * Dřív radila karta „zadejte 0 Kč" i lidem, kterým chyběla jen pojišťovna.
+ */
+function sourceStepFor(code: string, remediationPaths: Array<string | null | undefined>): SourceStep[] {
+  if (code !== 'statutory_calculation_manual_review') {
+    const step = SOURCE_STEP_CODES[code]
+    return step ? [step] : []
+  }
+  const steps = new Set<SourceStep>()
+  for (const path of remediationPaths) {
+    steps.add(path?.startsWith('/payroll/quick-inputs') ? 'components' : 'statutory')
+  }
+  return steps.size === 0 ? ['statutory'] : [...steps]
+}
+
+function orderedSourceSteps(steps: Set<SourceStep>): SourceStep[] {
+  return SOURCE_STEP_ORDER.filter(step => steps.has(step))
+}
+
+const SOURCE_STEP_STATUSES = new Set<PayrollRun['status']>([
+  'inputs_locked',
+  'reopened',
+  'calculated',
+  'reviewed',
+  'cancelled',
+])
+
+function sourceBlockerSteps(run: PayrollRun): SourceStep[] {
+  if (!SOURCE_STEP_STATUSES.has(run.status)) return []
+  const steps = new Set<SourceStep>()
+  for (const validation of run.validations) {
+    if (validation.severity !== 'blocker') continue
+    for (const step of sourceStepFor(validation.code, [validation.remediation_path])) steps.add(step)
+  }
+  return orderedSourceSteps(steps)
+}
+
+/** Krok, který opravené podklady do běhu přenese — a hned přepočítá. */
+function sourceRefreshCommand(run: PayrollRun): PayrollRunCommand | null {
+  if (run.available_commands.includes('refresh_inputs')) return 'refresh_inputs'
+  if (run.status === 'cancelled' && run.available_commands.includes('reopen')) return 'reopen'
+  return null
+}
+
+function runPeriod(run: PayrollRun): string {
+  return run.period_start.slice(0, 7)
 }
 
 /*
@@ -889,14 +1141,38 @@ watch(periodRun, (run) => {
   if (run !== null) paymentDate.value = run.payment_date
 })
 
-async function load() {
-  loading.value = true
-  loadFailed.value = false
+/*
+ * Pořadí načtení. Kontrola před během počítá u větší firmy desítky sekund,
+ * takže odpověď za dříve zvolené období (výchozí měsíc při otevření stránky)
+ * mohla dorazit až po přepnutí měsíce a po příkazu nad během a přepsat ho:
+ * pod lednem pak visela kontrola a karta února a chybělo „Otevřít opravu".
+ * Odpověď, kterou předběhlo novější načtení, se proto zahodí.
+ */
+let loadSequence = 0
+
+/**
+ * `silent` = tichá obnova okna po změně jinde (hromadná akce v jiném okně):
+ * bez skeletonu a bez toastu, rozbalené osoby a historie zůstanou otevřené.
+ * Chyba se vyhodí, obnova pak počká na další příležitost.
+ */
+async function load(options?: { silent?: boolean }) {
+  const silent = options?.silent === true
+  const sequence = ++loadSequence
+  const requestedPeriod = period.value
+  if (!silent) {
+    loading.value = true
+    loadFailed.value = false
+  }
+  const openHistories = silent
+    ? Object.keys(historyOpen.value).map(Number).filter(id => historyOpen.value[id])
+    : []
   try {
     const [page, people] = await Promise.all([
-      payrollApi.runsPage(period.value, { limit: pageSize, offset: offset.value }),
-      payrollApi.peopleOptions().catch(() => null),
+      payrollApi.runsPage(requestedPeriod, { limit: pageSize, offset: offset.value }),
+      personNamesLoaded ? Promise.resolve(null) : payrollApi.peopleOptions().catch(() => null),
     ])
+    if (sequence !== loadSequence || requestedPeriod !== period.value) return
+    loadFailed.value = false
     runs.value = page.runs
     total.value = page.total
     suggestedPaymentDate.value = page.suggested_payment_date ?? null
@@ -913,8 +1189,11 @@ async function load() {
     ) {
       paymentDate.value = suggestedPaymentDate.value
     }
-    // Rozpad patří ke konkrétní revizi; po přenačtení seznamu už nemusí platit.
-    breakdowns.value = {}
+    // Otevřený přehled osob zůstává; při změně revize se přenačte sám.
+    breakdownOpen.value = Object.fromEntries(
+      Object.entries(breakdownOpen.value)
+        .filter(([id]) => page.runs.some(run => String(run.id) === id && run.result_snapshot)),
+    )
     histories.value = {}
     historyOpen.value = {}
     historyFailed.value = {}
@@ -922,15 +1201,32 @@ async function load() {
       personNames.value = Object.fromEntries(
         people.map(person => [person.id, person.full_name]),
       )
+      personNamesLoaded = true
     }
-  } catch {
+    // Nález jmenuje osobu, kterou číselník ještě nezná (založená mezitím
+    // jinde): příští načtení si jména stáhne znovu.
+    if (personNamesLoaded && page.runs.some(run => run.validations.some(validation =>
+      validation.entity_type === 'employee'
+      && validation.entity_id !== null
+      && personNames.value[validation.entity_id] === undefined))
+    ) {
+      personNamesLoaded = false
+    }
+    const reopened = openHistories.filter(id => page.runs.some(item => item.id === id))
+    if (reopened.length > 0) {
+      historyOpen.value = Object.fromEntries(reopened.map(id => [id, true]))
+      await Promise.all(reopened.map(id => loadHistory(id)))
+    }
+  } catch (error) {
+    if (silent) throw error
+    if (sequence !== loadSequence) return
     // Seznam běhů se nechává být: „za období nebyl spuštěn žádný běh" je
     // závěr, na který po výpadku sítě nemáme právo.
     readiness.value = null
     loadFailed.value = true
     toast.error(t('payroll.runs.load_failed'))
   } finally {
-    loading.value = false
+    if (!silent && sequence === loadSequence) loading.value = false
   }
 }
 
@@ -940,29 +1236,14 @@ function goToPage(nextPage: number) {
   void load()
 }
 
-/**
- * Dotáhne osobní rozpad jednoho běhu. Opakované kliknutí rozpad schová, aby si
- * uživatel mohl seznam zase zpřehlednit; jednou stažená data se drží v paměti.
- */
-async function toggleBreakdown(run: PayrollRun) {
-  if (breakdowns.value[run.id] !== undefined) {
-    const { [run.id]: _removed, ...rest } = breakdowns.value
-    breakdowns.value = rest
+/** Rozbalí nebo schová přehled osob jednoho běhu. */
+function toggleBreakdown(run: PayrollRun) {
+  if (breakdownOpen.value[run.id]) {
+    const { [run.id]: _removed, ...rest } = breakdownOpen.value
+    breakdownOpen.value = rest
     return
   }
-  breakdownLoading.value = { ...breakdownLoading.value, [run.id]: true }
-  try {
-    const detail = await payrollApi.run(run.id)
-    breakdowns.value = {
-      ...breakdowns.value,
-      [run.id]: detail.result_snapshot?.people ?? [],
-    }
-  } catch {
-    toast.error(t('payroll.runs.breakdown_failed'))
-  } finally {
-    const { [run.id]: _pending, ...rest } = breakdownLoading.value
-    breakdownLoading.value = rest
-  }
+  breakdownOpen.value = { ...breakdownOpen.value, [run.id]: true }
 }
 
 const HISTORY_TOTAL_KEYS: PayrollRunHistoryTotalKey[] = [
@@ -988,6 +1269,10 @@ function historyEventLabel(event: PayrollRunHistoryEvent): string {
     ...KNOWN_COMMANDS,
     'validation_override',
     'validation_override_revoked',
+    'validation_overrides_carried',
+    'compensation_recalculated',
+    'exclude_employee',
+    'include_employee',
   ])
   return known.has(event.event_type)
     ? t(`payroll.runs.history.event.${event.event_type}`)
@@ -1052,11 +1337,27 @@ function reloadedRun(run: PayrollRun): PayrollRun | null {
   return runs.value.find(candidate => candidate.id === run.id) ?? null
 }
 
+/**
+ * Důvod se píše jen u opravy schváleného běhu: u vyžádání opravy a u zrušení
+ * opravné revize, protože ta stojí nad schváleným (zaúčtovaným, uzavřeným)
+ * výsledkem. Server to hlídá stejně. Zrušení neschváleného běhu vrací
+ * „Začít znovu", takže stačí jedno potvrzení bez psaní; samotné „Začít
+ * znovu" je návrat a dialog nemá. Dřív se obrazovka ptala na důvod dvakrát
+ * za sebou a účetní psala „xxx", aby mohla pokračovat.
+ */
+function commandNeedsReason(run: PayrollRun, command: PayrollRunCommand): boolean {
+  return command === 'request_correction'
+    || command === 'exclude_employee'
+    || (command === 'cancel' && run.revision_kind === 'correction')
+}
+
 async function runCommand(run: PayrollRun, command: PayrollRunCommand) {
-  if (['request_correction', 'reopen', 'cancel'].includes(command)) {
+  averageCorrectionRunId.value = null
+  if (['request_correction', 'cancel', 'withdraw_correction', 'change_payment_date'].includes(command)) {
     pendingCommand.value = { run, command }
     commandReason.value = ''
     commandError.value = ''
+    commandPaymentDate.value = run.payment_date
     return
   }
   /*
@@ -1070,7 +1371,42 @@ async function runCommand(run: PayrollRun, command: PayrollRunCommand) {
     pendingStart.value = { run, command }
     return
   }
+  /*
+   * Schválení je závazné a nevratné jedním kliknutím: uzamkne výsledek, založí
+   * pásky a uzavře historii evidence. Dialog řekne, co se uzamkne, dřív než
+   * se to stane; zpět pak vede jen oprava běhu.
+   */
+  if (command === 'approve') {
+    pendingApprove.value = run
+    return
+  }
   await submitCommand(run, command)
+}
+
+/** Co schválení uzamkne; pořadí je pořadí vět v potvrzení. */
+const APPROVE_LOCK_KEYS = ['result', 'evidence', 'changes', 'followup'] as const
+
+async function confirmApprove() {
+  const run = pendingApprove.value
+  if (run === null) return
+  pendingApprove.value = null
+  await submitCommand(run, 'approve')
+}
+
+/**
+ * Stojí období běhu vůči dnešku: `upcoming` ještě nezačalo, `running` běží.
+ * Jen kalendář pro text potvrzení; nález s důsledky posílá kontrola před během.
+ */
+function periodTiming(run: PayrollRun): 'upcoming' | 'running' | 'finished' {
+  const today = appIsoDate()
+  if (run.period_start > today) return 'upcoming'
+  return periodEndDate(run) >= today ? 'running' : 'finished'
+}
+
+function periodEndDate(run: PayrollRun): string {
+  const [year, month] = run.period_start.split('-').map(Number)
+  const lastDay = new Date(Date.UTC(year, month, 0)).getUTCDate()
+  return `${run.period_start.slice(0, 8)}${String(lastDay).padStart(2, '0')}`
 }
 
 /** Kroky, po kterých se snímek vstupů zmrazí — jen před nimi má kontrola smysl. */
@@ -1123,6 +1459,40 @@ function findingEntityLabels(finding: PayrollRunReadinessFinding): string[] {
 
 type ReadinessEntity = PayrollRunReadinessFinding['entities'][number]
 
+/*
+ * Hromadná oprava z nálezu otevře TENTÝŽ dialog jako Mzdy → Zaměstnanci →
+ * Další funkce (`?bulk=`), s obdobím kontrolovaného běhu. Nic se tu
+ * nepřepočítává ani nezapisuje.
+ */
+const READINESS_BULK_ICONS: Record<PayrollRunReadinessBulkKind, string> = {
+  statutory_defaults: ICONS.clipboardCheck,
+  declaration_signed: ICONS.check,
+  health_insurer: ICONS.clipboardCheck,
+  workplace: ICONS.pin,
+  closure: ICONS.archive,
+  annual_settlement_request: ICONS.check,
+  annual_settlement_request_safe: ICONS.check,
+  payout_defaults: ICONS.coin,
+}
+
+function readinessBulkPeriod(): string {
+  return readiness.value?.period_start?.slice(0, 7) ?? period.value
+}
+
+function readinessBulkTarget(action: { kind: PayrollRunReadinessBulkKind, employee_ids?: number[] }) {
+  const kind = action.kind
+  const bulkPeriod = readinessBulkPeriod()
+  if (kind === 'annual_settlement_request' || kind === 'annual_settlement_request_safe') {
+    // Hromadné „nepožádal" je výběr na stránce Ročního zúčtování zúžený na
+    // osoby hlášení. Osoby bez prohlášení (bezpečná skupina) se rovnou vyberou.
+    return annualSettlementRequestTarget(bulkPeriod, action.employee_ids, true, route.fullPath)
+  }
+  // Nález nese osoby, kterých se týká — dialog se jimi zúží, ne na celý rok.
+  // `back`: po zavření dialogu zpět do běhu, ne na seznam zaměstnanců.
+  const employees = action.employee_ids?.length ? { employees: action.employee_ids.join(',') } : {}
+  return { name: 'payroll-people', query: { bulk: kind, period: bulkPeriod, ...employees, back: route.fullPath } }
+}
+
 function readinessEntityKey(entity: ReadinessEntity, index: number): string {
   return `${entity.entity_type}-${entity.entity_id}-${index}`
 }
@@ -1132,6 +1502,12 @@ function readinessEntitySearchText(entity: ReadinessEntity): string {
     ? personNames.value[entity.entity_id] ?? ''
     : ''
   return [entity.label ?? '', name, entity.message ?? ''].join(' ')
+}
+
+function readinessFindingMessage(finding: PayrollRunReadinessFinding): string {
+  return finding.code === 'payout_rule_missing'
+    ? t('payroll.runs.readiness.payout_rule_missing')
+    : finding.message
 }
 
 /** Skutečný počet dotčených — `entities` server ořezává, `entity_total` ne. */
@@ -1145,7 +1521,7 @@ function findingNotListed(finding: PayrollRunReadinessFinding): number {
 }
 
 function findingClass(finding: PayrollRunReadinessFinding): string {
-  if (finding.impact === 'blocking') {
+  if (finding.impact === 'blocking' || finding.impact === 'approval') {
     return 'border-danger-500/30 bg-danger-50 text-danger-700'
   }
 
@@ -1163,34 +1539,107 @@ function findingClass(finding: PayrollRunReadinessFinding): string {
  */
 const readinessGroups = computed(() => ([
   { impact: 'blocking' as const, findings: readinessFindings.value.filter(f => f.impact === 'blocking') },
+  { impact: 'approval' as const, findings: readinessFindings.value.filter(f => f.impact === 'approval') },
   { impact: 'revision' as const, findings: readinessFindings.value.filter(f => f.impact === 'revision') },
   { impact: 'anytime' as const, findings: readinessFindings.value.filter(f => f.impact === 'anytime') },
 ]).filter(group => group.findings.length > 0))
+
+/**
+ * Co z předběžné kontroly zablokuje schválení — stejné kroky, jaké karta
+ * běhu nabízí po výpočtu. Vyřešit je PŘED zahájením je levnější: odpadne
+ * obnova podkladů i přepočet.
+ */
+const readinessSourceSteps = computed<SourceStep[]>(() => {
+  const steps = new Set<SourceStep>()
+  for (const finding of readinessFindings.value) {
+    if (finding.impact !== 'approval') continue
+    const paths = finding.entities.length > 0
+      ? finding.entities.map(entity => entity.remediation_path)
+      : [finding.remediation_path]
+    for (const step of sourceStepFor(finding.code, paths)) steps.add(step)
+  }
+  return orderedSourceSteps(steps)
+})
+
+async function approveDraftInputsBeforeStart(run: PayrollRun) {
+  await approveDraftInputs(run)
+  await recheckReadiness()
+}
+
+function commandDoneMessage(
+  command: PayrollRunCommand,
+  extra: { payment_date?: string },
+  label: string | undefined,
+): string | null {
+  if (command === 'exclude_employee') return t('payroll.runs.command_toast.excluded', { name: label ?? '' })
+  if (command === 'include_employee') return t('payroll.runs.command_toast.included', { name: label ?? '' })
+  if (command === 'change_payment_date' && extra.payment_date) {
+    return t('payroll.runs.command_toast.payment_date', { date: formatDate(extra.payment_date) })
+  }
+  return null
+}
 
 async function submitCommand(
   run: PayrollRun,
   command: PayrollRunCommand,
   reason?: string,
+  extra: { payment_date?: string, employee_id?: number, employment_id?: number } = {},
+  label?: string,
+  donePrefix?: string,
 ) {
   saving.value = true
+  runningCommand.value = { runId: run.id, command }
   delete commandBlockers.value[run.id]
+  delete commandBlockerLinks.value[run.id]
   try {
     const response = await payrollApi.commandRun(
       run.id,
       command,
-      { row_version: run.row_version, ...(reason ? { reason } : {}) },
+      { row_version: run.row_version, ...(reason ? { reason } : {}), ...extra },
       crypto.randomUUID(),
     )
     const outcome = response.outcome?.outcome ?? null
-    toast.success(
-      outcome === null
-        ? t('payroll.runs.command_done')
-        : t(`payroll.runs.outcome.${outcome}`),
-    )
+    const doneMessage = commandDoneMessage(command, extra, label)
+    const recalculates = ['refresh_inputs', 'reopen', 'change_payment_date', 'exclude_employee', 'include_employee'].includes(command)
+    if (donePrefix !== undefined && command === 'calculate') {
+      toast.success(t('payroll.runs.command_toast.recalculated', {
+        done: donePrefix,
+        revision: response.run?.revision_no ?? response.run?.current_revision_no ?? '',
+      }))
+    } else if (doneMessage === null) {
+      toast.success(
+        outcome === null
+          ? t('payroll.runs.command_done')
+          : t(`payroll.runs.outcome.${outcome}`),
+      )
+    }
     pendingCommand.value = null
     commandReason.value = ''
     commandError.value = ''
     await load()
+    if (command === 'request_correction' && averageCorrectionRunId.value === run.id) {
+      averageCorrectionRunId.value = null
+      const fresh = reloadedRun(run)
+      if (fresh !== null && fresh.available_commands.includes('reopen') && auth.canWrite('payroll.reopen')) {
+        await submitCommand(fresh, 'reopen')
+        return
+      }
+    }
+    /*
+     * Obnovené podklady nebo nová revize nemají výsledek a jediný smysluplný
+     * další krok je přepočet. Udělá se rovnou, ať účetní nemačká dvě tlačítka
+     * za sebou a neplete si „obnoveno" se „spočítáno".
+     */
+    if (recalculates) {
+      const fresh = reloadedRun(run)
+      if (fresh !== null && fresh.available_commands.includes('calculate')
+        && auth.canWrite('payroll.calculate')
+      ) {
+        await submitCommand(fresh, 'calculate', undefined, {}, undefined, doneMessage ?? undefined)
+        return
+      }
+    }
+    if (doneMessage !== null) toast.success(doneMessage)
     if (command === 'prepare_payments'
       && outcome !== 'payments_not_applicable'
     ) {
@@ -1206,7 +1655,13 @@ async function submitCommand(
   } catch (error: any) {
     const failure = error?.response?.data?.error
     const message = failure?.message || t('payroll.runs.command_failed')
-    if (pendingCommand.value) commandError.value = message
+    // Chyba s místem opravy (dohoda o srážce, chybějící údaj) zůstane u běhu
+    // i s odkazem: z toastu se na místo opravy nedalo dostat.
+    if (typeof failure?.remediation_path === 'string' && failure.remediation_path !== '') {
+      commandBlockers.value = { ...commandBlockers.value, [run.id]: message }
+      commandBlockerLinks.value = { ...commandBlockerLinks.value, [run.id]: failure.remediation_path }
+      if (pendingCommand.value) commandError.value = message
+    } else if (pendingCommand.value) commandError.value = message
     // Blokující důvod u zaúčtování a plateb je celá věta („komu chybí výplatní
     // pravidlo", „kolik zbývá uhradit"). V toastu se ztratí dřív, než se podle
     // ní dá jednat — proto zůstane viset u konkrétního běhu.
@@ -1228,6 +1683,7 @@ async function submitCommand(
     }
   } finally {
     saving.value = false
+    runningCommand.value = null
   }
 }
 
@@ -1235,20 +1691,91 @@ function dismissBlocker(runId: number) {
   const next = { ...commandBlockers.value }
   delete next[runId]
   commandBlockers.value = next
+  const links = { ...commandBlockerLinks.value }
+  delete links[runId]
+  commandBlockerLinks.value = links
 }
 
 async function confirmCommand() {
   if (!pendingCommand.value) return
   const reason = commandReason.value.trim()
-  if (!reason) {
+  if (!reason && commandNeedsReason(pendingCommand.value.run, pendingCommand.value.command)) {
     commandError.value = t('payroll.runs.reason_required')
     return
   }
-  await submitCommand(
-    pendingCommand.value.run,
-    pendingCommand.value.command,
-    reason,
-  )
+  const pending = pendingCommand.value
+  const extra: { payment_date?: string, employee_id?: number, employment_id?: number } = {}
+  if (pending.command === 'change_payment_date') {
+    if (!commandPaymentDate.value) {
+      commandError.value = t('payroll.runs.create_blocked_payment_date')
+      return
+    }
+    extra.payment_date = commandPaymentDate.value
+  }
+  if (pending.target?.employee_id) extra.employee_id = pending.target.employee_id
+  if (pending.target?.employment_id) extra.employment_id = pending.target.employment_id
+  await submitCommand(pending.run, pending.command, reason || undefined, extra, pending.target?.label)
+}
+
+/**
+ * Vyřadit jde osobu z nálezu ruční kontroly (zákonný výpočet, srážky), jen
+ * v otevřené revizi a se stejným právem jako výjimka u kontroly.
+ */
+const EXCLUDABLE_CODES = new Set(['statutory_calculation_manual_review', 'enforcement_manual_review'])
+
+function canExclude(run: PayrollRun, validation: DisplayValidation): boolean {
+  return validation.severity === 'blocker'
+    && EXCLUDABLE_CODES.has(validation.code)
+    && (validation.entity_type === 'employee' || validation.entity_type === 'employment')
+    && validation.entity_id !== null
+    && run.available_commands.includes('exclude_employee')
+    && commandPermitted('exclude_employee')
+}
+
+function askExclude(run: PayrollRun, validation: DisplayValidation): void {
+  const id = validation.entity_id
+  if (id === null) return
+  const label = validation.entity_labels[0]
+    ?? (validation.entity_type === 'employee' ? personNames.value[id] : undefined)
+    ?? validation.display_message.split(':')[0]
+  pendingCommand.value = {
+    run,
+    command: 'exclude_employee',
+    target: validation.entity_type === 'employee'
+      ? { employee_id: id, label }
+      : { employment_id: id, label },
+  }
+  commandReason.value = ''
+  commandError.value = ''
+}
+
+function canExcludePeople(run: PayrollRun): boolean {
+  return run.revision_kind !== 'correction'
+    && run.revision_status !== 'approved'
+    && run.available_commands.includes('exclude_employee')
+    && commandPermitted('exclude_employee')
+}
+
+function askExcludePerson(run: PayrollRun, person: { employee_id: number, full_name: string }): void {
+  pendingCommand.value = {
+    run,
+    command: 'exclude_employee',
+    target: { employee_id: person.employee_id, label: person.full_name },
+  }
+  commandReason.value = ''
+  commandError.value = ''
+}
+
+async function includeExcluded(run: PayrollRun, exclusion: PayrollRunExclusion): Promise<void> {
+  await submitCommand(run, 'include_employee', undefined, { employee_id: exclusion.employee_id }, exclusion.full_name)
+}
+
+function activeExclusions(run: PayrollRun): PayrollRunExclusion[] {
+  return (run.exclusions ?? []).filter(exclusion => exclusion.active)
+}
+
+function settledExclusions(run: PayrollRun): PayrollRunExclusion[] {
+  return (run.exclusions ?? []).filter(exclusion => !exclusion.active)
 }
 
 function groupedFailures(
@@ -1501,7 +2028,20 @@ function changePeriod() {
   void load()
 }
 
-onMounted(load)
+/*
+ * Kontrola před během se mění akcemi jinde (hromadné ukončení dohod
+ * v Zaměstnancích, schválení docházky, roční zúčtování). Okno v pozadí se po
+ * změně mezd tiše obnoví, jakmile je vidět a nic rozpracovaného (dialog,
+ * rozepsaný důvod, běžící příkaz) tomu nebrání. Vlastní obnova zároveň brání
+ * tomu, aby okno stránku po vlastním příkazu vytvořilo znovu.
+ */
+useWindowRefresh(() => load({ silent: true }), () => !loading.value && !saving.value
+  && !advancingStart.value && !fillingAverages.value
+  && pendingCommand.value === null && pendingDelete.value === null && pendingApprove.value === null
+  && pendingOverride.value === null && pendingStart.value === null && pendingHide.value === null
+  && bulkDefaultsRun.value === null)
+
+onMounted(() => { void load() })
 </script>
 
 <template>
@@ -1528,6 +2068,16 @@ onMounted(load)
             class="h-9 rounded-md border border-neutral-300 bg-surface px-3 text-sm"
             @input="paymentDateTouched = true" />
         </label>
+        <RouterLink
+          :to="{ name: 'payroll-month-guide', query: { period } }"
+          :class="btnOutline('neutral')"
+          data-test="runs-month-guide-link"
+        >
+          <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+            <path :d="ICONS.clipboardCheck" />
+          </svg>
+          {{ t('payroll.month_guide.open_guide') }}
+        </RouterLink>
         <RouterLink
           :to="{ name: 'payroll-quick-inputs', query: { period } }"
           :class="btnOutline('primary')"
@@ -1677,6 +2227,45 @@ onMounted(load)
             {{ t('payroll.runs.readiness.subtitle') }}
           </p>
           <div
+            v-if="readinessSourceSteps.length"
+            class="mt-3 flex flex-wrap gap-2"
+            data-test="run-readiness-approval-links"
+          >
+            <RouterLink
+              v-if="readinessSourceSteps.includes('time')"
+              :to="{ name: 'payroll-time', query: { period, approve: 'all' } }"
+              :class="[btnOutlineSm('success'), 'whitespace-nowrap']"
+            >
+              <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.badgeCheck" /></svg>
+              {{ t('payroll.runs.continue_steps.time_action') }}
+            </RouterLink>
+            <RouterLink
+              v-if="readinessSourceSteps.includes('inputs')"
+              :to="{ name: 'payroll-components', query: { tab: 'inputs', status: 'draft', period } }"
+              :class="[btnOutlineSm('success'), 'whitespace-nowrap']"
+            >
+              <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.badgeCheck" /></svg>
+              {{ t('payroll.runs.continue_steps.inputs_action') }}
+            </RouterLink>
+            <RouterLink
+              v-if="readinessSourceSteps.includes('components')"
+              :to="{ name: 'payroll-quick-inputs', query: { period } }"
+              :class="[btnOutlineSm('primary'), 'whitespace-nowrap']"
+            >
+              <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.edit" /></svg>
+              {{ t('payroll.runs.continue_steps.components_action') }}
+            </RouterLink>
+            <RouterLink
+              v-if="readinessSourceSteps.includes('statutory')"
+              :to="{ name: 'payroll-people', query: { filter: 'blocking_data', period } }"
+              :class="[btnOutlineSm('primary'), 'whitespace-nowrap']"
+              data-test="run-readiness-step-statutory"
+            >
+              <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.clipboardCheck" /></svg>
+              {{ t('payroll.runs.continue_steps.statutory_people_action') }}
+            </RouterLink>
+          </div>
+          <div
             v-for="group in readinessGroups"
             :key="group.impact"
             class="mt-3"
@@ -1697,7 +2286,10 @@ onMounted(load)
                 :data-testid="`run-readiness-${finding.code}`"
               >
                 <p>
-                  <span v-if="findingCount(finding) > 1" class="font-semibold" :data-test="`run-readiness-count-${finding.code}`">{{ findingCount(finding) }}× </span>{{ finding.message }}
+                  <span v-if="findingCount(finding) > 1" class="font-semibold" :data-test="`run-readiness-count-${finding.code}`">{{ findingCount(finding) }}× </span>{{ readinessFindingMessage(finding) }}
+                </p>
+                <p v-if="finding.requires_override" class="mt-1 text-xs" :data-test="`run-readiness-override-${finding.code}`">
+                  {{ t('payroll.runs.override.awaiting') }}
                 </p>
                 <p
                   v-if="findingEntityLabels(finding).length"
@@ -1722,15 +2314,25 @@ onMounted(load)
                 >
                   <template #item="{ item: entity }">
                     <p v-if="entity.message && entity.message !== finding.message" class="text-sm">{{ entity.message }}</p>
-                    <a v-if="entity.remediation_path" :href="entity.remediation_path" :class="[btnOutlineSm('neutral'), 'mt-1 inline-flex']">
-                      <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.link" /></svg>
+                    <a v-if="entity.remediation_path" :href="readinessHref(entity.remediation_path)" :class="[btnOutlineSmWrap('neutral'), 'mt-1 max-w-full text-left']" data-test="run-readiness-entity-link">
+                      <svg class="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.link" /></svg>
                       {{ t('payroll.runs.validation.open_remediation') }}<span v-if="entity.label">: {{ entity.label }}</span>
                     </a>
                   </template>
                 </ExpandableList>
+                <!-- Výčet je oříznutý: zbytek osob nálezu ukáže seznam zaměstnanců zúžený týmž pravidlem. -->
+                <a
+                  v-if="finding.people_list_path"
+                  :href="finding.people_list_path"
+                  :class="[btnOutlineSm('neutral'), 'mt-2 inline-flex']"
+                  :data-test="`run-readiness-people-list-${finding.code}`"
+                >
+                  <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.link" /></svg>
+                  {{ t('payroll.runs.readiness.people_list', { count: finding.people_total ?? 0 }, finding.people_total ?? 0) }}
+                </a>
                 <a
                   v-if="finding.remediation_path && !finding.entities.some(entity => entity.remediation_path)"
-                  :href="finding.remediation_path"
+                  :href="readinessHref(finding.remediation_path)"
                   :class="[btnOutlineSm('neutral'), 'mt-2 inline-flex']"
                 >
                   <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
@@ -1738,6 +2340,49 @@ onMounted(load)
                   </svg>
                   {{ t('payroll.runs.validation.open_remediation') }}
                 </a>
+                <!--
+                  Víc dotčených vztahů: odkazy u záznamů otevřou vždy jednu osobu.
+                  Společný odkaz vede na tutéž agendu bez zúžení, kde je hromadná
+                  akce (průměry za čtvrtletí, schválení docházky, zaokrouhlení).
+                -->
+                <a
+                  v-else-if="finding.remediation_path && findingCount(finding) > 1"
+                  :href="readinessHref(finding.remediation_path)"
+                  :class="[btnOutlineSm('neutral'), 'mt-2 inline-flex']"
+                  :data-test="`run-readiness-open-all-${finding.code}`"
+                >
+                  <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                    <path :d="ICONS.link" />
+                  </svg>
+                  {{ t('payroll.runs.readiness.open_all', { count: findingCount(finding) }) }}
+                </a>
+                <button
+                  v-if="PROBABLE_AVERAGE_CODES.includes(finding.code) && canFillAverages"
+                  type="button"
+                  :class="[btnOutlineSm('success'), 'mt-2 whitespace-nowrap']"
+                  :disabled="fillingAverages"
+                  :data-test="`run-readiness-fill-probable-${finding.code}`"
+                  @click="fillProbableAverages"
+                >
+                  <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.plus" /></svg>
+                  {{ t('payroll.runs.readiness.fill_probable_average') }}
+                </button>
+                <div
+                  v-if="finding.bulk_actions?.length"
+                  class="mt-2 flex flex-wrap gap-2"
+                  :data-test="`run-readiness-bulk-${finding.code}`"
+                >
+                  <RouterLink
+                    v-for="action in finding.bulk_actions"
+                    :key="action.kind"
+                    :to="readinessBulkTarget(action)"
+                    :class="[btnOutlineSm(action.kind === 'declaration_signed' ? 'success' : 'warning'), 'whitespace-nowrap']"
+                    :data-test="`run-readiness-bulk-action-${action.kind}`"
+                  >
+                    <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="READINESS_BULK_ICONS[action.kind]" /></svg>
+                    {{ t(`payroll.runs.readiness.bulk.${action.kind}`, { count: action.count, period: formatPeriodNumeric(readinessBulkPeriod()) }) }}
+                  </RouterLink>
+                </div>
                 <div
                   v-if="finding.hideable && canHideWarnings"
                   class="mt-2 flex flex-wrap gap-2"
@@ -1840,7 +2485,7 @@ onMounted(load)
       :key="takeoverPanelKey"
       :year="takeoverYear"
       :can-write="canWrite"
-      @changed="load"
+      @changed="load()"
     />
 
     <div v-if="loading" class="space-y-3">
@@ -1853,7 +2498,7 @@ onMounted(load)
       boxed
       data-test="load-failed"
       :message="t('payroll.runs.load_failed_hint')"
-      @action="load"
+      @action="load()"
     />
 
     <section
@@ -1901,7 +2546,7 @@ onMounted(load)
               </span>
             </div>
             <p class="mt-1 text-sm text-neutral-500">
-              {{ t('payroll.runs.payment_date_value', { date: run.payment_date }) }}
+              {{ t('payroll.runs.payment_date_value', { date: formatDate(run.payment_date) }) }}
               · {{ t('payroll.runs.revision', { revision: run.revision_no ?? 0 }) }}
             </p>
           </div>
@@ -1955,6 +2600,13 @@ onMounted(load)
           {{ commandHint(run) }}
         </p>
         <p
+          v-if="forbiddenCommandHint(run)"
+          :data-testid="`payroll-run-${run.id}-forbidden`"
+          class="mt-2 max-w-3xl text-sm text-neutral-500"
+        >
+          {{ forbiddenCommandHint(run) }}
+        </p>
+        <p
           v-if="visibleCommands(run).includes('approve') && commandDisabled(run, 'approve')"
           :data-testid="`payroll-run-${run.id}-approve-blocked`"
           class="mt-2 flex max-w-3xl flex-wrap items-center gap-x-2 gap-y-1 text-sm text-warning-800"
@@ -1999,6 +2651,123 @@ onMounted(load)
             </p>
           </div>
         </div>
+        <div
+          v-if="run.average_change"
+          :data-testid="`payroll-run-${run.id}-average-change`"
+          class="mt-3 flex max-w-3xl items-start gap-3 rounded-lg border border-warning-200 bg-warning-50 p-3 text-sm text-warning-800"
+          role="alert"
+        >
+          <svg class="mt-0.5 h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+            <path :d="ICONS.bell" />
+          </svg>
+          <div class="min-w-0 flex-1 space-y-2">
+            <p class="font-medium">
+              {{ t(run.average_change.approved ? 'payroll.runs.average_change.title_approved' : 'payroll.runs.average_change.title_open') }}
+            </p>
+            <ExpandableList
+              :items="run.average_change.employments"
+              :item-key="averageChangeKey"
+              :search-text="averageChangeSearchText"
+              :test-id="`payroll-run-${run.id}-average-change-list`"
+              list-class="list-disc space-y-0.5 pl-5"
+            >
+              <template #item="{ item }">
+                <RouterLink
+                  :to="{ name: 'payroll-people', query: { person: String(item.employee_id), employment: String(item.employment_id) } }"
+                  class="font-medium text-primary-600 hover:underline"
+                >{{ item.full_name }}</RouterLink>
+                <span v-if="item.average_changed"> · {{ averageChangeAverage(item) }}</span>
+                <span
+                  v-for="compensation in item.compensations"
+                  :key="compensation.input_id"
+                  data-test="payroll-run-average-change-compensation"
+                > · {{ averageChangeCompensation(compensation) }}</span>
+              </template>
+            </ExpandableList>
+            <p v-if="run.average_change.compensation_count > 0">
+              {{ t('payroll.runs.average_change.compensation_body', { difference: money(run.average_change.compensation_difference_minor) }) }}
+            </p>
+            <p>{{ t(`payroll.runs.average_change.body_${run.average_change.action ?? 'none'}`) }}</p>
+            <button
+              v-if="averageChangeCommand(run)"
+              type="button"
+              class="cursor-pointer whitespace-nowrap"
+              :class="btnOutlineSm('warning')"
+              :disabled="saving"
+              :data-testid="`payroll-run-${run.id}-average-change-fix`"
+              @click="fixAverageChange(run)"
+            >
+              <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="run.average_change.action === 'refresh_inputs' ? ICONS.lock : ICONS.uturn" /></svg>
+              {{ t(`payroll.runs.average_change.action_${run.average_change.action}`) }}
+            </button>
+            <p v-else-if="run.average_change.action !== null" data-test="payroll-run-average-change-forbidden">
+              {{ t('payroll.runs.average_change.action_forbidden') }}
+            </p>
+            <button
+              v-if="canRecalculateCompensations(run)"
+              type="button"
+              class="cursor-pointer whitespace-nowrap"
+              :class="btnOutlineSm('warning')"
+              :disabled="saving"
+              :data-testid="`payroll-run-${run.id}-compensation-recalculation`"
+              @click="compensationRecalculationRun = run"
+            >
+              <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.cycle" /></svg>
+              {{ t('payroll.runs.average_change.recalculate_compensations') }}
+            </button>
+          </div>
+        </div>
+        <!--
+          Schválený běh nezná vztah, který do jeho období patří (zaměstnanec
+          založený po schválení, nástup posunutý dozadu). Bez tohohle výčtu
+          osoba tiše zůstala bez mzdy i bez měsíčního hlášení za měsíc nástupu.
+        -->
+        <div
+          v-if="(run.missing_employments ?? []).length > 0"
+          :data-testid="`payroll-run-${run.id}-missing-employments`"
+          class="mt-3 flex max-w-3xl items-start gap-3 rounded-lg border border-warning-200 bg-warning-50 p-3 text-sm text-warning-800"
+          role="alert"
+        >
+          <svg class="mt-0.5 h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+            <path :d="ICONS.bell" />
+          </svg>
+          <div class="min-w-0 flex-1 space-y-2">
+            <p class="font-medium">
+              {{ t('payroll.runs.missing_employments.title', { count: (run.missing_employments ?? []).length }, (run.missing_employments ?? []).length) }}
+            </p>
+            <ExpandableList
+              :items="run.missing_employments ?? []"
+              :item-key="missingEmploymentKey"
+              :search-text="missingEmploymentSearchText"
+              :test-id="`payroll-run-${run.id}-missing-employments-list`"
+              list-class="list-disc space-y-0.5 pl-5"
+            >
+              <template #item="{ item }">
+                <RouterLink
+                  :to="{ name: 'payroll-people', query: { person: String(item.employee_id), employment: String(item.employment_id) } }"
+                  class="font-medium text-primary-600 hover:underline"
+                >{{ item.full_name }}</RouterLink>
+                <span v-if="item.start_date"> · {{ t('payroll.runs.missing_employments.start', { date: formatDate(item.start_date) }) }}</span>
+              </template>
+            </ExpandableList>
+            <p>{{ t('payroll.runs.missing_employments.body') }}</p>
+            <button
+              v-if="visibleCommands(run).includes('request_correction')"
+              type="button"
+              class="cursor-pointer"
+              :class="btnOutlineSm('warning')"
+              :disabled="saving"
+              :data-testid="`payroll-run-${run.id}-missing-employments-correct`"
+              @click="runCommand(run, 'request_correction')"
+            >
+              <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.uturn" /></svg>
+              {{ commandLabel('request_correction', run) }}
+            </button>
+            <p v-else data-test="payroll-run-missing-employments-forbidden">
+              {{ t('payroll.runs.missing_employments.action_forbidden') }}
+            </p>
+          </div>
+        </div>
         <!--
           Stav úhrady, ne úkol. Účetní tu nemá co potvrzovat — příkaz do banky
           poslala a výpis dorazí, až dorazí. Vidí jen, kolik závazků je
@@ -2031,6 +2800,23 @@ onMounted(load)
           {{ run.delete_blocker }}
         </p>
 
+        <p
+          v-if="runningCommand?.runId === run.id"
+          :data-testid="`payroll-run-${run.id}-command-progress`"
+          class="mt-4 flex items-start gap-3 rounded-lg border border-payroll-200 bg-payroll-50 p-3 text-sm text-payroll-800"
+          role="status"
+          aria-live="polite"
+        >
+          <svg class="mt-0.5 h-4 w-4 shrink-0 animate-spin" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <circle class="opacity-20" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3" />
+            <path d="M22 12a10 10 0 0 0-10-10" stroke="currentColor" stroke-width="3" stroke-linecap="round" />
+          </svg>
+          <span>
+            <span class="font-medium">{{ commandProgressLabel(runningCommand.command) }}</span>
+            {{ t('payroll.runs.command_progress.hint') }}
+          </span>
+        </p>
+
         <div
           v-if="commandBlockers[run.id]"
           :data-testid="`payroll-run-${run.id}-blocker`"
@@ -2039,7 +2825,15 @@ onMounted(load)
           <svg class="mt-0.5 h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <path :d="ICONS.bell" />
           </svg>
-          <p class="flex-1">{{ commandBlockers[run.id] }}</p>
+          <p class="flex-1">
+            {{ commandBlockers[run.id] }}
+            <RouterLink
+              v-if="commandBlockerLinks[run.id]"
+              :to="commandBlockerLinks[run.id]"
+              class="ml-1 whitespace-nowrap font-medium text-primary-600 hover:underline"
+              :data-testid="`payroll-run-${run.id}-blocker-link`"
+            >{{ t('payroll.runs.validation.open_remediation') }}</RouterLink>
+          </p>
           <button
             type="button"
             class="cursor-pointer shrink-0 rounded p-1 text-warning-600 hover:bg-warning-100"
@@ -2050,6 +2844,62 @@ onMounted(load)
               <path :d="ICONS.x" />
             </svg>
           </button>
+        </div>
+
+        <!--
+          Vyřazené osoby: dokud je revize otevřená, jde osobu vrátit. Po
+          schválení čekají na doplatek opravou běhu za stejné období.
+        -->
+        <div
+          v-if="activeExclusions(run).length || settledExclusions(run).length"
+          :data-testid="`payroll-run-${run.id}-exclusions`"
+          class="mt-4 rounded-lg border border-warning-200 bg-warning-50 p-3 text-sm text-warning-800"
+        >
+          <template v-if="activeExclusions(run).length">
+            <p class="font-medium">{{ t('payroll.runs.exclusion.active_title', { count: activeExclusions(run).length }) }}</p>
+            <p class="mt-1 text-xs">{{ t('payroll.runs.exclusion.active_hint') }}</p>
+            <ul class="mt-2 space-y-1">
+              <li
+                v-for="exclusion in activeExclusions(run)"
+                :key="exclusion.id"
+                class="flex flex-wrap items-center gap-2 rounded-md bg-surface/70 px-2.5 py-1.5"
+                :data-testid="`payroll-run-${run.id}-exclusion-${exclusion.employee_id}`"
+              >
+                <span class="min-w-0 flex-1 text-xs">
+                  <span class="font-medium">{{ exclusion.full_name }}</span>
+                  · {{ exclusion.reason }}
+                  <span v-if="exclusion.excluded_by_name" class="text-warning-700">({{ exclusion.excluded_by_name }})</span>
+                </span>
+                <button
+                  v-if="run.available_commands.includes('include_employee') && commandPermitted('include_employee')"
+                  type="button"
+                  :class="[btnOutlineSm('neutral'), 'whitespace-nowrap']"
+                  :disabled="saving"
+                  :data-testid="`payroll-run-${run.id}-include-${exclusion.employee_id}`"
+                  @click="includeExcluded(run, exclusion)"
+                >
+                  <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.uturn" /></svg>
+                  {{ t('payroll.runs.exclusion.include') }}
+                </button>
+              </li>
+            </ul>
+          </template>
+          <template v-if="settledExclusions(run).length">
+            <p class="font-medium" :class="activeExclusions(run).length ? 'mt-3' : ''">
+              {{ t('payroll.runs.exclusion.settled_title', { count: settledExclusions(run).length }) }}
+            </p>
+            <p class="mt-1 text-xs">{{ t('payroll.runs.exclusion.settled_hint') }}</p>
+            <ul class="mt-2 space-y-1">
+              <li
+                v-for="exclusion in settledExclusions(run)"
+                :key="exclusion.id"
+                class="rounded-md bg-surface/70 px-2.5 py-1.5 text-xs"
+                :data-testid="`payroll-run-${run.id}-settled-exclusion-${exclusion.employee_id}`"
+              >
+                <span class="font-medium">{{ exclusion.full_name }}</span> · {{ exclusion.reason }}
+              </li>
+            </ul>
+          </template>
         </div>
 
         <dl v-if="run.result_snapshot?.totals" class="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
@@ -2088,6 +2938,45 @@ onMounted(load)
           z evidence, po lhůtě zvýrazní a u každé položky vede odkazem tam,
           kde se to reálně dělá; co je hotové, se kreslí jako hotové.
         -->
+        <div
+          v-if="showsAfterApprovalLinks(run)"
+          class="mt-5"
+          :data-test="`payroll-run-${run.id}-after-approval`"
+        >
+          <h4 class="mb-2 text-sm font-semibold uppercase tracking-wide text-neutral-500">
+            {{ t('payroll.runs.after_approval.title') }}
+          </h4>
+          <p class="mb-3 max-w-3xl text-sm text-neutral-600">
+            {{ t(run.status === 'approved' ? 'payroll.runs.after_approval.subtitle_approved' : 'payroll.runs.after_approval.subtitle') }}
+          </p>
+          <div class="flex flex-wrap gap-2">
+            <RouterLink
+              :to="{ name: 'payroll-documents', query: { period: run.period_start.slice(0, 7) } }"
+              :class="[btnOutline('neutral'), 'whitespace-nowrap']"
+              :data-test="`payroll-run-${run.id}-after-approval-documents`"
+            >
+              <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.doc" /></svg>
+              {{ t('payroll.runs.after_approval.documents') }}
+            </RouterLink>
+            <RouterLink
+              :to="{ name: 'payroll-payments', query: { period: run.period_start.slice(0, 7), run: String(run.id) } }"
+              :class="[btnOutline('neutral'), 'whitespace-nowrap']"
+              :data-test="`payroll-run-${run.id}-after-approval-payments`"
+            >
+              <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.coin" /></svg>
+              {{ t('payroll.runs.after_approval.payments') }}
+            </RouterLink>
+            <RouterLink
+              :to="{ name: 'payroll-submissions-tab', params: { tab: 'monthly' }, query: { period: run.period_start.slice(0, 7) } }"
+              :class="[btnOutline('neutral'), 'whitespace-nowrap']"
+              :data-test="`payroll-run-${run.id}-after-approval-submissions`"
+            >
+              <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.link" /></svg>
+              {{ t('payroll.runs.after_approval.submissions') }}
+            </RouterLink>
+          </div>
+        </div>
+
         <div v-if="showsNextSteps(run)" class="mt-5" :data-test="`payroll-run-${run.id}-next-steps`">
           <h4 class="mb-2 text-sm font-semibold uppercase tracking-wide text-neutral-500">
             {{ t('payroll.runs.next_steps.title') }}
@@ -2107,19 +2996,13 @@ onMounted(load)
             type="button"
             :data-testid="`payroll-run-${run.id}-breakdown-toggle`"
             :class="btnOutline('neutral')"
-            :disabled="breakdownLoading[run.id]"
+            :aria-expanded="!!breakdownOpen[run.id]"
             @click="toggleBreakdown(run)"
           >
             <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
               <path :d="ICONS.chart" />
             </svg>
-            {{
-              breakdownLoading[run.id]
-                ? t('common.loading')
-                : breakdowns[run.id]
-                  ? t('payroll.runs.breakdown_hide')
-                  : t('payroll.runs.breakdown_show')
-            }}
+            {{ breakdownOpen[run.id] ? t('payroll.runs.breakdown_hide') : t('payroll.runs.breakdown_show') }}
           </button>
           <button
             type="button"
@@ -2277,25 +3160,15 @@ onMounted(load)
           </div>
         </section>
 
-        <PayrollIncomeTaxBreakdown
-          v-if="breakdowns[run.id]?.length"
-          :people="breakdowns[run.id]"
-          :person-names="personNames"
-        />
-
-        <PayrollInsuranceBreakdown
-          v-if="breakdowns[run.id]?.length"
+        <PayrollRunPeopleTable
+          v-if="breakdownOpen[run.id] && run.result_snapshot"
+          :run-id="run.id"
           :revision-id="run.revision_id"
-          :people="breakdowns[run.id]"
-          :person-names="personNames"
-        />
-
-        <PayrollNetPayBreakdown
-          v-if="breakdowns[run.id]?.length"
-          :revision-id="run.revision_id"
+          :period="run.period_start.slice(0, 7)"
           :approved="run.revision_status === 'approved'"
-          :people="breakdowns[run.id]"
-          :person-names="personNames"
+          :refresh-key="run.row_version"
+          :can-exclude="canExcludePeople(run)"
+          @exclude="askExcludePerson(run, $event)"
         />
 
         <!--
@@ -2330,6 +3203,79 @@ onMounted(load)
             {{ t('payroll.runs.hidden_warnings_link', { count: run.hidden_validation_count }) }}
           </RouterLink>
         </div>
+
+        <section
+          v-if="sourceBlockerSteps(run).length"
+          class="mt-4 rounded-lg border border-primary-200 bg-primary-50 p-4 text-sm text-neutral-800"
+          :data-testid="`payroll-run-${run.id}-next-steps`"
+        >
+          <p class="font-semibold text-primary-800">{{ t('payroll.runs.continue_steps.title') }}</p>
+          <p class="mt-1 max-w-prose text-neutral-700">{{ t(run.status === 'cancelled' ? 'payroll.runs.continue_steps.intro_cancelled' : 'payroll.runs.continue_steps.intro') }}</p>
+          <ol class="mt-3 space-y-3">
+            <li
+              v-for="(step, index) in sourceBlockerSteps(run)"
+              :key="step"
+              class="flex flex-wrap items-center gap-x-3 gap-y-2"
+              :data-testid="`payroll-run-${run.id}-next-step-${step}`"
+            >
+              <span class="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-primary-600 text-xs font-semibold text-white">{{ index + 1 }}</span>
+              <span class="min-w-0 flex-1 basis-64">{{ t(`payroll.runs.continue_steps.${step}`) }}</span>
+              <RouterLink
+                v-if="step === 'time'"
+                :to="{ name: 'payroll-time', query: { period: runPeriod(run), approve: 'all' } }"
+                :class="[btnOutlineSm('success'), 'whitespace-nowrap']"
+              >
+                <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.badgeCheck" /></svg>
+                {{ t('payroll.runs.continue_steps.time_action') }}
+              </RouterLink>
+              <button
+                v-else-if="step === 'inputs' && canOverride"
+                type="button"
+                :class="[btnOutlineSm('success'), 'whitespace-nowrap']"
+                :disabled="saving"
+                @click="approveDraftInputs(run)"
+              >
+                <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.badgeCheck" /></svg>
+                {{ t('payroll.runs.continue_steps.inputs_action') }}
+              </button>
+              <RouterLink
+                v-else-if="step === 'components'"
+                :to="{ name: 'payroll-quick-inputs', query: { period: runPeriod(run) } }"
+                :class="[btnOutlineSm('primary'), 'whitespace-nowrap']"
+              >
+                <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.edit" /></svg>
+                {{ t('payroll.runs.continue_steps.components_action') }}
+              </RouterLink>
+              <button
+                v-else-if="step === 'statutory'"
+                type="button"
+                :class="[btnOutlineSm('primary'), 'whitespace-nowrap']"
+                :data-testid="`payroll-run-${run.id}-next-step-statutory-action`"
+                @click="showValidations(run)"
+              >
+                <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.clipboardCheck" /></svg>
+                {{ t('payroll.runs.continue_steps.statutory_action') }}
+              </button>
+            </li>
+            <li
+              v-if="sourceRefreshCommand(run)"
+              class="flex flex-wrap items-center gap-x-3 gap-y-2"
+              :data-testid="`payroll-run-${run.id}-next-step-refresh`"
+            >
+              <span class="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-primary-600 text-xs font-semibold text-white">{{ sourceBlockerSteps(run).length + 1 }}</span>
+              <span class="min-w-0 flex-1 basis-64">{{ t('payroll.runs.continue_steps.refresh') }}</span>
+              <button
+                type="button"
+                :class="[btnFilledSm('primary'), 'whitespace-nowrap']"
+                :disabled="saving"
+                @click="runCommand(run, sourceRefreshCommand(run)!)"
+              >
+                <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.cycle" /></svg>
+                {{ t(run.status === 'cancelled' ? 'payroll.runs.continue_steps.restart_action' : 'payroll.runs.continue_steps.refresh_action') }}
+              </button>
+            </li>
+          </ol>
+        </section>
 
         <div
           v-if="sectionValidations(run).length"
@@ -2440,6 +3386,23 @@ onMounted(load)
               </template>
             </ExpandableList>
             <!--
+              Jedna osoba v ruční kontrole nesmí zastavit výplatu ostatním.
+              Vyřazení založí revizi bez ní; doplatek jde opravou běhu.
+            -->
+            <button
+              v-if="canExclude(run, validation)"
+              type="button"
+              :data-testid="`payroll-validation-${validation.id}-exclude`"
+              :class="[btnOutlineSm('warning'), 'mt-2 inline-flex whitespace-nowrap']"
+              :disabled="saving"
+              @click="askExclude(run, validation)"
+            >
+              <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                <path :d="ICONS.x" />
+              </svg>
+              {{ t('payroll.runs.exclusion.exclude') }}
+            </button>
+            <!--
               Trvalé skrytí varování: u osob skupiny jedním klikem, nebo celý
               typ ve firmě. Blokující chyby a výjimky sem nikdy nepatří.
             -->
@@ -2503,6 +3466,18 @@ onMounted(load)
               </svg>
               {{ bulkDefaultsLabel(run) }}
             </button>
+            <RouterLink
+              v-if="canBulkDefaults && validation.id === firstHealthCoverageReviewId(run.validations)"
+              :to="{ name: 'payroll-people', query: { bulk: 'health_insurer' } }"
+              :data-testid="`payroll-run-${run.id}-health-insurer-bulk`"
+              class="whitespace-nowrap"
+              :class="[btnOutlineSm('warning'), 'mt-2 mr-2 inline-flex']"
+            >
+              <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                <path :d="ICONS.clipboardCheck" />
+              </svg>
+              {{ t('payroll.health_insurer_bulk.open') }}
+            </RouterLink>
             <!--
               Co dávka neschválila, zůstává na obrazovce. V toastu se to ztratilo
               dřív, než se podle toho dalo jednat, a znal se jen první důvod.
@@ -2748,6 +3723,49 @@ onMounted(load)
         <p class="text-sm text-neutral-700">
           {{ t('payroll.runs.readiness.confirm_intro') }}
         </p>
+        <div
+          v-if="readinessSourceSteps.length"
+          class="rounded-lg border border-danger-500/30 bg-danger-50 p-3 text-sm text-danger-700"
+          data-test="run-readiness-approval-steps"
+        >
+          <p class="font-semibold">{{ t('payroll.runs.readiness.approval_first') }}</p>
+          <div class="mt-2 flex flex-wrap gap-2">
+            <RouterLink
+              v-if="readinessSourceSteps.includes('time')"
+              :to="{ name: 'payroll-time', query: { period: runPeriod(pendingStart.run), approve: 'all' } }"
+              :class="[btnOutlineSm('success'), 'whitespace-nowrap']"
+            >
+              <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.badgeCheck" /></svg>
+              {{ t('payroll.runs.continue_steps.time_action') }}
+            </RouterLink>
+            <button
+              v-if="readinessSourceSteps.includes('inputs') && canOverride"
+              type="button"
+              :class="[btnOutlineSm('success'), 'whitespace-nowrap']"
+              :disabled="saving"
+              @click="approveDraftInputsBeforeStart(pendingStart.run)"
+            >
+              <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.badgeCheck" /></svg>
+              {{ t('payroll.runs.continue_steps.inputs_action') }}
+            </button>
+            <RouterLink
+              v-if="readinessSourceSteps.includes('components')"
+              :to="{ name: 'payroll-quick-inputs', query: { period: runPeriod(pendingStart.run) } }"
+              :class="[btnOutlineSm('primary'), 'whitespace-nowrap']"
+            >
+              <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.edit" /></svg>
+              {{ t('payroll.runs.continue_steps.components_action') }}
+            </RouterLink>
+            <RouterLink
+              v-if="readinessSourceSteps.includes('statutory')"
+              :to="{ name: 'payroll-people', query: { filter: 'blocking_data', period: runPeriod(pendingStart.run) } }"
+              :class="[btnOutlineSm('primary'), 'whitespace-nowrap']"
+            >
+              <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.clipboardCheck" /></svg>
+              {{ t('payroll.runs.continue_steps.statutory_people_action') }}
+            </RouterLink>
+          </div>
+        </div>
         <!--
           Dialog není seznam chyb, ale SOUPIS TOHO, CO JEŠTĚ ČEKÁ. Napřed to,
           co po zamknutí vstupů půjde opravit jen přes opravnou revizi — jen
@@ -2765,7 +3783,10 @@ onMounted(load)
               :class="findingClass(finding)"
             >
               <p>
-                <span v-if="findingCount(finding) > 1" class="font-semibold">{{ findingCount(finding) }}× </span>{{ finding.message }}
+                <span v-if="findingCount(finding) > 1" class="font-semibold">{{ findingCount(finding) }}× </span>{{ readinessFindingMessage(finding) }}
+              </p>
+              <p v-if="finding.requires_override" class="mt-1 text-xs">
+                {{ t('payroll.runs.override.awaiting') }}
               </p>
               <p v-if="findingEntityLabels(finding).length" class="mt-1 text-xs font-semibold">
                 {{ t('payroll.runs.readiness.affected', {
@@ -2783,13 +3804,13 @@ onMounted(load)
               >
                 <template #item="{ item: entity }">
                   <p v-if="entity.message && entity.message !== finding.message">{{ entity.message }}</p>
-                  <a v-if="entity.remediation_path" :href="entity.remediation_path" :class="[btnOutlineSm('neutral'), 'mt-1 inline-flex']">
-                    <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.link" /></svg>
+                  <a v-if="entity.remediation_path" :href="readinessHref(entity.remediation_path)" :class="[btnOutlineSmWrap('neutral'), 'mt-1 max-w-full text-left']" data-test="run-readiness-entity-link">
+                    <svg class="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.link" /></svg>
                     {{ t('payroll.runs.validation.open_remediation') }}<span v-if="entity.label">: {{ entity.label }}</span>
                   </a>
                 </template>
               </ExpandableList>
-              <a v-if="finding.remediation_path && !finding.entities.some(entity => entity.remediation_path)" :href="finding.remediation_path" :class="[btnOutlineSm('neutral'), 'mt-2 inline-flex']">
+              <a v-if="finding.remediation_path && !finding.entities.some(entity => entity.remediation_path)" :href="readinessHref(finding.remediation_path)" :class="[btnOutlineSm('neutral'), 'mt-2 inline-flex']">
                 <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.link" /></svg>
                 {{ t('payroll.runs.validation.open_remediation') }}
               </a>
@@ -2818,7 +3839,7 @@ onMounted(load)
           <button
             type="button"
             class="cursor-pointer"
-            :class="btnFilled('primary')"
+            :class="readinessSourceSteps.length ? btnOutline('primary') : btnFilled('primary')"
             :disabled="saving"
             data-test="confirm-run-readiness"
             @click="confirmStart()"
@@ -2837,12 +3858,55 @@ onMounted(load)
       @close="pendingCommand = null"
     >
       <form class="space-y-4" data-test="run-command-dialog" @submit.prevent="confirmCommand">
-        <label class="block text-sm font-medium text-neutral-700">
-          {{ t('payroll.runs.reason_prompt') }}
+        <p
+          v-if="pendingCommand.command === 'cancel'"
+          class="text-sm text-neutral-700"
+          data-test="run-cancel-hint"
+        >
+          {{ pendingCommand.run.revision_kind === 'correction'
+            ? t('payroll.runs.cancel_correction_hint')
+            : t('payroll.runs.cancel_hint') }}
+        </p>
+        <p
+          v-if="pendingCommand.command === 'withdraw_correction'"
+          class="text-sm text-neutral-700"
+          data-test="run-withdraw-hint"
+        >
+          {{ t('payroll.runs.withdraw_correction_hint') }}
+        </p>
+        <p
+          v-if="pendingCommand.command === 'exclude_employee'"
+          class="text-sm text-neutral-700"
+          data-test="run-exclude-hint"
+        >
+          {{ t('payroll.runs.exclusion.hint', { name: pendingCommand.target?.label ?? '' }) }}
+        </p>
+        <template v-if="pendingCommand.command === 'change_payment_date'">
+          <p class="text-sm text-neutral-700" data-test="run-payment-date-hint">
+            {{ t(['draft', 'cancelled'].includes(pendingCommand.run.status)
+              ? 'payroll.runs.change_payment_date.hint_draft'
+              : 'payroll.runs.change_payment_date.hint_locked') }}
+          </p>
+          <label class="block text-sm font-medium text-neutral-700">
+            {{ t('payroll.runs.payment_date') }}
+            <input
+              v-model="commandPaymentDate"
+              type="date"
+              required
+              class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"
+              data-test="run-command-payment-date"
+            >
+          </label>
+        </template>
+        <label v-else class="block text-sm font-medium text-neutral-700">
+          {{ commandNeedsReason(pendingCommand.run, pendingCommand.command)
+            ? t('payroll.runs.reason_prompt')
+            : t('payroll.runs.reason_prompt_optional') }}
           <textarea
             v-model="commandReason"
-            class="mt-1 min-h-24 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"
-            required
+            class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"
+            :class="commandNeedsReason(pendingCommand.run, pendingCommand.command) ? 'min-h-24' : 'min-h-12'"
+            :required="commandNeedsReason(pendingCommand.run, pendingCommand.command)"
             autofocus
             data-test="run-command-reason"
           />
@@ -2857,8 +3921,8 @@ onMounted(load)
         </p>
         <div class="flex flex-wrap justify-end gap-2">
           <button type="button" :class="btnOutline('neutral')" @click="pendingCommand = null">
-            <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.x" /></svg>
-            {{ t('common.cancel') }}
+            <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.chevronLeft" /></svg>
+            {{ t('common.close') }}
           </button>
           <button
             type="submit"
@@ -2935,6 +3999,14 @@ onMounted(load)
       </form>
     </Modal>
 
+    <PayrollCompensationRecalculationDialog
+      v-if="compensationRecalculationRun"
+      :periods="[compensationRecalculationRun.period_start.slice(0, 7)]"
+      :employment-ids="compensationRecalculationRun.average_change?.employments.map(item => item.employment_id) ?? null"
+      @close="compensationRecalculationRun = null"
+      @done="onCompensationsRecalculated"
+    />
+
     <PayrollHideWarningDialog
       v-if="pendingHide"
       :code="pendingHide.code"
@@ -2974,6 +4046,47 @@ onMounted(load)
         </div>
       </template>
     </PayrollStatutoryBulkDefaultsDialog>
+
+    <Modal
+      v-if="pendingApprove"
+      :title="t('payroll.runs.approve_confirm.title', { period: formatPeriod(pendingApprove.period_start.slice(0, 7)) })"
+      width-class="max-w-xl"
+      @close="pendingApprove = null"
+    >
+      <div class="space-y-3 text-sm text-neutral-700" data-test="run-approve-dialog">
+        <p>{{ t('payroll.runs.approve_confirm.intro') }}</p>
+        <ul class="list-disc space-y-1 pl-5" data-test="run-approve-locks">
+          <li v-for="key in APPROVE_LOCK_KEYS" :key="key">{{ t(`payroll.runs.approve_confirm.locks.${key}`) }}</li>
+        </ul>
+        <p
+          v-if="periodTiming(pendingApprove) !== 'finished'"
+          class="rounded-lg border border-warning-200 bg-warning-50 p-3 text-warning-800"
+          data-test="run-approve-period-timing"
+        >
+          {{ t(`payroll.runs.approve_confirm.period_${periodTiming(pendingApprove)}`, {
+            start: formatDate(pendingApprove.period_start),
+            end: formatDate(periodEndDate(pendingApprove)),
+          }) }}
+        </p>
+        <p class="text-xs text-neutral-500">{{ t('payroll.runs.approve_confirm.undo') }}</p>
+      </div>
+      <div class="mt-5 flex flex-wrap justify-end gap-2">
+        <button type="button" :class="btnOutline('neutral')" @click="pendingApprove = null">
+          <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.x" /></svg>
+          {{ t('common.cancel') }}
+        </button>
+        <button
+          type="button"
+          :class="btnFilled('success')"
+          :disabled="saving"
+          data-test="confirm-run-approve"
+          @click="confirmApprove"
+        >
+          <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.check" /></svg>
+          {{ commandLabel('approve', pendingApprove) }}
+        </button>
+      </div>
+    </Modal>
 
     <Modal
       v-if="pendingDelete"

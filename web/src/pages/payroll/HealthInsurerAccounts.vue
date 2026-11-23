@@ -33,6 +33,7 @@ const loading = ref(true)
 const loadFailed = ref(false)
 const saving = ref(false)
 const showCreate = ref(false)
+const createSection = ref<HTMLElement | null>(null)
 const showValidation = ref(false)
 const editingId = ref<number | null>(null)
 const deletingId = ref<number | null>(null)
@@ -467,6 +468,7 @@ function openCreate() {
   showValidation.value = false
   showCreate.value = true
   editingId.value = null
+  void nextTick(() => createSection.value?.scrollIntoView?.({ behavior: 'smooth', block: 'start' }))
 }
 
 function cancelCreate() {
@@ -813,7 +815,7 @@ onMounted(async () => {
         </article>
       </div>
 
-      <div v-if="showCreate" data-testid="health-account-create" class="mt-5 rounded-lg border border-payroll-500/30 bg-payroll-50/40 p-4 sm:p-5">
+      <div v-if="showCreate" ref="createSection" data-testid="health-account-create" class="mt-5 scroll-mt-24 rounded-lg border border-payroll-500/30 bg-payroll-50/40 p-4 sm:p-5">
         <div class="mb-4">
           <h3 class="font-semibold text-neutral-900">{{ t('payroll.employer.health_accounts.create_title') }}</h3>
           <p class="mt-1 text-sm text-neutral-500">{{ t('payroll.employer.health_accounts.create_hint') }}</p>

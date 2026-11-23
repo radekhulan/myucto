@@ -11,8 +11,10 @@ use MyInvoice\Security\AccessLevel;
 use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\IpMatcher;
+use MyInvoice\Service\Payroll\Component\PayrollWholeCrowns;
 use MyInvoice\Service\Payroll\Import\Attendance\AttendanceImportService;
 use MyInvoice\Service\Payroll\Import\Attendance\AttendanceMyUctoTemplate;
+use MyInvoice\Service\Payroll\Import\Attendance\AttendancePamicaTemplate;
 use MyInvoice\Service\Payroll\Import\Attendance\AttendanceSampleProfiles;
 use MyInvoice\Service\Payroll\Import\Attendance\AttendanceSourceConfirmationRequired;
 use MyInvoice\Service\Payroll\Import\ImportFiles;
@@ -30,6 +32,9 @@ final class PayrollAttendanceImportAction
 {
     use PayrollActionSupport;
 
+    /** XLSX a CSV z docházkových systémů, XML jen export docházky pro PAMICA. */
+    private const FILE_EXTENSIONS = ['xlsx', 'csv', 'xml'];
+
     public function __construct(
         private readonly AttendanceImportService $imports,
         private readonly PayrollModuleAccess $access,
@@ -38,6 +43,7 @@ final class PayrollAttendanceImportAction
         private readonly SupplierAccessResolver $supplierAccess,
         private readonly PayrollTimeImportApprovalService $timeApprovals,
         private readonly AttendanceMyUctoTemplate $template,
+        private readonly AttendancePamicaTemplate $pamicaTemplate,
     ) {
     }
 
@@ -51,10 +57,11 @@ final class PayrollAttendanceImportAction
             $preview = $this->imports->preview(
                 $this->currentSupplierId($request),
                 $this->string($body, 'period'),
-                ImportFiles::fromRequest($body['files'] ?? null, ['xlsx', 'csv']),
+                ImportFiles::fromRequest($body['files'] ?? null, self::FILE_EXTENSIONS),
                 $body['rules'] ?? null,
                 $this->profileId($body),
                 $body['components'] ?? null,
+                $this->roundWholeCrowns($body),
             );
         } catch (\InvalidArgumentException|\UnexpectedValueException $e) {
             return Json::error($response, 'validation_failed', $e->getMessage(), 422);
@@ -77,10 +84,16 @@ final class PayrollAttendanceImportAction
             ) {
                 return $error;
             }
+            // Údaje pro registraci se zapisují na kartu osoby, vztahu a do zákonné evidence.
+            if (($body['fill_registration_data'] ?? false) === true
+                && ($error = $this->authorize($request, $response, 'payroll.person.write')) !== null
+            ) {
+                return $error;
+            }
             $result = $this->imports->apply(
                 $this->currentSupplierId($request),
                 $this->string($body, 'period'),
-                ImportFiles::fromRequest($body['files'] ?? null, ['xlsx', 'csv']),
+                ImportFiles::fromRequest($body['files'] ?? null, self::FILE_EXTENSIONS),
                 $body['rules'] ?? null,
                 $body['links'] ?? null,
                 ($body['save_links'] ?? false) === true,
@@ -96,6 +109,9 @@ final class PayrollAttendanceImportAction
                 ($body['materialize_absence_compensations'] ?? false) === true,
                 ($body['create_deductions'] ?? false) === true,
                 ($body['confirm_source_checks'] ?? false) === true,
+                ($body['fill_registration_data'] ?? false) === true,
+                ($body['adopt_probable_earnings'] ?? false) === true,
+                $this->roundWholeCrowns($body),
             );
         } catch (AttendanceSourceConfirmationRequired $e) {
             return Json::error($response, 'source_confirmation_required', $e->getMessage(), 409, ['source_checks' => $e->checks]);
@@ -216,7 +232,7 @@ final class PayrollAttendanceImportAction
                 $this->userId($request),
                 $this->ipMatcher->clientIpFromRequest($this->serverParams($request)),
                 $request->getHeaderLine('User-Agent'),
-                isset($body['files']) ? ImportFiles::fromRequest($body['files'], ['xlsx', 'csv']) : null,
+                isset($body['files']) ? ImportFiles::fromRequest($body['files'], self::FILE_EXTENSIONS) : null,
                 $body['rules'] ?? null,
                 $this->profileId($body),
                 $body['components'] ?? null,
@@ -337,15 +353,32 @@ final class PayrollAttendanceImportAction
     }
 
     /**
-     * Prázdná šablona XLSX pro Vzor MyÚčto (s ukázkovými řádky a návodem).
-     * Neobsahuje data firmy; právo stejné jako načtení profilů a náhled.
+     * Šablona ke vzoru: XLSX pro Vzor MyÚčto (s ukázkovými řádky a návodem),
+     * `?sample=pamica` ukázkový XML export pro PAMICA za `?period=RRRR-MM`
+     * (výchozí minulý měsíc). Jen smyšlené osoby, žádná data firmy; právo
+     * stejné jako načtení profilů a náhled.
      */
     public function template(Request $request, Response $response): Response
     {
         if (($error = $this->authorize($request, $response, 'payroll.inputs.write')) !== null) {
             return $error;
         }
-        $file = $this->template->build();
+        $query = $request->getQueryParams();
+        $sample = $query['sample'] ?? AttendanceSampleProfiles::MYUCTO;
+        if ($sample === AttendanceSampleProfiles::PAMICA) {
+            $period = $query['period'] ?? null;
+            try {
+                $file = $this->pamicaTemplate->build(
+                    is_string($period) && $period !== '' ? $period : (new \DateTimeImmutable('first day of last month'))->format('Y-m'),
+                );
+            } catch (\InvalidArgumentException $e) {
+                return Json::error($response, 'validation_failed', $e->getMessage(), 422);
+            }
+        } elseif ($sample === AttendanceSampleProfiles::MYUCTO) {
+            $file = $this->template->build();
+        } else {
+            return Json::error($response, 'validation_failed', 'Ke vzoru není šablona ke stažení.', 422);
+        }
         $response->getBody()->write($file['bytes']);
 
         return $response
@@ -438,7 +471,7 @@ final class PayrollAttendanceImportAction
 
     private function authorize(Request $request, Response $response, string $permission): ?Response
     {
-        if (!RequestAuthorization::isSessionAuth($request)) {
+        if (!RequestAuthorization::actsAsSession($request)) {
             return Json::sessionRequired($response);
         }
         $error = null;
@@ -461,6 +494,25 @@ final class PayrollAttendanceImportAction
         }
 
         return $profileId;
+    }
+
+    /**
+     * Zaokrouhlení částek na celé koruny: výslovná volba, jinak zapnuté za
+     * měsíce vykazované přes JMHZ ({@see PayrollWholeCrowns::jmhzPeriod()}).
+     *
+     * @param array<string,mixed> $body
+     */
+    private function roundWholeCrowns(array $body): bool
+    {
+        $value = $body['round_whole_crowns'] ?? null;
+        if (is_bool($value)) {
+            return $value;
+        }
+        $period = $body['period'] ?? null;
+
+        return is_string($period)
+            && preg_match('/^\d{4}-\d{2}$/D', $period) === 1
+            && PayrollWholeCrowns::jmhzPeriod($period . '-01');
     }
 
     /** @return array<string,mixed> */

@@ -23,7 +23,8 @@ import ActivationBanner from '@/components/settings/activation/ActivationBanner.
 import EmptyState from '@/components/ui/EmptyState.vue'
 import { findAccountingPeriod } from '@/utils/accountingPeriod'
 import DateInput from '@/components/ui/DateInput.vue'
-import DimensionReportFilter from '@/components/dimensions/DimensionReportFilter.vue'
+import DimensionReportFilters from '@/components/dimensions/DimensionReportFilters.vue'
+import { dimensionValueIdsParam, parseDimensionValueIds } from '@/utils/dimensionFilter'
 import DimensionReportLinks from '@/components/dimensions/DimensionReportLinks.vue'
 import AccrualSpreadToggle from '@/components/accounting/AccrualSpreadToggle.vue'
 import AccrualSpreadNote from '@/components/accounting/AccrualSpreadNote.vue'
@@ -69,7 +70,7 @@ const filters = reactive({
   period_id: '' as number | '',
   as_of: '',
   scope: 'auto' as StatementScope,
-  dimension_value_id: null as number | null,
+  dimension_value_ids: [] as number[],
   dimension_descendants: true,
 })
 const selectedPeriod = computed(() => findAccountingPeriod(periods.value, filters.period_id))
@@ -79,16 +80,32 @@ function queryParams() {
     period_id: Number(filters.period_id),
     as_of: filters.as_of || undefined,
     scope: filters.scope,
-    ...(filters.dimension_value_id
-      ? { dimension_value_id: filters.dimension_value_id, dimension_descendants: (filters.dimension_descendants ? 1 : 0) as 0 | 1 }
+    ...(filters.dimension_value_ids.length > 0
+      ? { dimension_value_id: dimensionValueIdsParam(filters.dimension_value_ids), dimension_descendants: (filters.dimension_descendants ? 1 : 0) as 0 | 1 }
       : {}),
     ...accrualSpread.param(),
   }
 }
 
+const hideZero = ref(true)
+const showAnalytics = ref(true)
+
 function accountsParams(): Omit<StatementParams, 'scope'> {
   const { period_id, as_of, dimension_value_id, dimension_descendants } = queryParams() as StatementParams
-  return { period_id, as_of, dimension_value_id, dimension_descendants }
+  return {
+    period_id, as_of, dimension_value_id, dimension_descendants,
+    columns: 1, hide_zero: hideZero.value ? 1 : 0, analytics: showAnalytics.value ? 1 : 0,
+  }
+}
+
+function onHideZero(value: boolean) {
+  hideZero.value = value
+  void load()
+}
+
+function onShowAnalytics(value: boolean) {
+  showAnalytics.value = value
+  void load()
 }
 
 function switchView(next: 'statement' | 'accounts') {
@@ -97,8 +114,8 @@ function switchView(next: 'statement' | 'accounts') {
   void load()
 }
 
-function onDimensionValue(valueId: number | null) {
-  filters.dimension_value_id = valueId
+function onDimensionValues(valueIds: number[]) {
+  filters.dimension_value_ids = valueIds
   void load()
 }
 
@@ -136,8 +153,8 @@ async function load() {
       to: filters.as_of || selectedPeriod.value?.ends_on || '',
       ...(filters.scope !== 'auto' ? { scope: filters.scope } : {}),
       ...(view.value === 'accounts' ? { view: 'accounts' } : {}),
-      ...(filters.dimension_value_id ? {
-        dimension_value_id: String(filters.dimension_value_id),
+      ...(filters.dimension_value_ids.length > 0 ? {
+        dimension_value_id: dimensionValueIdsParam(filters.dimension_value_ids),
         dimension_descendants: filters.dimension_descendants ? '1' : '0',
       } : {}),
     } })
@@ -225,8 +242,7 @@ onMounted(async () => {
     if (typeof q.scope === 'string' && ['auto', 'full', 'small', 'micro'].includes(q.scope)) filters.scope = q.scope as StatementScope
     if (q.view === 'accounts') view.value = 'accounts'
     if (toQuery && toQuery >= selectedPeriod.starts_on && toQuery <= selectedPeriod.ends_on) filters.as_of = toQuery
-    const valueId = Number(q.dimension_value_id)
-    if (Number.isSafeInteger(valueId) && valueId > 0) filters.dimension_value_id = valueId
+    filters.dimension_value_ids = parseDimensionValueIds(q.dimension_value_id)
     filters.dimension_descendants = q.dimension_descendants !== '0'
     await load()
   }
@@ -312,12 +328,12 @@ onMounted(async () => {
           <AccrualSpreadToggle :model-value="accrualSpreadOn" @update:model-value="onAccrualSpread" />
         </div>
       </div>
-      <DimensionReportFilter class="mt-3"
-        :value-id="filters.dimension_value_id" :descendants="filters.dimension_descendants"
-        @update:value-id="onDimensionValue" @update:descendants="onDimensionDescendants" />
+      <DimensionReportFilters class="mt-3"
+        :value-ids="filters.dimension_value_ids" :descendants="filters.dimension_descendants"
+        @update:value-ids="onDimensionValues" @update:descendants="onDimensionDescendants" />
     </div>
     <DimensionReportLinks current="balance" :from="selectedPeriod?.starts_on ?? ''" :to="filters.as_of || selectedPeriod?.ends_on || ''"
-      :value-id="filters.dimension_value_id" :descendants="filters.dimension_descendants" />
+      :value-ids="filters.dimension_value_ids" :descendants="filters.dimension_descendants" />
     <p v-if="rangeAdjusted" class="mb-3 rounded-md border border-warning-500/30 bg-warning-50 px-3 py-2 text-xs text-warning-700" data-test="balance-range-adjusted">{{ t('dimensions.balance_range_adjusted') }}</p>
     <p v-if="view === 'statement' && report?.dimension" class="mb-3 rounded-md border border-primary-200 bg-primary-50 px-3 py-2 text-xs text-primary-800" data-test="balance-dimension-note">
       {{ t('dimensions.balance_filter_note') }}
@@ -336,7 +352,9 @@ onMounted(async () => {
         · {{ t('accounting.balance_sheet.prepared_at') }}: {{ accountsReport.entity.prepared_at }}
         <template v-if="unit === 'thousands'"> · {{ t('reports.unit_thousands_note') }}</template>
       </div>
-      <StatementAccountsTable :report="accountsReport" part="balance" :format="fm" />
+      <StatementAccountsTable :report="accountsReport" part="balance" :format="fm"
+        :hide-zero="hideZero" :show-analytics="showAnalytics"
+        @update:hide-zero="onHideZero" @update:show-analytics="onShowAnalytics" />
     </template>
 
     <template v-else-if="report">

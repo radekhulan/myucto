@@ -91,6 +91,15 @@ return [
         'lock_file'    => '',
         'retry_after'  => 300,                       // sekundy do hlavičky Retry-After u 503
     ],
+
+    // Ohlášení plánované údržby. Úloha cron-maintenance-notice stahuje hlášky
+    // provozovatele (od-do, text) a aplikace je ukazuje v pruhu nahoře. Ve
+    // spravovaném provozu běží vždy, tady si ji zapínáte sami. Hlášku lze zadat
+    // i lokálně souborem ${MYINVOICE_DATA_DIR}/storage/maintenance-notice.json.
+    'maintenance_notice' => [
+        'enabled' => false,
+        'url'     => '',                              // prázdné = license.server_url + /api/maintenance-notice
+    ],
     'epo' => [
         // Spravovaný PEM bundle pro ověřování pečeti dodejek EPO. V ostrém provozu
         // je POVINNÝ: `confirm()` u produkčního podání vyžaduje platný certifikační
@@ -224,6 +233,12 @@ return [
 
         // Opt-in přihlášení discoverable passkey bez zadání e-mailu a hesla.
         // Vyžaduje povolenou passkey metodu a správně nastavený HTTPS WebAuthn origin.
+        // Výměna e-mailu a hesla za API token (POST /api/v1/auth/password-token) pro
+        // mobilní a jiné nativní aplikace bez webového přihlášení. Default vypnuto.
+        'password_token' => [
+            'enabled' => false,
+        ],
+
         'passwordless_login' => [
             'enabled' => false,
         ],
@@ -251,6 +266,64 @@ return [
             'resend_cooldown_seconds' => 60,    // min. prodleva mezi rozesláním nového kódu
             'trusted_device_days'     => 30,    // „zapamatovat toto zařízení" na kolik dní
             'trusted_cookie_name'     => '__Host-myinvoice_td', // pro HTTP dev změnit (viz session.cookie_name)
+        ],
+
+        // Přihlášení přes poskytovatele identity (OpenID Connect). Aplikaci si u
+        // poskytovatele registruje každá instalace sama, návratová adresa je vždy
+        // {app.url}/api/auth/oidc/<poskytovatel>/callback (app.url musí být https).
+        // Účty v MyÚčto zakládá dál správce; s identitou se propojí pozvánkou
+        // (Nastavení → Uživatelé) nebo z profilu. Podle e-mailu se nepropojuje nikdy.
+        //
+        // Microsoft Entra ID výchozně nahrazuje celé přihlášení včetně MFA (MFA vynucuje
+        // tenant, typicky Conditional Access). skip_mfa=false zachová místní MFA.
+        // required_provider='entra' (ENV MYINVOICE_OIDC_REQUIRED) vynutí přihlášení
+        // přes Entra pro celou instalaci, tedy pro všechny firmy a všechny uživatele
+        // včetně technického správce. Heslo, passkey ani záložní kód pak neplatí
+        // a výjimka neexistuje; při výpadku Entra se vynucení vypne v konfiguraci.
+        // Tajemství patří do ENV (MYINVOICE_OIDC_ENTRA_CLIENT_SECRET), ne sem.
+        'oidc' => [
+            'enabled'                => false,
+            'required_provider'      => '', // 'entra' = přihlášení jen přes Entra ID
+            // Strop platnosti sezení z Entra ID od posledního ověření u Entra.
+            'session_lifetime_hours' => 12,
+            // true = stejný strop platí i pro API tokeny a MCP připojení vydané ze sezení
+            // přes Entra ID, takže uživatel zablokovaný v Entra ID přestane mít přístup
+            // nejpozději po něm (ENV MYINVOICE_OIDC_TOKENS_FOLLOW_IDENTITY=1).
+            // false = tokeny platí do své vlastní expirace, přístup ukončí deaktivace účtu.
+            'tokens_follow_identity' => false,
+            'providers' => [
+                'entra' => [
+                    'enabled'       => false,
+                    'label'         => 'Microsoft',
+                    'tenant_id'     => '', // Directory (tenant) ID, GUID; ne common/organizations
+                    'client_id'     => '', // Application (client) ID
+                    'client_secret' => '', // ENV MYINVOICE_OIDC_ENTRA_CLIENT_SECRET
+                    'allow_guests'  => false, // true = smí i hosté B2B tenantu
+                    'skip_mfa'      => true,
+                ],
+                // Google, Apple a Seznam nahrazují jen heslo. Druhý faktor (passkey,
+                // TOTP) se po návratu ověří v MyÚčto stejně jako po hesle, citlivé
+                // operace je potvrdit nemohou a instalace je nemůže vynutit.
+                'google' => [
+                    'enabled'       => false,
+                    'client_id'     => '', // …apps.googleusercontent.com
+                    'client_secret' => '', // ENV MYINVOICE_OIDC_GOOGLE_CLIENT_SECRET
+                    'allowed_hosted_domains' => [], // jen účty Google Workspace těchto domén
+                ],
+                'apple' => [
+                    'enabled'          => false,
+                    'team_id'          => '', // Team ID (10 znaků)
+                    'key_id'           => '', // Key ID klíče Sign in with Apple
+                    'services_id'      => '', // Services ID = client_id webu
+                    'private_key'      => '', // obsah .p8, ENV MYINVOICE_OIDC_APPLE_PRIVATE_KEY
+                    'private_key_file' => '', // nebo cesta k .p8 mimo webroot
+                ],
+                'seznam' => [
+                    'enabled'       => false,
+                    'client_id'     => '',
+                    'client_secret' => '', // ENV MYINVOICE_OIDC_SEZNAM_CLIENT_SECRET
+                ],
+            ],
         ],
     ],
     'smtp' => [
@@ -456,6 +529,28 @@ return [
         // ENV varianta: MYINVOICE_INVOICE_PUBLIC_LINKS=0
         'public_links' => true,
     ],
+    'accounting' => [
+        // Výchozí forma účetního zápisu nově založených firem: 'composite' (složený
+        // zápis, výchozí) nebo 'single' (jednoduchý zápis po dvojicích MD/Dal od
+        // začátku účetnictví). Týká se jen firem založených nebo aktivovaných
+        // v podvojném účetnictví po nastavení; stávající firmy se nemění.
+        // ENV varianta: MYINVOICE_ACCOUNTING_DEFAULT_ENTRY_FORM=single
+        'default_entry_form' => 'composite',
+        // Tlačítko „Uložit a zaúčtovat“ v editorech vydané a přijaté faktury (jen pro
+        // firmy v podvojném účetnictví a uživatele s právem zaúčtovat). Výchozí je
+        // vypnuto; náhled zápisu pod položkami i zaúčtování z detailu dokladu fungují
+        // vždy.
+        // ENV varianta: MYINVOICE_ACCOUNTING_SAVE_AND_POST=1
+        'save_and_post' => false,
+    ],
+    'export' => [
+        // Automatický měsíční export vydaných dokladů do Pohody e-mailem účetní
+        // (Prodej → Export, panel Automatický export do Pohody, a úloha
+        // cron-scheduled-pohoda-export). Výchozí je vypnuto: panel se nezobrazí,
+        // API vrací 404 a cron skončí bez práce. Uložená nastavení firem zůstávají.
+        // ENV varianta: MYINVOICE_SCHEDULED_POHODA_EXPORT=1
+        'scheduled_pohoda' => false,
+    ],
     'pagination' => [
         // Velikost stránky pro tlačítko "Další" v UI seznamech.
         // Min/max hranice (5 / 200) se enforcují v API; mimo rozsah API hodnotu clampuje.
@@ -479,9 +574,15 @@ return [
             'credit_note' => '7{YY}{MM}{CCC}',       // např. 72604001 (prefix 7 = dobropis)
         ],
     ],
+    // Ukázková instalace (`demo.enabled`): e-maily účtů, kterým ukázka vydá API token
+    // přihlášením heslem (POST /api/v1/auth/password-token), typicky účet pro review
+    // mobilní aplikace. Prázdný seznam = výjimka vypnutá. Ostatní zápisy dál blokuje.
+    // 'demo' => ['password_token_emails' => ['review@example.com']],
     'rate_limits' => [
         // Limity nad rámec brute_force (ten řeší jen login). Klíč = max požadavků v daném okně.
-        'login_per_min_per_ip'      => 10,           // doplněk k brute_force; ochrana proti spamu z 1 IP
+        'login_per_min_per_ip'      => 10,           // doplněk k brute_force; ochrana proti spamu z 1 IP (i výměna hesla za API token)
+        'password_token_failures_per_min' => 60,     // neúspěchy POST /api/v1/auth/password-token ze všech IP dohromady
+        'password_token_failures_per_hour_per_account' => 20, // neúspěchy jednoho účtu ze všech IP
         'forgot_per_hour_per_email' => 3,            // POST /auth/forgot-password
         'mutation_per_min_per_user' => 120,          // všechna POST/PUT/PATCH/DELETE (bulk akce + import jobs)
         'read_per_min_per_user'     => 1200,         // GET endpointy (CRM dashboard ~16 paralelně, časté refresh)
@@ -495,6 +596,18 @@ return [
         'work_report_public_post_per_min_per_ip' => 10,  // request-code (ODESÍLÁ e-mail) + verify (brute force OTP)
         'payroll_document_public_per_min_per_ip' => 30,      // zabezpečený odkaz na mzdový dokument (stav + stažení PDF)
         'payroll_document_public_post_per_min_per_ip' => 5,  // request-code (ODESÍLÁ e-mail) + verify; přísnější, za odkazem je výplatní páska
+    ],
+    'api' => [
+        // Plný zápis API tokenem (příznak tokenu `system_write`): token se chová jako
+        // přihlášený uživatel ve webovém rozhraní ve všech agendách, včetně zaúčtování,
+        // storen, uzávěrek, mezd a SVJ. Platí jen oprávnění uživatele tokenu; přihlášení,
+        // MFA, heslo, správa tokenů, licence a správa instance zůstávají tokenu
+        // nedostupné a uzavřené ani podané období token nepřebije.
+        // false = příznak nejde zapnout a už vydané tokeny s příznakem se chovají jako
+        // běžné tokeny. Zapínejte vědomě, jen když integraci, které token dáváte, věříte
+        // jako člověku s tímtéž účtem.
+        // ENV varianta: MYINVOICE_API_ALLOW_SYSTEM_WRITE_TOKENS=1
+        'allow_system_write_tokens' => false,
     ],
 
     // ── Doručování mzdových dokumentů zaměstnancům ────────────────────────────────

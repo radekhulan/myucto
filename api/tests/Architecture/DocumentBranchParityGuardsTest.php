@@ -90,6 +90,9 @@ final class DocumentBranchParityGuardsTest extends TestCase
         // převod párováním vydané proformy jinou cestou.
         'Service/Migration/MoneyS3/AdvanceLinker.php' => [
             'repointCancelledAdvanceRefunds' => 'vratka poskytnuté zálohy - jen přijatá strana (314)',
+            // Evidovanou platbu (`invoice_payments`) má jen vydaná proforma; přijatá záloha
+            // úhradu nese párováním a DDKP navazuje rodičem dokladu.
+            'linkTaxDocumentPayments'        => 'vazbu platby na DDKP má jen vydaná proforma (invoice_payments)',
         ],
         'Service/Bank/StatementMatcher.php' => [
             'matchPurchase'             => 'vydaný DDKP je vždy paid → nikdy platební cíl',
@@ -129,7 +132,7 @@ final class DocumentBranchParityGuardsTest extends TestCase
         // takže přijatá větev musí DDKP rozlišit podle document_kind.
         'Service/Accounting/JournalLinkService.php' => [
             'hasRelatedMap'      => 'vydaná větev pokrývá DDKP výčtem, přijatá rozlišuje vazební sloupec',
-            'advanceParentOf'    => 'vydaná větev pokrývá DDKP výčtem, přijatá rozlišuje vazební sloupec',
+            'advanceParentsOf'   => 'vydaná větev pokrývá DDKP výčtem, přijatá rozlišuje vazební sloupec',
             'withAdvanceChildren' => 'vydaná větev pokrývá DDKP výčtem, přijatá rozlišuje vazební sloupec',
         ],
 

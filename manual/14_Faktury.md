@@ -35,8 +35,9 @@ Kapitolu otevřete, když:
   [kapitole 15](15_Faktura_editor.md)).
 - **Zaúčtování** je dostupné jen firmám s podvojným účetnictvím. Tlačítko **Náhled** u
   zaúčtovaného dokladu a sloupce s předkontací vyžadují oprávnění ke čtení účetnictví.
-- **Odeslání e-mailem** vyžaduje, aby měl klient vyplněný e-mail (jinak se faktura
-  při hromadném odeslání přeskočí).
+- **Odeslání e-mailem** vyžaduje platného příjemce z kontaktů klienta, zakázky
+  nebo hlavního e-mailu klienta. Bez příjemce se faktura při hromadném odeslání
+  přeskočí; pravidla výběru popisuje [§ 16.10.8](16_Faktura_PDF.md#16108-odesilani-e-mailem).
 - **PDF export s podpisem** vyžaduje nastavený podpisový profil pro PDF faktur.
 
 ## 14.3 Krok za krokem: najít fakturu v seznamu
@@ -77,8 +78,8 @@ Typický začátek měsíce:
 3. V liště nahoře klikněte na **Vystavit znovu (N)** a potvrďte. Vzniknou koncepty s
    posunutými měsíci v popiscích položek (`Konzultace 3/2026` se změní na `Konzultace 4/2026`).
 4. Projděte koncepty a podle potřeby je upravte (hodiny navíc, sleva).
-5. Koncepty znovu označte a klikněte na **Vystavit (N)**. Každý dostane číslo podle šablony
-   číslování a vygeneruje se PDF.
+5. Koncepty znovu označte a klikněte na **Vystavit (N)**. Potvrzení ukáže, kolik konceptů si
+   ponechá ručně vyplněné číslo a kolik dostane číslo z číselné řady. Pak se vygeneruje PDF.
 6. Vystavené faktury označte a klikněte na **Odeslat klientovi (N)**.
 
 **Jak poznáte, že je hotovo:** faktury mají ve sloupci **Stav** hodnotu **Odesláno**.
@@ -124,6 +125,42 @@ Jen pro podvojné účetnictví.
 hodnotou **Nezaúčtováno** je prázdný. Na dávku je limit 500 dokladů. Podrobnosti o
 zaúčtování viz [§ 16.10.3](16_Faktura_PDF.md#16103-zauctovani-do-deniku).
 
+### 14.6.1 Hromadně nastavit dimenze
+
+Jen se zapnutými dimenzemi firmy a s právem zápisu do účetnictví.
+
+1. V seznamu zaškrtněte faktury. Mohou to být koncepty i vystavené a zaúčtované doklady.
+2. Klikněte na **Nastavit dimenze (N)**.
+3. U každého typu dimenze zvolte **Ponechat**, **Nastavit** (a vyberte hodnotu) nebo **Odebrat**.
+4. Klikněte na **Uložit dimenze**.
+
+**Jak poznáte, že je hotovo:** aplikace ukáže souhrn, kolik dokladů upravila, kolik se
+nezměnilo a kolik přeskočila. U přeskočeného dokladu uvede důvod, typicky uzavřené účetní
+období, a přeskočené doklady nechá vybrané. Změna se týká dimenzí celého dokladu a u
+zaúčtovaných dokladů i řádků deníku. Pravidla popisuje
+[§ 114.4](114_Dimenze.md#1144-krok-za-krokem-zadat-dimenze-na-dokladu).
+
+### 14.6.2 Hromadné akce: dimenze, předkontace, přeúčtování, smazání
+
+Pro větší změny mnoha faktur najednou otevřete v záhlaví seznamu nabídku **…** a zvolte
+**Hromadné akce** (se zaškrtnutými fakturami i v liště výběru dole). Akce pracuje s vybranými
+fakturami, nebo se všemi, které seznam ukazuje podle filtru, nejvýš s 500 doklady:
+
+- **Nastavit dimenze**: víc typů najednou, v režimu přepsat, jen kde je prázdné, nebo vymazat,
+  na hlavičce dokladu nebo jen na položkách,
+- **Změnit předkontaci** položek a znovu zaúčtovat,
+- **Přeúčtovat účet** v zápisech vybraných faktur,
+- **Smazat** podle pravidel mazání jednoho dokladu.
+
+Vždy nejdřív proběhne běh nanečisto se stavem před a po, provedení jde (kromě smazání)
+vrátit. Postup je v [§ 52.8.2](52_Ucetni_denik.md#5282-krok-za-krokem-hromadne-akce-v-seznamech),
+pravidla a oprávnění v [§ 52.14.18](52_Ucetni_denik.md#521418-hromadne-akce-v-seznamech).
+
+Členění DPH změníte operací **Změnit členění DPH** nad doklady, nebo v režimu **Položky
+dokladů** jen u vybraných položek napříč fakturami, například položce **Místní poplatek z pobytu**
+kód `mimo` a sazbu 0 %, aby nešla do přiznání ani do kontrolního hlášení. Doklady v podaném
+období DPH se nemění nikdy. Postup je v [§ 52.8.3](52_Ucetni_denik.md#5283-krok-za-krokem-cleneni-dph-a-polozky-dokladu).
+
 ## 14.7 Krok za krokem: sloučené PDF z více faktur
 
 1. V seznamu zaškrtněte vystavené faktury nebo dobropisy (nejvýše 100 najednou).
@@ -137,6 +174,22 @@ stáhne. Doklady jsou v pořadí, v jakém jsou v seznamu.
 Sloučené PDF obsahuje pouze samotné faktury. Nepřidává uživatelské přílohy, soubory ISDOC
 ani výkazy víceprací. Pro archiv jednotlivých souborů (PDF ZIP, ISDOC ZIP, Pohoda XML)
 použijte `Prodej → Export` ([kapitola 20](20_Exporty.md)).
+
+### 14.7.1 Kniha vystavených faktur
+
+1. V seznamu nastavte filtr (období, stav, odběratele, hledání a další).
+2. Vpravo nahoře klikněte na **Kniha vystavených faktur** a zvolte **PDF na šířku** nebo
+   **Tabulka XLSX**.
+
+Kniha obsahuje všechny doklady odpovídající filtru, ne jen načtenou stránku, seřazené podle
+čísla. U každého dokladu uvádí číslo, datum vystavení, splatnost, DUZP, částku, zbývá
+uhradit, odběratele, variabilní symbol a popis (text položky s nejvyšší částkou). Hlavička
+shrnuje použitý filtr, patička stránky uvádí, kdo a kdy sestavu vytiskl.
+
+Koncept bez čísla v knize není. Koncepty s číslem a stornované doklady se objeví jen tehdy,
+když je filtr zahrnuje, a do součtů nevstupují. Součty jsou za každou měnu zvlášť, bez
+přepočtu kurzem: celkem k úhradě (po odpočtu záloh), zbývá uhradit u faktur a u dobropisů
+a samostatně daňové doklady k přijaté platbě.
 
 ## 14.8 Krok za krokem: hromadné nastavení OSS
 
@@ -319,6 +372,7 @@ KH). Po výběru sestavy lze sloupce dále jednotlivě upravit.
 | Kategorie tržby | Výběr několika kategorií najednou a přepínač **Zobrazit jen vybrané** / **Skrýt vybrané** |
 | Zaúčtování | Vše / Zaúčtováno / Nezaúčtováno. Jen podvojné účetnictví, viz [§ 16.10.3](16_Faktura_PDF.md#16103-zauctovani-do-deniku) |
 | Místo plnění (OSS) | Místo plnění (OSS): vše / Nejisté místo plnění (OSS) / Nejisté - v OSS podání / Nejisté - v tuzemsku. Vypíše doklady s řádkem, u kterého si systém není jistý místem plnění, viz [§ 40.5](40_Fakturujeme.md#40913-zahranicni-fakturace). Filtr je vidět, i když OSS zapnuté nemáte |
+| Dimenze | Hodnota dimenze (středisko, projekt …), viz níže. Jen se zapnutými dimenzemi |
 | Hledat | Volný text, viz [§ 14.11.9](#14119-vyhledavani) |
 
 Filtr **Zaúčtování** jde do adresy (sdílitelný odkaz) a do [uložených
@@ -330,6 +384,20 @@ Filtr **Neuhrazené k datu** je jiná otázka než filtr **Nezaplacené**. Ten s
 „kdo mi k 30. 6. dlužil“). Doklad zaplacený až po tomto dni se proto ve výpisu objeví
 (k danému dni ještě nebyl uhrazen), i když má dnes stav **Zaplaceno**. Filtr používá stejnou
 definici úhrady jako [Saldokonto](60_Saldokonto.md), takže si obě sestavy neodporují.
+
+#### Dimenze
+
+Máte-li zapnuté [dimenze](114_Dimenze.md), klikněte ve filtrech na **Přidat dimenzi**
+a vyberte hodnotu. Seznam ukáže doklady, které hodnotu nesou na hlavičce, na některé
+položce nebo v rozpadu mezi víc hodnot. Zaškrtávátko **včetně podřízených** zahrne
+i podřízené hodnoty; hodnoty stejného typu se sčítají, hodnoty různých typů musí platit
+zároveň. Filtr jde do adresy, do uložených filtrů, do knihy vystavených faktur
+([§ 14.7.1](#1471-kniha-vystavenych-faktur)) i do hromadných akcí nad filtrem.
+
+Doklad rozdělený mezi víc hodnot (například položka na dvě střediska nebo rozpad
+hlavičky 60 % a 40 %) se zobrazí u každé hodnoty **celý**, částky seznamu jsou vždy
+celé doklady. Kolik DPH připadá na hodnotu, ukazuje Kniha DPH s filtrem dimenze
+a sestava DPH podle dimenze ([§ 42.6](42_Kniha_DPH.md#426-krok-za-krokem-kniha-dph-a-soupis-kh-podle-dimenze)).
 
 #### Kategorie tržby
 
@@ -446,7 +514,7 @@ Po zaškrtnutí více faktur se nahoře objeví lišta s akcemi:
 <!-- cols: 24 46 30 -->
 | Akce | Funkce | Aplikuje se na |
 |---|---|---|
-| **Vystavit (N)** | Hromadně vystaví vybrané koncepty. Každý dostane variabilní symbol podle šablony číslování, akce je nevratná | Koncepty |
+| **Vystavit (N)** | Hromadně vystaví vybrané koncepty. Koncept s ručně vyplněným číslem si ho ponechá, koncept bez čísla dostane číslo z číselné řady. Potvrzení ukáže počty obou skupin, akce je nevratná | Koncepty |
 | **Vystavit znovu (N)** | Vytvoří klony jako nové koncepty s posunutým měsícem v popiscích položek (`3/2026 → 4/2026`). Žádný se nevystaví ani neodešle automaticky | Faktury libovolného stavu |
 | **Odeslat klientovi (N)** | Hromadně odešle e-mail s PDF přílohou na hlavní adresu klienta a fakturační e-maily zakázky | Vystavené, neodeslané |
 | **Označit za zaplacené (N)** | Ručně označí jako zaplacené dnešním datem | Vystavené / odeslané / upomínkované |
@@ -454,6 +522,8 @@ Po zaškrtnutí více faktur se nahoře objeví lišta s akcemi:
 | **PDF export (N)** | Sloučí PDF vybraných vystavených dokladů do jednoho souboru, volitelně jej elektronicky podepíše nastaveným profilem | Vystavené faktury a dobropisy, maximálně 100 dokladů |
 | **Zaúčtovat (N)** | Zaúčtuje vybrané do deníku jednu po druhé (chyba jedné neblokuje ostatní), na konci souhrn. Max 500 dokladů na dávku | Vystavené a dosud nezaúčtované, jen podvojné účetnictví, viz [§ 16.10.3](16_Faktura_PDF.md#16103-zauctovani-do-deniku) |
 | **Nastavit OSS (N)** | Hromadně nastaví režim OSS, zemi spotřeby, typ sazby a typ plnění na položkách. Náhled je povinný. Max 200 dokladů na dávku | Doklady, které nejsou stornované, zamčené ani v podaném období |
+| **Nastavit dimenze (N)** | U každého typu dimenze zvolíte Ponechat, Nastavit hodnotu nebo Odebrat. Mění dimenze celého dokladu a promítne je i do zaúčtovaných řádků deníku. Doklad v uzavřeném období se přeskočí s důvodem. Max 500 dokladů na dávku, postup v [§ 14.6.1](#1461-hromadne-nastavit-dimenze) | Koncepty, vystavené i zaúčtované doklady, jen se zapnutými dimenzemi a právem zápisu do účetnictví |
+| **Hromadné akce** (nabídka **…**) | Nastavit dimenze s režimy a rozsahem, změnit předkontaci, přeúčtovat účet, smazat. Běh nanečisto, provedení a vrácení, max 500 dokladů, viz [§ 14.6.2](#1462-hromadne-akce-dimenze-predkontace-preuctovani-smazani) | Podle operace; jen s právem Hromadné změny dokladů a zápisů nebo jako správce firmy |
 
 Při hromadném odeslání můžete být dotázáni, zda se má poslat i poděkování za úhradu u již
 zaplacených faktur.

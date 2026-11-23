@@ -3,18 +3,23 @@ import { useWindowRefresh } from '@/composables/useWindowRefresh'
 import { useWindowTitle } from '@/composables/useWindowTitle'
 import ClientQuickLinks from '@/components/clients/ClientQuickLinks.vue'
 import LinkedDocumentsPanel from '@/components/documents/LinkedDocumentsPanel.vue'
+import AccrualSourcePanel from '@/components/accounting/AccrualSourcePanel.vue'
 import AttachmentCheckBadge from '@/components/documents/AttachmentCheckBadge.vue'
-import DocumentSidePreview from '@/components/documents/DocumentSidePreview.vue'
+import DocumentPreviewSplit from '@/components/documents/DocumentPreviewSplit.vue'
 import PdfDropzone from '@/components/purchase/PdfDropzone.vue'
 import ExtractionWarningText from '@/components/purchase/ExtractionWarningText.vue'
 import PurchaseItemMeta from '@/components/purchase/PurchaseItemMeta.vue'
+import AdvancePickerModal from '@/components/purchase/AdvancePickerModal.vue'
 import CreditNoteOffsetNotice from '@/components/invoices/CreditNoteOffsetNotice.vue'
 import { ref, reactive, computed, onMounted, onBeforeUnmount, watch, defineAsyncComponent } from 'vue'
 import { useRoute, useRouter, RouterLink } from 'vue-router'
+import { createReusableTemplate } from '@vueuse/core'
+import { useIsPhone } from '@/composables/useIsPhone'
+import PdfCanvasViewer from '@/components/documents/PdfCanvasViewer.vue'
 import { useI18n } from 'vue-i18n'
 import { purchaseInvoicesApi, type PurchaseInvoice, type PurchaseInvoiceStatus, type PurchaseInvoiceBrief, type PaymentQrResponse, type VatDeduction, type PurchaseForceMode } from '@/api/purchaseInvoices'
-import { formatMoney, formatHourlyRate, formatDate } from '@/composables/useFormat'
-import { formatDuration, isTimeItem, itemQuantity } from '@/utils/timeBilling'
+import { formatMoney, formatUnitPrice, formatDate } from '@/composables/useFormat'
+import { formatDuration, isPreciseUnitPrice, isTimeItem, itemQuantity } from '@/utils/timeBilling'
 import { useToast } from '@/composables/useToast'
 import { accountingApi } from '@/api/accounting'
 import { useAuthStore } from '@/stores/auth'
@@ -44,6 +49,8 @@ import { useDimensions } from '@/composables/useDimensions'
 import WorkspaceTeleport from '@/components/workspace/WorkspaceTeleport.vue'
 import ListNavArrows from '@/components/ui/ListNavArrows.vue'
 import { useListNavigation } from '@/composables/useListNavigation'
+import { useOpeningBalanceDocument } from '@/composables/useOpeningBalanceDocument'
+import ConfirmDialog from '@/components/ui/ConfirmDialog.vue'
 
 const ExtractionReviewModal = defineAsyncComponent(() => import('@/components/purchase/ExtractionReviewModal.vue'))
 const PaymentCalendarModal = defineAsyncComponent(() => import('@/components/purchase/PaymentCalendarModal.vue'))
@@ -98,7 +105,7 @@ const postingPanelRef = ref<InstanceType<typeof DocumentPostingPanel> | null>(nu
 // Zámek dokladu (F6) — čte se VÝHRADNĚ z BE pole `locked`, FE ze status/booked_at
 // nic neodvozuje. Blokuje mutace jen roli client; staff UI zůstává (autorita je BE).
 const lockedForMe = computed(() => !!invoice.value?.locked?.is_locked && auth.isClientRole)
-const bankMatchTarget = ref<{ id: number; ref: string | null } | null>(null)
+const bankMatchTarget = ref<{ id: number; ref: string | null; batchAvailable: boolean } | null>(null)
 const canMatchBankPayment = computed(() => !!invoice.value && !lockedForMe.value
   && !auth.isClientRole && auth.canRead('bank') && auth.canWrite('bank.match')
   && Number(invoice.value.amount_to_pay) !== 0
@@ -107,7 +114,13 @@ const canMatchBankPayment = computed(() => !!invoice.value && !lockedForMe.value
   && !((invoice.value.paid_amount ?? 0) > 0.005 && invoice.value.remaining_amount !== undefined
     && Math.abs(invoice.value.remaining_amount) <= 0.005))
 function openBankMatch() {
-  if (invoice.value && canMatchBankPayment.value) bankMatchTarget.value = { id: invoice.value.id, ref: invoice.value.vendor_invoice_number || invoice.value.varsymbol }
+  const doc = invoice.value
+  if (doc && canMatchBankPayment.value) {
+    bankMatchTarget.value = {
+      id: doc.id, ref: doc.vendor_invoice_number || doc.varsymbol,
+      batchAvailable: doc.status !== 'paid' && (doc.remaining_amount ?? doc.amount_to_pay - (doc.paid_amount ?? 0)) > 0.005,
+    }
+  }
 }
 watch(() => [route.params.id, supplierStore.currentSupplierId], () => { bankMatchTarget.value = null })
 const loading = ref(true)
@@ -121,7 +134,7 @@ let loadGeneration = 0
 // unit_price_without_vat už netto → vracíme ho beze změny.
 function displayUnitPriceNet(it: { quantity: number; unit_price_without_vat: number; total_without_vat?: number; unit?: string; duration_minutes?: number | null; stock_item_id?: number | null }): number {
   if (invoice.value?.prices_include_vat && Number(it.quantity)) {
-    if (isTimeItem(it) && (it.duration_minutes != null || it.unit_price_without_vat !== Math.round(it.unit_price_without_vat * 100) / 100)) {
+    if (isPreciseUnitPrice(it)) {
       return Math.round(((it.total_without_vat ?? 0) / itemQuantity(it)) * 1e6) / 1e6
     }
     return Math.round(((it.total_without_vat ?? 0) / Number(it.quantity)) * 100) / 100
@@ -132,12 +145,38 @@ function displayUnitPriceNet(it: { quantity: number; unit_price_without_vat: num
 // lepkavá (user_preferences), aby při procházení dokladů nemusel klikat u každého znovu.
 const pdfPreview = useSidePreview('purchase_invoices')
 const pdfPreviewOpen = pdfPreview.open
-// Nad prahem (viz useSidePreview) jde náhled do sloupce vpravo, pod prahem zůstává pod
-// dokladem. Bez archivovaného PDF se sloupec nevykreslí vůbec a doklad má celou šířku.
-const pdfSideBySide = computed(() => !!invoice.value?.pdf_path && pdfPreviewOpen.value && pdfPreview.wide.value)
 const pdfInlineUrl = computed(() => (invoice.value ? `${purchaseInvoicesApi.pdfUrl(invoice.value.id, true)}#view=FitH` : ''))
 const dismissingWarning = ref(false)
 const reviewOpen = ref(false)
+
+// Telefon: souhrn pod číslem dokladu, doklad přes celou obrazovku, karty s údaji
+// sbalené a sekce originálu výš. Mimo telefon se šablona vykreslí beze změny.
+const isPhone = useIsPhone()
+const phoneDetailsOpen = ref(false)
+const phonePdfOpen = ref(false)
+const [DefinePdfSection, ReusePdfSection] = createReusableTemplate()
+const phonePdfIsImage = computed(() => /\.(jpe?g|png|webp|gif|bmp|heic|heif)$/i.test(invoice.value?.pdf_original_name ?? ''))
+const phoneToPay = computed(() => invoice.value
+  ? (invoice.value.amount_to_pay ?? invoice.value.total_with_vat) + (invoice.value.rounding || 0)
+  : 0)
+type PhonePaymentState = 'paid' | 'partial' | 'overdue' | 'unpaid' | 'draft' | 'cancelled'
+const phonePaymentState = computed<PhonePaymentState>(() => {
+  const inv = invoice.value
+  if (!inv) return 'unpaid'
+  if (inv.status === 'draft' || inv.status === 'cancelled') return inv.status
+  if (inv.status === 'paid') return 'paid'
+  if (inv.due_date && inv.due_date < appIsoDate()) return 'overdue'
+  if ((inv.paid_amount ?? 0) > 0.005 && (inv.remaining_amount ?? 0) > 0.005) return 'partial'
+  return 'unpaid'
+})
+const phonePaymentStateClass = computed(() => ({
+  paid: 'bg-success-50 text-success-700 border-success-500/40',
+  partial: 'bg-warning-50 text-warning-700 border-warning-500/40',
+  overdue: 'bg-danger-50 text-danger-600 border-danger-500/40',
+  unpaid: 'bg-primary-50 text-primary-700 border-primary-500/40',
+  draft: 'bg-neutral-100 text-neutral-600 border-neutral-200',
+  cancelled: 'bg-danger-50 text-danger-500 border-danger-500/40',
+}[phonePaymentState.value]))
 
 function onReviewUpdated(inv: PurchaseInvoice) {
   invoice.value = inv
@@ -173,32 +212,47 @@ async function dismissWarning(section?: string) {
 // vyúčtovací fakturu (advance_purchase_invoice_id).
 const advanceModalOpen = ref(false)
 const pairMode = ref<'advance' | 'final'>('advance')
-const advanceCandidates = ref<PurchaseInvoiceBrief[]>([])
-const loadingCandidates = ref(false)
 const linkingAdvance = ref(false)
 
-async function openPairModal(mode: 'advance' | 'final') {
+function openPairModal(mode: 'advance' | 'final') {
   if (!invoice.value) return
   pairMode.value = mode
   advanceModalOpen.value = true
-  loadingCandidates.value = true
-  try {
-    advanceCandidates.value = mode === 'advance'
-      ? await purchaseInvoicesApi.advanceCandidates(invoice.value.id)
-      : await purchaseInvoicesApi.settlementCandidates(invoice.value.id)
-  } catch (e) {
-    toast.error(apiErrorMessage(e))
-  } finally {
-    loadingCandidates.value = false
-  }
+}
+
+function loadPairCandidates(): Promise<PurchaseInvoiceBrief[]> {
+  const current = invoice.value
+  if (!current) return Promise.resolve([])
+  return pairMode.value === 'advance'
+    ? purchaseInvoicesApi.advanceCandidates(current.id)
+    : purchaseInvoicesApi.settlementCandidates(current.id)
+}
+
+// Konečná faktura k záloze s DDKP bez odpočtu zálohy: odpočtové řádky vloží editor.
+function addAdvanceDeduction() {
+  if (!invoice.value) return
+  router.push({ name: 'purchase-invoice-edit', params: { id: invoice.value.id }, query: { advance_deduction: '1' } })
+}
+
+// Zálohy, které konečná faktura vyúčtovává (víc záloh téhož dodavatele).
+const linkedAdvances = computed<PurchaseInvoiceBrief[]>(() => {
+  const inv = invoice.value
+  if (!inv) return []
+  return inv.linked_advances ?? (inv.linked_advance ? [inv.linked_advance] : [])
+})
+
+function advanceLabel(a: PurchaseInvoiceBrief): string {
+  return a.varsymbol || a.vendor_invoice_number || ('#' + a.id)
 }
 
 // Jsem na vyúčtovací faktuře, advanceId = záloha → vazba na current (i AI návrh).
+// Má-li faktura už navázanou zálohu, další se přidává (append), stávající zůstávají.
 async function linkAdvance(advanceId: number) {
   if (!invoice.value || linkingAdvance.value) return
   linkingAdvance.value = true
   try {
-    invoice.value = await purchaseInvoicesApi.linkAdvance(invoice.value.id, advanceId)
+    const append = linkedAdvances.value.length > 0
+    invoice.value = await purchaseInvoicesApi.linkAdvance(invoice.value.id, advanceId, append ? { append: true } : undefined)
     advanceModalOpen.value = false
     toast.success(t('purchase_invoice.advance_link.linked'))
     purchaseInvoicesApi.activity(id.value).then(a => { activity.value = a }).catch(() => {})
@@ -229,19 +283,23 @@ async function pickCandidate(candId: number) {
 }
 
 // targetId = id vyúčtovací faktury, jejíž vazbu rušíme. Default = aktuální doklad
-// (jsem na vyúčtovací). Z detailu zálohy předáme id navázané faktury → reload.
-async function unlinkAdvance(targetId?: number) {
+// (jsem na vyúčtovací, advance = odpojovaná záloha). Z detailu zálohy předáme id
+// navázané faktury a odpojí se jen tato záloha → reload.
+async function unlinkAdvance(targetId?: number, advance?: PurchaseInvoiceBrief) {
   if (!invoice.value || linkingAdvance.value) return
-  if (!confirm(t('purchase_invoice.advance_link.unlink_confirm'))) return
+  const message = advance
+    ? t('purchase_invoice.advance_link.unlink_one_confirm', { advance: advanceLabel(advance) })
+    : t('purchase_invoice.advance_link.unlink_confirm')
+  if (!confirm(message)) return
   linkingAdvance.value = true
   try {
     if (targetId && targetId !== invoice.value.id) {
-      await purchaseInvoicesApi.unlinkAdvance(targetId)
+      await purchaseInvoicesApi.unlinkAdvance(targetId, invoice.value.id)
       await load()
     } else {
-      invoice.value = await purchaseInvoicesApi.unlinkAdvance(invoice.value.id)
+      invoice.value = await purchaseInvoicesApi.unlinkAdvance(invoice.value.id, advance?.id)
     }
-    toast.success(t('purchase_invoice.advance_link.unlinked'))
+    toast.success(advance ? t('purchase_invoice.advance_link.unlinked_one') : t('purchase_invoice.advance_link.unlinked'))
     purchaseInvoicesApi.activity(id.value).then(a => { activity.value = a }).catch(() => {})
   } catch (e) {
     toast.error(apiErrorMessage(e))
@@ -333,10 +391,12 @@ async function load() {
   stockReceipts.value = []
   stockError.value = ''
   stockLoading.value = stockIntegrationVisible.value
+  openingBalance.reset()
   try {
     const loadedInvoice = await purchaseInvoicesApi.get(purchaseInvoiceId)
     if (generation !== loadGeneration) return
     invoice.value = loadedInvoice
+    void openingBalance.load(purchaseInvoiceId)
   } catch (e) {
     if (generation !== loadGeneration) return
     error.value = apiErrorMessage(e)
@@ -361,8 +421,7 @@ const stockReceiptOpen = ref(false)
 const stockReceivedTotal = computed(() => (stockProposal.value?.lines ?? []).reduce((s, l) => s + Number(l.already_received), 0))
 const stockRequestedTotal = computed(() => (stockProposal.value?.lines ?? []).reduce((s, l) => s + Number(l.quantity), 0))
 const stockFullyReceived = computed(() => !!stockProposal.value && stockRequestedTotal.value > 0 && stockReceivedTotal.value >= stockRequestedTotal.value)
-const hasStockReceiptLines = computed(() => (stockProposal.value?.lines ?? []).some(line =>
-  line.stock_item_id !== null && Number(line.remaining_qty) > 0))
+const hasStockReceiptLines = computed(() => stockProposal.value?.has_lines_to_receive === true)
 async function loadStockIntegration(purchaseInvoiceId = id.value, generation = loadGeneration) {
   stockLoading.value = true
   stockError.value = ''
@@ -782,17 +841,33 @@ function transitionLabel(target: PurchaseInvoiceStatus): string {
   return t(`purchase_invoice.actions.mark_${target}`)
 }
 
+// Doklad převzatý z počátečních stavů: částku nese otevírací zápis, vlastní zápis nemá.
+const openingBalance = useOpeningBalanceDocument({
+  api: { get: purchaseInvoicesApi.openingBalance, mark: purchaseInvoicesApi.markOpeningBalance, unmark: purchaseInvoicesApi.unmarkOpeningBalance },
+  agenda: 'purchase_invoices',
+  enabled: () => isDoubleEntry.value && !!invoice.value && invoice.value.status !== 'draft',
+  onChanged: () => load(),
+})
+const canMarkOpeningBalance = computed(() => !!invoice.value && openingBalance.canManage.value
+  && !openingBalance.inOpening.value && invoice.value.status !== 'cancelled'
+  && !invoice.value.locked?.journal_entry_id)
+const canUnmarkOpeningBalance = computed(() => openingBalance.canManage.value && openingBalance.inOpening.value)
+
 // Zaúčtování do deníku (podvojné účetnictví). BE je idempotentní (source_type+source_id),
 // po úspěchu přenačteme detail (booked_at → badge „Zaúčtováno" + proklik do deníku).
 const canPostToJournal = computed(() =>
   !!invoice.value
   && isDoubleEntry.value
-  && !invoice.value.booked_at
+  && !openingBalance.inOpening.value
   && !invoice.value.locked?.journal_entry_id
   && invoice.value.document_kind !== 'advance'
   && invoice.value.status !== 'draft'
   && invoice.value.status !== 'cancelled'
   && auth.canWrite('purchase_invoices'))
+
+// Doklad označený jako zaúčtovaný (booked_at), ke kterému v deníku zápis není - typicky
+// po převodu z jiného programu, kde doklad zaúčtovaný nebyl. Zaúčtování zůstává dostupné.
+const bookedWithoutEntry = computed(() => canPostToJournal.value && !!invoice.value?.booked_at)
 
 // Místo slepého confirm() se otevře náhled kontace — u dokladu v cizí měně nebo
 // v přenesené daňové povinnosti má zápis víc než dva řádky a odklepnout ho neviděný
@@ -951,7 +1026,7 @@ const purchaseActions = computed<ActionItem[]>(() => {
     show: isDoubleEntry.value && auth.canWrite('bank.rules'), run: () => { postingRuleOpen.value = true } })
 
   items.push({ key: 'journal', label: t('common.view_in_journal'), icon: 'chart', tier: 'secondary', variant: 'neutral',
-    show: isDoubleEntry.value && (!!inv.booked_at || !!inv.locked?.journal_entry_id),
+    show: isDoubleEntry.value && !!inv.locked?.journal_entry_id,
     to: { name: 'accounting-journal', query: { source_type: 'purchase_invoice', source_id: String(inv.id) } } })
 
   items.push({ key: 'stock-receipt', label: t('stock.receipt.action'), icon: 'box', tier: 'secondary', variant: 'success',
@@ -978,6 +1053,13 @@ const purchaseActions = computed<ActionItem[]>(() => {
       !!inv.bank_payments?.length || !!inv.cash_payments?.length || !!inv.settlement_payments?.length,
       Array.isArray(inv.bank_payments) && Array.isArray(inv.cash_payments) && Array.isArray(inv.settlement_payments))), disabled: acting.value, run: remove })
 
+  items.push({ key: 'opening-balance-mark', label: t('accounting.opening_balance_document.mark'), icon: 'archive', tier: 'advanced', variant: 'warning',
+    show: canMarkOpeningBalance.value, disabled: acting.value || openingBalance.busy.value,
+    title: t('accounting.opening_balance_document.mark_tooltip') as string, run: () => { openingBalance.confirming.value = 'mark' } })
+  items.push({ key: 'opening-balance-unmark', label: t('accounting.opening_balance_document.unmark'), icon: 'uturn', tier: 'advanced', variant: 'neutral',
+    show: canUnmarkOpeningBalance.value, disabled: acting.value || openingBalance.busy.value,
+    run: () => { openingBalance.confirming.value = 'unmark' } })
+
   // admin „force" smazání (pod „Pokročilé")
   items.push({ key: 'force-delete', label: t('purchase_invoice.force_delete'), icon: 'trash', tier: 'advanced', variant: 'danger',
     show: canForceDelete.value, title: t('purchase_invoice.confirm.force_delete_warning') as string, run: forceDelete })
@@ -995,10 +1077,12 @@ useWindowRefresh(async () => {
   if (generation !== loadGeneration || invoiceId !== id.value) return
   invoice.value = updated
   activity.value = events
+  void openingBalance.load(invoiceId)
   if (stockIntegrationVisible.value) void loadStockIntegration(invoiceId, generation)
 }, () => !loading.value && !acting.value && !qrEditing.value && !qrSaving.value && !reviewOpen.value
   && !markPaidOpen.value && !settleRestOpen.value && !advanceModalOpen.value
-  && !stockReceiptOpen.value && !paymentCalendarOpen.value && !bankMatchTarget.value)
+  && !stockReceiptOpen.value && !paymentCalendarOpen.value && !bankMatchTarget.value
+  && !openingBalance.confirming.value && !openingBalance.busy.value)
 </script>
 
 <template>
@@ -1007,11 +1091,55 @@ useWindowRefresh(async () => {
     <div class="rounded-md bg-danger-50 border border-danger-500/40 px-3 py-2 text-sm text-danger-500">{{ error }}</div>
   </div>
 
-  <!-- Nad prahem (useSidePreview) jde náhled originálu do sloupce vpravo, jinak
-       zůstává rozbalený pod dokladem. Bez PDF se sloupec nevykreslí a doklad má
-       celou šířku - proto je vnější div v ostatních případech jen průhledný obal. -->
-  <div v-else-if="invoice" :class="pdfSideBySide ? 'flex items-start gap-4' : ''">
-    <div class="max-w-5xl space-y-4 min-w-0" :class="pdfSideBySide ? 'flex-1' : ''">
+  <div v-else-if="invoice">
+    <DocumentPreviewSplit :ctrl="pdfPreview" :show="!!invoice.pdf_path && pdfPreviewOpen" :src="pdfInlineUrl"
+      :file-name="invoice.pdf_original_name" form-class="space-y-4" narrow-class="max-w-5xl">
+      <DefinePdfSection>
+        <div v-if="invoice.pdf_path" class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-hidden">
+          <!-- Na mobilu se trojice tlačítek vedle názvu souboru nevejde — bez zalomení
+               se zmáčkla do úzkého sloupce a každý popisek se lámal na dva řádky.
+               Zalomí se tedy celý blok: nejdřív soubor, pod ním řada tlačítek. -->
+          <div class="flex flex-wrap items-center justify-between gap-3 px-5 py-3 border-b border-neutral-100">
+            <div class="flex items-center gap-3 min-w-0">
+              <svg class="w-7 h-8 shrink-0" viewBox="0 0 32 36" xmlns="http://www.w3.org/2000/svg">
+                <path fill="#dc2626" d="M4 2h16l8 8v22a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2z"/>
+                <path fill="#ffffff" opacity="0.35" d="M20 2v8h8z"/>
+                <text x="16" y="26" fill="#ffffff" font-family="Arial,Helvetica,sans-serif" font-size="8" font-weight="700" text-anchor="middle" letter-spacing="0.3">PDF</text>
+              </svg>
+              <div class="min-w-0">
+                <div class="font-medium text-sm truncate">{{ invoice.pdf_original_name || 'invoice.pdf' }}</div>
+                <div class="text-xs text-neutral-500">{{ Math.round((Number(invoice.pdf_size_bytes) || 0) / 1024) }} KiB · {{ invoice.pdf_uploaded_at ? formatDate(invoice.pdf_uploaded_at.slice(0,10)) : '' }}</div>
+              </div>
+            </div>
+            <div class="flex items-center gap-2 flex-wrap">
+              <button type="button" @click="pdfPreview.toggle()"
+                class="cursor-pointer px-3 h-9 text-sm border border-neutral-300 text-neutral-700 hover:bg-neutral-50 rounded-md inline-flex items-center gap-1.5 whitespace-nowrap">
+                <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0z"/>
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/>
+                </svg>
+                {{ pdfPreviewOpen ? t('purchase_invoice.pdf.hide') : t('purchase_invoice.pdf.show') }}
+              </button>
+              <a :href="purchaseInvoicesApi.pdfUrl(invoice.id)" target="_blank"
+                 @click="downloadPdfToCompanyFolder($event, invoice.id, invoice.vendor_invoice_number)"
+                 class="cursor-pointer px-3 h-9 text-sm border border-primary-500/40 text-primary-700 hover:bg-primary-50 rounded-md inline-flex items-center gap-1.5 whitespace-nowrap">
+                <svg class="w-4 h-4 text-primary-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 0 0 3 3h10a3 3 0 0 0 3-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
+                {{ t('purchase_invoice.pdf.download') }}
+              </a>
+              <button v-if="auth.canWrite('purchase_invoices') && !lockedForMe" type="button" @click="deletePdf"
+                class="cursor-pointer px-3 h-9 text-sm border border-danger-500/50 text-danger-500 hover:bg-danger-50 rounded-md inline-flex items-center gap-1.5 whitespace-nowrap">
+                <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0 1 16.138 21H7.862a2 2 0 0 1-1.995-1.858L5 7m5 4v6m4-6v6M1 7h22M9 7V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v3"/></svg>
+                {{ t('purchase_invoice.pdf.delete') }}
+              </button>
+            </div>
+          </div>
+        </div>
+        <div v-else class="bg-surface border border-neutral-200 rounded-lg p-5 shadow-sm">
+          <h3 class="text-sm font-medium text-neutral-700 mb-3">{{ t('purchase_invoice.pdf.title') }}</h3>
+          <PdfDropzone v-if="auth.canWrite('purchase_invoices') && !lockedForMe" crop-photos :uploading="pdfUploading" @file-dropped="onPdfDropped" @error="onPdfError" />
+          <p v-else class="text-sm text-neutral-500">{{ t('purchase_invoice.pdf.no_pdf') }}</p>
+        </div>
+      </DefinePdfSection>
       <div class="flex items-center gap-2">
         <ListNavArrows v-if="listNav.active.value" :has-previous="listNav.hasPrevious.value" :has-next="listNav.hasNext.value"
           :busy="listNav.busy.value" @previous="listNav.previous" @next="listNav.next" />
@@ -1072,6 +1200,11 @@ useWindowRefresh(async () => {
           <PostingBadge v-if="invoice.locked?.journal_entry_id"
             :booked-at="invoice.booked_at" :journal-entry-id="invoice.locked.journal_entry_id" with-label />
           <LockedBadge v-else-if="invoice.locked" :lock="invoice.locked" />
+          <span v-if="openingBalance.inOpening.value" data-test="opening-balance-badge"
+            class="text-xs px-2 py-0.5 rounded font-normal bg-neutral-100 text-neutral-600 border border-neutral-200"
+            :title="t('accounting.opening_balance_document.badge_tooltip', { date: formatDate(openingBalance.state.value?.entry_date ?? null) })">
+            {{ t('accounting.opening_balance_document.badge') }}
+          </span>
           <WhyChip v-if="!invoice.locked?.journal_entry_id && invoice.ai_posting_suggestion" :provenance="{
             source: 'ai',
             mode: 'approved',
@@ -1102,6 +1235,17 @@ useWindowRefresh(async () => {
             :can-acknowledge="auth.canWrite('purchase_invoices')" />
         </h1>
         <ActionBar :actions="purchaseActions" />
+        <button v-if="isPhone && invoice.pdf_path" type="button" data-test="phone-open-pdf"
+          :class="btnOutline('primary')" class="h-11 w-full justify-center" @click="phonePdfOpen = true">
+          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.eye" /></svg>
+          {{ t('purchase_invoice.pdf.open_fullscreen') }}
+        </button>
+      </div>
+
+      <!-- Příznak zaúčtování bez zápisu v deníku (např. převzato z jiného programu nezaúčtované). -->
+      <div v-if="bookedWithoutEntry" class="p-3 bg-warning-50 border border-warning-500/40 rounded-md text-sm text-warning-700" data-test="booked-without-entry">
+        <div class="font-medium">{{ t('common.booked_without_entry_title') }}</div>
+        <div class="mt-1 text-warning-700/90">{{ t('common.booked_without_entry_hint') }}</div>
       </div>
 
       <div v-if="invoice.document_kind === 'advance' && isDoubleEntry"
@@ -1132,6 +1276,44 @@ useWindowRefresh(async () => {
         </div>
       </div>
 
+      <template v-if="isPhone">
+        <div data-test="phone-summary" class="bg-surface border border-neutral-200 rounded-lg p-4 shadow-sm space-y-3">
+          <div class="flex items-start justify-between gap-3">
+            <div class="min-w-0">
+              <div class="text-xs text-neutral-500">{{ t('purchase_invoice.totals.to_pay') }}</div>
+              <div class="text-2xl font-semibold font-mono text-neutral-900 break-words">{{ formatMoney(phoneToPay, invoice.currency) }}</div>
+              <div class="text-xs text-neutral-500 mt-0.5">
+                {{ t('purchase_invoice.totals.with_vat') }}: <span class="font-mono">{{ formatMoney(invoice.total_with_vat, invoice.currency) }}</span>
+              </div>
+            </div>
+            <span data-test="phone-payment-state" class="shrink-0 inline-flex items-center min-h-9 px-3 rounded-full border text-sm font-medium" :class="phonePaymentStateClass">
+              {{ t('purchase_invoice.phone_summary.state.' + phonePaymentState) }}
+            </span>
+          </div>
+          <dl class="grid grid-cols-2 gap-3 text-sm border-t border-neutral-100 pt-3">
+            <div>
+              <dt class="text-xs text-neutral-500">{{ t('purchase_invoice.fields.due_date') }}</dt>
+              <dd class="font-mono" :class="phonePaymentState === 'overdue' ? 'text-danger-600 font-semibold' : ''">{{ formatDate(invoice.due_date) }}</dd>
+            </div>
+            <div v-if="showPaymentSummary && phonePaymentState === 'partial'">
+              <dt class="text-xs text-neutral-500">{{ t('purchase_invoice.payment_summary.remaining') }}</dt>
+              <dd class="font-mono font-semibold">{{ formatMoney(invoice.remaining_amount ?? 0, invoice.currency) }}</dd>
+            </div>
+            <div v-else>
+              <dt class="text-xs text-neutral-500">{{ t('purchase_invoice.fields.issue_date') }}</dt>
+              <dd class="font-mono">{{ formatDate(invoice.issue_date) }}</dd>
+            </div>
+          </dl>
+        </div>
+        <ReusePdfSection />
+        <button type="button" data-test="phone-details-toggle" :aria-expanded="phoneDetailsOpen"
+          class="cursor-pointer w-full min-h-11 px-4 inline-flex items-center justify-between gap-2 rounded-lg border border-neutral-200 bg-surface text-sm font-medium text-neutral-700 shadow-sm"
+          @click="phoneDetailsOpen = !phoneDetailsOpen">
+          <span>{{ t('purchase_invoice.phone_summary.details') }}</span>
+          <svg class="w-4 h-4 transition-transform" :class="phoneDetailsOpen ? 'rotate-180' : ''" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7" /></svg>
+        </button>
+      </template>
+
       <!-- ═══ Propojení se zálohou — banner pod headerem (sjednoceno s vydanou fakturou) ═══ -->
       <!-- Tento doklad JE záloha → odkaz na vyúčtovací fakturu (+ odpojení) -->
       <div v-if="invoice.settled_by"
@@ -1147,19 +1329,43 @@ useWindowRefresh(async () => {
           {{ t('purchase_invoice.advance_link.unlink') }}
         </button>
       </div>
-      <!-- Vyúčtovací faktura → odkaz na započtenou zálohu (+ odpojení) -->
-      <div v-else-if="invoice.linked_advance"
-        class="flex items-center justify-between gap-3 bg-primary-50 border border-primary-200 rounded-lg px-4 py-2.5 text-sm">
-        <span class="text-primary-700 min-w-0">
-          {{ t('purchase_invoice.advance_link.linked_to') }}
-          <RouterLink :to="`/purchase-invoices/${invoice.linked_advance.id}`" class="font-mono font-medium hover:underline">
-            {{ invoice.linked_advance.varsymbol || invoice.linked_advance.vendor_invoice_number || ('#' + invoice.linked_advance.id) }}
-          </RouterLink>
-          <span class="text-primary-700/70 font-mono">(−{{ formatMoney(invoice.linked_advance.total_with_vat, invoice.linked_advance.currency) }})</span>
-        </span>
-        <button v-if="auth.canWrite('purchase_invoices') && !lockedForMe" type="button" @click="unlinkAdvance()" :disabled="linkingAdvance"
-          class="cursor-pointer text-xs px-2 py-1 border border-neutral-300 rounded text-neutral-600 hover:bg-neutral-50 disabled:opacity-50 shrink-0 bg-surface">
-          {{ t('purchase_invoice.advance_link.unlink') }}
+      <!-- Vyúčtovací faktura → odkazy na započtené zálohy (+ odpojení jednotlivé, přidání další) -->
+      <div v-else-if="linkedAdvances.length > 0"
+        class="bg-primary-50 border border-primary-200 rounded-lg px-4 py-2.5 text-sm space-y-2" data-test="linked-advances">
+        <div class="flex flex-wrap items-center justify-between gap-2">
+          <span class="text-primary-700 font-medium min-w-0">
+            {{ linkedAdvances.length === 1 ? t('purchase_invoice.advance_link.linked_to') : t('purchase_invoice.advance_link.linked_to_many') }}
+          </span>
+          <button v-if="auth.canWrite('purchase_invoices') && !lockedForMe && invoice.status !== 'cancelled'" type="button"
+            @click="openPairModal('advance')" :disabled="linkingAdvance" :class="btnOutlineSm('primary')" data-test="linked-advance-add">
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.plus" /></svg>
+            {{ t('purchase_invoice.advance_link.add_more') }}
+          </button>
+        </div>
+        <ul class="divide-y divide-primary-200/60">
+          <li v-for="adv in linkedAdvances" :key="adv.id" data-test="linked-advance-row"
+            class="flex flex-wrap items-center justify-between gap-2 py-1.5 first:pt-0 last:pb-0">
+            <span class="text-primary-700 min-w-0">
+              <RouterLink :to="`/purchase-invoices/${adv.id}`" class="font-mono font-medium hover:underline">{{ advanceLabel(adv) }}</RouterLink>
+              <span class="text-primary-700/70 font-mono ml-1">(−{{ formatMoney(adv.total_with_vat, adv.currency) }})</span>
+            </span>
+            <button v-if="auth.canWrite('purchase_invoices') && !lockedForMe" type="button" @click="unlinkAdvance(undefined, adv)" :disabled="linkingAdvance"
+              :class="btnOutlineSm('neutral')" data-test="linked-advance-unlink">
+              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.x" /></svg>
+              {{ t('purchase_invoice.advance_link.unlink_one') }}
+            </button>
+          </li>
+        </ul>
+      </div>
+      <!-- Záloha s DDKP, ale faktura zálohu neodečítá → dvojí odpočet DPH, doklad nejde zaúčtovat -->
+      <div v-if="linkedAdvances.length > 0 && invoice.advance_deduction_missing"
+        class="flex flex-wrap items-center justify-between gap-3 bg-warning-50 border border-warning-200 rounded-lg px-4 py-2.5 text-sm"
+        data-test="advance-deduction-missing">
+        <span class="text-warning-700 min-w-0">{{ t('purchase_invoice.advance_deduction.missing') }}</span>
+        <button v-if="auth.canWrite('purchase_invoices') && !lockedForMe && invoice.status !== 'cancelled'" type="button"
+          @click="addAdvanceDeduction" :class="btnFilledSm('warning')">
+          <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.plus" /></svg>
+          {{ t('purchase_invoice.advance_deduction.add') }}
         </button>
       </div>
 
@@ -1385,7 +1591,7 @@ useWindowRefresh(async () => {
       </div>
 
       <!-- ═══ Datumy & metadata (3 sloupce ala vystavená InvoiceDetail) ═══ -->
-      <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+      <div v-show="!isPhone || phoneDetailsOpen" data-test="detail-cards" class="grid grid-cols-1 md:grid-cols-3 gap-4">
         <!-- Datumy -->
         <div class="bg-surface border border-neutral-200 rounded-lg p-5 shadow-sm">
           <h3 class="text-sm font-medium text-neutral-700 mb-3">{{ t('purchase_invoice.fields.issue_date') }} / {{ t('purchase_invoice.fields.tax_date') }} / {{ t('purchase_invoice.fields.due_date') }}</h3>
@@ -1500,13 +1706,9 @@ useWindowRefresh(async () => {
       <PurchaseApprovalPanel v-if="showApprovalPanel" :invoice-id="invoice.id"
         :approval-status="invoice.approval_status ?? 'none'" :refresh-key="approvalRefreshKey" />
 
-      <!-- Dimenze dokladu (Firma → Dimenze) — i u zaúčtovaného dokladu, řádky deníku
-           se přerazítkují. -->
-      <DocumentDimensionsPanel doc-type="purchase-invoices" :doc-id="invoice.id" @saved="postingPanelRef?.reload()" />
-
       <!-- Zaúčtování — účetní klasifikace je dostupná i před vznikem zápisu,
            samotná kontace se dál načítá na pozadí. -->
-      <DocumentPostingPanel ref="postingPanelRef" source="purchase-invoices" :doc-id="invoice.id" always-visible
+      <DocumentPostingPanel v-show="!isPhone || phoneDetailsOpen" ref="postingPanelRef" source="purchase-invoices" :doc-id="invoice.id" always-visible
         :advance="invoice.document_kind === 'advance' && isDoubleEntry"
         :doc-label="invoice.vendor_invoice_number || invoice.varsymbol" @reposted="onReposted">
         <div v-if="auth.canWrite('purchase_invoices') && !auth.isClientRole" class="flex flex-wrap justify-end gap-2">
@@ -1601,6 +1803,9 @@ useWindowRefresh(async () => {
           </table>
         </div>
       </DocumentPostingPanel>
+      <!-- Dimenze dokladu (Firma → Dimenze) — i u zaúčtovaného dokladu, řádky deníku
+           se přerazítkují. Sbalené pod zaúčtováním, stejně jako u vydané faktury. -->
+      <DocumentDimensionsPanel v-show="!isPhone || phoneDetailsOpen" doc-type="purchase-invoices" :doc-id="invoice.id" collapsible :initially-open="missingDimensions(invoice).length > 0" @saved="postingPanelRef?.reload()" />
       <!-- ═══ Položky ═══ -->
       <div class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-hidden">
         <h3 class="text-sm font-medium text-neutral-700 px-5 py-3 border-b border-neutral-100">{{ t('purchase_invoice.items.title') }}</h3>
@@ -1628,7 +1833,7 @@ useWindowRefresh(async () => {
               </td>
               <td class="py-2 px-2 text-right font-mono">{{ isTimeItem(it) && it.duration_minutes != null ? formatDuration(it.duration_minutes) : it.quantity }}</td>
               <td class="py-2 px-2">{{ it.unit }}</td>
-              <td class="py-2 px-2 text-right font-mono">{{ (isTimeItem(it) ? formatHourlyRate : formatMoney)(displayUnitPriceNet(it), invoice.currency) }}</td>
+              <td class="py-2 px-2 text-right font-mono">{{ formatUnitPrice(displayUnitPriceNet(it), invoice.currency) }}</td>
               <td class="py-2 px-2 text-right">{{ it.vat_rate_snapshot }}%</td>
               <td class="py-2 px-5 text-right font-mono">{{ formatMoney(it.total_with_vat, invoice.currency) }}</td>
             </tr>
@@ -1646,7 +1851,7 @@ useWindowRefresh(async () => {
                 <span class="font-mono text-neutral-700">{{ isTimeItem(it) && it.duration_minutes != null ? formatDuration(it.duration_minutes) : it.quantity }}</span>
                 <span class="ml-1">{{ it.unit }}</span>
                 <span class="text-neutral-400 mx-1.5">·</span>
-                <span class="font-mono">{{ (isTimeItem(it) ? formatHourlyRate : formatMoney)(displayUnitPriceNet(it), invoice.currency) }}</span>
+                <span class="font-mono">{{ formatUnitPrice(displayUnitPriceNet(it), invoice.currency) }}</span>
                 <span class="text-neutral-400 mx-1.5">·</span>
                 <span>{{ it.vat_rate_snapshot }}%</span>
               </span>
@@ -1768,7 +1973,7 @@ useWindowRefresh(async () => {
       </div>
 
       <!-- ═══ Správa propojení se zálohou — jen nelinkované stavy (linkované jsou v banneru pod headerem) ═══ -->
-      <div v-if="!invoice.settled_by && !invoice.linked_advance"
+      <div v-if="!invoice.settled_by && linkedAdvances.length === 0"
         class="bg-surface border border-neutral-200 rounded-lg shadow-sm p-5">
         <h3 class="text-sm font-medium text-neutral-700 mb-3">
           {{ invoice.document_kind === 'advance'
@@ -1818,28 +2023,12 @@ useWindowRefresh(async () => {
         </template>
       </div>
 
-      <!-- Modal výběru zálohy k propojení -->
-      <div v-if="advanceModalOpen" class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" @click.self="advanceModalOpen = false">
-        <div class="bg-surface rounded-lg shadow-xl max-w-lg w-full max-h-[80vh] overflow-hidden flex flex-col">
-          <div class="px-5 py-3 border-b border-neutral-100 flex items-center justify-between">
-            <h3 class="font-medium">{{ pairMode === 'advance' ? t('purchase_invoice.advance_link.modal_title') : t('purchase_invoice.advance_link.modal_title_settlement') }}</h3>
-            <button type="button" @click="advanceModalOpen = false" class="cursor-pointer text-neutral-400 hover:text-neutral-600">✕</button>
-          </div>
-          <div class="p-4 overflow-y-auto">
-            <div v-if="loadingCandidates" class="text-sm text-neutral-500">{{ t('common.loading') }}</div>
-            <div v-else-if="advanceCandidates.length === 0" class="text-sm text-neutral-500">{{ pairMode === 'advance' ? t('purchase_invoice.advance_link.no_candidates') : t('purchase_invoice.advance_link.no_candidates_settlement') }}</div>
-            <ul v-else class="space-y-2">
-              <li v-for="cand in advanceCandidates" :key="cand.id">
-                <button type="button" @click="pickCandidate(cand.id)" :disabled="linkingAdvance"
-                  class="cursor-pointer w-full text-left px-3 py-2 border border-neutral-200 rounded-md hover:border-primary-400 hover:bg-primary-50 disabled:opacity-50 flex justify-between items-center gap-3">
-                  <span class="font-mono text-sm">{{ cand.varsymbol || cand.vendor_invoice_number || ('#' + cand.id) }}</span>
-                  <span class="text-sm text-neutral-500">{{ cand.issue_date ? formatDate(cand.issue_date) : '' }} · {{ formatMoney(cand.total_with_vat, cand.currency) }}</span>
-                </button>
-              </li>
-            </ul>
-          </div>
-        </div>
-      </div>
+      <!-- Modal výběru zálohy k propojení (sdílený s editorem konečné faktury) -->
+      <AdvancePickerModal :open="advanceModalOpen"
+        :title="pairMode === 'advance' ? t('purchase_invoice.advance_link.modal_title') : t('purchase_invoice.advance_link.modal_title_settlement')"
+        :empty-text="pairMode === 'advance' ? t('purchase_invoice.advance_link.no_candidates') : t('purchase_invoice.advance_link.no_candidates_settlement')"
+        :load="loadPairCandidates" :busy="linkingAdvance"
+        @pick="pickCandidate" @close="advanceModalOpen = false" />
 
       <!-- Modal: Zaplatit pomocí QR -->
       <div v-if="qrOpen" class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" @click.self="qrOpen = false">
@@ -1935,61 +2124,8 @@ useWindowRefresh(async () => {
         </div>
       </div>
 
-      <!-- ═══ Originální PDF od dodavatele ═══ -->
-      <div v-if="invoice.pdf_path" class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-hidden">
-        <!-- Na mobilu se trojice tlačítek vedle názvu souboru nevejde — bez zalomení
-             se zmáčkla do úzkého sloupce a každý popisek se lámal na dva řádky.
-             Zalomí se tedy celý blok: nejdřív soubor, pod ním řada tlačítek. -->
-        <div class="flex flex-wrap items-center justify-between gap-3 px-5 py-3 border-b border-neutral-100">
-          <div class="flex items-center gap-3 min-w-0">
-            <svg class="w-7 h-8 shrink-0" viewBox="0 0 32 36" xmlns="http://www.w3.org/2000/svg">
-              <path fill="#dc2626" d="M4 2h16l8 8v22a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2z"/>
-              <path fill="#ffffff" opacity="0.35" d="M20 2v8h8z"/>
-              <text x="16" y="26" fill="#ffffff" font-family="Arial,Helvetica,sans-serif" font-size="8" font-weight="700" text-anchor="middle" letter-spacing="0.3">PDF</text>
-            </svg>
-            <div class="min-w-0">
-              <div class="font-medium text-sm truncate">{{ invoice.pdf_original_name || 'invoice.pdf' }}</div>
-              <div class="text-xs text-neutral-500">{{ Math.round((Number(invoice.pdf_size_bytes) || 0) / 1024) }} KiB · {{ invoice.pdf_uploaded_at ? formatDate(invoice.pdf_uploaded_at.slice(0,10)) : '' }}</div>
-            </div>
-          </div>
-          <div class="flex items-center gap-2 flex-wrap">
-            <button type="button" @click="pdfPreview.toggle()"
-              class="cursor-pointer px-3 h-9 text-sm border border-neutral-300 text-neutral-700 hover:bg-neutral-50 rounded-md inline-flex items-center gap-1.5 whitespace-nowrap">
-              <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                <path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0z"/>
-                <path stroke-linecap="round" stroke-linejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/>
-              </svg>
-              {{ pdfPreviewOpen ? t('purchase_invoice.pdf.hide') : t('purchase_invoice.pdf.show') }}
-            </button>
-            <a :href="purchaseInvoicesApi.pdfUrl(invoice.id)" target="_blank"
-               @click="downloadPdfToCompanyFolder($event, invoice.id, invoice.vendor_invoice_number)"
-               class="cursor-pointer px-3 h-9 text-sm border border-primary-500/40 text-primary-700 hover:bg-primary-50 rounded-md inline-flex items-center gap-1.5 whitespace-nowrap">
-              <svg class="w-4 h-4 text-primary-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 0 0 3 3h10a3 3 0 0 0 3-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
-              {{ t('purchase_invoice.pdf.download') }}
-            </a>
-            <button v-if="auth.canWrite('purchase_invoices') && !lockedForMe" type="button" @click="deletePdf"
-              class="cursor-pointer px-3 h-9 text-sm border border-danger-500/50 text-danger-500 hover:bg-danger-50 rounded-md inline-flex items-center gap-1.5 whitespace-nowrap">
-              <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0 1 16.138 21H7.862a2 2 0 0 1-1.995-1.858L5 7m5 4v6m4-6v6M1 7h22M9 7V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v3"/></svg>
-              {{ t('purchase_invoice.pdf.delete') }}
-            </button>
-          </div>
-        </div>
-        <!-- Inline PDF preview přes browser PDF viewer. Musí být ?inline=1 (jinak
-             Content-Disposition: attachment a Edge/IE blokují embed). Nad prahem se
-             tenhle blok nevykresluje — náhled je vedle dokladu (DocumentSidePreview). -->
-        <div v-if="pdfPreviewOpen && !pdfSideBySide" class="bg-neutral-100">
-          <iframe
-            :src="pdfInlineUrl"
-            class="w-full h-[80vh] border-0"
-            :title="invoice.pdf_original_name || 'PDF'"
-          ></iframe>
-        </div>
-      </div>
-      <div v-else class="bg-surface border border-neutral-200 rounded-lg p-5 shadow-sm">
-        <h3 class="text-sm font-medium text-neutral-700 mb-3">{{ t('purchase_invoice.pdf.title') }}</h3>
-        <PdfDropzone v-if="auth.canWrite('purchase_invoices') && !lockedForMe" :uploading="pdfUploading" @file-dropped="onPdfDropped" @error="onPdfError" />
-        <p v-else class="text-sm text-neutral-500">{{ t('purchase_invoice.pdf.no_pdf') }}</p>
-      </div>
+      <!-- ═══ Originální PDF od dodavatele (na telefonu výš, pod souhrnem) ═══ -->
+      <ReusePdfSection v-if="!isPhone" />
 
       <!-- ═══ Poznámky (jen pokud existují) ═══ -->
       <div v-if="invoice.note_above_items || invoice.note_below_items" class="bg-surface border border-neutral-200 rounded-lg p-5 shadow-sm">
@@ -2069,6 +2205,7 @@ useWindowRefresh(async () => {
         :confirm-label="t('purchase_invoice.payment_summary.settle_rest')"
         @close="settleRestOpen = false" @done="onSettleRestDone" />
 
+      <AccrualSourcePanel v-if="invoice && invoice.status !== 'draft' && isDoubleEntry && auth.canRead('accounting.accruals')" class="mt-4 block" source-type="purchase_invoice" :source-id="invoice.id" />
       <LinkedDocumentsPanel v-if="invoice" class="mt-4 block" entity-type="purchase_invoice" :entity-id="invoice.id" />
 
       <section v-if="invoice && stockIntegrationVisible"
@@ -2112,13 +2249,7 @@ useWindowRefresh(async () => {
 
       <StockReceiptModal v-if="stockReceiptOpen && invoice" :purchase-invoice-id="invoice.id"
         @close="stockReceiptOpen = false" @created="onStockReceiptCreated" />
-    </div>
-    <DocumentSidePreview
-      v-if="pdfSideBySide"
-      :src="pdfInlineUrl"
-      :file-name="invoice.pdf_original_name"
-      @close="pdfPreview.close()"
-    />
+    </DocumentPreviewSplit>
   </div>
     <PostingPreviewModal
       v-if="invoice"
@@ -2136,11 +2267,40 @@ useWindowRefresh(async () => {
       @close="expenseRuleTemplateOpen = false"
       @saved="() => { expenseRuleTemplateOpen = false; load() }" />
     <WorkspaceTeleport>
+      <div v-if="isPhone && phonePdfOpen && invoice?.pdf_path" data-test="phone-pdf-modal" role="dialog" aria-modal="true"
+        :aria-label="invoice.pdf_original_name || t('purchase_invoice.pdf.title')"
+        class="fixed inset-0 z-50 flex flex-col overflow-y-auto bg-surface" @keydown.esc="phonePdfOpen = false">
+        <div class="flex items-center gap-2 border-b border-neutral-200 px-3 py-2 pt-[max(0.5rem,env(safe-area-inset-top))]">
+          <div class="flex-1 min-w-0 truncate text-sm font-medium">{{ invoice.pdf_original_name || t('purchase_invoice.pdf.title') }}</div>
+          <a :href="purchaseInvoicesApi.pdfUrl(invoice.id)" target="_blank" rel="noopener" data-test="phone-pdf-download"
+            :class="btnOutline('primary')" class="h-11 whitespace-nowrap"
+            @click="downloadPdfToCompanyFolder($event, invoice.id, invoice.vendor_invoice_number)">
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 0 0 3 3h10a3 3 0 0 0 3-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
+            {{ t('common.download') }}
+          </a>
+          <button type="button" data-test="phone-pdf-close" :class="btnOutline('neutral')" class="h-11 whitespace-nowrap" @click="phonePdfOpen = false">
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+            {{ t('common.close') }}
+          </button>
+        </div>
+        <div v-if="phonePdfIsImage" class="flex-1 min-h-0 overflow-auto bg-neutral-100 p-2">
+          <img :src="purchaseInvoicesApi.pdfUrl(invoice.id, true)" :alt="invoice.pdf_original_name || t('purchase_invoice.pdf.title')" class="w-full object-contain" />
+        </div>
+        <PdfCanvasViewer v-else class="flex-1 min-h-0" :src="purchaseInvoicesApi.pdfUrl(invoice.id, true)" :title="invoice.pdf_original_name" />
+      </div>
       <RuleFormModal v-if="postingRuleOpen && invoice"
         :prefill="{ name: invoice.vendor_company_name || invoice.vendor_invoice_number || '', direction: invoice.total_with_vat < 0 ? 'incoming' : 'outgoing', applies_currency: invoice.currency, variable_symbol: invoice.payment_variable_symbol || invoice.varsymbol || null }"
         @close="postingRuleOpen = false" @saved="postingRuleOpen = false" />
       <InvoiceBankMatchModal v-if="bankMatchTarget" doc-type="purchase_invoice" :doc-id="bankMatchTarget.id" :doc-ref="bankMatchTarget.ref"
+        :batch-available="bankMatchTarget.batchAvailable"
         @close="bankMatchTarget = null" @done="load" />
+      <ConfirmDialog v-if="invoice && openingBalance.confirming.value"
+        :title="openingBalance.confirming.value === 'mark' ? t('accounting.opening_balance_document.mark_title') : t('accounting.opening_balance_document.unmark_title')"
+        :message="openingBalance.confirming.value === 'mark' ? t('accounting.opening_balance_document.mark_confirm') : t('accounting.opening_balance_document.unmark_confirm')"
+        :confirm-label="openingBalance.confirming.value === 'mark' ? t('accounting.opening_balance_document.mark') : t('accounting.opening_balance_document.unmark')"
+        :variant="openingBalance.confirming.value === 'mark' ? 'warning' : 'neutral'"
+        :busy="openingBalance.busy.value"
+        @confirm="openingBalance.confirm(invoice.id)" @cancel="openingBalance.confirming.value = null" />
     </WorkspaceTeleport>
 
 </template>

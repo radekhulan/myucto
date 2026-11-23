@@ -59,7 +59,7 @@ final class MonetaAboBatchMapper
                 'paymentIdentification' => [
                     'instructionIdentification' => sprintf('MU%03d%s', $index + 1, substr(hash('sha256', $abo . "\n" . $line), 0, 30)),
                 ],
-                'amount' => ['instructedAmount' => ['value' => $minor / 100, 'currency' => 'CZK']],
+                'amount' => ['instructedAmount' => ['value' => BankPaymentAmount::fromMinor($minor), 'currency' => 'CZK']],
                 'requestedExecutionDate' => $executionDate,
                 'debtorAccount' => ['identification' => ['other' => ['identification' => $payer . '/0600']], 'currency' => 'CZK'],
                 'creditorAccount' => ['identification' => ['other' => ['identification' => $this->account($item[1], $item[2]) . '/' . $bankCode]], 'currency' => 'CZK'],

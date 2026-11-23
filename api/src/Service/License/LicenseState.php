@@ -110,7 +110,35 @@ final class LicenseState
         public readonly int $payrollUsersLicensed = 0,
         public readonly int $payrollEmployeesActive = 0,
         public readonly int $payrollUsersActive = 0,
+        /**
+         * Parametry licence z podepsaného tokenu (`params`), např. limity
+         * souběžných relací nebo započítávání tokenů se zápisem do míst.
+         *
+         * ⚠️ Plní se JEN u platné licence. Chybějící parametr znamená „bez
+         * omezení", takže starší token ani instalace bez licence nic nezpřísní.
+         *
+         * @var array<string,bool|int>
+         */
+        public readonly array $params = [],
     ) {}
+
+    public const PARAM_MAX_BROWSER_SESSIONS = 'max_browser_sessions';
+    public const PARAM_MAX_MOBILE_SESSIONS = 'max_mobile_sessions';
+    public const PARAM_COUNT_WRITE_TOKENS_AS_SEATS = 'count_write_tokens_as_seats';
+
+    /** Celočíselný parametr licence; chybějící nebo neplatný = `$default`. */
+    public function intParam(string $code, int $default = 0): int
+    {
+        $value = $this->params[$code] ?? null;
+        return is_int($value) ? $value : $default;
+    }
+
+    /** Logický parametr licence; chybějící nebo neplatný = `$default`. */
+    public function boolParam(string $code, bool $default = false): bool
+    {
+        $value = $this->params[$code] ?? null;
+        return is_bool($value) ? $value : $default;
+    }
 
     /** Prodlužuje se licence automaticky (chystá se další stržení)? */
     public function autoRenews(): bool
@@ -264,6 +292,7 @@ final class LicenseState
             $this->perpetual, $this->subscription, $this->commercial, $this->managed,
             $this->payrollEnabled, $this->payrollTier, $this->payrollMaxEmployees,
             $this->payrollUsersLicensed, $this->payrollEmployeesActive, $this->payrollUsersActive,
+            $this->params,
         );
     }
 
@@ -278,6 +307,7 @@ final class LicenseState
             $this->perpetual, $this->subscription, $this->commercial, $this->managed,
             $this->payrollEnabled, $this->payrollTier, $this->payrollMaxEmployees,
             $this->payrollUsersLicensed, $this->payrollEmployeesActive, $this->payrollUsersActive,
+            $this->params,
         );
     }
 
@@ -291,6 +321,7 @@ final class LicenseState
             $this->perpetual, $this->subscription, $this->commercial, $this->managed,
             $this->payrollEnabled, $this->payrollTier, $this->payrollMaxEmployees,
             $this->payrollUsersLicensed, $employeesActive, $usersActive,
+            $this->params,
         );
     }
 

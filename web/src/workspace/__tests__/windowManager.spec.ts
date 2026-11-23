@@ -92,6 +92,8 @@ function testRouter(slowGate?: { entered: Deferred<void>, release: Deferred<bool
       { path: '/editor/:id', name: 'editor', component: TestEditor },
       { path: '/slow/:id', name: 'slow-editor', component: TestEditor },
       { path: '/list', name: 'list', component: TestEditor },
+      { path: '/purchase-invoices/ai-import', name: 'purchase-invoice-ai-import', component: TestEditor },
+      { path: '/new-tab', name: 'new-tab', component: TestEditor },
       { path: '/', name: 'home', component: TestEditor },
     ],
   })
@@ -114,6 +116,7 @@ function createHarness(options: {
   frames?: boolean
   routerFactory?: () => Router
   globalNavigate?: (to: RouteLocationRaw) => void
+  agendaFor?: (fullPath: string) => string
 } = {}): Harness {
   const pinia = createPinia()
   setActivePinia(pinia)
@@ -133,6 +136,7 @@ function createHarness(options: {
     frames: options.frames,
     globalNavigate: options.globalNavigate,
     frameContainer: () => frameContainer,
+    agendaFor: options.agendaFor,
   })
 
   function attachPane(id: PaneId): PaneMount {
@@ -481,6 +485,51 @@ describe('workspace window manager', () => {
     expect(harness.errors).toEqual([])
   })
 
+  it('předá fotku právě jednou jen novému oknu AI importu', async () => {
+    vi.spyOn(HTMLIFrameElement.prototype, 'src', 'set').mockImplementation(() => undefined)
+    const harness = createHarness({ frames: true, supplier: { id: 1, name: 'Firma A' } })
+    harness.attachPane('primary')
+    const path = '/purchase-invoices/ai-import'
+    await harness.manager.open(path, 'primary')
+    const previous = harness.store.windows[0]!
+    const photo = new File(['synthetic'], 'snapshot.jpg', { type: 'image/jpeg' })
+    await harness.manager.openPurchaseCapture(photo, 1, 'primary')
+    const capture = harness.store.windows[0]!
+    expect(capture).toMatchObject({ fullPath: path, supplierId: 1, paneId: 'primary' })
+    expect(capture.id).not.toBe(previous.id)
+    const [oldFrame, newFrame] = Array.from(document.querySelectorAll('iframe'))
+    const postOld = vi.spyOn(oldFrame!.contentWindow!, 'postMessage').mockImplementation(() => undefined)
+    const postNew = vi.spyOn(newFrame!.contentWindow!, 'postMessage').mockImplementation(() => undefined)
+    const ready = (frame: HTMLIFrameElement, id: string, origin = window.location.origin) => window.dispatchEvent(new MessageEvent('message', {
+      origin, source: frame.contentWindow, data: { type: 'myucto-window-ready', id },
+    }))
+    ready(oldFrame!, capture.id)
+    ready(newFrame!, capture.id, 'https://other.example')
+    expect(postNew).not.toHaveBeenCalled()
+    ready(oldFrame!, previous.id)
+    expect(postOld.mock.calls[0]?.[0]).not.toHaveProperty('purchaseCapture')
+    ready(newFrame!, capture.id)
+    expect(postNew.mock.calls[0]?.[0]).toMatchObject({ type: 'myucto-window-init', to: path, purchaseCapture: photo })
+    ready(newFrame!, capture.id)
+    expect(postNew.mock.calls[1]?.[0]).not.toHaveProperty('purchaseCapture')
+  })
+
+  it('nepředá fotku, pokud se při ověření oprávnění změnila firma', async () => {
+    vi.spyOn(HTMLIFrameElement.prototype, 'src', 'set').mockImplementation(() => undefined)
+    const supplier = { id: 1, name: 'Firma A' }
+    const gate = deferred<boolean>()
+    const authorize = vi.fn(async () => await gate.promise)
+    const harness = createHarness({ frames: true, supplier, authorize })
+    harness.attachPane('primary')
+    const opening = harness.manager.openPurchaseCapture(new File(['synthetic'], 'snapshot.jpg'), 1, 'primary')
+    await vi.waitFor(() => expect(authorize).toHaveBeenCalledTimes(1))
+    supplier.id = 2
+    gate.resolve(true)
+    await opening
+    expect(harness.store.windows).toHaveLength(0)
+    expect(document.querySelector('iframe')).toBeNull()
+  })
+
   it.each([true, false])('při frame navigaci vedle ověří firmu zdroje (přepnutí: %s)', async allowed => {
     vi.spyOn(HTMLIFrameElement.prototype, 'src', 'set').mockImplementation(() => undefined)
     const supplier = { id: 1, name: 'Firma A' }
@@ -639,6 +688,83 @@ describe('workspace window manager', () => {
     expect(harness.store.windows.map(window => window.fullPath).sort()).toEqual(['/editor/1', '/editor/2'])
     expect(other.isConnected).toBe(true)
     expect(otherInput.value).toBe('zůstane')
+    expect(harness.errors).toEqual([])
+  })
+
+  it('okna téže agendy otevřená za sebou sdílejí záložku, jiná agenda dostane vlastní', async () => {
+    const harness = createHarness({ agendaFor: fullPath => `/${fullPath.split(/[/?]/)[1] ?? ''}` })
+    harness.attachPane('primary')
+    const tabOf = (fullPath: string) => harness.store.windows.find(window => window.fullPath === fullPath)?.tab
+
+    await harness.manager.open('/editor/1', 'primary')
+    await harness.manager.open('/editor/2', 'primary')
+    await harness.manager.open('/list', 'primary')
+    await harness.manager.open('/editor/3', 'primary')
+
+    expect(tabOf('/editor/1')).toBe('0:/editor')
+    expect(tabOf('/editor/2')).toBe('0:/editor')
+    expect(tabOf('/editor/3')).toBe('0:/editor')
+    expect(tabOf('/list')).toBe('0:/list')
+
+    await harness.manager.reloadPane('primary')
+    expect(tabOf('/editor/3')).toBe('0:/editor')
+    expect(harness.errors).toEqual([])
+  })
+
+  it('nová prázdná záložka převezme agendu první otevřené stránky', async () => {
+    const harness = createHarness({ agendaFor: fullPath => `/${fullPath.split(/[/?]/)[1] ?? ''}` })
+    harness.attachPane('primary')
+    await harness.manager.open('/editor/1', 'primary')
+
+    await harness.manager.openTab()
+    const blank = harness.store.windows[0]!
+    expect(blank.fullPath).toBe('/new-tab')
+    expect(blank.tab?.startsWith('tab-')).toBe(true)
+    expect(blank.paneId).toBe('primary')
+
+    await harness.manager.open('/list', 'primary')
+    expect(harness.store.windows.find(window => window.fullPath === '/list')?.tab).toBe(blank.tab)
+    await harness.manager.open('/editor/2', 'primary')
+    expect(harness.store.windows.find(window => window.fullPath === '/editor/2')?.tab).toBe('0:/editor')
+    expect(harness.errors).toEqual([])
+  })
+
+  it('Shift+klik otevře cíl jako novou samostatnou záložku i tehdy, když stejná stránka už otevřená je', async () => {
+    const harness = createHarness({ agendaFor: fullPath => `/${fullPath.split(/[/?]/)[1] ?? ''}` })
+    harness.attachPane('primary')
+    await harness.manager.open('/editor/1', 'primary')
+    await harness.manager.open('/list', 'primary')
+
+    await harness.manager.openInTab('/editor/1', 'primary')
+    const copies = harness.store.windows.filter(window => window.fullPath === '/editor/1')
+    expect(copies).toHaveLength(2)
+    expect(copies[0]!.tab?.startsWith('tab-')).toBe(true)
+    expect(copies[0]!.paneId).toBe('primary')
+    expect(harness.errors).toEqual([])
+  })
+
+  it('duplikace otevře stránku záložky znovu a další okna agendy v kopii zůstanou', async () => {
+    const harness = createHarness({ agendaFor: fullPath => `/${fullPath.split(/[/?]/)[1] ?? ''}` })
+    const primary = harness.attachPane('primary')
+    await harness.manager.open('/list', 'primary')
+    await harness.manager.open('/editor/1', 'primary')
+    const original = editor(1)
+    await typeDraft(original, 'rozepsáno')
+
+    await harness.manager.openTab(windowIdFor(harness.store, '/editor/1'))
+    const copies = harness.store.windows.filter(window => window.fullPath === '/editor/1')
+    expect(copies).toHaveLength(2)
+    const own = copies.find(window => window.tab !== '0:/editor')!
+    expect(own.paneId).toBe('primary')
+    expect((primary.target.querySelector('[data-testid="draft"]') as HTMLInputElement).value).toBe('')
+
+    await harness.manager.open('/editor/2', 'primary')
+    expect(harness.store.windows.find(window => window.fullPath === '/editor/2')?.tab).toBe(own.tab)
+
+    await harness.manager.closeWindows(harness.store.windows.filter(window => window.tab === own.tab).map(window => window.id))
+    expect(harness.store.windows.map(window => window.tab)).toEqual(['0:/editor', '0:/list'])
+    expect(primary.target.contains(original)).toBe(true)
+    expect((original.querySelector('[data-testid="draft"]') as HTMLInputElement).value).toBe('rozepsáno')
     expect(harness.errors).toEqual([])
   })
 

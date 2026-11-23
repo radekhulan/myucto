@@ -4,15 +4,19 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Eshop\Pricing;
 
+use MyInvoice\Service\Invoice\UnitPricePrecision;
+
 /**
  * Zaokrouhlování prodejní ceny (Epic ESHOP, cenotvorba).
  *
- * Money-safe: pracuje v celočíselných halířích (žádný float). Vstup i výstup je
- * string s cenou bez DPH; výstup vždy 2 desetinná místa.
+ * Money-safe: pracuje v celých jednotkách (žádný float). Vstup i výstup je
+ * string s cenou bez DPH.
  *
  * Módy (sloupec stock_item_prices.rounding):
- *  - none      : jen normalizace na 2 des. místa (half-up na halíře)
- *  - 0.01      : na halíř (= none)
+ *  - none      : jen normalizace na přesnost jednotkové ceny (half-up na šest míst),
+ *                výstup ve tvaru {@see UnitPricePrecision::toDecimalString} — dvě místa,
+ *                víc jen u ceny pod haléř
+ *  - 0.01      : na halíř
  *  - 0.10      : na desetihalíř
  *  - 0.50      : na půlkorunu
  *  - 1         : na celou korunu
@@ -20,16 +24,19 @@ namespace MyInvoice\Service\Eshop\Pricing;
  */
 final class PriceRounding
 {
-    /** Zaokrouhlí cenu $value dle módu $mode; vrací string s 2 des. místy. */
+    /** Zaokrouhlí cenu $value dle módu $mode; explicitní módy vrací string s 2 des. místy. */
     public static function apply(string $value, string $mode): string
     {
+        if ($mode === 'none') {
+            return self::toUnitPrecision($value);
+        }
         $cents = self::toCents($value);
         if ($cents <= 0) {
             return '0.00';
         }
 
         $cents = match ($mode) {
-            'none', '0.01' => $cents,
+            '0.01'         => $cents,
             '0.10'         => self::roundToStep($cents, 10),
             '0.50'         => self::roundToStep($cents, 50),
             '1'            => self::roundToStep($cents, 100),
@@ -41,6 +48,21 @@ final class PriceRounding
         $whole = intdiv($cents, 100);
         $frac = $cents % 100;
         return $whole . '.' . str_pad((string) $frac, 2, '0', STR_PAD_LEFT);
+    }
+
+    /** Cena na šest desetinných míst (half-up); nekladná cena = „0.00" jako u ostatních módů. */
+    private static function toUnitPrecision(string $value): string
+    {
+        $value = str_replace(',', '.', trim($value));
+        if ($value === '' || !is_numeric($value)) {
+            return '0.00';
+        }
+        $scale = bcpow('10', (string) UnitPricePrecision::DECIMALS);
+        $micro = bcadd(bcmul($value, $scale, 8), '0.5', 0);
+        if (bccomp($micro, '0', 0) <= 0) {
+            return '0.00';
+        }
+        return (string) UnitPricePrecision::toDecimalString(bcdiv($micro, $scale, UnitPricePrecision::DECIMALS));
     }
 
     /** Cena (string, libovolná přesnost) → halíře s half-up zaokrouhlením. */

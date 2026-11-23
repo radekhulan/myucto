@@ -4,9 +4,13 @@ declare(strict_types=1);
 
 namespace MyInvoice\Action\PurchaseInvoice;
 
+use MyInvoice\Service\NumberSeries\NumberSeriesException;
+use MyInvoice\Service\NumberSeries\NumberSeriesSelection;
 use MyInvoice\Infrastructure\Database\DbErrorLogger;
 use MyInvoice\Action\Invoice\HandlesVarsymbolDuplicate;
+use MyInvoice\Infrastructure\Database\AfterCommit;
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Infrastructure\Database\TransactionFailure;
 use MyInvoice\Http\GuardsDocumentLock;
 use MyInvoice\Http\Json;
 use MyInvoice\Http\SessionOnlyAccountingAct;
@@ -28,8 +32,12 @@ use MyInvoice\Service\Currency\PurchaseInvoiceRateReloader;
 use MyInvoice\Service\Invoice\DocumentItemsPayload;
 use MyInvoice\Service\Invoice\PurchaseInvoiceCalculator;
 use MyInvoice\Service\IpMatcher;
+use MyInvoice\Service\PurchaseInvoice\PurchaseAdvanceDeduction;
+use MyInvoice\Service\PurchaseInvoice\PurchaseAdvanceLinkException;
+use MyInvoice\Service\PurchaseInvoice\PurchaseAdvanceLinks;
 use MyInvoice\Service\PurchaseInvoice\PurchaseVatTreatment;
 use MyInvoice\Service\PurchaseInvoice\PurchaseVatTreatmentConflict;
+use MyInvoice\Service\PurchaseInvoice\StoredPurchaseItemColumns;
 use MyInvoice\Service\PurchaseInvoice\VendorNumberDuplicates;
 use MyInvoice\Service\Vat\PurchaseFiledVatPeriod;
 use MyInvoice\Service\Validation\PurchaseInvoiceValidation;
@@ -67,6 +75,8 @@ final class UpdatePurchaseInvoiceAction
         private readonly CashSettlementService $cashSettlement,
         private readonly \MyInvoice\Service\Document\AttachmentCheck\AttachmentCheckService $attachmentChecks,
         private readonly PurchaseFiledVatPeriod $filedPeriods,
+        private readonly NumberSeriesSelection $numberSeries,
+        private readonly \MyInvoice\Service\Accounting\Dimension\DraftItemDimensionRealign $itemDimensions,
     ) {}
 
     /**
@@ -213,12 +223,12 @@ final class UpdatePurchaseInvoiceAction
             return Json::error($response, 'validation_failed', 'Validace selhala', 400, ['fields' => $errors]);
         }
 
-        // Vyprázdnění položek dokladu, který nějaké má → 422 ({@see DocumentItemsPayload}).
+        // Vyprázdnění položek mimo koncept → 422 ({@see DocumentItemsPayload}).
         // 422, ne 400: tělo je tvarem v pořádku (`items` JE pole), odmítá se až to, co
         // požadavek znamená proti STAVU tohohle dokladu — táž třída jako `force_mode_required`
         // a `financial_change_not_allowed` níž. 400 `validation_failed` je v téhle codebase
         // vyhrazené pro schéma pole po poli (nese mapu `fields`).
-        if (DocumentItemsPayload::emptiesExisting($body, (array) ($existing['items'] ?? []))) {
+        if (DocumentItemsPayload::emptiesExisting($body, (array) ($existing['items'] ?? []), (string) $existing['status'])) {
             return Json::error(
                 $response,
                 DocumentItemsPayload::EMPTY_ERROR_CODE,
@@ -323,6 +333,17 @@ final class UpdatePurchaseInvoiceAction
         // beginTransaction(): resolve sahá na ČNB (síť/cache), a síťové volání se nesmí
         // dostat dovnitř zápisové transakce. Výsledek se vloží do těla, takže ho zapíše
         // existující updateDraft() jedním atomickým UPDATE.
+        // Volba řady z číselníku jde měnit, dokud doklad nemá číslo.
+        if (!empty($existing['varsymbol'])) {
+            unset($body['number_series_id']);
+        } else {
+            try {
+                $this->numberSeries->fromBody($supplierId, $body, 'purchase');
+            } catch (NumberSeriesException $e) {
+                return Json::error($response, $e->errorCode, $e->getMessage(), $e->httpStatus);
+            }
+        }
+
         $rateDecision = $this->rateReloader->resolveForUpdate($supplierId, $existing, $body);
         foreach ($rateDecision['apply'] as $col => $value) {
             $body[$col] = $value;
@@ -373,13 +394,24 @@ final class UpdatePurchaseInvoiceAction
                     409,
                 );
             }
+            $this->numberSeries->apply('purchase_invoices', $supplierId, $id, $body, 'purchase');
             // Jen když tělo položky opravdu poslalo — jinak by částečný PUT (samotné DUZP,
             // poznámka) doklad vyprázdnil ({@see DocumentItemsPayload}).
             // Přenesení bylo v hlavičce už před uložením → tuzemský kód 40/41 na řádku je
             // vědomá položka smíšeného dokladu, ne pozůstatek z doby před zatržením.
             $keepDomesticItemCodes = (bool) ($existing['reverse_charge'] ?? false);
             if (DocumentItemsPayload::replaces($body)) {
-                $this->repo->replaceItems($id, (array) $body['items'], $keepDomesticItemCodes);
+                // Dimenze položek konceptu vrátí k položkám podle `id` z těla ({@see DraftItemDimensionRealign}).
+                $isDraft = (string) ($existing['status'] ?? '') === 'draft';
+                $dimensionsBefore = $isDraft ? $this->itemDimensions->snapshot('purchase_invoice', $id) : [];
+                $this->repo->replaceItems(
+                    $id,
+                    StoredPurchaseItemColumns::carryOver((array) $body['items'], (array) ($existing['items'] ?? [])),
+                    $keepDomesticItemCodes,
+                );
+                if ($isDraft) {
+                    $this->itemDimensions->realign($supplierId, 'purchase_invoice', $id, $dimensionsBefore, (array) $body['items']);
+                }
             } else {
                 // Zatržení přenesené povinnosti nebo změna kódu v hlavičce bez položek
                 // v těle musí srovnat i tuzemské kódy uložených řádků (issue #119).
@@ -404,6 +436,11 @@ final class UpdatePurchaseInvoiceAction
             // Až PO recompute — volba dominantního kódu váží podle total_with_vat, které
             // kalkulátor dopočítává.
             $this->repo->syncHeaderClassificationFromItems($id, $supplierId);
+            // Odpočet zálohy na řádku už zálohu z celkové částky odečetl; hlavička ji
+            // odečíst nesmí, jinak by K úhradě zálohu odečetlo podruhé.
+            (new PurchaseAdvanceDeduction($this->db))->clearHeaderAdvanceWhenDeducted($supplierId, $id);
+            // Faktura s víc zálohami: částky čerpání a uhrazené zálohy v hlavičce podle řádků.
+            (new PurchaseAdvanceLinks($this->db))->sync($supplierId, $id);
             if (array_key_exists('rounding', $body)) {
                 $this->repo->setRounding($id, $supplierId, (float) $body['rounding']);
             }
@@ -417,6 +454,9 @@ final class UpdatePurchaseInvoiceAction
             $this->repo->reprefixVarsymbol($id, $supplierId);
             $this->clients->markAsVendor((int) $vendor['id'], $supplierId);
             if ($ownTransaction) $pdo->commit();
+        } catch (PurchaseAdvanceLinkException $e) {
+            if ($ownTransaction && $pdo->inTransaction()) $pdo->rollBack();
+            return Json::error($response, $e->errorCode, $e->getMessage(), $e->status);
         } catch (\InvalidArgumentException $e) {
             if ($ownTransaction && $pdo->inTransaction()) $pdo->rollBack();
             $code = str_contains($e->getMessage(), 'alokac') ? 'invalid_vat_allocations' : 'integrity_violation';
@@ -442,10 +482,12 @@ final class UpdatePurchaseInvoiceAction
             throw $e;
         }
 
-        // Změna dokladu → nové porovnání s vytěžením přílohy (přehled rozporů).
-        try {
-            $this->attachmentChecks->recheckEntity($supplierId, 'purchase_invoice', $id);
-        } catch (\Throwable) {
+        // Náhled zápisu ukládá v transakci, která se odvolá: vedlejší přepočty se mu nedělají.
+        $preview = $request->getAttribute(\MyInvoice\Action\Accounting\DraftPostingPreviewAction::ATTR) === true;
+
+        // Změna dokladu → nové porovnání s vytěžením přílohy (přehled rozporů), až po commitu.
+        if (!$preview) {
+            $this->attachmentChecks->recheckEntityAfterCommit($supplierId, 'purchase_invoice', $id);
         }
 
         $ip = $this->ipMatcher->clientIpFromRequest($request->getServerParams());
@@ -477,12 +519,11 @@ final class UpdatePurchaseInvoiceAction
                 $request->getHeaderLine('User-Agent'),
             );
         }
-        if ($existing['status'] === 'draft') {
-            try {
+        if ($existing['status'] === 'draft' && !$preview) {
+            AfterCommit::run($pdo, 'ai_suggestions.purchase.' . $id, function () use ($supplierId, $id): void {
                 $this->aiSuggestions->invalidatePurchase($supplierId, $id);
                 $this->aiSuggestions->enqueuePurchase($supplierId, $id);
-            } catch (\Throwable) {
-            }
+            });
         }
 
         // B11 reconcile: stornuj původní zápis a přeúčtuj opravenou PF do otevřeného období.
@@ -533,6 +574,10 @@ final class UpdatePurchaseInvoiceAction
             try {
                 $this->smallAssets->syncFromPurchaseInvoice($supplierId, $id, $user['id'] ?? null);
             } catch (\Throwable $e) {
+                // Odvolanou cizí transakci (náhled zápisu, hromadná oprava) řeší její vlastník.
+                if (!$ownTransaction && TransactionFailure::aborted($e)) {
+                    throw $e;
+                }
                 // Uložení faktury shodit nesmí, ale tiché spolknutí znamenalo, že o
                 // nezaložené kartě nevěděl nikdo — ani uživatel, ani audit.
                 $this->logger->log('purchase_invoice.small_asset_sync_failed', $user['id'] ?? null,
@@ -608,9 +653,21 @@ final class UpdatePurchaseInvoiceAction
                 $invoice['_warning_meta']['exchange_rate_cnb_deviation'] = $dev;
             }
         }
-        // Finální faktura na zálohu s DDKP → DPH ze zálohy už odečtena (dvojí odpočet).
-        if (is_array($invoice) && (string) ($invoice['document_kind'] ?? 'invoice') === 'invoice'
-            && CreatePurchaseInvoiceAction::advanceHasActiveTaxDocument($this->db, $invoice['advance_purchase_invoice_id'] ?? null, $supplierId)) {
+        // Možná duplicita s jiným datem vystavení (viz CreatePurchaseInvoiceAction) — jen když
+        // uživatel změnil dodavatele, číslo nebo datum vystavení, jinak by se hlásila při
+        // každém uložení už jednou potvrzeného dokladu.
+        if (is_array($invoice)
+            && ((int) ($invoice['vendor_id'] ?? 0) !== (int) ($existing['vendor_id'] ?? 0)
+                || trim((string) ($invoice['vendor_invoice_number'] ?? '')) !== trim((string) ($existing['vendor_invoice_number'] ?? ''))
+                || self::dateOnly($invoice['issue_date'] ?? null) !== self::dateOnly($existing['issue_date'] ?? null))) {
+            $likelyDuplicates = VendorNumberDuplicates::likelyForInvoice($this->db->pdo(), $id, $supplierId);
+            if ($likelyDuplicates !== []) {
+                $warnings[] = 'vendor_invoice_likely_duplicate';
+                $invoice['_warning_meta']['vendor_invoice_likely_duplicate'] = ['matches' => $likelyDuplicates];
+            }
+        }
+        // Finální faktura na zálohu s DDKP bez odpočtu zálohy → dvojí odpočet DPH.
+        if (is_array($invoice) && CreatePurchaseInvoiceAction::finalRisksDoubleVatDeduction($this->db, $invoice, $supplierId)) {
             $warnings[] = 'advance_has_tax_document';
         }
         // Účtenka, která vypadá jako doklad k přijaté záloze → nejspíš má být DDKP/záloha.

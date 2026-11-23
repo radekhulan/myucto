@@ -13,6 +13,7 @@ use MyInvoice\Service\Accounting\Dimension\DimensionPeriodGuard;
 use MyInvoice\Service\Nonprofit\Funding\FundingEligibilityGuard;
 use MyInvoice\Service\Tax\Nonprofit\J6AuthoritativeCalculator;
 use MyInvoice\Service\Tax\Nonprofit\J6FundingCapacity;
+use MyInvoice\Service\Tax\Nonprofit\NonprofitGiftElectionGuard;
 use MyInvoice\Service\Tax\Nonprofit\NonprofitTaxAssessmentException;
 use MyInvoice\Service\Tax\Nonprofit\NonprofitTaxRules;
 use MyInvoice\Service\Tax\Nonprofit\Snapshot\NonprofitTaxSnapshotHasher;
@@ -37,6 +38,7 @@ final readonly class J6AssessmentConfirmationService
         private FundingEligibilityGuard $fundingEligibility,
         private J6FundingDependencyGuard $laterFunding,
         private J6FundingCapacity $fundingCapacity,
+        private NonprofitGiftElectionGuard $giftElections,
     ) {}
 
     public function confirm(J6DraftContext $context, string $idempotencyKey, string $reason, ?int $expectedAssessmentId): J6AssessmentCompletion
@@ -98,6 +100,8 @@ final readonly class J6AssessmentConfirmationService
             // Stejné brány jako legacy potvrzení: krytí nákladů napříč zdroji, politiky zdrojů
             // a navazující čerpání pozdějších období se ověří nad právě uloženým grafem;
             // selhání odvolá celou transakci.
+            // Volba osvobození daru je po potvrzení nevratná stejně jako na původní cestě (#399).
+            $this->giftElections->assert($context->supplierId, $this->giftElections->rowsOf($assessment), $assessment['id']);
             $this->fundingCapacity->assertRevisionCoverage($context->supplierId, $assessment);
             $this->fundingEligibility->assertRevision($context->supplierId, $assessment, true);
             $this->laterFunding->assertRevisionsUnused($context->supplierId, $context->periodId,

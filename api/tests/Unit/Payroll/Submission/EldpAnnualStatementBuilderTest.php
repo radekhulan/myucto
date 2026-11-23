@@ -11,6 +11,7 @@ use MyInvoice\Service\Payroll\Submission\Eldp\EldpAnnualStatementBuilder;
 use MyInvoice\Service\Payroll\Submission\Eldp\EldpValidationException;
 use MyInvoice\Service\Payroll\Submission\Eldp\EldpXmlSerializer;
 use MyInvoice\Service\Payroll\Submission\Eldp\EldpXmlValidator;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 
 /**
@@ -329,15 +330,18 @@ final class EldpAnnualStatementBuilderTest extends TestCase
      * Důchod přiznaný od 15. 4. náleží k výplatě od dubna: list se vede do
      * měsíce, od něhož náleží výplata (Všeobecné zásady ELDP; Metodická pomůcka
      * ELDP, příklad 8a), tedy do 30. 4., ne do května. Měsíc výplaty odvozuje
-     * ze zákonné evidence {@see PayrollPensionStatus::forInterval()}.
+     * ze zákonné evidence {@see PayrollPensionStatus::forInterval()}. Důchod
+     * od 1. 4. končí list týmž měsícem (diskuse JMHZ #363: první měsíc bez
+     * ELDP je květen); sleva pracujícího důchodce za duben na tom nic nemění.
      */
-    public function testFullOldAgePensionFromMidAprilEndsTheStatementInApril(): void
+    #[DataProvider('aprilPensionStarts')]
+    public function testFullOldAgePensionFromMidAprilEndsTheStatementInApril(string $effectiveFrom): void
     {
         $evidence = PayrollPensionStatus::normalize([], [[
             'pension_type_code' => '1',
             'early_retirement' => '0',
             'reduced_retirement_age' => '0',
-            'effective_from' => '2025-04-15',
+            'effective_from' => $effectiveFrom,
             'effective_to' => null,
         ]]);
         $pension = PayrollPensionStatus::forInterval($evidence, '2025-01-01', '2025-12-31');
@@ -353,6 +357,13 @@ final class EldpAnnualStatementBuilderTest extends TestCase
         self::assertSame('2025-04-30', $sections[0]['valid_to']);
         self::assertSame(120, $sections[0]['insurance_days']);
         self::assertSame('2025-05-01', $statement->payload['pension']['not_kept_from']);
+    }
+
+    /** @return iterable<string,array{string}> */
+    public static function aprilPensionStarts(): iterable
+    {
+        yield 'důchod od 15. 4.' => ['2025-04-15'];
+        yield 'důchod od 1. 4.' => ['2025-04-01'];
     }
 
     public function testFullOldAgePensionerInsuredAbroadKeepsTheWholeYear(): void

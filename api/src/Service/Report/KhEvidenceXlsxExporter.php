@@ -42,7 +42,7 @@ final class KhEvidenceXlsxExporter
         $meta = [
             'Firma'     => $firm,
             'Období'    => (string) ($period['label'] ?? '') . ' (' . self::czDate($period['start'] ?? '') . ' - ' . self::czDate($period['end'] ?? '') . ')',
-            'Filtr'     => KhEvidenceService::filterLabel((string) ($report['section'] ?? 'all')),
+            'Filtr'     => KhEvidenceService::filterLabel((string) ($report['section'] ?? 'all'), $report['dimension'] ?? null),
             'Zdroj'     => KhEvidenceService::sourceLabel($report),
             'Sestaveno' => self::czDateTime((string) ($report['generated_at'] ?? '')),
         ];

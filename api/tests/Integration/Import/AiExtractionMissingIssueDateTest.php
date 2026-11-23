@@ -35,4 +35,19 @@ final class AiExtractionMissingIssueDateTest extends StockTestCase
         self::assertStringContainsString('nenašli datum vystavení', (string) $row['extraction_warning']);
         self::assertStringContainsString('den importu', (string) $row['extraction_warning']);
     }
+
+    /** Neexistující den (31. 9.) z AI je nenalezené datum, ne chyba databáze. */
+    public function testImpossibleCalendarDateFallsBackInsteadOfDbError(): void
+    {
+        $data = AiPdfExtractor::withIssueDateFallback([
+            'issue_date' => '2026-09-31', 'tax_date' => '2026-09-31',
+            'due_date' => '2026-02-30', 'delivery_date' => '2026-09-31',
+        ], '2026-10-27');
+
+        self::assertSame('2026-10-27', $data['issue_date']);
+        self::assertNull($data['tax_date']);
+        self::assertNull($data['due_date']);
+        self::assertNull($data['delivery_date']);
+        self::assertTrue($data[AiPdfExtractor::ISSUE_DATE_FALLBACK]);
+    }
 }

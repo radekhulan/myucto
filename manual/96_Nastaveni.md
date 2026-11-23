@@ -40,14 +40,14 @@ Nastavení konkrétní firmy je v sekci **Firma**: **Nastavení**, **Externí in
 
 Správa opakovaně používaných fakturačních položek je kvůli návaznosti na vystavování dokladů v menu `Prodej → Ceník`.
 
-Nastavení globálních položek smí měnit jen superadministrátor nebo administrátor; viz [§ 96.4](#964-krok-za-krokem-uzivatele-role-a-pristup-k-firmam).
+Globální administraci spravuje superadministrátor. Provozní nastavení firmy lze delegovat jednotlivými oprávněními; viz [§ 96.4](#964-krok-za-krokem-uzivatele-role-a-pristup-k-firmam).
 
-V **Nastavení / Účetní rámec** lze pro testování zvolit **Nevýdělečné organizace (vyhláška 504)**. Zadejte první den existujícího účetního období a použijte **Uložit účetní rámec samostatně**. Změna vyžaduje příslušné oprávnění a v dotčeném intervalu nesmějí být zaúčtované zápisy. Přímo zde lze rámec 504 zapnout jen firmě bez účetní historie, tedy bez jediného zápisu v deníku a s prázdnou nebo nedotčenou výchozí osnovou. Nedotčená osnova podle vyhlášky 500 (žádný vlastní ani upravený účet a žádné použití v dokladech, předkontacích ani nastavení) se při uložení nahradí osnovou podle vyhlášky 504. Firmě, která už účtuje, aplikace změnu odmítne a nabídne odkaz na **Převod účetního rámce**. Platnost změn je vidět v historii rámce.
+V **Nastavení / Účetní rámec** lze zvolit **Nevýdělečné organizace (vyhláška 504)**. Zadejte první den existujícího účetního období a použijte **Uložit účetní rámec samostatně**. Změna vyžaduje příslušné oprávnění a v dotčeném intervalu nesmějí být zaúčtované zápisy. Přímo zde lze rámec 504 zapnout jen firmě bez účetní historie, tedy bez jediného zápisu v deníku a s prázdnou nebo nedotčenou výchozí osnovou. Nedotčená osnova podle vyhlášky 500 (žádný vlastní ani upravený účet a žádné použití v dokladech, předkontacích ani nastavení) se při uložení nahradí osnovou podle vyhlášky 504. Firmě, která už účtuje, aplikace změnu odmítne a nabídne odkaz na **Převod účetního rámce**. Platnost změn je vidět v historii rámce.
 
 U rozpoznané právní formy spolku, nadace, ústavu nebo SVJ se zobrazí doporučení rámce 504. Tlačítko **Zvolit doporučený rámec** pouze připraví výběr. Nic neukládá a nenahrazuje datum účinnosti ani samostatné potvrzení změny. Právní forma sama nepotvrzuje veřejnou prospěšnost ani osvobození příjmů. Existující účetnictví se převádí řízeně na hranici období přes **Převod účetního rámce**. Pro SVJ tato stránka místo formuláře vysvětlí, že se převádějí doložené počáteční stavy jednotek, a nabídne odkaz na Počáteční stavy SVJ. Nová firma, u které rejstřík uvede právní formu spolku, nadace, ústavu nebo SVJ, dostane rámec 504 i osnovu podle vyhlášky 504 rovnou při založení.
 
-> [!WARNING]
-> Účetní rámec 504 je v testování a zatím není vhodný pro produkční účetnictví. Dostupnost výpočtu, finalizace a podání DPPO závisí na období, doložených podkladech a podporované verzi formuláře; podrobnosti jsou v [Daň z příjmů](43_Dan_z_prijmu.md). V této sekci se při výběru nebo používání rámce 504 zobrazuje žluté upozornění.
+> [!NOTE]
+> Účetní rámec 504 je určen pro produkční účetnictví nevýdělečných organizací. Dostupnost výpočtu, finalizace a podání DPPO závisí na období, doložených podkladech a podporované verzi formuláře; podrobnosti jsou v [Daň z příjmů](43_Dan_z_prijmu.md).
 
 
 Přepnutí rámce nepřevádí upravený ani používaný účtový rozvrh podle vyhlášky 500. Rozvrh podle vyhlášky 504 vznikne, když je rozvrh prázdný nebo je to nedotčená výchozí šablona.
@@ -104,6 +104,8 @@ Stránka `Systém → Uživatelé` je jen pro superadmina.
 4. Ponechte zapnuté **Aktivní** (vypnutý uživatel se nemůže přihlásit).
 5. Uložte.
 
+**Resetovat MFA:** když uživatel ztratí telefon nebo přístupový klíč, otevřete jeho úpravu a v části **Dvoufázové ověření** klikněte na **Resetovat MFA**. Uvedete důvod a reset potvrdíte vlastním dvoufázovým ověřením. Podrobnosti v [§ 101.11.2.4](101_Bezpecnost.md#1011124-obnova-pristupu).
+
 **Přiřadit firmy:** v editaci uživatele vyhledejte firmu podle názvu, IČO nebo ID a přidejte ji. Každý uživatel kromě
 superadmina má přístup pouze k firmám, které mu superadmin výslovně přidá. U přiřazené firmy ponechte **Výchozí roli**,
 nebo vyberte jinou aktivní roli stejného typu.
@@ -112,6 +114,9 @@ Správce instance používá oddělené technické přiřazení popsané níže;
 **Odebrat uživatele:** aktivního uživatele nejdřív **deaktivujte**. U neaktivního se pak zobrazí **Smazat**. Smazání je
 trvalé a aplikace ho odmítne, pokud jsou na uživatele navázaná firemní, účetní nebo auditní data. V takovém případě účet
 ponechte deaktivovaný.
+
+**Aktivní relace:** superadmin otevře přehled všech přihlášení přes `Systém → Uživatelé → Aktivní relace`.
+Podrobnosti a odvolání relace popisuje [§ 101.9.1](101_Bezpecnost.md#10191-aktivni-relace).
 
 **Role a oprávnění:** `Systém → Role a oprávnění`. Superadmin může vytvořit interní roli typu **staff** nebo externí
 roli typu **client** a pro každou nastavit oprávnění po modulech a významných akcích (viz [§ 96.16.4](#96164-role-a-opravneni)).
@@ -240,6 +245,136 @@ kopie uložila do zadané IMAP složky.
 Povinná pole jsou ve formuláři označená hvězdičkou. Před uložením i před odesláním testu aplikace zkontroluje aktuálně
 zobrazené povinné položky (Reply-To, DKIM, SMTP autentizace a IMAP podle zapnutých voleb) a bez jejich vyplnění akci
 nespustí. Podrobnosti viz [§ 96.16.6](#96166-odesilaci-profily-podrobnosti).
+
+### 96.7.1 Připojení schránky Microsoft 365 přes IMAP
+
+Postup platí pro příjem bankovních avíz, PDF faktur a výpisů i pro ukládání kopií odeslaných e-mailů. MyÚčto se k Exchange Online přihlašuje jako aplikace pomocí OAuth 2.0 (`client_credentials`). Příjem může běžet z cronu bez přihlášeného uživatele. Odesílací transport se nastavuje samostatně.
+
+Potřebujete existující běžnou nebo sdílenou schránku Exchange Online, správce s právem udělit souhlas v Microsoft Entra a správce s příslušnými právy v Exchange Online PowerShellu. Ze serveru MyÚčta musí být dostupné `login.microsoftonline.com:443` přes HTTPS a `outlook.office365.com:993` přes IMAP s TLS. Adresu IMAP serveru, port a ověření certifikátu nastaví MyÚčto automaticky. [Vytvoření sdílené schránky v Microsoft 365](https://learn.microsoft.com/en-us/microsoft-365/admin/email/create-a-shared-mailbox)
+
+#### 96.7.1.1 Registrace aplikace v Microsoft Entra
+
+1. V [Centru pro správu Microsoft Entra](https://entra.microsoft.com/) přepněte do adresáře, ve kterém je cílová schránka. Otevřete **Entra ID → App registrations → New registration**.
+2. Zadejte název, například `myÚčto IMAP`. V **Supported account types** zvolte **Accounts in this organizational directory only (Single tenant)**. **Redirect URI** ponechte prázdné a klikněte na **Register**.
+3. V **Overview** nové registrace si zkopírujte **Directory (tenant) ID** a **Application (client) ID**.
+4. V registraci otevřete **API permissions → Add a permission → APIs my organization uses → Office 365 Exchange Online**. Na obrazovce **Request API permissions** klikněte na **Application permissions**, zaškrtněte **IMAP.AccessAsApp** a potvrďte **Add permissions**.
+5. Správce tenantu klikne na **Grant admin consent for …** a potvrdí souhlas. U řádku **Office 365 Exchange Online / IMAP.AccessAsApp** zkontrolujte typ **Application** a stav **Granted for …** pro správný tenant.
+6. Otevřete **Certificates & secrets → Client secrets → New client secret**. Zvolte popis a platnost, klikněte na **Add** a hned si bezpečně uložte obsah sloupce **Value**. Entra jej po opuštění stránky už nezobrazí. Do MyÚčta se zadává **Value**. **Secret ID** je identifikátor položky v Entra.
+7. V **Entra ID → Enterprise applications → All applications** vyhledejte aplikaci podle stejného **Application ID**. Otevřete ji a z jejího **Overview** zkopírujte **Object ID**. Tuto hodnotu použijete v PowerShellu. Stránka **App registrations → Overview** má vlastní **Object ID**, které patří objektu registrace.
+
+| Hodnota | Kde ji vzít | Kam ji zadat |
+|---|---|---|
+| **Directory (tenant) ID** | **App registrations → Overview** | **Tenant ID** v MyÚčtu |
+| **Application (client) ID** | **App registrations → Overview** | **Client ID** v MyÚčtu a `-AppId` v Exchange |
+| **Client Secret** | **App registrations → Certificates & secrets → Client secrets**, sloupec **Value** | **Client Secret** v MyÚčtu |
+| **Object ID podnikové aplikace** | **Enterprise applications → Overview** | `-ObjectId` v `New-ServicePrincipal` |
+| **Primární SMTP adresa schránky** | `PrimarySmtpAddress` v Exchange Online | **Adresa schránky** v MyÚčtu a `$mailbox` v příkazech níže |
+
+[Registrace aplikace v Entra](https://learn.microsoft.com/en-us/entra/identity-platform/quickstart-register-app) · [Vytvoření Client Secret](https://learn.microsoft.com/en-us/entra/identity-platform/how-to-add-credentials#add-a-client-secret) · [Aplikační oprávnění pro IMAP](https://learn.microsoft.com/en-us/exchange/client-developer/legacy-protocols/how-to-authenticate-an-imap-pop-smtp-application-by-using-oauth#add-the-pop-imap-or-smtp-permissions-to-your-microsoft-entra-application)
+
+#### 96.7.1.2 Registrace v Exchange Online a přístup ke schránce
+
+Microsoft pro registraci podnikové aplikace v Exchange a přidělení přístupu této identitě používá **Exchange Online PowerShell**. Na počítači správce otevřete nové okno PowerShellu. Pokud modul chybí, nainstalujte ho příkazem `Install-Module ExchangeOnlineManagement -Scope CurrentUser`. V následujících blocích nahraďte příklady vlastními hodnotami a pokračujte ve stejném okně.
+
+```powershell
+$admin = 'spravce@example.com'
+$mailbox = 'doklady@example.com'
+$appId = '<Application (client) ID>'
+$enterpriseObjectId = '<Object ID z Enterprise applications>'
+
+Import-Module ExchangeOnlineManagement
+Connect-ExchangeOnline -UserPrincipalName $admin
+Get-ConnectionInformation | Format-Table UserPrincipalName, TenantID, State
+Get-EXOMailbox -Identity $mailbox -ErrorAction Stop |
+    Format-List PrimarySmtpAddress, RecipientTypeDetails
+Get-CASMailbox -Identity $mailbox -ErrorAction Stop |
+    Format-List ImapEnabled
+```
+
+Přihlaste se účtem správce. `TenantID` musí odpovídat **Directory (tenant) ID** z Entra. Hledejte `RecipientTypeDetails` **UserMailbox** nebo **SharedMailbox** a ve zbytku návodu používejte vrácenou `PrimarySmtpAddress`. Jestliže Exchange schránku nenajde, ověřte tenant, adresu a dokončení vytvoření schránky. U běžné schránky ověřte přiřazení licence zahrnující Exchange Online. Sdílená schránka má vlastní licenční podmínky podle velikosti a použitých funkcí. [Podmínky sdílených schránek](https://learn.microsoft.com/en-us/microsoft-365/admin/email/about-shared-mailboxes?view=o365-worldwide)
+
+Pokud `ImapEnabled` vrátí `False` a pravidla organizace použití IMAP dovolují, povolte ho pro tuto schránku a hodnotu znovu ověřte. [Povolení protokolů u schránky](https://learn.microsoft.com/en-us/troubleshoot/exchange/user-and-shared-mailboxes/pop3-imap-owa-activesync-office-365)
+
+```powershell
+Set-CASMailbox -Identity $mailbox -ImapEnabled $true -ErrorAction Stop
+Get-CASMailbox -Identity $mailbox -ErrorAction Stop | Format-List ImapEnabled
+```
+
+Vyhledejte registraci podle `AppId`. Pro stejnou podnikovou aplikaci ji v Exchange zakládejte pouze jednou.
+
+```powershell
+$sp = @(Get-ServicePrincipal -ErrorAction Stop | Where-Object AppId -eq $appId)
+if ($sp.Count -eq 0) {
+    New-ServicePrincipal -AppId $appId -ObjectId $enterpriseObjectId -DisplayName 'myÚčto IMAP' -ErrorAction Stop
+    $sp = @(Get-ServicePrincipal -ErrorAction Stop | Where-Object AppId -eq $appId)
+}
+$sp | Format-List DisplayName, AppId, ObjectId, Identity
+```
+
+Pokračujte, až příkaz vrátí právě jeden záznam a jeho `AppId` i `ObjectId` souhlasí s hodnotami z Entra. Při nesouladu správce nejdřív prověří existující registraci a její použití. [Registrace aplikační identity v Exchange](https://learn.microsoft.com/en-us/exchange/client-developer/legacy-protocols/how-to-authenticate-an-imap-pop-smtp-application-by-using-oauth#register-service-principals-in-exchange)
+
+Přístup přidělte jen schránce, kterou má MyÚčto používat. Pro parametr `-User` použijte `Identity` z právě ověřeného záznamu Exchange. Nejprve zkontrolujte existující oprávnění.
+
+```powershell
+if ($sp.Count -ne 1 -or $sp[0].ObjectId -ne $enterpriseObjectId -or -not $sp[0].Identity) {
+    throw 'Ověřte registraci podnikové aplikace v Exchange.'
+}
+$exoIdentity = $sp[0].Identity
+Get-MailboxPermission -Identity $mailbox -User $exoIdentity -ErrorAction Stop |
+    Format-Table User, AccessRights, Deny, IsInherited
+```
+
+Pokud pro tuto identitu chybí přímé povolení **FullAccess**, přidejte ho a znovu spusťte kontrolu výše. Očekávaný řádek obsahuje `FullAccess`, `Deny = False` a `IsInherited = False`. Pokud vidíte pro tuto identitu zákaz přístupu, správce musí nejprve prověřit jeho původ.
+
+```powershell
+Add-MailboxPermission -Identity $mailbox -User $exoIdentity -AccessRights FullAccess -ErrorAction Stop
+```
+
+Pro další schválenou schránku zopakujte kontrolu schránky, IMAP a přidělení přístupu s její adresou v `$mailbox`. Při dokončení se odhlaste příkazem `Disconnect-ExchangeOnline -Confirm:$false`. [Připojení k Exchange Online PowerShellu](https://learn.microsoft.com/en-us/powershell/exchange/connect-to-exchange-online-powershell?view=exchange-ps) · [Kontrola oprávnění schránky](https://learn.microsoft.com/en-us/powershell/module/exchange/get-mailboxpermission)
+
+#### 96.7.1.3 Příchozí pošta v MyÚčtu
+
+1. Přepněte do správné firmy. Otevřete **Peníze → Bankovní účty → Bankovní avíza a PDF z e-mailu**. Rozbalte nastavení a v části **Vaše nastavení pro načítání bankovních avíz a PDF z e-mailů** klikněte na **Nový IMAP účet** nebo upravte stávající účet.
+2. Zadejte **Název** a v poli **Přihlášení k IMAP** vyberte **Microsoft 365 (OAuth 2.0)**. Vyplňte **Tenant ID**, **Client ID**, **Client Secret** a **Adresu schránky** podle tabulky výše. U sdílené schránky použijte přímo její adresu.
+3. Klikněte na **Procházet** a vyberte složku, kam zprávy chodí, například `INBOX`. Podle potřeby nastavte **Načítat bankovní avíza**, **Načítat PDF faktury z příloh** a **Načítat PDF výpisy z příloh**. Pro [ověření autenticity e-mailů](30_Bankovni_ucty.md#30119-overeni-autenticity-e-mailu-dkimdmarc) vyplňte skutečné **Důvěryhodný authserv-id** ze zprávy přijaté do schránky. Pro první test bez automatického importu vypněte **Povolit zpracování bankovních avíz z tohoto účtu**.
+4. Klikněte na **Uložit IMAP účet** a v seznamu u uloženého účtu klikněte na **Test**. Hláška „IMAP připojení je funkční“ potvrzuje přihlášení a načtení seznamu složek. **Test** ani **Procházet** neimportují zprávy ani nemění jejich stav.
+5. Až chcete začít zpracovávat zprávy, zapněte **Povolit zpracování bankovních avíz z tohoto účtu**, nastavte **Zpracovat od data** a případné akce po zpracování. U avíz nastavte mapování na bankovní účet. Pro ověření importu použijte zprávu s vhodným testovacím obsahem a klikněte na **Spustit scan**. Scan a cron podle nastavení zakládají záznamy v MyÚčtu a mohou měnit stav zpráv ve schránce. Pro pravidelné načítání ověřte, že je naplánovaný cron.
+
+[Mapování a první scan](30_Bankovni_ucty.md#307-krok-za-krokem-nacitani-bankovnich-aviz-z-e-mailu) · [Nastavení cronu](30_Bankovni_ucty.md#301117-cron-pro-e-mailova-aviza)
+
+#### 96.7.1.4 Kopie odeslané pošty v MyÚčtu
+
+1. Jako superadmin otevřete **Systém → E-maily a certifikáty → Odesílací profily**. Uživatel s právem **Odesílací profily firmy** se zápisem najde firemní profily v **Firma → Nastavení firmy**. Zkontrolujte vybranou firmu a otevřete správný profil.
+2. Zapněte **Ukládat kopii do IMAP složky odeslané pošty**. V poli **Přihlášení k IMAP** vyberte **Microsoft 365 (OAuth 2.0)** a vyplňte **Tenant ID**, **Client ID**, **Client Secret** a **Adresu schránky**.
+3. Klikněte na **Procházet** a z nabídky serveru vyberte **Složku odeslané pošty**. Použijte skutečný název složky v této schránce. **Procházet** pouze načítá seznam složek.
+4. Klikněte na **Otestovat zápis**. Test uloží do vybrané složky zprávu s předmětem `MyInvoice IMAP append test` přímo přes IMAP. Po kontrole ji můžete smazat. Tlačítko **Test** celého profilu naopak odešle testovací e-mail zvoleným transportem.
+5. Uložte profil a ověřte, že jej firma používá pro zprávy, které chcete archivovat. Pro živé ověření celého profilu zkontrolujte doručení testovacího e-mailu i uložení kopie v cílové složce.
+
+#### 96.7.1.5 Diagnostika připojení
+
+Začněte tlačítkem **Procházet** nebo **Test** u příchozího účtu. Pro ověření archivace použijte **Otestovat zápis**. Při chybě opište kód z hranatých závorek.
+
+Při ověřování rozsahu oprávnění můžete v novém testovacím formuláři zkusit **Procházet** také proti druhé schránce ve stejném tenantu, u níž je IMAP povolený a aplikace nemá **FullAccess**. Exchange má přihlášení odmítnout. Testovací konfiguraci poté zavřete.
+
+| Chyba nebo kód | Co zkontrolovat |
+|---|---|
+| `ManagementObjectNotFoundException` v PowerShellu | Zkontrolujte `TenantID`, primární SMTP adresu a dostupnost schránky přes `Get-EXOMailbox`. Pokud byla právě vytvořena nebo licencována, počkejte, až ji Exchange vrátí v obou kontrolních příkazech. |
+| `imap_configuration_invalid`, případně chyba povinného pole | Zkontrolujte režim, obě ID, hodnotu Client Secret a primární adresu schránky. Po změně ID nebo adresy zadejte secret znovu. |
+| `oauth_credentials_rejected` | Entra odmítla přihlašovací údaje aplikace. Porovnejte Tenant ID a Client ID s registrací. Zkontrolujte platnost a použijte **Value** z **Client secrets**. |
+| `oauth_secret_unreadable` | MyÚčto nedokázalo načíst uložený secret. Správce instalace ověří šifrovací klíč, zejména po obnově instance. Podle potřeby zadejte secret znovu. |
+| `oauth_token_failed`, `oauth_endpoint_unreachable`, `oauth_rate_limited` | Podle kódu ověřte registraci a souhlas správce, dostupnost `login.microsoftonline.com:443` ze serveru MyÚčta nebo test zopakujte s odstupem po omezení četnosti. |
+| `imap_connection_failed`, `imap_tls_failed`, `imap_timeout` | Ze serveru MyÚčta ověřte DNS, odchozí spojení na `outlook.office365.com:993`, firewall a důvěryhodnost certifikátu. |
+| `imap_auth_rejected` | MyÚčto získalo token a Exchange odmítl přihlášení ke schránce. Zkontrolujte souhlas pro **IMAP.AccessAsApp**, správné **Object ID** z **Enterprise applications**, `ImapEnabled = True`, primární adresu schránky a přímé **FullAccess** s `Deny = False` pro registrovanou aplikační identitu. Po čerstvé změně oprávnění zopakujte test s odstupem. Samotný kód přesnou příčinu odmítnutí neurčuje. |
+| `imap_list_failed`, `imap_folder_failed` | Přihlášení proběhlo. Ověřte, že složka existuje v cílové schránce a že používáte cestu vrácenou serverem. |
+| `imap_read_failed`, `imap_write_failed`, `imap_update_failed` | Přihlášení proběhlo. Podle operace zkontrolujte zdrojovou či cílovou složku, možnost zápisu, volnou kapacitu schránky nebo cílovou složku pro přesun. |
+
+U odmítnutí Exchange může správce při vlastní diagnostice narazit i na odpověď `User is authenticated but not connected`. V MyÚčtu spadá pod `imap_auth_rejected` a platí stejné kontroly. Po chybě `imap_list_failed` při testu zápisu nejdřív zkontrolujte cílovou složku. Test ukládá zprávu před načtením seznamu složek.
+
+Správce instalace najde v provozním logu aplikace událost `imap_oauth_failure`. Výchozí jméno denního souboru je `log/app-RRRR-MM-DD.log` v datovém adresáři instance. Při vlastní konfiguraci se řiďte hodnotou `logging.path`. Pro dohledání použijte čas, `supplier_id` (firma), `connection_id` (IMAP účet nebo odesílací profil, u nového formuláře může chybět), `purpose` (`incoming` pro příjem, `sent` pro archivaci), `operation`, `stage`, `code` a případný `oauth_http_status`. Úspěšný ruční test nebo načtení složek zaznamenává `imap_oauth_probe_succeeded` s `folder_count` na úrovni `info`. Stav automatického příjmu najdete v **Systém → Plánované úlohy** u `cron-bank-email-notices`. Při předání diagnostiky stačí tyto údaje a text chyby z MyÚčta. Client Secret, token ani obsah příkazu `AUTHENTICATE XOAUTH2` nesdílejte.
+
+#### 96.7.1.6 Výměna Client Secret
+
+Před vypršením vytvořte nový secret ve stejné registraci v **Certificates & secrets → Client secrets → New client secret**. Zadejte jeho **Value** do každého příchozího účtu a odesílacího profilu, který používá tuto aplikaci. Nastavení uložte a ověřte **Test** u příchozích účtů a **Otestovat zápis** u odesílacích profilů. Starý secret odstraňte v Entra, až projdou všechny dotčené konfigurace. V MyÚčtu se uložený secret zobrazuje jen jako informace o uložení. Při běžné úpravě formuláře jej zachováte prázdným polem. Při změně tenantu, aplikace nebo schránky jej zadejte znovu.
 
 ## 96.8 Krok za krokem: uložené filtry a zobrazení tabulek
 
@@ -581,6 +716,9 @@ vstup za dropdown.
 | Pořadí | Číslo pro řazení v dropdownu |
 | Desetinná místa množství | Kolik desetinných míst smí mít množství s touto jednotkou: `0` až `3`. Prázdné (v seznamu pomlčka) znamená bez omezení, jako dosud |
 
+Změna popisku se projeví v editoru a detailu faktury. Uložené PDF vystavené faktury má původní popisek.
+Při novém vygenerování použije PDF aktuální popisek v jazyce dokladu.
+
 **Desetinná místa množství.** Volba platí pro řádky faktury a pro ruční skladové doklady (příjemka, výdejka, převodka).
 Na faktuře se řídí jednotkou řádku, na skladovém dokladu jednotkou skladové karty. Jednotka na kartě i na řádku je volný
 text, s číselníkem se páruje podle kódu bez ohledu na velikost písmen (`KS` = `ks`). Jednotka, která v číselníku není,
@@ -680,8 +818,9 @@ externí roli typu **client** a pro každou nastavit oprávnění po modulech a 
 | **Pouze čtení** | Uživatel vidí seznamy, detaily, historii a povolené výstupy, ale nemění data. |
 | **Zápis** | Zahrnuje čtení a dovoluje příslušnou změnu nebo akci. |
 
-Role má po vytvoření neměnný typ. Klientské role nabízejí jen funkce bezpečné pro klientský portál; interní účetnictví,
-banka a globální správa se jim nepovolí. Čtyři předdefinované správcovské role mají pevná práva a nelze je deaktivovat,
+Role má po vytvoření neměnný typ. Klientské role nabízejí jen funkce bezpečné pro klientský portál; interní účetnictví a globální správa se jim nepovolí. Přístup k bance
+lze klientské roli přidělit samostatnými právy ke čtení, importu, párování
+a ignorování pohybů, viz [Klientský portál](09_Klientsky_portal.md#91113-banka-a-uhrady-dokladu). Čtyři předdefinované správcovské role mají pevná práva a nelze je deaktivovat,
 smazat ani upravit jejich matici:
 
 <!-- cols: 22 78 -->
@@ -699,20 +838,25 @@ rolí bez jiných rolí licenční místo nečerpá. Vlastní čtecí role, klie
 i technické účty se do limitu aktivních uživatelů počítají, a to i při přiřazení
 jiné role pouze pro jednu firmu. Podrobnosti jsou v [§ 104.10.3](104_Licence_a_aktivace.md#104103-zkusebni-obdobi-a-stavy-licence).
 
-Provozní nastavení firmy má pět samostatných oprávnění: **Odesílací profily firmy**, **E-mailové šablony firmy**,
-**Branding firmy**, **Platební QR firmy** a klientské **Firemní podpisové profily a PDF podpisy**. Každou oblast lze
+Provozní nastavení firmy má šest samostatných oprávnění: **Odesílací profily firmy**, **E-mailové šablony firmy**,
+**Branding firmy**, **Platební QR firmy**, **Výchozí hodnoty dokladů** a **Firemní podpisové profily a PDF podpisy**. Každou oblast lze
 samostatně zakázat nebo povolit pro zápis. V `Firma → Nastavení firmy` se zobrazí jen povolené záložky; totéž platí
 pro přímý odkaz a pro vlastní klientskou doménu. Samotné **Nastavení firmy** přístup do těchto editorů nezapíná.
 Právo **Měnit nastavení firmy** zůstává interní správě právních, daňových a účetních údajů.
+Oprávnění **Branding firmy** umožňuje upravit také vzhled PDF: kompaktní řádky položek, zobrazení autora dokladu, rozpis slevy a balení, bankovní spojení v patičce a sloupce a kompaktní zobrazení výkazu práce. Interní uživatelé nastavují vzhled v `Firma → Branding` nebo v `Firma → Nastavení`; klienti s tímto oprávněním v `Firma → Nastavení firmy` na záložce **Branding**. Kontaktní údaje brandingových profilů se spravují na stejné záložce. Volby vzhledu nemění účetní ani daňové údaje. Změna vzhledu se projeví u konceptů faktur. Již uložená PDF vystavených dokladů zůstávají zachována; výkazy u vystavených faktur zachovávají původní podobu i po přegenerování PDF.
+
 Interní role mají branding v položce `Firma → Branding`, platební QR a e-mailové šablony v `Firma → Nastavení`
 a superadmin odesílací profily v `Systém → E-maily a certifikáty`. Položka `Firma → Nastavení firmy` se jim proto
-v menu ukáže jen kvůli oblasti, kterou jinde nenajdou: odesílacím profilům, nebo platebnímu QR a e-mailovým šablonám
-u role bez práva **Měnit nastavení firmy**.
+v menu ukáže jen kvůli oblasti, kterou jinde nenajdou: odesílacím profilům, firemním podpisovým profilům, nebo platebnímu QR,
+e-mailovým šablonám a výchozím hodnotám dokladů u role bez práva **Měnit nastavení firmy**.
 
-Klient s právem spravovat firemní podpisové profily může pro firmu nahrát certifikát P12/PFX a nastavit jeho použití
+Oprávnění **Výchozí hodnoty dokladů** (`settings.invoice_defaults`) se zápisem dovolí měnit výchozí splatnost včetně jednotky, hodinovou sazbu a zapnutí a český i anglický text poznámky pod položkami. Interní správce je najde v `Firma → Nastavení`; klient a interní uživatel bez práva měnit celé nastavení firmy v `Firma → Nastavení firmy → Výchozí hodnoty dokladů`. Hodnoty se používají při zakládání nových dokladů; již uložené koncepty a vystavené doklady zůstávají beze změny. Měna, DPH a zaokrouhlování do tohoto oprávnění nepatří. Poznámka může mít nejvýše 5 000 znaků a hodinová sazba šest desetinných míst. Běžná klientská a účetní role toto právo ve výchozím stavu nemá. Odebrání práva platí i pro uživatele s právem **Měnit nastavení firmy**.
+
+Klient nebo interní role s právem spravovat firemní podpisové profily může pro firmu nahrát certifikát P12/PFX a nastavit jeho použití
 pro PDF výstupy. Pro propojení profilu s odesílacím profilem potřebuje také správu odesílacích profilů. Správa se týká
 firemních profilů s nativním backendem a šifrovaným uložením hesla; osobní profily a osobní trezor certifikátů zůstávají
-součástí interní správy. Podrobnosti jsou v [kapitole 99](99_Elektronicke_podpisy.md).
+součástí interní správy (právo **Elektronické podepisování**). Superadmin spravuje podpisy jen v `Systém → E-maily a certifikáty`.
+Podrobnosti jsou v [kapitole 99](99_Elektronicke_podpisy.md).
 Díky přepisu role u konkrétní firmy lze stejnému uživateli povolit například branding ve firmě A a ve firmě B mu jej
 zakázat. Podrobný rozsah popisuje [§ 9.11.2 Delegované nastavení firmy](09_Klientsky_portal.md#9112-delegovane-nastaveni-firmy).
 
@@ -720,8 +864,16 @@ Klientským rolím lze přidělit také existující práva **Zakázky**, **Vytv
 pro **Knihu jízd**, její správu, import a mazání. U skladu lze povolit čtení, správu skladových karet a expedici;
 provozní akce vyžadují i čtení skladu. Tyto oblasti se běžné klientské roli automaticky nezapínají.
 
-Předávání originálů používá záměrně oddělená práva. Klientské **Předávat doklady účetní** dovolí pouze vložit a sledovat
-vlastní podání aktuální firmy. Interní **Příchozí doklady** dovolí účetní frontu číst nebo zpracovávat, včetně nahrání
+Interní roli lze přidělit i rozsah klienta: **Předávat doklady účetní**, **Připravená podání DPH, KH a SH** a
+**Firemní podpisové profily a PDF podpisy**. Hodí se pro roli typu „Fakturace a dokumenty“, která vystavuje faktury
+a doklady účetní jen předává. Výchozí systémové role tato práva nemají, dostane je jen role, které je správce přidělí.
+Interní role bez modulu **Daně a výkazy** pracuje s připravenými podáními stejně jako klient: jen přiznání k DPH,
+kontrolní a souhrnné hlášení, jen z webové aplikace a bez správy nastavení podání, důkazů a mazání. Funkce se zobrazí
+v běžném menu (`Dokumenty → Předat doklady účetní`, `Daně → EPO podání a archív`, `Firma → Nastavení firmy`);
+podrobnosti jsou v [§ 9.11.10](09_Klientsky_portal.md#91110-opravneni-a-izolace-firem).
+
+Předávání originálů používá záměrně oddělená práva. **Předávat doklady účetní** dovolí pouze vložit a sledovat
+vlastní podání aktuální firmy a odpovídat na požadavky účetní. Interní **Příchozí doklady** dovolí účetní frontu číst nebo zpracovávat, včetně nahrání
 dokladu, který přišel mimo portál; pro vznik faktury a případnou AI extrakci jsou navíc potřeba jejich vlastní oprávnění.
 **Trvale vyřadit z příchozí fronty** je samostatné právo a žádná systémová role kromě správce ho nemá. Odmítnutí dokladu
 totiž originál záměrně nemaže (zůstává v Dokumentech i v auditní stopě), takže úklid fronty i s originálem je vědomý zásah.

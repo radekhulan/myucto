@@ -245,7 +245,7 @@ final class NonprofitDppoFinancialArchiveCloneTest extends TestCase
         $base = Config::load(Bootstrap::rootDir());
         $previous = (string) getenv('MYINVOICE_DB_NAME');
         self::assertStringEndsWith('_test', $previous);
-        self::assertContains($base->get('db.host'), ['localhost', '127.0.0.1', '::1']);
+        self::assertTrue(\MyInvoice\Tests\Support\TestDatabaseHost::isAllowed((string) ($base->get('db.host'))), 'Testovací DB musí být lokální nebo v db.test_allowed_hosts.');
         $prefix = 'myucto_dppo_archive_' . bin2hex(random_bytes(5));
         $source = $prefix . '_source_test';
         $target = $prefix . '_target_test';

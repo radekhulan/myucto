@@ -64,29 +64,25 @@ final readonly class JmhzAnnualEvidenceService
         // Úhrn měsíčních bonusů za minulý rok (10577) vykazuje až verze 2027.
         $withBonusTotal = JmhzSpecVersion::forPeriod($reportYear, 1) === JmhzSpecVersion::V2027;
         $snapshots = [];
-        foreach (array_values(array_unique($employeeIds)) as $employeeId) {
+        $uniqueIds = array_values(array_unique($employeeIds));
+        foreach ($uniqueIds as $employeeId) {
             if ($employeeId <= 0) {
                 throw new \InvalidArgumentException('Identita zaměstnance pro roční údaje JMHZ není platná.');
             }
-            $request = $this->settlements->findRequest(
-                $supplierId,
-                $employeeId,
-                $taxYear,
-                true,
-            );
-            $outcome = $this->settlements->findOutcome(
-                $supplierId,
-                $employeeId,
-                $taxYear,
-                true,
-            );
+        }
+        $settlementRows = $this->settlements->findManyForYear($supplierId, $uniqueIds, $taxYear, true);
+        $certificatePurpose = PayrollDocumentKind::TaxableIncomeWithholdingCertificate->value;
+        $latestDocuments = $this->documents->latestForEmployees(
+            $supplierId,
+            $uniqueIds,
+            $taxYear,
+            array_values(array_unique([AnnualSettlementSnapshotBuilder::PURPOSE, $certificatePurpose])),
+        );
+        foreach ($uniqueIds as $employeeId) {
+            $request = $settlementRows['requests'][$employeeId] ?? null;
+            $outcome = $settlementRows['outcomes'][$employeeId] ?? null;
             if ($outcome === null
-                && $this->documents->latest(
-                    $supplierId,
-                    $employeeId,
-                    $taxYear,
-                    AnnualSettlementSnapshotBuilder::PURPOSE,
-                ) !== null
+                && isset($latestDocuments[$employeeId][AnnualSettlementSnapshotBuilder::PURPOSE])
             ) {
                 throw new \DomainException(
                     'Neměnná revize ročního zúčtování nemá odpovídající rejstříkový výsledek.',
@@ -99,9 +95,8 @@ final readonly class JmhzAnnualEvidenceService
                 $outcome,
             );
             $withholding = $this->certificateSnapshot(
-                $supplierId,
-                $employeeId,
                 $taxYear,
+                $latestDocuments[$employeeId][$certificatePurpose] ?? null,
             );
             $snapshots[$employeeId] = [
                 'tax_year' => $taxYear,
@@ -162,6 +157,146 @@ final readonly class JmhzAnnualEvidenceService
         ksort($snapshots, SORT_NUMERIC);
 
         return $snapshots;
+    }
+
+    /**
+     * Hlášení za leden a únor nese odpověď, zda zaměstnanec požádal o roční
+     * zúčtování za minulý rok (10319). Jindy se stav žádosti nehlásí.
+     */
+    public static function requestStatusReported(string $periodStart): bool
+    {
+        $month = (int) substr($periodStart, 5, 2);
+
+        return $month >= 1 && $month <= 2;
+    }
+
+    /**
+     * Kód blokace stavu žádosti o roční zúčtování (10319), nebo null.
+     *
+     * Jediné místo pravidla. Volá ho zmrazení hlášení
+     * ({@see JmhzScenario1DocumentResolver}) i kontrola před zahájením běhu
+     * ({@see self::requestIssuesForProbe()}): účetní se o osobách bez
+     * rozhodnutí dřív dozvěděla až u zmrazení hlášení po schválení běhu.
+     *
+     * @param bool $requestPresent existuje řádek žádosti za zdaňovací rok
+     * @param ?string $verifiedStatus stav ověřeného řádku, jinak null
+     * @param bool $requestImpossible osoba v roce u firmy nepracovala a rok mzdy pokrývají celý
+     */
+    public static function requestIssueCode(
+        bool $requestPresent,
+        ?string $verifiedStatus,
+        bool $requestImpossible,
+    ): ?string {
+        if ($requestPresent) {
+            return in_array($verifiedStatus, ['requested', 'not_requested'], true)
+                ? null
+                : 'jmhz_annual_request_status_unresolved';
+        }
+
+        return $requestImpossible ? null : 'jmhz_annual_request_source_missing';
+    }
+
+    /**
+     * Osoby, u kterých zmrazení hlášení za období zastaví nerozhodnutý stav
+     * žádosti o roční zúčtování — nasucho, bez zámků a bez zápisu.
+     *
+     * Tytéž zdroje jako {@see self::snapshotsForPreparation()} (řádek žádosti,
+     * pokrytí roku a vztahy v roce), jen jedním dotazem přes všechny osoby
+     * místo zamykaného čtení po jedné. Rozhoduje {@see self::requestIssueCode()}.
+     *
+     * @param list<int> $employeeIds
+     * @return array<int,string> employee_id => kód blokace
+     */
+    public function requestIssuesForProbe(int $supplierId, array $employeeIds, string $periodStart): array
+    {
+        $ids = array_values(array_unique(array_filter(
+            array_map('intval', $employeeIds),
+            static fn (int $id): bool => $id > 0,
+        )));
+        if ($ids === [] || !self::requestStatusReported($periodStart)) {
+            return [];
+        }
+        $taxYear = (int) substr($periodStart, 0, 4) - 1;
+        $statuses = [];
+        foreach (array_chunk($ids, 500) as $chunk) {
+            $stmt = $this->db->pdo()->prepare(
+                'SELECT employee_id, request_status
+                   FROM payroll_annual_settlement_requests
+                  WHERE supplier_id = ? AND tax_year = ?
+                    AND employee_id IN (' . implode(',', array_fill(0, count($chunk), '?')) . ')',
+            );
+            $stmt->execute([$supplierId, $taxYear, ...$chunk]);
+            foreach ($stmt->fetchAll(\PDO::FETCH_ASSOC) as $row) {
+                $statuses[(int) $row['employee_id']] = (string) $row['request_status'];
+            }
+        }
+        $withoutTaxYearEmployment = $this->yearCoveredByPayroll($supplierId, $taxYear)
+            ? array_diff($ids, $this->employeesEmployedInYear($supplierId, $ids, $taxYear))
+            : [];
+
+        $issues = [];
+        foreach ($ids as $employeeId) {
+            $code = self::requestIssueCode(
+                array_key_exists($employeeId, $statuses),
+                $statuses[$employeeId] ?? null,
+                in_array($employeeId, $withoutTaxYearEmployment, true),
+            );
+            if ($code !== null) {
+                $issues[$employeeId] = $code;
+            }
+        }
+
+        return $issues;
+    }
+
+    /**
+     * Osoby, u kterých je „nepožádal" bezpečná hromadná odpověď.
+     *
+     * O roční zúčtování smí požádat jen ten, kdo u plátce podepsal prohlášení
+     * k dani (§ 38ch odst. 1 ZDP). Osoba bez podepsaného prohlášení účinného
+     * kdykoli ve zdaňovacím roce proto o zúčtování požádat nemohla, typicky
+     * brigádník na DPP se srážkovou daní. U osoby s podepsaným prohlášením
+     * je žádost fakt, který zná jen účetní (písemná žádost do 15. 2.).
+     *
+     * Chybějící záznam o prohlášení je důkaz jen tehdy, když mzdy v aplikaci
+     * pokrývají celý zdaňovací rok. U firmy, která přešla v průběhu nebo bez
+     * převzaté historie, se nic nepředvybírá a vrací se prázdný seznam.
+     *
+     * @param list<int> $employeeIds
+     * @return list<int>
+     */
+    public function employeesUnableToRequest(int $supplierId, array $employeeIds, int $taxYear): array
+    {
+        $ids = array_values(array_unique(array_filter(
+            array_map('intval', $employeeIds),
+            static fn (int $id): bool => $id > 0,
+        )));
+        if ($ids === [] || !$this->yearCoveredByPayroll($supplierId, $taxYear)) {
+            return [];
+        }
+        $signed = [];
+        foreach (array_chunk($ids, 500) as $chunk) {
+            $stmt = $this->db->pdo()->prepare(
+                'SELECT DISTINCT employee_id
+                   FROM payroll_person_tax_declarations
+                  WHERE supplier_id = ?
+                    AND employee_id IN (' . implode(',', array_fill(0, count($chunk), '?')) . ')
+                    AND status = "signed"
+                    AND effective_from <= ?
+                    AND (effective_to IS NULL OR effective_to >= ?)',
+            );
+            $stmt->execute([
+                $supplierId,
+                ...$chunk,
+                sprintf('%04d-12-31', $taxYear),
+                sprintf('%04d-01-01', $taxYear),
+            ]);
+            foreach ($stmt->fetchAll(\PDO::FETCH_COLUMN) as $employeeId) {
+                $signed[(int) $employeeId] = true;
+            }
+        }
+
+        return array_values(array_filter($ids, static fn (int $id): bool => !isset($signed[$id])));
     }
 
     /**
@@ -306,13 +441,12 @@ final readonly class JmhzAnnualEvidenceService
     }
 
     /** @return array<string,mixed>|null */
+    /** @param array<string,mixed>|null $revision poslední revize potvrzení za rok */
     private function certificateSnapshot(
-        int $supplierId,
-        int $employeeId,
         int $taxYear,
+        ?array $revision,
     ): ?array {
         $purpose = PayrollDocumentKind::TaxableIncomeWithholdingCertificate->value;
-        $revision = $this->documents->latest($supplierId, $employeeId, $taxYear, $purpose);
         if ($revision === null) {
             return null;
         }

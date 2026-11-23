@@ -7,7 +7,7 @@
  * Skrytá okna se obnovují až při zobrazení, takže hrubost nestojí skoro nic.
  */
 export type DataArea =
-  | 'sales' | 'purchases' | 'recurring' | 'clients' | 'projects' | 'crm'
+  | 'sales' | 'quotes' | 'purchases' | 'recurring' | 'clients' | 'projects' | 'crm'
   | 'bank' | 'cash' | 'eet' | 'ledger' | 'assets' | 'other-items' | 'tax'
   | 'stock' | 'eshop' | 'documents' | 'payroll' | 'property' | 'logbook' | 'settings'
 
@@ -28,6 +28,7 @@ export interface WindowDataProfile {
 /** Co se kromě zapsané agendy změní. Jen jedna úroveň: tranzitivně by souviselo všechno se vším. */
 const EFFECTS: Record<DataArea, readonly DataArea[]> = {
   sales: ['clients', 'ledger', 'bank', 'cash', 'stock', 'projects', 'recurring', 'documents', 'tax', 'eet'],
+  quotes: [],
   purchases: ['clients', 'ledger', 'bank', 'cash', 'stock', 'projects', 'documents', 'tax'],
   recurring: ['sales', 'clients'],
   clients: ['sales', 'purchases', 'recurring', 'crm', 'projects', 'bank'],
@@ -62,14 +63,19 @@ const MUTATION_RULES: readonly (readonly [RegExp, AreaSet])[] = [
   [/^\/accounting\/(?:bank-|gopay)/, ['bank', 'ledger']],
   [/^\/(?:accounting|tax-evidence)(?:\/|$)/, ['ledger']],
   [/^\/invoices(?:\/|$)/, ['sales']],
+  [/^\/sales-quotes\/\d+\/invoice$/, ['quotes', 'sales']],
+  [/^\/sales-quotes\/\d+\/order$/, ['quotes', 'stock']],
+  [/^\/sales-quotes(?:\/|$)/, ['quotes']],
   [/^\/recurring(?:\/|$)/, ['recurring']],
   [/^\/(?:portal\/)?purchase-invoice(?:s|-submissions|-approvals)(?:\/|$)/, ['purchases']],
   [/^\/clients(?:\/|$)/, ['clients']],
   [/^\/projects(?:\/|$)/, ['projects']],
+  [/^\/work-report-billing-templates(?:\/|$)/, ['projects']],
   [/^\/crm(?:\/|$)/, ['crm']],
   [/^\/(?:bank|bank-statements|bank-transactions|bank-match-suggestions|payment-cards|credit-cards)(?:\/|$)/, ['bank']],
   [/^\/cash(?:\/|$)/, ['cash']],
   [/^\/eet(?:\/|$)/, ['eet']],
+  [/^\/stock\/reports\//, []],
   [/^\/(?:stock|price-list-items)(?:\/|$)/, ['stock']],
   [/^\/(?:eshop|catalog)(?:\/|$)/, ['eshop']],
   [/^\/(?:portal\/)?(?:documents|document-folders|document-requests|scan-attach|attachment-checks)(?:\/|$)/, ['documents']],
@@ -94,13 +100,16 @@ const ROUTE_RULES: readonly RouteRule[] = [
   [/^invoices\/(?:export|import|ai-import)$/, NOTHING, 'manual'],
   [/^invoices\/\d+\/edit$/, ['sales', 'clients'], 'manual'],
   [/^invoices(?:\/\d+)?$/, ['sales']],
+  [/^sales-quotes\/\d+$/, ['quotes', 'sales'], 'manual'],
+  [/^sales-quotes$/, ['quotes', 'sales']],
   [/^purchase-invoices\/(?:export|import|ai-import|renumber|payment-orders)$/, ['purchases'], 'manual'],
   [/^purchase-invoices\/\d+\/edit$/, ['purchases', 'clients'], 'manual'],
-  [/^(?:purchase-invoices(?:\/\d+|\/incoming)?|purchase-approvals)$/, ['purchases']],
+  [/^(?:purchase-invoices(?:\/\d+|\/incoming|\/email)?|purchase-approvals)$/, ['purchases']],
   [/^recurring\/\d+\/edit$/, ['recurring', 'clients'], 'manual'],
   [/^recurring(?:\/\d+)?$/, ['recurring']],
   [/^clients\/\d+\/edit$/, ['clients'], 'manual'],
-  [/^clients(?:\/\d+)?$/, ['clients']],
+  [/^clients\/\d+$/, ['clients', 'quotes']],
+  [/^clients$/, ['clients']],
   [/^projects\/\d+\/edit$/, ['projects'], 'manual'],
   [/^projects(?:\/\d+)?$/, ['projects']],
   [/^other-items\/\d+\/edit$/, ['other-items'], 'manual'],
@@ -114,11 +123,12 @@ const ROUTE_RULES: readonly RouteRule[] = [
   [/^accounting\/cash(?:\/|$)/, ['cash']],
   [/^accounting\/(?:small-)?assets(?:\/|$)/, ['assets']],
   [/^accounting\/(?:journal|account-statement|general-ledger|trial-balance|balance-sheet|balance-inventory|income-statement|income-statement-by-function|saldo|offsets|monthly-report|monthly-check|document-completeness|manual-posting-queue|transition-report|dimension-profit|reports|archive|internal-documents)(?:\/|$)/, LEDGER_READ],
+  [/^accounting\/accruals(?:\/\d+)?$/, LEDGER_READ],
   [/^accounting(?:\/|$)/, LEDGER_READ, 'manual'],
   [/^tax-evidence\/(?:cash-journal|receivables-payables|tax-estimate)$/, LEDGER_READ],
   [/^tax-evidence(?:\/|$)/, ['settings'], 'manual'],
   [/^(?:stats|purchase-stats|group-stats|dimension-stats)$/, REPORT_READ],
-  [/^reports\/(?:dph-book|cnb-rate-audit|invoice-series-completeness)$/, REPORT_READ],
+  [/^reports\/(?:dph-book|vat-by-dimension|cnb-rate-audit|invoice-series-completeness)$/, REPORT_READ],
   [/^reports(?:\/|$)/, REPORT_READ, 'manual'],
   [/^tax$/, REPORT_READ],
   [/^stock\/(?:documents|items|sales-orders|purchase-orders|takes|reports)$/, ['stock']],
@@ -129,6 +139,7 @@ const ROUTE_RULES: readonly RouteRule[] = [
   [/^logbook$/, ['logbook'], 'manual'],
   [/^admin\/databox$/, 'all'],
   [/^admin\/approvals$/, ['purchases']],
+  [/^admin\/work-report-billing-templates$/, ['projects'], 'manual'],
   [/^(?:admin|company)(?:\/|$)/, ['settings'], 'manual'],
   [/^portfolio$/, 'all'],
   [/^automation$/, 'all', 'manual'],
@@ -136,6 +147,8 @@ const ROUTE_RULES: readonly RouteRule[] = [
   [/^portal(?:\/|$)/, 'all', 'manual'],
   // Vlastní profil, licence a nástroje nečtou data dokladů.
   [/^(?:profile|activation|hosting|utilities|imports|exchange|templates|isds-gateway)(?:\/|$)/, NOTHING, 'manual'],
+  // Nová záložka čeká na hledání; rozepsaný dotaz se nesmí přepsat obnovou.
+  [/^new-tab$/, NOTHING, 'manual'],
 ]
 
 function normalize(path: string): string {

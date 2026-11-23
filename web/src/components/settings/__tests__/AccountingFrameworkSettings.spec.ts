@@ -72,25 +72,16 @@ describe('AccountingFrameworkSettings', () => {
     expect(wrapper.emitted('updated')).toEqual([[state]])
   })
 
-  it('warns prominently before saving 504 and keeps the warning for an active 504 company', async () => {
+  it('saves 504 without a testing warning', async () => {
     const wrapper = render()
     await wrapper.get('select').setValue('cz_504')
-    const warning = wrapper.get('[data-test="framework-testing-warning"]')
-    expect(warning.text()).toContain('settings.accounting_framework.testing_warning_title')
-    expect(warning.text()).toContain('settings.accounting_framework.testing_warning')
-    expect(warning.classes()).toContain('border-warning-500')
-    const link = warning.get('[data-test="framework-testing-warning-link"]')
-    expect(link.attributes('href')).toBe('https://github.com/radekhulan/myucto/issues/258')
-    expect(link.attributes('target')).toBe('_blank')
-    expect(warning.classes()).toContain('bg-warning-50')
-    expect(warning.find('svg').exists()).toBe(true)
+    expect(wrapper.find('[data-test="framework-testing-warning"]').exists()).toBe(false)
     await wrapper.get('input').setValue('2027-01-01')
     await wrapper.get('[data-test="save-framework"]').trigger('click')
     await flushPromises()
     expect(m.save).toHaveBeenCalledExactlyOnceWith(42, 'cz_504', '2027-01-01')
     await wrapper.setProps({ supplier: { ...state, accounting_framework: 'cz_504' }, canChange: false })
-    await wrapper.get('select').setValue('cz_500')
-    expect(wrapper.find('[data-test="framework-testing-warning"]').exists()).toBe(true)
+    expect(wrapper.find('[data-test="framework-testing-warning"]').exists()).toBe(false)
   })
 
   it('shows the backend refusal without claiming the change was saved', async () => {
@@ -234,7 +225,6 @@ describe('AccountingFrameworkSettings', () => {
       const wrapper = render(true, false, withRecommendation(svj))
       await wrapper.get(apply).trigger('click')
       expect((wrapper.get('select').element as HTMLSelectElement).value).toBe('cz_504')
-      expect(wrapper.find('[data-test="framework-testing-warning"]').exists()).toBe(true)
       expect(wrapper.find(apply).exists()).toBe(false)
       expect(m.save).not.toHaveBeenCalled()
       expect(wrapper.get('[data-test="save-framework"]').attributes('disabled')).toBeDefined()

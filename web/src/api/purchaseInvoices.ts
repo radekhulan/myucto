@@ -1,9 +1,10 @@
 import { requestSupplierId } from '@/workspace/supplierContext'
 import { api } from './client'
+import { purchaseListFilterParams } from './listQueries'
 import type { DocumentLock } from './locks'
 import type { JournalSourceSummary } from './accounting'
 import type { DocItem } from './documents'
-import type { CashSettlementResult, CnbRateDeviationMeta, PaymentMethod, PaymentMethodSource } from './invoices'
+import type { CashSettlementResult, CnbRateDeviationMeta, OpeningBalanceState, PaymentMethod, PaymentMethodSource } from './invoices'
 import { appIsoDate } from '@/utils/date'
 import type { PurchaseApprovalRow, PurchaseApprovalStatus } from './purchaseApprovals'
 
@@ -47,6 +48,17 @@ export interface ResolvedExchangeRateMeta {
   fallback_used: boolean
   source: 'cache' | 'fresh' | 'last_known' | 'fixed'
   fixed_missing: boolean
+}
+
+/** Existující doklad dodavatele se stejným číslem a jiným datem vystavení (možná duplicita). */
+export interface VendorInvoiceLikelyDuplicate {
+  id: number
+  vendor_invoice_number: string
+  issue_date: string
+  total_with_vat: number
+  currency: string
+  status: string
+  varsymbol: string | null
 }
 
 /** Proč se kurz po změně rozhodného data / měny NEpřenačetl. */
@@ -153,7 +165,12 @@ export interface PurchaseInvoiceItem {
   vat_label_en?: string
   /** §DM — druh nákladu. Autoritativní klasifikace, BE z ní odvozuje `is_fixed_asset`. */
   expense_kind?: ExpenseKind | null
+  /** Účet MD řádku (náklad). */
   expense_account_code?: string | null
+  /** Účet Dal řádku (závazek); NULL = z předkontace řádku nebo dokladu. Jeden na doklad. */
+  counter_account_code?: string | null
+  /** Předkontace řádku — doplní účty, které řádek sám nemá. */
+  posting_rule_key?: string | null
   /** §DČR — časové rozlišení nákladu (381): období od–do, do kterého náklad věcně patří. NULL = bez rozlišení. */
   accrual_from?: string | null
   accrual_to?: string | null
@@ -162,6 +179,14 @@ export interface PurchaseInvoiceItem {
   /** Joined (read-only, jen v GET odpovědi) — pro label vybrané karty po reloadu. */
   stock_sku?: string | null
   stock_name?: string | null
+  /** Kód položky dodavatele a EAN z dokladu: párují řádek s kartou. FE je MUSÍ posílat zpět (DELETE+INSERT). */
+  seller_item_code?: string | null
+  item_ean?: string | null
+  /** Intrastat z dokladu: při příjmu se doplní na kartu, pokud tam chybí. FE je MUSÍ posílat zpět. */
+  intrastat_cn8_code?: string | null
+  intrastat_country_of_origin?: string | null
+  /** Odpočet poskytnuté zálohy s DDKP (migrace 2307): záloha, kterou záporný řádek odečítá. FE ho MUSÍ posílat zpět. */
+  advance_purchase_invoice_id?: number | null
   /** Karta drobného majetku vzniklá z téhle položky (§DM), pokud existuje — read-only join. */
   small_asset?: { id: number; name: string; status: 'in_use' | 'disposed' | 'sold' } | null
 }
@@ -477,6 +502,8 @@ export interface PurchaseInvoice {
   advance_link_suggested_id: number | null
   /** Shrnutí navázané zálohy (pokud advance_purchase_invoice_id != null). */
   linked_advance?: PurchaseInvoiceBrief | null
+  /** Všechny zálohy, které tato konečná faktura vyúčtovává (linked_advance = první z nich). */
+  linked_advances?: PurchaseInvoiceBrief[]
   /** Dobropis (credit_note): opravovaná přijatá faktura (migrace 1096). */
   parent_purchase_invoice_id?: number | null
   /** Shrnutí opravované faktury (pokud parent_purchase_invoice_id != null). */
@@ -507,6 +534,8 @@ export interface PurchaseInvoice {
   linked_advance_unpaid?: boolean
   /** Vyúčtovací faktura bez vazby: existuje nespárovaná záloha téhož dodavatele? */
   has_advance_candidates?: boolean
+  /** Konečná faktura k záloze s DDKP bez odpočtu zálohy (hrozí dvojí odpočet DPH). */
+  advance_deduction_missing?: boolean
   /** Záloha bez vyúčtování: existuje nepropojená finální faktura téhož dodavatele? */
   has_settlement_candidates?: boolean
   /**
@@ -549,6 +578,7 @@ export interface PurchaseInvoice {
   _warning_meta?: {
     exchange_rate_cnb_deviation?: CnbRateDeviationMeta
     exchange_rate_not_reloaded?: ExchangeRateNotReloadedMeta
+    vendor_invoice_likely_duplicate?: { matches: VendorInvoiceLikelyDuplicate[] }
   }
   /** Metadata k serverem provedenému přenačtení kurzu (migrace 1303). */
   _meta?: {
@@ -626,6 +656,7 @@ export interface PurchaseInvoiceListItem {
   expense_category_code?: string | null
   vendor_company_name: string
   vendor_ic: string | null
+  vendor_dic?: string | null
   month_bucket: string
   project_name?: string | null
   kh_sections?: string[]
@@ -656,6 +687,8 @@ export interface PurchaseMonthGroup {
 }
 
 export interface PurchaseInvoicePayload {
+  /** Řada z číselníku (jen doklad bez čísla); vynechané = beze změny, null = výchozí řada. */
+  number_series_id?: number | null
   /** Staging originál, který účetní tímto ručním zápisem zpracovává. */
   submission_id?: number
   /** Vědomě potvrzená shoda čísla dokladu u dodavatele (platby platebního kalendáře). */
@@ -697,6 +730,10 @@ export interface PurchaseInvoicePayload {
   project_id?: number | null
   /** Dobropis (credit_note): ID opravované přijaté faktury (migrace 1096). */
   parent_purchase_invoice_id?: number | null
+  /** Jen při založení: záloha, kterou nová konečná faktura vyúčtovává (u uloženého dokladu link-advance). */
+  advance_purchase_invoice_id?: number | null
+  /** Jen při založení: víc záloh téhož dodavatele, které nová konečná faktura vyúčtovává. */
+  advance_purchase_invoice_ids?: number[]
   /** Ruční rekapitulace DPH dle dokladu (§ 73). null/[] = počítat standardně. */
   vat_overrides?: PurchaseVatOverride[] | null
   /** Prázdné pole = použít hlavičkový režim faktury. */
@@ -733,10 +770,29 @@ export interface PurchaseInvoicePayload {
     accrual_from?: string | null
     accrual_to?: string | null
     stock_item_id?: number | null
+    advance_purchase_invoice_id?: number | null
   }>
 }
 
+/**
+ * Řádek odpočtu zálohy podle DDKP (GET /purchase-invoices/advance-deduction-lines). Částky záporné.
+ * Záloha z počátečních stavů DDKP v systému nemá: řádek je navržený z její částky (`opening_balance`).
+ */
+export interface PurchaseAdvanceDeductionLine {
+  tax_document_id: number | null
+  tax_document_number: string | null
+  opening_balance?: boolean
+  vat_rate_id: number
+  vat_rate: number
+  vat_classification_code: string | null
+  base: number
+  vat: number
+  gross: number
+}
+
 export interface PurchaseListFilters {
+  has_visual_document?: '0' | '1'
+  has_structured_source?: '0' | '1'
   include_vat_classification?: boolean
   include_journal_notes?: boolean
   include_document_tags?: boolean
@@ -781,6 +837,13 @@ export interface PurchaseListFilters {
   booked?: '1' | '0'
   /** Filtr na dávku hromadného AI importu (#232). */
   import_batch_id?: string
+  /**
+   * Hodnoty dimenzí oddělené čárkou (max 10). Doklad vyhovuje, když hodnotu (nebo
+   * podřízenou) má na hlavičce, na položce nebo ve splitu; rozdělený doklad se ukáže celý.
+   */
+  dimension_value_id?: string
+  /** false = jen vybrané hodnoty bez podřízených (výchozí je včetně podřízených). */
+  dimension_descendants?: boolean
   q?: string
   page?: number
   per_page?: number
@@ -828,52 +891,36 @@ export interface PurchaseRenumberRow {
   vendor_name: string
   document_kind: PurchaseDocumentKind
   issue_date: string
+  received_at: string
+  tax_date: string
+  /** Datum podle zvolené volby, podle kterého se doklad vybral a seřadil. */
+  date: string
+  /** Doklad zvolené datum nemá, řadí se podle data vystavení. */
+  date_fallback: boolean
   new_varsymbol?: string
   series?: string
   changed?: boolean
-  reason?: 'year_closed' | 'period_closed' | 'period_closing' | 'date_locked' | 'manual_number'
+  /** Období (YYYYMM, u roční řady YYYY) automatického čísla jiného měsíce, které doklad opouští. */
+  from_period?: string | null
+  reason?: 'year_closed' | 'period_closed' | 'period_closing' | 'date_locked' | 'manual_number' | 'date_other_month'
+    | 'document_locked' | 'number_month_locked' | 'month_locked'
 }
+
+/** Datum pro číslování přijatých dokladů (nastavení firmy i přečíslování): vystavení, přijetí, DUZP. */
+export type PurchaseRenumberBasis = 'issue' | 'received' | 'tax'
 
 export interface PurchaseRenumberPlan {
   period: string
+  date_basis: PurchaseRenumberBasis
   changes: PurchaseRenumberRow[]
   kept: PurchaseRenumberRow[]
   blocked: PurchaseRenumberRow[]
 }
 
+
 export const purchaseInvoicesApi = {
   listGrouped: (filters: PurchaseListFilters = {}) => {
-    const params: Record<string, string | number> = {}
-    if (filters.q) params.q = filters.q
-    if (filters.status) {
-      params['filter[status]'] = Array.isArray(filters.status) ? filters.status.join(',') : filters.status
-    }
-    if (filters.document_kind) {
-      params['filter[document_kind]'] = Array.isArray(filters.document_kind)
-        ? filters.document_kind.join(',')
-        : filters.document_kind
-    }
-    if (filters.vendor_id)   params['filter[vendor_id]']   = filters.vendor_id
-    if (filters.project_id)  params['filter[project_id]']  = filters.project_id
-    if (filters.year)        params['filter[year]']        = filters.year
-    if (filters.month)       params['filter[month]']       = filters.month
-    if (filters.date_from)   params['filter[date_from]']   = filters.date_from
-    if (filters.date_to)     params['filter[date_to]']     = filters.date_to
-    if (filters.currency)    params['filter[currency]']    = filters.currency
-    if (filters.unpaid_only)  params['filter[unpaid_only]']  = 1
-    if (filters.overdue)      params['filter[overdue]']      = 1
-    if (filters.unpaid_as_of) params['filter[unpaid_as_of]'] = filters.unpaid_as_of
-    if (filters.unmatched)    params['filter[unmatched]']    = 1
-    if (filters.paid_shortfall) params['filter[paid_shortfall]'] = 1
-    if (filters.needs_review) params['filter[needs_review]'] = 1
-    if (filters.approval_status) {
-      // Smlouva říká jen „filtr approval_status"; ostatní filtry jedou přes filter[...], proto obě podoby.
-      params['filter[approval_status]'] = filters.approval_status
-      params.approval_status = filters.approval_status
-    }
-    if (filters.payment_ordered) params['filter[payment_ordered]'] = filters.payment_ordered
-    if (filters.booked)      params['filter[booked]']      = filters.booked
-    if (filters.import_batch_id) params['filter[import_batch_id]'] = filters.import_batch_id
+    const params = purchaseListFilterParams(filters)
     if (filters.page)        params.page                   = filters.page
     if (filters.per_page)    params.per_page               = filters.per_page
     if (filters.sort_key)    params.sort_key               = filters.sort_key
@@ -894,7 +941,13 @@ export const purchaseInvoicesApi = {
   },
 
   get:    (id: number) => api.get<PurchaseInvoice>(`/purchase-invoices/${id}`).then(r => r.data),
-  items: (id: number) => api.get<{ items: PurchaseInvoiceItem[] }>(`/purchase-invoices/${id}/items`).then(r => r.data.items),
+  openingBalance: (id: number) =>
+    api.get<{ opening_balance: OpeningBalanceState }>(`/purchase-invoices/${id}/opening-balance`).then(r => r.data.opening_balance),
+  markOpeningBalance: (id: number) =>
+    api.put<{ opening_balance: OpeningBalanceState }>(`/purchase-invoices/${id}/opening-balance`).then(r => r.data.opening_balance),
+  unmarkOpeningBalance: (id: number) =>
+    api.delete<{ opening_balance: OpeningBalanceState }>(`/purchase-invoices/${id}/opening-balance`).then(r => r.data.opening_balance),
+  items:(id: number) => api.get<{ items: PurchaseInvoiceItem[] }>(`/purchase-invoices/${id}/items`).then(r => r.data.items),
   preview: (id: number) => api.get<JournalSourceSummary>(`/purchase-invoices/${id}/preview`).then(r => r.data),
   acceptAiPostingSuggestion: (id: number, override?: Partial<AiPostingSuggestion['payload']>) =>
     api.post<{ status: 'accepted'; applied: AiPostingSuggestion['payload'] }>(
@@ -982,13 +1035,16 @@ export const purchaseInvoicesApi = {
     api.put<PurchaseInvoice & { _repost?: { entry_id: number } }>(`/purchase-invoices/${id}/expense-kinds`, { items })
       .then(r => r.data),
 
-  /** Náhled přečíslování měsíce podle data vystavení (period = 'RRRR-MM'). */
-  renumberPreview: (period: string) =>
-    api.get<PurchaseRenumberPlan>('/purchase-invoices/renumber', { params: { period } }).then(r => r.data),
+  /**
+   * Náhled přečíslování měsíce (period = 'RRRR-MM') podle zvoleného data. Bez volby
+   * platí volba uložená při posledním přečíslování (vrací se v date_basis).
+   */
+  renumberPreview: (period: string, dateBasis?: PurchaseRenumberBasis) =>
+    api.get<PurchaseRenumberPlan>('/purchase-invoices/renumber', { params: { period, date_basis: dateBasis } }).then(r => r.data),
 
-  /** Přečíslování měsíce podle data vystavení. */
-  renumber: (period: string) =>
-    api.post<PurchaseRenumberPlan & { renumbered: number }>('/purchase-invoices/renumber', { period }).then(r => r.data),
+  /** Přečíslování měsíce podle zvoleného data; volba se uloží firmě. */
+  renumber: (period: string, dateBasis?: PurchaseRenumberBasis) =>
+    api.post<PurchaseRenumberPlan & { renumbered: number }>('/purchase-invoices/renumber', { period, date_basis: dateBasis }).then(r => r.data),
 
   /** Rychlá změna typu dokladu (#232) — oprava AI klasifikace po importu. */
   setDocumentKind: (id: number, documentKind: PurchaseDocumentKind) =>
@@ -1027,13 +1083,25 @@ export const purchaseInvoicesApi = {
   settlementCandidates: (id: number) =>
     api.get<{ candidates: PurchaseInvoiceBrief[] }>(`/purchase-invoices/${id}/settlement-candidates`)
       .then(r => r.data.candidates),
-  linkAdvance: (id: number, advanceId: number) =>
-    api.post<PurchaseInvoice>(`/purchase-invoices/${id}/link-advance`, { advance_id: advanceId })
+  // append = přidat další zálohu k už navázaným (konečná faktura vyúčtuje víc záloh).
+  linkAdvance: (id: number, advanceId: number, opts?: { append?: boolean }) =>
+    api.post<PurchaseInvoice>(`/purchase-invoices/${id}/link-advance`,
+      opts?.append ? { advance_id: advanceId, append: true } : { advance_id: advanceId })
       .then(r => r.data),
-  unlinkAdvance: (id: number) =>
-    api.delete<PurchaseInvoice>(`/purchase-invoices/${id}/link-advance`).then(r => r.data),
+  // Bez advanceId odpojí všechny navázané zálohy.
+  unlinkAdvance: (id: number, advanceId?: number) =>
+    api.delete<PurchaseInvoice>(`/purchase-invoices/${id}/link-advance`,
+      advanceId !== undefined ? { params: { advance_id: advanceId } } : undefined).then(r => r.data),
   dismissAdvanceSuggestion: (id: number) =>
     api.delete<PurchaseInvoice>(`/purchase-invoices/${id}/advance-suggestion`).then(r => r.data),
+  // Nová (neuložená) konečná faktura: zálohy dodavatele k navázání při uložení.
+  newInvoiceAdvanceCandidates: (params: { vendor_id: number; currency_id: number; total?: number }) =>
+    api.get<{ candidates: PurchaseInvoiceBrief[] }>('/purchase-invoices/advance-candidates', { params })
+      .then(r => r.data.candidates),
+  // Řádky odpočtu zálohy podle jejích DDKP (prázdné = záloha bez DDKP).
+  advanceDeductionLines: (advanceId: number) =>
+    api.get<{ advance_id: number; lines: PurchaseAdvanceDeductionLine[] }>('/purchase-invoices/advance-deduction-lines', { params: { advance_id: advanceId } })
+      .then(r => r.data.lines),
 
   uploadPdf: (id: number, file: File) => {
     const fd = new FormData()
@@ -1141,5 +1209,12 @@ export const purchaseInvoicesApi = {
     }
     if (sid && /^\d+$/.test(sid)) params.set('supplier_id', sid)
     return `/api/purchase-invoices/export?${params.toString()}`
+  },
+
+  /** Kniha přijatých faktur nad filtrem seznamu (bez stránkování). */
+  bookUrl: (filters: PurchaseListFilters, format: 'pdf' | 'xlsx') => {
+    const query = new URLSearchParams({ format })
+    for (const [key, value] of Object.entries(purchaseListFilterParams(filters))) query.set(key, String(value))
+    return `/api/purchase-invoices/book?${query.toString()}`
   },
 }

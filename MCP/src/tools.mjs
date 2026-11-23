@@ -17,13 +17,22 @@
  * Výjimkou jsou KONCEPTY OSTATNÍCH POHLEDÁVEK A ZÁVAZKŮ
  * (other-item-tools.mjs): založení, úprava a smazání konceptu, splátkový
  * kalendář a opakování bez automatického účtování. Do deníku se tím nic
- * nezapisuje. Potvrzení a zaúčtování, storno, přeúčtování, párování úhrad,
+ * nezapisuje. Přiřazení úhrady k ostatní položce (allocate_other_item_payment) jen
+ * spáruje existující platbu. Potvrzení a zaúčtování, storno, přeúčtování, odpárování úhrad,
  * generování opakování ani zapnutí automatického účtování v katalogu nejsou
  * a server je tokenu odmítne (`BEARER_WRITE_EXCEPTIONS` je výčet metoda + cesta).
  * Druhou výjimkou jsou ANALYTICKÉ ÚČTY OSNOVY (create_analytic_account,
  * update_analytic_account): koncept potřebuje analytiku dřív, než ho účetní
  * zaúčtuje, a založení účtu nic neúčtuje. Syntetiku a mazání účtu server
- * tokenu odmítne.
+ * tokenu odmítne. Třetí jsou DIMENZE KONCEPTU vydané a přijaté faktury
+ * (set_invoice_dimensions, set_purchase_invoice_dimensions): koncept nemá
+ * v deníku nic, co by se přerazítkovalo.
+ *
+ * Storno ani zrušení storna ZAÚČTOVANÉ faktury (cancel_invoice, cancel_purchase_invoice,
+ * uncancel_invoice) MCP neprovede: stornovalo by nebo mazalo zápis v deníku. Odmítne
+ * ho nástroj i server (`SessionOnlyAccountingAct`). Automatické zaúčtování při
+ * vystavení a přijetí, které si firma zapnula, je volba firmy a probíhá stejně jako
+ * z aplikace.
  *
  * E-SHOP A SKLAD JSOU NAOPAK OBOUSMĚRNÉ — katalog zboží, číselníky, ceny,
  * dodavatelé, média, sklady, skladové doklady i inventury se dají přes API
@@ -39,6 +48,7 @@
  *                      (viz {@see confirmed}) a hlásí se jako destructiveHint.
  */
 
+import { NOT_IN_CLIENT_CATALOG } from './api-contracts.mjs';
 import { ACCOUNTING_CONTEXT_TOOLS } from './accounting-context-tools.mjs';
 import { PROPERTY_ACCOUNTING_READ_TOOLS } from './property-accounting-read-tools.mjs';
 import { PROPERTY_UNIT_LEGAL_ROLE_TOOLS } from './property-unit-legal-role-tools.mjs';
@@ -52,9 +62,16 @@ import {
 import { PURCHASE_TOOLS } from './purchase-tools.mjs';
 import { OTHER_ITEM_TOOLS } from './other-item-tools.mjs';
 import {
-  CONFIRM, DOCUMENT_ENTITY_TYPES, changed, confirmed, merged, requireConfirm, seg,
+  CONFIRM, DOCUMENT_ENTITY_TYPES, PAYMENT_METHODS, PAYMENT_METHOD_HELP, changed, confirmed, merged,
+  nullIfEmpty, requireConfirm, seg,
 } from './tool-shared.mjs';
 import { FILE_TOOLS } from './file-tools.mjs';
+import { BANK_TOOLS } from './bank-tools.mjs';
+import { CLIENT_TOOLS } from './client-tools.mjs';
+import { ACCOUNTING_READ_TOOLS } from './accounting-read-tools.mjs';
+// Faktury: číselníky a dimenze konceptu (track mcp-fix).
+import { CODEBOOK_TOOLS } from './codebook-tools.mjs';
+import { DOCUMENT_DIMENSION_TOOLS } from './document-dimension-tools.mjs';
 
 const str = (description, extra = {}) => ({ type: 'string', description, ...extra });
 const int = (description, extra = {}) => ({ type: 'integer', description, ...extra });
@@ -372,14 +389,45 @@ const INVOICE_ITEM_OSS_FIELDS = [
 ];
 
 /**
- * Všechna pole řádku, která server při náhradě položek přijímá. Ceníková cena
- * (`list_unit_price`) jde zpět i po změně ceny, procento slevy dopočítá server.
+ * Všechna pole řádku, která server při náhradě položek přijímá (`InvoiceRepository::replaceItems`,
+ * DELETE + INSERT). Co tu chybí, to úprava konceptu přes MCP na řádku smaže. Ceníková cena
+ * (`list_unit_price`) jde zpět i po změně ceny, procento slevy dopočítá server. `id` řádku
+ * server neukládá, ale páruje podle něj vazbu na výkaz práce a výběr sériových čísel.
+ *
+ * Úplnost hlídá test `item-field-coverage.test.mjs` proti sloupcům `invoice_items`
+ * v `db/schema.snapshot.json`: nový sloupec tabulky test shodí, dokud ho někdo nepřidá
+ * sem, nebo vědomě mezi sloupce, které dopočítává server.
  */
-const INVOICE_ITEM_FIELDS = [
-  'item_kind', 'description', 'quantity', 'duration_minutes', 'unit', 'unit_price_without_vat', 'list_unit_price',
-  'vat_rate_id', 'order_index', 'vat_classification_code', 'stock_item_id', 'warehouse_id',
-  'small_asset_id', 'asset_id', 'accrual_from', 'accrual_to', 'tracking_allocations', ...INVOICE_ITEM_OSS_FIELDS,
+export const INVOICE_ITEM_FIELDS = [
+  'id', 'item_kind', 'description', 'quantity', 'duration_minutes', 'unit', 'unit_price_without_vat',
+  'list_unit_price', 'manual_price', 'vat_rate_id', 'order_index', 'vat_classification_code',
+  'stock_item_id', 'warehouse_id', 'small_asset_id', 'asset_id', 'accrual_from', 'accrual_to',
+  'tracking_allocations', 'revenue_account_code', 'counter_account_code', 'posting_rule_key',
+  'seller_item_code', 'linked_work_report_id', 'work_report_billing_key', 'advance_invoice_id', ...INVOICE_ITEM_OSS_FIELDS,
 ];
+
+/**
+ * Účetní a daňová pole položky vydané faktury, která jde zadat nebo změnit. Účet položky
+ * ověří server proti osnově firmy (`ProductPostingDefaults::validateIssuedItemAccount`).
+ */
+const INVOICE_ITEM_ACCOUNTING = {
+  revenue_account_code: str(
+    'Účet položky (Dal), typicky výnos 6xx, u přefakturace i rozvahový nebo nákladový. Bez zadání '
+    + 'se vezme účet zboží, kategorie nebo předkontace dokladu. Seznam účtů vrátí `chart_of_accounts`.',
+    { maxLength: 10 },
+  ),
+  counter_account_code: str(
+    'Protiúčet řádku (MD), pohledávka, typicky 311. Na jednom dokladu smí být jen jeden protiúčet.',
+    { maxLength: 10 },
+  ),
+  posting_rule_key: str('Předkontace řádku: `key` z `list_posting_rules`. Doplní účty, které řádek sám nemá.', { maxLength: 64 }),
+  vat_classification_code: str(
+    'Kód členění pro přiznání DPH a kontrolní hlášení: `code` z `list_vat_classifications` (strana `sales`), '
+    + 'např. 1m (prodej dlouhodobého majetku) nebo 26 (vývoz). Zadávej jen na výslovný pokyn; bez něj ho '
+    + 'server odvodí ze sazby, odběratele a přenesené povinnosti.',
+  ),
+};
+const INVOICE_ITEM_ACCOUNTING_KEYS = Object.keys(INVOICE_ITEM_ACCOUNTING);
 
 /** Slevové řádky generuje server z `discount_percent`; zpět se neposílají. */
 const isDiscountRow = (item) => (item?.item_kind ?? 'standard') === 'discount';
@@ -397,7 +445,7 @@ export async function loadDraftInvoice(c, invoiceId, tool) {
     throw new Error(
       `Faktura #${invoiceId}${invoice?.varsymbol ? ` (${invoice.varsymbol})` : ''} není koncept `
       + `(stav „${invoice?.status ?? '?'}"), proto ji nelze upravit. Vystavený doklad se opravuje `
-      + 'opravným daňovým dokladem (dobropisem), nebo se stornuje; obojí v aplikaci.',
+      + 'opravným daňovým dokladem (dobropisem), nebo se stornuje: `cancel_invoice`.',
     );
   }
   return invoice;
@@ -444,17 +492,92 @@ function pickInvoiceLine(lines, a) {
 
 /**
  * Kompletní PUT payload konceptu: hlavička ze současného stavu přebitá změnami
- * a celý seznam položek. Měna se dá změnit kódem; `currency_id` se pak nepošle
- * a server ho dohledá sám.
+ * a celý seznam položek. Měna se mění kódem (`currency`), server k ní načte kurz.
+ *
+ * Odvozené hodnoty hlavičky se po změně vstupu neposílají, jinak by uložená
+ * hodnota přebila přepočet: kód členění DPH hlavičky po změně daňového kontextu
+ * (`rederive`, server ho odvodí znovu, `UpdateInvoiceAction::mergeStoredHeader`)
+ * a starý text kategorie tržby po změně `revenue_category_id`.
  */
-export function draftPayload(invoice, changes, lines) {
+export function draftPayload(invoice, changes, lines, { rederive = false } = {}) {
   const header = merged(invoice, changes, INVOICE_HEADER_FIELDS);
   if (changes.currency !== undefined) {
-    delete header.currency_id;
-    header.currency = String(changes.currency).toUpperCase();
+    // Explicitní null: server pak měnu dohledá podle kódu (InvoiceDefaults) místo toho,
+    // aby doplnil uloženou (`UpdateInvoiceAction::mergeStoredHeader`); bez něj byla změna měny tichý no-op.
+    header.currency_id = null;
+    header.currency = changes.currency;
   }
-  if (changes.exchange_rate !== undefined) header.exchange_rate = changes.exchange_rate;
+  if (rederive && changes.vat_classification_code === undefined) delete header.vat_classification_code;
+  if (changes.revenue_category_id !== undefined) delete header.revenue_category;
+  for (const key of INVOICE_OPTIONAL_HEADER_FIELDS) {
+    if (changes[key] !== undefined) header[key] = changes[key];
+  }
   return { ...header, items: lines };
+}
+
+/**
+ * Sloupce hlavičky, které server zapisuje jen s klíčem v těle a jinak je nechá být.
+ * Posílají se proto jen při změně.
+ */
+const INVOICE_OPTIONAL_HEADER_FIELDS = [
+  'exchange_rate', 'number_series_id', 'branding_profile_id', 'cash_register_id', 'hide_customer_on_pdf',
+];
+
+/**
+ * Pole hlavičky vydané faktury společná pro `create_invoice` a `update_invoice`.
+ * Číselníky k ID: `list_number_series`, `list_price_levels`, `list_cash_registers`,
+ * `list_branding_profiles`, `list_revenue_categories`, `list_vat_classifications`.
+ */
+const INVOICE_HEADER_INPUT = {
+  payment_method: str(PAYMENT_METHOD_HELP, { enum: PAYMENT_METHODS }),
+  cash_register_id: int(
+    'Jen `payment_method: "cash"`: pokladna (`list_cash_registers`), do které se platba inkasuje. Po vystavení '
+    + 'z ní vznikne příjmový pokladní doklad. 0 volbu zruší.',
+    { minimum: 0 },
+  ),
+  number_series_id: int(
+    'Číselná řada dokladu (`list_number_series` s `document: "invoices"`). Bez zadání výchozí řada; '
+    + 'číslo se přidělí při vystavení.',
+    { minimum: 1 },
+  ),
+  price_level_id: int('Cenová hladina dokladu (`list_price_levels`). 0 = hladina odběratele.', { minimum: 0 }),
+  branding_profile_id: int(
+    'Brandingový profil (logo, hlavička, bankovní účet na PDF), `list_branding_profiles`. 0 = výchozí identita firmy.',
+    { minimum: 0 },
+  ),
+  is_simplified: bool('Zjednodušený daňový doklad (§ 30 ZDPH, do 10 000 Kč s DPH). U nového nemusí mít odběratele.'),
+  hide_customer_on_pdf: bool('Nevypisovat odběratele na PDF (jen u zjednodušeného dokladu).'),
+  rounding_mode: str(
+    'Zaokrouhlení celkové částky: `auto` = na koruny jen u hotovosti, `none` = bez zaokrouhlení, '
+    + '`whole_czk` = vždy na celé koruny.',
+    { enum: ['auto', 'none', 'whole_czk'] },
+  ),
+  vat_classification_code: str(
+    'Kód členění DPH hlavičky (`list_vat_classifications`, strana `sales`). Jen na výslovný pokyn; '
+    + 'bez něj ho server odvodí z položek, odběratele a přenesené povinnosti.',
+  ),
+  auto_send_reminders: bool('Posílat k dokladu automatické upomínky po splatnosti.'),
+  income_tax_exempt: bool('Příjem osvobozený od daně z příjmů (nezahrne se do základu daně).'),
+  income_tax_exempt_reason: str('Důvod osvobození, např. paragraf zákona.', { maxLength: 255 }),
+  supplier_order_number: str('Číslo objednávky odběratele.', { maxLength: 100 }),
+  payment_variable_symbol: str('Variabilní symbol pro platbu, liší-li se od čísla dokladu (jen číslice).', { maxLength: 10 }),
+  note_above_items: str('Poznámka nad položkami.'),
+};
+const INVOICE_HEADER_INPUT_KEYS = Object.keys(INVOICE_HEADER_INPUT);
+
+/** Nula v ID číselníku znamená „bez volby"; server čeká null. */
+function zeroIdsToNull(body) {
+  for (const key of ['project_id', 'revenue_category_id', 'price_level_id', 'branding_profile_id', 'cash_register_id']) {
+    if (body[key] === 0) body[key] = null;
+  }
+  return body;
+}
+
+/** Hotovostní pokladna bez platby v hotovosti by nikdy nic nezaúčtovala. */
+function checkCashRegister(paymentMethod, cashRegisterId) {
+  if (cashRegisterId != null && cashRegisterId !== 0 && paymentMethod !== 'cash') {
+    throw new Error('Pokladna (`cash_register_id`) patří jen k platbě v hotovosti (`payment_method: "cash"`).');
+  }
 }
 
 /** Výsledek úpravy: co se změnilo a doklad tak, jak ho po uložení vrátil server. */
@@ -552,7 +675,17 @@ const STOCK_DOC_LINES = arrayOf(
     qty: num('Množství v měrné jednotce karty. Vždy kladné, směr pohybu určuje `doc_type`.', { exclusiveMinimum: 0 }),
     unit_cost: num('Pořizovací cena za MJ bez DPH. Jen u příjemky (`receipt`) — u výdeje a převodky si ji doplní zaúčtování.'),
     extra_cost: num('Vedlejší pořizovací náklady rozpočítané na řádek (doprava, clo). Jen u příjemky.'),
+    purchase_invoice_item_id: int('Řádek přijaté faktury, ze kterého příjemka vznikla. Při úpravě příjemky z faktury ho pošli zpět, jinak se vazba ztratí.'),
+    fill_intrastat: {
+      type: 'boolean',
+      description: 'Jen `true`: po zaúčtování doplní na kartu KN8 a zemi původu z řádku faktury (`purchase_invoice_item_id` té faktury, ze které příjemka vznikla), pokud tam chybí. Nastavit vyžaduje právo upravovat skladové karty. Při úpravě konceptu pošli zpět, jinak se volba zruší.',
+    },
     note: str('Poznámka k řádku.'),
+    purchase_invoice_item_id: int('Řádek přijaté faktury, ze kterého příjemka vznikla. Při úpravě příjemky z faktury ho pošli zpět, jinak se vazba ztratí.'),
+    remember_seller_code: {
+      type: 'boolean',
+      description: 'Jen `true`: po zaúčtování uloží kód z řádku faktury (`purchase_invoice_item_id` té faktury, ze které příjemka vznikla) ke kartě pro tohoto dodavatele a odebere ho z jeho ostatních karet. Nastavit vyžaduje právo upravovat skladové karty. Při úpravě konceptu pošli zpět, jinak se volba zruší.',
+    },
   },
   ['stock_item_id', 'qty'],
   { minItems: 1 },
@@ -582,6 +715,8 @@ function codebookTools({ names, titles, descriptions, path, fields, required, li
   return [
     {
       name: names.list,
+      api: false,
+      apiReason: NOT_IN_CLIENT_CATALOG,
       title: titles.list,
       description: descriptions.list,
       inputSchema: schema({
@@ -593,6 +728,8 @@ function codebookTools({ names, titles, descriptions, path, fields, required, li
     },
     {
       name: names.get,
+      api: false,
+      apiReason: NOT_IN_CLIENT_CATALOG,
       title: titles.get,
       description: descriptions.get,
       inputSchema: schema({ id: idField }, ['id']),
@@ -601,6 +738,8 @@ function codebookTools({ names, titles, descriptions, path, fields, required, li
     },
     {
       name: names.create,
+      api: false,
+      apiReason: NOT_IN_CLIENT_CATALOG,
       title: titles.create,
       description: descriptions.create,
       inputSchema: schema(fields, required),
@@ -609,6 +748,8 @@ function codebookTools({ names, titles, descriptions, path, fields, required, li
     },
     {
       name: names.update,
+      api: false,
+      apiReason: NOT_IN_CLIENT_CATALOG,
       title: titles.update,
       description: descriptions.update,
       inputSchema: schema({ id: idField, ...fields }, ['id']),
@@ -617,6 +758,8 @@ function codebookTools({ names, titles, descriptions, path, fields, required, li
     },
     {
       name: names.delete,
+      api: false,
+      apiReason: NOT_IN_CLIENT_CATALOG,
       title: titles.delete,
       description: descriptions.delete,
       inputSchema: schema({ id: idField, confirm: CONFIRM }, ['id']),
@@ -647,11 +790,20 @@ export const TOOLS = [
   ...PURCHASE_TOOLS,
   ...OTHER_ITEM_TOOLS,
   ...FILE_TOOLS,
+  // Banka, karta partnera, dokumenty a čtení účetnictví mimo faktury (rozšíření katalogu).
+  ...BANK_TOOLS,
+  ...CLIENT_TOOLS,
+  ...ACCOUNTING_READ_TOOLS,
+  ...CODEBOOK_TOOLS,
+  ...DOCUMENT_DIMENSION_TOOLS,
   // ──────────────────────────────────────────────────────────────────────────
   // Diagnostika
   // ──────────────────────────────────────────────────────────────────────────
   {
     name: 'whoami',
+    api: [
+      ['GET', '/api/auth/api-me'],
+    ],
     title: 'Ověření připojení',
     description:
       'Ověří API token a vrátí, pod jakým uživatelem, rolí a firmou (supplier) se volá '
@@ -663,6 +815,9 @@ export const TOOLS = [
   },
   {
     name: 'list_suppliers',
+    api: [
+      ['GET', '/api/suppliers'],
+    ],
     title: 'Seznam firem',
     description:
       'Firmy (supplier), ke kterým má uživatel aktuálně přístup. Starší token vázaný '
@@ -678,6 +833,8 @@ export const TOOLS = [
   // ──────────────────────────────────────────────────────────────────────────
   {
     name: 'list_payroll_people',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Seznam zaměstnanců',
     description:
       'Najde zaměstnance a vrátí lehký přehled jejich pracovních vztahů. '
@@ -698,13 +855,17 @@ export const TOOLS = [
   },
   {
     name: 'create_payroll_person',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Založit zaměstnance',
     description:
       'Založí osobu i její první pracovní vztah. Slouží k onboardingu z jiné '
       + 'agendy — z personálního systému, z docházky, ze skriptu. Nová osoba do '
       + 'mzdy sama nevstoupí: mzdový běh, schválení a podání zůstávají jen pro '
       + 'webové rozhraní. `monthly_gross` je v KORUNÁCH, na rozdíl od '
-      + '`change_payroll_salary`, které pracuje v haléřích.',
+      + '`change_payroll_salary`, které pracuje v haléřích. Bez výslovného režimu zůstává '
+      + '`remuneration_type` NULL (dosavadní chování); nástroj režim nemění. Hodinové '
+      + 'podmínky se nastavují na kartě pracovního vztahu ve webu.',
     inputSchema: schema({
       full_name: str('Celé jméno tak, jak má být na mzdových dokladech.', { minLength: 2, maxLength: 200 }),
       first_name: str('Křestní jméno; bez něj se odvodí z `full_name`.', { maxLength: 100 }),
@@ -735,22 +896,32 @@ export const TOOLS = [
   },
   {
     name: 'get_payroll_person',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Detail zaměstnance a sjednané mzdy',
     description:
       'Vrátí osobu a všechny pracovní vztahy. `monthly_gross_minor` je aktuálně '
-      + 'sjednaná měsíční hrubá mzda v haléřích; `terms` obsahují její historické podmínky.',
+      + 'sjednaná měsíční hrubá mzda v haléřích; u hodinového vztahu je NULL. `terms` '
+      + 'obsahují historii, `remuneration_type` NULL/monthly/hourly (NULL zachovává dosavadní '
+      + 'chování), `hourly_rate_minor` a druh podkladu `remuneration_basis_kind` s označením '
+      + '`remuneration_basis`. Sjednaná sazba je oddělená od průměrného a pravděpodobného '
+      + 'hodinového výdělku; ze sazby ani úvazku se měsíční mzda neodvozuje.',
     inputSchema: schema({ employee_id: int('ID zaměstnance.') }, ['employee_id']),
     write: false,
     run: (c, a, tool) => c.get(`/payroll/people/${seg(a.employee_id)}`, null, tool),
   },
   {
     name: 'change_payroll_salary',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Změnit sjednanou mzdu',
     description:
       'Změní měsíční hrubou mzdu pracovního vztahu. `new_terms` založí novou verzi '
       + 'od `effective_from`, takže starší období zachovají původní mzdu. `correction` opraví '
       + 'chybnou částku v aktuální verzi bez změny účinnosti; server ji odmítne, pokud už byla '
-      + 'verze použita ve mzdovém běhu. Nástroj nesmí měnit ostatní pracovní podmínky.',
+      + 'verze použita ve mzdovém běhu. U hodinového vztahu nástroj změnu měsíční mzdy '
+      + 'odmítne; sazbu upravte na kartě vztahu. NULL režim zachová dosavadní chování. '
+      + 'Nástroj nesmí měnit režim odměňování ani ostatní pracovní podmínky.',
     inputSchema: schema({
       employee_id: int('ID zaměstnance.'),
       employment_id: int('ID pracovního vztahu, jehož mzda se mění.'),
@@ -765,6 +936,9 @@ export const TOOLS = [
     run: async (c, a, tool) => {
       const detail = await c.get(`/payroll/people/${seg(a.employee_id)}`, null, tool);
       const employment = payrollEmploymentFrom(detail, a.employment_id);
+      if (employment.terms?.[0]?.remuneration_type === 'hourly') {
+        throw new Error('Tento vztah má hodinové odměňování. Nástroj mění pouze měsíční mzdu; sjednanou hodinovou sazbu a podmínky upravte na kartě pracovního vztahu.');
+      }
       const body = {
         row_version: employment.row_version,
         monthly_gross_minor: a.monthly_gross_minor,
@@ -782,6 +956,8 @@ export const TOOLS = [
   },
   {
     name: 'list_payroll_components',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Seznam mzdových složek',
     description:
       'Vrátí mzdové složky a jejich ID pro zadání odměny, srážky nebo jiného měsíčního vstupu.',
@@ -791,6 +967,8 @@ export const TOOLS = [
   },
   {
     name: 'list_payroll_inputs',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Měsíční mzdové vstupy',
     description: 'Rozpracované, schválené i uzamčené vstupy mzdy za měsíc. Nástroj je pouze čte.',
     inputSchema: schema({
@@ -819,6 +997,8 @@ export const TOOLS = [
   },
   {
     name: 'create_payroll_input',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Zadat mzdový vstup',
     description:
       'Založí odměnu, srážku nebo jinou mzdovou složku jako koncept. ID složky zjisti přes '
@@ -849,6 +1029,8 @@ export const TOOLS = [
   },
   {
     name: 'update_payroll_input',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Upravit mzdový vstup',
     description:
       'Upraví existující mzdový vstup ve stavu `draft`. Po schválení nebo uzamčení ho server odmítne.',
@@ -882,6 +1064,8 @@ export const TOOLS = [
   },
   {
     name: 'list_payroll_runs',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Seznam mzdových běhů',
     description:
       'Najde mzdové běhy a jejich aktuální revize. Pouze čtení: MCP neumí běh vytvořit, '
@@ -900,6 +1084,8 @@ export const TOOLS = [
   },
   {
     name: 'get_payroll_salary_result',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Výsledek mzdy zaměstnance',
     description:
       'Vrátí vypočtený rozpad mzdy konkrétního zaměstnance. Lze zadat přímo `revision_id`, '
@@ -932,6 +1118,8 @@ export const TOOLS = [
   },
   {
     name: 'get_payroll_time_month',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Docházka za měsíc',
     description: 'Vrátí směny, zápisy docházky, součty a stav přesčasových limitů. Nic neschvaluje.',
     inputSchema: schema({
@@ -952,6 +1140,8 @@ export const TOOLS = [
   },
   {
     name: 'save_payroll_time_entry',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Zadat docházku nebo přesčas',
     description:
       'Uloží versionovaný záznam docházky. Pro přesčas nastav `category: overtime`. '
@@ -988,6 +1178,8 @@ export const TOOLS = [
   },
   {
     name: 'list_payroll_absences',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Seznam absencí',
     description: 'Absence, dovolené a DPN v zadaném období.',
     inputSchema: schema({
@@ -1008,6 +1200,8 @@ export const TOOLS = [
   },
   {
     name: 'list_payroll_average_earnings',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Průměrné výdělky pro náhrady',
     description:
       'Vrátí snapshoty průměrného hodinového výdělku. Jejich ID je povinné pro DPN, '
@@ -1018,6 +1212,8 @@ export const TOOLS = [
   },
   {
     name: 'create_payroll_absence',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Zadat absenci nebo neschopenku',
     description:
       'Založí absenci ve stavu `requested`. Pro neschopenku použij `dpn`. DPN, dovolená '
@@ -1058,6 +1254,9 @@ export const TOOLS = [
   // ──────────────────────────────────────────────────────────────────────────
   {
     name: 'search_clients',
+    api: [
+      ['GET', '/api/clients'],
+    ],
     title: 'Hledat odběratele',
     description:
       'Najde odběratele/dodavatele podle názvu, IČO nebo e-mailu. Používej k získání '
@@ -1074,6 +1273,9 @@ export const TOOLS = [
   },
   {
     name: 'get_client',
+    api: [
+      ['GET', '/api/clients/{id}'],
+    ],
     title: 'Detail odběratele',
     description: 'Kompletní karta odběratele včetně fakturačních údajů a splatnosti.',
     inputSchema: schema({ id: int('ID odběratele.') }, ['id']),
@@ -1082,6 +1284,8 @@ export const TOOLS = [
   },
   {
     name: 'lookup_company_in_ares',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Vyhledat firmu v ARES',
     description:
       'Načte údaje firmy z rejstříku ARES podle IČO — název, adresu, DIČ, právní formu '
@@ -1096,6 +1300,11 @@ export const TOOLS = [
   },
   {
     name: 'create_client',
+    api: [
+      ['POST', '/api/clients'],
+      ['POST', '/api/clients/lookup-ares'],
+      ['GET', '/api/clients'],
+    ],
     title: 'Založit odběratele',
     description:
       'Založí nového odběratele (nebo dodavatele). Typické zadání: '
@@ -1103,6 +1312,9 @@ export const TOOLS = [
       + 'KDYŽ ZADÁŠ `ic`, ÚDAJE SE DOTÁHNOU Z ARES — název, adresa, DIČ i registrace '
       + 'k DPH. Cokoli vyplníš ručně má přednost před tím, co vrátí ARES.\n\n'
       + 'Bez IČO je nutné vyplnit `company_name`, `street`, `city` a `zip`.\n\n'
+      + 'Drobný zákazník (`simplified_only: true`, např. stálý zákazník z prodejny) stačí se '
+      + 'jménem a e-mailem nebo telefonem, adresa ani IČO nejsou potřeba. Plátce mu ale smí '
+      + 'vystavit jen zjednodušený daňový doklad (§ 30 ZDPH) do 10 000 Kč s DPH.\n\n'
       + 'Před založením se kontroluje, jestli odběratel se stejným IČO nebo DIČ už '
       + 'neexistuje — pokud ano, nic se nevytvoří a vrátí se odkaz na stávající '
       + 'kartu. Vědomý duplicitní zápis povolíš přes `allow_duplicate`.',
@@ -1121,6 +1333,7 @@ export const TOOLS = [
       is_customer: bool('Je odběratel (výchozí ano).'),
       is_vendor: bool('Je i dodavatel (výchozí ne).'),
       note: str('Interní poznámka.'),
+      simplified_only: bool('Drobný zákazník bez adresy — jen zjednodušené daňové doklady (§ 30 ZDPH).'),
       allow_duplicate: bool('Založit i když už odběratel se stejným IČO/DIČ existuje.'),
     }),
     write: true,
@@ -1169,12 +1382,17 @@ export const TOOLS = [
         is_customer: a.is_customer !== false,
         is_vendor: a.is_vendor === true,
         note: a.note ?? '',
+        simplified_only: a.simplified_only === true,
       };
       if (a.hourly_rate !== undefined) payload.hourly_rate = Number(a.hourly_rate);
       // ARES je pro CZ autoritativní zdroj registrace k DPH.
       if (ares && typeof ares.is_vat_payer === 'boolean') payload.is_vat_payer = ares.is_vat_payer;
 
-      const missing = ['company_name', 'street', 'city', 'zip'].filter((f) => payload[f] === '');
+      if (payload.simplified_only && payload.main_email === '' && !payload.phone) {
+        throw new Error('Drobný zákazník musí mít e-mail nebo telefon.');
+      }
+      const required = payload.simplified_only ? ['company_name'] : ['company_name', 'street', 'city', 'zip'];
+      const missing = required.filter((f) => payload[f] === '');
       if (missing.length > 0) {
         throw new Error(
           `Chybí povinné údaje: ${missing.join(', ')}. `
@@ -1206,6 +1424,11 @@ export const TOOLS = [
   },
   {
     name: 'update_client',
+    api: [
+      ['GET', '/api/clients/{id}'],
+      ['PUT', '/api/clients/{id}'],
+      ['POST', '/api/clients/lookup-ares'],
+    ],
     title: 'Upravit odběratele',
     description:
       'Změní údaje existujícího odběratele. Uveď jen to, co se má změnit — zbytek '
@@ -1233,6 +1456,7 @@ export const TOOLS = [
       is_customer: bool('Je odběratel.'),
       is_vendor: bool('Je dodavatel.'),
       note: str('Interní poznámka.'),
+      simplified_only: bool('Drobný zákazník bez adresy — jen zjednodušené daňové doklady (§ 30 ZDPH). Vypnutí vyžaduje adresu.'),
     }, ['id']),
     write: true,
     run: async (c, a, tool) => {
@@ -1278,6 +1502,7 @@ export const TOOLS = [
         // (tichá změna flagu by se propsala do nových dokladů; stávající nesou snapshot).
         is_vat_payer: a.is_vat_payer ?? current.is_vat_payer,
         note: a.note ?? current.note ?? '',
+        simplified_only: a.simplified_only ?? current.simplified_only ?? false,
       };
       if (a.hourly_rate !== undefined) payload.hourly_rate = Number(a.hourly_rate);
       else if (current.hourly_rate !== undefined) payload.hourly_rate = current.hourly_rate;
@@ -1294,6 +1519,9 @@ export const TOOLS = [
   // ──────────────────────────────────────────────────────────────────────────
   {
     name: 'list_invoices',
+    api: [
+      ['GET', '/api/invoices'],
+    ],
     title: 'Seznam vystavených faktur',
     description:
       'Vystavené doklady seskupené po měsících. Filtruje se přes stav, typ, odběratele, '
@@ -1322,6 +1550,12 @@ export const TOOLS = [
       include_vat_breakdown: bool('Přidat rozpis DPH.'),
       include_posting_accounts: bool('Přidat předkontace účetních účtů.'),
       include_kh: bool('Přidat části kontrolního hlášení.'),
+      include_vat_classification: bool('Přidat členění plnění z evidence DPH a skutečné řádky přiznání.'),
+      sort_key: str('Řazení podle sloupce.', { enum: [
+        'number', 'client', 'type', 'issued', 'due', 'amount', 'status', 'paid_at', 'payment_method', 'booked_at',
+        'amount_czk', 'base', 'vat', 'total', 'project', 'sent_at', 'paid_total', 'remaining_amount',
+      ] }),
+      sort_dir: str('Směr řazení, výchozí sestupně.', { enum: ['asc', 'desc'] }),
       ...PAGING,
     }),
     write: false,
@@ -1329,6 +1563,8 @@ export const TOOLS = [
       q: a.query,
       page: a.page,
       per_page: a.per_page,
+      sort_key: a.sort_key,
+      sort_dir: a.sort_dir,
       filter: {
         status: a.status,
         type: a.type,
@@ -1351,11 +1587,15 @@ export const TOOLS = [
         include_vat_breakdown: a.include_vat_breakdown === undefined ? undefined : a.include_vat_breakdown ? 1 : 0,
         include_posting_accounts: a.include_posting_accounts === undefined ? undefined : a.include_posting_accounts ? 1 : 0,
         include_kh: a.include_kh === undefined ? undefined : a.include_kh ? 1 : 0,
+        include_vat_classification: a.include_vat_classification === undefined ? undefined : a.include_vat_classification ? 1 : 0,
       },
     }, tool),
   },
   {
     name: 'list_unpaid_invoices',
+    api: [
+      ['GET', '/api/invoices'],
+    ],
     title: 'Nezaplacené faktury',
     description:
       'Přehled neuhrazených vystavených dokladů — volitelně jen ty po splatnosti. '
@@ -1379,6 +1619,9 @@ export const TOOLS = [
   },
   {
     name: 'get_invoice',
+    api: [
+      ['GET', '/api/invoices/{id}'],
+    ],
     title: 'Detail faktury',
     description: 'Hlavička, položky, rozpis DPH, stav úhrady a historie dokladu.',
     inputSchema: schema({ id: int('ID faktury.') }, ['id']),
@@ -1387,6 +1630,9 @@ export const TOOLS = [
   },
   {
     name: 'list_invoice_payments',
+    api: [
+      ['GET', '/api/invoices/{id}/payments'],
+    ],
     title: 'Úhrady faktury',
     description: 'Zaevidované úhrady konkrétního dokladu (částka, datum, zdroj).',
     inputSchema: schema({ id: int('ID faktury.') }, ['id']),
@@ -1395,13 +1641,23 @@ export const TOOLS = [
   },
   {
     name: 'create_invoice',
+    api: [
+      ['GET', '/api/invoices/{id}'],
+      ['POST', '/api/invoices'],
+    ],
     title: 'Vytvořit fakturu (koncept)',
     description:
       'Založí NOVÝ DOKLAD JAKO KONCEPT. Číslo dokladu se přiděluje až při vystavení '
       + '(`issue_invoice`), takže je pořád možné koncept zkontrolovat nebo smazat.\n\n'
       + 'Před voláním si zjisti `client_id` (`search_clients`) a `vat_rate_id` '
       + '(`list_vat_rates`). Ceny položek se zadávají BEZ DPH, pokud nenastavíš '
-      + '`prices_include_vat`.\n\n'
+      + '`prices_include_vat`. Číselníky k dalším polím: `list_number_series`, `list_revenue_categories`, '
+      + '`list_price_levels`, `list_cash_registers`, `list_branding_profiles`, `list_posting_rules`, '
+      + '`list_vat_classifications`.\n\n'
+      + 'Zjednodušený daňový doklad (`is_simplified: true`) nemusí mít odběratele, server ho naváže na '
+      + 'koncového zákazníka. Dobropis (`credit_note`) vzniká k vystavenému dokladu a vyžaduje '
+      + '`parent_invoice_id`; obvykle je jednodušší `cancel_invoice` s `mode: "credit_note"`, který položky '
+      + 'zkopíruje se zápornými částkami.\n\n'
       + 'Splátkový kalendář k nájmu (§ 31 ZDPH) je `invoice_type: "rent_calendar"`, vyžaduje '
       + '`calendar_contract_ref` a splátky mají vlastní DUZP (`tax_date` v řádku rozpisu). Platební kalendář '
       + 'záloh, typicky energie (§ 31a ZDPH), je `invoice_type: "advance_calendar"` a DUZP nemá. Rozpis plateb '
@@ -1409,7 +1665,7 @@ export const TOOLS = [
       + 'vystavit. Rozpis jde doplnit i později přes `set_invoice_payment_schedule`. Kalendář v cizí měně '
       + 'vystavit nejde. Při vystavení vznikne ke každé splátce interní doklad, na kterém běží úhrady.',
     inputSchema: schema({
-      client_id: int('ID odběratele.'),
+      client_id: int('ID odběratele. Povinné, kromě zjednodušeného dokladu (`is_simplified`) a dobropisu (převezme ho z opravované faktury).'),
       items: {
         type: 'array',
         description: 'Fakturované položky, alespoň jedna. Mezi ně lze vložit textový řádek '
@@ -1424,11 +1680,15 @@ export const TOOLS = [
           vat_rate_id: int('ID sazby DPH, viz `list_vat_rates`. U běžné položky povinné.'),
           stock_item_id: int('Volitelná vazba na skladovou kartu.'),
           warehouse_id: int('Sklad k výdeji; jen spolu se `stock_item_id`.'),
+          accrual_from: date('Časové rozlišení výnosu od (RRRR-MM-DD), jen spolu s `accrual_to`.'),
+          accrual_to: date('Časové rozlišení výnosu do (RRRR-MM-DD).'),
+          ...INVOICE_ITEM_ACCOUNTING,
         }, ['description']),
       },
       invoice_type: str('Typ dokladu, výchozí "invoice".', {
-        enum: ['invoice', 'proforma', 'credit_note', 'cancellation', 'rent_calendar', 'advance_calendar'],
+        enum: ['invoice', 'proforma', 'credit_note', 'rent_calendar', 'advance_calendar'],
       }),
+      parent_invoice_id: int('Jen `credit_note`: vystavený doklad, který dobropis opravuje. Povinné.', { minimum: 1 }),
       payment_schedule: PAYMENT_SCHEDULE_INPUT,
       calendar_contract_ref: str('Jen `rent_calendar`: nájemní smlouva, ke které splátkový kalendář patří (§ 31 ZDPH). Bez ní ho nepůjde vystavit.', { maxLength: 190 }),
       project_id: int('Zakázka; musí patřit odběrateli.'),
@@ -1436,23 +1696,50 @@ export const TOOLS = [
       due_date: date('Datum splatnosti (výchozí podle nastavení odběratele).'),
       tax_date: date('Datum zdanitelného plnění. U proformy a kalendáře se ignoruje.'),
       currency: str('Kód měny, např. CZK. Výchozí je měna odběratele.'),
+      exchange_rate: num('Ruční kurz místo kurzu ČNB (Kč za jednotku měny). Jen na výslovný pokyn.', { exclusiveMinimum: 0 }),
       language: str('Jazyk dokladu.', { enum: ['cs', 'en'] }),
       prices_include_vat: bool('Ceny položek jsou včetně DPH (DPH se dopočítá shora).'),
       reverse_charge: bool('Přenesená daňová povinnost.'),
       discount_percent: num('Sleva z celé faktury v procentech (0–100). Slevovou položku NEposílej v `items`.', { minimum: 0, maximum: 100 }),
-      payment_method: str('Způsob úhrady.', { enum: ['bank_transfer', 'card', 'cash', 'other'] }),
-      revenue_category_id: int('Kategorie tržby. Bez zadání ji doplní server podle zakázky nebo pravidel.'),
-      note: str('Poznámka na dokladu.'),
-      varsymbol: str('Ruční variabilní symbol; jinak se přidělí automaticky při vystavení.'),
-    }, ['client_id', 'items']),
+      revenue_category_id: int('Kategorie tržby (`list_revenue_categories`). Bez zadání ji doplní server podle zakázky nebo pravidel.'),
+      note: str('Poznámka pod položkami.'),
+      varsymbol: str('Ruční číslo dokladu; jinak se přidělí automaticky při vystavení.'),
+      ...INVOICE_HEADER_INPUT,
+    }, ['items']),
     write: true,
     run: async (c, a, tool) => {
-      const body = withPaymentSchedule(a);
+      const body = zeroIdsToNull(withPaymentSchedule({ ...a }));
+      checkCashRegister(body.payment_method, body.cash_register_id);
+      if (body.invoice_type === 'credit_note') {
+        if (body.parent_invoice_id === undefined) {
+          throw new Error(
+            'Dobropis musí odkazovat na opravovaný doklad (`parent_invoice_id`), jinak nepůjde do kontrolního '
+            + 'hlášení ani k zápočtu. Nejjednodušší je `cancel_invoice` s `mode: "credit_note"` u původního dokladu.',
+          );
+        }
+        const parent = await c.get(`/invoices/${seg(body.parent_invoice_id)}`, null, tool);
+        if (!['issued', 'sent', 'reminded', 'paid'].includes(parent?.status) || parent?.invoice_type === 'credit_note') {
+          throw new Error(`Doklad #${body.parent_invoice_id} není vystavená faktura, dobropis k němu založit nejde.`);
+        }
+        if (body.client_id !== undefined && Number(body.client_id) !== Number(parent.client_id)) {
+          throw new Error('Dobropis musí mít stejného odběratele jako opravovaný doklad.');
+        }
+        body.client_id ??= parent.client_id;
+      } else if (body.parent_invoice_id !== undefined) {
+        throw new Error('`parent_invoice_id` patří jen dobropisu (`invoice_type: "credit_note"`).');
+      }
+      if (body.client_id === undefined && body.is_simplified !== true) {
+        throw new Error('Zadejte odběratele (`client_id`, viz `search_clients`). Bez něj jde založit jen zjednodušený doklad (`is_simplified: true`).');
+      }
+      if (body.currency !== undefined) body.currency = String(body.currency).trim().toUpperCase();
       return checkCreatedSchedule(body, await c.post('/invoices', body, tool));
     },
   },
   {
     name: 'issue_invoice',
+    api: [
+      ['POST', '/api/invoices/{id}/issue'],
+    ],
     title: 'Vystavit fakturu',
     description:
       'Vystaví koncept — přidělí číslo dokladu a uzamkne ho pro editaci. '
@@ -1464,29 +1751,37 @@ export const TOOLS = [
   },
   {
     name: 'update_invoice',
+    api: [
+      ['GET', '/api/invoices/{id}'],
+      ['PUT', '/api/invoices/{id}'],
+      ['GET', '/api/projects'],
+      ['GET', '/api/clients'],
+      ['GET', '/api/invoices'],
+    ],
     title: 'Upravit hlavičku konceptu faktury',
     description:
-      'Změní hlavičku KONCEPTU faktury (data, splatnost, měnu, jazyk, způsob úhrady, '
-      + 'poznámky, zakázku, slevu…). Zadaná pole se změní, ostatní zůstanou, položky '
-      + 'beze změny. Na položky jsou `add_invoice_item`, `update_invoice_item` '
-      + 'a `remove_invoice_item`.\n\n'
+      'Změní hlavičku KONCEPTU faktury (odběratele, data, splatnost, měnu, kurz, jazyk, způsob úhrady, '
+      + 'pokladnu, číselnou řadu, cenovou hladinu, branding, zaokrouhlení, poznámky, zakázku, slevu…). '
+      + 'Zadaná pole se změní, ostatní zůstanou, položky beze změny včetně účtů a předkontací. Na položky '
+      + 'jsou `add_invoice_item`, `update_invoice_item` a `remove_invoice_item`.\n\n'
       + 'Doklad určíš `invoice_id`, nebo názvem odběratele (`client`) či zakázky (`project`). '
       + 'Když má odběratel víc konceptů, nástroj nehádá a vypíše je.\n\n'
-      + 'Součty a DPH přepočítá server; vrátí upravený doklad. Vystavenou fakturu '
-      + 'nástroj odmítne: ta se opravuje dobropisem nebo stornem.',
+      + 'Po změně odběratele, DUZP, data vystavení nebo přenesené povinnosti server znovu odvodí členění DPH '
+      + 'hlavičky i položek. Po změně měny nebo data načte kurz ČNB (ruční kurz zadej `exchange_rate`). '
+      + 'Součty a DPH přepočítá server; vrátí upravený doklad. Vystavenou fakturu nástroj odmítne: ta se '
+      + 'opravuje dobropisem nebo stornem (`cancel_invoice`).',
     inputSchema: schema({
       invoice_id: int('ID konceptu faktury. Když chybí, dohledá se podle `client` / `project`.'),
       client: str('Název odběratele, alternativa k `invoice_id`.'),
       project: str('Název zakázky, alternativa k `invoice_id`.'),
+      client_id: int('Nový odběratel konceptu (`search_clients`). Zakázka jiného odběratele se z dokladu odebere.', { minimum: 1 }),
       issue_date: date('Datum vystavení.'),
       due_date: date('Datum splatnosti. „Posuň o 14 dní" si spočítej z `get_invoice`.'),
       tax_date: date('Datum zdanitelného plnění (DUZP).'),
-      currency: str('Kód měny, např. EUR. Kurz se po změně měny nebo data načte znovu z ČNB.'),
+      currency: str('Kód měny, např. EUR. Kurz se po změně měny načte znovu z ČNB.', { minLength: 3, maxLength: 3 }),
       exchange_rate: num('Ruční kurz místo kurzu ČNB. Zadávej jen na výslovný pokyn.', { exclusiveMinimum: 0 }),
       language: str('Jazyk dokladu.', { enum: ['cs', 'en'] }),
-      payment_method: str('Způsob úhrady.', { enum: ['bank_transfer', 'card', 'cash', 'other'] }),
       note: str('Poznámka pod položkami. Prázdný text poznámku smaže.'),
-      note_above_items: str('Poznámka nad položkami. Prázdný text poznámku smaže.'),
       project_id: int('Zakázka; musí patřit odběrateli. 0 zakázku z dokladu odebere.', { minimum: 0 }),
       discount_percent: num('Sleva z celé faktury v procentech (0–100); slevový řádek dopočítá server.', { minimum: 0, maximum: 100 }),
       prices_include_vat: bool(
@@ -1494,14 +1789,13 @@ export const TOOLS = [
         + 'jen jejich význam, takže se změní celková částka. Ověř si to s uživatelem.',
       ),
       reverse_charge: bool('Přenesená daňová povinnost.'),
-      varsymbol: str('Ruční variabilní symbol; prázdný text = přidělí se při vystavení.'),
-      payment_variable_symbol: str('Variabilní symbol pro platbu, liší-li se od čísla dokladu.'),
-      supplier_order_number: str('Číslo objednávky odběratele.'),
-      revenue_category_id: int('Kategorie tržby. 0 kategorii z dokladu odebere.', { minimum: 0 }),
+      varsymbol: str('Ruční číslo dokladu; prázdný text = přidělí se při vystavení.'),
+      revenue_category_id: int('Kategorie tržby (`list_revenue_categories`). 0 kategorii z dokladu odebere.', { minimum: 0 }),
       invoice_type: str('Typ konceptu. Rozpis plateb kalendáře nastaví `set_invoice_payment_schedule`.', {
         enum: ['invoice', 'proforma', 'credit_note', 'rent_calendar', 'advance_calendar'],
       }),
       calendar_contract_ref: str('Jen `rent_calendar`: nájemní smlouva, ke které splátkový kalendář patří (§ 31 ZDPH).', { maxLength: 190 }),
+      ...INVOICE_HEADER_INPUT,
     }),
     write: true,
     run: async (c, a, tool) => {
@@ -1509,16 +1803,34 @@ export const TOOLS = [
       const invoice = await loadDraftInvoice(c, invoiceId, tool);
 
       const changes = changed(a, [
-        'issue_date', 'due_date', 'tax_date', 'currency', 'exchange_rate', 'language',
-        'payment_method', 'note_above_items', 'project_id', 'discount_percent',
-        'prices_include_vat', 'reverse_charge', 'varsymbol', 'payment_variable_symbol',
-        'supplier_order_number', 'invoice_type', 'revenue_category_id', 'calendar_contract_ref',
+        'client_id', 'issue_date', 'due_date', 'tax_date', 'exchange_rate', 'language',
+        'project_id', 'discount_percent', 'prices_include_vat', 'reverse_charge', 'varsymbol',
+        'invoice_type', 'revenue_category_id', 'calendar_contract_ref', ...INVOICE_HEADER_INPUT_KEYS,
       ]);
       if (a.note !== undefined) changes.note_below_items = a.note;
-      if (changes.project_id === 0) changes.project_id = null;
-      if (changes.revenue_category_id === 0) changes.revenue_category_id = null;
+      zeroIdsToNull(changes);
+      for (const key of ['vat_classification_code', 'income_tax_exempt_reason', 'supplier_order_number', 'payment_variable_symbol']) {
+        if (changes[key] !== undefined) changes[key] = nullIfEmpty(changes[key]);
+      }
+      const currencyCode = a.currency !== undefined ? String(a.currency).trim().toUpperCase() : undefined;
+      if (currencyCode !== undefined && currencyCode !== String(invoice.currency ?? '').toUpperCase()) {
+        changes.currency = currencyCode;
+      }
       if (Object.keys(changes).length === 0) {
-        throw new Error('Není co měnit. Zadejte aspoň jedno pole hlavičky.');
+        throw new Error('Není co měnit. Zadejte aspoň jedno pole hlavičky, které se liší od dokladu.');
+      }
+      checkCashRegister(changes.payment_method ?? invoice.payment_method,
+        changes.cash_register_id !== undefined ? changes.cash_register_id : null);
+      if (changes.invoice_type === 'credit_note' && !invoice.parent_invoice_id) {
+        throw new Error(
+          'Koncept nemá vazbu na opravovaný doklad, dobropis z něj udělat nejde. Dobropis k vystavené faktuře '
+          + 'založí `cancel_invoice` s `mode: "credit_note"`.',
+        );
+      }
+      if (changes.client_id !== undefined && Number(changes.client_id) !== Number(invoice.client_id)
+        && changes.project_id === undefined) {
+        // Zakázka patří odběrateli; server by ji u jiného odběratele odmítl.
+        changes.project_id = null;
       }
 
       // Položky se posílají vždy: server z nich přegeneruje slevový řádek a po změně
@@ -1528,17 +1840,24 @@ export const TOOLS = [
       );
       const lines = invoiceLines(invoice).map((item) => lineForPut(item, { rederive }));
 
-      const saved = await c.put(`/invoices/${seg(invoiceId)}`, draftPayload(invoice, changes, lines), tool);
+      const saved = await c.put(`/invoices/${seg(invoiceId)}`, draftPayload(invoice, changes, lines, { rederive }), tool);
       return draftResult(invoiceId, { changed: changes }, saved);
     },
   },
   {
     name: 'add_invoice_item',
+    api: [
+      ['GET', '/api/invoices/{id}'],
+      ['PUT', '/api/invoices/{id}'],
+      ['GET', '/api/projects'],
+      ['GET', '/api/clients'],
+      ['GET', '/api/invoices'],
+    ],
     title: 'Přidat položku na koncept faktury',
     description:
       'Přidá položku na KONCEPT faktury, např. „přidej na koncept pro ACME dopravu, 1 ks, 350 Kč". '
-      + 'Existující položky zůstanou beze změny, včetně skrytých údajů (časové rozlišení, '
-      + 'sklad, OSS, pořadí).\n\n'
+      + 'Existující položky zůstanou beze změny, včetně skrytých údajů (účty a předkontace, časové '
+      + 'rozlišení, sklad, OSS, vazba na výkaz, dimenze).\n\n'
       + 'S `kind: "text"` přidá TEXTOVÝ ŘÁDEK mezi položky (nadpis, poznámka k části dokladu): '
       + 'stačí `description`, množství, cenu ani sazbu nezadávej. Do částek ani DPH nevstupuje.\n\n'
       + 'Doklad určíš `invoice_id`, nebo názvem odběratele (`client`) či zakázky (`project`); '
@@ -1560,6 +1879,7 @@ export const TOOLS = [
       accrual_to: date('Časové rozlišení do (RRRR-MM-DD).'),
       stock_item_id: int('Volitelná vazba na skladovou kartu.'),
       warehouse_id: int('Sklad k výdeji; jen spolu se `stock_item_id`.'),
+      ...INVOICE_ITEM_ACCOUNTING,
     }, ['description']),
     write: true,
     run: async (c, a, tool) => {
@@ -1586,7 +1906,7 @@ export const TOOLS = [
           unit: String(a.unit ?? 'ks').trim() || 'ks',
           unit_price_without_vat: Number(a.unit_price_without_vat),
           vat_rate_id: a.vat_rate_id,
-          ...changed(a, ['accrual_from', 'accrual_to', 'stock_item_id', 'warehouse_id']),
+          ...changed(a, ['accrual_from', 'accrual_to', 'stock_item_id', 'warehouse_id', ...INVOICE_ITEM_ACCOUNTING_KEYS]),
         };
       const at = a.position !== undefined ? Math.min(Number(a.position), lines.length + 1) - 1 : lines.length;
       lines.splice(at, 0, added);
@@ -1599,14 +1919,19 @@ export const TOOLS = [
   },
   {
     name: 'update_invoice_item',
+    api: [
+      ['GET', '/api/invoices/{id}'],
+      ['PUT', '/api/invoices/{id}'],
+    ],
     title: 'Upravit položku konceptu faktury',
     description:
       'Změní jednu položku KONCEPTU faktury, např. „změň cenu druhé položky na 1 800 Kč". '
       + 'Položku určíš `item_id`, nebo pořadím `row` (1 = první, jak je vidí uživatel; '
       + 'slevový řádek se nepočítá). Oboje vrátí `get_invoice`.\n\n'
-      + 'Změní se jen zadaná pole. Ostatní pole položky (časové rozlišení, sklad, OSS) '
-      + 'i ostatní položky zůstanou. Sazbu DPH měň jen na výslovný pokyn; daňové '
-      + 'zařazení řádku pak server odvodí znovu.',
+      + 'Změní se jen zadaná pole. Ostatní pole položky (účty, předkontace, časové rozlišení, sklad, '
+      + 'OSS, vazba na výkaz) i ostatní položky zůstanou. Sazbu DPH měň jen na výslovný pokyn; daňové '
+      + 'zařazení řádku pak server odvodí znovu. Účet, protiúčet, předkontaci nebo kód členění DPH '
+      + 'zrušíš prázdným textem (server pak použije výchozí).',
     inputSchema: schema({
       invoice_id: int('ID konceptu faktury.'),
       item_id: int('ID položky.'),
@@ -1618,12 +1943,13 @@ export const TOOLS = [
       vat_rate_id: int('Nová sazba DPH, viz `list_vat_rates`. Jen na výslovný pokyn.'),
       accrual_from: str('Časové rozlišení od (RRRR-MM-DD); prázdný text ho zruší.'),
       accrual_to: str('Časové rozlišení do (RRRR-MM-DD); prázdný text ho zruší.'),
+      ...INVOICE_ITEM_ACCOUNTING,
     }, ['invoice_id']),
     write: true,
     run: async (c, a, tool) => {
       const changes = changed(a, [
         'description', 'quantity', 'unit', 'unit_price_without_vat', 'vat_rate_id',
-        'accrual_from', 'accrual_to',
+        'accrual_from', 'accrual_to', ...INVOICE_ITEM_ACCOUNTING_KEYS,
       ]);
       if (Object.keys(changes).length === 0) throw new Error('Není co měnit. Zadejte aspoň jedno pole položky.');
       if (changes.quantity !== undefined && !(Number(changes.quantity) !== 0)) {
@@ -1639,10 +1965,12 @@ export const TOOLS = [
       }
 
       const rateChanged = changes.vat_rate_id !== undefined && Number(changes.vat_rate_id) !== Number(before.vat_rate_id);
-      const lines = items.map((item, i) => lineForPut(item, { rederive: i === index && rateChanged }));
+      const lines = items.map((item, i) => lineForPut(item, {
+        rederive: i === index && rateChanged && changes.vat_classification_code === undefined,
+      }));
       const line = lines[index];
-      for (const key of ['accrual_from', 'accrual_to']) {
-        if (changes[key] === '') changes[key] = null;
+      for (const key of ['accrual_from', 'accrual_to', ...INVOICE_ITEM_ACCOUNTING_KEYS]) {
+        if (changes[key] !== undefined) changes[key] = nullIfEmpty(changes[key]);
       }
       Object.assign(line, changes);
       if (changes.unit !== undefined && changes.unit !== before.unit) {
@@ -1663,10 +1991,14 @@ export const TOOLS = [
   },
   {
     name: 'remove_invoice_item',
+    api: [
+      ['GET', '/api/invoices/{id}'],
+      ['PUT', '/api/invoices/{id}'],
+    ],
     title: 'Odebrat položku z konceptu faktury',
     description:
       'Odebere jednu položku KONCEPTU faktury, určenou `item_id` nebo pořadím `row` '
-      + '(1 = první, slevový řádek se nepočítá). Ostatní položky zůstanou beze změny. '
+      + '(1 = první, slevový řádek se nepočítá). Ostatní položky zůstanou beze změny včetně svých dimenzí. '
       + 'Jedinou položku odebrat nejde, doklad musí nějakou mít.\n\n'
       + 'Bez `confirm: true` nic neodebere a jen vrátí, která položka by zmizela.',
     inputSchema: schema({
@@ -1684,7 +2016,7 @@ export const TOOLS = [
       const target = items[index];
       // Textové řádky nejsou plnění: doklad musí mít aspoň jednu skutečnou položku.
       if (!isTextRow(target) && items.filter((item) => !isTextRow(item)).length === 1) {
-        throw new Error('Doklad má jen tuto položku a bez položek ho uložit nejde. Upravte ji, nebo koncept smažte v aplikaci.');
+        throw new Error('Doklad má jen tuto položku a bez položek ho uložit nejde. Upravte ji, nebo koncept smažte (`delete_invoice_draft`).');
       }
       requireConfirm(a, 'Z konceptu se má odebrat položka',
         `${index + 1}. ${target.description} (${target.quantity} ${target.unit ?? ''} × ${target.unit_price_without_vat})`);
@@ -1696,6 +2028,9 @@ export const TOOLS = [
   },
   {
     name: 'send_invoice',
+    api: [
+      ['POST', '/api/invoices/{id}/send'],
+    ],
     title: 'Odeslat fakturu e-mailem',
     description:
       'Odešle vystavenou fakturu e-mailem odběrateli. Bez `to` se použijí fakturační '
@@ -1715,6 +2050,9 @@ export const TOOLS = [
   },
   {
     name: 'mark_invoice_paid',
+    api: [
+      ['POST', '/api/invoices/{id}/mark-paid'],
+    ],
     title: 'Označit fakturu jako uhrazenou',
     description:
       'Zaeviduje úhradu dokladu. Používej jen tam, kde platba nepřijde z bankovního '
@@ -1722,25 +2060,37 @@ export const TOOLS = [
     inputSchema: schema({
       id: int('ID faktury.'),
       paid_at: date('Datum úhrady (RRRR-MM-DD). Výchozí dnes.'),
+      send_payment_thanks: bool('Poslat odběrateli děkovný e-mail za úhradu. E-mail nejde vzít zpět, jen na výslovný pokyn.'),
     }, ['id']),
     write: true,
-    run: (c, a, tool) => c.post(`/invoices/${seg(a.id)}/mark-paid`, { paid_at: a.paid_at }, tool),
+    run: (c, a, tool) => c.post(`/invoices/${seg(a.id)}/mark-paid`, changed(a, ['paid_at', 'send_payment_thanks']), tool),
   },
   {
     name: 'send_invoice_reminder',
+    api: [
+      ['POST', '/api/invoices/{id}/reminder'],
+    ],
     title: 'Poslat upomínku',
     description:
       'Odešle upomínku k nezaplacené faktuře po splatnosti. Stejně jako `send_invoice` '
       + 'jde o nevratné odeslání e-mailu zákazníkovi — jen na výslovný pokyn.',
-    inputSchema: schema({ id: int('ID faktury.') }, ['id']),
+    inputSchema: schema({
+      id: int('ID faktury.'),
+      to: { type: 'array', items: { type: 'string' }, description: 'Přepis příjemců; jinak adresy pro upomínky z karty odběratele (`get_invoice_recipients` s `type: "reminders"`).' },
+      cc: { type: 'array', items: { type: 'string' }, description: 'Kopie.' },
+      bcc: { type: 'array', items: { type: 'string' }, description: 'Skrytá kopie.' },
+    }, ['id']),
     write: true,
-    run: (c, a, tool) => c.post(`/invoices/${seg(a.id)}/reminder`, {}, tool),
+    run: (c, a, tool) => c.post(`/invoices/${seg(a.id)}/reminder`, changed(a, ['to', 'cc', 'bcc']), tool),
   },
   // ──────────────────────────────────────────────────────────────────────────
   // Výkazy práce a materiálu
   // ──────────────────────────────────────────────────────────────────────────
   {
     name: 'list_projects',
+    api: [
+      ['GET', '/api/projects'],
+    ],
     title: 'Seznam zakázek',
     description:
       'Zakázky s hodinovou sazbou, měnou a splatností. Používej k dohledání '
@@ -1759,6 +2109,9 @@ export const TOOLS = [
   },
   {
     name: 'get_project',
+    api: [
+      ['GET', '/api/projects/{id}'],
+    ],
     title: 'Detail zakázky',
     description:
       'Vrátí kartu zakázky včetně obratu po měsících a letech, počtu faktur '
@@ -1769,6 +2122,9 @@ export const TOOLS = [
   },
   {
     name: 'project_stats',
+    api: [
+      ['GET', '/api/projects/stats'],
+    ],
     title: 'Statistiky zakázek',
     description:
       'Agregovaný přehled zakázek: nejlepší zakázky letos, loni a za posledních '
@@ -1779,6 +2135,10 @@ export const TOOLS = [
   },
   {
     name: 'project_profitability',
+    api: [
+      ['GET', '/api/projects/profitability'],
+      ['GET', '/api/projects/{id}/profit'],
+    ],
     title: 'Ziskovost zakázek',
     description:
       'Výnosy, náklady a ziskovost všech zakázek; s `id` vrátí detail jedné zakázky. '
@@ -1800,6 +2160,11 @@ export const TOOLS = [
   },
   {
     name: 'save_project',
+    api: [
+      ['GET', '/api/projects/{id}'],
+      ['POST', '/api/projects'],
+      ['PUT', '/api/projects/{id}'],
+    ],
     title: 'Založit nebo upravit zakázku',
     description:
       'Bez `id` založí novou zakázku; tehdy vyžaduje `client_id`, `name` '
@@ -1824,6 +2189,10 @@ export const TOOLS = [
   },
   {
     name: 'archive_project',
+    api: [
+      ['GET', '/api/projects/{id}'],
+      ['POST', '/api/projects/{id}/archive'],
+    ],
     title: 'Archivovat zakázku',
     description:
       'Skryje zakázku z běžných seznamů, ale zachová její doklady a historii. '
@@ -1842,6 +2211,10 @@ export const TOOLS = [
   },
   {
     name: 'delete_project',
+    api: [
+      ['GET', '/api/projects/{id}'],
+      ['DELETE', '/api/projects/{id}'],
+    ],
     title: 'Smazat nepoužitou zakázku',
     description:
       'Nevratně smaže pouze zakázku bez vystavených dokladů; zakázku s historií '
@@ -1860,6 +2233,9 @@ export const TOOLS = [
   },
   {
     name: 'get_work_report',
+    api: [
+      ['GET', '/api/invoices/{id}/work-report'],
+    ],
     title: 'Výkaz práce a materiálu',
     description:
       'Výkaz navázaný na konkrétní fakturu — řádky práce (popis, datum, hodiny, sazba), '
@@ -1870,6 +2246,17 @@ export const TOOLS = [
   },
   {
     name: 'add_work_report_entry',
+    api: [
+      ['GET', '/api/invoices/{id}'],
+      ['GET', '/api/invoices/{id}/work-report'],
+      ['GET', '/api/projects'],
+      ['GET', '/api/clients'],
+      ['GET', '/api/invoices'],
+      ['GET', '/api/projects/{id}'],
+      ['GET', '/api/clients/{id}'],
+      ['GET', '/api/settings/supplier'],
+      ['PUT', '/api/invoices/{id}/work-report'],
+    ],
     title: 'Přidat práci do výkazu',
     description:
       'Přidá řádek odvedené práce do výkazu u KONCEPTU faktury. Typické zadání: '
@@ -1953,6 +2340,14 @@ export const TOOLS = [
   },
   {
     name: 'add_work_report_material',
+    api: [
+      ['GET', '/api/invoices/{id}'],
+      ['GET', '/api/invoices/{id}/work-report'],
+      ['GET', '/api/projects'],
+      ['GET', '/api/clients'],
+      ['GET', '/api/invoices'],
+      ['PUT', '/api/invoices/{id}/work-report/materials'],
+    ],
     title: 'Přidat materiál do výkazu',
     description:
       'Přidá řádek materiálu do výkazu u KONCEPTU faktury (spotřebovaný materiál, '
@@ -2018,6 +2413,11 @@ export const TOOLS = [
   },
   {
     name: 'remove_work_report_entry',
+    api: [
+      ['GET', '/api/invoices/{id}'],
+      ['GET', '/api/invoices/{id}/work-report'],
+      ['PUT', '/api/invoices/{id}/work-report'],
+    ],
     title: 'Odebrat řádek z výkazu práce',
     description:
       'Smaže jeden řádek práce z výkazu podle pořadí (1 = první řádek). '
@@ -2060,6 +2460,9 @@ export const TOOLS = [
   },
   {
     name: 'list_vat_rates',
+    api: [
+      ['GET', '/api/settings/vat-rates'],
+    ],
     title: 'Sazby DPH',
     description:
       'Číselník sazeb DPH s jejich ID. `vat_rate_id` z tohoto seznamu se používá '
@@ -2070,6 +2473,9 @@ export const TOOLS = [
   },
   {
     name: 'list_currencies',
+    api: [
+      ['GET', '/api/codebooks/currencies'],
+    ],
     title: 'Měny dokladů',
     description:
       'Měny firmy s jejich ID. `currency_id` z tohoto seznamu patří do objednávek '
@@ -2086,6 +2492,8 @@ export const TOOLS = [
   // ──────────────────────────────────────────────────────────────────────────
   {
     name: 'dashboard_summary',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Souhrn nástěnky',
     description:
       'Rychlý přehled: tržby, pohledávky, doklady po splatnosti, stav za aktuální období. '
@@ -2096,6 +2504,8 @@ export const TOOLS = [
   },
   {
     name: 'revenue_overview',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Přehled tržeb a zisku',
     description: 'Souhrnné ukazatele obratu, nákladů a zisku za aktuální měsíc, minulý měsíc a od začátku roku.',
     inputSchema: schema(),
@@ -2104,6 +2514,8 @@ export const TOOLS = [
   },
   {
     name: 'revenue_monthly',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Tržby po měsících',
     description: 'Časová řada obratu a zisku po měsících — pro trendy a meziroční srovnání.',
     inputSchema: schema({
@@ -2115,6 +2527,8 @@ export const TOOLS = [
   },
   {
     name: 'top_clients',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Nejvýznamnější odběratelé',
     description: 'Žebříček odběratelů podle obratu za období — kdo dělá tržby.',
     inputSchema: schema({
@@ -2127,6 +2541,8 @@ export const TOOLS = [
   },
   {
     name: 'aging_receivables',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Pohledávky podle stáří',
     description:
       'Rozpad neuhrazených pohledávek do pásem po splatnosti (do 30 / 30–60 / 60–90 / 90+ dní). '
@@ -2137,6 +2553,8 @@ export const TOOLS = [
   },
   {
     name: 'cash_flow_forecast',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Výhled cash flow',
     description: 'Očekávané příjmy a výdaje podle splatností vystavených a přijatých dokladů.',
     inputSchema: schema(),
@@ -2145,6 +2563,8 @@ export const TOOLS = [
   },
   {
     name: 'payment_punctuality',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Platební morálka odběratelů',
     description: 'Jak rychle kdo platí — průměrné zpoždění a podíl včasných úhrad.',
     inputSchema: schema({ months: int('Počet posledních měsíců.', { minimum: 1, maximum: 36 }) }),
@@ -2153,6 +2573,8 @@ export const TOOLS = [
   },
   {
     name: 'revenue_yearly',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Tržby po letech',
     description: 'Meziroční srovnání obratu, nákladů a zisku.',
     inputSchema: schema({ currency: str('Měna výstupu, například CZK.') }),
@@ -2161,6 +2583,8 @@ export const TOOLS = [
   },
   {
     name: 'revenue_breakdown',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Rozpad tržeb podle kategorií',
     description: 'Z čeho se skládá obrat — podle kategorií tržeb.',
     inputSchema: schema({
@@ -2172,6 +2596,8 @@ export const TOOLS = [
   },
   {
     name: 'expense_breakdown',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Rozpad nákladů podle kategorií',
     description: 'Za co utrácíme — náklady po kategoriích. Pro dotazy „kde nám utíkají peníze".',
     inputSchema: schema({
@@ -2183,6 +2609,8 @@ export const TOOLS = [
   },
   {
     name: 'top_vendors',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Největší dodavatelé',
     description: 'Žebříček dodavatelů podle objemu nákupů za období.',
     inputSchema: schema({
@@ -2195,6 +2623,8 @@ export const TOOLS = [
   },
   {
     name: 'aging_payables',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Závazky podle stáří',
     description: 'Neuhrazené přijaté faktury v pásmech po splatnosti — komu dlužíme my.',
     inputSchema: schema(),
@@ -2203,6 +2633,8 @@ export const TOOLS = [
   },
   {
     name: 'dso_dpo',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Doba inkasa a doba splatnosti (DSO / DPO)',
     description:
       'DSO = za jak dlouho v průměru inkasujeme pohledávky, DPO = za jak dlouho platíme závazky. '
@@ -2216,6 +2648,8 @@ export const TOOLS = [
   },
   {
     name: 'client_concentration',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Koncentrace odběratelů a dodavatelů',
     description:
       'Jak moc obrat závisí na několika málo partnerech — riziko koncentrace na obou stranách.',
@@ -2228,6 +2662,8 @@ export const TOOLS = [
   },
   {
     name: 'churn_risk',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Odběratelé s rizikem odchodu',
     description: 'Zákazníci, kteří přestali objednávat oproti svému zvyku.',
     inputSchema: schema({ days: int('Dní bez nového odběru.', { minimum: 7, maximum: 365 }), limit: int('Počet výsledků.', { minimum: 1, maximum: 100 }) }),
@@ -2236,6 +2672,8 @@ export const TOOLS = [
   },
   {
     name: 'late_payment_risk',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Riziko pozdní úhrady',
     description: 'Odhad, které vystavené faktury se pravděpodobně zaplatí pozdě.',
     inputSchema: schema(),
@@ -2244,6 +2682,8 @@ export const TOOLS = [
   },
   {
     name: 'reminder_effectiveness',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Účinnost upomínek',
     description: 'Kolik upomínek vede k úhradě a jak rychle — má smysl upomínat?',
     inputSchema: schema(),
@@ -2252,6 +2692,8 @@ export const TOOLS = [
   },
   {
     name: 'payment_time_histogram',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Rozložení doby úhrady',
     description: 'Histogram — za kolik dní od vystavení nám kdo platí.',
     inputSchema: schema(),
@@ -2260,6 +2702,8 @@ export const TOOLS = [
   },
   {
     name: 'action_items',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Na co si dát pozor',
     description:
       'Automaticky odvozené položky k řešení — nezaplacené doklady, blížící se termíny, '
@@ -2270,6 +2714,8 @@ export const TOOLS = [
   },
   {
     name: 'tax_calendar',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Daňový kalendář',
     description: 'Blížící se daňové termíny a povinnosti firmy.',
     inputSchema: schema({ max_days_ahead: int('Výhled v počtu dnů.', { minimum: 1, maximum: 365 }) }),
@@ -2278,6 +2724,8 @@ export const TOOLS = [
   },
   {
     name: 'purchase_summary',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Souhrn nákupů',
     description: 'Přehled přijatých faktur — objem, závazky, stav úhrad.',
     inputSchema: schema(),
@@ -2290,6 +2738,8 @@ export const TOOLS = [
   // ──────────────────────────────────────────────────────────────────────────
   {
     name: 'search',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Globální vyhledávání',
     description:
       'Prohledá najednou odběratele, vystavené faktury a přijaté faktury. '
@@ -2305,6 +2755,9 @@ export const TOOLS = [
   // ──────────────────────────────────────────────────────────────────────────
   {
     name: 'list_purchase_invoices',
+    api: [
+      ['GET', '/api/purchase-invoices'],
+    ],
     title: 'Seznam přijatých faktur',
     description: 'Přijaté faktury (závazky) s filtry na stav, dodavatele a období.',
     inputSchema: schema({
@@ -2332,6 +2785,16 @@ export const TOOLS = [
       include_posting_accounts: bool('Přidat předkontace účetních účtů.'),
       include_kh: bool('Přidat části kontrolního hlášení.'),
       include_dimensions: bool('Přidat dimenze dokladů; vyžaduje právo číst účetnictví.'),
+      approval_status: str('Schvalování manažerem střediska.', { enum: ['none', 'pending', 'approved', 'rejected'] }),
+      has_visual_document: bool('Doklady s PDF nebo obrázkem dokladu (true), nebo bez něj (false), např. k doplnění originálu.'),
+      has_structured_source: bool('Doklady ze strukturovaného zdroje ISDOC nebo Pohoda XML (true), nebo bez něj (false).'),
+      include_review: bool('Přidat důvod, proč doklad potřebuje kontrolu vytěžení.'),
+      include_vat_classification: bool('Přidat členění plnění z evidence DPH a skutečné řádky přiznání.'),
+      sort_key: str('Řazení podle sloupce.', { enum: [
+        'number', 'vendor', 'vendor_number', 'kind', 'tax_date', 'due_date', 'amount', 'status', 'paid_at', 'booked_at',
+        'received_at', 'expense_category', 'base', 'vat', 'remaining_amount', 'project', 'payment_method',
+      ] }),
+      sort_dir: str('Směr řazení, výchozí sestupně.', { enum: ['asc', 'desc'] }),
       ...PAGING,
     }),
     write: false,
@@ -2339,6 +2802,8 @@ export const TOOLS = [
       q: a.query,
       page: a.page,
       per_page: a.per_page,
+      sort_key: a.sort_key,
+      sort_dir: a.sort_dir,
       filter: {
         status: a.status,
         vendor_id: a.vendor_id,
@@ -2363,11 +2828,19 @@ export const TOOLS = [
         date_to: a.date_to,
         unpaid_only: a.unpaid_only,
         include_dimensions: a.include_dimensions === undefined ? undefined : a.include_dimensions ? 1 : 0,
+        approval_status: a.approval_status,
+        has_visual_document: a.has_visual_document === undefined ? undefined : a.has_visual_document ? 1 : 0,
+        has_structured_source: a.has_structured_source === undefined ? undefined : a.has_structured_source ? 1 : 0,
+        include_review: a.include_review === undefined ? undefined : a.include_review ? 1 : 0,
+        include_vat_classification: a.include_vat_classification === undefined ? undefined : a.include_vat_classification ? 1 : 0,
       },
     }, tool),
   },
   {
     name: 'get_purchase_invoice',
+    api: [
+      ['GET', '/api/purchase-invoices/{id}'],
+    ],
     title: 'Detail přijaté faktury',
     description: 'Hlavička, položky, rozpis DPH a stav úhrady přijaté faktury.',
     inputSchema: schema({ id: int('ID přijaté faktury.') }, ['id']),
@@ -2381,6 +2854,8 @@ export const TOOLS = [
   // ──────────────────────────────────────────────────────────────────────────
   {
     name: 'list_documents',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Seznam dokumentů',
     description:
       'Dokumenty a podsložky ve vybrané složce DMS. Vrací metadata, ne bajty souboru. '
@@ -2404,6 +2879,8 @@ export const TOOLS = [
   },
   {
     name: 'search_documents',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Hledat v dokumentech',
     description:
       'Fulltextově hledá v názvu, popisu i vytěženém textu dokumentů. '
@@ -2414,6 +2891,8 @@ export const TOOLS = [
   },
   {
     name: 'get_document',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Detail a text dokumentu',
     description:
       'Vrátí metadata, tagy, vazby a přílohy dokumentu. S `include_text: true` přidá '
@@ -2437,6 +2916,8 @@ export const TOOLS = [
   },
   {
     name: 'list_entity_documents',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Dokumenty připojené k záznamu',
     description:
       'Vrátí dokumenty navázané na odběratele, fakturu, přijatou fakturu, zakázku, '
@@ -2451,21 +2932,36 @@ export const TOOLS = [
   },
   {
     name: 'update_document',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Upravit metadata dokumentu',
     description:
-      'Změní jen zadaný název, popis nebo kompletní sadu tagů dokumentu. '
+      'Změní jen zadaný název, popis, kompletní sadu tagů (list_document_tags) nebo složku dokumentu '
+      + '(`folder_id` z list_document_folders, 0 = přesun do kořene). '
       + 'Samotný soubor ani jeho vytěžený text nemění.',
     inputSchema: schema({
       id: int('ID dokumentu.'),
       title: str('Název dokumentu.'),
       description: str('Popis dokumentu; prázdný text popis odstraní.'),
       tags: { type: 'array', items: { type: 'string' }, description: 'Kompletní sada tagů.' },
+      folder_id: int('Cílová složka; 0 = kořen bez složky.', { minimum: 0 }),
     }, ['id']),
     write: true,
-    run: (c, a, tool) => c.patch(`/documents/${seg(a.id)}`, changed(a, ['title', 'description', 'tags']), tool),
+    run: async (c, a, tool) => {
+      const fields = changed(a, ['title', 'description', 'tags']);
+      if (Object.keys(fields).length === 0 && a.folder_id === undefined) {
+        throw new Error('Zadej aspoň jedno z title, description, tags a folder_id.');
+      }
+      const result = Object.keys(fields).length > 0 ? await c.patch(`/documents/${seg(a.id)}`, fields, tool) : null;
+      if (a.folder_id === undefined) return result;
+      const moved = await c.post(`/documents/${seg(a.id)}/move`, { folder_id: a.folder_id === 0 ? null : a.folder_id }, tool);
+      return result === null ? moved : { ...result, moved };
+    },
   },
   {
     name: 'link_document',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Připojit dokument k záznamu',
     description:
       'Přidá vazbu existujícího dokumentu na záznam stejné firmy, např. smlouvu k ostatní '
@@ -2483,6 +2979,8 @@ export const TOOLS = [
   },
   {
     name: 'unlink_document',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Odpojit dokument od záznamu',
     description:
       'Odstraní jen vazbu dokumentu na záznam; dokument ani cílový záznam nemaže. '
@@ -2516,6 +3014,10 @@ export const TOOLS = [
   // ──────────────────────────────────────────────────────────────────────────
   {
     name: 'list_logbook_cars',
+    api: [
+      ['GET', '/api/logbook/cars'],
+      ['GET', '/api/logbook/cars/{id}'],
+    ],
     title: 'Vozidla knihy jízd',
     description: 'Seznam vozidel; s `id` vrátí detail jednoho vozidla.',
     inputSchema: schema({
@@ -2529,6 +3031,11 @@ export const TOOLS = [
   },
   {
     name: 'save_logbook_car',
+    api: [
+      ['GET', '/api/logbook/cars/{id}'],
+      ['POST', '/api/logbook/cars'],
+      ['PUT', '/api/logbook/cars/{id}'],
+    ],
     title: 'Založit nebo upravit vozidlo',
     description:
       'Bez `id` založí vozidlo a vyžaduje registrační značku. S `id` načte současný '
@@ -2546,6 +3053,10 @@ export const TOOLS = [
   },
   {
     name: 'delete_logbook_car',
+    api: [
+      ['GET', '/api/logbook/cars/{id}'],
+      ['DELETE', '/api/logbook/cars/{id}'],
+    ],
     title: 'Smazat nepoužité vozidlo',
     description:
       'Smaže jen vozidlo bez jízd a tankování; používané vozidlo je nutné archivovat '
@@ -2564,6 +3075,9 @@ export const TOOLS = [
   },
   {
     name: 'list_logbook_trip_categories',
+    api: [
+      ['GET', '/api/logbook/trip-categories'],
+    ],
     title: 'Kategorie cest',
     description:
       'Kategorie určují mimo jiné soukromou nebo služební povahu cesty. '
@@ -2576,6 +3090,10 @@ export const TOOLS = [
   },
   {
     name: 'list_logbook_trips',
+    api: [
+      ['GET', '/api/logbook/trips'],
+      ['GET', '/api/logbook/trips/{id}'],
+    ],
     title: 'Jízdy',
     description: 'Seznam jízd s filtry; s `id` vrátí detail jedné jízdy.',
     inputSchema: schema({
@@ -2606,6 +3124,11 @@ export const TOOLS = [
   },
   {
     name: 'save_logbook_trip',
+    api: [
+      ['GET', '/api/logbook/trips/{id}'],
+      ['POST', '/api/logbook/trips'],
+      ['PUT', '/api/logbook/trips/{id}'],
+    ],
     title: 'Přidat nebo upravit jízdu',
     description:
       'Bez `id` založí jízdu a vyžaduje vozidlo, datum a výslovně vybranou kategorii. '
@@ -2629,6 +3152,10 @@ export const TOOLS = [
   },
   {
     name: 'delete_logbook_trip',
+    api: [
+      ['GET', '/api/logbook/trips/{id}'],
+      ['DELETE', '/api/logbook/trips/{id}'],
+    ],
     title: 'Smazat jízdu',
     description: 'Nevratně smaže jízdu. Bez `confirm: true` ji pouze načte k potvrzení.',
     inputSchema: schema({ id: int('ID jízdy.'), confirm: CONFIRM }, ['id']),
@@ -2645,6 +3172,10 @@ export const TOOLS = [
   },
   {
     name: 'list_logbook_fuelings',
+    api: [
+      ['GET', '/api/logbook/fuelings'],
+      ['GET', '/api/logbook/fuelings/{id}'],
+    ],
     title: 'Tankování',
     description: 'Seznam tankování s filtry; s `id` vrátí detail jednoho záznamu.',
     inputSchema: schema({
@@ -2677,6 +3208,11 @@ export const TOOLS = [
   },
   {
     name: 'save_logbook_fueling',
+    api: [
+      ['GET', '/api/logbook/fuelings/{id}'],
+      ['POST', '/api/logbook/fuelings'],
+      ['PUT', '/api/logbook/fuelings/{id}'],
+    ],
     title: 'Přidat nebo upravit tankování',
     description:
       'Bez `id` založí ruční tankování a vyžaduje datum a celkovou částku. '
@@ -2697,6 +3233,10 @@ export const TOOLS = [
   },
   {
     name: 'delete_logbook_fueling',
+    api: [
+      ['GET', '/api/logbook/fuelings/{id}'],
+      ['DELETE', '/api/logbook/fuelings/{id}'],
+    ],
     title: 'Smazat tankování',
     description: 'Nevratně smaže záznam tankování. Bez `confirm: true` ho pouze načte k potvrzení.',
     inputSchema: schema({ id: int('ID tankování.'), confirm: CONFIRM }, ['id']),
@@ -2713,6 +3253,9 @@ export const TOOLS = [
   },
   {
     name: 'logbook_summary',
+    api: [
+      ['GET', '/api/logbook/summary'],
+    ],
     title: 'Souhrn knihy jízd',
     description:
       'Roční souhrn kilometrů, služebních a soukromých jízd, tankování, spotřeby '
@@ -2727,6 +3270,8 @@ export const TOOLS = [
   // ──────────────────────────────────────────────────────────────────────────
   {
     name: 'vat_return_preview',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Odhad DPH za období',
     description:
       'Náhled přiznání k DPH za zvolené období — jednotlivé řádky i výsledná daňová '
@@ -2747,6 +3292,8 @@ export const TOOLS = [
   },
   {
     name: 'vat_trend',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Vývoj DPH po měsících',
     description: 'Časová řada daňové povinnosti a odpočtů — kolik DPH odvádíme v čase.',
     inputSchema: schema({
@@ -2757,6 +3304,8 @@ export const TOOLS = [
   },
   {
     name: 'vat_drafts_prediction',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Dopad konceptů na DPH',
     description:
       'O kolik se změní DPH, až se vystaví doklady, které jsou zatím v konceptu. '
@@ -2770,6 +3319,8 @@ export const TOOLS = [
   },
   {
     name: 'vat_control_statement_preview',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Náhled kontrolního hlášení',
     description: 'Kontrolní hlášení za období po sekcích (A1–A5, B1–B3) — náhled, ne podání.',
     inputSchema: schema({
@@ -2784,10 +3335,14 @@ export const TOOLS = [
   },
   {
     name: 'vat_ledger',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Záznamní evidence DPH',
     description:
       'Doklady, ze kterých se DPH za období skládá — na dohledání, proč vychází taková částka. '
-      + 'S parametrem kh_section vrátí soupis dokladů oddílu kontrolního hlášení (zařazení stejnou logikou jako KH) se součty.',
+      + 'S parametrem kh_section vrátí soupis dokladů oddílu kontrolního hlášení (zařazení stejnou logikou jako KH) se součty. '
+      + 'S dimension_value_id jen díl dokladů připadající na hodnotu dimenze (položka, jinak hlavička, rozpad podílem; '
+      + 'bez oprav § 43/46/74b/79) — doklady k řádku sestavy vat_by_dimension.',
     inputSchema: schema({
       year: int('Rok.', { minimum: 2020, maximum: 2050 }),
       month: int('Měsíc 1–12.', { minimum: 1, maximum: 12 }),
@@ -2795,18 +3350,21 @@ export const TOOLS = [
       kh_section: str('Oddíl kontrolního hlášení; none = doklady mimo KH, all = všechny oddíly.', {
         enum: ['all', 'A.1', 'A.2', 'A.4', 'A.5', 'B.1', 'B.2', 'B.3', 'none'],
       }),
+      ...DIMENSION_FILTER,
     }),
     write: false,
     run: (c, a, tool) => (a.kh_section
       ? c.get('/reports/kh-evidence/preview', {
-        year: a.year, month: a.month, period: a.period ?? 'monthly', section: a.kh_section,
+        year: a.year, month: a.month, period: a.period ?? 'monthly', section: a.kh_section, ...dimensionQuery(a),
       }, tool)
       : c.get('/reports/dph-book/preview', {
-        year: a.year, month: a.month, period: a.period,
+        year: a.year, month: a.month, period: a.period, ...dimensionQuery(a),
       }, tool)),
   },
   {
     name: 'vat_summary_report_preview',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Náhled souhrnného hlášení',
     description: 'Souhrnné hlášení k plnění do EU za období — náhled, ne podání.',
     inputSchema: schema({
@@ -2821,6 +3379,8 @@ export const TOOLS = [
   },
   {
     name: 'income_tax_analysis',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Odhad daně z příjmů',
     description:
       'Rozbor základu daně a odhad daňové povinnosti za rok, včetně záloh. '
@@ -2833,6 +3393,8 @@ export const TOOLS = [
   },
   {
     name: 'list_tax_submissions',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Historie daňových podání',
     description: 'Odeslaná i připravená podání (DPH, KH, SH) s jejich stavem.',
     inputSchema: schema({
@@ -2849,6 +3411,8 @@ export const TOOLS = [
   // ──────────────────────────────────────────────────────────────────────────
   {
     name: 'list_accounting_periods',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Účetní období',
     description:
       'Seznam účetních období s jejich ID a stavem (otevřené / uzavřené). '
@@ -2859,6 +3423,8 @@ export const TOOLS = [
   },
   {
     name: 'trial_balance',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Obratová předvaha',
     description:
       'Obratovka za období — počáteční stavy, obraty MD/D a konečné zůstatky po účtech. '
@@ -2883,6 +3449,8 @@ export const TOOLS = [
   },
   {
     name: 'balance_sheet',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Rozvaha',
     description: 'Aktiva a pasiva k datu — majetek firmy a jak je financovaný.',
     inputSchema: schema({
@@ -2898,6 +3466,8 @@ export const TOOLS = [
   },
   {
     name: 'income_statement',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Výsledovka',
     description: 'Výkaz zisku a ztráty — výnosy, náklady a hospodářský výsledek za období.',
     inputSchema: schema({
@@ -2913,6 +3483,8 @@ export const TOOLS = [
   },
   {
     name: 'general_ledger',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Hlavní kniha',
     description: 'Zápisy po účtech za období — pro dohledání, z čeho se zůstatek účtu skládá.',
     inputSchema: schema({
@@ -2924,6 +3496,8 @@ export const TOOLS = [
       from: date('Začátek rozsahu uvnitř účetního období.'),
       to: date('Konec rozsahu uvnitř účetního období.'),
       after_closing: bool('Stav po uzávěrkových operacích.'),
+      account_from: str('Účet od, včetně; stačí začátek kódu (5, 501).'),
+      account_to: str('Účet do, včetně analytik (5 až 5 = celá třída 5).'),
       ...DIMENSION_FILTER,
     }, ['period_id']),
     write: false,
@@ -2936,28 +3510,54 @@ export const TOOLS = [
       from: a.from,
       to: a.to,
       after_closing: a.after_closing ? 1 : undefined,
+      account_from: a.account_from,
+      account_to: a.account_to,
       ...dimensionQuery(a),
     }, tool),
   },
   {
     name: 'account_statement',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Výpis z účtu',
-    description: 'Všechny pohyby na jednom účtu účtové osnovy za období.',
+    description:
+      'Všechny pohyby na jednom účtu účtové osnovy za období. U každého pohybu je `counter_accounts` (protiúčet); '
+      + 'řádek jednoduchého zápisu nese jediný protiúčet (`counter_account_id`) a číslo dvojice (`pair_no`). '
+      + 'Starší složený zápis 1 : N je rozložený na pohyby po dílech (`pair_piece` = pořadí dílu), zápis M : N zůstává v původním tvaru. '
+      + '`pair_status` řádku je `paired` (nese `pair_no`), `derived` (rozložený za běhu) nebo `composite_mn`; u firmy s jednoduchým zápisem '
+      + 'je odpověď označená `layout: "pairs"`. '
+      + 'Podle protiúčtu jde filtrovat a součty protiúčtů přicházejí s první stránkou (`counter_totals`).',
     inputSchema: schema({
       account_id: int('ID účtu — viz `chart_of_accounts`.'),
       from: date('Počátek rozsahu.'),
       to: date('Konec rozsahu.'),
       after_closing: bool('Stav po uzávěrkových operacích.'),
+      counter_account_id: int('Jen řádky s tímto protiúčtem nebo jeho analytikou; zůstatek zůstává za celý účet. Nejde kombinovat s filtry dodavatele, odběratele, položky a dimenze.'),
+      client: str('Filtr na odběratele; zúží řádky i počáteční stav.'),
+      vendor: str('Filtr na dodavatele; zúží řádky i počáteční stav.'),
+      item: str('Filtr na text položky; zúží řádky i počáteční stav.'),
+      opening_date: date('Den, jehož otevírací zápis patří do počátečního stavu (začátek rozsahu hlavní knihy).'),
+      include_analytics: bool('false = jen účet sám, bez analytik.'),
+      ...DIMENSION_FILTER,
       ...PAGING,
     }, ['account_id', 'from', 'to']),
     write: false,
     run: (c, a, tool) => c.get(`/accounting/reports/account-statement/${seg(a.account_id)}`, {
       from: a.from, to: a.to, page: a.page, per_page: a.per_page,
       after_closing: a.after_closing ? 1 : undefined,
+      counter_account_id: a.counter_account_id,
+      client: a.client,
+      vendor: a.vendor,
+      item: a.item,
+      opening_date: a.opening_date,
+      include_analytics: a.include_analytics === false ? 0 : undefined,
+      ...dimensionQuery(a),
     }, tool),
   },
   {
     name: 'saldo',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Saldo (nespárované pohledávky a závazky)',
     description:
       'Saldokonto — nevyrovnané zůstatky vůči odběratelům a dodavatelům podle účetnictví. '
@@ -2975,6 +3575,8 @@ export const TOOLS = [
   },
   {
     name: 'chart_of_accounts',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Účtová osnova',
     description: 'Účty firmy s jejich ID a názvy — potřeba pro `account_statement` a `update_analytic_account`. '
       + 'Chybí-li analytika, založ ji nástrojem `create_analytic_account`.',
@@ -2984,6 +3586,8 @@ export const TOOLS = [
   },
   {
     name: 'create_analytic_account',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Založit analytický účet',
     description:
       'Založí analytický účet v účtové osnově pod existujícím syntetickým účtem, např. 378.800 Zápůjčka '
@@ -3012,6 +3616,8 @@ export const TOOLS = [
   },
   {
     name: 'update_analytic_account',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Přejmenovat nebo deaktivovat analytický účet',
     description:
       'Změní název analytického účtu nebo ho deaktivuje (is_active=false) či znovu aktivuje. Číslo účtu se '
@@ -3033,10 +3639,14 @@ export const TOOLS = [
   },
   {
     name: 'list_journal_entries',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Účetní deník',
     description:
       'Účetní zápisy s filtry na období, datum, zdrojový doklad a text. '
-      + 'Pro dotazy „jak se zaúčtovala tahle faktura" použij `source_type` + `source_id`.',
+      + 'Pro dotazy „jak se zaúčtovala tahle faktura" použij `source_type` + `source_id`. '
+      + 'U firmy s jednoduchým zápisem nese každý zápis `pair_status` (`composite_mn` = M : N k ruční úpravě, `ineligible` = převod nepřipadá v úvahu, jinak null) '
+      + 'a filtr `pair_status` vybere jen takové zápisy. Dvojice (`pairs`) jsou v detailu zápisu (`get_journal_entry`).',
     inputSchema: schema({
       query: str('Fulltext přes popis zápisu.'),
       period_id: int('ID účetního období.'),
@@ -3049,8 +3659,9 @@ export const TOOLS = [
       automation: str('Původ zaúčtování.', { enum: ['auto', 'approved', 'manual'] }),
       reversal: str('Stav storna.', { enum: ['reversed', 'reversal', 'any', 'none'] }),
       integrity: str('Jen zjištěné rozdíly částek dokladu a deníku.', { enum: ['amount_mismatch'] }),
-      account_from: str('Účet od, včetně.'),
-      account_to: str('Účet do, včetně.'),
+      pair_status: str('Jednoduchý zápis: jen zápisy bez dvojic s daným posouzením.', { enum: ['composite_mn', 'ineligible'] }),
+      account_from: str('Účet od, včetně; stačí začátek kódu (5, 501).'),
+      account_to: str('Účet do, včetně analytik (5 až 5 = celá třída 5).'),
       amount_from: num('Částka od, včetně.'),
       amount_to: num('Částka do, včetně.'),
       ...DIMENSION_FILTER,
@@ -3071,6 +3682,7 @@ export const TOOLS = [
       automation: a.automation,
       reversal: a.reversal,
       integrity: a.integrity,
+      pair_status: a.pair_status,
       account_from: a.account_from,
       account_to: a.account_to,
       amount_from: a.amount_from,
@@ -3084,14 +3696,36 @@ export const TOOLS = [
   },
   {
     name: 'get_journal_entry',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Detail účetního zápisu',
-    description: 'Řádky zápisu (MD / D), účty, částky a vazba na zdrojový doklad.',
+    description:
+      'Řádky zápisu (MD / D), účty, částky a vazba na zdrojový doklad. U firmy s jednoduchým zápisem také `pairs` '
+      + '(dvojice: číslo, účet MD a Dal s názvy, částka, text, případný opravný zápis `reversed_by_entry_id`), `pair_no` / `line_text` na řádcích '
+      + 'a `entry_form` (forma zápisu k datu zápisu). '
+      + 'Zápis bez dvojic nese případně `pair_status` = `{status, reason}` (`composite_mn` = M : N k ruční úpravě, `ineligible` = převod nepřipadá v úvahu). '
+      + 'Formu zápisu firmy vrací `journal_entry_form`.',
     inputSchema: schema({ id: int('ID účetního zápisu.') }, ['id']),
     write: false,
     run: (c, a, tool) => c.get(`/accounting/journal/${seg(a.id)}`, null, tool),
   },
   {
+    name: 'journal_entry_form',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
+    title: 'Forma účetního zápisu firmy',
+    description:
+      'Forma účetního zápisu firmy (`composite` = složený, `single` = jednoduchý po dvojicích účet MD / účet Dal) '
+      + 'k dnešnímu dni a historie změn s datem účinnosti. Firma bez historie účtuje složeným zápisem. Jen čtení, '
+      + 'změna formy se dělá v aplikaci.',
+    inputSchema: schema({}),
+    write: false,
+    run: (c, a, tool) => c.get('/accounting/entry-form', null, tool),
+  },
+  {
     name: 'cash_journal',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Peněžní deník (daňová evidence)',
     description:
       'Peněžní deník OSVČ v daňové evidenci — příjmy a výdaje na hotovostní bázi. '
@@ -3108,6 +3742,8 @@ export const TOOLS = [
   },
   {
     name: 'get_vat_status_history',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Historie plátcovství DPH firmy',
     description:
       'Historie plátcovství DPH vlastní firmy (tabulka supplier_vat_status_history) — '
@@ -3139,6 +3775,9 @@ export const TOOLS = [
   // ──────────────────────────────────────────────────────────────────────────
   {
     name: 'search_products',
+    api: [
+      ['GET', '/api/stock/items/search'],
+    ],
     title: 'Rychlé hledání zboží',
     description:
       'Našeptávač nad skladovými kartami — hledá podle názvu, kódu/SKU a EAN. '
@@ -3152,6 +3791,9 @@ export const TOOLS = [
   },
   {
     name: 'list_products',
+    api: [
+      ['GET', '/api/stock/items'],
+    ],
     title: 'Seznam zboží',
     description:
       'Skladové karty s filtry. `type: "goods"` vrátí jen e-shopové zboží, '
@@ -3189,6 +3831,8 @@ export const TOOLS = [
   },
   {
     name: 'get_product',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Karta zboží',
     description:
       'Kompletní e-shopová karta zboží — popis, kategorie, výrobce, parametry, štítky a média. '
@@ -3200,6 +3844,8 @@ export const TOOLS = [
   },
   {
     name: 'get_catalog_facets',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Počty hodnot katalogových filtrů',
     description: 'Vrací počty výrobců, dodavatelů, kategorií, štítků a dostupnosti v celé filtrované množině. Každá faseta uvádí případné omezení počtu hodnot příznakem truncated.',
     inputSchema: schema({
@@ -3220,6 +3866,8 @@ export const TOOLS = [
   },
   {
     name: 'get_catalog_job',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Průběh katalogové úlohy',
     description: 'Načte průběh a souhrnný výsledek katalogové úlohy v aktuální firmě. Dostupnost závisí na oprávnění pro konkrétní druh úlohy.',
     inputSchema: schema({ id: int('ID úlohy.', { minimum: 1 }) }, ['id']),
@@ -3228,6 +3876,8 @@ export const TOOLS = [
   },
   {
     name: 'get_products_batch',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Dávkový detail zboží',
     description:
       'Načte vybraná pole až 500 karet v jednom čtecím požadavku. Položky odpovědi '
@@ -3278,6 +3928,8 @@ export const TOOLS = [
   },
   {
     name: 'create_product',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Založit zboží',
     description:
       'Založí novou skladovou kartu. Pro e-shopové zboží nech `item_type` na `goods`.\n\n'
@@ -3305,6 +3957,8 @@ export const TOOLS = [
   },
   {
     name: 'update_product',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Upravit skladovou identitu zboží',
     description:
       'Změní SKU, název, měrnou jednotku, EAN, sazbu DPH, minimální zásobu nebo aktivitu karty. '
@@ -3334,6 +3988,8 @@ export const TOOLS = [
   },
   {
     name: 'delete_product',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Smazat zboží',
     description:
       'Smaže skladovou kartu i s jejím e-shopovým obsahem, cenami a médii.\n\n'
@@ -3354,6 +4010,8 @@ export const TOOLS = [
   },
   {
     name: 'product_movements',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Skladová kniha zboží',
     description:
       'Pohyby jedné karty (příjmy, výdeje, převody, inventurní rozdíly) s běžnou bilancí '
@@ -3376,6 +4034,8 @@ export const TOOLS = [
   // ──────────────────────────────────────────────────────────────────────────
   {
     name: 'update_product_card',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Upravit e-shopový obsah zboží',
     description:
       'Uloží e-shopovou část karty: výrobce, záruku, dodací lhůtu, hmotnost, publikaci do '
@@ -3451,6 +4111,8 @@ export const TOOLS = [
   },
   {
     name: 'get_product_i18n',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Jazykové verze zboží',
     description:
       'Překlady karty zboží po jazycích — název, popisy a SEO. Načti je před úpravou '
@@ -3465,6 +4127,8 @@ export const TOOLS = [
   // ──────────────────────────────────────────────────────────────────────────
   {
     name: 'get_product_prices',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Cenotvorba zboží',
     description:
       'Prodejní ceny zboží po měnách — režim (přirážka / pevná cena), procento přirážky, '
@@ -3475,6 +4139,8 @@ export const TOOLS = [
   },
   {
     name: 'get_product_prices_batch',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Dávkové efektivní ceny zboží',
     description:
       'Vrátí efektivní prodejní cenu až 500 položek pro požadované množství. '
@@ -3507,6 +4173,8 @@ export const TOOLS = [
   },
   {
     name: 'set_product_prices',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Změnit ceny zboží',
     description:
       'Uloží cenotvorbu zboží a hned ji přepočítá. MĚNÍ PRODEJNÍ CENY V OSTRÉM E-SHOPU.\n\n'
@@ -3522,6 +4190,8 @@ export const TOOLS = [
   },
   {
     name: 'recompute_product_prices',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Přepočítat ceny zboží',
     description:
       'Vynutí přepočet prodejních cen z aktuální pořizovací ceny a nastavené přirážky. '
@@ -3533,6 +4203,8 @@ export const TOOLS = [
   },
   {
     name: 'get_product_vendors',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Dodavatelé zboží',
     description:
       'Dodavatelé jednoho zboží s nákupní cenou, kódem u dodavatele, dodací lhůtou '
@@ -3543,6 +4215,8 @@ export const TOOLS = [
   },
   {
     name: 'set_product_vendors',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Změnit dodavatele zboží',
     description:
       'Uloží seznam dodavatelů zboží. Seznam je ÚPLNÝ — dodavatel, který v něm chybí, '
@@ -3568,6 +4242,9 @@ export const TOOLS = [
   // ──────────────────────────────────────────────────────────────────────────
   {
     name: 'get_product_packaging',
+    api: [
+      ['GET', '/api/stock/items/{id}/packaging'],
+    ],
     title: 'Balení zboží',
     description:
       'Nadřazené jednotky karty (karton, paleta) — kód balení, poměr k základní jednotce '
@@ -3579,6 +4256,8 @@ export const TOOLS = [
   },
   {
     name: 'get_product_customer_prices',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Individuální ceny zákazníků u zboží',
     description:
       'Smluvní ceny jednotlivých odběratelů na kartě: pevná cena nebo sleva v %, měna, '
@@ -3591,6 +4270,8 @@ export const TOOLS = [
   },
   {
     name: 'get_product_price_levels',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Ceny zboží v cenových hladinách',
     description:
       'Cena karty v každé aktivní cenové hladině a měně: standardní cena, výsledná cena '
@@ -3603,6 +4284,8 @@ export const TOOLS = [
   },
   {
     name: 'quote_product_prices',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Nacenit zboží pro odběratele',
     description:
       'Spočítá prodejní cenu řádků přesně tak, jak je nacení faktura: pro zadaného '
@@ -3638,6 +4321,8 @@ export const TOOLS = [
   },
   {
     name: 'list_price_levels',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Cenové hladiny odběratelů',
     description:
       'Číselník cenových hladin (např. Bronze / Silver / Gold) s výchozí slevou nebo přirážkou '
@@ -3650,6 +4335,8 @@ export const TOOLS = [
   },
   {
     name: 'get_price_level',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Detail cenové hladiny',
     description:
       'Jedna cenová hladina i s pravidly: sleva v % (záporná = přirážka) nebo pevná cena podle '
@@ -3668,6 +4355,8 @@ export const TOOLS = [
   },
   {
     name: 'list_packaging_units',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Číselník balení',
     description:
       'Kódy nadřazených jednotek firmy (KT = karton, PAL = paleta) s počtem karet, které je '
@@ -3678,6 +4367,8 @@ export const TOOLS = [
   },
   {
     name: 'list_sales_currencies',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Prodejní měny zboží',
     description:
       'Měny, ve kterých má zboží prodejní a akční ceny (číselník e-shopu). Nezaměňovat '
@@ -3688,6 +4379,8 @@ export const TOOLS = [
   },
   {
     name: 'list_eshop_locales',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Jazyky zboží',
     description:
       'Jazykové mutace karet zboží a kategorií. Kód jazyka patří do `locale` '
@@ -3705,6 +4398,8 @@ export const TOOLS = [
   // ──────────────────────────────────────────────────────────────────────────
   {
     name: 'list_product_media',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Média zboží',
     description:
       'Obrázky a přílohy karty zboží s jejich id, pořadím a příznakem hlavního obrázku.',
@@ -3714,6 +4409,8 @@ export const TOOLS = [
   },
   {
     name: 'update_product_media',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Upravit médium zboží',
     description:
       'Změní popisky média (`title`, `alt_text`), pořadí, publikaci do e-shopu, nebo ho '
@@ -3734,6 +4431,8 @@ export const TOOLS = [
   },
   {
     name: 'reorder_product_media',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Přeuspořádat média zboží',
     description:
       'Nastaví pořadí médií karty. Pošli id médií v pořadí, v jakém se mají zobrazovat; '
@@ -3752,6 +4451,8 @@ export const TOOLS = [
   },
   {
     name: 'delete_product_media',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Smazat médium zboží',
     description:
       'Odebere obrázek nebo přílohu z karty zboží. Nevratné — soubor se z aplikace '
@@ -3784,6 +4485,8 @@ export const TOOLS = [
   // ──────────────────────────────────────────────────────────────────────────
   {
     name: 'list_categories',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Kategorie e-shopu',
     description:
       'Celý strom kategorií zboží. Zanoření je v `path` a `depth`, takže se z plochého '
@@ -3794,6 +4497,8 @@ export const TOOLS = [
   },
   {
     name: 'get_category',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Detail kategorie',
     description: 'Jedna kategorie včetně jazykových verzí.',
     inputSchema: schema({ id: int('ID kategorie.') }, ['id']),
@@ -3802,6 +4507,8 @@ export const TOOLS = [
   },
   {
     name: 'create_category',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Založit kategorii',
     description:
       'Vytvoří kategorii pod zadaným rodičem, nebo v kořeni (bez `parent_id`). '
@@ -3821,6 +4528,8 @@ export const TOOLS = [
   },
   {
     name: 'update_category',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Upravit kategorii',
     description:
       'Změní kód, název, pořadí, publikaci nebo archivaci kategorie. Uveď jen to, co se '
@@ -3841,6 +4550,8 @@ export const TOOLS = [
   },
   {
     name: 'move_category',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Přesunout kategorii',
     description:
       'Přeřadí kategorii pod jiného rodiče i s celým jejím podstromem. Bez `parent_id` '
@@ -3857,6 +4568,8 @@ export const TOOLS = [
   },
   {
     name: 'delete_category',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Smazat kategorii',
     description:
       'Smaže kategorii. Zvaž místo toho archivaci (`update_category` s `archived: true`) — '
@@ -3875,6 +4588,8 @@ export const TOOLS = [
   },
   {
     name: 'get_category_i18n',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Jazykové verze kategorie',
     description: 'Překlady názvu, popisu a URL kategorie po jazycích.',
     inputSchema: schema({ id: int('ID kategorie.') }, ['id']),
@@ -3883,6 +4598,8 @@ export const TOOLS = [
   },
   {
     name: 'set_category_i18n',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Uložit jazykové verze kategorie',
     description:
       'Uloží překlady kategorie. Uvedené jazyky se založí nebo přepíšou, ostatní zůstanou. '
@@ -4057,6 +4774,8 @@ export const TOOLS = [
   }),
   {
     name: 'list_attribute_options',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Hodnoty parametru',
     description:
       'Výčet hodnot parametru typu `enum` (např. u parametru „Barva" hodnoty červená, modrá). '
@@ -4067,6 +4786,8 @@ export const TOOLS = [
   },
   {
     name: 'create_attribute_option',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Přidat hodnotu parametru',
     description: 'Přidá další volitelnou hodnotu k parametru typu `enum`.',
     inputSchema: schema({
@@ -4082,6 +4803,8 @@ export const TOOLS = [
   },
   {
     name: 'update_attribute_option',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Upravit hodnotu parametru',
     description:
       'Přejmenuje hodnotu parametru. Pošli jen to, co měníš; vynechané pole zůstane beze změny.',
@@ -4098,6 +4821,8 @@ export const TOOLS = [
   },
   {
     name: 'delete_attribute_option',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Smazat hodnotu parametru',
     description:
       'Odebere jednu volitelnou hodnotu parametru typu `enum`. Zboží, které tuhle hodnotu '
@@ -4131,9 +4856,12 @@ export const TOOLS = [
   // ──────────────────────────────────────────────────────────────────────────
   {
     name: 'list_warehouses',
+    api: [
+      ['GET', '/api/stock/warehouses'],
+    ],
     title: 'Seznam skladů',
     description:
-      'Sklady firmy s jejich ID a aktuální hodnotou zásob. ID se používá ve filtrech '
+      'Sklady firmy s jejich ID a aktuální hodnotou zásob (hodnotu vidí jen interní role). ID se používá ve filtrech '
       + 'ostatních skladových nástrojů a na skladových dokladech.',
     inputSchema: schema({ active_only: bool('Jen aktivní sklady.') }),
     write: false,
@@ -4141,14 +4869,19 @@ export const TOOLS = [
   },
   {
     name: 'get_warehouse',
+    api: [
+      ['GET', '/api/stock/warehouses/{id}'],
+    ],
     title: 'Detail skladu',
-    description: 'Jeden sklad včetně aktuální hodnoty zásob.',
+    description: 'Jeden sklad včetně aktuální hodnoty zásob (hodnotu vidí jen interní role).',
     inputSchema: schema({ id: int('ID skladu.') }, ['id']),
     write: false,
     run: (c, a, tool) => c.get(`/stock/warehouses/${seg(a.id)}`, null, tool),
   },
   {
     name: 'create_warehouse',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Založit sklad',
     description:
       'Vytvoří nový sklad. Kód musí být v rámci firmy unikátní (jinak 409). '
@@ -4167,6 +4900,8 @@ export const TOOLS = [
   },
   {
     name: 'update_warehouse',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Upravit sklad',
     description: 'Změní kód, název, výchozí příznak, aktivitu nebo poznámku skladu. Uveď jen to, co se má změnit.',
     inputSchema: schema({
@@ -4185,6 +4920,8 @@ export const TOOLS = [
   },
   {
     name: 'delete_warehouse',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Smazat sklad',
     description:
       'Smaže sklad. Server to dovolí jen u skladu s nulovým stavem a bez jediného pohybu '
@@ -4207,6 +4944,8 @@ export const TOOLS = [
   // ──────────────────────────────────────────────────────────────────────────
   {
     name: 'stock_levels',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Stav zásob',
     description:
       'Aktuální množství po dvojicích karta × sklad, s filtrem na sklad, typ karty '
@@ -4229,10 +4968,13 @@ export const TOOLS = [
   },
   {
     name: 'stock_availability',
+    api: [
+      ['GET', '/api/stock/availability'],
+    ],
     title: 'Dostupnost konkrétního zboží',
     description:
-      'Dostupné množství pro vyjmenované karty — na rozdíl od `stock_levels` počítá '
-      + 'i s rezervacemi. Pro dotazy „můžeme to hned expedovat?".',
+      'Množství vyjmenovaných karet ve skladech určených k prodeji. Rezervace neodečítá; '
+      + 'prodejné množství po rezervacích vrací `stock_quantities`.',
     inputSchema: schema({
       item_ids: {
         type: 'array',
@@ -4249,6 +4991,8 @@ export const TOOLS = [
   },
   {
     name: 'stock_status_report',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Sestava stavu zásob',
     description:
       'Sestava „stav zásob" — množství a hodnota po kartách, se stejnými filtry jako '
@@ -4271,32 +5015,42 @@ export const TOOLS = [
   },
   {
     name: 'stock_valuation',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Ocenění skladu',
     description:
       'Hodnota zásob k datu — pro otázky „kolik máme uloženo ve skladu". Ocenění '
       + 'ke zpětnému datu se rekonstruuje z pohybů.',
     inputSchema: schema({
       warehouse_id: int('Jen tento sklad.'),
+      category_id: int('ID kategorie včetně podkategorií.', { minimum: 1 }),
       date: date('Ocenění k datu (RRRR-MM-DD). Výchozí dnes.'),
     }),
     write: false,
     run: (c, a, tool) => c.get('/stock/reports/valuation', {
-      warehouse_id: a.warehouse_id, date: a.date,
+      warehouse_id: a.warehouse_id, category_id: a.category_id, date: a.date,
     }, tool),
   },
   {
     name: 'get_product_tracking',
+    api: [
+      ['GET', '/api/stock/items/{id}/tracking'],
+    ],
     title: 'Šarže a sériová čísla zboží',
     description:
       'Režim sledování karty (`none`, `lot` šarže, `serial` sériová čísla), převodní jednotky '
       + 'šarží, aktuální rozpis zásoby po šaržích a sériových číslech včetně expirace a úplná '
-      + 'historie jejich pohybů. Odpověď na „ze které šarže jsme to vydali".',
+      + 'historie jejich pohybů. Odpověď na „ze které šarže jsme to vydali". '
+      + 'Klientská role dostane režim, jednotky a aktuální zásobu; historie pohybů je pro ni prázdná.',
     inputSchema: schema({ id: int('ID zboží (skladové karty).') }, ['id']),
     write: false,
     run: (c, a, tool) => c.get(`/stock/items/${seg(a.id)}/tracking`, null, tool),
   },
   {
     name: 'list_stock_locations',
+    api: [
+      ['GET', '/api/stock/locations'],
+    ],
     title: 'Skladové lokace',
     description: 'Lokace (regály, pozice) uvnitř skladů firmy, volitelně jen jednoho skladu.',
     inputSchema: schema({ warehouse_id: int('Jen lokace tohoto skladu.', { minimum: 1 }) }),
@@ -4318,6 +5072,8 @@ export const TOOLS = [
   // ──────────────────────────────────────────────────────────────────────────
   {
     name: 'vendor_offers_list',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Nabídky dodavatelů',
     description:
       'Dvojice zboží × dodavatel: nákupní cena a měna, kód u dodavatele, dodací lhůta, '
@@ -4352,6 +5108,8 @@ export const TOOLS = [
   },
   {
     name: 'vendor_offer_upsert',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Uložit nabídku dodavatele',
     description:
       'Založí nebo upraví nabídku pro dvojici zboží × dodavatel. Jestli už dvojice '
@@ -4407,6 +5165,8 @@ export const TOOLS = [
   },
   {
     name: 'vendor_offer_delete',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Smazat nabídku dodavatele',
     description:
       'Odebere nabídku dodavatele u zboží. Většinou stačí `vendor_offer_upsert` '
@@ -4442,13 +5202,17 @@ export const TOOLS = [
   // ──────────────────────────────────────────────────────────────────────────
   {
     name: 'stock_quantities',
+    api: [
+      ['GET', '/api/stock/quantities'],
+    ],
     title: 'Množství ve třech dimenzích',
     description:
       'Pro každé zboží vrátí `on_hand` (skladem), `reserved` (drží vystavená faktura), '
       + '`sellable` = skladem − rezervováno, `in_transit` (objednáno a na cestě), '
       + '`at_vendor` (co hlásí dodavatelé) a `available_to_promise` = skladem − '
       + 'rezervováno + na cestě. K tomu rozpad po skladech, seznam objednávek, '
-      + 'které zboží vezou, a nabídky dodavatelů.\n\n'
+      + 'které zboží vezou, a nabídky dodavatelů. Klientská role nedostane seznam '
+      + 'zdrojových objednávek ani nabídky dodavatelů.\n\n'
       + 'Zákazníkovi slibuj `sellable`, ne `on_hand` — jinak prodáš kus, který už '
       + 'někdo koupil. `available_to_promise` je interní číslo pro plánování nákupu, '
       + 'protože zahrnuje i to, co teprve dorazí; může vyjít i záporně (prodalo se '
@@ -4469,6 +5233,8 @@ export const TOOLS = [
   },
   {
     name: 'stock_in_transit',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Zboží na cestě',
     description:
       'Kolik kusů je objednáno u dodavatelů a ještě nedorazilo, s rozpadem na konkrétní '
@@ -4490,6 +5256,8 @@ export const TOOLS = [
   },
   {
     name: 'stock_reservations',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Rezervované zboží',
     description:
       'Kusy, které jsou fyzicky skladem, ale drží je vystavená faktura bez zaúčtované '
@@ -4512,6 +5280,8 @@ export const TOOLS = [
   },
   {
     name: 'replenishment_suggest',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Co objednat',
     description:
       'Zboží pod minimální zásobou i s návrhem, kolik ho doobjednat:\n\n'
@@ -4554,6 +5324,8 @@ export const TOOLS = [
   // ──────────────────────────────────────────────────────────────────────────
   {
     name: 'purchase_orders_list',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Objednávky dodavatelům',
     description:
       'Objednávky vydané dodavatelům s dodavatelem, skladem, termínem, stavem '
@@ -4593,6 +5365,8 @@ export const TOOLS = [
   },
   {
     name: 'purchase_orders_get',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Detail objednávky',
     description:
       'Jedna objednávka včetně řádků a plnění. U každého řádku je `qty_ordered` '
@@ -4606,6 +5380,8 @@ export const TOOLS = [
   },
   {
     name: 'purchase_orders_create',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Založit objednávku',
     description:
       'Vytvoří objednávku jako ROZPRACOVANOU (draft): číslo zatím nedostane a do '
@@ -4649,6 +5425,8 @@ export const TOOLS = [
   },
   {
     name: 'purchase_orders_update',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Upravit objednávku',
     description:
       'Přepíše rozpracovanou (draft) objednávku VČETNĚ ŘÁDKŮ — pošli je všechny, '
@@ -4693,6 +5471,8 @@ export const TOOLS = [
   },
   {
     name: 'purchase_orders_send',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Odeslat objednávku',
     description:
       'Přepne rozpracovanou objednávku na odeslanou, přidělí jí číslo z řady OBJ '
@@ -4707,6 +5487,8 @@ export const TOOLS = [
   },
   {
     name: 'purchase_orders_confirm',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Potvrdit objednávku dodavatelem',
     description:
       'Zaznamená, že dodavatel objednávku potvrdil — volitelně s JINÝM množstvím '
@@ -4735,6 +5517,8 @@ export const TOOLS = [
   },
   {
     name: 'purchase_orders_close',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Uzavřít nedodaný zbytek',
     description:
       'Uzavře objednávku s tím, že co nedorazilo, už nedorazí: nedodaný zbytek se '
@@ -4764,6 +5548,8 @@ export const TOOLS = [
   },
   {
     name: 'purchase_orders_cancel',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Stornovat objednávku',
     description:
       'Stornuje objednávku a vyřadí ji z „na cestě". Jde to JEN dokud se z ní nic '
@@ -4791,6 +5577,8 @@ export const TOOLS = [
   },
   {
     name: 'purchase_orders_reopen',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Znovu otevřít objednávku',
     description:
       'Vrátí uzavřenou objednávku zpět mezi živé: vynuluje uzavřený zbytek a stav '
@@ -4801,6 +5589,8 @@ export const TOOLS = [
   },
   {
     name: 'purchase_orders_delete',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Smazat objednávku',
     description:
       'Smaže objednávku i s řádky. Server to dovolí jen u ROZPRACOVANÉ (draft) '
@@ -4820,6 +5610,8 @@ export const TOOLS = [
   },
   {
     name: 'purchase_orders_receipt',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Příjem z objednávky na sklad',
     description:
       'Založí PŘÍJEMKU z objednávky — jako DRAFT, takže se stavem skladu zatím nic '
@@ -4875,6 +5667,8 @@ export const TOOLS = [
   },
   {
     name: 'purchase_orders_bulk_create',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Hromadně objednat',
     description:
       'Z plochého seznamu „tohle zboží v tomhle množství" založí objednávky '
@@ -4921,6 +5715,8 @@ export const TOOLS = [
   // ──────────────────────────────────────────────────────────────────────────
   {
     name: 'list_stock_documents',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Skladové doklady',
     description:
       'Příjemky, výdejky a převodky s filtry na typ, stav, původ, sklad a období.',
@@ -4955,6 +5751,8 @@ export const TOOLS = [
   },
   {
     name: 'get_stock_document',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Detail skladového dokladu',
     description: 'Hlavička a řádky jednoho skladového dokladu včetně ocenění.',
     inputSchema: schema({ id: int('ID skladového dokladu.') }, ['id']),
@@ -4963,6 +5761,8 @@ export const TOOLS = [
   },
   {
     name: 'create_stock_document',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Založit skladový doklad',
     description:
       'Založí ROZPRACOVANÝ skladový doklad (draft). Stav zásob se tím ještě NEMĚNÍ — '
@@ -4990,6 +5790,8 @@ export const TOOLS = [
   },
   {
     name: 'update_stock_document',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Upravit skladový doklad',
     description:
       'Přepíše rozpracovaný doklad. Zaúčtovaný ani stornovaný doklad upravit NEJDE (422) — '
@@ -5012,6 +5814,8 @@ export const TOOLS = [
   },
   {
     name: 'post_stock_document',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Zaúčtovat skladový doklad',
     description:
       'Provede pohyb: naskladní, vyskladní, nebo převede zboží, přidělí dokladu číslo '
@@ -5026,6 +5830,8 @@ export const TOOLS = [
   },
   {
     name: 'reverse_stock_document',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Stornovat skladový doklad',
     description:
       'Vystaví ke zaúčtovanému dokladu opačný protidoklad v původních cenách a rovnou ho '
@@ -5051,6 +5857,8 @@ export const TOOLS = [
   },
   {
     name: 'delete_stock_document',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Smazat skladový doklad',
     description:
       'Smaže ROZPRACOVANÝ doklad. Zaúčtovaný doklad smazat nejde (422) — na ten je '
@@ -5073,6 +5881,8 @@ export const TOOLS = [
   // ──────────────────────────────────────────────────────────────────────────
   {
     name: 'list_stock_takes',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Seznam inventur',
     description: 'Inventury s filtrem na sklad a fázi (rozpracovaná / počítá se / uzavřená).',
     inputSchema: schema({
@@ -5088,6 +5898,8 @@ export const TOOLS = [
   },
   {
     name: 'get_stock_take',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Detail inventury',
     description:
       'Inventura i s řádky: očekávané množství, napočítané množství a rozdíl. '
@@ -5098,6 +5910,8 @@ export const TOOLS = [
   },
   {
     name: 'create_stock_take',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Založit inventuru',
     description:
       'Založí rozpracovanou inventuru skladu. Odpovědné osoby jsou povinné, protože '
@@ -5123,6 +5937,8 @@ export const TOOLS = [
   },
   {
     name: 'start_stock_take',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Spustit inventuru',
     description:
       'Přepne inventuru do fáze počítání a udělá snímek očekávaných stavů všech aktivních '
@@ -5134,6 +5950,8 @@ export const TOOLS = [
   },
   {
     name: 'set_stock_take_counts',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Zapsat napočítané množství',
     description:
       'Zapíše skutečně napočítané množství na řádky inventury. Jde to jen ve fázi počítání.\n\n'
@@ -5164,6 +5982,8 @@ export const TOOLS = [
   },
   {
     name: 'close_stock_take',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Uzavřít inventuru',
     description:
       'Uzavře inventuru: spočítá rozdíly proti očekávání a vygeneruje rozdílové skladové '
@@ -5198,6 +6018,8 @@ export const TOOLS = [
   // ──────────────────────────────────────────────────────────────────────────
   {
     name: 'list_sales_orders',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Prodejní objednávky',
     description:
       'Objednávky odběratelů s odděleným obchodním, platebním a expedičním stavem. '
@@ -5227,6 +6049,8 @@ export const TOOLS = [
   },
   {
     name: 'get_sales_order',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Detail prodejní objednávky',
     description: 'Objednávka i s řádky (neměnné snapshoty ceny a názvu) a zbývajícími rezervacemi zásoby.',
     inputSchema: schema({ id: int('ID prodejní objednávky.') }, ['id']),
@@ -5235,6 +6059,8 @@ export const TOOLS = [
   },
   {
     name: 'sales_order_shortages',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Objednávky čekající na zboží',
     description:
       'Fronta řádků prodejních objednávek, na které chybí zásoba — od nejstarší. '
@@ -5245,6 +6071,8 @@ export const TOOLS = [
   },
   {
     name: 'list_cycle_counts',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Cyklické inventury',
     description:
       'Poslední průběžné (cyklické) inventury části skladu se stavem přípravy. '
@@ -5255,6 +6083,8 @@ export const TOOLS = [
   },
   {
     name: 'get_cycle_count',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Detail cyklické inventury',
     description: 'Stav přípravy, okamžik uzamčení stavu (cutoff) a řádky s očekávaným a napočítaným množstvím.',
     inputSchema: schema({ id: int('ID cyklické inventury.') }, ['id']),
@@ -5272,6 +6102,9 @@ export const TOOLS = [
   // ──────────────────────────────────────────────────────────────────────────
   {
     name: 'list_price_list_items',
+    api: [
+      ['GET', '/api/price-list-items'],
+    ],
     title: 'Ceník služeb',
     description:
       'Položky ceníku s cenami po měnách. Se zadanou měnou (`currency`) vrátí jen položky '
@@ -5301,6 +6134,9 @@ export const TOOLS = [
   },
   {
     name: 'get_price_list_item',
+    api: [
+      ['GET', '/api/price-list-items/{id}'],
+    ],
     title: 'Detail položky ceníku',
     description:
       'Položka ceníku s cenami po měnách, individuálními cenami zákazníků '
@@ -5311,6 +6147,9 @@ export const TOOLS = [
   },
   {
     name: 'resolve_price_list_item',
+    api: [
+      ['GET', '/api/price-list-items/{id}/resolve'],
+    ],
     title: 'Cena položky ceníku pro odběratele',
     description:
       'Výsledná jednotková cena jedné položky ceníku v měně dokladu: individuální cena '

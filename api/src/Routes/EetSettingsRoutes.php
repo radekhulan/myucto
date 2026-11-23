@@ -23,6 +23,7 @@ final class EetSettingsRoutes
         $app->put('/api/eet/settings', [EetSettingsAction::class, 'update']);
 
         $app->get('/api/eet/units', [EetUnitsAction::class, 'list']);
+        $app->get('/api/eet/units/dis-import', [EetUnitsAction::class, 'disImport']);
         $app->post('/api/eet/units', [EetUnitsAction::class, 'create']);
         $app->put('/api/eet/units/{id:[0-9]+}', [EetUnitsAction::class, 'update']);
         $app->delete('/api/eet/units/{id:[0-9]+}', [EetUnitsAction::class, 'endValidity']);

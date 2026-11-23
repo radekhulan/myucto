@@ -63,6 +63,27 @@ final class ApiTokenRoleIntersectionTest extends TestCase
         }
     }
 
+    public function testWorkReportBillingTemplateReadRequiresAnExistingBusinessPermission(): void
+    {
+        foreach (['staff', 'client'] as $type) {
+            foreach (['read', 'read_write'] as $scope) {
+                foreach (['price_list', 'invoices', 'projects', 'clients'] as $key) {
+                    foreach ([0, 1, 2] as $level) {
+                        $pipeline = $this->pipeline(new EffectiveRole(9, 'Syntetická role pro výkazy', $type, true, [$key => $level]));
+                        $request = $this->request($scope)->withMethod('GET')
+                            ->withUri(new \Slim\Psr7\Uri('http', 'localhost', null, '/api/work-report-billing-templates'));
+                        $response = $pipeline->handle($request);
+                        self::assertSame($key !== 'clients' && $level >= 1 ? 204 : 403, $response->getStatusCode(),
+                            "$type $scope $key=$level");
+                        if ($response->getStatusCode() === 403) {
+                            self::assertStringContainsString('forbidden_permission', (string) $response->getBody());
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     private function pipeline(EffectiveRole $role): RequestHandlerInterface
     {
         $roles = $this->createStub(PermissionResolver::class);

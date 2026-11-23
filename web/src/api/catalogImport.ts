@@ -119,9 +119,9 @@ export const catalogImportApi = {
     api.post<CatalogJob>(`/eshop/imports/${id}/apply`, undefined, { signal })
       .then(response => response.data)
   ),
-  items: (id: number, page = 1, signal?: AbortSignal) => (
+  items: (id: number, page = 1, signal?: AbortSignal, status?: string) => (
     api.get<CatalogImportItems>(`/eshop/jobs/${id}/items`, {
-      params: { page, limit: 50 },
+      params: { page, limit: 50, ...(status ? { status } : {}) },
       signal,
     }).then(response => response.data)
   ),

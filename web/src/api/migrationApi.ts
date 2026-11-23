@@ -13,6 +13,18 @@ export interface MigrationNonprofitNotice {
 }
 
 /**
+ * Mzdy ve zdroji převodu, které se do MyÚčta nepřevedou: licence bez mzdového doplňku
+ * (`unlicensed`), nebo firma bez zapnutého modulu Mzdy (`module_disabled`).
+ */
+export interface MigrationPayrollNotice {
+  level: 'warning'
+  code: 'payroll_not_transferred'
+  reason: 'unlicensed' | 'module_disabled'
+  message: string
+  context: { employees: number; months: number; first: string | null; last: string | null; buy_url: string | null; source?: 'pohoda' }
+}
+
+/**
  * Společný klient průvodců převodem z cizího programu (Money S3, POHODA, PREMIER).
  * Server pod `{base}` nabízí nahrání po částech, stav nahraného souboru, spuštění převodu
  * na pozadí a protokoly běhů; zdroj si ke klientovi přidá vlastní volání.

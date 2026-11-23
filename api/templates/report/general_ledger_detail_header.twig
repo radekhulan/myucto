@@ -1,0 +1,8 @@
+<div class="title">Hlavní kniha včetně dokladů</div>
+{% if supplier_name %}<div class="meta">{{ supplier_name }}{% if supplier_ic %} · IČ: {{ supplier_ic }}{% endif %}</div>{% endif %}
+<div class="meta">Období: {{ from|cz_date }} - {{ to|cz_date }} · Částky v Kč · Zůstatek: kladný MD, záporný D{% if after_closing %} · Po uzavření knih{% endif %}</div>
+<div class="meta">{% if account_from is not empty or account_to is not empty %}Účty: {{ account_from is not empty ? account_from : '…' }} - {{ account_to is not empty ? account_to : '…' }} · {% endif %}{% if vendor %}Dodavatel: {{ vendor }} · {% endif %}{% if client %}Odběratel: {{ client }} · {% endif %}{% if item %}Položka: {{ item }} · {% endif %}{% if dimension %}Dimenze: {{ dimension.label }} · {% endif %}Nezaúčtované koncepty nejsou zahrnuty{% if draft_count > 0 %} (v období {{ draft_count }} za všechny účty){% endif %}.</div>
+{% if account %}
+<div class="account">{{ account.account_code }} - {{ account.name }} (pokračování)</div>
+<table class="detail"><tr class="head"><th class="date">Datum</th><th class="doc">Doklad</th><th class="text">Popis</th><th class="counter">Protiúčet</th><th class="money">MD</th><th class="money">D</th><th class="money">Zůstatek</th></tr></table>
+{% endif %}

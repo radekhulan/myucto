@@ -204,7 +204,7 @@ final class CreditNoteDeliveryPeriodTest extends TestCase
             // Akce po UPDATE pokračuje prací, která si otevírá vlastní transakci; uvnitř
             // testovací transakce to nejde. `tax_date` je v tu chvíli UŽ nastavený, což je
             // přesně to, co se ověřuje.
-            if (str_contains($e->getMessage(), 'Transaction characteristics')
+            if ((int) ($e->errorInfo[1] ?? 0) === 1568
                 || str_contains($e->getMessage(), 'already an active transaction')) {
                 return [];
             }

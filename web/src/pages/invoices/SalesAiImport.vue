@@ -7,6 +7,8 @@ import { useToast } from '@/composables/useToast'
 import { apiErrorCode, apiErrorMessage } from '@/api/errors'
 import AiNotConfiguredNotice from '@/components/purchase/AiNotConfiguredNotice.vue'
 import { ICONS } from '@/components/ui/buttonStyles'
+import MergeDocumentsPanel from '@/components/upload/MergeDocumentsPanel.vue'
+import CapturePhotoButton from '@/components/upload/CapturePhotoButton.vue'
 
 const { t } = useI18n()
 const toast = useToast()
@@ -39,10 +41,31 @@ const aiExtracting = ref(false)
 const aiResult = ref<AiIssuedExtractResult | null>(null)
 const aiPerRequestModel = ref('')  // empty = použít default
 
+// Výběr, přetažení i fotka jdou stejnou cestou: jeden doklad k vytěžení, víc do dávky.
+function acceptAiFiles(files: File[]) {
+  if (aiExtracting.value || aiBatchRunning.value || files.length === 0) return
+  const pdfs = files.filter(f =>
+    f.type === 'application/pdf' || f.type.startsWith('image/') ||
+    /\.(pdf|jpe?g|png|webp|heic|heif|gif|bmp|isdoc|isdocx)$/i.test(f.name))
+  if (pdfs.length === 0) {
+    toast.error(t('integrations.ai.only_pdf'))
+    return
+  }
+  if (pdfs.length === 1) {
+    aiPdfFile.value = pdfs[0]
+    aiBatchQueue.value = []
+  } else {
+    aiBatchQueue.value = pdfs.map(f => ({ file: f, status: 'pending' as const, result: null }))
+    aiPdfFile.value = null
+  }
+  aiResult.value = null
+}
+
 function onAiPdfPick(e: Event) {
   const input = e.target as HTMLInputElement
-  aiPdfFile.value = input.files?.[0] ?? null
-  aiResult.value = null
+  acceptAiFiles(Array.from(input.files ?? []))
+  // Reset hodnoty inputu, ať jde znovu vybrat týž soubor (change se jinak nespustí).
+  input.value = ''
 }
 
 const aiDragOver = ref(false)
@@ -94,25 +117,7 @@ function onAiDragLeave(e: DragEvent) {
 function onAiDrop(e: DragEvent) {
   e.preventDefault()
   aiDragOver.value = false
-  const files = Array.from(e.dataTransfer?.files ?? [])
-  if (files.length === 0) return
-
-  const pdfs = files.filter(f =>
-    f.type === 'application/pdf' || f.type.startsWith('image/') ||
-    /\.(pdf|jpe?g|png|webp|heic|heif|gif|bmp|isdoc|isdocx)$/i.test(f.name))
-  if (pdfs.length === 0) {
-    toast.error(t('integrations.ai.only_pdf'))
-    return
-  }
-
-  if (pdfs.length === 1) {
-    aiPdfFile.value = pdfs[0]
-    aiResult.value = null
-  } else {
-    aiBatchQueue.value = pdfs.map(f => ({ file: f, status: 'pending' as const, result: null }))
-    aiPdfFile.value = null
-    aiResult.value = null
-  }
+  acceptAiFiles(Array.from(e.dataTransfer?.files ?? []))
 }
 
 async function runAiExtract() {
@@ -143,6 +148,15 @@ async function runAiExtract() {
   }
 }
 
+// Doklad spojený z více částí jde do stejného vytěžení jako jeden nahraný soubor.
+function importMerged(file: File) {
+  if (aiExtracting.value || aiBatchRunning.value) return
+  aiBatchQueue.value = []
+  aiPdfFile.value = file
+  aiResult.value = null
+  void runAiExtract()
+}
+
 function gotoInvoice(id: number) {
   router.push(`/invoices/${id}/edit`)
 }
@@ -168,12 +182,15 @@ onMounted(() => {
       <p class="text-xs text-neutral-500 mb-4">{{ t('integrations.ai.extract_hint') }}</p>
 
       <div class="space-y-3">
+        <div class="flex flex-wrap gap-2 justify-end">
+          <CapturePhotoButton :disabled="aiExtracting || aiBatchRunning" @captured="(f: File) => acceptAiFiles([f])" />
+        </div>
         <label class="block border-2 border-dashed rounded-lg p-6 text-center cursor-pointer transition"
           :class="aiDragOver
             ? 'border-primary-500 bg-primary-50'
             : 'border-neutral-300 hover:border-primary-400 hover:bg-primary-50/30'"
           @dragenter="onAiDragEnter" @dragover="onAiDragOver" @dragleave="onAiDragLeave" @drop="onAiDrop">
-          <input type="file" accept="application/pdf,.pdf,image/*,.isdoc,.isdocx" @change="onAiPdfPick" class="hidden" />
+          <input type="file" multiple accept="application/pdf,.pdf,image/*,.isdoc,.isdocx" @change="onAiPdfPick" class="hidden" />
           <svg class="w-8 h-8 mx-auto text-neutral-400 mb-2" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
             <path stroke-linecap="round" stroke-linejoin="round" d="M7 16a4 4 0 0 1-.88-7.9 5 5 0 0 1 9.9-1A5.5 5.5 0 0 1 18.5 16H17m-5-4v9m0-9l-3 3m3-3l3 3" />
           </svg>
@@ -220,10 +237,19 @@ onMounted(() => {
               'bg-neutral-100 text-neutral-500']">
               {{ item.status === 'processing' ? '…' : item.status }}
             </span>
+            <span v-if="item.result?.warnings?.length" :title="item.result.warnings.join('\n')"
+              class="px-2 py-0.5 rounded text-[10px] font-medium bg-warning-50 text-warning-600 border border-warning-500/40 whitespace-nowrap">
+              {{ t('integrations.salesAi.warnings_badge', { n: item.result.warnings.length }) }}
+            </span>
             <RouterLink v-if="item.status === 'ok' && item.result?.invoice_id"
               :to="`/invoices/${item.result.invoice_id}/edit`"
               class="text-primary-600 hover:underline text-[10px]">→</RouterLink>
           </div>
+          <ul v-for="(item, idx) in aiBatchQueue.filter(x => x.result?.warnings?.length)" :key="'w' + idx"
+              class="mt-1 rounded-md bg-warning-50 border border-warning-500/40 px-2 py-1 text-warning-700 list-disc list-inside">
+            <li class="font-mono list-none">{{ item.file.name }}</li>
+            <li v-for="(w, wi) in item.result!.warnings" :key="wi">{{ w }}</li>
+          </ul>
         </div>
         <button type="button" @click="runAiBatch" :disabled="aiBatchRunning"
                 class="mt-3 cursor-pointer w-full h-10 bg-primary-600 hover:bg-primary-700 disabled:bg-neutral-300 text-white text-sm font-medium rounded-md">
@@ -258,6 +284,13 @@ onMounted(() => {
             Tokens: in={{ aiResult.usage.input_tokens }}, out={{ aiResult.usage.output_tokens }}
           </div>
         </div>
+        <div v-if="aiResult.ok && aiResult.warnings?.length"
+             class="mt-2 rounded-md bg-warning-50 border border-warning-500/40 px-3 py-2 text-sm text-warning-700">
+          <strong>{{ t('integrations.salesAi.warnings_title') }}</strong>
+          <ul class="mt-1 list-disc list-inside text-xs space-y-0.5">
+            <li v-for="(w, wi) in aiResult.warnings" :key="wi">{{ w }}</li>
+          </ul>
+        </div>
         <div v-else class="rounded-md bg-danger-50 border border-danger-500/40 px-3 py-2 text-sm text-danger-500">
           <strong>✗ {{ aiResult.error }}</strong>
           <div class="text-xs mt-1">Source: {{ aiResult.source }}</div>
@@ -269,5 +302,6 @@ onMounted(() => {
         </details>
       </div>
     </div>
+    <MergeDocumentsPanel v-if="aiConfigured" :busy="aiExtracting || aiBatchRunning" @import="importMerged" />
   </div>
 </template>

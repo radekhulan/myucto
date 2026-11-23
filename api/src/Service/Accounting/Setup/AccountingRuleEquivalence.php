@@ -27,6 +27,7 @@ final class AccountingRuleEquivalence
     public static function bank(array $left, array $right): bool
     {
         return trim((string) ($left['direction'] ?? '')) === trim((string) ($right['direction'] ?? ''))
+            && (int) ($left['bank_account_id'] ?? 0) === (int) ($right['bank_account_id'] ?? 0)
             && AccountNumberNormalizer::canonical((string) ($left['counterparty_account'] ?? ''))
                 === AccountNumberNormalizer::canonical((string) ($right['counterparty_account'] ?? ''))
             && AccountNumberNormalizer::canonicalBankCode((string) ($left['counterparty_bank'] ?? ''))

@@ -124,6 +124,44 @@ final class EnableDoubleEntryHookTest extends TestCase
         self::assertSame('accounting_mode_history_missing', $body['error']['code']);
     }
 
+    public function testSwitchBackToTaxEvidenceFromSameDateIsCorrection(): void
+    {
+        $this->prepareDoubleEntryHistory('2026-01-01');
+
+        $resp = $this->updateMode('tax_evidence', '2026-01-01');
+
+        self::assertSame(200, $resp->getStatusCode());
+        $mode = $this->db->pdo()->prepare(
+            "SELECT accounting_mode FROM supplier_accounting_modes WHERE supplier_id = ? AND effective_from = '2026-01-01'"
+        );
+        $mode->execute([$this->supplierId]);
+        self::assertSame('tax_evidence', $mode->fetchColumn());
+    }
+
+    public function testSwitchFromActivatedDoubleEntryOnSameDateIsCorrection(): void
+    {
+        $this->prepareDoubleEntryHistory('2026-01-01');
+        $this->db->pdo()->prepare(
+            "INSERT INTO supplier_accounting_modes (supplier_id, effective_from, accounting_mode) VALUES (?, '2020-01-01', 'tax_evidence')"
+        )->execute([$this->supplierId]);
+
+        $resp = $this->updateMode('tax_evidence', '2026-01-01');
+
+        self::assertSame(200, $resp->getStatusCode());
+    }
+
+    public function testSwitchAfterOneDoubleEntryPeriodIsStillRejected(): void
+    {
+        $this->prepareDoubleEntryHistory('2026-01-01');
+
+        $resp = $this->updateMode('tax_evidence', '2027-01-01');
+        $resp->getBody()->rewind();
+        $body = json_decode((string) $resp->getBody(), true, 512, JSON_THROW_ON_ERROR);
+
+        self::assertSame(422, $resp->getStatusCode());
+        self::assertSame('accounting_minimum_periods', $body['error']['code']);
+    }
+
     private function prepareDoubleEntryHistory(string $effectiveFrom): void
     {
         $pdo = $this->db->pdo();

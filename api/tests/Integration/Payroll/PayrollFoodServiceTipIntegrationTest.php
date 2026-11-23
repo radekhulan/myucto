@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Integration\Payroll;
 
-use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\Payroll\PayrollInputRepository;
 use MyInvoice\Service\Payroll\Component\PayrollBenefitExemptionBasket;
@@ -119,7 +118,7 @@ final class PayrollFoodServiceTipIntegrationTest extends TestCase
 
     private function inTransaction(callable $test): void
     {
-        $this->container = Bootstrap::buildContainer();
+        $this->container = \MyInvoice\Tests\Support\PayrollTestContainer::build();
         $connection = $this->container->get(Connection::class);
         self::assertInstanceOf(Connection::class, $connection);
         $pdo = $connection->pdo();

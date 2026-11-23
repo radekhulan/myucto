@@ -57,6 +57,57 @@ final class NonprofitTaxSnapshotHasher
         return NonprofitTaxRules::hash(['domain' => 'J6HEADER2', 'schema' => SnapshotHeaderV2::SCHEMA, 'header' => $header->data]);
     }
 
+    /**
+     * Obsah podkladů pro otisk {@see contentInput()}: zvlášť proud řádků a proud zjištění
+     * v pořadí, v jakém je čtečka vydá, bez hranic stránek a kurzorů. Stránky jdou přes
+     * všechny řádky deníku období, takže hranice i kurzory posouval i zápis, který do
+     * posouzení nevstupuje (daň 591/341, úhrada, uzavření knih), a potvrzené posouzení
+     * zastaralo (#397). Integritu uložených stránek dál drží kořen {@see startRoot()}.
+     *
+     * @return array{rows:\HashContext, findings:\HashContext}
+     */
+    public function startContent(): array
+    {
+        $rows = hash_init('sha256');
+        hash_update($rows, "J6ROWS3\0" . SnapshotHeaderV2::SCHEMA . "\0");
+        $findings = hash_init('sha256');
+        hash_update($findings, "J6FINDINGS3\0" . SnapshotHeaderV2::SCHEMA . "\0");
+        return ['rows' => $rows, 'findings' => $findings];
+    }
+
+    /** @param array{rows:\HashContext, findings:\HashContext} $content */
+    public function updateContent(array $content, array $rows, array $findings): void
+    {
+        foreach ($rows as $row) hash_update($content['rows'], $this->row($row));
+        foreach ($findings as $finding) {
+            $json = NonprofitTaxRules::canonicalJson($finding);
+            hash_update($content['findings'], pack('N', strlen($json)) . $json);
+        }
+    }
+
+    /** @param array{rows:\HashContext, findings:\HashContext} $content */
+    public function finishContent(array $content): string
+    {
+        return hash('sha256', "J6CONTENT3\0" . hash_final($content['rows']) . "\0" . hash_final($content['findings']));
+    }
+
+    /**
+     * Otisk podkladů posouzení (`input_hash`): hlavička a obsah ({@see finishContent()}),
+     * nezávisle na tom, jak jsou podklady rozdělené do stránek.
+     */
+    public function contentInput(SnapshotHeaderV2 $header, string $headerHash, string $contentHash, int $rowCount, int $findingCount): string
+    {
+        foreach ([$headerHash, $contentHash] as $hash) if (preg_match('/^[a-f0-9]{64}$/D', $hash) !== 1) throw new \InvalidArgumentException('Snapshot input hash material is invalid.');
+        return NonprofitTaxRules::hash(['domain' => 'J6INPUT3', 'schema' => SnapshotHeaderV2::SCHEMA,
+            'header_hash' => $headerHash, 'content_hash' => $contentHash, 'row_count' => $rowCount,
+            'finding_count' => $findingCount, 'ruleset' => $header->data['ruleset'],
+            'source_fact_schemas' => $header->data['source_fact_schemas']]);
+    }
+
+    /**
+     * Původní otisk podkladů nad kořenem stránek. Jen pro ověření manifestů uložených před
+     * {@see contentInput()}; nové otisky se jím nepočítají.
+     */
     public function input(SnapshotHeaderV2 $header, string $headerHash, string $rootHash, int $rowCount, int $findingCount, int $chunkCount): string
     {
         foreach ([$headerHash, $rootHash] as $hash) if (preg_match('/^[a-f0-9]{64}$/D', $hash) !== 1) throw new \InvalidArgumentException('Snapshot input hash material is invalid.');

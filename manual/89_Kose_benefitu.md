@@ -144,6 +144,12 @@ takže přehled **žádný limit ani zbytek netvrdí** a řekne to poznámkou: �
 znamená „tolik se za měsíc poskytlo", ne „limit je dodržený". Dodržení limitu za
 směnu se hlídá při schválení vstupu proti doloženému počtu směn z docházky.
 
+Pokud limit stravování pro nový rok ještě **čeká na vyhlášení**, lze vstup
+schválit, ale aplikace celé plnění zdaní a pojistí. Běh k němu přidá
+upozornění. Po doplnění limitu aktualizací osvobozenou část dorovnejte
+opravou vstupu a podle stavu mzdy opravnou revizí; zmrazené částky se
+samy nezmění ([Legislativní pravidla](92_Legislativni_pravidla_mezd.md#9284-parametry-mimo-automaticky-vypocet)).
+
 ### 89.6.3 Spropitné ze stravovacích služeb
 
 Od roku 2027 je spropitné ze stravovacích služeb, které zaměstnancům vyplácí
@@ -211,6 +217,15 @@ Nepeněžní plnění bez vlastní dvojice účtů se do mzdového deníku neza�
 vůbec: náklad je v knihách už ze zdrojového dokladu a mzdový zápis by ho
 zaúčtoval podruhé. Do daně a pojistného přitom vstupuje normálně (viz
 [Shoda účtování mezd](81_Shoda_uctovani_mezd.md#8153-ucetne-neutralni-nepenezni-plneni)).
+
+Příspěvek zaměstnavatele na penzijní a životní produkty a na pojištění
+dlouhodobé péče (složky *Příspěvek na penzijní a životní produkty* a *Příspěvek
+na dlouhodobou péči*) je nepeněžní plnění: zaměstnavatel ho platí penzijní
+společnosti nebo pojišťovně a zaměstnanci se nevyplácí. Do 50 000 Kč ročně je
+osvobozený, nadlimitní část se zdaní a pojistí z peněžní mzdy. Do měsíčního
+hlášení jde v údaji o příspěvcích na spoření na stáří jen osvobozená část.
+Chcete-li náklad a závazek vůči instituci účtovat mzdovým zápisem, vyplňte
+složce vlastní dvojici účtů.
 
 ### 89.6.6 Kontroly a časté chyby
 

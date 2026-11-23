@@ -56,6 +56,9 @@ final readonly class JmhzSubmissionBridgeService
     /** Měsíc, za který řádné hlášení už podal předchozí mzdový program. */
     public const EXTERNAL_SUBMISSION_CODE = 'jmhz_period_submitted_externally';
 
+    /** Do 48 h po přijaté změně údajů (REGZEC A3): odeslat i tak, nebo odložit dotčené. */
+    public const REGISTRATION_SETTLING_CODE = 'jmhz_registration_change_settling';
+
     /**
      * Kód chyby 409 pro obrazovku. Potvrzení slevy po lhůtě a měsíc podaný
      * předchozím programem nesou vlastní kód (obrazovka nabídne potvrzení,
@@ -66,7 +69,7 @@ final readonly class JmhzSubmissionBridgeService
     {
         return in_array(
             $exception->validationCode,
-            [self::LATE_DISCOUNT_CONFIRMATION_CODE, self::EXTERNAL_SUBMISSION_CODE],
+            [self::LATE_DISCOUNT_CONFIRMATION_CODE, self::EXTERNAL_SUBMISSION_CODE, self::REGISTRATION_SETTLING_CODE],
             true,
         ) ? $exception->validationCode : 'conflict';
     }
@@ -94,6 +97,11 @@ final readonly class JmhzSubmissionBridgeService
         private ?PayrollRegistrationChangeSettlement $registrationSettlement = null,
         /** Jména dotčených osob v hlášce o blokaci; bez něj zůstane jen počet. */
         private ?PayrollPeopleRepository $people = null,
+        /**
+         * Rozliší u nálezu čteného ze schváleného běhu, jestli je údaj už
+         * opravený a zbývá jen opravná revize. Volitelný jako ostatní rozšíření.
+         */
+        private ?JmhzFrozenSourceAdvisor $frozenSource = null,
     ) {}
 
     /**
@@ -118,8 +126,9 @@ final readonly class JmhzSubmissionBridgeService
             self::EXTERNAL_SUBMISSION_CODE,
             sprintf(
                 'Za období %s už %s měsíční hlášení podal předchozí mzdový program (%s%s). Druhé řádné hlášení za stejný '
-                . 'měsíc ČSSZ zamítne (kontrola č. 22 katalogu kontrol), proto se nepřipraví. Opravu za tento měsíc pošlete '
-                . 'jako opravné podání z programu, který hlášení podal. Pokud záznam neodpovídá (hlášení ve skutečnosti '
+                . 'měsíc ČSSZ zamítne (kontrola č. 22 katalogu kontrol), proto se nepřipraví. Opravné hlášení za tento měsíc '
+                . 'navážete v Mzdy → Podání → JMHZ, oddíl Oprava měsíce podaného předchozím programem (původní XML nebo '
+                . 'GUID podání a formulářů). Pokud záznam neodpovídá (hlášení ve skutečnosti '
                 . 'neodešlo), odeberte ho v Mzdy → Podání → JMHZ, oddíl Podání předchozím programem, a přípravu zopakujte.',
                 substr($period, 5, 2) . '/' . substr($period, 0, 4),
                 $sent['submission_type'] === 'O' ? 'opravné' : 'řádné',
@@ -138,8 +147,11 @@ final readonly class JmhzSubmissionBridgeService
         int $supplierId,
         string $environment,
         JmhzScenario1NormalizedDocument $document,
+        bool $confirmed,
+        int $preparationId,
+        ?int $officeId,
     ): void {
-        if ($this->registrationSettlement === null) {
+        if ($this->registrationSettlement === null || $confirmed) {
             return;
         }
         $employmentIds = [];
@@ -159,11 +171,25 @@ final readonly class JmhzSubmissionBridgeService
         );
         if ($pending !== null) {
             throw new JmhzXmlException(
-                'jmhz_registration_change_settling',
+                self::REGISTRATION_SETTLING_CODE,
                 PayrollRegistrationChangeSettlement::message(
                     $pending['until'],
                     count($pending['employment_ids']),
                 ),
+                [],
+                [
+                    'settling' => [
+                        'until' => $pending['until']->format(\DateTimeInterface::ATOM),
+                        'employment_ids' => $pending['employment_ids'],
+                    ],
+                    'deferral' => [
+                        'preparation_id' => $preparationId,
+                        'environment' => $environment,
+                        'office_id' => $officeId,
+                        'employment_ids' => $pending['employment_ids'],
+                        'count' => count($pending['employment_ids']),
+                    ],
+                ],
             );
         }
     }
@@ -184,6 +210,7 @@ final readonly class JmhzSubmissionBridgeService
         ?int $createdBy = null,
         ?int $officeId = null,
         bool $lateDiscountConfirmed = false,
+        bool $registrationSettlingConfirmed = false,
     ): array {
         if ($supplierId <= 0
             || $preparationId <= 0
@@ -211,16 +238,31 @@ final readonly class JmhzSubmissionBridgeService
         // verze 2027 ještě není, ne nálezy, po jejichž opravě by skončila tady.
         $candidatePeriod = $resolution->candidate?->payload['scope']['period_start'] ?? null;
         if (is_string($candidatePeriod) && preg_match('/^\d{4}-\d{2}-\d{2}$/D', $candidatePeriod) === 1) {
-            JmhzSpecPackageCatalog::requireBuildable(JmhzSpecVersion::forPeriodStart($candidatePeriod));
+            // Totéž platí pro období, které ještě neskončilo: katalog kontrol by
+            // ho zastavil až po zaevidování povinnosti a výčtem kontrol 43, 44
+            // a 90. Závora to řekne jednou větou a nic nezaloží.
+            (new JmhzPreparationGate($this->deadlines, $this->clock))->assertOpen($candidatePeriod);
         }
         if ($resolution->status() !== 'resolved') {
+            $payload = JmhzBlockerRemediationPath::payload(
+                $resolution->blockers,
+                $this->people,
+                $supplierId,
+                is_string($candidatePeriod) ? $candidatePeriod : null,
+            );
+            $candidateRun = $resolution->candidate?->payload['scope']['run_id'] ?? null;
+            if ($this->frozenSource !== null && is_int($candidateRun) && $candidateRun > 0) {
+                $payload = $this->frozenSource->annotate($supplierId, $candidateRun, $payload);
+            }
             throw new JmhzXmlException(
                 'jmhz_submission_preparation_blocked',
                 'Příprava JMHZ není úplná, podání se nezakládá: '
                     . ($this->people === null
                         ? JmhzBlockerExplainer::describe($resolution->blockers)
-                        : JmhzBlockerExplainer::describeNamed($resolution->blockers, $this->people, $supplierId)),
-                JmhzBlockerRemediationPath::payload($resolution->blockers, $this->people, $supplierId),
+                        : JmhzBlockerExplainer::describeNamed($resolution->blockers, $this->people, $supplierId))
+                    . self::alreadyFixedSentence($payload),
+                $payload,
+                self::deferralContext($resolution, $preparationId, $environment, $officeId),
             );
         }
         $document = $resolution->requireResolvedDocument();
@@ -267,6 +309,7 @@ final readonly class JmhzSubmissionBridgeService
             $periodStart,
             $keys,
             $lateDiscountConfirmed,
+            $registrationSettlingConfirmed,
             $split,
         ): array {
             if (!$this->submissionRepository->lockSupplier($supplierId)) {
@@ -309,7 +352,14 @@ final readonly class JmhzSubmissionBridgeService
             // Až za opakováním: už zmrazené podání se vrací beze změny, nové řádné
             // za měsíc podaný předchozím programem nevznikne (výjimka vrátí transakci).
             $this->assertNotSubmittedExternally($supplierId, $environment, $periodStart);
-            $this->assertRegistrationChangesSettled($supplierId, $environment, $document);
+            $this->assertRegistrationChangesSettled(
+                $supplierId,
+                $environment,
+                $document,
+                $registrationSettlingConfirmed,
+                $preparationId,
+                $officeId,
+            );
 
             // Odsud dál se mrazí. GUIDy vznikají právě tady a nikde jinde.
             $envelope = JmhzSubmissionEnvelope::create(
@@ -579,6 +629,56 @@ final readonly class JmhzSubmissionBridgeService
         return "{$artifactKey}:package:{$ordinal}";
     }
 
+    /**
+     * Kolik osob s nálezem lze z řádného hlášení odložit; podle toho obrazovka
+     * nabídne „Odložit všechny dotčené".
+     *
+     * @return array<string,mixed>
+     */
+    private static function deferralContext(
+        JmhzScenario1Resolution $resolution,
+        int $preparationId,
+        string $environment,
+        ?int $officeId,
+    ): array {
+        $employees = [];
+        $employmentEmployee = [];
+        $people = $resolution->candidate?->payload['people'] ?? [];
+        foreach (is_array($people) ? $people : [] as $person) {
+            $employeeId = is_array($person) ? ($person['employee_id'] ?? null) : null;
+            foreach ((is_array($person) && is_array($person['employments'] ?? null) ? $person['employments'] : []) as $employment) {
+                if (is_int($employeeId) && is_array($employment) && is_int($employment['employment_id'] ?? null)) {
+                    $employmentEmployee[$employment['employment_id']] = $employeeId;
+                }
+            }
+        }
+        $firm = 0;
+        foreach ($resolution->blockers as $blocker) {
+            if (!$blocker->deferrable()) {
+                $firm++;
+                continue;
+            }
+            $employee = $blocker->entityType === 'employment'
+                ? ($employmentEmployee[(int) $blocker->entityId] ?? 'employment:' . $blocker->entityId)
+                : $blocker->entityId;
+            $employees[(string) $employee] = true;
+        }
+        if ($employees === []) {
+            return [];
+        }
+
+        return [
+            'deferral' => [
+                'preparation_id' => $preparationId,
+                'environment' => $environment,
+                'office_id' => $officeId,
+                'employment_ids' => null,
+                'count' => count($employees),
+                'firm_blocker_count' => $firm,
+            ],
+        ];
+    }
+
     private static function formCount(JmhzScenario1NormalizedDocument $document): int
     {
         $declared = $document->payload['header']['individual_form_count'] ?? null;
@@ -653,6 +753,20 @@ final readonly class JmhzSubmissionBridgeService
                 'jmhz_submission_period_missing',
                 'Dokument JMHZ nenese platné vykazované období.',
             );
+        }
+        // Povinnost z dřívější přípravy, která se nezmrazila (podání k ní
+        // nevzniklo): nová příprava za totéž období ji převezme. Jinak by ji
+        // pojistka jediného řádného hlášení odmítla jako druhé řádné, přestože
+        // se za období nic nepodalo.
+        $unfiled = $this->submissionRepository->findUnfiledRegularObligationId(
+            $supplierId,
+            $environment,
+            self::AGENDA_CODE,
+            self::runReference($runId, $officeId),
+            $periodStart,
+        );
+        if ($unfiled !== null) {
+            return $unfiled;
         }
         $window = $this->deadlines->forPeriod($periodStart);
         $officeKey = $officeId === null ? 'all' : (string) $officeId;
@@ -1010,6 +1124,36 @@ final readonly class JmhzSubmissionBridgeService
             'submission' => "jmhz25-submission:{$fingerprint}",
             'artifact' => "jmhz25-artifact:{$fingerprint}",
         ];
+    }
+
+    /**
+     * Věta pro případ, kdy účetní údaj už opravila a hlášení se přesto
+     * zastavilo: bez ní nepozná, jestli se oprava neuložila, nebo jen chybí
+     * opravná revize běhu.
+     *
+     * @param list<array<string,mixed>> $payload
+     */
+    private static function alreadyFixedSentence(array $payload): string
+    {
+        $fixed = 0;
+        $open = 0;
+        foreach ($payload as $row) {
+            if (($row['needs_revision'] ?? false) !== true) {
+                continue;
+            }
+            if (($row['fixed_in_source'] ?? null) === true) {
+                ++$fixed;
+            } elseif (($row['fixed_in_source'] ?? null) === false) {
+                ++$open;
+            }
+        }
+        if ($fixed === 0) {
+            return '';
+        }
+
+        return $open === 0
+            ? ' Údaj je v evidenci už opravený, schválený mzdový běh ale nese původní hodnotu: zbývá jen opravná revize běhu.'
+            : ' Část údajů je v evidenci už opravená, schválený mzdový běh ale nese původní hodnoty.';
     }
 
     private static function describeControls(

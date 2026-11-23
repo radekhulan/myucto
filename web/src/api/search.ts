@@ -1,6 +1,15 @@
 import { api } from './client'
 
-export interface SearchClient {
+/**
+ * Výsledek z jiné firmy, než je aktivní. Server ho vrací, jen když aktivní firma
+ * v dané skupině nic nenašla; otevře se po přepnutí do `supplier_id`.
+ */
+export interface SearchOtherSupplier {
+  supplier_id?: number
+  supplier_name?: string
+}
+
+export interface SearchClient extends SearchOtherSupplier {
   id: number
   company_name: string
   main_email: string | null
@@ -8,7 +17,7 @@ export interface SearchClient {
   is_vendor: boolean
 }
 
-export interface SearchInvoice {
+export interface SearchInvoice extends SearchOtherSupplier {
   id: number
   varsymbol: string | null
   invoice_type: string
@@ -19,7 +28,7 @@ export interface SearchInvoice {
   company_name: string
 }
 
-export interface SearchPurchaseInvoice {
+export interface SearchPurchaseInvoice extends SearchOtherSupplier {
   id: number
   varsymbol: string | null
   vendor_invoice_number: string | null
@@ -51,6 +60,6 @@ export interface SearchResults {
 }
 
 export const searchApi = {
-  /** Globální vyhledávání — klienti/dodavatelé + vydané/přijaté faktury (dle čísla dokladu) + zaměstnanci napříč firmami. */
+  /** Globální vyhledávání: klienti, vydané a přijaté faktury (s návratem do ostatních firem) a zaměstnanci napříč firmami. */
   query: (q: string) => api.get<SearchResults>('/search', { params: { q } }).then(r => r.data),
 }

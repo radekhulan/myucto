@@ -32,6 +32,8 @@ export interface PhotoSource {
 export interface PhotoOptions {
   maxSide?: number
   maxBytes?: number
+  /** Název výsledného souboru; výchozí je {@link photoFileName}. */
+  name?: string
 }
 
 export class PhotoDecodeError extends Error {}
@@ -52,6 +54,17 @@ export function photoFileName(now = new Date()): string {
 }
 
 /**
+ * Název výstupu u fotky vybrané ze souborů: základ původního názvu s příponou
+ * `.jpg`. Serverový `ScanMatcher` z názvu čte číslo dokladu, takže přejmenovat
+ * `FA-2026-114.jpg` na `foto-…` by párování scanu k dokladu připravilo o vodítko.
+ * Bez použitelného názvu (fotka z fotoaparátu) se vrací {@link photoFileName}.
+ */
+export function photoFileNameFrom(original?: string | null, now = new Date()): string {
+  const base = (original ?? '').replace(/\.[^.]+$/, '').trim()
+  return base ? `${base}.jpg` : photoFileName(now)
+}
+
+/**
  * Zmenší a zkomprimuje zdroj do JPEG: kvalitu snižuje od 0.85 k 0.4, a nevejde-li se
  * ani tak do limitu, zmenší rozměr o 15 % a zkouší znovu (omezený počet kol).
  * Vrací nejmenší dosažený výsledek, i když limit nesplní.
@@ -59,6 +72,7 @@ export function photoFileName(now = new Date()): string {
 export async function compressPhoto(source: PhotoSource, opts: PhotoOptions = {}, now = new Date()): Promise<File> {
   const maxSide = opts.maxSide ?? PHOTO_MAX_SIDE
   const maxBytes = opts.maxBytes ?? PHOTO_MAX_BYTES
+  const name = opts.name ?? photoFileName(now)
   let best: Blob | null = null
   let scale = 1
   for (let shrink = 0; shrink <= PHOTO_MAX_SHRINKS; shrink++) {
@@ -69,11 +83,11 @@ export async function compressPhoto(source: PhotoSource, opts: PhotoOptions = {}
       const blob = await canvas.toBlob('image/jpeg', Math.round(q * 100) / 100)
       if (!blob) throw new PhotoDecodeError('toBlob failed')
       if (!best || blob.size < best.size) best = blob
-      if (blob.size <= maxBytes) return new File([blob], photoFileName(now), { type: 'image/jpeg', lastModified: now.getTime() })
+      if (blob.size <= maxBytes) return new File([blob], name, { type: 'image/jpeg', lastModified: now.getTime() })
     }
     scale *= PHOTO_SHRINK_FACTOR
   }
-  return new File([best as Blob], photoFileName(now), { type: 'image/jpeg', lastModified: now.getTime() })
+  return new File([best as Blob], name, { type: 'image/jpeg', lastModified: now.getTime() })
 }
 
 function canvasSource(width: number, height: number, drawSource: (ctx: CanvasRenderingContext2D, w: number, h: number) => void, close?: () => void): PhotoSource {
@@ -152,6 +166,15 @@ export async function processPhotoFile(file: File, opts: PhotoOptions = {}): Pro
   } finally {
     source.close?.()
   }
+}
+
+/**
+ * Soubor, který má smysl poslat do ořezu dokladu. PDF a ISDOC se neořezávají,
+ * MIME typ ale prohlížeče u některých formátů (HEIC z iPhonu) neposílají, proto
+ * rozhoduje i přípona — stejně jako ve validaci dropzony.
+ */
+export function isPhotoFile(file: File): boolean {
+  return file.type.startsWith('image/') || /\.(jpe?g|png|webp|heic|heif|gif|bmp)$/i.test(file.name)
 }
 
 /** Zařízení s dotykovým ovládáním (telefon, tablet), kde dává „Vyfotit“ smysl. */

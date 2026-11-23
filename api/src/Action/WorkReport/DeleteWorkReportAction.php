@@ -30,17 +30,46 @@ final class DeleteWorkReportAction
         private readonly IpMatcher $ipMatcher,
         private readonly InvoicePdfRenderer $pdf,
         private readonly DocumentLockService $locks,
+        private readonly \MyInvoice\Infrastructure\Database\Connection $db,
     ) {}
 
     public function __invoke(Request $request, Response $response, array $args): Response
     {
         $invoiceId = (int) ($args['id'] ?? 0);
-        $invoice = $this->invoices->find($invoiceId);
-        if (!SupplierGuard::owns($request, $invoice)) {
-            return Json::error($response, 'not_found', 'Faktura nenalezena.', 404);
+        $pdo = $this->db->pdo();
+        $pdo->beginTransaction();
+        try {
+            // Tentýž zámek používá uložení výkazu i přenos cen. Pojistky čteme až po něm.
+            $lock = $pdo->prepare('SELECT id FROM invoices WHERE supplier_id = ? AND id = ? FOR UPDATE');
+            $lock->execute([SupplierGuard::currentId($request), $invoiceId]);
+            $invoice = $this->invoices->find($invoiceId);
+            if (!SupplierGuard::owns($request, $invoice)) {
+                return Json::error($response, 'not_found', 'Faktura nenalezena.', 404);
+            }
+            $result = $this->deleteLocked($request, $response, $invoiceId, $invoice);
+            if ($result->getStatusCode() >= 400) return $result;
+            $pdo->commit();
+        } finally {
+            if ($pdo->inTransaction()) $pdo->rollBack();
         }
+        try {
+            $this->pdf->invalidate($invoiceId, 'invalidate_workreport');
+        } catch (\Throwable $e) {
+            error_log('work_report.delete_pdf_failed: ' . $e->getMessage());
+        }
+        try {
+            $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
+            $ip = $this->ipMatcher->clientIpFromRequest($request->getServerParams());
+            $action = ($invoice['status'] !== 'draft') ? 'work_report.force_deleted' : 'work_report.deleted';
+            $this->logger->log($action, $user['id'] ?? null, 'invoice', $invoiceId, null, $ip, $request->getHeaderLine('User-Agent'));
+        } catch (\Throwable $e) {
+            error_log('work_report.delete_log_failed: ' . $e->getMessage());
+        }
+        return $result;
+    }
 
-        $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
+    private function deleteLocked(Request $request, Response $response, int $invoiceId, array $invoice): Response
+    {
         $canEditIssued = RequestAuthorization::canEditIssuedInvoice($request);
         $isForce = !empty($request->getQueryParams()['force']);
 
@@ -57,13 +86,10 @@ final class DeleteWorkReportAction
         if ($invoice['status'] !== 'draft' && !($canEditIssued && $isForce)) {
             return Json::error($response, 'not_editable', 'Výkaz lze smazat pouze v draftu (vystavenou s oprávněním: ?force=1).', 409);
         }
-        $this->repo->deleteByInvoice($invoiceId);
-        $this->pdf->invalidate($invoiceId, 'invalidate_workreport');
-
-        $ip = $this->ipMatcher->clientIpFromRequest($request->getServerParams());
-        $action = ($invoice['status'] !== 'draft') ? 'work_report.force_deleted' : 'work_report.deleted';
-        $this->logger->log($action, $user['id'] ?? null, 'invoice', $invoiceId, null, $ip, $request->getHeaderLine('User-Agent'));
-
+        if ($this->repo->hasBillingItems($invoiceId, SupplierGuard::currentId($request))) {
+            return Json::error($response, 'billing_conflict', 'Nejprve odeberte z faktury propojené položky účtování, potom smažte výkaz.', 409);
+        }
+        $this->repo->deleteByInvoice($invoiceId, SupplierGuard::currentId($request));
         return Json::ok($response, ['deleted' => true]);
     }
 }

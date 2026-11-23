@@ -1,5 +1,5 @@
 import { api } from './client'
-import type { BankPaymentSubmissionItem, BankPaymentSubmissionStatus } from './bankConnections'
+import type { BankPaymentSubmissionItem, BankPaymentSubmissionStatus, BankProviderError } from './bankConnections'
 
 export interface PayrollBankSubmission {
   id: number
@@ -11,6 +11,7 @@ export interface PayrollBankSubmission {
   error_code?: string | null
   accepted_count?: number | null
   rejected_count?: number | null
+  provider_error?: BankProviderError | null
   submitted_at: string | null
 }
 

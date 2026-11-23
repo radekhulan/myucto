@@ -7,6 +7,7 @@ namespace MyInvoice\Service\Stock;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\StockItemCustomerPriceRepository;
 use MyInvoice\Service\Eshop\Pricing\EffectivePriceResolver;
+use MyInvoice\Service\Invoice\UnitPricePrecision;
 
 /**
  * Individuální ceny zákazníků na skladové kartě (issue #17) — editor na záložce
@@ -138,9 +139,9 @@ final class StockItemCustomerPriceService
         $fixed = null;
         $pct = null;
         if ($type === 'fixed') {
-            $fixed = self::decimal($raw['fixed_price'] ?? null, 2);
-            if ($fixed === null || bccomp($fixed, '0', 2) < 0 || bccomp($fixed, '9999999999.99', 2) > 0) {
-                throw $fail('fixed_price', 'Pevná cena musí být nezáporné číslo s nejvýše dvěma desetinnými místy.');
+            $fixed = self::unitPrice($raw['fixed_price'] ?? null);
+            if ($fixed === null) {
+                throw $fail('fixed_price', 'Pevná cena musí být nezáporné číslo s nejvýše šesti desetinnými místy.');
             }
         } else {
             $pct = self::decimal($raw['discount_pct'] ?? null, 3);
@@ -190,6 +191,18 @@ final class StockItemCustomerPriceService
             return null;
         }
         return bcadd($s, '0', $scale);
+    }
+
+    /**
+     * Jednotková cena bez DPH: nezáporné číslo s nejvýše šesti desetinnými místy
+     * (DECIMAL(16,6)), jinak null. Sdílí ji {@see StockPriceLevelService}.
+     */
+    public static function unitPrice(mixed $v): ?string
+    {
+        if (!UnitPricePrecision::isWithinPrecision($v)) {
+            return null;
+        }
+        return self::decimal($v, UnitPricePrecision::DECIMALS);
     }
 
     /**

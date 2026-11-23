@@ -62,6 +62,8 @@ Sekce **Měny + bankovní účty** je čistý seznam účtů firmy. Účet zde n
 > [!TIP]
 > Slovenský účet můžete zadat slovenským IBANem, se správným kódem banky a měnou EUR.
 
+U zahraničního účtu zadejte do **Kód banky** národní kód banky, například britský sort code `60-84-64` (nejvýše 10 znaků). Faktura ho vytiskne na samostatném řádku („Sort code: 60-84-64“) vedle čísla účtu, takže z něj zaplatí i odběratel domácím převodem. Necháte-li pole prázdné, vezme faktura sort code z britského IBANu. Výpisy, párování a QR platba pracují jen s českým kódem banky, u zahraničního účtu proto rozhoduje IBAN.
+
 ## 30.4 Krok za krokem: analytika 221 a dokladová řada
 
 Jen pro podvojné účetnictví. Každý bankovní účet má vlastní analytiku syntetického účtu 221 (221.100, 221.200 …), která se přidělí automaticky.
@@ -70,7 +72,8 @@ Jen pro podvojné účetnictví. Každý bankovní účet má vlastní analytiku
 2. U každého účtu zkontrolujte **Název**, **Druh** (běžný účet, spořicí účet, termínovaný vklad), **Analytika**, **Dokladová řada** a **Aktivní**. Účet kreditní karty (231) se tu nenastavuje, spravuje ho stránka Kreditní karty.
 3. Potřebujete-li účet namapovat na konkrétní analytiku, kterou už v osnově používáte (například termínovaný vklad na 221.100), přepište číslo za tečkou (1 až 6 číslic). Vedle se ukáže výsledný účet.
 4. Chcete-li změnit dokladovou řadu zápisů (například `BCR`), přepište ji. Smí obsahovat písmena A-Z a číslice, nejvýše 10 znaků, a jedna řada patří vždy jen jednomu účtu.
-5. Klikněte na **Uložit**.
+5. Máte-li zapnuté [dimenze](114_Dimenze.md), můžete účtu nastavit **Výchozí dimenze**: ve sloupci klikněte na **Upravit** a pro každý typ vyberte nejvýše jednu hodnotu. Dostane je řádek banky pohybů na účtu, které hodnotu typu nemají samy ani z hrazených dokladů, a u pohybů bez dokladu (úroky, srážková daň, poplatky) i jejich protiúčet (viz [§ 114.11.5](114_Dimenze.md#114115-vychozi-dimenze)).
+6. Klikněte na **Uložit**.
 
 **Jak poznáte, že je hotovo:** Zobrazí se hláška „Bankovní účty byly uloženy.“ a u každého účtu je vidět jeho analytika (například `221.200`). Po změně řady aplikace ukáže počet přečíslovaných bankovních zápisů v otevřených obdobích.
 
@@ -113,9 +116,9 @@ Přímé předání příkazu bance je určené pro tuzemské příkazy v CZK. P
 Aby se avíza načítala, potřebujete IMAP účet, mapování na bankovní účet a parser.
 
 1. Otevřete záložku **Bankovní avíza a PDF z e-mailu** a rozbalte nastavení.
-2. V části **Vaše nastavení pro načítání bankovních avíz a PDF z e-mailů** klikněte na **Nový IMAP účet**. Vyplňte **Název**, **Host**, **Port**, **Šifrování**, **Uživatel**, **Heslo** a **Složka** (nebo klikněte na **Procházet** a vyberte ze serveru).
+2. V části **Vaše nastavení pro načítání bankovních avíz a PDF z e-mailů** klikněte na **Nový IMAP účet** a vyplňte **Název**. Pro Exchange Online zvolte **Microsoft 365 (OAuth 2.0)**. Připojuje se přes aplikaci, kterou si zaregistrujete ve svém Microsoft Entra; správce organizace jí v Exchange Online povolí přístup ke schránce. Formulář to připomene a odkáže na [návod pro Microsoft Entra, Exchange a MyÚčto](96_Nastaveni.md#9671-pripojeni-schranky-microsoft-365-pres-imap). U schránky s přihlášením heslem vyplňte **Host**, **Port**, **Šifrování**, **Uživatel** a **Heslo**. Klikněte na **Procházet** a vyberte **Složku**.
 3. Zapněte **Povolit zpracování bankovních avíz z tohoto účtu** a **Načítat bankovní avíza**. Zkontrolujte **Vyžadovat ověření autenticity (DKIM/DMARC)** a vyplňte **Důvěryhodný authserv-id** (viz [§ 30.11.9](#30119-overeni-autenticity-e-mailu-dkimdmarc)).
-4. Klikněte na **Test**, pak na **Uložit IMAP účet**.
+4. Klikněte na **Uložit IMAP účet**, potom u účtu v seznamu na **Test**.
 5. V části **Mapování bankovních avíz** u každého bankovního účtu vyberte **IMAP účet**, **Parser** (nebo nechte **Automatický výběr**) a **Toleranci**. Klikněte na **Uložit mapování**.
 6. Klikněte na **Spustit scan**.
 
@@ -209,6 +212,7 @@ V tabulce u každého účtu nastavíte:
 | **Druh** | Běžný účet / spořicí účet / termínovaný vklad |
 | **Analytika** | Číslo za tečkou - vedle se hned ukáže výsledný účet (např. `221.200`) |
 | **Dokladová řada** | Řada, pod kterou se bankovní zápisy účtu číslují v deníku (např. `BCR`) |
+| **Výchozí dimenze** | Jen se zapnutými dimenzemi. Hodnoty, které zaúčtování doplní řádku banky a u pohybu bez dokladu i protiúčtu, když je řádek nemá z pohybu, hrazeného dokladu ani pravidla dimenzí |
 | **Aktivní** | Neaktivní účet se do kontací nenabízí, ale své číslo si drží |
 
 Číslo můžete **přepsat**, typicky když už některý účet v rozvrhu vedete pod konkrétní analytikou a chcete na ni bankovní účet **namapovat** (například termínovaný vklad na 221.100). Analytiku, kterou už používá jiný účet, systém odmítne, a jednou přidělenou analytiku **nelze zrušit**, jde ji jen změnit na jiné číslo. Analytika, na které už leží účetní zápisy, se sama nikdy nepřidělí, aby nový účet nezdědil cizí zůstatek.
@@ -270,7 +274,7 @@ Datum při načítání určuje vytvoření souboru v bance. V CEB povolte vytv�
 
 #### 30.11.5.2 Česká spořitelna (0800)
 
-Česká spořitelna používá Premium Accounts API v3 pro pohyby a Premium Payments API v1 pro odesílání platebních příkazů. Na [Erste Developer Portal](https://developers.erstegroup.com) vytvořte aplikaci, přidejte Premium Accounts API, pro odesílání příkazů také Premium Payments API, a OAuth2 Authorization Code. V jejím nastavení zaregistrujte přesnou návratovou adresu z formuláře MyÚčta (**Návratová adresa pro registraci aplikace**). Produkční přístup musí být schválený a služba aktivovaná u banky. Zadejte produkční **WEB-API-key**, **OAuth Client ID** a **OAuth Client Secret** a pokračujte do banky k udělení souhlasu (**Udělit nebo obnovit souhlas v bance**). MyÚčto vybere pouze účet se shodným číslem a měnou, další účty připojte samostatně. Přístupové údaje jsou šifrované, přístup se automaticky obnovuje refresh tokenem. Po vypršení nebo odvolání souhlasu připojení zopakujte. Správce má vypnout logování citlivých parametrů návratu z banky; samotné upozornění připojení neblokuje.
+Česká spořitelna používá Premium Accounts API v3 pro pohyby a Premium Payments API v1 pro odesílání platebních příkazů. Na [Erste Developer Portal](https://developers.erstegroup.com) vytvořte aplikaci, přidejte Premium Accounts API, pro odesílání příkazů také Premium Payments API, a OAuth2 Authorization Code. V jejím nastavení zaregistrujte přesnou návratovou adresu z formuláře MyÚčta (**Návratová adresa pro registraci aplikace**). Produkční přístup musí být schválený a služba aktivovaná u banky. Zadejte produkční **WEB-API-key**, **OAuth Client ID** a **OAuth Client Secret** a pokračujte do banky k udělení souhlasu (**Udělit nebo obnovit souhlas v bance**). MyÚčto připojí účet se shodným číslem a měnou. Banka si při každém připojení vyžádá nové přihlášení. Máte-li v George Business víc pracovních prostorů (firem), vyberte prostor firmy, jejíž účet právě připojujete. Souhlas udělený za jinou firmu MyÚčto odmítne a u účtu vysvětlí proč. Přístupové údaje jsou šifrované, přístup se automaticky obnovuje refresh tokenem. Po vypršení nebo odvolání souhlasu připojení zopakujte. Správce má vypnout logování citlivých parametrů návratu z banky; samotné upozornění připojení neblokuje.
 
 Pro testování nastavte v `cfg.php` volbu `bank_connectors.csas.sandbox` na `true`:
 
@@ -282,11 +286,15 @@ Pro testování nastavte v `cfg.php` volbu `bank_connectors.csas.sandbox` na `tr
 
 Výchozí hodnota je `false` (produkce). Přepínač společně mění adresy Accounts API, Payments API, OAuth přihlášení a obnovování tokenů. Sandbox je v nastavení účtu výrazně označený (**Sandbox České spořitelny: testovací data**) a vyžaduje sandboxový WEB-API-key, Client ID a Client Secret. V registraci aplikace připojte Accounts API v3 (a pro příkazy Payments API v1) a nastavte scope `siblings.accounts` (a `siblings.payments`). Sandbox vrací i u plateb statická data a jeho stránka podpisu se do aplikace nevrací. Použijte uvedenou callback adresu a samostatnou testovací firmu s číslem účtu ze sandboxu. Sandbox vrací statická data, ne pohyby vašeho skutečného účtu. Po změně prostředí připojte účet znovu: uložený token z jiného prostředí se nikdy neodešle do banky. Starší uložené přístupy bez označení prostředí se považují za produkční.
 
+**Další účty firmy ze stejného souhlasu.** Souhlas v George pokrývá všechny účty, které v něm povolíte, nejen ten, ze kterého připojení zahájíte. Po připojení proto MyÚčto propojí i další aktivní účty firmy s kódem banky 0800, které banka v souhlasu vrací se shodným číslem účtu a měnou (typicky EUR účet vedle CZK). Účet, který má vlastní připojení jiným souhlasem, zůstává beze změny. Při opětovném udělení souhlasu se převezmou i účty, které patřily k předchozímu souhlasu. Každý účet má v MyÚčtu vlastní napojení a lze ho samostatně pozastavit nebo odpojit. Obnovu přístupu sdílí všechny účty souhlasu a seznam účtů se při automatickém načítání stahuje jednou za souhlas, aby se zbytečně nezvyšoval počet volání API banky. Chybí-li účet v souhlasu, přidejte ho v George a souhlas udělte znovu. Účty připojené dříve propojí správce serveru příkazem `php api/bin/bank-link-sibling-accounts.php` (bez `--apply` jen vypíše, co by propojil).
+
+Pokud byl účet dříve doplňován ručně nahranými výpisy (GPC), první automatické načtení se může zastavit s výzvou k potvrzení shod: banka tytéž pohyby v API popisuje jinak a aplikace je bez potvrzení nespojí. Klikněte u účtu na **Načíst pohyby** a shody potvrďte. Po zapnutí napojení už výpisy tohoto účtu ručně nenahrávejte.
+
 Konektor načítá zaúčtované pohyby (`BOOK`) jako `bank_api` do společné evidence výpisů a automatického načítání. Informační položky (`INFO`) se neúčtují. Prázdný účet lze připojit. Identita účtu se ověřuje podle IBANu, nikoli podle proměnlivého systémového ID. Načítání má bezpečnostní limit 10 000 pohybů; při jeho překročení zvolte kratší interval. Zůstatek se z pohybů neodhaduje. Notifikace a originální soubory výpisů tento konektor nepodporuje.
 
 **Odesílání platebních příkazů.** Souhlas v bance se žádá i pro zakládání plateb (`siblings.payments`), jen když zapnete volbu **Povolit odesílání platebních příkazů**. Volba je ve výchozím stavu vypnutá a připojení pak slouží jen ke čtení. Napojení ukazuje, zda je odesílání pro účet povolené. Připojení, které vzniklo jen pro čtení, pohyby načítá dál. Chcete-li z něj odesílat příkazy, zvolte **Udělit nebo obnovit souhlas v bance** se zapnutou volbou odesílání; nový souhlas jen nahradí uložený přístup a čtení výpisů nepřeruší. Banka musí účet označit jako vhodný pro platby přes Premium API a váš uživatel potřebuje dispoziční právo k zadávání plateb (George: **Platby**, George Business: **Zadávat platební příkazy**). U dávky v George se spolupodpisem je potřeba právo podepisovat hromadné platby. Banka účtuje za každý účet připojený k Premium API poplatek podle svého ceníku.
 
-Odesílat lze jen tuzemské platby v CZK na český účet, nejvýše 400 položek v jednom příkazu. Banka dávku jen připraví k podpisu. Podepíšete ji tlačítkem **Podepsat v George**, které vás přesměruje do banky a po podpisu zpět do MyÚčta. Bez podpisu se žádná platba neprovede a nepodepsaná dávka po 30 dnech propadne. Pravidla odeslání a stavy jsou v [§ 30.11.6](#30116-odeslani-prikazu-do-banky-pravidla).
+Odesílat lze jen tuzemské platby v CZK na český účet, nejvýše 400 položek v jednom příkazu. Banka příkaz jen připraví k podpisu. Podepíšete ho tlačítkem **Podepsat v George**, které vás přesměruje do banky a po podpisu zpět do MyÚčta. V George (i George Business) se platby založené přes API objeví až po zahájení podpisu tímto tlačítkem. Bez podpisu se žádná platba neprovede a nepodepsaný příkaz po 30 dnech propadne. Pravidla odeslání a stavy jsou v [§ 30.11.6](#30116-odeslani-prikazu-do-banky-pravidla).
 
 #### 30.11.5.3 Raiffeisenbank (5500)
 
@@ -360,11 +368,12 @@ Stav zahájeného importu znamená pouze převzetí dávky ke zpracování, niko
 
 #### 30.11.6.1 Česká spořitelna: zakládání plateb, podpis a stav
 
-Česká spořitelna nepřijímá soubor. Aplikace založí každou platbu příkazu zvlášť a pak je seskupí do jedné dávky k podpisu. API banky nemá ochranu proti dvojímu odeslání, proto aplikace každou platbu zapíše do evidence dřív, než ji bance pošle, a k tomu uloží identifikátor, který banka vrátí.
+Česká spořitelna nepřijímá soubor. Aplikace založí každou platbu příkazu zvlášť a pak je seskupí do jedné dávky k podpisu. Příkaz s jedinou platbou se do dávky neseskupuje a podepisuje se přímo tato platba. API banky nemá ochranu proti dvojímu odeslání, proto aplikace každou platbu zapíše do evidence dřív, než ji bance pošle, a k tomu uloží identifikátor, který banka vrátí. Částky se bance posílají přesně na haléře (číslo s nejvýše dvěma desetinnými místy).
 
 | Stav u příkazu | Co znamená | Co udělat |
 |---|---|---|
-| Čeká na podpis | Banka připravila dávku k podpisu | Klikněte na **Podepsat v George** a dávku podepište. |
+| Čeká na podpis | Banka příkaz přijala a připravila k podpisu | Klikněte na **Podepsat v George** a příkaz podepište. |
+| Odmítnuto | Banka odmítla platbu nebo dávku; žádná platba se neprovede | Podle důvodu banky u příkazu a u jednotlivých plateb opravte příkaz a připravte nový. |
 | Podepsáno | Dávka je podepsaná, banka platby zpracovává | Nic, stav se ověřuje automaticky. |
 | Provedeno | Banka provedla všechny platby | Úhrady faktur potvrdí výpis. |
 | Část plateb odmítnuta | Některé platby banka odmítla | Ověřte je v bankovnictví a nezaplacené doklady uhraďte novým příkazem. |
@@ -374,9 +383,10 @@ Stav zahájeného importu znamená pouze převzetí dávky ke zpracování, niko
 
 - **Pokračování po přerušení** založí jen platby, které banka podle evidence ještě nemá, a dokončí dávku. Už založené platby se znovu neposílají. Pokračuje se jen přes stejné napojení a jen u nezměněného příkazu. Když pokračování narazí na přechodnou překážku (na účtu právě běží načítání výpisů, bezpečnostní odstup mezi požadavky), aplikace ji ohlásí a odeslání zůstane připravené k dalšímu pokusu.
 - **Shodné platby** (stejný účet příjemce, částka i symboly) aplikace odmítne dřív, než cokoli založí, a vypíše čísla řádků. Banka by takovou dávku odmítla až po založení plateb. Sloučte je do jedné platby, nebo je odlište například specifickým symbolem.
+- **Odmítnutí bankou.** Když banka některou platbu odmítne, aplikace pošle i zbývající platby, aby u každé ukázala odpověď banky, ale dávku k podpisu nezaloží. U příkazu se zobrazí důvod banky (text hlášky, kód chyby a pole platby, např. `WRONG_DECIMAL_PLACES`, pole `amount.instructedAmount.value`) a seznam plateb: odmítnuté s důvodem a přijaté s identifikátorem banky. Přijaté platby zůstanou bez podpisu, neprovedou se a po 30 dnech propadnou. Stejně skončí příkaz, jehož dávku banka odmítla. Tentýž příkaz nelze odeslat znovu; po opravě připravte nový.
 - **Nejasný výsledek** nastane, když spojení vypadne v okamžiku, kdy banka platbu nebo dávku zakládala. Takovou položku aplikace znovu neposílá a odeslání zastaví k ruční kontrole. U příkazu se pak zobrazí seznam plateb, které banka založila nebo mohla založit (částka, účet, VS a identifikátor banky). Zkontrolujte je v George a nepotřebné zrušte dřív, než připravíte nový příkaz. Nepodepsané platby se neprovedou a po 30 dnech propadnou.
 - **Archivace a zahození.** API České spořitelny založené platby zrušit neumí. Než archivujete příkaz nebo zahodíte mzdovou dávku, zrušte platby a dávku čekající na podpis v George ručně. Archivovaný příkaz ani zahozenou dávku už aplikace nepodepíše, nedokončí ani se na ně nedotazuje.
-- **Podpis** probíhá vždy v bance. Tlačítko **Podepsat v George** lze použít znovu, když podpis vyprší nebo ho nedokončíte; podepisuje se stále stejná dávka, žádné nové platby nevznikají.
+- **Podpis** probíhá vždy v bance a zahajuje ho aplikace tlačítkem **Podepsat v George**; dokud ho nezahájíte, platby v George nenajdete. Tlačítko lze použít znovu, když podpis vyprší nebo ho nedokončíte; podepisuje se stále stejná dávka nebo platba, žádné nové platby nevznikají.
 - **Stav** banka nehlásí sama. Aplikace se dotáže po návratu z podpisu, na tlačítko **Ověřit stav v bance** a automaticky v cronu bankovních napojení: během podpisu zhruba po minutě, u podepsané dávky před splatností dvakrát denně, kolem splatnosti po 2 hodinách a později jednou denně. Banka stav celé dávky nevrací, ptá se proto na jednotlivé platby, jen dokud nemají konečný stav, a jeden běh cronu má omezený počet dotazů. Banka stav plateb drží 34 dní, potom se dotazy zastaví.
 - Podpis a ověření stavu vyžadují stejná oprávnění jako odeslání (zápis k bankovním účtům a platebním příkazům, u mezd k mzdovým platbám) a přihlášení v aplikaci; přes API token je dokončit nelze.
 
@@ -403,8 +413,10 @@ Každá firma může mít více IMAP účtů, typicky jeden pro každou banku.
 | Pole | Význam |
 |---|---|
 | **Název** | Popisek v UI, např. „RB avíza“ |
-| **Host**, **Port**, **Šifrování** | Připojení k IMAP serveru |
-| **Uživatel**, **Heslo** | Přístup ke schránce; heslo se ukládá šifrovaně |
+| **Přihlášení k IMAP** | **Heslo** nebo **Microsoft 365 (OAuth 2.0)** podle poskytovatele schránky |
+| **Host**, **Port**, **Šifrování** | Připojení k IMAP serveru v režimu **Heslo** |
+| **Uživatel**, **Heslo** | Přístup ke schránce v režimu **Heslo**. Heslo se ukládá šifrovaně a při úpravě účtu ho zachováte prázdným polem. Při změně serveru, portu, šifrování nebo uživatele je nutné heslo zadat znovu, a to i pro **Procházet**. |
+| **Tenant ID**, **Client ID**, **Client Secret**, **Adresa schránky** | Přístup přes Microsoft 365, viz [nastavení v Microsoft Entra a Exchange](96_Nastaveni.md#9671-pripojeni-schranky-microsoft-365-pres-imap) |
 | **Složka** | IMAP složka, např. `INBOX` nebo `INBOX.Banka` |
 | **Procházet** | Ověří připojení a nabídne složky ze serveru |
 | **Max. zpráv na běh** | Kolik nejnovějších e-mailů cron načte při jednom běhu |
@@ -437,6 +449,8 @@ Hlavičku `Authentication-Results` si umí do těla zprávy vložit kdokoli. Dů
 ### 30.11.10 Načítání PDF faktur z příloh
 
 Do schránky, kam chodí bankovní avíza, obvykle posílají faktury i dodavatelé. Přepínač **Načítat PDF faktury z příloh** proto u daného IMAP účtu zapne druhou, nezávislou větev zpracování: u každé nové zprávy se projdou PDF přílohy a ty, které projdou rozpoznáním, se založí jako podání ve frontě [Nákup → Příchozí doklady](23_Prijate_faktury.md).
+
+Jak načítání funguje a kolik dokladů z e-mailu přišlo, ukazuje stránka `Nákup → Doklady z e-mailu` ([§ 23.11.26](23_Prijate_faktury.md#231126-doklady-z-e-mailu)).
 
 Příloha projde, jen když splní **obě** podmínky:
 
@@ -473,7 +487,7 @@ Přepínač **Načítat PDF výpisy z příloh** u IMAP účtu zapne třetí vě
 
 Aby se výpis naimportoval, musí splnit obě podmínky:
 
-1. **Je to výpis banky, kterou umíme přečíst** - Komerční banka, ČSOB, Česká spořitelna, MONETA Money Bank, Raiffeisenbank, Banka CREDITAS. Rozhoduje textová vrstva PDF, ne název souboru.
+1. **Je to výpis banky, kterou umíme přečíst** - Komerční banka, ČSOB, Česká spořitelna, MONETA Money Bank, Raiffeisenbank, Banka CREDITAS, Revolut Business. Rozhoduje textová vrstva PDF, ne název souboru.
 2. **Je k účtu vaší firmy** - číslo účtu z hlavičky výpisu musí sedět na právě jeden bankovní účet firmy (záložka *Měny a účty*). U víceměnového účtu se sdíleným číslem rozhoduje ještě měna výpisu.
 
 Cizí výpis se tím nikdy nestane vaším dokladem: kdyby vám někdo poslal do schránky výpis jiné firmy, skončí jako *Výpis k cizímu účtu* a nic nezaloží.
@@ -554,6 +568,9 @@ Povinná vytěžená pole: `amount`, `currency`, `posted_at`, `recipient_account
 - `message`
 - `bank_ref`
 - `balance` (disponibilní zůstatek účtu z avíza - zobrazí se v detailu měsíčního avízo-výpisu a promítne se do přehledu **Stavy na účtech**)
+- `original_amount` a `original_currency` (částka a měna nákupu u platby kartou v cizí měně; `amount` a `currency` pak nesou částku v měně účtu)
+
+Pohyb se na účtu eviduje vždy v měně účtu. Avízo o platbě kartou v cizí měně, které uvádí jen částku nákupu (například 18,00 EUR na korunovém účtu), pohyb nezaloží: banka v tu chvíli částku jen blokuje a korunovou částku určí až při zúčtování svým kurzem. Zpráva skončí ve stavu **match_failed** s vysvětlením a pohyb doplní bankovní výpis (GPC/ABO, CAMT nebo API). Uvádí-li avízo i částku v měně účtu, zachyťte ji do `amount` a `currency` a cizí částku do `original_amount` a `original_currency`; pohyb pak nese obě. Měnu účtu přebírá pohyb jen u avíz, která měnu vůbec neuvádějí.
 
 Regex parser používá první zachycenou skupinu nebo pojmenovanou skupinu se stejným názvem jako pole. Pro částku umí formáty typu `+1.234,56` i mezery mezi tisíci, datum například `01. 06. 2026 10:15`.
 

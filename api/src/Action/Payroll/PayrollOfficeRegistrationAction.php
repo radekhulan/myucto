@@ -133,7 +133,7 @@ final class PayrollOfficeRegistrationAction
     private function guard(Request $request, Response $response, AccessLevel $level): ?Response
     {
         $error = null;
-        if (!RequestAuthorization::isSessionAuth($request)) return Json::sessionRequired($response);
+        if (!RequestAuthorization::actsAsSession($request)) return Json::sessionRequired($response);
         if (!$this->requirePermission($request, $response, 'payroll.settings', $level, $error)) return $error;
         if (!$this->requirePayrollEnabled($request, $response, $this->access, $error)) return $error;
         return null;

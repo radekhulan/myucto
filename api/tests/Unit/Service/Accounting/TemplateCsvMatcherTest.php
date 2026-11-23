@@ -108,4 +108,90 @@ final class TemplateCsvMatcherTest extends TestCase
         self::assertSame(45000.0, $byLine[1], 'Bez CSV shody se zachová výchozí částka šablony.');
         self::assertSame(12000.0, $byLine[4]);
     }
+
+    /** @return list<array<string,mixed>> */
+    private function pairedTemplateLines(): array
+    {
+        return [
+            ['line_no' => 1, 'label' => 'Hrubé mzdy', 'account_code' => '521', 'side' => 'debit', 'default_amount' => null, 'cost_center' => null, 'pair_no' => 1],
+            ['line_no' => 2, 'label' => 'Hrubé mzdy', 'account_code' => '331', 'side' => 'credit', 'default_amount' => null, 'cost_center' => null, 'pair_no' => 1],
+            ['line_no' => 3, 'label' => null, 'account_code' => '524', 'side' => 'debit', 'default_amount' => null, 'cost_center' => null, 'pair_no' => 2, 'line_text' => 'Pojistné'],
+            ['line_no' => 4, 'label' => null, 'account_code' => '336', 'side' => 'credit', 'default_amount' => null, 'cost_center' => null, 'pair_no' => 2, 'line_text' => 'Pojistné'],
+            ['line_no' => 5, 'label' => null, 'account_code' => '524', 'side' => 'debit', 'default_amount' => null, 'cost_center' => null, 'pair_no' => 3],
+            ['line_no' => 6, 'label' => null, 'account_code' => '336', 'side' => 'credit', 'default_amount' => null, 'cost_center' => null, 'pair_no' => 3],
+        ];
+    }
+
+    /** @param array{lines:list<array<string,mixed>>} $result @return array<int,array<string,mixed>> */
+    private static function byLine(array $result): array
+    {
+        $out = [];
+        foreach ($result['lines'] as $l) {
+            $out[$l['line_no']] = $l;
+        }
+        return $out;
+    }
+
+    public function testPairRowsFillBothSidesOfMatchingPairInOrder(): void
+    {
+        $csv = "MD;Dal;Částka;Text;Středisko\n"
+            . "521;331;50000;Mzdy 10/2026;PRAHA\n"
+            . "524;336;12 000,50\n"
+            . "524;336;4500;Doplatek\n";
+
+        $result = (new TemplateCsvMatcher())->match($this->pairedTemplateLines(), $csv);
+        $lines = self::byLine($result);
+
+        self::assertCount(6, $result['lines'], 'Všechny dvojice CSV se napárovaly, nic se nepřidalo.');
+        self::assertSame([], $result['unmatched']);
+        self::assertSame(6, $result['matched_count']);
+        self::assertSame(50000.0, $lines[1]['amount']);
+        self::assertSame(50000.0, $lines[2]['amount']);
+        self::assertSame('Mzdy 10/2026', $lines[1]['line_text'], 'Text dvojice jde na oba řádky.');
+        self::assertSame('Mzdy 10/2026', $lines[2]['line_text']);
+        self::assertSame('PRAHA', $lines[1]['cost_center'], 'Středisko na výsledkový řádek 521.');
+        self::assertNull($lines[2]['cost_center'], 'Rozvahový 331 středisko nenese.');
+        self::assertSame(12000.5, $lines[3]['amount'], 'Opakovaná dvojice 524/336 se plní po pořadí.');
+        self::assertSame(12000.5, $lines[4]['amount']);
+        self::assertSame('Pojistné', $lines[3]['line_text'], 'Bez textu v CSV zůstane text šablony.');
+        self::assertSame(4500.0, $lines[5]['amount']);
+        self::assertSame('Doplatek', $lines[6]['line_text']);
+        self::assertSame(3, $lines[5]['pair_no']);
+    }
+
+    public function testUnknownPairIsAppendedAsNewPairAndSameAccountIsUnmatched(): void
+    {
+        $csv = "521;331;50000\n"
+            . "527;379;800;Stravenky;BRNO\n"
+            . "331;331;100\n";
+
+        $result = (new TemplateCsvMatcher())->match($this->pairedTemplateLines(), $csv);
+        $lines = self::byLine($result);
+
+        self::assertCount(8, $result['lines']);
+        self::assertSame(['line_no' => 7, 'label' => null, 'account_code' => '527', 'side' => 'debit', 'cost_center' => 'BRNO', 'amount' => 800.0, 'pair_no' => 4, 'line_text' => 'Stravenky'], $lines[7]);
+        self::assertSame(['line_no' => 8, 'label' => null, 'account_code' => '379', 'side' => 'credit', 'cost_center' => null, 'amount' => 800.0, 'pair_no' => 4, 'line_text' => 'Stravenky'], $lines[8]);
+        self::assertSame([['value' => '331/331', 'amount' => 100.0, 'debit_account_code' => '331', 'credit_account_code' => '331']], $result['unmatched']);
+        self::assertSame(4, $result['matched_count']);
+    }
+
+    public function testTwoColumnRowFillsWholePairOfPairedTemplate(): void
+    {
+        $result = (new TemplateCsvMatcher())->match($this->pairedTemplateLines(), "Hrubé mzdy;50000\n");
+        $lines = self::byLine($result);
+
+        self::assertSame(50000.0, $lines[1]['amount']);
+        self::assertSame(50000.0, $lines[2]['amount'], 'Dvojice zůstane vyrovnaná.');
+        self::assertNull($lines[3]['amount']);
+    }
+
+    public function testCompositeTemplateOutputHasNoPairKeys(): void
+    {
+        $result = (new TemplateCsvMatcher())->match($this->payrollTemplateLines(), "521;331;50000\n");
+
+        foreach ($result['lines'] as $line) {
+            self::assertSame(['line_no', 'label', 'account_code', 'side', 'cost_center', 'amount'], array_keys($line));
+        }
+        self::assertSame(331.0, $result['lines'][0]['amount'], 'Složená šablona čte CSV beze změny (kód;částka).');
+    }
 }

@@ -127,6 +127,47 @@ final class PayrollAnnualDocumentRepository
     }
 
     /**
+     * Poslední revize dokladů za rok pro víc osob a účelů najednou; zamyká
+     * stejně jako {@see self::latest()}.
+     *
+     * @param list<int> $employeeIds
+     * @param list<string> $purposes
+     * @return array<int,array<string,array<string,mixed>>> employee_id => purpose => revize
+     */
+    public function latestForEmployees(
+        int $supplierId,
+        array $employeeIds,
+        int $taxYear,
+        array $purposes,
+    ): array {
+        $latest = [];
+        if ($purposes === []) {
+            return $latest;
+        }
+        foreach (array_chunk(array_values(array_unique($employeeIds)), 500) as $chunk) {
+            $statement = $this->db->pdo()->prepare(
+                'SELECT * FROM payroll_annual_document_revisions
+                  WHERE supplier_id = ?
+                    AND tax_year = ?
+                    AND purpose IN (' . implode(',', array_fill(0, count($purposes), '?')) . ')
+                    AND employee_id IN (' . implode(',', array_fill(0, count($chunk), '?')) . ')
+                  ORDER BY employee_id, purpose, revision_no DESC, id DESC
+                  FOR UPDATE'
+            );
+            $statement->execute([$supplierId, $taxYear, ...$purposes, ...$chunk]);
+            foreach ($statement->fetchAll(PDO::FETCH_ASSOC) as $row) {
+                $employeeId = (int) $row['employee_id'];
+                $purpose = (string) $row['purpose'];
+                if (!isset($latest[$employeeId][$purpose])) {
+                    $latest[$employeeId][$purpose] = self::cast($row);
+                }
+            }
+        }
+
+        return $latest;
+    }
+
+    /**
      * @param array<string,mixed> $record
      * @param list<array<string,mixed>> $sources
      * @return array<string,mixed>

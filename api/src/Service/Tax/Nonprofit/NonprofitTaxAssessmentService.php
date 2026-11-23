@@ -20,7 +20,7 @@ final class NonprofitTaxAssessmentService
         private readonly J6FundingCapacity $fundingCapacity,
         private readonly FundingEligibilityGuard $fundingEligibility,
         private readonly J6FundingDependencyGuard $laterFunding,
-        private readonly J6FundingProjection $funding,
+        private readonly NonprofitGiftElectionGuard $giftElections,
     ) {}
 
     public function read(int $supplierId, int $periodId): array
@@ -58,7 +58,13 @@ final class NonprofitTaxAssessmentService
             $history = $this->assessments->history($supplierId, $periodId, true);
             $previous = $history === [] ? null : $history[array_key_last($history)];
             if (($previous['id'] ?? null) !== $expectedAssessmentId) throw new NonprofitTaxAssessmentException('nonprofit_tax_assessment_changed', 'Mezitím vzniklo jiné posouzení. Je nutné zkontrolovat aktuální revizi.', 409);
-            $this->assertGiftElections($this->assessments->confirmedHistory($supplierId, true), $snapshot, $assessment);
+            $this->giftElections->assert($supplierId, (static function () use ($snapshot, $assessment): \Generator {
+                foreach ($snapshot['sources'] as $source) {
+                    $decision = $assessment['decisions'][$source['id']];
+                    yield ['origin' => (int) $source['origin']['line_id'], 'title' => (string) ($decision['title'] ?? ''),
+                        'claim_exemption' => $decision['facts']['claim_exemption'] ?? null];
+                }
+            })());
             $this->laterFunding->assertRevisionsUnused($supplierId, $periodId, array_values(array_filter([$previous, ['result' => $result]])));
             return $this->assessments->append($supplierId, $periodId, $previous,
                 'confirmed', $reason, $key, $requestHash, $snapshot, $assessment, $result, $actor);
@@ -112,47 +118,5 @@ final class NonprofitTaxAssessmentService
     {
         NonprofitTaxRules::evidence($reason);
         if (!preg_match('/^[a-zA-Z0-9_.:-]{1,80}$/D', $key) || $actor <= 0) NonprofitTaxRules::invalid('Potvrzení vyžaduje identitu uživatele a jednoznačný klíč požadavku.');
-    }
-
-    private function assertGiftElections(array $history, array $snapshot, array $assessment): void
-    {
-        $elections = [];
-        foreach ($history as $revision) {
-            if ($revision['status'] !== 'confirmed') continue;
-            // Stránkovaná revize nemá řádky v JSON; volbu z ní přečte stejná projekce jako financování.
-            foreach ($this->funding->resultPages($revision) as $rows) {
-                foreach ($rows as $row) {
-                    if (($row['decision']['title'] ?? '') !== 'gift') continue;
-                    $origin = (int) $row['origin']['line_id'];
-                    $choice = $row['decision']['facts']['claim_exemption'];
-                    if (isset($elections[$origin]) && $elections[$origin] !== $choice) $this->giftElectionLocked();
-                    $elections[$origin] = $choice;
-                }
-            }
-        }
-        $current = [];
-        foreach ($snapshot['sources'] as $source) {
-            $decision = $assessment['decisions'][$source['id']];
-            $origin = (int) $source['origin']['line_id'];
-            if (isset($elections[$origin]) && (($decision['title'] ?? '') !== 'gift'
-                || ($decision['facts']['claim_exemption'] ?? null) !== $elections[$origin])) $this->giftElectionLocked();
-            if (($decision['title'] ?? '') !== 'gift') continue;
-            $choice = $decision['facts']['claim_exemption'];
-            if (isset($current[$origin]) && $current[$origin] !== $choice) $this->inconsistentGiftElection();
-            $current[$origin] = $choice;
-        }
-        foreach ($snapshot['sources'] as $source) {
-            if (isset($current[(int) $source['origin']['line_id']]) && $assessment['decisions'][$source['id']]['title'] !== 'gift') $this->inconsistentGiftElection();
-        }
-    }
-
-    private function giftElectionLocked(): never
-    {
-        throw new NonprofitTaxAssessmentException('nonprofit_tax_gift_election_locked', 'Potvrzenou volbu osvobození daru nelze zpětně změnit.', 409);
-    }
-
-    private function inconsistentGiftElection(): never
-    {
-        NonprofitTaxRules::invalid('Části téhož daru musí mít shodnou volbu osvobození a právní titul.');
     }
 }

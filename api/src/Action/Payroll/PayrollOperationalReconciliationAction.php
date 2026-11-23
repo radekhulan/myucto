@@ -124,7 +124,7 @@ final class PayrollOperationalReconciliationAction
         AccessLevel $level,
         ?Response &$error,
     ): bool {
-        if (!RequestAuthorization::isSessionAuth($request)) {
+        if (!RequestAuthorization::actsAsSession($request)) {
             $error = Json::sessionRequired($response)->withHeader('Cache-Control', 'no-store, private');
             return false;
         }

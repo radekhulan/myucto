@@ -9,6 +9,26 @@ use PHPUnit\Framework\TestCase;
 
 final class PayslipDocumentSnapshotMapperTest extends TestCase
 {
+    public function testHourlySnapshotRoundTripsWithoutChangingMonthlySnapshotShape(): void
+    {
+        $mapper = new PayslipDocumentSnapshotMapper();
+        $monthly = $mapper->attach($this->inputSnapshot(), $this->calculatedResult())['people'][0]['payslip_document'];
+        self::assertArrayNotHasKey('hourly_claims', $monthly);
+        $input = $this->inputSnapshot();
+        $source = \MyInvoice\Tests\Fixtures\Payroll\SyntheticHourlyPayslipFixture::source(480000, 30000);
+        $input['people'][0]['employments'][0]['inputs'][0]['hourly_calculation'] = $source;
+        $input['people'][0]['employments'][0]['hourly_wage_claims'] = [$source];
+        $result = $mapper->attach($input, $this->calculatedResult())['people'][0]['payslip_document'];
+        self::assertSame('payroll-payslip-document.v3', $result['schema_version']);
+        self::assertSame('160 h', $result['income_lines'][0]['hourly_detail']['quantity_text']);
+        self::assertSame(30000, $result['hourly_claims'][0]['segments'][0]['rate_minor']);
+        $hydrated = (new \MyInvoice\Service\Payroll\Document\PayslipDocumentSnapshotHydrator())->hydrate($result, 'rev-synthetic', str_repeat('a', 64), '2026-07');
+        self::assertSame($result['hourly_claims'], $hydrated->hourlyClaims);
+        unset($result['hourly_claims'], $result['income_lines'][0]['hourly_detail']);
+        $result['schema_version'] = 'payroll-payslip-document.v2';
+        self::assertSame($monthly, $result);
+    }
+
     public function testAttachesCompleteValidatedSnapshotForCalculatedPerson(): void
     {
         $result = (new PayslipDocumentSnapshotMapper())->attach(
@@ -16,6 +36,7 @@ final class PayslipDocumentSnapshotMapperTest extends TestCase
             $this->calculatedResult(),
         );
 
+        self::assertSame('79bbf40cb52321e781882ef86eb4ea4203788a017d046955e0d89df63541c642', hash('sha256', json_encode($result, JSON_THROW_ON_ERROR)));
         $document = $result['people'][0]['payslip_document'];
         self::assertSame('payroll-payslip-document.v2', $document['schema_version']);
         self::assertSame('Syntetická společnost s.r.o.', $document['employer_name']);

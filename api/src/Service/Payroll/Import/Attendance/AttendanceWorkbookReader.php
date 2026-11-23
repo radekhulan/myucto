@@ -51,9 +51,13 @@ final class AttendanceWorkbookReader
     {
         return match ($extension) {
             'xlsx' => $this->readXlsx($fileName, $fileIndex, $content),
-            'csv' => [$this->readCsv($fileName, $fileIndex, $content)],
+            // Denní export pro PAMICA se sečte po osobách, ostatní CSV zůstává beze změny.
+            'csv' => (static fn (AttendanceSheet $csv): array => AttendancePamicaExport::fromDailyCsv($csv) ?? [$csv])(
+                $this->readCsv($fileName, $fileIndex, $content),
+            ),
+            'xml' => AttendancePamicaExport::fromXml($fileName, $fileIndex, $content),
             default => throw new \InvalidArgumentException(
-                "Soubor „{$fileName}“ má nepodporovaný typ. Nahrajte XLSX nebo CSV.",
+                "Soubor „{$fileName}“ má nepodporovaný typ. Nahrajte XLSX, CSV nebo XML exportu pro PAMICA.",
             ),
         };
     }

@@ -3,9 +3,10 @@
  *
  * Postup je stejný jako u knihovny jscanify (MIT, puffinsoft/jscanify), jen bez
  * OpenCV.js, aby telefon kvůli focení účtenky nestahoval 9 MB: zmenšený šedotón,
- * práh podle Otsu, největší souvislá světlá oblast (papír na tmavším podkladu)
- * a její čtyři krajní body jako rohy. Narovnání je perspektivní transformace
- * (homografie) s bilineárním vzorkováním.
+ * práh podle Otsu, největší souvislá oblast nad prahem i pod ním (světlý papír
+ * na stole i tmavý doklad na světlém podkladu) a její čtyři krajní body jako
+ * rohy. Narovnání je perspektivní transformace (homografie) s bilineárním
+ * vzorkováním.
  *
  * Detekce selže tiše (vrátí null) a dialog pak nabídne celou fotku jako dosud.
  */
@@ -158,23 +159,8 @@ export function isConvexQuad(q: Quad): boolean {
   return true
 }
 
-/**
- * Najde doklad na (zmenšené) fotce. Rohy vrací v souřadnicích předaných pixelů.
- * Krajní body podle součtu a rozdílu souřadnic fungují pro doklad natočený
- * o méně než 45°, což je u fotky účtenky běžné.
- */
-export function detectDocumentQuad(px: Pixels): Quad | null {
-  const { width, height } = px
-  if (width < 16 || height < 16) return null
-  const gray = boxBlur(grayscale(px), width, height)
-  const threshold = otsuThreshold(gray)
-  const mask = new Uint8Array(gray.length)
-  for (let i = 0; i < gray.length; i++) mask[i] = gray[i] > threshold ? 1 : 0
-  const component = largestComponent(mask, width)
-  if (!component) return null
-  const ratio = component.length / (width * height)
-  if (ratio < MIN_AREA_RATIO || ratio > MAX_AREA_RATIO) return null
-
+/** Rohy oblasti: krajní body podle součtu a rozdílu souřadnic (doklad natočený o méně než 45°). */
+function componentQuad(component: Int32Array, width: number): Quad {
   let tl = { x: 0, y: 0, v: Infinity }
   let br = { x: 0, y: 0, v: -Infinity }
   let tr = { x: 0, y: 0, v: -Infinity }
@@ -190,15 +176,77 @@ export function detectDocumentQuad(px: Pixels): Quad | null {
     if (diff < bl.v) bl = { x, y, v: diff }
   }
   // Rohy na hraně pixelu, ne na jeho levém horním okraji.
-  const quad: Quad = [
+  return [
     { x: tl.x, y: tl.y },
     { x: tr.x + 1, y: tr.y },
     { x: br.x + 1, y: br.y + 1 },
     { x: bl.x, y: bl.y + 1 },
   ]
+}
+
+/**
+ * Kandidát na doklad z jedné polarity masky. Skóre je podíl plochy, kterou
+ * oblast ve svém čtyřúhelníku opravdu zabírá, krát podíl fotky: papír je
+ * obdélník a vyplní skoro celý čtyřúhelník, zatímco stůl okolo dokladu nebo
+ * stín vyplní jen jeho část, i když mají krajní body dál od sebe.
+ */
+function documentCandidate(mask: Uint8Array, width: number, height: number): { quad: Quad; score: number } | null {
+  const component = largestComponent(mask, width)
+  if (!component) return null
+  const frame = width * height
+  const ratio = component.length / frame
+  if (ratio < MIN_AREA_RATIO || ratio > MAX_AREA_RATIO) return null
+  const quad = componentQuad(component, width)
   if (!isConvexQuad(quad)) return null
-  if (quadArea(quad) < MIN_AREA_RATIO * width * height) return null
-  return quad
+  const area = quadArea(quad)
+  // Výřez přes celou fotku nemá co ořezávat (fotka samotného potištěného papíru).
+  if (area < MIN_AREA_RATIO * frame || area > MAX_AREA_RATIO * frame) return null
+  return { quad, score: (component.length / area) * ratio }
+}
+
+/**
+ * Najde doklad na (zmenšené) fotce. Rohy vrací v souřadnicích předaných pixelů.
+ *
+ * Zkouší obě polarity prahu: světlý papír na tmavším podkladu i tmavý doklad na
+ * světlém stole (účtenka v šeru, celá potištěná termopáska, doklad na bílém
+ * papíře). Polarita se tak nemusí hádat podle jasu okolí — vybere se kandidát
+ * s lepším skóre a opačná polarita obvykle vyjde jako celý záběr, který stejně
+ * neprojde `MAX_AREA_RATIO`.
+ */
+export function detectDocumentQuad(px: Pixels): Quad | null {
+  const { width, height } = px
+  if (width < 16 || height < 16) return null
+  const gray = boxBlur(grayscale(px), width, height)
+  const threshold = otsuThreshold(gray)
+  const light = new Uint8Array(gray.length)
+  const dark = new Uint8Array(gray.length)
+  for (let i = 0; i < gray.length; i++) {
+    const above = gray[i] > threshold
+    light[i] = above ? 1 : 0
+    dark[i] = above ? 0 : 1
+  }
+  const found = [documentCandidate(light, width, height), documentCandidate(dark, width, height)]
+    .filter((c): c is { quad: Quad; score: number } => c !== null)
+    .sort((a, b) => b.score - a.score)
+  return found[0]?.quad ?? null
+}
+
+/**
+ * Index rohu nejblíž bodu `at`, nejvýš však `radius` daleko (jinak null).
+ * Prstem se roh nechytá na pixel: dotyk má na mobilu průměr kolem 10 mm, takže
+ * tažení musí začít i tehdy, když se ťukne vedle.
+ */
+export function nearestCornerIndex(q: Quad, at: Point, radius: number): number | null {
+  let best: number | null = null
+  let bestDistance = radius
+  q.forEach((corner, i) => {
+    const d = Math.hypot(corner.x - at.x, corner.y - at.y)
+    if (d <= bestDistance) {
+      bestDistance = d
+      best = i
+    }
+  })
+  return best
 }
 
 export function scaleQuad(q: Quad, sx: number, sy: number = sx): Quad {

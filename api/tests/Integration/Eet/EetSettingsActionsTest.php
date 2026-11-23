@@ -134,6 +134,53 @@ final class EetSettingsActionsTest extends TestCase
         self::assertSame([$device['id']], array_column($own['body']['items'], 'id'));
     }
 
+    public function testUnitPreparedForDisImportHasNoNumberUntilDisAssignsIt(): void
+    {
+        $asAdmin = fn (string $http, array $body = []) => $this->req($http, 'admin', $this->supplierA, $body);
+        $created = $this->decode($this->unitsAction->create($asAdmin('POST', [
+            'name' => 'Prodejna Testov', 'kind' => 'premises', 'valid_from' => '2026-01-01',
+            'nace_code' => '47190', 'house_number' => '12', 'municipality' => 'Testov', 'postal_code' => '110 00',
+        ]), new Psr7Response()));
+        self::assertSame(201, $created['status'], json_encode($created['body']) ?: '');
+        self::assertNull($created['body']['unit_number']);
+        self::assertSame('11000', $created['body']['postal_code']);
+
+        // Bez čísla z DIS+ jednotka nedostane pokladnu (id_provoz by chybělo).
+        $device = $this->decode($this->devicesAction->create($asAdmin('POST', [
+            'unit_id' => $created['body']['id'], 'code' => 'POK-1', 'name' => 'Pokladna',
+        ]), new Psr7Response()));
+        self::assertSame(422, $device['status']);
+        self::assertSame('unit_id', $device['body']['error']['field'] ?? null);
+
+        $export = $this->unitsAction->disImport($asAdmin('GET'), new Psr7Response());
+        self::assertSame(200, $export->getStatusCode());
+        $export->getBody()->rewind();
+        self::assertSame(
+            "Prodejna Testov;S;47190;;1;0;;;12;;Testov;;11000;;;\r\n",
+            (string) $export->getBody(),
+        );
+
+        $numbered = $this->decode($this->unitsAction->update($asAdmin('PUT', ['unit_number' => 4711]), new Psr7Response(), ['id' => (string) $created['body']['id']]));
+        self::assertSame(200, $numbered['status']);
+        self::assertSame(4711, $numbered['body']['unit_number']);
+        self::assertSame(422, $this->code($this->unitsAction->disImport($asAdmin('GET'), new Psr7Response())));
+    }
+
+    public function testDisImportListsWhatIsMissingInsteadOfAnIncompleteFile(): void
+    {
+        $this->decode($this->unitsAction->create($this->req('POST', 'admin', $this->supplierA, [
+            'name' => 'Taxi', 'kind' => 'vehicle', 'valid_from' => '2026-01-01',
+        ]), new Psr7Response()));
+
+        $export = $this->decode($this->unitsAction->disImport($this->req('GET', 'admin', $this->supplierA), new Psr7Response()));
+        self::assertSame(422, $export['status']);
+        self::assertSame('eet_units_incomplete', $export['body']['error']['code'] ?? null);
+        self::assertSame(
+            ['nace_code', 'location_text', 'vehicle_kind'],
+            array_column($export['body']['error']['problems'], 'field'),
+        );
+    }
+
     public function testAccountantReadsSettingsButCannotChangeThemOrSeeCertificates(): void
     {
         $read = $this->decode($this->settingsAction->show($this->req('GET', 'accountant', $this->supplierA), new Psr7Response()));

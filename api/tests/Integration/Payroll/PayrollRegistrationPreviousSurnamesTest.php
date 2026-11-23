@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Integration\Payroll;
 
-use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\Payroll\PayrollRegistrationIdentityRepository;
 use MyInvoice\Service\Payroll\Security\PayrollSensitiveData;
@@ -31,14 +30,14 @@ final class PayrollRegistrationPreviousSurnamesTest extends TestCase
 
     protected function setUp(): void
     {
-        $container = Bootstrap::buildContainer();
+        $container = \MyInvoice\Tests\Support\PayrollTestContainer::build();
         $db = $container->get(Connection::class);
         $sensitive = $container->get(PayrollSensitiveData::class);
         self::assertInstanceOf(Connection::class, $db);
         self::assertInstanceOf(PayrollSensitiveData::class, $sensitive);
         $this->db = $db;
         $this->repository = new PayrollRegistrationIdentityRepository($db);
-        $this->service = new PayrollRegistrationIdentityService($this->repository, $sensitive, \MyInvoice\Service\Payroll\Ruleset\PayrollRulesetRegistry::defaults());
+        $this->service = new PayrollRegistrationIdentityService($this->repository, $sensitive, \MyInvoice\Service\Payroll\Ruleset\PayrollRulesetRegistry::defaults(), new \MyInvoice\Service\ActivityLogger($db));
 
         $pdo = $db->pdo();
         $source = (int) $pdo->query('SELECT MIN(id) FROM supplier')->fetchColumn();

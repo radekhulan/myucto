@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Integration\Payroll;
 
-use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Payroll\Document\PayrollDocumentEmployerSnapshotProvider;
 use MyInvoice\Tests\Support\IsolatedSupplierTrait;
@@ -27,7 +26,7 @@ final class PayrollDocumentEmployerSnapshotProviderTest extends TestCase
             $this->markTestSkipped('cfg.php neexistuje — test vyžaduje DB.');
         }
         try {
-            $this->db = Bootstrap::buildContainer()->get(Connection::class);
+            $this->db = \MyInvoice\Tests\Support\PayrollTestContainer::build()->get(Connection::class);
         } catch (\Throwable $exception) {
             $this->markTestSkipped('DI/DB nedostupné: ' . $exception->getMessage());
         }

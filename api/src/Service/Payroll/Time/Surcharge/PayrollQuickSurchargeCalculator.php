@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Payroll\Time\Surcharge;
 
+use MyInvoice\Service\Payroll\PayrollPeriodLabel;
 use MyInvoice\Service\Payroll\Absence\MinimumWageFloor;
 use MyInvoice\Service\Payroll\Calculation\DecimalRate;
 use MyInvoice\Service\Payroll\Calculation\RoundingMode;
@@ -201,7 +202,7 @@ final class PayrollQuickSurchargeCalculator
                     . 'zjištěná. Doplňte ji a výpočet zopakujte.',
                     $kind->section(),
                     $basis->label(),
-                    $periodStart,
+                    PayrollPeriodLabel::monthYear($periodStart),
                 ),
             });
         }

@@ -155,6 +155,10 @@ const projectActions = computed<ActionItem[]>(() => {
   return [
     { key: 'new-invoice', label: t('project.new_invoice'), icon: 'plus', tier: 'primary', variant: 'primary',
       show: p.status === 'active' && auth.canWrite('invoices.create'), to: `/invoices/new?client_id=${p.client_id}&project_id=${p.id}` },
+    { key: 'quotes', label: t('nav.sales_quotes'), icon: 'doc', tier: 'secondary', variant: 'neutral',
+      show: auth.hasCommercialFeatures && auth.canRead('sales_quotes'), to: { name: 'sales-quotes', query: { project_id: p.id } } },
+    { key: 'new-quote', label: t('sales_quotes.new'), icon: 'plus', tier: 'overflow', variant: 'primary',
+      show: auth.hasCommercialFeatures && p.status === 'active' && auth.canWrite('sales_quotes.write'), to: { name: 'sales-quote-new', query: { client_id: p.client_id, project_id: p.id } } },
     { key: 'edit', label: t('project.edit_project'), icon: 'edit', tier: 'secondary', variant: 'success',
       show: w, to: `/projects/${p.id}/edit` },
     { key: 'client', label: t('project.client_detail'), icon: 'user', tier: 'secondary', variant: 'warning',

@@ -17,6 +17,7 @@ final class UnitPaymentCorrectionTest extends TestCase
 {
     use ChargeIssuanceFixture;
     use \MyInvoice\Tests\Support\PaymentCorrectionFixture;
+    use \MyInvoice\Tests\Support\PairedJournalAssertions;
     private Connection $db;private array $f;
     protected function setUp():void{$this->db=Bootstrap::buildContainer()->get(Connection::class);$this->db->pdo()->beginTransaction();$this->f=$this->issuanceFixture($this->db);}
     protected function tearDown():void{if($this->db->pdo()->inTransaction())$this->db->pdo()->rollBack();}
@@ -74,5 +75,13 @@ final class UnitPaymentCorrectionTest extends TestCase
         $q=$this->db->pdo()->prepare('SELECT COUNT(*) FROM unit_payment_corrections WHERE supplier_id=?');$q->execute([$f['supplier']]);self::assertSame(0,(int)$q->fetchColumn());
         self::assertSame('90000',(new DebtRepository($this->db))->current($f['supplier'],$base['debt']['id'])['paid']['principal:'.$base['line_id']]);
         self::assertSame('0',(new PaymentSourceProof($this->db))->current($f['supplier'],'bank',$base['bank'])['available_cents']);
+    }
+
+    /** Jednoduchá forma: úleva z předpisu a její storno po dvojicích. */
+    #[\PHPUnit\Framework\Attributes\Group('pairs-e2e')]
+    public function testFullReliefReverseRequiresUnusedNewCreditAndRestoresExactOriginalPaymentInSingleEntryForm():void
+    {
+        $this->testFullReliefReverseRequiresUnusedNewCreditAndRestoresExactOriginalPayment();
+        $this->assertSupplierJournalPaired($this->db->pdo(),$this->f['supplier']);
     }
 }

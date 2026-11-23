@@ -174,8 +174,11 @@ final class PurchaseInvoiceSubmissionLifecycleTest extends TestCase
         self::assertSame(404, $this->portalAction->delete($tenant, (new ResponseFactory())->createResponse(), ['id' => $row['id']])->getStatusCode());
         $readOnly = $this->clientRequest('DELETE')->withAttribute('auth.effective_role', new EffectiveRole(1, 'client', 'client', true, ['documents.submit' => AccessLevel::READ->value], 'client'));
         self::assertSame(403, $this->portalAction->delete($readOnly, (new ResponseFactory())->createResponse(), ['id' => $row['id']])->getStatusCode());
-        $staff = $this->clientRequest('DELETE')->withAttribute('auth.effective_role', new EffectiveRole(1, 'staff', 'staff', true, ['documents.submit' => AccessLevel::WRITE->value], 'accountant'));
-        self::assertSame(403, $this->portalAction->delete($staff, (new ResponseFactory())->createResponse(), ['id' => $row['id']])->getStatusCode());
+        // Interní role předává jen s právem `documents.submit` na zápis; účetní fronta ho nenahradí.
+        foreach ([['documents.submit' => AccessLevel::READ->value], ['documents.inbox' => AccessLevel::WRITE->value]] as $permissions) {
+            $staff = $this->clientRequest('DELETE')->withAttribute('auth.effective_role', new EffectiveRole(1, 'staff', 'staff', true, $permissions, 'accountant'));
+            self::assertSame(403, $this->portalAction->delete($staff, (new ResponseFactory())->createResponse(), ['id' => $row['id']])->getStatusCode());
+        }
         self::assertNull($this->documentDeletedAt($row['document_id']));
         $superadmin = $foreign->withAttribute('auth.effective_role', new EffectiveRole(1, 'superadmin', 'superadmin', true, [], 'superadmin'));
         self::assertSame(200, $this->portalAction->delete($superadmin, (new ResponseFactory())->createResponse(), ['id' => $row['id']])->getStatusCode());
@@ -183,7 +186,7 @@ final class PurchaseInvoiceSubmissionLifecycleTest extends TestCase
 
     public function testDeleteGuardsProcessingHistoryAndFinancialLink(): void
     {
-        foreach (['processing', 'needs_information', 'rejected', 'processed', 'started', 'running', 'invoice'] as $state) {
+        foreach (['processing', 'processed', 'started', 'running', 'invoice'] as $state) {
             $row = $this->submission();
             $stmt = $this->db->pdo()->prepare('UPDATE purchase_invoice_submissions SET status = ?, processing_started_at = ?, extraction_status = ?, purchase_invoice_id = ? WHERE id = ?');
             $stmt->execute([in_array($state, ['started', 'running', 'invoice'], true) ? 'submitted' : $state, $state === 'started' ? '2099-01-01 00:00:00' : null, $state === 'running' ? 'running' : 'not_started', $state === 'invoice' ? $this->createPurchaseInvoiceDraft($this->supplierA, 'SYNTHETIC-GUARD') : null, $row['id']]);
@@ -192,6 +195,40 @@ final class PurchaseInvoiceSubmissionLifecycleTest extends TestCase
             self::assertNotNull($this->submissions->find($row['id'], $this->supplierA));
             self::assertNull($this->documentDeletedAt($row['document_id']));
         }
+    }
+
+    /**
+     * Odmítnuté nebo vrácené předání z něj doklad nevytvořilo. Klient ho musí
+     * umět z přehledu odklidit sám, ne jen nahradit; náhrada po smazání
+     * odmítnutého předání zůstane jako samostatné podání.
+     */
+    public function testClientCanDeleteOwnRejectedOrReturnedSubmission(): void
+    {
+        $rejected = $this->submission();
+        self::assertTrue($this->submissions->reject($rejected['id'], $this->supplierA, 'Nejde o účetní doklad.'));
+        $returned = $this->submission();
+        self::assertTrue($this->submissions->needsInformation($returned['id'], $this->supplierA, 'Doplňte originál.'));
+        $list = $this->portalAction->list($this->clientRequest('GET'), (new ResponseFactory())->createResponse());
+        foreach (json_decode((string) $list->getBody(), true, flags: JSON_THROW_ON_ERROR)['items'] as $item) {
+            self::assertTrue($item['can_delete'], (string) $item['status']);
+        }
+
+        $replacement = $this->clientRequest('POST')->withUploadedFiles(['file' => $this->uploadedFile('replacement.pdf', "%PDF-1.4
+% synthetic replacement " . bin2hex(random_bytes(8)))]);
+        $response = $this->portalAction->resubmit($replacement, (new ResponseFactory())->createResponse(), ['id' => $rejected['id']]);
+        self::assertSame(201, $response->getStatusCode(), (string) $response->getBody());
+        $new = $this->submissions->find((int) json_decode((string) $response->getBody(), true, flags: JSON_THROW_ON_ERROR)['items'][0]['id'], $this->supplierA);
+        $this->trackSubmissionFile($new);
+
+        foreach ([$rejected, $returned] as $row) {
+            $response = $this->portalAction->delete($this->clientRequest('DELETE'), (new ResponseFactory())->createResponse(), ['id' => $row['id']]);
+            self::assertSame(200, $response->getStatusCode(), (string) $response->getBody());
+            self::assertNull($this->submissions->find($row['id'], $this->supplierA));
+            self::assertNotNull($this->documentDeletedAt($row['document_id']));
+        }
+        $kept = $this->submissions->find((int) $new['id'], $this->supplierA);
+        self::assertSame('submitted', $kept['status']);
+        self::assertNull($kept['supersedes_submission_id']);
     }
 
     public function testRejectedDocumentCanBeReplacedOnceWithHistoryPreserved(): void
@@ -223,6 +260,41 @@ final class PurchaseInvoiceSubmissionLifecycleTest extends TestCase
         self::assertNull($this->submissions->deleteFromQueue($row['id'], $this->supplierA, $this->userId, true));
         self::assertSame('processing', $this->submissions->find($row['id'], $this->supplierA)['status']);
         self::assertNull($this->documentDeletedAt($row['document_id']));
+    }
+
+    /**
+     * Přerušené vytěžení (požadavek nedoběhl) nechalo podání ve stavu `processing`:
+     * fronta ho neukázala mezi čekajícími a nešlo vytěžit znovu ani smazat.
+     */
+    public function testInterruptedExtractionReturnsToQueueAndCanBeRetriedOrDeleted(): void
+    {
+        $row = $this->submission('staff');
+        $markStale = $this->db->pdo()->prepare(
+            "UPDATE purchase_invoice_submissions
+                SET status = 'processing', extraction_status = 'running',
+                    processing_started_at = NOW() - INTERVAL " . (PurchaseInvoiceSubmissionRepository::STALE_PROCESSING_MINUTES + 1) . ' MINUTE
+              WHERE id = ?'
+        );
+        $markStale->execute([$row['id']]);
+
+        self::assertTrue($this->submissions->find($row['id'], $this->supplierA)['processing_stale']);
+        self::assertContains($row['id'], $this->pendingIds());
+
+        self::assertTrue($this->submissions->claimForExtraction($row['id'], $this->supplierA), 'Přerušené vytěžení jde spustit znovu.');
+        self::assertFalse($this->submissions->find($row['id'], $this->supplierA)['processing_stale']);
+        self::assertNotContains($row['id'], $this->pendingIds(), 'Právě běžící vytěžení mezi čekajícími není.');
+        self::assertFalse($this->submissions->claimForExtraction($row['id'], $this->supplierA), 'Běžící vytěžení se nesmí spustit podruhé.');
+
+        $markStale->execute([$row['id']]);
+        $response = $this->inboxAction->delete($this->inboxRequest('DELETE', '/api/purchase-invoice-submissions/' . $row['id']), (new ResponseFactory())->createResponse(), ['id' => $row['id']]);
+        self::assertSame(200, $response->getStatusCode(), (string) $response->getBody());
+        self::assertNull($this->submissions->find($row['id'], $this->supplierA));
+    }
+
+    /** @return list<int> */
+    private function pendingIds(): array
+    {
+        return array_map(static fn (array $i): int => (int) $i['id'], $this->submissions->paginate($this->supplierA, 'submitted', 100, 0)['items']);
     }
 
     public function testFailedStaffDeleteRollsBackRequestReopening(): void

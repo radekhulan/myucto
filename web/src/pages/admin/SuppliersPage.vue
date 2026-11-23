@@ -24,7 +24,11 @@ import { formatDate, formatDateTime } from '@/composables/useFormat'
 import { ICONS, btnFilled, btnOutline, btnOutlineSm } from '@/components/ui/buttonStyles'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import SupplierUrgency from '@/components/supplier/SupplierUrgency.vue'
+import SupplierDeleteDialog from '@/components/supplier/SupplierDeleteDialog.vue'
 import { useSupplierSwitch } from '@/composables/useSupplierSwitch'
+import SsoStepUpOption from '@/components/security/SsoStepUpOption.vue'
+import { useSsoEnforcement } from '@/composables/useSsoEnforcement'
+import { takeSsoStepUpProof } from '@/security/oidc'
 
 const { t } = useI18n()
 const route = useRoute()
@@ -127,10 +131,17 @@ watch(() => route.query, (q) => {
 })
 
 onMounted(async () => {
+  const ssoReturn = takeSsoStepUpProof('epo.certificate', SSO_CONTEXT)
   await loadSuppliers()
   // Onboarding gate (#151): dashboard sem posílá s ?create=supplier → rovnou otevři
   // formulář pro vytvoření prvního dodavatele.
-  if (route.query.create === 'supplier') newSupplier()
+  if (route.query.create === 'supplier' || ssoReturn) newSupplier()
+  // Návrat z ověření přes Microsoft: údaje firmy se přesměrováním ztratily, proof ne.
+  if (ssoReturn) {
+    carryOverStepPasskeyToken.value = ssoReturn
+    ssoProof.value = ssoReturn
+    toast.info(t('sso.step_up_done'))
+  }
 })
 
 // ─── Suppliers (multi-tenant firmy) ───────────────────────────────────────
@@ -230,6 +241,11 @@ const carryOverStepTotp = ref('')
 const carryOverStepPasskeyToken = ref('')
 const carryOverPasskeyBusy = ref(false)
 const passkeySupported = isWebAuthnAvailable()
+const SSO_CONTEXT = 'suppliers-carry-over'
+const ssoProof = ref('')
+const carryOverSsoVerified = computed(() =>
+  carryOverStepPasskeyToken.value !== '' && carryOverStepPasskeyToken.value === ssoProof.value,
+)
 let carryOverRun = 0
 
 const hasPasskey = computed(() =>
@@ -237,6 +253,8 @@ const hasPasskey = computed(() =>
   || (auth.user?.passkey_count ?? 0) > 0,
 )
 const hasTotp = computed(() => auth.user?.totp_enabled === true)
+const ssoEnforcement = useSsoEnforcement()
+const { passwordAllowed, localFactorsAllowed } = ssoEnforcement
 
 const carryOverOffered = computed(() =>
   carryOver.value !== null
@@ -246,7 +264,11 @@ const carryOverNeedsStepUp = computed(() => carryOverCertificateIds.value.length
 
 /** Prázdný řetězec = ověření je kompletní; jinak text, co ještě chybí. */
 const carryOverStepUpMissing = computed(() => {
-  if (!carryOverNeedsStepUp.value || carryOverStepPasskeyToken.value) return ''
+  if (!carryOverNeedsStepUp.value) return ''
+  const enforced = ssoEnforcement.enforcedStepUpMissing(
+    carryOverStepPasskeyToken.value, carryOverSsoVerified.value, carryOverStepTotp.value, hasTotp.value)
+  if (enforced !== null) return enforced === '' ? '' : t(enforced)
+  if (carryOverStepPasskeyToken.value) return ''
   if (!carryOverStepPassword.value) return t('settings.certificate_vault_step_up_password_missing')
   if (hasTotp.value && !/^\d{6}$/.test(carryOverStepTotp.value.trim())) {
     return t('settings.certificate_vault_step_up_totp_missing')
@@ -296,17 +318,17 @@ async function verifyCarryOverPasskey() {
   }
 }
 
-function carryOverPayload(): SupplierCreatePayload['carry_over'] {
+async function carryOverPayload(): Promise<SupplierCreatePayload['carry_over']> {
   if (carryOver.value === null || (!carryOverAi.value && carryOverCertificateIds.value.length === 0)) return undefined
   return {
     ai: carryOverAi.value,
     certificate_ids: [...carryOverCertificateIds.value],
     step_up: carryOverNeedsStepUp.value
-      ? {
+      ? await ssoEnforcement.reauthProof('epo.certificate', {
           password: carryOverStepPassword.value || undefined,
           totp_code: carryOverStepTotp.value.trim() || undefined,
           step_up_token: carryOverStepPasskeyToken.value || undefined,
-        }
+        })
       : undefined,
   }
 }
@@ -393,7 +415,7 @@ async function saveSupplier() {
         bic: supplierBank.bic || undefined,
       }
     }
-    const carry = carryOverPayload()
+    const carry = await carryOverPayload()
     if (carry) payload.carry_over = carry
     const created = await suppliersApi.create(payload)
     supplierCreateOpen.value = false
@@ -409,20 +431,21 @@ async function saveSupplier() {
   }
 }
 
-async function removeSupplier(s: SupplierListItem) {
-  if (s.clients_count > 0 || s.invoices_count > 0) return
-  if (!confirm(t('supplier.delete_confirm'))) return
-  try {
-    await suppliersApi.delete(s.id)
-    toast.success(t('common.deleted'))
-    await loadSuppliers()
-    await auth.refresh()
-    if (supplierStore.currentSupplierId === s.id) {
-      const first = suppliers.value[0]
-      if (first) await switchTo(first.id)
-    }
-  } catch (e: any) {
-    toast.error(e?.response?.data?.error?.message || t('common.error'))
+const deleting = ref<SupplierListItem | null>(null)
+
+function removeSupplier(s: SupplierListItem) {
+  deleting.value = s
+}
+
+async function onSupplierDeleted(id: number) {
+  const name = deleting.value?.company_name ?? ''
+  deleting.value = null
+  toast.success(t('supplier.delete_dialog.done', { name }))
+  await loadSuppliers()
+  await auth.refresh()
+  if (supplierStore.currentSupplierId === id) {
+    const first = suppliers.value[0]
+    if (first) await switchTo(first.id)
   }
 }
 
@@ -529,7 +552,7 @@ async function switchSupplier(id: number) {
                       <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.swap" /></svg>
                       {{ t('supplier.switch') }}
                     </button>
-                    <button v-if="auth.isSuperadmin" @click="removeSupplier(s)" :disabled="s.clients_count > 0 || s.invoices_count > 0 || supplierStore.availableSuppliers.length <= 1"
+                    <button v-if="auth.isSuperadmin" @click="removeSupplier(s)" :disabled="supplierStore.availableSuppliers.length <= 1"
                       :class="btnOutlineSm('danger')">
                       <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.trash" /></svg>
                       {{ t('common.delete') }}
@@ -573,7 +596,7 @@ async function switchSupplier(id: number) {
               <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.swap" /></svg>
               {{ t('supplier.switch') }}
             </button>
-            <button v-if="auth.isSuperadmin" @click="removeSupplier(s)" :disabled="s.clients_count > 0 || s.invoices_count > 0 || supplierStore.availableSuppliers.length <= 1"
+            <button v-if="auth.isSuperadmin" @click="removeSupplier(s)" :disabled="supplierStore.availableSuppliers.length <= 1"
               :class="btnOutlineSm('danger')" class="whitespace-nowrap ml-auto">
               <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.trash" /></svg>
               {{ t('common.delete') }}
@@ -746,7 +769,7 @@ async function switchSupplier(id: number) {
 
               <div v-if="carryOverNeedsStepUp" class="mt-3 grid gap-3 sm:grid-cols-2 rounded-lg border border-neutral-200 p-3"
                 data-testid="carry-over-step-up">
-                <div v-if="hasPasskey" class="sm:col-span-2 flex flex-wrap items-center gap-3">
+                <div v-if="localFactorsAllowed && hasPasskey && !carryOverSsoVerified" class="sm:col-span-2 flex flex-wrap items-center gap-3">
                   <div v-if="carryOverStepPasskeyToken" class="text-sm font-medium text-success-600">
                     ✓ {{ t('settings.certificate_vault_passkey_verified') }}
                   </div>
@@ -756,18 +779,22 @@ async function switchSupplier(id: number) {
                       <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.lock" /></svg>
                       {{ carryOverPasskeyBusy ? t('common.loading') : t('settings.certificate_vault_verify_passkey') }}
                     </button>
-                    <span class="text-xs text-neutral-500">{{ t('settings.certificate_vault_step_up_or_password') }}</span>
+                    <span v-if="passwordAllowed" class="text-xs text-neutral-500">{{ t('settings.certificate_vault_step_up_or_password') }}</span>
                   </template>
                   <p v-else class="text-xs text-warning-700">{{ t('settings.certificate_vault_passkey_unsupported') }}</p>
                 </div>
+                <SsoStepUpOption v-if="carryOverSsoVerified || !carryOverStepPasskeyToken" class="sm:col-span-2"
+                  operation="epo.certificate" :context="SSO_CONTEXT"
+                  :verified="carryOverSsoVerified" :disabled="carryOverPasskeyBusy"
+                  @verified="(proof: string) => { carryOverStepPasskeyToken = proof; ssoProof = proof }" />
                 <template v-if="!carryOverStepPasskeyToken">
-                  <label class="text-xs text-neutral-600">
+                  <label v-if="passwordAllowed" class="text-xs text-neutral-600">
                     {{ t('settings.certificate_vault_step_up_password') }}
                     <input v-model="carryOverStepPassword" type="password" autocomplete="current-password"
                       data-testid="carry-over-step-password"
                       class="mt-1 h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm" />
                   </label>
-                  <label class="text-xs text-neutral-600">
+                  <label v-if="passwordAllowed || (localFactorsAllowed && hasTotp)" class="text-xs text-neutral-600">
                     {{ t('settings.certificate_vault_step_up_totp') }}
                     <input v-model="carryOverStepTotp" type="text" inputmode="numeric" maxlength="6"
                       autocomplete="one-time-code"
@@ -790,5 +817,6 @@ async function switchSupplier(id: number) {
         </form>
       </div>
     </div>
+    <SupplierDeleteDialog v-if="deleting" :supplier="deleting" @close="deleting = null" @deleted="onSupplierDeleted" />
   </div>
 </template>

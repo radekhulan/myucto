@@ -242,6 +242,8 @@ final class DocumentLinker
      * doplňují: součet nepřesáhne `paid_total`. Faktura v cizí měně dostane částku přepočtenou
      * kurzem dokladu. Opakovaný převod platbu nezdvojí (banka: pohyb + faktura, pokladna:
      * doklad + faktura) a doplní ji i k úhradám spárovaným dřívějším během.
+     * Přijaté faktury v matchPayments() přebírají přímé vazby řádků bez této alokace
+     * přeplatků; jejich částky na pořadí průchodu nezávisí.
      *
      * @param array<int,int> $entryByRow INTER řádku → journal_entries.id
      * @param array<int,int> $cashByRow INTER řádku na pokladně → cash_documents.id
@@ -273,6 +275,7 @@ final class DocumentLinker
                 if ($target !== null) {
                     $money[$target]['amount'] = ($money[$target]['amount'] ?? 0.0) + $r['amount'];
                     $money[$target]['date'] = max($money[$target]['date'] ?? $r['date'], $r['date']);
+                    $money[$target]['inter'] = min($money[$target]['inter'] ?? $r['inter'], $r['inter']);
                     continue;
                 }
                 // Haléřové vyrovnání v zápisu bankovního pohybu nebo na pokladním dokladu.
@@ -374,7 +377,9 @@ final class DocumentLinker
         // Přeplatek pohybu nad uhrazenou částkou faktury (v Kč) - kandidát na přeúčtování níže.
         $overflow = [];
         foreach ($planned as $invoiceId => $money) {
-            ksort($money);
+            // Přeplatek zbývá z pozdější úhrady podle deníku PREMIER. Cílové DB id
+            // ani prefix bank|cash neurčují pořadí; při stejném datu rozhoduje INTER.
+            uasort($money, static fn (array $a, array $b): int => ($a['date'] <=> $b['date']) ?: ($a['inter'] <=> $b['inter']));
             foreach ($money as $target => $m) {
                 $recorded = $record($invoiceId, $target, (float) $m['amount'], $m['date']);
                 if ($recorded !== null && (float) $m['amount'] - $recorded >= 0.01) {

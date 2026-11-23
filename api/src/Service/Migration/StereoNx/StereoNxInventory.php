@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Migration\StereoNx;
 
+use MyInvoice\Service\Invoice\UnitPricePrecision;
 use MyInvoice\Service\Migration\Shared\MigratedInventoryException;
 use MyInvoice\Service\Migration\Shared\MigratedInventoryWriter;
 
@@ -106,7 +107,7 @@ final class StereoNxInventory
             $salePrice = null;
             $mode = $priceMode[$warehouse] ?? $priceMode[''] ?? null;
             if ($mode === true) {
-                $salePrice = self::decimal($row['ProdejniCena'] ?? null, 2, false);
+                $salePrice = UnitPricePrecision::toDecimalString(self::decimal($row['ProdejniCena'] ?? null, UnitPricePrecision::DECIMALS, false));
             } elseif (self::number($row['ProdejniCena'] ?? null) !== 0.0) {
                 self::warning($warnings, 'stock_item_price_vat_unknown', 'Prodejní cena bez doloženého režimu DPH se nepřevede.');
             }

@@ -21,6 +21,7 @@ const m = vi.hoisted(() => ({
   employerSettings: vi.fn(),
   saveStatutoryEvidence: vi.fn(),
   employmentAgendaSummary: vi.fn(),
+  runsPage: vi.fn(),
 }))
 
 vi.mock('vue-router', () => ({
@@ -49,6 +50,7 @@ vi.mock('@/api/payroll', () => ({
     employerSettings: m.employerSettings,
     saveStatutoryEvidence: m.saveStatutoryEvidence,
     employmentAgendaSummary: m.employmentAgendaSummary,
+    runsPage: m.runsPage,
   },
 }))
 
@@ -182,8 +184,8 @@ function mountPage(employmentCardStub: unknown = true) {
     global: {
       stubs: {
         ActionBar: {
-          props: ['actions'],
-          template: '<div data-test="person-actions"><button v-for="action in actions" v-show="action.show" :key="action.key" type="button" :data-test="`action-${action.key}`" @click="action.run && action.run()">{{ action.label }}</button></div>',
+          props: ['actions', 'moreLabel'],
+          template: '<div data-test="person-actions"><span v-if="moreLabel" data-test="action-more-label">{{ moreLabel }}</span><button v-for="action in actions" v-show="action.show" :key="action.key" type="button" :data-test="`action-${action.key}`" :data-tier="action.tier" @click="action.run && action.run()">{{ action.label }}</button></div>',
         },
         RouterLink: {
           name: 'RouterLink',
@@ -233,9 +235,12 @@ describe('PeopleList toolbar and shared employee creation', () => {
       }],
     })
     m.createEmployment.mockResolvedValue({
-      id: 44,
-      employee_id: 4,
-      relation_type: 'employment',
+      employment: {
+        id: 44,
+        employee_id: 4,
+        relation_type: 'employment',
+      },
+      warnings: [],
     })
     m.capabilities.mockResolvedValue({ state: { start_period: '2026-01-01' } })
     m.employerSettings.mockResolvedValue({ offices: [], default_health_insurer_code: null })
@@ -293,6 +298,115 @@ describe('PeopleList toolbar and shared employee creation', () => {
     const buttons = wrapper.get('[data-test="quick-inputs-link"]').element.parentElement!
     expect(buttons.classList.contains('flex-wrap')).toBe(true)
     expect(buttons.classList.contains('min-w-0')).toBe(true)
+  })
+
+  /*
+   * Agentura s DPP dohání v listopadu únor. Dialog výchozích zákonných údajů
+   * otevřený ze Zaměstnanců předvyplnil říjen; kdo jen potvrdil, zapsal údaje
+   * od října a únor zůstal blokovaný. Platí nejstarší neschválený běh.
+   */
+  it('hromadné doplnění zákonných údajů předvyplní měsíc nejstaršího neschváleného běhu', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date('2026-11-11T12:00:00'))
+    m.runsPage.mockResolvedValue({
+      runs: [
+        { id: 3, period_start: '2026-03-01', status: 'draft' },
+        { id: 2, period_start: '2026-02-01', status: 'calculated' },
+        { id: 1, period_start: '2026-01-01', status: 'approved' },
+      ],
+    })
+    const wrapper = mount(PeopleList, {
+      global: {
+        stubs: {
+          ActionBar: {
+            props: ['actions'],
+            template: '<div><button v-for="action in actions" :key="action.key" type="button" :data-test="`action-${action.key}`" @click="action.run && action.run()">{{ action.label }}</button></div>',
+          },
+          RouterLink: true,
+          EmploymentCard: true,
+          PayrollPersonQuickEdit: true,
+          PayrollPersonProfilePanel: true,
+          PayrollPersonStatutoryEvidencePanel: true,
+          PayrollStatutoryBulkDefaultsDialog: {
+            props: ['effectiveOn'],
+            template: '<div data-test="statutory-bulk-dialog">{{ effectiveOn }}</div>',
+          },
+        },
+      },
+    })
+    await flushPromises()
+    await wrapper.get('[data-test="action-statutory-bulk"]').trigger('click')
+    await flushPromises()
+
+    expect(m.runsPage).toHaveBeenCalledWith(undefined, { limit: 50 })
+    expect(wrapper.get('[data-test="statutory-bulk-dialog"]').text()).toBe('2026-02-01')
+    wrapper.unmount()
+  })
+
+  it('hromadné úpravy schová do Další funkce a na liště nechá měsíční zadání', async () => {
+    const wrapper = mountPage()
+    await flushPromises()
+
+    expect(wrapper.find('[data-test="quick-inputs-link"]').exists()).toBe(true)
+    expect(wrapper.find('[data-test="action-more-label"]').exists()).toBe(true)
+    for (const key of ['statutory-bulk', 'payout-defaults-bulk', 'declaration-sign-bulk', 'health-insurer-bulk', 'workplace-bulk', 'terms-bulk', 'bulk-closure']) {
+      expect(wrapper.get(`[data-test="action-${key}"]`).attributes('data-tier')).toBe('overflow')
+    }
+  })
+
+  /**
+   * Kontrola před během posílá nález „chybí zákonné údaje" na
+   * `?filter=blocking_data`. Stránka parametr nečetla a otevřela aktivní
+   * zaměstnance, mezi kterými lidi s chybějícími údaji musela účetní hledat.
+   */
+  it('otevře seznam zúžený filtrem z odkazu nálezu', async () => {
+    m.routeQuery.filter = 'blocking_data'
+    mountPage()
+    await flushPromises()
+
+    expect(m.peoplePage).toHaveBeenLastCalledWith(expect.objectContaining({ filter: 'blocking_data' }))
+    expect(m.peoplePage).not.toHaveBeenCalledWith(expect.objectContaining({ filter: 'active' }))
+  })
+
+  /*
+   * U 150 nálezů kontroly před během bylo dosažitelných jen 25. Odkaz nálezu
+   * teď otevře seznam zúžený na všechny jeho osoby; kód, období a datum výplaty
+   * jdou na server, který osoby vybere týmž pravidlem jako nález.
+   */
+  it('odkaz z nálezu kontroly před během zúží seznam na osoby nálezu a nabídne cestu zpět', async () => {
+    Object.assign(m.routeQuery, {
+      filter: 'run_finding',
+      finding: 'time_month_missing',
+      period: '2026-10',
+      payment_date: '2026-11-10',
+    })
+    const wrapper = mountPage()
+    await flushPromises()
+
+    expect(m.peoplePage).toHaveBeenCalledWith(expect.objectContaining({
+      filter: 'run_finding',
+      finding: 'time_month_missing',
+      period: '2026-10',
+      payment_date: '2026-11-10',
+    }))
+    const banner = wrapper.get('[data-test="people-run-finding"]')
+    expect(banner.text()).toContain('payroll.people.run_finding.hint')
+
+    await banner.get('[data-test="people-run-finding-clear"]').trigger('click')
+    await flushPromises()
+
+    expect(m.peoplePage).toHaveBeenLastCalledWith(expect.objectContaining({ filter: 'active' }))
+    expect(m.peoplePage).not.toHaveBeenLastCalledWith(expect.objectContaining({ finding: 'time_month_missing' }))
+    expect(wrapper.find('[data-test="people-run-finding"]').exists()).toBe(false)
+  })
+
+  it('zúžení na nález bez kódu nebo období se neuplatní', async () => {
+    m.routeQuery.filter = 'run_finding'
+    const wrapper = mountPage()
+    await flushPromises()
+
+    expect(m.peoplePage).toHaveBeenLastCalledWith(expect.objectContaining({ filter: 'active' }))
+    expect(wrapper.find('[data-test="people-run-finding"]').exists()).toBe(false)
   })
 
   /*
@@ -531,6 +645,128 @@ describe('PeopleList toolbar and shared employee creation', () => {
    * Jméno jsou dvě pole, protože historická identita chce křestní a příjmení
    * zvlášť; celé jméno se z nich složí, takže třetí pole nepřibylo.
    */
+  it('nový hodinový vztah odešle s podkladem a bez měsíční mzdy', async () => {
+    m.person.mockResolvedValue({ ...person(1, 'Alfa Aktivní', true, false), employments: [] })
+    const wrapper = mountPage()
+    await flushPromises()
+    await wrapper.get('[data-test="edit-employee-1"]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-test="action-add-employment"]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-test="new-employment-remuneration-type"]').setValue('hourly')
+    await wrapper.get('[data-test="new-employment-hourly-rate"]').setValue('180,50')
+    await wrapper.get('[data-test="new-employment-remuneration-basis"]').setValue('')
+    await wrapper.get('[data-test="new-employment-form"]').trigger('submit')
+    expect(m.createEmployment).not.toHaveBeenCalled()
+    expect(wrapper.get('[data-test="new-employment-form"]').text()).toContain('payroll.people.remuneration.basis_required')
+    const basis = wrapper.get('[data-test="new-employment-remuneration-basis"]')
+    expect(basis.classes()).toContain('border-danger-500')
+    expect(basis.element.parentElement?.querySelector('[data-test="field-note-error"]')?.textContent).toContain('payroll.people.remuneration.basis_required')
+    await wrapper.get('[data-test="new-employment-remuneration-basis"]').setValue('Syntetická dohoda')
+    await wrapper.get('[data-test="new-employment-remuneration-basis-kind"]').setValue('agreement')
+    await wrapper.get('[data-test="new-employment-form"]').trigger('submit')
+    expect(m.createEmployment).toHaveBeenCalledWith(1, expect.objectContaining({ monthly_gross_minor: null, terms: expect.objectContaining({ remuneration_type: 'hourly', hourly_rate_minor: 18050, remuneration_basis: 'Syntetická dohoda' }) }))
+  })
+
+  it('u nového hodinového pracovního poměru předvyplní mzdový výměr od nástupu', async () => {
+    m.person.mockResolvedValue({ ...person(1, 'Alfa Aktivní', true, false), employments: [] })
+    const wrapper = mountPage()
+    await flushPromises()
+    await wrapper.get('[data-test="edit-employee-1"]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-test="action-add-employment"]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-test="new-employment-remuneration-type"]').setValue('hourly')
+    await flushPromises()
+    expect((wrapper.get('[data-test="new-employment-remuneration-basis-kind"]').element as HTMLSelectElement).value).toBe('wage_statement')
+    expect((wrapper.get('[data-test="new-employment-remuneration-basis"]').element as HTMLInputElement).value)
+      .toContain('payroll.people.remuneration.basis_default_wage_statement')
+  })
+
+  it('serverovou chybu s details.field ukáže u pole nového vztahu', async () => {
+    m.person.mockResolvedValue({ ...person(1, 'Alfa Aktivní', true, false), employments: [] })
+    m.createEmployment.mockRejectedValueOnce({ response: { status: 422, data: { error: {
+      code: 'validation_failed', message: 'Sazba je pod minimem.', details: { field: 'hourly_rate_minor' },
+    } } } })
+    const wrapper = mountPage()
+    await flushPromises()
+    await wrapper.get('[data-test="edit-employee-1"]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-test="action-add-employment"]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-test="new-employment-remuneration-type"]').setValue('hourly')
+    await wrapper.get('[data-test="new-employment-hourly-rate"]').setValue('50')
+    await flushPromises()
+    await wrapper.get('[data-test="new-employment-form"]').trigger('submit')
+    await flushPromises()
+    const rate = wrapper.get('[data-test="new-employment-hourly-rate"]')
+    expect(rate.classes()).toContain('border-danger-500')
+    expect(rate.element.parentElement?.querySelector('[data-test="field-note-error"]')?.textContent).toContain('Sazba je pod minimem.')
+  })
+
+  it('varování z uložení nového vztahu ohlásí, že vztah vznikl', async () => {
+    m.person.mockResolvedValue({ ...person(1, 'Alfa Aktivní', true, false), employments: [] })
+    m.createEmployment.mockResolvedValueOnce({
+      employment: { id: 44, employee_id: 1, relation_type: 'employment' },
+      warnings: [{ field: 'work_place', code: 'codebook_mismatch', message: 'Místo výkonu práce neodpovídá CISOB.' }],
+    })
+    const wrapper = mountPage()
+    await flushPromises()
+    await wrapper.get('[data-test="edit-employee-1"]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-test="action-add-employment"]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-test="new-employment-form"]').trigger('submit')
+    await flushPromises()
+    expect(m.toastWarning).toHaveBeenCalledWith(expect.stringContaining('Místo výkonu práce neodpovídá CISOB.'))
+  })
+
+  it('další DPP vedle otevřené dohody nabídne použít otevřenou a odešle volbu', async () => {
+    m.person.mockResolvedValue({ ...person(1, 'Alfa Aktivní', true, false), employments: [] })
+    m.createEmployment
+      .mockRejectedValueOnce({ response: { status: 409, data: { error: {
+        code: 'open_agreement_exists', message: 'Osoba už má otevřenou dohodu.',
+        open_agreements: [{
+          employment_id: 77, employee_id: 1, employee_name: 'Alfa Aktivní', code: 'DPP-1', status: 'active',
+          start_date: '2026-06-01', end_date: '2026-06-30', reusable: true, extend_to: '2026-09-30',
+        }],
+      } } } })
+      .mockResolvedValueOnce({ employment: { id: 77, employee_id: 1, relation_type: 'dpp', code: 'DPP-1' }, warnings: [], reused: true, extended_to: '2026-09-30' })
+    const wrapper = mountPage()
+    await flushPromises()
+    await wrapper.get('[data-test="edit-employee-1"]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-test="action-add-employment"]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-test="new-employment-form"]').trigger('submit')
+    await flushPromises()
+    expect(m.toastError).not.toHaveBeenCalled()
+    expect(wrapper.get('[data-test="new-employment-open-agreement"]').text()).toContain('payroll.people.open_agreement.guidance')
+    expect(wrapper.find('[data-test="new-employment-confirm-new"]').exists()).toBe(true)
+    await wrapper.get('[data-test="new-employment-reuse-77"]').trigger('click')
+    await flushPromises()
+    expect(m.createEmployment).toHaveBeenLastCalledWith(1, expect.objectContaining({ use_open_agreement: 77 }))
+    expect(m.toastSuccess).toHaveBeenCalledWith(expect.stringContaining('payroll.people.open_agreement.reused_extended'))
+    expect(wrapper.find('[data-test="new-employment-form"]').exists()).toBe(false)
+  })
+
+  it('podklad sjednání nabízí jen u hodinového režimu nového vztahu', async () => {
+    m.person.mockResolvedValue({ ...person(1, 'Alfa Aktivní', true, false), employments: [] })
+    const wrapper = mountPage()
+    await flushPromises()
+    await wrapper.get('[data-test="edit-employee-1"]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-test="action-add-employment"]').trigger('click')
+    await flushPromises()
+    for (const mode of ['', 'monthly']) {
+      await wrapper.get('[data-test="new-employment-remuneration-type"]').setValue(mode)
+      expect(wrapper.find('[data-test="new-employment-remuneration-basis"]').exists()).toBe(false)
+      expect(wrapper.find('[data-test="new-employment-remuneration-basis-kind"]').exists()).toBe(false)
+    }
+    await wrapper.get('[data-test="new-employment-remuneration-type"]').setValue('hourly')
+    expect(wrapper.find('[data-test="new-employment-remuneration-basis"]').exists()).toBe(true)
+  })
+
   it('u zakládání osoby značí hvězdičkou jen povinná pole', async () => {
     const wrapper = mountPage()
     await flushPromises()
@@ -982,6 +1218,128 @@ describe('PeopleList toolbar and shared employee creation', () => {
    * neaktivní člověk ve výchozím filtru chybí a listovat kvůli odkazu celý
    * seznam by stálo tolik požadavků, kolik má firma stránek.
    */
+  it('proklik z kontroly běhu otevře hromadnou opravu na období běhu', async () => {
+    m.routeQuery.bulk = 'workplace'
+    m.routeQuery.period = '2026-02'
+    const wrapper = mount(PeopleList, {
+      global: {
+        stubs: {
+          ActionBar: true,
+          RouterLink: true,
+          EmploymentCard: true,
+          PayrollPersonQuickEdit: true,
+          PayrollPersonProfilePanel: true,
+          PayrollPersonStatutoryEvidencePanel: true,
+          PayrollWorkplaceBulkFillDialog: {
+            props: ['periodStart', 'employmentIds'],
+            template: '<div data-test="workplace-bulk-stub">{{ periodStart }}</div>',
+          },
+          PayrollBulkClosureDialog: { template: '<div data-test="closure-bulk-stub" />' },
+        },
+      },
+    })
+    await flushPromises()
+
+    expect(wrapper.get('[data-test="workplace-bulk-stub"]').text()).toBe('2026-02-01')
+    expect(wrapper.find('[data-test="closure-bulk-stub"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  /*
+   * „Zavřít" v dialogu Ukončit skončené dohody otevřeném z běhu vedlo na seznam
+   * zaměstnanců. S `back` se po zavření vrací tam, odkud proklik přišel.
+   */
+  it('zavření hromadného dialogu z běhu vrátí zpět do běhu', async () => {
+    m.routeQuery.bulk = 'closure'
+    m.routeQuery.period = '2026-02'
+    m.routeQuery.back = '/payroll/runs?period=2026-02'
+    const stubs = {
+      ActionBar: true,
+      RouterLink: true,
+      EmploymentCard: true,
+      PayrollPersonQuickEdit: true,
+      PayrollPersonProfilePanel: true,
+      PayrollPersonStatutoryEvidencePanel: true,
+      PayrollBulkClosureDialog: {
+        emits: ['close'],
+        template: '<button type="button" data-test="closure-bulk-close" @click="$emit(\'close\')" />',
+      },
+    }
+    const wrapper = mount(PeopleList, { global: { stubs } })
+    await flushPromises()
+    await wrapper.get('[data-test="closure-bulk-close"]').trigger('click')
+    await flushPromises()
+
+    expect(m.routerPush).toHaveBeenCalledWith('/payroll/runs?period=2026-02')
+    expect(m.routerReplace).not.toHaveBeenCalledWith(expect.objectContaining({ query: expect.anything() }))
+    wrapper.unmount()
+
+    // Cizí adresa v `back` se nepoužije; bez návratu se jen uklidí povel z adresy.
+    m.routerPush.mockClear()
+    m.routeQuery.back = 'https://example.invalid/'
+    const external = mount(PeopleList, { global: { stubs } })
+    await flushPromises()
+    await external.get('[data-test="closure-bulk-close"]').trigger('click')
+    await flushPromises()
+    expect(m.routerPush).not.toHaveBeenCalled()
+    expect(m.routerReplace).toHaveBeenCalledWith({ query: { period: '2026-02' } })
+    external.unmount()
+  })
+
+  it('proklik z kontroly běhu otevře hromadná výplatní pravidla pro osoby nálezu', async () => {
+    m.routeQuery.bulk = 'payout_defaults'
+    m.routeQuery.employees = '7,9'
+    const wrapper = mount(PeopleList, {
+      global: {
+        stubs: {
+          ActionBar: true,
+          RouterLink: true,
+          EmploymentCard: true,
+          PayrollPersonQuickEdit: true,
+          PayrollPersonProfilePanel: true,
+          PayrollPersonStatutoryEvidencePanel: true,
+          PayrollPayoutDefaultsBulkDialog: {
+            props: ['employeeIds'],
+            template: '<div data-test="payout-bulk-stub">{{ employeeIds.join(",") }}</div>',
+          },
+        },
+      },
+    })
+    await flushPromises()
+
+    expect(wrapper.get('[data-test="payout-bulk-stub"]').text()).toBe('7,9')
+    wrapper.unmount()
+  })
+
+  it('Další funkce otevřou výplatní pravidla pro všechny osoby bez pravidla', async () => {
+    const wrapper = mount(PeopleList, {
+      global: {
+        stubs: {
+          ActionBar: {
+            props: ['actions'],
+            template: '<div><button v-for="action in actions" :key="action.key" type="button" :data-test="`action-${action.key}`" @click="action.run && action.run()">{{ action.label }}</button></div>',
+          },
+          RouterLink: true,
+          EmploymentCard: true,
+          PayrollPersonQuickEdit: true,
+          PayrollPersonProfilePanel: true,
+          PayrollPersonStatutoryEvidencePanel: true,
+          PayrollPayoutDefaultsBulkDialog: {
+            props: ['employeeIds'],
+            template: '<div data-test="payout-bulk-stub">{{ employeeIds === null ? "all" : employeeIds.join(",") }}</div>',
+          },
+        },
+      },
+    })
+    await flushPromises()
+    expect(wrapper.find('[data-test="payout-bulk-stub"]').exists()).toBe(false)
+    await wrapper.get('[data-test="action-payout-defaults-bulk"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.get('[data-test="payout-bulk-stub"]').text()).toBe('all')
+    wrapper.unmount()
+  })
+
   it('opens a person missing from the page by fetching that single detail', async () => {
     m.routeQuery.person = '2'
     m.person.mockResolvedValue({
@@ -1012,9 +1370,9 @@ describe('PeopleList toolbar and shared employee creation', () => {
     expect(wrapper.get('[data-test="person-header-name"]').text()).toBe('Delta Nová')
   })
 
-  it('směruje pole do přesně vybraného vztahu, nikoli do první karty osoby', async () => {
+  it.each(['jmhz_profile', 'exit_documents'])('směruje panel %s do přesně vybraného vztahu, nikoli do první karty osoby', async panel => {
     m.routeQuery.employment = '44'
-    m.routeQuery.panel = 'jmhz_profile'
+    m.routeQuery.panel = panel
     m.routeQuery.field = 'jmhz_deep_mining_work_applies'
     const focus = vi.fn()
     m.person.mockResolvedValue({
@@ -1029,7 +1387,7 @@ describe('PeopleList toolbar and shared employee creation', () => {
       },
     }))
     await flushPromises()
-    expect(focus).toHaveBeenCalledExactlyOnceWith(44, 'jmhz_profile', 'jmhz_deep_mining_work_applies')
+    expect(focus).toHaveBeenCalledExactlyOnceWith(44, panel, 'jmhz_deep_mining_work_applies')
     expect(m.routerReplace).toHaveBeenCalledWith({ query: { employment: '44' } })
     wrapper.unmount()
   })
@@ -1053,6 +1411,7 @@ describe('PeopleList toolbar and shared employee creation', () => {
         expose({
           employmentId: computed(() => props.employment.id),
           isPrimary: computed(() => props.employment.is_primary === true),
+          holdsOpeningBalances: computed(() => props.employment.is_primary === true && props.payrollStartPeriod !== null),
           focusSection: (panel: string) => focus(props.employment.id, panel, props.payrollStartPeriod),
         })
         return () => null

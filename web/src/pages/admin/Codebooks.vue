@@ -15,7 +15,8 @@ import { useHotkey } from '@/composables/useHotkey'
 import { useToast } from '@/composables/useToast'
 import { useAutoSlug } from '@/composables/useAutoSlug'
 import { ICONS, btnFilled, btnOutline, btnOutlineSm } from '@/components/ui/buttonStyles'
-import { renderVarsymbolTemplate, hasCounterPlaceholder } from '@/utils/varsymbol'
+import NumberTemplateInput from '@/components/ui/NumberTemplateInput.vue'
+import { numberTemplateState } from '@/utils/numberTemplate'
 import { formatMonth } from '@/composables/useFormat'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import { appIsoDate } from '@/utils/date'
@@ -303,26 +304,16 @@ const revenueSlug = useAutoSlug((s) => { revenueDraft.code = s }, { maxLen: 20 }
 const revenueHasNumbering = computed(() =>
   !!(revenueDraft.invoice_number_format || revenueDraft.proforma_number_format || revenueDraft.credit_note_number_format))
 
-/**
- * Živý náhled řady kategorie. Counter úmyslně 1 — skutečnou hodnotu zná až DB
- * (a při vystavení ji dodá /api/invoices/preview-varsymbol); tady jde o kontrolu
- * tvaru šablony, ne o predikci konkrétního čísla.
- */
-function revenueNumberingPreview(field: RevenueNumberingField): string {
-  return renderVarsymbolTemplate(revenueDraft[field], new Date(), 1)
-}
+/** Chybný tvar čísla v některém poli řady kategorie; do opravy nejde uložit. */
+const revenueNumberingInvalid = computed(() =>
+  (['invoice_number_format', 'proforma_number_format', 'credit_note_number_format'] as const)
+    .some((f) => numberTemplateState(t, revenueDraft[f]).invalid))
 
 /** Pole šablony → typ dokladu, jehož počítadlo se u něj nastavuje (issue #74). */
 const REVENUE_COUNTER_TYPE: Record<RevenueNumberingField, InvoiceCounterType> = {
   invoice_number_format: 'invoice',
   proforma_number_format: 'proforma',
   credit_note_number_format: 'credit_note',
-}
-
-function revenueNumberingWarning(field: RevenueNumberingField): string {
-  const tpl = revenueDraft[field]
-  if (!tpl || hasCounterPlaceholder(tpl)) return ''
-  return t('revenue_categories.numbering_must_have_counter')
 }
 
 async function loadRevenueCategories() {
@@ -2071,15 +2062,9 @@ watch(tab, (newTab) => {
             <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div v-for="field in (['invoice_number_format', 'proforma_number_format', 'credit_note_number_format'] as const)" :key="field">
                 <label class="block text-xs font-medium text-neutral-700 mb-1">{{ t(`revenue_categories.${field}`) }}</label>
-                <input v-model="revenueDraft[field]" type="text" maxlength="60"
+                <NumberTemplateInput v-model="revenueDraft[field]" :options="{ period: revenueDraft.invoice_number_period }"
                   :placeholder="field === 'proforma_number_format' ? '9{YY}{CCCC}' : '{YY}{CCCC}'"
-                  class="w-full h-10 px-3 border border-neutral-300 rounded-md font-mono text-sm focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 outline-none" />
-                <p v-if="revenueNumberingWarning(field)" class="text-xs text-warning-600 mt-1">
-                  {{ revenueNumberingWarning(field) }}
-                </p>
-                <p v-else-if="revenueDraft[field]" class="text-xs text-neutral-500 mt-1 font-mono">
-                  {{ t('revenue_categories.numbering_preview') }}: {{ revenueNumberingPreview(field) }}
-                </p>
+                  input-class="h-10 px-3 rounded-md text-sm" />
                 <!--
                   Počítadlo řady kategorie (issue #74). Jen u ULOŽENÉ kategorie: endpoint
                   míří na její id a na šablonu, kterou zná server — u nové kategorie ani
@@ -2107,7 +2092,7 @@ watch(tab, (newTab) => {
           <button @click="revenueOpen = false" :class="btnOutline('neutral')">
             <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.x" /></svg>
             {{ t('common.cancel') }}</button>
-          <button @click="saveRevenue" :class="btnFilled('primary')">
+          <button @click="saveRevenue" :disabled="revenueNumberingInvalid" :class="btnFilled('primary')">
             <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.check" /></svg>
             {{ t('common.save') }}</button>
         </div>

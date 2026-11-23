@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import DateInput from '@/components/ui/DateInput.vue'
 import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { eshopApi, type ProductSetCard, type ProductSetDefinition } from '@/api/eshop'
@@ -499,7 +500,7 @@ onMounted(() => { void Promise.all([loadList(), loadReferences()]) })
             {{ t('stock.assemblies.warehouse') }}
             <select v-model="warehouseId" :class="FIELD"><option :value="null" disabled>{{ t('stock.assemblies.choose_warehouse') }}</option><option v-for="warehouse in warehouses" :key="warehouse.id" :value="warehouse.id">{{ warehouse.code }} - {{ warehouse.name }}</option></select>
           </label>
-          <label class="text-sm font-medium text-neutral-700">{{ t('stock.assemblies.doc_date') }}<input v-model="docDate" :class="FIELD" type="date"></label>
+          <label class="text-sm font-medium text-neutral-700">{{ t('stock.assemblies.doc_date') }}<DateInput v-model="docDate" :class="FIELD" /></label>
           <label class="text-sm font-medium text-neutral-700">{{ t('stock.assemblies.quantity') }}<input v-model="quantity" :class="FIELD" inputmode="decimal"></label>
         </div>
 
@@ -561,7 +562,7 @@ onMounted(() => { void Promise.all([loadList(), loadReferences()]) })
             </label>
             <label class="text-sm font-medium text-neutral-700">
               {{ t('stock.tracking.expires') }}
-              <input v-model="productTrackingRows[0].expires_on" :class="FIELD" type="date">
+              <DateInput v-model="productTrackingRows[0].expires_on" :class="FIELD" />
             </label>
             <label class="text-sm font-medium text-neutral-700">
               {{ t('stock.assemblies.location') }}

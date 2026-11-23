@@ -18,6 +18,21 @@ final class ErrorCatalog
 {
     /** @var array<string,string> CZ → EN */
     private const MAP = [
+        'Chybí oprávnění pro párování banky nebo změnu úhrady faktury.' => 'You do not have permission to match bank transactions or change invoice payments.',
+        'Pro rozpad souhrnné platby zadejte pouze payout_allocations se 2 až 100 doklady.' => 'For a payout allocation, supply only payout_allocations with 2 to 100 documents.',
+        'Každý doklad uveďte právě jednou a zadejte kladnou částku v celých haléřích.' => 'Specify each document once and enter a positive amount in whole hellers.',
+        'Pohyb už má jiný rozpad úhrady. Nejprve zrušte párování.' => 'The transaction already has a different allocation. Unmatch it first.',
+        'Souhrnná úhrada vyžaduje příchozí pohyb v CZK z bankovního výpisu.' => 'A payout allocation requires an incoming CZK bank statement transaction.',
+        'Součet rozpadu musí přesně odpovídat bankovnímu pohybu.' => 'The allocation total must exactly match the bank transaction.',
+        'Bankovní pohyb již není volný pro souhrnnou úhradu.' => 'The bank transaction is no longer available for payout allocation.',
+        'Všechny doklady souhrnné úhrady musí být v CZK.' => 'All documents in the payout allocation must be in CZK.',
+        'Částka souhrnné úhrady musí odpovídat zbývající částce dokladu.' => 'The payout allocation must equal the remaining amount of the document.',
+        'Vyberte 2 až 100 různých bankovních pohybů a zkontrolujte náhled.' => 'Select 2 to 100 different bank transactions and review the preview.',
+        'Výběr nebo zůstatek faktury se změnil. Načtěte nový náhled.' => 'The selection or outstanding balance has changed. Reload the preview.',
+        'Pohyby se nepodařilo spárovat.' => 'The bank transactions could not be matched.',
+        'Hromadné párování vyžaduje fakturu s kladným zůstatkem k úhradě.' => 'Batch matching requires an invoice with a positive outstanding balance.',
+        'Některý pohyb už není volný nebo nepatří k bankovnímu výpisu této firmy.' => 'One or more transactions are no longer available or do not belong to a bank statement of this company.',
+        'Vybrané pohyby musí mít směr úhrady faktury.' => 'The selected transactions must match the direction of the invoice payment.',
         'Doplňte úplnou přílohu účetní závěrky 504 před sestavením podání.' => 'Complete the full 504 financial statement notes before building the filing.',
         'Daňový můstek vyžaduje úplné a vzájemně shodné posouzení zdrojových řádků a jejich řádků přiznání.' => 'The tax bridge requires complete, mutually consistent source-line assessments and their tax-return lines.',
         'Veřejně prospěšný poplatník nemůže uplatnit odpočet podle § 20 odst. 8.' => 'A public-benefit taxpayer cannot claim the deduction under section 20(8).',
@@ -188,6 +203,8 @@ final class ErrorCatalog
         'Podklady registru se od náhledu změnily. Vytvořte nový náhled.' => 'The registry inputs changed after the preview. Create a new preview.',
         'Podíl vyžaduje nezáporný celočíselný čitatel a kladný jmenovatel.' => 'A fraction requires a nonnegative integer numerator and a positive denominator.',
         'Pro potvrzení právních podkladů nemáte oprávnění.' => 'You do not have permission to confirm legal evidence.',
+        'Pro tuto akci nemáte oprávnění.' => 'You do not have permission for this action.',
+        'Pro tuto akci nemáte oprávnění k ceníku.' => 'You do not have price list permission for this action.',
         'Profil mezitím změnil jiný uživatel. Načtěte aktuální stav.' => 'Another user changed the profile. Reload its current state.',
         'Registr SVJ vyžaduje účetní rámec podle vyhlášky 504 k datu účinnosti.' => 'The property registry requires the Decree 504 accounting framework on the effective date.',
         'Registr mezitím změnil jiný uživatel. Načtěte aktuální stav.' => 'Another user changed the registry. Reload its current state.',
@@ -493,6 +510,9 @@ final class ErrorCatalog
         'Neplatná role.' => 'Invalid role.',
         'Neplatné datum.' => 'Invalid date.',
         'Neplatné přihlašovací údaje.' => 'Invalid credentials.',
+        'Příliš mnoho neúspěšných pokusů. Zkuste to znovu za několik minut.' => 'Too many failed attempts. Try again in a few minutes.',
+        'Instalace vyžaduje dvoufázové ověření. Nastavte si ho ve webu a pak se přihlaste znovu.' => 'This installation requires two-factor authentication. Set it up in the web app and then sign in again.',
+        'Účet se ověřuje způsobem, který přihlášení heslem přes API nepodporuje. Vytvořte si API token ve webu.' => 'This account uses a verification method that password sign-in through the API does not support. Create an API token in the web app.',
         'Neplatný email.' => 'Invalid email.',
         'Neplatný kód měny.' => 'Invalid currency code.',
         'Neplatný nebo chybějící CSRF token.' => 'Invalid or missing CSRF token.',
@@ -600,6 +620,8 @@ final class ErrorCatalog
         'Měnu nelze smazat — je výchozí měnou firmy.' => 'The currency cannot be deleted because it is the company default currency.',
         'Měnu nelze smazat — je na ni napojené bankovní spojení.' => 'The currency cannot be deleted because a bank connection is linked to it.',
         'Měnu nelze smazat — je použita v jiných záznamech.' => 'The currency cannot be deleted because other records use it.',
+        'Šifrované osobní údaje nejde přečíst, protože tato instalace nemá šifrovací klíč, kterým byly uložené. Nejde o chybu v datech, ale o nastavení instalace: správce instalace musí do její konfigurace vrátit původní šifrovací klíč. Do té doby nejde připravit podání ani zobrazit údaje, které šifrované osobní údaje potřebují.' => 'Encrypted personal data cannot be read because this installation does not have the encryption key it was stored with. This is not a data error but an installation setting: the installation administrator must restore the original encryption key in its configuration. Until then, filings and data that need the encrypted personal data cannot be prepared or shown.',
+        'Databáze odmítla zápis, protože databázový účet, pod kterým běží její triggery, k ní nemá potřebná práva nebo na serveru neexistuje. Typicky se to stane po obnově databáze z jiného serveru. Nejde o chybu v datech, ale o nastavení instalace: správce instalace spustí php api/bin/migrate.php --repair-definers (náhled) a potom totéž s --apply, nebo účtu přidělí práva k této databázi.' => 'The database refused the write because the database account its triggers run under has no privileges on it or does not exist on the server. This typically happens after restoring the database from another server. This is not a data error but an installation setting: the installation administrator runs php api/bin/migrate.php --repair-definers (preview) and then the same with --apply, or grants the account privileges on this database.',
     ];
 
     /**

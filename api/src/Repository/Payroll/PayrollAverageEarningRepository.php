@@ -8,6 +8,7 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Payroll\Absence\AverageEarningResult;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
 use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetVersion;
+use MyInvoice\Service\Payroll\Time\PayrollDuration;
 use PDO;
 
 final class PayrollAverageEarningRepository
@@ -97,13 +98,21 @@ final class PayrollAverageEarningRepository
         string $decisiveTo,
         int $grossMinor,
         int $allocatedMinor,
-        int $workedMinutes,
+        ?int $workedMinutes,
         int $workedDays,
         ?string $rationale,
         AverageEarningResult $result,
         PayrollRulesetVersion $ruleset,
         ?int $userId,
+        ?int $workedDurationUnits = null,
     ): array {
+        if ($workedDurationUnits !== null) {
+            if (PayrollDuration::exactMinutes($workedDurationUnits) !== $workedMinutes) {
+                throw new \InvalidArgumentException('Přesná odpracovaná doba neodpovídá uvedeným minutám.');
+            }
+        } elseif ($workedMinutes === null || $workedMinutes < 0) {
+            throw new \InvalidArgumentException('Odpracovaná doba musí být nezáporná a doložená.');
+        }
         $pdo = $this->db->pdo();
         $ownsTransaction = !$pdo->inTransaction();
         if ($ownsTransaction) {
@@ -121,16 +130,18 @@ final class PayrollAverageEarningRepository
                 'rationale' => $rationale,
                 'worked_days' => $workedDays,
                 'worked_minutes' => $workedMinutes,
+                ...($workedDurationUnits === null ? [] : ['worked_duration_units' => $workedDurationUnits]),
+                ...(isset($result->trace['hourly_minimum_proof']) ? ['hourly_minimum_proof' => $result->trace['hourly_minimum_proof']] : []),
             ]), true);
             $insert = $pdo->prepare(
                 'INSERT INTO payroll_average_earning_snapshots
                     (supplier_id, employment_id, applicable_year, applicable_quarter,
                      revision_no, source_kind, decisive_from, decisive_to,
                      gross_earnings_minor, longer_period_allocated_minor,
-                     worked_minutes, worked_days, average_hourly_minor, rationale,
+                     worked_minutes, worked_duration_units, worked_days, average_hourly_minor, rationale,
                      support_status, status, ruleset_id, ruleset_hash,
                      input_hash, input_trace, created_by)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
             );
             $insert->execute([
                 $supplierId,
@@ -144,6 +155,7 @@ final class PayrollAverageEarningRepository
                 $grossMinor,
                 $allocatedMinor,
                 $workedMinutes,
+                $workedDurationUnits,
                 $workedDays,
                 $result->averageHourlyMinor,
                 $rationale,
@@ -312,10 +324,17 @@ final class PayrollAverageEarningRepository
         foreach ([
             'id', 'supplier_id', 'employment_id', 'applicable_year',
             'applicable_quarter', 'revision_no', 'gross_earnings_minor',
-            'longer_period_allocated_minor', 'worked_minutes', 'worked_days',
+            'longer_period_allocated_minor', 'worked_days',
             'average_hourly_minor', 'row_version',
         ] as $key) {
             $row[$key] = (int) $row[$key];
+        }
+        $row['worked_minutes'] = $row['worked_minutes'] === null ? null : (int) $row['worked_minutes'];
+        if ($row['worked_duration_units'] === null) {
+            // Historický snímek i jeho veřejný tvar se novým sloupcem nemění.
+            unset($row['worked_duration_units']);
+        } else {
+            $row['worked_duration_units'] = (int) $row['worked_duration_units'];
         }
         $row['input_trace'] = json_decode((string) $row['input_trace'], true, flags: JSON_THROW_ON_ERROR);
         unset($row['input_hash']);

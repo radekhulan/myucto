@@ -80,7 +80,7 @@ final class InstanceAdminPurgeTest extends TestCase
             $action = new UserAdminAction($db, new ActivityLogger($db), new IpMatcher($config), new PasswordHasher($config),
                 new SessionManager($db, $config, new DatabaseSecurityClock()),
                 new LicenseCapacityGate($db, $license, new SeatPolicy($db), new PayrollUsagePolicy($db)),
-                new PasswordSetupLinkIssuer(), $this->createStub(Mailer::class), $config);
+                new PasswordSetupLinkIssuer(), $this->createStub(Mailer::class), $config, $this->createStub(\MyInvoice\Service\Auth\LoginPolicyService::class), new \MyInvoice\Service\Auth\Oidc\OidcProviderRegistry($config), $this->createStub(\MyInvoice\Service\Auth\Oidc\OidcInviteMailer::class));
             $request = (new ServerRequestFactory())->createServerRequest('DELETE', '/')
                 ->withAttribute(AuthMiddleware::ATTR_METHOD, 'session')
                 ->withAttribute(AuthMiddleware::ATTR_USER, ['id' => $actor, 'is_superadmin' => true])

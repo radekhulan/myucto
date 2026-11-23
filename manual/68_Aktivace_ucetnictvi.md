@@ -1,7 +1,7 @@
 # 68. Aktivace podvojného účetnictví
 
 > Návod, jak převést firmu z daňové evidence na podvojné účetnictví: zvolit datum zahájení, zadat
-> otevírací rozvahu, zkontrolovat historii nanečisto a doúčtovat doklady. Pro administrátora s oprávněním
+> otevírací rozvahu, zkontrolovat historii nanečisto a doúčtovat doklady. Pro uživatele s oprávněním
 > ke správě účetních období.
 
 ## 68.1 Kdy to potřebujete
@@ -18,7 +18,7 @@ běh a dávkové doúčtování. Až po úspěšném dokončení se firma přepn
 
 ## 68.2 Než začnete
 
-1. **Oprávnění.** Položku menu `Nástroje → Aktivace a doúčtování` a všechny akce vidí jen administrátor s oprávněním ke správě účetních období (zápis). Stav čte uživatel s oprávněním k firemnímu nastavení.
+1. **Oprávnění.** Položku menu `Nástroje → Aktivace a doúčtování` a všechny akce vyžadují oprávnění ke správě účetních období (zápis), které může mít i delegovaná interní role. Vynutit dokončení přes zbývající chyby smí jen správce firmy s tímto oprávněním. Stav čte uživatel s oprávněním k firemnímu nastavení.
 2. **Schválený přechodový postup.** Datum zahájení volte podle něj (viz [§ 68.3](#683-krok-za-krokem-datum-zahajeni)).
 3. **Podklady k počátečním stavům.** Připravte zůstatky ke dni před zahájením: ostatní aktiva, pasiva, oprávky, kapitál, daně. Předvyplnění je jen návrh.
 4. **Účetní období a účtový rozvrh.** Období zahájení musí být otevřené. Rozvrh a systémové předkontace se založí při zahájení sami.
@@ -49,7 +49,7 @@ založí účtový rozvrh a systémové předkontace.
 ## 68.4 Krok za krokem: otevírací rozvaha
 
 1. V kroku **Otevírací rozvaha** klikněte na **Předvyplnit z daňové evidence**. Aplikace sestaví návrh k dni před zahájením (viz [§ 68.9.1](#6891-predvyplneni-z-prechodoveho-mustku)).
-2. Zkontrolujte řádky. Další přidáte tlačítkem **Přidat řádek**. Každý řádek má **Účet**, **Stranu** (MD/Dal), kladnou **Částku** a **Poznámku**. Účet 701 nezadávejte: protiúčet doplní systém sám.
+2. Zkontrolujte řádky. Další přidáte tlačítkem **Přidat řádek**. Každý řádek má **Účet**, **Stranu** (MD/Dal), kladnou **Částku** a **Poznámku**. Počáteční rozvažný účet nezadávejte: protiúčet doplní systém sám, 701 v rámci 500 nebo 961 v rámci 504.
 3. Doplňte ostatní aktiva, pasiva, oprávky, kapitál, daně a další zůstatky podle průkazných podkladů.
 4. Sledujte stav bilance: **✓ vyrovnáno**, nebo **Σ MD ≠ Σ D - opravte rozvahu**.
 5. Klikněte na **Uložit a pokračovat**.
@@ -68,7 +68,16 @@ vedené v této aplikaci, takže u firmy přecházející z jiného programu nen
 
 1. V kroku **Kontrola** klikněte na **Spustit kontrolu (nic se nezapíše)**.
 2. Počkejte na dokončení úlohy na pozadí. Postup vidíte ve fázi, počtech zpracovaných položek a logu.
-3. Přečtěte si výsledek. Při chybách se zobrazí **Kontrola našla N chyb. Opravte je a spusťte ji znovu.** a podrobnosti k problematickým dokladům (doklad, datum, výsledek, důvod).
+3. Přečtěte si výsledek. Při chybách se zobrazí **Kontrola našla N chyb. Opravte je a spusťte ji znovu.** Report
+   položky rozdělí do tří seznamů:
+   - **K opravě** jsou doklady, které nejde zaúčtovat. U každého je odkaz na doklad, datum a konkrétní příčina.
+     Patří sem i zápočty proti účtu, které se nepodařilo doúčtovat.
+   - **Nezaúčtované bankovní pohyby** jsou pohyby, které doúčtování přeskočilo, s odkazem do detailu výpisu
+     a důvodem (například pohyb nespárovaný s dokladem nebo číslo účtu výpisu, které patří více firmám).
+     Aktivaci neblokují.
+   - **Přeskočené doklady** jsou doklady v uzamčeném nebo uzavřeném období a doklady, které nemají co účtovat.
+     U každého je uvedeno, zda **Zápis zůstal beze změny** (doklad už platný zápis má), nebo **Doklad zůstal
+     nezaúčtovaný**. Aktivaci neblokují.
 4. Opravte chyby u dokladů, účtů, kurzů, předkontací nebo počátečních stavů a klikněte na **Spustit kontrolu znovu**.
 5. Až kontrola skončí bez chyb, pokračujte.
 
@@ -77,7 +86,7 @@ pokladnu, banku a pokrytí a rovnost deníku. Ověřuje i předpoklady, na kter�
 období zahájení je otevřené a že otevření nepatří uzávěrce předchozího roku.
 
 **Jak poznáte, že je hotovo:** Zobrazí se **Kontrola nenašla žádné chyby**, **Deník je vyrovnaný** a
-**Počet postovatelných dokladů odpovídá zpracovaným dokladům**.
+**Všechny doklady bez zápisu prošly doúčtováním**.
 
 > [!TIP]
 > Jakákoli změna data nebo počátečních stavů změní kontrolní otisk. Před ostrým během je pak nutné kontrolu
@@ -105,6 +114,23 @@ Aktivace a doúčtování z menu odebrat.
 1. Otevřete stránku a v protokolu najděte chybnou fázi a doklady.
 2. Opravte konkrétní doklad, účet, kurz, předkontaci nebo počáteční stav.
 3. Spusťte znovu kontrolu a poté ostrý běh. Tlačítko **Opravit a opakovat** používá tutéž idempotentní exekuci, nejde o jiný silový režim.
+
+**Vynucené dokončení přes zbývající chyby:** Pokud některé položky ze seznamu **K opravě** nyní opravit nejde
+a aktivace je potřeba k datu zahájení, může ji správce firmy dokončit vynuceně.
+
+1. Po neúspěšném doúčtování klikněte v protokolu na **Vynutit dokončení**. Po kontrole nanečisto, která našla
+   chyby, je k dispozici **Vynutit doúčtování**: spustí ostré doúčtování a aktivaci dokončí i přes chyby položek.
+2. Dialog ukáže počet chyb a seznam toho, co zůstane nedoúčtované.
+3. Vyplňte **Důvod vynucení**, zaškrtněte potvrzení a akci potvrďte.
+
+Podvojné účetnictví se zapne a protokol ukáže, kdo a kdy aktivaci vynutil a s jakým důvodem. Vynucení i důvod
+se zapíšou do auditního logu. Položky ze seznamu **K opravě** opravte a doúčtujte tlačítkem **Doúčtovat
+chybějící zápisy**.
+
+> [!WARNING]
+> Vynutit nejde nevyrovnaný deník, nevyrovnanou otevírací rozvahu ani běh, který skončil dřív, než prošel
+> všechny zdroje (například neotevřené období zahájení). Vynucení je také vázané na otevírací rozvahu a datum
+> zahájení, se kterými běh proběhl. Po jejich změně spusťte kontrolu znovu.
 
 **Chybějící zápisy po dokončené aktivaci:** klikněte na **Doúčtovat chybějící zápisy** a potvrďte. Zaúčtují se
 jen jednoznačné položky v otevřených obdobích, existující zápisy se nezdvojí.
@@ -136,7 +162,9 @@ opakování nevzniknou znovu, protože každá má svůj idempotentní zdrojový
 | Zdrojová data nebo období se od náhledu změnily | Doklad, zámek nebo období se mezitím upravily | Spusťte kontrolu znovu. |
 | Worker se nespustil | Služba na pozadí nenaběhla | Zkontrolujte serverový log. |
 | Deník není vyrovnaný | Některá fáze skončila chybou | Najděte chybnou fázi v protokolu. Režim se nepřepnul. |
-| Kontrola úplnosti hlásí chybějící doklady | Některé postovatelné doklady nebyly zpracovány | Aktivaci nelze dokončit, opravte doklady a spusťte kontrolu znovu. |
+| Kontrola úplnosti hlásí chybějící doklady | Některé doklady bez zápisu doúčtování nezpracovalo | Aktivaci nelze dokončit, opravte doklady a spusťte kontrolu znovu. |
+| Přeskočené doklady s důvodem „Datum je v uzamčeném období“ | Období je zamčené podaným přiznáním nebo ručním zámkem | Aktivaci to neblokuje. Doklad se zápisem si zápis ponechá; nezaúčtovaný doklad zaúčtujte po posunutí zámku. |
+| Chyba v seznamu **K opravě** nejde nyní opravit | Doklad je potřeba opravit později | Správce firmy může aktivaci vynutit, viz *Vynucené dokončení přes zbývající chyby*. |
 
 ## 68.9 Podrobnosti a pravidla
 
@@ -177,7 +205,8 @@ na analytiky.
 ### 68.9.2 Zaúčtování počátečních stavů
 
 Ostrý běh zajistí otevřené období pro datum zahájení a vytvoří jediný zápis se zdrojem otevření. Pro řádek MD
-vytvoří `účet MD / 701 Dal`, pro řádek Dal `701 MD / účet Dal`. Číslo dostane z řady otevíracích zápisů.
+vytvoří `účet MD / počáteční účet Dal`, pro řádek Dal obráceně. Počáteční účet
+rozvažný je **701** v rámci 500 a **961** v rámci 504. Číslo dostane z řady otevíracích zápisů.
 
 Pokud předchozí den patří uzavíranému, uzavřenému nebo schválenému období, otevření už vlastní uzávěrka
 předchozího období a aktivační zápis se odmítne. Opakovaný běh používá stejný zdrojový klíč, takže zápis
@@ -204,8 +233,11 @@ podvojné účetnictví je aktivní, běh skončil chybou (po opravě lze spusti
 
 Kontrola projde fáze: otevírací rozvaha, vydané a přijaté doklady, pokladna, banka, kontrola pokrytí a rovnosti
 deníku. Report uvádí očekávané, zpracované, přeskočené a chybné položky, důvody přeskočení a konkrétní
-problémy dokladů. U dokumentů se navíc porovná počet očekávaných kandidátů s počtem skutečně obsloužených;
-chybějící i neočekávaný řádek je chyba úplnosti.
+problémy dokladů. U faktur se navíc porovná počet faktur bez platného zápisu s počtem, který z nich běh skutečně
+zpracoval (zaúčtoval, přeskočil nebo nahlásil jako chybu). Chybějící i neočekávaný doklad je chyba úplnosti.
+Faktury, které už zápis mají, průvodce jen přepisuje a do porovnání nevstupují; řádek kontroly je uvádí zvlášť.
+Kontrola nanečisto naráží na zámek k datu stejně jako ostrý běh, takže doklady v zamčeném období ukáže jako
+přeskočené už předem.
 
 Úspěšná kontrola nesmí mít žádné chybné položky, musí mít úplné pokrytí a vyrovnaný deník.
 
@@ -236,6 +268,10 @@ chyby, job skončí jako selhaný a režim se neaktivuje. Teprve úspěšný ost
 přepne firmu do podvojného účetnictví, uloží dokončený stav, zapíše historii účetního režimu a auditní událost
 a označí job jako dokončený.
 
+Vynucené dokončení prochází touž závěrečnou transakcí. Před ní se znovu sečte deník; nevyrovnaný deník
+vynucení odmítne. Report jobu dostane záznam o vynucení (kdo, kdy, důvod a počet zbývajících chyb) a historie
+úloh ho označí jako **vynuceně** dokončený.
+
 ### 68.9.8 Historie úloh, zámky a souběh
 
 Historie je stránkovaná a uchovává druh běhu, stav, fázi, parametry, report, log, poslední chybu a časy. Aktivní
@@ -251,7 +287,8 @@ zápis odmítne. Stejně se respektuje otevřenost období a aktivita účtů.
 ### 68.9.9 Oprávnění a chybové kódy
 
 Stav může číst uživatel s oprávněním k firemnímu nastavení. Zahájení, počáteční stavy, úlohy a zrušení vyžadují
-administrátorské oprávnění ke správě účetních období (zápis). Vše je omezené na aktuální firmu a auditované.
+oprávnění ke správě účetních období (zápis). Vynutit dokončení smí jen správce firmy,
+delegovaná role se správou účetních období ne. Vše je omezené na aktuální firmu a auditované.
 
 Chyby v protokolu a v logu mají tyto kódy:
 
@@ -267,6 +304,11 @@ Chyby v protokolu a v logu mají tyto kódy:
 | `job_already_running` | Počkejte na aktivní úlohu nebo ji řízeně zrušte |
 | `remaining/period/lock` | Zdrojová data či období se od náhledu změnily |
 | `worker_start_failed` | Worker se nespustil; zkontrolujte serverový log |
+| `force_confirmation_required` | Vynucení nebylo výslovně potvrzeno |
+| `force_reason_required` | U vynucení chybí důvod |
+| `activation_force_fatal` | Běh skončil dřív, než prošel všechny zdroje; vynutit ho nejde |
+| `activation_force_wrong_state` | Vynutit lze jen poslední neúspěšné doúčtování |
+| `journal_unbalanced` | Deník není vyrovnaný; aktivaci nejde dokončit ani vynutit |
 
 ## 68.10 Související kapitoly
 

@@ -16,7 +16,7 @@ final class SessionCookieFactory
 
     public function create(string $token, int $expiresAt): string
     {
-        $name = (string) $this->config->get('session.cookie_name', '__Host-myinvoice_session');
+        $name = $this->name();
         $sameSite = (string) $this->config->get('session.cookie_samesite', 'Lax');
         $secure = (bool) $this->config->get('session.cookie_secure', true);
         if ($name === '' || preg_match('/^[A-Za-z0-9_-]+$/D', $name) !== 1) {
@@ -35,5 +35,10 @@ final class SessionCookieFactory
             $sameSite,
             $secure ? '; Secure' : '',
         );
+    }
+
+    public function name(): string
+    {
+        return (string) $this->config->get('session.cookie_name', '__Host-myinvoice_session');
     }
 }

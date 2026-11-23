@@ -40,6 +40,53 @@
 3. Má-li účet zapnuté silné vícefaktorové ověření, potvrďte passkey nebo zadejte
    kód z autentikátoru (**Ověřovací kód (2FA)**).
 
+### 8.3.3 Účtem organizace (Microsoft Entra ID)
+
+Tlačítko **Přihlásit se přes Microsoft Entra ID** se zobrazí, jen když správce instalace
+přihlášení přes Microsoft Entra ID zapnul ([§ 101.6.1](101_Bezpecnost.md#10161-prihlaseni-pres-microsoft-entra-id-spravce)).
+
+1. Poprvé otevřete odkaz z pozvánky, kterou vám poslal správce e-mailem.
+   Přihlásíte se u Microsoftu a váš účet v MyÚčto se tím s účtem organizace
+   propojí. Odkaz platí 3 dny a jde použít jen jednou. Přihlásit se musíte účtem se stejnou e-mailovou adresou, na kterou pozvánka přišla.
+2. Příště klikněte na přihlašovací obrazovce na **Přihlásit se přes Microsoft Entra ID**.
+3. Přihlaste se u Microsoftu, včetně ověření, které vaše organizace vyžaduje.
+   Výchozně heslo ani kód z autentikátoru v MyÚčto nezadáváte. Pokud správce
+   vyžaduje také místní MFA (`skip_mfa = false`), po návratu potvrdíte passkey
+   nebo zadáte kód stejně jako při přihlášení heslem.
+
+Propojit účet můžete i sami: **Profil → Propojené účty → Propojit s Microsoft Entra ID**.
+Před propojením potvrdíte svou totožnost heslem nebo druhým faktorem.
+
+Propojení účtu i ověření citlivé operace dokončete před zamčením aplikace.
+Po ručním nebo automatickém zamčení je potřeba aplikaci odemknout a ověření
+zahájit znovu.
+
+Vyžaduje-li instalace přihlášení přes Microsoft, přihlašovací obrazovka nabízí
+jen tlačítko Microsoft Entra ID. Heslo se v aplikaci pak nepoužívá vůbec: nezadáváte
+ho při přihlášení, nemění se a citlivé operace (například podání EPO, práci
+s certifikátem nebo vytvoření API tokenu) potvrdíte novým přihlášením u Microsoftu
+v okně, které se otevře nad rozdělanou prací.
+
+### 8.3.4 Účtem Google, Apple nebo Seznam
+
+Tlačítka **Přihlásit se přes Google**, **Přihlásit se přes Apple** a
+**Přihlásit se přes Seznam** se zobrazí jen u poskytovatelů, které správce
+instalace zapnul.
+
+1. Poprvé si účet propojte: přihlaste se heslem a otevřete **Profil →
+   Propojené účty → Propojit s …**, nebo otevřete odkaz z pozvánky od správce.
+2. Příště klikněte na přihlašovací obrazovce na tlačítko poskytovatele a
+   přihlaste se u něj.
+3. Po návratu aplikace ukáže **Přihlašujete se přes …**. Máte-li zapnuté
+   vícefaktorové ověření, potvrďte passkey nebo zadejte kód z autentikátoru,
+   případně kód z e-mailu. E-mail ani heslo už nezadáváte.
+
+Přihlášení přes Google, Apple nebo Seznam nahrazuje jen heslo, druhý faktor dál ověřuje
+MyÚčto. Proto jím nejde potvrzovat citlivé operace a firma ho nemůže vyžadovat
+místo hesla. Tlačítkem **Přihlásit se jinak** se vrátíte k běžnému formuláři.
+Vyprší-li přihlášení (po zhruba 10 minutách nebo v jiném prohlížeči), začněte
+znovu tlačítkem poskytovatele.
+
 **Jak poznáte, že je hotovo:** otevře se [Přehled (dashboard)](10_Prehled.md).
 
 | Pole | Význam |
@@ -58,6 +105,9 @@
 3. V e-mailu otevřete odkaz (platí 1 hodinu) a nastavte nové heslo.
 
 **Jak poznáte, že je hotovo:** přihlásíte se novým heslem.
+
+Úspěšná obnova i změna hesla v profilu zneplatní všechny dosud nepoužité
+odkazy pro obnovu nebo prvotní nastavení hesla. Starší e-mail už nelze použít.
 
 Nedorazil-li e-mail, zkontrolujte spam a požádejte správce, ať ověří SMTP
 (`cfg.php` → `smtp.*`). V krajním případě správce nastaví heslo z CLI, viz
@@ -186,8 +236,8 @@ Zavřete-li jen okno bez odhlášení, session má absolutní platnost nejvýše
 <!-- cols: 34 30 36 -->
 | Co vidíte | Proč | Co udělat |
 |---|---|---|
-| Objevila se CAPTCHA | 5 neúspěšných pokusů během 5 minut z jedné IP | Vyřešte ji a pokračujte. Hláška „Vyřešte prosím ověření CAPTCHA.“ znamená, že jste ji vynechali |
-| „Příliš mnoho pokusů. Zkuste to později.“ | IP je zablokovaná (10 selhání za 15 minut = blok 15 minut) | Počkejte 15 minut, nebo požádejte správce o reset hesla z CLI: `php api/bin/set-password.php tvuj@email.cz` |
+| Objevila se CAPTCHA | Dosažen práh neúspěšných pokusů pro účet a síť, případně ji vyžádal Turnstile | Vyřešte ji a pokračujte. Hláška „Vyřešte prosím ověření CAPTCHA.“ znamená, že jste ji vynechali |
+| „Příliš mnoho pokusů. Zkuste to později.“ | Překročen práh pro účet a síť (výchozí 10 selhání za 15 minut = blok 15 minut) | Počkejte podle hlášky; při opakování požádejte správce o prověření blokace. Samotná změna hesla čítač nemaže |
 | E-mail s obnovou hesla nedorazil | Spam nebo nenastavené SMTP | Zkontrolujte spam, správce ověří `smtp.*` v `cfg.php`, v krajním případě nastaví heslo z CLI |
 | „Tento prohlížeč přístupové klíče nepodporuje.“ | Prohlížeč nebo zařízení passkey neumí | Použijte e-mail a heslo, kód z autentikátoru, nebo požádejte správce o obnovu MFA |
 | „Ověření přístupovým klíčem bylo zrušeno.“ | Zrušili jste systémový dialog | Zkuste to znovu, nebo použijte **Použít kód z autentikátoru** |
@@ -200,14 +250,17 @@ Zavřete-li jen okno bez odhlášení, session má absolutní platnost nejvýše
 
 ### 8.10.1 Brute-force ochrana
 
-Po **5 neúspěšných pokusech** během 5 minut z jedné IP se objeví **CAPTCHA**
-(Cloudflare Turnstile). Po **10 selháních** během 15 minut se IP zablokuje na
-15 minut. Po **30 selháních za hodinu** je lockout 24 hodin a uživateli na
-e-mail přijde upozornění.
+Výchozí prahy jsou **5 neúspěšných pokusů za 5 minut** pro CAPTCHA,
+**10 selhání za 15 minut** pro blokaci na 15 minut a **30 selhání za hodinu**
+pro blokaci na 24 hodin. Čítač se váže na kombinaci účtu a sítě
+(/24 u IPv4, /64 u IPv6), ne na samotnou IP. Turnstile může ověření
+vyžádat i nezávisle na prahu. Při blokaci vznikne záznam v auditu,
+přihlašovací brána sama e-mailové upozornění neposílá.
 
 Zapomenete-li heslo a omylem se 5× spletete, CAPTCHA se objeví: vyřešte ji a
-pokračujte. Pokud se zablokujete, počkejte 15 minut nebo požádejte správce,
-aby heslo resetoval z CLI: `php api/bin/set-password.php tvuj@email.cz`.
+pokračujte. Pokud se zablokujete, počkejte podle hlášky nebo požádejte
+správce o prověření aktivního čítače. Obnova zapomenutého hesla a odblokování
+jsou samostatné úkony.
 
 ### 8.10.2 Vícefaktorové ověření
 

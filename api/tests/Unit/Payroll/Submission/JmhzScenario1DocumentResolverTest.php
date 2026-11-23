@@ -142,6 +142,60 @@ final class JmhzScenario1DocumentResolverTest extends TestCase
     }
 
     /**
+     * Jediný vykázaný vztah osoby je ve formuláři primární (10495), i když ho
+     * evidence vede jako vedlejší — viz JmhzPrimaryEmployment.
+     */
+    public function testSoleSecondaryEmploymentIsReportedAsPrimary(): void
+    {
+        $preparation = $this->preparation();
+        $payload = $preparation->payload;
+        $payload['schema_reference'] = JmhzPreparationSnapshot::CURRENT_SCHEMA_REFERENCE;
+        $payload['builder_version'] = JmhzPreparationSnapshotBuilder::BUILDER_VERSION;
+        unset($payload['scope']['scenario_key']);
+        $payload['scope']['scenario_set'] = ['scenario_1'];
+        $payload['ordinary_evidence'] = [[
+            'scope' => ['employee_id' => 11, 'employment_id' => 101],
+            'attribute_values' => ['10116' => false, '10546' => false],
+        ]];
+        $payload['source_versions']['ordinary_evidence'] = [[
+            'employment_id' => 101,
+            'id' => 601,
+            'source_manifest_sha256' => str_repeat('4', 64),
+            'snapshot_fingerprint' => str_repeat('5', 64),
+        ]];
+        self::assertCount(1, $payload['people'][0]['employments']);
+        $payload['people'][0]['employments'][0]['employment']['is_primary'] = false;
+        $preparation = new JmhzVerifiedPreparationSnapshot(
+            $preparation->id,
+            $preparation->supplierId,
+            $preparation->environment,
+            $preparation->runId,
+            $preparation->sourceRevisionId,
+            $preparation->revisionNo,
+            $preparation->periodStart,
+            $preparation->periodEnd,
+            $preparation->scenarioKey,
+            JmhzPreparationSnapshotBuilder::BUILDER_VERSION,
+            $preparation->sourceManifestSha256,
+            $preparation->readinessSha256,
+            $preparation->snapshotFingerprint,
+            $preparation->manifest,
+            $preparation->readiness,
+            $payload,
+        );
+
+        $resolution = (new JmhzScenario1DocumentResolver())->resolve(
+            $preparation,
+            $this->pvpoj(),
+        );
+
+        self::assertSame([], $resolution->blockers);
+        self::assertTrue(
+            $resolution->candidate?->payload['people'][0]['employments'][0]['primary'],
+        );
+    }
+
+    /**
      * ČSSZ (potvrzeno v úřední diskuzi k JMHZ): čistý příjem (10344) NIKDY
      * nesmí být záporný, hlásí se jako 0. Šířeji (sdělení ČSSZ výrobcům SW,
      * do 31. 12. 2026) totéž platí pro mzdu a její rozpad (10328–10331) a

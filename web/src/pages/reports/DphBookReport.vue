@@ -4,7 +4,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import {
   reportsApi, KH_EVIDENCE_SECTIONS,
-  type DphBookPreview, type DphBookRow, type KhEvidenceReport, type KhEvidenceSection,
+  type DphBookPreview, type DphBookRow, type KhEvidenceReport, type KhEvidenceSection, type VatDimensionFilter,
 } from '@/api/reports'
 import { apiErrorMessage } from '@/api/errors'
 import { useYearOptions } from '@/composables/useYearOptions'
@@ -14,6 +14,8 @@ import { useAuthStore } from '@/stores/auth'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import KhEvidenceSections from '@/components/reports/KhEvidenceSections.vue'
 import DphBookDocumentLink from '@/components/reports/DphBookDocumentLink.vue'
+import DimensionReportFilters from '@/components/dimensions/DimensionReportFilters.vue'
+import { dimensionValueIdsParam, parseDimensionValueIds } from '@/utils/dimensionFilter'
 
 const { t, locale } = useI18n()
 const auth = useAuthStore()
@@ -34,13 +36,44 @@ const dphLine = ref('')
 const khReport = ref<KhEvidenceReport | null>(null)
 const khSectionOptions: KhEvidenceSection[] = ['all', ...KH_EVIDENCE_SECTIONS]
 
+// Filtr dimenze (jeden typ dimenze): kniha i soupis KH pak ukazují jen podíl řádků
+// a splitu dané hodnoty. Stav drží URL, takže na něj jde prokliknout ze sestavy
+// DPH podle dimenze (`dimension_value_id`, `dimension_descendants=0`).
+const dimensionValueIds = ref<number[]>([])
+const dimensionDescendants = ref(true)
+const dimensionFilter = computed<VatDimensionFilter | null>(() => {
+  const ids = dimensionValueIdsParam(dimensionValueIds.value)
+  return ids ? { dimension_value_id: ids, dimension_descendants: dimensionDescendants.value } : null
+})
+// Bez filtru se volá s původními argumenty, filtr se přidává jen když je zapnutý.
+const dimensionArgs = (): [VatDimensionFilter] | [] => dimensionFilter.value ? [dimensionFilter.value] : []
+const fmtUnassigned = (v: number) => new Intl.NumberFormat(locale.value === 'en' ? 'en-US' : 'cs-CZ', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(v)
+const dimensionLabel = computed(() => (khSection.value === '' ? preview.value?.dimension : khReport.value?.dimension)?.label ?? '')
+
 // Období drží v URL useVatReportPeriod; stránka zapisuje jen vlastní filtr.
 function syncFilterQuery() {
   void router.replace({ query: {
     ...route.query,
     dph_line: dphLine.value || undefined,
     kh_section: khSection.value || undefined,
+    dimension_value_id: dimensionValueIdsParam(dimensionValueIds.value),
+    dimension_descendants: dimensionValueIds.value.length > 0 && !dimensionDescendants.value ? '0' : undefined,
   } }).catch(() => {})
+}
+
+watch(() => [route.query.dimension_value_id, route.query.dimension_descendants], ([ids, descendants]) => {
+  const parsed = parseDimensionValueIds(ids)
+  if (parsed.join(',') !== dimensionValueIds.value.join(',')) dimensionValueIds.value = parsed
+  dimensionDescendants.value = descendants !== '0'
+}, { immediate: true })
+
+function onDimensionValues(valueIds: number[]) {
+  dimensionValueIds.value = valueIds
+  syncFilterQuery()
+}
+function onDimensionDescendants(value: boolean) {
+  dimensionDescendants.value = value
+  syncFilterQuery()
 }
 
 // Sloupce kráceného odpočtu (40k–44k) a ř. 51b jsou samostatné položky přiznání.
@@ -86,10 +119,10 @@ async function loadPreview() {
   try {
     if (requestedSection === '') {
       khReport.value = null
-      const result = await reportsApi.dphBookPreview(requestedYear, requestedMonth, requestedPeriod)
+      const result = await reportsApi.dphBookPreview(requestedYear, requestedMonth, requestedPeriod, ...dimensionArgs())
       if (seq === previewSeq) preview.value = result
     } else {
-      const result = await reportsApi.khEvidencePreview(requestedYear, requestedMonth, requestedPeriod, requestedSection)
+      const result = await reportsApi.khEvidencePreview(requestedYear, requestedMonth, requestedPeriod, requestedSection, ...dimensionArgs())
       if (seq === previewSeq) khReport.value = result
     }
   } catch (e) {
@@ -101,12 +134,12 @@ async function loadPreview() {
 
 function downloadPdf() {
   if (!ready.value || dphLine.value || !preview.value || loading.value) return
-  window.open(reportsApi.dphBookPdfUrl(year.value, month.value, periodType.value), '_blank')
+  window.open(reportsApi.dphBookPdfUrl(year.value, month.value, periodType.value, ...dimensionArgs()), '_blank')
 }
 
 function downloadKh(format: 'pdf' | 'xlsx') {
   if (!ready.value || !khReport.value || loading.value || khSection.value === '') return
-  window.open(reportsApi.khEvidenceDownloadUrl(year.value, month.value, periodType.value, khSection.value, format), '_blank')
+  window.open(reportsApi.khEvidenceDownloadUrl(year.value, month.value, periodType.value, khSection.value, format, ...dimensionArgs()), '_blank')
 }
 
 function khSectionLabel(s: KhEvidenceSection): string {
@@ -169,7 +202,7 @@ const anyClaimShifted = computed(() =>
   visibleSections.value.some(s => s.rows.some(claimShifted))
 )
 
-watch([ready, year, month, periodType, khSection], () => {
+watch([ready, year, month, periodType, khSection, () => dimensionFilter.value?.dimension_value_id, () => dimensionFilter.value?.dimension_descendants], () => {
   if (!ready.value) {
     ++previewSeq
     preview.value = null
@@ -201,7 +234,7 @@ onMounted(() => { void initialize() })
         <h1 class="text-2xl font-semibold">{{ t('reports.dph_book.title') }}</h1>
         <p class="text-sm text-neutral-500 mt-0.5">{{ t('reports.dph_book.subtitle') }}</p>
       </div>
-      <div class="flex items-center gap-2 flex-wrap">
+      <div class="flex items-center gap-2 flex-wrap max-md:min-w-0 max-md:max-w-full">
         <!-- Period toggle (měsíční / kvartální) -->
         <div class="flex rounded-md border border-neutral-300 overflow-hidden text-sm">
           <button type="button" :disabled="!ready" @click="periodOverride = 'monthly'"
@@ -262,6 +295,24 @@ onMounted(() => { void initialize() })
       </div>
     </div>
 
+    <!-- Hodnota dimenze: stejný výběr jako v účetním deníku, jen u firmy se zapnutými dimenzemi. -->
+    <DimensionReportFilters class="mb-4" :value-ids="dimensionValueIds" :descendants="dimensionDescendants" single-type
+      @update:value-ids="onDimensionValues" @update:descendants="onDimensionDescendants" />
+
+    <div v-if="dimensionValueIds.length > 0" class="mb-4 rounded-lg border border-primary-200 bg-primary-50 p-3 text-sm" data-test="dph-book-dimension-note">
+      <p class="font-semibold text-primary-700">{{ t('reports.dph_book.dimension_filtered', { label: dimensionLabel || dimensionValueIds.join(', ') }) }}</p>
+      <p class="mt-1 text-neutral-600">{{ t('reports.dph_book.dimension_filtered_note') }}</p>
+      <p class="mt-1 text-neutral-600">{{ t('reports.dph_book.dimension_corrections_note') }}</p>
+      <div v-if="khSection === '' && preview?.dimension_unassigned?.length" class="mt-2" data-test="dph-book-dimension-unassigned">
+        <p class="font-medium text-warning-700">{{ t('reports.dph_book.dimension_unassigned') }}</p>
+        <ul class="mt-1 space-y-0.5 text-neutral-700">
+          <li v-for="u in preview.dimension_unassigned" :key="`${u.source}-${u.invoice_id}`">
+            {{ u.doc_number || '—' }} · {{ u.counterparty_name }} · {{ t('reports.dph_book.dimension_unassigned_amounts', { base: fmtUnassigned(u.base), vat: fmtUnassigned(u.vat) }) }}
+          </li>
+        </ul>
+      </div>
+    </div>
+
     <div v-if="dphLine" class="mb-4 rounded-lg border border-primary-200 bg-primary-50 p-3 text-sm">
       <p class="font-semibold text-primary-700">{{ t('reports.dph_book.filtered_line', { line: dphLine }) }}</p>
       <p class="mt-1 text-neutral-600">{{ t('reports.dph_book.filtered_line_note') }}</p>
@@ -285,6 +336,9 @@ onMounted(() => { void initialize() })
           {{ t('reports.kh_evidence.title') }}
         </div>
         <div class="text-lg font-semibold font-mono">{{ khReport.period.label }}</div>
+        <div v-if="khReport.dimension" class="text-sm text-neutral-700 mt-1" data-test="dph-book-dimension-label">
+          {{ t('reports.dph_book.dimension_label') }}: <span class="font-medium">{{ khReport.dimension.label }}</span>
+        </div>
         <p class="text-xs text-neutral-500 mt-2">{{ t('reports.kh_evidence.source_current') }}</p>
         <p class="text-xs text-neutral-500 mt-1">{{ t('reports.kh_evidence.rule_note') }}</p>
       </div>
@@ -298,6 +352,9 @@ onMounted(() => { void initialize() })
           {{ t('reports.dph_book.period_label') }}
         </div>
         <div class="text-lg font-semibold font-mono">{{ preview.period.label }}</div>
+        <div v-if="preview.dimension" class="text-sm text-neutral-700 mt-1" data-test="dph-book-dimension-label">
+          {{ t('reports.dph_book.dimension_label') }}: <span class="font-medium">{{ preview.dimension.label }}</span>
+        </div>
         <!-- issue #9: pravidlo pro zařazení přijatého dokladu do období odpočtu musí být
              vidět v sestavě, ne jen v zákoně — jinak vypadá červnové DUZP v červenci jako chyba. -->
         <p class="text-xs text-neutral-500 mt-2">{{ t('reports.dph_book.claim_period_note') }}</p>

@@ -13,8 +13,12 @@ use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 
 /**
- * GET  /api/purchase-invoices/renumber?period=2026-10  náhled přečíslování měsíce
- * POST /api/purchase-invoices/renumber {period}        přečíslování podle data vystavení
+ * GET  /api/purchase-invoices/renumber?period=2026-10&date_basis=received  náhled přečíslování měsíce
+ * POST /api/purchase-invoices/renumber {period, date_basis}                 přečíslování měsíce
+ *
+ * date_basis = issue (datum vystavení) | received (datum přijetí) | tax (DUZP). Bez něj
+ * platí nastavení firmy „Číslovat přijaté doklady podle data“, provedené přečíslování
+ * zvolené datum do nastavení uloží.
  *
  * Interní plumbing (není ve veřejném API). Klient přečíslovat nesmí, interní čísla
  * spravuje účetní.
@@ -30,9 +34,10 @@ final class RenumberPurchaseInvoicesAction
         if (RequestAuthorization::isClientType($request)) {
             return Json::error($response, 'forbidden', 'Přečíslování dokladů je vyhrazeno účetní.', 403);
         }
-        $period = (string) ($request->getQueryParams()['period'] ?? '');
+        $query = $request->getQueryParams();
+        $period = (string) ($query['period'] ?? '');
         try {
-            return Json::ok($response, $this->service->preview(SupplierGuard::currentId($request), $period));
+            return Json::ok($response, $this->service->preview(SupplierGuard::currentId($request), $period, self::basis($query)));
         } catch (\InvalidArgumentException $e) {
             return Json::error($response, 'validation_failed', $e->getMessage(), 400);
         }
@@ -50,11 +55,23 @@ final class RenumberPurchaseInvoicesAction
                 SupplierGuard::currentId($request),
                 (string) ($body['period'] ?? ''),
                 isset($user['id']) ? (int) $user['id'] : null,
+                self::basis($body),
             ));
         } catch (\InvalidArgumentException $e) {
             return Json::error($response, 'validation_failed', $e->getMessage(), 400);
         } catch (\DomainException $e) {
             return Json::error($response, 'period_locked', $e->getMessage(), 409);
         }
+    }
+
+    /** @param array<string,mixed> $input */
+    private static function basis(array $input): ?string
+    {
+        $basis = $input['date_basis'] ?? null;
+        if ($basis === null || $basis === '') {
+            return null;
+        }
+        // Neplatná hodnota (i pole) skončí validační chybou služby.
+        return is_scalar($basis) ? (string) $basis : '?';
     }
 }

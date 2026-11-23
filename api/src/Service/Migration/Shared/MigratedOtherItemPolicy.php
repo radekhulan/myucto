@@ -8,17 +8,35 @@ namespace MyInvoice\Service\Migration\Shared;
  * Společná pravidla převodu ostatních pohledávek a závazků z cizích programů do agendy
  * Ostatní pohledávky a závazky (`other_items`).
  *
- * Předpisy mezd, odvodů a DPH (účty 331, 336, 341, 342, 343) vlastní mzdový a daňový
- * modul, převod je mezi ostatní položky nezakládá a nechá je jen v převzatém deníku.
+ * Předpisy DPH (343) a záloh na daň z příjmů (341) vlastní daňový modul, převod je mezi
+ * ostatní položky nezakládá a nechá je jen v převzatém deníku (zálohy převezme jako předpisy
+ * záloh). Mzdové závazky (331 zaměstnancům, 336 pojistné, 342 daň ze mzdy) převod zakládá
+ * jako ostatní závazky: převedená firma mzdy v MyÚčtu nepočítá (nemá výplaty ani jejich
+ * závazky), předpisy jsou jen v deníku a bez položky v agendě by nešly párovat s úhradami.
+ * Stejně je zakládá i převzetí zaúčtování mezd.
  */
 final class MigratedOtherItemPolicy
 {
-    /** Saldokontní účty, jejichž předpisy vlastní mzdy, DPH a daň z příjmů. */
-    private const MODULE_ACCOUNTS = ['331', '336', '341', '342', '343'];
+    /** Saldokontní účty, jejichž předpisy vlastní DPH a daň z příjmů. */
+    private const MODULE_ACCOUNTS = ['341', '343'];
+
+    /** Saldokontní účty mzdových závazků (zaměstnanci, pojistné, daň ze mzdy). */
+    public const PAYROLL_ACCOUNTS = ['331', '336', '342'];
 
     public static function moduleOwned(string $account): bool
     {
-        return in_array(substr(preg_replace('/\D+/', '', $account) ?? '', 0, 3), self::MODULE_ACCOUNTS, true);
+        return in_array(self::synthetic($account), self::MODULE_ACCOUNTS, true);
+    }
+
+    /** Mzdový závazek: převádí se jako ostatní závazek, protokol ho počítá zvlášť. */
+    public static function payroll(string $account): bool
+    {
+        return in_array(self::synthetic($account), self::PAYROLL_ACCOUNTS, true);
+    }
+
+    private static function synthetic(string $account): string
+    {
+        return substr(preg_replace('/\D+/', '', $account) ?? '', 0, 3);
     }
 
     /**

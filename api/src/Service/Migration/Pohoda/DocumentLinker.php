@@ -14,6 +14,7 @@ use MyInvoice\Service\Accounting\OtherItemService;
 use MyInvoice\Service\Accounting\TakenOverRecord;
 use MyInvoice\Service\Migration\MoneyS3\ImportProtocol;
 use MyInvoice\Service\Migration\Shared\JournalEntryLinker;
+use MyInvoice\Service\Migration\Shared\ReconciliationTolerance;
 use MyInvoice\Support\Sql\PurchaseSettledExpr;
 use PDO;
 
@@ -32,6 +33,9 @@ final class DocumentLinker
     public const STEP_LINK = 'link';
     public const STEP_PAYMENTS = 'payments';
 
+    /** Poznámka platby `settlement`, která dorovnává uhrazenou částku podle POHODY ({@see settleIssuedRemainders()}). */
+    public const REMAINDER_NOTE = 'Převzato z POHODY, dorovnání úhrady';
+
     /** Pohyb a zápis se stejným číslem dokladu dál od sebe než půl roku jsou různé doklady. */
     private const SAME_BANK_NUMBER_SECONDS = 183 * 86400;
 
@@ -41,6 +45,7 @@ final class DocumentLinker
         private readonly Connection $db,
         private readonly PohodaImportRepository $map,
         private readonly OtherItemService $otherItems,
+        private readonly PohodaPriorYearPayments $priorYear,
     ) {
         $this->entries = new JournalEntryLinker($db, 'Pohody');
     }
@@ -48,7 +53,8 @@ final class DocumentLinker
     public function link(PohodaContext $ctx): void
     {
         $p = $ctx->protocol;
-        $index = $this->journalIndex($ctx->supplierId);
+        $index = $this->journalIndex($ctx->supplierId, inScope: fn (string $date): bool => !$ctx->skipsDate($date));
+        $linkedEntryIds = [];
         $unbooked = [
             'invoice' => $this->unbookedIds('invoices', $ctx->supplierId),
             'purchase_invoice' => $this->unbookedIds('purchase_invoices', $ctx->supplierId),
@@ -57,12 +63,12 @@ final class DocumentLinker
         // mají v deníku Pohody jediný zápis a vlastnit ho může jen jeden z nich. Dostane ho
         // pohyb, kterým Pohoda hradí doklad - jinak by úhrada faktury zůstala mezi
         // nezaúčtovanými pohyby, ačkoli její zápis v deníku je.
-        $paying = [];
-        foreach ($ctx->liquidations as $l) {
-            if ($l['agenda'] === 'bank' && ($l['source_id'] ?? '') !== '' && isset($ctx->bankByPohodaId[$l['source_id']])) {
-                $paying[$ctx->bankByPohodaId[$l['source_id']]] = true;
-            }
-        }
+        $paying = PohodaBankJournal::paying($ctx);
+        // Pohyb bez vlastního řádku v deníku POHODY mezi pohyby téhož čísla (celý výpis pod
+        // jedním číslem, předkontace „Nevím") zápis čísla nedostane ({@see bankEntries()}).
+        $bankRows = PohodaBankJournal::byMovement($ctx);
+        $this->releaseUnbooked($ctx, array_filter($bankRows, static fn (array $rows): bool => $rows === []), $index[PohodaJournal::BANK] ?? []);
+        $this->warnOppositeDirection($ctx, $bankRows);
         $bankDocs = [];
         foreach ($ctx->bankTransactions as $number => $txs) {
             usort($txs, static fn (array $a, array $b): int => isset($paying[$b['id']]) <=> isset($paying[$a['id']]));
@@ -70,6 +76,8 @@ final class DocumentLinker
                 $bankDocs[$number . '#' . $tx['date'] . '#' . $tx['id']] = $tx['id'];
             }
         }
+        $year = $ctx->year();
+        $yearStart = $ctx->calendar->periodStart($year);
         $orphans = [];
         $openingAdvances = [];
         foreach ([
@@ -84,16 +92,19 @@ final class DocumentLinker
         ] as [$source, $sourceType, $docType, $docs, $retype]) {
             foreach ($docs as $docKey => $docId) {
                 [$number, $date] = array_pad(explode('#', (string) $docKey, 3), 2, null);
-                $entries = $index[$source][$number] ?? [];
-                if ($docType === 'bank' && count($entries) > 1 && $date !== null) {
-                    $sameDay = array_values(array_filter($entries, static fn (array $e): bool => $e['date'] === $date));
-                    $entries = $sameDay !== [] ? $sameDay : $entries;
+                // Číselné řady POHODY (pokladna, banka, faktury bez roku v řadě) se v každé
+                // agendě opakují: zápisy čísla z jiné agendy patří jinému dokladu. Pohyb banky
+                // bere jen zápisy své agendy stejně jako {@see bankBooking()}, ostatní doklady
+                // zápisy jiné agendy jen tehdy, když jejich agenda žádný nemá (doklad minulého
+                // období převzatý do agendy, zaúčtovaný minulou agendou).
+                $all = $index[$source][$number] ?? [];
+                $entries = self::agendaEntries($all, $year, $yearStart, $docType === 'bank');
+                if (count($entries) < count($all)) {
+                    $this->dropForeignLinks($ctx->supplierId, $retype ?? $sourceType, $docType, (int) $docId,
+                        array_values(array_diff(array_column($all, 'id'), array_column($entries, 'id'))));
                 }
-                // Číselná řada banky se každý rok začíná znovu a agenda vede i pohyby po konci
-                // roku: nezaúčtovaný pohyb nesmí převzít zápis stejného čísla o rok dřív.
-                if ($docType === 'bank' && $date !== null && count($ctx->bankTransactions[$number] ?? []) > 1) {
-                    $entries = array_values(array_filter($entries, static fn (array $e): bool =>
-                        abs(strtotime((string) $e['date']) - strtotime($date)) <= self::SAME_BANK_NUMBER_SECONDS));
+                if ($docType === 'bank') {
+                    $entries = self::bankEntries($ctx, $entries, (string) $number, $date, (int) $docId, $bankRows);
                 }
                 $entryIds = array_column($entries, 'id');
                 if ($entryIds === []) {
@@ -101,6 +112,12 @@ final class DocumentLinker
                         $p->count(self::STEP_LINK, 'previous_period');
                         if ($docType === 'purchase_invoice' && $this->isAdvance((int) $docId)) {
                             $openingAdvances[(int) $docId] = true;
+                        } elseif (isset($ctx->previousPeriodUnbooked[$docType . '|' . $docId])) {
+                            // Zálohový list minulého roku bez zaúčtování: počáteční stav 311 ho
+                            // nenese (zaplacená záloha je v PS 324), saldokonto 311 by ho jinak
+                            // ukázalo jako neuhrazenou pohledávku. Vazba z dřívějšího převodu se ruší.
+                            $this->unlinkOpening($ctx, $docType, (int) $docId);
+                            $p->count(self::STEP_LINK, 'previous_period_unbooked');
                         } else {
                             $this->linkOpening($ctx, $docType, (int) $docId);
                         }
@@ -120,6 +137,9 @@ final class DocumentLinker
                     continue;
                 }
                 $new = $this->entries->attach($ctx->supplierId, $ctx->userOrNull(), $retype ?? $sourceType, $sourceType, $docType, $docId, $entryIds);
+                foreach ($entryIds as $entryId) {
+                    $linkedEntryIds[$entryId] = true;
+                }
                 $p->count(self::STEP_LINK, $new ? 'linked' : 'existing');
             }
         }
@@ -136,7 +156,7 @@ final class DocumentLinker
         }
         $this->linkAdvances($ctx);
         $this->linkTaxDocumentsToAdvances($ctx);
-        $this->entries->refreshDescriptions($ctx->supplierId, $p, self::STEP_LINK);
+        $this->entries->refreshDescriptions($ctx->supplierId, $p, self::STEP_LINK, entryIds: array_keys($linkedEntryIds));
         $p->finish(self::STEP_LINK);
     }
 
@@ -162,13 +182,11 @@ final class DocumentLinker
             [PohodaImportRepository::KIND_INVOICE, ['issued', 'receivable'], ['issued_advance', 'issued_proforma'], 'invoices', 'parent_invoice_id'],
         ] as [$kind, $finalAgendas, $advanceAgendas, $table, $column]) {
             $byNumber = [];
-            $finals = [];
-            foreach ($this->map->all($ctx->supplierId, $kind) as $key => $id) {
-                [$agenda, $number] = array_pad(explode('|', (string) $key, 3), 2, '');
-                if (in_array($agenda, $advanceAgendas, true)) {
+            $finals = $this->map->all($ctx->supplierId, $kind);
+            foreach ($finals as $key => $id) {
+                [$agenda, $number, $date] = array_pad(explode('|', (string) $key, 3), 3, '');
+                if (in_array($agenda, $advanceAgendas, true) && !$ctx->skipsDate($date)) {
                     $byNumber[$number][] = (int) $id;
-                } elseif (in_array($agenda, $finalAgendas, true)) {
-                    $finals[$agenda . '|' . $number][] = (int) $id;
                 }
             }
             if ($byNumber === []) {
@@ -183,8 +201,15 @@ final class DocumentLinker
             );
             foreach ($finalAgendas as $agenda) {
                 foreach ($ctx->export->records($agenda, 'invoice') as $record) {
-                    $number = PohodaXml::text(PohodaXml::get($record, 'invoiceHeader'), 'number/numberRequested');
-                    $finalIds = $finals[$agenda . '|' . $number] ?? [];
+                    $header = PohodaXml::get($record, 'invoiceHeader');
+                    $number = PohodaXml::text($header, 'number/numberRequested');
+                    $accounting = PohodaXml::date($header, 'dateAccounting');
+                    $issue = PohodaXml::date($header, 'date') ?? $accounting;
+                    if ($ctx->skipsDate($accounting ?? $issue)) {
+                        continue;
+                    }
+                    $finalId = $finals[$agenda . '|' . $number . '|' . $issue] ?? null;
+                    $finalIds = $finalId === null ? [] : [(int) $finalId];
                     $advances = [];
                     foreach (PohodaXml::all($record, 'invoiceDetail/invoiceAdvancePaymentItem') as $item) {
                         $ref = PohodaXml::text($item, 'sourceDocument/number');
@@ -254,13 +279,11 @@ final class DocumentLinker
             [PohodaImportRepository::KIND_INVOICE, 'issuedAdvanceInvoice', ['issued_advance', 'issued_proforma'], 'invoices', 'parent_invoice_id', 'invoice_type'],
         ] as [$kind, $linkAgenda, $advanceAgendas, $table, $column, $kindColumn]) {
             $advances = [];
-            $taxDocuments = [];
-            foreach ($this->map->all($ctx->supplierId, $kind) as $key => $id) {
-                [$agenda, $number] = array_pad(explode('|', (string) $key, 3), 2, '');
-                if (in_array($agenda, $advanceAgendas, true)) {
+            $taxDocuments = $this->map->all($ctx->supplierId, $kind);
+            foreach ($taxDocuments as $key => $id) {
+                [$agenda, $number, $date] = array_pad(explode('|', (string) $key, 3), 3, '');
+                if (in_array($agenda, $advanceAgendas, true) && !$ctx->skipsDate($date)) {
                     $advances[$number][] = (int) $id;
-                } elseif ($agenda === 'internal') {
-                    $taxDocuments[$number][] = (int) $id;
                 }
             }
             if ($advances === [] || $taxDocuments === []) {
@@ -275,7 +298,10 @@ final class DocumentLinker
             foreach ($ctx->export->records('internal', 'intDoc') as $record) {
                 $header = PohodaXml::get($record, 'intDocHeader');
                 $number = PohodaXml::text($header, 'number/numberRequested');
-                if (count($taxDocuments[$number] ?? []) !== 1) {
+                $accounting = PohodaXml::date($header, 'dateAccounting');
+                $issue = PohodaXml::date($header, 'date') ?? $accounting;
+                $taxDocumentId = $taxDocuments['internal|' . $number . '|' . $issue] ?? null;
+                if ($taxDocumentId === null || $ctx->skipsDate($accounting ?? $issue)) {
                     continue;
                 }
                 $refs = [];
@@ -286,25 +312,41 @@ final class DocumentLinker
                     }
                 }
                 // Export z datového souboru vazbu DDKP na zálohu nenese; POHODA ale DDKP
-                // pojmenuje vždy „Daňový doklad k uhrazené zálohové faktuře č. …". Takovou
+                // pojmenuje číslem zálohy ({@see self::advanceNumberFromText()}). Takovou
                 // vazbu převod přijme jen u téhož partnera a téže částky jako záloha.
-                if ($refs === [] && preg_match('/zálohov\w*\s+faktu\w*\s+č\.?\s*(\S+)/u', PohodaXml::text($header, 'text'), $m) === 1
-                    && count($advances[rtrim($m[1], '.,;')] ?? []) === 1) {
-                    $candidate = $advances[rtrim($m[1], '.,;')][0];
-                    $same->execute([$candidate, $taxDocuments[$number][0], $ctx->supplierId]);
+                $textRef = $refs === [] ? self::advanceNumberFromText(PohodaXml::text($header, 'text')) : null;
+                if ($textRef !== null && count($advances[$textRef] ?? []) === 1) {
+                    $candidate = $advances[$textRef][0];
+                    $same->execute([$candidate, $taxDocumentId, $ctx->supplierId]);
                     if ($same->fetchColumn() !== false) {
-                        $refs[$m[1]] = $candidate;
+                        $refs[$textRef] = $candidate;
                     }
                 }
                 if (count($refs) !== 1) {
                     continue;
                 }
-                $set->execute([reset($refs), $taxDocuments[$number][0], $ctx->supplierId]);
+                $set->execute([reset($refs), $taxDocumentId, $ctx->supplierId]);
                 if ($set->rowCount() > 0) {
                     $p->count(self::STEP_LINK, 'tax_document_advance_linked');
                 }
             }
         }
+    }
+
+    /**
+     * Číslo zálohy z textu DDKP. POHODA ho do textu interního dokladu píše sama, podle verze
+     * jako „Daňový doklad k uhrazené zálohové faktuře č. 26ZF0001" nebo „Daňový doklad
+     * k přijaté platbě (zálohová faktura č. 260800020)". Číslo končí mezerou, závorkou nebo
+     * interpunkcí; závorka dřív zůstala součástí čísla a vydané DDKP se tak nenavázaly vůbec.
+     */
+    public static function advanceNumberFromText(string $text): ?string
+    {
+        if (preg_match('/zálohov\w*\s+faktu\w*\s+č\.?\s*([^\s()]+)/u', $text, $m) !== 1) {
+            return null;
+        }
+        $number = rtrim($m[1], '.,;:');
+
+        return $number === '' ? null : $number;
     }
 
     public function matchPayments(PohodaContext $ctx): void
@@ -330,13 +372,18 @@ final class DocumentLinker
         $start = $ctx->periodStart();
         $cashLink = $pdo->prepare('SELECT invoice_id, purchase_invoice_id FROM cash_documents WHERE id = ? AND supplier_id = ?');
         $cashMulti = [];
+        $prior = [];
 
         $internal = [];
         foreach ($ctx->liquidations as $l) {
+            if ($ctx->skipsDate($l['date'])) {
+                $p->count(self::STEP_PAYMENTS, 'later_year_skipped');
+                continue;
+            }
             $mapKey = $l['doc'] . '|' . $l['id'] . '|' . $l['liq'];
             $isIssued = $l['doc'] === 'invoice';
             if ($l['agenda'] === 'internalDocuments' && in_array($l['doc'], ['invoice', 'purchase_invoice'], true)
-                && !$ctx->skipsDate($l['date']) && ($l['date'] === null || $l['date'] >= $start)) {
+                && ($l['date'] === null || $l['date'] >= $start)) {
                 // Zápočet interním dokladem: vyřeší se po dokladech celého interního dokladu níže.
                 $internal[(string) $l['source']][] = $l;
                 continue;
@@ -356,13 +403,13 @@ final class DocumentLinker
                 $p->count(self::STEP_PAYMENTS, 'existing');
                 continue;
             }
-            if ($ctx->skipsDate($l['date'])) {
-                // Úhrada v roce, který se nepřevádí - pohyb v převodu není, doklad zůstává neuhrazený.
-                $p->count(self::STEP_PAYMENTS, 'later_year_skipped');
-                continue;
-            }
             if ($l['date'] !== null && $l['date'] < $start) {
                 // Úhrada v minulém roce - pohyb je v agendě minulého roku, ne v tomto exportu.
+                // Vydaný doklad ji dostane jako evidovanou platbu ({@see PohodaPriorYearPayments}),
+                // přijatý v settled_outside_amount ({@see restorePurchaseSettlements()}).
+                if ($isIssued) {
+                    $prior[(int) $l['id']] = round(($prior[(int) $l['id']] ?? 0.0) + abs((float) $l['amount']), 2);
+                }
                 $p->count(self::STEP_PAYMENTS, 'previous_period');
                 continue;
             }
@@ -449,6 +496,10 @@ final class DocumentLinker
             // Zápočet interním dokladem, odpočet zálohy apod. - úhrada bez pohybu peněz.
             $p->count(self::STEP_PAYMENTS, $l['agenda'] !== '' ? 'other_' . $l['agenda'] : 'without_document');
         }
+        $recorded = $this->priorYear->record($ctx->supplierId, $ctx->userOrNull(), $start, $prior, true);
+        if ($recorded['inserted'] > 0) {
+            $p->count(self::STEP_PAYMENTS, 'previous_period_paid', $recorded['inserted']);
+        }
         $this->settleByInternalDocuments($ctx, $internal);
         $this->restoreOtherItemSettlements($ctx);
         $this->inferAdvanceSettlements($ctx);
@@ -465,13 +516,44 @@ final class DocumentLinker
     }
 
     /**
+     * Úhrady ostatních pohledávek a závazků a záloh na daň z příjmů v agendě daňové evidence
+     * ({@see PohodaTaxEvidenceImporter}): přiřazení pohybu stejně jako v {@see matchPayments()},
+     * jen bez vazeb na deník, který daňová evidence nemá. Ostatní položka bez vlastního
+     * zápisu se platbou neúčtuje, předpis zálohy dostane jen vazbu na pohyb.
+     */
+    public function matchOtherItemPayments(PohodaContext $ctx): void
+    {
+        $existing = $this->map->all($ctx->supplierId, PohodaImportRepository::KIND_PAYMENT);
+        $start = $ctx->periodStart();
+        foreach ($ctx->liquidations as $l) {
+            if ($l['doc'] !== 'other_item' && $l['doc'] !== 'tax_advance') {
+                continue;
+            }
+            $mapKey = $l['doc'] . '|' . $l['id'] . '|' . $l['liq'];
+            if (isset($existing[$mapKey])) {
+                $ctx->protocol->count(self::STEP_PAYMENTS, 'existing');
+                continue;
+            }
+            if ($ctx->skipsDate($l['date']) || ($l['date'] !== null && $l['date'] < $start)) {
+                continue;
+            }
+            if ($l['doc'] === 'other_item') {
+                $this->allocateOtherItem($ctx, $l, $mapKey);
+            } else {
+                $this->matchTaxAdvance($ctx, $l, $mapKey);
+            }
+        }
+        $this->restoreOtherItemSettlements($ctx);
+    }
+
+    /**
      * Pohyb, kterým POHODA doklad uhradila. Úhrada nese id bankovního dokladu POHODY - to je
      * jednoznačné i tam, kde se čísla dokladů opakují (číselná řada banky se každý rok
      * začíná znovu).
      *
      * @param array<string,mixed> $l
      */
-    private function bankTransactionFor(PohodaContext $ctx, array $l): ?int
+    public function bankTransactionFor(PohodaContext $ctx, array $l): ?int
     {
         $p = $ctx->protocol;
         $byId = ($l['source_id'] ?? '') !== '' ? ($ctx->bankByPohodaId[$l['source_id']] ?? null) : null;
@@ -544,6 +626,9 @@ final class DocumentLinker
             if (!is_string($date)) {
                 return;
             }
+        }
+        if ($ctx->skipsDate($date)) {
+            return;
         }
         $pdo->prepare(
             'INSERT INTO invoice_payments (supplier_id, invoice_id, paid_on, amount, currency, note, source, bank_transaction_id, created_by)
@@ -810,6 +895,9 @@ final class DocumentLinker
         )->fetchAll(PDO::FETCH_ASSOC);
         $match = $pdo->prepare('INSERT INTO payment_matches (supplier_id, bank_transaction_id, invoice_id, purchase_invoice_id, amount, match_type, matched_by_user_id) VALUES (?, ?, NULL, ?, ?, "manual", ?)');
         foreach ($refunds as $t) {
+            if ($ctx->skipsDate($t['posted'])) {
+                continue;
+            }
             $candidates = array_keys($bySymbol[preg_replace('/\D+/', '', (string) $t['variable_symbol']) ?? ''] ?? []);
             if (count($candidates) !== 1 || $advances[$candidates[0]]['left'] + 0.005 < (float) $t['amount']) {
                 continue;
@@ -821,7 +909,7 @@ final class DocumentLinker
 
         // Čerpání, které POHODA páruje symbolem zálohy na řádku konečné faktury.
         $exact = $pdo->query(
-            "SELECT f.id, p.pairing_symbol, SUM(l.signed_amount) AS amount
+            "SELECT f.id, p.pairing_symbol, MAX(e.entry_date) AS entry_date, SUM(l.signed_amount) AS amount
                FROM purchase_invoices f
                JOIN journal_entries e ON e.supplier_id = f.supplier_id AND e.source_type = 'purchase_invoice' AND e.source_id = f.id AND e.reversed_by IS NULL
                JOIN journal_entry_lines l ON l.entry_id = e.id AND l.side = 'credit'
@@ -834,6 +922,9 @@ final class DocumentLinker
         )->fetchAll(PDO::FETCH_ASSOC);
         $deductExact = $pdo->prepare('INSERT IGNORE INTO purchase_advance_deductions (supplier_id, final_invoice_id, advance_invoice_id, amount, created_by) VALUES (?, ?, ?, ?, ?)');
         foreach ($exact as $f) {
+            if ($ctx->skipsDate($f['entry_date'])) {
+                continue;
+            }
             // Víc záloh se stejným symbolem (smlouva na energie) se čerpá od nejstarší.
             $amount = round((float) $f['amount'], 2);
             foreach (array_keys($bySymbol[preg_replace('/\D+/', '', (string) $f['pairing_symbol']) ?? ''] ?? []) as $advanceId) {
@@ -865,6 +956,9 @@ final class DocumentLinker
         )->fetchAll(PDO::FETCH_ASSOC);
         $deduct = $pdo->prepare('INSERT IGNORE INTO purchase_advance_deductions (supplier_id, final_invoice_id, advance_invoice_id, amount, created_by) VALUES (?, ?, ?, ?, ?)');
         foreach ($finals as $f) {
+            if ($ctx->skipsDate($f['entry_date'])) {
+                continue;
+            }
             $credit = round((float) $f['credit'], 2);
             foreach ($advances as $advanceId => &$advance) {
                 if ($credit < 0.01) {
@@ -921,7 +1015,7 @@ final class DocumentLinker
         // Čerpání, které POHODA páruje symbolem zálohy na řádku konečné faktury.
         $deduct = $pdo->prepare("INSERT IGNORE INTO invoice_advance_deductions (supplier_id, final_invoice_id, advance_invoice_id, amount, source, created_by) VALUES (?, ?, ?, ?, 'import', ?)");
         foreach ($pdo->query(
-            "SELECT f.id, p.pairing_symbol, SUM(l.signed_amount) AS amount
+            "SELECT f.id, p.pairing_symbol, MAX(e.entry_date) AS entry_date, SUM(l.signed_amount) AS amount
                FROM invoices f
                JOIN journal_entries e ON e.supplier_id = f.supplier_id AND e.source_type = 'invoice' AND e.source_id = f.id AND e.reversed_by IS NULL
                JOIN journal_entry_lines l ON l.entry_id = e.id AND l.side = 'debit'
@@ -932,6 +1026,9 @@ final class DocumentLinker
                 AND NOT EXISTS (SELECT 1 FROM invoice_advance_deductions iad WHERE iad.supplier_id = f.supplier_id AND iad.final_invoice_id = f.id)
               GROUP BY f.id, p.pairing_symbol"
         )->fetchAll(PDO::FETCH_ASSOC) as $f) {
+            if ($ctx->skipsDate($f['entry_date'])) {
+                continue;
+            }
             $amount = round((float) $f['amount'], 2);
             foreach (array_keys($bySymbol[preg_replace('/\D+/', '', (string) $f['pairing_symbol']) ?? ''] ?? []) as $advanceId) {
                 if ($amount < 0.01 || $advances[$advanceId]['left'] < 0.01) {
@@ -957,6 +1054,9 @@ final class DocumentLinker
               ORDER BY entry_date, f.id"
         )->fetchAll(PDO::FETCH_ASSOC);
         foreach ($finals as $f) {
+            if ($ctx->skipsDate($f['entry_date'])) {
+                continue;
+            }
             $debit = round((float) $f['debit'], 2);
             foreach ($advances as $advanceId => &$advance) {
                 if ($debit < 0.01) {
@@ -981,7 +1081,9 @@ final class DocumentLinker
      * bez dokladu banky či pokladny (tržby z pokladny účtované souhrnně). Zbytek
      * dostane evidovanou platbu se zdrojem `settlement` k datu úhrady, jinak by saldokonto drželo
      * doklad otevřený, i když ho hlavní kniha má uzavřený. Doklad s ručním vyrovnáním v deníku
-     * (vazba nebo rozpad zápisu) ten zbytek už nese. Opakovaný převod nic nezdvojí.
+     * (vazba nebo rozpad zápisu) ten zbytek už nese. Úhrady z doby před začátkem agendy
+     * už nese platba {@see PohodaPriorYearPayments}, zbytek je jen to, co nepokryla.
+     * Opakovaný převod nic nezdvojí.
      */
     private function settleIssuedRemainders(PohodaContext $ctx): void
     {
@@ -993,6 +1095,7 @@ final class DocumentLinker
                FROM invoices i
                JOIN currencies cur ON cur.id = i.currency_id
               WHERE i.supplier_id = {$s} AND i.status = 'paid' AND i.invoice_type = 'invoice' AND i.paid_at IS NOT NULL
+                AND EXISTS (SELECT 1 FROM pohoda_import_map m WHERE m.supplier_id = i.supplier_id AND m.kind = 'invoice' AND m.target_id = i.id)
                 AND NOT EXISTS (SELECT 1 FROM journal_entry_document_links jl
                                   JOIN journal_entries je ON je.id = jl.entry_id AND je.supplier_id = jl.supplier_id AND je.source_type = 'manual'
                                  WHERE jl.supplier_id = i.supplier_id AND jl.doc_type = 'invoice' AND jl.doc_id = i.id)
@@ -1001,10 +1104,13 @@ final class DocumentLinker
         )->fetchAll(PDO::FETCH_ASSOC);
         $insert = $pdo->prepare(
             "INSERT INTO invoice_payments (supplier_id, invoice_id, paid_on, amount, currency, note, source, created_by)
-             VALUES (?, ?, ?, ?, ?, 'Převzato z POHODY, dorovnání úhrady', 'settlement', ?)"
+             VALUES (?, ?, ?, ?, ?, ?, 'settlement', ?)"
         );
         foreach ($rows as $r) {
-            $insert->execute([$s, (int) $r['id'], $r['paid_on'], $r['rest'], $r['currency'], $ctx->userOrNull()]);
+            if ($ctx->skipsDate($r['paid_on'])) {
+                continue;
+            }
+            $insert->execute([$s, (int) $r['id'], $r['paid_on'], $r['rest'], $r['currency'], self::REMAINDER_NOTE, $ctx->userOrNull()]);
             $ctx->protocol->count(self::STEP_PAYMENTS, 'issued_payment_remainder');
         }
     }
@@ -1044,6 +1150,9 @@ final class DocumentLinker
              VALUES (?, ?, ?, ?, ?, ?, ?, 'confirmed', ?, ?, ?)"
         );
         foreach ($rows as $r) {
+            if ($ctx->skipsDate($r['entry_date'])) {
+                continue;
+            }
             $issued = $r['invoice_id'] !== null;
             $docType = $issued ? 'invoice' : 'purchase_invoice';
             $docId = (int) ($issued ? $r['invoice_id'] : $r['purchase_id']);
@@ -1370,6 +1479,17 @@ final class DocumentLinker
         ), ['unlinked' => (int) $unlinked]);
     }
 
+    private function unlinkOpening(PohodaContext $ctx, string $docType, int $docId): void
+    {
+        if ($ctx->period === null) {
+            return;
+        }
+        $this->db->pdo()->prepare(
+            "DELETE dl FROM journal_entry_document_links dl JOIN journal_entries e ON e.id = dl.entry_id
+              WHERE dl.supplier_id = ? AND e.source_type = 'opening' AND e.period_id = ? AND dl.doc_type = ? AND dl.doc_id = ?"
+        )->execute([$ctx->supplierId, (int) $ctx->period['id'], $docType, $docId]);
+    }
+
     private function linkOpening(PohodaContext $ctx, string $docType, int $docId): bool
     {
         return $this->entries->linkOpening($ctx->supplierId, $ctx->userOrNull(), $ctx->period !== null ? (int) $ctx->period['id'] : null, $docType, $docId);
@@ -1419,9 +1539,9 @@ final class DocumentLinker
     }
 
     /**
-     * Převedené pohyby podle toho, zda je POHODA zaúčtovala (v deníku je zápis banky se
-     * stejným číslem dokladu), nebo mají předkontaci „Nevím" a zápis nemají. Jediné místo
-     * toho rozhodnutí - řídí se jím vyřízení pohybů bez dokladu i odvozené úhrady
+     * Převedené pohyby podle toho, zda je POHODA zaúčtovala (pohyb má v deníku zápis podle
+     * {@see bankEntries()}, stejně jako při navázání v {@see link()}), nebo mají předkontaci
+     * „Nevím" a zápis nemají. Řídí se tím vyřízení pohybů bez dokladu i odvozené úhrady
      * ({@see UnbookedBankPayments}).
      *
      * @return array{booked:list<int>,unbooked:list<int>}
@@ -1430,23 +1550,125 @@ final class DocumentLinker
     {
         // Jen deník téže agendy: číselná řada banky se v POHODĚ opakuje po letech a pohyb
         // zaúčtovaný v jiné agendě by jinak vypadal jako zaúčtovaný i tady.
-        $booked = $this->journalIndex($ctx->supplierId, $ctx->year(), $ctx->calendar)[PohodaJournal::BANK] ?? [];
+        $index = $this->journalIndex($ctx->supplierId, $ctx->year(), $ctx->calendar)[PohodaJournal::BANK] ?? [];
+        $rows = PohodaBankJournal::byMovement($ctx);
         $ids = ['booked' => [], 'unbooked' => []];
         foreach ($ctx->bankTransactions as $number => $txs) {
             foreach ($txs as $tx) {
-                $ids[($booked[(string) $number] ?? []) !== [] ? 'booked' : 'unbooked'][] = (int) $tx['id'];
+                $entries = self::bankEntries($ctx, $index[(string) $number] ?? [], (string) $number, (string) $tx['date'], (int) $tx['id'], $rows);
+                $ids[$entries !== [] ? 'booked' : 'unbooked'][] = (int) $tx['id'];
             }
         }
         return ['booked' => array_values(array_unique($ids['booked'])), 'unbooked' => array_values(array_unique($ids['unbooked']))];
     }
 
     /**
+     * Zápisy deníku banky, které patří pohybu - jediné místo toho rozhodnutí pro navázání
+     * ({@see link()}) i vyřízení pohybů ({@see bankBooking()}). Z `$entries` (zápisy čísla
+     * v agendě pohybu):
+     *  - pohyb, který podle řádků deníku POHODY vlastní řádek nemá ({@see PohodaBankJournal}),
+     *    nedostane žádný (výpis pod jedním číslem, stejné číslo v datovém souboru o rok později);
+     *  - z víc zápisů čísla zápis dne pohybu, pokud je;
+     *  - má-li číslo víc pohybů, jen zápisy do půl roku od pohybu: číselná řada banky se každý
+     *    rok začíná znovu a agenda vede i pohyby po konci roku, nezaúčtovaný pohyb nesmí
+     *    převzít zápis stejného čísla o rok dřív.
+     *
+     * @param list<array{year:int,date:string,id:int}> $entries
+     * @param array<int,list<array<string,mixed>>> $rows {@see PohodaBankJournal::byMovement()}
+     * @return list<array{year:int,date:string,id:int}>
+     */
+    private static function bankEntries(PohodaContext $ctx, array $entries, string $number, ?string $date, int $txId, array $rows): array
+    {
+        if (($rows[$txId] ?? null) === []) {
+            return [];
+        }
+        if (count($entries) > 1 && $date !== null) {
+            $sameDay = array_values(array_filter($entries, static fn (array $e): bool => $e['date'] === $date));
+            $entries = $sameDay !== [] ? $sameDay : $entries;
+        }
+        if ($date !== null && count($ctx->bankTransactions[$number] ?? []) > 1) {
+            $entries = array_values(array_filter($entries, static fn (array $e): bool =>
+                abs(strtotime((string) $e['date']) - strtotime($date)) <= self::SAME_BANK_NUMBER_SECONDS));
+        }
+        return $entries;
+    }
+
+    /**
+     * Opakovaný převod uvolní pohyby, které dřívější převod navázal na zápis čísla, ačkoli
+     * v deníku POHODY vlastní řádek nemají ({@see PohodaBankJournal::byMovement()}):
+     * smaže vazby převodu na zápisy čísla a zápis, jehož zdrojem pohyb byl, vrátí bez zdroje,
+     * aby ho v {@see link()} dostal zaúčtovaný pohyb. Ruční vazby a odvozené zápisy úhrad
+     * se nemění.
+     *
+     * @param array<int,mixed> $txIds bank_transactions.id => cokoli
+     * @param array<string,list<array{year:int,date:string,id:int}>> $bankIndex zápisy banky po číslech
+     */
+    private function releaseUnbooked(PohodaContext $ctx, array $txIds, array $bankIndex): void
+    {
+        if ($txIds === []) {
+            return;
+        }
+        $pdo = $this->db->pdo();
+        foreach ($ctx->bankTransactions as $number => $txs) {
+            $entryIds = array_map('intval', array_column($bankIndex[(string) $number] ?? [], 'id'));
+            $released = array_values(array_filter(array_map(static fn (array $tx): int => (int) $tx['id'], $txs), static fn (int $id): bool => isset($txIds[$id])));
+            if ($entryIds === [] || $released === []) {
+                continue;
+            }
+            $entries = implode(',', $entryIds);
+            $docs = implode(',', $released);
+            $pdo->prepare(
+                "DELETE FROM journal_entry_document_links
+                  WHERE supplier_id = ? AND doc_type = 'bank' AND note = ? AND doc_id IN ({$docs}) AND entry_id IN ({$entries})"
+            )->execute([$ctx->supplierId, $this->entries->linkNote()]);
+            $pdo->prepare(
+                "UPDATE journal_entries SET source_id = NULL
+                  WHERE supplier_id = ? AND source_type = 'bank' AND source_id IN ({$docs}) AND id IN ({$entries})"
+            )->execute([$ctx->supplierId]);
+        }
+    }
+
+    /**
+     * Pohyb, jehož řádky v deníku POHODY hýbou účtem 221 opačně, než jde peníz (výdaj
+     * zaúčtovaný předkontací pro příjem nebo naopak). Převod zápis převezme beze změny,
+     * zůstatek 221 pak nesedí na výpis o dvojnásobek pohybu; protokol ho proto vypíše.
+     *
+     * @param array<int,list<array<string,mixed>>> $rows {@see PohodaBankJournal::byMovement()}
+     */
+    private function warnOppositeDirection(PohodaContext $ctx, array $rows): void
+    {
+        $found = [];
+        foreach ($ctx->bankTransactions as $number => $txs) {
+            foreach ($txs as $tx) {
+                $own = $rows[(int) $tx['id']] ?? [];
+                $net = round(array_sum(array_column($own, 'net')), 2);
+                $amount = (float) ($tx['amount'] ?? 0.0);
+                if ($own === [] || ReconciliationTolerance::isZeroCent($net) || ReconciliationTolerance::isZeroCent($amount) || ($net > 0) === ($amount > 0)) {
+                    continue;
+                }
+                $found[] = ['document_no' => (string) $number, 'date' => (string) $tx['date'], 'amount' => $amount, 'journal' => $net, 'id' => (int) $tx['id']];
+            }
+        }
+        if ($found === []) {
+            return;
+        }
+        $money = static fn (float $v): string => number_format($v, 2, ',', ' ');
+        $list = implode(', ', array_map(static fn (array $f): string => sprintf('%s ze dne %s (pohyb %s Kč, na 221 %s Kč)',
+            $f['document_no'], (new \DateTimeImmutable($f['date']))->format('j. n. Y'), $money($f['amount']), $money($f['journal'])), array_slice($found, 0, 30)));
+        $ctx->protocol->warn(self::STEP_LINK, 'bank_opposite_direction', sprintf(
+            '%d bankovních pohybů je v deníku POHODY zaúčtovaných na účet 221 opačným směrem, než jde platba (předkontace pro opačný směr pohybu): %s%s. '
+            . 'Převod zápisy převzal beze změny, zůstatek účtu 221 se proto od výpisu liší o dvojnásobek pohybu. Zaúčtování opravte interním dokladem.',
+            count($found), $list, count($found) > 30 ? ' a další' : '',
+        ), ['documents' => array_slice($found, 0, 50)]);
+    }
+
+    /**
      * Zápisy deníku převedené z Pohody: zdroj → číslo dokladu → zápisy v pořadí data.
      * Staví se z mapy převodu, takže funguje i pro zápisy z dřívějšího běhu.
      *
-     * @return array<string,array<string,list<array{date:string,id:int}>>>
+     * @return array<string,array<string,list<array{year:int,date:string,id:int}>>>
      */
-    private function journalIndex(int $supplierId, ?int $year = null, ?FiscalCalendar $calendar = null): array
+    private function journalIndex(int $supplierId, ?int $year = null, ?FiscalCalendar $calendar = null, ?callable $inScope = null): array
     {
         $index = [];
         $yearStart = $year !== null ? ($calendar ?? FiscalCalendar::calendar())->periodStart($year) : '';
@@ -1455,14 +1677,11 @@ final class DocumentLinker
             if (count($parts) < 4 || $parts[2] === '') {
                 continue; // otevírací zápis "rok|PS"
             }
-            // Deník agendy vede i doklady po konci jejího roku, takže zápis roku `$year`
-            // mohla přinést už agenda minulého roku.
-            if ($year !== null && (int) $parts[0] !== $year
-                && !((int) $parts[0] === $year - 1 && ($parts[3] ?? '') >= $yearStart)) {
+            [$agenda, $source, $number, $date] = $parts;
+            if (($year !== null && !self::inAgendaYear((int) $agenda, $date, $year, $yearStart)) || ($inScope !== null && !$inScope($date))) {
                 continue;
             }
-            [, $source, $number, $date] = $parts;
-            $index[$source][$number][$date . '|' . str_pad((string) $entryId, 12, '0', STR_PAD_LEFT)] = ['date' => $date, 'id' => $entryId];
+            $index[$source][$number][$date . '|' . str_pad((string) $entryId, 12, '0', STR_PAD_LEFT)] = ['year' => (int) $agenda, 'date' => $date, 'id' => $entryId];
         }
         foreach ($index as &$docs) {
             foreach ($docs as &$entries) {
@@ -1471,6 +1690,58 @@ final class DocumentLinker
             }
         }
         return $index;
+    }
+
+    /**
+     * Zápis převedený z agendy roku `$entryYear` patří do agendy roku `$year`. Deník agendy
+     * vede i doklady po konci jejího roku, takže zápis roku `$year` mohla přinést už agenda
+     * minulého roku.
+     */
+    public static function inAgendaYear(int $entryYear, string $date, int $year, string $yearStart): bool
+    {
+        return $entryYear === $year || ($entryYear === $year - 1 && $date >= $yearStart);
+    }
+
+    /**
+     * Zápisy čísla dokladu, které patří dokladu převáděné agendy roku `$year`. Má-li číslo
+     * zápisy v této agendě, platí jen ty: stejné číslo v jiné agendě je jiný doklad (POHODA
+     * čísluje pokladnu, banku i řady bez roku v každé agendě znovu). Bez zápisu v agendě
+     * zůstávají zápisy ostatních agend - doklad minulého období převzatý do agendy zaúčtovala
+     * minulá agenda. `$strict` je vynechá i tehdy (pohyb banky patří jen do své agendy).
+     *
+     * @param list<array{year:int,date:string,id:int}> $entries
+     * @return list<array{year:int,date:string,id:int}>
+     */
+    public static function agendaEntries(array $entries, int $year, string $yearStart, bool $strict = false): array
+    {
+        $own = array_values(array_filter($entries, static fn (array $e): bool => self::inAgendaYear($e['year'], $e['date'], $year, $yearStart)));
+        return $own !== [] || $strict ? $own : $entries;
+    }
+
+    /**
+     * Opakovaný převod uklidí vazby, které dřívější převod dal dokladu na zápis stejného čísla
+     * z jiné agendy ({@see agendaEntries()}), a pokladní doklad přestane ukazovat na takový
+     * zápis. Jen vazby převodu na zápis, který vlastní jiný doklad - vlastní zápis dokladu
+     * ani ruční vazby uživatele se nemění. Zdroj (`source_id`) pak doklad dostane v {@see link()}.
+     *
+     * @param list<int> $foreignIds zápisy čísla dokladu z jiných agend
+     */
+    private function dropForeignLinks(int $supplierId, string $ownerType, string $docType, int $docId, array $foreignIds): void
+    {
+        $in = implode(',', array_fill(0, count($foreignIds), '?'));
+        $owned = "e.supplier_id = ? AND e.id IN ({$in}) AND e.source_id IS NOT NULL AND NOT (e.source_type = ? AND e.source_id = ?)";
+        $params = [$supplierId, ...$foreignIds, $ownerType, $docId];
+        $this->db->pdo()->prepare(
+            "DELETE l FROM journal_entry_document_links l JOIN journal_entries e ON e.id = l.entry_id
+              WHERE l.supplier_id = ? AND l.doc_type = ? AND l.doc_id = ? AND l.note = ? AND {$owned}"
+        )->execute([$supplierId, $docType, $docId, $this->entries->linkNote(), ...$params]);
+        if ($docType === 'cash') {
+            $this->db->pdo()->prepare(
+                "UPDATE cash_documents d JOIN journal_entries e ON e.id = d.journal_entry_id
+                    SET d.journal_entry_id = NULL
+                  WHERE d.id = ? AND d.supplier_id = ? AND {$owned}"
+            )->execute([$docId, $supplierId, ...$params]);
+        }
     }
 
     /**

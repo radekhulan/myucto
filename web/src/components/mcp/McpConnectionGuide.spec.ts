@@ -27,7 +27,7 @@ describe.each(['cs', 'en'] as const)('MCP connection guide (%s)', locale => {
     wrapper.unmount()
   })
 
-  it('sends the user to the client domain instead of promising a company scope for the main address', () => {
+  it('explains choosing one company when connecting from the main domain', () => {
     const wrapper = render(locale, true, true)
     const copy = messages[locale].client_mcp
     expect(wrapper.text()).toContain(copy.step_copy_main_domain)

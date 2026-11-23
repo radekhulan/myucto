@@ -25,6 +25,30 @@ final class OvertimeLimitEvaluatorTest extends TestCase
     private const WEEK_LIMIT_MINUTES = 480;
     private const YEAR_LIMIT_MINUTES = 9_000;
 
+    public function testManualHistoryPreservesKnownProhibitedMinutes(): void
+    {
+        $known = (new OvertimeLimitEvaluator())->assess(
+            7, '2026-02-01', '2026-02-28', [new OvertimeSegment('2026-02-09', 60)], [], $this->limits(),
+            profile: new \MyInvoice\Service\Payroll\Time\Overtime\OvertimeEmploymentProfile('2010-01-01'),
+        );
+        self::assertNotEmpty($known->prohibitedMinutes);
+        $unknown = $known->withManualSummaryPeriods(['2026-01-01'], '2026-01-01', '2026-02-28');
+        self::assertSame($known->prohibitedMinutes, $unknown->prohibitedMinutes);
+        self::assertSame($known->toArray()['prohibited_minutes'], $unknown->toArray()['prohibited_minutes']);
+    }
+
+    public function testManualHistoryDoesNotEraseAlreadyProvenViolation(): void
+    {
+        $known = $this->assess('2026-02-01', '2026-02-28', [['2026-02-09', 600]]);
+        $unknown = $known->withManualSummaryPeriods(['2026-01-01'], '2026-01-01', '2026-02-28');
+        self::assertContains(OvertimeLimitFinding::CODE_WEEKLY, $this->codes($unknown->findings));
+        self::assertContains(OvertimeLimitFinding::CODE_MANUAL_SUMMARY, $this->codes($unknown->findings));
+        self::assertNull($unknown->orderedYearMinutes);
+        self::assertTrue($unknown->requiresOverride());
+        self::assertSame(600, $known->orderedYearMinutes);
+        self::assertArrayNotHasKey('evidence_status', $known->toArray());
+    }
+
     public function testWeekBelowOrderedLimitIsSilent(): void
     {
         $assessment = $this->assess('2026-02-01', '2026-02-28', [

@@ -13,6 +13,7 @@ use MyInvoice\Service\Accounting\Assets\AssetService;
 use MyInvoice\Service\Accounting\Assets\DepreciationPostingService;
 use MyInvoice\Service\Accounting\ChartOfAccountsSeeder;
 use MyInvoice\Service\Accounting\Closing\ClosingService;
+use MyInvoice\Service\Accounting\PostingService;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
 
@@ -36,6 +37,7 @@ final class ClosingDepreciationBookingTest extends TestCase
     private DepreciationEntryRepository $entries;
     private JournalEntryRepository $journal;
     private AccountingPeriodRepository $periods;
+    private PostingService $posting;
 
     private int $supplierId = 0;
     private int $userId = 0;
@@ -57,6 +59,7 @@ final class ClosingDepreciationBookingTest extends TestCase
             $this->entries    = $container->get(DepreciationEntryRepository::class);
             $this->journal    = $container->get(JournalEntryRepository::class);
             $this->periods    = $container->get(AccountingPeriodRepository::class);
+            $this->posting    = $container->get(PostingService::class);
             $seeder           = $container->get(ChartOfAccountsSeeder::class);
         } catch (\Throwable $e) {
             $this->markTestSkipped('DI nedostupné: ' . $e->getMessage());
@@ -191,6 +194,94 @@ final class ClosingDepreciationBookingTest extends TestCase
             $state['depreciation_step_required'],
             'S majetkem v období se odpisový krok vyžaduje.'
         );
+    }
+
+    /**
+     * Zaúčtovaný účetní řádek roku, jehož vlastní zápis v deníku chybí (deník roku nahradil
+     * obnovený převod, odpis nesou jeho měsíční zápisy): bookYear ho znovu neúčtuje, ohlásí
+     * ho, a náhled roku s tím souhlasí (nic nečeká na zaúčtování).
+     */
+    public function testPostedYearWithoutOwnJournalEntryIsReportedNotBookedAgain(): void
+    {
+        $this->disposeExistingAssetsBeforePeriod();
+        $assetId = $this->createAssetInUse('M-ORPHAN', self::YEAR . '-03-10', 90000.00, 1, 36);
+        $first = $this->depPosting->bookYear($this->supplierId, self::YEAR, ['posted_by' => $this->userId]);
+        self::assertSame([], $first['errors']);
+        $acc = $this->entries->findYear($assetId, 'accounting', self::YEAR);
+        $journal = $this->journal->findBySource($this->supplierId, 'depreciation', (int) $acc['id']);
+        self::assertNotNull($journal);
+        // Deník roku nahradil převod: odpis nese jiný zápis, vlastní zápis řádku už není.
+        $this->db->pdo()->prepare("UPDATE journal_entries SET source_type = 'manual', source_id = NULL WHERE id = ?")
+            ->execute([(int) $journal['id']]);
+        $before = $this->depreciationJournalTotal();
+
+        $preview = $this->depPosting->previewYear($this->supplierId, self::YEAR);
+        self::assertSame(0.0, $preview['pending_accounting'], 'Náhled: nic nečeká na zaúčtování.');
+        self::assertSame([['asset_id' => $assetId, 'code' => DepreciationPostingService::JOURNAL_MISSING]], $preview['findings']);
+
+        $result = $this->depPosting->bookYear($this->supplierId, self::YEAR, ['posted_by' => $this->userId]);
+        self::assertSame([['asset_id' => $assetId, 'code' => DepreciationPostingService::JOURNAL_MISSING]], $result['errors']);
+        self::assertSame(0.0, $result['total_accounting']);
+        self::assertSame($before, $this->depreciationJournalTotal(), 'Odpis roku se nezaúčtoval podruhé.');
+    }
+
+    /** Rok uzavřený původním systémem (převzatá uzávěrka): krok Odpisy účetní odpisy neúčtuje. */
+    public function testYearWithTakenOverClosingPostsNoDepreciation(): void
+    {
+        $this->disposeExistingAssetsBeforePeriod();
+        $this->createAssetInUse('M-TAKEN', self::YEAR . '-03-10', 90000.00, 1, 36);
+        $this->posting->postDocument($this->supplierId, 'closing', null, [
+            ['account_code' => '702', 'side' => 'debit', 'amount' => 1.00],
+            ['account_code' => '701', 'side' => 'credit', 'amount' => 1.00],
+        ], ['entry_date' => self::YEAR . '-12-31', 'posted_by' => $this->userId]);
+        self::assertNotSame([], $this->closing->takenOverClosingEntryIds($this->supplierId, $this->periodId));
+        $before = $this->depreciationJournalTotal();
+
+        $preview = $this->depPosting->previewYear($this->supplierId, self::YEAR);
+        self::assertSame(0.0, $preview['pending_accounting']);
+        self::assertSame('closing_taken_over', $preview['accounting_skipped']);
+
+        $result = $this->closing->bookDepreciation($this->supplierId, $this->periodId, ['posted_by' => $this->userId]);
+        self::assertSame('closing_taken_over', $result['accounting_skipped'] ?? null);
+        self::assertSame(0.0, $result['total_accounting']);
+        self::assertSame($before, $this->depreciationJournalTotal());
+    }
+
+    /**
+     * Daňový odpis potvrzený převodem z jiného programu se nepřepočítává: náhled ho bere
+     * jako potvrzený (nic nečeká) a zaúčtování roku ho nepřepíše.
+     */
+    public function testTaxDepreciationConfirmedByMigrationIsKept(): void
+    {
+        $this->disposeExistingAssetsBeforePeriod();
+        $assetId = $this->createAssetInUse('M-MIGTAX', self::YEAR . '-03-10', 90000.00, 1, 36);
+        $this->entries->upsert([
+            'supplier_id' => $this->supplierId, 'asset_id' => $assetId, 'kind' => 'tax', 'fiscal_year' => self::YEAR,
+            'amount' => 12345.00, 'full_amount' => 12345.00, 'residual_value_end' => 77655.00,
+            'is_paused' => false, 'is_half' => false, 'months_count' => null,
+            'detail' => json_encode([DepreciationEntryRepository::MIGRATED_TAX_SOURCE => DepreciationEntryRepository::MIGRATED_JOURNAL, 'program' => 'Money S3']),
+            'status' => 'confirmed',
+        ]);
+
+        $preview = $this->depPosting->previewYear($this->supplierId, self::YEAR);
+        self::assertSame(12345.0, $preview['planned_tax']);
+        self::assertSame(0.0, $preview['pending_tax']);
+
+        $this->depPosting->bookYear($this->supplierId, self::YEAR, ['posted_by' => $this->userId]);
+        self::assertSame(12345.0, (float) $this->entries->findYear($assetId, 'tax', self::YEAR)['amount']);
+    }
+
+    private function depreciationJournalTotal(): float
+    {
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT COALESCE(SUM(CASE WHEN l.side = 'debit' THEN l.amount ELSE -l.amount END), 0)
+               FROM journal_entry_lines l
+               JOIN journal_entries e ON e.id = l.entry_id
+               JOIN chart_of_accounts a ON a.id = l.account_id
+              WHERE e.supplier_id = ? AND e.entry_date BETWEEN ? AND ? AND a.account_code LIKE '551%'"
+        );
+        $stmt->execute([$this->supplierId, self::YEAR . '-01-01', self::YEAR . '-12-31']);
+        return round((float) $stmt->fetchColumn(), 2);
     }
 
     private function createAssetInUse(

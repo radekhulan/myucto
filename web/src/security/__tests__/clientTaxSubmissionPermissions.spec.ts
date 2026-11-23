@@ -36,6 +36,16 @@ describe('client tax submission permissions', () => {
     setRolePermission(permissions, 'staff', 'reports.submit', 1)
     expect(permissions['reports.submit']).toBe(1)
   })
+
+  it('keeps the staff archive read-only without linking it to legacy send', () => {
+    const permissions: Record<string, PermissionValue> = {}
+    expect(rolePermissionLevels('staff', 'reports.submissions')).toEqual([0, 1])
+    setRolePermission(permissions, 'staff', 'reports.submissions', 2)
+    expect(permissions).toEqual({ 'reports.submissions': 1 })
+    setRolePermission(permissions, 'staff', 'reports.submit', 2)
+    setRolePermission(permissions, 'staff', 'reports.submissions', 0)
+    expect(permissions).toEqual({ 'reports.submissions': 0, 'reports.submit': 2 })
+  })
 })
 
 it('localizes every submission permission in both root locale namespaces', () => {

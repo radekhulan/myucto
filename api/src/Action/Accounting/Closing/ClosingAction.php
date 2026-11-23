@@ -12,6 +12,7 @@ use MyInvoice\Repository\AccountingFrameworkRepository;
 use MyInvoice\Service\Accounting\AccountingFrameworkService;
 use MyInvoice\Service\Accounting\Closing\ClosingException;
 use MyInvoice\Service\Accounting\Closing\ClosingService;
+use MyInvoice\Service\Accounting\Closing\ClosingSteps;
 use MyInvoice\Service\Accounting\FindingRemedyService;
 use MyInvoice\Service\Accounting\PostingException;
 use MyInvoice\Service\Bank\Match\PaymentMatchAuditChecker;
@@ -52,9 +53,6 @@ final class ClosingAction
     use AccountingActionSupport;
     use GuardsAccountingMode;
 
-    private const RUNNABLE_STEPS  = ['precheck', 'depreciation', 'fx_revaluation', 'estimates', 'deferrals', 'provisions', 'income_tax', 'deferred_tax', 'stock'];
-    private const REVERTIBLE_STEPS = ['precheck', 'depreciation', 'fx_revaluation', 'estimates', 'deferrals', 'provisions', 'income_tax', 'deferred_tax', 'stock', 'close_books', 'open_next'];
-    private const ASSIST_STEPS = ['estimates', 'deferrals', 'provisions'];
     private const ASSIST_RULE_KEYS = [
         'provisions' => ['reserve.repairs.create', 'reserve.repairs.release'],
         'estimates' => ['estimate.asset', 'estimate.liability'],
@@ -128,7 +126,7 @@ final class ClosingAction
 
     public function fxCasePreview(Request $request, Response $response, array $args): Response
     {
-        if (!RequestAuthorization::isSessionAuth($request)) return Json::error($response, 'fx_case_session_only', 'Posouzení kurzových případů je dostupné pouze v přihlášené relaci.', 403);
+        if (!RequestAuthorization::actsAsSession($request)) return Json::error($response, 'fx_case_session_only', 'Posouzení kurzových případů je dostupné pouze v přihlášené relaci.', 403);
         if (!$this->requirePermission($request, $response, 'accounting', AccessLevel::READ, $err)) return $err;
         $supplierId = $this->currentSupplierId($request);
         if (!$this->requireDoubleEntry($this->db, $supplierId, $response, $err)) return $err;
@@ -595,7 +593,7 @@ final class ClosingAction
      */
     public function deferredTax504Preview(Request $request, Response $response, array $args): Response
     {
-        if (!RequestAuthorization::isSessionAuth($request) || !RequestAuthorization::allows($request, 'accounting', AccessLevel::READ)) {
+        if (!RequestAuthorization::actsAsSession($request) || !RequestAuthorization::allows($request, 'accounting', AccessLevel::READ)) {
             return Json::error($response, 'forbidden', 'Náhled vyžaduje přihlášenou relaci s oprávněním číst účetnictví.', 403);
         }
         $supplierId = $this->currentSupplierId($request);
@@ -799,7 +797,7 @@ final class ClosingAction
         $periodId = (int) ($args['id'] ?? 0);
         $step = (string) ($args['step'] ?? '');
 
-        if (!in_array($step, self::RUNNABLE_STEPS, true)) {
+        if (!in_array($step, ClosingSteps::RUNNABLE, true)) {
             return Json::error($response, 'validation_failed',
                 "Krok '{$step}' nelze spustit tímto endpointem — close_books = POST /close, open_next = POST /open-next.", 422);
         }
@@ -812,6 +810,9 @@ final class ClosingAction
         try {
             if ($step === 'precheck') {
                 $data = $this->closing->runPrecheck($supplierId, $periodId, $rowVersion, $meta);
+            } elseif (in_array($step, ['fx_revaluation', 'stock'], true) && ($body['status'] ?? null) === 'skipped') {
+                // Jen rok s uzávěrkou převzatou z původního systému (ověří služba).
+                $data = $this->closing->confirmStep($supplierId, $periodId, $step, 'skipped', $this->nullableString($body['note'] ?? null), $rowVersion, $meta);
             } elseif ($step === 'fx_revaluation') {
                 $bankRows = $this->parseBankRows($body['bank_rows'] ?? [], $response, $err);
                 if ($bankRows === null) return $err;
@@ -835,6 +836,10 @@ final class ClosingAction
                 $status = trim((string) ($body['status'] ?? ''));
                 if ($status === 'skipped') {
                     $data = $this->closing->confirmStep($supplierId, $periodId, 'income_tax', 'skipped', $this->nullableString($body['note'] ?? null), $rowVersion, $meta);
+                } elseif ($status === 'done' && !array_key_exists('amount', $body)) {
+                    // Potvrzení zaúčtované daně beze změny (zruší příznak přepočtu po vrácení kroku),
+                    // i daně zaúčtované mimo průvodce (ruční zápis, převzatá uzávěrka).
+                    $data = $this->closing->reconfirmIncomeTax($supplierId, $periodId, $this->nullableString($body['note'] ?? null), $rowVersion, $meta);
                 } elseif (!is_numeric($body['amount'] ?? null)) {
                     return Json::error($response, 'validation_failed', 'amount (splatná daň) musí být číslo.', 422);
                 } else {
@@ -844,7 +849,8 @@ final class ClosingAction
                     if ($reason !== null && mb_strlen($reason) > 500) {
                         return Json::error($response, 'validation_failed', 'reason může mít nejvýše 500 znaků.', 422);
                     }
-                    $data = $this->closing->runIncomeTax($supplierId, $periodId, (float) $body['amount'], $rowVersion, $meta, $reason);
+                    $activity = isset($body['activity']) && is_string($body['activity']) ? $body['activity'] : null;
+                    $data = $this->closing->runIncomeTax($supplierId, $periodId, (float) $body['amount'], $rowVersion, $meta, $reason, $activity);
                 }
             } elseif ($step === 'deferred_tax') {
                 // ČÚS 003 — odložená daň (592/481 závazek, 481/592 pohledávka).
@@ -947,7 +953,7 @@ final class ClosingAction
         $periodId = (int) ($args['id'] ?? 0);
         $step = (string) ($args['step'] ?? '');
 
-        if (!in_array($step, self::REVERTIBLE_STEPS, true)) {
+        if (!in_array($step, ClosingSteps::REVERTIBLE, true)) {
             return Json::error($response, 'validation_failed', "Neznámý krok uzávěrky '{$step}'.", 422);
         }
         $rowVersion = $this->rowVersion($request, $response, $err);
@@ -977,7 +983,7 @@ final class ClosingAction
         if ($rowVersion === null) return $err;
 
         $step = trim((string) ($body['step'] ?? ''));
-        if (!in_array($step, self::ASSIST_STEPS, true)
+        if (!in_array($step, ClosingSteps::ASSIST, true)
             || ($step === 'provisions' && !$this->periodUsesFramework504($supplierId, $periodId))) {
             return Json::error($response, 'validation_failed', 'Nepodporovaný krok asistovaného zápisu.', 422);
         }

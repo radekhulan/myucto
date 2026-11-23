@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Integration\Payroll;
 
-use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\Payroll\ApprovedRevisionPayslipRepository;
 use MyInvoice\Repository\Payroll\PayrollDocumentRepository;
@@ -52,7 +51,7 @@ final class ApprovedRevisionPayslipBatchServiceTest extends TestCase
             . bin2hex(random_bytes(6));
         putenv('MYINVOICE_DATA_DIR=' . $this->dataDir);
 
-        $container = Bootstrap::buildContainer();
+        $container = \MyInvoice\Tests\Support\PayrollTestContainer::build();
         $db = $container->get(Connection::class);
         $service = $container->get(ApprovedRevisionPayslipBatchService::class);
         $documents = $container->get(PayrollDocumentRepository::class);

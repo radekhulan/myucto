@@ -129,6 +129,10 @@ function jmhzOptions() {
         { code: '7', label: '§ 42 odst. 1 písm. h)', employment_types: ['3'] },
         { code: '15', label: '§ 18 písm. d)', employment_types: ['4'] },
       ],
+      employment_status_codes: [
+        { code: '1111', label: 'Zaměstnanci v pracovním poměru na dobu neurčitou' },
+        { code: '2119', label: 'Zaměstnavatelé – fyzické osoby jinde neuvedené' },
+      ],
     },
   }
 }
@@ -972,6 +976,61 @@ describe('EmploymentRegistrationPanel', () => {
     expect(m.prepare).toHaveBeenCalledWith(5, 'production', 91)
   })
 
+  it('offers Prepare again instead of sending a stale REGZEC25 change', async () => {
+    m.events.mockResolvedValue([{
+      id: 91,
+      employment_id: 5,
+      environment: 'test',
+      interaction: 'change',
+      action_code: 3,
+      effective_on: '2026-12-01',
+      source_kind: 'verified_change',
+      source_reference: 'personnel-change-19',
+      snapshot_fingerprint: 'c'.repeat(64),
+      approved_at: '2026-12-10 09:00:00',
+      consumed: true,
+      created: false,
+    }])
+    m.preview.mockResolvedValue({ ...preview, agenda_code: 'REGZEC25', interaction: 'change', action_code: 3 })
+    const prepared = {
+      obligation_id: 22,
+      part_id: 23,
+      artifact_id: 24,
+      status: 'ready',
+      row_version: 1,
+      environment: 'production',
+      agenda_code: 'REGZEC25',
+      interaction: 'change',
+      artifact_sha256: 'd'.repeat(64),
+      deadline,
+    }
+    m.prepare
+      .mockResolvedValueOnce({ ...prepared, submission_id: 21, created: false, vintage_expired: true })
+      .mockResolvedValueOnce({ ...prepared, submission_id: 31, created: true, vintage_expired: false, replaced_submission_id: 21 })
+
+    const wrapper = mountPanel()
+    await flushPromises()
+    await wrapper.get('[data-test="registration-event-select"]').setValue('91')
+    await wrapper.get('[data-test="registration-preview"]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-test="registration-prepare"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('[data-test="registration-vintage-expired"]').exists()).toBe(true)
+    const actions = wrapper.get('[data-test="registration-transport-actions"]')
+    expect(actions.text()).toContain('registration.reprepare')
+    expect(actions.text()).not.toContain('registration.send_production')
+
+    await actions.get('button').trigger('click')
+    await flushPromises()
+
+    expect(m.send).not.toHaveBeenCalled()
+    expect(m.prepare).toHaveBeenLastCalledWith(5, 'production', 91, 'auto', { replacesSubmissionId: 21 })
+    expect(wrapper.find('[data-test="registration-vintage-expired"]').exists()).toBe(false)
+    expect(wrapper.get('[data-test="registration-transport-actions"]').text())
+      .toContain('registration.send_production')
+  })
+
   it('creates an A5 source, selects it and previews the exact event', async () => {
     const event = {
       id: 92,
@@ -1242,6 +1301,44 @@ describe('EmploymentRegistrationPanel', () => {
     expect(m.approveEvent).toHaveBeenCalledWith(5, expect.objectContaining({
       interaction: 'termination',
       identifiers_verified_in_cssz_list: true,
+    }))
+  })
+
+  it('approves A2 with a reasoned exception when the corrective JMHZ is not accepted', async () => {
+    m.approveEvent.mockRejectedValueOnce({
+      response: { data: { error: {
+        code: 'registration_a2_jmhz_corrections_incomplete',
+        message: 'Odhlášku nejde schválit, dokud nejsou uzavřená opravná JMHZ.',
+      } } },
+    })
+    m.approveEvent.mockResolvedValueOnce({
+      id: 96,
+      employment_id: 5,
+      environment: 'production',
+      interaction: 'termination',
+      action_code: 2,
+      effective_on: '2026-09-15',
+      source_kind: 'employment_exit',
+      source_reference: 'termination',
+      snapshot_fingerprint: 'f'.repeat(64),
+      approved_at: '2026-09-15 11:00:00',
+      consumed: false,
+      created: true,
+    })
+    const wrapper = mountPanel()
+    await flushPromises()
+    await wrapper.get('[data-test="registration-event-new"]').trigger('click')
+    await wrapper.get('[data-test="registration-event-effective-on"]').setValue('2026-09-15')
+    await wrapper.get('[data-test="registration-event-save"]').trigger('click')
+    await flushPromises()
+
+    await wrapper.get('[data-test="registration-a2-override-reason"]').setValue('Opravné JMHZ pošleme do pátku.')
+    await wrapper.get('[data-test="registration-a2-override-save"]').trigger('click')
+    await flushPromises()
+
+    expect(m.approveEvent).toHaveBeenLastCalledWith(5, expect.objectContaining({
+      interaction: 'termination',
+      jmhz_corrections_override_reason: 'Opravné JMHZ pošleme do pátku.',
     }))
   })
 
@@ -1525,6 +1622,30 @@ describe('EmploymentRegistrationPanel', () => {
     const after = await openForeignA1('2027-01-04')
     expect(after.text()).toContain('zvláštní dlouhodobý pobyt')
     expect(after.text()).toContain('vyslání zaměstnavatelem')
+  })
+
+  it('offers the 2027 employment status codes (EDV REGZEC27, list with 2119) for a start from 1 January 2027', async () => {
+    const statusCodes = async (startOn: string) => {
+      const suggested = a1Suggested()
+      m.a1Profile.mockResolvedValue(a1View({
+        suggested: { ...suggested, employment: { ...suggested.employment, actual_start_on: startOn } },
+      }))
+      const wrapper = mountPanel()
+      await flushPromises()
+      await wrapper.get('[data-test="registration-a1-toggle"]').trigger('click')
+      await flushPromises()
+      return wrapper.get('[data-test="a1-employment-status-code"]').findAll('option')
+        .map(option => option.attributes('value'))
+    }
+
+    const before = await statusCodes('2026-12-31')
+    expect(before).toContain('1341')
+    expect(before).not.toContain('2219')
+
+    const after = await statusCodes('2027-01-04')
+    expect(after).toContain('2119')
+    expect(after).not.toContain('2219')
+    expect(after).not.toContain('1341')
   })
 
   it('keeps the A2 prefill disabled without a termination record', async () => {
@@ -2230,6 +2351,18 @@ describe('EmploymentRegistrationPanel', () => {
       .toMatchObject({ name: 'payroll-settings', query: { tab: 'employer' } })
   })
 
+  /** Průchod agentury: XML přihlášky se ověřovalo ručně, náhled teď řekne, že prošlo XSD. */
+  it('řekne, že XML náhledu prošlo schématem ČSSZ', async () => {
+    m.preview.mockResolvedValue({ ...preview, schema_validation: { valid: true, schema_version: 'REGZEC25' } })
+    const wrapper = mountPanel()
+    await flushPromises()
+    await wrapper.get('[data-test="registration-preview"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.get('[data-test="registration-preview-xsd-valid"]').text())
+      .toContain('payroll.people.registration.xml_schema_valid')
+  })
+
   /** UI-21: obec pracoviště se doplní z kódu obce, který přišel ze vztahu. */
   it('fills the workplace city from the municipality code of the relationship', async () => {
     m.searchMunicipalities.mockResolvedValue([
@@ -2336,6 +2469,61 @@ describe('EmploymentRegistrationPanel', () => {
     await flushPromises()
 
     expect(wrapper.get('[data-test="registration-a1-toggle"]').text()).toContain('a1.hide')
+  })
+
+  /*
+   * Nástup daleko v budoucnu: náhled částečného přihlášení neprojde a volba
+   * částečná / plná se dřív ukázala až po úspěšném náhledu. Účetní se má
+   * dozvědět jediné datum, dostat se k profilu A1 a mít volbu režimu po ruce.
+   */
+  it('na přihlášku je brzy: ukáže volbu režimu, cestu k profilu A1 a nehlásí chybu údajů', async () => {
+    m.preview.mockRejectedValue(rejection(
+      'registration_prezec_start_window_invalid',
+      'Přihlášku zaměstnance s nástupem 1. 1. 2027 půjde připravit a podat nejdřív 24. 12. 2026.',
+    ))
+    const wrapper = mountPanel()
+    await flushPromises()
+    expect(wrapper.find('[data-test="registration-mode"]').exists()).toBe(false)
+
+    await wrapper.get('[data-test="registration-preview"]').trigger('click')
+    await flushPromises()
+
+    const notice = wrapper.get('[data-test="registration-error"]')
+    expect(notice.text()).toContain('nejdřív 24. 12. 2026')
+    expect(notice.attributes('role')).toBe('status')
+    expect(wrapper.find('[data-test="registration-mode"]').exists()).toBe(true)
+
+    // Plná registrace má totéž okno: přepnutí pošle zvolený režim a server
+    // odpoví týmž dnem, žádná druhá rada.
+    m.preview.mockRejectedValue(rejection(
+      'registration_regzec_a1_start_window_invalid',
+      'Přihlášku zaměstnance s nástupem 1. 1. 2027 půjde připravit a podat nejdřív 24. 12. 2026.',
+    ))
+    await wrapper.get('[data-test="registration-mode"]').setValue('full')
+    await wrapper.get('[data-test="registration-preview"]').trigger('click')
+    await flushPromises()
+    expect(m.preview).toHaveBeenLastCalledWith(5, 'production', null, 'full')
+    expect(wrapper.get('[data-test="registration-error"]').text()).toContain('nejdřív 24. 12. 2026')
+    expect(wrapper.find('[data-test="registration-mode"]').exists()).toBe(true)
+
+    await wrapper.get('[data-test="registration-error-open-a1"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.get('[data-test="registration-a1-toggle"]').text()).toContain('a1.hide')
+  })
+
+  it('jiná chyba částečného přihlášení také nabídne plnou registraci', async () => {
+    m.preview.mockRejectedValue(rejection(
+      'registration_prezec_foreign_requires_full_registration',
+      'PREZEC se podává jen zaměstnanci s českým státním občanstvím.',
+    ))
+    const wrapper = mountPanel()
+    await flushPromises()
+
+    await wrapper.get('[data-test="registration-preview"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.get('[data-test="registration-error"]').attributes('role')).toBe('alert')
+    expect(wrapper.find('[data-test="registration-mode"]').exists()).toBe(true)
   })
 
   it('UI-26: po uložení kmenových dat se profil A1 načte znovu', async () => {

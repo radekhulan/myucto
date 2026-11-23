@@ -29,6 +29,12 @@ use MyInvoice\Service\Report\EpoPayerBlockBuilder;
  * ne výpočet: kam peníze poslat a jestli je místo výplaty započíst. Bez UI, které
  * se na to zeptá, není z čeho je odvodit; vynechaná věta znamená výplatu běžnou
  * cestou, dosazená by tvrdila volbu, kterou uživatel neudělal.
+ *
+ * ## Zástupce
+ *
+ * `$meta['representation']` (výstup `TaxRepresentationService::at()`) naplní
+ * `zast_*` a `opr_*` ve `VetaP` stejnou cestou jako ostatní podání. Žádost
+ * nemá lhůtu, kterou by kód 4b nebo 4c prodlužoval, takže upozornění nevrací.
  */
 final class TaxBonusRequestXmlBuilder
 {
@@ -62,7 +68,7 @@ final class TaxBonusRequestXmlBuilder
      *   verze_sw?:string,verze_pis?:string,zad_typ?:string,
      *   kc_ponech?:int,kc_vraceni?:int,kc_prevedeni?:int,
      *   vr_zpusob?:string,vr_c_komds?:string,vr_pbu?:string,vr_k_bank?:string,
-     *   vr_naz_bank?:string,vr_sp_symb?:string
+     *   vr_naz_bank?:string,vr_sp_symb?:string,representation?:array<string,mixed>
      * } $meta
      * @return array{xml:string,warnings:list<string>}
      */
@@ -148,7 +154,7 @@ final class TaxBonusRequestXmlBuilder
         // {@see EpoPayerBlockBuilder}, ne {@see EpoSupplierBlockBuilder}.
         // `sest_email` znají jen vyúčtování, žádosti o bonus ho v XSD nemají.
         $vetaP = $dom->createElement('VetaP');
-        EpoPayerBlockBuilder::fillVetaP($vetaP, $supplier, false);
+        EpoPayerBlockBuilder::fillVetaP($vetaP, $supplier, false, representation: (array) ($meta['representation'] ?? []));
         $root->appendChild($vetaP);
 
         // ── VetaV — vrácení bonusu (část a) tiskopisu) ───────────────────────

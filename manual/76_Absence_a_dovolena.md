@@ -32,6 +32,7 @@ Kapitolu otevřete, když:
 | Osobní překážka, za kterou náhrada nepřísluší | **Překážka na straně zaměstnance bez náhrady mzdy** | jen neodpracované hodiny |
 | Prostoj, počasí, částečná nezaměstnanost, částečná práce | **Překážka na straně zaměstnavatele** | náhrada mzdy ve mzdě |
 | Mateřská, otcovská, rodičovská | **Peněžitá pomoc v mateřství**, **Otcovská**, **Rodičovská** | případ dávky a hlášení zdravotní pojišťovně |
+| Placené volno za práci ve svátek při hodinovém odměňování | **Placené náhradní volno za práci ve svátek** | po schválení propojení s nárokem v [hodinových podkladech](79_Rychly_mesicni_vstup.md#79812-vypocet-hodinove-mzdy-a-dolozeni-naroku); samotné schválení peníze nevytváří |
 | Neplacené volno, volno za přesčas, neomluvená absence | **Neplacené volno**, **Náhradní volno za přesčas**, **Neomluvená absence** | krácení mzdy, hlášení |
 | Veřejná funkce bez náhrady | **Výkon veřejné funkce (volno bez náhrady)** | jen neodpracované hodiny |
 | Vztah trval po neplatném skončení bez přiznané náhrady | **Trvání vztahu po neplatném skončení (bez náhrady mzdy)** | vyloučená doba v JMHZ a ELDP |
@@ -66,7 +67,8 @@ Kapitolu otevřete, když:
 3. V části **Nová absence** zvolte **Druh absence** a vyplňte **Od** a **Do**.
    Pod výběrem druhu se u některých druhů zobrazí vysvětlení, co se
    s nepřítomností stane.
-4. U druhu s náhradou mzdy vyberte **Schválený průměr za hodinu**. Chybí-li,
+4. U druhu s náhradou mzdy vyberte **Schválený průměr za hodinu**
+   (kromě placeného volna za svátek propojeného s hodinovým nárokem). Chybí-li,
    klikněte na **Přejít na Průměrný výdělek** a průměr nejdřív založte
    ([§ 76.4](#764-krok-za-krokem-prumerny-vydelek-pro-nahrady)).
 5. Začíná nebo končí nepřítomnost částí směny, vyplňte **Čerpání první den
@@ -82,6 +84,16 @@ Kapitolu otevřete, když:
 přibylo čerpání v **Historii dovolené**, u nepřítomnosti s náhradou vznikl
 mzdový vstup náhrady. U nemoci, ošetřovného nebo mateřské se nad seznamem
 objeví zpráva o založeném případu dávky a odkaz **Otevřít případy dávek**.
+
+**Placené náhradní volno za práci ve svátek** je samostatný druh.
+Samotné schválení této nepřítomnosti peněžní náhradu nevytvoří.
+V hodinových podkladech propojte schválenou nepřítomnost s doloženým
+nárokem za původní práci ve svátek a zadejte přesnou dobu čerpání;
+náhradu určí hodinový výpočet z příslušného průměru. Původní druh
+**Náhradní volno za přesčas** zůstává neplacený a nesmí se s placeným
+svátečním volnem zaměnit. Pracovní souhrn JMHZ obsahuje toto placené
+volno samostatně; zároveň je již zahrnuto v neodpracovaných a placených
+hodinách. Nepřičítejte je do úhrnů podruhé.
 
 > [!WARNING]
 > Nepřítomnost nezadávejte zároveň v docházce i tady. Schválenou nepřítomnost
@@ -100,7 +112,44 @@ Průměrný výdělek se zakládá jednou za čtvrtletí pro každý pracovní v
 3. Projděte návrhy. U každého vztahu vidíte skutečný průměr nebo
    pravděpodobný výdělek se zdrojem, nebo důvod, proč návrh nevznikl.
 4. Klikněte na **Vybrat připravené na stránce** a pak na **Založit a schválit
-   vybrané**.
+   vybrané**. Vztah, jehož návrh mezitím přestal být připravený, se
+   neschválí; ostatní ano. Pod přehledem ho uvidíte jménem s důvodem
+   a odkazem na kartu osoby.
+
+**Pravděpodobný výdělek pro více vztahů najednou** (typicky brigádníci na
+dohodu, kteří mají sazbu jen v importovaných odměnách a návrh jim vyšel
+z hodinové minimální mzdy):
+
+1. V části **Nastavit pravděpodobný výdělek vybraným** zaškrtněte vztahy.
+   Pomůže **Rychlý výběr**: **Dohody o provedení práce** nebo **Průměr
+   z minimální mzdy**.
+2. Vyplňte **Hodinový výdělek (Kč)** a **Odůvodnění**, z čeho částka vychází
+   (§ 355 odst. 2 zákoníku práce). Odůvodnění je povinné.
+3. Klikněte na **Nastavit vybraným**.
+
+Částka se uloží do platné verze podmínek vztahu jako jejich oprava, ne jako
+nová verze, a za zvolené čtvrtletí vznikne nová schválená revize průměru.
+Dosavadní schválený průměr s jinou částkou tím přejde do stavu nahrazený.
+Vztah, který už má stejnou částku, zůstane beze změny.
+
+Pod přehledem se ukáže souhrn a jménem každý vztah, u kterého se nastavení
+neprovedlo, s dalším krokem:
+
+- Schválený průměr už použil **uzavřený mzdový běh** některého měsíce
+  čtvrtletí: aplikace ho tiše nemění. Otevřete běh k opravě a nastavení
+  zopakujte. Pokud z běhu už vzniklo hlášení JMHZ, po schválení opravy
+  podejte opravné hlášení.
+- Za čtvrtletí **čeká ke schválení jiná revize průměru**: schvalte ji, nebo ji
+  smažte v detailu osoby, a nastavení zopakujte.
+
+Když je běh čtvrtletí otevřený k opravě a hlášení JMHZ za něj už odešlo,
+průměr se změní a u vztahu se ukáže upozornění na opravné hlášení. Když
+podmínky vztahu opravit nejde (zúčtované období, ukončený vztah), průměr se
+nastaví a upozornění řekne proč. Pro další čtvrtletí pak pravděpodobný
+výdělek zadejte na kartě vztahu.
+
+Akce vyžaduje právo spravovat docházku a absence i právo spravovat pracovní
+vztahy.
 
 **Pro jednoho zaměstnance:**
 
@@ -109,8 +158,14 @@ Průměrný výdělek se zakládá jednou za čtvrtletí pro každý pracovní v
 2. V části **Nový snapshot průměrného výdělku** zkontrolujte předvyplněná
    čísla z uzavřených mzdových běhů. Poměrnou část odměn za období delší než
    čtvrtletí doplňte ručně do **Poměrná část delších odměn (Kč)**.
-3. Klikněte na **Vypočítat snapshot**.
-4. Zkontrolujte výsledek a klikněte na **Schválit**.
+3. Zkontrolujte skutečně odpracovanou dobu. **H:MM** i desetinné hodiny
+   s nejvýše třemi místy zachovají přesný zlomek; prázdná doba ani počet
+   dnů nejsou nula a hláška jmenuje pole, které je potřeba doplnit. Vztah,
+   který v rozhodném období ještě netrval, má předvyplněno 0 h a 0 dnů.
+   Nezměněný uložený smíšený součet aplikace zachová přesně, i když jej
+   ukazuje se sekundami.
+4. Klikněte na **Vypočítat snapshot**.
+5. Zkontrolujte výsledek a klikněte na **Schválit**.
 
 **Nový zaměstnanec** (méně než 21 odpracovaných dnů): na kartě pracovního
 vztahu v `Mzdy → Zaměstnanci` klikněte na **Zadat pravděpodobný výdělek
@@ -132,6 +187,29 @@ Průměr jde založit jen na čtvrtletí, ve kterém pracovní vztah trval. Vzta
 který začíná po konci čtvrtletí nebo skončil před jeho začátkem, aplikace
 odmítne a hromadné založení ho přeskočí. Průměr tak nevznikne omylem na jiném
 vztahu téže osoby.
+
+**Přepočítat náhrady z nového průměru.** Náhrada mzdy má pevnou částku z průměru,
+který platil při jejím zadání. Když průměr čtvrtletí později změníte (nová revize,
+pravděpodobný výdělek), náhrady se samy nepřepočítají. Udělejte to výslovně:
+
+1. V záložce **Průměrný výdělek** klikněte u schváleného průměru (nebo v hromadném
+   přehledu za zvolené čtvrtletí) na **Přepočítat náhrady z nového průměru**.
+2. Náhled vypíše po měsících osobu, náhradu, starou a novou částku z dnes
+   schváleného průměru a co se stane:
+   - dovolená zadaná s daty: přepočítá se částka (původní vstup se zruší a vznikne
+     nový se stejnými hodinami),
+   - náhrada z importu hodin: stornuje se a založí znovu z nového průměru,
+   - překážky s dorovnáním, náhrada dorovnaná na zaručené minimum, nemoc:
+     **ručně**, upravte je v Mzdových vstupech.
+3. Klikněte na **Přepočítat**. Kdo smí schvalovat mzdové vstupy, dostane nové
+   náhrady rovnou schválené, ostatním vzniknou koncepty ke schválení.
+
+Schválený mzdový běh se nemění nikdy: měsíc se schváleným během náhled označí
+a navede na **Vyžádat opravu** a **Otevřít opravu** ([§ 80.5](80_Mzdove_behy.md#805-krok-za-krokem-oprava-schvaleneho-mesice));
+v otevřené opravě přepočet spusťte znovu. U otevřeného (neschváleného) běhu se
+po přepočtu obnoví podklady a běh se vrátí k výpočtu, k tomu je potřeba i právo
+spočítat mzdy. Každý přepočet se zapíše do auditního záznamu a do historie běhu.
+Opakované spuštění nic nezmění, náhrady z dnešního průměru už náhled neukáže.
 
 ## 76.5 Krok za krokem: dovolená
 
@@ -263,6 +341,8 @@ listu se doba vykáže jako vyloučená doba.
 | *„Pro tento vztah není spočítaný žádný průměrný výdělek.“* | Chybí průměr za čtvrtletí | Klikněte na **Přejít na Průměrný výdělek** a založte ho ([§ 76.4](#764-krok-za-krokem-prumerny-vydelek-pro-nahrady)). |
 | *„Průměrný výdělek … čeká na schválení.“* | Průměr je založený, ale neschválený | Na záložce **Průměrný výdělek** klikněte na **Schválit**. |
 | Návrh průměru: *„Skutečný průměr z uzavřených běhů odvodit nelze a u pracovního vztahu není zadaný pravděpodobný výdělek“* | Nový vztah bez podkladů | Na kartě vztahu klikněte na **Zadat pravděpodobný výdělek (§ 355 ZP)**. |
+| Náhled hodinové mzdy: *„Chybí schválený průměrný výdělek za N. čtvrtletí RRRR“* | Příplatek za noc nebo víkend se počítá z průměru, který za čtvrtletí chybí | Klikněte na **Doplnit průměrný výdělek**: otevře se tento formulář s předvyplněným vztahem a čtvrtletím. U hodinově odměňovaného vztahu průměr doplní i **Doplnit pravděpodobný výdělek ze sazby** v kontrole mzdového běhu. |
+| Mzdový běh: *„Náhrada nebo pohotovost nemá doložený průměr alespoň v účinném hodinovém minimu“* | Průměr použitý pro náhradu je nižší než hodinová minimální mzda, nebo chybí | Odkaz u blokace otevře tento formulář s předvyplněným vztahem a čtvrtletím měsíce běhu. Průměr opravte, schvalte a v běhu klikněte na **Obnovit podklady**. |
 | Návrh průměru nevznikl, chybí běh za měsíc | V rozhodném období je měsíc bez mzdového běhu, i když vztah trval | Doplňte evidenci (mzdový běh za ten měsíc). |
 | *„Překážka je schválená, ale náhrada mzdy nevznikla“* | Na dny překážky nejsou rozvržené směny | Klikněte na **Rozvrhnout směny v docházce**, nebo zadejte náhradu jako mzdový vstup. |
 | *„U překážky chybí druh … schválit ji nelze.“* | Překážka zapsaná bez druhu | Zrušte ji a zapište znovu s vybraným **Druh překážky**. |
@@ -274,6 +354,7 @@ listu se doba vykáže jako vyloučená doba.
 | Ruční krácení dovolené aplikace odmítne | Chybí schválená **Neomluvená absence** v témže roce, nebo krácení překračuje její hodiny | Zapište a schvalte neomluvenou absenci. |
 | Výpočet nároku má štítek **Doplnit** | Chybí podmínky, docházka, nebo je potřeba posoudit jiné absence | Klikněte na štítek a doplňte, co řádek vyjmenuje. |
 | Hromadné založení průměrů: *„Podklady se od načtení seznamu změnily.“* | Mezitím se změnila data | Zkontrolujte výběr a odešlete znovu. |
+| Přepočet náhrad hlásí schválený běh | Měsíc má schválený mzdový běh | Vyžádejte a otevřete opravu běhu ([§ 80.5](80_Mzdove_behy.md#805-krok-za-krokem-oprava-schvaleneho-mesice)), pak přepočet spusťte znovu. |
 | Měsíc s mateřskou nejde sestavit do hlášení | Měsíc sahá na očekávaný den porodu, ale den porodu není doplněný | Klikněte na **Doplnit den porodu**. |
 | Den porodu je zapsaný chybně | Den porodu jde doplnit jen jednou | Zrušte nepřítomnost a zapište ji znovu. |
 
@@ -283,16 +364,22 @@ listu se doba vykáže jako vyloučená doba.
 
 Záložka **Průměrný výdělek** vede čtvrtletní snapshot průměrného nebo
 pravděpodobného hodinového výdělku. Skutečný průměr používá započitatelnou
-mzdu a odpracovaný čas v rozhodném období. Formuláře zadávají částky v Kč
-a čas v hodinách či dnech, na haléře a minuty je aplikace převádí až při
-uložení. Stejně se v hodinách zadává částečný první nebo poslední den
-absence i ruční změna dovolené. Přesný důvod chyby zůstane viditelný přímo
-u formuláře.
+mzdu a odpracovaný čas v rozhodném období. U měsíční mzdy návrh do
+odpracovaného času počítá i svátek v obvyklý pracovní den, za který se mzda
+nekrátí (doba, za kterou mzda přísluší, § 353 odst. 2 zákoníku práce);
+u hodinové mzdy se svátek placený náhradou mzdy nezapočítává. Formuláře zadávají částky v Kč
+a čas v hodinách či dnech. Částky se ukládají v haléřích; skutečně
+odpracovaná doba průměru se zachová přesně, bez vynuceného zaokrouhlení
+na minuty. Staré celominutové podklady se nemění. Částečný první nebo
+poslední den absence a ruční změna dovolené se nadále zadávají
+s celominutovou přesností. Přesný důvod chyby zůstane viditelný přímo
+u formuláře. Neznámý počet odpracovaných dnů se z hodin nedopočítává.
 
 Při méně než 21 odpracovaných dnech je povinný pravděpodobný hodinový
-výdělek a jeho odůvodnění. Zadává se jednou na kartě pracovního vztahu
-a uloží se do revize podmínek, takže platí, dokud ho nová revize nezmění.
-Formulář průměru ho nabídne a označí, že průměr stojí na pravděpodobném
+výdělek a jeho odůvodnění. Přímé zadání na kartě pracovního vztahu se
+ukládá do revize podmínek a platí, dokud ho nová revize nezmění.
+Doložený návrh lze posoudit a upravit i v jednotlivém formuláři průměru.
+Formulář označí, že průměr stojí na pravděpodobném
 výdělku. U běžného vztahu se pole nenabízí, průměr se spočítá z uzavřených
 mzdových běhů.
 
@@ -303,10 +390,27 @@ navrhne podle § 355 odst. 2 zákoníku práce v tomto pořadí:
 1. z hrubé mzdy dosažené od počátku rozhodného období: započitatelná mzda
    a odpracované hodiny z uzavřených mzdových běhů od nástupu, typicky
    z prvního uzavřeného měsíce;
-2. ze sjednané měsíční mzdy přepočtené na hodinu koeficientem 4,348
+2. z účinné sjednané hodinové sazby, je-li vztah hodinově odměňovaný;
+3. ze sjednané měsíční mzdy přepočtené na hodinu koeficientem 4,348
    (týdenní pracovní doba × 4,348, § 356 odst. 2);
-3. nemá-li vztah ani sjednanou mzdu, z minimální mzdy účinné v rozhodném
+4. nemá-li vztah ani sjednanou mzdu, z minimální mzdy účinné v rozhodném
    období přepočtené na hodinu při 40hodinové týdenní době.
+
+**Automaticky ze sjednané sazby.** U hodinově odměňovaného vztahu, kterému
+za čtvrtletí chybí průměr a skutečný průměr odvodit nejde, se pravděpodobný
+výdělek založí a schválí automaticky ze sjednané hodinové sazby (nebo
+z pravděpodobného výdělku zadaného na kartě vztahu) s odůvodněním
+*„Automaticky ze sjednané hodinové sazby (§ 355 odst. 2 ZP)“*. Stane se to
+při schválení docházky měsíce a při akci **Počítat ze směn**; v kontrole
+před zahájením mzdového běhu to pro všechny vztahy měsíce, kterým průměr
+chybí, udělá tlačítko **Doplnit pravděpodobný výdělek ze sazby**. Mají-li
+se zohlednit další obvyklé složky výdělku, opravte průměr novou revizí
+v jednotlivém formuláři. Za čtvrtletí, které už nějaký průměr má, se nic
+automaticky nezakládá. Návrh ze sjednané sazby jde založit i hromadně.
+
+Přesnou dobu přesčasu zúčtovaného až v jiném čtvrtletí ověřuje návrh
+proti jeho původnímu podkladu a zúčtování. Při chybějící či rozporné
+době ji formulář nenahradí nulou; nejprve opravte podklad.
 
 Odůvodnění návrhu uvádí zdroj i čísla. Chybí-li běh v měsíci, kdy vztah už
 trval, návrh nevznikne a je potřeba doplnit evidenci. Není-li z čeho
@@ -325,18 +429,36 @@ z převzatých mezd předchozího programu se hromadně neschvaluje; založte ho
 jednotlivě a převzatou hrubou mzdu upravte na započitatelnou (náhrady za
 dovolenou nebo svátek do průměru nepatří).
 
-**Spodní hranice.** Je-li vypočtený průměr nižší než minimální mzda, použije
-se podle § 357 odst. 1 zákoníku práce minimální mzda. Hranice platí pro
-skutečný i pravděpodobný výdělek a její výše se bere z legislativní sady
-účinné pro rozhodné období. Ve stopě výpočtu je vidět, že se uplatnila
-a z jaké hodnoty.
+**Spodní hranice.** Je-li průměr nižší než příslušná minimální mzda,
+použije se podle § 357 odst. 1 zákoníku práce minimální mzda. Hranice
+platí pro skutečný i pravděpodobný výdělek; ve stopě je vidět její
+uplatnění a výchozí hodnota. Vyjde-li návrh pod minimální mzdou, aplikace
+na to upozorní už v návrhu: tak nízký výdělek bývá chybou v podkladech
+(sazba, sjednaná mzda, odpracované hodiny). Sjednanou měsíční mzdu, ze
+které vychází méně než minimální mzda za hodinu (typicky hodinová sazba
+zapsaná do pole měsíční mzdy), aplikace jako pravděpodobný výdělek
+nenabídne; opravte podmínky vztahu, nebo pravděpodobný výdělek zadejte
+s odůvodněním na kartě vztahu.
+
+U výslovně hodinově odměňovaného vztahu používají náhrady schválený
+průměr povýšený alespoň na aktuální minimum příslušného účinného úseku.
+Schválený průměr zůstává čtvrtletní; při výpočtu náhrady se hranice
+znovu ověří podle skutečného dne náhrady.
+Platí to i při čerpání dovolené, překážkách, náhradě při DPN,
+pohotovosti nebo nárocích při skončení vztahu. Rozhoduje doložená
+**stanovená** týdenní doba, nikoli pouze kratší sjednaný úvazek.
+Neurčený či rozporný režim výpočet zablokuje konkrétní příčinou;
+mezery v údajích se nesmějí doplňovat odhadem nebo nulou. Podklady
+stanovené doby a minima doplňte v
+[zásadách vztahu](79_Rychly_mesicni_vstup.md#79813-minimalni-mzda-a-doplatek).
 
 > [!WARNING]
-> Aplikace nerozlišuje **stanovenou** kratší týdenní pracovní dobu (§ 79
-> odst. 2 a 3 zákoníku práce), která hodinové minimum zvyšuje, od
-> **sjednané** kratší doby podle § 80, která ho nezvyšuje. U provozu s kratší
-> stanovenou týdenní dobou hodinovou hranici ověřte a případný rozdíl
-> vypořádejte mimo automatický výpočet.
+> Dosavadní výpočty mimo výslovný hodinový režim automaticky nerozlišují
+> **stanovenou** kratší týdenní pracovní dobu (§ 79 odst. 2 a 3 zákoníku
+> práce) od **sjednané** kratší doby podle § 80. U takového provozu ověřte
+> dosavadní hodinovou hranici a případný rozdíl vypořádejte podle
+> doložených podkladů. Nové hodinové posouzení neznamená zpětnou změnu
+> uzavřených průměrů a mezd.
 
 ### 76.11.2 Dovolená: nárok, čerpání a náhrada
 

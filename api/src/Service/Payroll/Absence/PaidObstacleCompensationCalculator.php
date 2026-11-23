@@ -38,6 +38,7 @@ final class PaidObstacleCompensationCalculator
         array $segments,
         array $holidays,
         PayrollWageRounding $rounding = PayrollWageRounding::Ceil,
+        array $averagesByDate = [],
     ): array {
         if ($averageHourlyMinor <= 0) {
             throw new InvalidArgumentException('Náhrada mzdy za překážku vyžaduje kladný hodinový průměr.');
@@ -46,6 +47,7 @@ final class PaidObstacleCompensationCalculator
             throw new InvalidArgumentException('Sazba náhrady mzdy musí být 0,01 až 100 % průměru.');
         }
         $minutesByPeriod = [];
+        $weightedByPeriod = [];
         foreach ($segments as $segment) {
             $date = (string) $segment['local_date'];
             $eligible = (int) $segment['eligible_minutes'];
@@ -57,14 +59,19 @@ final class PaidObstacleCompensationCalculator
             }
             $period = substr($date, 0, 7) . '-01';
             $minutesByPeriod[$period] = ($minutesByPeriod[$period] ?? 0) + $eligible;
+            $average = $averagesByDate[$date] ?? $averageHourlyMinor;
+            if (!is_int($average) || $average <= 0) throw new InvalidArgumentException('Úsek překážky nemá platný průměrný výdělek.');
+            $weightedByPeriod[$period] = ($weightedByPeriod[$period] ?? 0) + $average * $eligible;
         }
         ksort($minutesByPeriod);
 
         $amounts = [];
         $fullRate = [];
         foreach ($minutesByPeriod as $period => $minutes) {
-            $amounts[$period] = self::amount($averageHourlyMinor, $minutes, $rateBasisPoints, $rounding);
-            $fullRate[$period] = self::amount($averageHourlyMinor, $minutes, PayrollObstacleKind::FULL_RATE_BASIS_POINTS, $rounding);
+            $amounts[$period] = $averagesByDate === [] ? self::amount($averageHourlyMinor, $minutes, $rateBasisPoints, $rounding)
+                : $rounding->mode()->roundFraction($weightedByPeriod[$period] * $rateBasisPoints, 60 * PayrollObstacleKind::FULL_RATE_BASIS_POINTS * 100) * 100;
+            $fullRate[$period] = $averagesByDate === [] ? self::amount($averageHourlyMinor, $minutes, PayrollObstacleKind::FULL_RATE_BASIS_POINTS, $rounding)
+                : $rounding->mode()->roundFraction($weightedByPeriod[$period], 60 * 100) * 100;
         }
 
         return ['minutes' => $minutesByPeriod, 'amounts' => $amounts, 'full_rate_amounts' => $fullRate];

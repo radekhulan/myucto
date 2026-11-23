@@ -23,7 +23,7 @@ trait PaymentReadCorruptionSandbox
         $config = $container->get(Config::class);
         $source = (string) $container->get(Connection::class)->pdo()->query('SELECT DATABASE()')->fetchColumn();
         self::assertStringEndsWith('_test', $source);
-        self::assertContains($config->get('db.host'), ['localhost', '127.0.0.1', '::1']);
+        self::assertTrue(\MyInvoice\Tests\Support\TestDatabaseHost::isAllowed((string) ($config->get('db.host'))), 'Testovací DB musí být lokální nebo v db.test_allowed_hosts.');
         foreach ($triggers as $trigger) self::assertContains($trigger, [
             'unit_payment_export_items_immutable_delete', 'unit_payment_audit_immutable_delete',
             'unit_payment_exports_immutable_update', 'unit_payment_operations_immutable_update',
@@ -64,7 +64,7 @@ trait PaymentReadCorruptionSandbox
         }
         if (self::$paymentReadServer !== null && self::$paymentReadSchema !== null) {
             self::assertMatchesRegularExpression('/^myucto_property_read_[a-f0-9]{10}_test$/D', self::$paymentReadSchema);
-            self::$paymentReadServer->exec('DROP DATABASE ' . DatabaseCloner::quote(self::$paymentReadSchema));
+            DatabaseCloner::dropDatabase(self::$paymentReadServer, self::$paymentReadSchema);
             self::$paymentReadServer = null;
             self::$paymentReadSchema = null;
         }

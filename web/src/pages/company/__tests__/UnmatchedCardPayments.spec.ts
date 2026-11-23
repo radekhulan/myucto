@@ -34,7 +34,7 @@ vi.mock('@/composables/useFormat', () => ({
   formatDate: (s: string) => s,
   formatMoney: (amount: number, currency: string) => `${amount.toFixed(2)} ${currency}`,
 }))
-vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }))
+vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => key, locale: { value: 'cs' } }) }))
 vi.mock('vue-router', () => ({ useRouter: () => ({ push: m.push }), RouterLink: { template: '<a><slot /></a>' } }))
 
 /** Syntetická data: dvě karty, jedna v evidenci, druhá neznámá. */

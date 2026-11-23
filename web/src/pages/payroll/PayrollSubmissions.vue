@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { formatDateTime } from '@/composables/useFormat'
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { isAxiosError } from 'axios'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
@@ -28,18 +28,18 @@ import PayrollStatutoryObligationsPanel from './PayrollStatutoryObligationsPanel
 import PayrollSigningCertificatePanel from './PayrollSigningCertificatePanel.vue'
 import PayrollTransportHistoryPanel from './PayrollTransportHistoryPanel.vue'
 import PayrollExternalJmhzSubmissionsPanel from './PayrollExternalJmhzSubmissionsPanel.vue'
+import PayrollJmhzExternalCorrectionRoot from './PayrollJmhzExternalCorrectionRoot.vue'
 import PayrollSubmissionQueuePanel from './PayrollSubmissionQueuePanel.vue'
 import PayrollRegistrationCompletionPanel from './PayrollRegistrationCompletionPanel.vue'
+import PayrollRegistrationA1BatchPanel from './PayrollRegistrationA1BatchPanel.vue'
 import TaxSubmissions from '@/pages/reports/TaxSubmissions.vue'
 import { payrollWorkingPeriod } from './payrollComponentsUi'
 import ColumnPicker from '@/components/ui/ColumnPicker.vue'
 import DensityToggle from '@/components/ui/DensityToggle.vue'
 import { useTablePrefs, type ColumnDef } from '@/composables/useTablePrefs'
+import { PAYROLL_SUBMISSION_TABS, type PayrollSubmissionTab } from './payrollSubmissionTabs'
 
-type SubmissionTab =
-  'monthly' | 'queue' | 'transport' | 'regzel' | 'registration_completion' | 'jmhz'
-  | 'discount_intents' | 'sickness' | 'eldp'
-  | 'health' | 'tax_statements' | 'statutory' | 'other' | 'inbox' | 'certificate'
+type SubmissionTab = PayrollSubmissionTab
 
 const { t } = useI18n()
 const auth = useAuthStore()
@@ -86,13 +86,9 @@ const activeTab = ref<SubmissionTab>('monthly')
 // tenhle měsíc udělat, fronta odpovídá na navazující „a co z toho mám
 // připravené a ještě to neodešlo" — napříč agendami i zaměstnanci. Bez ní
 // se ta odpověď skládala z pěti různých obrazovek.
-// Dohlášení údajů (A3) stojí hned za registrací zaměstnavatele: obojí je
-// registrační agenda ČSSZ mimo měsíční hlášení.
-const tabs: SubmissionTab[] = [
-  'monthly', 'queue', 'transport', 'regzel', 'registration_completion', 'jmhz',
-  'discount_intents', 'sickness', 'eldp',
-  'health', 'tax_statements', 'statutory', 'other', 'inbox', 'certificate',
-]
+// Přihlášky (A1) a dohlášení údajů (A3) stojí hned za registrací
+// zaměstnavatele: všechno je registrační agenda ČSSZ mimo měsíční hlášení.
+const tabs: readonly SubmissionTab[] = PAYROLL_SUBMISSION_TABS
 /*
  * `null` = počet neznáme (načtení odznaku selhalo), ne „nula nevyřízených".
  * Číslo 0 tu dřív zastupovalo obojí, takže po výpadku odznak tiše zmizel
@@ -126,6 +122,7 @@ function storedEnvironment(): PayrollRegzelEnvironment {
       sessionStorage.removeItem(ENVIRONMENT_STORAGE_KEY)
       return 'production'
     }
+    if (route.query.environment === 'test' || route.query.environment === 'production') return route.query.environment
     return sessionStorage.getItem(ENVIRONMENT_STORAGE_KEY) === 'test' ? 'test' : 'production'
   } catch {
     return 'production'
@@ -337,7 +334,7 @@ watch(activeTab, (tab) => {
 
 watch(overviewPeriod, (period) => {
   if (route.query.period === period) return
-  void router.replace({ query: { ...route.query, period } })
+  void router.replace({ query: { ...route.query, period, submission: undefined } })
 })
 
 async function applySuggestedPeriod() {
@@ -385,7 +382,7 @@ const tabGroups: { key: 'extraordinary' | 'more'; labelKey: string; tabs: Submis
   {
     key: 'extraordinary',
     labelKey: 'payroll.submissions.tabs_extraordinary',
-    tabs: ['statutory', 'regzel', 'registration_completion', 'discount_intents', 'sickness', 'eldp', 'other'],
+    tabs: ['statutory', 'regzel', 'registration_a1', 'registration_completion', 'discount_intents', 'sickness', 'eldp', 'other'],
   },
   { key: 'more', labelKey: 'payroll.submissions.tabs_more', tabs: ['inbox', 'certificate'] },
 ]
@@ -418,6 +415,31 @@ function readDetailsState(): Record<string, boolean> {
 }
 
 const detailsOpen = ref<Record<string, boolean>>(readDetailsState())
+const requestedSubmissionId = computed(() => {
+  const value = Number(route.query.submission)
+  return Number.isSafeInteger(value) && value > 0 ? value : null
+})
+
+function clearRequestedSubmission() {
+  if (requestedSubmissionId.value !== null) void router.replace({ query: { ...route.query, submission: undefined } })
+}
+
+async function openExternalRoot(payload: { submissionId: number; period: string }) {
+  overviewPeriod.value = payload.period
+  await nextTick()
+  void router.replace({ query: { ...route.query, period: payload.period, submission: String(payload.submissionId) } })
+}
+
+watch([requestedSubmissionId, activeTab], ([id, tab]) => {
+  if (id !== null) detailsOpen.value = { ...detailsOpen.value, [tab]: true }
+}, { immediate: true })
+
+watch(() => route.query.period, value => {
+  if (typeof value === 'string' && /^\d{4}-\d{2}$/.test(value)) overviewPeriod.value = value
+})
+watch(() => route.query.environment, value => {
+  if (value === 'production' || (value === 'test' && submissionTestAllowed.value)) environment.value = value
+})
 
 function rememberDetails(tab: string, event: Event) {
   const open = (event.target as HTMLDetailsElement).open
@@ -579,6 +601,11 @@ function rememberDetails(tab: string, event: Event) {
       v-model:environment="environment"
     />
 
+    <PayrollRegistrationA1BatchPanel
+      v-else-if="activeTab === 'registration_a1'"
+      v-model:environment="environment"
+    />
+
     <PayrollRegistrationCompletionPanel
       v-else-if="activeTab === 'registration_completion'"
       v-model:environment="environment"
@@ -663,6 +690,8 @@ function rememberDetails(tab: string, event: Event) {
         v-model:environment="environment"
         v-model:period="overviewPeriod"
         mode="health"
+        :submission-id="requestedSubmissionId"
+        @close-submission="clearRequestedSubmission"
       />
       <details
         class="rounded-xl border border-neutral-200 bg-surface shadow-sm"
@@ -977,10 +1006,13 @@ function rememberDetails(tab: string, event: Event) {
             z jiného programu panel neuvidí.
           -->
           <PayrollExternalJmhzSubmissionsPanel :environment="environment" />
+          <PayrollJmhzExternalCorrectionRoot :environment="environment" @open-submission="openExternalRoot" />
           <PayrollSubmissionOverviewPanel
             v-model:environment="environment"
             v-model:period="overviewPeriod"
             mode="jmhz"
+            :submission-id="requestedSubmissionId"
+            @close-submission="clearRequestedSubmission"
           />
         </div>
       </details>
@@ -991,6 +1023,8 @@ function rememberDetails(tab: string, event: Event) {
         v-model:environment="environment"
         v-model:period="overviewPeriod"
         :mode="activeTab === 'other' ? activeTab : 'jmhz'"
+        :submission-id="requestedSubmissionId"
+        @close-submission="clearRequestedSubmission"
       />
     </template>
   </div>

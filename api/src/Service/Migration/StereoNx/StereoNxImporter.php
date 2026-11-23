@@ -24,6 +24,7 @@ use MyInvoice\Service\Migration\Shared\MigrationVatRateLookup;
 use MyInvoice\Service\Migration\Shared\BankStatementImportWriter;
 use MyInvoice\Service\Migration\Shared\PartnerIdentityMatcher;
 use MyInvoice\Service\Migration\Shared\VatCoefficientSeeder;
+use MyInvoice\Service\Migration\Shared\VatReturnLineClassifier;
 use MyInvoice\Service\Stats\StatsRecomputer;
 use PDO;
 use PDOException;
@@ -633,6 +634,15 @@ final class StereoNxImporter
         $reviewCodes = array_values(array_unique(array_map('strval', $record['review_codes'] ?? [])));
         if ($items === []) $reviewCodes[] = 'missing_items';
         $liveSnapshot = $this->clientSnapshot($ctx['supplier_id'], $partnerId);
+        if ($kind === 'issued') {
+            // Ř. 26 u tuzemského odběratele je § 71i, ne služba mimo tuzemsko.
+            foreach ($items as $i => $item) {
+                if (is_array($item) && isset($item['vat_classification_code'])) {
+                    $items[$i]['vat_classification_code'] = VatReturnLineClassifier::saleCodeForCustomer(
+                        (string) $item['vat_classification_code'], $liveSnapshot['country_code']);
+                }
+            }
+        }
         $historical = $record['partner_snapshot'] ?? [];
         if (is_array($historical) && ($historical['country_unresolved'] ?? true) === false
             && ($historical['country_code'] ?? '') !== ''

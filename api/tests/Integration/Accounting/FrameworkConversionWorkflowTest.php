@@ -16,7 +16,7 @@ final class FrameworkConversionWorkflowTest extends TestCase
     use \MyInvoice\Tests\Support\SharedClassFixture;
     private $container;private Connection $db;private int $supplier;private int $source;private int $target;private int $actor;private ?array $converted=null;
     /** Testy, které začínají hotovou konverzí: dostanou ji ze sdílené fixture, konverzi samotnou ověřují ostatní testy. */
-    private const CONVERTED=['testNext504ForeignNativeCaseUsesProvedConversionOpening','testRehashedForeignOriginTamperCannotChangeNativeOpeningLineage','testGenericNativeOpeningInsertCannotDuplicateOwnedConversion','testSourceCloseRevertIsBlockedAfterConversion','testNativeOpeningMutationIsBlocked','testLateDecisionPersistMutationRollsBackEveryDecisionWrite','testCancelledConversionReleasesLiveSourceCloseAndPreservesHistoricalIdentity'];
+    private const CONVERTED=['testNext504ForeignNativeCaseUsesProvedConversionOpening','testRehashedForeignOriginTamperCannotChangeNativeOpeningLineage','testGenericNativeOpeningInsertCannotDuplicateOwnedConversion','testSourceCloseRevertIsBlockedAfterConversion','testNativeOpeningMutationIsBlocked','testLateDecisionPersistMutationRollsBackEveryDecisionWrite','testCancelledConversionReleasesLiveSourceCloseAndPreservesHistoricalIdentity','testCancellationRefusesPairedOrAllocatedOpening'];
     protected function setUp():void
     {
         $this->container=Bootstrap::buildContainer();$this->db=$this->container->get(Connection::class);$p=$this->db->pdo();
@@ -26,7 +26,7 @@ final class FrameworkConversionWorkflowTest extends TestCase
             $p->exec("CREATE OR REPLACE TRIGGER conversion_test_header_mutant BEFORE INSERT ON journal_entries FOR EACH ROW BEGIN IF COALESCE(@conversion_test_mutant,0)=2 AND (EXISTS(SELECT 1 FROM accounting_framework_conversions c WHERE c.supplier_id=NEW.supplier_id AND c.status='pending') OR NEW.source_type='profit_distribution') THEN SET NEW.entry_date=DATE_ADD(NEW.entry_date,INTERVAL 1 DAY); END IF; END");
         }
         $this->actor=(int)$p->query('SELECT id FROM users ORDER BY id LIMIT 1')->fetchColumn();self::assertGreaterThan(0,$this->actor);
-        $variant='base';foreach(['ProfitTuple','CustomAnalytic','Offbalance','PendingRelease','Foreign'] as $name)if(str_contains($this->name(),$name))$variant=$name;
+        $variant='base';foreach(['ProfitTuple','CustomAnalytic','Offbalance','PendingRelease','Foreign','StockSlot'] as $name)if(str_contains($this->name(),$name))$variant=$name;
         // FrameworkConversionCloneTest a HttpTest si třídu berou přes reflexi jako fixturu.
         if(!$this->preparedByPhpunit()){$p->beginTransaction();$this->closedSource($variant);if($variant==='Foreign')$this->foreignRates();return;}
         $converted=in_array($this->name(),self::CONVERTED,true);
@@ -60,6 +60,13 @@ final class FrameworkConversionWorkflowTest extends TestCase
             foreach(['998','999'] as $code)$this->container->get(\MyInvoice\Repository\ChartOfAccountsRepository::class)->insert($this->supplier,['account_code'=>$code,'name'=>'Synthetic offbalance '.$code,'account_type'=>'offbalance','normal_side'=>null,'is_synthetic'=>true]);
             $this->container->get(PostingService::class)->postDocument($this->supplier,'manual',null,[['account_code'=>'998','side'=>'debit','amount'=>'10.00'],['account_code'=>'999','side'=>'credit','amount'=>'10.00']],['entry_date'=>'2025-06-01','posted'=>true,'user_id'=>$this->actor,'posted_by'=>$this->actor]);
         }
+        if($variant==='StockSlot'){
+            // Krok Zásoby (způsob B) účtuje přes source_type 'closing' do skladových slotů. Loňský
+            // konečný stav zásob se 1. dne převodního roku uvolní do spotřeby (MD 501 / D 112).
+            $posting=$this->container->get(PostingService::class);
+            $posting->postDocument($this->supplier,'manual',null,[['account_code'=>'112','side'=>'debit','amount'=>'50.00'],['account_code'=>'428','side'=>'credit','amount'=>'50.00']],['entry_date'=>'2025-01-01','posted'=>true,'user_id'=>$this->actor,'posted_by'=>$this->actor]);
+            $posting->postDocument($this->supplier,'closing',\MyInvoice\Service\Accounting\Closing\ClosingSourceId::stockOpening($this->source-1),[['account_code'=>'501','side'=>'debit','amount'=>'50.00'],['account_code'=>'112','side'=>'credit','amount'=>'50.00']],['entry_date'=>'2025-01-01','posted'=>true,'user_id'=>$this->actor,'posted_by'=>$this->actor]);
+        }
         if($variant==='PendingRelease')$this->container->get(PostingService::class)->postDocument($this->supplier,'small_asset_accrual',\MyInvoice\Service\Accounting\Closing\ClosingSourceId::smallAssetAccrual($this->source),[['account_code'=>'381','side'=>'debit','amount'=>'20.00'],['account_code'=>'501','side'=>'credit','amount'=>'20.00']],['entry_date'=>'2025-12-31','posted'=>true,'user_id'=>$this->actor,'posted_by'=>$this->actor]);
         $rates=null;
         if($variant==='Foreign'){
@@ -83,6 +90,15 @@ final class FrameworkConversionWorkflowTest extends TestCase
         self::assertSame($before,$this->dump());self::assertCount(5,$cells);self::assertSame(0,array_sum(array_column($cells,'czk_cents')));
         self::assertSame(-40000,array_values(array_filter($cells,fn($c)=>$c['role']==='pending_approval'))[0]['czk_cents']);
         self::assertSame(-70000,array_values(array_filter($cells,fn($c)=>$c['role']==='retained'))[0]['czk_cents']);
+    }
+    /** Rozvahu převodu tvoří stejné zápisy jako zůstatky uzavření knih: skladový slot 'closing' (uvolnění loňských zásob) v ní zůstává. */
+    public function testStockSlotNativeCloseConvertsWithReleasedStock():void
+    {
+        $r=new FrameworkConversionRepository($this->db);$cells=$r->cells($r->source($this->supplier,$this->source,$this->target));
+        self::assertSame(0,array_sum(array_column($cells,'czk_cents')));self::assertSame([],array_values(array_filter($cells,fn($c)=>$c['account_code']==='112')));
+        self::assertSame(-35000,array_values(array_filter($cells,fn($c)=>$c['role']==='pending_approval'))[0]['czk_cents']);
+        self::assertSame(-75000,array_values(array_filter($cells,fn($c)=>$c['role']==='retained'))[0]['czk_cents']);
+        self::assertGreaterThan(0,$this->convert()['opening_entry_id']);
     }
     public function testNative500CloseConvertsToActual504OpeningWithSeparate931And932():void
     {
@@ -209,6 +225,20 @@ final class FrameworkConversionWorkflowTest extends TestCase
     {
         $result=$this->converted;$r=new FrameworkConversionRepository($this->db);$original=$r->receipt($this->supplier,$result['conversion_id'],true);$sourceEntry=(int)$original['source_entry_id'];$w=$this->container->get(FrameworkConversionWorkflow::class);$preview=$w->cancellationPreview($this->supplier,$result['conversion_id'],$this->actor);$w->cancel($this->supplier,$result['conversion_id'],$this->actor,$preview['receipt_hash'],$preview['preview_hash'],'synthetic-cancel-release');
         $this->container->get(ClosingService::class)->revertStep($this->supplier,$this->source,'close_books',$this->rv(),['user_id'=>$this->actor]);$cancelled=$r->receipt($this->supplier,$result['conversion_id'],true);self::assertNull($cancelled['source_entry_id']);self::assertSame($sourceEntry,$cancelled['receipt']['plan']['source_entry_id']);$q=$this->db->pdo()->prepare('SELECT id FROM journal_entries WHERE supplier_id=? AND id=?');$q->execute([$this->supplier,$sourceEntry]);self::assertFalse($q->fetchColumn());
+    }
+    /** Zrušení převodu maže otevírací zápis natvrdo: okruh párování ani rozpad saldokonta nad ním nesmí odejít kaskádou. */
+    public function testCancellationRefusesPairedOrAllocatedOpening():void
+    {
+        $opening=(int)$this->converted['opening_entry_id'];$p=$this->db->pdo();$w=$this->container->get(FrameworkConversionWorkflow::class);
+        $line=$p->prepare('SELECT line_no,account_id FROM journal_entry_lines WHERE supplier_id=? AND entry_id=? ORDER BY line_no LIMIT 1');$line->execute([$this->supplier,$opening]);$first=$line->fetch(\PDO::FETCH_ASSOC);
+        $p->prepare("INSERT INTO journal_settlement_allocations (supplier_id,entry_id,line_no,account_id,side,doc_type,doc_id,amount,kind) VALUES (?,?,?,?,'debit','other_item',1,100,'settlement')")->execute([$this->supplier,$opening,$first['line_no'],$first['account_id']]);
+        try{$w->cancellationPreview($this->supplier,$this->converted['conversion_id'],$this->actor);self::fail('Opening with saldo allocation must stay');}catch(\MyInvoice\Service\Accounting\Conversion\FrameworkConversionException $e){self::assertSame('conversion_already_consumed',$e->errorCode);}
+        $p->prepare('DELETE FROM journal_settlement_allocations WHERE supplier_id=? AND entry_id=?')->execute([$this->supplier,$opening]);
+        $p->prepare('INSERT INTO journal_line_pairings (supplier_id,account_id) VALUES (?,?)')->execute([$this->supplier,$first['account_id']]);$pairing=(int)$p->lastInsertId();
+        $p->prepare('INSERT INTO journal_line_pairing_items (supplier_id,entry_id,line_no,pairing_id,account_id) VALUES (?,?,?,?,?)')->execute([$this->supplier,$opening,$first['line_no'],$pairing,$first['account_id']]);
+        try{$w->cancellationPreview($this->supplier,$this->converted['conversion_id'],$this->actor);self::fail('Paired opening must stay');}catch(\MyInvoice\Service\Accounting\Conversion\FrameworkConversionException $e){self::assertSame('conversion_already_consumed',$e->errorCode);}
+        $p->prepare('DELETE FROM journal_line_pairings WHERE supplier_id=? AND id=?')->execute([$this->supplier,$pairing]);
+        self::assertArrayHasKey('receipt_hash',$w->cancellationPreview($this->supplier,$this->converted['conversion_id'],$this->actor),'Without pairing and allocation the cancellation is offered again');
     }
     private function dump():string
     {$out=[];foreach(['chart_of_accounts','accounting_account_definition_history','supplier_accounting_frameworks','journal_entries','journal_entry_lines','journal_entry_line_dimensions','journal_entry_line_dimension_splits','accounting_framework_conversions','accounting_framework_conversion_cells','accounting_framework_conversion_commands','accounting_framework_conversion_decisions','dimension_types','dimension_values'] as $table){$q=$this->db->pdo()->prepare('SELECT * FROM '.$table.' WHERE supplier_id=?');$q->execute([$this->supplier]);$out[$table]=$q->fetchAll(\PDO::FETCH_ASSOC);}return FrameworkConversionRepository::json($out);}

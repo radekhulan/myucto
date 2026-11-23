@@ -1,0 +1,527 @@
+{
+    "entity": {
+        "name": "Dvojice test s.r.o.",
+        "ico": "12345678",
+        "address": "Testovací 1, 11000 Praha",
+        "prepared_at": "<timestamp>"
+    },
+    "filters": {
+        "document_no": null,
+        "date_from": "2099-01-01",
+        "date_to": "2099-12-31",
+        "source_type": null,
+        "posted": null,
+        "automation": null
+    },
+    "entries": [
+        {
+            "id": "entry:invoice",
+            "entry_date": "2099-01-10",
+            "document_date": null,
+            "document_no": "FV-1",
+            "description": "Vydaná faktura",
+            "source_type": "manual",
+            "source_id": null,
+            "posted_at": "<timestamp>",
+            "reversed_by": null,
+            "posted_by_name": "Fixture Admin",
+            "amount": 1210.0,
+            "amount_side": null,
+            "lines": [
+                {
+                    "side": "debit",
+                    "amount": 1210.0,
+                    "is_red_storno": false,
+                    "cost_center": null,
+                    "account_code": "311",
+                    "account_name": "Pohledávky z obchodních vztahů (odběratelé)"
+                },
+                {
+                    "side": "credit",
+                    "amount": 1000.0,
+                    "is_red_storno": false,
+                    "cost_center": null,
+                    "account_code": "602",
+                    "account_name": "Tržby z prodeje služeb"
+                },
+                {
+                    "side": "credit",
+                    "amount": 210.0,
+                    "is_red_storno": false,
+                    "cost_center": null,
+                    "account_code": "343.200",
+                    "account_name": "Daň z přidané hodnoty výstup"
+                }
+            ],
+            "automation": null,
+            "automation_origin": "ručně"
+        },
+        {
+            "id": "entry:purchase",
+            "entry_date": "2099-01-12",
+            "document_date": null,
+            "document_no": "FP-1",
+            "description": "Přijatá faktura",
+            "source_type": "manual",
+            "source_id": null,
+            "posted_at": "<timestamp>",
+            "reversed_by": null,
+            "posted_by_name": "Fixture Admin",
+            "amount": 1210.0,
+            "amount_side": null,
+            "lines": [
+                {
+                    "side": "debit",
+                    "amount": 1000.0,
+                    "is_red_storno": false,
+                    "cost_center": null,
+                    "account_code": "513",
+                    "account_name": "Náklady na reprezentaci"
+                },
+                {
+                    "side": "debit",
+                    "amount": 210.0,
+                    "is_red_storno": false,
+                    "cost_center": null,
+                    "account_code": "343.100",
+                    "account_name": "Daň z přidané hodnoty vstup"
+                },
+                {
+                    "side": "credit",
+                    "amount": 1210.0,
+                    "is_red_storno": false,
+                    "cost_center": null,
+                    "account_code": "321",
+                    "account_name": "Závazky z obchodních vztahů (dodavatelé)"
+                }
+            ],
+            "automation": null,
+            "automation_origin": "ručně"
+        },
+        {
+            "id": "entry:receipt",
+            "entry_date": "2099-01-20",
+            "document_date": null,
+            "document_no": "BV-1",
+            "description": "Úhrada FV-1",
+            "source_type": "manual",
+            "source_id": null,
+            "posted_at": "<timestamp>",
+            "reversed_by": null,
+            "posted_by_name": "Fixture Admin",
+            "amount": 1210.0,
+            "amount_side": null,
+            "lines": [
+                {
+                    "side": "debit",
+                    "amount": 1210.0,
+                    "is_red_storno": false,
+                    "cost_center": null,
+                    "account_code": "221",
+                    "account_name": "Peněžní prostředky na účtech"
+                },
+                {
+                    "side": "credit",
+                    "amount": 1210.0,
+                    "is_red_storno": false,
+                    "cost_center": null,
+                    "account_code": "311",
+                    "account_name": "Pohledávky z obchodních vztahů (odběratelé)"
+                }
+            ],
+            "automation": null,
+            "automation_origin": "ručně"
+        },
+        {
+            "id": "entry:bulk",
+            "entry_date": "2099-01-25",
+            "document_date": null,
+            "document_no": "BV-2",
+            "description": "Hromadná platba",
+            "source_type": "manual",
+            "source_id": null,
+            "posted_at": "<timestamp>",
+            "reversed_by": null,
+            "posted_by_name": "Fixture Admin",
+            "amount": 1830.0,
+            "amount_side": null,
+            "lines": [
+                {
+                    "side": "debit",
+                    "amount": 1210.0,
+                    "is_red_storno": false,
+                    "cost_center": null,
+                    "account_code": "321",
+                    "account_name": "Závazky z obchodních vztahů (dodavatelé)"
+                },
+                {
+                    "side": "debit",
+                    "amount": 605.0,
+                    "is_red_storno": false,
+                    "cost_center": null,
+                    "account_code": "321",
+                    "account_name": "Závazky z obchodních vztahů (dodavatelé)"
+                },
+                {
+                    "side": "debit",
+                    "amount": 15.0,
+                    "is_red_storno": false,
+                    "cost_center": null,
+                    "account_code": "568",
+                    "account_name": "Ostatní finanční náklady"
+                },
+                {
+                    "side": "credit",
+                    "amount": 1830.0,
+                    "is_red_storno": false,
+                    "cost_center": null,
+                    "account_code": "221",
+                    "account_name": "Peněžní prostředky na účtech"
+                }
+            ],
+            "automation": null,
+            "automation_origin": "ručně"
+        },
+        {
+            "id": "entry:cash",
+            "entry_date": "2099-02-03",
+            "document_date": null,
+            "document_no": "PD-1",
+            "description": "Pokladní doklad",
+            "source_type": "manual",
+            "source_id": null,
+            "posted_at": "<timestamp>",
+            "reversed_by": null,
+            "posted_by_name": "Fixture Admin",
+            "amount": 200.0,
+            "amount_side": null,
+            "lines": [
+                {
+                    "side": "debit",
+                    "amount": 100.0,
+                    "is_red_storno": false,
+                    "cost_center": null,
+                    "account_code": "512",
+                    "account_name": "Cestovné"
+                },
+                {
+                    "side": "debit",
+                    "amount": 100.0,
+                    "is_red_storno": false,
+                    "cost_center": null,
+                    "account_code": "513",
+                    "account_name": "Náklady na reprezentaci"
+                },
+                {
+                    "side": "credit",
+                    "amount": 100.0,
+                    "is_red_storno": false,
+                    "cost_center": null,
+                    "account_code": "211",
+                    "account_name": "Pokladna"
+                },
+                {
+                    "side": "credit",
+                    "amount": 100.0,
+                    "is_red_storno": false,
+                    "cost_center": null,
+                    "account_code": "211",
+                    "account_name": "Pokladna"
+                }
+            ],
+            "automation": null,
+            "automation_origin": "ručně"
+        },
+        {
+            "id": "entry:mn",
+            "entry_date": "2099-02-10",
+            "document_date": null,
+            "document_no": "ID-1",
+            "description": "Složený zápis M : N",
+            "source_type": "manual",
+            "source_id": null,
+            "posted_at": "<timestamp>",
+            "reversed_by": null,
+            "posted_by_name": "Fixture Admin",
+            "amount": 500.0,
+            "amount_side": null,
+            "lines": [
+                {
+                    "side": "debit",
+                    "amount": 300.0,
+                    "is_red_storno": false,
+                    "cost_center": null,
+                    "account_code": "513",
+                    "account_name": "Náklady na reprezentaci"
+                },
+                {
+                    "side": "debit",
+                    "amount": 200.0,
+                    "is_red_storno": false,
+                    "cost_center": null,
+                    "account_code": "512",
+                    "account_name": "Cestovné"
+                },
+                {
+                    "side": "credit",
+                    "amount": 250.0,
+                    "is_red_storno": false,
+                    "cost_center": null,
+                    "account_code": "321",
+                    "account_name": "Závazky z obchodních vztahů (dodavatelé)"
+                },
+                {
+                    "side": "credit",
+                    "amount": 250.0,
+                    "is_red_storno": false,
+                    "cost_center": null,
+                    "account_code": "211",
+                    "account_name": "Pokladna"
+                }
+            ],
+            "automation": null,
+            "automation_origin": "ručně"
+        },
+        {
+            "id": "entry:storno",
+            "entry_date": "2099-02-15",
+            "document_date": null,
+            "document_no": "FV-2",
+            "description": "Opravný doklad",
+            "source_type": "manual",
+            "source_id": null,
+            "posted_at": "<timestamp>",
+            "reversed_by": null,
+            "posted_by_name": "Fixture Admin",
+            "amount": -121.0,
+            "amount_side": null,
+            "lines": [
+                {
+                    "side": "debit",
+                    "amount": 121.0,
+                    "is_red_storno": true,
+                    "cost_center": null,
+                    "account_code": "311",
+                    "account_name": "Pohledávky z obchodních vztahů (odběratelé)"
+                },
+                {
+                    "side": "credit",
+                    "amount": 100.0,
+                    "is_red_storno": true,
+                    "cost_center": null,
+                    "account_code": "602",
+                    "account_name": "Tržby z prodeje služeb"
+                },
+                {
+                    "side": "credit",
+                    "amount": 21.0,
+                    "is_red_storno": true,
+                    "cost_center": null,
+                    "account_code": "343.200",
+                    "account_name": "Daň z přidané hodnoty výstup"
+                }
+            ],
+            "automation": null,
+            "automation_origin": "ručně"
+        },
+        {
+            "id": "entry:transfer",
+            "entry_date": "2099-03-01",
+            "document_date": null,
+            "document_no": "BV-3",
+            "description": "Výběr do pokladny",
+            "source_type": "manual",
+            "source_id": null,
+            "posted_at": "<timestamp>",
+            "reversed_by": null,
+            "posted_by_name": "Fixture Admin",
+            "amount": 5000.0,
+            "amount_side": null,
+            "lines": [
+                {
+                    "side": "debit",
+                    "amount": 5000.0,
+                    "is_red_storno": false,
+                    "cost_center": null,
+                    "account_code": "211",
+                    "account_name": "Pokladna"
+                },
+                {
+                    "side": "credit",
+                    "amount": 5000.0,
+                    "is_red_storno": false,
+                    "cost_center": null,
+                    "account_code": "221",
+                    "account_name": "Peněžní prostředky na účtech"
+                }
+            ],
+            "automation": null,
+            "automation_origin": "ručně"
+        },
+        {
+            "id": "entry:asset",
+            "entry_date": "2099-03-05",
+            "document_date": null,
+            "document_no": "FP-2",
+            "description": "Nákup stroje",
+            "source_type": "manual",
+            "source_id": null,
+            "posted_at": "<timestamp>",
+            "reversed_by": null,
+            "posted_by_name": "Fixture Admin",
+            "amount": 20000.0,
+            "amount_side": null,
+            "lines": [
+                {
+                    "side": "debit",
+                    "amount": 20000.0,
+                    "is_red_storno": false,
+                    "cost_center": null,
+                    "account_code": "022",
+                    "account_name": "Hmotné movité věci a jejich soubory"
+                },
+                {
+                    "side": "credit",
+                    "amount": 20000.0,
+                    "is_red_storno": false,
+                    "cost_center": null,
+                    "account_code": "321",
+                    "account_name": "Závazky z obchodních vztahů (dodavatelé)"
+                }
+            ],
+            "automation": null,
+            "automation_origin": "ručně"
+        },
+        {
+            "id": "entry:asset_pay",
+            "entry_date": "2099-03-06",
+            "document_date": null,
+            "document_no": "BV-4",
+            "description": "Úhrada stroje",
+            "source_type": "manual",
+            "source_id": null,
+            "posted_at": "<timestamp>",
+            "reversed_by": null,
+            "posted_by_name": "Fixture Admin",
+            "amount": 20000.0,
+            "amount_side": null,
+            "lines": [
+                {
+                    "side": "debit",
+                    "amount": 20000.0,
+                    "is_red_storno": false,
+                    "cost_center": null,
+                    "account_code": "321",
+                    "account_name": "Závazky z obchodních vztahů (dodavatelé)"
+                },
+                {
+                    "side": "credit",
+                    "amount": 20000.0,
+                    "is_red_storno": false,
+                    "cost_center": null,
+                    "account_code": "221",
+                    "account_name": "Peněžní prostředky na účtech"
+                }
+            ],
+            "automation": null,
+            "automation_origin": "ručně"
+        },
+        {
+            "id": "entry:loan",
+            "entry_date": "2099-03-10",
+            "document_date": null,
+            "document_no": "BV-5",
+            "description": "Úvěr",
+            "source_type": "manual",
+            "source_id": null,
+            "posted_at": "<timestamp>",
+            "reversed_by": null,
+            "posted_by_name": "Fixture Admin",
+            "amount": 50000.0,
+            "amount_side": null,
+            "lines": [
+                {
+                    "side": "debit",
+                    "amount": 50000.0,
+                    "is_red_storno": false,
+                    "cost_center": null,
+                    "account_code": "221",
+                    "account_name": "Peněžní prostředky na účtech"
+                },
+                {
+                    "side": "credit",
+                    "amount": 50000.0,
+                    "is_red_storno": false,
+                    "cost_center": null,
+                    "account_code": "461",
+                    "account_name": "Dlouhodobé závazky k úvěrovým institucím"
+                }
+            ],
+            "automation": null,
+            "automation_origin": "ručně"
+        },
+        {
+            "id": "entry:sale2",
+            "entry_date": "2099-03-20",
+            "document_date": null,
+            "document_no": "FV-3",
+            "description": "Vydaná faktura dvě sazby",
+            "source_type": "manual",
+            "source_id": null,
+            "posted_at": "<timestamp>",
+            "reversed_by": null,
+            "posted_by_name": "Fixture Admin",
+            "amount": 13220.0,
+            "amount_side": null,
+            "lines": [
+                {
+                    "side": "debit",
+                    "amount": 13220.0,
+                    "is_red_storno": false,
+                    "cost_center": null,
+                    "account_code": "311",
+                    "account_name": "Pohledávky z obchodních vztahů (odběratelé)"
+                },
+                {
+                    "side": "credit",
+                    "amount": 10000.0,
+                    "is_red_storno": false,
+                    "cost_center": null,
+                    "account_code": "602",
+                    "account_name": "Tržby z prodeje služeb"
+                },
+                {
+                    "side": "credit",
+                    "amount": 2100.0,
+                    "is_red_storno": false,
+                    "cost_center": null,
+                    "account_code": "343.200",
+                    "account_name": "Daň z přidané hodnoty výstup"
+                },
+                {
+                    "side": "credit",
+                    "amount": 1000.0,
+                    "is_red_storno": false,
+                    "cost_center": null,
+                    "account_code": "604",
+                    "account_name": "Tržby za zboží"
+                },
+                {
+                    "side": "credit",
+                    "amount": 120.0,
+                    "is_red_storno": false,
+                    "cost_center": null,
+                    "account_code": "343.200",
+                    "account_name": "Daň z přidané hodnoty výstup"
+                }
+            ],
+            "automation": null,
+            "automation_origin": "ručně"
+        }
+    ],
+    "totals": {
+        "debit": 114259.0,
+        "credit": 114259.0,
+        "count": 12
+    }
+}

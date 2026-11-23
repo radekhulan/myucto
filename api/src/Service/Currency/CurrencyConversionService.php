@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Currency;
 
 use DateTimeImmutable;
+use MyInvoice\Service\Invoice\UnitPricePrecision;
 
 final class CurrencyConversionService
 {
@@ -31,11 +32,37 @@ final class CurrencyConversionService
         DateTimeImmutable $date,
         int $targetDecimals = 2,
     ): ?array {
+        return $this->convertRounded($amount, $sourceCurrency, $targetCurrency, $date, max(0, min(2, $targetDecimals)));
+    }
+
+    /**
+     * Převod jednotkové ceny (ceník): výsledek na šest desetinných míst jako cena
+     * řádku dokladu. Částky a součty převádí {@see convert()} na haléře.
+     *
+     * @return array{amount: float, source_currency: string, target_currency: string, cross_rate: float,
+     *               rate_date: string, fallback_used: bool, source: string}|null
+     */
+    public function convertUnitPrice(
+        float $amount,
+        string $sourceCurrency,
+        string $targetCurrency,
+        DateTimeImmutable $date,
+    ): ?array {
+        return $this->convertRounded($amount, $sourceCurrency, $targetCurrency, $date, UnitPricePrecision::DECIMALS);
+    }
+
+    /** @return array<string,mixed>|null */
+    private function convertRounded(
+        float $amount,
+        string $sourceCurrency,
+        string $targetCurrency,
+        DateTimeImmutable $date,
+        int $decimals,
+    ): ?array {
         $source = strtoupper(trim($sourceCurrency));
         $target = strtoupper(trim($targetCurrency));
         if ($source === '' || $target === '') return null;
 
-        $decimals = max(0, min(2, $targetDecimals));
         if ($source === $target) {
             return [
                 'amount' => round($amount, $decimals),

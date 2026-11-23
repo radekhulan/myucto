@@ -109,7 +109,7 @@ describe('All companies dashboard', () => {
     expect(mocks.get).toHaveBeenLastCalledWith({ section: 'overview', months: 12, weeks: 8, from: '2094-03-15', to: '2094-06-10' }, expect.any(AbortSignal))
     await wrapper.find('[data-test="group-reset-range"]').trigger('click')
     await flushPromises()
-    expect(wrapper.find('[data-test="group-from"]').element).toHaveProperty('value', '2093-10-01')
+    expect(wrapper.find('[data-test="group-from"]').element).toHaveProperty('value', '01. 10. 2093')
   })
   it('opens an overdue risk in its company and currency, with no year limitation', async () => {
     const data = report('risks')

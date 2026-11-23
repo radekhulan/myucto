@@ -10,7 +10,8 @@ Zvolte **Doložit zdroj** a vyberte otevřené období, konkrétní kreditní ú
 
 Uveďte název, účel, smlouvu či stanovy, oprávněný orgán a rozhodnutí. Vyberte časové rozmezí způsobilých nákladů, druhy činností, nákladové účty a výslovné daňové zařazení vznikajícího výnosu. Potvrzené podklady jsou neměnné a zůstávají v historii. Samotné doložení zdroje neúčtuje nový příjem.
 
-Potvrzení vyžaduje přihlášenou relaci a oprávnění k účetní uzávěrce. Náhled ukáže doloženou částku a u investičního zdroje také ocenění majetku. Ověřte rozhodnutí a podmínky a výslovně operaci potvrďte.
+Potvrzení vyžaduje oprávnění k účetní uzávěrce a přihlášenou relaci,
+případně API token s [Plným zápisem](103_API.md#103973-plny-zapis-tokenem-systemwrite). Náhled ukáže doloženou částku a u investičního zdroje také ocenění majetku. Ověřte rozhodnutí a podmínky a výslovně operaci potvrďte.
 
 ## 119.2 Investiční dotace a účelové dary
 

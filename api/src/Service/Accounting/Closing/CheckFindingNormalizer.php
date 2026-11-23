@@ -66,6 +66,7 @@ final class CheckFindingNormalizer
         'paid_purchases_open_saldo' => 'purchase_invoice',
         'paid_proformas_no_advance' => 'invoice',
         'paid_advances_no_payment'  => 'purchase_invoice',
+        'purchase_final_missing_advance_deduction' => 'purchase_invoice',
         'drafts_in_period'          => 'journal_entry',
         'vat_clearing_stale'        => 'journal_entry',
     ];
@@ -227,7 +228,8 @@ final class CheckFindingNormalizer
             'account_code' => (string) ($row['account_code'] ?? ''),
             'name'         => (string) ($row['name'] ?? ''),
             'amount'       => self::pick($row, self::AMOUNT_KEYS),
-            'note'         => isset($row['line_count']) ? (int) $row['line_count'] . '×' : null,
+            'note'         => isset($row['note']) ? (string) $row['note']
+                : (isset($row['line_count']) ? (int) $row['line_count'] . '×' : null),
         ];
     }
 

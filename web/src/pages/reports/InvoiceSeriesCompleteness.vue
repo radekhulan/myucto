@@ -42,7 +42,9 @@ function groupLabel(g: InvoiceSeriesGroup): string {
     })
   }
   let scope: string
-  if (g.client_id !== 0) {
+  if (g.series_name) {
+    scope = t('reports.series_completeness.series_codebook', { name: g.series_name })
+  } else if (g.client_id !== 0) {
     scope = t('reports.series_completeness.series_client', { name: g.client_name || `#${g.client_id}` })
   } else if (g.revenue_category_id !== 0) {
     scope = t('reports.series_completeness.series_revenue_category', {

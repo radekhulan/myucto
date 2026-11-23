@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Repository\Payroll;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Service\Payroll\Employment\PayrollHourlyRemuneration;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
 use PDO;
 use PDOException;
@@ -294,6 +295,8 @@ final class PayrollRecurringComponentRepository
                      WHERE employment.supplier_id = ?
                  )
              SELECT recurring.*, employment.employee_id,
+                    ' . PayrollHourlyRemuneration::overlapsPeriodSql() . '
+                      AS hourly_remuneration_in_period,
                     ' . PayrollEmploymentLifecycleSql::effectiveMonthlyGrossAtPlaceholder() . '
                       AS monthly_gross_minor,
                     employment.code AS employment_code,
@@ -350,12 +353,14 @@ final class PayrollRecurringComponentRepository
         );
         $stmt->execute([
             // Pořadí odpovídá výskytu `?` v dotazu: účinný stav (1), okno
-            // událostí (2), firma v CTE (1), účinná měsíční mzda (2), zdroj
+            // událostí (2), firma v CTE (1), hodinové podmínky (2), měsíční mzda (2), zdroj
             // docházky měsíce (1), firma a účinnost předpisu (5).
             $periodEnd,
             $periodStart,
             $periodEnd,
             $supplierId,
+            $periodEnd,
+            $periodStart,
             $periodEnd,
             $periodEnd,
             $periodStart,
@@ -486,7 +491,8 @@ final class PayrollRecurringComponentRepository
         bool $creating = true,
     ): void {
         $stmt = $this->db->pdo()->prepare(
-            'SELECT component.valid_from, component.valid_to,
+            'SELECT component.valid_from, component.valid_to, component.component_kind,
+                    ' . PayrollHourlyRemuneration::overlapsPeriodSql() . ' AS hourly_remuneration_in_period,
                     COALESCE(
                       employment.actual_start_date,
                       employment.start_date,
@@ -506,7 +512,7 @@ final class PayrollRecurringComponentRepository
             . ' WHERE employment.supplier_id = ? AND employment.id = ?
               FOR UPDATE'
         );
-        $stmt->execute([$data['component_id'], $supplierId, $data['employment_id']]);
+        $stmt->execute([$data['valid_to'] ?? '9999-12-31', $data['valid_from'], $data['component_id'], $supplierId, $data['employment_id']]);
         $raw = $stmt->fetch(PDO::FETCH_ASSOC);
         if ($raw === false) {
             throw new \InvalidArgumentException(
@@ -515,6 +521,15 @@ final class PayrollRecurringComponentRepository
                         . 'firmě, případně je složka neaktivní. Aktivujte složku '
                         . 'v číselníku, nebo vyberte jinou.'
                     : 'Pracovní vztah nebo pravidelná mzdová složka nepatří této firmě.'
+            );
+        }
+        // Stejný zámek vztahu serializuje i přepnutí podmínek na hodinovou
+        // odměnu. Předpis nesmí obejít zákaz opačným pořadím těchto operací.
+        if ($data['is_active'] && $raw['component_kind'] === 'base_wage'
+            && (bool) $raw['hourly_remuneration_in_period']) {
+            throw new \InvalidArgumentException(
+                'Základní měsíční předpis se překrývá s hodinovým odměňováním. '
+                . 'Ukončete jeho platnost před hodinovým obdobím nebo předpis deaktivujte.'
             );
         }
         /*

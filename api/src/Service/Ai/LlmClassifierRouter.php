@@ -14,6 +14,15 @@ final class LlmClassifierRouter implements LlmClassifierInterface
     private const FORBIDDEN_PURCHASE_PREFIXES = ['211', '221'];
     private const OPERATION_TYPES = ['fee', 'interest', 'tax', 'insurance', 'rent', 'subscription', 'purchase', 'income', 'other'];
 
+    /**
+     * Tvar kódu účtu, který smí model vrátit: syntetika (3–6 číslic) volitelně s analytikou
+     * za tečkou (`221.100`, `518.990`) — stejný tvar, jaký osnova a PostingRuleChartAlignmentService
+     * berou jako analytiku. Dřívější `^[0-9]{3,6}$` zahazoval každou analytiku s tečkou, přestože
+     * ji model dostal v allowed_accounts: bankovní účet namapovaný na `221.100` tak končil vždy
+     * `invalid_accounts` (a eskalací stál dvě volání). Rozhoduje stejně přesná shoda s rozvrhem.
+     */
+    private const ACCOUNT_CODE_PATTERN = '^[0-9]{3,6}(?:[.][0-9]{1,6})?$';
+
     // Minimální použitelná jistota (po škálování ×0.40): raw model confidence < 0.3 → pod
     // touto hranicí je návrh nepoužitelný a bank_tx kontace se jednorázově eskaluje na Sonnet.
     private const ESCALATION_MIN_CONFIDENCE = 0.12;
@@ -215,8 +224,8 @@ final class LlmClassifierRouter implements LlmClassifierInterface
     /** @param list<string> $allowed */
     private function validAccountPair(array $allowed, string $debit, string $credit): bool
     {
-        return preg_match('/^[0-9]{3,6}$/', $debit) === 1
-            && preg_match('/^[0-9]{3,6}$/', $credit) === 1
+        return preg_match('/' . self::ACCOUNT_CODE_PATTERN . '/D', $debit) === 1
+            && preg_match('/' . self::ACCOUNT_CODE_PATTERN . '/D', $credit) === 1
             && BankAccountPairNormalizer::hasExactlyOneBankSide($debit, $credit)
             && in_array($debit, $allowed, true) && in_array($credit, $allowed, true)
             && !$this->forbidden($debit) && !$this->forbidden($credit);
@@ -252,8 +261,8 @@ final class LlmClassifierRouter implements LlmClassifierInterface
             'type' => 'object', 'additionalProperties' => false,
             'required' => ['debit_account', 'credit_account', 'operation_type', 'confidence', 'reasoning'],
             'properties' => [
-                'debit_account' => ['type' => 'string', 'pattern' => '^[0-9]{3,6}$'],
-                'credit_account' => ['type' => 'string', 'pattern' => '^[0-9]{3,6}$'],
+                'debit_account' => ['type' => 'string', 'pattern' => self::ACCOUNT_CODE_PATTERN],
+                'credit_account' => ['type' => 'string', 'pattern' => self::ACCOUNT_CODE_PATTERN],
                 'operation_type' => ['type' => 'string', 'enum' => self::OPERATION_TYPES],
                 'confidence' => ['type' => 'number', 'minimum' => 0, 'maximum' => 1],
                 'reasoning' => ['type' => 'string', 'maxLength' => 300],
@@ -268,7 +277,7 @@ final class LlmClassifierRouter implements LlmClassifierInterface
             'type' => 'object', 'additionalProperties' => false,
             'required' => ['debit_account', 'expense_category_id', 'confidence', 'reasoning'],
             'properties' => [
-                'debit_account' => ['type' => 'string', 'pattern' => '^[0-9]{3,6}$'],
+                'debit_account' => ['type' => 'string', 'pattern' => self::ACCOUNT_CODE_PATTERN],
                 'expense_category_id' => ['type' => 'integer', 'minimum' => 0],
                 'confidence' => ['type' => 'number', 'minimum' => 0, 'maximum' => 1],
                 'reasoning' => ['type' => 'string', 'maxLength' => 300],

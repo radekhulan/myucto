@@ -104,7 +104,7 @@ trait PayrollActionSupport
         ?Response &$error,
     ): bool {
         if (!RequestAuthorization::allows($request, $permission, $minimum)) {
-            $error = Json::error($response, 'forbidden', 'Pro tuto akci nemáš oprávnění.', 403);
+            $error = Json::error($response, 'forbidden', 'Pro tuto akci nemáte oprávnění.', 403);
             return false;
         }
         $error = null;

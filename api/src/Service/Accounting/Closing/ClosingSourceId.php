@@ -52,6 +52,14 @@ final class ClosingSourceId
      */
     public const DEFERRED_REVENUE_RELEASE_BASE = 5_000_000_000_000;
 
+    /**
+     * Rozdělení výsledku hospodaření z počátečního stavu 431 prvního roku v MyÚčtu (převod
+     * z jiného systému). Předchozí rok tu není, takže klíč nemůže být jeho period_id jako
+     * u běžného rozdělení; plain period_id cílového roku by se srazil s rozdělením jeho
+     * vlastního výsledku v dalším roce. Pásmo 6e12 + period_id cílového roku.
+     */
+    public const OPENING_PROFIT_DISTRIBUTION_BASE = 6_000_000_000_000;
+
     /** FX přecenění saldokonta (311/321) k rozvahovému dni (R10a). */
     public const SLOT_FX_SALDO = 1;
 
@@ -108,6 +116,12 @@ final class ClosingSourceId
         return self::STOCK_SLOT_BASE + $periodId * 10 + self::SLOT_STOCK_OPENING;
     }
 
+    /** Rozdělení výsledku z počátečního stavu 431 roku bez předchozího období (převod). */
+    public static function openingProfitDistribution(int $targetPeriodId): int
+    {
+        return self::OPENING_PROFIT_DISTRIBUTION_BASE + $targetPeriodId;
+    }
+
     /** Časové rozlišení drobného majetku (§DM) — defer zápis MD 381 / D 501 v období N. */
     public static function smallAssetAccrual(int $periodId): int
     {
@@ -152,6 +166,30 @@ final class ClosingSourceId
     public static function allFxSlots(int $periodId): array
     {
         return [self::fxSaldo($periodId), self::fxBank($periodId), self::fxReversal($periodId)];
+    }
+
+    /**
+     * Je zápis `closing` skladovým slotem kroku „Zásoby" (uzavření, manko, přebytek,
+     * otevření v N+1), a ne zápisem uzavření knih?
+     */
+    public static function isStockSlot(?int $sourceId): bool
+    {
+        return $sourceId !== null && $sourceId >= self::STOCK_SLOT_BASE && $sourceId < self::SMALL_ASSET_RELEASE_BASE;
+    }
+
+    /**
+     * SQL podmínka „zápis uzavírající období" nad aliasem `$alias` deníku: každý zápis
+     * source_type 'closing' kromě skladových slotů. Skladové sloty nesou týž source_type,
+     * ale jen zaúčtovávají zásoby; období neuzavírají a nesmí zmrazit jeho dimenze ani
+     * alokace (#398).
+     *
+     * Záměrně ne „source_id = period_id": uzávěrka převzatá z jiného programu (POHODA,
+     * starší instalace) nese zápisy 'closing' bez source_id a období uzavírá stejně.
+     */
+    public static function closeBooksSql(string $alias): string
+    {
+        return "{$alias}.source_type = 'closing' AND ({$alias}.source_id IS NULL OR {$alias}.source_id < " . self::STOCK_SLOT_BASE
+            . " OR {$alias}.source_id >= " . self::SMALL_ASSET_RELEASE_BASE . ')';
     }
 
     /**

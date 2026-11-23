@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { bankApi, type BankPaymentCandidate } from '@/api/bank'
+import { BANK_BATCH_MATCH_LIMIT, bankApi, type BankPaymentCandidate } from '@/api/bank'
 import { apiErrorMessage } from '@/api/errors'
 import { useAuthStore } from '@/stores/auth'
 import { useSupplierStore } from '@/stores/supplier'
@@ -10,11 +10,13 @@ import { useHotkey } from '@/composables/useHotkey'
 import { formatDate, formatMoney } from '@/composables/useFormat'
 import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
 import BankMatchModal from './BankMatchModal.vue'
+import BankBatchMatchModal from './BankBatchMatchModal.vue'
 
 const props = defineProps<{
   docType: 'invoice' | 'purchase_invoice'
   docId: number
   docRef: string | null
+  batchAvailable?: boolean
 }>()
 const emit = defineEmits<{ close: []; done: [] }>()
 const { t } = useI18n()
@@ -27,6 +29,10 @@ const searchInput = ref<HTMLInputElement | null>(null)
 const candidates = ref<BankPaymentCandidate[]>([])
 const selectedId = ref<number | null>(null)
 const selected = computed(() => candidates.value.find(candidate => candidate.id === selectedId.value) ?? null)
+const batchMode = ref(false)
+const batchSelected = ref<number[]>([])
+const reviewIds = ref<number[] | null>(null)
+const reviewButton = ref<HTMLButtonElement | null>(null)
 const loading = ref(false)
 const matching = ref(false)
 const completed = ref(false)
@@ -63,6 +69,7 @@ async function load(targetPage = 1) {
       purchaseInvoiceId: props.docType === 'purchase_invoice' ? props.docId : undefined,
       search: search.value.trim() || undefined,
       page: targetPage,
+      ...(batchMode.value ? { batch: true } : {}),
     })
     if (disposed || requestGeneration !== generation) return
     candidates.value = result.items
@@ -74,6 +81,18 @@ async function load(targetPage = 1) {
   } finally {
     if (!disposed && requestGeneration === generation) loading.value = false
   }
+}
+
+function toggleBatch() {
+  batchMode.value = !batchMode.value
+  batchSelected.value = []
+  void load()
+}
+
+function closeReview(matched: boolean) {
+  reviewIds.value = null
+  if (matched) emit('close')
+  else void nextTick(() => reviewButton.value?.focus())
 }
 
 async function confirmMatch() {
@@ -103,7 +122,12 @@ watch(search, () => {
   clearTimeout(searchTimer)
   searchTimer = setTimeout(() => { void load() }, 300)
 })
-watch(() => [props.docType, props.docId], () => { void load() })
+watch(() => [props.docType, props.docId], () => {
+  batchMode.value = false
+  batchSelected.value = []
+  reviewIds.value = null
+  void load()
+})
 watch(() => supplier.currentSupplierId, () => {
   generation++
   clearTimeout(searchTimer)
@@ -120,7 +144,7 @@ watch(purchaseShortfall, value => {
   if (completed.value && !value) emit('close')
 })
 useHotkey('escape', () => {
-  if (!completed.value) close()
+  if (!completed.value && !reviewIds.value) close()
 })
 onMounted(() => {
   if (!canMatch.value) {
@@ -139,7 +163,9 @@ onBeforeUnmount(() => {
 
 <template>
   <BankMatchModal :actions="actions" />
-  <div v-if="!completed" class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" @click.self="close">
+  <BankBatchMatchModal v-if="reviewIds" :ids="reviewIds" :document="{ type: docType, id: docId, ref: docRef }"
+    @done="emit('done')" @close="closeReview" />
+  <div v-if="!completed && !reviewIds" class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" @click.self="close">
     <section role="dialog" aria-modal="true" :aria-label="t('bank.invoice_match.title')"
       class="bg-surface w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-xl p-5 shadow-lg">
       <div class="mb-2 flex flex-wrap items-start justify-between gap-2">
@@ -150,7 +176,11 @@ onBeforeUnmount(() => {
         </button>
       </div>
       <p class="mb-3 text-sm text-neutral-600">{{ t('bank.invoice_match.document', { ref: docRef || `#${docId}` }) }}</p>
-      <p class="mb-4 text-sm text-neutral-500">{{ t('bank.invoice_match.hint') }}</p>
+      <p class="text-sm text-neutral-500" :class="batchAvailable ? 'mb-2' : 'mb-4'">{{ t(batchMode ? 'bank.batch_match.select_hint' : 'bank.invoice_match.hint') }}</p>
+      <button v-if="batchAvailable" type="button" :class="btnOutline('neutral')" class="mb-4"
+        :disabled="matching" data-test="invoice-bank-batch-mode" @click="toggleBatch">
+        {{ t(batchMode ? 'bank.batch_match.single' : 'bank.batch_match.multiple') }}
+      </button>
       <form class="mb-4 flex flex-wrap items-center gap-2" @submit.prevent="load()">
         <label class="min-w-0 flex-1">
           <span class="sr-only">{{ t('bank.invoice_match.search') }}</span>
@@ -172,10 +202,12 @@ onBeforeUnmount(() => {
       <p v-if="loading" role="status" class="py-4 text-center text-sm text-neutral-500">{{ t('bank.invoice_match.loading') }}</p>
       <p v-else-if="!error && !candidates.length" class="py-4 text-center text-sm text-neutral-500">{{ t('bank.invoice_match.empty') }}</p>
       <fieldset v-else-if="!error" class="space-y-2" :disabled="matching">
-        <legend class="sr-only">{{ t('bank.invoice_match.select_payment') }}</legend>
+        <legend class="sr-only">{{ t(batchMode ? 'bank.batch_match.multiple' : 'bank.invoice_match.select_payment') }}</legend>
         <label v-for="candidate in candidates" :key="candidate.id" class="flex cursor-pointer items-start gap-3 rounded-lg border p-3"
-          :class="selectedId === candidate.id ? 'border-primary-400 bg-primary-50' : 'border-neutral-200 hover:bg-neutral-50'">
-          <input v-model="selectedId" type="radio" name="bank-payment-candidate" :value="candidate.id" class="mt-1 text-primary-600" />
+          :class="(batchMode ? batchSelected.includes(candidate.id) : selectedId === candidate.id) ? 'border-primary-400 bg-primary-50' : 'border-neutral-200 hover:bg-neutral-50'">
+          <input v-if="batchMode" v-model="batchSelected" type="checkbox" :value="candidate.id" class="mt-1 text-primary-600"
+            :disabled="batchSelected.length >= BANK_BATCH_MATCH_LIMIT && !batchSelected.includes(candidate.id)" />
+          <input v-else v-model="selectedId" type="radio" name="bank-payment-candidate" :value="candidate.id" class="mt-1 text-primary-600" />
           <span class="min-w-0 flex-1">
             <span class="flex flex-wrap justify-between gap-x-3 gap-y-1">
               <span class="font-medium">{{ candidate.counterparty_name || t('bank.invoice_match.unknown_counterparty') }}</span>
@@ -203,8 +235,13 @@ onBeforeUnmount(() => {
       </div>
       <p v-if="matchError" role="alert" class="mt-3 rounded-md border border-danger-200 bg-danger-50 p-3 text-sm text-danger-700">{{ matchError }}</p>
       <div class="mt-4 flex flex-wrap items-center justify-between gap-3 border-t border-neutral-200 pt-4">
-        <p v-if="selected" class="min-w-0 text-sm text-neutral-600">{{ t('bank.invoice_match.selected', { amount: formatMoney(selected.amount, selected.currency), date: formatDate(selected.posted_at), ref: docRef || `#${docId}` }) }}</p>
-        <button type="button" data-testid="confirm-match" :disabled="!selected || loading || matching || !canMatch" :class="btnFilled('success')" @click="confirmMatch">
+        <p v-if="batchMode" class="text-sm text-neutral-600" aria-live="polite">{{ t('bank.batch_match.selection_count', { count: batchSelected.length, limit: BANK_BATCH_MATCH_LIMIT }) }}</p>
+        <p v-else-if="selected" class="min-w-0 text-sm text-neutral-600">{{ t('bank.invoice_match.selected', { amount: formatMoney(selected.amount, selected.currency), date: formatDate(selected.posted_at), ref: docRef || `#${docId}` }) }}</p>
+        <button v-if="batchMode" ref="reviewButton" type="button" :class="btnFilled('primary')" data-test="review-invoice-bank-batch"
+          :disabled="batchSelected.length < 2 || loading || !canMatch" @click="reviewIds = [...batchSelected]">
+          {{ t('bank.batch_match.review') }}
+        </button>
+        <button v-else type="button" data-testid="confirm-match" :disabled="!selected || loading || matching || !canMatch" :class="btnFilled('success')" @click="confirmMatch">
           <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.link" /></svg>
           {{ t(matching ? 'bank.invoice_match.matching' : 'bank.invoice_match.confirm') }}
         </button>

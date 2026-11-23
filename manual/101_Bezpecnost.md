@@ -120,6 +120,170 @@ klíče i autentikátoru zadáte kód na přihlašovací stránce místo druhéh
 **Jak poznáte, že je hotovo:** Nový uživatel po přihlášení heslem vidí
 `/setup-mfa` a do aplikace se dostane až po registraci klíče nebo zapnutí TOTP.
 
+### 101.6.1 Přihlášení přes Microsoft Entra ID (správce)
+
+Přihlášení přes Entra ID výchozně nahrazuje heslo i vícefaktorové ověření
+v MyÚčto. MFA v tomto režimu vynucuje váš tenant (Conditional Access), MyÚčto
+se na druhý faktor už neptá. Aplikaci v Entra ID si registruje každá instalace sama.
+
+Chcete-li po návratu od Microsoftu ověřovat také místní MFA, nastavte v `cfg.php`
+`auth.oidc.providers.entra.skip_mfa` na `false` (v Dockeru
+`MYINVOICE_OIDC_ENTRA_SKIP_MFA=0`). Entra pak nahrazuje jen heslo a následuje
+passkey, TOTP nebo další ověření stejně jako při přihlášení heslem. Má-li být
+místní MFA povinné i pro účty bez zřízeného faktoru, zapněte také
+`auth.require_mfa = true`. Povinné přihlášení přes Entra zůstává vynucené
+v obou režimech. S hodnotou `false` se citlivé operace potvrzují místním
+ověřením; popup Entra se pro ně nenabízí.
+
+Při vynuceném přihlášení přes Entra se heslo nepoužívá. Účet bez místního faktoru
+si ho zřídí v povinném nastavení MFA hned po přihlášení přes Entra
+(`auth.require_mfa = true`).
+
+Výchozí `skip_mfa = true` zachovává důvěru v MFA organizace. Změna platí při
+dalších přihlášeních; potřebujete-li okamžitě odebrat důvěru dosavadním relacím,
+zrušte také aktivní sezení uživatelů.
+
+Vynucené přihlášení přes Entra platí pro celou instalaci, tedy pro všechny firmy,
+portfolio, automatizace i operace mezi firmami. API token a MCP připojení platí
+jen tehdy, když vznikly ze sezení přihlášeného přes Entra.
+
+1. V Microsoft Entra admin center založte registraci aplikace: *single tenant*,
+   platforma **Web**, redirect URI `https://<adresa instalace>/api/auth/oidc/entra/callback`
+   (musí odpovídat `app.url`). Implicitní tokeny nechte vypnuté, oprávnění
+   stačí `openid`, `profile`, `email`. Vytvořte tajný klíč klienta.
+2. V Enterprise application zapněte **Assignment required** a přiřaďte
+   uživatele nebo skupinu, kteří se smí přihlásit.
+3. Nastavte instalaci (tajemství patří do proměnné prostředí, ne do souboru):
+
+   ```php
+   'auth' => [
+       'oidc' => [
+           'enabled' => true,
+           'providers' => [
+               'entra' => [
+                   'enabled'   => true,
+                   'tenant_id' => '<Directory (tenant) ID>',
+                   'client_id' => '<Application (client) ID>',
+                   'skip_mfa'  => true,
+               ],
+           ],
+       ],
+   ],
+   ```
+
+   V Dockeru: `MYINVOICE_OIDC_ENABLED=1`, `MYINVOICE_OIDC_ENTRA_ENABLED=1`,
+   `MYINVOICE_OIDC_ENTRA_TENANT_ID`, `MYINVOICE_OIDC_ENTRA_CLIENT_ID`,
+   `MYINVOICE_OIDC_ENTRA_CLIENT_SECRET`.
+4. Účty uživatelů zakládejte dál v **Nastavení → Uživatelé**. U uživatele
+   v části **Propojené identity** zvolte **Pozvat k přihlášení přes Microsoft Entra ID**. Uživatel dostane e-mail
+   s odkazem a prvním přihlášením se jeho účet propojí s identitou v Entra ID.
+5. Až budou všichni propojení včetně technického účtu správce instance, vynuťte
+   přihlášení přes Microsoft Entra ID v konfiguraci: `'required_provider' => 'entra'`
+   pod `auth.oidc`, v Dockeru `MYINVOICE_OIDC_REQUIRED=entra`. Vynucení platí pro
+   celou instalaci, všechny firmy včetně nově založených a všechny uživatele.
+   Jednotlivé firmy ho nastavit ani vypnout nemohou.
+
+Při vynucení se heslo v aplikaci nepoužívá vůbec, ani pro správce instance:
+
+- přihlašovací stránka nabídne jen tlačítko Microsoft Entra ID, bez formuláře
+  s heslem, přihlášení přístupovým klíčem i záložním kódem,
+- změna hesla, zapomenuté heslo a odkaz na nastavení hesla nejsou k dispozici,
+- nový uživatel dostane místo odkazu na nastavení hesla pozvánku k přihlášení
+  přes Microsoft Entra ID,
+- citlivé operace (podání EPO, certifikáty, API tokeny, zálohy, vlastní domény
+  a další) potvrdíte novým přihlášením u Microsoftu v okně, které se otevře nad
+  rozdělanou prací. Při `skip_mfa = false` je potvrdíte místním přístupovým
+  klíčem nebo kódem z autentikátoru, heslem nikdy,
+- sezení, API tokeny a MCP připojení vzniklé dřív přihlášením heslem přestanou
+  platit. Uživatel se přihlásí znovu přes Microsoft a token si vystaví znovu.
+
+Účet, který se přes Entra ještě nepřihlásil (například první správce po instalaci),
+propojíte pozvánkou z příkazové řádky:
+
+```
+php api/bin/oidc-invite.php --email=spravce@example.com
+```
+
+Nástroj vypíše odkaz, který platí 3 dny a jednou. S volbou `--send` ho pošle
+e-mailem. Odkaz předejte jen majiteli účtu.
+
+| Pravidlo | Chování |
+|---|---|
+| Párování účtu | Podle ID objektu (`oid`) a tenantu (`tid`), nikdy jen podle e-mailu |
+| Pozvánka | Platí 3 dny, jednou; přijme ji jen účet se stejnou e-mailovou adresou jako pozvaný uživatel |
+| Neznámá identita | Přihlášení se odmítne, účet se nezakládá |
+| Hosté B2B | Smí se přihlásit jen s `allow_guests = true` (ENV `MYINVOICE_OIDC_ENTRA_ALLOW_GUESTS=1`) a přiřazením k aplikaci |
+| Platnost sezení | `auth.oidc.session_lifetime_hours`, výchozí 12 hodin od posledního přihlášení přes Entra ID, i při `skip_mfa = false`. Při vynuceném přihlášení přes Entra ID (`required_provider = 'entra'`) se po vypršení aplikace sama znovu přihlásí přes Microsoft a vrátí vás na stejnou stránku, pokud jste tam zůstali přihlášení. Když je Entra ID jen jednou z možností přihlášení, vede vypršení sezení na přihlašovací stránku a způsob přihlášení si vyberete |
+| API tokeny a MCP připojení z přihlášení přes Entra ID | S `tokens_follow_identity = true` (ENV `MYINVOICE_OIDC_TOKENS_FOLLOW_IDENTITY=1`) platí, jen dokud se vlastník přes Entra ID přihlásil v posledních `session_lifetime_hours`. Výchozí je `false`: platí do své vlastní expirace |
+| Zablokovaný uživatel v Entra ID | Znovu se nepřihlásí, otevřené sezení přestane platit nejpozději po `session_lifetime_hours` od jeho posledního přihlášení přes Entra ID, API tokeny a MCP připojení také, je-li zapnuté `tokens_follow_identity` |
+| Instalace vyžaduje Microsoft | Heslo, přístupový klíč ani záložní kód nepustí nikoho, ani správce instance |
+| Nouzový přístup | Jen vypnutím vynucení v konfiguraci, aplikace výjimku nemá |
+| Citlivé operace | Při `skip_mfa = true` je potvrdíte novým přihlášením u Microsoftu; při `false` místním přístupovým klíčem nebo TOTP, při vynucení nikdy heslem |
+
+**Co se stane po zablokování uživatele v Entra ID.** MyÚčto se o blokaci dozví
+až při dalším přihlášení, které Microsoft odmítne. Proto platí strop
+`auth.oidc.session_lifetime_hours` (výchozí 12 hodin), počítaný od posledního
+úspěšného přihlášení nebo ověření citlivé operace přes Entra ID:
+
+- nové přihlášení přes Microsoft se nepodaří,
+- otevřené sezení z přihlášení přes Entra ID skončí nejpozději po uplynutí stropu.
+  Strop platí i při `skip_mfa = false`, kdy druhý faktor ověřuje MyÚčto, a odemčení
+  zamčené obrazovky ani přechod na vlastní doménu firmy ho neprodlouží,
+- je-li zapnuté `auth.oidc.tokens_follow_identity` (ENV
+  `MYINVOICE_OIDC_TOKENS_FOLLOW_IDENTITY=1`), API token a MCP připojení vystavené
+  ze sezení přes Entra ID přestanou fungovat nejpozději po uplynutí stropu (`401 invalid_token`, obnova MCP připojení se
+  odmítne). Token má dál svou vlastní expiraci, ale používat jde jen tehdy, když
+  se jeho vlastník přes Entra ID přihlásil v posledních `session_lifetime_hours`.
+  Kdo tokeny používá k automatickému napojení, musí se proto přes Microsoft
+  přihlašovat alespoň jednou za tuto dobu, nebo si strop prodloužit. Bez
+  `tokens_follow_identity` (výchozí) platí token do své expirace a zablokovanému
+  uživateli ho ukončí deaktivace účtu v MyÚčto,
+- tokeny a sezení vzniklé bez Entra ID (heslo, TOTP, přístupový klíč, Google)
+  se tím nemění. Bez vynucení se uživatel, který zná heslo, přihlásí heslem dál.
+  Blokace v Entra ID tedy celý přístup uzavře jen s `required_provider = 'entra'`.
+
+Potřebujete-li přístup ukončit okamžitě, deaktivujte účet v **Nastavení →
+Uživatelé**: sezení i všechny tokeny uživatele tím přestanou platit hned.
+
+Neúplná konfigurace poskytovatele se nezapne a ukáže se v Diagnostice. Vynucení
+platí jen pro zapnutého poskytovatele podporujícího firemní SSO (Microsoft Entra ID),
+a to i při místním MFA. Překlep v názvu ani vypnutý poskytovatel nikoho nezamknou.
+Při výpadku Entra ID vypněte vynucení (`MYINVOICE_OIDC_REQUIRED=` prázdné), uživatelé
+se pak přihlásí heslem a MFA. Heslo si účet, který ho nezná, nastaví přes
+zapomenuté heslo.
+
+### 101.6.2 Přihlášení přes Google, Apple a Seznam (správce)
+
+Google, Apple a Seznam nahrazují jen heslo. Má-li uživatel přístupový klíč
+nebo TOTP, ověří ho po návratu od poskytovatele stejně jako po hesle, a při
+`auth.require_mfa` se bez silného faktoru do aplikace nedostane. Citlivé
+operace přes tyto poskytovatele potvrdit nejde a instalace je nemůže vynutit.
+Účty se nezakládají; uživatel se propojí pozvánkou nebo v profilu.
+
+Návratová adresa je u všech `https://<adresa instalace>/api/auth/oidc/<poskytovatel>/callback`
+(`google`, `apple`, `seznam`) a musí odpovídat `app.url`.
+
+| Poskytovatel | Kde zaregistrovat | Do konfigurace |
+|---|---|---|
+| Google | Google Cloud Console → APIs & Services → Credentials → OAuth client ID, typ *Web application*, Authorized redirect URI dle výše; OAuth consent screen s rozsahy `openid`, `email`, `profile` | `client_id`, `client_secret`; volitelně `allowed_hosted_domains` (jen účty Google Workspace těchto domén) |
+| Apple | Apple Developer → Identifiers: App ID se *Sign in with Apple* a Services ID (to je `client_id` webu) s doménou instalace a Return URL dle výše; Keys: klíč se *Sign in with Apple* (.p8) | `team_id`, `key_id`, `services_id`, `private_key` (obsah .p8) nebo `private_key_file` mimo webroot |
+| Seznam | vyvojari.seznam.cz → registrace OAuth aplikace s návratovou adresou dle výše | `client_id`, `client_secret` |
+
+V Dockeru: `MYINVOICE_OIDC_GOOGLE_ENABLED`, `MYINVOICE_OIDC_GOOGLE_CLIENT_ID`,
+`MYINVOICE_OIDC_GOOGLE_CLIENT_SECRET`, `MYINVOICE_OIDC_GOOGLE_HOSTED_DOMAINS`,
+`MYINVOICE_OIDC_APPLE_ENABLED`, `MYINVOICE_OIDC_APPLE_TEAM_ID`, `MYINVOICE_OIDC_APPLE_KEY_ID`,
+`MYINVOICE_OIDC_APPLE_SERVICES_ID`, `MYINVOICE_OIDC_APPLE_PRIVATE_KEY`,
+`MYINVOICE_OIDC_SEZNAM_ENABLED`, `MYINVOICE_OIDC_SEZNAM_CLIENT_ID`,
+`MYINVOICE_OIDC_SEZNAM_CLIENT_SECRET`. Vždy také `MYINVOICE_OIDC_ENABLED=1`.
+
+| Pravidlo | Chování |
+|---|---|
+| Párování účtu | Google a Apple podle `sub`, Seznam podle `advert_user_id`; nikdy podle e-mailu |
+| E-mail z Googlu | Použije se jen ověřený; neověřený pozvánku nepřijme |
+| Apple a skrytý e-mail | Adresa `…@privaterelay.appleid.com` pozvánku nepřijme, propojte účet z profilu |
+| Druhý faktor | Po návratu se ověří passkey, TOTP nebo e-mailový kód stejně jako po hesle |
+| Firma vyžaduje Microsoft | Přihlášení přes Google, Apple ani Seznam do firmy nepustí |
+
 ## 101.7 Krok za krokem: omezení přístupu IP allowlistem (správce)
 
 1. Do `cfg.php` zapište povolené IP adresy a rozsahy (příklad je v
@@ -162,12 +326,73 @@ znamená zákaz.
 **Jak poznáte, že je hotovo:** Podezřelé záznamy jste vysvětlili nebo
 eskalovali. Doporučujeme kontrolu aspoň jednou měsíčně.
 
+### 101.9.1 Aktivní relace
+
+Superadmin otevře **Systém → Uživatelé → Aktivní relace**. Přehled ukazuje platná přihlášení napříč instalací;
+vlastní relace je vždy první, ostatní jsou seřazené podle posledního kontaktu od nejnovějšího. Každý řádek uvádí
+uživatele, e-mail, IP adresu, prohlížeč nebo zařízení, čas přihlášení, poslední kontakt a konec platnosti. Vlastní
+přihlášení označuje štítek **Tato relace**. Více zařízení stejného uživatele má samostatné řádky.
+
+Čas posledního kontaktu se zapisuje nejvýše jednou za pět minut a může zahrnovat požadavky na pozadí. Neprokazuje tedy,
+že uživatel právě pracuje. Zavření prohlížeče platné přihlášení nemusí ukončit. Přehled se automaticky obnovuje každých
+30 sekund, pokud je stránka viditelná a relace není uzamčená. Tlačítko **Obnovit** načte aktuální stav; větší seznam se
+stránkuje.
+
+Tlačítkem **Ukončit relaci** a následným potvrzením superadmin odvolá vybrané přihlášení včetně jeho bezpečnostně
+obnovených generací. Ostatní přihlášení stejného uživatele zůstanou platná. Odvolání se projeví při příštím požadavku
+daného zařízení a uživatel se musí znovu přihlásit. Ukončení vlastní relace vyžaduje zvláštní potvrzení a přejde na
+přihlášení. Jednotlivé relace lze označit a hromadně ukončit; **Vybrat všechny na stránce** označí jen právě zobrazené
+řádky. Potvrzení hromadného ukončení upozorní, pokud výběr zahrnuje vlastní relaci. Akce se zaznamená do Logu jako
+`auth.session_revoked` (hromadná akce jako `auth.sessions_revoked`).
+
+API tokeny ani MCP připojení přehled nezobrazuje a tlačítko **Ukončit relaci** je neodvolává. Přihlášení technických
+účtů správce instance v přehledu nejsou a superadmin je odtud ukončit nemůže.
+
+**Správa relací ze serveru (CLI).** Správce s přístupem k serveru a konfiguraci aplikace může
+relace vypsat nebo ukončit i bez přihlášení do aplikace. CLI spravuje také přihlášení superadminů,
+technických správců instance a neaktivních účtů. Zobrazuje pouze časově platné, neodvolané aktuální
+generace, nikoli autentizační nebo CSRF tokeny. Výstupní ID označuje rodinu relace.
+
+```bash
+php api/bin/user-sessions.php list
+php api/bin/user-sessions.php list --email=uzivatel@example.test --json
+php api/bin/user-sessions.php terminate --id=ID_RELACE
+php api/bin/user-sessions.php terminate --email=uzivatel@example.test --yes
+php api/bin/user-sessions.php terminate --all --yes
+```
+
+Příkazy se spouštějí z kořene instalace pomocí PHP CLI, stejně na Linuxu i Windows.
+`list` vrací nejvýše 50 přihlášení, seřazených podle posledního kontaktu. Pro další stránku použijte
+vypsaný `--cursor`; při filtrování zachovejte `--email`. JSON obsahuje pole `data` a `next_cursor`.
+Poslední kontakt se stejně jako ve webovém přehledu zapisuje nejvýše jednou za pět minut.
+
+`terminate` vyžaduje právě jeden výběr: `--id`, `--email`, nebo `--all`. Bez `--yes` jde pouze o
+náhled počtu odpovídajících relací. `--id` ukončí jednu rodinu včetně rotovaných generací;
+`--email` všechny odpovídající relace uživatele; `--all` všechny odpovídající relace celé instalace
+včetně správců. Nové přihlášení během operace nemusí být do výběru zahrnuto. API tokeny a MCP připojení
+se tím neruší. Uživatel se musí znovu přihlásit při příštím požadavku.
+
+Hromadné operace běží po nejvýše 50 rodinách: každá dávka a její audit jsou atomické. Při chybě
+zůstávají předchozí dokončené dávky odvolané, chybná dávka se vrátí a příkaz lze zopakovat.
+Audit `auth.sessions_revoked` obsahuje zdroj `cli:user-sessions`, serverového operátora, hostitele,
+počet a bezpečná ID rodin. Náhled do auditu nezapisuje. `--json` funguje i u ukončení; náhled vrací
+`matched`, skutečné ukončení navíc `terminated` a `executed: true`. Návratové kódy jsou 0 pro úspěch,
+1 pro provozní chybu, 2 pro neplatné argumenty a 3 pro nenalezený účet nebo relaci.
+
+**Počet současně přihlášených zařízení.** Licence může omezit, kolik relací smí mít jeden uživatel současně, zvlášť
+v prohlížeči počítače a zvlášť na mobilním zařízení (telefon, tablet, mobilní aplikace). Standardně je to jedna relace
+v prohlížeči a jedna na mobilu. Nové přihlášení nad tento počet ukončí nejstarší relaci stejného druhu a odhlášené
+zařízení při příštím požadavku zobrazí na přihlašovací stránce, že se k účtu přihlásil někdo jiný. Uložené přihlášení
+v témže prohlížeči je stále jedna relace, nová vzniká až přihlášením v jiném prohlížeči nebo na jiném zařízení.
+Přihlášení na vlastní doméně firmy se počítá zvlášť a hlavní aplikaci neodhlásí. Instalace bez platné licence relace
+neomezuje.
+
 ## 101.10 Když něco nejde
 
 <!-- cols: 30 34 36 -->
 | Co vidíte | Proč | Co udělat |
 |---|---|---|
-| Nemáte autentikátor ani klíč | Zařízení je ztracené | Zadejte záložní kód ([§ 101.5](#1015-krok-za-krokem-zalozni-kody)); jinak správce spustí `php api/bin/reset-mfa.php <email>` ([§ 101.11.2.4](#1011124-obnova-pristupu)) |
+| Nemáte autentikátor ani klíč | Zařízení je ztracené | Zadejte záložní kód ([§ 101.5](#1015-krok-za-krokem-zalozni-kody)); jinak superadmin resetuje MFA v **Administrace → Uživatelé**, případně spustí `php api/bin/reset-mfa.php <email>` ([§ 101.11.2.4](#1011124-obnova-pristupu)) |
 | Odebrat poslední silný faktor nejde | Je vynucené MFA | Nejdřív zaregistrujte druhý klíč nebo zapněte TOTP |
 | Přístupové klíče nejsou dostupné | `app.url` není HTTPS DNS adresa, nebo je v konfiguraci vypnutá metoda `passkey` | Opravte `app.url` ([§ 101.11.2.1](#1011121-passkeys)) |
 | Přihlášení hlásí `503 passkeys_unavailable` | WebAuthn je nedostupný a účet nemá jiný druhý faktor | Opravte `app.url`, případně `reset-mfa.php` |
@@ -187,7 +412,7 @@ eskalovali. Doporučujeme kontrolu aspoň jednou měsíčně.
 | Algoritmus | bcrypt cost 12 |
 | Pepper | Sůl z `cfg.php → app.pepper` (32B base64), neukládá se v DB |
 | Min. délka | 12 znaků |
-| Max. délka | Bez limitu - passphrase je doporučená (20+ znaků) |
+| Max. délka | 128 bajtů; znak s diakritikou může zabrat více bajtů. Passphrase je podporovaná. |
 | Kontrola síly | Indikátor v UI (slabé / střední / silné) |
 | Reset hesla | Odkaz na 1 hodinu, e-mailem |
 
@@ -449,10 +674,28 @@ přístupovým klíčem zapisuje `auth.passkey_step_up_failed` (při přihláše
 validátoru nebo `unknown_credential`, podle které se dá dohledat, proč klíč
 neprošel.
 
-##### Rescue na serveru
+##### Reset superadminem v aplikaci
 
 Nejprve použijte jinou zaregistrovanou passkey, TOTP nebo záložní kód. Pokud není
-dostupné nic z toho, správce může na serveru spustit:
+dostupné nic z toho, superadmin otevře **Administrace → Uživatelé**, u uživatele
+**Upravit** a v části **Dvoufázové ověření** klikne na **Resetovat MFA**.
+
+- Resetovat lze kohokoli kromě sebe, i jiného superadmina. Vlastní MFA si každý
+  spravuje v profilu.
+- Uvedete důvod (aspoň 10 znaků) a reset potvrdíte **vlastním** dvoufázovým
+  ověřením: přístupovým klíčem, kódem z aplikace, nebo účtem organizace. Heslo
+  ani záložní kód nestačí, superadmin bez MFA si ho musí nejdřív zapnout.
+- Reset vypne TOTP, odvolá passkeys, záložní kódy a důvěryhodná zařízení
+  a odhlásí uživatele ze všech zařízení. **API tokeny a MCP připojení zůstanou.**
+- Uživateli přijde e-mail o resetu. Do activity logu se zapíše `user.mfa_reset`
+  s důvodem, tím, kdo reset provedl, a čím ho potvrdil.
+
+Při vynuceném přihlášení přes silného poskytovatele identity (Entra ID) se reset
+nenabízí, dvoufázové ověření tam spravuje poskytovatel.
+
+##### Rescue na serveru
+
+Když se do aplikace nedostane ani superadmin, správce může na serveru spustit:
 
 ```bash
 php api/bin/reset-mfa.php vas@email.cz
@@ -695,10 +938,13 @@ expirované řádky.
 | Pokusy během | Akce |
 |---|---|
 | 5 selhání / 5 minut | CAPTCHA (Cloudflare Turnstile) |
-| 10 selhání / 15 minut | Lockout 15 minut (per IP) |
-| 30 selhání / 1 hodinu | Lockout 24 hodin + e-mail uživateli o pokusech |
+| 10 selhání / 15 minut | Lockout 15 minut pro kombinaci účtu a síťového prefixu |
+| 30 selhání / 1 hodinu | Lockout 24 hodin pro stejnou kombinaci účtu a sítě; pokus se zapíše do auditu |
 
-Implementace: **Redis** pokud běží, jinak **MariaDB MEMORY engine** fallback.
+U IPv4 se používá síťový prefix **/24**, u IPv6 **/64**. Sousední IP ve stejné
+síti proto není nový čítač pro tentýž účet. Implementace: **Redis**, pokud
+běží, jinak **MariaDB MEMORY**. Přihlašovací brána při blokaci sama
+e-mailové upozornění neposílá.
 
 ### 101.11.4 IP allowlist (volitelné)
 
@@ -973,6 +1219,7 @@ anonymizovaná kopie.
 | IČO, DIČ | jiné, platné podle kontrolní číslice; DIČ navazuje na nové IČO |
 | rodná čísla | datum narození a pohlaví zůstávají, koncovka je jiná a číslo platné |
 | čísla účtů, IBAN | jiná platná čísla, kód banky a předčíslí zůstávají |
+| variabilní symbol zaměstnavatele u ČSSZ | kód okresní správy zůstává, zbytek jiný s platnou kontrolní číslicí |
 | e-maily, telefony, datové schránky | vymyšlené (e-maily v doméně `example.invalid`) |
 | texty dokladů, poznámky, protokoly převodů, auditní stopa | tatáž jména a čísla nahrazená týmiž pseudonymy |
 | přílohy a výpisy uložené v databázi | zástupný soubor (prázdné PDF, obrázek 1×1 px, text) |
@@ -1004,6 +1251,24 @@ používejte ji jen na vývojovém stroji.
 - Šifrované mzdové údaje jsou znovu zapečetěné klíčem instance, na které
   příkaz běžel. Testovací instance s jiným `secret_encryption_key` je
   nerozšifruje.
+- **Kopie pro jinou instanci (přešifrování):** `--target-keys=SOUBOR` zapečetí
+  mzdové údaje (rodná čísla, účty, kontakty, profily registrace A1) klíči
+  testovací instance a stejným pepperem zahashuje heslo z `--password`.
+  `--source-keys=SOUBOR` určí klíče, kterými jsou údaje zdroje šifrované
+  (výchozí jsou klíče instance). Oba soubory vrací
+  `['app' => ['secret_encryption_key' => …, 'pepper' => …, 'payroll_hash_key' => …,
+  'secret_encryption_previous_keys' => []]]`; z konfigurace se převezmou jen
+  tyto klíče.
+- Co klíčem zdroje dešifrovat nejde (například kopie produkce bez jejího
+  klíče), dostane vymyšlenou hodnotu: rodné číslo s datem narození a pohlavím
+  z karty osoby a platnou kontrolní číslicí, účet s kódem banky z masky.
+  Nečitelné profily registrace A1 se v kopii smažou a vyplní se znovu na
+  kartě vztahu. Počet nahrazených hodnot příkaz vypíše. Datové klíče
+  mzdových dokumentů dostanou kopie nové, zabalené klíčem cíle.
+- `--older-source` dovolí kopii ze zálohy starší verze aplikace: tabulky a
+  sloupce, které v ní ještě nejsou, se přeskočí. Kopii pak doplní
+  `php api/bin/migrate.php`. Neznámý textový sloupec ve zdroji kopii i tak
+  zastaví.
 - Archivní snímky podání (mzdová podání, EPO) jsou smazané, jejich otisky
   zůstaly - archiv podání v kopii proto hlásí nečitelné snímky. Auditní stopa
   je po pseudonymizaci zapečetěná znovu a dokazuje jen integritu kopie.

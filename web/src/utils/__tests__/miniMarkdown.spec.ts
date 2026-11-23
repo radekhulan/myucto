@@ -44,3 +44,19 @@ describe('renderMarkdown – seznamy', () => {
     expect(flat('1. a\n\n   <script>x</script>')).not.toContain('<script>')
   })
 })
+
+describe('obrázky nabídky', () => {
+  it('vykreslí jen autorizovanou přílohu a escapuje popisek i adresu', () => {
+    const file = '/api/sales-quotes/12/files/17?supplier_id=1&version_id=4'
+    const render = (id: number) => id === 17 ? file : undefined
+    const html = renderMarkdown('![A < B"](quote-file:17) ![cizí](quote-file:18) ![externí](https://example.test/photo.jpg)', render)
+    expect(html).toContain('<img src="/api/sales-quotes/12/files/17?supplier_id=1&amp;version_id=4" alt="A &lt; B&quot;" data-quote-file="17">')
+    expect(html.match(/<img /g)).toHaveLength(1)
+    expect(html).toContain('cizí')
+  })
+
+  it('nepovolí vzdálený cíl ani při chybném resolveru', () => {
+    expect(renderMarkdown('![obrázek](quote-file:7)', () => 'https://example.test/photo.jpg')).toBe('<p>obrázek</p>')
+    expect(renderMarkdown('![obrázek](quote-file:7)')).not.toContain('<img ')
+  })
+})

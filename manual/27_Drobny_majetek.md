@@ -61,7 +61,8 @@ Ruční kartu použijte pro historický majetek, dar nebo vklad, který nemá do
 3. Uložte.
 
 **Jak poznáte, že je hotovo:** hláška **Karta založena.** a karta je v seznamu se zdrojem **Bez dokladu**. Cena musí být
-nezáporná, množství kladné a datum uvedení do používání nesmí předcházet pořízení.
+nezáporná, množství kladné a datum uvedení do používání nesmí předcházet pořízení. Cenu za kus lze zadat až na
+šest desetinných míst (levný majetek po tisících kusů), cena karty je v haléřích.
 
 ## 27.4 Krok za krokem: najít kartu v seznamu
 
@@ -129,7 +130,8 @@ Fyzické smazání používejte jen pro chybně založenou kartu. Běžné vyřa
 2. Zvolte sestavu a datum či období:
    - **Soupis drobného majetku k datu** (pole **Ke dni**),
    - **Přírůstky a úbytky za období** (pole **Od** a **Do**),
-   - **Rozpis 501 dle druhu výdaje** (pole **Od** a **Do**).
+   - **Rozpis 501 dle druhu výdaje** (pole **Od** a **Do**). Částky jsou v Kč kurzem dokladu jako náklad v hlavní
+     knize; zálohové výzvy, daňové doklady k záloze, koncepty ani stornované doklady v rozpisu nejsou.
 3. Klikněte na **PDF** nebo **XLSX**.
 4. Při inventuře porovnejte sestavu s fyzickou existencí, inventárními štítky, umístěním a odpovědnými osobami.
 
@@ -254,7 +256,10 @@ Měsíční kontrola porovnává náklady řádků označených jako drobný maj
 varování, ne automatický zápis.
 
 Uzávěrka může nabídnout volitelné časové rozlišení nákladu drobného majetku. Nejde o daňový odpis. Použije účetní politiku
-období a předkontaci 381/501, v dalším období vytvoří zrcadlové rozpuštění. Bez doložené doby užitku a významnosti návrh
+období a předkontaci 381/501, v dalším období vytvoří zrcadlové rozpuštění. Řádek 501 přebírá analytiku 501 a dimenze zápisu dokladu karty,
+proto u účetní jednotky podle vyhlášky 504/2002 Sb. musí mít při poměrném rozlišení i u paušálu, který se dělí podle karet, každá rozlišovaná karta vazbu na
+zaúčtovanou přijatou fakturu nebo pokladní doklad s osami činnosti. U paušálu z rozpisu 501 musí být zaúčtované s osami
+činnosti faktury rozpisu. Bez doložené doby užitku a významnosti návrh
 nepotvrzujte, podrobnosti jsou v kapitole [Uzávěrka](72_Uzaverka.md).
 
 ### 27.9.5 Sestavy

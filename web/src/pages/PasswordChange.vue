@@ -4,6 +4,7 @@
  *   - Heslo  (změna hesla, self-service)
  *   - 2FA    (TOTP setup, status, aktivace)
  *   - Passkeys (registrace a správa přístupových klíčů)
+ *   - Účet organizace (propojení s poskytovatelem identity, jen když je zapnutý)
  *   - Zámek aplikace (osobní interval nečinnosti)
  *   - Klávesové zkratky (osobní ovládání aplikace)
  */
@@ -16,10 +17,14 @@ import { apiErrorMessage } from '@/api/errors'
 import { useAuthStore } from '@/stores/auth'
 import { useSessionSecurityStore } from '@/stores/sessionSecurity'
 import Passkeys from '@/pages/Passkeys.vue'
+import ExternalIdentities from '@/components/security/ExternalIdentities.vue'
 import KeyboardShortcuts from '@/pages/KeyboardShortcuts.vue'
 import { getCredential, webAuthnErrorKey } from '@/security/webauthn'
 import RecoveryCodesOnce from '@/components/security/RecoveryCodesOnce.vue'
 import TotpAppRecommendation from '@/components/security/TotpAppRecommendation.vue'
+import SsoStepUpOption from '@/components/security/SsoStepUpOption.vue'
+import { hasStrongProvider, takeSsoStepUpProof } from '@/security/oidc'
+import { useSsoEnforcement } from '@/composables/useSsoEnforcement'
 import {
   advanceCanonicalDomainLoginSession,
   authorizePendingDomainLogin,
@@ -34,6 +39,8 @@ const toast = useToast()
 const route = useRoute()
 const router = useRouter()
 const auth = useAuthStore()
+// Volba ověření přes Microsoft jen tam, kde je silný poskytovatel zapnutý.
+const ssoStrongEnabled = computed(() => hasStrongProvider(auth.setupStatus?.sso_providers, 'entra'))
 const sessionSecurity = useSessionSecurityStore()
 const domainReturnPending = ref(hasPendingCanonicalDomainLogin())
 const domainReturnBusy = ref(false)
@@ -58,11 +65,21 @@ async function returnToClientDomain() {
   }
 }
 
-type Tab = 'password' | 'totp' | 'passkeys' | 'session-lock' | 'shortcuts'
+type Tab = 'password' | 'totp' | 'passkeys' | 'sso' | 'session-lock' | 'shortcuts'
+const ssoEnabled = computed(() => (auth.setupStatus?.sso_providers ?? []).length > 0)
+// Vynucené přihlášení přes organizaci: heslo se nemění vůbec, místní faktory
+// (TOTP, passkey a s nimi záložní kódy) jen tam, kde poskytovatel není silný.
+const { passwordAllowed, localFactorsAllowed } = useSsoEnforcement()
+function defaultTab(): Tab {
+  if (passwordAllowed.value) return 'password'
+  return ssoEnabled.value ? 'sso' : 'session-lock'
+}
 function tabFromQuery(value: unknown): Tab {
+  if (!localFactorsAllowed.value && (value === 'totp' || value === 'passkeys')) return defaultTab()
   return value === 'totp' || value === 'passkeys' || value === 'session-lock' || (value === 'shortcuts' && !auth.isInstanceAdmin)
+    || (value === 'sso' && ssoEnabled.value)
     ? value
-    : 'password'
+    : defaultTab()
 }
 const tab = ref<Tab>(tabFromQuery(route.query.tab))
 function setTab(next: Tab) {
@@ -71,7 +88,7 @@ function setTab(next: Tab) {
 function setTabFromSelect(event: Event) {
   setTab((event.target as HTMLSelectElement).value as Tab)
 }
-watch(() => route.query.tab, value => {
+watch([() => route.query.tab, passwordAllowed, localFactorsAllowed], ([value]) => {
   tab.value = tabFromQuery(value)
 })
 
@@ -169,6 +186,10 @@ async function startTotpSetup() {
     } finally {
       totpBusy.value = false
     }
+    return
+  }
+  if (!passwordAllowed.value) {
+    totpError.value = t('sso.local_factor_setup_unavailable')
     return
   }
   if (!totpCurrentPassword.value) {
@@ -310,8 +331,24 @@ watch(tab, next => {
   }
 })
 
+// Po ověření přes účet organizace se secret TOTP vydá rovnou.
+async function totpSetupWithSsoProof(proof: string) {
+  if (!totpStatus.value || totpStatus.value.enabled) return
+  totpBusy.value = true
+  try {
+    totpSetup.value = await authApi.totpSetup({ step_up_token: proof })
+    toast.info(t('sso.step_up_done'))
+  } catch (e: any) {
+    applyTotpSetupError(e)
+  } finally {
+    totpBusy.value = false
+  }
+}
+
 onMounted(() => {
-  loadTotpStatus()
+  const ssoProof = takeSsoStepUpProof('totp.enable')
+  const status = loadTotpStatus()
+  if (ssoProof) void status.then(() => totpSetupWithSsoProof(ssoProof))
   if (tab.value === 'session-lock') {
     void loadLockPreference()
   }
@@ -319,7 +356,7 @@ onMounted(() => {
 </script>
 
 <template>
-  <div class="max-w-2xl mx-auto">
+  <div class="max-w-4xl mx-auto">
     <div class="mb-4">
       <h1 class="text-2xl font-semibold">{{ t('auth.profile_title') }}</h1>
       <p class="text-sm text-neutral-500 mt-0.5">{{ t('auth.profile_subtitle') }}</p>
@@ -346,22 +383,23 @@ onMounted(() => {
     <!-- Tabs: na mobilu a tabletu select, aby se pět názvů nemačkalo ani nescrollovalo -->
     <select :value="tab" @change="setTabFromSelect"
             class="md:hidden w-full h-10 px-3 mb-4 border border-neutral-300 rounded-md bg-surface text-sm">
-      <option value="password">{{ t('auth.change_password_title') }}</option>
-      <option value="totp">{{ t('auth.totp_tab') }}</option>
-      <option value="passkeys">{{ t('passkeys.title') }}</option>
+      <option v-if="passwordAllowed" value="password">{{ t('auth.change_password_title') }}</option>
+      <option v-if="localFactorsAllowed" value="totp">{{ t('auth.totp_tab') }}</option>
+      <option v-if="localFactorsAllowed" value="passkeys">{{ t('passkeys.title') }}</option>
+      <option v-if="ssoEnabled" value="sso">{{ t('sso.profile_tab') }}</option>
       <option value="session-lock">{{ t('session_lock.preference_tab') }}</option>
       <option v-if="!auth.isInstanceAdmin" value="shortcuts">{{ t('keyboard_shortcuts.title') }}</option>
     </select>
 
     <div class="hidden md:flex flex-wrap border-b border-neutral-200 mb-4 gap-1">
-      <button type="button" @click="setTab('password')"
+      <button v-if="passwordAllowed" type="button" @click="setTab('password')"
         class="cursor-pointer px-3 py-2 text-sm border-b-2 transition"
         :class="tab === 'password'
           ? 'border-primary-600 text-primary-700 font-medium'
           : 'border-transparent text-neutral-600 hover:text-neutral-900'">
         {{ t('auth.change_password_title') }}
       </button>
-      <button type="button" @click="setTab('totp')"
+      <button v-if="localFactorsAllowed" type="button" @click="setTab('totp')"
         class="cursor-pointer px-3 py-2 text-sm border-b-2 transition inline-flex items-center gap-2"
         :class="tab === 'totp'
           ? 'border-primary-600 text-primary-700 font-medium'
@@ -372,12 +410,19 @@ onMounted(() => {
           {{ t('auth.totp_badge_on') }}
         </span>
       </button>
-      <button type="button" @click="setTab('passkeys')"
+      <button v-if="localFactorsAllowed" type="button" @click="setTab('passkeys')"
         class="cursor-pointer px-3 py-2 text-sm border-b-2 transition"
         :class="tab === 'passkeys'
           ? 'border-primary-600 text-primary-700 font-medium'
           : 'border-transparent text-neutral-600 hover:text-neutral-900'">
         {{ t('passkeys.title') }}
+      </button>
+      <button v-if="ssoEnabled" type="button" @click="setTab('sso')"
+        class="cursor-pointer px-3 py-2 text-sm border-b-2 transition"
+        :class="tab === 'sso'
+          ? 'border-primary-600 text-primary-700 font-medium'
+          : 'border-transparent text-neutral-600 hover:text-neutral-900'">
+        {{ t('sso.profile_tab') }}
       </button>
       <button type="button" @click="setTab('session-lock')"
         class="cursor-pointer px-3 py-2 text-sm border-b-2 transition"
@@ -490,7 +535,10 @@ onMounted(() => {
       <!-- Čerstvé ověření před vydáním secretu: bez passkey heslem, s ní
            step-up ceremonií pro operaci 'totp.enable'. -->
       <div v-if="totpStatus && !totpStatus.enabled && !totpSetup" class="space-y-3">
-        <div v-if="!totpRequiresPasskeyStepUp">
+        <p v-if="!passwordAllowed && !totpRequiresPasskeyStepUp" class="text-sm text-warning-700" data-test="totp-needs-passkey">
+          {{ t('sso.local_factor_setup_unavailable') }}
+        </p>
+        <div v-else-if="!totpRequiresPasskeyStepUp">
           <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('auth.current_password') }}</label>
           <input
             v-model="totpCurrentPassword"
@@ -507,10 +555,12 @@ onMounted(() => {
         </div>
 
         <button data-test="totp-start"
-                @click="startTotpSetup" :disabled="totpBusy"
+                @click="startTotpSetup" :disabled="totpBusy || (!passwordAllowed && !totpRequiresPasskeyStepUp)"
                 class="cursor-pointer h-10 px-4 bg-primary-600 hover:bg-primary-700 disabled:bg-neutral-300 text-white font-medium rounded-md">
           {{ totpBusy ? '…' : (totpRequiresPasskeyStepUp ? t('auth.totp_setup_verify_passkey_btn') : t('auth.totp_setup_btn')) }}
         </button>
+        <SsoStepUpOption v-if="ssoStrongEnabled" operation="totp.enable" :disabled="totpBusy"
+          @verified="(proof: string) => totpSetupWithSsoProof(proof)" />
       </div>
 
       <div v-if="totpSetup" class="space-y-4 pt-2 border-t border-neutral-200">
@@ -552,6 +602,9 @@ onMounted(() => {
 
     <!-- ── Passkeys ── -->
     <Passkeys v-else-if="tab === 'passkeys'" @registered="returnToClientDomain" />
+
+    <!-- ── Přihlášení přes účet organizace ── -->
+    <ExternalIdentities v-else-if="tab === 'sso'" />
 
     <!-- ── Automatický zámek ── -->
     <form v-else-if="tab === 'session-lock'" @submit.prevent="saveLockPreference"

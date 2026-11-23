@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Integration\Payroll;
 
-use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\Payroll\PayrollRunConflictException;
 use MyInvoice\Repository\Payroll\PayrollRunRepository;
@@ -75,9 +74,9 @@ final class PayrollRunConcurrencyTest extends TestCase
             // v téže session — zámek by se sám sobě nikdy nepostavil do cesty
             // a test by serializaci jen předstíral. Connection MUSÍ vzniknout
             // UVNITŘ zóny; rozhodnutí „smím sdílet PDO?" padá v konstruktoru.
-            $containerA = Bootstrap::buildContainer();
+            $containerA = \MyInvoice\Tests\Support\PayrollTestContainer::build();
             $containerB = Connection::withoutSharedTestConnection(static function () {
-                $c = Bootstrap::buildContainer();
+                $c = \MyInvoice\Tests\Support\PayrollTestContainer::build();
                 $c->get(Connection::class);
 
                 return $c;

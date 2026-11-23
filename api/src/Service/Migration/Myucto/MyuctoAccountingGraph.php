@@ -19,10 +19,17 @@ final class MyuctoAccountingGraph
         };
     }
 
-    public static function validate(array $tables): void
+    /** @param MyuctoRowStore|array<string,array<int|string,array<string,mixed>>> $tables */
+    public static function validate(MyuctoRowStore|array $tables): void
     {
-        $accounts = array_column(array_values($tables['chart_of_accounts'] ?? []), null, 'account_code');
-        foreach ($tables['posting_rules'] ?? [] as $row) {
+        if (is_array($tables)) {
+            $tables = MyuctoRowStore::fromArrays($tables);
+        }
+        $accounts = [];
+        foreach ($tables->rows('chart_of_accounts') as $row) {
+            $accounts[(string) ($row['account_code'] ?? '')] = true;
+        }
+        foreach ($tables->rows('posting_rules') as $row) {
             foreach (['rule_key', 'description', 'debit_account_code', 'credit_account_code', 'priority', 'is_active', 'created_at'] as $column) {
                 if (!array_key_exists($column, $row)) {
                     throw new RuntimeException('Neúplná předkontace v exportu: ' . $column . '.');
@@ -35,7 +42,7 @@ final class MyuctoAccountingGraph
             }
         }
         foreach (['de_movement_classification', 'de_movement_classification_history'] as $table) {
-            foreach ($tables[$table] ?? [] as $row) {
+            foreach ($tables->rows($table) as $row) {
                 $columns = $table === 'de_movement_classification'
                     ? ['classified_by', 'classified_at', 'updated_at', 'note']
                     : ['changed_by', 'changed_at'];
@@ -57,7 +64,7 @@ final class MyuctoAccountingGraph
                     $buckets = ['previous_tax_bucket', 'new_tax_bucket'];
                 }
                 $id = MyuctoExportReader::id($row[$column] ?? null);
-                if (!isset($tables[$parent][$id])) {
+                if (!$tables->has($parent, $id)) {
                     throw new RuntimeException('Chybí zdrojový pohyb klasifikace nebo její historie.');
                 }
                 foreach ($buckets as $bucket) {

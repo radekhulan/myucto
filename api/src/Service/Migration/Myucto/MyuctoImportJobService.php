@@ -5,7 +5,9 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Migration\Myucto;
 
 use MyInvoice\Bootstrap;
+use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Infrastructure\Config\RuntimePaths;
+use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\ImportJobRepository;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Auth\SecretEncryption;
@@ -30,8 +32,37 @@ final class MyuctoImportJobService extends AbstractImportJobService
         ActivityLogger $logger,
         private readonly LoggerInterface $log,
         private readonly ?MyInvoiceBackupImportBridge $legacy = null,
+        private readonly ?Config $config = null,
     ) {
         parent::__construct($jobs, null, $logger);
+    }
+
+    /**
+     * Průběh obnovy po tabulkách. Obnova běží v jedné transakci na hlavním spojení, takže
+     * stav úlohy se zapisuje vlastním spojením: jinak by ho UI do konce obnovy nevidělo
+     * a zkouška nanečisto by ho s transakcí vrátila.
+     *
+     * @return null|callable(string):void
+     */
+    private function progressReporter(int $jobId): ?callable
+    {
+        if ($this->config === null) {
+            return null;
+        }
+        $config = $this->config;
+        $jobs = null;
+        $last = 0.0;
+        return static function (string $step) use ($config, $jobId, &$jobs, &$last): void {
+            $now = microtime(true);
+            if ($now - $last < 1.0) {
+                return;
+            }
+            $last = $now;
+            $jobs ??= Connection::withoutSharedTestConnection(
+                static fn (): ImportJobRepository => new ImportJobRepository(new Connection($config)),
+            );
+            $jobs->updateProgress($jobId, ['current_step' => mb_substr($step, 0, 200)]);
+        };
     }
 
     public static function passwordContext(int $supplier, string $token): string
@@ -224,8 +255,16 @@ final class MyuctoImportJobService extends AbstractImportJobService
                 $this->jobs->appendLog($jobId, 'Výběr firmy podle IČO a převod zálohy do společného importního formátu.');
                 $token = $this->legacyBridge()->convert($supplierId, (int) $job['created_by'], $token, $params['myinvoice'], $password);
             }
-            $result = $this->workflow->run($supplierId, (int) $job['created_by'], $token, (string) ($params['source_name'] ?? ''), $password, $apply, $apply);
+            $result = $this->workflow->run($supplierId, (int) $job['created_by'], $token, (string) ($params['source_name'] ?? ''), $password, $apply, $apply,
+                $this->progressReporter($jobId));
             $this->jobs->setReport($jobId, $result);
+            $detached = $result['report']['detached'] ?? [];
+            if ($detached !== []) {
+                $this->jobs->appendLog($jobId, 'Vazby na nastavení, které obnova nepřenáší (řady číselníku, cenové hladiny, '
+                    . 'šablony fakturace, pravidla nákladů), se odpojily: '
+                    . implode(', ', array_map(static fn (string $column, int $count): string => $column . ' (' . $count . ')', array_keys($detached), $detached))
+                    . '. Doklady si ponechaly čísla i částky.');
+            }
             $this->jobs->updateProgress($jobId, [
                 'processed' => 1,
                 'created_count' => array_sum($result['report']['created'] ?? []),

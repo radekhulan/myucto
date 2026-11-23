@@ -70,6 +70,8 @@ Samostatná stránka hledá mezery v číslování vydaných faktur a dobropisů
 
 **Jak poznáte, že je hotovo:** Žádná řada nemá chybějící čísla, nebo je každá mezera vysvětlená.
 
+Řady faktur a dobropisů založené v číselníku řad se ukazují jako samostatné řady s vlastním názvem. Úplnost všech řad včetně nových řad přijatých, pokladních a interních dokladů ukáže **Kontrola úplnosti po řadách** v číselníku řad ([§ 95.6.1](95_Multi_supplier.md#9561-ciselnik-rad-vic-rad-pro-jeden-druh-dokladu)).
+
 > [!TIP]
 > Stornovaný doklad, který v systému zůstal s přiděleným číslem, mezeru nevytváří. Sestava čísla sama nedoplňuje ani nepřečísluje.
 

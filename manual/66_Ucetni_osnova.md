@@ -149,8 +149,8 @@ a nedaňové nákladové analytiky **501.990 / 511.990 / 518.990 / 548.990**) a 
 Stejné založení lze bezpečně spustit znovu: existující firemní účty ani jejich názvy se neduplikují.
 Aktivační průvodce je popsán v kapitole [Aktivace účetnictví](68_Aktivace_ucetnictvi.md).
 
-Aktivace rámce **504/2002 Sb.** zůstává nedostupná. Jeho samostatná šablona zakládá pouze prázdný
-rozvrh a existující osnovu nepřevádí ani nedoplňuje účty jiného rámce. Používá třídy 0 až 3, 5, 6
+Rámec **504/2002 Sb.** má samostatnou šablonu osnovy, která existující osnovu jiného rámce nepřevádí
+ani nedoplňuje. Zapíná se v [Nastavení](96_Nastaveni.md) nebo řízeným převodem z rámce 500. Používá třídy 0 až 3, 5, 6
 a 9, včetně vlastního jmění a fondů 901/911, výsledku hospodaření 931/932/933 a závěrkových účtů
 961/962. Náklady této šablony nemají potvrzenou daňovou uznatelnost; výchozí nedaňový příznak
 nenahrazuje posouzení konkrétní činnosti a účetního případu.
@@ -243,7 +243,7 @@ u správce daně. Na plochém 343 to z principu nešlo.
 | Popis | „Zúčtování DPH za 01/2026“; v deníku je zdroj označený jako **Zúčtování DPH** |
 | Datum zápisu | **poslední den období**, takže zápis padne do správného období i při opožděném běhu |
 | Kdy běží | plánovaná úloha **1. den v měsíci ve 04:30** (viz [§ 5.5](05_Po_instalaci.md#55-krok-za-krokem-naplanovani-uloh-cron)), za období obsahující předchozí měsíc |
-| Opakované spuštění | doklad se **přepočítá, nikdy nezdvojí**; vlastní zúčtovací doklady se přitom z obratu vylučují, aby si samy sebe nepřičítaly |
+| Opakované spuštění | doklad se **přepočítá, nikdy nezdvojí**; vlastní zúčtovací doklady se přitom z obratu vylučují, aby si samy sebe nepřičítaly. Vyjde-li období nově nulové, doklad se smaže; je-li jeho řádek spárovaný s jiným zápisem v okruhu otevřených položek (typicky s platbou daně) nebo rozepsaný v saldokontu, nesmaže se a běh to nahlásí. Okruh pak zrušte v opisu účtu na záložce **Otevřené položky - párování** |
 | Zpětné dohnání | jde spustit ručně pro konkrétní období |
 
 Do obratu se **nepočítají** uzávěrkové a otevírací zápisy, dřívější zúčtovací doklady ani nezaúčtované koncepty.
@@ -288,7 +288,8 @@ změněné, přeskočené a chybné řádky.
 
 Vedle existence a aktivity účtu hlídá centrální účetní služba i následující invarianty:
 
-- účty **701, 702 a 710** lze použít jen v řízeném závěrkovém nebo otevíracím zápisu,
+- účty typu **uzávěrkový** lze použít jen v řízeném závěrkovém nebo otevíracím
+  zápisu; ochrana zahrnuje například 701/702/710 v rámci 500 a 961/962 v rámci 504,
 - podrozvahové účty 75x/79x se nesmějí v jednom zápisu míchat s rozvahovým či výsledkovým účtem,
 - každý zápis musí být vyrovnaný na haléř,
 - datum musí patřit do otevřeného období a nesmí spadat do zámku účtování k datu.

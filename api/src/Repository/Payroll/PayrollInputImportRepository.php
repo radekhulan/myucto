@@ -41,6 +41,11 @@ final class PayrollInputImportRepository
         ];
     }
 
+    public function reservedForHourlyCalculation(int $supplierId, int $employmentId, string $periodStart, string $componentCode): bool
+    {
+        return (new PayrollHourlyWageCollisionGuard($this->db))->reservedForCalculation($supplierId, $employmentId, $periodStart, $componentCode);
+    }
+
     /** @return array<string,mixed>|null */
     public function resolveComponent(
         int $supplierId,
@@ -211,6 +216,8 @@ final class PayrollInputImportRepository
             $pdo->beginTransaction();
         }
         try {
+            $guardRows = array_map(static fn (array $row): array => $row['payload'], $validRows);
+            (new PayrollHourlyWageCollisionGuard($this->db))->externalInputs($supplierId, $periodStart, $guardRows);
             try {
                 $stmt = $pdo->prepare(
                     'INSERT INTO payroll_input_imports

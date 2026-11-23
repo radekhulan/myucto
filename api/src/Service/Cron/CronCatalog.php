@@ -263,6 +263,19 @@ final class CronCatalog
                 'critical' => false,
             ],
             [
+                // Plánovaný export dokladů do Pohody e-mailem účetní. Volba instalace,
+                // výchozí vypnuto (ScheduledPohodaExportFeature); bez zapnutého
+                // nastavení u firmy skončí hned.
+                'script' => 'cron-scheduled-pohoda-export',
+                'requires_config_flag' => \MyInvoice\Service\Export\ScheduledPohodaExportFeature::CONFIG_KEY,
+                'recommended' => 'daily_0630',
+                'linux_cron' => '30 6 * * *',
+                'windows_schtasks' => '/sc daily /st 06:30',
+                'max_age_hours' => 36,
+                'weekdays_only' => false,
+                'critical' => true,
+            ],
+            [
                 'script' => 'cron-send-approval-reminders',
                 'recommended' => 'weekdays_0915',
                 'linux_cron' => '15 9 * * 1-5',
@@ -429,6 +442,20 @@ final class CronCatalog
                 'requires_feature' => CronJobGate::FEATURE_PAYROLL,
             ],
             [
+                // Ukončení DPP a DPČ, kterým uplynul sjednaný konec. Běží krátce
+                // po půlnoci, aby ranní kontroly a mzdový běh už viděly dohodu
+                // ukončenou. Výpadek nic nepokazí natrvalo: další běh dožene
+                // všechny uplynulé dohody naráz.
+                'script' => 'cron-payroll-end-agreements',
+                'recommended' => 'daily_0030',
+                'linux_cron' => '30 0 * * *',
+                'windows_schtasks' => '/sc daily /st 00:30',
+                'max_age_hours' => 36,
+                'weekdays_only' => false,
+                'critical' => false,
+                'requires_feature' => CronJobGate::FEATURE_PAYROLL,
+            ],
+            [
                 // Jediná měsíční úloha v katalogu. Účtuje předchozí měsíc, takže musí běžet
                 // až po jeho konci; 04:00 prvního dne je po nočních zálohách a před ranním
                 // provozem. `max_age_hours` = 33 dní: měsíční úloha nesmí hlásit „nejede"
@@ -539,6 +566,21 @@ final class CronCatalog
                 'linux_cron' => '0 15 * * *',
                 'windows_schtasks' => '/sc daily /st 15:00',
                 'max_age_hours' => 36,
+                'weekdays_only' => false,
+                'critical' => false,
+            ],
+            [
+                // Ohlášení plánované údržby od provozovatele. Ve spravovaném
+                // provozu povinné, self-hosted instalace si úlohu zapíná sama.
+                // 15 minut: hláška má dorazit dřív, než si ji uživatel přečte
+                // až na stránce 503.
+                'script' => 'cron-maintenance-notice',
+                'requires_config_flag' => 'maintenance_notice.enabled',
+                'managed_implies_flag' => true,
+                'recommended' => 'every_15_min',
+                'linux_cron' => '*/15 * * * *',
+                'windows_schtasks' => '/sc minute /mo 15',
+                'max_age_hours' => 4,
                 'weekdays_only' => false,
                 'critical' => false,
             ],

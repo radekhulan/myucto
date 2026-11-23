@@ -9,13 +9,19 @@ const m = vi.hoisted(() => ({
   activity: vi.fn(),
   receiptPropose: vi.fn(),
   receiptList: vi.fn(),
+  unlinkAdvance: vi.fn(),
   push: vi.fn(),
   route: null as null | { params: { id: string } },
   stockEnabled: false,
   stockRead: true,
   stockWrite: true,
   offsetsWrite: true,
+  journalPost: true,
+  accountingMode: 'double_entry',
   isClientRole: false,
+  openingBalance: vi.fn(),
+  markOpeningBalance: vi.fn(),
+  unmarkOpeningBalance: vi.fn(),
 }))
 
 // vue-router — useRoute (id), useRouter (push), RouterLink jako jednoduchý stub.
@@ -38,6 +44,10 @@ vi.mock('@/api/purchaseInvoices', () => ({
   purchaseInvoicesApi: {
     get: m.get,
     activity: m.activity,
+    unlinkAdvance: m.unlinkAdvance,
+    openingBalance: m.openingBalance,
+    markOpeningBalance: m.markOpeningBalance,
+    unmarkOpeningBalance: m.unmarkOpeningBalance,
     pdfUrl: () => '',
     sourceUrl: () => '',
     ourPdfUrl: () => '',
@@ -70,7 +80,8 @@ vi.mock('@/api/errors', () => ({
 vi.mock('@/stores/auth', () => ({
   useAuthStore: () => ({
     canRead: (permission: string) => permission === 'stock' ? m.stockRead : true,
-    canWrite: (permission: string) => permission === 'stock' ? m.stockWrite : permission === 'accounting.offsets' ? m.offsetsWrite : true,
+    canWrite: (permission: string) => permission === 'stock' ? m.stockWrite : permission === 'accounting.offsets' ? m.offsetsWrite
+      : permission === 'accounting.journal.post' ? m.journalPost : true,
     hasCommercialFeatures: true,
     get isClientRole() { return m.isClientRole },
     isSuperadmin: false,
@@ -81,7 +92,7 @@ vi.mock('@/stores/auth', () => ({
 vi.mock('@/stores/supplier', () => ({
   useSupplierStore: () => ({
     currentSupplier: {
-      accounting_mode: 'double_entry',
+      get accounting_mode() { return m.accountingMode },
       get stock_enabled() { return m.stockEnabled },
     },
   }),
@@ -483,6 +494,149 @@ describe('InvoiceDetail.vue — vazba daňového dokladu k platbě', () => {
   })
 })
 
+describe('InvoiceDetail.vue — víc navázaných záloh', () => {
+  const advance = (id: number, total: number) => ({
+    id,
+    varsymbol: `ZAL-${id}`,
+    vendor_invoice_number: `Z-${id}`,
+    document_kind: 'advance' as const,
+    issue_date: '2026-01-15',
+    total_with_vat: total,
+    currency: 'CZK',
+    status: 'paid' as const,
+  })
+
+  beforeEach(() => {
+    m.get.mockReset()
+    m.activity.mockReset()
+    m.activity.mockResolvedValue([])
+    m.receiptPropose.mockReset()
+    m.receiptPropose.mockResolvedValue({ lines: [], cost_candidates: [], purchase_invoice_id: 258, not_receivable_kind: 'advance' })
+    m.receiptList.mockReset()
+    m.receiptList.mockResolvedValue([])
+    m.unlinkAdvance.mockReset()
+    m.stockEnabled = false
+    if (m.route) m.route.params.id = '258'
+  })
+
+  it('zobrazí všechny navázané zálohy a odpojí jen vybranou', async () => {
+    const advances = [advance(901, 1500), advance(902, 1600), advance(903, 1700)]
+    m.get.mockResolvedValue(makeInvoice({ linked_advance: advances[0], linked_advances: advances }))
+    m.unlinkAdvance.mockResolvedValue(makeInvoice({ linked_advance: advances[0], linked_advances: [advances[0], advances[2]] }))
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const wrapper = mount(InvoiceDetail, { global: { stubs } })
+    await flushPromises()
+
+    const rows = wrapper.findAll('[data-test="linked-advance-row"]')
+    expect(rows).toHaveLength(3)
+    expect(rows.map(r => r.text())).toEqual([
+      expect.stringContaining('ZAL-901'),
+      expect.stringContaining('ZAL-902'),
+      expect.stringContaining('ZAL-903'),
+    ])
+    expect(wrapper.text()).toContain('purchase_invoice.advance_link.linked_to_many')
+    expect(wrapper.find('[data-test="linked-advance-add"]').exists()).toBe(true)
+
+    await rows[1].find('[data-test="linked-advance-unlink"]').trigger('click')
+    await flushPromises()
+
+    expect(m.unlinkAdvance).toHaveBeenCalledWith(258, 902)
+    expect(wrapper.findAll('[data-test="linked-advance-row"]')).toHaveLength(2)
+    confirmSpy.mockRestore()
+  })
+})
+
+describe('InvoiceDetail.vue — převzato z počátečních stavů', () => {
+  const opening = (inOpening: boolean) => inOpening
+    ? { in_opening: true, entry_id: 50, entry_date: '2026-01-01' }
+    : { in_opening: false, entry_id: null, entry_date: null }
+  const confirmStubs = {
+    ...stubs,
+    ConfirmDialog: { name: 'ConfirmDialog', props: ['title', 'message', 'confirmLabel', 'variant', 'busy'], emits: ['confirm', 'cancel'],
+      template: '<button data-test="confirm-ok" @click="$emit(\'confirm\')">{{ message }}</button>' },
+  }
+  const actionsOf = (wrapper: ReturnType<typeof mount>) =>
+    wrapper.getComponent({ name: 'ActionBar' }).props('actions') as { key: string; show?: boolean; tier?: string; variant?: string; run?: () => void }[]
+
+  beforeEach(() => {
+    m.get.mockReset()
+    m.get.mockResolvedValue(makeInvoice({ status: 'received', issue_date: '2025-12-01', tax_date: '2025-12-01' }))
+    m.activity.mockReset()
+    m.activity.mockResolvedValue([])
+    m.stockEnabled = false
+    m.journalPost = true
+    m.accountingMode = 'double_entry'
+    m.isClientRole = false
+    m.openingBalance.mockReset().mockResolvedValue(opening(false))
+    m.markOpeningBalance.mockReset().mockResolvedValue(opening(true))
+    m.unmarkOpeningBalance.mockReset().mockResolvedValue(opening(false))
+    if (m.route) m.route.params.id = '258'
+  })
+
+  it('označí doklad po potvrzení v dialogu (PUT) a ukáže štítek', async () => {
+    const wrapper = mount(InvoiceDetail, { global: { stubs: confirmStubs } })
+    await flushPromises()
+    const mark = actionsOf(wrapper).find(a => a.key === 'opening-balance-mark')
+    expect(mark?.show).toBe(true)
+    expect(mark?.tier).toBe('advanced')
+    expect(actionsOf(wrapper).find(a => a.key === 'opening-balance-unmark')?.show).toBe(false)
+    expect(wrapper.find('[data-test="opening-balance-badge"]').exists()).toBe(false)
+
+    mark?.run?.()
+    await flushPromises()
+    expect(m.markOpeningBalance).not.toHaveBeenCalled()
+    expect(wrapper.getComponent({ name: 'ConfirmDialog' }).props('message')).toBe('accounting.opening_balance_document.mark_confirm')
+    m.openingBalance.mockResolvedValue(opening(true))
+    wrapper.getComponent({ name: 'ConfirmDialog' }).vm.$emit('confirm')
+    await flushPromises()
+
+    expect(m.markOpeningBalance).toHaveBeenCalledWith(258)
+    expect(wrapper.find('[data-test="opening-balance-badge"]').exists()).toBe(true)
+    expect(actionsOf(wrapper).find(a => a.key === 'opening-balance-unmark')?.show).toBe(true)
+    expect(actionsOf(wrapper).find(a => a.key === 'post')?.show).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('zruší označení po potvrzení (DELETE)', async () => {
+    m.openingBalance.mockResolvedValue(opening(true))
+    const wrapper = mount(InvoiceDetail, { global: { stubs: confirmStubs } })
+    await flushPromises()
+    expect(wrapper.find('[data-test="opening-balance-badge"]').exists()).toBe(true)
+    actionsOf(wrapper).find(a => a.key === 'opening-balance-unmark')?.run?.()
+    await flushPromises()
+    m.openingBalance.mockResolvedValue(opening(false))
+    wrapper.getComponent({ name: 'ConfirmDialog' }).vm.$emit('confirm')
+    await flushPromises()
+    expect(m.unmarkOpeningBalance).toHaveBeenCalledWith(258)
+    expect(wrapper.find('[data-test="opening-balance-badge"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('bez práva zaúčtovat, klientovi ani v daňové evidenci akci nenabídne', async () => {
+    m.journalPost = false
+    let wrapper = mount(InvoiceDetail, { global: { stubs: confirmStubs } })
+    await flushPromises()
+    expect(actionsOf(wrapper).find(a => a.key === 'opening-balance-mark')?.show).toBe(false)
+    wrapper.unmount()
+
+    m.journalPost = true
+    m.isClientRole = true
+    wrapper = mount(InvoiceDetail, { global: { stubs: confirmStubs } })
+    await flushPromises()
+    expect(actionsOf(wrapper).find(a => a.key === 'opening-balance-mark')?.show).toBe(false)
+    wrapper.unmount()
+
+    m.isClientRole = false
+    m.accountingMode = 'tax_records'
+    m.openingBalance.mockClear()
+    wrapper = mount(InvoiceDetail, { global: { stubs: confirmStubs } })
+    await flushPromises()
+    expect(m.openingBalance).not.toHaveBeenCalled()
+    expect(actionsOf(wrapper).find(a => a.key === 'opening-balance-mark')?.show).toBe(false)
+    wrapper.unmount()
+  })
+})
+
 describe('InvoiceDetail.vue — skladové příjemky', () => {
   beforeEach(() => {
     m.get.mockReset()
@@ -493,6 +647,7 @@ describe('InvoiceDetail.vue — skladové příjemky', () => {
     m.receiptPropose.mockResolvedValue({
       purchase_invoice: { id: 258, varsymbol: '2026258', vendor_invoice_number: 'FP-258', vendor_name: 'Dodavatel s.r.o.', currency_code: 'CZK', exchange_rate: null },
       lines: [{ purchase_invoice_item_id: 1, purchase_order_line_id: null, stock_item_id: 10, description: 'Zboží', quantity: '2', already_received: '0', remaining_qty: '2', unit_cost: '100' }],
+      has_lines_to_receive: true,
       cost_candidates: [],
       pf_changed_after_receipt: false,
     })
@@ -523,6 +678,24 @@ describe('InvoiceDetail.vue — skladové příjemky', () => {
     await flushPromises()
     await wrapper.find('[data-test="create-receipt"]').trigger('click')
     expect(m.push).toHaveBeenCalledWith('/stock/documents/777')
+  })
+
+  it('nabídne příjemku i faktuře, která má jen řádky bez kódu a bez karty', async () => {
+    const line = { purchase_invoice_item_id: 2, purchase_order_line_id: null, stock_item_id: null, description: 'Zboží bez kódu', quantity: '1', already_received: '0', remaining_qty: '1', unit_cost: '100' }
+    m.receiptPropose.mockResolvedValue({ lines: [], unmatched_lines: [], uncoded_lines: [line], has_lines_to_receive: true, cost_candidates: [], pf_changed_after_receipt: false })
+    const wrapper = mount(InvoiceDetail, { global: { stubs } })
+    await flushPromises()
+    const action = (wrapper.findComponent({ name: 'ActionBar' }).props('actions') as Array<{ key: string; show?: boolean }>).find(a => a.key === 'stock-receipt')
+    expect(action?.show).toBe(true)
+  })
+
+  it('nenabídne příjemku, když server hlásí, že není co přijmout (zboží přijaté, zbývá jen doprava)', async () => {
+    const received = { purchase_invoice_item_id: 1, purchase_order_line_id: null, stock_item_id: 10, description: 'Zboží', quantity: '2', already_received: '2', remaining_qty: '0', unit_cost: '100' }
+    m.receiptPropose.mockResolvedValue({ lines: [received], unmatched_lines: [], uncoded_lines: [], has_lines_to_receive: false, cost_candidates: [{ purchase_invoice_item_id: 2, description: 'Doprava', amount: '150.00' }], pf_changed_after_receipt: false })
+    const wrapper = mount(InvoiceDetail, { global: { stubs } })
+    await flushPromises()
+    const action = (wrapper.findComponent({ name: 'ActionBar' }).props('actions') as Array<{ key: string; show?: boolean }>).find(a => a.key === 'stock-receipt')
+    expect(action?.show).toBe(false)
   })
 
   it('zobrazí historii draft, posted i reversed příjemek a rozliší prázdný stav', async () => {

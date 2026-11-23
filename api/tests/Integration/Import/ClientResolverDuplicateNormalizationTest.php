@@ -129,6 +129,57 @@ final class ClientResolverDuplicateNormalizationTest extends TestCase
     }
 
     /**
+     * Zahraniční identifikátor delší než 8 číslic: SQL `LPAD(…, 8, '0')` ho ořízl na
+     * prvních 8 znaků, takže se s normalizovaným vstupem nikdy neshodl a každý další
+     * doklad téhož dodavatele založil novou kartu.
+     */
+    public function testIcLongerThanEightDigitsMatchesExistingCard(): void
+    {
+        $existingId = $this->clients->create([
+            'company_name' => 'Testovací zahraniční dodavatel Kft.',
+            'ic'            => '12345678901',
+            'street'        => 'Utca 1',
+            'city'          => 'Budapest',
+            'zip'           => '1011',
+            'country_iso2'  => 'HU',
+        ], $this->supplierId);
+
+        $vendor = [
+            'company_name' => 'Testovací zahraniční dodavatel Kft.',
+            'ic'            => '12345678901',
+            'country_iso2'  => 'HU',
+        ];
+        $first = $this->resolver->resolve($vendor, $this->supplierId);
+        $second = $this->resolver->resolve($vendor, $this->supplierId);
+
+        self::assertFalse($first['created'], 'Dlouhé IČO musí napárovat existující kartu.');
+        self::assertSame($existingId, $first['id']);
+        self::assertSame($existingId, $second['id']);
+        self::assertSame(1, $this->countClientsByIc('12345678901'), 'V DB smí být jen jedna karta tohoto dodavatele.');
+    }
+
+    /**
+     * Dvě různá dlouhá IČO se shodnými prvními 8 číslicemi zůstanou dvěma kartami.
+     */
+    public function testLongIcsSharingEightDigitPrefixStayDistinct(): void
+    {
+        $this->clients->create([
+            'company_name' => 'Prefixový dodavatel A Kft.',
+            'ic'            => '12345678111',
+            'street'        => 'Utca 2',
+            'city'          => 'Budapest',
+            'zip'           => '1011',
+        ], $this->supplierId);
+
+        $result = $this->resolver->resolve([
+            'company_name' => 'Prefixový dodavatel B Kft.',
+            'ic'            => '12345678222',
+        ], $this->supplierId);
+
+        self::assertTrue($result['created'], 'Jiné dlouhé IČO se stejným prefixem se nesmí napárovat na cizí kartu.');
+    }
+
+    /**
      * Karta založená s DIČ obsahujícím mezeru navíc. Import stejného DIČ bez mezery
      * (a bez IČO — typický zahraniční dodavatel) musí najít tutéž kartu.
      */
@@ -176,7 +227,7 @@ final class ClientResolverDuplicateNormalizationTest extends TestCase
     private function countClientsByIc(string $ic): int
     {
         $stmt = $this->db->pdo()->prepare(
-            "SELECT COUNT(*) FROM clients WHERE supplier_id = ? AND LPAD(REGEXP_REPLACE(ic, '[^0-9]', ''), 8, '0') = ?"
+            'SELECT COUNT(*) FROM clients WHERE supplier_id = ? AND ' . \MyInvoice\Support\CompanyIdNormalizer::icSql('ic') . ' = ?'
         );
         $stmt->execute([$this->supplierId, $ic]);
         return (int) $stmt->fetchColumn();

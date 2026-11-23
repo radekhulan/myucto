@@ -98,15 +98,15 @@ watch([status, clientId, sort], () => load(true))
     </div>
 
     <div class="bg-surface border border-neutral-200 rounded-lg shadow-sm">
-      <div class="px-4 py-3 border-b border-neutral-200 flex flex-wrap items-center gap-2">
+      <div class="px-4 py-3 border-b border-neutral-200 flex flex-wrap items-center gap-2 max-md:grid max-md:grid-cols-2">
         <select v-model="status"
-          class="h-9 px-3 border border-neutral-300 rounded-md text-sm bg-surface">
+          class="h-9 px-3 border border-neutral-300 rounded-md text-sm bg-surface max-md:w-full max-md:min-w-0">
           <option value="">{{ t('invoice.all_statuses') }}</option>
           <option value="active">{{ t('common.active') }}</option>
           <option value="paused">{{ t('project.status_paused') }}</option>
           <option value="closed">{{ t('project.status_closed') }}</option>
         </select>
-        <div v-if="auth.canRead('clients')" class="min-w-48 flex-1 max-w-xs">
+        <div v-if="auth.canRead('clients')" class="min-w-48 flex-1 max-w-xs max-md:order-first max-md:col-span-2 max-md:min-w-0 max-md:max-w-none">
           <SearchableSelect
             :model-value="clientId === '' ? null : clientId"
             @update:model-value="(v) => clientId = v === null ? '' : v"
@@ -114,7 +114,7 @@ watch([status, clientId, sort], () => load(true))
             :placeholder="t('project.all_clients')"
           />
         </div>
-        <select v-model="sort" class="h-9 px-3 border border-neutral-300 rounded-md text-sm bg-surface ml-auto"
+        <select v-model="sort" class="h-9 px-3 border border-neutral-300 rounded-md text-sm bg-surface ml-auto max-md:ml-0 max-md:w-full max-md:min-w-0"
           :title="t('common.sort_by')">
           <option value="name">{{ t('common.sort_name') }}</option>
           <option value="client">{{ t('common.sort_client') }}</option>

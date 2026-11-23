@@ -136,9 +136,9 @@ final class PartialUpdateItemsTest extends TestCase
     }
 
     /**
-     * BEZ OPRAVY PADÁ: prázdné pole doklad tiše vyprázdnilo se stavem 200.
+     * Koncept smí zůstat prázdný; po explicitním [] se přepočítá na nulu.
      */
-    public function testUpdateWithExplicitEmptyItemsIsRejected(): void
+    public function testDraftUpdateWithExplicitEmptyItemsClearsRows(): void
     {
         $id = $this->createInvoice();
 
@@ -146,9 +146,27 @@ final class PartialUpdateItemsTest extends TestCase
         $body['items'] = [];
 
         $res = $this->put($id, $body);
-        self::assertSame(422, $res['status'], json_encode($res['body'], JSON_UNESCAPED_UNICODE));
-        self::assertSame('no_items', $res['body']['error']['code'] ?? null);
-        self::assertSame(2, $this->itemCount($id), 'Odmítnutý požadavek nesmí nic smazat.');
+        self::assertSame(200, $res['status'], json_encode($res['body'], JSON_UNESCAPED_UNICODE));
+        self::assertSame(0, $this->itemCount($id));
+        self::assertEqualsWithDelta(0, $this->totalWithVat($id), 0.005);
+    }
+
+    /** Ani vynucená editace nesmí vyprázdnit doklad mimo koncept. */
+    public function testNonDraftCannotLoseAllItemsEvenWithForce(): void
+    {
+        $id = $this->createInvoice();
+        $this->db->pdo()->prepare("UPDATE purchase_invoices SET status = 'received' WHERE id = ?")->execute([$id]);
+        $before = $this->totalWithVat($id);
+        self::assertGreaterThan(0.0, $before);
+
+        foreach ([false, true] as $force) {
+            // Podvržený status v těle nesmí udělit výjimku pro koncept.
+            $res = $this->put($id, ['items' => [], 'status' => 'draft'], $force);
+            self::assertSame($force ? 422 : 409, $res['status'], json_encode($res['body'], JSON_UNESCAPED_UNICODE));
+            self::assertSame($force ? 'no_items' : 'not_editable', $res['body']['error']['code'] ?? null);
+            self::assertSame(2, $this->itemCount($id), 'Odmítnutý požadavek nesmí nic smazat.');
+            self::assertEqualsWithDelta($before, $this->totalWithVat($id), 0.005);
+        }
     }
 
     /** Regrese: poslané neprázdné `items` řádky dál nahrazují. */
@@ -238,10 +256,10 @@ final class PartialUpdateItemsTest extends TestCase
      * @param  array<string,mixed> $body
      * @return array{status:int, body:array<string,mixed>}
      */
-    private function put(int $id, array $body): array
+    private function put(int $id, array $body, bool $force = false): array
     {
         return self::decode(
-            ($this->update)($this->request('PUT', $body), new Psr7Response(), ['id' => (string) $id])
+            ($this->update)($this->request('PUT', $body)->withQueryParams($force ? ['force' => '1'] : []), new Psr7Response(), ['id' => (string) $id])
         );
     }
 
@@ -263,6 +281,7 @@ final class PartialUpdateItemsTest extends TestCase
             ->createServerRequest($method, '/api/purchase-invoices')
             ->withAttribute(SupplierScopeMiddleware::ATTR_CURRENT_ID, $this->supplierId)
             ->withAttribute(AuthMiddleware::ATTR_USER, ['id' => $this->userId, 'role' => 'admin'])
+            ->withAttribute(AuthMiddleware::ATTR_METHOD, 'session')
             ->withParsedBody($body);
     }
 

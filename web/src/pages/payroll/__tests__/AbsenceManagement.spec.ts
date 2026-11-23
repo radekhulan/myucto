@@ -18,6 +18,7 @@ const m = vi.hoisted(() => ({
   createAutomaticEntitlements: vi.fn(),
   averageCandidates: vi.fn(),
   createAveragesBulk: vi.fn(),
+  setProbableBulk: vi.fn(),
   recordChildbirth: vi.fn(),
   toastSuccess: vi.fn(),
   toastError: vi.fn(),
@@ -68,6 +69,7 @@ vi.mock('@/api/payrollAbsences', () => ({
     createAutomaticEntitlements: m.createAutomaticEntitlements,
     averageCandidates: m.averageCandidates,
     createAveragesBulk: m.createAveragesBulk,
+    setProbableBulk: m.setProbableBulk,
     recordChildbirth: m.recordChildbirth,
   },
 }))
@@ -87,6 +89,7 @@ vi.mock('vue-i18n', async (importOriginal) => ({
   useI18n: () => ({
     t: (key: string, params?: Record<string, unknown>) =>
       (typeof params?.code === 'string' ? `${key}:${params.code}` : key),
+    te: () => true,
     locale: ref('cs-CZ'),
   }),
 }))
@@ -220,7 +223,7 @@ describe('AbsenceManagement', () => {
     m.averageCandidates.mockResolvedValue({
       items: [], total: 0, limit: 25, offset: 0,
     })
-    m.createAveragesBulk.mockResolvedValue([])
+    m.createAveragesBulk.mockResolvedValue({ averages: [], skipped: [] })
   })
 
   it('explains itself instead of pulsing forever when the company has no employee', async () => {
@@ -439,6 +442,7 @@ describe('AbsenceManagement', () => {
       warnings: [
         { code: 'absence_overlaps_worked_time', message: 'Na 8. 9. je zapsaná odpracovaná doba.', path: '/payroll/time?employment=48&period=2026-09' },
         { code: 'absence_in_approved_run', message: 'Mzdový běh za 9/2026 je už schválený.', path: '/payroll/runs?period=2026-09' },
+        { code: 'absence_manual_work_time_unverifiable', message: 'Neověřený souhrn', path: '/payroll/time?employment=48&period=2026-09' },
       ],
     })
     const wrapper = mount(AbsenceManagement, { global: { stubs: { RouterLink: true } } })
@@ -453,6 +457,7 @@ describe('AbsenceManagement', () => {
 
     expect(wrapper.get('[data-test="absence-approval-warning-absence_overlaps_worked_time"]').text()).toContain('8. 9.')
     expect(wrapper.find('[data-test="absence-approval-warning-absence_in_approved_run"]').exists()).toBe(true)
+    expect(wrapper.get('[data-test="absence-approval-warning-absence_manual_work_time_unverifiable"]').text()).toContain('payroll_absence.manual_work_time_unverifiable')
     wrapper.unmount()
   })
 
@@ -592,6 +597,21 @@ describe('AbsenceManagement', () => {
    * před porodem, takže bez očekávaného dne porodu nejde zapsat. Skutečný den
    * porodu je nepovinný, doplní se, až nastane.
    */
+  it('keeps paid public holiday time off separate from unpaid overtime time off', async () => {
+    const wrapper = mount(AbsenceManagement); await flushPromises()
+    const type = wrapper.findComponent('[data-test="absence-type"]') as VueWrapper<any>
+    type.vm.$emit('update:modelValue', 'holiday_compensatory_time_off'); await flushPromises()
+    expect(wrapper.get('[data-test="absence-holiday-time-off-hint"]').text()).toContain('holiday_time_off_hint')
+    await wrapper.get('[data-test="absence-form"]').trigger('submit'); await flushPromises()
+    expect(m.createAbsence).toHaveBeenLastCalledWith(expect.objectContaining({ absence_type: 'holiday_compensatory_time_off', average_snapshot_id: null }))
+    expect(m.createAbsence.mock.calls.at(-1)?.[0]).not.toHaveProperty('compensation_policy')
+    ;(wrapper.findComponent('[data-test="absence-type"]') as VueWrapper<any>).vm.$emit('update:modelValue', 'compensatory_time_off'); await flushPromises()
+    expect(wrapper.find('[data-test="absence-holiday-time-off-hint"]').exists()).toBe(false)
+    await wrapper.get('[data-test="absence-form"]').trigger('submit'); await flushPromises()
+    expect(m.createAbsence).toHaveBeenLastCalledWith(expect.objectContaining({ absence_type: 'compensatory_time_off', average_snapshot_id: null }))
+    wrapper.unmount()
+  })
+
   it('u PPM žádá očekávaný den porodu a pošle oba dny porodu', async () => {
     const wrapper = mount(AbsenceManagement)
     await flushPromises()
@@ -913,17 +933,21 @@ describe('AbsenceManagement', () => {
     await flushPromises()
     await wrapper.find('[data-test="tab-averages"]').trigger('click')
 
+    await wrapper.find('[data-test="average-worked-hours"]').setValue('0')
+    await wrapper.find('[data-test="average-worked-days"]').setValue('0')
     await wrapper.find('[data-test="average-gross-czk"]').setValue('1.001')
     await wrapper.find('[data-test="average-form"]').trigger('submit')
     await flushPromises()
     expect(m.createAverage).not.toHaveBeenCalled()
     expect(wrapper.find('[data-test="average-error"]').text())
-      .toBe('payroll_absence.validation.money_precision')
+      .toBe('payroll_absence.averages.gross_minor: payroll_absence.validation.money_precision')
 
     m.createAverage.mockRejectedValueOnce({
       response: { data: { error: { message: 'Přesná zpráva validační chyby z API.' } } },
     })
     await wrapper.find('[data-test="average-gross-czk"]').setValue('100')
+    await wrapper.find('[data-test="average-worked-hours"]').setValue('0')
+    await wrapper.find('[data-test="average-worked-days"]').setValue('0')
     await wrapper.find('[data-test="average-form"]').trigger('submit')
     await flushPromises()
     expect(wrapper.find('[data-test="average-error"]').text())
@@ -937,6 +961,151 @@ describe('AbsenceManagement', () => {
    * v uzavřených bězích. Předvyplnění je proto celý smysl obrazovky — ale
    * potvrzení se nepřeskakuje: snapshot vzniká až odesláním formuláře.
    */
+  it.each([3, 53])('preserves exact average worked units %i without inventing whole minutes', async units => {
+    m.averageSuggestion.mockResolvedValue(averageSuggestion({ ready: true, blockers: [], source_kind: 'actual', gross_earnings_minor: 100000, worked_duration_units: units, worked_minutes: null, worked_days: 21 }))
+    const wrapper = mount(AbsenceManagement)
+    await flushPromises()
+    await wrapper.find('[data-test="tab-averages"]').trigger('click')
+    expect((wrapper.get('[data-test="average-worked-hours"]').element as HTMLInputElement).value).toBe(units === 3 ? '0,001' : '0:01:03.6')
+    await wrapper.get('[data-test="average-form"]').trigger('submit')
+    await flushPromises()
+    expect(m.createAverage).toHaveBeenCalledWith(expect.objectContaining({ worked_duration_units: units, worked_days: 21 }))
+    expect(m.createAverage.mock.calls[0][0]).not.toHaveProperty('worked_minutes')
+    wrapper.unmount()
+  })
+
+  it('treats an agreed hourly rate as an editable individual proposal', async () => {
+    m.averageSuggestion.mockResolvedValue(averageSuggestion({ ready: true, blockers: [], source_kind: 'probable', probable_source: 'agreed_hourly_rate', probable_hourly_minor: 28000, probable_rationale: 'Syntetická sazba', worked_minutes: 0, worked_days: 0 }))
+    const wrapper = mount(AbsenceManagement)
+    await flushPromises()
+    await wrapper.get('[data-test="tab-averages"]').trigger('click')
+    expect(wrapper.get('[data-test="average-suggestion-probable"]').text()).toContain('hourly_rate_review')
+    await wrapper.get('[data-test="average-probable-czk"]').setValue('300')
+    await wrapper.get('[data-test="average-form"]').trigger('submit')
+    await flushPromises()
+    expect(m.createAverage).toHaveBeenCalledWith(expect.objectContaining({ probable_hourly_minor: 30000 }))
+    wrapper.unmount()
+  })
+
+  /*
+   * Hláška „skutečný průměr odvodit nelze" neřekla proč. Důvod posílá server:
+   * chybějící běhy rozhodného období, nebo méně než 21 odpracovaných dnů.
+   */
+  it('u pravděpodobného výdělku řekne, proč skutečný průměr nevyšel', async () => {
+    m.averageSuggestion.mockResolvedValue(averageSuggestion({
+      ready: true,
+      blockers: [],
+      source_kind: 'probable',
+      probable_source: 'terms',
+      probable_hourly_minor: 28000,
+      probable_rationale: 'Syntetické odůvodnění',
+      actual_blockers: ['run_missing'],
+      probable_reason: {
+        codes: ['run_missing'],
+        missing_run_periods: ['2026-10', '2026-11'],
+        worked_days: 21,
+        minimum_worked_days: 21,
+      },
+    }))
+    const wrapper = mount(AbsenceManagement)
+    await flushPromises()
+    await wrapper.get('[data-test="tab-averages"]').trigger('click')
+
+    expect(wrapper.get('[data-test="average-suggestion-probable"]').text()).toContain('suggestion_probable')
+    expect(wrapper.get('[data-test="average-suggestion-probable-reason"]').text())
+      .toContain('payroll_absence.averages.probable_reason.intro')
+    wrapper.unmount()
+  })
+
+  it('bez důvodu ze serveru větu o důvodu neukáže', async () => {
+    m.averageSuggestion.mockResolvedValue(averageSuggestion({ ready: true, blockers: [], source_kind: 'probable', probable_source: 'terms', probable_hourly_minor: 28000, probable_rationale: 'Syntetické odůvodnění', probable_reason: null }))
+    const wrapper = mount(AbsenceManagement)
+    await flushPromises()
+    await wrapper.get('[data-test="tab-averages"]').trigger('click')
+
+    expect(wrapper.find('[data-test="average-suggestion-probable-reason"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('upozorní na výdělek pod minimální mzdou', async () => {
+    m.averageSuggestion.mockResolvedValue(averageSuggestion({
+      ready: true,
+      blockers: [],
+      source_kind: 'probable',
+      probable_source: 'terms',
+      probable_hourly_minor: 103,
+      probable_rationale: 'Syntetické odůvodnění',
+      below_minimum_wage: { source_kind: 'probable', raw_hourly_minor: 103, minimum_hourly_minor: 13440 },
+    }))
+    const wrapper = mount(AbsenceManagement)
+    await flushPromises()
+    await wrapper.get('[data-test="tab-averages"]').trigger('click')
+
+    expect(wrapper.get('[data-test="average-suggestion-below-minimum"]').text())
+      .toContain('payroll_absence.averages.below_minimum_wage')
+    wrapper.unmount()
+  })
+
+  it('u sjednané mzdy pod minimem řekne, co opravit', async () => {
+    m.averageSuggestion.mockResolvedValue(averageSuggestion({
+      ready: false,
+      blockers: ['probable_earning_not_recorded', 'probable_agreed_gross_below_minimum_wage'],
+      source_kind: null,
+      probable_unusable: { code: 'agreed_gross_below_minimum_wage', monthly_gross_minor: 18000, hourly_minor: 103, minimum_hourly_minor: 13440 },
+    }))
+    const wrapper = mount(AbsenceManagement)
+    await flushPromises()
+    await wrapper.get('[data-test="tab-averages"]').trigger('click')
+
+    expect(wrapper.get('[data-test="average-suggestion-blocked"]').text())
+      .toContain('payroll_absence.averages.blockers.probable_agreed_gross_below_minimum_wage')
+    expect(wrapper.get('[data-test="average-suggestion-blocked-below-minimum"]').text())
+      .toContain('payroll_absence.averages.probable_unusable')
+    wrapper.unmount()
+  })
+
+  it('leaves unknown suggested hours and days empty', async () => {
+    m.averageSuggestion.mockResolvedValue(averageSuggestion({ worked_minutes: null, worked_duration_units: null, worked_days: null }))
+    const wrapper = mount(AbsenceManagement)
+    await flushPromises()
+    await wrapper.find('[data-test="tab-averages"]').trigger('click')
+    expect((wrapper.get('[data-test="average-worked-hours"]').element as HTMLInputElement).value).toBe('')
+    expect((wrapper.get('[data-test="average-worked-days"]').element as HTMLInputElement).value).toBe('')
+    await wrapper.get('[data-test="average-worked-hours"]').setValue('0')
+    await wrapper.get('[data-test="average-form"]').trigger('submit')
+    await flushPromises()
+    expect(m.createAverage).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it('names the field whose number is missing instead of a generic number error', async () => {
+    m.averageSuggestion.mockResolvedValue(averageSuggestion({ worked_minutes: null, worked_duration_units: null, worked_days: null }))
+    const wrapper = mount(AbsenceManagement)
+    await flushPromises()
+    await wrapper.find('[data-test="tab-averages"]').trigger('click')
+    await wrapper.get('[data-test="average-worked-hours"]').setValue('8')
+    await wrapper.get('[data-test="average-form"]').trigger('submit')
+    await flushPromises()
+    expect(wrapper.get('[data-test="average-error"]').text()).toContain('payroll_absence.averages.worked_days: payroll_absence.validation.number')
+    await wrapper.get('[data-test="average-worked-days"]').setValue('1')
+    await wrapper.get('[data-test="average-worked-hours"]').setValue('')
+    await wrapper.get('[data-test="average-form"]').trigger('submit')
+    await flushPromises()
+    expect(wrapper.get('[data-test="average-error"]').text()).toContain('payroll_absence.averages.worked_minutes:')
+    expect(m.createAverage).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it('prefills zero hours and days when the employment did not exist in the decisive period', async () => {
+    m.averageSuggestion.mockResolvedValue(averageSuggestion({ worked_minutes: null, worked_duration_units: null, worked_days: null, employment_started_after_decisive_period: true }))
+    const wrapper = mount(AbsenceManagement)
+    await flushPromises()
+    await wrapper.find('[data-test="tab-averages"]').trigger('click')
+    expect((wrapper.get('[data-test="average-worked-hours"]').element as HTMLInputElement).value).toBe('0')
+    expect((wrapper.get('[data-test="average-worked-days"]').element as HTMLInputElement).value).toBe('0')
+    wrapper.unmount()
+  })
+
   it('prefills the average form from closed payroll runs and still requires confirmation', async () => {
     m.averageSuggestion.mockResolvedValue(averageSuggestion({
       ready: true,
@@ -1076,6 +1245,8 @@ describe('AbsenceManagement', () => {
     expect((wrapper.find('[data-test="average-probable-czk"]').element as HTMLInputElement).value)
       .toBe('280')
 
+    await wrapper.find('[data-test="average-worked-hours"]').setValue('0')
+    await wrapper.find('[data-test="average-worked-days"]').setValue('0')
     await wrapper.find('[data-test="average-form"]').trigger('submit')
     await flushPromises()
     expect(m.createAverage).toHaveBeenCalledWith(expect.objectContaining({
@@ -1107,6 +1278,19 @@ describe('AbsenceManagement', () => {
     expect(wrapper.find('[data-test="average-probable-czk"]').exists()).toBe(false)
     expect(wrapper.find('[data-test="average-probable-field"]').exists()).toBe(false)
     expect(wrapper.find('[data-test="average-suggestion-probable"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('dovolenou z ručního měsíčního zdroje označí k posouzení a nenabídne automatické vytvoření', async () => {
+    m.leaveEntitlementCandidates.mockResolvedValue({ items: [{ employment_id: 12, employee_id: 5, employee_name: 'Syntetická Osoba', employment_code: 'SYNTH-HPP', relation_type: 'employment', period_from: '2026-01-01', period_to: '2026-09-30', weekly_minutes: 2400, entitlement_weeks: 4, allowance_source: 'company_policy', continuous_calendar_days: 273, worked_equivalent_minutes: null, input_version: 'b'.repeat(64), ready: false, blockers: ['manual_work_source_requires_review'], assessment_absences: [], predecessor_absences: 0, takeover: null }], total: 1, limit: 25, offset: 0 })
+    const wrapper = mount(AbsenceManagement)
+    await flushPromises()
+    await wrapper.find('[data-test="tab-leave"]').trigger('click')
+    await flushPromises()
+    const row = wrapper.get('[data-test="leave-candidate-12"]')
+    expect(row.text()).toContain('payroll_absence.leave.blockers.manual_work_source_requires_review')
+    expect(row.find('input[type="checkbox"]').attributes('disabled')).toBeDefined()
+    expect(row.text()).not.toContain('payroll_absence.leave.automatic_summary')
     wrapper.unmount()
   })
 
@@ -1740,6 +1924,178 @@ describe('AbsenceManagement', () => {
 
       expect(wrapper.text()).toContain('payroll_absence.averages.bulk_inputs_changed')
       expect(m.averageCandidates).toHaveBeenCalledTimes(2)
+      wrapper.unmount()
+    })
+
+    /**
+     * Schválený průměr, který po opravě výpočtu (svátek v odpracované době,
+     * § 353 odst. 2 ZP) neodpovídá podkladům: řádek říká proč, o kolik se
+     * liší, že vyplacené náhrady se nemění, a jde hromadně přepočítat.
+     */
+    it('neaktuální schválený průměr vysvětlí, ukáže rozdíl a nabídne hromadný přepočet', async () => {
+      m.averageCandidates.mockResolvedValue({
+        items: [
+          averageCandidate({
+            employment_id: 12,
+            ready: false,
+            blockers: ['average_already_exists'],
+            source_kind: null,
+            existing: { id: 7, status: 'approved', source_kind: 'actual', average_hourly_minor: 26_190 },
+            existing_outdated: true,
+            existing_outdated_reason: 'holiday_hours',
+            suggested_average_hourly_minor: 25_781,
+          }),
+        ],
+        total: 1,
+        limit: 25,
+        offset: 0,
+      })
+      m.createAveragesBulk.mockResolvedValueOnce({ averages: [{ id: 8 }], skipped: [] })
+
+      const wrapper = await mountAllEmployees()
+      await wrapper.get('[data-test="tab-averages"]').trigger('click')
+      await flushPromises()
+
+      const note = wrapper.get('[data-test="bulk-average-outdated-12"]').text()
+      expect(note).toContain('payroll_absence.averages.bulk_outdated_reason.holiday_hours')
+      expect(note).toContain('payroll_absence.averages.bulk_outdated_difference')
+      expect(note).toContain('payroll_absence.averages.bulk_outdated_action')
+
+      await wrapper.get('[data-test="bulk-average-select-outdated"]').trigger('click')
+      const createButton = wrapper.get('[data-test="bulk-average-create"]')
+      expect(createButton.attributes('disabled')).toBeUndefined()
+      await createButton.trigger('click')
+      await flushPromises()
+
+      expect(m.createAveragesBulk).toHaveBeenCalledWith({
+        year: expect.any(Number),
+        quarter: expect.any(Number),
+        items: [{ employment_id: 12, input_version: 'a'.repeat(64), recalculate_outdated: true }],
+      })
+      wrapper.unmount()
+    })
+
+    it('ukáže přeskočené vztahy hromadného schválení jménem a důvodem', async () => {
+      m.averageCandidates.mockResolvedValue({ items: [averageCandidate()], total: 1, limit: 25, offset: 0 })
+      m.createAveragesBulk.mockResolvedValueOnce({
+        averages: [],
+        skipped: [{
+          employment_id: 12,
+          employee_id: 5,
+          employee_name: 'Syntetická osoba',
+          employment_code: 'SYNTH-HPP',
+          blockers: ['probable_earning_not_recorded'],
+        }],
+      })
+
+      const wrapper = await mountAllEmployees()
+      await wrapper.get('[data-test="tab-averages"]').trigger('click')
+      await flushPromises()
+      const selectReady = wrapper.findAll('button')
+        .find(button => button.text() === 'payroll_absence.leave.select_ready')
+      await selectReady!.trigger('click')
+      await wrapper.get('[data-test="bulk-average-create"]').trigger('click')
+      await flushPromises()
+
+      const skipped = wrapper.get('[data-test="bulk-average-skipped"]')
+      expect(skipped.text()).toContain('Syntetická osoba')
+      expect(skipped.text()).toContain('payroll_absence.averages.blockers.probable_earning_not_recorded')
+      wrapper.unmount()
+    })
+
+    it('nastaví pravděpodobný výdělek vybraným vztahům a vypíše neprovedené jménem', async () => {
+      m.averageCandidates.mockResolvedValue({
+        items: [
+          averageCandidate({
+            employment_id: 12,
+            relation_type: 'dpp',
+            ready: false,
+            blockers: ['average_already_exists'],
+            source_kind: 'probable',
+            probable_source: 'minimum_wage',
+            existing: { id: 3, status: 'approved', source_kind: 'probable', average_hourly_minor: 13_440, probable_source: 'minimum_wage' },
+          }),
+          averageCandidate({
+            employment_id: 13,
+            employee_name: 'Druhá syntetická osoba',
+            relation_type: 'dpp',
+            ready: false,
+            blockers: ['average_already_exists'],
+            existing: { id: 4, status: 'approved', source_kind: 'probable', average_hourly_minor: 13_440, probable_source: 'minimum_wage' },
+          }),
+          averageCandidate({ employment_id: 14, employee_name: 'Zaměstnanec HPP', relation_type: 'employment' }),
+        ],
+        total: 3,
+        limit: 25,
+        offset: 0,
+      })
+      m.setProbableBulk.mockResolvedValue({
+        counts: { applied: 1, unchanged: 0, failed: 1 },
+        applied: [{ employment_id: 12, employee_id: 5, employee_name: 'Syntetická osoba', employment_code: 'A', warnings: [], snapshot_id: 9 }],
+        unchanged: [],
+        failed: [{
+          employment_id: 13,
+          employee_id: 6,
+          employee_name: 'Druhá syntetická osoba',
+          employment_code: 'B',
+          code: 'average_reported_in_jmhz',
+          message: 'server',
+          params: { quarter: '1/2026', period: '2/2026' },
+        }],
+      })
+
+      const wrapper = await mountAllEmployees()
+      await wrapper.get('[data-test="tab-averages"]').trigger('click')
+      await flushPromises()
+
+      await wrapper.get('[data-test="probable-select-minimum"]').trigger('click')
+      expect(wrapper.get('[data-test="probable-apply"]').text()).toContain('payroll_absence.averages.probable_bulk.apply')
+      // Bez odůvodnění se nic neodešle (§ 355 odst. 2 ZP).
+      await wrapper.get('[data-test="probable-amount"]').setValue('180')
+      await wrapper.get('[data-test="probable-apply"]').trigger('click')
+      await flushPromises()
+      expect(m.setProbableBulk).not.toHaveBeenCalled()
+      expect(wrapper.text()).toContain('payroll_absence.averages.probable_bulk.rationale_required')
+
+      await wrapper.get('[data-test="probable-rationale"]').setValue('Sjednaná odměna 180 Kč/h')
+      await wrapper.get('[data-test="probable-apply"]').trigger('click')
+      await flushPromises()
+
+      expect(m.setProbableBulk).toHaveBeenCalledWith({
+        year: expect.any(Number),
+        quarter: expect.any(Number),
+        probable_hourly_minor: 18_000,
+        rationale: 'Sjednaná odměna 180 Kč/h',
+        employment_ids: [12, 13],
+      })
+      const failed = wrapper.get('[data-test="probable-bulk-failed"]')
+      expect(failed.text()).toContain('Druhá syntetická osoba')
+      expect(failed.text()).toContain('payroll_absence.averages.probable_bulk.failure.average_reported_in_jmhz')
+      wrapper.unmount()
+    })
+
+    it('rychlý výběr DPP vybere jen dohody o provedení práce', async () => {
+      m.averageCandidates.mockResolvedValue({
+        items: [
+          averageCandidate({ employment_id: 12, relation_type: 'dpp' }),
+          averageCandidate({ employment_id: 14, employee_name: 'Zaměstnanec HPP', relation_type: 'employment' }),
+        ],
+        total: 2,
+        limit: 25,
+        offset: 0,
+      })
+      m.setProbableBulk.mockResolvedValue({ counts: { applied: 1, unchanged: 0, failed: 0 }, applied: [], unchanged: [], failed: [] })
+
+      const wrapper = await mountAllEmployees()
+      await wrapper.get('[data-test="tab-averages"]').trigger('click')
+      await flushPromises()
+      await wrapper.get('[data-test="probable-select-dpp"]').trigger('click')
+      await wrapper.get('[data-test="probable-amount"]').setValue('180')
+      await wrapper.get('[data-test="probable-rationale"]').setValue('Dohoda')
+      await wrapper.get('[data-test="probable-apply"]').trigger('click')
+      await flushPromises()
+
+      expect(m.setProbableBulk.mock.calls[0]![0].employment_ids).toEqual([12])
       wrapper.unmount()
     })
   })

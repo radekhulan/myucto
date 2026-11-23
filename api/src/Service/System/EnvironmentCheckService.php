@@ -954,6 +954,26 @@ final class EnvironmentCheckService
             '101_Bezpecnost'
         );
 
+        // --- Přihlášení přes poskytovatele identity ---
+        // Neúplně nastavený poskytovatel se nezapne (OidcProviderRegistry), tady se
+        // ukáže proč. Bez prefixu __Host- může cookie s vazbou přihlášení podvrhnout
+        // sesterská subdoména a vnutit prohlížeči přihlášení do cizího účtu.
+        if ((bool) $this->config->get('auth.oidc.enabled', false)) {
+            $oidc = new \MyInvoice\Service\Auth\Oidc\OidcProviderRegistry($this->config);
+            $errors = $oidc->configurationErrors();
+            $enabled = array_keys($oidc->enabled());
+            $hostCookie = str_starts_with((string) $this->config->get('session.cookie_name', '__Host-myinvoice_session'), '__Host-');
+            $checks[] = $this->check(
+                'oidc_config',
+                $errors !== [] ? self::STATUS_FAIL : ($hostCookie ? self::STATUS_OK : self::STATUS_WARN),
+                $errors !== []
+                    ? implode('; ', array_map(static fn ($id, $msg) => $id . ': ' . $msg, array_keys($errors), $errors))
+                    : ($enabled === [] ? 'žádný poskytovatel' : implode(', ', $enabled) . ($hostCookie ? '' : ' (cookie bez __Host-)')),
+                'poskytovatelé nastavení, session cookie s prefixem __Host-',
+                '101_Bezpecnost',
+            );
+        }
+
         // --- Verze aplikace ---
         // Sahá na cache aktualizací (a přes ni potenciálně po síti), takže se
         // vůbec nepočítá, když o ni volající nestojí — třeba v preflightu.

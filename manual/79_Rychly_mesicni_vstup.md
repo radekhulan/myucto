@@ -21,7 +21,9 @@ a před mzdovým během (viz [§ 75.4](75_Uplne_mzdy.md#754-krok-za-krokem-zprac
 ## 79.2 Než začnete
 
 1. **Pracovní vztahy** účinné ve zpracovávaném měsíci (`Mzdy → Zaměstnanci`).
-   Bez nich stránka ukáže **V tomto měsíci nejsou účinné pracovní vztahy**.
+   Stránka ukazuje tytéž vztahy, které zahrne mzdový běh za měsíc, včetně
+   plánovaného vztahu s nástupem v tomto měsíci nebo dřív, ještě než se nástup
+   potvrdí. Bez nich stránka ukáže **V tomto měsíci nejsou účinné pracovní vztahy**.
 2. **Mzdové složky** firmy (`Mzdy → Mzdové složky a vstupy`).
 3. **Absence a docházka** za měsíc zapsané a rozhodnuté. Nabídnutá mzda se
    o ně krátí.
@@ -32,6 +34,14 @@ a před mzdovým během (viz [§ 75.4](75_Uplne_mzdy.md#754-krok-za-krokem-zprac
 6. Podklad pro každý zadaný údaj.
 
 ## 79.3 Krok za krokem: měsíční mzdy a odměny
+
+U vztahu s výslovně zvoleným hodinovým odměňováním se nenabízí měsíční
+základ z dřívější sjednané mzdy ani výpočet dosažené mzdy za přesčas
+z tohoto základu. Samostatný **Náhled hodinové mzdy / odměny** používá
+schválené skutečné hodiny, účinné sazby a doložené příplatkové vrstvy
+([§ 79.8.1.2](#79812-vypocet-hodinove-mzdy-a-dolozeni-naroku)). Původní
+vztahy bez přepnutí na hodinový režim a jejich hotové částkové vstupy
+se zpracovávají jako dosud.
 
 1. Otevřete `Mzdy → Rychlý měsíční vstup` (nadpis stránky **Rychlý měsíční
    vstup mezd**). Ověřte firmu a nahoře v poli **Mzdové období** měsíc.
@@ -46,13 +56,16 @@ a před mzdovým během (viz [§ 75.4](75_Uplne_mzdy.md#754-krok-za-krokem-zprac
    a doplňte **Bonus / odměna**.
 5. Pokud složka v měsíci není, zadejte **0**. Prázdné pole neznamená nulu.
    Trvající vztah bez příjmu zadejte s 0 Kč u základní mzdy; podá se za něj
-   nulové hlášení JMHZ.
+   nulové hlášení JMHZ. U agentury s mnoha dohodami použijte **Dohody bez
+   příjmu v měsíci**: aplikace vypíše dohody bez vstupů, odpracované doby
+   a příplatků za měsíc (ze všech stránek), odškrtněte ty, které příjem
+   mají, a **Uložit a schválit 0 Kč (N)** uloží nulu všem vybraným najednou.
 6. Porovnejte **Součet za období** pod tabulkou se zdrojovým podkladem.
 7. Klikněte na **Uložit měsíční podklady** (nebo v pruhu nahoře na **Uložit
    a schválit vše (N)**, bez práva schvalovat **Uložit vše (N)**). Uloží se
    celá rozepsaná sada ze všech stránek.
-8. Klikněte na **Přejít na mzdový běh** a mzdy spočítejte nebo přepočítejte
-   (viz [Mzdové běhy](80_Mzdove_behy.md)).
+8. Klikněte na **Přejít na mzdový běh** (otevře běh za zvolené období)
+   a mzdy spočítejte nebo přepočítejte (viz [Mzdové běhy](80_Mzdove_behy.md)).
 
 **Jak poznáte, že je hotovo:** Objeví se hláška **Měsíční podklady byly
 bezpečně uloženy.**, pruh **Navrženo, neuloženo** zmizí a pole mají ikonu
@@ -83,6 +96,15 @@ nebo **Koncept** a v náhledu hrubého příjmu je přesčas započtený.
 > nelze vykázat dvakrát; schválení docházky ani uložení vstupu ho podruhé
 > nepřijme.
 
+Hodiny přesčasu v měsíčním hlášení (odpracované hodiny a z toho přesčas)
+i odpracovaná doba pro průměrný výdělek se berou ze schválené docházky.
+Přesčas zadaný jen tady v docházce chybí, proto mzdový běh před schválením
+zobrazí varování se jménem osoby, hodinami z rychlého vstupu a z docházky
+a odkazem na docházku měsíce. Správný postup: hodiny přesčasu tady vymažte
+a přesčas zapište do docházky; její schválení dosaženou mzdu i příplatek
+založí samo. Varování potvrďte jen tehdy, když platíte přesčas odpracovaný
+v jiném měsíci.
+
 ## 79.5 Krok za krokem: zákonné příplatky a další složky
 
 1. Klikněte na **Zadat i příplatky**. Odkryjí se sloupce pro noční práci
@@ -99,6 +121,12 @@ nebo **Koncept** a v náhledu hrubého příjmu je přesčas započtený.
 uložení ikona stavu. Pole, do kterého zadat nejde, ukazuje **Nedostupné**
 a důvod najdete v popisku po najetí myší nebo v pruhu **Proč některé
 příplatky nejde zadat**.
+
+U hodinově odměňovaného vztahu se příplatky počítají z docházky, nové ruční
+příplatky zde nezadáváte. Dříve zadaný ruční příplatek odeberte vymazáním
+hodin a uložením změny. Kolizi ohlásí kontrola před zahájením běhu se jménem
+a odkazem na vstup. Pokud už vstup zamkl neschválený běh, nejdřív běh zrušte,
+vstup opravte a začněte z opravených vstupů.
 
 ## 79.6 Krok za krokem: úprava hodnoty z importu
 
@@ -154,7 +182,10 @@ zařazené jako zdanitelný příjem včetně nepeněžních. Osvobozené náhra
 a jiné složky mimo hrubý příjem se zobrazí zvlášť a do součtu se nepřičtou.
 Složka s neuzavřeným daňovým zařazením vytvoří ruční kontrolu. Jde jen
 o náhled hrubých složek; pojištění, daň, srážky a čistou mzdu spočítá až
-mzdový běh.
+mzdový běh. U hodinově odměňovaného vztahu s úplným náhledem hodinové mzdy
+připočte náhled i hodinovou mzdu, dokud z ní nevznikl mzdový vstup (vzniká
+uzamčením podkladů běhu); popisek pod částkou uvede, kolik z ní je náhled
+hodinové mzdy. Neúplný hodinový náhled se nepřičítá.
 
 **Součet za období** pod tabulkou sčítá všechny vztahy měsíce (při hledání
 všechny nalezené), ne jen zobrazenou stránku, a započítá i rozepsané změny.
@@ -170,6 +201,233 @@ jen neaktivní. V řádku zůstává jen ikona stavu u pole (**Koncept**,
 
 Docházka není povinná. Formulář ukládá měsíční podklady samostatně pro každý
 pracovní vztah a schválené ani uzamčené vstupy nikdy nepřepisuje.
+
+### 79.8.1.1 Doložené odpracované hodiny
+
+U vztahu s hodinovým odměňováním v daném měsíci otevřete podklad odpracované
+doby přímo z jeho řádku. Panel ukazuje vybraný zdroj a stav měsíce. Můžete použít
+docházku, souhrn importu nebo doložený ruční souhrn; vždy platí jediný zdroj
+pro celý pracovní vztah a měsíc. Měsíčně odměňovaný vztah panel nemá a jeho
+importovaný měsíc zůstává beze změny.
+
+1. Zadejte dobu jako **H:MM** nebo desetinné hodiny, například `7:30`,
+   `7,5` či `7.5`. Desetinný zápis má nejvýše tři místa a pod polem se
+   ukáže převod na hodiny a minuty (`7.30` je 7,3 h, tedy 7:18, ne 7:30).
+   Prázdné pole není nula; neodpracovaný měsíc potvrďte výslovným `0`.
+2. **Skutečně odpracováno (včetně přesčasu)** zahrnuje i přesčas. Údaj **Z toho přesčas** jej
+   pouze rozlišuje a k celku se znovu nepřičítá. Neznámý přesčas ani počet
+   odpracovaných dnů nevyplňujte nulou.
+3. Při změně podmínek v měsíci vyplňte hodiny zvlášť pro jednotlivé úseky.
+   Úsek musí ležet v trvání vztahu a jedné účinné verzi podmínek; úseky se
+   nesmějí překrývat a musí bez mezer pokrýt celé trvání vztahu v měsíci;
+   při mezeře aplikace vypíše chybějící dny. Dny bez práce zahrňte do úseku
+   s `0`. Rozvržený fond se za skutečně odpracované hodiny nedoplňuje.
+4. Uveďte důvod a podklad (nejvýše 450 znaků). Při prvním zadání souhrnu,
+   kdy měsíc nemá předchozí ruční revizi ani jiný zdroj, je důvod
+   nepovinný; v historii se zápis ukáže jako **Prvotní zadání souhrnu**.
+   Povinný je při opravě uloženého souhrnu a při náhradě zdroje. Jestliže
+   už měsíc obsahuje docházku nebo souhrn importu, výslovně potvrďte
+   nahrazení zdroje. Chybu v hodinách úseku panel ukáže přímo u úseku
+   a vadné pole orámuje.
+   Původní evidence zůstane zachovaná, ale její hodiny se k ručnímu
+   souhrnu nepřičtou.
+5. Souhrn uložte a klikněte na **Schválit v docházce**. V **Docházce
+   a směnách** se otevře schválení měsíce spolu s pracovním souhrnem JMHZ.
+   Zápis vyžaduje právo zapisovat docházku, schválení právo schvalovat
+   docházku. Schválený měsíc před opravou znovu otevřete s důvodem;
+   potřebujete právo znovuotevření. Každá změna uchová původní revizi.
+
+Schválení samotných hodin nevytváří příplatky. Pokud existují vypočtené
+příplatky nebo pohotovost z původního zdroje, změnu zdroje nejprve vyřešte
+opravou těchto vstupů. Má-li měsíc ze souhrnu importu nestornované mzdové
+vstupy z téhož importu docházky (náhrady nebo částky), zdroj hodin nelze
+změnit, dokud je v Mzdových vstupech nestornujete; jinak by se vyplatily
+vedle hodin z nového zdroje. Souhrn importu nelze obnovit, pokud měsíc mezitím
+dostal denní záznamy docházky.
+
+Měsíční souhrn nedokládá rozložení práce do konkrétních směn a týdnů.
+Kontroly, kterým takový rozpad chybí, si vyžádají ruční posouzení;
+původní nahrazené zápisy nepoužijí. Roční limit DPP a průměrný rozsah
+DPČ ověří z přesného celku aktuálního schváleného ručního souhrnu,
+i když tento souhrn nemá potvrzené JMHZ. Neznámý či neschválený podklad
+se nepočítá jako nula. Automatický nárok na dovolenou a počet směn pro
+stravenkový příspěvek nadále potřebují vlastní důkazy o směnách či dnech.
+Před schválením navazujícího nároku doplňte požadovanou evidenci nebo
+doložené ruční posouzení.
+
+### 79.8.1.2 Výpočet hodinové mzdy a doložení nároků
+
+Hodiny a náhled hodinové mzdy stojí v samostatném řádku pod jménem
+přes celou šířku tabulky (na mobilu v kartě osoby). Řádek ukazuje
+odpracované hodiny, zdroj a stav, celkovou zaokrouhlenou částku a doplatek
+do minima; důvody neúplnosti jsou v jedné řádce a celý seznam se rozbalí
+kliknutím. Stejná blokace hlášená za více úseků se ukáže jen jednou.
+Měsíčně odměňovaný vztah tento řádek nemá. Otevřete panel podkladů pro rozpad běžné práce, dosažené mzdy
+za přesčas, jednotlivých příplatků a náhrad. Vidíte skutečné hodiny a
+sazby po účinných úsecích; při více sazbách během měsíce se jednotlivé
+úseky nezamění za poslední sazbu. Nároky se zaokrouhlují za měsíc a složku,
+nikoli zvlášť za každou položku nebo den. Neuložený rozepsaný formulář
+náhled nemění.
+
+Firemní volba zaokrouhlení na celé koruny (nahoru nebo matematicky) platí
+i pro hodinovou odměnu z DPP a DPČ. Použitá volba se uchovává v podkladu
+výpočtu společně s přesnými částkami před zaokrouhlením.
+
+Součet peněžních vstupů v hlavní tabulce není totéž co náhled nových
+hodinových nároků. Náhled k němu ručně nepřičítejte: při přípravě běhu
+se ověřené hodinové nároky vytvářejí do vstupů automaticky před jejich
+uzamčením. Tentýž doložený nárok se při opakování nepřidá podruhé.
+Přímým přepsáním měsíčního základu hodinový výpočet nenahradíte.
+
+**Příplatkové vrstvy** dokládáte nezávisle na celkových odpracovaných
+hodinách. Pro ruční souhrn vyplňte v panelu **Podklady příplatků hodinové
+mzdy / odměny** skutečnou dobu noci, víkendu, práce ve svátek a expozice
+ztíženému prostředí včetně počtu vlivů. Prázdné pole znamená neznámé,
+`0` potvrzenou nulovou dobu. Tlačítko **V měsíci žádné příplatky** vyplní
+u všech úseků nulu u noci, víkendu a práce ve svátku a potvrdí práci bez
+ztíženého prostředí; podklad pak uložte. Doložené nulové nároky náhled
+schová pod odkaz **Zobrazit i nulové nároky**. U kladné práce ve svátek uveďte skutečné
+sváteční dny a jejich hodiny. U přesčasu nahrazeného volnem obdobně
+doložte skutečné dny přesčasové práce; systém je nerozdělí podle
+kalendáře ani fondu. Je-li zdrojem denní docházka, její příplatkové
+vrstvy se odvozují z této evidence a ručně se k nim nepřičítají.
+
+Sjednání příplatku, náhradního volna nebo zahrnutí práce do mzdy patří
+do stávajících **Zásad příplatků** na kartě vztahu. Zahrnutý přesčas
+pracovního poměru potřebuje smlouvu, roční rozsah a počáteční čerpání
+s dokladem, u vedoucího zaměstnance také doklad jeho postavení.
+Zahrnuté příplatky dohody potřebují druh, období, rozsah hodin,
+zahrnutou částku a doložené počáteční čerpání. Následné čerpání
+počítá evidence nároků; nezadávejte je podruhé jako další příplatek.
+
+**Neodpracované svátky a čerpání volna** vyberte z doložených možností
+v témže panelu. Zadejte přesný rozsah; dostupná doba vychází z rozvrhu,
+skutečné práce a schválených nepřítomností. Pro placené volno za svátek
+vyberte historický nárok a schválenou nepřítomnost **Placené náhradní
+volno za práci ve svátek**. Volno za přesčas používá samostatnou
+neplacenou nepřítomnost a původní den přesčasové práce. Chybějící
+rozvrh nebo nepřítomnost doplňte v jejich agendách, nikoli odhadem
+dostupných hodin. Skupinu můžete výslovně potvrdit; potvrzený prázdný
+seznam znamená žádný nárok nebo nulové čerpání. Potvrzení k uložení
+nutné není: nepotvrzenou skupinu posoudí aplikace automaticky při každém
+výpočtu, a vznikne-li v ní nárok, který bez dokladu ocenit nejde, výpočet
+ho uvede jako konkrétní blokaci.
+
+Kde nárok v měsíci objektivně vzniknout nemůže, posoudí nulu aplikace
+sama a panel u skupiny zobrazí **Posouzeno automaticky** s důvodem:
+v měsíci není svátek s hodinovou mzdou nebo žádný svátek nepadá na
+rozvrženou směnu ani na pracovní den pravidelného týdenního rozvrhu
+v pracovním kalendáři vztahu, případně vztah nemá nevyčerpaný nárok ani
+schválenou nepřítomnost náhradního volna. Bez rozpisu směn, bez
+pravidelného týdenního rozvrhu nebo při vadném záznamu směny posuďte
+neodpracovaný svátek výslovně. Dohodám o provedení práce a o pracovní
+činnosti náhrada mzdy za neodpracovaný svátek nepřísluší, takže ji
+aplikace nenabízí ani nepožaduje. Běžný měsíc s denní docházkou bez
+svátku a bez starších nároků proto nepotřebuje žádné ruční potvrzení.
+Ruční souhrn hodin dál vyžaduje doložení příplatkových vrstev; u úseku
+s nulovou odpracovanou dobou je aplikace doplní nulou sama. Automatické
+posouzení se neukládá jako pevná nula: vyhodnotí se znovu při každém
+výpočtu, takže pozdější nárok (například dodatečně schválené náhradní
+volno) vyžádá výslovné posouzení. Posouzení se zapíše do podkladu výpočtu
+včetně použitého pravidla.
+
+Historický hodinový nárok lze doložit a vypořádat i v pozdějším měsíci,
+kdy už vztah přešel na měsíční mzdu. Panel pak nese nadpis **Náhled
+historických hodinových nároků**; běžný měsíční základ zůstává samostatně
+upravitelný. Pro samotné peněžní vypořádání dřívějšího nároku není
+potřeba vymýšlet novou docházku nebo ruční nulový měsíc. Skutečné
+čerpání volna ale nadále potřebuje doložený aktuální rozvrh, neodpracovanou
+dobu a schválenou nepřítomnost. Volby, jejichž podklad už není platný, se neztratí:
+ukážou důvod, proč je nyní nelze použít.
+
+Nevyčerpaný přesčas se po uplynutí lhůty vypořádá příplatkem jen jednou.
+Aplikace jej oceňuje schváleným průměrem platným v době přesčasové práce,
+nejméně však příslušnou aktuální minimální sazbou. Tento způsob ocenění
+je dohledatelný v podkladu výpočtu. U volna za svátek samotné uplynutí
+lhůty nevytváří příplatek bez doloženého sjednání jeho peněžní náhrady.
+
+Uložení podkladů příplatků vyžaduje právo zapisovat docházku a aktuální
+verzi podkladu; důvod je povinný až při opravě dříve uložené revize.
+Jde o vlastní revizi, takže schválené celkové hodiny nemusíte kvůli
+doplnění vrstvy znovu otevírat. Podklad se váže na obsah docházky, ne
+na její schválení: schválení měsíce ani zápisů uložené podklady
+nezneplatní, změna odpracované doby ano. Změněné hranice
+sazeb či zásad vyžadují nové doložené rozdělení; původní podklad
+zůstává viditelný. Historie ukazuje autora, čas a důvod změny.
+
+Je-li některý nárok neúplný, náhled ho označí a jeho částku neodhadne.
+Již doložený základ může zůstat zobrazený, celková částka ale zůstane
+neznámá. Výpočet obsahuje také posouzení minima a případný doplatek
+podle následující části. Schválení vyžaduje vyřešení konkrétních chyb
+podkladů; úplné nároky se uloží do revize běhu a návazných výstupů.
+
+### 79.8.1.3 Minimální mzda a doplatek
+
+V rozbaleném náhledu sledujte **Posouzení minimální mzdy**. Ukazuje
+požadovaný příjem podle minima, započitatelnou mzdu či odměnu a
+**Doplatek do minimální mzdy**. Rozpis vyloučených položek vysvětluje,
+proč se určitý příjem do minima nepočítá. Podklady po účinných úsecích
+ukazují skutečně odpracovanou běžnou dobu, stanovenou týdenní dobu
+a účinné minimum. Částky určuje server, náhled není další ruční vstup.
+
+Složky `MZDA_HODINOVA_ZAKLAD`, `MZDA_DOSAZENA_PRESCAS`,
+`NAHRADA_MZDY_VOLNO_ZA_SVATEK` a `DOPLATEK_MINIMALNI_MZDA` vznikají u vztahu
+s hodinovými podmínkami v daném měsíci jen tímto výpočtem, ručně ani importem
+je zadat nejde. U ostatních vztahů jsou to běžné složky jako dřív. Vede-li
+firma pod stejným kódem vlastní složku s jiným zacházením, hodinový výpočet
+se zastaví s chybou a vlastní složku je potřeba v číselníku upravit nebo
+ukončit.
+
+**Hodinové posouzení je výchozí.** Používá přesnou dobu běžné práce
+bez přesčasu. Kratší sjednaný úvazek nesnižuje hodinové minimum.
+Je-li doložená kratší zákonná stanovená týdenní doba, může být
+hodinové minimum vyšší; nezaměňujte ji se sjednaným částečným úvazkem.
+V **Zásadách příplatků** na kartě vztahu lze stanovenou týdenní dobu
+doložit v části minima. Zadejte ji v hodinách s přesností na celé
+minuty a uveďte podklad; prázdné pole použije zákonný výchozí režim
+serveru. Pole se samo nepředvyplňuje sjednaným kratším úvazkem.
+Bez doložení se jako stanovená bere doba ze sjednání a úvazku jen v rozsahu
+37,5 až 40 hodin; kratší sjednaná doba (například 20 hodin při úvazku
+100 %) je kratší úvazek a minimum se počítá ze 40 hodin.
+
+**Měsíční posouzení** lze zvolit jen u pracovního poměru, také u
+zaměstnání malého rozsahu. Potřebuje označení sjednání a doklad
+předchozího rozhodnutí: datum rozhodnutí a dobu platnosti. Rozhodnutí
+musí být předem doložené a platné pro posuzované úseky. Režim se
+nevybírá zpětně podle toho, který dá nižší doplatek. U DPP a DPČ tato
+volba není dostupná. Chybějící fond, rozvrh či rozporná týdenní doba
+se neřeší odhadem; náhled uvede, co doplnit.
+
+**Započitatelnost není daňové zařazení.** Do minima se nepočítají
+například dosažená mzda za přesčas a zákonné příplatky, náhrady mzdy,
+pohotovost, odstupné, benefity a nepeněžní plnění. Doložené příplatky
+zahrnuté v odměně dohody se odečtou ze započitatelné části; nepřičítají
+se podruhé. Vyloučená opravná položka může být záporná. Je to stopa
+opravovaného příjmu, nikoli nový započitatelný základ.
+
+U nejednoznačné vlastní prémie, příplatku nebo doplatku otevřete
+[editor mzdové složky](91_Mzdove_slozky_a_vstupy.md#9131-zapocteni-vlastni-slozky-do-minimalni-mzdy)
+a zkontrolujte **Započtení do minimální mzdy**. Zahrnutí nebo vyloučení
+vyžaduje konkrétní odůvodnění. Výchozí či ruční neurčené posouzení
+neznamená zahrnutí a může bránit dokončení kontroly. Jednoznačné
+zákonné zařazení určuje server a formulář je nedovolí přepsat.
+
+**Potvrzená nula není neznámá hodnota.** Doložený měsíc bez běžné práce
+může mít požadované minimum i doplatek nulový; chybějící hodiny se
+nulou nenahrazují. U neúplného posouzení náhled neukáže vypočtený
+doplatek jako ověřený. Částky vyloučených položek jsou jednotlivé
+serverové podklady, jejich prázdný neověřený seznam není potvrzená nula.
+
+Doplatek se počítá z přesného rozdílu a zaokrouhluje nahoru na celé
+koruny, aby příjem neklesl pod minimum ani při firemním matematickém
+zaokrouhlování ostatních nároků. Při přípravě běhu vzniká spravovaný
+vstup doplatku; nepřepisujte jej další ruční částkou. U vypořádání
+pouze historických hodinových nároků se minimum aktuální práce
+neposuzuje a nevytváří se fiktivní nulová docházka.
+
+Před schválením zkontrolujte také pracovní souhrn JMHZ a ostatní
+kontroly běhu. Samotné dokončené minimum nenahrazuje kontrolu podkladů
+příplatků, náhrad ani výkazů.
 
 ### 79.8.2 Krácení měsíční mzdy o absence
 

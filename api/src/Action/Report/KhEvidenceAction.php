@@ -4,11 +4,14 @@ declare(strict_types=1);
 
 namespace MyInvoice\Action\Report;
 
+use MyInvoice\Action\Accounting\Reports\DimensionFilterParam;
 use MyInvoice\Http\Json;
 use MyInvoice\Http\SupplierGuard;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Security\AccessLevel;
 use MyInvoice\Security\RequestAuthorization;
+use MyInvoice\Service\Accounting\Dimension\DimensionException;
+use MyInvoice\Service\Accounting\Dimension\DimensionService;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\IpMatcher;
 use MyInvoice\Service\Pdf\KhEvidencePdfRenderer;
@@ -22,15 +25,22 @@ use Psr\Http\Message\ServerRequestInterface as Request;
  *
  *   GET /api/reports/kh-evidence/preview?year=2026&month=4&period=monthly&section=A.4 → JSON
  *   GET /api/reports/kh-evidence?…&format=pdf|xlsx                                    → soubor
+ *
+ * Soupis z aktuálních dat bere volitelně filtr `dimension_value_id` (+ `dimension_descendants=0`),
+ * viz {@see KhEvidenceService::current()}. Soupis podle podaného KH filtr nemá: podané XML
+ * dimenze nenese.
  */
 final class KhEvidenceAction
 {
+    use DimensionFilterParam;
+
     public function __construct(
         private readonly KhEvidenceService $service,
         private readonly KhEvidencePdfRenderer $pdf,
         private readonly KhEvidenceXlsxExporter $xlsx,
         private readonly ActivityLogger $logger,
         private readonly IpMatcher $ipMatcher,
+        private readonly DimensionService $dimensions,
     ) {}
 
     public function preview(Request $request, Response $response): Response
@@ -42,8 +52,15 @@ final class KhEvidenceAction
         if (is_string($params)) {
             return Json::error($response, 'validation_failed', $params, 400);
         }
+        $supplierId = SupplierGuard::currentId($request);
+        $dimension = $this->dimensionFilterParam($this->dimensions, $request, $response, $supplierId, $err);
+        if ($dimension === false) {
+            return $err;
+        }
         try {
-            $report = $this->service->current(SupplierGuard::currentId($request), ...$params);
+            $report = $this->service->current($supplierId, ...$params, dimension: $dimension);
+        } catch (DimensionException $e) {
+            return Json::error($response, $e->errorCode, $e->getMessage(), $e->httpStatus);
         } catch (\Throwable $e) {
             return Json::internalError($response, 'build_failed', $e->getMessage(), 500);
         }
@@ -63,14 +80,22 @@ final class KhEvidenceAction
         if (!in_array($format, ['pdf', 'xlsx'], true)) {
             return Json::error($response, 'validation_failed', 'Neplatný formát (pdf, xlsx).', 400);
         }
+        $supplierId = SupplierGuard::currentId($request);
+        $dimension = $this->dimensionFilterParam($this->dimensions, $request, $response, $supplierId, $err);
+        if ($dimension === false) {
+            return $err;
+        }
         try {
-            $report = $this->service->current(SupplierGuard::currentId($request), ...$params);
+            $report = $this->service->current($supplierId, ...$params, dimension: $dimension);
+        } catch (DimensionException $e) {
+            return Json::error($response, $e->errorCode, $e->getMessage(), $e->httpStatus);
         } catch (\Throwable $e) {
             return Json::internalError($response, 'build_failed', $e->getMessage(), 500);
         }
         $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
         $this->logger->log('report.kh_evidence_downloaded', (int) ($user['id'] ?? 0), null, null, [
             'period' => $report['period']['label'], 'section' => $report['section'], 'format' => $format,
+            'dimension' => $report['dimension']['label'] ?? null,
         ], $this->ipMatcher->clientIpFromRequest($request->getServerParams()), $request->getHeaderLine('User-Agent'));
 
         return self::file($response, $this->pdf, $this->xlsx, $report, self::filename($report, 'aktualni'), $format);

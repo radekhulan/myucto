@@ -14,6 +14,7 @@ use MyInvoice\Service\Anonymization\AnonymizationService;
 use MyInvoice\Service\Anonymization\DatabaseCloner;
 use MyInvoice\Service\Anonymization\Pseudonymizer;
 use MyInvoice\Service\Auth\SecretEncryption;
+use MyInvoice\Service\Nonprofit\Membership\MembershipCorrectionService;
 use MyInvoice\Service\Payroll\Security\PayrollRevealPurpose;
 use MyInvoice\Service\Payroll\Security\PayrollSensitiveData;
 use MyInvoice\Service\Payroll\Security\PayrollSensitiveField;
@@ -34,6 +35,7 @@ final class AnonymizationServiceTest extends TestCase
     private const COMPANY = 'Zkušební Montáže Anonym s.r.o.';
     private const PERSON = 'Radomíra Zkušebnová';
     private const EMAIL = 'kontakt@zkusebni-montaze.example';
+    private const MEMBER_NUMBER = 'ZK-CLEN-4711';
     private const ACCOUNT = '1000000005';
 
     private PDO $server;
@@ -47,6 +49,9 @@ final class AnonymizationServiceTest extends TestCase
     private int $employeeId;
     private int $identifierId;
     private int $supplierId;
+
+    /** @var list<string> */
+    private array $keyFiles = [];
 
     protected function setUp(): void
     {
@@ -77,6 +82,95 @@ final class AnonymizationServiceTest extends TestCase
         if (isset($this->server)) {
             $this->dropDatabases();
         }
+        foreach ($this->keyFiles as $file) {
+            @unlink($file);
+        }
+    }
+
+    public function testRekeyRevealsWithSourceKeysSealsWithTargetKeysAndSynthesizesUnreadableValues(): void
+    {
+        $cloner = new DatabaseCloner($this->server);
+        $plan = $cloner->plan($this->testDatabase);
+        $cloner->copyTables($plan, $this->source, static function (): void {});
+        $cloner->finalize($plan, $this->source);
+        $this->seedSource();
+        $sourceKeys = $this->keyFile();
+        $foreignKeys = $this->keyFile();
+        $targetKeys = $this->keyFile();
+
+        $pdo = $this->server;
+        $pdo->exec('USE ' . DatabaseCloner::quote($this->source));
+        $pdo->exec('SET SESSION FOREIGN_KEY_CHECKS = 0');
+        $readable = $this->sensitive($this->source, $sourceKeys)->seal($this->birthNumber, PayrollSensitiveField::PERSONAL_IDENTIFIER, $this->supplierId, $this->identifierId);
+        $pdo->prepare('UPDATE payroll_person_identifiers SET value_ciphertext = ?, value_hash = ?, value_masked = ? WHERE id = ?')
+            ->execute([$readable->ciphertext, $readable->lookupHash, $readable->masked, $this->identifierId]);
+        $pdo->prepare('INSERT INTO payroll_employees (supplier_id, full_name, birth_date, address) VALUES (?, ?, ?, ?)')
+            ->execute([$this->supplierId, 'Nečitelná Zkušební', '1991-07-23', 'Zkušební 13, 123 45 Zkušebnice']);
+        $lockedEmployee = (int) $pdo->lastInsertId();
+        $pdo->prepare("INSERT INTO payroll_person_identity_history (supplier_id, employee_id, full_name, first_name, last_name, birth_date, sex, effective_from) VALUES (?, ?, 'Nečitelná Zkušební', 'Nečitelná', 'Zkušební', '1991-07-23', 'female', '2026-01-01')")
+            ->execute([$this->supplierId, $lockedEmployee]);
+        $foreign = $this->sensitive($this->source, $foreignKeys);
+        $pdo->prepare("INSERT INTO payroll_person_identifiers (supplier_id, employee_id, identifier_type, value_ciphertext, value_hash, value_masked) VALUES (?, ?, 'birth_number', '', ?, '')")
+            ->execute([$this->supplierId, $lockedEmployee, str_repeat("\1", 32)]);
+        $lockedIdentifier = (int) $pdo->lastInsertId();
+        $lockedNumber = $foreign->seal('9157230006', PayrollSensitiveField::PERSONAL_IDENTIFIER, $this->supplierId, $lockedIdentifier);
+        $pdo->prepare('UPDATE payroll_person_identifiers SET value_ciphertext = ?, value_hash = ?, value_masked = ? WHERE id = ?')
+            ->execute([$lockedNumber->ciphertext, $lockedNumber->lookupHash, $lockedNumber->masked, $lockedIdentifier]);
+        $pdo->prepare("INSERT INTO payroll_person_accounts (supplier_id, employee_id, label, bank_account_ciphertext, bank_account_hash, bank_account_masked, effective_from) VALUES (?, ?, 'Mzda', '', ?, '', '2026-01-01')")
+            ->execute([$this->supplierId, $lockedEmployee, str_repeat("\2", 32)]);
+        $lockedAccountId = (int) $pdo->lastInsertId();
+        $lockedAccount = $foreign->seal('19-2000145399/0800', PayrollSensitiveField::BANK_ACCOUNT, $this->supplierId, $lockedAccountId);
+        $pdo->prepare('UPDATE payroll_person_accounts SET bank_account_ciphertext = ?, bank_account_hash = ?, bank_account_masked = ? WHERE id = ?')
+            ->execute([$lockedAccount->ciphertext, $lockedAccount->lookupHash, $lockedAccount->masked, $lockedAccountId]);
+        $lockedProfile = $foreign->seal('{"permanent_address":{"city":"Zkušebnice"}}', PayrollSensitiveField::REGISTRATION_A1_PROFILE, $this->supplierId, 990001);
+        $pdo->prepare("INSERT INTO payroll_registration_a1_profiles (supplier_id, employee_id, employment_id, effective_on, status, profile_ciphertext, profile_hash, reference_hash, row_version) VALUES (?, ?, 990001, '2026-01-01', 'draft', ?, ?, ?, 1)")
+            ->execute([$this->supplierId, $lockedEmployee, $lockedProfile->ciphertext, $lockedProfile->lookupHash, str_repeat('a', 64)]);
+        $lockedProfileId = (int) $pdo->lastInsertId();
+        $pdo->exec('SET SESSION FOREIGN_KEY_CHECKS = 1');
+
+        $report = (new AnonymizationService($this->config))->run(
+            new AnonymizationOptions(source: $this->source, target: $this->target, seed: 'integration', sourceKeysPath: $sourceKeys, targetKeysPath: $targetKeys),
+            static function (): void {},
+        );
+
+        self::assertGreaterThanOrEqual(2, $report['synthesized']);
+        $target = $this->sensitive($this->target, $targetKeys);
+        $employee = $this->row($this->target, 'SELECT birth_number FROM payroll_employees WHERE id = ?', [$this->employeeId]);
+        $sealed = $this->row($this->target, 'SELECT value_ciphertext, value_hash FROM payroll_person_identifiers WHERE id = ?', [$this->identifierId]);
+        $revealed = $target->reveal((string) $sealed['value_ciphertext'], PayrollSensitiveField::PERSONAL_IDENTIFIER, $this->supplierId, $this->identifierId, PayrollRevealPurpose::ANONYMIZATION);
+        self::assertSame($employee['birth_number'], $revealed, 'Čitelné rodné číslo dostane týž pseudonym jako otevřený sloupec.');
+        self::assertNotSame($this->birthNumber, $revealed);
+        self::assertSame($target->lookupHash($revealed, PayrollSensitiveField::PERSONAL_IDENTIFIER, $this->supplierId), $sealed['value_hash']);
+        try {
+            $this->sensitive($this->target)->reveal((string) $sealed['value_ciphertext'], PayrollSensitiveField::PERSONAL_IDENTIFIER, $this->supplierId, $this->identifierId, PayrollRevealPurpose::ANONYMIZATION);
+            self::fail('Kopie má být zapečetěná klíčem cíle, ne klíčem instance.');
+        } catch (\RuntimeException) {
+        }
+
+        $locked = $this->row($this->target, 'SELECT value_ciphertext, value_hash, value_masked FROM payroll_person_identifiers WHERE id = ?', [$lockedIdentifier]);
+        $synthetic = $target->reveal((string) $locked['value_ciphertext'], PayrollSensitiveField::PERSONAL_IDENTIFIER, $this->supplierId, $lockedIdentifier, PayrollRevealPurpose::ANONYMIZATION);
+        self::assertStringStartsWith('915723', $synthetic, 'Datum narození a pohlaví z karty osoby.');
+        self::assertTrue(Pseudonymizer::isValidBirthNumber($synthetic));
+        self::assertNotSame('9157230006', $synthetic);
+        self::assertSame($target->lookupHash($synthetic, PayrollSensitiveField::PERSONAL_IDENTIFIER, $this->supplierId), $locked['value_hash']);
+        self::assertStringEndsWith(substr($synthetic, -2), (string) $locked['value_masked']);
+
+        $account = $this->row($this->target, 'SELECT bank_account_ciphertext FROM payroll_person_accounts WHERE id = ?', [$lockedAccountId]);
+        $syntheticAccount = $target->reveal((string) $account['bank_account_ciphertext'], PayrollSensitiveField::BANK_ACCOUNT, $this->supplierId, $lockedAccountId, PayrollRevealPurpose::ANONYMIZATION);
+        self::assertStringEndsWith('/0800', $syntheticAccount, 'Kód banky zůstane z masky.');
+        self::assertStringNotContainsString('2000145399', $syntheticAccount);
+        self::assertSame('0', $this->scalar($this->target, 'SELECT COUNT(*) FROM payroll_registration_a1_profiles WHERE id = ' . $lockedProfileId), 'Nečitelný profil A1 se v kopii smaže, prázdný by registraci rozbil.');
+        self::assertSame('0', $this->scalar($this->target, 'SELECT COUNT(*) FROM payroll_person_identifiers WHERE value_ciphertext IN (' . $this->server->quote($readable->ciphertext) . ', ' . $this->server->quote($lockedNumber->ciphertext) . ')'));
+    }
+
+    public function testRejectsKeyFileWithoutKeys(): void
+    {
+        $file = tempnam(sys_get_temp_dir(), 'anonkeys');
+        self::assertIsString($file);
+        $this->keyFiles[] = $file;
+        file_put_contents($file, "<?php return ['app' => ['url' => 'https://example.test']];");
+        $this->expectException(\InvalidArgumentException::class);
+        AnonymizationService::keyOverrides($file);
     }
 
     public function testCopyContainsNoOriginalIdentifiersAndKeepsAmounts(): void
@@ -97,9 +191,12 @@ final class AnonymizationServiceTest extends TestCase
         self::assertStringNotContainsString(self::EMAIL, $history, 'Historie verzované tabulky nesmí v kopii nést původní hodnoty.');
         self::assertContains('journal_entries', $plan['system_versioned'], 'Verzovanou tabulku pozná plán podle definice.');
         $dump = $this->tableTexts($this->target, ['clients', 'client_bank_accounts', 'payroll_employees', 'activity_log', 'supplier', 'users']);
-        foreach ([self::COMPANY, 'Zkušební Montáže', self::PERSON, 'Zkušebnová', self::EMAIL, self::ACCOUNT, $this->ico, $this->birthNumber, str_replace('/', '', $this->birthNumber)] as $needle) {
+        foreach ([self::COMPANY, 'Zkušební Montáže', self::PERSON, 'Zkušebnová', self::EMAIL, self::ACCOUNT, $this->ico, $this->birthNumber, str_replace('/', '', $this->birthNumber), self::MEMBER_NUMBER] as $needle) {
             self::assertStringNotContainsString($needle, $dump, "V kopii zůstal originální údaj {$needle}.");
         }
+        $audit = $this->server->query('SELECT action, payload FROM ' . DatabaseCloner::quote($this->target) . ".activity_log WHERE action LIKE 'nonprofit\\_membership\\_%'")->fetchAll(PDO::FETCH_KEY_PAIR);
+        self::assertCount(3, $audit, 'Audit oprav členské evidence zůstává v kopii, jen bez původních údajů.');
+        self::assertSame([7], json_decode((string) $audit[MembershipCorrectionService::AUDIT_MEMBER_DELETE], true)['rejected_batch_ids']);
 
         $client = $this->row($this->target, 'SELECT company_name, ic, dic, main_email, note, email_subject_format, email_attachment_name_format FROM clients WHERE id = ?', [$this->clientId]);
         self::assertStringEndsWith('s.r.o.', (string) $client['company_name']);
@@ -274,6 +371,20 @@ final class AnonymizationServiceTest extends TestCase
             ->execute([$this->supplierId, $this->clientId, $payload]);
         $chain = new ActivityLogHashChain(new Connection($this->targetConfig($this->source)));
         $chain->seal((int) $pdo->lastInsertId());
+        // Audit oprav členské evidence (MembershipCorrectionService): členské číslo (klíč membernumber, tvar) a důvod
+        // zrušení revize, který se jako ostatní volné texty čistí od osobních údajů (jméno, e-mail), ne celý.
+        $membershipAudit = [
+            MembershipCorrectionService::AUDIT_MEMBER_UPDATE => ['before' => ['client_id' => $this->clientId, 'member_number' => self::MEMBER_NUMBER],
+                'after' => ['client_id' => $this->clientId, 'member_number' => self::MEMBER_NUMBER . '-B']],
+            MembershipCorrectionService::AUDIT_MEMBER_DELETE => ['client_id' => $this->clientId, 'member_number' => self::MEMBER_NUMBER . '-C', 'rejected_batch_ids' => [7]],
+            MembershipCorrectionService::AUDIT_REVISION_VOID => ['revision_id' => 11, 'revision_no' => 2, 'voiding_revision_id' => 12,
+                'reason' => 'Chybně zadal ' . self::PERSON . ' <' . self::EMAIL . '>'],
+        ];
+        foreach ($membershipAudit as $action => $details) {
+            $pdo->prepare("INSERT INTO activity_log (supplier_id, action, entity_type, entity_id, payload) VALUES (?, ?, 'nonprofit_member', 1, ?)")
+                ->execute([$this->supplierId, $action, json_encode($details, JSON_UNESCAPED_UNICODE)]);
+            $chain->seal((int) $pdo->lastInsertId());
+        }
         $pdo->exec('SET SESSION FOREIGN_KEY_CHECKS = 1');
     }
 
@@ -310,9 +421,14 @@ final class AnonymizationServiceTest extends TestCase
         return $value === false ? false : (string) $value;
     }
 
-    private function sensitive(string $schema): PayrollSensitiveData
+    private function sensitive(string $schema, ?string $keyFile = null): PayrollSensitiveData
     {
         $config = $this->targetConfig($schema);
+        if ($keyFile !== null) {
+            $data = $config->all();
+            $data['app'] = array_replace($data['app'], AnonymizationService::keyOverrides($keyFile));
+            $config = new Config($data, $this->config->dataDir());
+        }
 
         return new PayrollSensitiveData(new SecretEncryption($config), $config);
     }
@@ -325,10 +441,26 @@ final class AnonymizationServiceTest extends TestCase
         return new Config($data, $this->config->dataDir());
     }
 
+    private function keyFile(): string
+    {
+        $file = tempnam(sys_get_temp_dir(), 'anonkeys');
+        self::assertIsString($file);
+        $this->keyFiles[] = $file;
+        $keys = ['app' => [
+            'pepper' => base64_encode(random_bytes(32)),
+            'secret_encryption_key' => base64_encode(random_bytes(32)),
+            'payroll_hash_key' => base64_encode(random_bytes(32)),
+            'secret_encryption_previous_keys' => [],
+        ]];
+        file_put_contents($file, '<?php return ' . var_export($keys, true) . ';');
+
+        return $file;
+    }
+
     private function dropDatabases(): void
     {
         foreach ([$this->source, $this->target] as $schema) {
-            $this->server->exec('DROP DATABASE IF EXISTS ' . DatabaseCloner::quote($schema));
+            DatabaseCloner::dropDatabase($this->server, $schema);
         }
     }
 }

@@ -6,6 +6,7 @@ import { useSupplierStore } from '@/stores/supplier'
 import type { SupplierBrief, User } from '@/api/auth'
 import type { AiExtractionStatus } from '@/api/integrations'
 import AiImport from '../AiImport.vue'
+import { windowContextKey } from '@/workspace/windowContext'
 
 const m = vi.hoisted(() => ({ status: vi.fn(), extract: vi.fn(), batches: vi.fn(), push: vi.fn() }))
 vi.mock('@/api/integrations', () => ({ integrationsApi: { getAiExtractionStatus: m.status, extractPdfAi: m.extract } }))
@@ -97,8 +98,20 @@ describe('klientský AI import přijatých faktur', () => {
     await pickFiles(w, ['synthetic.pdf'])
     await w.findAll('button').find(b => b.text().includes('integrations.ai.run_extract'))!.trigger('click')
     await flushPromises()
-    expect(m.extract).toHaveBeenCalledWith(expect.any(File), undefined, expect.any(String))
+    expect(m.extract).toHaveBeenCalledWith(expect.any(File), undefined, expect.any(String), false)
     expect(m.status).toHaveBeenCalledTimes(2)
+    w.unmount()
+  })
+
+  it('volba Načíst bez položek se předá do vytěžení', async () => {
+    setupRole(false)
+    m.extract.mockResolvedValue({ ok: true })
+    const w = await mountPage()
+    await w.get('[data-test="ai-without-items"] input').setValue(true)
+    await pickFiles(w, ['synthetic.pdf'])
+    await w.findAll('button').find(b => b.text().includes('integrations.ai.run_extract'))!.trigger('click')
+    await flushPromises()
+    expect(m.extract).toHaveBeenCalledWith(expect.any(File), undefined, expect.any(String), true)
     w.unmount()
   })
 
@@ -111,7 +124,7 @@ describe('klientský AI import přijatých faktur', () => {
     await pickFiles(w, ['synthetic.pdf'])
     await w.findAll('button').find(b => b.text().includes('integrations.ai.run_extract'))!.trigger('click')
     await flushPromises()
-    expect(m.extract).toHaveBeenCalledWith(expect.any(File), 'synthetic-model', expect.any(String))
+    expect(m.extract).toHaveBeenCalledWith(expect.any(File), 'synthetic-model', expect.any(String), false)
     expect(w.find('[data-test="client-ai-limit-reached"]').exists()).toBe(false)
     w.unmount()
   })
@@ -227,6 +240,50 @@ describe('klientský AI import přijatých faktur', () => {
     expect(m.extract).toHaveBeenCalledTimes(1)
     expect(w.findComponent({ name: 'ExtractionReviewModal' }).exists()).toBe(false)
     expect(w.text()).not.toContain('synthetic-a.pdf')
+    w.unmount()
+  })
+
+  it('fotku z mobilní nabídky Nákup převezme, nechá oříznout a rovnou vytěží', async () => {
+    setupRole(false)
+    m.extract.mockResolvedValue({ ok: true, purchase_invoice_id: 21, source: 'ai', document_kind: 'invoice' })
+    const photo = new File(['synthetic'], 'snapshot.jpg', { type: 'image/jpeg' })
+    const takePurchaseCapture = vi.fn().mockReturnValueOnce(photo)
+    const w = mount(AiImport, { global: {
+      provide: { [windowContextKey as symbol]: { takePurchaseCapture } },
+      stubs: { RouterLink: true, ExtractionReviewModal: true, PhotoCropDialog: true },
+    } })
+    await flushPromises()
+    expect(takePurchaseCapture).toHaveBeenCalledTimes(1)
+    const crop = w.getComponent({ name: 'PhotoCropDialog' })
+    expect((crop.props('file') as File).name).toBe('snapshot.jpg')
+    const cropped = new File(['synthetic-cropped'], 'snapshot-cropped.jpg', { type: 'image/jpeg' })
+    crop.vm.$emit('done', cropped)
+    await flushPromises()
+    expect(m.extract).toHaveBeenCalledTimes(1)
+    expect((m.extract.mock.calls[0][0] as File).name).toBe('snapshot-cropped.jpg')
+    w.unmount()
+  })
+
+  it.each([
+    [true, status(false), 'aiGateway.client_extraction_unavailable'],
+    [false, status(true, false), 'aiGateway.not_configured_body'],
+  ])('bez dostupného vytěžení zobrazí fotku a důvod (klient: %s)', async (client, config, reason) => {
+    setupRole(client)
+    m.status.mockResolvedValue(config)
+    const original = new File(['synthetic'], 'snapshot.jpg', { type: 'image/jpeg' })
+    const takePurchaseCapture = vi.fn().mockReturnValueOnce(original)
+    const w = mount(AiImport, { global: {
+      provide: { [windowContextKey as symbol]: { takePurchaseCapture } },
+      stubs: { RouterLink: true, ExtractionReviewModal: true, PhotoCropDialog: true },
+    } })
+    await flushPromises()
+    expect(takePurchaseCapture).toHaveBeenCalledTimes(1)
+    const crop = w.getComponent({ name: 'PhotoCropDialog' })
+    expect(crop.props('file')).toBe(original)
+    expect(crop.props('previewOnlyReason')).toBe(reason)
+    crop.vm.$emit('done', original)
+    await flushPromises()
+    expect(m.extract).not.toHaveBeenCalled()
     w.unmount()
   })
 })

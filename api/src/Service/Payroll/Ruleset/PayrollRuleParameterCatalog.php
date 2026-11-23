@@ -283,46 +283,76 @@ final class PayrollRuleParameterCatalog
         'merge-two-calendar-days-when-more-favourable' =>
             'sloučit dva kalendářní dny cesty, je-li to pro zaměstnance výhodnější',
         'last_day_of_month' => 'poslední den příslušného měsíce',
+        'unlimited' => 'bez číselného limitu',
+    ];
+
+    /** Hodnota čeká na vyhlášení ve Sbírce a přijde aktualizací aplikace. */
+    public const REVIEW_PENDING_PUBLICATION = 'pending_publication';
+
+    /** Posuzuje se jinde z dokladů nebo u konkrétního případu, ne v sadě pravidel. */
+    public const REVIEW_ASSESSED_ELSEWHERE = 'assessed_elsewhere';
+
+    /** Skutečně zbývá lidskému posouzení: aplikace případ nepočítá. */
+    public const REVIEW_MANUAL = 'manual_review';
+
+    /** Všechny kategorie; kontrakt s frontendovým `PayrollRulesetReviewCategory`. */
+    public const REVIEW_CATEGORIES = [
+        self::REVIEW_PENDING_PUBLICATION,
+        self::REVIEW_ASSESSED_ELSEWHERE,
+        self::REVIEW_MANUAL,
     ];
 
     /**
-     * Vysvětlení ručního posouzení: proč tu aplikace vědomě netvrdí hodnotu
-     * a co s tím má uživatel dělat. Skoro vždy nic — proto to musí být napsané.
+     * Vysvětlení parametrů, ze kterých výpočet nečerpá: proč tu aplikace vědomě
+     * netvrdí hodnotu a co s tím má uživatel dělat. Skoro vždy nic, proto to musí
+     * být napsané.
      *
-     * @var array<string, array<string, array{why: string, action: string}>>
+     * `category` rozlišuje tři situace, které dřív splývaly do jediného „ruční
+     * posouzení":
+     *
+     *  - {@see REVIEW_PENDING_PUBLICATION}: zákon číslo dá, jen ještě nevyšlo
+     *    (`expected` = očekávaný měsíc vyhlášení, `source_url` = zmocňovací předpis),
+     *  - {@see REVIEW_ASSESSED_ELSEWHERE}: nárok se posuzuje z dokladů v jiné agendě
+     *    (`route` = název routy té agendy ve frontendu),
+     *  - {@see REVIEW_MANUAL}: případ aplikace nepočítá a zbývá člověku.
+     *
+     * Kategorie je výklad, ne hodnota. Do kanonického otisku sady nevstupuje, takže
+     * u immutable ročníků 2025 a 2026 mění jen zobrazení, ne historické výpočty.
+     *
+     * @var array<string, array<string, array{category: string, why: string, action: string, expected?: string, source_url?: string, route?: string}>>
      */
     private const MANUAL_REVIEW = [
         'income_tax' => [
-            // Dvě vysvětlení NÍŽE jsou ruční posouzení jen v ročníku 2027. Ročník
-            // 2026 je má jako částky, takže se uživateli ukážou jedině u sady,
-            // které hodnota opravdu chybí.
+            // Ruční posouzení jen v ročníku 2027. Ročníky 2025 a 2026 ho mají jako
+            // částku, takže se vysvětlení ukáže jedině u sady, které hodnota chybí.
             'benefit_exemption.meal.per_shift' => [
+                'category' => self::REVIEW_PENDING_PUBLICATION,
+                'expected' => '2026-12',
+                'source_url' => 'https://www.zakonyprolidi.cz/cs/2006-262#p189',
                 'why' => 'Osvobozený příspěvek na stravování je 70 % horní hranice stravného při '
-                    . 'pracovní cestě 5 až 12 hodin. Vyhláška o stravném pro rok 2027 zatím nevyšla, '
-                    . 'takže částku za směnu nelze odvodit a hodnota roku 2026 by byla odhad.',
-                'action' => 'Až vyjde vyhláška o cestovních náhradách pro rok 2027, aktualizujte '
-                    . 'aplikaci. Do té doby se příspěvek na stravování za rok 2027 nespočítá.',
-            ],
-            'benefit_exemption.non_cash_leisure.yearly' => [
-                'why' => 'Od 1. 1. 2027 zákon č. 180/2026 Sb. zrušil společný limit poloviny průměrné '
-                    . 'mzdy pro volnočasová plnění: rekreace a zájezdy mají limit 20 000 Kč za rok, '
-                    . 'sport, kultura a vzdělávací zařízení limit nemají. Starý koš tomu neodpovídá.',
-                'action' => 'Nic tu nevyplňujte. Volnočasová plnění za rok 2027 se spočítají až po '
-                    . 'aktualizaci aplikace s novými koši osvobození.',
+                    . 'pracovní cestě 5 až 12 hodin (§ 6 odst. 9 písm. b) ZDP). Horní hranici '
+                    . 'stravného pro rok 2027 stanoví vyhláška MPSV podle § 189 zákoníku práce, '
+                    . 'která ještě nevyšla. Hodnota roku 2026 by byla odhad.',
+                'action' => 'Nic nevyplňujte, částka přijde aktualizací aplikace hned po vyhlášení. '
+                    . 'Do té doby nejde schválit mzdový vstup s příspěvkem na stravování za období '
+                    . 'roku 2027 a aplikace to u vstupu ohlásí. Ostatní mzda za rok 2027 i příspěvek '
+                    . 'na stravování za rok 2026 se počítají normálně.',
             ],
             'credit.spouse.eligibility' => [
-                'why' => 'Roční sleva na manžela má od 1. 1. 2024 dvě podmínky NAJEDNOU: společně '
-                    . 'hospodařící domácnost s manželem A s vyživovaným dítětem poplatníka, které '
-                    . 'nedovršilo 3 let věku, k tomu vlastní příjem manžela do zákonného limitu '
-                    . 'a doložení podle § 38l. Domácnost, věk dítěte ani příjmy manžela mzdový '
-                    . 'modul v datech nemá — částky vedle jsou zákonná čísla, ne posouzení nároku.',
-                'action' => 'Nic tu nevyplňujte ani neschvalujte. Slevu na manžela uplatněte '
-                    . 'v ročním zúčtování ručně proti doloženým podkladům, nebo ji zaměstnanec '
-                    . 'uplatní v daňovém přiznání.',
+                'category' => self::REVIEW_ASSESSED_ELSEWHERE,
+                'route' => 'payroll-annual-settlement',
+                'why' => 'Nárok na slevu na manžela (§ 35ba odst. 1 písm. b) a § 35bb ZDP) stojí na '
+                    . 'společně hospodařící domácnosti s manželem a s dítětem do 3 let věku, na '
+                    . 'vlastním příjmu manžela do zákonného limitu a na doložení podle § 38l ZDP. '
+                    . 'Zálohy během roku slevu nezohledňují (§ 38h odst. 6 ZDP), uplatní se až '
+                    . 'v ročním zúčtování. Sada drží jen zákonné částky slevy a limitu příjmu.',
+                'action' => 'V sadě nic nevyplňujte. Uplatnění slevy zapište u zaměstnance '
+                    . 'v ročním zúčtování podle jeho prohlášení a dokladů, výpočet ji pak uplatní.',
             ],
         ],
         'social_insurance' => [
             'employee.discount.agriculture_dpp' => [
+                'category' => self::REVIEW_MANUAL,
                 'why' => 'Slevu na pojistném u zemědělské dohody o provedení práce lze uplatnit jen '
                     . 'při splnění zákonných podmínek o sezónní zemědělské činnosti. Ty aplikace '
                     . 'z mzdových dat nepozná a nebude si je domýšlet.',
@@ -332,8 +362,10 @@ final class PayrollRuleParameterCatalog
             ],
             // Tři parametry NÍŽE jsou ruční posouzení jen v ročníku 2025, kam se
             // doplnily zpětně. Ročník 2026 je má jako sazby — vysvětlení se proto
-            // uživateli ukáže jedině u sady, které hodnota opravdu chybí.
+            // uživateli ukáže jedině u sady, které hodnota opravdu chybí. Ročník
+            // 2025 je immutable, hodnota se proto nedoplňuje ani dodatečně.
             'employee.discount.working_pensioner' => [
+                'category' => self::REVIEW_MANUAL,
                 'why' => 'Sazbu slevy pracujícího starobního důchodce se pro rok 2025 nepodařilo '
                     . 'doložit z primárního zdroje se stejnou jistotou jako zbytek dodané sady. '
                     . 'Sazba, která by se lišila jen o desetinu procenta, by se propsala do každé '
@@ -343,6 +375,7 @@ final class PayrollRuleParameterCatalog
                     . 'účinného pro rok 2025. Pro rok 2026 je hodnota dodaná a nic dělat nemusíte.',
             ],
             'employer.rate.rescue_and_company_fire_service' => [
+                'category' => self::REVIEW_MANUAL,
                 'why' => 'Zvláštní sazba zaměstnavatele za zdravotnické záchranáře a členy HZS '
                     . 'podniku se pro rok 2025 nepodařilo doložit z primárního zdroje — sekundární '
                     . 'zdroje si navíc protiřečí v tom, která sazba patří které kategorii.',
@@ -351,6 +384,7 @@ final class PayrollRuleParameterCatalog
                     . '2025, doplňte sazbu podle § 7 odst. 1 z. č. 589/1992 Sb. ve znění pro rok 2025.',
             ],
             'employer.rate.risk_employment' => [
+                'category' => self::REVIEW_MANUAL,
                 'why' => 'Zvýšené pojistné za rizikové zaměstnání je v dodané sadě doložené až pro '
                     . 'rok 2026. Pro rok 2025 není doloženo ani to, zda tahle kategorie tehdy '
                     . 'existovala, a hádat se to nebude.',
@@ -361,24 +395,30 @@ final class PayrollRuleParameterCatalog
         ],
         'compensation_averages' => [
             'wage_compensation.manual_review' => [
+                'category' => self::REVIEW_ASSESSED_ELSEWHERE,
+                'route' => 'payroll-absences',
                 'why' => 'Nárok na náhradu mzdy, úplnost rozvrhu směn, souběh s jinými dávkami '
-                    . 'a přerušené směny nejde spolehlivě odvodit z uložených dat. Aplikace proto '
-                    . 'radši nedosadí nic, než aby odhadovala.',
-                'action' => 'Není to fronta ke schválení a odklikávat se nedá. Náhradu mzdy za '
-                    . 'prvních 14 dnů nemoci zkontrolujte na mzdovém listu, než mzdu uzavřete.',
+                    . 'a přerušené směny se posuzují u konkrétní nepřítomnosti, ne v sadě pravidel. '
+                    . 'Sazby a redukční hranice z této sady výpočet náhrady používá.',
+                'action' => 'V sadě nic nevyplňujte. Nepřítomnost a průměrný výdělek, u kterých '
+                    . 'aplikace něco nedokáže odvodit, ukáže agenda Nepřítomnosti.',
             ],
         ],
         'travel_allowances' => [
             'foreign_travel' => [
+                'category' => self::REVIEW_MANUAL,
+                'route' => 'payroll-travel',
                 'why' => 'Zahraniční stravné, kapesné a přepočet měn stanoví vyhláška Ministerstva '
-                    . 'financí pro každý stát zvlášť. Tenhle ruleset drží jen tuzemské sazby, '
-                    . 'a proto pro zahraniční cesty žádnou hodnotu netvrdí.',
+                    . 'financí pro každý stát zvlášť. Aplikace zahraniční pracovní cesty nepočítá '
+                    . 'a výpočet je u nich odmítne, tenhle ruleset drží jen tuzemské sazby.',
                 'action' => 'Tuzemské cesty se počítají normálně a nic tu nevyplňujte. Zahraniční '
                     . 'pracovní cestu vyúčtujte ručně podle vyhlášky pro daný stát.',
             ],
         ],
         'deadlines' => [
             'submission_calendar' => [
+                'category' => self::REVIEW_ASSESSED_ELSEWHERE,
+                'route' => 'payroll-submissions',
                 'why' => 'Lhůta pro podání se liší podle agendy, události, zvoleného kanálu '
                     . 'a přechodných ustanovení. Jedno univerzální datum neexistuje, takže by ho '
                     . 'aplikace musela vymyslet.',
@@ -388,6 +428,7 @@ final class PayrollRuleParameterCatalog
         ],
         'codebooks' => [
             'catalog_versions' => [
+                'category' => self::REVIEW_ASSESSED_ELSEWHERE,
                 'why' => 'Číselníky se do aplikace nahrávají jako soubor s vlastním datem vydání '
                     . 'a kontrolním součtem. Nemají jednu „hodnotu", kterou by šlo napsat sem.',
                 'action' => 'Nic tu nevyplňujte ani neschvalujte. Aktuálnost číselníků se řeší '
@@ -396,6 +437,8 @@ final class PayrollRuleParameterCatalog
         ],
         'submissions' => [
             'submission' => [
+                'category' => self::REVIEW_ASSESSED_ELSEWHERE,
+                'route' => 'payroll-submissions',
                 'why' => 'Verze schémat jsou zapsané jako parametry níže, ale samotné odeslání '
                     . 'podání není součástí mzdového výpočtu.',
                 'action' => 'Nic tu neschvalujete. Podání se odesílá ze stránky Podání.',
@@ -410,9 +453,9 @@ final class PayrollRuleParameterCatalog
      * @var array<string, string>
      */
     private const MANUAL_REVIEW_DOMAINS = [
-        'compensation_averages' => 'Redukční hranice i sazby náhrady mzdy tu jsou vyplněné, ale nárok '
-            . 'na náhradu a úplnost rozvrhu směn musí potvrdit člověk. Doména proto do výpočtu '
-            . 'nevstupuje automaticky.',
+        'compensation_averages' => 'Redukční hranice, sazby náhrady mzdy a příplatků tu jsou vyplněné '
+            . 'a výpočet náhrad a příplatků je používá. Nárok na náhradu a průměrný výdělek se '
+            . 'posuzují u konkrétní nepřítomnosti v agendě Nepřítomnosti.',
         'deadlines' => 'Lhůty závisí na agendě, události a kanálu podání, takže tu není jedno datum, '
             . 'které by šlo schválit. Termíny hlídá stránka Podání.',
         'codebooks' => 'Číselníky se nahrávají importem se svým datem vydání a kontrolním součtem — '
@@ -431,10 +474,19 @@ final class PayrollRuleParameterCatalog
         return is_string($value) ? (self::VALUE_LABELS[$value] ?? null) : null;
     }
 
-    /** @return array{why: string, action: string}|null */
+    /** @return array{category: string, why: string, action: string, expected?: string, source_url?: string, route?: string}|null */
     public static function manualReview(string $domain, string $key): ?array
     {
         return self::MANUAL_REVIEW[$domain][$key] ?? null;
+    }
+
+    /**
+     * Kategorie parametru, ze kterého výpočet nečerpá. Bez vysvětlení v katalogu
+     * (např. parametr z overridu zákazníka) zůstává poctivé „ruční posouzení".
+     */
+    public static function reviewCategory(string $domain, string $key): string
+    {
+        return self::MANUAL_REVIEW[$domain][$key]['category'] ?? self::REVIEW_MANUAL;
     }
 
     public static function domainManualReview(string $domain): ?string

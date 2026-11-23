@@ -10,9 +10,15 @@ final class AuthoritativeTransactionReconciler
 {
     public function __construct(private readonly PDO $pdo) {}
 
+    /** Zdroje výpisu, jejichž pohyby párovač porovná s evidovanými a převzatými pohyby účtu. */
+    public static function coversSource(string $source): bool
+    {
+        return in_array($source, ['gpc', 'bank_api'], true);
+    }
+
     public function candidates(array $transactions, int $supplierId, string $account, string $bank, string $currency, string $source, array $confirmations = [], array $fingerprints = [], array $fingerprintCandidates = []): array
     {
-        if ($transactions === [] || $supplierId <= 0 || !in_array($source, ['gpc', 'bank_api'], true)) return [];
+        if ($transactions === [] || $supplierId <= 0 || !self::coversSource($source)) return [];
         $accountKey = self::account($account, $bank);
         if ($accountKey === null || $currency === '') return [];
         $dates = array_column($transactions, 'posted_at');

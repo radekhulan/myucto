@@ -132,7 +132,15 @@ final readonly class PayrollMonthlyAgendaDutyService
             if ($jmhz !== null) {
                 $duties[] = $jmhz;
             }
-            foreach ($run['insurer_codes'] as $insurerCode) {
+            /*
+             * Přehled o platbě pojistného patří jen pojišťovně, u které měl
+             * zaměstnavatel v měsíci pojištěnce (§ 24 zákona
+             * č. 592/1992 Sb.). Agentura s DPP pod rozhodným příjmem má
+             * pojišťovny ve snímku, ale nikoho pojištěného: šest nulových
+             * přehledů bylo zbytečných. Rozhoduje vypočtený zdravotní výsledek;
+             * bez něj kódy ze snímku.
+             */
+            foreach ($run['insured_codes'] ?? $run['insurer_codes'] as $insurerCode) {
                 $health = $this->healthDuty($run, $period, $insurerCode);
                 if ($health !== null) {
                     $duties[] = $health;

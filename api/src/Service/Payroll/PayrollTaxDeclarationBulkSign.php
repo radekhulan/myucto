@@ -13,21 +13,24 @@ use MyInvoice\Repository\Payroll\PayrollPersonNotFoundException;
 use MyInvoice\Repository\Payroll\PayrollPersonStatutoryEvidenceConflictException;
 use MyInvoice\Repository\Payroll\PayrollPersonStatutoryEvidenceRepository;
 use MyInvoice\Service\ActivityLogger;
+use MyInvoice\Service\Payroll\IncomeTax\TaxDeclarationEffectiveMonth;
 use MyInvoice\Service\Payroll\IncomeTax\TaxDeclarationStatus;
+use MyInvoice\Service\Payroll\Submission\PayrollSubmissionCalendar;
 use PDO;
+use Psr\Clock\ClockInterface;
 
 /**
  * Hromadný zápis podepsaných prohlášení poplatníka (§ 38k ZDP).
  *
  * Na začátku sezóny přinese firma balík podepsaných prohlášení a jediná cesta
  * byla karta osoby, člověk po člověku. Tahle služba zapíše „Podepsáno" vybraným
- * osobám od jednoho měsíce:
+ * osobám:
  *
- *  - od 1. ledna zdaňovacího roku, je-li prohlášení podepsané před ním nebo
- *    v lednu, jinak od měsíce podpisu — za měsíce před podpisem se sleva
- *    zpětně neuplatňuje;
- *  - nikdy do období uzavřeného schválenou mzdou
- *    ({@see PayrollApprovedPeriodFreeze::firstOpenMonth()});
+ *  - od měsíce, který plyne z § 38k ZDP pro den podpisu a nástup dané osoby
+ *    ({@see TaxDeclarationEffectiveMonth}: do 30 dnů po nástupu od měsíce
+ *    nástupu, do 15. 2. od ledna, jinak od měsíce po podpisu);
+ *  - nikdy do období uzavřeného schválenou mzdou; slevu za takové měsíce
+ *    dorovná roční zúčtování (`annual_settlement`);
  *  - osobu, která má na daný rok od toho měsíce podepsané prohlášení, přeskočí
  *    a její větu nepřepíše.
  *
@@ -45,7 +48,7 @@ final class PayrollTaxDeclarationBulkSign
     public const EVIDENCE_REFERENCE = 'declaration:38k-signed';
 
     /** Stav osoby v náhledu a změna evidence, jak je dostane klient. */
-    public const STATES = ['ready', 'already_signed', 'period_frozen', 'timeline_gap', 'employee_not_found'];
+    public const STATES = ['ready', 'already_signed', 'period_frozen', 'after_year_end', 'timeline_gap', 'employee_not_found'];
     public const CHANGES = ['add', 'close_previous', 'replace'];
 
     private const MAX_EMPLOYEES = 2000;
@@ -70,6 +73,7 @@ final class PayrollTaxDeclarationBulkSign
         private readonly PayrollPersonStatutoryEvidenceRepository $evidence,
         private readonly PayrollApprovedPeriodFreeze $freeze,
         private readonly ActivityLogger $activityLogger,
+        private readonly ClockInterface $clock,
     ) {}
 
     /**
@@ -83,22 +87,26 @@ final class PayrollTaxDeclarationBulkSign
     {
         [$taxYear, $signed] = $this->normalizeInput($year, $signedOn);
         $frozenThrough = $this->freeze->frozenThrough($supplierId);
-        $start = $this->effectiveFrom($taxYear, $signed, $frozenThrough);
+        // Souhrn platí pro stávající zaměstnance; nově nastoupivší mají první
+        // měsíc podle svého nástupu v řádku osoby.
+        $start = TaxDeclarationEffectiveMonth::resolve($taxYear, $signed, [], $frozenThrough);
         $requested = $employeeIds === null
             ? $this->yearEmployeeIds($supplierId, $taxYear)
             : $this->normalizeIds($employeeIds);
-        $assessments = $this->assess($supplierId, $requested, $taxYear, $start['from']);
+        $assessments = $this->assess($supplierId, $requested, $taxYear, $signed, $frozenThrough);
 
         $summary = [
             'people' => 0,
             'ready' => 0,
             'already_signed' => 0,
             'period_frozen' => 0,
+            'after_year_end' => 0,
             'timeline_gap' => 0,
             'employee_not_found' => 0,
         ];
         $people = [];
         $ready = [];
+        $earliest = null;
         foreach ($requested as $employeeId) {
             $row = $assessments[$employeeId] ?? [
                 'employee_id' => $employeeId,
@@ -107,6 +115,8 @@ final class PayrollTaxDeclarationBulkSign
                 'change' => null,
                 'current_status' => null,
                 'effective_from' => null,
+                'effective_from_basis' => null,
+                'annual_settlement' => false,
                 'effective_to' => null,
             ];
             $people[] = $row;
@@ -114,20 +124,23 @@ final class PayrollTaxDeclarationBulkSign
             $summary[$row['state']]++;
             if ($row['state'] === 'ready') {
                 $ready[] = $employeeId;
+                $earliest = $earliest === null ? $row['effective_from'] : min($earliest, $row['effective_from']);
             }
         }
+        $recalculateFrom = $earliest ?? $start['from'];
 
         return [
             'year' => $taxYear,
             'signed_on' => $signed,
             'effective_from' => $start['from'],
             'effective_from_basis' => $start['basis'],
+            'annual_settlement' => $start['annual_settlement'],
             'frozen_through' => $frozenThrough,
             'summary' => $summary,
             'ready_employee_ids' => $ready,
-            'runs_to_recalculate' => $start['from'] === null
+            'runs_to_recalculate' => $recalculateFrom === null
                 ? []
-                : $this->runsToRecalculate($supplierId, $start['from'], $taxYear),
+                : $this->runsToRecalculate($supplierId, $recalculateFrom, $taxYear),
             'people' => $people,
         ];
     }
@@ -156,7 +169,7 @@ final class PayrollTaxDeclarationBulkSign
         if ($ids === []) {
             throw new InvalidArgumentException('Vyberte aspoň jednu osobu.');
         }
-        $today = (new DateTimeImmutable('today'))->format('j. n. Y');
+        $today = (new DateTimeImmutable(PayrollSubmissionCalendar::today($this->clock->now())))->format('j. n. Y');
         $note = sprintf(
             self::NOTE,
             (new DateTimeImmutable($signed))->format('j. n. Y'),
@@ -235,13 +248,18 @@ final class PayrollTaxDeclarationBulkSign
                 $this->rollback($owns);
                 return ['status' => 'skipped', 'detail' => ['reasons' => ['employee_not_found']]];
             }
-            $start = $this->effectiveFrom($taxYear, $signedOn, $this->freeze->frozenThrough($supplierId));
-            $from = $start['from'];
-            $assessment = $this->assess($supplierId, [$employeeId], $taxYear, $from)[$employeeId] ?? null;
+            $assessment = $this->assess(
+                $supplierId,
+                [$employeeId],
+                $taxYear,
+                $signedOn,
+                $this->freeze->frozenThrough($supplierId),
+            )[$employeeId] ?? null;
             if ($assessment === null) {
                 $this->rollback($owns);
                 return ['status' => 'skipped', 'detail' => ['reasons' => ['employee_not_found']]];
             }
+            $from = $assessment['effective_from'];
             if ($assessment['state'] !== 'ready' || $from === null) {
                 $this->rollback($owns);
                 return ['status' => 'skipped', 'detail' => ['reasons' => [$assessment['state']]]];
@@ -256,6 +274,7 @@ final class PayrollTaxDeclarationBulkSign
                 $from,
                 $this->yearEnd($taxYear),
                 $note,
+                $signedOn,
             )['rows'];
             $this->evidence->save(
                 $supplierId,
@@ -271,6 +290,8 @@ final class PayrollTaxDeclarationBulkSign
             return ['status' => 'applied', 'detail' => [
                 'change' => $assessment['change'],
                 'effective_from' => $from,
+                'effective_from_basis' => $assessment['effective_from_basis'],
+                'annual_settlement' => $assessment['annual_settlement'],
                 'effective_to' => $assessment['effective_to'],
             ]];
         } catch (\Throwable $exception) {
@@ -296,8 +317,13 @@ final class PayrollTaxDeclarationBulkSign
      * @param list<int> $employeeIds
      * @return array<int,array<string,mixed>> klíčováno ID; cizí nebo neexistující osoby chybí
      */
-    private function assess(int $supplierId, array $employeeIds, int $taxYear, ?string $from): array
-    {
+    private function assess(
+        int $supplierId,
+        array $employeeIds,
+        int $taxYear,
+        string $signedOn,
+        ?string $frozenThrough,
+    ): array {
         if ($employeeIds === []) {
             return [];
         }
@@ -326,28 +352,42 @@ final class PayrollTaxDeclarationBulkSign
                 $declarations[(int) $row['employee_id']][] = $row;
             }
         }
+        $starts = $this->evidence->employmentStarts($supplierId, array_keys($employees));
 
         $result = [];
         foreach ($employees as $employeeId => $fullName) {
+            $resolved = TaxDeclarationEffectiveMonth::resolve(
+                $taxYear,
+                $signedOn,
+                $starts[$employeeId] ?? [],
+                $frozenThrough,
+            );
+            $from = $resolved['from'];
             $base = [
                 'employee_id' => $employeeId,
                 'full_name' => $fullName,
                 'change' => null,
                 'current_status' => null,
                 'effective_from' => null,
+                'effective_from_basis' => null,
+                'annual_settlement' => false,
                 'effective_to' => null,
             ];
             if ($from === null) {
-                $result[$employeeId] = ['state' => 'period_frozen'] + $base;
+                $state = $resolved['legal_from'] === null ? 'after_year_end' : 'period_frozen';
+                $result[$employeeId] = ['state' => $state] + $base;
                 continue;
             }
-            $plan = $this->plannedRows($declarations[$employeeId] ?? [], $from, $this->yearEnd($taxYear), '');
+            $plan = $this->plannedRows($declarations[$employeeId] ?? [], $from, $this->yearEnd($taxYear), '', $signedOn);
+            $ready = $plan['state'] === 'ready';
             $result[$employeeId] = [
                 'state' => $plan['state'],
-                'change' => $plan['state'] === 'ready' ? $plan['change'] : null,
+                'change' => $ready ? $plan['change'] : null,
                 'current_status' => $plan['current_status'],
-                'effective_from' => $plan['state'] === 'ready' ? $from : null,
-                'effective_to' => $plan['state'] === 'ready' ? $plan['effective_to'] : null,
+                'effective_from' => $ready ? $from : null,
+                'effective_from_basis' => $ready ? $resolved['basis'] : null,
+                'annual_settlement' => $ready && $resolved['annual_settlement'],
+                'effective_to' => $ready ? $plan['effective_to'] : null,
             ] + $base;
         }
 
@@ -371,7 +411,7 @@ final class PayrollTaxDeclarationBulkSign
      * @param list<array<string,mixed>> $rows
      * @return array{state:string,change:?string,current_status:?string,effective_to:?string,rows:list<array<string,mixed>>}
      */
-    private function plannedRows(array $rows, string $from, string $yearEnd, string $note): array
+    private function plannedRows(array $rows, string $from, string $yearEnd, string $note, string $signedOn): array
     {
         usort(
             $rows,
@@ -440,6 +480,10 @@ final class PayrollTaxDeclarationBulkSign
             'effective_from' => $from,
             'effective_to' => $to,
             'evidence_note' => $note,
+            // Den podpisu nese i hromadný zápis jako karta: od 01/2027 ho
+            // hlásí JMHZ (10575, IN16) a editor podle něj ověřuje první
+            // měsíc věty (§ 38k ZDP, TaxDeclarationEffectiveMonth::check).
+            'signed_on' => $signedOn,
         ];
 
         $planned = [];
@@ -470,25 +514,6 @@ final class PayrollTaxDeclarationBulkSign
         ];
     }
 
-    /**
-     * @return array{from:?string,basis:string}
-     */
-    private function effectiveFrom(int $taxYear, string $signedOn, ?string $frozenThrough): array
-    {
-        $yearStart = sprintf('%04d-01-01', $taxYear);
-        $base = max($yearStart, substr($signedOn, 0, 8) . '01');
-        $basis = $base === $yearStart ? 'year_start' : 'signing_month';
-        $open = PayrollApprovedPeriodFreeze::firstOpenMonth($base, $frozenThrough);
-        if ($open !== $base) {
-            $basis = 'after_frozen_period';
-        }
-
-        return [
-            'from' => $open > $this->yearEnd($taxYear) ? null : $open,
-            'basis' => $basis,
-        ];
-    }
-
     private function yearEnd(int $taxYear): string
     {
         return sprintf('%04d-12-31', $taxYear);
@@ -506,11 +531,16 @@ final class PayrollTaxDeclarationBulkSign
         if (!is_string($signedOn) || !IsoDate::isValid($signedOn)) {
             throw new InvalidArgumentException('Datum podpisu musí být platné datum RRRR-MM-DD.');
         }
-        if ($signedOn > (new DateTimeImmutable('today'))->format('Y-m-d')) {
+        if ($signedOn > PayrollSubmissionCalendar::today($this->clock->now())) {
             throw new InvalidArgumentException('Datum podpisu nesmí být v budoucnosti.');
         }
         $signedYear = (int) substr($signedOn, 0, 4);
-        if ($signedYear > $taxYear) {
+        // Kdo nastoupil v posledních 30 dnech roku, podepisuje prohlášení na
+        // ten rok ještě v lednu dalšího roku a platí mu od měsíce nástupu
+        // (§ 38k odst. 1 věta poslední a odst. 4 ZDP: „do 30 dnů po vstupu
+        // do zaměstnání“). Stávajícím zaměstnancům takový podpis do roku už
+        // nepatří; to rozliší TaxDeclarationEffectiveMonth (`after_year_end`).
+        if ($signedYear > $taxYear + 1) {
             throw new InvalidArgumentException(sprintf(
                 'Prohlášení na rok %d nelze podepsat až po jeho skončení.',
                 $taxYear,

@@ -28,6 +28,7 @@ final class PayrollImportProfileRepository
     public const SAMPLE_MARKERS = [
         'giriton' => 'payroll_attendance_sample_seeded_at',
         'myucto' => 'payroll_attendance_myucto_sample_seeded_at',
+        'pamica' => 'payroll_attendance_pamica_sample_seeded_at',
     ];
 
     /** Vzory založené před zavedením klíčů jsou GIRITON (migrace 2206). */

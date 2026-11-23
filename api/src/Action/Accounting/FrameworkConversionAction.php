@@ -40,7 +40,7 @@ final class FrameworkConversionAction
     {$b=$q->getParsedBody();E::need(is_array($b),'conversion_command_invalid',422);PropertyInput::fields($b,$fields);return $b;}
     private function handle(Request $q,Response $r,bool $write,callable $work):Response
     {
-        if(!RequestAuthorization::isSessionAuth($q))return Json::sessionRequired($r);
+        if(!RequestAuthorization::actsAsSession($q))return Json::sessionRequired($r);
         if(!$this->requirePermission($q,$r,$write?'accounting.journal.post':'accounting',$write?AccessLevel::WRITE:AccessLevel::READ,$error))return $error;
         try{if($write)E::need(self::integrated(),'conversion_integration_required');return Json::ok($r,$work($this->currentSupplierId($q)));}
         catch(E|\MyInvoice\Service\Accounting\AccountDefinitionException|\MyInvoice\Service\Accounting\AccountingFrameworkException|\MyInvoice\Service\Accounting\PostingException|\MyInvoice\Service\Accounting\Closing\ClosingException|\MyInvoice\Service\Accounting\Dimension\DimensionException|\MyInvoice\Service\Property\PropertyException $e){return Json::error($r,$e->errorCode,'Převod vyžaduje úplný, aktuální a výslovně potvrzený podklad.',$e->httpStatus);}

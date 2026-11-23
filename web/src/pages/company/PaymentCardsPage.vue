@@ -83,9 +83,9 @@ const unverifiedCount = computed(() => cards.value.filter(c => !c.is_verified &&
       <ActionBar :actions="actions" />
     </div>
 
-    <div v-if="tabs.length > 1" class="border-b border-neutral-200 mb-4 flex gap-1 overflow-x-auto">
+    <div v-if="tabs.length > 1" class="border-b border-neutral-200 mb-4 flex gap-1 overflow-x-auto max-md:overflow-x-visible">
       <button v-for="tt in tabs" :key="tt" type="button" @click="tab = tt"
-        class="cursor-pointer px-4 py-2 text-sm border-b-2 transition whitespace-nowrap"
+        class="cursor-pointer px-4 py-2 text-sm border-b-2 transition whitespace-nowrap max-md:flex-1 max-md:min-w-0 max-md:px-1.5 max-md:text-[13px] max-md:leading-tight max-md:whitespace-normal max-md:text-center"
         :class="tab === tt
           ? 'border-primary-600 text-primary-700 font-medium'
           : 'border-transparent text-neutral-600 hover:text-neutral-900'">

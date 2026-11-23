@@ -286,6 +286,7 @@ async function runBook() {
     } else {
       toast.success(t('accounting.assets.book.result', { booked: r.booked, skipped: r.skipped }))
     }
+    if (r.accounting_skipped === 'closing_taken_over') toast.info(t('accounting.assets.book.closing_taken_over'))
     await load()
   } catch (e: any) {
     toast.error(e?.response?.data?.error?.message || t('common.error'))

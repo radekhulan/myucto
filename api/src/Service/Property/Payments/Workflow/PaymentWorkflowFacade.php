@@ -81,7 +81,7 @@ final class PaymentWorkflowFacade
                 foreach (['allocations', 'credit', 'reservation'] as $field) {
                     if (PropertyInput::hash($current['snapshot'][$field] ?? []) !== PropertyInput::hash($expectedPart[$field] ?? [])) PaymentException::reject('workflow_plan_changed');
                 }
-                if (PropertyInput::hash(PaymentJournalProof::canonicalLines($current['snapshot']['lines'])) !== PropertyInput::hash(PaymentJournalProof::canonicalLines($expectedPart['lines']))) PaymentException::reject('workflow_plan_changed');
+                if (!PaymentJournalProof::matches($current['snapshot']['lines'], $expectedPart['lines'])) PaymentException::reject('workflow_plan_changed');
                 $operation = $this->payments->apply($supplier, $partRequest, $current['preview_hash'], 'workflow.' . $id . '.' . $index, $actor);
                 $q = $this->db->pdo()->prepare('INSERT INTO unit_payment_workflow_operations (supplier_id,workflow_id,operation_id,part_key,part_no) VALUES (?,?,?,?,?)');
                 $q->execute([$supplier, $id, $operation['id'], $part['key'], $index + 1]);

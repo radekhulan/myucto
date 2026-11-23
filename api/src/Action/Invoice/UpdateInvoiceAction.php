@@ -4,6 +4,9 @@ declare(strict_types=1);
 
 namespace MyInvoice\Action\Invoice;
 
+use MyInvoice\Service\NumberSeries\NumberSeriesException;
+use MyInvoice\Service\NumberSeries\NumberSeriesKinds;
+use MyInvoice\Service\NumberSeries\NumberSeriesSelection;
 use MyInvoice\Service\Stock\InvoiceItemTracking;
 use MyInvoice\Service\Stock\IssuedInvoiceStockGuard;
 use MyInvoice\Service\Stock\StockException;
@@ -13,6 +16,7 @@ use MyInvoice\Http\Json;
 use MyInvoice\Http\SessionOnlyAccountingAct;
 use MyInvoice\Http\SupplierGuard;
 use MyInvoice\Http\TenantReferenceGuard;
+use MyInvoice\Infrastructure\Database\AfterCommit;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Infrastructure\Database\TransactionFailure;
 use MyInvoice\Middleware\AuthMiddleware;
@@ -46,6 +50,7 @@ use MyInvoice\Service\Vat\FiledVatPeriodLookup;
 use MyInvoice\Support\ExchangeRateDate;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
+use MyInvoice\Support\Sql\AdvanceDrawSql;
 
 final class UpdateInvoiceAction
 {
@@ -83,6 +88,10 @@ final class UpdateInvoiceAction
         // Limit zjednodušeného dokladu podle roku dokladu (§ 30 ZDPH), viz simplifiedRejection().
         private readonly \MyInvoice\Repository\TaxConstantsRepository $taxConstants,
         private readonly FiledVatPeriodLookup $filedPeriods,
+        private readonly NumberSeriesSelection $numberSeries,
+        private readonly \MyInvoice\Service\Accounting\Dimension\DraftItemDimensionRealign $itemDimensions,
+        private readonly \MyInvoice\Service\Invoice\InvoiceIssueTaxGate $taxGate,
+        private readonly \MyInvoice\Service\Accounting\DocumentPaymentLinks $paymentLinks,
     ) {}
 
     /**
@@ -125,6 +134,14 @@ final class UpdateInvoiceAction
         }
 
         $body = (array) ($request->getParsedBody() ?? []);
+        if ((isset($body['currency_id']) && (int) $body['currency_id'] !== (int) $existing['currency_id'])
+            || (isset($body['currency']) && (string) $body['currency'] !== (string) $existing['currency'])) {
+            $billingReport = (new \MyInvoice\Repository\WorkReportRepository($this->db))->findByInvoice($id, (int) $existing['supplier_id']);
+            if (($billingReport['billing_snapshot'] ?? null) !== null) {
+                return Json::error($response, 'billing_currency_mismatch', 'Nejprve zrušte cenové ujednání výkazu; jeho měna musí odpovídat faktuře.', 400);
+            }
+        }
+
         // effective_tax_date je generovaný sloupec (COALESCE(tax_date, issue_date)) a z těla se
         // neukládá. invoiceRefDate() ho bere přednostně, takže podvržená hodnota by zámek
         // období i kontrolu podaného DPH období vyhodnotila nad jiným datem, než se uloží.
@@ -139,6 +156,19 @@ final class UpdateInvoiceAction
         // plnění (OSS klíč je vyplněný, karta prázdná).
         if (isset($body['items']) && is_array($body['items'])) {
             $body['items'] = InvoiceItemKind::normalizeItems($body['items']);
+            // Příznak „cenu zadá člověk" patří jen konceptu: u vystavené faktury by obešel
+            // kontrolu kladné částky ({@see \MyInvoice\Service\Validation\InvoiceAmountPolicy}).
+            if ($existing['status'] !== 'draft') {
+                $body['items'] = array_map(static function (mixed $item): mixed {
+                    if (is_array($item)) {
+                        unset($item['manual_price']);
+                    }
+                    return $item;
+                }, $body['items']);
+            }
+            // Záloha odpočtového řádku (čerpání víc záloh) ještě před validací: faktura krytá
+            // zálohami nemusí mít kladnou částku k úhradě (InvoiceAmountPolicy::advanceLinkId).
+            $body['items'] = $this->repo->carryAdvanceLinks($id, $body['items']);
         }
 
         // Částečný PUT (#113): vynechaný klíč = uložená hodnota, ne default nového dokladu.
@@ -149,12 +179,22 @@ final class UpdateInvoiceAction
         // document_locked, ne 409 not_editable): kontrola staré I nové refDate —
         // klient nesmí datem do uzavřeného období „utéct" ani ho tam přesunout.
         $lock = $this->locks->forInvoice($existing);
+        // Vynucená úprava vystaveného dokladu přes API token se schopností (#355): přísněji
+        // než správce v relaci. Uzavřené období token nepřebije nikdy, ani jako správce.
+        $tokenForce = $existing['status'] !== 'draft'
+            && $isForce
+            && !RequestAuthorization::isSessionAuth($request)
+            && RequestAuthorization::tokenAllowsIssuedInvoiceEdit($request);
+        if ($tokenForce && self::lockedForToken($lock)) {
+            return Json::error($response, 'period_closed', 'Doklad spadá do uzavřeného nebo zamčeného účetního období; přes API token ho nelze upravit.', 409);
+        }
         if ($deny = $this->denyIfLocked($request, $response, $lock, 'invoice', $id)) {
             return $deny;
         }
         if ($existing['status'] !== 'draft') {
-            // Vynucená úprava vystaveného dokladu (u zaúčtovaného přeúčtuje deník) jen z relace.
-            if ($isForce
+            // Vynucená úprava vystaveného dokladu (u zaúčtovaného přeúčtuje deník) jen z relace,
+            // nebo přes API token s výslovně povolenou schopností.
+            if ($isForce && !$tokenForce
                 && ($deny = SessionOnlyAccountingAct::deny($request, $response, 'Vynucená úprava vystaveného dokladu'))) {
                 return $deny;
             }
@@ -167,15 +207,18 @@ final class UpdateInvoiceAction
             if (in_array($existing['invoice_type'], ['cancellation'], true)) {
                 return Json::error($response, 'not_editable', 'Storno doklad nelze editovat.', 409);
             }
+            if ($tokenForce && ($deny = $this->denyTokenForce($response, $body, $existing))) {
+                return $deny;
+            }
         }
 
-        // Vyprázdnění položek dokladu, který nějaké má → 422 ({@see DocumentItemsPayload}).
+        // Vyprázdnění položek mimo koncept → 422 ({@see DocumentItemsPayload}).
         // 422, ne 400: tělo je tvarem v pořádku (`items` JE pole), odmítá se až to, co
         // požadavek znamená proti STAVU tohohle dokladu — táž třída jako `force_mode_required`
         // níž. 400 `validation_failed` je tu vyhrazené pro schéma pole po poli (mapa `fields`).
         // Musí to být PŘED přečíslováním při změně typu: to už sahá na čítač řady, takže
         // pozdější odmítnutí by po sobě nechalo spálené číslo.
-        if (DocumentItemsPayload::emptiesExisting($body, (array) ($existing['items'] ?? []))) {
+        if (DocumentItemsPayload::emptiesExisting($body, (array) ($existing['items'] ?? []), (string) $existing['status'])) {
             return Json::error(
                 $response,
                 DocumentItemsPayload::EMPTY_ERROR_CODE,
@@ -268,10 +311,15 @@ final class UpdateInvoiceAction
             if ($existingType === 'proforma') {
                 $link = $this->db->pdo()->prepare(
                     "SELECT 1 FROM invoices
-                      WHERE parent_invoice_id = ? AND invoice_type IN ('invoice', 'tax_document')
-                        AND status <> 'cancelled' LIMIT 1"
+                      WHERE supplier_id = ? AND parent_invoice_id = ? AND invoice_type = 'tax_document'
+                        AND status <> 'cancelled'
+                     UNION ALL
+                     SELECT 1 FROM (" . AdvanceDrawSql::finalIds('?', '?') . ") fx
+                       JOIN invoices i ON i.id = fx.id
+                      WHERE i.status <> 'cancelled'
+                     LIMIT 1"
                 );
-                $link->execute([$id]);
+                $link->execute([$supplierId, $id, $supplierId, $id, $id, $supplierId]);
                 if ($link->fetchColumn() !== false) {
                     return Json::error(
                         $response,
@@ -376,7 +424,8 @@ final class UpdateInvoiceAction
         try {
             $body = $this->defaults->resolve($body, resolvedClient: $walkInClient);
         } catch (\InvalidArgumentException $e) {
-            return Json::error($response, 'integrity_violation', $e->getMessage(), 400);
+            $code = $e instanceof \MyInvoice\Service\Invoice\UnknownCurrencyException ? $e::ERROR_CODE : 'integrity_violation';
+            return Json::error($response, $code, $e->getMessage(), 400);
         }
 
         // Derivace OSS pro API klienty — TOTÉŽ místo v pořadí jako u POST (viz
@@ -399,6 +448,9 @@ final class UpdateInvoiceAction
         $newRefDate = DocumentLockService::invoiceRefDate($body) ?? DocumentLockService::invoiceRefDate($existing);
         if ($newRefDate !== null) {
             $newLock = $this->locks->forDate((int) $existing['supplier_id'], $newRefDate);
+            if ($tokenForce && self::lockedForToken($newLock)) {
+                return Json::error($response, 'period_closed', 'Nové datum spadá do uzavřeného nebo zamčeného účetního období; přes API token ho nelze použít.', 409);
+            }
             if ($deny = $this->denyIfLocked($request, $response, $newLock, 'invoice', $id)) {
                 return $deny;
             }
@@ -459,11 +511,22 @@ final class UpdateInvoiceAction
         // s právem upravit vystavenou fakturu v něm nezmění částky, data ani položky, a to ani
         // přesunem data do podaného období. Oprava podaného období jde opravným nebo dodatečným
         // tvrzením. Stejná brána jako import vystaveného dokladu a hromadná změna OSS.
+        // API token (i s plným zápisem, #371) podané období nepřebije nikdy, ani jako správce.
+        $viaToken = !RequestAuthorization::mayOverridePeriodProtection($request);
         if ($existing['status'] !== 'draft'
             && $isForce
-            && !RequestAuthorization::canChangeFiledVatPeriod($request)
+            && ($viaToken || !RequestAuthorization::canChangeFiledVatPeriod($request))
             && self::financialFieldsChanged($body, $existing) !== []
-            && ($filed = $this->filedPeriodOf($existing, $body)) !== null) {
+            && ($filed = $this->filedPeriodOf($existing, $body, $viaToken && $this->entersSummaryReport($existing, $body))) !== null) {
+            if ($viaToken) {
+                return Json::error(
+                    $response,
+                    'period_filed',
+                    'Období faktury už bylo podáno (' . $filed . '). Přes API token v něm nelze měnit částky, data ani položky; '
+                        . 'opravu řešte opravným daňovým dokladem nebo v aplikaci.',
+                    409,
+                );
+            }
             return Json::error(
                 $response,
                 'period_filed',
@@ -506,6 +569,28 @@ final class UpdateInvoiceAction
         ) {
             return Json::error($response, 'simplified_document_not_allowed', $reason, 422);
         }
+        // Drobný zákazník bez adresy (#310): vystavený doklad nesmí úpravou přestat být
+        // zjednodušeným ani přejít na takovou kartu jako běžná faktura. Limit hlídá
+        // simplifiedRejection() výše, proto se tu částka neposílá. U dobropisu brána
+        // ověří vazbu na zjednodušený původní doklad (§ 45 odst. 2 ZDPH).
+        if ($existing['status'] !== 'draft') {
+            $rejected = $this->taxGate->simplifiedOnlyClientRejection([
+                'id'            => (int) $existing['id'],
+                'parent_invoice_id' => $existing['parent_invoice_id'] ?? null,
+                'client_id'     => (int) ($body['client_id'] ?? $existing['client_id']),
+                'supplier_id'   => (int) $existing['supplier_id'],
+                'invoice_type'  => (string) ($body['invoice_type'] ?? $existing['invoice_type']),
+                'is_simplified' => array_key_exists('is_simplified', $body)
+                    ? filter_var($body['is_simplified'], FILTER_VALIDATE_BOOLEAN)
+                    : !empty($existing['is_simplified']),
+                'issue_date'    => (string) ($body['issue_date'] ?? $existing['issue_date']),
+                'tax_date'      => $body['tax_date'] ?? $existing['tax_date'] ?? null,
+                'total_with_vat' => 0,
+            ]);
+            if ($rejected !== null) {
+                return Json::error($response, $rejected['code'], $rejected['message'], $rejected['status']);
+            }
+        }
 
         // SOUDRŽNOST DOKLADU (§ H1) — táž kontrola jako u importu a u založení dokladu,
         // z téhož SSOT ({@see OssDocumentCoherence}). Počítá se při KAŽDÉM uložení, takže
@@ -525,6 +610,17 @@ final class UpdateInvoiceAction
         // Přečíslování při změně typu: nové číslo se přidělí ve stejné transakci, která
         // ho zapíše na doklad, a staré se uvolní až po úspěšném zápisu. Odmítnutí
         // zápisu vrátí rollback vše do původního stavu.
+        // Volba řady z číselníku jde měnit jen na konceptu; vystavený doklad má řadu danou číslem.
+        $seriesKind = NumberSeriesKinds::issuedKind((string) ($body['invoice_type'] ?? $existingType));
+        if ($isIssued) {
+            unset($body['number_series_id']);
+        } else {
+            try {
+                $this->numberSeries->fromBody((int) ($existing['supplier_id'] ?? 0), $body, $seriesKind);
+            } catch (NumberSeriesException $e) {
+                return Json::error($response, $e->errorCode, $e->getMessage(), $e->httpStatus);
+            }
+        }
         $pdo = $this->db->pdo();
         $renumberTx = false;
         $abortRenumber = static function (): void {};
@@ -538,7 +634,17 @@ final class UpdateInvoiceAction
             }
             [$newDate, $newClient, $newCategory] = $renumberScope['new'];
             try {
-                $newVs = $this->varsymbol->next($renumberScope['supplier_id'], $renumberScope['new_series'], $newDate, $newClient, $newCategory);
+                // Cílová řada = výchozí řada nového druhu v číselníku; řada vybraná pro původní
+                // typ k novému druhu nepatří.
+                [$newVs, $newSeriesId] = $this->varsymbol->nextForInvoice($renumberScope['supplier_id'], [
+                    'invoice_type'        => $renumber['to_type'],
+                    'is_simplified'       => $renumberScope['new_series'] === VarsymbolGenerator::SIMPLIFIED,
+                    'client_id'           => $newClient,
+                    'revenue_category_id' => $newCategory,
+                ], $newDate);
+            } catch (\MyInvoice\Service\NumberSeries\NumberSeriesException $e) {
+                if ($renumberTx && $pdo->inTransaction()) $pdo->rollBack();
+                return Json::error($response, $e->errorCode, $e->getMessage(), $e->httpStatus);
             } catch (\InvalidArgumentException | \RuntimeException $e) {
                 if (TransactionFailure::rollbackIfAborted($pdo, $e)) throw $e;
                 if ($renumberTx && $pdo->inTransaction()) $pdo->rollBack();
@@ -546,12 +652,12 @@ final class UpdateInvoiceAction
             }
             $body['varsymbol'] = $newVs;
             $renumber['to'] = $newVs;
-            $abortRenumber = function () use ($pdo, $renumberTx, $renumberScope, $newVs, $newDate, $newClient, $newCategory): void {
+            $abortRenumber = function () use ($pdo, $renumberTx, $renumberScope, $newVs, $newDate, $newClient, $newCategory, $newSeriesId): void {
                 if ($renumberTx) {
                     if ($pdo->inTransaction()) $pdo->rollBack();
                     return;
                 }
-                $this->varsymbol->releaseIfLatest($renumberScope['supplier_id'], $renumberScope['new_series'], $newVs, $newDate, $newClient, $newCategory);
+                $this->varsymbol->releaseIfLatest($renumberScope['supplier_id'], $renumberScope['new_series'], $newVs, $newDate, $newClient, $newCategory, $newSeriesId);
             };
         }
         try {
@@ -587,13 +693,24 @@ final class UpdateInvoiceAction
         if ($renumber !== null) {
             [$oldDate, $oldClient, $oldCategory] = $renumberScope['old'];
             if ($renumberScope['supplier_id'] > 0 && $renumber['from'] !== '') {
-                $this->varsymbol->releaseIfLatest($renumberScope['supplier_id'], $renumberScope['old_series'], $renumber['from'], $oldDate, $oldClient, $oldCategory);
+                $this->varsymbol->releaseIfLatest($renumberScope['supplier_id'], $renumberScope['old_series'], $renumber['from'], $oldDate, $oldClient, $oldCategory,
+                    isset($existing['number_series_id']) ? (int) $existing['number_series_id'] : null);
             }
+            $this->varsymbol->recordSeries($id, $existing, $newSeriesId);
             if ($renumberTx) $pdo->commit();
+        }
+        if (!$isIssued) {
+            $this->numberSeries->apply('invoices', (int) ($existing['supplier_id'] ?? 0), $id, $body, $seriesKind);
         }
         try {
             if (DocumentItemsPayload::replaces($body)) {
+                // Dimenze položek konceptu drží pořadí řádku; po vložení či odebrání řádku je
+                // vrátí k položkám podle `id` z těla (klient API, MCP).
+                $dimensionsBefore = !$isIssued ? $this->itemDimensions->snapshot('invoice', $id) : [];
                 $this->repo->replaceItems($id, (array) $body['items']);
+                if (!$isIssued) {
+                    $this->itemDimensions->realign((int) ($existing['supplier_id'] ?? 0), 'invoice', $id, $dimensionsBefore, (array) $body['items']);
+                }
             } elseif (($replay = self::storedItemsToReplay($body, $existing)) !== null) {
                 $this->repo->replaceItems($id, InvoiceItemTracking::fromStored($replay));
             }
@@ -648,9 +765,8 @@ final class UpdateInvoiceAction
             $this->rateApplier->ensureRate($id);
         }
 
-        // Force update vystavené faktury → revenue cache musí přijmout nové total/currency
-        $this->stats->recomputeForInvoiceId($id);
-
+        // Force update vystavené faktury → revenue cache musí přijmout nové total/currency.
+        // Cache je odvozená: přepočet až po commitu, v náhledu zápisu vůbec.
         // Přesun faktury na jiného klienta/projekt: recomputeForInvoiceId čte vazbu z už
         // zapsaného řádku, takže přepočte jen nového. Původnímu by v client_revenue_cache
         // zůstal nafouknutý invoice_count/revenue → dopočítej i jeho.
@@ -660,11 +776,17 @@ final class UpdateInvoiceAction
             && $prevClientId !== (int) $body['client_id'];
         $movedProject  = $prevProjectId > 0 && array_key_exists('project_id', $body)
             && $prevProjectId !== (int) $body['project_id'];
-        if ($movedClient || $movedProject) {
-            $this->stats->recomputeForIds(
-                $movedClient ? $prevClientId : null,
-                $movedProject ? $prevProjectId : null,
-            );
+        if ($request->getAttribute(\MyInvoice\Action\Accounting\DraftPostingPreviewAction::ATTR) !== true) {
+            AfterCommit::run($this->db->pdo(), 'stats.invoice.' . $id, function () use ($id): void {
+                $this->stats->recomputeForInvoiceId($id);
+            });
+            if ($movedClient || $movedProject) {
+                $previousClient = $movedClient ? $prevClientId : null;
+                $previousProject = $movedProject ? $prevProjectId : null;
+                AfterCommit::run($this->db->pdo(), 'stats.invoice_moved.' . $id, function () use ($previousClient, $previousProject): void {
+                    $this->stats->recomputeForIds($previousClient, $previousProject);
+                });
+            }
         }
 
         // Force-edit vystavené faktury: přepiš snapshoty z opravených live dat, aby se
@@ -678,7 +800,11 @@ final class UpdateInvoiceAction
         // Invalidate cached PDF — data faktury se změnila, starý soubor je nepoužitelný.
         // Cache freshness check v rendereru zohledňuje jen mtime šablon/CSS, ne dat,
         // takže bez explicit invalidate by se starý PDF dál servíroval.
-        $this->pdf->invalidate($id, 'invalidate_update');
+        // Náhled zápisu v editoru ukládá v transakci, která se odvolá: soubor PDF
+        // mimo databázi se mu proto zahazovat nesmí.
+        if ($request->getAttribute(\MyInvoice\Action\Accounting\DraftPostingPreviewAction::ATTR) !== true) {
+            $this->pdf->invalidate($id, 'invalidate_update');
+        }
 
         // Hotovostní vyrovnání (migrace 1327): forma úhrady „Hotově" + zvolená pokladna →
         // příjmový pokladní doklad; odebraná volba ten dřívější zruší. Na draftu se volba
@@ -709,6 +835,17 @@ final class UpdateInvoiceAction
         // B11: zvolený režim force-editu (reconcile/notes_only) do auditní stopy.
         if ($forceMode !== null) {
             $payload = ($payload ?? []) + ['force_mode' => $forceMode];
+        }
+        if ($tokenForce) {
+            $token = (array) $request->getAttribute(AuthMiddleware::ATTR_API_TOKEN, []);
+            $payload = ($payload ?? []) + [
+                'via_api_token' => true,
+                'api_token' => [
+                    'id'     => (int) ($token['id'] ?? 0),
+                    'name'   => (string) ($token['name'] ?? ''),
+                    'prefix' => (string) ($token['prefix'] ?? ''),
+                ],
+            ];
         }
 
         $ip = $this->ipMatcher->clientIpFromRequest($request->getServerParams());
@@ -859,6 +996,11 @@ final class UpdateInvoiceAction
         if (array_key_exists('client_id', $body) && (int) $body['client_id'] !== (int) ($existing['client_id'] ?? 0)) {
             $skip[] = 'project_id';
         }
+        // Měna poslaná kódem bez `currency_id` je změna měny: uložené ID by kód přebilo
+        // (InvoiceDefaults ho čte, jen když ID chybí) a změna by se tiše neprovedla.
+        if (array_key_exists('currency', $body) && !array_key_exists('currency_id', $body)) {
+            $skip[] = 'currency_id';
+        }
         // Kategorie tržby (legacy text + id) je jedna hodnota: poslaná půlka ruší i druhou.
         if (array_key_exists('revenue_category', $body) || array_key_exists('revenue_category_id', $body)) {
             $skip[] = 'revenue_category';
@@ -939,12 +1081,23 @@ final class UpdateInvoiceAction
             'discount_percent', 'advance_paid_amount', 'reverse_charge',
             'prices_include_vat', 'vat_classification_code', 'income_tax_exempt', 'language',
             'is_simplified', 'hide_customer_on_pdf', 'price_level_id',
+            'exchange_rate', 'exchange_rate_date',
         ];
 
         $changed = [];
         foreach ($columns as $col) {
+            $o = $old[$col] ?? null;
+            $n = $new[$col] ?? null;
+            if ($col === 'exchange_rate') {
+                // DECIMAL vs float: porovnej numericky, ať „25.000000" ≠ „25" nehlásí falešnou změnu.
+                if (($o === null || $o === '') !== ($n === null || $n === '')
+                    || (is_numeric($o) && is_numeric($n) && abs((float) $o - (float) $n) > 1e-9)) {
+                    $changed[] = $col;
+                }
+                continue;
+            }
             // String cast sjednotí int/float/null/bool porovnání napříč PDO casty.
-            if ((string) ($old[$col] ?? '') !== (string) ($new[$col] ?? '')) {
+            if ((string) ($o ?? '') !== (string) ($n ?? '')) {
                 $changed[] = preg_replace('/_id$/', '', $col); // client_id → client
             }
         }
@@ -961,7 +1114,7 @@ final class UpdateInvoiceAction
      * @param array<string,mixed> $existing
      * @param array<string,mixed> $body tělo po sloučení s uloženou hlavičkou
      */
-    private function filedPeriodOf(array $existing, array $body): ?string
+    private function filedPeriodOf(array $existing, array $body, bool $includeSummaryReport = false): ?string
     {
         $items = [...(array) ($existing['items'] ?? []), ...(DocumentItemsPayload::replaces($body) ? (array) $body['items'] : [])];
         $includeOss = array_filter($items, static fn ($item): bool => !empty($item['oss_applicable'])) !== [];
@@ -971,9 +1124,97 @@ final class UpdateInvoiceAction
             DocumentLockService::invoiceRefDate($body),
         ]));
         foreach ($dates as $refDate) {
-            if (($filed = $this->filedPeriods->describe($supplierId, $refDate, $includeOss)) !== null) {
+            if (($filed = $this->filedPeriods->describe($supplierId, $refDate, $includeOss, $includeSummaryReport)) !== null) {
                 return $filed;
             }
+        }
+
+        return null;
+    }
+
+    /**
+     * Vstupuje faktura před úpravou nebo po ní do souhrnného hlášení? Stejné pravidlo
+     * jako sestavení SH ({@see \MyInvoice\Service\Report\SouhrnneHlaseniBuilder::entersSummaryReport()}):
+     * kód plnění řádku (položka, jinak hlavička, u RC bez kódu „22") a země odběratele.
+     */
+    private function entersSummaryReport(array $existing, array $body): bool
+    {
+        $countries = $this->db->pdo()->prepare(
+            'SELECT co.iso2, COALESCE(co.is_eu, 0) FROM clients c LEFT JOIN countries co ON co.id = c.country_id
+              WHERE c.id = ? AND c.supplier_id = ?'
+        );
+        $states = [
+            [$existing, (array) ($existing['items'] ?? [])],
+            [$body + $existing, DocumentItemsPayload::replaces($body) ? (array) $body['items'] : (array) ($existing['items'] ?? [])],
+        ];
+        foreach ($states as [$doc, $items]) {
+            $countries->execute([(int) ($doc['client_id'] ?? 0), (int) $existing['supplier_id']]);
+            $row = $countries->fetch(\PDO::FETCH_NUM);
+            $iso2 = $row !== false && $row[0] !== null ? (string) $row[0] : null;
+            $isEu = $row !== false && (int) $row[1] === 1;
+            $header = ($doc['vat_classification_code'] ?? '') !== '' ? (string) $doc['vat_classification_code']
+                : (($existing['vat_classification_code'] ?? '') !== '' ? (string) $existing['vat_classification_code'] : null);
+            $fallback = !empty($doc['reverse_charge']) ? '22' : null;
+            foreach ($items === [] ? [[]] : $items as $item) {
+                $code = is_array($item) && ($item['vat_classification_code'] ?? '') !== ''
+                    ? (string) $item['vat_classification_code']
+                    : ($header ?? $fallback);
+                if (\MyInvoice\Service\Report\SouhrnneHlaseniBuilder::entersSummaryReport($code, $iso2, $isEu)) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Uzavřené, uzavírané i k datu zamčené období token nepřebije (#355).
+     */
+    private static function lockedForToken(\MyInvoice\Service\Accounting\DocumentLock $lock): bool
+    {
+        return $lock->inClosedPeriod || $lock->inClosingPeriod || $lock->dateLocked;
+    }
+
+    /**
+     * Zámky vynucené úpravy přes API token (#355), všechny před jakýmkoli zápisem:
+     * token doklad nepřečísluje a nesahá na fakturu s úhradou nebo zápočtem.
+     */
+    private function denyTokenForce(Response $response, array $body, array $existing): ?Response
+    {
+        if (array_key_exists('cash_register_id', $body)
+            && (int) ($body['cash_register_id'] ?? 0) !== (int) ($existing['cash_register_id'] ?? 0)) {
+            return Json::error(
+                $response,
+                'token_force_cash_register_forbidden',
+                'Přes API token nelze u vystavené faktury nastavit, změnit ani zrušit inkaso do pokladny; '
+                    . 'pokladní doklad je úhrada.',
+                422,
+            );
+        }
+        $typeChanged = array_key_exists('invoice_type', $body)
+            && (string) $body['invoice_type'] !== '' && (string) $body['invoice_type'] !== (string) $existing['invoice_type'];
+        $numberChanged = array_key_exists('varsymbol', $body)
+            && (string) $body['varsymbol'] !== (string) ($existing['varsymbol'] ?? '');
+        if ($typeChanged || $numberChanged) {
+            return Json::error(
+                $response,
+                'token_force_renumber_forbidden',
+                'Přes API token nelze u vystavené faktury měnit typ dokladu ani číslo (variabilní symbol).',
+                422,
+            );
+        }
+        $supplierId = (int) $existing['supplier_id'];
+        if ((string) $existing['status'] === 'paid'
+            || (float) ($existing['advance_paid_amount'] ?? 0) != 0.0
+            || $this->paymentLinks->existsForDocuments($supplierId, 'invoice', [(int) $existing['id']])) {
+            return Json::error(
+                $response,
+                'invoice_has_payments',
+                'Faktura už má evidovanou úhradu, zálohu, zápočet nebo platební doklad. Přes API token ji nelze upravit; '
+                    . 'opravte ji dobropisem.',
+                409,
+            );
         }
 
         return null;

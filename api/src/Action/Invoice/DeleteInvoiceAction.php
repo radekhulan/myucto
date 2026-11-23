@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MyInvoice\Action\Invoice;
 
+use MyInvoice\Http\BulkDryRun;
 use MyInvoice\Http\GuardsDocumentLock;
 use MyInvoice\Http\Json;
 use MyInvoice\Http\SessionOnlyAccountingAct;
@@ -15,6 +16,8 @@ use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Repository\InvoiceAttachmentRepository;
 use MyInvoice\Repository\InvoiceRepository;
 use MyInvoice\Service\Accounting\DocumentJournalPurge;
+use MyInvoice\Service\Accounting\JournalPairingUseGuard;
+use MyInvoice\Service\Accounting\JournalSettlementUseGuard;
 use MyInvoice\Service\Accounting\DocumentJournalSync;
 use MyInvoice\Service\Accounting\DocumentLockService;
 use MyInvoice\Service\Accounting\DocumentPaymentLinks;
@@ -107,16 +110,16 @@ final class DeleteInvoiceAction
         $children = $this->db->pdo()->prepare(
             $periodCandidate ? 'WITH RECURSIVE deletion_tree AS (
                 SELECT id, supplier_id, invoice_type, is_simplified, varsymbol, status, issue_date, tax_date, parent_invoice_id,
-                       effective_tax_date, booked_at, revenue_category_id
+                       effective_tax_date, booked_at, revenue_category_id, number_series_id
                   FROM invoices FORCE INDEX (idx_inv_parent) WHERE supplier_id = ? AND parent_invoice_id = ?
                 UNION DISTINCT
                 SELECT i.id, i.supplier_id, i.invoice_type, i.is_simplified, i.varsymbol, i.status, i.issue_date, i.tax_date, i.parent_invoice_id,
-                       i.effective_tax_date, i.booked_at, i.revenue_category_id
+                       i.effective_tax_date, i.booked_at, i.revenue_category_id, i.number_series_id
                   FROM deletion_tree parent STRAIGHT_JOIN invoices i FORCE INDEX (idx_inv_parent) ON parent.id = i.parent_invoice_id
                  WHERE i.supplier_id = ?
              ) SELECT * FROM deletion_tree WHERE id <> ?'
             : 'SELECT id, supplier_id, invoice_type, is_simplified, varsymbol, status, issue_date, tax_date, parent_invoice_id,
-                      effective_tax_date, booked_at, revenue_category_id
+                      effective_tax_date, booked_at, revenue_category_id, number_series_id
                  FROM invoices WHERE supplier_id = ? AND parent_invoice_id = ?'
         );
         $children->execute($periodCandidate ? [$supplierId, $id, $supplierId, $id] : [$supplierId, $id]);
@@ -187,6 +190,7 @@ final class DeleteInvoiceAction
         $counterReleased = [];
         $retentionOverride = null;
         $journalPurge = null;
+        $journalPurgeBlock = null;
 
         // A3 (audit H4): mazání zaúčtované faktury NESMÍ nechat v deníku aktivní sirotčí
         // zápis. Reverze aktivního zápisu + PDF/soubory + counter release + vlastní delete
@@ -219,10 +223,11 @@ final class DeleteInvoiceAction
             // Zápis v uzamčeném období (po podání přiznání k DPH) se nepřeskakuje tichým
             // stornem: bez potvrzení vrátí varování, s ním se smaže zápis i faktura naráz.
             if ($forceDelete && !$allUnposted) {
-                $lockedAck = ($request->getQueryParams()[JournalEntryDeletionRules::ACK_LOCKED_PARAM] ?? '') === '1';
+                $lockedAck = RequestAuthorization::acknowledgesLockedPeriod($request);
                 $purge = $this->journalPurge->purge(
                     $supplierId, 'invoice', $deleteIds, $reverseMeta, 'invoice_force_delete', $lockedAck,
                 );
+                $journalPurgeBlock = $purge['blocked'];
                 if ($purge['blocked'] === null && $purge['deleted'] !== []) {
                     $journalPurge = $purge;
                     $allUnposted = !$this->hasPostingTrace($supplierId, $deleteIds);
@@ -267,6 +272,19 @@ final class DeleteInvoiceAction
                         if ($ownTx && $pdo->inTransaction()) {
                             $pdo->rollBack();
                         }
+                        // Zápis by šel smazat, nebýt okruhu párování nebo rozpadu saldokonta:
+                        // uživatel má vědět, co zrušit, ne jen narazit na retenční lhůtu.
+                        if ($journalPurgeBlock !== null && in_array($journalPurgeBlock['code'],
+                                [JournalPairingUseGuard::CODE, JournalSettlementUseGuard::CODE], true)) {
+                            return Json::error(
+                                $response,
+                                (string) $journalPurgeBlock['code'],
+                                'Zápis faktury v deníku nejde smazat. ' . $journalPurgeBlock['message']
+                                    . ' Bez smazání zápisu fakturu chrání retenční lhůta: ' . $e->getMessage(),
+                                409,
+                                ['entry_id' => $journalPurgeBlock['entry_id'], 'retention_period' => true],
+                            );
+                        }
                         return Json::error($response, 'retention_period', $e->getMessage(), 422);
                     }
                     $retentionOverride = [
@@ -279,6 +297,13 @@ final class DeleteInvoiceAction
             $this->journalSync->onDeleteMany($supplierId, 'invoice', $deleteIds, $reverseMeta);
             foreach ($deleteIds as $deleteId) {
                 $this->stockIssue->reverseForInvoice($supplierId, $deleteId, isset($user['id']) ? (int) $user['id'] : null);
+            }
+            // Hromadné akce nanečisto: všechny kontroly i storno prošly, soubory se nemažou.
+            if (BulkDryRun::requested($request)) {
+                if ($ownTx && $pdo->inTransaction()) {
+                    $pdo->rollBack();
+                }
+                return Json::ok($response, ['ok' => true, 'dry_run' => true, 'cascade_deleted' => count($childRows)]);
             }
 
             // 1. Invalidate aktivní PDF cache (parent + děti)
@@ -318,7 +343,8 @@ final class DeleteInvoiceAction
                     $parentCat = (int) ($existing['revenue_category_id'] ?? 0);
                     // Řada, ze které číslo přišlo (zjednodušený doklad může mít vlastní).
                     $parentSeries = VarsymbolGenerator::seriesTypeFor($existing);
-                    if ($this->varsymbol->releaseIfLatest($supplierId, $parentSeries, $parentVs, $issueDate, $clientId ?? 0, $parentCat)) {
+                    if ($this->varsymbol->releaseIfLatest($supplierId, $parentSeries, $parentVs, $issueDate, $clientId ?? 0, $parentCat,
+                        isset($existing['number_series_id']) ? (int) $existing['number_series_id'] : null)) {
                         $counterReleased[] = ['id' => $id, 'varsymbol' => $parentVs, 'type' => $parentType];
                     }
                 }
@@ -329,7 +355,8 @@ final class DeleteInvoiceAction
                 if ($cvs === '' || !in_array($ctype, ['invoice', 'proforma', 'credit_note'], true)) continue;
                 $cdate = !empty($child['issue_date']) ? new \DateTimeImmutable($child['issue_date']) : null;
                 $ccat  = (int) ($child['revenue_category_id'] ?? 0);
-                if ($this->varsymbol->releaseIfLatest($supplierId, VarsymbolGenerator::seriesTypeFor($child), $cvs, $cdate, $clientId ?? 0, $ccat)) {
+                if ($this->varsymbol->releaseIfLatest($supplierId, VarsymbolGenerator::seriesTypeFor($child), $cvs, $cdate, $clientId ?? 0, $ccat,
+                    isset($child['number_series_id']) ? (int) $child['number_series_id'] : null)) {
                     $counterReleased[] = ['id' => (int) $child['id'], 'varsymbol' => $cvs, 'type' => $ctype];
                 }
             }
@@ -417,7 +444,7 @@ final class DeleteInvoiceAction
                             WHERE supplier_id = ? AND id IN ($place) AND booked_at IS NOT NULL)
                  OR EXISTS(SELECT 1 FROM invoices d
                             WHERE d.supplier_id = ? AND d.id IN ($place)
-                              AND " . \MyInvoice\Service\Accounting\DocumentPostingGroup::activePostingExistsSql("'invoice'", 'd.id', 'd.supplier_id') . ')'
+                              AND " . \MyInvoice\Service\Accounting\DocumentPostingGroup::activePostingExistsSql("'invoice'", 'd.id', 'd.supplier_id', true, false) . ')'
         );
         $stmt->execute(array_merge([$supplierId], $invoiceIds, [$supplierId], $invoiceIds));
 

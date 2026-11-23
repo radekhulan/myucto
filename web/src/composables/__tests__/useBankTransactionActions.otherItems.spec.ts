@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import { useBankTransactionActions } from '../useBankTransactionActions'
 import BankMatchModal from '@/components/bank/BankMatchModal.vue'
@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
   reload: vi.fn(), toast: vi.fn(),
   client: false,
 }))
+vi.mock('@/api/membershipBank', () => ({ membershipBankApi: { candidates: vi.fn().mockResolvedValue({ candidates: [], next_after_id: null }) } }))
 vi.mock('@/api/bank', () => ({ bankApi: mocks.bank }))
 vi.mock('@/api/otherItems', () => ({ otherItemsApi: mocks.otherItems }))
 vi.mock('@/api/accounting', () => ({ accountingApi: {} }))
@@ -40,7 +41,29 @@ beforeEach(() => {
   mocks.otherItems.matchBankTransaction.mockResolvedValue({ id: 9 })
 })
 
+afterEach(() => {
+  vi.useRealTimers()
+})
+
 describe('ostatní pohledávky a závazky v dialogu Spárovat', () => {
+  it('u ostatní položky ukáže důvody shody včetně čísla splátky', async () => {
+    mocks.otherItems.bankCandidates.mockResolvedValue([{ ...other, match_score: 100,
+      match_reasons: ['variable_symbol', 'counterparty_account', 'installment_amount'],
+      installment: { id: 5, position: 2, due_on: '2099-01-20', remaining_amount: 1200 } }])
+    const actions = useBankTransactionActions({ reload: mocks.reload })
+    actions.startMatch(tx)
+    await flushPromises()
+    const wrapper = mount(BankMatchModal, { props: { actions }, global: { stubs } })
+    await flushPromises()
+    const reasons = wrapper.findAll('[data-testid="other-item-reasons"] span').map(span => span.text())
+    expect(reasons).toEqual([
+      'bank.other_item_match.variable_symbol:{"number":2}',
+      'bank.other_item_match.counterparty_account:{"number":2}',
+      'bank.other_item_match.installment_amount:{"number":2}',
+    ])
+    wrapper.unmount()
+  })
+
   it('nabídne je za fakturami se štítkem podle strany a spáruje přes ostatní položky', async () => {
     const actions = useBankTransactionActions({ reload: mocks.reload })
     actions.startMatch(tx)
@@ -71,6 +94,7 @@ describe('ostatní pohledávky a závazky v dialogu Spárovat', () => {
   })
 
   it('varování o širším okně faktur neukazuje, když našlo jen ostatní položky', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
     mocks.bank.matchCandidates.mockResolvedValue({ candidates: [], fallback: true })
     const actions = useBankTransactionActions({ reload: mocks.reload })
     actions.startMatch(tx)
@@ -80,7 +104,7 @@ describe('ostatní pohledávky a závazky v dialogu Spárovat', () => {
 
     mocks.bank.matchCandidates.mockResolvedValue({ candidates: [invoice], fallback: true })
     actions.matchSearch.value = 'FV'
-    await new Promise(resolve => setTimeout(resolve, 350))
+    await vi.advanceTimersByTimeAsync(350)
     await flushPromises()
     expect(actions.candidatesFallback.value).toBe(true)
   })

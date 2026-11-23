@@ -33,7 +33,7 @@ vi.mock('@/composables/useToast', () => ({
   useToast: () => ({ success: m.toastSuccess, error: m.toastError, warning: m.toastWarning }),
 }))
 vi.mock('@/composables/useFormat', () => ({
-  formatMoney: (v: number) => String(v),
+  formatMoney: (v: number, currency?: string) => currency ? `${v} ${currency}` : String(v),
   formatDate: (v: string) => v,
 }))
 vi.mock('@/composables/useTablePrefs', () => ({
@@ -122,6 +122,19 @@ describe('CashRegister.vue', () => {
     m.canWrite.mockImplementation((_p: string) => true)
     m.deleteDocument.mockResolvedValue({ deleted: true, warnings: [] })
     m.postDocument.mockResolvedValue({ doc_number: 'PPD-2093-0002', journal_entry_id: 5, warnings: [] })
+  })
+
+  it('valutový zůstatek zobrazí v měně pokladny a korunovou účetní hodnotu zvlášť', async () => {
+    m.listRegisters.mockResolvedValue([{
+      id: 1, supplier_id: 1, name: 'Pokladna EUR', currency_code: 'EUR', account_code: '211.100',
+      account_id: 1, account_name: 'Pokladna EUR', is_default: true, is_active: true,
+      documents_count: 0, balance: 12640, balance_foreign: 510.25, balance_date: '2093-03-01',
+    }])
+    const wrapper = await mountList([])
+
+    expect(wrapper.text()).toContain('510.25 EUR')
+    expect(wrapper.text()).toContain('cash.balance_czk_value:{"amount":"12640"}')
+    wrapper.unmount()
   })
 
   it('zobrazí detail odkazovaného pohybu mimo stránku a období seznamu i pouze pro čtení', async () => {
@@ -227,10 +240,13 @@ describe('CashRegister.vue', () => {
     const actions = (wrapper.vm as any).headerActions as any[]
 
     expect(wrapper.findComponent({ name: 'ActionBar' }).exists()).toBe(true)
-    expect(actions.map(a => a.key)).toEqual(['new-in', 'new-out', 'book', 'registers'])
+    expect(actions.map(a => a.key)).toEqual(['new-in', 'new-out', 'book', 'registers', 'renumber'])
     expect(actions.every(a => a.icon && a.variant)).toBe(true)
-    // Správa pokladen je utility → patří do „…", ne mezi tlačítka hlavičky.
+    // Správa pokladen a přečíslování jsou utility → patří do „…", ne mezi tlačítka hlavičky.
     expect(actions.find(a => a.key === 'registers').tier).toBe('overflow')
+    expect(actions.find(a => a.key === 'renumber')).toMatchObject({
+      tier: 'overflow', to: { path: '/purchase-invoices/renumber', query: { agenda: 'cash' } },
+    })
   })
 
   it('znaménko částky nese číslo, ne ručně slepený prefix', async () => {

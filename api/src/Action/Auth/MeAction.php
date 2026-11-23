@@ -22,8 +22,10 @@ use MyInvoice\Security\InstanceAdminRoutePolicy;
 use MyInvoice\Service\Auth\MfaOfferService;
 use MyInvoice\Service\Invoice\DefaultInvoiceNote;
 use MyInvoice\Service\Invoice\InvoiceRounding;
+use MyInvoice\Service\Export\ScheduledPohodaExportFeature;
 use MyInvoice\Service\Invoice\InvoicePublicLinkFeature;
 use MyInvoice\Service\Auth\MfaPolicyService;
+use MyInvoice\Service\Auth\SessionAuthContext;
 use MyInvoice\Service\Auth\SessionLockPolicy;
 use MyInvoice\Service\Tenant\TenantDomainContext;
 use MyInvoice\Service\License\LicenseService;
@@ -47,6 +49,7 @@ final class MeAction
         private readonly MfaOfferService $mfaOffers,
         private readonly SessionLockPolicy $lockPolicy,
         private readonly ClockInterface $clock,
+        private readonly \MyInvoice\Service\Tenant\SupplierAccessResolver $supplierAccess,
         ?EntityCache $cache = null,
         private readonly ?\MyInvoice\Service\Import\ClientAiExtractionPolicy $clientAi = null,
     ) {
@@ -86,6 +89,13 @@ final class MeAction
             $lineDiscountSelect = $this->db->hasColumn('supplier', 'invoice_pdf_show_line_discount')
                 ? 'invoice_pdf_show_line_discount'
                 : '0 AS invoice_pdf_show_line_discount';
+            $workReportSelect = $this->db->hasColumn('supplier', 'work_report_display_options')
+                ? 'work_report_display_options' : 'NULL AS work_report_display_options';
+            $hourlyRateSelect = $this->db->hasColumn('supplier', 'default_hourly_rate')
+                ? 'default_hourly_rate' : '0 AS default_hourly_rate';
+            // Výkazy práce na úvodní stránce (migrace 2312), výchozí zapnuto i bez migrace.
+            $dashboardWorkReportsSelect = $this->db->hasColumn('supplier', 'dashboard_work_reports')
+                ? 'dashboard_work_reports' : '1 AS dashboard_work_reports';
             $where  = '';
             $params = [];
             if ($allowed !== []) {
@@ -100,12 +110,14 @@ final class MeAction
             $cacheKey = 'me:suppliers:' . ($allowed === [] ? 'all' : implode(',', $allowed))
                 . ':' . ($ossSelect === 'oss_enabled' ? '1' : '0') . ':client-ai'
                 . ':' . ($simplifiedSelect === 'simplified_hide_customer_default' ? '1' : '0')
-                . ':legal-form'
+                . ':legal-form:work-report-display:' . $workReportSelect
+                . ':hourly-rate:' . $hourlyRateSelect
+                . ':dashboard-work-reports:' . $dashboardWorkReportsSelect
                 . ':' . ($lineDiscountSelect === 'invoice_pdf_show_line_discount' ? '1' : '0');
             $suppliers = (array) $this->cache->remember(
                 EntityCache::GROUP_SUPPLIER,
                 $cacheKey,
-                function () use ($where, $params, $ossSelect, $simplifiedSelect, $lineDiscountSelect): array {
+                function () use ($where, $params, $ossSelect, $simplifiedSelect, $lineDiscountSelect, $workReportSelect, $hourlyRateSelect, $dashboardWorkReportsSelect): array {
                     $stmt = $this->db->pdo()->prepare(
                         // dic + adresa: dashboard pod názvem firmy vypisuje identifikaci
                         // (IČ · DIČ · adresa) na jeden řádek — bez nich by musel dělat
@@ -114,7 +126,7 @@ final class MeAction
                                 is_vat_payer, is_identified, taxpayer_type,
                                 default_payment_due_days, default_payment_due_unit, default_prices_include_vat, default_rounding_mode,
                                 allow_refund_invoices, auto_send_reminders, payment_thanks_enabled, payment_thanks_default_checked,
-                                ' . $lineDiscountSelect . ',
+                                ' . $lineDiscountSelect . ', ' . $workReportSelect . ', ' . $hourlyRateSelect . ', ' . $dashboardWorkReportsSelect . ',
                                 ' . $simplifiedSelect . ',
                                 accounting_mode, accounting_enabled, payroll_enabled, stock_enabled, dimensions_enabled, fiscal_year_start_month, ' . $ossSelect . ',
                                 ai_provider, ai_data_region, ai_eu_residency_required, client_ai_extraction_enabled, '
@@ -137,6 +149,13 @@ final class MeAction
                 static fn (array $supplier): bool => (int) ($supplier['id'] ?? 0) === $domainContext->supplierId,
             ));
         }
+
+        $visibleIds = $this->supplierAccess->filterAllowedSupplierIds($request, array_column($suppliers, 'id'));
+        $visibleSet = array_fill_keys($visibleIds, true);
+        $suppliers = array_values(array_filter($suppliers, static fn (array $s): bool => isset($visibleSet[(int) $s['id']])));
+        if (!isset($visibleSet[$currentSupplierId])) $currentSupplierId = $visibleIds[0] ?? 0;
+        $roleRequest = $request->withHeader(SupplierScopeMiddleware::HEADER_NAME, (string) $currentSupplierId)
+            ->withQueryParams([])->withAttribute(SupplierScopeMiddleware::ATTR_CURRENT_ID, $currentSupplierId);
 
         $frameworks = new AccountingFrameworkService($this->db, new AccountingFrameworkRepository($this->db));
         $effectiveFrameworks = $frameworks->forDateForSuppliers(array_map(static fn (array $supplier): int => (int) $supplier['id'], $suppliers), date('Y-m-d'));
@@ -180,6 +199,7 @@ final class MeAction
             $s['is_identified']            = (bool) ($s['is_identified'] ?? false);
             // 'fo' = OSVČ (fyzická osoba), 'po' = s.r.o. (právnická osoba), null = nenastaveno.
             $s['taxpayer_type']            = $s['taxpayer_type'] !== null ? (string) $s['taxpayer_type'] : null;
+            $s['default_hourly_rate']      = (float) ($s['default_hourly_rate'] ?? 0);
             $s['default_payment_due_days'] = (int) $s['default_payment_due_days'];
             $s['default_payment_due_unit'] = (string) ($s['default_payment_due_unit'] ?? 'days');
             // Výchozí režim cen u nových faktur (0 = bez DPH, 1 = ceny s DPH) — předvyplní editor.
@@ -192,6 +212,9 @@ final class MeAction
             // odběratele" při zaškrtnutí zjednodušeného dokladu.
             $s['simplified_hide_customer_default'] = (bool) ($s['simplified_hide_customer_default'] ?? false);
             // Rozpis slevy z ceníku na PDF (migrace 2035), editor podle ní ukáže u řádku pole „Sleva %".
+            $s['work_report_display_options'] = \MyInvoice\Service\WorkReport\WorkReportDisplayOptions::resolve($s['work_report_display_options'] ?? null);
+            // Výkazy práce na úvodní stránce (migrace 2312), výchozí zapnuto.
+            $s['dashboard_work_reports'] = (bool) ($s['dashboard_work_reports'] ?? true);
             $s['invoice_pdf_show_line_discount'] = (bool) ($s['invoice_pdf_show_line_discount'] ?? false);
             // Per-faktura přepínač upomínek v editoru se skryje, když dodavatel auto-upomínky nemá.
             $s['auto_send_reminders']      = (bool) ($s['auto_send_reminders'] ?? true);
@@ -218,8 +241,8 @@ final class MeAction
         $totpEnabled  = (bool) ($user['totp_enabled'] ?? false);
         $requireTotp  = (bool) $this->config->get('auth.require_totp', false);
         $mustSetupTotp = $requireTotp && !$totpEnabled;
-        $effectiveRole = $this->permissions->resolve($request);
         $defaultRole = $this->permissions->resolveDefault($request);
+        $effectiveRole = $currentSupplierId > 0 ? $this->permissions->resolve($roleRequest) : $defaultRole;
         $roleSummary = $effectiveRole->id > 0 ? [
             'id' => $effectiveRole->id,
             'name' => $effectiveRole->name,
@@ -263,6 +286,20 @@ final class MeAction
                 : null;
         }
 
+        // Sezení z poskytovatele, který nahrazuje celé přihlášení, má pevnou
+        // platnost (SessionManager::externalSessionLifetimeSeconds). Frontend podle
+        // toho po vypršení přihlášení u poskytovatele tiše obnoví.
+        $authMethod = (string) ($session['auth_method'] ?? '');
+        $ssoSession = null;
+        if ($assurance === 'strong' && SessionAuthContext::isExternalMethod($authMethod)
+            && (int) ($session['expires_at'] ?? 0) > 0
+        ) {
+            $ssoSession = [
+                'provider' => substr($authMethod, strlen(SessionAuthContext::EXTERNAL_PREFIX)),
+                'expires_at' => self::isoUtc((new \DateTimeImmutable('@' . (int) $session['expires_at']))),
+            ];
+        }
+
         $licenseSummary = $isInstanceAdmin ? null
             : (LicenseMiddleware::state($request) ?? $this->license->current())->toMeSummary();
         if ($effectiveRole->isClientType()) {
@@ -302,6 +339,7 @@ final class MeAction
             'lock_after_minutes'  => $effectiveTimeout,
             'server_time'         => self::isoUtc($now),
             'idle_expires_at'     => $idleExpiresAt,
+            'sso_session'         => $ssoSession,
             // Stav licence (E4) pro FE bannery (trial odpočet, overage, degraded).
             'license'             => $licenseSummary,
             // Výběr testovacího prostředí podání úřadům (ČSSZ, ZP, ISDS). Mimo
@@ -309,6 +347,12 @@ final class MeAction
             'submission_test_environment_allowed' => !$isInstanceAdmin && (new SubmissionEnvironmentPolicy($this->config))->testAllowed(),
             // Web faktura (veřejný odkaz) — vypnutá instalace UI tlačítko skryje.
             'invoice_public_links_enabled' => !$isInstanceAdmin && (new InvoicePublicLinkFeature($this->config))->isEnabled(),
+            // Tlačítko „Uložit a zaúčtovat“ v editorech faktur (volba instalace, výchozí vypnuto).
+            'save_and_post_enabled' => !$isInstanceAdmin
+                && filter_var($this->config->get('accounting.save_and_post', false), FILTER_VALIDATE_BOOL),
+            // Automatický export do Pohody (volba instalace, výchozí vypnuto) — vypnutá panel skryje.
+            'scheduled_pohoda_export_enabled' => !$isInstanceAdmin
+                && (new ScheduledPohodaExportFeature($this->config))->isEnabled(),
         ]);
     }
 

@@ -358,6 +358,41 @@ final class SessionSecurityTest extends TestCase
         );
     }
 
+    public function testExternalSetupPreservesProviderDuringLocalMfaAndDemotion(): void
+    {
+        $identities = new \MyInvoice\Service\Auth\Oidc\ExternalIdentityRepository($this->db);
+        $identityId = $identities->link($this->userId, new \MyInvoice\Service\Auth\Oidc\ExternalIdentity(
+            'entra', 'https://issuer.example.invalid', null, 'synthetic-subject', null, null,
+        ), 'self');
+        $setup = $this->sessions->create(
+            $this->userId, '127.0.0.1', 'Entra setup',
+            SessionAuthContext::setup('oidc:entra')->withExternalIdentity('entra', $identityId),
+        );
+        $completed = $this->sessions->completeSetup(
+            $this->userId, $setup['token'], '127.0.0.1', 'Local MFA',
+            SessionAuthContext::strong('passkey', $this->clock->now(), 42),
+        );
+        $loaded = $this->sessions->load($completed['token']);
+        self::assertSame('oidc:entra', $loaded['auth_method']);
+        self::assertSame($identityId, (int) $loaded['external_identity_id']);
+        self::assertSame('strong', $loaded['assurance_level']);
+        self::assertSame(42, $loaded['auth_credential_id']);
+        self::assertSame($this->sessions->externalSessionLifetimeSeconds(), $loaded['expires_at'] - $loaded['created_at']);
+        $pdo = $this->db->pdo();
+        $pdo->beginTransaction();
+        try {
+            self::assertTrue($this->sessions->demoteToSetupInTransaction($pdo, $completed['token'], $this->userId, 42));
+            $pdo->commit();
+        } catch (\Throwable $e) {
+            $pdo->rollBack();
+            throw $e;
+        }
+        $demoted = $this->sessions->load($completed['token']);
+        self::assertSame('oidc:entra', $demoted['auth_method']);
+        self::assertSame('setup', $demoted['assurance_level']);
+        self::assertNull($demoted['mfa_verified_at']);
+    }
+
     public function testSetupCompletionKeepsExactLifetimeWithNonUtcDatabaseTimezone(): void
     {
         $this->db->pdo()->exec("SET time_zone = '+09:00'");

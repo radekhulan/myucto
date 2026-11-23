@@ -11,14 +11,20 @@ import { useAuthStore } from '@/stores/auth'
 import { useToast } from '@/composables/useToast'
 import { apiErrorMessage } from '@/api/errors'
 import { downloadApiFile } from '@/utils/downloadFile'
-import ActionBar from '@/components/ui/ActionBar.vue'
+import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
+import BulkActionBar from '@/components/ui/BulkActionBar.vue'
+import BulkActionsDialog from '@/components/bulk/BulkActionsDialog.vue'
+import { useListBulkActions } from '@/components/bulk/useListBulkActions'
+import { bulkActionsApi } from '@/api/bulkActions'
+import { ICONS, btnOutline } from '@/components/ui/buttonStyles'
 import BankTransactionRow from '@/components/bank/BankTransactionRow.vue'
 import BankTransactionDialogs from '@/components/bank/BankTransactionDialogs.vue'
 import BankMatchModal from '@/components/bank/BankMatchModal.vue'
+import BankBatchMatchModal from '@/components/bank/BankBatchMatchModal.vue'
 import BankCreatePurchaseModal from '@/components/bank/BankCreatePurchaseModal.vue'
 import BankRequestDocModal from '@/components/bank/BankRequestDocModal.vue'
 import { bankPostingApi, type UnpostedBankTransaction } from '@/api/bankPosting'
-import { bankApi, type BankAccountOption, type MatchSuggestion } from '@/api/bank'
+import { BANK_BATCH_MATCH_LIMIT, bankApi, type BankAccountOption, type MatchSuggestion } from '@/api/bank'
 import { useBankTransactionActions } from '@/composables/useBankTransactionActions'
 import { useBankTransactionSort } from '@/composables/useBankTransactionSort'
 import EmptyState from '@/components/ui/EmptyState.vue'
@@ -66,8 +72,9 @@ function accountLabel(a: BankAccountOption): string {
 const bankActions = useBankTransactionActions({ reload: () => changed(), refresh: () => changed(true) })
 // „Všechny pohyby" vidí každá firma s výpisy; stav zaúčtování, kontace a akce zaúčtování
 // jen podvojné účetnictví s komerčními funkcemi (stejná podmínka jako detail výpisu).
-const isDoubleEntry = computed(() => !auth.isClientRole && auth.hasCommercialFeatures && supplierStore.currentSupplier?.accounting_mode === 'double_entry')
-const colspan = computed(() => 7 + (props.scope === 'all' ? 1 : 0) + (isDoubleEntry.value ? 1 : 0))
+const isDoubleEntry = computed(() => !auth.isClientRole && auth.hasCommercialFeatures && supplierStore.currentSupplier?.accounting_mode === 'double_entry'
+  && supplierStore.currentSupplier?.accounting_enabled !== false)
+const colspan = computed(() => 7 + (props.scope === 'all' ? 1 : 0) + (isDoubleEntry.value ? 1 : 0) + (showSelection.value ? 1 : 0))
 // Řazení podle sloupce — seznam je stránkovaný na serveru, řadí se tam (výchozí = nejnovější nahoře).
 const txSort = useBankTransactionSort(['posted_at', 'amount', 'account', 'variable_symbol', 'counterparty', 'invoice', 'posting', 'status'])
 const sortKeys = computed(() => txSort.keys.filter(k =>
@@ -95,6 +102,73 @@ function onListScroll(event: Event) {
   const el = event.currentTarget as HTMLElement
   if (el.scrollTop + el.clientHeight >= el.scrollHeight - 240) void loadMore()
 }
+// ── Výběr pohybů a hromadné akce (oprava variabilního symbolu) ───────────────
+// Tabulka nepoužívá useAdaptiveTableRows (žádné ovládací buňky na krajích), takže
+// zaškrtávátko má vlastní úzký první sloupec jako ostatní seznamy s výběrem.
+const selectedIds = ref<number[]>([])
+const bulk = useListBulkActions({
+  target: 'bank_transaction',
+  selectedIds,
+  // Týž filtr jako načtení seznamu, bez stránkování; scope odliší „Všechny pohyby" od „K zaúčtování".
+  listQuery: () => ({ ...listFilterParams(), scope: props.scope }),
+  total,
+})
+/** Výběr a položku v „…" ukáže jen server: oprava VS potřebuje hromadné změny i párování pohybů. */
+const bulkAvailable = ref(false)
+const canBatchMatch = computed(() => props.scope === 'all' && !auth.isClientRole && auth.canRead('bank') && auth.canWrite('bank.match')
+  && (auth.canRead('invoices') || auth.canRead('purchase_invoices')))
+const batchMatchIds = ref<number[] | null>(null)
+function isBatchMatchable(tx: UnpostedBankTransaction) {
+  return tx.source === 'statement' && tx.match_status === 'unmatched' && tx.match_available !== false
+    && !tx.resolution && !tx.matched_other_items?.length && !tx.matched_membership_claims?.length
+    && tx.amount !== 0 && auth.canRead(tx.amount > 0 ? 'invoices' : 'purchase_invoices')
+}
+const selectableItems = computed(() => bulkAvailable.value ? items.value : items.value.filter(isBatchMatchable))
+const showSelection = computed(() => bulkAvailable.value || (canBatchMatch.value && selectableItems.value.length > 0))
+const batchSelectionError = computed(() => {
+  const ids = new Set(selectedIds.value)
+  const selected = items.value.filter(tx => ids.has(tx.id))
+  if (selected.length < 2) return t('bank.batch_match.needs_multiple')
+  if (selected.length > BANK_BATCH_MATCH_LIMIT) return t('bank.batch_match.limit', { limit: BANK_BATCH_MATCH_LIMIT })
+  if (selected.some(tx => !isBatchMatchable(tx)) || new Set(selected.map(tx => Math.sign(tx.amount))).size > 1) {
+    return t('bank.batch_match.incompatible_selection')
+  }
+  if (new Set(selected.map(tx => tx.currency?.toUpperCase() ?? 'CZK')).size > 1) return t('bank.batch_match.currency')
+  return ''
+})
+function openBatchMatch() {
+  if (canBatchMatch.value && selectedIds.value.length > 1 && !batchSelectionError.value) {
+    batchMatchIds.value = [...selectedIds.value]
+  }
+}
+watch(canBatchMatch, allowed => { if (!allowed) batchMatchIds.value = null })
+let bulkGeneration = 0
+async function loadBulkAvailability() {
+  const generation = ++bulkGeneration
+  try {
+    if (!bulk.canUse.value) { bulkAvailable.value = false; return }
+    const status = await bulkActionsApi.status('bank_transaction')
+    if (generation !== bulkGeneration) return
+    bulkAvailable.value = status.operations.some(o => o.key === 'set_variable_symbol' && o.available)
+  } catch {
+    if (generation === bulkGeneration) bulkAvailable.value = false
+  }
+}
+const allLoadedSelected = computed(() => selectableItems.value.length > 0 && selectableItems.value.every(tx => selectedIds.value.includes(tx.id)))
+function toggleSelected(id: number) {
+  selectedIds.value = selectedIds.value.includes(id)
+    ? selectedIds.value.filter(x => x !== id)
+    : [...selectedIds.value, id]
+}
+function toggleAllLoaded() {
+  selectedIds.value = allLoadedSelected.value ? [] : selectableItems.value.map(tx => tx.id)
+}
+const toolbarActions = computed<ActionItem[]>(() => [
+  { key: 'export', label: t('bank.unmatched_export.download'), icon: 'download', tier: 'overflow', show: props.scope === 'all' && !auth.isClientRole, run: exportUnmatched },
+  { ...bulk.menuItem.value, show: bulkAvailable.value },
+  { key: 'bank-bulk-link', label: t('bulk_actions.bank_link'), icon: 'table', tier: 'overflow', variant: 'primary', show: isDoubleEntry.value && auth.canRead('accounting'), to: { name: 'accounting-posting-backfill' } },
+])
+
 async function exportUnmatched() {
   try {
     await downloadApiFile(bankApi.unmatchedAllExportUrl({
@@ -127,6 +201,18 @@ async function loadMatchSuggestions(txs: UnpostedBankTransaction[], generation: 
   bankActions.setSuggestions(map)
 }
 
+/** Filtr a řazení seznamu tak, jak jdou na server (bez stránkování). */
+function listFilterParams() {
+  return {
+    ...(props.scope === 'all' && statusFilter.value ? { status: statusFilter.value } : {}),
+    ...(year.value ? { year: year.value } : {}),
+    ...(search.value.trim() ? { q: search.value.trim() } : {}),
+    ...(accountFilter.value ? { account: accountFilter.value } : {}),
+    ...(props.scope === 'all' && isDoubleEntry.value && postingFilter.value ? { posting_status: postingFilter.value } : {}),
+    ...txSort.params.value,
+  }
+}
+
 async function load(silent = false, append = false) {
   const generation = ++loadGeneration
   if (append) loadingMore.value = true
@@ -135,12 +221,7 @@ async function load(silent = false, append = false) {
     const params = {
       page: append ? page.value + 1 : page.value,
       per_page: perPage.value,
-      ...(props.scope === 'all' && statusFilter.value ? { status: statusFilter.value } : {}),
-      ...(year.value ? { year: year.value } : {}),
-      ...(search.value.trim() ? { q: search.value.trim() } : {}),
-      ...(accountFilter.value ? { account: accountFilter.value } : {}),
-      ...(props.scope === 'all' && isDoubleEntry.value && postingFilter.value ? { posting_status: postingFilter.value } : {}),
-      ...txSort.params.value,
+      ...listFilterParams(),
     }
     // „Všechny pohyby" čtou bankovní endpoint (každý režim), fronta k zaúčtování účetní.
     const fetchPage = (p: typeof params) => props.scope === 'all'
@@ -165,6 +246,11 @@ async function load(silent = false, append = false) {
       ? await Promise.all(Array.from({ length: page.value - 1 }, (_, index) => fetchPage({ ...params, page: index + 1 }))) : []
     if (generation !== loadGeneration) return
     items.value = append ? [...items.value, ...result.items] : [...preceding.flatMap(part => part.items), ...result.items]
+    // Nové načtení (filtr, hromadná akce) výběr zruší; tiché obnovení jen vyřadí pohyby, které ze seznamu zmizely.
+    if (!append) {
+      const loaded = new Set(items.value.map(tx => tx.id))
+      selectedIds.value = silent ? selectedIds.value.filter(id => loaded.has(id)) : []
+    }
     if (append) { internalPageChange = true; page.value = params.page }
     total.value = result.total
     perPage.value = result.per_page
@@ -198,14 +284,17 @@ watch(accountFilter, resetAndLoad)
 watch(statusFilter, resetAndLoad)
 watch(postingFilter, resetAndLoad)
 watch(isDoubleEntry, resetAndLoad)
-watch(() => supplierStore.currentSupplierId, () => { items.value = []; resetAndLoad() })
+watch(() => supplierStore.currentSupplierId, () => { items.value = []; resetAndLoad(); void loadBulkAvailability() })
 watch(txSort.sort, resetAndLoad)
 watch(() => props.scope, () => {
   if (props.scope !== 'all' && txSort.sort.value?.key === 'account') txSort.sort.value = null
   resetAndLoad()
 })
 
-onMounted(load)
+onMounted(() => {
+  void load()
+  void loadBulkAvailability()
+})
 onUnmounted(() => {
   clearTimeout(searchTimer)
   loadGeneration++
@@ -248,7 +337,7 @@ useWindowRefresh(() => load(true))
         <option value="unposted">{{ t('bank.filter_posting_unposted') }}</option>
         <option value="posted">{{ t('bank.filter_posting_posted') }}</option>
       </select>
-      <ActionBar v-if="scope === 'all' && !auth.isClientRole" :actions="[{ key: 'export', label: t('bank.unmatched_export.download'), icon: 'download', tier: 'secondary', run: exportUnmatched }]" />
+      <ActionBar v-if="toolbarActions.some(a => a.show)" :actions="toolbarActions" data-test="bank-more-actions" />
       <BankTransactionSortSelect v-model="txSort.selectValue.value" class="md:hidden" :keys="sortKeys" />
       <span class="text-xs text-neutral-500 whitespace-nowrap">{{ t('bank.posting.count_found', { n: total }) }}</span>
     </div>
@@ -263,6 +352,10 @@ useWindowRefresh(() => load(true))
         <table class="w-full text-sm">
           <thead class="bg-neutral-50 text-xs text-neutral-500 uppercase tracking-wide sticky top-0 z-20 shadow-sm">
             <tr>
+              <th v-if="showSelection" class="pl-3 py-2 w-6">
+                <input type="checkbox" class="h-4 w-4 cursor-pointer" :checked="allLoadedSelected"
+                  :aria-label="t('common.select_all')" data-test="bank-select-all" @change="toggleAllLoaded" />
+              </th>
               <SortableTh :label="t('bank.date')" sort-key="posted_at" :sort="txSort.sort.value" @toggle="txSort.toggle" />
               <SortableTh :label="t('bank.amount')" sort-key="amount" :sort="txSort.sort.value" align="right" @toggle="txSort.toggle" />
               <SortableTh v-if="scope === 'all'" :label="t('bank.posting.col_account')" sort-key="account" :sort="txSort.sort.value" @toggle="txSort.toggle" />
@@ -280,7 +373,8 @@ useWindowRefresh(() => load(true))
               layout="desktop" :tx="tx" :is-double-entry="isDoubleEntry"
               fallback-currency="CZK" :show-account="scope === 'all'" :show-statement-link="true" :show-counter-account="isDoubleEntry"
               :colspan="colspan" :actions="bankActions"
-              @changed="changed" />
+              :selectable="showSelection" :selection-disabled="!bulkAvailable && !isBatchMatchable(tx)" :selected="selectedIds.includes(tx.id)"
+              @changed="changed" @toggle-select="toggleSelected" />
           </tbody>
         </table>
       </div>
@@ -290,7 +384,8 @@ useWindowRefresh(() => load(true))
           layout="mobile" :tx="tx" :is-double-entry="isDoubleEntry"
           fallback-currency="CZK" :show-account="scope === 'all'" :show-statement-link="true" :show-counter-account="isDoubleEntry"
           :actions="bankActions"
-          @changed="changed" />
+          :selectable="showSelection" :selection-disabled="!bulkAvailable && !isBatchMatchable(tx)" :selected="selectedIds.includes(tx.id)"
+          @changed="changed" @toggle-select="toggleSelected" />
       </div>
     </div>
     <div v-if="page < totalPages" ref="loadMoreTarget" class="text-center text-sm text-neutral-500 pointer-fine-hidden">
@@ -298,6 +393,27 @@ useWindowRefresh(() => load(true))
         {{ loadingMore ? t('common.loading_more') : t('common.load_more') }}
       </button>
     </div>
+
+    <BulkActionBar v-if="showSelection" :count="selectedIds.length" @clear="selectedIds = []">
+      <button v-if="canBatchMatch && selectedIds.length > 0" type="button" :class="btnOutline('primary')" class="whitespace-nowrap"
+        data-test="bank-review-batch" :disabled="!!batchSelectionError" :title="batchSelectionError || undefined" @click="openBatchMatch">
+        <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.link" /></svg>
+        {{ t('bank.batch_match.action') }}
+      </button>
+      <p v-if="canBatchMatch && selectedIds.length > 0 && batchSelectionError" class="max-w-56 px-2 text-xs"
+        :class="selectedIds.length === 1 ? 'text-neutral-600' : 'text-danger-700'">
+        {{ batchSelectionError }}
+      </p>
+      <button v-if="bulkAvailable" type="button" :class="btnOutline('warning')" class="whitespace-nowrap" data-test="bank-bulk-open" @click="bulk.open">
+        <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.table" /></svg>
+        {{ t('bulk_actions.menu') }}
+      </button>
+    </BulkActionBar>
+    <BankBatchMatchModal v-if="batchMatchIds" :ids="batchMatchIds" @close="batchMatchIds = null" @done="changed()" />
+    <BulkActionsDialog v-if="bulk.dialog.value" target="bank_transaction"
+      :selection="bulk.dialog.value.selection" :selection-count="bulk.dialog.value.selectionCount"
+      :filter-selection="bulk.dialog.value.filterSelection" :filter-count="bulk.dialog.value.filterCount"
+      @close="bulk.close" @changed="changed()" />
 
     <BankTransactionDialogs :actions="bankActions" fallback-currency="CZK" />
     <BankMatchModal :actions="bankActions" fallback-currency="CZK" />

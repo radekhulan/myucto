@@ -10,7 +10,7 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\Property\PropertyProfileRepository;
 use MyInvoice\Repository\Property\PropertyReadRepository;
 use MyInvoice\Repository\Property\PropertyRegistryRepository;
-use MyInvoice\Service\Anonymization\DatabaseCloner;
+use MyInvoice\Tests\Support\CloneSandbox;
 use MyInvoice\Service\Property\PropertyException;
 use MyInvoice\Tests\Support\IsolatedSupplierTrait;
 use PDO;
@@ -31,14 +31,10 @@ final class PropertyDeletionHooksTest extends TestCase
         $config = $container->get(Config::class);
         $source = (string) $container->get(Connection::class)->pdo()->query('SELECT DATABASE()')->fetchColumn();
         self::assertStringEndsWith('_test', $source);
-        self::assertContains($config->get('db.host'), ['localhost', '127.0.0.1', '::1']);
-        $this->ownedSchema = 'myucto_property_delete_' . bin2hex(random_bytes(5)) . '_test';
+        self::assertTrue(\MyInvoice\Tests\Support\TestDatabaseHost::isAllowed((string) ($config->get('db.host'))), 'Testovací DB musí být lokální nebo v db.test_allowed_hosts.');
         $this->server = new PDO('mysql:host=' . $config->get('db.host') . ';port=' . $config->get('db.port', 3306) . ';charset=utf8mb4',
             $config->get('db.user'), $config->get('db.pass', ''), [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
-        $cloner = new DatabaseCloner($this->server);
-        $plan = $cloner->plan($source);
-        $cloner->copyTables($plan, $this->ownedSchema, static function (): void {});
-        $cloner->finalize($plan, $this->ownedSchema);
+        $this->ownedSchema = CloneSandbox::acquire($this->server, $source, true);
         $data = $config->all();
         $data['db']['name'] = $this->ownedSchema;
         for ($i = 0; $i < 2; ++$i) {
@@ -56,12 +52,13 @@ final class PropertyDeletionHooksTest extends TestCase
             if ($db->pdo()->inTransaction()) $db->pdo()->rollBack();
             $db->close();
         }
-        self::assertMatchesRegularExpression('/^myucto_property_delete_[a-f0-9]{10}_test$/D', $this->ownedSchema);
-        $this->server->exec('DROP DATABASE ' . DatabaseCloner::quote($this->ownedSchema));
+        self::assertMatchesRegularExpression('/^myucto_clonesandbox_[a-f0-9]{10}_test$/D', $this->ownedSchema);
+        self::assertTrue(CloneSandbox::isLeased($this->ownedSchema));
+        CloneSandbox::dropOrRelease($this->server, $this->ownedSchema, [$this->ownedSchema]);
     }
 
 
-    public function testSupplierProfileHistoryRequiresFriendlyDependencyRefusal(): void
+    public function testSupplierWithProfileHistoryIsDeletedCompletely(): void
     {
         $db = $this->connections[0];
         $pdo = $db->pdo();
@@ -74,11 +71,12 @@ final class PropertyDeletionHooksTest extends TestCase
         $container->set(Connection::class, $db);
         $request = (new \Slim\Psr7\Factory\ServerRequestFactory())->createServerRequest('DELETE', '/api/settings/suppliers/' . $supplier)
             ->withAttribute(\MyInvoice\Middleware\AuthMiddleware::ATTR_METHOD, 'session')
-            ->withAttribute(\MyInvoice\Middleware\AuthMiddleware::ATTR_USER, ['id' => $actor, 'role' => 'admin']);
+            ->withAttribute(\MyInvoice\Middleware\AuthMiddleware::ATTR_USER, ['id' => $actor, 'role' => 'admin'])
+            ->withParsedBody(['confirm' => (string) $pdo->query("SELECT COALESCE(NULLIF(TRIM(ic), ''), TRIM(company_name)) FROM supplier WHERE id = " . $supplier)->fetchColumn()]);
         $response = $container->get(\MyInvoice\Action\Settings\SettingsAction::class)->deleteSupplierById($request, new \Slim\Psr7\Response(), ['id' => $supplier]);
-        self::assertSame(409, $response->getStatusCode(), (string) $response->getBody());
-        self::assertSame('has_dependencies', json_decode((string) $response->getBody(), true)['error']['code']);
-        self::assertCount(1, (new PropertyProfileRepository($db))->history($supplier));
+        self::assertSame(200, $response->getStatusCode(), (string) $response->getBody());
+        self::assertSame([], (new PropertyProfileRepository($db))->history($supplier));
+        self::assertSame(0, (int) $pdo->query('SELECT COUNT(*) FROM supplier WHERE id = ' . $supplier)->fetchColumn());
     }
 
     public function testClientHistoryAddedAfterSnapshotRequiresFriendlyRefusal(): void

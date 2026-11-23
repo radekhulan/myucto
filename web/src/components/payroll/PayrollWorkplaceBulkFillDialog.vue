@@ -1,12 +1,14 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { RouterLink } from 'vue-router'
 import {
   payrollApi,
   type PayrollEmploymentJmhzEvidenceOptions,
   type PayrollJmhzMunicipalityOption,
   type PayrollWorkplaceBulkPreview,
   type PayrollWorkplaceBulkResult,
+  type PayrollWorkplaceBulkUnverified,
 } from '@/api/payroll'
 import { apiErrorMessage } from '@/api/errors'
 import { useToast } from '@/composables/useToast'
@@ -132,6 +134,26 @@ async function apply() {
   }
 }
 
+/*
+ * Vyplněné, ale neověřené pracoviště („Praha") se hromadně nepřepisuje.
+ * Musí být ale vidět jménem i po uložení, jinak účetní neví, proč JMHZ
+ * pracoviště dál hlásí jako chybějící.
+ */
+const unverifiedRows = computed<PayrollWorkplaceBulkUnverified[]>(() => {
+  const rows = new Map<number, PayrollWorkplaceBulkUnverified>()
+  for (const row of [...(preview.value?.unverified ?? []), ...(result.value?.unverified ?? [])]) {
+    rows.set(row.employment_id, row)
+  }
+  return [...rows.values()]
+})
+
+function cardLink(row: PayrollWorkplaceBulkUnverified) {
+  return {
+    name: 'payroll-people',
+    query: { person: String(row.employee_id), employment: String(row.employment_id), panel: 'employment_terms' },
+  }
+}
+
 function itemLabel(item: { employment_id: number }): string {
   const found = preview.value?.items.find(candidate => candidate.employment_id === item.employment_id)
   return found?.full_name ?? String(item.employment_id)
@@ -168,7 +190,23 @@ onMounted(async () => {
         </button>
       </div>
 
-      <template v-else-if="preview && !result">
+      <div
+        v-if="!loading && !loadError && unverifiedRows.length"
+        class="rounded-lg border border-warning-200 bg-warning-50 p-3 text-sm text-warning-800"
+        data-test="workplace-bulk-unverified"
+      >
+        <p class="font-medium">{{ t('payroll.workplace_bulk.unverified_title', { count: unverifiedRows.length }) }}</p>
+        <p class="mt-1 text-xs">{{ t('payroll.workplace_bulk.unverified_hint') }}</p>
+        <ul class="mt-2 max-h-48 space-y-1 overflow-y-auto text-xs">
+          <li v-for="row in unverifiedRows" :key="row.employment_id" :data-test="`workplace-bulk-unverified-${row.employment_id}`">
+            <RouterLink :to="cardLink(row)" class="font-medium underline" @click="emit('close')">{{ row.full_name }}</RouterLink>
+            <span v-if="row.employment_code"> · {{ row.employment_code }}</span>:
+            {{ t('payroll.workplace_bulk.unverified_value', { place: row.work_place ?? '—', code: row.municipality_code ?? '—' }) }}
+          </li>
+        </ul>
+      </div>
+
+      <template v-if="!loading && !loadError && preview && !result">
         <div class="grid grid-cols-2 gap-3 sm:grid-cols-4">
           <article class="rounded-lg bg-neutral-50 p-3">
             <p class="text-xs text-neutral-500">{{ t('payroll.workplace_bulk.summary.employments') }}</p>

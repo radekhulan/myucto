@@ -46,6 +46,17 @@ final class CurrencyConversionServiceTest extends TestCase
         self::assertSame(1.25, $result['cross_rate']);
     }
 
+    public function testUnitPriceKeepsSixDecimalsWhileAmountsStayOnCents(): void
+    {
+        $service = $this->serviceWithRates(['EUR' => 25.0]);
+        $date = new DateTimeImmutable('2026-06-15');
+
+        self::assertSame(0.1, $service->convertUnitPrice(0.004, 'EUR', 'CZK', $date)['amount']);
+        self::assertSame(0.00016, $service->convertUnitPrice(0.004, 'CZK', 'EUR', $date)['amount']);
+        self::assertSame(0.004, $service->convertUnitPrice(0.004, 'EUR', 'EUR', $date)['amount']);
+        self::assertSame(0.0, $service->convert(0.004, 'CZK', 'EUR', $date)['amount'], 'Částky a součty se dál převádějí na haléře.');
+    }
+
     public function testReturnsNullWhenCommonRateIsUnavailable(): void
     {
         $cnb = $this->createStub(CnbExchangeRateClient::class);

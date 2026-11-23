@@ -12,8 +12,8 @@ Vstupem je ZIP s XML, který připravíte jednou ze tří cest (export přes XML
 rozhraní POHODY, místní převod kopie datového souboru MDB, nebo export přímo
 z databáze POHODA SQL). Nástroje stáhnete přímo z průvodce. Zdrojová data jen
 čtou, v POHODĚ nic nemění. Průvodce převádí jen **účetnictví**. Mzdy
-z POHODY Mzdy nebo PAMICA převádí samostatný průvodce, viz
-[Přechod z PAMICA](108_Prechod_z_PAMICA.md).
+z POHODA Mzdy, z PAMICA i mzdy vedené přímo v POHODĚ v agendě Mzdy převádí
+samostatný průvodce, viz [Přechod z PAMICA](108_Prechod_z_PAMICA.md).
 
 ## 107.1 Kdy to potřebujete
 
@@ -37,9 +37,11 @@ z POHODY Mzdy nebo PAMICA převádí samostatný průvodce, viz
 
 Agendu neziskové organizace (osnova podle vyhlášky 504/2002 Sb. s účty skupiny 9)
 převod přijme jen do firmy, která účtuje podle vyhlášky 504; agendu podnikatele
-do takové firmy odmítne. Převod přebírá deník, doklady a střediska (dimenze Středisko)
-a ověřuje rovnováhu rozvahy. Činnost z POHODY nečte, všem řádkům nákladů a výnosů
-nastaví hlavní činnost, kterou účetní přeřadí. Fondy, dotace ani členské příspěvky
+do takové firmy odmítne. Převod přebírá deník, doklady, střediska (dimenze Středisko),
+činnosti (samostatná dimenze Činnost POHODY) a zakázky (dimenze Zakázka) a ověřuje
+rovnováhu rozvahy. Hlavní a hospodářskou činnost (systémová dimenze Činnost) z činností
+POHODY neodvozuje: všem řádkům nákladů a výnosů nastaví hlavní činnost, kterou účetní
+přeřadí. Fondy, dotace ani členské příspěvky
 zvlášť nepřebírá a výkazy s POHODOU neporovnává, proto je zkontrolujte. Průvodce na to
 upozorní (podrobnosti v kapitole [Přechod z Money S3](106_Prechod_z_Money_S3.md),
 oddíl 106.2).
@@ -58,9 +60,11 @@ nástroj přepíše. Jednotlivé změny i souhrn běhu zapisuje do protokolu akt
 
 1. **Firma v MyÚčtu.** Musí existovat a mít vyplněné stejné IČO jako v POHODĚ.
    Převádí se do firmy, ve které právě pracujete; novou firmu nejdřív založte
-   (kapitola [Multi supplier](95_Multi_supplier.md)). Firma, která zatím vede
-   daňovou evidenci, se převodem přepne na podvojné účetnictví od začátku
-   převáděného roku.
+   (kapitola [Multi supplier](95_Multi_supplier.md)). Agenda podvojného
+   účetnictví přepne firmu, která zatím vede daňovou evidenci, na podvojné
+   účetnictví od začátku převáděného roku. Agendu, kterou POHODA vede jako
+   daňovou evidenci (peněžní deník), převod převede jen do firmy v daňové
+   evidenci a její režim nemění, viz [§ 107.9.9](#10799-danova-evidence).
 2. **Oprávnění.** Průvodce vidí a zkoušku nanečisto spouští uživatel
    s oprávněním k zápisu importů. Ostrý převod zapisuje účetní deník a mění
    nastavení firmy, proto vyžaduje navíc zápis do účetního deníku a do
@@ -144,18 +148,25 @@ převodníku MDB, nebo `<IČO>_<rok>.zip`). Souhrn nástroje neuvádí chybu.
    všechny roky agend s IČO firmy. U firmy s hospodářským rokem je **Rok**
    účetní rok firmy, do kterého agenda patří, s hranicemi období (například
    2025 (1. 8. 2025 – 31. 7. 2026)).
-4. Má-li agenda doklady po konci roku, průvodce nabídne každý pozdější rok jako
+4. Obsahuje-li export mzdy firmy, které se do MyÚčta převést nedají, ukáže
+   náhled hned pod tabulkou agend výrazné upozornění **Mzdy se do MyÚčta
+   nepřevedou**: kolik zaměstnanců a za které měsíce export obsahuje, proč se
+   nepřevedou a co udělat ([§ 107.9.3](#10793-co-prevod-neprenese)). Převod
+   účetnictví tím nic nezastaví. Jdou-li mzdy převést, nabídne náhled místo
+   upozornění tlačítko **Převést mzdy z PAMICA**.
+5. Má-li agenda doklady po konci roku, průvodce nabídne každý pozdější rok jako
    samostatný řádek pod agendou (u hospodářského roku jako další účetní rok
-   firmy). Pozdější rok jde převést jen spolu s rokem agendy; nevybraný převod
-   přeskočí ([§ 107.9.4](#10794-postup)).
-5. Zkontrolujte **Kontrolu před převodem** pro každý vybraný rok. Převod se
+   firmy). Náhled počítá i s nezaúčtovanými doklady a daty úhrad. Pozdější rok
+   lze převést jen spolu s rokem agendy. Nevybraný rok převod přeskočí
+   ([§ 107.9.4](#10794-postup)).
+6. Zkontrolujte **Kontrolu před převodem** pro každý vybraný rok. Převod se
    zastaví, když export patří firmě s jiným IČO, chybí nebo nejde přečíst deník,
    osnova nebo členění DPH, účetní období v MyÚčtu už obsahuje zápisy, které
-   nevznikly převodem, nebo je období uzavřené.
-6. Klikněte na **Pokračovat** a v kroku **Zkouška nanečisto** na **Spustit
+   nevznikly převodem, období není otevřené nebo zasahuje do zámku účtování k datu.
+7. Klikněte na **Pokračovat** a v kroku **Zkouška nanečisto** na **Spustit
    zkoušku nanečisto**. Proběhne celý převod včetně rekonciliace, na konci se ale
    všechno vrátí.
-7. Přečtěte protokol za každý rok. Chyby opravte a zkoušku zopakujte.
+8. Přečtěte protokol za každý rok. Chyby opravte a zkoušku zopakujte.
 
 **Jak poznáte, že je hotovo:** Každý rok skončí stavem **V pořádku** nebo **S
 upozorněními**. Selže-li zkouška jen na **Rozdílech k přijetí**, postupujte podle
@@ -201,9 +212,23 @@ nespustí. Převod jedné firmy běží vždy jen jeden.
 7. Převáděný rok zůstává neuzavřený. Uzávěrku a převod zůstatků do dalšího roku
    provedete v `Nástroje → Uzávěrka`.
 8. Doplňte, co se nepřevádí ([§ 107.9.3](#10793-co-prevod-neprenese)).
+9. Otevřete několik převzatých daňových dokladů k přijaté platbě a ověřte, že mají odkaz na
+   zálohovou fakturu. Konečné faktury k zálohám, které jsou v POHODĚ ještě otevřené, vystavujte
+   podle [§ 15.4.3](15_Faktura_editor.md#1543-konecna-faktura-k-zaloze-s-danovym-dokladem-jak-nezdvojit-dph).
+   Daňové doklady bez vazby na zálohu najde [Kontrola dat po převodu](126_Kontrola_dat_po_prevodu.md#1269-ddkp-bez-vazby-na-zalohu)
+   a jednoznačné vazby doplní. Ostatní navažte ručně: otevřete doklad, klikněte na **Navázat na zálohu**
+   a vyberte zálohu ještě před vystavením konečné faktury.
+10. Spusťte [Kontrolu dat po převodu](126_Kontrola_dat_po_prevodu.md#1262-krok-za-krokem-kontrola-a-oprava)
+   (tlačítko **Zkontrolovat data po převodu** na konci průvodce): úhrady minulých let, bankovní účty v cizí
+   měně, stavy převzatých výpisů, mzdové závazky, saldokonto, krytí přijatých dokladů, vazby DDKP na zálohy
+   a DPH ze zálohy podruhé.
+11. Vedla-li firma v POHODĚ agendu Časové rozlišení (ruční zápisy s čísly typu `24CR0001`), převezměte ji
+   do agendy [Časové rozlišení](125_Casove_rozliseni.md#1258-krok-za-krokem-prevzit-casove-rozliseni-z-pohody).
+   Převzetí nic neúčtuje a lze ho opakovat.
 
 **Jak poznáte, že je hotovo:** Kontroly rekonciliace projdou, nezbývají doklady
-v konceptu ani nepřijaté rozdíly a obraty v MyÚčtu odpovídají POHODĚ.
+v konceptu ani nepřijaté rozdíly, Kontrola dat po převodu nemá nálezy k opravě a obraty
+v MyÚčtu odpovídají POHODĚ.
 
 ## 107.7 Krok za krokem: navázání číselné řady
 
@@ -229,7 +254,10 @@ Pravidla (perioda resetu, zděděná šablona) jsou v
 | Doklad OSS se nepřevedl | Firma nemá zapnutý OSS nebo chybí sazba státu spotřeby | Doplňte nastavení ([§ 107.9.2](#10792-co-prevod-prenese)) a převod zopakujte |
 | Zkouška selhala jen na rozdílech k přijetí | Doklad se nepřevedl, nebo výsledek nesedí na POHODU | Zaškrtněte **Převést i přes rozdíly**, nebo opravte a zopakujte |
 | Doklad je koncept | Nejistá daňová povaha | Opravte klasifikaci DPH a potvrďte |
+| Kontrola před převodem hlásí, že firma vede podvojné účetnictví | Agenda vede v POHODĚ daňovou evidenci, firma v MyÚčtu převáděný rok jako podvojné účetnictví | Převeďte agendu do firmy v daňové evidenci; převod režim firmy nemění ([§ 107.9.9](#10799-danova-evidence)) |
+| Pohyb na účtu po převodu daňové evidence nemá zařazení | Vklad, výběr, poplatek nebo odvod bez dokladu převod nezařazuje | Zařaďte pohyb v **Daňová evidence → Peněžní deník** |
 | Faktura uhrazená v nevybraném roce zůstala neuhrazená | Pozdější rok jste nevybrali | Převeďte pozdější rok opakovaným převodem ([§ 107.9.7](#10797-opakovany-prevod)) |
+| Převod kopie MDB odmítl doklad kvůli sazbám DPH | Doklad má DPH ze sazeb před 1. 5. 2004, částku v druhé snížené sazbě před rokem 2015, nebo zaškrtnuté historické sazby a DPH, které neodpovídá sazbám platným k datu plnění ani předchozím; číslo dokladu je v hlášení | Opravte doklad v POHODĚ, nebo převeďte agendu XML exportem POHODY (cesta 1). Starší neuhrazené doklady převedené do nového roku jinak převod přijme se sazbami platnými k datu plnění, doklad se zaškrtnutými historickými sazbami se sazbami, kterým odpovídá jeho DPH |
 | Přeskočený doklad s neznámým typem | Neznámý typ faktury, banky, pokladny nebo zdroj úhrady | Doklad doplňte ručně, číslo a důvod uvádí protokol |
 | Karta majetku je koncept | Neznámý typ majetku nebo odpisu, jiná vstupní cena, chybí plán nebo účet | Zkontrolujte kartu podle důvodu v protokolu |
 | Nástroj hlásí, že datový soubor je chráněný heslem databáze | MDB má heslo databáze | Spusťte nástroj znovu a heslo zadejte, když se zeptá, nebo parametrem `-Heslo` |
@@ -319,7 +347,7 @@ POHODY (`.mdb`), u POHODA SQL z databáze agendy. Data jen čte, nic v nich nem�
 | Soubor | Obsah |
 |---|---|
 | `90_majetek.xml` | karty dlouhodobého majetku, daňové odpisy po letech, účetní odpisy po měsících, drobný majetek a jeho zdrojové doklady |
-| `91_mzdy.xml` | zaměstnanci, pracovní poměry, zpracované mzdy a číselníky mezd - tento průvodce ho nevyužije, viz [Přechod z PAMICA](108_Prechod_z_PAMICA.md) |
+| `91_mzdy.xml` | zaměstnanci, pracovní poměry (u mezd vedených přímo v POHODĚ jsou na kartě zaměstnance), zpracované mzdy a číselníky mezd - tento průvodce ho nevyužije, viz [Přechod z PAMICA](108_Prechod_z_PAMICA.md#108914-mzdy-vedene-primo-v-pohode) |
 | `92_sklad.xml` | sklady, členění skladu, karty zásob se stavem, ceníky, kusovníky a ocenění stavu každé karty po jejím posledním pohybu; samotné pohyby ne |
 
 **Při běžném exportu nemusíte dělat nic.** `Export-Pohoda.cmd` skript spustí
@@ -490,7 +518,7 @@ Soubory `90_majetek.xml`, `91_mzdy.xml` a `92_sklad.xml` jsou stejné jako u dat
 | přijaté a vydané faktury | doklady se stavem zaúčtováno nebo uhrazeno; doklad nejisté daňové povahy jako koncept k ruční kontrole |
 | ostatní pohledávky a závazky bez DPH | otevřené položky s jednoznačným již převedeným účetním zápisem na 315 nebo 325 |
 | vydané doklady v režimu OSS (členění mimo přiznání, daň, stát MOSS) | plnění v režimu OSS včetně země spotřeby, typu sazby a typu plnění |
-| interní daňové doklady | daňové doklady k platbě a samovyměření DPH u přijatých faktur |
+| interní daňové doklady | daňové doklady k platbě a samovyměření DPH u přijatých faktur; daňový doklad k platbě dostane vazbu na zálohu podle vazby v exportu, nebo podle čísla zálohy v textu dokladu („Daňový doklad k přijaté platbě (zálohová faktura č. …)“), sedí-li odběratel nebo dodavatel i celková částka |
 | interní doklady | záznam v agendě Účetnictví → Interní doklady nad zápisem v deníku, s číslem z POHODY. Druh se odvodí: Zápočet (doklad hradí jiné doklady nebo text začíná na zápočet), Kurzový rozdíl (jen 563/663 proti pohledávce nebo závazku), Dohadná položka (časové rozlišení a dohady na účtech 381, 383, 384, 385, 388, 389), jinak Ostatní. Partner se převezme z řádků zápisu v deníku, jen když je jediný: známý se naváže na kartu, neznámý zůstane jménem na dokladu, karta se nezakládá. Export převodníkem musí být vytvořený aktuální verzí nástroje, starší export partnera v deníku nenese |
 | pokladny a pokladní doklady | pokladny a zaúčtované pokladní doklady |
 | bankovní účty a bankovní doklady | výpisy podle čísla výpisu v POHODĚ, bankovní pohyby; zůstatky jsou dopočtené z počátečního stavu v deníku a dorovná je první nahraný výpis banky se stavem |
@@ -499,7 +527,68 @@ Soubory `90_majetek.xml`, `91_mzdy.xml` a `92_sklad.xml` jsou stejné jako u dat
 | drobný majetek (`90_majetek.xml`) | karty evidence drobného majetku navázané na zdrojový doklad |
 | sklady a karty zásob (`92_sklad.xml`) | sklady, skladové karty a počáteční stav každé karty po skladech k datu exportu |
 | ceníky (`92_sklad.xml`) | cenové hladiny s cenou bez DPH u každé karty |
+| střediska na řádcích deníku | střediska firmy a hodnoty dimenze Středisko, viz níže |
+| činnosti a činnost na dokladech a v deníku | hodnoty firemní dimenze Činnost, u neziskové organizace Činnost POHODY, viz níže |
+| zakázky a číslo zakázky na dokladech a v deníku | hodnoty firemní dimenze Zakázka; zakázka u klienta u zakázky s vlastním partnerem nebo s jediným odběratelem na vydaných fakturách, viz níže |
 | členění skladu, alternativní jednotky, dodavatel karty (`92_sklad.xml`) | kategorie skladu, balení karty, dodavatel karty s nákupní cenou |
+
+**Středisko, činnost a zakázka.** POHODA vede tři analytická členění a převod každé
+z nich přenese jako dimenzi (`Firma → Dimenze`): středisko jako dimenzi Středisko,
+činnost jako dimenzi Činnost a zakázku jako dimenzi Zakázka. Řádek deníku i doklad
+tak může nést všechna tři členění zároveň a sestavy po dimenzích je ukážou stejně
+jako POHODA. Export bez některého členění tuto dimenzi nezakládá a u firmy dimenze
+nezapíná.
+
+**Střediska.** Středisko řádku deníku z POHODY je hodnota dimenze Středisko
+a zároveň středisko firmy. Hodnotu dostanou řádky deníku podle svého střediska
+a doklad do hlavičky, když mají všechny jeho řádky stejné středisko.
+
+**Činnosti.** Každá činnost z agendy Činnosti je hodnota firemní dimenze Činnost
+s kódem podle zkratky činnosti a názvem podle jejího textu, i když ji žádný doklad
+nepoužívá. Řádky deníku, faktury, jejich položky, pokladní doklady a bankovní pohyby
+dostanou hodnotu podle stejných pravidel jako u zakázek níže. Interní doklad nese
+činnost ve svém zápisu v deníku. Protokol v kroku Činnosti uvede počet činností,
+nových a existujících hodnot dimenze a označených řádků deníku a dokladů.
+
+U neziskové organizace (vyhláška 504) vede MyÚčto systémovou dimenzi Činnost s hlavní
+a hospodářskou činností, podle které se sestavují výkazy a daň z příjmů. Činnosti
+POHODY jsou volný číselník firmy a z exportu nejde bezpečně poznat, která z nich je
+hospodářská. Převod je proto založí jako samostatnou dimenzi Činnost POHODY
+a systémovou dimenzi podle nich nemění. Hlavní nebo hospodářskou činnost řádků
+určí účetní, činnost POHODY mu k tomu zůstává na řádcích deníku i dokladech.
+
+**Zakázky.** Každá zakázka z agendy Zakázky je hodnota firemní dimenze Zakázka
+(`Firma → Dimenze`, druh Projekt) s kódem podle čísla zakázky a názvem podle jejího
+textu, i když ji žádný doklad nepoužívá. Výsledovku a rozbor po zakázce pak ukážou
+sestavy po dimenzích. Převod dimenze u firmy zapne. Hodnotu dostanou:
+
+- řádky účetního deníku podle zakázky svého řádku v POHODĚ,
+- vydané a přijaté faktury do hlavičky podle zakázky dokladu; nemá-li ji hlavička,
+  podle zakázky položek, když se všechny shodují. Položka s jinou zakázkou než
+  hlavička dostane hodnotu na položku, když má převedená faktura stejné položky
+  jako v POHODĚ,
+- pokladní doklady, bankovní pohyby a faktury bez zakázky na dokladu do hlavičky,
+  když ji nesou všechny řádky jejich zápisu v deníku se zakázkou.
+
+Zakázka v MyÚčtu (`Zakázky`, vždy u jednoho klienta) vznikne u zakázky, která
+má v POHODĚ vlastního partnera z adresáře. Klient je partner zakázky, číslo zakázky
+je číslo z POHODY a měna je výchozí měna firmy. Zakázka je aktivní, stav zakázky
+z POHODY se nepřebírá. Hodnota dimenze se na ni naváže a faktury i řádky deníku
+s touto zakázkou ji dostanou jako zakázku dokladu.
+
+Zakázka bez partnera dostane klienta z vydaných faktur: jdou-li všechny vydané
+faktury se zakázkou na hlavičce jedinému odběrateli (počítají se i faktury dříve
+převedených roků), vznikne zakázka u tohoto odběratele. Jdou-li více odběratelům,
+nebo zakázku žádná vydaná faktura nenese, zůstane zakázka jen hodnotou dimenze.
+Protokol v kroku Zakázky uvede počet zakázek, nových a existujících hodnot dimenze,
+označených řádků deníku a dokladů a zakázek založených u klienta. Vyjmenuje zakázky,
+kterým převod klienta odvodil z faktur, i zakázky, které zůstaly jen dimenzí.
+
+Zakázky a činnosti nese export z aktuální verze nástroje: převodník MDB a POHODA SQL
+čte agendy Zakázky (`sZAK`) a Činnosti (`sCIN`), číslo zakázky a činnost dokladů,
+jejich položek a řádků deníku, XML export agendy `35_zakazky.xml` a `34_cinnosti.xml`
+a zakázku a činnost na dokladech a v deníku. Starší export zakázky ani činnosti nenese
+a převod se bez nich chová jako dřív.
 
 **Přeplatky a pohyby bez dokladu.** Bankovní nebo pokladní pohyb, který POHODA
 zaúčtovala přímo na účet 315 nebo 325 (typicky přeplatek na analytice 315.999
@@ -518,7 +607,14 @@ hlavní knihu.
   nezaloží.
 
 **Sklad.** Převádí se jen z nejnovější agendy v exportu a jen když ho
-v náhledu necháte zaškrtnutý. Firma musí mít zapnutý sklad. Převede se stav,
+v náhledu necháte zaškrtnutý. Nemá-li firma sklad zapnutý, náhled ho nabídne
+s poznámkou, že ho převod zapne. Ostrý převod pak zapne
+`Nastavení firmy → Daně a účetnictví → Vést skladovou evidenci` sám, zapíše to
+do historie změn firmy a protokol to uvede. V podvojném účetnictví je pak
+v roční uzávěrce povinný krok [Zásoby](72_Uzaverka.md#7248-krok-9-zasoby). Zkouška
+nanečisto nastavení nemění, jen ohlásí, že ostrý převod sklad zapne. Sklad
+patří ke komerčním modulům: bez jejich licence ho převod nezapne, náhled sklad
+nenabídne a protokol uvede, že se nepřevedl. Převede se stav,
 ne historie: každá karta dostane ve svém skladu počáteční stav k datu exportu
 (nejpozději ke konci roku agendy), jednou příjemkou za sklad. Hodnota stavu je
 ocenění, které vede POHODA po posledním pohybu karty, takže sklad v MyÚčtu
@@ -648,6 +744,17 @@ kontrole. Interní doklady mimo přiznání k DPH mají zápis v deníku a zázn
 Interní doklady. Zápis takového dokladu nejde smazat v deníku, opravuje se stornem
 v detailu dokladu.
 
+Mzdové závazky na účtech 331, 336 a 342 (mzdy zaměstnanců, pojistné, daň ze mzdy)
+se převedou do `Účetnictví → Ostatní pohledávky a závazky` stejně jako ostatní
+závazky, aby se daly párovat s úhradami. Závazek s vlastním zápisem v deníku ho
+převezme bez nového zaúčtování. Mzda zaměstnance, jejíž předpis nese interní doklad
+mezd, a závazek z počátečního stavu se uloží jako potvrzené bez vlastního zápisu.
+Ostatní závazek bez členění DPH a s nulovou daní (u mzdových dokladů ho tak vede
+export z MDB) je doklad mimo přiznání, ne přijatá faktura. Protokol převodu uvádí
+počet mzdových závazků v kroku ostatních pohledávek a závazků. Předpisy DPH (343)
+a doplatky daně z příjmů (341) zůstávají jen v deníku, zálohy na daň z příjmů
+převod převezme jako předpisy záloh.
+
 **Samovyměření jen na interních dokladech.** Někdy účetní vede přijatou fakturu
 v členění mimo přiznání (například `PN`) a výstup i odpočet zachytí až dvojicí
 interních dokladů navázaných na fakturu (vyměření `DD…`, odpočet `PD…`). Převod
@@ -656,10 +763,43 @@ faktury zůstane tuzemská část s daní dodavatele v odpočtu ř. 40/41. Když
 chybí interní doklad s odpočtem, převezme se samovyměření bez nároku na odpočet,
 stejně jako ho podala POHODA.
 
+**DUZP a období odpočtu přijatých dokladů.** POHODA vede u přijaté faktury, závazku,
+zálohy a interního dokladu dvě data DPH. **Datum KH DPH** je DUZP z dokladu
+dodavatele a POHODA ho uvádí v kontrolním hlášení jako DPPD. **Datum odp./doruč.**
+je den, ke kterému účetní uplatnila odpočet, a určuje období přiznání. Převod je
+přenese takto:
+
+| POHODA | MyÚčto |
+|---|---|
+| Datum KH DPH (MDB `DatKHDPH`) | DUZP dokladu; jde do kontrolního hlášení (DPPD v A.2 a B.2, DUZP v B.1) a podle něj se volí sazba DPH |
+| Datum odp./doruč. (MDB `DatZdPln`), je-li pozdější než DUZP | ručně zadané datum přijetí, takže odpočet je v přiznání za stejné období jako v POHODĚ |
+| Datum odp./doruč., chybí-li Datum KH DPH | DUZP dokladu |
+
+Doklad s odpočtem uplatněným v POHODĚ dřív než DUZP nebo datum vystavení převod
+zařadí do období DUZP a v protokolu na posun upozorní, MyÚčto odpočet před DUZP
+nepřipustí. U samovyměření se data berou z interního dokladu s vyměřením daně, bez
+data KH DPH na interním dokladu z faktury. **Zahraniční plnění v přenesení daňové
+povinnosti** řadí MyÚčto do přiznání podle DUZP. Leží-li Datum KH DPH v jiném měsíci
+než datum, ke kterému POHODA daň přiznala, převod jako DUZP ponechá datum přiznání
+z POHODY, aby přiznání sedělo na podané, a protokol doklad vypíše: v kontrolním
+hlášení (A.2) pak bude toto datum místo DUZP dodavatele. Pokladní doklad nese jediné
+datum DPH; převod do něj dá datum odpočtu a odlišné Datum KH DPH vypíše v protokolu.
+
 **Platební brána.** Úhradu přes bránu vede POHODA jako několik bankovních dokladů
 se stejným číslem: příjem, poplatek a odvod netto. Zápis v deníku pod tímto číslem
 patří k pohybu, kterým POHODA hradí doklad. Úhrada faktury proto nezůstane mezi
 nezaúčtovanými pohyby.
+
+**Výpis pod jedním číslem.** POHODA někdy dá stejné číslo dokladu všem pohybům
+výpisu z téhož dne. Zaúčtované pohyby mají v deníku řádky, pohyby s předkontací
+„Nevím" žádné. Zápis pod tímto číslem patří jen pohybům, které v deníku POHODY
+řádek mají. Z datového souboru (MDB) to převod pozná podle vazby řádku deníku na
+bankovní doklad, ze standardního XML podle částky pohybu. Ostatní pohyby zůstanou
+nespárované a nabídnou se k zaúčtování
+([§ 107.9.5.1](#107951-pohyby-ktere-pohoda-nezauctovala)). Když částky
+jednoznačně nerozhodnou, patří zápis všem pohybům čísla. Stejně se posuzuje číslo,
+které se v číselné řadě banky opakuje o rok později: pohyb bez řádku v deníku
+zůstane k zaúčtování, i když starší pohyb téhož čísla zaúčtovaný je.
 
 Číslo dokladu, které už ve firmě je, dostane příponu roku, například
 `FV-0001/2026`.
@@ -669,7 +809,15 @@ nezaúčtovanými pohyby.
 - **Sklad.** Zápisy jsou v převedeném deníku, zásoby se zakládají v MyÚčtu.
 - **Mzdy.** Tento průvodce mzdy nepřevádí, ani z datového souboru
   (`91_mzdy.xml`); ty převede samostatný průvodce
-  [Přechod z PAMICA](108_Prechod_z_PAMICA.md).
+  [Přechod z PAMICA](108_Prechod_z_PAMICA.md). Zaúčtování mezd je součástí
+  převedeného deníku, účetnictví je proto úplné i bez nich.
+  Mzdy nejde převzít, když licence nezahrnuje mzdový doplněk nebo firma nemá
+  zapnutý modul Mzdy. Náhled pak výrazně upozorní, kolik zaměstnanců a za které
+  měsíce se nepřevede, a nabídne nápravu: **Rozšířit licenci o mzdy**
+  (`Aktivace → Zakoupení`, mzdový doplněk), nebo **Otevřít nastavení firmy**
+  (`Daně a účetnictví → Vést mzdy`). Stejné upozornění zapíše zkouška nanečisto
+  i ostrý převod do protokolu, takže zůstane v historii převodů. Po nápravě
+  mzdy převeďte v průvodci PAMICA.
 - **Objednávky, nabídky a přílohy dokladů.** Skeny dokladů připojíte zvlášť
   v `Dokumenty → Skeny k dokladům`.
 - **Číselné řady a podaná přiznání.** Přiznání k DPH a kontrolní hlášení za
@@ -688,8 +836,8 @@ nezaúčtovanými pohyby.
    `.zip`. Rozbalení a načtení běží na serveru na pozadí, u velkého exportu
    i několik minut; obnovení stránky mezitím průvodce nepřeruší.
 2. **Náhled a volby.** Tabulka ukáže všechny agendy v exportu: IČO, firmu,
-   rok, počty řádků deníku, počátečních stavů, dokladů a partnerů a rozsah
-   zápisů. Převést jde jen agendu s IČO firmy v MyÚčtu. Roky k převodu
+   rok, počty řádků deníku, počátečních stavů, dokladů, partnerů, zakázek
+   a činností a rozsah zápisů. Převést jde jen agendu s IČO firmy v MyÚčtu. Roky k převodu
    zaškrtněte v prvním sloupci tabulky; předvybrané jsou všechny roky agend
    s IČO firmy. Soubory exportu, které POHODA vrátila prázdné nebo které
    v exportu chybí, průvodce vypíše jako informaci.
@@ -711,9 +859,11 @@ nezaúčtovanými pohyby.
    - v exportu chybí nebo nejde přečíst účetní deník, osnova nebo členění DPH,
    - účetní období v MyÚčtu už obsahuje zápisy, které nevznikly převodem
      (uzávěrkové zápisy a kurzové přecenění se nepočítají),
-   - období je v MyÚčtu uzavřené.
+   - období v MyÚčtu není otevřené, a to i při opakovaném převodu,
+   - do vybraného období zasahuje zámek účtování k datu. Kontrola se vztahuje
+     k celému období. Zámek může být nastavený i u jinak otevřeného období.
 
-   Obojí platí i pro vybrané období následujícího roku, do kterého padají
+   Stejné kontroly platí i pro vybrané období následujícího roku, do kterého padají
    doklady agendy s pozdějším datem.
 3. **Zkouška nanečisto.** Proběhne celý převod vybraných roků včetně
    rekonciliace, na konci se ale všechno vrátí. Výsledkem je protokol za každý
@@ -769,8 +919,12 @@ s počty, upozornění a chyby a rekonciliaci převáděného roku:
   než kolik jeho zápis v deníku POHODY dá na účet dokladu, a MyÚčto převzalo
   obojí beze změny. Typicky jde o odpočet nedaňové zálohy, který POHODA
   zaúčtovala kladně na stranu MD účtu 311 (například 311/602). Faktura je
-  uhrazená, účet 311 ale v deníku drží navíc částku zálohy. Saldo takových
-  dokladů zkontrolujte a případně opravte interním dokladem,
+  uhrazená, účet 311 ale v deníku drží navíc částku zálohy. U banky jde
+  typicky o výdaj zaúčtovaný předkontací pro příjem (například MD 221 / D 335):
+  účet 221 se v deníku pohne opačně, než šly peníze, a banka proti deníku nesedí
+  o dvojnásobek pohybu. Protokol takový pohyb vypíše s číslem dokladu, datem
+  a částkou a upozorní na něj už v kroku vazeb. Saldo takových dokladů
+  a zaúčtování takových pohybů zkontrolujte a případně opravte interním dokladem,
 - saldokonto proti hlavní knize za každé období převodu, ke konci období, nejvýš
   k poslednímu zápisu v deníku. Rozdíl nad 1 Kč na účtu protokol uvede jako
   upozornění s účtem, zůstatkem hlavní knihy, součtem položek a rozdílem. Převod
@@ -848,9 +1002,11 @@ nanečisto z přehledu smažete, protokol ostrého převodu zůstává.
 
 ### 107.9.6 Režim účetnictví a automatika
 
-Převod zapíše podvojné účetnictví od začátku převáděného roku do nastavení
-firmy. Automatika účtování je během převodu vypnutá: deník přichází hotový
-a každý automatický zápis nad týmiž doklady by byl duplicita.
+Převod agendy podvojného účetnictví zapíše podvojné účetnictví od začátku
+převáděného roku do nastavení firmy. Agenda daňové evidence režim firmy ani
+automatiku účtování nemění ([§ 107.9.9](#10799-danova-evidence)).
+U podvojného účetnictví je automatika účtování během převodu vypnutá: deník
+přichází hotový a každý automatický zápis nad týmiž doklady by byl duplicita.
 
 Po úspěšném převodu se automatika vrátí do stavu před převodem. Firma, která
 podvojné účetnictví zapíná právě převodem, dostane výchozí nastavení účetní
@@ -871,7 +1027,7 @@ období podle jeho data (jen v otevřených obdobích a mimo uzamčené datum).
 
 Kontrola před převodem ([§ 107.9.4](#10794-postup)) běží i při opakovaném převodu
 a stejně přísně: vznikl-li mezitím v některém z převáděných roků (včetně
-pozdějšího roku agendy) ruční zápis, který nepochází z převodu, převod se zastaví
+pozdějšího roku agendy) zápis, který nepochází z převodu, převod se zastaví
 a nic nezapíše. Opakovaný převod do roku s vlastními zápisy tedy nejde; další rok
 převádějte dřív, než v něm začnete účtovat ručně. Výjimkou je opravný převod vazeb
 už převedené firmy: vlastní zápisy v MyÚčtu nechá beze změny a nové doklady
@@ -883,18 +1039,41 @@ POHODY starší než první zápis zadaný v MyÚčtu. Novější záznamy POHOD
 nevznikl dvojí zápis, a protokol uvede datum, od kterého se nepřebírají. Rekonciliace
 tu může hlásit rozdíl, protože deník nese i vlastní zápisy.
 
+**Doplnění zakázek a činností.** Firmu převedenou exportem bez zakázek a činností
+doplníte novým exportem z aktuální verze nástroje a opakovaným převodem téhož roku.
+Převod založí hodnoty dimenzí Zakázka a Činnost a zakázky u klienta a doplní je
+k už převedeným dokladům a řádkům deníku. Nic nezdvojí a hodnotu, kterou jste
+v MyÚčtu změnili, nepřepíše. Převod spusťte v otevřeném období mimo zámek účtování.
+Zápisy a doklady se zmrazenými dimenzemi zůstanou bez nového přiřazení a protokol
+uvede jejich počet.
+
 Už převedené doklady ani zápisy deníku opakovaný převod nepřepisuje, protože
 mohly být mezitím zaúčtované, spárované nebo upravené v MyÚčtu. Změnila-li se
 v POHODĚ celková částka faktury, protokol ji vypíše jako změněnou v POHODĚ
 a ponechanou v MyÚčtu; upravte ji ručně.
+
+**Oprava dat DPH u dříve převedených dokladů.** Firma převedená verzí, která
+u přijatých dokladů zaměnila Datum KH DPH a Datum odp./doruč., má v DUZP datum odpočtu
+a Datum KH DPH jako ručně zadané datum přijetí. Přiznání k DPH je v pořádku, kontrolní
+hlášení ale nese jako DPPD datum odpočtu. Správce instalace to opraví příkazem
+`php api/bin/repair-pohoda-duzp.php`. Bez parametrů jen vypíše, které doklady by
+opravil a které přeskočí, s `--supplier=<id firmy>` se omezí na jednu firmu a teprve
+s `--apply` data prohodí. Opravují se jen přijaté doklady z převodu, které mají ručně
+zadané datum přijetí dřív než DUZP. Přeskočí a vypíše doklady v obdobích s podaným
+přiznáním nebo kontrolním hlášením, v uzavřeném účetním období nebo pod zámkem k datu,
+doklady zaúčtované v MyÚčtu (opravte je ručně v dokladu, aby se zápis přeúčtoval)
+a zahraniční plnění v přenesení daňové povinnosti s daty v různých měsících. Přiznání
+se opravou nemění, mění se jen DUZP v kontrolním hlášení a případně datum nákladu. Zápisy
+převzaté z deníku POHODY zůstávají beze změny. Každý opravený doklad má záznam
+v auditní stopě a opakované spuštění už opravené doklady nemění.
 
 Před převodem firmy znovu od začátku stáhněte v průvodci **profil firmy** a po
 ostrém převodu ho nahrajte zpět, viz [§ 96.13](96_Nastaveni.md#9613-krok-za-krokem-profil-firmy).
 
 ### 107.9.8 Omezení
 
-- Převádí se kalendářní účetní rok, období se vždy založí od 1. 1. do 31. 12.
-  (i období následujícího roku pro doklady agendy s pozdějším datem).
+- Převádí se kalendářní nebo hospodářský účetní rok. Hranice období musí
+  odpovídat účetnímu roku nastavenému u firmy v MyÚčtu.
 - Převod čte jen export vytvořený nástrojem, nikdy živou databázi POHODY.
 - Jeden běh převede vybrané roky jedné firmy, každý rok s vlastním
   protokolem. Agenda roku musí mít IČO firmy v MyÚčtu.
@@ -905,10 +1084,56 @@ ostrém převodu ho nahrajte zpět, viz [§ 96.13](96_Nastaveni.md#9613-krok-za-
   [Přechod z PAMICA](108_Prechod_z_PAMICA.md) - mzdy tento průvodce
   nepřevede.
 
+### 107.9.9 Daňová evidence
+
+Agendu, kterou POHODA vede jako daňovou evidenci (typ účetní jednotky daňová
+evidence, místo účetního deníku peněžní deník), převod převede do firmy
+v MyÚčtu, která vede daňovou evidenci. Firma v daňové evidenci zůstane: převod
+režim firmy nemění, účetní deník, účtovou osnovu, předkontace ani účetní období
+nezakládá a doklady nezaúčtuje. Peněžní deník sestaví MyÚčto z převedených
+dokladů, banky a pokladny. Agendu pozná převod podle typu účetní jednotky
+v exportu, prázdný účetní deník a osnova jsou u ní v pořádku.
+
+Kontrola před převodem převod zastaví, když:
+
+- firma v MyÚčtu je právnická osoba (ta vede účetnictví),
+- firma má nastavený hospodářský rok; daňová evidence se vede po kalendářních
+  letech,
+- firma v MyÚčtu vede převáděný rok jako podvojné účetnictví nebo v něm má
+  účetní období či zápisy deníku,
+- převáděný rok už v MyÚčtu obsahuje doklady, bankovní pohyby nebo pokladní
+  doklady, které nevznikly převodem z POHODY,
+- doklady firmy jsou uzamčené do převáděného roku (při prvním převodu).
+
+| Z POHODY | Do MyÚčta |
+|---|---|
+| adresář | klienti |
+| vydané a přijaté faktury, dobropisy, zálohy, ostatní pohledávky a závazky v přiznání DPH | doklady s DPH bez zaúčtování; uhrazené jen podle úhrad navázaných na pohyb |
+| interní daňové doklady | daňové doklady k platbě a samovyměření DPH |
+| ostatní pohledávky a závazky mimo přiznání DPH | ostatní pohledávky a závazky bez zaúčtování |
+| pokladny a pokladní doklady | pokladní doklady: úhrada faktury, prodej nebo nákup s DPH, ostatní |
+| bankovní účty a bankovní doklady | výpisy se zdrojem „import" a počátečním stavem účtu z POHODY |
+| úhrady dokladů bankou nebo pokladnou | úhrady faktur, ostatních položek a záloh na daň navázané na pohyb |
+| úhrada dokladu z minulého roku | uhrazená část dokladu mimo peněžní deník roku |
+| zakázky, činnosti, drobný majetek, sklad | stejně jako u podvojného účetnictví |
+
+Doklad, který POHODA vede jako uhrazený bez bankovního nebo pokladního dokladu
+(zápočet interním dokladem), zůstane neuhrazený: peněžní deník bez pohybu
+peněz výdaj ani příjem nezapočte. Protokol tyto doklady vyjmenuje, vyrovnání
+doplňte ručně.
+
+Pohyby na účtu bez dokladu (vklad, výběr, poplatky, odvody pojistného a daní)
+převod nezařazuje, předkontace daňové evidence z POHODY nečte. Protokol
+uvede jejich počet; zařaďte je v **Daňová evidence → Peněžní deník**, jinak je
+peněžní deník nezapočte. Dlouhodobý majetek převod daňové evidence nepřevádí,
+karty majetku a daňové odpisy zadejte ručně.
+
 ## 107.10 Související kapitoly
 
+- [Kontrola dat po převodu](126_Kontrola_dat_po_prevodu.md) - kontroly a opravy převzatých dat
 - [Přechod z PAMICA](108_Prechod_z_PAMICA.md) - mzdy z POHODY Mzdy a PAMICA
 - [Přechod z PREMIER](109_Prechod_z_PREMIER.md)
 - [Režim OSS](45_OSS.md)
+- [Časové rozlišení](125_Casove_rozliseni.md) - převzetí agendy časového rozlišení
 - [Souběh se starým systémem](111_Soubeh_se_starym_systemem.md)
 - [Řešení problémů](999_Reseni_problemu.md)

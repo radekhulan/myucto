@@ -266,4 +266,19 @@ final class InvoiceAmountPolicyTest extends TestCase
         self::assertArrayHasKey('items.2.quantity', $err);
         self::assertArrayHasKey('items.2.unit_price_without_vat', $err);
     }
+
+    public function testManualLineWithoutPriceIsLeftOutOfTheAmountCheckOtherLinesCount(): void
+    {
+        $line = ['quantity' => 1, 'vat_rate_id' => 1];
+        $validate = static fn (array ...$items): ?string => InvoiceAmountPolicy::validatePositiveAmountToPay(
+            ['invoice_type' => 'invoice', 'items' => $items],
+            [1 => 21.0],
+        );
+        $pending = $line + ['unit_price_without_vat' => 0, 'manual_price' => true];
+
+        self::assertNull($validate($pending), 'Koncept jen s řádky čekajícími na cenu smí být nulový.');
+        self::assertNull($validate($pending, $line + ['unit_price_without_vat' => 100]));
+        self::assertNotNull($validate($pending, $line + ['unit_price_without_vat' => -100]), 'Záporný zbytek příznak nesmí schovat.');
+        self::assertNotNull($validate($line + ['unit_price_without_vat' => -100, 'manual_price' => true]), 'Příznak platí jen u nulové ceny.');
+    }
 }

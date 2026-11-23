@@ -125,6 +125,13 @@ enum PayrollBenefitExemptionBasket: string
     /** První zdaňovací období přestavěného § 6 odst. 9 písm. d) ZDP. */
     public const BENEFITS_2027_FROM_YEAR = 2027;
 
+    /**
+     * Hodnota parametru koše v rulesetu pro plnění bez číselného limitu. Rozhoduje
+     * {@see isUnlimited()} podle zákona; ruleset to jen říká nahlas, aby administrace
+     * neukazovala chybějící částku jako nevyřízenou věc.
+     */
+    public const UNLIMITED_RULESET_VALUE = 'unlimited';
+
     /** Stojí limit koše na evidenci firmy místo rulesetu? */
     public function limitFromCompanyEvidence(): bool
     {

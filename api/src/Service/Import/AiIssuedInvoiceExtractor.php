@@ -120,7 +120,7 @@ final class AiIssuedInvoiceExtractor
                 'source' => $notConfigured ? 'ai_not_configured' : 'ai_failed',
             ];
         }
-        $data = (array) ($extracted['data'] ?? []);
+        $data = (new AiExtractedDataClipper($this->db))->clipIssued((array) ($extracted['data'] ?? []));
 
         $validationError = $this->validateAiData($data);
         if ($validationError !== null) {

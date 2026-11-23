@@ -6,6 +6,7 @@ namespace MyInvoice\Service\Payroll\Submission\Jmhz;
 
 use MyInvoice\Service\Payroll\Absence\PayrollSicknessInputMaterializer;
 use MyInvoice\Service\Payroll\Calculation\PayrollRounding;
+use MyInvoice\Service\Payroll\Component\PayrollWholeCrowns;
 use MyInvoice\Service\Payroll\PayrollEmploymentJmhzActivityFamily;
 use MyInvoice\Service\Payroll\IncomeTax\SeparateTaxBaseRegime;
 use MyInvoice\Service\Payroll\IncomeTax\StudentTaxCredit;
@@ -95,6 +96,8 @@ final class JmhzScenario1DocumentResolver
     private ?JmhzScenario1XmlSerializer $probeSerializer = null;
 
     private ?JmhzScenario1Xml2027Serializer $probeSerializer2027 = null;
+
+    private ?JmhzExternalCodebookCatalog $externalCodebooks = null;
 
     private const NEGATIVE_INCOME_REPORTED_AS_ZERO = [
         '10286',
@@ -270,7 +273,7 @@ final class JmhzScenario1DocumentResolver
             }
             foreach ($scopedReadinessIssues as $issue) {
                 $attributeIds = $issue['attribute_ids'] ?? [];
-                $blockers[] = $this->blocker(
+                $blocker = $this->blocker(
                     is_string($issue['code'] ?? null)
                         ? $issue['code']
                         : 'jmhz_preparation_issue_invalid',
@@ -283,6 +286,17 @@ final class JmhzScenario1DocumentResolver
                     is_array($attributeIds) && array_is_list($attributeIds)
                         ? array_values(array_filter($attributeIds, 'is_string'))
                         : [],
+                );
+                $workplaceMessage = $blocker->code === 'jmhz_workplace_codebooks_unverified'
+                    && $blocker->entityType === 'employment' && $blocker->entityId !== null
+                    ? $this->workplaceMismatchMessage($people, $blocker->entityId, $preparation->periodStart)
+                    : null;
+                $blockers[] = $workplaceMessage === null ? $blocker : new JmhzScenario1Blocker(
+                    $blocker->code,
+                    $blocker->entityType,
+                    $blocker->entityId,
+                    $blocker->attributeIds,
+                    $workplaceMessage,
                 );
             }
         }
@@ -322,6 +336,7 @@ final class JmhzScenario1DocumentResolver
                 ? $person['employee_id']
                 : null;
             $employments = $this->rows($person['employments'] ?? null);
+            $primaryFlags = JmhzPrimaryEmployment::flags($employments);
             /*
              * Ordinary evidence se zmrazuje per pracovní vztah a úplná musí být
              * u KAŽDÉHO vztahu osoby, protože každý vztah je samostatný
@@ -333,7 +348,7 @@ final class JmhzScenario1DocumentResolver
              */
             $personEvidence = [];
             $ozpWageEmployments = [];
-            foreach ($employments as $employmentRow) {
+            foreach ($employments as $employmentIndex => $employmentRow) {
                 $employmentKey = $employmentRow['employment_id'] ?? null;
                 $evidence = is_int($employmentKey)
                     ? ($ordinaryEvidence[$employmentKey] ?? null)
@@ -346,7 +361,7 @@ final class JmhzScenario1DocumentResolver
                     $ozpWageEmployments[] = $employmentKey;
                 }
                 if ($personEvidence === []
-                    || ($this->object($employmentRow['employment'] ?? null)['is_primary'] ?? null) === true
+                    || ($primaryFlags[$employmentIndex] ?? null) === true
                 ) {
                     $personEvidence = $evidence;
                 }
@@ -364,7 +379,7 @@ final class JmhzScenario1DocumentResolver
             if ($employments === []) {
                 $ordinaryEvidenceComplete = false;
             } else {
-                $this->inspectPrimaryEmployment($employments, $employeeId, $blockers);
+                $this->inspectPrimaryEmployment($primaryFlags, $employeeId, $blockers);
             }
             $personSummary = $this->object($person['person_summary'] ?? null);
             $annual = $this->annualSummary(
@@ -449,7 +464,7 @@ final class JmhzScenario1DocumentResolver
             // než odvozování osvobozených příjmů ho nemá a element se vynechá.
             $exemptIncomeMinor = null;
             $employerContributions = [];
-            foreach ($employments as $employment) {
+            foreach ($employments as $employmentIndex => $employment) {
                 if (is_int($employment['exempt_income_minor'] ?? null)) {
                     $exemptIncomeMinor = ($exemptIncomeMinor ?? 0)
                         + $employment['exempt_income_minor'];
@@ -480,7 +495,7 @@ final class JmhzScenario1DocumentResolver
                         ['10239', '10502'],
                     );
                 }
-                if (($employmentSource['is_primary'] ?? null) === true) {
+                if (($primaryFlags[$employmentIndex] ?? null) === true) {
                     // 10419 nese SDZ, a ta se vyplňuje jednou za zaměstnance na
                     // primárním PPV. Proto se prohlášení čte z účinného termu
                     // právě toho vztahu, ne z prvního v pořadí.
@@ -615,7 +630,7 @@ final class JmhzScenario1DocumentResolver
                                 && ($this->object($row['insurance'] ?? null)['kind'] ?? null) === 'employment',
                         )),
                     ),
-                    'primary' => $employmentSource['is_primary'] ?? null,
+                    'primary' => $primaryFlags[$employmentIndex] ?? null,
                     // 10535 za TENTO vztah; viz relationshipTaxableIncomeCzk().
                     'taxable_income_czk' => is_int($employmentId)
                         ? ($taxableIncomeCzk[$employmentId] ?? null)
@@ -731,10 +746,9 @@ final class JmhzScenario1DocumentResolver
             $normalizedPeople[] = [
                 'employee_id' => $employeeId,
                 'summary' => [
-                    'income_total_czk' => $this->wholeCzk(
+                    'income_total_czk' => $this->incomeTotalCzk(
                         $this->nestedInt($personSummary, ['totals', 'jmhz_amount_minor']),
-                        '10286',
-                        'person',
+                        $exemptIncomeMinor,
                         $employeeId,
                         $blockers,
                     ),
@@ -751,15 +765,12 @@ final class JmhzScenario1DocumentResolver
                     // nepřispívá nebo složku nemá zavedenou; blok se pak
                     // nevykazuje vůbec.
                     'employer_contributions_czk' => $employerContributions,
+                    // Haléře osvobozené části pocházejí ze zákonného limitu
+                    // (129,50 Kč za směnu, polovina průměrné mzdy) a vykazují
+                    // se dolů, viz PayrollWholeCrowns::reportedExemptCzk().
                     'exempt_income_czk' => $exemptIncomeMinor === null
                         ? null
-                        : $this->wholeCzk(
-                            $exemptIncomeMinor,
-                            '10289',
-                            'person',
-                            $employeeId,
-                            $blockers,
-                        ),
+                        : PayrollWholeCrowns::reportedExemptCzk($exemptIncomeMinor),
                     'net_income_czk' => $this->wholeCzk(
                         $this->netIncomeMinor($tax, $social, $health, $net, $employments),
                         '10344',
@@ -918,12 +929,16 @@ final class JmhzScenario1DocumentResolver
             );
             // EDV ID 10221 (C_COKR + Luhn) jako u registrací: ČSSZ by hlášení
             // s takovým symbolem odmítla, takže se dokument nesestaví.
-            if (CsszEmployerVariableSymbol::invalidReason($variableSymbol) !== null) {
-                $blockers[] = $this->blocker(
+            $invalidReason = CsszEmployerVariableSymbol::invalidReason($variableSymbol);
+            if ($invalidReason !== null) {
+                // Symbol je vyplněný, jen neplatný: hláška to musí říct i s důvodem,
+                // ne „chybí údaj", jinak účetní hledá prázdné pole.
+                $blockers[] = new JmhzScenario1Blocker(
                     'jmhz_office_variable_symbol_invalid',
                     'office',
                     $registration['id'],
                     ['10221'],
+                    self::invalidVariableSymbolMessage($variableSymbol, $invalidReason),
                 );
             }
         }
@@ -1129,13 +1144,37 @@ final class JmhzScenario1DocumentResolver
             }
         }
         $excluded = [];
+        $absent = [];
         foreach ($exclusion->employmentIds as $employmentId) {
             if (isset($officeEmploymentIds[$employmentId])) {
                 $excluded[$employmentId] = true;
+            } elseif ($exclusion->purpose === JmhzFormExclusion::PURPOSE_DEFERRAL) {
+                $absent[$employmentId] = true;
             }
         }
         if ($excluded === []) {
-            return $full;
+            if ($absent === []) {
+                return $full;
+            }
+            $payload = $full->candidate->payload;
+            $absentIds = array_keys($absent);
+            sort($absentIds, SORT_NUMERIC);
+            $provenance = $this->object($payload['provenance'] ?? null);
+            $provenance['form_exclusion'] = [
+                'purpose' => $exclusion->purpose,
+                'employment_ids' => $absentIds,
+                'employee_ids' => [],
+                'deferral_ids' => $exclusion->deferralIds,
+                'summary_excluded_employee_ids' => [],
+            ];
+            $payload['provenance'] = $provenance;
+
+            return new JmhzScenario1Resolution(
+                new JmhzScenario1NormalizedDocument($payload),
+                $full->blockers,
+                $full->excludedBlockers,
+                $exclusion,
+            );
         }
 
         $guards = [];
@@ -1227,7 +1266,7 @@ final class JmhzScenario1DocumentResolver
         $employer = $this->object($payload['employer'] ?? null);
         $employer['summary_totals'] = $this->employerTaxTotals($summaryPeople);
         $payload['employer'] = $employer;
-        $excludedIds = array_keys($excluded);
+        $excludedIds = array_keys($excluded + $absent);
         sort($excludedIds, SORT_NUMERIC);
         $excludedEmployeeIds = array_keys($excludedEmployees);
         sort($excludedEmployeeIds, SORT_NUMERIC);
@@ -1379,6 +1418,36 @@ final class JmhzScenario1DocumentResolver
         }
 
         return $found;
+    }
+
+    /**
+     * Konkrétní nesoulad pracoviště zmrazených podmínek s CISOB. Obecné
+     * „chybí ověřené číselníkové údaje" účetní neřekne, že stačí opravit
+     * název obce na úřední — a místo výkonu práce se ukládá i s holým
+     * „Praha" (uložení ho jen varuje).
+     *
+     * @param list<array<string,mixed>> $people
+     */
+    private function workplaceMismatchMessage(array $people, int $employmentId, string $periodStart): ?string
+    {
+        foreach ($people as $person) {
+            foreach ($this->rows($person['employments'] ?? null) as $employment) {
+                if (($employment['employment_id'] ?? null) !== $employmentId) {
+                    continue;
+                }
+                $term = $this->object($employment['term'] ?? null);
+                $this->externalCodebooks ??= new JmhzExternalCodebookCatalog(new JmhzSpecPackageCatalog());
+
+                return $this->externalCodebooks->workplaceMismatchMessage(
+                    is_string($term['jmhz_workplace_municipality_code'] ?? null) ? $term['jmhz_workplace_municipality_code'] : null,
+                    is_string($term['work_place'] ?? null) ? $term['work_place'] : null,
+                    $periodStart,
+                    is_string($term['jmhz_workplace_country_code'] ?? null) ? $term['jmhz_workplace_country_code'] : null,
+                );
+            }
+        }
+
+        return null;
     }
 
     private function probeSerializer(): JmhzScenario1XmlSerializer
@@ -1598,20 +1667,20 @@ final class JmhzScenario1DocumentResolver
      * Souhrnná data zaměstnance se vyplňují jednou za osobu, a to právě na
      * formuláři primárního vztahu (kontrola 248). Osoba proto musí mít PRÁVĚ
      * JEDEN vztah s `true`. Vedlejší vztah (`false`) je legitimní souběh;
-     * blokuje jen nerozhodnutý údaj nebo jiný počet primárních vztahů.
+     * blokuje jen nerozhodnutý údaj nebo jiný počet primárních vztahů. Účinný
+     * příznak (jediný vykázaný vztah je primární) určuje JmhzPrimaryEmployment.
      *
-     * @param list<array<string,mixed>> $employments
+     * @param array<array-key,?bool> $primaryFlags
      * @param list<JmhzScenario1Blocker> $blockers
      */
     private function inspectPrimaryEmployment(
-        array $employments,
+        array $primaryFlags,
         ?int $employeeId,
         array &$blockers,
     ): void {
         $primaryCount = 0;
         $resolved = true;
-        foreach ($employments as $employment) {
-            $flag = $this->object($employment['employment'] ?? null)['is_primary'] ?? null;
+        foreach ($primaryFlags as $flag) {
             if (!is_bool($flag)) {
                 $resolved = false;
             } elseif ($flag) {
@@ -2695,18 +2764,12 @@ final class JmhzScenario1DocumentResolver
         }
 
         $status = $frozen['other_household_caregiver_status'] ?? null;
-        if (!in_array($status, ['none', 'present'], true)) {
-            // 10453 je povinná položka bloku. `unknown` = otázku nikdo
-            // nezodpověděl, `inconsistent` = nároky si u téže domácnosti
-            // odporují; obojí musí rozhodnout účetní na kartě osoby.
-            $blockers[] = $this->blocker(
-                $status === 'inconsistent'
-                    ? 'jmhz_scenario1_child_credit_caregiver_inconsistent'
-                    : 'jmhz_scenario1_child_credit_caregiver_unknown',
-                'person',
-                $employeeId,
-                ['10453'],
-            );
+        // 10453 je povinná položka bloku. Pravidlo sdílí s kontrolou před
+        // během ({@see JmhzPreparationSnapshotBuilder::childCaregiverIssueCode()}),
+        // aby nezodpovězenou otázku ohlásila už před schválením mzdy.
+        $caregiverIssue = JmhzPreparationSnapshotBuilder::childCaregiverIssueCode($frozen);
+        if ($caregiverIssue !== null) {
+            $blockers[] = $this->blocker($caregiverIssue, 'person', $employeeId, ['10453']);
 
             return null;
         }
@@ -3394,21 +3457,18 @@ final class JmhzScenario1DocumentResolver
                 === JmhzAnnualEvidenceService::PROOF_NO_EMPLOYMENT_IN_TAX_YEAR
             && ($requestEvidence['tax_year'] ?? null) === $expectedTaxYear;
         $requested = null;
-        if ($month <= 2) {
-            $requested = match (true) {
-                $requestLocked => match ($requestStatus) {
-                    'requested' => true,
-                    'not_requested' => false,
-                    default => null,
-                },
-                $requestImpossible => false,
-                default => null,
-            };
-            if ($requested === null) {
+        if (JmhzAnnualEvidenceService::requestStatusReported($periodStart)) {
+            // Pravidlo sdílí kontrola před zahájením běhu, proto žije jinde.
+            $requestIssue = JmhzAnnualEvidenceService::requestIssueCode(
+                $request !== [],
+                $requestLocked ? $requestStatus : null,
+                $requestImpossible,
+            );
+            if ($requestIssue === null) {
+                $requested = $requestLocked && $requestStatus === 'requested';
+            } else {
                 $blockers[] = $this->blocker(
-                    $request === []
-                        ? 'jmhz_annual_request_source_missing'
-                        : 'jmhz_annual_request_status_unresolved',
+                    $requestIssue,
                     'person',
                     $employeeId,
                     ['10319'],
@@ -4096,6 +4156,15 @@ final class JmhzScenario1DocumentResolver
         if (($evidence['report_year'] ?? null) !== $reportYear
             || !self::validCollectiveAgreementTypes($types)
         ) {
+            // Tutéž příčinu už jmenuje nález přípravy i s místem opravy (roční
+            // údaje zaměstnavatele). Druhý, obecný nález na revizi by vedle něj
+            // stál jako další krok s radou „dokončete zvýrazněný krok" v běhu,
+            // kde se nic takového nedoplňuje.
+            foreach ($blockers as $existing) {
+                if ($existing->code === 'jmhz_employer_annual_collective_agreement_missing') {
+                    return [];
+                }
+            }
             $blockers[] = $this->blocker(self::SOURCE_MISSING_2027, 'revision', $revisionId, ['10214']);
 
             return [];
@@ -4166,6 +4235,33 @@ final class JmhzScenario1DocumentResolver
         return $annual;
     }
 
+    /**
+     * Zúčtovaný příjem celkem (10286). Haléře smí nést jen osvobozená část
+     * benefitu v koši § 6 odst. 9 ZDP; jiné haléře jsou chyba vstupu a hlásí
+     * se jako dosud. Pravidlo drží {@see PayrollWholeCrowns::reportedIncomeTotalCzk()}.
+     *
+     * @param list<JmhzScenario1Blocker> $blockers
+     */
+    private function incomeTotalCzk(
+        ?int $totalMinor,
+        ?int $exemptMinor,
+        ?int $employeeId,
+        array &$blockers,
+    ): ?int {
+        if ($totalMinor === null) {
+            return null;
+        }
+        $czk = PayrollWholeCrowns::reportedIncomeTotalCzk($totalMinor, $exemptMinor ?? 0);
+        if ($czk === null) {
+            return $this->wholeCzk($totalMinor, '10286', 'person', $employeeId, $blockers);
+        }
+        if ($czk < 0 && in_array('10286', $this->negativeIncomeClamp, true)) {
+            return 0;
+        }
+
+        return $czk;
+    }
+
     private function wholeCzk(
         ?int $minor,
         string $attributeId,
@@ -4177,13 +4273,19 @@ final class JmhzScenario1DocumentResolver
             return null;
         }
         if ($minor % 100 !== 0) {
-            $blockers[] = $this->blocker(
-                'jmhz_scenario1_whole_czk_required',
-                $entityType,
-                $entityId,
-                [$attributeId],
-            );
-            return null;
+            if (!in_array($attributeId, PayrollWholeCrowns::REPORTED_ROUNDED_UP, true)) {
+                $blockers[] = $this->blocker(
+                    'jmhz_scenario1_whole_czk_required',
+                    $entityType,
+                    $entityId,
+                    [$attributeId],
+                );
+                return null;
+            }
+            // Základy a čistý příjem s haléři z nadlimitní části benefitu:
+            // nahoru, viz PayrollWholeCrowns::REPORTED_ROUNDED_UP. Haléř ve
+            // mzdě dál zastaví úhrn 10286 a výdělek po složkách.
+            $minor = PayrollWholeCrowns::roundUpMinor($minor);
         }
         $whole = intdiv($minor, 100);
         if ($whole < 0 && in_array($attributeId, $this->negativeIncomeClamp, true)) {
@@ -4327,6 +4429,16 @@ final class JmhzScenario1DocumentResolver
     }
 
     /** @param list<string> $attributeIds */
+    /**
+     * Věta o neplatném variabilním symbolu registrace. Sdílí ji příprava
+     * hlášení i kontrola před během, aby obě místa říkala totéž.
+     */
+    public static function invalidVariableSymbolMessage(string $variableSymbol, string $reason): string
+    {
+        return 'Variabilní symbol zaměstnavatele u ČSSZ „' . $variableSymbol . '" u mzdové účtárny je vyplněný, '
+            . 'ale neplatný: ' . $reason . '. ČSSZ by hlášení s ním odmítla.';
+    }
+
     private function blocker(
         string $code,
         string $entityType,

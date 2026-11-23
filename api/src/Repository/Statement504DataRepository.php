@@ -84,17 +84,22 @@ final class Statement504DataRepository
             $stmt->execute([...$params, $typeId, $supplierId]);
             foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $part) $parts[(int) $part['line_id']][] = $part;
         }
+        // Podmínku na činnost rozhoduje činnost řádku (i v rozpadu), ostatní typy jdou přes filtr řádků.
+        $activityFilter = $dimension?->criterion($typeId);
+        $otherFilter = $dimension?->without($typeId);
         $filtered = null;
         $foreignSplits = [];
-        if ($dimension !== null && $dimension->typeId !== $typeId) {
-            [$sql, $params] = $dimension->lineSource($supplierId, 'f', $from, $to);
+        if ($otherFilter !== null) {
+            $otherTypes = array_map(static fn (DimensionFilter $c): int => $c->typeId, $otherFilter->criteria());
+            $typeMarks = implode(',', array_fill(0, count($otherTypes), '?'));
+            [$sql, $params] = $otherFilter->lineSource($supplierId, 'f', $from, $to);
             $stmt = $this->db->pdo()->prepare("SELECT f.id,CAST(SUM(f.signed_amount) * 100 AS SIGNED) AS cents,
-                EXISTS(SELECT 1 FROM journal_entry_line_dimension_splits s WHERE s.line_id=f.id AND s.dimension_type_id=?) AS has_split
+                EXISTS(SELECT 1 FROM journal_entry_line_dimension_splits s WHERE s.line_id=f.id AND s.dimension_type_id IN ({$typeMarks})) AS has_split
                 FROM {$sql}
                 JOIN journal_entries fe ON fe.id = f.entry_id AND fe.supplier_id = f.supplier_id
                 WHERE fe.supplier_id = ? AND fe.entry_date >= ? AND fe.entry_date <= ?
                 GROUP BY f.id");
-            $stmt->execute([$dimension->typeId, ...$params, $supplierId, $from, $to]);
+            $stmt->execute([...$otherTypes, ...$params, $supplierId, $from, $to]);
             $filtered = [];
             foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
                 $filtered[(int) $row['id']] = (int) $row['cents'];
@@ -111,7 +116,7 @@ final class Statement504DataRepository
             }
             if ((int) $line['split_count'] === 0) {
                 $this->assertActivity($line['activity']);
-                if ($dimension !== null && $dimension->typeId === $typeId && !in_array((int) $line['value_id'], $dimension->valueIds, true)) continue;
+                if ($activityFilter !== null && !in_array((int) $line['value_id'], $activityFilter->valueIds, true)) continue;
                 if ($filtered !== null && !array_key_exists($id, $filtered)) continue;
                 $amount = $filtered === null ? (int) $line['balance_cents'] : (int) $filtered[$id] * ($line['side'] === 'debit' ? 1 : -1);
                 $out[] = ['code' => $line['code'], 'activity' => $line['activity'], 'balance_cents' => $amount];
@@ -130,7 +135,7 @@ final class Statement504DataRepository
                 throw new ReportException('statement_joint_allocation_required', 'Vybraná dimenze a činnost vyžadují společnou alokaci.');
             }
             foreach ($allocated as $part) {
-                if ($dimension !== null && $dimension->typeId === $typeId && !in_array((int) $part['value_id'], $dimension->valueIds, true)) continue;
+                if ($activityFilter !== null && !in_array((int) $part['value_id'], $activityFilter->valueIds, true)) continue;
                 $out[] = ['code' => $line['code'], 'activity' => $part['semantic_key'], 'balance_cents' => (int) $part['cents']
                     * ($line['side'] === 'debit' ? 1 : -1) * ((int) $line['is_red_storno'] === 1 ? -1 : 1)];
             }

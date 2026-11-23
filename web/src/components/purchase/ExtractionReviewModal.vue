@@ -36,7 +36,7 @@ import {
   type DimensionSplits,
 } from '@/api/dimensions'
 import DimensionChips from '@/components/dimensions/DimensionChips.vue'
-import DocumentSidePreview from '@/components/documents/DocumentSidePreview.vue'
+import DocumentPreviewSplit from '@/components/documents/DocumentPreviewSplit.vue'
 import { useSidePreview } from '@/composables/useSidePreview'
 
 /**
@@ -95,16 +95,14 @@ const invoice = computed<PurchaseInvoice | null>(() => queue.value[index.value] 
 const isLast = computed(() => index.value >= queue.value.length - 1)
 
 // ── Náhled originálu ────────────────────────────────────────────────────────
-// Modál nemá vedle sebe boční menu, takže formulář s náhledem se vejde už od `xl`.
 // Volba je lepkavá a výchozí stav otevřený: kontrola vytěžení je porovnání s dokladem.
-const preview = useSidePreview('purchase_invoices', 'review_preview_open', {
-  defaultOpen: true,
-  query: '(min-width: 1280px)',
-})
+const preview = useSidePreview('purchase_invoices', 'review_preview_open', { defaultOpen: true })
 /** Detail dokladu už originál ukazuje vedle sebe a Modal od něj odsadil backdrop. */
 const pageHasPreview = ref(false)
 const previewShown = computed(() => preview.open.value && !pageHasPreview.value)
-const previewSideBySide = computed(() => previewShown.value && preview.wide.value)
+// Šířka okna se řídí volbou, ne změřeným výsledkem: v úzkém okně modál stejně nepřeroste
+// okno, a kdyby šířka modálu závisela na tom, co se do něj vejde, šlo by o kruh.
+const previewWantsSide = computed(() => previewShown.value && preview.placement.value === 'side')
 const previewSrc = computed(() => invoice.value?.pdf_path ? purchaseInvoicesApi.pdfUrl(invoice.value.id, true) : null)
 
 const proposals = computed(() => {
@@ -460,9 +458,9 @@ onMounted(async () => {
 
 <template>
   <Modal v-if="!loading && invoice" :title="t('purchase_invoice.extraction_review.title')"
-    :width-class="previewSideBySide ? 'max-w-[112rem]' : 'max-w-5xl'" @close="emit('close')">
-    <div :class="previewSideBySide ? 'flex items-start gap-4' : ''">
-    <div class="space-y-4" :class="previewSideBySide ? 'flex-1 min-w-0' : ''">
+    :width-class="previewWantsSide ? 'max-w-[112rem]' : 'max-w-5xl'" @close="emit('close')">
+    <DocumentPreviewSplit :ctrl="preview" :show="previewShown" :src="previewSrc" :file-name="invoice.pdf_original_name"
+      embedded form-class="space-y-4" side-class="sticky top-0 h-[calc(100dvh-13rem)] min-h-[24rem]">
       <!-- Hlavička dokladu -->
       <div class="flex flex-wrap items-start justify-between gap-3">
         <div class="min-w-0">
@@ -586,17 +584,7 @@ onMounted(async () => {
         </ul>
         <p v-if="readOnlyReason" :class="BTN_DISABLED_NOTE" class="mt-2">{{ readOnlyReason }}</p>
       </div>
-
-      <!-- Úzké okno: náhled originálu pod formulářem -->
-      <DocumentSidePreview v-if="previewShown && !previewSideBySide" embedded
-        class="w-full h-[70vh] min-h-[20rem]"
-        :src="previewSrc" :file-name="invoice.pdf_original_name" @close="preview.close()" />
-    </div>
-    <!-- Široké okno: náhled originálu vedle formuláře, při posunu formuláře zůstává vidět -->
-    <DocumentSidePreview v-if="previewSideBySide" embedded
-      class="shrink-0 grow-0 basis-[46%] min-w-[26rem] max-w-[56rem] sticky top-0 h-[calc(100dvh-13rem)] min-h-[24rem]"
-      :src="previewSrc" :file-name="invoice.pdf_original_name" @close="preview.close()" />
-    </div>
+    </DocumentPreviewSplit>
 
     <template #footer>
       <div class="flex flex-wrap items-center justify-between gap-3">

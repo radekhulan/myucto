@@ -6,11 +6,10 @@ namespace MyInvoice\Action\Invoice;
 
 use MyInvoice\Http\Json;
 use MyInvoice\Http\SupplierGuard;
-use MyInvoice\Infrastructure\Config\Config;
-use MyInvoice\Infrastructure\Config\RuntimePaths;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Repository\InvoiceRepository;
 use MyInvoice\Service\ActivityLogger;
+use MyInvoice\Service\Invoice\IssuedInvoiceOriginalPdfStore;
 use MyInvoice\Service\IpMatcher;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
@@ -34,7 +33,7 @@ final class DownloadImportedPdfAction
 {
     public function __construct(
         private readonly InvoiceRepository $repo,
-        private readonly Config $config,
+        private readonly IssuedInvoiceOriginalPdfStore $originals,
         private readonly ActivityLogger $logger,
         private readonly IpMatcher $ipMatcher,
     ) {}
@@ -56,25 +55,10 @@ final class DownloadImportedPdfAction
             return Json::error($response, 'no_pdf', 'K této faktuře není archivovaný zdrojový PDF dokument.', 404);
         }
 
-        $archiveRoot = $this->resolveArchiveRoot();
-        $archiveRootReal = realpath($archiveRoot);
-        if ($archiveRootReal === false) {
-            return Json::error($response, 'storage_unavailable', 'Archiv nelze nalézt.', 500);
-        }
-
-        // Sestavit absolutní cestu a ověřit, že NEUTÍKÁ z archiveRoot (path traversal guard).
-        $fullPath = $archiveRootReal . DIRECTORY_SEPARATOR . str_replace('/', DIRECTORY_SEPARATOR, $relativePath);
-        $fullPathReal = realpath($fullPath);
-        if ($fullPathReal === false || !is_file($fullPathReal)) {
+        // Path-traversal guard (case-insensitive na Windows) drží úložiště originálů.
+        $fullPathReal = $this->originals->resolveAbsolutePath($relativePath);
+        if ($fullPathReal === null) {
             return Json::error($response, 'file_missing', 'Archivovaný soubor nebyl na disku nalezen.', 404);
-        }
-        // Windows je case-insensitive FS — realpath() může vrátit nekonzistentní casing
-        // mezi archiveRootReal a fullPathReal. Na Linuxu zachováme striktní compare.
-        $isWindows = DIRECTORY_SEPARATOR === '\\';
-        $haystack = ($isWindows ? strtolower($fullPathReal) : $fullPathReal);
-        $needle   = ($isWindows ? strtolower($archiveRootReal) : $archiveRootReal) . DIRECTORY_SEPARATOR;
-        if (!str_starts_with($haystack, $needle)) {
-            return Json::error($response, 'forbidden', 'Cesta mimo archive root.', 403);
         }
 
         $size = filesize($fullPathReal);
@@ -135,23 +119,5 @@ final class DownloadImportedPdfAction
         }
 
         return $resp;
-    }
-
-    /**
-     * Import-archive root pro vydané faktury. MUSÍ být shodný s tím, kam zapisuje
-     * import (IdokladImportService/FakturoidImportService::archiveIssuedPdf), tzn.
-     * config klíč `invoice.import_archive_storage` s fallbackem na `invoices-imported`.
-     */
-    private function resolveArchiveRoot(): string
-    {
-        $dir = (string) $this->config->get('invoice.import_archive_storage', '');
-        if ($dir !== '') {
-            return $dir;
-        }
-        $uploads = (string) $this->config->get('storage.uploads_dir', '');
-        if ($uploads !== '') {
-            return dirname($uploads) . '/invoices-imported';
-        }
-        return RuntimePaths::storage('invoices-imported');
     }
 }

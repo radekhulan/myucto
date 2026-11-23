@@ -109,4 +109,23 @@ final class CashRulePresetsTest extends TestCase
         $out = (new CashRulePresets($rules))->listForOther(1, 'out');
         self::assertSame('518', $out[0]['counter_account_code']);
     }
+
+    /**
+     * Předkontace převzaté z POHODY mají číselné klíče (513000). PHP z nich v poli
+     * udělá int a řazení přes strcmp() pak shodilo celý seznam předvoleb i editor
+     * pokladního dokladu.
+     */
+    public function testNumericRuleKeysFromMigration(): void
+    {
+        $rules = $this->createStub(PostingRuleRepository::class);
+        $rules->method('effectiveMap')->willReturn([
+            '513000' => self::rule('513', '211', 'Reprezentace'),
+            '3Pv'    => self::rule('211', '602', 'Tržba'),
+            '538'    => self::rule('538', '211', 'Poplatky'),
+        ]);
+        $p = new CashRulePresets($rules);
+
+        self::assertSame(['3Pv', '513000', '538'], array_column($p->listForOther(1), 'rule_key'));
+        self::assertTrue($p->isAllowedForOther(1, '513000'));
+    }
 }

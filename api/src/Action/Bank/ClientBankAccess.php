@@ -6,6 +6,7 @@ namespace MyInvoice\Action\Bank;
 
 use MyInvoice\Http\SupplierGuard;
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Middleware\LicenseMiddleware;
 use MyInvoice\Security\AccessLevel;
 use MyInvoice\Security\RequestAuthorization;
 use Psr\Http\Message\ServerRequestInterface as Request;
@@ -105,6 +106,22 @@ final class ClientBankAccess
     /** Jeden dotaz pro celou stránku; SSOT zohledňuje i platby obsazené mimo faktury. */
     public function redactTransactions(Request $request, array $rows): array
     {
+        $rows = array_map(static function (array $row) use ($request): array {
+            if (!empty($row['matched_membership_claims'])) {
+                $row['resolution'] = 'membership';
+                $row['match_available'] = false;
+                $row['ignore_available'] = false;
+            }
+            // Podrobnosti členů jen v relaci nebo přes token s plným zápisem: běžný API token je nedostane,
+            // stejně jako členské routy (ApiScopeMiddleware::BEARER_SESSION_ONLY) a katalog bez členských čísel.
+            // Stav resolution zůstává.
+            if (!RequestAuthorization::actsAsSession($request) || RequestAuthorization::isClientType($request)
+                || !RequestAuthorization::allows($request, 'accounting', AccessLevel::READ)
+                || LicenseMiddleware::state($request)?->hasCommercialFeatures() === false) {
+                if (array_key_exists('matched_membership_claims', $row)) $row['matched_membership_claims'] = [];
+            }
+            return $row;
+        }, $rows);
         // Výpis banky je bezplatný, ostatní položky ne: vazba na ně vyžaduje jejich právo i licenci.
         if (!RequestAuthorization::allows($request, 'other_items', \MyInvoice\Security\AccessLevel::READ)
             || \MyInvoice\Middleware\LicenseMiddleware::state($request)?->hasCommercialFeatures() === false) {
@@ -120,8 +137,8 @@ final class ClientBankAccess
         $available = $stmt->fetchAll(\PDO::FETCH_KEY_PAIR);
         return array_map(static function (array $row) use ($request, $available): array {
             $posting = $row['posting'] ?? [];
-            $row['resolution'] = !empty($posting['payroll_matched']) ? 'payroll'
-                : (!empty($posting['transfer']) ? 'transfer' : (!empty($posting['outside_saldo']) ? 'outside_saldo' : null));
+            $row['resolution'] = ($row['resolution'] ?? null) === 'membership' ? 'membership' : (!empty($posting['payroll_matched']) ? 'payroll'
+                : (!empty($posting['transfer']) ? 'transfer' : (!empty($posting['outside_saldo']) ? 'outside_saldo' : null)));
             $free = (bool) ($available[(int) $row['id']] ?? false);
             $row['match_available'] = $free || in_array($row['match_status'], ['auto_exact', 'auto_partial', 'manual'], true);
             $row['ignore_available'] = $free || ($row['match_status'] === 'ignored' && ($row['ignore_origin'] ?? null) === 'manual');
@@ -143,7 +160,8 @@ final class ClientBankAccess
         foreach (['posting', 'card'] as $key) if (array_key_exists($key, $row)) $row[$key] = null;
         // Ostatní pohledávky a závazky klientská role nevidí (agenda účetní).
         if (array_key_exists('matched_other_items', $row)) $row['matched_other_items'] = [];
-        unset($row['dimensions'], $row['match_reason'], $row['matched_by']);
+        if (array_key_exists('matched_membership_claims', $row)) $row['matched_membership_claims'] = [];
+        unset($row['dimensions'], $row['rule_dimension_types'], $row['match_reason'], $row['matched_by']);
         return $row;
     }
 }

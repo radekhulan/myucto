@@ -38,6 +38,8 @@ final class JmhzCodeCatalogCoverageTest extends TestCase
      * @var array<string,string>
      */
     private const NON_CODES = [
+        'jmhz_corrections_override' => 'key',
+        'jmhz_corrections_override_reason' => 'field',
         'eldp_code' => 'field',
         'eldp_code_evidence' => 'field',
         'eldp_code_row_sha256' => 'field',
@@ -60,6 +62,8 @@ final class JmhzCodeCatalogCoverageTest extends TestCase
         'jmhz_apz_contribution_status' => 'field',
         'jmhz_apz_instrument_code' => 'field',
         'jmhz_codebook' => 'field',
+        // Boolean potvrzení výkazového souhrnu v PayrollQuickInputRepository::workedTimeForPage.
+        'jmhz_confirmed' => 'field',
         'jmhz_correction_evidence' => 'field',
         'jmhz_deep_mining_work_applies' => 'table',
         'jmhz_default_interpretations' => 'field',
@@ -96,6 +100,8 @@ final class JmhzCodeCatalogCoverageTest extends TestCase
         'jmhz_submission_correction' => 'enum',
         'jmhz_takeover_detail' => 'other',
         // Zařazení dohody o srážce do atributu JMHZ 10350 až 10353 (sloupec dohody).
+        // Klíč odpovědi přehledu podání a testu hlášení (závora přípravy, JmhzPreparationGate).
+        'jmhz_preparation_gate' => 'key',
         'jmhz_target' => 'table',
         'jmhz_temporary_assignment_status' => 'field',
         'jmhz_transport' => 'key',

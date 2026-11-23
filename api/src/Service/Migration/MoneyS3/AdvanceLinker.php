@@ -32,7 +32,7 @@ use PDO;
  * k záloze téhož partnera. Vrácení zálohy příchozí platbou se spáruje se zálohou
  * ({@see matchAdvanceRefunds()}). Čerpání, které Money vede bez odkazu na zálohu (řádek
  * konečné faktury na zálohovém účtu s vlastním symbolem faktury), spáruje podle saldokonta
- * {@see AdvanceDeductionMatcher}.
+ * {@see AdvanceDeductionMatcher} - poskytnuté zálohy na 314 i přijaté proformy na 324.
  *
  * Existující vazby převod nepřepisuje a opakovaný převod nic nezdvojí.
  */
@@ -125,11 +125,19 @@ final class AdvanceLinker
                     }
                 }
             }
-            $issued ? $this->linkIssued($ctx, $deductions, $ddkp) : $this->linkPurchase($ctx, $deductions, $ddkp, $legacy);
+            if ($issued) {
+                $this->linkIssued($ctx, $deductions, $ddkp);
+                $issuedRefs = array_map(static fn (array $advances): array => array_keys($advances), $deductions);
+            } else {
+                $this->linkPurchase($ctx, $deductions, $ddkp, $legacy);
+            }
         }
         $this->matchAdvanceRefunds($ctx);
         $this->repointCancelledAdvanceRefunds($ctx);
         (new AdvanceDeductionMatcher($this->db, $this->map))->match($ctx, $dirs);
+        // Vydaná faktura s víc zálohami vazbu na doklad nedostane; čerpání proforem páruje
+        // saldokonto 324 (odkazy položek odpočtu mají přednost).
+        AdvanceDeductionMatcher::issued($this->db, $this->map)->match($ctx, $dirs, $issuedRefs ?? []);
     }
 
     /**
@@ -483,6 +491,51 @@ final class AdvanceLinker
             }
         }
         $this->linkTaxDocuments($ctx, $ddkp, 'invoices', 'parent_invoice_id', 'invoice_type', 'client_id');
+    }
+
+    /**
+     * Platba zálohové faktury z Money a DDKP z Money k ní: Money je svazuje jen textem a převod
+     * navázal DDKP na zálohu ({@see linkTaxDocuments()}), platbu ne. Bez vazby platby
+     * (`invoice_payments.tax_document_invoice_id`) MyÚčto nepozná, že úplata je zdaněná:
+     * kontrola DDKP ji hlásí a k platbě jde vystavit druhý DDKP. Vazba vznikne jen
+     * jednoznačně: záloha převodu má jedinou platbu, ta je převzatá z Money a bez DDKP,
+     * k záloze je jediný nestornovaný DDKP, žádná platba na něj neukazuje a jeho částka
+     * s DPH se rovná platbě (stejná měna). Ostatní platby záloh z Money vyjímá z kontroly
+     * DDKP predikát {@see \MyInvoice\Service\Invoice\TakenOverPayment::isTaxDeclaredByOrigin()}.
+     * Opakovaný převod i oprava dříve převedené firmy nic nezdvojí.
+     *
+     * @return int počet navázaných plateb
+     */
+    public function linkTaxDocumentPayments(int $supplierId, ?ImportProtocol $protocol = null): int
+    {
+        $pdo = $this->db->pdo();
+        $stmt = $pdo->prepare(
+            "SELECT ip.id AS payment_id, td.id AS tax_document_id
+               FROM invoices pf
+               JOIN (SELECT invoice_id, COUNT(*) AS n, MIN(id) AS id FROM invoice_payments WHERE supplier_id = ? GROUP BY invoice_id) pc
+                 ON pc.invoice_id = pf.id AND pc.n = 1
+               JOIN invoice_payments ip ON ip.id = pc.id
+               JOIN (SELECT parent_invoice_id, COUNT(*) AS n, MIN(id) AS id FROM invoices
+                      WHERE supplier_id = ? AND invoice_type = 'tax_document' AND status <> 'cancelled' AND parent_invoice_id IS NOT NULL
+                      GROUP BY parent_invoice_id) tc ON tc.parent_invoice_id = pf.id AND tc.n = 1
+               JOIN invoices td ON td.id = tc.id
+              WHERE pf.supplier_id = ? AND pf.invoice_type = 'proforma'
+                AND EXISTS (SELECT 1 FROM money_s3_import_map m WHERE m.supplier_id = pf.supplier_id AND m.kind = ? AND m.target_id = pf.id)
+                AND ip.tax_document_invoice_id IS NULL AND ip.note LIKE ?
+                AND td.currency_id = pf.currency_id AND ABS(td.total_with_vat - ip.amount) < 0.01
+                AND NOT EXISTS (SELECT 1 FROM invoice_payments o WHERE o.tax_document_invoice_id = td.id)"
+        );
+        $stmt->execute([$supplierId, $supplierId, $supplierId, MoneyS3ImportRepository::KIND_INVOICE, IssuedPaymentRecorder::NOTE_PREFIX . '%']);
+        $set = $pdo->prepare('UPDATE invoice_payments SET tax_document_invoice_id = ? WHERE id = ? AND supplier_id = ? AND tax_document_invoice_id IS NULL');
+        $linked = 0;
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $r) {
+            $set->execute([(int) $r['tax_document_id'], (int) $r['payment_id'], $supplierId]);
+            $linked += $set->rowCount();
+        }
+        if ($linked > 0) {
+            $protocol?->count(DocumentLinker::STEP_PAYMENTS, 'tax_document_payment_linked', $linked);
+        }
+        return $linked;
     }
 
     /** @param array<int,array<int,true>> $ddkp */

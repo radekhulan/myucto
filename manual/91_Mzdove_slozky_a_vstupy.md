@@ -28,6 +28,12 @@
 Hromadně zadáte měsíc rychleji v [Rychlém měsíčním vstupu](79_Rychly_mesicni_vstup.md).
 Absence, cestovní náhrady, benefity a srážky se zadávají ve vlastních agendách.
 
+Rezervované složky hodinového základu, dosažené mzdy za přesčas, placeného
+volna za svátek a doplatku do minima musí zachovat výchozí zařazení pro daň,
+pojištění, průměrný výdělek a výkazy. Vlastní složka se stejným kódem a odlišným
+zařazením zablokuje přípravu běhu. Název, četnost, účetní předkontace
+a cílová kolonka JMHZ zůstávají nastavitelné.
+
 ### 91.2.1 Jak je stránka uspořádaná
 
 `Mzdy → Mzdové složky a vstupy` má nahoře **Mzdové období** a záložky:
@@ -56,7 +62,44 @@ Absence, cestovní náhrady, benefity a srážky se zadávají ve vlastních age
 **Jak poznáte, že je hotovo:** Vstup má stav **Schválený**. Po zahájení
 mzdového běhu se změní na **Uzamčený během**.
 
+### 91.3.1 Započtení vlastní složky do minimální mzdy
+
+V katalogu otevřete **Upravit** nebo **Nová složka** a zkontrolujte
+**Započtení do minimální mzdy**. Posouzení je samostatné od daní,
+pojistného a průměrného výdělku. Zdanitelná položka nemusí být
+započitatelná do minima.
+
+Pravidla serveru určují jednoznačné složky pouze ke čtení: jednoznačně
+určenou běžnou mzdu a odměnu za práci, zákonné příplatky, náhrady, benefity či
+nepeněžní plnění nelze vlastní volbou převést do jiné zákonné
+kategorie. U nejednoznačných vlastních prémií, příplatků či doplatků
+zvolte zahrnutí nebo vyloučení a připojte konkrétní odůvodnění
+(nejvýše 500 znaků). **Ruční posouzení** nebo výchozí neurčená volba
+neznamená zahrnutí; náhled minima může vyžádat její vyřešení. Starší
+hodinová složka může vyžadovat posouzení, pokud z jejího zařazení není
+zřejmé, zda obsahuje běžnou práci nebo dosaženou mzdu za přesčas.
+
+Při změně druhu či hodnoty složky na jednoznačně klasifikovanou položku
+se dřívější vlastní volba a odůvodnění zruší; původní zahrnutí se
+nesmí skrytě přenést například na nepeněžní plnění. Změna nezasahuje
+do již uzavřených snímků mezd. Dopad zkontrolujte v
+[náhledu minima](79_Rychly_mesicni_vstup.md#79813-minimalni-mzda-a-doplatek)
+a při opravě mzdy použijte odpovídající novou revizi běhu.
+
 ## 91.4 Krok za krokem: pravidelný předpis
+
+Před přepnutím vztahu na hodinové odměňování ukončete aktivní předpis
+základní mzdy. U hodinového vztahu se předpis procentem ze sjednané
+měsíční mzdy předá k ručnímu posouzení; stará měsíční částka se nepoužije.
+Sjednaná hodinová sazba na kartě vztahu není hotovým mzdovým vstupem.
+[Hodinový výpočet](79_Rychly_mesicni_vstup.md#79812-vypocet-hodinove-mzdy-a-dolozeni-naroku)
+vytváří běžnou mzdu, dosažený přesčas, příplatky a náhrady jako samostatné
+doložené nároky. Vypočtený hodinový základ se nepodsouvá jako sjednaná
+měsíční částka procentnímu předpisu. Vstupy spravované hodinovým
+výpočtem neopisujte druhou ruční položkou; oprava patří do hodin, sazby
+nebo příslušného podkladu. Výpočet připravuje také doložený doplatek
+do minimální mzdy. Schválení vyžaduje úplné podklady a vyřešené
+konkrétní kontroly běhu; výplatní páska přebírá uložený rozpis nároků.
 
 1. Otevřete záložku **Pravidelné předpisy** a klikněte na **Nový předpis**.
 2. Vyberte zaměstnance, vztah a složku.
@@ -262,6 +305,31 @@ filtr**. **Schválit … odpovídajících filtru** schválí všechny koncepty 
 a schválené přeskočí; každý vstup prochází stejnými kontrolami jako jednotlivě
 (roční limit benefitu, podklad docházky u stravného, složka k ručnímu
 posouzení). Stejně funguje **Zrušit … konceptů**, vždy s potvrzením.
+
+**Zaokrouhlit vstupy na celé koruny nahoru.** Měsíční hlášení (JMHZ) vykazuje
+výdělek v celých korunách a mzda se podle § 142 odst. 2 zákoníku práce
+zaokrouhluje nahoru. Vstup s haléři u složky zařazené do hlášení (typicky
+provize nebo příplatek z importu docházky) proto mzdový běh hlásí jako blokující
+kontrolu ještě před schválením, s výčtem vstupů a odkazem sem. Tlačítko
+zaokrouhlí haléřové vstupy období (případně jen zúženého vztahu) nahoru, a to
+koncepty i schválené vstupy, až je potvrdíte v dialogu; schválené jen uživatel s právem schvalovat vstupy.
+Dva vstupy téže složky, jejichž součet vyjde na celé koruny, nemění. Vstupy
+uzamčené během, vypočtené vstupy (hodinová mzda, pravidelná složka, náhrada)
+a vstupy navázané na vyúčtování cesty zůstanou beze změny a pod lištou je
+uvedený důvod. Uzamčené vstupy uvolní zrušení běhu, vstupy ani docházka se tím
+nesmažou. Každá změna částky se zapisuje do auditu.
+
+Výjimkou je osvobozený benefit v zákonném koši (příspěvek na stravování,
+volnočasový nebo zdravotní benefit, přechodné ubytování). Zákonný limit sám
+nese haléře (129,50 Kč za směnu, polovina průměrné mzdy 24 483,50 Kč za rok
+2026), takže částka přesně na limitu ani nadlimitní část na celé koruny vyjít
+nemusí a zaokrouhlení nahoru by vytvořilo zdanitelný přebytek nad limit. Takový
+vstup proto kontrola nehlásí a tlačítko ho nemění. Měsíční hlášení pak vykáže
+osvobozenou část v celých korunách dolů, základ zálohy na daň, příjem
+zahrnovaný do vyměřovacího základu a čistý příjem nahoru, takže součet
+zdanitelné a osvobozené části dává zúčtovaný příjem celkem. Má-li schválený
+benefit nadlimitní část, musí být částka vstupu v celých korunách.
+
 [Rychlý měsíční vstup](79_Rychly_mesicni_vstup.md) uloží řádky rovnou jako
 schválené, má-li uživatel oprávnění.
 

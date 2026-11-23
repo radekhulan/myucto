@@ -20,6 +20,8 @@ final class EmailTemplatePreviewData
                 'bank_account' => '1000000005/0100', 'invoice_type' => 'invoice'],
             'work_report' => ['title' => 'Ukázkový výkaz', 'total_hours' => 4, 'material_total' => 100, 'total_amount' => 1000, 'material_title' => 'Materiál'],
             'greeting' => $locale === 'en' ? 'Hello,' : 'Dobrý den,', 'intro_prefix' => $locale === 'en' ? 'Please find your invoice' : 'Posíláme fakturu',
+            'quote_number' => 'NAB-2026-001', 'quote_title' => 'Ukázková nabídka',
+            'message' => 'Dobrý den, v příloze posíláme ukázkovou nabídku.',
             'client_name' => 'Ukázkový odběratel', 'amount_to_pay' => 1210, 'paid_amount' => 1210,
             'days_overdue' => 7, 'payment_varsymbol' => '20260001', 'payment_method' => 'bank_transfer',
             'paid_at' => '2026-01-20', 'amount_paid' => 1210, 'is_proforma' => false, 'public_url' => 'https://preview.example.test/invoice/demo',

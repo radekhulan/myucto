@@ -8,6 +8,9 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Infrastructure\Database\TransactionFailure;
 use MyInvoice\Service\Payroll\PayrollYearCloseGuard;
 use MyInvoice\Service\Payroll\Submission\PayrollAgendaGroupCatalog;
+use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzSpecVersion;
+use MyInvoice\Service\Payroll\Submission\HealthInsurance\HealthInsuranceSubmissionService;
+use MyInvoice\Service\Payroll\Submission\PayrollSubmissionStateMachine;
 use PDO;
 
 final class PayrollSubmissionRepository
@@ -339,7 +342,7 @@ final class PayrollSubmissionRepository
         ?string $agendaGroup = null,
     ): array {
         $statement = $this->db->pdo()->prepare(
-            'SELECT obligation.status,
+            'SELECT obligation.status, obligation.agenda_code, obligation.subject_reference,
                     deadline.earliest_submission_on, deadline.due_on,
                     latest_submission.status AS submission_status'
             . self::OVERVIEW_FROM
@@ -358,6 +361,8 @@ final class PayrollSubmissionRepository
             $row = self::associativeRow($row, 'souhrn mzdových podání');
             $rows[] = [
                 'status' => self::string($row, 'status'),
+                'agenda_code' => self::string($row, 'agenda_code'),
+                'subject_reference' => self::string($row, 'subject_reference'),
                 'earliest_submission_on' => self::string(
                     $row,
                     'earliest_submission_on',
@@ -496,6 +501,45 @@ final class PayrollSubmissionRepository
             'status' => self::string($row, 'status'),
             'period_start' => self::string($row, 'period_start'),
         ];
+    }
+
+    /**
+     * Řádná povinnost období, ke které ještě NIKDY nevzniklo podání.
+     *
+     * Povinnost se eviduje dřív, než se podání zmrazí. Když zmrazení neprojde
+     * (katalog kontrol, datum), povinnost zůstane bez podání. Další příprava
+     * z opravené revize ji musí převzít: jako „druhé řádné hlášení" by ji
+     * pojistka období odmítla, ačkoli se nic nepodalo.
+     */
+    public function findUnfiledRegularObligationId(
+        int $supplierId,
+        string $environment,
+        string $agendaCode,
+        string $subjectReference,
+        string $periodStart,
+    ): ?int {
+        $statement = $this->db->pdo()->prepare(
+            'SELECT obligation.id
+               FROM payroll_obligations obligation
+              WHERE obligation.supplier_id = ?
+                AND obligation.environment = ?
+                AND obligation.agenda_code = ?
+                AND obligation.subject_reference = ?
+                AND obligation.regular_period_scope_on = ?
+                AND obligation.status = "open"
+                AND NOT EXISTS (
+                    SELECT 1
+                      FROM payroll_submissions submission
+                     WHERE submission.supplier_id = obligation.supplier_id
+                       AND submission.obligation_id = obligation.id
+                )
+              ORDER BY obligation.id
+              LIMIT 1',
+        );
+        $statement->execute([$supplierId, $environment, $agendaCode, $subjectReference, $periodStart]);
+        $id = $statement->fetchColumn();
+
+        return $id === false ? null : (int) $id;
     }
 
     /**
@@ -1624,6 +1668,83 @@ final class PayrollSubmissionRepository
         $statement->execute([$submissionId, $supplierId, $environment]);
 
         return $statement->fetchColumn() !== false;
+    }
+
+    /** @return list<int> */
+    public function cancelUnsentPreviousRunSubmissions(int $supplierId, int $runId, int $revisionId): array
+    {
+        return $this->transaction(function () use ($supplierId, $runId, $revisionId): array {
+            $this->lockSupplier($supplierId);
+            $agendas = ['JMHZ', ...JmhzSpecVersion::MONTHLY_AGENDA_CODES];
+            $agendaPlaceholders = implode(',', array_fill(0, count($agendas), '?'));
+            $statement = $this->db->pdo()->prepare(
+                'SELECT DISTINCT submission.id, submission.environment, submission.obligation_id,
+                        submission.status, submission.row_version, obligation.row_version AS obligation_row_version,
+                        approved.approved_at
+                   FROM payroll_run_revisions previous
+                   JOIN payroll_run_revisions approved
+                     ON approved.supplier_id = previous.supplier_id
+                    AND approved.run_id = previous.run_id
+                    AND approved.id = ? AND approved.status = "approved"
+                   JOIN payroll_runs run
+                     ON run.supplier_id = previous.supplier_id AND run.id = previous.run_id
+                   JOIN payroll_obligations obligation
+                     ON obligation.supplier_id = previous.supplier_id
+                    AND obligation.period_start = run.period_start
+                   JOIN payroll_submissions submission
+                     ON submission.supplier_id = obligation.supplier_id
+                    AND submission.environment = obligation.environment
+                    AND submission.obligation_id = obligation.id
+                   LEFT JOIN payroll_jmhz_preparation_snapshots preparation
+                     ON preparation.supplier_id = previous.supplier_id
+                    AND preparation.environment = submission.environment
+                    AND preparation.source_revision_id = previous.id
+                    AND obligation.source_event_reference = CONCAT("jmhz_preparation:", preparation.id)
+                  WHERE previous.supplier_id = ? AND previous.run_id = ?
+                    AND previous.revision_no < approved.revision_no
+                    AND submission.status IN ("draft", "validated", "prepared", "ready")
+                    AND (
+                        (obligation.agenda_code = ?
+                         AND (submission.source_revision_id = previous.id
+                              OR obligation.source_event_reference LIKE CONCAT("payroll_health_payment_overview:", previous.id, ":%")))
+                        OR (obligation.agenda_code IN (' . $agendaPlaceholders . ')
+                            AND (submission.source_revision_id = previous.id OR preparation.id IS NOT NULL))
+                    )
+                    AND NOT EXISTS (
+                        SELECT 1 FROM payroll_submission_transport_attempts attempt
+                         WHERE attempt.supplier_id = submission.supplier_id
+                           AND attempt.environment = submission.environment
+                           AND attempt.submission_id = submission.id
+                    )
+                    AND NOT EXISTS (
+                        SELECT 1 FROM payroll_submission_artifacts artifact
+                        JOIN submission_outbox outbox
+                          ON outbox.supplier_id = artifact.supplier_id
+                         AND outbox.environment = artifact.environment AND outbox.artifact_id = artifact.id
+                         AND outbox.channel = "isds" AND outbox.artifact_kind = "payroll_submission"
+                         AND outbox.dispatch_state NOT IN ("failed", "cancelled")
+                         WHERE artifact.supplier_id = submission.supplier_id
+                           AND artifact.environment = submission.environment AND artifact.submission_id = submission.id
+                    )
+                  ORDER BY submission.id FOR UPDATE',
+            );
+            $statement->execute([$revisionId, $supplierId, $runId, HealthInsuranceSubmissionService::AGENDA_PAYMENT_OVERVIEW, ...$agendas]);
+            $submissions = $statement->fetchAll(PDO::FETCH_ASSOC);
+            $machine = new PayrollSubmissionStateMachine();
+            foreach ($submissions as $submission) {
+                $machine->assertTransition((string) $submission['status'], 'cancelled_in_time');
+                $this->updateSubmissionStatus(
+                    $supplierId, (int) $submission['id'], (int) $submission['row_version'],
+                    'cancelled_in_time', null, null, (string) $submission['approved_at'],
+                );
+                $this->updateObligationStatus(
+                    $supplierId, (string) $submission['environment'], (int) $submission['obligation_id'],
+                    (int) $submission['obligation_row_version'], 'cancelled',
+                );
+            }
+
+            return array_map(static fn (array $submission): int => (int) $submission['id'], $submissions);
+        });
     }
 
     /**

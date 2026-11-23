@@ -18,11 +18,12 @@ import { createWindowManager } from '@/workspace/windowManager'
 import { mirrorWindowLocation } from '@/workspace/windowHistory'
 import { resizePaneFractions } from '@/workspace/panelSizing'
 import { paneCountFromShortcut, panelIndexFromShortcut } from '@/workspace/panelShortcuts'
-import { rightPanePlan } from '@/workspace/panelLinks'
 import { installShiftClickNavigation } from '@/workspace/frameNavigation'
 import WorkspacePane from './WorkspacePane.vue'
+import { NEW_TAB_PATH } from '@/workspace/windowTabs'
+import { openTabsSummary, plainMenuItems, setOpenTabSelectHandler, workspaceMenuItems, workspaceOpenTabs, type WorkspaceMenuItem } from '@/workspace/newTabData'
 
-const props = defineProps<{ accentFor?: (fullPath: string) => string }>()
+const props = defineProps<{ accentFor?: (fullPath: string) => string, agendaFor?: (fullPath: string) => string, menuItems?: WorkspaceMenuItem[] }>()
 const workspace = useWorkspaceStore()
 const { t } = useI18n()
 const { locale } = useI18n()
@@ -47,6 +48,7 @@ const windows = createWindowManager({
   pinia,
   frames: true,
   frameContainer: () => frameLayer.value,
+  agendaFor: fullPath => props.agendaFor?.(fullPath) ?? '',
   currentSupplier: () => ({ id: supplier.currentSupplierId, name: supplier.currentSupplier?.company_name ?? '' }),
   switchSupplier: async id => {
     if (supplier.domainLocked || !supplier.availableSuppliers.some(candidate => candidate.id === id)) return false
@@ -64,6 +66,7 @@ const windows = createWindowManager({
   appearance: fullPath => ({ theme: isDark.value ? 'dark' : 'light', locale: locale.value,
     accent: props.accentFor?.(fullPath) ?? 'primary',
     singlePanel: workspace.paneCount === 1,
+    ...(fullPath.split(/[?#]/)[0] === NEW_TAB_PATH ? { menuItems: workspaceMenuItems.value, openTabs: workspaceOpenTabs.value } : {}),
     csrfToken: auth.csrfToken,
     shortcutActions: shortcuts.actions.value.map(action => ({ ...action })),
     globalShortcuts: [...Object.values(shortcuts.effectiveBindings.value).filter(Boolean), 'ctrl+k', 'ctrl+alt+1', 'ctrl+alt+2', 'ctrl+alt+3', 'alt+shift+1', 'alt+shift+2', 'alt+shift+3'] }),
@@ -94,8 +97,8 @@ function sourcePaneForClick(event: MouseEvent): PaneId {
   return workspace.panes.find(pane => pane.id === id)?.id ?? workspace.activePaneId
 }
 const removeShiftClick = installShiftClickNavigation(primaryRouter,
-  event => rightPanePlan(sourcePaneForClick(event), workspace.panes, workspace.maximumPaneCount) !== null,
-  (to, event) => { void windows.openRight(to, sourcePaneForClick(event)) })
+  () => true,
+  (to, event) => { void windows.openInTab(to, sourcePaneForClick(event)) })
 let syncingUrl = false
 let mirrorTask = Promise.resolve()
 let stopped = false
@@ -227,6 +230,11 @@ watch(() => auth.user?.id, () => {
 watch([locale, isDark, shortcuts.effectiveBindings, () => auth.csrfToken], () => windows.updateFrames(), { deep: true, flush: 'sync' })
 function reloadShortcuts(): void { void shortcuts.load(true) }
 watch(() => auth.permissions, () => { void windows.reauthorize() }, { deep: true })
+watch(() => props.menuItems, items => { workspaceMenuItems.value = plainMenuItems(items ?? []) }, { immediate: true })
+// Nová záložka bez firmy (okno přímo v panelu) čte přehled ze stejného modulu.
+watch(() => workspace.windows.map(window => `${window.id}:${window.tab}:${window.title}:${window.paneId}`).join('|'),
+  () => { workspaceOpenTabs.value = openTabsSummary(workspace.windows) }, { immediate: true, flush: 'sync' })
+setOpenTabSelectHandler(id => { void windows.select(id) })
 watch(width, () => { void enforceSupportedLayout() })
 watch(() => workspace.paneCount, () => { resetFractions(); void nextTick(() => { measureViewport(); windows.updateFrames() }) }, { immediate: true })
 watch([allowTwo, allowThree], () => {
@@ -241,7 +249,7 @@ onMounted(() => {
   window.addEventListener('keydown', activatePanelShortcut)
   observer = new ResizeObserver(measureViewport)
   if (host.value) observer.observe(host.value)
-  for (const element of document.querySelectorAll('header.sticky, footer.sticky, main')) observer.observe(element)
+  for (const element of document.querySelectorAll('header.sticky, footer.sticky, main, [data-workspace-tabs]')) observer.observe(element)
   window.addEventListener('resize', measureViewport)
   void nextTick(() => {
     width.value = host.value?.clientWidth ?? 0

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   formatPayrollMinutes,
+  payrollMonthCoversFund,
   payrollWallTimeToIso,
 } from '@/pages/payroll/payrollTime'
 
@@ -16,6 +17,39 @@ describe('payrollTime', () => {
       .toBe('2026-06-01T08:00:00+02:00')
     expect(payrollWallTimeToIso('2026-06-01T08:00', 'America/New_York'))
       .toBe('2026-06-01T08:00:00-04:00')
+  })
+
+  it('započte do pokrytí fondu svátky a nepřítomnosti, ne jen odpracovanou dobu', () => {
+    const month = (
+      actual: number,
+      unworked: string | null,
+      holiday: number | null,
+    ) => ({
+      summary: { fund_minutes: 10_080, actual_minutes: actual },
+      jmhz_work_summary: {
+        preview: {
+          suggestions: { unworked_total_hours: unworked },
+          holiday_millihours: holiday,
+        },
+      },
+    })
+
+    // 21 pracovních dní po 8 h, jeden z nich svátek: 160 h práce + 8 h svátku.
+    expect(payrollMonthCoversFund(month(9_600, null, 8_000))).toBe(true)
+    // Dovolená 16 h v úhrnu neodpracovaných hodin.
+    expect(payrollMonthCoversFund(month(9_120, '16.000', null))).toBe(true)
+    expect(payrollMonthCoversFund(month(9_600, null, null))).toBe(false)
+    expect(payrollMonthCoversFund({
+      summary: { fund_minutes: 10_080, actual_minutes: 10_080 },
+      jmhz_work_summary: { preview: null },
+    })).toBe(true)
+  })
+
+  it('pro pokrytí fondu neplete neznámé minuty s nulou a použije přesné jednotky souhrnu', () => {
+    expect(payrollMonthCoversFund({ summary: { fund_minutes: 1, actual_minutes: null, worked_duration_units: null } })).toBe(false)
+    expect(payrollMonthCoversFund({ summary: { fund_minutes: 1, actual_minutes: null, worked_duration_units: 49 } })).toBe(false)
+    expect(payrollMonthCoversFund({ summary: { fund_minutes: 1, actual_minutes: null, worked_duration_units: 50 } })).toBe(true)
+    expect(payrollMonthCoversFund({ summary: { fund_minutes: 1, actual_minutes: 480, worked_duration_units: 3 } })).toBe(false)
   })
 
   it('neodešle neplatný ani neexistující lokální čas při přechodu DST', () => {

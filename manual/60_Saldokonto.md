@@ -81,7 +81,7 @@ Záloha na **314** nebo **324** zůstává otevřená, přestože ji konečná f
 3. U jedné zálohy můžete vybrat víc faktur a upravit částky. U víc záloh vyberete jednu fakturu a její odpočet rozdělíte mezi zálohy.
 4. Klikněte na **Vyrovnat čerpáním**. Záloha je vyrovnaná ode dne zaúčtování faktury a **Rozdíl** klesne o čerpanou částku. Hlavní kniha ani předvaha se nemění.
 
-Čerpání zadané v saldokontu zrušíte v dialogu **Vyrovnat** u seznamu **Čerpání zálohy**. Čerpání převzaté z převodu z jiného programu je označené **z převodu** a v saldokontu se neruší. Faktura navázaná na zálohu přímo na dokladu (vyúčtovací faktura k zálohové faktuře, konečná faktura z proformy) přiřazuje svůj odpočet té záloze do výše její částky; jiné záloze se nabídne jen přebytek odpočtu nad ní.
+Čerpání zadané v saldokontu zrušíte v dialogu **Vyrovnat** u seznamu **Čerpání zálohy**. Čerpání převzaté z převodu z jiného programu je označené **z převodu** a v saldokontu se neruší. Čerpání vystavené faktury, která odečítá víc záloh (viz [§ 15.4.2](15_Faktura_editor.md#1542-cerpat-zalohy-na-fakture-vic-zaloh-i-postupne-po-milnicich)), je označené **odpočet na faktuře**: faktura ho nese v odpočtových řádcích, v saldokontu se neruší a změní ho jen oprava faktury. Faktura navázaná na zálohu přímo na dokladu (vyúčtovací faktura k zálohové faktuře, konečná faktura z proformy) přiřazuje svůj odpočet té záloze do výše její částky; jiné záloze se nabídne jen přebytek odpočtu nad ní.
 
 Záloha čerpaná v saldokontu se už nedá propojit s fakturou na dokladu (ani vystavit konečnou fakturu z proformy) a faktura, která zálohu čerpá, se nedá propojit s další zálohou: vazba by čerpání zdvojila. Zbytek takové zálohy vyrovnejte v saldokontu. Mimo saldokonto se čerpaná záloha chová jako vyúčtovaná (nepočítá se do pohledávek ani nákladů).
 
@@ -177,7 +177,10 @@ se konfrontují v zaúčtované Kč hodnotě; obrazovka současně ukáže půvo
 
 Ostatní pohledávky a závazky se do sestavy dostanou až po zaúčtování. Sestava
 bere jejich skutečný zápis na účtu a při částečné úhradě odečte jen platby,
-které jsou k rozvahovému dni zaúčtované na stejný saldokontní účet. Storno a
+které jsou k rozvahovému dni zaúčtované na stejný saldokontní účet. Úhradu,
+kterou převod z jiného programu převzal jako uhrazenou mimo banku a pokladnu
+(například zápočtem nebo interním dokladem), odečte stejně jako detail položky,
+a to k jakémukoli dni, protože datum nenese. Storno a
 přeúčtování se projeví od dne příslušného účetního zápisu. Koncepty a
 potvrzené položky v daňové evidenci sem nepatří.
 
@@ -191,7 +194,11 @@ zaúčtovanou platbu a její následné čerpání:
   také pro samostatný daňový doklad k platbě použitý jako záloha při nákupu bez
   samostatné zálohové faktury,
 - na **324** je přijatá platba vydané proformy snížena o daňový doklad k
-  přijaté platbě a o vyúčtovací fakturu,
+  přijaté platbě a o vyúčtovací fakturu. Záloha přijatá před otevřením knih
+  (proforma převzatá z počátečních stavů, viz
+  [Záloha přijatá před otevřením knih](15_Faktura_editor.md#zaloha-prijata-pred-otevrenim-knih))
+  je otevřená proti otevíracímu zápisu: platbou je její úhrada z doby před otevřením knih
+  a sníží ji daň převzatého daňového dokladu k platbě a vyúčtovací faktura,
 - na obou účtech snižuje zálohu i čerpání konečnou fakturou zadané v saldokontu
   nebo převzaté z převodu (jedna faktura může čerpat víc záloh a jedna záloha
   víc faktur), a to ode dne zaúčtování faktury.

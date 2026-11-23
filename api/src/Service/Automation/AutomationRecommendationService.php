@@ -492,6 +492,10 @@ final class AutomationRecommendationService
 
     private function bankRuleCoversProposal(array $rule, array $proposal): bool
     {
+        // Pravidlo omezené na vlastní účet nepokryje návrh pro pohyby ostatních účtů.
+        if ((int) ($rule['bank_account_id'] ?? 0) > 0 && (int) ($rule['bank_account_id'] ?? 0) !== (int) ($proposal['bank_account_id'] ?? 0)) {
+            return false;
+        }
         $criterionCovers = static function (mixed $existing, mixed $proposed, callable $normalize): bool {
             $existing = $normalize((string) ($existing ?? ''));
             if ($existing === null || $existing === '') {

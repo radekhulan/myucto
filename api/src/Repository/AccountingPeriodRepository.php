@@ -49,7 +49,7 @@ final class AccountingPeriodRepository
         return $row === false ? null : $this->cast($row);
     }
 
-    public function findByYear(int $supplierId, int $fiscalYear): ?array
+    public function findByYear(int $supplierId, int $fiscalYear, bool $currentRead = false): ?array
     {
         $stmt = $this->db->pdo()->prepare(
             'SELECT id, supplier_id, fiscal_year, starts_on, ends_on, status, closed_at, created_at,
@@ -57,7 +57,7 @@ final class AccountingPeriodRepository
                     reviewed_at, reviewed_by, approval_body, approval_decision_ref, approval_document_hash,
                     created_reason
                FROM accounting_periods
-              WHERE supplier_id = ? AND fiscal_year = ?'
+              WHERE supplier_id = ? AND fiscal_year = ?' . ($currentRead ? ' FOR UPDATE' : '')
         );
         $stmt->execute([$supplierId, $fiscalYear]);
         $row = $stmt->fetch(PDO::FETCH_ASSOC);

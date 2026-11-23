@@ -22,6 +22,9 @@ import {
 } from '@/api/payroll'
 import { authApi } from '@/api/auth'
 import { getCredential, isWebAuthnAvailable } from '@/security/webauthn'
+import { takeSsoStepUpReturn } from '@/security/oidc'
+import SsoStepUpOption from '@/components/security/SsoStepUpOption.vue'
+import { useSsoEnforcement } from '@/composables/useSsoEnforcement'
 import { useAuthStore } from '@/stores/auth'
 import { useSubmissionEnvironment } from '@/composables/useSubmissionEnvironment'
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
@@ -75,6 +78,8 @@ const hasPasskey = computed(() =>
   || (auth.user?.passkey_count ?? 0) > 0,
 )
 const hasTotp = computed(() => auth.user?.totp_enabled === true)
+const ssoEnforcement = useSsoEnforcement()
+const { passwordAllowed, localFactorsAllowed } = ssoEnforcement
 
 const busy = computed(() => loading.value || saving.value || removing.value)
 
@@ -186,6 +191,8 @@ function resetStepUp() {
 }
 
 const stepUpMissing = computed(() => {
+  const enforced = ssoEnforcement.enforcedStepUpMissing(stepPasskeyToken.value, ssoVerified.value, stepTotpCode.value, hasTotp.value)
+  if (enforced !== null) return enforced === '' ? '' : t(enforced)
   if (stepPasskeyToken.value) return ''
   if (!stepPassword.value) return t('payroll.submissions.signing.step_up.password_missing')
   if (hasTotp.value && !/^\d{6}$/.test(stepTotpCode.value.trim())) {
@@ -195,11 +202,11 @@ const stepUpMissing = computed(() => {
 })
 
 function proof() {
-  return {
+  return ssoEnforcement.reauthProof('epo.certificate', {
     password: stepPassword.value || undefined,
     totp_code: stepTotpCode.value.trim() || undefined,
     step_up_token: stepPasskeyToken.value || undefined,
-  }
+  })
 }
 
 async function verifyPasskey() {
@@ -286,7 +293,7 @@ async function save() {
       credential_id: selectedCredentialId.value,
       cssz_registered_serial: registeredSerial.value.trim(),
       row_version: profile.value?.row_version ?? null,
-    }, proof())
+    }, await proof())
     profile.value = result.profile
     warnings.value = result.warnings
     registeredSerial.value = result.profile.cssz_registered_serial ?? ''
@@ -316,7 +323,7 @@ async function remove() {
   actionError.value = ''
   success.value = ''
   try {
-    await payrollApi.deleteSigningProfile(environment.value, proof())
+    await payrollApi.deleteSigningProfile(environment.value, await proof())
     profile.value = null
     warnings.value = []
     selectedCredentialId.value = null
@@ -334,7 +341,20 @@ async function remove() {
   }
 }
 
-onMounted(load)
+// Ověření přes Microsoft: proof platí pro prostředí, ze kterého uživatel odešel.
+const SSO_SCOPE = 'payroll-signing'
+const ssoProof = ref('')
+const ssoVerified = computed(() => stepPasskeyToken.value !== '' && stepPasskeyToken.value === ssoProof.value)
+
+onMounted(async () => {
+  const ssoReturn = takeSsoStepUpReturn('epo.certificate', SSO_SCOPE)
+  await load()
+  if (ssoReturn && ssoReturn.detail === environment.value) {
+    stepPasskeyToken.value = ssoReturn.token
+    ssoProof.value = ssoReturn.token
+    success.value = t('sso.step_up_done')
+  }
+})
 </script>
 
 <template>
@@ -618,7 +638,7 @@ onMounted(load)
             <p class="text-sm font-medium text-neutral-800 sm:col-span-2">
               {{ t('payroll.submissions.signing.step_up.title') }}
             </p>
-            <div v-if="hasPasskey" class="flex flex-wrap items-center gap-3 sm:col-span-2">
+            <div v-if="localFactorsAllowed && hasPasskey && !ssoVerified" class="flex flex-wrap items-center gap-3 sm:col-span-2">
               <p v-if="stepPasskeyToken" class="text-sm font-medium text-success-600">
                 {{ t('payroll.submissions.signing.step_up.passkey_verified') }}
               </p>
@@ -637,7 +657,7 @@ onMounted(load)
                     ? t('auth.passkey_verifying')
                     : t('payroll.submissions.signing.step_up.passkey_verify') }}
                 </button>
-                <span class="text-xs text-neutral-500">
+                <span v-if="passwordAllowed" class="text-xs text-neutral-500">
                   {{ t('payroll.submissions.signing.step_up.or_password') }}
                 </span>
               </template>
@@ -645,8 +665,17 @@ onMounted(load)
                 {{ t('payroll.submissions.signing.step_up.passkey_unsupported') }}
               </p>
             </div>
+            <SsoStepUpOption
+              v-if="ssoVerified || !stepPasskeyToken"
+              class="sm:col-span-2"
+              operation="epo.certificate"
+              :context="`${SSO_SCOPE}:${environment}`"
+              :verified="ssoVerified"
+              :disabled="passkeyBusy || busy"
+              @verified="(proof: string) => { stepPasskeyToken = proof; ssoProof = proof }"
+            />
             <template v-if="!stepPasskeyToken">
-              <label class="block text-xs text-neutral-600">
+              <label v-if="passwordAllowed" class="block text-xs text-neutral-600">
                 {{ t('payroll.submissions.signing.step_up.password') }}
                 <input
                   v-model="stepPassword"
@@ -656,7 +685,7 @@ onMounted(load)
                   class="mt-1 h-9 w-full rounded-md border border-neutral-300 bg-surface px-2 text-sm"
                 >
               </label>
-              <label class="block text-xs text-neutral-600">
+              <label v-if="passwordAllowed || (localFactorsAllowed && hasTotp)" class="block text-xs text-neutral-600">
                 {{ t('payroll.submissions.signing.step_up.totp') }}
                 <input
                   v-model="stepTotpCode"
@@ -669,7 +698,7 @@ onMounted(load)
                 >
               </label>
             </template>
-            <p class="text-xs text-neutral-500 sm:col-span-2">
+            <p v-if="passwordAllowed" class="text-xs text-neutral-500 sm:col-span-2">
               {{ t('payroll.submissions.signing.step_up.hint') }}
             </p>
           </div>
@@ -680,7 +709,7 @@ onMounted(load)
               type="button"
               data-test="signing-remove"
               :class="btnOutline('danger')"
-              :disabled="busy"
+              :disabled="busy || (!passwordAllowed && stepUpMissing !== '')"
               @click="remove"
             >
               <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
@@ -694,7 +723,7 @@ onMounted(load)
               type="button"
               data-test="signing-save"
               :class="btnFilled('primary')"
-              :disabled="busy || selectedCredentialId === null"
+              :disabled="busy || selectedCredentialId === null || (!passwordAllowed && stepUpMissing !== '')"
               @click="save"
             >
               <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">

@@ -71,6 +71,29 @@ final class PohodaExporterSchemaTest extends TestCase
             $xml, '//inv:invoiceHeader/inv:partnerIdentity/typ:address/typ:company'));
     }
 
+    /**
+     * Zjednodušený daňový doklad je v myúčtu běžná faktura (invoice_type = invoice) s příznakem
+     * is_simplified a vlastní číselnou řadou. Exportér ho nerozlišuje: vyjde jako issuedInvoice
+     * s číslem z vlastní řady. Dokladům bez odběratele (nebo s prázdným snapshotem) vyjde
+     * partnerIdentity s prázdnými poli, což XSD akceptuje.
+     */
+    public function testSimplifiedDocumentWithOwnSeriesIsSchemaValid(): void
+    {
+        $inv = $this->issuedInvoice(['is_simplified' => true, 'hide_customer_on_pdf' => true, 'varsymbol' => 'ZD2026-0007']);
+        $xml = $this->exporter->buildXml([$inv], $this->issuedCfg());
+        $this->assertValidPohoda($xml);
+        self::assertSame('issuedInvoice', $this->xpathOne($xml, '//inv:invoiceHeader/inv:invoiceType'));
+        self::assertSame('ZD2026-0007', $this->xpathOne($xml, '//inv:invoiceHeader/inv:number/typ:numberRequested'));
+    }
+
+    public function testSimplifiedDocumentWithoutCustomerIsSchemaValid(): void
+    {
+        $inv = $this->issuedInvoice(['is_simplified' => true, 'varsymbol' => 'ZD2026-0008', 'client_snapshot' => []]);
+        $xml = $this->exporter->buildXml([$inv], $this->issuedCfg());
+        $this->assertValidPohoda($xml);
+        self::assertSame('ZD2026-0008', $this->xpathOne($xml, '//inv:invoiceHeader/inv:number/typ:numberRequested'));
+    }
+
     public function testIssuedCreditNoteAndProformaTypesAreValid(): void
     {
         $credit = $this->exporter->buildXml([$this->issuedInvoice(['invoice_type' => 'credit_note'])], $this->issuedCfg());
@@ -272,6 +295,49 @@ final class PohodaExporterSchemaTest extends TestCase
         );
         $this->assertValidPohoda($received);
         self::assertSame('5xx', $this->xpathOne($received, '//inv:invoiceHeader/inv:accounting/typ:ids'));
+    }
+
+    /**
+     * Issue #391: forma úhrady chyběla v exportu u všech dokladů (`inv:paymentType`
+     * se negeneroval vůbec).
+     *
+     * @return iterable<string,array{string,string}>
+     */
+    public static function paymentMethodProvider(): iterable
+    {
+        yield 'převodem' => ['bank_transfer', 'draft'];
+        yield 'hotově' => ['cash', 'cash'];
+        yield 'kartou' => ['card', 'creditcard'];
+        yield 'dobírka' => ['cash_on_delivery', 'delivery'];
+        yield 'inkaso' => ['direct_debit', 'encashment'];
+        yield 'zápočet' => ['offset', 'compensation'];
+    }
+
+    #[\PHPUnit\Framework\Attributes\DataProvider('paymentMethodProvider')]
+    public function testPaymentTypeIsExportedForIssuedAndReceivedInvoices(string $method, string $pohoda): void
+    {
+        foreach ([
+            $this->exporter->buildXml([$this->issuedInvoice(['payment_method' => $method])], $this->issuedCfg()),
+            $this->exporter->buildXml([$this->receivedInvoice(['payment_method' => $method])], $this->purchaseCfg()),
+            $this->exporter->buildXml(
+                [$this->issuedInvoice(['payment_method' => $method, 'invoice_type' => 'proforma'])],
+                $this->issuedCfg(),
+            ),
+        ] as $xml) {
+            $this->assertValidPohoda($xml);
+            self::assertSame($pohoda, $this->xpathOne($xml, '//inv:invoiceHeader/inv:paymentType/typ:paymentType'));
+        }
+    }
+
+    public function testPaymentTypeOtherIsOmittedAndMissingFallsBackToTransfer(): void
+    {
+        // `other` nemá v Pohodě ekvivalent — element se vynechá, Pohoda dosadí svou výchozí formu.
+        $other = $this->exporter->buildXml([$this->issuedInvoice(['payment_method' => 'other'])], $this->issuedCfg());
+        $this->assertValidPohoda($other);
+        self::assertNull($this->xpathOne($other, '//inv:invoiceHeader/inv:paymentType'));
+
+        $missing = $this->exporter->buildXml([$this->issuedInvoice()], $this->issuedCfg());
+        self::assertSame('draft', $this->xpathOne($missing, '//inv:invoiceHeader/inv:paymentType/typ:paymentType'));
     }
 
     // ─── Přijaté faktury (purchase) ───

@@ -39,7 +39,7 @@ use Psr\Http\Message\UploadedFileInterface;
  *   POST /api/admin/imports/money-s3/uploads/{token}/complete
  *   GET  /api/admin/imports/money-s3/uploads/{token}
  *   POST /api/admin/imports/money-s3/uploads/{token}/reports        multipart `report` + `year`
- *   POST /api/admin/imports/money-s3/uploads/{token}/start          {mode, close_history, first_period_start, from_year, disposal_year_tax}
+ *   POST /api/admin/imports/money-s3/uploads/{token}/start          {mode, close_history, first_period_start, from_year, to_year, disposal_year_tax}
  *   GET  /api/admin/imports/money-s3/runs
  *   GET  /api/admin/imports/money-s3/runs/{id}
  *   DELETE /api/admin/imports/money-s3/runs/{id}                    jen zkouška nanečisto
@@ -206,7 +206,10 @@ final class MoneyS3MigrationAction extends AbstractMigrationAction
             return Json::error($response, $e->errorCode, $e->getMessage(), 404);
         }
         $agenda = MoneyS3Importer::companyAgenda((array) $meta['agenda'], (array) $meta['journal_preview']);
-        $years = array_map('intval', array_filter(array_column((array) ($agenda['years'] ?? []), 'fiscal_year')));
+        // Obratová předvaha je sestava podvojného účetnictví; daňovou evidenci rekonciliace
+        // porovnává s peněžním deníkem ze zálohy.
+        $years = array_map('intval', array_column(array_filter((array) ($agenda['years'] ?? []),
+            static fn (mixed $y): bool => is_array($y) && ($y['fiscal_year'] ?? null) !== null && ($y['accounting_mode'] ?? null) !== 'tax_evidence'), 'fiscal_year'));
         if (!in_array($year, $years, true)) {
             return Json::error($response, 'invalid_year', 'Rok sestavy musí být jeden z účetních roků zálohy.', 422);
         }
@@ -243,6 +246,7 @@ final class MoneyS3MigrationAction extends AbstractMigrationAction
         $mode = (string) ($body['mode'] ?? ImportOptions::MODE_DRY_RUN);
         $firstPeriodStart = trim((string) ($body['first_period_start'] ?? ''));
         $fromYear = (int) ($body['from_year'] ?? 0);
+        $toYear = (int) ($body['to_year'] ?? 0);
         $acceptDifferences = self::acceptDifferences($body, $mode);
         if ($acceptDifferences === null) {
             return self::invalidAcceptDifferences($response);
@@ -258,6 +262,7 @@ final class MoneyS3MigrationAction extends AbstractMigrationAction
                 $fromYear > 0 ? $fromYear : null,
                 (string) ($body['disposal_year_tax'] ?? ImportOptions::DISPOSAL_YEAR_TAX_HALF),
                 $acceptDifferences,
+                toYear: $toYear > 0 ? $toYear : null,
             );
         } catch (MoneyS3Exception $e) {
             return Json::error($response, $e->errorCode, $e->getMessage(), 422);
@@ -288,6 +293,7 @@ final class MoneyS3MigrationAction extends AbstractMigrationAction
             'first_period_start' => $options->firstPeriodStart,
             'confirm_ico' => $options->confirmedIco,
             'from_year' => $options->fromYear,
+            'to_year' => $options->toYear,
             'disposal_year_tax' => $options->disposalYearTax,
             // Ostrý převod přijme rozdíly, na kterých selhala zkouška nanečisto.
             'accept_differences' => $options->acceptDifferences,

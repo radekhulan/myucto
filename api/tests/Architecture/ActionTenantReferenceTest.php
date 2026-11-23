@@ -128,6 +128,7 @@ final class ActionTenantReferenceTest extends TestCase
         // (varianta MS-P1-1), plus kontrola shody klienta na ř. ~93. Právě tuhle kontrolu
         // sesterský SaveWorkReportMaterialsAction neměl = nález F6.
         'SaveWorkReportAction.php:project_id' => 'SupplierGuard::owns($request, project) + client match',
+        'QuoteAction.php:project_id' => 'QuoteContent::normalize() ověřuje projekt přes klienta aktuální firmy a shodu s vybraným odběratelem.',
 
         // ── revize invoice_id / purchase_invoice_id (2026-08-04) ─────────────────────
         //
@@ -171,6 +172,15 @@ final class ActionTenantReferenceTest extends TestCase
         // Dvoutenantní protějšek: VendorOfferTest::testVendorMustBeMarkedAsVendorAndOwned()
         // a ::testForeignTenantSeesNothing().
         'VendorOfferAction.php:client_id' => 'StockItemVendorRepository::filterOwnedVendors($supplierId, …) (StockItemVendorRepository:313)',
+
+        // Ocenění k datu omezené na kategorii: `category_id` v createValuationJob() je skladová
+        // kategorie (`stock_categories`), ne kategorie jízdy, na kterou míří SCOPES, takže
+        // TenantReferenceGuard by kontroloval jinou tabulku. StockValuationJobService::enqueue()
+        // ř. ~49 ji načte přes StockCategoryRepository::find($supplierId, …) se `supplier_id = ?`
+        // v predikátu; cizí i neexistující kategorie skončí 422 `validation_failed` dřív, než
+        // úloha vznikne. Dvoutenantní protějšek:
+        // StockValuationCategoryGroupsTest::testApiAndExportsWithCategory().
+        'StockReportAction.php:category_id' => 'StockCategoryRepository::find($supplierId, …) v StockValuationJobService::enqueue() (StockValuationJobService:49)',
     ];
 
     private const METHOD_ALTERNATIVE_GUARDS = [

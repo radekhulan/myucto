@@ -271,6 +271,7 @@ final class JmhzScenario1XmlDryRunServiceTest extends TestCase
             new JmhzSubmissionGuidFactory(),
             JmhzControlValidatorFactory::create(),
             new JmhzDeadlinePolicy(CzechPayrollRulesets2026::provider()),
+            new \Symfony\Component\Clock\NativeClock(),
         );
     }
 }

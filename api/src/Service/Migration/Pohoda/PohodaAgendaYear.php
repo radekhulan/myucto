@@ -33,7 +33,6 @@ final class PohodaAgendaYear
 {
     /**
      * @param list<string> $sourceDates data zápisů roku agendy (s počátečními stavy) ke kontrole tvaru roku
-     * @param list<string> $dates data všech zápisů kromě počátečních stavů a uzávěrky
      */
     private function __construct(
         public readonly int $label,
@@ -42,7 +41,7 @@ final class PohodaAgendaYear
         public readonly FiscalCalendar $calendar,
         private readonly int $exportYear,
         private readonly array $sourceDates,
-        private readonly array $dates,
+        private readonly PohodaExport $export,
     ) {}
 
     public static function of(PohodaExport $export, FiscalCalendar $calendar): self
@@ -81,7 +80,7 @@ final class PohodaAgendaYear
             $sourceDates[] = $opening;
         }
         $label = $calendar->isCalendar() ? $export->year : $calendar->fiscalYearOfDate($start);
-        return new self($label, $start, $end, $calendar, $export->year, $sourceDates, $dates);
+        return new self($label, $start, $end, $calendar, $export->year, $sourceDates, $export);
     }
 
     /**
@@ -106,21 +105,12 @@ final class PohodaAgendaYear
     }
 
     /**
-     * Období firmy po období agendy, do kterých padají zápisy deníku (agenda POHODY vede
-     * doklady i po konci svého roku).
+     * Období firmy po období agendy, do kterých padají zápisy, doklady a úhrady.
      *
      * @return list<int>
      */
     public function laterYears(): array
     {
-        $years = [];
-        foreach ($this->dates as $date) {
-            $year = $this->laterYear($date);
-            if ($year !== null) {
-                $years[$year] = true;
-            }
-        }
-        ksort($years);
-        return array_keys($years);
+        return $this->export->counts($this->calendar, $this->label)['later_years'];
     }
 }

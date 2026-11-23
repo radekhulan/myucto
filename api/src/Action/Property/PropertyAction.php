@@ -36,9 +36,9 @@ final class PropertyAction
             [$at, $known] = $this->dates($request);
             return ['as_of' => $at, 'profile' => $this->profiles->at($supplier, $at, knownAt: $known), 'history' => $this->profiles->history($supplier),
                 'import_columns' => PropertyRegistryImportParser::COLUMNS,
-                'capabilities' => ['manage' => RequestAuthorization::isSessionAuth($request) && RequestAuthorization::allows($request, 'property.registry.manage', AccessLevel::WRITE),
-                    'confirm' => RequestAuthorization::isSessionAuth($request) && RequestAuthorization::allows($request, 'property.registry.confirm', AccessLevel::WRITE),
-                    'export' => RequestAuthorization::isSessionAuth($request) && RequestAuthorization::allows($request, 'property.export', AccessLevel::WRITE)]];
+                'capabilities' => ['manage' => RequestAuthorization::actsAsSession($request) && RequestAuthorization::allows($request, 'property.registry.manage', AccessLevel::WRITE),
+                    'confirm' => RequestAuthorization::actsAsSession($request) && RequestAuthorization::allows($request, 'property.registry.confirm', AccessLevel::WRITE),
+                    'export' => RequestAuthorization::actsAsSession($request) && RequestAuthorization::allows($request, 'property.export', AccessLevel::WRITE)]];
         });
     }
 
@@ -161,7 +161,7 @@ final class PropertyAction
 
     private function run(Request $request, Response $response, string $permission, bool $write, callable $work): Response
     {
-        if ($write && !RequestAuthorization::isSessionAuth($request)) return Json::sessionRequired($response);
+        if ($write && !RequestAuthorization::actsAsSession($request)) return Json::sessionRequired($response);
         if (!$this->requirePermission($request, $response, $permission, $write ? AccessLevel::WRITE : AccessLevel::READ, $error)) return $error;
         try { return Json::ok($response, $work($this->currentSupplierId($request))); }
         catch (PropertyException $e) { return Json::error($response, $e->errorCode, $e->getMessage(), $e->httpStatus, ['details' => $e->details]); }

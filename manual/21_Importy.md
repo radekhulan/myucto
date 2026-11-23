@@ -672,8 +672,27 @@ Při chybě 401 se token vyřadí a automaticky obnoví, nemusíte nic dělat.
 |---|---|
 | **Subjekty (kontakty)** | Klienti |
 | **Vydané faktury** | Faktury s položkami a DPH klasifikací |
-| **Dobropisy** | Dobropisy |
+| **Zálohové faktury** | Zálohové faktury (proformy) |
+| **Daňové doklady k přijaté platbě** | Daňové doklady k přijaté platbě, navázané na zálohovou fakturu |
+| **Konečné faktury** | Faktury s odpočtem záloh, navázané na zálohové faktury |
+| **Opravné doklady** | Dobropisy, navázané na opravovaný doklad |
 | **Přijaté** (Fakturoid "expenses") | Přijaté faktury |
+
+**Zálohy a vazby dokladů.** Import zachová zálohový cyklus tak, jak ho vede
+Fakturoid. Daňový doklad k přijaté platbě dostane vazbu na zálohovou fakturu,
+jejíž platbu dokumentuje, a je uhrazený. Konečná faktura převezme odpočty
+zdaněných záloh jako záporné řádky v sazbě, v jaké byl daňový doklad vystavený
+(i když je jiná než sazba plnění), takže se už zdaněná záloha nezdaní podruhé
+a částky sedí na Fakturoid. Odečítá-li konečná faktura zálohy jediné zálohové
+faktury, dostane na ni vazbu. Vyúčtuje-li zálohy více zálohových faktur, zapíše
+se čerpání každé zálohy zvlášť (stejné jako akce **Vyrovnat** v saldokontu).
+Úhrada zálohy, ke které daňový doklad vystavený není, sníží částku k úhradě
+konečné faktury. Převyšuje-li uhrazená záloha konečnou fakturu, doklad se označí
+ke kontrole s výší přeplatku. Dobropis dostane vazbu na opravovaný doklad. Vazby
+se navazují až po převzetí všech dokladů, na pořadí dokladů ve Fakturoidu proto
+nezáleží. Doklad, na který vazba ukazuje a který v importu není, se nahlásí ke
+kontrole a vazbu doplníte ručně. Čísla dokladů, variabilní symboly a úhrady se
+přebírají beze změny.
 
 **Platební stav.** Stejně jako u iDokladu se přebírá skutečný stav z Fakturoidu:
 doklad **Zaplaceno** se importuje jako Zaplacená (datum úhrady `paid_on`),
@@ -698,7 +717,10 @@ externí ID téhož zdroje, založí se karta nová.
 Import přebírá ceny tak, jak jsou ve Fakturoidu. U dokladů s cenami včetně DPH
 se daň počítá shora, takže 1 210 Kč včetně 21 % dá základ 1 000 Kč a DPH 210 Kč.
 U přijatých faktur se převezme zaokrouhlení a rekapitulace DPH dokladu; haléřový
-rozdíl se srovná ruční rekapitulací DPH. Liší-li se částky po přenosu od
+rozdíl se srovná ruční rekapitulací DPH. Vydaný doklad s cenami bez DPH, jehož
+řádek má cenu na víc než haléře (typicky řádek **Zaokrouhlení**), počítá Fakturoid
+z ceny s DPH. Takový doklad se převezme v režimu cen včetně DPH, pokud tak základ
+i DPH přesně odpovídají Fakturoidu. Liší-li se částky po přenosu od
 Fakturoidu víc, než vysvětlí zaokrouhlení, doklad se označí ke kontrole. Doklady
 bez DPH (neplátci, nulová sazba) se přenášejí beze změny.
 
@@ -1147,9 +1169,15 @@ dotací, kapitálu a podklady daně z příjmů neziskové organizace se nepřen
 Převod pro neziskové organizace nebyl ověřen a průvodce u nich ukáže výrazné
 upozornění; před převodem kontaktujte podporu.
 
+Některá nastavení převod nepřenáší: cenové hladiny skladu, šablony fakturace
+výkazů práce a pravidla rozúčtování nákladů. Doklady
+a odběratelé, kteří na ně odkazují, se převedou s čísly, cenami i účty beze
+změny, jen bez vazby na tato nastavení. Protokol běhu vypíše, u kolika řádků
+se vazba odpojila. Zápočty dobropisů se převádějí včetně vazby na fakturu.
+
 Průvodce přijímá ZIP do **2 GiB**, nahrává jej po částech a používá stejný
-importér jako CLI. Vybraná data a přílohy mají společný limit **64 MiB / 100 000
-řádků**. Kontrola i obnova běží na pozadí ve společném workeru importů. Stránku
+importér jako CLI. Data firmy se čtou proudem po tabulkách, takže obnovu zvládne
+i firma se statisíci řádky deníku a přiřazení dimenzí. Kontrola i obnova běží na pozadí ve společném workeru importů. Stránku
 můžete zavřít: po návratu se připojí k rozpracovanému běhu. V **Historii běhů**
 uvidíte průběh, protokol i výsledek dokončených kontrol a obnov. Nahrané ZIPy
 se čistí po 24 hodinách bez práce s nimi; protokoly zůstávají v historii.
@@ -1167,6 +1195,15 @@ plátcovství včetně historie a význam klasifikací DPH. Její nastavení, p�
 ani přihlašovací údaje se nepřepisují. Cíl nesmí obsahovat vlastní obchodní data;
 přítomné výchozí číselníky se mohou použít při shodném významu.
 
+Účtová osnova exportované firmy je pro její deník závazná. Účty, které prázdná
+cílová firma už má (výchozí osnova nové firmy), se párují podle čísla účtu
+a při první obnově převezmou význam a název zdroje: druh účtu, stranu,
+syntetiku, daňovou uznatelnost, zúčtovací povahu a aktivitu. Protokol je vypíše
+v `adopted_chart`. Prázdná je firma, která nemá žádný zápis deníku ani doklad;
+firmu s vlastními daty obnova odmítne celou. Při opakované obnově do firmy, která
+už převzatá data má, se osnova nemění: liší-li se význam některého účtu, obnova
+skončí bez zápisu a vypíše účty s rozdíly.
+
 Nejprve spusťte zkoušku nanečisto:
 
 ```bash
@@ -1179,7 +1216,17 @@ ověří přenesené hodnoty a vrátí transakci i nově vytvořené soubory. Pr
 obsahuje počty vytvořených, použitých a již převzatých řádků, rekonciliaci
 po tabulkách a `outside_scope` — nepřenesené neprázdné tabulky.
 
-První profil přenáší partnery a jejich účty, měny, kategorie, střediska,
+Mzdové osobní údaje (rodná čísla, čísla účtů a další) jsou v exportu zašifrované
+klíčem zdrojové instalace a vázané na zdrojovou firmu. Obnova je dešifruje
+a zašifruje klíčem cílové instalace pro cílovou firmu; ověří přitom masku
+i otisk každé hodnoty. Při obnově do jiné instalace předejte klíče zdroje
+v souboru `--source-keys=SOUBOR` (JSON s hodnotami `secret_encryption_key`,
+`secret_encryption_previous_keys`, `payroll_hash_key` a `pepper` zdrojové
+instalace). Soubor musí mít práva jen pro vlastníka, mějte jej mimo archiv
+exportu a po obnově jej smažte. Šifrovaný údaj, který nejde dešifrovat, obnovu
+zastaví.
+
+Obnova přenáší partnery a jejich účty, měny, kategorie, střediska,
 účtovou osnovu, firemní předkontace, účetní období, zakázky a výkazy práce, faktury a jejich položky,
 pravidelné šablony, jednoduchý ceník, pokladnu, bankovní výpisy a transakce,
 úhrady, vypořádání a zápočty, majetek s odpisy a účetní deník. Přenáší také ruční
@@ -1190,6 +1237,67 @@ přijatých faktur, jejich zdrojové soubory a importovaná PDF vydaných faktur
 kopírují do nových cest; binární výpisy se obnovují k přemapovaným řádkům.
 PDF vydaných faktur vytvořená aplikací se mohou v cíli vygenerovat znovu.
 
+Obnova dále přenáší:
+
+- **Dokumenty**: strom složek, dokumenty včetně koše a příloh rozbalených
+  z datových zpráv, jejich soubory, údaje datových zpráv, vytěžení a vazby
+  na doklady, kontakty, zakázky a zápisy deníku. Soubory se uloží do úložiště
+  dokumentů cílové firmy, náhledy se vygenerují znovu.
+- **Archiv PDF vydaných faktur** (odeslané a archivované verze) včetně souborů.
+- **Analytické dimenze**: typy a hodnoty dimenzí, jejich přiřazení dokladům
+  a řádkům účetního deníku včetně rozpadu na podíly, povinnost dimenzí na účtech,
+  mapa účtotvorné dimenze, výchozí dimenze klientů, zakázek a bankovních účtů
+  a dimenze pravidel účtování banky. Sdílené dimenze skupiny firem obnova
+  nezakládá znovu: dohledá je podle kódu typu a hodnoty ve skupině, do které
+  cílová firma patří. Když cílová firma do skupiny nepatří nebo skupině některý
+  typ či hodnota chybí, obnova skončí bez zápisu a vypíše, co chybí. Firmu pak
+  zařaďte do skupiny se stejnými dimenzemi a obnovu opakujte.
+- **Interní doklady** s řádky, **vazby účetních zápisů na doklady**, **šablony
+  účetních zápisů** a **poznámky k zápisům**.
+- **Daně**: přiznání k dani z příjmů a rozpis záloh na daň a pojistné.
+- **Banku a automatiku**: pravidla účtování banky, naučené protistrany
+  a obchodníky plateb kartou, pravidla zařazení nákladů, šablony bankovních
+  pravidel, nastavení automatického účtování a podepisování PDF výstupů.
+- **Ostatní pohledávky a závazky**: druhy včetně jejich číselných řad
+  a profilů kontace, doklady v konceptu i zaúčtované, jejich splátky, úhrady
+  z banky a pokladny, opakování, vlastní kontaci, dimenze, připojené dokumenty,
+  vazby z faktur a pravidel banky a nastavení složky dokumentů. Zaúčtovaný doklad
+  si ponechá svůj převzatý zápis deníku, obnova ho znovu neúčtuje.
+- **Historii** oprav účtování a kroků uzávěrky.
+- **Mzdy**: zaměstnance, pracovní poměry, nepřítomnosti, dovolenou, srážky
+  a exekuce, převzatá hlášení JMHZ, počáteční stavy a referenční součty převzetí
+  mezd. Osobní údaje zaměstnanců obnova přešifruje pro cílovou firmu (viz níže
+  `--source-keys`).
+- **Podání** DPH, kontrolních a souhrnných hlášení včetně odeslaných XML.
+- **Čerpání záloh** vydaných i přijatých dokladů, rozpad řádků deníku na doklady
+  saldokonta a párovací symboly řádků převzatých z jiného programu.
+- **Výkazy**: kategorie účetní jednotky, výjimky mapování řádků a přílohy.
+- **Nastavení účetnictví firmy** a **převodní mapu** z Heliosu.
+- **Auditní stopu** firmy, kterou obnova v cíli zapečetí do řetězu cílové
+  instalace. Na spravované instalaci se auditní stopa nepřenáší.
+- **Číselné řady a počítadla**: číselník řad, počítadla vydaných a přijatých
+  dokladů, řady účetních dokladů a číslovací nastavení firmy (šablony čísel
+  dokladů, období řady faktur, číslování přijatých dokladů). Další doklad
+  navazuje na převedené a převedené doklady zůstávají ve svých řadách.
+
+Výchozí nastavení, které nová firma dostane při založení nebo při prvním
+otevření (šablony bankovních pravidel, automatické účtování, podepisování PDF,
+doporučené šablony zápisů), první obnova nahradí nastavením zdroje, pokud ho
+export nese. Řady založené průvodcem se spárují s řadami zdroje a převezmou
+jejich předponu, název a šablonu. Počítadlo, které cílová firma už má, se jen
+zvýší na hodnotu zdroje. Podpisové profily, skupiny firem a vozidla
+se nepřenášejí; vazby na ně se odpojí a protokol je vypíše.
+
+Vazby na doklady, které export nenese (dokument nebo dimenze u smazaného
+dokladu, výchozí dimenze skladové karty nebo kategorie, oprava účtování
+u smazaného pohybu, řada smazaného druhu ostatní položky), obnova vynechá a protokol je
+vypíše jako vynechané vazby. Soubory, které export nenese, protokol vypíše jako
+chybějící. Nenese-li export počítadla řad vydaných nebo přijatých dokladů
+(starší export, záloha MyInvoice, doklady číslované ručně), protokol upozorní,
+abyste před vystavením dalšího dokladu zkontrolovali číselné řady v nastavení.
+Export starší verze ani záloha MyInvoice tyto oblasti nenesou; obnova z nich
+probíhá jako dosud a výchozí nastavení cílové firmy ponechá.
+
 Firemní předkontace zachovají účty, priority a aktivitu; neúčtují doklady znovu.
 Globální instalační předkontace se nepřenášejí, proto se jejich výchozí pravidla
 mohou mezi instalacemi lišit. Nenulové kódy účtů předkontací musí být obsažené
@@ -1199,16 +1307,38 @@ Historie klasifikací zachová původní časy a změny kategorií; odkazy na au
 se stejně jako ostatní uživatelské odkazy převedou na importujícího uživatele.
 Zdrojové uživatelské účty se neobnovují.
 
-Firmu obnovenou starším profilem bez předkontací a klasifikací nelze tímto
-importem dodatečně rozšířit. Pro úplný přenos použijte prázdnou cílovou firmu;
-opakování obnovy provedené současným profilem zůstává bez duplicit.
+Firmu obnovenou starším profilem z exportu, který nesl i oblasti, jež starší
+profil nepřenášel (předkontace, klasifikace, dokumenty, dimenze, číselné řady
+a další výše), nelze tímto importem dodatečně rozšířit. Pro úplný přenos použijte
+prázdnou cílovou firmu; opakování obnovy provedené současným profilem zůstává
+bez duplicit.
 
-Mzdy, skladové grafy, DMS, přístupové a komunikační profily ani další tabulky
-mimo tento seznam první profil nepřenáší. Doklad s živou vazbou na nepodporovaný
+Skladové grafy, přihlašovací údaje a tokeny (bankovní spojení, e-mailové
+profily), historii AI, importní úlohy a převodní mapy jiných programů než Helios, mzdové běhy
+vypočtené v MyÚčtu, návrhy
+a doporučení automatiky, mezipaměti, nálezy kontroly deníku, data bankovních
+API ani další tabulky mimo tento seznam obnova nepřenáší. Doklad s živou vazbou na nepodporovaný
 graf se odmítne, vazba se tiše nenuluje. Rovněž se odmítají nepodporovaná
 syntetická ID závěrkových zápisů. Zkontrolujte proto před ostrým importem
-`outside_scope` a celý výsledek zkoušky. Limit načtených dat a potřebných souborů
-je 64 MiB, nejvýše 100 000 řádků; celý ZIP může mít nejvýše 20 GiB.
+`outside_scope` a celý výsledek zkoušky.
+
+Export se čte proudem: tabulky řádek po řádku a přílohy přímo do dočasných
+souborů, v paměti zůstávají jen indexy. Limity chrání před poškozeným nebo
+podvrženým archivem:
+
+| Limit | Hodnota |
+|---|---|
+| Celý ZIP (rozbalený obsah) | 20 GiB, nejvýše 250 000 položek |
+| Manifest | 64 MiB |
+| Data převáděných tabulek celkem | 8 GiB |
+| Řádků v jedné tabulce | 20 000 000 |
+| Jeden řádek dat | 16 MiB |
+| Jedna příloha | 512 MiB |
+| Kompresní poměr položky nad 1 MiB | nejvýše 300 : 1 |
+
+Dočasné soubory obnovy vznikají v adresáři pro dočasné soubory PHP
+(`sys_get_temp_dir()`) a po skončení běhu se smažou; počítejte tam s volným
+místem zhruba ve velikosti rozbalených dat firmy.
 
 Po kontrole protokolu přidejte `--apply`:
 
@@ -1303,8 +1433,8 @@ Libovolné SQL skripty, výrazy a jiné způsoby zápisu nejsou podporované.
 
 Limity převodu: každý vstupní ZIP do 2 GiB, rozbalený SQL dump do 512 MiB,
 podporované databázové řádky **celé zdrojové instance** do 64 MiB / 100 000
-řádků. Vybraná data firmy a její originály mají společný limit 64 MiB / 100 000
-řádků stávajícího importéru. Starší bankovní výpis bez firmy se přiřadí podle
+řádků. Pro vybraná data firmy a její originály pak platí limity obnovy z exportu
+MyÚčta (viz výše). Starší bankovní výpis bez firmy se přiřadí podle
 účtu a banky; pokud nelze v záloze určit jedinou firmu, převod skončí chybou.
 
 Výsledný ZIP nahrajte přes dlaždici **MyÚčto / MyInvoice** v `Systém → Přechod z jiných účetních

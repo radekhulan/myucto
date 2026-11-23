@@ -1,0 +1,10 @@
+{% extends '_layout.txt.twig' %}
+{% block content %}
+Quote {{ quote_number }}
+{{ quote_title|raw }}
+
+{{ message|raw }}
+{% if valid_until %}
+Valid until {{ valid_until|date('Y-m-d') }}.
+{% endif %}
+{% endblock %}

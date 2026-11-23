@@ -38,7 +38,8 @@ final class FinalDraftToTaxDocument
     ) {}
 
     /**
-     * Platby zálohové faktury, ke kterým zatím není platný daňový doklad.
+     * Platby zálohové faktury, ke kterým zatím není platný daňový doklad. Platba, ze které
+     * daň přiznal původní program ({@see TakenOverPayment::isTaxDeclaredByOrigin()}), sem nepatří.
      *
      * @return list<array{id:int, paid_on:string, amount:float}>
      */
@@ -48,7 +49,7 @@ final class FinalDraftToTaxDocument
             "SELECT p.id, p.paid_on, p.amount
                FROM invoice_payments p
                LEFT JOIN invoices td ON td.id = p.tax_document_invoice_id
-              WHERE p.invoice_id = ? AND p.amount > 0
+              WHERE p.invoice_id = ? AND p.amount > 0 AND NOT " . TakenOverPayment::isTaxDeclaredByOriginSql('p') . "
                 AND (p.tax_document_invoice_id IS NULL OR td.id IS NULL OR td.status = 'cancelled')
               ORDER BY p.paid_on, p.id"
         );
@@ -128,6 +129,7 @@ final class FinalDraftToTaxDocument
                     !empty($draft['issue_date']) ? new \DateTimeImmutable((string) $draft['issue_date']) : null,
                     (int) ($draft['client_id'] ?? 0),
                     (int) ($draft['revenue_category_id'] ?? 0),
+                    isset($draft['number_series_id']) ? (int) $draft['number_series_id'] : null,
                 );
             }
             $this->repo->delete($draftId);

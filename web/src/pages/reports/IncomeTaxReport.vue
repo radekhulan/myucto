@@ -17,7 +17,7 @@ import { taxEvidenceApi, type TaxEvidenceClosing, type TaxEvidenceAdjustment } f
 import { downloadApiFile } from '@/utils/downloadFile'
 import { btnOutline, btnFilled, ICONS } from '@/components/ui/buttonStyles'
 import DateInput from '@/components/ui/DateInput.vue'
-import { closingProjectionLabelKey, closingProjectionSource } from '@/utils/closingProjection'
+import { closingProjectionLabelKey, closingProjectionSource, closingProjectionWarningLabelKey, type ClosingProjectionWarning } from '@/utils/closingProjection'
 
 const { t } = useI18n()
 const route = useRoute()
@@ -123,6 +123,13 @@ const taxLosses = computed(() => (state.value as any)?.tax_losses ?? { losses: [
 // Feature 1 — projekce závěrkových operací do VH (jen DPPO; null, když nic nezaúčtovaného nečeká).
 const projection = computed<TaxReturnProjection | null>(() => (computed_.value as any)?.projection ?? null)
 const projectionPeriodId = computed<number | null>(() => Number((state.value?.podklady as any)?.period?.id ?? 0) || null)
+// Kroky uzávěrky, jejichž náhled selhal: projekce VH a daně je bez nich neúplná.
+const projectionWarnings = computed<ClosingProjectionWarning[]>(() =>
+  ((state.value?.podklady as any)?.closing_projection?.warnings as ClosingProjectionWarning[] | undefined) ?? [])
+function projectionWarningLabel(w: ClosingProjectionWarning): string {
+  const key = closingProjectionWarningLabelKey(w.source)
+  return key ? t(key) : w.source
+}
 // Feature 2 — auto-návrhy připočitatelných / odečitatelných položek k ověření účetní.
 const addbackSuggestions = computed<TaxReturnAddbackSuggestion[]>(() =>
   ((state.value?.podklady as any)?.suggestions?.addbacks as TaxReturnAddbackSuggestion[]) ?? [])
@@ -802,7 +809,7 @@ function tabLabel(k: TabKey): string { return t('taxReturn.tab_' + k) }
         <h1 class="text-2xl font-semibold">{{ t('taxReturn.title') }}</h1>
         <p class="text-sm text-neutral-500 mt-0.5">{{ t('taxReturn.subtitle') }}</p>
       </div>
-      <div class="flex items-center gap-2">
+      <div class="flex items-center gap-2 max-md:flex-wrap">
         <div class="inline-flex rounded-md border border-neutral-300 overflow-hidden text-sm">
           <button type="button" @click="type = 'fo'" :disabled="supplierType !== 'fo'" :class="type === 'fo' ? 'bg-primary-600 text-white' : 'bg-surface text-neutral-700'" class="px-3 h-9 disabled:opacity-40">DPFO</button>
           <button type="button" @click="type = 'po'" :disabled="supplierType !== 'po'" :class="type === 'po' ? 'bg-primary-600 text-white' : 'bg-surface text-neutral-700'" class="px-3 h-9 border-l border-neutral-300 disabled:opacity-40">DPPO</button>
@@ -891,7 +898,10 @@ function tabLabel(k: TabKey): string { return t('taxReturn.tab_' + k) }
             <span class="text-xs font-semibold uppercase">{{ checkStatusLabel(c) }}</span>
           </div>
           <div class="text-xs mt-1 opacity-90">
-            <template v-if="c.key === 'period_status'">
+            <template v-if="c.value?.reason === 'check_failed'">
+              {{ t('taxReturn.check_failed') }}
+            </template>
+            <template v-else-if="c.key === 'period_status'">
               {{ t('taxReturn.check_period_' + ((c.value?.status as string) || 'na')) }}
             </template>
             <template v-else-if="c.key === 'depreciation_551' && !c.na">
@@ -942,6 +952,17 @@ function tabLabel(k: TabKey): string { return t('taxReturn.tab_' + k) }
           :class="activeTab === tk ? 'border-primary-600 text-primary-700 font-medium' : 'border-transparent text-neutral-500 hover:text-neutral-700'">
           {{ tabLabel(tk) }}
         </button>
+      </div>
+
+      <!-- Přiznání bez otisku: VH se od finalizace drobně změnil, daň ale ne. Jen informace. -->
+      <div v-if="type === 'po' && isFinal && state.books_current === false && state.books_current_reason === 'vh_differs_tax_same'"
+        class="bg-primary-50 dark:bg-primary-500/[0.06] border border-primary-200 rounded-md p-3 text-sm text-primary-800 dark:text-primary-200 mb-4" data-test="books-vh-differs">
+        {{ t('taxReturn.books_vh_differs_tax_same', { difference: formatMoney(state.books_vh?.difference ?? 0, 'CZK') }) }}
+      </div>
+      <div v-else-if="type === 'po' && isFinal && state.books_current === false"
+        class="bg-warning-50 border border-warning-500/40 rounded-md p-3 text-sm text-warning-700 mb-4" data-test="books-changed">
+        {{ t('taxReturn.books_changed_after_final') }}
+        <template v-if="state.books_vh"> {{ t('taxReturn.books_vh_difference', { difference: formatMoney(state.books_vh.difference, 'CZK') }) }}</template>
       </div>
 
       <!-- Warnings (společné) -->
@@ -1374,6 +1395,13 @@ function tabLabel(k: TabKey): string { return t('taxReturn.tab_' + k) }
           </table>
         </div>
         <p class="text-xs text-neutral-500">{{ t('taxReturn.vh_realtime_note') }}</p>
+
+        <div v-if="type === 'po' && !isFinal && projectionWarnings.length" class="bg-warning-50 border border-warning-500/40 rounded-md p-3 text-sm text-warning-700" data-test="projection-warnings">
+          <strong>{{ t('taxReturn.projection_incomplete') }}</strong>
+          <ul class="mt-1 list-disc list-inside">
+            <li v-for="w in projectionWarnings" :key="w.source">{{ projectionWarningLabel(w) }}: {{ w.reason }}</li>
+          </ul>
+        </div>
 
         <!-- Feature 1 — projekce dosud NEzaúčtovaných závěrkových operací do VH (posted → projektovaný). -->
         <div v-if="projection?.is_projection" class="bg-surface border border-primary-500/40 rounded-lg p-4">

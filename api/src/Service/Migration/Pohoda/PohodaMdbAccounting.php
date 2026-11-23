@@ -22,6 +22,15 @@ final class PohodaMdbAccounting
         16 => 'received_proforma',
         18 => 'received_corrective',
     ];
+    /**
+     * Druh objednávky `OBJ.RelTpObj`. Ověřeno na číselné řadě reálné agendy: objednávka typu 2
+     * má řadu agendy 10 (vydané objednávky); typ 1 je druhá z dvojice, přijaté objednávky
+     * (agenda 21). Jiný typ převod nezná a objednávku přeskočí.
+     */
+    private const ORDERS = [
+        1 => 'received',
+        2 => 'issued',
+    ];
     private const SOURCES = [
         2 => PohodaJournal::ISSUED,
         3 => PohodaJournal::RECEIVED,
@@ -56,6 +65,8 @@ final class PohodaMdbAccounting
         'bank' => 'BV',
         'cash' => 'HO',
         'internal' => 'pINT',
+        'contracts' => 'sZAK',
+        'activities' => 'sCIN',
     ];
 
     /** Tabulky, jejichž řádky se kontrolují při otevření, v pořadí hlášení chyb. */
@@ -140,9 +151,9 @@ final class PohodaMdbAccounting
         if ($table === 'pUD') {
             return;
         }
-        self::lowRate($r);
-        if (in_array(strtolower($r['HistSzDPH'] ?? ''), ['true', '1', '-1'], true)) {
-            throw new PohodaException('mdb_historical_vat', 'Doklad s historickými sazbami vyžaduje standardní XML export.');
+        self::assertRatesKnown($r);
+        if (self::historicalRates($r)) {
+            self::rates($r);
         }
         if ($table === 'FA' && (($r['Cislo'] ?? '') !== '' || ($r['Datum'] ?? '') !== '') && !isset(self::INVOICES[(int) ($r['RelTpFak'] ?? 0)])) {
             throw new PohodaException('mdb_invoice_type', 'Nepodporovaný typ faktury ' . ($r['RelTpFak'] ?? '0') . '.');
@@ -160,6 +171,79 @@ final class PohodaMdbAccounting
     public function warnings(): array
     {
         return array_values($this->warnings);
+    }
+
+    /** Export nese objednávky (`OBJ` a `OBJpol`); starší převodník je nevytahoval. */
+    public function hasOrders(): bool
+    {
+        return $this->tables->has('OBJ') && $this->tables->has('OBJpol');
+    }
+
+    /**
+     * Objednávky z tabulky `OBJ` s položkami z `OBJpol`, v pořadí ze souboru. Typ podle
+     * `RelTpObj` ({@see self::ORDERS}, neznámý = `null`). Vyřízení nese příznak `Vyrizeno`
+     * (ručně nebo po přenesení všech položek) a u položky dodané množství `Dodano`, storno
+     * datum `DatStorn`. Položka odkazuje na kartu zásoby `RefSKz` (`SKz.ID` ze skladu).
+     *
+     * @return \Generator<int,array{id:string,type:?string,source_type:string,number:string,date:string,delivery:string,
+     *     fulfilled:bool,cancelled:bool,text:string,partner_reference:string,note:string,
+     *     partner:array<string,mixed>,
+     *     currency:string,rate:float,units:float,items:list<array<string,mixed>>}>
+     */
+    public function orders(): \Generator
+    {
+        if (!$this->hasOrders()) {
+            return;
+        }
+        $items = $this->group('OBJpol', 'RefAg');
+        foreach ($this->tables->each(['OBJ']) as $r) {
+            $currency = $this->lookup('sCMeny', $r['RefCM'] ?? '');
+            $lines = [];
+            foreach ($items[$r['ID'] ?? ''] ?? [] as $it) {
+                $lines[] = [
+                    'id' => (string) ($it['ID'] ?? ''),
+                    'card' => ($it['RefSKz'] ?? '') === '0' ? '' : (string) ($it['RefSKz'] ?? ''),
+                    'code' => trim($it['Kod'] ?? ''),
+                    'text' => trim($it['SText'] ?? ''),
+                    'quantity' => (float) ($it['Mnozstvi'] ?? 0),
+                    'delivered' => (float) ($it['Dodano'] ?? 0),
+                    'unit' => trim($it['MJ'] ?? ''),
+                    'unit_ratio' => is_numeric($it['MJKoef'] ?? null) && (float) $it['MJKoef'] > 0 ? (float) $it['MJKoef'] : 1.0,
+                    'unit_price' => (float) ($it['KcJedn'] ?? 0),
+                    'price' => (float) ($it['Kc'] ?? 0),
+                    'vat' => (float) ($it['KcDPH'] ?? 0),
+                    'vat_slot' => (int) ($it['RelSzDPH'] ?? 0),
+                    'vat_percent' => is_numeric($it['ProcentoDPH'] ?? null) ? (float) $it['ProcentoDPH'] : null,
+                    'prices_include_vat' => self::flag($it['SDph'] ?? ''),
+                    'foreign_unit_price' => is_numeric($it['CmJedn'] ?? null) ? (float) $it['CmJedn'] : null,
+                    'foreign_price' => is_numeric($it['Cm'] ?? null) ? (float) $it['Cm'] : null,
+                ];
+            }
+            yield [
+                'id' => (string) ($r['ID'] ?? ''),
+                'type' => self::ORDERS[(int) ($r['RelTpObj'] ?? 0)] ?? null,
+                'source_type' => (string) ($r['RelTpObj'] ?? ''),
+                'number' => trim($r['Cislo'] ?? ''),
+                'date' => $this->date($r, 'Datum'),
+                'delivery' => $this->date($r, 'DatDod'),
+                'fulfilled' => self::flag($r['Vyrizeno'] ?? ''),
+                'cancelled' => $this->date($r, 'DatStorn') !== '',
+                'text' => trim($r['SText'] ?? ''),
+                'partner_reference' => trim($r['PDoklad'] ?? ''),
+                'note' => trim($r['Pozn'] ?? ''),
+                // Partner ve tvaru `typ:partnerIdentity` jako u dokladů ({@see PartnerImporter::snapshot()}).
+                'partner' => ['id' => ($r['RefAD'] ?? '') === '0' ? '' : (string) ($r['RefAD'] ?? '')] + $this->identity($r),
+                'currency' => strtoupper(trim($currency['Kod'] ?? '')),
+                'rate' => (float) ($r['CmKurs'] ?? 0),
+                'units' => (float) ($r['CmMnoz'] ?? 0),
+                'items' => $lines,
+            ];
+        }
+    }
+
+    private static function flag(string $value): bool
+    {
+        return in_array(strtolower(trim($value)), ['true', '1', '-1'], true);
     }
 
     private static function skippable(PohodaException $error): bool
@@ -256,12 +340,39 @@ final class PohodaMdbAccounting
                 'homeCurrency' => ['priceSum' => $r['Kc'] ?? '0'],
                 'accounting' => ['credit' => $r['UMD'] ?? '', 'debit' => $r['UD'] ?? ''],
                 'centre' => $this->centre($r['RefStr'] ?? ''),
+                'contract' => self::contract($r),
+                'activity' => $this->activity($r['RefCin'] ?? ''),
                 // Partner řádku v tvaru `act:address` z XML. Vazbu na adresář XML nenese, starší
                 // převodník tyto sloupce neexportoval.
                 'address' => ['company' => $r['Firma'] ?? '', 'name' => $r['Jmeno'] ?? '', 'ico' => $r['ParICO'] ?? ''],
                 'addressbookId' => ($r['RefAD'] ?? '') === '0' ? '' : ($r['RefAD'] ?? ''),
+                // Id zdrojového dokladu řádku (u banky id bankovního dokladu). XML ho nenese,
+                // rozlišuje se jím pohyb mezi pohyby se stejným číslem ({@see PohodaBankJournal}).
+                'sourceId' => ($r['RelAgID'] ?? '') === '0' ? '' : ($r['RelAgID'] ?? ''),
                 'pairing' => ['symbol' => $r['ParSym'] ?? '', 'advance' => $r['ParSym2'] ?? ''],
             ];
+        } elseif ($key === 'contracts') {
+            if (trim($r['Cislo'] ?? '') === '') {
+                return null;
+            }
+            // Zakázka ve tvaru `con:contractDesc` z XML (agenda Zakázky). Partner je vazba na
+            // adresář (`RefAD`), údaje z hlavičky zakázky jsou jen opis.
+            return ['contractDesc' => [
+                'id' => $r['ID'] ?? '',
+                'number' => ['numberRequested' => trim($r['Cislo'])],
+                'text' => $r['SText'] ?? '',
+                'partnerIdentity' => ['id' => ($r['RefAD'] ?? '') === '0' ? '' : ($r['RefAD'] ?? ''), 'address' => ['company' => $r['Firma'] ?? '', 'ico' => $r['ICO'] ?? '']],
+                'datePlanStart' => $this->date($r, 'PlZahaj'),
+                'datePlanDelivery' => $this->date($r, 'PlPredani'),
+                'dateStart' => $this->date($r, 'Zahajeni'),
+                'dateDelivery' => $this->date($r, 'Predani'),
+            ]];
+        } elseif ($key === 'activities') {
+            if (trim($r['IDS'] ?? '') === '') {
+                return null;
+            }
+            // Činnost ve tvaru `acv:activityHeader` z XML (agenda Činnosti).
+            return ['activityHeader' => ['id' => $r['ID'] ?? '', 'code' => trim($r['IDS']), 'name' => $r['SText'] ?? '']];
         } elseif ($key === 'chart') {
             return ['@code' => $r['Ucet'] ?? '', '@name' => $r['Nazev'] ?? ''];
         } elseif ($key === 'posting_rules') {
@@ -291,7 +402,10 @@ final class PohodaMdbAccounting
         } elseif ($key === 'addressbook') {
             return ['addressbookHeader' => ['id' => $r['ID'], 'identity' => $this->identity($r), 'email' => $r['Email'] ?? '', 'mobil' => $r['GSM'] ?? '', 'phone' => $r['Tel'] ?? '']];
         } elseif ($key === 'bank_accounts' && (int) ($r['RelJeUcet'] ?? 0) === 2) {
-            return ['bankAccountHeader' => ['id' => $r['ID'], 'ids' => $r['IDS'] ?? '', 'numberAccount' => $r['SText'] ?? '', 'codeBank' => $r['KodBanky'] ?? '', 'nameBank' => $r['Banka'] ?? '', 'IBAN' => $r['IBAN'] ?? '', 'analyticAccount' => ['ids' => $r['AUcet'] ?? '']]];
+            // Měna účtu (`RefCM` do číselníku měn); korunový účet ji nemá. XML export ji nenese,
+            // převod ji tam určí z dokladů účtu ({@see CashBankImporter::importBank()}).
+            return ['bankAccountHeader' => ['id' => $r['ID'], 'ids' => $r['IDS'] ?? '', 'numberAccount' => $r['SText'] ?? '', 'codeBank' => $r['KodBanky'] ?? '', 'nameBank' => $r['Banka'] ?? '', 'IBAN' => $r['IBAN'] ?? '', 'analyticAccount' => ['ids' => $r['AUcet'] ?? ''],
+                'currency' => ['ids' => $this->lookup('sCMeny', $r['RefCM'] ?? '')['Kod'] ?? '']]];
         } elseif ($key === 'cash_registers' && (int) ($r['RelJeUcet'] ?? 0) === 1) {
             return ['cashRegisterHeader' => ['id' => $r['ID'], 'ids' => $r['IDS'] ?? '', 'name' => $r['SText'] ?? '', 'account' => ['ids' => $r['AUcet'] ?? '']]];
         } elseif ($key === 'internal') {
@@ -319,9 +433,6 @@ final class PohodaMdbAccounting
 
     private function document(array $r, string $prefix, string $itemsTable): array
     {
-        if (in_array(strtolower($r['HistSzDPH'] ?? ''), ['true', '1', '-1'], true)) {
-            throw new PohodaException('mdb_historical_vat', 'Doklad s historickými sazbami vyžaduje standardní XML export.');
-        }
         $payment = $this->lookup('sFormUh', $r['RelForUh'] ?? '');
         $h = [
             'id' => $r['ID'],
@@ -344,6 +455,8 @@ final class PohodaMdbAccounting
             'paymentType' => ['paymentType' => [1 => 'cash', 2 => 'creditcard', 3 => 'draft', 4 => 'advance', 5 => 'other', 6 => 'compensation', 7 => 'other', 8 => 'compensation', 9 => 'delivery'][(int) ($payment['RelTyp'] ?? 0)] ?? ''],
             'liquidation' => ['amountHome' => $r['KcLikv'] ?? '0', 'date' => $this->date($r, 'DatLikv')],
             'note' => $r['Pozn'] ?? '',
+            'contract' => self::contract($r),
+            'activity' => $this->activity($r['RefCin'] ?? ''),
         ];
         // Režim OSS dokladu (FA.MOSS = stát spotřeby, FA.MOSSDukaz = doklady prokazující
         // stát) ve stejných elementech jako XML POHODY. Prázdné se vynechává stejně jako
@@ -453,7 +566,8 @@ final class PohodaMdbAccounting
     private function summary(array $r): array
     {
         $out = ['priceNone' => $r['Kc0'] ?? '0', 'round' => ['priceRound' => $r['KcZaokr'] ?? '0']];
-        foreach ([1 => ['Low', $this->lowRate($r)], 2 => ['High', 21], 3 => ['3', 10]] as $slot => [$name, $rate]) {
+        $rates = self::rates($r);
+        foreach ([1 => ['Low', $rates[1]], 2 => ['High', $rates[2]], 3 => ['3', $rates[3]]] as $slot => [$name, $rate]) {
             $out['price' . $name] = $r['Kc' . $slot] ?? '0';
             $out['price' . $name . 'VAT'] = ['#' => $r['KcDPH' . $slot] ?? '0', '@rate' => (string) $rate];
             $out['price' . $name . 'Sum'] = (string) ((float) ($r['Kc' . $slot] ?? 0) + (float) ($r['KcDPH' . $slot] ?? 0));
@@ -464,7 +578,8 @@ final class PohodaMdbAccounting
     private function item(array $r, array $header): array
     {
         $slot = (int) ($r['RelSzDPH'] ?? 0);
-        $rate = $r['ProcentoDPH'] ?? ([0 => '0', 1 => (string) $this->lowRate($header), 2 => '21', 3 => '10'][$slot] ?? null);
+        $rates = self::rates($header);
+        $rate = $r['ProcentoDPH'] ?? ([0 => '0', 1 => (string) $rates[1], 2 => (string) $rates[2], 3 => (string) $rates[3]][$slot] ?? null);
         if ($rate === null) {
             throw new PohodaException('mdb_item_vat', 'Sazbu položky z MDB nelze bezpečně určit. Použijte standardní XML export.');
         }
@@ -476,6 +591,8 @@ final class PohodaMdbAccounting
             'rateVAT' => ['#' => [0 => 'none', 1 => 'low', 2 => 'high', 3 => 'third'][$slot] ?? '', '@value' => $rate],
             'homeCurrency' => ['unitPrice' => $r['KcJedn'] ?? '0', 'price' => $r['Kc'] ?? '0', 'priceVAT' => $r['KcDPH'] ?? '0', 'priceSum' => (string) ((float) ($r['Kc'] ?? 0) + (float) ($r['KcDPH'] ?? 0))],
             'classificationVAT' => $this->reference('sDPH', $r['RelTpDPH'] ?? ''),
+            'contract' => self::contract($r),
+            'activity' => $this->activity($r['RefCin'] ?? ''),
         ];
         // Stejné elementy jako XML POHODY, ať převod z obou zdrojů skončí v téže logice:
         // skutečné procento sazby, typ plnění OSS a částky položky v cizí měně dokladu.
@@ -522,6 +639,36 @@ final class PohodaMdbAccounting
         }
         $r = $this->lookup('sSTR', $id);
         return ['ids' => $r['IDS'] ?? '', 'name' => $r['SText'] ?? ''];
+    }
+
+    /**
+     * Činnost řádku deníku, dokladu nebo položky (`RefCin` do `sCIN`) jako `typ:activity` z XML.
+     * Starší převodník činnost ani číselník neexportoval; odkaz na činnost, kterou číselník
+     * nemá, se čte jako bez činnosti.
+     *
+     * @return array{ids?:string,name?:string}
+     */
+    private function activity(string $id): array
+    {
+        if ($id === '' || $id === '0' || !$this->tables->has('sCIN')) {
+            return [];
+        }
+        $r = $this->lookup('sCIN', $id);
+        $code = trim($r['IDS'] ?? '');
+        return $code === '' ? [] : ['ids' => $code, 'name' => $r['SText'] ?? ''];
+    }
+
+    /**
+     * Zakázka řádku nebo dokladu (`CisloZAK`) jako `typ:contract` z XML. POHODA ji na doklad
+     * zapisuje číslem zakázky, ne vazbou na `sZAK`; starší převodník sloupec neexportoval.
+     *
+     * @param array<string,string> $r
+     * @return array{ids?:string}
+     */
+    private static function contract(array $r): array
+    {
+        $code = trim($r['CisloZAK'] ?? '');
+        return $code === '' ? [] : ['ids' => $code];
     }
 
     private function reference(string $table, string $id): array
@@ -595,7 +742,9 @@ final class PohodaMdbAccounting
 
     private function date(array $r, string $key): string
     {
-        return substr($r[$key] ?? '', 0, 10);
+        $date = substr($r[$key] ?? '', 0, 10);
+        // Prázdné datum Accessu (30. 12. 1899) není datum dokladu.
+        return $date !== '' && $date <= '1900-12-31' ? '' : $date;
     }
 
     private static function direction(string $type): string
@@ -603,13 +752,149 @@ final class PohodaMdbAccounting
         return match ($type) { '1' => 'receipt', '2' => 'expense', default => throw new PohodaException('mdb_direction', 'Neznámý směr dokladu ' . $type . ' v MDB exportu.') };
     }
 
-    private static function lowRate(array $r): int
+    /**
+     * Sazby DPH slotů dokladu (1 snížená, 2 základní, 3 druhá snížená) podle data
+     * zdanitelného plnění, jinak data dokladu. MDB export sazbu u hlavičky nenese, jen
+     * slot; POHODA přitom převádí do nového roku i neuhrazené doklady s původním datem,
+     * takže v záloze roku 2026 může být faktura z roku 2012 se sazbami 14 a 20 %.
+     * Slot 3 před rokem 2015 neexistoval; doklad s částkou v něm odmítne
+     * {@see assertRatesKnown()}.
+     *
+     * @param array<string,string> $r
+     * @return array{1:int,2:int,3:int}
+     */
+    private static function rates(array $r): array
     {
-        $date = ($r['DatZdPln'] ?? '') ?: ($r['Datum'] ?? '');
-        if ($date !== '' && substr($date, 0, 4) < '2013') {
-            throw new PohodaException('mdb_historical_vat', 'Doklad se staršími sazbami vyžaduje standardní XML export.');
+        $date = self::taxDate($r);
+        $index = 0;
+        while ($date !== '' && $index < count(self::RATE_SETS) - 1 && $date < self::RATE_SETS[$index][0]) {
+            $index++;
         }
-        return $date !== '' && substr($date, 0, 4) < '2024' ? 15 : 12;
+        if (!self::historicalRates($r)) {
+            return self::RATE_SETS[$index][1];
+        }
+        return self::ratesFromAmounts($r, array_column(array_slice(self::RATE_SETS, $index, 2), 1));
+    }
+
+    /** Sazby DPH (1 snížená, 2 základní, 3 druhá snížená) platné od data, od nejnovějších. */
+    private const RATE_SETS = [
+        ['2024-01-01', [1 => 12, 2 => 21, 3 => 10]],
+        ['2013-01-01', [1 => 15, 2 => 21, 3 => 10]],
+        ['2012-01-01', [1 => 14, 2 => 20, 3 => 10]],
+        ['2010-01-01', [1 => 10, 2 => 20, 3 => 10]],
+        ['2008-01-01', [1 => 9, 2 => 19, 3 => 10]],
+        ['', [1 => 5, 2 => 19, 3 => 10]],
+    ];
+
+    /** @param array<string,string> $r */
+    private static function historicalRates(array $r): bool
+    {
+        return in_array(strtolower($r['HistSzDPH'] ?? ''), ['true', '1', '-1'], true);
+    }
+
+    /**
+     * Doklad se zaškrtnutými historickými sazbami: POHODA počítá DPH sazbami platnými před
+     * poslední změnou, MDB export ale sazbu u hlavičky nenese. Sazby se proto určí z částek
+     * slotů: platí ta sada (aktuální ke dni plnění, nebo předchozí), se kterou souhlasí DPH
+     * všech slotů s částkou, při shodě obou ta bližší. Typicky jde o vyúčtování zálohy
+     * přijaté před změnou sazeb: odpočet zálohy je v historické sazbě (slot 101-103,
+     * procento nese `FApol.ProcentoDPH`) a hlavička v aktuálních sazbách. Doklad bez DPH
+     * dostane aktuální sazby. Doklad, jehož DPH neodpovídá žádné sadě, převod odmítne.
+     *
+     * @param array<string,string> $r
+     * @param list<array{1:int,2:int,3:int}> $candidates
+     * @return array{1:int,2:int,3:int}
+     */
+    private static function ratesFromAmounts(array $r, array $candidates): array
+    {
+        $best = null;
+        $bestDeviation = INF;
+        foreach ($candidates as $rates) {
+            $deviation = 0.0;
+            foreach ($rates as $slot => $rate) {
+                $base = (float) ($r['Kc' . $slot] ?? 0);
+                $vat = (float) ($r['KcDPH' . $slot] ?? 0);
+                $expected = $base * $rate / 100;
+                $diff = abs($vat - $expected);
+                if ($diff > max(1.0, abs($expected) * 0.01)) {
+                    continue 2;
+                }
+                $deviation += $diff;
+            }
+            if ($deviation < $bestDeviation) {
+                [$best, $bestDeviation] = [$rates, $deviation];
+            }
+        }
+        if ($best === null) {
+            throw new PohodaException('mdb_historical_vat', 'Doklad ' . self::label($r) . ' má zaškrtnuté historické sazby DPH a jeho DPH neodpovídá sazbám platným ke dni plnění ani předchozím. Použijte standardní XML export.');
+        }
+        return $best;
+    }
+
+    /**
+     * Odmítne doklad, jehož sazby z data nejde bezpečně určit: částky DPH před 1. 5. 2004
+     * (sazby 5 a 22 % číselník nezná) a částka ve slotu druhé snížené sazby před rokem
+     * 2015. Doklad bez DPH (nebo s prázdným datem) projde, sazba se u něj neuplatní.
+     *
+     * @param array<string,string> $r
+     */
+    private static function assertRatesKnown(array $r): void
+    {
+        $date = self::taxDate($r);
+        if ($date === '' || $date >= '2015-01-01') {
+            return;
+        }
+        $nonZero = static fn (string ...$keys): bool => array_filter($keys, static fn (string $k): bool => (float) ($r[$k] ?? 0) != 0.0) !== [];
+        if ($date < '2004-05-01' && $nonZero('Kc1', 'Kc2', 'Kc3', 'KcDPH1', 'KcDPH2', 'KcDPH3')) {
+            throw new PohodaException('mdb_historical_vat', 'Doklad ' . self::label($r) . ' má DPH ze sazeb platných před 1. 5. 2004, které převod nezná. Použijte standardní XML export.');
+        }
+        if ($nonZero('Kc3', 'KcDPH3')) {
+            throw new PohodaException('mdb_historical_vat', 'Doklad ' . self::label($r) . ' má částku v druhé snížené sazbě DPH, která před rokem 2015 neexistovala. Opravte doklad v POHODĚ, nebo použijte standardní XML export.');
+        }
+    }
+
+    /**
+     * Datum zdanitelného plnění, jinak datum dokladu. U přijatého dokladu je DUZP z dokladu
+     * dodavatele „Datum KH DPH" (`DatKHDPH`), `DatZdPln` je tam datum odpočtu
+     * ({@see PohodaPurchaseVatDates}); sazby platí ke dni plnění. Vydaný doklad (faktura,
+     * příjmový pokladní doklad) má DUZP v `DatZdPln`. Access ukládá prázdné datum jako
+     * 30. 12. 1899, takové datum se bere jako nevyplněné.
+     *
+     * @param array<string,string> $r
+     */
+    private static function taxDate(array $r): string
+    {
+        $keys = self::isIssued($r) ? ['DatZdPln', 'Datum'] : ['DatKHDPH', 'DatZdPln', 'Datum'];
+        foreach ($keys as $key) {
+            $date = substr($r[$key] ?? '', 0, 10);
+            if ($date !== '' && $date > '1900-12-31') {
+                return $date;
+            }
+        }
+        return '';
+    }
+
+    /**
+     * Vydaný doklad: faktura vydané strany (`FA.RelTpFak` mimo přijaté druhy) nebo příjmový
+     * pokladní doklad. Interní, bankovní a výdajový pokladní doklad nese DUZP dodavatele
+     * v `DatKHDPH` stejně jako přijatá faktura.
+     *
+     * @param array<string,string> $r
+     */
+    private static function isIssued(array $r): bool
+    {
+        if (isset($r['RelTpFak'])) {
+            return !str_starts_with(self::INVOICES[(int) $r['RelTpFak']] ?? '', 'received') && (self::INVOICES[(int) $r['RelTpFak']] ?? '') !== 'commitment';
+        }
+        return ($r['RelTpHO'] ?? '') === '1';
+    }
+
+    /** @param array<string,string> $r */
+    private static function label(array $r): string
+    {
+        $date = self::taxDate($r);
+        return trim(($r['Cislo'] ?? '') !== '' ? $r['Cislo'] : 'ID ' . ($r['ID'] ?? '?'))
+            . ($date !== '' ? ' (' . (int) substr($date, 8, 2) . '. ' . (int) substr($date, 5, 2) . '. ' . substr($date, 0, 4) . ')' : '');
     }
 
     private function isPlaceholder(array $r): bool

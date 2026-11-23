@@ -80,7 +80,7 @@ final class AttendanceMyUctoTemplate
             $format = match ($column['format']) {
                 AttendanceMyUctoSampleProfile::FORMAT_DATE => self::DATE_FORMAT,
                 AttendanceMyUctoSampleProfile::FORMAT_AMOUNT => self::AMOUNT_FORMAT,
-                AttendanceMyUctoSampleProfile::FORMAT_HOURS => null,
+                AttendanceMyUctoSampleProfile::FORMAT_HOURS, AttendanceMyUctoSampleProfile::FORMAT_DAYS => null,
                 default => NumberFormat::FORMAT_TEXT,
             };
             if ($format !== null) {
@@ -134,6 +134,9 @@ final class AttendanceMyUctoTemplate
                 . 'svátku a přesčasu jsou část odpracovaných hodin, nepřičítají se k nim.', ''],
             ['Částky', 'V Kč za celý měsíc, bez měny (např. 7650 nebo 7 650,50).', ''],
             ['Druh vztahu', 'HPP = pracovní poměr, DPP = dohoda o provedení práce, DPČ = dohoda o pracovní činnosti.', ''],
+            ['Registrace ČSSZ', 'Sloupce od Ulice po Postavení v zaměstnání jsou nepovinné. Nové osobě se zapíšou při založení '
+                . '(adresa, občanství, podmínky vztahu, daňová rezidence, prohlášení a profil registrace), existující osobě '
+                . 'import na potvrzení doplní jen to, co v evidenci chybí; nic nepřepisuje.', ''],
             ['', '', ''],
             ['Sloupec', 'Co do něj patří', 'Formát'],
         ];
@@ -142,6 +145,7 @@ final class AttendanceMyUctoTemplate
             AttendanceMyUctoSampleProfile::FORMAT_DATE => 'datum',
             AttendanceMyUctoSampleProfile::FORMAT_HOURS => 'hodiny',
             AttendanceMyUctoSampleProfile::FORMAT_AMOUNT => 'částka v Kč',
+            AttendanceMyUctoSampleProfile::FORMAT_DAYS => 'počet dnů',
         ];
         $tableHeader = count($lines);
         foreach (AttendanceMyUctoSampleProfile::columns() as $column) {
@@ -166,7 +170,7 @@ final class AttendanceMyUctoTemplate
             }
         }
         $guide->getStyle('A1')->getFont()->setBold(true)->setSize(14);
-        $guide->getStyle('A3:A8')->getFont()->setBold(true);
+        $guide->getStyle('A3:A9')->getFont()->setBold(true);
         $guide->getStyle("A{$tableHeader}:C{$tableHeader}")->getFont()->setBold(true);
         $guide->getStyle("A{$insurersHeader}:B{$insurersHeader}")->getFont()->setBold(true);
         $guide->getColumnDimension('A')->setWidth(28);

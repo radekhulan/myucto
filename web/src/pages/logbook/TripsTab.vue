@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, reactive, onMounted, computed, watch, useId } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useIsPhone } from '@/composables/useIsPhone'
 import { useToast } from '@/composables/useToast'
 import { formatDate, formatMonth } from '@/composables/useFormat'
 import {
@@ -182,6 +183,17 @@ watch(() => draft.odometer_start, () => {
 // Reset filtrů na default při kliku na menu (LogbookPage bumpne resetToken).
 watch(() => props.resetToken, () => { resetFilters() })
 
+// Telefon: formulář jízdy přes celou obrazovku, nahoře auto, „Do km", účel a cíl,
+// ostatní pole pod „Další". Nová jízda dostane jako konec jízdy aktuální čas
+// (datum je dnešní už teď). Mimo telefon formulář beze změny.
+const isPhone = useIsPhone()
+const tripMoreOpen = ref(false)
+const showTripMore = computed(() => !isPhone.value || tripMoreOpen.value)
+function nowTime(): string {
+  const d = new Date()
+  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+}
+
 function newTrip() {
   if (!auth.canWrite('logbook.write') && !auth.isDemo) return
   const defCar = cars.value.find(c => c.is_default) ?? cars.value[0]
@@ -190,6 +202,8 @@ function newTrip() {
     time_start: '', time_end: '', odometer_start: defCar?.last_odometer ?? null, odometer_end: null, distance_km: null,
     category_id: (categories.value.find(c => c.is_default) ?? categories.value[0])?.id ?? null, purpose: '', origin: '', destination: '', note: '',
   })
+  tripMoreOpen.value = false
+  if (isPhone.value && !draft.time_end) draft.time_end = nowTime()
   open.value = true
 }
 
@@ -212,6 +226,7 @@ function applyTemplate(e: Event) {
 let editedOdometerEnd: number | null = null
 
 function editTrip(tr: Trip) {
+  tripMoreOpen.value = false
   editedOdometerEnd = tr.odometer_end
   Object.assign(draft, {
     id: tr.id, car_id: tr.car_id, trip_date: tr.trip_date, time_start: tr.time_start ?? '', time_end: tr.time_end ?? '',
@@ -581,9 +596,10 @@ function fmtKm(n: number | null): string { return n == null ? '—' : n.toLocale
     </template>
 
     <!-- Modal: trip -->
-    <div v-if="open" class="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
-      <div class="bg-surface rounded-lg shadow-xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
-        <form @submit.prevent="save" class="p-5 space-y-4">
+    <div v-if="open" class="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4 max-md:p-0 max-md:items-stretch">
+      <div class="bg-surface rounded-lg shadow-xl w-full max-w-lg max-h-[90vh] overflow-y-auto max-md:max-w-none max-md:max-h-none max-md:h-full max-md:rounded-none max-md:pt-[env(safe-area-inset-top)]"
+        data-test="trip-modal">
+        <form @submit.prevent="save" class="p-5 space-y-4 max-md:p-4 max-md:min-h-full max-md:flex max-md:flex-col max-md:gap-4 max-md:space-y-0">
           <h2 class="text-lg font-semibold">{{ draft.id ? t('logbook.trip_edit') : t('logbook.trip_new') }}</h2>
           <div v-if="!draft.id && tripTemplates.length">
             <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('logbook.trip_from_template') }}</label>
@@ -593,47 +609,54 @@ function fmtKm(n: number | null): string { return n == null ? '—' : n.toLocale
             </select>
           </div>
           <div class="grid grid-cols-2 gap-3">
-            <div>
+            <button v-if="isPhone" type="button" data-test="trip-more-toggle" :aria-expanded="tripMoreOpen"
+              class="col-span-2 cursor-pointer min-h-10 inline-flex items-center justify-between gap-2 rounded-md border border-neutral-200 px-3 text-sm font-medium text-neutral-700"
+              @click="tripMoreOpen = !tripMoreOpen">
+              {{ t('logbook.trip_more') }}
+              <svg class="w-4 h-4 transition-transform" :class="{ 'rotate-180': tripMoreOpen }" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7" /></svg>
+            </button>
+            <div class="max-md:col-span-2 max-md:-order-4">
               <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('logbook.car') }} *</label>
               <select v-model.number="draft.car_id" class="w-full h-10 px-3 border border-neutral-300 rounded-md bg-surface text-sm">
                 <option v-for="c in cars" :key="c.id" :value="c.id">{{ c.registration }}{{ c.name ? ` — ${c.name}` : '' }}</option>
               </select>
             </div>
-            <div>
+            <div v-if="showTripMore">
               <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('logbook.date') }} *</label>
               <DateInput v-model="draft.trip_date" required class="w-full h-10 px-3 border border-neutral-300 rounded-md text-sm" />
             </div>
-            <div>
+            <div v-if="showTripMore">
               <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('logbook.time_start') }}</label>
               <input v-model="draft.time_start" type="time" class="w-full h-10 px-3 border border-neutral-300 rounded-md text-sm" />
             </div>
-            <div>
+            <div v-if="showTripMore">
               <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('logbook.time_end') }}</label>
               <input v-model="draft.time_end" type="time" class="w-full h-10 px-3 border border-neutral-300 rounded-md text-sm" />
             </div>
-            <div>
+            <div v-if="showTripMore">
               <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('logbook.odometer_start') }}</label>
               <input v-model.number="draft.odometer_start" type="number" min="0" class="w-full h-10 px-3 border border-neutral-300 rounded-md text-sm font-mono" />
             </div>
-            <div>
+            <div class="max-md:col-span-2 max-md:-order-3">
               <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('logbook.odometer_end') }}</label>
-              <input v-model.number="draft.odometer_end" type="number" min="0" @input="recomputeDistanceFromEnd" class="w-full h-10 px-3 border border-neutral-300 rounded-md text-sm font-mono" />
+              <input v-model.number="draft.odometer_end" type="number" min="0" @input="recomputeDistanceFromEnd" class="w-full h-10 px-3 border border-neutral-300 rounded-md text-sm font-mono max-md:h-14 max-md:text-2xl max-md:font-semibold"
+                :inputmode="isPhone ? 'numeric' : undefined" data-test="trip-odometer-end" />
             </div>
-            <div>
+            <div v-if="showTripMore">
               <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('logbook.distance_km') }}</label>
               <input v-model.number="draft.distance_km" type="number" min="0" step="0.1" @input="recomputeEndFromDistance"
                 :placeholder="computedDistance != null ? String(computedDistance) : ''"
                 class="w-full h-10 px-3 border border-neutral-300 rounded-md text-sm font-mono" />
               <p class="text-xs text-neutral-400 mt-0.5">{{ t('logbook.distance_hint') }}</p>
             </div>
-            <div>
+            <div v-if="showTripMore">
               <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('logbook.category') }}</label>
               <select v-model="draft.category_id" class="w-full h-10 px-3 border border-neutral-300 rounded-md bg-surface text-sm">
                 <option :value="null">—</option>
                 <option v-for="c in categories" :key="c.id" :value="c.id">{{ c.label }}</option>
               </select>
             </div>
-            <div class="col-span-2">
+            <div class="col-span-2 max-md:-order-2">
               <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('logbook.purpose') }}</label>
               <input v-model="draft.purpose" type="text" maxlength="255" :list="`${pageId}-trip-purposes`" autocomplete="off"
                 :placeholder="t('logbook.purpose_placeholder')" class="w-full h-10 px-3 border border-neutral-300 rounded-md text-sm" />
@@ -641,11 +664,11 @@ function fmtKm(n: number | null): string { return n == null ? '—' : n.toLocale
                 <option v-for="p in purposes" :key="p" :value="p" />
               </datalist>
             </div>
-            <div>
+            <div v-if="showTripMore">
               <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('logbook.origin') }}</label>
               <input v-model="draft.origin" type="text" maxlength="255" :list="`${pageId}-trip-places`" autocomplete="off" class="w-full h-10 px-3 border border-neutral-300 rounded-md text-sm" />
             </div>
-            <div>
+            <div class="max-md:col-span-2 max-md:-order-1">
               <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('logbook.destination') }}</label>
               <input v-model="draft.destination" type="text" maxlength="255" :list="`${pageId}-trip-places`" autocomplete="off" class="w-full h-10 px-3 border border-neutral-300 rounded-md text-sm" />
             </div>
@@ -653,7 +676,8 @@ function fmtKm(n: number | null): string { return n == null ? '—' : n.toLocale
               <option v-for="p in places" :key="p" :value="p" />
             </datalist>
           </div>
-          <div class="flex justify-end gap-2 pt-2">
+          <div class="flex justify-end gap-2 pt-2 max-md:mt-auto max-md:sticky max-md:bottom-[0px] max-md:z-10 max-md:-mx-4 max-md:-mb-4 max-md:border-t max-md:border-neutral-200 max-md:bg-surface max-md:px-4 max-md:pt-3 max-md:pb-[calc(0.75rem+env(safe-area-inset-bottom))] max-md:[&>button]:h-11 max-md:[&>button[type=submit]]:flex-1 max-md:[&>button]:justify-center"
+            data-test="trip-modal-footer">
             <button type="button" @click="open = false" class="cursor-pointer h-9 px-4 text-sm border border-neutral-300 rounded-md hover:bg-neutral-50 inline-flex items-center gap-1.5">
               <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
               {{ t('common.cancel') }}

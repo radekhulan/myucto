@@ -16,6 +16,7 @@ use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\Invoice\OverduePolicy;
 use MyInvoice\Support\Sql\CzkAmountExpr;
 use MyInvoice\Support\Sql\PayablePredicate;
+use MyInvoice\Support\Sql\PurchaseCostSql;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 use MyInvoice\Support\Sql\AdvanceSettledSql;
@@ -455,7 +456,8 @@ final class SummaryAction
      */
     private function costCol(bool $isVatPayer): string
     {
-        return $isVatPayer ? 'pi.total_without_vat' : 'pi.total_with_vat';
+        // Bez odpočtu zálohy z DDKP ({@see PurchaseCostSql}); dotaz připojuje deductionJoin.
+        return PurchaseCostSql::cost('pi', $isVatPayer);
     }
 
     /**
@@ -678,7 +680,7 @@ final class SummaryAction
         $stmt = $pdo->prepare(
             "SELECT COUNT(*) AS cnt,
                     COALESCE(SUM(" . CzkAmountExpr::amount($costCol, 'pi') . "), 0) AS costs_czk
-               FROM purchase_invoices pi
+               FROM purchase_invoices pi" . PurchaseCostSql::deductionJoin('pi', $sid) . "
           LEFT JOIN currencies cur ON cur.id = pi.currency_id
               WHERE pi.supplier_id = ? {$currencyCondition}
                 AND pi.status NOT IN ('draft', 'cancelled')" . $this->advanceCostExclude() . "
@@ -779,7 +781,7 @@ final class SummaryAction
         $costCol = $this->costCol($isVatPayer);
         $sql = "SELECT DATE_FORMAT(pi.effective_cost_date, '%Y-%m') AS ym,
                        SUM(" . CzkAmountExpr::amount($costCol, 'pi') . ") AS total
-                  FROM purchase_invoices pi
+                  FROM purchase_invoices pi" . PurchaseCostSql::deductionJoin('pi', $sid) . "
              LEFT JOIN currencies cur ON cur.id = pi.currency_id
                  WHERE pi.supplier_id = ?
                    AND pi.status NOT IN ('draft', 'cancelled')" . $this->advanceCostExclude() . "

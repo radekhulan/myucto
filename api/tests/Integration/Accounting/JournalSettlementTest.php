@@ -407,6 +407,22 @@ final class JournalSettlementTest extends BankPostingTestCase
         self::assertNull($this->remaining($this->block('321', self::YEAR . '-12-31'), 'purchase_invoice', $linked));
     }
 
+    public function testResidualItemCountsAmountSettledOutside(): void
+    {
+        $entry = $this->manual('311', 'debit', 700.0, self::YEAR . '-04-01', 'Převzatý zůstatek');
+        $id = (int) $this->settlements->createOtherItem($this->supplierId, [
+            'line_id' => $this->lineId($entry, '311'), 'amount' => 700.0, 'title' => 'Syntetický převzatý zůstatek',
+        ], $this->userId)['item']['id'];
+        $outside = $this->db->pdo()->prepare('UPDATE other_items SET settled_outside_amount = ? WHERE id = ? AND supplier_id = ?');
+        $asOf = self::YEAR . '-12-31';
+
+        $outside->execute([300, $id, $this->supplierId]);
+        self::assertEqualsWithDelta(400.0, $this->remaining($this->block('311', $asOf), 'other_item', $id), 0.001);
+
+        $outside->execute([700, $id, $this->supplierId]);
+        self::assertNull($this->remaining($this->block('311', $asOf), 'other_item', $id));
+    }
+
     public function testCancelledResidualItemDisappearsOnlyFromCancellationDayInOpenPeriod(): void
     {
         $entry = $this->manual('311', 'debit', 400.0, self::YEAR . '-03-01', 'Přeplatek bez dokladu');
@@ -480,6 +496,28 @@ final class JournalSettlementTest extends BankPostingTestCase
         $stmt = $this->db->pdo()->prepare('SELECT id FROM journal_entries WHERE supplier_id = ? AND source_type = ? AND source_id = ?');
         $stmt->execute([$this->supplierId, $type, $docId]);
         return (int) $stmt->fetchColumn();
+    }
+
+    /** Panel „Souvisí“: zápis s předpisem položky ze zůstatku ji ukáže, storno položky vazbu zruší. */
+    public function testOtherItemFromResidualIsRelatedToItsOriginEntry(): void
+    {
+        $entry = $this->manual('311', 'debit', 450.0, self::YEAR . '-07-03', 'Souvisí ze zůstatku');
+        $item = (int) $this->settlements->createOtherItem($this->supplierId, [
+            'line_id' => $this->lineId($entry, '311'), 'amount' => 450.0, 'title' => 'Syntetická položka Souvisí',
+        ], $this->userId)['item']['id'];
+        $links = $this->container->get(\MyInvoice\Service\Accounting\JournalLinkService::class);
+        $access = \MyInvoice\Service\Accounting\JournalRelatedAccess::all();
+        $row = $this->journal->find($entry, $this->supplierId);
+
+        $items = $links->related($this->supplierId, $row, $access)['items'];
+        self::assertSame([['other_item', $item, $entry]], array_map(
+            static fn (array $it): array => [$it['source_type'], $it['source_id'], $it['entry_id']], $items
+        ));
+        self::assertSame([$entry => true], $links->hasRelatedMap($this->supplierId, [$row], $access));
+
+        $this->container->get(OtherItemService::class)->reverse($this->supplierId, $item, 'Syntetické storno', $this->userId, self::YEAR . '-12-31');
+        self::assertSame([], $links->related($this->supplierId, $row, $access)['items']);
+        self::assertSame([], $links->hasRelatedMap($this->supplierId, [$row], $access));
     }
 
     private function manual(string $account, string $side, float $amount, string $date, string $description): int

@@ -511,8 +511,10 @@ table.czk-recap tr.grand td {
 /* Číslo účtu, IBAN, BIC a banka na patě každé stránky (volba invoice_pdf_bank_in_footer). */
 .page-bank {
     text-align: center;
-    font-size: 8pt;
-    color: #5A5470;
+    font-size: 8.5pt;
+    /* Údaje k platbě musí být čitelné: tučně a tmavě, ne šedivě jako attribution. */
+    font-weight: bold;
+    color: #2E2940;
     font-family: 'montserrat', 'DejaVu Sans', sans-serif;
     margin-bottom: 1mm;
 }

@@ -28,6 +28,12 @@ final class JmhzBlockerRemediationPath
         'jmhz_identity_unresolved',
     ];
 
+    /** Kódy nerozhodnuté žádosti o roční zúčtování (10319). */
+    private const ANNUAL_REQUEST_CODES = [
+        'jmhz_annual_request_source_missing',
+        'jmhz_annual_request_status_unresolved',
+    ];
+
     /**
      * Nálezy s jmény a odkazy pro odpověď serveru.
      *
@@ -38,35 +44,52 @@ final class JmhzBlockerRemediationPath
         array $blockers,
         ?PayrollPeopleRepository $people,
         int $supplierId,
+        ?string $periodStart = null,
     ): array {
         $blockers = array_slice($blockers, 0, self::MAX_BLOCKERS);
-        $ids = ['employment' => [], 'person' => []];
+        $ids = ['employment' => [], 'person' => [], 'office' => []];
         foreach ($blockers as $blocker) {
             $type = self::labelType($blocker->entityType);
             if ($blocker->entityId !== null && isset($ids[$type])) {
                 $ids[$type][] = $blocker->entityId;
             }
         }
-        $labels = $people === null ? ['employment' => [], 'person' => []] : [
+        $labels = $people === null ? ['employment' => [], 'person' => [], 'office' => []] : [
             'employment' => $people->employmentLabels($supplierId, $ids['employment']),
             'person' => $people->personLabels($supplierId, $ids['person']),
+            'office' => $people->officeLabels($supplierId, $ids['office']),
         ];
 
         $rows = [];
         foreach ($blockers as $blocker) {
             $type = self::labelType($blocker->entityType);
-            $rows[] = $blocker->toArray() + [
+            $row = $blocker->toArray();
+            $rows[] = $row + [
                 'label' => $blocker->entityId === null ? null : ($labels[$type][$blocker->entityId] ?? null),
-                'remediation_path' => self::forBlocker($blocker),
+                'remediation_path' => self::forBlocker($blocker, $periodStart),
+                // Kde se po opravě údaje otevírá oprava schváleného běhu.
+                'revision_path' => $row['needs_revision'] ? self::revisionPath($periodStart) : null,
             ];
         }
 
         return $rows;
     }
 
-    public static function forBlocker(JmhzScenario1Blocker $blocker): ?string
+    /**
+     * Mzdové běhy vykazovaného měsíce: tam se u schváleného běhu vyžádá
+     * a otevře oprava, kterou nález čtený ze schváleného běhu potřebuje.
+     *
+     * @param ?string $periodStart první den vykazovaného měsíce (`YYYY-MM-DD`)
+     */
+    public static function revisionPath(?string $periodStart): string
     {
-        $remediation = JmhzBlockerCatalog::remediation($blocker->code, $blocker->entityType);
+        return self::resolve('', 'runs', null, '', null, $periodStart) ?? '/payroll/runs';
+    }
+
+    /** @param ?string $periodStart první den vykazovaného měsíce (`YYYY-MM-DD`) */
+    public static function forBlocker(JmhzScenario1Blocker $blocker, ?string $periodStart = null): ?string
+    {
+        $remediation = JmhzBlockerCatalog::remediationFor($blocker->code, $blocker->entityType, $blocker->attributeIds);
 
         return self::resolve(
             $blocker->code,
@@ -74,15 +97,22 @@ final class JmhzBlockerRemediationPath
             $remediation['field'],
             $blocker->entityType,
             $blocker->entityId,
+            $periodStart,
         );
     }
 
     /**
-     * Odkaz kontroly před během: kód bez katalogového druhu (identita, složky,
-     * chybějící průměr). Průměr vede na hromadný výpočet za čtvrtletí období.
+     * Odkaz kontroly před během. Identita, složky a chybějící průměr mají
+     * vlastní cestu (průměr vede na hromadný výpočet za čtvrtletí období),
+     * ostatní kódy jdou přes katalogový druh nápravy stejně jako u zmrazení
+     * hlášení. `null` = katalog místo opravy nezná (zopakovat, zpracovat ručně).
      */
-    public static function forReadinessCode(string $code, ?int $entityId = null, ?string $periodStart = null): ?string
-    {
+    public static function forReadinessCode(
+        string $code,
+        ?int $entityId = null,
+        ?string $periodStart = null,
+        string $entityType = '',
+    ): ?string {
         if ($code === 'jmhz_average_hourly_earning_missing') {
             $query = ['tab' => 'averages'];
             if ($periodStart !== null && preg_match('/^(\d{4})-(\d{2})-/', $periodStart, $m) === 1) {
@@ -106,8 +136,16 @@ final class JmhzBlockerRemediationPath
         ], true)) {
             return self::componentPath($code, $entityId);
         }
+        $remediation = JmhzBlockerCatalog::remediation($code, $entityType);
 
-        return null;
+        return self::resolve(
+            $code,
+            $remediation['kind'],
+            $remediation['field'],
+            $entityType,
+            $entityId,
+            $periodStart,
+        );
     }
 
     private static function resolve(
@@ -116,7 +154,18 @@ final class JmhzBlockerRemediationPath
         ?string $field,
         string $entityType,
         ?int $entityId,
+        ?string $periodStart = null,
     ): ?string {
+        // Docházka, nepřítomnosti, průměry i běhy se otevírají na zpracovávaný
+        // měsíc; bez období by stránka skočila na dnešní a nález tam nebyl.
+        $period = $periodStart !== null && preg_match('/^(\d{4})-(\d{2})(?:-\d{2})?$/D', $periodStart, $m) === 1
+            ? ['year' => (int) $m[1], 'month' => (int) $m[2], 'key' => $m[1] . '-' . $m[2]]
+            : null;
+        $periodQuery = $period === null ? [] : ['period' => $period['key']];
+        $quarterQuery = $period === null ? [] : [
+            'year' => $period['year'],
+            'quarter' => intdiv($period['month'] - 1, 3) + 1,
+        ];
         $employmentId = $entityType === 'employment' ? $entityId : null;
         $personId = in_array($entityType, ['person', 'employee'], true) ? $entityId : null;
         $scope = $employmentId !== null
@@ -137,22 +186,45 @@ final class JmhzBlockerRemediationPath
             'employee_identity' => $personOnly === null ? '/payroll/people' : $people($personOnly + ['panel' => 'registration_identity']),
             'statutory_evidence' => $personOnly === null ? '/payroll/people' : $people($personOnly + ['panel' => 'statutory_evidence']),
             'dependants' => $personOnly === null ? '/payroll/people' : $people($personOnly + ['panel' => 'dependants']),
+            'deferred_income' => $scope === [] ? '/payroll/people' : $people($scope + ['panel' => 'deferred_income']),
             'absences' => '/payroll/absences?' . http_build_query(
-                ($employmentId === null ? [] : ['employment' => $employmentId]) + ['tab' => 'absences'],
+                ($employmentId === null ? [] : ['employment' => $employmentId]) + ['tab' => 'absences'] + $periodQuery,
             ),
             'averages' => '/payroll/absences?' . http_build_query(
-                ($employmentId === null ? [] : ['employment' => $employmentId]) + ['tab' => 'averages'],
+                ($employmentId === null ? [] : ['employment' => $employmentId]) + ['tab' => 'averages'] + $quarterQuery,
             ),
-            'time' => '/payroll/time' . ($employmentId === null ? '' : '?' . http_build_query(['employment' => $employmentId])),
-            'runs' => '/payroll/runs',
+            'time' => self::withQuery(
+                '/payroll/time',
+                ($employmentId === null ? [] : ['employment' => $employmentId]) + $periodQuery,
+            ),
+            'runs' => self::withQuery('/payroll/runs', $periodQuery),
             'components' => self::componentPath($code, $entityType === 'component' ? $entityId : null),
-            'ordinary_evidence' => '/payroll/submissions#jmhz-ordinary-evidence',
-            'employer_annual' => '/payroll/settings?tab=submissions#jmhz-employer-annual-evidence',
+            'ordinary_evidence' => self::withQuery('/payroll/submissions', $periodQuery) . '#jmhz-ordinary-evidence',
+            // Roční údaje zaměstnavatele se vedou po letech: odkaz nese rok
+            // HLÁŠENÉHO období, jinak formulář otevřel výchozí (už vyplněný) rok.
+            'employer_annual' => self::withQuery(
+                '/payroll/settings',
+                ['tab' => 'submissions'] + ($period === null ? [] : ['year' => $period['year']]),
+            ) . '#jmhz-employer-annual-evidence',
             'office' => '/payroll/settings?tab=employer#payroll-employer-offices',
-            'annual_settlement' => '/payroll/annual-settlement'
-                . ($personId === null ? '' : '?' . http_build_query(['person' => $personId])),
+            // Hlášení vykazuje roční zúčtování za předchozí zdaňovací období
+            // (JmhzAnnualEvidenceService: rok hlášení - 1); bez roku by stránka
+            // otevřela loňský rok podle dnešního data, ne podle hlášení.
+            // Nerozhodnutá žádost (10319) otevře seznam zúžený na nerozhodnuté;
+            // bez filtru účetní hledala dotčené osoby mezi všemi lidmi roku.
+            'annual_settlement' => self::withQuery(
+                '/payroll/annual-settlement',
+                ($period === null ? [] : ['year' => $period['year'] - 1])
+                    + (in_array($code, self::ANNUAL_REQUEST_CODES, true) ? ['state' => 'request_undecided'] : [])
+                    + ($personId === null ? [] : ['person' => $personId]),
+            ),
             'takeover' => '/payroll/imports?tab=reconciliation',
             'correction', 'submission' => '/payroll/submissions/transport',
+            // Nález, který účetní sama neopraví (poškozený podklad, chyba
+            // sestavení): stránka podpory, stejně jako odkaz v aplikaci
+            // (`jmhzBlockerRemediation.ts`). Dřív server u těchhle nálezů
+            // nevracel nic a hláška končila bez jakékoli cesty dál.
+            'support' => '/admin/support',
             default => null,
         };
     }
@@ -193,6 +265,12 @@ final class JmhzBlockerRemediationPath
         }
 
         return '/payroll/components?' . http_build_query($query);
+    }
+
+    /** @param array<string,int|string> $query */
+    private static function withQuery(string $path, array $query): string
+    {
+        return $query === [] ? $path : $path . '?' . http_build_query($query);
     }
 
     private static function labelType(string $entityType): string

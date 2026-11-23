@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Payroll;
 
+use MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationCodebooks;
+
 use MyInvoice\Service\Payment\CzechBankAccountValidator;
 use MyInvoice\Service\Payment\IbanValidator;
 use MyInvoice\Service\Payroll\Net\PayrollPartnerSettlement;
@@ -514,11 +516,15 @@ final class PayrollPersonProfileValidator
             $city = $addressPresent
                 ? $this->text($row['city'], "addresses.{$index}.city", 128)
                 : null;
-            $postalCode = $addressPresent
-                ? $this->text($row['postal_code'], "addresses.{$index}.postal_code", 24)
-                : null;
             $countryCode = $addressPresent
                 ? $this->countryCode($row['country_code'], "addresses.{$index}.country_code")
+                : null;
+            // Zahraniční adresa nemusí PSČ mít (např. ukrajinská adresa převzatá bez PSČ);
+            // česká ano. Podání ČSSZ, které PSČ vyžaduje, ho chybějící ohlásí samo.
+            $postalCode = $addressPresent
+                ? ($countryCode !== 'CZ' && is_string($row['postal_code']) && trim($row['postal_code']) === ''
+                    ? ''
+                    : $this->text($row['postal_code'], "addresses.{$index}.postal_code", 24))
                 : null;
             foreach ([$street, $city, $postalCode] as $addressPart) {
                 if ($addressPart !== null) {
@@ -874,8 +880,12 @@ final class PayrollPersonProfileValidator
         if (!is_string($value) || preg_match('/^[A-Za-z]{2}$/', $value) !== 1) {
             throw new \InvalidArgumentException("{$path} musí být dvoupísmenný kód země.");
         }
+        $value = strtoupper($value);
+        if (!PayrollRegistrationCodebooks::isCountry($value)) {
+            throw new \InvalidArgumentException("{$path}: kód státu „{$value}\" není v číselníku států. Vyberte stát z nabídky.");
+        }
 
-        return strtoupper($value);
+        return $value;
     }
 
     /** @param list<string> $allowed */

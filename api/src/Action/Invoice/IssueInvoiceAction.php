@@ -25,6 +25,7 @@ use MyInvoice\Service\Invoice\InvoiceIssuer;
 use MyInvoice\Service\Invoice\InvoiceItemKind;
 use MyInvoice\Service\Invoice\SnapshotBuilder;
 use MyInvoice\Service\Invoice\VarsymbolGenerator;
+use MyInvoice\Service\NumberSeries\NumberSeriesException;
 use MyInvoice\Service\IpMatcher;
 use MyInvoice\Service\Pdf\InvoicePdfRenderer;
 use MyInvoice\Service\Invoice\InvoiceIssueTaxGate;
@@ -34,6 +35,7 @@ use MyInvoice\Service\Stock\StockIssueService;
 use MyInvoice\Service\Validation\InvoiceAmountPolicy;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
+use MyInvoice\Support\Sql\AdvanceDrawSql;
 
 /**
  * Přechod draft → issued:
@@ -71,6 +73,8 @@ final class IssueInvoiceAction
         private readonly ClientRepository $clients,
         private readonly \MyInvoice\Service\Invoice\CreditNoteOffsetService $creditNoteOffsets,
         private readonly \MyInvoice\Service\Invoice\InvoicePaymentService $payments,
+        private readonly \MyInvoice\Service\WorkReport\WorkReportBillingService $billing,
+        private readonly \MyInvoice\Service\Invoice\InvoiceOtherItemLinkService $otherItemLink,
     ) {}
 
     public function __invoke(Request $request, Response $response, array $args): Response
@@ -108,6 +112,12 @@ final class IssueInvoiceAction
             return Json::error($response, 'not_draft', 'Lze vystavit jen draft fakturu.', 409);
         }
 
+        try {
+            $this->billing->assertCurrent($id, (int) $invoice['supplier_id']);
+        } catch (\MyInvoice\Service\WorkReport\WorkReportBillingConflict $e) {
+            return Json::error($response, 'billing_stale', $e->getMessage(), 409);
+        }
+
         // Zámek dokladu (Epic F6, H1): issue přiděluje varsymbol/číslo řady k issue/tax
         // date — datum v uzavřeném období nesmí projít (client 403, účetní 409, admin force).
         if ($deny = $this->denyIfLocked($request, $response, $this->locks->forInvoice($invoice), 'invoice', $id)) {
@@ -117,10 +127,13 @@ final class IssueInvoiceAction
         if (!InvoiceItemKind::hasAmountLine((array) $invoice['items'])) {
             return Json::error($response, 'no_items', 'Faktura musí obsahovat alespoň jednu položku.', 422);
         }
+        if (InvoiceAmountPolicy::hasMissingManualPrice((array) $invoice['items'])) {
+            return Json::error($response, 'manual_price_missing', InvoiceAmountPolicy::MANUAL_PRICE_MISSING_MESSAGE, 422);
+        }
         if (
             InvoiceAmountPolicy::requiresPositiveDraftAmountToPay(
                 (string) ($invoice['invoice_type'] ?? 'invoice'),
-                $invoice['parent_invoice_id'] ?? null,
+                InvoiceAmountPolicy::advanceLinkId($invoice),
             )
             && !InvoiceAmountPolicy::hasPositiveAmountToPay($invoice)
             && !(InvoiceAmountPolicy::isAllowedRefundInvoice($invoice)
@@ -136,11 +149,14 @@ final class IssueInvoiceAction
         // by se zdanila podruhé. Draft DD smaž, nebo nejdřív stornuj finál.
         if ($invoice['invoice_type'] === 'tax_document' && (int) ($invoice['parent_invoice_id'] ?? 0) > 0) {
             $fin = $this->db->pdo()->prepare(
-                "SELECT 1 FROM invoices
-                  WHERE parent_invoice_id = ? AND invoice_type = 'invoice' AND status <> 'cancelled'
+                'SELECT 1 FROM (' . AdvanceDrawSql::finalIds('?', '?') . ") fx
+                   JOIN invoices i ON i.id = fx.id
+                  WHERE i.status <> 'cancelled'
                   LIMIT 1"
             );
-            $fin->execute([(int) $invoice['parent_invoice_id']]);
+            $supplierId = (int) $invoice['supplier_id'];
+            $proformaId = (int) $invoice['parent_invoice_id'];
+            $fin->execute([$supplierId, $proformaId, $proformaId, $supplierId]);
             if ($fin->fetchColumn() !== false) {
                 return Json::error(
                     $response,
@@ -183,6 +199,12 @@ final class IssueInvoiceAction
             return Json::error($response, $rejected['code'], $rejected['message'], 422);
         }
 
+        // Drobný zákazník bez adresy (#310): jen zjednodušený doklad a jen do limitu § 30.
+        // Před obecnou kontrolou limitu, ať odmítnutí nabídne doplnění karty.
+        if (($rejected = $this->taxGate->simplifiedOnlyClientRejection($invoice)) !== null) {
+            return Json::error($response, $rejected['code'], $rejected['message'], $rejected['status']);
+        }
+
         // Koncový zákazník bez údajů smí být odběratelem jen zjednodušeného dokladu (§ 30).
         // Běžný daňový doklad musí nést jméno a adresu odběratele (§ 29 odst. 1 písm. c).
         if (($rejected = $this->taxGate->walkInRejection($invoice)) !== null) {
@@ -204,7 +226,7 @@ final class IssueInvoiceAction
         // Faktury bez výkazu (např. fixní paušál) lze vystavit i u projektu s requires_approval.
         if (!empty($invoice['project_requires_approval'])
             && ($invoice['approval_status'] ?? 'none') !== 'approved'
-            && $this->workReports->findByInvoice($id) !== null
+            && $this->workReports->findByInvoice($id, (int) $invoice['supplier_id']) !== null
         ) {
             return Json::error(
                 $response,
@@ -339,7 +361,8 @@ final class IssueInvoiceAction
         // Ve vlastní transakci vrátí číslo do řady rollback. V cizí by zůstalo
         // spotřebované, proto ho odmítnutí vrací ručně.
         $allocated = false;
-        $releaseAllocated = function () use (&$allocated, &$varsymbol, $ownTransaction, $supplierId, $invoice, $issueDate): void {
+        $usedSeriesId = null;
+        $releaseAllocated = function () use (&$allocated, &$varsymbol, &$usedSeriesId, $ownTransaction, $supplierId, $invoice, $issueDate): void {
             if ($allocated && !$ownTransaction) {
                 $this->varsymbol->releaseIfLatest(
                     $supplierId,
@@ -348,20 +371,22 @@ final class IssueInvoiceAction
                     $issueDate,
                     (int) $invoice['client_id'],
                     (int) ($invoice['revenue_category_id'] ?? 0),
+                    $usedSeriesId,
                 );
             }
         };
         try {
+            $billingLock = $pdo->prepare('SELECT id FROM invoices WHERE supplier_id = ? AND id = ? FOR UPDATE');
+            $billingLock->execute([$supplierId, $id]);
+            $this->billing->assertCurrent($id, $supplierId);
             if ($varsymbol === null) {
                 try {
-                    // Zjednodušený doklad má vlastní řadu, je-li ve firmě nastavená.
-                    $varsymbol = $this->varsymbol->next(
-                        $supplierId,
-                        VarsymbolGenerator::seriesTypeFor($invoice),
-                        $issueDate,
-                        (int) $invoice['client_id'],
-                        (int) ($invoice['revenue_category_id'] ?? 0),
-                    );
+                    // Řada z číselníku (volba na konceptu nebo výchozí řada druhu); zjednodušený
+                    // doklad má vlastní řadu, je-li ve firmě nastavená.
+                    [$varsymbol, $usedSeriesId] = $this->varsymbol->nextForInvoice($supplierId, $invoice, $issueDate);
+                } catch (NumberSeriesException $e) {
+                    if ($ownTransaction && $pdo->inTransaction()) $pdo->rollBack();
+                    return Json::error($response, $e->errorCode, $e->getMessage(), $e->httpStatus);
                 } catch (\InvalidArgumentException | \RuntimeException $e) {
                     if (TransactionFailure::rollbackIfAborted($pdo, $e)) throw $e;
                     if ($ownTransaction && $pdo->inTransaction()) $pdo->rollBack();
@@ -376,6 +401,7 @@ final class IssueInvoiceAction
                 $releaseAllocated();
                 return Json::error($response, 'race_condition', 'Faktura byla mezitím změněna.', 409);
             }
+            $this->varsymbol->recordSeries($id, $invoice, $usedSeriesId);
             // Koncept může mít úhrady už před potvrzením. Výstupy obnoví běžná větev po commitu.
             if (!$autoPaid) $this->payments->recompute($id, refreshOutputs: false);
             InvoiceIssuer::record($pdo, $id, isset($user['id']) ? (int) $user['id'] : null);
@@ -390,6 +416,10 @@ final class IssueInvoiceAction
             );
             $this->clients->markAsCustomer((int) $invoice['client_id'], $supplierId);
             if ($ownTransaction) $pdo->commit();
+        } catch (\MyInvoice\Service\WorkReport\WorkReportBillingConflict $e) {
+            if ($ownTransaction && $pdo->inTransaction()) $pdo->rollBack();
+            $releaseAllocated();
+            return Json::error($response, 'billing_stale', $e->getMessage(), 409);
         } catch (StockException $e) {
             // Typicky insufficient_stock (409 + výčet chybějících položek) —
             // rollback vrátí fakturu do draftu, nic se nevystavilo.
@@ -439,6 +469,24 @@ final class IssueInvoiceAction
         // Smaž cached draft PDF (Faktura-draft-NN.pdf) — po vystavení má faktura nový
         // varsymbol a snapshoty, takže staré cached PDF už neodpovídá.
         $this->pdfRenderer->invalidate($id, 'invalidate_issue');
+
+        // Koncept navázaný na ostatní pohledávku (migrace 2246): po vystavení převezme její
+        // úhrady a auto-post ho vynechá. Koncept, který podmínky vazby už nesplňuje, se
+        // odpojí a zaúčtuje jako každá faktura. Chyba nesmí shodit vystavení.
+        $otherItemLink = ['status' => 'none'];
+        try {
+            $otherItemLink = $this->otherItemLink->afterIssue($supplierId, $id, isset($user['id']) ? (int) $user['id'] : null);
+        } catch (\Throwable $e) {
+            $this->logger->log('invoice.other_item_link_failed', $user['id'] ?? null, 'invoice', $id, [
+                'error' => $e->getMessage(),
+            ], $ip, $request->getHeaderLine('User-Agent'));
+        }
+        if ($otherItemLink['status'] === 'unlinked') {
+            $this->logger->log('invoice.other_item_unlinked', $user['id'] ?? null, 'invoice', $id, [
+                'trigger' => 'issue',
+                'reason' => $otherItemLink['reason'] ?? null,
+            ], $ip, $request->getHeaderLine('User-Agent'));
+        }
 
         // Auto-post hook (A2): má-li firma zapnutý auto_post_invoices a běží v podvojném
         // účetnictví, zaúčtuj vystavenou fakturu hned. Chyba zaúčtování NESMÍ zablokovat

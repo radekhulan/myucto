@@ -43,7 +43,7 @@ final class CloneSandboxTest extends TestCase
     {
         $config = Config::load(Bootstrap::rootDir());
         self::assertStringEndsWith('_test', (string) $config->get('db.name'));
-        self::assertContains($config->get('db.host'), ['localhost', '127.0.0.1', '::1']);
+        self::assertTrue(\MyInvoice\Tests\Support\TestDatabaseHost::isAllowed((string) ($config->get('db.host'))), 'Testovací DB musí být lokální nebo v db.test_allowed_hosts.');
         $this->server = new PDO('mysql:host=' . $config->get('db.host') . ';port=' . $config->get('db.port', 3306) . ';charset=utf8mb4',
             (string) $config->get('db.user'), (string) $config->get('db.pass', ''), [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
         $this->source = $this->syntheticSource();
@@ -143,6 +143,95 @@ final class CloneSandboxTest extends TestCase
         $exists->execute([$back]);
         self::assertSame(0, (int) $exists->fetchColumn(), 'Databáze se změněnou strukturou se zahodí.');
         self::assertEquals($expectedTables, $this->state($rebuilt));
+    }
+
+    public function testDirtyTableRestorePreservesStrictTriggerSemanticsAndSessionMode(): void
+    {
+        $session = (string) $this->server->query('SELECT @@SESSION.sql_mode')->fetchColumn();
+        try {
+            $this->addStrictCastSource();
+            $this->server->exec("SET SESSION sql_mode = 'NO_ENGINE_SUBSTITUTION'");
+            $first = $this->acquire($this->source, true);
+            $this->assertStrictCastRejected();
+            $this->server->exec("UPDATE sandbox_labels SET label = '8' WHERE id = 1");
+            $this->release($first);
+
+            $restored = $this->acquire($this->source, true);
+            self::assertSame($first, $restored, 'Obnova musí zachovat stejnou zapůjčenou databázi.');
+            self::assertSame('NO_ENGINE_SUBSTITUTION', $this->server->query('SELECT @@SESSION.sql_mode')->fetchColumn());
+            self::assertSame('7', $this->server->query('SELECT label FROM sandbox_labels WHERE id = 1')->fetchColumn());
+            self::assertSame(7, (int) $this->server->query('SELECT numeric_value FROM sandbox_numbers WHERE id = 1')->fetchColumn());
+            $this->assertStrictCastRejected();
+        } finally {
+            if ($this->server->inTransaction()) $this->server->rollBack();
+            $this->server->prepare('SET SESSION sql_mode = ?')->execute([$session]);
+        }
+    }
+
+    public function testSameTriggerBodyWithDifferentSqlModeIsRestoredToStrictSemantics(): void
+    {
+        $session = (string) $this->server->query('SELECT @@SESSION.sql_mode')->fetchColumn();
+        try {
+            $this->addStrictCastSource();
+            $sourceTrigger = $this->castTriggerMetadata($this->source);
+            $this->server->exec("SET SESSION sql_mode = 'NO_ENGINE_SUBSTITUTION'");
+            $first = $this->acquire($this->source, true);
+            $this->server->exec('DROP TRIGGER trg_sandbox_strict_cast');
+            $this->createCastTrigger();
+            $changedTrigger = $this->castTriggerMetadata($first);
+            self::assertSame($sourceTrigger['ACTION_STATEMENT'], $changedTrigger['ACTION_STATEMENT']);
+            self::assertNotSame($sourceTrigger['SQL_MODE'], $changedTrigger['SQL_MODE']);
+            $this->server->beginTransaction();
+            $this->server->exec("INSERT INTO sandbox_labels (id, label) VALUES (2, 'not-a-number')");
+            self::assertSame(0, (int) $this->server->query('SELECT numeric_value FROM sandbox_numbers WHERE id = 2')->fetchColumn());
+            $this->server->rollBack();
+            $this->release($first);
+
+            $restored = $this->acquire($this->source, true);
+            self::assertSame($first, $restored, 'Samotný režim triggeru se musí obnovit bez nové databáze.');
+            self::assertSame('NO_ENGINE_SUBSTITUTION', $this->server->query('SELECT @@SESSION.sql_mode')->fetchColumn());
+            $this->assertStrictCastRejected();
+            self::assertSame($sourceTrigger['SQL_MODE'], $this->castTriggerMetadata($restored)['SQL_MODE']);
+        } finally {
+            if ($this->server->inTransaction()) $this->server->rollBack();
+            $this->server->prepare('SET SESSION sql_mode = ?')->execute([$session]);
+        }
+    }
+
+    private function addStrictCastSource(): void
+    {
+        $this->server->exec('USE ' . DatabaseCloner::quote($this->source));
+        $this->server->exec("SET SESSION sql_mode = 'STRICT_ALL_TABLES,NO_ENGINE_SUBSTITUTION'");
+        $this->server->exec('CREATE TABLE sandbox_labels (id INT PRIMARY KEY, label VARCHAR(32) NOT NULL) ENGINE=InnoDB');
+        $this->server->exec('CREATE TABLE sandbox_numbers (id INT PRIMARY KEY, numeric_value INT NOT NULL) ENGINE=InnoDB');
+        $this->createCastTrigger();
+        $this->server->exec("INSERT INTO sandbox_labels (id, label) VALUES (1, '7')");
+    }
+
+    private function createCastTrigger(): void
+    {
+        $this->server->exec('CREATE TRIGGER trg_sandbox_strict_cast AFTER INSERT ON sandbox_labels FOR EACH ROW '
+            . 'INSERT INTO sandbox_numbers (id, numeric_value) VALUES (NEW.id, NEW.label)');
+    }
+
+    private function castTriggerMetadata(string $schema): array
+    {
+        foreach (TriggerMetadata::read($this->server, $schema) as $trigger) {
+            if ($trigger['TRIGGER_NAME'] === 'trg_sandbox_strict_cast') return $trigger;
+        }
+        self::fail('Syntetický trigger pro ověření režimu SQL chybí.');
+    }
+
+    private function assertStrictCastRejected(): void
+    {
+        try {
+            $this->server->exec("INSERT INTO sandbox_labels (id, label) VALUES (2, 'not-a-number')");
+            self::fail('Převod textu na INT musí trigger ve striktním režimu odmítnout.');
+        } catch (\PDOException $error) {
+            self::assertSame(1366, (int) ($error->errorInfo[1] ?? 0));
+        }
+        self::assertSame([1], array_map('intval', $this->server->query('SELECT id FROM sandbox_labels ORDER BY id')->fetchAll(PDO::FETCH_COLUMN)));
+        self::assertSame([7], array_map('intval', $this->server->query('SELECT numeric_value FROM sandbox_numbers ORDER BY id')->fetchAll(PDO::FETCH_COLUMN)));
     }
 
     private function syntheticSource(): string

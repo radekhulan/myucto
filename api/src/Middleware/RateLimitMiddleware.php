@@ -22,6 +22,13 @@ use Slim\Psr7\Factory\ResponseFactory;
  * zarovnané `window_start`).
  *
  *   login_per_min_per_ip      → 60s window, key = "rl:login:ip:{ip/24}"
+ *                               (i POST /api/auth/password-token)
+ *   password_token_failures_per_min → 60s window, key = "rl:password-token:fail:all"
+ *                               (neúspěchy endpointu ze všech IP dohromady)
+ *   password_token_failures_per_hour_per_account → 3600s window,
+ *                               key = "rl:password-token:fail:email:{sha1}" (neúspěchy
+ *                               jednoho účtu ze všech IP; obojí počítá PasswordTokenAction
+ *                               přes blockedFor() a consume())
  *   forgot_per_hour_per_ip    → 3600s window, key = "rl:forgot:ip:{ip/24}"
  *   forgot_per_hour_per_email → 3600s window, key = "rl:forgot:email:{sha1}"
  *                               (konzumuje ForgotPasswordAction přes consume() —
@@ -171,6 +178,24 @@ final class RateLimitMiddleware implements MiddlewareInterface
     }
 
     /**
+     * Je bucket vyčerpaný? Jen čte, slot neodebere. Pro limity, které počítají
+     * jen neúspěchy: akce se nejdřív zeptá tady a slot odebere přes consume()
+     * až po neúspěchu.
+     *
+     * @return int|null  null = průchod povolen, jinak Retry-After v sekundách
+     */
+    public function blockedFor(string $key, int $limit, int $window): ?int
+    {
+        if ($this->config->get('rate_limits.enabled', true) === false) {
+            return null;
+        }
+
+        $state = $this->peek($key, $window);
+
+        return $state['count'] >= $limit ? max(1, $state['ttl']) : null;
+    }
+
+    /**
      * Přečte stav bucketu bez zápisu. Redis primary, jinak DB fallback.
      *
      * @return array{count:int,ttl:int}
@@ -253,8 +278,9 @@ final class RateLimitMiddleware implements MiddlewareInterface
             return ['rl:mcp-consent:user:' . $userId, 10, 60];
         }
 
-        // Login — všichni
-        if ($path === '/api/auth/login' && $method === 'POST') {
+        // Login — všichni. Výměna hesla za API token sdílí s webovým přihlášením
+        // kbelík na IP: jde o stejné hádání hesla jinými dveřmi.
+        if (in_array($path, ['/api/auth/login', '/api/auth/password-token'], true) && $method === 'POST') {
             return ['rl:login:ip:' . $this->ipBucket($ip), (int) ($rl['login_per_min_per_ip'] ?? 10), 60];
         }
         if ($path === '/api/auth/webauthn/login/verify' && $method === 'POST') {
@@ -267,6 +293,20 @@ final class RateLimitMiddleware implements MiddlewareInterface
             && $method === 'POST'
         ) {
             return ['rl:domain-login:' . sha1($path) . ':ip:' . $this->ipBucket($ip), 10, 60];
+        }
+        // Přihlášení u poskytovatele identity: zahájení i návrat jsou GET bez
+        // session, každý stojí zápis do DB a návrat i dotaz na poskytovatele.
+        if (str_starts_with($path, '/api/auth/oidc/') && $method === 'GET'
+            && (str_ends_with($path, '/login') || str_ends_with($path, '/callback'))
+        ) {
+            return ['rl:oidc:' . sha1($path) . ':ip:' . $this->ipBucket($ip),
+                (int) ($rl['login_per_min_per_ip'] ?? 10) * 2, 60];
+        }
+        if ($path === '/api/auth/oidc/apple/callback' && $method === 'POST') {
+            return ['rl:oidc-form:ip:' . $this->ipBucket($ip), (int) ($rl['login_per_min_per_ip'] ?? 10) * 2, 60];
+        }
+        if (str_starts_with($path, '/api/auth/oidc/') && $method !== 'GET' && $userId > 0) {
+            return ['rl:oidc-self:' . sha1($path) . ':user:' . $userId, 20, 60];
         }
         if ($path === '/api/auth/domain-login/authorize' && $method === 'POST' && $userId > 0) {
             return ['rl:domain-login-authorize:user:' . $userId, 20, 60];

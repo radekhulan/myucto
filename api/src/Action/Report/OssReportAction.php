@@ -125,17 +125,20 @@ final class OssReportAction
         // chyba jde do activity logu vedle samotného podání.
         $evidenceCount = 0;
         $evidenceError = null;
-        try {
-            $evidenceCount = $this->evidence->capture(
-                $supplierId,
-                (int) $archived['submission_id'],
-                $year,
-                $quarter,
-                $result['preview'],
-                $userId ?: null,
-            );
-        } catch (\Throwable $e) {
-            $evidenceError = $e->getMessage();
+        // Bez archivovaného podání (ukázka) není k čemu evidenci navázat.
+        if ($archived['submission_id'] !== null) {
+            try {
+                $evidenceCount = $this->evidence->capture(
+                    $supplierId,
+                    (int) $archived['submission_id'],
+                    $year,
+                    $quarter,
+                    $result['preview'],
+                    $userId ?: null,
+                );
+            } catch (\Throwable $e) {
+                $evidenceError = $e->getMessage();
+            }
         }
 
         $this->logger->log('report.ossei1_downloaded', $userId, null, null, [

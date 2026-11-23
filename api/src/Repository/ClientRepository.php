@@ -14,6 +14,7 @@ use MyInvoice\Service\Oss\OssClientContext;
 use MyInvoice\Support\PaymentMethods;
 use PDO;
 use MyInvoice\Support\Sql\AdvanceSettledSql;
+use MyInvoice\Support\Sql\PurchaseCostSql;
 
 final class ClientRepository
 {
@@ -66,6 +67,44 @@ final class ClientRepository
             'is_customer'  => (bool) $r['is_customer'],
             'is_vendor'    => (bool) $r['is_vendor'],
         ], $stmt->fetchAll(PDO::FETCH_ASSOC) ?: []);
+    }
+
+    /**
+     * Rychlé hledání klientů ve více firmách naráz, když je aktivní firma nenašla.
+     * O tom, zda smí uživatel výsledek firmy vidět, rozhoduje VOLAJÍCÍ.
+     *
+     * Název se hledá jako podřetězec, IČ, DIČ a e-mail od začátku. Podřetězec index
+     * nevyužije, proto drží strop prohlížených řádků: u obřího adresáře se raději
+     * vrátí neúplný výběr, než aby každé písmeno procházelo klienty všech firem.
+     *
+     * @param list<int> $supplierIds
+     * @return list<array{id:int, supplier_id:int, company_name:string, main_email:?string, is_customer:bool, is_vendor:bool}>
+     */
+    public function searchQuickAcrossSuppliers(array $supplierIds, string $q, int $limit): array
+    {
+        $supplierIds = array_values(array_unique(array_filter($supplierIds, static fn (int $id): bool => $id > 0)));
+        $q = trim($q);
+        if ($q === '' || $supplierIds === []) return [];
+        $esc = addcslashes($q, '%_\\');
+        $in = implode(',', array_fill(0, count($supplierIds), '?'));
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT id, supplier_id, company_name, main_email, is_customer, is_vendor
+               FROM clients
+              WHERE supplier_id IN ($in) AND archived_at IS NULL AND is_walk_in = 0
+                AND (company_name LIKE ? OR main_email LIKE ? OR ic LIKE ? OR dic LIKE ?)
+              LIMIT " . max(1, min(100, $limit)) . ' ROWS EXAMINED 20000'
+        );
+        $stmt->execute([...$supplierIds, '%' . $esc . '%', $esc . '%', $esc . '%', $esc . '%']);
+        $rows = array_map(static fn (array $r) => [
+            'id'           => (int) $r['id'],
+            'supplier_id'  => (int) $r['supplier_id'],
+            'company_name' => (string) $r['company_name'],
+            'main_email'   => $r['main_email'] !== null ? (string) $r['main_email'] : null,
+            'is_customer'  => (bool) $r['is_customer'],
+            'is_vendor'    => (bool) $r['is_vendor'],
+        ], $stmt->fetchAll(PDO::FETCH_ASSOC) ?: []);
+        usort($rows, static fn (array $a, array $b): int => [$a['supplier_id'], mb_strtolower($a['company_name'])] <=> [$b['supplier_id'], mb_strtolower($b['company_name'])]);
+        return $rows;
     }
 
     public function list(array $filters = [], int $page = 1, int $perPage = 20, string $sort = 'name'): array
@@ -169,7 +208,7 @@ final class ClientRepository
         $sql = "SELECT c.id, c.supplier_id, c.company_name, c.ic, c.dic, c.tax_number, c.main_email, c.language,
                        c.currency_default_id, cur.code AS currency_default,
                        c.reverse_charge, c.is_vat_payer, c.is_customer, c.is_vendor, c.is_fuel_station,
-                       c.auto_send_reminders,
+                       c.simplified_only, c.auto_send_reminders,
                        c.payment_due_default, c.payment_due_unit, c.default_payment_method, c.hourly_rate,
                        c.default_expense_category_id, c.default_revenue_category_id,
                        c.price_level_id, pl.name AS price_level_name,
@@ -206,11 +245,12 @@ final class ClientRepository
                                      -- DDKP (daňový doklad k platbě) = jen odpočet DPH ze zálohy,
                                      -- nikdy náklad → bezpodmínečně ven (shoda s CRM/dashboard).
                                      AND COALESCE(pi.document_kind, '') <> 'tax_document',
-                                     pi.total_with_vat * COALESCE(IF(cur.code = 'CZK', 1, pi.exchange_rate), 1),
+                                     -- Odpočet zálohy z DDKP na konečné faktuře nákladem není (PurchaseCostSql).
+                                     " . PurchaseCostSql::gross('pi') . " * COALESCE(IF(cur.code = 'CZK', 1, pi.exchange_rate), 1),
                                      0)) AS costs,
                               SUM(IF(pi.status != 'cancelled', 1, 0)) AS purchase_count,
                               MAX(IF(pi.status != 'cancelled', pi.issue_date, NULL)) AS last_purchase_date
-                         FROM purchase_invoices pi
+                         FROM purchase_invoices pi" . PurchaseCostSql::deductionJoin('pi', (int) ($filters['supplier_id'] ?? 0)) . "
                     LEFT JOIN currencies cur ON cur.id = pi.currency_id
                         WHERE pi.supplier_id = ?
                      GROUP BY pi.vendor_id
@@ -274,8 +314,9 @@ final class ClientRepository
              auto_send_reminders, payment_due_default, payment_due_unit, default_payment_method, hourly_rate, note,
              default_expense_category_id, default_revenue_category_id,
              invoice_number_format, proforma_number_format, credit_note_number_format, invoice_number_period,
-             default_branding_profile_id, email_subject_format, email_attachment_name_format, email_attach_isdoc)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)';
+             default_branding_profile_id, email_subject_format, email_attachment_name_format, email_attach_isdoc,
+             simplified_only)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)';
         $stmt = $this->db->pdo()->prepare($sql);
         $stmt->execute([
             $supplierId,
@@ -287,9 +328,9 @@ final class ClientRepository
             // Národní daňové číslo (#120) — SK DIČ / DE Steuernummer / PL NIP / HU Adószám;
             // `dic` u takových klientů nese VAT ID s prefixem (u SK = IČ DPH).
             $this->nullable($data, 'tax_number'),
-            (string) $data['street'],
-            (string) $data['city'],
-            (string) $data['zip'],
+            (string) ($data['street'] ?? ''),
+            (string) ($data['city'] ?? ''),
+            (string) ($data['zip'] ?? ''),
             $countryId,
             $this->nullable($data, 'main_email'),
             $this->nullable($data, 'phone'),
@@ -323,6 +364,7 @@ final class ClientRepository
             ClientEmailFormat::normalize($data['email_subject_format'] ?? null),
             ClientEmailFormat::normalize($data['email_attachment_name_format'] ?? null),
             $emailAttachIsdoc,
+            self::simplifiedOnlyFlag($data) ?? 0,
         ]);
         return (int) $this->db->pdo()->lastInsertId();
     }
@@ -468,6 +510,26 @@ final class ClientRepository
         return $id;
     }
 
+    /**
+     * Drobný zákazník (#310, migrace 2282): karta bez adresy, které lze vystavit jen
+     * zjednodušený daňový doklad (§ 30 ZDPH).
+     */
+    public function isSimplifiedOnly(int $clientId): bool
+    {
+        $stmt = $this->db->pdo()->prepare('SELECT simplified_only FROM clients WHERE id = ?');
+        $stmt->execute([$clientId]);
+        return (int) $stmt->fetchColumn() === 1;
+    }
+
+    /** Příznak drobného zákazníka z payloadu; `null` = klíč chybí, uložená hodnota se nemění. */
+    private static function simplifiedOnlyFlag(array $data): ?int
+    {
+        if (!array_key_exists('simplified_only', $data) || $data['simplified_only'] === null) {
+            return null;
+        }
+        return filter_var($data['simplified_only'], FILTER_VALIDATE_BOOLEAN) ? 1 : 0;
+    }
+
     public function isWalkInCustomer(int $clientId): bool
     {
         $stmt = $this->db->pdo()->prepare('SELECT is_walk_in FROM clients WHERE id = ?');
@@ -500,7 +562,7 @@ final class ClientRepository
         $stmt = $this->db->pdo()->prepare(
             "UPDATE clients SET dic = ?
               WHERE id = ?
-                AND LPAD(REGEXP_REPLACE(ic, '[^0-9]', ''), 8, '0') = ?
+                AND " . \MyInvoice\Support\CompanyIdNormalizer::icSql('ic') . " = ?
                 AND (dic IS NULL OR REGEXP_REPLACE(dic, '[^0-9]', '') IN ('', ?))"
         );
         $stmt->execute([$groupDic, $id, $icDigits, $icDigits]);
@@ -533,6 +595,7 @@ final class ClientRepository
             'invoice_number_format', 'proforma_number_format', 'credit_note_number_format',
             'invoice_number_period', 'related_party_type', 'related_party_note',
             'email_subject_format', 'email_attachment_name_format', 'email_attach_isdoc',
+            'simplified_only',
         ] as $key) {
             if (!array_key_exists($key, $data) && array_key_exists($key, $current)) {
                 $data[$key] = $current[$key];
@@ -648,7 +711,8 @@ final class ClientRepository
                 -- Typ a doložení doplňuje mergeWithStored(), explicitní null je smaže.
                 related_party = COALESCE(?, related_party),
                 related_party_type = ?,
-                related_party_note = ?
+                related_party_note = ?,
+                simplified_only = COALESCE(?, simplified_only)
                 WHERE id = ?';
         $stmt = $pdo->prepare($sql);
         $stmt->execute([
@@ -658,9 +722,9 @@ final class ClientRepository
             $this->nullable($data, 'ic'),
             $this->nullable($data, 'dic'),
             $this->nullable($data, 'tax_number'),
-            (string) $data['street'],
-            (string) $data['city'],
-            (string) $data['zip'],
+            (string) ($data['street'] ?? ''),
+            (string) ($data['city'] ?? ''),
+            (string) ($data['zip'] ?? ''),
             $countryId,
             $this->nullable($data, 'main_email'),
             $this->nullable($data, 'phone'),
@@ -696,6 +760,7 @@ final class ClientRepository
             array_key_exists('related_party', $data) ? (int) (bool) $data['related_party'] : null,
             $this->nullable($data, 'related_party_type'),
             $this->nullable($data, 'related_party_note'),
+            self::simplifiedOnlyFlag($data),
             $id,
         ]);
 
@@ -918,6 +983,7 @@ final class ClientRepository
         if (array_key_exists('is_customer', $row)) $row['is_customer'] = (bool) $row['is_customer'];
         if (array_key_exists('is_vendor', $row))   $row['is_vendor']   = (bool) $row['is_vendor'];
         if (array_key_exists('is_walk_in', $row))  $row['is_walk_in']  = (bool) $row['is_walk_in'];
+        if (array_key_exists('simplified_only', $row)) $row['simplified_only'] = (bool) $row['simplified_only'];
         if (array_key_exists('is_fuel_station', $row)) $row['is_fuel_station'] = (bool) $row['is_fuel_station'];
         // Formulář čte příznak striktně (`=== true`); bez přetypování přišla `1`, checkbox
         // zůstal prázdný a uložení karty spojenou osobu i s typem vztahu tiše smazalo.

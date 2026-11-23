@@ -6,6 +6,7 @@ namespace MyInvoice\Service\Payroll\Submission\Registration;
 
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzCodebookCatalog;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzSpecPackageCatalog;
+use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzSpecVersion;
 
 /**
  * Postavení v zaměstnání (REGZEC `job/@relat`, ID 10249).
@@ -16,6 +17,19 @@ use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzSpecPackageCatalog;
  * výslovně říká „musí jít o 4místný kód, kratší nejsou akceptovány", takže
  * nabídka i kontrola pracují jen s listy o čtyřech číslicích. U druhu
  * činnosti 15 a 16 je číselník podle EDV omezený na 1341 a 1342.
+ *
+ * REGZEC 2025 i REGZEC 2027 berou TÝŽ výčet (vložený ve slovníku 1.4.1.6),
+ * tedy list 2119 „Zaměstnavatelé – fyzické osoby jinde neuvedené". Závazný
+ * zdroj pro REGZEC27 je EDV 1.5.0.3 (ČSSZ/MPSV), list „CIS Klasif. postavení
+ * v zaměst", řádek 41: 2119, kód 2219 v něm není; shodně živý číselník MPSV
+ * DS_CIS_Klasifikace_postaveni_v_zamestnani (developers.mpsv.cz/api/codebook,
+ * aktualizace 9. 9. 2026), na
+ * který odkazují Pokyny k vyplnění REGZEC (ID 10249), a systematická část
+ * NKPZ ČSÚ (nkpz_systematicka_cast.xlsx, řádek 42). Kód 2219 v příloze
+ * sdělení ČSÚ č. 401/2024 Sb. je tisková chyba, kterou převzala iSMS ČSÚ
+ * (číselník 80145) a zařadila ji pod 221; aplikace ji proto nepoužívá
+ * ({@see PayrollRegistrationNkpzClassification} zůstává jen referencí).
+ * Výčet EDV 1.4.0.6 a 1.5.0.3 je řádek po řádku shodný.
  */
 final class PayrollRegistrationEmploymentStatusCodebook
 {
@@ -31,10 +45,10 @@ final class PayrollRegistrationEmploymentStatusCodebook
     private static ?array $entries = null;
 
     /** @return list<array{code:string,label:string}> */
-    public static function options(): array
+    public static function options(JmhzSpecVersion $version = JmhzSpecVersion::V2026): array
     {
         $options = [];
-        foreach (self::entries() as $code => $label) {
+        foreach (self::entriesFor($version) as $code => $label) {
             // Čtyřmístný klíč PHP drží jako int; bez přetypování by šel do JSON
             // jako číslo a formulář by uložený kód „1111" v nabídce nenašel.
             $options[] = ['code' => (string) $code, 'label' => $label];
@@ -43,9 +57,43 @@ final class PayrollRegistrationEmploymentStatusCodebook
         return $options;
     }
 
-    public static function isKnown(string $code): bool
+    public static function isKnown(string $code, JmhzSpecVersion $version = JmhzSpecVersion::V2026): bool
     {
-        return array_key_exists($code, self::entries());
+        return array_key_exists($code, self::entriesFor($version));
+    }
+
+    /**
+     * Ročník věty podle rozhodného data (`YYYY-MM-DD`). Neplatné datum hlásí
+     * kontrola data, tady se jen nezvolí ročník 2027.
+     */
+    public static function versionForDate(mixed $decisiveDate): JmhzSpecVersion
+    {
+        if (!is_string($decisiveDate) || preg_match('/\A\d{4}-\d{2}-\d{2}\z/D', $decisiveDate) !== 1) {
+            return JmhzSpecVersion::V2026;
+        }
+
+        return JmhzSpecVersion::forRegistrationEventDate($decisiveDate);
+    }
+
+    /**
+     * Výčet pro ročník věty. Oba ročníky mají podle EDV stejný (viz docblock
+     * třídy); parametr zůstává, kdyby se v dalším EDV rozešly.
+     *
+     * @return array<string,string>
+     */
+    private static function entriesFor(JmhzSpecVersion $version): array
+    {
+        return self::entries();
+    }
+
+    /**
+     * Kód, který se v uloženém profilu nebo změně mohl objevit z ČSÚ iSMS:
+     * 2219 je tisková chyba sdělení č. 401/2024 Sb. za 2119 (EDV 1.5.0.3,
+     * číselník MPSV). Čtení ho převede, aby se nemusela měnit data.
+     */
+    public static function normalize(?string $code): ?string
+    {
+        return $code === '2219' ? '2119' : $code;
     }
 
     /**
@@ -71,6 +119,13 @@ final class PayrollRegistrationEmploymentStatusCodebook
     ): ?string {
         if ($activityCode === '15' || $activityCode === '16') {
             return $fixedTerm ? '1342' : '1341';
+        }
+        // Pokyny k vyplnění REGZEC, ID 10249: jednatel nebo člen statutárního
+        // orgánu bez pracovní smlouvy má 2210 (s pracovní smlouvou 1111/1112,
+        // vede se pak jako pracovní poměr). Bez pracovní smlouvy = vztah
+        // statutárního orgánu s druhem činnosti S.
+        if ($relationType === 'statutory_body' && $activityCode === 'S') {
+            return '2210';
         }
 
         return match ($relationType) {

@@ -289,6 +289,35 @@ final class SubmissionInboxCategoryTest extends TestCase
         self::assertSame([$kept], array_column($page['items'], 'id'));
     }
 
+    public function testPairedReceiptCarriesItsSubmissionForTheList(): void
+    {
+        $this->pdo->prepare(
+            'INSERT INTO submission_outbox
+                (supplier_id, environment, channel, recipient_box_id, agenda_code, subject, artifact_kind, artifact_id,
+                 artifact_filename, artifact_sha256, dispatch_state, idempotency_key_hash, correlation_reference)
+             VALUES (?, \'production\', \'isds\', \'tstfu01\', \'DPHKH1\', \'Kontrolní hlášení DPH za 1/2026\', \'tax_submission\', 4242,
+                 \'kh.xml\', ?, \'ready\', ?, ?)'
+        )->execute([
+            $this->supplierId,
+            hash('sha256', 'kh'),
+            random_bytes(32),
+            'TEST-' . bin2hex(random_bytes(6)),
+        ]);
+        $outboxId = (int) $this->pdo->lastInsertId();
+        $receipt = $this->message(['sender_box_id' => 'own0001', 'sender_name' => 'Testovací firma', 'classification' => 'delivery_receipt']);
+        $this->pdo->prepare('UPDATE submission_inbox_messages SET matched_outbox_id = ? WHERE id = ?')
+            ->execute([$outboxId, $receipt]);
+        $unpaired = $this->message(['sender_box_id' => 'tst0001', 'sender_name' => 'Finanční úřad pro Testovací kraj']);
+
+        $items = array_column($this->browse([])['items'], null, 'id');
+
+        self::assertSame($outboxId, $items[$receipt]['matched_outbox_id']);
+        self::assertSame('Kontrolní hlášení DPH za 1/2026', $items[$receipt]['matched_outbox_subject']);
+        self::assertSame('tax_submission', $items[$receipt]['matched_outbox_artifact_kind']);
+        self::assertSame(4242, $items[$receipt]['matched_outbox_artifact_id']);
+        self::assertNull($items[$unpaired]['matched_outbox_subject']);
+    }
+
     // ───────────────────────── pomocníci ─────────────────────────
 
     /**

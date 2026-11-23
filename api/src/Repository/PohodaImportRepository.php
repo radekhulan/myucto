@@ -15,6 +15,8 @@ use MyInvoice\Service\Migration\Pohoda\PohodaException;
 final class PohodaImportRepository extends AbstractMigrationImportRepository
 {
     public const KIND_PERIOD = 'period';
+    /** Rok agendy převedené jako daňová evidence ({@see \MyInvoice\Service\Migration\Pohoda\PohodaTaxEvidenceImporter}): rok => rok. */
+    public const KIND_TAX_EVIDENCE_YEAR = 'tax_evidence_year';
     public const KIND_ACCOUNT = 'account';
     public const KIND_JOURNAL_ENTRY = 'journal_entry';
     public const KIND_CLIENT = 'client';
@@ -48,6 +50,8 @@ final class PohodaImportRepository extends AbstractMigrationImportRepository
     public const KIND_BANK_PROPOSAL_RULE = 'bank_proposal_rule';
     /** Hlavička interního dokladu nad převzatým zápisem: journal_entries.id => internal_documents.id. */
     public const KIND_INTERNAL_DOCUMENT = 'internal_document';
+    /** Zakázka MyÚčta u partnera zakázky POHODY: číslo zakázky => projects.id. */
+    public const KIND_PROJECT = 'project';
     public const KIND_ASSET = 'asset';
     public const KIND_SMALL_ASSET = 'small_asset';
     /** Sklad podle kódu skladu v POHODĚ => warehouses.id. */
@@ -60,6 +64,10 @@ final class PohodaImportRepository extends AbstractMigrationImportRepository
     public const KIND_STOCK_PRICE_LEVEL = 'stock_price_level';
     /** Větev členění skladu (otisk cesty názvů) => stock_categories.id. */
     public const KIND_STOCK_CATEGORY = 'stock_category';
+    /** Otevřená vydaná objednávka POHODY podle čísla => purchase_orders.id. */
+    public const KIND_PURCHASE_ORDER = 'purchase_order';
+    /** Otevřená přijatá objednávka POHODY podle čísla => sales_orders.id. */
+    public const KIND_SALES_ORDER = 'sales_order';
     /** Převedený měsíc mezd: `období|otisk sešitu` => id dávky importu docházky. */
     public const KIND_PAYROLL_MONTH = 'payroll_month';
     /** Převedená trvalá srážka: reference srážky v PAMICA => id případu nebo dohody. */

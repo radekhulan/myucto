@@ -14,6 +14,7 @@ use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Middleware\SupplierScopeMiddleware;
 use MyInvoice\Support\Sql\CzkAmountExpr;
 use MyInvoice\Support\Sql\PayablePredicate;
+use MyInvoice\Support\Sql\PurchaseCostSql;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 
@@ -119,10 +120,19 @@ final class PurchaseSummaryAction
         return (bool) $stmt->fetchColumn();
     }
 
-    /** SQL fragment vybírající správný sloupec nákladu dle plátcovství DPH. */
+    /**
+     * Náklad dokladu dle plátcovství DPH bez odpočtu zálohy ({@see PurchaseCostSql}).
+     * Dotaz musí připojit {@see costJoin()}.
+     */
     private function costCol(bool $isVatPayer): string
     {
-        return $isVatPayer ? 'pi.total_without_vat' : 'pi.total_with_vat';
+        return PurchaseCostSql::cost('pi', $isVatPayer);
+    }
+
+    /** JOIN odpočtů zálohy k `purchase_invoices pi` pro {@see costCol()}. */
+    private function costJoin(int $sid): string
+    {
+        return PurchaseCostSql::deductionJoin('pi', $sid);
     }
 
     /**
@@ -139,10 +149,15 @@ final class PurchaseSummaryAction
     {
         $p     = $alias === '' ? '' : $alias . '.';
         $idRef = $alias === '' ? 'purchase_invoices.id' : $alias . '.id';
+        $supplierRef = $alias === '' ? 'purchase_invoices.supplier_id' : $alias . '.supplier_id';
+        // Spárovaná = vazba hlavičkou i záloha jedné z faktur s víc zálohami (PurchaseAdvanceLinks).
         return " AND NOT (COALESCE({$p}document_kind, '') = 'advance'"
              . " AND ({$p}status <> 'paid'"
              . " OR EXISTS (SELECT 1 FROM purchase_invoices adv_s"
-             . " WHERE adv_s.advance_purchase_invoice_id = {$idRef})))"
+             . " WHERE adv_s.advance_purchase_invoice_id = {$idRef})"
+             . " OR EXISTS (SELECT 1 FROM purchase_advance_deductions adv_d"
+             . " WHERE adv_d.supplier_id = {$supplierRef} AND adv_d.advance_invoice_id = {$idRef}"
+             . " AND adv_d.source = '" . \MyInvoice\Service\PurchaseInvoice\PurchaseAdvanceLinks::SOURCE . "')))"
              // DDKP (daňový doklad k platbě) není náklad ani závazek — jen odpočet DPH ze
              // zálohy (343/314); jeho základ vzniká jako náklad až u vyúčtovací faktury. Proto
              // BEZPODMÍNEČNĚ ven z nákladových/závazkových sum (na rozdíl od 'advance' výše).
@@ -178,7 +193,7 @@ final class PurchaseSummaryAction
     {
         $cost = $this->costCol($isVatPayer);
         $sql = "SELECT cur.code AS currency, SUM($cost) AS total, COUNT(*) AS invoice_count
-                  FROM purchase_invoices pi
+                  FROM purchase_invoices pi" . $this->costJoin($sid) . "
                   JOIN currencies cur ON cur.id = pi.currency_id
                  WHERE pi.supplier_id = ?
                    AND pi.effective_cost_date >= DATE_SUB(CURDATE(), INTERVAL 30 DAY)
@@ -204,7 +219,7 @@ final class PurchaseSummaryAction
                        cur.code AS currency,
                        SUM($cost) AS total,
                        COUNT(*) AS invoice_count
-                  FROM purchase_invoices pi
+                  FROM purchase_invoices pi" . $this->costJoin($sid) . "
                   JOIN currencies cur ON cur.id = pi.currency_id
                  WHERE pi.supplier_id = ?
                    AND pi.status IN " . self::COST_STATUSES . $this->advanceCostExclude() . "
@@ -256,7 +271,7 @@ final class PurchaseSummaryAction
                                             THEN pi.vendor_id END) AS this_year_vendor_count,
                        COUNT(DISTINCT CASE WHEN YEAR(pi.effective_cost_date) = ?
                                             THEN pi.vendor_id END) AS prev_year_vendor_count
-                  FROM purchase_invoices pi
+                  FROM purchase_invoices pi" . $this->costJoin($sid) . "
                   JOIN currencies cur ON cur.id = pi.currency_id
                  WHERE pi.supplier_id = ?
                    -- prevYear a year po sobě jdoucí → půlotevřený rozsah = YEAR IN (year, prevYear)
@@ -450,7 +465,7 @@ final class PurchaseSummaryAction
                        SUM($costCzk) AS total_czk,
                        GROUP_CONCAT(DISTINCT cur.code ORDER BY cur.code SEPARATOR ',') AS currencies,
                        COUNT(*) AS invoice_count
-                  FROM purchase_invoices pi
+                  FROM purchase_invoices pi" . $this->costJoin($sid) . "
                   JOIN clients c ON c.id = pi.vendor_id
                   JOIN currencies cur ON cur.id = pi.currency_id
                  WHERE pi.supplier_id = ?
@@ -479,7 +494,7 @@ final class PurchaseSummaryAction
                        SUM($costCzk) AS total_czk,
                        GROUP_CONCAT(DISTINCT cur.code ORDER BY cur.code SEPARATOR ',') AS currencies,
                        COUNT(*) AS invoice_count
-                  FROM purchase_invoices pi
+                  FROM purchase_invoices pi" . $this->costJoin($sid) . "
                   JOIN clients c ON c.id = pi.vendor_id
                   JOIN currencies cur ON cur.id = pi.currency_id
                  WHERE pi.supplier_id = ?
@@ -509,7 +524,7 @@ final class PurchaseSummaryAction
         $sql = "SELECT cur.code AS currency,
                        DATE_FORMAT(pi.effective_cost_date, '%Y-%m') AS ym,
                        SUM($cost) AS total
-                  FROM purchase_invoices pi
+                  FROM purchase_invoices pi" . $this->costJoin($sid) . "
                   JOIN currencies cur ON cur.id = pi.currency_id
                  WHERE pi.supplier_id = ?
                    AND pi.effective_cost_date >= DATE_FORMAT(DATE_SUB(CURDATE(), INTERVAL 23 MONTH), '%Y-%m-01')
@@ -633,7 +648,7 @@ final class PurchaseSummaryAction
                        SUM(CASE WHEN pi.effective_cost_date >= DATE_SUB(CURDATE(), INTERVAL 24 MONTH)
                                   AND pi.effective_cost_date <  DATE_SUB(CURDATE(), INTERVAL 12 MONTH)
                                  THEN $cost ELSE 0 END) AS total_prev_12m
-                  FROM purchase_invoices pi
+                  FROM purchase_invoices pi" . $this->costJoin($sid) . "
                   JOIN currencies cur ON cur.id = pi.currency_id
                  WHERE pi.supplier_id = ?
                    AND pi.effective_cost_date >= DATE_SUB(CURDATE(), INTERVAL 24 MONTH)
@@ -748,7 +763,7 @@ final class PurchaseSummaryAction
         $sql = "SELECT pi.expense_category_id, ec.code, ec.label,
                        SUM($costCzk) AS total,
                        COUNT(*) AS cnt
-                  FROM purchase_invoices pi
+                  FROM purchase_invoices pi" . $this->costJoin($sid) . "
              LEFT JOIN expense_categories ec ON ec.id = pi.expense_category_id
                   JOIN currencies cur ON cur.id = pi.currency_id
                  WHERE pi.supplier_id = ?
@@ -894,7 +909,7 @@ final class PurchaseSummaryAction
                                  THEN $cost ELSE 0 END) AS prev_year_remainder,
                        SUM(CASE WHEN YEAR(pi.effective_cost_date) = ?
                                  THEN $cost ELSE 0 END) AS prev_year_full
-                  FROM purchase_invoices pi
+                  FROM purchase_invoices pi" . $this->costJoin($sid) . "
                   JOIN currencies cur ON cur.id = pi.currency_id
                  WHERE pi.supplier_id = ?
                    -- prevYear a year po sobě jdoucí → půlotevřený rozsah = YEAR IN (year, prevYear)
@@ -926,11 +941,11 @@ final class PurchaseSummaryAction
      */
     private function invoiceSizeHistogram(\PDO $pdo, int $sid, bool $isVatPayer): array
     {
-        $cost = $isVatPayer ? 'total_without_vat' : 'total_with_vat';
+        $cost = $this->costCol($isVatPayer);
         // CZK pojistka jako ve zbytku kódu: bez ní by se korunový doklad se zbloudilým
         // `exchange_rate` vynásobil kurzem. Ostatních ~45 kurzových výrazů ji má.
         $sql = "SELECT " . CzkAmountExpr::amount($cost, 'pi') . " AS size_czk
-                  FROM purchase_invoices pi
+                  FROM purchase_invoices pi" . $this->costJoin($sid) . "
              LEFT JOIN currencies cur ON cur.id = pi.currency_id
                  WHERE pi.supplier_id = ?
                    AND pi.status IN " . self::COST_STATUSES . $this->advanceCostExclude() . "

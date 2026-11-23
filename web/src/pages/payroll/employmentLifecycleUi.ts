@@ -1,4 +1,4 @@
-import type { PayrollEmploymentStatus } from '@/api/payroll'
+import type { PayrollEmployment, PayrollEmploymentStatus } from '@/api/payroll'
 import { appIsoDate } from '@/utils/date'
 
 export interface EmploymentTransitionPresentation {
@@ -131,6 +131,8 @@ const BOOLEAN_FIELDS = new Set(['risky_work', 'tax_declaration_signed', 'is_prim
  * text. Radši tedy syrová hodnota než `payroll.people.tax_regime.neco`.
  */
 const ENUM_FIELDS: Record<string, { prefix: string, values: string[] }> = {
+  remuneration_type: { prefix: 'payroll.people.remuneration.mode', values: ['monthly', 'hourly'] },
+  remuneration_basis_kind: { prefix: 'payroll.people.remuneration.basis_kinds', values: ['wage_statement', 'contract', 'agreement', 'internal_regulation', 'collective_agreement'] },
   status: {
     prefix: 'payroll.people.employment_status',
     values: ['planned', 'preregistered', 'active', 'suspended', 'ended', 'archived', 'no_show'],
@@ -187,6 +189,7 @@ const ENUM_FIELDS: Record<string, { prefix: string, values: string[] }> = {
 }
 
 export function employmentDiffValue(field: string, value: unknown): EmploymentDiffValue {
+  if (field === 'remuneration_type' && value == null) return { kind: 'key', key: 'payroll.people.remuneration.legacy' }
   if (value === null || value === undefined || value === '') return { kind: 'empty' }
 
   if (BOOLEAN_FIELDS.has(field)) {
@@ -213,7 +216,7 @@ export function employmentDiffValue(field: string, value: unknown): EmploymentDi
     return { kind: 'date', iso: text }
   }
 
-  if (field === 'monthly_gross_minor') {
+  if (field === 'monthly_gross_minor' || field === 'hourly_rate_minor') {
     const minor = Number(text)
     if (Number.isInteger(minor)) return { kind: 'money', minor }
   }
@@ -232,11 +235,22 @@ export function employmentDiffValue(field: string, value: unknown): EmploymentDi
  * takže stejný údaj v diffu je druhý výpis téhož. Filtruje se jen tam, kde hlavička
  * opravdu vznikla — u události bez `from_status`/`to_status` je diff jediný zdroj.
  */
+const MERGE_DIFF_KEYS = new Set(['merged_from', 'moved'])
+
+/** Osobní číslo vztahu, ze kterého sloučení přesunulo data (událost `merged`). */
+export function mergedFromCode(diff: Record<string, unknown> | null | undefined): string | null {
+  const source = diff?.merged_from
+  if (source === null || typeof source !== 'object' || !('code' in source)) return null
+  return typeof source.code === 'string' ? source.code : null
+}
+
 export function employmentDiffFields(
   diff: Record<string, unknown> | null | undefined,
   hasStatusHeader: boolean,
 ): string[] {
-  const keys = Object.keys(diff ?? {})
+  // Sloučení nese vedle změn „z → na" i `merged_from` a `moved`, které karta
+  // ukazuje vlastní větou.
+  const keys = Object.keys(diff ?? {}).filter(key => !MERGE_DIFF_KEYS.has(key))
   return hasStatusHeader ? keys.filter(key => key !== 'status') : keys
 }
 
@@ -249,4 +263,26 @@ export function employmentDiffFields(
  */
 export function todayIso(now = new Date()): string {
   return appIsoDate(now)
+}
+
+type OpeningBalancesCandidate = Pick<PayrollEmployment, 'id' | 'status' | 'is_primary' | 'start_date' | 'end_date'>
+
+/**
+ * Karta vztahu, na které osoba doplňuje počáteční roční úhrny.
+ *
+ * Úhrny patří osobě a roku, ne vztahu. Karta je ukazuje u hlavního vztahu;
+ * ukončení ale hlavní roli odebere (`is_primary = 0`), takže brigádník, jehož
+ * jediná dohoda skončila, by úhrny neměl kam uložit a odkaz z kontroly běhu
+ * by vedl do prázdna. Bez hlavního vztahu proto úhrny nese vztah, který
+ * skončil nejpozději (u souběhu ten s nejpozdějším nástupem). Hlavní roli
+ * vztahu to nemění, pravidla JMHZ 10495 zůstávají na serveru.
+ */
+export function openingBalancesHostId(employments: readonly OpeningBalancesCandidate[]): number | null {
+  const candidates = employments.filter(item => item.status !== 'no_show')
+  const primary = candidates.find(item => item.is_primary)
+  if (primary !== undefined) return primary.id
+  const rank = (item: OpeningBalancesCandidate) => `${item.end_date ?? '9999-12-31'}|${item.start_date ?? ''}|${String(item.id).padStart(12, '0')}`
+  const latest = [...candidates].sort((left, right) => rank(right).localeCompare(rank(left)))[0]
+
+  return latest?.id ?? null
 }

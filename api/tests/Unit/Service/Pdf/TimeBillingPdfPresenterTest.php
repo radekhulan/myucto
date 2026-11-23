@@ -27,7 +27,7 @@ final class TimeBillingPdfPresenterTest extends TestCase
         self::assertSame(6, $items[0]['unit_price_decimals']);
     }
 
-    public function testLegacyAndStockItemsKeepTheirExistingPresentation(): void
+    public function testCentPricesKeepTwoDecimalsAndSubCentStockPriceShowsItsOwn(): void
     {
         $items = TimeBillingPdfPresenter::invoiceItems([
             [
@@ -40,10 +40,18 @@ final class TimeBillingPdfPresenterTest extends TestCase
             [
                 'duration_minutes' => null,
                 'quantity' => 1.0,
-                'unit' => 'h',
+                'unit' => 'ks',
                 'stock_item_id' => 5,
-                'unit_price_without_vat' => 333.333333,
-                'total_without_vat' => 333.33,
+                'unit_price_without_vat' => 12.5,
+                'total_without_vat' => 12.5,
+            ],
+            [
+                'duration_minutes' => null,
+                'quantity' => 250000.0,
+                'unit' => 'ks',
+                'stock_item_id' => 5,
+                'unit_price_without_vat' => 0.0108,
+                'total_without_vat' => 2700.0,
             ],
         ], false);
 
@@ -52,6 +60,25 @@ final class TimeBillingPdfPresenterTest extends TestCase
         self::assertSame(1.5, $items[0]['quantity']);
         self::assertNull($items[1]['duration_display']);
         self::assertSame(2, $items[1]['unit_price_decimals']);
+        self::assertSame(4, $items[2]['unit_price_decimals']);
+        self::assertSame(0.0108, $items[2]['pdf_unit_price']);
+    }
+
+    public function testPurchaseGrossSubCentItemKeepsPreciseNetRate(): void
+    {
+        $items = TimeBillingPdfPresenter::purchaseInvoiceItems([[
+            'description' => 'Víčka',
+            'duration_minutes' => null,
+            'quantity' => 250000.0,
+            'unit' => 'ks',
+            'unit_price_without_vat' => 0.004,
+            'vat_rate_snapshot' => 21.0,
+            'total_without_vat' => 826.45,
+            'total_with_vat' => 1000.0,
+        ]], true);
+
+        self::assertSame(0.003306, $items[0]['pdf_unit_price']);
+        self::assertSame(6, $items[0]['unit_price_decimals']);
     }
 
     public function testLegacyHourlyItemOptsIntoStoredSubCentRate(): void

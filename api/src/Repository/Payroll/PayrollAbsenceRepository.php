@@ -32,6 +32,8 @@ final class PayrollAbsenceRepository
         $stmt = $this->db->pdo()->prepare(
             "SELECT employment.id, employment.employee_id, employment.code,
                     employment.relation_type, employment.status,
+                    COALESCE(employment.actual_start_date, employment.start_date) AS start_date,
+                    employment.end_date,
                     employee.full_name
                FROM payroll_employments employment
                JOIN payroll_employees employee
@@ -132,6 +134,9 @@ final class PayrollAbsenceRepository
                 (string) $data['date_to'],
             );
             $this->lockEmployment($supplierId, (int) $data['employment_id']);
+            if ($data['absence_type'] === 'holiday_compensatory_time_off') {
+                $this->assertHourlyHolidayTimeOff($supplierId, $data);
+            }
             $this->assertNoOverlap(
                 $supplierId,
                 (int) $data['employment_id'],
@@ -223,6 +228,10 @@ final class PayrollAbsenceRepository
                     (string) $absence['date_from'],
                     (string) $absence['date_to'],
                 );
+                if ($decision === 'approved' && $absence['absence_type'] === 'holiday_compensatory_time_off') {
+                    $this->lockEmployment($supplierId, (int) $absence['employment_id']);
+                    $this->assertHourlyHolidayTimeOff($supplierId, $absence);
+                }
             }
             /*
              * Zamítnutí je vratné. Zamítnutá absence nic nematerializovala —
@@ -1133,9 +1142,12 @@ final class PayrollAbsenceRepository
         );
         $stmt->execute([$supplierId, $employmentId, $snapshotId, $year, $quarter]);
         if ($stmt->fetchColumn() === false) {
-            throw new \InvalidArgumentException(
-                'Náhrada vyžaduje schválený snapshot průměru stejného vztahu a čtvrtletí.'
-            );
+            throw new \InvalidArgumentException(sprintf(
+                'Náhrada vyžaduje schválený průměrný výdělek téhož vztahu za čtvrtletí, do kterého '
+                . 'nepřítomnost spadá (%d. čtvrtletí %d). Založte nebo schvalte ho na záložce Průměrný výdělek.',
+                $quarter,
+                $year,
+            ));
         }
     }
 
@@ -1179,6 +1191,27 @@ final class PayrollAbsenceRepository
             (string) $conflict['date_to'],
             (string) $conflict['status'],
         );
+    }
+
+    /** Placené sváteční volno této cesty vypořádává výhradně hodinový claim. */
+    private function assertHourlyHolidayTimeOff(int $supplierId, array $data): void
+    {
+        // Dřívější hodinový nárok přežívá změnu způsobu odměňování.
+        if ((new \MyInvoice\Service\Payroll\PayrollHourlyEntitlementLedger($this->db))->hasOutstanding(
+            $supplierId, (int) $data['employment_id'], substr($data['date_from'], 0, 7) . '-01', 'holiday',
+        )) return;
+        $stmt = $this->db->pdo()->prepare('SELECT effective_from, effective_to, remuneration_type
+            FROM payroll_employment_terms WHERE supplier_id = ? AND employment_id = ?
+            AND effective_from <= ? AND (effective_to IS NULL OR effective_to >= ?) ORDER BY effective_from');
+        $stmt->execute([$supplierId, $data['employment_id'], $data['date_to'], $data['date_from']]);
+        $cursor = $data['date_from'];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $term) {
+            if ($term['effective_from'] > $cursor || $term['remuneration_type'] !== 'hourly') break;
+            $end = min($term['effective_to'] ?? $data['date_to'], $data['date_to']);
+            $cursor = (new \DateTimeImmutable($end))->modify('+1 day')->format('Y-m-d');
+            if ($cursor > $data['date_to']) return;
+        }
+        throw new \InvalidArgumentException('Placené náhradní volno za svátek vyžaduje hodinové odměňování po celou dobu absence nebo dosud nevypořádaný hodinový nárok.');
     }
 
     private function lockEmployment(int $supplierId, int $employmentId): void

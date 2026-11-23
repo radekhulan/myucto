@@ -2,6 +2,7 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { defineComponent, h } from 'vue'
 import { createI18n } from 'vue-i18n'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { formatDate } from '@/composables/useFormat'
 import Form from '../MembershipRevisionForm.vue'
 import type { MemberRevision } from '@/api/nonprofitMembership'
 import cs from '@/i18n/cs.json'
@@ -29,7 +30,7 @@ const revision = (no: number, from: string, status: MemberRevision['status'] = '
 function mounted(props: Record<string, unknown> = {}, locale = 'cs') {
   return mount(Form, {
     props: { supplier: 5, canManage: true, member, history: [revision(1, '2020-01-01')], ...props },
-    global: { plugins: [createI18n({ legacy: false, locale, messages: { cs, en } })], stubs: { ActionBar, DateInput } },
+    global: { plugins: [createI18n({ legacy: false, locale, messages: { cs, en } })], stubs: { ActionBar, DialogActions: ActionBar, DateInput } },
   })
 }
 async function fill(w: ReturnType<typeof mounted>, from = '2026-01-01') {
@@ -54,6 +55,18 @@ beforeEach(() => {
 })
 
 describe('Membership revision form', () => {
+  it('hlásí rodiči rozepsaný formulář a po vyprázdnění i odpojení ho uvolní', async () => {
+    const w = mounted()
+    expect(w.emitted('dirty')?.at(-1)).toEqual([false])
+    await w.get('[data-field="rev-reference"]').setValue('Synthetic draft')
+    expect(w.emitted('dirty')?.at(-1)).toEqual([true])
+    await w.get('[data-field="rev-reference"]').setValue('  ')
+    expect(w.emitted('dirty')?.at(-1)).toEqual([false])
+    await w.get('[data-field="rev-evidence"]').setValue('Synthetic draft')
+    w.unmount()
+    expect(w.emitted('dirty')?.at(-1)).toEqual([false])
+  })
+
   it('does not arm a revision while the visible effective date is invalid', async () => {
     const w = mounted()
     await fill(w)
@@ -66,7 +79,7 @@ describe('Membership revision form', () => {
 
   it.each(['cs', 'en'])('renders translated %s texts', async locale => {
     const w = mounted({}, locale)
-    expect(w.text()).toContain((locale === 'cs' ? cs : en).nonprofitMembership.revisionTitle)
+    expect(w.text()).toContain((locale === 'cs' ? cs : en).nonprofitMembership.revisionHelp)
     expect(w.text()).not.toContain('nonprofitMembership.')
     w.unmount()
   })
@@ -93,11 +106,31 @@ describe('Membership revision form', () => {
     w.unmount()
   })
 
+  it('after a voided revision follows the chain head but checks the date against the last valid revision', async () => {
+    const voiding = { ...revision(3, '2026-07-01', 'suspended'), voids_revision_id: 2 }
+    const w = mounted({ history: [revision(1, '2020-01-01'), revision(2, '2026-07-01', 'suspended'), voiding] })
+    expect(w.findAll('[data-field="rev-status"] option').map(o => o.attributes('value'))).toEqual(['active', 'suspended', 'ended'])
+    await fill(w, '2026-07-01')
+    expect(w.get('[data-action="rev-review"]').attributes('disabled')).toBeUndefined()
+    await review(w)
+    await w.get('[data-field="ack"]').setValue(true)
+    await w.get('[data-action="confirm"]').trigger('click')
+    await flushPromises()
+    expect(api.appendRevision.mock.calls[0]).toEqual([5, 9, { ...body, effective_from: '2026-07-01', expected_revision: 3 }])
+    w.unmount()
+  })
+
+  it('offers only activation when every revision was voided', () => {
+    const w = mounted({ history: [revision(1, '2026-01-01'), { ...revision(2, '2026-01-01'), voids_revision_id: 1 }] })
+    expect(w.findAll('[data-field="rev-status"] option').map(o => o.attributes('value'))).toEqual(['active'])
+    w.unmount()
+  })
+
   it('requires an effective date after the last revision', async () => {
     const w = mounted({ history: [revision(1, '2026-01-01')] })
     await fill(w, '2026-01-01')
     expect(w.get('[data-action="rev-review"]').attributes('disabled')).toBeDefined()
-    expect(w.get('[data-section="rev-invalid"]').text()).toContain('2026-01-01')
+    expect(w.get('[data-section="rev-invalid"]').text()).toContain(formatDate('2026-01-01'))
     await w.get('[data-field="rev-from"]').setValue('2026-01-02')
     expect(w.get('[data-action="rev-review"]').attributes('disabled')).toBeUndefined()
     w.unmount()
@@ -144,7 +177,7 @@ describe('Membership revision form', () => {
     await flushPromises()
     expect(api.appendRevision).toHaveBeenCalledTimes(1)
     expect(w.find('[data-section="uncertain"]').exists()).toBe(false)
-    expect(w.get('[role="alert"]').text()).toContain('Synthetic history changed')
+    expect(w.get('[role="alert"]').text()).toContain(cs.nonprofitMembership.serverErrors.nonprofit_membership_revision_changed)
     w.unmount()
   })
 
@@ -162,5 +195,28 @@ describe('Membership revision form', () => {
     const w = mounted({ canManage: false })
     expect(w.find('[data-action="rev-review"]').exists()).toBe(false)
     w.unmount()
+  })
+
+  it('shows the previewed effective date in the app date format', async () => {
+    const w = mounted({ history: [revision(1, '2026-01-01')] })
+    await fill(w, '2026-02-03')
+    await w.get('[data-action="rev-review"]').trigger('click')
+    await flushPromises()
+    const preview = w.get('[data-section="rev-preview"]').text()
+    expect(preview).toContain(formatDate('2026-02-03'))
+    expect(preview).not.toContain('2026-02-03')
+    w.unmount()
+  })
+
+  it('offers closing the form only for a member who already has a revision', async () => {
+    const first = mounted({ history: [] })
+    await flushPromises()
+    expect(first.find('[data-action="rev-close"]').exists()).toBe(false)
+    first.unmount()
+    const next = mounted({ history: [revision(1, '2026-01-01')] })
+    await flushPromises()
+    await next.get('[data-action="rev-close"]').trigger('click')
+    expect(next.emitted('close')).toHaveLength(1)
+    next.unmount()
   })
 })

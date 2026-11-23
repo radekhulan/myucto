@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Integration\Payroll;
 
-use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Tests\Support\IsolatedSupplierTrait;
 use PDO;
@@ -19,7 +18,7 @@ final class PayrollPaymentExportsSchemaTest extends TestCase
 
     public function testImmutableExportArchiveAndUserBoundGrantSchemaIsInstalled(): void
     {
-        $connection = Bootstrap::buildContainer()->get(Connection::class);
+        $connection = \MyInvoice\Tests\Support\PayrollTestContainer::build()->get(Connection::class);
         self::assertInstanceOf(Connection::class, $connection);
 
         foreach ([
@@ -100,7 +99,7 @@ final class PayrollPaymentExportsSchemaTest extends TestCase
 
     public function testExportRevisionTenantIntegrityAndOneUseGrantAreEnforced(): void
     {
-        $connection = Bootstrap::buildContainer()->get(Connection::class);
+        $connection = \MyInvoice\Tests\Support\PayrollTestContainer::build()->get(Connection::class);
         self::assertInstanceOf(Connection::class, $connection);
         $pdo = $connection->pdo();
         $sourceSupplierId = (int) $this->query(

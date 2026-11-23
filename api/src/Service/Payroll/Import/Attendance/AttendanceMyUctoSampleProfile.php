@@ -24,7 +24,7 @@ final class AttendanceMyUctoSampleProfile
 {
     public const KEY = 'myucto';
     public const NAME = 'Vzor MyÚčto';
-    public const VERSION = 2;
+    public const VERSION = 6;
 
     public const SHEET = 'Podklady';
     public const GUIDE_SHEET = 'Návod';
@@ -33,6 +33,7 @@ final class AttendanceMyUctoSampleProfile
     public const FORMAT_DATE = 'date';
     public const FORMAT_HOURS = 'hours';
     public const FORMAT_AMOUNT = 'amount';
+    public const FORMAT_DAYS = 'days';
 
     /**
      * Hodinová mzda podle podkladů je deklarovaná složka (stejná jako ve Vzoru
@@ -108,7 +109,7 @@ final class AttendanceMyUctoSampleProfile
                 'Sjednaná měsíční mzda v Kč jen u zaměstnance s měsíční mzdou. Při založení osoby se předvyplní do podmínek, u existující osoby ji import nabídne ke změně podmínek.',
                 [null, null]),
             $column('Hodinová sazba (Kč/h)', ['hodinová sazba*'], 'hourly_rate', self::FORMAT_AMOUNT,
-                'Sjednaná hodinová sazba v Kč za hodinu (např. 180). Při založení osoby se uloží do podmínek vztahu jako pravděpodobný výdělek pro náhrady, než vznikne skutečný průměr.',
+                'Sjednaná hodinová sazba v Kč za hodinu (např. 180). Při založení osoby se uloží do podmínek vztahu jako pravděpodobný výdělek pro náhrady, než vznikne skutečný průměr. Když řádek nemá žádnou částku mzdy, import z ní dopočte mzdu: sazba × odpracované hodiny.',
                 [180, 180]),
             $column('Konec dohody', ['konec dohody*', 'sjednaný konec*'], 'end_date', self::FORMAT_DATE,
                 'Sjednaný konec dohody nebo pracovního poměru na dobu určitou. Při založení osoby se uloží do podmínek vztahu; po tomto dni ji nabídne hromadné ukončení dohod.',
@@ -116,9 +117,57 @@ final class AttendanceMyUctoSampleProfile
             $column('Číslo účtu', ['číslo účtu*', 'bankovní účet*'], 'bank_account', self::FORMAT_TEXT,
                 'Účet pro výplatu ve tvaru předčíslí-číslo/kód banky (např. 1000000005/0100) nebo IBAN. Při založení osoby se uloží jako výplatní účet; před první výplatou ho na kartě osoby ověřte.',
                 ['1000000005/0100', null]),
+            // Údaje pro registraci ČSSZ (AttendanceRegistrationData): nové osobě
+            // se zapíšou při založení, existující jen doplní, co v evidenci chybí.
+            $column('Ulice', ['ulice', 'ulice a číslo*', 'ulice trvalého pobytu*'], 'address_street', self::FORMAT_TEXT,
+                'Ulice adresy trvalého pobytu (u obce bez ulic název obce nebo části). Adresa se zapíše, jen když je vyplněná ulice, obec i PSČ.',
+                ['Ukázková', null]),
+            $column('Číslo domu', ['číslo domu*', 'číslo popisné*'], 'address_house_number', self::FORMAT_TEXT,
+                'Číslo popisné, případně s orientačním za lomítkem (12/3).',
+                ['12', null]),
+            $column('Obec', ['obec', 'obec trvalého pobytu*', 'obec bydliště*', 'město'], 'address_city', self::FORMAT_TEXT,
+                'Obec adresy trvalého pobytu.',
+                ['Praha', null]),
+            $column('PSČ', ['psč*'], 'address_postal_code', self::FORMAT_TEXT,
+                'Poštovní směrovací číslo, s mezerou nebo bez (110 00).',
+                ['110 00', null]),
+            $column('Stát', ['stát', 'stát trvalého pobytu*', 'stát bydliště*'], 'address_country', self::FORMAT_TEXT,
+                'Dvoupísmenný kód státu adresy (CZ, SK, UA…). Prázdný znamená CZ.',
+                ['CZ', null]),
+            $column('Státní občanství', ['státní občanství*', 'občanství*', 'státní příslušnost*'], 'citizenship', self::FORMAT_TEXT,
+                'Dvoupísmenný kód státu občanství (CZ, SK, UA…).',
+                ['CZ', null]),
+            $column('CZ-ISCO', ['cz-isco*', 'cz isco*', 'isco*', 'kód zaměstnání*'], 'cz_isco_code', self::FORMAT_TEXT,
+                'Kód zaměstnání podle klasifikace CZ-ISCO (pět číslic). Uloží se do podmínek vztahu.',
+                ['43111', null]),
+            $column('Druh činnosti', ['druh činnosti*'], 'activity_code', self::FORMAT_TEXT,
+                'Kód druhu činnosti pro ČSSZ (např. T u první DPP). Prázdný doplní aplikace podle druhu vztahu.',
+                [null, null]),
+            $column('Místo výkonu práce', ['místo výkonu práce*'], 'workplace', self::FORMAT_TEXT,
+                'Obec, kde osoba převážně pracuje. Šest číslic se bere jako kód obce (554782 = Praha); název se dohledá v číselníku obcí ČSSZ, a když není jednoznačný, uloží se jen jako text a hlášení JMHZ bude chtít kód.',
+                ['Praha', null]),
+            $column('Daňová rezidence', ['daňová rezidence*'], 'tax_residence', self::FORMAT_TEXT,
+                'Dvoupísmenný kód státu daňové rezidence. Prázdný u osoby s českou adresou z podkladů znamená CZ.',
+                ['CZ', null]),
+            $column('Prohlášení poplatníka', ['prohlášení poplatníka*'], 'tax_declaration', self::FORMAT_TEXT,
+                'Ano, když osoba podepsala prohlášení poplatníka (§ 38k ZDP). Zapíše se jen osobě, která podepsané prohlášení na rok nemá.',
+                ['ano', 'ne']),
+            $column('Prohlášení od', ['prohlášení od*'], 'tax_declaration_from', self::FORMAT_DATE,
+                'Den podpisu prohlášení. Bez něj se použije den nástupu.',
+                ['2026-06-01', null]),
+            $column('Vzdělání', ['vzdělání*', 'nejvyšší vzdělání*'], 'education_code', self::FORMAT_TEXT,
+                'Nejvyšší dosažené vzdělání jako kód KKOV pro ČSSZ (např. K, M, R). Uloží se do profilu registrace.',
+                ['M', null]),
+            $column('Postavení v zaměstnání', ['postavení v zaměstnání*'], 'employment_status_code', self::FORMAT_TEXT,
+                'Čtyřmístný kód klasifikace postavení v zaměstnání (NKPZ) pro ČSSZ. Uloží se do profilu registrace.',
+                [null, null]),
+            ...self::a1Columns($column),
             $column('Odpracováno (hod)', ['odpracováno*'], 'worked_hours', self::FORMAT_HOURS,
                 'Všechny odpracované hodiny v měsíci včetně noci, víkendu, svátku a přesčasu.',
                 [42.5, 60]),
+            $column('Odpracované dny', ['odpracované dny*', 'počet odpracovaných dnů*', 'odpracovaných dnů*'], 'worked_days', self::FORMAT_DAYS,
+                'Počet kalendářních dnů v měsíci, kdy osoba pracovala (celé číslo). Zapíše se do souhrnu pracovního měsíce: rozhoduje o skutečném průměrném výdělku (aspoň 21 dnů za čtvrtletí, § 355 ZP) a vyplní počet odpracovaných dnů v JMHZ.',
+                [6, 8]),
             $column('z toho noc (hod)', ['z toho noc*'], 'night_hours', self::FORMAT_HOURS,
                 'Část odpracovaných hodin v noci (22 až 6 hodin).',
                 [8, null]),
@@ -152,6 +201,43 @@ final class AttendanceMyUctoSampleProfile
             $column('Srážka z čisté mzdy (Kč)', ['srážka z čisté mzdy*'], 'net_other_deduction', self::FORMAT_AMOUNT,
                 'Částka, která se strhne z čisté mzdy (např. za stravu nebo zálohu). Import pro ni založí dohodu o srážce na daný měsíc.',
                 [null, 500]),
+        ];
+    }
+
+    /**
+     * Povinné údaje přihlášky A1, které jinde v šabloně nejsou. Sdílí je
+     * šablona importu dohod.
+     *
+     * @param callable $column
+     * @return list<array<string,mixed>>
+     */
+    public static function a1Columns(callable $column): array
+    {
+        return [
+            $column('Rodné příjmení', ['rodné příjmení*'], 'birth_surname', self::FORMAT_TEXT,
+                'Příjmení při narození (pro přihlášku ČSSZ). Zapíše se na kartu osoby, jen když tam chybí.',
+                ['Ukázková', null]),
+            $column('Místo narození', ['místo narození*', 'obec narození*'], 'birth_place', self::FORMAT_TEXT,
+                'Obec narození (pro přihlášku ČSSZ).',
+                ['Praha', null]),
+            $column('Stát narození', ['stát narození*'], 'birth_country', self::FORMAT_TEXT,
+                'Dvoupísmenný kód státu narození (CZ, SK, UA…).',
+                ['CZ', null]),
+            $column('Režim práce', ['režim práce*', 'pracovní režim*'], 'work_mode_code', self::FORMAT_TEXT,
+                'Pro přihlášku ČSSZ: 1 = jednosměnný, 2 = dvousměnný, 3 = vícesměnný, 4 = neuvedeno. Uloží se do profilu registrace.',
+                ['1', null]),
+            $column('Nepřetržitý provoz', ['nepřetržitý provoz*'], 'continuous_operation', self::FORMAT_TEXT,
+                'Ano, když osoba pracuje v nepřetržitém provozu, jinak ne. Uloží se do profilu registrace.',
+                ['ne', null]),
+            $column('Obec pracoviště', ['obec pracoviště*'], 'workplace_city', self::FORMAT_TEXT,
+                'Obec pracoviště pro přihlášku ČSSZ. Prázdná = obec ze sloupce Místo výkonu práce.',
+                [null, null]),
+            $column('Název pozice', ['název pozice*', 'název pracovní pozice*'], 'position_name', self::FORMAT_TEXT,
+                'Název pracovní pozice podle smlouvy (např. Promotér). Uloží se do profilu registrace.',
+                ['Promotérka', null]),
+            $column('Vedoucí pozice', ['vedoucí pozice*'], 'leadership', self::FORMAT_TEXT,
+                'Ano u vedoucího zaměstnance, jinak ne. Uloží se do profilu registrace.',
+                ['ne', null]),
         ];
     }
 

@@ -1,0 +1,60 @@
+<?php
+
+declare(strict_types=1);
+
+use MyInvoice\Bootstrap;
+use MyInvoice\Infrastructure\Config\Config;
+use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Repository\Nonprofit\Membership\MembershipRepository;
+use MyInvoice\Service\ActivityLogger;
+use MyInvoice\Service\Nonprofit\Membership\MembershipCorrectionService;
+use MyInvoice\Service\Nonprofit\Membership\MembershipException;
+
+require dirname(__DIR__, 2) . '/vendor/autoload.php';
+
+// Druhé spojení: snímek RR vznikne před čekáním na zámek člena, takže zastaralé čtení by se projevilo.
+$input = json_decode(stream_get_contents(STDIN), true, flags: JSON_THROW_ON_ERROR);
+$config = new Config($input['config'], $input['data_dir']);
+if (preg_match('/^myucto_membership_correction_[a-f0-9]+_test$/D', (string) $config->get('db.name')) !== 1) {
+    throw new RuntimeException('Worker vyžaduje vlastní testovací sandbox oprav členů.');
+}
+$container = Bootstrap::buildContainer();
+$db = Connection::withoutSharedTestConnection(static fn () => new Connection($config));
+$container->set(Config::class, $config);
+$container->set(Connection::class, $db);
+$pdo = $db->pdo();
+$pdo->exec('SET SESSION TRANSACTION ISOLATION LEVEL REPEATABLE READ');
+$pdo->exec('SET SESSION innodb_snapshot_isolation=0,innodb_lock_wait_timeout=20');
+$service = new MembershipCorrectionService($db, new MembershipRepository($db), new ActivityLogger($db));
+$supplier = (int) $input['supplier']; $member = (int) $input['member']; $actor = (int) $input['actor'];
+$result = [];
+// Bez vnější transakce volá službu jako akce, takže TransactionFailure::retrying smí zopakovat deadlock.
+$outer = ($input['outer'] ?? true) === true;
+try {
+    if ($outer) $pdo->beginTransaction();
+    $q = $pdo->prepare('SELECT COUNT(*) FROM nonprofit_membership_charge_cases WHERE supplier_id=? AND member_id=?');
+    $q->execute([$supplier, $member]);
+    $snapshotCases = (int) $q->fetchColumn();
+    $q = $pdo->prepare('SELECT client_id, member_number FROM nonprofit_members WHERE supplier_id=? AND id=?');
+    $q->execute([$supplier, $member]);
+    $row = $q->fetch(PDO::FETCH_ASSOC);
+    $identity = $row === false ? ['client_id' => 0, 'member_number' => ''] : ['client_id' => (int) $row['client_id'], 'member_number' => (string) $row['member_number']];
+    file_put_contents($argv[1], json_encode(['ready' => true, 'snapshot_cases' => $snapshotCases,
+        'connection_id' => (int) $pdo->query('SELECT CONNECTION_ID()')->fetchColumn()], JSON_THROW_ON_ERROR));
+    $detail = match ($input['mode']) {
+        'identity' => $service->updateIdentity($supplier, $member, $input['body'], $actor),
+        'void' => $service->voidRevision($supplier, $member, (int) $input['revision'], $input['body'], $actor),
+        // Smazání potvrzuje kontakt a číslo jako formulář: snímek z doby, kdy worker připravil požadavek.
+        'delete' => $service->delete($supplier, $member, $actor, $identity),
+        default => throw new RuntimeException('Neplatná operace workeru.'),
+    };
+    if ($outer) $pdo->commit();
+    $result = ['status' => 'completed', 'detail' => $detail];
+} catch (Throwable $failure) {
+    if ($pdo->inTransaction()) $pdo->rollBack();
+    $result = ['status' => $failure instanceof MembershipException ? 'rejected' : 'error',
+        'error_code' => $failure instanceof MembershipException ? $failure->errorCode : null,
+        'exception' => $failure::class, 'message' => $failure->getMessage()];
+}
+file_put_contents($argv[2], json_encode($result, JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE));
+$db->close();

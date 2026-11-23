@@ -51,13 +51,12 @@ final class PayrollHealthInsurerWriter
         $sections = $view['sections'];
         $rows = $sections['health_coverages'];
         $covering = self::covering($rows, $monthStart);
-        if ($covering === null) {
-            if ($rows !== []) {
-                throw new \DomainException(
-                    "Zdravotní pojištění k {$monthStart} v evidenci vedené není a navazuje na jiné období. "
-                    . 'Zapište pojišťovnu ručně v zákonné evidenci osoby.',
-                );
-            }
+        $earliestFrom = self::earliestFrom($rows);
+        if ($covering === null && $earliestFrom !== null && $earliestFrom > $monthStart) {
+            // Vztah začal dřív než první věta pojištění — typicky dohoda za
+            // dřívější měsíc přidaná k osobě, která už pojišťovnu od pozdějška
+            // má. Před první větu se doplní ohraničená věta až do dne před ní;
+            // existující řada se nemění. Mezera MEZI větami zůstává na člověku.
             $rows[] = [
                 'jurisdiction' => 'czech_regime_verified',
                 'foreign_country_code' => null,
@@ -67,6 +66,35 @@ final class PayrollHealthInsurerWriter
                 'insurer_evidence_reference' => null,
                 'health_evidence_document_id' => null,
                 'effective_from' => $monthStart,
+                'effective_to' => (new \DateTimeImmutable($earliestFrom))->modify('-1 day')->format('Y-m-d'),
+                'evidence_note' => null,
+            ];
+        } elseif ($covering === null) {
+            // Všechny věty skončily před měsícem doplnění (pojištění vedené jen
+            // za předchozí dohodu brigádníka): naváže se věta bez konce,
+            // existující se nemění. Stejné pravidlo drží hromadné zákonné
+            // údaje (PayrollStatutoryEvidenceBulkDefaults). Mezera MEZI větami
+            // (pozdější věta existuje) zůstává na člověku.
+            if ($rows !== [] && !self::allEndBefore($rows, $monthStart)) {
+                throw new \DomainException(
+                    "Zdravotní pojištění k {$monthStart} v evidenci vedené není a navazuje na jiné období. "
+                    . 'Zapište pojišťovnu ručně v zákonné evidenci osoby.',
+                );
+            }
+            // Řada pojištění navazuje den po dni: věta za skončenou poslední
+            // začne hned po ní.
+            $lastEnd = self::latestEnd($rows);
+            $rows[] = [
+                'jurisdiction' => 'czech_regime_verified',
+                'foreign_country_code' => null,
+                'jurisdiction_evidence_reference' => null,
+                'insurer_status' => 'verified',
+                'insurer_code' => $insurerCode,
+                'insurer_evidence_reference' => null,
+                'health_evidence_document_id' => null,
+                'effective_from' => $lastEnd === null
+                    ? $monthStart
+                    : (new \DateTimeImmutable($lastEnd))->modify('+1 day')->format('Y-m-d'),
                 'effective_to' => null,
                 'evidence_note' => null,
             ];
@@ -107,6 +135,47 @@ final class PayrollHealthInsurerWriter
             $ip,
             $userAgent,
         );
+    }
+
+    /** @param list<array<string,mixed>> $rows */
+    private static function latestEnd(array $rows): ?string
+    {
+        $latest = null;
+        foreach ($rows as $row) {
+            $to = $row['effective_to'] ?? null;
+            if (is_string($to) && $to !== '' && ($latest === null || $to > $latest)) {
+                $latest = $to;
+            }
+        }
+
+        return $latest;
+    }
+
+    /** @param list<array<string,mixed>> $rows */
+    private static function allEndBefore(array $rows, string $date): bool
+    {
+        foreach ($rows as $row) {
+            $to = $row['effective_to'] ?? null;
+            if (!is_string($to) || $to === '' || $to >= $date) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /** @param list<array<string,mixed>> $rows */
+    private static function earliestFrom(array $rows): ?string
+    {
+        $earliest = null;
+        foreach ($rows as $row) {
+            $from = (string) $row['effective_from'];
+            if ($earliest === null || $from < $earliest) {
+                $earliest = $from;
+            }
+        }
+
+        return $earliest;
     }
 
     /**

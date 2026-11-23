@@ -41,6 +41,24 @@ beforeEach(() => {
 })
 
 describe('Bank connection account', () => {
+  it('banku určuje kód banky účtu: zobrazí ji jen pro čtení, ostatní banky nenabízí', async () => {
+    const other = { ...provider, code: 'moneta', label: 'MONETA Money Bank', bank_codes: ['0600'] }
+    const wrapper = await open({ connection: null })
+    expect(wrapper.find('select').exists()).toBe(false)
+    expect(wrapper.get('[data-testid="connection-provider"]').text()).toBe('Test')
+    expect(wrapper.text()).not.toContain(other.label)
+    wrapper.unmount()
+  })
+
+  it('uložené spojení jiné banky, než odpovídá kódu banky účtu, nahradí poskytovatel podle kódu', async () => {
+    const wrapper = await open({ connection: { ...connection, provider: 'moneta' } })
+    expect(wrapper.get('[data-testid="connection-provider"]').text()).toBe('Test')
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+    expect(m.save).toHaveBeenCalledWith(3, expect.objectContaining({ provider: 'test' }))
+    wrapper.unmount()
+  })
+
   it('explains an empty CSOB file response without treating existing duplicate files as missing', async () => {
     m.sync.mockResolvedValueOnce({ status: 'success', imported_statement_id: null, import_result: { transactions: 0, matched: 0 }, period: { from: '2026-01-01', to: '2026-01-31' } })
     const wrapper = mount(BankConnectionAccount, {

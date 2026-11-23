@@ -666,25 +666,38 @@ final class GarnishmentCalculator
     }
 
     /**
-     * Paušální náhradu nákladů plátce mzdy PLATÍ OPRÁVNĚNÝ, ne povinný.
+     * Paušální náhradu nákladů plátce mzdy HRADÍ POVINNÝ, ne oprávněný.
      *
-     * § 270 odst. 3 o. s. ř. (shodně § 87 odst. 3 exekučního řádu): plátce mzdy
-     * si náhradu „odečte ze sražených částek, které mají být vyplaceny nebo
-     * zaslány oprávněnému"; právo na náhradu, která nebyla odečtena ze sražené
-     * částky před jejím vyplacením, zaniká. Srážka ze mzdy se o paušál tedy
-     * NEZVYŠUJE — zaměstnanci se srazí přesně tolik, kolik by se srazilo
-     * i bez něj, a z té částky si 50 Kč nechá zaměstnavatel.
+     * § 270 odst. 2 o. s. ř.: „Plátce mzdy má vůči povinnému nárok na paušálně
+     * stanovenou náhradu nákladů, které mu vznikly za kalendářní měsíc, v němž
+     * provádí srážky ze mzdy povinného. Náklady plátce mzdy jsou náklady
+     * výkonu rozhodnutí.“ Na náklady výkonu se nařízení výkonu vztahuje také
+     * (§ 270 odst. 1). Exekuční řád to říká přímo, § 87 odst. 3: „Paušálně
+     * stanovenou náhradu nákladů hradí plátci mzdy povinný.“ Podle § 279
+     * odst. 1 věty poslední se náhrada „uspokojuje před všemi ostatními
+     * pohledávkami z první třetiny“ a plátce ji podle § 291 odst. 3 odečítá
+     * ze sražených částek před jejich vyplacením.
      *
-     * Dřív se paušál k pohledávkám PŘIČÍTAL (`withheld = claim_total + fee`).
-     * Tam, kde srážku omezovala kapacita, vycházel součet náhodou správně,
-     * jenže na doběhu exekuce ne: při zbývajícím dluhu 100 Kč se zaměstnanci
-     * srazilo 150 Kč. Chyba se týkala každé exekuce s paušálem, tedy prakticky
-     * všech od 1. 1. 2022 (nález E-02).
+     * Dva důsledky:
      *
-     * Výpočet proto běží v jednom průchodu: nejdřív se rozdělí celá kapacita
-     * mezi pohledávky (to je částka sražená ze mzdy), pak se z ní ukrojí
-     * paušál. Iterativní hledání pevného bodu odpadlo — paušál už kapacitu
-     * neovlivňuje, takže se nemá na čem stáčet.
+     *  - Kde srážku omezuje kapacita (běžný měsíc), bere se náhrada ze
+     *    sražené částky a oprávněný dostane o ni méně; jeho pohledávka se
+     *    umořuje jen tím, co mu skutečně došlo.
+     *  - Kde kapacita stačí na víc (doběh exekuce, pohledávka uspokojená celá
+     *    z druhé třetiny), srazí se náhrada NAVÍC z volné první třetiny:
+     *    oprávněný dostane celý zbytek pohledávky a exekuce skončí. Při
+     *    zbývajícím dluhu 1 000 Kč se srazí 1 050 Kč.
+     *
+     * Mezi lety se tu drželo opačné čtení („platí oprávněný“, nález E-02):
+     * na doběhu se srazil jen zbývající dluh, oprávněný dostal o náhradu
+     * méně a nedoplatek se v dalších měsících znovu krátil o další náhradu,
+     * až zůstalo srážení 1 Kč měsíčně jen na náhradu, které neskončilo nikdy.
+     *
+     * Výše náhrady: nejvýše 50 Kč za měsíc a jen jednou na povinného,
+     * a „nesmí přesáhnout třetinu částky sražené ze mzdy povinného
+     * zaokrouhlenou na celé koruny nahoru“. Sraženou částkou je celá srážka
+     * včetně náhrady, proto se strop u malých částek hledá postupným
+     * snižováním (u zbytku dluhu 10 Kč vyjde náhrada 6 Kč a srážka 16 Kč).
      *
      * @return array{
      *   first:array<string,int>,
@@ -721,63 +734,74 @@ final class GarnishmentCalculator
         // jestli je titulem exekuční příkaz, nebo dohoda o srážkách. Dohody
         // proto soutěží společně s exekucemi; co připadne jim, se ale nesráží
         // tady, jen se to o ně zmenší (viz níž).
-        $ranked = $this->allocateRankedClaims(
-            [...$claims, ...$agreements],
-            self::generalPool($third, $excess, $priorityUsed, $fourRule),
-            $balances,
-        );
-
-        // Rozdělení výsledku. Částka, kterou si vzaly dohody, NENÍ exekuční
-        // srážkou: nevyplácí ji exekuční jádro ani nevstupuje do `withheld`.
-        // Sráží ji až čistá mzda z kapacity dobrovolných srážek, kterou
-        // {@see self::voluntaryDeductionCapacity()} spočítá jako zbytek obecné
-        // části po exekucích — a ten se o tuhle částku právě zvětšil. Kdyby se
-        // započetla na obou místech, zaměstnanci by se srazila dvakrát.
+        $generalPool = self::generalPool($third, $excess, $priorityUsed, $fourRule);
         $agreementIds = [];
         foreach ($agreements as $agreement) {
             $agreementIds[$agreement->id] = true;
         }
-        $first = [];
-        $voluntaryReserved = 0;
-        foreach ($ranked as $claimId => $amount) {
-            if (isset($agreementIds[$claimId])) {
-                $voluntaryReserved = self::addExactly($voluntaryReserved, $amount);
+
+        // Náhrada se uspokojuje z první třetiny PŘED všemi ostatními (§ 279
+        // odst. 1 věta poslední): obecná část se o ni zmenší dřív, než se
+        // rozdělí podle pořadí. Kde kapacita nestačí, přijde tím o náhradu
+        // poslední v pořadí; kde stačí, dostanou oprávnění všechno a náhrada
+        // se srazí navíc. Výše náhrady závisí na sražené částce a ta na
+        // náhradě, proto se hledá od stropu dolů.
+        $fee = $employerFeeAllowed && $this->hasEligibleFeeClaim($claims, $policy)
+            // 50 Kč za kalendářní měsíc, a jen jednou na jednoho povinného
+            // i při souběhu více pohledávek. VÝHRADNĚ z první třetiny: § 280
+            // odst. 2 vypočítává, co se platí z druhé třetiny, taxativně
+            // a náhrada mezi tím není.
+            ? min($policy->money('employer_flat_fee.maximum.monthly'), $generalPool)
+            : 0;
+        while (true) {
+            $rankedBalances = $balances;
+            $ranked = $this->allocateRankedClaims(
+                [...$claims, ...$agreements],
+                $generalPool - $fee,
+                $rankedBalances,
+            );
+            // Rozdělení výsledku. Částka, kterou si vzaly dohody, NENÍ
+            // exekuční srážkou: nevyplácí ji exekuční jádro ani nevstupuje do
+            // `withheld`. Sráží ji až čistá mzda z kapacity dobrovolných
+            // srážek, kterou {@see self::voluntaryDeductionCapacity()} spočítá
+            // jako zbytek obecné části po exekucích — a ten se o tuhle částku
+            // právě zvětšil. Kdyby se započetla na obou místech, zaměstnanci
+            // by se srazila dvakrát.
+            $first = [];
+            $voluntaryReserved = 0;
+            foreach ($ranked as $claimId => $amount) {
+                if (isset($agreementIds[$claimId])) {
+                    $voluntaryReserved = self::addExactly($voluntaryReserved, $amount);
+                    continue;
+                }
+                $first[$claimId] = $amount;
+            }
+            // Co se vyplatí oprávněným.
+            $claimsTotal = self::addExactly(self::sumExactly($first), $priorityUsed);
+            if ($fee === 0) {
+                break;
+            }
+            // Náhrada náleží za měsíc, „v němž provádí srážky“ (§ 270 odst. 2),
+            // a „nesmí přesáhnout třetinu částky sražené ze mzdy povinného
+            // zaokrouhlenou na celé koruny nahoru“; sraženou částkou je celá
+            // srážka včetně náhrady.
+            $cap = self::ceilOneThirdToWholeCrown(self::addExactly($claimsTotal, $fee));
+            if ($fee > $cap) {
+                $fee = $cap;
                 continue;
             }
-            $first[$claimId] = $amount;
+            if ($claimsTotal > 0) {
+                break;
+            }
+            // Náhrada by spolkla celou srážku a oprávněnému by nedošlo nic:
+            // srážet jen na náhradu se nesmí (exekuce by tak nikdy neskončila),
+            // proto o korunu méně a znovu.
+            $fee = max(0, $fee - 100);
         }
-
-        // Sražená částka. Paušál ji nezvyšuje ani nesnižuje — jen se z ní bere.
-        $withheld = self::addExactly(self::sumExactly($first), $priorityUsed);
-
-        $fee = $employerFeeAllowed
-            && $this->hasEligibleFeeClaim($claims, $policy)
-            && $withheld > 0
-            ? min(
-                // 50 Kč za kalendářní měsíc, a jen jednou na jednoho povinného
-                // i při souběhu více pohledávek (§ 3 nař. vlády č. 595/2006 Sb.).
-                $policy->money('employer_flat_fee.maximum.monthly'),
-                // „nesmí přesáhnout třetinu částky sražené ze mzdy povinného
-                // zaokrouhlenou na celé koruny nahoru"
-                self::ceilOneThirdToWholeCrown($withheld),
-                // Pojistka pro haléřové doběhy: zaokrouhlení nahoru nesmí
-                // ukrojit víc, než kolik se vůbec srazilo.
-                $withheld,
-            )
-            : 0;
-
-        $firstNet = $this->carveEmployerFee($this->reverseFirstPoolOrder($claims), $first, $fee);
-
-        // Paušál se bere VÝHRADNĚ z první třetiny: § 279 odst. 1 věta čtvrtá
-        // o. s. ř. ho uspokojuje „před všemi ostatními pohledávkami z první
-        // třetiny zbytku čisté mzdy" a § 280 odst. 2 vypočítává, co se platí
-        // z druhé třetiny, taxativně — náhrada nákladů plátce mezi tím není.
-        //
-        // Dřív se nedokrytý zbytek dobíral z druhé třetiny, aby nárok nepropadl.
-        // Jenže druhá třetina patří přednostním pohledávkám: zaplatilo by ho
-        // výživné, které tam má přednost, a povinný by dostal totéž. Nárok se
-        // proto o nedokrytou část krátí.
-        $fee = self::sumExactly($first) - self::sumExactly($firstNet);
+        $balances = $rankedBalances;
+        $firstNet = $first;
+        // Sražená částka: co připadá pohledávkám, a náhrada plátce mzdy.
+        $withheld = self::addExactly($claimsTotal, $fee);
 
         return [
             'first' => $firstNet,
@@ -823,96 +847,6 @@ final class GarnishmentCalculator
                 && !isset($registered[$agreement->id]),
         ));
     }
-
-    /**
-     * Odkud se paušál ukrojí, sráží-li se na víc pohledávek.
-     *
-     * Náhrada „se uspokojuje před všemi ostatními pohledávkami z první
-     * třetiny" (§ 3 odst. 4 nař. vlády č. 595/2006 Sb.), takže o ni nepřijde
-     * ten, kdo je v pořadí první, ale ten, na koho by zbylo jako na
-     * posledního: krájí se v OBRÁCENÉM pořadí uspokojování. Uvnitř jedné
-     * skupiny stejného pořadí se dělí poměrně podle přiznaných částek, aby
-     * se pořadí nerozbilo abecedou.
-     *
-     * Až když první třetina nestačí — typicky měsíc, kdy celou srážku spolkne
-     * výživné z druhé třetiny a na první třetinu nedojde — sáhne se do druhé
-     * třetiny, opět od konce (§ 280 řeší jen rozvrh MEZI výživnými, ne poměr
-     * k náhradě). Bez toho by zaměstnavateli náhrada v takovém měsíci
-     * propadla, přestože srážky prováděl; § 270 odst. 3 o. s. ř. přitom
-     * dovoluje odečíst ji z kterékoli částky mířící oprávněnému.
-     *
-     * @param list<list<DeductionClaim>> $groups
-     * @param array<string,int> $allocated
-     * @return array<string,int>
-     */
-    private function carveEmployerFee(array $groups, array $allocated, int $remaining): array
-    {
-        if ($remaining <= 0) {
-            return $allocated;
-        }
-
-        foreach ($groups as $group) {
-            $ids = [];
-            $groupTotal = 0;
-            foreach ($group as $claim) {
-                $amount = $allocated[$claim->id] ?? 0;
-                if ($amount > 0) {
-                    $ids[$claim->id] = $amount;
-                    $groupTotal = self::addExactly($groupTotal, $amount);
-                }
-            }
-            if ($groupTotal === 0) {
-                continue;
-            }
-
-            $carve = min($remaining, $groupTotal);
-            $remaining -= $carve;
-            $unassigned = $carve;
-            $remainders = [];
-            foreach ($ids as $claimId => $amount) {
-                $product = self::multiplyExactly($carve, $amount);
-                $share = intdiv($product, $groupTotal);
-                $allocated[$claimId] -= $share;
-                $unassigned -= $share;
-                $remainders[$claimId] = $product % $groupTotal;
-            }
-            if ($unassigned > 0) {
-                $order = array_keys($ids);
-                usort($order, static function (int|string $a, int|string $b) use ($remainders): int {
-                    $remainderOrder = $remainders[$b] <=> $remainders[$a];
-
-                    return $remainderOrder !== 0 ? $remainderOrder : (string) $a <=> (string) $b;
-                });
-                foreach ($order as $claimId) {
-                    if ($unassigned === 0) {
-                        break;
-                    }
-                    if ($allocated[$claimId] === 0) {
-                        continue;
-                    }
-                    $allocated[$claimId]--;
-                    $unassigned--;
-                }
-            }
-            if ($remaining === 0) {
-                break;
-            }
-        }
-
-        return $allocated;
-    }
-
-    /**
-     * Obrácené pořadí uspokojování z první třetiny.
-     *
-     * @param list<DeductionClaim> $claims
-     * @return list<list<DeductionClaim>>
-     */
-    private function reverseFirstPoolOrder(array $claims): array
-    {
-        return array_reverse($this->priorities->resolve($claims));
-    }
-
 
     /**
      * @param list<DeductionClaim> $claims

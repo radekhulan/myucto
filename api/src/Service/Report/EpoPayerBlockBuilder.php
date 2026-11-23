@@ -31,12 +31,16 @@ final class EpoPayerBlockBuilder
      * @param bool $includeSestEmail Emitovat `sest_email`? Vyúčtování a hlášení nerezidentů.
      * @param bool $includePersonTitle DPSHL1/DPSZD1 atribut `titul` nemají; ostatní
      *                                formuláře této rodiny dovolují titul FO do 10 znaků.
+     * @param array<string,mixed> $representation Výstup {@see \MyInvoice\Service\Tax\Return\TaxRepresentationService::at()}.
+     *                                Zastoupený plátce dostane `zast_*` a `opr_*` přes
+     *                                {@see EpoSupplierBlockBuilder::fillSignerAttributes()}, stejně jako DPH, DPPO a DPFO.
      */
     public static function fillVetaP(
         DOMElement $vetaP,
         array $supplier,
         bool $includeSestEmail = false,
         bool $includePersonTitle = true,
+        array $representation = [],
     ): void {
         $vetaP->setAttribute('dic', EpoSupplierBlockBuilder::normalizeDic(
             isset($supplier['dic']) ? (string) $supplier['dic'] : null,
@@ -82,9 +86,13 @@ final class EpoPayerBlockBuilder
         if (!empty($supplier['workplace_code'])) {
             $vetaP->setAttribute('c_pracufo', (string) $supplier['workplace_code']);
         }
-        foreach (['opr_jmeno', 'opr_prijmeni', 'opr_postaveni'] as $key) {
-            if (!empty($supplier[$key])) {
-                $vetaP->setAttribute($key, (string) $supplier[$key]);
+        if (!empty($representation['represented'])) {
+            EpoSupplierBlockBuilder::fillSignerAttributes($vetaP, $supplier, $representation);
+        } else {
+            foreach (['opr_jmeno', 'opr_prijmeni', 'opr_postaveni'] as $key) {
+                if (!empty($supplier[$key])) {
+                    $vetaP->setAttribute($key, (string) $supplier[$key]);
+                }
             }
         }
 

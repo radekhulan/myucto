@@ -25,7 +25,7 @@ const mocks = vi.hoisted(() => ({
   supplierState: null as null | { currentSupplierId: number },
 }))
 
-vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }))
+vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => key, locale: { value: 'cs' } }) }))
 vi.mock('vue-router', async () => {
   const { reactive } = await import('vue')
   const route = reactive({ query: {} as Record<string, string> })
@@ -244,7 +244,7 @@ describe('PriceMatrix', () => {
     const wrapper = mountPage()
     await flushPromises()
 
-    expect((wrapper.get('[data-test="matrix-on-date"]').element as HTMLInputElement).value).toBe('2026-01-02')
+    expect(wrapper.get('[data-test="matrix-on-date"]').attributes('modelvalue')).toBe('2026-01-02')
     year.mockRestore()
     month.mockRestore()
     day.mockRestore()

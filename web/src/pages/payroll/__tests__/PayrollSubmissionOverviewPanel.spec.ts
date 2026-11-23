@@ -19,6 +19,9 @@ const m = vi.hoisted(() => ({
   startMobileKeyOutboxBatch: vi.fn(),
   mobileKeyOutboxConfirmBatch: vi.fn(),
 }))
+vi.mock('@/stores/supplier', () => ({ useSupplierStore: () => ({ currentSupplierId: 1 }) }))
+vi.mock('@/api/isdsAccess', () => ({ isdsAccessApi: { choices: vi.fn().mockResolvedValue([]) } }))
+
 vi.mock('@/api/payrollHealthNotifications', () => ({
   payrollHealthNotificationApi: {
     preparePaymentOverview: m.prepareHealthOverview,
@@ -208,6 +211,55 @@ describe('PayrollSubmissionOverviewPanel — odvození období', () => {
     expect(m.prepareHealthOverview).toHaveBeenCalledWith(12, '111', 'production')
     expect(m.downloadSubmissionArtifact).toHaveBeenCalledWith(57, pdfArtifact)
     expect(m.downloadSubmissionArtifact).not.toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ mime_type: 'application/json' }))
+  })
+
+  /*
+   * Chybějící číslo plátce / platební účet pojišťovny: hláška říkala jen
+   * „Založte ho v Mzdy, Nastavení zaměstnavatele…“. Pod ní musí být proklik
+   * přímo do záložky Platební účty institucí.
+   */
+  it('chyba přípravy přehledu ZP nese proklik na platební účty institucí', async () => {
+    m.runs.mockResolvedValue([{ revision_status: 'approved', revision_id: 12 }])
+    m.healthPaymentOverviews.mockResolvedValue({
+      items: [{
+        schema_reference: 'payroll-health-payment-overview.v1',
+        document_kind: 'internal_health_payment_overview',
+        official_submission: { supported: false, reason_code: 'internal' },
+        supplier_id: 1,
+        run_id: 1,
+        revision_id: 12,
+        revision_no: 1,
+        period: '2026-03',
+        currency_code: 'CZK',
+        insurer: { code: '207' },
+        source: { statutory_result_id: 1, statutory_result_hash: 'a', ruleset_id: 'r', ruleset_hash: 'h' },
+        totals: {
+          person_count: 1,
+          assessment_base_minor_units: 3000000,
+          employee_contribution_minor_units: 135000,
+          employer_contribution_minor_units: 270000,
+          total_contribution_minor_units: 405000,
+        },
+        people: [],
+        sha256: 'x',
+        filename: 'internal.json',
+      }],
+    })
+    m.prepareHealthOverview.mockRejectedValue(Object.assign(new Error('fail'), {
+      response: { data: { error: { code: 'zp_payer_account_missing', message: 'Firma nemá platební účet pojišťovny.' } } },
+    }))
+
+    const wrapper = mount(PayrollSubmissionOverviewPanel, {
+      props: { mode: 'health' },
+      global: { stubs: { RouterLink: { props: ['to'], template: '<a :data-to="to"><slot /></a>' } } },
+    })
+    await flushPromises()
+    await wrapper.get('[data-test="health-overview-download"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.get('[data-test="health-overview-error"]').text()).toContain('platební účet')
+    expect(wrapper.get('[data-test="health-overview-error-remediation"]').attributes('data-to'))
+      .toBe('/payroll/settings?tab=institutions')
   })
 
   /**
@@ -492,7 +544,7 @@ describe('PayrollSubmissionOverviewPanel — odvození období', () => {
       .toContain('payroll.submissions.overview.mobile_key_batch.sent_summary')
   })
 
-  it('ukáže v detailu lidské stavy a technický kód problému oddělí od hlavní zprávy', async () => {
+  it.each([false, true])('ukáže detail po otevření odkazem (%s) i tlačítkem a oddělí technický kód', async (fromLink) => {
     m.submissionOverview.mockResolvedValue({
       items: [{
         id: 7,
@@ -602,11 +654,23 @@ describe('PayrollSubmissionOverviewPanel — odvození období', () => {
     })
 
     const wrapper = mount(PayrollSubmissionOverviewPanel, {
-      props: { mode: 'other' },
+      props: { mode: 'other', submissionId: fromLink ? 56 : null },
     })
     await flushPromises()
+    if (!fromLink) {
+      await wrapper.findAll('[data-test="submission-detail-open"]')[0]!.trigger('click')
+      await flushPromises()
+    }
+    expect(wrapper.find('[data-test="submission-detail"]').exists()).toBe(true)
+
     await wrapper.findAll('[data-test="submission-detail-open"]')[0]!.trigger('click')
     await flushPromises()
+    expect(wrapper.find('[data-test="submission-detail"]').exists()).toBe(false)
+    expect(wrapper.emitted('close-submission')).toHaveLength(1)
+    await wrapper.setProps({ submissionId: null })
+    await wrapper.setProps({ submissionId: 56 })
+    await flushPromises()
+    expect(m.submissionDetail).toHaveBeenLastCalledWith(56)
 
     const detail = wrapper.get('[data-test="submission-detail"]')
     expect(detail.text()).toContain('payroll.submissions.overview.submission_kind.correction')
@@ -679,6 +743,105 @@ describe('PayrollSubmissionOverviewPanel — odvození období', () => {
     expect(wrapper.findAll('[data-test="submission-not-prepared"]').length).toBeGreaterThan(0)
     expect(wrapper.get('[data-test="submission-not-prepared"]').text())
       .toContain('payroll.submissions.overview.not_prepared_action')
+    expect(wrapper.find('[data-test="submission-bulk-external-hint"]').exists()).toBe(false)
+  })
+
+  /*
+   * Měsíční přehled nad panelem hlásil únor „Nepřipraveno", souhrn panelu
+   * „Celkem 0": povinnost bez řádku v evidenci se do souhrnu nepočítala.
+   */
+  it('souhrn započítá i povinnost období, která ještě není připravená', async () => {
+    const empty = {
+      not_open: 0, open: 0, due_soon: 0, due_today: 0, overdue: 0,
+      awaiting_result: 0, fulfilled: 0, action_required: 0, cancelled: 0,
+    }
+    m.submissionOverview.mockResolvedValue({
+      items: [],
+      total: 0,
+      deadline_summary: empty,
+      unprepared_deadline_summary: { ...empty, overdue: 1 },
+    })
+
+    const wrapper = mount(PayrollSubmissionOverviewPanel, { props: { mode: 'jmhz' } })
+    await flushPromises()
+
+    expect(wrapper.get('[data-test="submission-summary-total"]').text()).toBe('1')
+    expect(wrapper.get('[data-test="submission-summary-attention"]').text()).toBe('1')
+    expect(wrapper.get('[data-test="submission-summary-open"]').text()).toBe('0')
+  })
+
+  it('u desítek povinností po termínu bez podání odkáže na hromadné vyřízení v Zákonných termínech', async () => {
+    const overdue = (id: number) => ({
+      id,
+      environment: 'production',
+      agenda_code: 'SYNTH',
+      agenda_group: 'other',
+      subject_type: 'employment',
+      subject_reference: `employment:${id}`,
+      subject_label: `Syntetická dohoda ${id}`,
+      period_start: '2026-02-01',
+      period_end: '2026-02-28',
+      obligation_kind: 'event',
+      preferred_channel: 'isds',
+      status: 'open',
+      row_version: 1,
+      earliest_submission_on: '2026-02-01',
+      due_on: '2026-02-08',
+      calendar_basis: 'calendar_days',
+      deadline: { phase: 'overdue', days_to_due: -277, is_action_required: true, is_overdue: true },
+      latest_submission: null,
+    })
+    m.submissionOverview.mockResolvedValue({
+      items: [overdue(1), overdue(2)],
+      total: 106,
+      deadline_summary: {
+        not_open: 0, open: 0, due_soon: 0, due_today: 0, overdue: 106,
+        awaiting_result: 0, fulfilled: 0, action_required: 0, cancelled: 0,
+      },
+    })
+
+    const wrapper = mount(PayrollSubmissionOverviewPanel, { props: { mode: 'other' } })
+    await flushPromises()
+
+    const hint = wrapper.get('[data-test="submission-bulk-external-hint"]')
+    expect(hint.text()).toContain('payroll.submissions.overview.bulk_external_hint')
+    expect(hint.find('[data-test="submission-bulk-external-link"]').exists()).toBe(true)
+  })
+
+  it('povinnost po termínu pozná i podle is_overdue, když fáze chybí', async () => {
+    const overdue = (id: number) => ({
+      id,
+      environment: 'production',
+      agenda_code: 'SYNTH',
+      agenda_group: 'other',
+      subject_type: 'employment',
+      subject_reference: `employment:${id}`,
+      subject_label: `Syntetická dohoda ${id}`,
+      period_start: '2026-02-01',
+      period_end: '2026-02-28',
+      obligation_kind: 'event',
+      preferred_channel: 'isds',
+      status: 'open',
+      row_version: 1,
+      earliest_submission_on: '2026-02-01',
+      due_on: '2026-02-08',
+      calendar_basis: 'calendar_days',
+      deadline: { days_to_due: -277, is_action_required: true, is_overdue: true },
+      latest_submission: null,
+    })
+    m.submissionOverview.mockResolvedValue({
+      items: [overdue(1), overdue(2), overdue(3)],
+      total: 3,
+      deadline_summary: {
+        not_open: 0, open: 0, due_soon: 0, due_today: 0, overdue: 0,
+        awaiting_result: 0, fulfilled: 0, action_required: 3, cancelled: 0,
+      },
+    })
+
+    const wrapper = mount(PayrollSubmissionOverviewPanel, { props: { mode: 'other' } })
+    await flushPromises()
+
+    expect(wrapper.find('[data-test="submission-bulk-external-hint"]').exists()).toBe(true)
   })
 })
 

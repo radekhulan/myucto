@@ -26,7 +26,10 @@ Jednoúčelové formáty (jen ISDOC vydaných, jen Pohoda XML) najdete v kapitol
 5. Sledujte průběh (stav, postup, krok). Export běží na pozadí, stránku můžete nechat otevřenou.
 6. Až se v seznamu **Poslední exporty** objeví stav **Hotovo**, klikněte na **Stáhnout ZIP**.
 
-**Jak poznáte, že je hotovo:** Řádek exportu má stav **Hotovo**, počet souborů a velikost a tlačítko **Stáhnout ZIP** stáhne archiv.
+**Jak poznáte, že je hotovo:** Řádek exportu má stav **Hotovo**, počet souborů
+a velikost a tlačítko **Stáhnout ZIP** stáhne archiv. Zkontrolujte také log
+a `README.txt` uvnitř ZIPu. Chyba jednotlivého PDF či ISDOC může soubor
+přeskočit a zbytek exportu přesto dokončit; stav Hotovo sám úplnost nepotvrzuje.
 
 Co lze zabalit:
 
@@ -66,10 +69,14 @@ Zařazení do období je daňově korektní a shodné s výkazy DPH (přiznání
 hlášení, kniha DPH):
 
 - vystavené doklady podle DUZP,
-- přijaté tuzemské podle pozdějšího z dat DUZP a vystavení (odpočet nelze uplatnit dříve, než máte daňový doklad),
+- přijaté tuzemské podle nejpozdějšího z dat DUZP, vystavení a vědomě ručně
+  zadaného data přijetí; automaticky doplněné datum přijetí rozhodné období neposouvá,
 - přijaté zahraniční s reverse charge podle DUZP,
 - výpisy podle data výpisu,
 - GoPay podle období uvedeného ve vyúčtování. Zasahuje-li vyúčtování do zvoleného období, exportuje se jeho XML i dostupné PDF.
+
+Do fakturační části se zahrnují dokončené doklady. Koncepty, doklady ve stavu **Stornováno** a hlavičky
+platebních či zálohových kalendářů se neexportují.
 
 ### 48.6.2 Běh na pozadí a úklid
 

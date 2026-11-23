@@ -18,6 +18,7 @@ import type {
   AttendanceUnit,
   AttendanceUnrecognizedColumn,
   ImportFilePayload,
+  PayrollOpenAgreement,
   RegistrationEmploymentOption,
   RegistrationOpeningBalance,
   RegistrationPair,
@@ -360,6 +361,15 @@ export function minutesToHours(minutes: number): string {
 
 // ─── Docházka: číselníky mapování ─────────────────────────────────────────────
 
+/** Údaje pro registraci ČSSZ, viz AttendanceMeaning::REGISTRATION na serveru. */
+export const REGISTRATION_MEANINGS: readonly AttendanceMeaning[] = [
+  'address_street', 'address_house_number', 'address_city', 'address_postal_code', 'address_country',
+  'citizenship', 'cz_isco_code', 'activity_code', 'workplace', 'tax_residence', 'tax_declaration',
+  'tax_declaration_from', 'education_code', 'employment_status_code',
+  'birth_surname', 'birth_place', 'birth_country', 'work_mode_code', 'continuous_operation',
+  'workplace_city', 'position_name', 'leadership',
+]
+
 export const ATTENDANCE_MEANING_GROUPS: { key: string; meanings: AttendanceMeaning[] }[] = [
   { key: 'other', meanings: ['ignore'] },
   {
@@ -371,9 +381,13 @@ export const ATTENDANCE_MEANING_GROUPS: { key: string; meanings: AttendanceMeani
     ],
   },
   {
+    key: 'registration',
+    meanings: [...REGISTRATION_MEANINGS],
+  },
+  {
     key: 'work',
     meanings: [
-      'worked_hours', 'overtime_hours', 'night_hours', 'weekend_hours', 'holiday_work_hours',
+      'worked_hours', 'worked_days', 'overtime_hours', 'night_hours', 'weekend_hours', 'holiday_work_hours',
       'afternoon_hours', 'fund_hours',
     ],
   },
@@ -404,7 +418,7 @@ export const AUTO_COMPONENT_CODE = '*'
 const TEXT_MEANINGS = new Set<AttendanceMeaning>([
   'person_name', 'personal_number', 'birth_number', 'birth_date', 'health_insurer_code', 'relation_label',
   'department', 'cost_center', 'position', 'start_end_note', 'start_date', 'monthly_wage',
-  'hourly_rate', 'end_date', 'bank_account',
+  'hourly_rate', 'end_date', 'bank_account', 'worked_days', ...REGISTRATION_MEANINGS,
 ])
 const MONEY_MEANINGS = new Set<AttendanceMeaning>([
   'component', 'net_meal_deduction', 'net_other_deduction', 'reference_gross', 'reference_net',
@@ -548,9 +562,14 @@ export function duplicateDraft(draft: ProfileDraft, name: string): ProfileDraft 
   }
 }
 
-export const ATTENDANCE_SAMPLE_KEYS: AttendanceSampleKey[] = ['giriton', 'myucto']
+export const ATTENDANCE_SAMPLE_KEYS: AttendanceSampleKey[] = ['giriton', 'myucto', 'pamica']
 /** Název souboru šablony, pokud ho server v hlavičce nepošle. */
 export const ATTENDANCE_TEMPLATE_FILENAME = 'podklady-mzdy-myucto.xlsx'
+/** Ukázkový XML export pro Vzor PAMICA, pokud server název nepošle. */
+export const ATTENDANCE_PAMICA_TEMPLATE_FILENAME = 'pamica-dochazka-vzor.xml'
+/** Soubory importu docházky: XLSX a CSV z docházkových systémů, XML exportu pro PAMICA. */
+export const ATTENDANCE_FILE_EXTENSIONS = ['xlsx', 'csv', 'xml']
+export const ATTENDANCE_FILE_ACCEPT = '.xlsx,.csv,.xml'
 
 /** Klíč vzoru profilu; vzor ze serveru bez klíčů je GIRITON (jediný vzor té doby). */
 export function profileSampleKey(profile: AttendanceProfile | null | undefined): AttendanceSampleKey | null {
@@ -837,8 +856,15 @@ export function pruneManualLinks(
  * nová osoba by z ní udělala duplicitu, vybírá se proto vztah. Sdílí ji krok
  * Osoby (checkbox u řádku) i krok Souhrn (nabídka založit chybějící osoby).
  */
+/** Osoba z evidence nalezená jen podle jména a data narození — založení čeká na potvrzení. */
+export function existingPersonNeedsConfirmation(person: AttendancePerson): boolean {
+  return person.existing_person?.requires_confirmation === true
+}
+
 export function personCanBeCreated(person: AttendancePerson, manual: ManualLinks): boolean {
+  // Chyba řádku (neplatné rodné číslo) založení zastaví: server by osobu odmítl.
   return person.match.status === 'not_found' && effectiveEmploymentId(person, manual) === null
+    && (person.errors?.length ?? 0) === 0
 }
 
 export function personHasIdentifier(person: AttendancePerson): boolean {
@@ -852,7 +878,8 @@ export function personHasIdentifier(person: AttendancePerson): boolean {
  * karta by byla duplicitou. Takové osoby zůstanou k ruční volbě v kroku Osoby.
  */
 export function autoCreatablePersons(persons: AttendancePerson[], manual: ManualLinks): AttendancePerson[] {
-  const creatable = persons.filter(person => personCanBeCreated(person, manual))
+  // Shodu jména a data narození s osobou z evidence potvrzuje člověk v kroku Osoby.
+  const creatable = persons.filter(person => personCanBeCreated(person, manual) && !existingPersonNeedsConfirmation(person))
   return persons.some(personHasIdentifier) ? creatable.filter(personHasIdentifier) : creatable
 }
 
@@ -874,6 +901,22 @@ export function guessRelationType(label: string | null): RegistrationRelationTyp
   if (/maleho rozsahu/.test(normalized)) return 'small_scale_employment'
   if (/jednatel|funkc|statutar/.test(normalized)) return 'statutory_body'
   return 'employment'
+}
+
+/**
+ * Druh vztahu, který k osobě uvádějí podklady (sloupec druhu vztahu ve
+ * šabloně i ve vlastním mapování), u osoby z evidence bez údaje v podkladech
+ * druh jejího posledního vztahu. Null = podklady ani evidence nic neříkají;
+ * teprve pak platí společná volba pro celou dávku.
+ */
+export function sourceRelationType(person: AttendancePerson): RegistrationRelationType | null {
+  if ((person.relation_label ?? '').trim() !== '') return guessRelationType(person.relation_label)
+  return person.existing_person?.relation_type ?? null
+}
+
+/** Druh zakládaného vztahu: z podkladů, jinak společná volba dávky. */
+export function relationTypeForCreate(person: AttendancePerson, fallback: RegistrationRelationType): RegistrationRelationType {
+  return sourceRelationType(person) ?? fallback
 }
 
 /**
@@ -899,12 +942,7 @@ export interface PersonCreateDefaults {
   activate: boolean
 }
 
-/**
- * `relationTypeFor` volitelně určí druh vztahu za osobu (odhad z podkladů);
- * bez něj se použije jednotný `defaults.relation_type` jako dosud (ruční
- * založení v kroku Osoby, kde druh vybírá uživatel jednou pro celou dávku).
- */
-export type PersonCreateDetailKey = 'start_on' | 'agreed_end_on' | 'hourly_rate' | 'monthly_wage' | 'bank_account'
+export type PersonCreateDetailKey = 'start_on' | 'agreed_end_on' | 'hourly_rate' | 'probable_earning' | 'monthly_wage' | 'bank_account'
 
 /**
  * Údaje z podkladů, které se nové osobě převezmou — pro náhled zakládání.
@@ -923,6 +961,9 @@ export function personCreateDetails(
   if (rate !== '') {
     const parsed = parseLocaleNumber(rate)
     details.push({ key: 'hourly_rate', value: parsed !== null && parsed > 0 ? String(parsed) : rate, invalid: parsed === null || parsed <= 0 })
+  } else if (person.probable_earning?.source === 'amount') {
+    // Bez sazby navrhne server pravděpodobný výdělek z odměny za odpracované hodiny.
+    details.push({ key: 'probable_earning', value: String(person.probable_earning.hourly_minor / 100), invalid: false })
   }
   const wage = person.monthly_wage?.trim() ?? ''
   if (wage !== '') {
@@ -933,11 +974,27 @@ export function personCreateDetails(
   return details
 }
 
+/**
+ * Otevřená DPP osoby, kterou jde použít místo nové dohody. Výchozí je ji
+ * použít; `newAgreementKeys` jsou osoby, u kterých uživatel zvolil novou.
+ */
+export function reusableOpenAgreement(person: AttendancePerson, relationType: RegistrationRelationType): PayrollOpenAgreement | null {
+  return relationType === 'dpp' && person.open_agreement?.reusable ? person.open_agreement : null
+}
+
+/**
+ * `relationTypeFor` volitelně určí druh vztahu za osobu; bez něj platí druh
+ * z podkladů ({@see relationTypeForCreate}) a společný `defaults.relation_type`
+ * jen u osob, u kterých podklady druh neuvádějí. Hromadná volba tak druh ze
+ * souboru nikdy nepřepíše.
+ */
 export function buildPersonsPayload(
   persons: AttendancePerson[],
   drafts: Record<string, PersonDraft>,
   defaults: PersonCreateDefaults,
   relationTypeFor?: (person: AttendancePerson) => RegistrationRelationType,
+  newAgreementKeys: ReadonlySet<string> = new Set(),
+  existingChoices: Readonly<Record<string, 'existing' | 'new'>> = {},
 ): AttendancePersonCreate[] {
   return persons.map(person => {
     const draft = drafts[person.key] ?? splitDisplayName(person.display_name)
@@ -945,13 +1002,21 @@ export function buildPersonsPayload(
     const lastName = draft.last_name.trim()
     const weekly = (person.weekly_hours ?? '').trim() || defaults.weekly_hours.trim()
     const wage = parseLocaleNumber(person.monthly_wage) ?? NaN
+    const relationType = relationTypeFor ? relationTypeFor(person) : relationTypeForCreate(person, defaults.relation_type)
+    const open = reusableOpenAgreement(person, relationType)
     return {
       person_key: person.key,
       full_name: [firstName, lastName].filter(Boolean).join(' ') || person.display_name,
       first_name: firstName,
       last_name: lastName,
       birth_number: null,
-      relation_type: relationTypeFor ? relationTypeFor(person) : defaults.relation_type,
+      relation_type: relationType,
+      ...(open === null ? {} : newAgreementKeys.has(person.key)
+        ? { create_new_agreement: true }
+        : { use_open_agreement: open.employment_id }),
+      ...(!existingPersonNeedsConfirmation(person) || !person.existing_person ? {} : existingChoices[person.key] === 'existing'
+        ? { confirm_existing_person: person.existing_person.employee_id }
+        : existingChoices[person.key] === 'new' ? { create_new_person: true } : {}),
       weekly_hours: weekly === '' ? null : weekly.replace(',', '.'),
       monthly_gross: Number.isFinite(wage) && wage > 0 ? Math.round(wage) : null,
       // Nástup z poznámky v podkladech je přesnější než jednotný den pro celou dávku.

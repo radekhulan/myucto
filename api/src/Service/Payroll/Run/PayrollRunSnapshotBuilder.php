@@ -4,6 +4,10 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Payroll\Run;
 
+use MyInvoice\Service\Payroll\Time\PayrollWorkedTimeEvidence;
+use MyInvoice\Service\Payroll\PayrollHourlyEntitlementContextLoader;
+use MyInvoice\Service\Payroll\PayrollHourlyEntitlementLedger;
+use MyInvoice\Service\Payroll\PayrollHourlyMonthlyParts;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\Payroll\PayrollEmploymentLifecycleSql;
 use MyInvoice\Repository\Payroll\PayrollEmployerPolicyDeletionRepository;
@@ -20,8 +24,10 @@ use MyInvoice\Service\Payroll\PayrollAccountingDefaults;
 use MyInvoice\Service\Payroll\PayrollPredecessorObligationScope;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
 use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetProvider;
+use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetYearCoverage;
 use MyInvoice\Service\Payroll\HealthInsurance\PayrollExpectedHealthParticipation;
 use MyInvoice\Service\Payroll\SocialInsurance\PayrollExpectedParticipation;
+use MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationSubmissionService;
 use MyInvoice\Service\Payroll\SocialInsurance\SocialPartTimeDiscountAgeCondition;
 use MyInvoice\Service\Payroll\RiskySavings\PayrollRiskySavingsPolicy;
 use MyInvoice\Service\Payroll\RiskySavings\PayrollRiskySavingsRules;
@@ -29,6 +35,7 @@ use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzCodebookUnavailableException;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzCodebookValueException;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzExternalCodebookCatalog;
 use MyInvoice\Service\Payroll\Submission\Ozuspoj\OzuspojClaimDeadlinePolicy;
+use MyInvoice\Service\Payroll\Time\Juvenile\PayrollJuvenileWorkTimeService;
 use MyInvoice\Service\Payroll\Time\Overtime\PayrollOvertimeLimitService;
 use MyInvoice\Service\Payroll\Time\PayrollAgreementAnnualHours;
 use MyInvoice\Service\Payroll\Time\PayrollAgreementWeeklyAverage;
@@ -64,11 +71,16 @@ final class PayrollRunSnapshotBuilder
         $this->riskySavingsPolicy = new PayrollRiskySavingsPolicy();
     }
 
+    /**
+     * @param array<int,list<array{code:string,message:string,remediation:string}>> $hourlyMaterializationBlockers
+     *     vztahy, které hodinový materializer v tomtéž příkazu vyřadil kvůli kolizi
+     */
     public function build(
         int $supplierId,
         string $periodStart,
         string $paymentDate,
         ?int $officeId = null,
+        array $hourlyMaterializationBlockers = [],
     ): PayrollRunInputSnapshot {
         if ($supplierId <= 0) {
             throw new \InvalidArgumentException('Firma mzdového běhu není platná.');
@@ -95,6 +107,7 @@ final class PayrollRunSnapshotBuilder
             );
         }
         $periodEnd = $period->modify('last day of this month')->format('Y-m-d');
+        $this->assertRulesetCoverage($periodStart);
         $statutoryPeriod = ($this->periods ?? new PayrollStatutoryPeriodResolver())
             ->resolve($periodStart, $paymentDate);
         $manifest = $this->rulesets->canonicalManifest();
@@ -125,6 +138,15 @@ final class PayrollRunSnapshotBuilder
                 'Pro období nebyl nalezen žádný zpracovatelný pracovní vztah.',
                 '/payroll/people',
             );
+        }
+        foreach ($this->inputsOnUnstartedEmploymentValidations(
+            $supplierId,
+            $periodStart,
+            $periodEnd,
+            $officeId,
+            $employments,
+        ) as $validation) {
+            $validations[] = $validation;
         }
 
         // Zmrazená množina ID — od tohohle bodu se podklady načítají MNOŽINOVĚ.
@@ -168,12 +190,36 @@ final class PayrollRunSnapshotBuilder
         ) as $validation) {
             $validations[] = $validation;
         }
+        // Pracovní doba mladistvých (§ 79a, § 88, § 90, § 245 ZP) nad skutečnými
+        // záznamy. Varování bez výjimky, mzdu neovlivňuje, mimo snapshot.
+        foreach ((new PayrollJuvenileWorkTimeService($this->db, $this->rulesets))->validations(
+            $supplierId,
+            $employments,
+            $periodStart,
+        ) as $validation) {
+            $validations[] = $validation;
+        }
 
         $personRegistrationGaps = $this->personRegistrationGaps(
             $supplierId,
             $employmentIds,
         );
 
+        $hourlyTerms = $this->batch->hourlyRemunerationTerms(
+            $supplierId, $employmentIds, $periodStart, $periodEnd,
+        );
+
+        // Běžný měsíční otisk zůstává beze změny; starší nároky potřebují vlastní podklad.
+        $settlementIds = array_values(array_diff((new PayrollHourlyEntitlementLedger($this->db))->employmentIdsWithOutstanding($supplierId, $employmentIds, $periodStart, includeCurrentClaims: true), array_keys($hourlyTerms)));
+        $settlementTerms = $this->batch->remunerationTerms($supplierId, $settlementIds, $periodStart, $periodEnd);
+        foreach ($settlementIds as $id) $settlementTerms[$id] ??= [];
+        $evidenceTerms = $hourlyTerms + $settlementTerms;
+        $workedTimeEvidence = (new PayrollWorkedTimeEvidence($this->db))->loadMany($supplierId, array_keys($evidenceTerms), $periodStart);
+        $hourlyContexts = $evidenceTerms === [] ? [] : (new PayrollHourlyEntitlementContextLoader($this->db))->forMany(
+            $supplierId, $periodStart, $employments, $evidenceTerms, $workedTimeEvidence,
+        );
+        $monthlyParts = (new PayrollHourlyMonthlyParts($this->db))->forMany($supplierId, $periodStart, $employments, $hourlyTerms, false, \MyInvoice\Service\Payroll\PayrollHourlyWagePreview::minimumFundIds($hourlyContexts));
+        foreach ($monthlyParts as $id => $part) $hourlyContexts[$id]['monthly_fund_source'] = $part['source'];
         $timeMonthRows = $this->batch->timeMonths(
             $supplierId,
             $employmentIds,
@@ -191,6 +237,20 @@ final class PayrollRunSnapshotBuilder
             $periodEnd,
         );
         $inputRows = $this->batch->inputs($supplierId, $employmentIds, $periodStart);
+        // Haléře ve výdělku hlášení JMHZ se dřív ukázaly až po schválení mzdy.
+        foreach (PayrollRunWholeCrownInputs::validations($employments, $inputRows, $periodStart) as $validation) {
+            $validations[] = $validation;
+        }
+        foreach (PayrollRunQuickOvertimeHours::validations($employments, $inputRows, $timeMonthRows, $periodStart) as $validation) {
+            $validations[] = $validation;
+        }
+        foreach (PayrollRunAttendanceOvertimeWage::validations($employments, $inputRows, $timeMonthRows, $periodStart) as $validation) {
+            $validations[] = $validation;
+        }
+        $hourlyFrozen = $this->batch->hourlyFrozenClaims($supplierId, array_keys($evidenceTerms), $periodStart);
+        $hourlyPreviews = $evidenceTerms === [] ? [] : (new \MyInvoice\Service\Payroll\PayrollHourlyWagePreview($this->db))->fromSources(
+            $supplierId, $periodStart, $employments, $evidenceTerms, $hourlyTerms, $workedTimeEvidence, $hourlyContexts, $monthlyParts);
+        $hourlyAverageCheck = (new \MyInvoice\Service\Payroll\PayrollHourlyAverageInputGuard($this->db))->invalidInputs($supplierId, $periodStart, $inputRows, $hourlyContexts);
         $dimensionRows = $this->batch->employmentDimensions(
             $supplierId,
             $employmentIds,
@@ -243,6 +303,9 @@ final class PayrollRunSnapshotBuilder
             $periodEnd,
         );
         $deferredIncomes = $this->deferredIncomes($supplierId, $periodStart);
+        foreach (self::inputsAfterEmploymentEndValidations($employments, $deferredIncomes, $periodStart) as $validation) {
+            $validations[] = $validation;
+        }
         $payoutRuleRows = $this->batch->payoutRules($supplierId, $employeeIds);
         $payoutAccountRows = $this->batch->payoutAccounts(
             $supplierId,
@@ -257,6 +320,44 @@ final class PayrollRunSnapshotBuilder
         foreach ($employments as $row) {
             $employmentId = (int) $row['employment_id'];
             $employeeId = (int) $row['employee_id'];
+            if (array_key_exists($employmentId, $evidenceTerms)) {
+                $preview = $hourlyPreviews[$employmentId] ?? null;
+                $settlementOnly = !isset($hourlyTerms[$employmentId]);
+                // Vztah jen s vypořádáním dřívějších nároků už hodinově odměňovaný není.
+                $hourlyLink = $settlementOnly
+                    ? '/payroll/quick-inputs?period=' . substr($periodStart, 0, 7) . '&employment=' . $employmentId
+                    : "/payroll/people?person={$employeeId}&employment={$employmentId}&panel=employment_terms";
+                foreach ($hourlyMaterializationBlockers[$employmentId] ?? [] as $blocker) {
+                    $validations[] = new PayrollRunValidation('blocker', $blocker['code'], 'employment', $employmentId,
+                        $blocker['message'], $blocker['remediation']);
+                }
+                if ($preview === null) {
+                    $validations[] = new PayrollRunValidation('blocker', 'hourly_calculation_missing', 'employment', $employmentId,
+                        $settlementOnly
+                            ? 'Vypořádání dříve vzniklých nároků na náhradní volno nelze sestavit. Zkontrolujte evidenci jejich čerpání.'
+                            : 'Hodinový výpočet nelze sestavit. Zkontrolujte účinné podmínky a podklady pracovní doby.',
+                        $hourlyLink);
+                } else {
+                    foreach ($preview['blockers'] as $blocker) {
+                        $validations[] = new PayrollRunValidation('blocker', (string) $blocker['code'], 'employment', $employmentId,
+                            (string) $blocker['message'], self::hourlyBlockerLink((string) $blocker['code'], $periodStart, $employmentId, $hourlyLink, (array) ($blocker['context'] ?? [])));
+                    }
+                    if ($preview['complete'] && !isset($hourlyMaterializationBlockers[$employmentId])) {
+                        $latest = [];
+                        foreach ($hourlyFrozen['latest'][$employmentId] ?? [] as $claim) $latest[$claim['purpose']] = $claim;
+                        foreach ($preview['claims'] as $claim) {
+                            $frozen = $latest[$claim['purpose']] ?? null;
+                            if (!is_array($frozen) || $frozen['evidence_hash'] !== $preview['evidence_hash']
+                                || ($frozen['full_claim']['payable_minor'] ?? null) !== ($claim['payable_minor'] ?? null)
+                                || ($frozen['full_claim']['worked_duration_units'] ?? null) !== ($claim['worked_duration_units'] ?? null)) {
+                                $validations[] = new PayrollRunValidation('blocker', 'hourly_claims_not_materialized', 'employment', $employmentId,
+                                    'Úplný hodinový výpočet ještě není zmrazený. Zamkněte nebo obnovte podklady mzdového běhu.');
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
             if ($row['term_id'] === null) {
                 $validations[] = new PayrollRunValidation(
                     'blocker',
@@ -370,7 +471,8 @@ final class PayrollRunSnapshotBuilder
                     $employmentId,
                     sprintf(
                         '%s: pracovní vztah nemá schválenou docházku. Zamknutím vstupů se '
-                        . 'stav zmrazí a měsíční hlášení ČSSZ by ji už nevidělo.',
+                        . 'stav zmrazí a měsíční hlášení ČSSZ by ji už nevidělo. Schvalte '
+                        . 'docházku v Mzdy → Docházka (odkaz otevře tento vztah a měsíc).',
                         (string) $row['full_name'],
                     ),
                     "/payroll/time?employment={$employmentId}&period=" . substr($periodStart, 0, 7),
@@ -416,8 +518,42 @@ final class PayrollRunSnapshotBuilder
                     "/payroll/absences?employment={$employmentId}&period=" . substr($periodStart, 0, 7),
                 );
             }
-            $inputs = $this->inputs($inputRows[$employmentId] ?? []);
+            $inputs = $this->inputs($inputRows[$employmentId] ?? [], $hourlyFrozen['inputs']);
+            foreach ($hourlyFrozen['invalid'][$employmentId] ?? [] as $invalidClaim) {
+                $validations[] = new PayrollRunValidation('blocker', 'hourly_claim_provenance_invalid', 'employment', $employmentId,
+                    'Hodinový nárok nemá platný zmrazený podklad. Obnovte podklady mzdového běhu.');
+            }
+            foreach ($inputRows[$employmentId] ?? [] as $inputRow) {
+                if (str_contains((string) ($inputRow['benefit_allocation_json'] ?? ''), 'limit_awaits_publication')) {
+                    $validations[] = new PayrollRunValidation(
+                        'warning',
+                        'meal_allowance_exemption_deferred',
+                        'employment',
+                        $employmentId,
+                        sprintf(
+                            '%s: příspěvek na stravování je celý zdaněný a pojištěný jako mzda, protože'
+                            . ' limit osvobození za směnu (stravné MPSV) pro rok %s ještě nebyl vyhlášen.'
+                            . ' Po vyhlášení osvobozenou část dorovnejte opravou vstupu.',
+                            (string) $row['full_name'],
+                            substr($periodStart, 0, 4),
+                        ),
+                        "/payroll/components?tab=inputs&period=" . substr($periodStart, 0, 7),
+                    );
+                }
+                if (($inputRow['source_kind'] ?? null) === 'time' && str_starts_with((string) ($inputRow['external_id'] ?? ''), 'hourly-wage:') && !isset($hourlyFrozen['inputs'][(int) $inputRow['id']])) {
+                    $validations[] = new PayrollRunValidation('blocker', 'hourly_claim_provenance_invalid', 'employment', $employmentId,
+                        'Hodinový mzdový vstup nemá doloženou vazbu na výpočet. Obnovte podklady mzdového běhu.');
+                }
+            }
+            foreach ($hourlyAverageCheck['invalid'][$employmentId] ?? [] as $invalidInputId) {
+                // Průměr se opravuje v Absence a dovolená → Průměrný výdělek, ne
+                // v podmínkách vztahu; odkaz předvyplní vztah a čtvrtletí měsíce.
+                $validations[] = new PayrollRunValidation('blocker', 'hourly_average_minimum_evidence_missing', 'employment', $employmentId,
+                    'Náhrada nebo pohotovost nemá doložený průměr alespoň v účinném hodinovém minimu. Opravte průměr a znovu vytvořte podklad.',
+                    self::hourlyAverageMinimumLink($periodStart, $employmentId));
+            }
             $riskySavingsEvidence = $this->riskySavingsEvidence($row);
+            $riskySavingsPath = self::riskySavingsPath($employeeId, $employmentId);
             if ($riskySavingsEvidence !== null) {
                 foreach ($this->riskySavingsPolicy->issues(
                     $riskySavingsEvidence,
@@ -429,7 +565,7 @@ final class PayrollRunSnapshotBuilder
                         'employment',
                         $employmentId,
                         $this->riskySavingsValidationMessage($issue),
-                        '/payroll/components',
+                        $riskySavingsPath,
                     );
                 }
                 foreach ($this->riskySavingsPolicy->warnings(
@@ -442,7 +578,7 @@ final class PayrollRunSnapshotBuilder
                         'employment',
                         $employmentId,
                         $this->riskySavingsValidationMessage($warning),
-                        '/payroll/components',
+                        $riskySavingsPath,
                     );
                 }
             }
@@ -454,7 +590,18 @@ final class PayrollRunSnapshotBuilder
                 \MyInvoice\Repository\Payroll\PayrollDeferredIncomeRepository::TYPES_WITHOUT_INCOME,
                 true,
             );
-            if ($inputs === [] && !$deferredWithoutIncome) {
+            // Hodinová mzda vznikne jako vstup až zamčením podkladů. Před zahájením
+            // běhu proto vztah s úplným náhledem a nenulovým nárokem „bez vstupu"
+            // není; nezmrazený nárok po zamčení hlídá `hourly_claims_not_materialized`.
+            $hourlyPreview = $hourlyPreviews[$employmentId] ?? null;
+            $hourlyWagePending = is_array($hourlyPreview)
+                && ($hourlyPreview['complete'] ?? false) === true
+                && ($hourlyPreview['settlement_only'] ?? true) === false
+                && (int) ($hourlyPreview['payable_total_minor'] ?? 0) > 0;
+            // Neschválené vstupy už hlásí `draft_inputs_present`; vztah, kterému
+            // chybí jen jejich schválení, „bez vstupu" není a druhá hláška by
+            // tentýž problém jen opakovala.
+            if ($inputs === [] && $draftCount === 0 && !$deferredWithoutIncome && !$hourlyWagePending) {
                 // Vztah bez složky je většinou chyba zadání (zapomenutá mzda).
                 // Výjimku (override) tu NEnabízíme: když měsíc bez vstupu
                 // nevysvětluje schválená nepřítomnost, zastaví vztah zákonný
@@ -562,6 +709,12 @@ final class PayrollRunSnapshotBuilder
                     'row_version' => (int) $row['term_row_version'],
                     'effective_from' => (string) $row['effective_from'],
                     'effective_to' => $row['effective_to'],
+                    ...(($row['remuneration_type'] ?? 'monthly') === 'hourly' ? [
+                        'remuneration_type' => 'hourly',
+                        'hourly_rate_minor' => (int) $row['hourly_rate_minor'],
+                        'remuneration_basis_kind' => $row['remuneration_basis_kind'],
+                        'remuneration_basis' => $row['remuneration_basis'],
+                    ] : []),
                     'weekly_hours' => $row['weekly_hours'] === null
                         ? null
                         : (string) $row['weekly_hours'],
@@ -688,8 +841,26 @@ final class PayrollRunSnapshotBuilder
                     'is_primary' => $row['term_is_primary'] === null
                         ? null
                         : (bool) $row['term_is_primary'],
+                    // Člen orgánu, který je zároveň společníkem (odměna za výkon
+                    // funkce proti 366). Klíč jen u takového vztahu, ostatním
+                    // zůstává snímek i otisk vstupu beze změny.
+                    ...((int) ($row['statutory_partner'] ?? 0) === 1
+                        && (string) $row['relation_type'] === 'statutory_body'
+                        ? ['statutory_partner' => true]
+                        : []),
                 ],
                 'term' => $termSnapshot,
+                ...(!isset($hourlyFrozen['latest'][$employmentId]) ? [] : ['hourly_wage_claims' => $hourlyFrozen['latest'][$employmentId]]),
+                ...(!isset($hourlyAverageCheck['source'][$employmentId]) ? [] : ['hourly_average_input_sources' => $hourlyAverageCheck['source'][$employmentId]]),
+                ...(($hourlyTerms[$employmentId] ?? []) === [] ? [] : [
+                    'hourly_remuneration_terms' => $hourlyTerms[$employmentId],
+                    'hourly_entitlement_context' => $hourlyContexts[$employmentId] ?? null,
+                ]),
+                ...(!array_key_exists($employmentId, $settlementTerms) ? [] : [
+                    'hourly_settlement_only' => true,
+                    'hourly_settlement_terms' => $settlementTerms[$employmentId],
+                    'hourly_entitlement_context' => $hourlyContexts[$employmentId] ?? null,
+                ]),
                 'ordinary_evidence_profile' => $row['term_id'] === null
                     ? null
                     : [
@@ -706,6 +877,9 @@ final class PayrollRunSnapshotBuilder
                     ],
                 'average_earning' => $this->averageEarningSnapshot($row),
                 'time_month' => $timeMonth,
+                ...(!array_key_exists($employmentId, $evidenceTerms) ? [] : [
+                    'worked_time_evidence' => $workedTimeEvidence[$employmentId] ?? null,
+                ]),
                 'absences' => $absences,
                 'inputs' => $inputs,
                 'risky_savings_evidence' => $riskySavingsEvidence,
@@ -743,6 +917,12 @@ final class PayrollRunSnapshotBuilder
         ) as $validation) {
             $validations[] = $validation;
         }
+        foreach (self::exhaustedCurrentMaintenanceValidations(
+            $enforcementEvidence,
+            array_keys($people),
+        ) as $validation) {
+            $validations[] = $validation;
+        }
 
         // Nepodepsané prohlášení poplatníka je rozhodnutý stav, ne mezera —
         // assembler ho proto neblokuje. Má ale daňový dopad (bez slevy na
@@ -759,15 +939,59 @@ final class PayrollRunSnapshotBuilder
         // srážky pod rozhodnou částkou), mění se jen to, co běh hlásí.
         // Osoba, která má vedle funkce i jiný vztah, se počítá dál.
         // Id osob nese souhrn kvůli trvalému skrytí po osobách.
+        //
+        // Osoba bez záznamu o prohlášení se počítá jako nepodepsaná (zákonný
+        // výchozí stav, PayrollRunStatutoryInputAssembler::taxDeclarationIssue()),
+        // proto patří do téhož souhrnu. U nepodepsaných se výpočet neptá ani
+        // na rezidenci; chybějící připomene vlastní souhrn, protože ji bude
+        // potřebovat potvrzení o příjmech i pozdější podpis prohlášení.
         $unsignedDeclarations = [];
+        $unsignedWithoutResidence = [];
+        $withoutHealthCoverage = [];
+        $withoutSocialJurisdiction = [];
+        $withoutOpeningBalances = [];
         foreach ($people as $personId => $person) {
+            foreach (['social_insurance', 'income_tax'] as $accumulatorKind) {
+                $accumulator = $person['statutory_accumulators'][$accumulatorKind] ?? null;
+                if (is_array($accumulator)
+                    && ($accumulator['status'] ?? null) === 'unverified'
+                    && ($accumulator['issue_code'] ?? null) === 'annual_accumulator_missing'
+                ) {
+                    $withoutOpeningBalances[(int) $personId] = (int) $personId;
+                }
+            }
+            $personEvidence = $statutoryEvidence[$personId] ?? null;
+            if (is_array($personEvidence)
+                && $person['employments'] !== []
+                && !is_array($personEvidence['social']['jurisdiction'] ?? null)
+            ) {
+                $withoutSocialJurisdiction[] = (int) $personId;
+            }
+            if (is_array($personEvidence)
+                && $person['employments'] !== []
+                && !is_array($personEvidence['health']['coverage'] ?? null)
+            ) {
+                $withoutHealthCoverage[] = (int) $personId;
+            }
+            $declaration = $personEvidence['income_tax']['declaration'] ?? null;
+            $unsigned = is_array($declaration)
+                ? ($declaration['status'] ?? null) === 'not-signed'
+                : is_array($personEvidence)
+                    && PayrollRunStatutoryInputAssembler::taxDeclarationIssue(
+                        $personEvidence,
+                        $person['employments'],
+                    ) === null;
+            if (!$unsigned) {
+                continue;
+            }
+            $residence = $personEvidence['income_tax']['residence'] ?? null;
+            if (!is_array($residence) || ($residence['residence'] ?? null) === 'unverified') {
+                $unsignedWithoutResidence[] = (int) $personId;
+            }
             if (self::onlyCompanyBodyRelations($person['employments'])) {
                 continue;
             }
-            $declaration = $statutoryEvidence[$personId]['income_tax']['declaration'] ?? null;
-            if (is_array($declaration) && ($declaration['status'] ?? null) === 'not-signed') {
-                $unsignedDeclarations[] = (int) $personId;
-            }
+            $unsignedDeclarations[] = (int) $personId;
         }
         if ($unsignedDeclarations !== []) {
             $validations[] = new PayrollRunValidation(
@@ -778,6 +1002,50 @@ final class PayrollRunSnapshotBuilder
                 self::unsignedDeclarationsMessage(count($unsignedDeclarations)),
                 '/payroll/people',
                 subjectIds: $unsignedDeclarations,
+            );
+        }
+        if ($unsignedWithoutResidence !== []) {
+            $validations[] = new PayrollRunValidation(
+                'warning',
+                'tax_residence_missing_unsigned_summary',
+                'run',
+                null,
+                self::unsignedWithoutResidenceMessage(count($unsignedWithoutResidence)),
+                '/payroll/people?bulk=statutory_defaults',
+                subjectIds: $unsignedWithoutResidence,
+            );
+        }
+        if ($withoutOpeningBalances !== []) {
+            $validations[] = new PayrollRunValidation(
+                'warning',
+                'annual_accumulator_missing_summary',
+                'run',
+                null,
+                self::withoutOpeningBalancesMessage(count($withoutOpeningBalances)),
+                '/payroll/imports?tab=registration',
+                subjectIds: array_values($withoutOpeningBalances),
+            );
+        }
+        if ($withoutSocialJurisdiction !== []) {
+            $validations[] = new PayrollRunValidation(
+                'warning',
+                'social_jurisdiction_missing_summary',
+                'run',
+                null,
+                self::withoutSocialJurisdictionMessage(count($withoutSocialJurisdiction)),
+                '/payroll/people?bulk=statutory_defaults',
+                subjectIds: $withoutSocialJurisdiction,
+            );
+        }
+        if ($withoutHealthCoverage !== []) {
+            $validations[] = new PayrollRunValidation(
+                'warning',
+                'health_coverage_missing_summary',
+                'run',
+                null,
+                self::withoutHealthCoverageMessage(count($withoutHealthCoverage)),
+                '/payroll/people?bulk=health_insurer',
+                subjectIds: $withoutHealthCoverage,
             );
         }
 
@@ -807,6 +1075,63 @@ final class PayrollRunSnapshotBuilder
     }
 
     /**
+     * Mzdový rok bez legislativní sady se nespočítá a účetní se to má dozvědět
+     * srozumitelně a hned při založení běhu, ne jako technickou chybu
+     * „Expected exactly one inspectable social_insurance ruleset" z hloubi
+     * výpočtu. Rozhoduje totéž pravidlo jako podporované roky
+     * ({@see PayrollRulesetYearCoverage::CALCULATION_CRITICAL_DOMAINS}); sada
+     * přidaná v administraci rok zpřístupní bez nové verze aplikace.
+     *
+     * @throws \DomainException rok nepokrývá některá výpočtově kritická doména
+     */
+    public function assertRulesetCoverage(string $periodStart): void
+    {
+        $period = \DateTimeImmutable::createFromFormat('!Y-m-d', $periodStart);
+        if ($period === false || $period->format('Y-m-d') !== $periodStart) {
+            throw new \InvalidArgumentException('Mzdové období není platné.');
+        }
+        $periodEnd = $period->modify('last day of this month')->format('Y-m-d');
+        $missing = [];
+        foreach (PayrollRulesetYearCoverage::CALCULATION_CRITICAL_DOMAINS as $domain) {
+            if (!PayrollRulesetYearCoverage::coversDate($this->rulesets, $domain, $periodStart)
+                || !PayrollRulesetYearCoverage::coversDate($this->rulesets, $domain, $periodEnd)
+            ) {
+                $missing[] = self::RULESET_DOMAIN_LABELS[$domain->value] ?? $domain->value;
+            }
+        }
+        if ($missing === []) {
+            return;
+        }
+        throw new \DomainException(sprintf(
+            'Mzdy za %s zatím nejde spočítat: aplikace pro rok %s nemá legislativní sadu (%s). '
+                . 'Sazby a částky pro nový rok se do aplikace doplňují aktualizací po jejich vyhlášení '
+                . 've Sbírce zákonů; dostupné sady najdete v Mzdy → Legislativní pravidla mezd. '
+                . 'Měsíce předchozího roku zpracujete beze změny.',
+            $period->format('m/Y'),
+            $period->format('Y'),
+            implode(', ', $missing),
+        ));
+    }
+
+    /** @var array<string,string> */
+    private const RELATION_LABELS = [
+        'employment' => 'pracovní poměr',
+        'small_scale_employment' => 'zaměstnání malého rozsahu',
+        'dpp' => 'DPP',
+        'dpc' => 'DPČ',
+        'partner_dependent' => 'příjem společníka',
+        'statutory_body' => 'statutární orgán',
+    ];
+
+    private const RULESET_DOMAIN_LABELS = [
+        'income_tax' => 'daň z příjmů',
+        'social_insurance' => 'sociální pojištění',
+        'health_insurance' => 'zdravotní pojištění',
+        'employment_thresholds' => 'minimální mzda a rozhodné příjmy',
+        'compensation_averages' => 'náhrady a průměrný výdělek',
+    ];
+
+    /**
      * Věta souhrnného varování o nepodepsaných prohlášeních. Veřejná, protože
      * po skrytí části osob ji se sníženým počtem skládá i
      * {@see PayrollWarningSuppressionSet}.
@@ -814,11 +1139,66 @@ final class PayrollRunSnapshotBuilder
     public static function unsignedDeclarationsMessage(int $count): string
     {
         return sprintf(
-            'Počet osob s nepodepsaným prohlášením poplatníka k dani: %d. Záloha'
+            'Počet osob s nepodepsaným prohlášením poplatníka k dani: %d. Osoba'
+            . ' bez záznamu o prohlášení se počítá jako nepodepsaná. Záloha'
             . ' se jim počítá bez slevy na poplatníka a bez daňového zvýhodnění;'
             . ' u dohody o provedení práce a zaměstnání malého rozsahu s příjmem'
-            . ' pod rozhodnou částkou se daň sráží zvláštní sazbou (§ 6 odst. 4 ZDP).'
+            . ' pod rozhodnou částkou se daň počítá zvlášť sazbou 15 %% (§ 6 odst. 4 ZDP;'
+            . ' do roku 2026 srážková daň, od roku 2027 samostatný základ zálohy).'
             . ' Ověřte, že to odpovídá skutečnosti.',
+            $count,
+        );
+    }
+
+    public static function unsignedWithoutResidenceMessage(int $count): string
+    {
+        return sprintf(
+            'Počet osob bez podepsaného prohlášení a bez ověřené daňové rezidence: %d.'
+            . ' Výpočet daně ji u nich nepotřebuje (bez prohlášení se slevy'
+            . ' neuplatní a daň se počítá stejně u rezidenta i nerezidenta).'
+            . ' Doplňte ji před vystavením potvrzení o zdanitelných příjmech'
+            . ' nebo před podpisem prohlášení, hromadně v Mzdy → Zaměstnanci'
+            . ' → Další funkce → Doplnit výchozí zákonné údaje.',
+            $count,
+        );
+    }
+
+    public static function withoutOpeningBalancesMessage(int $count): string
+    {
+        return sprintf(
+            'Počet osob bez počátečních ročních úhrnů (pojistné a daň za dřívější'
+            . ' měsíce roku): %d. Měsíční záloha i srážková daň se počítají za měsíc,'
+            . ' takže výpočet pokračuje od nuly; sociální pojištění zastaví jen u'
+            . ' příjmu, který mohl dosáhnout ročního maximálního vyměřovacího základu.'
+            . ' Úhrny potřebuje roční zúčtování a potvrzení o příjmech: naimportujte'
+            . ' je hromadně v Mzdy → Importy → JMHZ (počáteční stavy), u nového'
+            . ' zaměstnance bez dřívější mzdy stačí na kartě vztahu uložit nulový stav.',
+            $count,
+        );
+    }
+
+    public static function withoutSocialJurisdictionMessage(int $count): string
+    {
+        return sprintf(
+            'Počet osob bez příslušnosti k sociálnímu pojištění v zákonné evidenci: %d.'
+            . ' U dohody, která v měsíci nezaloží účast na pojištění (bez příjmu nebo'
+            . ' pod rozhodnou částkou), pojistné nevzniká a výpočet pokračuje; kde'
+            . ' účast vznikne, výpočet osobu zastaví. Příslušnost potřebuje i měsíční'
+            . ' hlášení JMHZ. Doplňte ji hromadně v Mzdy → Zaměstnanci → Další funkce'
+            . ' → Doplnit výchozí zákonné údaje.',
+            $count,
+        );
+    }
+
+    public static function withoutHealthCoverageMessage(int $count): string
+    {
+        return sprintf(
+            'Počet osob bez zdravotní pojišťovny v zákonné evidenci: %d. U dohody'
+            . ' bez účasti na zdravotním pojištění (příjem pod rozhodnou částkou)'
+            . ' pojistné nevzniká a výpočet pokračuje; kde účast vznikne, výpočet'
+            . ' osobu zastaví. Pojišťovnu doplňte hromadně v Mzdy → Zaměstnanci'
+            . ' → Další funkce → Zdravotní pojišťovny hromadně. Registrace u ČSSZ'
+            . ' kód pojišťovny vyžaduje; není-li znám, uvede se 999 (ostatní).',
             $count,
         );
     }
@@ -836,8 +1216,12 @@ final class PayrollRunSnapshotBuilder
      * @param list<int> $employeeIds osoby zmrazeného snímku
      * @return array{
      *   eligible_employment_ids:list<int>,
+     *   employment_facts:array<int,array<string,mixed>>,
      *   inputs:array<int,list<array<string,mixed>>>,
      *   absences:array<int,list<array<string,mixed>>>,
+     *   worked_time_evidence:array<int,array<string,mixed>>,
+     *   manual_time_month_state:array<int,array<string,mixed>>,
+     *   hourly_remuneration_terms:array<int,list<array<string,mixed>>>,
      *   statutory_evidence:array<int,mixed>|null
      * }
      */
@@ -857,7 +1241,8 @@ final class PayrollRunSnapshotBuilder
 
         $eligible = [];
         $eligibleEmployees = [];
-        foreach ($this->employmentRows($supplierId, $periodStart, $periodEnd, $officeId) as $row) {
+        $eligibleRows = $this->employmentRows($supplierId, $periodStart, $periodEnd, $officeId);
+        foreach ($eligibleRows as $row) {
             $eligible[] = (int) $row['employment_id'];
             $eligibleEmployees[] = (int) $row['employee_id'];
         }
@@ -887,12 +1272,163 @@ final class PayrollRunSnapshotBuilder
             );
         }
 
+        $hourlyTerms = $this->batch->hourlyRemunerationTerms($supplierId, $allEmployments, $periodStart, $periodEnd);
+        $settlementIds = array_values(array_diff((new PayrollHourlyEntitlementLedger($this->db))->employmentIdsWithOutstanding($supplierId, $allEmployments, $periodStart, includeCurrentClaims: true), array_keys($hourlyTerms)));
+        $settlementTerms = $this->batch->remunerationTerms($supplierId, $settlementIds, $periodStart, $periodEnd);
+        foreach ($settlementIds as $id) $settlementTerms[$id] ??= [];
+        $evidenceTerms = $hourlyTerms + $settlementTerms;
+        $hourlyFrozen = $this->batch->hourlyFrozenClaims($supplierId, array_keys($evidenceTerms), $periodStart);
+        foreach ($allEmployments as $employmentId) $inputs[$employmentId] = $this->inputs($inputRows[$employmentId] ?? [], $hourlyFrozen['inputs']);
+        $workedTime = new PayrollWorkedTimeEvidence($this->db);
+        $hourlySources = $workedTime->loadMany($supplierId, array_keys($evidenceTerms), $periodStart);
+        $hourlyContexts = $evidenceTerms === [] ? [] : (new PayrollHourlyEntitlementContextLoader($this->db))->forMany(
+            $supplierId, $periodStart, $eligibleRows, $evidenceTerms, $hourlySources,
+        );
+        $monthlyParts = (new PayrollHourlyMonthlyParts($this->db))->forMany($supplierId, $periodStart, $eligibleRows, $hourlyTerms, false, \MyInvoice\Service\Payroll\PayrollHourlyWagePreview::minimumFundIds($hourlyContexts));
+        foreach ($monthlyParts as $id => $part) $hourlyContexts[$id]['monthly_fund_source'] = $part['source'];
+        $hourlyAverageCheck = (new \MyInvoice\Service\Payroll\PayrollHourlyAverageInputGuard($this->db))->invalidInputs($supplierId, $periodStart, $inputRows, $hourlyContexts);
+        $employmentFacts = [];
+        $averageEarnings = [];
+        foreach ($eligibleRows as $row) {
+            $employmentFacts[(int) $row['employment_id']] = self::employmentDriftFactsFromRow($row);
+            $averageEarnings[(int) $row['employment_id']] = $this->averageEarningSnapshot($row);
+        }
         return [
             'eligible_employment_ids' => $eligible,
+            'employment_facts' => $employmentFacts,
+            'worked_time_evidence' => $hourlySources,
+            'hourly_entitlement_context' => $hourlyContexts,
+            'hourly_average_input_sources' => $hourlyAverageCheck['source'],
+            'hourly_wage_claims' => $hourlyFrozen['latest'],
+            'manual_time_month_state' => $workedTime->manualHistoryStates(
+                $supplierId, array_values(array_diff($allEmployments, array_keys($hourlyTerms))), $periodStart,
+            ),
+            'hourly_remuneration_terms' => $hourlyTerms,
+            'hourly_settlement_terms' => $settlementTerms,
             'inputs' => $inputs,
             'absences' => $absences,
             'statutory_evidence' => $statutoryEvidence,
+            'average_earnings' => $averageEarnings,
         ];
+    }
+
+    /**
+     * Údaje vztahu, které snímek nese a které účetní mění běžnou prací (hlavní
+     * vztah, místo výkonu, účtárna, úvazek, druh činnosti, mzda). Jméno osoby
+     * záměrně ne: výpočet nemění a oprava překlepu nemá zastavit schválení.
+     *
+     * Dřív je detektor zastaralé revize nesledoval: po změně podmínek přepočet
+     * počítal ze starého snímku a jako „beze změny" se tvářil i seznam běhů,
+     * takže pomohlo jen ruční „Obnovit podklady". Hodnoty jdou z TÉHOŽ řádku
+     * `employmentRows()`, ze kterého je `build()` zapisuje do snímku; druhá
+     * strana ({@see self::employmentDriftFactsFromSnapshot()}) je čte ze
+     * zmrazeného snímku a obě prochází stejnou normalizací.
+     *
+     * @param array<string,mixed> $row
+     * @return array<string,mixed>
+     */
+    public static function employmentDriftFactsFromRow(array $row): array
+    {
+        $hasTerm = $row['term_id'] !== null;
+
+        return self::normalizeDriftFacts([
+            'office_id' => $row['office_id'],
+            'relation_type' => $row['relation_type'],
+            'status' => $row['employment_status'],
+            'start_date' => $row['start_date'],
+            'actual_start_date' => $row['actual_start_date'],
+            'end_date' => $row['end_date'],
+            'monthly_gross_minor' => $row['monthly_gross_minor'],
+            'is_primary' => $row['term_is_primary'],
+            'term_id' => $row['term_id'],
+            ...array_combine(
+                array_map(static fn (string $key): string => 'term.' . $key, self::DRIFT_TERM_KEYS),
+                array_map(static fn (string $key): mixed => $hasTerm ? ($row[$key] ?? null) : null, self::DRIFT_TERM_KEYS),
+            ),
+        ]);
+    }
+
+    /**
+     * Protějšek {@see self::employmentDriftFactsFromRow()} ze zmrazeného snímku.
+     * Klíč, který starší snímek nenese, se vynechá, aby revize ze starší verze
+     * nehlásila změnu jen proto, že ho tehdy snímek nezapisoval.
+     *
+     * @param array<string,mixed> $entry vztah ze snímku (`people[].employments[]`)
+     * @return array<string,mixed>
+     */
+    public static function employmentDriftFactsFromSnapshot(array $entry): array
+    {
+        $employment = is_array($entry['employment'] ?? null) ? $entry['employment'] : [];
+        $term = is_array($entry['term'] ?? null) ? $entry['term'] : null;
+        $facts = [];
+        foreach ([
+            'office_id' => [$employment, 'office_id'],
+            'relation_type' => [$employment, 'relation_type'],
+            'status' => [$employment, 'status'],
+            'start_date' => [$employment, 'start_date'],
+            'actual_start_date' => [$employment, 'actual_start_date'],
+            'end_date' => [$employment, 'end_date'],
+            'monthly_gross_minor' => [$employment, 'monthly_gross_minor'],
+            'is_primary' => [$employment, 'is_primary'],
+        ] as $key => [$source, $field]) {
+            if (array_key_exists($field, $source)) {
+                $facts[$key] = $source[$field];
+            }
+        }
+        $facts['term_id'] = $term['id'] ?? null;
+        foreach (self::DRIFT_TERM_KEYS as $key) {
+            if ($term === null) {
+                $facts['term.' . $key] = null;
+            } elseif (array_key_exists($key, $term)) {
+                $facts['term.' . $key] = $term[$key];
+            }
+        }
+
+        return self::normalizeDriftFacts($facts);
+    }
+
+    /**
+     * Sloupce podmínek, které snímek přebírá beze změny pod stejným klíčem.
+     *
+     * @var list<string>
+     */
+    private const DRIFT_TERM_KEYS = [
+        'weekly_hours',
+        'workload_basis_points',
+        'activity_code',
+        'jmhz_relationship_detail_code',
+        'work_place',
+        'jmhz_workplace_municipality_code',
+        'jmhz_workplace_country_code',
+        'social_insurance_participation',
+        'health_insurance_participation',
+        'tax_regime',
+        'risky_work',
+        'social_employer_rate_category',
+    ];
+
+    /**
+     * Jednotné typy pro porovnání: čísla jako int, příznaky jako bool, zbytek
+     * jako text. PDO vrací z řádku texty, snímek nese už přetypované hodnoty.
+     *
+     * @param array<string,mixed> $facts
+     * @return array<string,mixed>
+     */
+    private static function normalizeDriftFacts(array $facts): array
+    {
+        $normalized = [];
+        foreach ($facts as $key => $value) {
+            $normalized[$key] = match (true) {
+                $value === null => null,
+                in_array($key, ['is_primary', 'term.risky_work'], true) => (bool) $value,
+                in_array($key, ['office_id', 'monthly_gross_minor', 'term_id', 'term.workload_basis_points'], true) => (int) $value,
+                $key === 'term.weekly_hours' => number_format((float) $value, 2, '.', ''),
+                default => (string) $value,
+            };
+        }
+        ksort($normalized);
+
+        return $normalized;
     }
 
     /** @param list<array<string,mixed>> $employments */
@@ -922,8 +1458,8 @@ final class PayrollRunSnapshotBuilder
      * odstranit jinak než novou verzí smluvních podmínek.
      *
      * Sloupec zůstává záložním zdrojem jen tam, kde evidence není k dispozici
-     * (volitelná závislost, osoba bez evidence). Chybějící evidenci ohlásí
-     * assembler vlastním blokátorem `tax_declaration_evidence_missing`.
+     * (volitelná závislost). Osoba s evidencí bez záznamu o prohlášení je
+     * nepodepsaná, stejně jako ve výpočtu.
      *
      * @param array<string,mixed> $row
      */
@@ -933,9 +1469,10 @@ final class PayrollRunSnapshotBuilder
             $incomeTax = $evidence['income_tax'] ?? null;
             $declaration = is_array($incomeTax) ? ($incomeTax['declaration'] ?? null) : null;
             $status = is_array($declaration) ? ($declaration['status'] ?? null) : null;
-            if (is_string($status)) {
-                return $status === 'signed';
-            }
+
+            // Bez účinného záznamu v evidenci prohlášení podepsané není
+            // (migrace 1643, § 38k ZDP); výpočet i hlášení tak říkají totéž.
+            return $status === 'signed';
         }
 
         return (bool) $row['tax_declaration_signed'];
@@ -1215,8 +1752,16 @@ final class PayrollRunSnapshotBuilder
             || $rowVersion <= 0
             || !is_bool($automaticPosting)
         ) {
-            throw new \UnexpectedValueException(
-                'Účinná zaměstnavatelská politika nemá platná data pro mzdový snapshot.',
+            throw new PayrollRunSnapshotFixableException(
+                'employer_policy_invalid',
+                sprintf(
+                    'Zaměstnavatelská mzdová politika účinná za období %s nemá úplná data. '
+                        . 'Otevřete Mzdy → Nastavení mezd → Politiky a připravenost, politiku '
+                        . 'zkontrolujte (včetně volby automatického účtování) a uložte ji znovu. '
+                        . 'Pokud se hláška opakuje, předejte ji správci aplikace.',
+                    self::formatPeriod($periodStart),
+                ),
+                '/payroll/settings?tab=policies',
             );
         }
 
@@ -1225,6 +1770,19 @@ final class PayrollRunSnapshotBuilder
             'row_version' => $rowVersion,
             'automatic_posting_enabled' => $automaticPosting,
         ];
+    }
+
+    /**
+     * Rovnou na záložku Rizikové spoření zúženou na vztah. Bez `tab` stránka
+     * otevře Mzdové vstupy, kde se evidence rizikové práce opravit nedá.
+     */
+    private static function riskySavingsPath(int $employeeId, int $employmentId): string
+    {
+        return '/payroll/components?' . http_build_query([
+            'tab' => 'risky_savings',
+            'person' => $employeeId,
+            'employment' => $employmentId,
+        ]);
     }
 
     private static function formatPeriod(string $periodStart): string
@@ -1262,8 +1820,240 @@ final class PayrollRunSnapshotBuilder
         return sprintf(' (nejstarší uložená platí až od %s)', $earliest);
     }
 
+    /**
+     * Mzdové vstupy vztahů, které do mzdového běhu nepatří.
+     *
+     * Vztah s nepotvrzeným nástupem (plánovaný, nebo založený až po období),
+     * archivovaný či s nástupem po období do běhu nevstoupí
+     * ({@see PayrollEmploymentLifecycleSql::payrollPeriodMembershipSql()}).
+     * Jeho nezrušené vstupy za období se ale tím neztratí, jen se nevyplatí:
+     * u brigádnice zadané před potvrzením nástupu tak z výplat tiše vypadla
+     * celá měsíční mzda a kontrola běhu o tom nevěděla, protože hlídala jen
+     * vztahy, které v běhu jsou. Doplněk množiny se proto počítá stejným
+     * pravidlem členství, ne vlastní kopií.
+     *
+     * Dotaz začíná vstupy období (`idx_payroll_input_period_status`) a teprve
+     * seskupené vztahy spojuje s jejich stavem, takže na velikosti historie
+     * vstupů nezávisí.
+     *
+     * @return list<PayrollRunValidation>
+     */
+    public function inputsOnUnstartedEmploymentValidations(
+        int $supplierId,
+        string $periodStart,
+        string $periodEnd,
+        ?int $officeId,
+        array $periodEmployments = [],
+    ): array {
+        $officeSql = $officeId === null ? '1 = 1' : 'employment.office_id = ?';
+        $stmt = $this->db->pdo()->prepare(
+            'WITH period_inputs AS (
+                    SELECT input.employment_id,
+                           COUNT(*) AS input_count,
+                           SUM(input.amount_minor) AS amount_minor
+                      FROM payroll_inputs input
+                     WHERE input.supplier_id = ?
+                       AND input.period_start = ?
+                       AND input.status IN ("draft", "approved", "locked")
+                     GROUP BY input.employment_id
+                 ),
+                 effective_employment AS (
+                    SELECT employment.*,
+                           ' . PayrollEmploymentLifecycleSql::effectiveStatusAtPlaceholder() . '
+                               AS effective_status,
+                           period_inputs.input_count,
+                           period_inputs.amount_minor AS input_amount_minor
+                      FROM period_inputs
+                      JOIN payroll_employments employment
+                        ON employment.supplier_id = ?
+                       AND employment.id = period_inputs.employment_id
+                 )
+             SELECT employment.id AS employment_id,
+                    employment.employee_id,
+                    employment.effective_status,
+                    COALESCE(employment.actual_start_date, employment.start_date) AS start_date,
+                    employment.input_count,
+                    employment.input_amount_minor,
+                    ' . \MyInvoice\Repository\Payroll\PayrollPeopleRepository::fullNameExpression('employee') . ' AS full_name,
+                    EXISTS (
+                        SELECT 1
+                          FROM payroll_employment_terms term
+                         WHERE term.supplier_id = employment.supplier_id
+                           AND term.employment_id = employment.id
+                           AND term.effective_from <= ?
+                           AND (term.effective_to IS NULL OR term.effective_to >= ?)
+                    ) AS has_term
+               FROM effective_employment employment
+               JOIN payroll_employees employee
+                 ON employee.supplier_id = employment.supplier_id
+                AND employee.id = employment.employee_id
+              WHERE NOT (' . PayrollEmploymentLifecycleSql::payrollPeriodMembershipSql() . ')
+                AND ' . $officeSql . '
+              ORDER BY employment.employee_id, employment.id'
+        );
+        $stmt->execute([
+            $supplierId,
+            $periodStart,
+            $periodEnd,
+            $supplierId,
+            $periodEnd,
+            $periodStart,
+            ...PayrollEmploymentLifecycleSql::payrollPeriodMembershipParams($periodStart, $periodEnd),
+            ...($officeId === null ? [] : [$officeId]),
+        ]);
+
+        $validations = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $employmentId = (int) $row['employment_id'];
+            $employeeId = (int) $row['employee_id'];
+            $status = $row['effective_status'] === null ? null : (string) $row['effective_status'];
+            $startDate = $row['start_date'] === null ? null : (string) $row['start_date'];
+            $reasons = [];
+            if ($status === null || $status === 'planned') {
+                $reasons[] = 'nástup není potvrzený';
+            } elseif ($status === 'archived') {
+                $reasons[] = 'vztah je archivovaný';
+            } elseif ($status === 'no_show') {
+                $reasons[] = 'vztah je označený jako nenastoupení';
+            }
+            if ($startDate !== null && $startDate > $periodEnd) {
+                $reasons[] = sprintf('nástup je evidovaný až od %s', $startDate);
+            }
+            if ((int) $row['has_term'] === 0) {
+                $reasons[] = 'za období nemá účinné podmínky (zkontrolujte účinnost verze podmínek)';
+            }
+            if ($reasons === []) {
+                $reasons[] = 'vztah do období nepatří';
+            }
+            $alternatives = self::validEmploymentsOfPerson($periodEmployments, $employeeId, $employmentId, $periodStart);
+            $validations[] = new PayrollRunValidation(
+                'blocker',
+                'inputs_on_unstarted_employment',
+                'employment',
+                $employmentId,
+                sprintf(
+                    '%s: pracovní vztah má za období %d nezrušených mzdových vstupů (%s Kč), '
+                    . 'ale do mzdového běhu nevstoupí, protože %s. Bez opravy se vstupy nevyplatí. %s',
+                    (string) $row['full_name'],
+                    (int) $row['input_count'],
+                    number_format(((int) $row['input_amount_minor']) / 100, 2, ',', ' '),
+                    implode(', ', $reasons),
+                    $alternatives === null
+                        ? 'Patří-li vstupy k tomuto vztahu, potvrďte na kartě vztahu nástup (Potvrdit nástup), '
+                            . 'případně opravte účinnost podmínek, a pak obnovte podklady běhu. Jsou-li zadané '
+                            . 'omylem, v měsíčních vstupech je zrušte.'
+                        : sprintf(
+                            'Osoba má v období platný vztah %s: patří-li vstupy k němu, v měsíčních vstupech '
+                                . 'je přesuňte (Upravit, Pracovní vztah), jsou-li zadané omylem, zrušte je. '
+                                . 'Patří-li k tomuto vztahu, potvrďte na kartě nástup nebo opravte účinnost '
+                                . 'podmínek. Pak obnovte podklady běhu.',
+                            $alternatives,
+                        ),
+                ),
+                $alternatives === null
+                    ? "/payroll/people?person={$employeeId}&employment={$employmentId}&panel=employment_terms"
+                    : '/payroll/components?tab=inputs&period=' . substr($periodStart, 0, 7) . '&employment=' . $employmentId,
+            );
+        }
+
+        return $validations;
+    }
+
+    /**
+     * Vztahy ukončené před začátkem období, které do běhu vstoupily jen kvůli
+     * mzdovému vstupu za období.
+     *
+     * Pravidlo členství ({@see PayrollEmploymentLifecycleSql::payrollPeriodMembershipSql()})
+     * pouští skončený vztah do běhu, má-li za období nezrušený vstup, protože
+     * doplatek po skončení je legitimní. Bez potvrzeného odloženého příjmu je
+     * to ale skoro vždy vstup zadaný na špatný vztah (dohoda z ledna s vstupem
+     * za únor) a výpočet pak skončí obecnou výzvou k potvrzení odloženého
+     * příjmu, ze které nebylo poznat, o který vstup jde. Kontrola proto jmenuje
+     * měsíc vstupu, den konce a vede rovnou na vstupy vztahu.
+     *
+     * @param list<array<string,mixed>> $employments řádky {@see self::employmentRows()}
+     * @param array<int,mixed> $deferredIncomes potvrzené odložené příjmy období po vztazích
+     * @return list<PayrollRunValidation>
+     */
+    public static function inputsAfterEmploymentEndValidations(
+        array $employments,
+        array $deferredIncomes,
+        string $periodStart,
+    ): array {
+        $validations = [];
+        $period = substr($periodStart, 0, 7);
+        foreach ($employments as $row) {
+            $employmentId = (int) $row['employment_id'];
+            $endDate = $row['end_date'] ?? null;
+            if (!is_string($endDate) || $endDate >= $periodStart || isset($deferredIncomes[$employmentId])) {
+                continue;
+            }
+            $end = new \DateTimeImmutable($endDate);
+            $alternatives = self::validEmploymentsOfPerson(
+                $employments,
+                (int) ($row['employee_id'] ?? 0),
+                $employmentId,
+                $periodStart,
+            );
+            $validations[] = new PayrollRunValidation(
+                'blocker',
+                'input_after_employment_end',
+                'employment',
+                $employmentId,
+                sprintf(
+                    '%s: vstup za %s je na vztahu ukončeném %s. Jde-li o doplatek po skončení, '
+                    . 'potvrďte na kartě vztahu odložený příjem; jinak vstup zrušte nebo ho %s.',
+                    (string) ($row['full_name'] ?? ''),
+                    substr($periodStart, 5, 2) . '/' . substr($periodStart, 0, 4),
+                    $end->format('j. n. Y'),
+                    $alternatives === null
+                        ? 'zadejte na trvající vztah'
+                        : 'přesuňte (Upravit, Pracovní vztah) na platný vztah téže osoby ' . $alternatives,
+                ),
+                '/payroll/components?tab=inputs&period=' . $period . '&employment=' . $employmentId,
+            );
+        }
+
+        return $validations;
+    }
+
+    /**
+     * Vztahy téže osoby, které v období platí: kam se dá přesunout vstup
+     * zadaný na vztah mimo jeho trvání.
+     *
+     * @param list<array<string,mixed>> $employments řádky {@see self::employmentRows()}
+     */
+    public static function validEmploymentsOfPerson(
+        array $employments,
+        int $employeeId,
+        int $excludeEmploymentId,
+        string $periodStart,
+    ): ?string {
+        if ($employeeId <= 0) {
+            return null;
+        }
+        $labels = [];
+        foreach ($employments as $row) {
+            $endDate = $row['end_date'] ?? null;
+            if ((int) ($row['employee_id'] ?? 0) !== $employeeId
+                || (int) ($row['employment_id'] ?? 0) === $excludeEmploymentId
+                || (is_string($endDate) && $endDate !== '' && $endDate < $periodStart)
+            ) {
+                continue;
+            }
+            $start = $row['actual_start_date'] ?? $row['start_date'] ?? null;
+            $relation = self::RELATION_LABELS[(string) ($row['relation_type'] ?? '')] ?? (string) ($row['relation_type'] ?? '');
+            $code = trim((string) ($row['employment_code'] ?? ''));
+            $labels[] = trim($relation . ($code === '' ? '' : ' ' . $code))
+                . (is_string($start) && $start !== '' ? ' od ' . (new \DateTimeImmutable($start))->format('j. n. Y') : '')
+                . (is_string($endDate) && $endDate !== '' ? ' do ' . (new \DateTimeImmutable($endDate))->format('j. n. Y') : '');
+        }
+
+        return $labels === [] ? null : implode(', ', $labels);
+    }
+
     /** @return list<array<string,mixed>> */
-    private function employmentRows(
+    public function employmentRows(
         int $supplierId,
         string $periodStart,
         string $periodEnd,
@@ -1283,12 +2073,14 @@ final class PayrollRunSnapshotBuilder
                     employment.office_id,
                     employment.code AS employment_code,
                     employment.relation_type,
+                    employment.statutory_partner,
                     employment.effective_status AS employment_status,
                     employment.start_date,
                     employment.actual_start_date,
                     employment.end_date,
-                    COALESCE(term.monthly_gross_minor, employment.monthly_gross_minor)
-                      AS monthly_gross_minor,
+                    CASE WHEN term.remuneration_type = "hourly" THEN NULL
+                         ELSE COALESCE(term.monthly_gross_minor, employment.monthly_gross_minor)
+                    END AS monthly_gross_minor,
                     employee.full_name,
                     employee.birth_date AS employee_birth_date,
                     (SELECT regzel_profile.protected_labor_market
@@ -1297,6 +2089,7 @@ final class PayrollRunSnapshotBuilder
                       AS employer_protected_labor_market,
                     employee.is_active AS employee_active,
                     profile.profile_status,
+                    term.remuneration_type, term.hourly_rate_minor, term.remuneration_basis_kind, term.remuneration_basis,
                     term.id AS term_id,
                     term.row_version AS term_row_version,
                     term.effective_from,
@@ -1478,40 +2271,7 @@ final class PayrollRunSnapshotBuilder
           LEFT JOIN payroll_employment_terminations termination
                  ON termination.supplier_id = employment.supplier_id
                 AND termination.employment_id = employment.id
-              WHERE employment.effective_status IS NOT NULL
-                AND employment.effective_status NOT IN ("archived", "no_show")
-                AND COALESCE(
-                    employment.actual_start_date,
-                    employment.start_date,
-                    "1900-01-01"
-                ) <= ?
-                AND (
-                    employment.end_date IS NULL
-                    OR employment.end_date >= ?
-                    OR EXISTS (
-                        SELECT 1
-                          FROM payroll_inputs post_termination_input
-                         WHERE post_termination_input.supplier_id =
-                               employment.supplier_id
-                           AND post_termination_input.employment_id =
-                               employment.id
-                           AND post_termination_input.period_start = ?
-                           AND post_termination_input.status <> "cancelled"
-                    )
-                    OR EXISTS (
-                        SELECT 1
-                          FROM payroll_employment_deferred_incomes deferred_without_income
-                         WHERE deferred_without_income.supplier_id =
-                               employment.supplier_id
-                           AND deferred_without_income.employment_id =
-                               employment.id
-                           AND deferred_without_income.period_start = ?
-                           AND deferred_without_income.deferred_type IN (' . implode(', ', array_map(
-                               static fn (string $type): string => '"' . $type . '"',
-                               \MyInvoice\Repository\Payroll\PayrollDeferredIncomeRepository::TYPES_WITHOUT_INCOME,
-                           )) . ')
-                    )
-                )
+              WHERE ' . PayrollEmploymentLifecycleSql::payrollPeriodMembershipSql() . '
                 AND ' . $officeSql . '
               ORDER BY employment.employee_id, employment.id'
         );
@@ -1531,10 +2291,7 @@ final class PayrollRunSnapshotBuilder
             $periodStart,
             $periodStart,
             $periodStart,
-            $periodEnd,
-            $periodStart,
-            $periodStart,
-            $periodStart,
+            ...PayrollEmploymentLifecycleSql::payrollPeriodMembershipParams($periodStart, $periodEnd),
             ...($officeId === null ? [] : [$officeId]),
         ]);
         return array_values($stmt->fetchAll(PDO::FETCH_ASSOC));
@@ -1590,10 +2347,9 @@ final class PayrollRunSnapshotBuilder
                     EXISTS (
                       SELECT 1 FROM payroll_obligations obligation
                        WHERE obligation.supplier_id = employment.supplier_id
-                         AND obligation.source_event_type
-                               = \'payroll_employment_registration\'
+                         AND obligation.source_event_type = ?
                          AND obligation.source_event_reference
-                               = CONCAT(\'payroll_employment:\', employment.id)
+                               = CONCAT(?, employment.id)
                          AND obligation.status <> \'cancelled\'
                     ) AS social_submitted,
                     EXISTS (
@@ -1613,7 +2369,12 @@ final class PayrollRunSnapshotBuilder
                 AND employment.is_legacy_projection = 0
                 AND employment.id IN (' . $placeholders . ')'
         );
-        $statement->execute([$supplierId, ...$employmentIds]);
+        $statement->execute([
+            PayrollRegistrationSubmissionService::SOURCE_EVENT_TYPE,
+            PayrollRegistrationSubmissionService::EMPLOYMENT_REFERENCE_PREFIX,
+            $supplierId,
+            ...$employmentIds,
+        ]);
         $gaps = [];
         foreach ($statement->fetchAll(PDO::FETCH_ASSOC) as $row) {
             $gaps[(int) $row['employment_id']] = [
@@ -1632,14 +2393,12 @@ final class PayrollRunSnapshotBuilder
      * ne blokátor. Přihláška se mohla podat mimo aplikaci a mzda se musí dát
      * spočítat i tak; jen ne mlčky.
      *
-     * Koho se to týká, rozhoduje ÚČAST NA POJIŠTĚNÍ, ne druh vztahu sám:
-     * `included` se hlásí vždy, `excluded` a `foreign` (cizinec pod cizí
-     * legislativou s A1) nikdy. `automatic` znamená „rozhodne výpočet podle
-     * prahu příjmu" — u DPP se proto mlčí, protože DPP pod rozhodným
-     * příjmem se u ČSSZ nehlásí a hlásit ji „pro jistotu" by bylo varování
-     * u každé brigády; DPČ a další vztahy malého rozsahu se sjednaným příjmem
-     * nad rozhodným příjmem výpočet pojistí vždy, takže se hlásí. Pravidlo drží
-     * {@see PayrollExpectedParticipation}. Zdravotní pojištění má vlastní
+     * Registraci u ČSSZ (REGZEC) dluží od 2026 každá DPP a DPČ bez ohledu
+     * na účast na pojištění (evidence zaměstnanců podle zákona č. 323/2025
+     * Sb.). U ostatních vztahů rozhoduje ÚČAST NA POJIŠTĚNÍ: `included` se
+     * hlásí vždy, `excluded` a `foreign` nikdy, `automatic` podle druhu vztahu
+     * a sjednaného příjmu. Pravidlo drží
+     * {@see PayrollExpectedParticipation::registrationExpected()}. Zdravotní pojištění má vlastní
      * pravidlo účasti ({@see PayrollExpectedHealthParticipation}) — totéž, ze
      * kterého vzniká oznámení pojišťovně: zaměstnání malého rozsahu a jednatel
      * s odměnou pod rozhodným příjmem jsou zaměstnanci pro ZP, i když pro ČSSZ ne.
@@ -1672,7 +2431,7 @@ final class PayrollRunSnapshotBuilder
         }
         $relationType = (string) $row['relation_type'];
         $validations = [];
-        if ($gap['social'] && $this->participatesInLevy(
+        if ($gap['social'] && $this->owesSocialRegistration(
             $row['social_insurance_participation'],
             $relationType,
             $row,
@@ -1684,15 +2443,21 @@ final class PayrollRunSnapshotBuilder
                 'employment',
                 $employmentId,
                 sprintf(
-                    '%s: k pracovnímu vztahu chybí přihláška u ČSSZ '
-                    . '(nemocenské pojištění). Podejte ji v Mzdy → Podání → '
+                    '%s: k pracovnímu vztahu chybí registrace zaměstnance '
+                    . 'u ČSSZ (JMHZ). Registruje se i každá DPP a DPČ bez '
+                    . 'účasti na pojištění. Podejte ji v Mzdy → Podání → '
                     . 'Registrace zaměstnance, nebo — byla-li podána mimo '
                     . 'aplikaci — odškrtněte v checklistu vztahu položku '
                     . '„Registrace ČSSZ / JMHZ".',
                     (string) $row['full_name'],
                 ),
                 "/payroll/people?person={$employeeId}&employment={$employmentId}&panel=employment_checklist&field=social_jmhz_registration",
-                true,
+                $this->participatesInSocialInsurance(
+                    $row['social_insurance_participation'],
+                    $relationType,
+                    $row,
+                    $periodEnd,
+                ),
             );
         }
         if ($gap['health'] && $this->participatesInHealthInsurance(
@@ -1746,11 +2511,32 @@ final class PayrollRunSnapshotBuilder
     }
 
     /**
-     * Účast na sociálním pojištění: {@see PayrollExpectedParticipation}.
+     * Registrace u ČSSZ: {@see PayrollExpectedParticipation::registrationExpected()}.
      *
      * @param array<string,mixed> $row
      */
-    private function participatesInLevy(
+    private function owesSocialRegistration(
+        mixed $participation,
+        string $relationType,
+        array $row,
+        string $periodEnd,
+    ): bool {
+        return PayrollExpectedParticipation::registrationExpected(
+            is_string($participation) ? $participation : null,
+            $relationType,
+            ($row['monthly_gross_minor'] ?? null) === null ? null : (int) $row['monthly_gross_minor'],
+            PayrollExpectedParticipation::smallScaleThreshold($this->rulesets, $periodEnd),
+            $periodEnd,
+        );
+    }
+
+    /**
+     * Dohoda bez účasti na pojištění registraci dluží také, ale výpočet ani
+     * pojistné na ní nezávisí: varování ji připomene, schválení nezastaví.
+     *
+     * @param array<string,mixed> $row
+     */
+    private function participatesInSocialInsurance(
         mixed $participation,
         string $relationType,
         array $row,
@@ -1762,6 +2548,39 @@ final class PayrollRunSnapshotBuilder
             ($row['monthly_gross_minor'] ?? null) === null ? null : (int) $row['monthly_gross_minor'],
             PayrollExpectedParticipation::smallScaleThreshold($this->rulesets, $periodEnd),
         );
+    }
+
+    /**
+     * Blokace hodin a doložení příplatků se opravují v panelu hodin Rychlého
+     * měsíčního vstupu, ne v podmínkách vztahu.
+     */
+    public static function hourlyAverageMinimumLink(string $periodStart, int $employmentId): string
+    {
+        return PayrollHourlyAverageEarningLink::path(
+            $employmentId,
+            (int) substr($periodStart, 0, 4),
+            intdiv((int) substr($periodStart, 5, 2) - 1, 3) + 1,
+            $periodStart,
+        );
+    }
+
+    /** @param array<string,mixed> $context */
+    private static function hourlyBlockerLink(string $code, string $periodStart, int $employmentId, string $fallback, array $context = []): string
+    {
+        // Chybějící průměrný výdělek se zakládá v Absence a dovolená → Průměrný
+        // výdělek; odkaz předvyplní vztah i čtvrtletí, za které průměr chybí.
+        if ($code === 'hourly_average_earning_missing') {
+            return PayrollHourlyAverageEarningLink::path(
+                $employmentId,
+                (int) ($context['applicable_year'] ?? substr($periodStart, 0, 4)),
+                (int) ($context['applicable_quarter'] ?? (intdiv((int) substr($periodStart, 5, 2) - 1, 3) + 1)),
+                $periodStart,
+            );
+        }
+        return str_starts_with($code, 'hourly_time_')
+            || in_array($code, ['hourly_premium_evidence_missing', 'hourly_premium_partition_missing'], true)
+            ? '/payroll/quick-inputs?period=' . substr($periodStart, 0, 7) . '&employment=' . $employmentId . '&hours=1'
+            : $fallback;
     }
 
     /** @param array<string,mixed> $data */
@@ -1874,7 +2693,7 @@ final class PayrollRunSnapshotBuilder
                 'employment',
                 $employmentId,
                 'Sleva na pojistném za kratší úvazek je zadaná, ale za období není doložený přijatý záměr (OZUSPOJ). Podle § 7a odst. 5 se bez něj sleva neuplatní.',
-                '/payroll/submissions',
+                '/payroll/submissions/discount_intents?period=' . substr($periodStart, 0, 7),
                 true,
             );
         }
@@ -1898,7 +2717,7 @@ final class PayrollRunSnapshotBuilder
                     $missing
                         ? 'U záměru uplatňovat slevu na pojistném není zapsané písemné poučení zaměstnance. Zaměstnavatel ho musí informovat před prvním uplatněním slevy (§ 23d odst. 2 zákona č. 589/1992 Sb.), jinak se dopouští přestupku (§ 25d odst. 1 písm. j).'
                         : 'Zaměstnanec byl o uplatňování slevy na pojistném poučen až po prvním měsíci jejího uplatnění. Zaměstnavatel ho musí informovat písemně před prvním uplatněním slevy (§ 23d odst. 2 zákona č. 589/1992 Sb.).',
-                    '/payroll/submissions',
+                    '/payroll/submissions/discount_intents?period=' . substr($periodStart, 0, 7),
                     false,
                 );
             }
@@ -2014,6 +2833,83 @@ final class PayrollRunSnapshotBuilder
     }
 
     /**
+     * Běžné výživné s vyčerpanou evidovanou částkou zastaví schválení běhu.
+     *
+     * Běžné výživné je opětující se dávka: sráží se každý měsíc, dokud soud
+     * výkon rozhodnutí nezastaví (§ 280 odst. 3 a § 290 odst. 2 o. s. ř.).
+     * Evidence pohledávek ale vede u každé pohledávky jen jednu částku
+     * a umořuje ji sraženými částkami, takže po jejím vyčerpání se na běžné
+     * výživné v dalších měsících nesrazilo nic a nikdo se to nedozvěděl.
+     * Plátce mzdy přitom oprávněnému za neprovedené srážky ručí (§ 292
+     * o. s. ř.).
+     *
+         * Zda výživné trvá, nebo srážky skončily, z evidence poznat nejde, proto
+     * se nic neodhaduje: varování s POVINNÝM potvrzením, stejně jako
+     * u doručeného a nepřevedeného případu. Varování říká, co udělat: založit
+     * na další měsíční dávku nový případ (do aktivního případu pohledávku
+     * přidat nejde, čerpanou pohledávku nejde zvýšit a částka za víc měsíců
+     * naráz by se srazila celá hned) a vyčerpaný případ označit za uhrazený,
+     * čímž z evidence vypadne a varování skončí. Má-li příkaz vedle vyčerpané
+     * dávky i dávku se zůstatkem, varování nevzniká. Za oddlužení se exekuce
+     * neprovádí a souběh s přednostní pohledávkou řeší výpočet sám.
+     * Do `$data` nevstupuje, takže `input_hash` se nemění.
+     *
+     * @param array<int,array<string,mixed>> $evidenceByEmployee
+     * @param list<int> $employeeIds
+     * @return list<PayrollRunValidation>
+     */
+    private static function exhaustedCurrentMaintenanceValidations(
+        array $evidenceByEmployee,
+        array $employeeIds,
+    ): array {
+        $validations = [];
+        foreach ($employeeIds as $employeeId) {
+            $evidence = $evidenceByEmployee[$employeeId] ?? null;
+            if (!is_array($evidence)
+                || (($evidence['insolvency']['mode'] ?? 'none') !== 'none')
+            ) {
+                continue;
+            }
+            // Po příkazech: další dávka přidaná k témuž příkazu varování
+            // ukončí, vyčerpaná lednová dávka vedle ní už nevadí.
+            $liveByOrder = [];
+            foreach (is_array($evidence['claims'] ?? null) ? $evidence['claims'] : [] as $claim) {
+                if (!is_array($claim)
+                    || ($claim['category'] ?? null) !== 'current_maintenance'
+                    || ($claim['legal_basis'] ?? null) !== 'statutory'
+                    || ($claim['active'] ?? false) !== true
+                ) {
+                    continue;
+                }
+                $order = is_string($claim['enforcement_order_id'] ?? null) && trim($claim['enforcement_order_id']) !== ''
+                    ? 'order:' . $claim['enforcement_order_id']
+                    : 'claim:' . (string) ($claim['id'] ?? '');
+                $liveByOrder[$order] = ($liveByOrder[$order] ?? false)
+                    || (int) ($claim['outstanding_minor_units'] ?? 0) > 0;
+            }
+            if (in_array(false, $liveByOrder, true)) {
+                $validations[] = new PayrollRunValidation(
+                    'warning',
+                    'enforcement_current_maintenance_exhausted',
+                    'employee',
+                    $employeeId,
+                    'U běžného výživného je evidovaná částka vyčerpaná, v tomto běhu se na ně nesrazí'
+                    . ' nic. Běžné výživné se sráží každý měsíc, dokud soud výkon rozhodnutí nezastaví'
+                    . ' (§ 280 odst. 3 a § 290 odst. 2 o. s. ř.). Trvá-li, založte na další měsíční'
+                    . ' dávku nový případ s pohledávkou „běžné výživné“ a aktivujte ho; do aktivního'
+                    . ' případu pohledávku přidat ani zvýšit nejde. Částku za víc měsíců naráz'
+                    . ' nezapisujte, srazila by se celá hned. Vyčerpaný případ po úhradě označte za'
+                    . ' uhrazený.',
+                    "/payroll/enforcement?person={$employeeId}",
+                    true,
+                );
+            }
+        }
+
+        return $validations;
+    }
+
+    /**
      * Exekuční evidence celé zmrazené množiny osob v kanonickém tvaru.
      *
      * @param list<int> $employeeIds
@@ -2120,7 +3016,8 @@ final class PayrollRunSnapshotBuilder
      * @return array{
      *   name:string,
      *   identification_number:string,
-     *   accounting_accounts:array<string,string>
+     *   accounting_accounts:array<string,string>,
+     *   posting_granularity?:'employee'
      * }
      */
     private function employerSnapshot(int $supplierId): array
@@ -2138,8 +3035,11 @@ final class PayrollRunSnapshotBuilder
             || !is_string($row['ic'] ?? null)
             || trim($row['ic']) === ''
         ) {
-            throw new \DomainException(
-                'Firma nemá úplnou identitu zaměstnavatele pro výplatní pásky.',
+            throw new PayrollRunSnapshotFixableException(
+                'employer_identity_incomplete',
+                'Firma nemá úplnou identitu zaměstnavatele pro výplatní pásky: chybí '
+                    . 'název firmy nebo IČO. Doplňte je v Nastavení firmy a kontrolu spusťte znovu.',
+                '/admin/settings',
             );
         }
         $settings = ($this->employerSettings
@@ -2147,8 +3047,11 @@ final class PayrollRunSnapshotBuilder
             ->get($supplierId);
         $accounts = $settings['accounts'] ?? null;
         if (!is_array($accounts) || array_is_list($accounts)) {
-            throw new \DomainException(
-                'Firma nemá úplné účetní předkontace pro výplatní pásky.',
+            throw new PayrollRunSnapshotFixableException(
+                'employer_accounts_incomplete',
+                'Firma nemá úplné účetní předkontace pro výplatní pásky. Otevřete Mzdy → '
+                    . 'Nastavení mezd → Automatické účtování, předkontace doplňte a uložte.',
+                '/payroll/settings?tab=accounting',
             );
         }
         $accountSnapshot = [];
@@ -2165,19 +3068,33 @@ final class PayrollRunSnapshotBuilder
                 || !is_string($account)
                 || preg_match('/^[0-9]{3}[.A-Z0-9]{0,13}$/D', $account) !== 1
             ) {
-                throw new \DomainException(
-                    'Firma nemá platné účetní předkontace pro výplatní pásky.',
+                throw new PayrollRunSnapshotFixableException(
+                    'employer_accounts_invalid',
+                    sprintf(
+                        'Firma nemá platné účetní předkontace pro výplatní pásky: %s není '
+                            . 'platné číslo účtu. Otevřete Mzdy → Nastavení mezd → Automatické '
+                            . 'účtování a předkontaci opravte.',
+                        is_string($account) && $account !== '' ? '„' . $account . '“' : 'jedna z nich',
+                    ),
+                    '/payroll/settings?tab=accounting',
                 );
             }
             $accountSnapshot[$key] = $account;
         }
         ksort($accountSnapshot, SORT_STRING);
 
-        return [
+        $employer = [
             'name' => trim($row['name']),
             'identification_number' => trim($row['ic']),
             'accounting_accounts' => $accountSnapshot,
         ];
+        // Zaúčtování po zaměstnancích se zmrazí jen tam, kde ho firma zvolila;
+        // ostatním zůstává snímek i otisk vstupu beze změny.
+        if (($settings['posting_granularity'] ?? 'summary') === 'employee') {
+            $employer['posting_granularity'] = 'employee';
+        }
+
+        return $employer;
     }
 
     /**
@@ -2291,6 +3208,9 @@ final class PayrollRunSnapshotBuilder
                         PayrollJmhzWorkMonthSummaryBuilder::unpaidHolidayFields(),
                     );
                 }
+                if (in_array($derivationVersion, PayrollJmhzWorkMonthSummaryBuilder::VERSIONS_WITH_HOLIDAY_TIME_OFF, true)) {
+                    $conditionalFields = array_merge($conditionalFields, PayrollJmhzWorkMonthSummaryBuilder::holidayTimeOffFields());
+                }
                 foreach ($conditionalFields as $field) {
                     $values[$field] = $row[$field] === null ? null : (int) $row[$field];
                 }
@@ -2364,7 +3284,7 @@ final class PayrollRunSnapshotBuilder
      * @param list<array<string,mixed>> $rows
      * @return list<array<string,mixed>>
      */
-    private function inputs(array $rows): array
+    private function inputs(array $rows, array $hourlyClaims = []): array
     {
         $result = [];
         foreach ($rows as $row) {
@@ -2387,6 +3307,7 @@ final class PayrollRunSnapshotBuilder
                 'component_snapshot_hash' =>
                     strtolower((string) $row['component_snapshot_hash']),
                 'component' => $component,
+                ...(!isset($hourlyClaims[(int) $row['id']]) ? [] : ['hourly_calculation' => $hourlyClaims[(int) $row['id']]]),
             ];
             // Rozpad zákonného koše osvobození (§ 6 odst. 9 ZDP) zmrazený při
             // schválení vstupu. Revize spočtené před migrací 1480 klíče nemají —
@@ -2435,7 +3356,7 @@ final class PayrollRunSnapshotBuilder
             // Podíl a vazba na firemní dimenzi vstupují jen tam, kde jsou
             // nastavené. Vztah se 100 % a bez vazby tak má otisk shodný
             // s dosavadním snapshotem a zaúčtuje se bajtově stejně.
-            $shareBp = self::shareBasisPoints($row['share_percent'] ?? null);
+            $shareBp = self::shareBasisPoints($row['share_percent'] ?? null, $employmentId, $dimension['code']);
             if ($shareBp !== 10_000) {
                 $dimension['share_bp'] = $shareBp;
             }
@@ -2455,34 +3376,61 @@ final class PayrollRunSnapshotBuilder
         // schválení běhu. Zastaví se tady, kdy se dá ještě opravit.
         foreach ($shares as $type => $share) {
             if ($share['total'] !== 10_000) {
-                throw new \DomainException(sprintf(
-                    'Procentní rozpad mzdových dimenzí typu %s u pracovního vztahu %d dává k začátku '
-                    . 'období %s %% místo 100 %%. Upravte rozpad na kartě pracovního vztahu.',
-                    $type,
-                    $employmentId,
-                    number_format($share['total'] / 100, 2, ',', ' '),
-                ));
+                throw new PayrollRunSnapshotFixableException(
+                    'employment_dimension_split_invalid',
+                    sprintf(
+                        'Procentní rozpad mzdových dimenzí typu %s u pracovního vztahu %d dává k začátku '
+                        . 'období %s %% místo 100 %%. Upravte rozpad na kartě pracovního vztahu.',
+                        $type,
+                        $employmentId,
+                        number_format($share['total'] / 100, 2, ',', ' '),
+                    ),
+                    self::dimensionSplitPath($employmentId),
+                );
             }
         }
         return $result;
     }
 
-    /** Podíl v setinách procenta (10 000 = 100 %); chybějící sloupec = 100 %. */
-    private static function shareBasisPoints(mixed $share): int
+    /**
+     * Podíl v setinách procenta (10 000 = 100 %); chybějící sloupec = 100 %.
+     *
+     * Neplatný podíl opraví účetní v rozpadu na kartě vztahu, proto je to
+     * opravitelný nález s odkazem, ne interní chyba (dřív končil jako 500).
+     */
+    private static function shareBasisPoints(mixed $share, int $employmentId = 0, string $dimensionCode = ''): int
     {
         if ($share === null) {
             return 10_000;
         }
         $text = is_string($share) ? $share : (string) $share;
-        if (preg_match('/^(\d{1,3})(?:\.(\d{1,2}))?$/', $text, $match) !== 1) {
-            throw new \UnexpectedValueException("Podíl dimenze {$text} není platné procento.");
-        }
-        $bp = (int) $match[1] * 100 + (int) str_pad($match[2] ?? '0', 2, '0');
-        if ($bp <= 0 || $bp > 10_000) {
-            throw new \UnexpectedValueException("Podíl dimenze {$text} je mimo rozsah 0–100 %.");
+        $bp = preg_match('/^(\d{1,3})(?:\.(\d{1,2}))?$/', $text, $match) === 1
+            ? (int) $match[1] * 100 + (int) str_pad($match[2] ?? '0', 2, '0')
+            : null;
+        if ($bp === null || $bp <= 0 || $bp > 10_000) {
+            throw new PayrollRunSnapshotFixableException(
+                'employment_dimension_share_invalid',
+                sprintf(
+                    'Podíl %s %% u mzdové dimenze %s pracovního vztahu %d %s. Na kartě pracovního '
+                        . 'vztahu v rozpadu dimenzí zadejte podíl větší než 0 a nejvýš 100 %% '
+                        . 's nejvýš dvěma desetinnými místy.',
+                    $text,
+                    $dimensionCode !== '' ? $dimensionCode : '(bez kódu)',
+                    $employmentId,
+                    $bp === null ? 'není platné procento' : 'je mimo rozsah 0–100 %',
+                ),
+                self::dimensionSplitPath($employmentId),
+            );
         }
 
         return $bp;
+    }
+
+    private static function dimensionSplitPath(int $employmentId): string
+    {
+        return $employmentId > 0
+            ? '/payroll/people?' . http_build_query(['employment' => $employmentId, 'panel' => 'employment_terms'])
+            : '/payroll/people';
     }
 
     /**

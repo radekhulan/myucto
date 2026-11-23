@@ -3,11 +3,13 @@ import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { apiErrorCode, apiErrorMessage, externalJmhzSubmissionTarget } from '@/api/errors'
 import { dataBoxApi, type GatewayStart } from '@/api/dataBox'
-import { PAYROLL_JMHZ_LATE_DISCOUNT_CONFIRMATION } from '@/api/payrollTransportCodes'
+import { PAYROLL_JMHZ_LATE_DISCOUNT_CONFIRMATION, PAYROLL_JMHZ_REGISTRATION_SETTLING } from '@/api/payrollTransportCodes'
 import {
   payrollApi,
+  type PayrollJmhzDeferralContext,
   type PayrollJmhzFreezeBlocker,
   type PayrollJmhzIsdsEnqueueResult,
+  type PayrollJmhzPreparationGate,
   type PayrollJmhzPvpojPreview,
   type PayrollJmhzTransportPoll,
   type PayrollRegzelEnvironment,
@@ -17,7 +19,8 @@ import { btnFilled, btnOutline, btnOutlineSm, ICONS } from '@/components/ui/butt
 import IsdsSendMethods from '@/components/submission/IsdsSendMethods.vue'
 import PayrollLateDiscountConfirm from '@/components/payroll/PayrollLateDiscountConfirm.vue'
 import JmhzFreezeBlockerList from './JmhzFreezeBlockerList.vue'
-import { freezeBlockersFromError } from './jmhzFreezeBlockers'
+import JmhzRegistrationSettlingConfirm from './JmhzRegistrationSettlingConfirm.vue'
+import { deferralContextFromError, freezeBlockersFromError } from './jmhzFreezeBlockers'
 import { useAuthStore } from '@/stores/auth'
 import { navigateFullPage } from '@/workspace/fullPageNavigation'
 
@@ -25,6 +28,13 @@ const props = defineProps<{
   environment: PayrollRegzelEnvironment
   previews: PayrollJmhzPvpojPreview[]
   obligations: PayrollSubmissionOverviewItem[]
+  /**
+   * Proč hlášení za období teď nejde zmrazit ani odeslat (období neskončilo,
+   * ročník hlášení aplikace ještě neumí sestavit). Platí i bez evidované
+   * povinnosti: dřív se tlačítka zhasínala jen podle ní, takže u období, kde
+   * povinnost ještě nevznikla, zůstala aktivní a klik skončil chybou.
+   */
+  preparationGate?: PayrollJmhzPreparationGate | null
 }>()
 
 const emit = defineEmits<{ refresh: [] }>()
@@ -46,6 +56,10 @@ interface DispatchState {
   errorTarget?: ReturnType<typeof externalJmhzSubmissionTarget>
   /** Nálezy blokace zmrazení hlášení se jmény a odkazy na opravu. */
   blockers?: PayrollJmhzFreezeBlocker[]
+  /** Odkud lze dotčené osoby odložit jedním rozhodnutím. */
+  deferral?: PayrollJmhzDeferralContext | null
+  /** Do 48 h po přijaté změně údajů: odeslat i tak, nebo odložit dotčené. */
+  settling?: { message: string; channel: 'isds' | 'vrep' } | null
   isds: PayrollJmhzIsdsEnqueueResult | null
   vrep: PayrollJmhzTransportPoll | null
   gateway: GatewayStart | null
@@ -204,6 +218,11 @@ function obligation(preview: PayrollJmhzPvpojPreview): PayrollSubmissionOverview
 
 function unavailableReason(preview: PayrollJmhzPvpojPreview): string | null {
   const item = obligation(preview)
+  // Už zmrazené podání se odeslat smí; závora se týká jen hlášení, které by
+  // se teprve mrazilo.
+  if (props.preparationGate && item?.latest_submission?.status !== 'ready') {
+    return props.preparationGate.message
+  }
   if (!item) return null
   if (props.environment === 'production' && item.deadline.phase === 'not_open') {
     return t(auth.submissionTestEnvironmentAllowed
@@ -224,6 +243,7 @@ function unavailableReason(preview: PayrollJmhzPvpojPreview): string | null {
 async function submissionId(
   preview: PayrollJmhzPvpojPreview,
   confirmLateDiscount: boolean,
+  confirmSettling: boolean,
 ): Promise<number> {
   const item = obligation(preview)
   if (item?.latest_submission?.status === 'ready') return item.latest_submission.id
@@ -239,6 +259,7 @@ async function submissionId(
     props.environment,
     preview.office.office_id,
     confirmLateDiscount,
+    confirmSettling,
   )
 
   return frozen.submission_id
@@ -252,6 +273,7 @@ async function dispatch(
   preview: PayrollJmhzPvpojPreview,
   channel: 'isds' | 'vrep',
   confirmLateDiscount = false,
+  confirmSettling = false,
 ) {
   if (!canWrite.value || unavailableReason(preview)) return
   const current = state(preview)
@@ -262,12 +284,14 @@ async function dispatch(
     error: '',
     errorTarget: null,
     blockers: [],
+    deferral: null,
+    settling: null,
     gateway: null,
     lateDiscount: null,
   })
 
   try {
-    const id = await submissionId(preview, confirmLateDiscount)
+    const id = await submissionId(preview, confirmLateDiscount, confirmSettling)
     if (channel === 'vrep') {
       const result = await payrollApi.sendJmhzTransport(
         id,
@@ -311,6 +335,18 @@ async function dispatch(
       })
       return
     }
+    if (apiErrorCode(exception) === PAYROLL_JMHZ_REGISTRATION_SETTLING) {
+      setState(preview, {
+        ...state(preview),
+        busy: null,
+        deferral: deferralContextFromError(exception),
+        settling: {
+          message: apiErrorMessage(exception, t('payroll.jmhz_gate.settling.title')),
+          channel,
+        },
+      })
+      return
+    }
     setState(preview, {
       ...state(preview),
       busy: null,
@@ -320,6 +356,7 @@ async function dispatch(
       ),
       errorTarget: externalJmhzSubmissionTarget(exception),
       blockers: freezeBlockersFromError(exception),
+      deferral: deferralContextFromError(exception),
     })
   }
 }
@@ -409,7 +446,9 @@ function continueGateway(preview: PayrollJmhzPvpojPreview) {
           :data-test="`jmhz-dispatch-confirm-${key(preview)}`"
         >
           <p class="text-sm font-medium text-warning-900">
-            {{ t('payroll.submissions.overview.jmhz_dispatch_confirm_title') }}
+            {{ t(state(preview).confirming === 'vrep'
+              ? 'payroll.submissions.overview.jmhz_dispatch_confirm_title'
+              : 'payroll.submissions.overview.jmhz_dispatch_confirm_title_isds') }}
           </p>
           <p class="mt-1 text-sm text-warning-800">
             {{ t(state(preview).confirming === 'vrep'
@@ -423,7 +462,9 @@ function continueGateway(preview: PayrollJmhzPvpojPreview) {
             }) }}
           </p>
           <p class="mt-1 text-xs text-warning-700">
-            {{ t('payroll.submissions.overview.jmhz_dispatch_confirm_irreversible') }}
+            {{ t(state(preview).confirming === 'vrep'
+              ? 'payroll.submissions.overview.jmhz_dispatch_confirm_irreversible'
+              : 'payroll.submissions.overview.jmhz_dispatch_confirm_isds_note') }}
           </p>
           <div class="mt-3 flex flex-wrap gap-2">
             <button
@@ -432,7 +473,9 @@ function continueGateway(preview: PayrollJmhzPvpojPreview) {
               :data-test="`jmhz-dispatch-confirm-yes-${key(preview)}`"
               @click="dispatch(preview, state(preview).confirming ?? 'vrep')"
             >
-              {{ t('payroll.submissions.overview.jmhz_dispatch_confirm_send') }}
+              {{ t(state(preview).confirming === 'vrep'
+                ? 'payroll.submissions.overview.jmhz_dispatch_confirm_send'
+                : 'payroll.submissions.overview.jmhz_dispatch_confirm_prepare') }}
             </button>
             <button
               type="button"
@@ -491,6 +534,17 @@ function continueGateway(preview: PayrollJmhzPvpojPreview) {
           @confirm="dispatch(preview, state(preview).lateDiscount!.channel, true)"
           @cancel="cancelLateDiscount(preview)"
         />
+        <JmhzRegistrationSettlingConfirm
+          v-if="state(preview).settling"
+          class="mt-3"
+          :message="state(preview).settling!.message"
+          :busy="state(preview).busy !== null"
+          :deferral="state(preview).deferral"
+          :can-write="canWrite"
+          :test-id="`jmhz-settling-${key(preview)}`"
+          @confirm="dispatch(preview, state(preview).settling!.channel, false, true)"
+          @cancel="setState(preview, { ...state(preview), settling: null })"
+        />
         <p
           v-if="state(preview).error"
           class="mt-3 rounded-lg border border-danger-500/30 bg-danger-50 p-3 text-sm text-danger-700"
@@ -510,6 +564,8 @@ function continueGateway(preview: PayrollJmhzPvpojPreview) {
           v-if="state(preview).blockers?.length"
           :blockers="state(preview).blockers!"
           :period="preview.period"
+          :deferral="state(preview).deferral"
+          :can-write="canWrite"
         />
 
         <div

@@ -7,7 +7,7 @@ import { bankConnectionsApi, bankSignatureStatuses, needsItemReview, trustedBank
 import BankSubmissionItemsReview from './BankSubmissionItemsReview.vue'
 import type { PaymentOrderListItem } from '@/api/paymentOrders'
 import { apiErrorCode, apiErrorMessage } from '@/api/errors'
-import { bankConnectionErrorMessage, bankSubmissionNote } from '@/utils/bankConnectionError'
+import { bankConnectionErrorMessage, bankProviderReason, bankSubmissionNote } from '@/utils/bankConnectionError'
 import { sameBankConnectionAccount } from '@/utils/bankConnectionAccount'
 import { formatDate, formatDateTime, formatMoney } from '@/composables/useFormat'
 import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
@@ -47,6 +47,7 @@ const reviewItems = computed(() => needsItemReview(submission.value))
 const loadItems = () => bankConnectionsApi.items(submission.value?.payment_order_id ?? 0)
 const interrupted = computed(() => submission.value?.status === 'creating')
 const note = computed(() => bankSubmissionNote(submission.value?.error_code, t, te))
+const bankReason = computed(() => bankProviderReason(submission.value?.provider_error, t, te))
 const disabledReason = computed(() => {
   if (!order.value) return t('bank_connection.payment_choose')
   if (order.value.currency !== 'CZK') return t('bank_connection.payment_czk_only')
@@ -167,12 +168,16 @@ async function refreshFromBank() {
     <div v-if="submission" class="rounded-md px-3 py-2 border text-sm space-y-1" :class="['accepted_awaiting_authorization', 'awaiting_signature', 'creating'].includes(submission.status) ? 'bg-warning-50 border-warning-500/40 text-warning-700' : 'bg-neutral-50 border-neutral-200 text-neutral-700'" role="status" data-test="submission-status">
       <p>{{ t(`bank_connection.payment_status_${submission.status}`) }}</p>
       <p v-if="note">{{ note }}</p>
-      <p v-if="submission.accepted_count != null">{{ t('bank_connection.payment_accepted_count', { count: submission.accepted_count }) }}</p>
+      <p v-if="bankReason" data-test="submission-bank-reason">{{ t('bank_connection.payment_bank_reason', { reason: bankReason }) }}</p>
+      <template v-if="submission.status === 'rejected' && submission.provider === 'csas'">
+        <p v-if="(submission.accepted_count ?? 0) > 0">{{ t('bank_connection.payment_unsigned_count', { count: submission.accepted_count }) }}</p>
+      </template>
+      <p v-else-if="submission.accepted_count != null">{{ t('bank_connection.payment_accepted_count', { count: submission.accepted_count }) }}</p>
       <p v-if="submission.rejected_count != null">{{ t('bank_connection.payment_rejected_count', { count: submission.rejected_count }) }}</p>
       <p v-if="submission.submitted_at">{{ formatDateTime(submission.submitted_at) }}</p>
       <p v-if="submission.provider_reference" class="break-all">{{ t('bank_connection.payment_reference', { reference: submission.provider_reference }) }}</p>
     </div>
-    <BankSubmissionItemsReview v-if="reviewItems && submission" :key="submission.id + submission.status" :load="loadItems" />
+    <BankSubmissionItemsReview v-if="reviewItems && submission" :key="submission.id + submission.status" :load="loadItems" :rejected="submission.status === 'rejected'" />
     <div class="flex flex-wrap gap-2">
       <button v-if="canSubmit && !submission" type="button" :class="btnFilled('primary')" class="whitespace-nowrap" :disabled="!!disabledReason || loading || submitting" @click="submit"><svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path :d="ICONS.send" /></svg>{{ submitting ? t('common.loading') : t('bank_connection.payment_submit') }}</button>
       <button v-if="canSubmit && awaitingSignature" type="button" :class="btnFilled('primary')" class="whitespace-nowrap" :disabled="loading || submitting" data-test="sign" @click="sign"><svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path :d="ICONS.edit" /></svg>{{ t('bank_connection.payment_sign') }}</button>

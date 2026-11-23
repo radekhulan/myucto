@@ -39,7 +39,7 @@ final class CsasAboBatchMapper
             $body = [
                 'paymentIdentification' => ['instructionIdentification' => $instruction],
                 'paymentTypeInformation' => ['instructionPriority' => 'NORM'],
-                'amount' => ['instructedAmount' => ['value' => $item['amount_minor'] / 100, 'currency' => 'CZK']],
+                'amount' => ['instructedAmount' => ['value' => BankPaymentAmount::fromMinor($item['amount_minor']), 'currency' => 'CZK']],
                 'requestedExecutionDate' => $batch['execution_date'],
                 'debtorAccount' => ['identification' => ['iban' => $batch['payer_iban']], 'currency' => 'CZK'],
                 'creditorAccount' => ['identification' => ['iban' => $item['creditor_iban']], 'currency' => 'CZK'],

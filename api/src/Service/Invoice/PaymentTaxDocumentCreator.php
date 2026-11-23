@@ -141,10 +141,11 @@ final class PaymentTaxDocumentCreator
      *
      * @param int $paymentId  invoice_payments.id — platba zálohové faktury
      * @param int $userId     created_by; 0 = systémová akce (bankovní párování)
+     * @param int|null $vatRateId sazba plnění zvolená uživatelem pro zálohu bez sazeb ({@see ProformaVatRates})
      * @return int id daňového dokladu
      * @throws \RuntimeException při porušení podmínek (zpráva pro UI)
      */
-    public function createForPayment(int $paymentId, int $userId = 0): int
+    public function createForPayment(int $paymentId, int $userId = 0, ?int $vatRateId = null): int
     {
         $pdo = $this->db->pdo();
 
@@ -180,6 +181,16 @@ final class PaymentTaxDocumentCreator
         if (($proforma['invoice_type'] ?? '') !== 'proforma') {
             throw new \RuntimeException('Daňový doklad k přijaté platbě lze vystavit jen k zálohové faktuře.');
         }
+        if (TakenOverPayment::isPriorYear($payment)) {
+            throw new PaymentTaxDocumentNotApplicableException(
+                'Úhrada z minulého roku převzatá z POHODY - daň z ní přiznala POHODA, daňový doklad k platbě se nevystavuje.'
+            );
+        }
+        if (TakenOverPayment::isTaxDeclaredByOrigin($payment, $pdo)) {
+            throw new PaymentTaxDocumentNotApplicableException(
+                'Úhrada převzatá z Money S3 je už zdaněná: kryje ji daňový doklad z Money, nebo leží v podaném či uzavřeném období. Nový daňový doklad se nevystavuje.'
+            );
+        }
         // Guard proti dvojímu zdanění: jakmile k proformě existuje VYSTAVENÝ
         // (nestornovaný) finální doklad, jeho odpočtové řádky (§ 37a) jsou zafixované
         // a dodatečný daňový doklad k platbě by stejnou úplatu zdanil podruhé.
@@ -213,6 +224,21 @@ final class PaymentTaxDocumentCreator
             throw new PaymentTaxDocumentNotApplicableException(
                 'Daňový doklad k přijaté platbě vystavuje jen plátce DPH — firma jím k datu přijetí platby nebyla.'
             );
+        }
+        // Záloha převzatá bez sazeb DPH (Money S3): rozpad podle sazeb položek by vyšel na 0 %
+        // a úplata by zůstala nezdaněná ({@see ProformaVatRates}). Sazbou plnění je jediná
+        // sazba DDKP zálohy (platba přes hranici roku), jinak sazba, kterou zvolil uživatel.
+        if (ProformaVatRates::ratesUnknown($pdo, $proforma, (string) $payment['paid_on'])) {
+            $rate = ProformaVatRates::singleRate(ProformaVatRates::taxDocumentRows($pdo, $this->ossCarry->selectList('ii'), (int) $proforma['id']))
+                ?? ($vatRateId !== null ? ProformaVatRates::chosenRate($pdo, $vatRateId, (string) $payment['paid_on']) : null);
+            if ($rate === null) {
+                throw new PaymentTaxDocumentNotApplicableException(
+                    'Zálohová faktura je převzatá z Money S3 bez sazeb DPH a její daňové doklady sazbu plnění neurčují. '
+                    . 'Daňový doklad k platbě by vyšel bez daně; vystavte ho se zvolenou sazbou plnění.',
+                    ProformaVatRates::RATE_REQUIRED,
+                );
+            }
+            $proforma['items'] = [ProformaVatRates::itemAtRate($proforma, $rate)];
         }
 
         // Brutto váhy per sazba ze stored řádkových totálů proformy (vč. slevových řádků).

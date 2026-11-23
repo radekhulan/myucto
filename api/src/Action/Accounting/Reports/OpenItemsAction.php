@@ -10,7 +10,10 @@ use MyInvoice\Http\Json;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Accounting\Reports\OpenItemsService;
 use MyInvoice\Service\Accounting\Reports\ReportException;
+use MyInvoice\Service\Accounting\Reports\ReportXlsxExporter;
+use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\IpMatcher;
+use MyInvoice\Service\Pdf\OpenItemsListPdfRenderer;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 use Psr\Log\LoggerInterface;
@@ -26,6 +29,8 @@ use Psr\Log\LoggerInterface;
  *   GET    /api/accounting/open-items/pairings/{id}
  *   POST   /api/accounting/open-items/pairings/{id}/lines             {line_ids}
  *   DELETE /api/accounting/open-items/pairings/{id}/lines/{entryId}/{lineNo}
+ *   GET    /api/accounting/reports/open-items-list?as_of=&codes=261,335,395
+ *   GET    /api/accounting/reports/open-items-list/export?as_of=&codes=&format=pdf|xlsx
  *
  * Práva řeší RoutePermissionMap (/api/accounting: GET = čtení, ostatní = zápis
  * účetnictví); zápisové metody si právo ověří i samy. ZÁMĚRNĚ bez guardu
@@ -39,12 +44,92 @@ final class OpenItemsAction
     private const MAX_PER_PAGE = 500;
     private const MAX_LINES = 500;
 
+    /** Soupis na obrazovce ukazuje prvních N položek účtu, export celý rozsah. */
+    private const LISTING_SCREEN_ROWS = 200;
+    private const LISTING_EXPORT_ROWS = 100000;
+
     public function __construct(
         private readonly OpenItemsService $service,
         private readonly IpMatcher $ipMatcher,
         private readonly LoggerInterface $log,
         private readonly Connection $db,
+        private readonly OpenItemsListPdfRenderer $listingPdf,
+        private readonly ReportXlsxExporter $xlsx,
+        private readonly ActivityLogger $logger,
     ) {}
+
+    public function listing(Request $request, Response $response): Response
+    {
+        $supplierId = $this->currentSupplierId($request);
+        if (!$this->requireDoubleEntry($this->db, $supplierId, $response, $err)) return $err;
+        $q = $request->getQueryParams();
+        $asOf = $this->asOf($q, $response, $err);
+        if ($asOf === null) return $err;
+        $codes = $this->listingCodes($q, $response, $err);
+        if ($codes === null) return $err;
+
+        return $this->run($response, fn () => $this->service->listing($supplierId, $asOf, $codes, self::LISTING_SCREEN_ROWS));
+    }
+
+    public function exportListing(Request $request, Response $response): Response
+    {
+        $supplierId = $this->currentSupplierId($request);
+        if (!$this->requireDoubleEntry($this->db, $supplierId, $response, $err)) return $err;
+        $q = $request->getQueryParams();
+        $asOf = $this->asOf($q, $response, $err);
+        if ($asOf === null) return $err;
+        $codes = $this->listingCodes($q, $response, $err);
+        if ($codes === null) return $err;
+        $format = strtolower(trim((string) ($q['format'] ?? '')));
+        if (!in_array($format, ['pdf', 'xlsx'], true)) {
+            return Json::error($response, 'validation_failed', "format musí být 'pdf' nebo 'xlsx'.", 422);
+        }
+
+        try {
+            $data = $this->service->listing($supplierId, $asOf, $codes, self::LISTING_EXPORT_ROWS);
+            $out = $format === 'pdf'
+                ? ['bytes' => $this->listingPdf->render($data), 'filename' => 'otevrene-polozky-' . $asOf . '.pdf', 'mime' => 'application/pdf']
+                : $this->xlsx->openItemsList($data);
+        } catch (ReportException $e) {
+            return Json::error($response, $e->errorCode, $e->getMessage(), $e->httpStatus);
+        } catch (\Throwable $e) {
+            $this->log->error('Export soupisu otevřených položek selhal: ' . $e->getMessage(), ['exception' => $e]);
+            return Json::error($response, 'build_failed', 'Sestavu se nepodařilo vytvořit.', 500);
+        }
+
+        $this->logger->log('report.accounting_export', $this->userId($request), 'report', null,
+            ['report' => 'open_items_list', 'format' => $format],
+            $this->ipMatcher->clientIpFromRequest($request->getServerParams()),
+            $request->getHeaderLine('User-Agent'), $supplierId);
+
+        $response->getBody()->write($out['bytes']);
+        return $response
+            ->withHeader('Content-Type', $out['mime'])
+            ->withHeader('Content-Disposition', 'attachment; filename="' . $out['filename'] . '"')
+            ->withHeader('Content-Length', (string) strlen($out['bytes']))
+            ->withHeader('Cache-Control', 'private, no-store');
+    }
+
+    /**
+     * @param array<string,mixed> $q
+     * @return list<string>|null
+     */
+    private function listingCodes(array $q, Response $response, ?Response &$err): ?array
+    {
+        $err = null;
+        $codes = array_values(array_unique(array_filter(array_map('trim', explode(',', (string) ($q['codes'] ?? ''))), static fn (string $c): bool => $c !== '')));
+        foreach ($codes as $code) {
+            if (preg_match('/^[0-9A-Za-z.]{1,20}$/D', $code) !== 1) {
+                $err = Json::error($response, 'validation_failed', 'codes musí být seznam kódů účtů oddělených čárkou.', 422);
+                return null;
+            }
+        }
+        if (count($codes) > OpenItemsService::LISTING_MAX_ACCOUNTS) {
+            $err = Json::error($response, 'validation_failed', 'Najednou lze vybrat nejvýš ' . OpenItemsService::LISTING_MAX_ACCOUNTS . ' účtů.', 422);
+            return null;
+        }
+        return $codes;
+    }
 
     public function get(Request $request, Response $response, array $args): Response
     {

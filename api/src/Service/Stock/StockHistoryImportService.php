@@ -101,7 +101,7 @@ final class StockHistoryImportService
                 SELECT ?, ?, ROW_NUMBER() OVER (ORDER BY doc_date, first_ordinal, ordinal), stock_item_id, source_row, input_json
                 FROM (SELECT ordinal, stock_item_id, source_row, input_json,
                         JSON_VALUE(input_json, '$.values.doc_date') AS doc_date,
-                        MIN(ordinal) OVER (PARTITION BY JSON_VALUE(input_json, '$.doc')) AS first_ordinal
+                        FIRST_VALUE(ordinal) OVER (PARTITION BY JSON_VALUE(input_json, '$.doc') ORDER BY ordinal) AS first_ordinal
                     FROM catalog_job_items WHERE supplier_id = ? AND job_id = ? AND status = 'ready') staged");
             $stmt->execute([$supplierId, $id, $supplierId, $previewId]);
             $total = $stmt->rowCount();

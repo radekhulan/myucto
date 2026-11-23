@@ -11,6 +11,7 @@ final readonly class ChannelContext
         public int $supplierId,
         public string $environment,
         public ChannelCredentials $credentials,
+        public ?string $verifiedBoxId = null,
     ) {}
 
     public function isProduction(): bool

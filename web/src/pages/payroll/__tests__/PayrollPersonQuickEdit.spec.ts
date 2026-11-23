@@ -41,7 +41,10 @@ vi.mock('@/composables/useToast', () => ({
   }),
 }))
 
-vi.mock('vue-i18n', () => ({
+// Sdílené formátování (`useFormat`) táhne @/i18n se skutečným `createI18n`,
+// proto továrna původní modul rozprostírá a přepisuje jen `useI18n`.
+vi.mock('vue-i18n', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('vue-i18n')>()),
   useI18n: () => ({
     // Parametry se promítnou do výstupu, aby šlo ověřit, KTERÉ osobní číslo karta ukazuje.
     t: (key: string, params?: Record<string, unknown>) =>
@@ -261,6 +264,17 @@ describe('PayrollPersonQuickEdit', () => {
     })
   })
 
+  /* Čtecí souhrn vztahu ukazoval „40.00 h/týden · 42000 Kč" bez českého formátu. */
+  it('úvazek a mzdu ve čtecím souhrnu vztahu píše v českém formátu', async () => {
+    const wrapper = await mountedReader()
+
+    const summary = wrapper.get('[data-test="read-employment"]').text().replace(/\s+/g, ' ')
+    expect(summary).toContain('40 payroll.people.quick_edit.hours_unit')
+    expect(summary).not.toContain('40.00')
+    expect(summary).toMatch(/42 000,00 Kč/)
+    expect(summary).not.toContain('42000 Kč')
+  })
+
   it('ukáže běžné údaje v jediném formuláři bez záložek a citlivé hodnoty jen maskovaně', async () => {
     const wrapper = await mountedEditor()
 
@@ -398,6 +412,21 @@ describe('PayrollPersonQuickEdit', () => {
     expect(wrapper.get<HTMLInputElement>('[data-test="birth-number"]').element.value).toBe('')
     expect(wrapper.get<HTMLInputElement>('[data-test="email"]').element.value).toBe('')
     expect(wrapper.get<HTMLInputElement>('[data-test="phone"]').element.value).toBe('')
+  })
+
+  it('při změně pracovní doby zachová hodinové odměňování a nedovolí přepsat měsíční mzdu', async () => {
+    const hourly = employment({ monthly_gross_minor: null })
+    Object.assign(hourly.terms[0]!, { remuneration_type: 'hourly', hourly_rate_minor: 18050, remuneration_basis: 'Syntetický výměr', remuneration_basis_kind: 'wage_statement' })
+    mocks.person.mockResolvedValue({ ...person(), employments: [hourly] })
+    const wrapper = await mountedEditor()
+    expect(wrapper.get('[data-test="monthly-gross"]').attributes('disabled')).toBeDefined()
+    expect(wrapper.find('[data-test="hourly-edit-guidance"]').exists()).toBe(true)
+    await wrapper.get('[data-test="weekly-hours"]').setValue('20.00')
+    await wrapper.get('form').trigger('submit')
+    expect(mocks.savePersonQuickEdit).toHaveBeenCalledWith(17, expect.objectContaining({ employment: expect.objectContaining({
+      terms: expect.objectContaining({ remuneration_type: 'hourly', hourly_rate_minor: 18050, remuneration_basis: 'Syntetický výměr', remuneration_basis_kind: 'wage_statement', weekly_hours: '20.00' }),
+    }) }))
+    expect(mocks.savePersonQuickEdit.mock.calls[0]![1].employment).not.toHaveProperty('monthly_gross_minor')
   })
 
   it('při změně jen osobního údaje nevytvoří zbytečnou verzi pracovních podmínek', async () => {

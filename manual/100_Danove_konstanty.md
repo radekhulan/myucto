@@ -24,8 +24,9 @@ Kapitolu otevřete, když:
 
 ## 100.2 Než začnete
 
-- Potřebujete roli administrátora. Stránka je celosystémová, ne nastavení
-  aktuální firmy.
+- Změnu a reset konstant smí provést jen **Superadmin**. Samotné čtecí
+  oprávnění k nastavení firmy dovoluje hodnoty číst, ne měnit. Konstanty
+  platí pro celou instalaci, nejde o nastavení aktuální firmy.
 - Mějte po ruce platné právní hodnoty daného roku. Změna se projeví u všech
   firem v instalaci.
 
@@ -99,8 +100,8 @@ Konstanty zahrnují zejména:
 - zákonné termíny podání.
 
 Mzdové hodnoty na této stránce používá především základní **Mzdová
-rekapitulace**. Zkušební agenda **Úplné mzdy** má oddělené, auditovatelné
-legislativní sady v **Mzdy → Legislativní pravidla**; jejich stav a schvalování
+rekapitulace**. Plný modul **Mzdy** má oddělené, auditovatelné
+legislativní sady v **Mzdy → Legislativní pravidla mezd**; jejich stav a schvalování
 popisuje kapitola [Legislativní pravidla mezd](92_Legislativni_pravidla_mezd.md).
 
 ### 100.7.2 Vlastní přepis

@@ -3,6 +3,7 @@ export const PERMISSION_KEYS = [
   'clients', 'clients.create', 'clients.archive', 'clients.public_links',
   'projects', 'projects.create', 'projects.archive',
   'invoices', 'invoices.create', 'invoices.issue', 'invoices.send',
+  'sales_quotes', 'sales_quotes.write', 'sales_quotes.send',
   'invoices.reminder', 'invoices.mark_paid', 'invoices.cancel', 'invoices.clone',
   'invoices.delete', 'invoices.approval', 'invoices.edit_issued',
   'purchase_invoices', 'purchase_invoices.create', 'purchase_invoices.transition',
@@ -14,9 +15,9 @@ export const PERMISSION_KEYS = [
   'documents', 'documents.upload', 'documents.move', 'documents.delete',
   'documents.restore', 'documents.requests', 'documents.inbox', 'documents.inbox.delete',
   'documents.submit',
-  'accounting', 'other_items', 'accounting.journal.write', 'accounting.journal.post',
-  'accounting.periods.manage', 'accounting.periods.close', 'accounting.periods.close_override', 'accounting.offsets',
-  'accounting.templates',
+  'accounting', 'other_items', 'accounting.journal.write', 'accounting.journal.post', 'accounting.accruals', 'accounting.accruals.write',
+  'accounting.periods.manage', 'accounting.periods.close', 'accounting.periods.close_override', 'accounting.period_lock', 'accounting.journal.bulk_repost', 'accounting.bulk_changes', 'accounting.offsets',
+  'accounting.templates', 'accounting.membership_erasure',
   'tax_evidence', 'tax_evidence.classification.write', 'tax_evidence.export',
   'reports', 'reports.submissions', 'reports.submissions.manage', 'reports.finalize', 'reports.submit', 'reports.reopen', 'reports.export',
   'payroll', 'payroll.settings', 'payroll.person.read_sensitive', 'payroll.person.write', 'payroll.personnel',
@@ -41,7 +42,7 @@ export const PERMISSION_KEYS = [
   'property.opening.manage', 'property.opening.post', 'property.opening.revise',
   'property.payments.manage', 'property.payments.post', 'property.payments.reverse',
   'settings.company', 'settings.company.write', 'settings.domains', 'settings.bank_accounts',
-  'settings.email_profiles', 'settings.email_templates', 'settings.payment_qr', 'settings.signing_profiles',
+  'settings.email_profiles', 'settings.email_templates', 'settings.payment_qr', 'settings.invoice_defaults', 'settings.signing_profiles',
   'settings.branding', 'settings.ai_provider', 'settings.signing',
   'utilities', 'utilities.export', 'utilities.import', 'utilities.archives',
   'profile', 'profile.tokens', 'profile.mcp',
@@ -64,7 +65,7 @@ export const CLIENT_PERMISSION_KEYS = [
   'bank', 'bank.import', 'bank.match', 'bank.ignore',
   'reports.submissions', 'reports.submit',
   'documents.submit', 'settings.company', 'settings.branding',
-  'settings.email_profiles', 'settings.email_templates', 'settings.payment_qr', 'settings.signing_profiles',
+  'settings.email_profiles', 'settings.email_templates', 'settings.payment_qr', 'settings.invoice_defaults', 'settings.signing_profiles',
   'projects', 'projects.create', 'projects.archive',
   'logbook', 'logbook.write', 'logbook.import', 'logbook.delete',
   'stock', 'stock.items.write', 'stock.fulfillment.write', 'profile', 'profile.mcp',
@@ -89,7 +90,8 @@ export const CLIENT_BANK_ACTION_KEYS = ['bank.import', 'bank.match', 'bank.ignor
 export function setRolePermission(
   permissions: Record<string, PermissionValue>, roleType: 'staff' | 'client', key: string, level: PermissionValue,
 ): void {
-  permissions[key] = roleType === 'client' && (key === 'bank' || key === 'stock' || key === 'reports.submissions') && level > 0 ? 1 : level
+  // Archiv připravených podání je jen ke čtení pro každý typ role (RoleRepository::validatePermissions).
+  permissions[key] = (key === 'reports.submissions' || (roleType === 'client' && (key === 'bank' || key === 'stock'))) && level > 0 ? 1 : level
   if (roleType !== 'client') return
   if (key === 'reports.submissions' && level === 0) {
     permissions['reports.submit'] = 0
@@ -109,7 +111,7 @@ export function setRolePermission(
   }
 }
 
-export const OPERATIONAL_SETTINGS_KEYS = ['settings.email_profiles', 'settings.email_templates', 'settings.branding', 'settings.payment_qr', 'settings.signing_profiles'] as const satisfies readonly PermissionKey[]
+export const OPERATIONAL_SETTINGS_KEYS = ['settings.email_profiles', 'settings.email_templates', 'settings.branding', 'settings.payment_qr', 'settings.invoice_defaults', 'settings.signing_profiles'] as const satisfies readonly PermissionKey[]
 
 /** Úrovně nabízené editorem respektují omezení klientských agend a samostatných akcí. */
 export function rolePermissionLevels(roleType: 'staff' | 'client', key: string): readonly PermissionValue[] {

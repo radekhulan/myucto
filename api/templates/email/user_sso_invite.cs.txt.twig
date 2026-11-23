@@ -1,0 +1,18 @@
+{% extends '_layout.txt.twig' %}
+
+{% block content %}
+Přihlášení účtem organizace
+---------------------------
+
+Dobrý den{% if name %} {{ name }}{% endif %},
+
+do MyÚčto.cz se budete přihlašovat účtem Vaší organizace ({{ provider }}).
+Heslo v MyÚčto nepotřebujete.
+
+Při prvním přihlášení použijte tento odkaz (platný {{ expiresIn|default('3 dny') }}, jen na jedno použití).
+Váš účet se tím propojí s účtem organizace:
+
+{{ inviteLink }}
+
+Potom se už přihlašujete tlačítkem „{{ provider }}“ na přihlašovací stránce.
+{% endblock %}

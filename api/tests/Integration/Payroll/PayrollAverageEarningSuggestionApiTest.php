@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace MyInvoice\Tests\Integration\Payroll;
 
 use MyInvoice\Action\Payroll\PayrollAbsenceAction;
-use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Middleware\SupplierScopeMiddleware;
@@ -32,6 +31,7 @@ final class PayrollAverageEarningSuggestionApiTest extends TestCase
 
     private Connection $db;
     private PayrollAbsenceAction $action;
+    private \DI\Container $container;
     private int $userId;
     private int $supplierId;
     private int $employeeId;
@@ -44,9 +44,10 @@ final class PayrollAverageEarningSuggestionApiTest extends TestCase
             $this->markTestSkipped('cfg.php neexistuje — test vyžaduje DB.');
         }
         try {
-            $container = Bootstrap::buildContainer();
+            $container = \MyInvoice\Tests\Support\PayrollTestContainer::build();
             $this->db = $container->get(Connection::class);
             $this->action = $container->get(PayrollAbsenceAction::class);
+            $this->container = $container;
         } catch (\Throwable $e) {
             $this->markTestSkipped('DI/DB nedostupné: ' . $e->getMessage());
         }
@@ -112,6 +113,201 @@ final class PayrollAverageEarningSuggestionApiTest extends TestCase
         // § 358 ZP aplikace v datech nerozlišuje, poměrnou část zadává účetní.
         self::assertNull($suggestion['longer_period_allocated_minor']);
         self::assertCount(3, $suggestion['months']);
+    }
+
+    public function testExactTimeSurvivesAverageCreationAndLegacyHashStaysUnchanged(): void
+    {
+        $body = $this->averageBody(2026, 2);
+        $legacy = $this->call('createAverage', 'POST', $body);
+        self::assertSame(201, $legacy['status']);
+        $snapshot = $legacy['body']['snapshot'];
+        self::assertArrayNotHasKey('worked_duration_units', $snapshot);
+        self::assertArrayNotHasKey('worked_duration_units', $snapshot['input_trace']);
+        $stmt = $this->db->pdo()->prepare('SELECT HEX(input_hash) FROM payroll_average_earning_snapshots WHERE supplier_id = ? AND id = ?');
+        $stmt->execute([$this->supplierId, $snapshot['id']]);
+        self::assertSame(strtoupper(hash('sha256', CanonicalJson::encode([
+            'allocated_minor' => 0, 'decisive_from' => '2026-01-01', 'decisive_to' => '2026-03-31',
+            'gross_minor' => 13_500_000, 'rationale' => null, 'worked_days' => 24, 'worked_minutes' => 10_800,
+        ]))), $stmt->fetchColumn());
+
+        unset($body['worked_minutes']);
+        $body['worked_duration_units'] = 480053;
+        $body['gross_earnings_minor'] = 3_200_000;
+        $exact = $this->call('createAverage', 'POST', $body);
+        self::assertSame(201, $exact['status']);
+        self::assertNull($exact['body']['snapshot']['worked_minutes']);
+        self::assertSame(480053, $exact['body']['snapshot']['worked_duration_units']);
+        self::assertSame(19_998, $exact['body']['snapshot']['average_hourly_minor']);
+        self::assertSame(480053, $exact['body']['snapshot']['input_trace']['worked_duration_units']);
+        self::assertSame(422, $this->call('createAverage', 'POST', $body + ['worked_minutes' => 9601])['status']);
+    }
+
+    public function testBulkAverageUsesExactTimeAndDetectsLaterSubminuteChange(): void
+    {
+        foreach (['2026-01-01', '2026-02-01', '2026-03-01'] as $period) {
+            $this->insertClosedRun($period, manualUnits: 480053);
+        }
+        $suggestion = $this->suggest(2026, 2);
+        self::assertTrue($suggestion['ready']);
+        self::assertNull($suggestion['worked_minutes']);
+        self::assertSame(1440159, $suggestion['worked_duration_units']);
+        $created = $this->call('createAutomaticAverages', 'POST', [
+            'year' => 2026, 'quarter' => 2, 'items' => [[
+                'employment_id' => $this->employmentId, 'input_version' => $suggestion['input_version'],
+            ]],
+        ]);
+        self::assertSame(201, $created['status']);
+        $snapshot = $created['body']['averages'][0];
+        self::assertNull($snapshot['worked_minutes']);
+        self::assertSame(1440159, $snapshot['worked_duration_units']);
+        self::assertSame(28_122, $snapshot['average_hourly_minor']);
+        $page = $this->call('averageCandidates', 'GET', ['year' => 2026, 'quarter' => 2]);
+        self::assertFalse($page['body']['items'][0]['existing_outdated']);
+        // Rozdíl jediné přesné jednotky nesmí zmizet po přetypování minut na nulu.
+        $this->db->pdo()->prepare('UPDATE payroll_average_earning_snapshots SET worked_duration_units = worked_duration_units + 1 WHERE supplier_id = ? AND id = ?')
+            ->execute([$this->supplierId, $snapshot['id']]);
+        $page = $this->call('averageCandidates', 'GET', ['year' => 2026, 'quarter' => 2]);
+        self::assertTrue($page['body']['items'][0]['existing_outdated']);
+    }
+
+    /**
+     * Návrh ze sjednané hodinové sazby se dřív hromadně nezakládal. Rozhodnutí
+     * maintainera (11/2026): zakládá se i hromadně, opravuje se novou revizí.
+     * Hodnota zadaná účetní v podmínkách má dál přednost.
+     */
+    public function testHourlyRateProposalIsBulkCreatableAndAccountantValueTakesPriority(): void
+    {
+        $this->startEmploymentOn('2026-06-01');
+        $this->db->pdo()->prepare('INSERT INTO payroll_employment_terms
+            (supplier_id, employment_id, effective_from, planned_start_on, actual_start_on, weekly_hours,
+             remuneration_type, hourly_rate_minor, remuneration_basis_kind, remuneration_basis)
+            VALUES (?, ?, "2026-06-01", "2026-06-01", "2026-06-01", 40, "hourly", 20000, "contract", "Syntetická smlouva")')
+            ->execute([$this->supplierId, $this->employmentId]);
+        $suggestion = $this->suggest(2026, 2);
+        self::assertSame('agreed_hourly_rate', $suggestion['probable_source']);
+        self::assertSame(20000, $suggestion['probable_hourly_minor']);
+        self::assertTrue($suggestion['ready']);
+        $page = $this->call('averageCandidates', 'GET', ['year' => 2026, 'quarter' => 2]);
+        self::assertTrue($page['body']['items'][0]['ready']);
+        self::assertNotContains('probable_hourly_rate_needs_review', $page['body']['items'][0]['blockers']);
+        $this->db->pdo()->prepare('UPDATE payroll_employment_terms SET probable_hourly_earning_minor = 24000,
+            probable_earning_rationale = "Posouzení obvyklé odměny a příplatků" WHERE supplier_id = ? AND employment_id = ?')
+            ->execute([$this->supplierId, $this->employmentId]);
+        $suggestion = $this->suggest(2026, 2);
+        self::assertSame(24000, $suggestion['probable_hourly_minor']);
+        self::assertNotSame('agreed_hourly_rate', $suggestion['probable_source']);
+        $term = $this->db->pdo()->prepare('SELECT hourly_rate_minor FROM payroll_employment_terms WHERE supplier_id = ? AND employment_id = ?');
+        $term->execute([$this->supplierId, $this->employmentId]);
+        self::assertSame(20000, (int) $term->fetchColumn());
+    }
+
+    /**
+     * Nový hodinový vztah bez průměru dostane pravděpodobný výdělek ze sazby
+     * automaticky, schválený a označený jako automatický. Opakované volání
+     * nic nezaloží a měsíčně odměňovaný vztah se nezakládá vůbec.
+     */
+    public function testProbableEarningFromRateIsCreatedAutomaticallyOnlyOnce(): void
+    {
+        $this->startEmploymentOn('2026-06-01');
+        $this->db->pdo()->prepare('INSERT INTO payroll_employment_terms
+            (supplier_id, employment_id, effective_from, planned_start_on, actual_start_on, weekly_hours,
+             remuneration_type, hourly_rate_minor, remuneration_basis_kind, remuneration_basis)
+            VALUES (?, ?, "2026-06-01", "2026-06-01", "2026-06-01", 40, "hourly", 20000, "contract", "Syntetická smlouva")')
+            ->execute([$this->supplierId, $this->employmentId]);
+        $batch = $this->container->get(\MyInvoice\Service\Payroll\Absence\AverageEarningBatchService::class);
+
+        $created = $batch->ensureProbableFromRate($this->supplierId, $this->employmentId, 2026, 2, $this->userId);
+
+        self::assertNotNull($created);
+        self::assertSame('approved', $created['status']);
+        self::assertSame('probable', $created['source_kind']);
+        self::assertSame(20000, $created['average_hourly_minor']);
+        self::assertStringContainsString('Automaticky ze sjednané hodinové sazby (§ 355 odst. 2 ZP)', (string) $created['rationale']);
+        self::assertSame('probable_from_rate', $created['input_trace']['automatic']);
+        self::assertNull($batch->ensureProbableFromRate($this->supplierId, $this->employmentId, 2026, 2, $this->userId));
+
+        $this->db->pdo()->prepare('UPDATE payroll_employment_terms SET remuneration_type = "monthly", hourly_rate_minor = NULL,
+            monthly_gross_minor = 4000000, remuneration_basis_kind = NULL, remuneration_basis = NULL WHERE supplier_id = ? AND employment_id = ?')
+            ->execute([$this->supplierId, $this->employmentId]);
+        self::assertNull($batch->ensureProbableFromRate($this->supplierId, $this->employmentId, 2026, 3, $this->userId));
+    }
+
+    public function testFillEndpointCreatesProbableEarningForHourlyEmploymentsOfThePeriod(): void
+    {
+        $pdo = $this->db->pdo();
+        $this->startEmploymentOn('2026-06-01');
+        $pdo->prepare('UPDATE payroll_employments SET actual_start_date = "2026-06-01" WHERE supplier_id = ? AND id = ?')
+            ->execute([$this->supplierId, $this->employmentId]);
+        $pdo->prepare('INSERT INTO payroll_employee_profiles (supplier_id, employee_id, profile_status) VALUES (?, ?, "ready")')
+            ->execute([$this->supplierId, $this->employeeId]);
+        $pdo->prepare('INSERT INTO payroll_employment_terms
+            (supplier_id, employment_id, effective_from, planned_start_on, actual_start_on, weekly_hours,
+             remuneration_type, hourly_rate_minor, remuneration_basis_kind, remuneration_basis)
+            VALUES (?, ?, "2026-06-01", "2026-06-01", "2026-06-01", 40, "hourly", 20000, "contract", "Syntetická smlouva")')
+            ->execute([$this->supplierId, $this->employmentId]);
+
+        $filled = $this->call('fillProbableFromRate', 'POST', ['period' => '2026-06']);
+
+        self::assertSame(201, $filled['status'], json_encode($filled['body']));
+        self::assertSame(1, $filled['body']['candidates']);
+        self::assertCount(1, $filled['body']['created']);
+        self::assertSame(20000, $filled['body']['created'][0]['average_hourly_minor']);
+        $again = $this->call('fillProbableFromRate', 'POST', ['period' => '2026-06']);
+        self::assertSame(0, $again['body']['candidates']);
+        self::assertSame(422, $this->call('fillProbableFromRate', 'POST', ['period' => '2026-6'])['status']);
+    }
+
+    public function testHourlyAverageCreationAndBulkProposalUseDocumentedStatutoryWeek(): void
+    {
+        $this->db->pdo()->prepare('INSERT INTO payroll_employment_terms
+            (supplier_id, employment_id, effective_from, planned_start_on, weekly_hours, workload_basis_points,
+             remuneration_type, hourly_rate_minor, remuneration_basis_kind, remuneration_basis,
+             probable_hourly_earning_minor, probable_earning_rationale)
+            VALUES (?, ?, "2025-01-01", "2025-01-01", 37.5, 10000, "hourly", 13000, "contract", "Syntetická smlouva", 13000, "Individuální posouzení")')
+            ->execute([$this->supplierId, $this->employmentId]);
+        $suggestion = $this->suggest(2026, 2);
+        self::assertTrue($suggestion['ready'], json_encode($suggestion['blockers']));
+        // Uložený průměr nenese hodinové minimum 37,5h týdne (143,40 Kč); to se přidá ke dni použití.
+        self::assertSame(13000, $suggestion['probable_hourly_minor']);
+        self::assertSame(2250, $suggestion['hourly_minimum_intervals'][0]['stated_weekly_minutes']);
+        $created = $this->call('createAutomaticAverages', 'POST', ['year' => 2026, 'quarter' => 2,
+            'items' => [['employment_id' => $this->employmentId, 'input_version' => $suggestion['input_version']]]]);
+        self::assertSame(201, $created['status'], json_encode($created['body']));
+        self::assertSame(13440, $created['body']['averages'][0]['average_hourly_minor']);
+        self::assertArrayNotHasKey('hourly_minimum_proof', $created['body']['averages'][0]['input_trace']);
+        $body = [...$this->averageBody(2026, 3), 'gross_earnings_minor' => 1000000];
+        $manual = $this->call('createAverage', 'POST', $body);
+        self::assertSame(201, $manual['status'], json_encode($manual['body']));
+        self::assertLessThan(14340, $manual['body']['snapshot']['average_hourly_minor']);
+        $this->db->pdo()->prepare('UPDATE payroll_employment_terms SET weekly_hours = NULL WHERE supplier_id = ? AND employment_id = ?')->execute([$this->supplierId, $this->employmentId]);
+        self::assertSame(422, $this->call('createAverage', 'POST', [...$this->averageBody(2026, 4), 'gross_earnings_minor' => 1000000])['status']);
+    }
+
+    public function testHourlyAverageFloorResolverUsesConstantQueriesAndTenantScope(): void
+    {
+        $ids = [$this->employmentId];
+        foreach (['SYN-FLOOR-B', 'SYN-FLOOR-C'] as $code) {
+            $this->db->pdo()->prepare('INSERT INTO payroll_employments (supplier_id, employee_id, code, relation_type, status, start_date)
+                VALUES (?, ?, ?, "employment", "active", "2025-01-01")')->execute([$this->supplierId, $this->employeeId, $code]);
+            $ids[] = (int) $this->db->pdo()->lastInsertId();
+        }
+        foreach ($ids as $id) $this->db->pdo()->prepare('INSERT INTO payroll_employment_terms
+            (supplier_id, employment_id, effective_from, planned_start_on, weekly_hours, workload_basis_points,
+             remuneration_type, hourly_rate_minor, remuneration_basis_kind, remuneration_basis)
+            VALUES (?, ?, "2025-01-01", "2025-01-01", 37.5, 10000, "hourly", 13000, "contract", "Syntetická smlouva")')->execute([$this->supplierId, $id]);
+        $resolver = new \MyInvoice\Service\Payroll\PayrollHourlyAverageFloorResolver($this->db);
+        $questions = fn(): int => (int) $this->db->pdo()->query("SHOW SESSION STATUS LIKE 'Questions'")->fetch()['Value'];
+        $before = $questions();
+        $one = $resolver->forMany($this->supplierId, [$ids[0]], '2026-07-01', '2026-07-31');
+        $single = $questions() - $before;
+        $before = $questions();
+        $many = $resolver->forMany($this->supplierId, $ids, '2026-07-01', '2026-07-31');
+        $batch = $questions() - $before;
+        self::assertSame($single, $batch);
+        self::assertLessThanOrEqual(12, $batch);
+        self::assertSame($one[$ids[0]], $many[$ids[0]]);
+        $other = $this->createIsolatedSupplier($this->db->pdo(), $this->supplierId);
+        self::assertSame(array_fill_keys($ids, []), $resolver->forMany($other, $ids, '2026-07-01', '2026-07-31'));
     }
 
     public function testMissingMonthSuppressesTheWholeProposal(): void
@@ -183,6 +379,9 @@ final class PayrollAverageEarningSuggestionApiTest extends TestCase
         self::assertSame('minimum_wage', $suggestion['probable_source']);
         // Minimální mzda 2026: 134,40 Kč za hodinu.
         self::assertSame(13_440, $suggestion['probable_hourly_minor']);
+        // V rozhodném období (Q2) vztah netrval: formulář předvyplní 0 h a 0 dnů.
+        self::assertTrue($suggestion['employment_started_after_decisive_period']);
+        self::assertFalse($this->suggest(2026, 4)['employment_started_after_decisive_period']);
     }
 
     public function testBulkCreatesAndApprovesTheProposedAverage(): void
@@ -216,8 +415,13 @@ final class PayrollAverageEarningSuggestionApiTest extends TestCase
         self::assertSame('probable', $snapshot['source_kind']);
         self::assertSame(75_000, (int) $snapshot['average_hourly_minor']);
 
-        // Založený průměr se nepřepisuje: druhé potvrzení téhož návrhu projít nesmí.
-        self::assertSame(422, $this->call('createAutomaticAverages', 'POST', $request)['status']);
+        // Založený průměr se nepřepisuje: druhé potvrzení téhož návrhu nic
+        // nezaloží a vztah se vrátí jako přeskočený s důvodem.
+        $again = $this->call('createAutomaticAverages', 'POST', $request);
+        self::assertSame(201, $again['status']);
+        self::assertSame([], $again['body']['averages']);
+        self::assertSame($this->employmentId, $again['body']['skipped'][0]['employment_id']);
+        self::assertContains('average_already_exists', $again['body']['skipped'][0]['blockers']);
     }
 
     public function testBulkRefusesInputsChangedSinceThePreview(): void
@@ -288,7 +492,7 @@ final class PayrollAverageEarningSuggestionApiTest extends TestCase
      */
     public function testReadinessProbeReportsMissingAverageWithEmployeeName(): void
     {
-        $probe = Bootstrap::buildContainer()->get(\MyInvoice\Service\Payroll\Run\PayrollRunJmhzReadinessProbe::class);
+        $probe = \MyInvoice\Tests\Support\PayrollTestContainer::build()->get(\MyInvoice\Service\Payroll\Run\PayrollRunJmhzReadinessProbe::class);
         $entry = static fn (int $employmentId, ?array $average): array => [
             'employment' => ['id' => $employmentId],
             'inputs' => [['amount_minor' => 100_000]],
@@ -299,6 +503,8 @@ final class PayrollAverageEarningSuggestionApiTest extends TestCase
             'employments' => [$entry($this->employmentId, null)],
         ]]];
 
+        // Leden 2026: hlášení jde připravit i před zákonným startem JMHZ
+        // (04/2026), průměr proto kontrola hlásí už tady.
         $findings = $probe->inspect($this->supplierId, '2026-01-01', $snapshot);
         $found = array_values(array_filter(
             $findings,
@@ -320,6 +526,31 @@ final class PayrollAverageEarningSuggestionApiTest extends TestCase
             $withAverage,
             static fn (array $finding): bool => $finding['code'] === 'jmhz_average_hourly_earning_missing',
         ));
+    }
+
+    /**
+     * Formulář `cinnostKS` (scénář 3, společník s. r. o.) pole 10345 nemá a zmrazení
+     * ho nežádá. Předběžná kontrola se nesmí ptát na průměr, který hlášení nepotřebuje.
+     */
+    public function testReadinessProbeSkipsMissingAverageWhenScenarioHasNoSuchField(): void
+    {
+        $probe = \MyInvoice\Tests\Support\PayrollTestContainer::build()->get(\MyInvoice\Service\Payroll\Run\PayrollRunJmhzReadinessProbe::class);
+        $snapshot = fn (string $activityCode, ?string $detailCode): array => ['people' => [[
+            'employee' => ['id' => $this->employeeId],
+            'employments' => [[
+                'employment' => ['id' => $this->employmentId],
+                'term' => ['activity_code' => $activityCode, 'jmhz_relationship_detail_code' => $detailCode],
+                'inputs' => [['amount_minor' => 450_000]],
+                'average_earning' => null,
+            ]],
+        ]]];
+        $missing = static fn (array $findings): array => array_values(array_filter(
+            $findings,
+            static fn (array $finding): bool => $finding['code'] === 'jmhz_average_hourly_earning_missing',
+        ));
+
+        self::assertSame([], $missing($probe->inspect($this->supplierId, '2026-10-01', $snapshot('S', '1'))));
+        self::assertCount(1, $missing($probe->inspect($this->supplierId, '2026-10-01', $snapshot('A', null))));
     }
 
     /** @return array<string,mixed> */
@@ -383,6 +614,7 @@ final class PayrollAverageEarningSuggestionApiTest extends TestCase
         string $periodStart,
         string $runStatus = 'closed',
         string $revisionStatus = 'approved',
+        ?int $manualUnits = null,
     ): void {
         $pdo = $this->db->pdo();
         $run = $pdo->prepare(
@@ -456,6 +688,19 @@ final class PayrollAverageEarningSuggestionApiTest extends TestCase
                 ],
             ],
         ]);
+        if ($manualUnits !== null) {
+            $input = json_decode($inputJson, true, flags: JSON_THROW_ON_ERROR);
+            $input['time_month']['jmhz_work_summary'] = null;
+            $evidence = ['schema_version' => 'payroll-worked-time.v1', 'duration_units_per_hour' => 3000,
+                'status' => 'approved', 'period_start' => $periodStart, 'revision_no' => 1,
+                'work_source' => 'manual_summary', 'manual_summary' => ['segments' => [[
+                    'date_from' => $periodStart, 'date_to' => (new \DateTimeImmutable($periodStart))->modify('last day of this month')->format('Y-m-d'),
+                    'worked_duration_units' => $manualUnits, 'overtime_duration_units' => 0, 'worked_days' => 21,
+                ]]]];
+            $evidence['source_sha256'] = hash('sha256', CanonicalJson::encode($evidence));
+            $input['worked_time_evidence'] = $evidence;
+            $inputJson = CanonicalJson::encode($input);
+        }
         $resultRowJson = (string) json_encode([
             'employment_id' => $this->employmentId,
             'totals' => ['average_earning_base_minor' => 4_500_000],

@@ -477,28 +477,35 @@ final class GarnishmentCalculatorTest extends TestCase
     }
 
     /**
-     * § 270 odst. 3 o. s. ř.: paušál si plátce mzdy odečte ZE SRAŽENÝCH ČÁSTEK
-     * mířících oprávněnému. Na doběhu exekuce se proto zaměstnanci srazí přesně
-     * zbývající dluh — dřív se mu k němu paušál přičetl (nález E-02).
+     * Paušální náhradu hradí povinný (§ 270 odst. 2 o. s. ř.: „Plátce mzdy má
+     * vůči povinnému nárok…“; § 87 odst. 3 exekučního řádu: „hradí plátci mzdy
+     * povinný“) a uspokojuje se z první třetiny před pohledávkami (§ 279
+     * odst. 1). Na doběhu exekuce, kde kapacita stačí, se proto srazí
+     * zbývající dluh A náhrada: oprávněný dostane celý zbytek a exekuce
+     * skončí. Opačné čtení (nález E-02) srazilo jen dluh, oprávněnému poslalo
+     * o náhradu méně a exekuce pak nekonečně dobíhala po korunách.
      */
-    public function testEmployerFeeIsPaidByCreditorNotByDebtorOnTheFinalInstalment(): void
+    public function testEmployerFeeIsBorneByTheDebtorOnTheFinalInstalment(): void
     {
         $result = $this->calculate(4_000_000, [
             $this->statutoryClaim('claim-1', ClaimCategory::NonPriority, 30_000),
         ]);
 
         self::assertSame(GarnishmentStatus::Supported, $result->status);
-        // Kapacita první třetiny je 863 200; sráží se jen zbývající dluh 300 Kč.
-        self::assertSame(30_000, $result->totalWithheldMinorUnits);
+        // Kapacita první třetiny je 863 200; sráží se dluh 300 Kč a náhrada 50 Kč.
+        self::assertSame(35_000, $result->totalWithheldMinorUnits);
         self::assertSame(5_000, $result->employerFlatFeeMinorUnits);
-        self::assertSame(25_000, $result->allocationFor('claim-1')?->totalMinorUnits);
-        self::assertSame(3_970_000, $result->employeePaymentMinorUnits);
+        self::assertSame(30_000, $result->allocationFor('claim-1')?->totalMinorUnits);
+        self::assertSame(3_965_000, $result->employeePaymentMinorUnits);
     }
 
     /**
-     * Zaokrouhlená třetina sražené částky je strop náhrady (§ 3 odst. 3 nař.
-     * vlády č. 595/2006 Sb.). Při dluhu 100 Kč tedy plátci mzdy nenáleží
-     * 50 Kč, ale jen 34 Kč — a sráží se pořád jen těch 100 Kč.
+     * Náhrada „nesmí přesáhnout třetinu částky sražené ze mzdy povinného
+     * zaokrouhlenou na celé koruny nahoru“. Sraženou částkou je celá srážka
+     * včetně náhrady: při dluhu 100 Kč se srazí 150 Kč a náhrada 50 Kč strop
+     * (třetina ze 150) právě splní. Při dluhu 10 Kč je nejvyšší přípustná
+     * náhrada 6 Kč (srážka 16 Kč, třetina 5,33 → 6 Kč; 7 Kč by už strop
+     * třetiny ze 17 Kč překročilo).
      */
     public function testEmployerFeeIsCappedByOneThirdOfTheAmountActuallyWithheld(): void
     {
@@ -506,9 +513,17 @@ final class GarnishmentCalculatorTest extends TestCase
             $this->statutoryClaim('claim-1', ClaimCategory::NonPriority, 10_000),
         ]);
 
-        self::assertSame(10_000, $result->totalWithheldMinorUnits);
-        self::assertSame(3_400, $result->employerFlatFeeMinorUnits);
-        self::assertSame(6_600, $result->allocationFor('claim-1')?->totalMinorUnits);
+        self::assertSame(15_000, $result->totalWithheldMinorUnits);
+        self::assertSame(5_000, $result->employerFlatFeeMinorUnits);
+        self::assertSame(10_000, $result->allocationFor('claim-1')?->totalMinorUnits);
+
+        $small = $this->calculate(4_000_000, [
+            $this->statutoryClaim('claim-1', ClaimCategory::NonPriority, 1_000),
+        ]);
+
+        self::assertSame(1_600, $small->totalWithheldMinorUnits);
+        self::assertSame(600, $small->employerFlatFeeMinorUnits);
+        self::assertSame(1_000, $small->allocationFor('claim-1')?->totalMinorUnits);
     }
 
     /**
@@ -546,19 +561,15 @@ final class GarnishmentCalculatorTest extends TestCase
     }
 
     /**
-     * Měsíc, kdy celou srážku spolkne výživné z druhé třetiny a na první
-     * třetinu vůbec nedojde. Paušál za takový měsíc NENÁLEŽÍ.
-     *
-     * § 279 odst. 1 věta čtvrtá o. s. ř. ho uspokojuje „před všemi ostatními
-     * pohledávkami z první třetiny zbytku čisté mzdy" a § 280 odst. 2 určuje
-     * taxativně, co se hradí z druhé třetiny — náhrada nákladů plátce mezi tím
-     * není. Ukrojit ji z výživného by znamenalo platit náklady plátce z peněz,
-     * na které má přednost oprávněný, a otevřelo by to žalobu podle § 292.
-     *
-     * Zaměstnance to nestojí nic navíc: sráží se pořád stejných 2 000 Kč,
-     * jen z nich nic nezůstane plátci.
+     * Měsíc, kdy celou srážku pokryje výživné z druhé třetiny a první třetina
+     * zůstane volná. Náhrada se z výživného NEBERE (§ 280 odst. 2 vypočítává
+     * taxativně, co se hradí z druhé třetiny), ale ani nepropadá: § 279
+     * odst. 1 věta poslední ji uspokojuje z první třetiny před ostatními
+     * pohledávkami a hradí ji povinný (§ 270 odst. 2). Srazí se tedy navíc
+     * z volné první třetiny: oprávněný dostane celé výživné 2 000 Kč
+     * a zaměstnanec přijde o 2 050 Kč.
      */
-    public function testEmployerFeeLapsesWhenTheFirstThirdStaysUnused(): void
+    public function testEmployerFeeIsTakenFromTheFreeFirstThirdNextToMaintenance(): void
     {
         $result = $this->calculate(4_000_000, [
             $this->statutoryClaim(
@@ -569,17 +580,17 @@ final class GarnishmentCalculatorTest extends TestCase
             ),
         ]);
 
-        self::assertSame(200_000, $result->totalWithheldMinorUnits);
-        self::assertSame(0, $result->employerFlatFeeMinorUnits);
+        self::assertSame(205_000, $result->totalWithheldMinorUnits);
+        self::assertSame(5_000, $result->employerFlatFeeMinorUnits);
         self::assertSame(200_000, $result->allocationFor('maintenance')?->secondPoolMinorUnits);
         self::assertSame(0, $result->allocationFor('maintenance')?->firstPoolMinorUnits);
-        self::assertSame(3_800_000, $result->employeePaymentMinorUnits);
+        self::assertSame(3_795_000, $result->employeePaymentMinorUnits);
     }
 
     /**
-     * Doplněk k předchozímu: jakmile na první třetinu dojde, paušál se z ní
-     * bere PŘED výživným — tam přednost má. Nárok tedy nepropadá vždycky,
-     * když je ve hře výživné, jen když je první třetina prázdná.
+     * Doplněk k předchozímu: sahá-li výživné i do první třetiny a vyčerpá ji,
+     * bere se náhrada z ní PŘED výživným (tam přednost má) a oprávněný
+     * dostane o náhradu méně.
      */
     public function testEmployerFeeOutranksMaintenanceInsideTheFirstThird(): void
     {
@@ -605,12 +616,14 @@ final class GarnishmentCalculatorTest extends TestCase
     }
 
     /**
-     * Jádro nálezu E-02 jako vlastnost, ne jako jeden příklad: srážka
-     * s paušálem musí být na korunu stejná jako srážka bez něj. Paušál smí
-     * měnit jen to, komu z ní co dojde.
+     * Vlastnost místo jednoho příkladu: náhrada nikdy neukrojí oprávněnému
+     * víc, než kolik chybí do kapacity. Stačí-li kapacita na dluh i náhradu,
+     * dostane oprávněný totéž co bez náhrady a zaměstnanci se srazí o náhradu
+     * víc; kde srážku omezuje kapacita, sráží se stejně a náhrada jde z ní.
      */
-    public function testEmployerFeeNeverChangesWhatTheEmployeeLoses(): void
+    public function testEmployerFeeIsAddedWhereCapacityAllowsAndCarvedWhereItDoesNot(): void
     {
+        $capacity = 863_200;
         foreach ([1, 100, 3_400, 10_000, 30_000, 200_000, 863_100, 863_200, 5_000_000] as $debt) {
             foreach ([ClaimCategory::NonPriority, ClaimCategory::OtherPriority] as $category) {
                 $withFee = $this->calculate(4_000_000, [
@@ -624,24 +637,37 @@ final class GarnishmentCalculatorTest extends TestCase
                         orderIssuedOn: '2021-12-31',
                     ),
                 ]);
+                $label = "dluh {$debt}, kategorie {$category->value}";
+                $fee = $withFee->employerFlatFeeMinorUnits;
+                $paid = $withFee->allocationFor('claim-1')?->totalMinorUnits ?? 0;
+                $paidWithoutFee = $withoutFee->allocationFor('claim-1')?->totalMinorUnits ?? 0;
 
+                self::assertSame($withFee->totalWithheldMinorUnits, $paid + $fee, $label);
                 self::assertSame(
-                    $withoutFee->totalWithheldMinorUnits,
-                    $withFee->totalWithheldMinorUnits,
-                    "dluh {$debt}, kategorie {$category->value}",
-                );
-                self::assertSame(
-                    $withoutFee->employeePaymentMinorUnits,
+                    4_000_000 - $withFee->totalWithheldMinorUnits,
                     $withFee->employeePaymentMinorUnits,
+                    $label,
                 );
+                // Strop: 50 Kč a třetina sražené částky na koruny nahoru.
+                self::assertLessThanOrEqual(5_000, $fee, $label);
                 self::assertLessThanOrEqual(
+                    intdiv($withFee->totalWithheldMinorUnits + 299, 300) * 100,
+                    $fee,
+                    $label,
+                );
+                if ($category === ClaimCategory::NonPriority && $debt + $fee <= $capacity) {
+                    // Kapacita stačí: oprávněný dostane celý dluh.
+                    self::assertSame($debt, $paid, $label);
+                    self::assertSame($paidWithoutFee, $paid, $label);
+                }
+                // Náhrada nikdy nezvedne srážku nad to, co by se srazilo bez
+                // ní, o víc než o sebe samu.
+                self::assertLessThanOrEqual(
+                    $withoutFee->totalWithheldMinorUnits + $fee,
                     $withFee->totalWithheldMinorUnits,
-                    $withFee->employerFlatFeeMinorUnits,
+                    $label,
                 );
-                self::assertSame(
-                    $withFee->totalWithheldMinorUnits - $withFee->employerFlatFeeMinorUnits,
-                    $withFee->allocationFor('claim-1')?->totalMinorUnits ?? 0,
-                );
+                self::assertGreaterThanOrEqual($paidWithoutFee - $fee, $paid, $label);
             }
         }
     }
@@ -687,7 +713,14 @@ final class GarnishmentCalculatorTest extends TestCase
         );
     }
 
-    public function testEmployerFeeCannotExceedTheSingleCrownThatWasWithheld(): void
+    /**
+     * Třetina 1 Kč: náhrada by směla být 1 Kč (třetina sražené koruny na
+     * koruny nahoru), jenže oprávněnému by pak nedošlo nic a sráželo by se jen
+     * na náhradu, měsíc co měsíc bez konce. Náhrada proto nikdy nespolkne
+     * celou srážku: korunu dostane oprávněný. Při třetině 2 Kč dostane
+     * korunu plátce a korunu oprávněný.
+     */
+    public function testEmployerFeeNeverConsumesTheWholeDeduction(): void
     {
         $result = $this->calculate(1_410_500, [
             $this->statutoryClaim('claim-1', ClaimCategory::NonPriority, 10_000_000),
@@ -695,9 +728,19 @@ final class GarnishmentCalculatorTest extends TestCase
 
         self::assertSame(GarnishmentStatus::Supported, $result->status);
         self::assertSame(100, $result->thirdMinorUnits);
-        self::assertSame(100, $result->employerFlatFeeMinorUnits);
+        self::assertSame(0, $result->employerFlatFeeMinorUnits);
         self::assertSame(100, $result->totalWithheldMinorUnits);
+        self::assertSame(100, $result->allocationFor('claim-1')?->totalMinorUnits);
         self::assertSame(1_410_400, $result->employeePaymentMinorUnits);
+
+        $two = $this->calculate(1_410_800, [
+            $this->statutoryClaim('claim-1', ClaimCategory::NonPriority, 10_000_000),
+        ]);
+
+        self::assertSame(200, $two->thirdMinorUnits);
+        self::assertSame(100, $two->employerFlatFeeMinorUnits);
+        self::assertSame(200, $two->totalWithheldMinorUnits);
+        self::assertSame(100, $two->allocationFor('claim-1')?->totalMinorUnits);
     }
 
     public function testApprovedInsolvencyUsesPriorityCapacityAndSingleAdministratorAllocation(): void
@@ -1585,27 +1628,29 @@ final class GarnishmentCalculatorTest extends TestCase
 
         // Kapacita první třetiny je 863 200 v KAŽDÉM období. Dřív dostala
         // pohledávka v každém z nich celý zůstatek 3 000 Kč, dohromady 9 000 Kč
-        // na dluh 3 000 Kč. Teď se zůstatek přenáší, takže se v prvním období
-        // srazí celý dluh a v dalších už jen to, co v něm ukrojil paušál.
+        // na dluh 3 000 Kč. Teď se zůstatek přenáší: v prvním období se srazí
+        // celý dluh a náhrada plátce mzdy navíc (§ 270 odst. 2 o. s. ř.),
+        // oprávněný dostane 3 000 Kč a v dalších obdobích se už nesráží nic.
         $paid = [];
         foreach ($results as $period => $result) {
             self::assertSame(GarnishmentStatus::Supported, $result->status);
             $paid[$period] = $result->allocationFor('claim-1')?->totalMinorUnits ?? 0;
         }
 
-        self::assertSame($outstanding, $results['2026-01']->totalWithheldMinorUnits);
-        self::assertSame(295_000, $paid['2026-01']);
-        self::assertSame(5_000, $results['2026-02']->totalWithheldMinorUnits);
-        self::assertSame(3_300, $paid['2026-02']);
-        self::assertSame(1_700, $results['2026-03']->totalWithheldMinorUnits);
-        self::assertSame(1_100, $paid['2026-03']);
-        self::assertLessThan($outstanding, array_sum($paid));
+        self::assertSame($outstanding + 5_000, $results['2026-01']->totalWithheldMinorUnits);
+        self::assertSame($outstanding, $paid['2026-01']);
+        self::assertSame(0, $results['2026-02']->totalWithheldMinorUnits);
+        self::assertSame(0, $results['2026-02']->employerFlatFeeMinorUnits);
+        self::assertSame(0, $results['2026-03']->totalWithheldMinorUnits);
+        self::assertSame($outstanding, array_sum($paid));
     }
 
     /**
      * Přenos snižuje zůstatek o částku, která oprávněnému SKUTEČNĚ došla —
-     * tedy po ukrojení paušální náhrady nákladů plátce mzdy (§ 270 odst. 3
-     * o. s. ř.). Paušál dluh neumořuje, patří zaměstnavateli.
+     * tedy po odečtení paušální náhrady nákladů plátce mzdy (§ 291 odst. 3
+     * o. s. ř.). Paušál dluh neumořuje, patří zaměstnavateli a hradí ho
+     * povinný (§ 270 odst. 2): v druhém období se proto srazí zbytek dluhu
+     * a náhrada navíc a exekuce skončí.
      */
     public function testBatchDoesNotCreditTheEmployerFeeAgainstTheDebt(): void
     {
@@ -1629,10 +1674,11 @@ final class GarnishmentCalculatorTest extends TestCase
 
         // Do dalšího období se přenese dluh snížený jen o to, co došlo
         // oprávněnému — paušál si nechal zaměstnavatel a dluh neumořil.
-        self::assertSame(
-            300_000 - $paidToCreditor,
-            $results['2026-02']->totalWithheldMinorUnits,
-        );
+        $second = $results['2026-02'];
+        self::assertSame(108_400, 300_000 - $paidToCreditor);
+        self::assertSame(108_400, $second->allocationFor('claim-1')?->totalMinorUnits);
+        self::assertSame(5_000, $second->employerFlatFeeMinorUnits);
+        self::assertSame(113_400, $second->totalWithheldMinorUnits);
     }
 
     /**

@@ -11,6 +11,7 @@ use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Security\UserRoleProfile;
 use MyInvoice\Service\Auth\ApiTokenService;
+use MyInvoice\Service\Auth\LoginPolicyService;
 use MyInvoice\Service\ApiRequestLogger;
 use MyInvoice\Service\Auth\SessionManager;
 use MyInvoice\Service\IpMatcher;
@@ -51,11 +52,20 @@ final class AuthMiddleware implements MiddlewareInterface
         '/api/auth/setup-crpdph-lookup',
         '/api/auth/setup-sample',
         '/api/auth/login',
+        '/api/auth/password-token',
         '/api/auth/webauthn/login/options',
         '/api/auth/webauthn/login/verify',
         '/api/auth/domain-context',
         '/api/auth/domain-login/start',
         '/api/auth/domain-login/exchange',
+        '/api/auth/oidc/entra/login',
+        '/api/auth/oidc/entra/callback',
+        '/api/auth/oidc/google/login',
+        '/api/auth/oidc/google/callback',
+        '/api/auth/oidc/apple/login',
+        '/api/auth/oidc/apple/callback',
+        '/api/auth/oidc/seznam/login',
+        '/api/auth/oidc/seznam/callback',
         '/api/auth/forgot',
         '/api/auth/reset',
         // ⚠️ Doručení licence do spravované instalace volá licenční server,
@@ -87,9 +97,21 @@ final class AuthMiddleware implements MiddlewareInterface
         'GET' => [
             '/api/auth/setup-status',
             '/api/auth/domain-context',
+            // Návrat od poskytovatele si sezení (u propojení a ověření) čte
+            // a ověřuje sám; přihlášení staré sezení nahrazuje.
+            '/api/auth/oidc/entra/login',
+            '/api/auth/oidc/entra/callback',
+            '/api/auth/oidc/google/login',
+            '/api/auth/oidc/google/callback',
+            '/api/auth/oidc/apple/login',
+            '/api/auth/oidc/apple/callback',
+            '/api/auth/oidc/seznam/login',
+            '/api/auth/oidc/seznam/callback',
         ],
         'POST' => [
+            '/api/auth/oidc/apple/callback',
             '/api/auth/login',
+            '/api/auth/password-token',
             '/api/auth/webauthn/login/options',
             '/api/auth/webauthn/login/verify',
             '/api/auth/domain-login/start',
@@ -108,7 +130,19 @@ final class AuthMiddleware implements MiddlewareInterface
         private readonly ApiRequestLogger $apiRequestLog,
         private readonly ?LoggerInterface $logger = null,
         private readonly ?\MyInvoice\Service\Mcp\McpResourcePolicy $mcpResources = null,
+        private readonly ?LoginPolicyService $loginPolicy = null,
     ) {}
+
+    private function ssoRequired(Response $response): Response
+    {
+        return Json::error(
+            $response,
+            'sso_required',
+            'Přihlaste se přes poskytovatele identity organizace.',
+            401,
+            ['provider' => $this->loginPolicy?->requiredProvider()],
+        );
+    }
 
     public function process(Request $request, Handler $handler): Response
     {
@@ -153,7 +187,7 @@ final class AuthMiddleware implements MiddlewareInterface
                     || (int) $binding['active'] !== 1
                     || (string) $binding['resource'] !== $resource
                     || ($this->mcpResources !== null && !$this->mcpResources->allowsGrant(
-                        $resource, (int) $tokenRow['user_id'], $tokenRow['supplier_id'], (string) $tokenRow['scope'],
+                        $resource, (int) $tokenRow['user_id'], $tokenRow['supplier_id'], (string) $tokenRow['scope'], $tokenRow['issued_auth_method'] ?? null,
                     ))
                     || ($path !== '/mcp' && !($request->getAttribute('mcp.internal') === true
                         && str_starts_with($path, '/api/')))
@@ -165,7 +199,10 @@ final class AuthMiddleware implements MiddlewareInterface
 
             if (($tokenRow['audience'] ?? 'api') === 'mcp') {
                 $tokenRow['mcp_resource'] = $resource;
-                $tokenRow['mcp_client_surface'] = $resource !== rtrim((string) $this->config->get('app.url', ''), '/') . '/mcp';
+                // Klientský povrch určuje typ role, ne adresa: klient má stejný
+                // omezený katalog i na kanonické adrese instalace.
+                $tokenRow['mcp_client_surface'] = ($tokenRow['user_role_type'] ?? null) === 'client'
+                    || $resource !== rtrim((string) $this->config->get('app.url', ''), '/') . '/mcp';
             }
 
             $ip = $this->ipMatcher->clientIp(
@@ -239,7 +276,21 @@ final class AuthMiddleware implements MiddlewareInterface
             ];
             Locale::set((string) ($user['locale'] ?? 'cs'));
 
+            // Token vydaný ze sezení z hesla nebo passkey při vynucení přihlášení
+            // přes poskytovatele identity neplatí, jinak by vynucení obešel.
+            if ($this->loginPolicy !== null
+                && !$this->loginPolicy->authMethodAllowed(isset($tokenRow['issued_auth_method']) ? (string) $tokenRow['issued_auth_method'] : null)
+            ) {
+                return $this->withMcpChallenge($request, $this->ssoRequired($this->responseFactory->createResponse(401)));
+            }
+
             $this->apiTokens->touch($tokenRow['id'], $ip);
+
+            // Plný zápis (#371) platí jen na instanci, která ho povoluje; jinak se token
+            // s příznakem chová jako běžný. Rozhoduje se tady jednou, brány čtou jen
+            // {@see \MyInvoice\Security\RequestAuthorization::isSystemWriteToken()}.
+            $tokenRow['system_write'] = (new \MyInvoice\Service\Auth\SystemWriteTokenFeature($this->config))
+                ->appliesTo($tokenRow);
 
             $request = $request
                 ->withAttribute(self::ATTR_USER, $user)
@@ -291,6 +342,18 @@ final class AuthMiddleware implements MiddlewareInterface
             $user = $this->loadUser((int) $session['user_id']);
         }
 
+        $ssoRequired = false;
+        if ($session !== null && !$logoutTombstone && $this->loginPolicy !== null
+            && !$this->loginPolicy->authMethodAllowed(isset($session['auth_method']) ? (string) $session['auth_method'] : null)
+        ) {
+            // Instalace vynucuje přihlášení přes poskytovatele identity. Sezení
+            // z hesla, passkey nebo záložního kódu (typicky vydané před zapnutím
+            // vynucení) se zruší, uživatel se přihlásí znovu u poskytovatele.
+            $this->sessions->destroy($token);
+            $session = null;
+            $ssoRequired = true;
+        }
+
         if ($session !== null) {
             if (is_array($user) && $user['is_active'] === true) {
                 // SessionManager vrací účet v upstream tvaru (legacy `users.role`).
@@ -328,6 +391,19 @@ final class AuthMiddleware implements MiddlewareInterface
 
         if ($request->getAttribute(self::ATTR_USER) === null) {
             $response = $this->responseFactory->createResponse(401);
+            if ($ssoRequired) {
+                return $this->ssoRequired($response);
+            }
+            // Relace ukončená novějším přihlášením nad limit licence dostane
+            // vlastní kód, aby aplikace řekla, proč uživatele odhlásila.
+            if ($token !== '' && $this->sessions->isSuperseded($token)) {
+                return Json::error(
+                    $response,
+                    'session_superseded',
+                    'Byli jste odhlášeni, protože se k vašemu účtu přihlásil někdo jiný.',
+                    401,
+                );
+            }
             return Json::error($response, 'unauthenticated', 'Nepřihlášený uživatel.', 401);
         }
 

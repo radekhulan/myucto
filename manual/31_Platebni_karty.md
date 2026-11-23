@@ -121,6 +121,7 @@ V podvojném účetnictví můžete platby kartou účtovat **přes mezičlen s 
 | „Nalezen možný doklad. Potvrďte ho v detailu výpisu.“ | Podobný doklad je jen návrh | Klikněte na **Výpis** a návrh potvrďte. |
 | „Doklad k platbě zatím nenalezen.“ | Doklad ještě není přijatý | Nahrajte účtenku, nebo počkejte na doklad. |
 | Tlačítka **Bez dokladu** a **K tíži držitele** chybí | Platba není zaúčtovaná přes mezičlen, nebo nemáte oprávnění zaúčtovat bankovní pohyby | Zapněte mezičlen (viz [§ 31.7](#317-krok-za-krokem-zapnuti-uctovani-pres-meziclen)), nebo požádejte o oprávnění. |
+| **Bez dokladu** skončí hláškou „Zápis nelze zaúčtovat bez povinných systémových dimenzí …“ | Firma účtuje podle vyhlášky 504/2002 Sb. a náklad uzavření nemá činnost | Doplňte dimenzi pohybu v detailu výpisu, výchozí dimenzi bankovního účtu výpisu ([§ 30](30_Bankovni_ucty.md)), nebo pravidlo dimenze s výchozí hodnotou pro nákladový účet ([§ 114](114_Dimenze.md)). Pak uzavření zopakujte. |
 | Platba není na záložce **Platby bez dokladu** | Je to nákup kreditní kartou, nebo je platba už uzavřená | Nákupy kreditní kartou řešte v detailu kreditní karty ([Kreditní karty](112_Kreditni_karty.md)). |
 | Karta označená **Neověřená** | Import výpisu našel koncovku, kterou jste neevidovali | Doplňte název a držitele a kartu uložte, nebo klikněte na **Ověřit kartu**. |
 | Platba na analytice 378.199 Neevidované karty | Zakládání neznámých karet je vypnuté, nebo se karta nedala k datu platby určit | Založte kartu s platností k datu platby, nebo zapněte **Zakládat neznámé karty automaticky**. |

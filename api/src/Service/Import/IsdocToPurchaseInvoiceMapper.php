@@ -10,6 +10,7 @@ use MyInvoice\Service\Accounting\Accrual\AccrualPeriodDetector;
 use MyInvoice\Service\Invoice\PurchaseInvoiceCalculator;
 use MyInvoice\Service\Invoice\TimeBilling;
 use MyInvoice\Service\Oss\OssItemPlanner;
+use MyInvoice\Service\PurchaseInvoice\VendorNumberDuplicates;
 
 /**
  * Mapper z ISDOC normalized array (z IsdocParser) na purchase_invoice draft.
@@ -48,7 +49,9 @@ final class IsdocToPurchaseInvoiceMapper
      *        {@see PurchaseInvoiceInboxScanner}, {@see AiPdfExtractor} i dropzone na
      *        novém dokladu zakládají po jednom a uživatel doklad stejně otevírá —
      *        u AI extrakce je kontrola dokonce nutná. Stav volí tedy volající.
-     * @return array{purchase_invoice_id:int, vendor_id:int, vendor_created:bool}
+     * @return array{purchase_invoice_id:int, vendor_id:int, vendor_created:bool, duplicate:bool, likely_duplicate?:bool}
+     *         `likely_duplicate` = doklad zůstal konceptem kvůli pravděpodobné duplicitě
+     *         s jiným datem vystavení, i když volající chtěl `received`.
      * @throws \InvalidArgumentException pokud ISDOC nemá vendor / patří jinému tenantovi
      */
     public function map(array $parsed, int $supplierId, int $userId, string $status = 'draft'): array
@@ -119,6 +122,8 @@ final class IsdocToPurchaseInvoiceMapper
                 'order_index'            => $i,
                 'accrual_from'           => $accrual['from'] ?? null,
                 'accrual_to'             => $accrual['to'] ?? null,
+                'seller_item_code'       => $line['seller_item_code'] ?? null,
+                'item_ean'               => $line['item_ean'] ?? null,
             ];
         }
 
@@ -139,6 +144,7 @@ final class IsdocToPurchaseInvoiceMapper
             $parsed['issue_date'] ?? null,
             $parsed['tax_date'] ?? null,
         );
+        $documentKind = $this->mapDocumentKind((string) ($parsed['invoice_type'] ?? 'invoice'));
 
         $payload = [
             'vendor_id'             => $resolved['id'],
@@ -146,9 +152,9 @@ final class IsdocToPurchaseInvoiceMapper
                 ?? $resolved['is_vat_payer']
                 ?? $this->liveVendorVatPayer((int) $resolved['id']),
             'vendor_invoice_number' => $this->safeVarsymbol((string) ($parsed['varsymbol'] ?? '')),
-            'document_kind'         => $this->mapDocumentKind((string) ($parsed['invoice_type'] ?? 'invoice')),
+            'document_kind'         => $documentKind,
             'issue_date'            => (string) ($parsed['issue_date'] ?? date('Y-m-d')),
-            'tax_date'              => $parsed['tax_date'] !== null ? (string) $parsed['tax_date'] : null,
+            'tax_date'              => ImportedTaxDatePolicy::resolve($parsed['tax_date'] ?? null, null, $parsed['issue_date'] ?? null, $documentKind),
             'due_date'              => (string) ($parsed['due_date'] ?? date('Y-m-d', strtotime('+14 days'))),
             'received_at'           => $receivedAt['date'],
             // C6 (§ 73/1/a): received_at je jen otisk dat ze souboru, ne vědomé zadání data
@@ -201,8 +207,21 @@ final class IsdocToPurchaseInvoiceMapper
         $payload['vendor_number_seq'] = $this->repo->importDuplicateSeq(
             $supplierId, $resolved['id'], (string) $payload['vendor_invoice_number'], (string) $payload['issue_date'],
         );
+        // Tentýž doklad s jiným datem vystavení (převzatý dřív, nebo z jiného zdroje) unikátní
+        // index nechytí. Neblokuje, ale doklad nevznikne jako přijatý: zůstane konceptem
+        // s varováním, ať ho účetní porovná dřív, než vstoupí do nákladů a DPH.
+        $likelyDuplicates = VendorNumberDuplicates::likely(
+            $this->db->pdo(), $supplierId, (int) $resolved['id'],
+            (string) $payload['vendor_invoice_number'], (string) $payload['issue_date'],
+        );
+        if ($likelyDuplicates !== []) {
+            $payload['status'] = 'draft';
+        }
 
         $id = $this->repo->createDraft($payload, $userId, $supplierId);
+        if ($likelyDuplicates !== []) {
+            $this->repo->flagLikelyVendorDuplicate($id, $supplierId, $likelyDuplicates);
+        }
         // Soubor bez čitelného data vystavení i DUZP → datum přijetí je NÁHRADA. Ať to
         // uživatel vidí na dokladu, ne aby to tiše prošlo (stejný box jako varování DPH níž).
         if ($receivedAt['fell_back']) {
@@ -250,6 +269,7 @@ final class IsdocToPurchaseInvoiceMapper
             'vendor_id'           => $resolved['id'],
             'vendor_created'      => $resolved['created'],
             'duplicate'           => false,
+            'likely_duplicate'    => $likelyDuplicates !== [],
         ];
     }
 

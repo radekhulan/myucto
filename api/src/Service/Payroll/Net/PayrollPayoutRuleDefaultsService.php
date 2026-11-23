@@ -50,11 +50,28 @@ final class PayrollPayoutRuleDefaultsService
     public function proposeFor(int $supplierId, int $employeeId): array
     {
         $this->repository->assertEmployee($supplierId, $employeeId);
-        $profile = $this->profile($supplierId, $employeeId);
-        $hasActiveRules = $this->hasActiveRules(
-            $this->repository->listForEmployee($supplierId, $employeeId),
-        );
 
+        return $this->proposal(
+            $this->profile($supplierId, $employeeId),
+            $this->hasActiveRules($this->repository->listForEmployee($supplierId, $employeeId)),
+            fn (): array => $this->verifiedAccountIds($supplierId, $employeeId),
+        );
+    }
+
+    /**
+     * @param array<string,mixed>|null $profile
+     * @param callable():list<int> $verifiedAccountIds
+     * @return array{
+     *   payout_method:?string,
+     *   available:bool,
+     *   applicable:bool,
+     *   has_active_rules:bool,
+     *   blocked_reason:?string,
+     *   rules:list<array<string,mixed>>
+     * }
+     */
+    private function proposal(?array $profile, bool $hasActiveRules, callable $verifiedAccountIds): array
+    {
         if ($profile === null) {
             return $this->blocked(
                 null,
@@ -65,7 +82,7 @@ final class PayrollPayoutRuleDefaultsService
         $payoutMethod = (string) $profile['payout_method'];
 
         try {
-            $input = $this->proposeInput($supplierId, $employeeId, $profile);
+            $input = $this->proposeInput($profile, $verifiedAccountIds);
         } catch (\DomainException $exception) {
             return $this->blocked(
                 $payoutMethod,
@@ -124,32 +141,176 @@ final class PayrollPayoutRuleDefaultsService
                     . 'není známý.',
                 );
             }
-            $input = $this->proposeInput($supplierId, $employeeId, $profile);
+            $input = $this->proposeInput(
+                $profile,
+                fn (): array => $this->verifiedAccountIds($supplierId, $employeeId),
+            );
             $this->rules->create($supplierId, $employeeId, $input);
 
             return $this->repository->listForEmployee($supplierId, $employeeId);
         });
     }
 
+    public const BULK_LIMIT = 500;
+
+    /**
+     * @param list<int> $employeeIds
+     * @return list<array{employee_id:int,full_name:string,payout_method:?string,applicable:bool,destination_kind:?string,blocked_reason:?string}>
+     */
+    public function previewMany(int $supplierId, array $employeeIds): array
+    {
+        return $this->previewRows($supplierId, $this->names($supplierId, $employeeIds));
+    }
+
+    /**
+     * Náhled pro osoby, které výplatní pravidlo nemají: s vztahem, který
+     * trvá nebo se chystá, a bez jediného aktivního pravidla. Nabídka
+     * v Zaměstnancích nemá výběr osob, a tak si je určí sama.
+     *
+     * @return array{people:list<array{employee_id:int,full_name:string,payout_method:?string,applicable:bool,destination_kind:?string,blocked_reason:?string}>,truncated:bool}
+     */
+    public function previewWithoutRules(int $supplierId): array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT employee.id, employee.full_name
+               FROM payroll_employees employee
+              WHERE employee.supplier_id = ?
+                AND employee.is_active = 1
+                AND EXISTS (
+                  SELECT 1
+                    FROM payroll_employments employment
+                   WHERE employment.supplier_id = employee.supplier_id
+                     AND employment.employee_id = employee.id
+                     AND employment.status IN ('planned', 'preregistered', 'active', 'suspended')
+                )
+                AND NOT EXISTS (
+                  SELECT 1
+                    FROM payroll_payout_rules rule
+                   WHERE rule.supplier_id = employee.supplier_id
+                     AND rule.employee_id = employee.id
+                     AND rule.is_active = 1
+                )
+              ORDER BY employee.full_name, employee.id
+              LIMIT " . (self::BULK_LIMIT + 1)
+        );
+        $stmt->execute([$supplierId]);
+        $names = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $names[(int) $row['id']] = (string) $row['full_name'];
+        }
+        $truncated = count($names) > self::BULK_LIMIT;
+
+        return [
+            'people' => $this->previewRows($supplierId, array_slice($names, 0, self::BULK_LIMIT, true)),
+            'truncated' => $truncated,
+        ];
+    }
+
+    /**
+     * @param array<int,string> $names
+     * @return list<array{employee_id:int,full_name:string,payout_method:?string,applicable:bool,destination_kind:?string,blocked_reason:?string}>
+     */
+    private function previewRows(int $supplierId, array $names): array
+    {
+        if ($names === []) {
+            return [];
+        }
+        $ids = array_keys($names);
+        $profiles = $this->profiles($supplierId, $ids);
+        $withActiveRules = $this->employeesWithActiveRules($supplierId, $ids);
+        $accounts = $this->verifiedAccountIdsByEmployee($supplierId, $ids);
+        $rows = [];
+        foreach ($ids as $employeeId) {
+            $proposal = $this->proposal(
+                $profiles[$employeeId] ?? null,
+                isset($withActiveRules[$employeeId]),
+                static fn (): array => $accounts[$employeeId] ?? [],
+            );
+            $rows[] = [
+                'employee_id' => $employeeId,
+                'full_name' => $names[$employeeId],
+                'payout_method' => $proposal['payout_method'],
+                'applicable' => $proposal['available'] && $proposal['applicable'],
+                'destination_kind' => $proposal['rules'][0]['destination_kind'] ?? null,
+                'blocked_reason' => $proposal['blocked_reason'],
+            ];
+        }
+
+        return $rows;
+    }
+
+    /**
+     * @param list<int> $employeeIds
+     * @return array{applied:list<array<string,mixed>>,skipped:list<array{employee_id:int,full_name:string,reason:string}>}
+     */
+    public function applyMany(int $supplierId, array $employeeIds): array
+    {
+        $names = $this->names($supplierId, $employeeIds);
+        $applied = [];
+        $skipped = [];
+        foreach (array_keys($names) as $employeeId) {
+            try {
+                foreach ($this->applyDefaults($supplierId, $employeeId) as $rule) {
+                    if ($rule['is_active'] === true) {
+                        $applied[] = $rule;
+                    }
+                }
+            } catch (\DomainException $exception) {
+                $skipped[] = [
+                    'employee_id' => $employeeId,
+                    'full_name' => $names[$employeeId],
+                    'reason' => $exception->getMessage(),
+                ];
+            }
+        }
+
+        return ['applied' => $applied, 'skipped' => $skipped];
+    }
+
+    /**
+     * @param list<int> $employeeIds
+     * @return array<int,string>
+     */
+    private function names(int $supplierId, array $employeeIds): array
+    {
+        $ids = array_values(array_unique(array_filter(
+            array_map('intval', $employeeIds),
+            static fn (int $id): bool => $id > 0,
+        )));
+        if ($ids === []) {
+            return [];
+        }
+        if (count($ids) > self::BULK_LIMIT) {
+            throw new \InvalidArgumentException(sprintf('Najednou jde zpracovat nejvýš %d osob.', self::BULK_LIMIT));
+        }
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT id, full_name FROM payroll_employees
+              WHERE supplier_id = ? AND id IN (' . implode(',', array_fill(0, count($ids), '?')) . ')
+              ORDER BY full_name, id'
+        );
+        $stmt->execute([$supplierId, ...$ids]);
+        $names = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $names[(int) $row['id']] = (string) $row['full_name'];
+        }
+
+        return $names;
+    }
+
     /**
      * @param array<string,mixed> $profile
+     * @param callable():list<int> $verifiedAccountIds
      * @throws \DomainException když z karty jednoznačné pravidlo neplyne
      */
-    private function proposeInput(
-        int $supplierId,
-        int $employeeId,
-        array $profile,
-    ): PayrollPayoutRuleInput {
+    private function proposeInput(array $profile, callable $verifiedAccountIds): PayrollPayoutRuleInput
+    {
         $payoutMethod = (string) $profile['payout_method'];
 
         return match ($payoutMethod) {
             'cash' => PayrollPayoutRuleInput::remainder('cash', null),
             'bank' => PayrollPayoutRuleInput::remainder(
                 'bank',
-                'account:' . $this->singleVerifiedAccountId(
-                    $supplierId,
-                    $employeeId,
-                ),
+                'account:' . self::singleVerifiedAccountId($verifiedAccountIds()),
             ),
             PayrollPartnerSettlement::KIND => PayrollPayoutRuleInput::remainder(
                 PayrollPartnerSettlement::KIND,
@@ -173,23 +334,11 @@ final class PayrollPayoutRuleDefaultsService
      * se navrhl neověřený účet, pravidlo by vzniklo, ale výplata by o měsíc
      * později spadla na „Zmrazený účet nemá úplné ověření".
      */
-    private function singleVerifiedAccountId(int $supplierId, int $employeeId): int
+    /** @param list<int> $ids */
+    private static function singleVerifiedAccountId(array $ids): int
     {
-        $stmt = $this->db->pdo()->prepare(
-            'SELECT id
-               FROM payroll_person_accounts
-              WHERE supplier_id = ? AND employee_id = ?
-                AND is_active = 1
-                AND verification_source IS NOT NULL
-                AND verified_on IS NOT NULL
-                AND verified_by IS NOT NULL
-                AND (effective_to IS NULL OR effective_to >= CURRENT_DATE)
-              ORDER BY id'
-        );
-        $stmt->execute([$supplierId, $employeeId]);
-        $ids = $stmt->fetchAll(PDO::FETCH_COLUMN);
         if (count($ids) === 1) {
-            return (int) $ids[0];
+            return $ids[0];
         }
         if ($ids === []) {
             throw new \DomainException(
@@ -203,6 +352,77 @@ final class PayrollPayoutRuleDefaultsService
             'Zaměstnanec má ' . count($ids) . ' ověřené výplatní účty. Výchozí '
             . 'pravidlo z nich nelze odvodit — vyberte cílový účet ručně.',
         );
+    }
+
+    /** @return list<int> */
+    private function verifiedAccountIds(int $supplierId, int $employeeId): array
+    {
+        return $this->verifiedAccountIdsByEmployee($supplierId, [$employeeId])[$employeeId] ?? [];
+    }
+
+    /**
+     * @param list<int> $employeeIds
+     * @return array<int,list<int>>
+     */
+    private function verifiedAccountIdsByEmployee(int $supplierId, array $employeeIds): array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT employee_id, id
+               FROM payroll_person_accounts
+              WHERE supplier_id = ? AND employee_id IN (' . implode(',', array_fill(0, count($employeeIds), '?')) . ')
+                AND is_active = 1
+                AND verification_source IS NOT NULL
+                AND verified_on IS NOT NULL
+                AND verified_by IS NOT NULL
+                AND (effective_to IS NULL OR effective_to >= CURRENT_DATE)
+              ORDER BY employee_id, id'
+        );
+        $stmt->execute([$supplierId, ...$employeeIds]);
+        $accounts = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $accounts[(int) $row['employee_id']][] = (int) $row['id'];
+        }
+
+        return $accounts;
+    }
+
+    /**
+     * @param list<int> $employeeIds
+     * @return array<int,array<string,mixed>>
+     */
+    private function profiles(int $supplierId, array $employeeIds): array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT employee_id, payout_method, partner_settlement_account_code
+               FROM payroll_employee_profiles
+              WHERE supplier_id = ? AND employee_id IN (' . implode(',', array_fill(0, count($employeeIds), '?')) . ')'
+        );
+        $stmt->execute([$supplierId, ...$employeeIds]);
+        $profiles = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $employeeId = (int) $row['employee_id'];
+            unset($row['employee_id']);
+            $profiles[$employeeId] = $row;
+        }
+
+        return $profiles;
+    }
+
+    /**
+     * @param list<int> $employeeIds
+     * @return array<int,true>
+     */
+    private function employeesWithActiveRules(int $supplierId, array $employeeIds): array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT DISTINCT employee_id
+               FROM payroll_payout_rules
+              WHERE supplier_id = ? AND is_active = 1
+                AND employee_id IN (' . implode(',', array_fill(0, count($employeeIds), '?')) . ')'
+        );
+        $stmt->execute([$supplierId, ...$employeeIds]);
+
+        return array_fill_keys(array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN)), true);
     }
 
     /** @param array<string,mixed> $profile */

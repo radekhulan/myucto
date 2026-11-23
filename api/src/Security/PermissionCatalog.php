@@ -6,7 +6,7 @@ namespace MyInvoice\Security;
 
 final class PermissionCatalog
 {
-    public const VERSION = '2026-10-seat-readonly-tokens-v2';
+    public const VERSION = '2026-11-staff-client-scope-v1';
 
     /** @var list<string> */
     private const GROUPS = [
@@ -25,7 +25,6 @@ final class PermissionCatalog
 
         $staffOnly = ['staff'];
         $both = ['staff', 'client'];
-        $clientOnly = ['client'];
         $rows = [
             ['dashboard', 'dashboard', 'Dashboard', $staffOnly],
             ['dashboard.portfolio', 'dashboard', 'Přehled firem', $staffOnly],
@@ -47,6 +46,9 @@ final class PermissionCatalog
             ['invoices.delete', 'invoices', 'Smazat fakturu', $both],
             ['invoices.approval', 'invoices', 'Schvalování faktur', $both],
             ['invoices.edit_issued', 'invoices', 'Upravit vystavenou fakturu', $staffOnly],
+            ['sales_quotes', 'invoices', 'Nabídky', $staffOnly],
+            ['sales_quotes.write', 'invoices', 'Upravovat nabídky', $staffOnly],
+            ['sales_quotes.send', 'invoices', 'Odesílat nabídky', $staffOnly],
             ['purchase_invoices', 'purchase_invoices', 'Přijaté faktury', $both],
             ['purchase_invoices.create', 'purchase_invoices', 'Vytvořit přijatou fakturu', $both],
             ['purchase_invoices.transition', 'purchase_invoices', 'Změnit stav přijaté faktury', $both],
@@ -77,15 +79,21 @@ final class PermissionCatalog
             ['documents.requests', 'documents', 'Požadavky klientovi', $staffOnly],
             ['documents.inbox', 'documents', 'Příchozí doklady', $staffOnly],
             ['documents.inbox.delete', 'documents', 'Trvale vyřadit z příchozí fronty', $staffOnly],
-            ['documents.submit', 'documents', 'Předávat doklady účetní', $clientOnly],
+            ['documents.submit', 'documents', 'Předávat doklady účetní', $both],
             ['accounting', 'accounting', 'Účetnictví', $staffOnly],
             ['accounting.journal.write', 'accounting', 'Zápisy v deníku', $staffOnly],
             ['accounting.journal.post', 'accounting', 'Zaúčtovat doklad', $staffOnly],
+            ['accounting.journal.bulk_repost', 'accounting', 'Hromadně doúčtovat bankovní pohyby', $staffOnly],
+            ['accounting.accruals', 'accounting', 'Časové rozlišení', $staffOnly],
+            ['accounting.accruals.write', 'accounting', 'Spravovat položky časového rozlišení', $staffOnly],
+            ['accounting.bulk_changes', 'accounting', 'Hromadné změny dokladů a zápisů', $staffOnly],
             ['accounting.periods.manage', 'accounting', 'Spravovat období', $staffOnly],
             ['accounting.periods.close', 'accounting', 'Uzavřít období', $staffOnly],
             ['accounting.periods.close_override', 'accounting', 'Uzavřít období přes nezaúčtované doklady', $staffOnly],
+            ['accounting.period_lock', 'accounting', 'Posunout zámek účtování k datu', $staffOnly],
             ['accounting.offsets', 'accounting', 'Vzájemné zápočty', $staffOnly],
             ['accounting.templates', 'accounting', 'Účetní šablony', $staffOnly],
+            ['accounting.membership_erasure', 'accounting', 'Schválit a provést výmaz osobních údajů bývalých členů', $staffOnly],
             ['property', 'property', 'Registr SVJ', $staffOnly],
             ['property.registry.manage', 'property', 'Spravovat podklady registru SVJ', $staffOnly],
             ['property.registry.confirm', 'property', 'Potvrzovat právní podklady SVJ', $staffOnly],
@@ -116,7 +124,7 @@ final class PermissionCatalog
             ['tax_evidence.export', 'tax_evidence', 'Exportovat daňovou evidenci', $staffOnly],
             ['reports', 'reports', 'Daně a výkazy', $staffOnly],
             ['reports.finalize', 'reports', 'Finalizovat výkaz', $staffOnly],
-            ['reports.submissions', 'reports', 'Připravená podání DPH, KH a SH', $clientOnly],
+            ['reports.submissions', 'reports', 'Připravená podání DPH, KH a SH', $both],
             ['reports.submit', 'reports', 'Elektronicky podat', $both],
             ['reports.submissions.manage', 'reports', 'Spravovat nastavení daňových podání', $staffOnly],
             ['reports.reopen', 'reports', 'Znovu otevřít výkaz', $staffOnly],
@@ -181,8 +189,9 @@ final class PermissionCatalog
             ['settings.email_profiles', 'settings', 'Odesílací profily firmy', $both],
             ['settings.email_templates', 'settings', 'E-mailové šablony firmy', $both],
             ['settings.payment_qr', 'settings', 'Platební QR firmy', $both],
-            ['settings.signing_profiles', 'settings', 'Firemní podpisové profily a PDF podpisy', $clientOnly],
+            ['settings.signing_profiles', 'settings', 'Firemní podpisové profily a PDF podpisy', $both],
             ['settings.branding', 'settings', 'Branding firmy', $both],
+            ['settings.invoice_defaults', 'settings', 'Výchozí hodnoty dokladů', $both],
             ['settings.ai_provider', 'settings', 'AI poskytovatel', $staffOnly],
             ['settings.signing', 'utilities', 'Elektronické podepisování', $staffOnly],
             ['utilities', 'utilities', 'Nástroje', $staffOnly],
@@ -241,9 +250,12 @@ final class PermissionCatalog
                 // Úprava vystavené faktury mění doklad, který už odběratel dostal; roli ji
                 // přidělí správce v editoru rolí, výchozí účetní ji nemá.
                 'invoices.edit_issued',
-                'accounting.periods.close', 'accounting.periods.manage',
+                'accounting.periods.close', 'accounting.periods.manage', 'accounting.period_lock', 'accounting.journal.bulk_repost',
+                // Hromadné změny mění stovky dokladů jedním krokem; stejně jako hromadné
+                // přeúčtování je roli přidělí správce v editoru rolí.
+                'accounting.bulk_changes',
                 'property.registry.confirm', 'property.receivables.confirm', 'property.charges.confirm', 'property.charges.reverse', 'property.payments.reverse', 'property.opening.revise', 'property.settlements.reverse', 'property.funds.reverse',
-                'settings.ai_provider', 'settings.bank_accounts', 'settings.branding',
+                'settings.ai_provider', 'settings.bank_accounts', 'settings.branding', 'settings.invoice_defaults',
                 'settings.company.write', 'settings.domains', 'settings.email_profiles', 'settings.email_templates', 'settings.payment_qr', 'utilities.import',
                 'payroll.settings', 'payroll.person.read_sensitive', 'payroll.approve',
                 'payroll.reopen', 'payroll.health_evidence', 'payroll.enforcement', 'payroll.enforcement.cooperation', 'payroll.insolvency', 'payroll.rulesets',
@@ -252,8 +264,13 @@ final class PermissionCatalog
                 // ve výchozím stavu zůstávají: prodloužit lhůtu nebo zadržet výmaz
                 // je konzervativní směr, kterým se nic neztratí.
                 'payroll.erasure',
+                // Výmaz osobních údajů bývalých členů spolku je stejně nevratný jako výmaz mezd.
+                'accounting.membership_erasure',
                 // Pokladní certifikát s privátním klíčem podepisuje evidenci tržeb jménem firmy.
                 'eet.certificates',
+                // Rozsah klienta (předání dokladů, připravená podání, firemní podpisy)
+                // dostane interní role jen výslovně v editoru rolí.
+                'documents.submit', 'reports.submissions', 'settings.signing_profiles',
             ];
             $read = [
                 'dashboard', 'dashboard.portfolio', 'tax_evidence', 'tax_evidence.export',
@@ -271,9 +288,9 @@ final class PermissionCatalog
 
         $keys = match ($systemKey) {
             'readonly' => [
-                'dashboard', 'dashboard.portfolio', 'clients', 'projects', 'invoices',
+                'dashboard', 'dashboard.portfolio', 'clients', 'projects', 'invoices', 'sales_quotes',
                 'purchase_invoices', 'purchase_invoices.approve', 'recurring', 'price_list', 'bank', 'documents', 'documents.requests', 'documents.inbox',
-                'accounting', 'property', 'other_items', 'tax_evidence', 'tax_evidence.export', 'reports', 'reports.export',
+                'accounting', 'accounting.accruals', 'property', 'other_items', 'tax_evidence', 'tax_evidence.export', 'reports', 'reports.export',
                 'cash', 'eet', 'assets', 'stock', 'eshop', 'logbook', 'settings.company', 'utilities',
                 'utilities.export', 'utilities.archives', 'profile', 'profile.tokens',
             ],

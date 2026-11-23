@@ -49,6 +49,9 @@
                 <td class="col-name">{{ row.name|slice(0, name_chars) }}</td>
                 {% elseif col.key == 'qty' %}
                 <td class="num col-qty {{ row.min_qty and row.qty < row.min_qty ? 'below-min' : '' }}">{{ row.qty|cz_money }}</td>
+                {% elseif col.key == 'sale_price' %}
+                {# Cena karty přichází ve tvaru „12.50“ / „0.0108“: haléřová na dvě místa, levnější na svá. #}
+                <td class="num col-sale_price">{{ row.sale_price is null ? '' : row.sale_price|number_format(row.sale_price|split('.')|last|length, ',', ' ') }}</td>
                 {% elseif col.key == 'note' %}
                 <td class="col-note">{{ row.note is null ? '' : row.note|slice(0, 120) }}</td>
                 {% elseif col.numeric %}

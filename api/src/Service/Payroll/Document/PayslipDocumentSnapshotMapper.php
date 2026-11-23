@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Payroll\Document;
 
+use MyInvoice\Service\Payroll\PayrollAccountingDefaults;
 use MyInvoice\Service\Payroll\Accounting\PayrollAccountCode;
 use MyInvoice\Service\Payroll\Calculation\Money;
 use MyInvoice\Service\Payroll\Component\PayrollExemptIncomeSplit;
@@ -170,6 +171,7 @@ final class PayslipDocumentSnapshotMapper
 
         [
             'income_lines' => $incomeLines,
+            'hourly_claims' => $hourlyClaims,
             'gross_minor_units' => $grossMinorUnits,
             'cash_minor_units' => $cashMinorUnits,
             'employment_label' => $employmentLabel,
@@ -361,6 +363,7 @@ final class PayslipDocumentSnapshotMapper
             insuranceLiabilityAccount: $insuranceLiability,
             annualSettlementMinorUnits: $annualSettlement,
             incomeDetailStatus: PayslipDocumentData::INCOME_DETAIL_RECORDED,
+            hourlyClaims: $hourlyClaims,
         );
 
         return $this->snapshot($document);
@@ -400,6 +403,7 @@ final class PayslipDocumentSnapshotMapper
         }
 
         $incomeLines = [];
+        $hourlyClaims = [];
         $gross = new Money(0);
         $cash = new Money(0);
         $labels = [];
@@ -424,6 +428,7 @@ final class PayslipDocumentSnapshotMapper
             $fallbackAccounts = $this->relationAccounts(
                 $relationType,
                 $configuredAccounts,
+                $employment,
             );
 
             $inputs = [];
@@ -438,6 +443,11 @@ final class PayslipDocumentSnapshotMapper
                     );
                 }
                 $inputs[$inputId] = $input;
+            }
+            foreach ($employmentSnapshot['hourly_wage_claims'] ?? [] as $claimSource) {
+                $claimInput = $inputs[$claimSource['input_id'] ?? 0] ?? [];
+                $hourlyClaims[] = PayslipHourlyDetail::claim($claimSource, $employmentId,
+                    $claimInput['component']['name'] ?? PayslipHourlyDetail::label($claimSource['purpose'] ?? ''));
             }
             foreach ($this->rows(
                 $employmentResult['inputs'] ?? null,
@@ -473,6 +483,7 @@ final class PayslipDocumentSnapshotMapper
                     $sourceAmount,
                     $split->basis,
                     $split->exemptMinorUnits,
+                    isset($input['hourly_calculation']) ? PayslipHourlyDetail::input($input['hourly_calculation'], $sourceAmount) : null,
                 );
                 $gross = $gross->add(new Money($sourceAmount));
                 $cash = $cash->add(new Money($cashAmount));
@@ -512,6 +523,7 @@ final class PayslipDocumentSnapshotMapper
             $fallback = $this->relationAccounts(
                 $this->requiredText($employment, 'relation_type'),
                 $configuredAccounts,
+                $employment,
             );
             $accountPairs[] = [
                 'debit' => $fallback['gross_debit'],
@@ -530,6 +542,7 @@ final class PayslipDocumentSnapshotMapper
 
         return [
             'income_lines' => $incomeLines,
+            'hourly_claims' => $hourlyClaims,
             'gross_minor_units' => $gross->minorUnits,
             'cash_minor_units' => $cash->minorUnits,
             'employment_label' => implode(', ', array_values($labels)),
@@ -812,7 +825,8 @@ final class PayslipDocumentSnapshotMapper
     private function snapshot(PayslipDocumentData $document): array
     {
         return [
-            'schema_version' => self::SCHEMA_VERSION,
+            'schema_version' => $document->hourlyClaims === [] ? self::SCHEMA_VERSION : 'payroll-payslip-document.v3',
+            ...($document->hourlyClaims === [] ? [] : ['hourly_claims' => $document->hourlyClaims]),
             'employer_name' => $document->employerName,
             'employer_identification_number' =>
                 $document->employerIdentificationNumber,
@@ -872,6 +886,7 @@ final class PayslipDocumentSnapshotMapper
 
     /**
      * @param array<string,mixed> $accounts
+     * @param array<string,mixed> $employment zmrazený pracovní vztah
      * @return array{
      *   gross_debit:string,
      *   gross_credit:string,
@@ -879,7 +894,7 @@ final class PayslipDocumentSnapshotMapper
      *   employer_insurance_credit:string
      * }
      */
-    private function relationAccounts(string $relationType, array $accounts): array
+    private function relationAccounts(string $relationType, array $accounts, array $employment = []): array
     {
         [$grossDebit, $grossCredit] = match ($relationType) {
             'employment', 'small_scale_employment', 'dpp', 'dpc' => [
@@ -899,9 +914,21 @@ final class PayslipDocumentSnapshotMapper
             ),
         };
 
+        $credit = $this->account($accounts, $grossCredit);
+        if ($relationType === 'statutory_body') {
+            // Jednatel bez podílu má závazek na 331, je-li předkontace zmrazená;
+            // páska ukazuje tutéž dvojici jako zaúčtování.
+            $credit = PayrollAccountingDefaults::relationGrossCredit(
+                $relationType,
+                $accounts,
+                $accounts,
+                $employment,
+            );
+        }
+
         return [
             'gross_debit' => $this->account($accounts, $grossDebit),
-            'gross_credit' => $this->account($accounts, $grossCredit),
+            'gross_credit' => $credit,
             'employer_insurance_debit' =>
                 $this->account($accounts, 'employer_insurance_debit'),
             'employer_insurance_credit' =>

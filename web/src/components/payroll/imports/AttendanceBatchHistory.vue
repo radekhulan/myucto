@@ -12,7 +12,7 @@ import {
 import { payrollAttendanceApprovalApi, type AttendanceTimeApproval } from '@/api/payrollAttendanceApproval'
 import { apiErrorMessage } from '@/api/errors'
 import { useToast } from '@/composables/useToast'
-import { formatDateTime, formatMoneyMinor } from '@/composables/useFormat'
+import { formatDateTime, formatMoneyMinor, formatPeriodNumeric } from '@/composables/useFormat'
 import { btnOutline, btnOutlineSm, ICONS } from '@/components/ui/buttonStyles'
 import AttendanceTimeApprovalResult from './AttendanceTimeApprovalResult.vue'
 import { formatHours } from './importHelpers'
@@ -145,7 +145,7 @@ defineExpose({ reload })
       <div class="flex flex-wrap items-center gap-3">
         <label class="inline-flex items-center gap-2 text-sm text-neutral-700">
           <input v-model="onlyPeriod" type="checkbox" class="rounded border-neutral-300 text-payroll-600">
-          {{ t('payroll_imports.attendance.history.only_period', { period }) }}
+          {{ t('payroll_imports.attendance.history.only_period', { period: formatPeriodNumeric(period) }) }}
         </label>
         <button type="button" :class="btnOutline('neutral')" :disabled="loading" @click="reload">
           <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.cycle" /></svg>
@@ -165,7 +165,7 @@ defineExpose({ reload })
         <div class="flex flex-wrap items-center justify-between gap-3 px-4 py-3 text-sm">
           <div class="min-w-0">
             <p class="font-medium text-neutral-900">
-              {{ t('payroll_imports.attendance.history.batch_title', { id: batch.id, period: batch.period }) }}
+              {{ t('payroll_imports.attendance.history.batch_title', { id: batch.id, period: formatPeriodNumeric(batch.period) }) }}
             </p>
             <p class="text-xs text-neutral-500">
               {{ formatDateTime(batch.created_at) }}<template v-if="batch.created_by_name"> · {{ batch.created_by_name }}</template>
@@ -259,7 +259,7 @@ defineExpose({ reload })
                 <tr v-for="row in detail[batch.id]" :key="`${row.employment_id}-${row.meaning}`">
                   <td class="px-3 py-1.5"><span class="font-medium">{{ row.employee_name }}</span> <span class="text-xs text-neutral-500">{{ personalNumberLabel(t, row.employment_code) }}</span></td>
                   <td class="px-3 py-1.5">{{ meaningLabel(row.meaning) }}</td>
-                  <td class="whitespace-nowrap px-3 py-1.5 text-right tabular-nums">{{ row.hours !== null ? formatHours(row.hours, locale) : formatMoneyMinor(row.amount_minor) }}</td>
+                  <td class="whitespace-nowrap px-3 py-1.5 text-right tabular-nums">{{ row.meaning === 'worked_days' && row.hours !== null ? Math.round(Number(row.hours)) : row.hours !== null ? formatHours(row.hours, locale) : formatMoneyMinor(row.amount_minor) }}</td>
                   <td class="max-w-64 truncate px-3 py-1.5 font-mono text-xs text-neutral-500" :title="row.source">{{ row.source }}</td>
                 </tr>
               </tbody>

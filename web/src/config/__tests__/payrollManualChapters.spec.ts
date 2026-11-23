@@ -14,14 +14,16 @@ const EXPECTED_CHAPTERS = new Map<string, string>([
   ['/payroll/travel', '78_Cestovni_nahrady'],
   ['/payroll/quick-inputs', '79_Rychly_mesicni_vstup'],
   ['/payroll/runs', '80_Mzdove_behy'],
+  ['/payroll/month-guide', '80_Mzdove_behy'],
   ['/payroll/posting-reconciliation', '81_Shoda_uctovani_mezd'],
+  ['/payroll/posting-detail', '81_Shoda_uctovani_mezd'],
   ['/payroll/payments', '82_Platby_a_uhrady'],
   ['/payroll/documents', '83_Dokumenty_a_vystupy'],
   ['/payroll/annual-settlement', '84_Rocni_zuctovani'],
   ['/payroll/submissions', '85_Podani_a_hlaseni'],
   // Záložka podání a karta člověka mají vlastní adresu, aby na ně šlo odkázat.
   // Kapitolu dědí po rodiči — je to tatáž agenda, ne nová.
-  ['/payroll/submissions/:tab([a-z_]+)', '85_Podani_a_hlaseni'],
+  ['/payroll/submissions/:tab([a-z0-9_]+)', '85_Podani_a_hlaseni'],
   ['/payroll/people', '86_Zamestnanci'],
   ['/payroll/personnel-file', '86_Zamestnanci'],
   ['/payroll/people/:id(\\d+)', '86_Zamestnanci'],

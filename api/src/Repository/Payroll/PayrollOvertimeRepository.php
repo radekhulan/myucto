@@ -46,21 +46,50 @@ final class PayrollOvertimeRepository
         string $fromDate,
         string $toDate,
     ): array {
+        return $this->segmentsAndManualMonthsForMany($supplierId, $employmentIds, $fromDate, $toDate)['segments'];
+    }
+
+    /**
+     * Jediná dávka pro intervaly i výslovně nahrazující ruční měsíce.
+     * Ruční součet nemá denní rozpad; staré intervaly daného místního měsíce
+     * proto nelze použít ani pro týdenní, ani pro roční kontrolu. Schválená
+     * výslovná nula ve všech segmentech rozpad nepotřebuje. Otevřený souhrn
+     * zatím nevylučuje přesčas; vyžaduje potvrzení či ruční posouzení.
+     *
+     * @param list<int> $employmentIds
+     * @return array{segments:array<int,list<OvertimeSegment>>,manual_months:array<int,list<string>>}
+     */
+    public function segmentsAndManualMonthsForMany(int $supplierId, array $employmentIds, string $fromDate, string $toDate): array
+    {
         $result = array_fill_keys($employmentIds, []);
         if ($employmentIds === []) {
-            return [];
+            return ['segments' => [], 'manual_months' => []];
         }
         $placeholders = implode(',', array_fill(0, count($employmentIds), '?'));
         $stmt = $this->db->pdo()->prepare(
             "SELECT employment_id, starts_at_utc, ends_at_utc,
-                    timezone_name, break_minutes
-               FROM payroll_time_entries
+                    timezone_name, break_minutes, NULL AS manual_period, id, NULL AS manual_zero
+               FROM payroll_time_entries FORCE INDEX (idx_payroll_time_entry_month)
               WHERE supplier_id = ?
                 AND employment_id IN ({$placeholders})
                 AND category = 'overtime'
                 AND status <> 'superseded'
                 AND starts_at_utc >= ?
                 AND starts_at_utc < ?
+              UNION ALL
+             SELECT month_row.employment_id, NULL, NULL, NULL, NULL, month_row.period_start, month_row.id,
+                    CASE WHEN month_row.status = 'approved' AND COUNT(segment.id) > 0
+                              AND COUNT(segment.overtime_duration_units) = COUNT(segment.id)
+                              AND MAX(segment.overtime_duration_units) = 0 THEN 1 ELSE 0 END
+               FROM payroll_time_months month_row FORCE INDEX (uq_payroll_time_month_period)
+               LEFT JOIN payroll_time_month_manual_summaries summary
+                 ON summary.supplier_id = month_row.supplier_id AND summary.time_month_id = month_row.id
+                AND summary.time_month_revision_no = month_row.revision_no
+               LEFT JOIN payroll_time_month_manual_segments segment
+                 ON segment.supplier_id = summary.supplier_id AND segment.summary_id = summary.id
+              WHERE month_row.supplier_id = ? AND month_row.employment_id IN ({$placeholders})
+                AND month_row.period_start >= ? AND month_row.period_start <= ? AND month_row.work_source = 'manual_summary'
+              GROUP BY month_row.employment_id, month_row.period_start, month_row.id, month_row.status
               ORDER BY starts_at_utc, id"
         );
         $stmt->execute([
@@ -70,9 +99,24 @@ final class PayrollOvertimeRepository
                 ->modify('-2 days')->format('Y-m-d H:i:s'),
             (new \DateTimeImmutable($toDate . ' 00:00:00', new \DateTimeZone('UTC')))
                 ->modify('+3 days')->format('Y-m-d H:i:s'),
+            $supplierId, ...$employmentIds, substr($fromDate, 0, 7) . '-01', substr($toDate, 0, 7) . '-01',
         ]);
 
-        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        $manualMonths = [];
+        $unknownMonths = [];
+        foreach ($rows as $row) {
+            if ($row['manual_period'] !== null) {
+                $manualMonths[(int) $row['employment_id']][] = $row['manual_period'];
+                if ((int) $row['manual_zero'] !== 1) {
+                    $unknownMonths[(int) $row['employment_id']][] = $row['manual_period'];
+                }
+            }
+        }
+        foreach ($rows as $row) {
+            if ($row['manual_period'] !== null) {
+                continue;
+            }
             $timezone = new \DateTimeZone((string) $row['timezone_name']);
             $start = new \DateTimeImmutable(
                 (string) $row['starts_at_utc'],
@@ -83,7 +127,8 @@ final class PayrollOvertimeRepository
                 new \DateTimeZone('UTC'),
             );
             $date = $start->setTimezone($timezone)->format('Y-m-d');
-            if ($date < $fromDate || $date > $toDate) {
+            if ($date < $fromDate || $date > $toDate
+                || in_array(substr($date, 0, 7) . '-01', $manualMonths[(int) $row['employment_id']] ?? [], true)) {
                 continue;
             }
             $minutes = max(0, intdiv($end->getTimestamp() - $start->getTimestamp(), 60)
@@ -94,7 +139,7 @@ final class PayrollOvertimeRepository
             $result[(int) $row['employment_id']][] = new OvertimeSegment($date, $minutes);
         }
 
-        return $result;
+        return ['segments' => $result, 'manual_months' => $unknownMonths];
     }
 
     /**

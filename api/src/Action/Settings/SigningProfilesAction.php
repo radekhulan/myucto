@@ -76,7 +76,7 @@ final class SigningProfilesAction
             || !OperationalSettingsAccess::clientSigningProfiles($request)
             || $this->supplierId($request) <= 0
         ) {
-            return Json::error($response, 'forbidden', 'Pro tuto akci nemáš oprávnění.', 403);
+            return Json::error($response, 'forbidden', 'Pro tuto akci nemáte oprávnění.', 403);
         }
         $operation = (string) ($args['operation'] ?? '');
         if (!in_array($operation, [
@@ -175,7 +175,7 @@ final class SigningProfilesAction
     public function settings(Request $request, Response $response): Response
     {
         if (!$this->isAdmin($request) && !$this->isAccountant($request)) {
-            return Json::error($response, 'forbidden', 'Pro tuto akci nemáš oprávnění.', 403);
+            return Json::error($response, 'forbidden', 'Pro tuto akci nemáte oprávnění.', 403);
         }
 
         return Json::ok($response, $this->profiles->settings($this->supplierId($request)));
@@ -217,7 +217,7 @@ final class SigningProfilesAction
             return Json::ok($response, $this->profiles->listProfilesForOwner($supplierId, $this->userId($request)));
         }
 
-        return Json::error($response, 'forbidden', 'Pro tuto akci nemáš oprávnění.', 403);
+        return Json::error($response, 'forbidden', 'Pro tuto akci nemáte oprávnění.', 403);
     }
 
     public function getProfile(Request $request, Response $response, array $args): Response
@@ -235,7 +235,7 @@ final class SigningProfilesAction
         $supplierId = $this->supplierId($request);
         $settings = $this->profiles->settings($supplierId);
         if (!$this->access->canCreate($this->isAdmin($request), $this->isAccountant($request), $settings['accountant_profiles_enabled'])) {
-            return Json::error($response, 'forbidden', 'Pro tuto akci nemáš oprávnění.', 403);
+            return Json::error($response, 'forbidden', 'Pro tuto akci nemáte oprávnění.', 403);
         }
 
         $body = (array) ($request->getParsedBody() ?? []);
@@ -300,7 +300,7 @@ final class SigningProfilesAction
             return Json::error($response, 'not_found', 'Podpisový profil nenalezen.', 404);
         }
         if (!$this->canManageProfile($request, $profile)) {
-            return Json::error($response, 'forbidden', 'Pro tuto akci nemáš oprávnění.', 403);
+            return Json::error($response, 'forbidden', 'Pro tuto akci nemáte oprávnění.', 403);
         }
 
         try {
@@ -393,7 +393,7 @@ final class SigningProfilesAction
             return Json::error($response, 'not_found', 'Podpisový profil nenalezen.', 404);
         }
         if (!$this->canManageProfile($request, $profile)) {
-            return Json::error($response, 'forbidden', 'Pro tuto akci nemáš oprávnění.', 403);
+            return Json::error($response, 'forbidden', 'Pro tuto akci nemáte oprávnění.', 403);
         }
 
         $credential = $this->profiles->credential($supplierId, $profileId);
@@ -596,7 +596,7 @@ final class SigningProfilesAction
     public function userDefaults(Request $request, Response $response): Response
     {
         if (!$this->canUseUserDefaults($request)) {
-            return Json::error($response, 'forbidden', 'Pro tuto akci nemáš oprávnění.', 403);
+            return Json::error($response, 'forbidden', 'Pro tuto akci nemáte oprávnění.', 403);
         }
 
         return Json::ok($response, [
@@ -619,7 +619,7 @@ final class SigningProfilesAction
     public function updateUserDefault(Request $request, Response $response, array $args): Response
     {
         if (!$this->canUseUserDefaults($request)) {
-            return Json::error($response, 'forbidden', 'Pro tuto akci nemáš oprávnění.', 403);
+            return Json::error($response, 'forbidden', 'Pro tuto akci nemáte oprávnění.', 403);
         }
 
         $outputType = (string) ($args['output_type'] ?? '');
@@ -771,7 +771,7 @@ final class SigningProfilesAction
             return Json::error($response, 'not_found', 'Podpisový profil nenalezen.', 404);
         }
         if (!$this->canManageProfile($request, $profile)) {
-            return Json::error($response, 'forbidden', 'Pro tuto akci nemáš oprávnění.', 403);
+            return Json::error($response, 'forbidden', 'Pro tuto akci nemáte oprávnění.', 403);
         }
         $file = $request->getUploadedFiles()['file'] ?? null;
         if (!$file instanceof UploadedFileInterface) {
@@ -865,7 +865,7 @@ final class SigningProfilesAction
             return Json::error($response, 'not_found', 'Podpisový profil nenalezen.', 404);
         }
         if (!$this->canManageProfile($request, $profile)) {
-            return Json::error($response, 'forbidden', 'Pro tuto akci nemáš oprávnění.', 403);
+            return Json::error($response, 'forbidden', 'Pro tuto akci nemáte oprávnění.', 403);
         }
         $credential = $this->profiles->credential($supplierId, $profileId);
         if ($credential === null) {
@@ -948,7 +948,7 @@ final class SigningProfilesAction
             return Json::error($response, 'not_found', 'Podpisový profil nenalezen.', 404);
         }
         if (!$this->canManageProfile($request, $profile)) {
-            return Json::error($response, 'forbidden', 'Pro tuto akci nemáš oprávnění.', 403);
+            return Json::error($response, 'forbidden', 'Pro tuto akci nemáte oprávnění.', 403);
         }
 
         $credential = $this->profiles->credential($supplierId, $profileId);

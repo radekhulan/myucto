@@ -1,11 +1,20 @@
 import { ref } from 'vue'
-import type { PayrollJmhzFreezeBlocker } from '@/api/payroll'
+import type { PayrollJmhzDeferralContext, PayrollJmhzFreezeBlocker } from '@/api/payroll'
 
 /** Nálezy blokace zmrazení hlášení z odpovědi 409 (`error.details.blockers`). */
 export function freezeBlockersFromError(error: unknown): PayrollJmhzFreezeBlocker[] {
   const blockers = (error as { response?: { data?: { error?: { details?: { blockers?: unknown } } } } })
     ?.response?.data?.error?.details?.blockers
   return Array.isArray(blockers) ? blockers as PayrollJmhzFreezeBlocker[] : []
+}
+
+/** Odkud lze odložit dotčené osoby jedním rozhodnutím (`error.details.deferral`). */
+export function deferralContextFromError(error: unknown): PayrollJmhzDeferralContext | null {
+  const deferral = (error as { response?: { data?: { error?: { details?: { deferral?: unknown } } } } })
+    ?.response?.data?.error?.details?.deferral
+  if (deferral === null || typeof deferral !== 'object') return null
+  const context = deferral as PayrollJmhzDeferralContext
+  return typeof context.preparation_id === 'number' && context.count > 0 ? context : null
 }
 
 /** Návratový odkaz smí vést jen na stránku téže aplikace. */

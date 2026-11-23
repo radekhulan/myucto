@@ -43,7 +43,7 @@ nejbližší pracovní den.
 <!-- cols: 24 44 32 -->
 | Situace | Co podat a do kdy | Kde v aplikaci |
 |---|---|---|
-| Nástup | Přihláška na ČSSZ (PREZEC nebo REGZEC A1) před nástupem, nejdřív 8 dnů předem. Oznámení zdravotní pojišťovně (HOZ, kód `P`) do 8 dnů, u DPP a DPČ do 20. dne následujícího měsíce. | karta pracovního vztahu, část **Registrace vztahu na ČSSZ**; postup v [§ 85.5](#855-krok-za-krokem-nastup-zamestnance) |
+| Nástup | Přihláška na ČSSZ (PREZEC nebo REGZEC A1) před nástupem, nejdřív 8 dnů předem. Oznámení zdravotní pojišťovně (HOZ, kód `P`) do 8 dnů, u DPP a DPČ do 20. dne následujícího měsíce. | karta pracovního vztahu, část **Registrace vztahu na ČSSZ**, nebo hromadně **Mimořádná podání ▾ → Přihlášky k podání (A1)**; postup v [§ 85.5](#855-krok-za-krokem-nastup-zamestnance) |
 | Zaměstnanec nenastoupil | Storno A8, nebo ukončení předregistrace P2, do 8 dnů od předpokládaného dne nástupu | karta pracovního vztahu, **Nová událost A2–A8** |
 | Změna údajů (adresa, jméno, pojišťovna, místo výkonu práce…) | Změna A3 do 8 dnů ode dne, kdy jste se o změně dozvěděli. Změna zdravotní pojišťovny navíc HOZ oběma pojišťovnám do 8 dnů. | karta pracovního vztahu, blok **Změny k ohlášení**; postup v [§ 85.8](#858-krok-za-krokem-zmena-udaju-zamestnance-a3) |
 | Nemoc přes 14 dnů, karanténa, ošetřování, dlouhodobá péče, mateřská, otcovská | NEMPRI v lhůtě, kterou ukáže aplikace u případu. Po návratu z nemoci HZUPN neprodleně. | **Mimořádná podání ▾ → Dávky nemocenského**; postup v [§ 85.6](#856-krok-za-krokem-nemoc-osetrovani-materska-a-otcovska) |
@@ -65,6 +65,7 @@ nejbližší pracovní den.
 | když bonusy převýší zálohy | Požádat finanční úřad o poukázání chybějící částky na daňovém bonusu | viz [§ 85.14.24](#851424-zadost-o-poukazani-chybejici-castky-na-danovem-bonusu) |
 | jednou při zavádění | Registrace zaměstnavatele (REGZEL), doplňující údaje | `Mzdy → Nastavení mezd`, záložka **Podání**; na stránce podání **Mimořádná podání ▾ → Registrace zaměstnavatele** |
 | jednou po převodu z jiného programu | Dohlášení údajů zaměstnanců přihlášených přes ONZ (A3) | **Mimořádná podání ▾ → Dohlášení údajů (A3)** |
+| při nástupu více lidí najednou | Přihlášky zaměstnanců (A1) hromadně | **Mimořádná podání ▾ → Přihlášky k podání (A1)** |
 
 ## 85.2 Než začnete
 
@@ -187,7 +188,7 @@ protože mzdy se podávají zpětně.
 | **Roční vyúčtování daně** | Archiv vyúčtování daně (jen s oprávněním k sestavám). |
 | **K odeslání** | Všechno připravené, co ještě neodešlo, napříč měsíci a agendami. |
 | **Odesláno** | Odeslaná podání ČSSZ, jejich protokoly, opravy a storna. |
-| **Mimořádná podání ▾** | **Přehled povinností**, **Registrace zaměstnavatele**, **Dohlášení údajů (A3)**, **Záměr slevy**, **Dávky nemocenského**, **Evidenční list DP**, **Ostatní**. |
+| **Mimořádná podání ▾** | **Přehled povinností**, **Registrace zaměstnavatele**, **Přihlášky k podání (A1)**, **Dohlášení údajů (A3)**, **Záměr slevy**, **Dávky nemocenského**, **Evidenční list DP**, **Ostatní**. |
 | **Další ▾** | **Inbox** (připomínky lhůt a problémů) a **Certifikát**. |
 
 Na úzkém displeji se záložky zalamují do dalšího řádku. Každá záložka má
@@ -209,23 +210,51 @@ Lhůta: 20. den následujícího měsíce (na pracovní den se posouvá).
 5. V panelu **Test měsíčního hlášení JMHZ** klikněte na **Otestovat XML**.
    Nic se neodesílá. U každého nálezu je tlačítko, které otevře místo opravy.
    Opravte data, případně přepočtěte mzdový běh, a test spusťte znovu.
+   Test jde spustit i před koncem měsíce: je-li obsah v pořádku, řekne to
+   a uvede den, od kdy půjde hlášení připravit.
 6. Jeden zaměstnanec s neúplnými daty nemusí blokovat ostatní: u jeho nálezu
-   klikněte na **Odložit z hlášení** a zadejte důvod (viz
-   [§ 85.14.10](#851410-odlozeni-vztahu-z-radneho-hlaseni)).
+   klikněte na **Odložit z hlášení** a zadejte důvod. Týká-li se nález víc
+   lidí, odložte je všechny jedním důvodem tlačítkem **Odložit všechny
+   dotčené (N)** (viz [§ 85.14.10](#851410-odlozeni-vztahu-z-radneho-hlaseni)).
 7. Přepněte na záložku **Měsíc**. U řádku JMHZ klikněte na **Připravit
    a odeslat**. Chcete-li hlášení jen zmrazit a odeslat později, klikněte na
    **Jen připravit** a později na **Odeslat**. Všechna podání měsíce najednou
-   odešle **Připravit a odeslat vše**.
+   odešle **Připravit a odeslat vše**. **Jen připravit** sestaví XML ze
+   schválené mzdy, ověří ho a zmrazí jako podání k odeslání; úřadu se nic
+   nepošle. Odeslání se nedá vzít zpět.
 8. Potvrďte odeslání do ostrého prostředí. JMHZ odejde přes VREP ČSSZ hned,
    podepsané vaším certifikátem.
 9. Aplikace se ČSSZ na výsledek doptává sama. Stav sledujte na záložce
    **Odesláno**.
 
 Nejde-li hlášení při odeslání nebo zmrazení připravit, aplikace pod chybou
-vypíše nálezy seskupené podle důvodu a u každého jméno zaměstnance. Tlačítko
-**Opravit** otevře přímo pole, které chybí (karta zaměstnance, roční zúčtování,
-průměry). Na stránce otevřené tímto odkazem je nahoře tlačítko **Zpět na
-přípravu JMHZ**, které vás vrátí tam, kde jste skončili.
+vypíše nálezy seskupené podle důvodu a u každého jméno zaměstnance nebo název
+mzdové účtárny. Tlačítko **Opravit** otevře přímo místo, kde se údaj opravuje
+(karta zaměstnance, roční zúčtování, průměry, nastavení mezd). Na stránce
+otevřené tímto odkazem je nahoře tlačítko **Zpět na přípravu JMHZ**, které vás
+vrátí tam, kde jste skončili.
+
+**Údaj převzatý ze schváleného mzdového běhu.** Hlášení se sestavuje ze
+schválené mzdy. Část údajů do ní vstupuje při zamknutí vstupů: podmínky
+pracovního vztahu včetně pracoviště, zákonná evidence osoby a nároky na děti,
+průměrný výdělek, docházka, nepřítomnosti a variabilní symbol mzdové účtárny.
+U takového nálezu oprava údaje sama nestačí. Aplikace to u nálezu říká
+a nabízí tlačítko **Otevřít mzdový běh k opravě**: v běhu zvolte **Vyžádat
+opravu** a **Otevřít opravu**, mzdy přepočítejte, běh znovu schvalte a hlášení
+připravte znovu. Je-li údaj v evidenci už opravený, nález nese štítek
+**už opraveno, zbývá opravná revize**. Nejlevnější je tyhle údaje doplnit před
+výpočtem: kontrola před mzdovým během je hlásí předem, včetně neplatného
+variabilního symbolu účtárny a nezodpovězené otázky, zda děti vyživuje i jiná
+osoba. Údaje čtené až při přípravě hlášení (zařazení mzdových složek,
+identifikátory přidělené ČSSZ, roční údaje zaměstnavatele, žádost o roční
+zúčtování) opravnou revizi nepotřebují a projeví se při dalším pokusu.
+
+**Kdy hlášení připravit nejde.** Měsíční hlášení se podává až za uplynulý
+kalendářní měsíc. Před jeho koncem jsou tlačítka **Připravit a odeslat**
+a **Jen připravit** neaktivní a u řádku stojí den, od kdy to půjde. Stejně se
+chová období, jehož hlášení aplikace zatím neumí sestavit (hlášení za rok,
+pro který ještě nevyšel číselník obcí a států): u řádku je důvod, co dělat
+a termín podání.
 
 **Jak poznáte, že je hotovo:** Na záložce **Odesláno** má podání za období
 štítek **Přijato** a v panelu **Zákonné termíny** je JMHZ za měsíc **Splněno**.
@@ -240,8 +269,14 @@ podání opravit (viz [§ 85.9](#859-krok-za-krokem-oprava-nebo-storno-odeslaneh
 > Vyšší slevu po lhůtě ČSSZ neuzná.
 
 Druhé řádné hlášení za týž měsíc aplikace nepřipraví. Obsahuje-li hlášení
-vztah s právě přijatou změnou údajů (A3), připraví se nejdřív 48 hodin po jejím
-přijetí; hláška uvede, od kdy to jde.
+vztah s právě přijatou změnou údajů (A3) mladší než 48 hodin, příprava se
+zastaví s varováním: ČSSZ takové hlášení může zamítnout (chyba 243). Můžete ho
+**Připravit a odeslat i tak**, nebo dotčené vztahy **odložit** a doplnit je
+opravným hlášením po 48 hodinách.
+
+Má-li běh víc mzdových účtáren a jedné chybí variabilní symbol ČSSZ, hlášení
+za ostatní účtárny se připraví a přehled vypíše, za kterou se nepřipravilo.
+Po doplnění symbolu ho za ni připravte v `Mzdy → Podání a hlášení → JMHZ`.
 
 ## 85.4 Krok za krokem: přehledy o platbě pojistného zdravotním pojišťovnám
 
@@ -302,10 +337,33 @@ pojišťovně (HOZ).
 5. Klikněte na **Připravit podání**.
 6. Klikněte na **Odeslat do produkce** (nebo podání odešlete ze záložky
    **K odeslání**, kde jsou všechny připravené registrace pohromadě).
-7. Po převzetí klikněte na **Zjistit výsledek** a po načtení protokolu na
+7. Výsledek si aplikace po převzetí zjistí sama a transakci uzavře. Chcete-li
+   ho hned, klikněte na **Zjistit výsledek** a po načtení protokolu na
    **Uzavřít**.
 8. Podali-li jste částečné přihlášení P1, podejte plnou registraci A1 do
    8 dnů po nástupu stejným postupem.
+
+Nastupuje-li víc lidí najednou, připravte přihlášky A1 hromadně v
+**Mimořádná podání ▾ → Přihlášky k podání (A1)** (viz
+[§ 85.14.16](#851416-registrace-zamestnance-prezec-a-regzec)). Profil A1
+(krok 3) nemusíte vyplňovat po jednom:
+
+- Dohody s údaji přihlášky naimportujte souborem (`Mzdy → Importy → Dohody`,
+  viz [Nastavení mezd § 90.11.1](90_Nastaveni_mezd.md#90111-krok-za-krokem-import-dohod-bez-dochazky)).
+  Vyplněné sloupce šablony (adresa s číslem domu zvlášť, rodné příjmení, místo
+  a stát narození, občanství, CZ-ISCO, místo výkonu práce, režim práce,
+  nepřetržitý provoz, název pozice, vedoucí pozice) dají ověřený profil A1.
+- U neúplných profilů v období nabídne seznam přihlášek tlačítko **Nastavit
+  společné údaje A1**: režim práce, nepřetržitý provoz, vedoucí pozice, název
+  pozice a obec pracoviště se zapíší všem neúplným profilům v období najednou.
+  Vyplněné hodnoty se nepřepisují, pokud nezaškrtnete **Přepsat i údaje, které
+  už v profilu vyplněné jsou**. Volba **Číslo domu oddělit z ulice** rozdělí
+  ulici zapsanou v evidenci i s číslem („Dlouhá 12/3") na ulici, číslo popisné
+  a orientační. Profil se ukládá stejně jako formulář na kartě vztahu; co
+  zůstane neúplné, ukáže seznam u řádku.
+
+Odkaz na seznam může nést období: `?period=2026-12` (celý měsíc) nebo
+`?from=2026-12-01&to=2026-12-15`.
 
 **Oznámení zdravotní pojišťovně** (do 8 dnů, u DPP a DPČ do 20. dne
 následujícího měsíce):
@@ -421,8 +479,12 @@ vztahy než státních zaměstnanců pokračují.
 
 > [!WARNING]
 > Příprava A2 prověří všechna období od ledna 2026 do měsíce
-> skončení. Chybí-li u opraveného měsíce přijaté opravné JMHZ, odhláška se
-> nepřipraví a hláška uvede konkrétní období (viz
+> skončení, ve kterých opravná revize běhu vztahu něco změnila. Za doklad se
+> počítá přijaté opravné i řádné JMHZ připravené z té opravné revize; měsíc,
+> kde se vztahu oprava netýká, se neprověřuje. Chybí-li doklad, schválení se
+> zastaví s konkrétním obdobím. ČSSZ pořadí nehlídá, proto můžete odhlášku
+> **Schválit s výjimkou** s důvodem (alespoň 10 znaků); opravné hlášení pak
+> pošlete bez odkladu (viz
 > [§ 85.14.16](#851416-registrace-zamestnance-prezec-a-regzec)).
 
 ## 85.8 Krok za krokem: změna údajů zaměstnance (A3)
@@ -462,7 +524,9 @@ podání A3 má stav přijato podle protokolu ČSSZ.
 2. Na stránce `Mzdy → Podání a hlášení` otevřete záložku **Odesláno**.
 3. U platné karty období klikněte na **Opravit hodnoty hlášení**.
 4. Vyberte **Aktuální příprava JMHZ** (jediná se vybere sama) a klikněte na
-   **Načíst výsledky formulářů**.
+   **Načíst výsledky formulářů**. Není-li žádná úplná aktuální příprava,
+   klikněte na **Připravit z aktuální revize**; aplikace připraví hlášení
+   ze schválené revize běhu a výběr načte znovu.
 5. Vyberte zaměstnance, jejichž údaje se mění. Tlačítko **Vybrat označené
    protokolem** vybere ty, u kterých protokol hlásil chybu.
 6. Potvrďte dopad a klikněte na **Připravit obsahovou opravu**.
@@ -574,6 +638,11 @@ předchozím programem** tlačítkem **Potvrdit podání mimo MyÚčto**.
 Přehled pojišťovně odeslaný mimo aplikaci, u kterého chybí doručenka,
 uzavřete u řádku tlačítkem **Označit za vyřízené** s poznámkou, čím je
 doručení doložené.
+
+Je-li po termínu víc povinností, ke kterým v aplikaci žádné podání nevzniklo
+(typicky přihlášky dohod podané dřív jiným programem), ukáže záložka **Měsíc**
+i přehledy agend upozornění s odkazem do panelu **Zákonné termíny**. Tam je
+označíte jako vyřízené mimo aplikaci hromadně.
 
 **Jak poznáte, že je hotovo:** Povinnost je **Splněno** a v historii je
 výslovně zapsané, že podání proběhlo jinudy a kdy.
@@ -1017,6 +1086,22 @@ Jsou na to tři cesty a liší se tím, co po nich zůstane:
 | **Smazat pokus** | u pokusu v historii na záložce **Odesláno** | Řádek z historie zmizí úplně. Zůstane po něm jen záznam v auditním logu. |
 | **Potvrdit opakování** | u pokusu „Možná doručeno“ (fronta i **Odesláno**) | Po dohledání protokolu uvolní odeslání téhož dokumentu se stejným GUID. Pokus zůstane v historii i s důvodem. |
 
+**Schválení opravné revize.** Neodeslaná JMHZ a přehledy zdravotních pojišťoven
+ze starších revizí stejného běhu se při schválení opravy automaticky zruší.
+Zůstávají v historii ve stavu **Včas zrušeno** a nelze je odeslat. Připravte je
+znovu z opraveného běhu. Podání, která už byla odeslána, mají pokus o odeslání
+nebo čekají v odchozí frontě datové schránky, se tím nemění. Zrušení se eviduje
+v historii mzdového běhu.
+
+**Zrušit přípravu.** Připravené řádné měsíční hlášení (i ročníku 2027)
+a přehled o platbě pojistného, které se ještě neodesílaly, mají na záložce
+**K odeslání** tlačítko **Zrušit přípravu**. Přípravu tak můžete
+zrušit i ručně. Aplikace se zeptá na důvod
+a zrušením potvrzujete, že hlášení neodešlo ani ručně přes ePortál ČSSZ ze
+staženého souboru (druhé řádné hlášení za totéž období by úřad odmítl). Zrušené
+hlášení i s důvodem zůstane v historii. Odeslané hlášení zrušit nejde; změny se
+pak posílají opravným hlášením.
+
 Zahození je běžná cesta; historie pokusů je záměrně úplná, aby šlo dohledat,
 co se kdy komu odeslalo. Smazání je pro záznam, který **nic nedokládá**
 a jen mate: typicky první nepovedený pokus u podání, které nakonec odešlo
@@ -1326,13 +1411,36 @@ Co odložení znamená:
   pojistná část, souhrn nebo mzdová složka se odložením jednoho vztahu
   nevyřeší.
 
+**Víc lidí najednou.** Zastaví-li zmrazení hlášení nález u víc osob (typicky
+brigádníci bez adresy), nabídne seznam nálezů v přehledu podání i v odeslání
+JMHZ tlačítko **Odložit všechny dotčené (N)**. Jeden důvod platí pro všechny;
+odloží se každá osoba s nálezem, který odložit jde. Totéž tlačítko je i v testu
+hlášení. Odložit jde i vztah s přijatou změnou údajů (A3) mladší než 48 hodin.
+
+**Osoba vyřazená z mzdového běhu.** Vyřadíte-li osobu z běhu (kap. 80) a běh
+schválíte bez ní, příprava JMHZ za měsíc ji odloží sama. Důvod odložení je
+„Vyřazena z mzdového běhu:“ a důvod vyřazení, nález **Osoba vyřazená
+z mzdového běhu**. Řádné hlášení za ostatní pak jde zmrazit a vazba na něj
+zůstane jako nesplněná povinnost. Až osobu doplatíte opravou běhu (opravná
+revize ji zase obsahuje) a ČSSZ řádné hlášení přijme, doplňte ji tlačítkem
+**Doplnit všechny odložené jedním opravným hlášením (N)**.
+
+**Oprava běhu před podáním.** Odložení patří k revizi běhu. Opravíte-li běh
+dřív, než řádné hlášení zmrazíte, nabídne seznam **Odložené vztahy**
+tlačítko **Převzít trvající odložení do aktuální revize (N)**. Převezmou se
+jen vztahy, které nález stále mají; důvod dostane poznámku, ze které revize
+pochází.
+
 Odložené vztahy běhu jsou vidět v seznamu **Odložené vztahy** pod testem se
 stavem a lhůtou. Dokud řádné hlášení nezmrazíte, můžete odložení zrušit (opět
 s důvodem). Po přijetí řádného hlášení doplňte data vztahu, případně opravte
 a znovu schvalte mzdový běh, a zvolte **Doplnit opravným hlášením**. Aplikace
 připraví hlášení nad aktuální revizí a zmrazí opravné hlášení, které formulář
 odloženého vztahu doplní. Odešlete ho na záložce **Odesláno** jako každé
-jiné. Když data vztahu ještě nejsou úplná, řekne přesně, co chybí.
+jiné. Když data vztahu ještě nejsou úplná, řekne přesně, co chybí. Čeká-li na
+doplnění víc vztahů, **Doplnit všechny odložené jedním opravným hlášením (N)**
+připraví jedno opravné hlášení za každou registraci; vztahy, kterým data dál
+chybí, zůstanou odložené.
 
 ### 85.14.11 Zmrazení, odeslání a protokol JMHZ
 
@@ -1410,7 +1518,8 @@ další kliknutí proto nevytvoří jiné podání pod stejnou identitou. Ostré
 podání je zablokované do začátku zákonné lhůty, testovací prostředí lze
 použít k bezpečnému testu celého toku.
 
-- **Odeslat přes ISDS** připraví datovou zprávu pro doloženou schránku ČSSZ.
+- **Připravit zprávu do datové schránky** hlášení zmrazí a připraví datovou
+  zprávu pro doloženou schránku ČSSZ. Potvrzením se úřadu nic neposílá.
   Je-li aktivní odesílací brána, MyÚčto před přesměrováním vysvětlí
   přihlášení a pošle uživatele přímo do ISDS. Přihlašovací údaje aplikace
   nevidí ani neukládá a zpráva odejde až po schválení konceptu uživatelem
@@ -1525,7 +1634,12 @@ zablokuje; revizi přepočtěte opravným během po schválení nemoci.
 **Pracující důchodce** nemá v hlášení údaje pro evidenční list (třída, dny
 a vyměřovací základ ELDP), vyloučené dny podle § 18 ale nese dál. Za
 pracujícího důchodce aplikace považuje zaměstnance s ověřenou slevou
-pracujícího důchodce v zákonné evidenci osoby.
+pracujícího důchodce v zákonné evidenci osoby. Měsíc, od kterého mu náleží
+výplata starobního důchodu v plné výši, ale hlášení ještě vykazuje s údaji
+pro evidenční list, i když v něm sleva už náleží (důchod od 1. dne měsíce):
+údaje se vyplňují do tohoto měsíce včetně, stejně jako roční evidenční list.
+Jen interval pojištění s nulou dnů se hlásí až od následujícího měsíce. Měsíc
+výplaty aplikace bere ze sekce **Pobíraný důchod** zákonné evidence osoby.
 
 **Zaměstnanec po dosažení důchodového věku** bez ověřené slevy pracujícího
 důchodce: kód ELDP v hlášení nese druhý znak `D` (například `1D+`) od dne
@@ -1620,6 +1734,30 @@ JMHZ po opravě mzdových údajů a vytvoří skutečné obsahové opravné hlá
 Aplikace vytvoří nový neměnný artefakt s vazbou na původní podání. Chybně
 uplatněné slevy za období lze opravit jen do 20. dne následujícího měsíce.
 
+**Oprava měsíce podaného předchozím programem.** Opravné hlášení se váže na
+řádné: nese stejný GUID podání a každý opravený formulář GUID formuláře, ve
+kterém byl vztah nahlášen poprvé (Pravidla podání JMHZ). Řádné hlášení za
+měsíc, který podal jiný program, proto nejdřív převezměte. Na stránce
+`Mzdy → Podání a hlášení`, záložka **JMHZ**, rozbalte **Podrobnosti** a
+v oddílu **Oprava měsíce podaného předchozím programem** klikněte na **Navázat
+opravu**. Vyberte schválený mzdový běh za měsíc a jeden ze dvou způsobů:
+
+- **Nahrát původní XML** řádného hlášení. Aplikace ověří XSD ČSSZ, že jde
+  o řádné hlášení (typ R), že období odpovídá běhu a variabilní symbol
+  registraci účtárny. Datová věta JMHZ IČO nenese, zaměstnavatele určuje
+  právě variabilní symbol. Formuláře se párují se vztahy podle ID PPV.
+- **Zadat GUID** podání a GUID formulářů vztahů, které v původním hlášení byly
+  (najdete je v protokolu ČSSZ). Je potřeba potvrdit, že vztahy v hlášení
+  byly. Obsah původního hlášení pak aplikace nezná, oprava proto posílá celé
+  formuláře vybraných vztahů a neukazuje, co se změnilo.
+
+Do poznámky uveďte, čím je podání a jeho přijetí doložené. Aplikace podání
+převezme jako přijaté řádné hlášení (nic neodešle) a otevře ho v přehledu.
+Opravu pak připravíte běžně tlačítkem **Opravit hodnoty hlášení**: opravený
+formulář má typ O a GUID původního formuláře, vztah, který v původním hlášení
+nebyl, se doplní řádným formulářem. Druhé řádné hlášení za takový měsíc
+aplikace nezaloží.
+
 Příprava storna ani opravy sama nic neodešle. Nový artefakt se na záložce
 **Odesláno** ukáže v oddílu **Připravená podání čekají na odeslání** se svým
 přesným číslem, druhem a vazbou na původní hlášení. Odtud jej odešlete
@@ -1690,8 +1828,32 @@ vždy. Firma bez převodu tenhle oddíl nevidí.
 **Měsíc, za který řádné hlášení odešlo, MyÚčto znovu nepodá.** Druhé řádné
 hlášení za stejný měsíc ČSSZ zamítne jako duplicitní (kontrola č. 22
 katalogu kontrol), proto se ani nepřipraví: příprava skončí hláškou, který
-program a kdy hlášení podal, a odkazem na tento oddíl. Opravu takového měsíce
-pošlete jako opravné podání z programu, který řádné hlášení podal.
+program a kdy hlášení podal, a odkazem na tento oddíl. Opravu můžete
+navázat v MyÚčtu, pokud pro měsíc existuje vlastní schválený vypočtený běh
+s revizí; postup je níže. U pouze převzatých historických měsíců bez
+vypočtené revize použijte původní program nebo portál ČSSZ.
+
+#### 85.14.14.1 Navázání opravy na řádné podání z jiného programu
+
+1. Na záložce **JMHZ** rozbalte **Podrobnosti** a najděte panel
+   **Oprava měsíce podaného předchozím
+   programem** a klikněte na **Navázat opravu**. Potřebujete právo zápisu
+   do mzdových podání.
+2. Vyberte běh ve stavu **Schváleno** s vypočtenou revizí za opravovaný měsíc.
+3. Máte-li **Původní XML**, nahrajte řádné hlášení, nejvýše 30 MB. Aplikace
+   ověří XSD, typ R, období, variabilní symbol zaměstnavatele a vazbu
+   formulářů na ID pojistných vztahů aktuálního běhu.
+4. Alternativou je režim **GUID**: zadejte GUID původního podání a GUID
+   formulářů vybraných vztahů. Výslovně potvrďte, že tyto vztahy byly součástí
+   původního hlášení. GUID formulářů se nesmějí opakovat ani shodovat s GUID podání.
+5. Zapište poznámku alespoň o 10 znacích a klikněte na **Převzít podání**.
+6. Otevřete převzaté podání a pokračujte akcí **Opravit hodnoty hlášení**
+   podle [§ 85.14.13](#851413-storno-a-obsahova-oprava-jmhz).
+
+**Převzetí nic neodesílá.** Uloží externí řádné hlášení jako přijatý výchozí
+podklad pro opravu. Přebírejte proto jen skutečně přijaté hlášení
+s doloženými identifikátory. Nejde o nový výpočet převzatých historických
+mezd ani o automatické ověření přijetí u ČSSZ.
 
 **Zrušené a zamítnuté hlášení měsíc nepodalo.** Řádné nebo opravné hlášení,
 které zrušilo nahrané stornující podání téhož programu (storno nese GUID
@@ -1775,6 +1937,17 @@ REGZEC.
 
 ### 85.14.16 Registrace zaměstnance PREZEC a REGZEC
 
+**Koho registrovat.** Do evidence zaměstnanců u ČSSZ se přihlašuje každá DPP
+a DPČ, i když v ní nevzniká účast na pojištění (dohoda pod rozhodným příjmem,
+cizinec pojištěný v jiném státě s A1). Za každý měsíc, kdy přihlášená dohoda
+trvá a nebyl zúčtován příjem, se podává řádný formulář s nulovými hodnotami:
+pojištění od 1. do posledního dne měsíce, počet dnů důchodového pojištění 0,
+vyměřovací základ 0 a bez kódu ELDP. Chybějící registraci dohody ohlásí mzdový
+běh i kontrola před během jako varování. Povinnou výjimku před schválením
+vyžaduje jen u vztahu s účastí na pojištění; dohoda bez účasti schválení
+nezastaví (viz
+[§ 86.12.14](86_Zamestnanci.md#861214-checklist-a-casova-osa)).
+
 **Zdroj osobních údajů.** Test registrace zaměstnance čte identitu z osobní
 karty účinnou přesně k datu nástupu pracovního vztahu. V `Mzdy →
 Zaměstnanci`, na kartě osoby v části **Úplná osobní evidence a historie**,
@@ -1847,18 +2020,42 @@ předpokládaném dni nástupu z P1; nastoupí-li zaměstnanec později, aplikac
 nepřipraví a vede k podání P2 a nového přihlášení s novým předpokládaným
 dnem. Cizinec se přihlašuje vždy plnou registrací před zahájením práce, volba
 se u něj neukazuje. Dřív než osm dnů před nástupem aplikace přihlášku
-nepřipraví a napíše, od kterého dne to jde.
+nepřipraví, částečnou ani plnou, a napíše jediný den, od kterého to jde. Do té
+doby můžete vyplnit a uložit profil A1, podání se pak jen připraví a odešle.
+Vztah je s tímto dnem vidět i v **Přihlášky k podání (A1)**, kde se k přípravě
+nabídne, až se okno otevře. Volba částečné nebo plné registrace zůstane po
+ruce, i když náhled neprojde.
 
 **Události od 1. 1. 2027 (REGZEC27).** Ročník formuláře REGZEC určuje
-rozhodné datum události, ne den odeslání: nástup (A1), skončení (A2), skončení
-uvedené ve změně nebo opravě (A3, A4) a den platnosti (A5 až A7) od 1. 1. 2027
-se hlásí formulářem REGZEC27, dřívější události dál formulářem REGZEC25, i když
-je podáváte v roce 2027. Ostrá ČSSZ přijímá REGZEC27 až od 1. 1. 2027, proto
-plnou registraci s nástupem v prvních dnech ledna 2027 aplikace připraví
-nejdřív 1. 1. 2027. Částečné přihlášení PREZEC se ročníkem nemění a zaměstnance
-s českým občanstvím s nástupem v lednu 2027 jím přihlásíte už v prosinci, osm
-dnů před nástupem. U cizince ze státu mimo EHP chce REGZEC27 navíc platnost
-pobytu (od a do) a číslo orientační má u všech adres nejvýš čtyři znaky.
+rozhodné datum události: nástup (A1), skončení (A2) a den platnosti (A5 až A7)
+od 1. 1. 2027 se hlásí formulářem REGZEC27, dřívější události dál formulářem
+REGZEC25, i když je podáváte v roce 2027. U změny a opravy (A3, A4) rozhoduje
+jen datum skončení pracovního vztahu: u vztahu skončeného do 31. 12. 2026 jde
+REGZEC25, u trvajícího vztahu nebo skončeného později REGZEC27, a to i tehdy,
+když změna platí už od roku 2026. Ostrá ČSSZ přijímá REGZEC27 od 23. 12. 2026;
+změnu trvajícího vztahu připravenou dřív proto aplikace pošle ještě jako
+REGZEC25, od 23. 12. 2026 jako REGZEC27. Takovou změnu nebo opravu připravenou
+ve formátu REGZEC25, která do 22. 12. 2026 neodešla, aplikace od 23. 12. 2026
+neodešle: v kartě podání místo tlačítka odeslání nabídne **Připravit znovu**,
+které ze stejné schválené události připraví REGZEC27 a původní podání zruší.
+
+Změna i oprava u vztahu, který už skončil, nese datum skončení, jinak by ji
+ČSSZ předala k ručnímu zpracování. Datum musí být stejné jako to, které vede
+ČSSZ: aplikace ho bere z odeslané odhlášky (A2), a jen když žádná odhláška
+z aplikace neodešla, z karty pracovního vztahu. Liší-li se datum na kartě od
+odeslané odhlášky, změnu ani opravu neschválí; datum na kartě opravte. Opravu
+samotného data skončení (s písemným vysvětlením) aplikace nepodává, vyřiďte ji
+s ČSSZ. Oprava (A4) běžného pracovního vztahu s datem skončení nese navíc údaj
+o skončení úmrtím a podklady pro podporu v nezaměstnanosti; aplikace je převezme
+ze schválené odhlášky. Bez schválené odhlášky aplikace opravu skončeného
+vztahu odmítne a napíše proč.
+
+Plnou registraci
+s nástupem v lednu 2027 aplikace připraví nejdřív 23. 12. 2026 a vždy nejvýš
+osm dnů před nástupem; platí pozdější z obou dnů, u nástupu 1. 1. 2027 tedy
+24. 12. 2026. Částečné přihlášení PREZEC se ročníkem nemění.
+U cizince ze státu mimo EHP chce REGZEC27 navíc platnost pobytu (od a do)
+a číslo orientační má u všech adres nejvýš čtyři znaky.
 
 **Nástup v jiný den (oprava A4).** Byla-li přihláška podaná s předpokládaným
 dnem nástupu a zaměstnanec nastoupil jindy, podejte opravu A4. Opravu
@@ -1959,23 +2156,56 @@ nemá pole pro stát narození, proto se u osoby narozené mimo ČR píše stát
 název obce („Bratislava, Slovensko“); k tomu je potřeba mít na kartě osoby
 vyplněný stát narození. Místo narození smí mít i se státem nejvýš 50 znaků.
 
+#### Hromadná příprava přihlášek A1
+
+Na stránce `Mzdy → Podání a hlášení` v **Mimořádná podání ▾ → Přihlášky
+k podání (A1)** je seznam vztahů, které ve zvoleném období (**Období od**,
+**Období do**; výchozí je tento a příští měsíc) trvají nebo začnou a přihlášku
+ještě potřebují. Seznam vynechá vztahy, které už mají v daném prostředí
+ID PPV, mají přihlášku připravenou ve frontě nebo odeslanou, nebo je přihlásil
+předchozí program (podání v historii předchozího programu nebo nástup před
+začátkem vedení mezd v MyÚčtu). Vztah s přijatým částečným přihlášením P1
+v seznamu zůstává, protože plná přihláška A1 je jeho další krok.
+
+U každého vztahu seznam ukáže:
+
+- stav profilu A1: **Úplný**, **Neúplný** s výčtem chybějících údajů (stejným,
+  jaký ukáže **Kontrola** na kartě), nebo **Chybí**, a odkaz **Otevřít kartu
+  vztahu**,
+- lhůtu přihlášky (den nástupu, po přijatém P1 osmý den po nástupu); po lhůtě
+  je zvýrazněná,
+- varování, má-li osoba jinou otevřenou DPP, která už ID PPV má. Takový vztah
+  je nejspíš založený dvakrát a místo nové přihlášky je lepší vztahy sloučit.
+
+Zaškrtněte vztahy s úplným profilem a klikněte na **Připravit vybrané**.
+Každému se připraví plná přihláška A1 stejnou cestou jako tlačítkem
+**Připravit podání** na kartě vztahu, i před nástupem. Vztah s neúplným
+profilem, s ID PPV nebo s už existující přihláškou se přeskočí a pod hlášením
+o výsledku je u něj důvod. Opakované stisknutí druhou přihlášku nezaloží.
+Připravené přihlášky pak odešlete v záložce **K odeslání**.
+
 #### Odeslání registrace přes VREP
 
 Po přípravě registrace zůstává na kartě pracovního vztahu přesně zmrazené
 XML. Prostředí (test nebo produkce) zvolte ještě před přípravou a pak
 stiskněte **Odeslat do testu** nebo **Odeslat do produkce**. Každé stisknutí
-založí jeden doložitelný pokus; aplikace jej sama neopakuje ani se sama
-neptá na stav.
+založí jeden doložitelný pokus; aplikace registraci sama neodesílá ani
+odeslání neopakuje.
 
-Po převzetí bránou klikněte ručně na **Zjistit výsledek**. Potvrzení
-o převzetí není přijetí registrace; rozhoduje až protokol ČSSZ. Protokol se
+Na výsledek se aplikace ptá sama: úloha na pozadí, která dotahuje protokoly
+JMHZ, se v rozvrhu brány ptá i na odeslané registrace a po načtení protokolu
+transakci sama uzavře. Tlačítka **Zjistit výsledek** a **Uzavřít** zůstávají
+pro případ, kdy nechcete čekat na další běh, nebo kdy se automatice nedaří;
+když protokol nedorazí ani po stropu dotazů, podání se objeví k ruční kontrole.
+Potvrzení o převzetí není přijetí registrace; rozhoduje až protokol ČSSZ.
+Protokol se
 k podání uloží a podle výsledku formuláře se podání vede jako přijaté,
 částečně přijaté nebo odmítnuté; u odmítnutí je u podání kód a text chyby od
 ČSSZ. Uvádí-li protokol k přijaté přihlášce A1 OIČ a ID PPV, aplikace je
 zapíše do identifikátorů osoby a pracovního vztahu s doloženým původem
 „protokol ČSSZ“. Protokol, ve kterém čísla zatím chybí (ČSSZ je přiděluje
-dodatečně), přijetí potvrdí, ale čísla nezapíše. Až je protokol načtený,
-stiskněte **Uzavřít**, aby se dokončila transakce u brány. Neuzavírejte
+dodatečně), přijetí potvrdí, ale čísla nezapíše. Po načtení protokolu se
+transakce u brány uzavírá (automaticky, nebo tlačítkem **Uzavřít**). Neuzavírejte
 přenos během čekání na protokol, jinak by nebylo možné výsledek bezpečně
 načíst. Testovací a produkční pokusy jsou oddělené; pracovní vztah není
 přihlášený, dokud přijetí nepotvrdí ČSSZ.
@@ -3134,6 +3364,12 @@ i tehdy, když je příloha č. 1 prázdná, když firma nemá vyplněný finan�
 (dosadí se FÚ pro Prahu 1 a je potřeba ho ověřit), a když zaokrouhlení na
 celé koruny zbylo přes.
 
+**Zástupce.** Je-li ke dni vytvoření XML v evidenci zastoupení platný zástupce
+(`Nastavení → Daně a účetnictví`, část **Zastoupení a podepisující osoba**), vyplní se
+do obou vyúčtování jako podepisující osoba, stejně jako u přiznání DPH a daně
+z příjmů. Lhůtu vyúčtování ale neprodlužuje žádný zástupce, ani daňový poradce
+s kódem 4b nebo 4c, a aplikace proto u vyúčtování na kód zástupce neupozorňuje.
+
 ### 85.14.24 Žádost o poukázání chybějící částky na daňovém bonusu
 
 Vyplatí-li zaměstnavatel na daňových bonusech víc, než kolik ten měsíc
@@ -3182,6 +3418,8 @@ musíte vrátit sami.
 
 Výstupem je XML pro EPO. Archivuje se se stejným otiskem jako ostatní daňová
 podání a v přehledu podání je najdete ve složce „Daňové bonusy“.
+Zástupce platný ke dni vytvoření XML se do žádosti vyplní jako podepisující
+osoba stejně jako u vyúčtování.
 S [Vyúčtováním daně](#851423-vyuctovani-zalohove-a-srazkove-dane) nemá
 žádost společný formulář ani přílohu; jsou to samostatná podání, byť se
 stejnými částkami vyplacených bonusů v pozadí.

@@ -43,7 +43,8 @@ final class PayrollRunValidationDetailsTest extends TestCase
         self::assertSame([7, 8], array_column($rows, 'entity_id'));
         self::assertSame(['employee', 'employee'], array_column($rows, 'entity_type'));
         self::assertStringContainsString('zdravotní pojišťovna', $rows[0]['message']);
-        self::assertSame('/payroll/people?person=7&employment=9&panel=statutory_evidence', $rows[0]['remediation_path']);
+        // Proklik doskočí na sekci zdravotního pojištění (audit 12. 11. 2026, ř. 29).
+        self::assertSame('/payroll/people?person=7&employment=9&panel=statutory_evidence&field=statutory.health_coverages', $rows[0]['remediation_path']);
         self::assertStringContainsString('pořadí dítěte', $rows[1]['message']);
         self::assertSame('/payroll/people?person=8&panel=dependants', $rows[1]['remediation_path']);
     }
@@ -209,10 +210,21 @@ final class PayrollRunValidationDetailsTest extends TestCase
             );
         }
 
-        self::assertSame(
-            '/payroll/people?person=7&panel=statutory_evidence',
-            PayrollRunIssueGuidance::describe('health_insurance:health_coverage_evidence_missing:employee:7')['remediation_path'],
-        );
+        // Nálezy zdravotního pojištění doskočí na jeho sekci (audit ř. 29);
+        // hromadné zadání pojišťoven nabízí karta běhu u nálezu.
+        foreach ([
+            'health_insurance:health_insurer_evidence_unverified:employee:7',
+            'person:employee:7:health_insurer_snapshot_unverified',
+            'health_insurance:health_coverage_evidence_conflict:employee:7',
+            'health_insurance:health_coverage_evidence_missing:employee:7',
+            'person:employee:7:health_coverage_evidence_missing',
+        ] as $issue) {
+            self::assertSame(
+                '/payroll/people?' . http_build_query(['person' => 7, 'panel' => 'statutory_evidence', 'field' => 'statutory.health_coverages']),
+                PayrollRunIssueGuidance::describe($issue)['remediation_path'],
+                $issue,
+            );
+        }
     }
 
     /**
@@ -273,5 +285,16 @@ final class PayrollRunValidationDetailsTest extends TestCase
     private function rows(): array
     {
         return $this->pdo->query('SELECT * FROM payroll_run_validations')->fetchAll(PDO::FETCH_ASSOC);
+    }
+
+    /**
+     * Chybějící sada exekučních srážek pro rok výplaty se týká jen osob se
+     * srážkou; osobě bez srážky výpočet vrátí „nic se nesráží" (audit ř. 19).
+     */
+    public function testMissingEnforcementRulesetTextConcernsOnlyPeopleWithDeductions(): void
+    {
+        $message = PayrollRunIssueGuidance::describe('enforcement_ruleset_not_effective_for_whole_year', 7)['message'];
+        self::assertStringContainsString('jen zaměstnance se srážkou', $message);
+        self::assertStringNotContainsString('i když zaměstnanec žádnou srážku nemá', $message);
     }
 }

@@ -5,10 +5,13 @@ declare(strict_types=1);
 namespace MyInvoice\Tests\Integration\Eshop;
 
 use MyInvoice\Action\Eshop\IntegrationAction;
+use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Middleware\SupplierScopeMiddleware;
 use MyInvoice\Security\EffectiveRole;
+use MyInvoice\Service\Demo\DemoMode;
 use MyInvoice\Service\Integration\IntegrationConnectionService;
+use MyInvoice\Service\Integration\IntegrationSampleProvisioner;
 use MyInvoice\Tests\Integration\Stock\StockTestCase;
 use MyInvoice\Tests\Support\WorkerLockWaitTrait;
 use PHPUnit\Framework\Attributes\Group;
@@ -106,6 +109,20 @@ final class IntegrationSampleProvisionerTest extends StockTestCase
         self::assertNotNull($this->seededAt($sid), 'Značka se nastaví, ať se kontrola neopakuje při každém otevření.');
         $this->call('list', $sid);
         self::assertSame(1, $this->countConnections($sid), 'Ani další otevření seznamu ukázku nepřidá.');
+    }
+
+    /** Veřejná ukázka je jen ke čtení: ani uživatel s právem úprav ukázku nezaloží. */
+    public function testDemoCreatesNoSampleAndNoMarker(): void
+    {
+        $sid = $this->createSupplier();
+        self::assertInstanceOf(\DI\Container::class, $this->container);
+        $provisioner = $this->container->make(IntegrationSampleProvisioner::class, [
+            'demo' => new DemoMode(new Config(['demo' => ['enabled' => true]])),
+        ]);
+
+        self::assertFalse($provisioner->ensure($sid, $this->userId));
+        self::assertNull($this->seededAt($sid));
+        self::assertSame(0, $this->countConnections($sid));
     }
 
     public function testCompaniesAreIsolatedAndReadersCreateNothing(): void

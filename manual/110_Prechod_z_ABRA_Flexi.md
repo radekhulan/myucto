@@ -163,8 +163,9 @@ se uloží jako potvrzený bez vlastního zaúčtování, protože jeho zápisy 
 převzatý deník. Úhrady z banky a pokladny se k nim spárují. Co ABRA vede jako
 uhrazené jinak (zápočtem, interním dokladem nebo platbou v nepřeváděném roce),
 převezme se jako úhrada mimo banku a pokladnu, takže doklad nezůstane otevřený.
-Předpisy mezd, odvodů a DPH (účty 331, 336, 341, 342 a 343) zůstávají jen
-v deníku, stejně jako pohledávky s DPH a doklady v cizí měně nebo stornované;
+Mzdové závazky (účty 331, 336 a 342) se převedou stejně jako ostatní závazky,
+protokol je počítá zvlášť. Předpisy DPH a daně z příjmů (účty 341 a 343) zůstávají
+jen v deníku, stejně jako pohledávky s DPH a doklady v cizí měně nebo stornované;
 protokol na ně upozorní. Zahraniční DPH zůstává v částce faktury, ale nevstupuje
 do české daně v přiznání. Doklad s rozporným nebo neznámým členěním DPH,
 například s tuzemským nárokem na odpočet a nulovou daní, zůstane k ověření jako

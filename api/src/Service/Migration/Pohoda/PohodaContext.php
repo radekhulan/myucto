@@ -43,6 +43,23 @@ final class PohodaContext
     public array $costCenters = [];
 
     /**
+     * Řádky deníku s analytickým členěním POHODY (zakázka `CisloZAK`, činnost `RefCin`), i u zápisů
+     * z dřívějšího převodu ({@see ChartJournalImporter}): členění ({@see PohodaSplitDimension::SPLITS})
+     * => kód => seznam [journal_entries.id, line_no].
+     *
+     * @var array<string,array<string,list<array{0:int,1:int}>>>
+     */
+    public array $splitLines = [];
+
+    /**
+     * Členění převedených faktur podle exportu ({@see InvoiceImporter}), i u dokladů z dřívějšího
+     * převodu: členění => typ dokladu (`invoice`, `purchase_invoice`) => id => kód hlavičky a položek.
+     *
+     * @var array<string,array<string,array<int,array{header:string,items:list<string>}>>>
+     */
+    public array $splitDocuments = [];
+
+    /**
      * Dorovnání novější zálohou: datum prvního zápisu zadaného v MyÚčtu. Od něj se účtuje
      * v MyÚčtu, záznamy POHODY s tímto nebo pozdějším datem převod nepřebírá (nevznikne dvojí zápis).
      */
@@ -81,8 +98,31 @@ final class PohodaContext
     /** @var array<string,int> číslo dokladu => cash_documents.id */
     public array $cashDocuments = [];
 
-    /** @var array<string,list<array{id:int,date:string}>> číslo pohybu => bank_transactions */
+    /** @var array<string,list<array{id:int,date:string,amount:float}>> číslo pohybu => bank_transactions (částka v Kč se znaménkem) */
     public array $bankTransactions = [];
+
+    /**
+     * Pohyby účtů v cizí měně ({@see CashBankImporter::importBank()}): částka v měně účtu,
+     * v Kč a kurz. Podle nich {@see PohodaForeignBank} přepočte párování a doplní měnu do deníku.
+     *
+     * @var array<int,array{foreign:float,czk:float,rate:float,currency:string,account_id:?int}>
+     */
+    public array $foreignBankTx = [];
+
+    /**
+     * Počáteční stavy účtů v cizí měně pro otevírací zápis ({@see PohodaForeignBank::fillOpening()}).
+     *
+     * @var list<array{account_id:int,period_id:int,currency:string,foreign:float,rate:float}>
+     */
+    public array $foreignBankOpenings = [];
+
+    /**
+     * Řádky deníku POHODY ze zdroje Banka po číslech dokladu ({@see PohodaBankJournal::row()}).
+     * Podle nich {@see PohodaBankJournal} rozhoduje, kterým pohybům se stejným číslem zápis patří.
+     *
+     * @var array<string,list<array{date:string,source_id:string,net:float,candidates:list<float>}>>
+     */
+    public array $bankJournalRows = [];
 
     /**
      * Úhrady dokladů z `liquidations` - kterým bankovním nebo pokladním dokladem Pohody
@@ -94,6 +134,15 @@ final class PohodaContext
 
     /** @var array<string,true> id převedených dokladů minulého období („typ|id“) - nemají zápis v deníku roku */
     public array $previousPeriod = [];
+
+    /**
+     * Doklady minulého období, které POHODA nezaúčtovala (`accountingType = withoutAccounting`,
+     * vydané zálohové a proforma faktury). V počátečních stavech nejsou, a proto se nevážou
+     * na otevírací zápis ({@see DocumentLinker}).
+     *
+     * @var array<string,true> „typ|id“
+     */
+    public array $previousPeriodUnbooked = [];
 
     /** @var array<int,true> pokladní doklady bez zaúčtování k začátku období - jsou v počátečních stavech */
     public array $openingCash = [];
@@ -112,6 +161,9 @@ final class PohodaContext
      */
     public array $skippedYears = [];
 
+    /** @var array<int,true>|null */
+    public ?array $selectedYears = null;
+
     /**
      * Převod skladu zvolený v průvodci: volba po skladech POHODY (kód skladu => `goods`,
      * `material` nebo `skip`) pro karty bez druhu zásoby. `null` = sklad se nepřevádí.
@@ -129,6 +181,13 @@ final class PohodaContext
      * Novější doklady z POHODY by se jinak zdvojily s tím, co uživatel zadal v MyÚčtu.
      */
     public bool $relinkOnly = false;
+
+    /**
+     * Agenda vedená v POHODĚ jako daňová evidence ({@see PohodaTaxEvidenceImporter}): firma
+     * zůstává v daňové evidenci, převod zapisuje doklady, banku a pokladnu bez zaúčtování
+     * a úhrady jen tam, kde je nese navázaný pohyb.
+     */
+    public bool $taxEvidence = false;
 
     /** @var (callable(string,int,int):void)|null */
     public $progress = null;
@@ -185,11 +244,11 @@ final class PohodaContext
         if ($this->ownJournalFrom !== null && substr($date, 0, 10) >= $this->ownJournalFrom) {
             return true;
         }
-        if ($this->skippedYears === []) {
+        if ($this->skippedYears === [] && $this->selectedYears === null) {
             return false;
         }
         $year = $this->calendar->fiscalYearOfDate(substr($date, 0, 10));
-        return $year > $this->year() && isset($this->skippedYears[$year]);
+        return $year > $this->year() && (isset($this->skippedYears[$year]) || ($this->selectedYears !== null && !isset($this->selectedYears[$year])));
     }
 
     /** @return list<int> */

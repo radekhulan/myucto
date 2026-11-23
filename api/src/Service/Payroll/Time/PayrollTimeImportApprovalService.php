@@ -344,7 +344,7 @@ final class PayrollTimeImportApprovalService
                     'Podklady uvádějí %s jen jako součet hodin, bez dat od–do. Náhradu mzdy ani evidenční '
                         . 'list z toho spočítat nejde. Buď podklady opravte v docházkovém systému a importujte '
                         . 'znovu (opravná dávka souhrn otevřeného měsíce nahradí a čistý měsíc se schválí), '
-                        . 'nebo zapište nepřítomnost v Mzdy → Absence a průměry a měsíc schvalte ručně.',
+                        . 'nebo zapište nepřítomnost v Mzdy → Absence a dovolená a měsíc schvalte ručně.',
                     implode(', ', array_map(
                         static fn (string $meaning): string => self::DATED_HOURS_LABELS[$meaning] ?? $meaning,
                         $dated,

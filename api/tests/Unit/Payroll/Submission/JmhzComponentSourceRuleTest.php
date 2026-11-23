@@ -85,6 +85,30 @@ final class JmhzComponentSourceRuleTest extends TestCase
     }
 
     /**
+     * Zdaněná (nadlimitní) cestovní náhrada do rozpadu mzdy nepatří: pokyny
+     * k 10328 cestovní náhrady vylučují výslovně. Služební vůz k soukromým
+     * účelům pokyny nejmenují a 10328 zahrnuje i naturální mzdu, zařazení
+     * proto zůstává na účetní stejně jako u obecného nepeněžního příjmu.
+     */
+    public function testTaxedTravelExcessNeedsNoWageBreakdownMappingButCompanyCarDoes(): void
+    {
+        self::assertNull(JmhzComponentSourceRule::issueCode('included', null, 'included', 'travel_reimbursement'));
+        self::assertTrue(JmhzComponentSourceRule::belongsOutsideWageBreakdown('included', 'included', 'travel_reimbursement'));
+        self::assertSame(
+            'component_jmhz_manual_review',
+            JmhzComponentSourceRule::issueCode('manual_review', null, 'manual_review', 'travel_reimbursement'),
+        );
+        foreach (['benefit_vehicle', 'non_cash'] as $kind) {
+            self::assertSame(
+                'component_jmhz_mapping_missing',
+                JmhzComponentSourceRule::issueCode('included', null, 'included', $kind),
+                $kind,
+            );
+            self::assertFalse(JmhzComponentSourceRule::belongsOutsideWageBreakdown('included', 'included', $kind), $kind);
+        }
+    }
+
+    /**
      * Vyřazená složka nemá co mapovat — chybějící zařazení u ní není nález,
      * je to správný stav.
      */

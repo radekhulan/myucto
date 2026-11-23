@@ -92,6 +92,7 @@
         <td style="width:40%;">
             <div class="header-title">Kniha DPH</div>
             <div class="header-period">Za období: {{ period.label }}</div>
+            {% if dimension and dimension.label %}<div class="header-period">Dimenze: {{ dimension.label }} (podíl dokladů připadající na hodnotu, bez oprav § 43, 46, 74b a 79)</div>{% endif %}
         </td>
         <td style="width:30%;" class="supplier-info">
             <strong>{{ supplier.company_name }}</strong><br>

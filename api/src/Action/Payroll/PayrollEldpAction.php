@@ -258,7 +258,7 @@ final class PayrollEldpAction
     /** @param array<string,string> $args */
     public function complete(Request $request, Response $response, array $args): Response
     {
-        if (!RequestAuthorization::isSessionAuth($request)) {
+        if (!RequestAuthorization::actsAsSession($request)) {
             return Json::sessionRequired($response, 'Ruční dokončení ELDP vyžaduje přihlášenou relaci.');
         }
         if (!$this->guard($request, $response, AccessLevel::WRITE, $error)) {

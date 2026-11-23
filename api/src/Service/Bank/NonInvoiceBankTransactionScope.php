@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Bank;
 
+use MyInvoice\Service\Nonprofit\Membership\MembershipBankPaymentGuard;
+
 /**
  * Bankovní pohyb, u kterého se spárování s fakturou nečeká, protože ho uzavírá něco jiného:
  *
@@ -73,10 +75,27 @@ final class NonInvoiceBankTransactionScope
     {
         self::validate($supplierId, $transactionIdSql);
         return '(' . self::ownTransferSql($supplierId, $transactionIdSql)
-            . ' OR ' . self::postedOutsideSaldoSql($supplierId, $transactionIdSql) . " OR EXISTS (
+            . ' OR ' . self::postedOutsideSaldoSql($supplierId, $transactionIdSql)
+            . ' OR ' . self::membershipSql($supplierId, $transactionIdSql) . " OR EXISTS (
             SELECT 1 FROM payroll_payment_matches non_invoice_payroll
              WHERE non_invoice_payroll.supplier_id = $supplierId
                AND non_invoice_payroll.bank_transaction_id = $transactionIdSql))";
+    }
+
+    /**
+     * Členské úhrady jsou vyřešené i při pohledávkovém účtu ze saldokontního rozsahu.
+     * Skalární poddotaz místo EXISTS: semi-join z EXISTS optimalizátor ve stránce a seznamu pohybů řídil
+     * přes všechna párování firmy (práce rostla s počtem uhrazených předpisů, ne s velikostí stránky;
+     * měření 15. 11.). Korelovaný skalární poddotaz se vyhodnotí po pohybu přes idx_je_supplier_source.
+     */
+    public static function membershipSql(int|string $supplierId, string $transactionIdSql): string
+    {
+        self::validate($supplierId, $transactionIdSql);
+        // Vnější závorky: volající skládají `NOT ' . membershipSql(), výraz musí být jeden atom jako dřív EXISTS.
+        return "((SELECT 1 FROM journal_entries non_invoice_membership FORCE INDEX(idx_je_supplier_source)
+            WHERE non_invoice_membership.supplier_id=$supplierId AND non_invoice_membership.source_type='bank'
+              AND non_invoice_membership.source_id=$transactionIdSql AND non_invoice_membership.reversed_by IS NULL
+              AND " . MembershipBankPaymentGuard::entryUsedSql('non_invoice_membership') . ' LIMIT 1) IS NOT NULL)';
     }
 
     public static function openCardClearingSql(int|string $supplierId, string $transactionIdSql): string

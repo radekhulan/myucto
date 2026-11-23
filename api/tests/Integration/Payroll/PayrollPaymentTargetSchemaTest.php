@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Integration\Payroll;
 
-use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Tests\Support\IsolatedSupplierTrait;
 use PDO;
@@ -19,7 +18,7 @@ final class PayrollPaymentTargetSchemaTest extends TestCase
 
     public function testEmployeePaymentAccountsCarryExplicitVerificationEvidence(): void
     {
-        $connection = Bootstrap::buildContainer()->get(Connection::class);
+        $connection = \MyInvoice\Tests\Support\PayrollTestContainer::build()->get(Connection::class);
         self::assertInstanceOf(Connection::class, $connection);
 
         $columns = $connection->pdo()->query(
@@ -49,7 +48,7 @@ final class PayrollPaymentTargetSchemaTest extends TestCase
 
     public function testPaymentTargetChangeInvalidatesVerificationEvidence(): void
     {
-        $connection = Bootstrap::buildContainer()->get(Connection::class);
+        $connection = \MyInvoice\Tests\Support\PayrollTestContainer::build()->get(Connection::class);
         self::assertInstanceOf(Connection::class, $connection);
         $pdo = $connection->pdo();
         $sourceSupplierId = (int) $pdo->query(

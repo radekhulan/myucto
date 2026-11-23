@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Repository;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Service\Invoice\UnitPricePrecision;
 use PDO;
 
 /**
@@ -323,7 +324,7 @@ final class StockPriceLevelRepository
             'rule_type'      => (string) $r['rule_type'],
             // discount_pct, fixed_price zůstávají string (money-safe).
             'discount_pct'   => $r['discount_pct'],
-            'fixed_price'    => $r['fixed_price'],
+            'fixed_price'    => UnitPricePrecision::toDecimalString($r['fixed_price']),
             'currency_code'  => $r['currency_code'] !== null ? strtoupper((string) $r['currency_code']) : null,
             'priority'       => (int) $r['priority'],
         ];

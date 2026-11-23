@@ -7,6 +7,7 @@ import { vSelectOnFocus } from '@/directives/vSelectOnFocus'
 import { vColumnLabels } from '@/directives/columnLabels'
 import { useAuthStore } from '@/stores/auth'
 import { authorizationGuard, applyAuthorizationMeta } from '@/router'
+import { sanitizeMenuItems, sanitizeOpenTabs, setOpenTabSelectHandler, workspaceMenuItems, workspaceOpenTabs } from './newTabData'
 import { createPaneRouter } from '@/router/createPaneRouter'
 import { setForbiddenPermissionHandler } from '@/api/client'
 import { shortcutFromEvent, useKeyboardShortcuts } from '@/composables/useKeyboardShortcuts'
@@ -36,15 +37,40 @@ function toggleClass(element: HTMLElement, name: string, enabled = true): void {
   if (element.classList.contains(name) !== enabled) element.classList.toggle(name, enabled)
 }
 
+let singlePanelState = false
+let observedMain: Element | null = null
+let mainObserver: MutationObserver | null = null
+
+/*
+ * Horní odsazení jediného okna: hlavní plocha shellu ruší vlastní padding, když
+ * v ní je jen okno (main.css, `:has(> .workspace-host:only-child)`). Hláška nad
+ * oknem (údržba, licence, úložiště) ale může zmizet i bez nové zprávy o vzhledu,
+ * třeba zavřením křížkem. Proto se stav přepočítá i při změně obsahu shellu,
+ * jinak by obsah okna vyjel až k menu.
+ */
+function syncSinglePadding(): void {
+  const shellMain = window.frameElement?.closest('main') ?? null
+  toggleClass(document.body, 'workspace-window-single-padded', singlePanelState
+    && (!shellMain || window.parent.getComputedStyle(shellMain).paddingTop === '0px'))
+  if (shellMain === observedMain) return
+  mainObserver?.disconnect()
+  mainObserver = null
+  observedMain = shellMain
+  if (shellMain) {
+    const Observer = (window.parent as typeof window).MutationObserver ?? MutationObserver
+    mainObserver = new Observer(() => syncSinglePadding())
+    mainObserver.observe(shellMain, { childList: true, attributes: true, attributeFilter: ['class', 'style'] })
+  }
+}
+
 async function applyAppearance(theme: WindowFrameTheme, locale: WindowFrameLocale, accent = 'primary', singlePanel = false): Promise<void> {
   const sequence = ++appearanceSequence
   toggleClass(document.documentElement, 'dark', theme === 'dark')
   toggleClass(document.documentElement, 'workspace-window-frame')
   toggleClass(document.body, 'workspace-window-frame')
   toggleClass(document.body, 'workspace-window-single', singlePanel)
-  const shellMain = window.frameElement?.closest('main')
-  toggleClass(document.body, 'workspace-window-single-padded', singlePanel
-    && (!shellMain || window.parent.getComputedStyle(shellMain).paddingTop === '0px'))
+  singlePanelState = singlePanel
+  syncSinglePadding()
   if (document.body.dataset.accent !== accent) document.body.dataset.accent = accent
   if (i18n.global.locale.value !== locale) await ensureLocaleLoaded(locale)
   if (sequence !== appearanceSequence) return
@@ -81,8 +107,8 @@ async function initialMessage(frame: WindowFrameBootstrap): Promise<WindowFrameI
 
 export async function startWindowFrame(frame: WindowFrameBootstrap): Promise<void> {
   const init = await initialMessage(frame)
-  await ensureInitialLocaleReady()
-  await applyAppearance(init.theme, init.locale, init.accent, init.singlePanel)
+  let purchaseCapture = init.purchaseCapture
+  delete init.purchaseCapture
 
   const active = ref(init.active)
   const paneId = ref<WindowFramePaneId | null>(init.paneId ?? null)
@@ -100,10 +126,16 @@ export async function startWindowFrame(frame: WindowFrameBootstrap): Promise<voi
     finally { refreshingPermissions = false }
   })
 
-  await auth.refresh()
+  await Promise.all([
+    auth.bootstrapWorkspace(),
+    ensureInitialLocaleReady().then(() => applyAppearance(init.theme, init.locale, init.accent, init.singlePanel)),
+  ])
   if (init.csrfToken) auth.setSessionCsrfToken(init.csrfToken)
   const shortcuts = useKeyboardShortcuts()
   shortcuts.registerActions(init.shortcutActions ?? [])
+  if (init.menuItems) workspaceMenuItems.value = sanitizeMenuItems(init.menuItems)
+  if (init.openTabs) workspaceOpenTabs.value = sanitizeOpenTabs(init.openTabs)
+  setOpenTabSelectHandler(windowId => postWindowFrameMessage({ type: 'myucto-window-select', id: frame.id, windowId }))
   const globalNavigation = (to: RouteLocationRaw) => {
     postWindowFrameMessage({ type: 'myucto-window-global', id: frame.id, to })
   }
@@ -164,6 +196,11 @@ export async function startWindowFrame(frame: WindowFrameBootstrap): Promise<voi
         visible: computed(() => paneId.value !== null),
         root,
         portal: document.body,
+        takePurchaseCapture: () => {
+          const file = purchaseCapture
+          purchaseCapture = undefined
+          return file
+        },
         navigate: async (to: RouteLocationRaw) => {
           postWindowFrameMessage({ type: 'myucto-window-navigate', id: frame.id, to })
         },
@@ -189,6 +226,7 @@ export async function startWindowFrame(frame: WindowFrameBootstrap): Promise<voi
   })
   await router.push(init.to)
   await router.isReady()
+  if (router.currentRoute.value.name !== 'purchase-invoice-ai-import') purchaseCapture = undefined
   installFrameNavigation(router, direction => {
     postWindowFrameMessage({ type: 'myucto-window-history', id: frame.id, direction })
   }, () => window.scrollTo({ top: 0, left: 0, behavior: 'instant' }))
@@ -220,6 +258,8 @@ export async function startWindowFrame(frame: WindowFrameBootstrap): Promise<voi
     })
     if (state.globalShortcuts) globalShortcuts.value = new Set(state.globalShortcuts)
     if (state.shortcutActions) shortcuts.registerActions(state.shortcutActions)
+    if (state.menuItems) workspaceMenuItems.value = sanitizeMenuItems(state.menuItems)
+    if (state.openTabs) workspaceOpenTabs.value = sanitizeOpenTabs(state.openTabs)
     if (state.csrfToken) auth.setSessionCsrfToken(state.csrfToken)
     if (state.invalidation?.supplierId === frame.supplierId) window.dispatchEvent(new CustomEvent('myucto:window-data-changed', { detail: state.invalidation }))
     if (state.refreshAuth) void auth.refresh()

@@ -162,7 +162,7 @@ final class EmailProfilesAction
         $this->log($request, 'email_profile.updated', $profileId, [
             'changed_fields' => array_values(array_filter(
                 array_keys($body),
-                static fn (string $field): bool => !in_array($field, ['smtp_password', 'imap_password'], true),
+                static fn (string $field): bool => !in_array($field, ['smtp_password', 'imap_password', 'imap_oauth_client_secret'], true),
             )),
             'code' => $profile['code'] ?? null,
             'from_email' => $profile['from_email'] ?? null,

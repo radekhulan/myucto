@@ -9,6 +9,7 @@ use MyInvoice\Http\Json;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\JournalEntryRepository;
 use MyInvoice\Service\Accounting\JournalLinkService;
+use MyInvoice\Service\Accounting\JournalRelatedAccess;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 
@@ -22,6 +23,9 @@ use Psr\Http\Message\ServerRequestInterface as Request;
  * tenantovi a hrany grafu se hledají VÝHRADNĚ z ověřeného DB řádku.
  *
  * Právo řeší RoutePermissionMap: GET /api/accounting/journal(/|$) → 'accounting' READ.
+ * Ostatní položky navíc jen s právem 'other_items' a jejich úhrady s právem 'bank' / 'cash'
+ * ({@see JournalRelatedAccess}); licenci hlídá LicenseMiddleware
+ * podle CommercialFeatureAccess::RESTRICTED_API_PATTERNS (celé /api/accounting kromě pokladny a bank. účtů).
  */
 final class JournalRelatedAction
 {
@@ -45,7 +49,13 @@ final class JournalRelatedAction
             return Json::error($response, 'not_found', 'Účetní zápis nenalezen.', 404);
         }
 
-        $related = $this->links->related($supplierId, $entry);
+        // Ostatní položky a jejich úhrady jen s právy other_items a bank / cash: bez
+        // nich je panel vůbec nevrátí (ne jen skryje odkaz), viz JournalRelatedAccess.
+        $related = $this->links->related(
+            $supplierId,
+            $entry,
+            JournalRelatedAccess::fromRequest($request),
+        );
 
         return Json::ok($response, [
             'entry_id'  => $entryId,

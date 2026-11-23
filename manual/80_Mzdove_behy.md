@@ -20,19 +20,55 @@ Kapitolu otevřete, když:
 <!-- cols: 26 40 34 -->
 | Kdy | Co udělat | Kde v aplikaci |
 |---|---|---|
+| na začátku měsíční uzávěrky | Zjistit, co je hotové a co zbývá | `Mzdy → Průvodce měsícem`, postup v [§ 80.2a](#802a-pruvodce-mesicem-mezd) |
 | po schválení docházky a vstupů | Založit běh, spočítat a schválit mzdy | `Mzdy → Mzdové běhy`, postup v [§ 80.3](#803-krok-za-krokem-spocitat-a-schvalit-mzdy) |
 | hned po schválení | Zaúčtovat, připravit platby, vydat dokumenty a podat hlášení | karta běhu, postup v [§ 80.4](#804-krok-za-krokem-dokonceni-mesice-po-schvaleni) |
 | po spárování plateb a odeslání podání | Uzavřít měsíc | karta běhu, tlačítko **Uzavřít** |
 | když se ve schváleném měsíci najde chyba | Opravná revize | karta běhu, postup v [§ 80.5](#805-krok-za-krokem-oprava-schvaleneho-mesice) |
 
+V rozbaleném detailu vypočteného běhu najdete **Hodinové nároky na
+výplatní pásce**. Vyberte osobu a rozbalte nárok. Uvidíte uložené
+množství, sazby po účinných úsecích, analytické částky a zaokrouhlení.
+Příplatky ukazují doložené procento či základ; smluvní základní sazba
+se za sazbu příplatku nevydává. U doplatku minima úseky dokládají
+hranici, nikoli jednotlivé vyplacené doplatky.
+
+Opravená revize je celkový přepočet včetně dříve zúčtovaných složek;
+její součet není dodatečná výplata. Při opravě páska odlišuje celý
+nárok, již zúčtovanou částku a nynější rozdíl. Detail samostatně ukáže
+také změnu skutečně odpracované doby, včetně záporné opravy nebo nuly. Množství původního nároku nepovažujte za nové odpracované
+hodiny. Jako dříve zúčtovaná se počítá jen částka ze schválené revize;
+obnova podkladů před prvním schválením nahradí dosavadní rozdíl, takže
+první páska ukáže celý nárok jedním řádkem. Výplatní páska i detail přebírají stejnou zmrazenou revizi;
+pozdější změna sazeb je nepřepočítá. Starší revize bez tohoto rozpisu
+jej zpětně nedopočítávají.
+
 ## 80.2 Než začnete
+
+Hodinový výpočet připravuje nároky z přesných schválených hodin, účinných
+sazeb a samostatně doložených příplatků. Při přípravě běhu je převádí
+do vstupů před jejich uzamčením; opakování nevytváří druhou platbu
+za tentýž nárok. Náhled a konkrétní chybějící podklady zkontrolujte
+v [rychlém měsíčním vstupu](79_Rychly_mesicni_vstup.md#79812-vypocet-hodinove-mzdy-a-dolozeni-naroku).
+
+Výpočet obsahuje posouzení minimální mzdy a případný doplatek.
+Neurčené započtení vlastní složky, chybějící rozhodnutí pro měsíční
+posouzení nebo rozporná stanovená doba mají konkrétní blokaci v
+[náhledu minima](79_Rychly_mesicni_vstup.md#79813-minimalni-mzda-a-doplatek).
+Schválení vyžaduje úplné podklady a vyřešené konkrétní kontroly běhu.
+Samotným zadáním hotové částky chybějící podklady nenahradíte. Snímek uchovává sazby, vybranou revizi hodin
+a další podklady nároků; pozdější změnu ohlásí jako změnu podkladů
+a již uzavřenou revizi nepřepíše.
 
 1. **Nastavení mezd.** Zaměstnavatel, zaměstnanci, pracovní vztahy, kalendář,
    absence a mzdové vstupy musí být hotové (průvodce je v
    [Úplné mzdy](75_Uplne_mzdy.md)).
-2. **Schválená docházka.** Měsíc docházky schvalte v `Mzdy → Docházka a směny`
-   ještě před spočítáním mezd. Zákonné příplatky vznikají právě schválením
-   docházky a po uzamčení vstupů se do běhu nedostanou.
+2. **Schválená pracovní doba.** Měsíc denní docházky schvalte v
+   `Mzdy → Docházka a směny` před spočítáním mezd. Doložený ruční souhrn
+   můžete schválit i v rychlém měsíčním vstupu. U hodinového výpočtu
+   samostatně doplňte příplatkové vrstvy a nároky na volno; schválení
+   celkových hodin samo jejich úplnost nepotvrzuje. Příslušné vstupy
+   musejí vzniknout před uzamčením podkladů běhu.
 3. **Schválené vstupy.** Mzdové vstupy a nepřítomnosti měsíce musí být
    schválené. Koncepty můžete schválit hromadně i přímo z běhu.
 4. **Oprávnění.** Potřebujete mzdové oprávnění. Celý běh může dokončit jedna
@@ -41,18 +77,108 @@ Kapitolu otevřete, když:
 5. **Aktivní legislativní pravidla.** Pro období musí být odborně schválená
    a aktivní legislativní pravidla mezd (`Mzdy → Legislativní pravidla mezd`).
 
+## 80.2a Průvodce měsícem mezd
+
+Průvodce v `Mzdy → Průvodce měsícem` (odkaz je i v hlavičce Mzdových
+běhů) vede celou měsíční uzávěrku jedním postupem. Hodí se malé firmě
+s několika zaměstnanci na HPP stejně jako agentuře s desítkami až stovkami
+dohod. Nahoře zvolíte období, pod ním je sedm kroků. U každého uvidíte
+stav, počet věcí, které zbývají, a jedno hlavní tlačítko. To vás pošle na
+obrazovku nebo do hromadného dialogu, kde se věc udělá. Průvodce sám nic
+nepočítá, neukládá ani neodesílá.
+
+Zvolíte-li měsíc **před začátkem vedení mezd**, průvodce místo kroků
+vysvětlí hranici a nabídne **Otevřít MM/RRRR** pro první vedené období.
+Starší měsíce patří do [převzatých mezd](113_Prechod_mezd_v_prubehu_roku.md);
+hranici vedení měňte v aktivaci mzdové agendy.
+
+<!-- cols: 26 40 34 -->
+| Krok | Co ukazuje | Kam vede |
+|---|---|---|
+| 1. Podklady měsíce | Neschválenou nebo chybějící docházku, koncepty a haléřové částky vstupů, lidi bez mzdy, nerozhodnuté nepřítomnosti a počet importů docházky za měsíc | Docházka, import docházky (`Mzdy → Importy`, záložka Docházka), rychlý měsíční vstup |
+| 2. Noví lidé a dohody | Chybějící údaje lidí: pojišťovna, prohlášení, způsob výplaty, příslušnost k pojištění, dohody po sjednaném konci | Zaměstnanci zúžení na blokující údaje, založení lidí z importu docházky |
+| 3. Registrace ČSSZ a oznámení ZP | Přihlášky A1 za měsíc (kolik jde připravit, kolik je neúplných a po termínu) a otevřená oznámení zdravotním pojišťovnám | Hromadná příprava přihlášek, fronta K odeslání, hromadné označení „podáno mimo aplikaci“ v Zákonných termínech |
+| 4. Kontrola před během | Nálezy podle dopadu: co zastaví, co stojí opravnou revizi, co se doplní kdykoli; hromadné opravy | Kontrola v Mzdových bězích, hromadné dialogy v seznamu zaměstnanců |
+| 5. Výpočet a schválení | Stav běhu a počet kontrol, které brání schválení | Mzdové běhy |
+| 6. JMHZ a další měsíční podání | Splněné a zbývající povinnosti měsíčního přehledu podání, z toho JMHZ | Měsíční přehled podání, záložka JMHZ (test XML, odložení) |
+| 7. Platby a výplatní pásky | Doložené úhrady a počet dokumentů za měsíc | Platby mezd, Dokumenty a výstupy |
+
+U haléřových částek vede akce **Zaokrouhlit vstupy na celé koruny**
+na `Mzdy → Mzdové složky a vstupy`, záložku **Měsíční vstupy** ve stejném měsíci.
+Částky zkontrolujte a upravte tam; průvodce je sám nemění.
+
+Stavy kroků:
+
+- **Hotovo**: v kroku nic nezbývá.
+- **Chybí N**: krok čeká na práci, N je počet věcí ze zdroje kroku.
+  Krok, na který je řada, je zvýrazněný jako **Teď na řadě**.
+- **Zatím nelze**: krok navazuje na dřívější. Podání, platby a pásky
+  vznikají ze schváleného běhu, běh nejde založit při blokujícím nálezu.
+- **Bez oprávnění**: k údajům kroku nemáte přístup (například k podáním).
+
+Počty jsou tytéž, jaké ukazují cílové obrazovky. Kroky 1, 2 a 4 čtou
+kontrolu před během z [§ 80.3](#803-krok-za-krokem-spocitat-a-schvalit-mzdy);
+po zamknutí vstupů místo ní kontroly běhu, které brání schválení. Krok 1
+a 2 jsou výřez téže kontroly, krok 4 ji shrnuje celou. Krok 6 přebírá
+souhrn měsíčního přehledu podání ([kapitola 85](85_Podani_a_hlaseni.md)).
+Krok 3 počítá přihlášky A1 za zvolený měsíc. Odkaz otevře hromadnou
+přípravu se stejným měsícem v adrese; rozsah **Období od** a **Období do**
+v ní si ověřte.
+
+Celý měsíc pro stovky lidí, včetně hromadných akcí v každém kroku,
+orientačních časů a kontrolního seznamu, popisuje kapitola
+[Mzdy pro stovky zaměstnanců a brigádníků](122_Mzdy_pro_stovky_zamestnancu.md).
+
 ## 80.3 Krok za krokem: spočítat a schválit mzdy
 
-1. Otevřete `Mzdy → Mzdové běhy`.
+1. Otevřete `Mzdy → Mzdové běhy`. Stránka se otevře na rozpracovaném měsíci,
+   tedy na prvním měsíci, který ještě nemá schválenou mzdu. Jakmile období
+   změníte, drží se zvolený měsíc i na ostatních stránkách mezd (měsíční
+   vstupy, docházka, dokumenty, platby, podání), dokud se neodhlásíte.
 2. Vyplňte **Mzdové období** a **Datum výplaty** a klikněte na **Nový mzdový
    běh**. Datum výplaty nesmí být později než poslední den následujícího
    měsíce.
 3. Klikněte na **Spočítat mzdy**. Jedno tlačítko uzamkne vstupy a spustí
    výpočet.
 4. Zobrazí se **Kontrola před zahájením**. Projděte ji a potvrďte volbou
-   **Přesto zahájit**.
+   **Přesto zahájit**. Kontrola hlásí i pracovní vztahy, které mají za
+   období nezrušené mzdové vstupy, ale do běhu nevstoupí (nepotvrzený
+   nástup, podmínky účinné až po období). Takové vstupy by se nevyplatily;
+   na kartě vztahu potvrďte nástup (**Potvrdit nástup**), případně opravte
+   účinnost podmínek. Má-li osoba v období jiný platný vztah (typicky
+   únorová dohoda a vstup zadaný na březnovou), hláška ho jmenuje a odkaz
+   vede na vstupy vztahu, kde vstup přesunete (**Upravit**, pracovní vztah)
+   nebo zrušíte. Chybí-li hodinově odměňovaným vztahům průměrný
+   výdělek, doplníte ho tlačítkem **Doplnit pravděpodobný výdělek ze
+   sazby**. Nezmrazený hodinový výpočet se tu nehlásí, zmrazí se sám
+   uzamčením vstupů. Kontrola také řekne, když období ještě neskončilo nebo
+   ani nezačalo (mzdy spočítat jde, podklady se ale ještě mohou změnit
+   a měsíční hlášení půjde připravit až po skončení měsíce), a které hodnoty
+   nového roku ještě nejsou vyhlášené. Týká-li se nález víc osob, než se do
+   přehledu vejde, odkaz **Zobrazit všech N osob v seznamu zaměstnanců**
+   otevře seznam zúžený právě na ně. Nález má v kontrole před zahájením
+   stejnou závažnost jako po výpočtu: chybějící přihláška ČSSZ u vztahu
+   s účastí na pojištění nebo oznámení zdravotní pojišťovně je mezi nálezy,
+   kvůli kterým běh nepůjde schválit, dokud se nepodá nebo neschválí výjimka
+   (podáno mimo aplikaci). U DPP a DPČ bez účasti na pojištění je chybějící
+   registrace jen připomínkou.
+   Chybějící docházka schválení nezastaví, doplnění po zamknutí vstupů ale
+   stojí opravnou revizi.
+   U osob s částkou k výplatě kontrola hlásí také chybějící výplatní
+   pravidlo a odkáže na výplatní údaje v kartě zaměstnance. Je to údaj
+   osoby, ne nastavení firmy, a potřebujete ho jen tehdy, když platby mezd
+   připravujete v aplikaci. Výpočet ani schválení tím nejsou omezené.
+   Tlačítko **Doplnit výplatní pravidla z karet osob (N)** otevře náhled:
+   osobám s výplatou v hotovosti nebo s jediným ověřeným účtem na kartě
+   pravidlo doplní, u ostatních řekne proč ne (rozdělená výplata, chybí
+   ověřený účet). Osobám, které už pravidlo mají, nic nemění.
+   Doplnění po schválení vyžaduje opravnou revizi a nový výpočet běhu.
+   Nulová nebo záporná výplata pravidlo nepotřebuje; existující pravidlo
+   pro hotovost nebo jiný způsob výplaty se jako chybějící nehlásí.
 5. Zůstal-li některý vstup v konceptu, běh to ohlásí jako blokaci. Klikněte
-   přímo u ní na **Schválit vše**. Na jinou obrazovku nemusíte.
+   přímo u ní na **Schválit vše**. Na jinou obrazovku nemusíte. Tentýž
+   problém se neopakuje jako vztah bez mzdových vstupů ani jako chybějící
+   schválená mzdová složka v zákonném posouzení.
 6. Projděte blokace, varování a výsledky jednotlivých zaměstnanců. U každého
    důvodu je odkaz na místo opravy. U skupiny osob použijte odkaz u konkrétního
    člověka. Karta vztahu se otevře přímo na příslušné sekci nebo poli,
@@ -63,10 +189,14 @@ Kapitolu otevřete, když:
    U daně pomůže **Rozpad daně ze závislé činnosti**.
 8. Po opravě zdroje klikněte na **Přepočítat**. Vypočtený výsledek nikdy
    neupravujte bez podkladu.
-9. Klikněte na **Schválit**.
+9. Klikněte na **Schválit** a potvrďte dialog. Schválení je závazné: uloží
+   výsledek, založí výplatní pásky a uzavře historii zákonné evidence osob do
+   konce období. Zpět vede jen oprava běhu
+   ([§ 80.5](#805-krok-za-krokem-oprava-schvaleneho-mesice)).
 
-**Jak poznáte, že je hotovo:** Běh má stav **Schváleno** a hlavní tlačítko
-nabízí **Zaúčtovat**. Výplatní pásky zaměstnanců se generují na pozadí
+**Jak poznáte, že je hotovo:** Běh má stav **Schváleno**, hlavní tlačítko
+nabízí **Zaúčtovat** a pod souhrnem jsou odkazy na výplatní pásky a dokumenty,
+výplaty a měsíční přehled podání za období běhu. Výplatní pásky zaměstnanců se generují na pozadí
 (viz [§ 83.3](83_Dokumenty_a_vystupy.md#833-krok-za-krokem-mesicni-dokumenty))
 a v podvojném
 účetnictví vznikl mzdový deník.
@@ -79,7 +209,7 @@ a v podvojném
 
 ## 80.4 Krok za krokem: dokončení měsíce po schválení
 
-Pořadí je dané a všechny kroky se dělají ze schválené revize.
+Doporučený postup na kartě běhu navazuje na schválenou revizi.
 
 1. Na kartě běhu klikněte na **Zaúčtovat** a ověřte
    [shodu účtování](81_Shoda_uctovani_mezd.md). U daňové evidence účetní zápis
@@ -91,9 +221,15 @@ Pořadí je dané a všechny kroky se dělají ze schválené revize.
    ([§ 85.3](85_Podani_a_hlaseni.md#853-krok-za-krokem-mesicni-hlaseni-jmhz)).
 5. Klikněte na **Uzavřít**.
 
-**Jak poznáte, že je hotovo:** Běh má stav **Uzavřeno**. Do stavu **Uhrazeno**
-ho server překlopí sám podle spárovaných plateb; tlačítko pro potvrzení úhrady
-neexistuje. Celý klikací postup měsíce je v
+**Uzavřít** lze už ve stavu **Platby připraveny**. Uzavření samo
+nepotvrzuje zaplacení závazků ani přijetí podání. Nedoložené úhrady dál
+sledujte v platbách a výsledek odeslání v přehledu podání.
+
+**Jak poznáte, že je hotovo:** Běh má stav **Uzavřeno** a zvlášť jste
+ověřili úhrady a podání. Před uzavřením se běh ze stavu **Platby připraveny**
+přepne automaticky na **Uhrazeno** po doložení všech úhrad. Již uzavřený běh
+svůj stav nemění a platební evidence se doplňuje dál. Tlačítko pro ruční
+potvrzení úhrady neexistuje. Celý klikací postup měsíce je v
 [§ 75.4](75_Uplne_mzdy.md#754-krok-za-krokem-zpracovani-mzdoveho-mesice).
 
 ## 80.5 Krok za krokem: oprava schváleného měsíce
@@ -116,6 +252,45 @@ revize.
 
 Zrušený běh znovu otevřete tlačítkem **Začít z opravených vstupů**.
 
+Opravu jste vyžádali omylem? Ve stavu **Čeká na opravu** klikněte na **Vzít
+žádost o opravu zpět**. Běh se vrátí do stavu před vyžádáním (schváleno,
+zaúčtováno, uhrazeno nebo uzavřeno) a schválená revize, zaúčtování, platby ani
+podání se nemění. Změny podkladů zadané mezitím do běhu nejdou; potřebujete-li
+je, pokračujte **Otevřít opravu**. Krok smí uživatel s právem „Zkontrolovat
+mzdový běh“.
+
+Když **Otevřít opravu** odmítne dohoda o srážce ze mzdy, jejíž sražená částka
+se od schválení změnila, karta běhu jmenuje osobu a dohodu a nabídne odkaz do
+`Mzdy → Dohody o srážkách`. Vraťte u dohody stav sražené částky, nebo žádost
+o opravu vezměte zpět.
+
+> [!IMPORTANT]
+> Zaměstnanec založený až po schválení měsíce, nebo vztah, kterému jste
+> posunuli nástup do už schváleného měsíce, se do schváleného běhu sám
+> nedostane. Karta běhu takové vztahy jmenuje („V běhu chybí pracovní vztah,
+> který do období patří") a karta vztahu na to upozorní s odkazem na běh.
+> Vyžádejte opravu běhu: nová revize vztah převezme a mzdy přepočítá.
+
+> [!IMPORTANT]
+> Když se po schválení běhu změní schválený průměrný nebo pravděpodobný
+> výdělek čtvrtletí (nová revize průměru na kartě vztahu, hromadné nastavení
+> pravděpodobného výdělku), karta běhu ukáže **Průměr pro náhrady se změnil po
+> schválení**: u každé osoby původní a nový průměr a náhrady spočítané ze
+> starého průměru s částkou z nového průměru. Tlačítko **Otevřít opravu
+> a obnovit podklady** vyžádá opravu (důvod je předvyplněný), otevře ji
+> a běh přepočítá. Schválení zůstává na vás. Náhrady mají pevnou částku, proto
+> je v otevřené opravě přepočítejte tlačítkem **Přepočítat náhrady z nového
+> průměru**: náhled ukáže osobu, náhradu, starou a novou částku, po potvrzení se
+> dovolená zadaná s daty a náhrady z importu hodin přepočítají, překážky
+> s dorovnáním a další náhrady se vypíšou k ruční úpravě
+> ([§ 76.4](76_Absence_a_dovolena.md#764-krok-za-krokem-prumerny-vydelek-pro-nahrady)).
+> Podklady běhu se pak obnoví a běh spočítejte znovu; upozornění zmizí, až žádná
+> náhrada nepochází ze starého průměru. Ve schváleném běhu ani ve vyžádané opravě
+> přepočet nic nezmění, jen navede na **Vyžádat opravu** / **Otevřít opravu**.
+> U spočítaného neschváleného běhu se ukáže **Průměr pro náhrady se změnil po
+> výpočtu** s tlačítky **Obnovit podklady a přepočítat** a **Přepočítat náhrady
+> z nového průměru**.
+
 ## 80.6 Krok za krokem: obnovení podkladů rozpracovaného běhu
 
 Použijte, když jste po spočítání schválili další vstup, nepřítomnost nebo
@@ -134,6 +309,50 @@ Nechcete-li nový vstup do měsíce zahrnout, zrušte ho nebo ho přesuňte do j
 období. U schváleného běhu vede cesta přes **Vyžádat opravu**
 ([§ 80.5](#805-krok-za-krokem-oprava-schvaleneho-mesice)).
 
+## 80.6a Krok za krokem: vyřazení osoby, kterou nejde spočítat
+
+Jedna osoba v ruční kontrole (chybí zdravotní pojišťovna, podmínky vztahu nebo
+hodnoty pro srážky) zastaví schválení celého běhu. Nechcete-li kvůli ní
+odkládat výplatu ostatním, nebo chcete osobu vyřadit z jiného důvodu (sporné
+hodiny, chybějící podklad):
+
+1. U blokace osoby v kontrolách běhu klikněte na **Vyřadit osobu z běhu**,
+   nebo v tabulce **Zaměstnanci v běhu** (tlačítko **Zobrazit rozpad podle
+   zaměstnanců** na kartě spočítaného běhu) klikněte u osoby na **Vyřadit
+   z běhu**. Tabulka tlačítko nabízí jen v běžné revizi, která ještě není
+   schválená.
+2. Napište důvod (aspoň 10 znaků: co chybí a kdy se doplní) a potvrďte. Běh
+   dostane novou revizi bez této osoby a hned se přepočítá; potvrzení uvede
+   číslo nové revize.
+3. Schvalte běh obvyklým postupem.
+4. Až údaje doplníte, klikněte na **Vyžádat opravu** a **Otevřít opravu**.
+   Opravná revize osobu zase obsahuje; po schválení dostane mzdu za stejné
+   období.
+5. Měsíční hlášení JMHZ za ni podejte opravným hlášením
+   ([§ 85.9](85_Podani_a_hlaseni.md#859-krok-za-krokem-oprava-nebo-storno-odeslaneho-hlaseni-jmhz)).
+
+**Jak poznáte, že je hotovo:** Na kartě běhu je rámeček **Z běhu vyřazeno**
+(dokud je revize otevřená) nebo **Bez mzdy v tomto běhu** (po schválení)
+s důvodem a autorem; v historii běhu je událost **Osoba vyřazena z běhu**.
+
+Osobu, kterou jste vyřadili omylem, vrátíte tlačítkem **Vrátit do běhu**,
+dokud revize není schválená. Vyřazená osoba nemá v běhu výplatní pásku, mzdu
+ani zamčené vstupy. Osobu, která je už ve schválené revizi, z opravy vyřadit
+nejde: mzdu už dostala. Vyřazení smí uživatel s právy „Schválit mzdový běh“
+a „Spravovat mzdové vstupy“. Zrušení běhu vyřazení zruší.
+
+## 80.6b Krok za krokem: změna data výplaty
+
+Datum výplaty jde změnit až do schválení běhu, i u zrušeného běhu.
+
+1. Na kartě běhu klikněte na **Změnit datum výplaty**.
+2. Zadejte nové datum a potvrďte.
+
+U konceptu a zrušeného běhu se změní jen datum. Běh se snímkem vstupů dostane
+novou revizi s novým datem a hned se přepočítá, protože na datu výplaty závisí
+zákonný výpočet i lhůty odvodů a hlášení. Datum schváleného běhu změnit nejde.
+Krok smí uživatel s právy „Vypočítat mzdy“ a „Spravovat mzdové vstupy“.
+
 ## 80.7 Krok za krokem: doplnění zákonných údajů po importu
 
 Po převzetí zaměstnanců z importu běh často hlásí nedokončený zákonný výpočet
@@ -143,8 +362,13 @@ pro JMHZ. Aplikace nabízí tři hromadné akce.
 **Výchozí zákonná evidence** (daňová rezidence, příslušnost k pojištění):
 
 1. U blokace na kartě běhu klikněte na **Doplnit výchozí údaje (N osob)**.
-   Totéž je v `Mzdy → Zaměstnanci` pod **Doplnit výchozí zákonné údaje**;
-   tam zvolíte měsíc, od kterého údaje platí.
+   Tlačítko v kontrole před během nabídne všechny osoby běhu, kterým se
+   výchozí údaj doplní: ty, kterým chybějící údaj zastaví výpočet, i ty, kterým
+   chybí jen údaj pro měsíční hlášení JMHZ (například příslušnost k pojištění
+   u dohody bez účasti). Platnost je předvyplněná od měsíce běhu.
+   Totéž je v `Mzdy → Zaměstnanci → Další funkce` pod **Doplnit výchozí zákonné údaje**;
+   tam zvolíte měsíc, od kterého údaje platí. Předvyplněný je měsíc nejstaršího
+   mzdového běhu, který ještě není schválený (z kontroly běhu měsíc běhu).
 2. Projděte náhled: komu se údaje doplní, kdo je vyřazený a proč, kdo nemá
    zdravotní pojišťovnu a kdo nemá prohlášení poplatníka. Náhled nic
    nezapisuje.
@@ -156,12 +380,19 @@ pro JMHZ. Aplikace nabízí tři hromadné akce.
 4. Údaje uložte a pokračujte krokem, který nabídne dialog (**Spočítat mzdy**,
    **Obnovit podklady**, nová revize nebo **Vyžádat opravu**).
 
+Doplněné údaje platí bez konce, takže pokryjí i další dohodu téže osoby.
+Existující údaj se nemění. Skončil-li dřív (například rezidence zapsaná jen do
+konce první dohody), doplní se za něj navazující údaj od měsíce doplnění.
+
 **Zdravotní pojišťovny:**
 
-1. V `Mzdy → Zaměstnanci` klikněte na **Zdravotní pojišťovny hromadně**
+1. V `Mzdy → Zaměstnanci → Další funkce` klikněte na **Zdravotní pojišťovny hromadně**
    (výsledek importu hlášení na akci odkáže sám).
 2. U každé osoby vyberte pojišťovnu a měsíc, od kterého platí. **Doplnit
-   prázdné** vyplní stejnou pojišťovnu všem, kdo ji zatím nemají.
+   prázdné** vyplní stejnou pojišťovnu všem, kdo ji zatím nemají. Má-li osoba
+   pojišťovnu zapsanou až od pozdějšího měsíce (například s pozdějším vztahem),
+   dialog ji předvyplní a pod jménem napíše, od kdy je zapsaná; kontrola běhu
+   to u nálezu řekne také.
 3. Uložte. Osoby bez vybrané pojišťovny se přeskočí.
 
 **Místo výkonu práce pro JMHZ:**
@@ -170,7 +401,11 @@ pro JMHZ. Aplikace nabízí tři hromadné akce.
    údaje pracoviště.** v testu JMHZ, klikněte na **Doplnit pracoviště**.
 2. Zvolte pracoviště z nabídky (ve firmě už ověřená, nejčastější první), nebo
    jinou obec vyhledejte v číselníku.
-3. Klikněte na **Doplnit pracoviště N vztahům**.
+3. Klikněte na **Doplnit pracoviště N vztahům**. Vztah, který už pracoviště
+   vyplněné má, ale číselník ho neověřil (například jen „Praha"), se
+   nepřepíše. Dialog ho před uložením i ve výsledku uvede v seznamu
+   **Pracoviště vyplněné, ale neověřené** s odkazem na kartu vztahu, kde
+   obec vyberete z číselníku.
 4. Doplněné údaje dostanete do běhu novou revizí: schválený běh vraťte
    k opravě, otevřete novou revizi, spočítejte, schvalte a hlášení připravte
    znovu.
@@ -219,13 +454,21 @@ hlášením najdete v [Přechodu mezd v průběhu roku](113_Prechod_mezd_v_prube
 |---|---|---|
 | „…: pracovní vztah nemá v období žádnou schválenou mzdovou složku.“ | Vztah je v běhu, ale nemá schválený vstup | Doplňte a schvalte složku v měsíčních vstupech. Trvá-li vztah a příjem v měsíci opravdu nevznikl, zadejte u základní složky 0 Kč; za vztah se podá nulové hlášení JMHZ. Potom **Obnovit podklady**. |
 | Blokace kvůli vstupu v konceptu | Vstup zůstal neschválený | U blokace klikněte na **Schválit vše**, nebo v `Mzdy → Mzdové složky a vstupy` na **Schválit N odpovídajících filtru**. |
+| Hodinový nárok koliduje s ruční částkou, ručním příplatkem nebo jiným během | Pro tutéž mzdu existuje druhý podklad; blokován je jen tento vztah, ostatní se spočítají | Odkazem z blokace odeberte ruční vstup (příplatek) v rychlém měsíčním vstupu, případně dokončete nebo zrušte druhý běh, potom **Obnovit podklady**. |
 | „…: v období je nerozhodnutá nepřítomnost“ | Nepřítomnost v měsíci čeká na schválení nebo u ní běží oprava; platí pro měsíční i hodinovou mzdu | Nepřítomnost schvalte nebo zamítněte (opravu dokončete) v `Mzdy → Absence a dovolená`, potom **Obnovit podklady**. |
 | Schválení odmítnuto s výzvou k obnovení | Od zmrazení snímku přibyly nebo se změnily schválené podklady | Klikněte na **Obnovit podklady** a přepočítejte ([§ 80.6](#806-krok-za-krokem-obnoveni-podkladu-rozpracovaneho-behu)). |
 | Přepočet nevzal opravený údaj | **Přepočítat** počítá ze zmrazeného snímku | **Obnovit podklady**, u schváleného běhu **Vyžádat opravu**. |
 | Datum výplaty se neuloží | Je později než poslední den následujícího měsíce (§ 141 odst. 1 zákoníku práce) | Zadejte skutečné datum výplaty v zákonné lhůtě. |
-| Rozpad daně ukazuje **Vyžaduje ruční kontrolu** | Chybí ověřené prohlášení, rezidence nebo nárok na dítě | Opravte podklad na kartě osoby a vytvořte novou revizi výpočtu. |
+| „Mzdový běh č. N za toto období už existuje s datem výplaty…“ | Za období už je běh (i zrušený) s jiným datem | V běhu č. N klikněte na **Změnit datum výplaty** ([§ 80.6b](#806b-krok-za-krokem-zmena-data-vyplaty)). |
+| Jedna osoba v ruční kontrole drží schválení celého běhu | Zákonný výpočet ukládá výsledky jen za všechny osoby běhu | **Vyřadit osobu z běhu** a doplatek opravou ([§ 80.6a](#806a-krok-za-krokem-vyrazeni-osoby-kterou-nejde-spocitat)). |
+| Na kartě běhu chybí **Zrušit běh**, **Začít znovu** nebo **Uzavřít** | Nemáte právo, které krok vyžaduje | Věta pod tlačítky jmenuje chybějící právo; požádejte správce firmy o jeho přidělení. |
+| „Nad tímto mzdovým během právě probíhá jiný požadavek“ | Souběžně běží výpočet, výjimka nebo obnova podkladů | Počkejte, až doběhne, a akci zopakujte; obrazovka data načte znovu. |
+| Vztah vypadl z běhu, ale jeho vstupy jsou zamčené | Vstupy zamkla předchozí revize | **Obnovit podklady**: vstupy vztahů, které nová revize nezná, se odemknou a jdou zrušit nebo přesunout. |
+| Rozpad daně ukazuje **Vyžaduje ruční kontrolu** | Prohlášení je vedené jako neověřené, u podepsaného chybí rezidence, nebo chybí nárok na dítě | Opravte podklad na kartě osoby a vytvořte novou revizi výpočtu. Chybějící záznam o prohlášení výpočet nezastaví ([§ 80.11.13](#801113-zakonne-vychozi-stavy-ve-vypoctu)). |
 | Nedokončený zákonný výpočet u většiny lidí po importu | Osoby nemají rezidenci ani příslušnost k pojištění | **Doplnit výchozí údaje (N osob)** ([§ 80.7](#807-krok-za-krokem-doplneni-zakonnych-udaju-po-importu)). |
-| Výpočet zdravotního pojištění skončí chybou | Osoba nemá zdravotní pojišťovnu (hlášení JMHZ ji nenese) | **Zdravotní pojišťovny hromadně**. |
+| Výpočet zdravotního pojištění skončí chybou | Osoba nemá zdravotní pojišťovnu (hlášení JMHZ ji nenese) a v měsíci jí vzniká účast na pojištění | U nálezu klikněte na **Zdravotní pojišťovny hromadně**. Dohodu bez účasti výpočet bez pojišťovny spočítá. |
+| Varování o chybějících počátečních ročních úhrnech | Mzdy roku jste převzali v jeho průběhu | Naimportujte počáteční stavy v `Mzdy → Importy → JMHZ`. Výpočet zatím pokračuje od nuly ([§ 80.11.13](#801113-zakonne-vychozi-stavy-ve-vypoctu)). |
+| Varování, že příspěvek na stravování je celý zdaněný | Stravné MPSV na nový rok ještě nevyšlo | Po vyhlášení vyhlášky dorovnejte osvobozenou část opravou vstupu. |
 | Test JMHZ hlásí **Chybí ověřené číselníkové údaje pracoviště.** | Vztah nemá místo výkonu práce z číselníku ČSSZ | **Doplnit pracoviště**, pak nová revize běhu. |
 | Schválení zablokováno kvůli pravidlům | Legislativní pravidla pro období nejsou aktivní nebo úplná | Nechte aktivovat pravidla v `Mzdy → Legislativní pravidla mezd`. |
 | Čistá mzda jedné osoby vyšla záporně | Typicky doplatek zdravotního pojištění v měsíci bez peněžního příjmu | Nejde o chybu, vznikla pohledávka za zaměstnancem ([§ 80.11.4](#80114-zaporna-cista-mzda)). |
@@ -293,7 +536,10 @@ revizi. Archivní export nese celý řetěz revizí.
 Prázdný technický běh smažete tlačítkem **Smazat prázdný běh**, i po jeho
 zrušení. Tlačítko se ukáže, jen když běh nemá revizi, uzamčené vstupy,
 výpočet, dokument, podání, platbu ani účetní stopu. Běh s věcnou evidencí
-zůstává kvůli auditu dohledatelný a jde jen zrušit.
+zůstává kvůli auditu dohledatelný a jde jen zrušit. Zrušený běh za období
+zůstává a pokračuje se v něm přes **Začít znovu**; špatné datum výplaty
+opravíte tlačítkem **Změnit datum výplaty**. Zrušený převzatý běh založení
+nového běhu za stejné období nebrání.
 
 ### 80.11.3 Schvalování vstupů
 
@@ -397,8 +643,14 @@ osob.
 **Obnovit podklady** založí novou revizi téhož druhu (opravná zůstává
 opravnou) ze stejných podkladů, jaké by vzalo zamknutí vstupů, nově schválené
 vstupy zamkne a běh vrátí k přepočtu. Rozpracovaná revize zůstane v historii
-jako zahozená. Schválenou revizi obnova nikdy nemění. Výjimky schválené
-u varování předchozí revize se nepřenášejí, nová revize je vyžaduje znovu.
+jako zahozená. Schválenou revizi obnova nikdy nemění. Výjimku schválenou
+u varování předchozí revize nová revize převezme, pokud má varování stejný
+kód, týká se stejné osoby nebo vztahu a má doslova stejný text; zůstane
+původní důvod i autor a historie běhu zapíše „Výjimky převzaté z předchozí
+revize“. Změněné varování vyžaduje výjimku znovu. Totéž platí pro opravu
+schváleného běhu a pro nový start zrušeného běhu. Vstupy vztahů, které nová
+revize už nezná (nenastoupil, ukončený vztah), obnova odemkne, takže je jde
+zrušit nebo přesunout.
 Obnovit podklady smí uživatel s právem počítat mzdy a zapisovat mzdové vstupy.
 
 Schválení revize, ke které existují novější podklady, aplikace odmítne. Nejde
@@ -420,6 +672,12 @@ Náhled bere všechny osoby, které by vzal mzdový běh za daný měsíc, a uk�
   povolení k pobytu nebo práci, cizí legislativa, formulář A1, zahraniční
   pojištění nebo daňový režim, zahraniční údaj v evidenci), chybějící
   pracovní vztah v měsíci nebo vztah ukončený ve schváleném období,
+- cizince, kterým brání jen občanství nebo povolení k pobytu. Žijí-li
+  a pracují v Česku bez formuláře A1 (typicky agentura s občany Ukrajiny
+  a Slovenska), zaškrtněte **Potvrzuji, že … cizinců … tu žije a pracuje bez
+  formuláře A1**. Doplní se jim česká daňová rezidence (§ 2 odst. 2 ZDP)
+  a česká příslušnost k pojištění (čl. 11 nařízení 883/2004) s poznámkou
+  o potvrzení. Adresa v cizině, A1 nebo cizí režim zůstávají vyloučením,
 - osoby bez zdravotní pojišťovny s odkazem na **Zdravotní pojišťovny
   hromadně**; výchozí stav pojišťovnu nezná, takže ji tato akce nedoplní,
 - osoby bez prohlášení poplatníka.
@@ -478,9 +736,15 @@ je na požádání rozbalí.
 
 Skrytí platí pro všechny další i už existující běhy, dokud ho neobnovíte.
 **Skrýt tento typ ve firmě** platí i pro nové osoby. Skrytá varování se
-nepočítají do kontrol. Souhrnné varování o počtu osob s nepodepsaným
-prohlášením se po skrytí části osob ukáže se sníženým počtem a zmizí, až jsou
-skryté všechny dotčené osoby.
+nepočítají do kontrol. Souhrnná varování o počtu osob (nepodepsané
+prohlášení, rezidence u nepodepsaných, chybějící zdravotní pojišťovna nebo
+příslušnost k sociálnímu pojištění) se po skrytí části osob ukážou se sníženým
+počtem a zmizí, až jsou skryté všechny dotčené osoby.
+
+Varování o chybějící registraci u ČSSZ u dohody bez účasti na pojištění jde
+skrýt po vztazích: použijte ho, když jste registraci podali mimo aplikaci
+(například **Skrýt u vybraných** pro všech 300 dohod najednou). U vztahu
+s účastí na pojištění je to varování s výjimkou a skrýt nejde.
 
 Přehled skrytí v `Mzdy → Nastavení mezd`, záložce **Skrytá varování**, je
 seskupený podle typu, s tím, kdo a kdy varování skryl a proč. Obnovit jde
@@ -548,6 +812,34 @@ z převodu. Otevřený závazek by trvale znečistil saldo dávno zaplacenými
 částkami. Pro měsíce, které počítá MyÚčto, fungují mzdové příkazy, úhrady
 i saldo dál přes [mzdové příkazy a úhrady](82_Platby_a_uhrady.md).
 
+### 80.11.13 Zákonné výchozí stavy ve výpočtu
+
+Výpočet nechce víc údajů, než vyžaduje zákon. Kde zákon určuje výchozí stav,
+počítá s ním a běh na chybějící údaj jen upozorní souhrnným varováním
+s odkazem na hromadnou opravu:
+
+- **Bez záznamu o prohlášení poplatníka** se osoba počítá jako nepodepsaná
+  (§ 38k ZDP): bez slev a u dohody nebo zaměstnání malého rozsahu pod
+  rozhodnou částkou se daní zvlášť sazbou 15 % (§ 6 odst. 4 ZDP). Zastaví jen
+  prohlášení vedené jako neověřené.
+- **Daňová rezidence** u nepodepsaného prohlášení výpočet nezastaví: bez
+  podpisu se slevy neuplatní a daň je stejná u rezidenta i nerezidenta.
+  Doplňte ji před potvrzením o příjmech nebo podpisem prohlášení.
+- **Zdravotní pojišťovna a příslušnost k sociálnímu pojištění** u dohody:
+  dohoda bez práce v měsíci nebo s příjmem pod rozhodnou částkou účast
+  nezakládá, pojistné nevzniká a výpočet doběhne. Vznikne-li účast, výpočet
+  osobu zastaví. U pracovního poměru se chybějící údaj hlásí jako dřív.
+  Kód pojišťovny vyžaduje registrace u ČSSZ (kód 999, není-li znám)
+  a příslušnost měsíční hlášení JMHZ; to hlídají jejich kontroly.
+- **Počáteční roční úhrny** při převzetí mezd v průběhu roku: záloha, srážka
+  i slevy jsou měsíční, daň se proto počítá od nuly. Sociální pojištění
+  zastaví jen příjem, který mohl dosáhnout ročního maximálního vyměřovacího
+  základu (měsíční základ krát počet měsíců roku). Úhrny potřebuje roční
+  zúčtování a potvrzení o příjmech.
+- **Příspěvek na stravování** před vyhláškou o stravném na nový rok se
+  schválí jako celý zdanitelný a pojistný příjem s poznámkou; osvobozenou
+  část dorovnejte opravou po vyhlášení.
+
 ## 80.12 Související kapitoly
 
 - [Úplné mzdy](75_Uplne_mzdy.md): průvodce celým mzdovým měsícem.
@@ -560,3 +852,5 @@ i saldo dál přes [mzdové příkazy a úhrady](82_Platby_a_uhrady.md).
   [Dokumenty a výstupy](83_Dokumenty_a_vystupy.md),
   [Podání a hlášení](85_Podani_a_hlaseni.md).
 - [Přechod mezd v průběhu roku](113_Prechod_mezd_v_prubehu_roku.md).
+- [Mzdy pro stovky zaměstnanců a brigádníků](122_Mzdy_pro_stovky_zamestnancu.md):
+  měsíc agentury s DPP a větší firmy krok za krokem.

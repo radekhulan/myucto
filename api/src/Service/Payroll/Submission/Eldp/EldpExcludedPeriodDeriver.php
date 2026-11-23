@@ -277,6 +277,7 @@ final class EldpExcludedPeriodDeriver
         'vacation',
         'employer_obstacle',
         'compensatory_time_off',
+        'holiday_compensatory_time_off',
         /*
          * Neplacené volno, neomluvená absence a rodičovská dovolená.
          *
@@ -435,6 +436,7 @@ final class EldpExcludedPeriodDeriver
      */
     private const SECTION18_NEUTRAL_TYPES = [
         'vacation',
+        'holiday_compensatory_time_off',
         'employer_obstacle',
         'employee_obstacle',
         'unexcused',

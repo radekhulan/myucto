@@ -37,7 +37,7 @@ Kontrolní hlášení právnické osoby zůstává měsíční. Měsíční náh
 
 ## 41.2 Než začnete
 
-1. **Daňové nastavení firmy.** V `Nastavení → Daně a účetnictví`, v boxu **Daňové nastavení (EPO výkazy DPH/KH)**, vyplňte **Typ poplatníka** (fyzická osoba nebo právnická osoba), **Perioda DPH přiznání** (měsíční nebo kvartální), **Kód finančního úřadu** a případně **Kód územního pracoviště (ÚzP)**. Povinné je také **DIČ** v identifikaci firmy. Volitelně doplňte **CZ-NACE klasifikaci**, datovou schránku a **Sestavitel přiznání (účetní)**. Přehled všech polí je v [§ 41.13.1](#41131-pole-epo-a-vetap).
+1. **Daňové nastavení firmy.** V `Nastavení → Daně a účetnictví`, v boxu **Daňové nastavení (EPO výkazy DPH/KH)**, vyplňte **Typ poplatníka** (fyzická osoba nebo právnická osoba), **Perioda DPH přiznání** (měsíční nebo kvartální), **Finanční úřad** a případně **Územní pracoviště (ÚzP)**. Povinné je také **DIČ** v identifikaci firmy. Volitelně doplňte **CZ-NACE klasifikaci**, datovou schránku a **Sestavitel přiznání (účetní)**. Přehled všech polí je v [§ 41.13.1](#41131-pole-epo-a-vetap).
 2. **Údaje podnikatele nebo oprávněné osoby.** U fyzické osoby zkontrolujte v `Nastavení → Daně a účetnictví` část **Osobní údaje podnikatele**. U právnické osoby vyplňte v části **Oprávněná osoba (jednatel / podpisující)** jméno, příjmení a postavení osoby, která přiznání podepisuje (typicky jednatel).
 3. **Plátcovství DPH.** Rozhoduje stav ke konci období výkazu, ne dnešní stav. Historii plátcovství vedete v témže nastavení v bloku **Plátcovství DPH**.
 4. **Doklady.** Doklady za období musí být vystavené nebo přijaté (ne koncepty) a mít správnou **Klasifikaci DPH**. Chybějící klasifikaci doplní automatika, viz [§ 41.13.10](#411310-automaticke-prirazeni-klasifikace).
@@ -223,13 +223,13 @@ Používáte ji jako věřitel: opravujete základ daně u pohledávky, kterou d
 | Co vidíte | Proč | Co udělat |
 |---|---|---|
 | EPO odmítne soubor s chybou o neúplné adrese | Chybí číslo popisné nebo orientační | V `Nastavení → Daně a účetnictví` vyplňte **Číslo popisné** a **Číslo orientační**. EPO chce ulici, popisné i orientační číslo zvlášť. |
-| **Chybí kód finančního úřadu - XML nemusí projít validací EPO.** | V nastavení není kód úřadu | Vyplňte **Kód finančního úřadu** v `Nastavení → Daně a účetnictví`. Bez něj XML neprojde kontrolou. |
+| **Chybí kód finančního úřadu - XML nemusí projít validací EPO.** | V nastavení není vybraný úřad | Vyberte **Finanční úřad** v `Nastavení → Daně a účetnictví`. Bez něj XML neprojde kontrolou. |
 | **Chybí IČO tenanta.** nebo **Chybí DIČ tenanta.** | V identifikaci firmy chybí údaj | Doplňte IČO a DIČ v identifikaci firmy v nastavení. |
 | **Tenant nebyl v průběhu období evidovaný jako plátce DPH - výkaz nemusí být relevantní.** | Plátcovství se posuzuje podle období výkazu, ne podle dneška | V bloku **Plátcovství DPH** zkontrolujte historii a doplňte nebo opravte řádek. Jste-li identifikovaná osoba, nechte **Plátce DPH** vypnuté a zaškrtněte **Identifikovaná osoba (§ 6g-6l ZDPH)**, přiznání se pak tvoří jako přiznání identifikované osoby. |
 | Částky v tabulkách přiznání nesedí s fakturami | Řádky faktur nemají správnou **Klasifikaci DPH** | V editoru faktury zkontrolujte pole **Klasifikace DPH** na řádcích. Kódy a automatika jsou v [§ 41.13.9](#41139-klasifikacni-kody-dph) a [§ 41.13.10](#411310-automaticke-prirazeni-klasifikace). |
 | Prázdné tabulky a hláška, že musíte faktury označit klasifikací | V období nejsou doklady s klasifikací | Označte řádky faktur klasifikací DPH. Starším importovaným dokladům ji doplňte ručně v editoru. |
 | Přiznání je čtvrtletní, ale aplikace počítá měsíčně | V nastavení je jiná perioda | V `Nastavení → Daně a účetnictví` změňte **Perioda DPH přiznání** na kvartální, pak na stránce přiznání zvolte **Kvartálně** a čtvrtletí. |
-| Nevím kód úřadu a pracoviště | - | Podívejte se na poslední přiznání nahrané na EPO (VetaD a VetaP), zavolejte na svůj finanční úřad, nebo použijte [seznam územních pracovišť](https://www.financnisprava.cz/cs/financni-sprava/organy-financni-spravy/uzemni-pracoviste). |
+| Nevím, který úřad a pracoviště vybrat | - | Úřad je ten pro kraj, kde má firma sídlo (OSVČ bydliště), velké firmy patří pod Specializovaný finanční úřad. Pracoviště najdete na posledním přiznání nahraném na EPO (VetaD a VetaP), nebo se zeptejte svého finančního úřadu. |
 | OKEČ vychází `631000`, ale činnost je jiná | Pole CZ-NACE je prázdné, použije se náhradní hodnota | Vyplňte **CZ-NACE klasifikaci** podle živnostenského listu nebo ARES. Aplikace odstraní předponu a doplní na 6 číslic. |
 | Červený rámeček **Přiznání nesedí na kontrolní/souhrnné hlášení nebo účet 343** | Přiznání se rozchází s KH, SH nebo obratem účtu 343 | Opravte podklad (doplňte DIČ, opravte klasifikaci, zaúčtujte chybějící doklad) a načtěte náhled znovu. Viz [§ 41.13.5](#41135-krizova-kontrola-s-kh-sh-a-uctem-343). |
 | **Doklady se samovyměřením čekají na schválení** | Přijaté doklady jsou ve schvalování nebo zamítnuté, proto v podání chybí | Doklady před podáním schvalte, nebo stornujte. Daň ze samovyměření patří do období DUZP a nejde ji přesunout. |
@@ -257,8 +257,8 @@ Tato část mapuje pole z `Nastavení → Daně a účetnictví`, box **Daňové
 <!-- cols: 26 14 60 -->
 | Pole v UI | XML atribut | Popis a kde zjistit |
 |---|---|---|
-| **Kód finančního úřadu** | `c_ufo` | Číselný kód finančního úřadu, např. `451` Finanční úřad pro hlavní město Prahu, `461` Finanční úřad pro Jihomoravský kraj, `13` Specializovaný finanční úřad. Najdete ho na posledním podaném přiznání nebo v EPO. |
-| **Kód územního pracoviště (ÚzP)** | `c_pracufo` | Konkrétní pracoviště v rámci úřadu, např. `3203` pracoviště Brno III. Volitelné, ale EPO ho někdy vyžaduje. |
+| **Finanční úřad** | `c_ufo` | Výběr z číselníku finanční správy, např. `451` Finanční úřad pro hlavní město Prahu, `461` Finanční úřad pro Jihomoravský kraj, `13` Specializovaný finanční úřad. Pod výběrem se ukáže datová schránka úřadu a jeho účty pro placení DPH, daně z příjmů, záloh na daň ze závislé činnosti a srážkové daně. |
+| **Územní pracoviště (ÚzP)** | `c_pracufo` | Pracoviště vybraného úřadu, např. `3003` Územní pracoviště Brno III. Nabízí se jen pracoviště zvoleného úřadu, Specializovaný finanční úřad žádné nemá. Volitelné, ale EPO ho někdy vyžaduje. |
 | **CZ-NACE klasifikace** | `c_okec` | Hlavní podnikatelská činnost, např. `631000` (IT poradenství). Najdete ji na živnostenském listě nebo v ARES. Při prázdném poli se použije `631000`. Pole nabízí jen kódy platné k dnešku, číselník EPO je od 1. 1. 2026 na NACE rev. 2.1. |
 
 #### Typ plátce a perioda
@@ -315,7 +315,7 @@ U OSVČ se údaje o podnikateli zadávají v části **Osobní údaje podnikatel
 
 #### Zastoupení a podepisující osoba
 
-Podává-li za firmu podání někdo jiný než jednatel nebo podnikatel sám, zapište ho v `Nastavení → Daně a účetnictví → Zastoupení a podepisující osoba`. Zástupce se pak vyplní jako podepisující osoba (`zast_*`) do přiznání DPH, kontrolního a souhrnného hlášení i do přiznání k dani z příjmů. Zastoupení se eviduje v čase a ukládá se hned, bez tlačítka Uložit. Podání dostane zástupce platného ke dni, kdy XML vytváříte, finalizované přiznání k dani z příjmů zástupce platného ke dni finalizace.
+Podává-li za firmu podání někdo jiný než jednatel nebo podnikatel sám, zapište ho v `Nastavení → Daně a účetnictví → Zastoupení a podepisující osoba`. Zástupce se pak vyplní jako podepisující osoba (`zast_*`) do přiznání DPH, kontrolního a souhrnného hlášení, do přiznání k dani z příjmů, do oznámení a hlášení o příjmech do zahraničí (§ 38da a § 38e), do vyúčtování daně ze závislé činnosti a srážkové daně i do žádostí o poukázání daňového bonusu. Zastoupení se eviduje v čase a ukládá se hned, bez tlačítka Uložit. Podání dostane zástupce platného ke dni, kdy XML vytváříte, finalizované přiznání k dani z příjmů zástupce platného ke dni finalizace.
 
 <!-- cols: 34 22 44 -->
 | Pole | XML atribut | Popis |
@@ -435,7 +435,7 @@ Pokud vše sedí, na stránce se nic nezobrazí. Jinak se nad kartami objeví č
 
 - popis, čeho se rozdíl týká (např. "DPHDP3 ř.1+2 a KH A.4 + A.5"),
 - konkrétní částku z obou stran a rozdíl v Kč,
-- je-li možné rozdíl přiřadit ke konkrétním dokladům, seznam dokladů (číslo dokladu a částka na obou stranách). Kliknutím na číslo otevřete detail vedle přiznání; **Shift+klik** jej otevře v pravém panelu. Ruční účetní zápis vede na konkrétní zápis v deníku. Pokud byl původní převzatý doklad smazán, historický rozdíl rovněž odkazuje na existující účetní zápis. Odkaz se zobrazuje podle oprávnění ke čtení příslušné agendy. U rozdílu proti souhrnnému hlášení je i vysvětlení pravděpodobné příčiny (chybějící DIČ odběratele, plnění zařazené jako EU, ale na tuzemské nebo ne-EU zemi apod.).
+- je-li možné rozdíl přiřadit ke konkrétním dokladům, seznam dokladů (číslo dokladu a částka na obou stranách). Kliknutím na číslo otevřete detail vedle přiznání; **Ctrl+klik** jej otevře v pravém panelu. Ruční účetní zápis vede na konkrétní zápis v deníku. Pokud byl původní převzatý doklad smazán, historický rozdíl rovněž odkazuje na existující účetní zápis. Odkaz se zobrazuje podle oprávnění ke čtení příslušné agendy. U rozdílu proti souhrnnému hlášení je i vysvětlení pravděpodobné příčiny (chybějící DIČ odběratele, plnění zařazené jako EU, ale na tuzemské nebo ne-EU zemi apod.).
 
 U kontroly účtu 343 rozpis navíc u každého rozdílového dokladu vysvětlí, zda jde o časový posun odpočtu podle § 73 ZDPH, odlišnou částku, chybějící řádek 343, nebo zápis bez protějšku v přiznání. Typický časový posun vznikne, když je předpis zaúčtovaný k DUZP na konci měsíce, ale přijatý doklad dorazí až v následujícím měsíci. Pokud celý rozdíl vysvětlují pouze časové posuny, zobrazí se neutrální informace **Rozdíl obratu 343 je vysvětlen časovým posunem podle § 73 ZDPH** s čísly dokladů a přiznání můžete stáhnout bez potvrzování nesouladu. Nevysvětlený zbytek nad toleranci zůstává červený a blokující.
 
@@ -443,6 +443,8 @@ U dokladů převzatých z jiného účetního programu kontrola přiřadí i sam
 
 > [!WARNING]
 > Tlačítko **Stáhnout XML** se při nalezeném rozdílu úplně nezablokuje, ale vyžádá potvrzení: zobrazí se dialog, že se přiznání rozchází s kontrolním nebo souhrnným hlášením, nebo s obratem účtu 343, a že finanční úřad páruje podání strojově. Teprve po potvrzení se XML stáhne. Tahle vědomá volba se spolu s celým rozpisem rozdílu zapíše do auditní stopy.
+
+Do obratu účtu 343 se nepočítá uzavření a otevření knih ani úhrada vlastní daně finančnímu úřadu a vratka nadměrného odpočtu: řádek 343 v zápisu z bankovního pohybu s protiúčtem u ČNB (kód banky 0710; poplatek ve stejném zápisu na tom nic nemění) a zápis z banky nebo pokladny, který má jen účet 343 a peněžní účty (211, 221, 261). Samotná dvojice peněžní účet a 343 (třeba hotovostní prodej v jednoduchém zápisu) ani ruční zápis úhradou nejsou. Stejné pravidlo používá kontrola obratu 343 v sestavě DPH podle dimenze ([§ 42.9.5](42_Kniha_DPH.md#4295-dimenze-v-evidenci-dph)).
 
 Kontrola obratu účtu 343 se automaticky přeskočí (zobrazí se jen informativní šedá poznámka, nic neblokuje), pokud v období existují ještě nezaúčtované doklady DPH. Rozdíl pak neznamená chybu v přiznání, jen že se zatím nezaúčtovalo vše. Jakmile doklady zaúčtujete, kontrola při dalším načtení proběhne znovu.
 
@@ -534,14 +536,14 @@ Jak se to projeví v přiznání:
 
 Zálohový a vypořádací koeficient: zálohový (§ 76 odst. 6) se používá během roku. Na začátku roku ho buď zadáte ručně (kvalifikovaný odhad), nebo se automaticky převezme z vypořádacího koeficientu předchozího, už vypořádaného roku. Vypořádací koeficient (§ 76 odst. 7) se počítá až ze skutečných dat celého roku, takže je zpravidla přesnější než odhad použitý během roku. Proto poslední období roku obsahuje dorovnání na ř. 53. Oba koeficienty se zaokrouhlují nahoru na celé procento (§ 76 odst. 5). Vyjde-li hodnota 95 % a víc, zaokrouhlí se rovnou na 100 % (plný nárok).
 
-Bez nastaveného zálohového koeficientu pro daný rok nejde doklad s kráceným nárokem § 76 ani zaúčtovat, ani zahrnout do přiznání. Aplikace vrátí srozumitelnou chybu s výzvou koeficient nejdřív nastavit. Nastavení koeficientu a roční vypořádání jsou na stránce `Nástroje → Koeficient krácení (§76)` ([§ 41.8](#418-krok-za-krokem-koeficient-kraceni-odpoctu-76)). Stejné akce jsou dostupné i přes administrátorské API:
+Bez nastaveného zálohového koeficientu pro daný rok nejde doklad s kráceným nárokem § 76 ani zaúčtovat, ani zahrnout do přiznání. Aplikace vrátí srozumitelnou chybu s výzvou koeficient nejdřív nastavit. Nastavení koeficientu a roční vypořádání jsou na stránce `Nástroje → Koeficient krácení (§76)` ([§ 41.8](#418-krok-za-krokem-koeficient-kraceni-odpoctu-76)). Stejné akce používá aplikační API; zápis vyžaduje přihlášení v aplikaci nebo token s plným zápisem ([§ 103.9.7.3](103_API.md#103973-plny-zapis-tokenem-systemwrite)):
 
 <!-- cols: 46 18 36 -->
 | Endpoint | Kdo smí | Co dělá |
 |---|---|---|
-| `GET /api/reports/vat-coefficient?year=2026` | administrátor, účetní, jen čtení | Vrátí nastavený zálohový koeficient pro rok (případně automaticky převzatý z vypořádání předchozího roku) a vypořádací koeficient, pokud je rok vypořádaný. |
-| `PUT /api/reports/vat-coefficient` | administrátor, účetní | Nastaví nebo změní zálohový koeficient (celé %, 0-100) pro rok. |
-| `POST /api/reports/vat-coefficient/settle` | jen administrátor | Spočítá a uloží vypořádací koeficient za celý (uzavřený) rok ze skutečných ročních dat. Náhled ani stažení přiznání koeficient nikdy automaticky neuloží, vypořádání je vždy samostatný vědomý krok. |
+| `GET /api/reports/vat-coefficient?year=2026` | čtení Daní a výkazů (`reports`) | Vrátí nastavený zálohový koeficient pro rok (případně automaticky převzatý z vypořádání předchozího roku) a vypořádací koeficient, pokud je rok vypořádaný. |
+| `PUT /api/reports/vat-coefficient` | zápis Daní a výkazů (`reports`) | Nastaví nebo změní zálohový koeficient (celé %, 0-100) pro rok. |
+| `POST /api/reports/vat-coefficient/settle` | právo Finalizovat výkazy (`reports.finalize`, zápis) | Spočítá a uloží vypořádací koeficient za celý (uzavřený) rok ze skutečných ročních dat. Náhled ani stažení přiznání koeficient nikdy automaticky neuloží, vypořádání je vždy samostatný vědomý krok. |
 
 **Plnění vyloučená z koeficientu.** Pro transakce podle § 76 odst. 4 zvolte v klasifikaci DPH odpovídající kód: `1m` / `2m` pro zdaněný prodej dlouhodobého majetku, nebo `3m` pro příležitostné osvobozené finanční či nemovitostní plnění. Doklad zůstane na běžném řádku 1/2 nebo 50 a současně se vykáže na řádku 51 ve správném sloupci. Vypořádací koeficient ho odečte z čitatele nebo jmenovatele.
 
@@ -565,6 +567,7 @@ Každá faktura (nebo její řádek) má klasifikaci DPH, například `1`, `40`,
 | **26c** | Cestovní služba § 89, cena snížená o přirážku včetně daně | 26 | - |
 | **1p** / **2p** | Použité zboží § 90, přirážka, 21 % / 12 % | 1 / 2 | KH A.4 s `kod_rezim_pl=2` |
 | **3** | Osvobozené plnění bez nároku na odpočet (§ 51) | 50 | - |
+| **71i** | Dodání v tuzemsku osvobozené s nárokem na odpočet, § 71i (knihy včetně elektronických) | 26 | - |
 | **3m** | Příležitostné osvobozené plnění vyloučené z koeficientu § 76 odst. 4 | 50 | - |
 | **20** | Dodání zboží do jiného členského státu | 20 | SH kód plnění 0 |
 | **22** | Poskytnutí služby do JČS (§ 9 odst. 1) | 21 | SH kód plnění 3 |
@@ -596,6 +599,8 @@ Každá faktura (nebo její řádek) má klasifikaci DPH, například `1`, `40`,
 Kódy s příponou (`1m`, `25s5`, `26s` a další) se od základní varianty liší jediným atributem: vyloučením z koeficientu, kódem předmětu plnění, zvláštním režimem, nebo řádkem přiznání. Číselník je editovatelný. V `Systém → Sazby a číselníky`, na záložce **Klasifikace DPH**, si můžete přidat vlastní kód, včetně kódu předmětu plnění s písmenným sufixem (`1a`, `3a`) z číselníku MFČR.
 
 **Cestovní služba podle § 89** se na dokladu rozepisuje na dva řádky. Přirážka snížená o daň má kód `1c` nebo `2c` a jde na ř. 1 nebo 2 a do kontrolního hlášení s režimem 1. Zbytek ceny, tedy cena snížená o přirážku včetně daně, má kód `26c` a sazbu 0 % a jde na ř. 26 mimo kontrolní hlášení (metodika GFŘ č. j. 67743/21/7100-20116-050701). Příklad: cena 140 Kč, náklady 120 Kč, přirážka 20 Kč dává řádek `1c` se základem 16,53 Kč a DPH 3,47 Kč a řádek `26c` se 120 Kč. Do A.4 nebo A.5 se doklad zařadí podle celé částky dokladu včetně daně, ne podle přirážky.
+
+**Dodání knih podle § 71i** (takzvaná nulová sazba) je osvobozené plnění s nárokem na odpočet. Položka má sazbu 0 % a kód `71i`, který zvolíte výslovně v klasifikaci DPH položky; automaticky ho aplikace nenabízí, tuzemská položka s nulovou sazbou zůstává bez kódu. Plnění jde na ř. 26, do kontrolního hlášení ani souhrnného hlášení nevstupuje a v koeficientu § 76 je v čitateli i jmenovateli. Kód `3` pro knihy nepoužívejte: znamená osvobození bez nároku na odpočet a ř. 50 by snížil koeficient. Převod z POHODY, Money S3, ABRA, PREMIER a Stereo NX dává plnění z ř. 26 tuzemskému odběrateli kód `71i`, zahraničnímu `26s`.
 
 MyÚčto přirážku nepočítá, její výši určíte vy. U zálohy přebírá daňový doklad k přijaté platbě kódy z proformy a platbu dělí v poměru jejích řádků. Pokud se přirážka ze zálohy podle § 89 odst. 4 až 6 liší, opravte částky v konceptu daňového dokladu před vystavením. Vyúčtovací faktura a odpočty záloh kódy přebírají také. PDF vydané faktury vypisuje základ a DPH, ale § 89 odst. 14 uvedení daně z přirážky na dokladu pro zákazníka zakazuje, takže takové PDF zákazníkovi neposílejte.
 
@@ -652,6 +657,8 @@ V editoru faktury (vystavené i přijaté) je sekce **Klasifikace** s výběrem 
 
 - nechat pole prázdné, použije se automatika,
 - vybrat konkrétní kód jako ruční volbu (např. specifický kód pro export).
+
+Kód `mimo` (mimo předmět DPH) nemá řádek přiznání ani oddíl kontrolního hlášení a platí pro vystavené i přijaté doklady. Použijte ho u položky, která předmětem daně není, například místní poplatek z pobytu přeúčtovaný hostovi. Položka bez vlastního kódu by převzala kód hlavičky dokladu. Kód u mnoha položek najednou změníte hromadnou akcí ([§ 52.8.3](52_Ucetni_denik.md#5283-krok-za-krokem-cleneni-dph-a-polozky-dokladu)).
 
 ### 41.13.12 Reverse charge v cizí měně
 

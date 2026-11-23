@@ -4,11 +4,16 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Payroll\Time;
 
+use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Repository\Payroll\PayrollInputRepository;
 use MyInvoice\Repository\Payroll\PayrollOvertimeRepository;
 use MyInvoice\Repository\Payroll\PayrollTimeConflictException;
+use MyInvoice\Repository\Payroll\PayrollTimeImportInputsApprovedException;
 use MyInvoice\Repository\Payroll\PayrollTimeLockedException;
 use MyInvoice\Repository\Payroll\PayrollTimeRepository;
 use MyInvoice\Repository\Payroll\PayrollTimeValue;
+use MyInvoice\Service\Payroll\Time\Juvenile\JuvenileWorkTimeFinding;
+use MyInvoice\Service\Payroll\Time\Juvenile\PayrollJuvenileWorkTimeService;
 use MyInvoice\Service\Payroll\Time\Overtime\CompensatoryTimeOffReconciliation;
 use MyInvoice\Service\Payroll\Time\Overtime\OvertimeLimits;
 use MyInvoice\Service\Payroll\Time\Overtime\OvertimeProtectionWindow;
@@ -16,6 +21,234 @@ use MyInvoice\Service\Payroll\Time\Overtime\PayrollOvertimeLimitService;
 
 final class PayrollTimeService
 {
+    /**
+     * Důvod se v událostech měsíce ukládá i s popisem změny zdroje
+     * (nejvýše 39 znaků) a sloupec má 500 znaků; ořez by text tiše ztratil.
+     */
+    public const SOURCE_REASON_MAX_LENGTH = 450;
+
+    /** @param array<string,mixed> $input @return array<string,mixed> */
+    public function saveManualSummary(int $supplierId, string $period, array $input, ?int $userId): array
+    {
+        [$periodStart, $periodEnd] = $this->periodBounds($period);
+        // Důvod je nepovinný jen u prvního zadání; zda jde o první, ví až
+        // repozitář pod zámkem měsíce.
+        $reason = $input['reason'] ?? null;
+        if (($reason !== null && !is_string($reason)) || (is_string($reason) && mb_strlen(trim($reason)) > self::SOURCE_REASON_MAX_LENGTH)) {
+            throw new \InvalidArgumentException('Uveďte důvod zadání hodin (nejvýše ' . self::SOURCE_REASON_MAX_LENGTH . ' znaků).');
+        }
+        $reason = is_string($reason) && trim($reason) !== '' ? trim($reason) : null;
+        $replace = $input['replace_source'] ?? false;
+        if (!is_bool($replace)) {
+            throw new \InvalidArgumentException('Potvrzení nahrazení zdroje musí být boolean.');
+        }
+        $segments = $input['segments'] ?? null;
+        if (!is_array($segments) || !array_is_list($segments) || $segments === [] || count($segments) > 31) {
+            throw new \InvalidArgumentException('Zadejte jeden až 31 úseků odpracované doby.');
+        }
+        $normalized = [];
+        foreach ($segments as $segment) {
+            if (!is_array($segment)) {
+                throw new \InvalidArgumentException('Úsek odpracované doby není platný.');
+            }
+            $from = $segment['date_from'] ?? null;
+            $to = $segment['date_to'] ?? null;
+            if (!self::strictDate($from) || !self::strictDate($to)
+                || $from < $periodStart || $to >= $periodEnd || $to < $from) {
+                throw new \InvalidArgumentException('Úsek musí být platný a celý ležet ve zvoleném měsíci.');
+            }
+            $worked = $segment['worked_duration_units'] ?? null;
+            $overtime = $segment['overtime_duration_units'] ?? null;
+            $days = $segment['worked_days'] ?? null;
+            $span = (int) (new \DateTimeImmutable($from))->diff(new \DateTimeImmutable($to))->days + 1;
+            if (!is_int($worked) || $worked < 0 || $worked > $span * 24 * 3000
+                || ($overtime !== null && (!is_int($overtime) || $overtime < 0 || $overtime > $worked))
+                || ($days !== null && (!is_int($days) || $days < 0 || $days > $span
+                    || (($worked === 0) !== ($days === 0))))) {
+                throw new \InvalidArgumentException('Odpracovaná doba, přesčas nebo počet dnů nejsou platné.');
+            }
+            $normalized[] = ['date_from' => $from, 'date_to' => $to, 'worked_duration_units' => $worked,
+                'overtime_duration_units' => $overtime, 'worked_days' => $days];
+        }
+        usort($normalized, static fn (array $a, array $b): int => $a['date_from'] <=> $b['date_from']);
+        foreach ($normalized as $i => $segment) {
+            if ($i > 0 && $normalized[$i - 1]['date_to'] >= $segment['date_from']) {
+                throw new \InvalidArgumentException('Úseky odpracované doby se nesmí překrývat.');
+            }
+        }
+        return $this->repository->saveManualSummary(
+            $supplierId, $this->positiveInt($input, 'employment_id'), $periodStart,
+            $this->nonNegativeInt($input, 'row_version'), $reason, $replace, $normalized, $userId,
+        );
+    }
+
+    /** @param array<string,mixed> $input @return array<string,mixed> */
+    public function restoreEntries(int $supplierId, string $period, array $input, ?int $userId): array
+    {
+        [$periodStart] = $this->periodBounds($period);
+        $reason = $input['reason'] ?? null;
+        if (!is_string($reason) || trim($reason) === '' || mb_strlen(trim($reason)) > self::SOURCE_REASON_MAX_LENGTH || ($input['replace_source'] ?? null) !== true) {
+            throw new \InvalidArgumentException('Změna zdroje vyžaduje potvrzení a důvod (nejvýše ' . self::SOURCE_REASON_MAX_LENGTH . ' znaků).');
+        }
+        $source = $input['source'] ?? 'entries';
+        if (!in_array($source, ['entries', 'import_summary'], true)) {
+            throw new \InvalidArgumentException('Vyberte předchozí zdroj docházky nebo importu.');
+        }
+        return $this->repository->restoreEntries($supplierId, $this->positiveInt($input, 'employment_id'), $periodStart, $this->nonNegativeInt($input, 'row_version'), trim($reason), $source, $userId);
+    }
+
+    /**
+     * „Počítat ze směn": měsíc z importu docházky přepne na docházku jedním krokem.
+     *
+     * Dřív to byly tři kroky na dvou obrazovkách: hláška u zápisu směny poslala
+     * na neexistující panel, změna zdroje pak spadla na nezrušených vstupech
+     * z importu a ty se musely hledat a rušit v Mzdových vstupech. Teď se
+     * v jedné transakci zruší neschválené importované vstupy vztahu za měsíc
+     * a zdroj se přepne. Schválené a zamčené vstupy se nemění — to je
+     * rozhodnutí účetní, ne vedlejší účinek přepnutí (409 se seznamem).
+     *
+     * `keep_import_inputs: true` je „Zapisovat směny, částky ponechat": zdroj
+     * hodin se přepne a importované vstupy zůstanou. Smí jen vztah, u kterého
+     * hodiny nevstupují do žádné částky
+     * ({@see PayrollTimeRepository::importAmountsKeepableIds()}); jinde by se
+     * mzda ze směn spočítala vedle importu podruhé.
+     *
+     * `take_over_shifts: true` v téže transakci převezme publikované směny
+     * měsíce jako odpracovaný čas ({@see takeOverPublishedShifts()}).
+     *
+     * @param array<string,mixed> $input
+     * @return array<string,mixed>
+     */
+    public function switchImportToEntries(
+        int $supplierId,
+        string $period,
+        array $input,
+        ?int $userId,
+    ): array {
+        [$periodStart] = $this->periodBounds($period);
+        $note = $input['reason'] ?? null;
+        if ($note !== null && (!is_string($note) || mb_strlen(trim($note)) > self::SOURCE_REASON_MAX_LENGTH)) {
+            throw new \InvalidArgumentException('Důvod může mít nejvýše ' . self::SOURCE_REASON_MAX_LENGTH . ' znaků.');
+        }
+        $keep = self::optionalFlag($input, 'keep_import_inputs');
+        $takeOver = self::optionalFlag($input, 'take_over_shifts');
+        $reason = is_string($note) && trim($note) !== ''
+            ? trim($note)
+            : ($keep
+                ? 'Zapisovat směny, částky ponechat: importované vstupy zůstávají, zdroj přepnut na docházku'
+                : 'Počítat ze směn: importované vstupy zrušeny, zdroj přepnut na docházku');
+        $employmentId = $this->positiveInt($input, 'employment_id');
+        $rowVersion = $this->nonNegativeInt($input, 'row_version');
+
+        $pdo = $this->db->pdo();
+        $owns = !$pdo->inTransaction();
+        if ($owns) {
+            $pdo->beginTransaction();
+        }
+        try {
+            if ($this->repository->lockedWorkSource($supplierId, $employmentId, $periodStart) !== 'import_summary') {
+                throw new \InvalidArgumentException('Měsíc nebere hodiny ze souhrnu importu docházky, není co přepínat.');
+            }
+            $cancelled = [];
+            if (!$keep) {
+                $active = $this->repository->activeImportInputs($supplierId, $employmentId, $periodStart);
+                $frozen = array_values(array_map(
+                    static fn (array $row): int => $row['id'],
+                    array_filter($active, static fn (array $row): bool => $row['status'] !== 'draft'),
+                ));
+                if ($frozen !== []) {
+                    throw new PayrollTimeImportInputsApprovedException($frozen);
+                }
+                foreach ($active as $row) {
+                    $this->inputs->cancel($supplierId, $row['id'], $row['row_version']);
+                    $cancelled[] = $row['id'];
+                }
+            }
+            $result = $this->repository->restoreEntries(
+                $supplierId,
+                $employmentId,
+                $periodStart,
+                $rowVersion,
+                $reason,
+                'entries',
+                $userId,
+                $keep,
+            );
+            $created = [];
+            if ($takeOver) {
+                [$created, $month] = $this->takeOverPublishedShifts($supplierId, $employmentId, $periodStart, $result['month'], $userId);
+                $result['month'] = $month;
+            }
+            $result['created_entry_ids'] = $created;
+            if ($owns) {
+                $pdo->commit();
+            }
+        } catch (\Throwable $e) {
+            if ($owns && $pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            throw $e;
+        }
+
+        return $result + ['cancelled_input_ids' => $cancelled];
+    }
+
+    /**
+     * Publikované směny měsíce jako odpracovaný čas: běžná práce se stejným
+     * začátkem, koncem, přestávkou a časovým pásmem. Jde přes {@see saveEntry()},
+     * takže platí tytéž kontroly (otevřený měsíc, překryv, revize). Původ nese
+     * `source_kind = schedule` a odkaz `shift:{id}`.
+     *
+     * @param array<string,mixed> $month
+     * @return array{list<int>,array<string,mixed>}
+     */
+    private function takeOverPublishedShifts(int $supplierId, int $employmentId, string $periodStart, array $month, ?int $userId): array
+    {
+        $created = [];
+        $utc = new \DateTimeZone('UTC');
+        foreach ($this->repository->publishedShiftsInPeriod($supplierId, [$employmentId], $periodStart)[$employmentId] ?? [] as $shift) {
+            $shiftId = PayrollTimeValue::int($shift['id'] ?? null, 'id');
+            $timezone = PayrollTimeValue::string($shift['timezone_name'] ?? null, 'timezone_name');
+            $local = static fn (string $key): string => (new \DateTimeImmutable(PayrollTimeValue::string($shift[$key] ?? null, $key), $utc))
+                ->setTimezone(new \DateTimeZone($timezone))->format(DATE_ATOM);
+            $saved = $this->saveEntry($supplierId, [
+                'employment_id' => $employmentId,
+                'starts_at' => $local('starts_at_utc'),
+                'ends_at' => $local('ends_at_utc'),
+                'timezone' => $timezone,
+                'category' => 'regular',
+                'break_minutes' => PayrollTimeValue::int($shift['break_minutes'] ?? null, 'break_minutes'),
+                'row_version' => 0,
+                'month_row_version' => PayrollTimeValue::int($month['row_version'] ?? null, 'row_version'),
+            ], $userId, 'schedule', 'shift:' . $shiftId, hash('sha256', 'shift:' . $shiftId, true));
+            $created[] = PayrollTimeValue::int($saved['entry']['id'] ?? null, 'id');
+            $month = $saved['month'];
+        }
+
+        return [$created, $month];
+    }
+
+    /** @param array<string,mixed> $input */
+    private static function optionalFlag(array $input, string $key): bool
+    {
+        $value = $input[$key] ?? false;
+        if (!is_bool($value)) {
+            throw new \InvalidArgumentException($key . ' musí být true nebo false.');
+        }
+
+        return $value;
+    }
+
+    /** Přesně YYYY-MM-DD; regex se `$` by propustil i datum s koncovým odřádkováním. */
+    private static function strictDate(mixed $value): bool
+    {
+        if (!is_string($value)) {
+            return false;
+        }
+        $parsed = \DateTimeImmutable::createFromFormat('!Y-m-d', $value);
+        return $parsed !== false && $parsed->format('Y-m-d') === $value;
+    }
+
     public const LIST_DEFAULT_LIMIT = 25;
     public const LIST_MAX_LIMIT = 200;
 
@@ -54,7 +287,29 @@ final class PayrollTimeService
         private readonly PayrollJmhzWorkMonthSummaryBuilder $jmhzWorkSummary,
         private readonly PayrollOvertimeLimitService $overtimeLimits,
         private readonly PayrollOvertimeRepository $overtime,
+        private readonly PayrollInputRepository $inputs,
+        private readonly Connection $db,
+        private readonly PayrollJuvenileWorkTimeService $juvenileWorkTime,
     ) {}
+
+    /**
+     * Hodiny ze směn proti původnímu souhrnu importu měsíce, který přešel na
+     * směny. Jen upozornění: u vztahu s ponechanými částkami se mzda z hodin
+     * nepočítá, rozdíl ale může znamenat chybějící nebo navíc zapsanou směnu.
+     *
+     * @return array{import_worked_duration_units:int,entries_worked_duration_units:int,differs:bool}
+     */
+    private static function importSummaryComparison(int $importMillihours, int $entryMinutes): array
+    {
+        $import = PayrollDuration::fromMillihours($importMillihours);
+        $entries = PayrollDuration::fromMinutes($entryMinutes);
+
+        return [
+            'import_worked_duration_units' => $import,
+            'entries_worked_duration_units' => $entries,
+            'differs' => $import !== $entries,
+        ];
+    }
 
     /** @return array<string,mixed> */
     public function overview(
@@ -141,6 +396,16 @@ final class PayrollTimeService
             ));
         }
         $total = count($employments);
+        // Otevřené měsíce celého výběru, ne jen stránky: „Schválit měsíc všem"
+        // dřív slibovalo a schvalovalo jen 25 viditelných řádků, kontrola běhu
+        // přitom hlásila desítky dalších na dalších stránkách.
+        $openTotal = 0;
+        foreach ($employments as $employment) {
+            $status = $states[PayrollTimeValue::int($employment['id'] ?? null, 'id')]['status'] ?? 'open';
+            if ($status === 'open') {
+                ++$openTotal;
+            }
+        }
         $employments = array_slice($employments, $offset, $limit);
 
         // § 93 zákoníku práce — stav limitů přesčasu se počítá pro CELOU
@@ -154,9 +419,30 @@ final class PayrollTimeService
             $start = $employment['actual_start_date'] ?? $employment['start_date'] ?? null;
             $employmentStarts[$id] = is_string($start) ? $start : null;
         }
+        $manualSummaries = $this->repository->selectedManualSummaries($supplierId, $employmentIds, [$periodStart]);
+        $importSummaries = $this->repository->selectedImportSummaries($supplierId, $employmentIds, [$periodStart]);
         $periodLastDay = (new \DateTimeImmutable($periodEnd))
             ->modify('-1 day')
             ->format('Y-m-d');
+        $hourlyRanges = $this->repository->hourlyRemunerationRanges($supplierId, $employmentIds, $periodStart, $periodLastDay);
+        $manualIds = [];
+        $importIds = [];
+        $entryIds = [];
+        foreach ($employmentIds as $id) {
+            $source = $states[$id]['work_source'] ?? 'entries';
+            if ($source === 'manual_summary' && ($states[$id]['status'] ?? null) === 'open') {
+                $manualIds[] = $id;
+            }
+            if ($source === 'import_summary') {
+                $importIds[] = $id;
+            } elseif ($source === 'entries' && isset($states[$id])) {
+                $entryIds[] = $id;
+            }
+        }
+        $keepableImports = $this->repository->importAmountsKeepableIds($supplierId, $importIds, $periodStart);
+        $replacedImports = $this->repository->replacedImportWorkedMillihours($supplierId, $entryIds, $periodStart);
+        $juvenileFindings = $this->juvenileWorkTime->findingsForMany($supplierId, $employmentIds, $periodStart);
+        $manualEvidence = $manualIds === [] ? [] : $this->jmhzWorkSummary->manualSummaryEvidence($supplierId, $manualIds, $periodStart);
         $overtimeLimits = $this->overtimeLimits->assessMany(
             $supplierId,
             $employmentIds,
@@ -217,6 +503,9 @@ final class PayrollTimeService
                 'reopened_at' => null,
                 'reopen_reason' => null,
             ];
+            $manualSummary = $manualSummaries[$employmentId][$periodStart] ?? null;
+            $hourly = isset($hourlyRanges[$employmentId]);
+            $selectedSummary = $this->selectedWorkSummary($state, $manualSummary, $importSummaries[$employmentId][$periodStart] ?? null, $periodStart, $actualMinutes, $plannedMinutes, $categories, $hourly);
             $jmhzRevision = $this->repository->jmhzWorkSummaryRevision(
                 $supplierId,
                 $employmentId,
@@ -229,9 +518,7 @@ final class PayrollTimeService
                 'summary' => [
                     'fund_minutes' => $fundMinutes,
                     'planned_minutes' => $plannedMinutes,
-                    'actual_minutes' => $actualMinutes,
-                    'difference_minutes' => $actualMinutes - $plannedMinutes,
-                    'category_minutes' => $categories,
+                    ...$selectedSummary,
                     'incomplete' => $incomplete,
                 ],
                 'jmhz_work_summary' => [
@@ -241,6 +528,7 @@ final class PayrollTimeService
                                 $supplierId,
                                 $employmentId,
                                 $periodStart,
+                                manualEvidence: $manualEvidence,
                             ),
                         )
                         : null,
@@ -263,6 +551,16 @@ final class PayrollTimeService
                     : null,
                 'shifts' => $employmentShifts,
                 'entries' => $employmentEntries,
+                'manual_summary' => $manualSummary,
+                'hourly_remuneration_in_period' => $hourly,
+                'import_amounts_keepable' => isset($keepableImports[$employmentId]),
+                'import_summary_comparison' => isset($replacedImports[$employmentId])
+                    ? self::importSummaryComparison($replacedImports[$employmentId], $actualMinutes)
+                    : null,
+                'juvenile_work_time' => array_map(
+                    static fn (JuvenileWorkTimeFinding $finding): array => $finding->toArray(),
+                    $juvenileFindings[$employmentId] ?? [],
+                ),
             ];
             $items[] = $item;
         }
@@ -273,6 +571,7 @@ final class PayrollTimeService
             'employment_id' => $employmentId,
             'items' => $items,
             'total' => $total,
+            'open_total' => $openTotal,
             'limit' => $limit,
             'offset' => $offset,
         ];
@@ -415,6 +714,28 @@ final class PayrollTimeService
         ];
     }
 
+    /** @param array<string,mixed> $state @param ?array<string,mixed> $manualSummary @param ?array<string,mixed> $importSummary @param array<string,int> $categories @return array<string,mixed> */
+    private function selectedWorkSummary(array $state, ?array $manualSummary, ?array $importSummary, string $periodStart, int $entryMinutes, int $plannedMinutes, array $categories, bool $hourly): array
+    {
+        $source = $state['work_source'] ?? 'entries';
+        // Měsíčně odměňovaný vztah vidí importovaný měsíc beze změny; hodiny
+        // ze souhrnu importu slouží jen hodinovému výpočtu.
+        if ($source === 'manual_summary' || ($source === 'import_summary' && $hourly)) {
+            $worked = $source === 'manual_summary'
+                ? PayrollWorkedTimeSource::fromManualSummary($manualSummary, $periodStart)
+                : PayrollWorkedTimeSource::fromImportSummary($importSummary);
+            $units = $worked['issues'] === [] ? $worked['worked_duration_units'] : null;
+            $minutes = $units === null ? null : PayrollDuration::exactMinutes($units);
+            $categories = null;
+        } else {
+            $minutes = $entryMinutes;
+            $units = PayrollDuration::fromMinutes($entryMinutes);
+        }
+        return ['work_source' => $source, 'worked_duration_units' => $units,
+            'actual_minutes' => $minutes, 'difference_minutes' => $minutes === null ? null : $minutes - $plannedMinutes,
+            'category_minutes' => $categories];
+    }
+
     /**
      * Historie docházky JEDNOHO vztahu po měsících, sestupně a stránkovaně.
      *
@@ -436,6 +757,7 @@ final class PayrollTimeService
         ?string $to,
         int $limit = self::HISTORY_DEFAULT_LIMIT,
         int $offset = 0,
+        int $manualSummaryOffset = 0,
     ): array {
         if ($employmentId <= 0) {
             throw new \InvalidArgumentException('Vztah musí být kladné číslo.');
@@ -463,9 +785,24 @@ final class PayrollTimeService
             }
         }
 
+        $page = array_slice($periods, $offset, $limit);
+        $periodStarts = array_map(static fn (string $period): string => $period . '-01', $page);
+        $selectedManual = $this->repository->selectedManualSummaries($supplierId, [$employmentId], $periodStarts)[$employmentId] ?? [];
+        $selectedImport = $this->repository->selectedImportSummaries($supplierId, [$employmentId], $periodStarts)[$employmentId] ?? [];
+        $hourlyRanges = $periodStarts === [] ? [] : $this->repository->hourlyRemunerationRanges(
+            $supplierId, [$employmentId], min($periodStarts),
+            (new \DateTimeImmutable(max($periodStarts)))->modify('last day of this month')->format('Y-m-d'),
+        )[$employmentId] ?? [];
+        $manualSummaryOffset = max(0, $manualSummaryOffset);
+        $manualHistory = $this->repository->manualSummaryHistory($supplierId, $employmentId, $periodStarts, $manualSummaryOffset);
         $items = [];
-        foreach (array_slice($periods, $offset, $limit) as $period) {
-            $items[] = $this->historyMonth($supplierId, $employmentId, $period);
+        foreach ($page as $period) {
+            $item = $this->historyMonth($supplierId, $employmentId, $period, $selectedManual[$period . '-01'] ?? null, $selectedImport[$period . '-01'] ?? null, self::rangesOverlapMonth($hourlyRanges, $period . '-01'));
+            $history = $manualHistory[$period . '-01'] ?? [];
+            $item['manual_summary_history_truncated'] = count($history) > 20;
+            $item['manual_summary_history_offset'] = $manualSummaryOffset;
+            $item['manual_summary_history'] = array_slice($history, 0, 20);
+            $items[] = $item;
         }
 
         return [
@@ -479,7 +816,19 @@ final class PayrollTimeService
     }
 
     /** @return array<string,mixed> */
-    private function historyMonth(int $supplierId, int $employmentId, string $period): array
+    /** @param list<array{effective_from:string,effective_to:?string}> $ranges */
+    private static function rangesOverlapMonth(array $ranges, string $periodStart): bool
+    {
+        $last = (new \DateTimeImmutable($periodStart))->modify('last day of this month')->format('Y-m-d');
+        foreach ($ranges as $range) {
+            if ($range['effective_from'] <= $last && ($range['effective_to'] === null || $range['effective_to'] >= $periodStart)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private function historyMonth(int $supplierId, int $employmentId, string $period, ?array $manualSummary, ?array $importSummary, bool $hourly): array
     {
         [$periodStart, $periodEnd, $startsAtUtc, $endsAtUtc] = $this->periodBounds($period);
         [$fundMinutes, $calendarDto] = $this->fundMinutesForMonth(
@@ -521,9 +870,7 @@ final class PayrollTimeService
             'summary' => [
                 'fund_minutes' => $fundMinutes,
                 'planned_minutes' => $plannedMinutes,
-                'actual_minutes' => $actualMinutes,
-                'difference_minutes' => $actualMinutes - $plannedMinutes,
-                'category_minutes' => $categories,
+                ...$this->selectedWorkSummary($state, $manualSummary, $importSummary, $periodStart, $actualMinutes, $plannedMinutes, $categories, $hourly),
                 // „Má kalendář?" se tu pozná z téhož dotazu, který počítá fond
                 // (`calendars()`), zatímco přehled na to má hromadný dotaz přes
                 // celou stránku (`employmentIdsWithCalendar()`). Podmínka je
@@ -536,6 +883,8 @@ final class PayrollTimeService
             ],
             'shift_count' => count($employmentShifts),
             'entry_count' => count($employmentEntries),
+            'manual_summary' => $manualSummary,
+            'hourly_remuneration_in_period' => $hourly,
         ];
     }
 

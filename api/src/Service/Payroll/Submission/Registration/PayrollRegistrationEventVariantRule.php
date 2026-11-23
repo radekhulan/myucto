@@ -13,6 +13,8 @@ namespace MyInvoice\Service\Payroll\Submission\Registration;
  *
  * - A2-10 a A2-SPEC: bez „ukončeno smrtí" (10225); A2-10 bez celé části
  *   podpory v nezaměstnanosti, A2-SPEC z ní jen důvod předčasného ukončení.
+ * - A4-10 a A4-SPEC: totéž jako A2 pro části odhlášky, které oprava nese
+ *   u vztahu skončeného u ČSSZ ({@see PayrollRegistrationRegisteredEnd}).
  * - A3 a A4: delta podle {@see PayrollRegistrationDeltaVariantRule}; mimo OST
  *   bez cizozemského nositele (`forin`), u A4 mimo OST bez vzniku
  *   zaměstnání (`contractfro`).
@@ -43,7 +45,10 @@ final class PayrollRegistrationEventVariantRule
             return [];
         }
         $result = [];
-        if ($actionCode === 2) {
+        if (in_array($actionCode, [2, 4], true)) {
+            // Části odhlášky nese i oprava A4 vztahu skončeného u ČSSZ
+            // (PayrollRegistrationRegisteredEnd); EDV je u A4 zakazuje ve
+            // stejných variantách jako u A2.
             if (is_bool($data['ended_by_death'] ?? null)) {
                 $result[] = 'ended_by_death';
             }
@@ -59,11 +64,12 @@ final class PayrollRegistrationEventVariantRule
                     }
                 }
             }
-
-            return $result;
+            if ($actionCode === 2) {
+                return $result;
+            }
         }
         $delta = is_array($data['delta'] ?? null) ? $data['delta'] : [];
-        foreach (PayrollRegistrationDeltaVariantRule::forbiddenPaths($variant, $delta) as $path) {
+        foreach (PayrollRegistrationDeltaVariantRule::forbiddenPaths($variant, $delta, $actionCode) as $path) {
             $result[] = 'delta.' . $path;
         }
         if ($actionCode === 4 && isset($delta['contract_start_on'])) {

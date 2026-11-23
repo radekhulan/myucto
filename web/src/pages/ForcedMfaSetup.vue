@@ -20,6 +20,7 @@ import {
 } from '@/security/domainLogin'
 import { takeTotpEnrollment } from '@/security/totpEnrollment'
 import { testRegisteredPasskey } from '@/security/passkeyTest'
+import { useSsoEnforcement } from '@/composables/useSsoEnforcement'
 
 const { t } = useI18n()
 const route = useRoute()
@@ -69,9 +70,12 @@ const passkeyAllowed = computed(() => allowed.value.includes('passkey'))
 const totpAllowed = computed(() => allowed.value.includes('totp'))
 const passkeySupported = isWebAuthnAvailable()
 const passkeyRequiresTotpStepUp = computed(() => auth.user?.totp_enabled === true)
+// Při vynuceném přihlášení přes organizaci se heslo nepoužívá: první faktor
+// zřizuje čerstvé sezení po přihlášení přes poskytovatele.
+const { passwordAllowed } = useSsoEnforcement()
 const passkeyAuthorizationReady = computed(() => passkeyRequiresTotpStepUp.value
   ? /^\d{6}$/.test(totpCode.value)
-  : currentPassword.value.length > 0)
+  : !passwordAllowed.value || currentPassword.value.length > 0)
 
 // Zrcadlo `passkeyRequiresTotpStepUp` pro opačný směr: `/auth/totp/setup` teď
 // taky vyžaduje čerstvé ověření, a má-li uživatel už passkey, ověří se jí
@@ -94,7 +98,7 @@ async function completePasskey() {
       error.value = t('mfa_setup.transition_totp_required')
       return
     }
-  } else {
+  } else if (passwordAllowed.value) {
     if (!currentPassword.value) {
       error.value = t('mfa_setup.password_required')
       return
@@ -185,7 +189,7 @@ async function startTotp() {
     }
     return
   }
-  if (!enrollment.value && !currentPassword.value) {
+  if (passwordAllowed.value && !enrollment.value && !currentPassword.value) {
     error.value = t('mfa_setup.password_required')
     return
   }
@@ -193,7 +197,7 @@ async function startTotp() {
   try {
     const authorization = enrollment.value
       ? { enrollment_token: enrollment.value.token }
-      : { current_password: currentPassword.value }
+      : passwordAllowed.value ? { current_password: currentPassword.value } : {}
     enrollment.value = null
     totpSetup.value = await authApi.totpSetup(authorization)
     currentPassword.value = ''
@@ -367,7 +371,7 @@ onMounted(async () => {
                 class="w-full h-10 px-3 border border-neutral-300 rounded-md font-mono text-lg tracking-widest text-center"
                 @keydown.enter="completePasskey" />
             </template>
-            <input v-else v-model="currentPassword" type="password" autocomplete="current-password"
+            <input v-else-if="passwordAllowed" v-model="currentPassword" type="password" autocomplete="current-password"
               :placeholder="t('auth.current_password')"
               class="w-full h-10 px-3 border border-neutral-300 rounded-md"
               @keydown.enter="completePasskey" />
@@ -411,7 +415,7 @@ onMounted(async () => {
           <!-- Stejně jako u passkey: čerstvé ověření nejdřív, secret až potom —
                bez passkey heslem, s ní step-up ceremonií pro 'totp.enable'. -->
           <template v-else>
-            <input v-if="!totpRequiresPasskeyStepUp && !enrollment" v-model="currentPassword" type="password"
+            <input v-if="passwordAllowed && !totpRequiresPasskeyStepUp && !enrollment" v-model="currentPassword" type="password"
               autocomplete="current-password" :placeholder="t('auth.current_password')"
               data-test="totp-current-password"
               class="w-full h-10 px-3 border border-neutral-300 rounded-md"

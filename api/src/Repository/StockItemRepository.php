@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace MyInvoice\Repository;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Service\Invoice\UnitPricePrecision;
+use MyInvoice\Service\Stock\StockItemIntrastatValidator;
 use PDO;
 
 /**
@@ -553,7 +555,7 @@ final class StockItemRepository
                 'default_sale_unit'      => $r['default_sale_unit'] !== null ? (string) $r['default_sale_unit'] : null,
                 'tracking_mode'          => (string) $r['tracking_mode'],
                 'vat_rate_id'            => $r['vat_rate_id'] !== null ? (int) $r['vat_rate_id'] : null,
-                'sale_price_without_vat' => $r['sale_price_without_vat'],
+                'sale_price_without_vat' => UnitPricePrecision::toDecimalString($r['sale_price_without_vat']),
                 'is_stocked'             => (bool) $r['is_stocked'],
                 'item_type'              => (string) $r['item_type'],
             ];
@@ -896,6 +898,9 @@ final class StockItemRepository
         $r['supplier_id'] = (int) $r['supplier_id'];
         $r['vat_rate_id'] = $r['vat_rate_id'] !== null ? (int) $r['vat_rate_id'] : null;
         $r['is_active'] = (bool) $r['is_active'];
+        if (array_key_exists('sale_price_without_vat', $r)) {
+            $r['sale_price_without_vat'] = UnitPricePrecision::toDecimalString($r['sale_price_without_vat']);
+        }
         if (array_key_exists('row_version', $r)) {
             $r['row_version'] = (int) $r['row_version'];
         }
@@ -917,5 +922,38 @@ final class StockItemRepository
             $r['weight_g'] = $r['weight_g'] !== null ? (int) $r['weight_g'] : null;
         }
         return $r;
+    }
+
+    /**
+     * Doplní Intrastat z dokladu jen tam, kde na kartě chybí; existující hodnota se nikdy nepřepíše.
+     * Neznámou zemi nezapíše: StockItemIntrastatValidator by pak odmítl každé uložení karty.
+     *
+     * @return array<string,array{old:?string,new:string}> co se změnilo, podle sloupce
+     */
+    public function fillMissingIntrastat(int $supplierId, int $id, ?string $cn8Code, ?string $originCountry): array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT intrastat_cn8_code, intrastat_country_of_origin, (SELECT iso2 FROM countries WHERE iso2 = ?) AS known_country
+               FROM stock_items WHERE supplier_id = ? AND id = ? FOR UPDATE'
+        );
+        $stmt->execute([$originCountry, $supplierId, $id]);
+        $card = $stmt->fetch(PDO::FETCH_ASSOC);
+        if ($card === false) {
+            return [];
+        }
+        $changes = [];
+        $country = in_array($originCountry, StockItemIntrastatValidator::NON_ISO_ORIGIN_CODES, true) ? $originCountry : $card['known_country'];
+        foreach (['intrastat_cn8_code' => $cn8Code, 'intrastat_country_of_origin' => $country] as $column => $value) {
+            if ($value !== null && (string) $card[$column] === '') {
+                $changes[$column] = ['old' => $card[$column], 'new' => (string) $value];
+            }
+        }
+        if ($changes === []) {
+            return [];
+        }
+        $set = implode(', ', array_map(static fn (string $column): string => $column . ' = ?', array_keys($changes)));
+        $this->db->pdo()->prepare("UPDATE stock_items SET {$set}, row_version = row_version + 1 WHERE supplier_id = ? AND id = ?")
+            ->execute([...array_column($changes, 'new'), $supplierId, $id]);
+        return $changes;
     }
 }

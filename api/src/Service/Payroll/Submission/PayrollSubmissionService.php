@@ -1813,14 +1813,42 @@ final class PayrollSubmissionService
                         $receiptId,
                         $importedBy,
                     );
-                $this->registrationReceiptIdentities
-                    ->applyAcceptedEmploymentRegistration(
+                $registered = $this->registrationReceiptIdentities
+                    ->applyAcceptedEmploymentRegistrationOutcomes(
                         $supplierId,
                         $submission['environment'],
                         $submissionId,
                         $receiptId,
                         $importedBy,
                     );
+                /*
+                 * Protokol přihlášku přijal, ale přidělený identifikátor nemá
+                 * předepsaný tvar, takže se do evidence nezapsal. Bez nálezu
+                 * by přijaté podání vypadalo hotové a čísla by tiše chyběla.
+                 */
+                foreach ($registered['unusable'] as $unusable) {
+                    $this->repository->insertIssue(
+                        $supplierId,
+                        $submission['environment'],
+                        $submissionId,
+                        $partId,
+                        'error',
+                        'remote',
+                        $unusable['identifier_type'] === 'ik_mpsv'
+                            ? 'registration_receipt_oic_invalid'
+                            : 'registration_receipt_id_ppv_invalid',
+                        'payroll_employment',
+                        'payroll_employment:' . $unusable['employment_id'],
+                        null,
+                        null,
+                        $importedBy,
+                    );
+                    $currentVersion = $this->repository->bumpSubmissionVersion(
+                        $supplierId,
+                        $submissionId,
+                        $currentVersion,
+                    );
+                }
             }
             /*
              * Identita z protokolu JMHZ. Běží ve stejné transakci jako zbytek

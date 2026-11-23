@@ -955,6 +955,18 @@ final class AiPdfExtractorUnitTest extends TestCase
         );
     }
 
+    public function testReverseChargeClassification_mixedFromEuIsGoodsAcquisition(): void
+    {
+        $classify = \MyInvoice\Service\Import\AiPdfExtractor::reverseChargeClassification(...);
+        self::assertSame('23', $classify('goods', true));
+        self::assertSame('23', $classify('mixed', true), 'Zboží s vedlejší dopravou z JČS = pořízení zboží.');
+        self::assertSame('24e', $classify('services', true));
+        self::assertSame('24e', $classify('', true));
+        self::assertSame('25', $classify('goods', false));
+        self::assertSame('24', $classify('mixed', false), 'Dovoz ze 3. země se z faktury nesamovyměřuje jako zboží.');
+        self::assertSame('24', $classify('services', false));
+    }
+
     public function testLinesAreGross_noRecap_false(): void
     {
         $items = $this->grossEshopItems();
@@ -1006,6 +1018,19 @@ final class AiPdfExtractorUnitTest extends TestCase
         // na řádkovou částku (jinak by součet řádků rozhodil základ a spustil collapse).
         self::assertSame([1.0, 117.52],
             \MyInvoice\Service\Import\AiPdfExtractor::reconcileLineAmount(0.5, 235.05, 117.52));
+    }
+
+    public function testReconcile_unitPricePrintedInCents_keepsQuantityWithExactPrice(): void
+    {
+        // Doklad tiskne 0,01 EUR/ks, řádek 2 700,00 za 250 000 ks → přesná cena 0,0108.
+        self::assertSame([250000.0, 0.0108],
+            \MyInvoice\Service\Import\AiPdfExtractor::reconcileLineAmount(250000.0, 0.01, 2700.0));
+        // 0,00 EUR/ks a řádek 1 000,00 → 0,004, ne 1 ks × 1 000.
+        self::assertSame([250000.0, 0.004],
+            \MyInvoice\Service\Import\AiPdfExtractor::reconcileLineAmount(250000.0, 0.0, 1000.0));
+        // Sleva: záporná cena zaokrouhlená na haléře drží znaménko.
+        self::assertSame([3.0, -0.333333],
+            \MyInvoice\Service\Import\AiPdfExtractor::reconcileLineAmount(3.0, -0.33, -1.0));
     }
 
     public function testReconcile_negativeLineTotal_preservesSign(): void

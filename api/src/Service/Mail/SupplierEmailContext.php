@@ -41,8 +41,8 @@ final class SupplierEmailContext
 
         $stmt = $this->db->pdo()->prepare(
             'SELECT s.id, s.company_name, s.display_name, s.tagline, s.street, s.city, s.zip,
-                    s.email, s.phone, s.web, s.email_footer,
-                    s.email_branding_enabled, s.email_accent_color, s.logo_path, s.email_profile_id,
+                    s.email, s.phone, s.web,
+                    s.email_branding_enabled, s.email_accent_color, s.logo_path,
                     s.branding_profiles_enabled, s.default_branding_profile_id,
                     co.name_cs AS country
                FROM supplier s
@@ -52,6 +52,11 @@ final class SupplierEmailContext
         $stmt->execute([$supplierId]);
         $row = $stmt->fetch(\PDO::FETCH_ASSOC);
         if ($row === false) return null;
+
+        // Patička a e-mailový profil existují jen v brandingových profilech (supplier je nemá),
+        // overlay je případně doplní.
+        $row['email_footer'] = null;
+        $row['email_profile_id'] = null;
 
         // Výchozí profil firmy přebije živá nastavení, stejně jako u dokladů.
         if (!empty($row['branding_profiles_enabled']) && !empty($row['default_branding_profile_id'])) {

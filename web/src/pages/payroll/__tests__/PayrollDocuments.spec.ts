@@ -16,6 +16,7 @@ const m = vi.hoisted(() => ({
   generateDocumentBatch: vi.fn(),
   documentBatch: vi.fn(),
   documentBatchItems: vi.fn(),
+  runDocumentBatch: vi.fn(),
   retryDocumentBatchItem: vi.fn(),
   enqueueAnnualDocumentBatch: vi.fn(),
   annualDocumentBatch: vi.fn(),
@@ -63,6 +64,7 @@ vi.mock('@/api/payroll', () => ({
     generateDocumentBatch: m.generateDocumentBatch,
     documentBatch: m.documentBatch,
     documentBatchItems: m.documentBatchItems,
+    runDocumentBatch: m.runDocumentBatch,
     retryDocumentBatchItem: m.retryDocumentBatchItem,
     enqueueAnnualDocumentBatch: m.enqueueAnnualDocumentBatch,
     annualDocumentBatch: m.annualDocumentBatch,
@@ -453,6 +455,99 @@ describe('PayrollDocuments', () => {
     expect(m.documentBatch).toHaveBeenCalledWith(81)
     expect(wrapper.find('[data-test="document-batch-report"]').exists()).toBe(true)
     expect(wrapper.find('[data-test="document-batch-start-worker"]').exists()).toBe(true)
+    wrapper.unmount()
+  })
+
+  // Průběh dávky nesou stav a počty. Seznam položek se dřív stahoval celý při
+  // každém přírůstku hotových pásek (u 150 osob všechny položky každých 2,5 s).
+  it('follows progress by counts and does not refetch every batch item on each tick', async () => {
+    vi.useFakeTimers()
+    try {
+      const list = await m.listDocuments()
+      m.listDocuments.mockResolvedValue({
+        ...list,
+        items: [],
+        total: 0,
+        revisions: list.revisions.map((revision: Record<string, unknown>) => ({ ...revision, open_batch_id: 81 })),
+      })
+      const base = await m.documentBatch()
+      let done = 0
+      m.documentBatch.mockImplementation(async () => ({
+        ...base,
+        status: 'running',
+        item_count: 150,
+        succeeded_count: done,
+        failed_count: 0,
+        worker_stalled: false,
+      }))
+      m.documentBatchItems.mockClear()
+
+      const wrapper = mount(PayrollDocuments)
+      await flushPromises()
+      expect(m.documentBatchItems).toHaveBeenCalledTimes(1)
+
+      // Tři dotazy na stav po 2,5 s, pokaždé o deset hotových pásek víc.
+      for (let tick = 0; tick < 3; tick++) {
+        done += 10
+        await vi.advanceTimersByTimeAsync(2500)
+        await flushPromises()
+      }
+      expect(wrapper.get('[data-test="document-batch-report"]').find('[role="progressbar"]').attributes('aria-valuenow')).toBe('30')
+      expect(m.documentBatchItems).toHaveBeenCalledTimes(1)
+
+      // Po deseti sekundách se řádky obnoví, aby za průběhem nezůstaly stát.
+      done += 10
+      await vi.advanceTimersByTimeAsync(2500)
+      await flushPromises()
+      expect(m.documentBatchItems).toHaveBeenCalledTimes(2)
+
+      // Chyba položky se ukáže hned: jde zopakovat.
+      m.documentBatch.mockImplementation(async () => ({
+        ...base, status: 'running', item_count: 150, succeeded_count: done, failed_count: 1, worker_stalled: false,
+      }))
+      await vi.advanceTimersByTimeAsync(2500)
+      await flushPromises()
+      expect(m.documentBatchItems).toHaveBeenCalledTimes(3)
+      wrapper.unmount()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  // Server hlásí frontu jako stojící ještě chvíli po ručním spuštění, takže
+  // tlačítko zůstávalo aktivní a šlo zmáčknout podruhé.
+  it('locks the start button after the queue was started by hand', async () => {
+    const list = await m.listDocuments()
+    m.listDocuments.mockResolvedValue({
+      ...list,
+      items: [],
+      total: 0,
+      revisions: list.revisions.map((revision: Record<string, unknown>) => ({ ...revision, open_batch_id: 81 })),
+    })
+    m.documentBatch.mockResolvedValue({
+      ...(await m.documentBatch()),
+      status: 'queued',
+      succeeded_count: 0,
+      failed_count: 0,
+      worker_stalled: true,
+    })
+    m.runDocumentBatch.mockResolvedValue({})
+
+    const wrapper = mount(PayrollDocuments)
+    await flushPromises()
+    const button = wrapper.get('[data-test="document-batch-start-worker"]')
+    expect(button.attributes('disabled')).toBeUndefined()
+
+    await button.trigger('click')
+    await flushPromises()
+
+    expect(m.runDocumentBatch).toHaveBeenCalledTimes(1)
+    const locked = wrapper.get('[data-test="document-batch-start-worker"]')
+    expect(locked.attributes('disabled')).toBeDefined()
+    expect(locked.text()).toBe('payroll.documents.batch_worker_running')
+    await locked.trigger('click')
+    await flushPromises()
+    expect(m.runDocumentBatch).toHaveBeenCalledTimes(1)
     wrapper.unmount()
   })
 

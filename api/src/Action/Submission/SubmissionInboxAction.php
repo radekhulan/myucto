@@ -15,12 +15,13 @@ use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Submission\Channel\ChannelContext;
 use MyInvoice\Service\Submission\Channel\ChannelCredentials;
 use MyInvoice\Service\Submission\Channel\Isds\DirectIsdsInboxTransport;
-use MyInvoice\Service\Submission\Channel\Isds\IsdsChannel;
 use MyInvoice\Service\Submission\Channel\Isds\MobileKeyIsdsAuthenticator;
 use MyInvoice\Service\Submission\Channel\Isds\SmsIsdsAuthenticator;
 use MyInvoice\Service\Submission\Channel\SensitiveValue;
+use MyInvoice\Service\Submission\IsdsAccessService;
 use MyInvoice\Service\Submission\Channel\SubmissionChannelException;
 use MyInvoice\Service\Submission\SubmissionCredentialService;
+use MyInvoice\Service\Submission\SubmissionInboxPollFlow;
 use MyInvoice\Service\Submission\SubmissionInboxService;
 use MyInvoice\Service\Submission\SubmissionInboxPrivacyService;
 use MyInvoice\Service\Submission\IsdsMobileCredentialService;
@@ -39,6 +40,7 @@ final class SubmissionInboxAction
 {
     public function __construct(
         private readonly SubmissionInboxService $inbox,
+        private readonly SubmissionInboxPollFlow $pollFlow,
         private readonly SubmissionCredentialService $credentials,
         private readonly DirectIsdsInboxTransport $directTransport,
         private readonly MobileKeyIsdsAuthenticator $mobileKey,
@@ -46,6 +48,7 @@ final class SubmissionInboxAction
         private readonly IsdsMobileCredentialService $mobileCredentials,
         private readonly SubmissionInboxPrivacyService $privacy,
         private readonly ActivityLogger $logger,
+        private readonly IsdsAccessService $access,
     ) {}
 
     public function list(Request $request, Response $response): Response
@@ -132,13 +135,7 @@ final class SubmissionInboxAction
 
         try {
             $context = $this->credentials->unlock($supplierId, $environment);
-            $result = $this->inbox->pollWithChannel(
-                $context,
-                'isds',
-                new IsdsChannel($this->directTransport),
-                500,
-                $this->userId($request),
-            );
+            $result = $this->pollFlow->poll($context, $this->directTransport, $this->userId($request));
         } catch (SubmissionChannelException $e) {
             return Json::error($response, $e->errorCode, $e->getMessage(), $e->httpStatus);
         }
@@ -155,6 +152,17 @@ final class SubmissionInboxAction
         $body = (array) ($request->getParsedBody() ?? []);
         if (($error = $this->acknowledgementError($body, $response)) !== null) {
             return $error;
+        }
+        if (array_key_exists('access_id', $body)) {
+            $supplierId = SupplierGuard::currentId($request);
+            $actor = $this->userId($request);
+            try {
+                $selected = $this->access->useSelected($request, $supplierId, $actor, 'receive', $body);
+                $result = $this->pollFlow->poll($selected['context'], $this->directTransport, $actor, $selected['can_receipts']);
+                return $this->pollResult($response, $result);
+            } catch (SubmissionChannelException $e) {
+                return Json::error($response, $e->errorCode, $e->getMessage(), $e->httpStatus);
+            }
         }
         $environment = (string) ($body['environment'] ?? 'production');
         $username = trim((string) ($body['username'] ?? ''));
@@ -181,13 +189,7 @@ final class SubmissionInboxAction
             ),
         );
         try {
-            $result = $this->inbox->pollWithChannel(
-                $context,
-                'isds',
-                new IsdsChannel($this->directTransport),
-                500,
-                $this->userId($request),
-            );
+            $result = $this->pollFlow->poll($context, $this->directTransport, $this->userId($request));
         } catch (SubmissionChannelException $e) {
             return Json::error($response, $e->errorCode, $e->getMessage(), $e->httpStatus);
         }
@@ -258,13 +260,7 @@ final class SubmissionInboxAction
                 ]);
             }
             try {
-                $pollResult = $this->inbox->pollWithChannel(
-                    $context,
-                    'isds',
-                    new IsdsChannel($this->directTransport),
-                    500,
-                    $this->userId($request),
-                );
+                $pollResult = $this->pollFlow->poll($context, $this->directTransport, $this->userId($request));
             } finally {
                 $this->mobileKey->logout($context);
             }
@@ -326,13 +322,7 @@ final class SubmissionInboxAction
                 (string) ($body['environment'] ?? 'production'),
             );
             try {
-                $result = $this->inbox->pollWithChannel(
-                    $context,
-                    'isds',
-                    new IsdsChannel($this->directTransport),
-                    500,
-                    $this->userId($request),
-                );
+                $result = $this->pollFlow->poll($context, $this->directTransport, $this->userId($request));
             } finally {
                 $this->sms->logout($context);
             }
@@ -342,7 +332,7 @@ final class SubmissionInboxAction
         return $this->pollResult($response, $result);
     }
 
-    /** @param array{fetched:int,stored:int,skipped:int,failed:int,unclassified:int,error:?string} $result */
+    /** @param array{fetched:int,stored:int,skipped:int,failed:int,unclassified:int,error:?string,receipts:array{attached:int,pending:int,failed:int}|null} $result */
     private function pollResult(Response $response, array $result): Response
     {
         if ($result['error'] !== null && $result['fetched'] === 0) {
@@ -573,7 +563,7 @@ final class SubmissionInboxAction
         if ($this->userId($request) <= 0) {
             return Json::error($response, 'unauthenticated', 'Nepřihlášený uživatel.', 401);
         }
-        if (!RequestAuthorization::isSessionAuth($request)) {
+        if (!RequestAuthorization::actsAsSession($request)) {
             return Json::sessionRequired($response, 'Datová schránka se obsluhuje jen z webového rozhraní.');
         }
 

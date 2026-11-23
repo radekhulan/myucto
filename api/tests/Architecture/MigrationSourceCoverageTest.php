@@ -75,7 +75,7 @@ final class MigrationSourceCoverageTest extends TestCase
 
     public function testEveryPayrollMigrationHasAMatrix(): void
     {
-        foreach (['pamica', 'premier', 'jmhz', 'money-s3'] as $source) {
+        foreach (['pamica', 'pohoda-mzdy', 'premier', 'jmhz', 'money-s3'] as $source) {
             self::assertArrayHasKey($source, self::matrices(), "Chybí api/resources/migration/{$source}.json");
         }
     }

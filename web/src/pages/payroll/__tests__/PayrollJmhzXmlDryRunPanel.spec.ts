@@ -137,6 +137,39 @@ describe('PayrollJmhzXmlDryRunPanel', () => {
 
     expect(wrapper.find('[data-test="workplace-bulk-dialog"]').exists()).toBe(true)
   })
+  /*
+   * Za období od 01/2027 chybí číselník obcí a států úplně. Hromadné doplnění
+   * by vrátilo zavádějící „obec neplatí" i pro správný kód, takže ho panel
+   * nenabízí a místo obecného kroku „podejte ručně" řekne, že se čeká na
+   * vyhlášení číselníku.
+   */
+  it('nevyhlášený číselník obcí nenabízí hromadné doplnění ani odkaz', async () => {
+    m.dryRun.mockResolvedValue({ status: 'blocked', preparation_id: 77, official_submission: { supported: false, reason: 'Lokální test.' }, blockers: [
+      {
+        code: 'jmhz_workplace_codebooks_not_published',
+        entity_type: 'employment',
+        entity_id: 12,
+        attribute_ids: ['10229', '10230', '10231'],
+        remediation: { kind: 'manual', field: null },
+      },
+    ] })
+    const wrapper = mount(PayrollJmhzXmlDryRunPanel, {
+      props: { runs: [{ ...run, period_start: '2027-01-01' }] as never[] },
+      global: { stubs: {
+        RouterLink: { props: ['to'], template: '<a :data-to="JSON.stringify(to)"><slot /></a>' },
+        teleport: true,
+      } },
+    })
+    await wrapper.get('[data-test="jmhz-dry-run-start-18"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('[data-test="jmhz-dry-run-workplace-bulk"]').exists()).toBe(false)
+    expect(wrapper.find('[data-test="jmhz-dry-run-remediation"]').exists()).toBe(false)
+    expect(wrapper.get('[data-test="jmhz-dry-run-blocker-label"]').text())
+      .toBe('payroll.jmhz_gate.codes.jmhz_workplace_codebooks_not_published')
+    expect(wrapper.get('[data-test="jmhz-dry-run-blocker-step"]').text())
+      .toBe('payroll.jmhz_gate.code_steps.jmhz_workplace_codebooks_not_published')
+  })
   beforeEach(() => {
     vi.clearAllMocks()
     m.canWrite.mockReturnValue(true)
@@ -376,6 +409,53 @@ describe('PayrollJmhzXmlDryRunPanel', () => {
     expect(wrapper.text()).not.toContain('10050')
   })
 
+  /*
+   * Nerozhodnutá žádost o roční zúčtování u desítek osob vedla na Roční
+   * zúčtování bez filtru. Odkaz teď nese rok, zúžení na nerozhodnuté, osoby
+   * hlášení a předvýběr, takže „nepožádal" je jedno potvrzení.
+   */
+  it('nerozhodnutou žádost o roční zúčtování vede na hromadné nastavení pro osoby hlášení', async () => {
+    m.dryRun.mockResolvedValue({
+      status: 'blocked',
+      preparation_id: 78,
+      blockers: [21, 22, 23].map(id => ({
+        code: 'jmhz_annual_request_source_missing',
+        entity_type: 'person',
+        entity_id: id,
+        attribute_ids: ['10319'],
+        remediation: { kind: 'annual_settlement', field: null },
+      })),
+      official_submission: {
+        supported: false,
+        reason_code: 'jmhz_dry_run_is_not_a_submission',
+        reason: 'Jde o lokální test, ne o podání.',
+      },
+    })
+
+    const wrapper = mount(PayrollJmhzXmlDryRunPanel, {
+      props: { runs: [{ ...run, period_start: '2026-02-01' }] as never[] },
+      global: {
+        stubs: {
+          RouterLink: {
+            props: ['to'],
+            template: '<a data-test="router-link" :data-to="JSON.stringify(to)"><slot /></a>',
+          },
+        },
+      },
+    })
+    await flushPromises()
+    await wrapper.get('[data-test="jmhz-dry-run-start-18"]').trigger('click')
+    await flushPromises()
+
+    const links = wrapper.findAll('[data-test="jmhz-dry-run-remediation"]')
+    expect(links).toHaveLength(1)
+    expect(JSON.parse(links[0]!.attributes('data-to')!)).toEqual({
+      name: 'payroll-annual-settlement',
+      query: { year: '2025', state: 'request_undecided', employees: '21,22,23', select: 'all', return: '/' },
+    })
+    expect(links[0]!.text()).toContain('jmhz_dry_run_action_codes.jmhz_annual_request_source_missing')
+  })
+
   it('vypíše nepropustné vady z katalogu kontrol i s kódem chyby', async () => {
     m.dryRun.mockResolvedValue({
       status: 'dry_run_incomplete',
@@ -447,7 +527,9 @@ describe('PayrollJmhzXmlDryRunPanel', () => {
     await wrapper.get('[data-test="jmhz-dry-run-start-18"]').trigger('click')
     await flushPromises()
 
-    expect(wrapper.text()).toContain('jmhz_dry_run_incomplete')
+    // Nepropustná vada: nadpis mluví o kontrolách, které neprošly, ne
+    // o „nevykonaném katalogu" (ten platí jen pro nevykonané kontroly).
+    expect(wrapper.text()).toContain('jmhz_dry_run_controls_failed')
     expect(wrapper.get('[data-test="jmhz-controls-blocking"]').text()).toContain(
       'Pojistné 10024 neodpovídá sazbě.',
     )
@@ -549,15 +631,17 @@ describe('PayrollJmhzXmlDryRunPanel', () => {
     await wrapper.get('[data-test="jmhz-defer-confirm"]').trigger('click')
     await flushPromises()
 
-    // Odklad jde do prostředí panelu (výchozí produkce), ne natvrdo do testu.
     expect(m.defer).toHaveBeenCalledWith({
-      environment: 'production',
+      environment: 'test',
       preparationId: 77,
       employmentId: 12,
       officeId: 4,
       reason: 'Průměr se doplní do konce měsíce.',
     })
     expect(m.freeze).toHaveBeenCalledTimes(2)
+    expect(m.freeze).toHaveBeenLastCalledWith(18, expect.any(String), 'test')
+    expect(m.dryRun).toHaveBeenLastCalledWith(77, 'test', 4)
+    expect(m.deferrals).toHaveBeenLastCalledWith(18, 'production')
     expect(wrapper.find('[data-test="jmhz-defer-form"]').exists()).toBe(false)
   })
 
@@ -692,5 +776,181 @@ describe('PayrollJmhzXmlDryRunPanel', () => {
 
     expect(wrapper.text()).toContain('srpen 2026')
     expect(wrapper.text()).not.toContain('2026-08')
+  })
+
+  const routerStub = { RouterLink: { props: ['to'], template: '<a :data-to="JSON.stringify(to)"><slot /></a>' } }
+
+  function finding(controlId: number, message: string) {
+    return {
+      control_id: controlId,
+      name: 'Kontrola',
+      outcome: 'failed',
+      scope: 'submission',
+      passability: 'blocking',
+      technical: false,
+      part: 'submission',
+      form_ordinal: null,
+      message,
+      attribute_ids: [],
+      error_code: null,
+    }
+  }
+
+  /**
+   * M6: test před koncem měsíce. Kontroly 43, 44 a 90 selžou jen kvůli
+   * dnešnímu datu; panel to řekne jednou větou s datem a nevypíše je jako
+   * „nepropustné vady, podání by bylo neúčinné".
+   */
+  it('před koncem období řekne jednou větou, od kdy půjde hlášení připravit', async () => {
+    m.canWrite.mockReturnValue(true)
+    m.dryRun.mockResolvedValue({
+      status: 'dry_run_incomplete',
+      preparation_id: 77,
+      preparation_gate: {
+        code: 'jmhz_period_not_finished',
+        message: 'Období 08/2026 ještě neskončilo. Připravit ho půjde od 1. 9. 2026.',
+        available_from: '2026-09-01',
+      },
+      waiting_for_period_end: true,
+      date_only_control_ids: [43, 44, 90],
+      blockers: [],
+      xml,
+      xml_sha256: 'c'.repeat(64),
+      controls: {
+        submittable: false,
+        counts: { passed: 88, failed: 3, not_evaluable: 30, not_applicable: 0 },
+        blocking: [
+          finding(43, 'Pojištění do 2026-08-31 je po datu vyplnění podání 2026-08-12.'),
+          finding(44, 'Pojištění do 2026-08-31 je po datu vyplnění podání 2026-08-12.'),
+          finding(90, 'Hlášené období 2026-08 ještě neskončilo.'),
+        ],
+        warnings: [],
+        coverage_gaps: [],
+        evaluated: [],
+      },
+      official_submission: { supported: false, reason_code: 'x', reason: 'Lokální test.' },
+    })
+    const wrapper = mount(PayrollJmhzXmlDryRunPanel, { props: { runs: [run] as never[] }, global: { stubs: routerStub } })
+    await wrapper.get('[data-test="jmhz-dry-run-start-18"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.get('[data-test="jmhz-dry-run-gate-18"]').text()).toContain('od 1. 9. 2026')
+    expect(wrapper.get('[data-test="jmhz-dry-run-status"]').text()).toContain('jmhz_dry_run_waiting')
+    expect(wrapper.find('[data-test="jmhz-controls-blocking"]').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('jmhz_dry_run_incomplete')
+  })
+
+  it('před koncem období nechá vypsanou vadu, která s datem nesouvisí', async () => {
+    m.dryRun.mockResolvedValue({
+      status: 'dry_run_incomplete',
+      preparation_id: 77,
+      preparation_gate: { code: 'jmhz_period_not_finished', message: 'Období ještě neskončilo.', available_from: '2026-09-01' },
+      waiting_for_period_end: false,
+      date_only_control_ids: [43, 44, 90],
+      blockers: [],
+      xml,
+      xml_sha256: 'c'.repeat(64),
+      controls: {
+        submittable: false,
+        counts: { passed: 88, failed: 2, not_evaluable: 30, not_applicable: 0 },
+        blocking: [finding(90, 'Hlášené období 2026-08 ještě neskončilo.'), finding(8, 'Pojistné 10024 neodpovídá sazbě.')],
+        warnings: [],
+        coverage_gaps: [],
+        evaluated: [],
+      },
+      official_submission: { supported: false, reason_code: 'x', reason: 'Lokální test.' },
+    })
+    const wrapper = mount(PayrollJmhzXmlDryRunPanel, { props: { runs: [run] as never[] }, global: { stubs: routerStub } })
+    await wrapper.get('[data-test="jmhz-dry-run-start-18"]').trigger('click')
+    await flushPromises()
+
+    const blocking = wrapper.get('[data-test="jmhz-controls-blocking"]').text()
+    expect(blocking).toContain('Pojistné 10024 neodpovídá sazbě.')
+    expect(blocking).not.toContain('ještě neskončilo')
+    expect(wrapper.get('[data-test="jmhz-dry-run-status"]').text()).toContain('jmhz_dry_run_controls_failed')
+  })
+
+  /**
+   * B1: nález čtený ze schváleného běhu. Test řekne, že samotná oprava údaje
+   * nestačí, a vede na mzdový běh měsíce; přesný důvod ze serveru má přednost
+   * před obecným popiskem kódu.
+   */
+  it('u nálezu čteného ze schváleného běhu řekne o opravné revizi a ukáže přesný důvod', async () => {
+    const reason = 'Variabilní symbol zaměstnavatele u ČSSZ „1100000012" u mzdové účtárny je vyplněný, ale neplatný: nesouhlasí kontrolní číslice.'
+    m.dryRun.mockResolvedValue({ status: 'blocked', preparation_id: 77, official_submission: { supported: false, reason: 'Lokální test.' }, blockers: [
+      {
+        code: 'jmhz_office_variable_symbol_invalid',
+        entity_type: 'office',
+        entity_id: 4,
+        attribute_ids: ['10221'],
+        reason,
+        reason_specific: true,
+        message: reason,
+        remediation: { kind: 'office', field: null },
+        needs_revision: true,
+      },
+      {
+        code: 'component_jmhz_mapping_missing',
+        entity_type: 'component',
+        entity_id: 3,
+        attribute_ids: [],
+        reason: 'Mzdové složky nemají určené zařazení do JMHZ.',
+        remediation: { kind: 'components', field: null },
+        needs_revision: false,
+      },
+    ] })
+    const wrapper = mount(PayrollJmhzXmlDryRunPanel, { props: { runs: [run] as never[] }, global: { stubs: routerStub } })
+    await wrapper.get('[data-test="jmhz-dry-run-start-18"]').trigger('click')
+    await flushPromises()
+
+    const groups = wrapper.findAll('[data-test="jmhz-dry-run-blocker"]')
+    expect(groups).toHaveLength(2)
+    expect(groups[0]!.get('[data-test="jmhz-dry-run-blocker-label"]').text()).toBe(reason)
+    expect(groups[0]!.get('[data-test="jmhz-dry-run-revision-hint"]').text())
+      .toContain('payroll.jmhz_gate.freeze_blockers.revision_hint')
+    expect(JSON.parse(groups[0]!.get('[data-test="jmhz-dry-run-revision-link"]').attributes('data-to')!))
+      .toEqual({ name: 'payroll-runs', query: { period: '2026-08' } })
+    // Zařazení složky se čte až při přípravě: o opravné revizi se nic neříká.
+    expect(groups[1]!.find('[data-test="jmhz-dry-run-revision-hint"]').exists()).toBe(false)
+    expect(groups[1]!.get('[data-test="jmhz-dry-run-blocker-label"]').text())
+      .toBe('payroll.jmhz_gate.codes.component_jmhz_mapping_missing')
+  })
+
+  /**
+   * B3: ročník, který aplikace ještě neumí sestavit. Důvod, co dělat a termín
+   * stojí nahoře; když na straně účetní nic nechybí, panel neslibuje „kroky
+   * k doplnění" a nenabízí odložení ani hromadné doplnění pracoviště.
+   */
+  it('u období, které nejde sestavit, ukáže důvod s termínem a žádné kroky navíc', async () => {
+    m.dryRun.mockResolvedValue({
+      status: 'blocked',
+      preparation_id: 77,
+      preparation_gate: {
+        code: 'jmhz_spec_version_unavailable',
+        message: 'Číselník obcí a států ještě nebyl vyhlášen. Na vaší straně nic nechybí. Termín podání za 01/2027 je 22. 2. 2027.',
+        available_from: null,
+      },
+      // Nález číselníků u vztahu server dál vrací; důvod ale nese závora,
+      // takže se jako krok k doplnění neukáže.
+      blockers: [{
+        code: 'jmhz_workplace_codebooks_not_published',
+        entity_type: 'employment',
+        entity_id: 12,
+        attribute_ids: ['10229', '10230', '10231'],
+        remediation: { kind: 'manual', field: null },
+        deferrable: false,
+      }],
+      official_submission: { supported: false, reason: 'Lokální test.' },
+    })
+    const wrapper = mount(PayrollJmhzXmlDryRunPanel, { props: { runs: [run] as never[] }, global: { stubs: routerStub } })
+    await wrapper.get('[data-test="jmhz-dry-run-start-18"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.get('[data-test="jmhz-dry-run-gate-18"]').text()).toContain('22. 2. 2027')
+    expect(wrapper.get('[data-test="jmhz-dry-run-blocked-title"]').text())
+      .toContain('jmhz_dry_run_blocked_nothing_to_fix')
+    expect(wrapper.findAll('[data-test="jmhz-dry-run-blocker"]')).toHaveLength(0)
+    expect(wrapper.find('[data-test="jmhz-dry-run-workplace-bulk"]').exists()).toBe(false)
+    expect(wrapper.find('[data-test^="jmhz-dry-run-defer-"]').exists()).toBe(false)
   })
 })

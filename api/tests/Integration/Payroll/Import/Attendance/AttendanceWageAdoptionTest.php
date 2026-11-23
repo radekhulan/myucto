@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Integration\Payroll\Import\Attendance;
 
-use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\Payroll\PayrollEmploymentRepository;
 use MyInvoice\Repository\Payroll\PayrollImportProfileRepository;
@@ -43,7 +42,7 @@ final class AttendanceWageAdoptionTest extends TestCase
 
     protected function setUp(): void
     {
-        $this->container = Bootstrap::buildContainer();
+        $this->container = \MyInvoice\Tests\Support\PayrollTestContainer::build();
         $db = $this->container->get(Connection::class);
         $service = $this->container->get(AttendanceImportService::class);
         if (!$db instanceof Connection || !$service instanceof AttendanceImportService) {
@@ -236,6 +235,28 @@ final class AttendanceWageAdoptionTest extends TestCase
         self::assertSame(0, $result['monthly_wages_adopted']);
         self::assertSame(['Hana Hodinová'], array_column($result['wage_conflicts'], 'display_name'));
         self::assertSame([['2026-01-01', null, null]], $this->terms($hana['employment_id']));
+    }
+
+    /**
+     * Hodinově odměňovanému vztahu (i jen od poloviny měsíce) náhled převzetí
+     * měsíční mzdy nenabídne jako proveditelné a řekne proč.
+     */
+    public function testWageNotOfferedToHourlyRemuneration(): void
+    {
+        $hana = $this->createPerson('Hana Sazbová', 30000);
+        $this->db->pdo()->prepare('UPDATE payroll_employment_terms SET effective_to = "2026-06-14" WHERE supplier_id = ? AND employment_id = ?')
+            ->execute([$this->supplierId, $hana['employment_id']]);
+        $this->db->pdo()->prepare('INSERT INTO payroll_employment_terms (supplier_id, employment_id, effective_from, planned_start_on, remuneration_type, hourly_rate_minor, remuneration_basis_kind, remuneration_basis, weekly_hours, workload_basis_points) VALUES (?, ?, "2026-06-15", "2026-01-01", "hourly", 20000, "contract", "Syntetické podmínky", 40, 10000)')
+            ->execute([$this->supplierId, $hana['employment_id']]);
+        $files = $this->files(['Hana Sazbová' => ['42000']]);
+
+        $changes = $this->service->preview($this->supplierId, self::PERIOD, $files, $this->rules(), null)['wage_changes'];
+        self::assertCount(1, $changes);
+        self::assertStringContainsString('hodinově', (string) $changes[0]['reason']);
+
+        $result = $this->apply($files);
+        self::assertSame(0, $result['monthly_wages_adopted']);
+        self::assertSame(['Hana Sazbová'], array_column($result['wage_conflicts'], 'display_name'));
     }
 
     /**

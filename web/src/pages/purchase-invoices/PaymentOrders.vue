@@ -2,6 +2,7 @@
 import { ref, computed, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
+import { useIsPhone } from '@/composables/useIsPhone'
 import { useAuthStore } from '@/stores/auth'
 import {
   paymentOrdersApi,
@@ -12,7 +13,9 @@ import {
   type PaymentOrderFormat,
   type RefundCandidate,
   type TaxPaymentCandidate,
+  type OtherPayablePaymentCandidate,
 } from '@/api/paymentOrders'
+import { otherItemKindLabel } from '@/utils/otherItemKind'
 import {
   purchaseInvoicesApi,
   type PaymentAccountSource,
@@ -25,7 +28,9 @@ import TableSkeleton from '@/components/ui/TableSkeleton.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import { ICONS, OUTLINE, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
 import BulkActionBar from '@/components/ui/BulkActionBar.vue'
+import RowActionsMenu, { type RowAction } from '@/components/ui/RowActionsMenu.vue'
 import JournalSourceDrawer from '@/components/accounting/JournalSourceDrawer.vue'
+import PdfFrame from '@/components/documents/PdfFrame.vue'
 import { appIsoDate } from '@/utils/date'
 import DateInput from '@/components/ui/DateInput.vue'
 import BankPaymentSubmission from '@/components/bank/BankPaymentSubmission.vue'
@@ -46,8 +51,12 @@ const selectedRefundIds = ref<number[]>([])
 // Daně finančnímu úřadu (DPH, zálohy na daň z příjmů); klíč `vat:ID` / `advance:ID`.
 const taxCandidates = ref<TaxPaymentCandidate[]>([])
 const selectedTaxKeys = ref<string[]>([])
+// Ostatní závazky (splátka nebo celý zbytek); klíč `other:ID` / `other:ID:SPLÁTKA`.
+const otherCandidates = ref<OtherPayablePaymentCandidate[]>([])
+const selectedOtherKeys = ref<string[]>([])
 const selectedCount = computed(() =>
-  selectedIds.value.length + selectedRefundIds.value.length + selectedTaxKeys.value.length)
+  selectedIds.value.length + selectedRefundIds.value.length + selectedTaxKeys.value.length
+  + selectedOtherKeys.value.length)
 const selectedPayerId = ref<number | ''>('')
 
 const loading = ref(true)
@@ -166,6 +175,7 @@ async function loadCandidates(reset = true) {
     if (reset) {
       refundCandidates.value = res.refund_candidates ?? []
       taxCandidates.value = res.tax_candidates ?? []
+      otherCandidates.value = res.other_candidates ?? []
     }
     if (payerAccounts.value.length === 0) {
       payerAccounts.value = res.payer_accounts
@@ -199,6 +209,10 @@ function onPayerChange() {
   selectedTaxKeys.value = selectedTaxKeys.value.filter(key => {
     const c = taxCandidates.value.find(x => x.key === key)
     return c ? isTaxSelectable(c) : false
+  })
+  selectedOtherKeys.value = selectedOtherKeys.value.filter(key => {
+    const c = otherCandidates.value.find(x => x.key === key)
+    return c ? isOtherSelectable(c) : false
   })
 }
 
@@ -358,10 +372,57 @@ function selectedTaxIds(kind: TaxPaymentCandidate['kind']): number[] {
     .map(c => c.id)
 }
 
+/** Ostatní závazek jde jen z korunového účtu, s účtem protistrany a mimo jiný příkaz. */
+function isOtherSelectable(c: OtherPayablePaymentCandidate): boolean {
+  return isCzk.value && c.payable && c.amount > 0
+}
+
+const visibleOthers = computed(() =>
+  hideOrdered.value ? otherCandidates.value.filter(c => !c.ordered_at) : otherCandidates.value,
+)
+
+function toggleOther(c: OtherPayablePaymentCandidate) {
+  if (!isOtherSelectable(c)) return
+  const idx = selectedOtherKeys.value.indexOf(c.key)
+  if (idx >= 0) selectedOtherKeys.value.splice(idx, 1)
+  else selectedOtherKeys.value.push(c.key)
+}
+
+const othersAllSelected = computed(() => {
+  const keys = visibleOthers.value.filter(isOtherSelectable).map(c => c.key)
+  return keys.length > 0 && keys.every(key => selectedOtherKeys.value.includes(key))
+})
+
+function toggleAllOthers() {
+  const keys = visibleOthers.value.filter(isOtherSelectable).map(c => c.key)
+  selectedOtherKeys.value = othersAllSelected.value
+    ? selectedOtherKeys.value.filter(key => !keys.includes(key))
+    : Array.from(new Set([...selectedOtherKeys.value, ...keys]))
+}
+
+function selectedOtherItems(): Array<{ id: number; installment_id: number | null }> {
+  return otherCandidates.value
+    .filter(c => selectedOtherKeys.value.includes(c.key))
+    .map(c => ({ id: c.other_item_id, installment_id: c.installment_id }))
+}
+
+function otherDisabledReason(c: OtherPayablePaymentCandidate): string {
+  if (c.reason === 'no_account') return t('payment_order.other_no_account')
+  if (c.reason === 'already_ordered') return t('payment_order.skip_reason.already_ordered')
+  return isCzk.value ? '' : t('payment_order.currency_mismatch')
+}
+
+function otherInstallmentLabel(c: OtherPayablePaymentCandidate): string {
+  return c.installment_position !== null
+    ? t('payment_order.other_installment', { position: c.installment_position, count: c.installment_count ?? c.installment_position })
+    : t('payment_order.other_whole_remainder')
+}
+
 function clearSelection() {
   selectedIds.value = []
   selectedRefundIds.value = []
   selectedTaxKeys.value = []
+  selectedOtherKeys.value = []
 }
 
 const selectedTotal = computed(() =>
@@ -373,6 +434,9 @@ const selectedTotal = computed(() =>
     .reduce((sum, r) => sum + (r.amount_to_pay || 0), 0)
   + taxCandidates.value
     .filter(c => selectedTaxKeys.value.includes(c.key))
+    .reduce((sum, c) => sum + (c.amount || 0), 0)
+  + otherCandidates.value
+    .filter(c => selectedOtherKeys.value.includes(c.key))
     .reduce((sum, c) => sum + (c.amount || 0), 0),
 )
 
@@ -493,6 +557,9 @@ async function refreshCandidatesKeepSelection() {
     taxCandidates.value = res.tax_candidates ?? []
     const taxesSelectable = new Set(taxCandidates.value.filter(isTaxSelectable).map(c => c.key))
     selectedTaxKeys.value = selectedTaxKeys.value.filter(key => taxesSelectable.has(key))
+    otherCandidates.value = res.other_candidates ?? []
+    const othersSelectable = new Set(otherCandidates.value.filter(isOtherSelectable).map(c => c.key))
+    selectedOtherKeys.value = selectedOtherKeys.value.filter(key => othersSelectable.has(key))
   } catch {
     // ponech stávající stav
   }
@@ -585,9 +652,10 @@ async function verifyAccountRow(c: PaymentCandidate) {
 // ── Jen označit (bez exportu) ─────────────────────────────────────────
 async function markOnly() {
   if (!auth.canWrite('purchase_invoices.payment_orders') || creating.value) return
-  // Daň razítko „zařazeno" nemá, zařadí ji jen skutečný příkaz.
+  // Daň ani ostatní závazek razítko „zařazeno" nemají, zařadí je jen skutečný příkaz.
   if (selectedIds.value.length + selectedRefundIds.value.length === 0) {
-    toast.error(t(selectedTaxKeys.value.length ? 'payment_order.tax_mark_only_unsupported' : 'payment_order.no_selection'))
+    toast.error(t(selectedTaxKeys.value.length ? 'payment_order.tax_mark_only_unsupported'
+      : selectedOtherKeys.value.length ? 'payment_order.other_mark_only_unsupported' : 'payment_order.no_selection'))
     return
   }
   creating.value = true
@@ -641,6 +709,7 @@ async function createAndDownload(format: PaymentOrderFormat | 'bank') {
       ...(selectedRefundIds.value.length ? { refund_invoice_ids: selectedRefundIds.value } : {}),
       ...(selectedTaxIds('vat').length ? { tax_submission_ids: selectedTaxIds('vat') } : {}),
       ...(selectedTaxIds('advance').length ? { tax_advance_ids: selectedTaxIds('advance') } : {}),
+      ...(selectedOtherKeys.value.length ? { other_items: selectedOtherItems() } : {}),
       payer_currency_id: selectedPayer.value!.id,
       payment_date: paymentDate.value,
       constant_symbol: constantSymbol.value || undefined,
@@ -671,6 +740,42 @@ async function createAndDownload(format: PaymentOrderFormat | 'bank') {
   }
 }
 
+// ─── Telefon ───
+// Nastavení příkazu sbalené, sekundární akce karet v „…" a dole jedna lišta
+// „Vybráno N · Stáhnout příkaz". Mimo telefon se stránka vykreslí beze změny.
+const isPhone = useIsPhone()
+const phoneSettingsOpen = ref(false)
+const canOrder = computed(() => auth.canWrite('purchase_invoices.payment_orders'))
+/** Formát hlavního stažení: ABO pro CZK, SEPA pro EUR, jinak PDF příkaz. */
+const phonePrimaryFormat = computed<PaymentOrderFormat>(() => isCzk.value ? 'abo' : (isEur.value ? 'sepa' : 'pdf'))
+const phonePrimaryDisabled = computed(() => creating.value || selectedCount.value === 0
+  || (phonePrimaryFormat.value === 'sepa' && !selectedPayer.value?.iban))
+
+function phoneCardActions(c: PaymentCandidate): RowAction[] {
+  return [
+    { key: 'detail', label: t('payment_order.detail'), icon: 'eye', run: () => openDetail(c) },
+    { key: 'verify', label: t('payment_order.verify_account'), icon: 'checkCircle', show: c.can_verify,
+      disabled: verifyingId.value === c.id, run: () => { void verifyAccountRow(c) } },
+    { key: 'qr', label: t('payment_order.qr_code'), icon: 'qr', show: c.has_account, run: () => { void toggleQr(c) } },
+    { key: 'add-account', label: t('payment_order.add_account'), icon: 'plus',
+      show: !c.has_account && canOrder.value && editingAccountId.value !== c.id, run: () => startEditAccount(c) },
+    { key: 'edit-account', label: t('payment_order.edit_account'), icon: 'edit',
+      show: c.has_account && canOrder.value && editingAccountId.value !== c.id, run: () => startEditAccount(c) },
+  ]
+}
+
+const phoneBarActions = computed<RowAction[]>(() => [
+  { key: 'bank', label: t('bank_connection.payment_prepare'), icon: 'plus',
+    show: canOrder.value && auth.canWrite('settings.bank_accounts') && isCzk.value,
+    disabled: creating.value || selectedCount.value === 0, run: () => { void createAndDownload('bank') } },
+  { key: 'mark-only', label: t('payment_order.mark_only'), icon: 'checkCircle', show: canOrder.value,
+    disabled: creating.value || selectedCount.value === 0, run: () => { void markOnly() } },
+  { key: 'csv', label: t('payment_order.export_csv'), icon: 'download', show: canOrder.value,
+    disabled: creating.value || selectedCount.value === 0, run: () => { void createAndDownload('csv') } },
+  { key: 'pdf', label: t('payment_order.export_pdf'), icon: 'download', show: canOrder.value && phonePrimaryFormat.value !== 'pdf',
+    disabled: creating.value || selectedCount.value === 0, run: () => { void createAndDownload('pdf') } },
+])
+
 function redownload(item: PaymentOrderListItem, format: PaymentOrderFormat) {
   paymentOrdersApi.downloadPaymentOrder(item.id, format)
 }
@@ -699,7 +804,16 @@ function payerAccountDisplay(item: PaymentOrderListItem): string {
 
     <!-- ═══ Ovládací box ═══ -->
     <div class="bg-surface border border-neutral-200 rounded-lg shadow-sm mb-4 p-4 space-y-3">
-      <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+      <button v-if="isPhone" type="button" data-test="po-settings-toggle" :aria-expanded="phoneSettingsOpen"
+        class="cursor-pointer w-full min-h-11 -my-1 flex items-center justify-between gap-2 text-left"
+        @click="phoneSettingsOpen = !phoneSettingsOpen">
+        <span class="min-w-0">
+          <span class="block text-sm font-medium text-neutral-700">{{ t('payment_order.settings_title') }}</span>
+          <span class="block text-xs text-neutral-500 truncate">{{ selectedPayer ? payerDisplay(selectedPayer) : t('payment_order.no_payer_accounts') }} · {{ formatDate(paymentDate) }}</span>
+        </span>
+        <svg class="w-4 h-4 shrink-0 transition-transform" :class="phoneSettingsOpen ? 'rotate-180' : ''" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7" /></svg>
+      </button>
+      <div v-show="!isPhone || phoneSettingsOpen" data-test="po-settings-fields" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
         <div>
           <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('payment_order.payer_account') }}</label>
           <select v-model="selectedPayerId" @change="onPayerChange"
@@ -728,7 +842,7 @@ function payerAccountDisplay(item: PaymentOrderListItem): string {
         </div>
       </div>
 
-      <div class="flex items-center gap-4 flex-wrap">
+      <div v-show="!isPhone || phoneSettingsOpen" class="flex items-center gap-4 flex-wrap">
         <label class="flex items-center gap-1.5 text-sm text-neutral-700">
           <input v-model="markPaid" type="checkbox" class="rounded border-neutral-300 text-primary-600" />
           {{ t('payment_order.mark_paid') }}
@@ -761,7 +875,7 @@ function payerAccountDisplay(item: PaymentOrderListItem): string {
     </div>
 
     <!-- Hromadné akce nad vybranými fakturami v plovoucí liště u spodní hrany (BulkActionBar). -->
-    <BulkActionBar :count="selectedCount" @clear="clearSelection">
+    <BulkActionBar v-if="!isPhone" :count="selectedCount" @clear="clearSelection">
       <span class="px-1.5 text-sm font-mono font-semibold text-neutral-900 whitespace-nowrap">
         {{ formatMoney(selectedTotal, payerCurrency || 'CZK') }}
       </span>
@@ -970,8 +1084,8 @@ function payerAccountDisplay(item: PaymentOrderListItem): string {
                 <tr v-if="pdfPreviewId === c.id">
                   <td></td>
                   <td colspan="6" class="px-4 py-3 bg-neutral-50">
-                    <iframe :src="pdfPreviewUrlFor(c.id)" class="w-full h-[75vh] border border-neutral-200 rounded bg-neutral-100"
-                      :title="c.vendor_invoice_number || 'PDF'"></iframe>
+                    <PdfFrame :src="pdfPreviewUrlFor(c.id)" class="block w-full h-[75vh] border border-neutral-200 rounded bg-neutral-100"
+                      :title="c.vendor_invoice_number || 'PDF'" />
                   </td>
                 </tr>
                 <!-- Inline QR k platbě -->
@@ -1057,7 +1171,8 @@ function payerAccountDisplay(item: PaymentOrderListItem): string {
               </span>
               <div class="text-xs mt-1">
                 <template v-if="!c.has_account">
-                  <button v-if="auth.canWrite('purchase_invoices.payment_orders') && editingAccountId !== c.id" type="button" @click="startEditAccount(c)"
+                  <span v-if="isPhone" class="text-warning-700">{{ t('payment_order.no_account') }}</span>
+                  <button v-else-if="auth.canWrite('purchase_invoices.payment_orders') && editingAccountId !== c.id" type="button" @click="startEditAccount(c)"
                     class="cursor-pointer inline-flex items-center gap-1 h-7 px-2 text-[11px] font-medium rounded-md border border-primary-500 text-primary-700 hover:bg-primary-50 transition">
                     <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15"/></svg>
                     {{ t('payment_order.add_account') }}
@@ -1080,7 +1195,7 @@ function payerAccountDisplay(item: PaymentOrderListItem): string {
                       <span v-else-if="isCzk && !c.abo_eligible" class="text-[10px] text-warning-600">{{ t('payment_order.not_abo_eligible_row') }}</span>
                       <span v-else-if="isEur && !c.sepa_eligible" class="text-[10px] text-warning-600">{{ t('payment_order.not_sepa_eligible_row') }}</span>
                     </div>
-                    <button v-if="auth.canWrite('purchase_invoices.payment_orders') && editingAccountId !== c.id" type="button" @click="startEditAccount(c)"
+                    <button v-if="!isPhone && auth.canWrite('purchase_invoices.payment_orders') && editingAccountId !== c.id" type="button" @click="startEditAccount(c)"
                       :title="t('payment_order.edit_account')"
                       class="cursor-pointer flex-shrink-0 inline-flex items-center gap-1 h-7 px-2 text-[11px] font-medium rounded-md border border-neutral-300 text-neutral-600 hover:bg-neutral-100 transition">
                       <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 1 1 2.652 2.652L10.582 16.07a4.5 4.5 0 0 1-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 0 1 1.13-1.897l8.932-8.931z"/></svg>
@@ -1089,8 +1204,18 @@ function payerAccountDisplay(item: PaymentOrderListItem): string {
                   </div>
                 </template>
               </div>
+              <!-- Akce (telefon): Doklad inline, ostatní v „…" -->
+              <div v-if="isPhone" data-test="po-card-phone-actions" class="flex items-center gap-2 mt-2">
+                <button v-if="c.has_pdf" type="button" @click="togglePdf(c)"
+                  class="cursor-pointer inline-flex items-center justify-center gap-1 h-9 min-w-11 px-3 text-xs rounded-md text-white font-medium"
+                  :class="pdfPreviewId === c.id ? 'bg-primary-800' : 'bg-primary-600 hover:bg-primary-700'">
+                  <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.eye"/></svg>
+                  {{ t('payment_order.view_pdf') }}
+                </button>
+                <RowActionsMenu :actions="phoneCardActions(c)" :inline-count="0" class="ml-auto [&>button]:h-9 [&>button]:w-11" />
+              </div>
               <!-- Akce (mobile) -->
-              <div class="flex items-center gap-2 mt-2 flex-wrap">
+              <div v-else class="flex items-center gap-2 mt-2 flex-wrap">
                 <button v-if="c.has_account" type="button" @click="toggleQr(c)"
                   class="cursor-pointer inline-flex items-center gap-1 text-[11px] px-2 py-1 rounded border font-medium"
                   :class="qrPreviewId === c.id ? 'bg-neutral-800 text-neutral-50 border-neutral-800' : 'border-neutral-300 text-neutral-600 hover:bg-neutral-100'">
@@ -1114,8 +1239,8 @@ function payerAccountDisplay(item: PaymentOrderListItem): string {
               </div>
               <!-- Inline PDF náhled (mobile) -->
               <div v-if="pdfPreviewId === c.id" class="mt-2">
-                <iframe :src="pdfPreviewUrlFor(c.id)" class="w-full h-[70vh] border border-neutral-200 rounded bg-neutral-100"
-                  :title="c.vendor_invoice_number || 'PDF'"></iframe>
+                <PdfFrame :src="pdfPreviewUrlFor(c.id)" class="block w-full h-[70vh] border border-neutral-200 rounded bg-neutral-100"
+                  :title="c.vendor_invoice_number || 'PDF'" />
               </div>
               <!-- Inline QR (mobile) -->
               <div v-if="qrPreviewId === c.id" class="mt-2 flex flex-col items-center gap-1">
@@ -1402,6 +1527,137 @@ function payerAccountDisplay(item: PaymentOrderListItem): string {
       </template>
     </section>
 
+    <!-- ═══ Ostatní závazky (nejbližší splátka nebo celý zbytek) ═══ -->
+    <section v-if="!loading && otherCandidates.length" class="mt-6" data-testid="other-payables">
+      <div class="flex items-center gap-2 mb-2 flex-wrap">
+        <h3 class="text-sm font-semibold text-neutral-800">{{ t('payment_order.other_title') }}</h3>
+        <span class="text-[11px] px-2 py-0.5 rounded font-medium bg-primary-50 text-primary-700 border border-primary-500/30">
+          {{ t('payment_order.group_czk_via') }}
+        </span>
+        <span class="text-xs text-neutral-500">{{ t('payment_order.candidates_count', { n: visibleOthers.length }) }}</span>
+      </div>
+      <p class="text-xs text-neutral-500 mb-2">{{ t('payment_order.other_hint') }}</p>
+
+      <div v-if="visibleOthers.length === 0" class="bg-surface border border-neutral-200 rounded-lg shadow-sm">
+        <EmptyState dense accent="neutral" :title="t('payment_order.empty')" />
+      </div>
+      <template v-else>
+        <!-- Desktop: tabulka -->
+        <div class="hidden md:block bg-surface border border-primary-500/30 rounded-lg overflow-hidden shadow-sm">
+          <table class="w-full text-sm table-fixed">
+            <colgroup>
+              <col class="w-10" />
+              <col class="w-56" />
+              <col class="w-28" />
+              <col class="w-80" />
+              <col class="w-28" />
+              <col class="w-32" />
+              <col />
+            </colgroup>
+            <thead class="bg-neutral-50 text-neutral-500 text-xs uppercase tracking-wide">
+              <tr>
+                <th class="px-2 py-2 text-center">
+                  <input type="checkbox" :checked="othersAllSelected" @change="toggleAllOthers"
+                    :title="t('common.select_all')"
+                    class="w-4 h-4 cursor-pointer rounded border-neutral-300 text-primary-600 focus:ring-2 focus:ring-primary-500/30" />
+                </th>
+                <th class="text-left px-4 py-2 font-medium">{{ t('payment_order.other_col_item') }}</th>
+                <th class="text-center px-2 py-2 font-medium">{{ t('payment_order.col_due_date') }}</th>
+                <th class="text-left px-4 py-2 font-medium">{{ t('payment_order.col_account') }}</th>
+                <th class="text-left px-2 py-2 font-medium">{{ t('payment_order.col_vs') }}</th>
+                <th class="text-right px-3 py-2 font-medium">{{ t('payment_order.other_col_amount') }}</th>
+                <th class="text-center px-2 py-2 font-medium">{{ t('payment_order.col_actions') }}</th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-neutral-100">
+              <tr v-for="c in visibleOthers" :key="c.key" class="transition"
+                :class="!c.has_account ? 'bg-warning-50/50' : 'hover:bg-neutral-50'">
+                <td class="px-2 py-2.5 text-center align-top">
+                  <input type="checkbox" :checked="selectedOtherKeys.includes(c.key)" :disabled="!isOtherSelectable(c)"
+                    @change="toggleOther(c)" :title="otherDisabledReason(c)"
+                    class="w-5 h-5 mt-0.5 cursor-pointer rounded border-neutral-300 text-primary-600 focus:ring-2 focus:ring-primary-500/30 disabled:opacity-40 disabled:cursor-not-allowed" />
+                </td>
+                <td class="px-4 py-2.5 align-top">
+                  <div class="font-medium text-neutral-900 truncate">{{ c.title }}</div>
+                  <div class="text-xs text-neutral-500 truncate">{{ c.partner_name || '-' }}<span v-if="c.document_no" class="font-mono"> · {{ c.document_no }}</span></div>
+                  <div class="flex items-center gap-1 mt-1 flex-wrap">
+                    <span class="inline-flex items-center text-[10px] px-1.5 py-0.5 rounded bg-neutral-100 text-neutral-600 whitespace-nowrap">
+                      {{ otherItemKindLabel(t, c) }}
+                    </span>
+                    <span class="inline-flex items-center text-[10px] px-1.5 py-0.5 rounded bg-primary-50 text-primary-700 whitespace-nowrap">
+                      {{ otherInstallmentLabel(c) }}
+                    </span>
+                  </div>
+                </td>
+                <td class="px-3 py-2.5 text-center text-xs text-neutral-600 align-top">
+                  <div>{{ formatDate(c.due_date) }}</div>
+                  <span v-if="c.ordered_at"
+                    class="inline-flex items-center gap-0.5 mt-1 text-[10px] px-1.5 py-0.5 rounded bg-teal-50 text-teal-600 border border-teal-500/30 whitespace-nowrap"
+                    :title="t('payment_order.ordered_badge_tooltip', { date: formatDate(c.ordered_at) })">
+                    {{ t('payment_order.ordered_badge') }}
+                  </span>
+                </td>
+                <td class="px-4 py-2.5 text-xs align-top">
+                  <div v-if="c.has_account" class="text-neutral-700 whitespace-nowrap overflow-hidden text-ellipsis">
+                    <span class="font-mono">{{ accountDisplay(c) }}</span><span v-if="bankLabel(c.bank_code)" class="text-[10px] text-neutral-500 ml-1.5">{{ bankLabel(c.bank_code) }}</span>
+                  </div>
+                  <span v-else class="text-warning-600">{{ t('payment_order.other_no_account') }}</span>
+                </td>
+                <td class="px-2 py-2.5 font-mono text-xs text-neutral-600 align-top">{{ c.variable_symbol || '-' }}</td>
+                <td class="px-3 py-2.5 text-right font-mono align-top whitespace-nowrap">{{ formatMoney(c.amount, c.currency) }}</td>
+                <td class="px-3 py-2.5 text-center align-top">
+                  <RouterLink v-if="auth.canRead('other_items')" :to="`/other-items/${c.other_item_id}`" target="_blank"
+                    class="cursor-pointer text-[11px] px-2 py-1 border border-neutral-300 rounded hover:bg-neutral-100 text-neutral-600 whitespace-nowrap">
+                    {{ t('payment_order.detail') }}
+                  </RouterLink>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        <!-- Mobile: karty -->
+        <div class="md:hidden bg-surface border border-primary-500/30 rounded-lg divide-y divide-neutral-100 overflow-hidden shadow-sm">
+          <div v-for="c in visibleOthers" :key="`m-${c.key}`" class="px-3 py-3"
+            :class="!c.has_account ? 'bg-warning-50/50' : ''">
+            <div class="flex items-start gap-3">
+              <input type="checkbox" :checked="selectedOtherKeys.includes(c.key)" :disabled="!isOtherSelectable(c)"
+                @change="toggleOther(c)"
+                class="w-5 h-5 mt-0.5 cursor-pointer rounded border-neutral-300 text-primary-600 focus:ring-2 focus:ring-primary-500/30 disabled:opacity-40" />
+              <div class="flex-1 min-w-0">
+                <div class="flex items-baseline justify-between gap-2">
+                  <div class="font-medium text-neutral-900 truncate">{{ c.title }}</div>
+                  <div class="font-mono text-sm whitespace-nowrap">{{ formatMoney(c.amount, c.currency) }}</div>
+                </div>
+                <div class="text-xs text-neutral-500 mt-0.5">
+                  <span>{{ otherItemKindLabel(t, c) }}</span>
+                  <span class="text-neutral-400"> · </span>
+                  <span>{{ otherInstallmentLabel(c) }}</span>
+                  <span class="text-neutral-400"> · </span>
+                  <span>{{ t('payment_order.col_due_date') }}: {{ formatDate(c.due_date) }}</span>
+                </div>
+                <div class="text-xs mt-1">
+                  <span v-if="c.has_account" class="font-mono text-neutral-700">{{ accountDisplay(c) }}</span>
+                  <span v-else class="text-warning-600">{{ t('payment_order.other_no_account') }}</span>
+                  <span v-if="c.variable_symbol" class="text-neutral-500"> · VS <span class="font-mono">{{ c.variable_symbol }}</span></span>
+                </div>
+                <div class="flex items-center gap-2 mt-2 flex-wrap">
+                  <span v-if="c.ordered_at"
+                    class="inline-flex items-center text-[10px] px-1.5 py-0.5 rounded bg-teal-50 text-teal-600 border border-teal-500/30 whitespace-nowrap">
+                    {{ t('payment_order.ordered_badge') }}
+                  </span>
+                  <RouterLink v-if="auth.canRead('other_items')" :to="`/other-items/${c.other_item_id}`" target="_blank"
+                    class="cursor-pointer text-[11px] px-2 py-1 border border-neutral-300 rounded hover:bg-neutral-100 text-neutral-600">
+                    {{ t('payment_order.detail') }}
+                  </RouterLink>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </template>
+    </section>
+
     <!-- ═══ Historie příkazů ═══ -->
     <section class="mt-8">
       <h2 class="text-lg font-semibold mb-3">{{ t('payment_order.history_title') }}</h2>
@@ -1483,5 +1739,23 @@ function payerAccountDisplay(item: PaymentOrderListItem): string {
 
     <JournalSourceDrawer v-if="sourceDrawerEntryId" :entry-id="sourceDrawerEntryId"
       @close="sourceDrawerEntryId = null" @focus-entry="focusInJournal" />
+
+    <div v-if="isPhone && selectedCount > 0" data-test="po-phone-bar"
+      class="sticky bottom-[calc(var(--app-footer-height,0px)+0.5rem)] z-10 mt-4 flex items-center gap-2 rounded-lg border border-neutral-200 bg-surface p-2 shadow-lg">
+      <div class="min-w-0 flex-1 px-1">
+        <div class="text-sm font-medium text-neutral-900 whitespace-nowrap">{{ t('common.bulk_selected', { n: selectedCount }) }}</div>
+        <div class="text-xs font-mono text-neutral-600 truncate">{{ formatMoney(selectedTotal, payerCurrency || 'CZK') }}</div>
+      </div>
+      <button type="button" class="h-9 min-w-11 px-2 text-xs text-neutral-500 hover:text-neutral-900 cursor-pointer"
+        :aria-label="t('common.bulk_clear')" :title="t('common.bulk_clear')" @click="clearSelection">
+        <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+      </button>
+      <button v-if="canOrder" type="button" data-test="po-phone-download" :disabled="phonePrimaryDisabled"
+        :class="btnFilled('primary')" class="h-11 whitespace-nowrap" @click="createAndDownload(phonePrimaryFormat)">
+        <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.download" /></svg>
+        {{ creating ? '…' : t('payment_order.download_order') }}
+      </button>
+      <RowActionsMenu v-if="canOrder" :actions="phoneBarActions" :inline-count="0" class="[&>button]:h-11 [&>button]:w-11" />
+    </div>
   </div>
 </template>

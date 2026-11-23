@@ -659,7 +659,7 @@ defineExpose({ reload: load })
                       : issueSeverityLabel(issue.severity) }}
                   </span>
                 </div>
-                <p class="mt-2 text-xs text-neutral-600">{{ submissionIssueRemediation(issue.validation_stage) }}</p>
+                <p class="mt-2 text-xs text-neutral-600">{{ submissionIssueRemediation(issue.validation_stage, issue.issue_code) }}</p>
               </li>
             </ul>
           </article>

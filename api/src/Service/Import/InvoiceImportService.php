@@ -434,8 +434,17 @@ final class InvoiceImportService
 
         foreach ($parsed as $entry) {
             if ($cancelled) break;
+            if (isset($entry['error']) && ($entry['code'] ?? null) === 'payroll_posting') {
+                // Zaúčtování mezd není chyba souboru: vyčlení se k vlastnímu importu.
+                $results[] = ['file' => $entry['file'], 'status' => 'skipped', 'reason' => $entry['error'], 'code' => 'payroll_posting'];
+                $skipped++;
+                $processedDocs++;
+                $report();
+                continue;
+            }
             if (isset($entry['error'])) {
-                $results[] = ['file' => $entry['file'], 'status' => 'failed', 'reason' => $entry['error']];
+                $results[] = ['file' => $entry['file'], 'status' => 'failed', 'reason' => $entry['error']]
+                    + (isset($entry['code']) ? ['code' => $entry['code']] : []);
                 $failed++;
                 $processedDocs++;
                 $report();
@@ -985,7 +994,9 @@ final class InvoiceImportService
             // háčky přijetí (automatické zaúčtování, kartové vypořádání, drobný majetek)
             // musí spustit import. Duplicita je už přijatá z dřívějška, až po archivaci
             // proto, aby zaúčtování i háčky viděly úplný doklad.
-            if ($purchaseStatus === 'received' && !$duplicate) {
+            // Pravděpodobná duplicita s jiným datem vystavení zůstala konceptem (mapper), háčky
+            // přijetí proto neběží.
+            if ($purchaseStatus === 'received' && !$duplicate && empty($r['likely_duplicate'])) {
                 $this->purchaseReceiver->afterReceived(
                     $supplierId,
                     (int) $r['purchase_invoice_id'],
@@ -996,7 +1007,9 @@ final class InvoiceImportService
                 'status' => 'created',
                 'reason' => $duplicate
                     ? 'přijatá faktura již existuje'
-                    : (!empty($r['vendor_created']) ? 'vytvořen vendor + draft přijaté faktury' : 'draft přijaté faktury (vendor reuse)'),
+                    : (!empty($r['likely_duplicate'])
+                        ? 'koncept přijaté faktury - možná duplicita (stejné číslo od dodavatele s jiným datem vystavení)'
+                        : (!empty($r['vendor_created']) ? 'vytvořen vendor + draft přijaté faktury' : 'draft přijaté faktury (vendor reuse)')),
                 'purchase_invoice_id' => $r['purchase_invoice_id'],
                 'vendor_id'           => $r['vendor_id'],
                 'duplicate'           => $duplicate,
@@ -1032,6 +1045,18 @@ final class InvoiceImportService
                 $sourceFormat = 'isdoc';
             }
             $content = self::stripBom($content);
+            // Export z mzdového programu PAMICA faktury nenese. Zaúčtování mezd (interní
+            // doklad a ostatní závazky typu `commitment`) by parser Pohody vzal jako přijaté
+            // faktury, proto se soubor vyčlení a rozhraní nabídne jeho vlastní import.
+            if (PamicaPosting\PamicaPostingFormat::isPamicaDataPack($content)) {
+                $posting = PamicaPosting\PamicaPostingFormat::isPayrollPosting($content);
+                return [
+                    'error' => $posting
+                        ? 'Soubor je zaúčtování mezd z PAMICY, ne faktury. Načtěte ho jako zaúčtování mezd (Převody → PAMICA, nebo náhled v tomto importu).'
+                        : 'Soubor je export z mzdového programu PAMICA, faktury neobsahuje.',
+                    'code' => $posting ? 'payroll_posting' : 'pamica_export',
+                ];
+            }
             $isIsdoc = self::looksLikeIsdoc($name, $content);
             $parsed = $isIsdoc
                 ? $this->isdoc->parse($content)

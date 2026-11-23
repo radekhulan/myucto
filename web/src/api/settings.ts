@@ -277,6 +277,8 @@ export interface Supplier {
    * v platebních příkazech a výplatu v hotovosti.
    */
   allow_refund_invoices: boolean
+  /** Výkazy práce (rozpracované koncepty) na úvodní stránce, výchozí zapnuto. */
+  dashboard_work_reports: boolean
   /**
    * Datum přijetí u importovaných přijatých dokladů (migrace 1848). 'issue_date' =
    * datum z dokladu (vystavení, jinak DUZP) — výchozí; 'import_date' = den importu.
@@ -313,6 +315,8 @@ export interface Supplier {
   purchase_credit_note_number_format?: string | null
   purchase_advance_number_format?: string | null
   purchase_tax_document_number_format?: string | null
+  /** Datum pro měsíc a rok čísla přijatých dokladů i přečíslování (migrace 2336). */
+  purchase_numbering_date_basis?: 'issue' | 'received' | 'tax'
   invoice_number_period: 'year' | 'month' | 'none'
   // Per-supplier email branding (migrace 0016)
   email_branding_enabled: boolean
@@ -352,6 +356,7 @@ export interface Supplier {
   /** Na PDF faktury tisknout řádek „Vystavil" (migrace 2032). */
   invoice_pdf_show_issued_by?: boolean
   /** Na PDF faktury rozepsat slevu z ceníkové ceny (Cena/j před slevou, Sleva, Cena/j po slevě). Výchozí vypnuto. */
+  work_report_display_options?: Partial<import('./invoices').WorkReportDisplayOptions> | null
   invoice_pdf_show_line_discount?: boolean
   /** Kompaktní řádky položek na PDF faktury (migrace 2199). Výchozí vypnuto. */
   invoice_pdf_compact_items?: boolean
@@ -361,6 +366,8 @@ export interface Supplier {
   // účinek jen v režimu double_entry.
   auto_post_invoices?: boolean
   auto_post_purchases?: boolean
+  /** Automatické párování banky s ostatními pohledávkami a závazky (migrace 2239). */
+  auto_match_other_items?: boolean
   /** Účet závazku pro účtenky / paragony (migrace 2204); null = závazek z předkontace (321). */
   receipt_payable_account_code?: string | null
   // Tax settings pro EPO výkazy DPH/KH (migrace 0038, fáze 6)
@@ -460,6 +467,9 @@ export interface InvoiceCounterResult {
   revenue_category_id: number
 }
 
+/** Odpověď GET /settings/supplier/invoice-counter. */
+export type InvoiceCounterPeek = InvoiceCounterResult | { type: InvoiceCounterType; next_number: null }
+
 export interface NumberSeriesSide {
   type: 'invoice' | 'proforma' | 'credit_note' | 'simplified'
   client_id: number | null
@@ -495,6 +505,18 @@ export interface BrandingProfile {
 }
 
 /** Úzký supplier-scoped výřez, který lze delegovat klientské roli. */
+export interface InvoiceDefaultsSettings {
+  id: number
+  default_currency: string
+  default_payment_due_days: number
+  default_payment_due_unit: 'days' | 'month'
+  default_hourly_rate: number
+  default_note_below_items_enabled: boolean
+  default_note_below_items_cs: string | null
+  default_note_below_items_en: string | null
+}
+export type InvoiceDefaultsPayload = Omit<InvoiceDefaultsSettings, 'id' | 'default_currency'>
+
 export interface OperationalBrandingSettings {
   id: number
   company_name: string
@@ -507,6 +529,12 @@ export interface OperationalBrandingSettings {
   email_accent_color: string
   pdf_logo_show_name: boolean
   invoice_pdf_monochrome?: boolean
+  invoice_pdf_show_issued_by?: boolean
+  invoice_pdf_show_line_discount?: boolean
+  invoice_pdf_compact_items?: boolean
+  invoice_pdf_bank_in_footer?: boolean
+  invoice_pdf_show_base_qty?: boolean
+  work_report_display_options?: Partial<import('./invoices').WorkReportDisplayOptions> | null
   branding_profiles_enabled: boolean
   logo_path: string | null
   has_email_logo?: boolean
@@ -529,6 +557,8 @@ export interface CurrencyAccount {
   bic: string | null
   invoices_count?: number
 }
+
+export type ImapAuthMode = 'password' | 'microsoft365'
 
 export interface BankEmailImapSettings {
   id: number | null
@@ -566,9 +596,18 @@ export interface BankEmailImapSettings {
   retry_failed: boolean
   max_attempts: number
   has_password: boolean
+  auth_mode?: ImapAuthMode
+  oauth_tenant_id?: string | null
+  oauth_client_id?: string | null
+  has_oauth_client_secret?: boolean
   last_scan_at?: string | null
   last_scan_status?: 'ok' | 'error' | null
   last_scan_message?: string | null
+}
+
+export type BankEmailImapPayload = Partial<BankEmailImapSettings> & {
+  password?: string
+  oauth_client_secret?: string | null
 }
 
 export interface BankEmailProvider {
@@ -843,6 +882,10 @@ export interface EmailProfile {
   imap_validate_cert: boolean
   imap_username: string | null
   has_imap_password: boolean
+  imap_auth_mode?: ImapAuthMode
+  imap_oauth_tenant_id?: string | null
+  imap_oauth_client_id?: string | null
+  has_imap_oauth_client_secret?: boolean
   imap_folder: string | null
   imap_create_folder: boolean
   imap_mark_seen: boolean
@@ -891,6 +934,10 @@ export interface EmailProfilePayload {
   imap_validate_cert?: boolean
   imap_username?: string | null
   imap_password?: string | null
+  imap_auth_mode?: ImapAuthMode
+  imap_oauth_tenant_id?: string | null
+  imap_oauth_client_id?: string | null
+  imap_oauth_client_secret?: string | null
   imap_folder?: string | null
   imap_create_folder?: boolean
   imap_mark_seen?: boolean
@@ -941,6 +988,22 @@ export interface EmailProfileTestResult {
  * step-up proof jako u EPO (passkey token / TOTP / heslo).
  */
 export type CertificateVaultItem = EpoSigningCredential
+
+export interface CertificateVaultCompanyUsage {
+  supplier_id: number
+  name: string
+  epo: 'eligible' | 'invalid' | 'disabled'
+  payroll: {
+    environment: 'production' | 'test'
+    registration: 'missing' | 'matches' | 'mismatch' | 'unknown'
+  }[]
+  databox: {
+    environment: 'production' | 'test'
+    box_id: string
+    source: 'company' | 'shared'
+    operations: ('send' | 'receive' | 'receipts')[]
+  }[]
+}
 
 export interface CertificateVaultUploadPayload {
   file: File
@@ -1083,8 +1146,29 @@ export interface PdfSignatureOutputSettingsBatchResult {
   output_settings: PdfSignatureOutputSetting[]
 }
 
+export type TaxOfficeAccountKind = 'vat' | 'dppo' | 'dpfo' | 'employment' | 'withholding'
+
+export interface TaxOffice {
+  code: string
+  name: string
+  data_box: string | null
+  accounts: Partial<Record<TaxOfficeAccountKind, string>>
+}
+
+export interface TaxOfficeWorkplace {
+  code: string
+  name: string
+  office_code: string
+}
+
+export interface TaxOfficeCatalog {
+  offices: TaxOffice[]
+  workplaces: TaxOfficeWorkplace[]
+}
+
 export const settingsApi = {
   getSupplier: () => api.get<Supplier>('/settings/supplier').then(r => r.data),
+  taxOffices: () => api.get<TaxOfficeCatalog>('/settings/tax-offices').then(r => r.data),
   updateSupplier: (payload: Partial<Supplier>) => api.put<Supplier>('/settings/supplier', payload).then(r => r.data),
   updateAccountingFramework: (id: number, framework: AccountingFramework, effectiveFrom: string) =>
     api.put<Supplier>(`/suppliers/${id}`, {
@@ -1115,9 +1199,21 @@ export const settingsApi = {
       ...(clientId ? { client_id: clientId } : {}),
       ...(revenueCategoryId ? { revenue_category_id: revenueCategoryId } : {}),
     }).then(r => r.data),
+  /** Číslo, které dostane PŘÍŠTÍ vystavený doklad řady (bez zápisu). `next_number: null` = řada bez čítače. */
+  getInvoiceCounter: (type: InvoiceCounterType, clientId = 0, revenueCategoryId = 0) =>
+    api.get<InvoiceCounterPeek>('/settings/supplier/invoice-counter', {
+      params: {
+        type,
+        ...(clientId ? { client_id: clientId } : {}),
+        ...(revenueCategoryId ? { revenue_category_id: revenueCategoryId } : {}),
+      },
+    }).then(r => r.data),
+  getClientInvoiceDefaults: () => api.get<InvoiceDefaultsSettings>('/settings/client/invoice-defaults').then(r => r.data),
+  updateClientInvoiceDefaults: (payload: InvoiceDefaultsPayload, supplierId: number) =>
+    api.put<InvoiceDefaultsSettings>('/settings/client/invoice-defaults', payload, { headers: { 'X-Supplier-Id': String(supplierId) } }).then(r => r.data),
   getClientBranding: () => api.get<OperationalBrandingSettings>('/settings/client/branding').then(r => r.data),
-  updateClientBranding: (payload: Partial<OperationalBrandingSettings>) =>
-    api.put<OperationalBrandingSettings>('/settings/client/branding', payload).then(r => r.data),
+  updateClientBranding: (payload: Partial<OperationalBrandingSettings>, supplierId?: number) =>
+    api.put<OperationalBrandingSettings>('/settings/client/branding', payload, supplierId ? { headers: { 'X-Supplier-Id': String(supplierId) } } : undefined).then(r => r.data),
   getClientPaymentQrSettings: () =>
     api.get<PaymentQrSettings>('/settings/client/payment-qr').then(r => r.data),
   updateClientPaymentQrSettings: (payload: PaymentQrSettings) =>
@@ -1155,19 +1251,19 @@ export const settingsApi = {
 
   getBankEmailOverview: () =>
     api.get<BankEmailOverview>('/settings/bank-email-notices').then(r => r.data),
-  updateBankEmailImap: (payload: Partial<BankEmailImapSettings> & { password?: string }) =>
+  updateBankEmailImap: (payload: BankEmailImapPayload) =>
     api.put<BankEmailImapSettings>('/settings/bank-email-notices/imap', payload).then(r => r.data),
   testBankEmailImap: () =>
     api.post<{ ok: boolean; message: string; folders?: string[] }>('/settings/bank-email-notices/imap/test', {}).then(r => r.data),
-  createBankEmailImapAccount: (payload: Partial<BankEmailImapSettings> & { password?: string }) =>
+  createBankEmailImapAccount: (payload: BankEmailImapPayload) =>
     api.post<BankEmailImapSettings>('/settings/bank-email-notices/imap-accounts', payload).then(r => r.data),
-  updateBankEmailImapAccount: (id: number, payload: Partial<BankEmailImapSettings> & { password?: string }) =>
+  updateBankEmailImapAccount: (id: number, payload: BankEmailImapPayload) =>
     api.put<BankEmailImapSettings>(`/settings/bank-email-notices/imap-accounts/${id}`, payload).then(r => r.data),
   deleteBankEmailImapAccount: (id: number) =>
     api.delete<{ deleted: boolean }>(`/settings/bank-email-notices/imap-accounts/${id}`).then(r => r.data),
   testBankEmailImapAccount: (id: number) =>
     api.post<{ ok: boolean; message: string; folders?: string[] }>(`/settings/bank-email-notices/imap-accounts/${id}/test`, {}).then(r => r.data),
-  browseBankEmailImapFolders: (payload: Partial<BankEmailImapSettings> & { password?: string }, id?: number | null) =>
+  browseBankEmailImapFolders: (payload: BankEmailImapPayload, id?: number | null) =>
     api.post<{ ok: boolean; message: string; folders?: string[] }>(
       id ? `/settings/bank-email-notices/imap-accounts/${id}/folders` : '/settings/bank-email-notices/imap-accounts/folders',
       payload,
@@ -1274,6 +1370,8 @@ export const settingsApi = {
     api.get<PdfSigningDiagnostics>('/settings/pdf-signing/diagnostics').then(r => r.data),
   listCertificates: () =>
     api.get<{ items: CertificateVaultItem[] }>('/settings/certificates').then(r => r.data.items),
+  getCertificateUsage: (credentialId: number) =>
+    api.get<{ companies: CertificateVaultCompanyUsage[] }>(`/settings/certificates/${credentialId}/usage`).then(r => r.data.companies),
   uploadCertificate: (payload: CertificateVaultUploadPayload) => {
     const data = new FormData()
     data.append('file', payload.file, payload.file.name)

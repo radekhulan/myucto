@@ -21,6 +21,7 @@ const props = withDefaults(defineProps<{
   availabilityText?: string | null
   availabilityInsufficient?: boolean
   placeholder?: string
+  ariaLabel?: string
   /** true → textarea (resize), false → jednořádkový input. */
   multiline?: boolean
   rows?: number
@@ -219,6 +220,7 @@ const controlClass = computed(() => [
       :rows="rows"
       :data-row-input="rowInputMarker"
       :placeholder="placeholder"
+      :aria-label="ariaLabel"
       autocomplete="off"
       :class="controlClass"
       @input="onInput"
@@ -232,6 +234,7 @@ const controlClass = computed(() => [
       :value="description"
       :data-row-input="rowInputMarker"
       :placeholder="placeholder"
+      :aria-label="ariaLabel"
       autocomplete="off"
       role="combobox"
       :aria-expanded="open"

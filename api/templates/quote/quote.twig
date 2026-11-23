@@ -1,0 +1,85 @@
+{% macro identity(party, name, labels) %}
+    <strong>{{ name }}</strong>
+    {% if party.street %}<br>{{ party.street }}{% endif %}
+    {% if party.city or party.zip %}<br>{{ party.zip }} {{ party.city }}{% endif %}
+    {% if party.country_name_cs or party.country %}<br>{{ party.country_name_cs|default(party.country) }}{% endif %}
+    {% if party.ico or party.company_id %}<br>{{ labels.company_id }} {{ party.ico|default(party.company_id) }}{% endif %}
+    {% if party.dic or party.vat_id %}<br>{{ labels.vat_id }} {{ party.dic|default(party.vat_id) }}{% endif %}
+{% endmacro %}
+
+{% macro amounts(totals, currency, decimal, labels, title) %}
+    <table class="totals-table" width="100%" cellpadding="6" cellspacing="0">
+        <thead><tr><th>{{ title }}</th><th>{{ labels.without_vat }}</th><th>{{ labels.vat }}</th><th>{{ labels.with_vat }}</th></tr></thead>
+        <tbody><tr class="grand">
+            <td></td>
+            <td>{{ totals.without_vat|default(0)|number_format(2, decimal, ' ') }} {{ currency }}</td>
+            <td>{{ totals.vat|default(0)|number_format(2, decimal, ' ') }} {{ currency }}</td>
+            <td>{{ totals.with_vat|default(0)|number_format(2, decimal, ' ') }} {{ currency }}</td>
+        </tr></tbody>
+    </table>
+{% endmacro %}
+
+<table class="head" width="100%">
+    <tr>
+        <td>
+            <div class="doc-type">{{ labels.quote }}{% if quote.number %} {{ quote.number }}{% endif %}</div>
+            <h1>{{ quote.title }}</h1>
+            {% if quote.revision %}{{ labels.revision }} {{ quote.revision }}{% endif %}
+            {% if issue_date %}<br>{{ labels.issue_date }} {{ issue_date }}{% endif %}
+            {% if valid_until %}<br>{{ labels.valid_until }} {{ valid_until }}{% endif %}
+        </td>
+        {% if logo %}<td class="logo"><img src="{{ logo }}" style="max-width:42mm;max-height:18mm" alt=""></td>{% endif %}
+    </tr>
+</table>
+<table class="parties" width="100%" cellpadding="8" cellspacing="0">
+    <tr>
+        <td width="50%">
+            <h2>{{ labels.supplier }}</h2>
+            {{ _self.identity(supplier, supplier.company_name|default(supplier.display_name), labels) }}
+        </td>
+        <td width="50%" class="party-customer">
+            <h2>{{ labels.client }}</h2>
+            {{ _self.identity(client, client.company_name|default(client.name|default(quote.client_name)), labels) }}
+        </td>
+    </tr>
+</table>
+
+{% for section in quote.sections %}
+    <h2 class="section-title">
+        {{ section.title }}
+        {% if section.kind == 'optional' %}
+            <span class="tag">{{ section.id in quote.accepted_section_ids|default([]) ? labels.accepted : labels.optional }}</span>
+        {% endif %}
+    </h2>
+    {% if section.html %}<div class="markdown">{{ section.html|raw }}</div>{% endif %}
+    {% if section.items %}
+        <table class="items" width="100%" cellpadding="5" cellspacing="0">
+            <thead>
+            <tr>
+                <th class="left">{{ labels.description }}</th><th>{{ labels.quantity }}</th><th>{{ labels.unit }}</th>
+                <th>{{ labels.unit_price }}</th><th>{{ labels.discount }}</th><th>{{ labels.vat }}</th>
+                <th>{{ labels.without_vat }}</th><th>{{ labels.with_vat }}</th>
+            </tr>
+            </thead>
+            <tbody>
+            {% for item in section.items %}
+                <tr>
+                    <td class="left">{{ item.description|nl2br }}</td>
+                    <td>{{ item.quantity|number_format(3, decimal, ' ')|trim('0', 'right')|trim(decimal, 'right') }}</td>
+                    <td>{{ item.unit }}</td>
+                    <td>{{ item.unit_price|number_format(6, decimal, ' ')|trim('0', 'right')|trim(decimal, 'right') }}</td>
+                    <td>{{ item.discount_percent|default(0)|number_format(2, decimal, ' ')|trim('0', 'right')|trim(decimal, 'right') }} %</td>
+                    <td>{{ item.vat_rate|default(0)|number_format(2, decimal, ' ')|trim('0', 'right')|trim(decimal, 'right') }} %</td>
+                    <td>{{ item.totals.without_vat|default(0)|number_format(2, decimal, ' ') }}</td>
+                    <td>{{ item.totals.with_vat|default(0)|number_format(2, decimal, ' ') }}</td>
+                </tr>
+            {% endfor %}
+            </tbody>
+        </table>
+        {{ _self.amounts(section.totals, quote.currency, decimal, labels, labels.section_total) }}
+    {% endif %}
+{% endfor %}
+
+{% set accepted = quote.status|default('') == 'accepted' %}
+{{ _self.amounts(accepted ? quote.accepted_totals|default(quote.totals) : quote.totals, quote.currency, decimal, labels, accepted ? labels.accepted_total : labels.total) }}
+<p class="unit-note">{{ quote.prices_include_vat ? labels.unit_gross : labels.unit_net }}</p>

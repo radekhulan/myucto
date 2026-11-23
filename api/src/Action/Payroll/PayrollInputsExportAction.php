@@ -45,7 +45,7 @@ final class PayrollInputsExportAction
     /** @param array<string,string> $args */
     public function export(Request $request, Response $response, array $args): Response
     {
-        if (!RequestAuthorization::isSessionAuth($request)) {
+        if (!RequestAuthorization::actsAsSession($request)) {
             return Json::sessionRequired($response);
         }
         $error = null;

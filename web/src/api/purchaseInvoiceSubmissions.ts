@@ -54,6 +54,8 @@ export interface PurchaseInvoiceSubmission {
   extraction_status?: 'not_started' | 'running' | 'succeeded' | 'failed'
   extraction_source?: string | null
   extraction_error?: string | null
+  /** Vytěžení se nedokončilo (přerušený požadavek); podání jde vytěžit znovu nebo smazat. */
+  processing_stale?: boolean
   document_sha256?: string
   thumb_status?: string
   processed_by?: number | null
@@ -150,11 +152,35 @@ export const portalPurchaseInvoiceSubmissionsApi = {
   downloadUrl: (id: number) => fileUrl(`/portal/purchase-invoice-submissions/${id}/download`),
 }
 
+export type PurchaseInvoiceSubmissionSource = PurchaseInvoiceSubmission['submitted_via']
+
+export interface EmailIntakeAccount {
+  id: number
+  name: string
+  enabled: boolean
+  ingest_pdf_invoices: boolean
+  ingest_pdf_statements: boolean
+  distribute_to_suppliers: boolean
+  last_scan_at: string | null
+  last_scan_status: 'ok' | 'error' | null
+  last_scan_message: string | null
+}
+
+export interface EmailIntakeStatus {
+  accounts: EmailIntakeAccount[]
+  active: boolean
+  days: number
+  received: number
+  waiting: number
+}
+
 export const purchaseInvoiceSubmissionsApi = {
-  list: (status?: PurchaseInvoiceSubmissionStatus) =>
+  list: (status?: PurchaseInvoiceSubmissionStatus, via?: PurchaseInvoiceSubmissionSource) =>
     api.get<PurchaseInvoiceSubmissionPage>('/purchase-invoice-submissions', {
-      params: status ? { status } : undefined,
+      params: status || via ? { ...(status ? { status } : {}), ...(via ? { via } : {}) } : undefined,
     }).then(r => r.data),
+  emailStatus: () =>
+    api.get<EmailIntakeStatus>('/purchase-invoice-submissions/email-status').then(r => r.data),
   /**
    * Doklad, který přišel mimo portál (e-mailem, papírově) — účetní ho vloží do fronty sama.
    * `distribute` pošle každý soubor do firmy podle odběratele (jen firmy s právem na příchozí doklady).
@@ -167,8 +193,9 @@ export const purchaseInvoiceSubmissionsApi = {
     ).then(r => r.data),
   get: (id: number) =>
     api.get<PurchaseInvoiceSubmission>(`/purchase-invoice-submissions/${id}`).then(r => r.data),
-  extract: (id: number) =>
-    api.post<PurchaseInvoiceSubmission>(`/purchase-invoice-submissions/${id}/extract`, {}).then(r => r.data),
+  extract: (id: number, withoutItems = false) =>
+    api.post<PurchaseInvoiceSubmission>(`/purchase-invoice-submissions/${id}/extract`,
+      withoutItems ? { without_items: true } : {}).then(r => r.data),
   needsInformation: (id: number, reason: string) =>
     api.post<PurchaseInvoiceSubmission>(`/purchase-invoice-submissions/${id}/needs-information`, { reason }).then(r => r.data),
   reject: (id: number, reason: string) =>

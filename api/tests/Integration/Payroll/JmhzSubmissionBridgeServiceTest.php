@@ -12,7 +12,6 @@ use GuzzleHttp\HandlerStack;
 use GuzzleHttp\Middleware;
 use GuzzleHttp\Psr7\Request;
 use GuzzleHttp\Psr7\Response;
-use MyInvoice\Bootstrap;
 use MyInvoice\Repository\Payroll\PayrollSigningProfileRepository;
 use MyInvoice\Service\Payroll\Submission\Jmhz\Transport\JmhzDispatchOutcome;
 use MyInvoice\Service\Payroll\Submission\Jmhz\Transport\JmhzDispatchService;
@@ -112,7 +111,7 @@ final class JmhzSubmissionBridgeServiceTest extends TestCase
 
     protected function setUp(): void
     {
-        $container = Bootstrap::buildContainer();
+        $container = \MyInvoice\Tests\Support\PayrollTestContainer::build();
         $db = $container->get(Connection::class);
         $config = $container->get(Config::class);
         if (!$db instanceof Connection || !$config instanceof Config) {
@@ -210,12 +209,26 @@ final class JmhzSubmissionBridgeServiceTest extends TestCase
         } catch (JmhzXmlException $exception) {
             self::assertSame('jmhz_registration_change_settling', $exception->validationCode);
             self::assertStringContainsString('6. 8. 2026 14:00', $exception->getMessage());
+            self::assertSame('jmhz_registration_change_settling', JmhzSubmissionBridgeService::clientErrorCode($exception));
+            $details = $exception->clientDetails()['details'];
+            self::assertSame([1, 2], $details['deferral']['employment_ids']);
+            self::assertSame(self::PREPARATION_ID, $details['deferral']['preparation_id']);
         }
         $count = $this->row(
             'SELECT COUNT(*) AS c FROM payroll_submissions WHERE supplier_id = ?',
             [$this->supplierId],
         );
         self::assertSame(0, (int) $count['c']);
+
+        $result = $this->bridge(registrationSettlement: $settlement)->bridge(
+            $this->supplierId,
+            self::PREPARATION_ID,
+            $obligationId,
+            self::ENVIRONMENT,
+            $this->userId,
+            registrationSettlingConfirmed: true,
+        );
+        self::assertSame('ready', $result['status'], 'Účetní hlášení vědomě odešle i tak.');
     }
 
     public function testFreezesWhenNoRegistrationChangeIsSettling(): void
@@ -1512,7 +1525,7 @@ final class JmhzSubmissionBridgeServiceTest extends TestCase
             self::assertCount(2, $exception->blockers);
             [$annual, $average] = $exception->blockers;
             self::assertSame('jmhz_annual_request_source_missing', $annual['code']);
-            self::assertSame('/payroll/annual-settlement?person=11', $annual['remediation_path']);
+            self::assertSame('/payroll/annual-settlement?state=request_undecided&person=11', $annual['remediation_path']);
             self::assertArrayHasKey('label', $annual);
             self::assertSame(
                 '/payroll/absences?employment=22&tab=averages',

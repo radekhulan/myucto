@@ -22,6 +22,9 @@ use PDO;
  * pak výsledek proženou týmž {@see PayrollSnapshotHealthInsurers::normalize()},
  * aby se pravidlo „kód je trojmístný řetězec" nedalo obejít ani z jedné.
  *
+ * Čte se jen snímek JEDNÉ revize každého běhu dotázaného období. Historie
+ * firmy do dotazu nevstupuje: přehled podání ho volá při každém otevření.
+ *
  * Revize se bere NEJVYŠŠÍ SCHVÁLENÁ (`approved`/`superseded`) — tatáž volba
  * jako {@see PayrollRunRepository::latestApprovedRevision()}: opravná revize
  * odsune předchozí do `superseded`, ale ta pořád jednou schválená byla, takže
@@ -38,7 +41,7 @@ final class PayrollMonthlyAgendaDutyRepository
      * Zrušený běh se nevrací: povinnost z něj nevzniká.
      *
      * @return list<array{
-     *   run_id:int,revision_id:int,person_count:int,insurer_codes:list<string>
+     *   run_id:int,revision_id:int,person_count:int,insurer_codes:list<string>,insured_codes:?list<string>
      * }>
      */
     public function approvedRunsForPeriod(
@@ -48,42 +51,57 @@ final class PayrollMonthlyAgendaDutyRepository
         if (!$this->db->hasTable('payroll_run_revisions')) {
             return [];
         }
+        // Nejdřív jen ÚZKÉ sloupce: běhy období (index firmy a období) a pořadí
+        // jejich schválených revizí (index firmy, běhu a čísla revize). Megabajtový
+        // snímek se čte až v druhém kroku, a to jedině u vybrané revize každého
+        // běhu. Dřív CTE počítala JSON funkce nad schválenými revizemi CELÉ
+        // historie firmy a období filtrovala až potom, takže přehled podání
+        // zpomaloval s každým dalším měsícem. `STRAIGHT_JOIN` drží pořadí
+        // (nejdřív výběr revizí, pak snímek podle klíče): u malé tabulky si
+        // optimalizátor jinak vybral průchod všemi revizemi firmy i se snímky.
         $statement = $this->db->pdo()->prepare(
             'WITH approved AS (
-                 SELECT revision.supplier_id,
-                        revision.run_id,
-                        revision.id,
-                        JSON_LENGTH(revision.input_snapshot_json, "$.people")
-                            AS person_count,
-                        JSON_EXTRACT(revision.input_snapshot_json, ?)
-                            AS insurer_codes,
+                 SELECT run.id AS run_id,
+                        revision.id AS revision_id,
                         ROW_NUMBER() OVER (
-                            PARTITION BY revision.supplier_id, revision.run_id
+                            PARTITION BY run.id
                             ORDER BY revision.revision_no DESC
                         ) AS row_rank
-                   FROM payroll_run_revisions revision
-                  WHERE revision.supplier_id = ?
+                   FROM payroll_runs run
+                   JOIN payroll_run_revisions revision
+                     ON revision.supplier_id = run.supplier_id
+                    AND revision.run_id = run.id
+                  WHERE run.supplier_id = ?
+                    AND run.period_start = ?
+                    AND run.status <> "cancelled"
                     AND revision.status IN ("approved", "superseded")
              )
-             SELECT run.id AS run_id,
-                    approved.id AS revision_id,
-                    approved.person_count,
-                    approved.insurer_codes
-               FROM payroll_runs run
-               JOIN approved
-                 ON approved.supplier_id = run.supplier_id
-                AND approved.run_id = run.id
-                AND approved.row_rank = 1
-              WHERE run.supplier_id = ?
-                AND run.period_start = ?
-                AND run.status <> "cancelled"
-              ORDER BY run.id',
+             SELECT approved.run_id,
+                    approved.revision_id,
+                    JSON_LENGTH(snapshot.input_snapshot_json, "$.people")
+                        AS person_count,
+                    JSON_EXTRACT(snapshot.input_snapshot_json, ?)
+                        AS insurer_codes,
+                    health.id AS health_result_id,
+                    JSON_EXTRACT(health.result_snapshot_json, "$.insurer_liabilities[*].insurer_code")
+                        AS insured_codes
+               FROM approved
+      STRAIGHT_JOIN payroll_run_revisions snapshot
+                 ON snapshot.supplier_id = ?
+                AND snapshot.id = approved.revision_id
+          LEFT JOIN payroll_statutory_results health
+                 ON health.supplier_id = snapshot.supplier_id
+                AND health.revision_id = snapshot.id
+                AND health.calculation_kind = "health_insurance"
+                AND health.result_status = "calculated"
+              WHERE approved.row_rank = 1
+              ORDER BY approved.run_id',
         );
         $statement->execute([
-            PayrollSnapshotHealthInsurers::SNAPSHOT_JSON_PATH,
-            $supplierId,
             $supplierId,
             $periodStart,
+            PayrollSnapshotHealthInsurers::SNAPSHOT_JSON_PATH,
+            $supplierId,
         ]);
 
         $rows = [];
@@ -95,6 +113,11 @@ final class PayrollMonthlyAgendaDutyRepository
                 'insurer_codes' => PayrollSnapshotHealthInsurers::normalize(
                     self::decodeCodes($row['insurer_codes']),
                 ),
+                // Pojišťovny se závazkem ve vypočteném zdravotním výsledku;
+                // `null` = výsledek chybí a platí kódy ze snímku.
+                'insured_codes' => $row['health_result_id'] === null
+                    ? null
+                    : PayrollSnapshotHealthInsurers::normalize(self::decodeCodes($row['insured_codes'])),
             ];
         }
 

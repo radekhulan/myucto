@@ -21,6 +21,7 @@ final class StockReportService
         private readonly StockLevelRepository $levels,
         private readonly StockLedgerReader $ledger,
         private readonly \MyInvoice\Repository\StockValuationSnapshotRepository $snapshots,
+        private readonly StockValuationCategory $categories,
     ) {}
 
     /** Volitelné sloupce sestavy Stav zásob; bez parametru `columns` jsou vidět první dva. */
@@ -160,7 +161,7 @@ final class StockReportService
      * dvojice (sklad, karta) od nuly do `$date` (§3.2 stejný algoritmus jako
      * {@see StockRecomputeService::replay()}, ale READ-ONLY — nic se nezapisuje).
      *
-     * @param array<string,mixed> $filters {warehouse_id?:int}
+     * @param array{warehouse_id?:int,category_id?:int} $filters
      * @return array<string,mixed>
      */
     public function valuation(int $supplierId, string $date, array $filters): array
@@ -177,12 +178,14 @@ final class StockReportService
         }
         try {
             $warehouseId = !empty($filters['warehouse_id']) ? (int) $filters['warehouse_id'] : null;
+            $categoryId = $filters['category_id'] ?? null;
+            $category = $this->categories->resolve($supplierId, $categoryId);
             $this->snapshots->versions($supplierId, $warehouseId !== null ? [$warehouseId] : null);
             $itemsMeta = $this->itemsMetaMap($supplierId);
             $warehouses = $this->warehouseMetaMap($supplierId);
             $out = [];
             $totalValueC = 0;
-            foreach ($this->ledger->pairs($supplierId, $date, $warehouseId) as $pair) {
+            foreach ($this->ledger->pairs($supplierId, $date, $warehouseId, $categoryId) as $pair) {
                 $whId = (int) $pair['warehouse_id'];
                 $itemId = (int) $pair['stock_item_id'];
                 $snapshot = $this->snapshots->latest($supplierId, $whId, $itemId, $date);
@@ -212,9 +215,13 @@ final class StockReportService
             if ($ownTransaction) {
                 $pdo->commit();
             }
-            return ['date' => $date, 'items' => $out, 'totals' => [
+            $result = ['date' => $date, 'items' => $out, 'totals' => [
                 'value_total' => StockValuation::cToDecimal($totalValueC), 'count' => count($out),
             ]];
+            if ($category !== null) {
+                $result['category'] = $category;
+            }
+            return $result;
         } catch (\Throwable $e) {
             if ($ownTransaction && $pdo->inTransaction()) {
                 $pdo->rollBack();

@@ -140,7 +140,9 @@ function toggle() {
         </svg>
         {{ expanded
           ? t('common.expandable_list.collapse')
-          : t('common.expandable_list.show_all', { count: items.length }) }}
+          : notListed > 0
+            ? t('common.expandable_list.show_listed', { count: items.length, total: total ?? items.length })
+            : t('common.expandable_list.show_all', { count: items.length }) }}
       </button>
       <span v-if="notListed > 0" class="text-xs opacity-80" :data-test="`${testId}-not-listed`">
         {{ t('common.expandable_list.not_listed', { shown: items.length, total: total ?? items.length, rest: notListed }) }}

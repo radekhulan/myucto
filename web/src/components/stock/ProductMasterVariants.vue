@@ -11,6 +11,7 @@ import { useToast } from '@/composables/useToast'
 import Modal from '@/components/ui/Modal.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import { ICONS, btnFilled, btnOutline, btnOutlineSm } from '@/components/ui/buttonStyles'
+import { unitPriceText } from '@/utils/unitPrice'
 
 const props = defineProps<{
   master: ProductMaster
@@ -182,7 +183,7 @@ function optionLabel(variant: ProductMasterVariant, attributeId: number): string
 function priceLabel(itemId: number): string {
   const rows = prices.value[itemId] ?? []
   if (!rows.length) return '-'
-  return rows.map(row => `${row.computed_price ?? row.fixed_price ?? '-'} ${row.currency_code}`).join(', ')
+  return rows.map(row => `${unitPriceText(row.computed_price ?? row.fixed_price) ?? '-'} ${row.currency_code}`).join(', ')
 }
 
 async function loadEconomics() {

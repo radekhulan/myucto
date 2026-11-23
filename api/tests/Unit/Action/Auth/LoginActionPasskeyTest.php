@@ -112,6 +112,8 @@ final class LoginActionPasskeyTest extends TestCase
             $issuer,
             $this->createMock(ClockInterface::class),
             $this->createMock(\MyInvoice\Service\Auth\MfaRecoveryCodeService::class),
+            $this->createMock(\MyInvoice\Service\Auth\LoginPolicyService::class),
+            $this->createMock(\MyInvoice\Service\Auth\Oidc\OidcFlowStore::class),
         );
         $request = (new ServerRequestFactory())
             ->createServerRequest('POST', '/api/auth/login')
@@ -209,6 +211,8 @@ final class LoginActionPasskeyTest extends TestCase
             $issuer,
             $this->createMock(ClockInterface::class),
             $this->createMock(\MyInvoice\Service\Auth\MfaRecoveryCodeService::class),
+            $this->createMock(\MyInvoice\Service\Auth\LoginPolicyService::class),
+            $this->createMock(\MyInvoice\Service\Auth\Oidc\OidcFlowStore::class),
         );
         $request = (new ServerRequestFactory())
             ->createServerRequest('POST', '/api/auth/login')
@@ -348,6 +352,8 @@ final class LoginActionPasskeyTest extends TestCase
             $this->createMock(LoginSessionIssuer::class),
             $this->createMock(ClockInterface::class),
             $this->createMock(\MyInvoice\Service\Auth\MfaRecoveryCodeService::class),
+            $this->createMock(\MyInvoice\Service\Auth\LoginPolicyService::class),
+            $this->createMock(\MyInvoice\Service\Auth\Oidc\OidcFlowStore::class),
         );
     }
 

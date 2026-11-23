@@ -63,6 +63,27 @@ final class McpInternalRequestTest extends TestCase
         self::assertFileDoesNotExist($path);
     }
 
+    public function testSessionOfAssistantOnlyForReadRequestWithoutToken(): void
+    {
+        $internal = new McpInternalRequest('https://ucto.example.test', $this->tmpDir, '__Host-session');
+        $read = $internal->build(['url' => 'https://ucto.example.test/api/v1/clients', 'method' => 'GET', 'sessionToken' => 'tok']);
+        self::assertSame(['__Host-session' => 'tok'], $read->getCookieParams());
+
+        foreach ([
+            ['method' => 'POST', 'body' => '{}'],
+            ['method' => 'GET', 'headers' => ['Authorization' => 'Bearer mi_pat_x']],
+        ] as $input) {
+            try {
+                $internal->build($input + ['url' => 'https://ucto.example.test/api/v1/clients', 'sessionToken' => 'tok']);
+                self::fail('Relace smí nést jen čtecí požadavek bez tokenu.');
+            } catch (\RuntimeException $e) {
+                self::assertStringContainsString('Relace', $e->getMessage());
+            }
+        }
+        $withoutName = $this->internal->build(['url' => 'https://ucto.example.test/api/v1/clients', 'method' => 'GET', 'sessionToken' => 'tok']);
+        self::assertSame([], $withoutName->getCookieParams(), 'bez jména cookie se relace nepřenese');
+    }
+
     public function testRejectsPathsOutsidePublicApi(): void
     {
         foreach ([

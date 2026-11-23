@@ -1,4 +1,5 @@
 import type { StockQuotePriceLevel, StockQuotePriceSource } from '@/api/stock'
+import { UNIT_PRICE_DECIMALS } from '@/utils/unitPrice'
 
 /**
  * Balení a nacenění skladových řádků faktury (issue #17).
@@ -128,8 +129,8 @@ export function unitPriceForUnit(
   units: PackagingUnitLike[] | null | undefined,
 ): number {
   const ratio = packagingRatio(unit, baseUnit, units)
-  if (!ratio) return round(basePrice, 2)
-  return round(basePrice * ratio.numerator / ratio.denominator, 2)
+  if (!ratio) return round(basePrice, UNIT_PRICE_DECIMALS)
+  return round(basePrice * ratio.numerator / ratio.denominator, UNIT_PRICE_DECIMALS)
 }
 
 /** Množství do nacenění: kladné (dobropis má zápornou položku), prázdné = 1. */
@@ -141,7 +142,7 @@ export function quoteQuantity(quantity: number | string | null | undefined): str
 /** Je cena řádku pořád ta, kterou doplnil editor? Ruční přepis se nepřeceňuje. */
 export function isPriceStillAuto(state: StockQuoteState | null | undefined, currentPrice: number | string | null | undefined): boolean {
   if (!state || state.autoPrice === null) return false
-  return round(Number(currentPrice) || 0, 2) === round(state.autoPrice, 2)
+  return round(Number(currentPrice) || 0, 6) === round(state.autoPrice, 6)
 }
 
 export function canRepriceStockPrice(value: number | string | null | undefined): boolean {

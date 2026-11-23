@@ -19,6 +19,9 @@ namespace MyInvoice\Support\Sql;
  * (a konfrontace se zůstatkem hlavní knihy vykázala rozdíl v jeho výši, přestože
  * deník má obě strany — předpis i vratku — vyrovnané).
  *
+ * Záporná zálohová faktura (vrácení zálohy, typicky převod z programu, který zálohu stornuje
+ * zápornou proformou) je doklad k vyplacení stejně jako záporná faktura.
+ *
  * NEproplacený doklad otevřenou položkou ZŮSTÁVÁ: v saldu partnera se svým
  * záporným znaménkem správně odečítá od neuhrazených faktur, dokud se buď
  * nezapočte, nebo nevrátí v penězích.
@@ -41,7 +44,7 @@ final class CreditNoteRefundExpr
         $p = $alias === '' ? '' : $alias . '.';
 
         return "(({$p}invoice_type = 'credit_note'"
-            . " OR ({$p}invoice_type = 'invoice' AND {$p}amount_to_pay < 0 AND {$p}parent_invoice_id IS NULL))"
+            . " OR ({$p}invoice_type IN ('invoice', 'proforma') AND {$p}amount_to_pay < 0 AND {$p}parent_invoice_id IS NULL))"
             . " AND {$p}status = 'paid'"
             . " AND {$p}paid_at IS NOT NULL AND DATE({$p}paid_at) <= ?)";
     }
@@ -56,7 +59,7 @@ final class CreditNoteRefundExpr
         ?int $parentInvoiceId = null,
     ): bool {
         $refundDocument = $invoiceType === 'credit_note'
-            || ($invoiceType === 'invoice' && round($amountToPay, 2) < 0 && $parentInvoiceId === null);
+            || (in_array($invoiceType, ['invoice', 'proforma'], true) && round($amountToPay, 2) < 0 && $parentInvoiceId === null);
 
         return $refundDocument
             && $status === 'paid'

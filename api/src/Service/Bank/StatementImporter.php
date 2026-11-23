@@ -18,6 +18,9 @@ use Psr\Log\LoggerInterface;
  */
 final class StatementImporter
 {
+    /** Podíl už evidovaných pohybů PDF, od kterého je založení výpisu jisté zdvojení. */
+    private const PDF_OVERLAP_REJECT_RATIO = 0.8;
+
     public function __construct(
         private readonly Connection $db,
         private readonly GpcParser $parser,
@@ -51,8 +54,8 @@ final class StatementImporter
      *   (lookup podle account_number — folder scan, jednoznačný účet).
      *
      * @return array{statement_id:int, transactions:int, matched:int, duplicate:bool,
-     *               parsed_transactions:int, skipped_duplicates:int, superseded_notices:int,
-     *               warnings:list<array{code:string,message:string,parsed?:int,inserted?:int,skipped?:int}>}
+     *               parsed_transactions:int, skipped_duplicates:int, skipped_migrated?:int, superseded_notices:int,
+     *               warnings:list<array{code:string,message:string,parsed?:int,inserted?:int,skipped?:int,since?:string,until?:string}>}
      */
     public function import(string $content, string $fileName, ?int $userId, ?int $currencyId = null, array $reconciliationConfirmations = [], ?array $parsed = null, ?array $ignoreDecision = null): array
     {
@@ -241,6 +244,19 @@ final class StatementImporter
      */
     public function importParsedPdf(array $parsed, string $pdfBytes, string $fileName, ?int $userId, ?int $currencyId = null, ?int $supplierId = null, ?array $ignoreDecision = null): array
     {
+        $alreadyRecorded = $this->statementAlreadyCoveringPdf($parsed, $currencyId, $supplierId);
+        if ($alreadyRecorded !== null) {
+            return [
+                'statement_id' => $alreadyRecorded,
+                'transactions' => 0,
+                'matched' => 0,
+                'duplicate' => true,
+                'ignored_transferred' => 0,
+                'parsed_transactions' => count($parsed['transactions']),
+                'skipped_duplicates' => count($parsed['transactions']),
+                'warnings' => [],
+            ];
+        }
         // Denní výpis („výpis při pohybu") se v přehledu nezobrazuje samostatně —
         // skládá se do měsíčního výpisu účtu stejně jako pohyby ze strojového feedu.
         // Projekci umí jen scoped cesta (zámek + transakce), a ta potřebuje jednoznačný
@@ -254,6 +270,80 @@ final class StatementImporter
             }
         }
         return $this->persist($parsed, $pdfBytes, $fileName, $userId, $currencyId, 'pdf', false, null, [], $supplierId);
+    }
+
+    /**
+     * Má účet pohyby z tohoto PDF už v evidenci? Otisk pohybu tu nepomůže: PDF, GPC i feed
+     * nesou různou referenci i popis, takže znovu vygenerované PDF téhož měsíce založilo
+     * všechny pohyby podruhé a automat je znovu zaúčtoval. Porovnává se proto datum a částka.
+     *
+     * Vrací výpis, kde se pohyby zobrazují. Překryv z větší části se odmítne, doplnit jen
+     * chybějící pohyby z PDF neumíme a založit všechny by zdvojilo ty existující.
+     * Denní výpisy mají vlastní skládání do měsíce a tudy nejdou.
+     *
+     * @param array{header:array,transactions:list<array>} $parsed
+     */
+    private function statementAlreadyCoveringPdf(array $parsed, ?int $currencyId, ?int $supplierId): ?int
+    {
+        $transactions = $parsed['transactions'];
+        if ($transactions === [] || ($parsed['header']['period_kind'] ?? 'period') === 'day') {
+            return null;
+        }
+        $accountNumber = (string) ($parsed['header']['account_number'] ?? '');
+        $owner = $supplierId ?? (int) (($currencyId !== null
+            ? $this->loadCurrencyById($currencyId)
+            : $this->lookupRegisteredOwner($accountNumber))['supplier_id'] ?? 0);
+        if ($owner <= 0 || $accountNumber === '') {
+            return null;
+        }
+        $dates = array_column($transactions, 'posted_at');
+        $query = $this->db->pdo()->prepare(
+            "SELECT bt.id, bt.posted_at, bt.amount, bs.account_number
+               FROM bank_statements bs
+               JOIN bank_transactions bt ON bt.statement_id = bs.id
+              WHERE bs.supplier_id = ? AND bs.source IN ('gpc', 'bank_api', 'pdf', 'import')
+                AND bt.source = 'statement' AND bt.posted_at BETWEEN ? AND ?"
+        );
+        $query->execute([$owner, min($dates), max($dates)]);
+        $pool = [];
+        foreach ($query->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            if (AccountNumberNormalizer::equals($accountNumber, (string) $row['account_number'])) {
+                $pool[$row['posted_at'] . '|' . number_format((float) $row['amount'], 2, '.', '')][] = (int) $row['id'];
+            }
+        }
+        $firstId = null;
+        $covered = 0;
+        foreach ($transactions as $tx) {
+            $key = $tx['posted_at'] . '|' . number_format((float) $tx['amount'], 2, '.', '');
+            if (($pool[$key] ?? []) !== []) {
+                $firstId ??= $pool[$key][0];
+                array_shift($pool[$key]);
+                $covered++;
+            }
+        }
+        if ($covered < count($transactions)) {
+            if ($covered / count($transactions) >= self::PDF_OVERLAP_REJECT_RATIO) {
+                throw new \InvalidArgumentException(sprintf(
+                    'Výpis se překrývá s pohyby, které už v evidenci jsou (%d z %d). Nic se nezaložilo, chybějící pohyby prověřte ve výpisu účtu.',
+                    $covered,
+                    count($transactions),
+                ));
+            }
+            return null;
+        }
+        $month = $this->db->pdo()->prepare(
+            'SELECT m.statement_id FROM bank_transaction_imports bti
+               JOIN bank_api_months m ON m.statement_id = bti.statement_id
+              WHERE bti.bank_transaction_id = ? LIMIT 1'
+        );
+        $month->execute([$firstId]);
+        $statement = $month->fetchColumn();
+        if ($statement === false) {
+            $own = $this->db->pdo()->prepare('SELECT statement_id FROM bank_transactions WHERE id = ?');
+            $own->execute([$firstId]);
+            $statement = $own->fetchColumn();
+        }
+        return (int) $statement;
     }
 
     /**
@@ -328,12 +418,18 @@ final class StatementImporter
         // Explicitně zvolený měnový účet (#167) je autoritativní; jinak lookup podle čísla.
         $accountCurrency = $account['code'] ?? null;
         $accountBankCode = $account['bank_code'] ?? $registeredOwner['bank_code'] ?? null;
+        // Výpis nese jen český kód banky (CHAR(4)). Zahraniční kód účtu (sort code)
+        // by zápis výpisu shodil a s kódem banky z výpisu by se stejně nikdy neshodoval.
+        if ($accountBankCode !== null && AccountNumberNormalizer::canonicalBankCode((string) $accountBankCode) === null) {
+            $accountBankCode = null;
+        }
         $statementCurrency = $accountCurrency
             ?? $this->detectStatementCurrency($parsed['transactions']);
 
         $identities = $this->transactionIdentities($parsed['transactions'], (string) $h['account_number'], $accountBankCode, $accountCurrency, $statementCurrency, $statementSupplierId);
 
-        $crossSource = $deferProcessing && $statementSupplierId !== null
+        $crossSourceReconciled = $deferProcessing && $statementSupplierId !== null && AuthoritativeTransactionReconciler::coversSource($source);
+        $crossSource = $crossSourceReconciled
             ? (new AuthoritativeTransactionReconciler($pdo))->candidates(
                 $parsed['transactions'], $statementSupplierId, (string) $h['account_number'],
                 (string) $accountBankCode, (string) $statementCurrency, $source,
@@ -431,11 +527,22 @@ final class StatementImporter
             ? $pdo->prepare('SELECT import_fingerprint FROM bank_transactions WHERE id = ?')
             : null;
 
+        // Pohyby GPC a napojené banky párovač porovnal s převzatými jednotlivě a nejistou
+        // shodu předloží k potvrzení; hranice převzetí platí pro výpis v PDF.
+        $migrated = $crossSourceReconciled ? null : $this->migratedRange($pdo, $statementSupplierId, (string) $h['account_number'], $accountBankCode, $statementCurrency);
+        $migratedUntil = $migrated['until'] ?? null;
+
         $matched = 0;
         $inserted = 0;
         $skipped = 0;
+        $skippedMigrated = 0;
         $ignoredIds = [];
         foreach ($parsed['transactions'] as $index => $tx) {
+            $postedOn = substr((string) $tx['posted_at'], 0, 10);
+            if ($migrated !== null && $postedOn >= $migrated['since'] && $postedOn <= $migrated['until']) {
+                $skippedMigrated++;
+                continue;
+            }
             ['currency' => $txCurrency, 'fingerprint' => $fingerprint, 'portable_fingerprint' => $portableFingerprint, 'candidates' => $candidates] = $identities[$index];
             $alreadyStored = false;
             $duplicateId = $crossSource[$index] ?? false;
@@ -550,21 +657,53 @@ final class StatementImporter
                 'skipped'  => $skipped,
             ];
         }
+        if ($skippedMigrated > 0) {
+            $warnings[] = [
+                'code'     => 'transactions_skipped_as_migrated',
+                'message'  => sprintf(
+                    'Účet má pohyby od %s do %s převzaté převodem z jiného programu. %d pohybů výpisu z tohoto období se nezaložilo, v evidenci už jsou; pohyb z prvního nebo posledního dne, který převod nepřevzal, doplňte ručně.',
+                    date('j. n. Y', (int) strtotime((string) $migrated['since'])),
+                    date('j. n. Y', (int) strtotime((string) $migratedUntil)),
+                    $skippedMigrated,
+                ),
+                'parsed'   => $parsedCount,
+                'inserted' => $inserted,
+                'skipped'  => $skippedMigrated,
+                'since'    => $migrated['since'],
+                'until'    => $migratedUntil,
+            ];
+        }
         if ($statementSupplierId !== null && $pdo->getAttribute(PDO::ATTR_DRIVER_NAME) === 'mysql') {
             $rebased = (new ImportedStatementRebase($this->db))->rebase($statementSupplierId, $statementId);
             if ($rebased !== null) {
+                $unit = $statementCurrency !== null && $statementCurrency !== 'CZK' ? (string) $statementCurrency : 'Kč';
                 $warnings[] = [
-                    'code'       => 'imported_balances_rebased',
-                    'message'    => sprintf(
-                        'Stavy %d převzatých výpisů účtu se podle výpisu banky posunuly o %s Kč, počáteční stav účtu vychází %s Kč. Deník se nemění.',
-                        $rebased['statements'],
-                        number_format($rebased['shift'], 2, ',', ' '),
-                        number_format($rebased['opening'], 2, ',', ' '),
-                    ),
+                    'code'       => match ($rebased['status']) {
+                        'held' => 'imported_balances_rebase_held',
+                        'mixed_sources' => 'imported_balances_rebase_mixed',
+                        default => 'imported_balances_rebased',
+                    },
+                    'message'    => match ($rebased['status']) {
+                        'held' => sprintf(
+                            'Stav účtu podle výpisu banky se liší od převzatých výpisů o %s %s. Tak velký posun stavů %d převzatých výpisů se bez potvrzení neprovede: zkontrolujte počáteční stav účtu v převodu (měnu účtu, výpisy jiného účtu se stejným číslem). Posun potvrdí správce příkazem rebase-imported-statements.php.',
+                            number_format($rebased['shift'], 2, ',', ' '), $unit, $rebased['statements'],
+                        ),
+                        'mixed_sources' => sprintf(
+                            'Převzaté výpisy s číslem tohoto účtu pocházejí z různých účtů původního programu (%s), jejich stavy se podle výpisu banky neposunuly. Rozdíl %s %s zkontrolujte.',
+                            implode(', ', $rebased['sources'] ?? []), number_format($rebased['shift'], 2, ',', ' '), $unit,
+                        ),
+                        default => sprintf(
+                            'Stavy %d převzatých výpisů účtu se podle výpisu banky posunuly o %s %s, počáteční stav účtu vychází %s %s. Deník se nemění.',
+                            $rebased['statements'],
+                            number_format($rebased['shift'], 2, ',', ' '), $unit,
+                            number_format($rebased['opening'], 2, ',', ' '), $unit,
+                        ),
+                    },
                     'shift'      => $rebased['shift'],
                     'statements' => $rebased['statements'],
                     'opening'    => $rebased['opening'],
-                ];
+                    'currency'   => $statementCurrency ?? 'CZK',
+                ] + (isset($rebased['sources']) ? ['sources' => $rebased['sources']] : []);
             }
         }
 
@@ -576,10 +715,62 @@ final class StatementImporter
             'ignored_transferred'  => $ignoredTransferred,
             'parsed_transactions' => $parsedCount,
             'skipped_duplicates'  => $skipped,
+            'skipped_migrated'    => $skippedMigrated,
             'superseded_notices'  => $processed['superseded'],
             'warnings'            => $warnings,
         ];
         return $deferProcessing ? $result : $this->withProcessingOutcome($result, $failure);
+    }
+
+    /**
+     * Období převzetí účtu: od prvního převzatého pohybu do data posledního výpisu, který na
+     * účet převzal převod z jiného programu (výpisy se zdrojem `import`, zapisuje je
+     * {@see \MyInvoice\Service\Migration\Shared\BankStatementImportWriter}). Takový pohyb má
+     * otisk převodu, ne banky, takže ho deduplikace podle otisku u výpisu z banky nepozná
+     * a pohyb by se v evidenci (a v peněžním deníku) zdvojil. Účet se páruje stejně jako
+     * výpisy s účty firmy ({@see \MyInvoice\Repository\CashJournalRepository::matchingStatementIds()}):
+     * číslo účtu přes {@see AccountNumberNormalizer}, rozdílný kód banky shodu vylučuje.
+     * Měnové účty se stejným číslem (#167) mají každý svoje převzetí, rozhoduje i měna.
+     * Výpis bez převzatých pohybů (jen počáteční stav) období nevymezuje, nic nezdvojí.
+     *
+     * Na rozdíl od {@see \MyInvoice\Repository\BankConnectionRepository::takenOverThrough()}
+     * (jen konec převzetí pro začátek automatického stažení) potřebuje výpis v PDF i začátek:
+     * starší výpis, než převod převzal, nese pohyby, které v evidenci nejsou.
+     *
+     * @return array{since:string,until:string}|null
+     */
+    private function migratedRange(PDO $pdo, ?int $supplierId, string $accountNumber, ?string $bankCode, ?string $currency): ?array
+    {
+        if ($supplierId === null || AccountNumberNormalizer::normalize($accountNumber) === '') {
+            return null;
+        }
+        $currency = trim((string) $currency);
+        $stmt = $pdo->prepare(
+            "SELECT bs.account_number, bs.bank_code, MIN(bt.posted_at) AS since, MAX(bs.statement_date) AS until
+               FROM bank_statements bs
+               JOIN bank_transactions bt ON bt.statement_id = bs.id
+              WHERE bs.supplier_id = ? AND bs.source = 'import' AND bs.account_number IS NOT NULL AND bs.account_number <> ''"
+            . ($currency !== '' ? ' AND bs.currency = ?' : '') . '
+              GROUP BY bs.account_number, bs.bank_code'
+        );
+        $stmt->execute($currency !== '' ? [$supplierId, $currency] : [$supplierId]);
+        $range = null;
+        $bankCode = trim((string) $bankCode);
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $migratedBank = trim((string) ($row['bank_code'] ?? ''));
+            if ($bankCode !== '' && $migratedBank !== '' && $migratedBank !== $bankCode) {
+                continue;
+            }
+            if ($row['since'] !== null && $row['until'] !== null && AccountNumberNormalizer::matchesAny($accountNumber, (string) $row['account_number'])) {
+                $since = substr((string) $row['since'], 0, 10);
+                $until = substr((string) $row['until'], 0, 10);
+                $range = [
+                    'since' => $range === null ? $since : min($range['since'], $since),
+                    'until' => $range === null ? $until : max($range['until'], $until),
+                ];
+            }
+        }
+        return $range;
     }
 
     /**
@@ -753,7 +944,7 @@ final class StatementImporter
             $matchIds[] = $txId;
         }
         foreach ($this->matcher->matchBatch($matchIds) as $txId => $result) {
-            if (in_array($result['status'], ['auto_exact', 'auto_partial'], true)) {
+            if (in_array($result['status'], ['auto_exact', 'auto_partial'], true) || !empty($result['other_item_id'])) {
                 $matched++;
             }
             $this->bankPosting?->handleTransaction((int) $txId, $userId, !empty($result['requires_review']));

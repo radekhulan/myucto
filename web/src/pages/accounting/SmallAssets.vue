@@ -669,7 +669,7 @@ onMounted(async () => {
         </div>
         <div>
           <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('accounting.small_assets.col_unit_price') }}</label>
-          <input v-model.number="form.unit_price" type="number" step="0.01" class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm bg-surface" />
+          <input v-model.number="form.unit_price" type="number" step="any" class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm bg-surface" />
           <p class="text-xs text-neutral-400 mt-1">{{ t('accounting.small_assets.unit_price_hint') }}</p>
         </div>
         <div>

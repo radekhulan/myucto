@@ -57,6 +57,16 @@ describe('cashErrorMessage', () => {
     expect(cashErrorMessage(e, tEn)).not.toBe(tEn('cash.error.partial_purchase_payment'))
   })
 
+  it('cizoměnovou úhradu mimo toleranci vypíše zbytek v měně dokladu a koruny v Kč', () => {
+    const e = apiError('cash.error.fx_amount_out_of_tolerance', 'x',
+      { remaining: 1000, currency_code: 'EUR', expected_czk: 24000, tolerance_czk: 960 })
+    const msg = cashErrorMessage(e, t)
+    expect(msg).toContain('€')
+    expect(msg).toContain('Kč')
+    expect(msg).not.toContain('{')
+    expect(cashErrorMessage(e, tEn)).not.toContain('{')
+  })
+
   it('bez `params` zůstane obecný překlad (starší server)', () => {
     expect(cashErrorMessage(apiError('cash.error.partial_purchase_payment', 'x'), t))
       .toBe(t('cash.error.partial_purchase_payment'))

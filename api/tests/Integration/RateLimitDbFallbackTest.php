@@ -202,6 +202,28 @@ final class RateLimitDbFallbackTest extends TestCase
         self::assertLessThanOrEqual(60, $retryAfter, 'Retry-After nesmí přesáhnout okno limitu');
     }
 
+    public function testPasswordTokenSharesPerIpLoginBucket(): void
+    {
+        $mw = $this->middleware();
+        $handler = $this->handler();
+        $tokenRequest = (new ServerRequestFactory())->createServerRequest(
+            'POST',
+            'http://localhost/api/auth/password-token',
+            ['REMOTE_ADDR' => self::TEST_IP],
+        );
+
+        $codes = [];
+        for ($i = 0; $i < 2; $i++) {
+            $codes[] = $mw->process($this->loginRequest(), $handler)->getStatusCode();
+        }
+        for ($i = 0; $i < 2; $i++) {
+            $codes[] = $mw->process($tokenRequest, $handler)->getStatusCode();
+        }
+
+        self::assertSame([200, 200, 200, 429], $codes,
+            'Výměna hesla za token a přihlášení webu sdílí limit na IP (3/min)');
+    }
+
     public function testCounterRowsArePersisted(): void
     {
         $mw = $this->middleware();

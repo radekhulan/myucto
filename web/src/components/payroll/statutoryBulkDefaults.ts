@@ -49,12 +49,19 @@ export function bulkCodeKey(group: BulkCodeGroup, code: string): string | null {
  * Pořadí drží náhled, duplicity se vynechají.
  */
 export function bulkApplyEmployeeIds(
-  preview: Pick<PayrollStatutoryBulkPreview, 'ready_employee_ids' | 'declaration_missing_employee_ids'>,
+  preview: Pick<PayrollStatutoryBulkPreview, 'ready_employee_ids' | 'declaration_missing_employee_ids'>
+    & Partial<Pick<PayrollStatutoryBulkPreview, 'excluded'>>,
   recordUnsignedDeclaration: boolean,
+  confirmForeignCitizens = false,
 ): number[] {
   const ids = new Set(preview.ready_employee_ids)
   if (recordUnsignedDeclaration) {
     for (const id of preview.declaration_missing_employee_ids) ids.add(id)
+  }
+  if (confirmForeignCitizens) {
+    for (const person of preview.excluded ?? []) {
+      if (person.foreign_confirmable) ids.add(person.employee_id)
+    }
   }
   return [...ids]
 }
@@ -126,6 +133,23 @@ export function statutoryReviewEmployeeIds(validations: PayrollRunValidation[]):
     }
   }
   return [...ids]
+}
+
+/*
+ * Nález zdravotního pojištění (proklik na sekci `statutory.health_coverages`).
+ * Chybějící pojišťovnu doplní hromadné zadání pojišťoven pro všechny osoby
+ * najednou, ne karta po kartě.
+ */
+function isHealthCoverageReview(validation: PayrollRunValidation): boolean {
+  if (validation.code !== STATUTORY_REVIEW_CODE) return false
+  const path = validation.remediation_path ?? ''
+  const query = path.includes('?') ? path.slice(path.indexOf('?') + 1) : ''
+  return new URLSearchParams(query).get('field') === 'statutory.health_coverages'
+}
+
+/** První nález zdravotního pojištění: odkaz na hromadné zadání se kreslí jednou. */
+export function firstHealthCoverageReviewId(validations: PayrollRunValidation[]): number | null {
+  return validations.find(isHealthCoverageReview)?.id ?? null
 }
 
 /** První validace skupiny: akce se u běhu kreslí jednou, ne u každé osoby. */

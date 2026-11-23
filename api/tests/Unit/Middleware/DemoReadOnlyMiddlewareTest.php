@@ -80,6 +80,8 @@ final class DemoReadOnlyMiddlewareTest extends TestCase
             ['POST', '/api/auth/setup'],
             ['POST', '/api/public/approval/abc/decide'],
             ['POST', '/api/admin/cron-jobs/cron-cleanup/run'],
+            ['POST', '/api/stock/reports/value-trend-jobs'],
+            ['POST', '/api/stock/reports/value-trend-jobs/7/cancel'],
         ];
     }
 
@@ -139,6 +141,48 @@ final class DemoReadOnlyMiddlewareTest extends TestCase
         ];
     }
 
+    /**
+     * Uživatelé a jejich aktivní relace jsou na ukázkové instanci skutečné účty
+     * (e-maily, IP adresy, zařízení), ne demo data: ani superadmin je nepřečte.
+     */
+    #[DataProvider('usersAndSessionsProvider')]
+    public function testDemoSuperadminCannotReachUsersOrSessions(string $method, string $path): void
+    {
+        $handlerCalled = false;
+        $handler = new class($handlerCalled) implements RequestHandlerInterface {
+            public function __construct(private bool &$called) {}
+
+            public function handle(ServerRequestInterface $request): ResponseInterface
+            {
+                $this->called = true;
+                return (new ResponseFactory())->createResponse(204);
+            }
+        };
+        $request = $this->request($method, $path)->withAttribute(
+            AuthMiddleware::ATTR_USER,
+            ['id' => 1, 'role' => 'superadmin'],
+        );
+
+        $response = $this->middleware(true)->process($request, $handler);
+
+        self::assertSame(403, $response->getStatusCode(), $method . ' ' . $path);
+        self::assertFalse($handlerCalled, 'Users and sessions must not reach the action handler in demo.');
+    }
+
+    public static function usersAndSessionsProvider(): array
+    {
+        return [
+            ['GET', '/api/admin/users'],
+            ['HEAD', '/api/admin/users'],
+            ['GET', '/api/admin/users/1/technical-suppliers'],
+            ['GET', '/api/admin/user-sessions'],
+            ['HEAD', '/api/admin/user-sessions'],
+            ['GET', '/api/%61dmin/user-sessions'],
+            ['POST', '/api/admin/user-sessions/terminate'],
+            ['DELETE', '/api/admin/user-sessions/abc123'],
+        ];
+    }
+
     public function testInstanceSmtpPathPassesThroughWhenDemoIsDisabled(): void
     {
         $called = false;
@@ -162,10 +206,29 @@ final class DemoReadOnlyMiddlewareTest extends TestCase
         self::assertTrue($called, 'With demo disabled the request should reach the handler.');
     }
 
-    private function middleware(bool $enabled): DemoReadOnlyMiddleware
+    public function testPasswordTokenIsBlockedWithoutReviewAccountException(): void
+    {
+        $response = $this->middleware(true)->process($this->request('POST', '/api/v1/auth/password-token'), $this->handler());
+
+        self::assertSame(403, $response->getStatusCode());
+        self::assertStringContainsString('demo_read_only', (string) $response->getBody());
+    }
+
+    public function testPasswordTokenPassesWithReviewAccountException(): void
+    {
+        // E-mail ze seznamu kontroluje akce (middleware tělo nečte); ostatní zápisy dál neprojdou.
+        $middleware = $this->middleware(true, ['password_token_emails' => ['review@example.com']]);
+
+        self::assertSame(204, $middleware->process($this->request('POST', '/api/auth/password-token'), $this->handler())->getStatusCode());
+        self::assertSame(403, $middleware->process($this->request('POST', '/api/invoices'), $this->handler())->getStatusCode());
+        self::assertSame(403, $middleware->process($this->request('POST', '/api/auth/change-password'), $this->handler())->getStatusCode());
+    }
+
+    /** @param array<string,mixed> $demo */
+    private function middleware(bool $enabled, array $demo = []): DemoReadOnlyMiddleware
     {
         return new DemoReadOnlyMiddleware(
-            new Config(['demo' => ['enabled' => $enabled]]),
+            new Config(['demo' => ['enabled' => $enabled] + $demo]),
             new RoutePermissionMap(),
             new ResponseFactory(),
         );

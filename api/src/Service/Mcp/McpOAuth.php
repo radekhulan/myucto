@@ -47,16 +47,18 @@ final class McpOAuth
         string $challenge,
         string $scope,
         string $resource,
+        ?string $issuedAuthMethod = null,
     ): string {
         $code = self::randomToken('mi_mcp_code_');
         $stmt = $this->db->pdo()->prepare(
             'INSERT INTO mcp_oauth_codes
-             (code_hash, client_id, user_id, supplier_id, redirect_uri, code_challenge, scope, resource, expires_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, FROM_UNIXTIME(?))'
+             (code_hash, client_id, user_id, supplier_id, redirect_uri, code_challenge, scope, resource,
+              issued_auth_method, expires_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, FROM_UNIXTIME(?))'
         );
         $stmt->execute([
             hash('sha256', $code), $clientId, $userId, $supplierId,
-            $redirectUri, $challenge, $scope, $resource, time() + 300,
+            $redirectUri, $challenge, $scope, $resource, $issuedAuthMethod, time() + 300,
         ]);
         return $code;
     }
@@ -89,7 +91,8 @@ final class McpOAuth
                 || (int) $row['user_active'] !== 1
                 || (int) $row['role_active'] !== 1
                 || !$this->resources->allowsGrant((string) $row['resource'], (int) $row['user_id'],
-                    $row['supplier_id'] !== null ? (int) $row['supplier_id'] : null, (string) $row['scope'])
+                    $row['supplier_id'] !== null ? (int) $row['supplier_id'] : null, (string) $row['scope'], $row['issued_auth_method'] ?? null)
+                || !$this->tokens->issuingIdentityFresh((int) $row['user_id'], $row['issued_auth_method'] ?? null, $pdo)
             ) {
                 $pdo->rollBack();
                 return null;
@@ -103,8 +106,8 @@ final class McpOAuth
                 'MCP OAuth ' . substr($clientId, 0, 20), (string) $row['scope'],
                 new \DateTimeImmutable('+1 hour'),
             );
-            $pdo->prepare("UPDATE api_tokens SET audience = 'mcp' WHERE id = ?")
-                ->execute([$access['id']]);
+            $pdo->prepare("UPDATE api_tokens SET audience = 'mcp', issued_auth_method = ? WHERE id = ?")
+                ->execute([$row['issued_auth_method'] ?? null, $access['id']]);
             $pdo->prepare(
                 'INSERT INTO mcp_oauth_grants
                  (client_id, user_id, supplier_id, scope, resource, refresh_hash, access_token_id, expires_at)
@@ -127,7 +130,7 @@ final class McpOAuth
         $pdo->beginTransaction();
         try {
             $stmt = $pdo->prepare(
-                'SELECT g.*, t.revoked_at AS token_revoked, u.is_active AS user_active,
+                'SELECT g.*, t.revoked_at AS token_revoked, t.issued_auth_method, u.is_active AS user_active,
                         r.is_active AS role_active
                    FROM mcp_oauth_grants g
                    JOIN api_tokens t ON t.id = g.access_token_id
@@ -145,17 +148,22 @@ final class McpOAuth
                 || (int) $row['user_active'] !== 1
                 || (int) $row['role_active'] !== 1
                 || !$this->resources->allowsGrant((string) $row['resource'], (int) $row['user_id'],
-                    $row['supplier_id'] !== null ? (int) $row['supplier_id'] : null, (string) $row['scope'])
+                    $row['supplier_id'] !== null ? (int) $row['supplier_id'] : null, (string) $row['scope'], $row['issued_auth_method'] ?? null)
+                // Připojení z přihlášení přes Entra ID se obnoví, jen když se uživatel
+                // přes Entra ID ověřil v rámci stropu sezení (zablokovaný už ne).
+                || !$this->tokens->issuingIdentityFresh((int) $row['user_id'], $row['issued_auth_method'] ?? null, $pdo)
             ) {
                 $pdo->rollBack();
                 return null;
             }
 
             $nextRefresh = self::randomToken('mi_mcp_rt_');
+            // Obnova počet oprávnění nemění: dočasný token se hned smaže.
             $access = $this->tokens->generateInTransaction(
                 $pdo, (int) $row['user_id'], $row['supplier_id'] !== null ? (int) $row['supplier_id'] : null,
                 'MCP OAuth ' . substr($clientId, 0, 20), (string) $row['scope'],
                 new \DateTimeImmutable('+1 hour'),
+                seatGate: false,
             );
             $pdo->prepare('DELETE FROM api_tokens WHERE id = ?')->execute([$access['id']]);
             $rotate = $pdo->prepare(
@@ -182,9 +190,10 @@ final class McpOAuth
         }
     }
 
-    public function listForUser(int $userId, ?int $supplierId = null, ?string $resource = null): array
+    /** @param list<string>|null $resources */
+    public function listForUser(int $userId, ?int $supplierId = null, ?array $resources = null): array
     {
-        return $this->listGrants($userId, $supplierId, $resource);
+        return $this->listGrants($userId, $supplierId, $resources);
     }
 
     /**
@@ -196,8 +205,10 @@ final class McpOAuth
         return $this->listGrants(null);
     }
 
-    private function listGrants(?int $userId, ?int $supplierId = null, ?string $resource = null): array
+    /** @param list<string>|null $resources */
+    private function listGrants(?int $userId, ?int $supplierId = null, ?array $resources = null): array
     {
+        $resources = $resources !== null ? array_values($resources) : null;
         $stmt = $this->db->pdo()->prepare(
             'SELECT g.id, c.client_name, g.supplier_id, s.display_name AS supplier_name,
                     s.company_name AS supplier_company, g.scope, g.created_at, g.expires_at,
@@ -210,10 +221,10 @@ final class McpOAuth
                LEFT JOIN users u ON u.id = g.user_id'
             . ($userId !== null ? ' WHERE g.user_id = ?' : '')
             . ($supplierId !== null ? ' AND g.supplier_id = ?' : '')
-            . ($resource !== null ? ' AND g.resource = ?' : '')
+            . ($resources !== null ? ' AND g.resource IN (' . self::placeholders($resources) . ')' : '')
             . ' ORDER BY g.revoked_at IS NOT NULL, g.created_at DESC, g.id DESC'
         );
-        $stmt->execute([...($userId !== null ? [$userId] : []), ...($supplierId !== null ? [$supplierId] : []), ...($resource !== null ? [$resource] : [])]);
+        $stmt->execute([...($userId !== null ? [$userId] : []), ...($supplierId !== null ? [$supplierId] : []), ...($resources ?? [])]);
         $rows = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
         foreach ($rows as &$row) {
             $row['id'] = (int) $row['id'];
@@ -227,9 +238,10 @@ final class McpOAuth
         return $rows;
     }
 
-    public function revokeForUser(int $grantId, int $userId, ?int $supplierId = null, ?string $resource = null): bool
+    /** @param list<string>|null $resources */
+    public function revokeForUser(int $grantId, int $userId, ?int $supplierId = null, ?array $resources = null): bool
     {
-        return $this->revokeGrant($grantId, $userId, $supplierId, $resource) !== null;
+        return $this->revokeGrant($grantId, $userId, $supplierId, $resources) !== null;
     }
 
     /**
@@ -241,8 +253,10 @@ final class McpOAuth
         return $this->revokeGrant($grantId, null);
     }
 
-    private function revokeGrant(int $grantId, ?int $userId, ?int $supplierId = null, ?string $resource = null): ?int
+    /** @param list<string>|null $resources */
+    private function revokeGrant(int $grantId, ?int $userId, ?int $supplierId = null, ?array $resources = null): ?int
     {
+        $resources = $resources !== null ? array_values($resources) : null;
         $pdo = $this->db->pdo();
         $pdo->beginTransaction();
         try {
@@ -250,9 +264,9 @@ final class McpOAuth
                 'SELECT access_token_id, user_id FROM mcp_oauth_grants WHERE id = ?'
                 . ($userId !== null ? ' AND user_id = ?' : '')
                 . ($supplierId !== null ? ' AND supplier_id = ?' : '')
-                . ($resource !== null ? ' AND resource = ?' : '') . ' FOR UPDATE'
+                . ($resources !== null ? ' AND resource IN (' . self::placeholders($resources) . ')' : '') . ' FOR UPDATE'
             );
-            $stmt->execute([$grantId, ...($userId !== null ? [$userId] : []), ...($supplierId !== null ? [$supplierId] : []), ...($resource !== null ? [$resource] : [])]);
+            $stmt->execute([$grantId, ...($userId !== null ? [$userId] : []), ...($supplierId !== null ? [$supplierId] : []), ...($resources ?? [])]);
             $grant = $stmt->fetch(PDO::FETCH_ASSOC);
             if ($grant === false) {
                 $pdo->rollBack();
@@ -279,6 +293,13 @@ final class McpOAuth
             'refresh_token' => $refresh,
             'scope' => $scope . ' offline_access',
         ];
+    }
+
+    /** @param list<string> $values */
+    private static function placeholders(array $values): string
+    {
+        // Prázdný výčet nesmí rozšířit výběr: IN (NULL) nevybere nic.
+        return $values === [] ? 'NULL' : implode(', ', array_fill(0, count($values), '?'));
     }
 
     private static function randomToken(string $prefix): string

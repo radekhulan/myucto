@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import SentEmails from './SentEmails.vue'
@@ -7,17 +7,23 @@ import EmailProfiles from './EmailProfiles.vue'
 import EmailTemplates from './EmailTemplates.vue'
 import ElectronicSignatures from './ElectronicSignatures.vue'
 import SmtpLogAnalysis from './SmtpLogAnalysis.vue'
+import { useAuthStore } from '@/stores/auth'
 
 const { t } = useI18n()
 const route = useRoute()
 const router = useRouter()
+const auth = useAuthStore()
 
 type Tab = 'sent' | 'templates' | 'profiles' | 'signatures' | 'logs'
-const VALID: Tab[] = ['sent', 'templates', 'profiles', 'signatures', 'logs']
+const ALL: Tab[] = ['sent', 'templates', 'profiles', 'signatures', 'logs']
+// Na ukázkové instanci API odeslanou poštu, šablony ani SMTP logy nevydá
+// (DemoReadOnlyMiddleware): jde o provozní data skutečného účtu, ne o demo data.
+const DEMO_HIDDEN: Tab[] = ['sent', 'templates', 'logs']
+const VALID = computed<Tab[]>(() => auth.isDemo ? ALL.filter(item => !DEMO_HIDDEN.includes(item)) : ALL)
 
 function initialTab(): Tab {
   const q = String(route.query.tab || '')
-  return (VALID as string[]).includes(q) ? (q as Tab) : 'sent'
+  return (VALID.value as string[]).includes(q) ? (q as Tab) : VALID.value[0]
 }
 const tab = ref<Tab>(initialTab())
 
@@ -49,6 +55,6 @@ watch(tab, (v) => {
     <EmailTemplates v-else-if="tab === 'templates'" />
     <EmailProfiles v-else-if="tab === 'profiles'" />
     <ElectronicSignatures v-else-if="tab === 'signatures'" />
-    <SmtpLogAnalysis v-else />
+    <SmtpLogAnalysis v-else-if="tab === 'logs'" />
   </div>
 </template>

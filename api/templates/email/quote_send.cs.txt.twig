@@ -1,0 +1,10 @@
+{% extends '_layout.txt.twig' %}
+{% block content %}
+Cenová nabídka {{ quote_number }}
+{{ quote_title|raw }}
+
+{{ message|raw }}
+{% if valid_until %}
+Platí do {{ valid_until|date('j. n. Y') }}.
+{% endif %}
+{% endblock %}

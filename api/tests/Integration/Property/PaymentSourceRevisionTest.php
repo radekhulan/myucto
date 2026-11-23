@@ -17,6 +17,7 @@ use PHPUnit\Framework\TestCase;
 final class PaymentSourceRevisionTest extends TestCase
 {
     use ChargeIssuanceFixture;
+    use \MyInvoice\Tests\Support\PairedJournalAssertions;
     private Connection $db;
     private array $f;
 
@@ -170,5 +171,22 @@ final class PaymentSourceRevisionTest extends TestCase
             $q->execute([$this->f['supplier']]); $out[$table] = (int) $q->fetchColumn();
         }
         return $out;
+    }
+
+    /**
+     * Jednoduchá forma: zúčtování banky i storno staré úhrady jsou po dvojicích a důkazy
+     * je přijmou. Revize zdroje přesouvá kapacitu mezi buňkami dimenzí téhož účtu 379.900;
+     * dvojice se stejným účtem MD i Dal je vyloučená (kritérium b), zápis proto zůstane
+     * složený jako nezpůsobilý s důvodem `typed_pair_same_account` a jeho důkaz projde.
+     */
+    #[\PHPUnit\Framework\Attributes\Group('pairs-e2e')]
+    public function testOnlyFreeCapacityMovesAndOldPaymentReversalRestoresItsOriginalCellInSingleEntryForm(): void
+    {
+        $this->testOnlyFreeCapacityMovesAndOldPaymentReversalRestoresItsOriginalCell();
+        self::assertGreaterThan(0, $this->assertSupplierJournalPaired($this->db->pdo(), $this->f['supplier'], ['typed_pair_same_account']));
+        $q = $this->db->pdo()->prepare("SELECT COUNT(*) FROM journal_entry_pair_status s JOIN journal_entries e ON e.supplier_id=s.supplier_id AND e.id=s.entry_id
+            WHERE s.supplier_id=? AND e.source_type='unit_payment_revision' AND s.status='ineligible' AND s.reason='typed_pair_same_account'");
+        $q->execute([$this->f['supplier']]);
+        self::assertSame(1, (int) $q->fetchColumn());
     }
 }

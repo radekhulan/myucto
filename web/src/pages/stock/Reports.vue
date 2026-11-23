@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, reactive, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { stockApi, type StockStatusReport, type StockStatusColumn, type StockValuationReport, type StockSalesReport, type StockSalesAmount, type Warehouse } from '@/api/stock'
+import { stockApi, type StockStatusReport, type StockStatusColumn, type StockValuationReport, type StockValueTrendReport, type StockSalesReport, type StockSalesAmount, type Warehouse } from '@/api/stock'
 import { eshopApi, type Attribute, type Category } from '@/api/eshop'
 import ColumnPicker from '@/components/ui/ColumnPicker.vue'
 import { useTablePrefs, type ColumnDef } from '@/composables/useTablePrefs'
@@ -11,8 +11,8 @@ import { indentedCategoryLabel } from '@/utils/categoryLabel'
 import { useToast } from '@/composables/useToast'
 import { useAuthStore } from '@/stores/auth'
 import { useRoute, RouterLink } from 'vue-router'
-import { formatMoney, formatDate, formatNumber } from '@/composables/useFormat'
-import { ICONS, btnOutline } from '@/components/ui/buttonStyles'
+import { formatMoney, formatDate, formatDateTime, formatNumber } from '@/composables/useFormat'
+import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import { appIsoDate } from '@/utils/date'
 import DateInput from '@/components/ui/DateInput.vue'
@@ -24,7 +24,7 @@ const toast = useToast()
 const auth = useAuthStore()
 const route = useRoute()
 
-type ReportTab = 'status' | 'valuation' | 'sales'
+type ReportTab = 'status' | 'valuation' | 'trend' | 'sales'
 const tab = ref<ReportTab>('status')
 // Prodeje ukazují odběratele a prodejní ceny, proto jen s právem číst vydané faktury (hlídá i API).
 const canSeeSales = computed(() => auth.canRead('invoices'))
@@ -97,6 +97,7 @@ const salesFilters = reactive({
   item_label: null as string | null,
   q: '',
   group_by: 'none' as 'none' | 'client' | 'item',
+  include_imported: false,
   page: 1,
 })
 let salesSearchTimer: ReturnType<typeof setTimeout> | undefined
@@ -111,6 +112,7 @@ function salesParams() {
     stock_item_id: salesFilters.stock_item_id ?? undefined,
     q: salesFilters.q.trim() || undefined,
     group_by: salesFilters.group_by,
+    include_imported: salesFilters.include_imported || undefined,
   }
 }
 
@@ -124,7 +126,7 @@ async function loadSales() {
 
 function onWarehouseChange() {
   if (tab.value === 'sales') reloadSales()
-  else void load()
+  else if (tab.value !== 'trend') void load() // vývoj hodnoty se počítá až tlačítkem
 }
 
 function reloadSales(resetPage = true) {
@@ -178,6 +180,83 @@ const salesQty = computed(() => {
 })
 
 const statusReport = ref<StockStatusReport | null>(null)
+// Vývoj hodnoty: konce měsíců od data „od“ a samotné datum „do“ vedle sebe.
+const trendFilters = reactive({ from: `${new Date().getFullYear() - 1}-12-31`, to: appIsoDate() })
+const trendReport = ref<StockValueTrendReport | null>(null)
+const trendGroup = ref<'' | number>('') // vlastní volba, aby se nepletla se seskupením ocenění
+let loadSeq = 0 // novější načtení nesmí přepsat starší odpověď
+const trendJob = ref<CatalogJob | null>(null)
+const trendJobStarted = ref(false) // úloha založená touto stránkou; sdílenou (reused) při odchodu jen přestaneme sledovat
+const trendJobOwn = computed(() => trendJob.value?.created_by != null && trendJob.value.created_by === auth.user?.id)
+const trendCanCancel = computed(() => trendJobOwn.value || auth.canWrite('stock'))
+const cancellingTrend = ref(false)
+let trendTimer: ReturnType<typeof setTimeout> | undefined
+let trendGeneration = 0
+function clearTrendTimer() { if (trendTimer) clearTimeout(trendTimer) }
+// Výpočet běží na pozadí (jako ocenění k datu): zadá se, sleduje se průběh a hotový výsledek se načte.
+/** Rozpracovaný výpočet, který už nikdo nesleduje, se zruší (bez práva ke zrušení nebo u hotové úlohy chyba nevadí). */
+async function abandonTrend() {
+  clearTrendTimer()
+  ++trendGeneration
+  const job = trendJob.value
+  if (job && trendJobStarted.value && ['queued', 'running'].includes(job.status)) await catalogJobsApi.cancelValueTrend(job.id).catch(() => {})
+}
+async function startTrend(seq: number) {
+  await abandonTrend()
+  const generation = trendGeneration
+  trendReport.value = null
+  trendJob.value = null
+  const job = await catalogJobsApi.createValueTrend({
+    from: trendFilters.from, to: trendFilters.to,
+    warehouse_id: filters.warehouse_id || undefined,
+    group_parent_id: trendGroup.value === '' ? undefined : trendGroup.value,
+  })
+  if (generation !== trendGeneration || seq !== loadSeq) return
+  trendJob.value = job
+  trendJobStarted.value = !job.reused
+  await pollTrend(generation)
+}
+async function pollTrend(generation = trendGeneration) {
+  if (!trendJob.value || generation !== trendGeneration) return
+  try {
+    const job = await catalogJobsApi.getValueTrendStatus(trendJob.value.id)
+    if (generation !== trendGeneration) return
+    trendJob.value = job
+    if (job.status === 'completed') {
+      const report = await catalogJobsApi.getValueTrend(job.id)
+      if (generation === trendGeneration) trendReport.value = report
+      return
+    }
+    if (job.status === 'queued' || job.status === 'running') trendTimer = setTimeout(() => { void pollTrend(generation) }, 1200)
+  } catch (e: any) {
+    if (generation !== trendGeneration) return
+    if ([403, 404, 409].includes(e?.response?.status)) { toast.error(e?.response?.data?.error?.message || t('common.error')); return }
+    trendTimer = setTimeout(() => { void pollTrend(generation) }, 5000)
+  }
+}
+/** Sdílenou úlohu jiného uživatele nezrušíme, jen přestaneme sledovat. */
+function stopWatchingTrend() {
+  clearTrendTimer()
+  ++trendGeneration
+  trendJob.value = null
+}
+async function cancelTrend() {
+  if (!trendJob.value) return
+  cancellingTrend.value = true
+  try {
+    await catalogJobsApi.cancelValueTrend(trendJob.value.id)
+    clearTrendTimer()
+    await pollTrend()
+  } catch { /* úloha mezitím doběhla nebo skončila: stav ukáže další dotaz */
+    await pollTrend()
+  } finally { cancellingTrend.value = false }
+}
+function trendGroupLabel(g: StockValueTrendReport['groups'][number]): string {
+  const parent = trendReport.value?.parent
+  if (g.kind === 'parent') return t('stock.reports.group_parent', { name: parent?.name ?? '' })
+  if (g.kind === 'uncategorized') return parent ? t('stock.reports.group_outside', { name: parent.name }) : t('stock.reports.group_none')
+  return g.name
+}
 const valuationReport = ref<StockValuationReport | null>(null)
 const valuationJob = ref<CatalogJob | null>(null)
 const valuationResult = ref<ValuationJobResult | null>(null)
@@ -187,6 +266,7 @@ let valuationTimer: ReturnType<typeof setTimeout> | undefined
 let valuationGeneration = 0
 // Seskupení ocenění: '' = žádné, 'top' = kategorie nejvyšší úrovně, číslo = přímé podkategorie.
 const valuationGroup = ref<'' | 'top' | number>('')
+const valuationCategory = ref<'' | number>('')
 function valuationGroupParams(): ValuationGroupParams {
   if (valuationGroup.value === '') return {}
   return valuationGroup.value === 'top' ? { group_by: 'category' } : { group_by: 'category', group_parent_id: valuationGroup.value }
@@ -204,14 +284,18 @@ function onValuationGroupChange() {
 }
 
 async function load() {
+  const seq = ++loadSeq
   loading.value = true
   try {
     if (tab.value === 'status') {
       statusReport.value = await stockApi.reportStatus(statusParams())
     } else if (tab.value === 'sales') {
       await loadSales()
+    } else if (tab.value === 'trend') {
+      await startTrend(seq)
     } else { await startValuation() }
   } catch (e: any) {
+    if (seq !== loadSeq) return
     const code = e?.response?.data?.error?.code
     if (code === 'too_many_movements' || code === 'stock.error.too_many_movements') {
       toast.warning(t('stock.reports.too_many_movements'))
@@ -219,7 +303,7 @@ async function load() {
       toast.error(e?.response?.data?.error?.message || t('common.error'))
     }
   } finally {
-    loading.value = false
+    if (seq === loadSeq) loading.value = false
   }
 }
 
@@ -230,7 +314,7 @@ async function startValuation() {
   valuationResult.value = null
   valuationReport.value = null
   valuationPage.value = 1
-  const job = await catalogJobsApi.createValuation({ date: filters.date, warehouse_id: filters.warehouse_id || undefined })
+  const job = await catalogJobsApi.createValuation({ date: filters.date, warehouse_id: filters.warehouse_id || undefined, category_id: valuationCategory.value || undefined })
   if (generation !== valuationGeneration) return
   valuationJob.value = job
   await pollValuation(generation)
@@ -259,6 +343,7 @@ async function loadValuationPage(page = valuationPage.value) {
     valuationPage.value = page
     valuationResult.value = result
     filters.date = result.date
+    valuationCategory.value = result.category?.id ?? ''
   } catch (e: any) { toast.error(e?.response?.data?.error?.message || t('common.error')) }
 }
 async function cancelValuation() {
@@ -272,11 +357,15 @@ async function cancelValuation() {
   finally { cancellingValuation.value = false }
 }
 
-function selectTab(t2: ReportTab) { clearValuationTimer(); ++valuationGeneration; tab.value = t2; void load() }
+function selectTab(t2: ReportTab) { clearValuationTimer(); ++valuationGeneration; void abandonTrend(); tab.value = t2; if (t2 !== 'trend') void load() }
 
 async function exportFile(format: 'pdf' | 'xlsx') {
   if (tab.value === 'sales') {
     window.open(stockApi.reportExportUrl('sales', 'xlsx', salesParams()), '_blank', 'noopener')
+    return
+  }
+  if (tab.value === 'trend') {
+    if (trendReport.value) window.open(stockApi.reportExportUrl('value-trend', format, { job_id: trendReport.value.job_id }), '_blank', 'noopener')
     return
   }
   const url = stockApi.reportExportUrl(tab.value, format, tab.value === 'status' ? statusParams() : {
@@ -311,6 +400,17 @@ onMounted(async () => {
       stockApi.getItem(itemId).then(item => { salesFilters.item_label = item.sku }).catch(() => {})
     }
   }
+  // Odkaz ze seznamu úloh na pozadí: /stock/reports?tab=trend&trend_job=… (hotový výsledek se jen načte, nepřepočítává)
+  const trendJobId = Number(route.query.trend_job)
+  if (Number.isSafeInteger(trendJobId) && trendJobId > 0) {
+    tab.value = 'trend'
+    trendJobStarted.value = false
+    try {
+      trendJob.value = await catalogJobsApi.getValueTrendStatus(trendJobId)
+      await pollTrend()
+    } catch (e: any) { toast.error(e?.response?.data?.error?.message || t('common.error')) }
+    return
+  }
   const jobId = Number(route.query.valuation_job)
   if (Number.isSafeInteger(jobId) && jobId > 0) {
     tab.value = 'valuation'
@@ -322,7 +422,7 @@ onMounted(async () => {
   }
   await load()
 })
-onBeforeUnmount(() => { clearValuationTimer(); ++valuationGeneration; if (salesSearchTimer) clearTimeout(salesSearchTimer) })
+onBeforeUnmount(() => { clearValuationTimer(); ++valuationGeneration; void abandonTrend(); if (salesSearchTimer) clearTimeout(salesSearchTimer) })
 </script>
 
 <template>
@@ -343,6 +443,11 @@ onBeforeUnmount(() => { clearValuationTimer(); ++valuationGeneration; if (salesS
         :class="tab === 'valuation' ? 'border-primary-600 text-primary-700 font-medium' : 'border-transparent text-neutral-600 hover:text-neutral-900'">
         {{ t('stock.reports.tab_valuation') }}
       </button>
+      <button type="button" @click="selectTab('trend')" data-test="tab-trend"
+        class="cursor-pointer px-3 py-2 text-sm border-b-2 transition whitespace-nowrap"
+        :class="tab === 'trend' ? 'border-primary-600 text-primary-700 font-medium' : 'border-transparent text-neutral-600 hover:text-neutral-900'">
+        {{ t('stock.reports.tab_trend') }}
+      </button>
       <button v-if="canSeeSales" type="button" @click="selectTab('sales')"
         class="cursor-pointer px-3 py-2 text-sm border-b-2 transition whitespace-nowrap"
         :class="tab === 'sales' ? 'border-primary-600 text-primary-700 font-medium' : 'border-transparent text-neutral-600 hover:text-neutral-900'">
@@ -360,10 +465,38 @@ onBeforeUnmount(() => { clearValuationTimer(); ++valuationGeneration; if (salesS
             <option v-for="w in warehouses" :key="w.id" :value="w.id">{{ w.name }}</option>
           </select>
         </div>
+        <div v-if="tab === 'valuation' && categories.length">
+          <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('stock.reports.filter_category') }}</label>
+          <select v-model="valuationCategory" data-test="valuation-category" @change="load" class="h-9 px-2 border border-neutral-300 rounded-md text-sm bg-surface min-w-[10rem]">
+            <option value="">{{ t('common.all') }}</option>
+            <option v-for="c in categories" :key="c.id" :value="c.id">{{ indentedCategoryLabel(c) }}</option>
+          </select>
+        </div>
         <div v-if="tab === 'valuation'">
           <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('stock.reports.filter_date') }}</label>
           <DateInput v-model="filters.date" @change="load" class="h-9 px-2 border border-neutral-300 rounded-md text-sm" />
         </div>
+        <template v-if="tab === 'trend'">
+          <div>
+            <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('stock.reports.trend_from') }}</label>
+            <DateInput v-model="trendFilters.from" class="h-9 px-2 border border-neutral-300 rounded-md text-sm" />
+          </div>
+          <div>
+            <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('stock.reports.trend_to') }}</label>
+            <DateInput v-model="trendFilters.to" class="h-9 px-2 border border-neutral-300 rounded-md text-sm" />
+          </div>
+          <div v-if="categories.length">
+            <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('stock.reports.trend_level') }}</label>
+            <select v-model="trendGroup" data-test="trend-group" class="h-9 px-2 border border-neutral-300 rounded-md text-sm bg-surface min-w-[12rem]">
+              <option value="">{{ t('stock.reports.group_top') }}</option>
+              <option v-for="c in categories" :key="c.id" :value="c.id">{{ indentedCategoryLabel(c) }}</option>
+            </select>
+          </div>
+        </template>
+        <button v-if="tab === 'trend'" type="button" @click="load" :disabled="loading" data-test="trend-run" :class="btnFilled('primary')">
+          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.chart" /></svg>
+          {{ t('stock.reports.trend_run') }}
+        </button>
         <div v-if="tab === 'valuation' && categories.length">
           <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('stock.reports.filter_group') }}</label>
           <select v-model="valuationGroup" data-test="valuation-group" @change="onValuationGroupChange" class="h-9 px-2 border border-neutral-300 rounded-md text-sm bg-surface min-w-[12rem]">
@@ -424,11 +557,11 @@ onBeforeUnmount(() => { clearValuationTimer(); ++valuationGeneration; if (salesS
             {{ t('stock.reports.export_xlsx') }}
           </button>
           <template v-else>
-          <button :disabled="loading || (tab === 'valuation' && !valuationResult)" @click="exportFile('pdf')" :class="btnOutline('primary')">
+          <button :disabled="loading || (tab === 'valuation' && !valuationResult) || (tab === 'trend' && !trendReport)" @click="exportFile('pdf')" :class="btnOutline('primary')">
             <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.download" /></svg>
             {{ t('stock.reports.export_pdf') }}
           </button>
-          <button :disabled="loading || (tab === 'valuation' && !valuationResult)" @click="exportFile('xlsx')" :class="btnOutline('primary')">
+          <button :disabled="loading || (tab === 'valuation' && !valuationResult) || (tab === 'trend' && !trendReport)" @click="exportFile('xlsx')" :class="btnOutline('primary')">
             <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.download" /></svg>
             {{ t('stock.reports.export_xlsx') }}
           </button>
@@ -446,6 +579,11 @@ onBeforeUnmount(() => { clearValuationTimer(); ++valuationGeneration; if (salesS
             {{ t(`stock.reports.sales.group_${g}`) }}
           </button>
         </div>
+        <label class="inline-flex items-center gap-1.5 h-8 text-xs sm:text-sm text-neutral-600 cursor-pointer" :title="t('stock.reports.sales.include_imported_hint')">
+          <input v-model="salesFilters.include_imported" type="checkbox" @change="reloadSales()" class="rounded border-neutral-300" />
+          {{ t('stock.reports.sales.include_imported') }}
+        </label>
+        <p v-if="salesFilters.include_imported" class="basis-full text-xs text-neutral-500">{{ t('stock.reports.sales.include_imported_hint') }}</p>
         <button v-if="salesFilters.stock_item_id" type="button" @click="clearItemFilter"
           class="cursor-pointer inline-flex items-center gap-1 h-8 px-2 rounded-md bg-neutral-100 text-xs text-neutral-700 hover:bg-neutral-200 whitespace-nowrap">
           {{ t('stock.reports.sales.item_filter', { sku: salesFilters.item_label ?? `#${salesFilters.stock_item_id}` }) }}
@@ -583,6 +721,7 @@ onBeforeUnmount(() => { clearValuationTimer(); ++valuationGeneration; if (salesS
                     <td class="px-3 py-2 whitespace-nowrap">
                       <RouterLink :to="`/invoices/${r.invoice_id}`" class="font-mono text-xs text-primary-600 hover:text-primary-700">{{ r.invoice_number || `#${r.invoice_id}` }}</RouterLink>
                       <span v-if="r.invoice_type === 'credit_note'" class="ml-1 text-xs px-1.5 py-0.5 rounded bg-warning-50 text-warning-700">{{ t('stock.item_detail.credit_note') }}</span>
+                      <span v-if="r.matched_by_code" class="ml-1 text-xs px-1.5 py-0.5 rounded bg-neutral-100 text-neutral-600" :title="t('stock.reports.sales.include_imported_hint')">{{ t('stock.reports.sales.matched_by_code') }}</span>
                     </td>
                     <td class="px-3 py-2">
                       <RouterLink v-if="r.client_id" :to="`/clients/${r.client_id}`" class="hover:text-primary-700">{{ r.client_name || `#${r.client_id}` }}</RouterLink>
@@ -610,6 +749,7 @@ onBeforeUnmount(() => { clearValuationTimer(); ++valuationGeneration; if (salesS
                 <span class="flex items-center gap-1">
                   <RouterLink :to="`/invoices/${r.invoice_id}`" class="font-mono text-primary-600">{{ r.invoice_number || `#${r.invoice_id}` }}</RouterLink>
                   <span v-if="r.invoice_type === 'credit_note'" class="px-1.5 py-0.5 rounded bg-warning-50 text-warning-700">{{ t('stock.item_detail.credit_note') }}</span>
+                  <span v-if="r.matched_by_code" class="px-1.5 py-0.5 rounded bg-neutral-100 text-neutral-600">{{ t('stock.reports.sales.matched_by_code') }}</span>
                 </span>
                 <span class="text-neutral-500">{{ formatDate(r.tax_date) }}</span>
               </div>
@@ -626,6 +766,45 @@ onBeforeUnmount(() => { clearValuationTimer(); ++valuationGeneration; if (salesS
             @update:page="(p: number) => { salesFilters.page = p; reloadSales(false) }" />
         </template>
       </template>
+    </template>
+
+    <!-- Vývoj hodnoty -->
+    <template v-else-if="tab === 'trend'">
+      <p v-if="!trendJob && !trendReport && !loading" class="text-sm text-neutral-500 mb-3" data-test="trend-hint">{{ t('stock.reports.trend_hint') }}</p>
+      <CatalogJobProgress v-if="trendJob && ['queued', 'running'].includes(trendJob.status)" class="mb-2" :job="trendJob" :cancelling="cancellingTrend" :can-cancel="trendCanCancel" @cancel="cancelTrend" />
+      <div v-if="trendJob && !trendJobOwn && ['queued', 'running'].includes(trendJob.status)" class="mb-4 flex items-center gap-3 text-sm text-neutral-600" data-test="trend-shared">
+        <span>{{ t('stock.reports.trend_shared') }}</span>
+        <button type="button" :class="btnOutline('neutral')" data-test="trend-stop-watching" @click="stopWatchingTrend">{{ t('stock.reports.trend_stop_watching') }}</button>
+      </div>
+      <p v-if="trendJob && ['queued', 'running'].includes(trendJob.status) && Number((trendJob.report as any)?.restarts) > 0" class="text-sm text-neutral-600 mb-3" data-test="trend-restart">{{ t('stock.reports.trend_restart') }}</p>
+      <p v-if="trendJob?.status === 'cancelled'" class="text-sm text-neutral-600 mb-3" data-test="trend-cancelled">{{ t('stock.reports.trend_cancelled') }}</p>
+      <p v-if="trendJob?.status === 'failed'" class="text-sm text-danger-600 mb-3" data-test="trend-failed">{{ trendJob.error_code === 'stock_value_trend_stale' ? t('stock.reports.trend_stale') : t('stock.reports.trend_failed') }}</p>
+      <p v-if="trendReport?.computed_at" class="text-xs text-neutral-500 mb-2" data-test="trend-computed">{{ t('stock.reports.trend_computed', { at: formatDateTime(trendReport.computed_at) }) }}</p>
+      <div v-if="trendReport" class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-hidden">
+        <div class="overflow-x-auto">
+          <table class="w-full text-sm table-sticky-first" data-test="trend-table">
+            <thead class="bg-neutral-50 text-xs text-neutral-500 uppercase tracking-wide">
+              <tr>
+                <th class="px-3 py-2 text-left font-medium">{{ t('stock.reports.col_category') }}</th>
+                <th v-for="d in trendReport.dates" :key="d" class="px-3 py-2 text-right font-medium whitespace-nowrap">{{ formatDate(d) }}</th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-neutral-100">
+              <tr v-for="g in trendReport.groups" :key="`${g.kind}-${g.category_id ?? ''}`">
+                <td class="px-3 py-2" :class="g.kind === 'category' ? '' : 'text-neutral-600'">{{ trendGroupLabel(g) }}</td>
+                <td v-for="d in trendReport.dates" :key="d" class="px-3 py-2 text-right font-mono whitespace-nowrap">{{ formatMoney(Number(g.values[d])) }}</td>
+              </tr>
+            </tbody>
+            <tfoot class="bg-neutral-50 font-medium">
+              <tr>
+                <td class="sticky left-0 z-[1] bg-neutral-50 px-3 py-2">{{ t('stock.reports.total') }}</td>
+                <td v-for="d in trendReport.dates" :key="d" class="px-3 py-2 text-right font-mono whitespace-nowrap">{{ formatMoney(Number(trendReport.totals[d].value_total)) }}</td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+      </div>
+      <p v-if="trendReport?.groups.length" class="text-xs text-neutral-500 mt-3">{{ t('stock.reports.group_note') }}</p>
     </template>
 
     <!-- Ocenění -->
@@ -696,3 +875,4 @@ onBeforeUnmount(() => { clearValuationTimer(); ++valuationGeneration; if (salesS
     </template>
   </div>
 </template>
+

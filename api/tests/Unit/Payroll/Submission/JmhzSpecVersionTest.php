@@ -54,12 +54,22 @@ final class JmhzSpecVersionTest extends TestCase
         self::assertSame(JmhzSpecVersion::V2027, JmhzSpecVersion::forRegistrationEventDate('2027-01-01'));
     }
 
+    /** ČSSZ, Otázky a odpovědi k NV2027, odpověď 5: REGZEC27 od 23. 12. 2026. */
+    public function testChangeWithoutEndFollowsTheDayRegzec27IsAccepted(): void
+    {
+        self::assertSame('2026-12-23', JmhzSpecVersion::FIRST_REGZEC27_ACCEPTED_ON);
+        self::assertSame(JmhzSpecVersion::V2026, JmhzSpecVersion::forRegistrationChangeWithoutEnd('2026-12-22'));
+        self::assertSame(JmhzSpecVersion::V2027, JmhzSpecVersion::forRegistrationChangeWithoutEnd('2026-12-23'));
+        self::assertSame(JmhzSpecVersion::V2027, JmhzSpecVersion::forRegistrationChangeWithoutEnd('2027-01-05'));
+    }
+
     /** @return iterable<string,array{\Closure():mixed,string}> */
     public static function invalidInputs(): iterable
     {
         yield 'měsíc 13' => [static fn () => JmhzSpecVersion::forPeriod(2026, 13), 'jmhz_spec_version_period_invalid'];
         yield 'neexistující den' => [static fn () => JmhzSpecVersion::forPeriodStart('2027-02-30'), 'jmhz_spec_version_period_invalid'];
         yield 'datum události' => [static fn () => JmhzSpecVersion::forRegistrationEventDate('2027-1-1'), 'jmhz_spec_version_period_invalid'];
+        yield 'den vyhotovení' => [static fn () => JmhzSpecVersion::forRegistrationChangeWithoutEnd('2026-12-32'), 'jmhz_spec_version_period_invalid'];
         yield 'neznámá verze' => [static fn () => JmhzSpecVersion::fromStored('2028'), 'jmhz_spec_version_unknown'];
         yield 'prázdná verze' => [static fn () => JmhzSpecVersion::fromStored(''), 'jmhz_spec_version_unknown'];
     }

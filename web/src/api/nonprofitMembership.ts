@@ -11,14 +11,40 @@ export interface MembershipLegalBasis { organisation_form: 'association'; relati
 
 /** Řádek seznamu členů: poslední revize může začínat v budoucnu, není to dnešní stav. */
 export interface MemberRow {
+  contribution?: {status: 'none' | 'paid' | 'unpaid' | 'unproven'; unpaired_count?: number; claim_count: number; prescribed_cents: string; paid_cents: string | null; open_cents: string | null}
   id: number; supplier_id: number; client_id: number; member_number: string; created_by: number; created_at?: string
-  company_name?: string; revision_no: number | null; effective_from: string | null; status: MemberStatus | null
+  // revision_no, effective_from a status jsou z poslední platné (nezrušené) revize, ne z hlavy řetězu.
+  company_name?: string; first_name?: string; last_name?: string; revision_no: number | null; effective_from: string | null; status: MemberStatus | null
+  /** Člen má historii, ale všechny revize jsou zrušené (nemá členství). */
+  all_revisions_voided?: boolean
+  /** Osobní údaje člena byly vymazány; jméno server nevrací (krok 10). */
+  erased?: boolean
 }
 export interface MemberPage { items: MemberRow[]; next_after_id: number | null }
+/** Řádek náhledu nebo výsledku importu seznamu členů; reason je strojový kód důvodu. */
+export interface MembershipImportRow {
+  line: number; member_number: string; name?: string; status: 'new_revision' | 'new_member' | 'unchanged' | 'error'
+  reason?: string; params?: Record<string, string>; member_id?: number; client_id?: number | null; contact?: 'existing' | 'create'; contact_name?: string; contact_ic?: string | null
+  new_status?: MemberStatus; effective_from?: string
+  outcome?: 'written' | 'failed' | 'already_imported'; failure?: string; failure_message?: string
+}
+export interface MembershipImportReport {
+  ok: boolean; dry_run: boolean; preview_hash: string
+  counts: { new_revision: number; new_member: number; unchanged: number; error: number }
+  rows: MembershipImportRow[]; written?: number; failed_writes?: number
+}
+export interface MembershipListFilters {search?: string; year?: number | null; title_key?: string; payment_status?: 'all' | 'paid' | 'unpaid' | 'unproven' | 'none'}
 
-export interface MemberIdentity { id: number; supplier_id: number; client_id: number; member_number: string; created_by: number; created_at?: string }
+export interface MemberIdentity {
+  id: number; supplier_id: number; client_id: number; member_number: string; created_by: number; created_at?: string
+  /** Jméno kontaktu; vrací ho detail člena (samostatná stránka), ne zápisové akce. */
+  company_name?: string | null; first_name?: string | null; last_name?: string | null
+}
 export interface MemberRevision {
   id: number; supplier_id: number; member_id: number; revision_no: number; previous_id: number | null
+  /** Rušící článek: odkaz na zrušenou revizi. Zrušená revize zůstává v historii, ale nepočítá se. */
+  voids_revision_id?: number | null
+  request?: { reason?: string }
   effective_from: string; status: MemberStatus; legal_basis: MembershipLegalBasis
   idempotency_key: string; request_hash: string; parent_hash: string; record_hash: string; created_by: number; created_at?: string
 }
@@ -26,16 +52,26 @@ export interface MemberRevisionInput { status: MemberStatus; effective_from: str
 
 export interface ClaimSettlement { status: SettlementStatus; paid_cents: number | null; open_cents: number | null; pairing_id: number | null; evidence: string }
 export interface ClaimRow {
+  variable_symbol?: string | null
   claim_id: number; case_id: number; operation_id: number; member_id: number; client_id: number; amount_cents: number
   reversal_claim_id: number | null; accounting_date: string; due_date: string; journal_entry_id: number; receivable_line_id: number
   line_no: number; account_id: number; posted_at: string | null; reversed_by: number | null
   title_key: string; period_from: string; period_to: string; settlement: ClaimSettlement
 }
 export interface MemberBalance {
-  member_id: number; page_active_claim_cents: number; page_proven_open_cents: number; page_unreconciled_count: number
+  member_id: number; page_active_claim_cents: number; page_open_cents: number | null; page_needs_review_count: number
   items: ClaimRow[]; next_after_claim_id: number | null
 }
-export interface MemberDetail { member: MemberIdentity; history: MemberRevision[]; balance: MemberBalance }
+/** Které opravy server u člena právě dovolí (krok 7 #321); důvod blokace je chybový kód. */
+export interface MemberCorrections {
+  can_edit_identity: boolean; edit_identity_block: string | null
+  can_delete: boolean; delete_block: string | null
+  voidable_revision_id: number | null; void_block: string | null
+  head_revision_no: number
+}
+export interface MemberIdentityInput { client_id: number; member_number: string; expected_client_id: number; expected_member_number: string }
+export interface MemberRevisionVoidInput { expected_revision: number; reason: string; idempotency_key: string }
+export interface MemberDetail { member: MemberIdentity; history: MemberRevision[]; corrections?: MemberCorrections; balance: MemberBalance; erased?: boolean }
 
 export interface ReconciliationTotals {
   claims: { row_count: number | string; cents: number | string }
@@ -51,6 +87,8 @@ export interface MembershipClassification { activity_value_id: number; activity_
 
 /** Přesná množina klíčů, kterou přijímá MembershipChargeRequest::issue. */
 export interface MembershipIssueRequest {
+  variable_symbol?: string
+  rate_id?: number
   member_id: number; title_key: string; period_from: string; period_to: string; accounting_date: string; due_date: string
   amount: string; receivable_account: string; revenue_account: string; title_reference: string; evidence: string
   nonreciprocal: true; reason: string; classification: MembershipClassification
@@ -75,6 +113,7 @@ export interface JournalPlanLine {
   dimensions?: Record<number, number>; dimension_origins?: Record<number, ClassificationOrigin>
 }
 export interface MembershipPreview {
+  variable_symbol?: string | null
   request: Record<string, unknown>; case_id: number | null; expected_case_version: number; preview_hash: string
   case: { id: number; row_version: number } | null
   proof?: {
@@ -105,14 +144,108 @@ function options(supplier: number) {
 }
 const base = '/accounting/nonprofit-membership'
 
+export interface MembershipRateInput {
+  name: string; amount: string; receivable_account: string; revenue_account: string; title_key: string
+  period_months: number; title_reference: string; evidence: string; classification: MembershipClassification | null
+  is_active: boolean; row_version: number
+}
+export interface MembershipRate extends MembershipRateInput { id: number; supplier_id: number }
+export interface MembershipRatePage { items: MembershipRate[]; next_after_id: number | null; revenue_accounts?: {account_code: string; name: string}[] }
+export type MembershipBatchTemplate = Omit<MembershipIssueRequest, 'member_id'>
+export type MembershipBatchPhase = 'seeding' | 'preparing' | 'ready' | 'posting' | 'finished' | 'cancelled'
+export type MembershipBatchStatus = 'pending' | 'ready' | 'created' | 'existing' | 'rejected'
+export interface MembershipBatchCreate { template: MembershipBatchTemplate; selection_mode: 'active' | 'selected'; member_ids: number[]; idempotency_key: string }
+export interface MembershipBatchSummary { total: number; pending: number; ready: number; created: number; existing: number; rejected: number; planned_cents: string; created_cents: string; deferred_cents: string; deferral_date: string | null }
+export interface MembershipBatchItem { member_id: number; member_number: string; company_name: string | null;first_name?: string; last_name?: string; status: MembershipBatchStatus; amount_cents: number; operation_id: number | null; error_code: string | null; error_message: string | null }
+export interface MembershipBatchDetail {
+  batch: { id: number; supplier_id: number; phase: MembershipBatchPhase; template: MembershipBatchTemplate; approval_token?: string | null; approval_expires_at?: string | null; member_count: number; selection_mode: 'active' | 'selected' }
+  summary: MembershipBatchSummary; items: MembershipBatchItem[]; next_after_member_id: number | null
+  accounts: { account: string; side: 'debit' | 'credit'; amount_cents: string }[]
+}
+export interface MembershipBatchRecent { id: number; phase: MembershipBatchPhase; member_count: number; created_at: string; title_key: string; period_from: string; period_to: string }
+
+export type MembershipErasureStatus = 'pending' | 'approved' | 'rejected' | 'executed'
+export type MembershipErasureOutcome = 'pending' | 'done' | 'skipped_changed' | 'skipped_hold'
+export type MembershipErasureSubject = 'member' | 'deleted_member'
+export type MembershipErasureRule = 'accounting_records' | 'membership_only'
+export interface MembershipErasureAssessmentItem {
+  member_id: number; subject: MembershipErasureSubject; ended_on: string; last_record_period_end: string | null
+  retained_until: string; governing_rule: MembershipErasureRule; blocked_by: string | null; erasable: boolean
+}
+export interface MembershipErasureAssessment { as_of: string; items: MembershipErasureAssessmentItem[]; next_after: number | null; deleted_members: MembershipErasureAssessmentItem[] }
+export interface MembershipErasureProposal {
+  id: number; status: MembershipErasureStatus; as_of: string; note: string | null; row_version: number
+  created_by: number | null; created_at: string; approved_by: number | null; approved_at: string | null; executable_from: string | null
+  revoked_at: string | null; rejected_at: string | null; executed_at: string | null
+  item_count?: number; pending_count?: number; done_count?: number; skipped_count?: number
+}
+export interface MembershipErasureItem {
+  id: number; member_id: number; subject: MembershipErasureSubject; governing_rule: MembershipErasureRule; ended_on: string
+  last_record_period_end: string | null; retained_until: string; outcome: MembershipErasureOutcome; skip_reason: string | null
+  counts: Record<string, unknown> | null; executed_at: string | null
+  /** Jen u položky, která ještě neproběhla (kontrola před schválením). */
+  member_number: string | null; company_name: string | null; first_name: string | null; last_name: string | null
+}
+export interface MembershipErasureDetail { proposal: MembershipErasureProposal; items: MembershipErasureItem[]; next_after_member_id: number | null; confirmation: string; cooling_off_hours: number }
+export interface MembershipErasureExecution { proposal: MembershipErasureProposal; processed: number; remaining: number; summary: Record<'done' | 'skipped_changed' | 'skipped_hold', number> }
+
+export const membershipErasureApi = {
+  assessment: (supplier: number, afterId = 0) => api.get<MembershipErasureAssessment>(`${base}/erasure/assessment`, { ...options(supplier), params: { after_id: afterId } }).then(r => r.data),
+  proposals: (supplier: number) => api.get<{ items: MembershipErasureProposal[] }>(`${base}/erasure`, options(supplier)).then(r => r.data),
+  proposal: (supplier: number, id: number, afterMemberId = 0) => api.get<MembershipErasureDetail>(`${base}/erasure/${id}`, { ...options(supplier), params: { after_member_id: afterMemberId } }).then(r => r.data),
+  create: (supplier: number, note: string | null) => api.post<{ proposal: MembershipErasureProposal }>(`${base}/erasure`, { note }, options(supplier)).then(r => r.data),
+  approve: (supplier: number, id: number) => api.post<{ proposal: MembershipErasureProposal }>(`${base}/erasure/${id}/approve`, {}, options(supplier)).then(r => r.data),
+  revoke: (supplier: number, id: number) => api.post<{ proposal: MembershipErasureProposal }>(`${base}/erasure/${id}/revoke`, {}, options(supplier)).then(r => r.data),
+  reject: (supplier: number, id: number) => api.post<{ proposal: MembershipErasureProposal }>(`${base}/erasure/${id}/reject`, {}, options(supplier)).then(r => r.data),
+  execute: (supplier: number, id: number, confirmation: string) => api.post<MembershipErasureExecution>(`${base}/erasure/${id}/execute`, { confirmation }, options(supplier)).then(r => r.data),
+}
+
 export const membershipApi = {
-  members: (supplier: number, afterId = 0, limit = 50) => api.get<MemberPage>(`${base}/members`, { ...options(supplier), params: { after_id: afterId, limit } }).then(r => r.data),
+  batches: (supplier: number, beforeId?: number) => api.get<{items: MembershipBatchRecent[]; next_before_id: number | null}>(`${base}/batches`, { ...options(supplier), params: { ...(beforeId ? {before_id: beforeId} : {}) } }).then(r => r.data),
+  batch: (supplier: number, id: number, afterMemberId = 0) => api.get<MembershipBatchDetail>(`${base}/batches/${id}`, { ...options(supplier), params: { after_member_id: afterMemberId } }).then(r => r.data),
+  createBatch: (supplier: number, body: MembershipBatchCreate) => api.post<MembershipBatchDetail>(`${base}/batches`, body, options(supplier)).then(r => r.data),
+  prepareBatch: (supplier: number, id: number) => api.post<MembershipBatchDetail>(`${base}/batches/${id}/prepare`, {}, options(supplier)).then(r => r.data),
+  renewBatch: (supplier: number, id: number) => api.post<MembershipBatchDetail>(`${base}/batches/${id}/renew-preview`, {}, options(supplier)).then(r => r.data),
+  cancelBatch: (supplier: number, id: number) => api.post<MembershipBatchDetail>(`${base}/batches/${id}/cancel`, {}, options(supplier)).then(r => r.data),
+  confirmBatch: (supplier: number, id: number, token: string) => api.post<MembershipBatchDetail>(`${base}/batches/${id}/confirm`, {approval_token: token}, options(supplier)).then(r => r.data),
+  rate: (supplier: number, id: number) => api.get<MembershipRate>(`${base}/rates/${id}`, options(supplier)).then(r => r.data),
+  rates: (supplier: number, afterId = 0, activeOnly = true, date?: string) => api.get<MembershipRatePage>(`${base}/rates`, { ...options(supplier), params: { after_id: afterId, active_only: activeOnly ? 1 : 0, ...(date ? {date} : {}) } }).then(r => r.data),
+  createRate: (supplier: number, body: MembershipRateInput) => api.post<MembershipRate>(`${base}/rates`, body, options(supplier)).then(r => r.data),
+  updateRate: (supplier: number, id: number, body: MembershipRateInput) => api.put<MembershipRate>(`${base}/rates/${id}`, body, options(supplier)).then(r => r.data),
+  selectionCheck: (supplier: number, memberIds: number[], filters: MembershipListFilters) => api.post<{member_ids: number[]}>(`${base}/members/selection-check`, {member_ids: memberIds, filters}, options(supplier)).then(r => r.data),
+  titles: (supplier: number, year?: number, afterTitleKey?: string) => api.get<{items: string[]; next_after_title_key: string | null}>(`${base}/titles`, { ...options(supplier), params: { ...(year ? {year} : {}), ...(afterTitleKey ? {after_title_key: afterTitleKey} : {}), limit: 100 } }).then(r => r.data),
+  members: (supplier: number, afterId = 0, limit = 50, filters: MembershipListFilters = {}) => api.get<MemberPage>(`${base}/members`, { ...options(supplier), params: { after_id: afterId, limit, ...filters, ...(filters.year === null ? {year: ''} : {}) } }).then(r => r.data),
+  /** Soubor seznamu se stejnými filtry jako seznam; přes axios kvůli X-Supplier-Id a přihlášení. */
+  exportMembers: async (supplier: number, format: 'xlsx' | 'csv', filters: MembershipListFilters = {}): Promise<{blob: Blob; filename: string}> => {
+    const r = await api.get(`${base}/members/export`, { ...options(supplier), responseType: 'blob', params: { format, ...filters, ...(filters.year === null ? {year: ''} : {}) } })
+      .catch(async (e: { response?: { data?: unknown } }) => {
+        // Chyba přijde jako Blob s JSON; převedeme ji, aby hláška šla podle kódu jako u ostatních volání.
+        const data = e?.response?.data
+        if (data instanceof Blob && e.response) {
+          try { e.response.data = JSON.parse(await data.text()) } catch { /* ponechat původní odpověď */ }
+        }
+        throw e
+      })
+    const match = /filename\*?=(?:UTF-8'')?"?([^";]+)"?/i.exec(String(r.headers?.['content-disposition'] ?? ''))
+    return { blob: r.data as Blob, filename: match ? decodeURIComponent(match[1]) : `clenove.${format}` }
+  },
+  importMembers: (supplier: number, file: File, previewHash: string | null) => {
+    const fd = new FormData()
+    fd.append('file', file)
+    fd.append('dry_run', previewHash === null ? '1' : '0')
+    if (previewHash !== null) fd.append('preview_hash', previewHash)
+    return api.post<MembershipImportReport>(`${base}/members/import`, fd, { headers: { ...options(supplier).headers, 'Content-Type': 'multipart/form-data' } }).then(r => r.data)
+  },
   member: (supplier: number, id: number, afterClaimId = 0, limit = 50) => api.get<MemberDetail>(`${base}/members/${id}`, { ...options(supplier), params: { after_claim_id: afterClaimId, limit } }).then(r => r.data),
   claim: (supplier: number, id: number) => api.get<ClaimRow>(`${base}/claims/${id}`, options(supplier)).then(r => r.data),
   classificationOptions: (supplier: number) => api.get<DimensionOverview>('/accounting/dimensions', options(supplier)).then(r => r.data),
   reconciliation: (supplier: number, period: number) => api.get<ReconciliationTotals>(`/accounting/periods/${period}/nonprofit-membership/reconciliation`, options(supplier)).then(r => r.data),
   createMember: (supplier: number, body: { client_id: number; member_number: string }) => api.post<MemberIdentity>(`${base}/members`, body, options(supplier)).then(r => r.data),
   appendRevision: (supplier: number, member: number, body: MemberRevisionInput) => api.post<MemberRevision>(`${base}/members/${member}/revisions`, body, options(supplier)).then(r => r.data),
+  updateMember: (supplier: number, member: number, body: MemberIdentityInput) => api.put<MemberIdentity>(`${base}/members/${member}`, body, options(supplier)).then(r => r.data),
+  deleteMember: (supplier: number, member: number, expected: { client_id: number; member_number: string }) => api.delete<{ deleted: true; member_id: number }>(`${base}/members/${member}`,
+    { ...options(supplier), params: { expected_client_id: expected.client_id, expected_member_number: expected.member_number } }).then(r => r.data),
+  voidRevision: (supplier: number, member: number, revision: number, body: MemberRevisionVoidInput) => api.post<MemberRevision>(`${base}/members/${member}/revisions/${revision}/void`, body, options(supplier)).then(r => r.data),
   preview: (supplier: number, body: MembershipPreviewBody) => api.post<MembershipPreview>(`${base}/charges/preview`, body, options(supplier)).then(r => r.data),
   confirm: (supplier: number, body: MembershipConfirmBody) => api.post<MembershipConfirmResult>(`${base}/charges/confirm`, body, options(supplier)).then(r => r.data),
 }

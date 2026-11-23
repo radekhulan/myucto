@@ -36,6 +36,7 @@ final class PortfolioAction
             RequestAuthorization::isSuperadmin($request),
             new \DateTimeImmutable(),
             RequestAuthorization::boundSupplierId($request),
+            $request,
         ));
     }
 
@@ -59,6 +60,7 @@ final class PortfolioAction
             RequestAuthorization::isSuperadmin($request),
             $supplierId,
             RequestAuthorization::boundSupplierId($request),
+            $request,
         )) {
             return Json::error($response, 'not_found', 'Firma nenalezena.', 404);
         }

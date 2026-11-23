@@ -12,13 +12,21 @@ const m = vi.hoisted(() => ({
   overview: vi.fn(),
   getDocument: vi.fn(),
   saveDocument: vi.fn(),
+  warning: vi.fn(),
+  push: vi.fn(),
   dimensionsEnabled: false,
 }))
 
 vi.mock('vue-router', () => ({
   useRoute: () => ({ params: { id: '301' }, query: {} }),
-  useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
+  useRouter: () => ({ push: m.push, replace: vi.fn() }),
   RouterLink: { name: 'RouterLink', props: ['to'], template: '<a><slot /></a>' },
+}))
+
+vi.mock('@/composables/useUserPrefs', () => ({
+  ensurePrefsLoaded: () => Promise.resolve(),
+  getPagePrefs: () => ({ value: {} }),
+  patchPagePrefs: vi.fn(),
 }))
 
 vi.mock('vue-i18n', () => ({
@@ -67,9 +75,12 @@ vi.mock('@/api/vatClassifications', () => ({ vatClassificationsApi: { list: vi.f
 vi.mock('@/api/settings', () => ({ settingsApi: { createCurrency: vi.fn() } }))
 vi.mock('@/api/clients', () => ({ clientsApi: { getVatStatus: vi.fn() } }))
 vi.mock('@/api/errors', () => ({ apiErrorMessage: (e: unknown) => String((e as { message?: string })?.message ?? e) }))
-vi.mock('@/composables/useFormat', () => ({ formatMoney: (v: number, c?: string) => `${v} ${c ?? ''}`.trim() }))
+vi.mock('@/composables/useFormat', () => ({
+  formatMoney: (v: number, c?: string) => `${v} ${c ?? ''}`.trim(),
+  formatDate: (d: string) => d,
+}))
 vi.mock('@/composables/useToast', () => ({
-  useToast: () => ({ success: vi.fn(), error: vi.fn(), warning: vi.fn(), info: vi.fn() }),
+  useToast: () => ({ success: vi.fn(), error: vi.fn(), warning: m.warning, info: vi.fn() }),
 }))
 vi.mock('@/composables/useDemoMode', () => ({ useDemoMode: () => ({ blockDemoMutation: () => false }) }))
 vi.mock('@/composables/useRowFocus', () => ({ focusLastRow: vi.fn() }))
@@ -164,7 +175,30 @@ describe('InvoiceEditor.vue — stejné číslo dokladu u dodavatele', () => {
   beforeEach(() => {
     m.get.mockReset().mockResolvedValue(makeInvoice())
     m.update.mockReset()
+    m.warning.mockReset()
+    m.push.mockReset()
     m.overview.mockReset().mockResolvedValue({ enabled: false, group: null, types: [], values: [] })
+  })
+
+  it('možná duplicita s jiným datem vystavení: varování s prolinkem na existující doklad', async () => {
+    m.update.mockResolvedValueOnce({
+      ...makeInvoice(),
+      _warnings: ['vendor_invoice_likely_duplicate'],
+      _warning_meta: { vendor_invoice_likely_duplicate: { matches: [{
+        id: 88, vendor_invoice_number: 'FP-301', issue_date: '2026-06-03', total_with_vat: 1210, currency: 'CZK', status: 'received', varsymbol: null,
+      }] } },
+    })
+    const wrapper = mount(InvoiceEditor, { global: { stubs } })
+    await flushPromises()
+
+    await wrapper.find('form').trigger('submit')
+    await flushPromises()
+
+    expect(m.update).toHaveBeenCalledTimes(1)
+    const call = m.warning.mock.calls.find(c => c[0] === 'purchase_invoice.warning.vendor_invoice_likely_duplicate')
+    expect(call?.[1]?.label).toBe('purchase_invoice.warning.vendor_invoice_likely_duplicate_open')
+    call?.[1]?.handler()
+    expect(m.push).toHaveBeenCalledWith('/purchase-invoices/88')
   })
 
   it('po potvrzení uloží doklad znovu s allow_duplicate_number', async () => {

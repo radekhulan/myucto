@@ -5,14 +5,18 @@ declare(strict_types=1);
 namespace MyInvoice\Action\Invoice;
 
 use MyInvoice\Http\GuardsDocumentLock;
+use MyInvoice\Http\IsoDate;
 use MyInvoice\Http\Json;
 use MyInvoice\Http\SupplierGuard;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Repository\InvoiceRepository;
 use MyInvoice\Service\Accounting\DocumentLockService;
 use MyInvoice\Service\ActivityLogger;
+use MyInvoice\Service\Invoice\AdvanceReceiptNotPostedException;
+use MyInvoice\Service\Invoice\ProformaWithoutVatRatesException;
 use MyInvoice\Service\Invoice\FinalFromProformaCreator;
 use MyInvoice\Service\IpMatcher;
+use MyInvoice\Service\SalesQuote\QuoteException;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 
@@ -56,10 +60,13 @@ final class IssueFinalFromProformaAction
         }
 
         $body = (array) ($request->getParsedBody() ?? []);
-        $taxDate = isset($body['tax_date']) && $body['tax_date'] !== '' ? (string) $body['tax_date'] : null;
-        if ($taxDate !== null && !preg_match('/^\d{4}-\d{2}-\d{2}$/', $taxDate)) {
-            return Json::error($response, 'invalid_date', 'Neplatné datum.', 400);
+        foreach (['tax_date', 'due_date'] as $field) {
+            if (isset($body[$field]) && $body[$field] !== ''
+                && (!is_string($body[$field]) || !IsoDate::isValid($body[$field]))) {
+                return Json::error($response, 'invalid_date', 'Neplatné datum.', 400);
+            }
         }
+        $taxDate = isset($body['tax_date']) && $body['tax_date'] !== '' ? (string) $body['tax_date'] : null;
         $dueDate = isset($body['due_date']) && $body['due_date'] !== '' ? (string) $body['due_date'] : null;
         $advance = isset($body['advance_paid_amount']) && $body['advance_paid_amount'] !== null && $body['advance_paid_amount'] !== ''
             ? (float) $body['advance_paid_amount']
@@ -88,6 +95,12 @@ final class IssueFinalFromProformaAction
 
         try {
             $finalId = $this->creator->create($proformaId, $userId, $taxDate, $dueDate, $advance, $finalTotal);
+        } catch (QuoteException $e) {
+            return Json::error($response, $e->errorCode, $e->getMessage(), $e->httpStatus);
+        } catch (AdvanceReceiptNotPostedException $e) {
+            return Json::error($response, AdvanceReceiptNotPostedException::ERROR_CODE, $e->getMessage(), 409);
+        } catch (ProformaWithoutVatRatesException $e) {
+            return Json::error($response, ProformaWithoutVatRatesException::ERROR_CODE, $e->getMessage(), 409);
         } catch (\Throwable $e) {
             return Json::internalError($response, 'create_failed', $e->getMessage(), 500);
         }

@@ -166,8 +166,34 @@ final class TrackingAllocationService
         if ($direction !== null && !in_array($direction, ['in', 'out'], true)) {
             throw new \InvalidArgumentException('Neplatný směr skladové alokace.');
         }
+        return self::canonicalAllocations($this->tracking->allocationsForLine($supplierId, $lineId), $direction);
+    }
+
+    /**
+     * Stejné jako {@see canonicalAllocationsForLine()} pro více řádků jedním dotazem.
+     *
+     * @param list<int> $lineIds
+     * @return array<int,list<array<string,mixed>>> řádek => alokace (řádek bez alokací chybí)
+     */
+    public function canonicalAllocationsForLines(int $supplierId, array $lineIds, ?string $direction = null): array
+    {
+        if ($direction !== null && !in_array($direction, ['in', 'out'], true)) {
+            throw new \InvalidArgumentException('Neplatný směr skladové alokace.');
+        }
         $result = [];
-        foreach ($this->tracking->allocationsForLine($supplierId, $lineId) as $allocation) {
+        foreach ($this->tracking->allocationsForLines($supplierId, $lineIds) as $lineId => $allocations) {
+            $canonical = self::canonicalAllocations($allocations, $direction);
+            if ($canonical !== []) {
+                $result[$lineId] = $canonical;
+            }
+        }
+        return $result;
+    }
+
+    private static function canonicalAllocations(array $allocations, ?string $direction): array
+    {
+        $result = [];
+        foreach ($allocations as $allocation) {
             if ($direction !== null && $allocation['direction'] !== $direction) continue;
             $result[] = [
                 'stock_tracking_unit_id' => (int) $allocation['stock_tracking_unit_id'],
@@ -183,6 +209,18 @@ final class TrackingAllocationService
         return $result;
     }
 
+    /**
+     * Identitní klíč sledované jednotky (`stock_tracking_units.tracking_key`): sériové číslo,
+     * jinak kód šarže s datem expirace. Jediné místo, které klíč skládá při zakládání
+     * i opravě šarže ({@see TrackingUnitRenameService}).
+     */
+    public static function trackingKey(?string $serial, ?string $lot, ?string $expiresOn): string
+    {
+        return $serial !== null
+            ? 'serial:' . $serial
+            : 'lot:' . (string) $lot . '|' . (string) ($expiresOn ?? '');
+    }
+
     private function resolveUnit(int $supplierId, int $itemId, string $mode, array $entry, bool $allowCreate): array
     {
         $id = (int) ($entry['stock_tracking_unit_id'] ?? 0);
@@ -191,9 +229,7 @@ final class TrackingAllocationService
             if ($unit === null || $unit['tracking_type'] !== $mode) throw new StockException('tracking_not_found', 'Sledovaná jednotka nenalezena pro tuto kartu.', 422);
             return $unit;
         }
-        $key = $mode === 'serial'
-            ? 'serial:' . (string) $entry['serial_number']
-            : 'lot:' . (string) $entry['lot_code'] . '|' . (string) ($entry['expires_on'] ?? '');
+        $key = self::trackingKey($entry['serial_number'] ?? null, $entry['lot_code'] ?? null, $entry['expires_on'] ?? null);
         $unit = $this->tracking->findUnitByKey($supplierId, $itemId, $key, true);
         if ($unit !== null) return $unit;
         if (!$allowCreate) throw new StockException('tracking_not_found', 'Sériové číslo nebo šarže nejsou na kartě evidovány.', 422);

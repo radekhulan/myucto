@@ -6,7 +6,9 @@ namespace MyInvoice\Repository;
 
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Accounting\Activation\OpeningBalanceDocuments;
+use MyInvoice\Service\Accounting\AdvanceSettlementEvidenceReader;
 use MyInvoice\Service\Accounting\DocumentPostingGroup;
+use MyInvoice\Support\Sql\AdvanceDrawSql;
 use MyInvoice\Support\Sql\CreditNoteRefundExpr;
 use MyInvoice\Support\Sql\JournalSettlementAllocationSql;
 use MyInvoice\Support\Sql\LinkedManualSettlementSql;
@@ -110,6 +112,17 @@ final class SaldoRepository
      * a co kontrola hlásí, saldo neschová.
      */
     private const SHORTFALL_TOLERANCE_CZK = 1.0;
+    /**
+     * Uhrazeno u ostatní položky k asOf: přiřazené úhrady (`paid`) a úhrada převzatá z jiného
+     * programu mimo evidované kanály (`settled_outside_amount`, migrace 2207). Ta datum nenese,
+     * stejně jako u přijatých faktur, a je to jediný údaj, kterým převod uzavře položku vyrovnanou
+     * zápočtem nebo interním dokladem: ruční zápis na položku navázat nejde a bankovní párování
+     * ji jako uhrazenou nenabídne. Úhradu mimo evidenci započítává stejně {@see OtherItemRepository}
+     * (detail, seznam, párování v bance). Obě složky jsou v měně položky: úhradu jde přiřadit jen
+     * položce v Kč a převody plní úhradu mimo evidenci také jen u položek v Kč (POHODA cizí měnu
+     * nepřevádí, ABRA zakládá položky v Kč), poměr k zaúčtované Kč částce tedy sedí.
+     */
+    private const OTHER_ITEM_PAID_SQL = '(COALESCE(paid.paid_sum, 0) + oi.settled_outside_amount)';
     private const CANDIDATE_PAGE_SIZE = 5000;
 
     public function __construct(
@@ -183,6 +196,10 @@ final class SaldoRepository
      * @param string|null $dueBefore volitelná horní hranice splatnosti (exclusive),
      *                        aplikovaná v SQL před stránkováním.
      * @param bool $orderByDue řadit kandidáty primárně od nejstarší splatnosti.
+     * @param bool $withOverdrawnAdvances na 324 i neuhrazené zálohy, které konečná faktura
+     *                        čerpala dřív než přišla platba ({@see fetchReceivedAdvances()}
+     *                        s `$overdrawn`). Jen pro sestavu saldokonta: párování a čerpání
+     *                        záloh (převod Money S3, AdvanceDeductionService) s nimi nepočítá.
      * @return list<array{doc_type:string, doc_id:int, doc_no:string, issue_date:string,
      *                    due_date:string, status:string, partner_id:int, partner_name:string,
      *                    currency_code:string, booked_signed:float, foreign_signed:float,
@@ -197,6 +214,7 @@ final class SaldoRepository
         ?int $partnerId = null,
         ?string $dueBefore = null,
         bool $orderByDue = false,
+        bool $withOverdrawnAdvances = false,
     ): array {
         $pdo = $this->db->pdo();
         $ownsSnapshot = !$pdo->inTransaction();
@@ -210,6 +228,9 @@ final class SaldoRepository
             if ($accountCode === '324') {
                 $result = array_merge(
                     $this->fetchReceivedAdvances($supplierId, $accountId, $asOf, $limit, $partnerId, $dueBefore, $orderByDue),
+                    $withOverdrawnAdvances && $dueBefore === null
+                        ? $this->fetchReceivedAdvances($supplierId, $accountId, $asOf, $limit, $partnerId, null, $orderByDue, overdrawn: true)
+                        : [],
                     $this->fetchOpenOtherItems($supplierId, $accountId, $asOf, $limit, $partnerId, $dueBefore, $orderByDue),
                 );
             } elseif ($accountCode === '314') {
@@ -260,7 +281,7 @@ final class SaldoRepository
         bool $orderByDue,
     ): array {
         $booked = "ROUND(SUM(CASE WHEN l.side = 'debit' THEN l.signed_amount ELSE -l.signed_amount END), 2)";
-        $paid = 'COALESCE(paid.paid_sum, 0)';
+        $paid = self::OTHER_ITEM_PAID_SQL;
         $ratio = "CASE WHEN ABS({$booked}) < 0.005 THEN 0
                        ELSE LEAST(1, GREATEST(0, {$paid} / ABS({$booked}))) END";
         $partnerFilter = $partnerId === null ? '' : ' AND oi.partner_id = ' . $partnerId;
@@ -319,7 +340,8 @@ final class SaldoRepository
                    AND oi.deleted_at IS NULL
                    {$partnerFilter}{$dueFilter}
                  GROUP BY oi.id, oi.document_no, oi.issued_on, oi.due_on, oi.status,
-                          oi.partner_id, cl.company_name, oi.partner_name, oi.currency, oi.amount, paid.paid_sum
+                          oi.partner_id, cl.company_name, oi.partner_name, oi.currency, oi.amount,
+                          oi.settled_outside_amount, paid.paid_sum
                 HAVING " . self::openFilterSql($booked, $ratio) . $order;
 
         $map = static function (array $row): array {
@@ -384,7 +406,7 @@ final class SaldoRepository
                        COALESCE(cl.company_name, NULLIF(oi.partner_name, ''), 'Bez partnera') AS partner_name,
                        oi.currency AS currency_code, oi.amount AS amount_foreign,
                        ROUND(SUM(CASE WHEN l.side = 'debit' THEN ja.amount ELSE -ja.amount END), 2) AS booked_signed,
-                       COALESCE(paid.paid_sum, 0) AS paid_as_of
+                       " . self::OTHER_ITEM_PAID_SQL . " AS paid_as_of
                   FROM journal_settlement_allocations ja
                   JOIN journal_entries e ON e.id = ja.entry_id AND e.supplier_id = ja.supplier_id
                   " . JournalSettlementAllocationSql::lineJoin('ja', 'l') . "
@@ -425,7 +447,8 @@ final class SaldoRepository
                    AND oi.deleted_at IS NULL
                    {$partnerFilter}" . self::dueBeforeSql('oi', $dueBefore, 'due_on') . "
                  GROUP BY oi.id, oi.document_no, oi.issued_on, oi.due_on, oi.status,
-                          oi.partner_id, cl.company_name, oi.partner_name, oi.currency, oi.amount, paid.paid_sum
+                          oi.partner_id, cl.company_name, oi.partner_name, oi.currency, oi.amount,
+                          oi.settled_outside_amount, paid.paid_sum
                  ORDER BY {$order}";
         $stmt = $this->db->pdo()->prepare($sql);
         $stmt->execute(self::asOfParams($sql, $asOf));
@@ -1211,19 +1234,23 @@ final class SaldoRepository
         ?string $dueBefore = null,
         bool $orderByDue = false,
         bool $onReceivable = false,
+        bool $overdrawn = false,
     ): array
     {
-        if ($onReceivable) {
+        if ($onReceivable && $overdrawn) {
+            throw new \LogicException('Přečerpaná záloha je jen položkou zálohového účtu.');
+        }
+        if ($overdrawn) {
+            // Čerpání čistým pohybem zápisů konečné faktury na zálohovém účtu: převod z Money S3
+            // v nich přeúčtovává DPH zálohy (debet i kredit 324), samotný debet by čerpání nadsadil.
+            $settledAmount = "CASE WHEN l.side = 'debit' THEN l.signed_amount ELSE -l.signed_amount END";
+            $settledFilter = '';
+            $receivableFilter = '';
+        } elseif ($onReceivable) {
             $settledAmount = "CASE WHEN l.side = 'debit' THEN l.signed_amount ELSE -l.signed_amount END";
             $settledFilter = "AND child.invoice_type = 'tax_document'";
             $receivableFilter = '
-               AND NOT ' . self::invoiceBookedOnAccountSql('p.id') . "
-               AND NOT EXISTS (
-                   SELECT 1 FROM invoices fin
-                    WHERE fin.supplier_id = p.supplier_id AND fin.parent_invoice_id = p.id
-                      AND fin.invoice_type NOT IN ('proforma', 'tax_document')
-                      AND " . self::invoiceBookedOnAccountSql('fin.id') . '
-               )';
+               AND NOT ' . self::invoiceBookedOnAccountSql('p.id');
         } else {
             $settledAmount = 'l.signed_amount';
             $settledFilter = "AND l.side = 'debit'";
@@ -1231,19 +1258,75 @@ final class SaldoRepository
         }
         // Čerpání po dvojicích záloha × konečná faktura (`invoice_advance_deductions`, zrcadlo
         // purchase_advance_deductions): faktura, která vyúčtuje víc záloh, nebo záloha čerpaná
-        // víc fakturami. Platí od zaúčtování konečné faktury. Jen pro zálohový účet: zálohu
-        // inkasovanou přímo na 311 vypořádává konečná faktura poměrem ve fetchOpenInvoices.
+        // víc fakturami. Patří sem i faktura čerpající víc záloh odpočtovými řádky, která vazbu
+        // dokladu nemá ({@see AdvanceDeductionRepository::deductionsSource()}). Platí od zaúčtování
+        // konečné faktury. Jen pro zálohový účet: zálohu inkasovanou přímo na 311 vypořádává
+        // konečná faktura poměrem ve fetchOpenInvoices.
         $deductedCte = $onReceivable ? '' : ",
             deducted AS (
                 SELECT iad.advance_invoice_id AS invoice_id, SUM(iad.amount) AS amount
-                  FROM invoice_advance_deductions iad
+                  FROM " . AdvanceDeductionRepository::deductionsSource('invoice', $supplierId) . " iad
                   CROSS JOIN params x
                  WHERE iad.supplier_id = x.supplier_id
                    AND " . self::advanceDeductionCountsSql('iad', 'invoice', 'x.as_of') . '
                  GROUP BY iad.advance_invoice_id
             )';
-        $deductedJoin = $onReceivable ? '' : ' LEFT JOIN deducted dd ON dd.invoice_id = p.id';
-        $settledTotal = $onReceivable ? 'COALESCE(s.settled_czk, 0)' : 'COALESCE(s.settled_czk, 0) + COALESCE(dd.amount, 0)';
+        // Záloha inkasovaná přímo na 311: zaúčtovaná konečná faktura z ní ubírá jen to, co sama
+        // odečítá ({@see drawnOnReceivableCte}). Faktura bez odpočtu i odečtu úhrady v hlavičce
+        // (ručně navázaná, převzatá) zálohu vypořádá celou, shodně s dřívějším vyřazením zálohy.
+        if ($onReceivable) {
+            $deductedCte = ",
+            drawn AS (
+                " . self::drawnOnReceivableCte() . '
+            )';
+        }
+        $deductedJoin = $onReceivable ? ' LEFT JOIN drawn dd ON dd.invoice_id = p.id' : ' LEFT JOIN deducted dd ON dd.invoice_id = p.id';
+        $settledTotal = $onReceivable
+            ? 'CASE WHEN COALESCE(dd.full_cover, 0) = 1 THEN c.collected_czk ELSE COALESCE(s.settled_czk, 0) + COALESCE(dd.amount, 0) END'
+            : 'COALESCE(s.settled_czk, 0) + COALESCE(dd.amount, 0)';
+        // Záloha přijatá před otevřením knih (proforma v počátečních stavech): inkasem je
+        // úhrada převzatá z počátečních stavů ({@see AdvanceSettlementEvidenceReader::openingReceiptSql()})
+        // proti otevíracímu zápisu s řádkem na zálohovém účtu. Daň jejího převzatého DDKP
+        // odčerpal předchozí systém (otevírací zápis nese 324 už po dani), proto se počítá
+        // jako vyrovnaná stejně jako debet zaúčtovaného DDKP. Jen pro zálohový účet.
+        $openingCollected = '';
+        $openingVatCte = '';
+        $openingVatJoin = '';
+        if (!$onReceivable && !$overdrawn) {
+            $openingCollected = '
+                       OR (' . AdvanceSettlementEvidenceReader::openingReceiptSql('ip', 'ipf', 'x.as_of') . '
+                           AND EXISTS (
+                               SELECT 1
+                                 FROM journal_entry_document_links ocl
+                                 JOIN journal_entries oce ON oce.id = ocl.entry_id AND oce.supplier_id = ocl.supplier_id
+                                 JOIN journal_entry_lines ocn ON ocn.entry_id = oce.id AND ocn.supplier_id = oce.supplier_id
+                                 JOIN chart_of_accounts oca ON oca.id = ocn.account_id
+                                WHERE ocl.supplier_id = ipf.supplier_id AND ocl.doc_type = \'invoice\' AND ocl.doc_id = ipf.id
+                                  AND oce.source_type = \'opening\' AND oce.posted_at IS NOT NULL AND oce.reversed_by IS NULL
+                                  AND oce.entry_date <= x.as_of AND ocn.side = \'credit\'
+                                  AND (oca.id = x.account_id OR oca.parent_id = x.account_id)
+                           ))';
+            $openingVatCte = ",
+            opening_vat AS (
+                SELECT td.parent_invoice_id AS invoice_id,
+                       SUM(CASE WHEN tdc.code = 'CZK' OR td.exchange_rate IS NULL THEN td.total_vat
+                                ELSE ROUND(td.total_vat * td.exchange_rate, 2) END) AS vat_czk
+                  FROM invoices td
+                  CROSS JOIN params x
+                  JOIN currencies tdc ON tdc.id = td.currency_id
+                 WHERE td.supplier_id = x.supplier_id AND td.invoice_type = 'tax_document'
+                   AND td.parent_invoice_id IS NOT NULL AND td.status NOT IN ('draft', 'cancelled')
+                   AND td.id IN (SELECT tdl.doc_id
+                                   FROM journal_entries tde
+                                   JOIN journal_entry_document_links tdl
+                                     ON tdl.supplier_id = tde.supplier_id AND tdl.entry_id = tde.id AND tdl.doc_type = 'invoice'
+                                  WHERE tde.supplier_id = x.supplier_id AND tde.source_type = 'opening'
+                                    AND tde.posted_at IS NOT NULL AND tde.reversed_by IS NULL AND tde.entry_date <= x.as_of)
+                 GROUP BY td.parent_invoice_id
+            )";
+            $openingVatJoin = ' LEFT JOIN opening_vat ov ON ov.invoice_id = p.id';
+            $settledTotal = 'COALESCE(s.settled_czk, 0) + COALESCE(ov.vat_czk, 0) + COALESCE(dd.amount, 0)';
+        }
 
         $sql =
             "WITH params AS (
@@ -1286,6 +1369,7 @@ final class SaldoRepository
                               AND l.side = 'credit'
                               AND (ca.id = x.account_id OR ca.parent_id = x.account_id)
                        )
+                       OR (" . AdvanceSettlementEvidenceReader::takenOverSettlementReceiptSql('ip', 'x.account_id', 'x.as_of') . "){$openingCollected}
                    )
                  GROUP BY ip.invoice_id
             ), settled AS (
@@ -1303,25 +1387,37 @@ final class SaldoRepository
                    {$settledFilter}
                    AND (ca.id = x.account_id OR ca.parent_id = x.account_id)
                  GROUP BY child.parent_invoice_id
-            ){$deductedCte}
+            ){$deductedCte}{$openingVatCte}
             SELECT p.id AS doc_id,
                    COALESCE(NULLIF(p.varsymbol, ''), CONCAT('#', p.id)) AS doc_no,
                    p.issue_date, p.due_date, p.status,
                    cl.id AS partner_id, cl.company_name AS partner_name,
                    cur.code AS currency_code,
+                   " . ($overdrawn ? 'LEAST(p.total_with_vat, ' . $settledTotal . ')' : '0') . " AS overdrawn_czk,
                    c.collected_czk, {$settledTotal} AS settled_czk,
                    (SELECT td.id FROM invoices td
                      WHERE td.supplier_id = p.supplier_id AND td.parent_invoice_id = p.id
                        AND td.invoice_type = 'tax_document' AND td.status NOT IN ('draft', 'cancelled')
                      ORDER BY td.id LIMIT 1) AS tax_document_id
-              FROM collected c
-              JOIN invoices p ON p.id = c.invoice_id
+              FROM " . ($overdrawn
+                ? '(SELECT invoice_id FROM settled UNION SELECT invoice_id FROM deducted) od
+              LEFT JOIN collected c ON c.invoice_id = od.invoice_id
+              JOIN invoices p ON p.id = od.invoice_id'
+                : 'collected c
+              JOIN invoices p ON p.id = c.invoice_id') . "
               JOIN params x ON x.supplier_id = p.supplier_id
               JOIN clients cl ON cl.id = p.client_id
               JOIN currencies cur ON cur.id = p.currency_id
-              LEFT JOIN settled s ON s.invoice_id = p.id{$deductedJoin}
+              LEFT JOIN settled s ON s.invoice_id = p.id{$deductedJoin}{$openingVatJoin}
              WHERE p.invoice_type = 'proforma'
-               AND " . self::advanceOpenFilterSql('c.collected_czk', $settledTotal)
+               AND " . ($overdrawn
+                   // Zcela neuhrazená korunová záloha, kterou konečná faktura už čerpala. Uhrazená
+                   // nebo částečně uhrazená proforma sem nepatří: převzatý deník (Helios, Money S3)
+                   // čerpá kurzem či zaokrouhlením jinak než úhrada a úhradu ne vždy účtuje bankovním
+                   // zápisem MyÚčta, rozdíl by se tvářil jako nezaplacená záloha.
+                   ? "p.status <> 'paid' AND cur.code = 'CZK' AND p.paid_total = 0 AND COALESCE(c.collected_czk, 0) = 0
+                      AND ROUND(LEAST(p.total_with_vat, {$settledTotal}), 2) > 0"
+                   : self::advanceOpenFilterSql('c.collected_czk', $settledTotal))
                . $receivableFilter
                . self::partnerSql($partnerId)
                . self::dueBeforeSql('p', $dueBefore)
@@ -1330,9 +1426,30 @@ final class SaldoRepository
         return $this->fetchDefinitiveOpenRows(
             $sql,
             static fn (string $pageSql): array => [$supplierId, $asOf, $accountId],
-            static function (array $r) use ($onReceivable): array {
+            static function (array $r) use ($onReceivable, $overdrawn): array {
                 $collected = round((float) $r['collected_czk'], 2);
                 $settled = round((float) $r['settled_czk'], 2);
+                if ($overdrawn) {
+                    // Zálohový účet má na zálohu debet: pohledávka za odběratelem, dokud nepřijde
+                    // platba. Vyrovná ji úhrada proformy, ne další čerpání.
+                    return [
+                        'kind'           => 'document',
+                        'settleable'     => false,
+                        'tax_document_id' => null,
+                        'doc_type'       => 'invoice',
+                        'doc_id'         => (int) $r['doc_id'],
+                        'doc_no'         => (string) $r['doc_no'],
+                        'issue_date'     => (string) $r['issue_date'],
+                        'due_date'       => (string) $r['due_date'],
+                        'status'         => (string) $r['status'],
+                        'partner_id'     => (int) $r['partner_id'],
+                        'partner_name'   => (string) $r['partner_name'],
+                        'currency_code'  => (string) $r['currency_code'],
+                        'booked_signed'  => round((float) $r['overdrawn_czk'], 2),
+                        'foreign_signed' => 0.0,
+                        'paid_ratio'     => 0.0,
+                    ];
+                }
                 return [
                     // Záloha na saldokontním účtu čekající na vyúčtování — sestava ji musí
                     // popsat jinak než fakturu (částka = přijatá platba, uhrazeno = daň DDKP).
@@ -1404,7 +1521,14 @@ final class SaldoRepository
                AND NOT EXISTS (
                    SELECT 1 FROM purchase_invoices fin
                     WHERE fin.supplier_id = p.supplier_id AND fin.advance_purchase_invoice_id = p.id
-                      AND " . self::purchaseBookedOnAccountSql('fin.id') . '
+                      AND " . self::purchaseBookedOnAccountSql('fin.id') . "
+               )
+               -- Totéž pro zálohu faktury s víc zálohami (PurchaseAdvanceLinks).
+               AND NOT EXISTS (
+                   SELECT 1 FROM purchase_advance_deductions lnk
+                    WHERE lnk.supplier_id = p.supplier_id AND lnk.advance_invoice_id = p.id
+                      AND lnk.source = '" . \MyInvoice\Service\PurchaseInvoice\PurchaseAdvanceLinks::SOURCE . "'
+                      AND " . self::purchaseBookedOnAccountSql('lnk.final_invoice_id') . '
                )';
             $links = "SELECT id AS child_id, supplier_id, parent_purchase_invoice_id AS advance_id
                         FROM purchase_invoices
@@ -1655,7 +1779,8 @@ final class SaldoRepository
         $advanceCte = $this->advanceOnAccountCte('credit', $supplierId, $accountId, $currentRead);
 
         $paidExpr    = 'COALESCE(paid.paid_sum, 0)';
-        $advanceExpr = 'ROUND(COALESCE(adv.advance_sum, 0), 2)';
+        // Předplacení zálohami uhrazenými přímo na účet, po konečných fakturách ({@see advanceDrawLinesCte}).
+        $advanceExpr = 'ROUND(COALESCE(advl.lines_sum, 0), 2)';
         $toPayExpr   = 'COALESCE(d.amount_to_pay, 0)';
         $bookedExpr  = 'ROUND(SUM(b.booked_part), 2)';
         $foreignExpr = 'ROUND(SUM(b.foreign_part), 2)';
@@ -1692,7 +1817,8 @@ final class SaldoRepository
                  GROUP BY ip.invoice_id{$lock}
             ), advances AS (
                 {$advanceCte}
-            )
+            ), " . self::advanceDrawLinesCte($supplierId, $currentRead) . "
+            
             SELECT d.id AS doc_id,
                    COALESCE(NULLIF(d.varsymbol, ''), CONCAT('#', d.id)) AS doc_no,
                    d.issue_date, d.due_date, d.status, d.invoice_type, d.paid_at, d.parent_invoice_id,
@@ -1709,14 +1835,14 @@ final class SaldoRepository
               JOIN clients cl      ON cl.id = d.client_id
               JOIN currencies cur  ON cur.id = d.currency_id
               LEFT JOIN paid       ON paid.invoice_id = d.id
-              LEFT JOIN advances adv ON adv.advance_id = d.parent_invoice_id
+              LEFT JOIN advance_lines advl ON advl.final_id = d.id
               LEFT JOIN man        ON man.doc_id = d.id
              WHERE d.status <> 'draft'
                AND (d.status <> 'cancelled' OR d.cancelled_at IS NULL OR DATE(d.cancelled_at) > ?)
                " . self::partnerSql($partnerId) . self::dueBeforeSql('d', $dueBefore) . $invoiceFilter . "
              GROUP BY d.id, doc_no, d.issue_date, d.due_date, d.status, d.invoice_type, d.paid_at, d.parent_invoice_id,
                       cl.id, cl.company_name, cur.code, d.amount_to_pay,
-                      paid.paid_sum, adv.advance_sum, man.settled
+                      paid.paid_sum, advl.lines_sum, man.settled
             HAVING " . ($componentsOnly ? '1=1' : self::openFilterSql($bookedExpr, $ratio)) . "
              " . ($stream ? ' ORDER BY cl.id, d.due_date, d.id' : self::orderSql('d', $orderByDue));
 
@@ -1842,6 +1968,91 @@ final class SaldoRepository
     }
 
     /**
+     * Předplacení dokladů zálohami uhrazenými přímo na saldokontní účet: `final_id`,
+     * `lines_sum` (v měně dokladu). Doklad navázaný na zálohu (vazbou dokladu nebo
+     * odpočtovým řádkem faktury s víc zálohami, {@see AdvanceDrawSql}) má předplaceno to,
+     * co ze zálohy sám odečítá: odpočtové řádky zálohy s DPH a k nim odečet úhrady bez DDKP
+     * v hlavičce (`advance_paid_amount`), nejvýš úhradu zálohy zaúčtovanou na účtu. Postupné
+     * čerpání jedné zálohy víc fakturami tak každé faktuře připíše jen její díl. Doklad bez
+     * odpočtových řádků zálohy (ručně navázaný, převzatý, vyúčtování jen odečtem v hlavičce,
+     * daňový doklad k platbě) má předplacenou celou úhradu zálohy jako dřív. Odkazuje na CTE
+     * `advances` ({@see advanceOnAccountCte}), vrací tři CTE (bez úvodního `WITH`).
+     */
+    private static function advanceDrawLinesCte(int $supplierId, bool $currentRead = false): string
+    {
+        // Aktuální čtení (uzávěrka pod zámkem) musí vidět i vazbu, kterou mezitím zapsal jiný
+        // požadavek, stejně jako `advances`: každá větev je proto samostatný zamykací SELECT.
+        $lock = $currentRead ? ' FOR UPDATE' : '';
+        $parentLines = "SELECT -SUM(pii.total_with_vat) FROM invoice_items pii
+                          WHERE pii.invoice_id = f.id AND COALESCE(pii.advance_invoice_id, f.parent_invoice_id) = f.parent_invoice_id
+                            AND " . AdvanceDrawSql::deductionLine('pii');
+        return "advance_parent AS (
+                SELECT f.id AS final_id, f.parent_invoice_id AS advance_id, f.invoice_type AS final_type,
+                       CASE WHEN COALESCE(({$parentLines}), 0) > 0.005
+                            THEN f.advance_paid_amount + ({$parentLines}) ELSE 0 END AS explicit
+                  FROM advances a0
+                  JOIN invoices f ON f.supplier_id = {$supplierId} AND f.parent_invoice_id = a0.advance_id{$lock}
+            ), advance_stamped AS (
+                SELECT ii.invoice_id AS final_id, ii.advance_invoice_id AS advance_id, 'invoice' AS final_type,
+                       -SUM(ii.total_with_vat) AS explicit
+                  FROM invoice_items ii
+                  JOIN invoices f ON f.id = ii.invoice_id
+                 WHERE ii.advance_invoice_id IS NOT NULL AND f.supplier_id = {$supplierId}
+                   AND f.invoice_type = 'invoice' AND ii.advance_invoice_id <> COALESCE(f.parent_invoice_id, 0)
+                   AND " . AdvanceDrawSql::deductionLine('ii') . "
+                 GROUP BY ii.invoice_id, ii.advance_invoice_id{$lock}
+            ), advance_lines AS (
+                SELECT dl.final_id,
+                       SUM(CASE WHEN dl.final_type = 'invoice' AND dl.explicit > 0.005
+                                THEN LEAST(dl.explicit, a.advance_sum) ELSE a.advance_sum END) AS lines_sum
+                  FROM (SELECT final_id, advance_id, final_type, explicit FROM advance_parent
+                        UNION ALL
+                        SELECT final_id, advance_id, final_type, explicit FROM advance_stamped) dl
+                  JOIN advances a ON a.advance_id = dl.advance_id
+                 GROUP BY dl.final_id
+            )";
+    }
+
+    /**
+     * Záloha inkasovaná přímo na pohledávku: kolik z ní ubraly konečné faktury zaúčtované
+     * na účtu k `x.as_of` (`invoice_id` zálohy, `amount` v Kč, `full_cover`). Faktura
+     * s odpočtovými řádky zálohy ubírá jejich základ (daň zálohy už z účtu odčerpal daňový
+     * doklad k platbě) a k nim odečet úhrady bez DDKP v hlavičce. Faktura bez odpočtových
+     * řádků zálohy (ručně navázaná, převzatá, vyúčtování jen odečtem v hlavičce) zálohu
+     * vypořádá celou (`full_cover`), shodně s dřívějším vyřazením zálohy. Vyžaduje CTE `collected` a `params x`.
+     */
+    private static function drawnOnReceivableCte(): string
+    {
+        $rate = "CASE WHEN fcur.code = 'CZK' OR f.exchange_rate IS NULL OR f.exchange_rate <= 0 THEN 1 ELSE f.exchange_rate END";
+        $parentLines = "SELECT -SUM(pii.total_without_vat) FROM invoice_items pii
+                          WHERE pii.invoice_id = f.id AND COALESCE(pii.advance_invoice_id, f.parent_invoice_id) = f.parent_invoice_id
+                            AND " . AdvanceDrawSql::deductionLine('pii');
+        return "SELECT dr.advance_id AS invoice_id, SUM(dr.amount) AS amount, MAX(dr.amount <= 0.005) AS full_cover
+                  FROM (SELECT f.parent_invoice_id AS advance_id,
+                               CASE WHEN COALESCE(({$parentLines}), 0) > 0.005
+                                    THEN ROUND((f.advance_paid_amount + ({$parentLines})) * {$rate}, 2) ELSE 0 END AS amount
+                          FROM collected c0
+                          CROSS JOIN params x
+                          JOIN invoices f ON f.supplier_id = x.supplier_id AND f.parent_invoice_id = c0.invoice_id
+                                         AND f.invoice_type NOT IN ('proforma', 'tax_document')
+                          JOIN currencies fcur ON fcur.id = f.currency_id
+                         WHERE " . self::invoiceBookedOnAccountSql('f.id') . "
+                        UNION ALL
+                        SELECT ii.advance_invoice_id, ROUND(-SUM(ii.total_without_vat) * {$rate}, 2)
+                          FROM collected c0
+                          CROSS JOIN params x
+                          JOIN invoice_items ii ON ii.advance_invoice_id = c0.invoice_id
+                          JOIN invoices f ON f.id = ii.invoice_id AND f.supplier_id = x.supplier_id
+                                         AND f.invoice_type = 'invoice'
+                                         AND ii.advance_invoice_id <> COALESCE(f.parent_invoice_id, 0)
+                          JOIN currencies fcur ON fcur.id = f.currency_id
+                         WHERE " . AdvanceDrawSql::deductionLine('ii') . '
+                           AND ' . self::invoiceBookedOnAccountSql('f.id') . "
+                         GROUP BY ii.invoice_id, ii.advance_invoice_id, fcur.code, f.exchange_rate) dr
+                 GROUP BY dr.advance_id";
+    }
+
+    /**
      * Korelovaný poddotaz: kolik z dokladu `d` je předplaceno ZÁLOHOU (proformou /
      * zálohovou PF), jejíž úhrada je zaúčtovaná PŘÍMO NA TENHLE saldokontní účet —
      * tedy bez průchodu přes 324/314.
@@ -1879,16 +2090,23 @@ final class SaldoRepository
             $from = "FROM invoice_payments pip
                      JOIN invoices pf ON pf.id = pip.invoice_id AND pf.supplier_id = pip.supplier_id
                                      AND pf.invoice_type = 'proforma'";
-            $childExists = "EXISTS (SELECT 1 FROM invoices ch
-                                     WHERE ch.supplier_id = pf.supplier_id AND ch.parent_invoice_id = pf.id{$lock})";
+            // Navazující doklad: vazba dokladu, nebo konečná faktura čerpající zálohu
+            // odpočtovým řádkem (faktura s víc zálohami, AdvanceDrawSql).
+            $childExists = "(EXISTS (SELECT 1 FROM invoices ch
+                                     WHERE ch.supplier_id = pf.supplier_id AND ch.parent_invoice_id = pf.id{$lock})
+                             OR " . AdvanceDrawSql::advanceHasDrawLines('pf') . ')';
             $cashLink = 'cd.invoice_payment_id = pip.id';
         } else {
             $key = 'pip.purchase_invoice_id';
             $from = "FROM payment_matches pip
                      JOIN purchase_invoices pf ON pf.id = pip.purchase_invoice_id AND pf.supplier_id = pip.supplier_id
                                               AND pf.document_kind = 'advance'";
-            $childExists = "EXISTS (SELECT 1 FROM purchase_invoices ch
-                                     WHERE ch.supplier_id = pf.supplier_id AND ch.advance_purchase_invoice_id = pf.id{$lock})";
+            // Navazující doklad: vazba hlavičkou, nebo konečná faktura s víc zálohami (PurchaseAdvanceLinks).
+            $childExists = "(EXISTS (SELECT 1 FROM purchase_invoices ch
+                                     WHERE ch.supplier_id = pf.supplier_id AND ch.advance_purchase_invoice_id = pf.id{$lock})
+                             OR EXISTS (SELECT 1 FROM purchase_advance_deductions lnk
+                                         WHERE lnk.supplier_id = pf.supplier_id AND lnk.advance_invoice_id = pf.id
+                                           AND lnk.source = '" . \MyInvoice\Service\PurchaseInvoice\PurchaseAdvanceLinks::SOURCE . "'{$lock}))";
             $cashLink = 'cd.purchase_invoice_id = pf.id';
         }
 
@@ -2056,7 +2274,11 @@ final class SaldoRepository
               JOIN currencies cur      ON cur.id = d.currency_id
               LEFT JOIN matches m      ON m.doc_id = d.id
               LEFT JOIN cash ch        ON ch.doc_id = d.id
-              LEFT JOIN advances adv   ON adv.advance_id = d.advance_purchase_invoice_id
+              -- Zálohy faktury: hlavička i víc záloh (PurchaseAdvanceLinks), součet po faktuře.
+              LEFT JOIN (SELECT lnk.final_id, SUM(a.advance_sum) AS advance_sum
+                           FROM (" . \MyInvoice\Service\PurchaseInvoice\PurchaseAdvanceLinks::linksSql((string) $supplierId) . ") lnk
+                           JOIN advances a ON a.advance_id = lnk.advance_id
+                          GROUP BY lnk.final_id) adv ON adv.final_id = d.id
               LEFT JOIN man            ON man.doc_id = d.id
              WHERE d.status <> 'draft'
                AND (d.status <> 'cancelled' OR d.cancelled_at IS NULL OR DATE(d.cancelled_at) > ?)

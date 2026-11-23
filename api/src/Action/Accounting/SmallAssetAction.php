@@ -11,6 +11,7 @@ use MyInvoice\Repository\SmallAssetRepository;
 use MyInvoice\Service\Accounting\PostingException;
 use MyInvoice\Service\Accounting\SmallAsset\SmallAssetService;
 use MyInvoice\Service\ActivityLogger;
+use MyInvoice\Service\Invoice\UnitPricePrecision;
 use MyInvoice\Service\IpMatcher;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
@@ -242,7 +243,7 @@ final class SmallAssetAction
             throw $this->err('validation_failed', 'Datum pořízení je povinné.');
         }
         $quantity = $this->assertQuantity($body['quantity'] ?? 1);
-        $unitPrice = self::amount($body['unit_price'] ?? null) ?? 0.0;
+        $unitPrice = $this->unitPrice($body['unit_price'] ?? null) ?? 0.0;
         // Cena za kartu: buď zadaná, nebo dopočtená z ceny za kus × množství. Dopočet
         // je tu proto, aby ruční karta nešla uložit s cenou 0 jen kvůli tomu, že
         // uživatel vyplnil jen cenu za kus.
@@ -322,7 +323,7 @@ final class SmallAssetAction
             $fields['quantity'] = $this->assertQuantity($body['quantity']);
         }
         if (array_key_exists('unit_price', $body)) {
-            $fields['unit_price'] = self::amount($body['unit_price']) ?? 0.0;
+            $fields['unit_price'] = $this->unitPrice($body['unit_price']) ?? 0.0;
         }
         if (array_key_exists('price', $body)) {
             $price = self::amount($body['price']);
@@ -382,6 +383,18 @@ final class SmallAssetAction
             return null;
         }
         return round((float) $v, 2);
+    }
+
+    /** Cena za kus na šest desetinných míst (levný drobný majetek po tisících kusů), cena karty zůstává v haléřích. */
+    private function unitPrice(mixed $v): ?float
+    {
+        if ($v === null || $v === '') {
+            return null;
+        }
+        if (!is_numeric($v) || !UnitPricePrecision::isWithinPrecision($v)) {
+            throw $this->err('validation_failed', 'Cena za kus musí být číslo s nejvýše šesti desetinnými místy.');
+        }
+        return UnitPricePrecision::normalize((float) $v);
     }
 
     private function err(string $code, string $message): PostingException

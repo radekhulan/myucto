@@ -4,19 +4,22 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Integration\Payroll;
 
+use DI\Container;
 use MyInvoice\Action\Payroll\PayrollComponentJmhzMappingsAction;
-use MyInvoice\Bootstrap;
+use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Middleware\SupplierScopeMiddleware;
 use MyInvoice\Repository\Payroll\PayrollComponentJmhzMappingRepository;
 use MyInvoice\Repository\Payroll\PayrollComponentRepository;
 use MyInvoice\Repository\Payroll\PayrollTimeValue;
+use MyInvoice\Service\Demo\DemoMode;
 use MyInvoice\Service\Payroll\Component\PayrollComponentJmhzMappingDefaults;
 use MyInvoice\Tests\Support\IsolatedSupplierTrait;
 use PDO;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
+use Psr\Container\ContainerInterface;
 use Slim\Psr7\Factory\ServerRequestFactory;
 use Slim\Psr7\Response;
 
@@ -57,6 +60,7 @@ final class PayrollComponentJmhzMappingDefaultsTest extends TestCase
         'CESTOVNI_NAHRADA_NADLIMIT',
     ];
 
+    private ContainerInterface $container;
     private Connection $db;
     private PayrollComponentRepository $components;
     private PayrollComponentJmhzMappingRepository $mappings;
@@ -67,7 +71,8 @@ final class PayrollComponentJmhzMappingDefaultsTest extends TestCase
 
     protected function setUp(): void
     {
-        $container = Bootstrap::buildContainer();
+        $container = \MyInvoice\Tests\Support\PayrollTestContainer::build();
+        $this->container = $container;
         $db = $container->get(Connection::class);
         $components = $container->get(PayrollComponentRepository::class);
         $mappings = $container->get(PayrollComponentJmhzMappingRepository::class);
@@ -122,6 +127,9 @@ final class PayrollComponentJmhzMappingDefaultsTest extends TestCase
         $expected = [
             'MZDA_MESICNI' => '10329',
             'MZDA_HODINOVA' => '10329',
+            'MZDA_HODINOVA_ZAKLAD' => '10329',
+            'MZDA_DOSAZENA_PRESCAS' => '10329',
+            'DOPLATEK_MINIMALNI_MZDA' => '10329',
             'MZDA_UKOLOVA' => '10329',
             'ODMENA' => '10331',
             'PREMIE_PRIPLATKY' => '10332',
@@ -129,6 +137,7 @@ final class PayrollComponentJmhzMappingDefaultsTest extends TestCase
             'PRIPLATEK_NOCNI' => '10334',
             'PRIPLATEK_VIKEND' => '10335',
             'PRIPLATEK_SVATEK' => '10336',
+            'NAHRADA_MZDY_VOLNO_ZA_SVATEK' => '10339',
             'PRIPLATEK_ZTIZENE_PROSTREDI' => '10332',
             'ODMENA_POHOTOVOST' => '10343',
             // Nepeněžní stravování je součástí hrubé mzdy i obou vyměřovacích
@@ -222,6 +231,29 @@ final class PayrollComponentJmhzMappingDefaultsTest extends TestCase
         $rest = $this->mappingByCode('PRIPLATEK_NOCNI');
         self::assertIsArray($rest);
         self::assertSame('10334', $rest['target_attribute_id']);
+    }
+
+    /** Veřejná ukázka je jen ke čtení: otevření obrazovky zařazení nic neuloží. */
+    public function testDemoMappingScreenStoresNoDefaults(): void
+    {
+        $this->forgetApplicationDefaults();
+        $before = $this->snapshot();
+        self::assertInstanceOf(Container::class, $this->container);
+        $demo = new DemoMode(new Config(['demo' => ['enabled' => true]]));
+        $action = $this->container->make(PayrollComponentJmhzMappingsAction::class, [
+            'components' => $this->container->make(PayrollComponentRepository::class, ['demo' => $demo]),
+            'demo' => $demo,
+        ]);
+        $request = (new ServerRequestFactory())
+            ->createServerRequest('GET', '/api/payroll/components/jmhz-mappings')
+            ->withAttribute(SupplierScopeMiddleware::ATTR_CURRENT_ID, $this->supplierId)
+            ->withAttribute(AuthMiddleware::ATTR_USER, ['id' => $this->userId, 'role' => 'admin'])
+            ->withAttribute(AuthMiddleware::ATTR_METHOD, 'session');
+
+        $response = $action->list($request, new Response());
+
+        self::assertSame(200, $response->getStatusCode(), (string) $response->getBody());
+        self::assertSame($before, $this->snapshot());
     }
 
     public function testMappingScreenPrefillsDefaultsOnRead(): void

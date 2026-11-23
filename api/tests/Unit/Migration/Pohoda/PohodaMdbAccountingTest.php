@@ -50,6 +50,102 @@ final class PohodaMdbAccountingTest extends TestCase
         self::assertSame('2026-02-03', $records[0]['date']);
     }
 
+    /**
+     * Řádek deníku nese id zdrojového dokladu (`RelAgID`, u banky id bankovního dokladu).
+     * Podle něj se pozná, kterému z pohybů se stejným číslem řádek patří; 0 = bez dokladu.
+     */
+    public function testJournalCarriesSourceDocumentId(): void
+    {
+        $rows = iterator_to_array($this->mapper(['pUD' => [
+            ['ID' => '1', 'RelUdAg' => '28', 'RelAgID' => '29180', 'Cislo' => 'B1', 'UMD' => '261000', 'UD' => '221000', 'Kc' => '100'],
+            ['ID' => '2', 'RelUdAg' => '28', 'RelAgID' => '0', 'Cislo' => 'B1', 'UMD' => '568000', 'UD' => '221000', 'Kc' => '1'],
+            ['ID' => '3', 'RelUdAg' => '28', 'Cislo' => 'B1', 'UMD' => '568000', 'UD' => '221000', 'Kc' => '1'],
+        ]])->records('journal'), false);
+
+        self::assertSame(['29180', '', ''], array_map(static fn (array $r): string => PohodaXml::text($r, 'sourceId'), $rows));
+    }
+
+    /**
+     * Zakázky (`sZAK`) ve tvaru `con:contractDesc` z XML a číslo zakázky (`CisloZAK`) na řádku
+     * deníku, hlavičce i položce dokladu jako `typ:contract`. Řádek bez čísla zakázky se
+     * vynechá, RefAD 0 je zakázka bez partnera a export ze staršího převodníku zakázky nenese.
+     */
+    public function testContractsAndContractNumbersOfJournalAndDocuments(): void
+    {
+        $mapper = $this->mapper([
+            'sZAK' => [
+                ['ID' => '1', 'Cislo' => 'Z-01', 'SText' => 'Stavba', 'RefAD' => '7', 'Predani' => '2026-05-31T00:00:00'],
+                ['ID' => '2', 'Cislo' => 'Z-02', 'SText' => 'Vývoj', 'RefAD' => '0'],
+                ['ID' => '3', 'Cislo' => ''],
+            ],
+            'pUD' => [
+                ['ID' => '1', 'RelUdAg' => '2', 'Cislo' => 'F1', 'UMD' => '311000', 'UD' => '602000', 'Kc' => '100', 'CisloZAK' => 'Z-01'],
+                ['ID' => '2', 'RelUdAg' => '2', 'Cislo' => 'F1', 'UMD' => '311000', 'UD' => '343000', 'Kc' => '21'],
+            ],
+            'FA' => [['ID' => '5', 'Cislo' => 'F1', 'RelTpFak' => '1', 'Kc2' => '100', 'KcDPH2' => '21', 'CisloZAK' => 'Z-01']],
+            'FApol' => [
+                ['ID' => '51', 'RefAg' => '5', 'SText' => 'Práce', 'RelSzDPH' => '2', 'Kc' => '60', 'KcDPH' => '12.6', 'CisloZAK' => 'Z-02'],
+                ['ID' => '52', 'RefAg' => '5', 'SText' => 'Materiál', 'RelSzDPH' => '2', 'Kc' => '40', 'KcDPH' => '8.4'],
+            ],
+        ]);
+
+        $contracts = iterator_to_array($mapper->records('contracts'), false);
+        self::assertCount(2, $contracts);
+        self::assertSame(['Z-01', 'Stavba', '7', '2026-05-31'], [
+            PohodaXml::text($contracts[0], 'contractDesc/number/numberRequested'), PohodaXml::text($contracts[0], 'contractDesc/text'),
+            PohodaXml::text($contracts[0], 'contractDesc/partnerIdentity/id'), PohodaXml::text($contracts[0], 'contractDesc/dateDelivery'),
+        ]);
+        self::assertSame('', PohodaXml::text($contracts[1], 'contractDesc/partnerIdentity/id'));
+        self::assertSame(['Z-01', ''], array_map(static fn (array $r): string => PohodaXml::text($r, 'contract/ids'), iterator_to_array($mapper->records('journal'), false)));
+        $invoice = iterator_to_array($mapper->records('issued'), false)[0];
+        self::assertSame('Z-01', PohodaXml::text($invoice, 'invoiceHeader/contract/ids'));
+        self::assertSame(['Z-02', ''], array_map(static fn (array $i): string => PohodaXml::text($i, 'contract/ids'), PohodaXml::all($invoice, 'invoiceDetail/invoiceItem')));
+        self::assertSame([], iterator_to_array($this->mapper([])->records('contracts'), false));
+    }
+
+    /**
+     * Činnosti (`sCIN`) ve tvaru `acv:activityHeader` z XML a odkaz na činnost (`RefCin`) na řádku
+     * deníku, hlavičce i položce dokladu jako `typ:activity` se zkratkou a názvem. RefCin 0
+     * i odkaz na činnost, kterou číselník nemá, je bez činnosti; export ze staršího převodníku
+     * (bez `sCIN`) činnost nenese, i když sloupec RefCin má.
+     */
+    public function testActivitiesAndActivityReferencesOfJournalAndDocuments(): void
+    {
+        $mapper = $this->mapper([
+            'sCIN' => [
+                ['ID' => '2', 'IDS' => 'PRODEJ', 'SText' => 'Prodej služeb', 'RelTypDP' => '3'],
+                ['ID' => '4', 'IDS' => 'SERVIS', 'SText' => 'Servis'],
+                ['ID' => '5', 'IDS' => ''],
+            ],
+            'pUD' => [
+                ['ID' => '1', 'RelUdAg' => '2', 'Cislo' => 'F1', 'UMD' => '311000', 'UD' => '602000', 'Kc' => '100', 'RefCin' => '2'],
+                ['ID' => '2', 'RelUdAg' => '2', 'Cislo' => 'F1', 'UMD' => '311000', 'UD' => '343000', 'Kc' => '21', 'RefCin' => '0'],
+                ['ID' => '3', 'RelUdAg' => '2', 'Cislo' => 'F1', 'UMD' => '311000', 'UD' => '343000', 'Kc' => '1', 'RefCin' => '99'],
+            ],
+            'FA' => [['ID' => '5', 'Cislo' => 'F1', 'RelTpFak' => '1', 'Kc2' => '100', 'KcDPH2' => '21', 'RefCin' => '2']],
+            'FApol' => [
+                ['ID' => '51', 'RefAg' => '5', 'SText' => 'Práce', 'RelSzDPH' => '2', 'Kc' => '60', 'KcDPH' => '12.6', 'RefCin' => '4'],
+                ['ID' => '52', 'RefAg' => '5', 'SText' => 'Materiál', 'RelSzDPH' => '2', 'Kc' => '40', 'KcDPH' => '8.4'],
+            ],
+        ]);
+
+        $activities = iterator_to_array($mapper->records('activities'), false);
+        self::assertSame([['PRODEJ', 'Prodej služeb'], ['SERVIS', 'Servis']], array_map(
+            static fn (array $r): array => [PohodaXml::text($r, 'activityHeader/code'), PohodaXml::text($r, 'activityHeader/name')],
+            $activities,
+        ));
+        $journal = iterator_to_array($mapper->records('journal'), false);
+        self::assertSame(['PRODEJ', '', ''], array_map(static fn (array $r): string => PohodaXml::text($r, 'activity/ids'), $journal));
+        self::assertSame('Prodej služeb', PohodaXml::text($journal[0], 'activity/name'));
+        $invoice = iterator_to_array($mapper->records('issued'), false)[0];
+        self::assertSame('PRODEJ', PohodaXml::text($invoice, 'invoiceHeader/activity/ids'));
+        self::assertSame(['SERVIS', ''], array_map(static fn (array $i): string => PohodaXml::text($i, 'activity/ids'), PohodaXml::all($invoice, 'invoiceDetail/invoiceItem')));
+
+        $older = $this->mapper(['pUD' => [['ID' => '1', 'RelUdAg' => '2', 'Cislo' => 'F1', 'UMD' => '311000', 'UD' => '602000', 'Kc' => '100', 'RefCin' => '2']]]);
+        self::assertSame([], iterator_to_array($older->records('activities'), false));
+        self::assertSame('', PohodaXml::text(iterator_to_array($older->records('journal'), false)[0], 'activity/ids'));
+    }
+
     /** Partner řádku deníku v tvaru XML; RefAD 0 znamená bez vazby, starší export sloupce nemá. */
     public function testJournalCarriesPartnerOfTheRow(): void
     {
@@ -249,7 +345,8 @@ final class PohodaMdbAccountingTest extends TestCase
 
     public static function unknownTypes(): iterable
     {
-        yield 'historical VAT' => [['FA' => [['ID' => '1', 'Cislo' => 'TEST-F1', 'RelTpFak' => '1', 'HistSzDPH' => 'true']]], 'issued', 'mdb_historical_vat'];
+        yield 'historical VAT not matching amounts' => [['FA' => [['ID' => '1', 'Cislo' => 'TEST-F1', 'RelTpFak' => '1', 'Datum' => '2024-06-14',
+            'HistSzDPH' => 'true', 'Kc1' => '1000', 'KcDPH1' => '50']]], 'issued', 'mdb_historical_vat'];
     }
 
     public function testUnknownDocumentAndPaymentTypesAreReportedAndDoNotStopOtherRecords(): void
@@ -350,6 +447,8 @@ final class PohodaMdbAccountingTest extends TestCase
             'HO' => [['ID' => '1', 'RelTpHO' => '2', 'Cislo' => 'TEST-H1', 'Datum' => '2026-02-11']],
             'pINT' => [['ID' => '1', 'Cislo' => 'TEST-I1', 'Datum' => '2026-02-12']],
             'AD' => [['ID' => '1', 'Firma' => 'Testovací odběratel']],
+            'sZAK' => [['ID' => '1', 'Cislo' => 'Z-01', 'SText' => 'Testovací zakázka']],
+            'sCIN' => [['ID' => '1', 'IDS' => 'C-01', 'SText' => 'Testovací činnost'], ['ID' => '2', 'IDS' => 'C-02', 'SText' => 'Druhá činnost']],
         ]);
         $agenda = $this->dir . '/12345678_2026';
         mkdir($agenda);
@@ -364,7 +463,7 @@ final class PohodaMdbAccountingTest extends TestCase
         $counts = $export->counts();
         self::assertSame(
             ['journal' => 2, 'opening' => 1, 'first_date' => '2026-02-03', 'last_date' => '2026-02-03', 'later_years' => [],
-                'issued' => 1, 'purchase' => 2, 'internal' => 1, 'cash' => 1, 'bank' => 1, 'partners' => 1],
+                'issued' => 1, 'purchase' => 2, 'internal' => 1, 'cash' => 1, 'bank' => 1, 'partners' => 1, 'contracts' => 1, 'activities' => 2],
             $counts,
         );
         // Před opravou: deník + sedm druhů faktur zvlášť + každý číselník a položky zvlášť (přes 20).
@@ -405,11 +504,138 @@ final class PohodaMdbAccountingTest extends TestCase
         $this->mapper(['sKonfig' => [['ICO' => '12345678', 'Rok' => '2025']]]);
     }
 
-    public function testUnsupportedHistoricalDateIsRejectedBeforeImport(): void
+    public function testDocumentCarriedOverFromOldYearTakesRatesValidOnItsTaxDate(): void
+    {
+        // POHODA převádí do nového roku i neuhrazené doklady s původním datem.
+        $mapper = $this->mapper([
+            'FA' => [['ID' => '1', 'Cislo' => 'TEST-OLD', 'RelTpFak' => '1', 'Datum' => '2012-12-31', 'DatZdPln' => '2012-12-31',
+                'Kc1' => '100', 'KcDPH1' => '14', 'Kc2' => '200', 'KcDPH2' => '40']],
+            'FApol' => [['ID' => '1', 'RefAg' => '1', 'RelSzDPH' => '2', 'Kc' => '200', 'KcDPH' => '40', 'KcJedn' => '200', 'Mnozstvi' => '1']],
+        ]);
+        $invoice = iterator_to_array($mapper->records('issued'))[0];
+        $summary = $invoice['invoiceSummary']['homeCurrency'];
+        self::assertSame('14', $summary['priceLowVAT']['@rate']);
+        self::assertSame('20', $summary['priceHighVAT']['@rate']);
+        self::assertSame('20', $invoice['invoiceDetail']['invoiceItem'][0]['rateVAT']['@value']);
+    }
+
+    /**
+     * Přijatý doklad má DUZP z dokladu dodavatele v „Datum KH DPH" (`DatKHDPH`), `DatZdPln`
+     * je datum odpočtu. Sazby platí ke dni plnění: faktura s plněním 28. 12. 2023 a odpočtem
+     * v lednu 2024 má sníženou sazbu 15 %, ne 12 %. Vydaná faktura `DatKHDPH` nepoužívá.
+     */
+    public function testReceivedDocumentTakesRatesValidOnSupplierDuzp(): void
+    {
+        $row = ['Datum' => '2024-01-03', 'DatZdPln' => '2024-01-03', 'DatKHDPH' => '2023-12-28', 'Kc1' => '100', 'KcDPH1' => '15'];
+        $mapper = $this->mapper([
+            'FA' => [['ID' => '1', 'Cislo' => 'TEST-PF', 'RelTpFak' => '11'] + $row, ['ID' => '2', 'Cislo' => 'TEST-FV', 'RelTpFak' => '1'] + $row],
+        ]);
+        $received = iterator_to_array($mapper->records('received'))[0];
+        self::assertSame('15', $received['invoiceSummary']['homeCurrency']['priceLowVAT']['@rate']);
+        self::assertSame(['2024-01-03', '2023-12-28'], [$received['invoiceHeader']['dateTax'], $received['invoiceHeader']['dateKHDPH']]);
+        $issued = iterator_to_array($mapper->records('issued'))[0];
+        self::assertSame('12', $issued['invoiceSummary']['homeCurrency']['priceLowVAT']['@rate']);
+    }
+
+    /**
+     * Zaškrtnuté historické sazby: sazby se určí z částek slotů. Vyúčtování zálohy z roku
+     * 2023 má odpočet zálohy v historické sazbě 15 % a hlavičku v sazbě 12 % roku 2024;
+     * doklad s DPH předchozích sazeb (15 %) je dostane i na položky bez vlastního procenta.
+     */
+    public function testHistoricalVatFlagTakesRatesMatchingAmounts(): void
+    {
+        $row = ['RelTpFak' => '1', 'Datum' => '2024-06-14', 'DatZdPln' => '2024-06-14', 'HistSzDPH' => 'true'];
+        $mapper = $this->mapper([
+            'FA' => [
+                ['ID' => '1', 'Cislo' => 'TEST-CURRENT', 'Kc1' => '100000', 'KcDPH1' => '12000'] + $row,
+                ['ID' => '2', 'Cislo' => 'TEST-PREVIOUS', 'Kc1' => '1000', 'KcDPH1' => '150', 'Kc2' => '100', 'KcDPH2' => '21'] + $row,
+                ['ID' => '3', 'Cislo' => 'TEST-NO-VAT', 'Kc0' => '500'] + $row,
+                ['ID' => '4', 'Cislo' => 'TEST-ADVANCE', 'RelTpFak' => '4', 'Datum' => '2023-11-20', 'Kc0' => '10000'],
+            ],
+            'FApol' => [
+                ['ID' => '1', 'RefAg' => '2', 'RelSzDPH' => '1', 'Kc' => '1000', 'KcDPH' => '150', 'KcJedn' => '1000', 'Mnozstvi' => '1'],
+                ['ID' => '2', 'RefAg' => '1', 'RelSzDPH' => '1', 'Kc' => '100000', 'KcDPH' => '12000', 'KcJedn' => '100000', 'Mnozstvi' => '1'],
+                ['ID' => '3', 'RefAg' => '1', 'RelAgID' => '43', 'RefPol' => '4', 'RelSzDPH' => '101', 'ProcentoDPH' => '15', 'Kc' => '-10000', 'KcDPH' => '-1500', 'KcJedn' => '-10000', 'Mnozstvi' => '1'],
+            ],
+        ]);
+        $invoices = iterator_to_array($mapper->records('issued'), false);
+        $rates = array_map(static fn (array $i): array => [$i['invoiceSummary']['homeCurrency']['priceLowVAT']['@rate'], $i['invoiceSummary']['homeCurrency']['priceHighVAT']['@rate']], $invoices);
+        self::assertSame([['12', '21'], ['15', '21'], ['12', '21']], $rates);
+        self::assertSame('15', $invoices[1]['invoiceDetail']['invoiceItem'][0]['rateVAT']['@value']);
+        self::assertSame('12', $invoices[0]['invoiceDetail']['invoiceItem'][0]['rateVAT']['@value']);
+        self::assertSame('15', $invoices[0]['invoiceDetail']['invoiceAdvancePaymentItem'][0]['rateVAT']['@value']);
+    }
+
+    public function testAccessEmptyTaxDateFallsBackToDocumentDate(): void
+    {
+        $mapper = $this->mapper([
+            'FA' => [['ID' => '1', 'Cislo' => 'TEST-F1', 'RelTpFak' => '1', 'Datum' => '2026-03-01', 'DatZdPln' => '1899-12-30', 'Kc1' => '100', 'KcDPH1' => '12']],
+        ]);
+        $invoice = iterator_to_array($mapper->records('issued'))[0];
+        self::assertSame('12', $invoice['invoiceSummary']['homeCurrency']['priceLowVAT']['@rate']);
+        self::assertSame('', $invoice['invoiceHeader']['dateTax']);
+    }
+
+    public function testOldDocumentWithoutVatIsAccepted(): void
+    {
+        $mapper = $this->mapper([
+            'FA' => [['ID' => '1', 'Cislo' => 'TEST-OLD', 'RelTpFak' => '1', 'Datum' => '2003-12-31', 'Kc0' => '100']],
+        ]);
+        self::assertCount(1, iterator_to_array($mapper->records('issued')));
+    }
+
+    public function testVatBeforeMay2004IsRejectedWithDocumentNumber(): void
     {
         $this->expectException(PohodaException::class);
-        $this->expectExceptionMessage('staršími sazbami');
-        $this->mapper(['FA' => [['ID' => '1', 'Cislo' => 'TEST-OLD', 'RelTpFak' => '1', 'Datum' => '2012-12-31', 'Kc2' => '100']]]);
+        $this->expectExceptionMessage('Doklad TEST-OLD (31. 12. 2003) má DPH ze sazeb platných před 1. 5. 2004');
+        $this->mapper(['FA' => [['ID' => '1', 'Cislo' => 'TEST-OLD', 'RelTpFak' => '1', 'Datum' => '2003-12-31', 'Kc2' => '100', 'KcDPH2' => '22']]]);
+    }
+
+    public function testSecondReducedRateBefore2015IsRejected(): void
+    {
+        $this->expectException(PohodaException::class);
+        $this->expectExceptionMessage('Doklad TEST-OLD (30. 6. 2014) má částku v druhé snížené sazbě');
+        $this->mapper(['FA' => [['ID' => '1', 'Cislo' => 'TEST-OLD', 'RelTpFak' => '1', 'Datum' => '2014-06-30', 'Kc3' => '100', 'KcDPH3' => '10']]]);
+    }
+
+    /**
+     * Objednávky (`OBJ`, `OBJpol`): druh podle `RelTpObj` (2 vydaná, 1 přijatá, jiný neznámý),
+     * příznak vyřízení, storno, dodané množství a karta položky, měna z číselníku a partner
+     * ve tvaru identity dokladu. Export ze staršího převodníku objednávky nenese.
+     */
+    public function testOrdersCarryTypeFulfilmentDeliveredQuantityAndCard(): void
+    {
+        self::assertFalse($this->mapper([])->hasOrders());
+        self::assertSame([], iterator_to_array($this->mapper([])->orders()));
+
+        $orders = iterator_to_array($this->mapper([
+            'sCMeny' => [['ID' => '9', 'Kod' => 'eur']],
+            'sZeme' => [['ID' => '1', 'IDS' => 'CZ']],
+            'OBJ' => [
+                ['ID' => '1', 'Cislo' => 'OV1', 'RelTpObj' => '2', 'Datum' => '2026-03-02T00:00:00', 'DatDod' => '2026-03-20T00:00:00', 'Vyrizeno' => 'false',
+                    'RefAD' => '5', 'Firma' => 'Dodavatel Test s.r.o.', 'ICO' => '12345679', 'RefZeme' => '1', 'RefCM' => '9', 'CmKurs' => '25.1', 'CmMnoz' => '1'],
+                ['ID' => '2', 'Cislo' => 'OP1', 'RelTpObj' => '1', 'Datum' => '2026-03-03T00:00:00', 'Vyrizeno' => 'true', 'RefAD' => '0', 'DatStorn' => '1899-12-30T00:00:00'],
+                ['ID' => '3', 'Cislo' => 'OX1', 'RelTpObj' => '7', 'DatStorn' => '2026-03-05T00:00:00'],
+            ],
+            'OBJpol' => [
+                ['ID' => '11', 'RefAg' => '1', 'RefSKz' => '0', 'SText' => 'Doprava', 'Mnozstvi' => '1', 'Kc' => '150', 'OrderFld' => '2'],
+                ['ID' => '10', 'RefAg' => '1', 'RefSKz' => '101', 'Kod' => 'K-001', 'SText' => 'Kabel', 'Mnozstvi' => '10', 'Dodano' => '4', 'MJ' => 'm', 'MJKoef' => '1',
+                    'Kc' => '950', 'ProcentoDPH' => '21', 'SDph' => 'false', 'Cm' => '37.85', 'OrderFld' => '1'],
+            ],
+        ])->orders(), false);
+
+        self::assertSame(['issued', 'received', null], array_column($orders, 'type'));
+        self::assertSame([false, true, false], array_column($orders, 'fulfilled'));
+        self::assertSame([false, false, true], array_column($orders, 'cancelled'));
+        self::assertSame(['2026-03-20', 'EUR', 25.1], [$orders[0]['delivery'], $orders[0]['currency'], $orders[0]['rate']]);
+        self::assertSame(['5', 'Dodavatel Test s.r.o.', '12345679', 'CZ'], [$orders[0]['partner']['id'], $orders[0]['partner']['address']['company'],
+            $orders[0]['partner']['address']['ico'], $orders[0]['partner']['address']['country']['ids']]);
+        self::assertSame('', $orders[1]['partner']['id']);
+        $items = $orders[0]['items'];
+        self::assertSame(['101', ''], array_column($items, 'card'));
+        self::assertSame([[10.0, 4.0, 950.0, 21.0, 37.85], [1.0, 0.0, 150.0, null, null]],
+            array_map(static fn (array $i): array => [$i['quantity'], $i['delivered'], $i['price'], $i['vat_percent'], $i['foreign_price']], $items));
+        self::assertSame([], $orders[1]['items']);
     }
 
     private function mapper(array $data): PohodaMdbAccounting

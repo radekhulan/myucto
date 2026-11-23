@@ -129,7 +129,7 @@ final readonly class PayrollRulesetVersion
             throw new PayrollRulesetException("Ruleset {$this->id} is not active.");
         }
         if ($this->capability !== PayrollRulesetCapability::Supported) {
-            throw new PayrollRulesetException("Ruleset {$this->id} requires manual review.");
+            throw new PayrollRulesetException("Legislativní sada {$this->id} nemá hodnotu pro výpočet, posuzuje se mimo sadu.");
         }
     }
 

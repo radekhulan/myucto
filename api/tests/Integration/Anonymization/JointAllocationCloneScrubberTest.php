@@ -53,7 +53,7 @@ final class JointAllocationCloneScrubberTest extends TestCase
     {
         $container = Bootstrap::buildContainer();
         $this->config = $container->get(Config::class);
-        self::assertContains($this->config->get('db.host'), ['localhost', '127.0.0.1', '::1']);
+        self::assertTrue(\MyInvoice\Tests\Support\TestDatabaseHost::isAllowed((string) ($this->config->get('db.host'))), 'Testovací DB musí být lokální nebo v db.test_allowed_hosts.');
         $base = (string) $container->get(Connection::class)->pdo()->query('SELECT DATABASE()')->fetchColumn();
         self::assertStringEndsWith('_test', $base);
         $this->server = new PDO('mysql:host=' . $this->config->get('db.host') . ';port=' . $this->config->get('db.port', 3306) . ';charset=utf8mb4',

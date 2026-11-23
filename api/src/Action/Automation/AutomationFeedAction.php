@@ -26,7 +26,7 @@ final class AutomationFeedAction
         $query = $this->query($request);
         if ($query === null) return Json::error($response, 'invalid_query', 'Neplatné parametry fronty.', 422);
         [$userId, $isSuperadmin, $bound] = $this->identity($request);
-        return Json::ok($response, $this->feed->feed($userId, $isSuperadmin, $query, $bound));
+        return Json::ok($response, $this->feed->feed($userId, $isSuperadmin, $query, $bound, $request));
     }
 
     public function counts(Request $request, Response $response): Response
@@ -43,6 +43,7 @@ final class AutomationFeedAction
             isset($q['to']) && $q['to'] !== '' ? (string) $q['to'] : null,
             $this->supplierIds($q['suppliers'] ?? ''),
             $bound,
+            $request,
         ));
     }
 
@@ -53,7 +54,7 @@ final class AutomationFeedAction
             ? (int) $q['supplier_id']
             : (int) $request->getAttribute(SupplierScopeMiddleware::ATTR_CURRENT_ID, 0);
         [$userId, $isSuperadmin, $bound] = $this->identity($request);
-        if (!in_array($supplierId, $this->feed->allowedSupplierIds($userId, $isSuperadmin, $bound), true)) {
+        if (!in_array($supplierId, $this->feed->allowedSupplierIds($userId, $isSuperadmin, $bound, $request), true)) {
             return Json::error($response, 'not_found', 'Firma nebyla nalezena.', 404);
         }
         $from = isset($q['from']) && $q['from'] !== '' ? (string) $q['from'] : date('Y-01-01');
@@ -83,6 +84,7 @@ final class AutomationFeedAction
             $this->validDate($q['from'] ?? null) && ($q['from'] ?? '') !== '' ? (string) $q['from'] : null,
             $this->validDate($q['to'] ?? null) && ($q['to'] ?? '') !== '' ? (string) $q['to'] : null,
             $bound,
+            $request,
         ));
     }
 
@@ -91,7 +93,7 @@ final class AutomationFeedAction
         $query = $this->query($request, true);
         if ($query === null) return Json::error($response, 'invalid_query', 'Neplatné parametry historie.', 422);
         [$userId, $isSuperadmin, $bound] = $this->identity($request);
-        return Json::ok($response, $this->feed->history($userId, $isSuperadmin, $query, $bound));
+        return Json::ok($response, $this->feed->history($userId, $isSuperadmin, $query, $bound, $request));
     }
 
     private function query(Request $request, bool $history = false): ?FeedQuery
@@ -158,7 +160,7 @@ final class AutomationFeedAction
             ? (int) $q['supplier_id']
             : (int) $request->getAttribute(SupplierScopeMiddleware::ATTR_CURRENT_ID, 0);
         [$userId, $isSuperadmin, $bound] = $this->identity($request);
-        return in_array($supplierId, $this->feed->allowedSupplierIds($userId, $isSuperadmin, $bound), true) ? $supplierId : null;
+        return in_array($supplierId, $this->feed->allowedSupplierIds($userId, $isSuperadmin, $bound, $request), true) ? $supplierId : null;
     }
 
     /** @return list<int> */

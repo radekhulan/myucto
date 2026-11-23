@@ -72,6 +72,7 @@ final class StorageQuotaReadOnlyMiddleware implements MiddlewareInterface
      */
     private const AUTH_PATHS = [
         '/api/auth/login',
+        '/api/auth/password-token',
         '/api/auth/logout',
         '/api/auth/webauthn/login/options',
         '/api/auth/webauthn/login/verify',
@@ -80,6 +81,7 @@ final class StorageQuotaReadOnlyMiddleware implements MiddlewareInterface
         '/api/auth/domain-login/exchange',
         '/api/auth/mfa/step-up/totp',
         '/api/auth/mfa/step-up/recovery',
+        '/api/auth/oidc/apple/callback',
     ];
 
     /**

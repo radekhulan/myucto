@@ -89,7 +89,7 @@ describe('WorkspaceFavorites', () => {
     Object.values(mocks).forEach(mock => mock.mockReset())
     mocks.navigate.mockResolvedValue(undefined)
     mocks.switchCompany.mockResolvedValue(undefined)
-    Object.defineProperty(Element.prototype, 'scrollIntoView', { configurable: true, value: vi.fn() })
+    Object.defineProperty(Element.prototype, 'scrollIntoView', { configurable: true, writable: true, value: vi.fn() })
   })
 
   afterEach(() => {

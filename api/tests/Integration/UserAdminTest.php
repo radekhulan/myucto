@@ -337,6 +337,58 @@ final class UserAdminTest extends TestCase
         self::assertSame($target, (int) $stmt->fetchColumn());
     }
 
+    /**
+     * Hledání vazeb na uživatele čte metadata jen vlastní databáze. Dotaz, který
+     * otevírá tabulky všech databází na serveru, trvá se sousedními instalacemi
+     * (hosting, paralelní testy) minuty a čeká na jejich DDL.
+     */
+    public function testUserReferenceDiscoveryReadsOnlyOwnDatabase(): void
+    {
+        foreach (['USER_FOREIGN_KEYS_SQL', 'USER_IMPLICIT_COLUMNS_SQL'] as $constant) {
+            $sql = (string) (new \ReflectionClassConstant(\MyInvoice\Action\Admin\UserAdminAction::class, $constant))->getValue();
+            $plan = $this->db->pdo()->query('EXPLAIN ' . $sql)->fetchAll(\PDO::FETCH_ASSOC);
+            self::assertNotSame([], $plan);
+            foreach ($plan as $row) {
+                self::assertStringNotContainsString(
+                    'Scanned all databases',
+                    (string) ($row['Extra'] ?? ''),
+                    $constant . ' prochází information_schema všech databází na serveru.',
+                );
+            }
+        }
+    }
+
+    public function testLockedInactiveUserDeletionReturnsConflictInsteadOfServerError(): void
+    {
+        $admin = $this->mkUser('admin');
+        $session = $this->mkSession($admin);
+        $target = $this->mkUser('readonly');
+        $this->db->pdo()->prepare('UPDATE users SET is_active = 0 WHERE id = ?')->execute([$target]);
+
+        $other = Connection::withoutSharedTestConnection(fn (): Connection => new Connection($this->config));
+        $holder = $other->pdo();
+        $holder->beginTransaction();
+        try {
+            $holder->prepare('SELECT id FROM users WHERE id = ? FOR UPDATE')->execute([$target]);
+            $this->db->pdo()->exec('SET SESSION innodb_lock_wait_timeout = 1');
+
+            $busy = $this->sessionRequest('DELETE', '/api/admin/users/' . $target . '/permanent', $session);
+        } finally {
+            $holder->rollBack();
+            $other->close();
+            $this->db->pdo()->exec('SET SESSION innodb_lock_wait_timeout = DEFAULT');
+        }
+
+        self::assertSame(409, $busy->getStatusCode(), (string) $busy->getBody());
+        self::assertSame('user_busy', $this->json($busy)['error']['code']);
+        $stmt = $this->db->pdo()->prepare('SELECT id FROM users WHERE id = ?');
+        $stmt->execute([$target]);
+        self::assertSame($target, (int) $stmt->fetchColumn());
+
+        $deleted = $this->sessionRequest('DELETE', '/api/admin/users/' . $target . '/permanent', $session);
+        self::assertSame(200, $deleted->getStatusCode(), (string) $deleted->getBody());
+    }
+
     // ------------------------------------------------------------- fixtures
 
     private function mkEmail(): string

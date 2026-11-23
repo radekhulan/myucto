@@ -3,12 +3,16 @@ import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } 
 import { useI18n } from 'vue-i18n'
 import { onBeforeRouteLeave, onBeforeRouteUpdate, useRoute, useRouter, type LocationQueryRaw } from 'vue-router'
 import { apiErrorMessage } from '@/api/errors'
+import FieldNote from '@/components/ui/FieldNote.vue'
+import { apiErrorField } from './payrollFieldFeedback'
 import PayrollJmhzReturnBar from './PayrollJmhzReturnBar.vue'
+import { safeReturnPath } from './jmhzFreezeBlockers'
 import {
   payrollApi,
   type PayrollEmployment,
   type PayrollEmploymentCreatePayload,
   type PayrollOffice,
+  type PayrollOpenAgreement,
   type PayrollPeopleFilter,
   type PayrollEmploymentStatus,
   type PayrollPerson,
@@ -26,6 +30,7 @@ import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
 import Modal from '@/components/ui/Modal.vue'
 import PaginationBar from '@/components/ui/PaginationBar.vue'
 import RowActionsMenu, { type RowAction } from '@/components/ui/RowActionsMenu.vue'
+import { parsePayrollAmountToMinor } from './payrollComponentsUi'
 import RequiredMark from '@/components/ui/RequiredMark.vue'
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
 import { loadDefaultHealthInsurerCode } from '@/composables/usePayrollDefaultInsurer'
@@ -34,7 +39,7 @@ import { useToast } from '@/composables/useToast'
 import { healthInsurerOptions } from '@/utils/healthInsurers'
 import { czechBirthNumberFacts } from '@/utils/czechBirthNumber'
 import { fieldSelector, revealField } from '@/utils/revealField'
-import { btnFilled, btnOutline, ICONS } from '@/components/ui/buttonStyles'
+import { btnFilled, btnOutline, btnOutlineSm, ICONS } from '@/components/ui/buttonStyles'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import { useAuthStore } from '@/stores/auth'
 import EmploymentCard from './EmploymentCard.vue'
@@ -53,23 +58,28 @@ import { employmentCodeLabel, isValidPersonalNumber, personalNumberLabel, todayI
 import {
   payrollAgendaLabelKey,
   payrollAgendas,
+  payrollQueryValue,
   type PayrollAgendaDefinition,
 } from './payrollAgendaLinks'
+import { payrollPeopleFilterFromQuery } from './payrollRemediationQuery'
 import ColumnPicker from '@/components/ui/ColumnPicker.vue'
 import DensityToggle from '@/components/ui/DensityToggle.vue'
 import SortableTh from '@/components/ui/SortableTh.vue'
 import ColumnDragHandle from '@/components/ui/ColumnDragHandle.vue'
 import { useColumnDrag } from '@/composables/useColumnDrag'
-import { formatDate } from '@/composables/useFormat'
+import { formatDate, formatPeriod } from '@/composables/useFormat'
 import { useTablePrefs, type ColumnDef } from '@/composables/useTablePrefs'
 import { ensurePrefsLoaded } from '@/composables/useUserPrefs'
 import DateInput from '@/components/ui/DateInput.vue'
 import PayrollDeclarationSignBulkDialog from '@/components/payroll/PayrollDeclarationSignBulkDialog.vue'
 import PayrollHealthInsurerBulkDialog from '@/components/payroll/PayrollHealthInsurerBulkDialog.vue'
+import PayrollPayoutDefaultsBulkDialog from '@/components/payroll/PayrollPayoutDefaultsBulkDialog.vue'
 import PayrollStatutoryBulkDefaultsDialog from '@/components/payroll/PayrollStatutoryBulkDefaultsDialog.vue'
 import PayrollWorkplaceBulkFillDialog from '@/components/payroll/PayrollWorkplaceBulkFillDialog.vue'
+import PayrollTermsBulkEditDialog from '@/components/payroll/PayrollTermsBulkEditDialog.vue'
 import PayrollBulkClosureDialog from '@/components/payroll/PayrollBulkClosureDialog.vue'
 import { payrollWorkingPeriod } from './payrollComponentsUi'
+import { oldestUnapprovedRunPeriod } from './payrollOpenRunPeriod'
 import { providePersonCardSave } from './personCardSave'
 
 const { t } = useI18n()
@@ -103,7 +113,22 @@ const expandedId = ref<number | null>(null)
 const details = ref<Record<number, PayrollPerson>>({})
 const loadingDetailId = ref<number | null>(null)
 const searchQuery = ref('')
-const peopleFilter = ref<PayrollPeopleFilter>('active')
+// Odkaz z nálezu (kontrola před během → `?filter=blocking_data`) otevře
+// seznam rovnou zúžený.
+const peopleFilter = ref<PayrollPeopleFilter>(payrollPeopleFilterFromQuery(route.query))
+/*
+ * Zúžení na osoby jednoho nálezu kontroly před během (`?filter=run_finding`).
+ * Kód nálezu, období a datum výplaty nese odkaz z přehledu nálezů; server podle
+ * nich vybere osoby týmž snímkem, jakým nález vznikl. Bez nich zúžení nedává
+ * smysl, proto se v nabídce filtru ukazuje jen tehdy, když je zapnuté odkazem.
+ */
+const runFinding = (() => {
+  const finding = payrollQueryValue(route.query, 'finding')
+  const period = payrollQueryValue(route.query, 'period')
+  if (peopleFilter.value !== 'run_finding' || finding === null || period === null) return null
+  return { finding, period, payment_date: payrollQueryValue(route.query, 'payment_date') ?? undefined }
+})()
+if (peopleFilter.value === 'run_finding' && runFinding === null) peopleFilter.value = 'active'
 const narrowed = computed(
   () => peopleFilter.value !== 'all' || searchQuery.value.trim() !== '',
 )
@@ -115,7 +140,75 @@ const creatingForId = ref<number | null>(null)
 const savingNew = ref(false)
 const newEmployment = ref<PayrollEmploymentCreatePayload | null>(null)
 const newEmploymentMonthlyGross = ref<number | null>(null)
+const newEmploymentHourlyRate = ref('')
+watch(() => newEmployment.value?.relation_type, (relationType) => {
+  if (newEmployment.value?.terms.remuneration_type === 'hourly' && !['employment', 'small_scale_employment', 'dpp', 'dpc'].includes(relationType ?? '')) {
+    newEmployment.value.terms.remuneration_type = null
+    newEmployment.value.terms.hourly_rate_minor = null
+  }
+})
+/*
+ * Podklad hodinového sjednání se předvyplní stejně jako na kartě vztahu:
+ * DPP a DPČ dohoda, pracovní poměr mzdový výměr účinný ode dne nástupu.
+ * Předvyplněný text sleduje druh vztahu a datum, dokud ho nikdo nepřepíše.
+ */
+let newEmploymentPrefilledBasis: string | null = null
+watch(() => [newEmployment.value?.terms.remuneration_type, newEmployment.value?.relation_type, newEmployment.value?.terms.planned_start_on] as const, ([type, relation, start], previous) => {
+  const draft = newEmployment.value
+  if (!draft || type !== 'hourly' || !['employment', 'small_scale_employment', 'dpp', 'dpc'].includes(relation ?? '')) return
+  const agreement = relation === 'dpp' || relation === 'dpc'
+  const relationChanged = previous !== undefined && previous[1] !== relation
+  if (!draft.terms.remuneration_basis_kind || (relationChanged && draft.terms.remuneration_basis_kind === (agreement ? 'wage_statement' : 'agreement'))) {
+    draft.terms.remuneration_basis_kind = agreement ? 'agreement' : 'wage_statement'
+  }
+  const current = (draft.terms.remuneration_basis ?? '').trim()
+  if (current !== '' && current !== newEmploymentPrefilledBasis) return
+  newEmploymentPrefilledBasis = agreement
+    ? t(`payroll.people.remuneration.basis_default_${relation}`)
+    : start ? t('payroll.people.remuneration.basis_default_wage_statement', { date: formatDate(start) }) : null
+  draft.terms.remuneration_basis = newEmploymentPrefilledBasis
+})
 const newEmploymentError = ref('')
+/*
+ * Otevřené DPP osoby, kvůli kterým server novou DPP nezaložil (409
+ * `open_agreement_exists`). Formulář pak nabídne použít otevřenou dohodu,
+ * nebo výslovně založit novou; změna druhu nebo dat volbu zahodí.
+ */
+const newEmploymentOpenAgreements = ref<PayrollOpenAgreement[]>([])
+watch(() => [newEmployment.value?.relation_type, newEmployment.value?.terms.planned_start_on, newEmployment.value?.terms.fixed_term_end_on], () => {
+  newEmploymentOpenAgreements.value = []
+})
+/*
+ * Pole nového vztahu, kvůli kterému založení neprošlo — lokální kontrola nebo
+ * `error.details.field` ze serveru. Pole, které formulář nemá (pracoviště,
+ * kódy JMHZ), zůstává jen v souhrnné hlášce; doplní se pak na kartě vztahu.
+ */
+const NEW_EMPLOYMENT_FIELD_TARGETS: Record<string, string> = {
+  remuneration_type: 'new-employment-remuneration-type',
+  hourly_rate_minor: 'new-employment-hourly-rate',
+  remuneration_basis_kind: 'new-employment-remuneration-basis-kind',
+  remuneration_basis: 'new-employment-remuneration-basis',
+  monthly_gross_minor: 'new-employment-monthly-gross',
+  office_id: 'new-employment-office',
+  weekly_hours: 'new-employment-weekly-hours',
+  planned_start_on: 'new-employment-planned-start',
+}
+const newEmploymentInvalidField = ref<string | null>(null)
+function newEmploymentFieldClass(field: string): string {
+  return newEmploymentInvalidField.value === field ? 'border-danger-500' : 'border-neutral-300'
+}
+function newEmploymentFieldError(field: string): string | null {
+  return newEmploymentInvalidField.value === field && newEmploymentError.value !== '' ? newEmploymentError.value : null
+}
+function rejectNewEmploymentField(field: string, message: string): void {
+  newEmploymentError.value = message
+  newEmploymentInvalidField.value = field
+  const target = NEW_EMPLOYMENT_FIELD_TARGETS[field]
+  if (target) void nextTick(() => revealField(`[data-test="${target}"]`))
+}
+watch(() => [newEmployment.value?.terms.remuneration_type, newEmploymentHourlyRate.value, newEmploymentMonthlyGross.value, newEmployment.value?.terms.remuneration_basis_kind, newEmployment.value?.terms.remuneration_basis, newEmployment.value?.terms.office_id, newEmployment.value?.terms.weekly_hours, newEmployment.value?.terms.planned_start_on], () => {
+  newEmploymentInvalidField.value = null
+})
 const advancedProfileOpen = ref(false)
 const personProfilePanel = ref<InstanceType<typeof PayrollPersonProfilePanel> | null>(null)
 const deletingPerson = ref(false)
@@ -127,24 +220,120 @@ const canCreatePerson = computed(() => auth.canWrite('payroll.person.write'))
  * a nevhodné sám vyřadí s důvodem.
  */
 const statutoryBulkOpen = ref(false)
-const statutoryBulkEffectiveOn = `${payrollWorkingPeriod()}-01`
+// Proklik z kontroly běhu nese `period` běhu; dialogy pak pracují s ním,
+// ne se zpracovávaným měsícem.
+const bulkQueryPeriod = typeof route.query.period === 'string' && /^\d{4}-(0[1-9]|1[0-2])$/.test(route.query.period)
+  ? route.query.period
+  : null
+const bulkPeriod = ref(bulkQueryPeriod ?? payrollWorkingPeriod())
+const statutoryBulkEffectiveOn = computed(() => `${bulkPeriod.value}-01`)
+/** Období mzdového běhu, ke kterému se hromadné opravy vztahují; `null` = žádný neschválený běh. */
+const bulkRunPeriod = ref<string | null>(bulkQueryPeriod)
+// Bez období v odkazu platí nejstarší měsíc, který ještě čeká na schválení
+// mzdového běhu, ne měsíc podle dneška.
+const bulkPeriodResolved: Promise<void> = bulkQueryPeriod !== null
+  ? Promise.resolve()
+  : oldestUnapprovedRunPeriod()
+    .then((found) => {
+      if (found === null) return
+      bulkPeriod.value = found
+      bulkRunPeriod.value = found
+    })
+    .catch(() => {})
+
+function openWithBulkPeriod(open: () => void): void {
+  void bulkPeriodResolved.then(open)
+}
 const workplaceBulkOpen = ref(false)
+const termsBulkOpen = ref(false)
 const bulkClosureOpen = ref(false)
+/**
+ * Období mzdového běhu, ke kterému se hromadné ukončení vztahuje: z odkazu
+ * (`?bulk=closure&period=RRRR-MM`), z nabídky „Další funkce" nejstarší
+ * neschválený běh. Bez neschváleného běhu předvybírá všechny uplynulé konce.
+ */
+const bulkClosurePeriod = ref<string | null>(null)
 // Počet vztahů k ukončení na tlačítku; výpadek náhledu tlačítko neschová.
 const bulkClosureCount = ref<number | null>(null)
 // Po importu hlášení JMHZ (nenese pojišťovnu) sem vede proklik `?bulk=health_insurer`.
-const healthInsurerBulkOpen = ref(route.query.bulk === 'health_insurer')
+const healthInsurerBulkOpen = ref(false)
 // Z hromadného doplnění evidence (i na této stránce) vede proklik `?bulk=declaration_signed`.
-const declarationSignBulkOpen = ref(canCreatePerson.value && route.query.bulk === 'declaration_signed')
-watch(() => route.query.bulk, (bulk) => {
-  if (bulk !== 'declaration_signed' || !canCreatePerson.value) return
-  statutoryBulkOpen.value = false
-  declarationSignBulkOpen.value = true
-})
+const declarationSignBulkOpen = ref(false)
+// Nález kontroly běhu posílá i osoby, kterých se týká (`?employees=1,2`);
+// bez nich dialog nabídne všechny osoby roku.
+function bulkEmployeeIds(kind: string): number[] | null {
+  const raw = route.query.employees
+  if (route.query.bulk !== kind || typeof raw !== 'string') return null
+  const ids = raw.split(',').map(Number).filter(id => Number.isInteger(id) && id > 0)
+  return ids.length > 0 ? ids : null
+}
+const declarationSignEmployeeIds = computed(() => bulkEmployeeIds('declaration_signed'))
+const payoutDefaultsOpen = ref(false)
+const payoutDefaultsEmployeeIds = ref<number[] | null>(null)
+const canWritePerson = computed(() => auth.canWrite('payroll.person.write'))
+// Z nálezu kontroly běhu: dialog výchozích údajů nabídne tytéž osoby jako tlačítko.
+const statutoryBulkEmployeeIds = ref<number[] | null>(bulkEmployeeIds('statutory_defaults'))
 const canWriteEmployment = computed(() => auth.canWrite('payroll.employment.write'))
 const canQuickEditPerson = computed(() =>
   auth.canWrite('payroll.person.write')
   && auth.canWrite('payroll.employment.write'),
+)
+
+/*
+ * `?bulk=<druh>` otevře hromadnou opravu z „Další funkce" — vedou sem
+ * proklik po importu JMHZ, z doplnění evidence i z nálezu kontroly běhu.
+ * Každý dialog se otevře jen s tím právem, se kterým ho nabízí i nabídka.
+ */
+/**
+ * Kam se vrátit po zavření hromadného dialogu otevřeného odkazem (`?back=`).
+ * Z kontroly mzdového běhu vedlo „Zavřít" na seznam zaměstnanců a účetní
+ * hledala cestu zpět do běhu.
+ */
+const bulkBackPath = ref<string | null>(null)
+
+function openBulkFromQuery(bulk: unknown) {
+  bulkBackPath.value = typeof bulk === 'string' ? safeReturnPath(route.query.back) : null
+  if (bulk === 'declaration_signed' && canCreatePerson.value) {
+    statutoryBulkOpen.value = false
+    declarationSignBulkOpen.value = true
+  } else if (bulk === 'statutory_defaults' && canCreatePerson.value) {
+    statutoryBulkEmployeeIds.value = bulkEmployeeIds('statutory_defaults')
+    openWithBulkPeriod(() => { statutoryBulkOpen.value = true })
+  } else if (bulk === 'health_insurer' && canQuickEditPerson.value) {
+    openWithBulkPeriod(() => { healthInsurerBulkOpen.value = true })
+  } else if (bulk === 'workplace' && canWriteEmployment.value) {
+    openWithBulkPeriod(() => { workplaceBulkOpen.value = true })
+  } else if (bulk === 'payout_defaults' && canWritePerson.value) {
+    payoutDefaultsEmployeeIds.value = bulkEmployeeIds('payout_defaults')
+    payoutDefaultsOpen.value = true
+  } else if (bulk === 'closure' && canWriteEmployment.value) {
+    const linked = payrollQueryValue(route.query, 'period')
+    bulkClosurePeriod.value = linked !== null && /^\d{4}-(0[1-9]|1[0-2])$/.test(linked) ? linked : null
+    bulkClosureOpen.value = true
+  }
+}
+openBulkFromQuery(route.query.bulk)
+watch(() => route.query.bulk, openBulkFromQuery)
+// `?bulk=` je jednorázový povel: po zavření dialogu z adresy zmizí, jinak by
+// druhý proklik na tentýž odkaz adresu nezměnil a dialog se znovu neotevřel.
+watch(
+  () => statutoryBulkOpen.value || declarationSignBulkOpen.value || healthInsurerBulkOpen.value
+    || workplaceBulkOpen.value || bulkClosureOpen.value || payoutDefaultsOpen.value,
+  (open, wasOpen) => {
+    if (open || !wasOpen) return
+    const back = bulkBackPath.value
+    bulkBackPath.value = null
+    if (back !== null) {
+      void router.push(back)
+      return
+    }
+    if (route.query.bulk === undefined && route.query.employees === undefined) return
+    const query = { ...route.query }
+    delete query.bulk
+    delete query.employees
+    delete query.back
+    void router.replace({ query })
+  },
 )
 const relationTypes: PayrollRelationType[] = [
   'employment',
@@ -169,6 +358,9 @@ const filterOptions = computed(() => [
   { value: 'needs_data' as const, label: t('payroll.people.filters.needs_data') },
   { value: 'blocking_data' as const, label: t('payroll.people.filters.blocking_data') },
   { value: 'dpp_hours_limit' as const, label: t('payroll.people.filters.dpp_hours_limit') },
+  ...(peopleFilter.value === 'run_finding'
+    ? [{ value: 'run_finding' as const, label: t('payroll.people.filters.run_finding') }]
+    : []),
 ])
 const relationOptions = computed(() => relationTypes.map(type => ({
   value: type,
@@ -511,6 +703,82 @@ async function removePerson() {
   }
 }
 
+// Hromadné úpravy se nedělají každý měsíc, proto jsou v „Další funkce". Skončené
+// dohody k ukončení jsou ale úkol, který čeká, a ten se schovávat nesmí.
+const peopleBulkActions = computed<ActionItem[]>(() => [
+  {
+    key: 'bulk-closure',
+    label: bulkClosureCount.value
+      ? t('payroll.bulk_closure.open_count', { count: bulkClosureCount.value })
+      : t('payroll.bulk_closure.open'),
+    icon: 'archive',
+    tier: bulkClosureCount.value ? 'secondary' : 'overflow',
+    variant: 'warning',
+    show: canWriteEmployment.value,
+    run: () => openWithBulkPeriod(() => {
+      bulkClosurePeriod.value = bulkRunPeriod.value
+      bulkClosureOpen.value = true
+    }),
+  },
+  {
+    key: 'statutory-bulk',
+    label: t('payroll.people.statutory_bulk_action'),
+    icon: 'clipboardCheck',
+    tier: 'overflow',
+    variant: 'warning',
+    show: canCreatePerson.value,
+    run: () => openWithBulkPeriod(() => { statutoryBulkOpen.value = true }),
+  },
+  {
+    key: 'declaration-sign-bulk',
+    label: t('payroll.people.declaration_sign_bulk_action'),
+    icon: 'check',
+    tier: 'overflow',
+    variant: 'success',
+    show: canCreatePerson.value,
+    run: () => { declarationSignBulkOpen.value = true },
+  },
+  {
+    key: 'health-insurer-bulk',
+    label: t('payroll.health_insurer_bulk.open'),
+    icon: 'clipboardCheck',
+    tier: 'overflow',
+    variant: 'warning',
+    show: canQuickEditPerson.value,
+    run: () => openWithBulkPeriod(() => { healthInsurerBulkOpen.value = true }),
+  },
+  {
+    key: 'payout-defaults-bulk',
+    label: t('payroll.people.payout_defaults_action'),
+    icon: 'coin',
+    tier: 'overflow',
+    variant: 'warning',
+    show: canWritePerson.value,
+    run: () => {
+      payoutDefaultsEmployeeIds.value = null
+      payoutDefaultsOpen.value = true
+    },
+  },
+  {
+    key: 'workplace-bulk',
+    label: t('payroll.people.workplace_bulk_action'),
+    icon: 'pin',
+    tier: 'overflow',
+    variant: 'warning',
+    show: canWriteEmployment.value,
+    run: () => openWithBulkPeriod(() => { workplaceBulkOpen.value = true }),
+  },
+  {
+    key: 'terms-bulk',
+    label: t('payroll.people.terms_bulk_action'),
+    icon: 'edit',
+    tier: 'overflow',
+    variant: 'warning',
+    show: canWriteEmployment.value,
+    run: () => openWithBulkPeriod(() => { termsBulkOpen.value = true }),
+  },
+])
+
 const personActions = computed<ActionItem[]>(() => [
   {
     key: 'add-employment',
@@ -661,6 +929,21 @@ function removeEmploymentFromDetail(personId: number, employmentId: number) {
   if (listItem && listItem.employment_count > 0) listItem.employment_count -= 1
 }
 
+/*
+ * Sloučení přesunulo data do jiného vztahu a sloučený smazalo. Karta osoby se
+ * načte celá znovu: změnil se cílový vztah (druh, nástup, časová osa) i souhrny
+ * osoby, které z vztahů vycházejí.
+ */
+async function reloadAfterMerge(personId: number, employmentId: number, target: PayrollEmployment) {
+  removeEmploymentFromDetail(personId, employmentId)
+  updateEmployment(personId, target)
+  try {
+    details.value[personId] = await payrollApi.person(personId)
+  } catch {
+    // Karta zůstane s místně upraveným stavem; další otevření ji načte znovu.
+  }
+}
+
 function resetEmployeeForm() {
   employeeForm.first_name = ''
   employeeForm.last_name = ''
@@ -791,6 +1074,7 @@ async function load() {
       sort_key: activeSort.value?.key,
       sort_dir: activeSort.value?.dir,
       include_contacts: contactsShown.value || undefined,
+      ...(peopleFilter.value === 'run_finding' && runFinding !== null ? runFinding : {}),
     })
     people.value = page.items
     total.value = page.total
@@ -898,13 +1182,20 @@ function startCreate(personId: number) {
   // Nabídka se drží v paměti aplikace, takže tohle nestojí požadavek navíc.
   void loadPayrollOffices().then((value) => { offices.value = value })
   newEmploymentMonthlyGross.value = null
+  newEmploymentHourlyRate.value = ''
   newEmploymentError.value = ''
+  newEmploymentInvalidField.value = null
+  newEmploymentOpenAgreements.value = []
+  newEmploymentPrefilledBasis = null
   newEmployment.value = employmentDraft(
     '',
     'employment',
     start,
     null,
-    details.value[personId]?.employments.every(item => !item.is_primary) ?? true,
+    // Stejně jako server (hasOverlappingPrimary): primární vztah skončený před
+    // nástupem nového hlavní roli neblokuje.
+    details.value[personId]?.employments.every(item => !item.is_primary
+      || (item.end_date !== null && item.end_date < start)) ?? true,
   )
 }
 
@@ -921,6 +1212,10 @@ function employmentDraft(
     meal_entitlement_basis: 'shift',
     monthly_gross_minor: monthlyGrossMinor,
     terms: {
+      remuneration_type: null,
+      remuneration_basis_kind: null,
+      hourly_rate_minor: null,
+      remuneration_basis: null,
       office_id: null,
       effective_from: start,
       contract_signed_on: null,
@@ -955,17 +1250,56 @@ function employmentDraft(
   }
 }
 
-async function saveNew(personId: number) {
+/** Odpověď 409 na další DPP vedle otevřené dohody, viz PayrollOpenAgreements na serveru. */
+function openAgreementsFromError(error: unknown): PayrollOpenAgreement[] | null {
+  const response = (error as { response?: { status?: number; data?: { error?: { code?: string; open_agreements?: PayrollOpenAgreement[] } } } }).response
+  if (response?.status !== 409 || response.data?.error?.code !== 'open_agreement_exists') return null
+  return response.data.error.open_agreements ?? []
+}
+
+async function saveNew(personId: number, choice: { use_open_agreement?: number; confirm_new_agreement?: boolean } = {}) {
   if (!newEmployment.value || savingNew.value) return
+  const hourly = newEmployment.value.terms.remuneration_type === 'hourly'
+  const hourlyRate = parsePayrollAmountToMinor(newEmploymentHourlyRate.value)
+  if (hourly && (hourlyRate === null || hourlyRate <= 0 || hourlyRate > 1_000_000_000)) {
+    rejectNewEmploymentField('hourly_rate_minor', t('payroll.people.remuneration.hourly_invalid'))
+    return
+  }
+  if (hourly && !(newEmployment.value.terms.remuneration_basis ?? '').trim()) {
+    rejectNewEmploymentField('remuneration_basis', t('payroll.people.remuneration.basis_required'))
+    return
+  }
+  if (hourly && !newEmployment.value.terms.remuneration_basis_kind) {
+    rejectNewEmploymentField('remuneration_basis_kind', t('payroll.people.remuneration.basis_kind_required'))
+    return
+  }
   savingNew.value = true
   newEmploymentError.value = ''
+  newEmploymentInvalidField.value = null
   try {
-    const employment = await payrollApi.createEmployment(personId, {
+    const { employment, warnings, reused, extended_to: extendedTo } = await payrollApi.createEmployment(personId, {
       ...newEmployment.value,
-      monthly_gross_minor: Number(newEmploymentMonthlyGross.value) > 0
-        ? Number(newEmploymentMonthlyGross.value) * 100
+      ...choice,
+      monthly_gross_minor: !hourly && Number(newEmploymentMonthlyGross.value) > 0
+        ? Math.round(Number(newEmploymentMonthlyGross.value) * 100)
         : null,
+      terms: {
+        ...newEmployment.value.terms,
+        hourly_rate_minor: hourly ? hourlyRate : null,
+        remuneration_basis_kind: hourly ? newEmployment.value.terms.remuneration_basis_kind : null,
+        remuneration_basis: hourly ? (newEmployment.value.terms.remuneration_basis ?? '').trim() || null : null,
+      },
     })
+    newEmploymentOpenAgreements.value = []
+    if (reused) {
+      updateEmployment(personId, employment)
+      creatingForId.value = null
+      newEmployment.value = null
+      toast.success(extendedTo
+        ? t('payroll.people.open_agreement.reused_extended', { code: employment.code, date: formatDate(extendedTo) })
+        : t('payroll.people.open_agreement.reused', { code: employment.code }))
+      return
+    }
     const person = details.value[personId]
     if (person) person.employments.push(employment)
     const listItem = people.value.find(item => item.id === personId)
@@ -986,9 +1320,23 @@ async function saveNew(personId: number) {
     void refreshDataGaps(personId)
     creatingForId.value = null
     newEmployment.value = null
-    toast.success(t('payroll.people.employment_created'))
+    if (warnings.length > 0) {
+      toast.warning(t('payroll.people.employment_created_with_warnings', { messages: warnings.map(warning => warning.message).join(' ') }))
+    } else {
+      toast.success(t('payroll.people.employment_created'))
+    }
+    warnLockedRunGaps([employment])
   } catch (error) {
+    const openAgreements = openAgreementsFromError(error)
+    if (openAgreements !== null) {
+      newEmploymentOpenAgreements.value = openAgreements
+      return
+    }
     newEmploymentError.value = apiErrorMessage(error, t('payroll.people.mutation_failed'))
+    const field = apiErrorField(error)
+    if (field !== null && NEW_EMPLOYMENT_FIELD_TARGETS[field]) {
+      rejectNewEmploymentField(field, newEmploymentError.value)
+    }
     toast.error(newEmploymentError.value)
   } finally {
     savingNew.value = false
@@ -1063,6 +1411,7 @@ async function createEmployee() {
     details.value[created.id] = created
     expandedId.value = created.id
     toast.success(t('payroll.people.create.created'))
+    warnLockedRunGaps(created.employments)
   } catch (error) {
     employeeError.value = apiErrorMessage(
       error,
@@ -1072,6 +1421,17 @@ async function createEmployee() {
   } finally {
     savingEmployee.value = false
   }
+}
+
+/**
+ * Nástup nového vztahu spadá do měsíce, který už má schválený běh: řekne se to
+ * hned při založení, ne až když někdo zjistí, že osobě chybí mzda. Trvalé
+ * upozornění s odkazem na běh drží karta vztahu.
+ */
+function warnLockedRunGaps(employments: PayrollEmployment[]) {
+  const periods = [...new Set(employments.flatMap(item => (item.locked_run_gaps ?? []).map(gap => gap.period)))].sort()
+  if (periods.length === 0) return
+  toast.warning(t('payroll.people.locked_run_gap.toast', { periods: periods.map(period => formatPeriod(period)).join(', ') }, periods.length))
 }
 
 /**
@@ -1275,7 +1635,8 @@ const FOCUSABLE_PANELS = [
   'deferred_income',
   // Karta Skončení vztahu (srážky z odstupného podle § 299 odst. 4 o. s. ř.).
   'termination',
-  // Počáteční roční úhrny, na kartě hlavního pracovního vztahu.
+  'exit_documents',
+  // Počáteční roční úhrny, na kartě hlavního (bez něj posledního) pracovního vztahu.
   'opening_balances',
 ] as const
 
@@ -1304,13 +1665,13 @@ async function focusPanel(panel: string) {
   delete query.panel
   delete query.field
   await router.replace({ query })
-  if (['jmhz_identity', 'jmhz_profile', 'employment_terms', 'employment_checklist', 'registration', 'deferred_income', 'termination', 'opening_balances'].includes(panel)) {
+  if (['jmhz_identity', 'jmhz_profile', 'employment_terms', 'employment_checklist', 'registration', 'deferred_income', 'termination', 'exit_documents', 'opening_balances'].includes(panel)) {
     await nextTick()
     const cards = employmentCards.value
     const target = Number.isInteger(employmentId) && employmentId > 0
       ? cards.find(card => card.employmentId === employmentId)
       : panel === 'opening_balances'
-        ? cards.find(card => card.isPrimary)
+        ? cards.find(card => card.holdsOpeningBalances)
         : cards.length === 1 ? cards[0] : undefined
     await target?.focusSection(panel, field)
     return
@@ -1454,8 +1815,14 @@ const payrollStartPeriod = ref<string | null>(null)
 async function loadBulkClosureCount() {
   if (!canWriteEmployment.value) return
   try {
-    const preview = await payrollApi.bulkClosurePreview()
-    bulkClosureCount.value = preview.summary.expired + preview.summary.inactive - preview.summary.blocked
+    await bulkPeriodResolved
+    const period = bulkRunPeriod.value
+    const preview = await payrollApi.bulkClosurePreview(period === null ? {} : { period })
+    // S obdobím běhu tlačítko slibuje totéž, co hlásí kontrola před během
+    // a co dialog předvybere: dohody skončené před tímto měsícem.
+    bulkClosureCount.value = period === null
+      ? preview.summary.expired + preview.summary.inactive - preview.summary.blocked
+      : preview.items.filter(item => item.before_period === true && item.blocked_reason === null).length
   } catch {
     bulkClosureCount.value = null
   }
@@ -1627,6 +1994,7 @@ onMounted(async () => {
           <label class="min-w-0 text-xs text-neutral-600">
             {{ t('payroll.people.create.monthly_gross') }}
             <input v-model.number="employeeForm.monthly_gross" type="number" min="0" step="1" class="mt-1 w-full min-w-0 rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm">
+            <span class="mt-1 block text-xs text-neutral-500">{{ t('payroll.people.remuneration.edit_on_card') }}</span>
           </label>
           <!--
             Úvazek se dosud dosazoval natvrdo na 40 hodin, takže poloviční
@@ -1734,61 +2102,6 @@ onMounted(async () => {
           </label>
         </div>
         <div class="flex min-w-0 flex-wrap gap-2 lg:justify-end">
-          <button
-            v-if="canCreatePerson"
-            type="button"
-            class="whitespace-nowrap"
-            :class="btnOutline('warning')"
-            data-test="statutory-bulk-open"
-            @click="statutoryBulkOpen = true"
-          >
-            <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.clipboardCheck" /></svg>
-            {{ t('payroll.people.statutory_bulk_action') }}
-          </button>
-          <button
-            v-if="canCreatePerson"
-            type="button"
-            class="whitespace-nowrap"
-            :class="btnOutline('success')"
-            data-test="declaration-sign-bulk-open"
-            @click="declarationSignBulkOpen = true"
-          >
-            <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.check" /></svg>
-            {{ t('payroll.people.declaration_sign_bulk_action') }}
-          </button>
-          <button
-            v-if="canQuickEditPerson"
-            type="button"
-            class="whitespace-nowrap"
-            :class="btnOutline('warning')"
-            data-test="health-insurer-bulk-open"
-            @click="healthInsurerBulkOpen = true"
-          >
-            <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.clipboardCheck" /></svg>
-            {{ t('payroll.health_insurer_bulk.open') }}
-          </button>
-          <button
-            v-if="canWriteEmployment"
-            type="button"
-            class="whitespace-nowrap"
-            :class="btnOutline('warning')"
-            data-test="workplace-bulk-open"
-            @click="workplaceBulkOpen = true"
-          >
-            <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.pin" /></svg>
-            {{ t('payroll.people.workplace_bulk_action') }}
-          </button>
-          <button
-            v-if="canWriteEmployment"
-            type="button"
-            class="whitespace-nowrap"
-            :class="btnOutline('warning')"
-            data-test="bulk-closure-open"
-            @click="bulkClosureOpen = true"
-          >
-            <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.archive" /></svg>
-            {{ bulkClosureCount ? t('payroll.bulk_closure.open_count', { count: bulkClosureCount }) : t('payroll.bulk_closure.open') }}
-          </button>
           <RouterLink
             :to="{ name: 'payroll-quick-inputs' }"
             class="whitespace-nowrap"
@@ -1798,21 +2111,51 @@ onMounted(async () => {
             <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.coin" /></svg>
             {{ t('payroll.people.quick_inputs') }}
           </RouterLink>
+          <ActionBar :actions="peopleBulkActions" :more-label="t('payroll.people.more_functions')" />
         </div>
       </div>
     </section>
 
+    <!-- Seznam zúžený odkazem z nálezu kontroly před během: řekne proč a nabídne cestu zpět. -->
+    <div
+      v-if="peopleFilter === 'run_finding' && runFinding !== null && !editing && !showEmployeeForm"
+      class="flex flex-wrap items-center gap-3 rounded-lg border border-primary-500/30 bg-primary-50 p-3 text-sm text-primary-800"
+      data-test="people-run-finding"
+    >
+      <p class="min-w-0 flex-1">
+        {{ t('payroll.people.run_finding.hint', { period: formatPeriod(runFinding.period), count: total }, total) }}
+      </p>
+      <RouterLink
+        :to="{ name: 'payroll-runs', query: { period: runFinding.period } }"
+        :class="[btnOutlineSm('primary'), 'whitespace-nowrap']"
+        data-test="people-run-finding-back"
+      >
+        <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.chevronLeft" /></svg>
+        {{ t('payroll.people.run_finding.back') }}
+      </RouterLink>
+      <button
+        type="button"
+        :class="[btnOutlineSm('neutral'), 'whitespace-nowrap']"
+        data-test="people-run-finding-clear"
+        @click="peopleFilter = 'active'"
+      >
+        <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.x" /></svg>
+        {{ t('payroll.people.run_finding.clear') }}
+      </button>
+    </div>
+
     <PayrollStatutoryBulkDefaultsDialog
       v-if="statutoryBulkOpen"
       :effective-on="statutoryBulkEffectiveOn"
-      :employee-ids="null"
+      :employee-ids="statutoryBulkEmployeeIds"
       period-editable
-      @close="statutoryBulkOpen = false"
+      @close="statutoryBulkOpen = false; statutoryBulkEmployeeIds = null"
       @applied="load"
     />
 
     <PayrollDeclarationSignBulkDialog
       v-if="declarationSignBulkOpen"
+      :employee-ids="declarationSignEmployeeIds"
       @close="declarationSignBulkOpen = false"
       @applied="load"
     />
@@ -1824,6 +2167,13 @@ onMounted(async () => {
       @applied="load"
     />
 
+    <PayrollPayoutDefaultsBulkDialog
+      v-if="payoutDefaultsOpen"
+      :employee-ids="payoutDefaultsEmployeeIds"
+      @close="payoutDefaultsOpen = false; payoutDefaultsEmployeeIds = null"
+      @applied="load"
+    />
+
     <PayrollWorkplaceBulkFillDialog
       v-if="workplaceBulkOpen"
       :period-start="statutoryBulkEffectiveOn"
@@ -1832,8 +2182,16 @@ onMounted(async () => {
       @applied="load"
     />
 
+    <PayrollTermsBulkEditDialog
+      v-if="termsBulkOpen"
+      :period-start="statutoryBulkEffectiveOn"
+      @close="termsBulkOpen = false"
+      @applied="load"
+    />
+
     <PayrollBulkClosureDialog
       v-if="bulkClosureOpen"
+      :period="bulkClosurePeriod"
       @close="bulkClosureOpen = false"
       @applied="onBulkClosureApplied"
     />
@@ -2012,7 +2370,7 @@ onMounted(async () => {
             {{ t('payroll.people.relation_type') }} <RequiredMark />
             <SearchableSelect v-model="newEmployment.relation_type" class="mt-1" :options="relationOptions" :clearable="false" accent="payroll" />
           </label>
-          <label class="text-xs text-neutral-600">{{ t('payroll.people.planned_start') }} <RequiredMark /><DateInput v-model="newEmployment.terms.planned_start_on" required class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm" /></label>
+          <label class="text-xs text-neutral-600">{{ t('payroll.people.planned_start') }} <RequiredMark /><DateInput v-model="newEmployment.terms.planned_start_on" required :class="['mt-1 w-full rounded-md border bg-surface px-3 py-2 text-sm', newEmploymentFieldClass('planned_start_on')]" data-test="new-employment-planned-start" /><FieldNote :error="newEmploymentFieldError('planned_start_on')" /></label>
           <label v-if="officeOptions.length > 0" class="text-xs text-neutral-600">
             {{ t('payroll.people.office_label') }} <RequiredMark />
             <SearchableSelect
@@ -2027,9 +2385,39 @@ onMounted(async () => {
               data-test="new-employment-office"
               @update:model-value="newEmployment.terms.office_id = $event === null ? null : Number($event)"
             />
+            <FieldNote :error="newEmploymentFieldError('office_id')" />
           </label>
-          <label class="text-xs text-neutral-600">{{ t('payroll.people.weekly_hours') }}<input v-model="newEmployment.terms.weekly_hours" inputmode="decimal" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"></label>
-          <label class="text-xs text-neutral-600">{{ t('payroll.people.create.monthly_gross') }}<input v-model.number="newEmploymentMonthlyGross" type="number" min="0" step="1" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"></label>
+          <label class="text-xs text-neutral-600">{{ t('payroll.people.weekly_hours') }}<input v-model="newEmployment.terms.weekly_hours" inputmode="decimal" :class="['mt-1 w-full rounded-md border bg-surface px-3 py-2 text-sm', newEmploymentFieldClass('weekly_hours')]" data-test="new-employment-weekly-hours"><FieldNote :error="newEmploymentFieldError('weekly_hours')" /></label>
+          <label class="text-xs text-neutral-600">
+            {{ t('payroll.people.remuneration.type') }}
+            <select v-model="newEmployment.terms.remuneration_type" :class="['mt-1 w-full rounded-md border bg-surface px-3 py-2 text-sm', newEmploymentFieldClass('remuneration_type')]" :aria-invalid="newEmploymentInvalidField === 'remuneration_type'" data-test="new-employment-remuneration-type">
+              <option :value="null">{{ t('payroll.people.remuneration.legacy') }}</option>
+              <option value="monthly">{{ t(`payroll.people.remuneration.monthly_${['dpp', 'dpc'].includes(newEmployment.relation_type) ? 'reward' : 'wage'}`) }}</option>
+              <option v-if="['employment', 'small_scale_employment', 'dpp', 'dpc'].includes(newEmployment.relation_type)" value="hourly">{{ t(`payroll.people.remuneration.hourly_${['dpp', 'dpc'].includes(newEmployment.relation_type) ? 'reward' : 'wage'}`) }}</option>
+            </select>
+            <FieldNote :error="newEmploymentFieldError('remuneration_type')" />
+          </label>
+          <label v-if="newEmployment.terms.remuneration_type === 'hourly'" class="text-xs text-neutral-600">
+            {{ t('payroll.people.remuneration.hourly_rate') }} <RequiredMark />
+            <input v-model="newEmploymentHourlyRate" inputmode="decimal" :class="['mt-1 w-full rounded-md border bg-surface px-3 py-2 text-sm', newEmploymentFieldClass('hourly_rate_minor')]" :aria-invalid="newEmploymentInvalidField === 'hourly_rate_minor'" data-test="new-employment-hourly-rate">
+            <FieldNote :error="newEmploymentFieldError('hourly_rate_minor')" />
+          </label>
+          <label v-else class="text-xs text-neutral-600">{{ t(`payroll.people.remuneration.monthly_${['dpp', 'dpc'].includes(newEmployment.relation_type) ? 'reward' : 'wage'}`) }}<input v-model.number="newEmploymentMonthlyGross" type="number" min="0" step="0.01" :class="['mt-1 w-full rounded-md border bg-surface px-3 py-2 text-sm', newEmploymentFieldClass('monthly_gross_minor')]" data-test="new-employment-monthly-gross"><FieldNote :error="newEmploymentFieldError('monthly_gross_minor')" /></label>
+          <label v-if="newEmployment.terms.remuneration_type === 'hourly'" class="text-xs text-neutral-600">
+            {{ t('payroll.people.remuneration.basis_kind') }} <RequiredMark />
+            <select v-model="newEmployment.terms.remuneration_basis_kind" :class="['mt-1 w-full rounded-md border bg-surface px-3 py-2 text-sm', newEmploymentFieldClass('remuneration_basis_kind')]" :aria-invalid="newEmploymentInvalidField === 'remuneration_basis_kind'" data-test="new-employment-remuneration-basis-kind">
+              <option :value="null">{{ t('payroll.people.remuneration.basis_kind_empty') }}</option>
+              <option v-for="kind in ['wage_statement', 'contract', 'agreement', 'internal_regulation', 'collective_agreement']" :key="kind" :value="kind">{{ t(`payroll.people.remuneration.basis_kinds.${kind}`) }}</option>
+            </select>
+            <FieldNote :error="newEmploymentFieldError('remuneration_basis_kind')" />
+          </label>
+          <label v-if="newEmployment.terms.remuneration_type === 'hourly'" class="text-xs text-neutral-600">
+            {{ t('payroll.people.remuneration.basis') }} <RequiredMark />
+            <input v-model="newEmployment.terms.remuneration_basis" maxlength="255" :class="['mt-1 w-full rounded-md border bg-surface px-3 py-2 text-sm', newEmploymentFieldClass('remuneration_basis')]" :aria-invalid="newEmploymentInvalidField === 'remuneration_basis'" data-test="new-employment-remuneration-basis">
+            <FieldNote :error="newEmploymentFieldError('remuneration_basis')" />
+            <span class="mt-1 block">{{ t('payroll.people.remuneration.basis_hint') }}</span>
+          </label>
+          <p v-if="newEmployment.terms.remuneration_type === 'hourly'" class="sm:col-span-2 text-xs text-warning-800" data-test="new-employment-hourly-warning">{{ t('payroll.people.remuneration.calculation_evidence') }}</p>
           <label class="flex items-center gap-2 text-sm text-neutral-700"><input v-model="newEmployment.terms.is_primary" type="checkbox" class="rounded border-neutral-300 text-payroll-600">{{ t('payroll.people.primary') }}</label>
           <!-- Tytéž tři otázky pro ČSSZ jako u zakládání zaměstnance. -->
           <div class="sm:col-span-2 lg:col-span-4">
@@ -2040,6 +2428,34 @@ onMounted(async () => {
               v-model:temporary-assignment="newEmployment.terms.jmhz_temporary_assignment_status"
               :disabled="savingNew"
             />
+          </div>
+          <div v-if="newEmploymentOpenAgreements.length" class="rounded-lg border border-warning-500/30 bg-warning-50 p-3 text-sm sm:col-span-2 lg:col-span-4" role="alert" data-test="new-employment-open-agreement">
+            <p class="font-medium text-warning-700">{{ t('payroll.people.open_agreement.title') }}</p>
+            <ul class="mt-1 space-y-0.5 text-neutral-700">
+              <li v-for="agreement in newEmploymentOpenAgreements" :key="agreement.employment_id">
+                {{ t('payroll.people.open_agreement.item', {
+                  code: agreement.code,
+                  start: agreement.start_date ? formatDate(agreement.start_date) : '—',
+                  end: agreement.end_date ? formatDate(agreement.end_date) : t('payroll.people.open_agreement.no_end'),
+                }) }}
+              </li>
+            </ul>
+            <p class="mt-1 text-neutral-600">{{ t('payroll.people.open_agreement.guidance') }}</p>
+            <div class="mt-2 flex flex-wrap gap-2">
+              <button v-for="agreement in newEmploymentOpenAgreements.filter(item => item.reusable)" :key="`reuse-${agreement.employment_id}`" type="button"
+                :class="btnFilled('primary')" class="whitespace-nowrap" :disabled="savingNew" :data-test="`new-employment-reuse-${agreement.employment_id}`"
+                @click="saveNew(expandedId, { use_open_agreement: agreement.employment_id })">
+                <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.check" /></svg>
+                {{ agreement.extend_to
+                  ? t('payroll.people.open_agreement.reuse_extend', { code: agreement.code, date: formatDate(agreement.extend_to) })
+                  : t('payroll.people.open_agreement.reuse', { code: agreement.code }) }}
+              </button>
+              <button type="button" :class="btnOutline('neutral')" class="whitespace-nowrap" :disabled="savingNew" data-test="new-employment-confirm-new"
+                @click="saveNew(expandedId, { confirm_new_agreement: true })">
+                <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.plus" /></svg>
+                {{ t('payroll.people.open_agreement.create_new') }}
+              </button>
+            </div>
           </div>
           <p v-if="newEmploymentError" class="rounded-lg border border-danger-500/30 bg-danger-50 p-3 text-sm text-danger-700 sm:col-span-2 lg:col-span-4" role="alert">{{ newEmploymentError }}</p>
           <div class="flex flex-wrap items-end justify-end gap-2 sm:col-span-2 lg:col-span-4">
@@ -2059,8 +2475,10 @@ onMounted(async () => {
           :can-write-documents="auth.canWrite('payroll.documents')"
           :payroll-start-period="payrollStartPeriod"
           :person-data-version="personDataVersion"
+          :sibling-employments="details[expandedId].employments"
           @updated="updateEmployment(expandedId, $event)"
           @deleted="removeEmploymentFromDetail(expandedId, $event)"
+          @merged="(employmentId, target) => reloadAfterMerge(expandedId!, employmentId, target)"
           @focus-statutory-evidence="focusPanel('statutory_evidence')"
         />
       </section>

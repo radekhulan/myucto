@@ -63,6 +63,20 @@ describe('invoice list loading', () => {
     wrapper.unmount()
   })
 
+  it('preserves the unscheduled draft drilldown across URL synchronization and clears its chip', async () => {
+    const { wrapper, router } = await open({ cashflow_draft_unscheduled: '1', currency: 'EUR' })
+    expect(mocks.list).toHaveBeenLastCalledWith(expect.objectContaining({ cashflow_draft_unscheduled: true, currency: 'EUR', year: undefined }))
+    const vm = wrapper.vm as unknown as { search: string; clearFilter: (key: string) => void }
+    vm.search = 'synthetic'
+    await nextTick()
+    await vi.advanceTimersByTimeAsync(300)
+    expect(router.currentRoute.value.query.cashflow_draft_unscheduled).toBe('1')
+    vm.clearFilter('cashflow_draft_unscheduled')
+    await flushPromises()
+    expect(mocks.list).toHaveBeenLastCalledWith(expect.objectContaining({ cashflow_draft_unscheduled: undefined }))
+    wrapper.unmount()
+  })
+
   it('applies a saved default and another saved view once each', async () => {
     mocks.defaultQuery = { q: 'default', revenue_category: '7' }
     const { wrapper } = await open()

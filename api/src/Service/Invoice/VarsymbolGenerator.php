@@ -6,6 +6,8 @@ namespace MyInvoice\Service\Invoice;
 
 use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Service\NumberSeries\NumberSeriesAllocator;
+use MyInvoice\Service\NumberSeries\NumberSeriesKinds;
 use PDO;
 use Psr\Log\LoggerInterface;
 
@@ -117,7 +119,95 @@ final class VarsymbolGenerator
         // se nikdy nezapsal.
         private readonly NumberSeriesGapGuard $gapGuard,
         private readonly LoggerInterface $logger,
+        private readonly NumberSeriesAllocator $numberSeries,
     ) {}
+
+    /**
+     * Číslo pro vystavovaný doklad včetně volby řady z číselníku: řada vybraná na konceptu
+     * (`number_series_id`), jinak výchozí řada druhu. Je-li to nová (nativní) řada, číslo
+     * vydá {@see NumberSeriesAllocator}; převedená řada nebo prázdný číselník jde
+     * dosavadním {@see self::next()} beze změny (včetně řad klientů a kategorií tržby).
+     *
+     * Volej ve stejné transakci, která číslo zapíše na doklad, a výsledné id řady zapiš
+     * přes {@see self::recordSeries()}.
+     *
+     * @param array<string,mixed> $invoice koncept (`invoice_type`, `is_simplified`, `client_id`,
+     *                                     `revenue_category_id`, `number_series_id`)
+     * @return array{0: string, 1: ?int} [číslo, id nativní řady nebo null]
+     */
+    public function nextForInvoice(int $supplierId, array $invoice, ?\DateTimeInterface $for = null): array
+    {
+        $for = $for ?? new \DateTimeImmutable('today');
+        $native = $this->nativeSeriesFor($supplierId, $invoice, $for);
+        if ($native !== null) {
+            return [$this->numberSeries->allocate($supplierId, $native, $for), (int) $native['id']];
+        }
+        return [
+            $this->next(
+                $supplierId,
+                self::seriesTypeFor($invoice),
+                $for,
+                (int) ($invoice['client_id'] ?? 0),
+                (int) ($invoice['revenue_category_id'] ?? 0),
+            ),
+            null,
+        ];
+    }
+
+    /** Náhled čísla konceptu bez výdeje (viz {@see self::nextForInvoice()}). */
+    public function previewForInvoice(int $supplierId, array $invoice, ?\DateTimeInterface $for = null): string
+    {
+        $for = $for ?? new \DateTimeImmutable('today');
+        $native = $this->nativeSeriesFor($supplierId, $invoice, $for);
+        if ($native !== null) {
+            return $this->numberSeries->peek($supplierId, $native, $for);
+        }
+        return $this->preview(
+            $supplierId,
+            self::seriesTypeFor($invoice),
+            $for,
+            (int) ($invoice['client_id'] ?? 0),
+            (int) ($invoice['revenue_category_id'] ?? 0),
+        );
+    }
+
+    /**
+     * Zapíše na doklad řadu, ze které číslo dostal: id nativní řady, jinak NULL (dosavadní
+     * číslování). Koncept bez volby, který dostal číslo dosavadní cestou, se nemění.
+     *
+     * @param array<string,mixed> $invoice
+     */
+    public function recordSeries(int $invoiceId, array $invoice, ?int $usedSeriesId): void
+    {
+        $current = isset($invoice['number_series_id']) ? (int) $invoice['number_series_id'] : null;
+        if ($current === $usedSeriesId || ($current === null && $usedSeriesId === null)) {
+            return;
+        }
+        $this->db->pdo()->prepare('UPDATE invoices SET number_series_id = ? WHERE id = ?')
+            ->execute([$usedSeriesId, $invoiceId]);
+    }
+
+    /**
+     * Nativní řada pro doklad, nebo null. Zjednodušený doklad bez výslovné volby zůstává
+     * ve vlastní řadě firmy, má-li ji (`simplified_number_format`), jinak jde s fakturami.
+     *
+     * @param array<string,mixed> $invoice
+     * @return array<string,mixed>|null
+     */
+    private function nativeSeriesFor(int $supplierId, array $invoice, \DateTimeInterface $for): ?array
+    {
+        $explicit = isset($invoice['number_series_id']) && (int) $invoice['number_series_id'] > 0
+            ? (int) $invoice['number_series_id'] : null;
+        $type = (string) ($invoice['invoice_type'] ?? 'invoice');
+        if ($type === 'cancellation') {
+            return null;
+        }
+        if ($explicit === null && self::seriesTypeFor($invoice) === self::SIMPLIFIED
+            && $this->numberSeries->resolve($supplierId, self::SIMPLIFIED, null) !== null) {
+            return null;
+        }
+        return $this->numberSeries->nativeFor($supplierId, NumberSeriesKinds::issuedKind($type), $explicit, $for);
+    }
 
     /**
      * Atomicky vygeneruje další var. symbol pro daný typ a datum.
@@ -160,6 +250,9 @@ final class VarsymbolGenerator
                 . " nebo doplň cfg.varsymbol.templates.{$invoiceType}."
             );
         }
+        // Šablona uložená před validací placeholderů (`{1YY}{CCC}`) by dala číslo
+        // s doslovnými závorkami — vystavení raději odmítne, než aby číslo použilo.
+        InvoiceNumberFormat::assertRenderable($template, "Číselná řada ({$invoiceType}) „{$template}\"");
 
         $for       = $for ?? new \DateTimeImmutable('today');
         $periodKey = $this->makePeriodKey($period, $for);
@@ -515,6 +608,71 @@ final class VarsymbolGenerator
     }
 
     /**
+     * Číslo, které skutečně dostane PŘÍŠTÍ vystavený doklad dané řady, bez zápisu
+     * (pro pole „Příští číslo" v nastavení). Na rozdíl od preview() napodobuje celé
+     * next(): srovnání počítadla dolů na max(nejvyšší použité, ruční začátek) jako
+     * NumberSeriesGapGuard a přeskok obsazených čísel. Jinak by UI ukazovalo číslo,
+     * které vystavení nakonec nepoužije.
+     *
+     * @return array{next_number:int, counter:int, period:string, preview:string,
+     *               client_id:int, revenue_category_id:int}|null
+     *         null = řada bez šablony nebo bez čítače ({C+})
+     */
+    public function peek(
+        int $supplierId,
+        string $invoiceType,
+        ?\DateTimeInterface $for = null,
+        int $clientId = 0,
+        int $revenueCategoryId = 0,
+    ): ?array {
+        if ($supplierId <= 0) return null;
+        $invoiceType = self::normalizeType($invoiceType);
+        if (!in_array($invoiceType, self::SUPPORTED_TYPES, true)) return null;
+
+        [$template, $period, $counterClientId, $counterCategoryId, $invoiceType] =
+            $this->resolveTemplateAndPeriod($supplierId, $invoiceType, $clientId, $revenueCategoryId);
+        if ($template === '' || !$this->hasCounterPlaceholder($template)) return null;
+
+        $for       = $for ?? new \DateTimeImmutable('today');
+        $periodKey = $this->makePeriodKey($period, $for);
+
+        $floorColumn = $this->db->hasColumn('invoice_counters', 'floor_number') ? 'floor_number' : '0';
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT last_number, {$floorColumn} AS floor_number FROM invoice_counters
+              WHERE supplier_id = ? AND client_id = ? AND revenue_category_id = ? AND invoice_type = ? AND period = ?"
+        );
+        $stmt->execute([$supplierId, $counterClientId, $counterCategoryId, $invoiceType, $periodKey]);
+        $row     = $stmt->fetch(\PDO::FETCH_ASSOC);
+        $stored  = $row === false ? 0 : (int) $row['last_number'];
+        $floor   = $row === false ? 0 : (int) $row['floor_number'];
+        $highest = $this->highestUsedCounter($supplierId, $template, $for);
+
+        $counter = $stored;
+        if ($row !== false && $counter > $floor) {
+            $counter = min($counter, max($highest, $floor));
+        }
+
+        $next = $counter + 1;
+        if ($this->varsymbolExists($supplierId, $this->render($template, $for, $next)) && $highest >= $next) {
+            $next = $highest + 1;
+        }
+        $attempts = 0;
+        while ($this->varsymbolExists($supplierId, $this->render($template, $for, $next))) {
+            if (++$attempts > self::MAX_SKIP) break;
+            $next++;
+        }
+
+        return [
+            'next_number'         => $next,
+            'counter'             => $stored,
+            'period'              => $periodKey,
+            'preview'             => $this->render($template, $for, $next),
+            'client_id'           => $counterClientId,
+            'revenue_category_id' => $counterCategoryId,
+        ];
+    }
+
+    /**
      * Pokud je daná faktura "poslední" ve své counter scope (její varsymbol odpovídá
      * aktuální hodnotě counteru), dekrementuj counter — to umožní, aby další vystavená
      * faktura ve stejné scope dostala stejné číslo.
@@ -522,6 +680,9 @@ final class VarsymbolGenerator
      * Volej PŘED vlastním DELETE z DB (potřebujeme issue_date a varsymbol). Idempotentní:
      * pokud counter neodpovídá (nepasuje render, byla manuálně přečíslovaná, mezitím
      * inkrementoval konkurenční zápis), nic neudělá.
+     *
+     * `$numberSeriesId` = `invoices.number_series_id` dokladu: nativní řada číselníku
+     * dostane číslo zpět sama, NULL znamená dosavadní řadu.
      *
      * @return bool true pokud byl counter dekrementován
      */
@@ -532,7 +693,13 @@ final class VarsymbolGenerator
         ?\DateTimeInterface $for = null,
         int $clientId = 0,
         int $revenueCategoryId = 0,
+        ?int $numberSeriesId = null,
     ): bool {
+        // Doklad z nové řady číselníku vrací číslo do své řady, ne do dosavadní.
+        $native = $this->numberSeries->nativeById($supplierId, $numberSeriesId);
+        if ($native !== null) {
+            return $this->numberSeries->releaseIfLatest($native, $varsymbol, $for ?? new \DateTimeImmutable('today'));
+        }
         $invoiceType = self::normalizeType($invoiceType);
         if ($supplierId <= 0 || $varsymbol === '' || !in_array($invoiceType, self::SUPPORTED_TYPES, true)) {
             return false;

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Payroll\Submission\Registration\Change;
 
+
 use MyInvoice\Repository\Payroll\PayrollRegistrationChangeProposalRepository;
 use MyInvoice\Repository\Payroll\PayrollRegistrationIdentitySnapshotRepository;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
@@ -14,6 +15,7 @@ use MyInvoice\Service\Payroll\Submission\Registration\PayrollEmployeeRegistratio
 use MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationEventService;
 use MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationIdentityService;
 use MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationIdentitySnapshotService;
+use MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationProfessionCode;
 use MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationXmlException;
 use Psr\Clock\ClockInterface;
 
@@ -765,6 +767,12 @@ final readonly class PayrollRegistrationChangeDetectionService implements
      *
      * @var list<string>
      */
+    /** Kódy z podmínek vztahu, které se porovnávají i přímo s podanou hodnotou. */
+    private const MASTER_CODE_PATHS = [
+        'employment.profession_code',
+        'employment.workplace_municipality_code',
+    ];
+
     private const MASTER_TRACKED_PATHS = [
         'permanent_address.street',
         'permanent_address.house_number',
@@ -824,6 +832,23 @@ final readonly class PayrollRegistrationChangeDetectionService implements
             if ($before->get($path) !== $after->get($path)) {
                 $changes[$path] = $after->get($path);
             }
+        }
+        // Oprava platné verze podmínek (karta, hromadná úprava před prvním
+        // zúčtovaným měsícem) přepíše hodnotu i zpětně, takže porovnání
+        // „ke dni podání" a „dnes" změnu nevidí, přestože ČSSZ vede jinou
+        // hodnotu, než má vztah. Jednoznačné kódy proto porovnáme i přímo
+        // s podanou hodnotou. CZ-ISCO jen pětimístné: čtyřmístnou podskupinu
+        // vztah pro měsíční hlášení mít smí a do registrace nepatří.
+        foreach (self::MASTER_CODE_PATHS as $path) {
+            $value = $after->get($path);
+            if ($value === null
+                || $value === $baseline->get($path)
+                || ($path === 'employment.profession_code'
+                    && !PayrollRegistrationProfessionCode::isRegistrable($value))
+            ) {
+                continue;
+            }
+            $changes[$path] = $value;
         }
         // Adresa je jeden údaj: pohne-li se její kterákoli část, přebírá se
         // z kmenových dat celá, jinak by vznikla směs staré a nové adresy.

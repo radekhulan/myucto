@@ -244,6 +244,57 @@ final class StatementNotesTest extends TestCase
         self::assertStringNotContainsString('Přejmenovaná', (string) $after['entity_identification']['content']);
     }
 
+    /**
+     * Když kategorii ÚJ nejde vyhodnotit, náhled smí ukázat nejužší rozsah (mikro), ale
+     * zmrazit se nesmí: zmražený text se už nikdy nepřepíše a příloha by navždy nesla
+     * špatnou kategorii. Ostatní sekce se zmrazí, zmražení skončí chybou a další pokus
+     * (schválení) uloží skutečnou kategorii.
+     */
+    public function testMicroFallbackIsShownButNotFrozenWhenCategoryCannotBeEvaluated(): void
+    {
+        $restore = $this->breakCategoryEvaluation();
+        $preview = array_column($this->notes->build($this->supplierId, $this->periodId)['sections'], null, 'key');
+        self::assertStringContainsString('mikro', (string) $preview['entity_category']['content']);
+
+        $caught = null;
+        try {
+            $this->notes->freezeAutoValues($this->supplierId, self::YEAR, $this->periodId, null);
+        } catch (\MyInvoice\Service\Accounting\Reports\ReportException $e) {
+            $caught = $e;
+        }
+        self::assertNotNull($caught, 'Zmražení s náhradní kategorií musí selhat viditelně.');
+        self::assertSame('statement_notes_category_unknown', $caught->errorCode);
+        self::assertNull($this->storedSection('entity_category'), 'Náhradní kategorie se nezmrazí.');
+        self::assertStringContainsString('Příloha s.r.o.', (string) $this->storedSection('entity_identification'));
+
+        $restore();
+        $this->notes->ensureFrozen($this->supplierId, $this->periodId, null);
+        self::assertNotNull($this->storedSection('entity_category'), 'Opakované zmražení uloží vyhodnocenou kategorii.');
+    }
+
+    /** Rozvahové mapování bez platné verze: vyhodnocení kategorie ÚJ selže. Vrací obnovu. */
+    private function breakCategoryEvaluation(): \Closure
+    {
+        $pdo = $this->db->pdo();
+        $rows = $pdo->query("SELECT id, valid_from FROM statement_versions WHERE statement_type = 'balance_sheet' AND framework = 'cz_500'")
+            ->fetchAll(\PDO::FETCH_KEY_PAIR);
+        $pdo->exec("UPDATE statement_versions SET valid_from = '2999-01-01' WHERE statement_type = 'balance_sheet' AND framework = 'cz_500'");
+        return function () use ($pdo, $rows): void {
+            $update = $pdo->prepare('UPDATE statement_versions SET valid_from = ? WHERE id = ?');
+            foreach ($rows as $id => $validFrom) {
+                $update->execute([$validFrom, $id]);
+            }
+        };
+    }
+
+    private function storedSection(string $key): ?string
+    {
+        $stmt = $this->db->pdo()->prepare('SELECT content FROM statement_notes WHERE supplier_id = ? AND fiscal_year = ? AND section_key = ?');
+        $stmt->execute([$this->supplierId, self::YEAR, $key]);
+        $content = $stmt->fetchColumn();
+        return $content === false ? null : (string) $content;
+    }
+
     /** Ručně vyplněný text zmražení NEPŘEPÍŠE — účetní ho mohla vědomě upřesnit. */
     public function testFreezingDoesNotOverwriteManualText(): void
     {

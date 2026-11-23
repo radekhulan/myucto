@@ -92,6 +92,15 @@ describe('workspace route factory', () => {
     }
   })
 
+  it('vyžaduje komerční licenci ve všech stránkách nabídek', () => {
+    const routes = createWorkspaceRoutes()
+    applyAuthorizationMeta(routes, true)
+    for (const name of ['sales-quotes', 'sales-quote-new', 'sales-quote-detail']) {
+      expect(routes.find(route => route.name === name)?.meta, name).toMatchObject({ commercialOnly: true })
+      expect(router.getRoutes().find(route => route.name === name)?.meta, name).toMatchObject({ commercialOnly: true })
+    }
+  })
+
   it('řídí importy a firemní číselníky jejich skutečnými oprávněními', () => {
     const records: RouteRecordRaw[] = [{
       path: '/',
@@ -146,6 +155,10 @@ describe('workspace route factory', () => {
     expect(byName.get('admin-bank-rule-templates')?.meta?.superadminOnly).not.toBe(true)
     expect(byName.get('admin-suppliers')?.meta).toMatchObject({ adminPlusOnly: true })
     expect(byName.get('admin-suppliers')?.meta?.superadminOnly).not.toBe(true)
+    expect(byName.get('admin-work-report-billing-templates')?.meta).toMatchObject({ permission: 'price_list', access: 'read', requiresSupplier: true })
+    expect(byName.get('admin-work-report-billing-templates')?.meta?.requiresNoStock).not.toBe(true)
+    expect(byName.get('admin-work-report-billing-templates')?.meta?.companyAdminOnly).not.toBe(true)
+    expect(byName.get('admin-work-report-billing-templates')?.meta?.superadminOnly).not.toBe(true)
     for (const name of ['admin-price-list', 'admin-price-list-view', 'admin-price-list-new', 'admin-price-list-edit']) {
       expect(byName.get(name)?.meta).toMatchObject({
         permission: 'price_list',

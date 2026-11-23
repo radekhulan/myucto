@@ -198,8 +198,8 @@ final class PaymentQrProductionWiringTest extends TestCase
         $pdo->exec('CREATE TABLE supplier (id INTEGER PRIMARY KEY, country_id INTEGER, company_name TEXT, display_name TEXT)');
         $pdo->exec("INSERT INTO countries VALUES (1, 'CZ', 'Česko', 'Czechia')");
         $pdo->exec("INSERT INTO supplier VALUES (41, 1, 'Syntetický dodavatel s.r.o.', 'Syntetický dodavatel')");
-        // PDF čte desetinná místa množství z číselníku jednotek (2036).
-        $pdo->exec('CREATE TABLE units (id INTEGER PRIMARY KEY, code TEXT, quantity_decimals INTEGER NULL)');
+        // PDF čte desetinná místa množství a popisky z číselníku jednotek.
+        $pdo->exec('CREATE TABLE units (id INTEGER PRIMARY KEY, code TEXT, label_cs TEXT, label_en TEXT, quantity_decimals INTEGER NULL)');
 
         $connection = new Connection($this->createStub(Config::class));
         (new \ReflectionProperty(Connection::class, 'pdo'))->setValue($connection, $pdo);

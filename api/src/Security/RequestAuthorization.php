@@ -11,6 +11,25 @@ final class RequestAuthorization
     private static ?PermissionCatalog $catalog = null;
     private static ?PermissionChecker $checker = null;
 
+    /** Členské pohledávky ani bankovní výběr nejsou přístupné klientské roli ani tokenu bez plného zápisu. */
+    public static function canMatchMembershipBank(Request $request, bool $write): bool
+    {
+        return self::actsAsSession($request) && !self::isClientType($request)
+            && self::allows($request, 'bank', AccessLevel::READ)
+            && self::allows($request, 'accounting', AccessLevel::READ)
+            && (!$write || (self::allows($request, 'bank.match', AccessLevel::WRITE)
+                && self::allows($request, 'accounting.journal.post', AccessLevel::WRITE)));
+    }
+
+    /**
+     * Import seznamu členů smí kontakt založit jen tomu, kdo smí kontakty zakládat i v adresáři;
+     * samotné právo zápisu členské evidence hranici adresáře neobchází.
+     */
+    public static function canCreateContactsByMembershipImport(Request $request): bool
+    {
+        return self::allows($request, 'clients.create', AccessLevel::WRITE);
+    }
+
     /** MCP se uděluje samostatně; interní role zachovávají přístup přes správu tokenů. */
     public static function canUseMcp(Request $request, AccessLevel $minimum = AccessLevel::READ): bool
     {
@@ -62,6 +81,142 @@ final class RequestAuthorization
     }
 
     /**
+     * Je požadavek ověřený API tokenem s plným zápisem (`system_write`, #371)?
+     *
+     * Příznak platí jen na instanci s `api.allow_system_write_tokens` a jen pro token
+     * se zápisem; o tom rozhoduje jednou AuthMiddleware
+     * ({@see \MyInvoice\Service\Auth\SystemWriteTokenFeature::appliesTo()}).
+     */
+    public static function isSystemWriteToken(Request $request): bool
+    {
+        if (!self::isBearerAuth($request)) {
+            return false;
+        }
+        $token = $request->getAttribute(\MyInvoice\Middleware\AuthMiddleware::ATTR_API_TOKEN);
+
+        return is_array($token) && ($token['system_write'] ?? false) === true;
+    }
+
+    /**
+     * Je požadavek ověřený API tokenem BEZ plného zápisu? Protějšek {@see isBearerAuth()}
+     * pro místa, která podle kanálu jen mění chování (zúžené tělo, přeskočení kroku):
+     * token s plným zápisem (#371) se tam chová jako relace, požadavek bez způsobu
+     * ověření (úloha na pozadí, vnitřní volání) jako dřív.
+     */
+    public static function isRestrictedBearer(Request $request): bool
+    {
+        return self::isBearerAuth($request) && !self::isSystemWriteToken($request);
+    }
+
+    /**
+     * Smí požadavek do agend jako přihlášený uživatel ve webovém rozhraní?
+     *
+     * Brána omezení specifických pro API token (session-only agendy, účetní úkony,
+     * zúžené tělo požadavku): přihlášená relace, nebo token s plným zápisem
+     * ({@see isSystemWriteToken()}). Oprávnění uživatele (RBAC, firma) platí dál.
+     *
+     * ⚠️ Nepatří na přihlášení, MFA, heslo, správu tokenů a relací, licenci, správu
+     * instance ani na úložiště přístupových údajů (certifikáty, podpisy, datové
+     * schránky, napojení bank). Tam zůstává {@see isSessionAuth()}. Pojistky
+     * uzavřeného a podaného období drží {@see mayOverridePeriodProtection()}.
+     */
+    public static function actsAsSession(Request $request): bool
+    {
+        return self::isSessionAuth($request) || self::isSystemWriteToken($request);
+    }
+
+    /**
+     * Smí požadavek přebít ochranu uzavřeného nebo podaného období? Přebití
+     * uzavřeného (uzavíraného, k datu zamčeného) účetního období přes `?force=1`,
+     * změna částek v podaném DPH, KH, SH nebo OSS, potvrzení zásahu do zamčeného
+     * data (`ack_locked`), posun zámku zpět přes chráněné období a znovuotevření
+     * uzavřeného období jsou jen pro člověka v aplikaci. API token je nepřebije
+     * nikdy, ani s plným zápisem a ani jako správce firmy. Role se ověřuje zvlášť.
+     *
+     * Odmítá se kanál tokenu, ne „všechno mimo relaci": vnitřní požadavky bez způsobu
+     * ověření (úlohy na pozadí, výpočty nad rolí) se rozhodují jen podle role jako dřív.
+     */
+    public static function mayOverridePeriodProtection(Request $request): bool
+    {
+        return !self::isBearerAuth($request);
+    }
+
+    /**
+     * Smí uživatel z přihlášené relace založit token s plným zápisem (#371)? Token
+     * dostane jen práva uživatele, ale obejde pojistky kanálu, a o tom za firmu
+     * rozhoduje její správce. Token bez vazby na firmu sahá do všech firem uživatele,
+     * proto ho s plným zápisem zakládá jen superadmin. U vázaného tokenu se ptá
+     * požadavek zúžený na tu firmu ({@see CrossSupplierAuthorization::scopedRequest()}).
+     */
+    public static function canGrantSystemWriteToken(Request $request, bool $supplierBound): bool
+    {
+        return self::isSessionAuth($request)
+            && ($supplierBound ? self::isCompanyAdmin($request) : self::isSuperadmin($request));
+    }
+
+    /**
+     * Potvrdil požadavek vědomý zásah do uzamčeného data (`?ack_locked=1`, typicky po
+     * podání přiznání k DPH)? Potvrzení platí jen z přihlášené relace, token ho nemá.
+     */
+    public static function acknowledgesLockedPeriod(Request $request): bool
+    {
+        return self::mayOverridePeriodProtection($request)
+            && ($request->getQueryParams()[\MyInvoice\Service\Accounting\JournalEntryDeletionRules::ACK_LOCKED_PARAM] ?? '') === '1';
+    }
+
+    /**
+     * Je to syntetický požadavek úlohy na pozadí (cron, fronta), ne požadavek
+     * přihlášeného člověka? Takový požadavek nevzniká z HTTP, skládá ho jen kód
+     * přes {@see asBackground()}.
+     */
+    public static function isBackgroundAuth(Request $request): bool
+    {
+        return $request->getAttribute(\MyInvoice\Middleware\AuthMiddleware::ATTR_METHOD)
+            === \MyInvoice\Service\Auth\LoginPolicyService::BACKGROUND_AUTH_METHOD;
+    }
+
+    /**
+     * Požadavek úlohy, kterou spustil člověk přihlášený v aplikaci a která jedná za něj
+     * (Hromadné akce v seznamech). Nese metodu ověření relace, ze které úloha vznikla,
+     * takže úkony vyhrazené relaci ({@see actsAsSession()}) projdou stejně jako na detailu
+     * záznamu. Volá ho jen kód, který spuštění z relace zaznamenal
+     * ({@see \MyInvoice\Service\Accounting\Bulk\BulkRecordCall}); role se ověřuje zvlášť.
+     */
+    public static function asSessionStartedJob(Request $request): Request
+    {
+        return $request->withAttribute(\MyInvoice\Middleware\AuthMiddleware::ATTR_METHOD, 'session');
+    }
+
+    /** Syntetický požadavek úlohy na pozadí; protějšek {@see isBackgroundAuth()}. */
+    public static function asBackground(Request $request): Request
+    {
+        return $request->withAttribute(
+            \MyInvoice\Middleware\AuthMiddleware::ATTR_METHOD,
+            \MyInvoice\Service\Auth\LoginPolicyService::BACKGROUND_AUTH_METHOD,
+        );
+    }
+
+    /**
+     * Požadavek hromadné akce v seznamech za uživatele, který ji spustil. Hromadnou změnu
+     * spustí a vrátí jen člověk z přihlášené relace, API token nikdy ({@see canBulkChange()}),
+     * takže úprava jednoho dokladu, kterou úloha za něj provede, je jeho účetní úkon
+     * z relace ({@see actsAsSession()}), stejně jako tlačítko Uložit. Mění jen syntetický
+     * požadavek úlohy na pozadí ({@see isBackgroundAuth()}), jiný vrátí beze změny.
+     */
+    public static function asBulkActionSession(Request $request): Request
+    {
+        return self::isBackgroundAuth($request)
+            ? $request->withAttribute(\MyInvoice\Middleware\AuthMiddleware::ATTR_METHOD, 'session')
+            : $request;
+    }
+
+    /** Syntetický požadavek ověřený API tokenem; protějšek {@see isBearerAuth()}. */
+    public static function asBearer(Request $request): Request
+    {
+        return $request->withAttribute(\MyInvoice\Middleware\AuthMiddleware::ATTR_METHOD, 'bearer');
+    }
+
+    /**
      * Smí tenhle token vidět v Dokumentech evidenci mzdových PODÁNÍ?
      *
      * ⚠️ Jediná výjimka z pravidla, že mzdová evidence je session-only, a týká
@@ -77,6 +232,27 @@ final class RequestAuthorization
         $token = $request->getAttribute(\MyInvoice\Middleware\AuthMiddleware::ATTR_API_TOKEN);
 
         return is_array($token) && (int) ($token['allow_payroll_submission_docs'] ?? 0) === 1;
+    }
+
+    /**
+     * Smí tenhle token vynuceně upravit vystavenou vydanou fakturu (`?force=1`)?
+     *
+     * Jen token vázaný na firmu, se zápisem a s výslovně zapnutou schopností.
+     * Kontrola práva vlastníka (`invoices.edit_issued`) a přísnější zámky pro token
+     * (uzavřené i podané období, přečíslování, úhrady) zůstávají na akci.
+     */
+    public static function tokenAllowsIssuedInvoiceEdit(Request $request): bool
+    {
+        if (self::isSessionAuth($request)) {
+            return false;
+        }
+        $token = $request->getAttribute(\MyInvoice\Middleware\AuthMiddleware::ATTR_API_TOKEN);
+
+        return is_array($token)
+            && !empty($token['allow_issued_invoice_edit'])
+            && ($token['scope'] ?? '') === 'read_write'
+            && ($token['supplier_id'] ?? null) !== null
+            && (int) $token['supplier_id'] > 0;
     }
 
     /**
@@ -170,6 +346,33 @@ final class RequestAuthorization
             && ($role->isSuperadmin() || $role->isInstanceAdmin());
     }
 
+    /**
+     * Pozvánky k propojení a odpojení identit cizích účtů. Účty spravuje jen
+     * superadmin (UserAdminAction), proto i jejich identity.
+     */
+    public static function canManageExternalIdentities(Request $request): bool
+    {
+        $role = self::effectiveRole($request);
+        return self::isSessionAuth($request) && $role->isActive && $role->isSuperadmin();
+    }
+
+    /**
+     * Reset MFA jiného uživatele. Jen superadmin z webového přihlášení; účet
+     * spravuje UserAdminAction a reset odebírá cizímu účtu faktory, proto ani
+     * správce firmy, ani technický správce instance.
+     */
+    public static function canResetUserMfa(Request $request): bool
+    {
+        $role = self::effectiveRole($request);
+        return self::isSessionAuth($request) && $role->isActive && $role->isSuperadmin();
+    }
+
+    /** Přehled a ukončování browserových relací patří výhradně superadminovi. */
+    public static function canManageUserSessions(Request $request): bool
+    {
+        return self::isSessionAuth($request) && self::isSuperadmin($request);
+    }
+
     public static function canCreateSupplier(Request $request): bool
     {
         return self::effectiveRole($request)->canCreateSupplier();
@@ -180,10 +383,26 @@ final class RequestAuthorization
         return self::effectiveRole($request)->isClientType();
     }
 
+    /**
+     * Předávání dokladů účetní (portálová fronta a požadavky účetní) rozhoduje právo
+     * `documents.submit`, ne typ role: dostane ho klient i interní role, které ho
+     * správce přidělí. Superadmin ho má implicitně.
+     */
     public static function allowsClientDocumentPortal(Request $request, AccessLevel $minimum = AccessLevel::READ): bool
     {
-        return (self::isClientType($request) || self::isSuperadmin($request))
-            && self::allows($request, 'documents.submit', $minimum);
+        return self::allows($request, 'documents.submit', $minimum);
+    }
+
+    /**
+     * Hromadné nastavení pravděpodobného výdělku (§ 355 ZP) zapisuje průměr
+     * (`payroll.time.write`) i podmínky pracovního vztahu, jako oprava na kartě
+     * vztahu (`payroll.employment.write`). Bez druhého práva by šlo hromadnou
+     * akcí měnit podmínky, které role na kartě měnit nesmí.
+     */
+    public static function canSetProbableEarningInBulk(Request $request): bool
+    {
+        return self::allows($request, 'payroll.time.write', AccessLevel::WRITE)
+            && self::allows($request, 'payroll.employment.write', AccessLevel::WRITE);
     }
 
     /**
@@ -195,6 +414,16 @@ final class RequestAuthorization
     {
         return self::isCompanyAdmin($request)
             || (!self::isClientType($request) && self::allows($request, 'invoices.edit_issued', AccessLevel::WRITE));
+    }
+
+    /**
+     * Smazání výplně Money S3 (úhrada bez dokladu úhrady převzatá převodem): stejné právo
+     * jako úprava vystavené faktury, protože vrací doklad mezi neuhrazené. Období hlídá
+     * {@see \MyInvoice\Service\Invoice\TakenOverFillerGuard}.
+     */
+    public static function canDeleteTakenOverFiller(Request $request): bool
+    {
+        return self::canEditIssuedInvoice($request);
     }
 
     /**
@@ -242,21 +471,165 @@ final class RequestAuthorization
      */
     public static function canChangeFiledVatPeriod(Request $request): bool
     {
+        return self::mayOverridePeriodProtection($request) && self::isCompanyAdmin($request);
+    }
+
+    /**
+     * Zaúčtování v agendě Časové rozlišení (rozpuštění, předčasné ukončení a jejich storno):
+     * správa položek agendy a zároveň zápis do deníku. Účetní vrstva přes API token jen čte.
+     */
+    public static function canPostAccruals(Request $request): bool
+    {
+        return self::allows($request, 'accounting.accruals.write', AccessLevel::WRITE)
+            && self::allows($request, 'accounting.journal.post', AccessLevel::WRITE);
+    }
+
+    /**
+     * Krok uzávěrky „Časové rozlišení" zaúčtuje roční rozpuštění položek agendy do období
+     * ve stavu uzavírání: právo uzavřít období a zaúčtovat v agendě.
+     */
+    public static function canPostAccrualsInClosing(Request $request): bool
+    {
+        return self::canPostAccruals($request) && self::allows($request, 'accounting.periods.close', AccessLevel::WRITE);
+    }
+
+    /**
+     * Označení vydaného či přijatého dokladu jako převzatého z počátečních stavů a jeho
+     * zrušení (vazba na otevírací zápis): interní role s právem zaúčtovat
+     * (`accounting.journal.post`) a zapisovat doklady dané agendy. Z přihlášené relace,
+     * nebo tokenem s plným zápisem; běžný API token účetní vrstvu jen čte. Klient ne.
+     *
+     * @param 'invoice'|'purchase_invoice' $docType
+     */
+    public static function canMarkOpeningBalanceDocument(Request $request, string $docType): bool
+    {
+        return self::actsAsSession($request) && !self::isClientType($request)
+            && self::allows($request, 'accounting.journal.post', AccessLevel::WRITE)
+            && self::allows($request, $docType === 'invoice' ? 'invoices' : 'purchase_invoices', AccessLevel::WRITE);
+    }
+
+    /**
+     * Hromadné doúčtování bankovních pohybů podle filtru: správce firmy, nebo interní role
+     * s právem zaúčtovat (`accounting.journal.post`) a zároveň s vlastním právem
+     * `accounting.journal.bulk_repost`. Jedním krokem zaúčtuje stovky pohybů, proto ho
+     * API token nespustí nikdy a klient ho nedostane.
+     */
+    public static function canBulkRepost(Request $request): bool
+    {
+        return self::mayOverridePeriodProtection($request)
+            && (self::isCompanyAdmin($request)
+                || (!self::isClientType($request)
+                    && self::allows($request, 'accounting.journal.post', AccessLevel::WRITE)
+                    && self::allows($request, 'accounting.journal.bulk_repost', AccessLevel::WRITE)));
+    }
+
+    /**
+     * Hromadné přeúčtování účtu (stránka Přeúčtovat doklady a operace Přeúčtovat účet
+     * v Hromadných akcích, nad doklady i položkami): jen správce firmy nebo superadmin
+     * v relaci. Přepisuje už zaúčtované zápisy napříč obdobími, proto ho žádná role
+     * nedostane právem z editoru rolí, API token ani klient.
+     */
+    public static function canRebookAccounts(Request $request): bool
+    {
+        return self::mayOverridePeriodProtection($request) && self::isCompanyAdmin($request);
+    }
+
+    /**
+     * Hromadné změny dokladů a zápisů ze seznamů (Hromadné akce: dimenze, předkontace,
+     * smazání): správce firmy, nebo interní role s vlastním právem `accounting.bulk_changes`.
+     * Právo jen otevírá hromadný mechanismus. Každý záznam pak projde týmiž právy
+     * a pojistkami jako úprava jednoho záznamu, takže roli nic dalšího nepřidá. API token
+     * hromadnou změnu nespustí nikdy a klient ji nedostane.
+     */
+    public static function canBulkChange(Request $request): bool
+    {
+        return self::mayOverridePeriodProtection($request)
+            && (self::isCompanyAdmin($request)
+                || (!self::isClientType($request)
+                    && self::allows($request, 'accounting.bulk_changes', AccessLevel::WRITE)));
+    }
+
+    /**
+     * Ruční posun zámku účtování k datu (§ 52.14.10): kdo spravuje účetní období
+     * (`accounting.periods.manage`, správci), nebo interní role s vlastním právem
+     * `accounting.period_lock` (typicky hlavní účetní). Klient ho nedostane.
+     */
+    public static function canChangePeriodLock(Request $request): bool
+    {
+        return self::allows($request, 'accounting.periods.manage', AccessLevel::WRITE)
+            || (!self::isClientType($request) && self::allows($request, 'accounting.period_lock', AccessLevel::WRITE));
+    }
+
+    /**
+     * Posunout zámek ZPĚT přes podané období DPH nebo přes uzavřené účetní období smí jen
+     * ten, kdo to směl před zavedením práva `accounting.period_lock`: správce účetních
+     * období, nebo správce firmy ({@see canChangeFiledVatPeriod()}). Hlavní účetní s právem
+     * jen na zámek posouvá zámek vpřed a zpět jen v nepodaném a otevřeném rozsahu.
+     */
+    public static function canUnlockProtectedPeriods(Request $request): bool
+    {
+        return self::mayOverridePeriodProtection($request)
+            && (self::allows($request, 'accounting.periods.manage', AccessLevel::WRITE)
+                || self::canChangeFiledVatPeriod($request));
+    }
+
+    /**
+     * Formu účetního zápisu firmy (jednoduchý / složený od data) mění jen správce firmy:
+     * přepíná, jak se účtují všechny zápisy od data, a spouští převod starších zápisů.
+     * Delegovaná role s právem účtovat ji nemění.
+     */
+    public static function canChangeEntryForm(Request $request): bool
+    {
         return self::isCompanyAdmin($request);
     }
 
-    /** Klient čte jen připravená podání, interní role dál používají agendu výkazů. */
+    /**
+     * Dokončit aktivaci podvojného účetnictví přes zbývající chyby doúčtování smí jen
+     * správce firmy. Delegovaná role s právem spravovat účetní období průvodce projde,
+     * ale rozhodnutí, že část historie zůstane nedoúčtovaná, za firmu nedělá.
+     */
+    public static function canForceAccountingActivation(Request $request): bool
+    {
+        return self::isCompanyAdmin($request)
+            && self::allows($request, 'accounting.periods.manage', AccessLevel::WRITE);
+    }
+
+    /**
+     * Pracuje požadavek s daňovými podáními jen v rozsahu archivu připravených podání?
+     * Ten rozsah má klient a interní role, která má `reports.submissions` bez agendy
+     * Daně a výkazy (`reports`): jen DPH, KH a SH ({@see ClientTaxSubmissionPolicy}),
+     * jen z přihlášené relace a bez správy nastavení, důkazů a mazání archivu.
+     * Interní role s `reports` zůstává u plné agendy výkazů a interní role bez
+     * `reports.submissions` se chová jako dřív (i s legacy samotným `reports.submit`).
+     */
+    public static function usesClientTaxSubmissionScope(Request $request): bool
+    {
+        return self::roleUsesClientTaxSubmissionScope(self::effectiveRole($request));
+    }
+
+    /** Totéž rozhodnutí nad už vyřešenou rolí (PermissionMiddleware ji má dřív než request). */
+    public static function roleUsesClientTaxSubmissionScope(EffectiveRole $role): bool
+    {
+        if ($role->isClientType()) return true;
+        if ($role->isSuperadmin()) return false;
+        self::$catalog ??= new PermissionCatalog();
+        self::$checker ??= new PermissionChecker(self::$catalog);
+        return !self::$checker->allows($role, 'reports', AccessLevel::READ)
+            && self::$checker->allows($role, 'reports.submissions', AccessLevel::READ);
+    }
+
+    /** Rozsah připravených podání čte jen archiv, interní role dál používají agendu výkazů. */
     public static function canReadTaxSubmissions(Request $request): bool
     {
-        return self::isClientType($request)
-            ? self::isSessionAuth($request) && self::allows($request, 'reports.submissions', AccessLevel::READ)
+        return self::usesClientTaxSubmissionScope($request)
+            ? self::actsAsSession($request) && self::allows($request, 'reports.submissions', AccessLevel::READ)
             : self::allows($request, 'reports', AccessLevel::READ);
     }
 
-    /** XML a důkazy jsou součástí klientského archivu; interní export má vlastní právo. */
+    /** XML a důkazy jsou součástí archivu připravených podání; interní export má vlastní právo. */
     public static function canExportTaxSubmission(Request $request): bool
     {
-        return self::isClientType($request)
+        return self::usesClientTaxSubmissionScope($request)
             ? self::canReadTaxSubmissions($request)
             : self::allows($request, 'reports.export', AccessLevel::READ);
     }
@@ -264,7 +637,7 @@ final class RequestAuthorization
     /** Řádek musí volající nejprve dohledat v aktuální firmě. */
     public static function canAccessTaxSubmission(Request $request, array $submission): bool
     {
-        return !self::isClientType($request)
+        return !self::usesClientTaxSubmissionScope($request)
             || (self::canReadTaxSubmissions($request)
                 && ClientTaxSubmissionPolicy::allowsForm((string) ($submission['form_code'] ?? '')));
     }
@@ -272,21 +645,25 @@ final class RequestAuthorization
     /** Mazání archivu zachovává původní právo interních rolí k exportu se zápisem. */
     public static function canDeleteTaxSubmission(Request $request): bool
     {
-        return !self::isClientType($request)
+        return !self::usesClientTaxSubmissionScope($request)
             && self::allows($request, 'reports.export', AccessLevel::WRITE);
     }
 
-    /** Správa důkazů a korespondence zůstává interním podávajícím rolím. */
+    /** Správa důkazů a korespondence zůstává interním podávajícím rolím s agendou výkazů. */
     public static function canManageTaxSubmissionEvidence(Request $request): bool
     {
-        return !self::isClientType($request)
+        return !self::usesClientTaxSubmissionScope($request)
             && self::allows($request, 'reports.submit', AccessLevel::WRITE);
     }
 
-    /** Stávající interní podávající role si zachovávají správu nastavení. */
+    /**
+     * Stávající interní podávající role si zachovávají správu nastavení. Rozsah
+     * připravených podání (klient i interní role bez `reports`) ji nemá ani
+     * s `reports.submit`: odeslání nesmí otevřít správu kanálů a složek.
+     */
     public static function canManageTaxSubmissions(Request $request): bool
     {
-        return !self::isClientType($request)
+        return !self::usesClientTaxSubmissionScope($request)
             && (self::allows($request, 'reports.submissions.manage', AccessLevel::WRITE)
                 || self::allows($request, 'reports.submit', AccessLevel::WRITE));
     }
@@ -338,6 +715,19 @@ final class RequestAuthorization
      * `POST /api/accounting/internal-documents` v RoutePermissionMap; AI asistent podle
      * něj rozhoduje, zda smí interní doklad vůbec navrhnout.
      */
+    /**
+     * Oprava dat po převodu z jiného programu (Kontrola dat po převodu): správce firmy,
+     * nebo interní role se zápisem do účetnictví (`accounting`), jen z přihlášené relace
+     * (nebo tokenem s plným zápisem). Běžný API token kontroly jen čte, klient je neopravuje.
+     * Uzavřená, zamčená a podaná období oprava nemění pro nikoho, jen je ohlásí.
+     */
+    public static function canFixMigrationData(Request $request): bool
+    {
+        return self::actsAsSession($request)
+            && (self::isCompanyAdmin($request)
+                || (!self::isClientType($request) && self::allows($request, 'accounting', AccessLevel::WRITE)));
+    }
+
     public static function canCreateInternalDocument(Request $request): bool
     {
         return self::allows($request, 'accounting.journal.write', AccessLevel::WRITE);
@@ -350,7 +740,7 @@ final class RequestAuthorization
      */
     public static function canViewEetAttemptXml(Request $request): bool
     {
-        return self::isSessionAuth($request) && self::allows($request, 'eet.correct', AccessLevel::WRITE);
+        return self::actsAsSession($request) && self::allows($request, 'eet.correct', AccessLevel::WRITE);
     }
 
     /**
@@ -361,7 +751,7 @@ final class RequestAuthorization
      */
     public static function allowsReadSideEffects(Request $request, string $permission): bool
     {
-        return self::isSessionAuth($request) && self::allows($request, $permission, AccessLevel::WRITE);
+        return self::actsAsSession($request) && self::allows($request, $permission, AccessLevel::WRITE);
     }
 
     public static function allows(
@@ -369,14 +759,14 @@ final class RequestAuthorization
         string $permission,
         AccessLevel $minimum = AccessLevel::READ,
     ): bool {
-        if (self::isClientType($request)
-            && in_array($permission, ['reports.submissions', 'reports.submit'], true)
-            && !self::isSessionAuth($request)
+        self::$catalog ??= new PermissionCatalog();
+        self::$checker ??= new PermissionChecker(self::$catalog);
+        if (in_array($permission, ['reports.submissions', 'reports.submit'], true)
+            && !self::actsAsSession($request)
+            && self::roleUsesClientTaxSubmissionScope(self::effectiveRole($request))
         ) {
             return false;
         }
-        self::$catalog ??= new PermissionCatalog();
-        self::$checker ??= new PermissionChecker(self::$catalog);
         return self::$checker->allows(self::effectiveRole($request), $permission, $minimum);
     }
 }

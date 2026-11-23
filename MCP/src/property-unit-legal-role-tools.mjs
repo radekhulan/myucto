@@ -1,3 +1,4 @@
+import { NOT_IN_CLIENT_CATALOG } from './api-contracts.mjs';
 import { seg } from './tool-shared.mjs';
 
 const id = { type: 'integer', minimum: 1 };
@@ -5,6 +6,7 @@ const instant = { type: 'string', pattern: '^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:
 const cursor = { type: 'string', minLength: 1, maxLength: 2048, pattern: '^[A-Za-z0-9_-]+$' };
 const limit = { type: 'integer', minimum: 1, maximum: 100 };
 const read = (name, title, properties, required, run) => ({
+  api: false, apiReason: NOT_IN_CLIENT_CATALOG,
   name, title,
   description: 'Kurátorované čtení historických právních rolí jednotky bez označení jednotky, jmen, titulů, podkladů, interních požadavků, hashů a aktérů. Výsledek neopravňuje k finanční ani právní mutaci.',
   inputSchema: { type: 'object', properties, required, additionalProperties: false },

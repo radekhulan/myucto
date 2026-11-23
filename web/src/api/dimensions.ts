@@ -123,6 +123,15 @@ export interface DocumentDimensions {
   splits?: Record<number, DimensionSplits>
 }
 
+/** Výsledek hromadné změny dimenzí hlavičky dokladů ze seznamu. */
+export interface BulkDocumentDimensionsResult {
+  updated: number[]
+  unchanged: number[]
+  /** Uložené doklady, jejichž zaúčtované řádky potřebují přeúčtovat (rozdělení, jiný účet). */
+  needs_repost: number[]
+  skipped: { id: number; varsymbol: string | null; code: string; message: string }[]
+}
+
 export type DimensionRuleEnforcement = 'error' | 'warning' | 'none'
 
 export interface DimensionRule {
@@ -253,7 +262,7 @@ export function documentDimensionsBody(payload: DocumentDimensionsPayload) {
 export type DimensionDocType = 'purchase-invoices' | 'invoices' | 'cash-documents' | 'bank-transactions' | 'journal-templates' | 'recurring-templates' | 'other-items' | 'assets'
 
 /** Karta s výchozími dimenzemi (klient slouží jako odběratel i dodavatel). */
-export type DimensionDefaultsEntity = 'clients' | 'projects' | 'stock/items' | 'eshop/categories'
+export type DimensionDefaultsEntity = 'clients' | 'projects' | 'stock/items' | 'eshop/categories' | 'accounting/bank-accounts'
 
 /** history = návrh z posledního přijatého dokladu téhož dodavatele (nejnižší přednost). */
 export type DimensionPrefillSource = 'project' | 'client' | 'document' | 'history'
@@ -319,13 +328,14 @@ export interface DimensionProfitRow {
   has_children: boolean
   own: DimensionProfitAmounts
   total: DimensionProfitAmounts
+  semantic_key?: string | null
   responsible_user_id?: number | null
   responsible_user_name?: string | null
 }
 
 /** Rozpad po syntetických účtech: řádky = účty, sloupce = kořeny sestavy (+ bez hodnoty). */
 export interface DimensionProfitMatrix {
-  columns: { key: string; value_id: number | null; code: string; name: string | null }[]
+  columns: { key: string; value_id: number | null; code: string; name: string | null; semantic_key?: string | null }[]
   rows: { code: string; name: string; account_type: 'revenue' | 'expense'; cells: number[]; total: number }[]
   results: number[]
   total_result: number
@@ -468,6 +478,13 @@ export const dimensionsApi = {
     api.get<DocumentDimensions>(`/accounting/dimensions/documents/${doc}/${id}`).then(r => r.data),
   saveDocument: (doc: DimensionDocType, id: number, payload: DocumentDimensionsPayload) =>
     api.put<DocumentDimensionsSaveResult>(`/accounting/dimensions/documents/${doc}/${id}`, documentDimensionsBody(payload))
+      .then(r => r.data),
+  /**
+   * Hromadná změna dimenzí hlavičky vydaných faktur: hodnota typ nastaví, `null` ho
+   * odebere, typ mimo mapu zůstane beze změny.
+   */
+  bulkInvoiceDimensions: (ids: number[], dimensions: Record<number, number | null>) =>
+    api.post<BulkDocumentDimensionsResult>('/accounting/dimensions/documents/invoices/bulk', { ids, dimensions })
       .then(r => r.data),
   /** Co by po uložení nesl každý zaúčtovaný řádek dokladu — nic se neuloží. */
   previewDocument: (doc: DimensionDocType, id: number, payload: DocumentDimensionsPayload) =>

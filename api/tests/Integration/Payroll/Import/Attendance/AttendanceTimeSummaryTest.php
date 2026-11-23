@@ -4,13 +4,13 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Integration\Payroll\Import\Attendance;
 
-use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\Payroll\PayrollAttendanceImportRepository;
 use MyInvoice\Repository\Payroll\PayrollTimeRepository;
 use MyInvoice\Service\Payroll\Import\Attendance\AttendanceImportService;
 use MyInvoice\Service\Payroll\Time\PayrollEmploymentCalendarProvisioner;
 use MyInvoice\Service\Payroll\Time\PayrollTimeImportSummaryWriter;
+use MyInvoice\Service\Payroll\Time\PayrollTimeService;
 use MyInvoice\Tests\Support\IsolatedSupplierTrait;
 use MyInvoice\Tests\Unit\Payroll\Import\Attendance\AttendanceFixture;
 use PDO;
@@ -45,7 +45,7 @@ final class AttendanceTimeSummaryTest extends TestCase
 
     protected function setUp(): void
     {
-        $this->container = Bootstrap::buildContainer();
+        $this->container = \MyInvoice\Tests\Support\PayrollTestContainer::build();
         $db = $this->container->get(Connection::class);
         if (!$db instanceof Connection) {
             throw new \RuntimeException('Připojení k databázi není dostupné.');
@@ -192,6 +192,338 @@ final class AttendanceTimeSummaryTest extends TestCase
         $month = $this->time->monthState($this->supplierId, $employmentId, self::JULY);
         self::assertSame('import_summary', $month['work_source'] ?? null);
         self::assertSame('open', $month['status'] ?? null, 'Souhrn měsíc neschvaluje.');
+    }
+
+    public function testManualReplacementRejectsImplicitImportAndCanRestoreOriginalImport(): void
+    {
+        $employmentId = $this->employment('ZAM-MANUAL', 'employment', '2026-01-01', '40.00');
+        $this->makeHourly($employmentId);
+        $importId = $this->batch([$this->hoursRows($employmentId, 160_501)]);
+        $this->writer->writeFromBatch($this->supplierId, $importId, $this->userId);
+        $original = $this->time->importSummary($this->supplierId, $employmentId, self::JULY);
+        self::assertNotNull($original);
+        $month = $this->time->monthState($this->supplierId, $employmentId, self::JULY);
+        $service = $this->service(PayrollTimeService::class);
+        $initial = $service->overview($this->supplierId, '2026-07', false, employmentId: $employmentId)['items'][0];
+        self::assertSame('import_summary', $initial['summary']['work_source']);
+        self::assertSame(481503, $initial['summary']['worked_duration_units']);
+        self::assertNull($initial['summary']['actual_minutes']);
+        $input = [
+            'employment_id' => $employmentId, 'row_version' => (int) $month['row_version'],
+            'reason' => 'Syntetická oprava', 'replace_source' => false,
+            'segments' => [['date_from' => '2026-07-01', 'date_to' => '2026-07-31',
+                'worked_duration_units' => 3000, 'overtime_duration_units' => null, 'worked_days' => null]],
+        ];
+        try {
+            $service->saveManualSummary($this->supplierId, '2026-07', $input, $this->userId);
+            self::fail('Nahrazení importu bez potvrzení se musí odmítnout.');
+        } catch (\InvalidArgumentException) {
+            self::assertSame('import_summary', $this->time->monthState($this->supplierId, $employmentId, self::JULY)['work_source']);
+        }
+        $input['replace_source'] = true;
+        $manual = $service->saveManualSummary($this->supplierId, '2026-07', $input, $this->userId);
+        self::assertSame('manual_summary', $manual['month']['work_source']);
+        // Opuštěný souhrn importu patří předchozí revizi měsíce.
+        self::assertSame((int) $month['revision_no'] + 1, (int) $manual['month']['revision_no']);
+        self::assertNull($this->time->importSummary($this->supplierId, $employmentId, self::JULY));
+        self::assertSame(3000, $service->overview($this->supplierId, '2026-07', false, employmentId: $employmentId)['items'][0]['summary']['worked_duration_units']);
+        try {
+            $this->time->saveImportSummary($this->supplierId, $employmentId, self::JULY, $importId, $original['values'], $original['sources'], $original['content_sha256'], $this->userId);
+            self::fail('Import nesmí ruční zdroj tiše přepsat.');
+        } catch (\InvalidArgumentException) {
+            self::assertSame('manual_summary', $this->time->monthState($this->supplierId, $employmentId, self::JULY)['work_source']);
+        }
+        $restored = $service->restoreEntries($this->supplierId, '2026-07', [
+            'employment_id' => $employmentId, 'row_version' => (int) $manual['month']['row_version'],
+            'reason' => 'Návrat k importu', 'replace_source' => true, 'source' => 'import_summary',
+        ], $this->userId);
+        self::assertSame('import_summary', $restored['month']['work_source']);
+        $recovered = $this->time->importSummary($this->supplierId, $employmentId, self::JULY);
+        self::assertSame($original['values'], $recovered['values']);
+        self::assertSame($original['content_sha256'], $recovered['content_sha256']);
+        self::assertSame($original['attendance_import_id'], $recovered['attendance_import_id']);
+        $history = $service->history($this->supplierId, $employmentId, '2026-07', '2026-07')['items'][0];
+        self::assertSame('import_summary', $history['summary']['work_source']);
+        self::assertSame(481503, $history['summary']['worked_duration_units']);
+        self::assertNull($history['summary']['actual_minutes']);
+    }
+
+    public function testMonthlyImportMonthKeepsOriginalSummaryAndRefusesSourceChange(): void
+    {
+        $employmentId = $this->employment('ZAM-MESICNI', 'employment', '2026-01-01', '40.00');
+        $importId = $this->batch([$this->hoursRows($employmentId, 160_501)]);
+        $this->writer->writeFromBatch($this->supplierId, $importId, $this->userId);
+        $month = $this->time->monthState($this->supplierId, $employmentId, self::JULY);
+        $service = $this->service(PayrollTimeService::class);
+        $item = $service->overview($this->supplierId, '2026-07', false, employmentId: $employmentId)['items'][0];
+        self::assertFalse($item['hourly_remuneration_in_period']);
+        self::assertSame(0, $item['summary']['actual_minutes']);
+        self::assertSame([], array_filter($item['summary']['category_minutes']));
+        $history = $service->history($this->supplierId, $employmentId, '2026-07', '2026-07')['items'][0];
+        self::assertFalse($history['hourly_remuneration_in_period']);
+        self::assertSame(0, $history['summary']['actual_minutes']);
+        foreach ([
+            fn () => $service->saveManualSummary($this->supplierId, '2026-07', [
+                'employment_id' => $employmentId, 'row_version' => (int) $month['row_version'],
+                'reason' => 'Syntetická oprava', 'replace_source' => true,
+                'segments' => [['date_from' => '2026-07-01', 'date_to' => '2026-07-31',
+                    'worked_duration_units' => 3000, 'overtime_duration_units' => null, 'worked_days' => null]],
+            ], $this->userId),
+            fn () => $service->restoreEntries($this->supplierId, '2026-07', [
+                'employment_id' => $employmentId, 'row_version' => (int) $month['row_version'],
+                'reason' => 'Syntetický návrat', 'replace_source' => true, 'source' => 'entries',
+            ], $this->userId),
+        ] as $attempt) {
+            try {
+                $attempt();
+                self::fail('Měsíčnímu vztahu se zdroj hodin importovaného měsíce měnit nesmí.');
+            } catch (\InvalidArgumentException $e) {
+                self::assertStringContainsString('hodinovým odměňováním', $e->getMessage());
+            }
+        }
+        $after = $this->time->monthState($this->supplierId, $employmentId, self::JULY);
+        self::assertSame('import_summary', $after['work_source']);
+        self::assertSame($month['revision_no'], $after['revision_no']);
+        self::assertNotNull($this->time->importSummary($this->supplierId, $employmentId, self::JULY));
+    }
+
+    public function testHourlyImportWithActiveImportInputsRefusesSourceChange(): void
+    {
+        $employmentId = $this->employment('ZAM-HOD-VSTUP', 'employment', '2026-01-01', '40.00');
+        $this->makeHourly($employmentId);
+        $importId = $this->batch([$this->hoursRows($employmentId, 160_501)]);
+        $this->writer->writeFromBatch($this->supplierId, $importId, $this->userId);
+        $month = $this->time->monthState($this->supplierId, $employmentId, self::JULY);
+        $component = $this->componentId('NAHRADA_MZDY_DOVOLENA');
+        $employee = $this->db->pdo()->prepare('SELECT employee_id FROM payroll_employments WHERE supplier_id = ? AND id = ?');
+        $employee->execute([$this->supplierId, $employmentId]);
+        $this->db->pdo()->prepare(
+            'INSERT INTO payroll_inputs (supplier_id, employee_id, employment_id, component_id, period_start, amount_minor, status, source_kind, external_id, created_by)
+             VALUES (?, ?, ?, ?, ?, 120000, "draft", "absence", ?, ?)',
+        )->execute([$this->supplierId, (int) $employee->fetchColumn(), $employmentId, $component, self::JULY,
+            "leave:attendance:2026-07:{$employmentId}:vacation_hours", $this->userId]);
+        $inputId = (int) $this->db->pdo()->lastInsertId();
+        $service = $this->service(PayrollTimeService::class);
+        $manual = [
+            'employment_id' => $employmentId, 'row_version' => (int) $month['row_version'],
+            'reason' => 'Syntetická oprava', 'replace_source' => true,
+            'segments' => [['date_from' => '2026-07-01', 'date_to' => '2026-07-31',
+                'worked_duration_units' => 3000, 'overtime_duration_units' => null, 'worked_days' => null]],
+        ];
+        $restore = [
+            'employment_id' => $employmentId, 'row_version' => (int) $month['row_version'],
+            'reason' => 'Syntetický návrat', 'replace_source' => true, 'source' => 'entries',
+        ];
+        foreach ([
+            fn () => $service->saveManualSummary($this->supplierId, '2026-07', $manual, $this->userId),
+            fn () => $service->restoreEntries($this->supplierId, '2026-07', $restore, $this->userId),
+        ] as $attempt) {
+            try {
+                $attempt();
+                self::fail('Zdroj s aktivními vstupy z importu se měnit nesmí.');
+            } catch (\InvalidArgumentException $e) {
+                self::assertStringContainsString('importu docházky', $e->getMessage());
+            }
+        }
+        self::assertSame('import_summary', $this->time->monthState($this->supplierId, $employmentId, self::JULY)['work_source']);
+        $this->db->pdo()->prepare('UPDATE payroll_inputs SET status = "cancelled" WHERE supplier_id = ? AND id = ?')
+            ->execute([$this->supplierId, $inputId]);
+        $restored = $service->restoreEntries($this->supplierId, '2026-07', $restore, $this->userId);
+        self::assertTrue($restored['changed']);
+        self::assertSame('entries', $restored['month']['work_source']);
+        self::assertSame((int) $month['revision_no'] + 1, (int) $restored['month']['revision_no']);
+        self::assertNull($this->time->importSummary($this->supplierId, $employmentId, self::JULY));
+        $again = $service->restoreEntries($this->supplierId, '2026-07', $restore, $this->userId);
+        self::assertFalse($again['changed']);
+        self::assertSame($restored['month']['row_version'], $again['month']['row_version']);
+    }
+
+    public function testRestoringImportIsRefusedWhenMonthHasDailyEntries(): void
+    {
+        $employmentId = $this->employment('ZAM-HOD-ZAZNAM', 'employment', '2026-01-01', '40.00');
+        $this->makeHourly($employmentId);
+        $importId = $this->batch([$this->hoursRows($employmentId, 160_501)]);
+        $this->writer->writeFromBatch($this->supplierId, $importId, $this->userId);
+        $month = $this->time->monthState($this->supplierId, $employmentId, self::JULY);
+        $service = $this->service(PayrollTimeService::class);
+        $entries = $service->restoreEntries($this->supplierId, '2026-07', [
+            'employment_id' => $employmentId, 'row_version' => (int) $month['row_version'],
+            'reason' => 'Syntetický návrat', 'replace_source' => true, 'source' => 'entries',
+        ], $this->userId);
+        $saved = $service->saveEntry($this->supplierId, [
+            'employment_id' => $employmentId, 'starts_at' => '2026-07-06T08:00:00+02:00', 'ends_at' => '2026-07-06T16:00:00+02:00',
+            'timezone' => 'Europe/Prague', 'category' => 'regular', 'break_minutes' => 30, 'row_version' => 0,
+            'month_row_version' => (int) $entries['month']['row_version'], 'supersedes_id' => null,
+        ], $this->userId);
+        try {
+            $service->restoreEntries($this->supplierId, '2026-07', [
+                'employment_id' => $employmentId, 'row_version' => (int) $saved['month']['row_version'],
+                'reason' => 'Syntetický návrat k importu', 'replace_source' => true, 'source' => 'import_summary',
+            ], $this->userId);
+            self::fail('Souhrn importu nesmí vedle denních záznamů vzniknout jako druhý zdroj.');
+        } catch (\InvalidArgumentException $e) {
+            self::assertStringContainsString('časové záznamy', $e->getMessage());
+        }
+        self::assertSame('entries', $this->time->monthState($this->supplierId, $employmentId, self::JULY)['work_source']);
+    }
+
+    /**
+     * Brigádník na DPP bez hodinové sazby: k importovaným hodinám se zapíšou
+     * směny, importované částky zůstanou. Hodiny tu do mzdy nevstupují, takže
+     * dvojí výplata nehrozí. Publikovaný rozpis se převezme jako odpracovaný čas.
+     */
+    public function testAgreementWithoutRateSwitchesToShiftsAndKeepsImportedAmounts(): void
+    {
+        $employmentId = $this->amountOnlyAgreement('DPP-PONECHAT');
+        $month = $this->importedMonth($employmentId);
+        $draft = $this->attendanceInput($employmentId, 'draft', 'ODMENA');
+        $approved = $this->attendanceInput($employmentId, 'approved', 'PREMIE');
+        $first = $this->publishedShift($employmentId, '2026-07-06 06:00:00', '2026-07-06 10:00:00', 0);
+        $second = $this->publishedShift($employmentId, '2026-07-07 06:00:00', '2026-07-07 12:30:00', 30);
+        $service = $this->service(PayrollTimeService::class);
+        $before = $service->overview($this->supplierId, '2026-07', false, employmentId: $employmentId)['items'][0];
+        self::assertTrue($before['import_amounts_keepable']);
+
+        $result = $service->switchImportToEntries($this->supplierId, '2026-07', [
+            'employment_id' => $employmentId, 'row_version' => (int) $month['row_version'],
+            'keep_import_inputs' => true, 'take_over_shifts' => true,
+        ], $this->userId);
+
+        self::assertSame('entries', $result['month']['work_source']);
+        self::assertSame([], $result['cancelled_input_ids']);
+        self::assertSame('draft', $this->inputStatus($draft));
+        self::assertSame('approved', $this->inputStatus($approved));
+        self::assertCount(2, $result['created_entry_ids']);
+        $entries = $this->db->pdo()->prepare('SELECT source_kind, source_reference, category, break_minutes FROM payroll_time_entries WHERE supplier_id = ? AND employment_id = ? ORDER BY starts_at_utc');
+        $entries->execute([$this->supplierId, $employmentId]);
+        self::assertSame([
+            ['source_kind' => 'schedule', 'source_reference' => 'shift:' . $first, 'category' => 'regular', 'break_minutes' => 0],
+            ['source_kind' => 'schedule', 'source_reference' => 'shift:' . $second, 'category' => 'regular', 'break_minutes' => 30],
+        ], array_map(static fn (array $row): array => array_replace($row, ['break_minutes' => (int) $row['break_minutes']]), $entries->fetchAll(PDO::FETCH_ASSOC)));
+        $after = $service->overview($this->supplierId, '2026-07', false, employmentId: $employmentId)['items'][0];
+        self::assertSame(600, $after['summary']['actual_minutes'], '4 h + 6 h po přestávce.');
+        self::assertSame([
+            'import_worked_duration_units' => 481_500,
+            'entries_worked_duration_units' => 30_000,
+            'differs' => true,
+        ], $after['import_summary_comparison']);
+        self::assertSame(1, $this->countRows(
+            'SELECT COUNT(*) FROM payroll_time_month_import_summaries WHERE supplier_id = ? AND employment_id = ?',
+            [$this->supplierId, $employmentId],
+        ), 'Původní souhrn importu zůstává v historii.');
+    }
+
+    public function testKeepingImportedAmountsWithoutTakeOverCreatesNoEntries(): void
+    {
+        $employmentId = $this->amountOnlyAgreement('DPP-BEZ-PREVZETI');
+        $month = $this->importedMonth($employmentId);
+        $this->publishedShift($employmentId, '2026-07-06 06:00:00', '2026-07-06 10:00:00', 0);
+
+        $result = $this->service(PayrollTimeService::class)->switchImportToEntries($this->supplierId, '2026-07', [
+            'employment_id' => $employmentId, 'row_version' => (int) $month['row_version'], 'keep_import_inputs' => true,
+        ], $this->userId);
+
+        self::assertSame('entries', $result['month']['work_source']);
+        self::assertSame([], $result['created_entry_ids']);
+        self::assertSame(0, $this->countRows(
+            'SELECT COUNT(*) FROM payroll_time_entries WHERE supplier_id = ? AND employment_id = ?',
+            [$this->supplierId, $employmentId],
+        ));
+    }
+
+    /** Měsíční mzda se krátí podle zdroje hodin, hodinová by se ze směn spočítala znovu. */
+    public function testKeepingImportedAmountsIsRefusedForMonthlyAndHourlyWage(): void
+    {
+        $monthly = $this->employment('ZAM-MESICNI-PONECHAT', 'employment', '2026-01-01', '40.00');
+        $hourly = $this->employment('ZAM-HOD-PONECHAT', 'employment', '2026-01-01', '40.00');
+        $this->makeHourly($hourly);
+        $service = $this->service(PayrollTimeService::class);
+        foreach ([$monthly, $hourly] as $employmentId) {
+            $month = $this->importedMonth($employmentId);
+            $input = $this->attendanceInput($employmentId, 'draft', 'ODMENA');
+            self::assertFalse($service->overview($this->supplierId, '2026-07', false, employmentId: $employmentId)['items'][0]['import_amounts_keepable']);
+            try {
+                $service->switchImportToEntries($this->supplierId, '2026-07', [
+                    'employment_id' => $employmentId, 'row_version' => (int) $month['row_version'], 'keep_import_inputs' => true,
+                ], $this->userId);
+                self::fail('Částky z importu se u mzdy počítané z hodin ponechat nesmí.');
+            } catch (\InvalidArgumentException $e) {
+                self::assertStringContainsString('Počítat ze směn', $e->getMessage());
+            }
+            self::assertSame('import_summary', $this->time->monthState($this->supplierId, $employmentId, self::JULY)['work_source']);
+            self::assertSame('draft', $this->inputStatus($input));
+        }
+    }
+
+    /** „Počítat ze směn" převezme rozpis stejně, importované vstupy zruší. */
+    public function testRecalculatingFromShiftsCanTakeOverPublishedShifts(): void
+    {
+        $employmentId = $this->employment('ZAM-HOD-ROZPIS', 'employment', '2026-01-01', '40.00');
+        $this->makeHourly($employmentId);
+        $month = $this->importedMonth($employmentId);
+        $input = $this->attendanceInput($employmentId, 'draft', 'ODMENA');
+        $this->publishedShift($employmentId, '2026-07-07 06:00:00', '2026-07-07 14:30:00', 30);
+
+        $result = $this->service(PayrollTimeService::class)->switchImportToEntries($this->supplierId, '2026-07', [
+            'employment_id' => $employmentId, 'row_version' => (int) $month['row_version'], 'take_over_shifts' => true,
+        ], $this->userId);
+
+        self::assertSame([$input], $result['cancelled_input_ids']);
+        self::assertCount(1, $result['created_entry_ids']);
+    }
+
+    private function amountOnlyAgreement(string $code): int
+    {
+        $employmentId = $this->employment($code, 'dpp', '2026-01-01', null);
+        $this->db->pdo()->prepare('UPDATE payroll_employments SET monthly_gross_minor = NULL WHERE supplier_id = ? AND id = ?')
+            ->execute([$this->supplierId, $employmentId]);
+        $this->db->pdo()->prepare('INSERT INTO payroll_employment_terms (supplier_id, employment_id, effective_from, planned_start_on) VALUES (?, ?, "2026-01-01", "2026-01-01")')
+            ->execute([$this->supplierId, $employmentId]);
+
+        return $employmentId;
+    }
+
+    /** @return array<string,mixed> */
+    private function importedMonth(int $employmentId): array
+    {
+        $this->writer->writeFromBatch($this->supplierId, $this->batch([$this->hoursRows($employmentId)]), $this->userId);
+        $month = $this->time->monthState($this->supplierId, $employmentId, self::JULY);
+        self::assertSame('import_summary', $month['work_source'] ?? null);
+
+        return $month;
+    }
+
+    private function attendanceInput(int $employmentId, string $status, string $code): int
+    {
+        $employee = $this->db->pdo()->prepare('SELECT employee_id FROM payroll_employments WHERE supplier_id = ? AND id = ?');
+        $employee->execute([$this->supplierId, $employmentId]);
+        $this->db->pdo()->prepare(
+            'INSERT INTO payroll_inputs (supplier_id, employee_id, employment_id, component_id, period_start, amount_minor, status, source_kind, external_id, created_by, approved_by, approved_at, component_snapshot_json, component_snapshot_hash)
+             VALUES (?, ?, ?, ?, ?, 150000, ?, "manual", ?, ?, ?, ?, ?, ?)',
+        )->execute([$this->supplierId, (int) $employee->fetchColumn(), $employmentId, $this->componentId('NAHRADA_MZDY_DOVOLENA'), self::JULY,
+            $status, "attendance:2026-07:{$employmentId}:{$code}", $this->userId,
+            $status === 'draft' ? null : $this->userId, $status === 'draft' ? null : '2026-07-31 12:00:00',
+            '{"code":"IMP"}', hash('sha256', '{"code":"IMP"}', true)]);
+
+        return (int) $this->db->pdo()->lastInsertId();
+    }
+
+    private function publishedShift(int $employmentId, string $startsUtc, string $endsUtc, int $breakMinutes): int
+    {
+        $this->db->pdo()->prepare(
+            'INSERT INTO payroll_shifts (supplier_id, employment_id, series_key, revision_no, starts_at_utc, ends_at_utc, timezone_name, break_minutes, status, published_at, published_by, created_by)
+             VALUES (?, ?, ?, 1, ?, ?, "Europe/Prague", ?, "published", NOW(), ?, ?)',
+        )->execute([$this->supplierId, $employmentId, bin2hex(random_bytes(16)), $startsUtc, $endsUtc, $breakMinutes, $this->userId, $this->userId]);
+
+        return (int) $this->db->pdo()->lastInsertId();
+    }
+
+    private function inputStatus(int $id): string
+    {
+        $stmt = $this->db->pdo()->prepare('SELECT status FROM payroll_inputs WHERE supplier_id = ? AND id = ?');
+        $stmt->execute([$this->supplierId, $id]);
+
+        return (string) $stmt->fetchColumn();
     }
 
     public function testReplayDoesNotDuplicate(): void
@@ -483,6 +815,24 @@ final class AttendanceTimeSummaryTest extends TestCase
         }
 
         return $employmentId;
+    }
+
+    private function makeHourly(int $employmentId): void
+    {
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_employment_terms
+                SET remuneration_type = "hourly", hourly_rate_minor = 20000, monthly_gross_minor = NULL,
+                    remuneration_basis_kind = "wage_statement", remuneration_basis = "Syntetický výměr"
+              WHERE supplier_id = ? AND employment_id = ?',
+        )->execute([$this->supplierId, $employmentId]);
+    }
+
+    private function componentId(string $code): int
+    {
+        $this->service(\MyInvoice\Repository\Payroll\PayrollComponentRepository::class)->ensureDefaults($this->supplierId);
+        $stmt = $this->db->pdo()->prepare('SELECT id FROM payroll_component_definitions WHERE supplier_id = ? AND code = ? ORDER BY id LIMIT 1');
+        $stmt->execute([$this->supplierId, $code]);
+        return (int) $stmt->fetchColumn();
     }
 
     private function approvedMonth(int $employmentId): void

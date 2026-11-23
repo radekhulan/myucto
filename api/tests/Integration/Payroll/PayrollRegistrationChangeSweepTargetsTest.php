@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Integration\Payroll;
 
-use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\Payroll\PayrollModuleStateRepository;
 use MyInvoice\Service\Payroll\Submission\Registration\Change\PayrollRegistrationChangeSweepRunner;
@@ -38,7 +37,7 @@ final class PayrollRegistrationChangeSweepTargetsTest extends TestCase
     {
         // Jeden kontejner na celý test: druhé `buildContainer()` by přineslo
         // vlastní spojení, které by neotevřenou transakci téhle sady nevidělo.
-        $container = Bootstrap::buildContainer();
+        $container = \MyInvoice\Tests\Support\PayrollTestContainer::build();
         $this->db = $container->get(Connection::class);
         if (!$this->db->hasColumn('supplier', 'payroll_enabled')
             || !$this->db->hasTable('payroll_module_state')

@@ -1,0 +1,169 @@
+<?php
+
+declare(strict_types=1);
+
+namespace MyInvoice\Service\Nonprofit\Membership;
+
+use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Repository\Nonprofit\Membership\MembershipListRepository;
+use MyInvoice\Repository\Nonprofit\Membership\MembershipRepository;
+use MyInvoice\Service\Export\CsvWriter;
+use PhpOffice\PhpSpreadsheet\Cell\Coordinate;
+use PhpOffice\PhpSpreadsheet\Cell\DataType;
+use PhpOffice\PhpSpreadsheet\Spreadsheet;
+use PhpOffice\PhpSpreadsheet\Style\Fill;
+use PhpOffice\PhpSpreadsheet\Worksheet\Worksheet;
+use PhpOffice\PhpSpreadsheet\Writer\Xlsx as XlsxWriter;
+
+/**
+ * Export seznamu členů pro hromadnou změnu stavu (krok 8 #321): stejné filtry jako seznam,
+ * dnešní stav podle platných revizí, úhrady za rok a označení z filtru a prázdné sloupce změny.
+ * Bez adres a kontaktních údajů. Seznam se čte po stránkách 500 členů (historie a poslední
+ * předpis jedním dotazem na stránku), takže práce roste lineárně s počtem členů.
+ */
+final class MembershipListExporter
+{
+    private const PAGE = 500;
+    private const XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+
+    /**
+     * @param int $xlsxLimit nejvíc členů v XLSX: sešit drží všechny buňky v paměti (~9 MB na 1000 členů),
+     *                       (měřeno: 4000 členů +60 MB, 10 000 +129 MB); 5000 se vejde i do memory_limit 128M,
+     *                       CSV strop nemá: řádky čte generátorem, hotový soubor ale drží v paměti jako
+     *                       řetězec (10 000 členů +24 MB, zhruba 2,4 kB na člena); testy limit zmenšují
+     */
+    public function __construct(private readonly Connection $db, private readonly ?string $today = null, private readonly int $xlsxLimit = 5000) {}
+
+    /** @return array{bytes:string, filename:string, mime:string} */
+    public function export(int $supplier, array $filter, string $format): array
+    {
+        if (!in_array($format, ['xlsx', 'csv'], true)) {
+            throw new MembershipException('nonprofit_membership_invalid', 'Podporované formáty exportu jsou XLSX a CSV.');
+        }
+        // Řádky jdou po stránkách generátorem rovnou do zapisovače; pole řádků celého seznamu nevzniká, výsledný soubor ano.
+        $rows = $this->rows($supplier, $filter);
+        $filename = 'clenove-' . $this->today() . '.' . $format;
+        if ($format === 'csv') {
+            $text = (static function (iterable $rows): \Generator {
+                foreach ($rows as $row) yield array_map(static fn (array $cell): string => match ($cell[0]) {
+                    'n' => number_format((float) $cell[1], 2, ',', ''), 'i' => (string) (int) $cell[1], default => CsvWriter::safe(self::quoteApostrophe((string) $cell[1])) }, $row);
+            })($rows);
+            return ['bytes' => CsvWriter::build(MembershipListColumns::headers(), $text), 'filename' => $filename, 'mime' => 'text/csv; charset=UTF-8'];
+        }
+        $book = new Spreadsheet();
+        try {
+            $this->sheet($book->getActiveSheet(), 'Členové', MembershipListColumns::headers(), $rows, $this->xlsxLimit);
+        } catch (MembershipException $e) {
+            $book->disconnectWorksheets();
+            throw $e;
+        }
+        $guide = [];
+        foreach (MembershipListColumns::all() as $column) {
+            $guide[] = [['s', $column['header']], ['s', $column['required']], ['s', implode(', ', $column['aliases'])], ['s', $column['note']]];
+        }
+        $this->sheet($book->createSheet(), 'Návod', ['Sloupec', 'Povinný', 'Aliasy', 'Hodnoty / pravidla'], $guide);
+        $book->setActiveSheetIndex(0);
+        $base = tempnam(sys_get_temp_dir(), 'nmexp_');
+        $tmp = $base . '.xlsx';
+        try {
+            (new XlsxWriter($book))->save($tmp);
+            $bytes = (string) file_get_contents($tmp);
+        } finally {
+            @unlink($tmp);
+            @unlink($base);
+            $book->disconnectWorksheets();
+        }
+        return ['bytes' => $bytes, 'filename' => $filename, 'mime' => self::XLSX_MIME];
+    }
+
+    /**
+     * Buňky v pořadí MembershipListColumns; ['s', text], ['i', počet] nebo ['n', částka v Kč].
+     * @return \Generator<int,list<array{0:string,1:mixed}>>
+     */
+    public function rows(int $supplier, array $filter): \Generator
+    {
+        $list = new MembershipListRepository($this->db);
+        $members = new MembershipRepository($this->db);
+        $today = $this->today();
+        $after = 0;
+        do {
+            $page = $list->page($supplier, $after, self::PAGE, $filter);
+            if ($page === []) break;
+            $ids = array_column($page, 'id');
+            $histories = $members->historiesMany($supplier, $ids);
+            $claims = $list->latestClaims($supplier, $ids, $filter);
+            foreach ($page as $row) {
+                $now = MembershipRevisionTimeline::at($histories[$row['id']] ?? [], $today);
+                $dues = $row['contribution'];
+                $claim = $claims[$row['id']] ?? null;
+                yield [
+                    ['s', $row['member_number']],
+                    // Vymazaný člen: ani ID kontaktu (zachovaný kontakt by soubor znovu propojil s osobou).
+                    ['s', ($row['erased'] ?? false) ? '' : (string) $row['client_id']],
+                    ['s', ''],
+                    ['s', self::label($row)],
+                    ['s', $now['status'] ?? ''],
+                    ['s', $now['effective_from'] ?? ''],
+                    ['i', $dues['claim_count']],
+                    ...array_map(static fn (?string $cents): array => $cents === null ? ['s', ''] : ['n', (int) $cents / 100.0],
+                        [$dues['prescribed_cents'], $dues['paid_cents'], $dues['open_cents']]),
+                    ['s', $dues['status']],
+                    ['s', $claim === null ? '' : $claim['title_key'] . ' ' . $claim['period_from'] . '–' . $claim['period_to']],
+                    $claim === null ? ['s', ''] : ['n', (int) $claim['amount_cents'] / 100.0],
+                    ['s', ''], ['s', ''], ['s', ''], ['s', ''],
+                ];
+            }
+            $after = $page[array_key_last($page)]['id'];
+        } while (count($page) === self::PAGE);
+    }
+
+    /** Stejné zobrazení jako membershipMemberLabel na webu: název, jinak jméno a příjmení. */
+    private static function label(array $row): string
+    {
+        $company = trim((string) ($row['company_name'] ?? ''));
+        return $company !== '' ? $company : trim(implode(' ', array_filter([(string) ($row['first_name'] ?? ''), (string) ($row['last_name'] ?? '')], static fn (string $part): bool => $part !== '')));
+    }
+
+    private function today(): string
+    {
+        return $this->today ?? (new \DateTimeImmutable())->setTimezone(new \DateTimeZone(date_default_timezone_get()))->format('Y-m-d');
+    }
+
+    /** @param list<string> $headers @param iterable<list<array{0:string,1:mixed}>> $rows */
+    private function sheet(Worksheet $sheet, string $title, array $headers, iterable $rows, int $limit = PHP_INT_MAX): void
+    {
+        $sheet->setTitle($title);
+        foreach ($headers as $i => $header) {
+            $sheet->setCellValueExplicit([$i + 1, 1], $header, DataType::TYPE_STRING);
+        }
+        $last = Coordinate::stringFromColumnIndex(count($headers));
+        $sheet->getStyle("A1:{$last}1")->getFont()->setBold(true);
+        $sheet->getStyle("A1:{$last}1")->getFill()->setFillType(Fill::FILL_SOLID)->getStartColor()->setRGB('EEEEEE');
+        // Texty explicitně jako řetězec: číslo „042“ si drží nulu a „=…“ zůstane textem.
+        $r = 0;
+        foreach ($rows as $cells) {
+            if ($r >= $limit) {
+                throw new MembershipException('nonprofit_membership_export_too_large', 'Export XLSX má nejvýše ' . $limit . ' členů. Použijte CSV nebo seznam zužte filtrem.', 422);
+            }
+            foreach ($cells as $i => [$type, $value]) {
+                $type !== 's'
+                    ? $sheet->setCellValue([$i + 1, $r + 2], $value)
+                    : $sheet->setCellValueExplicit([$i + 1, $r + 2], self::quoteApostrophe((string) $value), DataType::TYPE_STRING);
+            }
+            $r++;
+        }
+        for ($i = 1; $i <= count($headers); $i++) {
+            $sheet->getColumnDimension(Coordinate::stringFromColumnIndex($i))->setAutoSize(true);
+        }
+    }
+
+    /**
+     * Text, který sám začíná apostrofem (členské číslo „'-1“), dostane ještě jeden: import úvodní apostrof před
+     * =+-@, tabulátorem, koncem řádku i dalším apostrofem odebírá (MembershipImportService::unescape), takže export a import
+     * vrátí přesně stejnou hodnotu a „'-1“ nesplyne s číslem „-1“. Volá se na surovou hodnotu před CsvWriter::safe.
+     */
+    private static function quoteApostrophe(string $value): string
+    {
+        return str_starts_with($value, "'") ? "'" . $value : $value;
+    }
+}

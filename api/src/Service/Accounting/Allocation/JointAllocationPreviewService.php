@@ -8,6 +8,7 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\AccountingFrameworkRepository;
 use MyInvoice\Repository\DimensionAssignmentRepository;
 use MyInvoice\Repository\JointAllocationKeyRepository;
+use MyInvoice\Repository\JournalLineProofColumns;
 use MyInvoice\Service\Accounting\AccountingFrameworkService;
 use MyInvoice\Service\Accounting\Dimension\DimensionPeriodGuard;
 use MyInvoice\Service\Accounting\Dimension\SystemDimensionWritePolicy;
@@ -118,7 +119,9 @@ final class JointAllocationPreviewService
         if (is_string($lockedUntil) && $date <= $lockedUntil) {
             throw new JointAllocationException('date_locked', 'Datum přeúčtování je zamčené.', 409);
         }
-        $stmt = $this->db->pdo()->prepare("SELECT id FROM journal_entries WHERE supplier_id = ? AND period_id = ? AND source_type = 'closing' AND posted_at IS NOT NULL AND reversed_by IS NULL LIMIT 1 FOR UPDATE");
+        // Období uzavírá zápis uzavření knih, ne skladové sloty kroku Zásoby (#398).
+        $stmt = $this->db->pdo()->prepare("SELECT je.id FROM journal_entries je WHERE je.supplier_id = ? AND je.period_id = ? AND "
+            . \MyInvoice\Service\Accounting\Closing\ClosingSourceId::closeBooksSql('je') . " AND je.posted_at IS NOT NULL AND je.reversed_by IS NULL LIMIT 1 FOR UPDATE");
         $stmt->execute([$supplierId, $period['id']]);
         if ($stmt->fetchColumn() !== false) {
             throw new JointAllocationException('period_not_open', 'Období již obsahuje účinný závěrkový zápis.', 409);
@@ -130,7 +133,7 @@ final class JointAllocationPreviewService
     {
         $pdo = $this->db->pdo();
         $marks = implode(',', array_fill(0, count($ids), '?'));
-        $stmt = $pdo->prepare("SELECT l.*, e.entry_date AS source_date, e.period_id AS source_period_id, e.source_type,
+        $stmt = $pdo->prepare("SELECT " . JournalLineProofColumns::select('l') . ", e.entry_date AS source_date, e.period_id AS source_period_id, e.source_type,
                 e.source_id, e.document_no, e.description AS entry_description, a.account_code, a.name AS account_name,
                 e.posted_at, e.reversed_by, e.row_version AS source_version, a.account_type
             FROM journal_entry_lines l

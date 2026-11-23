@@ -17,11 +17,12 @@ Výchozí klientská role tato práva nemá; postup a hranice přístupu popisuj
 [Klientské podávání připravených výkazů](49_Archiv_podani_a_rekonciliace.md#4921-klientske-podavani-pripravenych-vykazu).
 
 V části **Firma → MCP server** může klient spravovat připojení svého AI asistenta.
-Nové připojení na vlastní doméně firmy vyžaduje výslovně přidělené oprávnění
-**Připojit AI asistenta (MCP)**. Přihlášení a souhlas probíhají na hlavní doméně
-MyÚčta, připojení zůstává omezené na firmu klientské domény a aktuální práva
-uživatele. Vlastní připojení lze odvolat i po odebrání tohoto oprávnění.
-Postup popisuje [MCP server](105_MCP_server.md#10541-pripojeni-klienta-na-vlastni-domene-firmy).
+Nové připojení vyžaduje výslovně přidělené oprávnění **Připojit AI asistenta (MCP)**.
+Klient se připojí přes adresu klientské domény firmy, nebo přes adresu instalace,
+když firma klientskou doménu nemá. Přihlášení a souhlas probíhají na hlavní doméně
+MyÚčta, připojení zůstává omezené na jednu firmu potvrzenou v souhlasu a aktuální
+práva uživatele. Vlastní připojení lze odvolat i po odebrání tohoto oprávnění.
+Postup popisuje [MCP server](105_MCP_server.md#10541-pripojeni-klienta-na-vlastni-domene-firmy-nebo-adrese-instalace).
 
 Superadmin má v nabídce **Dokumenty → Předat doklady účetní** také přístup
 k předávání dokladů a odpovědím na požadavky účetní v právě vybrané firmě.
@@ -87,7 +88,7 @@ přehled; postup a pravidla osobního ukládání popisuje
 Provede klient. Hodí se pro účtenky, faktury a další doklady, které nechce přepisovat.
 
 1. Otevřete `Dokumenty → Předat doklady účetní`.
-2. Klikněte na **Vybrat soubory** a vyberte soubory (najednou až 20, formáty PDF, JPG, PNG, ISDOC, XML nebo ISDOCX).
+2. Klikněte na **Vybrat soubory** a vyberte soubory (najednou až 20, formáty PDF, JPG, PNG, ISDOC, XML nebo ISDOCX), nebo je přetáhněte do vyznačené plochy. Doklad můžete také **Vyfotit**: na telefonu a tabletu fotoaparátem, na počítači připojenou webkamerou (tlačítko je vidět, jen když je kamera připojená; prohlížeč se napoprvé zeptá na povolení kamery). Každý další výběr nebo fotka se přidá k už vybraným souborům, takže lze předat víc dokladů najednou i z telefonu. Omylem vybraný soubor odeberete křížkem.
 3. Podle potřeby doplňte **Poznámka pro účetní (nepovinné)** a **Typ dokladu (nepovinné)**. Používá-li firma střediska, vyberte i středisko, kterého se doklad týká.
 4. Klikněte na **Předat účetní**.
 
@@ -104,7 +105,7 @@ jen údaje přečte AI. Před nahráním vidíte měsíční čerpání společn
 spotřebuje jeden pokus i při chybě, duplicitě nebo načtení ISDOC. Pokusy se nevracejí a čerpání se obnovuje každý měsíc.
 Po vyčerpání můžete zadávat ručně nebo požádat účetní o zvýšení limitu. Použitý model nastavuje účetní. Podrobnosti najdete v [AI extrakci](25_AI_extrakce.md#254-krok-za-krokem-importovat-prijate-faktury-z-pdf).
 
-Tlačítko **Náhled** otevře PDF nebo obrázek na široké obrazovce vpravo vedle přehledu, na menší obrazovce v dialogu. Výběrem jiného dokladu se náhled přepne. Vlastní předání ve stavu **Předáno** můžete přes **Smazat předání** odstranit, dokud účetní nezačala zpracování. Potvrzení vyřadí podání z přehledu a přesune originál do koše Dokumentů. Pokud doklad odpovídal na požadavek účetní, požadavek se znovu otevře.
+Tlačítko **Náhled** otevře PDF nebo obrázek na široké obrazovce vpravo vedle přehledu, na menší obrazovce v dialogu. Výběrem jiného dokladu se náhled přepne. Vlastní předání můžete přes **Smazat předání** odstranit, dokud účetní nezačala zpracování. Smazat jde i předání, které účetní odmítla nebo vrátila k doplnění, pokud z něj nevznikl doklad. Potvrzení vyřadí podání z přehledu a přesune originál do koše Dokumentů. Pokud doklad odpovídal na požadavek účetní, požadavek se znovu otevře.
 
 Když účetní vyžádá čitelnější soubor, stav je **Čeká na doplnění**. Při odmítnutí uvidíte stav **Odmítnuto** a důvod účetní. V obou případech klikněte na **Nahrát náhradu** a vyberte nový soubor. Původní podání zůstane v historii a další náhradu už nenabízí.
 
@@ -205,7 +206,7 @@ Postup ověření a aktivace popisuje [§ 96.16 Vlastní domény](96_Nastaveni.m
 
 ### 9.11.1 Menu klienta
 
-Menu běžného klienta má pět sekcí:
+Základní klientské menu obsahuje tyto sekce; skutečný rozsah určuje role:
 
 - **Přehled** (domovská stránka),
 - **Prodej** (vydané faktury a pravidelná fakturace),
@@ -215,7 +216,12 @@ Menu běžného klienta má pět sekcí:
 
 Na desktopu jsou sekce v horní liště s popup položkami, na mobilu v nabídce **☰**. Nápovědu otevírá ikona **?** v horní liště.
 
-Cokoliv jiného klient v menu nevidí: účetnictví, bankovní výpisy, sklad, e-shop, reporty, Grafy, kniha jízd, DMS dokumenty, systémové nastavení a správu uživatelů. Při pokusu otevřít takovou stránku přes adresu ho aplikace přesměruje na portál. Omezení je vynucené na frontendu i v API, ruční úpravou adresy se obejít nedá.
+Další agendy lze povolit samostatnými klientskými oprávněními: například
+banku, knihu jízd, zakázky, vybrané skladové operace, připravená podání,
+MCP nebo provozní nastavení firmy. Podrobnosti popisují následující části
+a [Bezpečnost](101_Bezpecnost.md). Interní účetní deník, daňová evidence,
+e-shop a globální správa uživatelů zůstávají klientovi uzavřené. Omezení
+vynucují menu, router i server; ruční změna adresy práva nerozšíří.
 
 Uvnitř povolených sekcí klient **není v režimu jen pro čtení**. Smí, pokud doklad ještě nebyl zaúčtovaný (viz [§ 9.11.5](#9115-zamek-zauctovanych-dokladu)):
 
@@ -233,12 +239,15 @@ Každá provozní oblast má samostatné oprávnění **Zápis**. Klient vidí a
 - odesílací profily, odesílatele, Reply-To, DKIM a SMTP/IMAP nastavení firmy,
 - firemní podpisové profily s podporovaným nativním backendem a šifrovaně uloženým heslem k certifikátu; klientský správce může nahrát P12/PFX, nastavit použití pro PDF a vybrat profil v odesílacím profilu pro S/MIME e-mail,
 - obsah e-mailových šablon firmy v češtině a angličtině,
-- branding komunikace, logo, barvy, patičky a brandingové profily,
-- dvě samostatné volby, zda do nově generovaných platebních QR kódů vystavených a přijatých dokladů zahrnout datum splatnosti.
+- branding komunikace, logo, barvy, patičky a brandingové profily; také volby vzhledu PDF, jako jsou kompaktní řádky položek, zobrazení autora, rozpis slevy a balení, bankovní spojení v patičce a sloupce a kompaktní zobrazení výkazu práce,
+- dvě samostatné volby, zda do nově generovaných platebních QR kódů vystavených a přijatých dokladů zahrnout datum splatnosti,
+- výchozí hodnoty nových dokladů: splatnost, hodinovou sazbu a zapnutí a text poznámky pod položkami v češtině a angličtině.
+
+Záložka **Výchozí hodnoty dokladů** vyžaduje stejnojmenné oprávnění se zápisem. Změna platí pro nově zakládané doklady a nepřepisuje již uložené koncepty ani vystavené doklady. Neumožňuje měnit měnu, sazbu DPH, ceny s DPH ani zaokrouhlování. Správce může právo samostatně přidělit i odebrat; samotný přístup k nastavení firmy je nenahrazuje.
 
 Firemní šablony otevřete na záložce **E-mailové šablony** v `Nastavení firmy`. U každého typu zprávy a jazyka vidíte, zda se používá vlastní firemní, společná nebo výchozí šablona. Úprava uloží vlastní kopii firmy; volba **Používat společnou šablonu** ji odstraní. Editor nabízí přehled proměnných a náhled na syntetických datech. Seznam typů a pravidla dědění popisuje [§ 96.6](96_Nastaveni.md#966-krok-za-krokem-e-mailove-sablony).
 
-Zápis neotevře původní administrátorskou stránku nastavení ani obecné nastavení dodavatele. Klient proto nemůže měnit obchodní jméno, IČ, DIČ, bankovní účty, číslování dokladů, DPH, účetní režim, integrace, přístupové údaje AI, uživatele ani role. Osobní podpisové profily, osobní trezor certifikátů, nepodporované backendy a systémový `sendmail` zůstávají ve správě administrátora.
+Klient nastavení otevře v `Firma → Nastavení firmy` na příslušné povolené záložce. Nemůže měnit obchodní jméno, IČ, DIČ, bankovní účty, číslování dokladů, DPH, účetní režim, integrace, přístupové údaje AI, uživatele ani role. Volby vzhledu PDF nemění účetní ani daňové údaje. Kontaktní údaje brandingových profilů spravuje na záložce **Branding**. Osobní podpisové profily, osobní trezor certifikátů, nepodporované backendy a systémový `sendmail` zůstávají ve správě administrátora.
 
 SMTP a IMAP hesla se po uložení nikdy nevracejí do prohlížeče, rozhraní ukáže jen informaci, zda je heslo nastavené. Změny i testovací odeslání se zapisují do historie akcí bez tajných hodnot a požadavky podléhají stejnému rate limitu jako ostatní mutace. Všechny operace používají firmu z ověřeného kontextu, ID firmy zaslané v těle požadavku rozsah nerozšíří.
 
@@ -323,7 +332,13 @@ Dashboard účetní i domovská stránka klienta ukazují počet otevřených po
 
 Klient vidí vždy jen požadavky vlastní aktuálně zvolené firmy (stejný princip jako zbytek portálu, viz [§ 9.3](#93-krok-za-krokem-zalozeni-klientskeho-uctu)). Cizí požadavek vrátí 404, ne 403, aby se neprozrazovala ani jeho existence.
 
-Oprávnění **Předávat doklady účetní** patří jen klientským rolím. Oprávnění **Příchozí doklady** je interní a odděluje čtení fronty od jejího zpracování. Přístup k frontě sám nenahrazuje oprávnění vytvořit přijatou fakturu ani použít AI extrakci.
+Oprávnění **Předávat doklady účetní** mají klientské role a správce ho může přidělit i interní roli, například roli „Fakturace a dokumenty“ pro kolegu, který doklady jen předává. Výchozí interní role ho nemají. Oprávnění **Příchozí doklady** je interní a odděluje čtení fronty od jejího zpracování. Přístup k frontě sám nenahrazuje oprávnění vytvořit přijatou fakturu ani použít AI extrakci.
+
+Funkce klientského portálu se interní roli zpřístupňují oprávněními, ne samostatnou obrazovkou. Interní role může dostat:
+
+- **Předávat doklady účetní**: v menu `Dokumenty → Předat doklady účetní` předává originály stejně jako klient a vidí stav podání aktuální firmy. Na požadavky účetní odpovídá v `Dokumenty → Chybějící doklady`; má-li role i interní právo **Požadavky klientovi**, vede tato položka na interní přehled požadavků. Předání nedává přístup k příchozí frontě účetní a e-mailové urgence požadavků chodí dál jen klientům.
+- **Připravená podání DPH, KH a SH**: bez modulu **Daně a výkazy** pracuje role s archivem v `Daně → EPO podání a archív` stejně jako klient, tedy jen s přiznáním k DPH, kontrolním a souhrnným hlášením, jen z přihlášené webové aplikace a bez správy nastavení, důkazů a mazání. Role s modulem **Daně a výkazy** používá plnou agendu výkazů.
+- **Firemní podpisové profily a PDF podpisy**: spravuje firemní podpisové profily v `Firma → Nastavení firmy` ve stejném rozsahu jako klientský správce. Plnou správu podpisů dál dává interní právo **Elektronické podepisování**.
 
 ### 9.11.11 Vlastní doména: pravidla
 

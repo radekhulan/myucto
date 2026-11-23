@@ -32,7 +32,7 @@ final class PaymentWorkflowSourceProof
         $facts = $plan['source'];
         if ($workflow['source_kind'] !== $kind || $facts['amount_cents'] !== $cents || $facts['direction'] !== $direction || $facts['date'] !== $date
             || $ledger['entry']['entry_date'] !== $date || $ledger['entry']['source_type'] !== $kind || $ledger['entry']['source_id'] !== $id || $ledger['entry']['reversed_by'] !== null
-            || PropertyInput::hash(PaymentJournalProof::canonicalLines($ledger['lines'])) !== PropertyInput::hash(PaymentJournalProof::canonicalLines($plan['native']['lines']))) PaymentException::reject('source_clearing_mismatch');
+            || !PaymentJournalProof::matches($ledger['lines'], $plan['native']['lines'])) PaymentException::reject('source_clearing_mismatch');
         $cells = [];
         foreach ($plan['cells'] as $index => $cell) $cells[] = ['key' => $cell['key'], 'amount_cents' => $cell['amount_cents'], 'line' => $ledger['lines'][$index + 1]];
         $receipt = ['version' => 2, 'workflow_id' => (int) $workflow['id'], 'kind' => $kind, 'id' => $id, 'direction' => $direction,

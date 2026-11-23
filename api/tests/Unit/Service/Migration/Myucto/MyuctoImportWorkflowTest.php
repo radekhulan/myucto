@@ -10,6 +10,7 @@ use MyInvoice\Service\Migration\Myucto\MyuctoExportReader;
 use MyInvoice\Service\Migration\Myucto\MyuctoImporter;
 use MyInvoice\Service\Migration\Myucto\MyuctoImportException;
 use MyInvoice\Service\Migration\Myucto\MyuctoImportWorkflow;
+use MyInvoice\Service\Migration\Myucto\MyuctoRowStore;
 use PHPUnit\Framework\TestCase;
 use Slim\Psr7\Factory\StreamFactory;
 
@@ -31,7 +32,7 @@ final class MyuctoImportWorkflowTest extends TestCase
         putenv('MYINVOICE_DATA_DIR=' . $this->dir);
         $this->reader = $this->createStub(MyuctoExportReader::class);
         $this->importer = $this->createMock(MyuctoImporter::class);
-        $this->reader->method('read')->willReturn(['tables' => ['supplier' => [1 => ['company_name' => 'Syntetická firma', 'ic' => '00000000']]]]);
+        $this->reader->method('read')->willReturn(['tables' => MyuctoRowStore::fromArrays(['supplier' => [1 => ['company_name' => 'Syntetická firma', 'ic' => '00000000']]])]);
         $this->workflow = new MyuctoImportWorkflow($this->reader, $this->importer, new Config([]));
     }
 

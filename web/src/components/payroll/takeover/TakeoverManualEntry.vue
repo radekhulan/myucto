@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import DateInput from '@/components/ui/DateInput.vue'
 import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute } from 'vue-router'
@@ -99,6 +100,8 @@ const drafts = ref<DraftRow[]>([])
 const sourceReference = ref('')
 const loading = ref(false)
 const saving = ref(false)
+const prefilling = ref(false)
+const prefillNote = ref('')
 const error = ref('')
 
 const employmentCodes = computed(() => {
@@ -144,6 +147,7 @@ async function loadPeople(): Promise<void> {
 
 async function load(): Promise<void> {
   error.value = ''
+  prefillNote.value = ''
   if (employeeId.value === null) {
     entry.value = null
     drafts.value = []
@@ -231,6 +235,34 @@ async function save(): Promise<void> {
   }
 }
 
+/** Návrh z přijatých hlášení jen vyplní formulář; ukládá až účetní po kontrole. */
+async function fillFromFiledForms(): Promise<void> {
+  if (prefilling.value || employeeId.value === null) return
+  error.value = ''
+  prefilling.value = true
+  try {
+    const suggestion = await payrollTakeoverWagesApi.manualFiledForms(props.year, employeeId.value)
+    for (const row of suggestion.rows) {
+      const index = drafts.value.findIndex(draft => draft.employment_id === row.employment_id && draft.month === row.month)
+      if (index >= 0) drafts.value[index] = toDraft({ ...row, stored: drafts.value[index].stored })
+    }
+    const derived = [...new Set(suggestion.rows.flatMap(row => row.derived))]
+    prefillNote.value = t('payroll.takeover_manual.prefill_done', { count: suggestion.rows.length })
+      + (derived.length > 0
+        ? ' ' + t('payroll.takeover_manual.prefill_derived', {
+          fields: derived.map(field => t(`payroll.takeover_manual.field.${field}`)).join(', '),
+        })
+        : '')
+      + (suggestion.missing_months.length > 0
+        ? ' ' + t('payroll.takeover_manual.prefill_missing', { months: monthRanges(suggestion.missing_months) })
+        : '')
+  } catch (exception) {
+    error.value = apiErrorMessage(exception, t('payroll.takeover_manual.prefill_failed'))
+  } finally {
+    prefilling.value = false
+  }
+}
+
 function employeeFromRoute(): number | null {
   const raw = route?.query.employee
   const value = Number(Array.isArray(raw) ? raw[0] : raw)
@@ -290,6 +322,11 @@ onMounted(async () => {
           class="mt-3 rounded-md bg-warning-50 px-3 py-2 text-xs text-warning-800"
           data-test="takeover-manual-locked"
         >{{ entry.lock_reason }}</p>
+        <p
+          v-else-if="entry.partial_lock_reason"
+          class="mt-3 rounded-md bg-neutral-50 px-3 py-2 text-xs text-neutral-700"
+          data-test="takeover-manual-partial-lock"
+        >{{ t('payroll.takeover_manual.partial_lock', { reason: entry.partial_lock_reason }) }}</p>
 
         <div class="mt-3 overflow-x-auto">
           <table class="min-w-full text-xs">
@@ -346,12 +383,10 @@ onMounted(async () => {
                     >
                   </td>
                   <td v-if="group.key === 'wage'" class="px-1 py-1">
-                    <input
+                    <DateInput
                       v-model="draft.payout_date"
-                      type="date"
                       :disabled="!canWrite || entry.locked || saving"
-                      class="w-36 rounded-md border border-neutral-300 bg-surface px-2 py-1 disabled:bg-neutral-100"
-                    >
+                      class="w-36 rounded-md border border-neutral-300 bg-surface px-2 py-1 disabled:bg-neutral-100" />
                   </td>
                 </template>
                 <td class="px-1 py-1 text-center">
@@ -401,6 +436,11 @@ onMounted(async () => {
         </label>
 
         <p
+          v-if="prefillNote"
+          class="mt-3 rounded-md bg-neutral-50 px-3 py-2 text-xs text-neutral-700"
+          data-test="takeover-manual-prefill-note"
+        >{{ prefillNote }}</p>
+        <p
           v-if="error"
           class="mt-3 rounded-md border border-danger-500/30 bg-danger-50 p-2 text-xs text-danger-700"
           role="alert"
@@ -408,6 +448,17 @@ onMounted(async () => {
         >{{ error }}</p>
 
         <div v-if="canWrite && !entry.locked" class="mt-3 flex flex-wrap justify-end gap-2">
+          <button
+            type="button"
+            :class="[btnOutline('primary'), 'whitespace-nowrap']"
+            :disabled="saving || prefilling"
+            :title="t('payroll.takeover_manual.prefill_hint')"
+            data-test="takeover-manual-prefill"
+            @click="fillFromFiledForms"
+          >
+            <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.doc" /></svg>
+            {{ t('payroll.takeover_manual.prefill') }}
+          </button>
           <button type="button" :class="[btnOutline('neutral'), 'whitespace-nowrap']" :disabled="saving" @click="load">
             <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.cycle" /></svg>
             {{ t('common.cancel') }}

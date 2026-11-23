@@ -112,12 +112,12 @@ function accountName(code: string | null): string {
 
 <template>
   <div>
-    <div class="flex items-center justify-between mb-4">
+    <div class="flex items-center justify-between mb-4 max-md:flex-wrap max-md:gap-3">
       <div v-if="!embedded">
         <h1 class="text-2xl font-semibold">{{ t('accounting.posting_rules.title') }}</h1>
         <p class="text-sm text-neutral-500 mt-0.5">{{ t('accounting.posting_rules.subtitle') }}</p>
       </div>
-      <div class="flex items-center gap-2">
+      <div class="flex items-center gap-2 max-md:flex-wrap">
         <button @click="codebookTransferApi.download('posting-rules')" :class="btnOutline('primary')">
           <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.download" /></svg>
           {{ t('codebookTransfer.export') }}

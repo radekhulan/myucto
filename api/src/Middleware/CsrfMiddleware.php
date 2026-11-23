@@ -33,6 +33,8 @@ final class CsrfMiddleware implements MiddlewareInterface
         '/api/auth/setup-crpdph-lookup',
         // setup-sample je auth + má CSRF token (po auto-loginu)
         '/api/auth/login',
+        // Bez session a bez cookies; místo CAPTCHA zámek pokusů a limity (PasswordTokenAction).
+        '/api/auth/password-token',
         '/api/auth/webauthn/login/options',
         '/api/auth/webauthn/login/verify',
         '/api/auth/domain-login/start',
@@ -92,6 +94,25 @@ final class CsrfMiddleware implements MiddlewareInterface
         // Bez téhle výjimky odpoví instalace 403 `origin_mismatch` a licenci
         // nepřevezme — zaplacená instalace pak běží na zkušební období.
         if ($path === '/api/managed/license') {
+            return $handler->handle($request);
+        }
+
+        // Návrat přihlášení od Apple: prohlížeč ho POSTuje z appleid.apple.com
+        // (response_mode=form_post), Origin je tedy cizí z principu. Akce nic
+        // nemění a jen přesměruje na GET návrat, kde se ověří state i vazba
+        // na prohlížeč (OidcAction::formCallback).
+        if ($path === '/api/auth/oidc/apple/callback' && $method === 'POST') {
+            return $handler->handle($request);
+        }
+
+        // Výměna hesla za API token z nativní aplikace: bez prohlížeče, tedy bez
+        // Origin, Refereru i cookies, a nic z toho, co kontrola originu chrání
+        // (session prohlížeče), nepoužívá. Prohlížeč Origin u POST posílá vždy,
+        // takže požadavek vyvolaný cizím webem kontrolou dál projde jen se
+        // shodným originem. Hádání hesel brzdí zámek pokusů a limity v akci.
+        if ($path === '/api/auth/password-token' && $method === 'POST'
+            && $request->getHeaderLine('Origin') === ''
+        ) {
             return $handler->handle($request);
         }
 

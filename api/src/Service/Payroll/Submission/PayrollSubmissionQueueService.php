@@ -59,6 +59,7 @@ final class PayrollSubmissionQueueService
         private readonly HealthInsuranceIsdsSubmissionService $healthIsds,
         private readonly CsszFormVrepTransportService $csszForms,
         private readonly PayrollSigningProfileRepository $signingProfiles,
+        private readonly PayrollObligationSubjectResolver $subjects,
     ) {}
 
     /**
@@ -94,20 +95,14 @@ final class PayrollSubmissionQueueService
             $environment,
             $submissionIds,
         );
-        $names = $this->repository->employmentNames(
-            $supplierId,
-            array_values(array_filter(array_map(
-                static fn (array $item): int => self::employmentIdIn(
-                    (string) $item['subject_reference'],
-                ) ?? 0,
-                $items,
-            ))),
-        );
+        // Stejný popis předmětu jako v přehledu, inboxu a detailu podání,
+        // včetně vztahu, který už v evidenci není.
+        $subjects = $this->subjects->resolve($supplierId, $items);
 
         $summary = ['total' => $page['total'], 'ready' => 0, 'blocked' => 0, 'overdue' => 0];
         $signingReady = $this->signingProfileReady($supplierId, $environment);
         $decorated = [];
-        foreach ($items as $item) {
+        foreach ($items as $index => $item) {
             $submissionId = (int) $item['submission_id'];
             $capability = $this->capabilities->forAgenda(
                 (string) $item['agenda_code'],
@@ -143,11 +138,8 @@ final class PayrollSubmissionQueueService
                 'dispatchable' => $blockedReason === null,
                 'blocked_reason' => $blockedReason,
             ];
-            $item['subject_label'] = $this->subjectLabel($item, $names);
-            $subjectEmploymentId = self::employmentIdIn((string) $item['subject_reference']);
-            $item['subject_employee_id'] = $subjectEmploymentId === null
-                ? null
-                : ($names[$subjectEmploymentId]['employee_id'] ?? null);
+            $item['subject_label'] = $subjects[$index]['subject_label'];
+            $item['subject_employee_id'] = $subjects[$index]['subject_employee_id'];
             $item['blocking_issue_count'] = $issueCounts[$submissionId] ?? 0;
             $decorated[] = $item;
         }
@@ -567,41 +559,6 @@ final class PayrollSubmissionQueueService
                 . ' Přílohu si stáhněte a odešlete ze své schránky; doručenku'
                 . ' pak nahrajte zpátky k podání.',
         };
-    }
-
-    /**
-     * @param array<string,mixed> $row
-     * @param array<int,array{full_name:string,employee_id:int}> $employmentNames
-     */
-    private function subjectLabel(array $row, array $employmentNames): ?string
-    {
-        $reference = (string) $row['subject_reference'];
-        $employmentId = self::employmentIdIn($reference);
-        if ($employmentId !== null && isset($employmentNames[$employmentId])) {
-            return $employmentNames[$employmentId]['full_name'];
-        }
-
-        // Zbytek (účtárna, pojišťovna) umí sdílený formátovač; kde nezná
-        // odpověď, vrací `null` a fronta radši neukáže nic než syrové ID.
-        return PayrollObligationSubjectFormatter::humanSubject(
-            (string) $row['agenda_code'],
-            $reference,
-        );
-    }
-
-    private static function employmentIdIn(string $subjectReference): ?int
-    {
-        // Registrace, OZUSPOJ a dávky nemocenského vedou vztah jako
-        // `payroll_employment:{id}`, ELDP a ZP jako `employment:{id}`.
-        if (preg_match(
-            '/^(?:payroll_)?employment:([1-9][0-9]*)$/D',
-            $subjectReference,
-            $matches,
-        ) !== 1) {
-            return null;
-        }
-
-        return (int) $matches[1];
     }
 
     /**

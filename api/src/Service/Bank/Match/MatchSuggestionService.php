@@ -6,6 +6,7 @@ namespace MyInvoice\Service\Bank\Match;
 
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Infrastructure\Database\TransactionFailure;
+use MyInvoice\Service\Accounting\PostingException;
 use MyInvoice\Service\Bank\BankNoticeLifecycle;
 use MyInvoice\Service\Bank\BankTransactionContext;
 use MyInvoice\Service\Bank\AccountNumberNormalizer;
@@ -230,7 +231,8 @@ final class MatchSuggestionService
             return $result;
         } catch (\Throwable $e) {
             if ($pdo->inTransaction()) $pdo->rollBack();
-            if ($e instanceof \MyInvoice\Service\Accounting\PostingException && $e->errorCode === 'property_payment_source_immutable') {
+            if ($e instanceof PostingException
+                && in_array($e->errorCode, ['property_payment_source_immutable', 'nonprofit_membership_payment_in_use'], true)) {
                 throw new MatchSuggestionException($e->errorCode, $e->getMessage(), $e->httpStatus);
             }
             throw $e;

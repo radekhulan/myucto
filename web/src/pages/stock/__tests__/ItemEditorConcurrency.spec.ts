@@ -15,6 +15,8 @@ const m = vi.hoisted(() => ({
   replaceItemPackaging: vi.fn(),
   getCustomerPrices: vi.fn(),
   replaceCustomerPrices: vi.fn(),
+  listTrackingUnits: vi.fn(),
+  updateTrackingUnit: vi.fn(),
   toastSuccess: vi.fn(),
   toastError: vi.fn(),
 }))
@@ -45,6 +47,8 @@ vi.mock('@/api/stock', () => ({
     replaceItemPackaging: m.replaceItemPackaging,
     getCustomerPrices: m.getCustomerPrices,
     replaceCustomerPrices: m.replaceCustomerPrices,
+    listTrackingUnits: m.listTrackingUnits,
+    updateTrackingUnit: m.updateTrackingUnit,
   },
 }))
 
@@ -93,6 +97,7 @@ vi.mock('vue-i18n', async (importOriginal) => ({
 }))
 
 import ItemEditor from '../ItemEditor.vue'
+import DateInput from '@/components/ui/DateInput.vue'
 
 const product = {
   id: 42,
@@ -552,5 +557,61 @@ describe('ItemEditor připravené jazyky a měny', () => {
         intrastat_supplementary_unit_coefficient: 2.5,
       }),
     }))
+  })
+})
+
+describe('ItemEditor šarže karty', () => {
+  const lotPage = { data: [{ id: 7, lot_code: 'L-B', expires_on: '2027-01-31' }], meta: { total: 1, page: 1, per_page: 50, pages: 1 } }
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mockItemExtras()
+    m.getProduct.mockResolvedValue({ ...product, tracking_mode: 'lot' })
+    m.getPrices.mockResolvedValue([price])
+    m.getPromoPrices.mockResolvedValue([])
+    m.getVendors.mockResolvedValue([])
+    m.saveProductEditor.mockResolvedValue({ ...product, tracking_mode: 'lot', row_version: 8 })
+    m.listCurrencies.mockResolvedValue([currency(1, 'CZK', true)])
+    m.listLocales.mockResolvedValue([])
+  })
+
+  it('když se šarže nenačtou, ukáže chybu s tlačítkem Zkusit znovu místo skryté sekce', async () => {
+    m.listTrackingUnits.mockRejectedValueOnce(new Error('lots unavailable')).mockResolvedValue(lotPage)
+    const wrapper = shallowMount(ItemEditor)
+    await flushPromises()
+
+    expect(wrapper.find('[data-test="lots-section"]').exists()).toBe(true)
+    expect(wrapper.find('[data-test="lots-load-error"]').text()).toContain('stock.tracking.lots_load_error')
+    expect(wrapper.findAll('[data-test="lot-row"]')).toHaveLength(0)
+
+    await wrapper.find('[data-test="lots-retry"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('[data-test="lots-load-error"]').exists()).toBe(false)
+    expect(wrapper.findAll('[data-test="lot-row"]')).toHaveLength(1)
+  })
+
+  it('štítky patří k polím a odmítnutá šarže označí kód i datum spotřeby', async () => {
+    m.listTrackingUnits.mockResolvedValue(lotPage)
+    m.updateTrackingUnit.mockRejectedValue(new Error('conflict'))
+    const wrapper = shallowMount(ItemEditor)
+    await flushPromises()
+
+    const row = wrapper.find('[data-test="lot-row"]')
+    const code = row.find('input[data-test="lot-code"]')
+    const labels = row.findAll('label')
+    expect(labels).toHaveLength(2)
+    expect(labels[0]!.attributes('for')).toBe(code.attributes('id'))
+    const date = row.findComponent(DateInput)
+    expect(labels[1]!.attributes('for')).toBe(date.props('inputId'))
+    expect(date.props('invalid')).toBe(false)
+
+    await code.setValue('L-A')
+    await wrapper.find('form').trigger('submit')
+    await flushPromises()
+
+    const failed = wrapper.find('[data-test="lot-row"]')
+    expect(failed.find('[data-test="lot-error"]').text()).toBe('load failed')
+    expect(failed.findComponent(DateInput).props('invalid')).toBe(true)
+    expect(failed.find('input[data-test="lot-code"]').attributes('aria-invalid')).toBe('true')
   })
 })

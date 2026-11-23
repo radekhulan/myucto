@@ -9,6 +9,7 @@ use MyInvoice\Repository\CarRepository;
 use MyInvoice\Repository\CashDocumentRepository;
 use MyInvoice\Repository\FuelingRepository;
 use MyInvoice\Service\Bank\Card\CardNumberMask;
+use MyInvoice\Service\Invoice\UnitPricePrecision;
 use MyInvoice\Service\Logbook\Fuel\FuelKeywords;
 use MyInvoice\Service\Logbook\Fuel\FuelReceiptTextParser;
 use PDO;
@@ -203,7 +204,7 @@ final class CashFuelingService
         $quantity = $parsed['quantity'];
         $unitPrice = $parsed['unit_price'];
         if ($quantity !== null && $quantity > 0 && $unitPrice === null) {
-            $unitPrice = round($amount / $quantity, 4);
+            $unitPrice = UnitPricePrecision::normalize($amount / $quantity);
         } elseif ($unitPrice !== null && $unitPrice > 0 && $quantity === null) {
             $quantity = round($amount / $unitPrice, 3);
         }

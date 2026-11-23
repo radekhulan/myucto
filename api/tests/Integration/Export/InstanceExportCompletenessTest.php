@@ -143,6 +143,9 @@ final class InstanceExportCompletenessTest extends TestCase
         $this->pdo->exec("INSERT INTO bank_statements (id,supplier_id,statement_date,file_name,file_content) VALUES (91,7,'2020-01-01','synthetic.gpc','synthetic-bank-source')");
         $this->file('archives/sup-7/archive-2020.zip', 'synthetic-accounting-archive');
         $this->file('archives/sup-8/foreign.zip', 'foreign-archive');
+        $this->file('offers/sup-7/quote-5/v10-synthetic.pdf', '%PDF-archive');
+        $this->file('offers/sup-7/quote-5/.tmp-archive-1.tmp', 'temporary-archive');
+        $this->file('offers/sup-8/quote-5/v10-foreign.pdf', '%PDF-foreign');
         $this->file('supplier-logos/sup-7.svg', '<svg>synthetic</svg>');
         $this->pdo->beginTransaction();
         $result = $this->service()->runForSupplier(7, [InstanceExportService::PART_RESTORE], '2026-01-01', '2026-12-31', $this->temp);
@@ -162,6 +165,9 @@ final class InstanceExportCompletenessTest extends TestCase
         self::assertContains('archives/sup-7/archive-2020.zip', $paths);
         self::assertContains('supplier-logos/sup-7.svg', $paths);
         self::assertNotContains('archives/sup-8/foreign.zip', $paths);
+        self::assertContains('offers/sup-7/quote-5/v10-synthetic.pdf', $paths);
+        self::assertNotContains('offers/sup-7/quote-5/.tmp-archive-1.tmp', $paths);
+        self::assertNotContains('offers/sup-8/quote-5/v10-foreign.pdf', $paths);
         self::assertSame('synthetic-accounting-archive', $zip->getFromName('prilohy/ucetni-archivy/archive-2020.zip'));
         $zip->close();
     }

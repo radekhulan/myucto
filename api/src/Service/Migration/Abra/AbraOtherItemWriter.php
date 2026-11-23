@@ -17,8 +17,9 @@ use PDO;
  * účtování). Doklad, jehož zápis nemění účty (třeba splátkový kalendář 379/379), nebo
  * doklad minulého roku, který je v deníku jen počátečním stavem, se převede jako potvrzený
  * bez vlastního zápisu: v agendě je vidět a páruje úhrady, ale znovu se neúčtuje.
- * Předpisy mezd, odvodů a DPH ({@see MigratedOtherItemPolicy::moduleOwned()}) zůstávají
- * jen v deníku, stejně jako u převodu z POHODY.
+ * Mzdové závazky (331, 336, 342) se převádějí stejně jako ostatní, převedená firma mzdy
+ * v MyÚčtu nepočítá. Předpisy DPH a záloh na daň ({@see MigratedOtherItemPolicy::moduleOwned()})
+ * zůstávají jen v deníku, stejně jako u převodu z POHODY.
  */
 final class AbraOtherItemWriter
 {
@@ -30,7 +31,7 @@ final class AbraOtherItemWriter
     public function __construct(private readonly Connection $db) {}
 
     /**
-     * Kam patří doklad: faktura (`document`), ostatní položka, předpis modulu mezd a daní
+     * Kam patří doklad: faktura (`document`), ostatní položka, předpis daňového modulu
      * (`module`), nebo jen deník s upozorněním (`review`). Závazek s DPH zůstává přijatou
      * fakturou, pohledávka s DPH se nepřevádí.
      *

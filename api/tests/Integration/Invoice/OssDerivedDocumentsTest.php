@@ -90,10 +90,12 @@ final class OssDerivedDocumentsTest extends TestCase
         }
 
         // Daňový doklad k přijaté platbě vystavuje jen plátce — vynutit a v tearDown vrátit.
-        $flags = $pdo->prepare('SELECT is_vat_payer, is_identified FROM supplier WHERE id = ?');
+        // Zálohy tu hradí ruční úhrada, kterou podvojné účetnictví vyúčtovat nedovolí
+        // (advance_receipt_not_posted); OSS profil dokladů na formě účetnictví nezávisí.
+        $flags = $pdo->prepare('SELECT is_vat_payer, is_identified, accounting_mode FROM supplier WHERE id = ?');
         $flags->execute([$this->supplierId]);
         $this->origVatFlags = $flags->fetch(PDO::FETCH_ASSOC) ?: [];
-        $pdo->prepare('UPDATE supplier SET is_vat_payer = 1, is_identified = 0 WHERE id = ?')
+        $pdo->prepare("UPDATE supplier SET is_vat_payer = 1, is_identified = 0, accounting_mode = 'tax_evidence' WHERE id = ?")
             ->execute([$this->supplierId]);
 
         $this->currencyId = $this->currency();
@@ -109,9 +111,10 @@ final class OssDerivedDocumentsTest extends TestCase
         $pdo = $this->db->pdo();
 
         if ($this->origVatFlags !== null && $this->supplierId > 0) {
-            $pdo->prepare('UPDATE supplier SET is_vat_payer = ?, is_identified = ? WHERE id = ?')->execute([
+            $pdo->prepare('UPDATE supplier SET is_vat_payer = ?, is_identified = ?, accounting_mode = ? WHERE id = ?')->execute([
                 (int) ($this->origVatFlags['is_vat_payer'] ?? 1),
                 (int) ($this->origVatFlags['is_identified'] ?? 0),
+                (string) ($this->origVatFlags['accounting_mode'] ?? 'double_entry'),
                 $this->supplierId,
             ]);
         }

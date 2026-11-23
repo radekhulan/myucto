@@ -8,6 +8,7 @@ use MyInvoice\Repository\Payroll\JmhzDeferralRepository;
 use MyInvoice\Repository\Payroll\PayrollPeopleRepository;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
 use MyInvoice\Service\Payroll\Submission\PayrollSubmissionCalendar;
+use MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationChangeSettlement;
 use Psr\Clock\ClockInterface;
 
 /**
@@ -32,11 +33,15 @@ use Psr\Clock\ClockInterface;
  *  4. Po zmrazení řádného hlášení se odložení nemění. Co hlášení vynechalo,
  *     doplní opravné.
  *  5. Rozhodnutí je vázané na revizi běhu a přípravu, nad kterou vzniklo; nová
- *     revize (přepočet) znamená nová data a nové rozhodnutí.
+ *     revize (přepočet) znamená nová data. Odložení, které řádné hlášení ještě
+ *     nevynechalo, lze převzít do nové revize, pokud jeho důvod trvá.
  */
 final readonly class JmhzDeferralService
 {
     private const REGULAR_DONE = ['accepted', 'partially_accepted'];
+
+    /** Důvod odložení: čerstvě přijatá změna údajů zaměstnance (48 h). */
+    public const SETTLING_CODE = 'jmhz_registration_change_settling';
 
     /** Stav odložení pro UI; páruje ho `PayrollEnumContractTest`. */
     public const STATES = ['pending', 'omitted', 'to_complete', 'completing', 'completed', 'revoked', 'stale'];
@@ -49,6 +54,7 @@ final readonly class JmhzDeferralService
         private PayrollPeopleRepository $people,
         private JmhzDeadlinePolicy $deadlines,
         private ClockInterface $clock,
+        private ?PayrollRegistrationChangeSettlement $settlement = null,
     ) {}
 
     /**
@@ -95,9 +101,27 @@ final readonly class JmhzDeferralService
             static fn (array $item): bool => !in_array($item['state'], ['revoked', 'completed', 'stale'], true),
         );
 
+        $currentEmployments = [];
+        foreach ($rows as $row) {
+            if ($row['status'] === 'active' && $row['source_revision_id'] === $currentRevisionId) {
+                $currentEmployments[$row['employment_id']] = true;
+            }
+        }
+        $completable = count(array_filter(
+            $items,
+            static fn (array $item): bool => $item['state'] === 'to_complete',
+        ));
+
         return [
             'environment' => $environment,
             'run_id' => $scope['run_id'],
+            'carry_over_count' => count(array_filter(
+                $items,
+                static fn (array $item): bool => $item['state'] === 'stale' && $item['status'] === 'active'
+                    && $item['regular_submission_id'] === null
+                    && !isset($currentEmployments[$item['employment_id']]),
+            )),
+            'completable_count' => $completable,
             'period_start' => $scope['period_start'],
             'due_on' => $window->dueOn,
             'overdue' => $open !== [] && $today > $window->dueOn,
@@ -122,13 +146,79 @@ final readonly class JmhzDeferralService
         int $userId,
         ?int $officeId = null,
     ): array {
-        self::assertEnvironment($environment);
-        $reason = self::reason($reason);
-        if ($employmentId <= 0 || $userId <= 0) {
+        if ($employmentId <= 0) {
             throw new \InvalidArgumentException('Pracovní vztah a uživatel musí být kladná čísla.');
         }
+        $result = $this->deferMany(
+            $supplierId,
+            $environment,
+            $preparationId,
+            [$employmentId],
+            $reason,
+            $userId,
+            $officeId,
+        );
+        $person = $result['people'][0];
+
+        return [
+            'created' => $result['created'],
+            'deferral_ids' => $result['deferral_ids'],
+            'employee_id' => $person['employee_id'],
+            'employment_ids' => $person['employment_ids'],
+            'office_id' => $person['office_id'],
+            'source_revision_id' => $result['source_revision_id'],
+            'blocker_codes' => $person['blocker_codes'],
+        ];
+    }
+
+    /**
+     * Odloží jedním rozhodnutím všechny dotčené osoby přípravy: každou osobu,
+     * jejíž vztah nese nález, kvůli kterému lze odložit (`$employmentIds`
+     * = `null`), nebo jen osoby zadaných vztahů. Jeden důvod platí pro všechny.
+     *
+     * Nález firemní (účtárna, pojistná část) se tím neodstraní; řádné hlášení
+     * pak dál zastaví, ale odložení osob zůstane.
+     *
+     * @param list<int>|null $employmentIds
+     * @return array{
+     *   created:bool,deferral_ids:list<int>,source_revision_id:int,
+     *   employment_ids:list<int>,people:list<array{employee_id:int,office_id:?int,employment_ids:list<int>,blocker_codes:list<string>}>,
+     *   firm_blocker_count:int
+     * }
+     */
+    public function deferMany(
+        int $supplierId,
+        string $environment,
+        int $preparationId,
+        ?array $employmentIds,
+        string $reason,
+        int $userId,
+        ?int $officeId = null,
+    ): array {
+        self::assertEnvironment($environment);
+        $reason = self::reason($reason);
+        if ($userId <= 0) {
+            throw new \InvalidArgumentException('Pracovní vztah a uživatel musí být kladná čísla.');
+        }
+        if ($employmentIds !== null) {
+            foreach ($employmentIds as $id) {
+                if (!is_int($id) || $id <= 0) {
+                    throw new \InvalidArgumentException('Pracovní vztahy musí být kladná čísla.');
+                }
+            }
+        }
         $preparation = $this->preparations->loadVerified($supplierId, $environment, $preparationId);
-        $cluster = self::cluster($preparation, $employmentId);
+        $index = self::employmentIndex($preparation);
+        if ($employmentIds !== null) {
+            foreach ($employmentIds as $id) {
+                if (!isset($index[$id])) {
+                    throw new JmhzXmlException(
+                        'jmhz_deferral_employment_unknown',
+                        'Pracovní vztah v přípravě hlášení není.',
+                    );
+                }
+            }
+        }
         $resolution = $this->documents->resolve(
             $supplierId,
             $environment,
@@ -137,100 +227,161 @@ final readonly class JmhzDeferralService
             JmhzFormExclusion::correctionScope([]),
         );
         $codes = [];
+        $firmBlockers = 0;
         foreach ($resolution->blockers as $blocker) {
             if (!$blocker->deferrable()) {
+                $firmBlockers++;
                 continue;
             }
-            if (($blocker->entityType === 'employment'
-                    && in_array($blocker->entityId, $cluster['employment_ids'], true))
-                || (in_array($blocker->entityType, ['person', 'employee'], true)
-                    && $blocker->entityId === $cluster['employee_id'])
-            ) {
-                $codes[$blocker->code] = true;
+            foreach ($index as $employmentId => $row) {
+                if (($blocker->entityType === 'employment' && $blocker->entityId === $employmentId)
+                    || (in_array($blocker->entityType, ['person', 'employee'], true)
+                        && $blocker->entityId === $row['employee_id'])
+                ) {
+                    $codes[self::clusterKey($row)][$blocker->code] = true;
+                }
             }
         }
-        if ($codes === []) {
+        foreach ($this->settlingEmployments($supplierId, $environment, array_keys($index)) as $employmentId) {
+            if (isset($index[$employmentId])) {
+                $codes[self::clusterKey($index[$employmentId])][self::SETTLING_CODE] = true;
+            }
+        }
+        $clusters = [];
+        foreach ($index as $employmentId => $row) {
+            if ($officeId !== null && $row['office_id'] !== $officeId) {
+                continue;
+            }
+            $key = self::clusterKey($row);
+            $clusters[$key] ??= [
+                'employee_id' => $row['employee_id'],
+                'office_id' => $row['office_id'],
+                'employment_ids' => [],
+                'requested' => $employmentIds === null,
+            ];
+            $clusters[$key]['employment_ids'][] = $employmentId;
+            if ($employmentIds !== null && in_array($employmentId, $employmentIds, true)) {
+                $clusters[$key]['requested'] = true;
+            }
+        }
+        $selected = [];
+        foreach ($clusters as $key => $cluster) {
+            if (!$cluster['requested'] || !isset($codes[$key])) {
+                continue;
+            }
+            $clusterCodes = array_keys($codes[$key]);
+            sort($clusterCodes, SORT_STRING);
+            sort($cluster['employment_ids'], SORT_NUMERIC);
+            $selected[] = [
+                'employee_id' => $cluster['employee_id'],
+                'office_id' => $cluster['office_id'],
+                'employment_ids' => $cluster['employment_ids'],
+                'blocker_codes' => $clusterCodes,
+            ];
+        }
+        if ($selected === []) {
             throw new JmhzXmlException(
                 'jmhz_deferral_not_blocked',
-                'Vztah v přípravě nemá žádný nález, který by bránil podání - podá se'
-                    . ' v řádném hlášení a odkládat ho není důvod.',
+                $employmentIds !== null && count($employmentIds) === 1
+                    ? 'Vztah v přípravě nemá žádný nález, který by bránil podání - podá se'
+                        . ' v řádném hlášení a odkládat ho není důvod.'
+                    : 'V přípravě není žádný vztah s nálezem, který by šlo odložit. Zbývající'
+                        . ' nálezy jsou firemní a opravují se v nastavení mezd.',
             );
         }
-        $codes = array_keys($codes);
-        sort($codes, SORT_STRING);
+        $officeEmployments = [];
+        foreach ($index as $employmentId => $row) {
+            $officeEmployments[(string) $row['office_id']][] = $employmentId;
+        }
 
         return $this->repository->transaction(function () use (
             $supplierId,
             $environment,
             $preparation,
-            $cluster,
-            $codes,
+            $selected,
+            $officeEmployments,
             $reason,
             $userId,
+            $firmBlockers,
         ): array {
-            $live = $this->repository->liveRegularSubmission(
-                $supplierId,
-                'production',
-                $preparation->runId,
-                $cluster['office_id'],
-                $preparation->periodStart,
-            );
-            if ($live !== null) {
-                throw new JmhzXmlException(
-                    'jmhz_deferral_regular_frozen',
-                    'Řádné hlášení za toto období je už zmrazené, odložení se do něj'
-                        . ' nepromítne. Vztah doplňte opravným hlášením.',
-                );
+            $byOffice = [];
+            foreach ($selected as $cluster) {
+                $byOffice[(string) $cluster['office_id']][] = $cluster;
             }
             $active = $this->repository->activeForRevision($supplierId, $preparation->sourceRevisionId, true);
-            $activeEmployments = [];
-            foreach ($active as $row) {
-                if ($row['office_id'] === $cluster['office_id']) {
-                    $activeEmployments[$row['employment_id']] = $row;
-                }
-            }
-            $remaining = array_diff(
-                $cluster['office_employment_ids'],
-                array_keys($activeEmployments),
-                $cluster['employment_ids'],
-            );
-            if ($remaining === []) {
-                throw new JmhzXmlException(
-                    'jmhz_deferral_no_form_left',
-                    'Odložením by v hlášení za registraci nezůstal žádný formulář.'
-                        . ' Hlášení podejte až po doplnění dat.',
-                );
-            }
             $created = [];
-            foreach ($cluster['employment_ids'] as $employmentId) {
-                if (isset($activeEmployments[$employmentId])) {
-                    continue;
+            $deferred = [];
+            foreach ($byOffice as $officeKey => $clusters) {
+                $office = $officeKey === '' ? null : (int) $officeKey;
+                $live = $this->repository->liveRegularSubmission(
+                    $supplierId,
+                    'production',
+                    $preparation->runId,
+                    $office,
+                    $preparation->periodStart,
+                );
+                if ($live !== null) {
+                    throw new JmhzXmlException(
+                        'jmhz_deferral_regular_frozen',
+                        'Řádné hlášení za toto období je už zmrazené, odložení se do něj'
+                            . ' nepromítne. Vztah doplňte opravným hlášením.',
+                    );
                 }
-                $created[] = $this->repository->insert([
-                    'supplier_id' => $supplierId,
-                    'run_id' => $preparation->runId,
-                    'source_revision_id' => $preparation->sourceRevisionId,
-                    'period_start' => $preparation->periodStart,
-                    'office_id' => $cluster['office_id'],
-                    'employee_id' => $cluster['employee_id'],
-                    'employment_id' => $employmentId,
-                    'reason' => $reason,
-                    'blocker_codes_json' => CanonicalJson::encode($codes),
-                    'decided_environment' => $environment,
-                    'decided_preparation_id' => $preparation->id,
-                    'decided_snapshot_fingerprint' => $preparation->snapshotFingerprint,
-                    'created_by' => $userId,
-                ]);
+                $activeEmployments = [];
+                foreach ($active as $row) {
+                    if ($row['office_id'] === $office) {
+                        $activeEmployments[$row['employment_id']] = $row;
+                    }
+                }
+                $remaining = array_diff(
+                    $officeEmployments[$officeKey] ?? [],
+                    array_keys($activeEmployments),
+                    ...array_map(static fn (array $cluster): array => $cluster['employment_ids'], $clusters),
+                );
+                if ($remaining === []) {
+                    throw new JmhzXmlException(
+                        'jmhz_deferral_no_form_left',
+                        'Odložením by v hlášení za registraci nezůstal žádný formulář.'
+                            . ' Hlášení podejte až po doplnění dat.',
+                    );
+                }
+                foreach ($clusters as $cluster) {
+                    foreach ($cluster['employment_ids'] as $employmentId) {
+                        if (isset($activeEmployments[$employmentId])) {
+                            continue;
+                        }
+                        $created[] = $this->repository->insert([
+                            'supplier_id' => $supplierId,
+                            'run_id' => $preparation->runId,
+                            'source_revision_id' => $preparation->sourceRevisionId,
+                            'period_start' => $preparation->periodStart,
+                            'office_id' => $cluster['office_id'],
+                            'employee_id' => $cluster['employee_id'],
+                            'employment_id' => $employmentId,
+                            'reason' => $reason,
+                            'blocker_codes_json' => CanonicalJson::encode($cluster['blocker_codes']),
+                            'decided_environment' => $environment,
+                            'decided_preparation_id' => $preparation->id,
+                            'decided_snapshot_fingerprint' => $preparation->snapshotFingerprint,
+                            'created_by' => $userId,
+                        ]);
+                    }
+                    $deferred[] = $cluster;
+                }
             }
+            $employmentIds = array_merge(...array_map(
+                static fn (array $cluster): array => $cluster['employment_ids'],
+                $deferred,
+            ));
+            sort($employmentIds, SORT_NUMERIC);
 
             return [
                 'created' => $created !== [],
                 'deferral_ids' => $created,
-                'employee_id' => $cluster['employee_id'],
-                'employment_ids' => $cluster['employment_ids'],
-                'office_id' => $cluster['office_id'],
                 'source_revision_id' => $preparation->sourceRevisionId,
-                'blocker_codes' => $codes,
+                'employment_ids' => $employmentIds,
+                'people' => $deferred,
+                'firm_blocker_count' => $firmBlockers,
             ];
         });
     }
@@ -446,6 +597,258 @@ final readonly class JmhzDeferralService
     }
 
     /**
+     * Doplní všechny odložené vztahy běhu, jejichž řádné hlášení ČSSZ přijala,
+     * jedním opravným hlášením za každé řádné hlášení (registraci).
+     *
+     * Vztah, který zatím doplnit nejde (údaj stále chybí), opravu nezastaví:
+     * zůstane odložený a vrátí se v `still_blocked_employment_ids`.
+     *
+     * @return array{submissions:list<array<string,mixed>>,completed_employment_ids:list<int>,still_blocked_employment_ids:list<int>,preparation_id:int}
+     */
+    public function completeAll(
+        int $supplierId,
+        int $revisionId,
+        string $environment,
+        int $userId,
+    ): array {
+        self::assertEnvironment($environment);
+        if ($userId <= 0) {
+            throw new \InvalidArgumentException('Opravné hlášení může připravit jen přihlášený uživatel.');
+        }
+        $scope = $this->repository->revisionScope($supplierId, $revisionId);
+        if ($scope === null) {
+            throw new \DomainException('Mzdová revize nebyla nalezena.');
+        }
+        $rows = array_values(array_filter(
+            $this->repository->forRun($supplierId, $scope['run_id'], $scope['period_start']),
+            static fn (array $row): bool => $row['status'] === 'active',
+        ));
+        $groups = [];
+        foreach ($this->repository->bindings(
+            $supplierId,
+            array_map(static fn (array $row): int => $row['id'], $rows),
+        ) as $binding) {
+            if ($binding['environment'] !== $environment
+                || !in_array($binding['regular_status'], self::REGULAR_DONE, true)
+            ) {
+                continue;
+            }
+            $groups[$binding['regular_submission_id']] = true;
+        }
+        if ($groups === []) {
+            throw new JmhzXmlException(
+                'jmhz_deferral_nothing_to_complete',
+                'Žádný odložený vztah nečeká na doplnění. Opravné hlášení lze navázat'
+                    . ' až na přijaté nebo částečně přijaté řádné hlášení.',
+            );
+        }
+        $currentRevisionId = $this->repository->currentApprovedRevisionId($supplierId, $scope['run_id']);
+        if ($currentRevisionId === null) {
+            throw new JmhzXmlException(
+                'jmhz_deferral_revision_missing',
+                'Mzdový běh nemá schválenou revizi, ze které by šlo hlášení připravit.',
+            );
+        }
+        $preparation = $this->preparations->freeze(
+            $supplierId,
+            $currentRevisionId,
+            $environment,
+            'jmhz-deferral-complete-all:' . $scope['run_id'] . ':' . bin2hex(random_bytes(12)),
+            $userId,
+        );
+        $preparationId = (int) $preparation['id'];
+        $submissions = [];
+        $completed = [];
+        $blocked = [];
+        $lastBlockers = [];
+        foreach (array_keys($groups) as $regularSubmissionId) {
+            $pending = array_values(array_filter(
+                $this->repository->bindingsForRegular($supplierId, $environment, $regularSubmissionId),
+                static fn (array $row): bool => $row['status'] === 'active'
+                    && !in_array($row['correction_status'], ['accepted', 'partially_accepted'], true)
+                    && ($row['correction_submission_id'] === null || $row['correction_status'] === 'rejected'),
+            ));
+            if ($pending === []) {
+                continue;
+            }
+            $officeId = $pending[0]['office_id'];
+            $resolution = $this->documents->resolveForCorrection(
+                $supplierId,
+                $environment,
+                $preparationId,
+                $officeId,
+                [],
+            );
+            $identifiers = [];
+            $people = $resolution->status() === 'resolved' ? ($resolution->candidate?->payload['people'] ?? []) : [];
+            foreach (is_array($people) ? $people : [] as $person) {
+                foreach ((is_array($person) ? ($person['employments'] ?? []) : []) as $employment) {
+                    if (is_array($employment)
+                        && is_int($employment['employment_id'] ?? null)
+                        && is_string($employment['identity']['employment_external_identifier'] ?? null)
+                    ) {
+                        $identifiers[$employment['employment_id']] = $employment['identity']['employment_external_identifier'];
+                    }
+                }
+            }
+            $ready = [];
+            foreach ($pending as $row) {
+                if (isset($identifiers[$row['employment_id']])) {
+                    $ready[$row['employment_id']] = $identifiers[$row['employment_id']];
+                } else {
+                    $blocked[] = $row['employment_id'];
+                }
+            }
+            if ($ready === []) {
+                $lastBlockers = [...$resolution->blockers, ...$resolution->excludedBlockers];
+                continue;
+            }
+            $submissions[] = $this->corrections->freeze(
+                $supplierId,
+                $environment,
+                $regularSubmissionId,
+                $preparationId,
+                array_values($ready),
+                $userId,
+                $officeId,
+            );
+            array_push($completed, ...array_keys($ready));
+        }
+        if ($submissions === []) {
+            throw new JmhzXmlException(
+                'jmhz_deferral_still_blocked',
+                'Odložené vztahy zatím doplnit nejde: '
+                    . JmhzBlockerExplainer::describeNamed($lastBlockers, $this->people, $supplierId),
+            );
+        }
+        sort($completed, SORT_NUMERIC);
+        $blocked = array_values(array_unique($blocked));
+        sort($blocked, SORT_NUMERIC);
+
+        return [
+            'submissions' => $submissions,
+            'completed_employment_ids' => $completed,
+            'still_blocked_employment_ids' => $blocked,
+            'preparation_id' => $preparationId,
+        ];
+    }
+
+    /**
+     * Převezme do revize přípravy odložení z dřívější revize téhož běhu, která
+     * se do řádného hlášení nepromítla, pokud jejich důvod trvá (vztah v nové
+     * přípravě dál nese nález, kvůli kterému lze odložit). Vztah, který už je
+     * v pořádku, se nepřevezme a podá se v řádném hlášení.
+     *
+     * @return array{created:bool,deferral_ids:list<int>,carried_from:array<int,int>,employment_ids:list<int>,source_revision_id:int}
+     */
+    public function carryOver(
+        int $supplierId,
+        string $environment,
+        int $preparationId,
+        int $userId,
+        ?int $officeId = null,
+    ): array {
+        self::assertEnvironment($environment);
+        if ($userId <= 0) {
+            throw new \InvalidArgumentException('Odložení může převzít jen přihlášený uživatel.');
+        }
+        $preparation = $this->preparations->loadVerified($supplierId, $environment, $preparationId);
+        $previous = $this->carryCandidates($supplierId, $preparation->runId, $preparation->periodStart, $preparation->sourceRevisionId);
+        $index = self::employmentIndex($preparation);
+        $byEmployment = [];
+        foreach ($previous as $row) {
+            if (isset($index[$row['employment_id']])
+                && ($officeId === null || $index[$row['employment_id']]['office_id'] === $officeId)
+            ) {
+                $byEmployment[$row['employment_id']] = $row;
+            }
+        }
+        $empty = [
+            'created' => false,
+            'deferral_ids' => [],
+            'carried_from' => [],
+            'employment_ids' => [],
+            'source_revision_id' => $preparation->sourceRevisionId,
+        ];
+        if ($byEmployment === []) {
+            return $empty;
+        }
+        $created = [];
+        $carried = [];
+        $employmentIds = [];
+        foreach ($byEmployment as $employmentId => $row) {
+            if (in_array($employmentId, $employmentIds, true)) {
+                continue;
+            }
+            $reason = mb_substr('Převzato z revize ' . ($row['revision_no'] ?? '?') . ': ' . $row['reason'], 0, 500);
+            try {
+                $result = $this->deferMany(
+                    $supplierId,
+                    $environment,
+                    $preparationId,
+                    [$employmentId],
+                    $reason,
+                    $userId,
+                    $officeId,
+                );
+            } catch (JmhzXmlException $exception) {
+                if ($exception->validationCode === 'jmhz_deferral_not_blocked') {
+                    continue;
+                }
+                throw $exception;
+            }
+            foreach ($result['deferral_ids'] as $id) {
+                $created[] = $id;
+                $carried[$id] = $row['id'];
+            }
+            array_push($employmentIds, ...$result['employment_ids']);
+        }
+        sort($employmentIds, SORT_NUMERIC);
+
+        return [
+            'created' => $created !== [],
+            'deferral_ids' => $created,
+            'carried_from' => $carried,
+            'employment_ids' => $employmentIds,
+        ] + $empty;
+    }
+
+    /**
+     * Aktivní odložení dřívějších revizí běhu, která žádné řádné hlášení
+     * nevynechalo (nemají vazbu na podání) - s novou revizí zastarala.
+     *
+     * @return list<array<string,mixed>>
+     */
+    private function carryCandidates(int $supplierId, int $runId, string $periodStart, int $revisionId): array
+    {
+        $rows = $this->repository->forRun($supplierId, $runId, $periodStart);
+        $current = [];
+        foreach ($rows as $row) {
+            if ($row['status'] === 'active' && $row['source_revision_id'] === $revisionId) {
+                $current[$row['employment_id']] = true;
+            }
+        }
+        $old = array_values(array_filter(
+            $rows,
+            static fn (array $row): bool => $row['status'] === 'active'
+                && $row['source_revision_id'] !== $revisionId
+                && !isset($current[$row['employment_id']]),
+        ));
+        $bound = [];
+        foreach ($this->repository->bindings(
+            $supplierId,
+            array_map(static fn (array $row): int => $row['id'], $old),
+        ) as $binding) {
+            $bound[$binding['deferral_id']] = true;
+        }
+
+        return array_values(array_filter(
+            $old,
+            static fn (array $row): bool => !isset($bound[$row['id']]),
+        ));
+    }
+
+    /**
      * @param array<string,mixed> $row
      * @param list<array<string,mixed>> $bindings
      * @param array<int,string> $names
@@ -494,57 +897,60 @@ final readonly class JmhzDeferralService
     }
 
     /**
-     * Vztah a jeho souběžné vztahy téže osoby v téže registraci.
+     * Vztahy přípravy s osobou a registrací.
      *
-     * @return array{employee_id:int,office_id:?int,employment_ids:list<int>,office_employment_ids:list<int>}
+     * @return array<int,array{employee_id:int,office_id:?int}>
      */
-    private static function cluster(JmhzVerifiedPreparationSnapshot $preparation, int $employmentId): array
+    private static function employmentIndex(JmhzVerifiedPreparationSnapshot $preparation): array
     {
         $people = $preparation->payload['people'] ?? [];
-        $found = null;
+        $index = [];
         foreach (is_array($people) ? $people : [] as $person) {
-            foreach ((is_array($person) ? ($person['employments'] ?? []) : []) as $employment) {
-                if (is_array($employment) && ($employment['employment_id'] ?? null) === $employmentId) {
-                    $source = is_array($employment['employment'] ?? null) ? $employment['employment'] : [];
-                    $found = [
-                        'employee_id' => $person['employee_id'] ?? null,
-                        'office_id' => is_int($source['office_id'] ?? null) ? $source['office_id'] : null,
-                    ];
-                }
+            $employeeId = is_array($person) ? ($person['employee_id'] ?? null) : null;
+            if (!is_int($employeeId)) {
+                continue;
             }
-        }
-        if ($found === null || !is_int($found['employee_id'])) {
-            throw new JmhzXmlException(
-                'jmhz_deferral_employment_unknown',
-                'Pracovní vztah v přípravě hlášení není.',
-            );
-        }
-        $employmentIds = [];
-        $officeEmploymentIds = [];
-        foreach (is_array($people) ? $people : [] as $person) {
-            foreach ((is_array($person) ? ($person['employments'] ?? []) : []) as $employment) {
+            foreach ((is_array($person['employments'] ?? null) ? $person['employments'] : []) as $employment) {
                 if (!is_array($employment) || !is_int($employment['employment_id'] ?? null)) {
                     continue;
                 }
                 $source = is_array($employment['employment'] ?? null) ? $employment['employment'] : [];
-                $office = is_int($source['office_id'] ?? null) ? $source['office_id'] : null;
-                if ($office !== $found['office_id']) {
-                    continue;
-                }
-                $officeEmploymentIds[] = $employment['employment_id'];
-                if (($person['employee_id'] ?? null) === $found['employee_id']) {
-                    $employmentIds[] = $employment['employment_id'];
-                }
+                $index[$employment['employment_id']] = [
+                    'employee_id' => $employeeId,
+                    'office_id' => is_int($source['office_id'] ?? null) ? $source['office_id'] : null,
+                ];
             }
         }
-        sort($employmentIds, SORT_NUMERIC);
 
-        return [
-            'employee_id' => $found['employee_id'],
-            'office_id' => $found['office_id'],
-            'employment_ids' => $employmentIds,
-            'office_employment_ids' => $officeEmploymentIds,
-        ];
+        return $index;
+    }
+
+    /** @param array{employee_id:int,office_id:?int} $row */
+    private static function clusterKey(array $row): string
+    {
+        return $row['employee_id'] . ':' . ($row['office_id'] ?? '');
+    }
+
+    /**
+     * Vztahy, u kterých ČSSZ za posledních 48 hodin přijala změnu údajů
+     * (REGZEC A3). Hlášení s nimi se nezmrazí; odložit je lze.
+     *
+     * @param list<int> $employmentIds
+     * @return list<int>
+     */
+    private function settlingEmployments(int $supplierId, string $environment, array $employmentIds): array
+    {
+        if ($this->settlement === null || $employmentIds === []) {
+            return [];
+        }
+        $pending = $this->settlement->pendingUntil(
+            $supplierId,
+            $environment,
+            $employmentIds,
+            \DateTimeImmutable::createFromInterface($this->clock->now()),
+        );
+
+        return $pending === null ? [] : $pending['employment_ids'];
     }
 
     private static function reason(string $reason): string

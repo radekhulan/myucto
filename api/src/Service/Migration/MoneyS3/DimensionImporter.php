@@ -37,6 +37,12 @@ use MyInvoice\Service\Accounting\Dimension\DimensionPeriodGuard;
  */
 final class DimensionImporter
 {
+    /**
+     * Typy dimenzí, které převod na řádcích a dokladech z Money spravuje (středisko, vozidlo,
+     * projekt ze zakázky). Dimenze jiného typu přiřadil uživatel v MyÚčtu.
+     */
+    public const MANAGED_TYPE_CODES = ['stredisko', 'vozidlo', 'projekt'];
+
     public const STEP = 'dimensions';
 
     private const BATCH = 1000;
@@ -98,14 +104,14 @@ final class DimensionImporter
         $this->dimensionService->setEnabled($ctx->supplierId, true);
         $types = [];
         if ($centers !== []) {
-            $types['center'] = $this->dimensionService->ensureDefaultTypes($ctx->supplierId, ['stredisko'])['cost_center'];
+            $types['center'] = $this->dimensionService->ensureDefaultTypes($ctx->supplierId, [self::MANAGED_TYPE_CODES[0]])['cost_center'];
         }
         $vehicles = array_filter(array_keys($jobs), static fn ($c): bool => Ms3Journal::vehiclePlate((string) $c) !== null);
         if ($vehicles !== []) {
-            $types['vehicle'] = $this->dimensionService->ensureDefaultTypes($ctx->supplierId, ['vozidlo'])['vehicle'];
+            $types['vehicle'] = $this->dimensionService->ensureDefaultTypes($ctx->supplierId, [self::MANAGED_TYPE_CODES[1]])['vehicle'];
         }
         if (count($vehicles) < count($jobs)) {
-            $types['project'] = $this->dimensionService->ensureDefaultTypes($ctx->supplierId, ['projekt'])['project'];
+            $types['project'] = $this->dimensionService->ensureDefaultTypes($ctx->supplierId, [self::MANAGED_TYPE_CODES[2]])['project'];
         }
 
         // Číselný kód (středisko `633585`) z klíče pole vyjde jako int.

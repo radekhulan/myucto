@@ -21,7 +21,7 @@ final class ClientTaxSubmissionPermissionsTest extends TestCase
     {
         $catalog = new PermissionCatalog();
         self::assertTrue($catalog->allowsRoleType('reports.submissions', 'client'));
-        self::assertFalse($catalog->allowsRoleType('reports.submissions', 'staff'));
+        self::assertTrue($catalog->allowsRoleType('reports.submissions', 'staff'));
         self::assertTrue($catalog->allowsRoleType('reports.submit', 'client'));
         self::assertTrue($catalog->allowsRoleType('reports.submit', 'staff'));
         self::assertFalse($catalog->allowsRoleType('reports.submissions.manage', 'client'));
@@ -159,6 +159,61 @@ final class ClientTaxSubmissionPermissionsTest extends TestCase
             self::assertSame(isset($permissions['reports.submissions']) ? 204 : 403, $middleware->process($this->request($role), $this->handler())->getStatusCode());
             self::assertSame(403, $middleware->process($this->request($role, 'POST', '/api/reports/submissions/17/epo-submit'), $this->handler())->getStatusCode());
         }
+    }
+
+    public function testStaffWithArchiveButWithoutReportsUsesClientBoundary(): void
+    {
+        $role = $this->staff(['reports.submissions' => 1, 'reports.submit' => 2, 'reports.submissions.manage' => 2, 'reports.export' => 2]);
+        $request = $this->request($role);
+        self::assertTrue(RequestAuthorization::usesClientTaxSubmissionScope($request));
+        self::assertTrue(RequestAuthorization::canReadTaxSubmissions($request));
+        self::assertTrue(RequestAuthorization::canExportTaxSubmission($request));
+        self::assertTrue(RequestAuthorization::canAccessTaxSubmission($request, ['form_code' => 'dphkh1']));
+        self::assertFalse(RequestAuthorization::canAccessTaxSubmission($request, ['form_code' => 'dppdp9']));
+        self::assertFalse(RequestAuthorization::canManageTaxSubmissions($request));
+        self::assertFalse(RequestAuthorization::canManageTaxSubmissionEvidence($request));
+        self::assertFalse(RequestAuthorization::canDeleteTaxSubmission($request));
+        self::assertTrue(RequestAuthorization::allows($request, 'reports.submit', AccessLevel::WRITE));
+        self::assertFalse((new PermissionChecker(new PermissionCatalog()))->allows($role, 'reports.submissions', AccessLevel::WRITE));
+
+        $bearer = $request->withAttribute(AuthMiddleware::ATTR_METHOD, 'bearer');
+        self::assertFalse(RequestAuthorization::canReadTaxSubmissions($bearer));
+        self::assertFalse(RequestAuthorization::allows($bearer, 'reports.submit', AccessLevel::WRITE));
+
+        $middleware = $this->middleware($role);
+        foreach ([
+            ['GET', '/api/reports/submissions', 204],
+            ['POST', '/api/reports/submissions/17/epo-submit', 204],
+            ['PUT', '/api/reports/submissions/settings', 403],
+            ['DELETE', '/api/reports/submissions/17', 403],
+            ['GET', '/api/reports/submissions/17/kh-evidence', 403],
+        ] as [$method, $path, $status]) {
+            self::assertSame($status, $middleware->process($this->request($role, $method, $path), $this->handler())->getStatusCode(), "$method $path");
+        }
+        self::assertSame(403, $middleware->process($this->request($role)->withAttribute(AuthMiddleware::ATTR_METHOD, 'bearer'), $this->handler())->getStatusCode());
+    }
+
+    public function testStaffWithReportsAgendaOrWithoutArchiveKeepsFullScope(): void
+    {
+        foreach ([
+            ['reports' => 1, 'reports.submissions' => 1, 'reports.submit' => 2],
+            ['reports' => 1, 'reports.submit' => 2],
+            ['reports.submit' => 2],
+        ] as $permissions) {
+            $role = $this->staff($permissions);
+            $request = $this->request($role);
+            self::assertFalse(RequestAuthorization::usesClientTaxSubmissionScope($request), json_encode($permissions));
+            self::assertTrue(RequestAuthorization::canAccessTaxSubmission($request, ['form_code' => 'dppdp9']));
+            self::assertTrue(RequestAuthorization::canManageTaxSubmissions($request));
+            self::assertTrue(RequestAuthorization::allows($request->withAttribute(AuthMiddleware::ATTR_METHOD, 'bearer'), 'reports.submit', AccessLevel::WRITE));
+            self::assertSame(204, $this->middleware($role)->process($this->request($role, 'PUT', '/api/reports/submissions/settings'), $this->handler())->getStatusCode());
+        }
+        self::assertFalse(RequestAuthorization::usesClientTaxSubmissionScope($this->request(new EffectiveRole(0, 'Superadmin', 'superadmin', true, [], 'superadmin'))));
+    }
+
+    private function staff(array $permissions): EffectiveRole
+    {
+        return new EffectiveRole(5, 'Fakturace a dokumenty', 'staff', true, $permissions);
     }
 
     private function role(array $permissions): EffectiveRole

@@ -80,7 +80,7 @@ final class PaymentBankProposalAction
 
     private function run(Request $request, Response $response, string $permission, bool $write, callable $work): Response
     {
-        if ($write && !RequestAuthorization::isSessionAuth($request)) return Json::sessionRequired($response);
+        if ($write && !RequestAuthorization::actsAsSession($request)) return Json::sessionRequired($response);
         if (!RequestAuthorization::allows($request, $permission, $write ? AccessLevel::WRITE : AccessLevel::READ)) return Json::error($response, 'forbidden', 'Pro tuto operaci nemáte oprávnění.', 403);
         try {
             return Json::ok($response, $work($this->currentSupplierId($request)));

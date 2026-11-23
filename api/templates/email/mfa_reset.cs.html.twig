@@ -1,0 +1,23 @@
+{% extends '_layout.html.twig' %}
+
+{% block content %}
+<h1 style="margin:0 0 16px;font-size:22px;font-weight:600;color:#18181b;">Dvoufázové ověření bylo resetováno</h1>
+
+<p style="margin:0 0 16px;">Dobrý den{% if name %} {{ name }}{% endif %},</p>
+
+<p style="margin:0 0 16px;">správce{% if actorName %} <strong>{{ actorName }}</strong>{% endif %} dne {{ resetAt }} resetoval
+dvoufázové ověření Vašeho účtu v <strong>MyÚčto.cz</strong>. Ověřovací aplikace, passkeys i záložní kódy
+přestaly platit a byli jste odhlášeni ze všech zařízení.</p>
+
+<p style="margin:0 0 16px;">Po příštím přihlášení si dvoufázové ověření nastavte znovu v profilu (Zabezpečení).</p>
+
+<p style="margin:24px 0;text-align:center;">
+  <a href="{{ loginUrl }}" style="display:inline-block;background:{{ accent }};color:#ffffff;text-decoration:none;font-weight:600;padding:12px 28px;border-radius:6px;font-size:15px;">
+    Přihlásit se
+  </a>
+</p>
+
+<p style="margin:0;font-size:13px;color:#71717a;">
+  Pokud jste o reset nežádali, ihned kontaktujte správce aplikace.
+</p>
+{% endblock %}

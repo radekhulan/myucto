@@ -6,6 +6,7 @@ namespace MyInvoice\Service\Supplier;
 
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\AccountingModeRepository;
+use MyInvoice\Service\Accounting\EntryForm\EntryFormInstallationDefault;
 use MyInvoice\Repository\BankStatementOwnershipResolver;
 use MyInvoice\Service\Accounting\AccountingPeriodProvisioner;
 use MyInvoice\Service\Accounting\AccountingFrameworkService;
@@ -56,6 +57,7 @@ final class SupplierInitializer
         private readonly AccountingPeriodProvisioner $periodProvisioner,
         private readonly AutoPostingPolicyService $autoPosting,
         private readonly LoggerInterface $log,
+        private readonly EntryFormInstallationDefault $entryFormDefault,
     ) {}
 
     /**
@@ -319,6 +321,20 @@ final class SupplierInitializer
      *   - `vat_period` plátce zjištěného až z registru,
      *   - registr vlastních účtů pro účet doplněný z registru plátců.
      */
+    /**
+     * Výchozí forma účetního zápisu instalace pro firmu, která právě vstoupila do
+     * podvojného účetnictví (přepnutí režimu v nastavení). Best-effort jako zbytek
+     * dorovnání: chyba se zaloguje a firma zůstane ve složené formě.
+     */
+    public function applyEntryFormDefault(int $supplierId, ?int $userId = null): void
+    {
+        try {
+            $this->entryFormDefault->apply($supplierId, $userId);
+        } catch (\Throwable $e) {
+            $this->log->warning('supplier-init: výchozí formu zápisu se nepodařilo nastavit', ['error' => $e->getMessage()]);
+        }
+    }
+
     public function finalizeProfile(int $supplierId, ?int $userId = null): void
     {
         try {
@@ -343,6 +359,9 @@ final class SupplierInitializer
 
             if ((string) $row['accounting_mode'] === 'double_entry') {
                 $this->autoPosting->applyAccountingUnitDefaults($supplierId, $userId);
+                // Výchozí forma zápisu instalace (jednoduchý zápis od začátku), dřív než
+                // převod z cizího programu začne účtovat. Výchozí složená forma nic nezapíše.
+                $this->entryFormDefault->apply($supplierId, $userId);
             }
 
             if ((int) $row['is_vat_payer'] === 1 && ($row['vat_period'] ?? null) === null) {

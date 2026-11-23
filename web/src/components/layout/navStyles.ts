@@ -3,7 +3,7 @@
  * Technická plocha nesmí tahat AppLayout (firemní menu, přepínač firem, pracovní
  * plochu), takže společné jsou třídy a malé komponenty, ne celý layout.
  */
-export const APP_HEADER = 'nav-inverted sticky top-0 z-30 bg-surface border-b border-neutral-200 shadow-md'
+export const APP_HEADER = 'nav-inverted sticky top-0 z-30 bg-surface border-b border-neutral-200 pt-[env(safe-area-inset-top)] shadow-md'
 export const APP_HEADER_ROW = 'h-12 px-3 flex items-center gap-1'
 export const APP_BRAND_LINK = 'flex h-10 items-center gap-2 shrink-0 px-1.5 rounded-md hover:bg-neutral-100'
 

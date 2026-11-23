@@ -6,6 +6,8 @@ namespace MyInvoice\Service\Invoice;
 
 use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Repository\NumberSeriesRepository;
+use MyInvoice\Service\NumberSeries\NativeSeriesCompleteness;
 use PDO;
 
 /**
@@ -80,6 +82,8 @@ final class InvoiceSeriesCompletenessService
         // Kvůli hasFloor() — detekce, jestli je sloupec `floor_number` v schématu. Záměrně
         // se sem netahá druhá vlastní kontrola schématu; guard je pro floor jediné místo.
         private readonly NumberSeriesGapGuard $gapGuard,
+        private readonly NumberSeriesRepository $numberSeries,
+        private readonly NativeSeriesCompleteness $nativeCompleteness,
     ) {}
 
     /**
@@ -122,7 +126,48 @@ final class InvoiceSeriesCompletenessService
             }
         }
         array_push($result, ...$this->buildInferredReports($supplierId, $year, $byPriority));
+        array_push($result, ...$this->buildNativeReports($supplierId, $year));
         return $result;
+    }
+
+    /**
+     * Nové řady z číselníku (`number_series`, storage = native) vydaných daňových dokladů.
+     * Jejich doklady nesou `number_series_id`, takže do skenu dosavadních řad nevstupují
+     * ({@see fetchDocuments()}) a úplnost se počítá po řadě. Firma bez nových řad tu nemá
+     * nic a report je stejný jako dřív.
+     *
+     * @return list<array<string,mixed>>
+     */
+    private function buildNativeReports(int $supplierId, int $year): array
+    {
+        if (!$this->db->hasTable('number_series')) {
+            return [];
+        }
+        $reports = [];
+        foreach (self::SCANNED_TYPES as $type) {
+            foreach ($this->numberSeries->listForKind($supplierId, $type) as $row) {
+                if ($row['storage'] !== 'native') {
+                    continue;
+                }
+                $buckets = $this->nativeCompleteness->buckets($supplierId, $row, $year);
+                if ($buckets === []) {
+                    continue;
+                }
+                $reports[] = [
+                    'types'                 => [$type],
+                    'client_id'             => 0,
+                    'client_name'           => null,
+                    'revenue_category_id'   => 0,
+                    'revenue_category_name' => null,
+                    'period'                => (string) $row['period'],
+                    'template_by_type'      => [$type => str_replace('{PREFIX}', (string) $row['prefix'], (string) $row['template'])],
+                    'number_series_id'      => (int) $row['id'],
+                    'series_name'           => (string) $row['name'],
+                    'buckets'               => $buckets,
+                ];
+            }
+        }
+        return $reports;
     }
 
     /**
@@ -645,12 +690,14 @@ final class InvoiceSeriesCompletenessService
             : VarsymbolGenerator::documentTypesInSeries($invoiceType);
         $in = implode(',', array_fill(0, count($types), '?'));
         $simplifiedColumn = $this->db->hasColumn('invoices', 'is_simplified') ? 'is_simplified' : '0 AS is_simplified';
+        // Doklady nových řad číselníku patří své řadě ({@see buildNativeReports()}).
+        $nativeFilter = $this->db->hasColumn('invoices', 'number_series_id') ? ' AND number_series_id IS NULL' : '';
         $stmt = $this->db->pdo()->prepare(
             "SELECT varsymbol, invoice_type, {$simplifiedColumn}, client_id, revenue_category_id, issue_date
                  FROM invoices
                 WHERE supplier_id = ? AND invoice_type IN ($in)
                   AND varsymbol IS NOT NULL AND varsymbol <> ''
-                  AND calendar_id IS NULL
+                  AND calendar_id IS NULL{$nativeFilter}
                   AND issue_date >= ? AND issue_date <= ?"
         );
         $stmt->execute([$supplierId, ...$types, $from, $to]);

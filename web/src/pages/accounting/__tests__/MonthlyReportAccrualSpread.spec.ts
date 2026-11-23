@@ -26,7 +26,7 @@ function reportData(spread?: object) {
   }
 }
 
-const SPREAD = { applied: true, skipped_reason: null, prepaid_expense: 6100, deferred_revenue: 24300, documents: 2, prev: null }
+const SPREAD = { applied: true, skipped_reason: null, prepaid_expense: 6100, deferred_revenue: 24300, documents: 2, depreciation: 0, depreciation_assets: 0, prev: null }
 
 beforeEach(() => {
   vi.clearAllMocks()

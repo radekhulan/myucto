@@ -23,7 +23,9 @@ final readonly class PayslipLine
         public ?PayrollExemptionBasis $exemptionBasis = null,
         /** Nezdaněná část částky; u koše § 6 odst. 9 jen zmrazený podíl. */
         public int $exemptPartMinorUnits = 0,
+        public ?array $hourlyDetail = null,
     ) {
+        if ($hourlyDetail !== null) PayslipHourlyDetail::validateInput($hourlyDetail, $amountMinorUnits);
         if (trim($label) === '' || mb_strlen($label) > 160) {
             throw new \InvalidArgumentException('Payslip line label must not be empty.');
         }
@@ -80,6 +82,7 @@ final readonly class PayslipLine
             'exemption_basis' => $this->exemptionBasis?->value,
             'exemption_statute' => $this->exemptionBasis?->statute(),
             'exempt_part_minor_units' => $this->exemptPartMinorUnits,
+            ...($this->hourlyDetail === null ? [] : ['hourly_detail' => $this->hourlyDetail]),
         ];
     }
 }
