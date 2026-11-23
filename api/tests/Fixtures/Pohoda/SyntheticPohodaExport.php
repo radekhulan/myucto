@@ -1555,7 +1555,7 @@ final class SyntheticPohodaExport
      *    odpočtu jedinou zálohu 26ZP0001 (vazba na dokladu), 26PF0102 dvě zálohy 26ZP0002
      *    a 26ZP0003, záloha 26ZP0004 se čerpá postupně fakturami 26PF0103 a 26PF0104 (400 + 400);
      *  - DDKP (interní doklady v členění PD): 26ZD0001 s vazbou na 26ZP0001, 26ZD0002 jen
-     *    s textem „…zálohové faktuře č. 26ZP0002" (stejný partner i částka jako záloha),
+     *    s textem „…(zálohová faktura č. 26ZP0002)" (stejný partner i částka jako záloha),
      *    26ZD0003 s textem o 26ZP0003, ale jinou částkou;
      *  - záloha 26ZP0005 (1 000, Vratka Test, doklad dodavatele = VS 2026105) zaplacená na 314
      *    a příchozí platba 300 s jejím VS zaúčtovaná na 314 bez vazby (vrácení zálohy);
@@ -1656,7 +1656,7 @@ final class SyntheticPohodaExport
             . '</lst:intDoc>';
         $internal = $agendaDir . '/27_interni_doklady.xml';
         $taxDocuments = $taxDocument(self::TAX_DOCUMENT_LINKED, 'Daňový doklad k přijaté platbě', self::LINK_ADVANCE)
-            . $taxDocument(self::TAX_DOCUMENT_BY_TEXT, 'Daňový doklad k uhrazené zálohové faktuře č. ' . self::LINK_ADVANCE_FALLBACK, '')
+            . $taxDocument(self::TAX_DOCUMENT_BY_TEXT, 'Daňový doklad k přijaté platbě (zálohová faktura č. ' . self::LINK_ADVANCE_FALLBACK . ')', '')
             . $taxDocument(self::TAX_DOCUMENT_WRONG_AMOUNT, 'Daňový doklad k uhrazené zálohové faktuře č. ' . self::LINK_ADVANCE_PAIRED, '');
         is_file($internal)
             ? self::append($internal, '</lst:listIntDoc>', $taxDocuments)

@@ -124,7 +124,7 @@ final class PohodaDocumentLinkerTest extends TestCase
         self::assertSame($this->purchase(X::LINK_ADVANCE), $this->column('purchase_invoices', 'parent_purchase_invoice_id', X::TAX_DOCUMENT_LINKED),
             'DDKP s vazbou na zálohu v exportu dostane rodiče.');
         self::assertSame($this->purchase(X::LINK_ADVANCE_FALLBACK), $this->column('purchase_invoices', 'parent_purchase_invoice_id', X::TAX_DOCUMENT_BY_TEXT),
-            'DDKP bez vazby se naváže podle textu „zálohové faktuře č.", sedí-li partner i částka.');
+            'DDKP bez vazby se naváže podle textu POHODY „(zálohová faktura č. …)", sedí-li partner i částka.');
         self::assertNull($this->column('purchase_invoices', 'parent_purchase_invoice_id', X::TAX_DOCUMENT_WRONG_AMOUNT),
             'Text odkazuje na zálohu jiné částky - vazba se nepřijme.');
         self::assertSame(2, self::stepCounts($this->protocol, 'link')['tax_document_advance_linked'] ?? 0, $this->explain());

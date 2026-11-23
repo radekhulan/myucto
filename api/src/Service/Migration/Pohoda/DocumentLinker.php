@@ -312,25 +312,41 @@ final class DocumentLinker
                     }
                 }
                 // Export z datového souboru vazbu DDKP na zálohu nenese; POHODA ale DDKP
-                // pojmenuje vždy „Daňový doklad k uhrazené zálohové faktuře č. …". Takovou
+                // pojmenuje číslem zálohy ({@see self::advanceNumberFromText()}). Takovou
                 // vazbu převod přijme jen u téhož partnera a téže částky jako záloha.
-                if ($refs === [] && preg_match('/zálohov\w*\s+faktu\w*\s+č\.?\s*(\S+)/u', PohodaXml::text($header, 'text'), $m) === 1
-                    && count($advances[rtrim($m[1], '.,;')] ?? []) === 1) {
-                    $candidate = $advances[rtrim($m[1], '.,;')][0];
+                $textRef = $refs === [] ? self::advanceNumberFromText(PohodaXml::text($header, 'text')) : null;
+                if ($textRef !== null && count($advances[$textRef] ?? []) === 1) {
+                    $candidate = $advances[$textRef][0];
                     $same->execute([$candidate, $taxDocumentId, $ctx->supplierId]);
                     if ($same->fetchColumn() !== false) {
-                        $refs[$m[1]] = $candidate;
+                        $refs[$textRef] = $candidate;
                     }
                 }
                 if (count($refs) !== 1) {
                     continue;
                 }
-                    $set->execute([reset($refs), $taxDocumentId, $ctx->supplierId]);
+                $set->execute([reset($refs), $taxDocumentId, $ctx->supplierId]);
                 if ($set->rowCount() > 0) {
                     $p->count(self::STEP_LINK, 'tax_document_advance_linked');
                 }
             }
         }
+    }
+
+    /**
+     * Číslo zálohy z textu DDKP. POHODA ho do textu interního dokladu píše sama, podle verze
+     * jako „Daňový doklad k uhrazené zálohové faktuře č. 26ZF0001" nebo „Daňový doklad
+     * k přijaté platbě (zálohová faktura č. 260800020)". Číslo končí mezerou, závorkou nebo
+     * interpunkcí; závorka dřív zůstala součástí čísla a vydané DDKP se tak nenavázaly vůbec.
+     */
+    public static function advanceNumberFromText(string $text): ?string
+    {
+        if (preg_match('/zálohov\w*\s+faktu\w*\s+č\.?\s*([^\s()]+)/u', $text, $m) !== 1) {
+            return null;
+        }
+        $number = rtrim($m[1], '.,;:');
+
+        return $number === '' ? null : $number;
     }
 
     public function matchPayments(PohodaContext $ctx): void
