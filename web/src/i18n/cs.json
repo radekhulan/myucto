@@ -42700,7 +42700,19 @@
       "relinked": "Vazba obnovena.",
       "cancelled": "Zdroj zrušen.",
       "busy": "Evidenci právě mění jiný uživatel. Zkuste akci za chvíli znovu.",
-      "cancelBlocked": "Zdroj s přiřazenými náklady nelze zrušit. Nejdřív náklady odeberte."
+      "cancelBlocked": "Zdroj s přiřazenými náklady nelze zrušit. Nejdřív náklady odeberte.",
+      "costInConfirmed": "Náklad je čerpán i v potvrzeném zdroji J6.",
+      "reason_line_changed": "Řádek deníku se změnil (částka, účet, datum nebo zápis).",
+      "reason_not_posted": "Zápis už není zaúčtovaný.",
+      "reason_other_period": "Řádek je v jiném účetním období.",
+      "reason_amount": "Řádek nemá kladnou částku.",
+      "reason_not_cost": "Řádek už není způsobilý náklad (účet nebo druh zápisu).",
+      "reason_not_income": "Řádek už není výnos třídy 6.",
+      "reason_date": "Datum je mimo období způsobilosti zdroje.",
+      "reason_account": "Účet nepatří mezi způsobilé účty zdroje.",
+      "reason_activity": "Druh činnosti neodpovídá zdroji.",
+      "reason_overallocated": "Zdroje dohromady nesou víc, než je částka řádku.",
+      "reason_credit_note": "K faktuře byl zaúčtován dobropis. Zkontrolujte částku a vazbu potvrďte tlačítkem Navázat znovu."
     }
   },
   "securities504": {

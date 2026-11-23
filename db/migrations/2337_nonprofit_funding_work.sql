@@ -2,7 +2,8 @@
 -- Průběžná vrstva vedle potvrzených zdrojů (nonprofit_funding_revisions) a J6: přiřazení výnosových
 -- a nákladových řádků deníku ke zdroji v průběhu roku. Vazba na řádek neblokuje účetnictví:
 -- přeúčtování řádek smaže a vazba ztratí line_id (ON DELETE SET NULL), služba ji podle snímku
--- ukáže ke kontrole. linked_line_id drží původní id řádku (bez FK) pro unikátnost aktivních vazeb.
+-- ukáže ke kontrole. linked_line_id drží původní id řádku (bez FK) pro unikátnost aktivních vazeb;
+-- entry_source_type/id drží doklad zápisu pro „Navázat znovu“ po odúčtování a novém zaúčtování dokladu.
 SET NAMES utf8mb4;
 
 CREATE TABLE IF NOT EXISTS nonprofit_funding_work_sources (
@@ -44,6 +45,8 @@ CREATE TABLE IF NOT EXISTS nonprofit_funding_work_incomes (
     line_id BIGINT UNSIGNED NULL,
     linked_line_id BIGINT UNSIGNED NOT NULL,
     entry_id BIGINT UNSIGNED NOT NULL,
+    entry_source_type VARCHAR(40) CHARACTER SET ascii COLLATE ascii_bin NULL,
+    entry_source_id BIGINT UNSIGNED NULL,
     account_id BIGINT UNSIGNED NOT NULL,
     amount_cents BIGINT NOT NULL,
     entry_date DATE NOT NULL,
@@ -72,9 +75,12 @@ CREATE TABLE IF NOT EXISTS nonprofit_funding_work_allocations (
     line_id BIGINT UNSIGNED NULL,
     linked_line_id BIGINT UNSIGNED NOT NULL,
     entry_id BIGINT UNSIGNED NOT NULL,
+    entry_source_type VARCHAR(40) CHARACTER SET ascii COLLATE ascii_bin NULL,
+    entry_source_id BIGINT UNSIGNED NULL,
     account_id BIGINT UNSIGNED NOT NULL,
     line_amount_cents BIGINT NOT NULL,
     entry_date DATE NOT NULL,
+    credit_notes_seen INT UNSIGNED NOT NULL DEFAULT 0,
     amount_cents BIGINT UNSIGNED NOT NULL,
     note VARCHAR(500) NULL,
     status ENUM('active','removed') NOT NULL DEFAULT 'active',

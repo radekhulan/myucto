@@ -111,14 +111,26 @@ final class FundingWorkConcurrencyTest extends TestCase
         $pdo->beginTransaction();
         $workA->allocate($supplier, $period, $source, [['line_id' => $lines[0], 'amount_cents' => 60000]], $actor);
 
-        // B čeká na zámek období, který drží nepotvrzený zápis A.
+        // B čeká na zámek období, který drží nepotvrzený zápis A, i když přiřazuje týž řádek jinému zdroji.
         $b->pdo()->exec('SET SESSION innodb_lock_wait_timeout = 1');
-        try {
-            $workB->allocate($supplier, $period, $source, [['line_id' => $lines[1], 'amount_cents' => 50000]], $actor);
-            self::fail('Souběžný zápis musí čekat na zámek období.');
-        } catch (\PDOException $e) {
-            self::assertTrue(TransactionFailure::lockConflict($e), $e->getMessage());
+        foreach ([[$source, $lines[1]], [$other, $lines[0]]] as [$target, $line]) {
+            try {
+                $workB->allocate($supplier, $period, $target, [['line_id' => $line, 'amount_cents' => 100]], $actor);
+                self::fail('Souběžný zápis musí čekat na zámek.');
+            } catch (\PDOException $e) {
+                self::assertTrue(TransactionFailure::lockConflict($e), $e->getMessage());
+            }
         }
+        // Akce převede zámek na 409 funding_work_busy, ne na chybu serveru.
+        $request = (new \Slim\Psr7\Factory\ServerRequestFactory())->createServerRequest('POST', '/api/accounting/periods/' . $period . '/funding-work/sources/' . $source . '/allocations')
+            ->withAttribute(\MyInvoice\Middleware\SupplierScopeMiddleware::ATTR_CURRENT_ID, $supplier)
+            ->withAttribute(\MyInvoice\Middleware\AuthMiddleware::ATTR_USER, ['id' => $actor, 'role' => 'staff'])
+            ->withAttribute(\MyInvoice\Middleware\AuthMiddleware::ATTR_METHOD, 'session')
+            ->withAttribute('auth.effective_role', new \MyInvoice\Security\EffectiveRole(92, 'Synthetic writer', 'staff', true, ['accounting' => 2]))
+            ->withParsedBody(['items' => [['line_id' => $lines[1], 'amount_cents' => 100]]]);
+        $response = (new \MyInvoice\Action\Nonprofit\FundingWorkAction($workB))->allocate($request, (new \Slim\Psr7\Factory\ResponseFactory())->createResponse(), ['id' => (string) $period, 'sid' => (string) $source]);
+        self::assertSame(409, $response->getStatusCode(), (string) $response->getBody());
+        self::assertSame('funding_work_busy', json_decode((string) $response->getBody(), true)['error']['code']);
         $pdo->commit();
 
         // Po potvrzení A: B se starším snímkem vidí přiřazení A (zamykací čtení) a dostane zůstatek.
@@ -146,6 +158,8 @@ final class FundingWorkConcurrencyTest extends TestCase
 
     private static function service(Connection $db): FundingWorkService
     {
-        return new FundingWorkService($db, new FundingWorkLedger($db), new DimensionPeriodGuard($db), new FundingRepository($db), new ActivityLogger($db));
+        $container = Bootstrap::buildContainer();
+        $container->set(Connection::class, $db);
+        return $container->get(FundingWorkService::class);
     }
 }

@@ -8,22 +8,23 @@ use MyInvoice\Repository\Nonprofit\FundingRepository;
 use MyInvoice\Service\Accounting\AccountingPeriodStatus;
 use MyInvoice\Service\Accounting\Dimension\DimensionPeriodGuard;
 use MyInvoice\Service\ActivityLogger;
+use MyInvoice\Service\Nonprofit\Funding\FundingService;
 use MyInvoice\Support\Sql\PurchaseSettledExpr;
 use PDO;
 
 /**
  * Pracovní evidence čerpání dotací a účelových darů (#403): průběžné přiřazení výnosových
  * a nákladových řádků deníku ke zdroji. Je to pracovní podklad vedle potvrzených zdrojů
- * a J6 ({@see \MyInvoice\Service\Nonprofit\Funding\FundingService}); daňový výpočet z něj nečte.
+ * a J6 ({@see FundingService}); daňový výpočet z něj nečte.
  *
  * Vazba na řádek účetnictví neblokuje. Přeúčtování řádek smaže (vazba ztratí line_id),
- * storno označí zápis `reversed_by`; obojí se při čtení ukáže jako vazba ke kontrole podle
- * snímku pořízeného při přiřazení a opraví se „Navázat znovu“ nebo odebráním.
+ * storno označí zápis `reversed_by`, dobropis přijaté faktury přibude; vše se při čtení ukáže
+ * jako vazba ke kontrole podle snímku pořízeného při přiřazení ({@see self::linksSql()}) a opraví
+ * se „Navázat znovu“ (týž zápis nebo týž doklad) nebo odebráním.
  *
- * Zápisy běží v jedné transakci s pořadím zámků: období → zdroj → zápisy deníku (podle id).
- * Zámek období serializuje všechny zápisy evidence v období (rozpočet, kapacita řádku,
- * jedinečnost výnosu); čtení uvnitř zápisu jsou zamykací, aby viděla potvrzená data
- * souběžného uživatele.
+ * Zápisy běží v jedné transakci s pořadím zámků: období → zdroj → zápisy deníku (podle id),
+ * stejně jako zaúčtování (období před zápisy). Zámek období serializuje zápisy evidence v období;
+ * čtení uvnitř zápisu jsou zamykací, aby viděla potvrzená data souběžného uživatele.
  */
 final class FundingWorkService
 {
@@ -31,8 +32,20 @@ final class FundingWorkService
     public const STATE_CHANGED = 'changed';
     public const STATE_REMOVED = 'removed';
     public const STATE_REVERSED = 'reversed';
+    public const PAGE = 100;
     private const KINDS = ['operating_grant', 'investment_grant', 'gift'];
     private const MAX_CENTS = 999999999999999;
+    private const PROBLEMS = [
+        'not_posted' => ['funding_work_line_ineligible', 'Řádek není zaúčtovaný.', 422],
+        'reversed' => ['funding_work_line_reversed', 'Stornovaný zápis ani storno nelze přiřadit.', 409],
+        'other_period' => ['funding_work_line_other_period', 'Řádek patří do jiného účetního období než zdroj.', 422],
+        'amount' => ['funding_work_line_ineligible', 'Řádek musí mít kladnou částku.', 422],
+        'not_cost' => ['funding_work_line_ineligible', 'Náklad zdroje musí být řádek na straně Má dáti na nákladovém účtu třídy 5 (mimo daň z příjmů a uzávěrkové zápisy).', 422],
+        'not_income' => ['funding_work_line_ineligible', 'Výnos zdroje musí být řádek na straně Dal na výnosovém účtu třídy 6.', 422],
+        'date' => ['funding_work_line_ineligible', 'Datum nákladu je mimo období způsobilosti zdroje.', 422],
+        'account' => ['funding_work_line_ineligible', 'Účet nákladu nepatří mezi způsobilé účty zdroje.', 422],
+        'activity' => ['funding_work_line_ineligible', 'Druh činnosti nákladu neodpovídá zdroji.', 422],
+    ];
 
     public function __construct(
         private readonly Connection $db,
@@ -40,37 +53,36 @@ final class FundingWorkService
         private readonly DimensionPeriodGuard $guard,
         private readonly FundingRepository $confirmed,
         private readonly ActivityLogger $activity,
+        // Čerpání nákladů v potvrzeném J6 jen jako upozornění (rozhodnutí uživatele 23. 11.).
+        private readonly FundingService $confirmedUse,
     ) {}
 
     // ---------------------------------------------------------------- čtení
 
-    /** Přehled zdrojů období se souhrnnými částkami. */
+    /** Přehled zdrojů období; souhrny počítá databáze, řádky deníku se nenačítají. */
     public function overview(int $supplier, int $period): array
     {
         $periodRow = $this->period($supplier, $period, false);
         $sources = $this->sourceRows($supplier, 's.period_id = ?', [$period]);
-        $ids = array_keys($sources);
-        $incomes = $this->incomes($supplier, $ids);
-        $allocations = $this->allocations($supplier, $sources);
+        $totals = $this->totals($supplier, $sources);
         $out = [];
-        foreach ($sources as $id => $source) {
-            $out[] = $source + ['totals' => self::totals($source, $incomes[$id] ?? [], $allocations[$id] ?? [])];
-        }
+        foreach ($sources as $id => $source) $out[] = $source + ['totals' => $totals[$id]];
         return ['period' => $periodRow, 'editable' => !AccountingPeriodStatus::isClosed($periodRow['status']), 'sources' => $out];
     }
 
-    /** Detail zdroje: výnosy a přiřazení se stavem, nabídka k opětovnému navázání a historie. */
-    public function detail(int $supplier, int $period, int $sourceId): array
+    /** Detail zdroje: souhrn, výnosy, stránka přiřazených nákladů se stavem, nabídka k opětovnému navázání a historie. */
+    public function detail(int $supplier, int $period, int $sourceId, int $page = 1): array
     {
         $periodRow = $this->period($supplier, $period, false);
         $source = $this->source($supplier, $period, $sourceId, false);
-        $incomes = $this->incomes($supplier, [$sourceId])[$sourceId] ?? [];
-        $allocations = $this->allocations($supplier, [$sourceId => $source])[$sourceId] ?? [];
-        $this->attachRelinkCandidates($supplier, $source, $incomes, $allocations);
-        $this->attachConfirmedLinks($supplier, $incomes);
+        $incomes = $this->links($supplier, 'income', [$sourceId], null);
+        $allocations = $this->links($supplier, 'cost', [$sourceId], max(1, $page));
+        $more = count($allocations) > self::PAGE;
+        $allocations = array_slice($allocations, 0, self::PAGE);
+        $this->attachRelinkCandidates($supplier, $incomes, $allocations);
+        $this->attachConfirmedLinks($supplier, $incomes, $allocations);
         $this->attachPaymentState($supplier, $allocations);
-        $history = $this->db->pdo()->prepare('SELECT h.id, h.income_id, h.allocation_id, h.action, h.before_json, h.after_json, h.reason, h.created_at,
-                u.name AS actor_name
+        $history = $this->db->pdo()->prepare('SELECT h.id, h.income_id, h.allocation_id, h.action, h.before_json, h.after_json, h.reason, h.created_at, u.name AS actor_name
             FROM nonprofit_funding_work_history h LEFT JOIN users u ON u.id = h.created_by
             WHERE h.supplier_id = ? AND h.source_id = ? ORDER BY h.id DESC LIMIT 200');
         $history->execute([$supplier, $sourceId]);
@@ -85,9 +97,11 @@ final class FundingWorkService
             'period' => $periodRow,
             'editable' => !AccountingPeriodStatus::isClosed($periodRow['status']) && $source['status'] === 'active',
             'source' => $source,
-            'totals' => self::totals($source, $incomes, $allocations),
+            'totals' => $this->totals($supplier, [$sourceId => $source])[$sourceId],
             'incomes' => $incomes,
             'allocations' => $allocations,
+            'allocations_page' => max(1, $page),
+            'allocations_more' => $more,
             'history' => $rows,
         ];
     }
@@ -114,25 +128,32 @@ final class FundingWorkService
         return ['providers' => $providers, 'providers_more' => $more, 'activities' => $activities, 'accounts' => $accounts, 'confirmed_sources' => $confirmed];
     }
 
-    public function incomeCandidates(int $supplier, int $period, string $search, int $page): array
+    public function incomeCandidates(int $supplier, int $period, int $sourceId, string $search, int $page): array
     {
-        $this->period($supplier, $period, false);
+        $source = $this->source($supplier, $period, $sourceId, false);
         if (mb_strlen($search) > 100) self::invalid('Hledaný text je příliš dlouhý.');
-        return $this->ledger->incomeCandidates($supplier, $period, $search, max(1, $page));
+        return $this->ledger->candidates($supplier, $source, $this->period($supplier, $period, false), 'income', $search, max(1, $page));
     }
 
     public function costCandidates(int $supplier, int $period, int $sourceId, string $search, int $page): array
     {
         $source = $this->source($supplier, $period, $sourceId, false);
         if (mb_strlen($search) > 100) self::invalid('Hledaný text je příliš dlouhý.');
-        return $this->ledger->costCandidates($supplier, $source, $search, max(1, $page));
+        $result = $this->ledger->candidates($supplier, $source, $this->period($supplier, $period, false), 'cost', $search, max(1, $page));
+        $uses = $this->confirmedCostUses($supplier);
+        foreach ($result['rows'] as &$row) $row['confirmed_source_key'] = $uses[$row['id']] ?? null;
+        unset($row);
+        return $result;
     }
 
     /** Rozpad nákladového řádku podle zdrojů (kolik z řádku nese který zdroj). */
     public function costLineAllocations(int $supplier, int $period, int $lineId): array
     {
         $this->period($supplier, $period, false);
-        $line = $this->ledger->lines($supplier, [$lineId])[$lineId] ?? null;
+        $q = $this->db->pdo()->prepare('SELECT ' . FundingWorkLedger::LINE_COLUMNS . ' FROM journal_entry_lines l ' . FundingWorkLedger::LINE_JOINS . ' WHERE l.supplier_id = ? AND l.id = ?');
+        $q->execute([$supplier, $lineId]);
+        $row = $q->fetch(PDO::FETCH_ASSOC);
+        $line = $row ? FundingWorkLedger::line($row) : null;
         if ($line === null) throw new FundingWorkException('funding_work_line_not_found', 'Řádek deníku nebyl nalezen.', 404);
         $q = $this->db->pdo()->prepare("SELECT x.id, x.source_id, x.amount_cents, x.note, s.title, s.status AS source_status, s.period_id
             FROM nonprofit_funding_work_allocations x JOIN nonprofit_funding_work_sources s ON s.supplier_id = x.supplier_id AND s.id = x.source_id
@@ -149,17 +170,17 @@ final class FundingWorkService
     /** @param array<string,mixed> $input */
     public function create(int $supplier, int $period, array $input, int $actor): array
     {
-        $data = $this->normalize($supplier, $input, true);
+        $data = $this->normalize($input, true);
         $incomeLines = $data['income_line_ids'];
         unset($data['income_line_ids']);
         $id = $this->guard->transaction(function () use ($supplier, $period, $data, $incomeLines, $actor): int {
             $this->lockPeriod($supplier, $period);
-            $this->assertReferences($supplier, $data);
+            $data = $this->assertReferences($supplier, $data, null);
             $this->db->pdo()->prepare('INSERT INTO nonprofit_funding_work_sources (supplier_id, period_id, provider_id, kind, title, contract_ref, budget_cents, valid_from, valid_to, activity_kind_ids, account_prefixes, legacy_source_key, created_by)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')->execute([$supplier, $period, $data['provider_id'], $data['kind'], $data['title'], $data['contract_ref'], $data['budget_cents'],
                 $data['valid_from'], $data['valid_to'], json_encode($data['activity_kind_ids']), json_encode($data['account_prefixes']), $data['legacy_source_key'], $actor]);
             $id = (int) $this->db->pdo()->lastInsertId();
-            $this->history($supplier, $id, null, null, 'source_created', null, $data, null, $actor);
+            $this->history($supplier, $id, [['source_created', null, null, null, $data]], null, $actor);
             if ($incomeLines !== []) $this->attachIncomes($supplier, $this->source($supplier, $period, $id, true), $incomeLines, $actor);
             return $id;
         });
@@ -169,12 +190,12 @@ final class FundingWorkService
     /** @param array<string,mixed> $input */
     public function update(int $supplier, int $period, int $sourceId, array $input, int $expectedVersion, string $reason, int $actor): array
     {
-        $data = $this->normalize($supplier, $input, false);
+        $data = $this->normalize($input, false);
         $reason = self::reason($reason, false);
         $this->guard->transaction(function () use ($supplier, $period, $sourceId, $data, $expectedVersion, $reason, $actor): void {
             $this->lockPeriod($supplier, $period);
             $source = $this->writableSource($supplier, $period, $sourceId, $expectedVersion);
-            $this->assertReferences($supplier, $data);
+            $data = $this->assertReferences($supplier, $data, $source);
             $allocated = $this->allocatedOnSource($supplier, $sourceId, null);
             if ($data['budget_cents'] < $allocated) {
                 throw new FundingWorkException('funding_work_budget_below_allocated', 'Rozpočet nesmí být nižší než již přiřazené náklady (' . self::money($allocated) . ').', 422, ['allocated_cents' => $allocated]);
@@ -182,12 +203,12 @@ final class FundingWorkService
             $this->db->pdo()->prepare('UPDATE nonprofit_funding_work_sources SET provider_id = ?, kind = ?, title = ?, contract_ref = ?, budget_cents = ?, valid_from = ?, valid_to = ?, activity_kind_ids = ?, account_prefixes = ?, legacy_source_key = ?,
                 row_version = row_version + 1, updated_by = ?, updated_at = NOW() WHERE supplier_id = ? AND id = ?')->execute([$data['provider_id'], $data['kind'], $data['title'], $data['contract_ref'], $data['budget_cents'],
                 $data['valid_from'], $data['valid_to'], json_encode($data['activity_kind_ids']), json_encode($data['account_prefixes']), $data['legacy_source_key'], $actor, $supplier, $sourceId]);
-            $this->history($supplier, $sourceId, null, null, 'source_updated', self::sourceAudit($source), $data, $reason, $actor);
+            $this->history($supplier, $sourceId, [['source_updated', null, null, self::sourceAudit($source), $data]], $reason, $actor);
         });
         return $this->detail($supplier, $period, $sourceId);
     }
 
-    /** Zrušení zdroje jen bez aktivních přiřazení nákladů; výnosové řádky se uvolní. */
+    /** Zrušení zdroje jen bez aktivních přiřazení nákladů; výnosové řádky se uvolní a každý zapíše do historie. */
     public function cancel(int $supplier, int $period, int $sourceId, int $expectedVersion, string $reason, int $actor): array
     {
         $reason = self::reason($reason, true);
@@ -198,11 +219,16 @@ final class FundingWorkService
             $q->execute([$supplier, $sourceId]);
             $count = (int) $q->fetchColumn();
             if ($count > 0) throw new FundingWorkException('funding_work_source_has_allocations', 'Zdroj má přiřazené náklady. Nejdřív je odeberte.', 409, ['allocation_count' => $count]);
+            $q = $this->db->pdo()->prepare("SELECT * FROM nonprofit_funding_work_incomes WHERE supplier_id = ? AND source_id = ? AND status = 'active' ORDER BY id FOR UPDATE");
+            $q->execute([$supplier, $sourceId]);
+            $released = array_map(self::linkRow(...), $q->fetchAll(PDO::FETCH_ASSOC));
             $this->db->pdo()->prepare("UPDATE nonprofit_funding_work_incomes SET status = 'removed', row_version = row_version + 1, updated_by = ?, updated_at = NOW() WHERE supplier_id = ? AND source_id = ? AND status = 'active'")
                 ->execute([$actor, $supplier, $sourceId]);
             $this->db->pdo()->prepare("UPDATE nonprofit_funding_work_sources SET status = 'cancelled', row_version = row_version + 1, updated_by = ?, updated_at = NOW() WHERE supplier_id = ? AND id = ?")
                 ->execute([$actor, $supplier, $sourceId]);
-            $this->history($supplier, $sourceId, null, null, 'source_cancelled', self::sourceAudit($source), null, $reason, $actor);
+            $events = array_map(static fn(array $i) => ['income_removed', $i['id'], null, self::lineAudit($i), null], $released);
+            $events[] = ['source_cancelled', null, null, self::sourceAudit($source), null];
+            $this->history($supplier, $sourceId, $events, $reason, $actor);
         });
         return $this->detail($supplier, $period, $sourceId);
     }
@@ -226,13 +252,13 @@ final class FundingWorkService
         $reason = self::reason($reason, true);
         $sourceId = $this->guard->transaction(function () use ($supplier, $period, $incomeId, $expectedVersion, $reason, $actor): int {
             $this->lockPeriod($supplier, $period);
-            $income = $this->income($supplier, $incomeId);
+            $income = $this->link($supplier, 'income', $incomeId, false);
             $this->writableSource($supplier, $period, $income['source_id'], null);
-            $income = $this->income($supplier, $incomeId, true);
+            $income = $this->link($supplier, 'income', $incomeId, true);
             self::assertVersion($income, $expectedVersion);
             $this->db->pdo()->prepare("UPDATE nonprofit_funding_work_incomes SET status = 'removed', row_version = row_version + 1, updated_by = ?, updated_at = NOW() WHERE supplier_id = ? AND id = ?")
                 ->execute([$actor, $supplier, $incomeId]);
-            $this->history($supplier, $income['source_id'], $incomeId, null, 'income_removed', self::lineAudit($income), null, $reason, $actor);
+            $this->history($supplier, $income['source_id'], [['income_removed', $incomeId, null, self::lineAudit($income), null]], $reason, $actor);
             return $income['source_id'];
         });
         return $this->detail($supplier, $period, $sourceId);
@@ -242,17 +268,18 @@ final class FundingWorkService
     {
         $sourceId = $this->guard->transaction(function () use ($supplier, $period, $incomeId, $lineId, $expectedVersion, $actor): int {
             $this->lockPeriod($supplier, $period);
-            $income = $this->income($supplier, $incomeId);
+            $income = $this->link($supplier, 'income', $incomeId, false);
             $source = $this->writableSource($supplier, $period, $income['source_id'], null);
-            $this->ledger->lockEntries($supplier, [$income['entry_id'], ...$this->entryIdsOf($supplier, [$lineId])]);
-            $income = $this->income($supplier, $incomeId, true);
+            $this->ledger->lockEntries($supplier, [$income['entry_id'], ...$this->ledger->entryIdsOf($supplier, [$lineId])]);
+            $income = $this->link($supplier, 'income', $incomeId, true);
             self::assertVersion($income, $expectedVersion);
-            $line = $this->lineFor($supplier, $lineId);
-            $this->assertRelinkTarget($income, $line);
-            $this->assertIncomeLine($supplier, $source, $line, $incomeId);
-            $this->db->pdo()->prepare('UPDATE nonprofit_funding_work_incomes SET line_id = ?, linked_line_id = ?, entry_id = ?, account_id = ?, amount_cents = ?, entry_date = ?, row_version = row_version + 1, updated_by = ?, updated_at = NOW() WHERE supplier_id = ? AND id = ?')
-                ->execute([$line['id'], $line['id'], $line['entry_id'], $line['account_id'], $line['amount_cents'], $line['date'], $actor, $supplier, $incomeId]);
-            $this->history($supplier, $source['id'], $incomeId, null, 'income_relinked', self::lineAudit($income), self::lineSnapshot($line), null, $actor);
+            $line = $this->lineFor($supplier, $source['id'], 'income', $lineId);
+            self::assertRelinkTarget($income, $line);
+            self::assertEligible($line);
+            $this->assertIncomeFree($supplier, [$lineId], $incomeId);
+            $this->db->pdo()->prepare('UPDATE nonprofit_funding_work_incomes SET line_id = ?, linked_line_id = ?, entry_id = ?, entry_source_type = ?, entry_source_id = ?, account_id = ?, amount_cents = ?, entry_date = ?, row_version = row_version + 1, updated_by = ?, updated_at = NOW() WHERE supplier_id = ? AND id = ?')
+                ->execute([$line['id'], $line['id'], $line['entry_id'], $line['source_type'], $line['source_id'], $line['account_id'], $line['amount_cents'], $line['date'], $actor, $supplier, $incomeId]);
+            $this->history($supplier, $source['id'], [['income_relinked', $incomeId, null, self::lineAudit($income), self::lineSnapshot($line)]], null, $actor);
             return $source['id'];
         });
         return $this->detail($supplier, $period, $sourceId);
@@ -279,31 +306,33 @@ final class FundingWorkService
             $this->lockPeriod($supplier, $period);
             $source = $this->writableSource($supplier, $period, $sourceId, null);
             $lineIds = array_keys($wanted);
-            $this->ledger->lockEntries($supplier, $this->entryIdsOf($supplier, $lineIds));
-            $lines = $this->ledger->lines($supplier, $lineIds, true);
-            $used = $this->ledger->allocatedOnLines($supplier, $lineIds, null, true);
-            $budgetUsed = $this->allocatedOnSource($supplier, $sourceId, null);
-            $q = $this->db->pdo()->prepare('SELECT active_line_id FROM nonprofit_funding_work_allocations WHERE supplier_id = ? AND source_id = ? AND active_line_id IN ('
-                . implode(',', array_fill(0, count($lineIds), '?')) . ') LOCK IN SHARE MODE');
+            $this->ledger->lockEntries($supplier, $this->ledger->entryIdsOf($supplier, $lineIds));
+            $lines = $this->ledger->linesFor($supplier, $sourceId, 'cost', $lineIds);
+            $used = $this->ledger->allocatedOnLines($supplier, $lineIds);
+            $q = $this->db->pdo()->prepare('SELECT active_line_id FROM nonprofit_funding_work_allocations WHERE supplier_id = ? AND source_id = ? AND active_line_id IN (' . self::marks($lineIds) . ') LOCK IN SHARE MODE');
             $q->execute([$supplier, $sourceId, ...$lineIds]);
             $already = array_flip(array_map('intval', $q->fetchAll(PDO::FETCH_COLUMN)));
             $total = 0;
             foreach ($wanted as $lineId => $item) {
                 $line = $lines[$lineId] ?? throw new FundingWorkException('funding_work_line_not_found', 'Řádek deníku nebyl nalezen.', 404);
-                $this->assertCostLine($source, $line);
+                self::assertEligible($line);
                 if (isset($already[$lineId])) throw new FundingWorkException('funding_work_line_already_allocated', 'Řádek je k tomuto zdroji už přiřazený. Upravte jeho částku.', 409);
                 self::assertCapacity($line, $used[$lineId] ?? 0, $item['amount_cents']);
                 $total += $item['amount_cents'];
             }
-            self::assertBudget($source, $budgetUsed, $total);
-            $insert = $this->db->pdo()->prepare('INSERT INTO nonprofit_funding_work_allocations (supplier_id, source_id, line_id, linked_line_id, entry_id, account_id, line_amount_cents, entry_date, amount_cents, note, created_by)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
+            self::assertBudget($source, $this->allocatedOnSource($supplier, $sourceId, null), $total);
+            $values = [];
+            $params = [];
             foreach ($wanted as $lineId => $item) {
                 $line = $lines[$lineId];
-                $insert->execute([$supplier, $sourceId, $lineId, $lineId, $line['entry_id'], $line['account_id'], $line['amount_cents'], $line['date'], $item['amount_cents'], $item['note'], $actor]);
-                $id = (int) $this->db->pdo()->lastInsertId();
-                $this->history($supplier, $sourceId, null, $id, 'allocation_created', null, self::lineSnapshot($line) + $item, null, $actor);
+                $values[] = '(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)';
+                array_push($params, $supplier, $sourceId, $lineId, $lineId, $line['entry_id'], $line['source_type'], $line['source_id'], $line['account_id'],
+                    $line['amount_cents'], $line['date'], $line['credit_notes'], $item['amount_cents'], $item['note'], $actor);
             }
+            $this->db->pdo()->prepare('INSERT INTO nonprofit_funding_work_allocations (supplier_id, source_id, line_id, linked_line_id, entry_id, entry_source_type, entry_source_id, account_id, line_amount_cents, entry_date, credit_notes_seen, amount_cents, note, created_by)
+                VALUES ' . implode(', ', $values))->execute($params);
+            $ids = $this->activeIds($supplier, 'cost', $sourceId, $lineIds);
+            $this->history($supplier, $sourceId, array_map(static fn(int $lineId) => ['allocation_created', null, $ids[$lineId], null, self::lineSnapshot($lines[$lineId]) + $wanted[$lineId]], $lineIds), null, $actor);
         });
         return $this->detail($supplier, $period, $sourceId);
     }
@@ -314,22 +343,23 @@ final class FundingWorkService
         $note = self::note($note);
         $sourceId = $this->guard->transaction(function () use ($supplier, $period, $allocationId, $amount, $note, $expectedVersion, $actor): int {
             $this->lockPeriod($supplier, $period);
-            $allocation = $this->allocation($supplier, $allocationId);
+            $allocation = $this->link($supplier, 'cost', $allocationId, false);
             $source = $this->writableSource($supplier, $period, $allocation['source_id'], null);
             $this->ledger->lockEntries($supplier, [$allocation['entry_id']]);
-            $allocation = $this->allocation($supplier, $allocationId, true);
+            $allocation = $this->link($supplier, 'cost', $allocationId, true);
             self::assertVersion($allocation, $expectedVersion);
             if ($amount > $allocation['amount_cents']) {
                 // Zvýšení musí projít kapacitou řádku i rozpočtem; snížení je vždy v pořádku.
-                $line = $this->lineFor($supplier, (int) ($allocation['line_id'] ?? 0));
-                $this->assertCostLine($source, $line);
-                self::assertCapacity($line, $this->ledger->allocatedOnLines($supplier, [$line['id']], $allocationId, true)[$line['id']] ?? 0, $amount);
+                if ($allocation['line_id'] === null) throw new FundingWorkException('funding_work_relink_required', 'Řádek deníku se změnil. Nejdřív vazbu navažte znovu.', 409);
+                $line = $this->lineFor($supplier, $source['id'], 'cost', $allocation['line_id']);
+                self::assertEligible($line);
+                self::assertCapacity($line, $this->ledger->allocatedOnLines($supplier, [$line['id']], $allocationId)[$line['id']] ?? 0, $amount);
                 self::assertBudget($source, $this->allocatedOnSource($supplier, $source['id'], $allocationId), $amount);
             }
             $this->db->pdo()->prepare('UPDATE nonprofit_funding_work_allocations SET amount_cents = ?, note = ?, row_version = row_version + 1, updated_by = ?, updated_at = NOW() WHERE supplier_id = ? AND id = ?')
                 ->execute([$amount, $note, $actor, $supplier, $allocationId]);
-            $this->history($supplier, $source['id'], null, $allocationId, 'allocation_updated',
-                ['amount_cents' => $allocation['amount_cents'], 'note' => $allocation['note']], ['amount_cents' => $amount, 'note' => $note], null, $actor);
+            $this->history($supplier, $source['id'], [['allocation_updated', null, $allocationId,
+                ['amount_cents' => $allocation['amount_cents'], 'note' => $allocation['note']], ['amount_cents' => $amount, 'note' => $note]]], null, $actor);
             return $source['id'];
         });
         return $this->detail($supplier, $period, $sourceId);
@@ -340,48 +370,49 @@ final class FundingWorkService
         $reason = self::reason($reason, true);
         $sourceId = $this->guard->transaction(function () use ($supplier, $period, $allocationId, $expectedVersion, $reason, $actor): int {
             $this->lockPeriod($supplier, $period);
-            $allocation = $this->allocation($supplier, $allocationId);
+            $allocation = $this->link($supplier, 'cost', $allocationId, false);
             $source = $this->writableSource($supplier, $period, $allocation['source_id'], null);
-            $allocation = $this->allocation($supplier, $allocationId, true);
+            $allocation = $this->link($supplier, 'cost', $allocationId, true);
             self::assertVersion($allocation, $expectedVersion);
             $this->db->pdo()->prepare("UPDATE nonprofit_funding_work_allocations SET status = 'removed', row_version = row_version + 1, updated_by = ?, updated_at = NOW() WHERE supplier_id = ? AND id = ?")
                 ->execute([$actor, $supplier, $allocationId]);
-            $this->history($supplier, $source['id'], null, $allocationId, 'allocation_removed', self::lineAudit($allocation) + ['amount_cents' => $allocation['amount_cents']], null, $reason, $actor);
+            $this->history($supplier, $source['id'], [['allocation_removed', null, $allocationId, self::lineAudit($allocation) + ['amount_cents' => $allocation['amount_cents']], null]], $reason, $actor);
             return $source['id'];
         });
         return $this->detail($supplier, $period, $sourceId);
     }
 
     /**
-     * Navázání přiřazení na aktuální řádek po přeúčtování nebo změně řádku. Cíl je týž řádek
-     * (potvrzení změny) nebo řádek téhož zápisu se stejným účtem a stranou; stornovaný zápis
-     * se znovu nenavazuje, přiřazení se odebere.
+     * Navázání přiřazení na aktuální řádek po přeúčtování, změně řádku nebo dobropisu. Cíl je týž řádek
+     * (potvrzení změny), řádek téhož zápisu, nebo řádek zápisu téhož dokladu, vždy se stejným účtem.
+     * Stornovaný zápis se znovu nenavazuje, přiřazení se odebere.
      */
     public function relinkAllocation(int $supplier, int $period, int $allocationId, int $lineId, mixed $amount, int $expectedVersion, int $actor): array
     {
         $amount = $amount === null ? null : self::cents($amount);
         $sourceId = $this->guard->transaction(function () use ($supplier, $period, $allocationId, $lineId, $amount, $expectedVersion, $actor): int {
             $this->lockPeriod($supplier, $period);
-            $allocation = $this->allocation($supplier, $allocationId);
+            $allocation = $this->link($supplier, 'cost', $allocationId, false);
             $source = $this->writableSource($supplier, $period, $allocation['source_id'], null);
-            $this->ledger->lockEntries($supplier, [$allocation['entry_id'], ...$this->entryIdsOf($supplier, [$lineId])]);
-            $allocation = $this->allocation($supplier, $allocationId, true);
+            $this->ledger->lockEntries($supplier, [$allocation['entry_id'], ...$this->ledger->entryIdsOf($supplier, [$lineId])]);
+            $allocation = $this->link($supplier, 'cost', $allocationId, true);
             self::assertVersion($allocation, $expectedVersion);
-            $line = $this->lineFor($supplier, $lineId);
-            $this->assertRelinkTarget($allocation, $line);
-            $this->assertCostLine($source, $line);
+            $line = $this->lineFor($supplier, $source['id'], 'cost', $lineId);
+            self::assertRelinkTarget($allocation, $line);
+            self::assertEligible($line);
             $amount ??= $allocation['amount_cents'];
             if ($lineId !== $allocation['linked_line_id']) {
                 $q = $this->db->pdo()->prepare('SELECT 1 FROM nonprofit_funding_work_allocations WHERE supplier_id = ? AND source_id = ? AND active_line_id = ? LOCK IN SHARE MODE');
                 $q->execute([$supplier, $source['id'], $lineId]);
                 if ($q->fetchColumn() !== false) throw new FundingWorkException('funding_work_line_already_allocated', 'Řádek je k tomuto zdroji už přiřazený. Upravte jeho částku.', 409);
             }
-            self::assertCapacity($line, $this->ledger->allocatedOnLines($supplier, [$lineId], $allocationId, true)[$lineId] ?? 0, $amount);
+            self::assertCapacity($line, $this->ledger->allocatedOnLines($supplier, [$lineId], $allocationId)[$lineId] ?? 0, $amount);
             self::assertBudget($source, $this->allocatedOnSource($supplier, $source['id'], $allocationId), $amount);
-            $this->db->pdo()->prepare('UPDATE nonprofit_funding_work_allocations SET line_id = ?, linked_line_id = ?, entry_id = ?, account_id = ?, line_amount_cents = ?, entry_date = ?, amount_cents = ?, row_version = row_version + 1, updated_by = ?, updated_at = NOW() WHERE supplier_id = ? AND id = ?')
-                ->execute([$line['id'], $line['id'], $line['entry_id'], $line['account_id'], $line['amount_cents'], $line['date'], $amount, $actor, $supplier, $allocationId]);
-            $this->history($supplier, $source['id'], null, $allocationId, 'allocation_relinked', self::lineAudit($allocation) + ['amount_cents' => $allocation['amount_cents']],
-                self::lineSnapshot($line) + ['amount_cents' => $amount], null, $actor);
+            $this->db->pdo()->prepare('UPDATE nonprofit_funding_work_allocations SET line_id = ?, linked_line_id = ?, entry_id = ?, entry_source_type = ?, entry_source_id = ?, account_id = ?, line_amount_cents = ?, entry_date = ?, credit_notes_seen = ?, amount_cents = ?,
+                row_version = row_version + 1, updated_by = ?, updated_at = NOW() WHERE supplier_id = ? AND id = ?')
+                ->execute([$line['id'], $line['id'], $line['entry_id'], $line['source_type'], $line['source_id'], $line['account_id'], $line['amount_cents'], $line['date'], $line['credit_notes'], $amount, $actor, $supplier, $allocationId]);
+            $this->history($supplier, $source['id'], [['allocation_relinked', null, $allocationId, self::lineAudit($allocation) + ['amount_cents' => $allocation['amount_cents']],
+                self::lineSnapshot($line) + ['amount_cents' => $amount]]], null, $actor);
             return $source['id'];
         });
         return $this->detail($supplier, $period, $sourceId);
@@ -389,62 +420,40 @@ final class FundingWorkService
 
     // ---------------------------------------------------------------- kontroly
 
+    /** @param list<int> $lineIds */
     private function attachIncomes(int $supplier, array $source, array $lineIds, int $actor): void
     {
-        $this->ledger->lockEntries($supplier, $this->entryIdsOf($supplier, $lineIds));
-        $lines = $this->ledger->lines($supplier, $lineIds, true);
-        $insert = $this->db->pdo()->prepare('INSERT INTO nonprofit_funding_work_incomes (supplier_id, source_id, line_id, linked_line_id, entry_id, account_id, amount_cents, entry_date, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)');
+        $this->ledger->lockEntries($supplier, $this->ledger->entryIdsOf($supplier, $lineIds));
+        $lines = $this->ledger->linesFor($supplier, $source['id'], 'income', $lineIds);
+        foreach ($lineIds as $lineId) self::assertEligible($lines[$lineId] ?? throw new FundingWorkException('funding_work_line_not_found', 'Řádek deníku nebyl nalezen.', 404));
+        $this->assertIncomeFree($supplier, $lineIds, null);
+        $values = [];
+        $params = [];
         foreach ($lineIds as $lineId) {
-            $line = $lines[$lineId] ?? throw new FundingWorkException('funding_work_line_not_found', 'Řádek deníku nebyl nalezen.', 404);
-            $this->assertIncomeLine($supplier, $source, $line, null);
-            $insert->execute([$supplier, $source['id'], $lineId, $lineId, $line['entry_id'], $line['account_id'], $line['amount_cents'], $line['date'], $actor]);
-            $this->history($supplier, $source['id'], (int) $this->db->pdo()->lastInsertId(), null, 'income_added', null, self::lineSnapshot($line), null, $actor);
+            $line = $lines[$lineId];
+            $values[] = '(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)';
+            array_push($params, $supplier, $source['id'], $lineId, $lineId, $line['entry_id'], $line['source_type'], $line['source_id'], $line['account_id'], $line['amount_cents'], $line['date'], $actor);
         }
+        $this->db->pdo()->prepare('INSERT INTO nonprofit_funding_work_incomes (supplier_id, source_id, line_id, linked_line_id, entry_id, entry_source_type, entry_source_id, account_id, amount_cents, entry_date, created_by) VALUES ' . implode(', ', $values))
+            ->execute($params);
+        $ids = $this->activeIds($supplier, 'income', $source['id'], $lineIds);
+        $this->history($supplier, $source['id'], array_map(static fn(int $lineId) => ['income_added', $ids[$lineId], null, null, self::lineSnapshot($lines[$lineId])], $lineIds), null, $actor);
     }
 
-    private function assertIncomeLine(int $supplier, array $source, array $line, ?int $exceptIncome): void
+    /** Výnosový řádek smí patřit jen jednomu aktivnímu zdroji (pojistkou je i unikátní index). @param list<int> $lineIds */
+    private function assertIncomeFree(int $supplier, array $lineIds, ?int $exceptIncome): void
     {
-        $this->assertPostedLine($source, $line);
-        if ($line['side'] !== 'credit' || !str_starts_with($line['account_code'], '6')) {
-            throw new FundingWorkException('funding_work_line_ineligible', 'Výnos zdroje musí být řádek na straně Dal na účtu třídy 6.');
-        }
-        $q = $this->db->pdo()->prepare('SELECT source_id FROM nonprofit_funding_work_incomes WHERE supplier_id = ? AND active_line_id = ? AND id <> ? LOCK IN SHARE MODE');
-        $q->execute([$supplier, $line['id'], $exceptIncome ?? 0]);
+        $q = $this->db->pdo()->prepare('SELECT 1 FROM nonprofit_funding_work_incomes WHERE supplier_id = ? AND id <> ? AND active_line_id IN (' . self::marks($lineIds) . ') LIMIT 1 LOCK IN SHARE MODE');
+        $q->execute([$supplier, $exceptIncome ?? 0, ...$lineIds]);
         if ($q->fetchColumn() !== false) throw new FundingWorkException('funding_work_income_used', 'Výnosový řádek už patří jinému zdroji.', 409);
     }
 
-    private function assertCostLine(array $source, array $line): void
+    /** Důvod nezpůsobilosti z FundingWorkLedger::problemSql (jediné pravidlo pro nabídku, stav i zápis). */
+    private static function assertEligible(array $line): void
     {
-        $this->assertPostedLine($source, $line);
-        // Daň z příjmů (59x) není způsobilý náklad zdroje, shodně s čerpáním fondů a investičních zdrojů (CapitalLedger::cost).
-        if ($line['side'] !== 'debit' || !str_starts_with($line['account_code'], '5') || str_starts_with($line['account_code'], '59')) {
-            throw new FundingWorkException('funding_work_line_ineligible', 'Náklad zdroje musí být řádek na straně Má dáti na nákladovém účtu třídy 5.');
-        }
-        $problem = self::conditionProblem($source, $line);
-        if ($problem !== null) throw new FundingWorkException('funding_work_line_ineligible', $problem);
-    }
-
-    private function assertPostedLine(array $source, array $line): void
-    {
-        if (!$line['posted']) throw new FundingWorkException('funding_work_line_ineligible', 'Řádek není zaúčtovaný.');
-        if ($line['reversed'] || $line['is_reversal']) throw new FundingWorkException('funding_work_line_reversed', 'Stornovaný zápis ani storno nelze přiřadit.', 409);
-        if ($line['amount_cents'] <= 0) throw new FundingWorkException('funding_work_line_ineligible', 'Řádek musí mít kladnou částku.');
-        if ($line['period_id'] !== $source['period_id']) throw new FundingWorkException('funding_work_line_other_period', 'Řádek patří do jiného účetního období než zdroj.');
-    }
-
-    /** Podmínky zdroje pro náklad: datum, účet a druh činnosti. Null = splněno. */
-    private static function conditionProblem(array $source, array $line): ?string
-    {
-        if ($line['date'] < $source['valid_from'] || $line['date'] > $source['valid_to']) return 'Datum nákladu je mimo období způsobilosti zdroje.';
-        if ($source['account_prefixes'] !== []) {
-            $match = false;
-            foreach ($source['account_prefixes'] as $prefix) if (str_starts_with($line['account_code'], $prefix)) $match = true;
-            if (!$match) return 'Účet nákladu nepatří mezi způsobilé účty zdroje.';
-        }
-        if ($source['activity_kind_ids'] !== [] && ($line['activity_split'] || !in_array($line['activity_kind_id'], $source['activity_kind_ids'], true))) {
-            return 'Druh činnosti nákladu neodpovídá zdroji.';
-        }
-        return null;
+        if ($line['problem'] === null) return;
+        [$code, $message, $status] = self::PROBLEMS[$line['problem']] ?? ['funding_work_line_ineligible', 'Řádek nelze přiřadit.', 422];
+        throw new FundingWorkException($code, $message, $status);
     }
 
     private static function assertCapacity(array $line, int $usedByOthers, int $amount): void
@@ -468,113 +477,161 @@ final class FundingWorkService
         if ($row['row_version'] !== $expected) throw new FundingWorkException('funding_work_version_conflict', 'Záznam mezitím změnil jiný uživatel. Načtěte aktuální stav.', 409);
     }
 
-    /** Cíl navázání: týž řádek, nebo řádek téhož zápisu se stejným účtem a stranou. */
-    private function assertRelinkTarget(array $link, array $line): void
+    /** Cíl navázání: týž řádek, nebo řádek téhož zápisu či zápisu téhož dokladu, se stejným účtem. */
+    private static function assertRelinkTarget(array $link, array $line): void
     {
         if ($line['reversed'] || $line['is_reversal']) throw new FundingWorkException('funding_work_line_reversed', 'Stornovaný zápis nelze znovu navázat. Vazbu odeberte.', 409);
         if ($line['id'] === $link['linked_line_id'] && $link['line_id'] !== null) return;
-        if ($line['entry_id'] !== $link['entry_id'] || $line['account_id'] !== $link['account_id']) {
-            throw new FundingWorkException('funding_work_relink_invalid', 'Znovu navázat lze jen na řádek téhož zápisu se stejným účtem.');
-        }
+        if ($line['account_id'] === $link['account_id'] && self::sameDocument($link, $line)) return;
+        throw new FundingWorkException('funding_work_relink_invalid', 'Znovu navázat lze jen na řádek téhož zápisu nebo dokladu se stejným účtem.');
+    }
+
+    private static function sameDocument(array $link, array $line): bool
+    {
+        return $line['entry_id'] === $link['entry_id']
+            || ($link['entry_source_id'] !== null && $line['source_type'] === $link['entry_source_type'] && $line['source_id'] === $link['entry_source_id']);
     }
 
     // ---------------------------------------------------------------- stav vazeb
 
-    /** @param list<int> $sourceIds @return array<int,list<array<string,mixed>>> */
-    private function incomes(int $supplier, array $sourceIds): array
+    /**
+     * Vazby zdrojů se stavem podle snímku (jediný výpočet stavu pro přehled i detail). Důvod ke kontrole:
+     * removed (řádek smazán přeúčtováním), reversed (storno), line_changed (zápis, účet, datum nebo částka),
+     * důvod nezpůsobilosti z FundingWorkLedger::problemSql (např. zúžené podmínky zdroje), overallocated
+     * (řádek nese víc, než má) a credit_note (nový dobropis k přijaté faktuře).
+     */
+    private static function linksSql(string $kind, int $count): string
+    {
+        $table = $kind === 'income' ? 'nonprofit_funding_work_incomes x FORCE INDEX (idx_nfwi_source)' : 'nonprofit_funding_work_allocations x FORCE INDEX (idx_nfwa_source)';
+        $snapshot = $kind === 'income' ? 'x.amount_cents' : 'x.line_amount_cents';
+        $current = 'ROUND(IF(l.is_red_storno = 1, -l.amount, l.amount) * 100)';
+        $marks = implode(',', array_fill(0, $count, '?'));
+        $extra = $kind === 'income' ? 'NULL' : "CASE WHEN COALESCE(ov.used, 0) > $current THEN 'overallocated'
+            WHEN " . FundingWorkLedger::creditNotesSql() . " > x.credit_notes_seen THEN 'credit_note' ELSE NULL END";
+        // Přečerpání řádku: součet přiřazení všech aktivních zdrojů jednou za řádek (stejný výpočet jako
+        // FundingWorkLedger::allocatedSql), ne korelovaně pro každou vazbu (110 tis. vazeb: ~4 s navíc).
+        $used = $kind === 'income' ? '' : "LEFT JOIN (SELECT y.linked_line_id, SUM(y.amount_cents) AS used FROM nonprofit_funding_work_allocations y
+                JOIN nonprofit_funding_work_sources ys ON ys.supplier_id = y.supplier_id AND ys.id = y.source_id AND ys.status = 'active'
+                WHERE y.supplier_id = ? AND y.status = 'active' AND y.linked_line_id IN (SELECT x2.linked_line_id FROM nonprofit_funding_work_allocations x2
+                    WHERE x2.supplier_id = ? AND x2.status = 'active' AND x2.source_id IN ($marks))
+                GROUP BY y.linked_line_id) ov ON ov.linked_line_id = x.linked_line_id";
+        return 'SELECT x.*, xa.account_code AS snapshot_account_code, ' . FundingWorkLedger::LINE_COLUMNS . ",
+            CASE WHEN l.id IS NULL THEN 'removed'
+                WHEN e.reversed_by IS NOT NULL OR EXISTS(SELECT 1 FROM journal_entries r3 WHERE r3.supplier_id = e.supplier_id AND r3.reversed_by = e.id) THEN 'reversed'
+                WHEN l.entry_id <> x.entry_id OR l.account_id <> x.account_id OR e.entry_date <> x.entry_date OR $current <> $snapshot THEN 'line_changed'
+                ELSE COALESCE((" . FundingWorkLedger::problemSql($kind) . "), $extra) END AS review_reason
+            FROM $table
+            JOIN nonprofit_funding_work_sources s ON s.supplier_id = x.supplier_id AND s.id = x.source_id
+            LEFT JOIN chart_of_accounts xa ON xa.supplier_id = x.supplier_id AND xa.id = x.account_id
+            LEFT JOIN journal_entry_lines l ON l.id = x.line_id AND l.supplier_id = x.supplier_id
+            LEFT JOIN journal_entries e ON e.id = l.entry_id AND e.supplier_id = l.supplier_id
+            LEFT JOIN chart_of_accounts a ON a.id = l.account_id AND a.supplier_id = l.supplier_id
+            LEFT JOIN dimension_types t ON t.supplier_id = x.supplier_id AND t.system_key = 'activity_kind'
+            LEFT JOIN journal_entry_line_dimensions d ON d.line_id = l.id AND d.dimension_type_id = t.id
+            $used
+            WHERE x.supplier_id = ? AND x.status = 'active' AND x.source_id IN ($marks)";
+    }
+
+    /** Parametry k linksSql (u nákladů nejdřív součet přiřazení po řádcích). @param list<int> $sourceIds */
+    private static function linksParams(string $kind, int $supplier, array $sourceIds): array
+    {
+        return $kind === 'income' ? [$supplier, ...$sourceIds] : [$supplier, $supplier, ...$sourceIds, $supplier, ...$sourceIds];
+    }
+
+    /** @param list<int> $sourceIds @return list<array<string,mixed>> */
+    private function links(int $supplier, string $kind, array $sourceIds, ?int $page): array
     {
         if ($sourceIds === []) return [];
-        $q = $this->db->pdo()->prepare("SELECT i.*, a.account_code FROM nonprofit_funding_work_incomes i LEFT JOIN chart_of_accounts a ON a.supplier_id = i.supplier_id AND a.id = i.account_id
-            WHERE i.supplier_id = ? AND i.status = 'active' AND i.source_id IN (" . implode(',', array_fill(0, count($sourceIds), '?')) . ') ORDER BY i.entry_date, i.id');
-        $q->execute([$supplier, ...$sourceIds]);
-        $rows = array_map(self::linkRow(...), $q->fetchAll(PDO::FETCH_ASSOC));
-        $current = $this->ledger->lines($supplier, array_values(array_filter(array_map(static fn(array $r) => $r['line_id'], $rows))));
+        $sql = self::linksSql($kind, count($sourceIds)) . ' ORDER BY x.entry_date, x.id';
+        if ($page !== null) $sql .= ' LIMIT ' . (self::PAGE + 1) . ' OFFSET ' . (($page - 1) * self::PAGE);
+        $q = $this->db->pdo()->prepare($sql);
+        $q->execute(self::linksParams($kind, $supplier, $sourceIds));
         $out = [];
-        foreach ($rows as $row) {
-            $line = $row['line_id'] === null ? null : ($current[$row['line_id']] ?? null);
-            $row['state'] = self::linkState($row, $line, $row['amount_cents'], null);
-            $row['line'] = $line;
-            $out[$row['source_id']][] = $row;
+        foreach ($q->fetchAll(PDO::FETCH_ASSOC) as $r) {
+            $row = self::linkRow($r);
+            $row['account_code'] = $r['snapshot_account_code'];
+            $row['line'] = FundingWorkLedger::line($r);
+            $row['review_reason'] = $r['review_reason'];
+            $row['state'] = self::state($r['review_reason']);
+            $out[] = $row;
         }
         return $out;
     }
 
-    /** @param array<int,array<string,mixed>> $sources @return array<int,list<array<string,mixed>>> */
-    private function allocations(int $supplier, array $sources): array
+    private static function state(?string $reason): string
     {
-        if ($sources === []) return [];
+        return match ($reason) { null => self::STATE_OK, 'removed' => self::STATE_REMOVED, 'reversed' => self::STATE_REVERSED, default => self::STATE_CHANGED };
+    }
+
+    /** Souhrny zdrojů v SQL nad stejným výpočtem stavu jako detail. @param array<int,array<string,mixed>> $sources */
+    private function totals(int $supplier, array $sources): array
+    {
         $ids = array_keys($sources);
-        $q = $this->db->pdo()->prepare("SELECT x.*, a.account_code FROM nonprofit_funding_work_allocations x LEFT JOIN chart_of_accounts a ON a.supplier_id = x.supplier_id AND a.id = x.account_id
-            WHERE x.supplier_id = ? AND x.status = 'active' AND x.source_id IN (" . implode(',', array_fill(0, count($ids), '?')) . ') ORDER BY x.entry_date, x.id');
-        $q->execute([$supplier, ...$ids]);
-        $rows = array_map(self::linkRow(...), $q->fetchAll(PDO::FETCH_ASSOC));
-        $lineIds = array_values(array_filter(array_map(static fn(array $r) => $r['line_id'], $rows)));
-        $current = $this->ledger->lines($supplier, $lineIds);
-        $used = $this->ledger->allocatedOnLines($supplier, $lineIds);
         $out = [];
-        foreach ($rows as $row) {
-            $line = $row['line_id'] === null ? null : ($current[$row['line_id']] ?? null);
-            $state = self::linkState($row, $line, $row['line_amount_cents'], $sources[$row['source_id']]);
-            if ($state === self::STATE_OK && $line !== null && ($used[$line['id']] ?? 0) > $line['amount_cents']) $state = self::STATE_CHANGED;
-            $row['state'] = $state;
-            $row['line'] = $line;
-            $out[$row['source_id']][] = $row;
+        foreach ($sources as $id => $source) {
+            $out[$id] = ['budget_cents' => $source['budget_cents'], 'received_cents' => 0, 'allocated_cents' => 0, 'documented_cents' => 0, 'remaining_cents' => $source['budget_cents'],
+                'review_count' => 0, 'review_cents' => 0, 'income_count' => 0, 'allocation_count' => 0];
+        }
+        if ($ids === []) return $out;
+        foreach (['income', 'cost'] as $kind) {
+            $q = $this->db->pdo()->prepare('SELECT z.source_id, COUNT(*) AS cnt, SUM(z.amount_cents) AS total, SUM(IF(z.review_reason IS NULL, z.amount_cents, 0)) AS ok_cents,
+                SUM(z.review_reason IS NOT NULL) AS review_cnt, SUM(IF(z.review_reason IS NULL, 0, z.amount_cents)) AS review_cents
+                FROM (' . self::linksSql($kind, count($ids)) . ') z GROUP BY z.source_id');
+            $q->execute(self::linksParams($kind, $supplier, $ids));
+            foreach ($q->fetchAll(PDO::FETCH_ASSOC) as $r) {
+                $t = &$out[(int) $r['source_id']];
+                if ($kind === 'income') {
+                    $t['income_count'] = (int) $r['cnt'];
+                    $t['received_cents'] = (int) $r['ok_cents'];
+                } else {
+                    $t['allocation_count'] = (int) $r['cnt'];
+                    $t['allocated_cents'] = (int) $r['total'];
+                    $t['documented_cents'] = (int) $r['ok_cents'];
+                    $t['review_cents'] = (int) $r['review_cents'];
+                    $t['remaining_cents'] = $t['budget_cents'] - (int) $r['total'];
+                }
+                $t['review_count'] += (int) $r['review_cnt'];
+                unset($t);
+            }
         }
         return $out;
     }
 
-    /** Stav vazby podle snímku: odstraněný řádek, storno, změna řádku nebo podmínek zdroje, jinak v pořádku. */
-    private static function linkState(array $row, ?array $line, int $snapshotAmount, ?array $source): string
+    /** Pro vazby ke kontrole nabídne řádky téhož zápisu nebo dokladu se stejným účtem (jedním dotazem). */
+    private function attachRelinkCandidates(int $supplier, array &$incomes, array &$allocations): void
     {
-        if ($line === null) return self::STATE_REMOVED;
-        if ($line['reversed'] || $line['is_reversal']) return self::STATE_REVERSED;
-        if (!$line['posted'] || $line['amount_cents'] !== $snapshotAmount || $line['account_id'] !== $row['account_id'] || $line['date'] !== $row['entry_date']
-            || $line['entry_id'] !== $row['entry_id'] || $line['period_id'] !== ($source['period_id'] ?? $line['period_id'])) return self::STATE_CHANGED;
-        if ($source !== null && self::conditionProblem($source, $line) !== null) return self::STATE_CHANGED;
-        return self::STATE_OK;
-    }
-
-    private static function totals(array $source, array $incomes, array $allocations): array
-    {
-        $received = 0; $incomeReview = 0; $allocated = 0; $documented = 0; $review = 0; $reviewCents = 0;
-        foreach ($incomes as $income) {
-            if ($income['state'] === self::STATE_OK) $received += $income['amount_cents'];
-            else $incomeReview++;
-        }
-        foreach ($allocations as $allocation) {
-            $allocated += $allocation['amount_cents'];
-            if ($allocation['state'] === self::STATE_OK) $documented += $allocation['amount_cents'];
-            else { $review++; $reviewCents += $allocation['amount_cents']; }
-        }
-        return ['budget_cents' => $source['budget_cents'], 'received_cents' => $received, 'allocated_cents' => $allocated, 'documented_cents' => $documented,
-            'remaining_cents' => $source['budget_cents'] - $allocated, 'review_count' => $review + $incomeReview, 'review_cents' => $reviewCents,
-            'income_count' => count($incomes), 'allocation_count' => count($allocations)];
-    }
-
-    /** Pro vazby ke kontrole nabídne řádky téhož zápisu se stejným účtem (jedním dotazem pro všechny zápisy). */
-    private function attachRelinkCandidates(int $supplier, array $source, array &$incomes, array &$allocations): void
-    {
-        $entryIds = [];
-        foreach ([...$incomes, ...$allocations] as $row) if ($row['state'] === self::STATE_REMOVED || $row['state'] === self::STATE_CHANGED) $entryIds[] = $row['entry_id'];
-        $byEntry = $this->ledger->entryLines($supplier, $entryIds);
-        $pick = static function (array $row) use ($byEntry): array {
-            if ($row['state'] !== self::STATE_REMOVED && $row['state'] !== self::STATE_CHANGED) return [];
-            return array_values(array_filter($byEntry[$row['entry_id']] ?? [], static fn(array $line) => $line['account_id'] === $row['account_id']
-                && $line['posted'] && !$line['reversed'] && !$line['is_reversal'] && $line['amount_cents'] > 0));
-        };
+        $open = static fn(array $row) => $row['state'] === self::STATE_REMOVED || $row['state'] === self::STATE_CHANGED;
+        $pending = array_values(array_filter([...$incomes, ...$allocations], $open));
+        $lines = $this->ledger->relinkCandidates($supplier, $pending);
+        $pick = static fn(array $row) => $open($row) ? array_values(array_filter($lines, static fn(array $line) => $line['account_id'] === $row['account_id'] && self::sameDocument($row, $line))) : [];
         foreach ($incomes as &$income) $income['relink_candidates'] = $pick($income);
         unset($income);
         foreach ($allocations as &$allocation) $allocation['relink_candidates'] = $pick($allocation);
         unset($allocation);
     }
 
-    /** Výnos, který je i členem potvrzeného zdroje (J6), nese jeho klíč; jde jen o upozornění. */
-    private function attachConfirmedLinks(int $supplier, array &$incomes): void
+    /** Výnos ve zdroji J6 i náklad čerpaný v potvrzeném J6 nesou klíč zdroje; jde jen o upozornění. */
+    private function attachConfirmedLinks(int $supplier, array &$incomes, array &$allocations): void
     {
         $members = [];
         foreach ($this->confirmed->latest($supplier) as $key => $row) foreach ($row['policy']['source_members'] as $member) $members[$member] = (string) $key;
         foreach ($incomes as &$income) $income['confirmed_source_key'] = $members['line:' . $income['linked_line_id']] ?? null;
         unset($income);
+        $uses = $allocations === [] ? [] : $this->confirmedCostUses($supplier);
+        foreach ($allocations as &$allocation) $allocation['confirmed_source_key'] = $uses[$allocation['linked_line_id']] ?? null;
+        unset($allocation);
+    }
+
+    /** Nákladové řádky čerpané potvrzenými zdroji J6 (aktuální i neaktuální posouzení). @return array<int,string> */
+    private function confirmedCostUses(int $supplier): array
+    {
+        $out = [];
+        foreach ($this->confirmedUse->read($supplier)['sources'] as $source) {
+            foreach ($source['uses'] as $use) {
+                if (preg_match('/^line:([1-9][0-9]*)$/D', (string) ($use['cost']['id'] ?? ''), $m)) $out[(int) $m[1]] ??= (string) $source['source_key'];
+            }
+        }
+        return $out;
     }
 
     /** Stav úhrady přijaté faktury, ze které náklad pochází (jen informace, SSOT PurchaseSettledExpr). */
@@ -585,7 +642,7 @@ final class FundingWorkService
         $states = [];
         if ($ids !== []) {
             $ids = array_values(array_unique($ids));
-            $q = $this->db->pdo()->prepare('SELECT pi.id, pi.amount_to_pay, ' . PurchaseSettledExpr::settled('pi') . ' AS settled FROM purchase_invoices pi WHERE pi.supplier_id = ? AND pi.id IN (' . implode(',', array_fill(0, count($ids), '?')) . ')');
+            $q = $this->db->pdo()->prepare('SELECT pi.id, pi.amount_to_pay, ' . PurchaseSettledExpr::settled('pi') . ' AS settled FROM purchase_invoices pi WHERE pi.supplier_id = ? AND pi.id IN (' . self::marks($ids) . ')');
             $q->execute([$supplier, ...$ids]);
             foreach ($q->fetchAll(PDO::FETCH_ASSOC) as $r) {
                 $toPay = (float) $r['amount_to_pay']; $settled = (float) $r['settled'];
@@ -617,16 +674,27 @@ final class FundingWorkService
         if (AccountingPeriodStatus::isClosed($row['status'])) throw new FundingWorkException('funding_work_period_closed', 'V uzavřeném účetním období nelze měnit evidenci čerpání.', 409);
     }
 
-    /** @return array<int,array<string,mixed>> */
+    /**
+     * Zdroje s popisem poskytovatele. Zamykací čtení se týká jen tabulky zdrojů; popis poskytovatele
+     * se čte zvlášť bez zámku.
+     * @return array<int,array<string,mixed>>
+     */
     private function sourceRows(int $supplier, string $where, array $params, bool $lock = false): array
     {
-        $q = $this->db->pdo()->prepare('SELECT s.*, c.company_name, c.first_name, c.last_name FROM nonprofit_funding_work_sources s
-            LEFT JOIN clients c ON c.supplier_id = s.supplier_id AND c.id = s.provider_id WHERE s.supplier_id = ? AND ' . $where . ' ORDER BY s.status, s.title, s.id' . ($lock ? ' FOR UPDATE' : ''));
+        $q = $this->db->pdo()->prepare('SELECT s.* FROM nonprofit_funding_work_sources s WHERE s.supplier_id = ? AND ' . $where . ' ORDER BY s.status, s.title, s.id' . ($lock ? ' FOR UPDATE' : ''));
         $q->execute([$supplier, ...$params]);
+        $rows = $q->fetchAll(PDO::FETCH_ASSOC);
+        $labels = [];
+        $providers = array_values(array_unique(array_map(static fn(array $r) => (int) $r['provider_id'], $rows)));
+        if ($providers !== []) {
+            $q = $this->db->pdo()->prepare('SELECT id, company_name, first_name, last_name FROM clients WHERE supplier_id = ? AND id IN (' . self::marks($providers) . ')');
+            $q->execute([$supplier, ...$providers]);
+            foreach ($q->fetchAll(PDO::FETCH_ASSOC) as $c) $labels[(int) $c['id']] = self::partyLabel($c);
+        }
         $out = [];
-        foreach ($q->fetchAll(PDO::FETCH_ASSOC) as $r) {
+        foreach ($rows as $r) {
             $out[(int) $r['id']] = [
-                'id' => (int) $r['id'], 'period_id' => (int) $r['period_id'], 'provider_id' => (int) $r['provider_id'], 'provider_label' => self::partyLabel($r),
+                'id' => (int) $r['id'], 'period_id' => (int) $r['period_id'], 'provider_id' => (int) $r['provider_id'], 'provider_label' => $labels[(int) $r['provider_id']] ?? '',
                 'kind' => $r['kind'], 'title' => $r['title'], 'contract_ref' => $r['contract_ref'], 'budget_cents' => (int) $r['budget_cents'],
                 'valid_from' => $r['valid_from'], 'valid_to' => $r['valid_to'],
                 'activity_kind_ids' => array_map('intval', json_decode($r['activity_kind_ids'], true) ?: []),
@@ -652,38 +720,31 @@ final class FundingWorkService
         return $source;
     }
 
-    private function income(int $supplier, int $id, bool $lock = false): array
+    private function link(int $supplier, string $kind, int $id, bool $lock): array
     {
-        $q = $this->db->pdo()->prepare("SELECT * FROM nonprofit_funding_work_incomes WHERE supplier_id = ? AND id = ? AND status = 'active'" . ($lock ? ' FOR UPDATE' : ''));
+        $table = $kind === 'income' ? 'nonprofit_funding_work_incomes' : 'nonprofit_funding_work_allocations';
+        $q = $this->db->pdo()->prepare("SELECT * FROM $table WHERE supplier_id = ? AND id = ? AND status = 'active'" . ($lock ? ' FOR UPDATE' : ''));
         $q->execute([$supplier, $id]);
         $row = $q->fetch(PDO::FETCH_ASSOC);
-        if (!$row) throw new FundingWorkException('funding_work_not_found', 'Výnos zdroje nebyl nalezen.', 404);
+        if (!$row) throw new FundingWorkException('funding_work_not_found', $kind === 'income' ? 'Výnos zdroje nebyl nalezen.' : 'Přiřazení nebylo nalezeno.', 404);
         return self::linkRow($row);
     }
 
-    private function allocation(int $supplier, int $id, bool $lock = false): array
+    private function lineFor(int $supplier, int $sourceId, string $kind, int $lineId): array
     {
-        $q = $this->db->pdo()->prepare("SELECT * FROM nonprofit_funding_work_allocations WHERE supplier_id = ? AND id = ? AND status = 'active'" . ($lock ? ' FOR UPDATE' : ''));
-        $q->execute([$supplier, $id]);
-        $row = $q->fetch(PDO::FETCH_ASSOC);
-        if (!$row) throw new FundingWorkException('funding_work_not_found', 'Přiřazení nebylo nalezeno.', 404);
-        return self::linkRow($row);
-    }
-
-    private function lineFor(int $supplier, int $lineId): array
-    {
-        return $this->ledger->lines($supplier, [$lineId], true)[$lineId]
+        return $this->ledger->linesFor($supplier, $sourceId, $kind, [$lineId])[$lineId]
             ?? throw new FundingWorkException('funding_work_line_not_found', 'Řádek deníku nebyl nalezen.', 404);
     }
 
-    /** @param list<int> $lineIds @return list<int> */
-    private function entryIdsOf(int $supplier, array $lineIds): array
+    /** Id právě vložených aktivních vazeb podle řádku (jeden dotaz místo lastInsertId v cyklu). @return array<int,int> */
+    private function activeIds(int $supplier, string $kind, int $sourceId, array $lineIds): array
     {
-        $lineIds = array_values(array_filter($lineIds, static fn(int $id) => $id > 0));
-        if ($lineIds === []) return [];
-        $q = $this->db->pdo()->prepare('SELECT DISTINCT entry_id FROM journal_entry_lines WHERE supplier_id = ? AND id IN (' . implode(',', array_fill(0, count($lineIds), '?')) . ')');
-        $q->execute([$supplier, ...$lineIds]);
-        return array_map('intval', $q->fetchAll(PDO::FETCH_COLUMN));
+        $table = $kind === 'income' ? 'nonprofit_funding_work_incomes' : 'nonprofit_funding_work_allocations';
+        $q = $this->db->pdo()->prepare("SELECT active_line_id, id FROM $table WHERE supplier_id = ? AND source_id = ? AND active_line_id IN (" . self::marks($lineIds) . ')');
+        $q->execute([$supplier, $sourceId, ...$lineIds]);
+        $out = [];
+        foreach ($q->fetchAll(PDO::FETCH_NUM) as [$line, $id]) $out[(int) $line] = (int) $id;
+        return $out;
     }
 
     private function allocatedOnSource(int $supplier, int $sourceId, ?int $exceptAllocation): int
@@ -693,32 +754,60 @@ final class FundingWorkService
         return (int) $q->fetchColumn();
     }
 
-    private function assertReferences(int $supplier, array $data): void
+    /**
+     * Poskytovatel, druhy činnosti a potvrzený zdroj patří firmě. Druh činnosti, který mezitím zmizel
+     * z číselníku, se u úpravy zdroje tiše vypustí: smazat jde jen hodnotu bez řádků deníku (FK RESTRICT),
+     * takže jeho vypuštění nemění, které náklady zdroj splňují.
+     */
+    private function assertReferences(int $supplier, array $data, ?array $existing): array
     {
         $q = $this->db->pdo()->prepare('SELECT 1 FROM clients WHERE supplier_id = ? AND id = ?');
         $q->execute([$supplier, $data['provider_id']]);
         if ($q->fetchColumn() === false) self::invalid('Poskytovatel nebyl nalezen.');
         if ($data['activity_kind_ids'] !== []) {
-            $q = $this->db->pdo()->prepare("SELECT COUNT(*) FROM dimension_values v JOIN dimension_types t ON t.id = v.type_id AND t.supplier_id = v.supplier_id
-                WHERE v.supplier_id = ? AND t.system_key = 'activity_kind' AND v.id IN (" . implode(',', array_fill(0, count($data['activity_kind_ids']), '?')) . ')');
+            $q = $this->db->pdo()->prepare("SELECT v.id FROM dimension_values v JOIN dimension_types t ON t.id = v.type_id AND t.supplier_id = v.supplier_id
+                WHERE v.supplier_id = ? AND t.system_key = 'activity_kind' AND v.id IN (" . self::marks($data['activity_kind_ids']) . ')');
             $q->execute([$supplier, ...$data['activity_kind_ids']]);
-            if ((int) $q->fetchColumn() !== count($data['activity_kind_ids'])) self::invalid('Druh činnosti nepatří této firmě.');
+            $found = array_map('intval', $q->fetchAll(PDO::FETCH_COLUMN));
+            $missing = array_diff($data['activity_kind_ids'], $found);
+            if ($missing !== [] && array_diff($missing, $existing['activity_kind_ids'] ?? []) !== []) self::invalid('Druh činnosti nepatří této firmě.');
+            $data['activity_kind_ids'] = array_values(array_intersect($data['activity_kind_ids'], $found));
         }
         if ($data['legacy_source_key'] !== null && !array_key_exists($data['legacy_source_key'], $this->confirmed->latest($supplier))) self::invalid('Potvrzený zdroj nebyl nalezen.');
+        return $data;
     }
 
-    private function history(int $supplier, int $source, ?int $income, ?int $allocation, string $action, ?array $before, ?array $after, ?string $reason, int $actor): void
+    /**
+     * Neměnná historie zdroje (víceřádkový INSERT) a jeden záznam auditní stopy na akci.
+     * @param list<array{0:string,1:?int,2:?int,3:?array,4:?array}> $events [akce, výnos, přiřazení, před, po]
+     */
+    private function history(int $supplier, int $source, array $events, ?string $reason, int $actor): void
     {
-        $this->db->pdo()->prepare('INSERT INTO nonprofit_funding_work_history (supplier_id, source_id, income_id, allocation_id, action, before_json, after_json, reason, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
-            ->execute([$supplier, $source, $income, $allocation, $action, $before === null ? null : json_encode($before, JSON_UNESCAPED_UNICODE), $after === null ? null : json_encode($after, JSON_UNESCAPED_UNICODE), $reason, $actor]);
-        $this->activity->log('nonprofit_funding_work.' . $action, $actor, 'nonprofit_funding_work_source', $source,
-            array_filter(['income_id' => $income, 'allocation_id' => $allocation, 'before' => $before, 'after' => $after, 'reason' => $reason], static fn($v) => $v !== null), null, null, $supplier);
+        if ($events === []) return;
+        $values = [];
+        $params = [];
+        foreach ($events as [$action, $income, $allocation, $before, $after]) {
+            $values[] = '(?, ?, ?, ?, ?, ?, ?, ?, ?)';
+            array_push($params, $supplier, $source, $income, $allocation, $action,
+                $before === null ? null : json_encode($before, JSON_UNESCAPED_UNICODE), $after === null ? null : json_encode($after, JSON_UNESCAPED_UNICODE), $reason, $actor);
+        }
+        $this->db->pdo()->prepare('INSERT INTO nonprofit_funding_work_history (supplier_id, source_id, income_id, allocation_id, action, before_json, after_json, reason, created_by) VALUES ' . implode(', ', $values))
+            ->execute($params);
+        $grouped = [];
+        foreach ($events as [$action, $income, $allocation, $before, $after]) {
+            $grouped[$action][] = array_filter(['income_id' => $income, 'allocation_id' => $allocation, 'before' => $before, 'after' => $after], static fn($v) => $v !== null);
+        }
+        foreach ($grouped as $action => $items) {
+            $payload = count($items) === 1 ? $items[0] : ['items' => $items];
+            if ($reason !== null) $payload['reason'] = $reason;
+            $this->activity->log('nonprofit_funding_work.' . $action, $actor, 'nonprofit_funding_work_source', $source, $payload, null, null, $supplier);
+        }
     }
 
     // ---------------------------------------------------------------- vstupy
 
     /** @return array<string,mixed> */
-    private function normalize(int $supplier, array $input, bool $create): array
+    private function normalize(array $input, bool $create): array
     {
         $fields = ['provider_id', 'kind', 'title', 'contract_ref', 'budget_cents', 'valid_from', 'valid_to', 'activity_kind_ids', 'account_prefixes', 'legacy_source_key'];
         $allowed = $create ? [...$fields, 'income_line_ids'] : $fields;
@@ -764,6 +853,11 @@ final class FundingWorkService
         return $ids;
     }
 
+    private static function marks(array $ids): string
+    {
+        return implode(',', array_fill(0, count($ids), '?'));
+    }
+
     private static function cents(mixed $value): int
     {
         if (!is_int($value) || $value <= 0 || $value > self::MAX_CENTS) self::invalid('Částka musí být kladná, v haléřích.');
@@ -791,8 +885,9 @@ final class FundingWorkService
     {
         $out = [
             'id' => (int) $r['id'], 'source_id' => (int) $r['source_id'], 'line_id' => $r['line_id'] === null ? null : (int) $r['line_id'],
-            'linked_line_id' => (int) $r['linked_line_id'], 'entry_id' => (int) $r['entry_id'], 'account_id' => (int) $r['account_id'],
-            'account_code' => $r['account_code'] ?? null, 'entry_date' => $r['entry_date'], 'row_version' => (int) $r['row_version'],
+            'linked_line_id' => (int) $r['linked_line_id'], 'entry_id' => (int) $r['entry_id'],
+            'entry_source_type' => $r['entry_source_type'], 'entry_source_id' => $r['entry_source_id'] === null ? null : (int) $r['entry_source_id'],
+            'account_id' => (int) $r['account_id'], 'account_code' => $r['account_code'] ?? null, 'entry_date' => $r['entry_date'], 'row_version' => (int) $r['row_version'],
             'amount_cents' => (int) $r['amount_cents'],
         ];
         if (array_key_exists('line_amount_cents', $r)) {

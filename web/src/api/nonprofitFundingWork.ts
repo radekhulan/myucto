@@ -7,9 +7,9 @@ export interface FundingWorkPeriod { id: number; starts_on: string; ends_on: str
 export interface FundingWorkLine {
  id: number; entry_id: number; period_id: number; account_id: number; account_code: string; account_name: string; side: 'debit' | 'credit'
  amount_cents: number; date: string; document_no: string | null; description: string | null; source_type: string; source_id: number | null
- posted: boolean; reversed: boolean; is_reversal: boolean; activity_kind_id: number | null; activity_split: boolean
+ posted: boolean; reversed: boolean; is_reversal: boolean; activity_kind_id: number | null
 }
-export interface FundingWorkCandidate extends FundingWorkLine { allocated_cents?: number; capacity_cents?: number }
+export interface FundingWorkCandidate extends FundingWorkLine { allocated_cents?: number; capacity_cents?: number; confirmed_source_key?: string | null }
 export interface FundingWorkSourceInput {
  provider_id: number; kind: FundingKind; title: string; contract_ref: string | null; budget_cents: number; valid_from: string; valid_to: string
  activity_kind_ids: number[]; account_prefixes: string[]; legacy_source_key: string | null
@@ -23,15 +23,16 @@ export interface FundingWorkTotals {
 }
 interface FundingWorkLink {
  id: number; source_id: number; line_id: number | null; linked_line_id: number; entry_id: number; account_id: number; account_code: string | null
- entry_date: string; row_version: number; amount_cents: number; state: FundingWorkState; line: FundingWorkLine | null; relink_candidates?: FundingWorkLine[]
+ entry_source_type: string | null; entry_source_id: number | null; entry_date: string; row_version: number; amount_cents: number; state: FundingWorkState
+ review_reason: string | null; line: FundingWorkLine | null; relink_candidates?: FundingWorkLine[]; confirmed_source_key?: string | null
 }
-export interface FundingWorkIncome extends FundingWorkLink { confirmed_source_key?: string | null }
+export type FundingWorkIncome = FundingWorkLink
 export interface FundingWorkAllocation extends FundingWorkLink { line_amount_cents: number; note: string | null; payment_state?: 'paid' | 'partial' | 'unpaid' | null }
 export interface FundingWorkHistory { id: number; income_id: number | null; allocation_id: number | null; action: string; before: Record<string, unknown> | null; after: Record<string, unknown> | null; reason: string | null; created_at: string; actor: string | null }
 export interface FundingWorkOverview { period: FundingWorkPeriod; editable: boolean; sources: Array<FundingWorkSource & { totals: FundingWorkTotals }> }
 export interface FundingWorkDetail {
  period: FundingWorkPeriod; editable: boolean; source: FundingWorkSource; totals: FundingWorkTotals
- incomes: FundingWorkIncome[]; allocations: FundingWorkAllocation[]; history: FundingWorkHistory[]
+ incomes: FundingWorkIncome[]; allocations: FundingWorkAllocation[]; allocations_page: number; allocations_more: boolean; history: FundingWorkHistory[]
 }
 export interface FundingWorkChoices {
  providers: Array<{ id: number; label: string }>; providers_more: boolean; activities: Array<{ id: number; label: string }>
@@ -46,9 +47,9 @@ const base = (period: number) => `/accounting/periods/${period}/funding-work`
 export const fundingWorkApi = {
  overview: (supplier: number, period: number) => api.get<FundingWorkOverview>(base(period), options(supplier)).then(r => r.data),
  choices: (supplier: number, period: number, search = '') => api.get<FundingWorkChoices>(`${base(period)}/choices`, { ...options(supplier), params: { search } }).then(r => r.data),
- incomeCandidates: (supplier: number, period: number, search: string, page: number) => api.get<FundingWorkCandidates>(`${base(period)}/income-candidates`, { ...options(supplier), params: { search, page } }).then(r => r.data),
+ incomeCandidates: (supplier: number, period: number, source: number, search: string, page: number) => api.get<FundingWorkCandidates>(`${base(period)}/sources/${source}/income-candidates`, { ...options(supplier), params: { search, page } }).then(r => r.data),
  costCandidates: (supplier: number, period: number, source: number, search: string, page: number) => api.get<FundingWorkCandidates>(`${base(period)}/sources/${source}/cost-candidates`, { ...options(supplier), params: { search, page } }).then(r => r.data),
- detail: (supplier: number, period: number, source: number) => api.get<FundingWorkDetail>(`${base(period)}/sources/${source}`, options(supplier)).then(r => r.data),
+ detail: (supplier: number, period: number, source: number, page = 1) => api.get<FundingWorkDetail>(`${base(period)}/sources/${source}`, { ...options(supplier), params: { page } }).then(r => r.data),
  create: (supplier: number, period: number, body: FundingWorkSourceInput) => api.post<FundingWorkDetail>(`${base(period)}/sources`, body, options(supplier)).then(r => r.data),
  update: (supplier: number, period: number, source: number, body: FundingWorkSourceInput & { expected_version: number; reason: string }) => api.put<FundingWorkDetail>(`${base(period)}/sources/${source}`, body, options(supplier)).then(r => r.data),
  cancel: (supplier: number, period: number, source: number, expected_version: number, reason: string) => api.post<FundingWorkDetail>(`${base(period)}/sources/${source}/cancel`, { expected_version, reason }, options(supplier)).then(r => r.data),

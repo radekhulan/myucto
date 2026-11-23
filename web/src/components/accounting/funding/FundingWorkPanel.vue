@@ -23,7 +23,7 @@ import { fundingCents } from './fundingMoney'
 const props = defineProps<{ supplier: number; canManage: boolean }>()
 const { t, locale } = useI18n()
 const periods = ref<AccountingPeriod[]>([]), period = ref(0)
-const overview = ref<FundingWorkOverview | null>(null), detail = ref<FundingWorkDetail | null>(null), selected = ref(0)
+const overview = ref<FundingWorkOverview | null>(null), detail = ref<FundingWorkDetail | null>(null), selected = ref(0), detailPage = ref(1)
 const busy = ref(false), error = ref(''), notice = ref('')
 let alive = true, generation = 0, mounted = false
 
@@ -68,9 +68,10 @@ async function loadOverview() {
 }
 async function loadDetail() {
  if (!selected.value || !period.value) { detail.value = null; return }
- const target = selected.value
- await run(() => api.detail(props.supplier, period.value, target), data => { if (selected.value === target) detail.value = data })
+ const target = selected.value, page = detailPage.value
+ await run(() => api.detail(props.supplier, period.value, target, page), data => { if (selected.value === target) detail.value = data })
 }
+function allocationsPage(delta: number) { detailPage.value = Math.max(1, detailPage.value + delta); void loadDetail() }
 async function reload() {
  const before = period.value
  await loadPeriods()
@@ -79,7 +80,7 @@ async function reload() {
  await loadOverview()
  if (selected.value) await loadDetail()
 }
-function open(id: number) { selected.value = id; notice.value = ''; void loadDetail() }
+function open(id: number) { selected.value = id; detailPage.value = 1; notice.value = ''; void loadDetail() }
 function back() { selected.value = 0; detail.value = null; void loadOverview() }
 function applied(data: FundingWorkDetail, text: string) { detail.value = data; selected.value = data.source.id; notice.value = text; dialog.value = null; void loadOverview() }
 /**
@@ -142,7 +143,7 @@ const pickedCount = computed(() => Object.keys(picked.value).length)
 async function loadCandidates() {
  if (!detail.value || !dialog.value) return
  const source = detail.value.source.id, kind = dialog.value.kind, page = candidatePage.value, search = candidateSearch.value
- await run(() => kind === 'costs' ? api.costCandidates(props.supplier, period.value, source, search, page) : api.incomeCandidates(props.supplier, period.value, search, page),
+ await run(() => kind === 'costs' ? api.costCandidates(props.supplier, period.value, source, search, page) : api.incomeCandidates(props.supplier, period.value, source, search, page),
   data => { candidates.value = data.rows; candidateMore.value = data.more })
 }
 function openCandidates(kind: 'costs' | 'incomes') { picked.value = {}; candidatePage.value = 1; candidateSearch.value = ''; candidates.value = []; dialog.value = { kind }; void loadCandidates() }
@@ -323,7 +324,7 @@ onBeforeUnmount(() => { alive = false; generation++ })
     <p v-if="!detail.incomes.length" class="text-sm text-neutral-500" data-section="work-no-income">{{ t('nonprofitFunding.work.noIncome') }}</p>
     <ul v-else class="divide-y rounded-lg border bg-surface" data-section="work-incomes">
      <li v-for="i in detail.incomes" :key="i.id" class="flex flex-wrap items-center gap-x-4 gap-y-2 p-3 text-sm" :data-income="i.id">
-      <span class="min-w-0 flex-1">{{ formatDate(i.entry_date) }} · {{ i.line?.document_no || '—' }} · {{ i.account_code }} · {{ money(i.amount_cents) }}<span v-if="i.confirmed_source_key" class="block text-xs text-neutral-500">{{ t('nonprofitFunding.work.inConfirmed') }}</span></span>
+      <span class="min-w-0 flex-1">{{ formatDate(i.entry_date) }} · {{ i.line?.document_no || '—' }} · {{ i.account_code }} · {{ money(i.amount_cents) }}<span v-if="i.confirmed_source_key" class="block text-xs text-neutral-500">{{ t('nonprofitFunding.work.inConfirmed') }}</span><span v-if="i.state === 'changed' && i.review_reason" class="block text-xs text-warning-700">{{ t(`nonprofitFunding.work.reason_${i.review_reason}`) }}</span></span>
       <span class="rounded px-2 py-1 text-xs" :class="stateClass(i.state)" :data-state="i.state">{{ t(`nonprofitFunding.work.state_${i.state}`) }}</span>
       <div v-if="detailEditable" class="flex flex-wrap gap-2">
        <button v-if="i.relink_candidates?.length" type="button" :class="btnOutlineSm('primary')" data-action="relink-income" @click="openRelink(i, true)"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path :d="ICONS.link" /></svg>{{ t('nonprofitFunding.work.relink') }}</button>
@@ -342,6 +343,8 @@ onBeforeUnmount(() => { alive = false; generation++ })
        <span v-if="a.line?.description" class="block truncate text-xs text-neutral-500">{{ a.line.description }}</span>
        <span v-if="a.note" class="block text-xs text-neutral-500">{{ a.note }}</span>
        <span v-if="a.payment_state" class="block text-xs text-neutral-500">{{ t(`nonprofitFunding.work.payment_${a.payment_state}`) }}</span>
+       <span v-if="a.state === 'changed' && a.review_reason" class="block text-xs text-warning-700" data-reason="review">{{ t(`nonprofitFunding.work.reason_${a.review_reason}`) }}</span>
+       <span v-if="a.confirmed_source_key" class="block text-xs text-warning-700" data-warning="confirmed">{{ t('nonprofitFunding.work.costInConfirmed') }}</span>
       </span>
       <span class="rounded px-2 py-1 text-xs" :class="stateClass(a.state)" :data-state="a.state">{{ t(`nonprofitFunding.work.state_${a.state}`) }}</span>
       <div v-if="detailEditable" class="flex flex-wrap gap-2">
@@ -351,6 +354,8 @@ onBeforeUnmount(() => { alive = false; generation++ })
       </div>
      </li>
     </ul>
+
+    <div v-if="detail.allocations_page > 1 || detail.allocations_more" class="flex flex-wrap gap-2" data-section="work-allocations-pages"><button type="button" :class="btnOutlineSm('neutral')" :disabled="busy || detail.allocations_page <= 1" data-action="allocations-prev" @click="allocationsPage(-1)"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path :d="ICONS.chevronLeft" /></svg>{{ t('nonprofitFunding.work.prev') }}</button><button type="button" :class="btnOutlineSm('neutral')" :disabled="busy || !detail.allocations_more" data-action="allocations-next" @click="allocationsPage(1)">{{ t('nonprofitFunding.work.next') }}<svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path :d="ICONS.chevronRight" /></svg></button></div>
 
     <details class="rounded-lg border bg-surface p-3" data-section="work-history">
      <summary class="cursor-pointer text-sm font-medium">{{ t('nonprofitFunding.work.history') }}</summary>
@@ -386,7 +391,7 @@ onBeforeUnmount(() => { alive = false; generation++ })
      <p v-if="!busy && !candidates.length" class="rounded border p-4 text-sm text-neutral-500" data-section="no-candidates">{{ t('nonprofitFunding.work.noCandidates') }}</p>
      <ul v-else class="max-h-96 divide-y overflow-y-auto rounded border" data-section="candidates">
       <li v-for="row in candidates" :key="row.id" class="flex flex-wrap items-center gap-3 p-2 text-sm" :data-line="row.id">
-       <label class="flex min-w-0 flex-1 items-start gap-2"><input type="checkbox" :checked="row.id in picked" @change="togglePick(row)" /><span class="min-w-0">{{ lineLabel(row) }}<span v-if="row.description" class="block truncate text-xs text-neutral-500">{{ row.description }}</span><span v-if="dialog.kind === 'costs' && row.allocated_cents" class="block text-xs text-neutral-500">{{ t('nonprofitFunding.work.freeCapacity', { amount: money(row.capacity_cents ?? 0) }) }}</span></span></label>
+       <label class="flex min-w-0 flex-1 items-start gap-2"><input type="checkbox" :checked="row.id in picked" @change="togglePick(row)" /><span class="min-w-0">{{ lineLabel(row) }}<span v-if="row.description" class="block truncate text-xs text-neutral-500">{{ row.description }}</span><span v-if="dialog.kind === 'costs' && row.allocated_cents" class="block text-xs text-neutral-500">{{ t('nonprofitFunding.work.freeCapacity', { amount: money(row.capacity_cents ?? 0) }) }}</span><span v-if="row.confirmed_source_key" class="block text-xs text-warning-700">{{ t('nonprofitFunding.work.costInConfirmed') }}</span></span></label>
        <input v-if="dialog.kind === 'costs' && row.id in picked" v-model="picked[row.id]" inputmode="decimal" :class="[input, 'w-32']" :aria-label="t('nonprofitFunding.work.amount')" data-field="pick-amount" />
       </li>
      </ul>

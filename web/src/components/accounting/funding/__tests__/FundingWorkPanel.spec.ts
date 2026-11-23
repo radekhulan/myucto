@@ -26,11 +26,11 @@ const totals = { budget_cents: 100000, received_cents: 100000, allocated_cents: 
 const source = { id: 7, period_id: 11, provider_id: 21, provider_label: 'Synthetic provider', kind: 'operating_grant' as const, title: 'Synthetic city grant', contract_ref: 'SYN-1', budget_cents: 100000,
  valid_from: '2026-01-01', valid_to: '2026-12-31', activity_kind_ids: [], account_prefixes: ['518'], legacy_source_key: null, status: 'active' as const, row_version: 1, created_at: '2026-11-01 10:00:00', updated_at: null }
 const newLine = { id: 99, entry_id: 50, period_id: 11, account_id: 3, account_code: '518', account_name: 'Services', side: 'debit' as const, amount_cents: 32000, date: '2026-06-01', document_no: 'SYN-7',
- description: 'Synthetic service', source_type: 'manual', source_id: null, posted: true, reversed: false, is_reversal: false, activity_kind_id: null, activity_split: false }
-const removed: FundingWorkAllocation = { id: 3, source_id: 7, line_id: null, linked_line_id: 41, entry_id: 50, account_id: 3, account_code: '518', entry_date: '2026-06-01', row_version: 1,
- amount_cents: 30000, line_amount_cents: 30000, note: null, state: 'removed', line: null, relink_candidates: [newLine], payment_state: null }
+ description: 'Synthetic service', source_type: 'manual', source_id: null, posted: true, reversed: false, is_reversal: false, activity_kind_id: null }
+const removed: FundingWorkAllocation = { id: 3, source_id: 7, line_id: null, linked_line_id: 41, entry_id: 50, entry_source_type: 'manual', entry_source_id: null, account_id: 3, account_code: '518', entry_date: '2026-06-01', row_version: 1,
+ amount_cents: 30000, line_amount_cents: 30000, note: null, state: 'removed', review_reason: 'removed', line: null, relink_candidates: [newLine], payment_state: null, confirmed_source_key: null }
 const overview = (sources: FundingWorkOverview['sources'] = []): FundingWorkOverview => ({ period, editable: true, sources })
-const detail = (allocations: FundingWorkAllocation[] = [removed]): FundingWorkDetail => ({ period, editable: true, source, totals, incomes: [], allocations, history: [] })
+const detail = (allocations: FundingWorkAllocation[] = [removed]): FundingWorkDetail => ({ period, editable: true, source, totals, incomes: [], allocations, allocations_page: 1, allocations_more: false, history: [] })
 
 function mounted(locale = 'cs', canManage = true) {
  return mount(Panel, { props: { supplier: 5, canManage }, global: { plugins: [createI18n({ legacy: false, locale, messages: { cs, en } })], stubs: { ActionBar, DialogActions, Modal, DateInput: true, MultiSelectFilter: true } } })
@@ -69,7 +69,7 @@ describe('Funding work panel (#403)', () => {
 
  it('R5: detail shows a removed line for review and relinks it to the offered line', async () => {
   api.overview.mockResolvedValue(overview([{ ...source, totals }]))
-  api.relinkAllocation.mockResolvedValue(detail([{ ...removed, line_id: 99, linked_line_id: 99, state: 'ok', line: newLine, relink_candidates: [] }]))
+  api.relinkAllocation.mockResolvedValue(detail([{ ...removed, line_id: 99, linked_line_id: 99, state: 'ok', review_reason: null, line: newLine, relink_candidates: [] }]))
   const w = mounted(); await flushPromises()
   await w.get('[data-source="7"]').trigger('click'); await flushPromises()
   expect(w.get('[data-allocation="3"] [data-state]').text()).toBe(cs.nonprofitFunding.work.state_removed)
@@ -215,5 +215,17 @@ describe('Funding work panel (#403)', () => {
   show.value = true; await flushPromises()
   expect(api.overview).toHaveBeenCalledTimes(2)
   expect(w.text()).toContain('Synthetic city grant')
+ })
+
+ it('shows why a link needs review, warns about cost drawn in confirmed J6 and pages the assigned costs', async () => {
+  api.overview.mockResolvedValue(overview([{ ...source, totals }]))
+  const credited: FundingWorkAllocation = { ...removed, line_id: 99, linked_line_id: 99, state: 'changed', review_reason: 'credit_note', line: newLine, confirmed_source_key: 'gift-sport' }
+  api.detail.mockResolvedValueOnce({ ...detail([credited]), allocations_more: true }).mockResolvedValueOnce({ ...detail([]), allocations_page: 2 })
+  const w = mounted(); await flushPromises()
+  await w.get('[data-source="7"]').trigger('click'); await flushPromises()
+  expect(w.get('[data-allocation="3"] [data-reason="review"]').text()).toBe(cs.nonprofitFunding.work.reason_credit_note)
+  expect(w.get('[data-allocation="3"] [data-warning="confirmed"]').text()).toBe(cs.nonprofitFunding.work.costInConfirmed)
+  await w.get('[data-action="allocations-next"]').trigger('click'); await flushPromises()
+  expect(api.detail).toHaveBeenLastCalledWith(5, 11, 7, 2)
  })
 })

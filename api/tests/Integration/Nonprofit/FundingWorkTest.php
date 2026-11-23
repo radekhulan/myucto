@@ -143,6 +143,7 @@ final class FundingWorkTest extends TestCase
         self::assertNull($allocation['line_id']);
         self::assertSame([$newCost], array_column($allocation['relink_candidates'], 'id'), 'Nabídka obsahuje jen řádek téhož zápisu se stejným účtem.');
         self::assertSame('removed', $detail['incomes'][0]['state']);
+        $this->expectError(fn() => $this->work->updateAllocation($this->supplier, $this->period, $allocation['id'], 26000, null, $allocation['row_version'], $this->actor), 'funding_work_relink_required');
         $this->expectError(fn() => $this->work->relinkAllocation($this->supplier, $this->period, $allocation['id'], $newOther, null, $allocation['row_version'], $this->actor), 'funding_work_relink_invalid');
         $foreign = $this->post('518', '50.00');
         $this->expectError(fn() => $this->work->relinkAllocation($this->supplier, $this->period, $allocation['id'], $foreign, null, $allocation['row_version'], $this->actor), 'funding_work_relink_invalid');
@@ -300,11 +301,12 @@ final class FundingWorkTest extends TestCase
         $next = $this->c->get(AccountingPeriodRepository::class)->create($this->supplier, 2027, '2027-01-01', '2027-12-31');
         $cost = $this->post('518', '100.00', '2027-02-01', $this->sport, $next);
         $income = $this->post('682', '100.00', '2027-02-01', null, $next);
+        // Rozhodnutí uživatele 23. 11. (3): způsobilost zdroje smí přesahovat jeho období; náklady se berou jen z období zdroje.
         $source = $this->source(['valid_to' => '2027-12-31']);
         $this->expectError(fn() => $this->work->allocate($this->supplier, $this->period, $source, [['line_id' => $cost, 'amount_cents' => 100]], $this->actor), 'funding_work_line_other_period');
         $this->expectError(fn() => $this->work->addIncomes($this->supplier, $this->period, $source, [$income], $this->actor), 'funding_work_line_other_period');
         self::assertSame([], $this->work->costCandidates($this->supplier, $this->period, $source, '', 1)['rows']);
-        self::assertSame([], $this->work->incomeCandidates($this->supplier, $this->period, '', 1)['rows']);
+        self::assertSame([], $this->work->incomeCandidates($this->supplier, $this->period, $source, '', 1)['rows']);
         $this->expectError(fn() => $this->work->detail($this->supplier, $next, $source), 'funding_work_not_found');
     }
 
@@ -317,9 +319,11 @@ final class FundingWorkTest extends TestCase
         $tooLate = $this->post('518', '100.00', '2026-11-15');
         $tax = $this->post('591', '100.00', '2026-03-01');
         $credit = $this->post('682', '100.00', '2026-03-01');
+        $closing = $this->post('518', '100.00', '2026-03-01');
+        $this->pdo->prepare("UPDATE journal_entries SET source_type = 'closing' WHERE id = (SELECT entry_id FROM journal_entry_lines WHERE id = ?)")->execute([$closing]);
         $source = $this->source(['account_prefixes' => ['518'], 'valid_to' => '2026-10-31']);
         $any = $this->source(['account_prefixes' => []]);
-        foreach ([[$source, $wrongActivity], [$source, $wrongAccount], [$source, $tooLate], [$any, $tax], [$any, $credit]] as [$target, $line]) {
+        foreach ([[$source, $wrongActivity], [$source, $wrongAccount], [$source, $tooLate], [$any, $tax], [$any, $credit], [$any, $closing]] as [$target, $line]) {
             $this->expectError(fn() => $this->work->allocate($this->supplier, $this->period, $target, [['line_id' => $line, 'amount_cents' => 100]], $this->actor), 'funding_work_line_ineligible');
         }
         $this->expectError(fn() => $this->work->create($this->supplier, $this->period, $this->input(['account_prefixes' => ['591']]), $this->actor), 'funding_work_invalid');
@@ -340,19 +344,95 @@ final class FundingWorkTest extends TestCase
         $a = $this->source(['income_line_ids' => [$income]]);
         $b = $this->source();
         $this->expectError(fn() => $this->work->addIncomes($this->supplier, $this->period, $b, [$income], $this->actor), 'funding_work_income_used');
-        self::assertSame([], $this->work->incomeCandidates($this->supplier, $this->period, '', 1)['rows']);
+        self::assertSame([], $this->work->incomeCandidates($this->supplier, $this->period, $b, '', 1)['rows']);
         $detail = $this->work->allocate($this->supplier, $this->period, $a, [['line_id' => $cost, 'amount_cents' => 100]], $this->actor);
         $this->expectError(fn() => $this->work->cancel($this->supplier, $this->period, $a, $detail['source']['row_version'], 'Synthetic', $this->actor), 'funding_work_source_has_allocations');
         $allocation = $detail['allocations'][0];
         $detail = $this->work->removeAllocation($this->supplier, $this->period, $allocation['id'], $allocation['row_version'], 'Synthetic', $this->actor);
         $detail = $this->work->cancel($this->supplier, $this->period, $a, $detail['source']['row_version'], 'Synthetic cancel', $this->actor);
         self::assertSame('cancelled', $detail['source']['status']);
+        $released = array_values(array_filter($detail['history'], static fn($h) => $h['action'] === 'income_removed'));
+        self::assertCount(1, $released, 'Zrušení zdroje zapíše každý uvolněný výnos.');
+        self::assertSame($income, $released[0]['before']['line_id']);
+        self::assertSame('Synthetic cancel', $released[0]['reason']);
         self::assertFalse($detail['editable']);
         $this->expectError(fn() => $this->work->allocate($this->supplier, $this->period, $a, [['line_id' => $cost, 'amount_cents' => 100]], $this->actor), 'funding_work_source_cancelled');
         $detail = $this->work->addIncomes($this->supplier, $this->period, $b, [$income], $this->actor);
         self::assertSame(100000, $detail['totals']['received_cents']);
         $overview = $this->work->overview($this->supplier, $this->period);
         self::assertSame([$b, $a], array_column($overview['sources'], 'id'), 'Aktivní zdroje první.');
+    }
+
+    /** Rozhodnutí uživatele 23. 11. (1): nový dobropis k přijaté faktuře dá vazbu ke kontrole, potvrzení = Navázat znovu. */
+    public function testCreditNoteToPurchaseInvoiceMarksAllocationForReview(): void
+    {
+        $invoice = $this->purchaseInvoice('invoice', null);
+        $cost = $this->post('518', '1000.00', '2026-06-01', -1, null, ['purchase_invoice', $invoice]);
+        $source = $this->source();
+        $detail = $this->work->allocate($this->supplier, $this->period, $source, [['line_id' => $cost, 'amount_cents' => 100000]], $this->actor);
+        self::assertSame('ok', $detail['allocations'][0]['state']);
+        $note = $this->purchaseInvoice('credit_note', $invoice);
+        $this->post('321', '200.00', '2026-06-10', null, null, ['purchase_invoice', $note]);
+        $allocation = $this->work->detail($this->supplier, $this->period, $source)['allocations'][0];
+        self::assertSame('changed', $allocation['state']);
+        self::assertSame('credit_note', $allocation['review_reason']);
+        self::assertSame(0, $this->work->overview($this->supplier, $this->period)['sources'][0]['totals']['documented_cents']);
+        $detail = $this->work->relinkAllocation($this->supplier, $this->period, $allocation['id'], $cost, 80000, $allocation['row_version'], $this->actor);
+        self::assertSame('ok', $detail['allocations'][0]['state']);
+        self::assertSame(80000, $detail['totals']['documented_cents']);
+    }
+
+    /** Rozhodnutí uživatele 23. 11. (2): po odúčtování a novém zaúčtování dokladu nabídne Navázat znovu řádek nového zápisu. */
+    public function testRelinkOffersLineOfSameDocumentAfterRepostIntoNewEntry(): void
+    {
+        $invoice = $this->purchaseInvoice('invoice', null);
+        $cost = $this->post('518', '500.00', '2026-06-01', -1, null, ['purchase_invoice', $invoice]);
+        $source = $this->source();
+        $this->work->allocate($this->supplier, $this->period, $source, [['line_id' => $cost, 'amount_cents' => 40000]], $this->actor);
+        $this->pdo->prepare('DELETE FROM journal_entries WHERE id = (SELECT entry_id FROM journal_entry_lines WHERE id = ?)')->execute([$cost]);
+        $other = $this->post('518', '500.00', '2026-06-01', -1, null, ['manual', null]);
+        $new = $this->post('518', '500.00', '2026-06-02', -1, null, ['purchase_invoice', $invoice]);
+        $allocation = $this->work->detail($this->supplier, $this->period, $source)['allocations'][0];
+        self::assertSame('removed', $allocation['state']);
+        self::assertSame([$new], array_column($allocation['relink_candidates'], 'id'), 'Jen řádek téhož dokladu se stejným účtem.');
+        $this->expectError(fn() => $this->work->relinkAllocation($this->supplier, $this->period, $allocation['id'], $other, null, $allocation['row_version'], $this->actor), 'funding_work_relink_invalid');
+        $detail = $this->work->relinkAllocation($this->supplier, $this->period, $allocation['id'], $new, null, $allocation['row_version'], $this->actor);
+        self::assertSame('ok', $detail['allocations'][0]['state']);
+    }
+
+    /** Hodnota druhu činnosti smazaná z číselníku úpravu zdroje neblokuje; neznámá hodnota u nového zdroje je chyba. */
+    public function testDeletedActivityValueDoesNotBlockSourceUpdate(): void
+    {
+        $this->pdo->prepare('INSERT INTO dimension_values(type_id, supplier_id, code, name) VALUES (?, ?, ?, ?)')->execute([$this->catalog['activity_kind']['id'], $this->supplier, 'GONE', 'Synthetic removed']);
+        $gone = (int) $this->pdo->lastInsertId();
+        $detail = $this->work->create($this->supplier, $this->period, $this->input(['activity_kind_ids' => [$this->sport, $gone]]), $this->actor);
+        $this->pdo->prepare('DELETE FROM dimension_values WHERE id = ?')->execute([$gone]);
+        $detail = $this->work->update($this->supplier, $this->period, $detail['source']['id'], $this->input(['activity_kind_ids' => [$this->sport, $gone], 'budget_cents' => 200000]), $detail['source']['row_version'], '', $this->actor);
+        self::assertSame([$this->sport], $detail['source']['activity_kind_ids']);
+        $this->expectError(fn() => $this->work->create($this->supplier, $this->period, $this->input(['activity_kind_ids' => [$gone]]), $this->actor), 'funding_work_invalid');
+    }
+
+    /** Mutace s id vazby jiné firmy nebo jiného období vrátí 404 a nic nezapíše. */
+    public function testForeignOrOtherPeriodLinkIdsAreNotFound(): void
+    {
+        $income = $this->post('682', '100.00');
+        $cost = $this->post('518', '100.00');
+        $source = $this->source(['income_line_ids' => [$income]]);
+        $detail = $this->work->allocate($this->supplier, $this->period, $source, [['line_id' => $cost, 'amount_cents' => 100]], $this->actor);
+        [$a, $i] = [$detail['allocations'][0], $detail['incomes'][0]];
+        $seed = (int) $this->pdo->query('SELECT id FROM supplier ORDER BY id LIMIT 1')->fetchColumn();
+        $other = $this->createIsolatedSupplier($this->pdo, $seed);
+        [$otherPeriod] = $this->company($other);
+        $next = $this->c->get(AccountingPeriodRepository::class)->create($this->supplier, 2027, '2027-01-01', '2027-12-31');
+        foreach ([[$other, $otherPeriod], [$this->supplier, $next]] as [$company, $period]) {
+            $this->expectError(fn() => $this->work->updateAllocation($company, $period, $a['id'], 50, null, $a['row_version'], $this->actor), 'funding_work_not_found');
+            $this->expectError(fn() => $this->work->removeAllocation($company, $period, $a['id'], $a['row_version'], 'Synthetic', $this->actor), 'funding_work_not_found');
+            $this->expectError(fn() => $this->work->relinkAllocation($company, $period, $a['id'], $cost, null, $a['row_version'], $this->actor), 'funding_work_not_found');
+            $this->expectError(fn() => $this->work->removeIncome($company, $period, $i['id'], $i['row_version'], 'Synthetic', $this->actor), 'funding_work_not_found');
+            $this->expectError(fn() => $this->work->relinkIncome($company, $period, $i['id'], $income, $i['row_version'], $this->actor), 'funding_work_not_found');
+        }
+        $after = $this->work->detail($this->supplier, $this->period, $source);
+        self::assertSame([1, 1], [$after['allocations'][0]['row_version'], $after['incomes'][0]['row_version']]);
     }
 
     // ------------------------------------------------------------------ pomocníci
@@ -370,7 +450,7 @@ final class FundingWorkTest extends TestCase
             $kinds[] = (int) $this->pdo->lastInsertId();
         }
         $accounts = [];
-        foreach (['221' => 'asset', '501' => 'expense', '518' => 'expense', '591' => 'expense', '682' => 'revenue', '691' => 'revenue'] as $code => $type) {
+        foreach (['221' => 'asset', '321' => 'liability', '501' => 'expense', '518' => 'expense', '591' => 'expense', '682' => 'revenue', '691' => 'revenue'] as $code => $type) {
             $this->pdo->prepare('INSERT INTO chart_of_accounts(supplier_id, account_code, name, account_type) VALUES (?, ?, ?, ?)')->execute([$supplier, (string) $code, 'Synthetic ' . $code, $type]);
             $accounts[(string) $code] = (int) $this->pdo->lastInsertId();
         }
@@ -380,14 +460,22 @@ final class FundingWorkTest extends TestCase
     }
 
     /** Zaúčtovaný zápis účet/221; vrací id prvního (sledovaného) řádku. */
-    private function post(string $code, string $amount, string $date = '2026-06-01', ?int $activity = -1, ?int $period = null): int
+    private function post(string $code, string $amount, string $date = '2026-06-01', ?int $activity = -1, ?int $period = null, array $document = ['manual', null]): int
     {
         $activity = $activity === -1 ? (str_starts_with($code, '5') ? $this->sport : null) : $activity;
-        $this->pdo->prepare("INSERT INTO journal_entries(supplier_id, period_id, entry_date, document_no, source_type) VALUES (?, ?, ?, ?, 'manual')")->execute([$this->supplier, $period ?? $this->period, $date, 'SYN-' . bin2hex(random_bytes(3))]);
+        $this->pdo->prepare('INSERT INTO journal_entries(supplier_id, period_id, entry_date, document_no, source_type, source_id) VALUES (?, ?, ?, ?, ?, ?)')->execute([$this->supplier, $period ?? $this->period, $date, 'SYN-' . bin2hex(random_bytes(3)), $document[0], $document[1]]);
         $entry = (int) $this->pdo->lastInsertId();
         $first = $this->lines($entry, $code, $amount, $activity)[0];
         $this->pdo->prepare('UPDATE journal_entries SET posted_at = NOW() WHERE id = ?')->execute([$entry]);
         return $first;
+    }
+
+    private function purchaseInvoice(string $kind, ?int $parent): int
+    {
+        $this->pdo->prepare("INSERT INTO purchase_invoices(supplier_id, vendor_id, vendor_invoice_number, document_kind, parent_purchase_invoice_id, issue_date, due_date, received_at, currency_id, vendor_snapshot, created_by)
+            VALUES (?, ?, ?, ?, ?, '2026-06-01', '2026-06-15', '2026-06-01', ?, '{}', ?)")
+            ->execute([$this->supplier, $this->provider, 'SYN-PF-' . bin2hex(random_bytes(3)), $kind, $parent, (int) $this->pdo->query('SELECT id FROM currencies ORDER BY id LIMIT 1')->fetchColumn(), $this->actor]);
+        return (int) $this->pdo->lastInsertId();
     }
 
     /** @return list<int> id nových řádků (sledovaný, protiúčet) */

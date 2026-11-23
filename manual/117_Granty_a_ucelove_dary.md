@@ -53,6 +53,8 @@ Tlačítkem **Přidat výnos** v detailu zdroje vyberte zaúčtovaný řádek p�
 
 Souhrn zdroje ukazuje rozpočet, přijatou částku, přiřazené a doložené náklady, zůstatek rozpočtu a vazby, které vyžadují kontrolu. U nákladu z přijaté faktury je pro informaci uveden stav její úhrady.
 
-Evidence nebrání opravám v účetnictví. Když se nákladový nebo výnosový řádek po přiřazení přeúčtuje, stornuje nebo změní, vazba zůstane a ukáže se ke kontrole. Po přeúčtování zvolte **Navázat znovu** a vyberte aktuální řádek téhož zápisu se stejným účtem. Stornovaný řádek znovu navázat nelze, vazbu odeberte. Odebrání vazby i zrušení zdroje vyžaduje důvod. Zdroj s přiřazenými náklady zrušit nelze.
+Evidence nebrání opravám v účetnictví. Když se nákladový nebo výnosový řádek po přiřazení přeúčtuje, stornuje nebo změní, vazba zůstane a ukáže se ke kontrole i s důvodem. Ke kontrole se ukáže také náklad z přijaté faktury, ke které byl zaúčtován dobropis, a náklad, jehož podmínky zdroj po úpravě už nesplňuje. Po přeúčtování zvolte **Navázat znovu** a vyberte aktuální řádek téhož zápisu nebo téhož dokladu se stejným účtem; nabídka pracuje i po odúčtování a novém zaúčtování dokladu. U dobropisu upravte částku a vazbu potvrďte stejným tlačítkem. Stornovaný řádek znovu navázat nelze, vazbu odeberte.
+
+Pracovní evidence potvrzené zdroje J6 neodečítá. Výnos, který je i v potvrzeném zdroji, a náklad, který potvrzený zdroj J6 už čerpá, jsou jen označené upozorněním. Odebrání vazby i zrušení zdroje vyžaduje důvod. Zdroj s přiřazenými náklady zrušit nelze.
 
 Každá změna se zapisuje do **Historie změn** zdroje i do auditní stopy. Upravit evidenci může uživatel s právem zápisu do účetnictví z přihlášené relace; v uzavřeném účetním období je evidence jen ke čtení.

@@ -35,12 +35,12 @@ final class FundingWorkAction
 
     public function incomeCandidates(Request $request, Response $response, array $args): Response
     {
-        return $this->read($request, $response, fn(int $s) => $this->service->incomeCandidates($s, (int) $args['id'], $this->query($request, 'search'), $this->page($request)));
+        return $this->read($request, $response, fn(int $s) => $this->service->incomeCandidates($s, (int) $args['id'], (int) $args['sid'], $this->query($request, 'search'), $this->page($request)));
     }
 
     public function detail(Request $request, Response $response, array $args): Response
     {
-        return $this->read($request, $response, fn(int $s) => $this->service->detail($s, (int) $args['id'], (int) $args['sid']));
+        return $this->read($request, $response, fn(int $s) => $this->service->detail($s, (int) $args['id'], (int) $args['sid'], $this->page($request)));
     }
 
     public function costCandidates(Request $request, Response $response, array $args): Response

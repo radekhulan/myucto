@@ -3310,7 +3310,7 @@ final class Routes
             // Pracovní evidence čerpání dotací (#403): interní, jen relace; čtení accounting READ, zápis accounting WRITE.
             $g->get('/periods/{id:[0-9]+}/funding-work', [\MyInvoice\Action\Nonprofit\FundingWorkAction::class, 'overview']);
             $g->get('/periods/{id:[0-9]+}/funding-work/choices', [\MyInvoice\Action\Nonprofit\FundingWorkAction::class, 'choices']);
-            $g->get('/periods/{id:[0-9]+}/funding-work/income-candidates', [\MyInvoice\Action\Nonprofit\FundingWorkAction::class, 'incomeCandidates']);
+            $g->get('/periods/{id:[0-9]+}/funding-work/sources/{sid:[0-9]+}/income-candidates', [\MyInvoice\Action\Nonprofit\FundingWorkAction::class, 'incomeCandidates']);
             $g->post('/periods/{id:[0-9]+}/funding-work/sources', [\MyInvoice\Action\Nonprofit\FundingWorkAction::class, 'create']);
             $g->get('/periods/{id:[0-9]+}/funding-work/sources/{sid:[0-9]+}', [\MyInvoice\Action\Nonprofit\FundingWorkAction::class, 'detail']);
             $g->put('/periods/{id:[0-9]+}/funding-work/sources/{sid:[0-9]+}', [\MyInvoice\Action\Nonprofit\FundingWorkAction::class, 'update']);
