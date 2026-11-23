@@ -595,8 +595,9 @@ final class InvoiceRepository
         $tdStmt->execute([$advanceId]);
         if ((int) $tdStmt->fetchColumn() > 0) {
             throw new \RuntimeException(
-                'K záloze existují daňové doklady k přijaté platbě — finál vystav tlačítkem „Vystavit daňový doklad" '
-                . 'z detailu zálohy (doplní odpočtové řádky), ruční propojení by daň zdvojilo.'
+                'K záloze existují daňové doklady k přijaté platbě, ruční propojení by daň zdvojilo. Konečnou fakturu '
+                . 'vystavte tlačítkem „Vystavit fakturu k záloze" v detailu zálohy, nebo na konceptu faktury použijte '
+                . '„Odečíst zálohu" (doplní odpočtové řádky podle daňového dokladu).'
             );
         }
 
