@@ -744,6 +744,76 @@ final class ClosingPrepaidExpenseAccrualTest extends TestCase
         self::assertEqualsWithDelta(-18200.00, $interim['deltas']['518'] ?? 0.0, 0.001);
     }
 
+    // ── agenda Časové rozlišení: žádné dvojí odložení ani rozpuštění ──────────
+
+    /**
+     * Doklad, ke kterému je položka agendy Časové rozlišení, odkládá a rozpouští agenda.
+     * Krok uzávěrky ani průběžný výkaz ho nesmí odložit znovu (účetní ho na 381 zaúčtovala
+     * interním dokladem bez vazby „Souvisí", kterou by uzávěrka poznala sama).
+     */
+    public function testAgendaManagedDocumentIsNotDeferredByClosingNorInterim(): void
+    {
+        $pi = $this->purchase('PF-2091-AGENDA', 36600.00, self::YEAR . '-11-15');
+        $this->item($pi, 36600.00, '2091-07-01', '2092-06-30', '548');
+        $this->postPurchaseExpense($pi, '548', 36600.00, self::YEAR . '-11-15');
+        self::assertEqualsWithDelta(18200.00, (float) $this->closing->prepaidExpenseAccrualPreview($this->supplierId, $this->periodId)['total'], 0.001);
+
+        $this->agendaItem($pi, 18200.00);
+
+        $preview = $this->closing->prepaidExpenseAccrualPreview($this->supplierId, $this->periodId);
+        self::assertSame([], $preview['items'], 'Uzávěrka nesmí odložit doklad spravovaný agendou.');
+        self::assertEqualsWithDelta(0.0, (float) $preview['total'], 0.001);
+        $interim = Bootstrap::buildContainer()->get(\MyInvoice\Service\Accounting\Reports\InterimAccrualAdjustment::class)
+            ->compute($this->supplierId, self::STARTS_ON, self::ENDS_ON);
+        self::assertEqualsWithDelta(0.0, $interim['prepaid_expense'], 0.001, 'Průběžný výkaz nesmí odložit doklad spravovaný agendou.');
+    }
+
+    /**
+     * Odklad zaúčtovaný uzávěrkou, jehož doklad pak převzala do správy agenda: otevření roku
+     * ho nerozpustí, rozpouští ho agenda.
+     */
+    public function testAgendaManagedDocumentIsNotReleasedByOpenNext(): void
+    {
+        $pi = $this->purchase('PF-2091-AGENDA-OPEN', 36600.00, self::YEAR . '-11-15');
+        $this->item($pi, 36600.00, '2091-07-01', '2092-06-30', '548');
+        $this->postPurchaseExpense($pi, '548', 36600.00, self::YEAR . '-11-15');
+        $this->driveCloseWithAccrual();
+        $this->closing->closeBooks($this->supplierId, $this->periodId, $this->rv(), $this->meta());
+        $this->agendaItem($pi, null);
+
+        $open = $this->closing->openNext($this->supplierId, $this->periodId, $this->rv(), $this->meta());
+
+        self::assertNull($open['prepaid_expense_release_entry_id'], 'Otevření roku nesmí rozpustit doklad spravovaný agendou.');
+        self::assertNull($this->journal->findBySource($this->supplierId, 'prepaid_expense_accrual', ClosingSourceId::prepaidExpenseAccrualRelease($this->periodId)));
+    }
+
+    /** Položka agendy ke zdrojovému dokladu; volitelně s interním zápisem odkladu MD 381 / D 548. */
+    private function agendaItem(int $purchaseId, ?float $deferral): void
+    {
+        $container = Bootstrap::buildContainer();
+        $origin = null;
+        if ($deferral !== null) {
+            $origin = $this->posting->postDocument($this->supplierId, 'manual', null, [
+                ['account_code' => '381', 'side' => 'debit', 'amount' => $deferral],
+                ['account_code' => '548', 'side' => 'credit', 'amount' => $deferral],
+            ], ['entry_date' => self::ENDS_ON, 'posted' => true, 'posted_by' => $this->userId, 'user_id' => $this->userId]);
+        }
+        $container->get(\MyInvoice\Service\Accounting\Accrual\AccrualItemService::class)->create($this->supplierId, [
+            'title' => 'Pojistné spravované agendou',
+            'kind' => 'prepaid_expense',
+            'accrual_account_code' => '381',
+            'counter_account_code' => '548',
+            'basis_amount' => 36600.00,
+            'period_from' => '2091-07-01',
+            'period_to' => '2092-06-30',
+            'method' => 'monthly_days',
+            'source_type' => 'purchase_invoice',
+            'source_id' => $purchaseId,
+            'origin_entry_id' => $origin,
+            'activate' => true,
+        ], $this->userId);
+    }
+
     /** Verzovaná změna účtu od data (stejná cesta jako úprava osnovy v aplikaci). */
     private function changeAccount(string $code, string $from, array $changes): void
     {

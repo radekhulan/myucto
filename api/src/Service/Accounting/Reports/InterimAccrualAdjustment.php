@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Accounting\Reports;
 
 use MyInvoice\Service\Accounting\Assets\AssetException;
+use MyInvoice\Service\Accounting\Accrual\AccrualAgendaGuard;
 use MyInvoice\Service\Accounting\Accrual\AccrualScheduleCalculator;
 use MyInvoice\Service\Accounting\Assets\DepreciationPostingService;
 use MyInvoice\Service\Accounting\Closing\AccrualDeferralService;
@@ -40,13 +41,15 @@ final class InterimAccrualAdjustment
     public function __construct(
         private readonly AccrualDeferralService $accruals,
         private readonly DepreciationPostingService $depreciation,
+        private readonly AccrualAgendaGuard $agenda,
     ) {}
 
     /**
      * @return array{deltas: array<string,float>, prepaid_expense: float, deferred_revenue: float, documents: int,
-     *   depreciation: float, depreciation_assets: int}
+     *   depreciation: float, depreciation_assets: int, accrual_agenda: float, accrual_agenda_items: int}
      *   deltas = účet => změna zůstatku MD − D; prepaid_expense = přírůstek 381; deferred_revenue = přírůstek 384;
-     *   depreciation = průběžný účetní odpis karet, jejichž odpis roku deník ještě nenese
+     *   depreciation = průběžný účetní odpis karet, jejichž odpis roku deník ještě nenese;
+     *   accrual_agenda = nezaúčtované rozpuštění položek agendy Časové rozlišení (v normálním znaménku)
      */
     public function compute(int $supplierId, string $periodStartsOn, string $asOf): array
     {
@@ -61,7 +64,7 @@ final class InterimAccrualAdjustment
         try {
             $accountsByInvoice = [];
             $costsByInvoice = [];
-            foreach ($this->accruals->prepaidExpenseRows($supplierId, $asOf, $periodStartsOn, $asOf, $asOf) as $row) {
+            foreach ($this->accruals->withoutAgendaItems($supplierId, $this->accruals->prepaidExpenseRows($supplierId, $asOf, $periodStartsOn, $asOf, $asOf)) as $row) {
                 $netCzk = $this->accruals->prepaidExpenseCostCzk($supplierId, $row, $costsByInvoice);
                 $deferred = AccrualScheduleCalculator::deferredAmount($netCzk, (string) $row['accrual_from'], (string) $row['accrual_to'], $asOf);
                 if ((int) round($deferred * 100) === 0) {
@@ -76,7 +79,7 @@ final class InterimAccrualAdjustment
             }
 
             $contexts = [];
-            foreach ($this->accruals->deferredRevenueRows($supplierId, $asOf, $periodStartsOn, $asOf, null, false, $asOf) as $row) {
+            foreach ($this->accruals->withoutAgendaItems($supplierId, $this->accruals->deferredRevenueRows($supplierId, $asOf, $periodStartsOn, $asOf, null, false, $asOf)) as $row) {
                 [$netCzk, $accounts] = $this->accruals->deferredRevenueItem($supplierId, $row, $contexts);
                 $deferred = AccrualScheduleCalculator::deferredAmount($netCzk, (string) $row['accrual_from'], (string) $row['accrual_to'], $asOf);
                 if ((int) round($deferred * 100) === 0 || $accounts === []) {
@@ -94,6 +97,13 @@ final class InterimAccrualAdjustment
             }
             if ((int) round($revenue * 100) !== 0) {
                 $add($deltas, $this->accruals->deferralAccount($supplierId, AccrualDeferralService::RULE_DEFERRED_REVENUE), -$revenue);
+            }
+
+            // Položky agendy Časové rozlišení: jen nezaúčtované rozpuštění podle plánu
+            // ({@see AccrualAgendaGuard::interimDeltas()}), zaúčtované už je v deníku.
+            $agenda = $this->agenda->interimDeltas($supplierId, $periodStartsOn, $asOf);
+            foreach ($agenda['deltas'] as $account => $amount) {
+                $add($deltas, (string) $account, $amount);
             }
 
             $depreciation = $this->depreciation->interimAccounting($supplierId, $periodStartsOn, $asOf);
@@ -115,6 +125,8 @@ final class InterimAccrualAdjustment
             'deferred_revenue' => $revenue,
             'documents' => count($documents),
             'depreciation' => $depreciation['total'],
+            'accrual_agenda' => $agenda['total'],
+            'accrual_agenda_items' => $agenda['items'],
             'depreciation_assets' => $depreciation['assets'],
         ];
     }

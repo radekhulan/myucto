@@ -22,6 +22,7 @@ namespace MyInvoice\Service\Tax\Return;
  *   • dohadné položky pasivní 5xx/389  → −VH (INFORMATIVNÍ — potvrzuje účetní per dodavatel)
  *   • konečný stav zásob (způsob B)    → +VH (112/132/123 proti 501/504/583) [volající: jen nezaúčtovaný]
  *   • odpisy roku 551                  → −VH, daňový odpis do `depreciation` [volající: jen pending část]
+ *   • agenda Časové rozlišení          → náklad 381 −VH, výnos 384 +VH [volající: jen nezaúčtované řádky plánu]
  *
  * Opravné položky a dohady jsou návrhy, které účetní teprve potvrdí/upraví/zamítne — proto
  * `optional=true` a do vh_projected (a odvozené daně) se NEzapočítávají, jen se zobrazí.
@@ -38,7 +39,8 @@ final class ClosingProjectionCalculator
      *   provisions?:array<string,mixed>|null,
      *   estimates?:array<string,mixed>|null,
      *   depreciation?:array{pending_accounting?:float,pending_tax?:float}|null,
-     *   stock?:array{total?:float}|null
+     *   stock?:array{total?:float}|null,
+     *   accrual_agenda?:array{expense?:float,revenue?:float}|null
      * } $sources
      * @return array{
      *   vh_posted:float,
@@ -131,6 +133,16 @@ final class ClosingProjectionCalculator
             $amount = round((float) ($st['total'] ?? 0), 2);
             if (self::cents($amount) !== 0) {
                 $items[] = self::item('stock_closing', 'taxReturn.proj_stock', abs($amount), $amount >= 0 ? 1 : -1, false);
+            }
+        }
+
+        // Agenda Časové rozlišení: nezaúčtované rozpuštění položek do konce období. Náklad 381
+        // (MD 5xx) sníží VH, výnos 384 (D 6xx) ho zvýší; netto jednou položkou.
+        $ag = $sources['accrual_agenda'] ?? null;
+        if (is_array($ag)) {
+            $net = round((float) ($ag['revenue'] ?? 0) - (float) ($ag['expense'] ?? 0), 2);
+            if (self::cents($net) !== 0) {
+                $items[] = self::item('accrual_agenda_release', 'taxReturn.proj_accrual_agenda', abs($net), $net >= 0 ? 1 : -1, false);
             }
         }
 

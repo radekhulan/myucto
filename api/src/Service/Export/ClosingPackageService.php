@@ -145,6 +145,10 @@ final class ClosingPackageService
         private readonly \MyInvoice\Service\Pdf\EquityChangesPdfRenderer $equityPdf,
         private readonly \MyInvoice\Service\Accounting\Reports\OpenItemsService $openItems,
         private readonly \MyInvoice\Service\Pdf\OpenItemsListPdfRenderer $openItemsPdf,
+        // Rozpis agendy Časové rozlišení po položkách k rozvahovému dni (doložení 381–385).
+        private readonly \MyInvoice\Service\Accounting\Accrual\AccrualBookService $accrualBook,
+        private readonly \MyInvoice\Service\Pdf\AccrualBookPdfRenderer $accrualBookPdf,
+        private readonly \MyInvoice\Service\Accounting\Accrual\AccrualBookXlsxExporter $accrualBookXlsx,
     ) {}
 
     /** Verze generátoru balíčku (manifest.json, EP-6). */
@@ -661,6 +665,16 @@ final class ClosingPackageService
                         $put(sprintf('Casova-rozliseni/casove-rozliseni-%d.xlsx', $fiscalYear), $out['bytes']);
                     }
                 } catch (\Throwable $e) { $warnings[] = 'Časové rozlišení: ' . $e->getMessage(); }
+                // Rozpis po položkách agendy, má-li firma položky (jinak by byl prázdný).
+                try {
+                    $book = $this->accrualBook->build($supplierId, ['as_of' => $endsOn, 'status' => 'active,completed,terminated'], []);
+                    if ($book['rows'] !== []) {
+                        $put(sprintf('Casova-rozliseni/rozpis-casoveho-rozliseni-%d.pdf', $fiscalYear), $this->accrualBookPdf->render($book));
+                        if ($includeXlsx) {
+                            $put(sprintf('Casova-rozliseni/rozpis-casoveho-rozliseni-%d.xlsx', $fiscalYear), $this->accrualBookXlsx->export($book)['bytes']);
+                        }
+                    }
+                } catch (\Throwable $e) { $warnings[] = 'Rozpis časového rozlišení: ' . $e->getMessage(); }
                 $bump('Časové rozlišení');
             }
 

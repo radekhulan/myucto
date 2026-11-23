@@ -270,6 +270,12 @@ final class DppoReturnDataProvider
         $read('estimates', function () use (&$sources, $supplierId, $periodId): void {
             $sources['estimates'] = $this->closing->estimatesSuggest($supplierId, $periodId);
         });
+        // Agenda Časové rozlišení: jen v neuzavřeném roce, uzavřený má rozpuštění v deníku.
+        if ($open) {
+            $read('accrual_agenda', function () use (&$sources, $supplierId, $periodId): void {
+                $sources['accrual_agenda'] = $this->closing->accrualAgendaProjection($supplierId, $periodId);
+            });
+        }
         $read('prior_release', function () use (&$sources, $supplierId, $periodId): void {
             $rel = $this->closing->priorDeferralReleaseProjection($supplierId, $periodId);
             if (($rel['applicable'] ?? false) === true) {

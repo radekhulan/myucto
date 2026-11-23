@@ -14,6 +14,7 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Accounting\Closing;
 
+use MyInvoice\Service\Accounting\Accrual\AccrualAgendaGuard;
 use MyInvoice\Service\Accounting\Accrual\AccrualScheduleCalculator;
 use MyInvoice\Service\Accounting\AccountingPeriodStatus;
 use MyInvoice\Service\Accounting\AccountRoleResolver;
@@ -2073,7 +2074,7 @@ final class ClosingService
         $accountsByInvoice = [];
         $costsByInvoice = [];
         $dimensionCache = [AccrualDeferralService::CACHE_POSTING_DATE => $endsOn];
-        $rows = $this->accruals->prepaidExpenseRows($supplierId, $endsOn, $startsOn, $endsOn);
+        $rows = $this->accruals->withoutAgendaItems($supplierId, $this->accruals->prepaidExpenseRows($supplierId, $endsOn, $startsOn, $endsOn));
         $this->accruals->preloadPrepaidExpenseAllocations($supplierId, $rows, $dimensionCache);
         foreach ($rows as $row) {
             $from = substr((string) $row['accrual_from'], 0, 10);
@@ -2331,6 +2332,8 @@ final class ClosingService
                 $rows[] = AccrualDeferralService::prepaidExpenseSnapshotRow($item);
             }
         }
+        // Doklady spravované agendou Časové rozlišení rozpouští agenda, ne otevření roku.
+        $rows = $this->accruals->withoutAgendaItems($supplierId, $rows);
         $this->accruals->preloadPrepaidExpenseAllocations($supplierId, $rows, $dimensionCache);
         // Starý odklad bez dimenzí se zrcadlí; ve 504 si rozpuštění ponechá osy činnosti dokladu.
         $this->accruals->markLegacyDeferrals($supplierId, 'prepaid_expense_accrual', $originEndsOn,
@@ -2412,7 +2415,7 @@ final class ClosingService
         $total = 0.0;
         $contexts = [];
         $dimensionCache = [AccrualDeferralService::CACHE_POSTING_DATE => $endsOn];
-        $rows = $this->accruals->deferredRevenueRows($supplierId, $endsOn, $startsOn, $endsOn);
+        $rows = $this->accruals->withoutAgendaItems($supplierId, $this->accruals->deferredRevenueRows($supplierId, $endsOn, $startsOn, $endsOn));
         $this->accruals->preloadDeferredRevenueAllocations($supplierId, $rows, $dimensionCache);
         foreach ($rows as $row) {
             $from = substr((string) $row['accrual_from'], 0, 10);
@@ -2626,6 +2629,8 @@ final class ClosingService
                 $rows[] = AccrualDeferralService::deferredRevenueSnapshotRow($item);
             }
         }
+        // Doklady spravované agendou Časové rozlišení rozpouští agenda, ne otevření roku.
+        $rows = $this->accruals->withoutAgendaItems($supplierId, $rows);
         $this->accruals->preloadDeferredRevenueAllocations($supplierId, $rows, $dimensionCache);
         // Starý odklad bez dimenzí se zrcadlí; ve 504 si rozpuštění ponechá osy činnosti dokladu.
         $this->accruals->markLegacyDeferrals($supplierId, 'deferred_revenue_accrual', $originEndsOn,
@@ -3139,6 +3144,48 @@ final class ClosingService
             'deferred_revenue' => $deferredRevenue,
             'total' => $total,
         ];
+    }
+
+    /**
+     * Předběžná kontrola: rozdíl agendy Časové rozlišení proti hlavní knize po analytikách
+     * 381 až 385 ({@see AccrualReconciliationService::reconcile()}). Firma bez položek agendy
+     * kontrolu nemá (rozdíl by byl celý zůstatek a nic by neříkal).
+     *
+     * @return array<string,mixed>|null
+     */
+    private function accrualAgendaCheck(int $supplierId, string $asOf): ?array
+    {
+        $stmt = $this->db->pdo()->prepare("SELECT 1 FROM accrual_items WHERE supplier_id = ? AND status <> 'cancelled' LIMIT 1");
+        $stmt->execute([$supplierId]);
+        if ($stmt->fetchColumn() === false) {
+            return null;
+        }
+        $rec = (new \MyInvoice\Service\Accounting\Accrual\AccrualReconciliationService($this->db,
+            new \MyInvoice\Service\Accounting\Accrual\AccrualItemRepository($this->db)))->reconcile($supplierId, $asOf);
+        $accounts = array_values(array_filter($rec['accounts'], static fn (array $a): bool => (int) round($a['difference'] * 100) !== 0));
+        return [
+            'key' => 'deferrals_agenda_difference',
+            'severity' => 'warning',
+            'ok' => $accounts === [],
+            'value' => ['as_of' => $asOf, 'difference' => $rec['totals']['difference'], 'accounts' => $accounts],
+        ];
+    }
+
+    /**
+     * Projekce nezaúčtovaného rozpuštění položek agendy Časové rozlišení do konce období pro
+     * náhled DPPO ({@see AccrualAgendaGuard::projectionPending()}). Zaúčtované rozpuštění je
+     * ve VH z deníku, položky agendy uzávěrka sama neodkládá ani nerozpouští, takže se nic
+     * nezapočte dvakrát. Read-only.
+     *
+     * @return array{expense: float, revenue: float, items: int}
+     */
+    public function accrualAgendaProjection(int $supplierId, int $periodId): array
+    {
+        $period = $this->periods->findById($supplierId, $periodId);
+        if ($period === null) {
+            return ['expense' => 0.0, 'revenue' => 0.0, 'items' => 0];
+        }
+        return (new AccrualAgendaGuard($this->db))->projectionPending($supplierId, (string) $period['starts_on'], (string) $period['ends_on']);
     }
 
     /**
@@ -6099,6 +6146,14 @@ final class ClosingService
                 $deferrals[$code] = $balances[$code];
             }
             $checks[] = ['key' => 'deferrals_balances', 'severity' => 'info', 'ok' => true, 'value' => $deferrals];
+        }
+        // Agenda Časové rozlišení proti hlavní knize: rozdíl = řádky 38x bez položky. Jen
+        // varování (uzávěrku neblokuje, rozhodne účetní) a jen u firmy, která agendu používá.
+        if ($wants('deferrals_agenda_difference')) {
+            $agendaCheck = $this->accrualAgendaCheck($supplierId, $rangeTo);
+            if ($agendaCheck !== null) {
+                $checks[] = $agendaCheck;
+            }
         }
 
         if ($wants('accounts_unusual_side')) {
