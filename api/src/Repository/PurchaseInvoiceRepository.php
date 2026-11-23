@@ -2271,8 +2271,10 @@ final class PurchaseInvoiceRepository
         $params[] = $id;
         $params[] = $supplierId;
 
+        $taxHeader = $this->sourceTaxHeader($id, $supplierId);
         $stmt = $this->db->pdo()->prepare($sql);
         $stmt->execute($params);
+        $this->dropSourceTaxIfHeaderChanged($id, $supplierId, $taxHeader);
 
         if ($requireUnbooked && $stmt->rowCount() === 0) {
             // rowCount 0 = buď booked_at podmínka nesedla, nebo identická data (MySQL
@@ -2328,6 +2330,26 @@ final class PurchaseInvoiceRepository
             foreach ($old->fetchAll(PDO::FETCH_ASSOC) ?: [] as $o) {
                 $storedDomestic[self::itemSignature($o)][] = (float) $o['total_vat'];
             }
+        }
+        // Daň v Kč ze zdroje převodu (sloupce SOURCE_TAX_COLUMNS) zůstává u položky, jejíž
+        // daňové údaje (množství, cena, sazba, kód zařazení) se nezměnily - jinak by
+        // přepis položek, třeba jen jiný popis, změnil přiznání. Hlavičku hlídá
+        // {@see dropSourceTaxIfHeaderChanged()}. Z těla požadavku se sloupce nepřebírají.
+        $sourceTax = $pdo->prepare(
+            'SELECT id, order_index, description, quantity, unit_price_without_vat, vat_rate_id, vat_classification_code,
+                    import_tax_base_czk, import_tax_vat_czk, import_projection_vat_czk, import_tax_excluded
+               FROM purchase_invoice_items
+              WHERE purchase_invoice_id = ?
+                AND (import_tax_base_czk IS NOT NULL OR import_tax_vat_czk IS NOT NULL OR import_projection_vat_czk IS NOT NULL OR import_tax_excluded <> 0)
+              ORDER BY order_index, id'
+        );
+        $sourceTax->execute([$purchaseInvoiceId]);
+        $storedSourceTax = $sourceTax->fetchAll(PDO::FETCH_ASSOC) ?: [];
+        $storedOrder = [];
+        if ($storedSourceTax !== []) {
+            $order = $pdo->prepare('SELECT id FROM purchase_invoice_items WHERE purchase_invoice_id = ? ORDER BY order_index, id');
+            $order->execute([$purchaseInvoiceId]);
+            $storedOrder = array_map('intval', $order->fetchAll(PDO::FETCH_COLUMN) ?: []);
         }
         $keepItemIds = [];
         $pdo->prepare('DELETE FROM purchase_invoice_items WHERE purchase_invoice_id = ?')
@@ -2495,6 +2517,16 @@ final class PurchaseInvoiceRepository
                     ? (int) $item['advance_purchase_invoice_id']
                     : null,
             ]);
+
+            if ($storedSourceTax !== []) {
+                $kept = self::unchangedSourceTax($storedSourceTax, $storedOrder, $item, $i, $vatRateId, $code !== null ? (string) $code : null);
+                if ($kept !== null) {
+                    $pdo->prepare('UPDATE purchase_invoice_items SET import_tax_base_czk = ?, import_tax_vat_czk = ?, import_projection_vat_czk = ?, import_tax_excluded = ?
+                                    WHERE id = ? AND purchase_invoice_id = ?')
+                        ->execute([$kept['import_tax_base_czk'], $kept['import_tax_vat_czk'], $kept['import_projection_vat_czk'],
+                            (int) $kept['import_tax_excluded'], (int) $pdo->lastInsertId(), $purchaseInvoiceId]);
+                }
+            }
 
             if ($keepDomesticItemCodes && in_array((string) $code, self::MIXED_DOCUMENT_DOMESTIC_CODES, true)) {
                 $sig = self::itemSignature([
@@ -2674,6 +2706,31 @@ final class PurchaseInvoiceRepository
      *
      * @param array<string,mixed> $row
      */
+    /**
+     * Uložená položka s daní v Kč ze zdroje, která odpovídá nové položce: podle `id`, bez něj
+     * podle pořadí. Vrátí ji jen se stejným množstvím, cenou, sazbou a kódem zařazení.
+     *
+     * @param list<array<string,mixed>> $stored položky s daní ze zdroje
+     * @param list<int> $order id všech uložených položek v pořadí
+     * @param array<string,mixed> $item
+     * @return ?array<string,mixed>
+     */
+    private static function unchangedSourceTax(array $stored, array $order, array $item, int $position, int $vatRateId, ?string $code): ?array
+    {
+        $itemId = isset($item['id']) && is_numeric($item['id']) ? (int) $item['id'] : ($order[$position] ?? 0);
+        foreach ($stored as $row) {
+            if ((int) $row['id'] !== $itemId) {
+                continue;
+            }
+            $same = abs((float) $row['quantity'] - (float) ($item['quantity'] ?? 1)) < 0.00005
+                && abs((float) $row['unit_price_without_vat'] - (float) ($item['unit_price_without_vat'] ?? 0)) < 0.0000005
+                && (int) $row['vat_rate_id'] === $vatRateId
+                && (string) ($row['vat_classification_code'] ?? '') === (string) ($code ?? '');
+            return $same ? $row : null;
+        }
+        return null;
+    }
+
     private static function itemSignature(array $row): string
     {
         $num = static fn (mixed $v): string => number_format((float) ($v ?? 0), 4, '.', '');
@@ -2923,11 +2980,46 @@ final class PurchaseInvoiceRepository
      */
     public function setExchangeRate(int $id, ?float $rate, ?string $rateDate, string $source, int $supplierId): void
     {
+        $taxHeader = $this->sourceTaxHeader($id, $supplierId);
         $this->db->pdo()
             ->prepare('UPDATE purchase_invoices
                           SET exchange_rate = ?, exchange_rate_date = ?, exchange_rate_source = ?
                         WHERE id = ? AND supplier_id = ?')
             ->execute([$rate, $rateDate, ExchangeRateSources::normalize($source), $id, $supplierId]);
+        $this->dropSourceTaxIfHeaderChanged($id, $supplierId, $taxHeader);
+    }
+
+    /** Sloupce položky s daní v Kč ze zdroje převodu ({@see VatLedgerService}: `import_tax_*`, `import_projection_vat_czk`). */
+    public const SOURCE_TAX_COLUMNS = ['import_tax_base_czk', 'import_tax_vat_czk', 'import_projection_vat_czk', 'import_tax_excluded'];
+
+    /**
+     * Údaje hlavičky, ze kterých se počítá základ a daň položek v Kč. Daň v Kč ze zdroje
+     * převodu (ABRA, POHODA - samovyměření kurzem ke dni plnění) platí jen pro ně; změna
+     * měny, kurzu, režimu přenesení nebo cen s DPH ji zneplatní.
+     *
+     * @return ?array<string,string>
+     */
+    private function sourceTaxHeader(int $id, int $supplierId): ?array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT currency_id, exchange_rate, reverse_charge, prices_include_vat FROM purchase_invoices WHERE id = ? AND supplier_id = ?'
+        );
+        $stmt->execute([$id, $supplierId]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        return $row === false ? null : array_map(static fn (mixed $v): string => (string) $v, $row);
+    }
+
+    /** Změnila-li se hlavička ({@see sourceTaxHeader()}), daň v Kč ze zdroje převodu položky ztrácí. */
+    private function dropSourceTaxIfHeaderChanged(int $id, int $supplierId, ?array $before): void
+    {
+        if ($before === null || $this->sourceTaxHeader($id, $supplierId) === $before) {
+            return;
+        }
+        $this->db->pdo()->prepare(
+            'UPDATE purchase_invoice_items i JOIN purchase_invoices pi ON pi.id = i.purchase_invoice_id AND pi.supplier_id = ?
+                SET i.import_tax_base_czk = NULL, i.import_tax_vat_czk = NULL, i.import_projection_vat_czk = NULL, i.import_tax_excluded = 0
+              WHERE i.purchase_invoice_id = ?'
+        )->execute([$supplierId, $id]);
     }
 
     /**
