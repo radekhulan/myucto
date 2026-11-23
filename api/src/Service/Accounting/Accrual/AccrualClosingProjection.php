@@ -46,17 +46,19 @@ final class AccrualClosingProjection
         $sql = "SELECT * FROM (
                   SELECT 'prepaid_expense' AS kind, 'purchase_invoice' AS source_type, d.id AS source_id, it.id AS source_item_id,
                          COALESCE(NULLIF(d.vendor_invoice_number, ''), d.varsymbol) AS document_no, it.description AS title,
-                         it.accrual_from, it.accrual_to, ROUND(it.total_without_vat * COALESCE(d.exchange_rate, 1), 2) AS net
+                         it.accrual_from, it.accrual_to, ROUND(it.total_without_vat * COALESCE(IF(cur.code = 'CZK', 1, d.exchange_rate), 1), 2) AS net
                     FROM purchase_invoices d
                     JOIN purchase_invoice_items it ON it.purchase_invoice_id = d.id
+                    JOIN currencies cur ON cur.id = d.currency_id
                    WHERE d.supplier_id = ? AND d.status NOT IN ('draft', 'cancelled')
                      AND it.accrual_from IS NOT NULL AND it.accrual_to > ? AND d.effective_cost_date <= ?
                      AND NOT {$piOwn} AND " . $agenda('purchase_invoice', 'd.id', 'it.id') . "
                   UNION ALL
                   SELECT 'deferred_revenue', 'invoice', d.id, it.id, d.varsymbol, it.description,
-                         it.accrual_from, it.accrual_to, ROUND(it.total_without_vat * COALESCE(d.exchange_rate, 1), 2)
+                         it.accrual_from, it.accrual_to, ROUND(it.total_without_vat * COALESCE(IF(cur.code = 'CZK', 1, d.exchange_rate), 1), 2)
                     FROM invoices d
                     JOIN invoice_items it ON it.invoice_id = d.id
+                    JOIN currencies cur ON cur.id = d.currency_id
                    WHERE d.supplier_id = ? AND d.status NOT IN ('draft', 'cancelled')
                      AND it.accrual_from IS NOT NULL AND it.accrual_to > ? AND d.effective_tax_date <= ?
                      AND NOT {$inOwn} AND " . $agenda('invoice', 'd.id', 'it.id') . "
