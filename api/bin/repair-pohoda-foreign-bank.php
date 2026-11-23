@@ -19,6 +19,13 @@ declare(strict_types=1);
  *   php api/bin/repair-pohoda-foreign-bank.php --supplier=12 --supplier=34  # nanečisto, vybrané firmy
  *   php api/bin/repair-pohoda-foreign-bank.php --supplier=12 --commit       # provést
  *   php api/bin/repair-pohoda-foreign-bank.php --all-pohoda --verbose       # i korunové účty
+ *   php api/bin/repair-pohoda-foreign-bank.php --supplier=12 --include-uploaded --commit
+ *
+ * Výpisy nahrané po převodu (GPC, PDF, banka) k číslu účtu v cizí měně vypíše vždy: v jaké
+ * jsou měně, kam patří, zda navazují na předchozí výpis a co s nimi udělat. Volba
+ * `--include-uploaded` s `--commit` přepne na měnu účtu ty, které k převedenému účtu v měně
+ * jednoznačně patří podle souboru a nemají spárování, úhradu ani zápis. U účtů, které se
+ * nepřevedly, vypíše doporučený ruční postup.
  */
 
 if (PHP_SAPI !== 'cli') {
@@ -34,6 +41,7 @@ $commit = false;
 $all = false;
 $fetch = true;
 $verbose = false;
+$includeUploaded = false;
 $suppliers = [];
 foreach (array_slice($argv, 1) as $arg) {
     if ($arg === '--commit') {
@@ -44,6 +52,8 @@ foreach (array_slice($argv, 1) as $arg) {
         $fetch = false;
     } elseif ($arg === '--verbose') {
         $verbose = true;
+    } elseif ($arg === '--include-uploaded') {
+        $includeUploaded = true;
     } elseif (str_starts_with($arg, '--supplier=') && ctype_digit(substr($arg, 11)) && (int) substr($arg, 11) > 0) {
         $suppliers[] = (int) substr($arg, 11);
     } else {
@@ -57,14 +67,15 @@ if ($all === ($suppliers !== [])) {
 }
 
 $repair = Bootstrap::buildContainer()->get(PohodaForeignBankRepair::class);
-$rows = $repair->run($all ? $repair->pohodaSuppliers() : array_values(array_unique($suppliers)), $commit, $fetch);
+$rows = $repair->run($all ? $repair->pohodaSuppliers() : array_values(array_unique($suppliers)), $commit, $fetch, null, $includeUploaded);
 
 $money = static fn (?int $cents): string => $cents === null ? '-' : number_format($cents / 100, 2, ',', ' ');
 echo ($commit ? '' : '[NANEČISTO] ') . 'Bankovní účty převzaté z POHODY' . PHP_EOL;
 $summary = [];
+$uploadSummary = [];
 foreach ($rows as $r) {
     $summary[$r['status']] = ($summary[$r['status']] ?? 0) + 1;
-    if (!$verbose && $r['status'] === 'czk' && $r['reason'] === null) {
+    if (!$verbose && $r['status'] === 'czk' && $r['reason'] === null && $r['uploaded'] === []) {
         continue;
     }
     printf(
@@ -78,6 +89,10 @@ foreach ($rows as $r) {
         if ($r['status'] === 'rechain' || $r['status'] === 'rechained') {
             printf("    rok %d: %d výpisů, počáteční stav %s Kč podle deníku (posun %s Kč zpět)\n",
                 $c['year'], count($c['statement_ids']), $money($c['opening_czk']), $money($c['shift_czk']));
+            continue;
+        }
+        if ($c['opening_czk'] === null && $c['opening_error'] === null) {
+            printf("    rok %d: %d výpisů, výpisy bez stavů (počáteční ani konečný stav se nepřepočítává)\n", $c['year'], count($c['statement_ids']));
             continue;
         }
         printf("    rok %d: %d výpisů, počáteční stav %s Kč -> %s %s (kurz %s%s), konečný stav %s %s%s\n",
@@ -94,6 +109,25 @@ foreach ($rows as $r) {
             echo "    evidence: {$change}" . PHP_EOL;
         }
     }
+    if (($r['advice'] ?? null) !== null) {
+        echo '    postup: ' . $r['advice'] . PHP_EOL;
+    }
+    if ($r['reason_code'] === 'low_match') {
+        foreach ($r['mismatches'] as $m) {
+            printf("    mimo kurz: %s  %s Kč (kurz %s %s)\n", $m['date'], number_format((float) $m['czk'], 2, ',', ' '),
+                number_format((float) $m['rate'], 3, ',', ''), $r['currency']);
+        }
+    }
+    foreach ($r['uploaded'] as $u) {
+        printf("    nahraný výpis #%d %s (%s, č. %s, %s): v %s, patří do %s%s  %s%s\n",
+            $u['id'], $u['file_name'] !== '' ? $u['file_name'] : '-', $u['source'], $u['statement_number'] ?? '-', $u['statement_date'],
+            $u['currency'], $u['expected'] ?? '?', $u['evidence'] !== '' ? ' (' . $u['evidence'] . ')' : '',
+            $u['status'], $u['diff'] !== null && $u['diff'] !== 0 ? ', rozdíl stavu ' . $money($u['diff']) . ' ' . ($u['expected'] ?? '') : '');
+        if ($u['advice'] !== null) {
+            echo '        postup: ' . $u['advice'] . PHP_EOL;
+        }
+        $uploadSummary[$u['status']] = ($uploadSummary[$u['status']] ?? 0) + 1;
+    }
     if (isset($r['result'])) {
         printf("    provedeno: pohybů %d, párování %d, řádků deníku %d, otevíracích řádků %d\n",
             $r['result']['transactions'], $r['result']['matches'], $r['result']['journal_lines'], $r['result']['opening_lines']);
@@ -101,7 +135,11 @@ foreach ($rows as $r) {
 }
 ksort($summary);
 echo 'Souhrn: ' . implode(', ', array_map(static fn (string $k, int $v): string => "{$k} {$v}", array_keys($summary), $summary)) . PHP_EOL;
-if (!$commit && (($summary['convert'] ?? 0) + ($summary['rechain'] ?? 0)) > 0) {
-    echo PHP_EOL . 'Nic nezměněno. Opravu provede spuštění s --commit.' . PHP_EOL;
+if ($uploadSummary !== []) {
+    ksort($uploadSummary);
+    echo 'Nahrané výpisy: ' . implode(', ', array_map(static fn (string $k, int $v): string => "{$k} {$v}", array_keys($uploadSummary), $uploadSummary)) . PHP_EOL;
 }
-exit(($summary['failed'] ?? 0) > 0 ? 1 : 0);
+if (!$commit && (($summary['convert'] ?? 0) + ($summary['rechain'] ?? 0) + ($uploadSummary['switch'] ?? 0)) > 0) {
+    echo PHP_EOL . 'Nic nezměněno. Opravu provede spuštění s --commit' . (($uploadSummary['switch'] ?? 0) > 0 ? ', nahrané výpisy přepne --include-uploaded' : '') . '.' . PHP_EOL;
+}
+exit(($summary['failed'] ?? 0) + ($uploadSummary['failed'] ?? 0) > 0 ? 1 : 0);

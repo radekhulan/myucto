@@ -188,6 +188,53 @@ final class PohodaForeignBankImportTest extends TestCase
     }
 
     /**
+     * Výpis GPC účtu v EUR nahraný po převodu, dokud byl účet v Kč: zařadil se pod korunový
+     * účet a EUR částky se tvářily jako Kč. Nanečisto ho oprava vypíše s měnou podle názvu
+     * souboru a s postupem, `--include-uploaded` ho s převedeným účtem přepne na EUR (částky
+     * výpisu banky už v EUR jsou). Výpis se spárovaným pohybem jen vypíše, opakovaný běh nic
+     * nemění.
+     */
+    public function testRepairListsAndSwitchesUploadedStatementOfForeignAccount(): void
+    {
+        $supplierId = $this->supplier();
+        $dir = SyntheticPohodaExport::write($this->tmp);
+        SyntheticPohodaExport::withEurBankAccount($dir);
+        $protocol = $this->importer->run($supplierId, $this->userId, PohodaExport::open($dir), false);
+        self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
+        $this->legacyCzk($supplierId);
+        $clean = $this->uploadedStatement($supplierId, 'Vypis_' . SyntheticPohodaExport::EUR_ACCOUNT_NUMBER . '_EUR_2026_004.gpc', '2026-04-30', 1498.00, 100.00, 'unmatched');
+        $matched = $this->uploadedStatement($supplierId, 'Vypis_' . SyntheticPohodaExport::EUR_ACCOUNT_NUMBER . '_EUR_2026_005.gpc', '2026-05-31', 1598.00, 50.00, 'manual');
+
+        $repair = Bootstrap::buildContainer()->get(PohodaForeignBankRepair::class);
+        $dry = $this->byCode($repair->run([$supplierId], false, false, null, true));
+        $uploaded = array_column($dry[SyntheticPohodaExport::EUR_ACCOUNT]['uploaded'], null, 'id');
+        self::assertSame(['CZK', 'EUR', 'switch'], [$uploaded[$clean]['currency'], $uploaded[$clean]['expected'], $uploaded[$clean]['status']],
+            json_encode($uploaded, JSON_UNESCAPED_UNICODE));
+        self::assertSame(0, $uploaded[$clean]['diff'], 'navazuje na konečný stav převedeného řetězu 1 498 EUR');
+        self::assertSame(['wrong_currency', 1], [$uploaded[$matched]['status'], $uploaded[$matched]['blockers']]);
+        self::assertStringContainsString('smažte', (string) $uploaded[$matched]['advice']);
+
+        // Bez volby se nahrané výpisy jen vypíší.
+        $this->byCode($repair->run([$supplierId], true, false));
+        self::assertSame(['CZK', 'CZK'], [$this->statementCurrency($clean), $this->statementCurrency($matched)]);
+
+        $done = $this->byCode($repair->run([$supplierId], true, false, null, true));
+        $uploaded = array_column($done[SyntheticPohodaExport::EUR_ACCOUNT]['uploaded'], null, 'id');
+        self::assertSame('switched', $uploaded[$clean]['status'], json_encode($uploaded, JSON_UNESCAPED_UNICODE));
+        self::assertSame(['EUR', 'CZK'], [$this->statementCurrency($clean), $this->statementCurrency($matched)]);
+        $tx = $this->db->pdo()->prepare('SELECT amount, currency FROM bank_transactions WHERE statement_id = ?');
+        $tx->execute([$clean]);
+        self::assertSame([['amount' => '100.00', 'currency' => 'EUR']], $tx->fetchAll(\PDO::FETCH_ASSOC), 'částka se nepřepočítává');
+
+        $again = $this->byCode($repair->run([$supplierId], true, false, null, true));
+        $uploaded = array_column($again[SyntheticPohodaExport::EUR_ACCOUNT]['uploaded'], null, 'id');
+        self::assertSame(['ok', 'wrong_currency'], [$uploaded[$clean]['status'], $uploaded[$matched]['status']]);
+        $log = $this->db->pdo()->prepare("SELECT COUNT(*) FROM activity_log WHERE supplier_id = ? AND action = ? AND entity_id = ?");
+        $log->execute([$supplierId, PohodaForeignBankRepair::AUDIT_ACTION, $clean]);
+        self::assertSame(1, (int) $log->fetchColumn());
+    }
+
+    /**
      * Účet, jehož pohyby kurzu ČNB neodpovídají (jiný kurz než ČNB), opravný průchod
      * nepřevede a vypíše důvod.
      */
@@ -205,7 +252,31 @@ final class PohodaForeignBankImportTest extends TestCase
         $done = $this->byCode(Bootstrap::buildContainer()->get(PohodaForeignBankRepair::class)->run([$supplierId], true, false));
         self::assertContains($done[SyntheticPohodaExport::EUR_ACCOUNT]['status'], ['czk', 'ambiguous'], json_encode($done, JSON_UNESCAPED_UNICODE));
         self::assertNotNull($done[SyntheticPohodaExport::EUR_ACCOUNT]['reason']);
+        self::assertNotNull($done[SyntheticPohodaExport::EUR_ACCOUNT]['advice'], 'nevyjasněný účet nese doporučený postup');
         self::assertSame(['CZK'], $this->statementCurrencies($supplierId, SyntheticPohodaExport::EUR_ACCOUNT_NUMBER));
+    }
+
+    /** Výpis nahraný po převodu pod korunovým účtem s částkami v měně (stavy v EUR, jak je dává banka). */
+    private function uploadedStatement(int $supplierId, string $fileName, string $date, float $opening, float $amount, string $matchStatus): int
+    {
+        $pdo = $this->db->pdo();
+        $pdo->prepare(
+            "INSERT INTO bank_statements (supplier_id, source, file_name, file_hash, account_number, bank_code, currency, statement_date,
+                                          prev_balance, curr_balance, credit_total, debit_total)
+             VALUES (?, 'gpc', ?, ?, ?, ?, 'CZK', ?, ?, ?, ?, 0)"
+        )->execute([$supplierId, $fileName, hash('sha256', $fileName . $supplierId), SyntheticPohodaExport::EUR_ACCOUNT_NUMBER, SyntheticPohodaExport::BANK_CODE,
+            $date, number_format($opening, 2, '.', ''), number_format($opening + $amount, 2, '.', ''), number_format($amount, 2, '.', '')]);
+        $id = (int) $pdo->lastInsertId();
+        $pdo->prepare("INSERT INTO bank_transactions (statement_id, posted_at, amount, currency, match_status) VALUES (?, ?, ?, 'CZK', ?)")
+            ->execute([$id, $date, number_format($amount, 2, '.', ''), $matchStatus]);
+        return $id;
+    }
+
+    private function statementCurrency(int $statementId): string
+    {
+        $stmt = $this->db->pdo()->prepare('SELECT currency FROM bank_statements WHERE id = ?');
+        $stmt->execute([$statementId]);
+        return (string) $stmt->fetchColumn();
     }
 
     /**
