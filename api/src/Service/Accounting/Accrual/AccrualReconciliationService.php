@@ -257,15 +257,15 @@ final class AccrualReconciliationService
     private function itemsByAccount(int $supplierId, string $asOf): array
     {
         $stmt = $this->db->pdo()->prepare(
-            "SELECT l.account_id, SUM(l.amount) AS bal, COUNT(DISTINCT l.accrual_item_id) AS cnt
-               FROM accrual_entry_links l
-               JOIN accrual_items ai ON ai.id = l.accrual_item_id AND ai.supplier_id = l.supplier_id
-               JOIN journal_entries je ON je.id = l.journal_entry_id AND je.supplier_id = l.supplier_id
+            "SELECT al.account_id, SUM(al.amount) AS bal, COUNT(DISTINCT al.accrual_item_id) AS cnt
+               FROM accrual_entry_links al
+               JOIN accrual_items ai ON ai.id = al.accrual_item_id AND ai.supplier_id = al.supplier_id
+               JOIN journal_entries je ON je.id = al.journal_entry_id AND je.supplier_id = al.supplier_id
           LEFT JOIN journal_entries rv ON rv.id = je.reversed_by AND rv.supplier_id = je.supplier_id
-              WHERE l.supplier_id = ? AND ai.status <> 'cancelled'
+              WHERE al.supplier_id = ? AND ai.status <> 'cancelled'
                 AND je.posted_at IS NOT NULL AND je.entry_date <= ?
                 AND (je.reversed_by IS NULL OR rv.entry_date > ?)
-              GROUP BY l.account_id"
+              GROUP BY al.account_id"
         );
         $stmt->execute([$supplierId, $asOf, $asOf]);
         $out = [];

@@ -27,6 +27,7 @@ final class PristineChart500
     /** Cizí klíče na chart_of_accounts.id: tabulka => sloupce. */
     public const ACCOUNT_ID_REFERENCES = [
         'accounting_account_definition_history' => ['account_id'],
+        'accrual_entry_links' => ['account_id'],
         'card_clearing_settings' => ['writeoff_account_id', 'holder_account_id', 'rounding_gain_account_id', 'fx_gain_account_id', 'rounding_loss_account_id', 'fx_loss_account_id'],
         'credit_card_settings' => ['repayment_account_id', 'interest_account_id', 'reward_account_id', 'opening_account_id', 'writeoff_nontax_account_id', 'cash_account_id', 'private_account_id', 'writeoff_tax_account_id', 'fee_account_id'],
         'dimension_account_map' => ['analytic_account_id', 'synthetic_account_id'],
@@ -41,6 +42,7 @@ final class PristineChart500
     /** Kódy účtů v tabulkách se sloupcem supplier_id: tabulka => sloupce. */
     public const ACCOUNT_CODE_REFERENCES = [
         'accounting_balance_inventory_items' => ['account_code'],
+        'accrual_items' => ['accrual_account_code', 'counter_account_code', 'termination_account_code'],
         'accounting_opening_balances' => ['account_code'],
         'assets' => ['asset_account_code', 'accumulated_account_code', 'acquisition_account_code', 'summary_account_code'],
         'bank_posting_rules' => ['debit_account_code', 'credit_account_code'],

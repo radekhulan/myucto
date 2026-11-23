@@ -55,6 +55,8 @@ final class PostingPairCoverageTest extends TestCase
             'Service/Accounting/Activation/DocumentBackfill.php::run::postDocument' => ['shape' => 'builder', 'test' => self::PAIR . 'InvoicePairsTest::testPurchaseInvoiceIsPairedAgainst321'],
             'Service/Accounting/Activation/OpeningBalanceService.php::post::postDocument' => ['shape' => 'grouped', 'test' => self::AUTO . '::testOpeningEntryIsPairedByConsecutiveGroups'],
             'Service/Accounting/AdvanceSettlementSync.php::syncFinal::replaceEntryLines' => ['shape' => 'builder', 'test' => self::PAIRER . '::testExistingPairsAreValidatedAndNewPairsAreNumberedAfterThem'],
+            'Service/Accounting/Accrual/AccrualPostingService.php::postRowLocked::postDocument' => ['shape' => 'one', 'test' => $one],
+            'Service/Accounting/Accrual/AccrualPostingService.php::terminate::postDocument' => ['shape' => 'hub', 'test' => $hub],
             'Service/Accounting/Assets/AssetService.php::disposeOnce::postDocument' => ['shape' => 'grouped', 'test' => self::PAIR . 'AssetPairsTest::testAssetLifecycleIsPaired'],
             'Service/Accounting/Assets/AssetService.php::putIntoUseOnce::postDocument' => ['shape' => 'one', 'test' => self::PAIR . 'AssetPairsTest::testAssetLifecycleIsPaired'],
             'Service/Accounting/Assets/DepreciationPostingService.php::postAccountingEntryLocked::postDocument' => ['shape' => 'one', 'test' => self::PAIR . 'AssetPairsTest::testAssetLifecycleIsPaired'],

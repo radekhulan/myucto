@@ -134,17 +134,17 @@ final class AccrualItemRepository
      */
     public static function balanceSql(): string
     {
-        return "SELECT l.accrual_item_id,
-                       SUM(l.amount) AS bal,
-                       SUM(CASE WHEN l.role IN ('release', 'termination', 'closing_release') THEN l.amount ELSE 0 END) AS released
-                  FROM accrual_entry_links l
-                  JOIN journal_entries je ON je.id = l.journal_entry_id AND je.supplier_id = l.supplier_id
+        return "SELECT al.accrual_item_id,
+                       SUM(al.amount) AS bal,
+                       SUM(CASE WHEN al.role IN ('release', 'termination', 'closing_release') THEN al.amount ELSE 0 END) AS released
+                  FROM accrual_entry_links al
+                  JOIN journal_entries je ON je.id = al.journal_entry_id AND je.supplier_id = al.supplier_id
              LEFT JOIN journal_entries rv ON rv.id = je.reversed_by AND rv.supplier_id = je.supplier_id
-                 WHERE l.supplier_id = ?
+                 WHERE al.supplier_id = ?
                    AND je.posted_at IS NOT NULL
                    AND je.entry_date <= ?
                    AND (je.reversed_by IS NULL OR rv.entry_date > ?)
-                 GROUP BY l.accrual_item_id";
+                 GROUP BY al.accrual_item_id";
     }
 
     /**

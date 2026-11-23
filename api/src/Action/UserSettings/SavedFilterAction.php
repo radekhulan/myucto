@@ -42,7 +42,7 @@ final class SavedFilterAction
      * a stejně tak celá mzdová sekce, dokud to nezačal hlídat
      * {@see \MyInvoice\Tests\Architecture\SavedFilterPageKeyContractTest}.
      */
-    public const PAGE_KEYS = ['invoices', 'purchase_invoices', 'journal', 'general_ledger',
+    public const PAGE_KEYS = ['invoices', 'purchase_invoices', 'journal', 'general_ledger', 'accruals',
         'trial_balance', 'financial_statements', 'clients', 'assets', 'bank_statements', 'projects', 'recurring', 'documents',
         'cash_documents', 'cash_book', 'cash_journal', 'receivables_payables', 'saldo',
         'bank_posting_suggestions', 'bank_posting_rules', 'automation_feed', 'automation_rules',
