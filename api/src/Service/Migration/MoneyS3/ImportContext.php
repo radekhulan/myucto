@@ -21,6 +21,19 @@ final class ImportContext
     /** @var array<int,array{id:int,starts_on:string,ends_on:string,status:string,locked:bool}> rok => období */
     public array $periods = [];
 
+    /**
+     * Rok po posledním převáděném, ze kterého se převezmou jen počáteční stavy (volba
+     * {@see ImportOptions::$openingOnlyNext}): položka rozvrhu deníku a období, které pro
+     * něj krok deníku zajistil. Do převáděných období (`$periods`) nepatří: doklady, banka
+     * ani úhrady z něj do MyÚčta nepřijdou, uzávěrka ho bere jen jako další rok.
+     *
+     * @var array{dir:string,year:int,starts_on:string,ends_on:string,has_opening:bool}|null
+     */
+    public ?array $openingOnly = null;
+
+    /** @var array{id:int,starts_on:string,ends_on:string,status:string,locked:bool}|null */
+    public ?array $openingOnlyPeriod = null;
+
     /** @var array<string,int> "rok|číslo dokladu" => id */
     public array $purchaseInvoices = [];
 

@@ -106,6 +106,7 @@ final class MoneyS3ImportJobService extends AbstractImportJobService
                 (bool) ($params['accept_differences'] ?? false),
                 // Job uložený před volbou „Převést do roku" ji nemá: výchozí rok podle firmy.
                 toYear: (int) ($params['to_year'] ?? 0) > 0 ? (int) $params['to_year'] : null,
+                openingOnlyNext: (bool) ($params['opening_only_next'] ?? false),
             );
             $agenda = (array) ($meta['agenda'] ?? []);
             $runId = $this->runs->startRun($supplierId, $jobId, $mode, [

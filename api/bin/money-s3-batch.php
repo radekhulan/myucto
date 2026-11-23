@@ -22,6 +22,9 @@ declare(strict_types=1);
  *                              v Money navazují počáteční a konečné stavy
  *   --to-year=auto|RRRR        poslední převáděný rok; auto (výchozí) = u každé firmy poslední
  *                              rok, který v MyÚčtu nemá vlastní zápisy
+ *   --opening-only-next        z roku po posledním převáděném jen počáteční stavy: poslední
+ *                              převáděný rok se proti nim ověří a uzavře (bez --to-year je
+ *                              posledním převáděným rokem předposlední rok zálohy)
  *   --dry-run                  zkouška nanečisto: nic nezůstane, ani založené firmy
  *   --existing=skip|update|relink  firma už v MyÚčtu je: přeskočit (výchozí), převést znovu
  *                              (převod doplní jen to, co chybí), nebo opravný převod vazeb
@@ -66,14 +69,14 @@ use MyInvoice\Service\Tax\Return\TaxReturnException;
 const MS3B_USAGE = <<<TXT
 Použití:
   php api/bin/money-s3-batch.php --dir=<adresář se zálohami .lz> (--all | --ico=<IČO>[,<IČO>…] | --list)
-      [--from-year=auto|RRRR|all] [--dry-run] [--existing=skip|update|relink] [--dppo-dir=<adresář>]
-      [--group="Název" | --group-id=N] [--related-parties] [--no-close] [--disposal-year-tax=half|none]
+      [--from-year=auto|RRRR|all] [--to-year=auto|RRRR] [--dry-run] [--existing=skip|update|relink] [--dppo-dir=<adresář>]
+      [--group="Název" | --group-id=N] [--related-parties] [--no-close] [--opening-only-next] [--disposal-year-tax=half|none]
       [--no-registry] [--user-id=N] [--report=<soubor.json>]
 
 TXT;
 
 $opts = getopt('', ['dir:', 'ico:', 'all', 'list', 'from-year:', 'to-year:', 'dry-run', 'existing:', 'dppo-dir:', 'group:', 'group-id:',
-    'related-parties', 'no-close', 'disposal-year-tax:', 'no-registry', 'user-id:', 'report:']);
+    'related-parties', 'no-close', 'disposal-year-tax:', 'no-registry', 'user-id:', 'report:', 'opening-only-next']);
 
 function ms3bFail(string $message, int $code = 2): never
 {
@@ -190,6 +193,7 @@ try {
         !array_key_exists('no-registry', $opts),
         $filings !== [],
         $toYearOpt === 'auto' ? MoneyS3BatchOptions::TO_YEAR_AUTO : (int) $toYearOpt,
+        array_key_exists('opening-only-next', $opts),
     );
 } catch (MoneyS3Exception $e) {
     ms3bFail($e->getMessage());

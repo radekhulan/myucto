@@ -162,6 +162,7 @@ final class MoneyS3BatchImporter
                     false,
                     $relink,
                     is_int($options->toYear) ? $options->toYear : null,
+                    $options->openingOnlyNext,
                 );
                 [$protocol, $runId] = $this->runImport($targetId, $actor->userId, $backup, $lzPath, $agenda, $importOptions, $jobId, $progress, $cancel);
                 $result = $protocol->toArray();
