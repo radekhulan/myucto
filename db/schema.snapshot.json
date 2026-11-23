@@ -1233,7 +1233,9 @@
         "2327_sales_quote_permissions.sql",
         "2328_stock_sales_retired_skus.sql",
         "2329_isds_access_profiles.sql",
-        "2330_bank_statement_rebases.sql"
+        "2330_bank_statement_rebases.sql",
+        "2331_accrual_agenda.sql",
+        "2332_accrual_agenda_permissions.sql"
     ],
     "tables": {
         "abra_flexi_connections": {
@@ -2221,6 +2223,146 @@
             },
             "foreign_keys": {
                 "fk_ass_supplier": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE CASCADE"
+            },
+            "checks": []
+        },
+        "accrual_entry_links": {
+            "type": "BASE TABLE",
+            "engine": "InnoDB",
+            "collation": "utf8mb4_unicode_ci",
+            "columns": {
+                "account_id": "bigint(20) unsigned NOT NULL",
+                "accrual_item_id": "bigint(20) unsigned NOT NULL",
+                "amount": "decimal(15,2) NOT NULL",
+                "created_at": "timestamp NOT NULL DEFAULT current_timestamp()",
+                "created_by": "bigint(20) unsigned NULL DEFAULT NULL",
+                "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
+                "journal_entry_id": "bigint(20) unsigned NOT NULL",
+                "matched_by": "enum('schedule','auto_document_no','auto_description','reconstruction','manual') NOT NULL DEFAULT 'manual'",
+                "role": "enum('origin','release','termination','deferral','closing_release','adjustment') NOT NULL",
+                "schedule_id": "bigint(20) unsigned NULL DEFAULT NULL",
+                "supplier_id": "int(10) unsigned NOT NULL"
+            },
+            "indexes": {
+                "PRIMARY": "UNIQUE BTREE (id)",
+                "fk_accrual_link_account": "BTREE (account_id)",
+                "fk_accrual_link_entry": "BTREE (journal_entry_id)",
+                "fk_accrual_link_schedule": "BTREE (schedule_id)",
+                "fk_accrual_link_user": "BTREE (created_by)",
+                "idx_accrual_link_account": "BTREE (supplier_id, account_id, accrual_item_id)",
+                "idx_accrual_link_entry": "BTREE (supplier_id, journal_entry_id, account_id)",
+                "uq_accrual_link": "UNIQUE BTREE (accrual_item_id, journal_entry_id, account_id, role)"
+            },
+            "foreign_keys": {
+                "fk_accrual_link_account": "(account_id) -> chart_of_accounts (id) ON UPDATE RESTRICT ON DELETE CASCADE",
+                "fk_accrual_link_entry": "(journal_entry_id) -> journal_entries (id) ON UPDATE RESTRICT ON DELETE CASCADE",
+                "fk_accrual_link_item": "(accrual_item_id) -> accrual_items (id) ON UPDATE RESTRICT ON DELETE CASCADE",
+                "fk_accrual_link_schedule": "(schedule_id) -> accrual_schedule (id) ON UPDATE RESTRICT ON DELETE SET NULL",
+                "fk_accrual_link_supplier": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE CASCADE",
+                "fk_accrual_link_user": "(created_by) -> users (id) ON UPDATE RESTRICT ON DELETE SET NULL"
+            },
+            "checks": {
+                "chk_accrual_link_amount": "`amount` <> 0"
+            }
+        },
+        "accrual_items": {
+            "type": "BASE TABLE",
+            "engine": "InnoDB",
+            "collation": "utf8mb4_unicode_ci",
+            "columns": {
+                "accrual_account_code": "varchar(20) NOT NULL",
+                "basis_amount": "decimal(15,2) NOT NULL",
+                "contract_ref": "varchar(100) NULL DEFAULT NULL",
+                "cost_center": "varchar(50) NULL DEFAULT NULL",
+                "counter_account_code": "varchar(20) NULL DEFAULT NULL",
+                "created_at": "timestamp NOT NULL DEFAULT current_timestamp()",
+                "created_by": "bigint(20) unsigned NULL DEFAULT NULL",
+                "dimensions_json": "longtext NULL DEFAULT NULL",
+                "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
+                "import_key": "varchar(190) NULL DEFAULT NULL",
+                "item_no": "varchar(50) NOT NULL",
+                "kind": "enum('prepaid_expense','complex_cost','accrued_expense','deferred_revenue','accrued_revenue') NOT NULL",
+                "managed_by": "enum('agenda','closing') NOT NULL DEFAULT 'agenda'",
+                "method": "enum('monthly_days','monthly_equal','yearly','manual') NOT NULL DEFAULT 'monthly_days'",
+                "note": "text NULL DEFAULT NULL",
+                "opening_as_of": "date NULL DEFAULT NULL",
+                "opening_balance": "decimal(15,2) NULL DEFAULT NULL",
+                "partner_id": "bigint(20) unsigned NULL DEFAULT NULL",
+                "partner_name": "varchar(190) NULL DEFAULT NULL",
+                "period_from": "date NULL DEFAULT NULL",
+                "period_to": "date NULL DEFAULT NULL",
+                "project_id": "bigint(20) unsigned NULL DEFAULT NULL",
+                "row_version": "int(10) unsigned NOT NULL DEFAULT 1",
+                "source_document_no": "varchar(50) NULL DEFAULT NULL",
+                "source_id": "bigint(20) unsigned NULL DEFAULT NULL",
+                "source_item_id": "bigint(20) unsigned NULL DEFAULT NULL",
+                "source_type": "enum('invoice','purchase_invoice','other_item','internal_document','manual','migration') NOT NULL DEFAULT 'manual'",
+                "status": "enum('draft','active','completed','terminated','cancelled') NOT NULL DEFAULT 'draft'",
+                "supplier_id": "int(10) unsigned NOT NULL",
+                "terminated_on": "date NULL DEFAULT NULL",
+                "termination_account_code": "varchar(20) NULL DEFAULT NULL",
+                "termination_entry_id": "bigint(20) unsigned NULL DEFAULT NULL",
+                "termination_reason": "varchar(500) NULL DEFAULT NULL",
+                "title": "varchar(255) NOT NULL",
+                "updated_at": "timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE CURRENT_TIMESTAMP()",
+                "updated_by": "bigint(20) unsigned NULL DEFAULT NULL"
+            },
+            "indexes": {
+                "PRIMARY": "UNIQUE BTREE (id)",
+                "fk_accrual_item_created_by": "BTREE (created_by)",
+                "fk_accrual_item_partner": "BTREE (partner_id)",
+                "fk_accrual_item_termination": "BTREE (termination_entry_id)",
+                "fk_accrual_item_updated_by": "BTREE (updated_by)",
+                "idx_accrual_item_partner": "BTREE (supplier_id, partner_id)",
+                "idx_accrual_item_period_to": "BTREE (supplier_id, period_to)",
+                "idx_accrual_item_source": "BTREE (supplier_id, source_type, source_id)",
+                "idx_accrual_item_status": "BTREE (supplier_id, status, accrual_account_code)",
+                "uq_accrual_item_import": "UNIQUE BTREE (supplier_id, import_key)",
+                "uq_accrual_item_no": "UNIQUE BTREE (supplier_id, item_no)"
+            },
+            "foreign_keys": {
+                "fk_accrual_item_created_by": "(created_by) -> users (id) ON UPDATE RESTRICT ON DELETE SET NULL",
+                "fk_accrual_item_partner": "(partner_id) -> clients (id) ON UPDATE RESTRICT ON DELETE SET NULL",
+                "fk_accrual_item_supplier": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE CASCADE",
+                "fk_accrual_item_termination": "(termination_entry_id) -> journal_entries (id) ON UPDATE RESTRICT ON DELETE SET NULL",
+                "fk_accrual_item_updated_by": "(updated_by) -> users (id) ON UPDATE RESTRICT ON DELETE SET NULL"
+            },
+            "checks": {
+                "chk_accrual_item_dimensions": "`dimensions_json` is null or json_valid(`dimensions_json`)",
+                "chk_accrual_item_period": "`method` = 'manual' or `period_from` is not null and `period_to` is not null and `period_to` >= `period_from`"
+            }
+        },
+        "accrual_schedule": {
+            "type": "BASE TABLE",
+            "engine": "InnoDB",
+            "collation": "utf8mb4_unicode_ci",
+            "columns": {
+                "accrual_item_id": "bigint(20) unsigned NOT NULL",
+                "amount_planned": "decimal(15,2) NOT NULL",
+                "created_at": "timestamp NOT NULL DEFAULT current_timestamp()",
+                "days": "int(10) unsigned NULL DEFAULT NULL",
+                "due_on": "date NOT NULL",
+                "from_on": "date NULL DEFAULT NULL",
+                "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
+                "journal_entry_id": "bigint(20) unsigned NULL DEFAULT NULL",
+                "kind": "enum('release','termination','adjustment') NOT NULL DEFAULT 'release'",
+                "posted_at": "datetime NULL DEFAULT NULL",
+                "status": "enum('planned','posted','linked','cancelled') NOT NULL DEFAULT 'planned'",
+                "supplier_id": "int(10) unsigned NOT NULL",
+                "to_on": "date NULL DEFAULT NULL",
+                "updated_at": "timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE CURRENT_TIMESTAMP()"
+            },
+            "indexes": {
+                "PRIMARY": "UNIQUE BTREE (id)",
+                "fk_accrual_schedule_entry": "BTREE (journal_entry_id)",
+                "idx_accrual_schedule_due": "BTREE (supplier_id, due_on, status)",
+                "idx_accrual_schedule_entry": "BTREE (supplier_id, journal_entry_id)",
+                "uq_accrual_schedule_row": "UNIQUE BTREE (accrual_item_id, kind, due_on)"
+            },
+            "foreign_keys": {
+                "fk_accrual_schedule_entry": "(journal_entry_id) -> journal_entries (id) ON UPDATE RESTRICT ON DELETE SET NULL",
+                "fk_accrual_schedule_item": "(accrual_item_id) -> accrual_items (id) ON UPDATE RESTRICT ON DELETE CASCADE",
+                "fk_accrual_schedule_supplier": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE CASCADE"
             },
             "checks": []
         },
@@ -8151,7 +8293,7 @@
                 "reversed_by": "bigint(20) unsigned NULL DEFAULT NULL",
                 "row_version": "int(10) unsigned NOT NULL DEFAULT 1",
                 "source_id": "bigint(20) unsigned NULL DEFAULT NULL",
-                "source_type": "enum('invoice','purchase_invoice','bank','cash','asset','manual','closing','opening','depreciation','asset_disposal','fx_revaluation','stock','provision','income_tax','profit_distribution','offset','small_asset_accrual','prepaid_expense_accrual','settlement','deferred_tax','payroll','vat_clearing','payroll_payment','gopay','card_settlement','card_writeoff','other_item','payroll_accident_insurance','payroll_travel','deferred_revenue_accrual','unit_charge','unit_payment','unit_payment_revision','property_service_settlement','property_service_lifecycle','property_funding','nonprofit_capital','nonprofit_membership') NOT NULL DEFAULT 'manual'",
+                "source_type": "enum('invoice','purchase_invoice','bank','cash','asset','manual','closing','opening','depreciation','asset_disposal','fx_revaluation','stock','provision','income_tax','profit_distribution','offset','small_asset_accrual','prepaid_expense_accrual','settlement','deferred_tax','payroll','vat_clearing','payroll_payment','gopay','card_settlement','card_writeoff','other_item','payroll_accident_insurance','payroll_travel','deferred_revenue_accrual','unit_charge','unit_payment','unit_payment_revision','property_service_settlement','property_service_lifecycle','property_funding','nonprofit_capital','nonprofit_membership','accrual_release','accrual_termination') NOT NULL DEFAULT 'manual'",
                 "supplier_id": "int(10) unsigned NOT NULL",
                 "updated_at": "timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE CURRENT_TIMESTAMP()"
             },

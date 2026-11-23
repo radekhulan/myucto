@@ -108,6 +108,7 @@ final class AccountStatementService
                 'source_doc_number'       => $l['source_doc_number'],
                 'source_register_id'        => $l['source_register_id'],
                 'source_asset_id'           => $l['source_asset_id'],
+                'source_accrual_item_id'    => $l['source_accrual_item_id'] ?? null,
                 'source_asset_name'         => $l['source_asset_name'],
                 'source_settlement_doc_type' => $l['source_settlement_doc_type'],
                 'source_settlement_doc_id'  => $l['source_settlement_doc_id'],

@@ -2165,6 +2165,7 @@ final class JournalEntryRepository
                        ast.name AS source_asset_name,
                        stl.doc_type AS source_settlement_doc_type,
                        stl.doc_id AS source_settlement_doc_id,
+                       acs.accrual_item_id AS source_accrual_item_id,
                        -- Protizápis nese zdroj jen jako typ, ne jako ID: doklad patří tomu,
                        -- co stornuje. Bez tohohle na něm chybí proklik na prvotní doklad
                        -- i cesta zpět na stornovaný zápis, takže ze storna nevede nikam nic.
@@ -2191,6 +2192,8 @@ final class JournalEntryRepository
                         WHEN je.source_type = 'depreciation' THEN dep.asset_id
                         ELSE NULL
                     END
+             LEFT JOIN accrual_schedule acs ON je.source_type IN ('accrual_release', 'accrual_termination')
+                    AND acs.supplier_id = je.supplier_id AND acs.id = COALESCE(je.source_id, rev_src.source_id)
              " . self::DOCUMENT_FACT_JOINS . "
                  ORDER BY pick.sort_value {$sortDir}, je.id DESC";
         $stmt = $pdo->prepare($sql);
@@ -3060,6 +3063,7 @@ final class JournalEntryRepository
         $r['source_link_id'] = ($r['source_link_id'] ?? null) === null ? null : (int) $r['source_link_id'];
         $r['source_register_id'] = $r['source_register_id'] === null ? null : (int) $r['source_register_id'];
         $r['source_asset_id'] = $r['source_asset_id'] === null ? null : (int) $r['source_asset_id'];
+        $r['source_accrual_item_id'] = ($r['source_accrual_item_id'] ?? null) === null ? null : (int) $r['source_accrual_item_id'];
         // Zápočet ukazuje na fakturu, kterou vyrovnal (doc_type + doc_id).
         $r['source_settlement_doc_type'] = $r['source_settlement_doc_type'] !== null
             ? (string) $r['source_settlement_doc_type'] : null;

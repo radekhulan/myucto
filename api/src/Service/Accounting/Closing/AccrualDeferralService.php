@@ -10,6 +10,7 @@ use MyInvoice\Repository\ChartOfAccountsRepository;
 use MyInvoice\Repository\DimensionAccountMapRepository;
 use MyInvoice\Repository\DimensionAssignmentRepository;
 use MyInvoice\Repository\PostingRuleRepository;
+use MyInvoice\Service\Accounting\Accrual\AccrualAgendaGuard;
 use MyInvoice\Service\Accounting\Accrual\AccrualScheduleCalculator;
 use MyInvoice\Service\Accounting\Dimension\DimensionDefaults;
 use MyInvoice\Service\Accounting\Dimension\DimensionStamper;
@@ -2202,6 +2203,28 @@ final class AccrualDeferralService
     private static function deferredOnDocumentParams(string $deferPrefix): array
     {
         return [$deferPrefix, $deferPrefix, $deferPrefix];
+    }
+
+    /**
+     * Vyřadí řádky dokladů, které spravuje agenda Časové rozlišení (položka agendy ke
+     * zdrojovému dokladu nebo jeho řádku). Ty rozpouští agenda svými zápisy; krok uzávěrky,
+     * otevření roku ani průběžný výkaz je nesmí odložit či rozpustit podruhé. Volá se nad
+     * výběrem, který volající stejně celý prochází; seznam položek agendy je malý a čte se
+     * jedním dotazem ({@see AccrualAgendaGuard::managedKeys()}).
+     *
+     * @param list<array<string,mixed>> $rows
+     * @return list<array<string,mixed>>
+     */
+    public function withoutAgendaItems(int $supplierId, array $rows): array
+    {
+        if ($rows === []) {
+            return $rows;
+        }
+        $keys = (new AccrualAgendaGuard($this->db))->managedKeys($supplierId);
+        if ($keys === []) {
+            return $rows;
+        }
+        return array_values(array_filter($rows, static fn (array $row): bool => !AccrualAgendaGuard::excludesRow($keys, $row)));
     }
 
     // ── poměr dnů ─────────────────────────────────────────────────────────────

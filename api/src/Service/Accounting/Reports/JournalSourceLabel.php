@@ -32,6 +32,8 @@ final class JournalSourceLabel
         'small_asset_accrual'         => 'Časové rozlišení drobného majetku',
         'prepaid_expense_accrual'     => 'Časové rozlišení nákladů',
         'deferred_revenue_accrual'    => 'Časové rozlišení výnosů',
+        'accrual_release'             => 'Rozpuštění časového rozlišení',
+        'accrual_termination'         => 'Předčasné ukončení časového rozlišení',
         'deferred_tax'                => 'Odložená daň',
         'payroll'                     => 'Mzdy',
         'payroll_payment'             => 'Výplata mezd',

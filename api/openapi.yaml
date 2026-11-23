@@ -20520,6 +20520,97 @@ paths:
         '422':
           description: Uzavřená hodnota dimenze (`dimension_closed`)
 
+  /api/v1/accounting/accruals:
+    get:
+      tags: [Accounting]
+      summary: Seznam položek časového rozlišení se zůstatkem k datu
+      description: >-
+        Agenda Časové rozlišení (jen podvojné účetnictví). Položky na účtech 381 až 385 se zůstatkem
+        a rozpuštěnou částkou k datu `as_of` (výchozí dnes). Zůstatek se počítá z vazeb položky na
+        zaúčtované zápisy deníku; v normálním znaménku účtu (381 aktivní, 384 pasivní).
+      parameters:
+        - $ref: '#/components/parameters/SupplierIdHeader'
+        - { in: query, name: as_of, schema: { type: string, format: date } }
+        - { in: query, name: status, description: "Čárkou oddělené stavy", schema: { type: string, example: "active,terminated" } }
+        - { in: query, name: kind, description: "Čárkou oddělené druhy", schema: { type: string, example: "deferred_revenue" } }
+        - { in: query, name: method, schema: { type: string } }
+        - { in: query, name: source_type, schema: { type: string } }
+        - { in: query, name: account, description: "Začátek čísla účtu (např. 384)", schema: { type: string } }
+        - { in: query, name: partner_id, schema: { type: integer } }
+        - { in: query, name: ends_by, schema: { type: string, format: date } }
+        - { in: query, name: active_on, schema: { type: string, format: date } }
+        - { in: query, name: with_balance, schema: { type: boolean } }
+        - { in: query, name: q, description: "Fulltext (číslo, název, smlouva, partner, zdrojový doklad)", schema: { type: string } }
+        - { in: query, name: sort_by, schema: { type: string, enum: [item_no, title, partner_name, accrual_account_code, period_from, period_to, basis_amount, balance, next_due_on, status, created_at] } }
+        - { in: query, name: sort_dir, schema: { type: string, enum: [asc, desc] } }
+        - { in: query, name: page, schema: { type: integer, default: 1 } }
+        - { in: query, name: per_page, schema: { type: integer, default: 50, maximum: 200 } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items: { type: array, items: { $ref: '#/components/schemas/AccrualItem' } }
+                  total: { type: integer }
+                  page: { type: integer }
+                  per_page: { type: integer }
+                  as_of: { type: string, format: date }
+                  totals: { type: object, properties: { basis_amount: { type: number }, balance: { type: number } } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+
+  /api/v1/accounting/accruals/reconciliation:
+    get:
+      tags: [Accounting]
+      summary: Odsouhlasení časového rozlišení s hlavní knihou po analytikách 381 až 385
+      description: >-
+        Zůstatek účtu v hlavní knize k datu (počáteční stav a pohyby účetního období bez závěrkového
+        zápisu) rozdělený na položky agendy, odklad spravovaný uzávěrkou a rozdíl (řádky bez položky).
+      parameters:
+        - $ref: '#/components/parameters/SupplierIdHeader'
+        - { in: query, name: as_of, schema: { type: string, format: date } }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/AccrualReconciliation' } } } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+
+  /api/v1/accounting/accruals/{id}:
+    get:
+      tags: [Accounting]
+      summary: Detail položky časového rozlišení s plánem a vazbami na zápisy
+      parameters:
+        - $ref: '#/components/parameters/SupplierIdHeader'
+        - { in: path, name: id, required: true, schema: { type: integer } }
+        - { in: query, name: as_of, schema: { type: string, format: date } }
+      responses:
+        '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/AccrualItemDetail' } } } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/v1/accounting/accruals/{id}/schedule:
+    get:
+      tags: [Accounting]
+      summary: Plán rozpouštění položky a vazby na zápisy deníku
+      parameters:
+        - $ref: '#/components/parameters/SupplierIdHeader'
+        - { in: path, name: id, required: true, schema: { type: integer } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  item_id: { type: integer }
+                  schedule: { type: array, items: { $ref: '#/components/schemas/AccrualScheduleRow' } }
+                  links: { type: array, items: { $ref: '#/components/schemas/AccrualEntryLink' } }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
   /api/v1/accounting/assets:
     get:
       tags: [Accounting]
@@ -46786,6 +46877,109 @@ components:
               type: number
             profit_matches:
               type: boolean
+    AccrualItem:
+      type: object
+      description: Položka časového rozlišení. Částky v Kč, zůstatek a rozpuštěno v normálním znaménku účtu.
+      properties:
+        id: { type: integer }
+        item_no: { type: string, description: "Číslo položky (vlastní řada CR-RRRR-NNNN, u převzatých číslo z POHODY)" }
+        title: { type: string }
+        contract_ref: { type: string, nullable: true }
+        note: { type: string, nullable: true }
+        kind: { type: string, enum: [prepaid_expense, complex_cost, accrued_expense, deferred_revenue, accrued_revenue] }
+        accrual_account_code: { type: string }
+        counter_account_code: { type: string, nullable: true }
+        termination_account_code: { type: string, nullable: true }
+        partner_id: { type: integer, nullable: true }
+        partner_name: { type: string, nullable: true }
+        source_type: { type: string, description: "Zdroj položky: invoice, purchase_invoice, other_item, internal_document, manual (ruční položka), migration (převod)" }
+        source_id: { type: integer, nullable: true }
+        source_item_id: { type: integer, nullable: true }
+        source_document_no: { type: string, nullable: true }
+        managed_by: { type: string, enum: [agenda, closing] }
+        basis_amount: { type: number }
+        opening_balance: { type: number, nullable: true, description: "Zůstatek převzatý k datu opening_as_of (převod)" }
+        opening_as_of: { type: string, format: date, nullable: true }
+        period_from: { type: string, format: date, nullable: true }
+        period_to: { type: string, format: date, nullable: true }
+        method: { type: string, enum: [monthly_days, monthly_equal, yearly, manual] }
+        status: { type: string, enum: [draft, active, completed, terminated, cancelled] }
+        terminated_on: { type: string, format: date, nullable: true }
+        termination_entry_id: { type: integer, nullable: true }
+        termination_reason: { type: string, nullable: true }
+        cost_center: { type: string, nullable: true }
+        project_id: { type: integer, nullable: true }
+        balance: { type: number, description: "Zůstatek k datu as_of" }
+        released: { type: number, description: "Rozpuštěno k datu as_of" }
+        next_due_on: { type: string, format: date, nullable: true }
+        row_version: { type: integer }
+    AccrualItemDetail:
+      allOf:
+        - $ref: '#/components/schemas/AccrualItem'
+        - type: object
+          properties:
+            as_of: { type: string, format: date }
+            balance_after_all: { type: number, description: "Zůstatek po všech zaúčtovaných zápisech včetně budoucích" }
+            covered_through: { type: string, format: date, nullable: true, description: "Poslední den pokrytý zaúčtovaným rozpouštěním" }
+            next_release: { allOf: [ { $ref: '#/components/schemas/AccrualScheduleRow' } ], nullable: true }
+            schedule: { type: array, items: { $ref: '#/components/schemas/AccrualScheduleRow' } }
+            links: { type: array, items: { $ref: '#/components/schemas/AccrualEntryLink' } }
+            source: { type: object, nullable: true, properties: { type: { type: string }, id: { type: integer, nullable: true }, document_no: { type: string, nullable: true } } }
+    AccrualScheduleRow:
+      type: object
+      description: Řádek plánu. Stav `linked` = navázaný převzatý zápis; zaúčtovaný řádek se stornovaným zápisem má stav `planned`.
+      properties:
+        id: { type: integer }
+        accrual_item_id: { type: integer }
+        kind: { type: string, enum: [release, termination, adjustment] }
+        due_on: { type: string, format: date }
+        from_on: { type: string, format: date, nullable: true }
+        to_on: { type: string, format: date, nullable: true }
+        days: { type: integer, nullable: true }
+        amount_planned: { type: number }
+        status: { type: string, enum: [planned, posted, linked, cancelled] }
+        journal_entry_id: { type: integer, nullable: true }
+        entry_date: { type: string, format: date, nullable: true }
+        entry_document_no: { type: string, nullable: true }
+        posted_at: { type: string, nullable: true }
+    AccrualEntryLink:
+      type: object
+      description: Vazba položky na zápis deníku a účet 38x. `amount` je MD − D, `amount_normal` v normálním znaménku položky.
+      properties:
+        id: { type: integer }
+        journal_entry_id: { type: integer }
+        account_code: { type: string }
+        schedule_id: { type: integer, nullable: true }
+        amount: { type: number }
+        amount_normal: { type: number }
+        role: { type: string, enum: [origin, release, termination, deferral, closing_release, adjustment] }
+        matched_by: { type: string, enum: [schedule, auto_document_no, auto_description, reconstruction, manual] }
+        entry_date: { type: string, format: date }
+        document_no: { type: string, nullable: true }
+        description: { type: string, nullable: true }
+        source_type: { type: string }
+        reversed_by: { type: integer, nullable: true }
+    AccrualReconciliation:
+      type: object
+      properties:
+        as_of: { type: string, format: date }
+        period_starts_on: { type: string, format: date }
+        accounts:
+          type: array
+          items:
+            type: object
+            properties:
+              account_id: { type: integer }
+              account_code: { type: string }
+              account_name: { type: string }
+              kind: { type: string, nullable: true }
+              normal_side: { type: string, enum: [debit, credit] }
+              ledger_balance: { type: number }
+              items_balance: { type: number }
+              items_count: { type: integer }
+              closing_balance: { type: number, description: "Odklad spravovaný uzávěrkou (řádky dokladů s obdobím)" }
+              difference: { type: number, description: "Řádky bez položky" }
+        totals: { type: object, properties: { ledger_balance: { type: number }, items_balance: { type: number }, closing_balance: { type: number }, difference: { type: number } } }
     AssetCardBase:
       type: object
       properties:
@@ -52290,7 +52484,7 @@ components:
           - 'null'
         source_type:
           type: string
-          enum: [invoice, purchase_invoice, bank, cash, asset, manual, closing, opening, depreciation, asset_disposal, fx_revaluation, stock, provision, income_tax, profit_distribution, offset, small_asset_accrual, prepaid_expense_accrual, settlement, deferred_tax, payroll, vat_clearing, unit_charge, payroll_payment, gopay, card_settlement, card_writeoff, other_item, payroll_accident_insurance, payroll_travel, deferred_revenue_accrual, unit_payment, unit_payment_revision, property_service_settlement, property_service_lifecycle, property_funding, nonprofit_capital, nonprofit_membership]
+          enum: [invoice, purchase_invoice, bank, cash, asset, manual, closing, opening, depreciation, asset_disposal, fx_revaluation, stock, provision, income_tax, profit_distribution, offset, small_asset_accrual, prepaid_expense_accrual, settlement, deferred_tax, payroll, vat_clearing, unit_charge, payroll_payment, gopay, card_settlement, card_writeoff, other_item, payroll_accident_insurance, payroll_travel, deferred_revenue_accrual, unit_payment, unit_payment_revision, property_service_settlement, property_service_lifecycle, property_funding, nonprofit_capital, nonprofit_membership, accrual_release, accrual_termination]
           description: Původ zápisu. Doména odpovídá sloupci `journal_entries.source_type` v aktuálním otisku migrací.
         source_id:
           type:
@@ -68643,6 +68837,11 @@ components:
           - string
           - 'null'
         source_register_id:
+          type:
+          - integer
+          - 'null'
+        source_accrual_item_id:
+          description: Položka agendy Časové rozlišení u zápisů rozpuštění a ukončení (proklik na položku).
           type:
           - integer
           - 'null'

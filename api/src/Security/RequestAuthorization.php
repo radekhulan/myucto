@@ -447,6 +447,25 @@ final class RequestAuthorization
     }
 
     /**
+     * Zaúčtování v agendě Časové rozlišení (rozpuštění, předčasné ukončení a jejich storno):
+     * správa položek agendy a zároveň zápis do deníku. Účetní vrstva přes API token jen čte.
+     */
+    public static function canPostAccruals(Request $request): bool
+    {
+        return self::allows($request, 'accounting.accruals.write', AccessLevel::WRITE)
+            && self::allows($request, 'accounting.journal.post', AccessLevel::WRITE);
+    }
+
+    /**
+     * Krok uzávěrky „Časové rozlišení" zaúčtuje roční rozpuštění položek agendy do období
+     * ve stavu uzavírání: právo uzavřít období a zaúčtovat v agendě.
+     */
+    public static function canPostAccrualsInClosing(Request $request): bool
+    {
+        return self::canPostAccruals($request) && self::allows($request, 'accounting.periods.close', AccessLevel::WRITE);
+    }
+
+    /**
      * Označení vydaného či přijatého dokladu jako převzatého z počátečních stavů a jeho
      * zrušení (vazba na otevírací zápis): interní role s právem zaúčtovat
      * (`accounting.journal.post`) a zapisovat doklady dané agendy. Z přihlášené relace,

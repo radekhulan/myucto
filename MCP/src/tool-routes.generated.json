@@ -44,6 +44,15 @@
       ]
     ]
   },
+  "accrual_reconciliation": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/accounting/accruals/reconciliation"
+      ]
+    ]
+  },
   "action_items": {
     "write": false,
     "api": [
@@ -1244,6 +1253,15 @@
       ]
     ]
   },
+  "get_accrual_item": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/accounting/accruals/{id}"
+      ]
+    ]
+  },
   "get_asset": {
     "write": false,
     "api": [
@@ -2136,6 +2154,15 @@
       [
         "GET",
         "/api/accounting/periods"
+      ]
+    ]
+  },
+  "list_accrual_items": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/accounting/accruals"
       ]
     ]
   },

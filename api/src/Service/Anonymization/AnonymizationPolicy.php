@@ -475,6 +475,7 @@ final class AnonymizationPolicy
         'monthly_report_sends' => ['cc' => 'json', 'comment' => 'text', 'sent_to' => 'json', 'smtp_response' => 'text'],
         'odometer_readings' => ['note' => 'text', 'source' => 'keep'],
         'offset_agreements' => ['document_no' => 'keep', 'note' => 'text'],
+        'accrual_items' => ['accrual_account_code' => 'keep', 'contract_ref' => 'symbol', 'cost_center' => 'keep', 'counter_account_code' => 'keep', 'dimensions_json' => 'keep', 'import_key' => 'keep', 'item_no' => 'keep', 'note' => 'text', 'partner_name' => 'party_name', 'source_document_no' => 'keep', 'termination_account_code' => 'keep', 'termination_reason' => 'text', 'title' => 'text'],
         'other_items' => ['account_code' => 'keep', 'counter_account_code' => 'keep', 'counterparty_account' => 'bank_account', 'counterparty_bank_code' => 'keep', 'currency' => 'keep', 'document_no' => 'keep', 'kind' => 'keep', 'note' => 'text', 'partner_name' => 'party_name', 'title' => 'text', 'variable_symbol' => 'symbol'],
         'other_item_allocations' => ['auto_match_reason' => 'keep'],
         'other_item_kinds' => ['builtin_code' => 'keep', 'name' => 'text'],

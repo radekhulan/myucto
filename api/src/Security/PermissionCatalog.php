@@ -84,6 +84,8 @@ final class PermissionCatalog
             ['accounting.journal.write', 'accounting', 'Zápisy v deníku', $staffOnly],
             ['accounting.journal.post', 'accounting', 'Zaúčtovat doklad', $staffOnly],
             ['accounting.journal.bulk_repost', 'accounting', 'Hromadně doúčtovat bankovní pohyby', $staffOnly],
+            ['accounting.accruals', 'accounting', 'Časové rozlišení', $staffOnly],
+            ['accounting.accruals.write', 'accounting', 'Spravovat položky časového rozlišení', $staffOnly],
             ['accounting.bulk_changes', 'accounting', 'Hromadné změny dokladů a zápisů', $staffOnly],
             ['accounting.periods.manage', 'accounting', 'Spravovat období', $staffOnly],
             ['accounting.periods.close', 'accounting', 'Uzavřít období', $staffOnly],
@@ -288,7 +290,7 @@ final class PermissionCatalog
             'readonly' => [
                 'dashboard', 'dashboard.portfolio', 'clients', 'projects', 'invoices', 'sales_quotes',
                 'purchase_invoices', 'purchase_invoices.approve', 'recurring', 'price_list', 'bank', 'documents', 'documents.requests', 'documents.inbox',
-                'accounting', 'property', 'other_items', 'tax_evidence', 'tax_evidence.export', 'reports', 'reports.export',
+                'accounting', 'accounting.accruals', 'property', 'other_items', 'tax_evidence', 'tax_evidence.export', 'reports', 'reports.export',
                 'cash', 'eet', 'assets', 'stock', 'eshop', 'logbook', 'settings.company', 'utilities',
                 'utilities.export', 'utilities.archives', 'profile', 'profile.tokens',
             ],

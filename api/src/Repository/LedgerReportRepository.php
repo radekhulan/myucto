@@ -220,7 +220,7 @@ final class LedgerReportRepository
             $r['amount_foreign'] = $r['amount_foreign'] === null ? null : round((float) $r['amount_foreign'], 2);
             $r['running_delta'] = round((float) $r['running_delta'], 2);
             $r['line_account_id'] = (int) $r['line_account_id'];
-            foreach (['source_statement_id', 'source_register_id', 'source_asset_id', 'source_settlement_doc_id'] as $k) {
+            foreach (['source_statement_id', 'source_register_id', 'source_asset_id', 'source_settlement_doc_id', 'source_accrual_item_id'] as $k) {
                 $r[$k] = $r[$k] === null ? null : (int) $r[$k];
             }
             if (array_key_exists('pair_no', $r)) {
@@ -265,6 +265,7 @@ final class LedgerReportRepository
                        ast.name AS source_asset_name,
                        stl.doc_type AS source_settlement_doc_type,
                        stl.doc_id AS source_settlement_doc_id,
+                       acs.accrual_item_id AS source_accrual_item_id,
                        SUM(CASE WHEN l.side = 'debit' THEN l.signed_amount ELSE -l.signed_amount END)
                          OVER (ORDER BY e.entry_date, e.id, l.line_no
                                ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS running_delta
@@ -284,6 +285,8 @@ final class LedgerReportRepository
                         WHEN e.source_type = 'depreciation' THEN dep.asset_id
                         ELSE NULL
                     END
+             LEFT JOIN accrual_schedule acs ON e.source_type IN ('accrual_release', 'accrual_termination')
+                    AND acs.id = e.source_id AND acs.supplier_id = e.supplier_id
                  WHERE l.supplier_id = ? AND e.posted_at IS NOT NULL
                    AND (l.account_id = ? OR ca.parent_id = ?)
                    AND e.entry_date BETWEEN ? AND ?{$technicalSql}{$filterSql}

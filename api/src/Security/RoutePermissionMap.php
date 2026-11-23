@@ -931,6 +931,14 @@ final class RoutePermissionMap
         ['*', '#^/api/accounting/saldo-settlements(/|$)#', 'accounting.journal.write', AccessLevel::WRITE],
         ['GET', '#^/api/accounting/journal(/|$)#', 'accounting', AccessLevel::READ],
         ['*', '#^/api/accounting/journal(/|$)#', 'accounting.journal.write', AccessLevel::WRITE],
+        // Agenda Časové rozlišení: čtení a náhledy, správa položek a vazeb, zaúčtování
+        // (rozpuštění, ukončení a jejich storno) jako zápis do deníku. Akce ověří navíc
+        // `accounting.accruals.write` ({@see RequestAuthorization::canPostAccruals()}).
+        ['GET', '#^/api/accounting/accruals(/|$)#', 'accounting.accruals', AccessLevel::READ],
+        ['POST', '#^/api/accounting/accruals/plan-preview$#', 'accounting.accruals', AccessLevel::READ],
+        ['POST', '#^/api/accounting/accruals/closing/[0-9]+/post$#', 'accounting.periods.close', AccessLevel::WRITE],
+        ['POST', '#^/api/accounting/accruals/[0-9]+/(?:schedule/[0-9]+/(?:post|unpost)|terminate|cancel-termination)$#', 'accounting.journal.post', AccessLevel::WRITE],
+        ['*', '#^/api/accounting/accruals(/|$)#', 'accounting.accruals.write', AccessLevel::WRITE],
         ['GET', '#^/api/accounting/other-items(/|$)#', 'other_items', AccessLevel::READ],
         // Smazání zaúčtované položky maže i její zápis v deníku (akce ověří navíc `other_items`).
         ['DELETE', '#^/api/accounting/other-items/[0-9]+/posted$#', 'accounting.journal.post', AccessLevel::WRITE],

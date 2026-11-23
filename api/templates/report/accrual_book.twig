@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+<meta charset="utf-8">
+<title>{{ meta.title }}</title>
+<style>
+    body { font-family: montserrat, dejavusans, sans-serif; font-size: 7.5pt; color: #15131D; }
+    .header-meta { font-size: 8pt; color: #555; }
+    .header-title { font-size: 13pt; font-weight: bold; text-align: center; margin-bottom: 1mm; }
+    .header-period { text-align: center; font-size: 9pt; margin-bottom: 3mm; }
+    table.book { width: 100%; border-collapse: collapse; margin: 0; }
+    table.book thead th { font-size: 7pt; font-weight: normal; color: #555; text-align: left; padding: 1mm 1.2mm; border-bottom: 0.3pt solid #999; }
+    table.book thead th.num { text-align: right; }
+    table.book tbody td { padding: 0.7mm 1.2mm; font-size: 7.5pt; border-bottom: 0.2pt solid #e5e5e5; vertical-align: top; }
+    table.book tfoot td { padding: 1mm 1.2mm; font-size: 8pt; font-weight: bold; border-top: 0.3pt solid #999; }
+    .num { text-align: right; }
+    .nw { white-space: nowrap; }
+    .muted { color: #888; }
+    .section { font-size: 9pt; font-weight: bold; margin: 5mm 0 1mm 0; }
+</style>
+</head>
+<body>
+<div class="header-meta">{{ meta.supplier.company_name }}{% if meta.supplier.ic %}, IČ {{ meta.supplier.ic }}{% endif %}</div>
+<div class="header-title">{{ meta.title }}</div>
+<div class="header-period">k {{ meta.as_of|date('j. n. Y') }}</div>
+
+<table class="book">
+    <thead>
+    <tr>
+        <th>Číslo</th><th>Název</th><th>Partner</th><th>Účet</th><th>Zdroj</th><th>Období</th>
+        <th class="num">Základ</th><th class="num">Rozpuštěno</th><th class="num">Zůstatek</th><th>Stav</th>
+    </tr>
+    </thead>
+    <tbody>
+    {% for row in rows %}
+    <tr>
+        <td class="nw">{{ row.item_no }}</td>
+        <td>{{ row.title }}</td>
+        <td>{{ row.partner_name }}</td>
+        <td class="nw">{{ row.accrual_account_code }}</td>
+        <td class="nw">{{ row.source_document_no }}</td>
+        <td class="nw">{% if row.period_from %}{{ row.period_from|date('j. n. Y') }} – {{ row.period_to|date('j. n. Y') }}{% else %}<span class="muted">bez plánu</span>{% endif %}</td>
+        <td class="num nw">{{ row.basis_amount|number_format(2, ',', ' ') }}</td>
+        <td class="num nw">{{ row.released|number_format(2, ',', ' ') }}</td>
+        <td class="num nw">{{ row.balance|number_format(2, ',', ' ') }}</td>
+        <td class="nw">{{ {'draft': 'Koncept', 'active': 'Aktivní', 'completed': 'Dokončeno', 'terminated': 'Ukončeno', 'cancelled': 'Zrušeno'}[row.status] ?? row.status }}</td>
+    </tr>
+    {% endfor %}
+    </tbody>
+    <tfoot>
+    <tr>
+        <td colspan="6">Celkem ({{ rows|length }})</td>
+        <td class="num nw">{{ totals.basis_amount|number_format(2, ',', ' ') }}</td>
+        <td class="num nw">{{ totals.released|number_format(2, ',', ' ') }}</td>
+        <td class="num nw">{{ totals.balance|number_format(2, ',', ' ') }}</td>
+        <td></td>
+    </tr>
+    </tfoot>
+</table>
+
+<div class="section">Odsouhlasení s hlavní knihou</div>
+<table class="book">
+    <thead>
+    <tr><th>Účet</th><th>Název</th><th class="num">Hlavní kniha</th><th class="num">Položky agendy</th><th class="num">Odklad uzávěrky</th><th class="num">Rozdíl</th></tr>
+    </thead>
+    <tbody>
+    {% for a in reconciliation.accounts %}
+    <tr>
+        <td class="nw">{{ a.account_code }}</td>
+        <td>{{ a.account_name }}</td>
+        <td class="num nw">{{ a.ledger_balance|number_format(2, ',', ' ') }}</td>
+        <td class="num nw">{{ a.items_balance|number_format(2, ',', ' ') }}</td>
+        <td class="num nw">{{ a.closing_balance|number_format(2, ',', ' ') }}</td>
+        <td class="num nw">{{ a.difference|number_format(2, ',', ' ') }}</td>
+    </tr>
+    {% endfor %}
+    </tbody>
+</table>
+</body>
+</html>

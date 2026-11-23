@@ -192,6 +192,10 @@ final class ApiScopeMiddleware implements MiddlewareInterface
         // Přečíslování přijatých dokladů přepisuje čísla i v deníku — jen účetní v aplikaci.
         '#^/api/purchase-invoices/renumber$#',
         '#^/api/accounting/(cash-documents|other-items|internal-documents)/renumber$#',
+        // Agenda Časové rozlišení: veřejné API čte seznam, detail, plán a odsouhlasení;
+        // pracovní náhledy, export, převzetí a krok uzávěrky jsou jen pro aplikaci.
+        '#^/api/accounting/accruals/(unallocated|projection|book|source-candidates|closing|takeover|plan-preview)(/|$)#',
+        '#^/api/accounting/accruals/[0-9]+/(activity|links|schedule/[0-9]+|termination-preview)(/|$)#',
         // Výchozí číselná řada je volba přihlášeného uživatele v editoru, ne integrace.
         '#^/api/(invoices|purchase-invoices|accounting/(cash|internal)-documents)/number-series/default$#',
     ];
