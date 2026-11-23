@@ -56,6 +56,85 @@ final class DphPriznaniBuilder
     ];
 
     /**
+     * Řádek přiznání → věta a atributy základu a daně v XML DPHDP3. Zdroj pravdy pro
+     * sestavení XML i pro tisk podaného přiznání ({@see TaxSubmissionPrintout}).
+     *
+     * @var array<string,array{veta:int,base:string,vat:?string,info_vat?:string}>
+     */
+    public const LINE_MAP = [
+        // Veta1 (výstup)
+        '1'  => ['veta' => 1, 'base' => 'obrat23',    'vat' => 'dan23'],
+        '2'  => ['veta' => 1, 'base' => 'obrat5',     'vat' => 'dan5'],
+        '3'  => ['veta' => 1, 'base' => 'p_zb23',     'vat' => 'dan_pzb23'],
+        '4'  => ['veta' => 1, 'base' => 'p_zb5',      'vat' => 'dan_pzb5'],
+        '5'  => ['veta' => 1, 'base' => 'p_sl23_e',   'vat' => 'dan_psl23_e'],
+        '6'  => ['veta' => 1, 'base' => 'p_sl5_e',    'vat' => 'dan_psl5_e'],
+        '7'  => ['veta' => 1, 'base' => 'dov_zb23',   'vat' => 'dan_dzb23'],
+        '8'  => ['veta' => 1, 'base' => 'dov_zb5',    'vat' => 'dan_dzb5'],
+        '10' => ['veta' => 1, 'base' => 'rez_pren23', 'vat' => 'dan_rpren23'],
+        '11' => ['veta' => 1, 'base' => 'rez_pren5',  'vat' => 'dan_rpren5'],
+        '12' => ['veta' => 1, 'base' => 'p_sl23_z',   'vat' => 'dan_psl23_z'],
+        '13' => ['veta' => 1, 'base' => 'p_sl5_z',    'vat' => 'dan_psl5_z'],
+        // Veta2 (oddíl C — ostatní plnění s nárokem na odpočet; jen základ, bez daně):
+        //   ř.20 dodání zboží do JČS · ř.21 služby do JČS (§9/1) · ř.22 vývoz (§66)
+        //   ř.23 dodání nového dopr. prostředku neregistrované osobě
+        //   ř.24 vybraná plnění (§ 110b odst. 2) — plnění v režimu OSS (VatLedgerService::
+        //        ossSelectedSupplyRows) i ručně klasifikovaná 24z
+        //   ř.25 RC dodavatel (§92a) · ř.26 ostatní plnění s nárokem na odpočet
+        '20' => ['veta' => 2, 'base' => 'dod_zb',      'vat' => null],
+        '21' => ['veta' => 2, 'base' => 'pln_sluzby',  'vat' => null],
+        '22' => ['veta' => 2, 'base' => 'pln_vyvoz',   'vat' => null],
+        '23' => ['veta' => 2, 'base' => 'dod_dop_nrg', 'vat' => null],
+        '24' => ['veta' => 2, 'base' => 'pln_zaslani', 'vat' => null],
+        '25' => ['veta' => 2, 'base' => 'pln_rez_pren','vat' => null],
+        '26' => ['veta' => 2, 'base' => 'pln_ost',     'vat' => null],
+        // Veta3 (oddíl C — doplňující údaje; jen základ, bez daně):
+        //   ř.30 pořízení zboží prostřední osobou · ř.31 dodání zboží prostřední osobou
+        //   (třístranný obchod § 17). Hodnota z ř.31 jde do souhrnného hlášení s kódem 2.
+        '30' => ['veta' => 3, 'base' => 'tri_pozb',   'vat' => null],
+        '31' => ['veta' => 3, 'base' => 'tri_dozb',   'vat' => null],
+        // ř.33 opr_verit (§46, věřitel) — INFORMATIVNÍ oprava výše daně u nedobytné
+        // pohledávky: oprava KLADNĚ, obnova po úhradě (§46e) ZÁPORNĚ (anotace XSD).
+        // Nese jen DPH (base slot), vat=null → mimo rekapitulaci ř.62/63; skutečný
+        // daňový efekt je na ř.1/2, kam ho míří correctionEntries().
+        '33' => ['veta' => 3, 'base' => 'opr_verit',  'vat' => null],
+        // ř.34 opr_dluz (§74b, dlužník) — INFORMATIVNÍ oprava odpočtu daně: snížení
+        // (odst. 1/3) KLADNĚ, obnova (odst. 2/4) ZÁPORNĚ. Nese jen DPH (base slot),
+        // vat=null → do rekapitulace ř.62/63 NEvstupuje (skutečný efekt je na ř.40/41).
+        '34' => ['veta' => 3, 'base' => 'opr_dluz',   'vat' => null],
+        // Veta5 (oddíl B — krácení nároku na odpočet §76):
+        //   ř.50 plnosv_kf = plnění osvobozená od daně bez nároku na odpočet (§51),
+        //   sloupec „S nárokem na odpočet" vstupující do koeficientu §76. Jen základ,
+        //   bez daně (osvobozené plnění daň nenese). Plný koeficient (koef_p20_*,
+        //   ř.52/53) se needituje — mimo rozsah, řeší účetní.
+        '50' => ['veta' => 5, 'base' => 'plnosv_kf',  'vat' => null],
+        // ř.51 — plnění s nárokem na odpočet vyloučená z koeficientu (§ 76/4),
+        // typicky prodej dlouhodobého majetku. Jde o doplňující údaj: stejné plnění
+        // zůstává současně na primárním ř.1/2 přes secondary mapping klasifikace.
+        '51' => ['veta' => 5, 'base' => 'pln_nkf',    'vat' => null],
+        '51b' => ['veta' => 5, 'base' => 'plnosv_nkf', 'vat' => null],
+        // Veta4 (odpočet)
+        '40' => ['veta' => 4, 'base' => 'pln23',      'vat' => 'odp_tuz23_nar'],
+        '41' => ['veta' => 4, 'base' => 'pln5',       'vat' => 'odp_tuz5_nar'],
+        '42' => ['veta' => 4, 'base' => 'dov_cu',     'vat' => 'odp_cu_nar'],
+        '43' => ['veta' => 4, 'base' => 'nar_zdp23',  'vat' => 'od_zdp23'],
+        '44' => ['veta' => 4, 'base' => 'nar_zdp5',   'vat' => 'od_zdp5'],
+        '47' => ['veta' => 4, 'base' => 'nar_maj',    'vat' => null, 'info_vat' => 'od_maj'],
+        // Veta4 — krácený odpočet § 76 (sloupec „Krácený odpočet", ř.40-44). Klíče
+        // 40k/41k/42k (tuzemsko, dovoz) a 43k/44k (zrcadlový odpočet samovyměření)
+        // vytváří VatLedgerService pro vat_deduction='reduced'. Základ jde do TÉHOŽ
+        // atributu jako plná verze (pln23/pln5/dov_cu/nar_zdp23/nar_zdp5 — jediný sdílený
+        // sloupec základu obou variant), daň do krácených atributů (odp_tuz23/odp_tuz5/
+        // odp_cu bez _nar, odkr_zdp23/odkr_zdp5). ř.45 krácenou variantu z klasifikací
+        // nemá (plní se z vlastní evidence).
+        '40k' => ['veta' => 4, 'base' => 'pln23',    'vat' => 'odp_tuz23'],
+        '41k' => ['veta' => 4, 'base' => 'pln5',     'vat' => 'odp_tuz5'],
+        '42k' => ['veta' => 4, 'base' => 'dov_cu',   'vat' => 'odp_cu'],
+        '43k' => ['veta' => 4, 'base' => 'nar_zdp23', 'vat' => 'odkr_zdp23'],
+        '44k' => ['veta' => 4, 'base' => 'nar_zdp5',  'vat' => 'odkr_zdp5'],
+    ];
+
+    /**
      * Atributy Veta1-5, které NEJSOU peněžní částky (koeficient §76 v %) — v dodatečném
      * přiznání se NEdiffují (procento popisuje období, ne rozdíl), přebírá se nová hodnota.
      */
@@ -342,78 +421,7 @@ final class DphPriznaniBuilder
         //                                  informativní (`info_vat`), už je na ř.40-45 a do
         //                                  ř.46/62/63 se znovu nepočítá. Krácený odpočet
         //                                  (odkr_maj) generátor zatím neplní.
-        $lineMap = [
-            // Veta1 (výstup)
-            '1'  => ['veta' => 1, 'base' => 'obrat23',    'vat' => 'dan23'],
-            '2'  => ['veta' => 1, 'base' => 'obrat5',     'vat' => 'dan5'],
-            '3'  => ['veta' => 1, 'base' => 'p_zb23',     'vat' => 'dan_pzb23'],
-            '4'  => ['veta' => 1, 'base' => 'p_zb5',      'vat' => 'dan_pzb5'],
-            '5'  => ['veta' => 1, 'base' => 'p_sl23_e',   'vat' => 'dan_psl23_e'],
-            '6'  => ['veta' => 1, 'base' => 'p_sl5_e',    'vat' => 'dan_psl5_e'],
-            '7'  => ['veta' => 1, 'base' => 'dov_zb23',   'vat' => 'dan_dzb23'],
-            '8'  => ['veta' => 1, 'base' => 'dov_zb5',    'vat' => 'dan_dzb5'],
-            '10' => ['veta' => 1, 'base' => 'rez_pren23', 'vat' => 'dan_rpren23'],
-            '11' => ['veta' => 1, 'base' => 'rez_pren5',  'vat' => 'dan_rpren5'],
-            '12' => ['veta' => 1, 'base' => 'p_sl23_z',   'vat' => 'dan_psl23_z'],
-            '13' => ['veta' => 1, 'base' => 'p_sl5_z',    'vat' => 'dan_psl5_z'],
-            // Veta2 (oddíl C — ostatní plnění s nárokem na odpočet; jen základ, bez daně):
-            //   ř.20 dodání zboží do JČS · ř.21 služby do JČS (§9/1) · ř.22 vývoz (§66)
-            //   ř.23 dodání nového dopr. prostředku neregistrované osobě
-            //   ř.24 vybraná plnění (§ 110b odst. 2) — plnění v režimu OSS (VatLedgerService::
-            //        ossSelectedSupplyRows) i ručně klasifikovaná 24z
-            //   ř.25 RC dodavatel (§92a) · ř.26 ostatní plnění s nárokem na odpočet
-            '20' => ['veta' => 2, 'base' => 'dod_zb',      'vat' => null],
-            '21' => ['veta' => 2, 'base' => 'pln_sluzby',  'vat' => null],
-            '22' => ['veta' => 2, 'base' => 'pln_vyvoz',   'vat' => null],
-            '23' => ['veta' => 2, 'base' => 'dod_dop_nrg', 'vat' => null],
-            '24' => ['veta' => 2, 'base' => 'pln_zaslani', 'vat' => null],
-            '25' => ['veta' => 2, 'base' => 'pln_rez_pren','vat' => null],
-            '26' => ['veta' => 2, 'base' => 'pln_ost',     'vat' => null],
-            // Veta3 (oddíl C — doplňující údaje; jen základ, bez daně):
-            //   ř.30 pořízení zboží prostřední osobou · ř.31 dodání zboží prostřední osobou
-            //   (třístranný obchod § 17). Hodnota z ř.31 jde do souhrnného hlášení s kódem 2.
-            '30' => ['veta' => 3, 'base' => 'tri_pozb',   'vat' => null],
-            '31' => ['veta' => 3, 'base' => 'tri_dozb',   'vat' => null],
-            // ř.33 opr_verit (§46, věřitel) — INFORMATIVNÍ oprava výše daně u nedobytné
-            // pohledávky: oprava KLADNĚ, obnova po úhradě (§46e) ZÁPORNĚ (anotace XSD).
-            // Nese jen DPH (base slot), vat=null → mimo rekapitulaci ř.62/63; skutečný
-            // daňový efekt je na ř.1/2, kam ho míří correctionEntries().
-            '33' => ['veta' => 3, 'base' => 'opr_verit',  'vat' => null],
-            // ř.34 opr_dluz (§74b, dlužník) — INFORMATIVNÍ oprava odpočtu daně: snížení
-            // (odst. 1/3) KLADNĚ, obnova (odst. 2/4) ZÁPORNĚ. Nese jen DPH (base slot),
-            // vat=null → do rekapitulace ř.62/63 NEvstupuje (skutečný efekt je na ř.40/41).
-            '34' => ['veta' => 3, 'base' => 'opr_dluz',   'vat' => null],
-            // Veta5 (oddíl B — krácení nároku na odpočet §76):
-            //   ř.50 plnosv_kf = plnění osvobozená od daně bez nároku na odpočet (§51),
-            //   sloupec „S nárokem na odpočet" vstupující do koeficientu §76. Jen základ,
-            //   bez daně (osvobozené plnění daň nenese). Plný koeficient (koef_p20_*,
-            //   ř.52/53) se needituje — mimo rozsah, řeší účetní.
-            '50' => ['veta' => 5, 'base' => 'plnosv_kf',  'vat' => null],
-            // ř.51 — plnění s nárokem na odpočet vyloučená z koeficientu (§ 76/4),
-            // typicky prodej dlouhodobého majetku. Jde o doplňující údaj: stejné plnění
-            // zůstává současně na primárním ř.1/2 přes secondary mapping klasifikace.
-            '51' => ['veta' => 5, 'base' => 'pln_nkf',    'vat' => null],
-            '51b' => ['veta' => 5, 'base' => 'plnosv_nkf', 'vat' => null],
-            // Veta4 (odpočet)
-            '40' => ['veta' => 4, 'base' => 'pln23',      'vat' => 'odp_tuz23_nar'],
-            '41' => ['veta' => 4, 'base' => 'pln5',       'vat' => 'odp_tuz5_nar'],
-            '42' => ['veta' => 4, 'base' => 'dov_cu',     'vat' => 'odp_cu_nar'],
-            '43' => ['veta' => 4, 'base' => 'nar_zdp23',  'vat' => 'od_zdp23'],
-            '44' => ['veta' => 4, 'base' => 'nar_zdp5',   'vat' => 'od_zdp5'],
-            '47' => ['veta' => 4, 'base' => 'nar_maj',    'vat' => null, 'info_vat' => 'od_maj'],
-            // Veta4 — krácený odpočet § 76 (sloupec „Krácený odpočet", ř.40-44). Klíče
-            // 40k/41k/42k (tuzemsko, dovoz) a 43k/44k (zrcadlový odpočet samovyměření)
-            // vytváří VatLedgerService pro vat_deduction='reduced'. Základ jde do TÉHOŽ
-            // atributu jako plná verze (pln23/pln5/dov_cu/nar_zdp23/nar_zdp5 — jediný sdílený
-            // sloupec základu obou variant), daň do krácených atributů (odp_tuz23/odp_tuz5/
-            // odp_cu bez _nar, odkr_zdp23/odkr_zdp5). ř.45 krácenou variantu z klasifikací
-            // nemá (plní se z vlastní evidence).
-            '40k' => ['veta' => 4, 'base' => 'pln23',    'vat' => 'odp_tuz23'],
-            '41k' => ['veta' => 4, 'base' => 'pln5',     'vat' => 'odp_tuz5'],
-            '42k' => ['veta' => 4, 'base' => 'dov_cu',   'vat' => 'odp_cu'],
-            '43k' => ['veta' => 4, 'base' => 'nar_zdp23', 'vat' => 'odkr_zdp23'],
-            '44k' => ['veta' => 4, 'base' => 'nar_zdp5',  'vat' => 'odkr_zdp5'],
-        ];
+        $lineMap = self::LINE_MAP;
 
         // Base i daň sčítáme NUMERICKY (ne string-set), protože krácené řádky 40k/41k/42k
         // (§ 76) míří na TENTÝŽ atribut základu (pln23/pln5/dov_cu) jako plná verze 40/41/42

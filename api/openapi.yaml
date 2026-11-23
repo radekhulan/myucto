@@ -12939,6 +12939,29 @@ paths:
             application/xml: {}
         '403': { $ref: '#/components/responses/Forbidden' }
 
+  /api/v1/reports/submissions/{id}/pdf:
+    get:
+      tags: [Reports]
+      summary: Stáhne PDF odeslaného přiznání k DPH, kontrolního nebo souhrnného hlášení
+      description: >-
+        Tisk se skládá z uloženého XML snapshotu, ne z aktuálních dat, takže odpovídá tomu,
+        co bylo podáno. Na začátku nese údaje o doručení: podací číslo, čas podání a uložené
+        doklady o podání (potvrzení EPO, doručenka datové zprávy), nebo proč chybí
+        (`receipt_evidence` v detailu podání). Originály doručenek se stahují přes
+        `/artifacts/{artifactId}/download`. Jen pro `dphdp3`, `dphkh1` a `dphshv`; klient
+        s `reports.submissions` jen ve vlastní firmě a ve webové session.
+      parameters:
+        - { in: path, name: id, required: true, schema: { type: integer } }
+        - $ref: '#/components/parameters/SupplierIdHeader'
+      responses:
+        '200':
+          description: PDF podání
+          content:
+            application/pdf: {}
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+
   /api/v1/reports/submissions/{id}/payment:
     get:
       tags: [Reports]
@@ -59409,6 +59432,32 @@ components:
             - { $ref: '#/components/schemas/TaxIsdsDispatch' }
             - { type: 'null' }
           description: Poslední zpráva datové schránky, kterou se snapshot podává (i zrušená nebo neúspěšná).
+        receipt_evidence: { $ref: '#/components/schemas/TaxSubmissionReceiptEvidence' }
+    TaxSubmissionReceiptEvidence:
+      type: object
+      description: Uložené doklady o podání (doručenka, potvrzení EPO), nebo proč chybí.
+      required: [available, reason, reason_label, reference, submitted_at, items]
+      properties:
+        available: { type: boolean }
+        reason:
+          type: [string, "null"]
+          enum: [not_submitted, isds_receipt_pending, submitted_outside, null]
+          description: >-
+            `submitted_outside` = podání bylo označené jako podané ručně bez doručenky
+            (typicky podáno mimo MyÚčto, např. přímo v portálu EPO).
+        reason_label: { type: [string, "null"] }
+        reference: { type: [string, "null"], description: Podací číslo, č. j. nebo ID datové zprávy }
+        submitted_at: { type: [string, "null"] }
+        items:
+          type: array
+          items:
+            type: object
+            required: [artifact_id, kind, label, name]
+            properties:
+              artifact_id: { type: integer }
+              kind: { type: string, enum: [confirmation_p7s, confirmation_xml, receipt_pdf, isds_delivery_zfo] }
+              label: { type: string }
+              name: { type: string }
     TaxIsdsDispatch:
       type: object
       required: [id, dispatch_state, recipient_box_id, correlation_reference]
