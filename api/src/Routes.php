@@ -3216,6 +3216,7 @@ final class Routes
             $g->get ('/reports/monthly-report/history',           [MonthlyReportAction::class, 'history']);
             // Export deníku (audit 2026-07) — filtry shodné s GET /journal, viz JournalAction::export.
             $g->get('/reports/journal/export',                    [JournalAction::class, 'export']);
+            $g->get('/reports/journal/document-list',             [JournalAction::class, 'documentList']);
             // Mzdový list (§38j ZDP) — roční evidence za zaměstnance z payroll_monthly_records (1105).
             $g->get('/reports/payroll-sheet',                     [PayrollSheetAction::class, 'export']);
             $g->get('/reports/entity-category',                   [EntityCategoryAction::class, 'get']);

@@ -1,6 +1,6 @@
 import { api } from '@/api/client'
 
-function responseFilename(disposition: string | undefined, fallback: string): string {
+export function responseFilename(disposition: string | undefined, fallback: string): string {
   const utf8 = disposition?.match(/filename\*=UTF-8''([^;]+)/i)?.[1]
   if (utf8) {
     try {

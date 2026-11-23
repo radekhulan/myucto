@@ -19911,6 +19911,65 @@ paths:
         '422':
           $ref: '#/components/responses/ValidationFailed'
 
+  /api/v1/accounting/reports/journal/document-list:
+    get:
+      tags: [Accounting]
+      summary: Soupiska dokladů z filtru deníku (XLSX)
+      description: |
+        Soupiska prvotních dokladů, například k vyúčtování dotace. Zápisy vybírají přesně
+        filtry seznamu GET /accounting/journal (včetně `account_from`/`account_to` a `q`,
+        které přesný kód účtu převede na rozsah účtů zápisu). Z nich se berou jen zaúčtované
+        řádky v povinném rozsahu účtů soupisky `line_account_from`/`line_account_to` a při filtru
+        dimenze jen řádky s hodnotou filtru (u rozpadu jen její díl, podřízené hodnoty podle
+        `dimension_descendants`). Částka k doložení je Σ MD − Σ D těchto řádků (u výnosových
+        účtů Σ D − Σ MD, jako výsledovka po dimenzi) se znaménkem,
+        sečtená po prvotním dokladu (faktura, pokladní doklad, interní doklad, ostatní
+        položka, bankovní pohyb; zápočet patří vyrovnané faktuře, zápis bez dokladu tvoří
+        vlastní řádek). Protizápis a opravný zápis dvojice patří opravovanému dokladu,
+        doklad s nulovou částkou se vynechá, stejně jako uzavření a otevření knih (skladové
+        sloty uzávěrky zůstávají). Doklad, jehož storno nebo oprava leží mimo filtr, je
+        označený k ověření, stejně jako doklad s účty různých druhů v rozsahu (náklady, výnosy,
+        rozvaha), který zůstává i s nulovou částkou. Koncepty se nepočítají, hlavička uvede jejich
+        počet. Řádek
+        nese naše číslo, číslo dokladu protistrany, protistranu, celkovou částku dokladu
+        a důvody k ověření; hlavička uvádí všechny použité filtry. Strop 5000 dokladů,
+        nad limit 422 `too_many_rows`. Firma mimo podvojné účetnictví dostane 403
+        `wrong_accounting_mode`.
+      parameters:
+        - $ref: '#/components/parameters/SupplierIdHeader'
+        - { in: query, name: line_account_from, required: true, description: "Dolní mez rozsahu účtů soupisky nebo začátek kódu (5 = celá třída 5)", schema: { type: string, minLength: 1, maxLength: 10, pattern: "^[0-9A-Za-z._/-]{1,10}$" } }
+        - { in: query, name: line_account_to, required: true, description: "Horní mez rozsahu účtů soupisky včetně analytik", schema: { type: string, minLength: 1, maxLength: 10, pattern: "^[0-9A-Za-z._/-]{1,10}$" } }
+        - { in: query, name: account_from, description: "Filtr Deníku: zápisy s řádkem od tohoto účtu", schema: { type: string, maxLength: 10, pattern: "^[0-9A-Za-z._/-]{0,10}$" } }
+        - { in: query, name: account_to, description: "Filtr Deníku: zápisy s řádkem do tohoto účtu", schema: { type: string, maxLength: 10, pattern: "^[0-9A-Za-z._/-]{0,10}$" } }
+        - { in: query, name: period_id, schema: { type: integer } }
+        - { in: query, name: date_from, schema: { type: string, format: date } }
+        - { in: query, name: date_to, schema: { type: string, format: date } }
+        - { in: query, name: source_type, description: "Typ zdroje zápisu jako v GET /accounting/reports/journal/export", schema: { type: string } }
+        - { in: query, name: source_id, schema: { type: integer } }
+        - { in: query, name: entry_id, schema: { type: integer } }
+        - { in: query, name: document_no, schema: { type: string, maxLength: 50 } }
+        - { in: query, name: q, description: "Hledání; přesný kód účtu se převede na rozsah účtů zápisu", schema: { type: string, maxLength: 100 } }
+        - { in: query, name: posted, schema: { type: boolean } }
+        - { in: query, name: reversal, schema: { type: string, enum: [reversed, reversal, any, none] } }
+        - { in: query, name: automation, schema: { type: string, enum: [auto, approved, manual] } }
+        - { in: query, name: pair_status, schema: { type: string, enum: [composite_mn, ineligible] } }
+        - { in: query, name: integrity, description: "Jen nálezy kontroly integrity deníku", schema: { type: string, enum: [amount_mismatch] } }
+        - { in: query, name: amount_from, schema: { type: number } }
+        - { in: query, name: amount_to, schema: { type: number } }
+        - { in: query, name: format, schema: { type: string, enum: [xlsx], default: xlsx } }
+        - $ref: '#/components/parameters/DimensionValueId'
+        - $ref: '#/components/parameters/DimensionDescendants'
+      responses:
+        '200':
+          description: Soupiska dokladů (XLSX)
+          content:
+            application/vnd.openxmlformats-officedocument.spreadsheetml.sheet:
+              schema: { type: string, format: binary }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { description: "Hodnota dimenze ve filtru neexistuje nebo patří jiné firmě", content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+        '500': { description: "Soupisku se nepodařilo sestavit (build_failed)", content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+
   /api/v1/accounting/journal/{id}/history:
     get:
       tags: [Accounting]

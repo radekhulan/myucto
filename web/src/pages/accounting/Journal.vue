@@ -36,6 +36,7 @@ import { ensurePrefsLoaded } from '@/composables/useUserPrefs'
 import { useSavedFilters, savedFilterTone, type SavedFilterTone } from '@/composables/useSavedFilters'
 import type { SavedFilter } from '@/api/preferences'
 import { ICONS, btnFilled, btnOutline, btnOutlineSm } from '@/components/ui/buttonStyles'
+import { errorResponseData, responseFilename } from '@/utils/downloadFile'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import AutomationBadge from '@/components/automation/AutomationBadge.vue'
 import ActivationBanner from '@/components/settings/activation/ActivationBanner.vue'
@@ -224,6 +225,15 @@ function setBulkMode(on: boolean) {
   if (!on) selectedIds.value = []
 }
 const headerActions = computed<ActionItem[]>(() => [
+  {
+    key: 'document-list',
+    label: t('accounting.journal.document_list'),
+    icon: 'clipboardCheck',
+    tier: 'overflow',
+    variant: 'primary',
+    disabled: exporting.value,
+    run: openDocumentList,
+  },
   {
     key: 'bulk-mode',
     label: t(bulkMode.value ? 'accounting.journal.bulk_mode_off' : 'accounting.journal.bulk_mode_on'),
@@ -703,6 +713,45 @@ async function exportFile(format: 'pdf' | 'xlsx') {
     exporting.value = false
   }
 }
+// ── Soupiska dokladů (#356): aktuální filtr + povinný rozsah účtů (výchozí nákladové) ──
+// Rozsah účtů soupisky je samostatný (`line_account_*`): filtr Deníku včetně jeho rozsahu
+// a hledání podle kódu účtu jde na server beze změny, takže soupiska bere tytéž zápisy.
+const documentList = reactive({ open: false, from: '', to: '', error: '' })
+const documentListFrom = ref<HTMLInputElement | null>(null)
+function openDocumentList() {
+  const fromFilter = filters.account_from !== '' && filters.account_to !== ''
+  Object.assign(documentList, {
+    open: true,
+    from: fromFilter ? filters.account_from : '5',
+    to: fromFilter ? filters.account_to : '5',
+    error: '',
+  })
+  nextTick(() => documentListFrom.value?.focus())
+}
+async function downloadDocumentList() {
+  documentList.error = ''
+  if (!documentList.from.trim() || !documentList.to.trim()) {
+    documentList.error = t('accounting.journal.document_list_range_required')
+    return
+  }
+  exporting.value = true
+  try {
+    const r = await accountingApi.exportReport('/accounting/reports/journal/document-list', {
+      // Tentýž filtr jako seznam (journalListFilterParams), aby soupiska brala přesně zápisy z obrazovky.
+      ...journalListFilterParams(listFilters()),
+      line_account_from: documentList.from.trim(),
+      line_account_to: documentList.to.trim(),
+      format: 'xlsx',
+    })
+    // Název se serveru nese období; bez něj by se soupisky za různá období přepisovaly.
+    downloadBlob(r.data as unknown as Blob, responseFilename(r.headers?.['content-disposition'], 'soupiska-dokladu.xlsx'))
+    documentList.open = false
+  } catch (e: any) {
+    documentList.error = (await errorResponseData(e))?.error?.message || t('common.error')
+  } finally {
+    exporting.value = false
+  }
+}
 function downloadBlob(blob: Blob, filename: string) {
   const url = URL.createObjectURL(blob)
   const a = document.createElement('a')
@@ -1160,7 +1209,7 @@ function entryRange(entry: JournalEntryDetail): { from: string; to: string } {
           <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.swap" /></svg>
           {{ t('accounting.journal.rebook_by_filter') }}
         </RouterLink>
-        <ActionBar v-if="bulk.canUse.value" :actions="headerActions" data-test="journal-more-actions" />
+        <ActionBar :actions="headerActions" data-test="journal-more-actions" />
         <RouterLink v-if="auth.canWrite('accounting.journal.write') || auth.isDemo" to="/accounting/journal/new" :class="btnFilled('primary')">
           <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.plus" /></svg>
           {{ t('accounting.journal.new') }}
@@ -1663,6 +1712,33 @@ function entryRange(entry: JournalEntryDetail): { from: string; to: string } {
       :confirm-label="t('accounting.pairs.action_reverse')" variant="danger"
       @confirm="confirmReversePairs" @cancel="reversePairsConfirm.open = false" />
 
+    <Modal v-if="documentList.open" :title="t('accounting.journal.document_list')" width-class="max-w-lg" @close="documentList.open = false">
+      <form :id="`${pageId}-document-list`" class="space-y-3" novalidate @submit.prevent="downloadDocumentList">
+        <p class="text-sm text-neutral-600">{{ t('accounting.journal.document_list_hint') }}</p>
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div>
+            <label :for="`${pageId}-document-list-from`" class="block text-sm font-medium text-neutral-700 mb-1">{{ t('accounting.journal.filter_account_from') }}</label>
+            <input :id="`${pageId}-document-list-from`" ref="documentListFrom" v-model.trim="documentList.from" type="text" maxlength="10" :list="`${pageId}-journal-coa`"
+              class="w-full h-10 px-3 border border-neutral-300 rounded-md text-sm font-mono" data-test="document-list-from" />
+          </div>
+          <div>
+            <label :for="`${pageId}-document-list-to`" class="block text-sm font-medium text-neutral-700 mb-1">{{ t('accounting.journal.filter_account_to') }}</label>
+            <input :id="`${pageId}-document-list-to`" v-model.trim="documentList.to" type="text" maxlength="10" :list="`${pageId}-journal-coa`"
+              class="w-full h-10 px-3 border border-neutral-300 rounded-md text-sm font-mono" data-test="document-list-to" />
+          </div>
+        </div>
+        <div v-if="documentList.error" class="text-sm text-danger-500" role="alert" data-test="document-list-error">{{ documentList.error }}</div>
+      </form>
+      <template #footer>
+        <div class="flex flex-wrap justify-end gap-2">
+          <button type="button" :class="btnOutline('neutral')" class="whitespace-nowrap" @click="documentList.open = false">{{ t('common.cancel') }}</button>
+          <button type="submit" :form="`${pageId}-document-list`" :class="btnFilled('primary')" class="whitespace-nowrap" :disabled="exporting" data-test="document-list-download">
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.download" /></svg>
+            {{ exporting ? t('accounting.journal.document_list_preparing') : t('accounting.journal.document_list_download') }}
+          </button>
+        </div>
+      </template>
+    </Modal>
     <!-- Přeúčtování jedné dvojice: nové účty MD/Dal, částka zůstává. Na místě, nebo opravným zápisem
          rozhodne server podle zámků a období. -->
     <Modal v-if="repostPairDialog.open && repostPairDialog.pair" :title="t('accounting.pairs.repost_title', { n: repostPairDialog.pair.pair_no })"

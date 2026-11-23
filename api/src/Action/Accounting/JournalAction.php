@@ -6,7 +6,9 @@ namespace MyInvoice\Action\Accounting;
 
 use MyInvoice\Action\Accounting\Reports\DimensionFilterParam;
 use MyInvoice\Http\GuardsAccountingMode;
+use MyInvoice\Http\IsoDate;
 use MyInvoice\Http\Json;
+use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Accounting\DocumentPostingGroup;
 use MyInvoice\Service\Accounting\Dimension\DimensionPeriodGuard;
@@ -46,6 +48,7 @@ use MyInvoice\Service\Accounting\OtherItemService;
 use MyInvoice\Service\Accounting\PostingOriginService;
 use MyInvoice\Service\Accounting\PostingException;
 use MyInvoice\Service\Accounting\PostingService;
+use MyInvoice\Service\Accounting\Reports\JournalDocumentListService;
 use MyInvoice\Service\Accounting\Reports\JournalExportService;
 use MyInvoice\Service\Accounting\Reports\ReportException;
 use MyInvoice\Service\Accounting\Reports\ReportXlsxExporter;
@@ -127,6 +130,7 @@ final class JournalAction
         private readonly InternalDocumentService $internalDocuments,
         private readonly InvoicePostingProposal $proposal,
         private readonly EntryFormService $entryForms,
+        private readonly JournalDocumentListService $documentList,
     ) {}
 
     public function list(Request $request, Response $response): Response
@@ -265,6 +269,69 @@ final class JournalAction
 
         $this->logger->log('report.accounting_export', $this->userId($request), 'report', null,
             ['report' => 'journal', 'format' => $format],
+            $this->ipMatcher->clientIpFromRequest($request->getServerParams()),
+            $request->getHeaderLine('User-Agent'), $supplierId);
+
+        $response->getBody()->write($out['bytes']);
+        return $response
+            ->withHeader('Content-Type', $out['mime'])
+            ->withHeader('Content-Disposition', 'attachment; filename="' . $out['filename'] . '"')
+            ->withHeader('Content-Length', (string) strlen($out['bytes']))
+            ->withHeader('Cache-Control', 'private, no-store');
+    }
+
+    /**
+     * GET /api/accounting/reports/journal/document-list — soupiska dokladů XLSX (#356).
+     * Zápisy vybírá přesně filtr seznamu Deníku (parseFilters, včetně jeho rozsahu účtů a
+     * hledání), částku k doložení počítá jen z řádků v povinném rozsahu soupisky
+     * `line_account_from`/`line_account_to`, viz {@see JournalDocumentListService}.
+     */
+    public function documentList(Request $request, Response $response): Response
+    {
+        $supplierId = $this->currentSupplierId($request);
+        if (!$this->requireDoubleEntry($this->db, $supplierId, $response, $err)) return $err;
+
+        $q = $request->getQueryParams();
+        if (strtolower(trim((string) ($q['format'] ?? 'xlsx'))) !== 'xlsx') {
+            return Json::error($response, 'validation_failed', "format musí být 'xlsx'.", 422);
+        }
+        $lineFrom = $q['line_account_from'] ?? null;
+        $lineTo = $q['line_account_to'] ?? null;
+        if (!is_string($lineFrom) || !is_string($lineTo) || trim($lineFrom) === '' || trim($lineTo) === '') {
+            return Json::error($response, 'validation_failed', 'Zadejte rozsah účtů soupisky (line_account_from a line_account_to), například 5 až 5 pro nákladové účty.', 422);
+        }
+        foreach (['date_from', 'date_to'] as $key) {
+            if (isset($q[$key]) && $q[$key] !== '' && (!is_string($q[$key]) || !IsoDate::isValid($q[$key]))) {
+                return Json::error($response, 'validation_failed', "{$key} musí být platné datum ve tvaru RRRR-MM-DD.", 422);
+            }
+        }
+        try {
+            $lineRange = AccountCodeRange::parse($lineFrom, $lineTo);
+            $filters = $this->parseFilters($q, $supplierId);
+        } catch (AccountCodeRangeException $e) {
+            return Json::error($response, 'validation_failed', $e->getMessage(), 422);
+        }
+        if (!$this->applyDimensionFilter($request, $response, $supplierId, $filters, $err)) return $err;
+        $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
+        try {
+            $data = $this->documentList->build(
+                $supplierId,
+                $filters,
+                $lineRange->from,
+                $lineRange->to,
+                (string) ($q['dimension_descendants'] ?? '1') !== '0',
+                trim((string) ($user['name'] ?? '')) ?: null,
+            );
+            $out = $this->xlsx->journalDocumentList($data);
+        } catch (ReportException $e) {
+            return Json::error($response, $e->errorCode, $e->getMessage(), $e->httpStatus);
+        } catch (\Throwable $e) {
+            $this->log->error('Soupisku dokladů se nepodařilo sestavit: ' . $e->getMessage(), ['exception' => $e]);
+            return Json::error($response, 'build_failed', 'Soupisku se nepodařilo vytvořit.', 500);
+        }
+
+        $this->logger->log('report.accounting_export', $this->userId($request), 'report', null,
+            ['report' => 'journal_document_list', 'format' => 'xlsx'],
             $this->ipMatcher->clientIpFromRequest($request->getServerParams()),
             $request->getHeaderLine('User-Agent'), $supplierId);
 

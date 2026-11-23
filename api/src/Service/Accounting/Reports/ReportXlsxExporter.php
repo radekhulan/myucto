@@ -8,6 +8,7 @@ use MyInvoice\Service\Accounting\Dimension\DimensionValueLabel;
 use MyInvoice\Service\Accounting\JournalLineAmount;
 use PhpOffice\PhpSpreadsheet\Cell\Coordinate;
 use PhpOffice\PhpSpreadsheet\Cell\DataType;
+use PhpOffice\PhpSpreadsheet\Shared\Date as ExcelDate;
 use PhpOffice\PhpSpreadsheet\Spreadsheet;
 use PhpOffice\PhpSpreadsheet\Style\Alignment;
 use PhpOffice\PhpSpreadsheet\Style\Border;
@@ -1332,6 +1333,108 @@ final class ReportXlsxExporter
         $sheet->getStyle("G{$tr}:H{$tr}")->getFont()->setBold(true);
 
         return $this->out($ss, 'ucetni-denik-' . (string) ($filters['date_from'] ?? '') . '_' . (string) ($filters['date_to'] ?? '') . '.xlsx');
+    }
+
+    /**
+     * Soupiska dokladů z filtru Deníku (#356) — výstup JournalDocumentListService::build().
+     * Jeden řádek na prvotní doklad; hlavička nese filtr, datum vytvoření a stav podkladu.
+     *
+     * @param array<string,mixed> $data
+     * @return array{bytes:string, filename:string, mime:string}
+     */
+    public function journalDocumentList(array $data): array
+    {
+        $ss = new Spreadsheet();
+        $sheet = $ss->getActiveSheet();
+        $sheet->setTitle('Soupiska dokladů');
+        $headers = ['Pořadí', 'Druh dokladu', 'Naše číslo', 'Číslo protistrany', 'Datum', 'Protistrana', 'IČO', 'Popis',
+            'Účty', 'Zápisy deníku', 'K ověření', 'Měna', 'Celkem dokladu', 'DPH reverse charge (Kč)', 'K doložení (Kč)'];
+        $cols = count($headers);
+        $lastCol = Coordinate::stringFromColumnIndex($cols);
+
+        $entity = $data['entity'] ?? [];
+        $filters = $data['filters'] ?? [];
+        $sub = 'Období: ' . JournalSourceLabel::period($this->czDate((string) ($filters['date_from'] ?? '')), $this->czDate((string) ($filters['date_to'] ?? '')))
+            . ' · Účty soupisky: ' . (string) ($filters['line_account_from'] ?? '') . ' až ' . (string) ($filters['line_account_to'] ?? '');
+        if (!empty($filters['dimension'])) {
+            // Popisek filtru už nese „(vč. podřízených)“, má-li hodnota podřízené (DimensionService::filter).
+            $sub .= ' · Dimenze: ' . (string) $filters['dimension']
+                . (($filters['dimension_descendants'] ?? true) ? '' : ' (bez podřízených)');
+        }
+        $journal = (array) ($filters['journal'] ?? []);
+        $intro = [
+            ['Soupiska dokladů', true],
+            [(string) ($entity['name'] ?? '') . ' — IČO: ' . (string) ($entity['ico'] ?? ''), false],
+            [$sub, false],
+            ['Další filtr Deníku: ' . ($journal === [] ? 'žádný' : implode(' · ', $journal)), false],
+            ['Pracovní podklad, stav k ' . (string) ($entity['prepared_at'] ?? '')
+                . (!empty($entity['prepared_by']) ? ' · Vytvořil: ' . (string) $entity['prepared_by'] : '')
+                . ((int) ($filters['drafts_excluded'] ?? 0) > 0 ? ' · Nezaúčtované koncepty (nezahrnuty): ' . (int) $filters['drafts_excluded'] : ''), false],
+            ['Částka k doložení vychází ze zaúčtovaných řádků deníku v rozsahu účtů soupisky a v dimenzi filtru (u rozpadu jen díl dimenze); '
+                . 'u výnosových účtů Dal − MD, u ostatních MD − Dal, vratky a storna se znaménkem. '
+                . 'Doklady s nulovou částkou (úplné storno), koncepty a uzavření a otevření knih soupiska vynechává.', false],
+        ];
+        foreach ($intro as $i => [$text, $title]) {
+            $row = $i + 1;
+            $sheet->setCellValueExplicit("A{$row}", $text, DataType::TYPE_STRING);
+            // Sloučení přes šířku tabulky: dlouhý text jinak roztáhne úzký sloupec Pořadí.
+            $sheet->mergeCells("A{$row}:{$lastCol}{$row}");
+            $sheet->getStyle("A{$row}")->getAlignment()->setWrapText(true)->setVertical(Alignment::VERTICAL_TOP);
+            if ($title) {
+                $sheet->getStyle("A{$row}")->getFont()->setBold(true)->setSize(14);
+            }
+        }
+        $sheet->getRowDimension(6)->setRowHeight(30);
+
+        $head = 8;
+        $this->headerRow($sheet, $head, $headers);
+
+        $r = $head + 1;
+        foreach ($data['documents'] ?? [] as $i => $doc) {
+            $sheet->setCellValue([1, $r], $i + 1);
+            $sheet->setCellValueExplicit([2, $r], (string) $doc['kind_label'], DataType::TYPE_STRING);
+            $sheet->setCellValueExplicit([3, $r], (string) ($doc['our_no'] ?? ''), DataType::TYPE_STRING);
+            $sheet->setCellValueExplicit([4, $r], (string) ($doc['counterparty_no'] ?? ''), DataType::TYPE_STRING);
+            $date = (string) ($doc['date'] ?? '');
+            if ($date !== '') {
+                // Skutečné datum, aby šlo v Excelu řadit a filtrovat; u zápisu bez dokladu je to
+                // datum zápisu (sloupec K ověření to uvádí).
+                $sheet->setCellValue([5, $r], ExcelDate::PHPToExcel(new \DateTimeImmutable($date)));
+                $sheet->getStyle([5, $r])->getNumberFormat()->setFormatCode('dd.mm.yyyy');
+            }
+            $sheet->setCellValueExplicit([6, $r], (string) ($doc['partner_name'] ?? ''), DataType::TYPE_STRING);
+            $sheet->setCellValueExplicit([7, $r], (string) ($doc['partner_ic'] ?? ''), DataType::TYPE_STRING);
+            $sheet->setCellValueExplicit([8, $r], (string) ($doc['description'] ?? ''), DataType::TYPE_STRING);
+            $sheet->setCellValueExplicit([9, $r], (string) ($doc['accounts'] ?? ''), DataType::TYPE_STRING);
+            $sheet->setCellValueExplicit([10, $r], (string) ($doc['entry_labels'] ?? ''), DataType::TYPE_STRING);
+            $sheet->setCellValueExplicit([11, $r], implode('; ', $doc['checks'] ?? []), DataType::TYPE_STRING);
+            $sheet->setCellValueExplicit([12, $r], (string) ($doc['document_currency'] ?? ''), DataType::TYPE_STRING);
+            if (($doc['document_total'] ?? null) !== null) {
+                $sheet->setCellValue([13, $r], (float) $doc['document_total']);
+            }
+            if (($doc['self_assessed_vat'] ?? null) !== null) {
+                $sheet->setCellValue([14, $r], (float) $doc['self_assessed_vat']);
+            }
+            $sheet->setCellValue([15, $r], (float) $doc['amount']);
+            $r++;
+        }
+        if (($data['documents'] ?? []) === []) {
+            $sheet->setCellValueExplicit("A{$r}", 'Filtru neodpovídá žádný doklad s částkou k doložení.', DataType::TYPE_STRING);
+            $sheet->mergeCells("A{$r}:{$lastCol}{$r}");
+            $r++;
+        }
+        $this->finishTable($sheet, $head, max($head, $r - 1), $cols, 13);
+
+        $t = $data['totals'] ?? [];
+        $tr = $r + 1;
+        $sheet->setCellValue("A{$tr}", 'Počet dokladů: ' . (int) ($t['count'] ?? 0) . ' · k ověření: ' . (int) ($t['to_check'] ?? 0));
+        $sheet->mergeCells("A{$tr}:L{$tr}");
+        $sheet->getStyle("A{$tr}")->getFont()->setBold(true);
+        $sheet->setCellValue("O{$tr}", (float) ($t['amount'] ?? 0));
+        $sheet->getStyle("O{$tr}")->getFont()->setBold(true);
+
+        // Data filtru ověřila akce (IsoDate), meze období jdou z databáze.
+        return $this->out($ss, 'soupiska-dokladu-' . ((string) ($filters['date_from'] ?? '') ?: 'vse') . '_' . ((string) ($filters['date_to'] ?? '') ?: 'vse') . '.xlsx');
     }
 
     /**
