@@ -141,6 +141,34 @@ test('zisk a cash flow předávají rozsah, globální skupinu a rozpad', async 
   assert.equal(cash.query.scope, 'group');
 });
 
+test('DPH podle dimenze je čtecí sestava za období a typ dimenze', async () => {
+  const tool = TOOLS_BY_NAME.get('vat_by_dimension');
+  assert.equal(tool.write, false);
+  assert.deepEqual(tool.inputSchema.required, ['year', 'month', 'type_id']);
+  const request = await call('vat_by_dimension', { year: 2026, month: 10, period: 'quarterly', type_id: 11 });
+  assert.equal(request.path, '/reports/vat-by-dimension/preview');
+  assert.deepEqual(request.query, { year: 2026, month: 10, period: 'quarterly', type_id: 11 });
+  assert.equal((await call('vat_by_dimension', { year: 2026, month: 10, type_id: 11 })).query.period, 'monthly');
+  assert.throws(() => validateToolArguments(tool, { year: 2026, month: 10 }));
+  assert.throws(() => validateToolArguments(tool, { year: 2026, month: 13, type_id: 11 }));
+  assert.throws(() => validateToolArguments(tool, { year: 2026, month: 10, type_id: 11, period: 'yearly' }));
+});
+
+test('záznamní evidence DPH předá filtr dimenze knize DPH i soupisu KH', async () => {
+  const book = await call('vat_ledger', { year: 2026, month: 10, dimension_value_id: 2551, dimension_descendants: false });
+  assert.equal(book.path, '/reports/dph-book/preview');
+  assert.equal(book.query.dimension_value_id, 2551);
+  assert.equal(book.query.dimension_descendants, 0);
+  const kh = await call('vat_ledger', { year: 2026, month: 10, kh_section: 'A.4', dimension_value_id: 2551 });
+  assert.equal(kh.path, '/reports/kh-evidence/preview');
+  assert.equal(kh.query.section, 'A.4');
+  assert.equal(kh.query.dimension_value_id, 2551);
+  assert.equal(kh.query.dimension_descendants, undefined);
+  const plain = await call('vat_ledger', { year: 2026, month: 10 });
+  assert.equal(plain.query.dimension_value_id, undefined);
+  assert.throws(() => validateToolArguments(TOOLS_BY_NAME.get('vat_ledger'), { year: 2026, month: 10, dimension_value_id: 0 }));
+});
+
 test('výpis účetního účtu používá povinná data místo nepodporovaného period_id', async () => {
   const tool = TOOLS_BY_NAME.get('account_statement');
   assert.deepEqual(tool.inputSchema.required, ['account_id', 'from', 'to']);

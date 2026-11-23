@@ -3340,7 +3340,9 @@ export const TOOLS = [
     title: 'Záznamní evidence DPH',
     description:
       'Doklady, ze kterých se DPH za období skládá — na dohledání, proč vychází taková částka. '
-      + 'S parametrem kh_section vrátí soupis dokladů oddílu kontrolního hlášení (zařazení stejnou logikou jako KH) se součty.',
+      + 'S parametrem kh_section vrátí soupis dokladů oddílu kontrolního hlášení (zařazení stejnou logikou jako KH) se součty. '
+      + 'S dimension_value_id jen díl dokladů připadající na hodnotu dimenze (položka, jinak hlavička, rozpad podílem; '
+      + 'bez oprav § 43/46/74b/79) — doklady k řádku sestavy vat_by_dimension.',
     inputSchema: schema({
       year: int('Rok.', { minimum: 2020, maximum: 2050 }),
       month: int('Měsíc 1–12.', { minimum: 1, maximum: 12 }),
@@ -3348,14 +3350,15 @@ export const TOOLS = [
       kh_section: str('Oddíl kontrolního hlášení; none = doklady mimo KH, all = všechny oddíly.', {
         enum: ['all', 'A.1', 'A.2', 'A.4', 'A.5', 'B.1', 'B.2', 'B.3', 'none'],
       }),
+      ...DIMENSION_FILTER,
     }),
     write: false,
     run: (c, a, tool) => (a.kh_section
       ? c.get('/reports/kh-evidence/preview', {
-        year: a.year, month: a.month, period: a.period ?? 'monthly', section: a.kh_section,
+        year: a.year, month: a.month, period: a.period ?? 'monthly', section: a.kh_section, ...dimensionQuery(a),
       }, tool)
       : c.get('/reports/dph-book/preview', {
-        year: a.year, month: a.month, period: a.period,
+        year: a.year, month: a.month, period: a.period, ...dimensionQuery(a),
       }, tool)),
   },
   {

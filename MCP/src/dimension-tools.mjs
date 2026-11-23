@@ -155,6 +155,20 @@ export const DIMENSION_TOOLS = [
     { ...range, ...DIMENSION_FILTER, scope }, ['from', 'to'], (c, a, tool) => c.get('/accounting/reports/dimension-cash-flow', {
       from: a.from, to: a.to, ...dimensionQuery(a), scope: a.scope === 'group' ? 'group' : undefined,
     }, tool)),
+  read('vat_by_dimension', 'DPH podle dimenze',
+    'Evidence DPH za zdaňovací období (stejná data jako přiznání, bez konceptů) po hodnotách jednoho typu dimenze '
+      + 'a řádek „bez dimenze": DPH na výstupu, nárok na odpočet, výsledek a základy podle sazeb. DPH dokladu patří '
+      + 'dimenzi položky, jinak hlavičky, u rozpadu podílem. control.ok/difference ověřuje, že součet sedí na evidenci '
+      + 'za období; control.return jsou ř. 62–64 přiznání a bridge opravy a zaokrouhlení. account343 porovná obraty '
+      + 'účtu 343 po dimenzích (bez úhrad finančnímu úřadu a počátečních stavů). Doklady hodnoty vypíše vat_ledger '
+      + 's dimension_value_id. Nemění data.',
+    { year: { type: 'integer', minimum: 2020, maximum: 2050, description: 'Rok.' },
+      month: { type: 'integer', minimum: 1, maximum: 12, description: 'Měsíc 1–12; u čtvrtletí libovolný měsíc čtvrtletí.' },
+      period: str('Zdaňovací období.', { enum: ['monthly', 'quarterly'] }),
+      type_id: int('ID typu dimenze z `list_dimensions`.') },
+    ['year', 'month', 'type_id'], (c, a, tool) => c.get('/reports/vat-by-dimension/preview', {
+      year: a.year, month: a.month, period: a.period ?? 'monthly', type_id: a.type_id,
+    }, tool)),
   read('statement_accounts', 'Rozvaha a výsledovka po účtech',
     'Rozvaha, výsledovka a hospodářský výsledek v členění po účtech. Lze omezit na hodnotu dimenze.',
     { period_id: int('ID účetního období.'), as_of: date('Stav k datu; výchozí dřívější z dneška a konce období.'), ...DIMENSION_FILTER },

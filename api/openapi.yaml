@@ -5078,6 +5078,8 @@ paths:
             UNKNOWN a naivní vyloučení by je vyhodilo taky. Zadané obojí: `revenue_category_id`
             vybere množinu a `revenue_category_exclude` ji zúží.
           schema: { type: string, example: "12,none" }
+        - $ref: '#/components/parameters/ListDimensionValueId'
+        - $ref: '#/components/parameters/ListDimensionDescendants'
         - in: query
           name: filter[group_by_month]
           description: "0 = souvislý seznam; výchozí 1 = skupiny po měsících"
@@ -5488,6 +5490,8 @@ paths:
         - { in: query, name: 'filter[oss_review]', schema: { type: string, enum: [any, oss, domestic, '1'] } }
         - { in: query, name: 'filter[revenue_category_id]', schema: { type: string, example: '3,7,none' } }
         - { in: query, name: 'filter[revenue_category_exclude]', schema: { type: string, example: '12,none' } }
+        - $ref: '#/components/parameters/ListDimensionValueId'
+        - $ref: '#/components/parameters/ListDimensionDescendants'
       responses:
         '200':
           description: Soubor knihy (Content-Disposition attachment)
@@ -11705,6 +11709,8 @@ paths:
           name: filter[approval_status]
           description: "Schvalování manažerem střediska (approval_status dokladu)"
           schema: { type: string, enum: [none, pending, approved, rejected] }
+        - $ref: '#/components/parameters/ListDimensionValueId'
+        - $ref: '#/components/parameters/ListDimensionDescendants'
         - in: query
           name: filter[group_by_month]
           description: "0 = souvislý seznam; výchozí 1 = skupiny po měsících"
@@ -13715,6 +13721,8 @@ paths:
         - { in: query, name: 'filter[has_visual_document]', schema: { type: string, enum: ['0', '1'] } }
         - { in: query, name: 'filter[has_structured_source]', schema: { type: string, enum: ['0', '1'] } }
         - { in: query, name: 'filter[import_batch_id]', schema: { type: string } }
+        - $ref: '#/components/parameters/ListDimensionValueId'
+        - $ref: '#/components/parameters/ListDimensionDescendants'
       responses:
         '200':
           description: Soubor knihy (Content-Disposition attachment)
@@ -15737,28 +15745,96 @@ paths:
   /api/v1/reports/dph-book/preview:
     get:
       tags: [Reports]
-      summary: Náhled Knihy DPH (interní VAT žurnál, vždy měsíční)
-      description: Interní pomůcka; řádky obsahují document_kind pro rozlišení faktury a pokladního dokladu. NENÍ EPO podání.
+      summary: Náhled Knihy DPH (interní VAT žurnál, měsíc nebo čtvrtletí)
+      description: |
+        Interní pomůcka; řádky obsahují document_kind pro rozlišení faktury a pokladního dokladu. NENÍ EPO podání.
+        S filtrem `dimension_value_id` kniha obsahuje jen díl dokladů připadající na hodnotu dimenze
+        a odpověď nese použitý filtr v `dimension` (jinak `null`).
       parameters:
         - $ref: '#/components/parameters/SupplierIdHeader'
         - { in: query, name: year, required: true, schema: { type: integer } }
-        - { in: query, name: month, required: true, schema: { type: integer, minimum: 1, maximum: 12 } }
-      responses: { '200': { description: Summary řádků žurnálu } }
+        - { in: query, name: month, required: true, schema: { type: integer, minimum: 1, maximum: 12 }, description: "U čtvrtletí libovolný měsíc čtvrtletí." }
+        - { in: query, name: period, schema: { type: string, enum: [monthly, quarterly], default: monthly } }
+        - $ref: '#/components/parameters/VatDimensionValueId'
+        - $ref: '#/components/parameters/DimensionDescendants'
+      responses:
+        '200': { description: 'Summary řádků žurnálu (`period`, `supplier`, `dimension`, `sections`, `totals`)' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { description: Neplatný filtr dimenze, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
 
   /api/v1/reports/dph-book:
     get:
       tags: [Reports]
-      summary: Stáhne PDF Knihy DPH za měsíc
+      summary: Stáhne PDF Knihy DPH za měsíc nebo čtvrtletí
       parameters:
         - $ref: '#/components/parameters/SupplierIdHeader'
         - { in: query, name: year, required: true, schema: { type: integer } }
         - { in: query, name: month, required: true, schema: { type: integer, minimum: 1, maximum: 12 } }
+        - { in: query, name: period, schema: { type: string, enum: [monthly, quarterly], default: monthly } }
+        - $ref: '#/components/parameters/VatDimensionValueId'
+        - $ref: '#/components/parameters/DimensionDescendants'
       responses:
         '200':
           description: PDF download
           content:
             application/pdf:
               schema: { type: string, format: binary }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { description: Neplatný filtr dimenze, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+
+  /api/v1/reports/vat-by-dimension/preview:
+    get:
+      tags: [Reports]
+      summary: DPH podle dimenze (evidence DPH za období po hodnotách typu dimenze)
+      description: |
+        Evidence DPH za období (stejná data jako přiznání, bez konceptů) rozdělená po hodnotách jednoho typu
+        dimenze a řádku „bez dimenze" (`value_id` null). Řádek evidence (položka dokladu) patří hodnotě
+        položky, jinak hodnotě hlavičky dokladu; u rozpadu podílem po haléřích. Výsledek = DPH na výstupu
+        (ř. 1–13) − nárok na odpočet (ř. 40–45, krácený sloupec v plné výši).
+
+        `control.difference` = součet řádků − evidence za období, musí být nula (`control.ok`).
+        `control.return` jsou ř. 62, 63 a 64 přiznání a `bridge` jejich rozdíl proti evidenci (opravy § 43,
+        § 46, § 74b, § 79, krácení § 76, úprava § 78 a zaokrouhlení na celé Kč). `account343` porovnává
+        obraty účtu 343 po hodnotách dimenze řádků deníku za období (bez úhrad daně finančnímu úřadu,
+        vratek odpočtu, počátečních stavů a uzávěrky); u firmy bez účtu 343 je `null` a důvod
+        v `account343_unavailable`.
+      parameters:
+        - $ref: '#/components/parameters/SupplierIdHeader'
+        - { in: query, name: year, required: true, schema: { type: integer, minimum: 2020, maximum: 2050 } }
+        - { in: query, name: month, required: true, schema: { type: integer, minimum: 1, maximum: 12 }, description: "U čtvrtletí libovolný měsíc čtvrtletí." }
+        - { in: query, name: period, schema: { type: string, enum: [monthly, quarterly], default: monthly } }
+        - { in: query, name: type_id, required: true, schema: { type: integer, minimum: 1 }, description: "Typ dimenze (Firma → Dimenze)." }
+      responses:
+        '200': { description: Sestava, content: { application/json: { schema: { $ref: '#/components/schemas/VatDimensionReport' } } } }
+        '400': { description: Neplatné období nebo chybí typ dimenze }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { description: Typ dimenze nenalezen, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '409': { description: Dimenze nejsou u firmy zapnuté (`dimensions_disabled`), content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+
+  /api/v1/reports/vat-by-dimension:
+    get:
+      tags: [Reports]
+      summary: Export sestavy DPH podle dimenze do PDF nebo XLSX
+      description: Tytéž částky a kontrolní řádky jako náhled; v XLSX jako čísla. Vyžaduje oprávnění `reports.export`.
+      parameters:
+        - $ref: '#/components/parameters/SupplierIdHeader'
+        - { in: query, name: year, required: true, schema: { type: integer, minimum: 2020, maximum: 2050 } }
+        - { in: query, name: month, required: true, schema: { type: integer, minimum: 1, maximum: 12 } }
+        - { in: query, name: period, schema: { type: string, enum: [monthly, quarterly], default: monthly } }
+        - { in: query, name: type_id, required: true, schema: { type: integer, minimum: 1 } }
+        - { in: query, name: format, schema: { type: string, enum: [pdf, xlsx], default: pdf } }
+      responses:
+        '200':
+          description: Soubor sestavy
+          content:
+            application/pdf:
+              schema: { type: string, format: binary }
+            application/vnd.openxmlformats-officedocument.spreadsheetml.sheet:
+              schema: { type: string, format: binary }
+        '400': { description: Neplatné období, typ dimenze nebo formát }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { description: Typ dimenze nenalezen }
+        '409': { description: Dimenze nejsou u firmy zapnuté }
 
   /api/v1/reports/kh-evidence/preview:
     get:
@@ -15776,10 +15852,13 @@ paths:
         - { in: query, name: month, required: true, schema: { type: integer, minimum: 1, maximum: 12 }, description: "U čtvrtletí libovolný měsíc čtvrtletí." }
         - { in: query, name: period, schema: { type: string, enum: [monthly, quarterly], default: monthly } }
         - { in: query, name: section, schema: { type: string, enum: [all, A.1, A.2, A.4, A.5, B.1, B.2, B.3, none], default: all }, description: "Oddíl KH; none = doklady evidence DPH mimo KH." }
+        - $ref: '#/components/parameters/VatDimensionValueId'
+        - $ref: '#/components/parameters/DimensionDescendants'
       responses:
         '200': { description: Soupis dokladů, content: { application/json: { schema: { $ref: '#/components/schemas/KhEvidenceReport' } } } }
         '400': { description: Neplatné období nebo oddíl }
         '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { description: Neplatný filtr dimenze, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
 
   /api/v1/reports/kh-evidence:
     get:
@@ -15792,6 +15871,8 @@ paths:
         - { in: query, name: month, required: true, schema: { type: integer, minimum: 1, maximum: 12 } }
         - { in: query, name: period, schema: { type: string, enum: [monthly, quarterly], default: monthly } }
         - { in: query, name: section, schema: { type: string, enum: [all, A.1, A.2, A.4, A.5, B.1, B.2, B.3, none], default: all } }
+        - $ref: '#/components/parameters/VatDimensionValueId'
+        - $ref: '#/components/parameters/DimensionDescendants'
         - { in: query, name: format, schema: { type: string, enum: [pdf, xlsx], default: pdf } }
       responses:
         '200':
@@ -40272,6 +40353,38 @@ components:
       description: '`0` = jen hodnota sama, bez podřízených hodnot.'
       schema: { type: integer, enum: [0, 1], default: 1 }
 
+    VatDimensionValueId:
+      in: query
+      name: dimension_value_id
+      required: false
+      description: |
+        Evidence DPH jen za díl dokladů připadající na hodnotu dimenze (Firma → Dimenze): jedno id
+        hodnoty, nebo nejvýše 10 id oddělených čárkou, všechny téhož typu; výchozí včetně podřízených
+        hodnot. Řádek evidence (položka dokladu) patří hodnotě položky, jinak hodnotě hlavičky; u rozpadu
+        jen podílem (základ i DPH po haléřích). Zařazení do oddílu kontrolního hlášení se posuzuje podle
+        celého dokladu. Opravy § 43, § 46, § 74b a § 79 ve filtrovaném výpisu nejsou. Hodnoty víc typů
+        vrací 422 `dimension_filter_single_type`, neplatný seznam 422 `dimension_value_invalid`.
+      schema: { type: string, pattern: '^[1-9][0-9]{0,9}(,[1-9][0-9]{0,9}){0,9}$', example: '2551' }
+
+    ListDimensionValueId:
+      in: query
+      name: filter[dimension_value_id]
+      required: false
+      description: |
+        Doklady s hodnotou dimenze (Firma → Dimenze) na hlavičce, na některé položce nebo v rozpadu
+        hlavičky či položky; výchozí včetně podřízených hodnot. Jedno id hodnoty, nebo nejvýše 10 id
+        oddělených čárkou: hodnoty stejného typu stačí kterákoli, různé typy musí platit zároveň.
+        Doklad rozdělený mezi víc hodnot vyhoví každé z nich celý (částky seznamu jsou celé doklady).
+        Neplatný seznam nebo cizí hodnota vrací 422.
+      schema: { type: string, pattern: '^[1-9][0-9]{0,9}(,[1-9][0-9]{0,9}){0,9}$', example: '12,34' }
+
+    ListDimensionDescendants:
+      in: query
+      name: filter[dimension_descendants]
+      required: false
+      description: '`0` = jen vybrané hodnoty samy, bez podřízených hodnot.'
+      schema: { type: integer, enum: [0, 1], default: 1 }
+
     AccrualSpread:
       in: query
       name: accrual_spread
@@ -53639,6 +53752,11 @@ components:
             end: { type: string, format: date }
             label: { type: string }
         section: { type: string }
+        dimension:
+          description: Použitý filtr dimenze (jen soupis z aktuálních dat), jinak null.
+          oneOf:
+            - { $ref: '#/components/schemas/ReportDimensionFilter' }
+            - { type: 'null' }
         generated_at: { type: string, example: '2026-10-09 14:30:00' }
         sections:
           type: object
@@ -63927,6 +64045,136 @@ components:
               type: array
               items:
                 $ref: '#/components/schemas/StatementUnmappedAccount'
+    VatDimensionAmounts:
+      type: object
+      description: Částky v Kč (2 desetinná místa). Výsledek = DPH na výstupu − DPH na vstupu.
+      properties:
+        vat_output: { type: number, description: 'DPH na výstupu (ř. 1–13)' }
+        vat_input: { type: number, description: 'Nárok na odpočet (ř. 40–45, krácený v plné výši)' }
+        vat_result: { type: number }
+        base_output_standard: { type: number }
+        base_output_reduced: { type: number }
+        base_output_other: { type: number, description: 'Plnění bez daně s nárokem na odpočet (ř. 20–26)' }
+        base_input_standard: { type: number }
+        base_input_reduced: { type: number }
+        base_input_other: { type: number, description: 'Dovoz zboží (ř. 42)' }
+    VatDimensionReport:
+      type: object
+      properties:
+        period:
+          type: object
+          properties:
+            year: { type: integer }
+            month: { type: integer }
+            period_type: { type: string, enum: [monthly, quarterly] }
+            quarter: { type: [integer, 'null'] }
+            start: { type: string, format: date }
+            end: { type: string, format: date }
+            label: { type: string }
+        supplier:
+          type: object
+          properties:
+            company_name: { type: string }
+            ic: { type: string }
+            dic: { type: string }
+        dimension_type:
+          type: object
+          properties:
+            id: { type: integer }
+            name: { type: string }
+        amount_keys: { type: array, items: { type: string } }
+        rows:
+          type: array
+          description: Hodnoty typu v pořadí stromu, poslední řádek `value_id` null = bez dimenze.
+          items:
+            allOf:
+              - { $ref: '#/components/schemas/VatDimensionAmounts' }
+              - type: object
+                properties:
+                  value_id: { type: [integer, 'null'] }
+                  code: { type: [string, 'null'] }
+                  name: { type: string }
+                  label: { type: string }
+                  depth: { type: integer }
+                  is_active: { type: boolean }
+                  documents: { type: integer }
+                  lines:
+                    type: object
+                    description: Řádky DPHDP3 hodnoty (zrcadlový ř. 43/44 v haléřích).
+                    additionalProperties:
+                      type: object
+                      properties:
+                        base: { type: number }
+                        vat: { type: number }
+        total: { $ref: '#/components/schemas/VatDimensionAmounts' }
+        control:
+          type: object
+          properties:
+            evidence: { $ref: '#/components/schemas/VatDimensionAmounts' }
+            difference: { $ref: '#/components/schemas/VatDimensionAmounts' }
+            ok: { type: boolean }
+            line_differences:
+              type: array
+              items:
+                type: object
+                properties:
+                  line: { type: string }
+                  base: { type: number }
+                  vat: { type: number }
+            return:
+              type: [object, 'null']
+              properties:
+                vat_output: { type: number, description: 'ř. 62' }
+                vat_input: { type: number, description: 'ř. 63' }
+                vat_result: { type: number, description: 'ř. 64 (záporná = nadměrný odpočet)' }
+                bridge:
+                  type: object
+                  properties:
+                    vat_output: { type: number }
+                    vat_input: { type: number }
+                    vat_result: { type: number }
+            return_error: { type: [string, 'null'] }
+        account343:
+          type: [object, 'null']
+          properties:
+            rows:
+              type: array
+              items:
+                type: object
+                properties:
+                  value_id: { type: [integer, 'null'] }
+                  code: { type: [string, 'null'] }
+                  name: { type: string }
+                  label: { type: string }
+                  debit: { type: number }
+                  credit: { type: number }
+                  net: { type: number, description: 'D − MD (daň k odvodu)' }
+            total:
+              type: object
+              properties:
+                debit: { type: number }
+                credit: { type: number }
+                net: { type: number }
+            excluded:
+              type: object
+              properties:
+                payments: { type: object, properties: { count: { type: integer }, net: { type: number } } }
+                opening: { type: object, properties: { count: { type: integer }, net: { type: number } } }
+            comparison:
+              type: array
+              items:
+                type: object
+                properties:
+                  value_id: { type: [integer, 'null'] }
+                  label: { type: string }
+                  report_result: { type: number }
+                  account_net: { type: number }
+                  difference: { type: number }
+                  is_total: { type: boolean }
+            note: { type: string }
+        account343_unavailable: { type: [string, 'null'] }
+        generated_at: { type: string }
+        warnings: { type: array, items: { type: string } }
     ReportDimensionFilter:
       type: object
       description: |

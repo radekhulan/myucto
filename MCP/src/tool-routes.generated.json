@@ -4886,6 +4886,15 @@
       ]
     ]
   },
+  "vat_by_dimension": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/reports/vat-by-dimension/preview"
+      ]
+    ]
+  },
   "vat_clearing_status": {
     "write": false,
     "api": [
