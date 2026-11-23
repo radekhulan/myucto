@@ -549,7 +549,7 @@ final class InvoicePaymentService
      *
      * @return array{became_unpaid: bool, remaining: float}
      */
-    public function deletePayment(int $paymentId, bool $skipBankGuard = false): array
+    public function deletePayment(int $paymentId, bool $skipBankGuard = false, bool $allowMoneyS3Filler = false): array
     {
         $payment = $this->findPayment($paymentId);
         if ($payment === null) {
@@ -565,8 +565,8 @@ final class InvoicePaymentService
                 'Platba je úhradou navázané ostatní pohledávky. Odpojte úhradu v detailu pohledávky, nebo fakturu od pohledávky odpojte.'
             );
         }
-        if (TakenOverPayment::isProtected($payment)) {
-            throw new TakenOverPaymentException(TakenOverPayment::PROTECTED_MESSAGE);
+        if (TakenOverPayment::isProtected($payment) && !($allowMoneyS3Filler && TakenOverPayment::isMoneyS3Filler($payment))) {
+            throw new TakenOverPaymentException(TakenOverPayment::protectedMessage($payment));
         }
         if ($payment['tax_document_invoice_id'] !== null) {
             $pdo = $this->db->pdo();
@@ -620,7 +620,7 @@ final class InvoicePaymentService
      * Zůstává zrcadlo úhrad ostatní pohledávky (peníze patří pohledávce, ne faktuře)
      * a platba převzatá bez protějšku v MyÚčtu ({@see TakenOverPayment::isProtected()}).
      */
-    public function deleteAllForInvoice(int $invoiceId): int
+    public function deleteAllForInvoice(int $invoiceId, bool $allowMoneyS3Filler = false): int
     {
         $pdo = $this->db->pdo();
         $ownsTransaction = !$pdo->inTransaction();
@@ -631,7 +631,7 @@ final class InvoicePaymentService
             $pdo->prepare('SELECT id FROM invoices WHERE id = ? FOR UPDATE')->execute([$invoiceId]);
             $this->assertNoEetRecord('a.invoice_payment_id IN (SELECT p.id FROM invoice_payments p WHERE p.invoice_id = ?)', [$invoiceId]);
             $this->goPayPending->releaseForInvoice($invoiceId);
-            $deletable = 'p.source <> ? AND NOT ' . TakenOverPayment::isProtectedSql('p');
+            $deletable = 'p.source <> ? AND NOT ' . TakenOverPayment::isProtectedSql('p', $allowMoneyS3Filler);
             $payments = $pdo->prepare("SELECT p.id, p.supplier_id FROM invoice_payments p WHERE p.invoice_id = ? AND {$deletable}");
             $payments->execute([$invoiceId, InvoiceOtherItemPayments::SOURCE]);
             foreach ($payments->fetchAll(PDO::FETCH_ASSOC) ?: [] as $p) {
@@ -939,6 +939,7 @@ final class InvoicePaymentService
         $row['prior_year'] = TakenOverPayment::isPriorYear($row);
         // Doložení zdanění potřebuje data (DDKP, podané období): počítá ho SQL výběru platby.
         $row['tax_declared_by_origin'] = (bool) ($row['tax_declared_by_origin'] ?? false);
+        $row['money_s3_filler'] = TakenOverPayment::isMoneyS3Filler($row);
         return $row;
     }
 

@@ -3401,7 +3401,7 @@ useWindowRefresh(async () => {
                   <span v-else class="text-xs text-neutral-400">—</span>
                 </td>
                 <td class="px-4 py-2.5 text-right">
-                  <button v-if="auth.canWrite('invoices') && !lockedForMe && !p.bank_transaction_id && !p.taken_over_locked && !eetPaymentIds.has(p.id) && !(p.tax_document_invoice_id && p.tax_document_status !== 'cancelled')"
+                  <button v-if="auth.canWrite('invoices') && !lockedForMe && !p.bank_transaction_id && (!p.taken_over_locked || (p.money_s3_filler && canAdminEdit)) && !eetPaymentIds.has(p.id) && !(p.tax_document_invoice_id && p.tax_document_status !== 'cancelled')"
                     @click="deletePayment(p)" :disabled="busy !== null"
                     class="cursor-pointer text-xs text-danger-500 hover:text-danger-700"
                     :title="t('common.delete')">✕</button>

@@ -399,6 +399,16 @@ final class RequestAuthorization
     }
 
     /**
+     * Smazání výplně Money S3 (úhrada bez dokladu úhrady převzatá převodem): stejné právo
+     * jako úprava vystavené faktury, protože vrací doklad mezi neuhrazené. Období hlídá
+     * {@see \MyInvoice\Service\Invoice\TakenOverFillerGuard}.
+     */
+    public static function canDeleteTakenOverFiller(Request $request): bool
+    {
+        return self::canEditIssuedInvoice($request);
+    }
+
+    /**
      * Finanční úprava zaúčtované vystavené faktury přepíše (nebo stornuje a znovu založí)
      * zápis v deníku. Kromě práva upravit vystavenou fakturu k ní neadmin potřebuje i právo
      * zaúčtovat (`accounting.journal.post`), jinak by úpravou faktury účtoval bez něj.

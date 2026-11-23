@@ -76,6 +76,7 @@ final class TakenOverPaymentDeleteTest extends TestCase
         }
         if ($this->supplierId !== 0) {
             $this->db->pdo()->prepare('DELETE FROM money_s3_import_map WHERE supplier_id = ?')->execute([$this->supplierId]);
+            $this->db->pdo()->prepare('DELETE FROM accounting_supplier_settings WHERE supplier_id = ?')->execute([$this->supplierId]);
             self::deleteRows($this->db->pdo(), 'supplier', $this->supplierId, 0);
         }
         $this->db->close();
@@ -141,23 +142,60 @@ final class TakenOverPaymentDeleteTest extends TestCase
     }
 
     /**
-     * Úhrada, kterou Money S3 vede jen datem úhrady bez dokladu úhrady v převedených datech,
-     * nemá v MyÚčtu protějšek: nesmaže se, „Zrušit úhradu" ji ponechá a doklad nevrátí.
+     * Výplň Money S3 (úhrada bez dokladu úhrady) v zamčeném období smazat nejde ani správce,
+     * „Zrušit úhradu" ji ponechá a doklad nevrátí. V otevřeném období ji správce (právo upravit
+     * vystavenou fakturu) smaže, smazání má auditní záznam a doklad se vrátí mezi neuhrazené.
      */
-    public function testMoneyS3PaymentWithoutDocumentIsProtected(): void
+    public function testMoneyS3FillerIsDeletableOnlyInOpenPeriodWithAudit(): void
     {
         $invoiceId = $this->invoice(1210);
         $paymentId = $this->payment($invoiceId, 1210, 'settlement', TakenOverPayment::MONEY_S3_WITHOUT_DOCUMENT_NOTE . ' (ID25001)', '2025-11-30');
+        $this->db->pdo()->prepare("INSERT INTO accounting_supplier_settings (supplier_id, locked_until) VALUES (?, '2025-12-31')")->execute([$this->supplierId]);
 
         $response = $this->deletePayment($invoiceId, $paymentId);
         self::assertSame(409, $response->getStatusCode(), (string) $response->getBody());
         self::assertSame('taken_over_payment', $this->json($response)['error']['code']);
-        self::assertSame(409, $this->unmarkPaid($invoiceId)->getStatusCode());
-
+        $unmark = $this->unmarkPaid($invoiceId);
+        self::assertSame(409, $unmark->getStatusCode());
+        self::assertStringContainsString('Money S3', $this->json($unmark)['error']['message']);
         self::assertSame(1, (int) $this->scalar('SELECT COUNT(*) FROM invoice_payments WHERE id = ?', [$paymentId]));
-        $invoice = $this->invoiceRow($invoiceId);
-        self::assertSame(1210.0, (float) $invoice['paid_total']);
-        self::assertSame('paid', $invoice['status']);
+        self::assertSame('paid', $this->invoiceRow($invoiceId)['status']);
+
+        $this->db->pdo()->prepare('UPDATE accounting_supplier_settings SET locked_until = NULL WHERE supplier_id = ?')->execute([$this->supplierId]);
+        // Zámky období si služba pamatuje po dobu požadavku: další požadavek = nový kontejner.
+        $this->container = Bootstrap::buildContainer();
+        $response = $this->deletePayment($invoiceId, $paymentId);
+        self::assertSame(200, $response->getStatusCode(), json_encode($this->json($response), JSON_UNESCAPED_UNICODE));
+        self::assertSame(0, (int) $this->scalar('SELECT COUNT(*) FROM invoice_payments WHERE id = ?', [$paymentId]));
+        self::assertSame(0.0, (float) $this->invoiceRow($invoiceId)['paid_total']);
+        self::assertSame(1, (int) $this->scalar('SELECT COUNT(*) FROM activity_log WHERE action = ? AND entity_id = ?',
+            [DeletePaymentAction::FILLER_AUDIT_ACTION, $invoiceId]));
+    }
+
+    /** Výplň smaže i „Zrušit úhradu" v otevřeném období; úhrada minulého roku z POHODY zůstává. */
+    public function testUnmarkPaidDeletesMoneyS3FillerButKeepsPohodaPriorYear(): void
+    {
+        $invoiceId = $this->invoice(1210);
+        $prior = $this->payment($invoiceId, 1000, 'settlement', PohodaPriorYearPayments::NOTE, '2024-12-31');
+        $this->payment($invoiceId, 210, 'settlement', TakenOverPayment::MONEY_S3_WITHOUT_DOCUMENT_NOTE, '2025-11-30');
+
+        $response = $this->unmarkPaid($invoiceId);
+        self::assertSame(200, $response->getStatusCode(), (string) $response->getBody());
+        self::assertSame([$prior], array_map('intval', $this->column('SELECT id FROM invoice_payments WHERE invoice_id = ?', [$invoiceId])));
+    }
+
+    /** Služba bez výslovného povolení výplň Money S3 nesmaže (jiné cesty než akce s právem). */
+    public function testServiceRefusesMoneyS3FillerWithoutPermission(): void
+    {
+        $invoiceId = $this->invoice(1210);
+        $paymentId = $this->payment($invoiceId, 1210, 'settlement', TakenOverPayment::MONEY_S3_WITHOUT_DOCUMENT_NOTE, '2025-11-30');
+
+        try {
+            $this->container->get(InvoicePaymentService::class)->deletePayment($paymentId, skipBankGuard: true);
+            self::fail('Výplň Money S3 se bez povolení nesmí smazat.');
+        } catch (TakenOverPaymentException $e) {
+            self::assertSame(TakenOverPayment::MONEY_S3_PROTECTED_MESSAGE, $e->getMessage());
+        }
     }
 
     public function testTaxDeclaredByOriginFlag(): void

@@ -13,7 +13,8 @@ use MyInvoice\Service\Migration\Pohoda\PohodaPriorYearPayments;
  * Money S3). Jediné místo pravidel, která z převzetí plynou: popisek „Převzato" v detailu
  * dokladu, zákaz smazání a zákaz daňového dokladu k platbě.
  *
- * Smazat nejde platba, která nemá v MyÚčtu žádný protějšek: úhrada minulého roku
+ * Smazat nejde platba, která nemá v MyÚčtu žádný protějšek (výplň Money S3 smí smazat
+ * oprávněný uživatel v nezamčeném a nepodaném období, {@see TakenOverFillerGuard}): úhrada minulého roku
  * ({@see PohodaPriorYearPayments}), dorovnání uhrazené částky podle POHODY
  * ({@see DocumentLinker::REMAINDER_NOTE}) a úhrada, kterou Money S3 vede jen datem úhrady
  * bez dokladu úhrady v převedených datech ({@see MONEY_S3_WITHOUT_DOCUMENT_NOTE}). Nese
@@ -38,6 +39,10 @@ final class TakenOverPayment
     public const ERROR_CODE = 'taken_over_payment';
 
     public const PROTECTED_MESSAGE = 'Úhrada převzatá z původního programu se nemaže; nese uhrazenou část, ke které v MyÚčtu není doklad úhrady. Opravte ji opakovaným převodem.';
+
+    public const POHODA_PROTECTED_MESSAGE = 'Úhrada převzatá z POHODY se nemaže; nese uhrazenou část z doby před převodem. Opravte ji opakovaným převodem.';
+
+    public const MONEY_S3_PROTECTED_MESSAGE = 'Úhradu převzatou z Money S3 bez dokladu úhrady smaže jen správce nebo role s právem upravit vystavenou fakturu, a to v nezamčeném a nepodaném období.';
 
     /**
      * Začátek poznámky platby `settlement`, kterou převod z Money S3 zakládá na uhrazenou
@@ -196,13 +201,23 @@ final class TakenOverPayment
         return "{$alias}.source IN ({$sources}) AND COALESCE({$alias}.note, '') LIKE '" . IssuedPaymentRecorder::NOTE_PREFIX . "%'";
     }
 
-    /** SQL podmínka {@see isProtected()} nad aliasem `invoice_payments`. */
-    public static function isProtectedSql(string $alias): string
+    /** Hláška k chráněné platbě podle zdroje (POHODA, Money S3). */
+    public static function protectedMessage(array $payment): string
+    {
+        return self::isMoneyS3Filler($payment) ? self::MONEY_S3_PROTECTED_MESSAGE : self::POHODA_PROTECTED_MESSAGE;
+    }
+
+    /**
+     * SQL podmínka {@see isProtected()} nad aliasem `invoice_payments`. S `$allowMoneyS3Filler`
+     * (oprávněný uživatel v nezamčeném období, {@see TakenOverFillerGuard}) se výplň Money S3
+     * za chráněnou nepočítá; úhrada minulého roku z POHODY zůstává chráněná vždy.
+     */
+    public static function isProtectedSql(string $alias, bool $allowMoneyS3Filler = false): string
     {
         self::assertAlias($alias);
         $notes = implode(', ', array_map(static fn (string $n): string => "'" . $n . "'", self::PROTECTED_NOTES));
         return "({$alias}.source = '" . PohodaPriorYearPayments::SOURCE . "' AND COALESCE({$alias}.note IN ({$notes})"
-            . " OR {$alias}.note LIKE '" . self::MONEY_S3_WITHOUT_DOCUMENT_NOTE . "%', 0))";
+            . ($allowMoneyS3Filler ? '' : " OR {$alias}.note LIKE '" . self::MONEY_S3_WITHOUT_DOCUMENT_NOTE . "%'") . ', 0))';
     }
 
     private static function assertAlias(string $alias): void

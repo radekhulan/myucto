@@ -64,6 +64,8 @@ export interface InvoicePayment {
   prior_year?: boolean
   /** Daň z platby přiznal původní program (POHODA minulý rok, Money S3): daňový doklad k ní se nevystavuje. */
   tax_declared_by_origin?: boolean
+  /** Výplň Money S3 (úhrada bez dokladu úhrady): smaže ji správce nebo právo invoices.edit_issued v nezamčeném období. */
+  money_s3_filler?: boolean
   created_at: string
 }
 

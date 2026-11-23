@@ -34,6 +34,12 @@ const m = vi.hoisted(() => ({
       bank_transaction_id: null, tax_document_invoice_id: null, created_at: '2026-01-05 10:00:00',
       taken_over: true, taken_over_locked: false, prior_year: false, tax_declared_by_origin: true,
     },
+    {
+      id: 74, invoice_id: 9, paid_on: '2025-11-30', amount: 50, currency: 'CZK', variable_symbol: null,
+      bank_reference: null, note: 'Převzato z Money S3, úhrada bez dokladu úhrady (ID25002)', source: 'settlement',
+      bank_transaction_id: null, tax_document_invoice_id: null, created_at: '2026-01-05 10:00:00',
+      taken_over: true, taken_over_locked: true, prior_year: false, tax_declared_by_origin: false, money_s3_filler: true,
+    },
   ],
 }))
 
@@ -117,6 +123,15 @@ describe('převzatá úhrada v detailu faktury', () => {
     expect(rows[0].text()).toContain('✕')
     expect(rows[0].text()).toContain('invoice.payments.create_tax_doc')
     expect(wrapper.findAll('[data-test="payment-locked-taken-over"]')).toHaveLength(1)
+    wrapper.unmount()
+  })
+
+  it('výplň Money S3 správce smazat smí (✕ místo zámku)', async () => {
+    const wrapper = await mountDetail()
+    const rows = wrapper.findAll('tr').filter(r => r.html().includes('ID25002'))
+    expect(rows).toHaveLength(1)
+    expect(rows[0].text()).toContain('✕')
+    expect(rows[0].find('[data-test="payment-locked-taken-over"]').exists()).toBe(false)
     wrapper.unmount()
   })
 
