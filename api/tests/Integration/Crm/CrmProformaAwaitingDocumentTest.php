@@ -150,13 +150,23 @@ final class CrmProformaAwaitingDocumentTest extends TestCase
         self::assertNull($this->item());
     }
 
-    /** Platba zálohy převzatá z Money S3: daň přiznala Money, doklad k ní MyÚčto nevystavuje. */
-    public function testMoneyS3PaymentDoesNotSurfaceTheItem(): void
+    /**
+     * Platba zálohy převzatá z Money S3 v zamčeném období: daň přiznala Money, doklad k ní
+     * MyÚčto nevystavuje. Táž platba po zámku (otevřené období, bez DDKP z Money) doklad čeká.
+     */
+    public function testMoneyS3PaymentInLockedPeriodDoesNotSurfaceTheItem(): void
     {
         $this->setMode(ProformaPaymentDocuments::MODE_MANUAL);
-        $this->paidProforma(30, 'bank', IssuedPaymentRecorder::NOTE_PREFIX . 'úhrada BP25001');
-        $this->paidProforma(25, 'settlement', TakenOverPayment::MONEY_S3_WITHOUT_DOCUMENT_NOTE . ' (ID25001)');
+        $map = $this->pdo->prepare("INSERT INTO money_s3_import_map (supplier_id, kind, money_key, target_id) VALUES (?, 'invoice', ?, ?)");
+        $bank = $this->paidProforma(30, 'bank', IssuedPaymentRecorder::NOTE_PREFIX . 'úhrada BP25001');
+        $settled = $this->paidProforma(25, 'settlement', TakenOverPayment::MONEY_S3_WITHOUT_DOCUMENT_NOTE . ' (ID25001)');
+        $map->execute([$this->supplierId, '2025|ZV1', $bank]);
+        $map->execute([$this->supplierId, '2025|ZV2', $settled]);
+        self::assertNotNull($this->item(), 'Platba z Money bez DDKP v otevřeném období doklad čeká.');
 
+        $this->pdo->prepare('INSERT INTO accounting_supplier_settings (supplier_id, locked_until) VALUES (?, ?)
+                              ON DUPLICATE KEY UPDATE locked_until = VALUES(locked_until)')
+            ->execute([$this->supplierId, (new \DateTimeImmutable('today'))->modify('-20 days')->format('Y-m-d')]);
         self::assertNull($this->item());
     }
 

@@ -114,7 +114,7 @@ final class InvoicePaymentService
     public function listFor(int $invoiceId): array
     {
         $stmt = $this->db->pdo()->prepare(
-            'SELECT p.*,
+            'SELECT p.*, (' . TakenOverPayment::isTaxDeclaredByOriginSql('p') . ') AS tax_declared_by_origin,
                     td.varsymbol AS tax_document_varsymbol, td.status AS tax_document_status,
                     bt.statement_id AS bank_statement_id, bt.counterparty_name AS bank_counterparty_name
                FROM invoice_payments p
@@ -165,7 +165,8 @@ final class InvoicePaymentService
     /** @return array<string,mixed>|null */
     public function findPayment(int $paymentId): ?array
     {
-        $stmt = $this->db->pdo()->prepare('SELECT * FROM invoice_payments WHERE id = ?');
+        $stmt = $this->db->pdo()->prepare('SELECT p.*, (' . TakenOverPayment::isTaxDeclaredByOriginSql('p') . ') AS tax_declared_by_origin
+              FROM invoice_payments p WHERE p.id = ?');
         $stmt->execute([$paymentId]);
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
         return $row === false ? null : self::castPayment($row);
@@ -889,7 +890,8 @@ final class InvoicePaymentService
         $row['taken_over'] = TakenOverPayment::isTakenOver($row);
         $row['taken_over_locked'] = TakenOverPayment::isProtected($row);
         $row['prior_year'] = TakenOverPayment::isPriorYear($row);
-        $row['tax_declared_by_origin'] = TakenOverPayment::isTaxDeclaredByOrigin($row);
+        // Doložení zdanění potřebuje data (DDKP, podané období): počítá ho SQL výběru platby.
+        $row['tax_declared_by_origin'] = (bool) ($row['tax_declared_by_origin'] ?? false);
         return $row;
     }
 

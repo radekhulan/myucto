@@ -423,9 +423,9 @@ final class VatCrossCheckTest extends TestCase
     }
 
     /**
-     * Platba zálohy převzatá z Money S3: daň z ní přiznala Money (DDKP je mezi převzatými
-     * doklady, převod ho k platbě nemusí umět navázat). Kontrola ji jako chybějící DDKP nehlásí,
-     * nativní platba téže zálohy ve stejném období dál ano.
+     * Platba zálohy převzatá z Money S3, kterou kryje DDKP z Money (převod ho k platbě nemusí
+     * umět navázat): daň z ní přiznala Money, kontrola ji jako chybějící DDKP nehlásí.
+     * Nativní platba jiné zálohy ve stejném období dál ano.
      */
     public function testMoneyS3PaymentIsNotMissingTaxDocument(): void
     {
@@ -442,6 +442,13 @@ final class VatCrossCheckTest extends TestCase
         );
         $insert->execute([$this->supplierId, $proformaId, $paidOn, IssuedPaymentRecorder::NOTE_PREFIX . 'úhrada BP25001', 'bank', $this->userId]);
         $insert->execute([$this->supplierId, $nativeId, $paidOn, null, 'manual', $this->userId]);
+        // Záloha i DDKP z mapy převodu Money: DDKP z Money kryje platbu, jen bez vazby platby.
+        $taxDocId = $this->sale('DDKP-MONEY', $cust, '1', false, 10000.0, 2100.0, 21.0);
+        $this->db->pdo()->prepare('UPDATE invoices SET invoice_type = "tax_document", parent_invoice_id = ?, status = "sent" WHERE id = ?')
+            ->execute([$proformaId, $taxDocId]);
+        $map = $this->db->pdo()->prepare("INSERT INTO money_s3_import_map (supplier_id, kind, money_key, target_id) VALUES (?, 'invoice', ?, ?)");
+        $map->execute([$this->supplierId, '2025|ZAL-MONEY', $proformaId]);
+        $map->execute([$this->supplierId, '2025|DDKP-MONEY', $taxDocId]);
 
         $finding = $this->findingByCheck(
             $this->crossCheck->check($this->supplierId, self::YEAR, self::MONTH, 'monthly'),

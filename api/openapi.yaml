@@ -57065,7 +57065,7 @@ components:
         taken_over: { type: boolean, description: "Platbu založil převod z jiného systému (POHODA, Money S3); `note` říká, jakou úhradu nese" }
         taken_over_locked: { type: boolean, description: "Převzatá platba bez protějšku v MyÚčtu (úhrada minulého roku nebo dorovnání úhrady z POHODY, úhrada bez dokladu úhrady z Money S3). Smazat ji nelze (409 `taken_over_payment`), „Zrušit úhradu“ ji ponechá." }
         prior_year: { type: boolean, description: "Úhrada minulého roku převzatá z POHODY; daňový doklad k přijaté platbě se k ní nevystavuje" }
-        tax_declared_by_origin: { type: boolean, description: "Daň z platby přiznal původní program (úhrada minulého roku z POHODY, platba převzatá z Money S3); daňový doklad k přijaté platbě se k ní nevystavuje" }
+        tax_declared_by_origin: { type: boolean, description: "Daň z platby přiznal původní program (úhrada minulého roku z POHODY; platba převzatá z Money S3, kterou kryje DDKP z Money nebo leží v podaném, zamčeném či uzavřeném období); daňový doklad k přijaté platbě se k ní nevystavuje" }
         created_by: { type: [integer, "null"] }
         created_at: { type: string, format: date-time }
 

@@ -75,6 +75,7 @@ final class TakenOverPaymentDeleteTest extends TestCase
             return;
         }
         if ($this->supplierId !== 0) {
+            $this->db->pdo()->prepare('DELETE FROM money_s3_import_map WHERE supplier_id = ?')->execute([$this->supplierId]);
             self::deleteRows($this->db->pdo(), 'supplier', $this->supplierId, 0);
         }
         $this->db->close();
@@ -168,11 +169,18 @@ final class TakenOverPaymentDeleteTest extends TestCase
         $this->payment($invoiceId, 100, 'bank', 'Převzato z POHODY, úhrada 25BV0001', '2025-11-13');
         $this->payment($invoiceId, 100, 'manual', null, '2025-11-14');
 
-        $flags = array_map(
+        $flag = fn (): array => array_map(
             static fn (array $p): array => [$p['taken_over_locked'], $p['tax_declared_by_origin']],
             $this->container->get(InvoicePaymentService::class)->listFor($invoiceId),
         );
-        self::assertSame([[true, true], [false, true], [true, true], [false, false], [false, false]], $flags);
+        // Doklad mimo mapu převodu: platby s poznámkou Money za převzaté (zdaněné) neplatí.
+        self::assertSame([[true, true], [false, false], [true, false], [false, false], [false, false]], $flag());
+        // Doklad z mapy převodu, období zamčené: platby Money jsou zdaněné.
+        $this->db->pdo()->prepare("INSERT INTO money_s3_import_map (supplier_id, kind, money_key, target_id) VALUES (?, 'invoice', '2025|FV1', ?)")
+            ->execute([$this->supplierId, $invoiceId]);
+        $this->db->pdo()->prepare("INSERT INTO accounting_supplier_settings (supplier_id, locked_until) VALUES (?, '2025-11-12')")
+            ->execute([$this->supplierId]);
+        self::assertSame([[true, true], [false, true], [true, true], [false, false], [false, false]], $flag());
     }
 
     public function testUnmarkPaidRefusesInvoiceCoveredByPriorYearPayment(): void
