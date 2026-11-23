@@ -50,6 +50,8 @@ import SortableTh from '@/components/ui/SortableTh.vue'
 import DensityToggle from '@/components/ui/DensityToggle.vue'
 import { useTablePrefs, type ColumnDef } from '@/composables/useTablePrefs'
 import { useDimensions } from '@/composables/useDimensions'
+import DimensionReportFilters from '@/components/dimensions/DimensionReportFilters.vue'
+import { dimensionFilterChip, dimensionValueIdsParam, parseDimensionValueIds } from '@/utils/dimensionFilter'
 import { useScrollLoadMore } from '@/composables/useScrollLoadMore'
 import { ensurePrefsLoaded } from '@/composables/useUserPrefs'
 import { useSavedFilters, savedFilterTone, type SavedFilterTone } from '@/composables/useSavedFilters'
@@ -143,6 +145,9 @@ const REVENUE_CATEGORY_NONE = 'none'
 const revenueCategoryMode = ref<'include' | 'exclude'>('include')
 const revenueCategoryIds = ref<string[]>([])
 const revenueCategories = ref<RevenueCategory[]>([])
+// Hodnoty dimenzí (stejný výběr jako v účetním deníku); jen u firmy se zapnutými dimenzemi.
+const dimensionValueIds = ref<number[]>([])
+const dimensionDescendants = ref(true)
 const clients = ref<Client[]>([])
 const currencies = ref<Currency[]>([])
 
@@ -178,6 +183,7 @@ const activeFilterCount = computed(() => {
   if (bookedFilter.value) n++
   if (ossReviewFilter.value) n++
   if (revenueCategoryIds.value.length) n++
+  if (dimensionValueIds.value.length) n++
   return n
 })
 
@@ -235,6 +241,9 @@ const filterChips = computed<FilterChip[]>(() => {
         : shown,
     })
   }
+  if (dimensionValueIds.value.length) {
+    chips.push({ key: 'dimension', ...dimensionFilterChip(dimensions, dimensionValueIds.value, dimensionDescendants.value, t) })
+  }
   return chips
 })
 
@@ -253,6 +262,7 @@ function clearFilter(key: string) {
     case 'booked': bookedFilter.value = ''; break
     case 'oss_review': ossReviewFilter.value = ''; break
     case 'revenue_category': revenueCategoryIds.value = []; break
+    case 'dimension': dimensionValueIds.value = []; dimensionDescendants.value = true; break
   }
 }
 
@@ -1000,6 +1010,8 @@ function listParams(): InvoiceListParams {
       ? revenueCategoryIds.value : undefined,
     revenue_category_exclude: revenueCategoryMode.value === 'exclude' && revenueCategoryIds.value.length
       ? revenueCategoryIds.value : undefined,
+    dimension_value_id: dimensionValueIdsParam(dimensionValueIds.value),
+    dimension_descendants: dimensionValueIds.value.length ? dimensionDescendants.value : undefined,
     per_page: 50,
     sort_key: tbl.sort.value?.key,
     sort_dir: tbl.sort.value?.dir,
@@ -1204,6 +1216,8 @@ onMounted(async () => {
   }).catch(() => {})
   // Včetně archivovaných — visí na starých fakturách (viz revenueCategoryOptions).
   revenueCategoriesApi.list(true).then(r => { revenueCategories.value = r }).catch(() => {})
+  // Číselník dimenzí pro popisek chipu filtru; při vypnutých dimenzích nic nenačte.
+  dimensions.load().catch(() => { /* chip ukáže #id */ })
   if (Object.keys(route.query).length === 0 && await saved.applyDefaultIfAny()) return
   await hydrateFilters(route.query)
 })
@@ -1241,6 +1255,8 @@ function loadFiltersFromQuery(q: typeof route.query) {
   revenueCategoryMode.value = rcExclude !== '' ? 'exclude' : 'include'
   const rcRaw = rcExclude !== '' ? rcExclude : rcInclude
   revenueCategoryIds.value = rcRaw ? rcRaw.split(',').map(v => v.trim()).filter(v => v !== '') : []
+  dimensionValueIds.value = parseDimensionValueIds(q.dimension_value_id)
+  dimensionDescendants.value = q.dimension_descendants !== '0'
   search.value       = typeof q.q === 'string' ? q.q : ''
 }
 
@@ -1263,6 +1279,10 @@ function buildQuery(): Record<string, string> {
   if (revenueCategoryIds.value.length) {
     const key = revenueCategoryMode.value === 'exclude' ? 'revenue_category_exclude' : 'revenue_category'
     q[key] = revenueCategoryIds.value.join(',')
+  }
+  if (dimensionValueIds.value.length) {
+    q.dimension_value_id = dimensionValueIdsParam(dimensionValueIds.value) as string
+    if (!dimensionDescendants.value) q.dimension_descendants = '0'
   }
   if (search.value) q.q = search.value
   return q
@@ -1295,7 +1315,7 @@ function applyQueryToPage(q: Record<string, string>) {
 
 watch([statusFilter, typeFilter, clientFilter, yearFilter, monthFilter, dateFrom, dateTo,
        cashflowDraftUnscheduled, overdueOnly, unpaidOnly, unpaidAsOf, bookedFilter, ossReviewFilter, currencyFilter,
-       revenueCategoryIds, revenueCategoryMode], () => {
+       revenueCategoryIds, revenueCategoryMode, dimensionValueIds, dimensionDescendants], () => {
   if (suppressUrlSync) return
   syncFiltersToUrl()
   load(true)
@@ -1623,6 +1643,12 @@ useWindowRefresh(refreshLoadedPages,
           <option value="oss">{{ t('invoice.oss_review_scope.oss') }}</option>
           <option value="domestic">{{ t('invoice.oss_review_scope.domestic') }}</option>
         </select>
+        <!-- Hodnota dimenze: stejný výběr jako v účetním deníku, jen u firmy se zapnutými dimenzemi. -->
+        <div v-if="dimensions.enabled.value" class="basis-full flex flex-col gap-1" data-test="invoice-dimension-filter">
+          <DimensionReportFilters :value-ids="dimensionValueIds" :descendants="dimensionDescendants"
+            @update:value-ids="dimensionValueIds = $event" @update:descendants="dimensionDescendants = $event" />
+          <p class="text-xs text-neutral-500">{{ t('dimensions.document_filter_hint') }}</p>
+        </div>
       <template #actions>
         <SavedFiltersMenu :ctrl="saved" />
         <button type="button" :class="btnOutline('neutral')" :title="groupByMonth ? t('invoice.view_continuous') : t('invoice.view_monthly')" @click="toggleGrouping">

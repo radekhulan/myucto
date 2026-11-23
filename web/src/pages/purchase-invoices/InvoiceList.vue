@@ -49,6 +49,8 @@ import SortableTh from '@/components/ui/SortableTh.vue'
 import DensityToggle from '@/components/ui/DensityToggle.vue'
 import { useTablePrefs, type ColumnDef } from '@/composables/useTablePrefs'
 import { useDimensions } from '@/composables/useDimensions'
+import DimensionReportFilters from '@/components/dimensions/DimensionReportFilters.vue'
+import { dimensionFilterChip, dimensionValueIdsParam, parseDimensionValueIds } from '@/utils/dimensionFilter'
 import { needsReview } from '@/utils/purchaseReview'
 import ApprovalStatusBadge from '@/components/purchase/ApprovalStatusBadge.vue'
 import { approvalErrorMessage } from '@/api/purchaseApprovals'
@@ -127,6 +129,9 @@ const projects = ref<Project[]>([])
 // Filtr na dávku hromadného AI importu (#232) — proklik z obrazovky importu.
 const importBatchFilter = ref('')
 const importBatches = ref<ImportBatch[]>([])
+// Hodnoty dimenzí (stejný výběr jako v účetním deníku); jen u firmy se zapnutými dimenzemi.
+const dimensionValueIds = ref<number[]>([])
+const dimensionDescendants = ref(true)
 
 // Počet aktivních filtrů pro odznáček na mobilním tlačítku „Filtry" (rok i hledání se nepočítají)
 const activeFilterCount = computed(() => {
@@ -149,6 +154,7 @@ const activeFilterCount = computed(() => {
   if (structuredSourceFilter.value) n++
   if (visualDocumentFilter.value) n++
   if (importBatchFilter.value) n++
+  if (dimensionValueIds.value.length) n++
   return n
 })
 
@@ -197,6 +203,9 @@ const filterChips = computed<FilterChip[]>(() => {
   if (visualDocumentFilter.value) chips.push({ key: 'has_visual_document', value: `${t('purchase_invoice.filters.has_visual_document')}: ${t('purchase_invoice.filters.document_' + (visualDocumentFilter.value === '1' ? 'present' : 'missing'))}` })
   if (structuredSourceFilter.value) chips.push({ key: 'has_structured_source', value: `${t('purchase_invoice.filters.has_structured_source')}: ${t('purchase_invoice.filters.document_' + (structuredSourceFilter.value === '1' ? 'present' : 'missing'))}` })
   if (importBatchFilter.value) chips.push({ key: 'importBatch', value: t('purchase_invoice.filters.import_batch') })
+  if (dimensionValueIds.value.length) {
+    chips.push({ key: 'dimension', ...dimensionFilterChip(dimensions, dimensionValueIds.value, dimensionDescendants.value, t) })
+  }
   return chips
 })
 
@@ -221,6 +230,7 @@ function clearFilter(key: string) {
     case 'has_structured_source': structuredSourceFilter.value = ''; break
     case 'has_visual_document': visualDocumentFilter.value = ''; break
     case 'importBatch': importBatchFilter.value = ''; break
+    case 'dimension': dimensionValueIds.value = []; dimensionDescendants.value = true; break
   }
 }
 
@@ -498,6 +508,8 @@ onMounted(async () => {
   }
   // Dávky hromadného AI importu pro „dohledat import" dropdown (#232).
   purchaseInvoicesApi.listImportBatches().then(b => { importBatches.value = b }).catch(() => {})
+  // Číselník dimenzí pro popisek chipu filtru; při vypnutých dimenzích nic nenačte.
+  dimensions.load().catch(() => { /* chip ukáže #id */ })
   if (Object.keys(route.query).length === 0 && await saved.applyDefaultIfAny()) return
   loadFiltersFromQuery(route.query)
   load()
@@ -533,6 +545,10 @@ function loadFiltersFromQuery(q: typeof route.query) {
   // Proklik z importu obvykle přijde bez roku — přepnout na „všechny roky", ať se
   // dávka neschová kvůli defaultu na aktuální rok.
   if (importBatchFilter.value && typeof q.year !== 'string') yearFilter.value = ''
+  // Nové pole se stejnými hodnotami by zbytečně spustilo watch a druhé načtení seznamu.
+  const dimensionIds = parseDimensionValueIds(q.dimension_value_id)
+  if (dimensionIds.join(',') !== dimensionValueIds.value.join(',')) dimensionValueIds.value = dimensionIds
+  dimensionDescendants.value = q.dimension_descendants !== '0'
   search.value       = typeof q.q === 'string' ? q.q : ''
 }
 
@@ -560,6 +576,10 @@ function buildQuery(): Record<string, string> {
   if (structuredSourceFilter.value) q.has_structured_source = structuredSourceFilter.value
   if (visualDocumentFilter.value) q.has_visual_document = visualDocumentFilter.value
   if (importBatchFilter.value) q.import_batch = importBatchFilter.value
+  if (dimensionValueIds.value.length) {
+    q.dimension_value_id = dimensionValueIdsParam(dimensionValueIds.value) as string
+    if (!dimensionDescendants.value) q.dimension_descendants = '0'
+  }
   if (search.value) q.q = search.value
   return q
 }
@@ -580,7 +600,7 @@ function applyQueryToPage(q: Record<string, string>) {
 
 watch([statusFilter, kindFilter, yearFilter, monthFilter, dateFrom, dateTo,
        overdueOnly, unpaidOnly, unpaidAsOf, unmatchedOnly, paidShortfallOnly, needsReviewOnly, approvalFilter, paymentOrderedFilter, bookedFilter, structuredSourceFilter, visualDocumentFilter,
-       currencyFilter, vendorFilter, projectFilter, importBatchFilter], () => {
+       currencyFilter, vendorFilter, projectFilter, importBatchFilter, dimensionValueIds, dimensionDescendants], () => {
   syncFiltersToUrl()
   load()
 })
@@ -616,6 +636,8 @@ watch(() => route.query, (newQ) => {
     vendorFilter.value = ''
     projectFilter.value = ''
     importBatchFilter.value = ''
+    if (dimensionValueIds.value.length) dimensionValueIds.value = []
+    dimensionDescendants.value = true
     search.value = ''
     // Uvolnit po flush (watch effects)
     setTimeout(() => { suppressUrlSync = false }, 0)
@@ -731,6 +753,8 @@ function listParams(): PurchaseListParams {
     has_structured_source: structuredSourceFilter.value || undefined,
     has_visual_document: visualDocumentFilter.value || undefined,
     import_batch_id: importBatchFilter.value || undefined,
+    dimension_value_id: dimensionValueIdsParam(dimensionValueIds.value),
+    dimension_descendants: dimensionValueIds.value.length ? dimensionDescendants.value : undefined,
     q:             search.value       || undefined,
     per_page: 50,
     sort_key: tbl.sort.value?.key,
@@ -1381,6 +1405,12 @@ function closeFilterPanel(event: MouseEvent, reveal = false) {
             {{ formatDate(b.created_at) }} · {{ t('purchase_invoice.filters.import_batch_count', { n: b.count }) }}
           </option>
         </select>
+        <!-- Hodnota dimenze: stejný výběr jako v účetním deníku, jen u firmy se zapnutými dimenzemi. -->
+        <div v-if="dimensions.enabled.value" class="basis-full flex flex-col gap-1" data-test="purchase-dimension-filter">
+          <DimensionReportFilters :value-ids="dimensionValueIds" :descendants="dimensionDescendants"
+            @update:value-ids="dimensionValueIds = $event" @update:descendants="dimensionDescendants = $event" />
+          <p class="text-xs text-neutral-500">{{ t('dimensions.document_filter_hint') }}</p>
+        </div>
         <!-- Telefon: rozbalené filtry zaberou celou obrazovku, zavřít je jde dole bez scrollu nahoru. -->
         <div data-test="phone-filter-footer" class="hidden max-md:flex max-md:sticky max-md:bottom-[calc(var(--app-footer-height,0px)+0.5rem)] max-md:z-10 basis-full gap-2 rounded-lg border border-neutral-200 bg-surface p-2 shadow-lg">
           <button type="button" data-test="phone-filter-close" :class="btnOutline('neutral')" class="h-11 justify-center" @click="closeFilterPanel($event)">

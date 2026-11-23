@@ -59,7 +59,7 @@ import { compactJournalDescription } from '@/utils/journalDescription'
 import { findAccountingPeriod } from '@/utils/accountingPeriod'
 import DateInput from '@/components/ui/DateInput.vue'
 import DimensionReportFilters from '@/components/dimensions/DimensionReportFilters.vue'
-import { dimensionValueIdsParam, parseDimensionValueIds } from '@/utils/dimensionFilter'
+import { dimensionFilterChip, dimensionValueIdsParam, parseDimensionValueIds } from '@/utils/dimensionFilter'
 import VatBreakdownCell from '@/components/ui/VatBreakdownCell.vue'
 import { useDimensions } from '@/composables/useDimensions'
 
@@ -494,20 +494,7 @@ const filterChips = computed<FilterChip[]>(() => {
   if (filters.integrity) chips.push({ key: 'integrity', value: t('accounting.journal.filter_integrity') })
   if (filters.pair_status) chips.push({ key: 'pair_status', value: t('accounting.pairs.filter_mn') })
   if (filters.dimension_value_ids.length > 0) {
-    const ids = filters.dimension_value_ids
-    const first = dims.valueById.value.get(ids[0])
-    const typeName = (id: number) => {
-      const value = dims.valueById.value.get(id)
-      return value ? dims.typeById.value.get(value.type_id)?.name : undefined
-    }
-    chips.push({
-      key: 'dimension',
-      label: (ids.length === 1 && first && typeName(ids[0])) || t('dimensions.filter_type'),
-      value: (ids.length === 1
-        ? dims.valueLabel(ids[0])
-        : ids.map(id => [typeName(id), dims.valueLabel(id)].filter(Boolean).join(': ')).join(' · '))
-        + (filters.dimension_descendants ? '' : ` (${t('accounting.journal.filter_dimension_only_value')})`),
-    })
+    chips.push({ key: 'dimension', ...dimensionFilterChip(dims, filters.dimension_value_ids, filters.dimension_descendants, t) })
   }
   return chips
 })

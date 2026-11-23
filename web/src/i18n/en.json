@@ -2755,7 +2755,8 @@
       "cash_in_hint": "Cash receipt document",
       "cash_out_hint": "Cash payment document",
       "log_trip_hint": "Logbook"
-    }
+    },
+    "reports_vat_by_dimension": "VAT by dimension"
   },
   "migration_nonprofit_notice": {
     "title": "Data transfer has not been verified for non-profit organisations",
@@ -31528,7 +31529,11 @@
       "no_data": "No entries in the VAT ledger for the selected period.",
       "draft_badge": "Draft",
       "disclaimer_title": "Internal tool",
-      "disclaimer_body": "The VAT ledger is an internal accounting journal grouping issued and received documents by VAT return rows. It includes drafts — visually distinguished in the table. It is NOT an official tax submission."
+      "disclaimer_body": "The VAT ledger is an internal accounting journal grouping issued and received documents by VAT return rows. It includes drafts — visually distinguished in the table. It is NOT an official tax submission.",
+      "dimension_filtered": "Dimension filter: {label}",
+      "dimension_filtered_note": "For a document split between several values only the share of lines and splits of that value is listed (base and VAT by lines). The ledger and the KH listing support a single dimension type only.",
+      "dimension_corrections_note": "Corrections under § 43, § 46 and § 74b are not linked to a dimension, so they are not part of the filtered listing.",
+      "dimension_label": "Dimension"
     },
     "vatCorrections": {
       "title": "One-off VAT corrections",
@@ -32011,6 +32016,47 @@
       "archive_submission_ref": "Filing reference",
       "archive_validation_errors": "Reasons for invalidity",
       "archive_notes": "Note"
+    },
+    "vat_by_dimension": {
+      "title": "VAT by dimension",
+      "subtitle": "VAT records of the period (the same data as the VAT return) broken down by the values of the selected dimension type. A document split between values is divided by its lines and splits.",
+      "type": "Dimension type",
+      "download_pdf": "Download PDF",
+      "download_xlsx": "Download XLSX",
+      "split_note": "The values together with the Without dimension row must add up to the VAT records of the period. Amounts are in CZK before the rounding of the return.",
+      "no_dimension": "Without dimension",
+      "total": "Total",
+      "evidence": "VAT records (the same data as the return)",
+      "difference": "Difference",
+      "open_book": "VAT ledger",
+      "documents_count": "Documents: {n}",
+      "line_differences": "Difference against the VAT records by return lines",
+      "line_difference": "line {line}: base {base}, VAT {vat}",
+      "control_ok": "The report total matches the VAT records of the period.",
+      "return_title": "VAT return lines 62/63/64",
+      "return_note": "The return also contains corrections under § 43, § 46 and § 74b and rounding that are not linked to a dimension. The Return corrections and rounding row is the difference between the return and the VAT records.",
+      "return_lines": "Return lines 62/63/64",
+      "bridge": "Return corrections and rounding",
+      "account343_title": "Account 343 turnover check",
+      "account343_excluded": "Excluded from the check: payments to the tax office {payments} ({payments_net}), opening balances {opening} ({opening_net}).",
+      "col": {
+        "documents": "Documents",
+        "vat_output": "Output VAT",
+        "vat_input": "Input VAT (deduction)",
+        "vat_result": "Result",
+        "base_output_standard": "Output base 21 %",
+        "base_output_reduced": "Output base 12 %",
+        "base_output_other": "Output base other",
+        "base_input_standard": "Input base 21 %",
+        "base_input_reduced": "Input base 12 %",
+        "base_input_other": "Input base other",
+        "book": "Link",
+        "debit": "Debit",
+        "credit": "Credit",
+        "net": "Balance (Cr − Dr)",
+        "report_result": "Report result",
+        "account_net": "Account 343 balance"
+      }
     }
   },
   "tax_evidence": {
@@ -39962,7 +40008,8 @@
         "out_of_scope": "Outside tax scope",
         "exempt": "Exempt"
       }
-    }
+    },
+    "document_filter_hint": "A document split between several values is shown in full under each of them. The share of each value in VAT is shown by the VAT ledger filtered by dimension and by the VAT by dimension report."
   },
   "stereo_nx": {
     "partner_countries": {

@@ -174,7 +174,36 @@ export interface DphBookSection {
   subtotal_total: number
 }
 
+/**
+ * Filtr knihy DPH a soupisu oddílu KH na hodnoty dimenze (jen jeden typ dimenze).
+ * Ve výpisu je u rozděleného dokladu jen podíl řádků a splitu dané hodnoty.
+ */
+export interface VatDimensionFilter {
+  /** Id hodnot oddělená čárkou, jako `dimension_value_id` v účetním deníku. */
+  dimension_value_id: string
+  /** false = jen vybrané hodnoty bez podřízených. */
+  dimension_descendants?: boolean
+}
+
+/** Popis použitého filtru dimenze v odpovědi výkazu DPH (`null` = bez filtru). */
+export interface VatReportDimension {
+  type_id: number
+  value_id: number
+  value_ids: number[]
+  label: string
+  criteria: unknown
+}
+
+function vatDimensionParams(dimension?: VatDimensionFilter): Record<string, string | number> {
+  if (!dimension?.dimension_value_id) return {}
+  return {
+    dimension_value_id: dimension.dimension_value_id,
+    ...(dimension.dimension_descendants === false ? { dimension_descendants: 0 } : {}),
+  }
+}
+
 export interface DphBookPreview {
+  dimension?: VatReportDimension | null
   period: {
     year: number
     month: number
@@ -234,6 +263,7 @@ export interface KhEvidenceTotals {
 }
 
 export interface KhEvidenceReport {
+  dimension?: VatReportDimension | null
   source: 'current' | 'submitted'
   comparison?: boolean
   submission: { id: number; submitted_at: string | null; variant: string | null; variant_label: string | null } | null
@@ -245,6 +275,73 @@ export interface KhEvidenceReport {
   excluded: (KhEvidenceRow & { reason: string })[]
   warnings: string[]
   status_counts?: Record<KhEvidenceStatus, number>
+}
+
+/** Částky sestavy DPH podle dimenze (Kč, 2 desetinná místa). */
+export const VAT_BY_DIMENSION_AMOUNT_KEYS = [
+  'vat_output', 'vat_input', 'vat_result',
+  'base_output_standard', 'base_output_reduced', 'base_output_other',
+  'base_input_standard', 'base_input_reduced', 'base_input_other',
+] as const
+export type VatByDimensionAmountKey = typeof VAT_BY_DIMENSION_AMOUNT_KEYS[number]
+export type VatByDimensionAmounts = Record<VatByDimensionAmountKey, number>
+
+export interface VatByDimensionRow extends VatByDimensionAmounts {
+  /** null = doklady a řádky bez hodnoty tohoto typu („Bez dimenze"). */
+  value_id: number | null
+  code: string | null
+  name: string
+  label: string
+  depth: number
+  is_active: boolean
+  documents: number
+  /** Rozpad po řádcích přiznání (DPHDP3). */
+  lines: Record<string, { base: number; vat: number }>
+}
+
+export interface VatByDimension343Row {
+  value_id: number | null
+  code: string | null
+  name: string
+  label: string
+  debit: number
+  credit: number
+  /** credit − debit = daň k odvodu. */
+  net: number
+}
+
+export interface VatByDimensionReport {
+  period: DphBookPreview['period']
+  supplier: { company_name: string; ic: string; dic: string }
+  dimension_type: { id: number; name: string }
+  amount_keys: VatByDimensionAmountKey[]
+  rows: VatByDimensionRow[]
+  total: VatByDimensionAmounts
+  control: {
+    /** Evidence DPH za období — stejná data jako přiznání (před zaokrouhlením). */
+    evidence: VatByDimensionAmounts
+    /** total − evidence, musí být 0. */
+    difference: VatByDimensionAmounts
+    ok: boolean
+    line_differences: { line: string; base: number; vat: number }[]
+    /** Přiznání ř. 62/63/64 a most (opravy a zaokrouhlení přiznání). */
+    return: null | {
+      vat_output: number
+      vat_input: number
+      vat_result: number
+      bridge: { vat_output: number; vat_input: number; vat_result: number }
+    }
+    return_error: string | null
+  }
+  account343: null | {
+    rows: VatByDimension343Row[]
+    total: { debit: number; credit: number; net: number }
+    excluded: { payments: { count: number; net: number }; opening: { count: number; net: number } }
+    comparison: { value_id: number | null; label: string; report_result: number; account_net: number; difference: number; is_total?: boolean }[]
+    note: string
+  }
+  account343_unavailable: string | null
+  warnings: string[]
 }
 
 export interface KhPreview {
@@ -837,30 +934,45 @@ export const reportsApi = {
   },
 
   // Kniha DPH (interní VAT žurnál — NE EPO podání)
-  dphBookPreview: (year: number, month: number, period?: 'monthly' | 'quarterly') =>
+  dphBookPreview: (year: number, month: number, period?: 'monthly' | 'quarterly', dimension?: VatDimensionFilter) =>
     api.get<DphBookPreview>('/reports/dph-book/preview', {
-      params: period ? { year, month, period } : { year, month },
+      params: { ...(period ? { year, month, period } : { year, month }), ...vatDimensionParams(dimension) },
     }).then(r => r.data),
 
-  dphBookPdfUrl: (year: number, month: number, period?: 'monthly' | 'quarterly') => {
+  dphBookPdfUrl: (year: number, month: number, period?: 'monthly' | 'quarterly', dimension?: VatDimensionFilter) => {
     const sid = requestSupplierId()
     const params = new URLSearchParams({ year: String(year), month: String(month) })
     if (period) params.set('period', period)
+    for (const [key, value] of Object.entries(vatDimensionParams(dimension))) params.set(key, String(value))
     if (sid && /^\d+$/.test(sid)) params.set('supplier_id', sid)
     return `/api/reports/dph-book?${params.toString()}`
   },
 
   // Evidence pro KH (issue #142) — soupis dokladů oddílu z aktuálních dat
-  khEvidencePreview: (year: number, month: number, period: 'monthly' | 'quarterly', section: KhEvidenceSection) =>
+  khEvidencePreview: (year: number, month: number, period: 'monthly' | 'quarterly', section: KhEvidenceSection, dimension?: VatDimensionFilter) =>
     api.get<KhEvidenceReport>('/reports/kh-evidence/preview', {
-      params: { year, month, period, section },
+      params: { year, month, period, section, ...vatDimensionParams(dimension) },
     }).then(r => r.data),
 
-  khEvidenceDownloadUrl: (year: number, month: number, period: 'monthly' | 'quarterly', section: KhEvidenceSection, format: 'pdf' | 'xlsx') => {
+  khEvidenceDownloadUrl: (year: number, month: number, period: 'monthly' | 'quarterly', section: KhEvidenceSection, format: 'pdf' | 'xlsx', dimension?: VatDimensionFilter) => {
     const sid = requestSupplierId()
     const params = new URLSearchParams({ year: String(year), month: String(month), period, section, format })
+    for (const [key, value] of Object.entries(vatDimensionParams(dimension))) params.set(key, String(value))
     if (sid && /^\d+$/.test(sid)) params.set('supplier_id', sid)
     return `/api/reports/kh-evidence?${params.toString()}`
+  },
+
+  // DPH podle dimenze — rozpad evidence DPH období po hodnotách jednoho typu dimenze
+  vatByDimensionPreview: (year: number, month: number, period: 'monthly' | 'quarterly', typeId: number) =>
+    api.get<VatByDimensionReport>('/reports/vat-by-dimension/preview', {
+      params: { year, month, period, type_id: typeId },
+    }).then(r => r.data),
+
+  vatByDimensionDownloadUrl: (year: number, month: number, period: 'monthly' | 'quarterly', typeId: number, format: 'pdf' | 'xlsx') => {
+    const sid = requestSupplierId()
+    const params = new URLSearchParams({ year: String(year), month: String(month), period, type_id: String(typeId), format })
+    if (sid && /^\d+$/.test(sid)) params.set('supplier_id', sid)
+    return `/api/reports/vat-by-dimension?${params.toString()}`
   },
 
   // Soupis podle PODANÉHO KH porovnaný s aktuálními daty (issue #142)

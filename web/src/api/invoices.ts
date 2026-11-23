@@ -850,6 +850,13 @@ export interface ListFilters {
    * bez kategorie zůstávají, dokud se nevyloučí i sentinel `none`.
    */
   revenue_category_exclude?: string[]
+  /**
+   * Hodnoty dimenzí oddělené čárkou (max 10). Doklad vyhovuje, když hodnotu (nebo
+   * podřízenou) má na hlavičce, na položce nebo ve splitu; rozdělený doklad se ukáže celý.
+   */
+  dimension_value_id?: string
+  /** false = jen vybrané hodnoty bez podřízených (výchozí je včetně podřízených). */
+  dimension_descendants?: boolean
   q?: string
   page?: number
   per_page?: number

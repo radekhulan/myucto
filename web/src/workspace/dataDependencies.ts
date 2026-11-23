@@ -128,7 +128,7 @@ const ROUTE_RULES: readonly RouteRule[] = [
   [/^tax-evidence\/(?:cash-journal|receivables-payables|tax-estimate)$/, LEDGER_READ],
   [/^tax-evidence(?:\/|$)/, ['settings'], 'manual'],
   [/^(?:stats|purchase-stats|group-stats|dimension-stats)$/, REPORT_READ],
-  [/^reports\/(?:dph-book|cnb-rate-audit|invoice-series-completeness)$/, REPORT_READ],
+  [/^reports\/(?:dph-book|vat-by-dimension|cnb-rate-audit|invoice-series-completeness)$/, REPORT_READ],
   [/^reports(?:\/|$)/, REPORT_READ, 'manual'],
   [/^tax$/, REPORT_READ],
   [/^stock\/(?:documents|items|sales-orders|purchase-orders|takes|reports)$/, ['stock']],

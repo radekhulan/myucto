@@ -37,7 +37,15 @@ export function invoiceListFilterParams(filters: ListFilters): ListQuery {
   if (filters.revenue_category_exclude?.length) {
     params['filter[revenue_category_exclude]'] = filters.revenue_category_exclude.join(',')
   }
+  dimensionFilterParams(params, filters)
   return params
+}
+
+/** Filtr dimenze seznamů faktur: stejný tvar jako v účetním deníku, jen v `filter[...]`. */
+function dimensionFilterParams(params: ListQuery, filters: { dimension_value_id?: string, dimension_descendants?: boolean }) {
+  if (!filters.dimension_value_id) return
+  params['filter[dimension_value_id]'] = filters.dimension_value_id
+  if (filters.dimension_descendants === false) params['filter[dimension_descendants]'] = 0
 }
 
 export function purchaseListFilterParams(filters: PurchaseListFilters): ListQuery {
@@ -74,6 +82,7 @@ export function purchaseListFilterParams(filters: PurchaseListFilters): ListQuer
   if (filters.has_visual_document !== undefined) params['filter[has_visual_document]'] = filters.has_visual_document
   if (filters.has_structured_source !== undefined) params['filter[has_structured_source]'] = filters.has_structured_source
   if (filters.import_batch_id) params['filter[import_batch_id]'] = filters.import_batch_id
+  dimensionFilterParams(params, filters)
   return params
 }
 

@@ -40,6 +40,7 @@ export const MANUAL_CHAPTERS: ManualChapterRule[] = [
   [/^\/eshop\/shoptet(?:\/|$)/, '39_Shoptet'],
   [/^\/eshop(?:\/|$)/, '38_Eshop'],
   [/^\/reports\/dph-book(?:\/|$)/, '42_Kniha_DPH'],
+  [/^\/reports\/vat-by-dimension(?:\/|$)/, '42_Kniha_DPH'],
   [/^\/reports\/shv(?:\/|$)/, '44_Souhrnne_hlaseni'],
   [/^\/reports\/oss(?:\/|$)/, '45_OSS'],
   [/^\/reports\/income-tax(?:\/|$)/, '43_Dan_z_prijmu'],

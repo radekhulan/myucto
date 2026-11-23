@@ -631,6 +631,8 @@ const navSections = computed<NavSection[]>(() => {
         { to: '/reports/dph',         label: t('nav.reports_dph'),         icon: ICONS.tax_dph },
         { to: '/reports/kh',          label: t('nav.reports_kh'),          icon: ICONS.tax_kh },
         { to: '/reports/dph-book',    label: t('nav.reports_dph_book'),    icon: ICONS.tax_book },
+        // DPH podle dimenze: rozpad evidence DPH po hodnotách dimenze, jen se zapnutými dimenzemi.
+        ...(dimensionsEnabled ? [{ to: '/reports/vat-by-dimension', label: t('nav.reports_vat_by_dimension'), icon: ICONS.tax_book }] : []),
         { to: '/reports/shv',         label: t('nav.reports_shv'),         icon: ICONS.tax_shv },
         // OSS hned za souhrnným hlášením: obojí je hlášení plnění do jiných členských
         // států, účetní je vyplňuje ve stejné části měsíce.

@@ -1395,6 +1395,11 @@
       "reports"
     ],
     "reports-dph-book": [
+      "dimensions",
+      "reports"
+    ],
+    "reports-vat-by-dimension": [
+      "dimensions",
       "reports"
     ],
     "reports-s74b": [

@@ -2755,7 +2755,8 @@
       "cash_in_hint": "Příjmový pokladní doklad",
       "cash_out_hint": "Výdajový pokladní doklad",
       "log_trip_hint": "Kniha jízd"
-    }
+    },
+    "reports_vat_by_dimension": "DPH podle dimenze"
   },
   "migration_nonprofit_notice": {
     "title": "Převod pro neziskové organizace nebyl ověřen",
@@ -31528,7 +31529,11 @@
       "no_data": "Pro zvolené období nejsou v knize DPH žádné záznamy.",
       "draft_badge": "Koncept",
       "disclaimer_title": "Interní pomůcka",
-      "disclaimer_body": "Kniha DPH je interní účetní žurnál, který seskupuje vystavené i přijaté doklady podle řádků DPH přiznání. Zahrnuje i koncepty (drafty) - ty jsou v tabulce vizuálně odlišené. Není to oficiální podání FÚ."
+      "disclaimer_body": "Kniha DPH je interní účetní žurnál, který seskupuje vystavené i přijaté doklady podle řádků DPH přiznání. Zahrnuje i koncepty (drafty) - ty jsou v tabulce vizuálně odlišené. Není to oficiální podání FÚ.",
+      "dimension_filtered": "Filtr dimenze: {label}",
+      "dimension_filtered_note": "U dokladu rozděleného mezi víc hodnot je ve výpisu jen podíl řádků a rozpadu dané hodnoty (základ i DPH po řádcích). Kniha i soupis KH podporují jen jeden typ dimenze.",
+      "dimension_corrections_note": "Opravy podle § 43, § 46 a § 74b nemají vazbu na dimenzi, proto ve filtrovaném výpisu nejsou.",
+      "dimension_label": "Dimenze"
     },
     "vatCorrections": {
       "title": "Jednorázové opravy DPH",
@@ -32011,6 +32016,47 @@
       "archive_submission_ref": "Číslo jednací podání",
       "archive_validation_errors": "Důvody neplatnosti",
       "archive_notes": "Poznámka"
+    },
+    "vat_by_dimension": {
+      "title": "DPH podle dimenze",
+      "subtitle": "Evidence DPH za období (stejná data jako přiznání) rozpadnutá po hodnotách zvoleného typu dimenze. Doklad rozdělený mezi hodnoty se dělí po řádcích a rozpadu.",
+      "type": "Typ dimenze",
+      "download_pdf": "Stáhnout PDF",
+      "download_xlsx": "Stáhnout XLSX",
+      "split_note": "Součet hodnot a řádku Bez dimenze musí dát evidenci DPH za období. Částky jsou v Kč před zaokrouhlením přiznání.",
+      "no_dimension": "Bez dimenze",
+      "total": "Celkem",
+      "evidence": "Evidence DPH (stejná data jako přiznání)",
+      "difference": "Rozdíl",
+      "open_book": "Kniha DPH",
+      "documents_count": "Dokladů: {n}",
+      "line_differences": "Rozdíl proti evidenci DPH po řádcích přiznání",
+      "line_difference": "ř. {line}: základ {base}, DPH {vat}",
+      "control_ok": "Součet sestavy odpovídá evidenci DPH za období.",
+      "return_title": "Přiznání k DPH ř. 62/63/64",
+      "return_note": "Přiznání navíc obsahuje opravy podle § 43, § 46 a § 74b a zaokrouhlení, které vazbu na dimenzi nemají. Řádek Opravy a zaokrouhlení přiznání je rozdíl mezi přiznáním a evidencí DPH.",
+      "return_lines": "Přiznání ř. 62/63/64",
+      "bridge": "Opravy a zaokrouhlení přiznání",
+      "account343_title": "Kontrola obratů účtu 343",
+      "account343_excluded": "Mimo kontrolu: platby finančnímu úřadu {payments} ({payments_net}), počáteční stavy {opening} ({opening_net}).",
+      "col": {
+        "documents": "Dokladů",
+        "vat_output": "DPH na výstupu",
+        "vat_input": "DPH na vstupu (nárok)",
+        "vat_result": "Výsledek",
+        "base_output_standard": "Základ výstup 21 %",
+        "base_output_reduced": "Základ výstup 12 %",
+        "base_output_other": "Základ výstup ostatní",
+        "base_input_standard": "Základ vstup 21 %",
+        "base_input_reduced": "Základ vstup 12 %",
+        "base_input_other": "Základ vstup ostatní",
+        "book": "Proklik",
+        "debit": "MD",
+        "credit": "D",
+        "net": "Saldo (D − MD)",
+        "report_result": "Výsledek sestavy",
+        "account_net": "Saldo účtu 343"
+      }
     }
   },
   "tax_evidence": {
@@ -39962,7 +40008,8 @@
         "out_of_scope": "Mimo předmět daně",
         "exempt": "Osvobozeno"
       }
-    }
+    },
+    "document_filter_hint": "Doklad rozdělený mezi víc hodnot se zobrazí u každé z nich celý. Podíl jednotlivé hodnoty na DPH ukazuje Kniha DPH filtrovaná podle dimenze a sestava DPH podle dimenze."
   },
   "stereo_nx": {
     "partner_countries": {

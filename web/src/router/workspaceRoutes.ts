@@ -536,6 +536,8 @@ export function createWorkspaceRoutes(): RouteRecordRaw[] {
       { path: 'reports/dph',            name: 'reports-dph',        component: () => import('@/pages/reports/DphPriznaniReport.vue') },
       { path: 'reports/kh',             name: 'reports-kh',         component: () => import('@/pages/reports/KontrolniHlaseniReport.vue') },
       { path: 'reports/dph-book',       name: 'reports-dph-book',   component: () => import('@/pages/reports/DphBookReport.vue') },
+      // DPH podle dimenze — rozpad evidence DPH období po hodnotách jednoho typu dimenze.
+      { path: 'reports/vat-by-dimension', name: 'reports-vat-by-dimension', component: () => import('@/pages/reports/VatByDimensionReport.vue') },
       { path: 'reports/s74b',           name: 'reports-s74b',       component: () => import('@/pages/reports/Section74b.vue') },
       { path: 'reports/related-parties', name: 'reports-related-parties', component: () => import('@/pages/reports/RelatedParties.vue') },
       // § 76 ZDPH — koeficient krácení nároku na odpočet (zálohový + roční vypořádání).

@@ -837,6 +837,13 @@ export interface PurchaseListFilters {
   booked?: '1' | '0'
   /** Filtr na dávku hromadného AI importu (#232). */
   import_batch_id?: string
+  /**
+   * Hodnoty dimenzí oddělené čárkou (max 10). Doklad vyhovuje, když hodnotu (nebo
+   * podřízenou) má na hlavičce, na položce nebo ve splitu; rozdělený doklad se ukáže celý.
+   */
+  dimension_value_id?: string
+  /** false = jen vybrané hodnoty bez podřízených (výchozí je včetně podřízených). */
+  dimension_descendants?: boolean
   q?: string
   page?: number
   per_page?: number
