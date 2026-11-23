@@ -187,8 +187,12 @@ final class StockDocumentService
         }
         foreach ($costs as $i => $cost) {
             $amount = is_array($cost) ? ($cost['amount'] ?? null) : null;
-            if (!is_numeric($amount) || (float) $amount <= 0 || (float) $amount >= 1e12) {
-                throw new StockException('invalid_document', 'Vedlejší náklad musí mít kladnou částku.', 422, ['index' => $i]);
+            if (!is_numeric($amount) || !((float) $amount >= 0.01 && (float) $amount <= 999_999_999_999.99)) {
+                throw new StockException('invalid_document', 'Částka vedlejšího nákladu musí být od 0,01 do 999 999 999 999,99.', 422, ['index' => $i]);
+            }
+            $description = $cost['description'] ?? null;
+            if ($description !== null && (!is_string($description) || mb_strlen($description, 'UTF-8') > 255)) {
+                throw new StockException('invalid_document', 'Popis vedlejšího nákladu musí být text o nejvýše 255 znacích.', 422, ['index' => $i]);
             }
         }
     }

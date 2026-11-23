@@ -80,7 +80,8 @@ const lines = ref<LineRow[]>([blankLine()])
 const locations = ref<WarehouseLocation[]>([])
 
 // L3: částky drž jako string (DECIMAL konvence) — přepočet do haléřů až v alokátoru.
-interface LandedCostRow { description: string; amount: string; allocation: LandedCostAllocation; purchase_invoice_id?: number; purchase_invoice_item_id?: number }
+interface LandedCostRow { description: string; amount: string | number; allocation: LandedCostAllocation; purchase_invoice_id?: number; purchase_invoice_item_id?: number }
+const maxLandedCostAmount = 999_999_999_999.99
 const landedCosts = ref<LandedCostRow[]>([])
 // Příjemka s uloženými náklady (z přijaté faktury nebo objednávky): server rozpouští jen je
 // a extra_cost z řádků nebere, proto se přidaný náklad posílá do jejich seznamu.
@@ -270,9 +271,7 @@ function mapError(e: any): string {
   return e?.response?.data?.error?.message || t('common.error')
 }
 
-function buildPayload(): StockDocumentPayload {
-  const rows = lines.value.filter(l => l.stock_item_id != null && Number(l.qty) > 0)
-
+function buildPayload(rows: LineRow[]): StockDocumentPayload {
   // H1: bez uložených nákladů backend /stock/documents čte jen per-řádkový `extra_cost`.
   // Vedlejší náklady proto rozpustíme klientsky do extra_cost (deterministicky, shodně s PHP).
   // Příjemka s uloženými náklady je posílá seznamem `landed_costs` a rozpustí je server.
@@ -282,10 +281,8 @@ function buildPayload(): StockDocumentPayload {
       value: Math.round(Number(l.qty) * Number(l.unit_cost || 0) * 100),
       qty: Math.round(Number(l.qty) * 1000),
     }))
-    const costs = landedCosts.value
-      .filter(c => Number(c.amount) > 0)
-      .map(c => ({ amount: Math.round(Number(c.amount) * 100), allocation: c.allocation }))
-    if (costs.length > 0) allocated = allocateLandedCosts(baseLines, costs)
+    const costs = landedCosts.value.map(c => ({ amount: Math.round(Number(c.amount) * 100), allocation: c.allocation }))
+    allocated = allocateLandedCosts(baseLines, costs)
   }
 
   return {
@@ -301,7 +298,7 @@ function buildPayload(): StockDocumentPayload {
     purchase_invoice_id: doc.value?.purchase_invoice_id ?? undefined,
     stock_take_id: doc.value?.stock_take_id ?? undefined,
     landed_costs: isReceipt.value && hasStoredLandedCosts.value
-      ? landedCosts.value.filter(c => Number(c.amount) > 0).map(c => ({ ...c, amount: Number(c.amount) }))
+      ? landedCosts.value.map(c => ({ ...c, amount: Number(c.amount) }))
       : undefined,
     lines: rows.map((l, i) => {
       const manualExtraH = isReceipt.value && l.extra_cost ? Math.round(Number(l.extra_cost) * 100) : 0
@@ -341,23 +338,44 @@ function validate(): boolean {
   if (lines.value.some(l => l.stock_item_id != null && quantityTooPrecise(l.qty, l.unit))) {
     error.value = t('stock.error.quantity_decimals'); return false
   }
+  if (isReceipt.value) {
+    for (const [index, cost] of landedCosts.value.entries()) {
+      const amount = Number(cost.amount)
+      if (!(amount >= 0.01 && amount <= maxLandedCostAmount)) {
+        error.value = t('stock.documents.landed_cost_invalid_amount', { row: index + 1 })
+        return false
+      }
+      if ([...cost.description].length > 255) {
+        error.value = t('stock.documents.landed_cost_invalid_description', { row: index + 1 })
+        return false
+      }
+    }
+  }
   return true
+}
+
+async function saveDocument(): Promise<number> {
+  const rows = lines.value.filter(l => l.stock_item_id != null && Number(l.qty) > 0)
+  const payload = buildPayload(rows)
+  const id = docId.value
+  const saved = id ? await stockApi.updateDocument(id, payload) : await stockApi.createDocument(payload)
+  doc.value = saved
+  if (saved.doc_type === 'receipt') {
+    landedCosts.value = landedCostRows(saved)
+    saved.lines?.forEach((line, index) => {
+      const row = rows[index]
+      if (row) row.extra_cost = line.extra_cost == null ? '' : String(line.extra_cost)
+    })
+  }
+  if (!id) router.replace(`/stock/documents/${saved.id}`)
+  return saved.id
 }
 
 async function saveDraft() {
   if (!validate()) return
   saving.value = true
   try {
-    const payload = buildPayload()
-    if (isEdit.value && docId.value) {
-      doc.value = await stockApi.updateDocument(docId.value, payload)
-    } else {
-      doc.value = await stockApi.createDocument(payload)
-      router.replace(`/stock/documents/${doc.value.id}`)
-    }
-    // Rozpuštěné částky už jsou v extra_cost řádků, další uložení by je přičetlo znovu.
-    // Uložené náklady bere z odpovědi, aby je nesmazalo další uložení, když znovunačtení selže.
-    landedCosts.value = landedCostRows(doc.value)
+    await saveDocument()
     toast.success(t('common.saved'))
     await loadDocument()
   } catch (e: any) {
@@ -371,16 +389,8 @@ async function post() {
   if (!validate()) return
   posting.value = true
   try {
-    let id = docId.value
-    const payload = buildPayload()
-    if (id) {
-      doc.value = await stockApi.updateDocument(id, payload)
-    } else {
-      doc.value = await stockApi.createDocument(payload)
-      id = doc.value.id
-      router.replace(`/stock/documents/${id}`)
-    }
-    doc.value = await stockApi.postDocument(id!)
+    const id = await saveDocument()
+    doc.value = await stockApi.postDocument(id)
     toast.success(t('common.saved'))
     if (doc.value.warnings?.length) {
       for (const w of doc.value.warnings) toast.warning(w)
@@ -676,8 +686,8 @@ onMounted(async () => {
         </div>
         <div v-if="landedCosts.length" class="divide-y divide-neutral-100">
           <div v-for="(c, i) in landedCosts" :key="i" class="p-3 grid grid-cols-1 sm:grid-cols-12 gap-2 items-center">
-            <input v-model="c.description" type="text" :placeholder="t('stock.documents.field_description')" class="sm:col-span-5 h-9 px-2 border border-neutral-300 rounded-md text-sm" />
-            <input v-model="c.amount" type="number" step="0.01" min="0" class="sm:col-span-3 h-9 px-2 border border-neutral-300 rounded-md text-right font-mono text-sm" />
+            <input v-model="c.description" type="text" :placeholder="t('stock.documents.field_description')" :aria-label="t('stock.documents.field_description')" class="sm:col-span-5 h-9 px-2 border border-neutral-300 rounded-md text-sm" />
+            <input v-model="c.amount" type="number" step="0.01" min="0.01" :max="maxLandedCostAmount" :aria-label="t('stock.documents.landed_cost_amount')" class="sm:col-span-3 h-9 px-2 border border-neutral-300 rounded-md text-right font-mono text-sm" />
             <select v-model="c.allocation" class="sm:col-span-3 h-9 px-2 border border-neutral-300 rounded-md bg-surface text-sm">
               <option value="by_value">{{ t('stock.documents.allocation_by_value') }}</option>
               <option value="by_qty">{{ t('stock.documents.allocation_by_qty') }}</option>

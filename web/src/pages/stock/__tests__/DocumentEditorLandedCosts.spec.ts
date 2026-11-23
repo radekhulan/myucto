@@ -37,7 +37,7 @@ describe('DocumentEditor: vedlejší náklady', () => {
       doc_date: '2026-11-09', description: 'Příjem', partner_name: null,
       lines: [{ stock_item_id: 7, qty: '2', unit_cost: '100', extra_cost: extraCost, sku: 'M1', name: 'Motorka', unit: 'ks', tracking_mode: 'none', tracking_allocations: [] }],
     })
-    m.getDocument.mockImplementation(async () => draft())
+    m.getDocument.mockImplementationOnce(async () => draft()).mockRejectedValue(new Error('network'))
     m.updateDocument.mockImplementation(async (_id: number, payload: { lines: Array<{ extra_cost?: string }> }) => {
       extraCost = payload.lines[0].extra_cost ?? '0'
       return draft()
@@ -126,6 +126,56 @@ describe('DocumentEditor: vedlejší náklady', () => {
     await flushPromises()
 
     expect(m.updateDocument.mock.calls[1][1].landed_costs).toEqual([{ description: 'Clo', amount: 40, allocation: 'by_qty' }])
+    wrapper.unmount()
+  })
+
+  it.each(['saveDraft', 'post'] as const)('neplatný vedlejší náklad zastaví uložení i zaúčtování a koš ho odstraní při %s', async operation => {
+    const stored = { id: 9, description: 'Clo', amount: '40.00', allocation: 'by_qty', purchase_invoice_id: null, purchase_invoice_item_id: null }
+    const draft = {
+      id: 8, status: 'draft', doc_type: 'receipt', warehouse_id: 3, warehouse_to_id: null,
+      doc_date: '2026-11-04', description: 'Příjem z faktury', partner_name: null, landed_costs: [stored],
+      lines: [{ stock_item_id: 7, qty: '1', unit_cost: '100', extra_cost: '40.00', sku: 'M1', name: 'Motorka', unit: 'ks', tracking_mode: 'none', tracking_allocations: [] }],
+    }
+    m.getDocument.mockResolvedValueOnce(draft).mockRejectedValue(new Error('network'))
+    m.updateDocument.mockResolvedValue({ ...draft, landed_costs: [], lines: [{ ...draft.lines[0], extra_cost: '0.00' }] })
+    m.postDocument.mockRejectedValueOnce(new Error('network'))
+
+    const router = createRouter({ history: createMemoryHistory(), routes: [{ path: '/stock/documents/:id', component: { render: () => null } }] })
+    await router.push('/stock/documents/8')
+    const wrapper = mount({ ...DocumentEditor, render: () => null }, { global: { plugins: [router] } })
+    const vm = wrapper.vm as unknown as {
+      landedCosts: Array<{ description: string; amount: string }>
+      saveDraft: () => Promise<void>
+      post: () => Promise<void>
+      removeLandedCost: (index: number) => void
+      error: string
+    }
+
+    await vi.waitFor(() => expect(vm.landedCosts).toHaveLength(1))
+    for (const amount of ['', '0', '-5', '0.001']) {
+      vm.landedCosts[0].amount = amount
+      await vm.saveDraft()
+      expect(vm.error).toBe('stock.documents.landed_cost_invalid_amount')
+      await vm.post()
+      expect(vm.error).toBe('stock.documents.landed_cost_invalid_amount')
+      expect(vm.landedCosts).toHaveLength(1)
+    }
+
+    vm.landedCosts[0].amount = '40.00'
+    vm.landedCosts[0].description = 'ž'.repeat(256)
+    await vm.saveDraft()
+    expect(vm.error).toBe('stock.documents.landed_cost_invalid_description')
+    expect(m.updateDocument).not.toHaveBeenCalled()
+    expect(m.postDocument).not.toHaveBeenCalled()
+
+    vm.removeLandedCost(0)
+    await vm[operation]()
+    expect(m.updateDocument).toHaveBeenCalledExactlyOnceWith(8, expect.objectContaining({ landed_costs: [] }))
+
+    await vm.saveDraft()
+    const retried = m.updateDocument.mock.calls[1][1]
+    expect(retried.landed_costs).toBeUndefined()
+    expect(retried.lines[0].extra_cost).toBeUndefined()
     wrapper.unmount()
   })
 

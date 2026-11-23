@@ -4,9 +4,15 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Integration\Stock;
 
+use MyInvoice\Action\Stock\StockDocumentAction;
+use MyInvoice\Middleware\AuthMiddleware;
+use MyInvoice\Middleware\SupplierScopeMiddleware;
 use MyInvoice\Repository\StockLandedCostRepository;
+use MyInvoice\Security\EffectiveRole;
 use MyInvoice\Service\Stock\StockException;
 use PHPUnit\Framework\Attributes\Group;
+use Slim\Psr7\Factory\ResponseFactory;
+use Slim\Psr7\Factory\ServerRequestFactory;
 
 /**
  * Epic SKLAD, plán §8.2 scénář 8 — příjem na sklad z přijaté faktury (PF):
@@ -360,6 +366,37 @@ final class StockReceiptTest extends StockTestCase
             } catch (StockException) {
             }
             self::assertSame(['30.00'], array_column($landed->listForDocument($supplierId, $draftId), 'amount'));
+        }
+    }
+
+    public function testDocumentApiRejectsInvalidLandedCostFieldsAndKeepsStoredAmounts(): void
+    {
+        [$supplierId, $draftId, $body] = $this->draftWithPersistedLandedCosts();
+        $costs = $this->container->get(StockLandedCostRepository::class);
+        $before = $costs->listForDocument($supplierId, $draftId);
+        $action = $this->container->get(StockDocumentAction::class);
+        $request = (new ServerRequestFactory())->createServerRequest('PUT', '/api/stock/documents/' . $draftId)
+            ->withAttribute(SupplierScopeMiddleware::ATTR_CURRENT_ID, $supplierId)
+            ->withAttribute(AuthMiddleware::ATTR_USER, ['id' => $this->userId, 'role' => 'accountant'])
+            ->withAttribute('auth.effective_role', new EffectiveRole(0, 'Skladník', 'staff', true, ['stock' => 2, 'accounting' => 2]));
+
+        foreach ([
+            ['description' => str_repeat('ž', 256), 'amount' => '50.00'],
+            ['description' => ['doprava'], 'amount' => '50.00'],
+            ['amount' => ''],
+            ['amount' => '0'],
+            ['amount' => '-10.00'],
+            ['amount' => '0.001'],
+        ] as $invalid) {
+            $response = $action->update(
+                $request->withParsedBody($body + ['landed_costs' => [$invalid]]),
+                (new ResponseFactory())->createResponse(),
+                ['id' => (string) $draftId],
+            );
+            self::assertSame(422, $response->getStatusCode(), (string) $response->getBody());
+            self::assertSame('stock.error.invalid_document', json_decode((string) $response->getBody(), true)['error']['code']);
+            self::assertSame($before, $costs->listForDocument($supplierId, $draftId));
+            self::assertSame(['15.00', '15.00'], array_column($this->docsRepo->lines($supplierId, $draftId), 'extra_cost'));
         }
     }
 

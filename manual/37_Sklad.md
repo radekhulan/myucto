@@ -1045,6 +1045,10 @@ přidávat) můžete přidat libovolný počet položek **vedlejších pořizova
 a způsob rozpuštění, buď **podle hodnoty** (výchozí), nebo **podle množství**
 přijímaných řádků.
 
+U konceptu z faktury nebo objednávky se načtou i uložené vedlejší náklady.
+Při uložení a zaúčtování musí mít každá položka částku aspoň 0,01 Kč a popis
+nejvýše 255 znaků. Položku odstraníte tlačítkem s košem v jejím řádku.
+
 Algoritmus rozpouštění je čistě celočíselný (v haléřích), aby součet rozpuštěných
 částí vždy přesně souhlasil se zadanou částkou nákladu:
 
@@ -1057,9 +1061,6 @@ Algoritmus rozpouštění je čistě celočíselný (v haléřích), aby součet
 - Ve výjimečném případě, kdy je základna nulová (například všechny řádky mají nulovou
   hodnotu i množství), se náklad rozdělí rovnoměrně a případný zbytek po haléřích jde
   postupně na první řádky (ne na řádek s nejvyšší hodnotou).
-- Nákladová položka s nulovou nebo zápornou částkou se přeskočí a nerozpouští se
-  vůbec.
-
 Rozpuštěná částka se u řádku uloží zvlášť jako informativní **vedlejší náklad**, ale
 zvyšuje i celkovou hodnotu, ze které se počítá klouzavý průměr (viz příklad
 v [§ 37.12.3.1](#371231-priklad-vypoctu-klouzaveho-prumeru), kde druhý příjem obsahuje

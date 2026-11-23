@@ -28006,8 +28006,8 @@ paths:
                     properties:
                       purchase_invoice_id: { type: integer, format: int64 }
                       purchase_invoice_item_id: { type: integer, format: int64 }
-                      description: { type: string }
-                      amount: { type: number }
+                      description: { type: string, maxLength: 255 }
+                      amount: { type: number, minimum: 0.01, maximum: 999999999999.99 }
                       allocation: { type: string, enum: [by_value, by_qty], default: by_value }
                 allow_over_delivery:
                   type: boolean
@@ -28018,7 +28018,7 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '422':
-          description: Doklad není draft, nebo validace řádků selhala.
+          description: Doklad není draft, nebo validace řádků či vedlejších nákladů selhala.
     delete:
       tags:
       - Stock
