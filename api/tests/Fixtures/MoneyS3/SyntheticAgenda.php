@@ -1932,6 +1932,63 @@ final class SyntheticAgenda
     }
 
     /**
+     * Mzdy za prosinec 2024, jak je vede mzdový modul Money: interní doklad hrubých mezd
+     * (521/331 30 000 Kč) a závazky `KnihZav` s příznakem mzdového dokladu za 12/2024 - sociální
+     * pojištění (331 a 524/336200, 9 570 Kč), zdravotní pojištění (331 a 524/336100, 4 050 Kč),
+     * záloha na daň (331/342100, 3 810 Kč), čistá mzda na témž účtu 331/331 (22 710 Kč) a exekuce
+     * (331/379000, 500 Kč). Pojistné a mzdu Money uhradilo až v lednu 2025 (`UhDatum`), daň
+     * zůstává neuhrazená (`UhZbyva`), zdravotní pojištění 2023 je uhrazené ještě v prosinci 2024.
+     *
+     * @return array<string,string>
+     */
+    public static function filesWithPayrollLiabilities(): array
+    {
+        $files = self::files();
+        $chart = iterator_to_array(Ms3Table::fromString($files['ROK.001/UcOsnova.DAT'], 'UCOSNOVA')->rows(), false);
+        $files['ROK.001/UcOsnova.DAT'] = Ms3FixtureWriter::table(self::CHART_FIELDS, array_merge($chart, [
+            ['Ucet' => '331000', 'Nazev' => 'Zaměstnanci'],
+            ['Ucet' => '336100', 'Nazev' => 'Zúčtování s institucemi 1'],
+            ['Ucet' => '336200', 'Nazev' => 'Zúčtování s institucemi 2'],
+            ['Ucet' => '342100', 'Nazev' => 'Záloha na daň ze závislé činnosti'],
+            ['Ucet' => '379000', 'Nazev' => 'Jiné závazky'],
+            ['Ucet' => '521000', 'Nazev' => 'Mzdové náklady'],
+            ['Ucet' => '524100', 'Nazev' => 'Zákonné sociální pojištění'],
+            ['Ucet' => '524200', 'Nazev' => 'Zákonné zdravotní pojištění'],
+        ]));
+        $date = '2024-12-31';
+        $kz = static fn (int $no, string $doc, string $text, string $md, string $d, float $amount): array =>
+            ['Cislo' => $no, 'Zdroj' => 'KZ', 'Doklad' => $doc, 'Datum' => $date, 'Popis' => $text, 'UcMD' => $md, 'UcD' => $d, 'Castka' => $amount];
+        $files = self::patch($files, 'ROK.001/UcDenik.DAT', null, [
+            ['Cislo' => 501, 'Zdroj' => 'ID', 'Doklad' => 'IDM2412', 'Datum' => $date, 'Popis' => 'Hrubé mzdy', 'UcMD' => '521000', 'UcD' => '331000', 'Castka' => 30000.0],
+            $kz(502, 'ZA241201', 'Sociální pojištění', '331000', '336200', 2130.0),
+            $kz(503, 'ZA241201', 'Sociální pojištění', '524100', '336200', 7440.0),
+            $kz(504, 'ZA241202', 'Zdravotní pojištění', '331000', '336100', 1350.0),
+            $kz(505, 'ZA241202', 'Zdravotní pojištění', '524200', '336100', 2700.0),
+            $kz(506, 'ZA241203', 'Daň z příjmů zálohová', '331000', '342100', 3810.0),
+            $kz(507, 'ZA241204', 'Vyúčtování mzdy', '331000', '331000', 22210.0),
+            $kz(508, 'ZA241205', 'Exekuce', '331000', '379000', 500.0),
+        ]);
+        $mz = static fn (int $code): array => ['MZTyp' => 1, 'MZRok' => 2024, 'MZMesic' => 12, 'MZDI_Zauct' => $code];
+        $row = static fn (int $no, string $doc, string $text, float $total, float $left, ?string $paid, string $partner, string $vs, int $code): array =>
+            ['Cislo' => $no, 'Doklad' => $doc, 'Popis' => $text, 'AdNazev' => $partner, 'DatUcPr' => $date, 'DatVyst' => $date, 'DatSpl' => '2025-01-20',
+             'Celkem' => $total, 'UhZbyva' => $left, 'UhDatum' => $paid, 'VarSym' => $vs] + $mz($code);
+        $files['ROK.001/KnihZav.DAT'] = Ms3FixtureWriter::table([
+            ['Cislo', 'L', 4], ['Doklad', 'C', 10], ['Popis', 'C', 50], ['AdCislo', 'L', 4], ['AdNazev', 'C', 60], ['DatUcPr', 'D', 2], ['DatVyst', 'D', 2],
+            ['DatSpl', 'D', 2], ['Celkem', 'E', 10], ['UhZbyva', 'E', 10], ['UhDatum', 'D', 2], ['VarSym', 'C', 20], ['Storno', 'B', 1],
+            ['MZTyp', 'V', 1], ['MZRok', 'W', 2], ['MZMesic', 'V', 1], ['MZDI_Zauct', 'V', 1],
+        ], [
+            $row(1, 'ZA241201', 'Sociální pojištění - Prosinec 2024', 9570.0, 0.0, '2025-01-12', 'Správa sociálního zabezpečení', '1000000005', 7),
+            $row(2, 'ZA241202', 'Zdravotní pojištění - Prosinec 2024', 4050.0, 0.0, '2025-01-12', 'Zdravotní pojišťovna', '12345679', 10),
+            $row(3, 'ZA241203', 'Daň z příjmů zálohová - Prosinec 2024', 3810.0, 3810.0, null, 'Finanční úřad', '12345679', 5),
+            $row(4, 'ZA241204', 'Vyúčtování mzdy - Prosinec 2024', 22210.0, 0.0, '2025-01-12', 'Zaměstnanec Vzorový', '1212', 1),
+            $row(5, 'ZA241205', 'Exekuce - Prosinec 2024', 500.0, 0.0, '2025-01-12', 'Exekutorský úřad', '555', 14),
+            // Zdravotní pojištění za listopad uhrazené ještě v prosinci: ke konci roku otevřené není.
+            $row(6, 'ZA241101', 'Zdravotní pojištění - Listopad 2024', 4050.0, 0.0, '2024-12-12', 'Zdravotní pojišťovna', '12345679', 10),
+        ]);
+        return $files;
+    }
+
+    /**
      * Úprava tabulky agendy pro opakovaný převod novější zálohy: `$change` vrací upravený
      * řádek (null = řádek v záloze už není), `$append` přidá nové řádky.
      *

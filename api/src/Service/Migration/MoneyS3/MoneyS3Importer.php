@@ -25,7 +25,8 @@ use PDO;
  * Převod agendy Money S3 do firmy v MyÚčtu — orchestrátor kroků průvodce.
  *
  * Pořadí: osnova → období a deník → režim účetní jednotky → adresář a předkontace →
- * faktury → pokladna a banka → vazby dokladů na deník a úhrady → pozastavené šablony
+ * faktury → pokladna a banka → vazby dokladů na deník a úhrady → mzdové závazky otevřené
+ * ke konci posledního roku jako ostatní závazky → pozastavené šablony
  * pravidelných faktur z historie → uzávěrka historických
  * let → mzdy (návrh kontací, kontrolní úhrny, zapnutí modulu) → rekonciliace. Automatika účtování je po celou dobu vypnutá
  * ({@see AccountingUnitSwitch}).
@@ -70,6 +71,7 @@ final class MoneyS3Importer
         private readonly VatFilingsTakeover $vatFilings,
         private readonly AccountingSupplierSettingsRepository $settings,
         private readonly InvoicePdfRenderer $pdf,
+        private readonly PayrollLiabilityImporter $payrollLiabilities,
     ) {}
 
     /**
@@ -110,6 +112,7 @@ final class MoneyS3Importer
             DocumentLinker::STEP_LINK,
             DimensionImporter::STEP,
             DocumentLinker::STEP_PAYMENTS,
+            PayrollLiabilityImporter::STEP,
             RecurringSeriesTakeover::STEP,
             AssetImporter::STEP,
             AssetImporter::STEP_SMALL,
@@ -933,7 +936,7 @@ final class MoneyS3Importer
     private const RELINK_SKIPPED_STEPS = [
         self::STEP_ACCOUNTING_MODE, CodebookImporter::STEP_POSTING_RULES, DimensionImporter::STEP, RecurringSeriesTakeover::STEP,
         AssetImporter::STEP, AssetImporter::STEP_SMALL, VatCoefficientSeeder::STEP, HistoricalYearCloser::STEP,
-        PayrollImporter::STEP, MoneyS3Reconciler::STEP,
+        PayrollImporter::STEP, MoneyS3Reconciler::STEP, PayrollLiabilityImporter::STEP,
     ];
 
     /** @return array<string,callable():void> */
@@ -966,6 +969,7 @@ final class MoneyS3Importer
             DocumentLinker::STEP_LINK => fn () => $this->linker->link($ctx),
             DimensionImporter::STEP => fn () => $this->dimensions->run($ctx),
             DocumentLinker::STEP_PAYMENTS => fn () => $this->linker->matchPayments($ctx),
+            PayrollLiabilityImporter::STEP => fn () => $this->payrollLiabilities->run($ctx),
             RecurringSeriesTakeover::STEP => fn () => $this->takeOverRecurring($ctx),
             AssetImporter::STEP =>fn () => $this->assets->importLongTerm($ctx),
             AssetImporter::STEP_SMALL => fn () => $this->assets->importSmall($ctx),
