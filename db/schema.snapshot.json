@@ -1232,7 +1232,8 @@
         "2326_sales_quote_order_line_origins.sql",
         "2327_sales_quote_permissions.sql",
         "2328_stock_sales_retired_skus.sql",
-        "2329_isds_access_profiles.sql"
+        "2329_isds_access_profiles.sql",
+        "2330_bank_statement_rebases.sql"
     ],
     "tables": {
         "abra_flexi_connections": {
@@ -3745,6 +3746,27 @@
             },
             "foreign_keys": {
                 "fk_brt_supplier": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE CASCADE"
+            },
+            "checks": []
+        },
+        "bank_statement_rebases": {
+            "type": "BASE TABLE",
+            "engine": "InnoDB",
+            "collation": "utf8mb4_unicode_ci",
+            "columns": {
+                "anchor_statement_id": "bigint(20) unsigned NOT NULL",
+                "created_at": "timestamp NOT NULL DEFAULT current_timestamp()",
+                "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
+                "shift": "decimal(14,2) NOT NULL",
+                "statement_ids": "text NOT NULL",
+                "supplier_id": "int(10) unsigned NOT NULL"
+            },
+            "indexes": {
+                "PRIMARY": "UNIQUE BTREE (id)",
+                "idx_bsr_anchor": "BTREE (supplier_id, anchor_statement_id)"
+            },
+            "foreign_keys": {
+                "fk_bsr_supplier": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE CASCADE"
             },
             "checks": []
         },

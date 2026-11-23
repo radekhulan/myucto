@@ -346,6 +346,7 @@ final class AnonymizationPolicy
         'bank_notice_ignore_transfers' => ['ignore_note' => 'text'],
         'bank_transaction_imports' => ['import_fingerprint' => 'keep'],
         'bank_transactions' => ['bank_ref' => 'keep', 'card_last4' => 'card_last4', 'constant_symbol' => 'keep', 'counterparty_account' => 'bank_account', 'counterparty_bank' => 'keep', 'counterparty_name' => 'party_name', 'currency' => 'keep', 'description' => 'text', 'ignore_note' => 'text', 'ignore_origin' => 'keep', 'import_fingerprint' => 'keep', 'match_reason' => 'keep', 'original_currency' => 'keep', 'portable_fingerprint' => 'keep', 'processing_error' => 'text', 'source_ref' => 'text', 'specific_symbol' => 'symbol', 'variable_symbol' => 'symbol'],
+        'bank_statement_rebases' => ['statement_ids' => 'keep'],
         'bank_transfer_matches' => ['currency' => 'keep'],
         'branding_profiles' => ['accent_color' => 'keep', 'display_name' => 'party_name', 'email' => 'email', 'email_footer' => 'text', 'logo_path' => 'file_path', 'name' => 'text', 'phone' => 'phone', 'reply_to' => 'email', 'tagline' => 'text', 'web' => 'web'],
         'card_clearing_settings' => ['clearing_synthetic' => 'keep'],

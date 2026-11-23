@@ -364,13 +364,17 @@ export interface BankTransactionsParams {
  * - `processing_failed`: výpis je uložený, ale párování a zaúčtování pohybů selhalo
  *   (`error` = text chyby). Dokončí ho „Znovu spárovat".
  * - `imported_balances_rebased`: první výpis banky na účtu dorovnal stavy výpisů převzatých
- *   z jiného programu (`shift`, `statements`, `opening` = vypočtený počáteční stav).
+ *   z jiného programu (`shift`, `statements`, `opening` = vypočtený počáteční stav, `currency` = měna účtu).
+ * - `imported_balances_rebase_held`: posun převzatých výpisů je příliš velký, bez potvrzení se neprovedl.
+ * - `imported_balances_rebase_mixed`: převzaté výpisy se stejným číslem účtu pocházejí z různých
+ *   účtů původního programu (`sources`), stavy se neposunuly.
  * - `transactions_skipped_as_migrated`: výpis v PDF nezaložil pohyby z období `since`–`until`,
  *   které na účet převzal převod z jiného programu (`skipped` = počet přeskočených).
  * FE si hlášku skládá z i18n — `message` je jen český text pro activity_log.
  */
 export interface ImportWarning {
   code: 'transactions_skipped_as_duplicate' | 'transactions_skipped_as_migrated' | 'processing_failed' | 'imported_balances_rebased'
+    | 'imported_balances_rebase_held' | 'imported_balances_rebase_mixed'
   message?: string
   error?: string
   parsed?: number
@@ -378,6 +382,8 @@ export interface ImportWarning {
   skipped?: number
   shift?: number
   statements?: number
+  currency?: string
+  sources?: string[]
   opening?: number
   since?: string
   until?: string

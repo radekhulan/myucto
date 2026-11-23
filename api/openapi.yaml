@@ -56013,7 +56013,7 @@ components:
           items:
             type: object
             properties:
-              code: { type: string, enum: [transactions_skipped_as_duplicate, transactions_skipped_as_migrated, processing_failed, imported_balances_rebased] }
+              code: { type: string, enum: [transactions_skipped_as_duplicate, transactions_skipped_as_migrated, processing_failed, imported_balances_rebased, imported_balances_rebase_held, imported_balances_rebase_mixed] }
               message: { type: string }
               error: { type: string, description: "Jen u `processing_failed`: text chyby, kterou zpracování skončilo." }
               parsed: { type: integer }
@@ -56021,6 +56021,8 @@ components:
               skipped: { type: integer }
               since: { type: string, format: date, description: "Jen u `transactions_skipped_as_migrated`: první den převzatých pohybů účtu." }
               until: { type: string, format: date, description: "Jen u `transactions_skipped_as_migrated`: poslední den převzetí účtu." }
+              currency: { type: string, description: "Jen u `imported_balances_*`: měna účtu, ve které je posun stavů." }
+              sources: { type: array, items: { type: string }, description: "Jen u `imported_balances_rebase_mixed`: účty původního programu, ze kterých převzaté výpisy pocházejí." }
 
     BankPostingSummary:
       type: [object, "null"]

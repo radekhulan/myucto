@@ -1424,6 +1424,62 @@ final class SyntheticPohodaExport
             . self::entry('Banka', self::SHARED_BANK, 'Poplatek', 20, '568000', '221001', '2026-04-10'));
     }
 
+    /** Účet v EUR ({@see withEurBankAccount()}): zkratka v POHODĚ, číslo (modulo 11), analytika. */
+    public const EUR_ACCOUNT = 'BANE';
+    public const EUR_ACCOUNT_NUMBER = '2605000002';
+    public const EUR_ANALYTIC = '221002';
+    /** Korunová faktura uhrazená z účtu v EUR: 10 000 + 2 100 Kč = 500 EUR kurzem 24,20. */
+    public const EUR_INVOICE = '26FV0009';
+    public const EUR_INVOICE_VS = '2026009';
+    public const EUR_RECEIPT = 'BANE0001';
+    public const EUR_FEE = 'BANE0002';
+    public const EUR_FX_DIFFERENCE = 'BANE0003';
+
+    /**
+     * Bankovní účet v EUR tak, jak ho vede POHODA: číselník účtů měnu nenese (XML), každý
+     * doklad účtu nese částku v měně (`bnk:foreignCurrency`) i v Kč. Počáteční stav
+     * 1 000 EUR kurzem 24,245 (24 245 Kč, otevírací zápis 221002), úhrada faktury
+     * {@see EUR_INVOICE} 500 EUR kurzem 24,20 (12 100 Kč), poplatek 2 EUR kurzem 24,25
+     * (48,50 Kč) a uzávěrka kurzových rozdílů 150 Kč bez částky v měně (221002/663000).
+     * Stav účtu na konci je 1 498 EUR.
+     */
+    public static function withEurBankAccount(string $agendaDir): void
+    {
+        $doc = static fn (string $number, string $type, string $date, float $home, float $foreign, float $rate, string $statement, string $text, string $vs = '', bool $opening = false): string =>
+            '<lst:bank version="2.0"><bnk:bankHeader>' . ($opening ? '' : '<bnk:id>' . abs(crc32($number)) . '</bnk:id>')
+            . '<bnk:bankType>' . $type . '</bnk:bankType><bnk:account><typ:ids>' . self::EUR_ACCOUNT . '</typ:ids></bnk:account>'
+            . ($opening ? '' : '<bnk:number>' . $number . '</bnk:number><bnk:statementNumber><bnk:statementNumber>' . $statement . '</bnk:statementNumber></bnk:statementNumber>')
+            . '<bnk:symVar>' . $vs . '</bnk:symVar><bnk:dateStatement>' . $date . '</bnk:dateStatement><bnk:datePayment>' . $date . '</bnk:datePayment>'
+            . ($opening ? '<bnk:accounting><typ:ids>Bez</typ:ids><typ:accountingType>withoutAccounting</typ:accountingType></bnk:accounting>' : '')
+            . '<bnk:text>' . $text . '</bnk:text><bnk:partnerIdentity><typ:address><typ:company>Odběratel Test s.r.o.</typ:company></typ:address></bnk:partnerIdentity></bnk:bankHeader>'
+            . '<bnk:bankSummary><bnk:homeCurrency><typ:priceNone>' . $home . '</typ:priceNone><typ:priceLowSum>0</typ:priceLowSum><typ:priceHighSum>0</typ:priceHighSum>'
+            . '<typ:round><typ:priceRound>0</typ:priceRound></typ:round></bnk:homeCurrency>'
+            . '<bnk:foreignCurrency><typ:currency><typ:ids>EUR</typ:ids></typ:currency><typ:rate>' . $rate . '</typ:rate><typ:amount>1</typ:amount>'
+            . '<typ:priceSum>' . $foreign . '</typ:priceSum></bnk:foreignCurrency></bnk:bankSummary></lst:bank>';
+        self::append($agendaDir . '/02_uctova_osnova.xml', '</lst:listAccount>',
+            '<lst:itemAccount id="' . self::EUR_ANALYTIC . '" code="' . self::EUR_ANALYTIC . '" name="Bankovní účet EUR"/>'
+            . '<lst:itemAccount id="663000" code="663000" name="Kurzové zisky"/>');
+        self::append($agendaDir . '/31_bankovni_ucty.xml', '</lst:listBankAccount>',
+            '<lst:bankAccount version="2.0"><bka:bankAccountHeader><bka:ids>' . self::EUR_ACCOUNT . '</bka:ids>'
+            . '<bka:numberAccount>' . self::EUR_ACCOUNT_NUMBER . '</bka:numberAccount><bka:codeBank>' . self::BANK_CODE . '</bka:codeBank><bka:nameBank>Testovací banka</bka:nameBank>'
+            . '<bka:analyticAccount><typ:ids>' . self::EUR_ANALYTIC . '</typ:ids></bka:analyticAccount></bka:bankAccountHeader></lst:bankAccount>');
+        self::append($agendaDir . '/12_faktury_issuedInvoice.xml', '</lst:listInvoice>',
+            self::invoice('issuedInvoice', self::EUR_INVOICE, self::EUR_INVOICE_VS, '2026-02-01', 10000, 2100, '', self::EUR_RECEIPT));
+        self::append($agendaDir . '/29_banka.xml', '</lst:listBank>',
+            $doc('', 'receipt', '2026-01-01', 24245, 1000, 24.245, '', 'Počáteční stav bankovního účtu ' . self::EUR_ACCOUNT, '', true)
+            . $doc(self::EUR_RECEIPT, 'receipt', '2026-02-10', 12100, 500, 24.20, '001', 'Úhrada ' . self::EUR_INVOICE, self::EUR_INVOICE_VS)
+            . $doc(self::EUR_FEE, 'expense', '2026-02-27', 48.50, 2, 24.25, '001', 'Poplatek')
+            . $doc(self::EUR_FX_DIFFERENCE, 'receipt', '2026-03-31', 150, 0, 24.515, '002', 'Uzávěrka kurzových rozdílů - kurzový zisk'));
+        self::append($agendaDir . '/01_ucetni_denik.xml', '</lst:accountancy>',
+            self::entry('Počáteční stavy účtů', 'ZAV', 'Počáteční stav účtu', 24245, self::EUR_ANALYTIC, '701000', '2026-01-01')
+            . self::entry('Počáteční stavy účtů', 'ZAV', 'Počáteční stav účtu', 24245, '701000', '411000', '2026-01-01')
+            . self::entry('Vydané faktury', self::EUR_INVOICE, 'Služby', 10000, '311001', '602000', '2026-02-01')
+            . self::entry('Vydané faktury', self::EUR_INVOICE, 'DPH', 2100, '311001', '343021', '2026-02-01')
+            . self::entry('Banka', self::EUR_RECEIPT, 'Úhrada ' . self::EUR_INVOICE, 12100, self::EUR_ANALYTIC, '311001', '2026-02-10')
+            . self::entry('Banka', self::EUR_FEE, 'Poplatek', 48.50, '568000', self::EUR_ANALYTIC, '2026-02-27')
+            . self::entry('Banka', self::EUR_FX_DIFFERENCE, 'Kurzový zisk', 150, self::EUR_ANALYTIC, '663000', '2026-03-31'));
+    }
+
     /** Číslo bankovního dokladu použité znovu o rok později ({@see withBankNumberNextYear()}). */
     public const NEXT_YEAR_BANK = 'BAN0010070';
 

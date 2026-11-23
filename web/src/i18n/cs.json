@@ -27215,6 +27215,8 @@
     "pdf_attached_to_existing": "Výpis už byl v systému z GPC - PDF se k němu přiložilo.",
     "warning": {
       "imported_balances_rebased": "Stavy {statements} převzatých výpisů účtu se podle výpisu banky posunuly o {shift}. Počáteční stav účtu vychází {opening}, deník se nemění: zkontrolujte počáteční stav účtu v účetnictví.",
+      "imported_balances_rebase_held": "Stav účtu podle výpisu banky se liší od {statements} převzatých výpisů o {shift}. Tak velký posun se bez potvrzení neprovede: zkontrolujte počáteční stav a měnu účtu v převodu, případně výpisy jiného účtu se stejným číslem. Posun potvrdí správce příkazem rebase-imported-statements.php.",
+      "imported_balances_rebase_mixed": "Převzaté výpisy s číslem tohoto účtu pocházejí z různých účtů původního programu ({sources}), jejich stavy se podle výpisu banky neposunuly. Rozdíl {shift} zkontrolujte.",
       "transactions_skipped_as_duplicate": "Ve výpisu bylo {parsed} pohybů, založeno {inserted}. {skipped} pohybů se shoduje s už evidovanými (překrývající se výpis) a nebylo založeno - zkontrolujte prosím, že jde skutečně o duplicity.",
       "transactions_skipped_as_duplicate_batch": "Z nahraných výpisů bylo přeskočeno {count} pohybů jako duplicity s už evidovanými - zkontrolujte prosím, že jde skutečně o duplicity.",
       "transactions_skipped_as_migrated": "Účet má pohyby od {since} do {until} převzaté převodem z jiného programu. {skipped} pohybů výpisu z tohoto období se nezaložilo, v evidenci už jsou. Pohyb z prvního nebo posledního dne, který převod nepřevzal, doplňte ručně.",

@@ -312,9 +312,10 @@ final class PohodaReconciler
             $journal = $scalar($ledger($kind, $docType, $prefix, $sign), [$supplierId]);
             $out[] = TrialBalanceReconciliation::documentRow($key, $documents, $journal, (int) $scalar($docs($table, $expr, $kind, $docType, $prefix, false), [$supplierId]));
         }
+        // Jen korunové výpisy: pohyby účtu v cizí měně jsou v té měně, deník v Kč (stejně jako Money S3).
         $bankDocs = $scalar(
             "SELECT COALESCE(SUM(t.amount), 0) FROM bank_transactions t JOIN bank_statements s ON s.id = t.statement_id
-              WHERE s.supplier_id = ?
+              WHERE s.supplier_id = ? AND COALESCE(s.currency, 'CZK') = 'CZK'
                 AND EXISTS (SELECT 1 FROM journal_entry_document_links k JOIN journal_entries e ON e.id = k.entry_id AND e.supplier_id = k.supplier_id
                              WHERE k.supplier_id = s.supplier_id AND k.doc_type = 'bank' AND k.doc_id = t.id AND e.period_id IN ({$in}))
                 AND EXISTS (SELECT 1 FROM pohoda_import_map m WHERE m.supplier_id = s.supplier_id AND m.kind = 'bank_transaction' AND m.target_id = t.id)",
@@ -328,7 +329,9 @@ final class PohodaReconciler
               WHERE l.supplier_id = ? AND e.period_id IN ({$in}) AND a.account_code LIKE '221%'
                 AND EXISTS (SELECT 1 FROM journal_entry_document_links k
                              JOIN pohoda_import_map m ON m.supplier_id = k.supplier_id AND m.target_id = k.doc_id AND m.kind = 'bank_transaction'
-                            WHERE k.supplier_id = l.supplier_id AND k.entry_id = e.id AND k.doc_type = 'bank')",
+                             JOIN bank_transactions kt ON kt.id = k.doc_id
+                             JOIN bank_statements ks ON ks.id = kt.statement_id AND ks.supplier_id = k.supplier_id
+                            WHERE k.supplier_id = l.supplier_id AND k.entry_id = e.id AND k.doc_type = 'bank' AND COALESCE(ks.currency, 'CZK') = 'CZK')",
             [$supplierId]
         );
         $out[] = TrialBalanceReconciliation::documentRow('bank', $bankDocs, $bankJournal, 0);
@@ -431,7 +434,8 @@ final class PohodaReconciler
             "SELECT e.document_no,
                     (SELECT COALESCE(SUM(t.amount), 0)
                        FROM journal_entry_document_links k JOIN bank_transactions t ON t.id = k.doc_id
-                      WHERE k.supplier_id = e.supplier_id AND k.entry_id = e.id AND k.doc_type = 'bank'
+                       JOIN bank_statements ts ON ts.id = t.statement_id AND ts.supplier_id = k.supplier_id
+                      WHERE k.supplier_id = e.supplier_id AND k.entry_id = e.id AND k.doc_type = 'bank' AND COALESCE(ts.currency, 'CZK') = 'CZK'
                         AND EXISTS (SELECT 1 FROM pohoda_import_map m WHERE m.supplier_id = k.supplier_id AND m.kind = 'bank_transaction' AND m.target_id = t.id)) AS docs,
                     (SELECT COALESCE(SUM(CASE WHEN l.side = 'debit' THEN l.signed_amount ELSE -l.signed_amount END), 0)
                        FROM journal_entry_lines l JOIN chart_of_accounts a ON a.id = l.account_id AND a.supplier_id = l.supplier_id
@@ -440,7 +444,9 @@ final class PohodaReconciler
               WHERE e.supplier_id = ? AND e.period_id IN (" . (implode(',', array_map('intval', $periodIds)) ?: '0') . ")
                 AND EXISTS (SELECT 1 FROM journal_entry_document_links k
                              JOIN pohoda_import_map m ON m.supplier_id = k.supplier_id AND m.target_id = k.doc_id AND m.kind = 'bank_transaction'
-                            WHERE k.supplier_id = e.supplier_id AND k.entry_id = e.id AND k.doc_type = 'bank')"
+                             JOIN bank_transactions kt ON kt.id = k.doc_id
+                             JOIN bank_statements ks ON ks.id = kt.statement_id AND ks.supplier_id = k.supplier_id
+                            WHERE k.supplier_id = e.supplier_id AND k.entry_id = e.id AND k.doc_type = 'bank' AND COALESCE(ks.currency, 'CZK') = 'CZK')"
         );
         $stmt->execute([$supplierId]);
         $out = [];

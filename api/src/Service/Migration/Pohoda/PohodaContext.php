@@ -98,8 +98,23 @@ final class PohodaContext
     /** @var array<string,int> číslo dokladu => cash_documents.id */
     public array $cashDocuments = [];
 
-    /** @var array<string,list<array{id:int,date:string,amount:float}>> číslo pohybu => bank_transactions (částka se znaménkem) */
+    /** @var array<string,list<array{id:int,date:string,amount:float}>> číslo pohybu => bank_transactions (částka v Kč se znaménkem) */
     public array $bankTransactions = [];
+
+    /**
+     * Pohyby účtů v cizí měně ({@see CashBankImporter::importBank()}): částka v měně účtu,
+     * v Kč a kurz. Podle nich {@see PohodaForeignBank} přepočte párování a doplní měnu do deníku.
+     *
+     * @var array<int,array{foreign:float,czk:float,rate:float,currency:string,account_id:?int}>
+     */
+    public array $foreignBankTx = [];
+
+    /**
+     * Počáteční stavy účtů v cizí měně pro otevírací zápis ({@see PohodaForeignBank::fillOpening()}).
+     *
+     * @var list<array{account_id:int,period_id:int,currency:string,foreign:float,rate:float}>
+     */
+    public array $foreignBankOpenings = [];
 
     /**
      * Řádky deníku POHODY ze zdroje Banka po číslech dokladu ({@see PohodaBankJournal::row()}).

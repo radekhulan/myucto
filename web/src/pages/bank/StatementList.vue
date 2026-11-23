@@ -673,12 +673,15 @@ async function onFileSelected(e: Event) {
         until: formatDate(migrated.until ?? ''),
       }))
     }
-    const rebased = lastNonDuplicate.warnings?.find(w => w.code === 'imported_balances_rebased')
+    const rebased = lastNonDuplicate.warnings?.find(w => w.code === 'imported_balances_rebased'
+      || w.code === 'imported_balances_rebase_held' || w.code === 'imported_balances_rebase_mixed')
     if (rebased) {
-      toast.warning(t('bank.warning.imported_balances_rebased', {
+      const currency = rebased.currency ?? 'CZK'
+      toast.warning(t(`bank.warning.${rebased.code}`, {
         statements: rebased.statements ?? 0,
-        shift: formatMoney(rebased.shift ?? 0, 'CZK'),
-        opening: formatMoney(rebased.opening ?? 0, 'CZK'),
+        shift: formatMoney(rebased.shift ?? 0, currency),
+        opening: formatMoney(rebased.opening ?? 0, currency),
+        sources: (rebased.sources ?? []).join(', '),
       }))
     }
     router.push(`/bank/${lastNonDuplicate.statement_id}`)

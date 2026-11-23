@@ -402,7 +402,10 @@ final class PohodaMdbAccounting
         } elseif ($key === 'addressbook') {
             return ['addressbookHeader' => ['id' => $r['ID'], 'identity' => $this->identity($r), 'email' => $r['Email'] ?? '', 'mobil' => $r['GSM'] ?? '', 'phone' => $r['Tel'] ?? '']];
         } elseif ($key === 'bank_accounts' && (int) ($r['RelJeUcet'] ?? 0) === 2) {
-            return ['bankAccountHeader' => ['id' => $r['ID'], 'ids' => $r['IDS'] ?? '', 'numberAccount' => $r['SText'] ?? '', 'codeBank' => $r['KodBanky'] ?? '', 'nameBank' => $r['Banka'] ?? '', 'IBAN' => $r['IBAN'] ?? '', 'analyticAccount' => ['ids' => $r['AUcet'] ?? '']]];
+            // Měna účtu (`RefCM` do číselníku měn); korunový účet ji nemá. XML export ji nenese,
+            // převod ji tam určí z dokladů účtu ({@see CashBankImporter::importBank()}).
+            return ['bankAccountHeader' => ['id' => $r['ID'], 'ids' => $r['IDS'] ?? '', 'numberAccount' => $r['SText'] ?? '', 'codeBank' => $r['KodBanky'] ?? '', 'nameBank' => $r['Banka'] ?? '', 'IBAN' => $r['IBAN'] ?? '', 'analyticAccount' => ['ids' => $r['AUcet'] ?? ''],
+                'currency' => ['ids' => $this->lookup('sCMeny', $r['RefCM'] ?? '')['Kod'] ?? '']]];
         } elseif ($key === 'cash_registers' && (int) ($r['RelJeUcet'] ?? 0) === 1) {
             return ['cashRegisterHeader' => ['id' => $r['ID'], 'ids' => $r['IDS'] ?? '', 'name' => $r['SText'] ?? '', 'account' => ['ids' => $r['AUcet'] ?? '']]];
         } elseif ($key === 'internal') {

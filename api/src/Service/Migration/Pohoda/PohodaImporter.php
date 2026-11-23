@@ -70,6 +70,7 @@ final class PohodaImporter
         private readonly ActivityImporter $activities,
         private readonly PohodaTaxEvidenceImporter $taxEvidence,
         private readonly OrderImporter $orders,
+        private readonly PohodaForeignBank $foreignBank,
     ) {}
 
     /**
@@ -567,7 +568,9 @@ final class PohodaImporter
                 $this->linker->link($ctx);
             },
             DocumentLinker::STEP_PAYMENTS => function () use ($ctx): void {
+                $matchesBefore = $this->foreignBank->lastMatchId($ctx->supplierId);
                 $this->linker->matchPayments($ctx);
+                $this->settleForeignBank($ctx, $matchesBefore);
                 if (!$ctx->relinkOnly) {
                     $this->unbooked->settle($ctx);
                     $this->proposals->propose($ctx);
@@ -600,6 +603,47 @@ final class PohodaImporter
                 $this->reconciler->run($ctx);
             },
         ];
+    }
+
+    /**
+     * Účty v cizí měně po vazbách a úhradách: párování, která převod právě založil v Kč, se
+     * přepočtou na měnu pohybu, řádky deníku na analytice účtu a jeho otevírací zápis dostanou
+     * měnu, kurz a částku v měně ({@see PohodaForeignBank}). Opakovaný běh nic nezdvojí.
+     */
+    private function settleForeignBank(PohodaContext $ctx, int $matchesBefore): void
+    {
+        if ($ctx->foreignBankTx === []) {
+            return;
+        }
+        $p = $ctx->protocol;
+        $converted = $this->foreignBank->convertMatches($ctx->supplierId, $ctx->foreignBankTx, $matchesBefore);
+        if ($converted > 0) {
+            $p->count(DocumentLinker::STEP_PAYMENTS, 'foreign_matches_converted', $converted);
+        }
+        $byAccount = [];
+        foreach ($ctx->foreignBankTx as $txId => $t) {
+            if ($t['account_id'] !== null && $t['rate'] > 0) {
+                $byAccount[$t['account_id'] . '|' . $t['currency']][$txId] = $t;
+            }
+        }
+        foreach ($byAccount as $key => $tx) {
+            [$accountId, $currency] = explode('|', $key, 2);
+            $filled = $this->foreignBank->fillJournal($ctx->supplierId, (int) $accountId, $currency, $tx);
+            if ($filled['lines'] > 0) {
+                $p->count(DocumentLinker::STEP_PAYMENTS, 'foreign_journal_lines', $filled['lines']);
+            }
+            if ($filled['fx_differences'] > 0) {
+                $p->info(DocumentLinker::STEP_PAYMENTS, 'foreign_fx_differences', sprintf(
+                    'Kurzové rozdíly bankovního účtu v %s (%d zápisů) nemají částku v měně, jejich řádky deníku zůstávají v Kč. Přecenění účtu k rozvahovému dni je zkontrolujte.',
+                    $currency, $filled['fx_differences'],
+                ), ['currency' => $currency, 'entries' => $filled['fx_differences']]);
+            }
+        }
+        foreach ($ctx->foreignBankOpenings as $o) {
+            if ($this->foreignBank->fillOpening($ctx->supplierId, $o['account_id'], $o['period_id'], $o['currency'], $o['foreign'], $o['rate'])) {
+                $p->count(DocumentLinker::STEP_PAYMENTS, 'foreign_opening_lines');
+            }
+        }
     }
 
     /**

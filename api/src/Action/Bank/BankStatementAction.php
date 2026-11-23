@@ -1574,12 +1574,15 @@ final class BankStatementAction
                 $this->release->release($sid, $txId, BankTransactionReleaseService::MODE_DELETE, $userId ?: null);
                 $released++;
             }
+            // Posun stavů převzatých výpisů podle tohoto výpisu banky s ním zmizí.
+            $rebaseReverted = (new \MyInvoice\Service\Bank\ImportedStatementRebase($this->db))->revert($sid, $id);
             $pdo->prepare('DELETE FROM bank_statements WHERE id = ?')->execute([$id]);
             $monthly->refreshMonths($months, $sid);
             $this->logger->log('bank.statement_deleted', $userId ?: null, 'bank_statement', $id, [
                 'file_name'             => $fileName,
                 'released_transactions' => $released,
                 'api_months'            => $months,
+                'imported_rebase_reverted' => $rebaseReverted,
             ], $ip, $request->getHeaderLine('User-Agent'), $sid);
             self::commitAtomic($pdo, $own, $savepoint);
         } catch (BankTransactionReleaseException $e) {

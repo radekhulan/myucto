@@ -52,6 +52,47 @@ final class SyntheticPohodaMdbExport
         ]);
     }
 
+    /**
+     * Datový soubor s korunovým účtem BAN a účtem BANE v EUR (`sUcet.RefCM` do číselníku měn
+     * `sCMeny`), stejné částky jako {@see SyntheticPohodaExport::withEurBankAccount()}:
+     * počáteční stav 1 000 EUR (24 245 Kč) v otevíracím zápisu, příjem 500 EUR kurzem 24,20
+     * (12 100 Kč, 221002/261000) a poplatek 2 EUR kurzem 24,25 (48,50 Kč). Poplatek částku
+     * v měně nenese (`RefCM` prázdné): měnu určí účet, částka se přepočte uloženým kurzem ČNB.
+     *
+     * @return string složka agendy
+     */
+    public static function writeEurBankAccount(string $root): string
+    {
+        $journal = static fn (string $id, string $agenda, string $source, string $number, string $day, string $amount, string $md, string $d): array =>
+            ['ID' => $id, 'RelUdAg' => $agenda, 'RelAgID' => $source, 'Cislo' => $number, 'Datum' => $day, 'Kc' => $amount, 'UMD' => $md, 'UD' => $d, 'SText' => 'Řádek'];
+        $bank = static fn (string $id, string $type, string $number, string $day, string $amount, string $currency, string $rate, string $foreign): array =>
+            ['ID' => $id, 'RelTpBV' => $type, 'Cislo' => $number, 'Datum' => $day, 'DatPlat' => $day, 'Kc0' => $amount, 'RefUcet' => '2', 'Vypis' => '001/1',
+                'SText' => 'Platba EUR', 'Firma' => 'Banka Test', 'RefCM' => $currency, 'CmKurs' => $rate, 'CmMnoz' => '1', 'CmCelkem' => $foreign];
+        return self::write($root, [
+            'pOS' => array_map(static fn (string $code, string $name): array => ['Ucet' => $code, 'Nazev' => $name],
+                ['221001', '221002', '261000', '411000', '568000', '701000'],
+                ['Bankovní účet', 'Bankovní účet EUR', 'Peníze na cestě', 'Základní kapitál', 'Ostatní finanční náklady', 'Počáteční účet rozvažný']),
+            'sCMeny' => [['ID' => '7', 'Kod' => 'EUR']],
+            'sUcet' => [
+                ['ID' => '1', 'RelJeUcet' => '2', 'IDS' => 'BAN', 'SText' => SyntheticPohodaExport::BANK_ACCOUNT, 'KodBanky' => SyntheticPohodaExport::BANK_CODE, 'Banka' => 'Testovací banka', 'AUcet' => '221001'],
+                ['ID' => '2', 'RelJeUcet' => '2', 'IDS' => SyntheticPohodaExport::EUR_ACCOUNT, 'SText' => SyntheticPohodaExport::EUR_ACCOUNT_NUMBER,
+                    'KodBanky' => SyntheticPohodaExport::BANK_CODE, 'Banka' => 'Testovací banka', 'AUcet' => '221002', 'RefCM' => '7'],
+            ],
+            'pUD' => [
+                $journal('1', '63', '0', '', '2026-01-01T00:00:00', '100000', '221001', '701000'),
+                $journal('2', '63', '0', '', '2026-01-01T00:00:00', '100000', '701000', '411000'),
+                $journal('3', '63', '0', '', '2026-01-01T00:00:00', '24245', '221002', '701000'),
+                $journal('4', '63', '0', '', '2026-01-01T00:00:00', '24245', '701000', '411000'),
+                $journal('5', '28', '21', 'BANE0001', '2026-02-10T00:00:00', '12100', '221002', '261000'),
+                $journal('6', '28', '22', 'BANE0002', '2026-02-27T00:00:00', '48.5', '568000', '221002'),
+            ],
+            'BV' => [
+                $bank('21', '1', 'BANE0001', '2026-02-10T00:00:00', '12100', '7', '24.2', '500'),
+                $bank('22', '2', 'BANE0002', '2026-02-27T00:00:00', '48.5', '0', '0', '0'),
+            ],
+        ]);
+    }
+
     /** Přijatá faktura s různým DUZP a datem odpočtu ({@see writeSplitVatDates()}). */
     public const SPLIT_PURCHASE = '26PF0071';
 
