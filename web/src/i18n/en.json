@@ -45322,9 +45322,12 @@
     "detected_hint": "This file contains no invoices but a payroll posting, so no received invoices were created from it. Import it as an internal document and other liabilities.",
     "open_preview": "Show posting preview",
     "open_wizard": "Open the PAMICA wizard",
-    "edit_codes": "Edit posting codes",
+    "edit_codes": "Edit posting code assignment",
     "code_map": {
       "title": "Posting codes",
+      "hint_all": "All posting code assignments saved for the company. Correct wrongly assigned accounts (e.g. swapped debit and credit) and save, the preview then reloads. The change does not alter documents already imported.",
+      "none_saved": "The company has no saved posting code assignments yet.",
+      "load_failed": "Posting code assignments could not be loaded.",
       "hint_unmapped": "Instead of accounts, the file carries PAMICA posting codes. Assign a debit and a credit account from the chart of accounts to each code. The assignment is saved for the company and the next import uses it automatically.",
       "hint_edit": "Assignment of the codes used in this file. A change applies to this and later imports, it does not change documents already imported.",
       "col_code": "Code",

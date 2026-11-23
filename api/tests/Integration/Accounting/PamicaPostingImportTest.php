@@ -10,6 +10,7 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Middleware\SupplierScopeMiddleware;
 use MyInvoice\Repository\AccountingPeriodRepository;
+use MyInvoice\Repository\ChartOfAccountsRepository;
 use MyInvoice\Security\EffectiveRole;
 use MyInvoice\Service\Accounting\ChartOfAccountsSeeder;
 use MyInvoice\Service\Import\InvoiceImportService;
@@ -351,6 +352,145 @@ final class PamicaPostingImportTest extends TestCase
         // Mapování patří firmě: jiná firma tytéž zkratky přiřazené nemá.
         $this->supplierId = $this->createIsolatedSupplier($this->pdo, $this->supplierId);
         self::assertSame(['7Int', '2Oz'], array_column($this->unmappedCodes($xml), 'code'));
+    }
+
+    /**
+     * Zkratky předkontací ve všech dokladech fixture: OSSZ (003) má dvě položky se dvěma
+     * zkratkami (aOz za firmu, 8Oz za zaměstnance), zdravotní pojištění zůstává dvojicí účtů.
+     */
+    private function codedXml(): string
+    {
+        return strtr($this->xml, [
+            '521000/331000' => '7Int', '331000/342000' => '2Oz',
+            '524000/336001' => 'aOz', '331000/336001' => '8Oz',
+        ]);
+    }
+
+    /** @param list<array{0:string,1:string,2:string}> $rows zkratka, MD, Dal */
+    private function saveCodes(array $rows): void
+    {
+        $this->container->get(PamicaPostingCodeMap::class)->save($this->supplierId, PamicaPostingImportService::APPLICATION,
+            array_map(static fn (array $r): array => ['code' => $r[0], 'debit_account_code' => $r[1], 'credit_account_code' => $r[2]], $rows), null);
+    }
+
+    private function analytic(string $code): void
+    {
+        $repo = $this->container->get(ChartOfAccountsRepository::class);
+        if ($repo->findByCode($this->supplierId, $code) !== null) return;
+        $parent = $repo->findByCode($this->supplierId, substr($code, 0, 3));
+        self::assertNotNull($parent, 'Syntetika ' . substr($code, 0, 3) . ' v osnově chybí.');
+        $repo->insert($this->supplierId, [
+            'account_code' => $code, 'name' => 'Analytika ' . $code, 'account_type' => (string) $parent['account_type'],
+            'normal_side' => $parent['normal_side'], 'is_synthetic' => false, 'parent_id' => (int) $parent['id'], 'is_active' => true,
+        ], '2000-01-01', null);
+    }
+
+    public function testDifferentCreditAccountsNameCodesAndSyntheticWithAnalyticsIsRefused(): void
+    {
+        $xml = $this->codedXml();
+        // Stav z praxe: 8Oz uložené na syntetiku 331, než osnova dostala analytiku 331.000.
+        $this->saveCodes([['7Int', '521', '331'], ['2Oz', '331', '342.100'], ['8Oz', '524', '331']]);
+        $this->analytic('331.000');
+        $this->saveCodes([['aOz', '524', '331.000']]);
+
+        try {
+            $this->service->preview($this->supplierId, $xml);
+            self::fail('Závazek s položkami na různých účtech Dal se nesmí načíst.');
+        } catch (PamicaPostingException $e) {
+            self::assertSame('invalid_accounting', $e->errorCode);
+            self::assertSame(422, $e->httpStatus);
+            self::assertStringContainsString('Závazek 003 má položky na různých účtech Dal (331.000 ze zkratky aOz; 331 ze zkratky 8Oz)', $e->getMessage());
+            self::assertStringContainsString('Upravte přiřazení zkratek.', $e->getMessage());
+            self::assertSame(['aOz', '8Oz'], $e->context['codes']);
+            self::assertSame(['331.000', '331'], $e->context['credits']);
+        }
+
+        // Syntetiku s aktivní analytikou už přiřazení nepřijme.
+        try {
+            $this->saveCodes([['8Oz', '331', '336']]);
+            self::fail('Syntetika s analytikami se nesmí uložit.');
+        } catch (PamicaPostingException $e) {
+            self::assertSame('invalid_code_map', $e->errorCode);
+            self::assertStringContainsString('Vyberte analytický účet (např. 331.000).', $e->getMessage());
+        }
+        $stored = array_column($this->container->get(PamicaPostingCodeMap::class)->rows($this->supplierId, PamicaPostingImportService::APPLICATION), null, 'code');
+        self::assertSame(['524', '331'], [$stored['8Oz']['debit_account_code'], $stored['8Oz']['credit_account_code']]);
+    }
+
+    public function testCodeMapEndpointReturnsSavedRows(): void
+    {
+        $action = $this->container->get(PayrollPostingImportAction::class);
+        $all = ['accounting' => 2, 'other_items' => 2, 'accounting.journal.write' => 2, 'accounting.journal.post' => 2];
+        self::assertSame([], $this->data($action->codeMap($this->jsonRequest($all, []), new Response()))['code_map']);
+
+        $this->saveCodes([['7Int', '521', '331'], ['2Oz', '331', '342.100']]);
+        $response = $action->codeMap($this->jsonRequest($all, []), new Response());
+        self::assertSame(200, $response->getStatusCode());
+        $rows = $this->data($response)['code_map'];
+        self::assertSame(['2Oz', '7Int'], array_column($rows, 'code'));
+        self::assertSame(['331', '342.100'], [$rows[0]['debit_account_code'], $rows[0]['credit_account_code']]);
+
+        // Čte ho jen ten, kdo ho smí uložit.
+        self::assertSame(403, $action->codeMap($this->jsonRequest(['other_items' => 1] + $all, []), new Response())->getStatusCode());
+        // Mapování patří firmě.
+        $this->supplierId = $this->createIsolatedSupplier($this->pdo, $this->supplierId);
+        self::assertSame([], $this->data($action->codeMap($this->jsonRequest($all, []), new Response()))['code_map']);
+    }
+
+    public function testCommitmentOnGrossWageAccountBlocksImport(): void
+    {
+        $xml = $this->codedXml();
+        $this->analytic('342.000');
+        // Prohozené účty u daně (342/331) a pojistné na Dal 331 místo 336.
+        $this->saveCodes([['7Int', '521', '331'], ['2Oz', '342.000', '331'], ['8Oz', '524', '331'], ['aOz', '524', '331']]);
+
+        $preview = $this->service->preview($this->supplierId, $xml);
+        $checks = array_values(array_filter($preview['checks'], static fn (array $c): bool => $c['code'] === 'commitment_on_clearing_account'));
+        self::assertSame(['002', '003'], array_column(array_column($checks, 'context'), 'item_id'));
+        self::assertSame('error', $checks[0]['level']);
+        self::assertSame('Závazek „Mzdy 2099/03, daň z příjmů, zálohová" by ležel na účtu 331, na který se účtují hrubé mzdy. '
+            . 'Zkontrolujte zkratku 2Oz (srážka ze mzdy se účtuje obvykle MD 331 / Dal účet závazku, např. 342 nebo 336).', $checks[0]['message']);
+        self::assertSame(['aOz', '8Oz'], $checks[1]['context']['codes']);
+        self::assertFalse($preview['can_apply']);
+        self::assertFalse($preview['can_apply_with_new_accounts']);
+
+        $this->expectApplyErrorKeepingDataFor($xml, 'commitment_on_clearing_account');
+    }
+
+    public function testCorrectCodeMapWithAnalyticsPasses(): void
+    {
+        $xml = $this->codedXml();
+        foreach (['521.000', '331.000', '342.000', '336.000', '524.000'] as $code) $this->analytic($code);
+        $this->saveCodes([
+            ['7Int', '521.000', '331.000'], ['2Oz', '331.000', '342.000'],
+            ['8Oz', '331.000', '336.000'], ['aOz', '524.000', '336.000'],
+        ]);
+
+        $preview = $this->service->preview($this->supplierId, $xml);
+        $levels = array_column($preview['checks'], 'level', 'code');
+        self::assertArrayNotHasKey('commitment_on_clearing_account', $levels);
+        self::assertSame('ok', $levels['clearing_balanced']);
+        self::assertSame('ok', $levels['accounts_ok']);
+        self::assertTrue($preview['can_apply'], json_encode($preview['checks'], JSON_UNESCAPED_UNICODE));
+
+        $result = $this->service->apply($this->supplierId, $xml, 'mzdy.xml', false, $this->audit());
+        self::assertSame([], $result['created_accounts']);
+        $items = $this->items();
+        self::assertSame(['331.000:debit:3000.00', '342.000:credit:3000.00'], $this->entryLines((int) $items[0]['journal_entry_id']));
+        self::assertSame(['331.000:debit:2130.00', '336.000:credit:9570.00', '524.000:debit:7440.00'], $this->entryLines((int) $items[1]['journal_entry_id']));
+        self::assertSame('23520.00', $this->balance('331.000'));
+    }
+
+    private function expectApplyErrorKeepingDataFor(string $xml, string $code): void
+    {
+        try {
+            $this->service->apply($this->supplierId, $xml, null, true, $this->audit());
+            self::fail('Načtení mělo být odmítnuto (' . $code . ').');
+        } catch (PamicaPostingException $e) {
+            self::assertSame($code, $e->errorCode);
+        }
+        self::assertSame(0, $this->rowCount('other_items'));
+        self::assertSame(0, $this->rowCount('internal_documents'));
     }
 
     /** @return list<array<string,mixed>> */

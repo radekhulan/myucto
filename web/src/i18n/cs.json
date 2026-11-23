@@ -45322,9 +45322,12 @@
     "detected_hint": "Tento soubor neobsahuje faktury, ale zaúčtování mezd, a přijaté faktury z něj nevznikly. Načtěte ho jako interní doklad a ostatní závazky.",
     "open_preview": "Zobrazit náhled zaúčtování",
     "open_wizard": "Otevřít průvodce PAMICA",
-    "edit_codes": "Upravit zkratky předkontací",
+    "edit_codes": "Upravit přiřazení zkratek",
     "code_map": {
       "title": "Zkratky předkontací",
+      "hint_all": "Všechna uložená přiřazení zkratek firmy. Opravte chybně přiřazené účty (např. prohozené MD a Dal) a uložte, náhled se pak načte znovu. Změna už načtené doklady nemění.",
+      "none_saved": "Firma zatím nemá uložené žádné přiřazení zkratek předkontací.",
+      "load_failed": "Přiřazení zkratek se nepodařilo načíst.",
       "hint_unmapped": "Soubor místo účtů nese zkratky předkontací z PAMICY. Každé zkratce přiřaďte účet MD a účet Dal z účtové osnovy. Přiřazení se uloží pro firmu a příští načtení ho použije samo.",
       "hint_edit": "Přiřazení zkratek použitých v tomto souboru. Změna platí pro toto i další načtení, už načtené doklady nemění.",
       "col_code": "Zkratka",

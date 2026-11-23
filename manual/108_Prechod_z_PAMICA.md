@@ -1048,12 +1048,19 @@ a další pro ostatní závazky), MyÚčto nejdřív ukáže tabulku zkratek, ke
 kterým firma ještě nemá účty. U každé zkratky jsou vzorové řádky ze
 souboru s částkou. Každé zkratce vyberte z účtové osnovy **účet MD a účet
 Dal**: zkratka vždy znamená celou dvojici účtů, oba účty musí být v osnově
-a nesmí být stejné. Po kliknutí **Uložit a načíst náhled** se přiřazení
-uloží pro firmu a náhled se načte znovu. Příští měsíc se uložené zkratky
-použijí samy a tabulka se ukáže jen pro nové zkratky. Přiřazení zkratek
-použitých v souboru změníte v náhledu tlačítkem **Upravit zkratky
-předkontací**; změna platí pro toto a další načtení, už načtené doklady
-nemění. U řádků se zkratkou náhled zkratku zobrazí vedle účtů.
+a nesmí být stejné. Syntetický účet, který se v osnově člení na analytiky,
+přiřadit nejde: vyberte jeho analytiku (např. `331.000`). Po kliknutí
+**Uložit a načíst náhled** se přiřazení uloží pro firmu a náhled se načte
+znovu. Příští měsíc se uložené zkratky použijí samy a tabulka se ukáže jen
+pro nové zkratky. U řádků se zkratkou náhled zkratku zobrazí vedle účtů.
+
+**Úprava přiřazení zkratek.** Tlačítko **Upravit přiřazení zkratek** je
+pod náhledem vždy, když je nahraný soubor. Z hotového náhledu otevře
+zkratky použité v souboru, a když se náhled sestavit nepodaří (například
+závazek má položky na různých účtech Dal, protože jedna zkratka míří na
+`331` a druhá na `331.000`), otevře všechna uložená přiřazení firmy. Chybová
+hláška jmenuje zkratky, ze kterých účty vzešly. Po uložení se náhled načte
+znovu. Změna platí pro toto a další načtení, už načtené doklady nemění.
 
 Náhled nic neukládá. Ukáže měsíc a párovací symbol PAMICY (např.
 `MZ202603`), interní doklad s řádky MD a Dal a ostatní závazky
@@ -1069,6 +1076,7 @@ nimi jsou kontroly:
 | Načtení | Stejný měsíc (IČO a párovací symbol) ještě nebyl načten (§ 108.10.4). |
 | Účty | Každý účet PAMICY musí mít účet v účtové osnově (pravidla níže). |
 | Účet 331 | Co interní doklad zaúčtuje na Dal účtu zaměstnanců, musí ostatní závazky srazit na MD nebo převzít jako závazky bez zaúčtování. Rozdíl náhled ukáže jako upozornění. |
+| Závazek na účtu hrubých mezd | Závazek se zaúčtováním nesmí ležet na účtu, na který interní doklad účtuje hrubé mzdy (typicky 331). Obvykle jde o prohozené účty MD a Dal u zkratky (daň správně `331 / 342`, pojistné `331 / 336`). Načtení zastaví; čisté mzdy bez zaúčtování se netýká. |
 | Účet protistrany | Neplatné číslo účtu náhled ohlásí; závazek se načte bez něj a účet doplníte v jeho detailu. |
 
 **Účty.** PAMICA uvádí účty šestimístně. MyÚčto hledá v účtové osnově

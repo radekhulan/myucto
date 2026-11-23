@@ -23,6 +23,8 @@ const props = defineProps<{
   /** Už přiřazené zkratky, které soubor používá (k úpravě). */
   mapped: PayrollPostingCodeMapRow[]
   canEdit: boolean
+  /** `mapped` nese všechna uložená přiřazení firmy, ne jen zkratky z tohoto souboru. */
+  allSaved?: boolean
 }>()
 const emit = defineEmits<{ (e: 'saved'): void; (e: 'cancel'): void }>()
 
@@ -85,7 +87,7 @@ async function save(): Promise<void> {
   <section class="space-y-3" data-testid="payroll-posting-code-map">
     <div>
       <h3 class="text-sm font-semibold uppercase tracking-wide text-neutral-500">{{ t('payroll_posting_import.code_map.title') }}</h3>
-      <p class="mt-1 text-sm text-neutral-600">{{ t(unmapped.length ? 'payroll_posting_import.code_map.hint_unmapped' : 'payroll_posting_import.code_map.hint_edit') }}</p>
+      <p class="mt-1 text-sm text-neutral-600">{{ t(unmapped.length ? 'payroll_posting_import.code_map.hint_unmapped' : allSaved ? 'payroll_posting_import.code_map.hint_all' : 'payroll_posting_import.code_map.hint_edit') }}</p>
     </div>
     <div class="overflow-x-auto rounded-lg border border-neutral-200">
       <table class="min-w-full text-sm">

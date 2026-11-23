@@ -135,6 +135,9 @@ export const payrollPostingImportsApi = {
     api.post<PayrollPostingResult>('/accounting/payroll-posting-imports/apply',
       form(file, createMissingAccounts ? { create_missing_accounts: '1' } : {}),
       { headers: { 'Content-Type': 'multipart/form-data' } }).then(r => r.data),
+  /** Všechna uložená přiřazení zkratek firmy (i když náhled kvůli chybnému přiřazení nejde sestavit). */
+  codeMap: () =>
+    api.get<{ code_map: PayrollPostingCodeMapRow[] }>('/accounting/payroll-posting-imports/code-map').then(r => r.data),
   saveCodeMap: (codes: PayrollPostingCodeMapRow[]) =>
     api.put<{ code_map: PayrollPostingCodeMapRow[] }>('/accounting/payroll-posting-imports/code-map', { codes }).then(r => r.data),
 }

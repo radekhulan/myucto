@@ -131,6 +131,15 @@ final class PamicaPostingCodeMap
         if (empty($row['is_active'])) {
             throw new PamicaPostingException('invalid_code_map', "Zkratka {$code}: účet {$side} {$value} je neaktivní.");
         }
+        // Syntetika s analytikami se neúčtuje (stejně jako u účtů PAMICY v importu): závazek
+        // by se rozpadl na syntetiku a analytiku a součet analytik by na syntetiku neseděl.
+        $children = array_values(array_filter($this->accounts->childrenOf($supplierId, (int) $row['id']),
+            static fn (array $c): bool => !empty($c['is_active'])));
+        if ($children !== []) {
+            throw new PamicaPostingException('invalid_code_map',
+                "Zkratka {$code}: účet {$side} {$value} je syntetický a člení se na analytiky. Vyberte analytický účet (např. "
+                . $children[0]['account_code'] . ').');
+        }
         return (string) ($row['account_code'] ?? $value);
     }
 }

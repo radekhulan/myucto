@@ -6,7 +6,7 @@ import { apiErrorMessage } from '@/api/errors'
 import { useToast } from '@/composables/useToast'
 import {
   NOT_PAYROLL_POSTING, UNMAPPED_ACCOUNTING_CODES, payrollPostingImportsApi,
-  type PayrollPostingCheck, type PayrollPostingPreview, type PayrollPostingResult, type PayrollPostingUnmappedCode,
+  type PayrollPostingCheck, type PayrollPostingCodeMapRow, type PayrollPostingPreview, type PayrollPostingResult, type PayrollPostingUnmappedCode,
 } from '@/api/pamicaPosting'
 import PayrollPostingCodeMap from './PayrollPostingCodeMap.vue'
 
@@ -31,8 +31,37 @@ const createAccounts = ref(false)
 // Zkratky předkontací bez přiřazených účtů: náhled nejde sestavit, dokud je účetní nepřiřadí.
 const unmappedCodes = ref<PayrollPostingUnmappedCode[]>([])
 const editingCodes = ref(false)
+// Řádky editoru přiřazení: zkratky z náhledu, nebo (když náhled nejde sestavit, třeba kvůli
+// chybně přiřazeným účtům) všechna uložená přiřazení firmy.
+const codeRows = ref<PayrollPostingCodeMapRow[]>([])
+const codeRowsAll = ref(false)
+const loadingCodes = ref(false)
 // Uložit mapování smí, kdo smí zaúčtování načíst; bez náhledu to server ověří až při uložení.
 const canEditCodes = computed(() => preview.value?.can_write ?? true)
+
+async function openCodeMap(): Promise<void> {
+  if (preview.value && preview.value.code_map.length > 0) {
+    codeRows.value = preview.value.code_map
+    codeRowsAll.value = false
+    editingCodes.value = true
+    return
+  }
+  loadingCodes.value = true
+  try {
+    const rows = (await payrollPostingImportsApi.codeMap()).code_map
+    if (rows.length === 0) {
+      toast.info(t('payroll_posting_import.code_map.none_saved'))
+      return
+    }
+    codeRows.value = rows
+    codeRowsAll.value = true
+    editingCodes.value = true
+  } catch (error: unknown) {
+    toast.error(apiErrorMessage(error, t('payroll_posting_import.code_map.load_failed')))
+  } finally {
+    loadingCodes.value = false
+  }
+}
 
 async function load(): Promise<void> {
   loading.value = true
@@ -116,8 +145,12 @@ const actions = computed<ActionItem[]>(() => result.value
   : [
       { key: 'apply', label: t('payroll_posting_import.apply'), icon: 'check', tier: 'primary', variant: 'success', show: !!preview.value,
         disabled: !canApply.value || applying.value, disabledReason: disabledReason.value, loading: applying.value, run: () => { void apply() } },
-      { key: 'codes', label: t('payroll_posting_import.edit_codes'), icon: 'edit', tier: 'secondary', variant: 'neutral',
-        show: !!preview.value && preview.value.code_map.length > 0 && !editingCodes.value, run: () => { editingCodes.value = true } },
+      // Cesta ven i z chyby náhledu: chybné přiřazení zkratek (různé účty Dal v závazku,
+      // prohozené MD a Dal) jde opravit jen v editoru přiřazení.
+      { key: 'codes', label: t('payroll_posting_import.edit_codes'), icon: 'edit',
+        tier: loadError.value ? 'primary' : 'secondary', variant: loadError.value ? 'primary' : 'neutral',
+        show: !loading.value && !unmappedCodes.value.length && !editingCodes.value,
+        disabled: loadingCodes.value, loading: loadingCodes.value, run: () => { void openCodeMap() } },
       { key: 'reload', label: t('payroll_posting_import.reload'), icon: 'cycle', tier: 'secondary', variant: 'neutral', show: !loading.value, run: () => { void load() } },
       { key: 'close', label: t('payroll_posting_import.other_file'), icon: 'x', tier: 'secondary', variant: 'neutral', run: () => emit('close') },
     ])
@@ -134,9 +167,10 @@ const actions = computed<ActionItem[]>(() => result.value
     <div v-else-if="loadError" class="rounded-md border border-danger-500/40 bg-danger-50 px-3 py-2 text-sm text-danger-600" role="alert" data-testid="payroll-posting-error">{{ loadError }}</div>
     <PayrollPostingCodeMap v-else-if="unmappedCodes.length" :unmapped="unmappedCodes" :mapped="[]" :can-edit="canEditCodes" @saved="load" />
 
-    <template v-else-if="preview">
-      <PayrollPostingCodeMap v-if="editingCodes && !result" :unmapped="[]" :mapped="preview.code_map" :can-edit="preview.can_write"
-        @saved="load" @cancel="editingCodes = false" />
+    <PayrollPostingCodeMap v-if="!loading && editingCodes && !result" :unmapped="[]" :mapped="codeRows" :all-saved="codeRowsAll"
+      :can-edit="canEditCodes" @saved="load" @cancel="editingCodes = false" />
+
+    <template v-if="!loading && !loadError && !unmappedCodes.length && preview">
       <div v-if="result" class="rounded-lg border border-success-500/40 bg-success-50 px-4 py-3 text-sm text-success-700" data-testid="payroll-posting-done">
         <p class="font-medium">{{ t('payroll_posting_import.done_title', { month: monthLabel }) }}</p>
         <p class="mt-1">{{ t('payroll_posting_import.done_detail', { internal: result.internal_documents.map(d => d.document_no).join(', '), items: result.other_items.length }) }}</p>

@@ -293,6 +293,8 @@ $sessionActions = [
     'MyInvoice\\Action\\Eet\\EetRecordAction::summary',
     'MyInvoice\\Action\\Eet\\EetRecordAction::export',
     'MyInvoice\\Action\\Eet\\EetRecordAction::invoice',
+    // Přiřazení zkratek předkontací PAMICY čte jen editor v importu mezd, akce odmítá bearer token.
+    'MyInvoice\\Action\\Accounting\\PayrollPostingImportAction::codeMap',
     // Oblíbené stránky uživatele - stav UI, akce je jen z webového rozhraní.
     'MyInvoice\\Action\\UserSettings\\FavoriteAction::list',
     'MyInvoice\\Action\\UserSettings\\FavoriteAction::create',

@@ -327,6 +327,8 @@ final class PamicaPostingImportService
             }
         }
 
+        array_push($checks, ...self::clearingAccountCommitments($parsed, $resolved));
+
         $errors = array_filter($checks, static fn (array $c): bool => $c['level'] === 'error');
         $onlyCreatable = $errors !== [] && array_values(array_unique(array_column($errors, 'code'))) === ['accounts_creatable'];
         return [
@@ -588,6 +590,56 @@ final class PamicaPostingImportService
             'commitments' => self::fromCents($posted + $without),
             'clearing' => $out,
         ];
+    }
+
+    /**
+     * Závazek se zaúčtováním nesmí ležet na účtu, na který interní doklad účtuje hrubé mzdy
+     * (Dal řádků s MD na mzdových nákladech 521 až 523, typicky 331). Srážka ze mzdy se
+     * z toho účtu odepisuje na MD a závazek vzniká na Dal jiného účtu (342, 336); závazek
+     * na Dal 331 by zúčtování mezd zdvojil a typicky prozrazuje prohozené účty v přiřazení
+     * zkratky. Čistá mzda zaměstnance jde jako závazek bez zaúčtování (BEZ331000), ten na
+     * účtu hrubých mezd ležet má a kontrola ho vynechá.
+     *
+     * @param array<string,mixed> $parsed
+     * @param array<string,string> $resolved kód ze souboru => účet osnovy
+     * @return list<array{code:string,level:string,message:string,context:array<string,mixed>}>
+     */
+    private static function clearingAccountCommitments(array $parsed, array $resolved): array
+    {
+        $key = static fn (string $code): string => $resolved[$code] ?? $code;
+        $grossWage = [];
+        foreach ($parsed['internal_documents'] as $doc) {
+            foreach ($doc['lines'] as $line) {
+                if (in_array(substr($key((string) $line['debit']), 0, 3), ['521', '522', '523'], true)) {
+                    $grossWage[$key((string) $line['credit'])] = true;
+                }
+            }
+        }
+        // Tentýž účet, nebo syntetika a její analytika (331 a 331.000).
+        $related = static fn (string $a, string $b): bool => strcasecmp($a, $b) === 0
+            || stripos($a, $b . '.') === 0 || stripos($b, $a . '.') === 0;
+        $checks = [];
+        foreach ($parsed['commitments'] as $c) {
+            if ($c['without_posting']) continue;
+            $account = $key((string) $c['credit']);
+            $clearing = null;
+            foreach (array_keys($grossWage) as $gross) {
+                if ($related($account, (string) $gross)) {
+                    $clearing = (string) $gross;
+                    break;
+                }
+            }
+            if ($clearing === null) continue;
+            $codes = array_values(array_unique(array_filter(array_map(static fn (array $l): ?string => $l['code'], $c['lines']))));
+            $hint = $codes !== []
+                ? 'Zkontrolujte ' . (count($codes) === 1 ? 'zkratku ' : 'zkratky ') . implode(', ', $codes)
+                    . ' (srážka ze mzdy se účtuje obvykle MD ' . $clearing . ' / Dal účet závazku, např. 342 nebo 336).'
+                : 'Zkontrolujte předkontaci závazku v PAMICE (obvykle MD ' . $clearing . ' / Dal účet závazku, např. 342 nebo 336).';
+            $checks[] = self::check('commitment_on_clearing_account', 'error',
+                'Závazek „' . $c['title'] . '" by ležel na účtu ' . $account . ', na který se účtují hrubé mzdy. ' . $hint,
+                ['item_id' => $c['item_id'], 'account' => $account, 'clearing_account' => $clearing, 'codes' => $codes]);
+        }
+        return $checks;
     }
 
     private static function fromCents(int $cents): float

@@ -285,8 +285,26 @@ final class PamicaPostingParser
         if ($unmapped !== []) {
             $credits = [''];
         } elseif (count($credits) !== 1) {
+            // Ke každému účtu Dal zkratky, ze kterých vzešel: chyba je typicky v přiřazení
+            // zkratek (331 u jedné, 331.000 u druhé) a účetní ji opraví v editoru přiřazení.
+            $sources = [];
+            foreach ($lines as $line) {
+                $sources[(string) $line['credit']] ??= [];
+                if ($line['code'] !== null) $sources[(string) $line['credit']][$line['code']] = true;
+            }
+            $parts = [];
+            $codes = [];
+            foreach ($sources as $credit => $lineCodes) {
+                $lineCodes = array_map('strval', array_keys($lineCodes));
+                array_push($codes, ...$lineCodes);
+                $parts[] = $lineCodes === [] ? (string) $credit
+                    : $credit . (count($lineCodes) === 1 ? ' ze zkratky ' : ' ze zkratek ') . implode(', ', $lineCodes);
+            }
+            $codes = array_values(array_unique($codes));
             throw new PamicaPostingException('invalid_accounting',
-                "{$label} má položky na různých účtech Dal (" . implode(', ', $credits) . '). Ostatní závazek leží na jednom účtu.');
+                "{$label} má položky na různých účtech Dal (" . implode('; ', $parts) . '). Ostatní závazek leží na jednom účtu. '
+                . ($codes !== [] ? 'Upravte přiřazení zkratek.' : 'Opravte předkontace v PAMICE.'),
+                422, ['codes' => $codes, 'credits' => array_map('strval', array_keys($sources))]);
         }
 
         $vs = $this->text($xp, 'inv:symVar', $header);

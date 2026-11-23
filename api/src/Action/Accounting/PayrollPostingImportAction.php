@@ -23,6 +23,7 @@ use Psr\Http\Message\UploadedFileInterface;
  *
  *   POST /api/accounting/payroll-posting-imports/preview  multipart `file` - náhled, nic neukládá
  *   POST /api/accounting/payroll-posting-imports/apply    multipart `file` (+ `create_missing_accounts=1`)
+ *   GET  /api/accounting/payroll-posting-imports/code-map - uložené přiřazení zkratek firmy
  *   PUT  /api/accounting/payroll-posting-imports/code-map JSON `{codes:[{code, debit_account_code, credit_account_code}]}`
  *        - přiřazení zkratek předkontací k účtům MD a Dal ({@see PamicaPostingCodeMap})
  *
@@ -37,6 +38,8 @@ use Psr\Http\Message\UploadedFileInterface;
 final class PayrollPostingImportAction
 {
     use AccountingActionSupport;
+
+    private const CODE_MAP_PERMISSIONS = ['accounting.journal.write', 'accounting.journal.post', 'other_items'];
 
     public function __construct(
         private readonly PamicaPostingImportService $service,
@@ -101,6 +104,22 @@ final class PayrollPostingImportAction
     }
 
     /**
+     * Uložené přiřazení zkratek předkontací firmy. Editor ho potřebuje i tehdy, když náhled
+     * kvůli chybnému přiřazení nejde sestavit; čte ho jen ten, kdo ho smí uložit.
+     */
+    public function codeMap(Request $request, Response $response): Response
+    {
+        if (!RequestAuthorization::actsAsSession($request)) {
+            return Json::sessionRequired($response);
+        }
+        foreach (self::CODE_MAP_PERMISSIONS as $permission) {
+            if (!$this->requirePermission($request, $response, $permission, AccessLevel::WRITE, $err)) return $err;
+        }
+        $rows = $this->codeMap->rows($this->currentSupplierId($request), PamicaPostingImportService::APPLICATION);
+        return Json::ok($response, ['code_map' => $rows]);
+    }
+
+    /**
      * Uloží přiřazení zkratek předkontací. Mapování určuje, kam import účtuje, proto chce
      * stejná práva jako samotné načtení.
      */
@@ -109,7 +128,7 @@ final class PayrollPostingImportAction
         if (!RequestAuthorization::actsAsSession($request)) {
             return Json::sessionRequired($response);
         }
-        foreach (['accounting.journal.write', 'accounting.journal.post', 'other_items'] as $permission) {
+        foreach (self::CODE_MAP_PERMISSIONS as $permission) {
             if (!$this->requirePermission($request, $response, $permission, AccessLevel::WRITE, $err)) return $err;
         }
         $body = $request->getParsedBody();

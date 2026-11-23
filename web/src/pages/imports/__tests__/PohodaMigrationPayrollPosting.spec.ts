@@ -4,20 +4,22 @@ import { ref } from 'vue'
 import PohodaMigration from '../PohodaMigration.vue'
 import PayrollPostingImport from '@/components/migration/PayrollPostingImport.vue'
 
-const m = vi.hoisted(() => ({ wizard: null as any, preview: vi.fn(), apply: vi.fn(), saveCodeMap: vi.fn() }))
+const m = vi.hoisted(() => ({ wizard: null as any, preview: vi.fn(), apply: vi.fn(), saveCodeMap: vi.fn(), codeMap: vi.fn() }))
 
 vi.mock('@/composables/useMigrationWizard', () => ({ useMigrationWizard: () => m.wizard }))
 vi.mock('@/api/pohoda', () => ({ pohodaApi: {}, isPohodaUploadReady: () => true }))
 vi.mock('@/api/pamicaPosting', () => ({
   NOT_PAYROLL_POSTING: 'not_payroll_posting',
   UNMAPPED_ACCOUNTING_CODES: 'unmapped_accounting_codes',
-  payrollPostingImportsApi: { preview: m.preview, apply: m.apply, saveCodeMap: m.saveCodeMap },
+  payrollPostingImportsApi: { preview: m.preview, apply: m.apply, saveCodeMap: m.saveCodeMap, codeMap: m.codeMap },
 }))
 vi.mock('@/api/accounting', () => ({ accountingApi: { listAccounts: () => Promise.resolve([
   { account_code: '331', name: 'Zaměstnanci', is_active: true },
+  { account_code: '331.000', name: 'Zaměstnanci - analytika', is_active: true },
   { account_code: '521', name: 'Mzdové náklady', is_active: true },
+  { account_code: '524', name: 'Zákonné pojištění', is_active: true },
 ]) } }))
-vi.mock('@/composables/useToast',() => ({ useToast: () => ({ error: vi.fn(), success: vi.fn() }) }))
+vi.mock('@/composables/useToast',() => ({ useToast: () => ({ error: vi.fn(), success: vi.fn(), info: vi.fn() }) }))
 vi.mock('@/stores/auth', () => ({ useAuthStore: () => ({ canWrite: () => true }) }))
 vi.mock('@/stores/supplier', () => ({ useSupplierStore: () => ({ currentSupplier: { ic: '87654321', company_name: 'Syntetická firma' } }) }))
 vi.mock('@/components/settings/CompanyProfileBox.vue', () => ({ default: { template: '<div />' } }))
@@ -170,5 +172,43 @@ describe('Náhled zaúčtování mezd', () => {
     await wrapper.get('[data-testid="action-codes"]').trigger('click')
     const inputsAgain = wrapper.get('[data-testid="payroll-posting-code-7Int"]').findAll('input')
     expect(inputsAgain.map(i => (i.element as HTMLInputElement).value)).toEqual(['521', '331'])
+  })
+
+  it('jiná chyba náhledu nabídne editor uložených přiřazení a po uložení načte náhled znovu', async () => {
+    m.preview.mockRejectedValueOnce({ response: { status: 422, data: { error: {
+      code: 'invalid_accounting', message: 'Závazek 003 má položky na různých účtech Dal (331.000 ze zkratky aOz; 331 ze zkratky 8Oz).',
+      codes: ['aOz', '8Oz'], credits: ['331.000', '331'],
+    } } } })
+    m.preview.mockResolvedValueOnce(preview())
+    m.codeMap.mockResolvedValue({ code_map: [
+      { code: '8Oz', debit_account_code: '524', credit_account_code: '331' },
+      { code: 'aOz', debit_account_code: '524', credit_account_code: '331.000' },
+    ] })
+    m.saveCodeMap.mockResolvedValue({ code_map: [] })
+    const wrapper = mount(PayrollPostingImport, { props: { file: new File(['<xml/>'], 'mzdy.xml') }, global: { stubs } })
+    await flushPromises()
+
+    expect(wrapper.get('[data-testid="payroll-posting-error"]').text()).toContain('331.000 ze zkratky aOz')
+    expect(wrapper.find('[data-testid="payroll-posting-code-map"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="action-apply"]').exists()).toBe(false)
+    await wrapper.get('[data-testid="action-codes"]').trigger('click')
+    await flushPromises()
+
+    expect(m.codeMap).toHaveBeenCalledTimes(1)
+    expect(wrapper.get('[data-testid="payroll-posting-code-map"]').text()).toContain('payroll_posting_import.code_map.hint_all')
+    const inputs = wrapper.get('[data-testid="payroll-posting-code-8Oz"]').findAll('input')
+    expect(inputs.map(i => (i.element as HTMLInputElement).value)).toEqual(['524', '331'])
+    await inputs[1].setValue('331.000')
+    await wrapper.get('[data-testid="payroll-posting-code-map-save"]').trigger('click')
+    await flushPromises()
+
+    expect(m.saveCodeMap).toHaveBeenCalledWith([
+      { code: '8Oz', debit_account_code: '524', credit_account_code: '331.000' },
+      { code: 'aOz', debit_account_code: '524', credit_account_code: '331.000' },
+    ])
+    expect(m.preview).toHaveBeenCalledTimes(2)
+    expect(wrapper.find('[data-testid="payroll-posting-error"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="payroll-posting-code-map"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="action-apply"]').exists()).toBe(true)
   })
 })
