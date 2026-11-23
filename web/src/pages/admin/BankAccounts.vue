@@ -30,6 +30,7 @@ import RequiredMark from '@/components/ui/RequiredMark.vue'
 import Modal from '@/components/ui/Modal.vue'
 import DateInput from '@/components/ui/DateInput.vue'
 import BankConnectionsPanel from '@/components/bank/BankConnectionsPanel.vue'
+import { bankConnectionsApi, type BankConnection } from '@/api/bankConnections'
 
 // embedded = vykresleno jako záložky uvnitř BankPage.vue (Finance → Bankovní účty);
 // hlavičku a lištu záložek pak dodává obálka, aktivní tab řídí přes ?tab=.
@@ -131,6 +132,26 @@ onMounted(() => { if (tab.value === 'balances') loadBalances() })
 
 const supplier = ref<Supplier | null>(null)
 const currencies = ref<CurrencyAccount[]>([])
+// Online napojení účtu na bankovní API (bank_connections). Čtení může být odepřené, pak se štítek neukáže.
+const apiConnections = ref<Map<number, { connection: BankConnection; provider: string }>>(new Map())
+async function loadApiConnections() {
+  try {
+    const data = await bankConnectionsApi.list()
+    const labels = new Map(data.providers.map(p => [p.code, p.label]))
+    apiConnections.value = new Map(data.connections.filter(c => c.enabled)
+      .map(c => [c.currency_id, { connection: c, provider: labels.get(c.provider) ?? c.provider }]))
+  } catch {
+    apiConnections.value = new Map()
+  }
+}
+function apiBadgeTitle(currencyId: number): string {
+  const entry = apiConnections.value.get(currencyId)
+  if (!entry) return ''
+  const last = entry.connection.last_sync_at ? formatDateTime(entry.connection.last_sync_at) : t('bank_accounts.api_badge_never')
+  return entry.connection.last_sync_status === 'error'
+    ? t('bank_accounts.api_badge_error_title', { provider: entry.provider, last })
+    : t('bank_accounts.api_badge_title', { provider: entry.provider, last })
+}
 const mappings = ref<BankEmailAccountMapping[]>([])
 const providers = ref<BankEmailProvider[]>([])
 const imapAccounts = ref<BankEmailImapSettings[]>([])
@@ -351,6 +372,7 @@ async function load() {
   bankEmailLoaded.value = false
   bankEmailGeneration++
   if (tab.value === 'email') void loadEmailOverview()
+  void loadApiConnections()
   try {
     const [supplierResult, currenciesResult] = await Promise.allSettled([
       settingsApi.getSupplier(),
@@ -945,7 +967,14 @@ async function deleteMessage(m: BankEmailProcessedMessage) {
               <EmptyState v-if="currencies.length === 0" dense icon="coin" :colspan="8" :title="t('bank_accounts.currencies_empty')" />
               <tr v-for="c in currencies" :key="c.id">
                 <td class="px-3 py-2 font-mono">{{ c.code }} <span class="text-xs text-neutral-500">{{ c.symbol }}</span></td>
-                <td class="px-3 py-2">{{ c.label }}</td>
+                <td class="px-3 py-2">{{ c.label }}
+                <span v-if="apiConnections.get(c.id)" :title="apiBadgeTitle(c.id)" data-test="bank-api-badge"
+                  class="ml-1.5 inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs font-medium whitespace-nowrap"
+                  :class="apiConnections.get(c.id)?.connection.last_sync_status === 'error' ? 'bg-warning-50 text-warning-700' : 'bg-success-50 text-success-700'">
+                  <span class="inline-block h-1.5 w-1.5 rounded-full" :class="apiConnections.get(c.id)?.connection.last_sync_status === 'error' ? 'bg-warning-500' : 'bg-success-500'" aria-hidden="true"></span>
+                  {{ t('bank_accounts.api_badge', { provider: apiConnections.get(c.id)?.provider }) }}
+                </span>
+                </td>
                 <td class="px-3 py-2 font-mono">
                   {{ c.account_number || '—' }}<span v-if="c.bank_code"> / {{ c.bank_code }}</span>
                 </td>
@@ -979,6 +1008,12 @@ async function deleteMessage(m: BankEmailProcessedMessage) {
               <span class="font-mono font-semibold">{{ c.code }}</span>
               <span class="text-xs text-neutral-500">{{ c.symbol }}</span>
               <span class="text-xs text-neutral-500 truncate">· {{ c.label }}</span>
+              <span v-if="apiConnections.get(c.id)" :title="apiBadgeTitle(c.id)" data-test="bank-api-badge"
+                  class="ml-1.5 inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-xs font-medium whitespace-nowrap"
+                  :class="apiConnections.get(c.id)?.connection.last_sync_status === 'error' ? 'bg-warning-50 text-warning-700' : 'bg-success-50 text-success-700'">
+                  <span class="inline-block h-1.5 w-1.5 rounded-full" :class="apiConnections.get(c.id)?.connection.last_sync_status === 'error' ? 'bg-warning-500' : 'bg-success-500'" aria-hidden="true"></span>
+                  {{ t('bank_accounts.api_badge', { provider: apiConnections.get(c.id)?.provider }) }}
+                </span>
             </div>
             <div class="font-mono text-xs text-neutral-600 break-all">
               <span v-if="c.account_number">{{ c.account_number }}<span v-if="c.bank_code"> / {{ c.bank_code }}</span></span>
