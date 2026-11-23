@@ -620,13 +620,124 @@ final class JournalDocumentListTest extends TestCase
         self::assertSame([3, 2920.00], [$all['totals']['count'], $all['totals']['amount']]);
 
         $dim = $this->service->build($this->supplierId, ['dimension' => $this->dimensions->filters($this->supplierId, [$this->valueA])], '5', '5')['documents'];
-        self::assertSame([[726.00, 126.00]], array_map(static fn (array $r): array => [$r['amount'], $r['self_assessed_vat']], $dim),
-            'Díl v dimenzi nese přiznanou DPH stejným poměrem.');
+        self::assertSame([[726.00, null]], array_map(static fn (array $r): array => [$r['amount'], $r['self_assessed_vat']], $dim),
+            'Společná částka na 343 neurčuje daň jednoho z nákladových řádků.');
 
         $sheet = $this->sheet($this->call(self::LINES + ['source_type' => 'purchase_invoice', 'source_id' => (string) $rc])['raw']);
         self::assertSame('DPH reverse charge (Kč)', $sheet->getCell('N8')->getValue());
         self::assertSame([1000.0, 210.0, 1210.0], [(float) $sheet->getCell('M9')->getValue(), (float) $sheet->getCell('N9')->getValue(), (float) $sheet->getCell('O9')->getValue()]);
         self::assertEqualsWithDelta(1210.00, (float) $sheet->getCell('O11')->getValue(), 0.001);
+    }
+
+    public function testForeignReverseChargeUsesPostedCzkIncludingReversal(): void
+    {
+        $id = $this->purchase('PF-RC-EUR', 'DOD-RC-EUR', 40.00);
+        $this->db->pdo()->prepare("UPDATE purchase_invoices SET reverse_charge = 1,
+            currency_id = (SELECT id FROM currencies WHERE code = 'EUR' LIMIT 1), exchange_rate = 25 WHERE id = ?")->execute([$id]);
+        $entry = $this->postPurchase($id, [['518', 'debit', 1210.00], ['343', 'credit', 210.00], ['321', 'credit', 1000.00]]);
+        $sheet = $this->sheet($this->call(self::LINES)['raw']);
+        self::assertSame(['EUR', 40.0, 210.0, 1210.0], [$sheet->getCell('L9')->getValue(),
+            (float) $sheet->getCell('M9')->getValue(), (float) $sheet->getCell('N9')->getValue(), (float) $sheet->getCell('O9')->getValue()]);
+
+        $this->posting->reverse($this->supplierId, $entry, ['entry_date' => self::YEAR . '-05-01', 'posted_by' => $this->userId]);
+        $row = $this->service->build($this->supplierId, ['date_from' => self::YEAR . '-05-01'], '5', '5')['documents'][0];
+        self::assertSame([-1210.0, -210.0], [$row['amount'], $row['self_assessed_vat']]);
+    }
+
+    public function testSeparatePostingsPreserveDifferentRatesByDimension(): void
+    {
+        $id = $this->purchase('PF-RC-DIM', 'DOD-RC-DIM', 2000.00);
+        $this->db->pdo()->prepare('UPDATE purchase_invoices SET reverse_charge = 1 WHERE id = ?')->execute([$id]);
+        $this->postPurchase($id, [
+            ['518', 'debit', 1210.00, ['dimensions' => [$this->type => $this->valueA]]],
+            ['343', 'credit', 210.00], ['321', 'credit', 1000.00],
+        ]);
+        $otherEntry = $this->manual([
+            ['518', 'debit', 1120.00, ['dimensions' => [$this->type => $this->valueB]]],
+            ['343', 'credit', 120.00], ['321', 'credit', 1000.00],
+        ]);
+        (new DocumentPostingGroup($this->db))->attach($this->supplierId, 'purchase_invoice', $id, [$otherEntry]);
+        self::assertSame([210.0], array_column($this->select([$this->valueA]), 'self_assessed_vat'));
+        self::assertSame([120.0], array_column($this->select([$this->valueB]), 'self_assessed_vat'));
+    }
+
+    public function testUnallocatedTaxIsLeftBlankInTheWorkbook(): void
+    {
+        $id = $this->purchase('PF-RC-MIX', 'DOD-RC-MIX', 2000.00);
+        $this->db->pdo()->prepare('UPDATE purchase_invoices SET reverse_charge = 1 WHERE id = ?')->execute([$id]);
+        $this->postPurchase($id, [
+            ['518', 'debit', 1210.00, ['dimensions' => [$this->type => $this->valueA]]],
+            ['518', 'debit', 1120.00, ['dimensions' => [$this->type => $this->valueB]]],
+            ['343', 'credit', 330.00], ['321', 'credit', 2000.00],
+        ]);
+        $sheet = $this->sheet($this->call(self::LINES + ['dimension_value_id' => (string) $this->valueA])['raw']);
+        self::assertNull($sheet->getCell('N9')->getValue());
+        self::assertStringContainsString('Reverse charge', (string) $sheet->getCell('K9')->getValue());
+        self::assertSame(1210.00, (float) $sheet->getCell('O9')->getValue());
+        self::assertSame(330.00, $this->service->build($this->supplierId, [], '5', '5')['documents'][0]['self_assessed_vat']);
+    }
+
+    public function testPortionOfOneCostLineDoesNotProveTheTaxPortion(): void
+    {
+        $id = $this->purchase('PF-RC-ROZPAD', 'DOD-RC-ROZPAD', 2000.00);
+        $this->db->pdo()->prepare('UPDATE purchase_invoices SET reverse_charge = 1 WHERE id = ?')->execute([$id]);
+        $this->postPurchase($id, [
+            ['518', 'debit', 2330.00, ['dimension_splits' => [$this->type => [$this->valueA => 0.6, $this->valueB => 0.4]]]],
+            ['343', 'credit', 330.00], ['321', 'credit', 2000.00],
+        ]);
+        $row = $this->select([$this->valueA])[0];
+        self::assertSame([1398.00, null], [$row['amount'], $row['self_assessed_vat']]);
+        self::assertStringContainsString('podíl DPH', implode(' ', $row['checks']));
+    }
+
+    public function testPurchaseWithTaxOnAnotherPostingIsFlagged(): void
+    {
+        $id = $this->purchase('PF-RC-ZVL', 'DOD-RC-ZVL', 1000.00);
+        $this->db->pdo()->prepare('UPDATE purchase_invoices SET reverse_charge = 1 WHERE id = ?')->execute([$id]);
+        $this->postPurchase($id, [
+            ['518', 'debit', 1000.00, ['dimensions' => [$this->type => $this->valueA]]],
+            ['321', 'credit', 1000.00],
+        ]);
+        $taxEntry = $this->manual([['518', 'debit', 210.00], ['343', 'credit', 210.00]]);
+        (new DocumentPostingGroup($this->db))->attach($this->supplierId, 'purchase_invoice', $id, [$taxEntry]);
+        $row = $this->select([$this->valueA])[0];
+        self::assertNull($row['self_assessed_vat']);
+        self::assertStringContainsString('podíl DPH', implode(' ', $row['checks']));
+    }
+
+    public function testMixedSupplierAndSelfAssessedVatRequireReconciliation(): void
+    {
+        $id = $this->purchase('PF-RC-TUZ', 'DOD-RC-TUZ', 2120.00);
+        $this->db->pdo()->prepare('UPDATE purchase_invoices SET reverse_charge = 1, total_without_vat = 2000, total_vat = 120 WHERE id = ?')->execute([$id]);
+        $this->postPurchase($id, [
+            ['518', 'debit', 2165.00], ['343', 'debit', 165.00], ['343', 'credit', 210.00], ['321', 'credit', 2120.00],
+        ]);
+        $row = $this->service->build($this->supplierId, [], '5', '5')['documents'][0];
+        self::assertNull($row['self_assessed_vat']);
+        self::assertStringContainsString('podíl DPH', implode(' ', $row['checks']));
+    }
+
+    public function testBothInvoiceKindsUseHistoricalPartnerIdentity(): void
+    {
+        $id = $this->purchase('PF-SNAP', 'DOD-SNAP', 1000.00);
+        $pdo = $this->db->pdo();
+        $pdo->prepare('UPDATE purchase_invoices SET vendor_snapshot = ? WHERE id = ?')
+            ->execute([json_encode(['company_name' => 'Původní dodavatel', 'ic' => '00123456'], JSON_THROW_ON_ERROR), $id]);
+        $this->postPurchase($id, [['518', 'debit', 1000.00], ['321', 'credit', 1000.00]]);
+
+        $client = $this->client();
+        $pdo->prepare("UPDATE clients SET ic = '87654321' WHERE id = ?")->execute([$client]);
+        $pdo->prepare("INSERT INTO invoices (supplier_id, invoice_type, client_id, client_snapshot, varsymbol, issue_date, due_date,
+                           currency_id, status, total_with_vat, created_by)
+                       SELECT ?, 'invoice', ?, ?, 'FV-SNAP', ?, ?, id, 'issued', 100, ? FROM currencies WHERE code = 'CZK' LIMIT 1")
+            ->execute([$this->supplierId, $client, json_encode(['first_name' => 'Anna', 'last_name' => 'Vzorová', 'ic' => null], JSON_THROW_ON_ERROR),
+                self::DATE, self::DATE, $this->userId]);
+        $invoice = (int) $pdo->lastInsertId();
+        $this->posting->postDocument($this->supplierId, 'invoice', $invoice, self::lines([['311', 'debit', 100.00], ['518', 'credit', 100.00]]),
+            ['entry_date' => self::DATE, 'posted_by' => $this->userId]);
+        $docs = $this->byDoc($this->service->build($this->supplierId, [], '5', '5')['documents']);
+        self::assertSame(['Původní dodavatel', '00123456'], [$docs['purchase_invoice:' . $id]['partner_name'], $docs['purchase_invoice:' . $id]['partner_ic']]);
+        self::assertSame(['Anna Vzorová', null], [$docs['invoice:' . $invoice]['partner_name'], $docs['invoice:' . $invoice]['partner_ic']]);
     }
 
     public function testExcludedDraftsAreCountedInTheHeader(): void

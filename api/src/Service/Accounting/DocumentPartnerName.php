@@ -32,15 +32,22 @@ final class DocumentPartnerName
         if (!empty($row[$snapshotKey])) {
             $snap = json_decode((string) $row[$snapshotKey], true);
             if (is_array($snap)) {
-                foreach (['company_name', 'name'] as $k) {
-                    if (!empty($snap[$k])) {
-                        return (string) $snap[$k];
-                    }
-                }
-                $p = trim(((string) ($snap['first_name'] ?? '')) . ' ' . ((string) ($snap['last_name'] ?? '')));
-                if ($p !== '') return $p;
+                return self::fromSnapshot($snap);
             }
         }
         return null;
+    }
+
+    /** @param array<string,mixed> $snapshot */
+    public static function fromSnapshot(array $snapshot): ?string
+    {
+        foreach (['company_name', 'name'] as $key) {
+            $name = trim((string) ($snapshot[$key] ?? ''));
+            if ($name !== '') {
+                return $name;
+            }
+        }
+        $person = trim(($snapshot['first_name'] ?? '') . ' ' . ($snapshot['last_name'] ?? ''));
+        return $person !== '' ? $person : null;
     }
 }

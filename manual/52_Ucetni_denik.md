@@ -59,7 +59,7 @@ Z bankovního výpisu použijte u pohybu **Otevřít v účetním deníku**. Ote
 6. V panelu **Souvisí** vidíte protějšek (faktura a její úhrada) a můžete přejít na **Náhled**, **Zápis #…** nebo **Otevřít doklad**.
 7. Kliknutím na kód nebo název účtu v rozbaleném zápisu otevřete opis pohybů účtu.
 8. Chcete-li deník předat, klikněte na **Export PDF** nebo **Export XLSX**. Export respektuje aktuální filtry a je omezený na 5 000 zápisů.
-9. Potřebujete-li seznam dokladů k vyúčtování (například dotace podle dimenze), nastavte filtr, klikněte na **Soupiska dokladů**, zkontrolujte rozsah účtů soupisky (bez rozsahu ve filtru se nabídne 5 až 5, tedy nákladové účty) a klikněte na **Stáhnout XLSX** nebo stiskněte Enter. Co soupiska obsahuje, popisuje [§ 52.14.3.4](#521434-export-pdf-xlsx).
+9. Potřebujete-li seznam dokladů k vyúčtování (například dotace podle dimenze), nastavte filtr, v nabídce **…** vyberte **Soupiska dokladů**, zkontrolujte rozsah účtů soupisky (bez rozsahu ve filtru se nabídne 5 až 5, tedy nákladové účty) a klikněte na **Stáhnout XLSX** nebo stiskněte Enter. Co soupiska obsahuje, popisuje [§ 52.14.3.4](#521434-export-pdf-xlsx).
 
 **Jak poznáte, že je hotovo:** Vidíte hledaný zápis se stavem **Zaúčtováno** a jeho zdroj. Koncept se označí badge **Koncept**.
 
@@ -676,7 +676,7 @@ na účet naopak jen částka připadající na filtrovaný rozsah účtů, ve s
 podle strany. PDF má **číslované strany**. Export je omezený na max. **5 000 zápisů** najednou
 - při větším rozsahu zužte filtr (typicky Datum od/do) a export zopakujte po částech.
 
-Tlačítko **Soupiska dokladů** stáhne XLSX se seznamem prvotních dokladů, typicky jako podklad
+Volba **Soupiska dokladů** v nabídce **…** otevře dialog pro stažení XLSX se seznamem prvotních dokladů, typicky jako podklad
 k vyúčtování dotace nebo projektu podle dimenze. Soupiska vezme zápisy **přesně podle aktuálního
 filtru** Deníku (včetně hledání podle kódu účtu a filtru účtů) a z nich jen **zaúčtované řádky
 v rozsahu účtů soupisky**; koncepty nepočítá, stejně jako výsledovka po dimenzi, a jejich počet uvede v hlavičce. Ten zadáte v dialogu a je povinný: předvyplní se z filtru **Účet od / Účet do**, pokud
@@ -708,8 +708,10 @@ chybějící celkovou částku, storno nebo opravu mimo filtr, doklad v cizí m�
 zápornou částku a částku k doložení vyšší než celý doklad. U přijaté faktury v režimu přenesené
 daňové povinnosti (reverse charge), kde náklad obsahuje DPH přiznanou odběratelem (neplátce,
 identifikovaná osoba nebo neodpočtená část), uvádí sloupec **DPH reverse charge** díl částky
-k doložení připadající na tuto DPH (v poměru základu a daně, i u faktury jen dílem v dimenzi). Tato DPH na faktuře
-není, celková částka dokladu ji neobsahuje; částka k doložení je součet obou. Faktura ji proto
+k doložení připadající na tuto DPH v Kč podle zaúčtování, i když byl doklad vystaven v cizí měně.
+Pokud zápis nedokládá přesný podíl daně pro vybrané účty či dimenzi nebo kombinuje daň
+dodavatele a samovyměření, zůstane buňka prázdná a důvod najdete ve sloupci **K ověření**.
+Celková částka faktury samovyměřenou daň neobsahuje. Faktura ji proto
 nedokládá a sloupec **K ověření** připomene: doložte ji výpočtem DPH k faktuře
 (například interním dokladem) a rekapitulací přiznání a úhrady daně za období, protože přiznání
 i platba finančnímu úřadu jsou součtem více položek. Vyšší částka k doložení o přiznanou DPH se

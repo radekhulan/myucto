@@ -226,6 +226,15 @@ function setBulkMode(on: boolean) {
 }
 const headerActions = computed<ActionItem[]>(() => [
   {
+    key: 'document-list',
+    label: t('accounting.journal.document_list'),
+    icon: 'clipboardCheck',
+    tier: 'overflow',
+    variant: 'primary',
+    disabled: exporting.value,
+    run: openDocumentList,
+  },
+  {
     key: 'bulk-mode',
     label: t(bulkMode.value ? 'accounting.journal.bulk_mode_off' : 'accounting.journal.bulk_mode_on'),
     icon: bulkMode.value ? 'x' : 'check',
@@ -1196,15 +1205,11 @@ function entryRange(entry: JournalEntryDetail): { from: string; to: string } {
           <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.download" /></svg>
           {{ t('accounting.journal.export_xlsx') }}
         </button>
-        <button type="button" :disabled="exporting" :class="btnOutline('primary')" class="whitespace-nowrap" data-test="journal-document-list" @click="openDocumentList">
-          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.clipboardCheck" /></svg>
-          {{ t('accounting.journal.document_list') }}
-        </button>
         <RouterLink v-if="rebookLink" :to="rebookLink" :class="btnOutline('neutral')" class="whitespace-nowrap" data-test="journal-rebook-by-filter">
           <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.swap" /></svg>
           {{ t('accounting.journal.rebook_by_filter') }}
         </RouterLink>
-        <ActionBar v-if="bulk.canUse.value" :actions="headerActions" data-test="journal-more-actions" />
+        <ActionBar :actions="headerActions" data-test="journal-more-actions" />
         <RouterLink v-if="auth.canWrite('accounting.journal.write') || auth.isDemo" to="/accounting/journal/new" :class="btnFilled('primary')">
           <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.plus" /></svg>
           {{ t('accounting.journal.new') }}

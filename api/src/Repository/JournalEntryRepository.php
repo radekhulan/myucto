@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Repository;
 
 use MyInvoice\Service\Accounting\AccountCodeRange;
+use MyInvoice\Service\Accounting\DocumentPartnerName;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Accounting\Dimension\DimensionFilter;
 use MyInvoice\Service\Accounting\Dimension\DimensionPeriodGuard;
@@ -2424,6 +2425,8 @@ final class JournalEntryRepository
                        -- Přenesená daňová povinnost: celkem dokladu je bez DPH, kterou si odběratel
                        -- přiznává sám (u neplátce či identifikované osoby jde do nákladu).
                        COALESCE(g.doc_kind = 'purchase_invoice' AND dpi.reverse_charge = 1, 0) AS reverse_charge,
+                       dpi.total_vat AS supplier_vat,
+                       COALESCE(dpi.vendor_snapshot, di.client_snapshot) AS partner_snapshot,
                        CASE g.doc_kind
                            WHEN 'invoice' THEN di.total_with_vat
                            WHEN 'purchase_invoice' THEN dpi.total_with_vat
@@ -2497,36 +2500,57 @@ final class JournalEntryRepository
             $r['corrected_outside'] = (bool) $r['corrected_outside'];
             $r['mixed_sides'] = (bool) $r['mixed_sides'];
             $r['reverse_charge'] = (bool) $r['reverse_charge'];
+            $snapshot = json_decode((string) $r['partner_snapshot'], true);
+            if (is_array($snapshot)) {
+                $r['partner_name'] = DocumentPartnerName::fromSnapshot($snapshot) ?? $r['partner_name'];
+                if (array_key_exists('ic', $snapshot)) {
+                    $ic = trim((string) $snapshot['ic']);
+                    $r['partner_ic'] = $ic !== '' ? $ic : null;
+                }
+            }
+            unset($r['partner_snapshot']);
             return $r;
         }, $stmt->fetchAll(PDO::FETCH_ASSOC));
     }
 
     /**
-     * Čistá částka na účtech DPH (343, Dal − MD) po zápisech: u přijaté faktury v režimu přenesené
-     * daňové povinnosti je to přiznaná DPH, kterou zápis nese v nákladu (neplátce, identifikovaná
-     * osoba, nebo neodpočtená část); u plátce s plným odpočtem se výstup a vstup vyruší na nulu.
+     * Zaúčtovaná daň i obrat ostatních řádků kromě DPH a závazku jsou v Kč.
+     * Absolutní obrat zachová i řádky, které se navzájem vyruší.
      *
      * @param list<int> $entryIds
-     * @return array<int, float> entry_id => částka
+     * @param array<string,mixed> $filters
+     * @return array<int,array{vat:string,has_vat:int,cost_turnover:string,selected_cost:string}>
      */
-    public function selfAssessedVatByEntry(int $supplierId, array $entryIds): array
+    public function reverseChargePostings(int $supplierId, array $entryIds, array $filters, string $accountFrom, string $accountTo): array
     {
         if ($entryIds === []) {
             return [];
         }
-        [$from, $to] = AccountCodeRange::sqlBoundsFor('343', '343');
+        $join = '';
+        $lineParams = [];
+        $selected = 'l.signed_amount';
+        if (($filters['dimension'] ?? null) instanceof DimensionFilter) {
+            [$lineSource, $lineParams] = $this->documentLineSource($supplierId, $filters);
+            $join = "LEFT JOIN {$lineSource} ON fl.id = l.id";
+            $selected = 'COALESCE(fl.signed_amount, 0)';
+        }
+
         $marks = implode(',', array_fill(0, count($entryIds), '?'));
-        $stmt = $this->db->pdo()->prepare("SELECT l.entry_id, SUM(CASE WHEN l.side = 'credit' THEN l.signed_amount ELSE -l.signed_amount END) AS vat
+        $isVat = "a.account_code LIKE '343%'";
+        $isCostCandidate = "a.account_code NOT LIKE '321%' AND a.account_code NOT LIKE '343%'";
+        $stmt = $this->db->pdo()->prepare("SELECT l.entry_id,
+                    SUM(CASE WHEN {$isVat} THEN IF(l.side = 'credit', l.signed_amount, -l.signed_amount) ELSE 0 END) AS vat,
+                    MAX({$isVat}) AS has_vat,
+                    SUM(CASE WHEN {$isCostCandidate} THEN ABS(l.signed_amount) ELSE 0 END) AS cost_turnover,
+                    SUM(CASE WHEN {$isCostCandidate} AND a.account_type IN ('expense', 'asset') AND a.account_code BETWEEN ? AND ?
+                             THEN ABS({$selected}) ELSE 0 END) AS selected_cost
               FROM journal_entry_lines l
               JOIN chart_of_accounts a ON a.supplier_id = l.supplier_id AND a.id = l.account_id
-             WHERE l.supplier_id = ? AND l.entry_id IN ({$marks}) AND a.account_code BETWEEN ? AND ?
+              {$join}
+             WHERE l.supplier_id = ? AND l.entry_id IN ({$marks})
              GROUP BY l.entry_id");
-        $stmt->execute([$supplierId, ...array_values($entryIds), $from, $to]);
-        $out = [];
-        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $r) {
-            $out[(int) $r['entry_id']] = (float) $r['vat'];
-        }
-        return $out;
+        $stmt->execute([...AccountCodeRange::sqlBoundsFor($accountFrom, $accountTo), ...$lineParams, $supplierId, ...$entryIds]);
+        return $stmt->fetchAll(PDO::FETCH_UNIQUE | PDO::FETCH_ASSOC);
     }
 
     /**

@@ -9,6 +9,7 @@ const m = vi.hoisted(() => ({
   exportReport: vi.fn(),
   replace: vi.fn(),
   toastError: vi.fn(),
+  canWrite: true,
   routeQuery: {} as Record<string, string>,
   supplier: { accounting_framework: 'cz_500', entity_profile: 'unknown' } as Record<string, string>,
 }))
@@ -44,7 +45,7 @@ vi.mock('vue-i18n', async importOriginal => ({
   ...await importOriginal<typeof import('vue-i18n')>(),
   useI18n: () => ({ locale: { value: 'cs' }, t: (key: string) => key }),
 }))
-vi.mock('@/stores/auth', () => ({ useAuthStore: () => ({ canWrite: () => true, canRead: () => true, isDemo: false }) }))
+vi.mock('@/stores/auth', () => ({ useAuthStore: () => ({ canWrite: () => m.canWrite, canRead: () => true, isDemo: false }) }))
 vi.mock('@/stores/supplier', () => ({ useSupplierStore: () => ({ get currentSupplier() { return m.supplier } }) }))
 vi.mock('@/composables/useToast', () => ({ useToast: () => ({ error: m.toastError, success: vi.fn() }) }))
 vi.mock('@/composables/useFormat', () => ({ formatDate: (v: string) => v, formatMoney: (v: number) => String(v) }))
@@ -209,19 +210,40 @@ describe('Journal – soupiska dokladů', () => {
     m.listAccounts.mockResolvedValue([])
     m.listJournal.mockResolvedValue({ items: [], total: 0, page: 1, per_page: 50 })
     m.routeQuery = {}
+    m.canWrite = true
     Object.assign(URL, { createObjectURL: vi.fn(() => 'blob:x'), revokeObjectURL: vi.fn() })
     vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})
   })
 
+  async function documentListMenuItem(wrapper: ReturnType<typeof mountJournal>) {
+    expect(wrapper.find('[data-test="action-bar-menu"]').exists()).toBe(false)
+    await wrapper.get('[data-test="journal-more-actions"] button[aria-expanded]').trigger('click')
+    const item = wrapper.get('[data-test="action-bar-menu"]').findAll('button')
+      .find(button => button.text() === 'accounting.journal.document_list')
+    expect(item).toBeDefined()
+    return item!
+  }
+
   async function openDialog() {
     const wrapper = mountJournal({ attachTo: document.body })
     await flushPromises()
-    await wrapper.get('[data-test="journal-document-list"]').trigger('click')
+    await (await documentListMenuItem(wrapper)).trigger('click')
     await flushPromises()
     return wrapper
   }
   const input = (wrapper: Awaited<ReturnType<typeof openDialog>>, name: string) =>
     wrapper.get(`[data-test="document-list-${name}"]`).element as HTMLInputElement
+
+  it('účetní s právem čtení vidí v nabídce jen soupisku', async () => {
+    m.canWrite = false
+    const wrapper = mountJournal()
+    await flushPromises()
+    const item = await documentListMenuItem(wrapper)
+    expect(wrapper.get('[data-test="action-bar-menu"]').findAll('button')).toHaveLength(1)
+    await item.trigger('click')
+    expect(wrapper.find('[data-test="document-list-download"]').exists()).toBe(true)
+    wrapper.unmount()
+  })
 
   it('pošle přesně filtr seznamu Deníku a k němu rozsah soupisky', async () => {
     m.routeQuery = {
@@ -253,7 +275,7 @@ describe('Journal – soupiska dokladů', () => {
     await flushPromises()
     expect(names).toEqual(['soupiska-dokladu-2099-01-01_2099-12-31.xlsx'])
     m.exportReport.mockResolvedValue({ data: new Blob(['x']), headers: { 'content-disposition': "attachment; filename*=UTF-8''soupiska-%C4%8Dtvrtlet%C3%AD.xlsx" } })
-    await wrapper.get('[data-test="journal-document-list"]').trigger('click')
+    await (await documentListMenuItem(wrapper)).trigger('click')
     await flushPromises()
     await wrapper.get('form').trigger('submit')
     await flushPromises()
@@ -304,7 +326,7 @@ describe('Journal – soupiska dokladů', () => {
     const download = wrapper.get('[data-test="document-list-download"]')
     expect(download.text()).toBe('accounting.journal.document_list_preparing')
     expect(download.attributes('disabled')).toBeDefined()
-    expect(wrapper.get('[data-test="journal-document-list"]').attributes('disabled')).toBeDefined()
+    expect((await documentListMenuItem(wrapper)).attributes('aria-disabled')).toBe('true')
     resolve({ data: new Blob(['x']) })
     await flushPromises()
     expect(wrapper.find('[data-test="document-list-download"]').exists()).toBe(false)
