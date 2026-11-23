@@ -13,6 +13,7 @@ use MyInvoice\Service\Migration\Check\FixableMigrationDataCheck;
 use MyInvoice\Service\Migration\Check\FixPreview;
 use MyInvoice\Service\Migration\Check\FixResult;
 use MyInvoice\Service\Migration\Check\MigrationCheckLocks;
+use MyInvoice\Service\Migration\Check\MigrationDataCheckException;
 use MyInvoice\Service\Migration\Check\MigrationSources;
 use MyInvoice\Service\Migration\Check\SourceScopedCheck;
 use MyInvoice\Service\Migration\Pohoda\DocumentLinker;
@@ -111,7 +112,10 @@ final class TaxDocumentAdvanceLinkCheck extends SourceScopedCheck implements Fix
                 try {
                     // Ruční navázání ověří doklady dřív, než cokoli zapíše: odmítnutí nález
                     // jen ohlásí a ostatní vazby pokračují.
-                    $this->links->link($supplierId, (int) $c['item']->entityId, (int) $c['proforma_id'], $userId, '', 'migration-data-check');
+                    $linked = $this->links->link($supplierId, (int) $c['item']->entityId, (int) $c['proforma_id'], $userId, '', 'migration-data-check');
+                    if (($linked['payment_id'] ?? null) !== ($c['payment_id'] ?? null)) {
+                        throw new MigrationDataCheckException('stale_preview', 'Navázání DDKP by navázalo jinou platbu zálohy, než ukázal náhled. Otevřete náhled opravy znovu.', 409);
+                    }
                     $fixed[] = $c['item'];
                 } catch (\DomainException|\OutOfBoundsException $e) {
                     $skipped[] = $c['item']->withState(CheckItem::REVIEW, $e->getMessage());
@@ -137,7 +141,7 @@ final class TaxDocumentAdvanceLinkCheck extends SourceScopedCheck implements Fix
     {
         $pdo = $this->db->pdo();
         $stmt = $pdo->prepare(
-            "SELECT td.id, td.client_id, td.currency_id, td.varsymbol, td.issue_date, td.tax_date, td.total_with_vat, td.total_vat, td.note_above_items,
+            "SELECT td.id, td.client_id, td.currency_id, (SELECT c.code FROM currencies c WHERE c.id = td.currency_id) AS currency, td.varsymbol, td.issue_date, td.tax_date, td.total_with_vat, td.total_vat, td.note_above_items,
                     EXISTS (SELECT 1 FROM pohoda_import_map m WHERE m.supplier_id = td.supplier_id AND m.kind = 'invoice' AND m.target_id = td.id) AS migrated
                FROM invoices td
               WHERE td.supplier_id = ? AND td.invoice_type = 'tax_document' AND td.status NOT IN ('draft', 'cancelled')
@@ -222,7 +226,50 @@ final class TaxDocumentAdvanceLinkCheck extends SourceScopedCheck implements Fix
             $out[] = ['item' => new CheckItem('invoice', (int) $r['id'], $label, $date, $amount,
                 $lock === null ? CheckItem::FIXABLE : CheckItem::LOCKED,
                 $lock ?? sprintf('DDKP se naváže na zálohu %s%s.', $r['ref'], $diff !== 0.0 ? sprintf(' (rozdíl částek %s)', self::money($diff)) : ''),
-                details: $details), 'proforma_id' => (int) $p['id']];
+                details: $details), 'proforma_id' => (int) $p['id'], 'currency' => (string) $r['currency']];
+        }
+        return $this->withPlannedPayments($supplierId, $out, $forUpdate);
+    }
+
+    /**
+     * Ruční navázání naváže DDKP i na jedinou platbu zálohy se stejnou částkou a měnou bez
+     * DDKP ({@see TaxDocumentAdvanceLink::link()}). Plán proto nese, kterou platbu (nebo
+     * žádnou): přibude-li platba mezi náhledem a opravou, otisk nesedí. Při opravě se
+     * platby záloh zamknou, takže zápis naváže právě plánovanou platbu.
+     *
+     * @param list<array<string,mixed>> $out
+     * @return list<array<string,mixed>>
+     */
+    private function withPlannedPayments(int $supplierId, array $out, bool $forUpdate): array
+    {
+        $advanceIds = array_values(array_unique(array_filter(array_map(
+            static fn (array $c): ?int => $c['item']->state === CheckItem::FIXABLE ? $c['proforma_id'] : null, $out))));
+        if ($advanceIds === []) {
+            return $out;
+        }
+        $payments = [];
+        foreach (array_chunk($advanceIds, 500) as $chunk) {
+            $stmt = $this->db->pdo()->prepare('SELECT id, invoice_id, currency, amount FROM invoice_payments
+                  WHERE supplier_id = ? AND invoice_id IN (' . implode(',', array_map('intval', $chunk)) . ') AND tax_document_invoice_id IS NULL
+                  ORDER BY id' . ($forUpdate ? ' FOR UPDATE' : ''));
+            $stmt->execute([$supplierId]);
+            foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $p) {
+                $payments[(int) $p['invoice_id']][] = $p;
+            }
+        }
+        foreach ($out as $k => $c) {
+            if ($c['item']->state !== CheckItem::FIXABLE) {
+                continue;
+            }
+            $amount = number_format((float) $c['item']->amountCzk, 2, '.', '');
+            $same = array_values(array_filter($payments[$c['proforma_id']] ?? [], static fn (array $p): bool => (string) $p['currency'] === $c['currency']
+                && number_format((float) $p['amount'], 2, '.', '') === $amount));
+            $paymentId = count($same) === 1 ? (int) $same[0]['id'] : null;
+            $item = $c['item'];
+            $out[$k]['payment_id'] = $paymentId;
+            $out[$k]['item'] = new CheckItem($item->entityType, $item->entityId, $item->label, $item->date, $item->amountCzk, $item->state,
+                $item->reason . ($paymentId !== null ? ' Naváže i platbu zálohy ve stejné výši.' : ''), $item->amount, $item->currency,
+                $item->details + ['payment_id' => $paymentId]);
         }
         return $out;
     }

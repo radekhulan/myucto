@@ -8,6 +8,7 @@ use MyInvoice\Service\Migration\Check\Checks\PurchaseSettledUncoveredCheck;
 use MyInvoice\Service\Migration\Check\Checks\SettledWithoutPaymentCheck;
 use MyInvoice\Service\Migration\Check\MigrationDataCheckException;
 use MyInvoice\Service\Migration\Check\MigrationDataCheckService;
+use MyInvoice\Service\Migration\MoneyS3\MoneyS3SettledPayments;
 use MyInvoice\Tests\Fixtures\MoneyS3\SyntheticAgenda;
 use PDO;
 
@@ -52,7 +53,7 @@ final class MoneyS3MigrationDataCheckTest extends MoneyS3ImportTestCase
         $detail = $this->service->detail($this->supplierId, PurchaseSettledUncoveredCheck::KEY);
         self::assertSame([$open], array_column($detail['items'], 'entity_id'), 'Detekce vidí jen chybějící krytí.');
         $preview = $this->service->preview($this->supplierId, PurchaseSettledUncoveredCheck::KEY);
-        self::assertEqualsCanonicalizing([$replaced, $open], array_column($preview['changes'], 'entity_id'), 'Náhled ukazuje všechny skutečné změny.');
+        self::assertEqualsCanonicalizing([$replaced, $open], array_values(array_unique(array_column($preview['changes'], 'entity_id'))), 'Náhled ukazuje všechny skutečné změny.');
 
         $this->lockUntil($replacedPaid);
         $preview = $this->service->preview($this->supplierId, PurchaseSettledUncoveredCheck::KEY);
@@ -77,15 +78,64 @@ final class MoneyS3MigrationDataCheckTest extends MoneyS3ImportTestCase
         $preview = $this->service->preview($this->supplierId, SettledWithoutPaymentCheck::KEY);
         self::assertTrue($preview['can_fix']);
         self::assertContains($gap, array_column($preview['changes'], 'entity_id'));
-        self::assertContains($taxDocument, array_column($preview['changes'], 'entity_id'), 'Náhled ukazuje i vazbu platby na DDKP.');
+        self::assertNotNull(self::linkChange($preview['changes'], $taxDocument), 'Náhled ukazuje i vazbu platby na DDKP.');
 
         $this->filedVat((int) substr($taxDate, 0, 4), (int) substr($taxDate, 5, 2));
         $preview = $this->service->preview($this->supplierId, SettledWithoutPaymentCheck::KEY);
         self::assertFalse($preview['can_fix']);
-        self::assertSame('locked', array_column($preview['skipped'], 'state', 'entity_id')[$taxDocument]);
+        self::assertSame('locked', self::linkChange($preview['skipped'], $taxDocument)['state'] ?? null);
         $this->assertRefused(SettledWithoutPaymentCheck::KEY, $preview['fingerprint']);
         self::assertSame(0, (int) $pdo->query("SELECT COUNT(*) FROM invoice_payments WHERE tax_document_invoice_id = {$taxDocument}")->fetchColumn());
         self::assertSame(0, (int) $pdo->query("SELECT COUNT(*) FROM invoice_payments WHERE invoice_id = {$gap} AND source = 'settlement'")->fetchColumn());
+    }
+
+    /** Zápočet se zapisuje k datu interního zápisu: zámek se ověřuje nad ním, ne nad datem úhrady dokladu. */
+    public function testSettlementIsCheckedAtJournalEntryDate(): void
+    {
+        $pdo = $this->db->pdo();
+        $invoice = $this->invoice('FV25020');
+        $entry = (int) $pdo->query("SELECT journal_entry_id FROM invoice_settlements WHERE doc_type = 'invoice' AND doc_id = {$invoice}")->fetchColumn();
+        self::assertGreaterThan(0, $entry);
+        $pdo->prepare("DELETE FROM invoice_settlements WHERE supplier_id = ? AND doc_type = 'invoice' AND doc_id = ?")->execute([$this->supplierId, $invoice]);
+        $pdo->prepare("DELETE FROM invoice_payments WHERE supplier_id = ? AND invoice_id = ? AND source = 'settlement'")->execute([$this->supplierId, $invoice]);
+        $paid = $this->paidAtInvoice($invoice);
+        $entryDate = (new \DateTimeImmutable($paid))->modify('-10 days')->format('Y-m-d');
+        $pdo->prepare('UPDATE journal_entries SET entry_date = ? WHERE id = ?')->execute([$entryDate, $entry]);
+        $this->lockUntil($entryDate);
+
+        $preview = $this->service->preview($this->supplierId, SettledWithoutPaymentCheck::KEY);
+        $settlement = array_values(array_filter(array_merge($preview['changes'], $preview['skipped']),
+            static fn (array $i): bool => ($i['details']['table'] ?? '') === 'settlements' && $i['entity_id'] === $invoice));
+        self::assertNotSame([], $settlement, 'Náhled ukazuje zápočet interním dokladem.');
+        self::assertSame($entryDate, $settlement[0]['details']['after']['settled_on']);
+        self::assertSame($entry, (int) $settlement[0]['details']['after']['journal_entry_id']);
+        self::assertSame('locked', $settlement[0]['state']);
+        self::assertFalse($preview['can_fix']);
+    }
+
+    /** Zrušená výplň odnese vazbu platby na DDKP: i zánik vazby je v náhledu a hlídá se období DDKP. */
+    public function testRemovedTaxDocumentLinkIsPreviewedAndChecked(): void
+    {
+        $pdo = $this->db->pdo();
+        $advance = $this->invoice('ZV25051');
+        $taxDocument = $this->invoice('DD25051');
+        self::assertSame(1, (int) $pdo->query("SELECT COUNT(*) FROM invoice_payments WHERE invoice_id = {$advance} AND tax_document_invoice_id = {$taxDocument}")->fetchColumn());
+        // Úhrada zálohy je výplň bez dokladu úhrady s vazbou na DDKP. Úhrada podle Money zmizela
+        // (opravený doklad): výplň se zruší a vazbu nemá kdo převzít.
+        $pdo->prepare("DELETE FROM invoice_settlements WHERE supplier_id = ? AND doc_type = 'invoice' AND doc_id = ?")->execute([$this->supplierId, $advance]);
+        $pdo->prepare('UPDATE invoice_payments SET note = ? WHERE invoice_id = ? AND tax_document_invoice_id = ?')
+            ->execute([MoneyS3SettledPayments::note(), $advance, $taxDocument]);
+        $pdo->prepare('UPDATE invoices SET paid_total = 0 WHERE id = ?')->execute([$advance]);
+        $preview = $this->service->preview($this->supplierId, SettledWithoutPaymentCheck::KEY);
+        $removal = self::linkChange(array_merge($preview['changes'], $preview['skipped']), $taxDocument);
+        self::assertNotNull($removal, 'Náhled ukazuje zánik vazby platby na DDKP.');
+        self::assertSame('remove', $removal['details']['op']);
+
+        $taxDate = (string) $pdo->query("SELECT COALESCE(tax_date, issue_date) FROM invoices WHERE id = {$taxDocument}")->fetchColumn();
+        $this->filedVat((int) substr($taxDate, 0, 4), (int) substr($taxDate, 5, 2));
+        $preview = $this->service->preview($this->supplierId, SettledWithoutPaymentCheck::KEY);
+        self::assertSame('locked', self::linkChange($preview['skipped'], $taxDocument)['state'] ?? null);
+        self::assertFalse($preview['can_fix']);
     }
 
     /** Oprava zapíše přesně plán z náhledu a opakovaná oprava nic nenajde. */
@@ -102,6 +152,23 @@ final class MoneyS3MigrationDataCheckTest extends MoneyS3ImportTestCase
         $again = $this->service->preview($this->supplierId, SettledWithoutPaymentCheck::KEY);
         self::assertFalse($again['can_fix']);
         self::assertSame(0, $again['count']);
+    }
+
+    /**
+     * Změna platby, která ji naváže na DDKP nebo z něj odváže.
+     *
+     * @param list<array<string,mixed>> $items
+     * @return ?array<string,mixed>
+     */
+    private static function linkChange(array $items, int $taxDocument): ?array
+    {
+        foreach ($items as $i) {
+            $d = $i['details'];
+            if (($d['table'] ?? '') === 'payments' && in_array($taxDocument, [(int) ($d['before']['tax_document_invoice_id'] ?? 0), (int) ($d['after']['tax_document_invoice_id'] ?? 0)], true)) {
+                return $i;
+            }
+        }
+        return null;
     }
 
     private function assertRefused(string $key, string $fingerprint): void

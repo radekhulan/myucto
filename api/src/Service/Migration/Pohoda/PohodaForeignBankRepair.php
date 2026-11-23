@@ -523,7 +523,11 @@ final class PohodaForeignBankRepair
             $own ? $pdo->commit() : $pdo->exec('RELEASE SAVEPOINT pohoda_foreign_bank_repair');
             return ['status' => $plan['status'] === 'rechain' ? 'rechained' : 'converted', 'result' => $result] + $plan;
         } catch (\Throwable $e) {
-            TransactionFailure::rollbackIfAborted($pdo, $e);
+            // Odvolaná transakce (deadlock, lock wait) se nesmí hlásit jako selhání jednoho účtu:
+            // ostatní účty by pokračovaly mimo transakci volajícího. Původní chyba jde ven.
+            if (TransactionFailure::rollbackIfAborted($pdo, $e)) {
+                throw $e;
+            }
             if ($own && $pdo->inTransaction()) {
                 $pdo->rollBack();
             } elseif (!$own && $pdo->inTransaction()) {
@@ -848,7 +852,11 @@ final class PohodaForeignBankRepair
             $own ? $pdo->commit() : $pdo->exec('RELEASE SAVEPOINT pohoda_foreign_bank_upload');
             return null;
         } catch (\Throwable $e) {
-            TransactionFailure::rollbackIfAborted($pdo, $e);
+            // Odvolaná transakce (deadlock, lock wait) se nesmí hlásit jako selhání jednoho účtu:
+            // ostatní účty by pokračovaly mimo transakci volajícího. Původní chyba jde ven.
+            if (TransactionFailure::rollbackIfAborted($pdo, $e)) {
+                throw $e;
+            }
             if ($own && $pdo->inTransaction()) {
                 $pdo->rollBack();
             } elseif (!$own && $pdo->inTransaction()) {

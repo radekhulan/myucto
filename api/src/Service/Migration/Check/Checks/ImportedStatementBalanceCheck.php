@@ -132,7 +132,7 @@ final class ImportedStatementBalanceCheck extends SourceScopedCheck implements F
                     continue;
                 }
                 $this->chain->rechain($supplierId, $chain['statement_ids'], $chain['opening']);
-                $released = $this->releaseRebases($supplierId, $chain['statement_ids']);
+                $released = $this->releaseRebases($supplierId, $chain['statement_ids'], $chain['rebases']);
                 $first = $pdo->prepare("SELECT prev_balance FROM bank_statements WHERE id = ? AND supplier_id = ? AND source = 'import'");
                 $first->execute([$chain['statement_ids'][0], $supplierId]);
                 if (PohodaForeignBank::cents((float) $first->fetchColumn()) !== $chain['opening']) {
@@ -175,7 +175,7 @@ final class ImportedStatementBalanceCheck extends SourceScopedCheck implements F
         $pdo = $this->db->pdo();
         $stmt = $pdo->prepare(
             "SELECT bs.id, bs.account_number, COALESCE(bs.bank_code, '') AS bank_code, COALESCE(bs.currency, 'CZK') AS currency,
-                    bs.statement_date, bs.prev_balance, bs.curr_balance
+                    bs.statement_date, bs.prev_balance, bs.curr_balance, bs.credit_total, bs.debit_total
                FROM bank_statements bs
               WHERE bs.supplier_id = ? AND bs.source = 'import'
               ORDER BY bs.statement_date, bs.id" . ($forUpdate ? ' FOR UPDATE' : '')
@@ -195,7 +195,7 @@ final class ImportedStatementBalanceCheck extends SourceScopedCheck implements F
         $sources = (new TakenOverRecord($this->db))->bankStatementSourceAccounts($supplierId,
             array_merge(...array_map(static fn (array $g): array => array_map(static fn (array $s): int => (int) $s['id'], $g), array_values($groups))));
 
-        $rebases = $this->rebases($supplierId);
+        $rebases = $this->rebases($supplierId, $forUpdate);
         $out = [];
         foreach ($groups as $statements) {
             if ($statements[0]['currency'] !== 'CZK') {
@@ -226,7 +226,7 @@ final class ImportedStatementBalanceCheck extends SourceScopedCheck implements F
      * @param array<int,array{0:int,1:int}> $totals
      * @param array<int,?string> $sources
      * @param list<array{id:int,shift:string,ids:list<int>,anchor_source:?string,anchor_date:?string}> $rebases
-     * @return array{item:?CheckItem,statement_ids:list<int>,opening:?int}
+     * @return array{item:?CheckItem,statement_ids:list<int>,opening:?int,rebases:list<array<string,mixed>>}
      */
     private function evaluate(int $supplierId, array $chain, array $period, array $totals, int $accountId, string $accountCode, float $share, array $sources, array $rebases): array
     {
@@ -245,14 +245,20 @@ final class ImportedStatementBalanceCheck extends SourceScopedCheck implements F
         }
         $shift = $opening === null ? null : $first - $opening;
         if (($shift === null || $shift === 0) && $broken === null) {
-            return ['item' => null, 'statement_ids' => $ids, 'opening' => $opening];
+            return ['item' => null, 'statement_ids' => $ids, 'opening' => $opening, 'rebases' => []];
         }
         $label = sprintf('%s/%s, rok %d', $chain[0]['account_number'], $chain[0]['bank_code'], (int) $period['fiscal_year']);
         // Otisk vstupů plánu: stavy a obraty každého výpisu řetězu a počáteční stav v deníku.
         // Přibude-li pohyb nebo změní-li se stav mezi náhledem a opravou, otisk náhledu nesedí.
+        // Patří k nim i uložené obraty výpisů a evidované posuny, které oprava z řetězu odebere.
+        $chainRebases = array_values(array_filter($rebases, static fn (array $r): bool => array_intersect($ids, $r['ids']) !== []));
         $inputs = [$accountId, $opening];
         foreach ($chain as $s) {
-            $inputs[] = [(int) $s['id'], (string) $s['prev_balance'], (string) $s['curr_balance'], $totals[(int) $s['id']] ?? [0, 0]];
+            $inputs[] = [(int) $s['id'], (string) $s['prev_balance'], (string) $s['curr_balance'], (string) $s['credit_total'], (string) $s['debit_total'],
+                $totals[(int) $s['id']] ?? [0, 0]];
+        }
+        foreach ($chainRebases as $r) {
+            $inputs[] = [$r['id'], $r['shift'], $r['ids'], $r['anchor_source']];
         }
         $details = ['ledger_account' => $accountCode, 'fiscal_year' => (int) $period['fiscal_year'], 'statements' => count($ids),
             'opening_ledger' => $opening === null ? null : PohodaForeignBank::amount($opening), 'opening_statement' => PohodaForeignBank::amount($first),
@@ -260,7 +266,7 @@ final class ImportedStatementBalanceCheck extends SourceScopedCheck implements F
         $chainSources = array_values(array_unique(array_filter(array_map(static fn (int $id): ?string => $sources[$id] ?? null, $ids))));
         $rebased = 0;
         $confirmed = null;
-        foreach ($rebases as $r) {
+        foreach ($chainRebases as $r) {
             if (array_intersect($ids, $r['ids']) !== []) {
                 $rebased += PohodaForeignBank::cents((float) $r['shift']);
                 if ($r['anchor_source'] !== null && $r['anchor_source'] !== 'import') {
@@ -303,6 +309,7 @@ final class ImportedStatementBalanceCheck extends SourceScopedCheck implements F
                 null, 'CZK', $details),
             'statement_ids' => $ids,
             'opening' => $opening,
+            'rebases' => $chainRebases,
         ];
     }
 
@@ -341,12 +348,12 @@ final class ImportedStatementBalanceCheck extends SourceScopedCheck implements F
      *
      * @return list<array{id:int,shift:string,ids:list<int>,anchor_source:?string,anchor_date:?string}>
      */
-    private function rebases(int $supplierId): array
+    private function rebases(int $supplierId, bool $forUpdate = false): array
     {
         $stmt = $this->db->pdo()->prepare('SELECT r.id, r.shift, r.statement_ids, a.source AS anchor_source, a.statement_date AS anchor_date
               FROM bank_statement_rebases r
               LEFT JOIN bank_statements a ON a.id = r.anchor_statement_id AND a.supplier_id = r.supplier_id
-             WHERE r.supplier_id = ? ORDER BY r.id');
+             WHERE r.supplier_id = ? ORDER BY r.id' . ($forUpdate ? ' FOR UPDATE' : ''));
         $stmt->execute([$supplierId]);
         $out = [];
         foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $r) {
@@ -360,21 +367,20 @@ final class ImportedStatementBalanceCheck extends SourceScopedCheck implements F
 
     /**
      * Výpisy přepočtené od deníku z evidence posunů vypadnou: smazání výpisu banky, který
-     * posun způsobil, by je jinak posunulo zpět mimo deník.
+     * posun způsobil, by je jinak posunulo zpět mimo deník. Mění se jen záznamy ověřené
+     * v potvrzeném plánu (zamčené při jeho výpočtu).
      *
      * @param list<int> $ids
+     * @param list<array{id:int,shift:string,ids:list<int>}> $rebases
      */
-    private function releaseRebases(int $supplierId, array $ids): int
+    private function releaseRebases(int $supplierId, array $ids, array $rebases): int
     {
         $pdo = $this->db->pdo();
         $update = $pdo->prepare('UPDATE bank_statement_rebases SET statement_ids = ? WHERE id = ? AND supplier_id = ?');
         $delete = $pdo->prepare('DELETE FROM bank_statement_rebases WHERE id = ? AND supplier_id = ?');
         $released = 0;
-        foreach ($this->rebases($supplierId) as $r) {
+        foreach ($rebases as $r) {
             $left = array_values(array_diff($r['ids'], $ids));
-            if (count($left) === count($r['ids'])) {
-                continue;
-            }
             $released += count($r['ids']) - count($left);
             $left === [] ? $delete->execute([$r['id'], $supplierId]) : $update->execute([json_encode($left), $r['id'], $supplierId]);
         }

@@ -147,14 +147,18 @@ final class MigrationDataCheckService
     }
 
     /**
-     * Zamkne nastavení zámku k datu a účetní období firmy do konce transakce opravy: posun
-     * zámku ani změna stavu období nemůže proběhnout mezi kontrolou období a zápisem.
+     * Zamkne nastavení zámku k datu, účetní období a podání firmy do konce transakce opravy:
+     * posun zámku, změna stavu období ani nové či označené podání (DPH, KH, OSS) nemůže
+     * proběhnout mezi kontrolou období a zápisem. Podání se zamykají rozsahem indexu firmy
+     * (zámky mezer v REPEATABLE READ), takže čeká i založení nového podání. Kontrola období
+     * čte až po zamčení: první nezamykací čtení transakce vytvoří snímek až potom.
      */
     private function lockPeriodState(int $supplierId): void
     {
         $pdo = $this->db->pdo();
         $pdo->prepare('SELECT supplier_id FROM accounting_supplier_settings WHERE supplier_id = ? FOR UPDATE')->execute([$supplierId]);
         $pdo->prepare('SELECT id FROM accounting_periods WHERE supplier_id = ? FOR UPDATE')->execute([$supplierId]);
+        $pdo->prepare('SELECT id FROM tax_submissions FORCE INDEX (idx_supplier_form_period) WHERE supplier_id = ? FOR UPDATE')->execute([$supplierId]);
     }
 
     /** @return array<string,mixed> */

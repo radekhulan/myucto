@@ -418,6 +418,44 @@ final class MigrationDataCheckTest extends TestCase
         self::assertSame(['0.00', '-100.00'], $this->balances($jan));
     }
 
+    /** Záznam posunu, který přibude k řetězu po náhledu, otisk změní: oprava ho neodebere naslepo. */
+    public function testImportedStatementFixRefusesNewRebaseRecord(): void
+    {
+        $this->account('221.001', 'asset');
+        $this->account('701', 'equity');
+        $this->account('518', 'expense');
+        $this->post('2025-01-01', '221.001', '701', 1000.0, 'opening');
+        $jan = $this->statement('RB', '2025-01-31', 0.0, -100.0, [['2025-01-15', -100.0]]);
+        $preview = $this->service->preview($this->supplierId, ImportedStatementBalanceCheck::KEY);
+        $this->pdo->prepare('INSERT INTO bank_statement_rebases (supplier_id, anchor_statement_id, shift, statement_ids) VALUES (?, 999999999, ?, ?)')
+            ->execute([$this->supplierId, '0.00', json_encode([$jan])]);
+        try {
+            $this->service->fix($this->supplierId, ImportedStatementBalanceCheck::KEY, $this->userId, [], $preview['fingerprint']);
+            self::fail('Nový záznam posunu od náhledu musí opravu zastavit.');
+        } catch (MigrationDataCheckException $e) {
+            self::assertSame('stale_preview', $e->errorCode);
+        }
+        self::assertSame(1, $this->rows('bank_statement_rebases', '1 = 1'));
+    }
+
+    /** Platba zálohy, která přibude po náhledu, by se navázala na DDKP: oprava ji nenaváže naslepo. */
+    public function testTaxDocumentFixRefusesPaymentAddedAfterPreview(): void
+    {
+        $advance = $this->invoice('proforma', 'ZF25930', '2025-03-01', 1210.0, 0.0);
+        $ddkp = $this->invoice('tax_document', 'DD25930', '2025-03-05', 1210.0, 210.0, note: 'Daňový doklad k přijaté platbě (zálohová faktura č. ZF25930)');
+        $preview = $this->service->preview($this->supplierId, TaxDocumentAdvanceLinkCheck::KEY);
+        self::assertNull($preview['changes'][0]['details']['payment_id']);
+        $this->pdo->prepare("INSERT INTO invoice_payments (supplier_id, invoice_id, paid_on, amount, currency, source, note) VALUES (?, ?, '2025-03-04', 1210.00, 'CZK', 'manual', 'Platba zalohy')")
+            ->execute([$this->supplierId, $advance]);
+        try {
+            $this->service->fix($this->supplierId, TaxDocumentAdvanceLinkCheck::KEY, $this->userId, [], $preview['fingerprint']);
+            self::fail('Nová platba zálohy od náhledu musí opravu zastavit.');
+        } catch (MigrationDataCheckException $e) {
+            self::assertSame('stale_preview', $e->errorCode);
+        }
+        self::assertNull($this->pdo->query("SELECT parent_invoice_id FROM invoices WHERE id = {$ddkp}")->fetchColumn());
+    }
+
     /** Automatické navázání DDKP jen na zálohu z převodu, která nevznikla po DDKP. */
     public function testTaxDocumentLinkNeedsMigratedAdvanceIssuedBeforeIt(): void
     {
