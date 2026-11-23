@@ -4,6 +4,9 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Integration\Migration;
 
+use MyInvoice\Repository\AccountingPeriodRepository;
+use MyInvoice\Repository\JournalEntryRepository;
+use MyInvoice\Service\Accounting\ChartOfAccountsSeeder;
 use MyInvoice\Service\Migration\MoneyS3\ImportOptions;
 use MyInvoice\Service\Migration\MoneyS3\ImportProtocol;
 use MyInvoice\Service\Migration\MoneyS3\SaldoOpeningCheck;
@@ -39,7 +42,48 @@ final class MoneyS3SaldoCheckTest extends MoneyS3ImportTestCase
             self::assertSame(0.0, $row['difference'], $code);
         }
         $step = array_column($protocol->toArray()['steps'], null, 'key')[SaldoOpeningCheck::STEP];
-        self::assertSame(['saldo_check_ok'], array_column($step['messages'], 'code'), $this->explain($protocol));
+        self::assertNotContains('saldo_check_difference', array_column($step['messages'], 'code'), $this->explain($protocol));
+        self::assertContains('saldo_check_ok', array_column($step['messages'], 'code'));
+        // Rok 2025 se nepřevedl a otevírací zápis nemá: kontrola výslovně říká, proti čemu porovnávala.
+        $against = array_values(array_filter($step['messages'], static fn (array $m): bool => $m['code'] === 'saldo_check_against_closing'));
+        self::assertCount(1, $against, $this->explain($protocol));
+        self::assertStringContainsString('konečnými stavy účtů k 31. 12. 2024', $against[0]['text']);
+        self::assertSame('closing_balances', $protocol->get(SaldoOpeningCheck::STEP)['basis']);
+    }
+
+    /**
+     * Otevírací zápis roku 2025 v MyÚčtu má na 311 jiný stav (500 Kč), než jaký vychází
+     * z konečných stavů 2024 a otevřených položek (0 Kč). Kontrola porovná otevřené položky
+     * se skutečným otevíracím zápisem a rozdíl ohlásí, i když hlavní kniha k 31. 12. sedí.
+     */
+    public function testOpenItemsAreComparedWithActualOpeningEntry(): void
+    {
+        $supplierId = $this->supplier(SyntheticAgenda::ICO, 'double_entry');
+        $this->container(ChartOfAccountsSeeder::class)->seedForSupplier($supplierId);
+        $periodId = $this->container(AccountingPeriodRepository::class)->create($supplierId, 2025, '2025-01-01', '2025-12-31');
+        $stmt = $this->db->pdo()->prepare("SELECT account_code, id FROM chart_of_accounts WHERE supplier_id = ? AND account_code IN ('311', '411')");
+        $stmt->execute([$supplierId]);
+        $accounts = array_map('intval', $stmt->fetchAll(\PDO::FETCH_KEY_PAIR));
+        $this->container(JournalEntryRepository::class)->insert(
+            ['supplier_id' => $supplierId, 'period_id' => $periodId, 'entry_date' => '2025-01-01', 'source_type' => 'opening', 'source_id' => $periodId,
+             'description' => 'Otevření roku v MyÚčtu', 'posted_at' => '2025-01-01 08:00:00'],
+            [['account_id' => $accounts['311'], 'side' => 'debit', 'amount' => '500.00'], ['account_id' => $accounts['411'], 'side' => 'credit', 'amount' => '500.00']],
+        );
+
+        $protocol = $this->convert($supplierId, new ImportOptions(ImportOptions::MODE_IMPORT, toYear: 2024, openingOnlyNext: true));
+
+        self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
+        $step = array_column($protocol->toArray()['steps'], null, 'key')[SaldoOpeningCheck::STEP];
+        $codes = array_column($step['messages'], 'code');
+        self::assertContains('saldo_check_difference', $codes, $this->explain($protocol));
+        self::assertNotContains('saldo_check_ok', $codes);
+        $row = $this->row($this->accounts($protocol), '311');
+        self::assertSame(0.0, $row['balance'], 'Hlavní kniha k 31. 12. 2024 na otevřené položky sedí.');
+        self::assertSame(0.0, $row['open_items']);
+        self::assertSame(500.0, $row['difference']);
+        self::assertSame(500.0, $row['opening']);
+        self::assertNotContains('saldo_check_against_closing', $codes);
+        self::assertSame('opening_entry', $protocol->get(SaldoOpeningCheck::STEP)['basis']);
     }
 
     /** Zůstatek 311 bez dokladu (doklady počátečního stavu nevznikly) protokol ohlásí. */
