@@ -150,6 +150,7 @@ final class MoneyS3SettledPaymentsTest extends MoneyS3ImportTestCase
     {
         $sid = $this->supplierId;
         $pdo = $this->db->pdo();
+        $converted = $this->settlementKinds();
         // Stav firmy převedené dřív: úhrady bez dokladu jen v paid_total, zápis ID25020 jen vazbou,
         // přijaté doklady bez úhrady mimo evidenci a platba zálohy bez vazby na DDKP.
         foreach (['ID25020', 'ID25040'] as $entry) {
@@ -178,7 +179,10 @@ final class MoneyS3SettledPaymentsTest extends MoneyS3ImportTestCase
         self::assertNotSame($before['payments'], $after['payments']);
         self::assertSame(1, $this->rowCount('invoice_payments', $sid, "invoice_id = {$this->invoice('FV25040')} AND source = 'settlement' AND amount = 1210.00"));
         self::assertSame(1, $this->rowCount('invoice_settlements', $sid, "doc_type = 'invoice' AND doc_id = {$this->invoice('FV25020')} AND journal_entry_id = {$this->entry('ID25020')}"));
-        self::assertSame(1210.0, (float) $this->scalar('SELECT settled_outside_amount FROM purchase_invoices WHERE id = ?', [$this->purchase('DF-2025-640')]));
+        // Zápočet ID25040 (vzájemný zápočet FV25040 a FP25040) CLI najde podle dne a částky
+        // i bez čísla úhrady ze zálohy Money: stejně jako převod, ne výplň a úhrada mimo evidenci.
+        self::assertSame(0.0, (float) $this->scalar('SELECT settled_outside_amount FROM purchase_invoices WHERE id = ?', [$this->purchase('DF-2025-640')]));
+        self::assertSame($converted, $this->settlementKinds(), 'Opravné CLI dá stejné zápočty jako převod.');
         self::assertSame(1, $this->rowCount('activity_log', $sid, "action = '" . MoneyS3SettledPaymentRepair::AUDIT_ACTION . "' AND entity_id = {$this->invoice('FV25040')}"));
 
         $again = $repair->run([$sid], true)[0];
@@ -187,6 +191,13 @@ final class MoneyS3SettledPaymentsTest extends MoneyS3ImportTestCase
     }
 
     // ── pomocníci ────────────────────────────────────────────────────────────
+
+    /** @return list<array{0:string,1:string,2:string}> zápočty firmy: druh dokladu, částka, číslo zápisu */
+    private function settlementKinds(): array
+    {
+        return $this->db->pdo()->query("SELECT s.doc_type, s.amount, e.document_no FROM invoice_settlements s JOIN journal_entries e ON e.id = s.journal_entry_id
+            WHERE s.supplier_id = {$this->supplierId} AND s.status = 'confirmed' ORDER BY s.doc_type, e.document_no, s.amount")->fetchAll(PDO::FETCH_NUM);
+    }
 
     /** @return array<string,mixed> */
     private function state(): array

@@ -158,9 +158,11 @@ final class MoneyS3SettledPayments
      *
      * @param array<int,string> $paymentNos id dokladu => číslo úhrady z Money (`UDoklad`) do poznámky
      * @param array<int,true> $leftForMatching doklady, jejichž úhrada má kandidáty v převedené bance či pokladně
+     * @param bool $inferSettlements bez zálohy Money (opravné CLI): zápis zápočtu, jehož číslo úhrady
+     *                               chybí, se hledá podle data úhrady a částky ({@see inferNamed()})
      * @return array{settlements:int,settlement_amount:float,inserted:int,updated:int,deleted:int,invoices:list<array<string,mixed>>,left_for_matching:list<array<string,mixed>>}
      */
-    public function recordIssued(int $supplierId, ?int $userId, string $lastEnd, array $paymentNos = [], array $leftForMatching = []): array
+    public function recordIssued(int $supplierId, ?int $userId, string $lastEnd, array $paymentNos = [], array $leftForMatching = [], bool $inferSettlements = false): array
     {
         $out = ['settlements' => 0, 'settlement_amount' => 0.0, 'inserted' => 0, 'updated' => 0, 'deleted' => 0, 'invoices' => [], 'left_for_matching' => []];
         $candidates = $this->issuedCandidates($supplierId, $lastEnd, true);
@@ -175,6 +177,10 @@ final class MoneyS3SettledPayments
             if ($c['in_range'] && $no !== null && $no !== '') {
                 $named[$c['id']] = ['no' => $no, 'date' => (string) $c['paid_at']];
             }
+        }
+        if ($inferSettlements) {
+            $named += $this->inferNamed($supplierId, 'invoice', array_map(static fn (array $c): array => $c + ['room' => round($c['paid_total'] - $c['others'], 2)],
+                array_filter($candidates, static fn (array $c): bool => $c['in_range'] && !isset($named[$c['id']]))));
         }
         $capacity = [];
         $linked = $this->settlementEntries($supplierId, 'invoice', array_column($candidates, 'id'), $named, $capacity);
@@ -346,9 +352,10 @@ final class MoneyS3SettledPayments
      * platbu se stejným symbolem. Volat UVNITŘ transakce volajícího.
      *
      * @param array<int,string> $paymentNos id dokladu => číslo úhrady z Money (`UDoklad`)
+     * @param bool $inferSettlements bez zálohy Money (opravné CLI), viz {@see recordIssued()}
      * @return array{updated:int,settlements:int,settlement_amount:float,amount:float,documents:list<array<string,mixed>>}
      */
-    public function restorePurchaseSettlements(int $supplierId, ?int $userId, string $lastEnd, array $paymentNos = []): array
+    public function restorePurchaseSettlements(int $supplierId, ?int $userId, string $lastEnd, array $paymentNos = [], bool $inferSettlements = false): array
     {
         $out = ['updated' => 0, 'settlements' => 0, 'settlement_amount' => 0.0, 'amount' => 0.0, 'documents' => []];
         $rows = $this->purchaseCandidates($supplierId, $lastEnd, true);
@@ -360,6 +367,10 @@ final class MoneyS3SettledPayments
             if (($paymentNos[$r['id']] ?? '') !== '') {
                 $named[$r['id']] = ['no' => $paymentNos[$r['id']], 'date' => $r['paid_at']];
             }
+        }
+        if ($inferSettlements) {
+            $named += $this->inferNamed($supplierId, 'purchase_invoice', array_map(static fn (array $r): array => $r + ['room' => round($r['amount_to_pay'] - $r['covered'], 2)],
+                array_filter($rows, static fn (array $r): bool => !isset($named[$r['id']]))));
         }
         $capacity = [];
         $linked = $this->settlementEntries($supplierId, 'purchase_invoice', array_column($rows, 'id'), $named, $capacity);
@@ -391,6 +402,71 @@ final class MoneyS3SettledPayments
         }
         $out['amount'] = round($out['amount'], 2);
         $out['settlement_amount'] = round($out['settlement_amount'], 2);
+        return $out;
+    }
+
+    /**
+     * Číslo úhrady dokladů, ke kterým ho opravné CLI nemá (doklady převedené před výplní, záloha
+     * Money v CLI není): převzatý zápis interního dokladu ze dne úhrady, který na saldokontní
+     * straně vyrovnává právě nekrytou částku dokladu v Kč, ještě není zápočtem a nemá vazbu na
+     * doklad (zápis s vazbou bere {@see linkedSettlements()} u svého dokladu). Jen jediný
+     * takový zápis za den a částku; jinak výplň jako dřív. Převod číslo úhrady zná ze zálohy.
+     *
+     * @param 'invoice'|'purchase_invoice' $docType
+     * @param array<int|string,array<string,mixed>> $docs doklady s `id`, `paid_at`, `currency`, `rate`, `room`
+     * @return array<int,array{no:string,date:string}>
+     */
+    private function inferNamed(int $supplierId, string $docType, array $docs): array
+    {
+        // Doklad, na který vede vazba zápisu zápočtu, ho má z vazby ({@see linkedSettlements()}).
+        $linked = $this->linkedSettlements($supplierId, $docType, array_map(static fn (array $d): int => (int) $d['id'], array_values($docs)));
+        $wanted = [];
+        foreach ($docs as $d) {
+            if (($linked[(int) $d['id']] ?? []) !== []) {
+                continue;
+            }
+            $rate = $d['currency'] === 'CZK' ? 1.0 : ($d['rate'] ?? null);
+            if (($d['paid_at'] ?? null) !== null && $rate !== null && $d['room'] >= 0.01) {
+                $wanted[(int) $d['id']] = ['date' => (string) $d['paid_at'], 'czk' => round($d['room'] * $rate, 2)];
+            }
+        }
+        if ($wanted === []) {
+            return [];
+        }
+        $side = self::SETTLEMENT_ACCOUNTS[$docType]['side'];
+        $receivable = implode(' OR ', array_map(static fn (string $p): string => "COALESCE(pa.account_code, ca.account_code) LIKE '{$p}%'", self::SETTLEMENT_ACCOUNTS[$docType]['prefixes']));
+        $byDay = [];
+        foreach (array_chunk(array_values(array_unique(array_column($wanted, 'date'))), 500) as $dates) {
+            $stmt = $this->db->pdo()->prepare(
+                "SELECT e.id, e.entry_date, e.document_no,
+                        SUM(CASE WHEN ({$receivable}) THEN (CASE WHEN l.side = '{$side}' THEN l.signed_amount ELSE -l.signed_amount END) ELSE 0 END) AS czk
+                   FROM journal_entries e
+                   JOIN journal_entry_lines l ON l.entry_id = e.id AND l.supplier_id = e.supplier_id
+                   JOIN chart_of_accounts ca ON ca.id = l.account_id
+                   LEFT JOIN chart_of_accounts pa ON pa.id = ca.parent_id
+                  WHERE e.supplier_id = ? AND e.entry_date IN (" . implode(',', array_fill(0, count($dates), '?')) . ")
+                    AND e.source_type = 'manual' AND e.posted_at IS NOT NULL AND e.reversed_by IS NULL AND e.document_no IS NOT NULL
+                    AND EXISTS (SELECT 1 FROM money_s3_import_map m WHERE m.supplier_id = e.supplier_id AND m.kind = ? AND m.target_id = e.id)
+                    AND NOT EXISTS (SELECT 1 FROM invoice_settlements s WHERE s.supplier_id = e.supplier_id AND s.journal_entry_id = e.id
+                                       AND s.doc_type = ? AND s.status = 'confirmed')
+                    AND NOT EXISTS (SELECT 1 FROM journal_entry_document_links dl WHERE dl.supplier_id = e.supplier_id AND dl.entry_id = e.id)
+                  GROUP BY e.id, e.entry_date, e.document_no
+                 HAVING czk >= 0.01"
+            );
+            $stmt->execute([$supplierId, ...$dates, MoneyS3ImportRepository::KIND_JOURNAL_ENTRY, $docType]);
+            foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $r) {
+                $byDay[substr((string) $r['entry_date'], 0, 10)][] = $r;
+            }
+        }
+        // Jednoznačně: v den úhrady jediný doklad s touto částkou a jediný takový zápis.
+        $docsPerKey = array_count_values(array_map(static fn (array $w): string => $w['date'] . '|' . number_format($w['czk'], 2, '.', ''), $wanted));
+        $out = [];
+        foreach ($wanted as $id => $w) {
+            $found = array_values(array_filter($byDay[$w['date']] ?? [], static fn (array $r): bool => abs((float) $r['czk'] - $w['czk']) < 0.005));
+            if (count($found) === 1 && $docsPerKey[$w['date'] . '|' . number_format($w['czk'], 2, '.', '')] === 1) {
+                $out[$id] = ['no' => (string) $found[0]['document_no'], 'date' => $w['date']];
+            }
+        }
         return $out;
     }
 

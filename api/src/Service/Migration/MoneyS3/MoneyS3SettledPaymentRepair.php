@@ -98,7 +98,8 @@ final class MoneyS3SettledPaymentRepair
             $journalBefore = $this->journal($supplierId);
             $before = $this->issuedState($supplierId);
 
-            $issued = $this->payments->recordIssued($supplierId, $userId, $lastEnd);
+            // CLI zálohu Money nemá: zápis zápočtu bez čísla úhrady hledá podle dne a částky.
+            $issued = $this->payments->recordIssued($supplierId, $userId, $lastEnd, inferSettlements: true);
             foreach ($issued['invoices'] as $i) {
                 $rate = $i['currency'] === 'CZK' ? 1.0 : ($i['rate'] ?? 1.0);
                 $row['issued_count']++;
@@ -110,7 +111,7 @@ final class MoneyS3SettledPaymentRepair
             $row['settlements'] = $issued['settlements'];
             $row['left_for_matching'] = $issued['left_for_matching'];
 
-            $purchases = $this->payments->restorePurchaseSettlements($supplierId, $userId, $lastEnd);
+            $purchases = $this->payments->restorePurchaseSettlements($supplierId, $userId, $lastEnd, inferSettlements: true);
             foreach ($purchases['documents'] as $d) {
                 $rate = $d['currency'] === 'CZK' ? 1.0 : ($d['rate'] ?? 1.0);
                 $row['purchase_count']++;
