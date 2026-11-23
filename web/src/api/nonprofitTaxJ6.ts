@@ -6,7 +6,7 @@ import type {
   J6ConvertRequest, J6CurrentDraft, J6CurrentSourceHeader, J6DecisionRow, J6DocumentFormat, J6PeriodSummary, J6WithdrawRequest, J6DraftCollectionPage, J6DraftEnvelope, J6DraftOpenRequest,
   J6DraftResetRequest, J6DraftSourcePage, J6FrozenCalculationPage, J6FrozenKind, J6FrozenSourcePage,
   J6LinkRow, J6MemberRow, J6PatchRequest, J6PoolKind, J6PoolRow, J6PreviewKind, J6PreviewPage,
-  J6PreviewReceipt, J6TaxActivity, J6TaxDecision, J6TaxFundingLink, J6TaxPool,
+  J6PreviewReceipt, J6SourceFindingFilter, J6SourceFindingPage, J6SourceFindingSummary, J6TaxActivity, J6TaxDecision, J6TaxFundingLink, J6TaxPool,
 } from './nonprofitTaxJ6Types'
 
 const PAGE_LIMIT = 100
@@ -69,6 +69,8 @@ export const nonprofitTaxJ6Api = {
   export: (supplier: number, id: number) => api.get(`/accounting/nonprofit-tax-assessments/${id}/export`, { ...options(supplier), responseType: 'blob' }),
   document: (supplier: number, id: number, format: J6DocumentFormat) => api.get(`/accounting/nonprofit-tax-assessments/${id}/summary.${format}`, { ...options(supplier), responseType: 'blob' }),
   periodSummary: (supplier: number, period: number) => api.get<J6PeriodSummary>(`${base(period)}/summary`, options(supplier)).then(r => r.data),
+  sourceFindings: (supplier: number, period: number) => api.get<J6SourceFindingSummary>(`${base(period)}/source-findings`, options(supplier)).then(r => r.data),
+  sourceFindingLines: (supplier: number, period: number, filter: J6SourceFindingFilter, after?: string | null, limit = 50) => api.get<J6SourceFindingPage>(`${base(period)}/source-findings/lines`, { ...options(supplier), params: { ...(filter.code ? { code: filter.code } : {}), ...(filter.account ? { account: filter.account } : {}), ...params(after, limit) } }).then(r => r.data),
   currentDraft: (supplier: number, period: number) => api.get<J6CurrentDraft>(`${base(period)}/draft`, options(supplier)).then(r => r.data),
   withdraw: (supplier: number, period: number, id: number, body: J6WithdrawRequest) => api.post<J6AssessmentCompletion>(`${base(period)}/assessments/${id}/withdraw`, body, options(supplier)).then(r => r.data),
   convert: (supplier: number, period: number, id: number, body: J6ConvertRequest) => api.post<J6AssessmentCompletion>(`${base(period)}/assessments/${id}/convert`, body, options(supplier)).then(r => r.data),

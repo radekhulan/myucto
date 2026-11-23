@@ -852,8 +852,20 @@ daňových ztrát, výkazů a XML. Export a odeslání znovu kontrolují přísl
 podmínky; před odesláním musí odpovídat také aktuální finální podklady.
 
 Načtení obrazovky podklady DPPO nesestavuje. Připravenost výpočtu ověříte
-tlačítkem **Ověřit připravenost výpočtu**; teprve potom obrazovka ukáže zjištění
-a nabídne převzetí do přiznání.
+tlačítkem **Ověřit připravenost výpočtu**. Obrazovka pak v části **Připravenost
+výpočtu** ukáže samostatně čtyři kroky se stavem a důvodem:
+
+- **Podklady a daňové posouzení:** podklady bez zjištění a aktuální potvrzené
+  posouzení. Odkaz vede do daňového posouzení období.
+- **Právní profil:** potvrzený profil vybraného období.
+- **Shoda profilu s posouzením:** postavení v posouzení odpovídá právnímu profilu.
+  Odkaz vede do daňového posouzení.
+- **Údaje pro přiznání:** výsledek posouzení navazuje na řádek 62 výsledovky
+  a doložené úpravy jsou platné. Odkaz vede na výsledovku.
+
+Výpočet se zastaví na první chybě, krok za ní proto zůstane neověřený. Chybějící
+právní profil a chybějící potvrzené posouzení se ale ukážou současně. Teprve po
+úspěšné kontrole obrazovka nabídne převzetí do přiznání.
 
 V **Uzávěrka → Daňové posouzení** zvolte u nákladu **Posoudit** a zadejte **Uznatelnou část nákladu před vyloučením financování** v Kč. U záporného nákladu zadejte zápornou uznatelnou část nebo nulu. U povinně neuznatelného nebo vyloučeného nákladu aplikace nastaví nulu. Po uložení rozhodnutí spusťte **Náhled**.
 

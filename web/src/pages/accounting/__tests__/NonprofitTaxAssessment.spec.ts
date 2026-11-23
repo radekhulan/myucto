@@ -120,6 +120,25 @@ describe('bounded nonprofit J6 assessment workspace', () => {
     wrapper.unmount()
   })
 
+  it('offers period source findings only when there are some and translates draft finding codes', async () => {
+    const findings = defineComponent({ props: ['supplierId', 'periodId'], template: '<div data-test="findings-stub">{{ supplierId }}/{{ periodId }}</div>' })
+    const mountWith = () => mount(Page, { attachTo: document.body, global: { stubs: { ActionBar, J6SourceFindings: findings } } })
+    let wrapper = mountWith()
+    await flushPromises()
+    expect(wrapper.find('[data-test="findings-stub"]').exists()).toBe(false)
+    wrapper.unmount()
+
+    mocks.periodSummary.mockResolvedValueOnce({ source: { ...header, finding_count: 3 }, latest: null })
+    mocks.currentDraft.mockResolvedValueOnce(envelope)
+    mocks.draftSource.mockResolvedValueOnce({ ...sourcePage, findings: [{ line_id: 1, code: 'missing_activity' }] })
+    wrapper = mountWith()
+    await flushPromises()
+    expect(wrapper.get('[data-test="findings-stub"]').text()).toBe('22/7')
+    expect(wrapper.text()).toContain('nonprofitTax.findings.missing_activity')
+    expect(wrapper.text()).not.toContain(': missing_activity')
+    wrapper.unmount()
+  })
+
   it('follows one opaque source cursor per user action and never drains it automatically', async () => {
     mocks.draftSource.mockResolvedValueOnce({ ...sourcePage, rows: [], findings: [{ line_id: 1, code: 'missing_activity' }] })
     const wrapper = render()

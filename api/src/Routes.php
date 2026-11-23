@@ -3366,6 +3366,8 @@ final class Routes
             $g->get('/periods/{periodId:[0-9]+}/nonprofit-tax/drafts/{draftId:[0-9]+}/previews/{token:[a-f0-9]{64}}/{kind:decision|result|coverage|usage|funding_reference|funding_history}', [\MyInvoice\Action\Accounting\Closing\J6NonprofitTaxAction::class, 'previewPage']);
             $g->post('/periods/{periodId:[0-9]+}/nonprofit-tax/drafts/{draftId:[0-9]+}/confirm', [\MyInvoice\Action\Accounting\Closing\J6NonprofitTaxAction::class, 'confirm']);
             $g->get('/periods/{periodId:[0-9]+}/nonprofit-tax/summary', [\MyInvoice\Action\Accounting\Closing\J6NonprofitTaxAction::class, 'periodSummary']);
+            $g->get('/periods/{periodId:[0-9]+}/nonprofit-tax/source-findings', [\MyInvoice\Action\Accounting\Closing\J6NonprofitTaxAction::class, 'sourceFindings']);
+            $g->get('/periods/{periodId:[0-9]+}/nonprofit-tax/source-findings/lines', [\MyInvoice\Action\Accounting\Closing\J6NonprofitTaxAction::class, 'sourceFindingLines']);
             $g->get('/periods/{periodId:[0-9]+}/nonprofit-tax/drafts/{draftId:[0-9]+}/source-summary', [\MyInvoice\Action\Accounting\Closing\J6NonprofitTaxAction::class, 'draftSourceSummary']);
             $g->post('/periods/{periodId:[0-9]+}/nonprofit-tax/assessments/{assessmentId:[0-9]+}/withdraw', [\MyInvoice\Action\Accounting\Closing\J6NonprofitTaxAction::class, 'withdraw']);
             $g->post('/periods/{periodId:[0-9]+}/nonprofit-tax/assessments/{assessmentId:[0-9]+}/convert', [\MyInvoice\Action\Accounting\Closing\J6NonprofitTaxAction::class, 'convertLegacy']);

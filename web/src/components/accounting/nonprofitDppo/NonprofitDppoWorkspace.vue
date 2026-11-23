@@ -8,7 +8,8 @@ import { formDateInput as dateInput, formInput as input, formLabel, formTextarea
 import NonprofitDppoReductionEditor from './NonprofitDppoReductionEditor.vue'
 import { nonprofitDppoApi as api } from '@/api/nonprofitDppo'
 import type { AccountingPeriod } from '@/api/accounting'
-import type { AcceptanceState, LegalConfirm, LegalKind, LegalOverview, NonprofitDppoState, NonprofitOperationKey, SavingConfirm, SavingEvent, SavingOverview, SavingPlan, SavingReverseConfirm, SavingSource, SavingUseInput } from '@/api/nonprofitDppoTypes'
+import type { RouteLocationRaw } from 'vue-router'
+import type { AcceptanceState, LegalConfirm, LegalKind, LegalOverview, NonprofitDppoState, NonprofitOperationKey, ReadinessStepKey, SavingConfirm, SavingEvent, SavingOverview, SavingPlan, SavingReverseConfirm, SavingSource, SavingUseInput } from '@/api/nonprofitDppoTypes'
 const props = defineProps<{ supplier: number; canManage: boolean; canEditReturn?: boolean }>()
 const { t, locale } = useI18n()
 const periods = ref<AccountingPeriod[]>([]), period = ref(0), legal = ref<LegalOverview | null>(null), savings = ref<SavingOverview | null>(null), native = ref<NonprofitDppoState | null>(null)
@@ -116,6 +117,18 @@ const filingReady = computed(() => Boolean(legal.value && nativeProofMatches.val
 const operations = computed(() => operationKeys.flatMap(key => { const op = legal.value?.capabilities.operations?.[key]; return op ? [{ key, ...op }] : [] }))
 const formManifest = computed(() => legal.value?.capabilities.form_manifest || null)
 const readinessPending = computed(() => legal.value?.capabilities.readiness_checked === false && legal.value.capabilities.native_dppo === true)
+// Kroky ukazujeme jen po kontrole připravenosti; zjištění bez vlastního kroku (akceptace, rámec) zůstávají v seznamu pod nimi.
+const readinessSteps = computed(() => legal.value?.capabilities.readiness_checked ? legal.value.capabilities.readiness_steps ?? [] : [])
+const otherFindings = computed(() => {
+ const shown = new Set(readinessSteps.value.filter(step => step.status === 'failed').map(step => step.code))
+ return (legal.value?.capabilities.preparation_findings ?? []).filter(finding => !shown.has(finding.code))
+})
+function stepLink(step: ReadinessStepKey): RouteLocationRaw | null {
+ if (!legal.value) return null
+ if (step === 'sources' || step === 'profile_match') return { name: 'accounting-nonprofit-tax', params: { id: String(legal.value.period.id) } }
+ if (step === 'return_data') return { name: 'accounting-income-statement' }
+ return null
+}
 const filingActions = computed<ActionItem[]>(() => [{ key: 'open-filing', label: t('nonprofitDppo.openFiling'), icon: 'doc', variant: 'primary', tier: 'primary', show: filingReady.value, to: { name: 'reports-income-tax', query: { type: 'po', year: String(legal.value?.period.fiscal_year), tab: 'nahled' } } }])
 function sourceLabel(s: SavingSource) { return `${s.source.basis.period.starts_on} - ${s.source.basis.period.ends_on} · ${money(s.remaining_cents)}` }
 function eventLabel(e: SavingEvent) {
@@ -140,7 +153,13 @@ function eventLabel(e: SavingEvent) {
     <label :class="formLabel">{{ t('nonprofitDppo.legalBasis') }}<textarea v-model="legalBasis" data-field="legal-basis" :class="textarea" /></label><label :class="formLabel">{{ t('nonprofitDppo.evidence') }}<textarea v-model="evidence" data-field="profile-evidence" :class="textarea" /></label><label :class="[formLabel, 'md:col-span-2']">{{ t('nonprofitDppo.reason') }}<textarea v-model="reason" data-field="profile-reason" :class="textarea" /></label>
    </fieldset><ActionBar :actions="profileActions" />
    <p v-if="readinessPending" class="text-sm text-neutral-500" data-test="readiness-pending">{{ t('nonprofitDppo.readinessPending') }}</p>
-   <ul v-if="legal.capabilities.preparation_findings?.length" class="list-disc space-y-1 pl-5"><li v-for="finding in legal.capabilities.preparation_findings" :key="finding.code">{{ finding.message }}</li></ul>
+   <section v-if="readinessSteps.length" class="space-y-2" data-test="readiness-steps">
+    <h3 class="font-semibold">{{ t('nonprofitDppo.readiness.title') }}</h3>
+    <ul class="space-y-1 text-sm">
+     <li v-for="step in readinessSteps" :key="step.step" :data-step="step.step" :data-status="step.status"><span class="font-medium">{{ t(`nonprofitDppo.readiness.steps.${step.step}`) }}</span> · <span :class="step.status === 'ok' ? 'text-success-700' : step.status === 'failed' ? 'text-warning-700' : 'text-neutral-500'">{{ t(`nonprofitDppo.readiness.status.${step.status}`) }}</span><span v-if="step.message"> - {{ step.message }}</span><RouterLink v-if="step.status === 'failed' && stepLink(step.step)" :to="stepLink(step.step)!" data-test="readiness-link" class="ml-2 text-xs font-medium text-primary-600 hover:underline whitespace-nowrap">{{ t(`nonprofitDppo.readiness.links.${step.step}`) }} →</RouterLink></li>
+    </ul>
+   </section>
+   <ul v-if="otherFindings.length" class="list-disc space-y-1 pl-5"><li v-for="finding in otherFindings" :key="finding.code">{{ finding.message }}</li></ul>
    <section v-if="operations.length || formManifest" class="space-y-2" data-test="operations">
     <h3 class="font-semibold">{{ t('nonprofitDppo.operations.title') }}</h3>
     <p v-if="formManifest" class="text-sm text-neutral-500" data-test="form-manifest">{{ t('nonprofitDppo.operations.form', { code: formManifest.form_code, version: formManifest.form_version, date: formManifest.form_date }) }}</p>

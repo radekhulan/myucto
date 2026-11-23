@@ -9,7 +9,7 @@ use MyInvoice\Http\SessionOnlyAccountingAct;
 use MyInvoice\Security\AccessLevel;
 use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\Accounting\PostingException;
-use MyInvoice\Service\Tax\Nonprofit\{NonprofitDppoAcceptanceService,NonprofitLegalProfileService,NonprofitTaxSavingsService,NonprofitDppoDataProvider,NonprofitTaxAssessmentException};
+use MyInvoice\Service\Tax\Nonprofit\{NonprofitDppoAcceptanceService,NonprofitLegalProfileService,NonprofitTaxSavingsService,NonprofitDppoReadiness,NonprofitTaxAssessmentException};
 use MyInvoice\Service\Tax\Return\{AccountingDecreeService,Dppo504CapabilityService,TaxReturnException};
 use MyInvoice\Infrastructure\Database\Connection;
 use Psr\Http\Message\ResponseInterface as Response;
@@ -19,7 +19,7 @@ final class NonprofitDppoAction
 {
     use AccountingActionSupport;
     public function __construct(private readonly NonprofitLegalProfileService $profiles,private readonly NonprofitTaxSavingsService $savings,
-        private readonly NonprofitDppoDataProvider $provider,private readonly Connection $db,
+        private readonly NonprofitDppoReadiness $readiness,private readonly Connection $db,
         private readonly NonprofitDppoAcceptanceService $acceptances) {}
 
     /**
@@ -69,7 +69,7 @@ final class NonprofitDppoAction
         $operations=(new Dppo504CapabilityService())->capabilities($period['starts_on'],$period['ends_on'],'A',$accepted);
         $manifest=$operations['manifest'];unset($operations['manifest']);
         $caps=$this->capabilities($q)+['native_dppo'=>false,'calculation_ready'=>$gather?false:null,'readiness_checked'=>$gather,'filing_ready'=>false,
-            'calculation_accepted'=>$accepted,'operations'=>$operations,'form_manifest'=>$manifest,'preparation_findings'=>[]];
+            'calculation_accepted'=>$accepted,'operations'=>$operations,'form_manifest'=>$manifest,'preparation_findings'=>[],'readiness_steps'=>NonprofitDppoReadiness::pending()];
         try{
             if((new AccountingDecreeService($this->db))->assertDppoSupported($s,(int)$period['fiscal_year'])!=='504'){
                 foreach($caps['operations']as&$operation)$operation=['allowed'=>false,'code'=>'nonprofit_legal_profile_framework_required','message'=>'DPPO 504 vyžaduje stejný účetní rámec v celém období.'];unset($operation);
@@ -77,7 +77,9 @@ final class NonprofitDppoAction
             }
             $caps['native_dppo']=$operations['compute']['allowed'];
             if(!$gather)return$caps;
-            $this->provider->gather($s,(int)$period['fiscal_year']);
+            $readiness=$this->readiness->check($s,$period);
+            $caps['readiness_steps']=$readiness['steps'];$caps['preparation_findings']=$readiness['findings'];
+            if(!$readiness['ready'])return$caps;
             $caps['calculation_ready']=true;$caps['filing_ready']=$operations['finalize']['allowed'];
             if(!$caps['filing_ready'])$caps['preparation_findings'][]=['code'=>$operations['finalize']['code'],'message'=>$operations['finalize']['message']];
         }
