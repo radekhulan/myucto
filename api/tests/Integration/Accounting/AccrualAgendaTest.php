@@ -323,6 +323,14 @@ final class AccrualAgendaTest extends TestCase
         self::assertSame([], $draft['schedule']);
         self::assertSame('active', $this->items->activate($this->supplierId, $draft['id'], $this->userId)['status']);
         self::assertSame('cancelled', $this->items->cancel($this->supplierId, $draft['id'], $this->userId)['status']);
+
+        // Zrušení uvolní vazbu vzniku: zápis se v odsouhlasení vrátí mezi řádky bez položky.
+        $other = $this->revenueItem(5_000.00, '2091-01-01', '2091-12-31');
+        $cancelled = $this->items->cancel($this->supplierId, $other['id'], $this->userId);
+        self::assertSame([], $cancelled['links']);
+        $rec = $this->account($this->reconciliation->reconcile($this->supplierId, '2091-06-30'), '384');
+        self::assertSame(5_000.00, $rec['difference']);
+        self::assertSame(5_000.00, $this->reconciliation->unallocated($this->supplierId, '2091-06-30')['total']);
         $this->items->delete($this->supplierId, $draft['id']);
         $this->assertAccrualError('not_found', fn () => $this->items->get($this->supplierId, $draft['id']));
     }

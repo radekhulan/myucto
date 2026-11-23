@@ -246,7 +246,7 @@ final class AccrualItemService
         $this->rebuildPlan($supplierId, $id);
     }
 
-    /** Zruší položku bez zaúčtovaného rozpouštění agendy (převzaté vazby se jen uvolní). */
+    /** Zruší položku bez zaúčtovaného rozpouštění agendy; vazby na zápisy se uvolní. */
     public function cancel(int $supplierId, int $id, ?int $userId): array
     {
         $pdo = $this->db->pdo();
@@ -260,7 +260,10 @@ final class AccrualItemService
             if (self::hasAgendaPostings($this->items->schedule($supplierId, $id, true))) {
                 throw new AccrualException('has_postings', 'Položka má zaúčtované rozpuštění. Nejdřív ho stornujte.', 409);
             }
-            $pdo->prepare("DELETE FROM accrual_schedule WHERE supplier_id = ? AND accrual_item_id = ? AND status IN ('planned', 'cancelled')")->execute([$supplierId, $id]);
+            // Zrušená položka nenese nic: vazby na zápisy (vznik, převzaté rozpuštění) se uvolní
+            // a zápisy se v odsouhlasení objeví mezi řádky bez položky.
+            $pdo->prepare('DELETE FROM accrual_entry_links WHERE supplier_id = ? AND accrual_item_id = ?')->execute([$supplierId, $id]);
+            $pdo->prepare('DELETE FROM accrual_schedule WHERE supplier_id = ? AND accrual_item_id = ?')->execute([$supplierId, $id]);
             $this->items->update($supplierId, $id, ['status' => 'cancelled', 'updated_by' => $userId]);
             if ($own) $pdo->commit();
         } catch (\Throwable $e) {
