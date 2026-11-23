@@ -212,7 +212,12 @@ nespustí. Převod jedné firmy běží vždy jen jeden.
 7. Převáděný rok zůstává neuzavřený. Uzávěrku a převod zůstatků do dalšího roku
    provedete v `Nástroje → Uzávěrka`.
 8. Doplňte, co se nepřevádí ([§ 107.9.3](#10793-co-prevod-neprenese)).
-9. Vedla-li firma v POHODĚ agendu Časové rozlišení (ruční zápisy s čísly typu `24CR0001`), převezměte ji
+9. Otevřete několik převzatých daňových dokladů k přijaté platbě a ověřte, že mají odkaz na
+   zálohovou fakturu. Konečné faktury k zálohám, které jsou v POHODĚ ještě otevřené, vystavujte
+   podle [§ 15.4.3](15_Faktura_editor.md#1543-konecna-faktura-k-zaloze-s-danovym-dokladem-jak-nezdvojit-dph).
+   Daňový doklad bez vazby na zálohu (jiná částka než záloha, text bez čísla zálohy) protokol
+   nehlásí a odečíst ho na konečné faktuře nejde, vazbu doplní podpora MyÚčta.
+10. Vedla-li firma v POHODĚ agendu Časové rozlišení (ruční zápisy s čísly typu `24CR0001`), převezměte ji
    do agendy [Časové rozlišení](125_Casove_rozliseni.md#1258-krok-za-krokem-prevzit-casove-rozliseni-z-pohody).
    Převzetí nic neúčtuje a lze ho opakovat.
 
@@ -507,7 +512,7 @@ Soubory `90_majetek.xml`, `91_mzdy.xml` a `92_sklad.xml` jsou stejné jako u dat
 | přijaté a vydané faktury | doklady se stavem zaúčtováno nebo uhrazeno; doklad nejisté daňové povahy jako koncept k ruční kontrole |
 | ostatní pohledávky a závazky bez DPH | otevřené položky s jednoznačným již převedeným účetním zápisem na 315 nebo 325 |
 | vydané doklady v režimu OSS (členění mimo přiznání, daň, stát MOSS) | plnění v režimu OSS včetně země spotřeby, typu sazby a typu plnění |
-| interní daňové doklady | daňové doklady k platbě a samovyměření DPH u přijatých faktur |
+| interní daňové doklady | daňové doklady k platbě a samovyměření DPH u přijatých faktur; daňový doklad k platbě dostane vazbu na zálohu podle vazby v exportu, nebo podle čísla zálohy v textu dokladu („Daňový doklad k přijaté platbě (zálohová faktura č. …)“), sedí-li odběratel nebo dodavatel i celková částka |
 | interní doklady | záznam v agendě Účetnictví → Interní doklady nad zápisem v deníku, s číslem z POHODY. Druh se odvodí: Zápočet (doklad hradí jiné doklady nebo text začíná na zápočet), Kurzový rozdíl (jen 563/663 proti pohledávce nebo závazku), Dohadná položka (časové rozlišení a dohady na účtech 381, 383, 384, 385, 388, 389), jinak Ostatní. Partner se převezme z řádků zápisu v deníku, jen když je jediný: známý se naváže na kartu, neznámý zůstane jménem na dokladu, karta se nezakládá. Export převodníkem musí být vytvořený aktuální verzí nástroje, starší export partnera v deníku nenese |
 | pokladny a pokladní doklady | pokladny a zaúčtované pokladní doklady |
 | bankovní účty a bankovní doklady | výpisy podle čísla výpisu v POHODĚ, bankovní pohyby; zůstatky jsou dopočtené z počátečního stavu v deníku a dorovná je první nahraný výpis banky se stavem |

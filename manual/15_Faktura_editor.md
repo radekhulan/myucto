@@ -114,18 +114,28 @@ zvolené pokladně je doklad rovnou uhrazený.
 **Jak poznáte, že je hotovo:** na obou dokladech je křížový odkaz, na daňovém dokladu je
 odečet zálohy v sumáři.
 
-### 15.4.1 Spárovat už existující zálohu a daňový doklad
+### 15.4.1 Spárovat už existující zálohu a konečnou fakturu (záloha bez DDKP)
+
+Ruční spárování je jen pro zálohu, ke které **není** vystavený daňový doklad k přijaté platbě
+(DDKP), typicky u neplátce DPH, v přenesené daňové povinnosti nebo když záloha a plnění
+proběhly týž den. Spárování odečte úhradu zálohy jen v hlavičce faktury (**Uhrazeno zálohou**),
+základ ani DPH faktury nemění. Má-li záloha DDKP, postupujte podle
+[§ 15.4.3](#1543-konecna-faktura-k-zaloze-s-danovym-dokladem-jak-nezdvojit-dph).
 
 Pokud už máte v systému oba doklady samostatně (typicky po importu), spárujete je z
 kterékoli strany:
 
-1. V detailu daňového dokladu bez vazby klikněte na **Spárovat se zálohou** a vyberte zálohovou
+1. V detailu konečné faktury bez vazby klikněte na **Spárovat se zálohou** a vyberte zálohovou
    fakturu téhož odběratele. V detailu zálohové faktury klikněte na **Spárovat s daňovým
-   dokladem** a vyberte daňový doklad.
-2. Propojení zrušíte tlačítkem **Zrušit propojení**.
+   dokladem** a vyberte konečnou fakturu.
+2. Propojení zrušíte tlačítkem **Zrušit propojení**. Úhradu zálohy odečtenou v hlavičce faktury
+   zrušení propojení nevrací: faktura dál ukazuje **K úhradě** 0 Kč. Pokud propojení vzniklo
+   omylem, opravte fakturu podle
+   [§ 15.4.3](#1543-konecna-faktura-k-zaloze-s-danovym-dokladem-jak-nezdvojit-dph).
 
 **Jak poznáte, že je hotovo:** zobrazí se zpráva „Záloha propojena.“ Tlačítko se nabídne jen
-tehdy, když u daného odběratele existuje vhodný nespárovaný protějšek.
+tehdy, když u daného odběratele existuje vhodný nespárovaný protějšek. Záloha s navázaným DDKP
+se mezi kandidáty nenabízí a spárování odmítne, protože by se DPH ze zálohy přiznala dvakrát.
 
 ### 15.4.2 Čerpat zálohy na faktuře (víc záloh i postupně po milnících)
 
@@ -175,6 +185,90 @@ faktura čerpající víc záloh má pruh **Faktura čerpá zálohy** s odkazy n
 je odpočet každé zálohy. Při zaúčtování faktura zúčtuje z každé zálohy (MD 324 / D 311) jen
 základ, který z ní sama odečetla, a zbytek zálohy zůstává na 324 pro další faktury. Kontrolní
 hlášení i přiznání k DPH vykáží rozdíl plnění a odpočtů po sazbách.
+
+### 15.4.3 Konečná faktura k záloze s daňovým dokladem: jak nezdvojit DPH
+
+Plátce DPH přizná daň ze zálohy už v daňovém dokladu k přijaté platbě (DDKP, § 28 odst. 2
+ZDPH) v měsíci platby. Konečná faktura pak musí tutéž úplatu odečíst **odpočtovým řádkem
+se základem a DPH z DDKP** (§ 37a). V přiznání za měsíc konečné faktury tak zůstane jen rozdíl
+mezi DPH plnění a DPH z DDKP. Konečná faktura, která zálohu odečte jen v hlavičce
+(**Uhrazeno zálohou**, K úhradě 0 Kč) a v položkách nese plnou DPH, přizná daň ze zálohy podruhé.
+
+#### Podle čeho MyÚčto páruje
+
+MyÚčto nepáruje zálohu, DDKP a konečnou fakturu podle variabilního symbolu, čísla dokladu ani
+částky. Rozhoduje **vazba mezi doklady**, kterou založí akce v aplikaci nebo převod dat:
+
+| Krok | Jak vznikne vazba | Co se při tom kontroluje |
+|---|---|---|
+| Platba zálohové faktury | Banka nebo pokladna spáruje platbu se zálohou podle variabilního symbolu a částky (stejně jako u každé faktury) | odběratel se nekontroluje, jen platba |
+| DDKP k platbě | Podle volby firmy **Po úhradě zálohové faktury vystavit** vznikne koncept DDKP, nebo ho vystavíte v boxu **Platby** zálohy. DDKP nese vazbu na zálohu i na platbu | plátcovství DPH k datu platby, ne přenesená daňová povinnost |
+| Konečná faktura z detailu zálohy | **Vystavit fakturu k záloze** zkopíruje položky zálohy a za každý DDKP a sazbu přidá odpočtový řádek. Úhradu zálohy bez DDKP odečte v hlavičce | DDKP se hledá jen přes vazbu na zálohu nebo na její platbu |
+| Konečná faktura založená jinak | **Odečíst zálohu** na konceptu přidá odpočtové řádky podle DDKP vybrané zálohy | stejný odběratel a měna, záloha vystavená a zaplacená, s DDKP navázaným na zálohu |
+| Ruční spárování | **Spárovat se zálohou** jen uloží vazbu a odečte úhradu v hlavičce ([§ 15.4.1](#1541-sparovat-uz-existujici-zalohu-a-konecnou-fakturu-zaloha-bez-ddkp)) | stejný odběratel a měna; zálohu s navázaným DDKP odmítne |
+| AI import vydané faktury z PDF | Žádná. Vznikne koncept s položkami z dokladu v plné výši, odpočet zálohy z PDF se nepřebírá | koncept z ISDOC, který zálohu odečítá, dostane upozornění **Koncept zkontrolujte před vystavením** |
+| Převod z POHODY | Konečná faktura převezme odpočet zálohy z POHODY a vazbu na zálohu. DDKP (interní doklad) dostane vazbu na zálohu podle vazby v exportu, nebo podle čísla zálohy v textu dokladu, sedí-li odběratel i částka | DDKP bez vazby na zálohu nevidí **Odečíst zálohu** ani kontrola ručního spárování |
+
+Stejný variabilní symbol zálohy a konečné faktury proto párování neovlivní. Rozhoduje, zda je
+DDKP navázaný na zálohu: v detailu DDKP je odkaz na zálohovou fakturu, v detailu zálohy
+odkaz na její DDKP.
+
+#### Doporučený postup
+
+**A. Konečnou fakturu vystavujete v MyÚčtu (doporučeno).**
+
+1. Vystavte zálohovou fakturu. Po zaplacení vznikne DDKP (nebo ho vystavte v boxu **Platby**)
+   a vystavte ho nejpozději do 15 dnů od platby.
+2. Po dodání otevřete detail zálohy a klikněte na **Vystavit fakturu k záloze**. Doplňte
+   případné další položky, zkontrolujte DUZP a fakturu vystavte.
+3. Fakturuje-li jedna konečná faktura víc záloh nebo jen část zálohy, založte fakturu jako
+   koncept a použijte **Odečíst zálohu** ([§ 15.4.2](#1542-cerpat-zalohy-na-fakture-vic-zaloh-i-postupne-po-milnicich)).
+
+**B. Záloha a DDKP převzaté z POHODY nebo z jiného programu.**
+
+1. Ověřte, že DDKP je navázaný na zálohu: v detailu DDKP je odkaz na zálohovou fakturu.
+2. Konečnou fakturu pak vystavte postupem A. DDKP bez vazby na zálohu v aplikaci navázat nejde.
+   Konečnou fakturu k takové záloze nevystavujte, dokud vazbu nedoplní správce (převod znovu
+   nebo podpora MyÚčta).
+
+**C. Konečnou fakturu vystavujete jinde a do MyÚčta ji jen nahráváte (PDF, ISDOC).**
+
+1. Nahrajte doklad v `Prodej → AI import` ([§ 25.6](25_AI_extrakce.md#256-krok-za-krokem-importovat-vydane-faktury-z-pdf)).
+   Vznikne **koncept** s položkami v plné výši.
+2. Otevřete koncept a klikněte na **Odečíst zálohu**. Vyberte zálohu, ponechte výchozí částku
+   (zbytek zálohy) a klikněte na **Odečíst**.
+3. Zkontrolujte, že odpočet odpovídá odpočtu zálohy na původním dokladu, a fakturu vystavte.
+   Číslo dokladu ponechte z původního dokladu.
+4. **Spárovat se zálohou** u konečné faktury k záloze s DDKP nepoužívejte.
+
+#### Jak poznáte, že odpočet proběhl správně
+
+- **Detail konečné faktury:** v položkách je záporný řádek „Odpočet zálohy …, daňový doklad …“
+  se základem a DPH z DDKP. Sumář ukazuje DPH jen z rozdílu (u plně zálohované faktury
+  0 Kč, případně haléře ze zaokrouhlení) a **K úhradě** 0 Kč. Faktura odkazuje na zálohovou
+  fakturu.
+- **Přiznání k DPH a Kniha DPH:** daň ze zálohy je v měsíci platby (DDKP), v měsíci konečné
+  faktury jen rozdíl. V Knize DPH má konečná faktura základ a daň po odečtení DDKP.
+- **Kontrolní hlášení:** DDKP je v oddílu A.4 (nad 10 000 Kč) nebo A.5 v měsíci platby.
+  Konečná faktura plně krytá zálohou se v A.4 neobjeví, protože její základ i daň jsou nulové.
+  Když je v A.4 nebo A.5 DDKP i konečná faktura se stejným základem a daní, DPH je zdvojená.
+- **Účetní deník:** konečná faktura účtuje výnos a zúčtování zálohy MD 324 / D 311 jen
+  ve výši základu, DPH na 343 neúčtuje.
+
+#### Oprava konečné faktury, která DPH ze zálohy zdvojila
+
+Konečná faktura spárovaná se zálohou jen v hlavičce, nebo bez vazby s plnou DPH, se opravuje
+v období, které ještě není podané:
+
+1. Ověřte, že DDKP je navázaný na zálohu (postup B). Bez vazby ho nejdřív nechte navázat.
+2. Chybnou konečnou fakturu smažte (správce firmy, **Smazat** v detailu faktury). Smazáním se
+   zruší i její zápis v deníku.
+3. Konečnou fakturu založte znovu: z detailu zálohy (**Vystavit fakturu k záloze**), nebo
+   nahráním původního dokladu (postup C) a **Odečíst zálohu**. Ponechte původní číslo a DUZP.
+4. Fakturu vystavte a zkontrolujte podle předchozího odstavce.
+
+Je-li období podané, chybnou konečnou fakturu neměňte. Rozdíl opravte dodatečným přiznáním
+a následným KH podle pokynů účetní.
 
 ## 15.5 Krok za krokem: výkaz víceprací a materiálu
 
@@ -250,6 +344,9 @@ Rozdíl mezi stornem a dobropisem a zaúčtování dobropisu viz [§ 15.9.9](#15
 | „Pokladní doklad se nepodařilo vystavit - doklad je uložený, ale zůstává neuhrazený.“ | Pokladní doklad nemohl vzniknout (zavřené období, smazaná pokladna) | Úhradu dořešte ručně v Pokladně |
 | „Fakturu nelze stornovat - nejdřív vyřešte pokladní doklad, kterým byla hotově inkasována (…)“ | Pokladní doklad nejde zrušit (třeba kvůli uzavřenému období) | Vyřešte pokladní doklad v Pokladně a storno zopakujte |
 | „Tento odkaz byl již použit nebo není platný“ | Schvalovací odkaz je jednorázový | Pošlete výkaz ke schválení znovu |
+| DPH ze zálohy je v přiznání a KH dvakrát (DDKP i konečná faktura se stejným základem a daní) | Konečná faktura odečetla zálohu jen v hlavičce (**Spárovat se zálohou**, AI import) a nese plnou DPH | Opravte fakturu podle [§ 15.4.3](#1543-konecna-faktura-k-zaloze-s-danovym-dokladem-jak-nezdvojit-dph) |
+| **Spárovat se zálohou** hlásí, že k záloze existují daňové doklady k přijaté platbě | Ruční spárování by DPH ze zálohy zdvojilo | Na konceptu faktury použijte **Odečíst zálohu**, nebo vystavte fakturu z detailu zálohy |
+| **Odečíst zálohu** zálohu nenabízí | Záloha nemá vystavený DDKP navázaný na zálohu, není zaplacená nebo má jiného odběratele či měnu | V detailu zálohy zkontrolujte platbu a DDKP, postup B v [§ 15.4.3](#1543-konecna-faktura-k-zaloze-s-danovym-dokladem-jak-nezdvojit-dph) |
 | Uložení faktury s prodejem majetku skončí chybou | Karta majetku už byla prodána jiným dokladem, nebo je vyřazená | Vyberte jinou kartu, viz [§ 15.9.3](#1593-polozky) |
 | Doklad zálohy nelze automaticky zaúčtovat | Vyúčtovací faktura neodečítá zálohu podle daňového dokladu k platbě, faktury dohromady odečítají víc, než ze zálohy bylo, chybí zaúčtovaná úhrada zálohy, nebo je k proformě bez daňového dokladu víc vyúčtovacích faktur | Opravte odpočet ([§ 15.4.2](#1542-cerpat-zalohy-na-fakture-vic-zaloh-i-postupne-po-milnicich)), zaúčtujte úhradu zálohy, nebo dořešte ručním zápisem, viz [§ 15.9.8](#1598-zalohova-faktura-a-danovy-doklad) |
 | Pole data se neuloží | Neplatné datum (např. `31. 2.`) | Opravte datum |
@@ -1123,7 +1220,7 @@ Z pohledu [Účetního deníku](52_Ucetni_denik.md) fungují tři doklady záloh
 - **Daňový doklad k přijaté platbě** (typ „Daňový doklad k platbě“, viz
   [§ 14.11.1](14_Faktury.md#14111-sloupce-seznamu)) se zaúčtuje **jen za DPH** (MD 324 / D 343),
   bez fiktivní pohledávky 311 a bez duplicitního výnosu 6xx (ten patří až finální faktuře).
-- **Vyúčtovací (finální) faktura** navázaná na proformu (viz [§ 15.4.1](#1541-sparovat-uz-existujici-zalohu-a-danovy-doklad))
+- **Vyúčtovací (finální) faktura** navázaná na proformu (viz [§ 15.4.1](#1541-sparovat-uz-existujici-zalohu-a-konecnou-fakturu-zaloha-bez-ddkp))
   při zaúčtování automaticky doplní **zúčtovací řádek zálohy** (MD 324 / D 311) ve výši
   skutečně **přijaté** zálohy, ne nominální částky proformy, takže i částečně zaplacená nebo
   jinak vyrovnaná proforma se zúčtuje správně.

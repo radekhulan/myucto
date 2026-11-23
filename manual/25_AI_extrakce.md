@@ -177,9 +177,13 @@ V editoru faktury jsou tytéž položky orámované červeně a návrh AI je u v
    Pro jednotlivý import i dávku lze dočasně vybrat jiný model z whitelistu aktivního poskytovatele.
 3. Po úspěchu klikněte na odkaz do editoru.
 4. Ověřte odběratele, typ dokladu, DUZP, splatnost, režim cen s/bez DPH, sazby a text položek.
+5. Odečítá-li doklad zálohu, ke které je vystavený daňový doklad k přijaté platbě, klikněte
+   v konceptu na **Odečíst zálohu** a teprve pak fakturu vystavte. Postup a kontrola jsou
+   v [§ 15.4.3](15_Faktura_editor.md#1543-konecna-faktura-k-zaloze-s-danovym-dokladem-jak-nezdvojit-dph).
 
 **Jak poznáte, že je hotovo:** u každého souboru je výsledek a odkaz na vytvořený **koncept** vydané faktury. Import sám fakturu
-nevystaví, neodešle a nezaúčtuje.
+nevystaví, neodešle a nezaúčtuje. Upozornění ke konceptu (odpočet zálohy, nesedící součet, sporné místo plnění OSS) se ukáže
+pod výsledkem, v dávce jako štítek **upozornění** u souboru s výpisem textů.
 
 Podrobnosti o chování importu jsou v [§ 25.9.19](#25919-ai-import-vydanych-faktur-podrobnosti).
 
@@ -583,6 +587,12 @@ zvolená firma. Existující ISDOC se stejným variabilním symbolem vrátí jak
 Při přetažení více souborů vznikne dávka. Zpracovává se **postupně po jednom**, aby nepřetížila limit poskytovatele. U každého
 řádku je samostatný výsledek a odkaz na vytvořený koncept. Maximální velikost jednoho uploadu je 32 MiB, konkrétní poskytovatel
 může mít nižší limit uvedený v [§ 25.9.15](#25915-vyber-modelu-a-chovani-shodne-napric-poskytovateli).
+
+Import zálohy nepáruje. Konečná faktura, která v souboru odečítá zálohu, vznikne s položkami v plné výši a bez vazby na zálohu,
+takže by po vystavení nesla plnou DPH. Nese-li ISDOC odpočet zálohy nebo nesedí-li součet řádků na částku k úhradě, dostane
+koncept upozornění **Koncept zkontrolujte před vystavením**. Zálohu s daňovým dokladem k přijaté platbě odečtěte na konceptu
+tlačítkem **Odečíst zálohu**, ne tlačítkem **Spárovat se zálohou**, které odečte jen úhradu v hlavičce
+([§ 15.4.3](15_Faktura_editor.md#1543-konecna-faktura-k-zaloze-s-danovym-dokladem-jak-nezdvojit-dph)).
 
 Výsledek nese zdroj (`ISDOC`, `AI` nebo duplicita), poskytovatele, model, region a případně spotřebu tokenů. Tyto údaje se spolu
 s názvem a velikostí souboru zapisují do activity logu, samotné přihlašovací údaje ani obsah dokladu se do něj nezapisují.
