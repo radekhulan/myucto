@@ -17,18 +17,53 @@
 [CmdletBinding()]
 param([switch]$Bump, [switch]$Write, [string]$Compose, [string]$From, [string]$To)
 
-function Get-ImageTagBump {
-    param([string]$Compose, [string]$Target)
-    $Target = "$Target" -replace '^v', ''
-    if (-not (Test-Path -LiteralPath $Compose) -or $Target -cnotmatch '\A[0-9]{1,6}\.[0-9]{1,6}\.[0-9]{1,6}\z') { return $null }
-    $current = $null
-    foreach ($line in [System.IO.File]::ReadAllLines((Resolve-Path -LiteralPath $Compose).Path)) {
-        if ($line -match '^\s*image:\s*["'']?([^\s"'']*myucto:[0-9]{1,6}\.[0-9]{1,6}\.[0-9]{1,6})["'']?(\s.*)?$') {
-            $current = $Matches[1]
-            break
+function Find-AppImageLine {
+    param([string[]]$Lines)
+    $inServices = $false
+    $inApp = $false
+    $serviceIndent = 0
+    $propertyIndent = 0
+    for ($i = 0; $i -lt $Lines.Count; $i++) {
+        $line = $Lines[$i].TrimEnd("`r")
+        if ($line -cmatch '^ *(#|$)') { continue }
+        $key = $line.TrimStart(' ')
+        $indent = $line.Length - $key.Length
+        if ($indent -eq 0) {
+            $inServices = $key -cmatch '^(services|"services"|''services''): *(#.*)?$'
+            $serviceIndent = 0
+            $inApp = $false
+            continue
+        }
+        if (-not $inServices) { continue }
+        if (-not $serviceIndent) { $serviceIndent = $indent }
+        if ($indent -eq $serviceIndent) {
+            $inApp = $key -cmatch '^(app|"app"|''app''): *(#.*)?$'
+            $propertyIndent = 0
+            continue
+        }
+        if (-not $inApp) { continue }
+        if (-not $propertyIndent) { $propertyIndent = $indent }
+        if ($indent -eq $propertyIndent -and $key -cmatch '^image: +') {
+            if ($key -cmatch '^image: +(?:"([^"\s]+)"|''([^''\s]+)''|([^"''\s]+)) *(?:#.*)?$') {
+                $image = $Matches[1] + $Matches[2] + $Matches[3]
+                return [pscustomobject]@{ Index = $i; Image = $image }
+            }
+            return $null
         }
     }
-    if (-not $current) { return $null }
+    return $null
+}
+
+function Get-ImageTagBump {
+    param([string]$Compose, [string]$Target, [string[]]$Lines)
+    $Target = "$Target" -creplace '^v', ''
+    if ($Target -cnotmatch '\A[0-9]{1,6}\.[0-9]{1,6}\.[0-9]{1,6}\z') { return $null }
+    if ($Compose) {
+        if (-not (Test-Path -LiteralPath $Compose)) { return $null }
+        $Lines = [System.IO.File]::ReadAllLines((Resolve-Path -LiteralPath $Compose).Path)
+    }
+    $current = (Find-AppImageLine -Lines $Lines).Image
+    if ($current -cnotmatch '(^|/)myucto:[0-9]{1,6}\.[0-9]{1,6}\.[0-9]{1,6}$') { return $null }
     $version = $current.Substring($current.LastIndexOf(':') + 1)
     if ([version]$Target -le [version]$version) { return $null }
     return [pscustomobject]@{
@@ -42,14 +77,13 @@ function Set-ImageTag {
     $path = (Resolve-Path -LiteralPath $Compose).Path
     $text = [System.IO.File]::ReadAllText($path)
     $lines = $text -split "`n"
-    for ($i = 0; $i -lt $lines.Count; $i++) {
-        if ($lines[$i] -match '^\s*image:' -and $lines[$i].Contains($Old)) {
-            $at = $lines[$i].IndexOf($Old)
-            $lines[$i] = $lines[$i].Substring(0, $at) + $New + $lines[$i].Substring($at + $Old.Length)
-            break
-        }
+    $app = Find-AppImageLine -Lines $lines
+    if (-not $app -or $app.Image -cne $Old) {
+        throw "V $Compose neodpovida image sluzby app ocekavane hodnote $Old."
     }
-    # UTF-8 bez BOM, konce radku beze zmeny.
+    $line = $lines[$app.Index]
+    $at = $line.IndexOf($Old, [System.StringComparison]::Ordinal)
+    $lines[$app.Index] = $line.Substring(0, $at) + $New + $line.Substring($at + $Old.Length)
     [System.IO.File]::WriteAllText($path, ($lines -join "`n"), (New-Object System.Text.UTF8Encoding($false)))
 }
 

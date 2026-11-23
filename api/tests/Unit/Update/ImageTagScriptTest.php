@@ -34,12 +34,32 @@ final class ImageTagScriptTest extends TestCase
         file_put_contents($this->tmp . '/pinned.yml', str_replace('myucto:latest', 'myucto:6.70.1', $production));
         file_put_contents($this->tmp . '/suffix.yml', "services:\n  app:\n    image: ghcr.io/radekhulan/myucto:6.70.1-rc1\n");
         file_put_contents($this->tmp . '/quoted.yml', "services:\n  app:\n    image: \"ghcr.io/radekhulan/myucto:6.9.0\"  # pin\n");
+        file_put_contents($this->tmp . '/multi.yml', <<<'YAML'
+services:
+  worker:
+    image: ghcr.io/radekhulan/myucto:6.70.1
+  "app": # web
+    environment:
+      image: ghcr.io/radekhulan/myucto:6.70.1
+    image: 'ghcr.io/radekhulan/myucto:6.70.1' # pin
+  job:
+    image: ghcr.io/radekhulan/myucto:6.70.1
+YAML . "\n");
+        file_put_contents($this->tmp . '/worker-pinned.yml', str_replace(
+            "    image: 'ghcr.io/radekhulan/myucto:6.70.1' # pin",
+            '    image: ghcr.io/radekhulan/myucto:latest',
+            (string) file_get_contents($this->tmp . '/multi.yml'),
+        ));
     }
 
     protected function tearDown(): void
     {
-        foreach (glob($this->tmp . '/*') ?: [] as $f) {
-            @unlink($f);
+        $files = new \RecursiveIteratorIterator(
+            new \RecursiveDirectoryIterator($this->tmp, \FilesystemIterator::SKIP_DOTS),
+            \RecursiveIteratorIterator::CHILD_FIRST,
+        );
+        foreach ($files as $file) {
+            $file->isDir() ? rmdir($file->getPathname()) : unlink($file->getPathname());
         }
         @rmdir($this->tmp);
     }
@@ -52,6 +72,7 @@ final class ImageTagScriptTest extends TestCase
             'cílová verze s předponou v'  => ['pinned.yml', 'v6.71.0', 'ghcr.io/radekhulan/myucto:6.70.1 ghcr.io/radekhulan/myucto:6.71.0'],
             'číselné, ne textové pořadí'  => ['pinned.yml', '6.70.10', 'ghcr.io/radekhulan/myucto:6.70.1 ghcr.io/radekhulan/myucto:6.70.10'],
             'v uvozovkách'                => ['quoted.yml', '6.10.0', 'ghcr.io/radekhulan/myucto:6.9.0 ghcr.io/radekhulan/myucto:6.10.0'],
+            'připnutý je jen worker'    => ['worker-pinned.yml', '6.71.0', ''],
             'plovoucí latest'             => ['latest.yml', '6.71.0', ''],
             'stejná verze'                => ['pinned.yml', '6.70.1', ''],
             'nižší cílová verze'          => ['pinned.yml', '6.69.9', ''],
@@ -88,29 +109,166 @@ final class ImageTagScriptTest extends TestCase
     public function testShellRewritesOnlyTheAppImageLine(): void
     {
         $this->bashOrSkip();
-        $before = (string) file_get_contents($this->tmp . '/pinned.yml');
+        $before = (string) file_get_contents($this->tmp . '/multi.yml');
 
-        [, $err, $rc] = $this->runProcess('bash image-tag.sh --write pinned.yml ghcr.io/radekhulan/myucto:6.70.1 ghcr.io/radekhulan/myucto:6.71.0');
+        [, $err, $rc] = $this->runProcess('bash image-tag.sh --write multi.yml ghcr.io/radekhulan/myucto:6.70.1 ghcr.io/radekhulan/myucto:6.71.0');
 
         self::assertSame(0, $rc, 'stderr: ' . $err);
         self::assertSame(
-            str_replace('myucto:6.70.1', 'myucto:6.71.0', $before),
-            file_get_contents($this->tmp . '/pinned.yml'),
+            str_replace(
+                "    image: 'ghcr.io/radekhulan/myucto:6.70.1' # pin",
+                "    image: 'ghcr.io/radekhulan/myucto:6.71.0' # pin",
+                $before,
+            ),
+            file_get_contents($this->tmp . '/multi.yml'),
         );
     }
 
     public function testPowerShellRewritesOnlyTheAppImageLine(): void
     {
         $this->pwshOrSkip();
-        $before = (string) file_get_contents($this->tmp . '/pinned.yml');
+        $before = (string) file_get_contents($this->tmp . '/multi.yml');
 
-        [, $err, $rc] = $this->runProcess('pwsh -NoProfile -File image-tag.ps1 -Write pinned.yml ghcr.io/radekhulan/myucto:6.70.1 ghcr.io/radekhulan/myucto:6.71.0');
+        [, $err, $rc] = $this->runProcess('pwsh -NoProfile -File image-tag.ps1 -Write multi.yml ghcr.io/radekhulan/myucto:6.70.1 ghcr.io/radekhulan/myucto:6.71.0');
 
         self::assertSame(0, $rc, 'stderr: ' . $err);
         self::assertSame(
-            str_replace('myucto:6.70.1', 'myucto:6.71.0', $before),
-            file_get_contents($this->tmp . '/pinned.yml'),
+            str_replace(
+                "    image: 'ghcr.io/radekhulan/myucto:6.70.1' # pin",
+                "    image: 'ghcr.io/radekhulan/myucto:6.71.0' # pin",
+                $before,
+            ),
+            file_get_contents($this->tmp . '/multi.yml'),
         );
+    }
+
+    public static function failedUpdateProvider(): array
+    {
+        return [
+            'bash: obsazený port' => ['sh', 'port'],
+            'PowerShell: obsazený port' => ['ps1', 'port'],
+            'bash: pád před spuštěním app' => ['sh', 'db'],
+            'PowerShell: pád před spuštěním app' => ['ps1', 'db'],
+            'bash: rozpor konfigurace app' => ['sh', 'config'],
+            'PowerShell: rozpor konfigurace app' => ['ps1', 'config'],
+        ];
+    }
+
+    #[DataProvider('failedUpdateProvider')]
+    public function testUpdateLeavesPinnedTagUntouchedBeforeStartingApp(string $script, string $failure): void
+    {
+        if ($script === 'sh') {
+            $this->bashOrSkip();
+        } else {
+            $this->pwshOrSkip();
+        }
+        [$out, $err, $rc] = $this->runUpdaterFixture($script, $failure);
+
+        self::assertNotSame(0, $rc, $out . $err);
+        self::assertStringContainsString($failure === 'port' ? '58120' : 'Restarting database', $out . $err);
+        self::assertFileEquals($this->tmp . '/multi.yml', $this->tmp . '/docker-compose.production.yml', $out . $err);
+        self::assertFileDoesNotExist($this->tmp . '/app-started');
+    }
+
+    public static function switchedVersionProvider(): array
+    {
+        return [
+            'bash: shoda verze' => ['sh', '6.71.0', 0],
+            'PowerShell: shoda verze' => ['ps1', '6.71.0', 0],
+            'bash: běží původní verze' => ['sh', '6.70.1', 1],
+            'PowerShell: běží původní verze' => ['ps1', '6.70.1', 1],
+        ];
+    }
+
+    #[DataProvider('switchedVersionProvider')]
+    public function testChecksAppVersionAfterRestart(string $script, string $actualVersion, int $expectedExit): void
+    {
+        if (PHP_OS_FAMILY === 'Windows') {
+            self::markTestSkipped('Zástupný curl.exe je spustitelný skript pro Unix.');
+        }
+        if ($script === 'sh') {
+            $this->bashOrSkip();
+        } else {
+            $this->pwshOrSkip();
+        }
+
+        foreach (['curl', 'curl.exe'] as $curl) {
+            file_put_contents($this->tmp . '/' . $curl, "#!/usr/bin/env bash\nexit 0\n");
+            chmod($this->tmp . '/' . $curl, 0755);
+        }
+        [$out, $err, $rc] = $this->runUpdaterFixture($script, $actualVersion);
+
+        self::assertSame($expectedExit, $rc, $out . $err);
+        self::assertStringContainsString($expectedExit === 0 ? 'Update complete' : $actualVersion, $out . $err);
+        $before = (string) file_get_contents($this->tmp . '/multi.yml');
+        self::assertSame(
+            str_replace("myucto:6.70.1' # pin", "myucto:6.71.0' # pin", $before),
+            file_get_contents($this->tmp . '/app-started'),
+        );
+    }
+
+    /** @return array{0:string,1:string,2:int} */
+    private function runUpdaterFixture(string $script, string $scenario): array
+    {
+        $compose = $this->tmp . '/docker-compose.production.yml';
+        copy($this->tmp . '/multi.yml', $compose);
+        file_put_contents($this->tmp . '/.env', "APP_PORT=58120\nDB_PORT=58121\n");
+        mkdir($this->tmp . '/cmd/lib', 0775, true);
+        copy($this->root . '/cmd/docker-update.' . $script, $this->tmp . '/cmd/docker-update.' . $script);
+        foreach (['env-load', 'image-tag'] as $lib) {
+            copy($this->root . '/cmd/lib/' . $lib . '.' . $script, $this->tmp . '/cmd/lib/' . $lib . '.' . $script);
+        }
+
+        $stub = $this->tmp . '/docker-stub.php';
+        file_put_contents($stub, <<<'PHP'
+<?php
+[, $command] = $argv;
+if ($command === 'compose') {
+    $file = $argv[2] === '-f' ? $argv[3] : 'docker-compose.production.yml';
+    $op = $argv[2] === '-f' ? $argv[4] : $argv[2];
+    if ($op === 'config') {
+        readfile(getenv('UPDATE_FAKE_FAILURE') === 'config' ? 'docker-compose.production.yml' : $file);
+    } elseif ($op === 'up' && end($argv) === 'db' && getenv('UPDATE_FAKE_FAILURE') === 'db') {
+        exit(12);
+    } elseif ($op === 'ps' && end($argv) === 'db') {
+        echo '{"Health":"healthy"}';
+    } elseif ($op === 'up' && end($argv) === 'app') {
+        copy($file, 'app-started');
+        if (in_array(getenv('UPDATE_FAKE_FAILURE'), ['port', 'db', 'config'], true)) {
+            exit(13);
+        }
+    } elseif ($op === 'exec') {
+        echo getenv('UPDATE_FAKE_FAILURE'), PHP_EOL;
+    }
+} elseif ($command === 'ps' && $argv[2] === '--format' && getenv('UPDATE_FAKE_FAILURE') === 'port') {
+    $project = str_contains($argv[3], 'com.docker.compose.project') ? 'fixture|' : '';
+    echo 'nginx|nginx:latest|' . $project . '0.0.0.0:58120->80/tcp', PHP_EOL;
+} elseif ($command === 'volume') {
+    exit(1);
+}
+PHP);
+        $php = str_replace('\\', '/', PHP_BINARY);
+        file_put_contents($this->tmp . '/docker', "#!/usr/bin/env bash\nexec \"$php\" \"\$(dirname \"\$0\")/docker-stub.php\" \"\$@\"\n");
+        chmod($this->tmp . '/docker', 0755);
+        file_put_contents($this->tmp . '/docker.cmd', "@echo off\r\n\"$php\" \"%~dp0docker-stub.php\" %*\r\n");
+
+        $env = getenv();
+        if (PHP_OS_FAMILY === 'Windows') {
+            $env = array_change_key_case($env, CASE_UPPER);
+        }
+        $env['PATH'] = $this->tmp . PATH_SEPARATOR . getenv('PATH');
+        $env['APP_PORT'] = '58120';
+        $env['DB_PORT'] = '58121';
+        $env['MYINVOICE_UPDATE_MODE'] = 'registry';
+        $env['MYINVOICE_TARGET_VERSION'] = '6.71.0';
+        $env['UPDATE_FAKE_FAILURE'] = $scenario;
+        $lookup = $script === 'sh' ? 'bash -c "command -v docker"' : 'pwsh -NoProfile -Command "(Get-Command docker).Source"';
+        [$docker, $err, $rc] = $this->runProcess($lookup, $env);
+        self::assertSame(0, $rc, $err);
+        self::assertStringStartsWith('myucto-image-tag-', basename(dirname(trim(str_replace('\\', '/', $docker)))));
+        $command = $script === 'sh' ? 'bash cmd/docker-update.sh' : 'pwsh -NoProfile -File cmd/docker-update.ps1';
+
+        return $this->runProcess($command, $env);
     }
 
     /** Watcher musí cílovou verzi opravdu předat, jinak knihovna nemá z čeho rozhodnout. */
@@ -130,9 +288,9 @@ final class ImageTagScriptTest extends TestCase
     }
 
     /** @return array{0:string,1:string,2:int} */
-    private function runProcess(string $command): array
+    private function runProcess(string $command, ?array $env = null): array
     {
-        $proc = proc_open($command, [1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $pipes, $this->tmp);
+        $proc = proc_open($command, [1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $pipes, $this->tmp, $env);
         self::assertIsResource($proc, 'proc_open selhal pro: ' . $command);
         $stdout = (string) stream_get_contents($pipes[1]);
         $stderr = (string) stream_get_contents($pipes[2]);
