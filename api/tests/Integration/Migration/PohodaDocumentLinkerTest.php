@@ -161,7 +161,10 @@ final class PohodaDocumentLinkerTest extends TestCase
         $payments = $this->fetchAll($sql);
         self::assertSame([['bank', 605.0, $first], ['cash', 363.0, $second]],
             array_map(static fn (array $r): array => [$r['source'], (float) $r['amount'], $r['varsymbol']], $payments));
-        self::assertSame(3, self::stepCounts($this->protocol, 'link')['tax_document_advance_linked'] ?? 0, $this->explain());
+        self::assertSame($this->purchase(Mdb::TEXT_ADVANCE),
+            $this->column('purchase_invoices', 'parent_purchase_invoice_id', Mdb::TEXT_FALLBACK_TAX_DOCUMENT));
+        self::assertSame(4, self::stepCounts($this->protocol, 'link')['tax_document_advance_linked'] ?? 0, $this->explain());
+        self::assertNotContains('tax_document_refs_missing', self::messageCodes($this->protocol, 'link'));
 
         $again = $this->import(false);
         self::assertSame($payments, $this->fetchAll($sql));
@@ -179,7 +182,21 @@ final class PohodaDocumentLinkerTest extends TestCase
             self::assertSame('tax_document', $this->column('invoices', 'invoice_type', $number));
             self::assertNull($this->column('invoices', 'parent_invoice_id', $number));
         }
-        self::assertSame(1, self::stepCounts($this->protocol, 'link')['tax_document_advance_linked'] ?? 0, $this->explain());
+        self::assertSame($this->purchase(Mdb::TEXT_ADVANCE),
+            $this->column('purchase_invoices', 'parent_purchase_invoice_id', Mdb::TEXT_FALLBACK_TAX_DOCUMENT));
+        self::assertSame(2, self::stepCounts($this->protocol, 'link')['tax_document_advance_linked'] ?? 0, $this->explain());
+        self::assertContains('tax_document_refs_missing', self::messageCodes($this->protocol, 'link'), $this->explain());
+    }
+
+    /** @return list<string> */
+    private static function messageCodes(ImportProtocol $protocol, string $step): array
+    {
+        foreach ($protocol->toArray()['steps'] as $s) {
+            if ($s['key'] === $step) {
+                return array_values(array_map(static fn (array $m): string => (string) ($m['code'] ?? ''), $s['messages'] ?? []));
+            }
+        }
+        return [];
     }
 
     /** 5) offsetCreditNote: faktura a dobropis vyrovnané interním dokladem = zápočet dobropisu. */

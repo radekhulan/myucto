@@ -141,6 +141,7 @@ final class DocumentBranchParityGuardsTest extends TestCase
         // převod přebírá přímo; dopočet z účtu 314 se jich netýká.
         'Service/Migration/Pohoda/DocumentLinker.php' => [
             'inferAdvanceSettlements' => 'dopočet čerpání se týká jen poskytnutých záloh na 314',
+            'linkIssuedPaymentTaxDocument' => 'vazbu platby zálohy na DDKP (invoice_payments.tax_document_invoice_id) mají jen vydané zálohy, platby přijatých dokladů takový sloupec nemají',
         ],
 
         // ZDD (daňový doklad k přijaté platbě zálohy) a čerpání zálohy vede ABRA Flexi jen

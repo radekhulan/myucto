@@ -275,6 +275,9 @@ final class DocumentLinker
         $p = $ctx->protocol;
         $pdo = $this->db->pdo();
         $hasRefDD = $ctx->export->hasTaxDocumentPaymentRefs();
+        $byText = 0;
+        $seen = 0;
+        $refAdvances = [];
         $byRefDD = [];
         $issuedPaymentSources = [];
         if ($hasRefDD) {
@@ -285,6 +288,7 @@ final class DocumentLinker
                 $ref = $l['tax_document_ref'] ?? '';
                 if ($ref !== '') {
                     $byRefDD[$ref][] = $l;
+                    $refAdvances[$l['doc']][$l['id']] = true;
                 }
                 if ($l['doc'] === 'invoice') {
                     $issuedPaymentSources[$l['id']][$l['agenda']][$l['source']] =
@@ -327,6 +331,7 @@ final class DocumentLinker
                 if ($taxDocumentId === null || $ctx->skipsDate($accounting ?? $issue)) {
                     continue;
                 }
+                $seen++;
                 $payments = $byRefDD[PohodaXml::text($header, 'id')] ?? [];
                 if ($setFromPayment !== null && $payments !== []) {
                     $advanceIds = array_unique(array_column($payments, 'id'));
@@ -352,12 +357,17 @@ final class DocumentLinker
                         $refs[$ref] = $advances[$ref][0];
                     }
                 }
-                $textRef = !$hasRefDD && $refs === [] ? self::advanceNumberFromText(PohodaXml::text($header, 'text')) : null;
-                if ($textRef !== null && count($advances[$textRef] ?? []) === 1) {
+                // DDKP bez úhrady s RefDD (ruční, k záloze jiného roku, starší export): číslo zálohy
+                // z textu, který POHODA generuje ({@see self::advanceNumberFromText()}), jen u téhož
+                // partnera a téže částky. Text lze přepsat, proto má RefDD přednost: záloha, ke které
+                // už DDKP váže úhrada, další DDKP podle textu nedostane.
+                $textRef = $refs === [] ? self::advanceNumberFromText(PohodaXml::text($header, 'text')) : null;
+                if ($textRef !== null && count($advances[$textRef] ?? []) === 1 && !isset($refAdvances[$docType][$advances[$textRef][0]])) {
                     $candidate = $advances[$textRef][0];
                     $same->execute([$candidate, $taxDocumentId, $ctx->supplierId]);
                     if ($same->fetchColumn() !== false) {
                         $refs[$textRef] = $candidate;
+                        $byText++;
                     }
                 }
                 if (count($refs) !== 1) {
@@ -368,6 +378,11 @@ final class DocumentLinker
                     $p->count(self::STEP_LINK, 'tax_document_advance_linked');
                 }
             }
+        }
+        if (!$hasRefDD && $seen > 0 && $ctx->export->hasMdbAccounting()) {
+            $p->warn(self::STEP_LINK, 'tax_document_refs_missing', "Export POHODY je z dřívější verze exportního skriptu a nenese vazbu daňových dokladů k platbě (DDKP) na úhradu zálohy. "
+                . "Z {$seen} DDKP se podle textu navázalo {$byText}, ostatní zůstaly bez vazby na zálohu. "
+                . 'Pro přesné párování (i u záloh placených po částech) vyexportujte data aktuálním skriptem z průvodce převodu a převod spusťte znovu.', ['count' => $seen, 'by_text' => $byText]);
         }
     }
 

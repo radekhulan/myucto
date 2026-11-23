@@ -244,6 +244,11 @@ final class PohodaExport
         }
     }
 
+    public function hasMdbAccounting(): bool
+    {
+        return $this->mdb !== null;
+    }
+
     public function hasTaxDocumentPaymentRefs(): bool
     {
         return $this->mdb?->tables->hasColumn('Uhrady', 'RefDD') ?? false;

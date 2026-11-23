@@ -20,6 +20,8 @@ final class SyntheticPohodaMdbExport
     public const RECEIVED_TAX_DOCUMENT = 'TEST-DDP1';
     public const OTHER_PARTNER_TAX_DOCUMENT = 'TEST-DDP2';
     public const TEXT_ONLY_TAX_DOCUMENT = 'TEST-DDP3';
+    public const TEXT_ADVANCE = 'TEST-ZFP2';
+    public const TEXT_FALLBACK_TAX_DOCUMENT = 'TEST-DDP4';
 
     /** Tabulky, které převod z MDB vyžaduje (mohou být prázdné). */
     private const TABLES = ['pUD', 'pOS', 'sDPH', 'sDPHTp', 'pPK', 'FA', 'FApol', 'AD', 'sUcet', 'sZeme', 'sCMeny', 'sFormUh', 'BV', 'BVpol', 'HO', 'HOpol', 'pINT', 'pINTpol', 'Uhrady'];
@@ -234,12 +236,15 @@ final class SyntheticPohodaMdbExport
                 $journal('8', '29', '103', self::RECEIVED_TAX_DOCUMENT, $bankDate, '210', '343011', '314001'),
                 $journal('9', '29', '104', self::OTHER_PARTNER_TAX_DOCUMENT, $cashDate, '210', '343011', '314001'),
                 $journal('10', '29', '105', self::TEXT_ONLY_TAX_DOCUMENT, $cashDate, '210', '343011', '314001'),
+                $journal('11', '29', '106', self::TEXT_FALLBACK_TAX_DOCUMENT, $cashDate, '210', '343011', '314001'),
             ],
             'FA' => [
                 ['ID' => '11', 'Cislo' => self::ISSUED_ADVANCE, 'RelTpFak' => '4', 'Datum' => $date, 'RelPk' => '3',
                     'Kc0' => '968', 'KcLikv' => '0', 'DatLikv' => $cashDate] + $customer,
                 ['ID' => '12', 'Cislo' => self::RECEIVED_ADVANCE, 'RelTpFak' => '14', 'Datum' => $date, 'RelPk' => '3',
                     'Kc0' => '1210', 'KcLikv' => '0', 'DatLikv' => $bankDate] + $vendor,
+                ['ID' => '13', 'Cislo' => self::TEXT_ADVANCE, 'RelTpFak' => '14', 'Datum' => $date, 'RelPk' => '3',
+                    'Kc0' => '1210'] + $vendor,
             ],
             'BV' => [
                 ['ID' => '21', 'RelTpBV' => '1', 'Cislo' => 'TEST-B1', 'Datum' => $bankDate, 'RefUcet' => '1', 'Kc0' => '605'] + $customer,
@@ -252,6 +257,7 @@ final class SyntheticPohodaMdbExport
                 $taxDocument('103', self::RECEIVED_TAX_DOCUMENT, $bankDate, '2', '1000', '210', $text) + ['KcZaokr' => '-0.01'] + $vendor,
                 $taxDocument('104', self::OTHER_PARTNER_TAX_DOCUMENT, $cashDate, '2', '1000', '210', $text) + $customer,
                 $taxDocument('105', self::TEXT_ONLY_TAX_DOCUMENT, $cashDate, '2', '1000', '210', $text . ' (zálohová faktura č. ' . self::RECEIVED_ADVANCE . ')') + $vendor,
+                $taxDocument('106', self::TEXT_FALLBACK_TAX_DOCUMENT, $cashDate, '2', '1000', '210', $text . ' (zálohová faktura č. ' . self::TEXT_ADVANCE . ')') + $vendor,
             ],
             'Uhrady' => [
                 $payment('1', '11', '43', 'TEST-STARÝ-OPIS', '28', '21', 'TEST-B1', $bankDate, '605', '101'),
