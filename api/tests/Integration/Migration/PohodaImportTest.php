@@ -1252,6 +1252,72 @@ final class PohodaImportTest extends TestCase
     }
 
     /**
+     * Doklad, který starší převod převzal v Kč s důvodem „samovyměření DPH" (řádek
+     * samovyměření 2 500 Kč + rozdíl kurzu 30 Kč), oprava podle exportu převede na 100 EUR
+     * kurzem 25,30 se základem samovyměření 2 500 Kč. Přiznání a KH se nezmění, změna jde
+     * do auditní stopy, opakovaný běh nic nemění. Bez exportu kontrola doklad jen ukáže,
+     * doklad za zámkem účtování oprava nemění.
+     */
+    public function testSelfAssessedForeignPurchaseTakenOverInCrownsIsRepairedFromExport(): void
+    {
+        $supplierId = $this->supplier();
+        $dir = SyntheticPohodaExport::write($this->tmp);
+        SyntheticPohodaExport::withSelfAssessedForeignPurchase($dir);
+        $protocol = $this->importer->run($supplierId, $this->userId, PohodaExport::open($dir), false);
+        self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
+        $pdo = $this->db->pdo();
+        $id = $this->documentId('purchase_invoices', $supplierId, SyntheticPohodaExport::SELF_ASSESSED_PURCHASE);
+
+        // Doklad tak, jak ho převzal převod před opravou: v Kč, rozdíl kurzu jako položka „mimo".
+        $czk = (int) $pdo->query("SELECT currency_id FROM purchase_invoices WHERE supplier_id = {$supplierId} AND exchange_rate IS NULL LIMIT 1")->fetchColumn();
+        $pdo->prepare("UPDATE purchase_invoices SET currency_id = ?, exchange_rate = NULL, total_without_vat = 2530, total_with_vat = 2530,
+                              note_below_items = 'Převzato z Pohody, doklad 26PF0010; doklad v EUR, převzat v Kč (samovyměření DPH - zdroj daň vyměřil kurzem ke dni plnění, ne kurzem faktury)'
+                        WHERE id = ?")->execute([$czk, $id]);
+        $pdo->prepare('UPDATE purchase_invoice_items SET unit_price_without_vat = 2500, total_without_vat = 2500, total_with_vat = 2500, import_tax_base_czk = NULL
+                        WHERE purchase_invoice_id = ?')->execute([$id]);
+        $pdo->prepare("INSERT INTO purchase_invoice_items (purchase_invoice_id, description, quantity, unit, unit_price_without_vat, vat_rate_id, vat_rate_snapshot,
+                              total_without_vat, total_vat, total_with_vat, order_index, vat_classification_code)
+                       SELECT purchase_invoice_id, 'Rozdíl proti základu samovyměření (kurz)', 1, 'ks', 30, vat_rate_id, 0, 30, 0, 30, 1, 'mimo'
+                         FROM purchase_invoice_items WHERE purchase_invoice_id = ?")->execute([$id]);
+
+        $container = Bootstrap::buildContainer();
+        $dph = $container->get(\MyInvoice\Service\Report\DphPriznaniBuilder::class);
+        $kh = $container->get(\MyInvoice\Service\Report\KontrolniHlaseniBuilder::class);
+        $return = $dph->build($supplierId, SyntheticPohodaExport::YEAR, 2, 'monthly')['summary']['lines'];
+        $statement = $kh->build($supplierId, SyntheticPohodaExport::YEAR, 2);
+        self::assertEqualsWithDelta(2500.0, (float) ($return['5']['base'] ?? 0), 0.005, 'Kontrola fixture: ř. 5 ze základu samovyměření.');
+
+        $check = $container->get(\MyInvoice\Service\Migration\Check\Checks\ForeignPurchaseInCzkCheck::class);
+        $found = $check->detect($supplierId);
+        self::assertSame([[$id, 'review', 'EUR', 2530.0]], array_map(static fn ($i): array => [$i->entityId, $i->state, $i->currency, $i->amountCzk], $found->items));
+
+        $repair = $container->get(\MyInvoice\Service\Migration\Pohoda\PohodaForeignPurchaseRepair::class);
+        $pdo->prepare('INSERT INTO accounting_supplier_settings (supplier_id, locked_until) VALUES (?, ?) ON DUPLICATE KEY UPDATE locked_until = VALUES(locked_until)')
+            ->execute([$supplierId, '2026-02-28']);
+        self::assertSame(['locked'], array_column($repair->run($supplierId, PohodaExport::open($dir), true, $this->userId), 'status'));
+        self::assertSame(1, $this->rows('purchase_invoices', $supplierId, "id = {$id} AND exchange_rate IS NULL"));
+        $pdo->prepare('UPDATE accounting_supplier_settings SET locked_until = NULL WHERE supplier_id = ?')->execute([$supplierId]);
+
+        $dry = $repair->run($supplierId, PohodaExport::open($dir), false);
+        self::assertSame([['convert', 25.3, 100.0, 2500.0, 1]], array_map(static fn (array $r): array => [$r['status'], $r['rate'], $r['total_foreign'], $r['tax_base_czk'], $r['removed_items']], $dry));
+        self::assertSame(1, $this->rows('purchase_invoices', $supplierId, "id = {$id} AND exchange_rate IS NULL"), 'Nanečisto nic nezapíše.');
+
+        self::assertSame(['converted'], array_column($repair->run($supplierId, PohodaExport::open($dir), true, $this->userId), 'status'));
+        $doc = $pdo->query("SELECT c.code, pi.exchange_rate, pi.total_with_vat, pi.amount_to_pay, pi.note_below_items FROM purchase_invoices pi JOIN currencies c ON c.id = pi.currency_id WHERE pi.id = {$id}")->fetch(\PDO::FETCH_ASSOC);
+        self::assertSame(['EUR', '25.300000', '100.00', '100.00'], [$doc['code'], $doc['exchange_rate'], $doc['total_with_vat'], $doc['amount_to_pay']]);
+        self::assertSame('Převzato z Pohody, doklad 26PF0010; doklad v EUR, převzat v měně dokladu kurzem 25,3 Kč; '
+            . 'samovyměření DPH ze základu 2 500,00 Kč kurzem ke dni plnění jako v POHODĚ, ne přepočtem EUR kurzem dokladu', $doc['note_below_items']);
+        self::assertSame([['100.000000', '100.00', '0.00', '2500.00']], $pdo->query("SELECT unit_price_without_vat, total_without_vat, total_vat, import_tax_base_czk FROM purchase_invoice_items WHERE purchase_invoice_id = {$id}")->fetchAll(\PDO::FETCH_NUM));
+        self::assertSame(1, (int) $pdo->query("SELECT COUNT(*) FROM activity_log WHERE action = 'purchase_invoice.pohoda_foreign_currency_repaired' AND entity_type = 'purchase_invoice' AND entity_id = {$id} AND supplier_id = {$supplierId}")->fetchColumn());
+
+        self::assertSame($return, $dph->build($supplierId, SyntheticPohodaExport::YEAR, 2, 'monthly')['summary']['lines']);
+        $after = $kh->build($supplierId, SyntheticPohodaExport::YEAR, 2);
+        self::assertSame($statement['summary'], $after['summary']);
+        self::assertSame([], $repair->run($supplierId, PohodaExport::open($dir), true, $this->userId), 'Opakovaný běh nic nemění.');
+        self::assertSame([], $check->detect($supplierId)->items);
+    }
+
+    /**
      * Zahraniční dodavatel, kterého adresář POHODY vede bez DIČ a státu: DIČ z dokladu se
      * doplní na kontakt i se státem podle předpony, jinak by evidence DPH brala samovyměření
      * jako tuzemský doklad a zařadila ho podle data vystavení místo DUZP.

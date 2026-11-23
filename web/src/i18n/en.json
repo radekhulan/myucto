@@ -46452,6 +46452,11 @@
         "title": "Final invoice with advance VAT counted twice",
         "hint": "Advance with a tax document deducted only in the header without deduction lines.",
         "description": "The final invoice deducts an advance with a tax document only in the header, so the advance VAT is in the return twice. The fix is done in the app by deducting the advance with a line, see the manual."
+      },
+      "foreign_purchase_in_czk": {
+        "title": "Foreign-currency purchase invoices taken over in CZK",
+        "hint": "Invoices from foreign suppliers with self-assessed VAT in CZK instead of the document currency.",
+        "description": "The POHODA migration used to take over purchase invoices in EUR or another currency with self-assessed VAT in CZK. VAT, the control statement and the journal are correct; the currency, rate and foreign amount are missing, so a payment in the currency cannot be matched and no exchange difference is calculated. The repair reads the currency and rate from the original POHODA export and is run by the installation administrator, see the manual."
       }
     }
   }
