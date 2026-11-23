@@ -18,6 +18,7 @@ use PhpOffice\PhpSpreadsheet\IOFactory;
 use PHPUnit\Framework\Attributes\Group;
 use Slim\Psr7\Factory\ServerRequestFactory;
 use Slim\Psr7\Response;
+use Smalot\PdfParser\Parser;
 
 /**
  * Ocenění k datu seskupené podle kategorií: skupiny jsou přímé podkategorie
@@ -146,6 +147,58 @@ final class StockValuationCategoryGroupsTest extends StockTestCase
             self::byLabel($grouping),
         );
         self::assertSame($report['totals']['value_total'], $grouping['value_total']);
+    }
+
+    public function testSynchronousValuationFiltersCategorySubtree(): void
+    {
+        $f = $this->fixture();
+        $action = $this->container->get(StockReportAction::class);
+        $query = ['date' => '2099-01-31'];
+        $plain = $this->json($action->valuation($this->request($f['sid'], $query), new Response()));
+        self::assertSame(['date', 'items', 'totals'], array_keys($plain));
+        self::assertSame(['value_total' => '447.00', 'count' => 9], $plain['totals']);
+
+        $query['category_id'] = (string) $f['c2'];
+        $filtered = $this->json($action->valuation($this->request($f['sid'], $query), new Response()));
+        self::assertSame(['VAL-2', 'VAL-2', 'VAL-4', 'VAL-5'], array_column($filtered['items'], 'sku'));
+        self::assertSame(['value_total' => '268.00', 'count' => 4], $filtered['totals']);
+        self::assertSame(['id' => $f['c2'], 'code' => 'VAL-C2', 'name' => 'Kategorie VAL-C2'], $filtered['category']);
+
+        $query['warehouse_id'] = (string) $f['wh'];
+        $warehouse = $this->json($action->valuation($this->request($f['sid'], $query), new Response()));
+        self::assertSame(['VAL-2', 'VAL-4', 'VAL-5'], array_column($warehouse['items'], 'sku'));
+        self::assertSame(['value_total' => '218.00', 'count' => 3], $warehouse['totals']);
+    }
+
+    public function testSynchronousValuationRejectsInvalidCategory(): void
+    {
+        $f = $this->fixture();
+        $foreign = $this->category($this->createSupplier(), 'VAL-FOREIGN');
+        $missing = (string) $this->db->pdo()->query('SELECT MAX(id) + 1 FROM stock_categories')->fetchColumn();
+        $action = $this->container->get(StockReportAction::class);
+        foreach (['abc', '0', '', (string) $foreign, $missing] as $bad) {
+            $request = $this->request($f['sid'], ['date' => '2099-01-31', 'category_id' => $bad, 'format' => 'xlsx']);
+            self::assertSame(422, $action->valuation($request, new Response())->getStatusCode(), 'category_id ' . var_export($bad, true));
+            self::assertSame(422, $action->export($request, new Response(), ['name' => 'valuation'])->getStatusCode(), 'category_id ' . var_export($bad, true));
+        }
+    }
+
+    public function testSynchronousValuationExportsIncludeCategory(): void
+    {
+        $f = $this->fixture();
+        $action = $this->container->get(StockReportAction::class);
+        $query = ['date' => '2099-01-31', 'category_id' => (string) $f['c2']];
+        $xlsx = $action->export($this->request($f['sid'], $query + ['format' => 'xlsx']), new Response(), ['name' => 'valuation']);
+        self::assertSame(200, $xlsx->getStatusCode());
+        $rows = $this->sheetRows((string) $xlsx->getBody(), 'Ocenění zásob');
+        self::assertSame(['Kategorie: Kategorie VAL-C2 (včetně podkategorií)'], $rows[2]);
+        self::assertSame(['VAL-2', 'VAL-2', 'VAL-4', 'VAL-5'], array_map(static fn (array $r) => $r[1], array_slice($rows, 3, 4)));
+        self::assertSame(['CELKEM (4 položek)', 268.0], $rows[8]);
+
+        $pdf = $action->export($this->request($f['sid'], $query + ['format' => 'pdf']), new Response(), ['name' => 'valuation']);
+        self::assertSame(200, $pdf->getStatusCode());
+        $text = (new Parser())->parseContent((string) $pdf->getBody())->getText();
+        self::assertStringContainsString('Kategorie: Kategorie VAL-C2 (včetně podkategorií)', $text);
     }
 
     public function testRejectsForeignOrInvalidParent(): void

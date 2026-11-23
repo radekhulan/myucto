@@ -5,8 +5,6 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Stock;
 
 use MyInvoice\Infrastructure\Database\Connection;
-use MyInvoice\Repository\StockCategoryRepository;
-use MyInvoice\Repository\StockItemRepository;
 use MyInvoice\Repository\StockTakeRepository;
 use MyInvoice\Repository\StockValuationSnapshotRepository;
 use MyInvoice\Repository\WarehouseRepository;
@@ -28,7 +26,7 @@ final class StockValuationJobService
         private readonly StockTakeRepository $takes,
         private readonly \MyInvoice\Repository\StockDocumentRepository $documents,
         private readonly StockValuationCategoryGroups $categoryGroups,
-        private readonly StockCategoryRepository $categories,
+        private readonly StockValuationCategory $categories,
     ) {}
 
     public function enqueue(int $supplierId, string $date, array $filters = []): array
@@ -46,19 +44,15 @@ final class StockValuationJobService
         try {
             $warehouseId = !empty($filters['warehouse_id']) ? (int) $filters['warehouse_id'] : null;
             $categoryId = !empty($filters['category_id']) ? (int) $filters['category_id'] : null;
-            $category = $categoryId !== null ? $this->categories->find($supplierId, $categoryId) : null;
-            if ($categoryId !== null && $category === null) {
-                throw new StockException('validation_failed', 'Kategorie nenalezena.', 422, ['field' => 'category_id']);
-            }
-            $categoryItems = 'SELECT si.id FROM stock_items si WHERE si.supplier_id = ? AND ' . StockItemRepository::categorySubtreeSql('si');
+            $category = $this->categories->resolve($supplierId, $categoryId);
+            $categoryItems = StockValuationCategory::itemIdsSql();
             $categoryInput = null;
             if ($category !== null) {
                 // Název se ukládá s id, aby výsledek i po smazání kategorie říkal, že je omezený. Otisk karet
                 // brání znovupoužití hotové úlohy po přeřazení karet, které verze skladu nezmění.
                 $members = $pdo->prepare($categoryItems . ' ORDER BY si.id');
                 $members->execute([$supplierId, $categoryId]);
-                $categoryInput = ['id' => $categoryId, 'code' => (string) $category['code'], 'name' => (string) $category['name'],
-                    'items' => sha1(implode(',', $members->fetchAll(PDO::FETCH_COLUMN)))];
+                $categoryInput = $category + ['items' => sha1(implode(',', $members->fetchAll(PDO::FETCH_COLUMN)))];
             }
             $versions = $this->snapshots->versions($supplierId, $warehouseId !== null ? [$warehouseId] : null);
             $this->warehouses->lockForStockOperation($supplierId, array_keys($versions));

@@ -82,17 +82,9 @@ final class StockReportAction
         }
         $q = $request->getQueryParams();
         $date = trim((string) ($q['date'] ?? (new \DateTimeImmutable())->format('Y-m-d')));
-        $filters = [];
-        if (!empty($q['warehouse_id'])) {
-            $filters['warehouse_id'] = (int) $q['warehouse_id'];
-        }
         try {
             $grouping = $this->categoryGrouping($request, $q);
-            $data = $this->service->valuation($supplierId, $date, $filters);
-            if ($grouping !== null) {
-                $data['category_groups'] = $this->categoryGroups->summarize($supplierId, $grouping['parent_id'], $data['items']);
-            }
-            return Json::ok($response, $data);
+            return Json::ok($response, $this->synchronousValuation($supplierId, $date, $q, $grouping));
         } catch (\Throwable $e) {
             return $this->mapStockError($response, $e);
         }
@@ -346,7 +338,6 @@ final class StockReportAction
             } else {
                 $q = $request->getQueryParams();
                 $date = trim((string) ($q['date'] ?? (new \DateTimeImmutable())->format('Y-m-d')));
-                $filters = !empty($q['warehouse_id']) ? ['warehouse_id' => (int) $q['warehouse_id']] : [];
                 $grouping = $this->categoryGrouping($request, $q);
                 if (isset($q['job_id'])) {
                     $jobId = filter_var($q['job_id'], FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]);
@@ -364,10 +355,7 @@ final class StockReportAction
                         $data['category_groups'] = $this->valuationJobs->categoryGroups($supplierId, $jobId, $grouping['parent_id']);
                     }
                 } else {
-                    $data = $this->service->valuation($supplierId, $date, $filters);
-                    if ($grouping !== null) {
-                        $data['category_groups'] = $this->categoryGroups->summarize($supplierId, $grouping['parent_id'], $data['items']);
-                    }
+                    $data = $this->synchronousValuation($supplierId, $date, $q, $grouping);
                 }
                 $out = $format === 'pdf'
                     ? ['bytes' => $this->valuationPdf->render($data), 'filename' => 'oceneni-zasob-' . $date . '.pdf', 'mime' => 'application/pdf']
@@ -414,6 +402,23 @@ final class StockReportAction
     {
         $grouping = StockValuationCategoryGroups::normalize($q);
         return RequestAuthorization::allows($request, 'eshop', AccessLevel::READ) ? $grouping : null;
+    }
+
+    private function synchronousValuation(int $supplierId, string $date, array $q, ?array $grouping): array
+    {
+        $filters = !empty($q['warehouse_id']) ? ['warehouse_id' => (int) $q['warehouse_id']] : [];
+        if (isset($q['category_id'])) {
+            $categoryId = filter_var($q['category_id'], FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]);
+            if ($categoryId === false) {
+                throw new StockException('validation_failed', 'Neplatná kategorie.', 422, ['field' => 'category_id']);
+            }
+            $filters['category_id'] = $categoryId;
+        }
+        $data = $this->service->valuation($supplierId, $date, $filters);
+        if ($grouping !== null) {
+            $data['category_groups'] = $this->categoryGroups->summarize($supplierId, $grouping['parent_id'], $data['items']);
+        }
+        return $data;
     }
 
     private function mapStockError(Response $response, \Throwable $e): Response

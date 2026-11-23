@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
+import { ToolArgumentsError, validateToolArguments } from '../src/tool-args.mjs';
 import { TOOLS, TOOLS_BY_NAME } from '../src/tools.mjs';
 
 class FakeClient {
@@ -73,6 +74,19 @@ test('katalog má unikátní názvy a nové domény', () => {
   ]) {
     assert.equal(TOOLS_BY_NAME.has(forbidden), false, forbidden);
   }
+});
+
+test('ocenění skladu předává volitelný filtr kategorie', async () => {
+  const client = new FakeClient();
+  const valuation = tool('stock_valuation');
+  const args = { warehouse_id: 3, date: '2099-01-31' };
+  await valuation.run(client, validateToolArguments(valuation, { ...args, category_id: 7 }), valuation.name);
+  await valuation.run(client, validateToolArguments(valuation, args), valuation.name);
+  assert.deepEqual(client.calls, [
+    { method: 'GET', path: '/stock/reports/valuation', query: { ...args, category_id: 7 }, tool: valuation.name },
+    { method: 'GET', path: '/stock/reports/valuation', query: { ...args, category_id: undefined }, tool: valuation.name },
+  ]);
+  assert.throws(() => validateToolArguments(valuation, { category_id: 0 }), ToolArgumentsError);
 });
 
 test('změna mzdy od data posílá jen povolená pole do nové verze', async () => {

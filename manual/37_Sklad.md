@@ -1378,8 +1378,9 @@ omezit nedá a vždy zahrne celý sklad.
   - Změna seskupení výpočet neopakuje, jen znovu načte hotové ocenění. Export XLSX
     přidá list **Podle kategorií**, export PDF souhrnnou tabulku nad seznam.
   - **Kategorie** omezí ocenění na karty v kategorii včetně podkategorií. Platí
-    pro řádky, součet, seskupení i export PDF a XLSX, v jehož hlavičce je kategorie
-    uvedená. Karty se vybírají podle zařazení v době výpočtu, ne k datu ocenění.
+    pro řádky, součet, seskupení i export do PDF a XLSX. Oba exporty uvádějí
+    kategorii v záhlaví. V REST API a nástroji MCP `stock_valuation` se filtr
+    zadává parametrem `category_id`. Karty se vybírají podle zařazení v době výpočtu.
     Karta přeřazená po rozhodném dni se proto započítá do nové kategorie. Změna
     kategorie nebo zařazení karet spustí nový výpočet.
 - **Vývoj hodnoty** ukáže hodnotu zásob po kategoriích **k více datům vedle sebe**:
