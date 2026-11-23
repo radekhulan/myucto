@@ -36,7 +36,9 @@ use PDO;
  * v cizí měně u korunového účtu se stejným číslem, {@see PohodaForeignBank::rechain()})
  * a odebere výpisy z evidence posunů, aby je smazání výpisu banky znovu neposunulo. Jen
  * tam, kde je jednoznačná: korunový účet, všechny zápisy pohybů na jedné analytice, výpisy
- * jednoho účtu zdroje, otevírací zápis analytiky v období a období otevřené a bez zámku.
+ * jednoho účtu zdroje, otevírací zápis analytiky v období, stavy neposunul výpis banky
+ * (posun doložený výpisem banky je stav u banky a rozdíl proti deníku se posuzuje ručně)
+ * a období otevřené a bez zámku. Otisk nálezu nese stavy a obraty všech výpisů řetězu.
  * Uzavřené období chrání i tahle oprava ({@see MigrationCheckLocks::reason()}): stavy
  * výpisů jsou podkladem inventarizace účtu 221 v uzávěrce.
  * Ostatní rozdíly (účty v cizí měně kontroluje {@see ForeignBankInCzkCheck}) jen ohlásí.
@@ -109,7 +111,7 @@ final class ImportedStatementBalanceCheck extends SourceScopedCheck implements F
     }
 
     /** @param array<string,bool> $options */
-    public function fix(int $supplierId, ?int $userId, array $options = []): FixResult
+    public function fix(int $supplierId, ?int $userId, array $options = [], ?string $fingerprint = null): FixResult
     {
         $pdo = $this->db->pdo();
         $own = !$pdo->inTransaction();
@@ -117,7 +119,10 @@ final class ImportedStatementBalanceCheck extends SourceScopedCheck implements F
         try {
             $fixed = [];
             $skipped = [];
-            foreach ($this->chains($supplierId, true) as $chain) {
+            // Plán nad zamčenými výpisy, ověřený proti potvrzenému náhledu, se zapíše celý beze změny.
+            $chains = array_values(array_filter($this->chains($supplierId, true), static fn (?array $c): bool => $c !== null && $c['item'] !== null));
+            FixPreview::fromResult(new CheckResult(array_column($chains, 'item')))->assertConfirmed($fingerprint);
+            foreach ($chains as $chain) {
                 if ($chain === null || $chain['item'] === null) {
                     continue;
                 }
@@ -190,6 +195,7 @@ final class ImportedStatementBalanceCheck extends SourceScopedCheck implements F
         $sources = (new TakenOverRecord($this->db))->bankStatementSourceAccounts($supplierId,
             array_merge(...array_map(static fn (array $g): array => array_map(static fn (array $s): int => (int) $s['id'], $g), array_values($groups))));
 
+        $rebases = $this->rebases($supplierId);
         $out = [];
         foreach ($groups as $statements) {
             if ($statements[0]['currency'] !== 'CZK') {
@@ -208,7 +214,7 @@ final class ImportedStatementBalanceCheck extends SourceScopedCheck implements F
                 if ($chain === [] || $chain[0]['prev_balance'] === null) {
                     continue;
                 }
-                $out[] = $this->evaluate($supplierId, $chain, $period, $totals, (int) $accountId, (string) $accountCode, $share, $sources);
+                $out[] = $this->evaluate($supplierId, $chain, $period, $totals, (int) $accountId, (string) $accountCode, $share, $sources, $rebases);
             }
         }
         return $out;
@@ -219,9 +225,10 @@ final class ImportedStatementBalanceCheck extends SourceScopedCheck implements F
      * @param array<string,mixed> $period
      * @param array<int,array{0:int,1:int}> $totals
      * @param array<int,?string> $sources
+     * @param list<array{id:int,shift:string,ids:list<int>,anchor_source:?string,anchor_date:?string}> $rebases
      * @return array{item:?CheckItem,statement_ids:list<int>,opening:?int}
      */
-    private function evaluate(int $supplierId, array $chain, array $period, array $totals, int $accountId, string $accountCode, float $share, array $sources): array
+    private function evaluate(int $supplierId, array $chain, array $period, array $totals, int $accountId, string $accountCode, float $share, array $sources, array $rebases): array
     {
         $ids = array_map(static fn (array $s): int => (int) $s['id'], $chain);
         $opening = $this->ledger->openingCents($supplierId, (int) $period['id'], $accountId);
@@ -241,10 +248,26 @@ final class ImportedStatementBalanceCheck extends SourceScopedCheck implements F
             return ['item' => null, 'statement_ids' => $ids, 'opening' => $opening];
         }
         $label = sprintf('%s/%s, rok %d', $chain[0]['account_number'], $chain[0]['bank_code'], (int) $period['fiscal_year']);
+        // Otisk vstupů plánu: stavy a obraty každého výpisu řetězu a počáteční stav v deníku.
+        // Přibude-li pohyb nebo změní-li se stav mezi náhledem a opravou, otisk náhledu nesedí.
+        $inputs = [$accountId, $opening];
+        foreach ($chain as $s) {
+            $inputs[] = [(int) $s['id'], (string) $s['prev_balance'], (string) $s['curr_balance'], $totals[(int) $s['id']] ?? [0, 0]];
+        }
         $details = ['ledger_account' => $accountCode, 'fiscal_year' => (int) $period['fiscal_year'], 'statements' => count($ids),
-            'opening_ledger' => $opening === null ? null : PohodaForeignBank::amount($opening), 'opening_statement' => PohodaForeignBank::amount($first)];
+            'opening_ledger' => $opening === null ? null : PohodaForeignBank::amount($opening), 'opening_statement' => PohodaForeignBank::amount($first),
+            'inputs' => substr(hash('sha256', (string) json_encode($inputs)), 0, 16)];
         $chainSources = array_values(array_unique(array_filter(array_map(static fn (int $id): ?string => $sources[$id] ?? null, $ids))));
-        $rebased = $this->rebasedShift($supplierId, $ids);
+        $rebased = 0;
+        $confirmed = null;
+        foreach ($rebases as $r) {
+            if (array_intersect($ids, $r['ids']) !== []) {
+                $rebased += PohodaForeignBank::cents((float) $r['shift']);
+                if ($r['anchor_source'] !== null && $r['anchor_source'] !== 'import') {
+                    $confirmed ??= $r;
+                }
+            }
+        }
         $lastDate = substr((string) end($chain)['statement_date'], 0, 10);
         $firstDate = substr((string) $chain[0]['statement_date'], 0, 10);
 
@@ -255,10 +278,18 @@ final class ImportedStatementBalanceCheck extends SourceScopedCheck implements F
             $reason = sprintf('Převzaté výpisy patří k různým účtům zdroje (%s). Nejdřív opravte měnu účtů.', implode(', ', $chainSources));
         } elseif ($share < 0.999) {
             $reason = sprintf('Zápisy pohybů účtu nejdou všechny na analytiku %s, počáteční stav nejde určit jednoznačně.', $accountCode);
-        } elseif ((string) $period['status'] !== 'open') {
-            $reason = sprintf('Účetní období %d není otevřené.', (int) $period['fiscal_year']);
+        } elseif ($confirmed !== null) {
+            // Posun doložený výpisem banky je stav účtu u banky; rozdíl proti deníku je rozdíl
+            // banky a deníku (chybějící pohyb, počáteční stav), automaticky se nevrací.
+            $reason = sprintf('Stavy převzatých výpisů dorovnal podle banky výpis z %s (posun %s Kč). Rozdíl proti deníku je rozdíl banky a deníku, posuďte ho ručně.',
+                (string) $confirmed['anchor_date'], number_format(PohodaForeignBank::cents((float) $confirmed['shift']) / 100, 2, ',', ' '));
         }
-        $lock = $reason === null ? ($this->locks->reason($supplierId, $firstDate) ?? $this->locks->reason($supplierId, $lastDate)) : null;
+        $lock = null;
+        if ($reason === null) {
+            $lock = (string) $period['status'] !== 'open'
+                ? sprintf('Účetní období %d není otevřené.', (int) $period['fiscal_year'])
+                : ($this->locks->reason($supplierId, $firstDate) ?? $this->locks->reason($supplierId, $lastDate));
+        }
         $state = $lock !== null ? CheckItem::LOCKED : ($reason !== null ? CheckItem::REVIEW : CheckItem::FIXABLE);
         if ($state === CheckItem::FIXABLE) {
             $reason = $shift !== 0
@@ -305,30 +336,24 @@ final class ImportedStatementBalanceCheck extends SourceScopedCheck implements F
     }
 
     /**
-     * Součet posunů podle výpisu banky, které zasáhly výpisy řetězu (v haléřích).
+     * Evidované posuny stavů podle výpisu banky s výpisem, který je způsobil (zdroj a datum;
+     * `null`, když už neexistuje).
      *
-     * @param list<int> $ids
+     * @return list<array{id:int,shift:string,ids:list<int>,anchor_source:?string,anchor_date:?string}>
      */
-    private function rebasedShift(int $supplierId, array $ids): int
-    {
-        $sum = 0;
-        foreach ($this->rebases($supplierId) as $r) {
-            if (array_intersect($ids, $r['ids']) !== []) {
-                $sum += PohodaForeignBank::cents((float) $r['shift']);
-            }
-        }
-        return $sum;
-    }
-
-    /** @return list<array{id:int,shift:string,ids:list<int>}> */
     private function rebases(int $supplierId): array
     {
-        $stmt = $this->db->pdo()->prepare('SELECT id, shift, statement_ids FROM bank_statement_rebases WHERE supplier_id = ? ORDER BY id');
+        $stmt = $this->db->pdo()->prepare('SELECT r.id, r.shift, r.statement_ids, a.source AS anchor_source, a.statement_date AS anchor_date
+              FROM bank_statement_rebases r
+              LEFT JOIN bank_statements a ON a.id = r.anchor_statement_id AND a.supplier_id = r.supplier_id
+             WHERE r.supplier_id = ? ORDER BY r.id');
         $stmt->execute([$supplierId]);
         $out = [];
         foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $r) {
             $ids = json_decode((string) $r['statement_ids'], true);
-            $out[] = ['id' => (int) $r['id'], 'shift' => (string) $r['shift'], 'ids' => array_map('intval', is_array($ids) ? $ids : [])];
+            $out[] = ['id' => (int) $r['id'], 'shift' => (string) $r['shift'], 'ids' => array_map('intval', is_array($ids) ? $ids : []),
+                'anchor_source' => $r['anchor_source'] !== null ? (string) $r['anchor_source'] : null,
+                'anchor_date' => $r['anchor_date'] !== null ? substr((string) $r['anchor_date'], 0, 10) : null];
         }
         return $out;
     }

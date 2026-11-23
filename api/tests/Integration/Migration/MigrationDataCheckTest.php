@@ -339,29 +339,120 @@ final class MigrationDataCheckTest extends TestCase
         self::assertSame(500.0, $items[0]['amount_czk']);
     }
 
-    public function testForeignCurrencyAccountMigratedInCzkIsConverted(): void
+    /** Čtení kontroly kurz ČNB nestahuje: chybějící kurz je nález, kurzy se neukládají. */
+    public function testForeignAccountWithMissingRateIsReportedWithoutFetching(): void
+    {
+        $this->foreignAccount('2025-06-15');
+        $count = (int) $this->pdo->query("SELECT COUNT(*) FROM exchange_rates WHERE currency_code = 'EUR'")->fetchColumn();
+        $detail = $this->service->detail($this->supplierId, ForeignBankInCzkCheck::KEY);
+        self::assertSame('review', $detail['items'][0]['state'], json_encode($detail['items'], JSON_UNESCAPED_UNICODE));
+        self::assertStringContainsString('kurz', $detail['items'][0]['reason']);
+        self::assertFalse($this->service->preview($this->supplierId, ForeignBankInCzkCheck::KEY)['can_fix']);
+        self::assertSame($count, (int) $this->pdo->query("SELECT COUNT(*) FROM exchange_rates WHERE currency_code = 'EUR'")->fetchColumn());
+    }
+
+    /** Převod účtu doplní měnu i do otevíracího zápisu: zámek k datu před prvním pohybem ho chrání. */
+    public function testForeignAccountWithLockedOpeningEntryIsOnlyReported(): void
+    {
+        $this->foreignAccount(null, 2500.0);
+        self::assertSame('fixable', $this->service->detail($this->supplierId, ForeignBankInCzkCheck::KEY)['status']);
+        $this->lockUntil('2025-01-10');
+        $detail = $this->service->detail($this->supplierId, ForeignBankInCzkCheck::KEY);
+        self::assertSame('locked', $detail['items'][0]['state'], json_encode($detail['items'], JSON_UNESCAPED_UNICODE));
+        $this->assertNothingToFix(ForeignBankInCzkCheck::KEY);
+    }
+
+    /** Posun stavů doložený výpisem banky se automaticky nevrací. */
+    public function testImportedStatementsShiftedByBankStatementAreOnlyReported(): void
     {
         $this->account('221.001', 'asset');
+        $this->account('701', 'equity');
         $this->account('518', 'expense');
-        $rates = [];
-        $moves = [];
-        for ($i = 1; $i <= 12; $i++) {
-            $date = sprintf('2025-%02d-15', $i);
-            $rate = 24.5 + $i / 100;
-            $rates[$date] = $rate;
-            $eur = 100 + 7 * $i + $i / 100;
-            $moves[$i] = [$date, round(round($eur, 2) * $rate, 2) * ($i % 2 === 0 ? -1 : 1)];
+        $this->post('2025-01-01', '221.001', '701', 1000.0, 'opening');
+        $jan = $this->statement('RB', '2025-01-31', 1100.0, 1000.0, [['2025-01-15', -100.0]]);
+        $this->pdo->prepare("INSERT INTO bank_statements (supplier_id, source, file_name, file_hash, file_content, account_number, bank_code, currency, statement_number,
+                statement_date, prev_balance, curr_balance, credit_total, debit_total, transaction_count)
+            VALUES (?, 'gpc', 'banka.gpc', ?, 'x', '1000000005', '0100', 'CZK', '2', '2025-02-28', 1000.00, 1000.00, 0, 0, 0)")
+            ->execute([$this->supplierId, hash('sha256', 'mchk-gpc-' . $this->supplierId)]);
+        $anchor = (int) $this->pdo->lastInsertId();
+        $this->pdo->prepare('INSERT INTO bank_statement_rebases (supplier_id, anchor_statement_id, shift, statement_ids) VALUES (?, ?, ?, ?)')
+            ->execute([$this->supplierId, $anchor, '1100.00', json_encode([$jan])]);
+
+        $item = $this->service->detail($this->supplierId, ImportedStatementBalanceCheck::KEY)['items'][0];
+        self::assertSame('review', $item['state']);
+        self::assertStringContainsString('dorovnal podle banky', $item['reason']);
+        $this->assertNothingToFix(ImportedStatementBalanceCheck::KEY);
+        self::assertSame(['1100.00', '1000.00'], $this->balances($jan));
+        self::assertSame(1, $this->rows('bank_statement_rebases', '1 = 1'));
+    }
+
+    public function testImportedStatementsInClosedPeriodAreLocked(): void
+    {
+        $this->account('221.001', 'asset');
+        $this->account('701', 'equity');
+        $this->account('518', 'expense');
+        $this->post('2025-01-01', '221.001', '701', 1000.0, 'opening');
+        $this->statement('RB', '2025-01-31', 0.0, -100.0, [['2025-01-15', -100.0]]);
+        $this->pdo->prepare("UPDATE accounting_periods SET status = 'closed' WHERE id = ?")->execute([$this->periodId]);
+        self::assertSame('locked', $this->service->detail($this->supplierId, ImportedStatementBalanceCheck::KEY)['items'][0]['state']);
+    }
+
+    /** Otisk náhledu nese vstupy plánu: nový pohyb v řetězu opravu zastaví, i když první výpis a rozdíl zůstávají. */
+    public function testImportedStatementFixRefusesChangedMovements(): void
+    {
+        $this->account('221.001', 'asset');
+        $this->account('701', 'equity');
+        $this->account('518', 'expense');
+        $this->post('2025-01-01', '221.001', '701', 1000.0, 'opening');
+        $jan = $this->statement('RB', '2025-01-31', 0.0, -100.0, [['2025-01-15', -100.0]]);
+        $feb = $this->statement('RB', '2025-02-28', -100.0, -150.0, [['2025-02-15', -50.0]]);
+        $preview = $this->service->preview($this->supplierId, ImportedStatementBalanceCheck::KEY);
+        $this->pdo->prepare("INSERT INTO bank_transactions (source, statement_id, posted_at, amount, currency, import_fingerprint) VALUES ('statement', ?, '2025-02-20', -30.00, 'CZK', ?)")
+            ->execute([$feb, hash('sha256', 'mchk-extra-' . $feb)]);
+        try {
+            $this->service->fix($this->supplierId, ImportedStatementBalanceCheck::KEY, $this->userId, [], $preview['fingerprint']);
+            self::fail('Změněné pohyby od náhledu musí opravu zastavit.');
+        } catch (MigrationDataCheckException $e) {
+            self::assertSame('stale_preview', $e->errorCode);
         }
-        foreach ($rates as $date => $rate) {
-            $this->pdo->prepare('INSERT INTO exchange_rates (currency_code, rate_date, rate) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE rate = VALUES(rate)')->execute(['EUR', $date, $rate]);
+        self::assertSame(['0.00', '-100.00'], $this->balances($jan));
+    }
+
+    /** Automatické navázání DDKP jen na zálohu z převodu, která nevznikla po DDKP. */
+    public function testTaxDocumentLinkNeedsMigratedAdvanceIssuedBeforeIt(): void
+    {
+        $this->invoice('proforma', 'ZF25920', '2025-03-01', 1210.0, 0.0, mapped: false);
+        $this->invoice('proforma', 'ZF25921', '2025-05-01', 1210.0, 0.0);
+        $native = $this->invoice('tax_document', 'DD25920', '2025-03-05', 1210.0, 210.0, note: 'Daňový doklad k přijaté platbě (zálohová faktura č. ZF25920)');
+        $later = $this->invoice('tax_document', 'DD25921', '2025-03-06', 1210.0, 210.0, note: 'Daňový doklad k přijaté platbě (zálohová faktura č. ZF25921)');
+
+        $items = array_column($this->service->detail($this->supplierId, TaxDocumentAdvanceLinkCheck::KEY)['items'], null, 'entity_id');
+        self::assertSame('review', $items[$native]['state']);
+        self::assertStringContainsString('nepochází z převodu', $items[$native]['reason']);
+        self::assertSame('review', $items[$later]['state']);
+        self::assertStringContainsString('po DDKP', $items[$later]['reason']);
+    }
+
+    /** Podané období DPH se zjišťuje jednou za měsíc, ne za každý nález (žádné N+1 nad podáními). */
+    public function testFiledVatPeriodIsLookedUpOncePerMonth(): void
+    {
+        for ($i = 1; $i <= 40; $i++) {
+            $this->invoice('proforma', sprintf('ZF259%02d', 50 + $i), '2025-04-01', 100.0, 0.0);
+            $this->invoice('tax_document', sprintf('DD259%02d', 50 + $i), sprintf('2025-04-%02d', 2 + intdiv($i, 3)), 100.0, 17.36,
+                note: sprintf('Daňový doklad k přijaté platbě (zálohová faktura č. ZF259%02d)', 50 + $i));
         }
-        $this->pdo->prepare('INSERT INTO exchange_rates (currency_code, rate_date, rate) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE rate = VALUES(rate)')->execute(['EUR', '2024-12-31', 25.0]);
-        $running = 0.0;
-        $ids = [];
-        foreach ($moves as $i => [$date, $czk]) {
-            $ids[] = $this->statement('FIOE', sprintf('2025-%02d-28', $i), $running, round($running + $czk, 2), [[$date, $czk]], '2000000017', '2010');
-            $running = round($running + $czk, 2);
-        }
+        $this->filedVat(2025, 4);
+        $questions = fn (): int => (int) $this->pdo->query("SHOW SESSION STATUS LIKE 'Questions'")->fetch(PDO::FETCH_NUM)[1];
+        $before = $questions();
+        $detail = $this->service->detail($this->supplierId, TaxDocumentAdvanceLinkCheck::KEY);
+        $used = $questions() - $before;
+        self::assertSame(40, $detail['locked_count']);
+        self::assertLessThan(40, $used, "Kontrola 40 DDKP v jednom podaném měsíci položila {$used} dotazů.");
+    }
+
+    public function testForeignCurrencyAccountMigratedInCzkIsConverted(): void
+    {
+        $ids = $this->foreignAccount();
 
         $detail = $this->service->detail($this->supplierId, ForeignBankInCzkCheck::KEY);
         self::assertSame('fixable', $detail['status'], json_encode($detail['items'], JSON_UNESCAPED_UNICODE));
@@ -373,6 +464,41 @@ final class MigrationDataCheckTest extends TestCase
         self::assertSame(['EUR'], array_values(array_unique($this->pdo->query('SELECT currency FROM bank_statements WHERE id IN (' . implode(',', $ids) . ')')->fetchAll(PDO::FETCH_COLUMN))));
         self::assertSame(107.01, (float) $this->pdo->query("SELECT amount FROM bank_transactions WHERE statement_id = {$ids[0]}")->fetchColumn());
         $this->assertNothingToFix(ForeignBankInCzkCheck::KEY);
+    }
+
+    /**
+     * Účet FIOE v EUR převedený v Kč: 12 výpisů po jednom pohybu přepočteném kurzem ČNB.
+     *
+     * @return list<int> výpisy
+     */
+    private function foreignAccount(?string $withoutRate = null, float $opening = 0.0): array
+    {
+        $this->account('221.001', 'asset');
+        $this->account('518', 'expense');
+        $this->account('701', 'equity');
+        if ($opening !== 0.0) {
+            $this->post('2025-01-01', '221.001', '701', $opening, 'opening');
+        }
+        $moves = [];
+        for ($i = 1; $i <= 12; $i++) {
+            $date = sprintf('2025-%02d-15', $i);
+            $rate = 24.5 + $i / 100;
+            if ($date !== $withoutRate) {
+                $this->pdo->prepare('INSERT INTO exchange_rates (currency_code, rate_date, rate) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE rate = VALUES(rate)')->execute(['EUR', $date, $rate]);
+            } else {
+                $this->pdo->prepare('DELETE FROM exchange_rates WHERE currency_code = ? AND rate_date BETWEEN ? AND ?')
+                    ->execute(['EUR', (new \DateTimeImmutable($date))->modify('-6 days')->format('Y-m-d'), (new \DateTimeImmutable($date))->modify('+6 days')->format('Y-m-d')]);
+            }
+            $moves[$i] = [$date, round(round(100 + 7 * $i + $i / 100, 2) * $rate, 2) * ($i % 2 === 0 ? -1 : 1)];
+        }
+        $this->pdo->prepare('INSERT INTO exchange_rates (currency_code, rate_date, rate) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE rate = VALUES(rate)')->execute(['EUR', '2024-12-31', 25.0]);
+        $running = $opening;
+        $ids = [];
+        foreach ($moves as $i => [$date, $czk]) {
+            $ids[] = $this->statement('FIOE', sprintf('2025-%02d-28', $i), $running, round($running + $czk, 2), [[$date, $czk]], '2000000017', '2010');
+            $running = round($running + $czk, 2);
+        }
+        return $ids;
     }
 
     private function assertNothingToFix(string $key): void
@@ -388,7 +514,7 @@ final class MigrationDataCheckTest extends TestCase
 
     /** @param list<array{0:float,1:float}> $items [základ, DPH] */
     private function invoice(string $type, string $number, string $date, float $total, float $vat, float $paidTotal = 0.0, string $status = 'sent',
-        ?int $parent = null, ?string $note = null, float $advancePaid = 0.0, array $items = []): int
+        ?int $parent = null, ?string $note = null, float $advancePaid = 0.0, array $items = [], bool $mapped = true): int
     {
         $this->pdo->prepare("INSERT INTO invoices (supplier_id, client_id, varsymbol, invoice_type, issue_date, tax_date, due_date, currency_id, exchange_rate,
                 client_snapshot, supplier_snapshot, total_without_vat, total_vat, total_with_vat, advance_paid_amount, paid_total, paid_at, status,
@@ -402,7 +528,9 @@ final class MigrationDataCheckTest extends TestCase
                     total_without_vat, total_vat, total_with_vat, order_index) VALUES (?, 'Polozka', 1, 'ks', ?, ?, 21, ?, ?, ?, ?)")
                 ->execute([$id, $base, $this->vatRateId, $base, $itemVat, $base + $itemVat, $n]);
         }
-        $this->map('invoice', $number . '|' . $date, $id);
+        if ($mapped) {
+            $this->map('invoice', $number . '|' . $date, $id);
+        }
         return $id;
     }
 

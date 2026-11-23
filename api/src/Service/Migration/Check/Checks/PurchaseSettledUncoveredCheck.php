@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Migration\Check\Checks;
 
 use MyInvoice\Infrastructure\Database\Connection;
-use MyInvoice\Infrastructure\Database\TransactionFailure;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Migration\Check\CheckItem;
 use MyInvoice\Service\Migration\Check\CheckResult;
@@ -13,9 +12,10 @@ use MyInvoice\Service\Migration\Check\FixableMigrationDataCheck;
 use MyInvoice\Service\Migration\Check\FixPreview;
 use MyInvoice\Service\Migration\Check\FixResult;
 use MyInvoice\Service\Migration\Check\MigrationCheckLocks;
+use MyInvoice\Service\Migration\Check\MigrationDataCheckException;
+use MyInvoice\Service\Migration\Check\MoneyS3RepairPlan;
 use MyInvoice\Service\Migration\Check\MigrationSources;
 use MyInvoice\Service\Migration\Check\SourceScopedCheck;
-use MyInvoice\Service\Migration\MoneyS3\MoneyS3SettledPaymentRepair;
 use MyInvoice\Service\Migration\MoneyS3\MoneyS3SettledPayments;
 use MyInvoice\Support\Sql\PurchaseSettledExpr;
 use PDO;
@@ -51,6 +51,7 @@ final class PurchaseSettledUncoveredCheck extends SourceScopedCheck implements F
         private readonly MoneyS3SettledPayments $money,
         private readonly MigrationCheckLocks $locks,
         private readonly ActivityLogger $activity,
+        private readonly MoneyS3RepairPlan $moneyPlan,
     ) {
         parent::__construct($sources);
     }
@@ -90,78 +91,71 @@ final class PurchaseSettledUncoveredCheck extends SourceScopedCheck implements F
         return new CheckResult(array_merge($items, MigrationCheckLocks::allOrNothing(new CheckResult($money))->items));
     }
 
-    /** @param array<string,bool> $options */
+    /**
+     * Náhled ukazuje všechny skutečné změny: u Money S3 plán z provedení krytí v savepointu,
+     * který se vrátí ({@see MoneyS3RepairPlan::purchases()}), včetně dokladů, kterým se jen
+     * mění skladba krytí. Volat uvnitř transakce.
+     *
+     * @param array<string,bool> $options
+     */
     public function preview(int $supplierId, array $options = []): FixPreview
     {
-        return FixPreview::fromResult($this->detect($supplierId));
+        return $this->plan($supplierId, false)['preview'];
     }
 
     /** @param array<string,bool> $options */
-    public function fix(int $supplierId, ?int $userId, array $options = []): FixResult
+    public function fix(int $supplierId, ?int $userId, array $options = [], ?string $fingerprint = null): FixResult
     {
         $pdo = $this->db->pdo();
-        $own = !$pdo->inTransaction();
-        $own ? $pdo->beginTransaction() : $pdo->exec('SAVEPOINT migration_check_purchases');
-        try {
-            $fixed = [];
-            $skipped = [];
-            $notes = [];
-            if ($this->sources->has($supplierId, MigrationSources::POHODA)) {
-                $update = $pdo->prepare('UPDATE purchase_invoices SET settled_outside_amount = settled_outside_amount + ? WHERE id = ? AND supplier_id = ?');
-                foreach ($this->pohodaItems($supplierId, true) as $item) {
-                    if ($item->state !== CheckItem::FIXABLE) {
-                        $skipped[] = $item;
-                        continue;
-                    }
-                    $update->execute([number_format((float) $item->amount, 2, '.', ''), $item->entityId, $supplierId]);
-                    $this->activity->log(self::AUDIT_ACTION_POHODA, $userId, 'purchase_invoice', $item->entityId, [
-                        'source' => 'migration_data_check',
-                        'check' => self::KEY,
-                        'document_no' => $item->label,
-                        'paid_at' => $item->date,
-                        'settled_outside_added' => $item->amount,
-                        'settled_outside_before' => $item->details['outside'] ?? null,
-                    ], null, null, $supplierId);
-                    $fixed[] = $item;
-                }
+        $plan = $this->plan($supplierId, true);
+        $plan['preview']->assertConfirmed($fingerprint);
+        $fixed = [];
+        $notes = [];
+        $update = $pdo->prepare('UPDATE purchase_invoices SET settled_outside_amount = settled_outside_amount + ? WHERE id = ? AND supplier_id = ?');
+        foreach ($plan['preview']->changes as $item) {
+            if (($item->details['source'] ?? '') !== MigrationSources::POHODA) {
+                continue;
             }
-            if ($this->sources->has($supplierId, MigrationSources::MONEY_S3)) {
-                $money = MigrationCheckLocks::allOrNothing(new CheckResult($this->moneyItems($supplierId)));
-                $ready = $money->itemsInState(CheckItem::FIXABLE);
-                $skipped = array_merge($skipped, array_values(array_filter($money->items, static fn (CheckItem $i): bool => $i->state !== CheckItem::FIXABLE)));
-                $lastEnd = $this->money->lastTransferredPeriodEnd($supplierId);
-                if ($ready !== [] && $lastEnd !== null) {
-                    $restored = $this->money->restorePurchaseSettlements($supplierId, $userId, $lastEnd);
-                    foreach ($restored['documents'] as $d) {
-                        $this->activity->log(MoneyS3SettledPaymentRepair::AUDIT_ACTION_PURCHASE, $userId, 'purchase_invoice', (int) $d['id'], [
-                            'source' => 'migration_data_check',
-                            'check' => self::KEY,
-                            'document_no' => $d['document_no'],
-                            'currency' => $d['currency'],
-                            'amount_to_pay' => $d['amount_to_pay'],
-                            'covered' => $d['covered'],
-                            'internal_settlement' => $d['settled'],
-                            'settled_outside_before' => $d['outside'],
-                            'settled_outside_amount' => $d['target'],
-                        ], null, null, $supplierId);
-                    }
-                    $fixed = array_merge($fixed, $ready);
-                    $notes[] = sprintf('Money S3: %d zápočtů interním dokladem, zbytek mimo evidenci u %d dokladů.', (int) $restored['settlements'], (int) $restored['updated']);
-                }
-            }
-            $own ? $pdo->commit() : $pdo->exec('RELEASE SAVEPOINT migration_check_purchases');
-            return new FixResult($fixed, $skipped, $notes);
-        } catch (\Throwable $e) {
-            if (TransactionFailure::rollbackIfAborted($pdo, $e)) {
-                throw $e;
-            }
-            if ($own && $pdo->inTransaction()) {
-                $pdo->rollBack();
-            } elseif (!$own) {
-                $pdo->exec('ROLLBACK TO SAVEPOINT migration_check_purchases');
-            }
-            throw $e;
+            $update->execute([number_format((float) $item->amount, 2, '.', ''), $item->entityId, $supplierId]);
+            $this->activity->log(self::AUDIT_ACTION_POHODA, $userId, 'purchase_invoice', $item->entityId, [
+                'source' => 'migration_data_check',
+                'check' => self::KEY,
+                'document_no' => $item->label,
+                'paid_at' => $item->date,
+                'settled_outside_added' => $item->amount,
+                'settled_outside_before' => $item->details['outside'] ?? null,
+            ], null, null, $supplierId);
+            $fixed[] = $item;
         }
+        if ($plan['money'] !== null) {
+            $money = $this->moneyPlan->purchases($supplierId, $userId, true);
+            if (!$money['kept'] || FixPreview::fromResult(new CheckResult($money['items']))->fingerprint() !== $plan['money']) {
+                throw new MigrationDataCheckException('stale_preview', 'Oprava Money S3 by změnila jiné doklady, než ukázal náhled. Otevřete náhled opravy znovu.', 409);
+            }
+            $moneyFixed = array_values(array_filter($money['items'], static fn (CheckItem $i): bool => $i->state === CheckItem::FIXABLE));
+            $fixed = array_merge($fixed, $moneyFixed);
+            $notes[] = sprintf('Money S3: doplněno krytí %d přijatých dokladů.', count($moneyFixed));
+        }
+        return new FixResult($fixed, $plan['preview']->skipped, $notes);
+    }
+
+    /**
+     * Plán opravy: POHODA z doplnění do částky k úhradě, Money S3 provedením krytí
+     * v savepointu, který se vrátí. `money` je otisk změn Money S3 (null = nic).
+     *
+     * @return array{preview:FixPreview,money:?string}
+     */
+    private function plan(int $supplierId, bool $forUpdate): array
+    {
+        $items = $this->sources->has($supplierId, MigrationSources::POHODA) ? $this->pohodaItems($supplierId, $forUpdate) : [];
+        $money = null;
+        if ($this->sources->has($supplierId, MigrationSources::MONEY_S3)) {
+            $moneyItems = $this->moneyPlan->purchases($supplierId, null, false)['items'];
+            $items = array_merge($items, $moneyItems);
+            $moneyResult = new CheckResult($moneyItems);
+            $money = $moneyResult->countState(CheckItem::FIXABLE) > 0 ? FixPreview::fromResult($moneyResult)->fingerprint() : null;
+        }
+        return ['preview' => FixPreview::fromResult(new CheckResult($items)), 'money' => $money];
     }
 
     /** @return list<CheckItem> */

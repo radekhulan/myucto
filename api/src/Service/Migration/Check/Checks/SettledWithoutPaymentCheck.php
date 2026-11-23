@@ -10,9 +10,10 @@ use MyInvoice\Service\Migration\Check\FixableMigrationDataCheck;
 use MyInvoice\Service\Migration\Check\FixPreview;
 use MyInvoice\Service\Migration\Check\FixResult;
 use MyInvoice\Service\Migration\Check\MigrationCheckLocks;
+use MyInvoice\Service\Migration\Check\MigrationDataCheckException;
+use MyInvoice\Service\Migration\Check\MoneyS3RepairPlan;
 use MyInvoice\Service\Migration\Check\MigrationSources;
 use MyInvoice\Service\Migration\Check\SourceScopedCheck;
-use MyInvoice\Service\Migration\MoneyS3\MoneyS3SettledPaymentRepair;
 use MyInvoice\Service\Migration\MoneyS3\MoneyS3SettledPayments;
 use MyInvoice\Service\Migration\Pohoda\PohodaPriorYearPaymentRepair;
 
@@ -42,9 +43,9 @@ final class SettledWithoutPaymentCheck extends SourceScopedCheck implements Fixa
     public function __construct(
         MigrationSources $sources,
         private readonly PohodaPriorYearPaymentRepair $pohoda,
-        private readonly MoneyS3SettledPaymentRepair $moneyRepair,
         private readonly MoneyS3SettledPayments $money,
         private readonly MigrationCheckLocks $locks,
+        private readonly MoneyS3RepairPlan $moneyPlan,
     ) {
         parent::__construct($sources);
     }
@@ -89,45 +90,78 @@ final class SettledWithoutPaymentCheck extends SourceScopedCheck implements Fixa
         return MigrationCheckLocks::allOrNothing(new CheckResult($items, $notes));
     }
 
-    /** @param array<string,bool> $options */
+    /**
+     * Náhled ukazuje všechny skutečné změny: u POHODY doklady opravy úhrad minulých let,
+     * u Money S3 plán celé opravy převodu ({@see MoneyS3RepairPlan::full()}) včetně krytí
+     * přijatých dokladů a vazeb plateb záloh na DDKP. Volat uvnitř transakce (náhled se vrací).
+     *
+     * @param array<string,bool> $options
+     */
     public function preview(int $supplierId, array $options = []): FixPreview
     {
-        $result = $this->detect($supplierId);
-        $notes = [];
-        if ($this->sources->has($supplierId, MigrationSources::MONEY_S3)) {
-            $money = $this->moneyRepair->run([$supplierId], false)[0];
-            if (($money['purchases'] ?? []) !== []) {
-                $notes[] = sprintf('Oprava Money S3 zároveň doplní krytí %d přijatých dokladů uhrazených podle Money (%s), stejně jako kontrola přijatých dokladů.',
-                    count($money['purchases']), self::money((float) $money['purchase_amount_czk']));
-            }
-            if ((int) ($money['tax_document_links'] ?? 0) > 0) {
-                $notes[] = sprintf('Naváže %d plateb záloh na DDKP z Money.', (int) $money['tax_document_links']);
-            }
-        }
-        return FixPreview::fromResult($result, $notes);
+        return $this->plan($supplierId, null, false)['preview'];
     }
 
     /** @param array<string,bool> $options */
-    public function fix(int $supplierId, ?int $userId, array $options = []): FixResult
+    public function fix(int $supplierId, ?int $userId, array $options = [], ?string $fingerprint = null): FixResult
     {
-        $result = $this->detect($supplierId);
-        $fixable = $result->itemsInState(CheckItem::FIXABLE);
-        $skipped = array_values(array_filter($result->items, static fn (CheckItem $i): bool => $i->state !== CheckItem::FIXABLE));
-        if ($fixable === []) {
-            return new FixResult([], $skipped);
-        }
+        $plan = $this->plan($supplierId, $userId, false);
+        $plan['preview']->assertConfirmed($fingerprint);
         $notes = [];
-        if ($this->sources->has($supplierId, MigrationSources::POHODA) && array_filter($fixable, static fn (CheckItem $i): bool => ($i->details['source'] ?? '') === MigrationSources::POHODA) !== []) {
-            $row = $this->pohoda->run([$supplierId], true, $userId)[0];
-            $notes[] = sprintf('POHODA: doplněno %d plateb úhrad minulých let (%s).', (int) $row['count'], self::money((float) $row['amount_czk']));
+        $pohoda = array_values(array_filter($plan['preview']->changes, static fn (CheckItem $i): bool => ($i->details['source'] ?? '') === MigrationSources::POHODA));
+        if ($pohoda !== []) {
+            $row = $this->pohoda->run([$supplierId], true, $userId, array_map(static fn (CheckItem $i): int => (int) $i->entityId, $pohoda))[0];
+            $written = [];
+            foreach ($row['invoices'] as $i) {
+                $written[(int) $i['id']] = round((float) $i['amount'], 2);
+            }
+            $planned = [];
+            foreach ($pohoda as $i) {
+                $planned[(int) $i->entityId] = round((float) $i->amount, 2);
+            }
+            ksort($written);
+            ksort($planned);
+            if ($written !== $planned) {
+                throw new MigrationDataCheckException('stale_preview', 'Oprava by doplnila jiné platby, než ukázal náhled. Otevřete náhled opravy znovu.', 409);
+            }
+            $notes[] = sprintf('POHODA: doplněno %d plateb úhrad minulých let (%s).', count($written), self::money((float) $row['amount_czk']));
         }
-        if ($this->sources->has($supplierId, MigrationSources::MONEY_S3) && array_filter($fixable, static fn (CheckItem $i): bool => ($i->details['source'] ?? '') === MigrationSources::MONEY_S3) !== []) {
-            $row = $this->moneyRepair->run([$supplierId], true, $userId)[0];
-            $notes[] = sprintf('Money S3: vydané %d dokladů (%s), přijaté %d dokladů (%s), vazby plateb na DDKP %d.',
-                (int) $row['issued_count'], self::money((float) $row['issued_amount_czk']),
-                (int) $row['purchase_count'], self::money((float) $row['purchase_amount_czk']), (int) $row['tax_document_links']);
+        if ($plan['money'] !== null) {
+            $money = $this->moneyPlan->full($supplierId, $userId, true);
+            if (!$money['kept'] || FixPreview::fromResult(new CheckResult($money['items']))->fingerprint() !== $plan['money']) {
+                throw new MigrationDataCheckException('stale_preview', 'Oprava Money S3 by změnila jiné doklady, než ukázal náhled. Otevřete náhled opravy znovu.', 409);
+            }
+            $notes[] = sprintf('Money S3: změněno %d dokladů a vazeb.', count(array_filter($money['items'], static fn (CheckItem $i): bool => $i->state === CheckItem::FIXABLE)));
         }
-        return new FixResult($fixable, $skipped, $notes);
+        return new FixResult($plan['preview']->changes, $plan['preview']->skipped, $notes);
+    }
+
+    /**
+     * Plán opravy: POHODA z výsledku opravy nanečisto, Money S3 provedením opravy v savepointu,
+     * který se vrátí. `money` je otisk změn Money S3 (null = Money se neopravuje).
+     *
+     * @return array{preview:FixPreview,money:?string}
+     */
+    private function plan(int $supplierId, ?int $userId, bool $keep): array
+    {
+        $items = [];
+        $notes = [];
+        if ($this->sources->has($supplierId, MigrationSources::POHODA)) {
+            [$pohodaItems, $pohodaNotes] = $this->pohodaItems($supplierId, $this->pohoda->run([$supplierId], false)[0]);
+            $items = array_merge($items, MigrationCheckLocks::allOrNothing(new CheckResult($pohodaItems))->items);
+            $notes = array_merge($notes, $pohodaNotes);
+        }
+        $money = null;
+        if ($this->sources->has($supplierId, MigrationSources::MONEY_S3)) {
+            $moneyItems = $this->moneyPlan->full($supplierId, $userId, $keep)['items'];
+            $items = array_merge($items, $moneyItems);
+            $moneyResult = new CheckResult($moneyItems);
+            $money = $moneyResult->countState(CheckItem::FIXABLE) > 0 ? FixPreview::fromResult($moneyResult)->fingerprint() : null;
+            if (array_filter($moneyItems, static fn (CheckItem $i): bool => $i->entityType === 'purchase_invoice') !== []) {
+                $notes[] = 'Oprava Money S3 zároveň doplní krytí přijatých dokladů uhrazených podle Money (v seznamu změn), stejně jako kontrola přijatých dokladů.';
+            }
+        }
+        return ['preview' => FixPreview::fromResult(new CheckResult($items), $notes), 'money' => $money];
     }
 
     /**

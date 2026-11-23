@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Migration\Check;
 
+use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Infrastructure\Database\TransactionFailure;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Migration\Shared\MigrationCompanyLock;
@@ -26,11 +27,14 @@ final class MigrationDataCheckService
         private readonly MigrationSources $sources,
         private readonly MigrationCompanyLock $lock,
         private readonly ActivityLogger $activity,
+        private readonly Connection $db,
+        private readonly MigrationCheckLocks $locks,
     ) {}
 
     /** @return array{sources:list<string>,checks:list<array<string,mixed>>} */
     public function summary(int $supplierId, ?string $only = null): array
     {
+        $this->locks->reset();
         $checks = [];
         foreach ($this->registry->all() as $key => $check) {
             if (($only !== null && $only !== $key) || !$check->appliesTo($supplierId)) {
@@ -61,6 +65,7 @@ final class MigrationDataCheckService
         if ($state !== null && !in_array($state, [CheckItem::FIXABLE, CheckItem::LOCKED, CheckItem::REVIEW], true)) {
             throw new MigrationDataCheckException('validation_failed', 'Neznámý stav nálezu.', 422);
         }
+        $this->locks->reset();
         $page = max(1, $page);
         $perPage = max(1, min(self::MAX_PER_PAGE, $perPage));
         $result = $check->detect($supplierId);
@@ -73,16 +78,36 @@ final class MigrationDataCheckService
     }
 
     /**
+     * Náhled opravy. Opravy převodu Money S3 spočtou plán tak, že opravu provedou a vrátí
+     * (stejný kód jako zápis), proto náhled běží v transakci, která se vždy vrátí.
+     *
      * @param array<string,mixed> $options
      * @return array<string,mixed>
      */
     public function preview(int $supplierId, string $key, array $options = []): array
     {
         $check = $this->fixable($supplierId, $key);
-        return $this->meta($check) + $check->preview($supplierId, $this->options($check, $options))->toArray();
+        $options = $this->options($check, $options);
+        $pdo = $this->db->pdo();
+        $own = !$pdo->inTransaction();
+        $own ? $pdo->beginTransaction() : $pdo->exec('SAVEPOINT migration_check_preview');
+        $this->locks->reset();
+        try {
+            $preview = $check->preview($supplierId, $options)->toArray();
+        } catch (\Throwable $e) {
+            if (!TransactionFailure::rollbackIfAborted($pdo, $e) && $pdo->inTransaction()) {
+                $own ? $pdo->rollBack() : $pdo->exec('ROLLBACK TO SAVEPOINT migration_check_preview');
+            }
+            throw $e;
+        }
+        $own ? $pdo->rollBack() : $pdo->exec('ROLLBACK TO SAVEPOINT migration_check_preview');
+        return $this->meta($check) + $preview;
     }
 
     /**
+     * Oprava v jedné transakci: zamkne stav období firmy (zámek k datu, účetní období), kontrola
+     * spočte plán znovu, ověří otisk potvrzeného náhledu a zapíše tentýž plán.
+     *
      * @param array<string,mixed> $options
      * @return array<string,mixed>
      */
@@ -93,27 +118,43 @@ final class MigrationDataCheckService
         if (!$this->lock->acquire('migration_check', $supplierId)) {
             throw new MigrationDataCheckException('fix_running', 'Oprava dat této firmy už běží, zkuste to za chvíli.', 409);
         }
+        $pdo = $this->db->pdo();
+        $own = !$pdo->inTransaction();
         try {
-            $preview = $check->preview($supplierId, $options);
-            if ($fingerprint !== null && $fingerprint !== $preview->fingerprint()) {
-                throw new MigrationDataCheckException('stale_preview', 'Data se od náhledu změnila. Otevřete náhled opravy znovu.', 409);
-            }
-            if (!$preview->canFix()) {
-                throw new MigrationDataCheckException('nothing_to_fix', $preview->blocked ?? 'Kontrola nemá nic k opravě.', 409);
-            }
-            $result = $check->fix($supplierId, $userId, $options);
+            $own ? $pdo->beginTransaction() : $pdo->exec('SAVEPOINT migration_check_fix');
+            $this->lockPeriodState($supplierId);
+            $this->locks->reset();
+            $result = $check->fix($supplierId, $userId, $options, $fingerprint);
             $this->activity->log(self::AUDIT_ACTION, $userId, 'supplier', $supplierId, [
                 'check' => $key,
                 'options' => $options,
+                'fingerprint' => $fingerprint,
                 'fixed' => count($result->fixed),
                 'skipped' => count($result->skipped),
                 'items' => array_map(static fn (CheckItem $i): array => ['type' => $i->entityType, 'id' => $i->entityId, 'label' => $i->label, 'amount_czk' => $i->amountCzk], $result->fixed),
             ], null, null, $supplierId);
+            $own ? $pdo->commit() : $pdo->exec('RELEASE SAVEPOINT migration_check_fix');
+        } catch (\Throwable $e) {
+            if (!TransactionFailure::rollbackIfAborted($pdo, $e) && $pdo->inTransaction()) {
+                $own ? $pdo->rollBack() : $pdo->exec('ROLLBACK TO SAVEPOINT migration_check_fix');
+            }
+            throw $e;
         } finally {
             $this->lock->release('migration_check', $supplierId);
         }
         $this->sources->reset();
         return $this->meta($check) + $result->toArray() + ['after' => $check->detect($supplierId)->summary()];
+    }
+
+    /**
+     * Zamkne nastavení zámku k datu a účetní období firmy do konce transakce opravy: posun
+     * zámku ani změna stavu období nemůže proběhnout mezi kontrolou období a zápisem.
+     */
+    private function lockPeriodState(int $supplierId): void
+    {
+        $pdo = $this->db->pdo();
+        $pdo->prepare('SELECT supplier_id FROM accounting_supplier_settings WHERE supplier_id = ? FOR UPDATE')->execute([$supplierId]);
+        $pdo->prepare('SELECT id FROM accounting_periods WHERE supplier_id = ? FOR UPDATE')->execute([$supplierId]);
     }
 
     /** @return array<string,mixed> */

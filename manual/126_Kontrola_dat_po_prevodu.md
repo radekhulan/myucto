@@ -52,7 +52,9 @@ plateb, doklad by se vrátil mezi neuhrazené a odešla by na něj upomínka.
 „Převzato z POHODY, úhrada v minulém roce", u Money S3 k datu úhrady), u Money S3 přednostně zápočet
 interním dokladem, na který převod navázal ruční zápis. Platba nemá bankovní pohyb ani zápis v deníku.
 Deník, uhrazená částka, stav ani DPH dokladu se nemění. U Money S3 oprava zároveň doplní krytí přijatých
-dokladů ([§ 126.8](#1268-prijate-doklady-uhrazene-bez-kryti)) a vazbu platby zálohy na DDKP z Money.
+dokladů ([§ 126.8](#1268-prijate-doklady-uhrazene-bez-kryti)) a vazbu platby zálohy na DDKP z Money. Náhled
+ukazuje všechny tyto změny po dokladech, i přijaté doklady, kterým oprava jen nahradí úhradu mimo evidenci
+zápočtem, a oprava zapíše přesně to, co ukázal náhled.
 
 **Jen ke kontrole:**
 
@@ -71,7 +73,8 @@ nález za zámkem nebo v podaném období, neopraví se nic a nálezy zůstanou 
 **Co kontrola hledá:** bankovní účet převzatý z POHODY v Kč, jehož pohyby jsou ve skutečnosti
 přepočtem z cizí měny kurzem ČNB, a výpisy nahrané po převodu (GPC, PDF, banka) v jiné měně, než má
 účet. Měnu účtu pozná podle pohybů (shoda s kurzem ČNB), zkratky a názvu účtu a měnových účtů firmy.
-Chybějící kurzy ČNB kontrola stáhne.
+Kontrola pracuje jen s uloženými kurzy ČNB; chybí-li kurz, ukáže nález ke kontrole s postupem doplnění
+kurzů.
 
 **Oprava:** převede výpisy, pohyby, párování a deník analytiky 221 na měnu účtu, stavy výpisů spočte
 od počátečního stavu v měně a upraví evidenci účtů. Korunové obraty analytiky v deníku se nezmění.
@@ -79,8 +82,9 @@ Korunový účet se stejným číslem (víceměnový účet banky) dostane stavy
 nahrané po převodu přepne na měnu účtu jen s volbou **Přepnout i výpisy nahrané po převodu** a jen ty,
 které k účtu podle souboru jednoznačně patří a nemají spárování, úhradu ani zápis.
 
-**Jen ke kontrole:** účet s nižší shodou s kurzem ČNB, s pohyby, které nezaložil převod, se společnou
-analytikou s jiným účtem, s úhradami ostatních položek, nebo v uzavřeném či zamčeném období. U každého
+**Jen ke kontrole:** účet s nižší shodou s kurzem ČNB, s chybějícím kurzem ČNB, s pohyby, které nezaložil
+převod, se společnou analytikou s jiným účtem, s úhradami ostatních položek, nebo v uzavřeném či zamčeném
+období (i když v něm leží jen otevírací zápis analytiky, do kterého oprava doplní měnu). U každého
 nálezu je doporučený ruční postup. Nahraný výpis, který nenavazuje na předchozí výpis, nemažte: rozdíl
 banky proti deníku dorovnejte zápisem na analytiku účtu.
 
@@ -94,12 +98,15 @@ první nahraný výpis banky (dorovnání převzatých výpisů podle banky) neb
 **Oprava:** stavy řetězu převzatých výpisů v roce se spočtou znovu od počátečního stavu v deníku a výpisy
 vypadnou z evidence dorovnání, aby je smazání výpisu banky znovu neposunulo. Pohyby ani deník se nemění.
 Oprava proběhne jen tam, kde je jednoznačná: všechny zápisy pohybů účtu jdou na jednu analytiku, výpisy
-patří k jednomu účtu původního programu, deník má otevírací zápis analytiky v roce a období je otevřené
-a bez zámku.
+patří k jednomu účtu původního programu, deník má otevírací zápis analytiky v roce, stavy neposunul výpis
+banky a období je otevřené a bez zámku. Přibude-li od náhledu pohyb nebo se změní stav výpisu, oprava
+neproběhne a náhled se načte znovu.
 
 **Jen ke kontrole:** výpisy různých účtů původního programu se stejným číslem (nejdřív opravte měnu účtu,
 [§ 126.4](#1264-bankovni-ucet-v-cizi-mene-prevedeny-v-kc)), deník bez počátečního stavu analytiky, zápisy
-pohybů na více analytikách. Rozdíl mezi stavem banky a deníkem po opravě ukáže první nahraný výpis banky
+pohybů na více analytikách a stavy, které dorovnal nahraný výpis banky: ten dokládá stav u banky, rozdíl
+proti deníku je proto rozdíl banky a deníku a posuzuje se ručně. Výpisy v uzavřeném roce jsou ve stavu
+**Chráněné období**. Rozdíl mezi stavem banky a deníkem po opravě ukáže první nahraný výpis banky
 jako chybějící pohyb. Výpisy v cizí měně tahle kontrola neporovnává.
 
 ## 126.6 Mzdové závazky v ostatních závazcích
@@ -151,7 +158,8 @@ neodečte DPH z DDKP a ruční spárování se zálohou DPH zdvojí.
 
 - text DDKP uvádí číslo zálohy (POHODA ho píše jako „Daňový doklad k přijaté platbě (zálohová faktura
   č. …)" nebo „… k uhrazené zálohové faktuře č. …"),
-- s tímto číslem existuje právě jedna nestornovaná záloha téhož odběratele ve stejné měně,
+- s tímto číslem existuje právě jedna nestornovaná záloha téhož odběratele ve stejné měně, DDKP i záloha
+  pocházejí z převodu a záloha nevznikla po DDKP,
 - celková částka DDKP a zálohy se liší nejvýš o 1 Kč a součet DDKP navázaných na zálohu nepřekročí její
   částku,
 - DDKP neleží v uzavřeném či zamčeném účetním období ani v podaném období DPH.
@@ -160,7 +168,8 @@ Vazbu zapíše stejně jako tlačítko **Navázat na zálohu** v detailu dokladu
 stejnou částkou jako DDKP, naváže DDKP i na ni. Částky, DPH ani zaúčtování DDKP se nemění.
 
 **Jen ke kontrole:** převzatý DDKP bez čísla zálohy v textu, záloha nenalezená nebo nejednoznačná, jiná
-částka, záloha už vyčerpaná jinými DDKP. Takový DDKP navažte na zálohu ručně tlačítkem **Navázat na zálohu**
+částka, záloha už vyčerpaná jinými DDKP, záloha založená v MyÚčtu nebo vystavená po DDKP (shoda jen podle
+čísla a částky). Takový DDKP navažte na zálohu ručně tlačítkem **Navázat na zálohu**
 v detailu dokladu, patří-li k nějaké.
 
 ## 126.10 Konečná faktura s DPH ze zálohy podruhé

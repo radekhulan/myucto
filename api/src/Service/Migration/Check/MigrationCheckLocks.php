@@ -26,6 +26,9 @@ use MyInvoice\Service\Vat\FiledVatPeriodLookup;
  */
 final class MigrationCheckLocks
 {
+    /** @var array<string,?string> firma|rok-měsíc => popis podaného období (podání se nemění podle dne) */
+    private array $filedByMonth = [];
+
     public function __construct(
         private readonly DocumentLockService $locks,
         private readonly FiledVatPeriodLookup $filed,
@@ -49,7 +52,7 @@ final class MigrationCheckLocks
             return sprintf('Leží za zámkem účtování k datu (%s).', $date);
         }
         if ($vat) {
-            $filed = $this->filed->describe($supplierId, $date);
+            $filed = $this->filedPeriod($supplierId, $date);
             if ($filed !== null) {
                 return sprintf('Leží v podaném období DPH (%s).', $filed);
             }
@@ -70,8 +73,28 @@ final class MigrationCheckLocks
         if ($this->locks->forDate($supplierId, $date)->dateLocked) {
             return sprintf('Leží za zámkem účtování k datu (%s).', $date);
         }
-        $filed = $this->filed->describe($supplierId, $date);
+        $filed = $this->filedPeriod($supplierId, $date);
         return $filed !== null ? sprintf('Leží v podaném období DPH (%s).', $filed) : null;
+    }
+
+    /**
+     * Podané období DPH k datu, jednou za firmu a měsíc: {@see FiledVatPeriodLookup::describe()}
+     * závisí jen na měsíci a čtvrtletí data, a nález za nálezem by jinak klepal do podání znovu.
+     */
+    public function filedPeriod(int $supplierId, string $date): ?string
+    {
+        $key = $supplierId . '|' . substr($date, 0, 7);
+        if (!array_key_exists($key, $this->filedByMonth)) {
+            $this->filedByMonth[$key] = $this->filed->describe($supplierId, $date);
+        }
+        return $this->filedByMonth[$key];
+    }
+
+    /** Zapomene zjištěná podání (oprava a dlouhý proces přes víc firem). */
+    public function reset(): void
+    {
+        $this->filedByMonth = [];
+        $this->locks->reset();
     }
 
     /**

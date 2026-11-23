@@ -36,6 +36,20 @@ final class FixPreview
         );
     }
 
+    /**
+     * Plán spočtený při opravě musí být tentýž, jaký uživatel potvrdil v náhledu: stejné
+     * nálezy, částky a vstupy (otisk). Jinak se nezapíše nic.
+     */
+    public function assertConfirmed(?string $fingerprint): void
+    {
+        if ($fingerprint !== null && $fingerprint !== $this->fingerprint()) {
+            throw new MigrationDataCheckException('stale_preview', 'Data se od náhledu změnila. Otevřete náhled opravy znovu.', 409);
+        }
+        if (!$this->canFix()) {
+            throw new MigrationDataCheckException('nothing_to_fix', $this->blocked ?? 'Kontrola nemá nic k opravě.', 409);
+        }
+    }
+
     public function canFix(): bool
     {
         return $this->blocked === null && $this->changes !== [];

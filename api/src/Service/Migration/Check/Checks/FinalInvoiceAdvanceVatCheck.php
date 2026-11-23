@@ -7,10 +7,10 @@ namespace MyInvoice\Service\Migration\Check\Checks;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Migration\Check\CheckItem;
 use MyInvoice\Service\Migration\Check\CheckResult;
+use MyInvoice\Service\Migration\Check\MigrationCheckLocks;
 use MyInvoice\Service\Migration\Check\MigrationSources;
 use MyInvoice\Service\Migration\Check\SourceScopedCheck;
 use MyInvoice\Service\Migration\Pohoda\DocumentLinker;
-use MyInvoice\Service\Vat\FiledVatPeriodLookup;
 use PDO;
 
 /**
@@ -35,7 +35,7 @@ final class FinalInvoiceAdvanceVatCheck extends SourceScopedCheck
     public function __construct(
         MigrationSources $sources,
         private readonly Connection $db,
-        private readonly FiledVatPeriodLookup $filed,
+        private readonly MigrationCheckLocks $locks,
     ) {
         parent::__construct($sources);
     }
@@ -98,17 +98,40 @@ final class FinalInvoiceAdvanceVatCheck extends SourceScopedCheck
         }
         $advanceIds = $this->advanceIds($supplierId, array_map('strval', array_keys($refs)));
 
+        // Index DDKP v paměti: podle zálohy (vazbou nebo číslem z textu u téhož odběratele)
+        // a podle odběratele a celé koruny částky. Konečná faktura pak hledá jen ve svém
+        // klíči, ne ve všech DDKP odběratele.
+        $byAdvance = [];
+        $byAmount = [];
+        foreach ($byClient as $clientId => $docs) {
+            foreach ($docs as $d) {
+                $advances = $d['parent_invoice_id'] !== null ? [(int) $d['parent_invoice_id']] : ($advanceIds[$d['ref'] ?? ''][$clientId] ?? []);
+                if ($advances === []) {
+                    continue;
+                }
+                foreach ($advances as $advanceId) {
+                    $byAdvance[$advanceId][(int) $d['id']] = $d;
+                }
+                $byAmount[$clientId][(int) floor((float) $d['total_with_vat'])][(int) $d['id']] = $d;
+            }
+        }
+
         $items = [];
         foreach ($finals as $f) {
             $matches = [];
-            foreach ($byClient[(int) $f['client_id']] ?? [] as $d) {
-                // Zálohy, ke kterým DDKP patří: vazbou, nebo číslem z textu u téhož odběratele.
-                $advances = $d['parent_invoice_id'] !== null ? [(int) $d['parent_invoice_id']] : ($advanceIds[$d['ref'] ?? ''][(int) $d['client_id']] ?? []);
-                foreach ($advances as $advanceId) {
-                    if ($f['parent_invoice_id'] !== null ? (int) $f['parent_invoice_id'] === $advanceId
-                        : abs((float) $d['total_with_vat'] - (float) $f['advance_paid_amount']) < self::TOLERANCE) {
-                        $matches[(int) $d['id']] = $d;
-                        break;
+            if ($f['parent_invoice_id'] !== null) {
+                foreach ($byAdvance[(int) $f['parent_invoice_id']] ?? [] as $id => $d) {
+                    if ((int) $d['client_id'] === (int) $f['client_id']) {
+                        $matches[$id] = $d;
+                    }
+                }
+            } else {
+                $koruna = (int) floor((float) $f['advance_paid_amount']);
+                foreach ([$koruna - 1, $koruna, $koruna + 1] as $key) {
+                    foreach ($byAmount[(int) $f['client_id']][$key] ?? [] as $id => $d) {
+                        if (abs((float) $d['total_with_vat'] - (float) $f['advance_paid_amount']) < self::TOLERANCE) {
+                            $matches[$id] = $d;
+                        }
                     }
                 }
             }
@@ -116,7 +139,7 @@ final class FinalInvoiceAdvanceVatCheck extends SourceScopedCheck
                 continue;
             }
             $label = (string) ($f['varsymbol'] ?: '#' . $f['id']);
-            $filed = $f['tax_date'] !== null ? $this->filed->describe($supplierId, (string) $f['tax_date']) : null;
+            $filed = $f['tax_date'] !== null ? $this->locks->filedPeriod($supplierId, (string) $f['tax_date']) : null;
             $ddkp = array_values($matches);
             $details = ['tax_documents' => implode(', ', array_map(static fn (array $d): string => (string) $d['varsymbol'], $ddkp)),
                 'advance_paid_amount' => round((float) $f['advance_paid_amount'], 2), 'linked' => $f['parent_invoice_id'] !== null, 'filed' => $filed];

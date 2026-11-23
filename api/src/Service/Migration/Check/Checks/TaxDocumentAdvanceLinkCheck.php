@@ -28,6 +28,8 @@ use PDO;
  *  - číslo zálohy z textu DDKP ({@see DocumentLinker::advanceNumberFromText()}),
  *  - právě jedna nestornovaná záloha s tímto číslem u téhož odběratele,
  *  - celková částka DDKP a zálohy se liší nejvýš o {@see TOLERANCE} (zaokrouhlení POHODY),
+ *  - DDKP i záloha pocházejí z převodu a záloha nevznikla po DDKP (shoda jen podle čísla
+ *    a částky se zálohou založenou později v MyÚčtu je náhoda, zůstane k ručnímu navázání),
  *  - DDKP je vystavený a bez vazby na zálohu (ani přes platbu),
  *  - DDKP neleží v uzavřeném či zamčeném účetním období ani v podaném období DPH (jen hlášení):
  *    vazba rozhoduje o odpočtu DPH zálohy na konečné faktuře, proto platí plné pojistky
@@ -91,7 +93,7 @@ final class TaxDocumentAdvanceLinkCheck extends SourceScopedCheck implements Fix
     }
 
     /** @param array<string,bool> $options */
-    public function fix(int $supplierId, ?int $userId, array $options = []): FixResult
+    public function fix(int $supplierId, ?int $userId, array $options = [], ?string $fingerprint = null): FixResult
     {
         $pdo = $this->db->pdo();
         $own = !$pdo->inTransaction();
@@ -99,7 +101,9 @@ final class TaxDocumentAdvanceLinkCheck extends SourceScopedCheck implements Fix
         try {
             $fixed = [];
             $skipped = [];
-            foreach ($this->candidates($supplierId, true) as $c) {
+            $candidates = $this->candidates($supplierId, true);
+            FixPreview::fromResult(new CheckResult(array_column($candidates, 'item')))->assertConfirmed($fingerprint);
+            foreach ($candidates as $c) {
                 if ($c['item']->state !== CheckItem::FIXABLE) {
                     $skipped[] = $c['item'];
                     continue;
@@ -188,6 +192,16 @@ final class TaxDocumentAdvanceLinkCheck extends SourceScopedCheck implements Fix
             $p = $matches[0];
             $details['advance_id'] = (int) $p['id'];
             $diff = round($amount - (float) $p['total_with_vat'], 2);
+            // Automaticky jen vazba doložená převodem: DDKP i záloha pocházejí z převodu a záloha
+            // nevznikla po DDKP. Stejné číslo a částka u zálohy založené v MyÚčtu jsou jen shoda.
+            if ((int) $r['migrated'] !== 1 || (int) $p['migrated'] !== 1 || (string) $p['issue_date'] > $date) {
+                $out[] = ['item' => new CheckItem('invoice', (int) $r['id'], $label, $date, $amount, CheckItem::REVIEW,
+                    (string) $p['issue_date'] > $date
+                        ? sprintf('Záloha %s je vystavená až %s, po DDKP. Ověřte vazbu a navažte DDKP ručně tlačítkem Navázat na zálohu.', $r['ref'], (string) $p['issue_date'])
+                        : sprintf('Záloha %s nebo DDKP nepochází z převodu, shoda je jen podle čísla a částky. Ověřte ji a navažte DDKP ručně tlačítkem Navázat na zálohu.', $r['ref']),
+                    details: $details), 'proforma_id' => null];
+                continue;
+            }
             if (abs($diff) > self::TOLERANCE) {
                 $out[] = ['item' => new CheckItem('invoice', (int) $r['id'], $label, $date, $amount, CheckItem::REVIEW,
                     sprintf('Částka DDKP %s se liší od zálohy %s (%s).', self::money($amount), $r['ref'], self::money((float) $p['total_with_vat'])),
@@ -225,7 +239,8 @@ final class TaxDocumentAdvanceLinkCheck extends SourceScopedCheck implements Fix
         $out = [];
         foreach (array_chunk($numbers, 500) as $chunk) {
             $stmt = $this->db->pdo()->prepare(
-                "SELECT a.id, a.client_id, a.currency_id, cur.code AS currency, a.varsymbol, a.total_with_vat,
+                "SELECT a.id, a.client_id, a.currency_id, cur.code AS currency, a.varsymbol, a.total_with_vat, a.issue_date,
+                        EXISTS (SELECT 1 FROM pohoda_import_map m WHERE m.supplier_id = a.supplier_id AND m.kind = 'invoice' AND m.target_id = a.id) AS migrated,
                         COALESCE((SELECT SUM(d.total_with_vat) FROM invoices d
                                    WHERE d.supplier_id = a.supplier_id AND d.parent_invoice_id = a.id
                                      AND d.invoice_type = 'tax_document' AND d.status <> 'cancelled'), 0)

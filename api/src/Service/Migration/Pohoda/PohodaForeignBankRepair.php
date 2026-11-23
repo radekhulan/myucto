@@ -334,6 +334,18 @@ final class PohodaForeignBankRepair
                 [$reason, $reasonCode] = [$chain['opening_error'], 'missing_rates'];
             }
         }
+        // Převod mění i zápisy v deníku: otevírací zápis analytiky (měna a kurz počátečního
+        // stavu) a zápisy pohybů. Leží-li některý z nich v uzavřeném nebo zamčeném období,
+        // nesmí se měnit, i když výpisy a pohyby samy leží mimo ně.
+        $journalDates = $reason === null && $accountId !== null
+            ? $this->journalDates($supplierId, $accountId, array_keys($tx), array_values(array_filter(array_column($plan['chains'], 'period_id'))))
+            : [];
+        if ($journalDates !== []) {
+            $journalLock = $this->lockReason($supplierId, [], array_map(static fn (string $d): array => ['date' => $d], $journalDates));
+            if ($journalLock !== null) {
+                [$reason, $reasonCode] = [$journalLock, 'locked'];
+            }
+        }
         $plan['matches'] = (int) $pdo->query("SELECT COUNT(*) FROM payment_matches WHERE supplier_id = {$supplierId} AND bank_transaction_id IN (" . implode(',', array_keys($tx)) . ')')->fetchColumn();
         $plan['suggestions'] = (int) $pdo->query("SELECT COUNT(*) FROM bank_posting_suggestions WHERE supplier_id = {$supplierId} AND status IN ('pending','needs_input','blocked','rejected') AND bank_transaction_id IN (" . implode(',', array_keys($tx)) . ')')->fetchColumn();
         $plan['other_item_allocations'] = (int) $pdo->query('SELECT COUNT(*) FROM other_item_allocations WHERE bank_transaction_id IN (' . implode(',', array_keys($tx)) . ')')->fetchColumn();
@@ -1092,6 +1104,36 @@ final class PohodaForeignBankRepair
      * @param list<array<string,mixed>> $statements
      * @param array<int,array{date:string}> $tx
      */
+    /**
+     * Data zápisů v deníku, které převod účtu změní: otevírací zápisy analytiky v obdobích
+     * převáděných řetězů a zápisy navázané na pohyby účtu (nejstarší a nejnovější).
+     *
+     * @param list<int> $txIds
+     * @param list<int> $periodIds
+     * @return list<string>
+     */
+    private function journalDates(int $supplierId, int $accountId, array $txIds, array $periodIds): array
+    {
+        $pdo = $this->db->pdo();
+        $dates = [];
+        if ($periodIds !== []) {
+            $stmt = $pdo->prepare("SELECT MIN(e.entry_date), MAX(e.entry_date)
+                   FROM journal_entry_lines l JOIN journal_entries e ON e.id = l.entry_id AND e.supplier_id = l.supplier_id
+                  WHERE l.supplier_id = ? AND l.account_id = ? AND e.source_type = 'opening'
+                    AND e.period_id IN (" . implode(',', array_map('intval', $periodIds)) . ')');
+            $stmt->execute([$supplierId, $accountId]);
+            $dates = array_merge($dates, $stmt->fetch(PDO::FETCH_NUM) ?: []);
+        }
+        foreach (array_chunk($txIds, 500) as $chunk) {
+            $stmt = $pdo->prepare("SELECT MIN(e.entry_date), MAX(e.entry_date)
+                   FROM journal_entry_document_links k JOIN journal_entries e ON e.id = k.entry_id AND e.supplier_id = k.supplier_id
+                  WHERE k.supplier_id = ? AND k.doc_type = 'bank' AND k.doc_id IN (" . implode(',', array_map('intval', $chunk)) . ')');
+            $stmt->execute([$supplierId]);
+            $dates = array_merge($dates, $stmt->fetch(PDO::FETCH_NUM) ?: []);
+        }
+        return array_values(array_unique(array_map(static fn ($d): string => substr((string) $d, 0, 10), array_filter($dates))));
+    }
+
     private function lockReason(int $supplierId, array $statements, array $tx): ?string
     {
         $dates = array_merge(array_map(static fn (array $s): string => substr((string) $s['statement_date'], 0, 10), $statements), array_column($tx, 'date'));

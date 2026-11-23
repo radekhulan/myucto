@@ -81,6 +81,19 @@ final class DocumentLockService
         );
     }
 
+    /**
+     * Zapomene zámky zjištěné v tomto procesu. Volá ho, kdo rozhoduje o zápisu až po zamčení
+     * stavu období v transakci (Kontrola dat po převodu): zámek zjištěný dřív v témže procesu
+     * může být mezitím posunutý.
+     */
+    public function reset(): void
+    {
+        $this->cache = [];
+        $this->modeCache = [];
+        $this->periodsCache = [];
+        $this->lockedUntilCache = [];
+    }
+
     /** Zámek období pro konkrétní datum (create/issue/změna data — H1). */
     public function forDate(int $supplierId, string $refDate): DocumentLock
     {

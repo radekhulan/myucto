@@ -9,6 +9,7 @@ use MyInvoice\Service\Migration\Check\CheckResult;
 use MyInvoice\Service\Migration\Check\FixableMigrationDataCheck;
 use MyInvoice\Service\Migration\Check\FixPreview;
 use MyInvoice\Service\Migration\Check\FixResult;
+use MyInvoice\Service\Migration\Check\MigrationDataCheckException;
 use MyInvoice\Service\Migration\Check\MigrationSources;
 use MyInvoice\Service\Migration\Check\SourceScopedCheck;
 use MyInvoice\Service\Migration\Pohoda\PohodaForeignBankRepair;
@@ -20,8 +21,10 @@ use MyInvoice\Service\Migration\Pohoda\PohodaForeignBankRepair;
  * Výběr, převod účtu i pojistky (uzavřené a zamčené období, společná analytika, pohyby mimo
  * převod) jsou v opravě {@see PohodaForeignBankRepair}; kontrola její výsledek převede na
  * nálezy. Uzavřené období chrání plně: převod mění částky pohybů a měnové řádky deníku
- * analytiky 221. Chybějící kurzy ČNB stáhne a uloží stejně jako oprava. Výpisy nahrané
- * po převodu přepne oprava jen s volbou {@see OPTION_UPLOADED}.
+ * analytiky 221 včetně otevíracího zápisu. Kontrola, náhled ani oprava kurzy ČNB nestahují
+ * (uložení kurzu by přepočítalo ceníky i jiným firmám), pracují jen s uloženými kurzy;
+ * chybějící kurz je nález s postupem doplnění. Výpisy nahrané po převodu přepne oprava jen
+ * s volbou {@see OPTION_UPLOADED}.
  */
 final class ForeignBankInCzkCheck extends SourceScopedCheck implements FixableMigrationDataCheck
 {
@@ -62,13 +65,13 @@ final class ForeignBankInCzkCheck extends SourceScopedCheck implements FixableMi
 
     public function detect(int $supplierId): CheckResult
     {
-        return $this->result($this->repair->run([$supplierId], false, true));
+        return $this->result($this->repair->run([$supplierId], false, false));
     }
 
     /** @param array<string,bool> $options */
     public function preview(int $supplierId, array $options = []): FixPreview
     {
-        $preview = FixPreview::fromResult($this->result($this->repair->run([$supplierId], false, true)));
+        $preview = FixPreview::fromResult($this->result($this->repair->run([$supplierId], false, false)));
         if (empty($options[self::OPTION_UPLOADED])) {
             return $this->withoutUploaded($preview);
         }
@@ -76,14 +79,12 @@ final class ForeignBankInCzkCheck extends SourceScopedCheck implements FixableMi
     }
 
     /** @param array<string,bool> $options */
-    public function fix(int $supplierId, ?int $userId, array $options = []): FixResult
+    public function fix(int $supplierId, ?int $userId, array $options = [], ?string $fingerprint = null): FixResult
     {
         $uploaded = !empty($options[self::OPTION_UPLOADED]);
-        $before = $this->preview($supplierId, $options);
-        if (!$before->canFix()) {
-            return new FixResult([], $before->skipped);
-        }
-        $rows = $this->repair->run([$supplierId], true, true, $userId, $uploaded);
+        $plan = $this->preview($supplierId, $options);
+        $plan->assertConfirmed($fingerprint);
+        $rows = $this->repair->run([$supplierId], true, false, $userId, $uploaded);
         $fixed = [];
         $skipped = [];
         $notes = [];
@@ -94,10 +95,24 @@ final class ForeignBankInCzkCheck extends SourceScopedCheck implements FixableMi
                 $skipped[] = $item;
             }
         }
+        // Oprava účtu jede po účtech ve vlastním savepointu: selhání jednoho účtu nebo jiný
+        // výsledek, než ukázal náhled, vrátí celou opravu (transakci drží volající).
+        $planned = array_map(static fn (CheckItem $i): string => $i->entityType . ':' . $i->entityId, $plan->changes);
+        $done = array_map(static fn (CheckItem $i): string => $i->entityType . ':' . $i->entityId, $fixed);
+        sort($planned);
+        sort($done);
         foreach ($rows as $r) {
             if ($r['status'] === 'failed') {
-                $notes[] = sprintf('Účet %s se neopravil: %s', $r['code'], (string) $r['reason']);
+                throw new \RuntimeException(sprintf('Účet %s se neopravil: %s', $r['code'], (string) $r['reason']));
             }
+            foreach ($r['uploaded'] ?? [] as $u) {
+                if (($u['status'] ?? '') === 'failed') {
+                    throw new \RuntimeException(sprintf('Výpis #%d se nepřepnul: %s', (int) $u['id'], (string) ($u['advice'] ?? '')));
+                }
+            }
+        }
+        if ($planned !== $done) {
+            throw new MigrationDataCheckException('stale_preview', 'Oprava by změnila jiné účty, než ukázal náhled. Otevřete náhled opravy znovu.', 409);
         }
         return new FixResult($fixed, $skipped, $notes);
     }

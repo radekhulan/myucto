@@ -50,7 +50,11 @@ final class PohodaPriorYearPaymentRepair
     }
 
     /**
+     * `$onlyInvoiceIds` omezí opravu na vybrané doklady (Kontrola dat po převodu zapisuje jen
+     * doklady z potvrzeného náhledu).
+     *
      * @param list<int> $supplierIds
+     * @param ?list<int> $onlyInvoiceIds
      * @return list<array{supplier_id:int,company:string,period_start:?string,paid_on:?string,
      *                    status:'repaired'|'would_repair'|'nothing'|'skipped',reason:?string,
      *                    count:int,amount_czk:float,other_count:int,other_amount_czk:float,
@@ -58,17 +62,18 @@ final class PohodaPriorYearPaymentRepair
      *                                       currency:string,amount_to_pay:float,paid_total:float,paid_before:float,amount:float,amount_czk:float}>,
      *                    other_invoices:list<array<string,mixed>>}> `other_invoices` = rozdíly u dokladů roku agendy, oprava je nemění
      */
-    public function run(array $supplierIds, bool $commit, ?int $userId = null): array
+    public function run(array $supplierIds, bool $commit, ?int $userId = null, ?array $onlyInvoiceIds = null): array
     {
         $out = [];
         foreach ($supplierIds as $supplierId) {
-            $out[] = $this->supplier($supplierId, $commit, $userId);
+            $out[] = $this->supplier($supplierId, $commit, $userId, $onlyInvoiceIds);
         }
         return $out;
     }
 
     /** @return array<string,mixed> */
-    private function supplier(int $supplierId, bool $commit, ?int $userId): array
+    /** @param ?list<int> $onlyInvoiceIds jen tyto doklady (oprava potvrzeného plánu); `null` = všechny */
+    private function supplier(int $supplierId, bool $commit, ?int $userId, ?array $onlyInvoiceIds = null): array
     {
         $pdo = $this->db->pdo();
         $company = $pdo->prepare('SELECT company_name FROM supplier WHERE id = ?');
@@ -91,6 +96,10 @@ final class PohodaPriorYearPaymentRepair
         }
         try {
             $candidates = $this->candidates($supplierId, $start, $commit);
+            if ($onlyInvoiceIds !== null) {
+                $only = array_fill_keys($onlyInvoiceIds, true);
+                $candidates = array_values(array_filter($candidates, static fn (array $c): bool => isset($only[$c['id']])));
+            }
             foreach ($candidates as $c) {
                 if ($c['issue_date'] >= $start) {
                     $row['other_count']++;

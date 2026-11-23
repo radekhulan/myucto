@@ -29,9 +29,12 @@ interface FixableMigrationDataCheck extends MigrationDataCheck
     public function preview(int $supplierId, array $options = []): FixPreview;
 
     /**
-     * Provede opravu.
+     * Provede opravu. Volá se uvnitř transakce ({@see MigrationDataCheckService::fix()}): kontrola
+     * spočte plán znovu nad zamčenými daty, ověří jeho otisk proti potvrzenému náhledu
+     * ({@see FixPreview::assertConfirmed()}) a zapíše právě tento plán.
      *
      * @param array<string,bool> $options
+     * @param ?string $fingerprint otisk potvrzeného náhledu; `null` jen z CLI (plán bez náhledu)
      */
-    public function fix(int $supplierId, ?int $userId, array $options = []): FixResult;
+    public function fix(int $supplierId, ?int $userId, array $options = [], ?string $fingerprint = null): FixResult;
 }
