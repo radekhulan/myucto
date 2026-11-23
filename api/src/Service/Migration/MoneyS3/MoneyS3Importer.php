@@ -692,6 +692,7 @@ final class MoneyS3Importer
         $ctx->openingOnly = $openingOnly;
         if (!$ctx->taxRecords) {
             $ctx->lockedUntil = $this->settings->getLockedUntil($supplierId);
+            $ctx->openingDocumentDirs = $this->openingDocumentDirs($backup, $options, $ctx->calendar);
         }
         // Daňová evidence se neúčtuje: automatika účtování ani výchozí nastavení účetní
         // jednotky se jí netýkají a převod je nemění.
@@ -834,6 +835,31 @@ final class MoneyS3Importer
             }
         }
         return $protocol;
+    }
+
+    /**
+     * Adresáře zálohy z let před prvním převáděným rokem (volba „Převést od roku"): adresář
+     * => účetní rok. Jejich doklady otevřené k začátku prvního období převod založí jako
+     * doklady počátečního stavu ({@see OpeningDocuments}).
+     *
+     * @return array<string,int>
+     */
+    private function openingDocumentDirs(Ms3Backup $backup, ImportOptions $options, FiscalCalendar $calendar): array
+    {
+        if ($options->fromYear === null) {
+            return [];
+        }
+        $plan = $this->journal->plan($backup, $options, $calendar);
+        if ($plan === []) {
+            return [];
+        }
+        $out = [];
+        foreach ($this->journal->plan($backup, new ImportOptions(firstPeriodStart: $options->firstPeriodStart), $calendar) as $item) {
+            if ((int) $item['year'] < (int) $plan[0]['year']) {
+                $out[(string) $item['dir']] = (int) $item['year'];
+            }
+        }
+        return $out;
     }
 
     /**

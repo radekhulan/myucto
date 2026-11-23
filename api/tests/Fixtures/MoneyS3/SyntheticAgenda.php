@@ -1862,6 +1862,76 @@ final class SyntheticAgenda
     }
 
     /**
+     * Agenda se starším rokem 2023 (adresář ROK.003) před prvním převáděným rokem 2024
+     * („Převést od roku" 2024). Doklady 2023 otevřené k 1. 1. 2024: FV23001 (1 210 Kč)
+     * uhrazená pohybem BP24010 v březnu 2024 a FP23001 (2 420 Kč) uhrazená pohybem BV24010
+     * v únoru 2024. FV23002 (605 Kč) Money vede bez data úhrady se zbytkem k úhradě (k ověření),
+     * FV23003 je uhrazená ještě v roce 2023. Počáteční stavy 2024 nesou 311 = 1 210 Kč
+     * a 321 = 2 420 Kč, počáteční stav 221 roku 2025 je o úhrady nižší (roky navazují).
+     *
+     * @param float $receivables počáteční stav 311 roku 2024 (pojistka proti počátečnímu stavu)
+     * @return array<string,string>
+     */
+    public static function filesWithDocumentsBeforeFirstYear(float $receivables = 1210.0): array
+    {
+        $files = self::files();
+        $issuedFields = array_merge(self::ISSUED_FIELDS, [['Proplatit', 'E', 10]]);
+        $purchaseFields = array_merge(self::PURCHASE_FIELDS, [['Proplatit', 'E', 10]]);
+        $customer = [
+            'O_ICO' => self::CUSTOMER_ICO, 'O_DIC' => 'CZ' . self::CUSTOMER_ICO,
+            'O_Nazev' => 'Odběratel Beta a.s.', 'O_Ulice' => 'Ukázková 7', 'O_Mesto' => 'Ostrava', 'O_Psc' => '702 00',
+            'SazbaDPH1' => 12.0, 'SazbaDPH2' => 21.0, 'Druh' => 'N', 'KodDPH' => self::KOD_DPH_SALE, 'Uhrada' => 'převodem',
+        ];
+        $vendor = [
+            'D_ICO' => self::VENDOR_ICO, 'D_DIC' => 'CZ' . self::VENDOR_ICO, 'D_Nazev' => 'Dodavatel Alfa s.r.o.',
+            'D_Ulice' => 'Vzorová 1', 'D_Mesto' => 'Praha', 'D_Psc' => '110 00',
+            'SazbaDPH1' => 12.0, 'SazbaDPH2' => 21.0, 'Druh' => 'N', 'KodDPH' => self::KOD_DPH_PURCHASE, 'Uhrada' => 'převodem',
+        ];
+        $dates = static fn (string $date): array => ['Vystaveno' => $date, 'DatUcPr' => $date, 'PlnenoDPH' => $date, 'Splatno' => $date];
+        $files['ROK.003/UcOsnova.DAT'] = $files['ROK.001/UcOsnova.DAT'];
+        $files['ROK.003/SzUcPokl.DAT'] = $files['ROK.001/SzUcPokl.DAT'];
+        $files['ROK.003/UcDenik.DAT'] = Ms3FixtureWriter::table(self::JOURNAL_FIELDS, [
+            ['Cislo' => 1, 'Zdroj' => 'FV', 'Doklad' => 'FV23001', 'Datum' => '2023-11-10', 'DatPlnDPH' => '2023-11-10', 'Popis' => 'Služby', 'UcMD' => '311000', 'UcD' => '602000', 'Castka' => 1000.0],
+            ['Cislo' => 2, 'Zdroj' => 'FV', 'Doklad' => 'FV23001', 'Datum' => '2023-11-10', 'DatPlnDPH' => '2023-11-10', 'Popis' => 'Služby', 'UcMD' => '311000', 'UcD' => '343200', 'Castka' => 210.0],
+            ['Cislo' => 3, 'Zdroj' => 'FP', 'Doklad' => 'FP23001', 'Datum' => '2023-12-01', 'DatPlnDPH' => '2023-12-01', 'Popis' => 'Nájem', 'UcMD' => '518000', 'UcD' => '321000', 'Castka' => 2000.0],
+            ['Cislo' => 4, 'Zdroj' => 'FP', 'Doklad' => 'FP23001', 'Datum' => '2023-12-01', 'DatPlnDPH' => '2023-12-01', 'Popis' => 'Nájem', 'UcMD' => '343100', 'UcD' => '321000', 'Castka' => 420.0],
+        ]);
+        $files['ROK.003/VFaktury.DAT'] = Ms3FixtureWriter::table($issuedFields, [
+            ['Doklad' => 'FV23001', 'VarSymbol' => '2023001', 'Zaklad_2' => 1000.0, 'DPH_2' => 210.0, 'CelkemSDPH' => 1210.0,
+                'Uhrazeno' => '2024-03-10', 'UDoklad' => 'BP24010', 'Popis' => 'Služby'] + $dates('2023-11-10') + $customer,
+            ['Doklad' => 'FV23002', 'VarSymbol' => '2023002', 'Zaklad_2' => 500.0, 'DPH_2' => 105.0, 'CelkemSDPH' => 605.0,
+                'Proplatit' => 605.0, 'Popis' => 'Služby bez úhrady'] + $dates('2023-06-15') + $customer,
+            ['Doklad' => 'FV23003', 'VarSymbol' => '2023003', 'Zaklad_2' => 100.0, 'DPH_2' => 21.0, 'CelkemSDPH' => 121.0,
+                'Uhrazeno' => '2023-12-20', 'UDoklad' => 'BP23099', 'Popis' => 'Uhrazeno v roce 2023'] + $dates('2023-12-01') + $customer,
+        ]);
+        $files['ROK.003/PFaktury.DAT'] = Ms3FixtureWriter::table($purchaseFields, [
+            ['Doklad' => 'FP23001', 'PrijatDokl' => 'NJ-2023-012', 'VarSymbol' => '2023012', 'Zaklad_2' => 2000.0, 'DPH_2' => 420.0, 'CelkemSDPH' => 2420.0,
+                'Uhrazeno' => '2024-02-05', 'UDoklad' => 'BV24010', 'Popis' => 'Nájem', 'Doruceno' => '2023-12-01'] + $dates('2023-12-01') + $vendor,
+        ]);
+        $files = self::patch($files, 'ROK.001/UcDenik.DAT', null, [
+            ['Cislo' => -11, 'Zdroj' => 'XP', 'Datum' => '2024-01-01', 'Popis' => 'Počáteční stav roku 2024', 'UcMD' => '311000', 'UcD' => '701000', 'Castka' => $receivables],
+            ['Cislo' => -12, 'Zdroj' => 'XP', 'Datum' => '2024-01-01', 'Popis' => 'Počáteční stav roku 2024', 'UcMD' => '701000', 'UcD' => '321000', 'Castka' => 2420.0],
+            ['Cislo' => -13, 'Zdroj' => 'XP', 'Datum' => '2024-01-01', 'Popis' => 'Počáteční stav roku 2024', 'UcMD' => '701000', 'UcD' => '411000', 'Castka' => $receivables - 2420.0],
+            ['Cislo' => 301, 'Zdroj' => 'BK', 'Doklad' => 'BV24010', 'Datum' => '2024-02-05', 'Popis' => 'Úhrada FP23001', 'UcMD' => '321000', 'UcD' => '221001', 'Castka' => 2420.0],
+            ['Cislo' => 302, 'Zdroj' => 'BK', 'Doklad' => 'BP24010', 'Datum' => '2024-03-10', 'Popis' => 'Úhrada FV23001', 'UcMD' => '221001', 'UcD' => '311000', 'Castka' => 1210.0],
+        ]);
+        $files = self::patch($files, 'ROK.001/BankKnih.DAT', null, [
+            ['Doklad' => 'BV24010', 'Ucet' => 'BU', 'Vydej' => 1, 'DatUcPr' => '2024-02-05', 'DatPlat' => '2024-02-05', 'Celkem' => 2420.0, 'VarSym' => '2023012', 'AdNazev' => 'Dodavatel Alfa s.r.o.', 'Popis' => 'Úhrada FP23001', 'Vypis' => 11],
+            ['Doklad' => 'BP24010', 'Ucet' => 'BU', 'Vydej' => 0, 'DatUcPr' => '2024-03-10', 'DatPlat' => '2024-03-10', 'Celkem' => 1210.0, 'VarSym' => '2023001', 'AdNazev' => 'Odběratel Beta a.s.', 'Popis' => 'Úhrada FV23001', 'Vypis' => 12],
+        ]);
+        // Rok 2025 navazuje: 221 je o úhrady roku 2024 nižší, 311 a 321 se vyrovnaly, 411 nese rozdíl počátečních stavů.
+        return self::patch($files, 'ROK.002/UcDenik.DAT', static function (array $r) use ($receivables): array {
+            if ($r['Zdroj'] === 'XP' && (string) $r['UcMD'] === '221001') {
+                return ['Castka' => 62150.0 - 1210.0] + $r;
+            }
+            if ($r['Zdroj'] === 'XP' && (string) $r['UcD'] === '411000') {
+                return ['Castka' => 60000.0 + $receivables - 2420.0] + $r;
+            }
+            return $r;
+        });
+    }
+
+    /**
      * Úprava tabulky agendy pro opakovaný převod novější zálohy: `$change` vrací upravený
      * řádek (null = řádek v záloze už není), `$append` přidá nové řádky.
      *

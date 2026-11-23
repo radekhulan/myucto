@@ -102,14 +102,24 @@ final class InvoiceImporter
             'SELECT 1 FROM purchase_invoices
               WHERE supplier_id = ? AND vendor_id = ? AND vendor_invoice_number = ? AND issue_date = ? LIMIT 1'
         );
+        if (!$ctx->taxRecords) {
+            OpeningDocuments::plan($ctx, $pdo, false, self::STEP_PURCHASE);
+        }
 
         foreach ($ctx->backup->rowsAcrossYears('PFaktury') as $r) {
             $year = $ctx->yearOf($r);
+            // Doklad z let před prvním převáděným rokem, otevřený k jeho začátku ({@see OpeningDocuments}).
+            $opening = $year === null && ($year = OpeningDocuments::yearOf($ctx, $r, false)) !== null;
             $docNo = trim((string) ($r['Doklad'] ?? ''));
             if ($year === null || $docNo === '') {
                 continue;
             }
             $key = $year . '|' . $docNo;
+            if (isset($existing[$key]) && $opening) {
+                $ctx->openingPurchases[$key] = $existing[$key];
+                $p->count(self::STEP_PURCHASE, 'opening_existing');
+                continue;
+            }
             if (isset($existing[$key])) {
                 $ctx->purchaseInvoices[$key] = $existing[$key];
                 $p->count(self::STEP_PURCHASE, 'existing');
@@ -151,6 +161,11 @@ final class InvoiceImporter
             }
             $class = self::classify($r, false, $amounts['vat']);
             $review = $class['reasons'] !== [];
+            if ($opening && ($review || $class['kind'] !== 'invoice')) {
+                // Doklad počátečního stavu nese jen zůstatek závazku, ke kontrole se nezakládá.
+                $p->count(self::STEP_PURCHASE, 'opening_review_skipped');
+                continue;
+            }
             if ($review && self::historicalUnposted($ctx, $year, 'FP', $docNo)) {
                 $p->count(self::STEP_PURCHASE, 'unposted_review_skipped');
                 continue;
@@ -265,6 +280,11 @@ final class InvoiceImporter
                 $p->count(self::STEP_PURCHASE, 'claim_shifted');
             }
             $this->map->put($ctx->supplierId, MoneyS3ImportRepository::KIND_PURCHASE_INVOICE, $key, $id, $ctx->runId);
+            if ($opening) {
+                $ctx->openingPurchases[$key] = $id;
+                $p->count(self::STEP_PURCHASE, 'opening_documents');
+                continue;
+            }
             $ctx->purchaseInvoices[$key] = $id;
             $p->count(self::STEP_PURCHASE, 'created');
             $this->reportNumberAndReview($ctx, self::STEP_PURCHASE, $docNo, $year, $number, $class['reasons']);
@@ -301,14 +321,24 @@ final class InvoiceImporter
             }
         }
 
+        if (!$ctx->taxRecords) {
+            OpeningDocuments::plan($ctx, $this->db->pdo(), true, self::STEP_ISSUED);
+        }
         $clients = [];
         foreach ($ctx->backup->rowsAcrossYears('VFaktury') as $r) {
             $year = $ctx->yearOf($r);
+            // Doklad z let před prvním převáděným rokem, otevřený k jeho začátku ({@see OpeningDocuments}).
+            $opening = $year === null && ($year = OpeningDocuments::yearOf($ctx, $r, true)) !== null;
             $docNo = trim((string) ($r['Doklad'] ?? ''));
             if ($year === null || $docNo === '') {
                 continue;
             }
             $key = $year . '|' . $docNo;
+            if (isset($existing[$key]) && $opening) {
+                $ctx->openingIssued[$key] = $existing[$key];
+                $p->count(self::STEP_ISSUED, 'opening_existing');
+                continue;
+            }
             if (isset($existing[$key])) {
                 $ctx->issuedInvoices[$key] = $existing[$key];
                 $p->count(self::STEP_ISSUED, 'existing');
@@ -358,6 +388,11 @@ final class InvoiceImporter
                 }
             }
             $review = $class['reasons'] !== [];
+            if ($opening && ($review || $class['kind'] !== 'invoice')) {
+                // Doklad počátečního stavu nese jen zůstatek pohledávky, ke kontrole se nezakládá.
+                $p->count(self::STEP_ISSUED, 'opening_review_skipped');
+                continue;
+            }
             if ($review && self::historicalUnposted($ctx, $year, 'FV', $docNo)) {
                 $p->count(self::STEP_ISSUED, 'unposted_review_skipped');
                 continue;
@@ -418,6 +453,11 @@ final class InvoiceImporter
                 DocumentRefresh::stateHash($issue, self::date($r, ['PlnenoDPH']) ?? $issue, $amounts['base'], $amounts['vat'], $amounts['total'], self::itemAmounts($items)))];
             ForeignCurrencyTakeover::report($p, self::STEP_ISSUED, $docNo, $fx);
             $this->map->put($ctx->supplierId, MoneyS3ImportRepository::KIND_INVOICE, $key, $id, $ctx->runId);
+            if ($opening) {
+                $ctx->openingIssued[$key] = $id;
+                $p->count(self::STEP_ISSUED, 'opening_documents');
+                continue;
+            }
             $ctx->issuedInvoices[$key] = $id;
             $p->count(self::STEP_ISSUED, 'created');
             $this->reportNumberAndReview($ctx, self::STEP_ISSUED, $docNo, $year, $number, $class['reasons']);

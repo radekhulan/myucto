@@ -128,6 +128,7 @@ final class DocumentLinker
                 $linkedEntries[$entryId] = true;
             }
         }
+        $this->linkOpeningDocuments($ctx);
         $p->set('orphans', $orphans);
         if ($orphans !== []) {
             $p->warn(self::STEP_LINK, 'orphan_documents', count($orphans) . ' dokladů nemá v deníku Money zápis se stejným číslem. '
@@ -191,10 +192,10 @@ final class DocumentLinker
         $relink = $ctx->options->relinkOnly;
         $docState = $this->documentState($ctx->supplierId);
 
-        foreach ([['PFaktury', $ctx->purchaseInvoices, false], ['VFaktury', $ctx->issuedInvoices, true]] as [$table, $docs, $isIssued]) {
+        foreach ([['PFaktury', $ctx->purchaseInvoices + $ctx->openingPurchases, false], ['VFaktury', $ctx->issuedInvoices + $ctx->openingIssued, true]] as [$table, $docs, $isIssued]) {
             $type = $isIssued ? 'invoice' : 'purchase_invoice';
             foreach ($ctx->backup->rowsAcrossYears($table) as $r) {
-                $year = $ctx->yearOf($r);
+                [$year, $opening] = self::documentYear($ctx, $r);
                 $docNo = trim((string) ($r['Doklad'] ?? ''));
                 $settledBy = trim((string) ($r['UDoklad'] ?? ''));
                 $docId = $docs[$year . '|' . $docNo] ?? null;
@@ -237,16 +238,31 @@ final class DocumentLinker
                 }
                 $paidAt = InvoiceImporter::date($r, ['Uhrazeno']);
                 $docTotal = $this->documentTotal($ctx->supplierId, $isIssued, $docId);
-                $txId = self::choosePayment($bankCandidates, $year, $docTotal, $paidAt);
+                $paymentYear = $year;
+                if ($opening) {
+                    // Doklad počátečního stavu: úhrada z převedených let, jen doklad z data úhrady
+                    // Money (číslo úhrady se v Money každý rok opakuje).
+                    $onDay = static fn (array $c): bool => $paidAt !== null && $c['date'] === $paidAt;
+                    $bankCandidates = array_values(array_filter($bankCandidates, $onDay));
+                    $cashCandidates = array_values(array_filter($cashCandidates, $onDay));
+                    $paymentYear = $paidAt !== null ? (int) substr($paidAt, 0, 4) : $year;
+                    if ($bankCandidates === [] && $cashCandidates === []) {
+                        $p->count(self::STEP_PAYMENTS, 'opening_not_found');
+                        continue;
+                    }
+                }
+                $txId = self::choosePayment($bankCandidates, $paymentYear, $docTotal, $paidAt);
                 if ($txId !== null) {
                     $movement = $movements[$txId] ?? null;
                     if (!self::movementEditable($movement, $relink)) {
                         $p->count(self::STEP_PAYMENTS, 'movement_kept');
                         continue;
                     }
-                    if (!$relink && !$ctx->writable($movement['date'])) {
+                    if (!$relink && !$opening && !$ctx->writable($movement['date'])) {
                         // Nové párování v uzavřeném roce (nebo pod zámkem k datu) by zpětně
                         // měnilo saldokonto uzavřených knih; dělá ho jen opravný převod vazeb.
+                        // Doklad počátečního stavu je nový: bez své úhrady by v saldokontu
+                        // uzavřených let visel otevřený, ačkoli ho deník (pohyb) vyrovnává.
                         $p->count(self::STEP_PAYMENTS, 'closed_period_skipped');
                         continue;
                     }
@@ -299,8 +315,8 @@ final class DocumentLinker
                     $p->count(self::STEP_PAYMENTS, 'bank');
                     continue;
                 }
-                $cashId = self::choosePayment($cashCandidates, $year, $docTotal, $paidAt);
-                if ($cashId !== null && !$relink && !$ctx->writable(self::candidateDate($cashCandidates, $cashId))) {
+                $cashId = self::choosePayment($cashCandidates, $paymentYear, $docTotal, $paidAt);
+                if ($cashId !== null && !$relink && !$opening && !$ctx->writable(self::candidateDate($cashCandidates, $cashId))) {
                     $p->count(self::STEP_PAYMENTS, 'closed_period_skipped');
                     continue;
                 }
@@ -393,8 +409,9 @@ final class DocumentLinker
         }
         $paymentNos = [];
         $left = [];
+        $issued = $ctx->issuedInvoices + $ctx->openingIssued;
         foreach ($ctx->backup->rowsAcrossYears('VFaktury') as $r) {
-            $docId = $ctx->issuedInvoices[$ctx->yearOf($r) . '|' . trim((string) ($r['Doklad'] ?? ''))] ?? null;
+            $docId = $issued[self::documentYear($ctx, $r)[0] . '|' . trim((string) ($r['Doklad'] ?? ''))] ?? null;
             $settledBy = trim((string) ($r['UDoklad'] ?? ''));
             if ($docId === null || $settledBy === '') {
                 continue;
@@ -438,8 +455,9 @@ final class DocumentLinker
             return;
         }
         $paymentNos = [];
+        $purchases = $ctx->purchaseInvoices + $ctx->openingPurchases;
         foreach ($ctx->backup->rowsAcrossYears('PFaktury') as $r) {
-            $docId = $ctx->purchaseInvoices[$ctx->yearOf($r) . '|' . trim((string) ($r['Doklad'] ?? ''))] ?? null;
+            $docId = $purchases[self::documentYear($ctx, $r)[0] . '|' . trim((string) ($r['Doklad'] ?? ''))] ?? null;
             $settledBy = trim((string) ($r['UDoklad'] ?? ''));
             if ($docId !== null && $settledBy !== '') {
                 $paymentNos[$docId] = $settledBy;
@@ -451,6 +469,42 @@ final class DocumentLinker
         }
         if ($out['updated'] > 0) {
             $ctx->protocol->count(self::STEP_PAYMENTS, 'purchase_settled_outside', $out['updated']);
+        }
+    }
+
+    /**
+     * Rok dokladu Money: rok převáděného adresáře, nebo rok adresáře z let před prvním
+     * převáděným rokem, odkud převod bere doklady počátečního stavu ({@see OpeningDocuments}).
+     *
+     * @param array<string,mixed> $r
+     * @return array{0:?int,1:bool} rok a zda jde o doklad počátečního stavu
+     */
+    private static function documentYear(ImportContext $ctx, array $r): array
+    {
+        $year = $ctx->yearOf($r);
+        if ($year !== null) {
+            return [$year, false];
+        }
+        $opening = $ctx->openingDocumentDirs[(string) ($r['__dir'] ?? '')] ?? null;
+        return [$opening, $opening !== null];
+    }
+
+    /**
+     * Doklady počátečního stavu ({@see OpeningDocuments}) navázané na otevírací zápis prvního
+     * převáděného období: zápis vlastní nemají, jejich částku nese počáteční stav.
+     */
+    private function linkOpeningDocuments(ImportContext $ctx): void
+    {
+        if (($ctx->openingIssued === [] && $ctx->openingPurchases === []) || $ctx->periods === []) {
+            return;
+        }
+        $periodId = (int) $ctx->periods[min(array_keys($ctx->periods))]['id'];
+        foreach ([['invoice', $ctx->openingIssued], ['purchase_invoice', $ctx->openingPurchases]] as [$docType, $docs]) {
+            foreach ($docs as $docId) {
+                if ($this->entries->linkOpening($ctx->supplierId, $ctx->userId > 0 ? $ctx->userId : null, $periodId, $docType, (int) $docId)) {
+                    $ctx->protocol->count(self::STEP_LINK, 'opening_linked');
+                }
+            }
         }
     }
 
