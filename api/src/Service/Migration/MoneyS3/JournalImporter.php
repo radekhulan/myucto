@@ -52,6 +52,7 @@ final class JournalImporter
         private readonly JournalEntryRepository $journal,
         private readonly MoneyS3ImportRepository $map,
         private readonly EntryFormService $entryForms,
+        private readonly InvoiceImporter $invoices,
     ) {
         $this->plans = new \WeakMap();
         $this->refresh = new JournalEntryRefresh($db);
@@ -227,16 +228,12 @@ final class JournalImporter
         $stored = $refresh ? $this->map->fingerprints($ctx->supplierId, MoneyS3ImportRepository::KIND_JOURNAL_ENTRY, $year . '|') : [];
         $current = $refresh ? $this->refresh->entryFingerprints($ctx->supplierId, array_values($existing)) : [];
         $touched = $refresh ? $this->refresh->touchedEntries($ctx->supplierId, (int) $period['id']) : [];
-        // Zápisy převedené před zavedením otisků: rozdíl proti Money převod přepíše, jen když
-        // se řádky zápisu od převodu nezměnily (K1 - jinak by vrátil opravu z MyÚčta).
-        $pristine = $refresh ? $this->refresh->pristineEntries($ctx->supplierId, array_values(array_filter(
-            $existing, static fn (int $id, string $key): bool => ($stored[$key] ?? null) === null, ARRAY_FILTER_USE_BOTH,
-        ))) : [];
-        // Zápis, se kterým se v MyÚčtu pracovalo (nebo ho upravil uživatel), se nepřepíše ani nesmaže.
-        $keeps = static function (string $key, int $entryId, ?string $entryState) use ($stored, $touched, $pristine): bool {
+        // Zápis, se kterým se v MyÚčtu pracovalo (nebo ho upravil uživatel), se nepřepíše ani
+        // nesmaže. Zápis převedený před zavedením otisků, který se od Money liší, převod nikdy
+        // sám nepřepíše: nepozná, zda rozdíl způsobilo Money, nebo oprava v MyÚčtu.
+        $keeps = static function (string $key, int $entryId, ?string $entryState) use ($stored, $touched): bool {
             $fingerprint = $stored[$key] ?? null;
-            $edited = $fingerprint !== null ? $fingerprint !== $entryState : !isset($pristine[$entryId]);
-            return $edited || isset($touched[$entryId]);
+            return $fingerprint === null || $fingerprint !== $entryState || isset($touched[$entryId]);
         };
         // Zápisy mapy, které v deníku Money pod svým klíčem už nejsou, podle `zdroj|číslo`:
         // změnilo-li Money datum (číslo) zápisu, se kterým se pracovalo, nový se nezaloží.
@@ -464,8 +461,9 @@ final class JournalImporter
     /**
      * Přepíše řádky převzatého zápisu podle skupiny deníku Money; hlavička zápisu (zdroj,
      * vazba na doklad, datum, popis) zůstává, dimenze přiřazené v MyÚčtu se přenesou na
-     * řádky se stejným pořadím. False = přepis odmítla pojistka deníku (zápis je součástí
-     * jiné evidence) nebo doklad zápisu leží v podaném období DPH; zápis zůstává, jak byl.
+     * řádky se stejným pořadím, účtem a stranou. False = přepis odmítla pojistka deníku
+     * (zápis je součástí jiné evidence), doklad zápisu leží v podaném období DPH nebo ho
+     * převod nezmění, nebo dimenzi z MyÚčta nemá kam přenést; zápis zůstává, jak byl.
      *
      * @param list<array<string,mixed>> $groupRows
      * @param array<int,array{currency:string,code:string,opening:?array{foreign:float,rate:float}}> $fxAccounts
@@ -478,6 +476,12 @@ final class JournalImporter
         if ($lines === [] || $header === null || $this->refresh->documentInFiledPeriod($ctx->supplierId, $header, $this->documents)) {
             return false;
         }
+        // Zápis dokladu se přepíše, jen když doklad Money buď nezměnilo, nebo ho krok dokladů
+        // aktualizuje - jinak by se doklad a deník rozešly.
+        if (in_array($header['source_type'], ['invoice', 'purchase_invoice'], true) && $header['source_id'] !== null
+            && !$this->invoices->documentFollowsEntry($ctx, (string) $header['source_type'], (int) $header['source_id'])) {
+            return false;
+        }
         $dimensions = $this->refresh->userDimensions($ctx->supplierId, $entryId);
         PostingService::assertBalanced($lines);
         if ($forms->singleAt((string) $header['entry_date'])) {
@@ -486,12 +490,21 @@ final class JournalImporter
                 return false;
             }
         }
+        $pdo = $this->db->pdo();
+        $pdo->exec('SAVEPOINT money_s3_entry_replace');
         try {
             $this->journal->replace($entryId, $header, $lines);
         } catch (PostingException) {
+            $pdo->exec('ROLLBACK TO SAVEPOINT money_s3_entry_replace');
             return false;
         }
-        $this->refresh->restoreUserDimensions($ctx->supplierId, $entryId, $dimensions);
+        // Dimenze přiřazená v MyÚčtu patří řádku s týmž pořadím, účtem i stranou. Když ho
+        // nový zápis nemá (Money řádky přeskládalo nebo přeúčtovalo), zápis zůstane, jak byl.
+        if (!$this->refresh->restoreUserDimensions($ctx->supplierId, $entryId, $dimensions)) {
+            $pdo->exec('ROLLBACK TO SAVEPOINT money_s3_entry_replace');
+            return false;
+        }
+        $pdo->exec('RELEASE SAVEPOINT money_s3_entry_replace');
         return true;
     }
 

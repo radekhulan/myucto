@@ -652,7 +652,9 @@ a zbytek zůstane k úhradě.
 aktualizuje to, co Money od minulého převodu změnilo:
 
 - zápis deníku převzatý z Money, který Money změnilo, přepíše podle Money
-  (zápis zůstává tentýž, vazby na doklad i dimenze přiřazené v MyÚčtu zůstanou),
+  (zápis zůstává tentýž, vazby na doklad zůstanou a dimenze přiřazená v MyÚčtu
+  zůstane na řádku se stejným účtem; přesunulo-li Money řádek jinam, zápis se
+  nepřepíše),
   a zápis, který Money smazalo, smaže. Doklad, kterému Money změnilo datum nebo
   číslo, se převede jako nový zápis a starý se smaže,
 - u vydané a přijaté faktury přepíše částky po sazbách, data vystavení, plnění
@@ -667,16 +669,17 @@ párováním zadaným v MyÚčtu, zápočtem, navázaným dobropisem, daňovým 
 čerpáním zálohy, opravou základu DPH, opravnou položkou, přijatý doklad
 s nahraným skenem, schvalováním, majetkem nebo skladem z položky, a doklad
 v období, za které je podané přiznání DPH, kontrolní nebo OSS hlášení. Takový
-doklad a jeho zápis v deníku zůstanou oba, aby se nerozešly. Změnu druhu dokladu,
+doklad a jeho zápis v deníku zůstanou oba, aby se nerozešly; stejně tak zůstane
+zápis dokladu, který převod změnit nesmí. Změnu druhu dokladu,
 členění DPH, měny, čísla dokladu dodavatele, data doručení, variabilního symbolu
 nebo odečtené zálohy převod nepřenese. Všechny tyto záznamy protokol vypíše jako
 změněné v Money a ponechané v MyÚčtu; upravte je ručně podle Money a rekonciliace
 do té doby ukáže rozdíl k přijetí.
 
-Doklady převedené dřív, než převod začal změny sledovat, protokol při změně jen
-vypíše a od dalšího převodu se sledují. Zápis deníku převedený před sledováním
-změn převod podle Money přepíše jen tehdy, když se jeho řádky od převodu v MyÚčtu
-nezměnily; jinak ho vypíše k porovnání s Money.
+Doklady a zápisy deníku převedené dřív, než převod začal změny sledovat, převod
+při rozdílu proti Money nikdy sám nepřepíše ani nesmaže, protože nepozná, zda je
+změnilo Money, nebo oprava v MyÚčtu. Vypíše je k porovnání s Money; jakmile se
+shodují, začne je sledovat.
 
 **Pohyby stažené z banky.** Stahuje-li MyÚčto pohyby účtu, který dosud vede
 Money (bankovní API, nahrané výpisy GPC nebo PDF), převod je na tomto účtu od

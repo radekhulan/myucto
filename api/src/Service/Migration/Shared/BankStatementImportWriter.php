@@ -222,30 +222,36 @@ final class BankStatementImportWriter
               WHERE t.statement_id IN ({$in}) AND t.posted_at >= ? AND t.posted_at <= ?
               ORDER BY t.posted_at, t.id"
         );
-        $rows->execute([$supplierId, $supplierId, ...$ids, $from, $until]);
-        foreach ($rows->fetchAll(PDO::FETCH_ASSOC) as $r) {
+        $rows->execute([$supplierId, $supplierId, $supplierId, ...$ids, $from, $until]);
+        $candidates = $rows->fetchAll(PDO::FETCH_ASSOC);
+        // Dva průchody: nejdřív protějšek se shodným variabilním symbolem pro všechny pohyby,
+        // teprve pak záložní protějšek, u kterého symbol jedna strana nemá. Jinak by pohyb bez
+        // symbolu „spotřeboval" pohyb zdroje, který patří pohybu se symbolem.
+        $hits = [];
+        foreach ([true, false] as $exact) {
+            foreach ($candidates as $i => $r) {
+                if (isset($hits[$i])) {
+                    continue;
+                }
+                $key = substr((string) $r['posted_at'], 0, 10) . '|' . number_format((float) $r['amount'], 2, '.', '');
+                $vs = self::symbol($r['variable_symbol']);
+                foreach ($pool[$key] ?? [] as $j => $sourceVs) {
+                    if ($exact ? ($vs !== '' && $sourceVs === $vs) : ($sourceVs === $vs || $sourceVs === '' || $vs === '')) {
+                        $hits[$i] = true;
+                        unset($pool[$key][$j]);
+                        break;
+                    }
+                }
+            }
+        }
+        foreach ($candidates as $i => $r) {
             $row = [
                 'id' => (int) $r['id'], 'posted_at' => substr((string) $r['posted_at'], 0, 10), 'amount' => (string) $r['amount'],
                 'variable_symbol' => $r['variable_symbol'], 'counterparty_name' => $r['counterparty_name'], 'status' => (string) $r['match_status'],
             ];
-            $key = $row['posted_at'] . '|' . number_format((float) $r['amount'], 2, '.', '');
-            $vs = self::symbol($r['variable_symbol']);
-            $hit = null;
-            foreach ($pool[$key] ?? [] as $i => $sourceVs) {
-                if ($sourceVs === $vs) {
-                    $hit = $i;
-                    break;
-                }
-                if ($hit === null && ($sourceVs === '' || $vs === '')) {
-                    $hit = $i;
-                }
-            }
-            if ($hit === null) {
+            if (!isset($hits[$i])) {
                 $out['unmatched'][] = $row;
-                continue;
-            }
-            unset($pool[$key][$hit]);
-            if ((int) $r['used'] === 1) {
+            } elseif ((int) $r['used'] === 1) {
                 $out['used'][] = $row;
             } else {
                 $out['duplicates'][] = $row;
@@ -279,7 +285,7 @@ final class BankStatementImportWriter
                     AND NOT " . BankTransactionLinks::linkedSql('t') . '
                   FOR UPDATE'
             );
-            $owned->execute([$supplierId, ...$chunk, $supplierId, $supplierId]);
+            $owned->execute([$supplierId, ...$chunk, $supplierId, $supplierId, $supplierId]);
             $statementIds = [];
             $txIds = [];
             foreach ($owned->fetchAll(PDO::FETCH_ASSOC) as $r) {
@@ -297,7 +303,7 @@ final class BankStatementImportWriter
             }
             $pdo->prepare("DELETE FROM bank_transaction_imports WHERE bank_transaction_id IN ({$txIn})")->execute($txIds);
             $pdo->prepare("DELETE t FROM bank_transactions t WHERE t.id IN ({$txIn}) AND NOT " . BankTransactionLinks::linkedSql('t'))
-                ->execute([...$txIds, $supplierId, $supplierId]);
+                ->execute([...$txIds, $supplierId, $supplierId, $supplierId]);
             $left = $pdo->prepare("SELECT id FROM bank_transactions WHERE id IN ({$txIn})");
             $left->execute($txIds);
             $kept = array_fill_keys(array_map('intval', $left->fetchAll(PDO::FETCH_COLUMN)), true);

@@ -28,7 +28,7 @@ final class BankTransactionLinks
         'unit_payment_sources' => ['bank_transaction_id'],
         'unit_payment_workflows' => ['bank_transaction_id'],
         'gopay_clearings' => ['bank_transaction_id', 'payout_match_transaction_id'],
-        'de_movement_classification' => ['bank_transaction_id'],
+
         'bank_transfer_matches' => ['in_transaction_id', 'out_transaction_id'],
         'tax_advance_schedules' => ['matched_transaction_id'],
         'document_requests' => ['bank_transaction_id'],
@@ -40,8 +40,8 @@ final class BankTransactionLinks
     public const OPEN_SUGGESTIONS = "('pending','needs_input','blocked','rejected')";
 
     /**
-     * SQL podmínka „pohyb `$alias` nese vazbu" (viz popis třídy). Dva parametry `?`, oba
-     * firma (vazba zápisu na pohyb a zápis deníku).
+     * SQL podmínka „pohyb `$alias` nese vazbu" (viz popis třídy). Tři parametry `?`, všechny
+     * firma (zařazení v peněžním deníku, vazba zápisu na pohyb a zápis deníku).
      */
     public static function linkedSql(string $alias): string
     {
@@ -54,6 +54,8 @@ final class BankTransactionLinks
                 $exists[] = "EXISTS (SELECT 1 FROM {$table} x WHERE x.{$column} = {$alias}.id)";
             }
         }
+        // Zařazení pohybu v peněžním deníku: po indexu (firma, zdroj, pohyb).
+        $exists[] = "EXISTS (SELECT 1 FROM de_movement_classification x WHERE x.supplier_id = ? AND x.source_type = 'bank' AND x.bank_transaction_id = {$alias}.id)";
         return "({$alias}.match_status <> 'unmatched' OR " . implode(' OR ', $exists) . "
                 OR EXISTS (SELECT 1 FROM bank_posting_suggestions bps WHERE bps.bank_transaction_id = {$alias}.id AND bps.status NOT IN " . self::OPEN_SUGGESTIONS . ")
                 OR EXISTS (SELECT 1 FROM journal_entry_document_links jdl WHERE jdl.supplier_id = ? AND jdl.doc_type = 'bank' AND jdl.doc_id = {$alias}.id)

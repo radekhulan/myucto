@@ -11520,6 +11520,7 @@
             "indexes": {
                 "PRIMARY": "UNIQUE BTREE (id)",
                 "fk_payment_event_alloc_event": "BTREE (payment_event_id)",
+                "idx_payment_event_alloc_bank_transaction": "BTREE (bank_transaction_id)",
                 "ix_payment_event_alloc_event": "BTREE (supplier_id, payment_event_id)",
                 "ix_payment_event_alloc_invoice": "BTREE (supplier_id, invoice_id)",
                 "uq_payment_event_alloc_cash_document": "UNIQUE BTREE (cash_document_id, payment_event_id)",

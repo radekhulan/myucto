@@ -18,9 +18,9 @@ use PDO;
  * otisk zápisu v MyÚčtu jiný než uložený = zápis upravil uživatel (ten se nepřepisuje).
  *
  * Zásah uživatele, kvůli kterému převod zápis nemění, jen ohlásí ({@see touchedEntries()}).
- * Zápis převedený před zavedením otisků, který se od Money liší, převod přepíše jen tehdy,
- * když se jeho řádky od převodu nezměnily ({@see pristineEntries()}); jinak nejde poznat,
- * zda rozdíl způsobilo Money, nebo oprava v MyÚčtu, a převod ho jen ohlásí.
+ * Zápis převedený před zavedením otisků, který se od Money liší, převod nikdy sám
+ * nepřepíše ani nesmaže: nejde poznat, zda rozdíl způsobilo Money, nebo oprava v MyÚčtu.
+ * Ohlásí ho účetní k porovnání a otisk mu doplní, až bude s Money shodný.
  */
 final class JournalEntryRefresh
 {
@@ -162,46 +162,16 @@ final class JournalEntryRefresh
     }
 
     /**
-     * Zápisy, jejichž řádky se od převodu nezměnily: tabulka řádků deníku je systémově
-     * verzovaná a změna řádku (úprava, přeúčtování, smazání) po sobě nechá historickou verzi.
-     * Rozhoduje u zápisů převedených před zavedením otisků - jen u nich převod pozná, že
-     * rozdíl proti Money nezpůsobila úprava v MyÚčtu.
-     *
-     * @param list<int> $entryIds
-     * @return array<int,true>
-     */
-    public function pristineEntries(int $supplierId, array $entryIds): array
-    {
-        $out = [];
-        foreach (array_chunk($entryIds, 1000) as $chunk) {
-            $in = implode(',', array_fill(0, count($chunk), '?'));
-            $stmt = $this->db->pdo()->prepare(
-                "SELECT l.entry_id, COUNT(*) AS all_rows, SUM(l.ROW_END > NOW(6)) AS current_rows
-                   FROM journal_entry_lines FOR SYSTEM_TIME ALL l
-                  WHERE l.supplier_id = ? AND l.entry_id IN ({$in})
-                  GROUP BY l.entry_id"
-            );
-            $stmt->execute([$supplierId, ...$chunk]);
-            while (($r = $stmt->fetch(PDO::FETCH_ASSOC)) !== false) {
-                if ((int) $r['all_rows'] === (int) $r['current_rows']) {
-                    $out[(int) $r['entry_id']] = true;
-                }
-            }
-        }
-        return $out;
-    }
-
-    /**
      * Dimenze typů, které převod nespravuje, přiřazené v MyÚčtu řádkům zápisu - přepis
-     * řádků je přenese na řádky se stejným pořadím ({@see restoreUserDimensions()}).
+     * řádků je přenese na řádek se stejným pořadím, účtem a stranou ({@see restoreUserDimensions()}).
      *
-     * @return list<array{line_no:int,type_id:int,value_id:int,origin:string,origin_ref:?string}>
+     * @return list<array{line_no:int,account_id:int,side:string,type_id:int,value_id:int,origin:string,origin_ref:?string}>
      */
     public function userDimensions(int $supplierId, int $entryId): array
     {
         $managed = implode(', ', array_map(static fn (string $c): string => "'{$c}'", DimensionImporter::MANAGED_TYPE_CODES));
         $stmt = $this->db->pdo()->prepare(
-            "SELECT l.line_no, d.dimension_type_id, d.dimension_value_id, d.assignment_origin, d.assignment_origin_ref
+            "SELECT l.line_no, l.account_id, l.side, d.dimension_type_id, d.dimension_value_id, d.assignment_origin, d.assignment_origin_ref
                FROM journal_entry_lines l
                JOIN journal_entry_line_dimensions d ON d.line_id = l.id AND d.supplier_id = l.supplier_id
                JOIN dimension_types t ON t.id = d.dimension_type_id
@@ -209,24 +179,37 @@ final class JournalEntryRefresh
         );
         $stmt->execute([$supplierId, $entryId]);
         return array_map(static fn (array $r): array => [
-            'line_no' => (int) $r['line_no'], 'type_id' => (int) $r['dimension_type_id'], 'value_id' => (int) $r['dimension_value_id'],
+            'line_no' => (int) $r['line_no'], 'account_id' => (int) $r['account_id'], 'side' => (string) $r['side'],
+            'type_id' => (int) $r['dimension_type_id'], 'value_id' => (int) $r['dimension_value_id'],
             'origin' => (string) $r['assignment_origin'], 'origin_ref' => $r['assignment_origin_ref'],
         ], $stmt->fetchAll(PDO::FETCH_ASSOC));
     }
 
-    /** @param list<array{line_no:int,type_id:int,value_id:int,origin:string,origin_ref:?string}> $dimensions */
-    public function restoreUserDimensions(int $supplierId, int $entryId, array $dimensions): void
+    /**
+     * Přenese dimenze z MyÚčta na přepsané řádky zápisu. False = některý řádek se stejným
+     * pořadím, účtem a stranou v zápisu už není (volající přepis vrátí a zápis ponechá).
+     *
+     * @param list<array{line_no:int,account_id:int,side:string,type_id:int,value_id:int,origin:string,origin_ref:?string}> $dimensions
+     */
+    public function restoreUserDimensions(int $supplierId, int $entryId, array $dimensions): bool
     {
         if ($dimensions === []) {
-            return;
+            return true;
         }
+        $line = $this->db->pdo()->prepare('SELECT id FROM journal_entry_lines WHERE supplier_id = ? AND entry_id = ? AND line_no = ? AND account_id = ? AND side = ?');
         $insert = $this->db->pdo()->prepare(
             'INSERT IGNORE INTO journal_entry_line_dimensions (line_id, dimension_type_id, supplier_id, dimension_value_id, assignment_origin, assignment_origin_ref)
-             SELECT l.id, ?, l.supplier_id, ?, ?, ? FROM journal_entry_lines l WHERE l.supplier_id = ? AND l.entry_id = ? AND l.line_no = ?'
+             VALUES (?, ?, ?, ?, ?, ?)'
         );
         foreach ($dimensions as $d) {
-            $insert->execute([$d['type_id'], $d['value_id'], $d['origin'], $d['origin_ref'], $supplierId, $entryId, $d['line_no']]);
+            $line->execute([$supplierId, $entryId, $d['line_no'], $d['account_id'], $d['side']]);
+            $lineId = $line->fetchColumn();
+            if ($lineId === false) {
+                return false;
+            }
+            $insert->execute([(int) $lineId, $d['type_id'], $supplierId, $d['value_id'], $d['origin'], $d['origin_ref']]);
         }
+        return true;
     }
 
     /**

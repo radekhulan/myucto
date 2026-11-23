@@ -799,7 +799,7 @@ final class PohodaForeignBankRepair
               WHERE bt.statement_id = ?
                 AND (' . BankTransactionLinks::linkedSql('bt') . " OR {$exists})"
         );
-        $stmt->execute([$statementId, $supplierId, $supplierId]);
+        $stmt->execute([$statementId, $supplierId, $supplierId, $supplierId]);
         return (int) $stmt->fetchColumn();
     }
 

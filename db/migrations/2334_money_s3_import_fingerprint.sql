@@ -9,3 +9,7 @@ ALTER TABLE money_s3_import_map ADD COLUMN IF NOT EXISTS fingerprint CHAR(64) NU
 
 -- Zásah uživatele na přijatém dokladu: majetek zařazený z položky dokladu (kontrola po indexu).
 CREATE INDEX IF NOT EXISTS idx_assets_purchase_invoice_item ON assets (purchase_invoice_item_id);
+
+-- Převod z Money S3 maže pohyby jiného zdroje jen bez vazby; vazbu na rozdělení platby
+-- hledá podle pohybu (kontrola po indexu, BankTransactionLinks).
+CREATE INDEX IF NOT EXISTS idx_payment_event_alloc_bank_transaction ON payment_event_allocations (bank_transaction_id);

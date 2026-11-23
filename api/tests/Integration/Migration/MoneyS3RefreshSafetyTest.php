@@ -63,7 +63,8 @@ final class MoneyS3RefreshSafetyTest extends MoneyS3ImportTestCase
 
         $protocol = $this->import($supplierId);
 
-        self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
+        // Zápis, jehož dimenzi nemá nový řádek kam přenést, zůstane; rozdíl ukáže rekonciliace.
+        self::assertTrue(!$protocol->hasErrors() || $protocol->acceptableOnly(), $this->explain($protocol));
         $kept = array_key_exists('518.000', $this->entryNet($entryId));
         $dims = (int) $pdo->query("SELECT COUNT(*) FROM journal_entry_line_dimensions d JOIN journal_entry_lines l ON l.id = d.line_id
             WHERE l.entry_id = {$entryId} AND d.dimension_type_id = {$typeId}")->fetchColumn();
