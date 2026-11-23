@@ -223,6 +223,29 @@ final class SubmissionOutboxServiceTest extends TestCase
         self::assertSame('DM-1000', $resolved['external_message_id']);
     }
 
+    public function testUncertainSavedDispatchCanOnlyBeCheckedThroughItsVerifiedMailbox(): void
+    {
+        $this->transport->sendBehaviour = 'timeout_but_delivered';
+        $id = (int) $this->enqueue()['row']['id'];
+        $original = new ChannelContext($this->supplierId, 'test', $this->context()->credentials, 'zzzzzzz');
+        $different = new ChannelContext($this->supplierId, 'test', $this->context()->credentials, 'xxxxxxx');
+
+        $result = $this->service->confirmAndSend($this->supplierId, $id, $this->userId, $original);
+        self::assertSame('send_uncertain', $result['row']['dispatch_state']);
+        self::assertSame('zzzzzzz', $result['row']['isds_sender_box_id']);
+
+        try {
+            $this->service->resolveUncertain($this->supplierId, $id, $different);
+            self::fail('Dohledání v jiné schránce mělo být zamítnuto.');
+        } catch (\MyInvoice\Service\Submission\Channel\SubmissionChannelException $exception) {
+            self::assertSame('isds_access_box_mismatch', $exception->errorCode);
+        }
+
+        $resolved = $this->service->resolveUncertain($this->supplierId, $id, $original);
+        self::assertSame('sent', $resolved['dispatch_state']);
+        self::assertSame('DM-1000', $resolved['external_message_id']);
+    }
+
     public function testUncertainSubmissionThatNeverLeftIsMarkedFailed(): void
     {
         $this->transport->sendBehaviour = 'timeout';

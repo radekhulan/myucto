@@ -464,6 +464,7 @@ export function createWorkspaceRoutes(): RouteRecordRaw[] {
       // Bez requiresPayroll: datovkou odchází i daňová podání, takže ji potřebuje i firma bez mezd.
       { path: 'admin/databox', name: 'admin-databox', component: () => import('@/pages/admin/DataBox.vue'), meta: {  } },
       { path: 'admin/isds-gateway', name: 'admin-isds-gateway', component: () => import('@/pages/admin/IsdsGatewaySettings.vue'), meta: {  } },
+      { path: 'admin/access-credentials', name: 'admin-access-credentials', component: () => import('@/pages/admin/IsdsAccessCredentials.vue'), meta: { demoHidden: true } },
       { path: 'isds-gateway/callback', name: 'isds-gateway-callback', component: () => import('@/pages/IsdsGatewayCallback.vue'), meta: { requiresSupplier: true } },
       // Firemní katalog šablon bankovních pravidel má samostatnou stránku v Nástrojích.
       { path: 'admin/bank-rule-templates', name: 'admin-bank-rule-templates', component: () => import('@/pages/admin/BankRuleTemplates.vue'), meta: { requiresDoubleEntry: true } },

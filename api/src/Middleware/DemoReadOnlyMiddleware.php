@@ -50,6 +50,8 @@ final class DemoReadOnlyMiddleware implements MiddlewareInterface
      */
     private const DENIED_READS = [
         '/api/admin/backups',
+        '/api/admin/isds/access',
+        '/api/submissions/isds/access',
         '/api/admin/diagnostics',
         '/api/admin/cron-jobs',
         '/api/admin/update',

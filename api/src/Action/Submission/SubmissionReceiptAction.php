@@ -16,6 +16,7 @@ use MyInvoice\Service\Submission\Channel\Isds\MobileKeyIsdsAuthenticator;
 use MyInvoice\Service\Submission\Channel\Isds\SmsIsdsAuthenticator;
 use MyInvoice\Service\Submission\Channel\ChannelCredentials;
 use MyInvoice\Service\Submission\Channel\SensitiveValue;
+use MyInvoice\Service\Submission\IsdsAccessService;
 use MyInvoice\Service\Submission\Channel\SubmissionChannelException;
 use MyInvoice\Service\Submission\DeliveryReceiptService;
 use MyInvoice\Service\Submission\SubmissionCredentialService;
@@ -50,6 +51,7 @@ final class SubmissionReceiptAction
         private readonly DirectIsdsInboxTransport $transport,
         private readonly MobileKeyIsdsAuthenticator $mobileKey,
         private readonly SmsIsdsAuthenticator $sms,
+        private readonly IsdsAccessService $access,
     ) {}
 
     /**
@@ -263,7 +265,9 @@ final class SubmissionReceiptAction
 
         $supplierId = SupplierGuard::currentId($request);
         try {
-            $context = $this->credentials->unlock($supplierId, $environment);
+            $context = array_key_exists('access_id', $body)
+                ? $this->access->useSelected($request, $supplierId, $this->userId($request), 'receipts', $body)['context']
+                : $this->credentials->unlock($supplierId, $environment);
         } catch (SubmissionChannelException $e) {
             return Json::error($response, $e->errorCode, $e->getMessage(), $e->httpStatus);
         }
@@ -390,6 +394,15 @@ final class SubmissionReceiptAction
             return $denied;
         }
         $body = (array) ($request->getParsedBody() ?? []);
+        if (array_key_exists('access_id', $body)) {
+            try {
+                $supplierId = SupplierGuard::currentId($request);
+                $context = $this->access->useSelected($request, $supplierId, $this->userId($request), 'receipts', $body)['context'];
+            } catch (SubmissionChannelException $e) {
+                return Json::error($response, $e->errorCode, $e->getMessage(), $e->httpStatus);
+            }
+            return $this->downloadBatchWithContext($response, $supplierId, $context->environment, $request, $context);
+        }
         $environment = (string) ($body['environment'] ?? 'production');
         if (!in_array($environment, ['production', 'test'], true)) {
             return Json::error($response, 'invalid_environment', 'Neznámé prostředí.', 400);

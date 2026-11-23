@@ -152,6 +152,7 @@ final class OutboxMobileKeyDispatchTest extends TestCase
             $authenticator,
             $this->createStub(IsdsMobileCredentialService::class),
             (new \ReflectionClass(SmsIsdsAuthenticator::class))->newInstanceWithoutConstructor(),
+            (new \ReflectionClass(\MyInvoice\Service\Submission\IsdsAccessService::class))->newInstanceWithoutConstructor(),
         );
     }
 

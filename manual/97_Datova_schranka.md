@@ -69,8 +69,17 @@ Na záložce **Přístup** zvolte způsob přihlášení.
 Přístup lze uložit šifrovaně pro kombinaci **firma + uživatel + prostředí**. Uložený profil jedné účetní není dostupný
 jiné účetní ani jiné firmě. Profil můžete kdykoli odstranit tlačítkem **Zapomenout uložený přístup**.
 
-**Jméno a heslo:** server heslo přijme pouze pro právě spuštěné načtení nebo odeslání. Požadavek proběhne synchronně
-a heslo se neukládá do databáze ani do nastavení firmy.
+**Jméno a heslo:** při ručním odeslání nebo načtení můžete zaškrtnout **Zapamatovat pro mě v této firmě**.
+Příště v téže firmě a prostředí zvolíte **Uložený přístup**. Údaje jsou v databázi šifrované a jsou dostupné
+jen vašemu účtu. V nabídce uložených přístupů můžete své údaje odstranit.
+
+**Sdílené přístupy:** v nabídce **Systém → Přístupové údaje** může superadministrátor uložit a ověřit
+přihlášení k datové schránce. Lze použít jméno a heslo, systémový certifikát nebo jméno a heslo s osobním
+certifikátem z trezoru. Pro každou firmu lze zvlášť povolit odesílání, příjem a stažení doručenek.
+Příjem z ověřené schránky lze v jednom prostředí přiřadit jen jedné firmě. Uživatelé s oprávněním k podáním
+vidí označení a ID schránky. Každé použití potvrdí v aplikaci.
+Uložený přístup lze použít i pro doručenku konkrétního podání a pro doručenky ve Mzdách. Přerušené
+odeslání MyÚčto dohledává pod uloženým přístupem ke stejné schránce, ze které se zpráva odesílala.
 
 **Jméno, heslo a SMS kód:** první krok zahájí krátkodobý jednorázový proces. Heslo zůstane po omezenou dobu šifrované
 na serveru; prohlížeč dostane jen náhodný neprůhledný token. Po zadání SMS kódu se proces atomicky spotřebuje. Má
@@ -101,7 +110,8 @@ podání a archív a mzdová podání, takže zprávu odešlete stejně odkudkol
 |---|---|---|
 | **Odesílací brána** | Provozovatel aplikace bránu pro zvolené prostředí zaregistroval a zapnul. Jinak je volba zašedlá s vysvětlením. | Přihlášení a schválení proběhne v ISDS. |
 | **Mobilní klíč eGovernmentu** | Vždy. | Potvrdíte odeslání v mobilu. |
-| **Jméno a heslo** | Vždy. | Zadáte přihlašovací údaje pro toto jedno odeslání. |
+| **Jméno a heslo** | Vždy. | Zadáte přihlašovací údaje a případně si je uložíte pro příště. |
+| **Uložený přístup** | Po uložení vlastních údajů nebo po sdílení přístupu pro firmu. | Vyberete přístup a potvrdíte použití schránky. |
 | **Jméno, heslo a SMS kód** | Vždy; pro účty chráněné jednorázovým kódem z SMS. | Zadáte jméno a heslo, pak kód z SMS. |
 | **Systémový certifikát** | Firma má na záložce **Přístup** uložený systémový certifikát. Jinak je volba zašedlá s odkazem **Nastavit přístup**. | Odeslání výslovně potvrdíte. |
 
@@ -131,8 +141,7 @@ znovu, dokud neověříte stav v datové schránce.
 2. Zadejte **Uživatelské jméno ISDS** a **Heslo k datové schránce**.
 3. Klikněte na **Přihlásit a odeslat**.
 
-Přihlášení platí jen pro toto jedno odeslání. Heslo projde do ISDS a nikam se neukládá, proto ho zadáváte pokaždé
-znovu. Uložené heslo k odeslání použít nejde.
+Pro další odeslání zvolte **Zapamatovat pro mě v této firmě**. V nabídce **Uložený přístup** pak vyberte osobní nebo sdílený přístup a potvrďte ID schránky.
 
 **Jméno, heslo a SMS kód:**
 
@@ -170,8 +179,8 @@ splněná samotným doručením a podání ukazuje **Splněno doručením**.
 
 > [!WARNING]
 > Přímé odeslání vždy vyžaduje váš úkon u konkrétního podání: potvrzení relace v Mobilním klíči, zadání hesla pro
-> toto jedno odeslání, ověření kódem z SMS, nebo výslovné potvrzení odeslání certifikátem. Samo, na pozadí ani z uloženého hesla aplikace
-> nic neodešle. Zahájené, ale nedokončené přihlášení Mobilním klíčem se za přihlášení nepovažuje a aplikace odeslání
+> toto jedno odeslání, ověření kódem z SMS nebo výslovné potvrzení použití certifikátu či uloženého přístupu.
+> Aplikace odesílá až po tomto potvrzení. Zahájené, ale nedokončené přihlášení Mobilním klíčem se za přihlášení nepovažuje a aplikace odeslání
 > odmítne dřív, než cokoli opustí server.
 
 ## 97.5 Krok za krokem: načíst doručenky a příchozí zprávy
@@ -193,7 +202,7 @@ Příchozí zprávy se nenačítají automaticky ani na pozadí. Postupujte takt
 
 1. Otevřete záložku **Příchozí zprávy**.
 2. Zvolte produkční nebo testovací prostředí.
-3. Vyberte přihlašovací metodu (**Mobilní klíč eGovernmentu**, **Jméno a heslo**, **Jméno, heslo a SMS kód**, nebo **Systémový certifikát firmy**).
+3. Vyberte přihlašovací metodu (**Mobilní klíč eGovernmentu**, **Jméno a heslo**, **Jméno, heslo a SMS kód**, **Uložený přístup** nebo **Systémový certifikát firmy**).
 4. Klikněte na **Vyzvednout nové zprávy** a potvrďte upozornění, že přístup do schránky může způsobit doručení zpráv a začátek běhu právních lhůt.
 5. Dokončete případné potvrzení v Mobilním klíči nebo zadejte jednorázový SMS kód a klikněte na **Přihlásit a jednou načíst** (u SMS na **Ověřit SMS a jednou načíst**).
 6. Zkontrolujte výsledek a nově uložené zprávy.
@@ -331,7 +340,7 @@ a vždy za ním stojí váš úkon u konkrétního podání:
   a SMS kód** (ISDS vydá relaci až po ověření jednorázového kódu): potvrzení člověka je součástí přihlášení, takže
   odeslání v takové relaci není odeslání bez jeho vědomí. Relaci ověřenou SMS kódem aplikace po odeslání hned
   ukončí odhlášením.
-- **Jméno a heslo**: heslo zadáváte pro jedno odeslání, ISDS ověří každý požadavek zvlášť a heslo se nikam neukládá.
+- **Jméno a heslo**: přihlášení lze použít jednorázově nebo uložit pro svůj účet. Použití uloženého přístupu výslovně potvrzujete.
 - **Systémový certifikát firmy**: za certifikátem nestojí člověk, proto odeslání výslovně potvrzujete v aplikaci
   (podobně jako u EPO) a potvrzení jde doložit.
 

@@ -30,6 +30,7 @@ final class SubmissionEnvironmentMiddleware implements MiddlewareInterface
     private const PREFIXES = [
         '/api/payroll',
         '/api/submissions',
+        '/api/admin/isds/access',
         '/api/settings/databox',
         '/api/settings/isds-gateway',
     ];

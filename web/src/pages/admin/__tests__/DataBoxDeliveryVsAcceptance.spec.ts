@@ -22,6 +22,7 @@ const m = vi.hoisted(() => ({
   inbox: vi.fn(),
   pollInbox: vi.fn(),
   pollInboxWithPassword: vi.fn(),
+  choices: vi.fn().mockResolvedValue([]),
   startMobileKeyInbox: vi.fn(),
   mobileKeyInboxStatus: vi.fn(),
   mobileKeyProfile: vi.fn(),
@@ -53,6 +54,8 @@ vi.mock('@/api/dataBox', () => ({
     unmatchedReceipts: m.unmatchedReceipts,
   },
 }))
+
+vi.mock('@/api/isdsAccess', () => ({ isdsAccessApi: { choices: m.choices } }))
 
 vi.mock('vue-router', async (importOriginal) => ({
   ...(await importOriginal<typeof import('vue-router')>()),
@@ -173,6 +176,26 @@ async function mountWith(
 }
 
 describe('DataBox — doručeno vs. zpracováno', () => {
+  it('pro příjem uloženým přístupem vyžaduje volbu účtu i potvrzení právních účinků', async () => {
+    m.choices.mockResolvedValueOnce([{ id: 83, label: 'Kancelář', box_id: 'abcdefg', scope: 'shared', method: 'password' }])
+    const wrapper = await mountWith([])
+    await wrapper.findAll('nav button')[2].trigger('click')
+    await flushPromises()
+    await wrapper.get('input[type="radio"][value="saved"]').setValue(true)
+    await wrapper.get('[data-test="isds-saved-access-select"]').setValue('83')
+    const submit = wrapper.get('[data-test="inbox-poll-submit"]')
+    expect(submit.attributes('disabled')).toBeDefined()
+    await wrapper.get('[data-test="isds-saved-access-confirm"]').setValue(true)
+    await submit.trigger('click')
+    expect(m.pollInboxWithPassword).not.toHaveBeenCalled()
+    await wrapper.get('[data-test="inbox-poll-acknowledge"]').setValue(true)
+    await submit.trigger('click')
+    await flushPromises()
+
+    expect(m.choices).toHaveBeenCalledWith('production', 'receive')
+    expect(m.pollInboxWithPassword).toHaveBeenCalledWith('production', { access_id: 83, authorized: true })
+  })
+
   it('u doručeného podání ukáže obě osy zvlášť a vyřízení nechá na „nevíme“', async () => {
     const wrapper = await mountWith([submission()])
     await wrapper.findAll('nav button')[1].trigger('click')

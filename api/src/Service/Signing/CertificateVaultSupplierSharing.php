@@ -437,6 +437,18 @@ final class CertificateVaultSupplierSharing
     }
 
     /** @return list<array{supplier_id:int,name:string}> */
+    public function permittedSuppliers(Request $request, int $ownerUserId, AccessLevel $level): array
+    {
+        $candidates = $this->candidateSuppliers($request, $ownerUserId);
+        $this->supplierAccess->preloadSupplierIds(array_column($candidates, 'supplier_id'));
+
+        return array_values(array_filter(
+            $candidates,
+            fn (array $supplier): bool => $this->permittedFor($request, $supplier['supplier_id'], $level) === true,
+        ));
+    }
+
+    /** @return list<array{supplier_id:int,name:string}> */
     private function candidateSuppliers(Request $request, int $ownerUserId): array
     {
         $memberships = $this->memberships->listForUser($ownerUserId);
@@ -459,8 +471,11 @@ final class CertificateVaultSupplierSharing
      * true = smí, false = je členem, ale chybí mu oprávnění, null = firma
      * v tomhle kontextu vůbec není dosažitelná (a nemá se ani jmenovat).
      */
-    public function permittedFor(Request $request, int $supplierId): ?bool
-    {
+    public function permittedFor(
+        Request $request,
+        int $supplierId,
+        AccessLevel $level = AccessLevel::WRITE,
+    ): ?bool {
         $scoped = $request
             ->withHeader(SupplierScopeMiddleware::HEADER_NAME, (string) $supplierId)
             ->withQueryParams([]);
@@ -475,6 +490,6 @@ final class CertificateVaultSupplierSharing
 
         return $role->isActive
             && !$role->isClientType()
-            && RequestAuthorization::allows($scoped, 'settings.signing', AccessLevel::WRITE);
+            && RequestAuthorization::allows($scoped, 'settings.signing', $level);
     }
 }

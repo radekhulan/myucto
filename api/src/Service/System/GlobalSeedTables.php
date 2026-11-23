@@ -216,6 +216,7 @@ final class GlobalSeedTables
         'epo_signing_credentials', 'epo_signing_credential_suppliers',
         'tax_submission_settings', 'submission_channel_credentials',
         'submission_inbox_storage_settings', 'submission_isds_mobile_credentials',
+        'isds_access_profiles', 'isds_access_profile_suppliers', 'isds_access_inbox_owners',
         'isds_gateway_registrations', 'submission_recipients',
         'submission_inbox_categories', 'submission_inbox_category_rules',
         // E-mail / bankovní avíza (konfigurace, NE zpracované zprávy).

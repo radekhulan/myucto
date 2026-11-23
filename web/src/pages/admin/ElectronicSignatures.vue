@@ -25,6 +25,7 @@ import { useAutoSlug } from '@/composables/useAutoSlug'
 import { useAuthStore } from '@/stores/auth'
 import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
 import EmptyState from '@/components/ui/EmptyState.vue'
+import CertificateVaultUsage from '@/components/settings/CertificateVaultUsage.vue'
 import SsoStepUpOption from '@/components/security/SsoStepUpOption.vue'
 import { useSsoEnforcement } from '@/composables/useSsoEnforcement'
 import { takeSsoStepUpReturn } from '@/security/oidc'
@@ -1283,6 +1284,7 @@ async function testPdfOutputSetting(setting: PdfSignatureOutputSetting) {
                 </p>
               </div>
             </div>
+            <CertificateVaultUsage :certificate-id="certificate.id" />
           </div>
           <p class="text-xs text-neutral-500">
             {{ t('settings.certificate_vault_grant_hint') }}

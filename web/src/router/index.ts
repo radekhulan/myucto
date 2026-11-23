@@ -246,7 +246,7 @@ const routePermissions: Record<string, [PermissionKey | readonly PermissionKey[]
 const superadminRouteNames = new Set([
   'activity-log', 'sent-emails', 'cron-jobs', 'admin-users', 'admin-roles',
   'admin-tax-constants', 'admin-email-templates', 'admin-emails', 'admin-update',
-  'admin-isds-gateway', 'admin-instance',
+  'admin-isds-gateway', 'admin-access-credentials', 'admin-instance',
   'activation-license', 'activation-terms', 'activation-purchase',
   'admin-diagnostics',
   // Obojí čte administrátorské endpointy (/api/admin/*, /api/license/status),

@@ -233,6 +233,7 @@ final class RoutePermissionMap
         // slouží jen k dohledání rozpracovaného podání a o oprávnění rozhoduje
         // přihlášená relace. Proto stejné právo jako zbytek fronty — odeslání
         // datové zprávy je právní úkon a nesmí ho vyvolat kdokoliv s odkazem.
+        ['*', '#^/api/submissions/isds/access(/|$)#', 'settings.signing', AccessLevel::WRITE],
         ['GET', '#^/api/submissions/(outbox|inbox|recipients|receipts|defect-notices|gateway)(/|$)#', 'settings.signing', AccessLevel::READ],
         ['*', '#^/api/submissions/(outbox|inbox|recipients|receipts|defect-notices|gateway)(/|$)#', 'settings.signing', AccessLevel::WRITE],
 

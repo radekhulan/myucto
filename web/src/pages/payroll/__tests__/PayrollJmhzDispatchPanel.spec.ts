@@ -15,6 +15,9 @@ const m = vi.hoisted(() => ({
   deferMany: vi.fn(),
 }))
 
+vi.mock('@/stores/supplier', () => ({ useSupplierStore: () => ({ currentSupplierId: 1 }) }))
+vi.mock('@/api/isdsAccess', () => ({ isdsAccessApi: { choices: vi.fn().mockResolvedValue([]) } }))
+
 vi.mock('@/api/payroll', () => ({
   payrollApi: {
     freezeJmhzPreparation: m.freezePreparation,

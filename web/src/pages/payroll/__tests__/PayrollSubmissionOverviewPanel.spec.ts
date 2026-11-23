@@ -19,6 +19,9 @@ const m = vi.hoisted(() => ({
   startMobileKeyOutboxBatch: vi.fn(),
   mobileKeyOutboxConfirmBatch: vi.fn(),
 }))
+vi.mock('@/stores/supplier', () => ({ useSupplierStore: () => ({ currentSupplierId: 1 }) }))
+vi.mock('@/api/isdsAccess', () => ({ isdsAccessApi: { choices: vi.fn().mockResolvedValue([]) } }))
+
 vi.mock('@/api/payrollHealthNotifications', () => ({
   payrollHealthNotificationApi: {
     preparePaymentOverview: m.prepareHealthOverview,

@@ -2141,6 +2141,7 @@
     "purchase_stats": "Costs",
     "bank": "Bank",
     "system": "System",
+    "access_credentials": "Access credentials",
     "section_taxes": "Taxes",
     "section_payroll": "Payroll",
     "payroll_overview": "Payroll overview",
@@ -9698,7 +9699,7 @@
           "databox_sent": "Sent to data boxes: {sent}. Failed: {failed}.",
           "receipts_following": "Delivery receipts are being fetched in the same Mobile Key session (a few minutes). An insurer overview is filed by delivery to the insurer's data box.",
           "load_receipts_count": "Load delivery receipts ({count})",
-          "receipts_intro": "One Mobile Key login downloads delivery receipts for all sent messages that do not have one yet. The incoming message box is not read.",
+          "receipts_intro": "Fetch delivery receipts for sent messages with Mobile Key or saved access.",
           "receipts_pending": "Waiting for delivery receipts — {delivered} of {total} sent messages have one.",
           "receipts_pending_hint": "An insurer overview is filed by delivery to the insurer's data box; until the receipt is loaded, the month does not show as fulfilled.",
           "receipts_loaded": "Receipts attached: {attached}. Not delivered yet: {pending}.",
@@ -29065,14 +29066,51 @@
     "certificate_vault_share_status_already_enabled": "Already enabled",
     "certificate_vault_replace": "Replace certificate",
     "certificate_vault_replace_none": "Do not replace anything",
-    "certificate_vault_replace_hint": "For a renewed certificate. The newly uploaded certificate (or the one whose Enable in other companies you click) is written to all companies, even where a valid certificate already exists, and the data box, signing profiles and payroll submissions are switched from the selected certificate to it. The old certificate stays in the vault and you can delete it afterwards.",
-    "certificate_vault_replace_confirm": "Replace certificate {name} in all companies? The data box, signing profiles and payroll submissions using it will switch to the new certificate.",
+    "certificate_vault_replace_hint": "For a renewed certificate. The newly uploaded certificate (or the one whose Enable in other companies you click) is written to all companies, even where a valid certificate already exists, and company data box access, signing profiles and payroll submissions are switched from the selected certificate to it. The old certificate stays in the vault and you can delete it afterwards.",
+    "certificate_vault_replace_confirm": "Replace certificate {name} in all companies? Company data box access, signing profiles and payroll submissions using it will switch to the new certificate.",
     "certificate_vault_replace_same": "A certificate cannot replace itself. Select the old one in Replace certificate.",
     "certificate_vault_replace_done": "The certificate was replaced in all companies.",
     "certificate_vault_replace_failed": "The certificate was saved, but the old one was not replaced: {reason}",
     "certificate_vault_replace_counts": "Switched: data box {dataBox}, signing profiles {profiles}, payroll submissions {payroll}",
     "certificate_vault_share_status_skipped_has_valid": "Skipped, has a valid certificate",
     "certificate_vault_share_status_skipped_no_permission": "Skipped, missing permission",
+    "certificate_vault_company_usage": {
+      "title": "Usage by company",
+      "company": "Company",
+      "epo_title": "EPO",
+      "epo": {
+        "eligible": "Available for selection",
+        "invalid": "Enabled, currently invalid",
+        "disabled": "Disabled"
+      },
+      "payroll": "Payroll submissions",
+      "payroll_selected": "{environment} · Selected",
+      "payroll_unused": "Unselected",
+      "registration": {
+        "missing": "CSSZ · Serial number missing",
+        "matches": "CSSZ · Serial number matches",
+        "mismatch": "CSSZ · Serial number differs",
+        "unknown": "CSSZ · Certificate serial number unavailable"
+      },
+      "databox": "Data box",
+      "databox_unused": "Unconfigured",
+      "databox_config": "{environment} · {source}",
+      "source": {
+        "company": "Company access",
+        "shared": "Shared access"
+      },
+      "operation": {
+        "send": "Sending",
+        "receive": "Receiving",
+        "receipts": "Delivery receipts"
+      },
+      "environment": {
+        "production": "Production",
+        "test": "Test"
+      },
+      "empty": "You do not have access to the electronic signatures overview in any company.",
+      "error": "Certificate usage could not be loaded."
+    },
     "certificate_vault_load_failed": "Certificates could not be loaded.",
     "certificate_vault_step_up_password": "MyÚčto password",
     "certificate_vault_step_up_totp": "Authenticator code",
@@ -29084,7 +29122,7 @@
     "certificate_vault_deleted_payroll": "The certificate was deleted from the vault. Cancelled payroll submission selections: {count}.",
     "certificate_vault_delete_in_use": "The certificate cannot be deleted, it is still used by: {places}. Disconnect it there first.",
     "certificate_vault_usage_profiles": "signing profiles ({count}), disconnect in the Signing profiles section below",
-    "certificate_vault_usage_data_box": "data box access ({count}), disconnect in System → Data box",
+    "certificate_vault_usage_data_box": "data box access ({count}), disconnect in Data box or System → Access credentials",
     "certificate_vault_usage_isds_gateway": "ISDS sending gateway, change it in the sending gateway settings",
     "certificate_vault_step_up_password_missing": "Enter your MyÚčto password to work with the certificate.",
     "certificate_vault_step_up_totp_missing": "Enter the six-digit authenticator code to work with the certificate.",
@@ -34704,7 +34742,72 @@
     "attach_privacy": "The bundle is created in your installation and stays there until you attach it to an incident yourself. Logs are not included by default; if you add them, you see their contents beforehand.",
     "open_diagnostics": "Go to Diagnostics"
   },
+  "isdsAccess": {
+    "admin": {
+      "title": "Access credentials",
+      "intro": "Share access to data boxes with selected companies. Users with the relevant permissions can use the shared access without knowing your sign-in details.",
+      "add": "Add access",
+      "empty": "You have no shared data box access yet.",
+      "removed": "Shared access was removed.",
+      "saved": "Shared access was saved.",
+      "remove": "Remove",
+      "removeTitle": "Remove shared access",
+      "editTitle": "Edit shared access",
+      "label": "Access name",
+      "environmentLabel": "ISDS environment",
+      "verifiedBox": "Verified data box ID",
+      "replace": "Replace sign-in details or certificate",
+      "methodLabel": "Sign-in method",
+      "username": "ISDS username",
+      "password": "ISDS password",
+      "certificate": "Certificate from the vault",
+      "selectCertificate": "Choose a certificate",
+      "certificateValidity": "Valid until {date}",
+      "goToVault": "Open the certificate vault",
+      "verifyExisting": "MyÚčto verifies that the new sign-in details belong to the same data box.",
+      "verifyNew": "When you save, MyÚčto validates the sign-in details with ISDS and finds the data box ID.",
+      "companies": "Company access",
+      "companiesHint": "You can give several companies permission to send messages and check delivery receipts. Incoming messages from each data box in a given environment go to a single company.",
+      "noCompanies": "No companies are available.",
+      "noGrants": "No companies can use this access yet.",
+      "companyFallback": "Company no. {id}",
+      "removeHint": "Companies will no longer be able to use “{label}”.",
+      "verifyIdentity": "Verify your identity",
+      "verifyIdentityHint": "Verify your identity to confirm the change.",
+      "reauthPassword": "MyÚčto account password",
+      "totp": "Code from your authenticator app",
+      "environment": {
+        "production": "Production",
+        "test": "Test"
+      },
+      "method": {
+        "password": "Username and password",
+        "certificate": "System certificate",
+        "user_certificate": "User certificate, username and password"
+      },
+      "operation": {
+        "send": "Send messages",
+        "receive": "Receive messages",
+        "receipts": "Check delivery receipts"
+      }
+    }
+  },
   "databox": {
+    "savedAccess": {
+      "title": "Saved access",
+      "description": "Use a personal or shared sign-in.",
+      "select": "Select an access profile",
+      "option": "{label} · {box} · {scope}",
+      "personal": "Personal",
+      "shared": "Shared",
+      "confirm": "I confirm using mailbox {box}.",
+      "remember": "Remember for me in this company",
+      "forget": "Forget access",
+      "forgetConfirm": "Remove the saved sign-in for mailbox {box}?",
+      "downloadReceipt": "Fetch receipt with saved access",
+      "resolveBox": "Checking the dispatch requires saved access to mailbox {box}.",
+      "forgetFailed": "The access profile could not be removed."
+    },
     "title": "Data box",
     "subtitle": "This company's data box: sending filings and reading incoming messages. Tax filings (VAT, control and recapitulative statements, corporate and personal income tax) can be sent here from Taxes → EPO filings and archive. What the application sends this way: health insurer overviews and notifications (HOZ, PPZ), the employer's monthly report to the social security administration (JMHZ) as an alternative to the direct VREP channel, and enforcement cooperation replies.",
     "howItWorks": "How it works and what leaves where",
@@ -34853,18 +34956,18 @@
       "loginMobileKeyTerm": "eGovernment Mobile Key — recommended",
       "loginMobileKeyText": "Username and communication code, each session confirmed on your phone. Works for sending as well as reading and can be remembered encrypted.",
       "loginPasswordTerm": "Username and password",
-      "loginPasswordText": "Used once for a single action. With SMS authentication enabled you enter the code in a second step. Not stored.",
+      "loginPasswordText": "Use your username and password for one action or remember them for your account in this company.",
       "loginCertificateTerm": "Company system certificate",
       "loginCertificateText": "Reading and machine operations only. It cannot send — nobody would be present at the dispatch.",
       "whatIsStored": "What is stored and what is not",
       "whatGoesThrough": "What leaves through the gateway",
-      "loginBoundary": "An ordinary password is never stored in the profile. During the SMS step it stays for a few minutes at most in a single-use encrypted flow; it is deleted after use and cannot be reused once expired. The SMS code is not stored. The Mobile Key username and communication code can, at your request, be stored encrypted only for the company + user pair. The box is never fetched automatically.",
+      "loginBoundary": "Saved usernames and passwords are encrypted in the database. Personal access is scoped to the account, company and environment. Administrators can share access with selected companies under System → Access credentials.",
       "inboxLoginTitle": "Sign-in for incoming messages",
       "inboxLoginDescription": "Choose an access method when you manually fetch messages. The sending gateway is unrelated to this operation.",
       "inboxMobileKey": "Mobile Key: username + communication code (app password), followed by confirmation of each session in the key. This personal access can be stored encrypted for you and the selected company.",
-      "inboxPassword": "Username + password: used once for a single request; if SMS authentication is enabled on the account, you enter the code in the second step.",
+      "inboxPassword": "Enter your username and password for a single fetch or use a saved sign-in available to this company.",
       "inboxCertificate": "System certificate: encrypted and stored for the currently selected company.",
-      "inboxLoginBoundary": "A regular password is not stored in a profile. During the SMS step it remains for at most a few minutes in a one-time encrypted flow; it is erased after use and cannot be used after expiry. The SMS code is not stored. At your request, the Mobile Key username and communication code can be stored encrypted only for the company + user combination. The mailbox is never fetched automatically.",
+      "inboxLoginBoundary": "Receiving from a saved data box can be enabled for one company in each environment. You confirm each fetch manually.",
       "certificateSettings": "System certificate settings",
       "certificateOnly": "This setting applies only to the currently selected company. Interactive sign-in for dispatch takes place separately in ISDS.",
       "label": "Label",
@@ -35007,7 +35110,7 @@
         "testEnvironmentWarning": "You are in the test environment. The test ISDS (datovka-test.gov.cz) has its own accounts — credentials for the live data box will not work here. Switch to the live environment above to send a real filing."
       },
       "passwordSend": {
-        "intro": "The sign-in applies to this one send only. The password goes to ISDS and is never stored.",
+        "intro": "Use the credentials once or remember them for next time.",
         "username": "ISDS username",
         "password": "Data box password",
         "submit": "Sign in and send",
@@ -35048,7 +35151,7 @@
       },
       "password": {
         "title": "Username and password",
-        "description": "Data box credentials for this single sending. The password is not stored."
+        "description": "Enter your data box credentials."
       },
       "sms": {
         "title": "Username, password and SMS code",
@@ -35252,7 +35355,7 @@
       "manualOnly": "The mailbox is never collected automatically. You must start and confirm every fetch.",
       "pollConfirm": "Fetch new messages from the data box now? Fetching may count as delivery and start statutory deadlines.",
       "authTitle": "How do you want to sign in for this fetch?",
-      "authIntro": "You start every fetch manually. Mobile Key access can be remembered personally for this company; a regular password and SMS code remain one-time credentials.",
+      "authIntro": "You start each fetch manually. You can use a one-time, personal or shared sign-in.",
       "auth": {
         "mobile_key": {
           "title": "Mobile eGovernment Key",
@@ -35260,7 +35363,7 @@
         },
         "password": {
           "title": "Username and password",
-          "description": "For an account without a second factor. The MyÚčto server receives the password only for the fetch you just started, passes it to ISDS, and does not store it."
+          "description": "For an account without a second factor. Enter your credentials once or remember them for next time."
         },
         "sms": {
           "title": "Username, password and SMS code",

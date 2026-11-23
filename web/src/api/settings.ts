@@ -987,6 +987,22 @@ export interface EmailProfileTestResult {
  */
 export type CertificateVaultItem = EpoSigningCredential
 
+export interface CertificateVaultCompanyUsage {
+  supplier_id: number
+  name: string
+  epo: 'eligible' | 'invalid' | 'disabled'
+  payroll: {
+    environment: 'production' | 'test'
+    registration: 'missing' | 'matches' | 'mismatch' | 'unknown'
+  }[]
+  databox: {
+    environment: 'production' | 'test'
+    box_id: string
+    source: 'company' | 'shared'
+    operations: ('send' | 'receive' | 'receipts')[]
+  }[]
+}
+
 export interface CertificateVaultUploadPayload {
   file: File
   /** Prázdný label backend nahradí jménem souboru. */
@@ -1352,6 +1368,8 @@ export const settingsApi = {
     api.get<PdfSigningDiagnostics>('/settings/pdf-signing/diagnostics').then(r => r.data),
   listCertificates: () =>
     api.get<{ items: CertificateVaultItem[] }>('/settings/certificates').then(r => r.data.items),
+  getCertificateUsage: (credentialId: number) =>
+    api.get<{ companies: CertificateVaultCompanyUsage[] }>(`/settings/certificates/${credentialId}/usage`).then(r => r.data.companies),
   uploadCertificate: (payload: CertificateVaultUploadPayload) => {
     const data = new FormData()
     data.append('file', payload.file, payload.file.name)

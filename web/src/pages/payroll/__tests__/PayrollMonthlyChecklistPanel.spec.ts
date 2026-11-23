@@ -9,6 +9,9 @@ const m = vi.hoisted(() => ({
   push: vi.fn(),
 }))
 
+vi.mock('@/stores/supplier', () => ({ useSupplierStore: () => ({ currentSupplierId: 1 }) }))
+vi.mock('@/api/isdsAccess', () => ({ isdsAccessApi: { choices: vi.fn().mockResolvedValue([]) } }))
+
 vi.mock('@/api/payroll', () => ({
   PAYROLL_QUEUE_BATCH_SIZE: 25,
   payrollApi: {
