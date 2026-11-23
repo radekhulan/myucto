@@ -55,7 +55,8 @@ final class PohodaPriorYearPaymentRepair
      *                    status:'repaired'|'would_repair'|'nothing'|'skipped',reason:?string,
      *                    count:int,amount_czk:float,other_count:int,other_amount_czk:float,
      *                    invoices:list<array{id:int,document_no:string,invoice_type:string,status:string,issue_date:string,
-     *                                       currency:string,amount_to_pay:float,paid_total:float,paid_before:float,amount:float}>}>
+     *                                       currency:string,amount_to_pay:float,paid_total:float,paid_before:float,amount:float,amount_czk:float}>,
+     *                    other_invoices:list<array<string,mixed>>}> `other_invoices` = rozdíly u dokladů roku agendy, oprava je nemění
      */
     public function run(array $supplierIds, bool $commit, ?int $userId = null): array
     {
@@ -75,6 +76,7 @@ final class PohodaPriorYearPaymentRepair
         $row = [
             'supplier_id' => $supplierId, 'company' => (string) ($company->fetchColumn() ?: ''), 'period_start' => null, 'paid_on' => null,
             'status' => 'nothing', 'reason' => null, 'count' => 0, 'amount_czk' => 0.0, 'other_count' => 0, 'other_amount_czk' => 0.0, 'invoices' => [],
+            'other_invoices' => [],
         ];
         $start = $this->agendaStart($supplierId);
         if ($start === null) {
@@ -93,11 +95,11 @@ final class PohodaPriorYearPaymentRepair
                 if ($c['issue_date'] >= $start) {
                     $row['other_count']++;
                     $row['other_amount_czk'] += $c['amount_czk'];
+                    $row['other_invoices'][] = $c;
                     continue;
                 }
                 $row['count']++;
                 $row['amount_czk'] += $c['amount_czk'];
-                unset($c['amount_czk']);
                 $row['invoices'][] = $c;
             }
             $row['amount_czk'] = round($row['amount_czk'], 2);

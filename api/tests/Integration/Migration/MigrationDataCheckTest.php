@@ -1,0 +1,471 @@
+<?php
+
+declare(strict_types=1);
+
+namespace MyInvoice\Tests\Integration\Migration;
+
+use DI\Container;
+use MyInvoice\Bootstrap;
+use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Repository\AccountingPeriodRepository;
+use MyInvoice\Service\Migration\Check\CheckItem;
+use MyInvoice\Service\Migration\Check\Checks\FinalInvoiceAdvanceVatCheck;
+use MyInvoice\Service\Migration\Check\Checks\ForeignBankInCzkCheck;
+use MyInvoice\Service\Migration\Check\Checks\ImportedStatementBalanceCheck;
+use MyInvoice\Service\Migration\Check\Checks\PayrollLiabilitiesCheck;
+use MyInvoice\Service\Migration\Check\Checks\PurchaseSettledUncoveredCheck;
+use MyInvoice\Service\Migration\Check\Checks\SettledWithoutPaymentCheck;
+use MyInvoice\Service\Migration\Check\Checks\SubledgerLedgerCheck;
+use MyInvoice\Service\Migration\Check\Checks\TaxDocumentAdvanceLinkCheck;
+use MyInvoice\Service\Migration\Check\MigrationDataCheckException;
+use MyInvoice\Service\Migration\Check\MigrationDataCheckService;
+use MyInvoice\Service\Migration\Check\TaxDocumentAdvanceLinker;
+use MyInvoice\Service\Migration\Pohoda\PohodaPriorYearPaymentRepair;
+use MyInvoice\Service\Migration\Pohoda\PohodaPriorYearPayments;
+use PDO;
+use PHPUnit\Framework\Attributes\Group;
+use PHPUnit\Framework\TestCase;
+
+/**
+ * Kontrola dat po převodu nad syntetickou firmou převedenou z POHODY (agenda 2025):
+ * nález, náhled, oprava, opakovaná oprava (idempotence) a chráněné období u každé kontroly.
+ * Vše v transakci, která se na konci vrátí.
+ */
+#[Group('integration')]
+final class MigrationDataCheckTest extends TestCase
+{
+    private Container $c;
+    private PDO $pdo;
+    private MigrationDataCheckService $service;
+    private int $supplierId = 0;
+    private int $czk = 0;
+    private int $eur = 0;
+    private int $clientId = 0;
+    private int $userId = 0;
+    private int $vatRateId = 0;
+    private int $periodId = 0;
+    private int $seq = 0;
+    /** @var array<string,int> */
+    private array $accounts = [];
+
+    protected function setUp(): void
+    {
+        if (!is_file(dirname(__DIR__, 4) . '/cfg.php')) {
+            $this->markTestSkipped('cfg.php missing');
+        }
+        $this->c = Bootstrap::buildContainer();
+        $this->pdo = $this->c->get(Connection::class)->pdo();
+        $this->userId = (int) ($this->pdo->query('SELECT id FROM users ORDER BY id LIMIT 1')->fetchColumn() ?: 0);
+        if ($this->userId === 0) {
+            $this->markTestSkipped('Chybí uživatel (ci-seed).');
+        }
+        $this->pdo->beginTransaction();
+        $this->pdo->exec("INSERT INTO supplier (company_name, street, city, zip, email, country_id, default_currency_id, default_vat_rate_id, accounting_mode)
+            SELECT 'Synteticka migrace s.r.o.', 'Testovaci 1', 'Test', '10000', 'migrace@example.com',
+                   (SELECT id FROM countries WHERE iso2 = 'CZ' LIMIT 1), (SELECT id FROM currencies WHERE code = 'CZK' LIMIT 1),
+                   (SELECT id FROM vat_rates ORDER BY id LIMIT 1), 'double_entry'");
+        $this->supplierId = (int) $this->pdo->lastInsertId();
+        $this->vatRateId = (int) $this->pdo->query('SELECT id FROM vat_rates ORDER BY id LIMIT 1')->fetchColumn();
+        foreach (['CZK' => 'Kč', 'EUR' => '€'] as $code => $symbol) {
+            $this->pdo->prepare("INSERT INTO currencies (supplier_id, code, label, symbol, name_cs, name_en, decimals, is_active, is_default)
+                VALUES (?, ?, ?, ?, ?, ?, 2, 1, ?)")->execute([$this->supplierId, $code, $code, $symbol, $code, $code, $code === 'CZK' ? 1 : 0]);
+            $code === 'CZK' ? $this->czk = (int) $this->pdo->lastInsertId() : $this->eur = (int) $this->pdo->lastInsertId();
+        }
+        $this->pdo->prepare("INSERT INTO clients (supplier_id, company_name, street, city, zip, country_id, currency_default_id)
+            VALUES (?, 'Odberatel Alfa s.r.o.', 'Ulice 1', 'Mesto', '11000', (SELECT id FROM countries WHERE iso2 = 'CZ' LIMIT 1), ?)")->execute([$this->supplierId, $this->czk]);
+        $this->clientId = (int) $this->pdo->lastInsertId();
+        $this->periodId = $this->c->get(AccountingPeriodRepository::class)->create($this->supplierId, 2025, '2025-01-01', '2025-12-31');
+        $this->pdo->prepare("INSERT INTO pohoda_imports (supplier_id, mode, status, agenda_year) VALUES (?, 'import', 'completed', 2025)")->execute([$this->supplierId]);
+        $this->service = $this->c->get(MigrationDataCheckService::class);
+    }
+
+    protected function tearDown(): void
+    {
+        if (isset($this->pdo) && $this->pdo->inTransaction()) {
+            $this->pdo->rollBack();
+        }
+    }
+
+    public function testOnlyChecksForMigrationSourceApply(): void
+    {
+        $keys = array_column($this->service->summary($this->supplierId)['checks'], 'key');
+        self::assertContains(SettledWithoutPaymentCheck::KEY, $keys);
+        self::assertContains(TaxDocumentAdvanceLinkCheck::KEY, $keys);
+        self::assertSame(['pohoda'], $this->service->summary($this->supplierId)['sources']);
+
+        $this->pdo->prepare("DELETE FROM pohoda_imports WHERE supplier_id = ?")->execute([$this->supplierId]);
+        $service = Bootstrap::buildContainer()->get(MigrationDataCheckService::class);
+        self::assertSame(['sources' => [], 'checks' => []], $service->summary($this->supplierId));
+        $this->expectException(MigrationDataCheckException::class);
+        $service->detail($this->supplierId, SettledWithoutPaymentCheck::KEY);
+    }
+
+    public function testPohodaPriorYearPaymentIsAddedOnceWithAudit(): void
+    {
+        $prior = $this->invoice('invoice', 'FV24901', '2024-12-10', 1210.0, 210.0, paidTotal: 1210.0, status: 'paid');
+        $agenda = $this->invoice('invoice', 'FV25901', '2025-02-01', 1000.0, 0.0, paidTotal: 500.0, status: 'sent');
+
+        $detail = $this->service->detail($this->supplierId, SettledWithoutPaymentCheck::KEY);
+        self::assertSame('fixable', $detail['status']);
+        self::assertSame([$prior => 'fixable', $agenda => 'review'], array_column($detail['items'], 'state', 'entity_id'));
+        self::assertSame(1210.0, $detail['fixable_amount_czk']);
+
+        $preview = $this->service->preview($this->supplierId, SettledWithoutPaymentCheck::KEY);
+        self::assertTrue($preview['can_fix']);
+        self::assertSame(1, $preview['count']);
+
+        $result = $this->service->fix($this->supplierId, SettledWithoutPaymentCheck::KEY, $this->userId, [], $preview['fingerprint']);
+        self::assertSame(1, $result['fixed_count']);
+        self::assertSame('review', $result['after']['status']);
+        $payment = $this->pdo->query("SELECT paid_on, amount, source, note FROM invoice_payments WHERE invoice_id = {$prior}")->fetch(PDO::FETCH_ASSOC);
+        self::assertSame(['paid_on' => '2024-12-31', 'amount' => '1210.00', 'source' => 'settlement', 'note' => PohodaPriorYearPayments::NOTE], $payment);
+        self::assertSame(0, $this->rows('invoice_payments', "invoice_id = {$agenda}"));
+        self::assertSame(1, $this->rows('activity_log', "action = '" . PohodaPriorYearPaymentRepair::AUDIT_ACTION . "' AND entity_id = {$prior}"));
+        self::assertSame(1, $this->rows('activity_log', "action = '" . MigrationDataCheckService::AUDIT_ACTION . "'"));
+
+        // Opakovaná oprava nic nezdvojí.
+        $this->assertNothingToFix(SettledWithoutPaymentCheck::KEY);
+        self::assertSame(1, $this->rows('invoice_payments', "invoice_id = {$prior}"));
+    }
+
+    public function testPohodaPriorYearPaymentInLockedPeriodIsOnlyReported(): void
+    {
+        $prior = $this->invoice('invoice', 'FV24902', '2024-11-10', 605.0, 105.0, paidTotal: 605.0, status: 'paid');
+        $this->lockUntil('2025-01-31');
+
+        $detail = $this->service->detail($this->supplierId, SettledWithoutPaymentCheck::KEY);
+        self::assertSame([$prior => 'locked'], array_column($detail['items'], 'state', 'entity_id'));
+        self::assertFalse($this->service->preview($this->supplierId, SettledWithoutPaymentCheck::KEY)['can_fix']);
+        $this->assertNothingToFix(SettledWithoutPaymentCheck::KEY);
+        self::assertSame(0, $this->rows('invoice_payments', "invoice_id = {$prior}"));
+    }
+
+    public function testPaidPurchaseWithoutCoverageGetsSettledOutside(): void
+    {
+        $covered = $this->purchase('DF-901', '2025-05-10', 1000.0, $this->czk);
+        $foreign = $this->purchase('DF-902', '2025-05-12', 100.0, $this->eur, 25.0);
+        $late = $this->purchase('DF-903', '2025-09-15', 300.0, $this->czk);
+        $this->lockUntil('2025-06-30');
+
+        $detail = $this->service->detail($this->supplierId, PurchaseSettledUncoveredCheck::KEY);
+        self::assertSame([$covered => 'locked', $foreign => 'review', $late => 'fixable'], array_column($detail['items'], 'state', 'entity_id'));
+        self::assertSame(2500.0, array_column($detail['items'], 'amount_czk', 'entity_id')[$foreign]);
+
+        $preview = $this->service->preview($this->supplierId, PurchaseSettledUncoveredCheck::KEY);
+        $result = $this->service->fix($this->supplierId, PurchaseSettledUncoveredCheck::KEY, $this->userId, [], $preview['fingerprint']);
+        self::assertSame(1, $result['fixed_count']);
+        self::assertSame(['0.00', '0.00', '300.00'], array_map(fn (int $id): string => (string) $this->pdo->query("SELECT settled_outside_amount FROM purchase_invoices WHERE id = {$id}")->fetchColumn(), [$covered, $foreign, $late]));
+        self::assertSame(1, $this->rows('activity_log', "action = '" . PurchaseSettledUncoveredCheck::AUDIT_ACTION_POHODA . "' AND entity_id = {$late}"));
+        $this->assertNothingToFix(PurchaseSettledUncoveredCheck::KEY);
+    }
+
+    public function testStalePreviewIsRefused(): void
+    {
+        $this->purchase('DF-911', '2025-05-10', 1000.0, $this->czk);
+        $preview = $this->service->preview($this->supplierId, PurchaseSettledUncoveredCheck::KEY);
+        $this->purchase('DF-912', '2025-05-11', 200.0, $this->czk);
+        try {
+            $this->service->fix($this->supplierId, PurchaseSettledUncoveredCheck::KEY, $this->userId, [], $preview['fingerprint']);
+            self::fail('Změněná data od náhledu musí opravu zastavit.');
+        } catch (MigrationDataCheckException $e) {
+            self::assertSame(['stale_preview', 409], [$e->errorCode, $e->status]);
+        }
+        self::assertSame(0, $this->rows('purchase_invoices', 'settled_outside_amount > 0'));
+    }
+
+    public function testRequestValidation(): void
+    {
+        foreach ([
+            fn () => $this->service->detail($this->supplierId, 'unknown_check'),
+            fn () => $this->service->preview($this->supplierId, PayrollLiabilitiesCheck::KEY),
+            fn () => $this->service->preview($this->supplierId, ForeignBankInCzkCheck::KEY, ['delete_everything' => true]),
+            fn () => $this->service->preview($this->supplierId, ForeignBankInCzkCheck::KEY, [ForeignBankInCzkCheck::OPTION_UPLOADED => 'yes']),
+            fn () => $this->service->detail($this->supplierId, SettledWithoutPaymentCheck::KEY, 1, 50, 'deleted'),
+        ] as $i => $call) {
+            try {
+                $call();
+                self::fail("Požadavek {$i} musí skončit odmítnutím.");
+            } catch (MigrationDataCheckException $e) {
+                self::assertContains($e->status, [404, 409, 422], (string) $i);
+            }
+        }
+    }
+
+    public function testTaxDocumentLinksToAdvanceOutsideFiledPeriod(): void
+    {
+        $this->invoice('proforma', 'ZF25901', '2025-03-01', 1210.0, 0.0);
+        $this->invoice('proforma', 'ZF25902', '2025-03-01', 5000.0, 0.0);
+        $this->invoice('proforma', 'ZF25903', '2025-04-01', 2420.0, 0.0);
+        $linkable = $this->invoice('tax_document', 'DD25901', '2025-03-05', 1210.5, 210.0, note: 'Daňový doklad k přijaté platbě (zálohová faktura č. ZF25901)');
+        $amount = $this->invoice('tax_document', 'DD25902', '2025-03-06', 1210.0, 210.0, note: 'Daňový doklad k přijaté platbě (zálohová faktura č. ZF25902)');
+        $filed = $this->invoice('tax_document', 'DD25903', '2025-04-10', 2420.0, 420.0, note: 'Daňový doklad k uhrazené zálohové faktuře č. ZF25903');
+        $noRef = $this->invoice('tax_document', 'DD25904', '2025-04-11', 100.0, 17.36, note: 'Daňový doklad k přijaté platbě');
+        $this->filedVat(2025, 4);
+
+        $detail = $this->service->detail($this->supplierId, TaxDocumentAdvanceLinkCheck::KEY);
+        self::assertSame([$linkable => 'fixable', $amount => 'review', $filed => 'locked', $noRef => 'review'], array_column($detail['items'], 'state', 'entity_id'));
+
+        $preview = $this->service->preview($this->supplierId, TaxDocumentAdvanceLinkCheck::KEY);
+        $result = $this->service->fix($this->supplierId, TaxDocumentAdvanceLinkCheck::KEY, $this->userId, [], $preview['fingerprint']);
+        self::assertSame(1, $result['fixed_count']);
+        self::assertSame($this->invoiceId('ZF25901'), (int) $this->pdo->query("SELECT parent_invoice_id FROM invoices WHERE id = {$linkable}")->fetchColumn());
+        foreach ([$amount, $filed, $noRef] as $id) {
+            self::assertNull($this->pdo->query("SELECT parent_invoice_id FROM invoices WHERE id = {$id}")->fetchColumn(), (string) $id);
+        }
+        self::assertSame(1, $this->rows('activity_log', "action = '" . TaxDocumentAdvanceLinker::AUDIT_ACTION . "' AND entity_id = {$linkable}"));
+        $this->assertNothingToFix(TaxDocumentAdvanceLinkCheck::KEY);
+    }
+
+    public function testFinalInvoiceDeductingAdvanceOnlyInHeaderIsReported(): void
+    {
+        $advance = $this->invoice('proforma', 'ZF25910', '2025-05-01', 1210.0, 0.0);
+        $this->invoice('tax_document', 'DD25910', '2025-05-03', 1210.0, 210.0, parent: $advance);
+        $double = $this->invoice('invoice', 'FV25910', '2025-06-01', 2420.0, 420.0, parent: $advance, advancePaid: 1210.0, items: [[2000.0, 420.0]]);
+        $advance2 = $this->invoice('proforma', 'ZF25911', '2025-05-01', 1210.0, 0.0);
+        $this->invoice('tax_document', 'DD25911', '2025-05-03', 1210.0, 210.0, parent: $advance2);
+        $this->invoice('invoice', 'FV25911', '2025-06-02', 2420.0, 210.0, parent: $advance2, advancePaid: 1210.0, items: [[2000.0, 420.0], [-1000.0, -210.0]]);
+
+        $detail = $this->service->detail($this->supplierId, FinalInvoiceAdvanceVatCheck::KEY);
+        self::assertSame([$double], array_column($detail['items'], 'entity_id'));
+        self::assertSame(210.0, $detail['items'][0]['amount_czk']);
+        self::assertSame('review', $detail['items'][0]['state']);
+        self::assertFalse($detail['fixable']);
+    }
+
+    public function testImportedStatementsAreRechainedFromJournal(): void
+    {
+        $this->account('221.001', 'asset');
+        $this->account('701', 'equity');
+        $this->account('518', 'expense');
+        $this->post('2025-01-01', '221.001', '701', 1000.0, 'opening');
+        $jan = $this->statement('RB', '2025-01-31', 0.0, -100.0, [['2025-01-15', -100.0]]);
+        $feb = $this->statement('RB', '2025-02-28', -100.0, -150.0, [['2025-02-15', -50.0]]);
+        $this->pdo->prepare('INSERT INTO bank_statement_rebases (supplier_id, anchor_statement_id, shift, statement_ids) VALUES (?, ?, ?, ?)')
+            ->execute([$this->supplierId, $feb, '-1100.00', json_encode([$jan, $feb])]);
+
+        $detail = $this->service->detail($this->supplierId, ImportedStatementBalanceCheck::KEY);
+        self::assertSame('fixable', $detail['status']);
+        self::assertSame(-1000.0, $detail['items'][0]['amount_czk']);
+
+        $preview = $this->service->preview($this->supplierId, ImportedStatementBalanceCheck::KEY);
+        $this->service->fix($this->supplierId, ImportedStatementBalanceCheck::KEY, $this->userId, [], $preview['fingerprint']);
+        self::assertSame(['1000.00', '900.00'], $this->balances($jan));
+        self::assertSame(['900.00', '850.00'], $this->balances($feb));
+        self::assertSame(0, $this->rows('bank_statement_rebases', '1 = 1'), 'Přepočtené výpisy už smazání výpisu banky neposune.');
+        self::assertSame(1, $this->rows('activity_log', "action = '" . ImportedStatementBalanceCheck::AUDIT_ACTION . "'"));
+        $this->assertNothingToFix(ImportedStatementBalanceCheck::KEY);
+    }
+
+    public function testImportedStatementsOfTwoSourceAccountsOrLockedPeriodAreOnlyReported(): void
+    {
+        $this->account('221.001', 'asset');
+        $this->account('701', 'equity');
+        $this->account('518', 'expense');
+        $this->post('2025-01-01', '221.001', '701', 1000.0, 'opening');
+        $jan = $this->statement('RB', '2025-01-31', 0.0, -100.0, [['2025-01-15', -100.0]]);
+        $this->statement('RBEU', '2025-02-28', -100.0, -150.0, [['2025-02-15', -50.0]]);
+        self::assertSame('review', $this->service->detail($this->supplierId, ImportedStatementBalanceCheck::KEY)['items'][0]['state']);
+
+        $this->pdo->prepare("UPDATE pohoda_import_map SET pohoda_key = REPLACE(pohoda_key, 'RBEU', 'RB') WHERE supplier_id = ?")->execute([$this->supplierId]);
+        $this->lockUntil('2025-01-31');
+        self::assertSame('locked', $this->service->detail($this->supplierId, ImportedStatementBalanceCheck::KEY)['items'][0]['state']);
+        $this->assertNothingToFix(ImportedStatementBalanceCheck::KEY);
+        self::assertSame(['0.00', '-100.00'], $this->balances($jan));
+    }
+
+    public function testPayrollLiabilitiesMissingInOtherItemsAreReported(): void
+    {
+        $this->account('331', 'liability');
+        $this->account('336', 'liability');
+        $this->account('521', 'expense');
+        $this->post('2025-01-31', '521', '331', 5000.0);
+        $this->post('2025-01-31', '521', '336', 1700.0);
+        $this->otherItem('331', 3000.0, '2025-01-31');
+        $this->otherItem('336', 1700.0, '2025-01-31');
+
+        $detail = $this->service->detail($this->supplierId, PayrollLiabilitiesCheck::KEY);
+        self::assertSame(['331'], array_map(static fn (array $i): string => (string) $i['details']['account'], $detail['items']));
+        self::assertSame(2000.0, $detail['items'][0]['amount_czk']);
+        self::assertSame('review', $detail['status']);
+        self::assertFalse($detail['fixable']);
+    }
+
+    public function testSubledgerDifferenceAgainstGeneralLedgerIsReported(): void
+    {
+        $this->account('311', 'asset');
+        $this->account('602', 'revenue');
+        $this->post('2025-03-01', '311', '602', 500.0);
+
+        $items = $this->service->detail($this->supplierId, SubledgerLedgerCheck::KEY)['items'];
+        self::assertCount(1, $items);
+        self::assertSame(['311', 2025, $this->periodId], [$items[0]['details']['account'], $items[0]['details']['fiscal_year'], $items[0]['details']['period_id']]);
+        self::assertSame(500.0, $items[0]['amount_czk']);
+    }
+
+    public function testForeignCurrencyAccountMigratedInCzkIsConverted(): void
+    {
+        $this->account('221.001', 'asset');
+        $this->account('518', 'expense');
+        $rates = [];
+        $moves = [];
+        for ($i = 1; $i <= 12; $i++) {
+            $date = sprintf('2025-%02d-15', $i);
+            $rate = 24.5 + $i / 100;
+            $rates[$date] = $rate;
+            $eur = 100 + 7 * $i + $i / 100;
+            $moves[$i] = [$date, round(round($eur, 2) * $rate, 2) * ($i % 2 === 0 ? -1 : 1)];
+        }
+        foreach ($rates as $date => $rate) {
+            $this->pdo->prepare('INSERT INTO exchange_rates (currency_code, rate_date, rate) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE rate = VALUES(rate)')->execute(['EUR', $date, $rate]);
+        }
+        $this->pdo->prepare('INSERT INTO exchange_rates (currency_code, rate_date, rate) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE rate = VALUES(rate)')->execute(['EUR', '2024-12-31', 25.0]);
+        $running = 0.0;
+        $ids = [];
+        foreach ($moves as $i => [$date, $czk]) {
+            $ids[] = $this->statement('FIOE', sprintf('2025-%02d-28', $i), $running, round($running + $czk, 2), [[$date, $czk]], '2000000017', '2010');
+            $running = round($running + $czk, 2);
+        }
+
+        $detail = $this->service->detail($this->supplierId, ForeignBankInCzkCheck::KEY);
+        self::assertSame('fixable', $detail['status'], json_encode($detail['items'], JSON_UNESCAPED_UNICODE));
+        self::assertSame('EUR', $detail['items'][0]['currency']);
+
+        $preview = $this->service->preview($this->supplierId, ForeignBankInCzkCheck::KEY);
+        $result = $this->service->fix($this->supplierId, ForeignBankInCzkCheck::KEY, $this->userId, [], $preview['fingerprint']);
+        self::assertSame(1, $result['fixed_count'], json_encode($result, JSON_UNESCAPED_UNICODE));
+        self::assertSame(['EUR'], array_values(array_unique($this->pdo->query('SELECT currency FROM bank_statements WHERE id IN (' . implode(',', $ids) . ')')->fetchAll(PDO::FETCH_COLUMN))));
+        self::assertSame(107.01, (float) $this->pdo->query("SELECT amount FROM bank_transactions WHERE statement_id = {$ids[0]}")->fetchColumn());
+        $this->assertNothingToFix(ForeignBankInCzkCheck::KEY);
+    }
+
+    private function assertNothingToFix(string $key): void
+    {
+        self::assertSame(0, $this->service->detail($this->supplierId, $key)['fixable_count']);
+        try {
+            $this->service->fix($this->supplierId, $key, $this->userId, [], $this->service->preview($this->supplierId, $key)['fingerprint']);
+            self::fail('Oprava bez nálezů k opravě musí skončit odmítnutím.');
+        } catch (MigrationDataCheckException $e) {
+            self::assertSame(['nothing_to_fix', 409], [$e->errorCode, $e->status]);
+        }
+    }
+
+    /** @param list<array{0:float,1:float}> $items [základ, DPH] */
+    private function invoice(string $type, string $number, string $date, float $total, float $vat, float $paidTotal = 0.0, string $status = 'sent',
+        ?int $parent = null, ?string $note = null, float $advancePaid = 0.0, array $items = []): int
+    {
+        $this->pdo->prepare("INSERT INTO invoices (supplier_id, client_id, varsymbol, invoice_type, issue_date, tax_date, due_date, currency_id, exchange_rate,
+                client_snapshot, supplier_snapshot, total_without_vat, total_vat, total_with_vat, advance_paid_amount, paid_total, paid_at, status,
+                parent_invoice_id, note_above_items, created_by)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, '{}', '{}', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)")
+            ->execute([$this->supplierId, $this->clientId, $number, $type, $date, $date, $date, $this->czk, $total - $vat, $vat, $total, $advancePaid,
+                $paidTotal, $paidTotal > 0 ? $date : null, $status, $parent, $note, $this->userId]);
+        $id = (int) $this->pdo->lastInsertId();
+        foreach ($items as $n => [$base, $itemVat]) {
+            $this->pdo->prepare("INSERT INTO invoice_items (invoice_id, description, quantity, unit, unit_price_without_vat, vat_rate_id, vat_rate_snapshot,
+                    total_without_vat, total_vat, total_with_vat, order_index) VALUES (?, 'Polozka', 1, 'ks', ?, ?, 21, ?, ?, ?, ?)")
+                ->execute([$id, $base, $this->vatRateId, $base, $itemVat, $base + $itemVat, $n]);
+        }
+        $this->map('invoice', $number . '|' . $date, $id);
+        return $id;
+    }
+
+    private function purchase(string $number, string $paidAt, float $total, int $currencyId, float $rate = 1.0): int
+    {
+        $this->pdo->prepare("INSERT INTO purchase_invoices (supplier_id, vendor_id, vendor_invoice_number, document_kind, issue_date, tax_date, due_date,
+                received_at, currency_id, exchange_rate, vendor_snapshot, total_without_vat, total_vat, total_with_vat, status, paid_at, created_by)
+            VALUES (?, ?, ?, 'invoice', ?, ?, ?, ?, ?, ?, '{}', ?, 0, ?, 'paid', ?, ?)")
+            ->execute([$this->supplierId, $this->clientId, $number, $paidAt, $paidAt, $paidAt, $paidAt, $currencyId, $rate, $total, $total, $paidAt, $this->userId]);
+        $id = (int) $this->pdo->lastInsertId();
+        $this->map('purchase_invoice', $number, $id);
+        return $id;
+    }
+
+    /** @param list<array{0:string,1:float}> $moves */
+    private function statement(string $code, string $date, float $prev, float $curr, array $moves, string $account = '1000000005', string $bank = '0100'): int
+    {
+        $n = ++$this->seq;
+        $this->pdo->prepare("INSERT INTO bank_statements (supplier_id, source, file_name, file_hash, account_number, bank_code, currency, statement_number,
+                statement_date, prev_balance, curr_balance, credit_total, debit_total, transaction_count)
+            VALUES (?, 'import', ?, ?, ?, ?, 'CZK', ?, ?, ?, ?, 0, 0, ?)")
+            ->execute([$this->supplierId, "pohoda-{$code}-{$n}", hash('sha256', "mchk-{$this->supplierId}-{$n}"), $account, $bank, (string) $n, $date,
+                number_format($prev, 2, '.', ''), number_format($curr, 2, '.', ''), count($moves)]);
+        $id = (int) $this->pdo->lastInsertId();
+        $this->map('bank_statement', "stmt|{$code}|2025|{$n}", $id);
+        foreach ($moves as $m => [$posted, $amount]) {
+            $this->pdo->prepare("INSERT INTO bank_transactions (source, statement_id, posted_at, amount, currency, import_fingerprint)
+                VALUES ('statement', ?, ?, ?, 'CZK', ?)")->execute([$id, $posted, number_format($amount, 2, '.', ''), hash('sha256', "{$id}|{$m}|{$amount}")]);
+            $tx = (int) $this->pdo->lastInsertId();
+            $this->map('bank_transaction', "tx|{$code}|{$n}|{$m}", $tx);
+            if (isset($this->accounts['221.001'])) {
+                $entry = $amount < 0 ? $this->post($posted, '518', '221.001', -$amount) : $this->post($posted, '221.001', '518', $amount);
+                $this->pdo->prepare("INSERT INTO journal_entry_document_links (supplier_id, entry_id, doc_type, doc_id) VALUES (?, ?, 'bank', ?)")
+                    ->execute([$this->supplierId, $entry, $tx]);
+            }
+        }
+        return $id;
+    }
+
+    private function account(string $code, string $type): void
+    {
+        $this->pdo->prepare('INSERT INTO chart_of_accounts (supplier_id, account_code, name, account_type) VALUES (?, ?, ?, ?)')
+            ->execute([$this->supplierId, $code, 'Synteticky ' . $code, $type]);
+        $this->accounts[$code] = (int) $this->pdo->lastInsertId();
+    }
+
+    private function post(string $date, string $debit, string $credit, float $amount, string $source = 'manual'): int
+    {
+        $this->pdo->prepare('INSERT INTO journal_entries (supplier_id, period_id, entry_date, source_type) VALUES (?, ?, ?, ?)')
+            ->execute([$this->supplierId, $this->periodId, $date, $source]);
+        $entry = (int) $this->pdo->lastInsertId();
+        foreach (['debit' => $debit, 'credit' => $credit] as $side => $code) {
+            $this->pdo->prepare('INSERT INTO journal_entry_lines (supplier_id, entry_id, account_id, side, amount) VALUES (?, ?, ?, ?, ?)')
+                ->execute([$this->supplierId, $entry, $this->accounts[$code], $side, number_format($amount, 2, '.', '')]);
+        }
+        $this->pdo->prepare('UPDATE journal_entries SET posted_at = NOW() WHERE id = ?')->execute([$entry]);
+        return $entry;
+    }
+
+    private function otherItem(string $account, float $amount, string $date): void
+    {
+        $this->pdo->prepare("INSERT INTO other_items (supplier_id, side, status, title, amount, currency, issued_on, due_on, account_code, document_no)
+            VALUES (?, 'payable', 'confirmed', 'Mzdy', ?, 'CZK', ?, ?, ?, ?)")
+            ->execute([$this->supplierId, $amount, $date, $date, $account, 'OZ' . (++$this->seq)]);
+    }
+
+    private function map(string $kind, string $key, int $id): void
+    {
+        $this->pdo->prepare('INSERT INTO pohoda_import_map (supplier_id, kind, pohoda_key, target_id) VALUES (?, ?, ?, ?)')->execute([$this->supplierId, $kind, $key, $id]);
+    }
+
+    private function lockUntil(string $date): void
+    {
+        $this->pdo->prepare('INSERT INTO accounting_supplier_settings (supplier_id, locked_until) VALUES (?, ?) ON DUPLICATE KEY UPDATE locked_until = VALUES(locked_until)')
+            ->execute([$this->supplierId, $date]);
+    }
+
+    private function filedVat(int $year, int $month): void
+    {
+        $this->pdo->prepare("INSERT INTO tax_submissions (supplier_id, form_code, period_year, period_month, xml_content, xml_size_bytes, xml_sha256, status, submitted_at)
+            VALUES (?, 'dphdp3', ?, ?, '<x/>', 4, ?, 'submitted', NOW())")->execute([$this->supplierId, $year, $month, hash('sha256', "x{$year}{$month}")]);
+    }
+
+    private function invoiceId(string $number): int
+    {
+        $stmt = $this->pdo->prepare('SELECT id FROM invoices WHERE supplier_id = ? AND varsymbol = ?');
+        $stmt->execute([$this->supplierId, $number]);
+        return (int) $stmt->fetchColumn();
+    }
+
+    /** @return array{0:string,1:string} */
+    private function balances(int $id): array
+    {
+        $row = $this->pdo->query("SELECT prev_balance, curr_balance FROM bank_statements WHERE id = {$id}")->fetch(PDO::FETCH_NUM);
+        return [(string) $row[0], (string) $row[1]];
+    }
+
+    private function rows(string $table, string $where): int
+    {
+        $column = 'supplier_id';
+        return (int) $this->pdo->query("SELECT COUNT(*) FROM {$table} WHERE {$column} = {$this->supplierId} AND {$where}")->fetchColumn();
+    }
+}

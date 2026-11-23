@@ -959,6 +959,12 @@ final class RoutePermissionMap
         ['POST', '#^/api/accounting/internal-documents/(?:[0-9]+/(?:post|reverse)|from-entry/[0-9]+)$#', 'accounting.journal.post', AccessLevel::WRITE],
         ['DELETE', '#^/api/accounting/internal-documents/[0-9]+/posted$#', 'accounting.journal.post', AccessLevel::WRITE],
         ['*', '#^/api/accounting/internal-documents(/|$)#', 'accounting.journal.write', AccessLevel::WRITE],
+        // Kontrola dat po převodu: přehled, detail a náhled opravy čtou, oprava zapisuje.
+        // Roli pro opravu (správce firmy nebo zápis do účetnictví) ověřuje akce přes
+        // RequestAuthorization::canFixMigrationData().
+        ['GET', '#^/api/accounting/migration-checks(/[a-z0-9_]+)?$#', 'accounting', AccessLevel::READ],
+        ['POST', '#^/api/accounting/migration-checks/[a-z0-9_]+/preview$#', 'accounting', AccessLevel::READ],
+        ['POST', '#^/api/accounting/migration-checks/[a-z0-9_]+/fix$#', 'accounting', AccessLevel::WRITE],
         ['GET', '#^/api/accounting(?:$|/(?!cash-|assets|bank-posting-))#', 'accounting', AccessLevel::READ],
         ['*', '#^/api/accounting(?:$|/(?!cash-|assets|bank-posting-))#', 'accounting', AccessLevel::WRITE],
 

@@ -3206,6 +3206,15 @@
       ]
     ]
   },
+  "migration_data_checks": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/accounting/migration-checks"
+      ]
+    ]
+  },
   "monthly_report_preview": {
     "write": false,
     "api": [

@@ -697,6 +697,19 @@ final class RequestAuthorization
      * `POST /api/accounting/internal-documents` v RoutePermissionMap; AI asistent podle
      * něj rozhoduje, zda smí interní doklad vůbec navrhnout.
      */
+    /**
+     * Oprava dat po převodu z jiného programu (Kontrola dat po převodu): správce firmy,
+     * nebo interní role se zápisem do účetnictví (`accounting`), jen z přihlášené relace
+     * (nebo tokenem s plným zápisem). Běžný API token kontroly jen čte, klient je neopravuje.
+     * Uzavřená, zamčená a podaná období oprava nemění pro nikoho, jen je ohlásí.
+     */
+    public static function canFixMigrationData(Request $request): bool
+    {
+        return self::actsAsSession($request)
+            && (self::isCompanyAdmin($request)
+                || (!self::isClientType($request) && self::allows($request, 'accounting', AccessLevel::WRITE)));
+    }
+
     public static function canCreateInternalDocument(Request $request): bool
     {
         return self::allows($request, 'accounting.journal.write', AccessLevel::WRITE);

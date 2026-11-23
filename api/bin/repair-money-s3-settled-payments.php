@@ -16,6 +16,10 @@ declare(strict_types=1);
  *
  * Výchozí je zkouška nanečisto s výpisem, zápis jen s --commit. Idempotentní.
  *
+ * Stejnou opravu spouští Kontrola dat po převodu (stránka v aplikaci a
+ * `api/bin/migration-data-check.php --check=settled_without_payment`); tento skript zůstává tenkou obálkou
+ * nad společnou službou opravy pro dávkové běhy přes všechny firmy.
+ *
  * Použití:
  *   php api/bin/repair-money-s3-settled-payments.php --all                         # nanečisto, všechny firmy převedené z Money S3
  *   php api/bin/repair-money-s3-settled-payments.php --supplier=12 --supplier=14   # nanečisto, vybrané firmy

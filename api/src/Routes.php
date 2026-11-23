@@ -3594,6 +3594,11 @@ final class Routes
             $g->post  ('/bank-posting-suggestions/{id:[0-9]+}/snooze',  [\MyInvoice\Action\Accounting\Bank\BankPostingSuggestionAction::class, 'snooze']);
             // Featura H — jednotná fronta ručního doúčtování (read-only agregace).
             $g->get   ('/manual-posting-queue',                      [\MyInvoice\Action\Accounting\ManualPostingQueueAction::class, 'list']);
+            // Kontrola dat po převodu z jiného účetního programu (POHODA, Money S3, ABRA …).
+            $g->get   ('/migration-checks',                          [\MyInvoice\Action\Accounting\MigrationDataCheckAction::class, 'list']);
+            $g->get   ('/migration-checks/{key:[a-z0-9_]+}',         [\MyInvoice\Action\Accounting\MigrationDataCheckAction::class, 'show']);
+            $g->post  ('/migration-checks/{key:[a-z0-9_]+}/preview', [\MyInvoice\Action\Accounting\MigrationDataCheckAction::class, 'preview']);
+            $g->post  ('/migration-checks/{key:[a-z0-9_]+}/fix',     [\MyInvoice\Action\Accounting\MigrationDataCheckAction::class, 'fix']);
         });
 
         // Dashboard

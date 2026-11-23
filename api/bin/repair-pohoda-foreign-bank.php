@@ -14,6 +14,10 @@ declare(strict_types=1);
  * Kurzy ČNB bere z `exchange_rates`, chybějící dny stáhne z ČNB (`--no-fetch-rates` ne).
  * Před opravou je vhodné doplnit historii kurzů: `php api/bin/backfill-cnb-rates.php --from=2025 --to=2026 --apply`.
  *
+ * Stejnou opravu spouští Kontrola dat po převodu (stránka v aplikaci a
+ * `api/bin/migration-data-check.php --check=foreign_bank_in_czk`); tento skript zůstává tenkou obálkou
+ * nad společnou službou opravy pro dávkové běhy přes všechny firmy.
+ *
  * Použití:
  *   php api/bin/repair-pohoda-foreign-bank.php --all-pohoda                 # nanečisto, všechny firmy z POHODY
  *   php api/bin/repair-pohoda-foreign-bank.php --supplier=12 --supplier=34  # nanečisto, vybrané firmy

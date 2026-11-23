@@ -21,7 +21,7 @@ final class MigratedOtherItemPolicy
     private const MODULE_ACCOUNTS = ['341', '343'];
 
     /** Saldokontní účty mzdových závazků (zaměstnanci, pojistné, daň ze mzdy). */
-    private const PAYROLL_ACCOUNTS = ['331', '336', '342'];
+    public const PAYROLL_ACCOUNTS = ['331', '336', '342'];
 
     public static function moduleOwned(string $account): bool
     {

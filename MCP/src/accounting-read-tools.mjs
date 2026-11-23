@@ -221,4 +221,16 @@ export const ACCOUNTING_READ_TOOLS = [
         }, tool),
       };
     }),
+  custom('migration_data_checks', 'Kontrola dat po převodu',
+    'Kontroly nejčastějších chyb dat převzatých z jiného účetního programu (POHODA, Money S3, ABRA Flexi a další): '
+    + 'úhrady faktur bez záznamu platby, účet v cizí měně převedený v Kč, stavy převzatých výpisů, mzdové závazky, '
+    + 'saldokonto proti hlavní knize, přijaté doklady bez krytí, DDKP bez vazby na zálohu, DPH ze zálohy podruhé. '
+    + 'Bez `check` vrátí přehled kontrol firmy se stavem (ok, fixable, review), počtem a částkou; s `check` nálezy jedné '
+    + 'kontroly po dokladech (id pro proklik). Nic neopravuje, opravu spouští uživatel v aplikaci.', {
+      check: str('Klíč kontroly z přehledu (malá písmena, číslice a podtržítka).', { pattern: '^[a-z0-9_]+$', maxLength: 64 }),
+      state: str('Jen s `check`: nálezy v daném stavu.', { enum: ['fixable', 'locked', 'review'] }),
+      ...PAGING,
+    }, [], false, (c, a, tool) => (a.check === undefined
+      ? c.get('/accounting/migration-checks', null, tool)
+      : c.get(`/accounting/migration-checks/${seg(a.check)}`, pick(a, ['state', 'page', 'per_page']), tool))),
 ];
