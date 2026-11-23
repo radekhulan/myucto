@@ -18,8 +18,8 @@ use MyInvoice\Service\Accounting\Dimension\DimensionStamper;
  *   • položka s vlastní hodnotou typu (nebo rozpadem) rozhoduje za sebe,
  *   • jinak hlavička dokladu (hodnota, nebo rozpad),
  *   • jinak řádek nemá dimenzi („bez dimenze").
- * Pořadí položky odpovídá editoru i {@see DimensionStamper}: `order_index, id`, od 1,
- * textové řádky se počítají. Rozpis DPH přijatého dokladu (`purchase_invoice_vat_allocations`)
+ * Pořadí položky (`item_no` řádku evidence) odpovídá editoru i {@see DimensionStamper}:
+ * `order_index, id`, od 1, textové řádky se počítají. Rozpis DPH přijatého dokladu (`purchase_invoice_vat_allocations`)
  * a řádky pokladního dokladu položku nemají, platí pro ně hlavička.
  *
  * Výchozí dimenze zakázky, klienta, produktu a pravidel dimenzí se tu NEUPLATNÍ: popisují,
@@ -33,8 +33,8 @@ use MyInvoice\Service\Accounting\Dimension\DimensionStamper;
  * přesně částka řádku. Celkové částky dokladu (`total_with_vat_czk`, `document_total`)
  * se nedělí: limit kontrolního hlášení posuzuje celý doklad.
  *
- * Řádky se zpracovávají po dávkách: dimenze i pořadí položek dávky se načtou jedním
- * dotazem na tabulku (žádné N+1) a evidence za období nikdy neleží v paměti celá.
+ * Řádky se zpracovávají po dávkách: dimenze dokladů dávky se načtou jedním dotazem
+ * na tabulku (žádné N+1) a evidence za období nikdy neleží v paměti celá.
  */
 final class VatLedgerDimensionAllocation
 {
@@ -189,13 +189,11 @@ final class VatLedgerDimensionAllocation
                 $assigned[$docType] = $this->assignments($supplierId, $typeId, $docType, array_keys($ids));
             }
         }
-        $positions = $this->itemPositions($batch, $assigned);
-
         $out = [];
         foreach ($batch as $i => $row) {
             $docType = self::docType($row);
             $doc = $docType !== null ? ($assigned[$docType][(int) $row['invoice_id']] ?? []) : [];
-            $itemNo = $positions[(string) ($row['line_source'] ?? '')][(int) ($row['line_id'] ?? 0)] ?? null;
+            $itemNo = isset($row['item_no']) ? (int) $row['item_no'] : null;
             $out[$i] = ($itemNo !== null ? ($doc[$itemNo] ?? null) : null) ?? ($doc[0] ?? []);
         }
         return $out;
@@ -252,48 +250,6 @@ final class VatLedgerDimensionAllocation
         foreach ($splitMap as $docId => $items) {
             foreach ($items as $itemNo => $shares) {
                 $out[$docId][$itemNo] = $shares;
-            }
-        }
-        return $out;
-    }
-
-    /**
-     * Pořadí položek (od 1) pro řádky dávky, jen u dokladů, které mají dimenzi na
-     * některé položce — jinak rozhoduje hlavička a pořadí není potřeba.
-     *
-     * @param list<array<string,mixed>> $batch
-     * @param array<string, array<int, array<int, array<int,float>>>> $assigned
-     * @return array<string, array<int,int>> zdroj řádku => id položky => pořadí
-     */
-    private function itemPositions(array $batch, array $assigned): array
-    {
-        $tables = [
-            'invoice_item' => ['invoice', 'invoice_items', 'invoice_id'],
-            'purchase_item' => ['purchase_invoice', 'purchase_invoice_items', 'purchase_invoice_id'],
-        ];
-        $docs = [];
-        foreach ($batch as $row) {
-            $source = (string) ($row['line_source'] ?? '');
-            if (!isset($tables[$source])) {
-                continue;
-            }
-            $docId = (int) $row['invoice_id'];
-            $items = $assigned[$tables[$source][0]][$docId] ?? [];
-            if (array_diff(array_keys($items), [0]) !== []) {
-                $docs[$source][$docId] = true;
-            }
-        }
-        $out = [];
-        foreach ($docs as $source => $ids) {
-            [, $table, $column] = $tables[$source];
-            $marks = implode(',', array_fill(0, count($ids), '?'));
-            $stmt = $this->db->pdo()->prepare(
-                "SELECT id, ROW_NUMBER() OVER (PARTITION BY {$column} ORDER BY order_index, id) AS item_no
-                   FROM {$table} WHERE {$column} IN ({$marks})"
-            );
-            $stmt->execute(array_keys($ids));
-            foreach ($stmt->fetchAll(\PDO::FETCH_ASSOC) as $r) {
-                $out[$source][(int) $r['id']] = (int) $r['item_no'];
             }
         }
         return $out;

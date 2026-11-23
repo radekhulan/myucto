@@ -549,6 +549,21 @@ final class VatLedgerService
     }
 
     /**
+     * Pořadí položky v dokladu (`item_no`, od 1) jako v editoru a v DimensionStamper:
+     * `order_index, id`, počítají se všechny položky dokladu včetně textových a vyřazených
+     * z evidence. Schéma bez `order_index` (fixture testů) pořadí nemá.
+     */
+    private function itemNoSql(string $table, string $docColumn, string $alias): string
+    {
+        if (!$this->db->hasColumn($table, 'order_index')) {
+            return 'NULL AS item_no';
+        }
+        return "(SELECT COUNT(*) FROM {$table} item_pos WHERE item_pos.{$docColumn} = {$alias}.{$docColumn}
+                   AND (item_pos.order_index < {$alias}.order_index
+                        OR (item_pos.order_index = {$alias}.order_index AND item_pos.id <= {$alias}.id))) AS item_no";
+    }
+
+    /**
      * Zúžení dotazu na vybrané doklady: `AND <sloupec> IN (...)` a jeho parametry,
      * bez zúžení (null) prázdný fragment.
      *
@@ -678,7 +693,7 @@ final class VatLedgerService
                        END
                    ) AS code,
                    ii.vat_rate_snapshot AS vat_rate,
-                   ii.id AS line_id, 'invoice_item' AS line_source,
+                   {$this->itemNoSql('invoice_items', 'invoice_id', 'ii')}, 'invoice_item' AS line_source,
                    vr.country AS tax_country,
                    ii.description AS description,
                    -- Totéž dokladové znaménko jako u inv_total výše (viz komentář tam).
@@ -838,7 +853,7 @@ final class VatLedgerService
                    0 AS is_fixed_asset,
                    '24z' AS code,
                    0 AS vat_rate,
-                   ii.id AS line_id, 'invoice_item' AS line_source,
+                   {$this->itemNoSql('invoice_items', 'invoice_id', 'ii')}, 'invoice_item' AS line_source,
                    ii.description AS description,
                    ({$saleSign}) * COALESCE(ii.total_without_vat, 0) AS base,
                    0 AS vat
@@ -1218,7 +1233,7 @@ final class VatLedgerService
                               AND pi.reverse_charge = 1 AND COALESCE(co.iso2, 'CZ') <> 'CZ'
                          THEN 1 ELSE 0 END) AS code_estimated,
                    pii.vat_rate_snapshot AS vat_rate,
-                   pii.id AS line_id, pii.line_source,
+                   pii.item_no, pii.line_source,
                    pii.description AS description,
                    -- Totéž dokladové znaménko jako u inv_total výše (viz komentář tam).
                    {$docSign} * COALESCE(pii.total_without_vat, 0) AS base,
@@ -1231,7 +1246,9 @@ final class VatLedgerService
          LEFT JOIN countries co ON co.id = c.country_id
          LEFT JOIN purchase_invoices parent ON parent.id = pi.parent_purchase_invoice_id
               JOIN (
-                    SELECT i.id, 'purchase_item' AS line_source, i.purchase_invoice_id, i.description, i.vat_rate_snapshot,
+                    SELECT i.id, 'purchase_item' AS line_source,
+                           {$this->itemNoSql('purchase_invoice_items', 'purchase_invoice_id', 'i')},
+                           i.purchase_invoice_id, i.description, i.vat_rate_snapshot,
                            i.total_without_vat, i.total_vat, i.vat_classification_code,
                            i.is_fixed_asset, NULL AS vat_deduction,
                            NULL AS vat_deduction_percent,
@@ -1248,7 +1265,7 @@ final class VatLedgerService
                                 WHERE a.purchase_invoice_id = i.purchase_invoice_id
                            )
                     UNION ALL
-                    SELECT a.id, 'purchase_allocation' AS line_source, a.purchase_invoice_id, a.description, a.vat_rate,
+                    SELECT a.id, 'purchase_allocation' AS line_source, NULL AS item_no, a.purchase_invoice_id, a.description, a.vat_rate,
                            a.base_amount, a.vat_amount, a.vat_classification_code,
                            0 AS is_fixed_asset, a.vat_deduction,
                            a.vat_deduction_percent,
@@ -1537,9 +1554,11 @@ final class VatLedgerService
             'exchange_rate'         => $rate,
             'exchange_rate_missing' => $exchangeRateMissing,
             // Zdrojový řádek dokladu (položka faktury, rozpis DPH přijatého dokladu, řádek
-            // DPH pokladního dokladu). Podle něj se řádek evidence přiřazuje k dimenzi položky
-            // ({@see VatLedgerDimensionAllocation}).
-            'line_id'               => isset($r['line_id']) ? (int) $r['line_id'] : null,
+            // DPH pokladního dokladu) a pořadí položky v dokladu (order_index, id; od 1,
+            // počítají se všechny položky jako v editoru). Podle pořadí se řádek evidence
+            // přiřazuje k dimenzi položky ({@see VatLedgerDimensionAllocation}). Pořadí,
+            // ne id: uložení dokladu položky přepisuje a evidence se tím měnit nesmí.
+            'item_no'               => isset($r['item_no']) ? (int) $r['item_no'] : null,
             'line_source'           => isset($r['line_source']) ? (string) $r['line_source'] : null,
         ];
     }
@@ -1740,7 +1759,7 @@ final class VatLedgerService
                                  THEN CASE WHEN cl.vat_rate >= ? THEN '1'  ELSE '2'  END
                                  ELSE CASE WHEN cl.vat_rate >= ? THEN '40' ELSE '41' END
                             END) AS code,
-                   cl.vat_rate, cl.id AS line_id, 'cash_vat_line' AS line_source,
+                   cl.vat_rate, NULL AS item_no, 'cash_vat_line' AS line_source,
                    cd.description, cl.base_amount AS base, cl.vat_amount AS vat
               FROM cash_documents cd
               JOIN cash_document_vat_lines cl ON cl.cash_document_id = cd.id
