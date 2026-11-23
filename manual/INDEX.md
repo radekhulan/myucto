@@ -94,6 +94,7 @@ nasazuje). Zbytek je psaný pro běžného uživatele — bez programátorského
 50. [Průvodce účetního](50_Pruvodce_ucetniho.md)
 51. [Přehled firem](51_Prehled_firem.md)
 52. [Účetní deník](52_Ucetni_denik.md)
+125. [Časové rozlišení](125_Casove_rozliseni.md)
 123. [AI asistent](123_AI_asistent.md)
 53. [Automat účtování](53_Automat.md)
 54. [K doúčtování](54_Rucni_fronta_doctovani.md)

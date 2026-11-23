@@ -1791,6 +1791,11 @@ k datu zaúčtování:
 Zaúčtování vyžaduje oprávnění zaúčtovat v deníku. Zápis nejde stornovat přímo
 v deníku; storno i opravy dělejte v detailu položky.
 
+Účtuje-li položka na 381 nebo 384 (předplacený náklad či výnos příštích období), ukáže detail panel
+**Časové rozlišení**. Z něj založíte položku agendy, která zůstatek rozpouští podle plánu, viz
+[Časové rozlišení](125_Casove_rozliseni.md#12542-z-dokladu). Období na položce
+([§ 50.10.4](50_Pruvodce_ucetniho.md#50104-ostatni-pohledavky-a-zavazky)) je druhá cesta, kterou spravuje uzávěrka.
+
 #### 52.14.14.4 Daňová evidence
 
 V daňové evidenci se položka **potvrdí** (dostane číslo, stav Potvrzeno) a žádný
@@ -2299,6 +2304,10 @@ Navázané doklady se při zaúčtování přenesou do vazeb zápisu
 podle zápisu.
 
 DPH řádky interní doklad nemá, stejně jako ruční zápis. Zdanitelné plnění patří do faktur.
+
+Účtuje-li zaúčtovaný interní doklad na účty 381 až 385, ukáže detail panel **Časové rozlišení**. Z něj
+založíte položku agendy [Časové rozlišení](125_Casove_rozliseni.md), která zápis naváže jako vznik a rozpouští
+ho podle plánu.
 
 #### 52.14.15.3 Seznam, filtry a export
 

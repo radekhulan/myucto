@@ -115,6 +115,7 @@ Kontrolují se mimo jiné:
 - **majetek v užívání bez zaúčtovaných odpisů** roku,
 - **cizoměnové otevřené doklady** čekající na přecenění,
 - zůstatky **dohadných účtů 388/389** a **časového rozlišení 381 až 385**,
+- **rozdíl agendy časového rozlišení proti hlavní knize** po účtech 381 až 385 (varování, jen u firmy s položkami agendy, viz [Časové rozlišení](125_Casove_rozliseni.md#1257-krok-za-krokem-odsouhlasit-agendu-s-hlavni-knihou)),
 - informativní upozornění na **splatnou daň z příjmů** (591/341), kterou je nutné zaúčtovat ručně,
 - **vznik plátcovství DPH z obratu** (§ 6 ZDPH) u firmy, která plátcem není: vzniklo-li plátcovství uvnitř období (překročení horního limitu), je to chyba; překročení dolního limitu, kdy plátcovství vzniká až 1. ledna dalšího roku, je jen varování. Hodnotí se ke konci období, ne ke dni spuštění kontrol,
 - **kategorie účetní jednotky** pro povinné přehledy podle § 18 odst. 2 ZoÚ: nejde-li kategorii určit (například nastavení čistého obratu zahrnuje výnosy jen v jednom členění výsledovky), kontroly doběhnou a ohlásí varování s důvodem,
@@ -204,6 +205,11 @@ U cizoměnových pohledávek a závazků se otevřená částka určuje v měně
 ### 72.4.4 Kroky 4 a 5: Dohadné položky a časové rozlišení
 
 Oba kroky fungují stejně. Jde o asistenta pro ruční zaúčtování rozvahových položek k rozvahovému dni.
+
+Položky agendy [Časové rozlišení](125_Casove_rozliseni.md) krok neodkládá ani nerozpouští a řádky dokladů,
+ke kterým položka agendy existuje, vynechá. Blok agendy v kroku Časové rozlišení zaúčtuje roční rozpuštění
+položek k rozvahovému dni a ukáže nezaúčtované měsíční řádky ke kontrole
+([§ 125.10.8](125_Casove_rozliseni.md#125108-uzaverka-prubezny-vykaz-a-projekce-dppo)).
 
 1. Ve formuláři zvolte **Kontaci**:
    - u dohadných položek **Dohadná položka aktivní (388)** nebo **Dohadná položka pasivní (389)**,
@@ -918,6 +924,7 @@ Závazek a pohledávka se vzájemně nezapočítávají. Rozvaha, výsledovka, P
 
 - [Účetní kontroly a inventarizace](46_Ucetni_kontroly_a_inventarizace.md)
 - [Inventarizace účtů](69_Inventarizace_rozvahovych_uctu.md)
+- [Časové rozlišení](125_Casove_rozliseni.md)
 - [Aktivace účetnictví](68_Aktivace_ucetnictvi.md)
 - [Nástroje: číselné řady, kurzy a kompletní export](73_Ucetni_nastroje.md)
 - [Rozvaha](57_Rozvaha.md)

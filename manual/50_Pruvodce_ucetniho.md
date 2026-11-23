@@ -542,6 +542,10 @@ konceptu s obdobím. Uzávěrka si odklad položky uloží a další rok rozpou�
 faktur. Opakování období
 do nově vzniklých položek nepřenáší.
 
+Má-li se náklad či výnos rozpouštět průběžně po měsících nebo sledovat jako smlouva, založte v detailu
+položky z panelu **Časové rozlišení** položku agendy [Časové rozlišení](125_Casove_rozliseni.md). Položku
+s takovou vazbou uzávěrka neodkládá a rozpouští ji agenda.
+
 Na detailu lze připojit originály ze [skladu dokumentů](34_Dokumenty.md) a
 akcí **Připojit úhradu** přiřadit volnou bankovní či pokladní úhradu. Bez
 zapnutého automatického párování (níže) se úhrady párují jen ručně. Výběr

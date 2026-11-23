@@ -212,6 +212,9 @@ nespustí. Převod jedné firmy běží vždy jen jeden.
 7. Převáděný rok zůstává neuzavřený. Uzávěrku a převod zůstatků do dalšího roku
    provedete v `Nástroje → Uzávěrka`.
 8. Doplňte, co se nepřevádí ([§ 107.9.3](#10793-co-prevod-neprenese)).
+9. Vedla-li firma v POHODĚ agendu Časové rozlišení (ruční zápisy s čísly typu `24CR0001`), převezměte ji
+   do agendy [Časové rozlišení](125_Casove_rozliseni.md#1258-krok-za-krokem-prevzit-casove-rozliseni-z-pohody).
+   Převzetí nic neúčtuje a lze ho opakovat.
 
 **Jak poznáte, že je hotovo:** Kontroly rekonciliace projdou, nezbývají doklady
 v konceptu ani nepřijaté rozdíly a obraty v MyÚčtu odpovídají POHODĚ.
@@ -1119,5 +1122,6 @@ karty majetku a daňové odpisy zadejte ručně.
 - [Přechod z PAMICA](108_Prechod_z_PAMICA.md) - mzdy z POHODY Mzdy a PAMICA
 - [Přechod z PREMIER](109_Prechod_z_PREMIER.md)
 - [Režim OSS](45_OSS.md)
+- [Časové rozlišení](125_Casove_rozliseni.md) - převzetí agendy časového rozlišení
 - [Souběh se starým systémem](111_Soubeh_se_starym_systemem.md)
 - [Řešení problémů](999_Reseni_problemu.md)

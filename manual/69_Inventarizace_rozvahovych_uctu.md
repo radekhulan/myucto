@@ -120,6 +120,11 @@ Aplikace podle účtu nabídne typ podkladu, například:
 Jde o vodítko. Aplikace neověřuje, zda podklad existuje, je podepsaný nebo odpovídá skutečnosti. Kód účtu
 vede do opisu za celé období.
 
+U účtů 381 až 385 vede řádek také do agendy [Časové rozlišení](125_Casove_rozliseni.md) k rozvahovému dni.
+Odsouhlasení agendy rozpadne zůstatek účtu na položky, odklad uzávěrky a řádky bez položky a export
+**Rozpis časového rozlišení k datu** poslouží jako inventurní soupis
+([§ 125.10.7](125_Casove_rozliseni.md#125107-rozpis-k-datu)).
+
 ### 69.5.3 Export
 
 **Export PDF** a **Export XLSX** vyexportují vyplněný protokol: hlavičku s odpovědnou osobou, datem inventury
@@ -148,3 +153,4 @@ nahradíte. Účet bez pohybu se vynechá. Na obrazovce je u účtu nejvýš 200
 
 - [Účetní kontroly a inventarizace](46_Ucetni_kontroly_a_inventarizace.md)
 - [Uzávěrka](72_Uzaverka.md)
+- [Časové rozlišení](125_Casove_rozliseni.md)
