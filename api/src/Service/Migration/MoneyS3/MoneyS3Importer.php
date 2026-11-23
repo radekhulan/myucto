@@ -566,14 +566,17 @@ final class MoneyS3Importer
 
     /**
      * Adresáře zálohy bez účetního deníku, které přesto nesou doklady, banku nebo pokladnu:
-     * rozvrh převodu stojí na deníku, takový adresář by převod vynechal bez zmínky.
+     * rozvrh převodu stojí na deníku, takový adresář by převod vynechal bez zmínky. Patří sem
+     * každá evidence dokladů, kterou převod čte (faktury, ostatní závazky a pohledávky včetně
+     * mzdových, interní doklady, banka a pokladna).
      *
      * @param list<string> $journalDirs adresáře, o kterých je známo, že deník mají (náhled nahrání)
      * @return array<string,array<string,int>> adresář => tabulka => počet řádků
      */
     private static function directoriesWithoutJournal(Ms3Backup $backup, array $journalDirs = []): array
     {
-        $labels = ['VFaktury' => 'vydané faktury', 'PFaktury' => 'přijaté faktury', 'BankKnih' => 'banka', 'PoklKnih' => 'pokladna'];
+        $labels = ['VFaktury' => 'vydané faktury', 'PFaktury' => 'přijaté faktury', 'KnihZav' => 'ostatní závazky', 'KnihPohl' => 'ostatní pohledávky',
+            'IntDokl' => 'interní doklady', 'BankKnih' => 'banka', 'PoklKnih' => 'pokladna'];
         $known = array_fill_keys(array_map('strtoupper', $journalDirs), true);
         $out = [];
         foreach ($backup->yearDirs() as $dir) {

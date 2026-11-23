@@ -10,6 +10,7 @@ use MyInvoice\Repository\JournalEntryRepository;
 use MyInvoice\Service\Accounting\ChartOfAccountsSeeder;
 use MyInvoice\Service\Migration\MoneyS3\ImportOptions;
 use MyInvoice\Service\Migration\MoneyS3\ImportProtocol;
+use MyInvoice\Tests\Fixtures\MoneyS3\Ms3FixtureWriter;
 use MyInvoice\Tests\Fixtures\MoneyS3\SyntheticAgenda;
 use PDO;
 use PHPUnit\Framework\Attributes\Group;
@@ -263,6 +264,32 @@ final class MoneyS3YearSelectionTest extends MoneyS3ImportTestCase
         self::assertCount(1, $found, $this->explain($protocol));
         self::assertSame('ROK.003', $found[0]['context']['dir']);
         self::assertSame(['vydané faktury' => 1], $found[0]['context']['documents']);
+    }
+
+    /**
+     * Adresář bez deníku jen s evidencí dokladů mimo faktury, banku a pokladnu (mzdový
+     * závazek, ostatní pohledávka, interní doklad) kontrola ohlásí také: převod ho vynechá
+     * celý stejně jako adresář s fakturami.
+     */
+    public function testDirectoryWithOtherDocumentsWithoutJournalIsReported(): void
+    {
+        $fields = [['Cislo', 'L', 4], ['Doklad', 'C', 10], ['Popis', 'C', 50], ['Celkem', 'E', 10]];
+        $files = SyntheticAgenda::files();
+        $files['ROK.003/KnihZav.DAT'] = Ms3FixtureWriter::table($fields, [['Cislo' => 1, 'Doklad' => 'ZA260101', 'Popis' => 'Sociální pojištění - Leden 2026', 'Celkem' => 9570.0]]);
+        $files['ROK.003/KnihPohl.DAT'] = Ms3FixtureWriter::table($fields, [['Cislo' => 1, 'Doklad' => 'OP260001', 'Popis' => 'Pohledávka za společníkem', 'Celkem' => 500.0]]);
+        $files['ROK.003/IntDokl.DAT'] = Ms3FixtureWriter::table($fields, [
+            ['Cislo' => 1, 'Doklad' => 'ID260001', 'Popis' => 'Mzdy - Leden 2026', 'Celkem' => 30000.0],
+            ['Cislo' => 2, 'Doklad' => 'ID260002', 'Popis' => 'Přeúčtování', 'Celkem' => 100.0],
+        ]);
+        SyntheticAgenda::writeLzFiles($this->tmp . '/agenda.lz', $files);
+        $supplierId = $this->supplier();
+
+        $protocol = $this->convert($supplierId, new ImportOptions(ImportOptions::MODE_DRY_RUN));
+
+        $found = array_values(array_filter($protocol->get('preflight'), static fn (array $m): bool => $m['code'] === 'dir_without_journal'));
+        self::assertCount(1, $found, $this->explain($protocol));
+        self::assertSame('ROK.003', $found[0]['context']['dir']);
+        self::assertSame(['ostatní závazky' => 1, 'ostatní pohledávky' => 1, 'interní doklady' => 2], $found[0]['context']['documents']);
     }
 
     /**
