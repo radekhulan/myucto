@@ -122,6 +122,25 @@ final class MonetaBankConnectorTest extends TestCase
         self::assertSame('77', $out['specific_symbol']);
     }
 
+    /** OpenAPI MONETA zapisuje symboly odděleně mezerou: `VS:{…} KS:{…} SS:{…}`. */
+    public function testSymbolsSeparatedBySpacesAreRead(): void
+    {
+        $row = $this->outgoing();
+        $row['entryDetails']['transactionDetails']['remittanceInformation']['structured']['creditorReferenceInformation']['reference'] = 'VS:5 KS:0308 SS:77';
+        $history = [];
+        $connector = $this->connector([
+            $this->account(),
+            $this->json(['transactions' => [$row], 'pageCount' => 1, 'pageNumber' => 0, 'pageSize' => 100]),
+        ], $history);
+
+        $parsed = $connector->parseStatement($connector->downloadStatement($this->credentials(), '2026-09-01', '2026-09-22'));
+
+        $tx = $parsed['transactions'][0];
+        self::assertSame('5', $tx['variable_symbol']);
+        self::assertSame('308', $tx['constant_symbol']);
+        self::assertSame('77', $tx['specific_symbol']);
+    }
+
     public function testTokenWithoutAccessToConfiguredAccountNeverReadsTransactions(): void
     {
         $history = [];
