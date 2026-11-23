@@ -46,6 +46,14 @@ final class NonprofitDppoReadinessTest extends TestCase
         self::assertSame(['nonprofit_dppo_legal_profile_invalid'], array_column($result['findings'], 'code'));
     }
 
+    public function testProfileCodeFromALaterCheckDoesNotFailAnAlreadyPassedProfile(): void
+    {
+        // NonprofitDppoLegalRules::obligation ve validate() hází stejný kód jako neplatný profil, ale až v údajích pro přiznání.
+        $result = NonprofitDppoReadiness::afterFailure(['sources' => true, 'legal_profile' => true, 'profile_match' => true],
+            ['code' => 'nonprofit_dppo_legal_profile_invalid', 'message' => 'Synthetic obligation rows.'], self::unexpected(...));
+        self::assertSame(['sources' => 'ok', 'legal_profile' => 'ok', 'profile_match' => 'ok', 'return_data' => 'failed'], self::statuses($result));
+    }
+
     public function testIndependentFindingWithTheSameCodeIsReportedOnce(): void
     {
         $failure = ['code' => 'nonprofit_dppo_assessment_required', 'message' => 'Synthetic missing assessment.'];

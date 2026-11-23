@@ -41645,7 +41645,9 @@
       "openDocument": "Open document",
       "openEntry": "Open entry",
       "continueSearch": "No line in the searched part of the period. Continue with the next page.",
-      "error": "Source findings could not be loaded."
+      "error": "Source findings could not be loaded.",
+      "changed": "The sources changed since the overview was loaded. Reload the overview so the header counts match the summary.",
+      "openJointAllocations": "Open joint allocations"
     }
   },
   "propertyPayments": {

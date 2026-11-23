@@ -148,6 +148,37 @@ describe('J6 source findings', () => {
     expect(w.get('[data-test=source-findings-load]').attributes('disabled')).toBeUndefined()
   })
 
+  it('forgets the cursor of the previous group when another group fails to load', async () => {
+    api.sourceFindingLines
+      .mockResolvedValueOnce({ rows: [line()], after: 'cursor-a' })
+      .mockRejectedValueOnce({ response: { status: 500, data: { error: { code: 'x', message: 'Synthetic failure' } } } })
+    const w = render()
+    await openGroup(w)
+    await w.findAll('[data-test=source-finding-show]')[1]!.trigger('click')
+    await flushPromises()
+    expect(w.get('[data-test=source-finding-next]').attributes('disabled')).toBeDefined()
+    expect(w.text()).not.toContain('continueSearch')
+    expect(w.findAll('button').find(b => b.text().includes('nonprofitTaxJ6.previous'))!.attributes('disabled')).toBeDefined()
+  })
+
+  it('adds a joint allocation link to lines that are fixed in the joint allocation', async () => {
+    api.sourceFindingLines.mockResolvedValueOnce({ after: null, rows: [line({ line_id: 1, codes: ['joint_allocation_required'] }), line({ line_id: 2 })] })
+    const w = render()
+    await openGroup(w)
+    const rows = w.findAll('[data-test=source-finding-line]')
+    expect(JSON.parse(rows[0]!.get('[data-test=source-finding-joint]').attributes('data-to')!)).toEqual({ name: 'accounting-joint-allocations' })
+    expect(rows[1]!.find('[data-test=source-finding-joint]').exists()).toBe(false)
+  })
+
+  it('warns when the summary was computed over other sources than the page overview', async () => {
+    const w = mount(J6SourceFindings, { props: { supplierId: 1, periodId: 7, currentHash: 'other' }, global: { stubs: { RouterLink } } })
+    await w.get('[data-test=source-findings-load]').trigger('click')
+    await flushPromises()
+    expect(w.find('[data-test=source-findings-changed]').exists()).toBe(true)
+    await w.setProps({ currentHash: 'h' })
+    expect(w.find('[data-test=source-findings-changed]').exists()).toBe(false)
+  })
+
   it('shows the server message when the summary fails', async () => {
     api.sourceFindings.mockRejectedValueOnce({ response: { status: 403, data: { error: { code: 'nonprofit_tax_session_only', message: 'Synthetic session message' } } } })
     const w = render()

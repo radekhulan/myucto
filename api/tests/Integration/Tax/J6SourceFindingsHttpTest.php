@@ -51,7 +51,7 @@ final class J6SourceFindingsHttpTest extends TestCase
         $this->pdo->prepare('INSERT INTO dimension_values(type_id,supplier_id,code,name) VALUES(?,?,?,?)')
             ->execute([$this->catalog['activity_kind']['id'], $this->supplier, 'SPORT', 'Syntetický druh sport']);
         $this->kind = (int) $this->pdo->lastInsertId();
-        foreach (['221' => 'asset', '518' => 'expense', '602' => 'revenue', '518.100' => 'expense', '518.200' => 'expense'] as $code => $type) {
+        foreach (['221' => 'asset', '518' => 'expense', '602' => 'revenue', '518.100' => 'expense', '518.200' => 'expense', '518/300' => 'expense'] as $code => $type) {
             $this->pdo->prepare('INSERT INTO chart_of_accounts(supplier_id,account_code,name,account_type) VALUES(?,?,?,?)')
                 ->execute([$this->supplier, (string) $code, 'Syntetický účet ' . $code, $type]);
             $this->accounts[(string) $code] = (int) $this->pdo->lastInsertId();
@@ -130,6 +130,12 @@ final class J6SourceFindingsHttpTest extends TestCase
         [, $summary] = $this->http('GET', '/source-findings');
         $kind = array_values(array_filter($summary['groups'], static fn (array $g): bool => $g['code'] === 'missing_activity_kind'));
         self::assertSame([['518.100', 2], ['518.200', 1]], array_map(static fn (array $g): array => [$g['account_code'], $g['line_count']], $kind));
+
+        // Analytika s lomítkem (průvodce nastavením ho povoluje) jde vyfiltrovat stejně.
+        $slash = $this->entries('2025-02-02', '518/300', 'debit', 1, ['activity']);
+        [$status, $page] = $this->http('GET', '/source-findings/lines', ['account' => '518/300', 'code' => 'missing_activity_kind']);
+        self::assertSame(200, $status, json_encode($page));
+        self::assertSame($slash, array_column($page['rows'], 'entry_id'));
     }
 
     public function testLinesResumeInsideOneEntryAndSkipClosingEntries(): void
@@ -179,6 +185,14 @@ final class J6SourceFindingsHttpTest extends TestCase
             'Protizápis vede na doklad stornovaného zápisu.');
     }
 
+    public function testEntryRemovedBeforeEnrichmentIsSkipped(): void
+    {
+        // Zápis odúčtovaný mezi čtením podkladů a obohacením stránka vynechá, místo chyby 500.
+        $service = $this->container->get(J6SourceFindingService::class);
+        $method = new \ReflectionMethod($service, 'withEntries');
+        self::assertSame([], $method->invoke($service, $this->supplier, [['line_id' => 1, 'entry_id' => PHP_INT_MAX, 'codes' => ['missing_activity']]]));
+    }
+
     public function testSummaryReadsTheSourcesOnlyOnce(): void
     {
         $this->entries('2025-02-01', '602', 'credit', 600, null);
@@ -223,8 +237,18 @@ final class J6SourceFindingsHttpTest extends TestCase
             self::assertSame(400, $status, json_encode($invalid));
         }
         [$status, $body] = $this->http('GET', '/source-findings', [], null, '999999999');
-        self::assertContains($status, [403, 404], 'Cizí nebo neexistující období nic nevydá.');
+        self::assertContains($status, [403, 404], 'Neexistující období nic nevydá.');
         self::assertArrayNotHasKey('groups', $body);
+
+        // Období jiné firmy: nevydá skupiny ani řádky.
+        $other = $this->createIsolatedSupplier($this->pdo, $this->supplier);
+        $foreign = (new AccountingPeriodRepository($this->db))->create($other, 2025, '2025-01-01', '2025-12-31');
+        foreach (['/source-findings', '/source-findings/lines'] as $path) {
+            [$status, $body] = $this->http('GET', $path, [], 'session', (string) $foreign);
+            self::assertContains($status, [403, 404], $path);
+            self::assertArrayNotHasKey('groups', $body);
+            self::assertArrayNotHasKey('rows', $body);
+        }
     }
 
     public function testFindingsAreSessionOnlyAndNeedAccountingRead(): void

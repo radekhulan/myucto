@@ -58,6 +58,8 @@ async function loadProfile() {
 async function checkReadiness() {
  if (!legal.value || locked.value) return
  const supplier = props.supplier, ticket = ++generation; busy.value = true; error.value = ''; native.value = null
+ // Předchozí výsledek kontroly zahodit hned: neúspěšná nová kontrola nesmí nechat staré „v pořádku“.
+ legal.value = { ...legal.value, capabilities: { ...legal.value.capabilities, readiness_checked: false, calculation_ready: false, filing_ready: false, readiness_steps: [], preparation_findings: [] } }
  try {
   const data = await api.readiness(supplier, legal.value.period.id)
   if (!current(ticket, supplier) || !legal.value) return

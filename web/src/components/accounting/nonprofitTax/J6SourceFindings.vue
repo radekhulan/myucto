@@ -11,9 +11,11 @@ import { journalEntryLink, journalSourceLink } from '@/utils/journalSourceLink'
 /**
  * Zjištění podkladů daňového posouzení za období mimo koncept. Souhrn se počítá na
  * vyžádání jedním průchodem podkladů, řádky se čtou po stránkách přes kurzor serveru.
- * Proklik vede na prvotní doklad, kde se členění opravuje, jinak na zápis v deníku.
+ * Proklik vede na prvotní doklad, kde se členění opravuje, jinak na zápis v deníku; řádky,
+ * které se opravují ve společné alokaci, mají navíc odkaz na společné alokace.
  */
-const props = defineProps<{ supplierId: number; periodId: number }>()
+const props = defineProps<{ supplierId: number; periodId: number; currentHash?: string }>()
+const JOINT_CODES = ['joint_allocation_required', 'joint_dimensions_changed']
 const { t, locale } = useI18n()
 
 const summary = ref<J6SourceFindingSummary | null>(null)
@@ -44,6 +46,11 @@ function findingLabel(code: string): string {
 function accountLabel(group: J6SourceFindingGroup): string {
   return group.account_name ? `${group.account_code} ${group.account_name}` : group.account_code
 }
+function needsJointAllocation(line: J6SourceFindingLine): boolean {
+  return line.codes.some(code => JOINT_CODES.includes(code))
+}
+/** Souhrn spočítaný nad jinými podklady, než jaké ukazuje přehled stránky (deník se mezitím změnil). */
+const changedSinceOverview = computed(() => Boolean(summary.value && props.currentHash && summary.value.source.input_hash !== props.currentHash))
 function lineLink(line: J6SourceFindingLine): { to: RouteLocationRaw; document: boolean } {
   const to = journalSourceLink(line)
   return to ? { to, document: true } : { to: journalEntryLink(line.entry_id), document: false }
@@ -81,8 +88,12 @@ async function loadLines(position: string | null, history?: (string | null)[]) {
   })
 }
 async function showLines(group: J6SourceFindingGroup) {
+  // Kurzor i historie patří předchozí skupině; server by je pro nový filtr odmítl.
   filter.value = { account: group.account_code, code: group.code }
   lines.value = []
+  after.value = null
+  cursor.value = null
+  back.value = []
   await loadLines(null, [])
 }
 async function next() {
@@ -120,6 +131,7 @@ watch(() => [props.supplierId, props.periodId], () => {
     <p v-if="loading" class="text-sm text-neutral-600">{{ t('nonprofitTaxJ6.loading') }}</p>
 
     <template v-if="summary">
+      <p v-if="changedSinceOverview" data-test="source-findings-changed" class="rounded-lg border border-warning-300 bg-warning-50 p-3 text-sm text-warning-800">{{ t('nonprofitTaxJ6.sourceFindings.changed') }}</p>
       <p class="text-sm" data-test="source-findings-total">{{ t('nonprofitTaxJ6.sourceFindings.total', { lines: summary.line_count, rows: summary.source.row_count }) }}</p>
       <p v-if="!summary.groups.length" class="rounded-lg border border-success-300 bg-success-50 p-3 text-sm text-success-700">{{ t('nonprofitTaxJ6.sourceFindings.none') }}</p>
       <div v-else class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-x-auto">
@@ -177,6 +189,9 @@ watch(() => [props.supplierId, props.periodId], () => {
               <td class="px-3 py-2 text-right">
                 <RouterLink :to="lineLink(line).to" data-test="source-finding-link" class="text-xs font-medium text-primary-600 hover:underline whitespace-nowrap">
                   {{ lineLink(line).document ? t('nonprofitTaxJ6.sourceFindings.openDocument') : t('nonprofitTaxJ6.sourceFindings.openEntry') }} →
+                </RouterLink>
+                <RouterLink v-if="needsJointAllocation(line)" :to="{ name: 'accounting-joint-allocations' }" data-test="source-finding-joint" class="mt-1 block text-xs font-medium text-primary-600 hover:underline whitespace-nowrap">
+                  {{ t('nonprofitTaxJ6.sourceFindings.openJointAllocations') }} →
                 </RouterLink>
               </td>
             </tr>

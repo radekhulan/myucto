@@ -387,7 +387,7 @@ final class NonprofitReferenceAssociationEndToEndTest extends TestCase
             array_column($caps['readiness_steps'], 'status', 'step'));
     }
 
-    public function testReadinessOfDocumentedManualAssessment(): void
+    public function testReadinessOfDocumentedManualPeriodReportsUnsupportedRuleset(): void
     {
         // R10: doložené ruční posouzení (documented_manual) a připravenost DPPO 504.
         // Ruční metodika je jen pro období mimo automatickou (2024 až 2026), proto prodloužené období do poloviny 2027.
@@ -415,6 +415,24 @@ final class NonprofitReferenceAssociationEndToEndTest extends TestCase
             array_column($body['capabilities']['readiness_steps'], 'status', 'step'));
         self::assertSame(['nonprofit_dppo_ruleset_not_supported'], array_column($body['capabilities']['preparation_findings'], 'code'));
         self::assertFalse($body['capabilities']['calculation_ready']);
+    }
+
+    public function testReadinessChecksSavedReturnInputsAsReturnData(): void
+    {
+        // Údaje pro přiznání se ověřují nad uloženými vstupy přiznání stejně jako výpočet:
+        // úprava navázaná na neexistující řádek posouzení selže až v tomto kroku.
+        $this->postReferenceYear();
+        (new NonprofitLegalProfileService($this->db))->confirm($this->supplier, $this->period, $this->legalRequest('tj-legal-inputs'), $this->actor);
+        $this->confirmPaged($this->period, $this->referenceAssessment(), 'tj-inputs-' . $this->supplier);
+        $this->container->get(TaxReturnService::class)->getReturn($this->supplier, $this->year, 'po', $this->actor);
+        $inputs = ['nonprofit' => ['adjustments' => [['kind' => 'expense_addback', 'source_id' => 'line:999999999', 'amount_cents' => 100,
+            'legal_basis' => 'zdp_25', 'evidence' => 'Syntetická úprava navázaná na zaniklý řádek']]]];
+        $this->pdo->prepare("UPDATE income_tax_returns SET inputs=? WHERE supplier_id=? AND year=? AND taxpayer_type='po'")
+            ->execute([json_encode($inputs), $this->supplier, $this->year]);
+        $caps = $this->readiness();
+        self::assertSame(['sources' => 'ok', 'legal_profile' => 'ok', 'profile_match' => 'ok', 'return_data' => 'failed'],
+            array_column($caps['readiness_steps'], 'status', 'step'));
+        self::assertSame('nonprofit_dppo_adjustment_invalid', $caps['readiness_steps'][3]['code']);
     }
 
     public function testIncompleteSourcesStillStopCalculationWithTheSameCode(): void

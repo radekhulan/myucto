@@ -51,6 +51,18 @@ describe('Nonprofit DPPO workspace', () => {
   expect(w.text()).toContain('Synthetic other finding')
   w.unmount()
  })
+ it('does not leave the previous readiness result visible when a new check fails', async () => {
+  const ok = ['sources', 'legal_profile', 'profile_match', 'return_data'].map(step => ({ step, status: 'ok', code: null, message: null }))
+  api.readiness.mockResolvedValueOnce({ period, capabilities: { ...legal().capabilities, readiness_checked: true, readiness_steps: ok, preparation_findings: [] } })
+   .mockRejectedValueOnce({ response: { status: 500, data: { error: { message: 'Synthetic outage' } } } })
+  const w = render(); await flushPromises()
+  await w.get('[data-action=check-readiness]').trigger('click'); await flushPromises()
+  expect(w.findAll('[data-test=readiness-steps] li')).toHaveLength(4)
+  await w.get('[data-action=check-readiness]').trigger('click'); await flushPromises()
+  expect(w.find('[data-test=readiness-steps]').exists()).toBe(false)
+  expect(w.text()).toContain('Synthetic outage')
+  w.unmount()
+ })
  it('gives no statement link for return data and hides unevaluated steps behind a general reason', async () => {
   const pending = ['sources', 'legal_profile', 'profile_match', 'return_data'].map(step => ({ step, status: 'not_evaluated', code: null, message: null }))
   const returnData = pending.map(step => step.step === 'return_data' ? { ...step, status: 'failed', code: 'nonprofit_dppo_adjustment_invalid', message: 'Synthetic adjustment' } : { ...step, status: 'ok' })

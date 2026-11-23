@@ -44248,7 +44248,9 @@
       "openDocument": "Otevřít doklad",
       "openEntry": "Otevřít zápis",
       "continueSearch": "V prohledané části období žádný řádek není. Pokračujte další stránkou.",
-      "error": "Zjištění podkladů se nepodařilo načíst."
+      "error": "Zjištění podkladů se nepodařilo načíst.",
+      "changed": "Podklady se od načtení přehledu změnily. Obnovte přehled, ať počty v záhlaví odpovídají souhrnu.",
+      "openJointAllocations": "Otevřít společné alokace"
     }
   },
   "propertyServiceLifecycle": {

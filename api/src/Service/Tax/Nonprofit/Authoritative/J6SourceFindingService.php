@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Tax\Nonprofit\Authoritative;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Repository\JournalEntryRepository;
 use MyInvoice\Service\Tax\Nonprofit\Snapshot\SnapshotCursor;
 use PDO;
 
@@ -19,9 +20,13 @@ use PDO;
 final readonly class J6SourceFindingService
 {
     /** Kolik řádků deníku jedno volání seznamu nejvýše prohledá, než vrátí kurzor pro pokračování. */
-    public const SCAN_BUDGET = 5000;
+    public const SCAN_BUDGET = 20000;
 
-    public function __construct(private Connection $db, private J6CurrentProviderFactory $current) {}
+    /** Údaje zápisu pro štítek a proklik na prvotní doklad (stejná pole jako deník, viz journalSourceLink ve frontendu). */
+    private const ENTRY_FIELDS = ['document_no', 'description', 'source_type', 'source_id', 'source_link_id', 'source_statement_id',
+        'source_doc_number', 'source_register_id', 'source_asset_id', 'source_settlement_doc_type', 'source_settlement_doc_id'];
+
+    public function __construct(private Connection $db, private J6CurrentProviderFactory $current, private JournalEntryRepository $journal) {}
 
     /**
      * Souhrn zjištění po účtu × kódu, počítaný v řádcích. Zjištění patří vždy stránce
@@ -116,50 +121,24 @@ final readonly class J6SourceFindingService
     }
 
     /**
-     * Číslo dokladu, popis a zdroj zápisu jedním dotazem pro celou stránku. Zdroj nese stejné
-     * obohacení jako deník ({@see \MyInvoice\Repository\JournalEntryRepository::paginate()}),
-     * aby proklik vedl na tentýž prvotní doklad (výpis banky, pokladní doklad, karta majetku,
-     * vyrovnaný doklad zápočtu, u protizápisu zdroj stornovaného zápisu).
+     * Číslo dokladu, popis a zdroj zápisu pro celou stránku přímo z deníku
+     * ({@see JournalEntryRepository::paginate()} s filtrem entry_ids), aby proklik vedl na tentýž
+     * prvotní doklad jako v deníku (výpis banky, pokladní doklad, karta majetku, vyrovnaný doklad
+     * zápočtu, u protizápisu zdroj stornovaného zápisu). Zápis, který mezi čtením podkladů
+     * a obohacením zmizel (odúčtování v jiném okně), se ze stránky vynechá.
      */
     private function withEntries(int $supplierId, array $rows): array
     {
         $ids = array_values(array_unique(array_column($rows, 'entry_id')));
         if ($ids === []) return [];
-        $stmt = $this->db->pdo()->prepare("SELECT je.id,
-                   COALESCE(je.document_no, src_i.varsymbol, src_pi.vendor_invoice_number, src_pi.varsymbol) AS document_no,
-                   je.description, je.source_type, je.source_id,
-                   COALESCE(je.source_id, rev_src.source_id) AS source_link_id,
-                   COALESCE(bt.statement_id, rev_bt.statement_id) AS source_statement_id,
-                   COALESCE(cd.doc_number, rev_cd.doc_number) AS source_doc_number,
-                   COALESCE(cd.register_id, rev_cd.register_id) AS source_register_id,
-                   ast.id AS source_asset_id,
-                   stl.doc_type AS source_settlement_doc_type,
-                   stl.doc_id AS source_settlement_doc_id
-              FROM journal_entries je
-         LEFT JOIN journal_entries rev_src FORCE INDEX (idx_je_supplier_reversed_by)
-                ON rev_src.supplier_id = je.supplier_id AND rev_src.reversed_by = je.id
-         LEFT JOIN bank_transactions rev_bt ON rev_src.source_type = 'bank' AND rev_bt.id = rev_src.source_id
-         LEFT JOIN cash_documents rev_cd ON rev_src.source_type = 'cash' AND rev_cd.id = rev_src.source_id
-         LEFT JOIN bank_transactions bt ON je.source_type = 'bank' AND bt.id = je.source_id
-         LEFT JOIN cash_documents cd ON je.source_type = 'cash' AND cd.id = je.source_id
-         LEFT JOIN invoice_settlements stl ON je.source_type = 'settlement' AND stl.id = je.source_id AND stl.supplier_id = je.supplier_id
-         LEFT JOIN invoices src_i ON je.source_type = 'invoice' AND src_i.id = je.source_id AND src_i.supplier_id = je.supplier_id
-         LEFT JOIN purchase_invoices src_pi ON je.source_type = 'purchase_invoice' AND src_pi.id = je.source_id AND src_pi.supplier_id = je.supplier_id
-         LEFT JOIN depreciation_entries dep ON je.source_type = 'depreciation' AND dep.id = je.source_id AND dep.supplier_id = je.supplier_id
-         LEFT JOIN assets ast ON ast.supplier_id = je.supplier_id
-                AND ast.id = CASE WHEN je.source_type IN ('asset', 'asset_disposal') THEN je.source_id
-                                  WHEN je.source_type = 'depreciation' THEN dep.asset_id ELSE NULL END
-             WHERE je.supplier_id = ? AND je.id IN (" . implode(',', array_fill(0, count($ids), '?')) . ')');
-        $stmt->execute([$supplierId, ...$ids]);
-        $entries = [];
-        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $entry) $entries[(int) $entry['id']] = $entry;
-        $ints = ['source_id', 'source_link_id', 'source_statement_id', 'source_register_id', 'source_asset_id', 'source_settlement_doc_id'];
-        foreach ($rows as &$row) {
-            $entry = $entries[$row['entry_id']];
-            foreach (['document_no', 'description', 'source_type', 'source_doc_number', 'source_settlement_doc_type'] as $key) $row[$key] = $entry[$key];
-            foreach ($ints as $key) $row[$key] = $entry[$key] === null ? null : (int) $entry[$key];
+        $entries = array_column($this->journal->paginate($supplierId, ['entry_ids' => $ids], count($ids), 0)['items'], null, 'id');
+        $out = [];
+        foreach ($rows as $row) {
+            $entry = $entries[$row['entry_id']] ?? null;
+            if ($entry === null) continue;
+            foreach (self::ENTRY_FIELDS as $key) $row[$key] = $entry[$key] ?? null;
+            $out[] = $row;
         }
-        unset($row);
-        return $rows;
+        return $out;
     }
 }

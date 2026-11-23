@@ -661,7 +661,7 @@ onMounted(() => { void loadOverview() })
         <template v-if="latest.summary"> · {{ t('nonprofitTaxJ6.assessedResult') }}: <span class="font-mono">{{ money(latest.summary.assessed_result_cents) }}</span></template>
         <template v-if="latest.conversion_required"> · {{ t('nonprofitTaxJ6.conversionRequired') }}</template>
       </p>
-      <J6SourceFindings v-if="current.finding_count > 0" :key="current.input_hash" :supplier-id="props.supplierId" :period-id="props.periodId" />
+      <J6SourceFindings v-if="current.finding_count > 0" :key="current.input_hash" :current-hash="current.input_hash" :supplier-id="props.supplierId" :period-id="props.periodId" />
       <div class="grid gap-3 md:grid-cols-2">
         <label :class="formLabel">{{ t('nonprofitTaxJ6.profile') }}
           <select v-model="profileKind" data-test="profile-kind" :class="formInput" class="mt-1" :disabled="!!draft && !editable">

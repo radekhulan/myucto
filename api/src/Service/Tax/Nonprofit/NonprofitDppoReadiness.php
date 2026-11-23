@@ -6,6 +6,7 @@ namespace MyInvoice\Service\Tax\Nonprofit;
 
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\NonprofitTaxAssessmentRepository;
+use MyInvoice\Repository\TaxReturnRepository;
 use MyInvoice\Service\Tax\Return\TaxReturnException;
 
 /**
@@ -49,7 +50,9 @@ final readonly class NonprofitDppoReadiness
     {
         $passed = [];
         try {
-            $this->provider->gather($supplierId, (int) $period['fiscal_year'], [], static function (string $step) use (&$passed): void {
+            // Stejné uložené vstupy přiznání jako výpočet (TaxReturnService::compute), aby krok údajů pro přiznání
+            // ověřil totéž, co pak výpočet použije (úpravy, dary).
+            $this->provider->gather($supplierId, (int) $period['fiscal_year'], $this->savedInputs($supplierId, (int) $period['fiscal_year']), static function (string $step) use (&$passed): void {
                 $passed[$step] = true;
             });
             return ['ready' => true, 'steps' => array_map(static fn (string $step): array => ['step' => $step, 'status' => 'ok', 'code' => null, 'message' => null], self::STEPS), 'findings' => []];
@@ -76,8 +79,10 @@ final readonly class NonprofitDppoReadiness
     {
         $steps = self::pending();
         if (in_array($failure['code'], self::GENERAL, true)) return ['ready' => false, 'steps' => $steps, 'findings' => [$failure]];
-        // Krok podle kódu chyby: legacy cesta kontroluje právní profil dřív než posouzení.
-        $failed = self::CODE_STEPS[$failure['code']] ?? current(array_diff(self::STEPS, array_keys($passed)));
+        // Krok podle kódu chyby: legacy cesta kontroluje právní profil dřív než posouzení. Už splněný krok
+        // chybu nedostane (stejný kód může přijít i z pozdější kontroly údajů pro přiznání).
+        $mapped = self::CODE_STEPS[$failure['code']] ?? null;
+        $failed = $mapped !== null && !isset($passed[$mapped]) ? $mapped : current(array_diff(self::STEPS, array_keys($passed)));
         $findings = [$failure];
         foreach ($steps as &$step) {
             if ($step['step'] === $failed) {
@@ -114,11 +119,18 @@ final readonly class NonprofitDppoReadiness
     {
         try {
             $context = (new NonprofitLegalProfileService($this->db))->assessmentContext($supplierId, $periodId);
-        } catch (TaxReturnException $error) {
+        } catch (TaxReturnException | NonprofitTaxAssessmentException $error) {
             return ['code' => $error->errorCode, 'message' => $error->getMessage()];
         }
         if (isset($context['legal_profile'])) return null;
         $error = NonprofitDppoDataProvider::legalProfileRequired();
         return ['code' => $error->errorCode, 'message' => $error->getMessage()];
+    }
+
+    /** Uložené vstupy řádného přiznání PO za rok; bez přiznání prázdné. */
+    private function savedInputs(int $supplierId, int $year): array
+    {
+        $row = (new TaxReturnRepository($this->db))->find($supplierId, $year, 'po');
+        return is_array($row['inputs'] ?? null) ? $row['inputs'] : [];
     }
 }

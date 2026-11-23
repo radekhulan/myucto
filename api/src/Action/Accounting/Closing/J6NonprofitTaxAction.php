@@ -76,7 +76,7 @@ final class J6NonprofitTaxAction
             $this->period($supplier, $period);
             $query = $request->getQueryParams();
             $code = $this->filter($query, 'code', '/^[a-z_]{1,64}$/D');
-            $account = $this->filter($query, 'account', '/^[0-9A-Za-z._-]{1,32}$/D');
+            $account = $this->filter($query, 'account', '#^[0-9A-Za-z._/-]{1,32}$#D');
             $limit = $this->queryInt($request, 'limit', 50, 1, 200);
             // Kurzor patří k filtru: s jiným kódem, účtem nebo velikostí stránky by přeskočil řádky.
             $binding = ['actor_id' => $this->actor($request), 'supplier_id' => $supplier, 'period_id' => $period,
