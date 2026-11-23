@@ -107,7 +107,7 @@ final class DphBookBuilder
         // žurnál). Seskupíme per (doklad, kód, sazba) do jednoho řádku přehledu a
         // zařadíme do sekcí dle dphdp3_line (+ mirror 43, + ř.47 majetek).
         $sections = [];
-        $groups = $this->groupLedgerRows($supplierId, $start, $end, $documentIds, $dimension);
+        $groups = $this->groupLedgerRows($supplierId, $start, $end, $documentIds, $dimension, $unassigned);
         foreach ($groups as $g) {
             $scope = $g['source'] === 'sale' ? 'issued' : 'received';
             $line = $g['dphdp3_line'];
@@ -136,24 +136,26 @@ final class DphBookBuilder
             // Secondary (ř.43/44 mirror odpočet u RC / dovozu služby). U plnění bez nároku
             // na odpočet ('none', § 72/4) se mirror POTLAČÍ — konzistentně s DPHDP3
             // (VatClassificationMapper) a KH: výstupní samovyměření zůstává, odpočet ne.
-            if (!empty($cls['dphdp3_line_secondary']) && empty($g['vat_deduction_none'])) {
+            // Částky zrcadlového řádku i ř. 47 počítá TÝŽ pravidlo jako přiznání
+            // ({@see DphLineProjection::secondaryAmounts()}): poměrný nárok § 75 u samovyměření
+            // krátí odpočet, doplňující ř. 51 daň nenese.
+            $secondary = $cls['dphdp3_line_secondary'];
+            if (!empty($secondary) && empty($g['vat_deduction_none'])) {
+                [$secondaryBase, $secondaryVat] = DphLineProjection::secondaryAmounts($g, $secondary);
                 $this->addToSection($sections, $scope, array_merge($cls, [
-                    'dphdp3_line'           => $cls['dphdp3_line_secondary'],
+                    'dphdp3_line'           => $secondary,
                     'dphdp3_line_secondary' => null,
                     'is_secondary'          => true,
-                ]), $row);
+                ]), $this->toBookRow(['base_czk' => $secondaryBase, 'vat_czk' => $secondaryVat] + $g));
             }
             // ř.47 — hodnota pořízeného majetku (primary nebo secondary v 40-45).
-            if ($g['is_fixed_asset']) {
-                $p = (int) ($cls['dphdp3_line'] ?? 0);
-                $s = (int) ($cls['dphdp3_line_secondary'] ?? 0);
-                if (($p >= 40 && $p <= 45) || ($s >= 40 && $s <= 45)) {
-                    $this->addToSection($sections, $scope, array_merge($cls, [
-                        'dphdp3_line'           => '47',
-                        'dphdp3_line_secondary' => null,
-                        'is_secondary'          => true,
-                    ]), $row);
-                }
+            $asset = DphLineProjection::fixedAssetAmounts($g, (string) $line, $secondary);
+            if ($asset !== null) {
+                $this->addToSection($sections, $scope, array_merge($cls, [
+                    'dphdp3_line'           => '47',
+                    'dphdp3_line_secondary' => null,
+                    'is_secondary'          => true,
+                ]), $this->toBookRow(['base_czk' => $asset[0], 'vat_czk' => $asset[1]] + $g));
             }
         }
 
@@ -258,6 +260,10 @@ final class DphBookBuilder
             ],
             'supplier' => $supplier,
             'dimension' => $dimension?->toArray(),
+            // Doklady s hodnotou filtru, jejichž rozpis DPH nejde přiřadit k položkám
+            // s různými dimenzemi: v knize hodnoty nejsou, sestava DPH podle dimenze je
+            // vykazuje samostatným řádkem.
+            'dimension_unassigned' => $dimension !== null ? array_values($unassigned) : [],
             'sections' => $sectionList,
             'totals' => [
                 'issued'      => $issued,
@@ -548,23 +554,40 @@ final class DphBookBuilder
      * @param array{sale?: list<int>, purchase?: list<int>}|null $documentIds
      * @return list<array<string,mixed>>
      */
-    private function groupLedgerRows(int $supplierId, string $start, string $end, ?array $documentIds = null, ?DimensionFilter $dimension = null): array
+    private function groupLedgerRows(int $supplierId, string $start, string $end, ?array $documentIds = null, ?DimensionFilter $dimension = null, ?array &$unassigned = null): array
     {
+        $unassigned = [];
         $grouped = [];
         foreach ($this->ledger->iterateReturnRows($supplierId, $start, $end, true, $documentIds, $dimension) as $r) {
+            if (isset($r['dimension_unassigned'])) {
+                // Rozpis DPH dokladu s hodnotou filtru, který nejde přiřadit k položkám
+                // (VatLedgerDimensionAllocation): do knihy hodnoty nepatří, vypíše se zvlášť.
+                $u = VatLedgerService::documentIdentity($r);
+                $unassigned[$u] ??= ['source' => $r['source'], 'document_kind' => $r['document_kind'], 'invoice_id' => (int) $r['invoice_id'],
+                    'doc_number' => $r['doc_number'] ?? $r['vendor_invoice_number'], 'counterparty_name' => (string) $r['counterparty_name'],
+                    'base' => 0.0, 'vat' => 0.0];
+                $unassigned[$u]['base'] = round($unassigned[$u]['base'] + (float) $r['dimension_unassigned_amounts']['base_czk'], 2);
+                $unassigned[$u]['vat'] = round($unassigned[$u]['vat'] + (float) $r['dimension_unassigned_amounts']['vat_czk'], 2);
+                continue;
+            }
             $key = VatLedgerService::documentIdentity($r) . ':' . ($r['code'] ?? '') . ':' . $r['vat_rate'];
             if (!isset($grouped[$key])) {
                 // Jen atributy, které build() a toBookRow() čtou: kniha firmy s desítkami
                 // tisíc dokladů by s celými řádky ledgeru nevešla do paměti PHP.
                 $grouped[$key] = array_intersect_key($r, self::GROUP_FIELDS);
-                $grouped[$key]['base_czk'] = 0.0;
-                $grouped[$key]['vat_czk'] = 0.0;
+                foreach (self::GROUP_AMOUNTS as $amount) {
+                    $grouped[$key][$amount] = 0.0;
+                }
             }
-            $grouped[$key]['base_czk'] += (float) $r['base_czk'];
-            $grouped[$key]['vat_czk']  += (float) $r['vat_czk'];
+            foreach (self::GROUP_AMOUNTS as $amount) {
+                $grouped[$key][$amount] += (float) ($r[$amount] ?? $r[str_replace('deduction_', '', $amount)]);
+            }
         }
         return array_values($grouped);
     }
+
+    /** Částky seskupeného řádku (odpočtové varianty pro zrcadlový ř. 43/44 a ř. 47). */
+    private const GROUP_AMOUNTS = ['base_czk', 'vat_czk', 'deduction_base_czk', 'deduction_vat_czk'];
 
     /** Atributy seskupeného řádku, které čte {@see build()} a {@see toBookRow()}. */
     private const GROUP_FIELDS = [

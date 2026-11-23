@@ -43,12 +43,7 @@ final class DphLineProjection
         // zrcadlový odpočet POTLAČÍ: výstupní samovyměření (primární ř.) zůstává, odpočet ne.
         $secondary = $r['dphdp3_line_secondary'];
         if ($secondary !== null && $secondary !== '' && $secondary !== $primary && empty($r['vat_deduction_none'])) {
-            // Ř.51 je pouze doplňující základ plnění vyloučeného z koeficientu §76;
-            // daň zůstává výhradně na primárním ř.1/2.
-            $secondaryVat = in_array($secondary, ['51', '51b'], true)
-                ? 0.0
-                : (float) ($r['deduction_vat_czk'] ?? $vatCzk);
-            $secondaryBase = (float) ($r['deduction_base_czk'] ?? $baseCzk);
+            [$secondaryBase, $secondaryVat] = self::secondaryAmounts($r, $secondary);
             $this->addLine(
                 $secondary,
                 $secondaryBase,
@@ -63,23 +58,9 @@ final class DphLineProjection
         }
 
         // ř.47 — hodnota pořízeného majetku (doplňující údaj k ř.40-45).
-        if ($r['is_fixed_asset']) {
-            $assetEligibleLine = $this->countsAsFixedAssetLine($primary)
-                ? $primary
-                : (($secondary !== null && $this->countsAsFixedAssetLine($secondary)) ? $secondary : null);
-            if ($assetEligibleLine !== null) {
-                $assetBase = $assetEligibleLine === $secondary
-                    ? (float) ($r['deduction_base_czk'] ?? $baseCzk)
-                    : $baseCzk;
-                // Daň ř.47 jde do sloupce „V plné výši" (od_maj); u kráceného odpočtu
-                // (ř.40k-44k) se sloupec „Krácený odpočet" zatím neplní.
-                $assetVat = str_ends_with($assetEligibleLine, 'k')
-                    ? 0.0
-                    : ($assetEligibleLine === $secondary
-                        ? (float) ($r['deduction_vat_czk'] ?? $vatCzk)
-                        : $vatCzk);
-                $this->addLine('47', $assetBase, $assetVat, $documentKey, 'Hodnota pořízeného majetku (§ 4 odst. 4 písm. c)');
-            }
+        $asset = self::fixedAssetAmounts($r, $primary, $secondary);
+        if ($asset !== null) {
+            $this->addLine('47', $asset[0], $asset[1], $documentKey, 'Hodnota pořízeného majetku (§ 4 odst. 4 písm. c)');
         }
     }
 
@@ -129,6 +110,51 @@ final class DphLineProjection
      */
     private const SELF_ASSESSMENT_MIRROR_LINES = ['43' => true, '44' => true, '43k' => true, '44k' => true];
 
+    /**
+     * Základ a daň zrcadlového (secondary) řádku řádku evidence: odpočtová varianta
+     * (`deduction_*`, u samovyměření s poměrným nárokem § 75 krácená), u doplňujícího
+     * ř. 51/51b jen základ — daň zůstává výhradně na primárním ř. 1/2. Sdílí přiznání
+     * i Kniha DPH ({@see DphBookBuilder}), aby zrcadlový odpočet ukazovaly stejně.
+     *
+     * @param array<string,mixed> $r
+     * @return array{0: float, 1: float}
+     */
+    public static function secondaryAmounts(array $r, string $secondary): array
+    {
+        $base = (float) ($r['deduction_base_czk'] ?? $r['base_czk']);
+        $vat = in_array($secondary, ['51', '51b'], true)
+            ? 0.0
+            : (float) ($r['deduction_vat_czk'] ?? $r['vat_czk']);
+        return [$base, $vat];
+    }
+
+    /**
+     * Základ a daň řádku evidence na ř. 47 (hodnota pořízeného majetku), null když na něj
+     * nepatří. Daň jde do sloupce „V plné výši" (od_maj); u kráceného odpočtu (ř. 40k–44k)
+     * se sloupec „Krácený odpočet" zatím neplní.
+     *
+     * @param array<string,mixed> $r
+     * @return array{0: float, 1: float}|null
+     */
+    public static function fixedAssetAmounts(array $r, string $primary, ?string $secondary): ?array
+    {
+        if (empty($r['is_fixed_asset'])) {
+            return null;
+        }
+        $line = self::countsAsFixedAssetLine($primary)
+            ? $primary
+            : (($secondary !== null && $secondary !== '' && self::countsAsFixedAssetLine($secondary)) ? $secondary : null);
+        if ($line === null) {
+            return null;
+        }
+        if ($line === $secondary) {
+            [$base, $vat] = self::secondaryAmounts($r, $secondary);
+        } else {
+            [$base, $vat] = [(float) $r['base_czk'], (float) $r['vat_czk']];
+        }
+        return [$base, str_ends_with($line, 'k') ? 0.0 : $vat];
+    }
+
     private function addLine(string $line, float $baseCzk, float $vatCzk, string $documentKey, string $label): void
     {
         if (!isset($this->byLine[$line])) {
@@ -150,7 +176,7 @@ final class DphLineProjection
      * RC mirror 43, korekce 44, registrace 45). NE pro výstupové řádky 3-13
      * samotné (ty se počítají odděleně přes secondary='43' mirror).
      */
-    private function countsAsFixedAssetLine(string $primaryLine): bool
+    private static function countsAsFixedAssetLine(string $primaryLine): bool
     {
         $n = (int) $primaryLine;
         return $n >= 40 && $n <= 45;
