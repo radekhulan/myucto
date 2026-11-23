@@ -53,6 +53,8 @@ export interface ValuationJobResult {
   pagination: { page: number; limit: number; total: number; pages: number }
   source_versions: Record<string, number>
   category_groups?: ValuationCategoryGroups
+  /** Jen ocenění omezené na kategorii (včetně podkategorií), název z doby výpočtu. */
+  category?: { id: number; code: string; name: string }
 }
 
 export const catalogJobsApi = {
@@ -65,7 +67,7 @@ export const catalogJobsApi = {
   getValueTrend: (id: number) => api.get<StockValueTrendReport>(`/stock/reports/value-trend-jobs/${id}`).then(r => r.data),
   getValueTrendStatus: (id: number) => api.get<CatalogJob>(`/stock/reports/value-trend-jobs/${id}/status`).then(r => r.data),
   cancelValueTrend: (id: number) => api.post<CatalogJob>(`/stock/reports/value-trend-jobs/${id}/cancel`).then(r => r.data),
-  createValuation: (payload: { date: string; warehouse_id?: number }) => api.post<CatalogJob>('/stock/reports/valuation-jobs', payload).then(r => r.data),
+  createValuation: (payload: { date: string; warehouse_id?: number; category_id?: number }) => api.post<CatalogJob>('/stock/reports/valuation-jobs', payload).then(r => r.data),
   getValuation: (id: number, params: { page?: number; limit?: number } & ValuationGroupParams = {}) => api.get<ValuationJobResult>(`/stock/reports/valuation-jobs/${id}`, { params }).then(r => r.data),
   getValuationStatus: (id: number) => api.get<CatalogJob>(`/stock/reports/valuation-jobs/${id}/status`).then(r => r.data),
   cancelValuation: (id: number) => api.post<CatalogJob>(`/stock/reports/valuation-jobs/${id}/cancel`).then(r => r.data),

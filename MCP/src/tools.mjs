@@ -5020,11 +5020,12 @@ export const TOOLS = [
       + 'ke zpětnému datu se rekonstruuje z pohybů.',
     inputSchema: schema({
       warehouse_id: int('Jen tento sklad.'),
+      category_id: int('ID kategorie včetně podkategorií.', { minimum: 1 }),
       date: date('Ocenění k datu (RRRR-MM-DD). Výchozí dnes.'),
     }),
     write: false,
     run: (c, a, tool) => c.get('/stock/reports/valuation', {
-      warehouse_id: a.warehouse_id, date: a.date,
+      warehouse_id: a.warehouse_id, category_id: a.category_id, date: a.date,
     }, tool),
   },
   {

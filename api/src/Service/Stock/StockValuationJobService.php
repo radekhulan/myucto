@@ -26,6 +26,7 @@ final class StockValuationJobService
         private readonly StockTakeRepository $takes,
         private readonly \MyInvoice\Repository\StockDocumentRepository $documents,
         private readonly StockValuationCategoryGroups $categoryGroups,
+        private readonly StockValuationCategory $categories,
     ) {}
 
     public function enqueue(int $supplierId, string $date, array $filters = []): array
@@ -42,6 +43,17 @@ final class StockValuationJobService
         }
         try {
             $warehouseId = !empty($filters['warehouse_id']) ? (int) $filters['warehouse_id'] : null;
+            $categoryId = !empty($filters['category_id']) ? (int) $filters['category_id'] : null;
+            $category = $this->categories->resolve($supplierId, $categoryId);
+            $categoryItems = StockValuationCategory::itemIdsSql();
+            $categoryInput = null;
+            if ($category !== null) {
+                // Název se ukládá s id, aby výsledek i po smazání kategorie říkal, že je omezený. Otisk karet
+                // brání znovupoužití hotové úlohy po přeřazení karet, které verze skladu nezmění.
+                $members = $pdo->prepare($categoryItems . ' ORDER BY si.id');
+                $members->execute([$supplierId, $categoryId]);
+                $categoryInput = $category + ['items' => sha1(implode(',', $members->fetchAll(PDO::FETCH_COLUMN)))];
+            }
             $versions = $this->snapshots->versions($supplierId, $warehouseId !== null ? [$warehouseId] : null);
             $this->warehouses->lockForStockOperation($supplierId, array_keys($versions));
             $versions = $this->snapshots->versions($supplierId, array_keys($versions));
@@ -56,6 +68,7 @@ final class StockValuationJobService
                 foreach ($existing->fetchAll(PDO::FETCH_ASSOC) as $candidate) {
                     $input = json_decode($candidate['input_json'], true, 512, JSON_THROW_ON_ERROR);
                     if (($input['warehouse_id'] ?? null) === $warehouseId
+                        && ($input['category'] ?? null) === $categoryInput
                         && ($input['stock_take_id'] ?? null) === null
                         && ($input['source_versions'] ?? null) === $versions) {
                         $result = $this->jobs->find($supplierId, (int) $candidate['id']);
@@ -66,16 +79,24 @@ final class StockValuationJobService
                     }
                 }
             }
-            $jobId = $this->jobs->enqueue($supplierId, 'stock_valuation', [
+            $input = [
                 'date' => $date, 'warehouse_id' => $warehouseId, 'source_versions' => $versions,
                 'stock_take_id' => $takeId > 0 ? $takeId : null,
-            ]);
+            ];
+            if ($categoryInput !== null) {
+                $input['category'] = $categoryInput;
+            }
+            $jobId = $this->jobs->enqueue($supplierId, 'stock_valuation', $input);
             $sql = 'INSERT INTO stock_valuation_rows (job_id, supplier_id, warehouse_id, stock_item_id)
                 SELECT ?, supplier_id, warehouse_id, stock_item_id FROM stock_levels WHERE supplier_id = ?';
             $params = [$jobId, $supplierId];
             if ($warehouseId !== null) {
                 $sql .= ' AND warehouse_id = ?';
                 $params[] = $warehouseId;
+            }
+            if ($categoryId !== null) {
+                $sql .= ' AND stock_item_id IN (' . $categoryItems . ')';
+                array_push($params, $supplierId, $categoryId);
             }
             $pdo->prepare($sql)->execute($params);
             if ($takeId > 0 && $warehouseId !== null) {
@@ -240,9 +261,13 @@ final class StockValuationJobService
             $item['warehouse_id'] = (int) $item['warehouse_id'];
             $item['stock_item_id'] = (int) $item['stock_item_id'];
         }
-        return ['job_id' => $jobId, 'date' => $job['input']['date'], 'items' => $items,
+        $out = ['job_id' => $jobId, 'date' => $job['input']['date'], 'items' => $items,
             'source_versions' => $versions, 'totals' => ['count' => (int) $totals['count'], 'value_total' => (string) $totals['value_total']],
             'pagination' => ['page' => $page, 'limit' => $limit, 'total' => (int) $totals['count'], 'pages' => (int) ceil((int) $totals['count'] / $limit)]];
+        if (isset($job['input']['category'])) {
+            $out['category'] = array_intersect_key($job['input']['category'], ['id' => true, 'code' => true, 'name' => true]);
+        }
+        return $out;
     }
 
     /**

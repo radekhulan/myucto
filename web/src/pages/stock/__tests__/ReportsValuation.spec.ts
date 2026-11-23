@@ -9,13 +9,14 @@ const m = vi.hoisted(() => ({
   listAttributes: vi.fn(),
   getValuation: vi.fn(),
   getValuationStatus: vi.fn(),
+  createValuation: vi.fn(),
 }))
 
 vi.mock('@/api/stock', () => ({
   stockApi: { reportStatus: vi.fn(), reportExportUrl: m.reportExportUrl, listWarehouses: m.listWarehouses },
 }))
 vi.mock('@/api/eshop', () => ({ eshopApi: { listCategories: m.listCategories, listAttributes: m.listAttributes } }))
-vi.mock('@/api/catalogJobs', () => ({ catalogJobsApi: { getValuation: m.getValuation, getValuationStatus: m.getValuationStatus } }))
+vi.mock('@/api/catalogJobs', () => ({ catalogJobsApi: { getValuation: m.getValuation, getValuationStatus: m.getValuationStatus, createValuation: m.createValuation } }))
 vi.mock('@/stores/auth', () => ({ useAuthStore: () => ({ canRead: (key: string) => key === 'eshop', canWrite: () => true }) }))
 vi.mock('@/composables/useToast', () => ({ useToast: () => ({ error: vi.fn(), warning: vi.fn() }) }))
 vi.mock('@/composables/useFormat', () => ({
@@ -91,6 +92,24 @@ describe('Reports – ocenění podle kategorií', () => {
     await wrapper.findAll('button').find(b => b.text().includes('stock.reports.export_xlsx'))!.trigger('click')
     expect(m.reportExportUrl).toHaveBeenCalledWith('valuation', 'xlsx', expect.objectContaining({ job_id: 5, group_by: 'category', group_parent_id: 12 }))
     open.mockRestore()
+  })
+
+  it('starts a valuation limited to the chosen category and shows the category of a loaded job', async () => {
+    m.getValuation.mockResolvedValue({ ...result, category: { id: 12, code: 'MOTO', name: 'Motocykly' } })
+    m.createValuation.mockResolvedValue({ id: 6, status: 'completed' })
+    const wrapper = mount(Reports, { global: { stubs } })
+    await flushPromises()
+    const select = wrapper.find<HTMLSelectElement>('[data-test="valuation-category"]')
+    expect(select.element.value).toBe('12')
+
+    m.getValuation.mockResolvedValue(result)
+    await select.setValue('')
+    await flushPromises()
+    expect(m.createValuation).toHaveBeenLastCalledWith({ date: '2026-09-30', warehouse_id: undefined, category_id: undefined })
+
+    await select.setValue('12')
+    await flushPromises()
+    expect(m.createValuation).toHaveBeenLastCalledWith({ date: '2026-09-30', warehouse_id: undefined, category_id: 12 })
   })
 
   it('groups by top-level categories without a parent', async () => {

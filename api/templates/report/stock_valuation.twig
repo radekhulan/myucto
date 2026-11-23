@@ -6,6 +6,7 @@
 <style>
     body { font-family: montserrat, dejavusans, sans-serif; font-size: 8pt; color: #15131D; }
     .header-title { font-size: 13pt; font-weight: bold; text-align: center; margin-bottom: 2mm; }
+    .header-sub { text-align: center; font-size: 9pt; color: #555; margin-bottom: 2mm; }
     table.book { width: 100%; border-collapse: collapse; margin: 0; } /* bez okraje: šev mezi kusy tabulky nesmí dělat mezeru */
     table.book thead th {
         font-size: 7pt; font-weight: normal; color: #555; text-align: right;
@@ -28,6 +29,7 @@
 <body>
 
 <div class="header-title">Ocenění zásob k {{ date|cz_date }}</div>
+{% if category is defined %}<div class="header-sub">Kategorie: {{ category.name }} (včetně podkategorií)</div>{% endif %}
 
 {% if category_groups is defined and category_groups is not null %}
 {# Souhrn podle kategorií (StockValuationCategoryGroups); popisky a poznámku dodává renderer. #}

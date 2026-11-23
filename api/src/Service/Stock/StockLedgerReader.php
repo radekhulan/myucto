@@ -11,18 +11,26 @@ final class StockLedgerReader
 {
     public function __construct(private readonly Connection $db) {}
 
-    public function pairs(int $supplierId, string $date, ?int $warehouseId = null): array
+    public function pairs(int $supplierId, string $date, ?int $warehouseId = null, ?int $categoryId = null): array
     {
-        $stmt = $this->db->pdo()->prepare("SELECT DISTINCT warehouse_id, stock_item_id FROM (
-            SELECT d.warehouse_id, l.stock_item_id FROM stock_document_lines l
+        $cte = '';
+        $lines = 'stock_document_lines l';
+        $params = [];
+        if ($categoryId !== null) {
+            $cte = 'WITH category_items AS (' . StockValuationCategory::itemIdsSql() . ') ';
+            $lines = 'category_items ci STRAIGHT_JOIN stock_document_lines l ON l.stock_item_id = ci.id';
+            $params = [$supplierId, $categoryId];
+        }
+        $stmt = $this->db->pdo()->prepare($cte . "SELECT DISTINCT warehouse_id, stock_item_id FROM (
+            SELECT d.warehouse_id, l.stock_item_id FROM {$lines}
             JOIN stock_documents d ON d.id = l.document_id AND d.supplier_id = l.supplier_id
             WHERE l.supplier_id = ? AND l.doc_date <= ? AND d.status IN ('posted','reversed')
             UNION ALL
-            SELECT d.warehouse_to_id AS warehouse_id, l.stock_item_id FROM stock_document_lines l
+            SELECT d.warehouse_to_id AS warehouse_id, l.stock_item_id FROM {$lines}
             JOIN stock_documents d ON d.id = l.document_id AND d.supplier_id = l.supplier_id
             WHERE l.supplier_id = ? AND l.doc_date <= ? AND d.status IN ('posted','reversed') AND d.doc_type = 'transfer'
         ) legs" . ($warehouseId !== null ? ' WHERE warehouse_id = ?' : '') . ' ORDER BY stock_item_id, warehouse_id');
-        $params = [$supplierId, $date, $supplierId, $date];
+        array_push($params, $supplierId, $date, $supplierId, $date);
         if ($warehouseId !== null) {
             $params[] = $warehouseId;
         }

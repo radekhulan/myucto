@@ -28726,6 +28726,10 @@ paths:
           name: warehouse_id
           schema: { type: integer }
         - in: query
+          name: category_id
+          schema: { type: integer, minimum: 1 }
+          description: Ocení karty v kategorii včetně podkategorií podle zařazení v době výpočtu.
+        - in: query
           name: group_by
           schema: { type: string, enum: [none, category] }
           description: |
@@ -28736,7 +28740,14 @@ paths:
           schema: { type: integer, minimum: 1 }
           description: Skupiny tvoří přímé podkategorie této kategorie; bez něj kategorie nejvyšší úrovně.
       responses:
-        '200': { description: OK }
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StockValuationResult'
+        '422':
+          description: Neplatný filtr nebo neexistující kategorie (včetně kategorie jiné firmy).
   /api/v1/stock/reports/value-trend-jobs:
     parameters:
       - $ref: '#/components/parameters/SupplierIdHeader'
@@ -28929,7 +28940,7 @@ paths:
         schema:
           type: integer
           minimum: 1
-        description: Jen u sestavy status. Kategorie karty včetně podkategorií.
+        description: Kategorie karty včetně podkategorií. Používá se u sestavy status a u sestavy valuation bez job_id.
       - in: query
         name: columns
         schema:
@@ -33826,6 +33837,10 @@ paths:
                 warehouse_id:
                   type: integer
                   minimum: 1
+                category_id:
+                  type: integer
+                  minimum: 1
+                  description: Ocení jen karty v této kategorii včetně podkategorií (podle zařazení karet v době výpočtu). Výsledek a export pak nesou `category`.
       responses:
         '202':
           description: OK
@@ -33834,7 +33849,7 @@ paths:
               schema:
                 $ref: '#/components/schemas/CatalogJob'
         '422':
-          description: Neplatné datum nebo sklad
+          description: Neplatné datum, sklad nebo kategorie (i kategorie jiné firmy)
 
   /api/v1/stock/reports/valuation-jobs/{id}:
     parameters:
@@ -48304,11 +48319,9 @@ components:
               value_total: { type: string }
         count: { type: integer }
         value_total: { type: string }
-    StockValuationJobResult:
+    StockValuationResult:
       type: object
       properties:
-        job_id:
-          type: integer
         date:
           type: string
           format: date
@@ -48344,21 +48357,36 @@ components:
               type: string
         category_groups:
           $ref: '#/components/schemas/StockValuationCategoryGroups'
-        pagination:
+        category:
           type: object
+          description: Jen při použití filtru `category_id`. Údaje o kategorii z doby výpočtu.
+          required: [id, code, name]
           properties:
-            page:
+            id: { type: integer }
+            code: { type: string }
+            name: { type: string }
+    StockValuationJobResult:
+      allOf:
+        - $ref: '#/components/schemas/StockValuationResult'
+        - type: object
+          properties:
+            job_id:
               type: integer
-            limit:
-              type: integer
-            total:
-              type: integer
-            pages:
-              type: integer
-        source_versions:
-          type: object
-          additionalProperties:
-            type: integer
+            pagination:
+              type: object
+              properties:
+                page:
+                  type: integer
+                limit:
+                  type: integer
+                total:
+                  type: integer
+                pages:
+                  type: integer
+            source_versions:
+              type: object
+              additionalProperties:
+                type: integer
     CatalogFacetValues:
       type: object
       required: [truncated, items]

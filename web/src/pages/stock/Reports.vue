@@ -266,6 +266,7 @@ let valuationTimer: ReturnType<typeof setTimeout> | undefined
 let valuationGeneration = 0
 // Seskupení ocenění: '' = žádné, 'top' = kategorie nejvyšší úrovně, číslo = přímé podkategorie.
 const valuationGroup = ref<'' | 'top' | number>('')
+const valuationCategory = ref<'' | number>('')
 function valuationGroupParams(): ValuationGroupParams {
   if (valuationGroup.value === '') return {}
   return valuationGroup.value === 'top' ? { group_by: 'category' } : { group_by: 'category', group_parent_id: valuationGroup.value }
@@ -313,7 +314,7 @@ async function startValuation() {
   valuationResult.value = null
   valuationReport.value = null
   valuationPage.value = 1
-  const job = await catalogJobsApi.createValuation({ date: filters.date, warehouse_id: filters.warehouse_id || undefined })
+  const job = await catalogJobsApi.createValuation({ date: filters.date, warehouse_id: filters.warehouse_id || undefined, category_id: valuationCategory.value || undefined })
   if (generation !== valuationGeneration) return
   valuationJob.value = job
   await pollValuation(generation)
@@ -342,6 +343,7 @@ async function loadValuationPage(page = valuationPage.value) {
     valuationPage.value = page
     valuationResult.value = result
     filters.date = result.date
+    valuationCategory.value = result.category?.id ?? ''
   } catch (e: any) { toast.error(e?.response?.data?.error?.message || t('common.error')) }
 }
 async function cancelValuation() {
@@ -461,6 +463,13 @@ onBeforeUnmount(() => { clearValuationTimer(); ++valuationGeneration; void aband
           <select v-model="filters.warehouse_id" @change="onWarehouseChange" class="h-9 px-2 border border-neutral-300 rounded-md text-sm bg-surface min-w-[10rem]">
             <option value="">{{ t('common.all') }}</option>
             <option v-for="w in warehouses" :key="w.id" :value="w.id">{{ w.name }}</option>
+          </select>
+        </div>
+        <div v-if="tab === 'valuation' && categories.length">
+          <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('stock.reports.filter_category') }}</label>
+          <select v-model="valuationCategory" data-test="valuation-category" @change="load" class="h-9 px-2 border border-neutral-300 rounded-md text-sm bg-surface min-w-[10rem]">
+            <option value="">{{ t('common.all') }}</option>
+            <option v-for="c in categories" :key="c.id" :value="c.id">{{ indentedCategoryLabel(c) }}</option>
           </select>
         </div>
         <div v-if="tab === 'valuation'">
