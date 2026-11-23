@@ -14,6 +14,7 @@ Kapitolu otevřete, když:
 - do MyÚčta přišly doklady z jiného systému a nejsou v deníku,
 - máte mnoho nespárovaných bankovních pohybů stejného druhu (výplaty mezd, platby z terminálu),
 - potřebujete deník vytisknout nebo předat auditorovi (PDF, XLSX),
+- potřebujete soupisku dokladů k vyúčtování dotace nebo projektu (XLSX),
 - potřebujete zamknout účtování po podání DPH,
 - evidujete nájemné, kauci, půjčku, pojistné nebo jinou pohledávku či závazek bez faktury.
 
@@ -58,6 +59,7 @@ Z bankovního výpisu použijte u pohybu **Otevřít v účetním deníku**. Ote
 6. V panelu **Souvisí** vidíte protějšek (faktura a její úhrada) a můžete přejít na **Náhled**, **Zápis #…** nebo **Otevřít doklad**.
 7. Kliknutím na kód nebo název účtu v rozbaleném zápisu otevřete opis pohybů účtu.
 8. Chcete-li deník předat, klikněte na **Export PDF** nebo **Export XLSX**. Export respektuje aktuální filtry a je omezený na 5 000 zápisů.
+9. Potřebujete-li seznam dokladů k vyúčtování (například dotace podle dimenze), nastavte filtr, klikněte na **Soupiska dokladů**, zkontrolujte rozsah účtů soupisky (bez rozsahu ve filtru se nabídne 5 až 5, tedy nákladové účty) a klikněte na **Stáhnout XLSX** nebo stiskněte Enter. Co soupiska obsahuje, popisuje [§ 52.14.3.4](#521434-export-pdf-xlsx).
 
 **Jak poznáte, že je hotovo:** Vidíte hledaný zápis se stavem **Zaúčtováno** a jeho zdroj. Koncept se označí badge **Koncept**.
 
@@ -352,6 +354,8 @@ Podrobnosti jsou v [§ 52.14.14](#521414-ostatni-pohledavky-a-zavazky).
 | Popis nejde upravit, vidíte text **Popis se edituje na zdrojovém dokladu** | Popis patří k dokladu (faktura, banka, pokladna, majetek) | Upravte popis na zdrojovém dokladu. Inline upravit lze jen ruční zápisy a zápisy uzavření a otevření knih. |
 | Příloha se nenahraje, **Tato příloha už je u zápisu evidována** | Stejný obsah nejde k témuž zápisu nahrát dvakrát | Příloha už u zápisu je. |
 | Export hlásí překročení limitu | Export je omezený na 5 000 zápisů | Zúžte filtr (typicky **Datum od / Datum do**) a export zopakujte po částech. |
+| Soupiska dokladů hlásí **Zadejte rozsah účtů** | Soupiska počítá částky jen z účtů v rozsahu | V dialogu vyplňte **Účet od** a **Účet do** (například 5 až 5 pro náklady). |
+| V soupisce chybí doklad, který v deníku vidíte | Doklad nemá řádek v rozsahu účtů soupisky s dimenzí filtru (typicky úhrada na 321 nebo 221 při rozsahu 5 až 5), je celý stornovaný, nebo jde o uzavření či otevření knih | Jde o záměr: soupiska dokládá částky na zvolených účtech a doklad s nulovou částkou vynechává. Potřebujete-li jiné účty, změňte rozsah v dialogu. |
 | Zaúčtování faktury se odmítne s rozpisem částek | Celková částka dokladu se liší od základu a DPH z položek o víc než 2 Kč | Opravte doklad (klasifikaci DPH, základ nebo DPH v rekapitulaci). Rozdíl do 2 Kč se doúčtuje na 648 nebo 548. |
 | Pro cizoměnový doklad vidíte kurzový rozdíl na 663 nebo 563 | Přecenění k rozvahovému dni | Nejde o chybu ([§ 52.14.6.1](#521461-kurzove-preceneni-a-kurzove-rozdily)). |
 | Karta **Zkontroluj integritu deníku** na přehledu | Noční kontrola našla nesrovnalost | Klikněte na kartu, nebo v deníku nastavte filtr **Nesrovnalosti doklad ↔ deník** na **Částka zápisu nesedí na doklad** ([§ 52.14.11](#521411-kontrola-integrity-deniku-nocni-job)). |
@@ -671,6 +675,41 @@ pravidlem jako sloupec Částka v seznamu: bez filtru na účet je to celková �
 na účet naopak jen částka připadající na filtrovaný rozsah účtů, ve sloupci MD nebo Dal
 podle strany. PDF má **číslované strany**. Export je omezený na max. **5 000 zápisů** najednou
 - při větším rozsahu zužte filtr (typicky Datum od/do) a export zopakujte po částech.
+
+Tlačítko **Soupiska dokladů** stáhne XLSX se seznamem prvotních dokladů, typicky jako podklad
+k vyúčtování dotace nebo projektu podle dimenze. Soupiska vezme zápisy **přesně podle aktuálního
+filtru** Deníku (včetně hledání podle kódu účtu a filtru účtů) a z nich jen **zaúčtované řádky
+v rozsahu účtů soupisky**; koncepty nepočítá, stejně jako výsledovka po dimenzi, a jejich počet uvede v hlavičce. Ten zadáte v dialogu a je povinný: předvyplní se z filtru **Účet od / Účet do**, pokud
+jsou vyplněné obě meze, jinak 5 až 5 (nákladové účty). Při filtru dimenze se berou jen řádky
+s hodnotou filtru, včetně podřízených hodnot, pokud je nevypnete; u rozpadu řádku mezi více hodnot
+se započte jen díl filtrované hodnoty, stejně jako ve výsledovce po dimenzi. V nákladovém rozsahu
+se úhrada nesoucí stejnou dimenzi nezapočte, protože je na účtech 321 a 221.
+
+Řádky se sečtou po **prvotním dokladu**: přijatá a vydaná faktura, pokladní doklad, interní doklad,
+ostatní pohledávka nebo závazek, bankovní pohyb. Doklad se tak objeví jednou, i když má víc zápisů,
+včetně převzatého dokladu zaúčtovaného několika zápisy. Zápočet proti účtu patří vyrovnané faktuře;
+úhrada bankou i pokladnou je vlastní doklad. Částka **K doložení** je u výnosových účtů Dal minus MD
+vybraných řádků, u ostatních MD minus Dal (stejně jako ve výsledovce po dimenzi), takže
+vratka a storno ji u nákladů i výnosů snižují. Vyberte proto rozsah jednoho druhu (například
+5 až 5, nebo 6 až 6); doklad, který má v rozsahu účty různých druhů (náklady, výnosy, rozvaha),
+je označený k ověření a zůstane v soupisce i tehdy, když se jeho řádky vyrovnají na nulu. Storno, storno storna i opravný zápis dvojice patří dokladu, který
+opravují, a doklad, který po stornu vyjde na nulu, soupiska vynechá. Leží-li storno nebo oprava
+mimo filtr (typicky v dalším období nebo jako koncept), doklad zůstane v plné výši a sloupec
+**K ověření** na to upozorní. Vynechává uzavření a otevření knih, protože jen převádějí zůstatky; zápisy zásob
+z uzávěrky (způsob B) náklady mění, proto v soupisce jsou jako **Uzávěrka zásob**. Ruční zápis bez
+interního dokladu je samostatný řádek; mzdy, odpisy a časové rozlišení tvoří řádek bez celkové
+částky dokladu.
+
+Každý řádek nese pořadí, druh dokladu, **naše číslo**, **číslo dokladu protistrany**, datum (DUZP,
+u zápisu bez dokladu datum zápisu), protistranu a IČO, popis, účty, čísla zápisů, měnu,
+**celkovou částku dokladu** a **částku k doložení**. U bankovního pohybu je datem datum zápisu,
+celková částka pokladního dokladu je v Kč. Sloupec **K ověření** upozorní na zápis bez dokladu,
+chybějící celkovou částku, storno nebo opravu mimo filtr, doklad v cizí měně,
+zápornou částku a částku k doložení vyšší než celý doklad. Hlavička uvádí firmu, období, rozsah účtů soupisky,
+dimenzi, všechny další použité filtry Deníku, datum a čas vytvoření a autora. Soupiska je pracovní
+podklad ke dni vytvoření: pozdější přeúčtování nebo změna dimenzí ji změní. Když filtru nic
+neodpovídá, soubor to uvede. Soupiska je omezená na **5 000 dokladů** a stáhne ji každý, kdo
+smí číst účetnictví.
 
 #### 52.14.3.5 Rozklik na detail zápisu
 
