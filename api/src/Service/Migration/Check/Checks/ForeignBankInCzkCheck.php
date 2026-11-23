@@ -19,7 +19,9 @@ use MyInvoice\Service\Migration\Pohoda\PohodaForeignBankRepair;
  *
  * Výběr, převod účtu i pojistky (uzavřené a zamčené období, společná analytika, pohyby mimo
  * převod) jsou v opravě {@see PohodaForeignBankRepair}; kontrola její výsledek převede na
- * nálezy. Chybějící kurzy ČNB stáhne a uloží stejně jako oprava. Výpisy nahrané po převodu přepne oprava jen s volbou {@see OPTION_UPLOADED}.
+ * nálezy. Uzavřené období chrání plně: převod mění částky pohybů a měnové řádky deníku
+ * analytiky 221. Chybějící kurzy ČNB stáhne a uloží stejně jako oprava. Výpisy nahrané
+ * po převodu přepne oprava jen s volbou {@see OPTION_UPLOADED}.
  */
 final class ForeignBankInCzkCheck extends SourceScopedCheck implements FixableMigrationDataCheck
 {

@@ -46369,7 +46369,7 @@
     "preview_title": "Fix preview: {check}",
     "preview_failed": "The fix preview could not be loaded.",
     "preview_summary": "Findings to fix: {count} ({amount}). Findings only reported: {skipped}.",
-    "preview_audit": "The fix runs in a single transaction, running it again doubles nothing and every change is written to the audit trail. Closed, locked and filed periods are not changed.",
+    "preview_audit": "The fix runs in a single transaction, running it again doubles nothing and every change is written to the audit trail. Anything in a protected period (depending on the fix a closed accounting period, the posting lock date or a filed VAT period) is not changed.",
     "fix_done": "Findings fixed: {count} ({amount}).",
     "fix_failed": "The fix could not be run.",
     "status": {

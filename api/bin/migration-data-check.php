@@ -128,6 +128,15 @@ foreach ($ids as $supplierId) {
                         $labels[$result['after']['status']] ?? $result['after']['status'], $result['notes'] !== [] ? PHP_EOL . '    ' . implode(PHP_EOL . '    ', $result['notes']) : '');
                 }
             } catch (MigrationDataCheckException $e) {
+                // Souhrn firmy je z doby před opravami: nálezy mohla opravit oprava předchozí
+                // kontroly (oprava Money S3 doplní vydané i přijaté doklady najednou).
+                if ($e->errorCode === 'nothing_to_fix') {
+                    $row['fixes'][] = ['key' => $c['key'], 'fixed_count' => 0, 'after' => 'nothing_to_fix'];
+                    if (!$json) {
+                        echo '    nic k opravě, nálezy opravila předchozí oprava' . PHP_EOL;
+                    }
+                    continue;
+                }
                 $failed++;
                 $row['fixes'][] = ['key' => $c['key'], 'error' => $e->errorCode, 'message' => $e->getMessage()];
                 if (!$json) {

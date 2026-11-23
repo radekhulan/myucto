@@ -61,8 +61,10 @@ dokladů ([§ 126.8](#1268-prijate-doklady-uhrazene-bez-kryti)) a vazbu platby z
 - doklad Money S3, jehož úhrada je spárovaná s pohybem převedené banky bez evidované platby: platbu
   doplní opakovaný převod z Money S3 ([§ 106.10.8](106_Prechod_z_Money_S3.md#106108-opakovany-prevod)).
 
-Oprava opravuje firmu jen celou. Leží-li některý nález v chráněném období ([§ 126.11](#12611-opravneni-a-pojistky)),
-neopraví se nic a nálezy zůstanou ke kontrole.
+Oprava jen doplní evidenci úhrady, kterou doklad už nese, proto ji uzavřené účetní období (ani převedené
+roky, které převod z Money S3 uzavřel) neblokuje. Neopraví úhradu za zámkem účtování k datu ani v podaném
+období DPH ([§ 126.11](#12611-opravneni-a-pojistky)). Oprava opravuje firmu jen celou: leží-li některý
+nález za zámkem nebo v podaném období, neopraví se nic a nálezy zůstanou ke kontrole.
 
 ## 126.4 Bankovní účet v cizí měně převedený v Kč
 
@@ -133,10 +135,11 @@ roku), který evidované úhrady (banka, pokladna, zápočty, úhrada mimo evide
 by k němu nabídlo platbu se stejným symbolem znovu a úhradu by započetlo dvakrát.
 
 **Oprava:** doplní chybějící krytí jako úhradu mimo evidenci (úhrada je už v deníku), u Money S3 přednostně
-zápočet interním dokladem navázaným na doklad. Deník ani DPH se nemění.
+zápočet interním dokladem navázaným na doklad. Deník ani DPH se nemění, a proto opravu neblokuje uzavřené
+účetní období, jen zámek účtování k datu a podané období DPH.
 
 **Jen ke kontrole:** doklad z POHODY v cizí měně (úhrady POHODY jsou v Kč, krytí doplňte ručně v detailu
-dokladu) a doklad v chráněném období.
+dokladu) a doklad s úhradou za zámkem účtování k datu nebo v podaném období DPH.
 
 ## 126.9 DDKP bez vazby na zálohu
 
@@ -173,9 +176,15 @@ kontrolním hlášením.
 - **Zobrazení a náhled opravy:** role s přístupem do účetnictví (čtení).
 - **Oprava:** správce firmy nebo role se zápisem do účetnictví, jen v aplikaci. API token a MCP server
   kontroly jen čtou.
-- **Chráněné období:** oprava nemění nic, co leží v uzavřeném účetním období, v období v uzávěrce, za zámkem
-  účtování k datu, a u změn s dopadem na DPH (vazba DDKP) ani v podaném období DPH. Takové nálezy ukáže
-  ve stavu **Chráněné období**. Opravit je jde po otevření období nebo posunu zámku
+- **Chráněné období:** co oprava nesmí změnit, ukáže ve stavu **Chráněné období**. Záleží na tom, na co
+  oprava sahá:
+  - doplnění evidence úhrad ([§ 126.3](#1263-uhrady-faktur-bez-zaznamu-platby),
+    [§ 126.8](#1268-prijate-doklady-uhrazene-bez-kryti)) nemění deník, DPH ani uhrazenou částku. Brání mu jen
+    zámek účtování k datu a podané období DPH, uzavřené účetní období ne,
+  - převod účtu na měnu, přepočet stavů výpisů a vazba DDKP na zálohu mění podklady deníku, uzávěrky nebo DPH.
+    Brání jim uzavřené účetní období, období v uzávěrce a zámek účtování k datu, vazbě DDKP i podané období DPH.
+
+  Opravit je jde po otevření období nebo posunu zámku
   ([§ 52.14.10](52_Ucetni_denik.md#521410-zamek-uctovani-k-datu)), jinak se opravují ručně.
 - **Jedna transakce, auditní stopa:** každá oprava proběhne celá, nebo vůbec. Každou změnu i souhrn opravy
   zapíše do auditní stopy (`Systém → Log`). Opakované spuštění nic nezdvojí.

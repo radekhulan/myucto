@@ -46369,7 +46369,7 @@
     "preview_title": "Náhled opravy: {check}",
     "preview_failed": "Náhled opravy se nepodařilo načíst.",
     "preview_summary": "Opraví se nálezů: {count} ({amount}). Jen ohlášených nálezů: {skipped}.",
-    "preview_audit": "Oprava proběhne v jedné transakci, opakované spuštění nic nezdvojí a každá změna se zapíše do auditní stopy. Uzavřená, zamčená a podaná období se nemění.",
+    "preview_audit": "Oprava proběhne v jedné transakci, opakované spuštění nic nezdvojí a každá změna se zapíše do auditní stopy. Co leží v chráněném období (podle druhu opravy uzavřené účetní období, zámek účtování k datu nebo podané období DPH), se nemění.",
     "fix_done": "Opraveno nálezů: {count} ({amount}).",
     "fix_failed": "Opravu se nepodařilo provést.",
     "status": {

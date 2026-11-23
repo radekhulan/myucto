@@ -37,6 +37,8 @@ use PDO;
  * a odebere výpisy z evidence posunů, aby je smazání výpisu banky znovu neposunulo. Jen
  * tam, kde je jednoznačná: korunový účet, všechny zápisy pohybů na jedné analytice, výpisy
  * jednoho účtu zdroje, otevírací zápis analytiky v období a období otevřené a bez zámku.
+ * Uzavřené období chrání i tahle oprava ({@see MigrationCheckLocks::reason()}): stavy
+ * výpisů jsou podkladem inventarizace účtu 221 v uzávěrce.
  * Ostatní rozdíly (účty v cizí měně kontroluje {@see ForeignBankInCzkCheck}) jen ohlásí.
  * Pohyby ani deník se nemění.
  */

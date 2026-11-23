@@ -30,8 +30,10 @@ use MyInvoice\Service\Migration\Pohoda\PohodaPriorYearPaymentRepair;
  *    {@see MoneyS3SettledPayments}. Oprava Money je jedna pro vydané i přijaté doklady,
  *    proto doplní i krytí přijatých dokladů (kontrola {@see PurchaseSettledUncoveredCheck}).
  *
- * Obě opravy opravují firmu jen celou, takže nález v chráněném období zastaví opravu firmy
- * ({@see MigrationCheckLocks::allOrNothing()}). Deník, DPH ani uhrazená částka se nemění.
+ * Oprava jen doplní evidenci úhrady, kterou doklad už nese: deník, DPH ani uhrazená částka
+ * se nemění. Uzavřené účetní období ji proto neblokuje, jen zámek účtování k datu a podané
+ * období DPH ({@see MigrationCheckLocks::paymentRecordReason()}). Obě opravy opravují firmu
+ * jen celou, takže nález za zámkem zastaví opravu firmy ({@see MigrationCheckLocks::allOrNothing()}).
  */
 final class SettledWithoutPaymentCheck extends SourceScopedCheck implements FixableMigrationDataCheck
 {
@@ -138,7 +140,7 @@ final class SettledWithoutPaymentCheck extends SourceScopedCheck implements Fixa
             return [[], ['POHODA: ' . (string) $row['reason']]];
         }
         $items = [];
-        $lock = $row['invoices'] !== [] ? $this->locks->reason($supplierId, (string) $row['paid_on']) : null;
+        $lock = $row['invoices'] !== [] ? $this->locks->paymentRecordReason($supplierId, (string) $row['paid_on']) : null;
         foreach ($row['invoices'] as $i) {
             $items[] = new CheckItem('invoice', (int) $i['id'], (string) $i['document_no'], (string) $i['issue_date'], (float) $i['amount_czk'],
                 $lock === null ? CheckItem::FIXABLE : CheckItem::LOCKED,
@@ -173,7 +175,7 @@ final class SettledWithoutPaymentCheck extends SourceScopedCheck implements Fixa
         // neopraví se nic.
         $purchaseLock = null;
         foreach ($rows === [] ? [] : $this->money->purchaseCandidates($supplierId, $lastEnd) as $p) {
-            if ($p['amount_to_pay'] - $p['covered'] - $p['outside'] >= 0.01 && ($purchaseLock = $this->locks->reason($supplierId, $p['paid_at'])) !== null) {
+            if ($p['amount_to_pay'] - $p['covered'] - $p['outside'] >= 0.01 && ($purchaseLock = $this->locks->paymentRecordReason($supplierId, $p['paid_at'])) !== null) {
                 $purchaseLock = sprintf('Oprava Money S3 doplní i přijatý doklad %s, který nejde změnit: %s', $p['document_no'], $purchaseLock);
                 break;
             }
@@ -184,7 +186,7 @@ final class SettledWithoutPaymentCheck extends SourceScopedCheck implements Fixa
             if (isset($pending[$c['id']])) {
                 $state = CheckItem::REVIEW;
                 $reason = 'Úhrada je spárovaná s pohybem převedené banky bez evidované platby. Doplní ji opakovaný převod z Money S3.';
-            } elseif (($lock = $this->locks->reason($supplierId, $c['paid_at'])) !== null) {
+            } elseif (($lock = $this->locks->paymentRecordReason($supplierId, $c['paid_at'])) !== null) {
                 $state = CheckItem::LOCKED;
                 $reason = $lock;
             } elseif ($purchaseLock !== null) {

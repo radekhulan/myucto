@@ -29,7 +29,9 @@ use PDO;
  *  - právě jedna nestornovaná záloha s tímto číslem u téhož odběratele,
  *  - celková částka DDKP a zálohy se liší nejvýš o {@see TOLERANCE} (zaokrouhlení POHODY),
  *  - DDKP je vystavený a bez vazby na zálohu (ani přes platbu),
- *  - DDKP neleží v uzavřeném či zamčeném účetním období ani v podaném období DPH (jen hlášení).
+ *  - DDKP neleží v uzavřeném či zamčeném účetním období ani v podaném období DPH (jen hlášení):
+ *    vazba rozhoduje o odpočtu DPH zálohy na konečné faktuře, proto platí plné pojistky
+ *    ({@see MigrationCheckLocks::reason()}).
  * Oprava doplní vazbu ({@see TaxDocumentAdvanceLinker}); částky, DPH ani zaúčtování se nemění.
  */
 final class TaxDocumentAdvanceLinkCheck extends SourceScopedCheck implements FixableMigrationDataCheck

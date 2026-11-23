@@ -140,6 +140,37 @@ final class MigrationDataCheckTest extends TestCase
         self::assertSame(0, $this->rows('invoice_payments', "invoice_id = {$prior}"));
     }
 
+    /**
+     * Doplnění evidence úhrad (kontroly 1 a 6) nemění deník ani DPH, uzavřené účetní období
+     * ho neblokuje. Zámek účtování k datu a podané období DPH ano. Vazba DDKP na zálohu
+     * (kontrola 7) v uzavřeném období dál jen hlásí.
+     */
+    public function testClosedPeriodBlocksOnlyLedgerRelevantFixes(): void
+    {
+        $prior = $this->c->get(AccountingPeriodRepository::class)->create($this->supplierId, 2024, '2024-01-01', '2024-12-31');
+        $this->pdo->prepare("UPDATE accounting_periods SET status = 'closed' WHERE id = ?")->execute([$prior]);
+        $invoice = $this->invoice('invoice', 'FV24930', '2024-10-10', 1210.0, 210.0, paidTotal: 1210.0, status: 'paid');
+        $closedPurchase = $this->purchase('DF-930', '2024-11-05', 400.0, $this->czk);
+        $filedPurchase = $this->purchase('DF-931', '2025-03-10', 500.0, $this->czk);
+        $this->filedVat(2025, 3);
+        $this->invoice('proforma', 'ZF24930', '2024-06-01', 1210.0, 0.0);
+        $ddkp = $this->invoice('tax_document', 'DD24930', '2024-06-05', 1210.0, 210.0, note: 'Daňový doklad k přijaté platbě (zálohová faktura č. ZF24930)');
+
+        self::assertSame([$invoice => 'fixable'], array_column($this->service->detail($this->supplierId, SettledWithoutPaymentCheck::KEY)['items'], 'state', 'entity_id'));
+        self::assertSame([$closedPurchase => 'fixable', $filedPurchase => 'locked'],
+            array_column($this->service->detail($this->supplierId, PurchaseSettledUncoveredCheck::KEY)['items'], 'state', 'entity_id'));
+        self::assertSame([$ddkp => 'locked'], array_column($this->service->detail($this->supplierId, TaxDocumentAdvanceLinkCheck::KEY)['items'], 'state', 'entity_id'));
+
+        foreach ([SettledWithoutPaymentCheck::KEY, PurchaseSettledUncoveredCheck::KEY] as $key) {
+            $result = $this->service->fix($this->supplierId, $key, $this->userId, [], $this->service->preview($this->supplierId, $key)['fingerprint']);
+            self::assertSame(1, $result['fixed_count'], $key);
+        }
+        self::assertSame(1, $this->rows('invoice_payments', "invoice_id = {$invoice} AND paid_on = '2024-12-31'"));
+        self::assertSame(['400.00', '0.00'], array_map(fn (int $id): string => (string) $this->pdo->query("SELECT settled_outside_amount FROM purchase_invoices WHERE id = {$id}")->fetchColumn(), [$closedPurchase, $filedPurchase]));
+        $this->assertNothingToFix(TaxDocumentAdvanceLinkCheck::KEY);
+        self::assertNull($this->pdo->query("SELECT parent_invoice_id FROM invoices WHERE id = {$ddkp}")->fetchColumn());
+    }
+
     public function testPaidPurchaseWithoutCoverageGetsSettledOutside(): void
     {
         $covered = $this->purchase('DF-901', '2025-05-10', 1000.0, $this->czk);

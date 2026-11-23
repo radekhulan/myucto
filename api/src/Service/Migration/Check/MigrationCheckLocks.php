@@ -8,13 +8,21 @@ use MyInvoice\Service\Accounting\DocumentLockService;
 use MyInvoice\Service\Vat\FiledVatPeriodLookup;
 
 /**
- * Smí oprava kontroly změnit záznam k danému datu? Opravy dat po převodu nemění nic, co
- * leží v uzavřeném nebo rozpracovaném (uzávěrka) účetním období, za zámkem účtování k datu
- * (`locked_until`) a u změn s dopadem na DPH ani v období, za které je podané přiznání,
- * kontrolní hlášení nebo OSS přiznání. Takový nález jen ohlásí ({@see CheckItem::LOCKED}).
+ * Smí oprava kontroly změnit záznam k danému datu? Co oprava nesmí změnit, jen ohlásí
+ * ({@see CheckItem::LOCKED}). Pojistky jsou stejné jako u ruční změny dokladu:
+ * {@see DocumentLockService::forDate()} a {@see FiledVatPeriodLookup::describe()}.
  *
- * Pojistky jsou stejné jako u ruční změny dokladu: {@see DocumentLockService::forDate()}
- * a {@see FiledVatPeriodLookup::describe()}.
+ * Dvě úrovně podle toho, na co oprava sahá:
+ *  - {@see reason()}: opravy, které mění výpisy, jejich stavy a vazby dokladů, ze kterých
+ *    vychází deník, uzávěrka nebo DPH (převod účtu na měnu, přepočet stavů převzatých
+ *    výpisů, vazba DDKP na zálohu). Chrání uzavřené a rozpracované účetní období, zámek
+ *    účtování k datu (`locked_until`) a u vazeb s dopadem na DPH i podané období DPH.
+ *  - {@see paymentRecordReason()}: doplnění evidence úhrad převzatých dokladů (platba bez
+ *    pohybu a zápisu, úhrada mimo evidenci). Deník, DPH, uhrazenou částku ani stav dokladu
+ *    nemění (hlídají to pojistky oprav převodu), jen zaeviduje úhradu, kterou doklad už nese.
+ *    Uzavřené účetní období ji proto neblokuje: převod z Money S3 převedené roky sám uzavírá
+ *    a doklady s úhradou v nich by jinak nešlo opravit nikdy. Blokuje ji jen zámek účtování
+ *    k datu a podané období DPH.
  */
 final class MigrationCheckLocks
 {
@@ -47,6 +55,23 @@ final class MigrationCheckLocks
             }
         }
         return null;
+    }
+
+    /**
+     * Důvod, proč se k datu `$date` nesmí doplnit evidence úhrady převzatého dokladu, nebo
+     * `null`: jen zámek účtování k datu a podané období DPH (viz třída).
+     */
+    public function paymentRecordReason(int $supplierId, ?string $date): ?string
+    {
+        if ($date === null || $date === '') {
+            return null;
+        }
+        $date = substr($date, 0, 10);
+        if ($this->locks->forDate($supplierId, $date)->dateLocked) {
+            return sprintf('Leží za zámkem účtování k datu (%s).', $date);
+        }
+        $filed = $this->filed->describe($supplierId, $date);
+        return $filed !== null ? sprintf('Leží v podaném období DPH (%s).', $filed) : null;
     }
 
     /**

@@ -36,7 +36,9 @@ use PDO;
  *    znamená nulový zůstatek, takže chybějící krytí je celý zbytek do částky k úhradě, stejně
  *    jako u převodu (`Pohoda\DocumentLinker::restorePurchaseSettlements`). Doklady v cizí
  *    měně převod nedoplňuje (úhrady POHODY jsou v Kč), kontrola je jen ohlásí.
- * Deník ani DPH se nemění.
+ * Deník, DPH ani částka k úhradě se nemění, doplní se jen evidence úhrady. Uzavřené účetní
+ * období proto opravu neblokuje, jen zámek účtování k datu a podané období DPH
+ * ({@see MigrationCheckLocks::paymentRecordReason()}).
  */
 final class PurchaseSettledUncoveredCheck extends SourceScopedCheck implements FixableMigrationDataCheck
 {
@@ -192,7 +194,7 @@ final class PurchaseSettledUncoveredCheck extends SourceScopedCheck implements F
             $paidAt = substr((string) $r['paid_at'], 0, 10);
             if ((string) $r['currency'] !== 'CZK') {
                 [$state, $reason] = [CheckItem::REVIEW, 'Doklad v cizí měně: úhrady POHODY jsou v Kč, krytí doplňte ručně (Uhrazeno mimo evidenci v detailu dokladu).'];
-            } elseif (($lock = $this->locks->reason($supplierId, $paidAt)) !== null) {
+            } elseif (($lock = $this->locks->paymentRecordReason($supplierId, $paidAt)) !== null) {
                 [$state, $reason] = [CheckItem::LOCKED, $lock];
             } else {
                 [$state, $reason] = [CheckItem::FIXABLE, 'Uhrazeno podle POHODY, evidované úhrady doklad nepokrývají. Zbytek se doplní jako úhrada mimo evidenci.'];
@@ -217,7 +219,7 @@ final class PurchaseSettledUncoveredCheck extends SourceScopedCheck implements F
                 continue;
             }
             $rate = $p['currency'] === 'CZK' ? 1.0 : ($p['rate'] ?? 1.0);
-            $lock = $this->locks->reason($supplierId, $p['paid_at']);
+            $lock = $this->locks->paymentRecordReason($supplierId, $p['paid_at']);
             $out[] = new CheckItem('purchase_invoice', $p['id'], $p['document_no'], $p['paid_at'], round($gap * $rate, 2),
                 $lock === null ? CheckItem::FIXABLE : CheckItem::LOCKED,
                 $lock ?? 'Uhrazeno podle Money S3, evidované úhrady doklad nepokrývají. Doplní se zápočet interním dokladem, zbytek jako úhrada mimo evidenci.',
