@@ -89,14 +89,9 @@ final class SummaryAction
     public function widgetInvoiceCount(string $kind, int $supplierId): int
     {
         $predicate = match ($kind) {
-            'overdue' => "i.status IN ('issued','sent','reminded') AND i.due_date "
-                . $this->overduePolicy->comparisonOperator() . ' CURDATE() AND '
-                . $this->receivableDocTypeSql() . ' AND ' . $this->outstandingReceivableSql(),
-            'upcoming' => "i.status IN ('issued','sent','reminded') AND i.due_date>=CURDATE()
-                AND i.invoice_type IN ('invoice','credit_note','tax_document') AND " . $this->outstandingReceivableSql(),
-            'drafts' => "i.status='draft' AND i.invoice_type<>'tax_document'
-                AND (i.issue_date>=DATE_SUB(CURDATE(),INTERVAL 2 MONTH)
-                    OR (i.issue_date IS NULL AND i.created_at>=DATE_SUB(CURDATE(),INTERVAL 2 MONTH)))",
+            'overdue' => $this->overdueInvoiceSql(),
+            'upcoming' => $this->upcomingInvoiceSql(),
+            'drafts' => $this->recentDraftInvoiceSql(),
             default => throw new \InvalidArgumentException('Neznámý seznam faktur.'),
         };
         $stmt = $this->db->pdo()->prepare('SELECT COUNT(*) FROM invoices i WHERE i.supplier_id=? AND ' . $predicate);
@@ -607,7 +602,6 @@ final class SummaryAction
     private function salesStatistics(\PDO $pdo, int $year, int $sid, ?array $currencyIds = null): array
     {
         $currencyCondition = $currencyIds === null ? '' : ' AND currency_id IN (' . implode(',', $currencyIds ?: [0]) . ')';
-        $overdueOperator = $this->overduePolicy->comparisonOperator();
         // Počet vystavených YTD — proformy se nezapočítávají (nejde o finální daňový doklad).
         $stmt = $pdo->prepare(
             "SELECT COUNT(*) FROM invoices
@@ -625,9 +619,7 @@ final class SummaryAction
                FROM invoices i
                JOIN currencies cur ON cur.id = i.currency_id
               WHERE i.supplier_id = ? {$currencyCondition}
-                AND i.status IN ('issued','sent','reminded') AND i.due_date {$overdueOperator} CURDATE()
-                AND " . $this->receivableDocTypeSql() . "
-                AND " . $this->outstandingReceivableSql() . "
+                AND " . $this->overdueInvoiceSql() . "
               GROUP BY cur.code"
         );
         $stmt->execute([$sid]);
@@ -769,6 +761,27 @@ final class SummaryAction
         return "(i.invoice_type NOT IN ('invoice','proforma','tax_document') OR i.amount_to_pay - i.paid_total > 0)";
     }
 
+    private function overdueInvoiceSql(): string
+    {
+        return "i.status IN ('issued','sent','reminded') AND i.due_date "
+            . $this->overduePolicy->comparisonOperator() . ' CURDATE() AND '
+            . $this->receivableDocTypeSql() . ' AND ' . $this->outstandingReceivableSql();
+    }
+
+    private function upcomingInvoiceSql(): string
+    {
+        return "i.status IN ('issued','sent','reminded') AND i.due_date >= CURDATE()
+            AND i.invoice_type IN ('invoice','credit_note','tax_document') AND " . $this->outstandingReceivableSql();
+    }
+
+    private function recentDraftInvoiceSql(): string
+    {
+        // Koncept daňového dokladu k platbě (#89) nemá výkaz práce. Starší převzaté koncepty sem také nepatří.
+        return "i.status = 'draft' AND i.invoice_type <> 'tax_document'
+            AND (i.issue_date >= DATE_SUB(CURDATE(), INTERVAL 2 MONTH)
+                OR (i.issue_date IS NULL AND i.created_at >= DATE_SUB(CURDATE(), INTERVAL 2 MONTH)))";
+    }
+
     /**
      * Náklady po měsících pro dashboard. Datum uznání je `effective_cost_date`
      * (= COALESCE(tax_date, issue_date), DUZP má přednost dle § 73) — TOTÉŽ, co používá
@@ -806,7 +819,6 @@ final class SummaryAction
 
     private function overdue(\PDO $pdo, int $sid): array
     {
-        $overdueOperator = $this->overduePolicy->comparisonOperator();
         $sql = "SELECT i.id, i.varsymbol, i.invoice_type, i.client_id, cur.code AS currency,
                        i.issue_date, i.due_date, (i.amount_to_pay - i.paid_total) AS amount_to_pay, i.status,
                        c.company_name AS client_company_name,
@@ -815,10 +827,7 @@ final class SummaryAction
                   JOIN clients c ON c.id = i.client_id
                   JOIN currencies cur ON cur.id = i.currency_id
                  WHERE i.supplier_id = ?
-                   AND i.status IN ('issued','sent','reminded')
-                   AND i.due_date {$overdueOperator} CURDATE()
-                   AND " . $this->receivableDocTypeSql() . "
-                   AND " . $this->outstandingReceivableSql() . "
+                   AND " . $this->overdueInvoiceSql() . "
                  ORDER BY i.due_date ASC
                  LIMIT 20";
         $stmt = $pdo->prepare($sql);
@@ -836,10 +845,7 @@ final class SummaryAction
                   JOIN clients c ON c.id = i.client_id
                   JOIN currencies cur ON cur.id = i.currency_id
                  WHERE i.supplier_id = ?
-                   AND i.status IN ('issued','sent','reminded')
-                   AND i.due_date >= CURDATE()
-                   AND i.invoice_type IN ('invoice','credit_note','tax_document')
-                   AND " . $this->outstandingReceivableSql() . "
+                   AND " . $this->upcomingInvoiceSql() . "
                  ORDER BY i.due_date ASC
                  LIMIT 20";
         $stmt = $pdo->prepare($sql);
@@ -865,13 +871,7 @@ final class SummaryAction
                   JOIN currencies cur ON cur.id = i.currency_id
              {$projectJoin}
                  WHERE i.supplier_id = ?
-                   AND i.status = 'draft'
-                   -- Koncept daňového dokladu k přijaté platbě (#89) sem nepatří —
-                   -- nemá výkaz práce, vystavuje se z detailu zálohy/platby.
-                   AND i.invoice_type != 'tax_document'
-                   -- Jen koncepty za poslední 2 měsíce: starší (typicky převzaté z jiného
-                   -- systému ke kontrole) nejsou rozpracovaný výkaz práce.
-                   AND COALESCE(i.issue_date, DATE(i.created_at)) >= DATE_SUB(CURDATE(), INTERVAL 2 MONTH)
+                   AND " . $this->recentDraftInvoiceSql() . "
                  ORDER BY i.updated_at DESC, i.id DESC
                  LIMIT 24";
         $stmt = $pdo->prepare($sql);

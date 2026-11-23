@@ -133,7 +133,7 @@ final class DashboardWidgetDataServiceTest extends TestCase
                 $stmt->method('fetch')->willReturn(['id' => $this->supplierId, 'is_vat_payer' => 0, 'taxpayer_type' => 'fo', 'accounting_mode' => 'double_entry']);
             } elseif (str_starts_with($sql, 'SELECT is_vat_payer')) {
                 $stmt->method('fetchColumn')->willReturn(0);
-            } elseif (str_starts_with($sql, 'WITH planned AS')) {
+            } elseif (str_contains($sql, 'AND EXISTS (SELECT 1 FROM other_item_installments')) {
                 $stmt->method('fetchAll')->willReturn([]);
             } elseif (str_contains($sql, 'FROM other_items')) {
                 $stmt->method('fetchAll')->willReturn([['id' => 1, 'currency' => 'CZK', 'status' => 'draft', 'side' => 'receivable', 'due_on' => date('Y-m-d'), 'remaining' => 20]]);

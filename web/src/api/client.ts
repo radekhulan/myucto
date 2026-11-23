@@ -96,10 +96,11 @@ api.interceptors.response.use(
     // dotčená okna (`workspace/dataDependencies.ts`). Okno v iframe mu ji pošle,
     // hlavní dokument ji vyvolá jako událost.
     const method = response.config.method?.toLowerCase() ?? 'get'
-    const requestPath = new URL(response.config.url ?? '', window.location.origin).pathname.replace(/^\/api\/(?:v1\/)?/, '/')
-    const widgetRead = method === 'post' && requestPath === '/dashboard-widgets/query'
-    if (!['get', 'head', 'options'].includes(method) && !widgetRead) {
+    if (!['get', 'head', 'options'].includes(method)) {
       const path = new URL(response.config.url ?? '', window.location.origin).pathname.replace(/^\/api\//, '/')
+      if (method === 'post' && ['/dashboard-widgets/query', '/v1/dashboard-widgets/query'].includes(path)) {
+        return response
+      }
       const resource = path.split('/')[1]
       if (resource && /^[a-z0-9-]+$/.test(resource)) {
         const scope = getWindowSupplierScope()

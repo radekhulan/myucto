@@ -125,7 +125,8 @@ final class DashboardWidgetDataService
             case 'invoices.approvals':
                 return $metric('approvals') + ['links' => ['list' => '/admin/approvals']];
             case 'documents.requests':
-                $link = RequestAuthorization::isClientType($r) ? '/portal/document-requests' : '/document-requests';
+                $views = $this->access->capabilities($r, $type);
+                $link = $views['internalView'] ? '/document-requests' : '/portal/document-requests';
                 return $this->memo($memo, 'documents', fn () => $this->portal->documentRequests($sid)) + ['links' => ['list' => $link]];
             case 'actions.quick':
                 return ['items' => $this->quickActions($r)];
