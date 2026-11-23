@@ -5,6 +5,10 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Migration\Shared;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Service\Bank\AccountNumberNormalizer;
+use MyInvoice\Service\Bank\BankApiMonthlyStatements;
+use MyInvoice\Service\Bank\StatementTransactionScope;
+use PDO;
 
 /**
  * Zápis převzatých bankovních výpisů a pohybů (zdroj výpisu `import`) z kanonického
@@ -153,6 +157,135 @@ final class BankStatementImportWriter
         );
         $this->ledgerOpening->execute([$supplierId, $periodId, $accountId]);
         return (float) $this->ledgerOpening->fetchColumn();
+    }
+
+    /**
+     * Pohyby účtu, které do MyÚčta přišly jinou cestou než převodem (stažené přes API banky,
+     * nahraný GPC či PDF výpis), v rozsahu dat, ve kterém pohyby účtu nese zdrojový program.
+     * Převod je přinese znovu ze zdroje, takže by se zdvojily. `free` = nespárované
+     * a nezaúčtované (převod je smí smazat, {@see deleteMovements()}), `used` = pohyb, se
+     * kterým uživatel v MyÚčtu pracoval (párování, platba, zaúčtování, ignorování, alokace,
+     * mzdy) - ten převod nemaže a volající převod zastaví s výpisem.
+     *
+     * Účet se pozná podle čísla účtu (i s předčíslím, bez vodicích nul) nebo IBANu, kódu
+     * banky a měny výpisu.
+     *
+     * @return array{free:list<int>,used:list<array{id:int,posted_at:string,amount:string,variable_symbol:?string,counterparty_name:?string,status:string}>}
+     */
+    public function foreignMovements(int $supplierId, string $accountNumber, string $bankCode, string $iban, string $currency, string $from, string $until): array
+    {
+        $pdo = $this->db->pdo();
+        $statements = $pdo->prepare(
+            "SELECT id, account_number, bank_code, currency FROM bank_statements
+              WHERE supplier_id = ? AND source <> 'import'"
+        );
+        $statements->execute([$supplierId]);
+        $bank = AccountNumberNormalizer::canonicalBankCode($bankCode, $iban);
+        $ids = [];
+        foreach ($statements->fetchAll(PDO::FETCH_ASSOC) as $st) {
+            $stBank = AccountNumberNormalizer::canonicalBankCode((string) ($st['bank_code'] ?? ''));
+            if (($st['currency'] ?? null) !== null && (string) $st['currency'] !== $currency) {
+                continue;
+            }
+            if ($bank !== null && $stBank !== null && $bank !== $stBank) {
+                continue;
+            }
+            if (AccountNumberNormalizer::matchesAny((string) $st['account_number'], $accountNumber !== '' ? $accountNumber : null, $iban !== '' ? $iban : null)) {
+                $ids[] = (int) $st['id'];
+            }
+        }
+        if ($ids === []) {
+            return ['free' => [], 'used' => []];
+        }
+        $in = implode(',', array_fill(0, count($ids), '?'));
+        $rows = $pdo->prepare(
+            "SELECT t.id, t.posted_at, t.amount, t.variable_symbol, t.counterparty_name, t.match_status,
+                    (t.match_status <> 'unmatched'
+                     OR EXISTS (SELECT 1 FROM payment_matches pm WHERE pm.bank_transaction_id = t.id)
+                     OR EXISTS (SELECT 1 FROM invoice_payments ip WHERE ip.bank_transaction_id = t.id)
+                     OR EXISTS (SELECT 1 FROM other_item_allocations oa WHERE oa.bank_transaction_id = t.id)
+                     OR EXISTS (SELECT 1 FROM payroll_payment_matches pp WHERE pp.bank_transaction_id = t.id)
+                     OR EXISTS (SELECT 1 FROM bank_transfer_matches bm WHERE bm.in_transaction_id = t.id OR bm.out_transaction_id = t.id)
+                     OR EXISTS (SELECT 1 FROM journal_entries e WHERE e.supplier_id = ? AND e.source_type = 'bank' AND e.source_id = t.id)) AS used
+               FROM bank_transactions t
+              WHERE t.statement_id IN ({$in}) AND t.posted_at >= ? AND t.posted_at <= ?
+              ORDER BY t.posted_at, t.id"
+        );
+        $rows->execute([$supplierId, ...$ids, $from, $until]);
+        $out = ['free' => [], 'used' => []];
+        foreach ($rows->fetchAll(PDO::FETCH_ASSOC) as $r) {
+            if ((int) $r['used'] === 1) {
+                $out['used'][] = [
+                    'id' => (int) $r['id'], 'posted_at' => substr((string) $r['posted_at'], 0, 10), 'amount' => (string) $r['amount'],
+                    'variable_symbol' => $r['variable_symbol'], 'counterparty_name' => $r['counterparty_name'], 'status' => (string) $r['match_status'],
+                ];
+            } else {
+                $out['free'][] = (int) $r['id'];
+            }
+        }
+        return $out;
+    }
+
+    /**
+     * Smaže pohyby jiného zdroje, které nahradí pohyby převodu ({@see foreignMovements()}
+     * `free`), i se záznamy jejich načtení, a přepočte počty a obraty dotčených výpisů
+     * (u měsíčních výpisů API celý souhrn měsíce). Volající drží transakci převodu.
+     *
+     * @param list<int> $ids
+     * @return int počet smazaných pohybů
+     */
+    public function deleteMovements(int $supplierId, array $ids): int
+    {
+        if ($ids === []) {
+            return 0;
+        }
+        $pdo = $this->db->pdo();
+        $deleted = 0;
+        foreach (array_chunk(array_values(array_unique($ids)), 500) as $chunk) {
+            $in = implode(',', array_fill(0, count($chunk), '?'));
+            $owned = $pdo->prepare(
+                "SELECT t.id, t.statement_id FROM bank_transactions t JOIN bank_statements s ON s.id = t.statement_id
+                  WHERE s.supplier_id = ? AND t.id IN ({$in})"
+            );
+            $owned->execute([$supplierId, ...$chunk]);
+            $statementIds = [];
+            $txIds = [];
+            foreach ($owned->fetchAll(PDO::FETCH_ASSOC) as $r) {
+                $txIds[] = (int) $r['id'];
+                $statementIds[(int) $r['statement_id']] = true;
+            }
+            if ($txIds === []) {
+                continue;
+            }
+            $txIn = implode(',', array_fill(0, count($txIds), '?'));
+            $imports = $pdo->prepare("SELECT DISTINCT statement_id FROM bank_transaction_imports WHERE bank_transaction_id IN ({$txIn})");
+            $imports->execute($txIds);
+            foreach ($imports->fetchAll(PDO::FETCH_COLUMN) as $statementId) {
+                $statementIds[(int) $statementId] = true;
+            }
+            $pdo->prepare("DELETE FROM bank_transaction_imports WHERE bank_transaction_id IN ({$txIn})")->execute($txIds);
+            $delete = $pdo->prepare("DELETE FROM bank_transactions WHERE id IN ({$txIn})");
+            $delete->execute($txIds);
+            $deleted += $delete->rowCount();
+
+            $months = new BankApiMonthlyStatements($pdo);
+            $isMonth = $pdo->prepare('SELECT 1 FROM bank_api_months WHERE statement_id = ? AND supplier_id = ?');
+            $monthIds = [];
+            foreach (array_keys($statementIds) as $statementId) {
+                $isMonth->execute([$statementId, $supplierId]);
+                if ($isMonth->fetchColumn() !== false) {
+                    $monthIds[] = $statementId;
+                    continue;
+                }
+                $pdo->prepare(
+                    'UPDATE bank_statements SET transaction_count = ' . StatementTransactionScope::countSql($statementId) . ',
+                            matched_count = ' . StatementTransactionScope::countSql($statementId, 'bt', "bt.match_status IN ('auto_exact', 'auto_partial', 'manual')") . '
+                      WHERE id = ? AND supplier_id = ?'
+                )->execute([$statementId, $supplierId]);
+            }
+            $months->refreshMonths($monthIds, $supplierId);
+        }
+        return $deleted;
     }
 
     /** Haléře jako částka pro DECIMAL sloupec (`12345` → `123.45`). */

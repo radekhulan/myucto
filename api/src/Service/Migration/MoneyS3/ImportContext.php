@@ -71,7 +71,10 @@ final class ImportContext
      */
     public array $movements = ['bank' => [], 'cash' => []];
 
-    /** Zámek dokladů firmy (`locked_until`) — u daňové evidence hranice uzavřené historie. */
+    /**
+     * Zámek dokladů firmy (`locked_until`) — u daňové evidence hranice uzavřené historie,
+     * u podvojného účetnictví zámek účtování k datu ({@see writable()}).
+     */
     public ?string $lockedUntil = null;
 
     public ?int $runId = null;
@@ -133,5 +136,58 @@ final class ImportContext
             return $this->lockedUntil !== null && sprintf('%04d-12-31', $year) <= $this->lockedUntil;
         }
         return (bool) ($this->periods[$year]['locked'] ?? false);
+    }
+
+    /**
+     * Konec posledního převáděného období (rozvrh deníku, u daňové evidence konec posledního
+     * roku). Úhrada z Money s pozdějším datem patří roku, který se nepřevádí - doklad ji
+     * nedostane ({@see paidWithin()}). Null = rozvrh ještě není (nic se neomezuje).
+     */
+    public function lastPeriodEnd(): ?string
+    {
+        if ($this->periods !== []) {
+            return max(array_column($this->periods, 'ends_on'));
+        }
+        return $this->dirYears !== [] ? sprintf('%04d-12-31', max($this->dirYears)) : null;
+    }
+
+    /**
+     * Datum úhrady z Money (`Uhrazeno`), pokud padne do převáděných období; pozdější úhrada
+     * (faktura 2026 zaplacená v lednu 2027) do převodu nepatří a doklad zůstane neuhrazený.
+     */
+    public function paidWithin(?string $paidAt): ?string
+    {
+        $end = $this->lastPeriodEnd();
+        return $paidAt === null || ($end !== null && $paidAt > $end) ? null : $paidAt;
+    }
+
+    /**
+     * Smí převod k datu zapisovat a měnit vazby: datum leží v převáděném období, které je
+     * v MyÚčtu otevřené, a za zámkem účtování k datu (`locked_until`). Uzavřené roky a data
+     * pod zámkem mění jen opravný převod vazeb ({@see ImportOptions::$relinkOnly}), a to
+     * jen vazby, ne deník.
+     */
+    public function writable(?string $date): bool
+    {
+        if ($date === null || $date === '') {
+            return false;
+        }
+        $date = substr($date, 0, 10);
+        if ($this->lockedUntil !== null && $date <= $this->lockedUntil) {
+            return false;
+        }
+        foreach ($this->periods as $period) {
+            if ($date >= $period['starts_on'] && $date <= $period['ends_on']) {
+                return !$period['locked'];
+            }
+        }
+        return false;
+    }
+
+    /** Rok rozvrhu, do kterého převod zapisuje: období je otevřené a zámek k datu ho nezasahuje. */
+    public function yearWritable(int $year): bool
+    {
+        $period = $this->periods[$year] ?? null;
+        return $period !== null && !$period['locked'] && ($this->lockedUntil === null || $this->lockedUntil < $period['starts_on']);
     }
 }

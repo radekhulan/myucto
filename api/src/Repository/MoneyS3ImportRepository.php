@@ -39,6 +39,58 @@ final class MoneyS3ImportRepository extends AbstractMigrationImportRepository
     public const KIND_OTHER_ITEM = 'other_item';
     public const KIND_VAT_FILING = 'vat_filing';
 
+    /**
+     * Otisky zdrojových záznamů druhu (volitelně jen klíče s předponou): klíč => otisk,
+     * null = záznam převedený před zavedením otisků.
+     *
+     * @return array<string,?string>
+     */
+    public function fingerprints(int $supplierId, string $kind, ?string $keyPrefix = null): array
+    {
+        $sql = 'SELECT money_key, fingerprint FROM money_s3_import_map WHERE supplier_id = ? AND kind = ?';
+        $params = [$supplierId, $kind];
+        if ($keyPrefix !== null) {
+            $sql .= ' AND money_key LIKE ?';
+            $params[] = addcslashes($keyPrefix, '%_\\') . '%';
+        }
+        $stmt = $this->db->pdo()->prepare($sql);
+        $stmt->execute($params);
+        $out = [];
+        foreach ($stmt->fetchAll(\PDO::FETCH_NUM) as [$key, $fingerprint]) {
+            $out[(string) $key] = $fingerprint === null ? null : (string) $fingerprint;
+        }
+        return $out;
+    }
+
+    /**
+     * Otisky zdrojových záznamů, jak je převod právě zapsal nebo ověřil, po dávkách.
+     * Jen u existujících řádků mapy (`$rows` klíč => [cíl, otisk]); cíl se nemění.
+     *
+     * @param array<string,array{0:int,1:string}> $rows
+     */
+    public function setFingerprints(int $supplierId, string $kind, array $rows): void
+    {
+        foreach (array_chunk($rows, 500, true) as $chunk) {
+            $values = [];
+            $params = [];
+            foreach ($chunk as $key => [$targetId, $fingerprint]) {
+                $values[] = '(?, ?, ?, ?, ?)';
+                array_push($params, $supplierId, $kind, self::key((string) $key), $targetId, $fingerprint);
+            }
+            $this->db->pdo()->prepare(
+                'INSERT INTO money_s3_import_map (supplier_id, kind, money_key, target_id, fingerprint) VALUES ' . implode(', ', $values)
+                . ' ON DUPLICATE KEY UPDATE fingerprint = VALUES(fingerprint)'
+            )->execute($params);
+        }
+    }
+
+    /** Řádek mapy záznamu, který převod smazal, protože ho smazalo Money. */
+    public function forget(int $supplierId, string $kind, string $key): void
+    {
+        $this->db->pdo()->prepare('DELETE FROM money_s3_import_map WHERE supplier_id = ? AND kind = ? AND money_key = ?')
+            ->execute([$supplierId, $kind, self::key($key)]);
+    }
+
     protected function runsTable(): string
     {
         return 'money_s3_imports';

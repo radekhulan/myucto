@@ -164,12 +164,26 @@ final class AdvanceDeductionMatcher
             $deductions[$i]['refs'] = array_values(array_unique(array_merge($knownRefs[$d['id']] ?? [], $refIds[$d['id']] ?? [])));
         }
         $result = self::allocate($opening, $advances, $deductions, $corrections);
-        $written = $this->write($ctx, $result['deductions'], $mapped);
-
-        // Souhrn do počtů kroku: zprávy kroku úhrad se u velké agendy ořezávají.
         $p = $ctx->protocol;
         $prefix = $this->issuedSide ? 'issued_' : '';
         $dates = array_column($deductions, 'date', 'id');
+        if (!$ctx->options->relinkOnly) {
+            // Čerpání konečné faktury uzavřeného roku (nebo pod zámkem k datu) mění saldokonto
+            // uzavřených knih zpětně - zapisuje ho jen opravný převod vazeb.
+            $closed = 0;
+            foreach (array_keys($result['deductions']) as $finalId) {
+                if (!$ctx->writable((string) ($dates[$finalId] ?? ''))) {
+                    unset($result['deductions'][$finalId]);
+                    $closed++;
+                }
+            }
+            if ($closed > 0) {
+                $p->setCount(DocumentLinker::STEP_PAYMENTS, $prefix . 'advance_deductions_closed_period_skipped', $closed);
+            }
+        }
+        $written = $this->write($ctx, $result['deductions'], $mapped);
+
+        // Souhrn do počtů kroku: zprávy kroku úhrad se u velké agendy ořezávají.
         $locked = 0;
         foreach ($written as $finalId) {
             if ($ctx->isLocked($ctx->calendar->fiscalYearOfDate((string) $dates[$finalId]))) {

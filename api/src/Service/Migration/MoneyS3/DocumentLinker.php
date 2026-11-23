@@ -31,6 +31,10 @@ final class DocumentLinker
 
     private readonly JournalEntryLinker $entries;
 
+    private ?\PDOStatement $markIssuedPaid = null;
+
+    private ?\PDOStatement $markPurchasePaid = null;
+
     public function __construct(
         private readonly Connection $db,
         private readonly MoneyS3ImportRepository $map,
@@ -53,6 +57,12 @@ final class DocumentLinker
         $orphans = [];
         $evidence = null;
         $evidential = [];
+        // Zápisy navázané v tomto běhu: jen jim se přepíše popis (vlastní zápisy firmy ani
+        // zápisy uzavřených let převod nemění).
+        $linkedEntries = [];
+        // Řádný převod mění vazby jen v obdobích, do kterých zapisuje; uzavřené roky a roky
+        // pod zámkem k datu projde jen opravný převod vazeb.
+        $relink = $ctx->options->relinkOnly;
         // Mapa převodu může ukazovat na záznam smazaný (zápis stornovaný) v MyÚčtu.
         $live = $this->liveRecords($ctx->supplierId);
         // Ostatní pohledávky vede Money v deníku pod zdrojem KP (převod ho čte jako ruční
@@ -67,6 +77,10 @@ final class DocumentLinker
         ] as [$sourceType, $docType, $docs, $retype]) {
             foreach ($docs as $key => $docId) {
                 [$year, $docNo] = explode('|', (string) $key, 3);
+                if (!$relink && !$ctx->yearWritable((int) $year)) {
+                    $p->count(self::STEP_LINK, 'closed_period_skipped');
+                    continue;
+                }
                 if ($indexYear !== (int) $year) {
                     $indexYear = (int) $year;
                     $index = $this->journalIndex($ctx->supplierId, $indexYear);
@@ -103,18 +117,23 @@ final class DocumentLinker
                     continue;
                 }
                 $new = $this->entries->attach($ctx->supplierId, $ctx->userId > 0 ? $ctx->userId : null, $retype ?? $sourceType, $sourceType, $docType, $docId, $entries);
+                foreach ($entries as $entryId) {
+                    $linkedEntries[$entryId] = true;
+                }
                 $p->count(self::STEP_LINK, $new ? 'linked' : 'existing');
             }
         }
         if ($evidential !== []) {
-            $this->linkEvidential($ctx, $evidential, $evidence ?? [], $live);
+            foreach ($this->linkEvidential($ctx, $evidential, $evidence ?? [], $live) as $entryId) {
+                $linkedEntries[$entryId] = true;
+            }
         }
         $p->set('orphans', $orphans);
         if ($orphans !== []) {
             $p->warn(self::STEP_LINK, 'orphan_documents', count($orphans) . ' dokladů nemá v deníku Money zápis se stejným číslem. '
                 . 'Nejsou zaúčtované; zaúčtujte je ručně nebo v Účetnictví → Doúčtovat doklady.');
         }
-        $this->entries->refreshDescriptions($ctx->supplierId, $p, self::STEP_LINK);
+        $this->entries->refreshDescriptions($ctx->supplierId, $p, self::STEP_LINK, entryIds: array_keys($linkedEntries));
         $p->finish(self::STEP_LINK);
     }
 
@@ -148,17 +167,6 @@ final class DocumentLinker
             $cashByDoc[$docNo][] = self::candidate($cashRow, $id, (int) $year, $ctx->supplierId);
         }
         $existing = $this->map->all($ctx->supplierId, MoneyS3ImportRepository::KIND_PAYMENT);
-        // Doklad převedený dřív jako neuhrazený: spárováním se stane uhrazeným. Koncept
-        // k ruční kontrole zůstává konceptem, jeho stav určí účetní. Převod zakládá jen
-        // běžné faktury (document_kind = 'invoice'), DDKP se sem dostat nemůže.
-        $markPurchasePaid = $pdo->prepare(
-            "UPDATE purchase_invoices SET status = 'paid', paid_at = COALESCE(paid_at, ?)
-              WHERE id = ? AND supplier_id = ? AND document_kind = 'invoice' AND status IN ('received', 'booked')"
-        );
-        $markIssuedPaid = $pdo->prepare(
-            "UPDATE invoices SET status = 'paid', paid_at = COALESCE(paid_at, ?), paid_total = total_with_vat
-              WHERE id = ? AND supplier_id = ? AND status IN ('issued', 'sent', 'reminded')"
-        );
         $insertMatch = $pdo->prepare(
             'INSERT INTO payment_matches
                 (supplier_id, bank_transaction_id, invoice_id, purchase_invoice_id, amount, match_type, matched_by_user_id)
@@ -236,6 +244,12 @@ final class DocumentLinker
                         $p->count(self::STEP_PAYMENTS, 'movement_kept');
                         continue;
                     }
+                    if (!$relink && !$ctx->writable($movement['date'])) {
+                        // Nové párování v uzavřeném roce (nebo pod zámkem k datu) by zpětně
+                        // měnilo saldokonto uzavřených knih; dělá ho jen opravný převod vazeb.
+                        $p->count(self::STEP_PAYMENTS, 'closed_period_skipped');
+                        continue;
+                    }
                     $txAmount = 0.0;
                     foreach ($bankCandidates as $c) {
                         $txAmount = $c['id'] === $txId ? abs($c['amount']) : $txAmount;
@@ -277,9 +291,7 @@ final class DocumentLinker
                         }
                     }
                     $markTx->execute([$ctx->userId > 0 ? $ctx->userId : null, $isIssued ? $docId : null, $txId, $ctx->supplierId]);
-                    if ($paidAt !== null) {
-                        ($isIssued ? $markIssuedPaid : $markPurchasePaid)->execute([$paidAt, $docId, $ctx->supplierId]);
-                    }
+                    $this->markPaid($ctx, $isIssued, $docId, $paidAt);
                     $this->map->put($ctx->supplierId, MoneyS3ImportRepository::KIND_PAYMENT, $mapKey, $matchId, $ctx->runId);
                     if ($isIssued) {
                         $this->recordIssuedBank($ctx, $issuedPayments, $docId, $txId, $movements, $settledBy);
@@ -288,6 +300,10 @@ final class DocumentLinker
                     continue;
                 }
                 $cashId = self::choosePayment($cashCandidates, $year, $docTotal, $paidAt);
+                if ($cashId !== null && !$relink && !$ctx->writable(self::candidateDate($cashCandidates, $cashId))) {
+                    $p->count(self::STEP_PAYMENTS, 'closed_period_skipped');
+                    continue;
+                }
                 if ($cashId !== null) {
                     // Pokladní doklad nese vazbu jen na jeden doklad. Hradí-li víc faktur, zůstane
                     // vazba na první a další ji nepřepíše; faktury jsou uhrazené podle Money.
@@ -307,9 +323,7 @@ final class DocumentLinker
                         $pdo->prepare("UPDATE purchase_invoices SET payment_method = 'cash' WHERE id = ? AND supplier_id = ?")
                             ->execute([$docId, $ctx->supplierId]);
                     }
-                    if ($paidAt !== null) {
-                        ($isIssued ? $markIssuedPaid : $markPurchasePaid)->execute([$paidAt, $docId, $ctx->supplierId]);
-                    }
+                    $this->markPaid($ctx, $isIssued, $docId, $paidAt);
                     $this->map->put($ctx->supplierId, MoneyS3ImportRepository::KIND_PAYMENT, $mapKey, $cashId, $ctx->runId);
                     if ($isIssued) {
                         $this->recordIssuedCash($ctx, $issuedPayments, $docId, $cashId, $cashCandidates, $settledBy);
@@ -754,8 +768,9 @@ final class DocumentLinker
      * @param list<array{type:string,year:int,document_no:string,id:int,par:string,amount:float}> $docs
      * @param array{neutral:array<string,array{par:string,amount:float}>,claims:array<string,array<string,array{year:int,doc:string,amounts:list<float>}>>} $evidence
      * @param array<string,array<int,true>> $live
+     * @return list<int> navázané zápisy (přepis popisu)
      */
-    private function linkEvidential(ImportContext $ctx, array $docs, array $evidence, array $live): void
+    private function linkEvidential(ImportContext $ctx, array $docs, array $evidence, array $live): array
     {
         $p = $ctx->protocol;
         $pdo = $this->db->pdo();
@@ -790,14 +805,7 @@ final class DocumentLinker
                                  WHERE g.supplier_id = e.supplier_id AND g.entry_id = e.id AND NOT (g.doc_type = ? AND g.doc_id = ?))'
         );
         $settlements = null;
-        $markIssuedPaid = $pdo->prepare(
-            "UPDATE invoices SET status = 'paid', paid_at = COALESCE(paid_at, ?), paid_total = total_with_vat
-              WHERE id = ? AND supplier_id = ? AND status IN ('issued', 'sent', 'reminded')"
-        );
-        $markPurchasePaid = $pdo->prepare(
-            "UPDATE purchase_invoices SET status = 'paid', paid_at = COALESCE(paid_at, ?)
-              WHERE id = ? AND supplier_id = ? AND document_kind = 'invoice' AND status IN ('received', 'booked')"
-        );
+        $attached = [];
         $indexes = [];
         $linked = 0;
         $evidentialOnly = 0;
@@ -824,14 +832,12 @@ final class DocumentLinker
                 continue;
             }
             $this->entries->attach($ctx->supplierId, $ctx->userId > 0 ? $ctx->userId : null, $doc['type'], 'manual', $doc['type'], $doc['id'], $entries);
+            array_push($attached, ...$entries);
             $linked++;
             $settlements ??= $this->claimSettlements($ctx);
             $paidAt = $settlements[($doc['type'] === 'invoice' ? 'KP|' : 'KZ|') . $claimKey] ?? null;
-            if ($paidAt !== null) {
-                ($doc['type'] === 'invoice' ? $markIssuedPaid : $markPurchasePaid)->execute([$paidAt, $doc['id'], $ctx->supplierId]);
-                if (($doc['type'] === 'invoice' ? $markIssuedPaid : $markPurchasePaid)->rowCount() > 0) {
-                    $p->count(self::STEP_LINK, 'evidential_paid_by_claim');
-                }
+            if ($this->markPaid($ctx, $doc['type'] === 'invoice', $doc['id'], $paidAt)) {
+                $p->count(self::STEP_LINK, 'evidential_paid_by_claim');
             }
         }
         if ($linked > 0) {
@@ -844,6 +850,57 @@ final class DocumentLinker
             $p->info(self::STEP_LINK, 'evidential_only', $evidentialOnly . ' faktur Money zaúčtovalo jen evidenčně (MD = D) bez dohledatelného '
                 . 'protějšku. Zůstávají zaúčtované bez vlastního zápisu; účetní účinek je v deníku pod jiným dokladem.');
         }
+        return $attached;
+    }
+
+    /**
+     * Doklad, který Money vede jako uhrazený (`Uhrazeno`, u ostatních pohledávek `UhDatum`),
+     * označí jako uhrazený - jen když datum úhrady padne do převáděných období
+     * ({@see ImportContext::paidWithin()}). Pozdější úhrada (v Money už zaúčtovaná v roce,
+     * který se nepřevádí) doklad neuhradí; stav vydaného dokladu pak určí jen převzaté
+     * platby ({@see IssuedPaymentRecorder}: uhrazený, až když ho platby pokryjí).
+     *
+     * Kontrakt uhrazené částky vydaného dokladu (`paid_total`): úhrada z Money do konce
+     * převáděných období znamená doklad uhrazený celý, `paid_total` = částka k úhradě a převod
+     * ji nesnižuje na součet převzatých plateb. Rozdíl, který Money uhradilo jinak než
+     * převzatým pohybem (interní doklad, zápočet, úhrada bez čísla dokladu), doplní evidovaná
+     * platba `settlement` jen do konce převáděných období (krok úhrad, převzatá úhrada bez
+     * dokladu úhrady). `paid_total` se nikdy nenastavuje nad částku k úhradě dokladu
+     * (`amount_to_pay`) a jen zvyšuje, uhrazenou částku z plateb zadaných v MyÚčtu nepřepíše.
+     *
+     * Koncept k ruční kontrole zůstává konceptem, jeho stav určí účetní. Převod zakládá jen
+     * běžné přijaté faktury (`document_kind = 'invoice'`), DDKP se sem dostat nemůže.
+     *
+     * @return bool doklad se právě označil jako uhrazený
+     */
+    private function markPaid(ImportContext $ctx, bool $issued, int $docId, ?string $paidAt): bool
+    {
+        $paidAt = $ctx->paidWithin($paidAt);
+        if ($paidAt === null) {
+            return false;
+        }
+        $stmt = $issued
+            ? ($this->markIssuedPaid ??= $this->db->pdo()->prepare(
+                "UPDATE invoices SET status = 'paid', paid_at = COALESCE(paid_at, ?), paid_total = GREATEST(paid_total, amount_to_pay)
+                  WHERE id = ? AND supplier_id = ? AND status IN ('issued', 'sent', 'reminded')"
+            ))
+            : ($this->markPurchasePaid ??= $this->db->pdo()->prepare(
+                "UPDATE purchase_invoices SET status = 'paid', paid_at = COALESCE(paid_at, ?)
+                  WHERE id = ? AND supplier_id = ? AND document_kind = 'invoice' AND status IN ('received', 'booked')"
+            ));
+        $stmt->execute([$paidAt, $docId, $ctx->supplierId]);
+        return $stmt->rowCount() > 0;
+    }
+
+    /** @param list<array{id:int,date:?string}> $candidates */
+    private static function candidateDate(array $candidates, int $id): ?string
+    {
+        foreach ($candidates as $c) {
+            if ($c['id'] === $id) {
+                return $c['date'];
+            }
+        }
+        return null;
     }
 
     /**

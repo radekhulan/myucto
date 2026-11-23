@@ -1237,6 +1237,7 @@
         "2331_accrual_agenda.sql",
         "2332_accrual_agenda_permissions.sql",
         "2333_purchase_renumber_date_basis.sql",
+        "2334_money_s3_import_fingerprint.sql",
         "2336_purchase_numbering_date_basis.sql"
     ],
     "tables": {
@@ -9202,6 +9203,7 @@
             "collation": "utf8mb4_unicode_ci",
             "columns": {
                 "created_at": "timestamp NOT NULL DEFAULT current_timestamp()",
+                "fingerprint": "char(64) NULL DEFAULT NULL",
                 "kind": "varchar(32) NOT NULL COLLATE utf8mb4_bin",
                 "money_key": "varchar(190) NOT NULL COLLATE utf8mb4_bin",
                 "run_id": "bigint(20) unsigned NULL DEFAULT NULL",

@@ -1862,6 +1862,34 @@ final class SyntheticAgenda
     }
 
     /**
+     * Úprava tabulky agendy pro opakovaný převod novější zálohy: `$change` vrací upravený
+     * řádek (null = řádek v záloze už není), `$append` přidá nové řádky.
+     *
+     * @param array<string,string> $files
+     * @param (callable(array<string,mixed>):?array<string,mixed>)|null $change
+     * @param list<array<string,mixed>> $append
+     * @return array<string,string>
+     */
+    public static function patch(array $files, string $path, ?callable $change, array $append = []): array
+    {
+        $table = strtoupper(pathinfo($path, PATHINFO_FILENAME));
+        $fields = match ($table) {
+            'UCDENIK' => self::JOURNAL_FIELDS,
+            'PFAKTURY' => self::PURCHASE_FIELDS,
+            'VFAKTURY' => self::ISSUED_FIELDS,
+            'BANKKNIH' => self::BANK_FIELDS,
+            'POKLKNIH' => self::CASH_FIELDS,
+            'SZUCPOKL' => self::REGISTER_FIELDS,
+        };
+        $rows = isset($files[$path]) ? iterator_to_array(Ms3Table::fromString($files[$path], $table)->rows(), false) : [];
+        if ($change !== null) {
+            $rows = array_values(array_filter(array_map($change, $rows), static fn (?array $r): bool => $r !== null));
+        }
+        $files[$path] = Ms3FixtureWriter::table($fields, array_merge($rows, $append));
+        return $files;
+    }
+
+    /**
      * Záloha agendy z daných souborů (varianty agendy pro jednotlivé testy).
      *
      * @param array<string,string> $files

@@ -11,6 +11,7 @@ use MyInvoice\Repository\MoneyS3ImportRepository;
 use MyInvoice\Service\Accounting\EntryForm\EntryFormService;
 use MyInvoice\Service\Accounting\FiscalCalendar;
 use MyInvoice\Service\Accounting\JournalDescriptionBuilder;
+use MyInvoice\Service\Accounting\PostingException;
 use MyInvoice\Service\Accounting\PostingService;
 use MyInvoice\Service\Migration\Shared\MigrationPeriods;
 use MyInvoice\Service\Migration\Shared\ReconciliationTolerance;
@@ -41,6 +42,8 @@ final class JournalImporter
      */
     private \WeakMap $plans;
 
+    private readonly JournalEntryRefresh $refresh;
+
     public function __construct(
         private readonly Connection $db,
         private readonly AccountingPeriodRepository $periods,
@@ -49,6 +52,7 @@ final class JournalImporter
         private readonly EntryFormService $entryForms,
     ) {
         $this->plans = new \WeakMap();
+        $this->refresh = new JournalEntryRefresh($db);
     }
 
     /**
@@ -59,7 +63,8 @@ final class JournalImporter
      * KALENDÁŘE FIRMY (`$calendar`, nastavení „Účetní rok začíná"): rok = label období
      * (rok jeho začátku), hranice = hranice období. Zda zdroj vede stejný tvar roku, ověří
      * kontrola před převodem z `source_dates` ({@see MigrationPeriods::assertSourceYear()}).
-     * Volba „Převést od roku" (`fromYear`) je label období firmy; začátek prvního období
+     * Volby „Převést od roku" (`fromYear`) a „Převést do roku" (`toYear`) jsou labely období
+     * firmy; pozdější adresáře zálohy rozvrh vynechá celé (deník, doklady, banku). Začátek prvního období
      * (`firstPeriodStart`) platí, když datum padne do prvního převáděného období.
      *
      * @return list<array{dir:string,year:int,starts_on:string,ends_on:string,has_opening:bool,source_dates:list<string>}>
@@ -67,6 +72,12 @@ final class JournalImporter
     public function plan(Ms3Backup $backup, ImportOptions $options, ?FiscalCalendar $calendar = null): array
     {
         $calendar ??= FiscalCalendar::calendar();
+        if ($options->toYear !== null) {
+            // Horní hranice rozvrh jen ořízne: začátek prvního období na ní nezávisí a deník
+            // velké zálohy se tak čte jednou pro všechny volby „Převést do roku".
+            return array_values(array_filter($this->plan($backup, $options->withToYear(null), $calendar),
+                static fn (array $p): bool => $p['year'] <= $options->toYear));
+        }
         $key = ($options->fromYear ?? '') . '|' . ($options->firstPeriodStart ?? '') . '|' . $calendar->startMonth();
         $cached = $this->plans[$backup] ?? [];
         if (!isset($cached[$key])) {
@@ -144,6 +155,7 @@ final class JournalImporter
         }
 
         $years = [];
+        $dirsPerYear = array_count_values(array_column($plan, 'year'));
         foreach ($plan as $item) {
             $ctx->dirYears[$item['dir']] = $item['year'];
             if ($ctx->options->relinkOnly && $this->periods->findByYear($ctx->supplierId, $item['year']) === null && $ctx->skipsNew(self::STEP)) {
@@ -155,7 +167,7 @@ final class JournalImporter
                 $p->info(self::STEP, 'year_locked', "Rok {$item['year']} je v MyÚčtu už uzavřený, deník se do něj znovu nenahrává.", ['year' => $item['year']]);
                 continue;
             }
-            $years[] = $this->importYear($ctx, $item, $period);
+            $years[] = $this->importYear($ctx, $item, $period, $dirsPerYear[$item['year']] === 1);
         }
         $p->set('journal', $years);
         $p->finish(self::STEP);
@@ -182,9 +194,11 @@ final class JournalImporter
     /**
      * @param array{dir:string,year:int,starts_on:string,ends_on:string,has_opening:bool} $item
      * @param array{id:int,starts_on:string,ends_on:string,status:string,locked:bool} $period
+     * @param bool $singleDir rok má v záloze jediný adresář: zápis roku, který v deníku adresáře
+     *        není, Money smazalo (u roku ve více adresářích může být v jiném)
      * @return array<string,int|float|string>
      */
-    private function importYear(ImportContext $ctx, array $item, array $period): array
+    private function importYear(ImportContext $ctx, array $item, array $period, bool $singleDir = true): array
     {
         $p = $ctx->protocol;
         $year = $item['year'];
@@ -203,6 +217,16 @@ final class JournalImporter
 
         // Klíč zápisu v mapě je `rok|skupina` - stačí zápisy tohoto roku.
         $existing = $this->map->all($ctx->supplierId, MoneyS3ImportRepository::KIND_JOURNAL_ENTRY, $year . '|');
+        // Aktualizace otevřeného období: zápisy, které Money od převodu změnilo nebo smazalo,
+        // se přepíšou podle Money ({@see JournalEntryRefresh}). Jen v otevřeném období mimo
+        // zámek k datu; opravný převod vazeb deník nemění.
+        $refresh = !$ctx->options->relinkOnly && $ctx->yearWritable($year) && $existing !== [];
+        $stored = $refresh ? $this->map->fingerprints($ctx->supplierId, MoneyS3ImportRepository::KIND_JOURNAL_ENTRY, $year . '|') : [];
+        $current = $refresh ? $this->refresh->entryFingerprints($ctx->supplierId, array_values($existing)) : [];
+        $touched = $refresh ? $this->refresh->touchedEntries($ctx->supplierId, (int) $period['id']) : [];
+        $fingerprints = [];
+        $seen = [];
+        $refreshed = ['replaced' => [], 'deleted' => [], 'kept' => []];
         $stats = [
             'year' => $year, 'entries' => 0, 'existing' => 0, 'lines' => 0, 'debit' => 0.0, 'credit' => 0.0,
             'skipped_rows' => 0, 'swapped_rows' => 0, 'deleted_rows' => $table?->skippedDeleted() ?? 0, 'moved' => [],
@@ -223,6 +247,32 @@ final class JournalImporter
             $key = $year . '|' . $groupKey;
             $isOpening = $groupKey === Ms3Journal::OPENING_SOURCE;
             $first = $groupRows[0];
+            if (isset($existing[$key]) && $refresh) {
+                $seen[$key] = true;
+                $docLabel = $isOpening ? "počáteční stavy {$year}" : (trim((string) ($first['Doklad'] ?? '')) ?: $groupKey);
+                $entryId = $existing[$key];
+                $source = JournalEntryRefresh::fingerprint(JournalEntryRefresh::net(
+                    $this->groupLines($ctx, $groupRows, $groupKey, $fxAccounts, $isOpening, $period['starts_on'])[0]
+                ));
+                $now = $current[$entryId] ?? null;
+                if ($now !== null && ($stored[$key] ?? null) !== $source && $now !== $source) {
+                    // Money zápis změnilo. Přepíše se, jen když ho v MyÚčtu nikdo neupravil:
+                    // zápis odpovídá otisku z převodu (starší převod otisk nemá) a nemá zásah uživatele.
+                    $edited = ($stored[$key] ?? null) !== null && $stored[$key] !== $now;
+                    if ($edited || isset($touched[$entryId]) || !$this->replaceEntry($ctx, $entryId, $groupRows, $groupKey, $fxAccounts, $isOpening, $period, $forms)) {
+                        $refreshed['kept'][] = $docLabel;
+                        $p->count(self::STEP, 'changed_kept');
+                    } else {
+                        $refreshed['replaced'][] = $docLabel;
+                        $fingerprints[$key] = [$entryId, $source];
+                        $p->count(self::STEP, 'replaced');
+                        $stats['existing']++;
+                        continue;
+                    }
+                } elseif ($now !== null && ($stored[$key] ?? null) !== $source) {
+                    $fingerprints[$key] = [$entryId, $source];
+                }
+            }
             if (isset($existing[$key])) {
                 $stats['existing']++;
                 // Zápis z dřívějšího převodu (před převzetím valut): měnu dostanou jen řádky,
@@ -307,6 +357,7 @@ final class JournalImporter
                 'posted_by' => $ctx->userId > 0 ? $ctx->userId : null,
             ], $lines);
             $this->map->put($ctx->supplierId, MoneyS3ImportRepository::KIND_JOURNAL_ENTRY, $key, $entryId, $ctx->runId);
+            $fingerprints[$key] = [$entryId, JournalEntryRefresh::fingerprint(JournalEntryRefresh::net($lines))];
 
             $stats['entries']++;
             $stats['lines'] += count($lines);
@@ -315,6 +366,29 @@ final class JournalImporter
             }
         }
         $ctx->report(self::STEP, $total, $total);
+        if ($refresh && $singleDir) {
+            // Zápisy, které v deníku Money už nejsou (smazané, nebo změnilo datum či číslo
+            // dokladu - pod novým klíčem je převod založil znovu).
+            foreach ($existing as $key => $entryId) {
+                if (isset($seen[$key]) || !isset($current[$entryId])) {
+                    continue;
+                }
+                $label = explode('|', $key)[2] ?? $key;
+                $edited = ($stored[$key] ?? null) !== null && $stored[$key] !== $current[$entryId];
+                if (!$edited && !isset($touched[$entryId]) && $this->refresh->delete($ctx->supplierId, $entryId)) {
+                    $this->map->forget($ctx->supplierId, MoneyS3ImportRepository::KIND_JOURNAL_ENTRY, $key);
+                    $refreshed['deleted'][] = $label;
+                    $p->count(self::STEP, 'deleted_in_money');
+                } else {
+                    $refreshed['kept'][] = $label;
+                    $p->count(self::STEP, 'changed_kept');
+                }
+            }
+        }
+        if ($fingerprints !== []) {
+            $this->map->setFingerprints($ctx->supplierId, MoneyS3ImportRepository::KIND_JOURNAL_ENTRY, $fingerprints);
+        }
+        $this->reportRefresh($ctx, $year, $refreshed);
 
         $stats['debit'] = round($stats['debit'], 2);
         $stats['credit'] = round($stats['credit'], 2);
@@ -341,6 +415,59 @@ final class JournalImporter
             $p->error(self::STEP, 'journal_unbalanced', "Rok {$year}: Σ MD ≠ Σ D.", ['year' => $year]);
         }
         return $stats;
+    }
+
+    /**
+     * Přepíše řádky převzatého zápisu podle skupiny deníku Money; hlavička zápisu (zdroj,
+     * vazba na doklad, datum, popis) zůstává. False = přepis odmítla pojistka deníku
+     * (zápis je součástí jiné evidence) a zápis zůstává, jak byl.
+     *
+     * @param list<array<string,mixed>> $groupRows
+     * @param array<int,array{currency:string,code:string,opening:?array{foreign:float,rate:float}}> $fxAccounts
+     * @param array{id:int,starts_on:string,ends_on:string,status:string,locked:bool} $period
+     */
+    private function replaceEntry(ImportContext $ctx, int $entryId, array $groupRows, string $groupKey, array $fxAccounts, bool $isOpening, array $period, SourceJournalPairs $forms): bool
+    {
+        [$lines, , , $texts] = $this->groupLines($ctx, $groupRows, $groupKey, $fxAccounts, $isOpening, $period['starts_on']);
+        $header = $this->refresh->header($ctx->supplierId, $entryId);
+        if ($lines === [] || $header === null) {
+            return false;
+        }
+        PostingService::assertBalanced($lines);
+        if ($forms->singleAt((string) $header['entry_date'])) {
+            $lines = SourceJournalPairs::pair($lines, $texts)['lines'];
+            if ($lines === []) {
+                return false;
+            }
+        }
+        try {
+            $this->journal->replace($entryId, $header, $lines);
+        } catch (PostingException) {
+            return false;
+        }
+        return true;
+    }
+
+    /**
+     * Protokol aktualizace otevřeného období ({@see JournalEntryRefresh}).
+     *
+     * @param array{replaced:list<string>,deleted:list<string>,kept:list<string>} $refreshed
+     */
+    private function reportRefresh(ImportContext $ctx, int $year, array $refreshed): void
+    {
+        $list = static fn (array $docs): string => implode(', ', array_slice($docs, 0, 20)) . (count($docs) > 20 ? ', …' : '');
+        if ($refreshed['replaced'] !== [] || $refreshed['deleted'] !== []) {
+            $ctx->protocol->info(self::STEP, 'journal_refreshed', sprintf(
+                'Rok %d: zápisy, které Money od minulého převodu změnilo (%d) nebo smazalo (%d), převod aktualizoval podle Money: %s.',
+                $year, count($refreshed['replaced']), count($refreshed['deleted']), $list([...$refreshed['replaced'], ...$refreshed['deleted']]),
+            ), ['year' => $year, 'replaced' => array_slice($refreshed['replaced'], 0, ImportProtocol::LIST_LIMIT), 'deleted' => array_slice($refreshed['deleted'], 0, ImportProtocol::LIST_LIMIT)]);
+        }
+        if ($refreshed['kept'] !== []) {
+            $ctx->protocol->warn(self::STEP, 'journal_changed_kept', sprintf(
+                'Rok %d: %d zápisů Money od minulého převodu změnilo nebo smazalo, v MyÚčtu se s nimi ale už pracovalo (úprava, párování, storno, vazba, poznámka). Převod je nechal beze změny, upravte je ručně podle Money: %s.',
+                $year, count($refreshed['kept']), $list($refreshed['kept']),
+            ), ['year' => $year, 'documents' => array_slice($refreshed['kept'], 0, ImportProtocol::LIST_LIMIT)]);
+        }
     }
 
     /**
