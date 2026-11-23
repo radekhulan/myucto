@@ -1045,6 +1045,36 @@ převádějte dřív, než v něm začnete účtovat ručně. Výjimkou je oprav
 už převedené firmy: vlastní zápisy v MyÚčtu nechá beze změny a nové doklady
 z POHODY nepřidá.
 
+**Opravný převod vazeb.** Firma převedená z POHODY se dál účtuje v MyÚčtu a vám chybí
+vazby, které starší export nenesl nebo které převod tehdy nenavázal. Typicky jde
+o daňové doklady k přijatým platbám navázané na zálohu. Požádejte klienta o nový
+export aktuální verzí exportního nástroje ([§ 107.9.1.1](#107911-exportni-nastroj))
+a nahrajte ho do průvodce. Ve 2. kroku zaškrtněte **Opravit vazby už převedené firmy
+(nový export do vedeného účetnictví)**. Volba se nabízí jen firmě, která už převod
+účetnictví z POHODY má.
+
+Co opravný převod dělá:
+
+- doplní vazby převzatých dokladů: daňové doklady k zálohám a k přijatým platbám,
+  úhrady dokladů z banky a pokladny a zápočty,
+- vlastní zápisy zadané v MyÚčtu ponechá; kontrola před převodem je u něj jen
+  informace, ne chyba, která převod zastaví.
+
+Co nedělá:
+
+- nezaloží nové doklady, zápisy deníku, pohyby ani partnery z novějšího exportu,
+  protokol je u kroku uvede jako přeskočené,
+- nepřepíná režim účetnictví, nemění předkontace, nepřevádí majetek, sklad, objednávky
+  ani mzdy a nespouští rekonciliaci proti exportu,
+- neúčtuje dopočtené úhrady novými zápisy.
+
+Průvodce i tady běží přes zkoušku nanečisto a teprve po ní spustíte ostrý převod.
+Správce instalace může opravný převod spustit i příkazem
+`php api/bin/pohoda-relink.php --supplier=<id firmy> --zip=<ZIP exportu nebo složka agendy>`.
+Bez dalších parametrů běží nanečisto a vypíše protokol kroků s počty a upozorněními,
+zápis provede až s `--commit`. Parametrem `--year=<rok>` se omezí na jednu agendu.
+Běh se zapíše do historie převodů a při chybě příkaz skončí nenulovým kódem.
+
 **Dorovnání novější zálohou.** Když už se v MyÚčtu účtuje a v POHODĚ mezitím přibyly
 starší záznamy, převod s volbou dorovnání vlastní zápisy nechá a převezme jen záznamy
 POHODY starší než první zápis zadaný v MyÚčtu. Novější záznamy POHODY nepřebere, aby

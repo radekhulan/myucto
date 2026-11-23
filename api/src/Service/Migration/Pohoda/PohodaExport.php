@@ -134,20 +134,31 @@ final class PohodaExport
     public static function locate(string $root, string $ico, ?int $year): self
     {
         $root = rtrim($root, '/\\');
-        $found = [];
-        foreach (glob($root . DIRECTORY_SEPARATOR . $ico . '_*', GLOB_ONLYDIR) ?: [] as $dir) {
-            if (preg_match('/_(\d{4})$/', basename($dir), $m) === 1) {
-                $found[(int) $m[1]] = $dir;
-            }
-        }
+        $found = self::agendaDirs($root, $ico);
         if ($found === []) {
             throw new \RuntimeException("V {$root} není export agendy IČO {$ico} (složka {$ico}_<rok>).");
         }
-        ksort($found);
         if ($year !== null && !isset($found[$year])) {
             throw new \RuntimeException("V {$root} není export IČO {$ico} za rok {$year} (jsou: " . implode(', ', array_keys($found)) . ').');
         }
         return self::open($found[$year ?? array_key_last($found)]);
+    }
+
+    /**
+     * Složky agend firmy `<kořen>\<IČO>_<rok>` podle roku vzestupně.
+     *
+     * @return array<int,string> rok => složka agendy
+     */
+    public static function agendaDirs(string $root, string $ico): array
+    {
+        $found = [];
+        foreach (glob(rtrim($root, '/\\') . DIRECTORY_SEPARATOR . $ico . '_*', GLOB_ONLYDIR) ?: [] as $dir) {
+            if (preg_match('/_(\d{4})$/', basename($dir), $m) === 1) {
+                $found[(int) $m[1]] = $dir;
+            }
+        }
+        ksort($found);
+        return $found;
     }
 
     public function path(string $key): ?string

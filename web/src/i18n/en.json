@@ -37136,6 +37136,11 @@
     "dry_run_title": "Dry run",
     "dry_run_hint": "The whole transfer of the selected years ({years}) runs, including reconciliation, and then everything is rolled back. Nothing stays in MyÚčto.",
     "dry_run_locks_hint": "The dry run runs in a single database transaction. Run it outside normal work in the company: entries it touches wait until it ends.",
+    "relink": {
+      "option": "Repair links of an already converted company (new export into ongoing accounting)",
+      "hint": "For a company already converted from POHODA that keeps its accounting in MyÚčto. Entries made in MyÚčto stay unchanged and no new documents from POHODA are added. The conversion only completes links: tax documents for advances and payments, document payments and offsets. Stock and payroll are not converted.",
+      "mode_note": "Link repair conversion: entries made in MyÚčto stay, no new documents are added, only links are completed (tax documents for advances and payments, payments, offsets)."
+    },
     "dry_run_background_hint": "The dry run is one transaction, so it does not report individual steps while running — the full protocol with every step appears when it ends. It usually takes up to a minute; you can close this page.",
     "dry_run_start": "Start dry run",
     "dry_run_again": "Repeat dry run",

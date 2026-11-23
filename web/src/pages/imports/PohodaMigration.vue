@@ -103,6 +103,9 @@ function nextMonth(period: string): string {
 function capLast(last: string): string {
   return periodTo.value !== '' && last.slice(0, 7) > periodTo.value ? periodTo.value : last
 }
+// Opravný převod vazeb už převedené firmy: zápisy z MyÚčtu zůstanou, nové doklady se
+// nepřidají, doplní se vazby. Jen účetnictví; sklad ani mzdy nepřevádí.
+const relinkOnly = ref(false)
 // Sklad: převést stav z nejnovější agendy a volba po skladech pro karty bez druhu zásoby.
 const stockEnabled = ref(true)
 const stockChoices = ref<Record<string, PohodaStockChoice>>({})
@@ -261,8 +264,11 @@ const selectedAgendas = computed(() => ownAgendas.value.filter(a => runYears.val
  * Sklad se převádí jen z nejnovější agendy účetnictví firmy: stav platí k datu exportu
  * a starší agenda by ho založila podruhé. Nabízí se, jen když je ta agenda vybraná.
  */
+/** Opravný převod vazeb se nabízí jen firmě, která už převod účetnictví z POHODY má. */
+const relinkAvailable = computed(() => !payrollWizard.value && upload.value?.pohoda_converted === true)
+const relinkSelected = computed(() => relinkAvailable.value && relinkOnly.value)
 const stockAgenda = computed(() => {
-  if (payrollWizard.value) return null
+  if (payrollWizard.value || relinkSelected.value) return null
   const newest = ownAgendas.value.reduce<typeof ownAgendas.value[number] | null>((best, a) => (best === null || a.year > best.year ? a : best), null)
   return newest && newest.stock && runYears.value.includes(agendaKey(newest)) ? { year: agendaKey(newest), stock: newest.stock } : null
 })
@@ -292,7 +298,8 @@ const noteFiles = computed(() => selectedAgendas.value.flatMap(a => a.files.filt
  * pozdějšího roku agendy) patří k tomu roku a u nevybraného roku se neukazuje ani neblokuje.
  */
 const preflightGroups = computed(() => {
-  const source = kind.value === 'payroll' ? upload.value?.payroll_preflight : upload.value?.preflight
+  const source = kind.value === 'payroll' ? upload.value?.payroll_preflight
+    : relinkSelected.value ? upload.value?.relink_preflight : upload.value?.preflight
   const groups = new Map<number, PohodaMessage[]>(selectedYears.value.map(y => [y, []]))
   for (const agendaYear of runYears.value) {
     for (const m of source?.[String(agendaYear)] ?? []) {
@@ -389,7 +396,7 @@ watch(kind, () => {
 // Zkouška nanečisto platí jen pro zvolené rozhodnutí o začátku vedení mezd a volbu skladu.
 // Porovnává se obsah voleb: obnovení náhledu po doběhu zkoušky přiřadí volbu skladu znovu
 // jako nový objekt se stejnými hodnotami a to zkoušku zneplatnit nesmí.
-const dryRunOptionsKey = computed(() => JSON.stringify([startDecision.value, keepStartConfirmed.value, stockEnabled.value, stockChoices.value, periodFrom.value, periodTo.value]))
+const dryRunOptionsKey = computed(() => JSON.stringify([startDecision.value, keepStartConfirmed.value, stockEnabled.value, stockChoices.value, periodFrom.value, periodTo.value, relinkSelected.value]))
 watch(dryRunOptionsKey, () => {
   dryRunPassed.value = false
   clearDifferences()
@@ -438,6 +445,7 @@ function restoreParams(params: PohodaStartParams): void {
   keepStartConfirmed.value = params.start_decision === 'keep'
   stockEnabled.value = params.stock !== undefined
   if (params.stock) stockChoices.value = { ...params.stock.warehouses }
+  relinkOnly.value = params.relink_only ?? false
 }
 
 async function start(mode: 'dry_run' | 'import'): Promise<void> {
@@ -451,6 +459,7 @@ async function start(mode: 'dry_run' | 'import'): Promise<void> {
     ...(kind.value === 'payroll' && periodTo.value !== '' ? { period_to: periodTo.value } : {}),
     ...(startBehind.value !== null ? { start_decision: startDecision.value } : {}),
     ...(stockAgenda.value && stockSelected.value ? { stock: { warehouses: { ...stockChoices.value } } } : {}),
+    ...(relinkSelected.value ? { relink_only: true } : {}),
   })
 }
 
@@ -765,6 +774,14 @@ const actions = computed<ActionItem[]>(() => {
             </RouterLink>
           </div>
 
+          <label v-if="relinkAvailable" class="mb-5 flex cursor-pointer items-start gap-3 rounded-lg border border-neutral-200 p-3 text-sm" data-testid="pohoda-relink">
+            <input v-model="relinkOnly" type="checkbox" class="mt-1 rounded border-neutral-300 text-primary-600" data-testid="pohoda-relink-only" />
+            <span>
+              <span class="font-medium text-neutral-800">{{ tt('relink.option') }}</span>
+              <span class="block text-neutral-600">{{ tt('relink.hint') }}</span>
+            </span>
+          </label>
+
           <fieldset v-if="stockAgenda" class="mb-5 rounded-lg border border-neutral-200 p-3 text-sm" data-testid="pohoda-stock">
             <legend class="sr-only">{{ tt('stock.title') }}</legend>
             <label class="flex items-start gap-3" :class="stockBlocked ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'">
@@ -891,6 +908,7 @@ const actions = computed<ActionItem[]>(() => {
         <p class="mb-2 text-sm text-neutral-500">{{ tt(kind === 'payroll' ? 'payroll_dry_run_hint' : 'dry_run_hint', { years: yearsLabel }) }}</p>
         <p v-if="runYears.length > 1" class="mb-2 rounded-lg border border-warning-500/30 bg-warning-50 px-3 py-2 text-sm text-warning-700" data-testid="pohoda-dry-run-years-hint">{{ tt('dry_run_years_hint') }}</p>
         <p class="mb-4 rounded-lg border border-warning-500/30 bg-warning-50 px-3 py-2 text-sm text-warning-700">{{ tt('dry_run_locks_hint') }}</p>
+        <p v-if="relinkSelected" class="mb-4 rounded-lg border border-primary-500/30 bg-primary-50 px-3 py-2 text-sm text-primary-700" data-testid="pohoda-relink-mode">{{ tt('relink.mode_note') }}</p>
         <ImportJobProgress v-if="jobRunning" :job="job" :percent="null" :cancelling="false" :show-cancel="false" :show-count="false"
           counts-key="pohoda.job_counts" background-hint-key="pohoda.dry_run_background_hint" running-key="pohoda.dry_run_running" />
         <template v-if="jobRuns.length && jobRuns[0].mode === 'dry_run'">
@@ -911,6 +929,7 @@ const actions = computed<ActionItem[]>(() => {
 
       <template v-else>
         <h2 class="mb-1 text-lg font-semibold">{{ tt('import_title') }}</h2>
+        <p v-if="relinkSelected" class="my-4 rounded-lg border border-primary-500/30 bg-primary-50 px-3 py-2 text-sm text-primary-700" data-testid="pohoda-relink-import-mode">{{ tt('relink.mode_note') }}</p>
         <label v-if="!importDone && !jobRunning" class="my-4 flex cursor-pointer items-start gap-3 rounded-lg border border-warning-500/30 bg-warning-50 p-4">
           <input v-model="confirmed" type="checkbox" class="mt-1 rounded border-neutral-300 text-primary-600" data-testid="pohoda-confirm" />
           <span class="text-sm text-warning-700">{{ tt(kind === 'payroll' ? 'payroll_import_confirm' : 'import_confirm', { company: (selectedAgendas[0] ?? ownAgendas[0])?.company ?? '', years: yearsLabel }) }}</span>

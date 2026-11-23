@@ -37136,6 +37136,11 @@
     "dry_run_title": "Zkouška nanečisto",
     "dry_run_hint": "Proběhne celý převod vybraných roků ({years}) včetně rekonciliace, na konci se ale všechno vrátí. V MyÚčtu nic nezůstane.",
     "dry_run_locks_hint": "Zkouška běží v jedné databázové transakci. Spouštějte ji mimo běžnou práci ve firmě: zápisy, na které zkouška sáhne, počkají, dokud neskončí.",
+    "relink": {
+      "option": "Opravit vazby už převedené firmy (nový export do vedeného účetnictví)",
+      "hint": "Pro firmu, která už je převedená z POHODY a dál se účtuje v MyÚčtu. Zápisy zadané v MyÚčtu zůstanou beze změny a nové doklady z POHODY se nepřidají. Převod doplní jen vazby: daňové doklady k zálohám a platbám, úhrady dokladů a zápočty. Sklad ani mzdy se nepřevádějí.",
+      "mode_note": "Opravný převod vazeb: zápisy z MyÚčtu zůstanou, nové doklady se nepřidají, doplní se jen vazby (daňové doklady k zálohám a platbám, úhrady, zápočty)."
+    },
     "dry_run_background_hint": "Zkouška je jedna transakce, proto během běhu nehlásí jednotlivé kroky - celý protokol se všemi kroky se ukáže po jejím konci. Obvykle trvá do minuty; stránku můžete zavřít.",
     "dry_run_start": "Spustit zkoušku nanečisto",
     "dry_run_again": "Zkoušku zopakovat",

@@ -41,7 +41,8 @@ use Psr\Http\Message\ServerRequestInterface as Request;
  *   POST /api/admin/imports/pohoda/uploads/{token}/complete
  *   GET  /api/admin/imports/pohoda/uploads/{token}
  *   POST /api/admin/imports/pohoda/uploads/{token}/start          {mode, years: int[] (nebo year), kind: accounting|payroll,
- *                                                                  stock?: {warehouses: {kód skladu: goods|material|skip}}}
+ *                                                                  stock?: {warehouses: {kód skladu: goods|material|skip}},
+ *                                                                  relink_only?: bool (opravný převod vazeb, jen účetnictví)}
  *   GET  /api/admin/imports/pohoda/runs
  *   GET  /api/admin/imports/pohoda/runs/{id}
  *   DELETE /api/admin/imports/pohoda/runs/{id}                    jen zkouška nanečisto
@@ -142,6 +143,9 @@ final class PohodaMigrationAction extends AbstractMigrationAction
         // `company_year` (období firmy, hranice, pozdější období) a kontrola před převodem je
         // pod rokem firmy. Kalendářní firma dostane náhled beze změny.
         $calendar = $this->importer->companyCalendar($supplierId);
+        // Firma už převedená z POHODY: průvodce nabídne opravný převod vazeb a ukáže jeho kontrolu.
+        $converted = $this->importer->hasConversion($supplierId);
+        $relinkPreflight = [];
         $companyYears = [];
         $payrollSummaries = [];
         foreach ((array) ($meta['agendas'] ?? []) as $agenda) {
@@ -170,14 +174,20 @@ final class PohodaMigrationAction extends AbstractMigrationAction
                 if ($agendaYear !== null) {
                     $companyYears[$year] = PohodaImportJobService::companyYear($agendaYear);
                 }
-                $preflight[(string) ($agendaYear?->label ?? $year)] = $this->importer->preflight($supplierId, $export, [],
-                    array_map('intval', (array) $agenda['counts']['later_years']), $agendaYear);
+                $laterYears = array_map('intval', (array) $agenda['counts']['later_years']);
+                $preflight[(string) ($agendaYear?->label ?? $year)] = $this->importer->preflight($supplierId, $export, [], $laterYears, $agendaYear);
+                if ($converted) {
+                    $relinkPreflight[(string) ($agendaYear?->label ?? $year)] = $this->importer->preflight($supplierId, $export, [], $laterYears, $agendaYear, relinkOnly: true);
+                }
             } catch (\Throwable $e) {
                 if (!$e instanceof PohodaException) {
                     error_log(sprintf('POHODA: náhled exportu %s firmy %d selhal: %s', $token, $supplierId, (string) $e));
                 }
                 $preflight[(string) $year] = [['level' => 'error', 'code' => 'export_unreadable',
                     'message' => $e instanceof PohodaException ? $e->getMessage() : 'Agendu exportu nejde přečíst.', 'context' => []]];
+                if ($converted) {
+                    $relinkPreflight[(string) $year] = $preflight[(string) $year];
+                }
             }
         }
         if ($companyYears !== []) {
@@ -199,6 +209,8 @@ final class PohodaMigrationAction extends AbstractMigrationAction
             'default_year' => $defaultYear,
             'preflight' => (object) $preflight,
             'payroll_preflight' => (object) $payrollPreflight,
+            'pohoda_converted' => $converted,
+            'relink_preflight' => (object) $relinkPreflight,
             'stock_module' => $this->stockModule($supplierId),
         ]), $payrollNotice));
     }
@@ -318,7 +330,15 @@ final class PohodaMigrationAction extends AbstractMigrationAction
         } catch (\InvalidArgumentException $e) {
             return Json::error($response, 'invalid_period_range', $e->getMessage(), 422);
         }
-        $stock = $kind === 'accounting' ? self::stockChoice($body['stock'] ?? null) : null;
+        $relinkOnly = filter_var($body['relink_only'] ?? false, FILTER_VALIDATE_BOOLEAN, FILTER_NULL_ON_FAILURE);
+        if ($relinkOnly === null) {
+            return Json::error($response, 'invalid_relink_only', 'Volba opravného převodu vazeb je neplatná.', 422);
+        }
+        if ($relinkOnly && $kind === 'payroll') {
+            return Json::error($response, 'invalid_relink_only', 'Opravný převod vazeb se týká jen účetnictví, mzdy nepřevádí.', 422);
+        }
+        // Opravný převod vazeb sklad nepřevádí ({@see PohodaImportJobService::relinkOnly()}).
+        $stock = $kind === 'accounting' && !$relinkOnly ? self::stockChoice($body['stock'] ?? null) : null;
         if ($stock === false) {
             return Json::error($response, 'invalid_stock', 'Volba převodu skladu je neplatná.', 422);
         }
@@ -380,12 +400,14 @@ final class PohodaMigrationAction extends AbstractMigrationAction
             'accept_differences' => $acceptDifferences,
             // Sklad z nejnovější agendy: volba po skladech pro karty bez druhu zásoby, `null` = nepřevádí se.
             'stock' => $stock,
+            // Opravný převod vazeb už převedené firmy: zápisy z MyÚčtu zůstanou, nové doklady se nepřidají.
+            'relink_only' => $relinkOnly,
         ], $userId);
         if ($jobId instanceof Response) {
             return $jobId;
         }
         $this->spawnWorker($jobId);
-        $this->logger->log('import.pohoda_started', $userId, 'import_job', $jobId, ['mode' => $mode, 'years' => $years, 'kind' => $kind] + ($acceptDifferences ? ['accept_differences' => true] : []),
+        $this->logger->log('import.pohoda_started', $userId, 'import_job', $jobId, ['mode' => $mode, 'years' => $years, 'kind' => $kind] + ($acceptDifferences ? ['accept_differences' => true] : []) + ($relinkOnly ? ['relink_only' => true] : []),
             $this->ipMatcher->clientIpFromRequest($request->getServerParams()), $request->getHeaderLine('User-Agent'));
 
         return Json::ok($response, ['job_id' => $jobId, 'status' => 'queued', 'mode' => $mode], 201);

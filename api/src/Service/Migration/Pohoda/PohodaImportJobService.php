@@ -250,6 +250,7 @@ final class PohodaImportJobService extends AbstractImportJobService
                 $mode = ($params['mode'] ?? '') === 'import' ? 'import' : 'dry_run';
                 $dryRun = $mode === 'dry_run';
                 $payroll = ($params['kind'] ?? '') === 'payroll';
+                $relink = self::relinkOnly($params);
                 $year = $item['year'];
                 $agenda = self::agenda($meta, (string) ($params['ico'] ?? ''), $year);
                 if ($agenda === null) {
@@ -273,7 +274,7 @@ final class PohodaImportJobService extends AbstractImportJobService
                 $included = array_values(array_diff($item['later'], $item['skip']));
                 return [
                     'run_id' => $runId,
-                    'log' => ($dryRun ? 'Zkouška nanečisto' : 'Ostrý převod') . ($payroll ? ' mezd' : ' agendy')
+                    'log' => ($dryRun ? 'Zkouška nanečisto' : 'Ostrý převod') . ($relink ? ' opravného převodu vazeb' : '') . ($payroll ? ' mezd' : ' agendy')
                         . " IČO {$agenda['ico']}, rok {$agenda['year']}"
                         . ($included !== [] ? ' (včetně dokladů roku ' . implode(', ', $included) . ')' : '')
                         . ($item['skip'] !== [] ? ', bez dokladů nevybraného roku ' . implode(', ', $item['skip']) : '') . '.',
@@ -285,14 +286,27 @@ final class PohodaImportJobService extends AbstractImportJobService
                             isset($params['job_last_period']) ? (string) $params['job_last_period'] : null,
                             PohodaPayrollPeriodRange::fromParams($params))
                         : $this->importer->run($supplierId, $userId, $export, $dryRun, $runId, $progress, $cancel, $item['skip'], (bool) ($params['accept_differences'] ?? false),
-                            self::stockFor($meta, (string) ($params['ico'] ?? ''), $year, $params['stock'] ?? null),
-                            payroll: $agenda['has_payroll'] ? $agenda['payroll'] : null,
+                            $relink ? null : self::stockFor($meta, (string) ($params['ico'] ?? ''), $year, $params['stock'] ?? null),
+                            relinkOnly: $relink,
+                            payroll: !$relink && $agenda['has_payroll'] ? $agenda['payroll'] : null,
                             selectedYears: PohodaImporter::isTaxEvidenceAgenda($export) ? null : $included),
                     'journal' => static fn (array $byStep): array => $payroll
                         ? ['entries' => $byStep[PohodaPayrollImporter::STEP_MONTHS]['counts']['months'] ?? 0, 'existing' => $byStep[PohodaPayrollImporter::STEP_MONTHS]['counts']['existing'] ?? 0]
                         : $byStep['journal']['counts'] ?? [],
                 ];
             });
+    }
+
+    /**
+     * Opravný převod vazeb už převedené firmy (`params.relink_only`, {@see PohodaContext::$relinkOnly}):
+     * zápisy zadané v MyÚčtu zůstanou, nové doklady se nepřidají, doplní se vazby. Týká se
+     * jen účetnictví; mzdy ani sklad opravný převod nepřevádí.
+     *
+     * @param array<string,mixed> $params
+     */
+    public static function relinkOnly(array $params): bool
+    {
+        return ($params['kind'] ?? 'accounting') !== 'payroll' && ($params['relink_only'] ?? false) === true;
     }
 
     /**
