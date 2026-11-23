@@ -540,6 +540,34 @@ final class PohodaMdbAccounting
     }
 
     /**
+     * DDKP, které POHODA váže k úhradě zálohy (`Uhrady.RefDD`), ze všech řádků úhrad bez ohledu
+     * na rok úhrady a na to, zda je záloha v exportu. Číslo zálohy je z `FA`, chybí-li tam,
+     * z opisu v úhradě (`CisloH`).
+     *
+     * @return array<string,list<array{doc:string,advance:string,number:string}>> id DDKP (`pINT.ID`) => zálohy
+     */
+    public function taxDocumentPaymentRefs(): array
+    {
+        $out = [];
+        foreach ($this->group('Uhrady', 'RelIDH') as $advanceId => $rows) {
+            foreach ($rows as $u) {
+                $agenda = (int) ($u['RelAgH'] ?? 0);
+                $ref = (string) ($u['RefDD'] ?? '');
+                if (!in_array($agenda, [43, 44], true) || (int) $ref <= 0) {
+                    continue;
+                }
+                $advance = $this->lookup('FA', (string) $advanceId);
+                $out[$ref][] = [
+                    'doc' => $agenda === 43 ? 'invoice' : 'purchase_invoice',
+                    'advance' => (string) $advanceId,
+                    'number' => (string) ($advance['Cislo'] ?? $u['CisloH'] ?? ''),
+                ];
+            }
+        }
+        return $out;
+    }
+
+    /**
      * Doklad, kterým byla úhrada zaplacena. Bankovní úhradu váže POHODA oběma směry
      * (`Uhrady.RelIDU` na bankovní doklad a `BVpol.RelIDUhrady` z položky pohybu na úhradu);
      * číslo dokladu v úhradě (`CisloU`) je jen opis a číselná řada banky se po letech opakuje.

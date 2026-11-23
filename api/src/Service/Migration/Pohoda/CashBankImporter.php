@@ -117,6 +117,7 @@ final class CashBankImporter
             $key = 'cash|' . $number . '|' . $issue;
             if (isset($existing[$key])) {
                 $ctx->cashDocuments[$number] = $existing[$key];
+                self::rememberCashId($ctx, $h, (int) $existing[$key]);
                 if ($inOpening) {
                     $ctx->openingCash[$existing[$key]] = true;
                 }
@@ -216,6 +217,7 @@ final class CashBankImporter
             }
             $this->map->put($ctx->supplierId, PohodaImportRepository::KIND_CASH_DOCUMENT, $key, $id, $ctx->runId);
             $ctx->cashDocuments[$number] = $id;
+            self::rememberCashId($ctx, $h, $id);
             if ($inOpening) {
                 $ctx->openingCash[$id] = true;
             }
@@ -629,6 +631,15 @@ final class CashBankImporter
             }
         }
         return $out;
+    }
+
+    /** Id pokladního dokladu POHODY, na které míří úhrady dokladů (`Uhrady.RelIDU`). */
+    private static function rememberCashId(PohodaContext $ctx, array $header, int $cashId): void
+    {
+        $pohodaId = PohodaXml::text($header, 'id');
+        if ($pohodaId !== '') {
+            $ctx->cashByPohodaId[$pohodaId] = $cashId;
+        }
     }
 
     /**

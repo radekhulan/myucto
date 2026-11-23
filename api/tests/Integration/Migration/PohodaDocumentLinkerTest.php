@@ -188,6 +188,153 @@ final class PohodaDocumentLinkerTest extends TestCase
         self::assertContains('tax_document_refs_missing', self::messageCodes($this->protocol, 'link'), $this->explain());
     }
 
+    /** P2-c: upozornění na starý export počítá vazby provedené v tomto běhu a DDKP, které zůstaly bez vazby. */
+    public function testOldExportWarningCountsLinksMadeInThisRun(): void
+    {
+        $this->importMdbTaxDocuments(false);
+        self::assertSame(['count' => 6, 'by_text' => 2, 'unlinked' => 4], self::message($this->protocol, 'link', 'tax_document_refs_missing')['context'] ?? null);
+
+        $again = $this->import(false);
+        self::assertSame(['count' => 6, 'by_text' => 0, 'unlinked' => 4], self::message($again, 'link', 'tax_document_refs_missing')['context'] ?? null, $this->explain($again));
+    }
+
+    /** P1-a: převod opraví vazbu DDKP z textu staršího exportu podle RefDD, platba zálohy B dostane DDKP. */
+    public function testRerunMovesTextLinkToAdvanceOfRefDDPayment(): void
+    {
+        $this->importMdbTaxDocuments(false, Mdb::SCENARIO_RELINK);
+        $taxDocument = Mdb::RELINK_TAX_DOCUMENT;
+        self::assertSame($this->invoice(Mdb::RELINK_TEXT_ADVANCE), $this->column('invoices', 'parent_invoice_id', $taxDocument));
+
+        $this->exportDir = Mdb::writeTaxDocumentPayments($this->tmp, true, Mdb::SCENARIO_RELINK);
+        $again = $this->import(false);
+
+        $paid = $this->invoice(Mdb::RELINK_PAID_ADVANCE);
+        self::assertSame($paid, $this->column('invoices', 'parent_invoice_id', $taxDocument), $this->explain($again));
+        self::assertSame(1, self::stepCounts($again, 'link')['tax_document_advance_relinked'] ?? 0);
+        self::assertSame([$this->invoice($taxDocument)], array_map('intval', array_column(
+            $this->fetchAll("SELECT tax_document_invoice_id FROM invoice_payments WHERE supplier_id = ? AND invoice_id = {$paid}"), 'tax_document_invoice_id')));
+    }
+
+    /** P1-a: v období s podaným přiznáním k DPH převod vazbu DDKP nemění a rozpor ohlásí. */
+    public function testRerunKeepsTextLinkInFiledVatPeriodAndWarns(): void
+    {
+        $this->importMdbTaxDocuments(false, Mdb::SCENARIO_RELINK);
+        $this->db->pdo()->prepare(
+            "INSERT INTO tax_submissions (supplier_id, form_code, period_year, period_month, form_variant, status, submitted_at, xml_content, xml_size_bytes, xml_sha256)
+             VALUES (?, 'dphdp3', 2026, 2, 'B', 'submitted', '2026-03-25 10:00:00', '<Pisemnost/>', 12, ?)"
+        )->execute([$this->supplierId, hash('sha256', '<Pisemnost/>')]);
+
+        $this->exportDir = Mdb::writeTaxDocumentPayments($this->tmp, true, Mdb::SCENARIO_RELINK);
+        $again = $this->import(false);
+
+        self::assertSame($this->invoice(Mdb::RELINK_TEXT_ADVANCE), $this->column('invoices', 'parent_invoice_id', Mdb::RELINK_TAX_DOCUMENT));
+        $warning = self::message($again, 'link', 'tax_document_advance_conflict');
+        self::assertSame(Mdb::RELINK_TAX_DOCUMENT, $warning['context']['document_no'] ?? null, $this->explain($again));
+        self::assertStringContainsString(Mdb::RELINK_PAID_ADVANCE, (string) ($warning['text'] ?? ''));
+        self::assertSame(0, $this->rows('invoice_payments', 'tax_document_invoice_id = ' . $this->invoice(Mdb::RELINK_TAX_DOCUMENT)));
+    }
+
+    /** P1-b: platba nalezená jen podle čísla pohybu či pokladního dokladu se k DDKP neváže, rodič DDKP ano. */
+    public function testPaymentFoundOnlyByNumberIsNotLinkedToTaxDocument(): void
+    {
+        $this->importMdbTaxDocuments(true, Mdb::SCENARIO_NUMBER_ONLY);
+
+        $advance = $this->invoice(Mdb::NUMBER_ONLY_ADVANCE);
+        foreach (Mdb::NUMBER_ONLY_TAX_DOCUMENTS as $number) {
+            self::assertSame($advance, $this->column('invoices', 'parent_invoice_id', $number), $this->explain());
+        }
+        $payments = $this->fetchAll("SELECT source, tax_document_invoice_id FROM invoice_payments WHERE supplier_id = ? AND invoice_id = {$advance} ORDER BY paid_on");
+        self::assertSame([['bank', null], ['cash', null]], array_map(static fn (array $r): array => [$r['source'], $r['tax_document_invoice_id']], $payments));
+        $uncertain = array_filter(self::messageCodes($this->protocol, 'payments'), static fn (string $c): bool => $c === 'tax_document_payment_uncertain');
+        self::assertCount(2, $uncertain, $this->explain());
+    }
+
+    /** P1-c: DDKP s RefDD k záloze mimo export nejde podle textu na jinou zálohu se stejným číslem. */
+    public function testTaxDocumentWithRefDDToMissingAdvanceIsNotLinkedByText(): void
+    {
+        $this->importMdbTaxDocuments(true, Mdb::SCENARIO_MISSING_ADVANCE);
+
+        self::assertNull($this->column('purchase_invoices', 'parent_purchase_invoice_id', Mdb::MISSING_ADVANCE_TAX_DOCUMENT), $this->explain());
+        self::assertSame(Mdb::MISSING_ADVANCE_TAX_DOCUMENT, self::message($this->protocol, 'link', 'tax_document_advance_missing')['context']['document_no'] ?? null);
+    }
+
+    /** P2-a: stornovaný DDKP rodiče nedostane, DDKP v konceptu nedaní platbu. */
+    public function testCancelledAndDraftTaxDocumentsAreNotLinked(): void
+    {
+        $this->importMdbTaxDocuments(false);
+        [$draft, $cancelled] = Mdb::ISSUED_TAX_DOCUMENTS;
+        $status = $this->db->pdo()->prepare('UPDATE invoices SET status = ? WHERE supplier_id = ? AND varsymbol = ?');
+        $status->execute(['draft', $this->supplierId, $draft]);
+        $status->execute(['cancelled', $this->supplierId, $cancelled]);
+
+        $this->exportDir = Mdb::writeTaxDocumentPayments($this->tmp, true);
+        $again = $this->import(false);
+
+        $advance = $this->invoice(Mdb::ISSUED_ADVANCE);
+        self::assertSame($advance, $this->column('invoices', 'parent_invoice_id', $draft));
+        self::assertNull($this->column('invoices', 'parent_invoice_id', $cancelled), $this->explain($again));
+        self::assertSame(0, $this->rows('invoice_payments', 'tax_document_invoice_id IS NOT NULL'));
+        self::assertContains('tax_document_advance_cancelled', self::messageCodes($again, 'link'));
+        self::assertContains('tax_document_payment_not_linked', self::messageCodes($again, 'payments'));
+    }
+
+    /** P2-b: jeden DDKP k více platbám zálohy dostane rodiče, platby zůstanou bez DDKP a převod to ohlásí. */
+    public function testTaxDocumentOfSeveralPaymentsIsReported(): void
+    {
+        $this->importMdbTaxDocuments(true, '', ['2' => '101']);
+
+        $advance = $this->invoice(Mdb::ISSUED_ADVANCE);
+        self::assertSame($advance, $this->column('invoices', 'parent_invoice_id', Mdb::ISSUED_TAX_DOCUMENTS[0]));
+        self::assertSame(0, $this->rows('invoice_payments', 'tax_document_invoice_id IS NOT NULL'));
+        $warning = self::message($this->protocol, 'payments', 'tax_document_multiple_payments');
+        self::assertSame(Mdb::ISSUED_TAX_DOCUMENTS[0], $warning['context']['document_no'] ?? null, $this->explain());
+        self::assertSame(['TEST-B1', 'TEST-K1'], $warning['context']['sources'] ?? null);
+    }
+
+    /** P2-b: DDKP úhrad dvou záloh zůstane bez rodiče a převod to ohlásí. */
+    public function testTaxDocumentOfSeveralAdvancesIsReported(): void
+    {
+        $this->importMdbTaxDocuments(true, Mdb::SCENARIO_TWO_ADVANCES);
+
+        self::assertNull($this->column('purchase_invoices', 'parent_purchase_invoice_id', Mdb::RECEIVED_TAX_DOCUMENT));
+        $warning = self::message($this->protocol, 'link', 'tax_document_multiple_advances');
+        self::assertSame(Mdb::RECEIVED_TAX_DOCUMENT, $warning['context']['document_no'] ?? null, $this->explain());
+        self::assertSame([Mdb::RECEIVED_ADVANCE, Mdb::TEXT_ADVANCE], $warning['context']['advances'] ?? null);
+    }
+
+    /** Kolize s unikátní vazbou DDKP na platbu (1062) převod nezastaví, jen ji ohlásí. */
+    public function testTaxDocumentAlreadyLinkedToAnotherPaymentIsReported(): void
+    {
+        $this->importMdbTaxDocuments(false);
+        $advance = $this->invoice(Mdb::ISSUED_ADVANCE);
+        $first = $this->invoice(Mdb::ISSUED_TAX_DOCUMENTS[0]);
+        $this->db->pdo()->prepare("UPDATE invoice_payments SET tax_document_invoice_id = ? WHERE supplier_id = ? AND invoice_id = ? AND source = 'cash'")
+            ->execute([$first, $this->supplierId, $advance]);
+
+        $this->exportDir = Mdb::writeTaxDocumentPayments($this->tmp, true);
+        $again = $this->import(false);
+
+        self::assertSame($advance, $this->column('invoices', 'parent_invoice_id', Mdb::ISSUED_TAX_DOCUMENTS[0]));
+        self::assertSame([['cash', $first]], array_map(static fn (array $r): array => [$r['source'], (int) $r['tax_document_invoice_id']],
+            $this->fetchAll("SELECT source, tax_document_invoice_id FROM invoice_payments WHERE supplier_id = ? AND tax_document_invoice_id IS NOT NULL")));
+        self::assertContains('tax_document_payment_taken', self::messageCodes($again, 'payments'), $this->explain($again));
+    }
+
+    /** @return array<string,mixed> první zpráva kroku s kódem */
+    private static function message(?ImportProtocol $protocol, string $step, string $code): array
+    {
+        foreach ($protocol?->toArray()['steps'] ?? [] as $s) {
+            if ($s['key'] === $step) {
+                foreach ($s['messages'] ?? [] as $m) {
+                    if (($m['code'] ?? '') === $code) {
+                        return $m;
+                    }
+                }
+            }
+        }
+        return [];
+    }
+
     /** @return list<string> */
     private static function messageCodes(ImportProtocol $protocol, string $step): array
     {
@@ -299,10 +446,11 @@ final class PohodaDocumentLinkerTest extends TestCase
 
     // ── helpers ──────────────────────────────────────────────────────────────
 
-    private function importMdbTaxDocuments(bool $withRefDD): void
+    /** @param array<string,string> $refDD */
+    private function importMdbTaxDocuments(bool $withRefDD, string $scenario = '', array $refDD = []): void
     {
         $this->supplierId = $this->supplier();
-        $this->exportDir = Mdb::writeTaxDocumentPayments($this->tmp, $withRefDD);
+        $this->exportDir = Mdb::writeTaxDocumentPayments($this->tmp, $withRefDD, $scenario, $refDD);
         $this->protocol = $this->import(false);
     }
 

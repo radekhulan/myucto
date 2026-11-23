@@ -219,7 +219,12 @@ nespustí. Převod jedné firmy běží vždy jen jeden.
    text dokladu uvádí jiné číslo zálohy. Text dokladu („…zálohové faktuře č. …") se použije jen
    u dokladů, které vazbu z úhrady nemají. Export pořízený starší verzí nástroje vazbu nenese:
    protokol převodu to ohlásí a doporučí data vyexportovat znovu aktuálním nástrojem z průvodce.
-   Čistě XML export POHODY tuto vazbu nenese nikdy.
+   Čistě XML export POHODY tuto vazbu nenese nikdy. Opakovaný převod z nového exportu opraví
+   vazbu, kterou dřívější převod vytvořil podle textu, pokud daňový doklad neleží v období
+   s podaným přiznáním nebo kontrolním hlášením ani v uzavřeném či zamčeném období. Platbu
+   naváže jen tehdy, když ji převod našel podle dokladu POHODY, ne jen podle čísla. Co převod
+   navázat nemohl (záloha mimo export, víc záloh nebo plateb k jednomu dokladu, storno, koncept,
+   ruční vazba), vypíše protokol s čísly dokladů.
    Konečné faktury k zálohám, které jsou v POHODĚ ještě otevřené, vystavujte
    podle [§ 15.4.3](15_Faktura_editor.md#1543-konecna-faktura-k-zaloze-s-danovym-dokladem-jak-nezdvojit-dph).
    Daňové doklady bez vazby na zálohu najde [Kontrola dat po převodu](126_Kontrola_dat_po_prevodu.md#1269-ddkp-bez-vazby-na-zalohu)

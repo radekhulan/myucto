@@ -255,6 +255,15 @@ final class PohodaExport
     }
 
     /**
+     * @return array<string,list<array{doc:string,advance:string,number:string}>> id DDKP => zálohy, ke kterým ho POHODA váže úhradou
+     *         ({@see PohodaMdbAccounting::taxDocumentPaymentRefs()})
+     */
+    public function taxDocumentPaymentRefs(): array
+    {
+        return $this->mdb !== null && $this->hasTaxDocumentPaymentRefs() ? $this->mdb->taxDocumentPaymentRefs() : [];
+    }
+
+    /**
      * Objednávky z převodu datového souboru ({@see PohodaMdbAccounting::orders()}); `null` =
      * export je nenese (XML export POHODY, převodník před přidáním objednávek).
      */
