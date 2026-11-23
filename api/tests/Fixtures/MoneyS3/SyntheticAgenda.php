@@ -1270,6 +1270,60 @@ final class SyntheticAgenda
     }
 
     /**
+     * K agendě {@see filesWithSettledWithoutPaymentDocument()} zápisy interních dokladů ze dne
+     * úhrady dokladů bez čísla úhrady:
+     *   - ID25099 15. 12. přeúčtovává pohledávku jiného odběratele (Zeta) 605 Kč z 311 na 395
+     *     (pochybná pohledávka), týž den Money vede jako uhrazenou vydanou FV25045 Odběratele
+     *     Beta na 605 Kč bez čísla úhrady,
+     *   - vydané FV25043 a FV25044 (Beta, každá 605) Money vede jako uhrazené 12. 12. bez čísla
+     *     úhrady a týž den zápočty ID25043 a ID25044 na 605 (MD 325 / D 311) pod vlastními
+     *     symboly, každý s číslem své faktury v popisu.
+     *
+     * @return array<string,string>
+     */
+    public static function filesWithSettlementProposals(): array
+    {
+        $files = self::filesWithSettledWithoutPaymentDocument();
+        $journalFields = array_merge(self::JOURNAL_FIELDS, [['ParSym', 'C', 20]]);
+        $append = static function (string $path, array $fields, array $rows) use (&$files): void {
+            $table = strtoupper(pathinfo($path, PATHINFO_FILENAME));
+            $existing = iterator_to_array(Ms3Table::fromString($files[$path], $table)->rows(), false);
+            $files[$path] = Ms3FixtureWriter::table($fields, array_merge($existing, $rows));
+        };
+        $n = 800;
+        $line = static function (string $zdroj, string $doklad, string $datum, string $popis, string $md, string $d, float $castka, string $sym, string $ico = '') use (&$n): array {
+            $row = ['Cislo' => $n++, 'Zdroj' => $zdroj, 'Doklad' => $doklad, 'Datum' => $datum, 'Popis' => $popis, 'UcMD' => $md, 'UcD' => $d, 'Castka' => $castka, 'ParSym' => $sym];
+            if ($zdroj === 'FV') {
+                $row['DatPlnDPH'] = $datum;
+            }
+            return $ico === '' ? $row : $row + ['ParICO' => $ico];
+        };
+        $rows = [];
+        foreach (['FV25043' => '2025643', 'FV25044' => '2025644', 'FV25045' => '2025645'] as $doc => $sym) {
+            $rows[] = $line('FV', $doc, '2025-12-02', 'Prodej', '311000', '602000', 500.0, $sym);
+            $rows[] = $line('FV', $doc, '2025-12-02', 'Prodej', '311000', '343200', 105.0, $sym);
+        }
+        $rows[] = $line('ID', 'ID25043', '2025-12-12', 'Zápočet FV25043', '325000', '311000', 605.0, '9999043');
+        $rows[] = $line('ID', 'ID25044', '2025-12-12', 'Zápočet FV25044', '325000', '311000', 605.0, '9999044');
+        $rows[] = $line('ID', 'ID25099', '2025-12-15', 'Pochybná pohledávka', '395000', '311000', 605.0, '2025699', self::ADVANCE_CUSTOMER_ICO);
+        $append('ROK.002/UcDenik.DAT', $journalFields, $rows);
+        $append('ROK.002/UcOsnova.DAT', self::CHART_FIELDS, [['Ucet' => '395000', 'Nazev' => 'Vnitřní zúčtování']]);
+        $customer = [
+            'O_ICO' => self::CUSTOMER_ICO, 'O_DIC' => 'CZ' . self::CUSTOMER_ICO, 'O_Nazev' => 'Odběratel Beta a.s.',
+            'O_Ulice' => 'Ukázková 7', 'O_Mesto' => 'Ostrava', 'O_Psc' => '702 00',
+            'SazbaDPH1' => 12.0, 'SazbaDPH2' => 21.0, 'Druh' => 'N', 'KodDPH' => self::KOD_DPH_SALE, 'Uhrada' => 'převodem',
+            'Vystaveno' => '2025-12-02', 'DatUcPr' => '2025-12-02', 'PlnenoDPH' => '2025-12-02', 'Splatno' => '2025-12-16',
+        ];
+        $invoices = [];
+        foreach (['FV25043' => ['2025643', '2025-12-12'], 'FV25044' => ['2025644', '2025-12-12'], 'FV25045' => ['2025645', '2025-12-15']] as $doc => [$sym, $paid]) {
+            $invoices[] = ['Cislo' => (int) substr($doc, -3), 'Doklad' => $doc, 'VarSymbol' => $sym, 'Zaklad_2' => 500.0, 'DPH_2' => 105.0,
+                'CelkemSDPH' => 605.0, 'Uhrazeno' => $paid, 'Popis' => 'Prodej'] + $customer;
+        }
+        $append('ROK.002/VFaktury.DAT', array_merge(self::ISSUED_FIELDS, [['Cislo', 'L', 4], ['ValutyZak2', 'E', 10], ['ValutyDPH2', 'E', 10]]), $invoices);
+        return $files;
+    }
+
+    /**
      * K agendě {@see filesWithSettledWithoutPaymentDocument()} záloha ZV25053 (1 210 Kč), kterou
      * Money vede jako uhrazenou interním dokladem ID25053 bez zápisu (číslo úhrady nevede na
      * pohyb), a týž den bankovní příjem BP25053 na 324 se symbolem zálohy, který Money s dokladem

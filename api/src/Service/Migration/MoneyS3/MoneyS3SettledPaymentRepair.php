@@ -25,6 +25,9 @@ use PDO;
  *    se ohlásí: platbu doplní opakovaný převod ({@see MoneyS3SettledPayments::pendingBankMatches()}),
  *  - přijatý doklad uhrazený podle Money dostane zápočet interním dokladem navázaným na
  *    doklad a zbytek nekrytý evidovanými úhradami do `settled_outside_amount`,
+ *  - zápis interního dokladu ze dne úhrady na nekrytou částku, který zápočet nepotvrzuje
+ *    identifikátorem dokladu ani partnerem ({@see MoneyS3SettledPayments::recordIssued()}),
+ *    se jen vypíše jako návrh (`proposals`), doklad dostane výplň,
  *  - jediná platba zálohy z Money se naváže na jediný DDKP z Money se stejnou částkou.
  *
  * Mění jen evidované platby, zápočty, `settled_outside_amount` a vazbu platby na DDKP:
@@ -78,7 +81,7 @@ final class MoneyS3SettledPaymentRepair
             'status' => 'nothing', 'reason' => null,
             'issued_count' => 0, 'issued_amount_czk' => 0.0, 'settlements' => 0, 'settlement_amount_czk' => 0.0, 'without_document_amount_czk' => 0.0,
             'purchase_count' => 0, 'purchase_amount_czk' => 0.0, 'purchase_settlements' => 0, 'purchase_settlement_amount_czk' => 0.0, 'tax_document_links' => 0,
-            'invoices' => [], 'purchases' => [], 'left_for_matching' => [],
+            'invoices' => [], 'purchases' => [], 'left_for_matching' => [], 'proposals' => [],
         ];
         $lastEnd = $this->payments->lastTransferredPeriodEnd($supplierId);
         if ($lastEnd === null) {
@@ -98,7 +101,8 @@ final class MoneyS3SettledPaymentRepair
             $journalBefore = $this->journal($supplierId);
             $before = $this->issuedState($supplierId);
 
-            // CLI zálohu Money nemá: zápis zápočtu bez čísla úhrady hledá podle dne a částky.
+            // CLI zálohu Money nemá: zápis zápočtu bez čísla úhrady hledá podle dne a částky
+            // a potvrdí ho jen s identifikátorem dokladu nebo partnerem, jinak jen návrh.
             $issued = $this->payments->recordIssued($supplierId, $userId, $lastEnd, inferSettlements: true);
             foreach ($issued['invoices'] as $i) {
                 $rate = $i['currency'] === 'CZK' ? 1.0 : ($i['rate'] ?? 1.0);
@@ -110,6 +114,7 @@ final class MoneyS3SettledPaymentRepair
             }
             $row['settlements'] = $issued['settlements'];
             $row['left_for_matching'] = $issued['left_for_matching'];
+            $row['proposals'] = $issued['proposals'];
 
             $purchases = $this->payments->restorePurchaseSettlements($supplierId, $userId, $lastEnd, inferSettlements: true);
             foreach ($purchases['documents'] as $d) {
@@ -120,6 +125,7 @@ final class MoneyS3SettledPaymentRepair
                 $row['purchases'][] = $d;
             }
             $row['purchase_settlements'] = $purchases['settlements'];
+            $row['proposals'] = array_merge($row['proposals'], $purchases['proposals']);
             $row['tax_document_links'] = (new AdvanceLinker($this->db))->linkTaxDocumentPayments($supplierId);
 
             foreach (['issued_amount_czk', 'settlement_amount_czk', 'without_document_amount_czk', 'purchase_amount_czk', 'purchase_settlement_amount_czk'] as $k) {
@@ -213,6 +219,10 @@ final class MoneyS3SettledPaymentRepair
     /** @param array<string,mixed> $row */
     private function audit(int $supplierId, ?int $userId, array $row): void
     {
+        $proposed = [];
+        foreach ($row['proposals'] as $p) {
+            $proposed[$p['doc_type'] . '|' . $p['id']] = ['entry_no' => $p['entry_no'], 'date' => $p['date'], 'amount_czk' => $p['amount_czk']];
+        }
         foreach ($row['invoices'] as $i) {
             $this->activity->log(self::AUDIT_ACTION, $userId, 'invoice', $i['id'], [
                 'source' => 'money_s3_settled_payment_repair',
@@ -224,7 +234,7 @@ final class MoneyS3SettledPaymentRepair
                 'internal_settlement' => $i['settled'],
                 'without_document' => $i['amount'],
                 'action' => $i['action'],
-            ], null, null, $supplierId);
+            ] + (isset($proposed['invoice|' . $i['id']]) ? ['settlement_proposal' => $proposed['invoice|' . $i['id']]] : []), null, null, $supplierId);
         }
         foreach ($row['purchases'] as $d) {
             $this->activity->log(self::AUDIT_ACTION_PURCHASE, $userId, 'purchase_invoice', $d['id'], [
@@ -236,7 +246,7 @@ final class MoneyS3SettledPaymentRepair
                 'internal_settlement' => $d['settled'],
                 'settled_outside_before' => $d['outside'],
                 'settled_outside_amount' => $d['target'],
-            ], null, null, $supplierId);
+            ] + (isset($proposed['purchase_invoice|' . $d['id']]) ? ['settlement_proposal' => $proposed['purchase_invoice|' . $d['id']]] : []), null, null, $supplierId);
         }
     }
 }

@@ -159,12 +159,13 @@ final class MoneyS3SettledPayments
      * @param array<int,string> $paymentNos id dokladu => číslo úhrady z Money (`UDoklad`) do poznámky
      * @param array<int,true> $leftForMatching doklady, jejichž úhrada má kandidáty v převedené bance či pokladně
      * @param bool $inferSettlements bez zálohy Money (opravné CLI): zápis zápočtu, jehož číslo úhrady
-     *                               chybí, se hledá podle data úhrady a částky ({@see inferNamed()})
-     * @return array{settlements:int,settlement_amount:float,inserted:int,updated:int,deleted:int,invoices:list<array<string,mixed>>,left_for_matching:list<array<string,mixed>>}
+     *                               chybí, se hledá podle data úhrady a částky ({@see inferNamed()});
+     *                               nepotvrzené shody vrací `proposals`
+     * @return array{settlements:int,settlement_amount:float,inserted:int,updated:int,deleted:int,invoices:list<array<string,mixed>>,left_for_matching:list<array<string,mixed>>,proposals:list<array<string,mixed>>}
      */
     public function recordIssued(int $supplierId, ?int $userId, string $lastEnd, array $paymentNos = [], array $leftForMatching = [], bool $inferSettlements = false): array
     {
-        $out = ['settlements' => 0, 'settlement_amount' => 0.0, 'inserted' => 0, 'updated' => 0, 'deleted' => 0, 'invoices' => [], 'left_for_matching' => []];
+        $out = ['settlements' => 0, 'settlement_amount' => 0.0, 'inserted' => 0, 'updated' => 0, 'deleted' => 0, 'invoices' => [], 'left_for_matching' => [], 'proposals' => []];
         $candidates = $this->issuedCandidates($supplierId, $lastEnd, true);
         if ($candidates === []) {
             return $out;
@@ -179,8 +180,10 @@ final class MoneyS3SettledPayments
             }
         }
         if ($inferSettlements) {
-            $named += $this->inferNamed($supplierId, 'invoice', array_map(static fn (array $c): array => $c + ['room' => round($c['paid_total'] - $c['others'], 2)],
+            $inferred = $this->inferNamed($supplierId, 'invoice', array_map(static fn (array $c): array => $c + ['room' => round($c['paid_total'] - $c['others'], 2)],
                 array_filter($candidates, static fn (array $c): bool => $c['in_range'] && !isset($named[$c['id']]))));
+            $named += $inferred['named'];
+            $out['proposals'] = $inferred['proposals'];
         }
         $capacity = [];
         $linked = $this->settlementEntries($supplierId, 'invoice', array_column($candidates, 'id'), $named, $capacity);
@@ -353,11 +356,11 @@ final class MoneyS3SettledPayments
      *
      * @param array<int,string> $paymentNos id dokladu => číslo úhrady z Money (`UDoklad`)
      * @param bool $inferSettlements bez zálohy Money (opravné CLI), viz {@see recordIssued()}
-     * @return array{updated:int,settlements:int,settlement_amount:float,amount:float,documents:list<array<string,mixed>>}
+     * @return array{updated:int,settlements:int,settlement_amount:float,amount:float,documents:list<array<string,mixed>>,proposals:list<array<string,mixed>>}
      */
     public function restorePurchaseSettlements(int $supplierId, ?int $userId, string $lastEnd, array $paymentNos = [], bool $inferSettlements = false): array
     {
-        $out = ['updated' => 0, 'settlements' => 0, 'settlement_amount' => 0.0, 'amount' => 0.0, 'documents' => []];
+        $out = ['updated' => 0, 'settlements' => 0, 'settlement_amount' => 0.0, 'amount' => 0.0, 'documents' => [], 'proposals' => []];
         $rows = $this->purchaseCandidates($supplierId, $lastEnd, true);
         if ($rows === []) {
             return $out;
@@ -369,8 +372,10 @@ final class MoneyS3SettledPayments
             }
         }
         if ($inferSettlements) {
-            $named += $this->inferNamed($supplierId, 'purchase_invoice', array_map(static fn (array $r): array => $r + ['room' => round($r['amount_to_pay'] - $r['covered'], 2)],
+            $inferred = $this->inferNamed($supplierId, 'purchase_invoice', array_map(static fn (array $r): array => $r + ['room' => round($r['amount_to_pay'] - $r['covered'], 2)],
                 array_filter($rows, static fn (array $r): bool => !isset($named[$r['id']]))));
+            $named += $inferred['named'];
+            $out['proposals'] = $inferred['proposals'];
         }
         $capacity = [];
         $linked = $this->settlementEntries($supplierId, 'purchase_invoice', array_column($rows, 'id'), $named, $capacity);
@@ -409,18 +414,33 @@ final class MoneyS3SettledPayments
      * Číslo úhrady dokladů, ke kterým ho opravné CLI nemá (doklady převedené před výplní, záloha
      * Money v CLI není): převzatý zápis interního dokladu ze dne úhrady, který na saldokontní
      * straně vyrovnává právě nekrytou částku dokladu v Kč, ještě není zápočtem a nemá vazbu na
-     * doklad (zápis s vazbou bere {@see linkedSettlements()} u svého dokladu). Jen jediný
-     * takový zápis za den a částku; jinak výplň jako dřív. Převod číslo úhrady zná ze zálohy.
+     * doklad (zápis s vazbou bere {@see linkedSettlements()} u svého dokladu).
+     *
+     * Den a částka samy zápočet nepotvrdí: týž den může stejnou částkou jít třeba přeúčtování
+     * pohledávky jiného odběratele. Převzatý deník Money párovací symbol ani IČO řádku nenese,
+     * zápočtem se proto zápis stane, jen když
+     *  - jeho popis nebo text řádku nese identifikátor dokladu (číslo dokladu, číslo dokladu
+     *    dodavatele, variabilní symbol); z více zápisů dne s touto částkou platí ten jediný,
+     *    který ho nese, nebo
+     *  - je jediný takový zápis dne pro jediný doklad s touto částkou, vyrovnává saldokontní
+     *    účet dokladu proti saldokontnímu účtu druhé strany zápočtu (311 proti 321, 324 proti
+     *    325; průběžný účet jako 395 se v zápisu musí vynulovat, přeúčtování na něj zápočtem
+     *    není) a protistrana dokladu má podle Money týž den uhrazený doklad opačného druhu
+     *    (vzájemný zápočet s týmž partnerem).
+     * Ostatní jednoznačné shody vrací jako návrh k ručnímu posouzení, doklad dostane výplň
+     * jako dřív. Převod číslo úhrady zná ze zálohy.
      *
      * @param 'invoice'|'purchase_invoice' $docType
-     * @param array<int|string,array<string,mixed>> $docs doklady s `id`, `paid_at`, `currency`, `rate`, `room`
-     * @return array<int,array{no:string,date:string}>
+     * @param array<int|string,array<string,mixed>> $docs doklady s `id`, `document_no`, `paid_at`, `currency`, `rate`, `room`
+     * @return array{named:array<int,array{no:string,date:string}>,proposals:list<array<string,mixed>>}
      */
     private function inferNamed(int $supplierId, string $docType, array $docs): array
     {
+        $out = ['named' => [], 'proposals' => []];
         // Doklad, na který vede vazba zápisu zápočtu, ho má z vazby ({@see linkedSettlements()}).
         $linked = $this->linkedSettlements($supplierId, $docType, array_map(static fn (array $d): int => (int) $d['id'], array_values($docs)));
         $wanted = [];
+        $byId = [];
         foreach ($docs as $d) {
             if (($linked[(int) $d['id']] ?? []) !== []) {
                 continue;
@@ -428,17 +448,23 @@ final class MoneyS3SettledPayments
             $rate = $d['currency'] === 'CZK' ? 1.0 : ($d['rate'] ?? null);
             if (($d['paid_at'] ?? null) !== null && $rate !== null && $d['room'] >= 0.01) {
                 $wanted[(int) $d['id']] = ['date' => (string) $d['paid_at'], 'czk' => round($d['room'] * $rate, 2)];
+                $byId[(int) $d['id']] = $d;
             }
         }
         if ($wanted === []) {
-            return [];
+            return $out;
         }
         $side = self::SETTLEMENT_ACCOUNTS[$docType]['side'];
         $receivable = implode(' OR ', array_map(static fn (string $p): string => "COALESCE(pa.account_code, ca.account_code) LIKE '{$p}%'", self::SETTLEMENT_ACCOUNTS[$docType]['prefixes']));
+        $offsetType = $docType === 'invoice' ? 'purchase_invoice' : 'invoice';
+        $offset = implode(' OR ', array_map(static fn (string $p): string => "COALESCE(pa.account_code, ca.account_code) LIKE '{$p}%'", self::SETTLEMENT_ACCOUNTS[$offsetType]['prefixes']));
         $byDay = [];
         foreach (array_chunk(array_values(array_unique(array_column($wanted, 'date'))), 500) as $dates) {
             $stmt = $this->db->pdo()->prepare(
-                "SELECT e.id, e.entry_date, e.document_no,
+                "SELECT e.id, e.entry_date, e.document_no, e.description,
+                        GROUP_CONCAT(DISTINCT l.line_text SEPARATOR '\n') AS line_texts,
+                        SUM(CASE WHEN ({$receivable}) OR ({$offset}) THEN 0 WHEN l.side = 'debit' THEN l.signed_amount ELSE -l.signed_amount END) AS other_net,
+                        SUM(CASE WHEN ({$offset}) THEN (CASE WHEN l.side = '{$side}' THEN -l.signed_amount ELSE l.signed_amount END) ELSE 0 END) AS offset_czk,
                         SUM(CASE WHEN ({$receivable}) THEN (CASE WHEN l.side = '{$side}' THEN l.signed_amount ELSE -l.signed_amount END) ELSE 0 END) AS czk
                    FROM journal_entries e
                    JOIN journal_entry_lines l ON l.entry_id = e.id AND l.supplier_id = e.supplier_id
@@ -450,7 +476,7 @@ final class MoneyS3SettledPayments
                     AND NOT EXISTS (SELECT 1 FROM invoice_settlements s WHERE s.supplier_id = e.supplier_id AND s.journal_entry_id = e.id
                                        AND s.doc_type = ? AND s.status = 'confirmed')
                     AND NOT EXISTS (SELECT 1 FROM journal_entry_document_links dl WHERE dl.supplier_id = e.supplier_id AND dl.entry_id = e.id)
-                  GROUP BY e.id, e.entry_date, e.document_no
+                  GROUP BY e.id, e.entry_date, e.document_no, e.description
                  HAVING czk >= 0.01"
             );
             $stmt->execute([$supplierId, ...$dates, MoneyS3ImportRepository::KIND_JOURNAL_ENTRY, $docType]);
@@ -458,14 +484,141 @@ final class MoneyS3SettledPayments
                 $byDay[substr((string) $r['entry_date'], 0, 10)][] = $r;
             }
         }
-        // Jednoznačně: v den úhrady jediný doklad s touto částkou a jediný takový zápis.
         $docsPerKey = array_count_values(array_map(static fn (array $w): string => $w['date'] . '|' . number_format($w['czk'], 2, '.', ''), $wanted));
-        $out = [];
+        $found = [];
         foreach ($wanted as $id => $w) {
-            $found = array_values(array_filter($byDay[$w['date']] ?? [], static fn (array $r): bool => abs((float) $r['czk'] - $w['czk']) < 0.005));
-            if (count($found) === 1 && $docsPerKey[$w['date'] . '|' . number_format($w['czk'], 2, '.', '')] === 1) {
-                $out[$id] = ['no' => (string) $found[0]['document_no'], 'date' => $w['date']];
+            $same = array_values(array_filter($byDay[$w['date']] ?? [], static fn (array $r): bool => abs((float) $r['czk'] - $w['czk']) < 0.005));
+            if ($same !== []) {
+                $found[$id] = $same;
             }
+        }
+        if ($found === []) {
+            return $out;
+        }
+        $identity = $this->documentIdentity($supplierId, $docType, array_keys($found));
+        $proposal = static fn (int $id, array $r, string $reason): array => [
+            'doc_type' => $docType, 'id' => $id, 'document_no' => (string) $byId[$id]['document_no'], 'currency' => (string) $byId[$id]['currency'],
+            'entry_id' => (int) $r['id'], 'entry_no' => (string) $r['document_no'], 'date' => $wanted[$id]['date'], 'amount_czk' => $wanted[$id]['czk'],
+            'reason' => $reason,
+        ];
+        $partnerCheck = [];
+        foreach ($found as $id => $same) {
+            $mentioning = array_values(array_filter($same, static fn (array $r): bool => self::mentionsAny(
+                (string) $r['description'] . "\n" . (string) ($r['line_texts'] ?? ''), $identity[$id]['ids'] ?? [])));
+            if (count($mentioning) === 1) {
+                $out['named'][$id] = ['no' => (string) $mentioning[0]['document_no'], 'date' => $wanted[$id]['date']];
+                continue;
+            }
+            // Bez identifikátoru jen jednoznačně: v den úhrady jediný doklad s touto částkou a jediný takový zápis.
+            if (count($same) !== 1 || $docsPerKey[$wanted[$id]['date'] . '|' . number_format($wanted[$id]['czk'], 2, '.', '')] !== 1) {
+                continue;
+            }
+            $r = $same[0];
+            if (abs((float) $r['other_net']) >= 0.005 || (float) $r['offset_czk'] < 0.01) {
+                $out['proposals'][] = $proposal($id, $r, 'zápis nenese číslo dokladu a protiúčet není saldokontní účet zápočtu');
+            } elseif (($identity[$id]['partner'] ?? null) === null) {
+                $out['proposals'][] = $proposal($id, $r, 'zápis nenese číslo dokladu a doklad nemá protistranu');
+            } else {
+                $partnerCheck[$id] = $r;
+            }
+        }
+        if ($partnerCheck !== []) {
+            $paid = $this->partnersPaidOn($supplierId, $offsetType,
+                array_values(array_unique(array_map(static fn (int $id): string => $wanted[$id]['date'], array_keys($partnerCheck)))),
+                array_values(array_unique(array_map(static fn (int $id): int => (int) $identity[$id]['partner'], array_keys($partnerCheck)))));
+            foreach ($partnerCheck as $id => $r) {
+                if (isset($paid[$wanted[$id]['date'] . '|' . $identity[$id]['partner']])) {
+                    $out['named'][$id] = ['no' => (string) $r['document_no'], 'date' => $wanted[$id]['date']];
+                } else {
+                    $out['proposals'][] = $proposal($id, $r, 'zápis nenese číslo dokladu a protistrana nemá týž den uhrazený doklad opačného druhu');
+                }
+            }
+        }
+        return $out;
+    }
+
+    /**
+     * Identifikátory dokladů, které může nést text zápisu (číslo dokladu, číslo dokladu
+     * dodavatele, variabilní symbol), a protistrana (adresář; převod vede jednoho partnera
+     * na IČO, {@see CodebookImporter::resolvePartner()}).
+     *
+     * @param 'invoice'|'purchase_invoice' $docType
+     * @param list<int> $ids
+     * @return array<int,array{ids:list<string>,partner:?int}>
+     */
+    private function documentIdentity(int $supplierId, string $docType, array $ids): array
+    {
+        $out = [];
+        foreach (array_chunk($ids, 500) as $chunk) {
+            $in = implode(',', array_map('intval', $chunk));
+            $stmt = $this->db->pdo()->prepare($docType === 'invoice'
+                ? "SELECT id, varsymbol, NULL AS vendor_no, payment_variable_symbol, client_id AS partner_id
+                     FROM invoices WHERE supplier_id = ? AND id IN ({$in})"
+                : "SELECT id, varsymbol, vendor_invoice_number AS vendor_no, payment_variable_symbol, vendor_id AS partner_id
+                     FROM purchase_invoices WHERE supplier_id = ? AND id IN ({$in})");
+            $stmt->execute([$supplierId]);
+            foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $r) {
+                $out[(int) $r['id']] = [
+                    'ids' => array_values(array_unique(array_filter(array_map(static fn ($v): string => trim((string) $v), [$r['varsymbol'], $r['vendor_no'], $r['payment_variable_symbol']]),
+                        static fn (string $v): bool => mb_strlen($v) >= 5 && preg_match('/\d{4}/', $v) === 1))),
+                    'partner' => $r['partner_id'] !== null ? (int) $r['partner_id'] : null,
+                ];
+            }
+        }
+        return $out;
+    }
+
+    /**
+     * Nese text identifikátor jako samostatné slovo? Identifikátory kratší než 5 znaků nebo
+     * bez čtyř číslic po sobě vyřadí už {@see documentIdentity()}, stejně jako
+     * {@see PairingSymbolMatcher::popisRefs()} v převodu (částka či rok v popisu nejsou číslo
+     * dokladu). Na rozdíl od něj se text nedělí na oddělovačích: číslo dokladu dodavatele
+     * nese pomlčky a lomítka („DF-2025-640") a hledá se celé.
+     *
+     * @param list<string> $ids
+     */
+    private static function mentionsAny(string $text, array $ids): bool
+    {
+        foreach ($ids as $id) {
+            if (preg_match('/(?<![\p{L}\p{N}])' . preg_quote($id, '/') . '(?![\p{L}\p{N}])/iu', $text) === 1) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Partneři s dokladem převodu druhu `$docType`, který Money vede jako uhrazený v daný den.
+     *
+     * @param 'invoice'|'purchase_invoice' $docType
+     * @param list<string> $dates
+     * @param list<int> $partners
+     * @return array<string,true> "den|id partnera"
+     */
+    private function partnersPaidOn(int $supplierId, string $docType, array $dates, array $partners): array
+    {
+        $out = [];
+        $partnerIn = implode(',', array_map('intval', $partners));
+        $dateIn = implode(',', array_fill(0, count($dates), '?'));
+        if ($docType === 'invoice') {
+            $types = "'" . implode("','", self::PAYABLE_TYPES) . "'";
+            $sql = "SELECT d.paid_at, d.client_id AS partner_id FROM invoices d
+                     WHERE d.supplier_id = ? AND d.client_id IN ({$partnerIn}) AND d.paid_at IN ({$dateIn})
+                       AND d.invoice_type IN ({$types}) AND d.status NOT IN ('draft', 'cancelled')
+                       AND EXISTS (SELECT 1 FROM money_s3_import_map m WHERE m.supplier_id = d.supplier_id AND m.kind = ? AND m.target_id = d.id)";
+            $kind = MoneyS3ImportRepository::KIND_INVOICE;
+        } else {
+            $kinds = "'" . implode("','", self::PURCHASE_KINDS) . "'";
+            $sql = "SELECT d.paid_at, d.vendor_id AS partner_id FROM purchase_invoices d
+                     WHERE d.supplier_id = ? AND d.vendor_id IN ({$partnerIn}) AND d.paid_at IN ({$dateIn})
+                       AND d.document_kind IN ({$kinds}) AND d.status = 'paid'
+                       AND EXISTS (SELECT 1 FROM money_s3_import_map m WHERE m.supplier_id = d.supplier_id AND m.kind = ? AND m.target_id = d.id)";
+            $kind = MoneyS3ImportRepository::KIND_PURCHASE_INVOICE;
+        }
+        $stmt = $this->db->pdo()->prepare($sql);
+        $stmt->execute([$supplierId, ...$dates, $kind]);
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $r) {
+            $out[substr((string) $r['paid_at'], 0, 10) . '|' . (int) $r['partner_id']] = true;
         }
         return $out;
     }
