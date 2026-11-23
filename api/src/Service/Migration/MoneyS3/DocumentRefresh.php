@@ -149,7 +149,7 @@ final class DocumentRefresh
     }
 
     /**
-     * Doklady, se kterými se v MyÚčtu pracovalo ({@see touchedSql()}), a doklady navázané
+     * Doklady, se kterými se v MyÚčtu pracovalo ({@see touchedQueries()}), a doklady navázané
      * na zápis deníku, který převod ponechal kvůli zásahu uživatele (`$keptEntries`) - doklad
      * se nepřepíše, aby se nerozešel se svým zápisem.
      *
@@ -160,11 +160,11 @@ final class DocumentRefresh
     public function touched(int $supplierId, bool $issued, array $ids, array $keptEntries = []): array
     {
         $out = [];
-        $table = $issued ? 'invoices' : 'purchase_invoices';
         foreach (array_chunk($ids, 500) as $chunk) {
             $in = implode(',', array_fill(0, count($chunk), '?'));
-            $stmt = $this->db->pdo()->prepare("SELECT d.id FROM {$table} d WHERE d.supplier_id = ? AND d.id IN ({$in}) AND " . self::touchedSql($issued, 'd'));
-            $stmt->execute([$supplierId, ...$chunk]);
+            $parts = array_map(static fn (string $q): string => str_replace('{ids}', $in, $q), self::touchedQueries($issued));
+            $stmt = $this->db->pdo()->prepare(implode("\nUNION\n", $parts));
+            $stmt->execute(array_merge(...array_fill(0, count($parts), [$supplierId, ...$chunk])));
             foreach ($stmt->fetchAll(PDO::FETCH_COLUMN) as $id) {
                 $out[(int) $id] = true;
             }
@@ -185,51 +185,64 @@ final class DocumentRefresh
     }
 
     /**
-     * SQL podmínka „s dokladem `$alias` se v MyÚčtu pracovalo" (bez parametrů): stornovaný,
-     * odeslaný, upomínaný nebo s poděkováním za platbu, s uloženou verzí PDF, přílohou,
-     * dokumentem, dimenzí typu, který převod nespravuje, splátkovým kalendářem, úhradou nebo
-     * párováním zadaným v MyÚčtu, zápočtem, dohodou o započtení, dobropisem, navázaným
-     * dokladem (dobropis, daňový doklad k platbě), čerpáním zálohy, opravou § 46 / § 74b,
-     * opravnou položkou, dodaněním neuhrazeného závazku; přijatý doklad navíc se skenem,
-     * schvalováním, majetkem, drobným majetkem nebo skladem z položky.
-     * Společná aktualizaci dokladu i zápisu, který na doklad odkazuje ({@see JournalEntryRefresh}).
+     * Dotazy „s dokladem se v MyÚčtu pracovalo": stornovaný, odeslaný, upomínaný nebo
+     * s poděkováním za platbu, s uloženou verzí PDF, přílohou, dokumentem, dimenzí typu,
+     * který převod nespravuje, splátkovým kalendářem, úhradou nebo párováním zadaným
+     * v MyÚčtu, zápočtem, dohodou o započtení, dobropisem, navázaným dokladem (dobropis,
+     * daňový doklad k platbě), čerpáním zálohy, opravou § 46 / § 74b, opravnou položkou,
+     * dodaněním neuhrazeného závazku; přijatý doklad navíc se skenem, schvalováním,
+     * majetkem, drobným majetkem nebo skladem z položky. Každý dotaz má parametry firma
+     * a id dokladů (`{ids}` = zástupné znaky seznamu) a jde od dokladu po indexu odkazující
+     * tabulky. Společné aktualizaci dokladu i zápisu, který na doklad odkazuje
+     * ({@see JournalEntryRefresh::touchedEntries()}).
+     *
+     * @return list<string>
      */
-    public static function touchedSql(bool $issued, string $alias): string
+    public static function touchedQueries(bool $issued): array
     {
-        $d = $alias;
+        $table = $issued ? 'invoices' : 'purchase_invoices';
         $type = $issued ? "'invoice'" : "'purchase_invoice'";
+        $base = "SELECT d.id FROM {$table} d %s WHERE d.supplier_id = ? AND d.id IN ({ids})%s";
+        $join = static fn (string $joins, string $where = ''): string => sprintf($base, $joins, $where);
         $managed = implode(', ', array_map(static fn (string $c): string => "'{$c}'", DimensionImporter::MANAGED_TYPE_CODES));
-        $common = "
-             OR EXISTS (SELECT 1 FROM document_links x WHERE x.supplier_id = {$d}.supplier_id AND x.entity_type = {$type} AND x.entity_id = {$d}.id)
-             OR EXISTS (SELECT 1 FROM document_dimensions x JOIN dimension_types t ON t.id = x.dimension_type_id
-                         WHERE x.supplier_id = {$d}.supplier_id AND x.doc_type = {$type} AND x.doc_id = {$d}.id AND t.code NOT IN ({$managed}))
-             OR EXISTS (SELECT 1 FROM payment_matches pm WHERE pm.supplier_id = {$d}.supplier_id AND pm." . ($issued ? 'invoice_id' : 'purchase_invoice_id') . " = {$d}.id
-                         AND NOT " . DocumentLinker::ownMatchSql('pm') . ")
-             OR EXISTS (SELECT 1 FROM invoice_settlements x WHERE x.supplier_id = {$d}.supplier_id AND x.doc_type = {$type} AND x.doc_id = {$d}.id)
-             OR EXISTS (SELECT 1 FROM offset_agreement_items x WHERE x.supplier_id = {$d}.supplier_id AND x.doc_type = {$type} AND x.doc_id = {$d}.id)
-             OR EXISTS (SELECT 1 FROM credit_note_offsets x WHERE x.supplier_id = {$d}.supplier_id AND x.doc_type = {$type} AND (x.invoice_id = {$d}.id OR x.credit_note_id = {$d}.id))";
+        $queries = [
+            $join("JOIN document_links x ON x.entity_type = {$type} AND x.entity_id = d.id AND x.supplier_id = d.supplier_id"),
+            $join("JOIN document_dimensions x ON x.supplier_id = d.supplier_id AND x.doc_type = {$type} AND x.doc_id = d.id
+                   JOIN dimension_types t ON t.id = x.dimension_type_id", " AND t.code NOT IN ({$managed})"),
+            $join('JOIN payment_matches pm ON pm.' . ($issued ? 'invoice_id' : 'purchase_invoice_id') . ' = d.id AND pm.supplier_id = d.supplier_id',
+                ' AND NOT ' . DocumentLinker::ownMatchSql('pm')),
+            $join("JOIN invoice_settlements x ON x.supplier_id = d.supplier_id AND x.doc_type = {$type} AND x.doc_id = d.id"),
+            $join("JOIN offset_agreement_items x ON x.supplier_id = d.supplier_id AND x.doc_type = {$type} AND x.doc_id = d.id"),
+            $join("JOIN credit_note_offsets x ON x.supplier_id = d.supplier_id AND x.doc_type = {$type} AND x.invoice_id = d.id"),
+            $join("JOIN credit_note_offsets x ON x.doc_type = {$type} AND x.credit_note_id = d.id AND x.supplier_id = d.supplier_id"),
+        ];
         if ($issued) {
             $note = str_replace("'", "''", IssuedPaymentRecorder::NOTE_PREFIX) . '%';
-            return "({$d}.status = 'cancelled' OR {$d}.sent_at IS NOT NULL OR {$d}.reminder_count > 0 OR {$d}.last_reminder_at IS NOT NULL
-             OR {$d}.payment_thanks_sent_at IS NOT NULL
-             OR EXISTS (SELECT 1 FROM invoice_pdfs x WHERE x.invoice_id = {$d}.id)
-             OR EXISTS (SELECT 1 FROM invoice_attachments x WHERE x.invoice_id = {$d}.id)
-             OR EXISTS (SELECT 1 FROM invoice_payment_schedule x WHERE x.supplier_id = {$d}.supplier_id AND x.invoice_id = {$d}.id)
-             OR EXISTS (SELECT 1 FROM invoice_payments x WHERE x.supplier_id = {$d}.supplier_id AND x.invoice_id = {$d}.id AND (x.note IS NULL OR x.note NOT LIKE '{$note}'))
-             OR EXISTS (SELECT 1 FROM invoices c WHERE c.supplier_id = {$d}.supplier_id AND c.parent_invoice_id = {$d}.id)
-             OR EXISTS (SELECT 1 FROM invoice_advance_deductions x WHERE x.supplier_id = {$d}.supplier_id AND (x.final_invoice_id = {$d}.id OR x.advance_invoice_id = {$d}.id))
-             OR EXISTS (SELECT 1 FROM vat_s46_corrections x WHERE x.supplier_id = {$d}.supplier_id AND x.invoice_id = {$d}.id)
-             OR EXISTS (SELECT 1 FROM accounting_receivable_provisions x WHERE x.supplier_id = {$d}.supplier_id AND x.invoice_id = {$d}.id){$common})";
+            return [...$queries,
+                $join('', " AND (d.status = 'cancelled' OR d.sent_at IS NOT NULL OR d.reminder_count > 0 OR d.last_reminder_at IS NOT NULL OR d.payment_thanks_sent_at IS NOT NULL)"),
+                $join('JOIN invoice_pdfs x ON x.invoice_id = d.id'),
+                $join('JOIN invoice_attachments x ON x.invoice_id = d.id'),
+                $join('JOIN invoice_payment_schedule x ON x.invoice_id = d.id AND x.supplier_id = d.supplier_id'),
+                $join('JOIN invoice_payments x ON x.invoice_id = d.id AND x.supplier_id = d.supplier_id', " AND (x.note IS NULL OR x.note NOT LIKE '{$note}')"),
+                $join('JOIN invoices c ON c.supplier_id = d.supplier_id AND c.parent_invoice_id = d.id'),
+                $join('JOIN invoice_advance_deductions x ON x.supplier_id = d.supplier_id AND x.final_invoice_id = d.id'),
+                $join('JOIN invoice_advance_deductions x ON x.supplier_id = d.supplier_id AND x.advance_invoice_id = d.id'),
+                $join('JOIN vat_s46_corrections x ON x.supplier_id = d.supplier_id AND x.invoice_id = d.id'),
+                $join('JOIN accounting_receivable_provisions x ON x.supplier_id = d.supplier_id AND x.invoice_id = d.id'),
+            ];
         }
-        return "({$d}.status = 'cancelled' OR {$d}.pdf_path IS NOT NULL
-             OR EXISTS (SELECT 1 FROM purchase_invoice_approvals x WHERE x.supplier_id = {$d}.supplier_id AND x.purchase_invoice_id = {$d}.id)
-             OR EXISTS (SELECT 1 FROM purchase_advance_deductions x WHERE x.supplier_id = {$d}.supplier_id AND (x.final_invoice_id = {$d}.id OR x.advance_invoice_id = {$d}.id))
-             OR EXISTS (SELECT 1 FROM assets x WHERE x.supplier_id = {$d}.supplier_id AND x.purchase_invoice_id = {$d}.id)
-             OR EXISTS (SELECT 1 FROM purchase_invoice_items i JOIN assets x ON x.purchase_invoice_item_id = i.id AND x.supplier_id = {$d}.supplier_id WHERE i.purchase_invoice_id = {$d}.id)
-             OR EXISTS (SELECT 1 FROM small_assets x WHERE x.supplier_id = {$d}.supplier_id AND x.purchase_invoice_id = {$d}.id)
-             OR EXISTS (SELECT 1 FROM purchase_invoice_items i JOIN stock_document_lines x ON x.purchase_invoice_item_id = i.id AND x.supplier_id = {$d}.supplier_id WHERE i.purchase_invoice_id = {$d}.id)
-             OR EXISTS (SELECT 1 FROM vat_s74b_corrections x WHERE x.supplier_id = {$d}.supplier_id AND x.purchase_invoice_id = {$d}.id)
-             OR EXISTS (SELECT 1 FROM tax_unpaid_liability_addbacks x WHERE x.supplier_id = {$d}.supplier_id AND x.purchase_invoice_id = {$d}.id){$common})";
+        return [...$queries,
+            $join('', " AND (d.status = 'cancelled' OR d.pdf_path IS NOT NULL)"),
+            $join('JOIN purchase_invoice_approvals x ON x.purchase_invoice_id = d.id AND x.supplier_id = d.supplier_id'),
+            $join('JOIN purchase_advance_deductions x ON x.supplier_id = d.supplier_id AND x.final_invoice_id = d.id'),
+            $join('JOIN purchase_advance_deductions x ON x.supplier_id = d.supplier_id AND x.advance_invoice_id = d.id'),
+            $join('JOIN assets x ON x.purchase_invoice_id = d.id AND x.supplier_id = d.supplier_id'),
+            $join('JOIN purchase_invoice_items i ON i.purchase_invoice_id = d.id JOIN assets x ON x.purchase_invoice_item_id = i.id AND x.supplier_id = d.supplier_id'),
+            $join('JOIN small_assets x ON x.purchase_invoice_id = d.id AND x.supplier_id = d.supplier_id'),
+            $join('JOIN purchase_invoice_items i ON i.purchase_invoice_id = d.id JOIN stock_document_lines x ON x.purchase_invoice_item_id = i.id AND x.supplier_id = d.supplier_id'),
+            $join('JOIN vat_s74b_corrections x ON x.supplier_id = d.supplier_id AND x.purchase_invoice_id = d.id'),
+            $join('JOIN tax_unpaid_liability_addbacks x ON x.supplier_id = d.supplier_id AND x.purchase_invoice_id = d.id'),
+        ];
     }
 
     /**

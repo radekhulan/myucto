@@ -2897,6 +2897,7 @@
                 "PRIMARY": "UNIQUE BTREE (id)",
                 "idx_assets_disposal_entry": "BTREE (disposal_entry_id)",
                 "idx_assets_purchase_invoice": "BTREE (purchase_invoice_id)",
+                "idx_assets_purchase_invoice_item": "BTREE (purchase_invoice_item_id)",
                 "idx_assets_sale_invoice": "BTREE (sale_invoice_id)",
                 "idx_assets_summary_account": "BTREE (supplier_id, summary_account_code)",
                 "idx_assets_supplier_status": "BTREE (supplier_id, status)",

@@ -90,55 +90,75 @@ final class JournalEntryRefresh
      * zachová, {@see userDimensions()}),
      * vazba z jiné evidence (interní doklad, zápočet, ostatní položka, mzdy, sklad, majetek,
      * časové rozlišení, tankování, návrh zaúčtování) a navázaný doklad, se kterým se
-     * pracovalo ({@see DocumentRefresh::touchedSql()}) - jinak by se rozešel doklad s deníkem.
+     * pracovalo ({@see DocumentRefresh::touched()}) - jinak by se rozešel doklad s deníkem.
      *
      * @return array<int,true>
      */
     public function touchedEntries(int $supplierId, int $periodId): array
     {
-        $stmt = $this->db->pdo()->prepare(self::touchedEntriesSql());
-        $stmt->execute([$supplierId, $periodId]);
-        return array_fill_keys(array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN)), true);
+        $parts = self::touchedEntriesQueries();
+        $stmt = $this->db->pdo()->prepare(implode("\nUNION\n", $parts));
+        $stmt->execute(array_merge(...array_fill(0, count($parts), [$supplierId, $periodId])));
+        $out = array_fill_keys(array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN)), true);
+
+        // Zápis dokladu, se kterým se v MyÚčtu pracovalo: doklad se nepřepíše, zápis také ne.
+        $links = $this->db->pdo()->prepare(
+            "SELECT k.entry_id, k.doc_type, k.doc_id FROM journal_entries e
+               JOIN journal_entry_document_links k ON k.supplier_id = e.supplier_id AND k.entry_id = e.id
+              WHERE e.supplier_id = ? AND e.period_id = ? AND k.doc_type IN ('invoice', 'purchase_invoice')"
+        );
+        $links->execute([$supplierId, $periodId]);
+        $byDoc = ['invoice' => [], 'purchase_invoice' => []];
+        foreach ($links->fetchAll(PDO::FETCH_NUM) as [$entryId, $docType, $docId]) {
+            $byDoc[(string) $docType][(int) $docId][] = (int) $entryId;
+        }
+        $documents = new DocumentRefresh($this->db);
+        foreach ($byDoc as $docType => $docs) {
+            if ($docs === []) {
+                continue;
+            }
+            foreach (array_keys($documents->touched($supplierId, $docType === 'invoice', array_keys($docs))) as $docId) {
+                foreach ($docs[$docId] as $entryId) {
+                    $out[$entryId] = true;
+                }
+            }
+        }
+        return $out;
     }
 
-    /** Dotaz {@see touchedEntries()}; parametry firma a období. */
-    public static function touchedEntriesSql(): string
+    /**
+     * Dotazy {@see touchedEntries()}, každý s parametry firma a období. Spojení jdou od
+     * zápisů období (index firma, období) po indexu odkazující tabulky - žádný průchod
+     * celou tabulkou.
+     *
+     * @return list<string>
+     */
+    public static function touchedEntriesQueries(): array
     {
         $managed = implode(', ', array_map(static fn (string $c): string => "'{$c}'", DimensionImporter::MANAGED_TYPE_CODES));
-        return "SELECT e.id FROM journal_entries e
-              WHERE e.supplier_id = ? AND e.period_id = ?
-                AND (e.reversed_by IS NOT NULL
-                  OR EXISTS (SELECT 1 FROM journal_entries r WHERE r.supplier_id = e.supplier_id AND r.reversed_by = e.id)
-                  OR EXISTS (SELECT 1 FROM journal_line_pairing x WHERE x.supplier_id = e.supplier_id AND x.entry_id = e.id)
-                  OR EXISTS (SELECT 1 FROM journal_line_pairing_items x WHERE x.supplier_id = e.supplier_id AND x.entry_id = e.id)
-                  OR EXISTS (SELECT 1 FROM journal_settlement_allocations x WHERE x.supplier_id = e.supplier_id AND x.entry_id = e.id)
-                  OR EXISTS (SELECT 1 FROM journal_entry_notes x WHERE x.supplier_id = e.supplier_id AND x.entry_id = e.id)
-                  OR EXISTS (SELECT 1 FROM journal_entry_attachments x WHERE x.supplier_id = e.supplier_id AND x.entry_id = e.id)
-                  OR EXISTS (SELECT 1 FROM journal_pair_reversals x WHERE x.supplier_id = e.supplier_id AND x.entry_id = e.id)
-                  OR EXISTS (SELECT 1 FROM journal_pair_reversals x WHERE x.supplier_id = e.supplier_id AND x.reversal_entry_id = e.id)
-                  OR EXISTS (SELECT 1 FROM accrual_entry_links x WHERE x.supplier_id = e.supplier_id AND x.journal_entry_id = e.id)
-                  OR EXISTS (SELECT 1 FROM internal_documents x WHERE x.supplier_id = e.supplier_id AND x.journal_entry_id = e.id)
-                  OR EXISTS (SELECT 1 FROM invoice_settlements x WHERE x.supplier_id = e.supplier_id AND x.journal_entry_id = e.id)
-                  OR EXISTS (SELECT 1 FROM offset_agreements x WHERE x.supplier_id = e.supplier_id AND x.journal_entry_id = e.id)
-                  OR EXISTS (SELECT 1 FROM other_items x WHERE x.supplier_id = e.supplier_id AND x.journal_entry_id = e.id)
-                  OR EXISTS (SELECT 1 FROM payroll_posting_batches x WHERE x.supplier_id = e.supplier_id AND x.journal_entry_id = e.id)
-                  OR EXISTS (SELECT 1 FROM stock_documents x WHERE x.supplier_id = e.supplier_id AND x.journal_entry_id = e.id)
-                  OR EXISTS (SELECT 1 FROM assets x WHERE x.supplier_id = e.supplier_id AND x.disposal_entry_id = e.id)
-                  OR EXISTS (SELECT 1 FROM fuelings x WHERE x.supplier_id = e.supplier_id AND x.source_journal_entry_id = e.id)
-                  OR EXISTS (SELECT 1 FROM bank_posting_suggestions x WHERE x.supplier_id = e.supplier_id AND x.journal_entry_id = e.id)
-                  OR EXISTS (SELECT 1 FROM document_links x WHERE x.supplier_id = e.supplier_id AND x.entity_type = 'journal_entry' AND x.entity_id = e.id)
-                  OR EXISTS (SELECT 1 FROM journal_entry_document_links k
-                              WHERE k.supplier_id = e.supplier_id AND k.entry_id = e.id AND (k.note IS NULL OR k.note NOT LIKE '%Money S3%'))
-                  OR EXISTS (SELECT 1 FROM journal_entry_lines l
-                               JOIN journal_entry_line_dimension_splits d ON d.line_id = l.id AND d.supplier_id = l.supplier_id
-                               JOIN dimension_types t ON t.id = d.dimension_type_id
-                              WHERE l.supplier_id = e.supplier_id AND l.entry_id = e.id AND t.code NOT IN ({$managed}))
-                  OR EXISTS (SELECT 1 FROM journal_entry_document_links k
-                               JOIN invoices d ON d.id = k.doc_id AND d.supplier_id = k.supplier_id
-                              WHERE k.supplier_id = e.supplier_id AND k.entry_id = e.id AND k.doc_type = 'invoice' AND " . DocumentRefresh::touchedSql(true, 'd') . ")
-                  OR EXISTS (SELECT 1 FROM journal_entry_document_links k
-                               JOIN purchase_invoices d ON d.id = k.doc_id AND d.supplier_id = k.supplier_id
-                              WHERE k.supplier_id = e.supplier_id AND k.entry_id = e.id AND k.doc_type = 'purchase_invoice' AND " . DocumentRefresh::touchedSql(false, 'd') . '))';
+        $base = 'SELECT e.id FROM journal_entries e %s WHERE e.supplier_id = ? AND e.period_id = ?%s';
+        $queries = [
+            sprintf($base, '', ' AND e.reversed_by IS NOT NULL'),
+            // Zápis, který stornoval jiný zápis: od storen firmy (index firma, storno) k zápisu období.
+            'SELECT r.reversed_by FROM journal_entries r JOIN journal_entries e ON e.id = r.reversed_by AND e.supplier_id = r.supplier_id
+              WHERE r.supplier_id = ? AND r.reversed_by IS NOT NULL AND e.period_id = ?',
+            sprintf($base, 'JOIN document_links x ON x.entity_type = \'journal_entry\' AND x.entity_id = e.id AND x.supplier_id = e.supplier_id', ''),
+            sprintf($base, 'JOIN journal_entry_document_links k ON k.supplier_id = e.supplier_id AND k.entry_id = e.id', " AND (k.note IS NULL OR k.note NOT LIKE '%Money S3%')"),
+            sprintf($base, "JOIN journal_entry_lines l ON l.supplier_id = e.supplier_id AND l.entry_id = e.id
+                JOIN journal_entry_line_dimension_splits d ON d.line_id = l.id AND d.supplier_id = l.supplier_id
+                JOIN dimension_types t ON t.id = d.dimension_type_id", " AND t.code NOT IN ({$managed})"),
+        ];
+        foreach ([
+            ['journal_line_pairing', 'entry_id'], ['journal_line_pairing_items', 'entry_id'], ['journal_settlement_allocations', 'entry_id'],
+            ['journal_entry_notes', 'entry_id'], ['journal_entry_attachments', 'entry_id'], ['journal_pair_reversals', 'entry_id'],
+            ['journal_pair_reversals', 'reversal_entry_id'], ['accrual_entry_links', 'journal_entry_id'], ['internal_documents', 'journal_entry_id'],
+            ['invoice_settlements', 'journal_entry_id'], ['offset_agreements', 'journal_entry_id'], ['other_items', 'journal_entry_id'],
+            ['payroll_posting_batches', 'journal_entry_id'], ['stock_documents', 'journal_entry_id'], ['assets', 'disposal_entry_id'],
+            ['fuelings', 'source_journal_entry_id'], ['bank_posting_suggestions', 'journal_entry_id'],
+        ] as [$table, $column]) {
+            $queries[] = sprintf($base, "JOIN {$table} x ON x.{$column} = e.id AND x.supplier_id = e.supplier_id", '');
+        }
+        return $queries;
     }
 
     /**
