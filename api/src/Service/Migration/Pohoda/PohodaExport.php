@@ -244,6 +244,11 @@ final class PohodaExport
         }
     }
 
+    public function hasTaxDocumentPaymentRefs(): bool
+    {
+        return $this->mdb?->tables->hasColumn('Uhrady', 'RefDD') ?? false;
+    }
+
     /**
      * Objednávky z převodu datového souboru ({@see PohodaMdbAccounting::orders()}); `null` =
      * export je nenese (XML export POHODY, převodník před přidáním objednávek).

@@ -10,6 +10,7 @@ use MyInvoice\Service\Migration\Pohoda\PohodaJournal;
 use MyInvoice\Service\Migration\Pohoda\PohodaMdbAccounting;
 use MyInvoice\Service\Migration\Pohoda\PohodaMdbTables;
 use MyInvoice\Service\Migration\Pohoda\PohodaXml;
+use MyInvoice\Tests\Fixtures\Pohoda\SyntheticPohodaMdbExport as Mdb;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 
@@ -313,6 +314,32 @@ final class PohodaMdbAccountingTest extends TestCase
         $invoice = iterator_to_array($mapper->records('received'))[0];
         self::assertSame(['id' => '', 'number' => 'TEST-B1'], $invoice['liquidations']['liquidation'][0]['sourceDocument']);
         self::assertSame('', iterator_to_array($mapper->records('bank'))[0]['bankHeader']['symPar']);
+    }
+
+    public function testAdvanceInstallmentsCarryTheirOwnTaxDocumentReferences(): void
+    {
+        $export = PohodaExport::open(Mdb::writeTaxDocumentPayments($this->dir));
+        $advance = iterator_to_array($export->records('issued_advance', 'invoice'))[0];
+        $payments = PohodaXml::all($advance, 'liquidations/liquidation');
+        self::assertSame(['101', '102'], array_column($payments, 'taxDocumentRef'));
+        self::assertSame(['605', '363'], array_column($payments, 'amount'));
+
+        $internal = iterator_to_array($export->records('internal', 'intDoc'));
+        self::assertSame(Mdb::ISSUED_TAX_DOCUMENTS, array_map(
+            static fn (array $record): string => PohodaXml::text($record, 'intDocHeader/number/numberRequested'),
+            array_slice($internal, 0, 2),
+        ));
+        self::assertSame(['101', '102'], array_column(array_column(array_slice($internal, 0, 2), 'intDocHeader'), 'id'));
+        self::assertTrue($export->hasTaxDocumentPaymentRefs());
+    }
+
+    public function testRefDDColumnIsRecognizedEvenWhenNull(): void
+    {
+        $dir = Mdb::write($this->dir, ['Uhrady' => [['ID' => '1', 'RefDD' => '0']]]);
+        $file = $dir . '/' . PohodaMdbAccounting::FILE;
+        file_put_contents($file, str_replace('<RefDD>0</RefDD>', '<RefDD nil="true"/>', file_get_contents($file)));
+
+        self::assertTrue(PohodaExport::open($dir)->hasTaxDocumentPaymentRefs());
     }
 
     /**

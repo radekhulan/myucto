@@ -1309,6 +1309,7 @@ final class InvoiceImporter
                 'date' => PohodaXml::date($l, 'date'),
                 'amount' => PohodaXml::num($l, 'amount'),
                 'liq' => PohodaXml::text($l, 'id') ?: substr(md5((string) json_encode($l)), 0, 12),
+                'tax_document_ref' => PohodaXml::text($l, 'taxDocumentRef'),
             ];
         }
     }

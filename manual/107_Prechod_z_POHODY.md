@@ -213,7 +213,9 @@ nespustí. Převod jedné firmy běží vždy jen jeden.
    provedete v `Nástroje → Uzávěrka`.
 8. Doplňte, co se nepřevádí ([§ 107.9.3](#10793-co-prevod-neprenese)).
 9. Otevřete několik převzatých daňových dokladů k přijaté platbě a ověřte, že mají odkaz na
-   zálohovou fakturu. Konečné faktury k zálohám, které jsou v POHODĚ ještě otevřené, vystavujte
+   zálohovou fakturu. Aktuální exportní nástroj pro MDB a POHODA SQL přenáší vazbu z úhrady
+   zálohy v POHODĚ. Díky tomu se k jedné záloze přiřadí i daňové doklady k jednotlivým splátkám.
+   Konečné faktury k zálohám, které jsou v POHODĚ ještě otevřené, vystavujte
    podle [§ 15.4.3](15_Faktura_editor.md#1543-konecna-faktura-k-zaloze-s-danovym-dokladem-jak-nezdvojit-dph).
    Daňové doklady bez vazby na zálohu najde [Kontrola dat po převodu](126_Kontrola_dat_po_prevodu.md#1269-ddkp-bez-vazby-na-zalohu)
    a jednoznačné vazby doplní. Ostatní navažte ručně: otevřete doklad, klikněte na **Navázat na zálohu**

@@ -128,9 +128,12 @@ final class PohodaContext
      * Úhrady dokladů z `liquidations` - kterým bankovním nebo pokladním dokladem Pohody
      * byl doklad uhrazen. Páruje je {@see DocumentLinker::matchPayments()}.
      *
-     * @var list<array{doc:string,id:int,number:string,agenda:string,source:string,date:?string,amount:float,liq:string}>
+     * @var list<array{doc:string,id:int,number:string,agenda:string,source:string,source_id:string,date:?string,amount:float,liq:string,tax_document_ref?:string}>
      */
     public array $liquidations = [];
+
+    /** @var array<int,array<string,int>> id vydané zálohy => id úhrady POHODY => id DDKP v MyÚčtu */
+    public array $taxDocumentsByLiquidation = [];
 
     /** @var array<string,true> id převedených dokladů minulého období („typ|id“) - nemají zápis v deníku roku */
     public array $previousPeriod = [];

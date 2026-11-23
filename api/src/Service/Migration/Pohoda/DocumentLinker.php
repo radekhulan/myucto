@@ -274,10 +274,28 @@ final class DocumentLinker
     {
         $p = $ctx->protocol;
         $pdo = $this->db->pdo();
+        $hasRefDD = $ctx->export->hasTaxDocumentPaymentRefs();
+        $byRefDD = [];
+        $issuedPaymentSources = [];
+        if ($hasRefDD) {
+            foreach ($ctx->liquidations as $l) {
+                if ($ctx->skipsDate($l['date'])) {
+                    continue;
+                }
+                $ref = $l['tax_document_ref'] ?? '';
+                if ($ref !== '') {
+                    $byRefDD[$ref][] = $l;
+                }
+                if ($l['doc'] === 'invoice') {
+                    $issuedPaymentSources[$l['id']][$l['agenda']][$l['source']] =
+                        ($issuedPaymentSources[$l['id']][$l['agenda']][$l['source']] ?? 0) + 1;
+                }
+            }
+        }
         foreach ([
-            [PohodaImportRepository::KIND_PURCHASE_INVOICE, 'receivedAdvanceInvoice', ['received_advance', 'received_proforma'], 'purchase_invoices', 'parent_purchase_invoice_id', 'document_kind'],
-            [PohodaImportRepository::KIND_INVOICE, 'issuedAdvanceInvoice', ['issued_advance', 'issued_proforma'], 'invoices', 'parent_invoice_id', 'invoice_type'],
-        ] as [$kind, $linkAgenda, $advanceAgendas, $table, $column, $kindColumn]) {
+            [PohodaImportRepository::KIND_PURCHASE_INVOICE, 'purchase_invoice', 'receivedAdvanceInvoice', ['received_advance', 'received_proforma'], 'purchase_invoices', 'parent_purchase_invoice_id', 'document_kind', 'vendor_id', 'advance'],
+            [PohodaImportRepository::KIND_INVOICE, 'invoice', 'issuedAdvanceInvoice', ['issued_advance', 'issued_proforma'], 'invoices', 'parent_invoice_id', 'invoice_type', 'client_id', 'proforma'],
+        ] as [$kind, $docType, $linkAgenda, $advanceAgendas, $table, $column, $kindColumn, $partner, $advanceKind]) {
             $advances = [];
             $taxDocuments = $this->map->all($ctx->supplierId, $kind);
             foreach ($taxDocuments as $key => $id) {
@@ -286,15 +304,20 @@ final class DocumentLinker
                     $advances[$number][] = (int) $id;
                 }
             }
-            if ($advances === [] || $taxDocuments === []) {
+            if ($taxDocuments === [] || ($advances === [] && $byRefDD === [])) {
                 continue;
             }
             $set = $pdo->prepare("UPDATE {$table} SET {$column} = ? WHERE id = ? AND supplier_id = ? AND {$column} IS NULL AND {$kindColumn} = 'tax_document'");
-            $partner = $table === 'purchase_invoices' ? 'vendor_id' : 'client_id';
             $same = $pdo->prepare(
                 "SELECT 1 FROM {$table} t JOIN {$table} a ON a.supplier_id = t.supplier_id AND a.id = ?
                   WHERE t.id = ? AND t.supplier_id = ? AND t.{$partner} = a.{$partner} AND ABS(t.total_with_vat - a.total_with_vat) < 0.01"
             );
+            $setFromPayment = $hasRefDD ? $pdo->prepare(
+                "UPDATE {$table} t JOIN {$table} a ON a.supplier_id = t.supplier_id AND a.id = ?
+                    SET t.{$column} = a.id
+                  WHERE t.supplier_id = ? AND t.id = ? AND t.{$column} IS NULL AND t.{$partner} = a.{$partner}
+                    AND t.{$kindColumn} = 'tax_document' AND a.{$kindColumn} = ?"
+            ) : null;
             foreach ($ctx->export->records('internal', 'intDoc') as $record) {
                 $header = PohodaXml::get($record, 'intDocHeader');
                 $number = PohodaXml::text($header, 'number/numberRequested');
@@ -304,6 +327,24 @@ final class DocumentLinker
                 if ($taxDocumentId === null || $ctx->skipsDate($accounting ?? $issue)) {
                     continue;
                 }
+                $payments = $byRefDD[PohodaXml::text($header, 'id')] ?? [];
+                if ($setFromPayment !== null && $payments !== []) {
+                    $advanceIds = array_unique(array_column($payments, 'id'));
+                    if (count($advanceIds) !== 1 || array_unique(array_column($payments, 'doc')) !== [$docType]) {
+                        continue;
+                    }
+                    $advanceId = $advanceIds[0];
+                    $setFromPayment->execute([$advanceId, $ctx->supplierId, $taxDocumentId, $advanceKind]);
+                    if ($setFromPayment->rowCount() > 0) {
+                        $p->count(self::STEP_LINK, 'tax_document_advance_linked');
+                    }
+                    $payment = $payments[0];
+                    if ($docType === 'invoice' && count($payments) === 1
+                        && $issuedPaymentSources[$advanceId][$payment['agenda']][$payment['source']] === 1) {
+                        $ctx->taxDocumentsByLiquidation[$advanceId][$payment['liq']] = $taxDocumentId;
+                    }
+                    continue;
+                }
                 $refs = [];
                 foreach (PohodaXml::all($record, 'linkedDocuments/link') as $link) {
                     $ref = PohodaXml::text($link, 'sourceDocument/number');
@@ -311,10 +352,7 @@ final class DocumentLinker
                         $refs[$ref] = $advances[$ref][0];
                     }
                 }
-                // Export z datového souboru vazbu DDKP na zálohu nenese; POHODA ale DDKP
-                // pojmenuje číslem zálohy ({@see self::advanceNumberFromText()}). Takovou
-                // vazbu převod přijme jen u téhož partnera a téže částky jako záloha.
-                $textRef = $refs === [] ? self::advanceNumberFromText(PohodaXml::text($header, 'text')) : null;
+                $textRef = !$hasRefDD && $refs === [] ? self::advanceNumberFromText(PohodaXml::text($header, 'text')) : null;
                 if ($textRef !== null && count($advances[$textRef] ?? []) === 1) {
                     $candidate = $advances[$textRef][0];
                     $same->execute([$candidate, $taxDocumentId, $ctx->supplierId]);
@@ -600,13 +638,15 @@ final class DocumentLinker
         }
         $note = 'Převzato z POHODY, úhrada ' . $l['source'];
         if ($kind === 'bank') {
-            $dup = $pdo->prepare('SELECT 1 FROM invoice_payments WHERE bank_transaction_id = ? AND invoice_id = ?');
+            $dup = $pdo->prepare('SELECT id FROM invoice_payments WHERE bank_transaction_id = ? AND invoice_id = ?');
             $dup->execute([$txId, $l['id']]);
         } else {
-            $dup = $pdo->prepare("SELECT 1 FROM invoice_payments WHERE invoice_id = ? AND source = 'cash' AND note = ?");
+            $dup = $pdo->prepare("SELECT id FROM invoice_payments WHERE invoice_id = ? AND source = 'cash' AND note = ?");
             $dup->execute([$l['id'], $note]);
         }
-        if ($dup->fetchColumn() !== false) {
+        $existingId = $dup->fetchColumn();
+        if ($existingId !== false) {
+            $this->linkIssuedPaymentTaxDocument($ctx, $l, (int) $existingId, $kind, $note);
             return;
         }
         $rate = $row['exchange_rate'] !== null && (float) $row['exchange_rate'] > 0 ? (float) $row['exchange_rate'] : null;
@@ -637,11 +677,35 @@ final class DocumentLinker
             $ctx->supplierId, $l['id'], $date, number_format($amount, 2, '.', ''), (string) $row['currency'],
             $note, $kind, $kind === 'bank' ? $txId : null, $ctx->userOrNull(),
         ]);
+        $paymentId = (int) $pdo->lastInsertId();
         if ($kind === 'cash') {
             $pdo->prepare('UPDATE cash_documents SET invoice_payment_id = ? WHERE id = ? AND supplier_id = ? AND invoice_id = ? AND invoice_payment_id IS NULL')
-                ->execute([(int) $pdo->lastInsertId(), $cashId, $ctx->supplierId, $l['id']]);
+                ->execute([$paymentId, $cashId, $ctx->supplierId, $l['id']]);
         }
+        $this->linkIssuedPaymentTaxDocument($ctx, $l, $paymentId, $kind, $note);
         $ctx->protocol->count(self::STEP_PAYMENTS, 'issued_payments_recorded');
+    }
+
+    private function linkIssuedPaymentTaxDocument(PohodaContext $ctx, array $l, int $paymentId, string $kind, string $note): void
+    {
+        $taxDocumentId = $ctx->taxDocumentsByLiquidation[$l['id']][$l['liq']] ?? null;
+        if ($taxDocumentId === null) {
+            return;
+        }
+        $stmt = $this->db->pdo()->prepare(
+            "UPDATE invoice_payments p
+               JOIN invoices td ON td.id = ? AND td.supplier_id = p.supplier_id AND td.parent_invoice_id = p.invoice_id
+               JOIN invoices a ON a.id = p.invoice_id AND a.supplier_id = p.supplier_id AND a.client_id = td.client_id
+               LEFT JOIN invoice_payments linked ON linked.tax_document_invoice_id = td.id
+                SET p.tax_document_invoice_id = td.id
+              WHERE p.supplier_id = ? AND p.id = ? AND p.source = ? AND p.note = ?
+                AND p.tax_document_invoice_id IS NULL AND linked.id IS NULL
+                AND a.invoice_type = 'proforma' AND td.invoice_type = 'tax_document' AND td.status <> 'cancelled'"
+        );
+        $stmt->execute([$taxDocumentId, $ctx->supplierId, $paymentId, $kind, $note]);
+        if ($stmt->rowCount() > 0) {
+            $ctx->protocol->count(self::STEP_PAYMENTS, 'tax_document_payment_linked');
+        }
     }
 
     /**

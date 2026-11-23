@@ -10,6 +10,7 @@ use MyInvoice\Service\Migration\MoneyS3\ImportProtocol;
 use MyInvoice\Service\Migration\Pohoda\PohodaExport;
 use MyInvoice\Service\Migration\Pohoda\PohodaImporter;
 use MyInvoice\Tests\Fixtures\Pohoda\SyntheticPohodaExport as X;
+use MyInvoice\Tests\Fixtures\Pohoda\SyntheticPohodaMdbExport as Mdb;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
 
@@ -133,6 +134,54 @@ final class PohodaDocumentLinkerTest extends TestCase
         self::assertArrayNotHasKey('tax_document_advance_linked', self::stepCounts($again, 'link'));
     }
 
+    public function testMdbTaxDocumentsLinkToTheirAdvanceAndInstallment(): void
+    {
+        $this->importMdbTaxDocuments(true);
+
+        $advance = $this->invoice(Mdb::ISSUED_ADVANCE);
+        [$first, $second] = Mdb::ISSUED_TAX_DOCUMENTS;
+        foreach ([$first, $second] as $number) {
+            self::assertSame('tax_document', $this->column('invoices', 'invoice_type', $number));
+        }
+        self::assertSame([$advance, $advance], [
+            $this->column('invoices', 'parent_invoice_id', $first),
+            $this->column('invoices', 'parent_invoice_id', $second),
+        ]);
+        self::assertSame(1209.99, (float) $this->column('purchase_invoices', 'total_with_vat', Mdb::RECEIVED_TAX_DOCUMENT));
+        self::assertSame($this->purchase(Mdb::RECEIVED_ADVANCE),
+            $this->column('purchase_invoices', 'parent_purchase_invoice_id', Mdb::RECEIVED_TAX_DOCUMENT));
+        foreach ([Mdb::OTHER_PARTNER_TAX_DOCUMENT, Mdb::TEXT_ONLY_TAX_DOCUMENT] as $number) {
+            self::assertSame('tax_document', $this->column('purchase_invoices', 'document_kind', $number));
+            self::assertNull($this->column('purchase_invoices', 'parent_purchase_invoice_id', $number));
+        }
+
+        $sql = "SELECT p.source, p.amount, t.varsymbol
+                  FROM invoice_payments p JOIN invoices t ON t.id = p.tax_document_invoice_id
+                 WHERE p.supplier_id = ? AND p.invoice_id = {$advance} ORDER BY p.paid_on";
+        $payments = $this->fetchAll($sql);
+        self::assertSame([['bank', 605.0, $first], ['cash', 363.0, $second]],
+            array_map(static fn (array $r): array => [$r['source'], (float) $r['amount'], $r['varsymbol']], $payments));
+        self::assertSame(3, self::stepCounts($this->protocol, 'link')['tax_document_advance_linked'] ?? 0, $this->explain());
+
+        $again = $this->import(false);
+        self::assertSame($payments, $this->fetchAll($sql));
+        self::assertArrayNotHasKey('tax_document_advance_linked', self::stepCounts($again, 'link'));
+        self::assertArrayNotHasKey('tax_document_payment_linked', self::stepCounts($again, 'payments'));
+    }
+
+    public function testMdbExportWithoutRefDDUsesVerifiedText(): void
+    {
+        $this->importMdbTaxDocuments(false);
+
+        self::assertSame($this->purchase(Mdb::RECEIVED_ADVANCE),
+            $this->column('purchase_invoices', 'parent_purchase_invoice_id', Mdb::TEXT_ONLY_TAX_DOCUMENT));
+        foreach (Mdb::ISSUED_TAX_DOCUMENTS as $number) {
+            self::assertSame('tax_document', $this->column('invoices', 'invoice_type', $number));
+            self::assertNull($this->column('invoices', 'parent_invoice_id', $number));
+        }
+        self::assertSame(1, self::stepCounts($this->protocol, 'link')['tax_document_advance_linked'] ?? 0, $this->explain());
+    }
+
     /** 5) offsetCreditNote: faktura a dobropis vyrovnané interním dokladem = zápočet dobropisu. */
     public function testCreditNoteSettledByInternalDocumentBecomesCreditNoteOffset(): void
     {
@@ -232,6 +281,13 @@ final class PohodaDocumentLinkerTest extends TestCase
     }
 
     // ── helpers ──────────────────────────────────────────────────────────────
+
+    private function importMdbTaxDocuments(bool $withRefDD): void
+    {
+        $this->supplierId = $this->supplier();
+        $this->exportDir = Mdb::writeTaxDocumentPayments($this->tmp, $withRefDD);
+        $this->protocol = $this->import(false);
+    }
 
     private function import(bool $fresh = true): ImportProtocol
     {

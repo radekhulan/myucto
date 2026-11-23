@@ -516,13 +516,17 @@ final class PohodaMdbAccounting
                 if ($agenda !== 0 && !isset(self::LINKS[$agenda])) {
                     throw new PohodaException('mdb_payment_source', 'MDB obsahuje nepodporovaný zdroj úhrady ' . $agenda . '.');
                 }
-                $d['liquidations']['liquidation'][] = [
+                $liquidation = [
                     'id' => $u['ID'],
                     'date' => $this->date($u, 'DatumU'),
                     'sourceAgenda' => self::LINKS[$agenda] ?? '',
                     'sourceDocument' => $this->paymentSource($u, $agenda),
                     'amount' => $u['KcU'] ?? '0',
                 ];
+                if (in_array($source, [43, 44], true) && (int) ($u['RefDD'] ?? 0) > 0) {
+                    $liquidation['taxDocumentRef'] = $u['RefDD'];
+                }
+                $d['liquidations']['liquidation'][] = $liquidation;
             }
         }
         if (isset($d['linkedDocuments']['link'])) {
