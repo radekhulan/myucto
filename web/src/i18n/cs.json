@@ -36807,7 +36807,12 @@
       "blocked": "Neuzavřen kvůli předchozímu roku",
       "mismatch": "Nesedí na počáteční stavy",
       "no_opening": "Další rok nemá počáteční stavy",
-      "failed": "Uzávěrka selhala"
+      "failed": "Uzávěrka selhala",
+      "opening_only": "Jen počáteční stavy z Money",
+      "closing_started": "Uzávěrka rozpracovaná, dokončete ji v Uzávěrce",
+      "closing_in_progress": "Uzávěrku rozpracovala účetní, převod ji nemění",
+      "open_next_pending": "Knihy uzavřené, otevření dalšího roku čeká na účetní",
+      "opening_differs": "Otevírací zápis nesedí na Money"
     },
     "doc_type": {
       "purchase_invoice": "Přijatá faktura",

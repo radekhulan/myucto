@@ -7,6 +7,7 @@ namespace MyInvoice\Tests\Integration\Migration;
 use MyInvoice\Repository\AccountingPeriodRepository;
 use MyInvoice\Repository\JournalEntryRepository;
 use MyInvoice\Service\Accounting\ChartOfAccountsSeeder;
+use MyInvoice\Service\Accounting\Closing\ClosingService;
 use MyInvoice\Service\Migration\MoneyS3\ImportOptions;
 use MyInvoice\Service\Migration\MoneyS3\ImportProtocol;
 use MyInvoice\Service\Migration\MoneyS3\Ms3Backup;
@@ -155,6 +156,69 @@ final class MoneyS3OpeningOnlyNextYearTest extends MoneyS3ImportTestCase
     }
 
     /**
+     * Uzávěrku roku 2024 rozpracovala účetní v MyÚčtu (zahájení a kontroly) po dřívějším
+     * převodu bez uzávěrky. Opakovaný převod na ni nenaváže: kroky nepřeskočí, rok neuzavře
+     * a v protokolu uvede skutečný stav kroků.
+     */
+    public function testClosingStartedInMyUctoIsLeftUnchanged(): void
+    {
+        $supplierId = $this->companyRunning2025();
+        $first = $this->convert($supplierId, new ImportOptions(ImportOptions::MODE_IMPORT, closeHistory: false, toYear: 2024, openingOnlyNext: true));
+        self::assertFalse($first->hasErrors(), $this->explain($first));
+        $periodId = $this->periodId($supplierId, 2024);
+        $closing = $this->container(ClosingService::class);
+        $closing->start($supplierId, $periodId, (int) $closing->state($supplierId, $periodId)['row_version'], ['user_id' => $this->userId]);
+        $closing->runPrecheck($supplierId, $periodId, (int) $closing->state($supplierId, $periodId)['row_version'], ['user_id' => $this->userId]);
+        $steps = $this->closingSteps($supplierId, 2024);
+
+        $protocol = $this->convert($supplierId, new ImportOptions(ImportOptions::MODE_IMPORT, toYear: 2024, openingOnlyNext: true));
+
+        self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
+        self::assertSame('closing', (string) $this->container(AccountingPeriodRepository::class)->findByYear($supplierId, 2024)['status']);
+        self::assertSame($steps, $this->closingSteps($supplierId, 2024), 'Kroky uzávěrky účetní převod nemění.');
+        $result = array_column((array) $protocol->get('closing'), null, 'year')[2024];
+        self::assertSame('closing_in_progress', $result['status'], $this->explain($protocol));
+        self::assertSame([], $result['steps']['skipped_by_conversion']);
+        self::assertSame(['precheck'], $result['steps']['done']);
+        self::assertContains('estimates', $result['steps']['pending']);
+        $warning = $this->closingMessage($protocol, 'closing_in_progress');
+        self::assertStringContainsString('Převod v uzávěrce žádný krok nepřeskočil.', $warning['text']);
+        self::assertStringContainsString('Čekají kroky: Kurzové rozdíly, Dohadné položky', $warning['text']);
+    }
+
+    /**
+     * Rok vyžaduje krok Zásoby: převod uzávěrku zahájí, ale skončí před přeskočením kroků
+     * z Money. Protokol uvádí skutečný stav kroků (nic nepřeskočeno). Opakovaný převod na
+     * svou uzávěrku naváže; jakmile v ní účetní pracovala (znovu spustila kontroly), nechá ji.
+     */
+    public function testClosingLeftForStockReportsActualStepsAndOnlyOwnClosingContinues(): void
+    {
+        $supplierId = $this->companyRunning2025();
+        $this->db->pdo()->prepare('UPDATE supplier SET stock_enabled = 1 WHERE id = ?')->execute([$supplierId]);
+        $options = new ImportOptions(ImportOptions::MODE_IMPORT, toYear: 2024, openingOnlyNext: true);
+
+        $protocol = $this->convert($supplierId, $options);
+
+        self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
+        $result = array_column((array) $protocol->get('closing'), null, 'year')[2024];
+        self::assertSame('closing_started', $result['status'], $this->explain($protocol));
+        self::assertSame([], $result['steps']['skipped_by_conversion']);
+        self::assertContains('stock', $result['steps']['pending']);
+        $warning = $this->closingMessage($protocol, 'closing_continues_manually');
+        self::assertStringContainsString('Převod v uzávěrce žádný krok nepřeskočil.', $warning['text']);
+        self::assertStringNotContainsString('jsou přeskočené', $warning['text']);
+
+        $again = $this->convert($supplierId, $options);
+        self::assertSame('closing_started', array_column((array) $again->get('closing'), 'status', 'year')[2024], $this->explain($again));
+
+        $periodId = $this->periodId($supplierId, 2024);
+        $closing = $this->container(ClosingService::class);
+        $closing->runPrecheck($supplierId, $periodId, (int) $closing->state($supplierId, $periodId)['row_version'], ['user_id' => $this->userId]);
+        $third = $this->convert($supplierId, $options);
+        self::assertSame('closing_in_progress', array_column((array) $third->get('closing'), 'status', 'year')[2024], $this->explain($third));
+    }
+
+    /**
      * Převod od roku 2025 s počátečními stavy z dalšího roku: posledním převáděným rokem je
      * předposlední rok zálohy 2024, rozsah je prázdný. Převod se zastaví a rok 2025 určený
      * jen pro počáteční stavy nepřevezme celý.
@@ -222,6 +286,15 @@ final class MoneyS3OpeningOnlyNextYearTest extends MoneyS3ImportTestCase
         );
         $stmt->execute([$supplierId]);
         return $stmt->fetchAll(PDO::FETCH_ASSOC);
+    }
+
+    /** @return array<string,mixed> */
+    private function closingMessage(ImportProtocol $protocol, string $code): array
+    {
+        $messages = array_column($protocol->toArray()['steps'], null, 'key')['closing']['messages'];
+        $found = array_values(array_filter($messages, static fn (array $m): bool => $m['code'] === $code));
+        self::assertCount(1, $found, $this->explain($protocol));
+        return $found[0];
     }
 
     /** @return list<array<string,mixed>> */

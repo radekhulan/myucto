@@ -36807,7 +36807,12 @@
       "blocked": "Not closed because of the previous year",
       "mismatch": "Does not match opening balances",
       "no_opening": "Next year has no opening balances",
-      "failed": "Closing failed"
+      "failed": "Closing failed",
+      "opening_only": "Opening balances from Money only",
+      "closing_started": "Closing in progress, finish it in Closing",
+      "closing_in_progress": "Closing in progress by the accountant, left unchanged",
+      "open_next_pending": "Books closed, opening of the next year left to the accountant",
+      "opening_differs": "Opening entry does not match Money"
     },
     "doc_type": {
       "purchase_invoice": "Received invoice",

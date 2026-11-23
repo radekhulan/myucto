@@ -39,9 +39,14 @@ use MyInvoice\Service\Accounting\AccountingFrameworkImportGuard;
  * se stejně ověří a uzavře i poslední převáděný rok. Rozdíly počátečních stavů Money proti
  * konečným stavům roku v MyÚčtu protokol vyjmenuje. Otevírací zápis dalšího roku, který převod
  * ponechal (převzatý dřív, nebo založený v MyÚčtu), se navíc porovná s počátečními stavy
- * z aktuální zálohy: při rozdílu zůstane rok otevřený a zápis se bez rozhodnutí uživatele nemění. Nedovolí-li uzavření kurzové přecenění
- * nebo zásoby, uzávěrka roku zůstane rozpracovaná: kroky, které proběhly v Money, jsou
- * přeskočené s poznámkou a průvodce je znovu nenabídne, zbytek dokončí uživatel.
+ * z aktuální zálohy: při rozdílu zůstane rok otevřený a zápis se bez rozhodnutí uživatele nemění.
+ * Nedovolí-li uzavření kurzové přecenění nebo zásoby, uzávěrka roku zůstane rozpracovaná
+ * a protokol uvede skutečný stav jejích kroků (přeskočené převodem, hotové, čekající);
+ * zbytek dokončí uživatel.
+ *
+ * Na rozpracovanou uzávěrku (i na uzavřené knihy s nedokončeným otevřením dalšího roku)
+ * převod navazuje jen tehdy, když ji zahájil sám a od jeho posledního kroku se v ní
+ * nepracovalo ({@see MARKER}). Uzávěrku rozpracovanou účetní nechá beze změny a ohlásí ji.
  */
 final class HistoricalYearCloser
 {
@@ -52,6 +57,22 @@ final class HistoricalYearCloser
 
     /** Kroky uzávěrky, které převod nedělá ani nepřeskakuje (rok pak uzavírá uživatel). */
     private const MANUAL_STEPS = ['fx_required', 'stock_step_required'];
+
+    /**
+     * Příznak uzávěrky zahájené převodem v payloadu kroku Kontroly: verze období po posledním
+     * kroku, který v uzávěrce udělal převod. Na uzávěrku navazuje převod jen s příznakem
+     * a beze změny od té doby; uzávěrku zahájenou v MyÚčtu (nebo tu, ve které se od převodu
+     * pracovalo, i znovu spuštěné kontroly příznak smažou) nechá beze změny.
+     */
+    private const MARKER = 'money_s3_conversion';
+
+    /** Názvy kroků uzávěrky do protokolu (shodně s průvodcem). */
+    private const STEP_LABELS = [
+        'precheck' => 'Kontroly', 'depreciation' => 'Odpisy majetku', 'fx_revaluation' => 'Kurzové rozdíly',
+        'estimates' => 'Dohadné položky', 'deferrals' => 'Časové rozlišení', 'provisions' => 'Opravné položky',
+        'income_tax' => 'Daň z příjmů', 'deferred_tax' => 'Odložená daň', 'stock' => 'Zásoby',
+        'close_books' => 'Uzavření knih', 'open_next' => 'Otevření dalšího roku',
+    ];
 
     public function __construct(
         private readonly Connection $db,
@@ -83,6 +104,15 @@ final class HistoricalYearCloser
             if (in_array((string) $state['period']['status'], ['closed', 'approved', 'reviewed'], true)) {
                 if (empty($state['can_open_next'])) {
                     $results[] = ['year' => $year, 'status' => 'already_closed'];
+                    continue;
+                }
+                if (!self::startedByConversion($state)) {
+                    // Knihy uzavřela účetní v MyÚčtu: otevření dalšího roku je její krok.
+                    $results[] = ['year' => $year, 'status' => 'open_next_pending'];
+                    $p->warn(self::STEP, 'open_next_left_to_user', "Rok {$year} má v MyÚčtu uzavřené knihy, ale rok {$next} z něj není otevřený. "
+                        . 'Uzávěrku nedokončoval převod (nebo se v ní od převodu pracovalo), převod ji proto nemění. '
+                        . "Otevření roku {$next} dokončete v Uzávěrce roku {$year}.", ['year' => $year, 'steps' => self::stepStates($state)]);
+                    $blocked = true;
                     continue;
                 }
                 $moneyDiffs = $last ? $this->moneyOpeningDiffs($ctx, $periods[$next]['id']) : [];
@@ -133,6 +163,17 @@ final class HistoricalYearCloser
                 $results[] = $row + ['status' => $blocked ? 'blocked' : 'verified'];
                 continue;
             }
+            if ((string) $state['period']['status'] === 'closing' && !self::startedByConversion($state)) {
+                // Uzávěrku rozpracovala účetní v MyÚčtu: její posouzení (dohady, daň, zásoby)
+                // převod nepřeskakuje ani neuzavírá.
+                $steps = self::stepStates($state);
+                $results[] = $row + ['status' => 'closing_in_progress', 'steps' => $steps];
+                $p->warn(self::STEP, 'closing_in_progress', "Rok {$year} sedí na počáteční stavy roku {$next} z Money, uzávěrku roku ale v MyÚčtu rozpracovala účetní "
+                    . '(nezahájil ji převod, nebo se v ní od převodu pracovalo). Převod ji nechává beze změny. ' . self::stepsText($steps)
+                    . ' Dokončete ji v Uzávěrce.', ['year' => $year, 'steps' => $steps]);
+                $blocked = true;
+                continue;
+            }
 
             $nextPeriodId = $periods[$next]['id'];
             $before = $this->repo->openingBalancesInPeriod($ctx->supplierId, $nextPeriodId);
@@ -144,6 +185,7 @@ final class HistoricalYearCloser
             }
             try {
                 $closed = $this->closeYear($ctx, $periodId);
+                $this->markStartedByConversion($ctx, $periodId);
                 $after = $this->repo->openingBalancesInPeriod($ctx->supplierId, $nextPeriodId);
                 $entries = count($this->repo->openingEntriesInPeriod($ctx->supplierId, $nextPeriodId));
                 if ($entries !== 1 || self::differs($before, $after)) {
@@ -167,10 +209,12 @@ final class HistoricalYearCloser
                     if ($savepoint) {
                         $this->db->pdo()->exec('RELEASE SAVEPOINT money_s3_close_year');
                     }
-                    $results[] = $row + ['status' => 'closing_started', 'error' => $e->getMessage()];
+                    $this->markStartedByConversion($ctx, $periodId);
+                    $steps = self::stepStates($this->closing->state($ctx->supplierId, $periodId));
+                    $results[] = $row + ['status' => 'closing_started', 'error' => $e->getMessage(), 'steps' => $steps];
                     $p->warn(self::STEP, 'closing_continues_manually', "Rok {$year} sedí na počáteční stavy roku {$next} z Money, uzavřít ho ale převod nemohl: " . $e->getMessage()
-                        . ' Uzávěrka zůstává rozpracovaná, kroky, které proběhly v Money (odpisy, dohadné položky, časové rozlišení, rezervy, daň z příjmů), jsou přeskočené s poznámkou. Dokončete ji v Uzávěrce.',
-                        ['year' => $year, 'step' => $e->errorCode]);
+                        . ' Uzávěrka zůstává rozpracovaná. ' . self::stepsText($steps) . ' Dokončete ji v Uzávěrce.',
+                        ['year' => $year, 'step' => $e->errorCode, 'steps' => $steps]);
                     $blocked = true;
                     continue;
                 }
@@ -178,6 +222,7 @@ final class HistoricalYearCloser
                     $this->db->pdo()->exec('ROLLBACK TO SAVEPOINT money_s3_close_year');
                 } else {
                     $this->abortIfClosing($ctx, $periodId);
+                    $this->markStartedByConversion($ctx, $periodId);
                 }
                 $results[] = $row + ['status' => 'failed', 'error' => $e->getMessage()];
                 $p->warn(self::STEP, 'closing_failed', "Rok {$year} se nepodařilo uzavřít: " . $e->getMessage() . ' Uzavřete ho v Uzávěrce ručně.', ['year' => $year]);
@@ -232,6 +277,85 @@ final class HistoricalYearCloser
             $ctx->protocol->warn(self::STEP, 'open_next_failed', "Rok {$year} je uzavřený, ale další rok se nepodařilo otevřít: " . $e->getMessage() . ' Otevřete ho v Uzávěrce ručně.', ['year' => $year]);
             return ['year' => $year, 'status' => 'failed', 'error' => $e->getMessage()];
         }
+    }
+
+    /**
+     * Uzávěrka roku, kterou zahájil převod a od jeho posledního kroku se v ní nepracovalo
+     * ({@see MARKER}).
+     *
+     * @param array<string,mixed> $state {@see ClosingService::state()}
+     */
+    private static function startedByConversion(array $state): bool
+    {
+        foreach ((array) ($state['steps'] ?? []) as $s) {
+            if (($s['step_key'] ?? null) === 'precheck') {
+                $marker = is_array($s['payload'] ?? null) ? ($s['payload'][self::MARKER] ?? null) : null;
+                return is_array($marker) && (int) ($marker['row_version'] ?? -1) === (int) $state['row_version'];
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Zapíše příznak uzávěrky zahájené převodem s verzí období po posledním kroku převodu.
+     * Rozpracovaná ani uzavřená uzávěrka bez uložených kontrol příznak nedostane.
+     */
+    private function markStartedByConversion(ImportContext $ctx, int $periodId): void
+    {
+        $state = $this->closing->state($ctx->supplierId, $periodId);
+        if ((string) $state['period']['status'] === 'open') {
+            return;
+        }
+        foreach ((array) $state['steps'] as $s) {
+            if (($s['step_key'] ?? null) === 'precheck' && is_array($s['payload'] ?? null)) {
+                $payload = $s['payload'];
+                $payload[self::MARKER] = ['run_id' => $ctx->runId, 'row_version' => (int) $state['row_version']];
+                $this->repo->updateStepPayload($ctx->supplierId, $periodId, 'precheck', $payload);
+            }
+        }
+    }
+
+    /**
+     * Skutečný stav kroků uzávěrky: přeskočené převodem (poznámka převodu), hotové a čekající
+     * kroky před uzavřením knih (Zásoby a Odpisy jen tam, kde je rok vyžaduje).
+     *
+     * @param array<string,mixed> $state {@see ClosingService::state()}
+     * @return array{skipped_by_conversion:list<string>,done:list<string>,pending:list<string>}
+     */
+    private static function stepStates(array $state): array
+    {
+        $out = ['skipped_by_conversion' => [], 'done' => [], 'pending' => []];
+        foreach ((array) ($state['steps'] ?? []) as $s) {
+            $key = (string) ($s['step_key'] ?? '');
+            $status = (string) ($s['status'] ?? 'pending');
+            if ($status === 'skipped' && ($s['note'] ?? null) === self::SKIP_NOTE) {
+                $out['skipped_by_conversion'][] = $key;
+            } elseif ($status === 'done' || $status === 'skipped') {
+                $out['done'][] = $key;
+            } elseif (!in_array($key, ['close_books', 'open_next', 'deferred_tax', 'stock', 'depreciation'], true)
+                || ($key === 'stock' && !empty($state['stock_step_required']))
+                || ($key === 'depreciation' && !empty($state['depreciation_step_required']))) {
+                $out['pending'][] = $key;
+            }
+        }
+        return $out;
+    }
+
+    /** @param array{skipped_by_conversion:list<string>,done:list<string>,pending:list<string>} $steps */
+    private static function stepsText(array $steps): string
+    {
+        $names = static fn (array $keys): string => implode(', ', array_map(static fn (string $k): string => self::STEP_LABELS[$k] ?? $k, $keys));
+        $parts = [];
+        $parts[] = $steps['skipped_by_conversion'] !== []
+            ? 'Převod přeskočil kroky, které proběhly v Money: ' . $names($steps['skipped_by_conversion']) . '.'
+            : 'Převod v uzávěrce žádný krok nepřeskočil.';
+        if ($steps['done'] !== []) {
+            $parts[] = 'Hotové kroky: ' . $names($steps['done']) . '.';
+        }
+        if ($steps['pending'] !== []) {
+            $parts[] = 'Čekají kroky: ' . $names($steps['pending']) . '.';
+        }
+        return implode(' ', $parts);
     }
 
     /** @return array<string,mixed> výsledek closeBooks */
