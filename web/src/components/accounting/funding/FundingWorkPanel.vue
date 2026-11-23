@@ -18,7 +18,7 @@ import {
  type FundingWorkIncome, type FundingWorkLine, type FundingWorkOverview, type FundingWorkSourceInput, type FundingWorkState,
 } from '@/api/nonprofitFundingWork'
 import { fundingCents } from './fundingMoney'
-import { loudBadge, quietBadge } from '../membership/membershipFormat'
+import { errorBox, loudBadge, quietBadge } from '../membership/membershipFormat'
 
 /** Pracovní evidence čerpání (#403): zdroje období, přiřazené výnosy a náklady se stavem vazby. */
 const props = defineProps<{ supplier: number; canManage: boolean }>()
@@ -35,6 +35,11 @@ function amountText(cents: number) { return (cents / 100).toFixed(2) }
 function range(from: string, to: string) { return `${formatDate(from)} – ${formatDate(to)}` }
 function lineLabel(line: FundingWorkLine) { return [formatDate(line.date), line.document_no, line.account_code, money(line.amount_cents)].filter(Boolean).join(' · ') }
 function stateClass(state: FundingWorkState) { return state === 'ok' ? quietBadge('success') : loudBadge('warning') }
+/** Karta sekce jako detail člena (MembershipMemberDetail): světlý rámeček, stín, nadpis malými verzálkami. */
+const card = 'rounded-lg border border-neutral-200 bg-surface shadow-sm'
+const cardTitle = 'px-5 pb-2 pt-4 text-sm font-semibold uppercase tracking-wide text-neutral-500'
+const th = 'whitespace-nowrap px-4 py-2 text-left font-medium'
+const thRight = 'whitespace-nowrap px-4 py-2 text-right font-medium'
 function message(e: unknown) {
  const response = (e as { response?: { status?: number; data?: { error?: { code?: string; message?: string } } } }).response
  const code = response?.data?.error?.code
@@ -220,6 +225,16 @@ const detailActions = computed<ActionItem[]>(() => [
  { key: 'edit', label: t('nonprofitFunding.edit'), icon: 'edit', variant: 'neutral', show: props.canManage, disabled: busy.value || !detailEditable.value, run: () => { void editSource() } },
  { key: 'cancel-source', label: t('nonprofitFunding.work.cancelSource'), icon: 'trash', tier: 'overflow', variant: 'danger', show: props.canManage, disabled: busy.value || !detailEditable.value || !!detail.value?.totals.allocation_count, disabledReason: detail.value?.totals.allocation_count ? t('nonprofitFunding.work.cancelBlocked') : undefined, run: () => { reason.value = ''; dialog.value = { kind: 'cancel' } } },
 ])
+interface RowAction { key: string; label: string; icon: keyof typeof ICONS; cls: string; run: () => void }
+/** Akce řádku výnosu/nákladu – stejné v tabulce i v kartě na telefonu. */
+function rowActions(link: FundingWorkAllocation | FundingWorkIncome, income: boolean): RowAction[] {
+ if (!detailEditable.value) return []
+ const out: RowAction[] = []
+ if (link.relink_candidates?.length) out.push({ key: income ? 'relink-income' : 'relink', label: t('nonprofitFunding.work.relink'), icon: 'link', cls: btnOutlineSm('primary'), run: () => openRelink(link, income) })
+ if (!income && link.state === 'ok') out.push({ key: 'amount', label: t('nonprofitFunding.work.editAmount'), icon: 'edit', cls: btnOutlineSm('neutral'), run: () => openAmount(link as FundingWorkAllocation) })
+ out.push({ key: income ? 'remove-income' : 'remove', label: t('nonprofitFunding.work.remove'), icon: 'trash', cls: btnOutlineSm('danger'), run: () => openRemove(link, income) })
+ return out
+}
 const dialogActions = computed<DialogAction[]>(() => {
  const d = dialog.value
  const closeAction: DialogAction = { key: 'close', label: t('common.cancel'), icon: 'x', disabled: busy.value, run: close }
@@ -260,7 +275,7 @@ defineExpose({ reload })
  <div class="space-y-5" data-section="funding-work">
   <p class="text-sm text-neutral-500">{{ t('nonprofitFunding.work.help') }}</p>
   <p v-if="!canManage" role="status" class="text-sm text-neutral-500" data-section="work-readonly">{{ t('nonprofitFunding.work.readOnly') }}</p>
-  <p v-if="error && !dialog" role="alert" class="rounded border border-danger-300 p-3" data-section="work-error">{{ error }}</p>
+  <p v-if="error && !dialog" role="alert" :class="errorBox" data-section="work-error">{{ error }}</p>
   <p v-if="notice" role="status" class="text-sm text-success-700" data-section="work-notice">{{ notice }}</p>
 
   <template v-if="!selected">
@@ -271,18 +286,18 @@ defineExpose({ reload })
    </div>
    <ActionBar :actions="listActions" />
    <p v-if="busy && !overview" role="status" class="text-sm text-neutral-500" data-section="work-loading">{{ t('common.loading') }}</p>
-   <p v-else-if="overview && !overview.sources.length" class="rounded border p-5 text-neutral-500" data-section="work-empty">{{ t('nonprofitFunding.work.empty') }}</p>
+   <p v-else-if="overview && !overview.sources.length" class="rounded-lg border border-neutral-200 bg-surface p-5 text-sm text-neutral-500 shadow-sm" data-section="work-empty">{{ t('nonprofitFunding.work.empty') }}</p>
    <template v-else-if="overview">
-    <div class="hidden overflow-x-auto rounded-lg border bg-surface md:block">
+    <div class="hidden overflow-x-auto md:block" :class="card">
      <table class="w-full text-sm" data-section="work-sources">
-      <thead class="bg-neutral-50 text-left text-neutral-600"><tr>
+      <thead class="bg-neutral-50 text-left text-xs uppercase tracking-wide text-neutral-500"><tr>
        <th class="px-3 py-2">{{ t('nonprofitFunding.name') }}</th><th class="px-3 py-2">{{ t('nonprofitFunding.provider') }}</th>
        <th class="px-3 py-2 text-right">{{ t('nonprofitFunding.budget') }}</th><th class="px-3 py-2 text-right">{{ t('nonprofitFunding.work.received') }}</th>
        <th class="px-3 py-2 text-right">{{ t('nonprofitFunding.work.allocated') }}</th><th class="px-3 py-2 text-right">{{ t('nonprofitFunding.work.documented') }}</th>
        <th class="px-3 py-2 text-right">{{ t('nonprofitFunding.remaining') }}</th><th class="px-3 py-2">{{ t('nonprofitFunding.work.state') }}</th>
       </tr></thead>
       <tbody>
-       <tr v-for="s in overview.sources" :key="s.id" class="cursor-pointer border-t hover:bg-neutral-50" :data-source="s.id" @click="open(s.id)">
+       <tr v-for="s in overview.sources" :key="s.id" class="cursor-pointer border-t border-neutral-100 hover:bg-neutral-50" :data-source="s.id" @click="open(s.id)">
         <td class="px-3 py-2"><button type="button" class="text-left font-medium text-primary-700 hover:underline" @click.stop="open(s.id)">{{ s.title }}</button><div class="text-xs text-neutral-500">{{ t(`nonprofitFunding.kind_${s.kind}`) }}<template v-if="s.contract_ref"> · {{ s.contract_ref }}</template></div></td>
         <td class="px-3 py-2">{{ s.provider_label }}</td>
         <td class="whitespace-nowrap px-3 py-2 text-right">{{ money(s.totals.budget_cents) }}</td><td class="whitespace-nowrap px-3 py-2 text-right">{{ money(s.totals.received_cents) }}</td>
@@ -294,7 +309,7 @@ defineExpose({ reload })
      </table>
     </div>
     <div class="space-y-3 md:hidden" data-section="work-cards">
-     <button v-for="s in overview.sources" :key="s.id" type="button" class="block w-full rounded-lg border bg-surface p-4 text-left" :data-source="s.id" @click="open(s.id)">
+     <button v-for="s in overview.sources" :key="s.id" type="button" class="block w-full rounded-lg border border-neutral-200 bg-surface p-4 text-left shadow-sm" :data-source="s.id" @click="open(s.id)">
       <span class="flex flex-wrap items-center justify-between gap-2"><span class="font-medium">{{ s.title }}</span><span v-if="s.status === 'cancelled'" :class="quietBadge('neutral')">{{ t('nonprofitFunding.work.cancelledBadge') }}</span><span v-else-if="s.totals.review_count" :class="loudBadge('warning')">{{ t('nonprofitFunding.work.reviewCount', { count: s.totals.review_count }) }}</span><span v-else :class="quietBadge('success')">{{ t('nonprofitFunding.work.stateOk') }}</span></span>
       <span class="block text-sm text-neutral-500">{{ s.provider_label }}</span>
       <span class="mt-2 grid grid-cols-2 gap-2 text-sm"><span><span class="block text-neutral-500">{{ t('nonprofitFunding.budget') }}</span>{{ money(s.totals.budget_cents) }}</span><span><span class="block text-neutral-500">{{ t('nonprofitFunding.remaining') }}</span>{{ money(s.totals.remaining_cents) }}</span></span>
@@ -305,73 +320,142 @@ defineExpose({ reload })
 
   <template v-else>
    <p v-if="busy && !detail" role="status" class="text-sm text-neutral-500">{{ t('common.loading') }}</p>
-   <section v-if="detail" class="space-y-4" data-section="work-detail">
-    <button type="button" class="text-sm text-neutral-600 hover:text-neutral-900 disabled:opacity-50" :disabled="busy" data-action="back" @click="back">{{ t('nonprofitFunding.work.back') }}</button>
-    <div class="flex flex-wrap items-center gap-3">
-     <h2 class="text-lg font-semibold">{{ detail.source.title }}</h2>
-     <span v-if="detail.source.status === 'cancelled'" :class="quietBadge('neutral')">{{ t('nonprofitFunding.work.cancelledBadge') }}</span>
-    </div>
-    <p class="text-sm text-neutral-500">{{ t(`nonprofitFunding.kind_${detail.source.kind}`) }} · {{ detail.source.provider_label }}<template v-if="detail.source.contract_ref"> · {{ detail.source.contract_ref }}</template> · {{ range(detail.source.valid_from, detail.source.valid_to) }}<template v-if="detail.source.account_prefixes.length"> · {{ detail.source.account_prefixes.join(', ') }}</template></p>
-    <p v-if="detail.source.legacy_source_key" class="text-sm text-neutral-500">{{ t('nonprofitFunding.work.legacyNote') }}</p>
-    <ActionBar :actions="detailActions" />
-    <dl class="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6" data-section="work-totals">
-     <div class="rounded-lg border bg-surface p-3"><dt class="text-xs text-neutral-500">{{ t('nonprofitFunding.budget') }}</dt><dd class="font-semibold">{{ money(detail.totals.budget_cents) }}</dd></div>
-     <div class="rounded-lg border bg-surface p-3"><dt class="text-xs text-neutral-500">{{ t('nonprofitFunding.work.received') }}</dt><dd class="font-semibold">{{ money(detail.totals.received_cents) }}</dd></div>
-     <div class="rounded-lg border bg-surface p-3"><dt class="text-xs text-neutral-500">{{ t('nonprofitFunding.work.allocated') }}</dt><dd class="font-semibold">{{ money(detail.totals.allocated_cents) }}</dd></div>
-     <div class="rounded-lg border bg-surface p-3"><dt class="text-xs text-neutral-500">{{ t('nonprofitFunding.work.documented') }}</dt><dd class="font-semibold">{{ money(detail.totals.documented_cents) }}</dd></div>
-     <div class="rounded-lg border bg-surface p-3"><dt class="text-xs text-neutral-500">{{ t('nonprofitFunding.remaining') }}</dt><dd class="font-semibold" data-total="remaining">{{ money(detail.totals.remaining_cents) }}</dd></div>
-     <div class="rounded-lg border p-3" :class="detail.totals.review_count ? 'border-warning-300 bg-warning-50' : 'bg-surface'"><dt class="text-xs text-neutral-500">{{ t('nonprofitFunding.work.review') }}</dt><dd class="font-semibold" data-total="review">{{ detail.totals.review_count }} · {{ money(detail.totals.review_cents) }}</dd></div>
-    </dl>
-
-    <h3 class="font-semibold">{{ t('nonprofitFunding.work.incomes') }}</h3>
-    <p v-if="!detail.incomes.length" class="text-sm text-neutral-500" data-section="work-no-income">{{ t('nonprofitFunding.work.noIncome') }}</p>
-    <ul v-else class="divide-y rounded-lg border bg-surface" data-section="work-incomes">
-     <li v-for="i in detail.incomes" :key="i.id" class="flex flex-wrap items-center gap-x-4 gap-y-2 p-3 text-sm" :data-income="i.id">
-      <span class="min-w-0 flex-[1_1_16rem]">{{ formatDate(i.entry_date) }} · {{ i.document_no || '—' }} · {{ i.account_code }} · {{ money(i.amount_cents) }}<span v-if="i.confirmed_source_key" class="block text-xs text-neutral-500">{{ t('nonprofitFunding.work.inConfirmed') }}</span><span v-if="i.state === 'changed' && i.review_reason" class="block text-xs text-warning-700">{{ t(`nonprofitFunding.work.reason_${i.review_reason}`) }}</span></span>
-      <span :class="stateClass(i.state)" :data-state="i.state">{{ t(`nonprofitFunding.work.state_${i.state}`) }}</span>
-      <div v-if="detailEditable" class="flex flex-wrap gap-2">
-       <button v-if="i.relink_candidates?.length" type="button" :class="btnOutlineSm('primary')" data-action="relink-income" @click="openRelink(i, true)"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path :d="ICONS.link" /></svg>{{ t('nonprofitFunding.work.relink') }}</button>
-       <button type="button" :class="btnOutlineSm('danger')" data-action="remove-income" @click="openRemove(i, true)"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path :d="ICONS.trash" /></svg>{{ t('nonprofitFunding.work.remove') }}</button>
+   <section v-if="detail" class="space-y-5" data-section="work-detail">
+    <!-- Hlavička jako detail člena: odkaz zpět, název se stavem, údaje zdroje, akce vpravo. -->
+    <header class="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+     <div class="min-w-0">
+      <button type="button" class="inline-flex items-center gap-1 text-sm text-neutral-600 hover:text-neutral-900 disabled:opacity-50" :disabled="busy" data-action="back" @click="back"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path :d="ICONS.chevronLeft" /></svg>{{ t('nonprofitFunding.work.back') }}</button>
+      <div class="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1">
+       <h2 class="min-w-0 break-words text-2xl font-semibold">{{ detail.source.title }}</h2>
+       <span v-if="detail.source.status === 'cancelled'" :class="quietBadge('neutral')">{{ t('nonprofitFunding.work.cancelledBadge') }}</span>
+       <span v-else-if="detail.totals.review_count" :class="loudBadge('warning')">{{ t('nonprofitFunding.work.reviewCount', { count: detail.totals.review_count }) }}</span>
+       <span v-else :class="quietBadge('success')">{{ t('nonprofitFunding.work.stateOk') }}</span>
       </div>
-     </li>
-    </ul>
+      <p class="mt-0.5 text-sm text-neutral-500" data-field="source-meta">{{ t(`nonprofitFunding.kind_${detail.source.kind}`) }} · {{ detail.source.provider_label }}<template v-if="detail.source.contract_ref"> · {{ detail.source.contract_ref }}</template> · {{ range(detail.source.valid_from, detail.source.valid_to) }}<template v-if="detail.source.account_prefixes.length"> · {{ t('nonprofitFunding.work.accountsShort') }} {{ detail.source.account_prefixes.join(', ') }}</template></p>
+      <p v-if="detail.source.legacy_source_key" class="mt-0.5 text-sm text-neutral-500">{{ t('nonprofitFunding.work.legacyNote') }}</p>
+     </div>
+     <ActionBar :actions="detailActions" />
+    </header>
 
-    <h3 class="font-semibold">{{ t('nonprofitFunding.work.costs') }}</h3>
-    <p class="text-xs text-neutral-500">{{ t('nonprofitFunding.work.capacityNote') }}</p>
-    <p v-if="!detail.allocations.length" class="rounded border p-4 text-sm text-neutral-500" data-section="work-no-costs">{{ t('nonprofitFunding.work.noCosts') }}</p>
-    <ul v-else class="divide-y rounded-lg border bg-surface" data-section="work-allocations">
-     <li v-for="a in detail.allocations" :key="a.id" class="flex flex-wrap items-center gap-x-4 gap-y-2 p-3 text-sm" :data-allocation="a.id">
-      <span class="min-w-0 flex-[1_1_16rem]">
-       {{ formatDate(a.entry_date) }} · {{ a.document_no || '—' }} · {{ a.account_code }} · <strong>{{ money(a.amount_cents) }}</strong> <span class="text-neutral-500">/ {{ money(a.line_amount_cents) }}</span>
-       <span v-if="a.line?.description" class="block truncate text-xs text-neutral-500">{{ a.line.description }}</span>
-       <span v-if="a.note" class="block text-xs text-neutral-500">{{ a.note }}</span>
-       <span v-if="a.payment_state" class="block text-xs text-neutral-500">{{ t(`nonprofitFunding.work.payment_${a.payment_state}`) }}</span>
-       <span v-if="a.state === 'changed' && a.review_reason" class="block text-xs text-warning-700" data-reason="review">{{ t(`nonprofitFunding.work.reason_${a.review_reason}`) }}</span>
-       <span v-if="a.confirmed_source_key" class="block text-xs text-warning-700" data-warning="confirmed">{{ t('nonprofitFunding.work.costInConfirmed') }}</span>
-      </span>
-      <span :class="stateClass(a.state)" :data-state="a.state">{{ t(`nonprofitFunding.work.state_${a.state}`) }}</span>
-      <div v-if="detailEditable" class="flex flex-wrap gap-2">
-       <button v-if="a.relink_candidates?.length" type="button" :class="btnOutlineSm('primary')" data-action="relink" @click="openRelink(a, false)"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path :d="ICONS.link" /></svg>{{ t('nonprofitFunding.work.relink') }}</button>
-       <button v-if="a.state === 'ok'" type="button" :class="btnOutlineSm('neutral')" data-action="amount" @click="openAmount(a)"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path :d="ICONS.edit" /></svg>{{ t('nonprofitFunding.work.editAmount') }}</button>
-       <button type="button" :class="btnOutlineSm('danger')" data-action="remove" @click="openRemove(a, false)"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path :d="ICONS.trash" /></svg>{{ t('nonprofitFunding.work.remove') }}</button>
+    <section :class="[card, 'p-5']" data-section="work-summary">
+     <h3 class="mb-3 text-sm font-semibold uppercase tracking-wide text-neutral-500">{{ t('nonprofitFunding.work.summary') }}</h3>
+     <dl class="grid gap-4 text-sm sm:grid-cols-3 lg:grid-cols-6" data-section="work-totals">
+      <div><dt class="text-neutral-500">{{ t('nonprofitFunding.budget') }}</dt><dd class="mt-1 font-mono text-base tabular-nums">{{ money(detail.totals.budget_cents) }}</dd></div>
+      <div><dt class="text-neutral-500">{{ t('nonprofitFunding.work.received') }}</dt><dd class="mt-1 font-mono text-base tabular-nums">{{ money(detail.totals.received_cents) }}</dd></div>
+      <div><dt class="text-neutral-500">{{ t('nonprofitFunding.work.allocated') }}</dt><dd class="mt-1 font-mono text-base tabular-nums">{{ money(detail.totals.allocated_cents) }}</dd></div>
+      <div><dt class="text-neutral-500">{{ t('nonprofitFunding.work.documented') }}</dt><dd class="mt-1 font-mono text-base tabular-nums">{{ money(detail.totals.documented_cents) }}</dd></div>
+      <div><dt class="text-neutral-500">{{ t('nonprofitFunding.remaining') }}</dt><dd class="mt-1 font-mono text-base font-semibold tabular-nums" data-total="remaining">{{ money(detail.totals.remaining_cents) }}</dd></div>
+      <div><dt class="text-neutral-500">{{ t('nonprofitFunding.work.review') }}</dt><dd class="mt-1 text-base tabular-nums" :class="detail.totals.review_count ? 'text-warning-700' : ''" data-total="review">{{ detail.totals.review_count }} · <span class="font-mono">{{ money(detail.totals.review_cents) }}</span></dd></div>
+     </dl>
+    </section>
+
+    <section :class="card" data-section="work-incomes-card">
+     <h3 :class="cardTitle">{{ t('nonprofitFunding.work.incomes') }}</h3>
+     <p v-if="!detail.incomes.length" class="px-5 pb-4 text-sm text-neutral-500" data-section="work-no-income">{{ t('nonprofitFunding.work.noIncome') }}</p>
+     <template v-else>
+      <div class="hidden overflow-x-auto md:block">
+       <table class="w-full text-sm" data-section="work-incomes">
+        <thead class="bg-neutral-50 text-xs uppercase tracking-wide text-neutral-500"><tr>
+         <th scope="col" :class="th">{{ t('common.date') }}</th><th scope="col" :class="th">{{ t('nonprofitFunding.work.colDocument') }}</th><th scope="col" :class="th">{{ t('nonprofitFunding.work.colAccount') }}</th>
+         <th scope="col" :class="thRight">{{ t('common.amount') }}</th><th scope="col" :class="th">{{ t('nonprofitFunding.work.state') }}</th><th scope="col" :class="thRight"><span class="sr-only">{{ t('common.actions') }}</span></th>
+        </tr></thead>
+        <tbody class="divide-y divide-neutral-100">
+         <tr v-for="i in detail.incomes" :key="i.id" class="align-top" :data-income="i.id">
+          <td class="whitespace-nowrap px-4 py-2.5 tabular-nums">{{ formatDate(i.entry_date) }}</td>
+          <td class="px-4 py-2.5">{{ i.document_no || '—' }}<span v-if="i.confirmed_source_key" class="block text-xs text-neutral-500">{{ t('nonprofitFunding.work.inConfirmed') }}</span><span v-if="i.state === 'changed' && i.review_reason" class="block text-xs text-warning-700">{{ t(`nonprofitFunding.work.reason_${i.review_reason}`) }}</span></td>
+          <td class="whitespace-nowrap px-4 py-2.5 font-mono">{{ i.account_code }}</td>
+          <td class="whitespace-nowrap px-4 py-2.5 text-right font-mono tabular-nums">{{ money(i.amount_cents) }}</td>
+          <td class="px-4 py-2.5"><span :class="stateClass(i.state)" :data-state="i.state">{{ t(`nonprofitFunding.work.state_${i.state}`) }}</span></td>
+          <td class="px-4 py-2"><div class="flex justify-end gap-2"><button v-for="b in rowActions(i, true)" :key="b.key" type="button" :class="[b.cls, 'whitespace-nowrap']" :data-action="b.key" @click="b.run"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path :d="ICONS[b.icon]" /></svg>{{ b.label }}</button></div></td>
+         </tr>
+        </tbody>
+       </table>
       </div>
-     </li>
-    </ul>
+      <ul class="divide-y divide-neutral-100 md:hidden" data-section="work-incomes-cards">
+       <li v-for="i in detail.incomes" :key="i.id" class="space-y-2 px-4 py-3 text-sm">
+        <div class="flex flex-wrap items-start justify-between gap-2"><span class="tabular-nums">{{ formatDate(i.entry_date) }} · {{ i.document_no || '—' }} · <span class="font-mono">{{ i.account_code }}</span></span><span :class="stateClass(i.state)">{{ t(`nonprofitFunding.work.state_${i.state}`) }}</span></div>
+        <div class="font-mono tabular-nums">{{ money(i.amount_cents) }}</div>
+        <p v-if="i.confirmed_source_key" class="text-xs text-neutral-500">{{ t('nonprofitFunding.work.inConfirmed') }}</p>
+        <p v-if="i.state === 'changed' && i.review_reason" class="text-xs text-warning-700">{{ t(`nonprofitFunding.work.reason_${i.review_reason}`) }}</p>
+        <div v-if="rowActions(i, true).length" class="flex flex-wrap gap-2"><button v-for="b in rowActions(i, true)" :key="b.key" type="button" :class="[b.cls, 'whitespace-nowrap']" @click="b.run"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path :d="ICONS[b.icon]" /></svg>{{ b.label }}</button></div>
+       </li>
+      </ul>
+     </template>
+    </section>
 
-    <div v-if="detail.allocations_page > 1 || detail.allocations_more" class="flex flex-wrap gap-2" data-section="work-allocations-pages"><button type="button" :class="btnOutlineSm('neutral')" :disabled="busy || detail.allocations_page <= 1" data-action="allocations-prev" @click="allocationsPage(-1)"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path :d="ICONS.chevronLeft" /></svg>{{ t('nonprofitFunding.work.prev') }}</button><button type="button" :class="btnOutlineSm('neutral')" :disabled="busy || !detail.allocations_more" data-action="allocations-next" @click="allocationsPage(1)">{{ t('nonprofitFunding.work.next') }}<svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path :d="ICONS.chevronRight" /></svg></button></div>
+    <section :class="card" data-section="work-costs-card">
+     <h3 :class="cardTitle">{{ t('nonprofitFunding.work.costs') }}</h3>
+     <p class="-mt-1 px-5 pb-3 text-xs text-neutral-500">{{ t('nonprofitFunding.work.capacityNote') }}</p>
+     <p v-if="!detail.allocations.length" class="px-5 pb-4 text-sm text-neutral-500" data-section="work-no-costs">{{ t('nonprofitFunding.work.noCosts') }}</p>
+     <template v-else>
+      <div class="hidden overflow-x-auto md:block">
+       <table class="w-full text-sm" data-section="work-allocations">
+        <thead class="bg-neutral-50 text-xs uppercase tracking-wide text-neutral-500"><tr>
+         <th scope="col" :class="th">{{ t('common.date') }}</th><th scope="col" :class="th">{{ t('nonprofitFunding.work.colDocument') }}</th><th scope="col" :class="th">{{ t('nonprofitFunding.work.colAccount') }}</th>
+         <th scope="col" :class="th">{{ t('common.description') }}</th><th scope="col" :class="thRight">{{ t('nonprofitFunding.work.allocated') }}</th><th scope="col" :class="thRight">{{ t('nonprofitFunding.work.colLineAmount') }}</th>
+         <th scope="col" :class="th">{{ t('nonprofitFunding.work.state') }}</th><th scope="col" :class="thRight"><span class="sr-only">{{ t('common.actions') }}</span></th>
+        </tr></thead>
+        <tbody class="divide-y divide-neutral-100">
+         <tr v-for="a in detail.allocations" :key="a.id" class="align-top" :data-allocation="a.id">
+          <td class="whitespace-nowrap px-4 py-2.5 tabular-nums">{{ formatDate(a.entry_date) }}</td>
+          <td class="whitespace-nowrap px-4 py-2.5">{{ a.document_no || '—' }}</td>
+          <td class="whitespace-nowrap px-4 py-2.5 font-mono">{{ a.account_code }}</td>
+          <td class="min-w-[14rem] px-4 py-2.5">
+           <span v-if="a.line?.description" class="block break-words">{{ a.line.description }}</span>
+           <span v-if="a.note" class="block text-xs text-neutral-500">{{ a.note }}</span>
+           <span v-if="a.payment_state" class="block text-xs text-neutral-500">{{ t(`nonprofitFunding.work.payment_${a.payment_state}`) }}</span>
+           <span v-if="a.state === 'changed' && a.review_reason" class="block text-xs text-warning-700" data-reason="review">{{ t(`nonprofitFunding.work.reason_${a.review_reason}`) }}</span>
+           <span v-if="a.confirmed_source_key" class="block text-xs text-warning-700" data-warning="confirmed">{{ t('nonprofitFunding.work.costInConfirmed') }}</span>
+          </td>
+          <td class="whitespace-nowrap px-4 py-2.5 text-right font-mono font-medium tabular-nums">{{ money(a.amount_cents) }}</td>
+          <td class="whitespace-nowrap px-4 py-2.5 text-right font-mono tabular-nums text-neutral-500">{{ money(a.line_amount_cents) }}</td>
+          <td class="px-4 py-2.5"><span :class="stateClass(a.state)" :data-state="a.state">{{ t(`nonprofitFunding.work.state_${a.state}`) }}</span></td>
+          <td class="px-4 py-2"><div class="flex justify-end gap-2"><button v-for="b in rowActions(a, false)" :key="b.key" type="button" :class="[b.cls, 'whitespace-nowrap']" :data-action="b.key" @click="b.run"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path :d="ICONS[b.icon]" /></svg>{{ b.label }}</button></div></td>
+         </tr>
+        </tbody>
+       </table>
+      </div>
+      <ul class="divide-y divide-neutral-100 md:hidden" data-section="work-allocations-cards">
+       <li v-for="a in detail.allocations" :key="a.id" class="space-y-2 px-4 py-3 text-sm">
+        <div class="flex flex-wrap items-start justify-between gap-2"><span class="tabular-nums">{{ formatDate(a.entry_date) }} · {{ a.document_no || '—' }} · <span class="font-mono">{{ a.account_code }}</span></span><span :class="stateClass(a.state)">{{ t(`nonprofitFunding.work.state_${a.state}`) }}</span></div>
+        <p v-if="a.line?.description" class="break-words">{{ a.line.description }}</p>
+        <div class="font-mono tabular-nums"><span class="font-medium">{{ money(a.amount_cents) }}</span> <span class="text-neutral-500">/ {{ money(a.line_amount_cents) }}</span></div>
+        <p v-if="a.note" class="text-xs text-neutral-500">{{ a.note }}</p>
+        <p v-if="a.payment_state" class="text-xs text-neutral-500">{{ t(`nonprofitFunding.work.payment_${a.payment_state}`) }}</p>
+        <p v-if="a.state === 'changed' && a.review_reason" class="text-xs text-warning-700">{{ t(`nonprofitFunding.work.reason_${a.review_reason}`) }}</p>
+        <p v-if="a.confirmed_source_key" class="text-xs text-warning-700">{{ t('nonprofitFunding.work.costInConfirmed') }}</p>
+        <div v-if="rowActions(a, false).length" class="flex flex-wrap gap-2"><button v-for="b in rowActions(a, false)" :key="b.key" type="button" :class="[b.cls, 'whitespace-nowrap']" @click="b.run"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path :d="ICONS[b.icon]" /></svg>{{ b.label }}</button></div>
+       </li>
+      </ul>
+     </template>
+     <div v-if="detail.allocations_page > 1 || detail.allocations_more" class="flex flex-wrap gap-2 border-t border-neutral-100 px-4 py-3" data-section="work-allocations-pages"><button type="button" :class="btnOutlineSm('neutral')" :disabled="busy || detail.allocations_page <= 1" data-action="allocations-prev" @click="allocationsPage(-1)"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path :d="ICONS.chevronLeft" /></svg>{{ t('nonprofitFunding.work.prev') }}</button><button type="button" :class="btnOutlineSm('neutral')" :disabled="busy || !detail.allocations_more" data-action="allocations-next" @click="allocationsPage(1)">{{ t('nonprofitFunding.work.next') }}<svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path :d="ICONS.chevronRight" /></svg></button></div>
+    </section>
 
-    <details class="rounded-lg border bg-surface p-3" data-section="work-history">
-     <summary class="cursor-pointer text-sm font-medium">{{ t('nonprofitFunding.work.history') }}</summary>
-     <ul class="mt-2 space-y-1 text-sm">
-      <li v-for="h in detail.history" :key="h.id">{{ formatDateTime(h.created_at) }} · {{ h.actor || '—' }} · {{ t(`nonprofitFunding.work.action_${h.action}`) }}<template v-if="h.reason"> · {{ h.reason }}</template></li>
-     </ul>
+    <details :class="card" data-section="work-history">
+     <summary :class="[cardTitle, 'cursor-pointer pb-4']">{{ t('nonprofitFunding.work.history') }}</summary>
+     <p v-if="!detail.history.length" class="px-5 pb-4 text-sm text-neutral-500">{{ t('nonprofitFunding.work.historyEmpty') }}</p>
+     <div v-else class="overflow-x-auto">
+      <table class="w-full text-sm">
+       <thead class="bg-neutral-50 text-xs uppercase tracking-wide text-neutral-500"><tr>
+        <th scope="col" :class="th">{{ t('common.date') }}</th><th scope="col" :class="th">{{ t('nonprofitFunding.work.colActor') }}</th><th scope="col" :class="th">{{ t('nonprofitFunding.work.colAction') }}</th><th scope="col" :class="th">{{ t('nonprofitFunding.reason') }}</th>
+       </tr></thead>
+       <tbody class="divide-y divide-neutral-100">
+        <tr v-for="h in detail.history" :key="h.id" class="align-top">
+         <td class="whitespace-nowrap px-4 py-2.5 tabular-nums">{{ formatDateTime(h.created_at) }}</td>
+         <td class="px-4 py-2.5">{{ h.actor || '—' }}</td>
+         <td class="px-4 py-2.5">{{ t(`nonprofitFunding.work.action_${h.action}`) }}</td>
+         <td class="min-w-[12rem] break-words px-4 py-2.5">{{ h.reason || '' }}</td>
+        </tr>
+       </tbody>
+      </table>
+     </div>
     </details>
    </section>
   </template>
 
   <Modal v-if="dialog" :title="dialogTitle" width-class="max-w-3xl" @close="close">
    <div class="space-y-4" :data-dialog="dialog.kind">
-    <p v-if="error" role="alert" class="rounded border border-danger-300 p-3" data-section="dialog-error">{{ error }}</p>
+    <p v-if="error" role="alert" :class="errorBox" data-section="dialog-error">{{ error }}</p>
 
     <div v-if="dialog.kind === 'source' && form" class="grid gap-3 sm:grid-cols-2">
      <label :class="formLabel">{{ t('nonprofitFunding.providerSearch') }}<span class="flex gap-2"><input v-model="providerSearch" :class="input" data-field="provider-search" @keydown.enter.prevent="loadChoices" /><button type="button" :class="btnOutlineSm('neutral')" @click="loadChoices"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path :d="ICONS.search" /></svg>{{ t('nonprofitFunding.search') }}</button></span></label>
@@ -391,8 +475,8 @@ defineExpose({ reload })
     <template v-else-if="dialog.kind === 'costs' || dialog.kind === 'incomes'">
      <p class="text-sm text-neutral-500">{{ t(dialog.kind === 'costs' ? 'nonprofitFunding.work.costsHelp' : 'nonprofitFunding.work.incomeHelp') }}</p>
      <div class="flex flex-wrap items-end gap-2"><label :class="[formLabel, 'min-w-48 flex-1']">{{ t('nonprofitFunding.search') }}<input v-model="candidateSearch" :class="input" data-field="candidate-search" @keydown.enter.prevent="candidatePage = 1; loadCandidates()" /></label><button type="button" :class="btnOutlineSm('neutral')" @click="candidatePage = 1; loadCandidates()"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path :d="ICONS.search" /></svg>{{ t('nonprofitFunding.search') }}</button></div>
-     <p v-if="!busy && !candidates.length" class="rounded border p-4 text-sm text-neutral-500" data-section="no-candidates">{{ t('nonprofitFunding.work.noCandidates') }}</p>
-     <ul v-else class="max-h-96 divide-y overflow-y-auto rounded border" data-section="candidates">
+     <p v-if="!busy && !candidates.length" class="rounded-lg border border-neutral-200 p-4 text-sm text-neutral-500" data-section="no-candidates">{{ t('nonprofitFunding.work.noCandidates') }}</p>
+     <ul v-else class="max-h-96 divide-y divide-neutral-100 overflow-y-auto rounded-lg border border-neutral-200" data-section="candidates">
       <li v-for="row in candidates" :key="row.id" class="flex flex-wrap items-center gap-3 p-2 text-sm" :data-line="row.id">
        <label class="flex min-w-0 flex-1 items-start gap-2"><input type="checkbox" :checked="row.id in picked" @change="togglePick(row)" /><span class="min-w-0">{{ lineLabel(row) }}<span v-if="row.description" class="block truncate text-xs text-neutral-500">{{ row.description }}</span><span v-if="dialog.kind === 'costs' && row.allocated_cents" class="block text-xs text-neutral-500">{{ t('nonprofitFunding.work.freeCapacity', { amount: money(row.capacity_cents ?? 0) }) }}</span><span v-if="row.confirmed_source_key" class="block text-xs text-warning-700">{{ t('nonprofitFunding.work.costInConfirmed') }}</span><span v-if="row.credit_notes" class="block text-xs text-warning-700" data-warning="credit-note">{{ t('nonprofitFunding.work.hasCreditNote') }}</span></span></label>
        <input v-if="dialog.kind === 'costs' && row.id in picked" v-model="picked[row.id]" inputmode="decimal" :class="[input, 'w-32']" :aria-label="t('nonprofitFunding.work.amount')" data-field="pick-amount" />

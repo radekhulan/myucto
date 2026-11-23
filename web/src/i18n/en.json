@@ -44723,7 +44723,7 @@
       "noIncome": "No revenue assigned yet.",
       "inConfirmed": "This revenue is also in a confirmed J6 source.",
       "costs": "Assigned costs",
-      "capacityNote": "Amount / line amount. One cost may be carried by two sources, together up to the line amount.",
+      "capacityNote": "One cost line can be shared by two sources, together up to the line amount.",
       "noCosts": "No costs assigned yet. Add them with Add costs.",
       "payment_paid": "Invoice paid",
       "payment_partial": "Invoice partly paid",
@@ -44786,7 +44786,15 @@
       "reason_activity": "The activity type does not match the source.",
       "reason_overallocated": "The sources together carry more than the line amount.",
       "reason_credit_note": "A credit note was posted to the invoice. Check the amount and confirm the link with Link again.",
-      "hasCreditNote": "A credit note is posted to the invoice. The link will need review after assignment."
+      "hasCreditNote": "A credit note is posted to the invoice. The link will need review after assignment.",
+      "summary": "Summary",
+      "colDocument": "Document",
+      "colAccount": "Account",
+      "colLineAmount": "Line amount",
+      "colActor": "User",
+      "colAction": "Change",
+      "historyEmpty": "No changes yet.",
+      "accountsShort": "accounts"
     }
   },
   "eet": {

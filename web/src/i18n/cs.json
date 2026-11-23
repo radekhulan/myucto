@@ -42650,7 +42650,7 @@
       "noIncome": "Zatím není přiřazený žádný výnos.",
       "inConfirmed": "Výnos je i v potvrzeném zdroji J6.",
       "costs": "Přiřazené náklady",
-      "capacityNote": "Částka / částka řádku. Jeden náklad mohou nést i dva zdroje, dohromady nejvýše do výše řádku.",
+      "capacityNote": "Jeden náklad mohou nést i dva zdroje, dohromady nejvýše do výše řádku.",
       "noCosts": "Zatím nejsou přiřazené žádné náklady. Přidejte je tlačítkem Přidat náklady.",
       "payment_paid": "Faktura uhrazena",
       "payment_partial": "Faktura uhrazena částečně",
@@ -42713,7 +42713,15 @@
       "reason_activity": "Druh činnosti neodpovídá zdroji.",
       "reason_overallocated": "Zdroje dohromady nesou víc, než je částka řádku.",
       "reason_credit_note": "K faktuře byl zaúčtován dobropis. Zkontrolujte částku a vazbu potvrďte tlačítkem Navázat znovu.",
-      "hasCreditNote": "K faktuře je zaúčtovaný dobropis. Po přiřazení bude vazba ke kontrole."
+      "hasCreditNote": "K faktuře je zaúčtovaný dobropis. Po přiřazení bude vazba ke kontrole.",
+      "summary": "Souhrn",
+      "colDocument": "Doklad",
+      "colAccount": "Účet",
+      "colLineAmount": "Částka řádku",
+      "colActor": "Uživatel",
+      "colAction": "Změna",
+      "historyEmpty": "Zatím bez změn.",
+      "accountsShort": "účty"
     }
   },
   "securities504": {
