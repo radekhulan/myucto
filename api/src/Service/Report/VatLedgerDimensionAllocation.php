@@ -18,9 +18,15 @@ use MyInvoice\Service\Accounting\Dimension\DimensionStamper;
  *   • položka s vlastní hodnotou typu (nebo rozpadem) rozhoduje za sebe,
  *   • jinak hlavička dokladu (hodnota, nebo rozpad),
  *   • jinak řádek nemá dimenzi („bez dimenze").
- * Pořadí položky (`item_no` řádku evidence) odpovídá editoru i {@see DimensionStamper}:
- * `order_index, id`, od 1, textové řádky se počítají. Rozpis DPH přijatého dokladu (`purchase_invoice_vat_allocations`)
- * a řádky pokladního dokladu položku nemají, platí pro ně hlavička.
+ * Pořadí položky odpovídá editoru i {@see DimensionStamper}: `order_index, id`, od 1,
+ * počítají se všechny položky dokladu včetně textových a z evidence vyřazených.
+ *
+ * Rozpis DPH přijatého dokladu (`purchase_invoice_vat_allocations`) k položkám vázaný není.
+ * Mají-li všechny položky dokladu stejnou dimenzi (jediná položka, jen hlavička, nebo
+ * všechny položky stejně), patří řádek rozpisu jí. Jinak je vazba nejednoznačná a díl
+ * zůstane bez hodnoty s příznakem `dimension_unassigned = 'vat_allocation'`: sestava ho
+ * ukáže samostatným řádkem a filtrovaná kniha ho vypíše jako nepřiřazený. Řádky
+ * pokladního dokladu položky nemají, platí pro ně hlavička.
  *
  * Výchozí dimenze zakázky, klienta, produktu a pravidel dimenzí se tu NEUPLATNÍ: popisují,
  * co dostane zaúčtovaný řádek nákladu či výnosu, ne doklad. Filtr seznamu faktur
@@ -33,8 +39,10 @@ use MyInvoice\Service\Accounting\Dimension\DimensionStamper;
  * přesně částka řádku. Celkové částky dokladu (`total_with_vat_czk`, `document_total`)
  * se nedělí: limit kontrolního hlášení posuzuje celý doklad.
  *
- * Řádky se zpracovávají po dávkách: dimenze dokladů dávky se načtou jedním dotazem
- * na tabulku (žádné N+1) a evidence za období nikdy neleží v paměti celá.
+ * Řádky musí nést zdrojový řádek dokladu (`line_id`, `line_source`, {@see VatLedgerService}
+ * je čte jen pro rozpad). Zpracovávají se po dávkách: dimenze i pořadí položek dávky se
+ * načtou jedním dotazem na tabulku (žádné N+1) a evidence za období nikdy neleží
+ * v paměti celá.
  */
 final class VatLedgerDimensionAllocation
 {
@@ -43,12 +51,16 @@ final class VatLedgerDimensionAllocation
     /** Částky řádku evidence, které se dělí mezi hodnoty (zbylé jsou údaje dokladu). */
     public const AMOUNT_KEYS = ['base_czk', 'vat_czk', 'deduction_base_czk', 'deduction_vat_czk'];
 
+    /** Díl bez hodnoty, protože rozpis DPH nejde jednoznačně přiřadit k položkám. */
+    public const UNASSIGNED_VAT_ALLOCATION = 'vat_allocation';
+
     public function __construct(private readonly Connection $db) {}
 
     /**
      * Díly řádků mezi hodnoty typu. Každý vstupní řádek dá jeden nebo víc dílů s klíči
      * `dimension_value_id` (null = bez dimenze) a `dimension_share`; částky z
-     * {@see AMOUNT_KEYS} jsou díly řádku, ostatní klíče zůstávají.
+     * {@see AMOUNT_KEYS} jsou díly řádku, ostatní klíče zůstávají. Díl rozpisu DPH bez
+     * jednoznačné vazby nese navíc `dimension_unassigned`.
      *
      * @param iterable<array<string,mixed>> $rows kanonické řádky evidence
      * @return \Generator<int, array<string,mixed>>
@@ -56,16 +68,53 @@ final class VatLedgerDimensionAllocation
     public function parts(int $supplierId, int $typeId, iterable $rows): \Generator
     {
         foreach ($this->batches($rows) as $batch) {
-            $shares = $this->sharesFor($supplierId, $typeId, $batch);
-            foreach ($batch as $i => $row) {
-                yield from self::split($row, $shares[$i]);
+            foreach ($this->sharesFor($supplierId, $typeId, $batch) as $i => [$shares, $unassigned]) {
+                yield from self::split($batch[$i], $shares, $unassigned);
+            }
+        }
+    }
+
+    /**
+     * Každý řádek celý a v `dimension_selected` jeho díl pro množinu hodnot (částky
+     * {@see AMOUNT_KEYS}), v `dimension_share` podíl. Řádek rozpisu DPH bez jednoznačné
+     * vazby, jehož doklad hodnotu z množiny nese, má díl nulový a `dimension_unassigned`.
+     *
+     * @param list<int> $valueIds hodnota a případně její podřízené
+     * @param iterable<array<string,mixed>> $rows
+     * @return \Generator<int, array<string,mixed>>
+     */
+    public function annotate(int $supplierId, int $typeId, array $valueIds, iterable $rows): \Generator
+    {
+        $wanted = array_fill_keys($valueIds, true);
+        foreach ($this->batches($rows) as $batch) {
+            foreach ($this->sharesFor($supplierId, $typeId, $batch, $wanted) as $i => [$shares, $unassigned, $touches]) {
+                $row = $batch[$i];
+                $selected = array_fill_keys(self::AMOUNT_KEYS, 0.0);
+                $share = 0.0;
+                foreach (self::split($row, $shares, $unassigned) as $part) {
+                    if ($part['dimension_value_id'] === null || !isset($wanted[$part['dimension_value_id']])) {
+                        continue;
+                    }
+                    $share += $part['dimension_share'];
+                    foreach (self::AMOUNT_KEYS as $key) {
+                        $selected[$key] = round($selected[$key] + (float) ($part[$key] ?? 0.0), 2);
+                    }
+                }
+                $row['dimension_selected'] = $selected;
+                $row['dimension_share'] = $share;
+                if ($unassigned !== null && $touches) {
+                    $row['dimension_unassigned'] = $unassigned;
+                }
+                yield $row;
             }
         }
     }
 
     /**
      * Řádky zúžené na množinu hodnot jednoho typu: z řádku zůstane součet dílů hodnot
-     * z množiny, řádek bez dílu vypadne. `dimension_share` nese podíl řádku.
+     * z množiny, řádek bez dílu vypadne. Řádek rozpisu DPH bez jednoznačné vazby, jehož
+     * doklad hodnotu z množiny nese, projde s nulovými částkami a `dimension_unassigned`
+     * (s celými částkami v `dimension_unassigned_amounts`), aby ho výpis mohl uvést.
      *
      * @param list<int> $valueIds hodnota a případně její podřízené
      * @param iterable<array<string,mixed>> $rows
@@ -73,33 +122,20 @@ final class VatLedgerDimensionAllocation
      */
     public function filter(int $supplierId, int $typeId, array $valueIds, iterable $rows): \Generator
     {
-        $wanted = array_fill_keys($valueIds, true);
-        foreach ($this->batches($rows) as $batch) {
-            $shares = $this->sharesFor($supplierId, $typeId, $batch);
-            foreach ($batch as $i => $row) {
-                $selected = null;
-                $share = 0.0;
-                foreach (self::split($row, $shares[$i]) as $part) {
-                    if ($part['dimension_value_id'] === null || !isset($wanted[$part['dimension_value_id']])) {
-                        continue;
-                    }
-                    $share += $part['dimension_share'];
-                    if ($selected === null) {
-                        $selected = $part;
-                        continue;
-                    }
-                    foreach (self::AMOUNT_KEYS as $key) {
-                        if ($selected[$key] !== null) {
-                            $selected[$key] = round($selected[$key] + $part[$key], 2);
-                        }
-                    }
-                }
-                if ($selected !== null) {
-                    $selected['dimension_share'] = $share;
-                    unset($selected['dimension_value_id']);
-                    yield $selected;
+        foreach ($this->annotate($supplierId, $typeId, $valueIds, $rows) as $row) {
+            $selected = $row['dimension_selected'];
+            unset($row['dimension_selected']);
+            if (isset($row['dimension_unassigned'])) {
+                $row['dimension_unassigned_amounts'] = array_intersect_key($row, array_flip(self::AMOUNT_KEYS));
+            } elseif ($row['dimension_share'] <= 0.0) {
+                continue;
+            }
+            foreach (self::AMOUNT_KEYS as $key) {
+                if (array_key_exists($key, $row) && $row[$key] !== null) {
+                    $row[$key] = $selected[$key];
                 }
             }
+            yield $row;
         }
     }
 
@@ -124,17 +160,21 @@ final class VatLedgerDimensionAllocation
 
     /**
      * Rozdělí jeden řádek podle podílů (hodnota => podíl). Pořadí dílů: hodnoty podle id,
-     * „bez dimenze" (zbytek podílu) nakonec.
+     * „bez dimenze" (zbytek podílu) nakonec. `$unassigned` označí díl bez hodnoty důvodem.
      *
      * @param array<string,mixed> $row
      * @param array<int,float> $shares
      * @return list<array<string,mixed>>
      */
-    public static function split(array $row, array $shares): array
+    public static function split(array $row, array $shares, ?string $unassigned = null): array
     {
         $total = array_sum($shares);
         if ($shares === [] || $total <= 0.0) {
-            return [$row + ['dimension_value_id' => null, 'dimension_share' => 1.0]];
+            $part = $row + ['dimension_value_id' => null, 'dimension_share' => 1.0];
+            if ($unassigned !== null) {
+                $part['dimension_unassigned'] = $unassigned;
+            }
+            return [$part];
         }
         if ($total > 1.0) {
             // Rozpad, jehož podíly dávají víc než celek (ruční zásah do dat), se normuje;
@@ -169,12 +209,13 @@ final class VatLedgerDimensionAllocation
     }
 
     /**
-     * Podíly hodnot typu pro každý řádek dávky (index řádku => hodnota => podíl).
+     * Pro každý řádek dávky: [hodnota => podíl, důvod nepřiřazení|null, doklad nese hodnotu z `$wanted`].
      *
      * @param list<array<string,mixed>> $batch
-     * @return array<int, array<int,float>>
+     * @param array<int,true> $wanted
+     * @return array<int, array{0: array<int,float>, 1: ?string, 2: bool}>
      */
-    private function sharesFor(int $supplierId, int $typeId, array $batch): array
+    private function sharesFor(int $supplierId, int $typeId, array $batch, array $wanted = []): array
     {
         $docIds = ['invoice' => [], 'purchase_invoice' => [], 'cash_document' => []];
         foreach ($batch as $row) {
@@ -189,14 +230,49 @@ final class VatLedgerDimensionAllocation
                 $assigned[$docType] = $this->assignments($supplierId, $typeId, $docType, array_keys($ids));
             }
         }
+        [$positions, $itemCounts] = $this->itemPositions($batch, $assigned);
+
         $out = [];
         foreach ($batch as $i => $row) {
             $docType = self::docType($row);
             $doc = $docType !== null ? ($assigned[$docType][(int) $row['invoice_id']] ?? []) : [];
-            $itemNo = isset($row['item_no']) ? (int) $row['item_no'] : null;
-            $out[$i] = ($itemNo !== null ? ($doc[$itemNo] ?? null) : null) ?? ($doc[0] ?? []);
+            $touches = false;
+            foreach ($doc as $shares) {
+                if (array_intersect_key($shares, $wanted) !== []) {
+                    $touches = true;
+                    break;
+                }
+            }
+            if (($row['line_source'] ?? null) === 'purchase_allocation') {
+                $out[$i] = [...self::documentWideShares($doc, $itemCounts[(int) $row['invoice_id']] ?? 0), $touches];
+                continue;
+            }
+            $itemNo = $positions[(string) ($row['line_source'] ?? '')][(int) ($row['line_id'] ?? 0)] ?? null;
+            $out[$i] = [($itemNo !== null ? ($doc[$itemNo] ?? null) : null) ?? ($doc[0] ?? []), null, $touches];
         }
         return $out;
+    }
+
+    /**
+     * Dimenze celého dokladu pro řádek bez vazby na položku (rozpis DPH přijatého dokladu):
+     * jednoznačná, když ji všechny položky mají stejnou (vlastní, nebo z hlavičky).
+     *
+     * @param array<int, array<int,float>> $doc pořadí položky (0 = hlavička) => hodnota => podíl
+     * @return array{0: array<int,float>, 1: ?string}
+     */
+    private static function documentWideShares(array $doc, int $itemCount): array
+    {
+        $header = $doc[0] ?? [];
+        $effective = null;
+        for ($itemNo = 1; $itemNo <= $itemCount; $itemNo++) {
+            $shares = $doc[$itemNo] ?? $header;
+            ksort($shares);
+            if ($effective !== null && $effective !== $shares) {
+                return [[], self::UNASSIGNED_VAT_ALLOCATION];
+            }
+            $effective = $shares;
+        }
+        return [$effective ?? $header, null];
     }
 
     /**
@@ -253,5 +329,54 @@ final class VatLedgerDimensionAllocation
             }
         }
         return $out;
+    }
+
+    /**
+     * Pořadí položek (od 1) a jejich počet za doklad, jednou dávkou přes ROW_NUMBER nad
+     * VŠEMI položkami dokladu (i textovými a z evidence vyřazenými, jako v editoru). Jen
+     * u dokladů, kde rozhoduje: dimenze na některé položce, nebo rozpis DPH přijatého dokladu.
+     *
+     * @param list<array<string,mixed>> $batch
+     * @param array<string, array<int, array<int, array<int,float>>>> $assigned
+     * @return array{0: array<string, array<int,int>>, 1: array<int,int>} [zdroj => id položky => pořadí, přijatý doklad => počet položek]
+     */
+    private function itemPositions(array $batch, array $assigned): array
+    {
+        $tables = [
+            'invoice_item' => ['invoice', 'invoice_items', 'invoice_id'],
+            'purchase_item' => ['purchase_invoice', 'purchase_invoice_items', 'purchase_invoice_id'],
+            'purchase_allocation' => ['purchase_invoice', 'purchase_invoice_items', 'purchase_invoice_id'],
+        ];
+        $docs = [];
+        foreach ($batch as $row) {
+            $source = (string) ($row['line_source'] ?? '');
+            if (!isset($tables[$source])) {
+                continue;
+            }
+            $docId = (int) $row['invoice_id'];
+            $items = $assigned[$tables[$source][0]][$docId] ?? [];
+            if (array_diff(array_keys($items), [0]) !== []) {
+                $docs[$tables[$source][1]][$docId] = true;
+            }
+        }
+        $positions = [];
+        $counts = [];
+        foreach ($docs as $table => $ids) {
+            $column = $table === 'invoice_items' ? 'invoice_id' : 'purchase_invoice_id';
+            $source = $table === 'invoice_items' ? 'invoice_item' : 'purchase_item';
+            $marks = implode(',', array_fill(0, count($ids), '?'));
+            $stmt = $this->db->pdo()->prepare(
+                "SELECT id, {$column} AS doc_id, ROW_NUMBER() OVER (PARTITION BY {$column} ORDER BY order_index, id) AS item_no
+                   FROM {$table} WHERE {$column} IN ({$marks})"
+            );
+            $stmt->execute(array_keys($ids));
+            foreach ($stmt->fetchAll(\PDO::FETCH_ASSOC) as $r) {
+                $positions[$source][(int) $r['id']] = (int) $r['item_no'];
+                if ($source === 'purchase_item') {
+                    $counts[(int) $r['doc_id']] = max($counts[(int) $r['doc_id']] ?? 0, (int) $r['item_no']);
+                }
+            }
+        }
+        return [$positions, $counts];
     }
 }

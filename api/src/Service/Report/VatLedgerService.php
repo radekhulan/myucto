@@ -123,43 +123,96 @@ final class VatLedgerService
     public function iterateRows(int $supplierId, string $start, string $end, bool $includeDrafts = false, ?array $documentIds = null, ?DimensionFilter $dimension = null): \Generator
     {
         if ($dimension !== null) {
-            yield from $this->filterByDimension($supplierId, $dimension, $this->iterateRows($supplierId, $start, $end, $includeDrafts, $documentIds));
+            yield from $this->filterByDimension($supplierId, $dimension, $this->ledgerRows($supplierId, $start, $end, $includeDrafts, $documentIds, true));
             return;
         }
+        yield from $this->ledgerRows($supplierId, $start, $end, $includeDrafts, $documentIds, false);
+    }
+
+    /**
+     * Řádky {@see iterateRows()}. `$sourceLines` přidá ke každému řádku zdrojový řádek dokladu
+     * (`line_id`, `line_source`), podle kterého se řádek přiřazuje k dimenzi položky. Bez
+     * rozpadu podle dimenze se nečte: evidence pro přiznání, KH i SH zůstává beze změny.
+     *
+     * @param array{sale?: list<int>, purchase?: list<int>}|null $documentIds
+     * @return \Generator<int, array<string,mixed>>
+     */
+    private function ledgerRows(int $supplierId, string $start, string $end, bool $includeDrafts, ?array $documentIds, bool $sourceLines): \Generator
+    {
         $map = $this->classificationMap($supplierId);
         // Práh základní/snížená sazba (per rok období) pro remapování 12% RC řádků (S3).
         $bucket = $this->taxConstants->vatBucketThreshold((int) substr($start, 0, 4));
         $saleIds = $documentIds === null ? null : ($documentIds['sale'] ?? []);
         $purchaseIds = $documentIds === null ? null : ($documentIds['purchase'] ?? []);
         if ($saleIds !== []) {
-            foreach ($this->fetchSales($supplierId, $start, $end, $includeDrafts, $saleIds) as $r) {
+            foreach ($this->fetchSales($supplierId, $start, $end, $includeDrafts, $saleIds, $sourceLines) as $r) {
                 yield $this->normalize($r, 'sale', $map, $bucket);
             }
         }
         if ($purchaseIds !== []) {
-            foreach ($this->fetchPurchases($supplierId, $start, $end, $includeDrafts, $purchaseIds) as $r) {
+            foreach ($this->fetchPurchases($supplierId, $start, $end, $includeDrafts, $purchaseIds, $sourceLines) as $r) {
                 yield $this->normalize($r, 'purchase', $map, $bucket);
             }
         }
         if ($documentIds === null) {
-            foreach ($this->fetchCash($supplierId, $start, $end, $includeDrafts) as $r) {
+            foreach ($this->fetchCash($supplierId, $start, $end, $includeDrafts, null, null, $sourceLines) as $r) {
                 yield $this->normalize($r, $r['doc_type'] === 'in' ? 'sale' : 'purchase', $map, $bucket);
             }
         }
     }
 
     /**
-     * Kanonické řádky (z {@see iterateRows()} / {@see iterateReturnRows()}) rozdělené mezi
-     * hodnoty typu dimenze: každý řádek dá díl pro každou svou hodnotu a díl „bez dimenze"
-     * (`dimension_value_id` null) za zbytek. Pravidlo i zaokrouhlení jsou tatáž jako
-     * u filtru `$dimension`, takže díl hodnoty sedí na evidenci filtrovanou na hodnotu.
+     * Řádky {@see iterateReturnRows()} rozdělené mezi hodnoty typu dimenze: každý řádek dá
+     * díl pro každou svou hodnotu a díl „bez dimenze" (`dimension_value_id` null) za zbytek.
+     * Pravidlo i zaokrouhlení jsou tatáž jako u filtru `$dimension`, takže díl hodnoty sedí
+     * na evidenci filtrovanou na hodnotu. `$onRow` dostane každý řádek celý, ještě před
+     * rozdělením (kontrolní součet, chybějící kurzy).
      *
-     * @param iterable<array<string,mixed>> $rows
+     * @param callable(array<string,mixed>):void|null $onRow
      * @return \Generator<int, array<string,mixed>>
      */
-    public function allocateByDimension(int $supplierId, int $typeId, iterable $rows): \Generator
+    public function iterateReturnRowsByDimension(int $supplierId, string $start, string $end, int $typeId, bool $includeDrafts = false, ?callable $onRow = null): \Generator
     {
+        $rows = $this->returnLedgerRows($supplierId, $start, $end, $includeDrafts, null, true);
+        if ($onRow !== null) {
+            $rows = (static function () use ($rows, $onRow): \Generator {
+                foreach ($rows as $r) {
+                    $onRow($r);
+                    yield $r;
+                }
+            })();
+        }
         yield from (new VatLedgerDimensionAllocation($this->db))->parts($supplierId, $typeId, $rows);
+    }
+
+    /**
+     * Řádky {@see iterateRows()} celé, každý s dílem pro hodnoty filtru v `dimension_selected`
+     * (částky {@see VatLedgerDimensionAllocation::AMOUNT_KEYS}, nulové, když řádek na hodnotu
+     * nepřipadá). Pro výkazy, které o zařazení dokladu rozhodují podle všech jeho řádků
+     * a teprve částky omezují na hodnotu (soupis KH).
+     *
+     * @param array{sale?: list<int>, purchase?: list<int>}|null $documentIds
+     * @return \Generator<int, array<string,mixed>>
+     */
+    public function iterateRowsWithDimensionShare(int $supplierId, string $start, string $end, DimensionFilter $dimension, bool $includeDrafts = false, ?array $documentIds = null): \Generator
+    {
+        self::requireSingleType($dimension);
+        yield from (new VatLedgerDimensionAllocation($this->db))->annotate(
+            $supplierId,
+            $dimension->typeId,
+            $dimension->valueIds,
+            $this->ledgerRows($supplierId, $start, $end, $includeDrafts, $documentIds, true),
+        );
+    }
+
+    private static function requireSingleType(DimensionFilter $dimension): void
+    {
+        if ($dimension->also !== []) {
+            throw new DimensionException(
+                'dimension_filter_single_type',
+                'Evidenci DPH lze filtrovat jen podle jednoho typu dimenze.',
+            );
+        }
     }
 
     /**
@@ -168,12 +221,7 @@ final class VatLedgerService
      */
     private function filterByDimension(int $supplierId, DimensionFilter $dimension, iterable $rows): \Generator
     {
-        if ($dimension->also !== []) {
-            throw new DimensionException(
-                'dimension_filter_single_type',
-                'Evidenci DPH lze filtrovat jen podle jednoho typu dimenze.',
-            );
-        }
+        self::requireSingleType($dimension);
         yield from (new VatLedgerDimensionAllocation($this->db))->filter($supplierId, $dimension->typeId, $dimension->valueIds, $rows);
     }
 
@@ -549,21 +597,6 @@ final class VatLedgerService
     }
 
     /**
-     * Pořadí položky v dokladu (`item_no`, od 1) jako v editoru a v DimensionStamper:
-     * `order_index, id`, počítají se všechny položky dokladu včetně textových a vyřazených
-     * z evidence. Schéma bez `order_index` (fixture testů) pořadí nemá.
-     */
-    private function itemNoSql(string $table, string $docColumn, string $alias): string
-    {
-        if (!$this->db->hasColumn($table, 'order_index')) {
-            return 'NULL AS item_no';
-        }
-        return "(SELECT COUNT(*) FROM {$table} item_pos WHERE item_pos.{$docColumn} = {$alias}.{$docColumn}
-                   AND (item_pos.order_index < {$alias}.order_index
-                        OR (item_pos.order_index = {$alias}.order_index AND item_pos.id <= {$alias}.id))) AS item_no";
-    }
-
-    /**
      * Zúžení dotazu na vybrané doklady: `AND <sloupec> IN (...)` a jeho parametry,
      * bez zúžení (null) prázdný fragment.
      *
@@ -602,8 +635,9 @@ final class VatLedgerService
      * @param list<int>|null $invoiceIds zúžení na vybrané doklady (null = celé období)
      * @return iterable<array<string,mixed>>
      */
-    private function fetchSales(int $supplierId, string $start, string $end, bool $includeDrafts, ?array $invoiceIds = null): iterable
+    private function fetchSales(int $supplierId, string $start, string $end, bool $includeDrafts, ?array $invoiceIds = null, bool $sourceLines = false): iterable
     {
+        $lineColumns = $sourceLines ? "ii.id AS line_id, 'invoice_item' AS line_source," : '';
         $statusFilter = $includeDrafts ? "i.status != 'cancelled'" : "i.status NOT IN ('draft', 'cancelled')";
         [$documentFilter, $documentParams] = self::idFilter('i.id', $invoiceIds);
         $saleSign = self::saleTaxSignExpr($this->db, 'i');
@@ -693,7 +727,7 @@ final class VatLedgerService
                        END
                    ) AS code,
                    ii.vat_rate_snapshot AS vat_rate,
-                   {$this->itemNoSql('invoice_items', 'invoice_id', 'ii')}, 'invoice_item' AS line_source,
+                   {$lineColumns}
                    vr.country AS tax_country,
                    ii.description AS description,
                    -- Totéž dokladové znaménko jako u inv_total výše (viz komentář tam).
@@ -790,13 +824,22 @@ final class VatLedgerService
     public function iterateReturnRows(int $supplierId, string $start, string $end, bool $includeDrafts = false, ?array $documentIds = null, ?DimensionFilter $dimension = null): \Generator
     {
         if ($dimension !== null) {
-            yield from $this->filterByDimension($supplierId, $dimension, $this->iterateReturnRows($supplierId, $start, $end, $includeDrafts, $documentIds));
+            yield from $this->filterByDimension($supplierId, $dimension, $this->returnLedgerRows($supplierId, $start, $end, $includeDrafts, $documentIds, true));
             return;
         }
-        yield from $this->iterateRows($supplierId, $start, $end, $includeDrafts, $documentIds);
+        yield from $this->returnLedgerRows($supplierId, $start, $end, $includeDrafts, $documentIds, false);
+    }
+
+    /**
+     * @param array{sale?: list<int>, purchase?: list<int>}|null $documentIds
+     * @return \Generator<int, array<string,mixed>>
+     */
+    private function returnLedgerRows(int $supplierId, string $start, string $end, bool $includeDrafts, ?array $documentIds, bool $sourceLines): \Generator
+    {
+        yield from $this->ledgerRows($supplierId, $start, $end, $includeDrafts, $documentIds, $sourceLines);
         $saleIds = $documentIds === null ? null : ($documentIds['sale'] ?? []);
         if ($saleIds !== []) {
-            yield from $this->iterateOssSelectedSupplyRows($supplierId, $start, $end, $includeDrafts, $saleIds);
+            yield from $this->iterateOssSelectedSupplyRows($supplierId, $start, $end, $includeDrafts, $saleIds, $sourceLines);
         }
     }
 
@@ -831,8 +874,9 @@ final class VatLedgerService
      * @param list<int>|null $invoiceIds zúžení na vybrané doklady (null = celé období)
      * @return \Generator<int, array<string,mixed>>
      */
-    private function iterateOssSelectedSupplyRows(int $supplierId, string $start, string $end, bool $includeDrafts, ?array $invoiceIds = null): \Generator
+    private function iterateOssSelectedSupplyRows(int $supplierId, string $start, string $end, bool $includeDrafts, ?array $invoiceIds = null, bool $sourceLines = false): \Generator
     {
+        $lineColumns = $sourceLines ? "ii.id AS line_id, 'invoice_item' AS line_source," : '';
         if (!$this->db->hasColumn('invoice_items', 'oss_applicable')) {
             return;
         }
@@ -853,7 +897,7 @@ final class VatLedgerService
                    0 AS is_fixed_asset,
                    '24z' AS code,
                    0 AS vat_rate,
-                   {$this->itemNoSql('invoice_items', 'invoice_id', 'ii')}, 'invoice_item' AS line_source,
+                   {$lineColumns}
                    ii.description AS description,
                    ({$saleSign}) * COALESCE(ii.total_without_vat, 0) AS base,
                    0 AS vat
@@ -1099,8 +1143,11 @@ final class VatLedgerService
      * @param list<int>|null $invoiceIds zúžení na vybrané doklady (null = celé období)
      * @return iterable<array<string,mixed>>
      */
-    private function fetchPurchases(int $supplierId, string $start, string $end, bool $includeDrafts, ?array $invoiceIds = null): iterable
+    private function fetchPurchases(int $supplierId, string $start, string $end, bool $includeDrafts, ?array $invoiceIds = null, bool $sourceLines = false): iterable
     {
+        [$lineColumns, $itemLine, $allocationLine] = $sourceLines
+            ? ['pii.id AS line_id, pii.line_source,', "'purchase_item' AS line_source,", "'purchase_allocation' AS line_source,"]
+            : ['', '', ''];
         $statusFilter = $includeDrafts ? "pi.status != 'cancelled'" : "pi.status NOT IN ('draft', 'cancelled')";
         [$ownFilter, $ownParams] = self::idFilter('own.id', $invoiceIds);
         $projectionVatColumn = $this->db->hasColumn('purchase_invoice_items', 'import_projection_vat_czk')
@@ -1233,7 +1280,7 @@ final class VatLedgerService
                               AND pi.reverse_charge = 1 AND COALESCE(co.iso2, 'CZ') <> 'CZ'
                          THEN 1 ELSE 0 END) AS code_estimated,
                    pii.vat_rate_snapshot AS vat_rate,
-                   pii.item_no, pii.line_source,
+                   {$lineColumns}
                    pii.description AS description,
                    -- Totéž dokladové znaménko jako u inv_total výše (viz komentář tam).
                    {$docSign} * COALESCE(pii.total_without_vat, 0) AS base,
@@ -1246,9 +1293,7 @@ final class VatLedgerService
          LEFT JOIN countries co ON co.id = c.country_id
          LEFT JOIN purchase_invoices parent ON parent.id = pi.parent_purchase_invoice_id
               JOIN (
-                    SELECT i.id, 'purchase_item' AS line_source,
-                           {$this->itemNoSql('purchase_invoice_items', 'purchase_invoice_id', 'i')},
-                           i.purchase_invoice_id, i.description, i.vat_rate_snapshot,
+                    SELECT i.id, {$itemLine} i.purchase_invoice_id, i.description, i.vat_rate_snapshot,
                            i.total_without_vat, i.total_vat, i.vat_classification_code,
                            i.is_fixed_asset, NULL AS vat_deduction,
                            NULL AS vat_deduction_percent,
@@ -1265,7 +1310,7 @@ final class VatLedgerService
                                 WHERE a.purchase_invoice_id = i.purchase_invoice_id
                            )
                     UNION ALL
-                    SELECT a.id, 'purchase_allocation' AS line_source, NULL AS item_no, a.purchase_invoice_id, a.description, a.vat_rate,
+                    SELECT a.id, {$allocationLine} a.purchase_invoice_id, a.description, a.vat_rate,
                            a.base_amount, a.vat_amount, a.vat_classification_code,
                            0 AS is_fixed_asset, a.vat_deduction,
                            a.vat_deduction_percent,
@@ -1553,14 +1598,12 @@ final class VatLedgerService
             'is_fixed_asset'        => (bool) $r['is_fixed_asset'],
             'exchange_rate'         => $rate,
             'exchange_rate_missing' => $exchangeRateMissing,
+        ] + (array_key_exists('line_id', $r) ? [
             // Zdrojový řádek dokladu (položka faktury, rozpis DPH přijatého dokladu, řádek
-            // DPH pokladního dokladu) a pořadí položky v dokladu (order_index, id; od 1,
-            // počítají se všechny položky jako v editoru). Podle pořadí se řádek evidence
-            // přiřazuje k dimenzi položky ({@see VatLedgerDimensionAllocation}). Pořadí,
-            // ne id: uložení dokladu položky přepisuje a evidence se tím měnit nesmí.
-            'item_no'               => isset($r['item_no']) ? (int) $r['item_no'] : null,
-            'line_source'           => isset($r['line_source']) ? (string) $r['line_source'] : null,
-        ];
+            // DPH pokladního dokladu) jen pro rozpad podle dimenze ({@see ledgerRows()}).
+            'line_id'               => (int) $r['line_id'],
+            'line_source'           => (string) $r['line_source'],
+        ] : []);
     }
 
     /**
@@ -1732,8 +1775,9 @@ final class VatLedgerService
      * @param list<int>|null $cashIds
      * @return iterable<array<string,mixed>>
      */
-    private function fetchCash(int $supplierId, ?string $start, ?string $end, bool $includeDrafts, ?array $cashIds = null, ?int $bucketYear = null): iterable
+    private function fetchCash(int $supplierId, ?string $start, ?string $end, bool $includeDrafts, ?array $cashIds = null, ?int $bucketYear = null, bool $sourceLines = false): iterable
     {
+        $lineColumns = $sourceLines ? "cl.id AS line_id, 'cash_vat_line' AS line_source," : '';
         $bucket = $this->taxConstants->vatBucketThreshold($bucketYear ?? (int) substr((string) $start, 0, 4));
         $statusFilter = $includeDrafts ? "cd.status != 'reversed'" : "cd.status = 'posted'";
         [$idWhere, $idParams] = self::idFilter('cd.id', $cashIds);
@@ -1759,7 +1803,7 @@ final class VatLedgerService
                                  THEN CASE WHEN cl.vat_rate >= ? THEN '1'  ELSE '2'  END
                                  ELSE CASE WHEN cl.vat_rate >= ? THEN '40' ELSE '41' END
                             END) AS code,
-                   cl.vat_rate, NULL AS item_no, 'cash_vat_line' AS line_source,
+                   cl.vat_rate, {$lineColumns}
                    cd.description, cl.base_amount AS base, cl.vat_amount AS vat
               FROM cash_documents cd
               JOIN cash_document_vat_lines cl ON cl.cash_document_id = cd.id
