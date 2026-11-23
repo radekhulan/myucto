@@ -362,6 +362,10 @@ final class DocumentLinker
         (new AdvanceLinker($this->db, $this->map))->link($ctx);
         $this->markBookedWithoutInvoice($ctx);
         $this->recordSettledWithoutDocument($ctx);
+        if ((new AdvanceReceiptMatcher($this->db))->match($ctx, $issuedPayments) > 0) {
+            // Záloha spárovaná s příjmem na 324: výplň bez dokladu úhrady se zmenší.
+            $this->recordSettledWithoutDocument($ctx, true);
+        }
         $this->restorePurchaseSettlements($ctx);
         (new AdvanceLinker($this->db, $this->map))->linkTaxDocumentPayments($ctx->supplierId, $ctx->protocol);
         if ($cashMulti !== []) {
@@ -377,7 +381,7 @@ final class DocumentLinker
      * doklad, zbytek jedna platba bez dokladu úhrady s číslem úhrady z Money v poznámce. Jen
      * do konce posledního převáděného období.
      */
-    private function recordSettledWithoutDocument(ImportContext $ctx): void
+    private function recordSettledWithoutDocument(ImportContext $ctx, bool $quiet = false): void
     {
         $payments = new MoneyS3SettledPayments($this->db);
         $lastEnd = $payments->lastTransferredPeriodEnd($ctx->supplierId, $ctx);
@@ -425,6 +429,9 @@ final class DocumentLinker
             }
         }
         $out = $payments->recordIssued($ctx->supplierId, $ctx->userId > 0 ? $ctx->userId : null, $lastEnd, $paymentNos, $left);
+        if ($quiet) {
+            return;
+        }
         foreach (['settlements' => 'settled_internal_document', 'inserted' => 'settled_without_document', 'updated' => 'settled_without_document_updated',
             'deleted' => 'settled_without_document_removed'] as $key => $counter) {
             if ($out[$key] > 0) {

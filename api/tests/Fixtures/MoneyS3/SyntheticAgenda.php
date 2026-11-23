@@ -1270,6 +1270,46 @@ final class SyntheticAgenda
     }
 
     /**
+     * K agendě {@see filesWithSettledWithoutPaymentDocument()} záloha ZV25053 (1 210 Kč), kterou
+     * Money vede jako uhrazenou interním dokladem ID25053 bez zápisu (číslo úhrady nevede na
+     * pohyb), a týž den bankovní příjem BP25053 na 324 se symbolem zálohy, který Money s dokladem
+     * nespárovalo. DDKP DD25053 (1 000 + 210 DPH).
+     *
+     * @return array<string,string>
+     */
+    public static function filesWithAdvanceBankReceiptUnlinked(): array
+    {
+        $files = self::filesWithSettledWithoutPaymentDocument();
+        $journalFields = array_merge(self::JOURNAL_FIELDS, [['ParSym', 'C', 20]]);
+        $append = static function (string $path, array $fields, array $rows) use (&$files): void {
+            $table = strtoupper(pathinfo($path, PATHINFO_FILENAME));
+            $existing = iterator_to_array(Ms3Table::fromString($files[$path], $table)->rows(), false);
+            $files[$path] = Ms3FixtureWriter::table($fields, array_merge($existing, $rows));
+        };
+        $append('ROK.002/UcDenik.DAT', $journalFields, [
+            ['Cislo' => 700, 'Zdroj' => 'BK', 'Doklad' => 'BP25053', 'Datum' => '2025-09-20', 'Popis' => 'Příjem zálohy', 'UcMD' => '221001', 'UcD' => '324000', 'Castka' => 1210.0, 'ParSym' => ''],
+            ['Cislo' => 701, 'Zdroj' => 'FV', 'Doklad' => 'DD25053', 'Datum' => '2025-09-20', 'DatPlnDPH' => '2025-09-20', 'Popis' => 'DPH ze zálohy', 'UcMD' => '324000', 'UcD' => '343200', 'Castka' => 210.0, 'ParSym' => ''],
+        ]);
+        $zeta = [
+            'O_ICO' => self::ADVANCE_CUSTOMER_ICO, 'O_DIC' => 'CZ' . self::ADVANCE_CUSTOMER_ICO, 'O_Nazev' => 'Odběratel Zeta s.r.o.',
+            'O_Ulice' => 'Ukázková 9', 'O_Mesto' => 'Olomouc', 'O_Psc' => '779 00',
+            'SazbaDPH1' => 12.0, 'SazbaDPH2' => 21.0, 'KodDPH' => self::KOD_DPH_SALE, 'Uhrada' => 'převodem',
+        ];
+        $dates = static fn (string $date): array => ['Vystaveno' => $date, 'DatUcPr' => $date, 'PlnenoDPH' => $date, 'Splatno' => $date];
+        $append('ROK.002/VFaktury.DAT', array_merge(self::ISSUED_FIELDS, [['Cislo', 'L', 4], ['ValutyZak2', 'E', 10], ['ValutyDPH2', 'E', 10]]), [
+            ['Cislo' => 660, 'Druh' => 'L', 'Doklad' => 'ZV25053', 'VarSymbol' => '25053', 'Zaklad_0' => 1210.0,
+                'CelkemSDPH' => 1210.0, 'Uhrazeno' => '2025-09-20', 'UDoklad' => 'ID25053', 'Popis' => 'Záloha'] + $zeta + $dates('2025-09-15'),
+            ['Cislo' => 661, 'Druh' => 'D', 'Doklad' => 'DD25053', 'VarSymbol' => '25053', 'Zaklad_2' => 1000.0, 'DPH_2' => 210.0,
+                'CelkemSDPH' => 1210.0, 'Popis' => 'Doklad k přijaté platbě (záloha ZV25053)'] + $zeta + $dates('2025-09-20'),
+        ]);
+        $append('ROK.002/BankKnih.DAT', self::BANK_FIELDS, [[
+            'Doklad' => 'BP25053', 'Ucet' => 'BU', 'Vydej' => 0, 'DatUcPr' => '2025-09-20', 'DatPlat' => '2025-09-20', 'Celkem' => 1210.0,
+            'VarSym' => '25053', 'AdNazev' => 'Odběratel Zeta s.r.o.', 'Popis' => 'Příjem zálohy', 'Vypis' => 31,
+        ]]);
+        return $files;
+    }
+
+    /**
      * Agenda s čerpáním poskytnutých záloh, které Money vede bez odkazu na zálohu (řádek
      * konečné faktury na 314 se symbolem a IČO faktury). Převádí se od roku 2025, počáteční
      * stav 314 Money vede bez IČO:
