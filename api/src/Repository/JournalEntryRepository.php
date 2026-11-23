@@ -20,6 +20,7 @@ use MyInvoice\Service\Accounting\Allocation\JointAllocationUseGuard;
 use MyInvoice\Service\Property\Charges\Issuance\IssuanceUseGuard;
 use MyInvoice\Service\Nonprofit\Membership\MembershipUseGuard;
 use MyInvoice\Service\Property\Charges\Issuance\IssuanceReversalIntent;
+use MyInvoice\Service\Accounting\Closing\ClosingSourceId;
 use MyInvoice\Service\Accounting\Closing\Fx504JournalProof;
 use MyInvoice\Service\Accounting\EntryForm\EntryFormService;
 use MyInvoice\Service\Accounting\Pair\JournalPairInvariant;
@@ -2176,20 +2177,7 @@ final class JournalEntryRepository
                          LIMIT {$limit} OFFSET {$offset}) AS pick
                   JOIN journal_entries je ON je.id = pick.id
              LEFT JOIN users u ON u.id = je.posted_by
-             -- FORCE INDEX: `reversed_by` je skoro všude NULL, optimizér pak odhaduje tisíce
-             -- řádků na lookup a volí BNL přes celou tabulku (0,2 s na stránku u 100 tis. zápisů, roste
-             -- s počtem zápisů). S indexem 1 ms.
-             LEFT JOIN journal_entries rev_src FORCE INDEX (idx_je_supplier_reversed_by)
-                    ON rev_src.supplier_id = je.supplier_id
-                    AND rev_src.reversed_by = je.id
-             LEFT JOIN bank_transactions rev_bt ON rev_src.source_type = 'bank' AND rev_bt.id = rev_src.source_id
-             LEFT JOIN cash_documents rev_cd ON rev_src.source_type = 'cash' AND rev_cd.id = rev_src.source_id
-             LEFT JOIN bank_transactions bt ON je.source_type = 'bank' AND bt.id = je.source_id
-             LEFT JOIN cash_documents cd ON je.source_type = 'cash' AND cd.id = je.source_id
-             -- Zápočet: source_id je ID ZÁPOČTU, ne dokladu. Bez tohohle JOINu nemá deník
-             -- kam prokliknout — uživatel vidí číslo faktury, ale odkaz nikam nevede.
-             LEFT JOIN invoice_settlements stl ON je.source_type = 'settlement'
-                    AND stl.id = je.source_id AND stl.supplier_id = je.supplier_id
+             " . self::DOCUMENT_SOURCE_JOINS . "
              LEFT JOIN invoices src_i ON je.source_type = 'invoice'
                     AND src_i.id = je.source_id AND src_i.supplier_id = je.supplier_id
              LEFT JOIN purchase_invoices src_pi ON je.source_type = 'purchase_invoice'
@@ -2259,6 +2247,27 @@ final class JournalEntryRepository
                            NULLIF(fpi.payment_iban, '')
                        ) AS counterparty_account";
 
+    /**
+     * Cesta od zápisu k prvotnímu dokladu, kterou sdílí seznam deníku ({@see paginate()})
+     * a soupiska dokladů ({@see documentSelection()}): stornovaný zápis (`rev_src`),
+     * bankovní pohyb, pokladní doklad a zápočet. Předpokládá alias zápisu `je`.
+     */
+    private const DOCUMENT_SOURCE_JOINS = "
+             -- FORCE INDEX: `reversed_by` je skoro všude NULL, optimizér pak odhaduje tisíce
+             -- řádků na lookup a volí BNL přes celou tabulku (0,2 s na stránku u 100 tis. zápisů, roste
+             -- s počtem zápisů). S indexem 1 ms.
+             LEFT JOIN journal_entries rev_src FORCE INDEX (idx_je_supplier_reversed_by)
+                    ON rev_src.supplier_id = je.supplier_id
+                    AND rev_src.reversed_by = je.id
+             LEFT JOIN bank_transactions rev_bt ON rev_src.source_type = 'bank' AND rev_bt.id = rev_src.source_id
+             LEFT JOIN cash_documents rev_cd ON rev_src.source_type = 'cash' AND rev_cd.id = rev_src.source_id
+             LEFT JOIN bank_transactions bt ON je.source_type = 'bank' AND bt.id = je.source_id
+             LEFT JOIN cash_documents cd ON je.source_type = 'cash' AND cd.id = je.source_id
+             -- Zápočet: source_id je ID ZÁPOČTU, ne dokladu. Bez tohohle JOINu nemá deník
+             -- kam prokliknout — uživatel vidí číslo faktury, ale odkaz nikam nevede.
+             LEFT JOIN invoice_settlements stl ON je.source_type = 'settlement'
+                    AND stl.id = je.source_id AND stl.supplier_id = je.supplier_id";
+
     /** JOINy k DOCUMENT_FACT_SELECT, předpokládají aliasy z paginate() (je, rev_src, cd, rev_cd, stl). */
     private const DOCUMENT_FACT_JOINS = "
              LEFT JOIN invoices fi ON fi.supplier_id = je.supplier_id
@@ -2303,6 +2312,242 @@ final class JournalEntryRepository
             JOIN chart_of_accounts c ON c.id = jel.account_id
            WHERE jel.entry_id = je.id AND jel.supplier_id = je.supplier_id
              AND c.account_code BETWEEN ? AND ?)';
+
+    /**
+     * Soupiska dokladů (#356): řádky deníku vybrané filtrem seznamu, sečtené po prvotním
+     * dokladu. Zápisy vybírá tentýž {@see buildWhere()} jako seznam (včetně jeho rozsahu
+     * účtů a hledání), takže soupiska nikdy nevezme zápis, který uživatel na obrazovce
+     * nevidí. Z nich se berou jen ŘÁDKY v rozsahu účtů soupisky a při filtru dimenze jen
+     * řádky, které ho splní, dílem rozpadu ({@see DimensionFilter::lineSource()}, stejný
+     * výklad jako sestavy). Úhrada nese dimenzi na saldokontu, mimo nákladové účty, proto
+     * se v nákladovém rozsahu nezapočte. Uzavření a otevření knih nejsou doklady, jen
+     * převádějí zůstatky, a vynulovaly by součet; soupiska je proto vynechává (skladové
+     * sloty uzávěrky náklady mění a zůstávají).
+     *
+     * Bere jen zaúčtované zápisy (jako výsledovka po dimenzi). Částka je Σ MD − Σ D se
+     * znaménkem červeného storna, u výnosových účtů Σ D − Σ MD, aby výnos byl kladný a vratka
+     * záporná; pravidlo je totéž jako ve výsledovce po dimenzi (DimensionProfitService).
+     * Doklad s účty různých druhů v rozsahu (náklady, výnosy, rozvaha) nese `mixed_sides`
+     * a zůstává i s nulovou částkou, aby se vyrovnaný zápis neztratil bez upozornění. Protizápis a opravný zápis dvojice
+     * nesou jen typ zdroje, doklad patří zápisu na začátku řetězu oprav (`reversed_by`,
+     * `journal_pair_reversals`), takže úplné storno dá nulu a doklad s nulou se vynechá.
+     * Doklad zápisu určuje skupina zaúčtování ({@see \MyInvoice\Service\Accounting\DocumentPostingGroup}), zápočet vede na
+     * vyrovnanou fakturu, ruční zápis na interní doklad, úhrada (banka, pokladna) je vlastní
+     * doklad a zápis bez dokladu tvoří vlastní skupinu. `corrected_outside` označí doklad,
+     * jehož storno nebo oprava leží mimo filtr (typicky v jiném období). Seskupení
+     * i součet počítá databáze, vrátí nejvýš `$limit + 1` dokladů, aby volající poznal
+     * překročení.
+     *
+     * @param array<string,mixed> $filters filtr seznamu Deníku
+     * @return list<array<string,mixed>>
+     */
+    public function documentSelection(int $supplierId, array $filters, string $lineAccountFrom, string $lineAccountTo, int $limit): array
+    {
+        if ($lineAccountFrom === '' || $lineAccountTo === '') {
+            throw new \InvalidArgumentException('Soupiska dokladů vyžaduje rozsah účtů.');
+        }
+        [$whereSql, $whereParams] = $this->buildWhere($supplierId, $filters);
+        [$accountFrom, $accountTo] = AccountCodeRange::sqlBoundsFor($lineAccountFrom, $lineAccountTo);
+        [$lineSource, $lineParams] = $this->documentLineSource($supplierId, $filters);
+
+        // Kořen řetězu oprav: storno (`reversed_by`, i storno storna) a opravný zápis dvojice
+        // (`journal_pair_reversals`, i jeho storno nebo další oprava) nesou jen typ zdroje,
+        // doklad patří zápisu na začátku řetězu. CTE nese jen zápisy v řetězcích, ostatní
+        // zápisy jsou kořenem samy sobě (vzor JournalTaxOrigin, který opravy dvojic nezná).
+        $s = (int) $supplierId;
+        $origins = "doc_origins (id, root_id, reversed_by) AS (
+                SELECT e.id, e.id, e.reversed_by FROM journal_entries e FORCE INDEX (idx_je_supplier_reversed_by)
+                 WHERE e.supplier_id = {$s} AND e.reversed_by IS NOT NULL
+                   AND NOT EXISTS (SELECT 1 FROM journal_entries p WHERE p.supplier_id = {$s} AND p.reversed_by = e.id)
+                   AND NOT EXISTS (SELECT 1 FROM journal_pair_reversals pr WHERE pr.supplier_id = {$s} AND pr.reversal_entry_id = e.id)
+                UNION
+                SELECT e.id, e.id, e.reversed_by FROM journal_pair_reversals r
+                  JOIN journal_entries e ON e.supplier_id = r.supplier_id AND e.id = r.entry_id
+                 WHERE r.supplier_id = {$s}
+                   AND NOT EXISTS (SELECT 1 FROM journal_entries p WHERE p.supplier_id = {$s} AND p.reversed_by = e.id)
+                   AND NOT EXISTS (SELECT 1 FROM journal_pair_reversals pr WHERE pr.supplier_id = {$s} AND pr.reversal_entry_id = e.id)
+                UNION
+                SELECT c.id, o.root_id, c.reversed_by FROM doc_origins o
+                  JOIN journal_entries c ON c.supplier_id = {$s} AND c.id = o.reversed_by
+                UNION
+                SELECT c.id, o.root_id, c.reversed_by FROM doc_origins o
+                  JOIN journal_pair_reversals r ON r.supplier_id = {$s} AND r.entry_id = o.id
+                  JOIN journal_entries c ON c.supplier_id = {$s} AND c.id = r.reversal_entry_id
+            )";
+        // Doklad kořene: vlastnictví skupinou zaúčtování (DocumentPostingGroup, převzaté
+        // doklady účtované více zápisy), zápočet → vyrovnaná faktura, ruční zápis → interní
+        // doklad, jinak zdroj zápisu. Uzavření knih (source_id = období) a otevření knih jen
+        // převádějí zůstatky a vynulovaly by součet; skladové sloty uzávěrky náklady mění, zůstávají.
+        $settled = "kstl.doc_type IN ('invoice', 'purchase_invoice')";
+        $keys = "SELECT je.id AS entry_id, je.entry_date,
+                        COALESCE(NULLIF(je.document_no, ''), CONCAT('#', je.id)) AS entry_label,
+                        CASE
+                            WHEN jdp.entry_id IS NOT NULL THEN jdp.doc_type
+                            WHEN {$settled} THEN kstl.doc_type
+                            WHEN root.source_type = 'manual' AND kid.id IS NOT NULL THEN 'internal_document'
+                            WHEN root.source_type <> 'manual' AND root.source_id IS NOT NULL THEN root.source_type
+                            ELSE 'entry'
+                        END AS doc_kind,
+                        CASE
+                            WHEN jdp.entry_id IS NOT NULL THEN jdp.doc_id
+                            WHEN {$settled} THEN kstl.doc_id
+                            WHEN root.source_type = 'manual' AND kid.id IS NOT NULL THEN kid.id
+                            WHEN root.source_type <> 'manual' AND root.source_id IS NOT NULL THEN root.source_id
+                            ELSE root.id
+                        END AS doc_id,
+                        (origin.root_id IS NULL OR origin.root_id = je.id) AS is_root,
+                        (origin.root_id IS NOT NULL AND EXISTS (
+                            SELECT 1 FROM doc_origins chain WHERE chain.root_id = origin.root_id AND chain.id NOT IN (SELECT id FROM sel)
+                        )) AS corrected_outside
+                   FROM sel
+                   JOIN journal_entries je ON je.id = sel.id
+              LEFT JOIN doc_origins origin ON origin.id = je.id
+                   JOIN journal_entries root ON root.supplier_id = je.supplier_id AND root.id = COALESCE(origin.root_id, je.id)
+              LEFT JOIN journal_document_postings jdp ON jdp.supplier_id = root.supplier_id AND jdp.entry_id = root.id
+              LEFT JOIN invoice_settlements kstl ON root.source_type = 'settlement'
+                        AND kstl.supplier_id = root.supplier_id AND kstl.id = root.source_id
+              LEFT JOIN internal_documents kid ON root.source_type = 'manual'
+                        AND kid.supplier_id = root.supplier_id AND kid.journal_entry_id = root.id
+                  WHERE root.source_type <> 'opening' AND NOT (" . ClosingSourceId::closeBooksSql('root') . ')';
+
+        $sql = "SELECT g.doc_kind, g.doc_id, g.amount, g.first_entry_date, g.corrected_outside, g.mixed_sides, g.entry_ids, g.entry_labels, g.accounts, g.rep_id,
+                       je.description,
+                       -- Doklad smazaný po převzetí zůstává vlastníkem zápisů; číslo pak nese zápis.
+                       COALESCE(CASE g.doc_kind
+                           WHEN 'invoice' THEN di.varsymbol
+                           WHEN 'purchase_invoice' THEN dpi.varsymbol
+                           WHEN 'cash' THEN dcd.doc_number
+                           WHEN 'other_item' THEN doi.document_no
+                           WHEN 'internal_document' THEN did.document_no
+                       END, je.document_no) AS our_no,
+                       IF(g.doc_kind = 'purchase_invoice', dpi.vendor_invoice_number, NULL) AS counterparty_no,
+                       CASE g.doc_kind
+                           WHEN 'invoice' THEN di.total_with_vat
+                           WHEN 'purchase_invoice' THEN dpi.total_with_vat
+                           WHEN 'cash' THEN dcd.total_amount
+                           WHEN 'other_item' THEN doi.amount
+                           WHEN 'internal_document' THEN did.amount
+                           WHEN 'bank' THEN ABS(dbt.amount)
+                           ELSE NULL
+                       END AS document_total,
+                       CASE g.doc_kind
+                           WHEN 'invoice' THEN dccy.code
+                           WHEN 'purchase_invoice' THEN dccy.code
+                           WHEN 'cash' THEN 'CZK'
+                           WHEN 'other_item' THEN COALESCE(NULLIF(doi.currency, ''), 'CZK')
+                           WHEN 'internal_document' THEN 'CZK'
+                           WHEN 'bank' THEN COALESCE(NULLIF(dbt.currency, ''), 'CZK')
+                           ELSE NULL
+                       END AS document_currency,
+                       CASE g.doc_kind
+                           WHEN 'invoice' THEN COALESCE(di.tax_date, di.issue_date)
+                           WHEN 'purchase_invoice' THEN COALESCE(dpi.tax_date, dpi.issue_date)
+                           WHEN 'cash' THEN COALESCE(dcd.tax_date, dcd.issue_date)
+                           WHEN 'other_item' THEN doi.issued_on
+                           WHEN 'internal_document' THEN did.document_date
+                           ELSE NULL
+                       END AS document_date,
+                       COALESCE(did.partner_name, doi.partner_name, dcd.partner_name,
+                                NULLIF(dc.company_name, ''), NULLIF(TRIM(CONCAT_WS(' ', dc.first_name, dc.last_name)), ''),
+                                dbt.counterparty_name, cd.partner_name, rev_cd.partner_name,
+                                bt.counterparty_name, rev_bt.counterparty_name) AS partner_name,
+                       COALESCE(NULLIF(dcd.partner_ic, ''), NULLIF(dc.ic, ''), NULLIF(cd.partner_ic, ''), NULLIF(rev_cd.partner_ic, '')) AS partner_ic
+                  FROM (SELECT k.doc_kind, k.doc_id,
+                               SUM((CASE WHEN fl.side = 'debit' THEN fl.signed_amount ELSE -fl.signed_amount END)
+                                   * (CASE WHEN ca.account_type = 'revenue' THEN -1 ELSE 1 END)) AS amount,
+                               COUNT(DISTINCT CASE ca.account_type WHEN 'revenue' THEN 1 WHEN 'expense' THEN 2 ELSE 3 END) > 1 AS mixed_sides,
+                               COALESCE(MIN(CASE WHEN k.is_root THEN k.entry_id END), MIN(k.entry_id)) AS rep_id,
+                               MIN(k.entry_date) AS first_entry_date, MAX(k.corrected_outside) AS corrected_outside,
+                               GROUP_CONCAT(DISTINCT k.entry_id ORDER BY k.entry_id) AS entry_ids,
+                               GROUP_CONCAT(DISTINCT k.entry_label ORDER BY k.entry_label SEPARATOR ', ') AS entry_labels,
+                               GROUP_CONCAT(DISTINCT ca.account_code ORDER BY ca.account_code SEPARATOR ', ') AS accounts
+                          FROM {$lineSource}
+                          JOIN chart_of_accounts ca ON ca.supplier_id = fl.supplier_id AND ca.id = fl.account_id AND ca.account_code BETWEEN ? AND ?
+                          JOIN ({$keys}) k ON k.entry_id = fl.entry_id
+                         GROUP BY k.doc_kind, k.doc_id
+                        HAVING amount <> 0 OR mixed_sides) g
+                  -- Nejdřív skupiny dokladů, pak hlavička zápisu po primárním klíči. Bez
+                  -- STRAIGHT_JOIN optimalizátor četl všechny zápisy firmy přes index období
+                  -- a skupiny k nim dohledával (2 s místo desetin u 300 tis. zápisů firmy).
+                  STRAIGHT_JOIN journal_entries je ON je.id = g.rep_id AND je.supplier_id = ?
+                  " . self::DOCUMENT_SOURCE_JOINS . "
+             LEFT JOIN invoices di ON g.doc_kind = 'invoice' AND di.id = g.doc_id AND di.supplier_id = je.supplier_id
+             LEFT JOIN purchase_invoices dpi ON g.doc_kind = 'purchase_invoice' AND dpi.id = g.doc_id AND dpi.supplier_id = je.supplier_id
+             LEFT JOIN cash_documents dcd ON g.doc_kind = 'cash' AND dcd.id = g.doc_id AND dcd.supplier_id = je.supplier_id
+             LEFT JOIN other_items doi ON g.doc_kind = 'other_item' AND doi.id = g.doc_id AND doi.supplier_id = je.supplier_id
+             LEFT JOIN internal_documents did ON g.doc_kind = 'internal_document' AND did.id = g.doc_id AND did.supplier_id = je.supplier_id
+             LEFT JOIN bank_transactions dbt ON g.doc_kind = 'bank' AND dbt.id = g.doc_id
+             LEFT JOIN currencies dccy ON dccy.id = COALESCE(di.currency_id, dpi.currency_id)
+             LEFT JOIN clients dc ON dc.supplier_id = je.supplier_id AND dc.id = COALESCE(di.client_id, dpi.vendor_id, doi.partner_id, did.partner_id)
+                 LIMIT " . (max(1, $limit) + 1);
+        // Jen zaúčtované zápisy, stejně jako výsledovka po dimenzi; koncept v řetězu oprav
+        // je pro soupisku mimo výběr a doklad se označí (corrected_outside).
+        $sql = "WITH RECURSIVE sel AS (SELECT je.id FROM journal_entries je WHERE {$whereSql} AND je.posted_at IS NOT NULL), {$origins}
+                SELECT d.* FROM ({$sql}) d ORDER BY COALESCE(d.document_date, d.first_entry_date), d.rep_id";
+        $stmt = $this->db->pdo()->prepare($sql);
+        $stmt->execute([...$whereParams, ...$lineParams, $accountFrom, $accountTo, $supplierId]);
+        return array_map(static function (array $r): array {
+            $r['doc_id'] = (int) $r['doc_id'];
+            $r['entry_ids'] = array_map('intval', explode(',', (string) $r['entry_ids']));
+            $r['amount'] = round((float) $r['amount'], 2);
+            $r['document_total'] = $r['document_total'] === null ? null : round((float) $r['document_total'], 2);
+            $r['corrected_outside'] = (bool) $r['corrected_outside'];
+            $r['mixed_sides'] = (bool) $r['mixed_sides'];
+            return $r;
+        }, $stmt->fetchAll(PDO::FETCH_ASSOC));
+    }
+
+    /**
+     * Počet konceptů, které by filtr seznamu a rozsah účtů soupisky vybraly, ale soupiska je
+     * vynechává ({@see documentSelection()} bere jen zaúčtované zápisy). Do hlavičky soupisky,
+     * aby vynechání nebylo bez stopy.
+     *
+     * @param array<string,mixed> $filters filtr seznamu Deníku
+     */
+    public function documentSelectionDraftCount(int $supplierId, array $filters, string $lineAccountFrom, string $lineAccountTo): int
+    {
+        [$whereSql, $whereParams] = $this->buildWhere($supplierId, $filters);
+        [$accountFrom, $accountTo] = AccountCodeRange::sqlBoundsFor($lineAccountFrom, $lineAccountTo);
+        [$lineSource, $lineParams] = $this->documentLineSource($supplierId, $filters);
+        // Tentýž výběr řádků jako documentSelection() (rozsah i dimenze na témže řádku) a bez
+        // uzavření a otevření knih, které soupiska nevezme ani po zaúčtování.
+        $stmt = $this->db->pdo()->prepare("SELECT COUNT(DISTINCT je.id)
+              FROM {$lineSource}
+              JOIN chart_of_accounts ca ON ca.supplier_id = fl.supplier_id AND ca.id = fl.account_id AND ca.account_code BETWEEN ? AND ?
+              JOIN journal_entries je ON je.id = fl.entry_id
+             WHERE {$whereSql} AND je.posted_at IS NULL
+               AND je.source_type <> 'opening' AND NOT (" . ClosingSourceId::closeBooksSql('je') . ')');
+        $stmt->execute([...$lineParams, $accountFrom, $accountTo, ...$whereParams]);
+        return (int) $stmt->fetchColumn();
+    }
+
+    /**
+     * Řádky deníku pro soupisku jako odvozená tabulka `fl` (entry_id, supplier_id, account_id,
+     * side, signed_amount): s filtrem dimenze jen řádky s její hodnotou dílem rozpadu
+     * ({@see DimensionFilter::lineSource()}), jinak všechny řádky firmy.
+     *
+     * @param array<string,mixed> $filters
+     * @return array{0:string, 1:list<int|string>}
+     */
+    private function documentLineSource(int $supplierId, array $filters): array
+    {
+        $dimension = $filters['dimension'] ?? null;
+        if (!$dimension instanceof DimensionFilter) {
+            return ['(SELECT fl.entry_id, fl.supplier_id, fl.account_id, fl.side, fl.signed_amount FROM journal_entry_lines fl WHERE fl.supplier_id = ?) fl', [$supplierId]];
+        }
+        // Meze data jen zužují poddotaz dimenze, zápisy vybírá buildWhere(). Filtr jen na
+        // období dostane jeho hranice, jinak by poddotaz četl celou historii firmy.
+        $from = $filters['date_from'] ?? null;
+        $to = $filters['date_to'] ?? null;
+        if (!empty($filters['period_id']) && ($from === null || $to === null)) {
+            $period = $this->db->pdo()->prepare('SELECT starts_on, ends_on FROM accounting_periods WHERE supplier_id = ? AND id = ?');
+            $period->execute([$supplierId, (int) $filters['period_id']]);
+            $bounds = $period->fetch(PDO::FETCH_ASSOC) ?: [];
+            $from ??= $bounds['starts_on'] ?? null;
+            $to ??= $bounds['ends_on'] ?? null;
+        }
+        return $dimension->lineSource($supplierId, 'fl', $from, (string) ($to ?? '9999-12-31'));
+    }
 
     /**
      * Export deníku (audit 2026-07, nález „Export a tisk účetního deníku"): VŠECHNY

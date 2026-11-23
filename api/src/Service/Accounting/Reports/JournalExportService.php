@@ -225,7 +225,7 @@ final class JournalExportService
      * @param array<string,mixed> $filters
      * @return array{0:?string, 1:?string}
      */
-    private function periodBounds(int $supplierId, array $filters): array
+    public function periodBounds(int $supplierId, array $filters): array
     {
         $from = $filters['date_from'] ?? null;
         $to = $filters['date_to'] ?? null;
@@ -244,7 +244,7 @@ final class JournalExportService
     /**
      * @return array{name:string, ico:?string, address:string, prepared_at:string}
      */
-    private function loadEntity(int $supplierId): array
+    public function loadEntity(int $supplierId): array
     {
         $stmt = $this->db->pdo()->prepare('SELECT company_name, street, city, zip, ic FROM supplier WHERE id = ?');
         $stmt->execute([$supplierId]);
