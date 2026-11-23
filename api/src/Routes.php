@@ -3307,6 +3307,23 @@ final class Routes
             $g->get('/periods/{id:[0-9]+}/nonprofit-funding/choices', [\MyInvoice\Action\Nonprofit\FundingAction::class, 'choices']);
             $g->post('/periods/{id:[0-9]+}/nonprofit-funding/preview', [\MyInvoice\Action\Nonprofit\FundingAction::class, 'preview']);
             $g->post('/periods/{id:[0-9]+}/nonprofit-funding/confirm', [\MyInvoice\Action\Nonprofit\FundingAction::class, 'confirm']);
+            // Pracovní evidence čerpání dotací (#403): interní, jen relace; čtení accounting READ, zápis accounting WRITE.
+            $g->get('/periods/{id:[0-9]+}/funding-work', [\MyInvoice\Action\Nonprofit\FundingWorkAction::class, 'overview']);
+            $g->get('/periods/{id:[0-9]+}/funding-work/choices', [\MyInvoice\Action\Nonprofit\FundingWorkAction::class, 'choices']);
+            $g->get('/periods/{id:[0-9]+}/funding-work/income-candidates', [\MyInvoice\Action\Nonprofit\FundingWorkAction::class, 'incomeCandidates']);
+            $g->post('/periods/{id:[0-9]+}/funding-work/sources', [\MyInvoice\Action\Nonprofit\FundingWorkAction::class, 'create']);
+            $g->get('/periods/{id:[0-9]+}/funding-work/sources/{sid:[0-9]+}', [\MyInvoice\Action\Nonprofit\FundingWorkAction::class, 'detail']);
+            $g->put('/periods/{id:[0-9]+}/funding-work/sources/{sid:[0-9]+}', [\MyInvoice\Action\Nonprofit\FundingWorkAction::class, 'update']);
+            $g->post('/periods/{id:[0-9]+}/funding-work/sources/{sid:[0-9]+}/cancel', [\MyInvoice\Action\Nonprofit\FundingWorkAction::class, 'cancel']);
+            $g->post('/periods/{id:[0-9]+}/funding-work/sources/{sid:[0-9]+}/incomes', [\MyInvoice\Action\Nonprofit\FundingWorkAction::class, 'addIncomes']);
+            $g->get('/periods/{id:[0-9]+}/funding-work/sources/{sid:[0-9]+}/cost-candidates', [\MyInvoice\Action\Nonprofit\FundingWorkAction::class, 'costCandidates']);
+            $g->post('/periods/{id:[0-9]+}/funding-work/sources/{sid:[0-9]+}/allocations', [\MyInvoice\Action\Nonprofit\FundingWorkAction::class, 'allocate']);
+            $g->post('/periods/{id:[0-9]+}/funding-work/incomes/{iid:[0-9]+}/remove', [\MyInvoice\Action\Nonprofit\FundingWorkAction::class, 'removeIncome']);
+            $g->post('/periods/{id:[0-9]+}/funding-work/incomes/{iid:[0-9]+}/relink', [\MyInvoice\Action\Nonprofit\FundingWorkAction::class, 'relinkIncome']);
+            $g->put('/periods/{id:[0-9]+}/funding-work/allocations/{aid:[0-9]+}', [\MyInvoice\Action\Nonprofit\FundingWorkAction::class, 'updateAllocation']);
+            $g->post('/periods/{id:[0-9]+}/funding-work/allocations/{aid:[0-9]+}/remove', [\MyInvoice\Action\Nonprofit\FundingWorkAction::class, 'removeAllocation']);
+            $g->post('/periods/{id:[0-9]+}/funding-work/allocations/{aid:[0-9]+}/relink', [\MyInvoice\Action\Nonprofit\FundingWorkAction::class, 'relinkAllocation']);
+            $g->get('/periods/{id:[0-9]+}/funding-work/cost-lines/{lid:[0-9]+}/allocations', [\MyInvoice\Action\Nonprofit\FundingWorkAction::class, 'costLine']);
             $g->get('/periods/{id:[0-9]+}/nonprofit-legal-profile', [\MyInvoice\Action\Accounting\Closing\NonprofitDppoAction::class, 'profile']);
             $g->post('/periods/{id:[0-9]+}/nonprofit-legal-profile/confirm', [\MyInvoice\Action\Accounting\Closing\NonprofitDppoAction::class, 'confirmProfile']);
             $g->post('/periods/{id:[0-9]+}/nonprofit-legal-profile/readiness', [\MyInvoice\Action\Accounting\Closing\NonprofitDppoAction::class, 'readiness']);

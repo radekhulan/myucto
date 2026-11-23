@@ -660,6 +660,16 @@ final class RequestAuthorization
     }
 
     /**
+     * Pracovní evidence čerpání dotací (#403) mění jen pracovní přiřazení řádků deníku ke
+     * zdroji, ne účetní zápisy ani potvrzené zdroje J6: stačí zápisové právo účetnictví,
+     * a to jen z přihlášené relace (bearer token na routy nesmí, viz ApiScopeMiddleware).
+     */
+    public static function canManageNonprofitFundingWork(Request $request): bool
+    {
+        return self::actsAsSession($request) && self::allows($request, 'accounting', AccessLevel::WRITE);
+    }
+
+    /**
      * Vrácení importu historie skladu smaže tisíce zaúčtovaných skladových dokladů
      * (a bez data přechodu vynuluje sklad). Rozhoduje o něm správce firmy, ne role
      * s právem zapisovat skladové doklady.
