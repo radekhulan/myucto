@@ -7,6 +7,7 @@ namespace MyInvoice\Service\Report;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\PurchaseInvoiceRepository;
 use MyInvoice\Service\Accounting\TakenOverRecord;
+use MyInvoice\Service\Migration\Pohoda\PohodaPriorYearPayments;
 
 /**
  * Křížová kontrola DPHDP3 ↔ KH ↔ SH ↔ obrat účtu 343 (audit 2026-07, C8').
@@ -265,6 +266,7 @@ final class VatCrossCheckService
         $rows = $stmt->fetchAll(\PDO::FETCH_ASSOC);
 
         // Platby proformy, ke kterým nevznikl vůbec žádný živý DDKP ani finální doklad.
+        // Úhrada minulého roku převzatá z POHODY DDKP nemá a mít nebude, daň přiznala POHODA.
         $missing = $this->db->pdo()->prepare(
             "SELECT p.id, p.varsymbol, 'missing' AS invoice_type,
                     SUM(ip.amount) AS total_with_vat, MIN(ip.paid_on) AS tax_date
@@ -274,6 +276,7 @@ final class VatCrossCheckService
                 AND p.invoice_type = 'proforma'
                 AND p.reverse_charge = 0
                 AND ip.paid_on BETWEEN ? AND ?
+                AND NOT " . PohodaPriorYearPayments::isPriorYearSql('ip') . "
                 AND NOT EXISTS (
                     SELECT 1 FROM invoices c
                      WHERE c.supplier_id = p.supplier_id

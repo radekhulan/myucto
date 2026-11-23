@@ -13,6 +13,7 @@ use MyInvoice\Repository\AccountingPeriodRepository;
 use MyInvoice\Service\Accounting\ChartOfAccountsSeeder;
 use MyInvoice\Service\Accounting\Closing\ClosingService;
 use MyInvoice\Service\Accounting\DocumentAutoPoster;
+use MyInvoice\Service\Migration\Pohoda\PohodaPriorYearPayments;
 use MyInvoice\Service\Report\VatCrossCheckService;
 use MyInvoice\Service\Report\VatLedgerService;
 use PDO;
@@ -394,6 +395,30 @@ final class VatCrossCheckTest extends TestCase
         self::assertContains($proformaId, array_column($finding['documents'], 'invoice_id'));
         self::assertSame('missing', $finding['documents'][0]['document_kind']);
         self::assertSame(12100.0, (float) $finding['counter'], 'precheck má sečíst jen platbu bez DDKP');
+    }
+
+    /**
+     * Úhrada minulého roku převzatá z POHODY: daň z ní přiznala POHODA, DDKP v MyÚčtu nemá
+     * a mít nebude. Kontrola DPH za období s datem platby ji jako chybějící DDKP nehlásí.
+     */
+    public function testPriorYearPohodaPaymentIsNotMissingTaxDocument(): void
+    {
+        $cust = $this->client('Odběratel záloha z POHODY', 'CZ11111150');
+        $proformaId = $this->sale('ZAL-POHODA-PRIOR', $cust, '1', false, 10000.0, 2100.0, 21.0);
+        $paidOn = sprintf('%04d-%02d-28', self::YEAR, self::MONTH);
+        $this->db->pdo()->prepare(
+            'UPDATE invoices SET invoice_type = "proforma", status = "paid", tax_date = NULL WHERE id = ?'
+        )->execute([$proformaId]);
+        $this->db->pdo()->prepare(
+            'INSERT INTO invoice_payments (supplier_id, invoice_id, paid_on, amount, currency, note, source, created_by)
+             VALUES (?, ?, ?, 12100, "CZK", ?, ?, ?)'
+        )->execute([$this->supplierId, $proformaId, $paidOn, PohodaPriorYearPayments::NOTE, PohodaPriorYearPayments::SOURCE, $this->userId]);
+
+        $finding = $this->findingByCheck(
+            $this->crossCheck->check($this->supplierId, self::YEAR, self::MONTH, 'monthly'),
+            'draft_advance_tax_documents',
+        );
+        self::assertNotContains($proformaId, $finding === null ? [] : array_column($finding['documents'], 'invoice_id'));
     }
 
     /** Finál s DUZP v jiném období nesmí skrýt povinnost z dřívější přijaté zálohy. */
