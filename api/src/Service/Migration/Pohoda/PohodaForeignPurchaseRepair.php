@@ -45,8 +45,9 @@ use PDO;
  *    položek by je posunulo);
  *  - evidence DPH, saldokonto v Kč a peněžní deník dotčených dokladů se před a po zápisu
  *    porovnají; doklad, kterému by se cokoli změnilo, se vrátí a ohlásí ke kontrole.
- * Nanečisto i naostro proběhne stejný zápis s porovnáním, nanečisto se pak vrátí. Každý
- * převedený doklad má záznam v auditní stopě. Opakovaný běh nic nemění.
+ * Nanečisto i naostro proběhne stejný zápis s porovnáním (kolo = samostatná transakce, bez
+ * SAVEPOINT), nanečisto se pak vrátí. Každý převedený doklad má záznam v auditní stopě. Opakovaný běh
+ * nic nemění.
  */
 final class PohodaForeignPurchaseRepair
 {
@@ -326,10 +327,15 @@ final class PohodaForeignPurchaseRepair
     }
 
     /**
-     * Zápis s porovnáním v transakci pod zámkem období a podání: zámky dokladů se ověří
-     * znovu, doklady se převedou a evidence DPH, saldokonto a peněžní deník se porovnají.
-     * Doklady s rozdílem se vrátí (savepoint) a zápis se zopakuje bez nich. Nanečisto se
-     * nakonec vrátí všechno, naostro se zapíše auditní stopa a potvrdí.
+     * Zápis s porovnáním po kolech, každé kolo v samostatné transakci pod zámkem období
+     * a podání: zámky dokladů se ověří znovu, doklady se převedou a evidence DPH, saldokonto
+     * a peněžní deník se porovnají. Při rozdílu se celá transakce vrátí a další kolo začne
+     * novou transakcí bez dokladů s rozdílem. Nanečisto se vrátí i kolo bez rozdílu, naostro
+     * se ve stejné transakci zapíše auditní stopa a potvrdí.
+     *
+     * Bez SAVEPOINT: `purchase_invoice_items` má FULLTEXT index a InnoDB (MariaDB 12.3.3)
+     * po ROLLBACK TO SAVEPOINT spadne na assertion ve fts0fts.cc, když transakce znovu smaže
+     * nebo změní tentýž řádek. Proto oprava nesmí běžet v cizí transakci.
      *
      * @param array<int,array<string,mixed>> $plans
      * @return array<int,array{string,string}> doklad => [stav, důvod] u dokladů, které se nepřevedou
@@ -337,67 +343,59 @@ final class PohodaForeignPurchaseRepair
     private function apply(int $supplierId, array $plans, bool $commit, ?int $userId): array
     {
         $pdo = $this->db->pdo();
-        $own = !$pdo->inTransaction();
-        if ($own) {
-            $pdo->beginTransaction();
-        } else {
-            $pdo->exec('SAVEPOINT pohoda_fx_outer');
+        if ($pdo->inTransaction()) {
+            throw new \LogicException('Oprava dokladů v cizí měně potřebuje vlastní transakce, nesmí běžet v cizí transakci.');
         }
         $failed = [];
-        try {
-            $this->lockPeriodState($supplierId);
-            $this->locks->reset();
-            foreach ($plans as $id => $plan) {
-                $lock = $this->lock($supplierId, $plan['doc']);
-                if ($lock !== null) {
-                    $failed[$id] = ['locked', $lock];
-                    unset($plans[$id]);
-                }
-            }
-            $done = false;
-            for ($round = 0; $plans !== [] && $round < 3; $round++) {
-                $ids = array_keys($plans);
-                [$from, $to] = $this->range($supplierId, $ids);
-                $before = $this->snapshot($supplierId, $from, $to, $ids);
-                $pdo->exec('SAVEPOINT pohoda_fx');
-                $decisions = $this->write($supplierId, $plans);
-                $after = $this->snapshot($supplierId, $from, $to, $ids);
-                $changed = self::changed($before, $after, $ids);
-                if ($changed === []) {
-                    if ($commit) {
-                        $this->audit($supplierId, $plans, $decisions, $userId);
-                    } else {
-                        $pdo->exec('ROLLBACK TO SAVEPOINT pohoda_fx');
+        $done = false;
+        for ($round = 0; $plans !== [] && $round < 3; $round++) {
+            $pdo->beginTransaction();
+            try {
+                $this->lockPeriodState($supplierId);
+                $this->locks->reset();
+                foreach ($plans as $id => $plan) {
+                    $lock = $this->lock($supplierId, $plan['doc']);
+                    if ($lock !== null) {
+                        $failed[$id] = ['locked', $lock];
+                        unset($plans[$id]);
                     }
-                    $pdo->exec('RELEASE SAVEPOINT pohoda_fx');
+                }
+                if ($plans === []) {
+                    $pdo->rollBack();
                     $done = true;
                     break;
                 }
-                $pdo->exec('ROLLBACK TO SAVEPOINT pohoda_fx');
-                $pdo->exec('RELEASE SAVEPOINT pohoda_fx');
-                foreach ($changed as $id => $what) {
-                    $failed[$id] = ['review', sprintf('Převod na měnu by změnil %s. %s', $what, self::ADVICE)];
-                    unset($plans[$id]);
+                $ids = array_keys($plans);
+                [$from, $to] = $this->range($supplierId, $ids);
+                $before = $this->snapshot($supplierId, $from, $to, $ids);
+                $decisions = $this->write($supplierId, $plans);
+                $changed = self::changed($before, $this->snapshot($supplierId, $from, $to, $ids), $ids);
+                if ($changed === []) {
+                    if ($commit) {
+                        $this->audit($supplierId, $plans, $decisions, $userId);
+                        $pdo->commit();
+                    } else {
+                        $pdo->rollBack();
+                    }
+                    $done = true;
+                    break;
                 }
-            }
-            if (!$done) {
-                foreach (array_keys($plans) as $id) {
-                    $failed[$id] = ['review', 'Ověření převodu se nepodařilo uzavřít ani bez dokladů s rozdílem. ' . self::ADVICE];
-                }
-            }
-            if ($own) {
-                $commit ? $pdo->commit() : $pdo->rollBack();
-            } else {
-                if (!$commit) {
-                    $pdo->exec('ROLLBACK TO SAVEPOINT pohoda_fx_outer');
-                }
-                $pdo->exec('RELEASE SAVEPOINT pohoda_fx_outer');
-            }
-        } catch (\Throwable $e) {
-            if ($own && $pdo->inTransaction()) {
                 $pdo->rollBack();
+            } catch (\Throwable $e) {
+                if ($pdo->inTransaction()) {
+                    $pdo->rollBack();
+                }
+                throw $e;
             }
-            throw $e;
+            foreach ($changed as $id => $what) {
+                $failed[$id] = ['review', sprintf('Převod na měnu by změnil %s. %s', $what, self::ADVICE)];
+                unset($plans[$id]);
+            }
+        }
+        if (!$done) {
+            foreach (array_keys($plans) as $id) {
+                $failed[$id] = ['review', 'Ověření převodu se nepodařilo uzavřít ani bez dokladů s rozdílem. ' . self::ADVICE];
+            }
         }
         return $failed;
     }
