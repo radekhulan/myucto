@@ -93,6 +93,7 @@ describe('J6 source findings', () => {
       line({ line_id: 2, source_type: 'purchase_invoice', source_id: 4, source_link_id: 4 }),
       line({ line_id: 3, source_type: 'other_item', source_id: 5, source_link_id: 5 }),
       line({ line_id: 4, source_type: 'bank', source_id: null, source_link_id: 3, source_statement_id: 9 }),
+      line({ line_id: 5, source_type: 'accrual_release', source_id: 6, source_link_id: 6, source_accrual_item_id: 12 }),
     ] })
     const w = render()
     await openGroup(w)
@@ -102,6 +103,7 @@ describe('J6 source findings', () => {
       { name: 'purchase-invoice-detail', params: { id: 4 } },
       { name: 'other-item-detail', params: { id: 5 } },
       { name: 'bank-detail', params: { id: 9 } },
+      { name: 'accounting-accrual-detail', params: { id: 12 } },
     ])
   })
 

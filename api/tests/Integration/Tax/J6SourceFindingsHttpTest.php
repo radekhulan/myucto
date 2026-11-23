@@ -184,6 +184,14 @@ final class J6SourceFindingsHttpTest extends TestCase
         self::assertSame(['bank', $transaction, $transaction, $statement], [$rows[$bank]['source_type'], $rows[$bank]['source_id'], $rows[$bank]['source_link_id'], $rows[$bank]['source_statement_id']]);
         self::assertSame([null, $transaction, $statement], [$rows[$reversal]['source_id'], $rows[$reversal]['source_link_id'], $rows[$reversal]['source_statement_id']],
             'Protizápis vede na doklad stornovaného zápisu.');
+        // Stejná pole zdroje jako deník, ne výčet: nový druh prokliku v deníku se přenese i sem.
+        $journal = array_column($this->container->get(\MyInvoice\Repository\JournalEntryRepository::class)
+            ->paginate($this->supplier, ['entry_ids' => [$bank, $reversal]], 2, 0)['items'], null, 'id');
+        foreach ([$bank, $reversal] as $entry) {
+            $expected = array_filter($journal[$entry], static fn (string $key): bool => str_starts_with($key, 'source_'), ARRAY_FILTER_USE_KEY);
+            self::assertNotSame([], $expected);
+            self::assertSame($expected, array_intersect_key($rows[$entry], $expected));
+        }
         [, $page] = $this->http('GET', '/source-findings/lines', ['code' => 'missing_activity', 'account' => '518']);
         $row = array_column($page['rows'], null, 'entry_id')[$purchase];
         self::assertSame(['purchase_invoice', 77, 77], [$row['source_type'], $row['source_id'], $row['source_link_id']]);

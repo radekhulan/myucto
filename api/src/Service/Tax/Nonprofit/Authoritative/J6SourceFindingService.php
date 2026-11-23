@@ -22,9 +22,8 @@ final readonly class J6SourceFindingService
     /** Kolik řádků deníku jedno volání seznamu nejvýše prohledá, než vrátí kurzor pro pokračování. */
     public const SCAN_BUDGET = 20000;
 
-    /** Údaje zápisu pro štítek a proklik na prvotní doklad (stejná pole jako deník, viz journalSourceLink ve frontendu). */
-    private const ENTRY_FIELDS = ['document_no', 'description', 'source_type', 'source_id', 'source_link_id', 'source_statement_id',
-        'source_doc_number', 'source_register_id', 'source_asset_id', 'source_settlement_doc_type', 'source_settlement_doc_id'];
+    /** Údaje zápisu pro štítek; zdroj pro proklik jsou všechna pole source_* deníku (viz journalSourceLink ve frontendu). */
+    private const ENTRY_FIELDS = ['document_no', 'description'];
 
     public function __construct(private Connection $db, private J6CurrentProviderFactory $current, private JournalEntryRepository $journal) {}
 
@@ -137,6 +136,8 @@ final readonly class J6SourceFindingService
             $entry = $entries[$row['entry_id']] ?? null;
             if ($entry === null) continue;
             foreach (self::ENTRY_FIELDS as $key) $row[$key] = $entry[$key] ?? null;
+            // Všechna pole zdroje, ne výčet: nový druh prokliku v deníku (např. časové rozlišení) platí i tady.
+            foreach ($entry as $key => $value) if (str_starts_with((string) $key, 'source_')) $row[$key] = $value;
             $out[] = $row;
         }
         return $out;

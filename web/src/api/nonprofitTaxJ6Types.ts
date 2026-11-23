@@ -1,3 +1,4 @@
+import type { JournalSourceRef } from '@/utils/journalSourceLink'
 export type J6ProfileKind = 'narrow_vpp' | 'broad_vpp' | 'non_vpp' | 'svj' | 'documented'
 export type J6PoolKind = 'revenue' | 'expense'
 export type J6PreviewKind = 'decision' | 'result' | 'coverage' | 'usage' | 'funding_reference' | 'funding_history'
@@ -63,7 +64,8 @@ export interface J6DraftSourcePage { draft: J6Draft; rows: J6SourceRow[]; findin
 /** Zjištění podkladů období po účtu a kódu (jeden průchod podkladů na vyžádání). */
 export interface J6SourceFindingGroup { account_id: number; account_code: string; account_name: string | null; code: J6FindingCode; line_count: number }
 export interface J6SourceFindingSummary { source: J6CurrentSourceHeader; line_count: number; groups: J6SourceFindingGroup[] }
-export interface J6SourceFindingLine {
+/** Řádek se zjištěním; zdroj zápisu nese stejná pole jako deník (journalSourceLink). */
+export interface J6SourceFindingLine extends JournalSourceRef {
   line_id: number
   entry_id: number
   line_no: number
@@ -74,14 +76,6 @@ export interface J6SourceFindingLine {
   codes: J6FindingCode[]
   source_type: string
   source_id: number | null
-  /** Obohacení zdroje jako v deníku (journalSourceLink): výpis banky, pokladní doklad, majetek, zápočet, storno. */
-  source_link_id: number | null
-  source_statement_id: number | null
-  source_doc_number: string | null
-  source_register_id: number | null
-  source_asset_id: number | null
-  source_settlement_doc_type: string | null
-  source_settlement_doc_id: number | null
   document_no: string | null
   description: string | null
 }
