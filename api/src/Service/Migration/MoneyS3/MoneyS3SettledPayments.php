@@ -207,12 +207,14 @@ final class MoneyS3SettledPayments
             $action = null;
             if ($c['own_id'] !== null) {
                 if ($target < 0.01) {
+                    $this->moveTaxDocumentLink($supplierId, $c['id']);
                     $pdo->prepare('DELETE FROM invoice_payments WHERE invoice_id = ? AND supplier_id = ? AND source = ? AND note LIKE ?')
                         ->execute([$c['id'], $supplierId, self::SOURCE, TakenOverPayment::MONEY_S3_WITHOUT_DOCUMENT_NOTE . '%']);
                     $out['deleted']++;
                     $action = 'deleted';
                 } else {
                     // Nejvýš jedna platba bez dokladu úhrady na doklad: případné další se slijí do první.
+                    $this->moveTaxDocumentLink($supplierId, $c['id'], $c['own_id']);
                     $pdo->prepare('DELETE FROM invoice_payments WHERE invoice_id = ? AND supplier_id = ? AND source = ? AND note LIKE ? AND id <> ?')
                         ->execute([$c['id'], $supplierId, self::SOURCE, TakenOverPayment::MONEY_S3_WITHOUT_DOCUMENT_NOTE . '%', $c['own_id']]);
                     if (abs($target - $c['own_amount']) >= 0.005 || isset($paymentNos[$c['id']])) {
@@ -260,6 +262,35 @@ final class MoneyS3SettledPayments
             }
         }
         return $out;
+    }
+
+    /**
+     * Vazba rušené výplně na DDKP přejde na platbu, která úhradu nese: přednostně na výplň,
+     * která zůstává (`$keepId`), jinak na nejstarší platbu převodu dokladu bez vazby. Bez ní
+     * by úplata zdaněná DDKP z Money ztratila odkaz na svůj DDKP.
+     */
+    private function moveTaxDocumentLink(int $supplierId, int $invoiceId, ?int $keepId = null): void
+    {
+        $pdo = $this->db->pdo();
+        $links = $pdo->prepare('SELECT id, tax_document_invoice_id FROM invoice_payments
+              WHERE invoice_id = ? AND supplier_id = ? AND ' . self::fillerSql('invoice_payments') . ' AND tax_document_invoice_id IS NOT NULL'
+            . ($keepId !== null ? ' AND id <> ' . (int) $keepId : ''));
+        $links->execute([$invoiceId, $supplierId]);
+        foreach ($links->fetchAll(PDO::FETCH_ASSOC) as $l) {
+            $target = $keepId;
+            if ($target === null) {
+                $pick = $pdo->prepare("SELECT id FROM invoice_payments WHERE invoice_id = ? AND supplier_id = ? AND tax_document_invoice_id IS NULL
+                      AND source IN ('bank', 'cash', 'credit_note', 'settlement') AND note LIKE ? AND NOT " . self::fillerSql('invoice_payments') . ' ORDER BY id LIMIT 1');
+                $pick->execute([$invoiceId, $supplierId, IssuedPaymentRecorder::NOTE_PREFIX . '%']);
+                $target = ($id = $pick->fetchColumn()) !== false ? (int) $id : null;
+            }
+            if ($target !== null) {
+                // Vazba na DDKP je jedinečná: rušená výplň ji uvolní dřív, než ji převezme platba.
+                $pdo->prepare('UPDATE invoice_payments SET tax_document_invoice_id = NULL WHERE id = ? AND supplier_id = ?')->execute([(int) $l['id'], $supplierId]);
+                $pdo->prepare('UPDATE invoice_payments SET tax_document_invoice_id = ? WHERE id = ? AND supplier_id = ? AND tax_document_invoice_id IS NULL')
+                    ->execute([(int) $l['tax_document_invoice_id'], $target, $supplierId]);
+            }
+        }
     }
 
     /** SQL podmínka „platba `$alias` je výplň bez dokladu úhrady" (alias `invoice_payments`). */

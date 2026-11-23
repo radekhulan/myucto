@@ -110,7 +110,8 @@ final class TakenOverPayment
      * - Úhrada minulého roku z POHODY ({@see isPriorYear()}): DDKP je v minulé agendě.
      * - Platba převzatá z Money S3 ({@see isMoneyS3Payment()}, doklad z mapy převodu), když
      *   je prokazatelně zdaněná: k ní je navázaný živý DDKP, DDKP převzaté z Money k záloze
-     *   pokrývají převzaté platby zálohy až po tuto (v pořadí data), nebo leží v období, které
+     *   v měně zálohy pokrývají převzaté platby zálohy až po tuto (v pořadí data; DDKP v jiné
+     *   měně se nesčítá, kurzy DDKP a platby se liší), nebo leží v období, které
      *   je podané (přiznání DPH), zamčené (`locked_until`) nebo uzavřené. Platba zálohy, ke
      *   které Money DDKP nevystavilo, v otevřeném období zůstává v kontrole DPH i v CRM a DDKP
      *   k ní jde vystavit jako k nativní platbě.
@@ -145,6 +146,7 @@ final class TakenOverPayment
         $moneyTaxDocuments = "SELECT COALESCE(SUM(ttd.total_with_vat), 0) FROM invoices ttd
                                WHERE ttd.supplier_id = {$a}.supplier_id AND ttd.parent_invoice_id = {$a}.invoice_id
                                  AND ttd.invoice_type = 'tax_document' AND ttd.status NOT IN ('draft', 'cancelled')
+                                 AND ttd.currency_id = (SELECT tpf.currency_id FROM invoices tpf WHERE tpf.id = {$a}.invoice_id)
                                  AND EXISTS (SELECT 1 FROM money_s3_import_map tdm
                                               WHERE tdm.supplier_id = ttd.supplier_id AND tdm.kind = 'invoice' AND tdm.target_id = ttd.id)";
         $moneyPaidUpTo = "SELECT COALESCE(SUM(tp.amount), 0) FROM invoice_payments tp

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Invoice;
 
+use MyInvoice\Service\Migration\MoneyS3\IssuedPaymentRecorder;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Infrastructure\Database\TransactionFailure;
 use MyInvoice\Repository\ClientBankAccountRepository;
@@ -498,7 +499,8 @@ final class InvoicePaymentService
     /**
      * Bankovní pohyb za úhradu, kterou převod z Money S3 nesl jen výplní bez dokladu úhrady
      * ({@see TakenOverPayment::isMoneyS3Filler()}): pohyb se zaeviduje jako bankovní platba
-     * a výplň se o její částku zmenší (nebo zruší). Uhrazená částka i stav dokladu se nemění.
+     * převzatá z Money (poznámka převodu s odkazem na výplň, vazba výplně na DDKP) a výplň se
+     * o její částku zmenší (nebo zruší). Uhrazená částka i stav dokladu se nemění.
      * Částka je menší z výplně a pohybu (pohyb v jiné měně než doklad se bere celou výplní).
      *
      * @param array{variable_symbol?: ?string, bank_reference?: ?string} $opts
@@ -506,14 +508,14 @@ final class InvoicePaymentService
      */
     private function replaceMoneyS3Filler(PDO $pdo, int $invoiceId, int $txId, array $opts): ?array
     {
-        $filler = $pdo->prepare('SELECT p.id, p.supplier_id, p.amount, p.currency FROM invoice_payments p
+        $filler = $pdo->prepare('SELECT p.id, p.supplier_id, p.amount, p.currency, p.note, p.tax_document_invoice_id FROM invoice_payments p
               WHERE p.invoice_id = ? AND ' . TakenOverPayment::moneyS3FillerSql('p') . ' ORDER BY p.id LIMIT 1 FOR UPDATE');
         $filler->execute([$invoiceId]);
         $f = $filler->fetch(PDO::FETCH_ASSOC);
         if ($f === false) {
             return null;
         }
-        $tx = $pdo->prepare('SELECT t.amount, t.currency, DATE(t.posted_at) AS posted_on FROM bank_transactions t WHERE t.id = ?');
+        $tx = $pdo->prepare('SELECT t.amount, t.currency, t.bank_ref, DATE(t.posted_at) AS posted_on FROM bank_transactions t WHERE t.id = ?');
         $tx->execute([$txId]);
         $t = $tx->fetch(PDO::FETCH_ASSOC);
         if ($t === false) {
@@ -523,12 +525,24 @@ final class InvoicePaymentService
         $amount = strtoupper((string) ($t['currency'] ?? '')) === strtoupper((string) $f['currency'])
             ? round(min($fillerAmount, abs((float) $t['amount'])), 2)
             : $fillerAmount;
-        $pdo->prepare('INSERT INTO invoice_payments (supplier_id, invoice_id, paid_on, amount, currency, variable_symbol, bank_reference, source, bank_transaction_id)
-            VALUES (?, ?, ?, ?, ?, ?, ?, "bank", ?)')
+        $whole = $fillerAmount - $amount < 0.01;
+        // Platba nese touž úhradu z Money jako výplň: poznámku převodu (zůstává převzatou
+        // platbou Money, predikát zdanění ji pozná) s odkazem na nahrazenou výplň a u celé
+        // náhrady i vazbu výplně na DDKP. Bez toho by k úplatě zdaněné DDKP z Money šel
+        // vystavit druhý DDKP.
+        $paymentNo = trim((string) ($t['bank_ref'] ?? '')) !== '' ? trim((string) $t['bank_ref']) : '#' . $txId;
+        $note = mb_substr(IssuedPaymentRecorder::note('bank', $paymentNo) . ' – nahrazuje: ' . (string) $f['note'], 0, 255);
+        if ($whole && $f['tax_document_invoice_id'] !== null) {
+            // Vazba na DDKP je jedinečná: výplň ji uvolní dřív, než ji převezme platba.
+            $pdo->prepare('UPDATE invoice_payments SET tax_document_invoice_id = NULL WHERE id = ?')->execute([(int) $f['id']]);
+        }
+        $pdo->prepare('INSERT INTO invoice_payments (supplier_id, invoice_id, paid_on, amount, currency, variable_symbol, bank_reference, note, source, bank_transaction_id, tax_document_invoice_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, "bank", ?, ?)')
             ->execute([(int) $f['supplier_id'], $invoiceId, (string) $t['posted_on'], number_format($amount, 2, '.', ''), (string) $f['currency'],
-                self::trimOrNull($opts['variable_symbol'] ?? null, 20), self::trimOrNull($opts['bank_reference'] ?? null, 120), $txId]);
+                self::trimOrNull($opts['variable_symbol'] ?? null, 20), self::trimOrNull($opts['bank_reference'] ?? null, 120), $note, $txId,
+                $whole ? $f['tax_document_invoice_id'] : null]);
         $paymentId = (int) $pdo->lastInsertId();
-        if ($fillerAmount - $amount < 0.01) {
+        if ($whole) {
             $pdo->prepare('DELETE FROM invoice_payments WHERE id = ?')->execute([(int) $f['id']]);
         } else {
             $pdo->prepare('UPDATE invoice_payments SET amount = ? WHERE id = ?')->execute([number_format($fillerAmount - $amount, 2, '.', ''), (int) $f['id']]);
