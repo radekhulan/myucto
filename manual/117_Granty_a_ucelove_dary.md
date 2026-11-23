@@ -49,7 +49,7 @@ Záložka **Průběžné čerpání** slouží k evidenci čerpání v průběhu
 
 Vyberte účetní období a zvolte **Nový zdroj**. Vyplňte poskytovatele, druh zdroje, název, číslo smlouvy nebo rozhodnutí, schválený rozpočet a období způsobilosti. Druhy činnosti a nákladové účty jsou nepovinné; pokud je vyplníte, nabídka nákladů je respektuje. Odpovídá-li zdroj už potvrzenému zdroji J6, můžete ho k němu přiřadit.
 
-V detailu zdroje přidejte **Výnos**, tedy zaúčtovaný řádek přijaté dotace nebo daru na účtu třídy 6. Zdroj může mít více výnosových řádků (splátek), jeden výnosový řádek ale patří jen jednomu zdroji. Tlačítkem **Přidat náklady** vyberte zaúčtované nákladové řádky téhož období a u každého částku, kterou zdroj nese. Jeden náklad mohou nést i dva zdroje, dohromady nejvýše do výše řádku. Součet přiřazených nákladů nesmí překročit rozpočet; aplikace v takovém případě uloží všechny vybrané řádky, nebo žádný, a ukáže zbývající částku.
+Tlačítkem **Přidat výnos** v detailu zdroje vyberte zaúčtovaný řádek přijaté dotace nebo daru na účtu třídy 6. Zdroj může mít více výnosových řádků (splátek), jeden výnosový řádek ale patří jen jednomu zdroji. Tlačítkem **Přidat náklady** vyberte zaúčtované nákladové řádky téhož období a u každého částku, kterou zdroj nese. Jeden náklad mohou nést i dva zdroje, dohromady nejvýše do výše řádku. Součet přiřazených nákladů nesmí překročit rozpočet; aplikace v takovém případě uloží všechny vybrané řádky, nebo žádný, a ukáže zbývající částku.
 
 Souhrn zdroje ukazuje rozpočet, přijatou částku, přiřazené a doložené náklady, zůstatek rozpočtu a vazby, které vyžadují kontrolu. U nákladu z přijaté faktury je pro informaci uveden stav její úhrady.
 

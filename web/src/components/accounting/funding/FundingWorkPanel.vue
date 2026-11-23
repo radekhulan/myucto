@@ -8,7 +8,7 @@ import Modal from '@/components/ui/Modal.vue'
 import MultiSelectFilter from '@/components/ui/MultiSelectFilter.vue'
 import { formDateInput as dateInput, formInput as input, formLabel, formTextarea as textarea } from '@/components/ui/formStyles'
 import { btnOutlineSm, ICONS } from '@/components/ui/buttonStyles'
-import { formatDate } from '@/composables/useFormat'
+import { formatDate, formatDateTime } from '@/composables/useFormat'
 import { appIsoDate } from '@/utils/date'
 import { fundingApi } from '@/api/nonprofitFunding'
 import type { AccountingPeriod } from '@/api/accounting'
@@ -37,7 +37,8 @@ function stateClass(state: FundingWorkState) { return state === 'ok' ? 'bg-succe
 function message(e: unknown) {
  const response = (e as { response?: { status?: number; data?: { error?: { code?: string; message?: string } } } }).response
  const code = response?.data?.error?.code
- if (code === 'funding_work_version_conflict' || code === 'funding_work_busy') return t('nonprofitFunding.work.stale')
+ if (code === 'funding_work_version_conflict') return t('nonprofitFunding.work.stale')
+ if (code === 'funding_work_busy') return t('nonprofitFunding.work.busy')
  return response?.data?.error?.message || t('nonprofitFunding.error')
 }
 
@@ -81,10 +82,13 @@ async function reload() {
 function open(id: number) { selected.value = id; notice.value = ''; void loadDetail() }
 function back() { selected.value = 0; detail.value = null; void loadOverview() }
 function applied(data: FundingWorkDetail, text: string) { detail.value = data; selected.value = data.source.id; notice.value = text; dialog.value = null; void loadOverview() }
-/** Konflikt verze: načíst aktuální stav, aby uživatel viděl změnu jiného uživatele. */
+/**
+ * Konflikt verze: dialog se zavře (drží starou verzi i rozepsané hodnoty nad starým stavem) a načte se
+ * aktuální detail. Uživatel akci otevře znovu nad novými daty, nic tiše nepřepíše.
+ */
 async function guarded(work: () => Promise<FundingWorkDetail>, text: string) {
  const ok = await run(work, data => applied(data, text))
- if (!ok && error.value === t('nonprofitFunding.work.stale')) { const keep = error.value; await loadDetail(); error.value = keep }
+ if (!ok && error.value === t('nonprofitFunding.work.stale')) { const keep = error.value; dialog.value = null; await loadDetail(); error.value = keep }
 }
 
 // ------------------------------------------------------------------ dialogy
@@ -147,7 +151,8 @@ function togglePick(row: FundingWorkCandidate) {
  if (row.id in next) delete next[row.id]
  else {
   // Předvyplní volnou část řádku, nejvýše zbývající rozpočet zdroje.
-  const free = row.capacity_cents ?? row.amount_cents, remaining = detail.value?.totals.remaining_cents ?? 0
+  const free = row.capacity_cents ?? row.amount_cents
+  const remaining = (detail.value?.totals.remaining_cents ?? 0) - Object.values(next).reduce((sum, v) => sum + (fundingCents(v) ?? 0), 0)
   next[row.id] = amountText(remaining > 0 ? Math.min(free, remaining) : free)
  }
  picked.value = next
@@ -183,6 +188,12 @@ function openRelink(link: FundingWorkAllocation | FundingWorkIncome, income: boo
  amount.value = amountText(first && !income ? Math.min(link.amount_cents, first.amount_cents) : link.amount_cents)
  dialog.value = { kind: 'relink', link, income }
 }
+watch(relinkLine, line => {
+ const d = dialog.value
+ if (d?.kind !== 'relink' || d.income) return
+ const target = d.link.relink_candidates?.find(c => c.id === line)
+ if (target) amount.value = amountText(Math.min(d.link.amount_cents, target.amount_cents))
+})
 async function saveRelink() {
  const d = dialog.value, cents = fundingCents(amount.value)
  if (d?.kind !== 'relink' || !relinkLine.value || (!d.income && !cents)) return
@@ -194,7 +205,7 @@ async function saveCancel() {
  if (!d || !reason.value.trim()) return
  await guarded(() => api.cancel(props.supplier, period.value, d.source.id, d.source.row_version, reason.value), t('nonprofitFunding.work.cancelled'))
 }
-function close() { if (!busy.value) dialog.value = null }
+function close() { if (!busy.value) { dialog.value = null; error.value = '' } }
 
 // ------------------------------------------------------------------ akce
 const listActions = computed<ActionItem[]>(() => [
@@ -206,7 +217,7 @@ const detailActions = computed<ActionItem[]>(() => [
  { key: 'add-income', label: t('nonprofitFunding.work.addIncome'), icon: 'coin', variant: 'neutral', show: props.canManage, disabled: busy.value || !detailEditable.value, run: () => openCandidates('incomes') },
  { key: 'edit', label: t('nonprofitFunding.edit'), icon: 'edit', variant: 'neutral', show: props.canManage, disabled: busy.value || !detailEditable.value, run: () => { void editSource() } },
  { key: 'back', label: t('nonprofitFunding.work.back'), icon: 'chevronLeft', variant: 'neutral', disabled: busy.value, run: back },
- { key: 'cancel-source', label: t('nonprofitFunding.work.cancelSource'), icon: 'trash', tier: 'overflow', variant: 'danger', show: props.canManage, disabled: busy.value || !detailEditable.value, run: () => { reason.value = ''; dialog.value = { kind: 'cancel' } } },
+ { key: 'cancel-source', label: t('nonprofitFunding.work.cancelSource'), icon: 'trash', tier: 'overflow', variant: 'danger', show: props.canManage, disabled: busy.value || !detailEditable.value || !!detail.value?.totals.allocation_count, disabledReason: detail.value?.totals.allocation_count ? t('nonprofitFunding.work.cancelBlocked') : undefined, run: () => { reason.value = ''; dialog.value = { kind: 'cancel' } } },
 ])
 const dialogActions = computed<DialogAction[]>(() => {
  const d = dialog.value
@@ -234,7 +245,7 @@ const dialogTitle = computed(() => {
 })
 const kinds: FundingKind[] = ['operating_grant', 'investment_grant', 'gift']
 
-watch(period, () => { selected.value = 0; detail.value = null; void loadOverview() })
+watch(period, () => { selected.value = 0; detail.value = null; overview.value = null; void loadOverview() })
 watch(() => props.supplier, () => { generation++; selected.value = 0; detail.value = null; void reload() })
 onMounted(() => { void reload().then(() => { mounted = true }) })
 // Po návratu na stránku (KeepAlive) načíst znovu: řádky deníku mohl mezitím přeúčtovat nebo stornovat jiný doklad.
@@ -281,9 +292,9 @@ onBeforeUnmount(() => { alive = false; generation++ })
     </div>
     <div class="space-y-3 md:hidden" data-section="work-cards">
      <button v-for="s in overview.sources" :key="s.id" type="button" class="block w-full rounded-lg border bg-surface p-4 text-left" :data-source="s.id" @click="open(s.id)">
-      <div class="flex flex-wrap items-center justify-between gap-2"><span class="font-medium">{{ s.title }}</span><span v-if="s.totals.review_count" class="rounded bg-warning-50 px-2 py-1 text-xs text-warning-700">{{ t('nonprofitFunding.work.reviewCount', { count: s.totals.review_count }) }}</span></div>
-      <p class="text-sm text-neutral-500">{{ s.provider_label }}</p>
-      <dl class="mt-2 grid grid-cols-2 gap-2 text-sm"><div><dt class="text-neutral-500">{{ t('nonprofitFunding.budget') }}</dt><dd>{{ money(s.totals.budget_cents) }}</dd></div><div><dt class="text-neutral-500">{{ t('nonprofitFunding.remaining') }}</dt><dd>{{ money(s.totals.remaining_cents) }}</dd></div></dl>
+      <span class="flex flex-wrap items-center justify-between gap-2"><span class="font-medium">{{ s.title }}</span><span v-if="s.status === 'cancelled'" class="rounded bg-neutral-100 px-2 py-1 text-xs text-neutral-600">{{ t('nonprofitFunding.work.cancelledBadge') }}</span><span v-else-if="s.totals.review_count" class="rounded bg-warning-50 px-2 py-1 text-xs text-warning-700">{{ t('nonprofitFunding.work.reviewCount', { count: s.totals.review_count }) }}</span><span v-else class="rounded bg-success-50 px-2 py-1 text-xs text-success-700">{{ t('nonprofitFunding.work.stateOk') }}</span></span>
+      <span class="block text-sm text-neutral-500">{{ s.provider_label }}</span>
+      <span class="mt-2 grid grid-cols-2 gap-2 text-sm"><span><span class="block text-neutral-500">{{ t('nonprofitFunding.budget') }}</span>{{ money(s.totals.budget_cents) }}</span><span><span class="block text-neutral-500">{{ t('nonprofitFunding.remaining') }}</span>{{ money(s.totals.remaining_cents) }}</span></span>
      </button>
     </div>
    </template>
@@ -344,7 +355,7 @@ onBeforeUnmount(() => { alive = false; generation++ })
     <details class="rounded-lg border bg-surface p-3" data-section="work-history">
      <summary class="cursor-pointer text-sm font-medium">{{ t('nonprofitFunding.work.history') }}</summary>
      <ul class="mt-2 space-y-1 text-sm">
-      <li v-for="h in detail.history" :key="h.id">{{ h.created_at }} · {{ h.actor || '—' }} · {{ t(`nonprofitFunding.work.action_${h.action}`) }}<template v-if="h.reason"> · {{ h.reason }}</template></li>
+      <li v-for="h in detail.history" :key="h.id">{{ formatDateTime(h.created_at) }} · {{ h.actor || '—' }} · {{ t(`nonprofitFunding.work.action_${h.action}`) }}<template v-if="h.reason"> · {{ h.reason }}</template></li>
      </ul>
     </details>
    </section>

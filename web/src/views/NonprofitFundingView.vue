@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
 import { useSupplierStore } from '@/stores/supplier'
@@ -12,14 +12,17 @@ const route = useRoute(), router = useRouter()
 const supplier = useSupplierStore(), auth = useAuthStore()
 const id = computed(() => Number(supplier.currentSupplierId))
 const canManage = computed(() => auth.can('accounting.periods.close', 'write'))
-// Pracovní evidenci mění zápisové právo účetnictví (RequestAuthorization::canManageNonprofitFundingWork).
-const canManageWork = computed(() => auth.can('accounting', 'write'))
+// Pracovní evidenci mění zápisové právo účetnictví jen z přihlášené relace (RequestAuthorization::canManageNonprofitFundingWork).
+const canManageWork = computed(() => Boolean(auth.user && auth.csrfToken && auth.can('accounting', 'write')))
 type Tab = 'work' | 'confirmed'
 const tabs = computed(() => [
  { key: 'work' as const, label: t('nonprofitFunding.tabs.work'), icon: ICONS.table },
  { key: 'confirmed' as const, label: t('nonprofitFunding.tabs.confirmed'), icon: ICONS.badgeCheck },
 ])
 const tab = computed<Tab>(() => route.query.tab === 'confirmed' ? 'confirmed' : 'work')
+// Záložky přes v-show (vzor Členské příspěvky): rozpracovaný stav přežije přepnutí; J6 se načte až při první návštěvě.
+const visited = ref<Record<Tab, boolean>>({ work: false, confirmed: false })
+watch(tab, value => { visited.value[value] = true }, { immediate: true })
 function setTab(next: Tab) { if (tab.value !== next) void router.replace({ query: { ...route.query, tab: next === 'work' ? undefined : next } }) }
 function onTabKey(event: KeyboardEvent) {
  if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return
@@ -42,7 +45,7 @@ function onTabKey(event: KeyboardEvent) {
     <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" :d="item.icon" /></svg>{{ item.label }}
    </button>
   </div>
-  <section v-if="tab === 'work'" id="funding-panel-work" role="tabpanel" aria-labelledby="funding-tab-work"><FundingWorkPanel :supplier="id" :can-manage="canManageWork" /></section>
-  <section v-else id="funding-panel-confirmed" role="tabpanel" aria-labelledby="funding-tab-confirmed"><FundingWorkspace :supplier="id" :can-manage="canManage" embedded /></section>
+  <section v-show="tab === 'work'" id="funding-panel-work" role="tabpanel" aria-labelledby="funding-tab-work" data-panel="work"><FundingWorkPanel v-if="visited.work" :supplier="id" :can-manage="canManageWork" /></section>
+  <section v-show="tab === 'confirmed'" id="funding-panel-confirmed" role="tabpanel" aria-labelledby="funding-tab-confirmed" data-panel="confirmed"><FundingWorkspace v-if="visited.confirmed" :supplier="id" :can-manage="canManage" embedded /></section>
  </div>
 </template>

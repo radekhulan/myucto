@@ -42698,7 +42698,9 @@
       "allocatedDone": "Náklady přiřazeny.",
       "removed": "Odebráno.",
       "relinked": "Vazba obnovena.",
-      "cancelled": "Zdroj zrušen."
+      "cancelled": "Zdroj zrušen.",
+      "busy": "Evidenci právě mění jiný uživatel. Zkuste akci za chvíli znovu.",
+      "cancelBlocked": "Zdroj s přiřazenými náklady nelze zrušit. Nejdřív náklady odeberte."
     }
   },
   "securities504": {
