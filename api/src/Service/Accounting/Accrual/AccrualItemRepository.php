@@ -166,6 +166,10 @@ final class AccrualItemRepository
             $where[] = 'ai.accrual_account_code LIKE ?';
             $params[] = addcslashes((string) $filters['account'], '%_\\') . '%';
         }
+        if (($filters['id'] ?? null) !== null) {
+            $where[] = 'ai.id = ?';
+            $params[] = (int) $filters['id'];
+        }
         if (($filters['partner_id'] ?? null) !== null) {
             $where[] = 'ai.partner_id = ?';
             $params[] = (int) $filters['partner_id'];
@@ -220,7 +224,9 @@ final class AccrualItemRepository
     public function nextItemNo(int $supplierId, int $year): string
     {
         $prefix = 'CR-' . $year . '-';
-        $stmt = $this->db->pdo()->prepare('SELECT item_no FROM accrual_items WHERE supplier_id = ? AND item_no LIKE ? ORDER BY item_no DESC LIMIT 1 FOR UPDATE');
+        // Pořadí číselně: textové řazení by po CR-RRRR-9999 vrátilo menší pětimístné číslo.
+        $stmt = $this->db->pdo()->prepare('SELECT item_no FROM accrual_items WHERE supplier_id = ? AND item_no LIKE ?
+                                            ORDER BY CHAR_LENGTH(item_no) DESC, item_no DESC LIMIT 1 FOR UPDATE');
         $stmt->execute([$supplierId, $prefix . '%']);
         $last = $stmt->fetchColumn();
         $n = $last === false ? 0 : (int) substr((string) $last, strlen($prefix));
@@ -287,19 +293,38 @@ final class AccrualItemRepository
     public function replacePlanned(int $supplierId, int $itemId, array $rows): void
     {
         $pdo = $this->db->pdo();
-        $pdo->prepare(
-            "DELETE s FROM accrual_schedule s
+        // Nezaúčtované řádky se stejným datem se upraví na místě (zůstane jim id, na které
+        // odkazuje rozhraní), ostatní nezaúčtované se smažou a nové vloží.
+        $stmt = $pdo->prepare(
+            "SELECT s.id, s.due_on FROM accrual_schedule s
           LEFT JOIN journal_entries je ON je.id = s.journal_entry_id AND je.supplier_id = s.supplier_id
               WHERE s.supplier_id = ? AND s.accrual_item_id = ? AND s.kind = 'release'
                 AND (s.status IN ('planned', 'cancelled') OR je.id IS NULL OR je.reversed_by IS NOT NULL)"
-        )->execute([$supplierId, $itemId]);
+        );
+        $stmt->execute([$supplierId, $itemId]);
+        $free = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $r) {
+            $free[(string) $r['due_on']] = (int) $r['id'];
+        }
+        $update = $pdo->prepare("UPDATE accrual_schedule SET from_on = ?, to_on = ?, days = ?, amount_planned = ?, status = 'planned',
+                                        journal_entry_id = NULL, posted_at = NULL WHERE supplier_id = ? AND id = ?");
         $insert = $pdo->prepare(
             'INSERT INTO accrual_schedule (supplier_id, accrual_item_id, kind, due_on, from_on, to_on, days, amount_planned, status)
              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
         );
         foreach ($rows as $r) {
-            $insert->execute([$supplierId, $itemId, $r['kind'] ?? 'release', $r['due_on'], $r['from_on'] ?? null, $r['to_on'] ?? null,
+            $due = (string) $r['due_on'];
+            if (isset($free[$due])) {
+                $update->execute([$r['from_on'] ?? null, $r['to_on'] ?? null, $r['days'] ?? null, $r['amount_planned'], $supplierId, $free[$due]]);
+                unset($free[$due]);
+                continue;
+            }
+            $insert->execute([$supplierId, $itemId, $r['kind'] ?? 'release', $due, $r['from_on'] ?? null, $r['to_on'] ?? null,
                 $r['days'] ?? null, $r['amount_planned'], $r['status'] ?? 'planned']);
+        }
+        if ($free !== []) {
+            $pdo->prepare('DELETE FROM accrual_schedule WHERE supplier_id = ? AND id IN (' . implode(',', array_map('intval', $free)) . ')')
+                ->execute([$supplierId]);
         }
     }
 

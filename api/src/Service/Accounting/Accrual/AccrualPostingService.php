@@ -59,7 +59,7 @@ final class AccrualPostingService
     /**
      * Zaúčtuje splatný řádek plánu (datum zápisu = konec úseku).
      *
-     * @param array{user_id?:?int, ip?:?string, user_agent?:?string, allow_closing_period?:bool} $meta
+     * @param array{user_id?:?int, ip?:?string, user_agent?:?string, allow_future?:bool} $meta
      * @return array<string,mixed> položka po zaúčtování
      */
     public function postRow(int $supplierId, int $itemId, int $rowId, array $meta = []): array
@@ -73,6 +73,24 @@ final class AccrualPostingService
     /** @param array<string,mixed> $meta */
     public function postRowLocked(int $supplierId, int $itemId, int $rowId, array $meta): int
     {
+        $prepared = $this->prepareRelease($supplierId, $itemId, $rowId, $meta);
+        $entryId = $this->posting->postDocument($supplierId, 'accrual_release', $rowId, $prepared['lines'], $prepared['meta']);
+        $this->recordRelease($supplierId, $prepared, $entryId, $meta['user_id'] ?? null);
+        return $entryId;
+    }
+
+    /**
+     * Ověří řádek plánu a sestaví zápis rozpuštění. Účtuje se jen nejstarší nezaúčtovaný řádek
+     * (plán jde po sobě, jinak by přepočet plánu neměl kam dát vynechaný úsek) a nikdy víc,
+     * než je zůstatek položky po všech zaúčtovaných zápisech (ručně přiřazené rozpuštění
+     * zůstatek už snížilo). Krok uzávěrky ({@see \MyInvoice\Service\Accounting\Closing\ClosingService::runAccrualAgendaRelease()})
+     * zápis zaúčtuje sám a pak zavolá {@see recordRelease()}.
+     *
+     * @param array<string,mixed> $meta
+     * @return array{item: array<string,mixed>, row: array<string,mixed>, amount: float, lines: list<array<string,mixed>>, meta: array<string,mixed>}
+     */
+    public function prepareRelease(int $supplierId, int $itemId, int $rowId, array $meta): array
+    {
         [$item, $row] = $this->itemAndRow($supplierId, $itemId, $rowId, true);
         if ($row['kind'] !== 'release' || $row['status'] !== 'planned') {
             throw new AccrualException('row_not_planned', 'Řádek plánu už je zaúčtovaný nebo zrušený.', 409);
@@ -80,26 +98,59 @@ final class AccrualPostingService
         if ($row['due_on'] > $this->today() && empty($meta['allow_future'])) {
             throw new AccrualException('row_not_due', 'Rozpuštění lze zaúčtovat nejdřív v den konce úseku.', 409);
         }
+        foreach ($this->items->schedule($supplierId, $itemId) as $other) {
+            if ($other['kind'] === 'release' && $other['status'] === 'planned' && $other['due_on'] < $row['due_on']) {
+                throw new AccrualException('row_not_first', 'Nejdřív zaúčtujte starší rozpuštění (' . $other['due_on'] . ').', 409, null, ['first_due_on' => $other['due_on']]);
+            }
+        }
+        $sign = AccrualKinds::normalSign((string) $item['kind']);
+        $balance = round(($this->items->balances($supplierId, [$itemId], '9999-12-31')[$itemId]['balance'] ?? 0.0) * $sign, 2);
         $amount = (float) $row['amount_planned'];
-        $lines = AccrualKinds::releaseLines((string) $item['kind'], (string) $item['accrual_account_code'],
-            (string) $item['counter_account_code'], $amount, $item['cost_center']);
-        $entryId = $this->posting->postDocument($supplierId, 'accrual_release', $rowId, $lines, [
-            'entry_date' => (string) $row['due_on'],
-            'document_date' => (string) $row['due_on'],
-            'document_no' => (string) $item['item_no'],
-            'description' => self::description($item, 'Rozpuštění'),
-            'posted' => true,
-            'user_id' => $meta['user_id'] ?? null,
-            'posted_by' => $meta['user_id'] ?? null,
-            'ip' => $meta['ip'] ?? null,
-            'user_agent' => $meta['user_agent'] ?? null,
-        ] + (!empty($meta['allow_closing_period']) ? ['allow_closing_period' => true] : []));
+        if ($amount > 0 && $balance < $amount) {
+            if ($balance <= 0) {
+                throw new AccrualException('nothing_to_release', 'Položka nemá v deníku zůstatek k rozpuštění. Navažte zápis vzniku.', 409);
+            }
+            $amount = $balance;
+        }
+        return [
+            'item' => $item,
+            'row' => $row,
+            'amount' => $amount,
+            'lines' => AccrualKinds::releaseLines((string) $item['kind'], (string) $item['accrual_account_code'],
+                (string) $item['counter_account_code'], $amount, $item['cost_center']),
+            'meta' => [
+                'entry_date' => (string) $row['due_on'],
+                'document_date' => (string) $row['due_on'],
+                'document_no' => (string) $item['item_no'],
+                'description' => self::description($item, 'Rozpuštění'),
+                'posted' => true,
+                'user_id' => $meta['user_id'] ?? null,
+                'posted_by' => $meta['user_id'] ?? null,
+                'ip' => $meta['ip'] ?? null,
+                'user_agent' => $meta['user_agent'] ?? null,
+            ],
+        ];
+    }
+
+    /**
+     * Po zaúčtování: řádek plánu zaúčtovaný, vazba zápisu na položku, případně dokončení.
+     *
+     * @param array{item: array<string,mixed>, row: array<string,mixed>, amount: float} $prepared
+     */
+    public function recordRelease(int $supplierId, array $prepared, int $entryId, ?int $userId): void
+    {
+        $item = $prepared['item'];
+        $rowId = (int) $prepared['row']['id'];
+        if (abs($prepared['amount'] - (float) $prepared['row']['amount_planned']) > 0.004) {
+            $this->db->pdo()->prepare('UPDATE accrual_schedule SET amount_planned = ? WHERE supplier_id = ? AND id = ?')
+                ->execute([$prepared['amount'], $supplierId, $rowId]);
+        }
         $this->items->setScheduleStatus($supplierId, $rowId, 'posted', $entryId, date('Y-m-d H:i:s'));
         $accountId = $this->accountId($supplierId, (string) $item['accrual_account_code']);
-        $this->items->addLink($supplierId, $itemId, $entryId, $accountId, AccrualKinds::releaseLinkAmount((string) $item['kind'], $amount),
-            'release', 'schedule', $rowId, $meta['user_id'] ?? null);
-        $this->syncCompletion($supplierId, $itemId);
-        return $entryId;
+        $this->items->addLink($supplierId, (int) $item['id'], $entryId, $accountId, AccrualKinds::releaseLinkAmount((string) $item['kind'], $prepared['amount']),
+            'release', 'schedule', $rowId, $userId);
+        $this->service->rebuildPlan($supplierId, (int) $item['id']);
+        $this->syncCompletion($supplierId, (int) $item['id']);
     }
 
     /**
@@ -118,6 +169,12 @@ final class AccrualPostingService
             if ($item['status'] === 'terminated') {
                 throw new AccrualException('terminated', 'Položka je ukončená. Nejdřív zrušte ukončení.', 409);
             }
+            foreach ($this->items->schedule($supplierId, $itemId) as $other) {
+                if ($other['kind'] === 'release' && $other['status'] === 'posted' && $other['entry_source_type'] === 'accrual_release'
+                    && $other['due_on'] > $row['due_on']) {
+                    throw new AccrualException('row_not_last', 'Nejdřív stornujte pozdější rozpuštění (' . $other['due_on'] . ').', 409, null, ['last_due_on' => $other['due_on']]);
+                }
+            }
             $this->posting->reverse($supplierId, (int) $row['journal_entry_id'], [
                 'entry_date' => (string) $row['entry_date'],
                 'description' => 'Storno: ' . self::description($item, 'Rozpuštění'),
@@ -128,6 +185,7 @@ final class AccrualPostingService
             if ($item['status'] === 'completed') {
                 $this->items->update($supplierId, $itemId, ['status' => 'active']);
             }
+            $this->service->rebuildPlan($supplierId, $itemId);
         }));
         return $this->service->get($supplierId, $itemId);
     }
@@ -391,32 +449,6 @@ final class AccrualPostingService
             $out[$key . '_total'] = round($out[$key . '_total'] + $r['amount_planned'], 2);
         }
         return $out;
-    }
-
-    /**
-     * Zaúčtuje roční rozpuštění položek agendy k rozvahovému dni (krok uzávěrky
-     * „Časové rozlišení"). Účtuje i do období ve stavu uzavírání, jako ostatní kroky.
-     *
-     * @param array<string,mixed> $meta
-     * @return array{posted:int, total:float}
-     */
-    public function postYearlyForClosing(int $supplierId, string $startsOn, string $endsOn, array $meta = []): array
-    {
-        $pending = $this->closingPending($supplierId, $startsOn, $endsOn);
-        $posted = 0;
-        $total = 0.0;
-        TransactionFailure::retrying($this->db->pdo(), function () use ($supplierId, $pending, $meta, &$posted, &$total): void {
-            $this->inTransaction(function () use ($supplierId, $pending, $meta, &$posted, &$total): void {
-                $posted = 0;
-                $total = 0.0;
-                foreach ($pending['yearly'] as $row) {
-                    $this->postRowLocked($supplierId, $row['item_id'], $row['schedule_id'], $meta + ['allow_closing_period' => true, 'allow_future' => true]);
-                    $posted++;
-                    $total = round($total + $row['amount_planned'], 2);
-                }
-            });
-        });
-        return ['posted' => $posted, 'total' => $total];
     }
 
     /** Položka bez nezaúčtovaných řádků a s nulovým zůstatkem je dokončená. */

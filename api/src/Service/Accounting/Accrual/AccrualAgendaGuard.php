@@ -24,7 +24,8 @@ final class AccrualAgendaGuard
 
     /**
      * Doklady a řádky dokladů spravované agendou: klíče `druh:id` (celý doklad) a
-     * `druh:id:řádek` (jen řádek dokladu).
+     * `druh:id:řádek` (jen řádek dokladu). Koncept položky doklad ještě nespravuje: dokud ho
+     * účetní neaktivuje, odkládá doklad dál uzávěrka.
      *
      * @return array<string,true>
      */
@@ -33,7 +34,7 @@ final class AccrualAgendaGuard
         $stmt = $this->db->pdo()->prepare(
             "SELECT source_type, source_id, source_item_id
                FROM accrual_items
-              WHERE supplier_id = ? AND managed_by = 'agenda' AND status <> 'cancelled'
+              WHERE supplier_id = ? AND managed_by = 'agenda' AND status IN ('active', 'completed', 'terminated')
                 AND source_type IN ('invoice', 'purchase_invoice', 'other_item') AND source_id IS NOT NULL"
         );
         $stmt->execute([$supplierId]);
@@ -69,6 +70,45 @@ final class AccrualAgendaGuard
         }
         $key = $source . ':' . (int) $docId;
         return isset($keys[$key]) || ($source !== 'other_item' && isset($keys[$key . ':' . (int) ($row['item_id'] ?? 0)]));
+    }
+
+    /**
+     * Počet nezaúčtovaných řádků plánu aktivních položek agendy splatných v období (pojistka
+     * uzavření knih).
+     */
+    public function pendingRowsCount(int $supplierId, string $startsOn, string $endsOn): int
+    {
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT COUNT(*)
+               FROM accrual_schedule s
+               JOIN accrual_items ai ON ai.id = s.accrual_item_id AND ai.supplier_id = s.supplier_id
+          LEFT JOIN journal_entries je ON je.id = s.journal_entry_id AND je.supplier_id = s.supplier_id
+              WHERE s.supplier_id = ? AND s.kind = 'release' AND s.due_on >= ? AND s.due_on <= ?
+                AND ai.status = 'active' AND ai.managed_by = 'agenda'
+                AND (s.status = 'planned' OR (s.status IN ('posted', 'linked') AND (je.id IS NULL OR je.reversed_by IS NOT NULL)))"
+        );
+        $stmt->execute([$supplierId, $startsOn, $endsOn]);
+        return (int) $stmt->fetchColumn();
+    }
+
+    /**
+     * Část odkladu uzávěrky (zápis kroku období `$periodId`), kterou tvoří doklady spravované
+     * agendou: otevření roku je nerozpouští, rozpouští je agenda. Projekce DPPO ji proto
+     * nesmí hlásit jako nezaúčtované rozpuštění minulého období.
+     *
+     * @param list<array<string,mixed>> $snapshotRows řádky ze záznamu kroku ve tvaru výběru uzávěrky
+     */
+    public function managedDeferredAmount(int $supplierId, array $snapshotRows, string $endsOn): float
+    {
+        $keys = $this->managedKeys($supplierId);
+        $sum = 0.0;
+        foreach ($snapshotRows as $row) {
+            if (self::excludesRow($keys, $row)) {
+                $snap = $row['snapshot'];
+                $sum = round($sum + AccrualScheduleCalculator::deferredAmount((float) $snap['basis'], (string) $snap['from'], (string) $snap['to'], $endsOn), 2);
+            }
+        }
+        return $sum;
     }
 
     /**

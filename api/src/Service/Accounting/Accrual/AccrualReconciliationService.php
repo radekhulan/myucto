@@ -31,6 +31,7 @@ final class AccrualReconciliationService
     public function __construct(
         private readonly Connection $db,
         private readonly AccrualItemRepository $items,
+        private readonly AccrualItemService $service,
     ) {}
 
     /** @return array<string,mixed> */
@@ -198,12 +199,51 @@ final class AccrualReconciliationService
             AccrualItemService::assertWithin($free, $want);
             $role = $want * $sign > 0 ? 'origin' : 'release';
             $this->items->addLink($supplierId, $itemId, $entryId, $accountId, $want, $role, 'manual', null, $userId);
+            // Ručně přiřazený zápis mění zůstatek položky: plán se přepočte na nový zbytek.
+            $this->service->rebuildPlan($supplierId, $itemId);
             if ($own) $pdo->commit();
         } catch (\Throwable $e) {
             if ($own && $pdo->inTransaction()) $pdo->rollBack();
             throw $e;
         }
         return ['item_id' => $itemId, 'entry_id' => $entryId, 'amount' => round($want * $sign, 2), 'role' => $role];
+    }
+
+    /**
+     * Zruší ručně přiřazenou vazbu zápisu a přepočte plán. Vazby zaúčtované agendou se ruší
+     * stornem rozpuštění či ukončení, převzaté vazby (POHODA, rozpad PS) opakovaným převzetím
+     * nebo zrušením položky; jejich smazání by rozbilo plán i stav položky.
+     */
+    public function unassign(int $supplierId, int $itemId, int $linkId): array
+    {
+        $pdo = $this->db->pdo();
+        $own = !$pdo->inTransaction();
+        if ($own) $pdo->beginTransaction();
+        try {
+            $this->items->find($supplierId, $itemId, true) ?? throw new AccrualException('not_found', 'Položka časového rozlišení neexistuje.', 404);
+            $link = null;
+            foreach ($this->items->links($supplierId, $itemId) as $l) {
+                if ($l['id'] === $linkId) {
+                    $link = $l;
+                }
+            }
+            if ($link === null) {
+                throw new AccrualException('link_not_found', 'Vazba neexistuje.', 404);
+            }
+            if ($link['matched_by'] === 'schedule') {
+                throw new AccrualException('link_from_schedule', 'Vazbu zápisu agendy zrušíte stornem rozpuštění nebo ukončení.', 409);
+            }
+            if ($link['matched_by'] !== 'manual') {
+                throw new AccrualException('link_imported', 'Převzatou vazbu nelze zrušit ručně. Položku zrušte nebo převezměte znovu.', 409);
+            }
+            $this->items->deleteLink($supplierId, $itemId, $linkId);
+            $this->service->rebuildPlan($supplierId, $itemId);
+            if ($own) $pdo->commit();
+        } catch (\Throwable $e) {
+            if ($own && $pdo->inTransaction()) $pdo->rollBack();
+            throw $e;
+        }
+        return $link;
     }
 
     /** @return array<int, array{account_code:string, name:string}> */
@@ -237,7 +277,11 @@ final class AccrualReconciliationService
         return array_map('floatval', $stmt->fetchAll(PDO::FETCH_KEY_PAIR));
     }
 
-    /** Kumulativní zůstatek zápisů odkladu uzávěrky (odklad − rozpuštění) k datu. @return array<int,float> */
+    /**
+     * Kumulativní zůstatek zápisů odkladu uzávěrky (odklad − rozpuštění) k datu, bez části
+     * navázané na položky agendy (doklad převzatý z uzávěrky do agendy, {@see AccrualItemService::closingHandover()}):
+     * tu už počítají položky. @return array<int,float>
+     */
     private function closingByAccount(int $supplierId, string $ids, string $asOf): array
     {
         $types = "'" . implode("','", self::CLOSING_TYPES) . "'";
@@ -250,7 +294,21 @@ final class AccrualReconciliationService
               GROUP BY l.account_id"
         );
         $stmt->execute([$supplierId, $asOf]);
-        return array_map('floatval', $stmt->fetchAll(PDO::FETCH_KEY_PAIR));
+        $out = array_map('floatval', $stmt->fetchAll(PDO::FETCH_KEY_PAIR));
+        $linked = $this->db->pdo()->prepare(
+            "SELECT al.account_id, SUM(al.amount) AS bal
+               FROM accrual_entry_links al
+               JOIN accrual_items ai ON ai.id = al.accrual_item_id AND ai.supplier_id = al.supplier_id
+               JOIN journal_entries je ON je.id = al.journal_entry_id AND je.supplier_id = al.supplier_id
+              WHERE al.supplier_id = ? AND ai.status <> 'cancelled' AND al.account_id IN ({$ids})
+                AND je.posted_at IS NOT NULL AND je.entry_date <= ? AND je.source_type IN ({$types})
+              GROUP BY al.account_id"
+        );
+        $linked->execute([$supplierId, $asOf]);
+        foreach ($linked->fetchAll(PDO::FETCH_KEY_PAIR) as $id => $amount) {
+            $out[(int) $id] = round(($out[(int) $id] ?? 0.0) - (float) $amount, 2);
+        }
+        return $out;
     }
 
     /** @return array<int, array{balance:float, count:int}> */

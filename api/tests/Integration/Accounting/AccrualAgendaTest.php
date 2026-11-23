@@ -293,7 +293,7 @@ final class AccrualAgendaTest extends TestCase
 
     // ── krok uzávěrky a životní cyklus ───────────────────────────────────────
 
-    public function testClosingStepPostsYearlyRowsIntoClosingPeriodAndReportsMonthly(): void
+    public function testClosingStepPostsDueRowsIntoClosingPeriod(): void
     {
         $yearly = $this->revenueItem(36_500.00, '2091-01-01', '2092-12-31', ['method' => 'yearly']);
         $this->revenueItem(12_000.00, '2091-01-01', '2091-12-31');
@@ -303,12 +303,18 @@ final class AccrualAgendaTest extends TestCase
         self::assertSame(12_000.00, $pending['monthly_total']);
         $this->db->pdo()->prepare("UPDATE accounting_periods SET status = 'closing' WHERE supplier_id = ? AND fiscal_year = ?")
             ->execute([$this->supplierId, self::YEAR]);
-        $result = $this->accrualPosting->postYearlyForClosing($this->supplierId, '2091-01-01', '2091-12-31', ['user_id' => $this->userId]);
-        self::assertSame(1, $result['posted']);
-        self::assertSame($pending['yearly_total'], $result['total']);
-        self::assertSame([], $this->accrualPosting->closingPending($this->supplierId, '2091-01-01', '2091-12-31')['yearly']);
+        $period = $this->db->pdo()->query("SELECT id, row_version FROM accounting_periods WHERE supplier_id = {$this->supplierId} AND fiscal_year = 2091")->fetch(\PDO::FETCH_ASSOC);
+        $this->lockUntil('2091-12-31');
+        $result = Bootstrap::buildContainer()->get(\MyInvoice\Service\Accounting\Closing\ClosingService::class)
+            ->runAccrualAgendaRelease($this->supplierId, (int) $period['id'], (int) $period['row_version'], ['user_id' => $this->userId]);
+        // Krok uzávěrky zaúčtuje roční i měsíční řádky splatné do konce období (i za zámkem data).
+        self::assertSame(13, $result['posted']);
+        self::assertSame(round($pending['yearly_total'] + $pending['monthly_total'], 2), $result['total']);
+        $after = $this->accrualPosting->closingPending($this->supplierId, '2091-01-01', '2091-12-31');
+        self::assertSame([], $after['yearly']);
+        self::assertSame([], $after['monthly']);
         $after = $this->items->get($this->supplierId, $yearly['id']);
-        self::assertSame(round(36_500.00 - $result['total'], 2), $after['balance_after_all']);
+        self::assertSame(round(36_500.00 - $pending['yearly_total'], 2), $after['balance_after_all']);
     }
 
     public function testCancelAndDeleteOnlyWithoutAgendaPostings(): void
@@ -333,6 +339,118 @@ final class AccrualAgendaTest extends TestCase
         self::assertSame(5_000.00, $this->reconciliation->unallocated($this->supplierId, '2091-06-30')['total']);
         $this->items->delete($this->supplierId, $draft['id']);
         $this->assertAccrualError('not_found', fn () => $this->items->get($this->supplierId, $draft['id']));
+    }
+
+    // ── regrese z review: plán, vazby, uzávěrka ──────────────────────────────
+
+    /**
+     * Nezaúčtovaný řádek před navázaným (převzatým) rozpuštěním zůstává na svém místě po úpravě
+     * poznámky i po změně plánu; účtovat jde jen nejstarší řádek a stornovat jen poslední.
+     */
+    public function testEditKeepsUnpostedRowBeforePostedOne(): void
+    {
+        $item = $this->revenueItem(12_000.00, '2091-07-01', '2092-06-30');
+        $dec = $this->rowOn($item, '2091-12-31');
+        $jan = $this->rowOn($item, '2092-01-31');
+        $entry = $this->manualEntry('2092-01-31', '384', '602', $jan['amount_planned'], 'CR-SYN-JAN');
+        $this->db->pdo()->prepare('DELETE FROM accrual_schedule WHERE id = ?')->execute([$jan['id']]);
+        $this->linkedRow($item['id'], $entry, '2092-01-01', '2092-01-31', $jan['amount_planned']);
+        $before = $this->items->get($this->supplierId, $item['id']);
+        self::assertSame('planned', $this->rowOn($before, '2091-12-31')['status']);
+        $planned2091 = $this->sumPlannedIn($before, '2091');
+
+        $after = $this->items->update($this->supplierId, $item['id'], ['note' => 'jen poznámka', 'row_version' => $before['row_version']], $this->userId);
+        self::assertSame($planned2091, $this->sumPlannedIn($after, '2091'), 'Úprava poznámky přesunula rozpuštění roku 2091.');
+        $rebuilt = $this->items->update($this->supplierId, $item['id'], ['period_to' => '2092-06-30', 'basis_amount' => 12_000.00,
+            'method' => 'monthly_days', 'title' => 'Přejmenovaná smlouva', 'row_version' => $after['row_version']], $this->userId);
+        self::assertSame($planned2091, $this->sumPlannedIn($rebuilt, '2091'));
+        $this->items->rebuildPlan($this->supplierId, $item['id']);
+        $forced = $this->items->get($this->supplierId, $item['id']);
+        self::assertSame('planned', $this->rowOn($forced, '2091-12-31')['status'], 'Přepočet plánu zahodil řádek před navázaným rozpuštěním.');
+        self::assertSame(round($forced['balance_after_all'], 2), round(array_sum(array_column($this->planned($forced), 'amount_planned')), 2));
+
+        $this->assertAccrualError('row_not_first', fn () => $this->accrualPosting->postRow($this->supplierId, $item['id'], $this->rowOn($forced, '2092-02-29')['id'], $this->meta()));
+        $first = $this->accrualPosting->postRow($this->supplierId, $item['id'], $this->planned($forced)[0]['id'], $this->meta());
+        $second = $this->accrualPosting->postRow($this->supplierId, $item['id'], $this->planned($first)[0]['id'], $this->meta());
+        $this->assertAccrualError('row_not_last', fn () => $this->accrualPosting->unpostRow($this->supplierId, $item['id'], $this->rowOn($second, '2091-07-31')['id'], $this->meta()));
+    }
+
+    /** Změna základu po zaúčtované části: zbytek se rozloží poměrem dnů, nenaskočí do posledního řádku. */
+    public function testBasisChangeIsSpreadNotLumped(): void
+    {
+        $item = $this->revenueItem(12_000.00, '2091-01-01', '2091-12-31');
+        foreach (range(1, 6) as $_) {
+            $item = $this->accrualPosting->postRow($this->supplierId, $item['id'], $this->planned($item)[0]['id'], $this->meta());
+        }
+        $this->reconciliation->assign($this->supplierId, $item['id'], $this->manualEntry('2091-01-01', '311', '384', 12_000.00, 'FV-SYN-DOPL'), '384', null, $this->userId);
+        $after = $this->items->update($this->supplierId, $item['id'], ['basis_amount' => 24_000.00, 'row_version' => $this->items->get($this->supplierId, $item['id'])['row_version']], $this->userId);
+        $rows = $this->planned($after);
+        self::assertSame(round($after['balance_after_all'], 2), round(array_sum(array_column($rows, 'amount_planned')), 2));
+        $perDay = array_map(static fn (array $r): float => $r['amount_planned'] / $r['days'], $rows);
+        self::assertLessThan(0.05, max($perDay) - min($perDay), 'Zbytek naskočil do posledního řádku: ' . json_encode(array_column($rows, 'amount_planned')));
+    }
+
+    /** Ručně přiřazené rozpuštění zkrátí plán a zrušení vazby ho vrátí. */
+    public function testManualReleaseLinkShortensPlan(): void
+    {
+        $item = $this->revenueItem(12_000.00, '2091-01-01', '2091-12-31');
+        $manual = $this->manualEntry('2091-03-15', '384', '602', 1_000.00, 'ID-SYN-1');
+        $this->reconciliation->assign($this->supplierId, $item['id'], $manual, '384', null, $this->userId);
+        $after = $this->items->get($this->supplierId, $item['id']);
+        self::assertSame(11_000.00, $after['balance_after_all']);
+        self::assertSame($after['balance_after_all'], round(array_sum(array_column($this->planned($after), 'amount_planned')), 2), 'Plán rozpustí víc, než je zůstatek položky.');
+        $link = array_values(array_filter($after['links'], static fn (array $l): bool => $l['journal_entry_id'] === $manual))[0];
+        $restored = $this->items->get($this->supplierId, $item['id']);
+        $this->reconciliation->unassign($this->supplierId, $item['id'], $link['id']);
+        $restored = $this->items->get($this->supplierId, $item['id']);
+        self::assertSame(12_000.00, round(array_sum(array_column($this->planned($restored), 'amount_planned')), 2));
+    }
+
+    /** Rozpuštění nikdy nepřekročí zůstatek položky v deníku. */
+    public function testReleaseIsCappedAtBalance(): void
+    {
+        $item = $this->revenueItem(1_000.00, '2091-01-01', '2091-02-28');
+        $this->db->pdo()->prepare("UPDATE accrual_schedule SET amount_planned = 900 WHERE accrual_item_id = ? AND due_on = '2091-01-31'")->execute([$item['id']]);
+        $this->manualEntry('2091-01-20', '384', '602', 500.00, 'ID-SYN-CAP');
+        $this->reconciliation->assign($this->supplierId, $item['id'], (int) $this->db->pdo()->query("SELECT id FROM journal_entries WHERE supplier_id = {$this->supplierId} AND document_no = 'ID-SYN-CAP'")->fetchColumn(), '384', null, $this->userId);
+        $this->db->pdo()->prepare("UPDATE accrual_schedule SET amount_planned = 900 WHERE accrual_item_id = ? AND due_on = '2091-01-31' AND status = 'planned'")->execute([$item['id']]);
+        $after = $this->accrualPosting->postRow($this->supplierId, $item['id'], $this->rowOn($this->items->get($this->supplierId, $item['id']), '2091-01-31')['id'], $this->meta());
+        self::assertSame(0.0, $after['balance_after_all']);
+        self::assertSame(500.00, $this->rowOn($after, '2091-01-31')['amount_planned']);
+    }
+
+    /** Druh ani účet položky s navázaným zápisem vzniku nejde změnit (vazby by zůstaly na starém účtu). */
+    public function testKindChangeWithOriginLink(): void
+    {
+        $item = $this->revenueItem(12_000.00, '2091-01-01', '2091-12-31');
+        $this->assertAccrualError('has_links', fn () => $this->items->update($this->supplierId, $item['id'],
+            ['kind' => 'prepaid_expense', 'accrual_account_code' => '381', 'counter_account_code' => '518', 'row_version' => $item['row_version']], $this->userId));
+        $this->assertAccrualError('changed', fn () => $this->items->update($this->supplierId, $item['id'], ['note' => 'bez verze'], $this->userId));
+        self::assertSame(0.0, $this->reconciliation->reconcile($this->supplierId, '2091-12-31')['totals']['difference']);
+    }
+
+    /**
+     * Roční rozpuštění zaúčtuje uzávěrka jen v období ve stavu uzavírání. V otevřeném období
+     * platí zámek k datu jako u každého zápisu agendy.
+     */
+    public function testYearlyClosingPostRespectsDateLockInOpenPeriod(): void
+    {
+        $item = $this->revenueItem(36_600.00, '2091-07-01', '2092-06-30', ['method' => 'yearly']);
+        $this->lockUntil('2091-12-31');
+        $closing = Bootstrap::buildContainer()->get(\MyInvoice\Service\Accounting\Closing\ClosingService::class);
+        $period = $this->db->pdo()->query("SELECT id, row_version FROM accounting_periods WHERE supplier_id = {$this->supplierId} AND fiscal_year = 2091")->fetch(\PDO::FETCH_ASSOC);
+        try {
+            $closing->runAccrualAgendaRelease($this->supplierId, (int) $period['id'], (int) $period['row_version'], ['user_id' => $this->userId]);
+            self::fail('Uzávěrka zaúčtovala rozpuštění agendy v otevřeném období.');
+        } catch (\MyInvoice\Service\Accounting\Closing\ClosingException $e) {
+            self::assertSame('period_not_closing', $e->errorCode);
+        }
+        try {
+            $this->accrualPosting->postRow($this->supplierId, $item['id'], $this->planned($item)[0]['id'], $this->meta());
+            self::fail('Zaúčtovalo se do uzamčeného data v otevřeném období.');
+        } catch (PostingException $e) {
+            self::assertSame('date_locked', $e->errorCode);
+        }
     }
 
     // ── pomocné ──────────────────────────────────────────────────────────────
@@ -368,6 +486,29 @@ final class AccrualAgendaTest extends TestCase
             ['account_code' => $credit, 'side' => 'credit', 'amount' => $amount],
         ], ['entry_date' => $date, 'document_no' => $docNo, 'description' => 'Syntetický zápis ' . $docNo, 'posted' => true,
             'user_id' => $this->userId, 'posted_by' => $this->userId]);
+    }
+
+    /** @param array<string,mixed> $item @return array<string,mixed> */
+    private function rowOn(array $item, string $due): array
+    {
+        foreach ($item['schedule'] as $r) {
+            if ($r['due_on'] === $due && $r['kind'] === 'release') {
+                return $r;
+            }
+        }
+        self::fail('Řádek ' . $due . ' chybí.');
+    }
+
+    /** @param array<string,mixed> $item */
+    private function sumPlannedIn(array $item, string $year): float
+    {
+        $sum = 0.0;
+        foreach ($this->planned($item) as $r) {
+            if (str_starts_with($r['due_on'], $year)) {
+                $sum += $r['amount_planned'];
+            }
+        }
+        return round($sum, 2);
     }
 
     private function linkedRow(int $itemId, int $entryId, string $from, string $to, float $amount): int

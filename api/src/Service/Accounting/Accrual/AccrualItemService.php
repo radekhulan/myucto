@@ -28,6 +28,7 @@ final class AccrualItemService
         private readonly Connection $db,
         private readonly AccrualItemRepository $items,
         private readonly DocumentPostingGroup $postingGroup,
+        private readonly \MyInvoice\Service\Accounting\Closing\AccrualDeferralService $deferrals,
     ) {}
 
     /**
@@ -45,6 +46,7 @@ final class AccrualItemService
             'managed_by' => self::csv($query['managed_by'] ?? null, ['agenda', 'closing'], 'managed_by'),
             'account' => preg_match('/^[0-9]{0,10}$/', (string) ($query['account'] ?? '')) === 1 ? (string) ($query['account'] ?? '') : '',
             'partner_id' => isset($query['partner_id']) && ctype_digit((string) $query['partner_id']) ? (int) $query['partner_id'] : null,
+            'id' => isset($query['item_id']) && ctype_digit((string) $query['item_id']) ? (int) $query['item_id'] : null,
             'ends_by' => self::dateOr($query['ends_by'] ?? null, null, 'ends_by'),
             'active_on' => self::dateOr($query['active_on'] ?? null, null, 'active_on'),
             'with_balance' => in_array((string) ($query['with_balance'] ?? ''), ['1', 'true'], true),
@@ -94,15 +96,79 @@ final class AccrualItemService
         $item['links'] = array_map(static fn (array $l): array => $l + ['amount_normal' => round($l['amount'] * $sign, 2)], $links);
         $item['covered_through'] = self::coveredThrough($item, $schedule);
         $item['source'] = $this->sourceInfo($supplierId, $item);
+        $item['warnings'] = $this->warnings($supplierId, $item, $links);
         $item['can'] = [
             'edit' => in_array($item['status'], ['draft', 'active'], true),
             'activate' => $item['status'] === 'draft',
             'terminate' => $item['status'] === 'active' && $item['managed_by'] === 'agenda' && in_array($item['kind'], AccrualKinds::SUPPORTED, true),
-            'cancel_termination' => $item['status'] === 'terminated' && $item['termination_entry_id'] !== null,
+            'cancel_termination' => $item['status'] === 'terminated' && $this->terminatedByAgenda($supplierId, $item),
             'cancel' => in_array($item['status'], ['draft', 'active'], true) && !self::hasAgendaPostings($schedule),
             'delete' => $item['status'] === 'draft' || ($item['status'] === 'cancelled' && !self::hasAgendaPostings($schedule)),
         ];
         return $item;
+    }
+
+    /**
+     * Upozornění na možné dvojí odložení stejného dokladu agendou a uzávěrkou:
+     *  - položka z interního dokladu, který není vazbou „Souvisí" spojený se zdrojovou fakturou
+     *    (uzávěrka by doklad s obdobím od–do odložila znovu, agenda ho nevyřadí),
+     *  - zápis vzniku patří faktuře, jejíž řádky mají období od–do a položka je nespravuje.
+     *
+     * @param array<string,mixed> $item
+     * @param list<array<string,mixed>> $links
+     * @return list<array{code:string, message:string}>
+     */
+    private function warnings(int $supplierId, array $item, array $links): array
+    {
+        if ($item['managed_by'] !== 'agenda' || in_array($item['status'], ['cancelled', 'completed'], true)) {
+            return [];
+        }
+        $out = [];
+        if ($item['source_type'] === 'internal_document' && $item['source_id'] !== null) {
+            $stmt = $this->db->pdo()->prepare(
+                "SELECT COUNT(*) FROM internal_documents d
+                   JOIN journal_entry_document_links l ON l.supplier_id = d.supplier_id AND l.entry_id = d.journal_entry_id
+                  WHERE d.supplier_id = ? AND d.id = ? AND l.doc_type IN ('invoice', 'purchase_invoice', 'other_item')"
+            );
+            $stmt->execute([$supplierId, (int) $item['source_id']]);
+            if ((int) $stmt->fetchColumn() === 0) {
+                $out[] = ['code' => 'internal_document_unlinked',
+                    'message' => 'Interní doklad není vazbou „Souvisí“ spojený se zdrojovým dokladem. Má-li zdrojová faktura období od–do, uzávěrka ji odloží znovu.'];
+            }
+        }
+        foreach ($links as $l) {
+            if ($l['role'] !== 'origin' || !in_array($l['source_type'], ['invoice', 'purchase_invoice'], true) || $l['source_id'] === null) {
+                continue;
+            }
+            if ($item['source_type'] === $l['source_type'] && (int) $item['source_id'] === (int) $l['source_id'] && $item['source_item_id'] !== null) {
+                continue;
+            }
+            [$table, $fk] = $l['source_type'] === 'invoice' ? ['invoice_items', 'invoice_id'] : ['purchase_invoice_items', 'purchase_invoice_id'];
+            $stmt = $this->db->pdo()->prepare("SELECT COUNT(*) FROM {$table} WHERE {$fk} = ? AND accrual_from IS NOT NULL AND accrual_to IS NOT NULL");
+            $stmt->execute([(int) $l['source_id']]);
+            if ((int) $stmt->fetchColumn() > 0) {
+                $out[] = ['code' => 'origin_document_has_period_lines',
+                    'message' => 'Zápis vzniku patří dokladu, jehož řádky mají období od–do. Zkontrolujte, že je neodkládá i uzávěrka.'];
+                break;
+            }
+        }
+        return $out;
+    }
+
+    /**
+     * Ukončení zaúčtovala agenda (zrušit ho jde jen stornem jejího zápisu); ukončení
+     * převzaté z POHODY je interní doklad a ruší se v deníku.
+     *
+     * @param array<string,mixed> $item
+     */
+    private function terminatedByAgenda(int $supplierId, array $item): bool
+    {
+        if ($item['termination_entry_id'] === null) {
+            return false;
+        }
+        $stmt = $this->db->pdo()->prepare('SELECT source_type FROM journal_entries WHERE supplier_id = ? AND id = ?');
+        $stmt->execute([$supplierId, (int) $item['termination_entry_id']]);
+        return $stmt->fetchColumn() === 'accrual_termination';
     }
 
     /**
@@ -144,6 +210,18 @@ final class AccrualItemService
             $own = !$pdo->inTransaction();
             if ($own) $pdo->beginTransaction();
             try {
+                $handover = null;
+                if (!empty($input['closing_handover'])) {
+                    $handover = $this->closingHandover($supplierId, (string) ($input['source_type'] ?? ''), (int) ($input['source_id'] ?? 0),
+                        isset($input['source_item_id']) && ctype_digit((string) $input['source_item_id']) ? (int) $input['source_item_id'] : null)
+                        ?? throw new AccrualException('no_closing_deferral', 'Doklad nemá odklad zaúčtovaný uzávěrkou.', 422, 'closing_handover');
+                    $input = array_merge($input, [
+                        'accrual_account_code' => $handover['account_code'],
+                        'opening_balance' => $handover['remaining'],
+                        'opening_as_of' => $handover['opening_as_of'],
+                        'origin_entry_id' => null,
+                    ]);
+                }
                 $data = $this->validated($supplierId, $input, null);
                 $data['managed_by'] = 'agenda';
                 $data['status'] = 'draft';
@@ -163,6 +241,16 @@ final class AccrualItemService
                 $originEntry = isset($input['origin_entry_id']) && ctype_digit((string) $input['origin_entry_id']) ? (int) $input['origin_entry_id'] : null;
                 if ($originEntry !== null) {
                     $this->linkOrigin($supplierId, $id, $originEntry, $data['accrual_account_code'], $input['origin_amount'] ?? null, $userId);
+                }
+                if ($handover !== null) {
+                    // Předání z uzávěrky: vznikem je odklad uzávěrky, rozpuštění z otevření roku se
+                    // navážou. Odsouhlasení pak tyto zápisy nepočítá do odkladu uzávěrky.
+                    $sign = AccrualKinds::normalSign((string) $data['kind']);
+                    $accountId = (int) $this->items->accountId($supplierId, (string) $data['accrual_account_code']);
+                    $this->items->addLink($supplierId, $id, $handover['deferral_entry_id'], $accountId, round($handover['deferred'] * $sign, 2), 'origin', 'manual', null, $userId);
+                    foreach ($handover['releases'] as $r) {
+                        $this->items->addLink($supplierId, $id, $r['entry_id'], $accountId, round(-$r['amount'] * $sign, 2), 'closing_release', 'manual', null, $userId);
+                    }
                 }
                 if (!empty($input['activate'])) {
                     $this->activateLocked($supplierId, $id, $userId);
@@ -187,26 +275,34 @@ final class AccrualItemService
         if ($own) $pdo->beginTransaction();
         try {
             $item = $this->items->find($supplierId, $id, true) ?? throw new AccrualException('not_found', 'Položka časového rozlišení neexistuje.', 404);
-            if (isset($input['row_version']) && (int) $input['row_version'] !== (int) $item['row_version']) {
-                throw new AccrualException('changed', 'Položku mezitím změnil jiný uživatel. Načtěte ji znovu.', 409);
+            // Optimistický zámek je povinný: úprava bez verze by tiše přepsala změnu jiného uživatele.
+            if (!isset($input['row_version']) || (int) $input['row_version'] !== (int) $item['row_version']) {
+                throw new AccrualException('changed', 'Položku mezitím změnil jiný uživatel. Načtěte ji znovu.', 409, 'row_version');
             }
             if (!in_array($item['status'], ['draft', 'active'], true) || $item['managed_by'] !== 'agenda') {
                 throw new AccrualException('not_editable', 'Ukončenou, dokončenou nebo zrušenou položku nelze upravit.', 409);
             }
             $merged = array_merge($item, array_intersect_key($input, array_flip([...self::EDITABLE_ALWAYS, ...self::EDITABLE_PLAN, 'kind', 'accrual_account_code', 'opening_balance', 'opening_as_of'])));
             $data = $this->validated($supplierId, $merged, $item);
-            $schedule = $this->items->schedule($supplierId, $id);
-            if (self::hasAgendaPostings($schedule) || self::hasLinked($schedule)) {
-                // Zaúčtovaná historie drží druh a účet položky; plán se přepočte jen za ní.
+            // Vazby (vznik, rozpuštění, převzaté zápisy) leží na účtu položky. Změna druhu nebo
+            // účtu by je nechala na starém účtu a knihy by se rozešly s položkou, aniž by to
+            // odsouhlasení poznalo; položku je pak třeba zrušit a založit znovu.
+            if ($this->items->links($supplierId, $id) !== [] || self::hasAgendaPostings($this->items->schedule($supplierId, $id))) {
                 foreach (['kind', 'accrual_account_code'] as $locked) {
                     if ((string) $data[$locked] !== (string) $item[$locked]) {
-                        throw new AccrualException('has_postings', 'Druh a účet položky se zaúčtovaným rozpouštěním nelze změnit.', 409, $locked);
+                        throw new AccrualException('has_links', 'Druh a účet položky s navázanými zápisy nelze změnit.', 409, $locked);
                     }
                 }
             }
             $data['updated_by'] = $userId;
             $this->items->update($supplierId, $id, $data);
-            if ($item['status'] === 'active') {
+            $planChanged = false;
+            foreach ([...self::EDITABLE_PLAN, 'opening_balance', 'opening_as_of'] as $field) {
+                if ((string) ($data[$field] ?? '') !== (string) ($item[$field] ?? '')) {
+                    $planChanged = true;
+                }
+            }
+            if ($item['status'] === 'active' && $planChanged) {
                 $this->rebuildPlan($supplierId, $id);
             }
             if ($own) $pdo->commit();
@@ -298,9 +394,12 @@ final class AccrualItemService
     }
 
     /**
-     * Přepočte nezaúčtovanou část plánu: za posledním zaúčtovaným či navázaným řádkem až do
-     * konce období, cílem je zbývající částka (základ nebo převzatý zůstatek − to, co už
-     * rozpouštějí zaúčtované řádky). Haléřový zbytek nese poslední řádek.
+     * Přepočte nezaúčtované řádky plánu. Plán se sestaví od začátku období (u převzaté položky
+     * ode dne převzatého zůstatku); řádky, které už pokrývá zaúčtovaný nebo navázaný zápis, se
+     * vynechají, nezaúčtované řádky před nimi zůstanou na svém místě. Cílem je zbývající
+     * zůstatek položky podle vazeb (vznik − všechna rozpuštění včetně ručně přiřazených), bez
+     * vazby vzniku převzatý zůstatek nebo základ. Rozdíl se rozloží do zbývajících řádků
+     * poměrem jejich částek ({@see AccrualPlanBuilder::spreadTo()}).
      */
     public function rebuildPlan(int $supplierId, int $id): void
     {
@@ -311,23 +410,51 @@ final class AccrualItemService
             return;
         }
         $schedule = $this->items->schedule($supplierId, $id);
-        $done = 0.0;
-        foreach ($schedule as $row) {
-            if ($row['kind'] === 'release' && in_array($row['status'], ['posted', 'linked'], true)) {
-                $done = round($done + $this->rowActualAmount($supplierId, $item, $row), 2);
-            }
-        }
-        $covered = self::coveredThrough($item, $schedule);
-        $target = round(($item['opening_balance'] ?? $item['basis_amount']) - $done, 2);
+        $start = $item['opening_as_of'] !== null ? AccrualPlanBuilder::dayBefore((string) $item['opening_as_of']) : null;
         $rows = AccrualPlanBuilder::build((string) $item['method'], (float) $item['basis_amount'],
-            (string) $item['period_from'], (string) $item['period_to'], $covered, $target, $this->fiscalYearEnd($supplierId));
-        $kept = [];
+            (string) $item['period_from'], (string) $item['period_to'], $start, null, $this->fiscalYearEnd($supplierId));
+        $done = [];
         foreach ($schedule as $row) {
             if ($row['kind'] === 'release' && in_array($row['status'], ['posted', 'linked'], true)) {
-                $kept[$row['due_on']] = true;
+                $done[] = $row;
             }
         }
-        $this->items->replacePlanned($supplierId, $id, array_values(array_filter($rows, static fn (array $r): bool => !isset($kept[$r['due_on']]))));
+        $rows = array_values(array_filter($rows, static function (array $r) use ($done): bool {
+            foreach ($done as $d) {
+                if ($d['due_on'] === $r['due_on']
+                    || ((string) ($d['from_on'] ?? $d['due_on']) <= $r['from_on'] && (string) ($d['to_on'] ?? $d['due_on']) >= $r['to_on'])) {
+                    return false;
+                }
+            }
+            return true;
+        }));
+        $target = $this->remainingTarget($supplierId, $item);
+        $rows = (int) round($target * 100) > 0 ? AccrualPlanBuilder::spreadTo($rows, $target) : [];
+        $this->items->replacePlanned($supplierId, $id, array_values(array_filter($rows,
+            static fn (array $r): bool => (int) round($r['amount_planned'] * 100) !== 0)));
+    }
+
+    /**
+     * Částka, kterou má zbývající plán rozpustit (normální znaménko): součet živých vazeb
+     * položky; bez vazby vzniku převzatý zůstatek nebo základ snížený o navázaná rozpuštění.
+     *
+     * @param array<string,mixed> $item
+     */
+    public function remainingTarget(int $supplierId, array $item): float
+    {
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT COALESCE(SUM(CASE WHEN al.role = 'origin' THEN al.amount ELSE 0 END), 0) AS origin,
+                    COALESCE(SUM(CASE WHEN al.role = 'origin' THEN 0 ELSE al.amount END), 0) AS other,
+                    COUNT(CASE WHEN al.role = 'origin' THEN 1 END) AS origins
+               FROM accrual_entry_links al
+               JOIN journal_entries je ON je.id = al.journal_entry_id AND je.supplier_id = al.supplier_id
+              WHERE al.supplier_id = ? AND al.accrual_item_id = ? AND je.posted_at IS NOT NULL AND je.reversed_by IS NULL"
+        );
+        $stmt->execute([$supplierId, (int) $item['id']]);
+        $r = $stmt->fetch(PDO::FETCH_ASSOC) ?: ['origin' => 0, 'other' => 0, 'origins' => 0];
+        $sign = AccrualKinds::normalSign((string) $item['kind']);
+        $base = (int) $r['origins'] > 0 ? (float) $r['origin'] * $sign : (float) ($item['opening_balance'] ?? $item['basis_amount']);
+        return round($base + (float) $r['other'] * $sign, 2);
     }
 
     /**
@@ -434,6 +561,121 @@ final class AccrualItemService
             'periods' => $periods,
             'items' => array_map(static fn (array $r): array => ['id' => (int) $r['id'], 'item_no' => $r['item_no'], 'title' => $r['title'], 'status' => $r['status']],
                 $existing->fetchAll(PDO::FETCH_ASSOC)),
+            'closing_deferrals' => $this->closingHandoverOptions($supplierId, $sourceType, $sourceId, $periods),
+        ];
+    }
+
+    /**
+     * Řádky dokladu, které odložila uzávěrka: nabídka předání do agendy se zůstatkem k datu.
+     *
+     * @param list<array{item_id:?int, from:string, to:string}> $periods
+     * @return list<array<string,mixed>>
+     */
+    private function closingHandoverOptions(int $supplierId, string $sourceType, int $sourceId, array $periods): array
+    {
+        $out = [];
+        foreach ($periods === [] ? [['item_id' => null]] : $periods as $p) {
+            $h = $this->closingHandover($supplierId, $sourceType, $sourceId, $p['item_id'] ?? null);
+            if ($h !== null) {
+                $out[] = $h + ['source_item_id' => $p['item_id'] ?? null];
+            }
+        }
+        return $out;
+    }
+
+    /**
+     * Odklad řádku dokladu zaúčtovaný uzávěrkou a jeho dosavadní rozpouštění v otevření roku
+     * (ze záznamu kroku, stejné částky jako uzávěrka): zápis odkladu, účet, odložená částka,
+     * rozpuštění po letech, zbývající zůstatek a den, od kterého ho rozpouští agenda.
+     *
+     * @return array<string,mixed>|null
+     */
+    public function closingHandover(int $supplierId, string $sourceType, int $sourceId, ?int $sourceItemId): ?array
+    {
+        $type = match ($sourceType) {
+            'purchase_invoice' => 'prepaid_expense_accrual',
+            'invoice' => 'deferred_revenue_accrual',
+            default => null,
+        };
+        if ($type === null || $sourceId <= 0) {
+            return null;
+        }
+        $snapshots = $this->deferrals->closingDeferralSnapshots($supplierId, $type, '9999-12-31');
+        $periods = $this->db->pdo()->prepare('SELECT id, starts_on, ends_on FROM accounting_periods WHERE supplier_id = ? ORDER BY starts_on');
+        $periods->execute([$supplierId]);
+        $list = $periods->fetchAll(PDO::FETCH_ASSOC);
+        $index = [];
+        foreach ($list as $i => $p) {
+            $index[(int) $p['id']] = $i;
+        }
+        $matched = array_values(array_filter($snapshots['items'], static fn (array $it): bool =>
+            !isset($it['source']) && (int) $it['doc_id'] === $sourceId && ($sourceItemId === null || (int) $it['item_id'] === $sourceItemId)));
+        if ($matched === [] || !isset($index[(int) $matched[0]['period_id']])) {
+            return null;
+        }
+        $periodId = (int) $matched[0]['period_id'];
+        $endsOn = (string) $list[$index[$periodId]]['ends_on'];
+        $entry = $this->db->pdo()->prepare("SELECT je.id, ca.account_code FROM journal_entries je
+                                              JOIN journal_entry_lines l ON l.entry_id = je.id AND l.supplier_id = je.supplier_id
+                                              JOIN chart_of_accounts ca ON ca.id = l.account_id
+                                             WHERE je.supplier_id = ? AND je.source_type = ? AND je.source_id = ? AND je.posted_at IS NOT NULL
+                                               AND je.reversed_by IS NULL AND ca.account_code >= '381' AND ca.account_code < '386' LIMIT 1");
+        $entry->execute([$supplierId, $type, $periodId]);
+        $e = $entry->fetch(PDO::FETCH_ASSOC);
+        if ($e === false) {
+            return null;
+        }
+        $deferred = 0.0;
+        $basis = 0.0;
+        $from = null;
+        $to = null;
+        foreach ($matched as $it) {
+            if ((int) $it['period_id'] !== $periodId) {
+                continue;
+            }
+            $deferred = round($deferred + AccrualScheduleCalculator::deferredAmount((float) $it['basis'], (string) $it['from'], (string) $it['to'], $endsOn), 2);
+            $basis = round($basis + (float) $it['basis'], 2);
+            $from = $from === null || $it['from'] < $from ? (string) $it['from'] : $from;
+            $to = $to === null || $it['to'] > $to ? (string) $it['to'] : $to;
+        }
+        // Rozpuštění v otevření dalších let: zápis uvolnění z období k, tranše ke konci období k+1.
+        $rel = $this->db->pdo()->prepare('SELECT source_id, id FROM journal_entries WHERE supplier_id = ? AND source_type = ? AND posted_at IS NOT NULL AND reversed_by IS NULL');
+        $rel->execute([$supplierId, $type]);
+        $postedBySource = $rel->fetchAll(PDO::FETCH_KEY_PAIR);
+        $releases = [];
+        $covered = $endsOn;
+        for ($k = $index[$periodId]; $k + 1 < count($list); $k++) {
+            $releaseId = $type === 'prepaid_expense_accrual'
+                ? \MyInvoice\Service\Accounting\Closing\ClosingSourceId::prepaidExpenseAccrualRelease((int) $list[$k]['id'])
+                : \MyInvoice\Service\Accounting\Closing\ClosingSourceId::deferredRevenueAccrualRelease((int) $list[$k]['id']);
+            if (!isset($postedBySource[$releaseId])) {
+                break;
+            }
+            $upper = (string) $list[$k + 1]['ends_on'];
+            $amount = 0.0;
+            foreach ($matched as $it) {
+                if ((int) $it['period_id'] === $periodId) {
+                    $amount = round($amount + AccrualScheduleCalculator::recognizedBetween((float) $it['basis'], (string) $it['from'], (string) $it['to'], (string) $list[$k]['ends_on'], $upper), 2);
+                }
+            }
+            if ((int) round($amount * 100) !== 0) {
+                $releases[] = ['entry_id' => (int) $postedBySource[$releaseId], 'amount' => $amount];
+            }
+            $covered = $upper;
+        }
+        $released = round(array_sum(array_column($releases, 'amount')), 2);
+        return [
+            'deferral_entry_id' => (int) $e['id'],
+            'account_code' => (string) $e['account_code'],
+            'period_ends_on' => $endsOn,
+            'basis' => $basis,
+            'period_from' => $from,
+            'period_to' => $to,
+            'deferred' => $deferred,
+            'releases' => $releases,
+            'released' => $released,
+            'remaining' => round($deferred - $released, 2),
+            'opening_as_of' => AccrualPlanBuilder::dayAfter($covered),
         ];
     }
 
@@ -606,6 +848,19 @@ final class AccrualItemService
         $opening = isset($input['opening_balance']) && $input['opening_balance'] !== null && $input['opening_balance'] !== ''
             ? self::amount($input['opening_balance'], 'opening_balance') : null;
         $openingAsOf = self::dateOr($input['opening_as_of'] ?? null, null, 'opening_as_of');
+        $sourceItemId = $current !== null ? $current['source_item_id']
+            : (isset($input['source_item_id']) && ctype_digit((string) $input['source_item_id']) ? (int) $input['source_item_id'] : null);
+        if ($current === null && $sourceId !== null && in_array($sourceType, ['invoice', 'purchase_invoice'], true)) {
+            $sourceItemId = $this->resolveSourceItem($supplierId, $sourceType, $sourceId, $sourceItemId, $basis, $from, $to);
+        }
+        $projectId = isset($input['project_id']) && ctype_digit((string) $input['project_id']) ? (int) $input['project_id'] : null;
+        if ($projectId !== null) {
+            $p = $this->db->pdo()->prepare('SELECT p.id FROM projects p JOIN clients c ON c.id = p.client_id WHERE c.supplier_id = ? AND p.id = ?');
+            $p->execute([$supplierId, $projectId]);
+            if ($p->fetchColumn() === false) {
+                throw new AccrualException('project_not_found', 'Projekt neexistuje.', 422, 'project_id');
+            }
+        }
         return [
             'title' => mb_substr($title, 0, 255),
             'contract_ref' => self::text($input['contract_ref'] ?? null, 100),
@@ -618,9 +873,7 @@ final class AccrualItemService
             'partner_name' => self::text($input['partner_name'] ?? null, 190),
             'source_type' => $sourceType,
             'source_id' => $current === null ? $sourceId : $current['source_id'],
-            'source_item_id' => $current === null
-                ? (isset($input['source_item_id']) && ctype_digit((string) $input['source_item_id']) ? (int) $input['source_item_id'] : null)
-                : $current['source_item_id'],
+            'source_item_id' => $sourceItemId,
             'source_document_no' => $current === null ? self::text($input['source_document_no'] ?? null, 50) : $current['source_document_no'],
             'basis_amount' => $basis,
             'opening_balance' => $opening,
@@ -629,8 +882,49 @@ final class AccrualItemService
             'period_to' => $to,
             'method' => $method,
             'cost_center' => self::text($input['cost_center'] ?? null, 50),
-            'project_id' => isset($input['project_id']) && ctype_digit((string) $input['project_id']) ? (int) $input['project_id'] : null,
+            'project_id' => $projectId,
         ];
+    }
+
+    /**
+     * Řádek zdrojové faktury, který položka spravuje. Uzávěrka vyřadí z odkladu jen tento
+     * řádek ({@see AccrualAgendaGuard}), ostatní řádky s obdobím dál odkládá sama. Bez
+     * zadaného řádku se dohledá: jediný řádek s obdobím, jinak řádek se stejným obdobím
+     * nebo částkou jako položka; nejednoznačný doklad vyžaduje výběr řádku.
+     */
+    private function resolveSourceItem(int $supplierId, string $sourceType, int $sourceId, ?int $itemId, float $basis, ?string $from, ?string $to): ?int
+    {
+        [$table, $fk, $doc] = $sourceType === 'invoice'
+            ? ['invoice_items', 'invoice_id', 'invoices']
+            : ['purchase_invoice_items', 'purchase_invoice_id', 'purchase_invoices'];
+        $stmt = $this->db->pdo()->prepare("SELECT it.id, it.accrual_from, it.accrual_to, it.total_without_vat
+                                             FROM {$table} it JOIN {$doc} d ON d.id = it.{$fk}
+                                            WHERE d.supplier_id = ? AND it.{$fk} = ?");
+        $stmt->execute([$supplierId, $sourceId]);
+        $lines = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        if ($itemId !== null) {
+            foreach ($lines as $l) {
+                if ((int) $l['id'] === $itemId) {
+                    return $itemId;
+                }
+            }
+            throw new AccrualException('source_item_not_found', 'Řádek nepatří ke zdrojovému dokladu.', 422, 'source_item_id');
+        }
+        $period = array_values(array_filter($lines, static fn (array $l): bool => $l['accrual_from'] !== null && $l['accrual_to'] !== null));
+        if (count($period) <= 1) {
+            return $period === [] ? null : (int) $period[0]['id'];
+        }
+        foreach ([
+            static fn (array $l): bool => (string) $l['accrual_from'] === (string) $from && (string) $l['accrual_to'] === (string) $to
+                && abs((float) $l['total_without_vat'] - $basis) < 0.005,
+            static fn (array $l): bool => abs((float) $l['total_without_vat'] - $basis) < 0.005,
+        ] as $match) {
+            $found = array_values(array_filter($period, $match));
+            if (count($found) === 1) {
+                return (int) $found[0]['id'];
+            }
+        }
+        throw new AccrualException('source_item_required', 'Doklad má víc řádků s obdobím. Vyberte řádek, který položka spravuje.', 422, 'source_item_id');
     }
 
     private function assertAccount(int $supplierId, string $code, string $field): void

@@ -58,7 +58,7 @@ final class AccrualPlanBuilder
             $rows = self::after($rows, $coveredThrough, $method, $basis, $from, $to);
         }
         if ($targetTotal !== null && $rows !== []) {
-            $rows = self::settleLast($rows, $targetTotal);
+            $rows = self::spreadTo($rows, $targetTotal);
         }
         return array_values(array_filter($rows, static fn (array $r): bool => (int) round($r['amount_planned'] * 100) !== 0));
     }
@@ -126,19 +126,29 @@ final class AccrualPlanBuilder
     }
 
     /**
+     * Rozpočítá cílovou částku na řádky v poměru jejich částek (u metod podle dnů tedy poměrem
+     * dnů), na haléře s největším zbytkem. Rozdíl proti plánu (převzatý zůstatek, zaúčtované
+     * rozpuštění jiné výše, změna základu) se tak rozloží do celého zbývajícího plánu a nikdy
+     * nenaskočí do posledního řádku. Řádky s nulovou vahou dostanou rovný díl.
+     *
      * @param list<array<string,mixed>> $rows
      * @return list<array<string,mixed>>
      */
-    private static function settleLast(array $rows, float $targetTotal): array
+    public static function spreadTo(array $rows, float $targetTotal): array
     {
-        $last = count($rows) - 1;
-        $others = 0.0;
-        foreach ($rows as $i => $row) {
-            if ($i !== $last) {
-                $others = round($others + (float) $row['amount_planned'], 2);
-            }
+        if ($rows === []) {
+            return [];
         }
-        $rows[$last]['amount_planned'] = round($targetTotal - $others, 2);
+        $weights = array_map(static fn (array $r): float => max(0.0, abs((float) $r['amount_planned'])), $rows);
+        if (array_sum($weights) <= 0.0) {
+            $weights = array_fill(0, count($rows), 1.0);
+        }
+        $cents = (int) round($targetTotal * 100);
+        $sign = $cents < 0 ? -1 : 1;
+        $parts = \MyInvoice\Service\Accounting\Dimension\DimensionStamper::distributeCents(abs($cents), $weights);
+        foreach ($rows as $i => $row) {
+            $rows[$i]['amount_planned'] = $sign * $parts[$i] / 100;
+        }
         return $rows;
     }
 

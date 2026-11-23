@@ -49,6 +49,7 @@ final class AccrualAction
         private readonly AccrualBookXlsxExporter $xlsx,
         private readonly AccrualBookPdfRenderer $pdf,
         private readonly DocumentActivityFeed $feed,
+        private readonly \MyInvoice\Service\Accounting\Closing\ClosingService $closing,
         private readonly ActivityLogger $logger,
         private readonly IpMatcher $ipMatcher,
     ) {}
@@ -236,19 +237,7 @@ final class AccrualAction
         if (!$this->guard($request, $response, true, $err)) return $err;
         return $this->run($response, function () use ($request, $args): array {
             $sid = $this->currentSupplierId($request);
-            $link = null;
-            foreach ($this->repository->links($sid, (int) $args['id']) as $l) {
-                if ($l['id'] === (int) $args['link']) {
-                    $link = $l;
-                }
-            }
-            if ($link === null) {
-                throw new AccrualException('link_not_found', 'Vazba neexistuje.', 404);
-            }
-            if ($link['matched_by'] === 'schedule') {
-                throw new AccrualException('link_from_schedule', 'Vazbu zápisu agendy zrušíte stornem rozpuštění nebo ukončení.', 409);
-            }
-            $this->repository->deleteLink($sid, (int) $args['id'], (int) $args['link']);
+            $link = $this->reconciliation->unassign($sid, (int) $args['id'], (int) $args['link']);
             $this->log($request, 'accrual_item.entry_unlinked', (int) $args['id'], ['entry_id' => $link['journal_entry_id'], 'amount' => $link['amount']]);
             return $this->items->get($sid, (int) $args['id']);
         });
@@ -299,13 +288,9 @@ final class AccrualAction
         if (!RequestAuthorization::canPostAccrualsInClosing($request)) {
             return Json::error($response, 'forbidden', 'Nemáte oprávnění zaúčtovat rozpuštění v uzávěrce.', 403);
         }
-        return $this->run($response, function () use ($request, $args): array {
-            $period = $this->period($request, (int) $args['period']);
-            $result = $this->posting->postYearlyForClosing($this->currentSupplierId($request), (string) $period['starts_on'], (string) $period['ends_on'], $this->meta($request));
-            $this->logger->log('accrual_item.closing_posted', $this->userId($request), 'accounting_period', (int) $period['id'], $result,
-                $this->ipMatcher->clientIpFromRequest($request->getServerParams()), $request->getHeaderLine('User-Agent'), $this->currentSupplierId($request));
-            return $result;
-        });
+        $body = (array) ($request->getParsedBody() ?? []);
+        return $this->run($response, fn () => $this->closing->runAccrualAgendaRelease($this->currentSupplierId($request), (int) $args['period'],
+            (int) ($body['row_version'] ?? 0), $this->meta($request) + ['posted_by' => $this->userId($request)]));
     }
 
     public function takeoverPreview(Request $request, Response $response): Response
@@ -401,6 +386,8 @@ final class AccrualAction
         } catch (AccrualException $e) {
             return Json::error($response, 'accruals.error.' . $e->errorCode, $e->getMessage(), $e->httpStatus,
                 array_filter(['field' => $e->field] + $e->details, static fn ($v): bool => $v !== null));
+        } catch (\MyInvoice\Service\Accounting\Closing\ClosingException $e) {
+            return Json::error($response, 'accruals.error.' . $e->errorCode, $e->getMessage(), $e->httpStatus);
         } catch (\Throwable $e) {
             return $this->mapPostingError($response, $e);
         }

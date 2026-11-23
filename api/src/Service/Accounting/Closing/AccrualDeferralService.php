@@ -2126,6 +2126,20 @@ final class AccrualDeferralService
     // ── SQL podmínky odkladu ──────────────────────────────────────────────────
 
     /**
+     * Podmínka „doklad nese odklad sám" ({@see deferredOnDocumentSql()}) s vázanými parametry
+     * pro přehledy mimo uzávěrku (projekce agendy), aby vyřazovaly tytéž doklady jako krok.
+     *
+     * @param 'invoice'|'purchase_invoice' $docType
+     * @return array{0:string, 1:list<string>}
+     */
+    public function deferredOnDocumentFilter(int $supplierId, string $docType, string $supplierSql, string $docIdSql): array
+    {
+        $prefix = $this->deferralAccountPrefix($supplierId, $docType === 'invoice' ? self::RULE_DEFERRED_REVENUE : self::RULE_PREPAID_EXPENSE);
+        return [self::deferredOnDocumentSql($docType, $supplierSql, $docIdSql), self::deferredOnDocumentParams($prefix)];
+    }
+
+
+    /**
      * Podmínka „odklad dokladu zaúčtovala uzávěrka": den dokladu (`$dateSql`) leží v účetním
      * období končícím nejpozději k vázanému `?`, jehož krok časového rozlišení zaúčtoval
      * odkladový zápis (`$sourceType`, period_id).

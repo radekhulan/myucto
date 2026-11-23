@@ -86,6 +86,8 @@ final class JournalPairConversionJob
         'stock_documents', 'assets', 'internal_documents', 'offset_agreements', 'gopay_movements',
         'gopay_clearings', 'bank_posting_suggestions', 'fuelings', 'credit_card_accounts',
         'accounting_reclassification_items',
+        // Agenda Časové rozlišení drží vazbu na zápis a účet, ne na řádek: převod na dvojice ji nemění.
+        'accrual_items', 'accrual_schedule', 'accrual_entry_links',
     ];
 
     /** Odkazy na zápis/řádek bez cizího klíče (vlastníci, které information_schema neukáže). */

@@ -40,9 +40,9 @@ final class AccrualPlanBuilderTest extends TestCase
         self::assertSame(3_650.00, round(array_sum(array_column($fiscal, 'amount_planned')), 2));
     }
 
-    public function testPlanAfterCoveredPartSettlesTargetInLastRow(): void
+    public function testPlanAfterCoveredPartSpreadsTarget(): void
     {
-        // Převzatý zůstatek k 1. 1. 2092 se liší od rekonstrukce: poslední řádek ho dorovná.
+        // Převzatý zůstatek k 1. 1. 2092 se liší od rekonstrukce: rozdíl se rozloží do řádků.
         $rows = AccrualPlanBuilder::build('yearly', 36_500.00, '2091-01-01', '2093-12-31', '2091-12-31', 24_000.00);
         self::assertSame(['2092-12-31', '2093-12-31'], array_column($rows, 'due_on'));
         self::assertSame('2092-01-01', $rows[0]['from_on']);

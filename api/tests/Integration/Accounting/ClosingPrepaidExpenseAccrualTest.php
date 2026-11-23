@@ -787,6 +787,94 @@ final class ClosingPrepaidExpenseAccrualTest extends TestCase
         self::assertNull($this->journal->findBySource($this->supplierId, 'prepaid_expense_accrual', ClosingSourceId::prepaidExpenseAccrualRelease($this->periodId)));
     }
 
+    /** Projekce DPPO: odklad dokladu převzatého agendou nehlásí jako nezaúčtované rozpuštění minulého roku. */
+    public function testPriorReleaseProjectionWithAgendaItem(): void
+    {
+        $pi = $this->purchase('PF-2091-AGENDA-OPEN', 36600.00, self::YEAR . '-11-15');
+        $this->item($pi, 36600.00, '2091-07-01', '2092-06-30', '548');
+        $this->postPurchaseExpense($pi, '548', 36600.00, self::YEAR . '-11-15');
+        $this->driveCloseWithAccrual();
+        $this->closing->closeBooks($this->supplierId, $this->periodId, $this->rv(), $this->meta());
+        $this->agendaItem($pi, null);
+        $this->closing->openNext($this->supplierId, $this->periodId, $this->rv(), $this->meta());
+        $next = (int) $this->db->pdo()->query("SELECT id FROM accounting_periods WHERE supplier_id = {$this->supplierId} AND starts_on = '" . (self::YEAR + 1) . "-01-01'")->fetchColumn();
+        $prior = $this->closing->priorDeferralReleaseProjection($this->supplierId, $next);
+        $agenda = $this->closing->accrualAgendaProjection($this->supplierId, $next);
+        self::assertEqualsWithDelta(0.0, $prior['prepaid'], 0.001, 'Odklad dokladu spravovaného agendou se v projekci počítá podruhé.');
+    }
+
+
+    /** Uzavření knih zastaví nezaúčtované rozpuštění agendy splatné v roce; krok uzávěrky ho zaúčtuje. */
+    public function testCloseBooksWithPendingYearlyAgendaRow(): void
+    {
+        $container = Bootstrap::buildContainer();
+        $origin = $this->posting->postDocument($this->supplierId, 'manual', null, [
+            ['account_code' => '381', 'side' => 'debit', 'amount' => 36600.00],
+            ['account_code' => '321', 'side' => 'credit', 'amount' => 36600.00],
+        ], ['entry_date' => self::YEAR . '-07-01', 'posted' => true, 'posted_by' => $this->userId, 'user_id' => $this->userId]);
+        $item = $container->get(\MyInvoice\Service\Accounting\Accrual\AccrualItemService::class)->create($this->supplierId, [
+            'title' => 'Roční pojistné', 'kind' => 'prepaid_expense', 'accrual_account_code' => '381', 'counter_account_code' => '548',
+            'basis_amount' => 36600.00, 'period_from' => '2091-07-01', 'period_to' => '2092-06-30', 'method' => 'yearly',
+            'origin_entry_id' => $origin, 'activate' => true,
+        ], $this->userId);
+        $this->driveCloseWithAccrual();
+        try {
+            $this->closing->closeBooks($this->supplierId, $this->periodId, $this->rv(), $this->meta());
+            self::fail('Rok se uzavřel s nezaúčtovaným ročním rozpuštěním agendy.');
+        } catch (\MyInvoice\Service\Accounting\Closing\ClosingException $e) {
+            self::assertSame('accrual_agenda_pending', $e->errorCode);
+        }
+        $run = $this->closing->runAccrualAgendaRelease($this->supplierId, $this->periodId, $this->rv(), $this->meta());
+        self::assertSame(1, $run['posted']);
+        $this->completeInventory($this->supplierId, $this->periodId, $this->userId);
+        $this->closing->closeBooks($this->supplierId, $this->periodId, $this->rv(), $this->meta());
+        $status = $this->db->pdo()->query("SELECT status FROM accounting_periods WHERE id = {$this->periodId}")->fetchColumn();
+        self::assertSame('closed', $status);
+        $after = $container->get(\MyInvoice\Service\Accounting\Accrual\AccrualItemService::class)->get($this->supplierId, $item['id'], '2091-12-31');
+        $dec = array_values(array_filter($after['schedule'], fn ($r) => $r['due_on'] === '2091-12-31'))[0];
+        self::assertNotSame('planned', $dec['status'], 'Rok se uzavřel s nezaúčtovaným ročním rozpuštěním agendy.');
+    }
+
+
+    /** Položka agendy k jednomu řádku faktury vyřadí z odkladu uzávěrky jen ten řádek. */
+    public function testAgendaItemForOneLineKeepsOtherLineDeferred(): void
+    {
+        // Faktura se dvěma řádky: A (pojistné, spravuje agenda) a B (předplatné, odkládá uzávěrka).
+        $pi = $this->purchase('PF-2091-TWO', 61000.00, self::YEAR . '-11-15');
+        $lineA = $this->item($pi, 36600.00, '2091-07-01', '2092-06-30', '548');
+        $this->item($pi, 24400.00, '2091-07-01', '2092-06-30', '518');
+        $this->postPurchaseExpense($pi, '548', 61000.00, self::YEAR . '-11-15');
+        $before = (float) $this->closing->prepaidExpenseAccrualPreview($this->supplierId, $this->periodId)['total'];
+        // Položka agendy bez zadaného řádku: řádek se dohledá podle částky a období (řádek A).
+        $this->agendaItem($pi, 18200.00);
+        $itemLine = (int) $this->db->pdo()->query("SELECT source_item_id FROM accrual_items WHERE supplier_id = {$this->supplierId}")->fetchColumn();
+        self::assertSame($lineA, $itemLine);
+        $after = (float) $this->closing->prepaidExpenseAccrualPreview($this->supplierId, $this->periodId)['total'];
+        self::assertEqualsWithDelta(18200.00 + round(24400.00 * 182 / 366, 2), $before, 0.02);
+        self::assertEqualsWithDelta(round(24400.00 * 182 / 366, 2), $after, 0.02, 'Řádek B, který agenda nespravuje, uzávěrka přestala odkládat.');
+    }
+
+
+    /** Odklad uzávěrky navázaný na položku agendy se v odsouhlasení nepočítá dvakrát. */
+    public function testLinkClosingDeferralToAgendaItem(): void
+    {
+        $pi = $this->purchase('PF-2091-AGENDA-LINK', 36600.00, self::YEAR . '-11-15');
+        $this->item($pi, 36600.00, '2091-07-01', '2092-06-30', '548');
+        $this->postPurchaseExpense($pi, '548', 36600.00, self::YEAR . '-11-15');
+        $this->driveCloseWithAccrual();
+        $this->closing->closeBooks($this->supplierId, $this->periodId, $this->rv(), $this->meta());
+        $this->agendaItem($pi, null);
+        $this->closing->openNext($this->supplierId, $this->periodId, $this->rv(), $this->meta());
+        $pdo = $this->db->pdo();
+        $itemId = (int) $pdo->query("SELECT id FROM accrual_items WHERE supplier_id = {$this->supplierId} ORDER BY id DESC LIMIT 1")->fetchColumn();
+        $defer = (int) $pdo->query("SELECT id FROM journal_entries WHERE supplier_id = {$this->supplierId} AND source_type = 'prepaid_expense_accrual' ORDER BY id LIMIT 1")->fetchColumn();
+        $rec = Bootstrap::buildContainer()->get(\MyInvoice\Service\Accounting\Accrual\AccrualReconciliationService::class);
+        $before = $rec->reconcile($this->supplierId, '2092-01-15')['totals'];
+        $rec->assign($this->supplierId, $itemId, $defer, '381', null, $this->userId);
+        $after = $rec->reconcile($this->supplierId, '2092-01-15')['totals'];
+        self::assertSame(0.0, $after['difference']);
+    }
+
     /** Položka agendy ke zdrojovému dokladu; volitelně s interním zápisem odkladu MD 381 / D 548. */
     private function agendaItem(int $purchaseId, ?float $deferral): void
     {

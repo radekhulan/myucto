@@ -17332,6 +17332,10 @@ paths:
           - property_service_settlement
           - property_service_lifecycle
           - property_funding
+          - nonprofit_capital
+          - nonprofit_membership
+          - accrual_release
+          - accrual_termination
       - in: query
         name: source_id
         schema:
@@ -19873,6 +19877,10 @@ paths:
           - property_service_settlement
           - property_service_lifecycle
           - property_funding
+          - nonprofit_capital
+          - nonprofit_membership
+          - accrual_release
+          - accrual_termination
       - in: query
         name: source_id
         schema:

@@ -276,6 +276,9 @@ final class ClosingService
         // Časové rozlišení z řádků dokladů s obdobím (381/384): výběr řádků, účty a poměr
         // dnů sdílí uzávěrka s výkazy s průběžným časovým rozlišením.
         private readonly AccrualDeferralService $accruals,
+        // Agenda Časové rozlišení: roční a splatná rozpuštění zaúčtuje krok uzávěrky.
+        private readonly \MyInvoice\Service\Accounting\Accrual\AccrualPostingService $accrualPosting,
+        private readonly \MyInvoice\Service\Accounting\Accrual\AccrualReconciliationService $accrualReconciliation,
         private readonly \MyInvoice\Service\Accounting\OtherItemMonthlyCheck $otherItemChecks,
         // Nativní zdroj DPPO 504 pro návrh daně v kroku Daň z příjmů (#400). Mimo 504 ho
         // DppoReturnDataProvider::gather nepoužije, takže ostatní firmy počítají jako dosud.
@@ -3118,12 +3121,20 @@ final class ClosingService
             ClosingSourceId::smallAssetAccrual($priorId),
             ClosingSourceId::smallAssetAccrualRelease($priorId),
         );
+        // Doklady, které převzala agenda Časové rozlišení, otevření roku nerozpouští (rozpouští je
+        // agenda a projekce je přičte z jejího plánu, {@see accrualAgendaProjection()}). Bez
+        // odečtu by se tentýž náklad či výnos v projekci objevil dvakrát.
+        $priorEnds = (string) $this->periods->findById($supplierId, $priorId)['ends_on'];
+        $agenda = new AccrualAgendaGuard($this->db);
         $prepaid = $this->pendingDeferralRelease(
             $supplierId,
             'prepaid_expense_accrual',
             ClosingSourceId::prepaidExpenseAccrual($priorId),
             ClosingSourceId::prepaidExpenseAccrualRelease($priorId),
         );
+        if ((int) round($prepaid * 100) !== 0) {
+            $prepaid = round($prepaid - $agenda->managedDeferredAmount($supplierId, $this->snapshotRowsOf($supplierId, 'prepaid_expense_accrual', $priorId), $priorEnds), 2);
+        }
 
         // Rozpuštění 384 výnos ZVYŠUJE, náklad tedy snižuje — proto se odečítá.
         $deferredRevenue = $this->pendingDeferralRelease(
@@ -3134,6 +3145,9 @@ final class ClosingService
             '384',
             'credit',
         );
+        if ((int) round($deferredRevenue * 100) !== 0) {
+            $deferredRevenue = round($deferredRevenue - $agenda->managedDeferredAmount($supplierId, $this->snapshotRowsOf($supplierId, 'deferred_revenue_accrual', $priorId), $priorEnds), 2);
+        }
 
         $total = round($small + $prepaid - $deferredRevenue, 2);
         return [
@@ -3160,15 +3174,63 @@ final class ClosingService
         if ($stmt->fetchColumn() === false) {
             return null;
         }
-        $rec = (new \MyInvoice\Service\Accounting\Accrual\AccrualReconciliationService($this->db,
-            new \MyInvoice\Service\Accounting\Accrual\AccrualItemRepository($this->db)))->reconcile($supplierId, $asOf);
+        $rec = $this->accrualReconciliation->reconcile($supplierId, $asOf);
         $accounts = array_values(array_filter($rec['accounts'], static fn (array $a): bool => (int) round($a['difference'] * 100) !== 0));
+        // Nezaúčtovaná rozpuštění splatná do data: rozdíl proti knize nevytvoří (zatím nikde
+        // nejsou), ale uzavření knih je zablokuje ({@see closeBooks()}).
+        $period = $this->db->pdo()->prepare('SELECT starts_on FROM accounting_periods WHERE supplier_id = ? AND starts_on <= ? AND ends_on >= ? LIMIT 1');
+        $period->execute([$supplierId, $asOf, $asOf]);
+        $startsOn = $period->fetchColumn();
+        $pending = $startsOn === false ? 0 : (new AccrualAgendaGuard($this->db))->pendingRowsCount($supplierId, (string) $startsOn, $asOf);
         return [
             'key' => 'deferrals_agenda_difference',
             'severity' => 'warning',
-            'ok' => $accounts === [],
-            'value' => ['as_of' => $asOf, 'difference' => $rec['totals']['difference'], 'accounts' => $accounts],
+            'ok' => $accounts === [] && $pending === 0,
+            'value' => ['as_of' => $asOf, 'difference' => $rec['totals']['difference'], 'accounts' => $accounts, 'pending_rows' => $pending],
         ];
+    }
+
+    /**
+     * Krok uzávěrky „Časové rozlišení": zaúčtuje všechna nezaúčtovaná rozpuštění položek agendy
+     * splatná do konce období (roční i měsíční), v období ve stavu uzavírání. Zápis účtuje
+     * uzávěrka sama (R7: příznak závěrkového kroku nastavuje jen ClosingService), řádek plánu
+     * a vazbu zapíše agenda. Řádky se berou po jednom od nejstaršího, protože každé
+     * zaúčtování přepočte zbytek plánu položky. Záznam se uloží do kroku `deferrals`.
+     *
+     * @param array<string,mixed> $meta
+     * @return array{posted:int, total:float}
+     */
+    public function runAccrualAgendaRelease(int $supplierId, int $periodId, int $rowVersion, array $meta = []): array
+    {
+        return $this->tx(function () use ($supplierId, $periodId, $rowVersion, $meta): array {
+            $period = $this->lockPeriod($supplierId, $periodId, $rowVersion);
+            if ((string) $period['status'] !== 'closing') {
+                throw new ClosingException('period_not_closing', 'Rozpuštění agendy zaúčtuje uzávěrka jen v období, které se uzavírá. V otevřeném období ho zaúčtujte v agendě.', 409);
+            }
+            $posted = 0;
+            $total = 0.0;
+            $guard = 10000;
+            while ($guard-- > 0) {
+                $pending = $this->accrualPosting->closingPending($supplierId, (string) $period['starts_on'], (string) $period['ends_on']);
+                $row = $pending['yearly'][0] ?? $pending['monthly'][0] ?? null;
+                if ($row === null) {
+                    break;
+                }
+                $prepared = $this->accrualPosting->prepareRelease($supplierId, (int) $row['item_id'], (int) $row['schedule_id'],
+                    ['user_id' => $meta['user_id'] ?? null, 'allow_future' => true]);
+                $entryId = $this->posting->postDocument($supplierId, 'accrual_release', (int) $row['schedule_id'], $prepared['lines'],
+                    $prepared['meta'] + ['allow_closing_period' => true]);
+                $this->accrualPosting->recordRelease($supplierId, $prepared, $entryId, $meta['user_id'] ?? null);
+                $posted++;
+                $total = round($total + $prepared['amount'], 2);
+            }
+            $step = $this->stepsMap($supplierId, $periodId)['deferrals'];
+            $payload = $step['payload'] ?? [];
+            $payload['accrual_agenda'] = ['posted' => $posted, 'total' => $total, 'at' => date('Y-m-d H:i:s')];
+            $this->closing->upsertStep($supplierId, $periodId, 'deferrals', (string) $step['status'], $payload, $step['note'], $meta['user_id'] ?? null);
+            $this->audit($supplierId, 'accounting.closing_accrual_agenda_posted', $periodId, ['posted' => $posted, 'total' => $total], $meta);
+            return ['posted' => $posted, 'total' => $total];
+        });
     }
 
     /**
@@ -3186,6 +3248,25 @@ final class ClosingService
             return ['expense' => 0.0, 'revenue' => 0.0, 'items' => 0];
         }
         return (new AccrualAgendaGuard($this->db))->projectionPending($supplierId, (string) $period['starts_on'], (string) $period['ends_on']);
+    }
+
+    /**
+     * Řádky odkladu ze záznamu kroku uzávěrky období (rozpad po položkách) ve tvaru výběru
+     * uzávěrky, aby je šlo porovnat s doklady spravovanými agendou.
+     *
+     * @return list<array<string,mixed>>
+     */
+    private function snapshotRowsOf(int $supplierId, string $sourceType, int $periodId): array
+    {
+        $rows = [];
+        foreach ($this->accruals->closingDeferralSnapshots($supplierId, $sourceType, '9999-12-31')['items'] as $item) {
+            if ((int) $item['period_id'] === $periodId) {
+                $rows[] = $sourceType === 'prepaid_expense_accrual'
+                    ? AccrualDeferralService::prepaidExpenseSnapshotRow($item)
+                    : AccrualDeferralService::deferredRevenueSnapshotRow($item);
+            }
+        }
+        return $rows;
     }
 
     /**
@@ -4895,6 +4976,16 @@ final class ClosingService
                 );
             }
             $this->assertAccrualDeferralsCurrent($supplierId, $periodId, $steps['deferrals']);
+            // Agenda Časové rozlišení: rok se nesmí uzavřít s nezaúčtovaným rozpuštěním, které
+            // do něj patří (náklad či výnos by chyběl ve výsledku i v daňovém přiznání).
+            $agendaPending = (new AccrualAgendaGuard($this->db))->pendingRowsCount($supplierId, (string) $period['starts_on'], (string) $period['ends_on']);
+            if ($agendaPending > 0) {
+                throw new ClosingException(
+                    'accrual_agenda_pending',
+                    'V agendě Časové rozlišení zbývá ' . $agendaPending . ' nezaúčtovaných rozpuštění splatných do konce období. Zaúčtujte je v kroku Časové rozlišení.',
+                    409,
+                );
+            }
             $failing = $this->failingErrorChecks($supplierId, $period);
             if ($failing !== []) {
                 throw new ClosingException(

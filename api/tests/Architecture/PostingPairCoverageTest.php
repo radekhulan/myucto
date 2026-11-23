@@ -71,6 +71,7 @@ final class PostingPairCoverageTest extends TestCase
             'Service/Accounting/Cash/CashDocumentService.php::doBackfillJournal::postDocument' => ['shape' => 'hub', 'test' => self::PAIR . 'CashPairsTest::testCashSaleAndPurchaseArePairedAgainstCashAccount'],
             'Service/Accounting/Cash/CashDocumentService.php::doPost::postDocument' => ['shape' => 'hub', 'test' => self::PAIR . 'CashPairsTest::testCashSaleAndPurchaseArePairedAgainstCashAccount'],
             'Service/Accounting/Closing/ClosingService.php::assert504PreparedLines::prepareDocumentLines' => ['shape' => 'out', 'reason' => 'kontrola nanečisto zápisu rámce 504'],
+            'Service/Accounting/Closing/ClosingService.php::runAccrualAgendaRelease::postDocument' => ['shape' => 'one', 'test' => $one],
             'Service/Accounting/Closing/ClosingService.php::closeBooks::postDocument' => ['shape' => 'grouped', 'test' => self::AUTO . '::testClosingEntryIsPairedByConsecutiveGroups'],
             'Service/Accounting/Closing/ClosingService.php::createAssistedEntry::postDocument' => ['shape' => 'one', 'test' => $one],
             'Service/Accounting/Closing/ClosingService.php::createLegalReserve504::postDocument' => ['shape' => 'out', 'reason' => 'zákonné rezervy rámce 504 (neziskovky)'],

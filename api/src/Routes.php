@@ -3443,7 +3443,7 @@ final class Routes
             $g->post  ('/other-items/renumber',                [\MyInvoice\Action\Accounting\RenumberAgendaDocumentsAction::class, 'otherItemsRenumber']);
             $g->get   ('/internal-documents/renumber',         [\MyInvoice\Action\Accounting\RenumberAgendaDocumentsAction::class, 'internalPreview']);
             $g->post  ('/internal-documents/renumber',         [\MyInvoice\Action\Accounting\RenumberAgendaDocumentsAction::class, 'internalRenumber']);
-            // Agenda Časové rozlišení (migrace 2330). Specifické cesty PŘED /accruals/{id}.
+            // Agenda Časové rozlišení (migrace 2331). Specifické cesty PŘED /accruals/{id}.
             $g->get   ('/accruals',                                             [\MyInvoice\Action\Accounting\AccrualAction::class, 'list']);
             $g->post  ('/accruals',                                             [\MyInvoice\Action\Accounting\AccrualAction::class, 'create']);
             $g->get   ('/accruals/reconciliation',                              [\MyInvoice\Action\Accounting\AccrualAction::class, 'reconcile']);
