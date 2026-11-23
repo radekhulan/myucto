@@ -530,8 +530,8 @@ final class JournalImporter
         }
         if ($refreshed['differs'] !== []) {
             $ctx->protocol->warn(self::STEP, 'journal_differs_kept', sprintf(
-                'Rok %d: %d zápisů převedených dřív, než převod začal změny sledovat, se liší od deníku Money a v MyÚčtu se s nimi pracovalo (oprava řádků, párování, poznámka, vazba). '
-                . 'Převod neví, zda rozdíl způsobilo Money, nebo oprava v MyÚčtu, a nechal je beze změny. Porovnejte je s Money: %s.',
+                'Rok %d: %d zápisů převedených dřív, než převod začal změny sledovat, se liší od deníku Money. '
+                . 'Převod neví, zda rozdíl způsobilo Money, nebo oprava v MyÚčtu, a nechal je beze změny. Porovnejte je s Money a opravte ručně; shodné zápisy převod dál sleduje: %s.',
                 $year, count($refreshed['differs']), $list($refreshed['differs']),
             ), ['year' => $year, 'documents' => array_slice($refreshed['differs'], 0, ImportProtocol::LIST_LIMIT)]);
         }
