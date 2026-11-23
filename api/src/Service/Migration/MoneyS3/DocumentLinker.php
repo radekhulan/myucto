@@ -622,8 +622,10 @@ final class DocumentLinker
                 }
             }
         }
+        // Výplň bez dokladu úhrady ({@see MoneyS3SettledPayments}) evidovanou úhradou není: nese
+        // jen uhrazenou částku z Money a po spárování úhrady z banky se zmenší, i v opravném převodu.
         $paid = $pdo->prepare(
-            "SELECT 'invoice', invoice_id FROM invoice_payments WHERE supplier_id = ?
+            "SELECT 'invoice', invoice_id FROM invoice_payments WHERE supplier_id = ? AND NOT " . MoneyS3SettledPayments::fillerSql('invoice_payments') . "
              UNION SELECT 'purchase_invoice', purchase_invoice_id FROM payment_matches WHERE supplier_id = ? AND purchase_invoice_id IS NOT NULL
              UNION SELECT 'purchase_invoice', purchase_invoice_id FROM cash_documents WHERE supplier_id = ? AND purchase_invoice_id IS NOT NULL
              UNION SELECT doc_type, doc_id FROM invoice_settlements WHERE supplier_id = ? AND status = 'confirmed'
