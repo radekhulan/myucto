@@ -24,7 +24,7 @@ export interface FundingWorkTotals {
 interface FundingWorkLink {
  id: number; source_id: number; line_id: number | null; linked_line_id: number; entry_id: number; account_id: number; account_code: string | null
  entry_source_type: string | null; entry_source_id: number | null; entry_date: string; row_version: number; amount_cents: number; state: FundingWorkState
- review_reason: string | null; line: FundingWorkLine | null; relink_candidates?: FundingWorkLine[]; confirmed_source_key?: string | null
+ review_reason: string | null; document_no: string | null; line: FundingWorkLine | null; relink_candidates?: FundingWorkLine[]; confirmed_source_key?: string | null
 }
 export type FundingWorkIncome = FundingWorkLink
 export interface FundingWorkAllocation extends FundingWorkLink { line_amount_cents: number; note: string | null; payment_state?: 'paid' | 'partial' | 'unpaid' | null }

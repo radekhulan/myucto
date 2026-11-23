@@ -143,6 +143,9 @@ final class FundingWorkTest extends TestCase
         $allocation = $detail['allocations'][0];
         self::assertSame('removed', $allocation['state']);
         self::assertNull($allocation['line_id']);
+        $q = $this->pdo->prepare('SELECT e.document_no FROM journal_entry_lines l JOIN journal_entries e ON e.id = l.entry_id WHERE l.id = ?');
+        $q->execute([$newCost]);
+        self::assertSame($q->fetchColumn(), $allocation['document_no'], 'Odstraněný řádek ukazuje číslo dokladu ze zápisu podle snímku.');
         self::assertSame([$newCost], array_column($allocation['relink_candidates'], 'id'), 'Nabídka obsahuje jen řádek téhož zápisu se stejným účtem.');
         self::assertSame('removed', $detail['incomes'][0]['state']);
         $this->expectError(fn() => $this->work->updateAllocation($this->supplier, $this->period, $allocation['id'], 26000, null, $allocation['row_version'], $this->actor), 'funding_work_relink_required');

@@ -28,7 +28,7 @@ const source = { id: 7, period_id: 11, provider_id: 21, provider_label: 'Synthet
 const newLine = { id: 99, entry_id: 50, period_id: 11, account_id: 3, account_code: '518', account_name: 'Services', side: 'debit' as const, amount_cents: 32000, date: '2026-06-01', document_no: 'SYN-7',
  description: 'Synthetic service', source_type: 'manual', source_id: null, posted: true, reversed: false, is_reversal: false, activity_kind_id: null }
 const removed: FundingWorkAllocation = { id: 3, source_id: 7, line_id: null, linked_line_id: 41, entry_id: 50, entry_source_type: 'manual', entry_source_id: null, account_id: 3, account_code: '518', entry_date: '2026-06-01', row_version: 1,
- amount_cents: 30000, line_amount_cents: 30000, note: null, state: 'removed', review_reason: 'removed', line: null, relink_candidates: [newLine], payment_state: null, confirmed_source_key: null }
+ amount_cents: 30000, line_amount_cents: 30000, note: null, state: 'removed', review_reason: 'removed', document_no: 'SYN-6', line: null, relink_candidates: [newLine], payment_state: null, confirmed_source_key: null }
 const overview = (sources: FundingWorkOverview['sources'] = []): FundingWorkOverview => ({ period, editable: true, sources })
 const detail = (allocations: FundingWorkAllocation[] = [removed]): FundingWorkDetail => ({ period, editable: true, source, totals, incomes: [], allocations, allocations_page: 1, allocations_more: false, history: [] })
 
@@ -69,16 +69,20 @@ describe('Funding work panel (#403)', () => {
 
  it('R5: detail shows a removed line for review and relinks it to the offered line', async () => {
   api.overview.mockResolvedValue(overview([{ ...source, totals }]))
-  api.relinkAllocation.mockResolvedValue(detail([{ ...removed, line_id: 99, linked_line_id: 99, state: 'ok', review_reason: null, line: newLine, relink_candidates: [] }]))
+  api.relinkAllocation.mockResolvedValue(detail([{ ...removed, line_id: 99, linked_line_id: 99, state: 'ok', review_reason: null, document_no: 'SYN-7', line: newLine, relink_candidates: [] }]))
   const w = mounted(); await flushPromises()
   await w.get('[data-source="7"]').trigger('click'); await flushPromises()
   expect(w.get('[data-allocation="3"] [data-state]').text()).toBe(cs.nonprofitFunding.work.state_removed)
+  expect(w.get('[data-allocation="3"]').text()).toContain('SYN-6')
   expect(w.get('[data-total="review"]').text()).toContain('1')
   await w.get('[data-action="relink"]').trigger('click'); await flushPromises()
   expect((w.get('[data-field="amount"]').element as HTMLInputElement).value).toBe('300.00')
   await w.get('[data-section="dialog-actions"] [data-action="save"]').trigger('click'); await flushPromises()
   expect(api.relinkAllocation).toHaveBeenCalledWith(5, 11, 3, 99, 30000, 1)
   expect(w.get('[data-allocation="3"] [data-state]').text()).toBe(cs.nonprofitFunding.work.state_ok)
+  await w.get('[data-section="work-detail"] [data-action="back"]').trigger('click'); await flushPromises()
+  expect(w.find('[data-section="work-detail"]').exists()).toBe(false)
+  expect(w.find('[data-section="work-sources"]').exists()).toBe(true)
   expect(w.get('[data-section="work-notice"]').text()).toBe(cs.nonprofitFunding.work.relinked)
  })
 
@@ -95,6 +99,7 @@ describe('Funding work panel (#403)', () => {
   expect(api.allocate).toHaveBeenCalledWith(5, 11, 7, [{ line_id: 99, amount_cents: 32000 }])
   expect(w.get('[data-section="dialog-error"]').text()).toContain('Zbývá 100,00 Kč')
   expect(w.find('[role="dialog"]').exists()).toBe(true)
+  expect(w.get('[data-section="dialog-actions"] [data-action="close"]').text()).toBe('Zrušit')
   await w.get('[data-section="dialog-actions"] [data-action="close"]').trigger('click'); await flushPromises()
   expect(w.find('[role="dialog"]').exists()).toBe(false)
   expect(w.find('[data-section="work-error"]').exists()).toBe(false)

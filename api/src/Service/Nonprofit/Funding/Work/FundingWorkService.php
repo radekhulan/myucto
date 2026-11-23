@@ -556,7 +556,17 @@ final class FundingWorkService
             $row['line'] = FundingWorkLedger::line($r);
             $row['review_reason'] = $r['review_reason'];
             $row['state'] = self::state($r['review_reason']);
+            $row['document_no'] = $row['line']['document_no'] ?? null;
             $out[] = $row;
+        }
+        // Odstraněný řádek: číslo dokladu ze zápisu podle snímku, pokud zápis ještě existuje (přeúčtování téhož zápisu).
+        $missing = array_values(array_unique(array_map(static fn(array $r) => (int) $r['entry_id'], array_filter($out, static fn(array $r) => $r['line'] === null))));
+        if ($missing !== []) {
+            $q = $this->db->pdo()->prepare('SELECT id, document_no FROM journal_entries WHERE supplier_id = ? AND id IN (' . implode(',', array_fill(0, count($missing), '?')) . ')');
+            $q->execute([$supplier, ...$missing]);
+            $numbers = $q->fetchAll(PDO::FETCH_KEY_PAIR);
+            foreach ($out as &$row) if ($row['line'] === null) $row['document_no'] = $numbers[(int) $row['entry_id']] ?? null;
+            unset($row);
         }
         return $out;
     }
