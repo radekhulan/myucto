@@ -39,6 +39,9 @@ final class PohodaAccrualTakeoverService
 {
     public const IMPORT_PREFIX = 'pohoda:';
 
+    /** @var list<array<string,mixed>> konflikty posledního převzetí (zápis už navázaný či rozpuštěný agendou) */
+    private array $conflicts = [];
+
     public function __construct(
         private readonly Connection $db,
         private readonly AccrualItemRepository $items,
@@ -67,6 +70,8 @@ final class PohodaAccrualTakeoverService
                 $created = 0;
                 $updated = 0;
                 $activeIds = [];
+                $skipped = [];
+                $this->conflicts = [];
                 foreach ($plan['items'] as $p) {
                     $existing = $this->items->findByImportKey($supplierId, $p['import_key']);
                     if ($existing === null) {
@@ -100,8 +105,14 @@ final class PohodaAccrualTakeoverService
                         $created++;
                     } else {
                         $itemId = (int) $existing['id'];
+                        // Položku, kterou agenda mezitím ukončila, dokončila nebo účetní zrušila,
+                        // převzetí nemění: jinak by přepsalo stav i vazby nastavené v agendě.
+                        if ($existing['status'] !== 'active') {
+                            $skipped[] = ['item_no' => $existing['item_no'], 'status' => $existing['status']];
+                            continue;
+                        }
                         $updated++;
-                        if ($existing['status'] === 'active' && $p['status'] === 'terminated') {
+                        if ($p['status'] === 'terminated') {
                             $this->items->update($supplierId, $itemId, ['status' => 'terminated', 'terminated_on' => $p['terminated_on'],
                                 'termination_entry_id' => $p['termination_entry_id'], 'termination_account_code' => $p['termination_account_code']]);
                         }
@@ -112,11 +123,22 @@ final class PohodaAccrualTakeoverService
                     }
                 }
                 foreach ($plan['opening'] as $o) {
-                    if ((int) round($o['remainder'] * 100) === 0 || $o['entry_id'] === null) {
+                    if ($o['entry_id'] === null) {
                         continue;
                     }
                     $key = self::IMPORT_PREFIX . 'ps:' . $o['account_code'] . ':' . $plan['opening_date'];
                     $existing = $this->items->findByImportKey($supplierId, $key);
+                    if ((int) round($o['remainder'] * 100) === 0) {
+                        // Počáteční stav je rozepsaný celý: položka zbytku nemá co nést.
+                        if ($existing !== null && $existing['status'] !== 'cancelled') {
+                            $pdo->prepare('DELETE FROM accrual_entry_links WHERE supplier_id = ? AND accrual_item_id = ?')->execute([$supplierId, (int) $existing['id']]);
+                            $this->items->update($supplierId, (int) $existing['id'], ['status' => 'cancelled', 'updated_by' => $userId]);
+                        }
+                        continue;
+                    }
+                    if ($existing !== null && $existing['status'] === 'cancelled') {
+                        $this->items->update($supplierId, (int) $existing['id'], ['status' => 'active', 'updated_by' => $userId]);
+                    }
                     $kind = (string) AccrualKinds::kindForAccount($o['account_code']);
                     $itemId = $existing === null ? $this->items->insert($supplierId, [
                         'item_no' => 'PS-' . $o['account_code'] . '-' . substr((string) $plan['opening_date'], 0, 4),
@@ -151,7 +173,7 @@ final class PohodaAccrualTakeoverService
                 if ($own && $pdo->inTransaction()) $pdo->rollBack();
                 throw $e;
             }
-            return ['created' => $created, 'updated' => $updated] + $this->analyze($supplierId);
+            return ['created' => $created, 'updated' => $updated, 'skipped' => $skipped, 'conflicts' => $this->conflicts] + $this->analyze($supplierId);
         });
     }
 
@@ -164,7 +186,7 @@ final class PohodaAccrualTakeoverService
         $sign = AccrualKinds::normalSign((string) $p['kind']);
         $accountId = (int) $this->items->accountId($supplierId, (string) $p['account_code']);
         if ($p['origin'] !== null) {
-            $this->items->addLink($supplierId, $itemId, $p['origin']['entry_id'], $accountId, round($p['origin']['amount'] * $sign, 2), 'origin', 'auto_document_no', null, $userId);
+            $this->addChecked($supplierId, $itemId, (string) $p['item_no'], (int) $p['origin']['entry_id'], $accountId, round($p['origin']['amount'] * $sign, 2), 'origin', 'auto_document_no', null, $userId);
         }
         if ($p['opening_share'] !== null && ($plan['opening_entries'][$p['account_code']] ?? null) !== null) {
             $this->items->addLink($supplierId, $itemId, (int) $plan['opening_entries'][$p['account_code']], $accountId,
@@ -177,6 +199,12 @@ final class PohodaAccrualTakeoverService
         foreach ($p['releases'] as $r) {
             $key = 'release:' . $r['date'];
             $rowId = null;
+            if (isset($usedDue[$key]) && $usedDue[$key]['status'] === 'posted' && (int) $usedDue[$key]['journal_entry_id'] !== (int) $r['entry_id']) {
+                // Týž úsek už rozpustila agenda: převzatý zápis by ho rozpustil podruhé.
+                $this->conflicts[] = ['item_no' => $p['item_no'], 'due_on' => $r['date'], 'entry_id' => $r['entry_id'],
+                    'message' => 'Rozpuštění k ' . $r['date'] . ' už zaúčtovala agenda; převzatý zápis se nenavázal, stornujte jeden z nich.'];
+                continue;
+            }
             if (!isset($usedDue[$key]) || in_array($usedDue[$key]['status'], ['planned', 'cancelled'], true)) {
                 $rowId = $this->items->upsertScheduleRow($supplierId, $itemId, [
                     'kind' => 'release', 'due_on' => $r['date'], 'from_on' => $r['from'], 'to_on' => $r['date'],
@@ -198,6 +226,26 @@ final class PohodaAccrualTakeoverService
             $this->items->addLink($supplierId, $itemId, $t['entry_id'], $accountId, AccrualKinds::releaseLinkAmount((string) $p['kind'], $t['amount']),
                 'termination', 'auto_description', $rowId, $userId);
         }
+    }
+
+    /**
+     * Vazba převzatého zápisu, nejvýš do nenavázané části jeho obratu na účtu (vlastní dřívější
+     * vazba téže položky se započte zpět, převzetí je opakovatelné).
+     */
+    private function addChecked(int $supplierId, int $itemId, string $itemNo, int $entryId, int $accountId, float $amount, string $role, string $matchedBy, ?int $scheduleId, ?int $userId): void
+    {
+        $alloc = $this->items->entryAccountAllocation($supplierId, $entryId, $accountId, true);
+        $own = $this->db->pdo()->prepare('SELECT COALESCE(SUM(amount), 0) FROM accrual_entry_links WHERE supplier_id = ? AND accrual_item_id = ? AND journal_entry_id = ? AND account_id = ? AND role = ?');
+        $own->execute([$supplierId, $itemId, $entryId, $accountId, $role]);
+        $free = round($alloc['turnover'] - $alloc['allocated'] + (float) $own->fetchColumn(), 2);
+        try {
+            AccrualItemService::assertWithin($free, $amount);
+        } catch (AccrualException) {
+            $this->conflicts[] = ['item_no' => $itemNo, 'entry_id' => $entryId,
+                'message' => 'Zápis vzniku je už navázaný na jinou položku; vazba se nevytvořila.'];
+            return;
+        }
+        $this->items->addLink($supplierId, $itemId, $entryId, $accountId, $amount, $role, $matchedBy, $scheduleId, $userId);
     }
 
     private function completeIfDone(int $supplierId, int $itemId): void

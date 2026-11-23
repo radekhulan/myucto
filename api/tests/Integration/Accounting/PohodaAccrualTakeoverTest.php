@@ -169,6 +169,39 @@ final class PohodaAccrualTakeoverTest extends TestCase
         self::assertSame($links, (int) $this->db->pdo()->query('SELECT COUNT(*) FROM accrual_entry_links WHERE supplier_id = ' . $this->supplierId)->fetchColumn());
     }
 
+    /** Nerozepsaný zbytek PS klesne na nulu: položka zbytku se zruší a její vazba zmizí. */
+    public function testRemainderDropsToZeroOnRepeatedTakeover(): void
+    {
+        $this->takeover->apply($this->supplierId, $this->userId);
+        self::assertSame(0.0, $this->reconciliation->reconcile($this->supplierId, '2092-12-31')['totals']['difference']);
+        // Druhá dávka převodu: zápis položky, jejíž doklad v datech chybí, rozpustí přesně nerozepsaný zbytek PS.
+        $this->manual('89CR0009', '2092-05-31', 'Časové rozlišení 89CR0009 — Časové rozlišení daňového dokladu č. NEEXISTUJE1', '384', '602', 1_234.56);
+        $preview = $this->takeover->preview($this->supplierId);
+        self::assertSame(0.0, $preview['summary']['opening_remainder']);
+        $this->takeover->apply($this->supplierId, $this->userId);
+        $ps = $this->item('pohoda:ps:384:2092-01-01');
+        $rec = $this->reconciliation->reconcile($this->supplierId, '2092-12-31');
+        self::assertSame('cancelled', $ps['status'], 'Položka nerozepsaného zbytku bez zbytku se zruší.');
+        self::assertSame(0.0, $this->balance($ps['id'], '2092-12-31'));
+        self::assertSame(0.0, $rec['totals']['difference']);
+    }
+
+
+    /** Opakované převzetí nemění položku, kterou mezitím ukončila agenda. */
+    public function testReapplyKeepsAgendaTermination(): void
+    {
+        $this->takeover->apply($this->supplierId, $this->userId);
+        $c = $this->item('pohoda:92CR0001');
+        $svc = Bootstrap::buildContainer()->get(\MyInvoice\Service\Accounting\Accrual\AccrualPostingService::class);
+        $svc->setToday('2092-12-31');
+        $after = $svc->terminate($this->supplierId, $c['id'], ['date' => '2092-06-30', 'termination_account_code' => '602', 'reverse_future' => true, 'confirm_linked' => true], ['user_id' => $this->userId]);
+        self::assertSame('terminated', $after['status']);
+        $this->takeover->apply($this->supplierId, $this->userId);
+        $again = $this->item('pohoda:92CR0001');
+        self::assertSame('terminated', $again['status']);
+        self::assertSame('2092-06-30', $again['terminated_on']);
+    }
+
     private function invoice(string $number, string $date, float $base): int
     {
         $this->db->pdo()->prepare(
