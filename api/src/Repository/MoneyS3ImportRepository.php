@@ -96,6 +96,29 @@ final class MoneyS3ImportRepository extends AbstractMigrationImportRepository
         return 'money_s3_imports';
     }
 
+    /**
+     * Převzal převod z Money S3 zaúčtování mezd dnů `$from` až `$until` (bez něj)? Rozhoduje
+     * živý převzatý zápis s předpisem na účet zaměstnanců (Dal 331): hrubé mzdy z interního
+     * dokladu mezd nebo čistá mzda závazku. Počáteční stavy a uzávěrka se nepočítají, úhrada
+     * mezd (MD 331) také ne. Mzdy téhož měsíce z mzdového programu by deník i závazky zdvojily.
+     */
+    public function payrollMonthConverted(int $supplierId, string $from, string $until): bool
+    {
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT 1 FROM journal_entries e
+               JOIN journal_entry_lines l ON l.entry_id = e.id AND l.supplier_id = e.supplier_id
+               JOIN chart_of_accounts ca ON ca.id = l.account_id AND ca.supplier_id = l.supplier_id
+              WHERE e.supplier_id = ? AND e.entry_date >= ? AND e.entry_date < ?
+                AND e.source_type NOT IN ('opening', 'closing') AND e.reversed_by IS NULL
+                AND l.side = 'credit' AND (ca.account_code = '331' OR ca.account_code LIKE '331.%')
+                AND EXISTS (SELECT 1 FROM money_s3_import_map m
+                             WHERE m.supplier_id = e.supplier_id AND m.kind = 'journal_entry' AND m.target_id = e.id)
+              LIMIT 1"
+        );
+        $stmt->execute([$supplierId, $from, $until]);
+        return $stmt->fetchColumn() !== false;
+    }
+
     protected function mapTable(): string
     {
         return 'money_s3_import_map';

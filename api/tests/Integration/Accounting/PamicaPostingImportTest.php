@@ -224,6 +224,40 @@ final class PamicaPostingImportTest extends TestCase
         self::assertSame(2, $this->rowCount('internal_documents'));
     }
 
+    /**
+     * Měsíc, jehož mzdy převzal převod z Money S3 (převzatý zápis s předpisem na 331), PAMICA
+     * znovu nenačte: deník i mzdové závazky už v MyÚčtu jsou. Ruční zápis na 331 ani převzatý
+     * zápis jiného měsíce načtení nebrání.
+     */
+    public function testMonthConvertedFromMoneyS3IsRejected(): void
+    {
+        $periodId = (int) $this->row('SELECT id FROM accounting_periods WHERE supplier_id = ? AND fiscal_year = 2099', [$this->supplierId])['id'];
+        $accounts = [];
+        foreach (['521', '331'] as $code) {
+            $accounts[$code] = (int) $this->row('SELECT id FROM chart_of_accounts WHERE supplier_id = ? AND account_code = ?', [$this->supplierId, $code])['id'];
+        }
+        $entry = function (string $date) use ($periodId, $accounts): int {
+            $this->pdo->prepare("INSERT INTO journal_entries (supplier_id, period_id, entry_date, document_no, description, source_type, posted_at)
+                VALUES (?, ?, ?, 'IDM9903', 'Hrubé mzdy', 'manual', NOW())")->execute([$this->supplierId, $periodId, $date]);
+            $id = (int) $this->pdo->lastInsertId();
+            $line = $this->pdo->prepare('INSERT INTO journal_entry_lines (supplier_id, entry_id, line_no, account_id, side, amount) VALUES (?, ?, ?, ?, ?, 30000)');
+            $line->execute([$this->supplierId, $id, 1, $accounts['521'], 'debit']);
+            $line->execute([$this->supplierId, $id, 2, $accounts['331'], 'credit']);
+            return $id;
+        };
+        $map = $this->pdo->prepare("INSERT INTO money_s3_import_map (supplier_id, kind, money_key, target_id) VALUES (?, 'journal_entry', ?, ?)");
+
+        $manual = $entry('2099-03-31');
+        $map->execute([$this->supplierId, '2099|ID|IDM9902|2099-02-28', $entry('2099-02-28')]);
+        self::assertArrayNotHasKey('converted_month', array_column($this->service->preview($this->supplierId, $this->xml)['checks'], 'level', 'code'));
+
+        $map->execute([$this->supplierId, '2099|ID|IDM9903|2099-03-31', $manual]);
+        $check = array_column($this->service->preview($this->supplierId, $this->xml)['checks'], null, 'code')['converted_month'] ?? null;
+        self::assertSame('error', $check['level'] ?? null);
+        self::assertStringContainsString('03/2099', (string) $check['message']);
+        $this->expectApplyError('converted_month');
+    }
+
     private function expectApplyErrorKeepingData(string $code): void
     {
         try {
