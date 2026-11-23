@@ -146,7 +146,7 @@ final readonly class IsdsAccessAction
     {
         return array_map(
             static fn (array $company): array => ['id' => $company['supplier_id'], 'name' => $company['name']],
-            $this->sharing->permittedSuppliers($request, $actor, AccessLevel::WRITE),
+            $this->sharing->permittedSuppliers($request, $actor, AccessLevel::WRITE, allForSuperadmin: true),
         );
     }
 

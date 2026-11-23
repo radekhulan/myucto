@@ -146,6 +146,22 @@ final class CertificateVaultSupplierSharingTest extends TestCase
     }
 
     /**
+     * Správa sdílených přístupů k datovým schránkám nabízí superadminovi všechny firmy instalace,
+     * i když je členem jen některých. Bez volby zůstává výběr omezený na členství (certifikáty).
+     */
+    public function testSuperadminWithMembershipsGetsAllCompaniesOnlyWhenAsked(): void
+    {
+        $limited = array_column($this->sharing->permittedSuppliers($this->request(true), $this->userId, AccessLevel::WRITE), 'supplier_id');
+        $all = array_column($this->sharing->permittedSuppliers($this->request(true), $this->userId, AccessLevel::WRITE, allForSuperadmin: true), 'supplier_id');
+
+        self::assertNotContains($this->foreign, $limited);
+        self::assertContains($this->foreign, $all);
+        self::assertContains($this->source, $all);
+        self::assertNotContains($this->foreign, array_column(
+            $this->sharing->permittedSuppliers($this->request(false), $this->userId, AccessLevel::WRITE, allForSuperadmin: true), 'supplier_id'));
+    }
+
+    /**
      * Superadmin bez jediného členství vidí v přepínači všechny firmy. Kdyby se
      * cíle braly jen z `user_suppliers`, hromadné povolení by u něj nedělalo nic.
      */

@@ -35231,6 +35231,10 @@
       "verifyNew": "When you save, MyÚčto validates the sign-in details with ISDS and finds the data box ID.",
       "companies": "Company access",
       "companiesHint": "You can give several companies permission to send messages and check delivery receipts. Incoming messages from each data box in a given environment go to a single company.",
+      "allCompanies": {
+        "send": "Sending in all companies",
+        "receipts": "Delivery receipts in all companies"
+      },
       "noCompanies": "No companies are available.",
       "noGrants": "No companies can use this access yet.",
       "companyFallback": "Company no. {id}",
