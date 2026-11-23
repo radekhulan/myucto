@@ -171,8 +171,9 @@ final class MoneyS3YearSelectionTest extends MoneyS3ImportTestCase
         $protocol = $this->import($supplierId);
 
         self::assertTrue($protocol->failed(), $this->explain($protocol));
-        $steps = array_column($protocol->toArray()['steps'], null, 'key');
-        self::assertContains('bank_foreign_movements_used', array_column($steps['bank']['messages'], 'code'), $this->explain($protocol));
+        // Kontrola před převodem: převod se zastaví dřív, než cokoli zapíše.
+        self::assertContains('bank_foreign_movements_used', array_column($protocol->get('preflight'), 'code'), $this->explain($protocol));
+        self::assertSame(0, $this->rowCount('journal_entries', $supplierId), 'Deník se nezapsal.');
         self::assertSame(1, $this->movements($supplierId, '2024-03-20', '24200.00'), 'Spárovaný pohyb převod nemaže.');
     }
 
@@ -247,6 +248,46 @@ final class MoneyS3YearSelectionTest extends MoneyS3ImportTestCase
         self::assertSame('Vlastní tržba', $this->db->pdo()->query("SELECT description FROM journal_entries WHERE id = {$ownEntry}")->fetchColumn());
         // Převzaté zápisy roku 2024 popis s číslem dokladu a protistranou dostaly.
         self::assertSame(1, $this->rowCount('journal_entries', $supplierId, "document_no = 'FV24001' AND description LIKE '%Odběratel Beta%'"));
+    }
+
+    /** Adresář zálohy s doklady, ale bez deníku (čerstvě založený rok) kontrola ohlásí. */
+    public function testDirectoryWithDocumentsWithoutJournalIsReported(): void
+    {
+        $files = SyntheticAgenda::patch(SyntheticAgenda::files(), 'ROK.003/VFaktury.DAT', null, [$this->issued('FV26001', '2026-01-10', 1000.0, 210.0)]);
+        SyntheticAgenda::writeLzFiles($this->tmp . '/agenda.lz', $files);
+        $supplierId = $this->supplier();
+
+        $protocol = $this->convert($supplierId, new ImportOptions(ImportOptions::MODE_DRY_RUN));
+
+        $found = array_values(array_filter($protocol->get('preflight'), static fn (array $m): bool => $m['code'] === 'dir_without_journal'));
+        self::assertCount(1, $found, $this->explain($protocol));
+        self::assertSame('ROK.003', $found[0]['context']['dir']);
+        self::assertSame(['vydané faktury' => 1], $found[0]['context']['documents']);
+    }
+
+    /**
+     * Doplnění staršího roku k firmě převedené od roku 2025, která rok 2025 dál zpracovává:
+     * převod doplní rok 2024, uzavře ho proti převzatým počátečním stavům 2025 a rok 2025
+     * nezmění.
+     */
+    public function testOlderYearAddedWhileNextYearInProgress(): void
+    {
+        $supplierId = $this->supplier();
+        $first = $this->convert($supplierId, new ImportOptions(ImportOptions::MODE_IMPORT, fromYear: 2025));
+        self::assertFalse($first->hasErrors(), $this->explain($first));
+        self::assertSame(0, $this->rowCount('journal_entries', $supplierId, "entry_date < '2025-01-01'"));
+        $before = $this->entries2025($supplierId);
+        $invoices2025 = $this->rowCount('invoices', $supplierId, "issue_date >= '2025-01-01'");
+
+        $protocol = $this->convert($supplierId, new ImportOptions(ImportOptions::MODE_IMPORT, fromYear: 2024));
+
+        self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
+        self::assertGreaterThan(0, $this->rowCount('journal_entries', $supplierId, "entry_date < '2025-01-01'"));
+        $periods = $this->container(AccountingPeriodRepository::class);
+        self::assertSame('closed', (string) $periods->findByYear($supplierId, 2024)['status'], $this->explain($protocol));
+        self::assertSame('open', (string) $periods->findByYear($supplierId, 2025)['status']);
+        self::assertSame($before, $this->entries2025($supplierId), 'Rok 2025 se doplněním staršího roku nemění.');
+        self::assertSame($invoices2025, $this->rowCount('invoices', $supplierId, "issue_date >= '2025-01-01'"));
     }
 
     // ── pomocníci ─────────────────────────────────────────────────────────────

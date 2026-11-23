@@ -409,6 +409,42 @@ final class CashBankImporter
     public function importBank(ImportContext $ctx): void
     {
         $p = $ctx->protocol;
+        [$accounts, $byStatement] = $this->bankSource($ctx);
+        $txKeys = self::documentKeys($byStatement);
+        $this->importBankStatements($ctx, $accounts, $byStatement, $txKeys);
+    }
+
+    /**
+     * Kontrola před převodem: pohyby stažené z banky na účtech, které vede Money, se kterými
+     * se v MyÚčtu už pracovalo a které převod přinese z Money znovu ({@see dropForeignMovements()}).
+     * Převod by se na nich zastavil až v kroku banky; kontrola je ohlásí dřív, než převod
+     * cokoli zapíše. Nic nemaže ani nemění.
+     *
+     * @return array{code:string,message:string,context:array<string,mixed>}|null
+     */
+    public function foreignMovementsBlocker(ImportContext $ctx): ?array
+    {
+        [$accounts, $byStatement] = $this->bankSource($ctx);
+        try {
+            $found = $this->findForeignMovements($ctx, $accounts, $byStatement, new BankStatementImportWriter($this->db, 'money-s3'));
+        } catch (MoneyS3Exception $e) {
+            return ['code' => $e->errorCode, 'message' => $e->getMessage(), 'context' => $e->context];
+        }
+        if ($found['used'] === []) {
+            return null;
+        }
+        $e = self::usedForeignMovements($found['used']);
+        return ['code' => $e->errorCode, 'message' => $e->getMessage(), 'context' => $e->context];
+    }
+
+    /**
+     * Bankovní účty Money (`SzUcPokl`, zkratka => údaje) a pohyby převáděných let po výpisech
+     * ("rok|zkratka účtu" => pohyby).
+     *
+     * @return array{0:array<string,array<string,mixed>>,1:array<string,list<array<string,mixed>>>}
+     */
+    private function bankSource(ImportContext $ctx): array
+    {
         $accounts = [];
         foreach ($ctx->backup->rowsAcrossYears('SzUcPokl') as $r) {
             $code = trim((string) ($r['Zkrat'] ?? ''));
@@ -450,9 +486,18 @@ final class CashBankImporter
             $code = trim((string) ($r['Ucet'] ?? '')) ?: ((string) (array_key_first($accounts) ?? 'BANKA'));
             $byStatement[$year . '|' . $code][] = $r;
         }
-
         ksort($byStatement);
-        $txKeys = self::documentKeys($byStatement);
+        return [$accounts, $byStatement];
+    }
+
+    /**
+     * @param array<string,array<string,mixed>> $accounts
+     * @param array<string,list<array<string,mixed>>> $byStatement
+     * @param array<string,mixed> $txKeys
+     */
+    private function importBankStatements(ImportContext $ctx, array $accounts, array $byStatement, array $txKeys): void
+    {
+        $p = $ctx->protocol;
 
         // Zkouška nanečisto účet firmy nedoplňuje: zámek řádku měny by v její transakci
         // blokoval vystavování dokladů firmy (cizí klíč na měnu) až do konce zkoušky.
@@ -642,6 +687,66 @@ final class CashBankImporter
      */
     private function dropForeignMovements(ImportContext $ctx, array $accounts, array $byStatement, BankStatementImportWriter $writer): void
     {
+        ['duplicates' => $duplicates, 'used' => $used, 'unmatched' => $unmatched] = $this->findForeignMovements($ctx, $accounts, $byStatement, $writer);
+        if ($used !== []) {
+            throw self::usedForeignMovements($used);
+        }
+        if ($unmatched !== []) {
+            $ctx->protocol->warn(self::STEP_BANK, 'foreign_movements_without_counterpart', sprintf(
+                'Na účtech, které vede Money, je %d pohybů stažených z banky (nebo z nahraného výpisu) v době, kterou Money pokrývá, ale Money je nemá. Převod je nechal; ověřte, zda nechybí v Money: %s.',
+                count($unmatched), self::describeMovements($unmatched),
+            ), ['movements' => array_slice($unmatched, 0, ImportProtocol::LIST_LIMIT)]);
+        }
+        if ($duplicates === []) {
+            return;
+        }
+        try {
+            $deleted = array_fill_keys($writer->deleteMovements($ctx->supplierId, array_column($duplicates, 'id')), true);
+        } catch (\PDOException $e) {
+            if (TransactionFailure::aborted($e) || ($e->errorInfo[0] ?? null) !== '23000') {
+                throw $e;
+            }
+            throw new MoneyS3Exception('bank_foreign_movements_used', 'Pohyby stažené z banky na účtech, které vede Money, nejde smazat - navazuje na ně jiná evidence v MyÚčtu. Vyřešte je ručně a převod spusťte znovu.');
+        }
+        $removed = array_values(array_filter($duplicates, static fn (array $m): bool => isset($deleted[$m['id']])));
+        if (count($removed) !== count($duplicates)) {
+            throw new MoneyS3Exception('bank_foreign_movements_used', 'Pohyby stažené z banky na účtech, které vede Money, se mezitím v MyÚčtu navázaly (párování, úhrada, zaúčtování). Převod se zastavil, spusťte ho znovu.');
+        }
+        $ctx->protocol->count(self::STEP_BANK, 'foreign_movements_deleted', count($removed));
+        $ctx->protocol->info(self::STEP_BANK, 'foreign_movements_deleted', sprintf(
+            'Smazáno %d nespárovaných pohybů stažených z banky (API, GPC) na účtech, které vede Money; převod je nahradil stejnými pohyby z Money: %s.',
+            count($removed), self::describeMovements($removed),
+        ), ['movements' => array_slice($removed, 0, ImportProtocol::LIST_LIMIT)]);
+    }
+
+    /** @param list<array<string,mixed>> $used */
+    private static function usedForeignMovements(array $used): MoneyS3Exception
+    {
+        return new MoneyS3Exception('bank_foreign_movements_used', sprintf(
+            'Na účtech, které vede Money, je %d pohybů stažených z banky (nebo z nahraného výpisu), které Money převod přinese znovu a se kterými se v MyÚčtu už pracovalo (spárované, zaúčtované, ignorované nebo jinak navázané). '
+            . 'Převod by je zdvojil. Zrušte u nich párování a zaúčtování, nebo je smažte, a převod spusťte znovu: %s.',
+            count($used), self::describeMovements($used),
+        ), ['movements' => array_slice($used, 0, ImportProtocol::LIST_LIMIT)]);
+    }
+
+    /** @param list<array<string,mixed>> $movements */
+    private static function describeMovements(array $movements): string
+    {
+        return implode('; ', array_map(static fn (array $m): string => sprintf('%s %s %s%s',
+            $m['account'], date('j. n. Y', (int) strtotime($m['posted_at'])), number_format((float) $m['amount'], 2, ',', ' '),
+            $m['variable_symbol'] ? ', VS ' . $m['variable_symbol'] : ''), array_slice($movements, 0, 10))) . (count($movements) > 10 ? '; …' : '');
+    }
+
+    /**
+     * Pohyby jiného zdroje na účtech Money v době, kterou převáděné pohyby Money pokrývají
+     * ({@see dropForeignMovements()}): duplicitní (k smazání), použité v MyÚčtu a bez protějšku.
+     *
+     * @param array<string,array<string,mixed>> $accounts
+     * @param array<string,list<array<string,mixed>>> $byStatement
+     * @return array{duplicates:list<array<string,mixed>>,used:list<array<string,mixed>>,unmatched:list<array<string,mixed>>}
+     */
+    private function findForeignMovements(ImportContext $ctx, array $accounts, array $byStatement, BankStatementImportWriter $writer): array
+    {
         $coverage = [];
         foreach ($byStatement as $statementKey => $rows) {
             [$yearText, $code] = explode('|', (string) $statementKey, 2);
@@ -687,42 +792,7 @@ final class CashBankImporter
             }
             unset($list);
         }
-        $describe = static fn (array $movements): string => implode('; ', array_map(static fn (array $m): string => sprintf('%s %s %s%s',
-            $m['account'], date('j. n. Y', (int) strtotime($m['posted_at'])), number_format((float) $m['amount'], 2, ',', ' '),
-            $m['variable_symbol'] ? ', VS ' . $m['variable_symbol'] : ''), array_slice($movements, 0, 10))) . (count($movements) > 10 ? '; …' : '');
-        if ($used !== []) {
-            throw new MoneyS3Exception('bank_foreign_movements_used', sprintf(
-                'Na účtech, které vede Money, je %d pohybů stažených z banky (nebo z nahraného výpisu), které Money převod přinese znovu a se kterými se v MyÚčtu už pracovalo (spárované, zaúčtované, ignorované nebo jinak navázané). '
-                . 'Převod by je zdvojil. Zrušte u nich párování a zaúčtování, nebo je smažte, a převod spusťte znovu: %s.',
-                count($used), $describe($used),
-            ), ['movements' => array_slice($used, 0, ImportProtocol::LIST_LIMIT)]);
-        }
-        if ($unmatched !== []) {
-            $ctx->protocol->warn(self::STEP_BANK, 'foreign_movements_without_counterpart', sprintf(
-                'Na účtech, které vede Money, je %d pohybů stažených z banky (nebo z nahraného výpisu) v době, kterou Money pokrývá, ale Money je nemá. Převod je nechal; ověřte, zda nechybí v Money: %s.',
-                count($unmatched), $describe($unmatched),
-            ), ['movements' => array_slice($unmatched, 0, ImportProtocol::LIST_LIMIT)]);
-        }
-        if ($duplicates === []) {
-            return;
-        }
-        try {
-            $deleted = array_fill_keys($writer->deleteMovements($ctx->supplierId, array_column($duplicates, 'id')), true);
-        } catch (\PDOException $e) {
-            if (TransactionFailure::aborted($e) || ($e->errorInfo[0] ?? null) !== '23000') {
-                throw $e;
-            }
-            throw new MoneyS3Exception('bank_foreign_movements_used', 'Pohyby stažené z banky na účtech, které vede Money, nejde smazat - navazuje na ně jiná evidence v MyÚčtu. Vyřešte je ručně a převod spusťte znovu.');
-        }
-        $removed = array_values(array_filter($duplicates, static fn (array $m): bool => isset($deleted[$m['id']])));
-        if (count($removed) !== count($duplicates)) {
-            throw new MoneyS3Exception('bank_foreign_movements_used', 'Pohyby stažené z banky na účtech, které vede Money, se mezitím v MyÚčtu navázaly (párování, úhrada, zaúčtování). Převod se zastavil, spusťte ho znovu.');
-        }
-        $ctx->protocol->count(self::STEP_BANK, 'foreign_movements_deleted', count($removed));
-        $ctx->protocol->info(self::STEP_BANK, 'foreign_movements_deleted', sprintf(
-            'Smazáno %d nespárovaných pohybů stažených z banky (API, GPC) na účtech, které vede Money; převod je nahradil stejnými pohyby z Money: %s.',
-            count($removed), $describe($removed),
-        ), ['movements' => array_slice($removed, 0, ImportProtocol::LIST_LIMIT)]);
+        return ['duplicates' => $duplicates, 'used' => $used, 'unmatched' => $unmatched];
     }
 
     /**

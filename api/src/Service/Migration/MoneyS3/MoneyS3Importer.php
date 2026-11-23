@@ -504,8 +504,58 @@ final class MoneyS3Importer
         if ($openingOnly !== null && !$taxRecords) {
             array_push($out, ...$this->openingOnlyChecks($supplierId, $openingOnly, $lockedUntil));
         }
+        if (!$taxRecords) {
+            foreach (self::directoriesWithoutJournal($backup) as $dir => $counts) {
+                $add('warning', 'dir_without_journal', sprintf(
+                    'Adresář %s zálohy nemá účetní deník, ale obsahuje doklady (%s). Převod bere jen roky s deníkem, tyto doklady se nepřevedou. Bývá to čerstvě založený rok v Money.',
+                    $dir, implode(', ', array_map(static fn (string $t, int $n): string => "{$t} {$n}", array_keys($counts), $counts)),
+                ), ['dir' => $dir, 'documents' => $counts]);
+            }
+        }
+        if ($plan !== [] && !$taxRecords && !$options->relinkOnly) {
+            // Pohyby z banky na účtech Money, se kterými se v MyÚčtu už pracovalo: převod by se na
+            // nich zastavil až v kroku banky, po zápisu deníku a dokladů.
+            $probe = new ImportContext($supplierId, 0, $backup, $agenda, $options, new ImportProtocol($options->mode), $calendar);
+            $probe->lockedUntil = $lockedUntil;
+            foreach ($plan as $item) {
+                $probe->dirYears[(string) $item['dir']] = (int) $item['year'];
+                $period = $this->periods->findByYear($supplierId, (int) $item['year']);
+                $probe->periods[(int) $item['year']] = ['id' => (int) ($period['id'] ?? 0), 'starts_on' => (string) ($period['starts_on'] ?? $item['starts_on']),
+                    'ends_on' => (string) ($period['ends_on'] ?? $item['ends_on']), 'status' => (string) ($period['status'] ?? 'open'),
+                    'locked' => $period !== null && (string) $period['status'] !== 'open'];
+            }
+            $bank = $this->cashBank->foreignMovementsBlocker($probe);
+            if ($bank !== null) {
+                $add('error', $bank['code'], $bank['message'], $bank['context']);
+            }
+        }
         if ($plan !== [] && !$taxRecords && $conflict === null && ($supplier['accounting_mode'] ?? '') !== 'double_entry') {
             $add('info', 'switch_to_double_entry', 'Firma se převodem přepne do podvojného účetnictví.');
+        }
+        return $out;
+    }
+
+    /**
+     * Adresáře zálohy bez účetního deníku, které přesto nesou doklady, banku nebo pokladnu:
+     * rozvrh převodu stojí na deníku, takový adresář by převod vynechal bez zmínky.
+     *
+     * @return array<string,array<string,int>> adresář => tabulka => počet řádků
+     */
+    private static function directoriesWithoutJournal(Ms3Backup $backup): array
+    {
+        $labels = ['VFaktury' => 'vydané faktury', 'PFaktury' => 'přijaté faktury', 'BankKnih' => 'banka', 'PoklKnih' => 'pokladna'];
+        $out = [];
+        foreach ($backup->yearDirs() as $dir) {
+            $journal = $backup->table('UcDenik', $dir);
+            if ($journal !== null && $journal->hasData()) {
+                continue;
+            }
+            foreach ($labels as $table => $label) {
+                $t = $backup->table($table, $dir);
+                if ($t !== null && $t->hasData() && ($n = $t->countRows()) > 0) {
+                    $out[basename($dir)][$label] = $n;
+                }
+            }
         }
         return $out;
     }
