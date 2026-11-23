@@ -2084,10 +2084,11 @@ final class SyntheticAgenda
      * záloha na daň (331/342100, 3 810 Kč), čistá mzda na témž účtu 331/331 (22 710 Kč) a exekuce
      * (331/379000, 500 Kč). Pojistné a mzdu Money uhradilo až v lednu 2025 (`UhDatum`), daň
      * zůstává neuhrazená (`UhZbyva`), zdravotní pojištění 2023 je uhrazené ještě v prosinci 2024.
+     * `$extra` přidá další neuhrazené závazky 100 Kč s vlastním zápisem KZ 524/336200 (objem dat).
      *
      * @return array<string,string>
      */
-    public static function filesWithPayrollLiabilities(): array
+    public static function filesWithPayrollLiabilities(int $extra = 0): array
     {
         $files = self::files();
         $chart = iterator_to_array(Ms3Table::fromString($files['ROK.001/UcOsnova.DAT'], 'UCOSNOVA')->rows(), false);
@@ -2113,25 +2114,67 @@ final class SyntheticAgenda
             $kz(506, 'ZA241203', 'Daň z příjmů zálohová', '331000', '342100', 3810.0),
             $kz(507, 'ZA241204', 'Vyúčtování mzdy', '331000', '331000', 22210.0),
             $kz(508, 'ZA241205', 'Exekuce', '331000', '379000', 500.0),
+            ...array_map(static fn (int $i): array => $kz(600 + $i, sprintf('ZP24%04d', $i), 'Pojištění dohody', '524100', '336200', 100.0), $extra > 0 ? range(1, $extra) : []),
         ]);
         $mz = static fn (int $code): array => ['MZTyp' => 1, 'MZRok' => 2024, 'MZMesic' => 12, 'MZDI_Zauct' => $code];
-        $row = static fn (int $no, string $doc, string $text, float $total, float $left, ?string $paid, string $partner, string $vs, int $code): array =>
+        $row = static fn (int $no, string $doc, string $text, float $total, float $left, ?string $paid, string $partner, string $vs, int $code, string $paidBy = ''): array =>
             ['Cislo' => $no, 'Doklad' => $doc, 'Popis' => $text, 'AdNazev' => $partner, 'DatUcPr' => $date, 'DatVyst' => $date, 'DatSpl' => '2025-01-20',
-             'Celkem' => $total, 'UhZbyva' => $left, 'UhDatum' => $paid, 'VarSym' => $vs] + $mz($code);
+             'Celkem' => $total, 'UhZbyva' => $left, 'UhDatum' => $paid, 'UDoklad' => $paidBy, 'VarSym' => $vs] + $mz($code);
         $files['ROK.001/KnihZav.DAT'] = Ms3FixtureWriter::table([
             ['Cislo', 'L', 4], ['Doklad', 'C', 10], ['Popis', 'C', 50], ['AdCislo', 'L', 4], ['AdNazev', 'C', 60], ['DatUcPr', 'D', 2], ['DatVyst', 'D', 2],
-            ['DatSpl', 'D', 2], ['Celkem', 'E', 10], ['UhZbyva', 'E', 10], ['UhDatum', 'D', 2], ['VarSym', 'C', 20], ['Storno', 'B', 1],
+            ['DatSpl', 'D', 2], ['Celkem', 'E', 10], ['UhZbyva', 'E', 10], ['UhDatum', 'D', 2], ['UDoklad', 'C', 10], ['VarSym', 'C', 20], ['Storno', 'B', 1],
             ['MZTyp', 'V', 1], ['MZRok', 'W', 2], ['MZMesic', 'V', 1], ['MZDI_Zauct', 'V', 1],
         ], [
-            $row(1, 'ZA241201', 'Sociální pojištění - Prosinec 2024', 9570.0, 0.0, '2025-01-12', 'Správa sociálního zabezpečení', '1000000005', 7),
-            $row(2, 'ZA241202', 'Zdravotní pojištění - Prosinec 2024', 4050.0, 0.0, '2025-01-12', 'Zdravotní pojišťovna', '12345679', 10),
+            $row(1, 'ZA241201', 'Sociální pojištění - Prosinec 2024', 9570.0, 0.0, '2025-01-12', 'Správa sociálního zabezpečení', '1000000005', 7, 'BV25011'),
+            $row(2, 'ZA241202', 'Zdravotní pojištění - Prosinec 2024', 4050.0, 0.0, '2025-01-12', 'Zdravotní pojišťovna', '12345679', 10, 'BV25012'),
             $row(3, 'ZA241203', 'Daň z příjmů zálohová - Prosinec 2024', 3810.0, 3810.0, null, 'Finanční úřad', '12345679', 5),
-            $row(4, 'ZA241204', 'Vyúčtování mzdy - Prosinec 2024', 22210.0, 0.0, '2025-01-12', 'Zaměstnanec Vzorový', '1212', 1),
-            $row(5, 'ZA241205', 'Exekuce - Prosinec 2024', 500.0, 0.0, '2025-01-12', 'Exekutorský úřad', '555', 14),
+            $row(4, 'ZA241204', 'Vyúčtování mzdy - Prosinec 2024', 22210.0, 0.0, '2025-01-12', 'Zaměstnanec Vzorový', '1212', 1, 'BV25013'),
+            $row(5, 'ZA241205', 'Exekuce - Prosinec 2024', 500.0, 0.0, '2025-01-12', 'Exekutorský úřad', '555', 14, 'BV25014'),
             // Zdravotní pojištění za listopad uhrazené ještě v prosinci: ke konci roku otevřené není.
-            $row(6, 'ZA241101', 'Zdravotní pojištění - Listopad 2024', 4050.0, 0.0, '2024-12-12', 'Zdravotní pojišťovna', '12345679', 10),
+            $row(6, 'ZA241101', 'Zdravotní pojištění - Listopad 2024', 4050.0, 0.0, '2024-12-12', 'Zdravotní pojišťovna', '12345679', 10, 'BV24011'),
+            ...array_map(static fn (int $i): array => $row(100 + $i, sprintf('ZP24%04d', $i), 'Pojištění dohody - Prosinec 2024', 100.0, 100.0, null,
+                'Správa sociálního zabezpečení', '1000000005', 7), $extra > 0 ? range(1, $extra) : []),
         ]);
         return $files;
+    }
+
+    /**
+     * Mzdové závazky za 12/2024 ({@see filesWithPayrollLiabilities()}) s rokem 2025: počáteční
+     * stavy 2025 nesou zůstatky mzdových účtů (VH 2024 snížený o mzdové náklady) a v lednu
+     * Money uhradilo bankou sociální pojištění (BV25011, 336.200) a čistou mzdu (BV25013, 331).
+     * Úhrada zdravotního pojištění (BV25012) v bance není.
+     *
+     * @return array<string,string>
+     */
+    public static function filesWithPayrollLiabilitiesPaidNextYear(): array
+    {
+        $files = self::filesWithPayrollLiabilities();
+        $chart = iterator_to_array(Ms3Table::fromString($files['ROK.002/UcOsnova.DAT'], 'UCOSNOVA')->rows(), false);
+        $payrollChart = array_values(array_filter(
+            iterator_to_array(Ms3Table::fromString($files['ROK.001/UcOsnova.DAT'], 'UCOSNOVA')->rows(), false),
+            static fn (array $r): bool => in_array(substr((string) $r['Ucet'], 0, 3), ['331', '336', '342', '379', '521', '524'], true),
+        ));
+        $files['ROK.002/UcOsnova.DAT'] = Ms3FixtureWriter::table(self::CHART_FIELDS, array_merge($chart, $payrollChart));
+        $xp = static fn (int $no, string $md, string $d, float $amount): array =>
+            ['Cislo' => $no, 'Zdroj' => 'XP', 'Datum' => '2025-01-01', 'Popis' => 'Počáteční stav roku 2025', 'UcMD' => $md, 'UcD' => $d, 'Castka' => $amount];
+        $bk = static fn (int $no, string $doc, string $text, string $md, float $amount): array =>
+            ['Cislo' => $no, 'Zdroj' => 'BK', 'Doklad' => $doc, 'Datum' => '2025-01-12', 'Popis' => $text, 'UcMD' => $md, 'UcD' => '221001', 'Castka' => $amount];
+        $files = self::patch($files, 'ROK.002/UcDenik.DAT', null, [
+            $xp(-201, '701000', '331000', 22210.0),
+            $xp(-202, '701000', '336100', 4050.0),
+            $xp(-203, '701000', '336200', 9570.0),
+            $xp(-204, '701000', '342100', 3810.0),
+            $xp(-205, '701000', '379000', 500.0),
+            $xp(-206, '431000', '701000', 40140.0),
+            $bk(501, 'BV25011', 'Sociální pojištění 12/2024', '336200', 9570.0),
+            $bk(502, 'BV25013', 'Mzda 12/2024', '331000', 22210.0),
+        ]);
+        return self::patch($files, 'ROK.002/BankKnih.DAT', null, [
+            ['Doklad' => 'BV25011', 'Ucet' => 'BU', 'Vydej' => 1, 'DatUcPr' => '2025-01-12', 'DatPlat' => '2025-01-12', 'Celkem' => 9570.0, 'VarSym' => '1000000005',
+                'AdNazev' => 'Správa sociálního zabezpečení', 'Popis' => 'Sociální pojištění 12/2024', 'Vypis' => 11],
+            ['Doklad' => 'BV25013', 'Ucet' => 'BU', 'Vydej' => 1, 'DatUcPr' => '2025-01-12', 'DatPlat' => '2025-01-12', 'Celkem' => 22210.0, 'VarSym' => '1212',
+                'AdNazev' => 'Zaměstnanec Vzorový', 'Popis' => 'Mzda 12/2024', 'Vypis' => 11],
+        ]);
     }
 
     /**

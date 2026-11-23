@@ -19,8 +19,7 @@ final class MoneyS3SaldoCheckTest extends MoneyS3ImportTestCase
 {
     /**
      * Mzdové závazky převzaté se zápisem pokryjí počáteční stav 336 a 342. Čistá mzda (potvrzená
-     * položka bez zápisu, předpis nese interní doklad mezd) saldokonto 331 nepokryje a kontrola
-     * rozdíl ohlásí.
+     * položka bez zápisu) má předpis v řádku 331 interního dokladu mezd a pokryje počáteční stav 331.
      */
     public function testPayrollAccountsMatchOpeningBalances(): void
     {
@@ -32,16 +31,15 @@ final class MoneyS3SaldoCheckTest extends MoneyS3ImportTestCase
         self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
         $check = $this->accounts($protocol);
         self::assertSame('2024-12-31', $protocol->get(SaldoOpeningCheck::STEP)['as_of']);
-        foreach (['336' => 13620.0, '342' => 3810.0] as $key => $balance) {
+        foreach (['331' => 22210.0, '336' => 13620.0, '342' => 3810.0] as $key => $balance) {
             $code = (string) $key;
             $row = $this->row($check, $code);
             self::assertSame($balance, $row['balance'], $code . ' ' . $this->explain($protocol));
             self::assertSame($balance, $row['open_items'], $code);
             self::assertSame(0.0, $row['difference'], $code);
         }
-        self::assertSame(22210.0, $this->row($check, '331')['difference']);
         $step = array_column($protocol->toArray()['steps'], null, 'key')[SaldoOpeningCheck::STEP];
-        self::assertContains('saldo_check_difference', array_column($step['messages'], 'code'));
+        self::assertSame(['saldo_check_ok'], array_column($step['messages'], 'code'), $this->explain($protocol));
     }
 
     /** Zůstatek 311 bez dokladu (doklady počátečního stavu nevznikly) protokol ohlásí. */
