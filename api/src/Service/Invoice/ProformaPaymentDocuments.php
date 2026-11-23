@@ -177,6 +177,9 @@ final class ProformaPaymentDocuments
                 if (!in_array($e->errorCode, ['quote_quantity_unavailable', 'quote_deposit_requires_offer', 'quote_has_pending_order'], true)) {
                     throw $e;
                 }
+            } catch (ProformaWithoutVatRatesException) {
+                // Záloha převzatá bez sazeb DPH: konečnou fakturu vystaví uživatel ručně,
+                // zápis úhrady to nesmí shodit.
             }
         }
 

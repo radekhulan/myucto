@@ -7859,7 +7859,9 @@ paths:
             proforma daňový doklad k platbě s daní, ale její úhrada zaúčtovaná bankou či pokladnou nebo
             převzatá z počátečních stavů nepokrývá, co by konečná faktura odečetla; konečnou fakturu
             by nešlo zaúčtovat. Zaúčtujte úhradu zálohy, nebo zálohový list označte jako převzatý
-            z počátečních stavů (`PUT /invoices/{id}/opening-balance`).
+            z počátečních stavů (`PUT /invoices/{id}/opening-balance`). Dále `proforma_without_vat_rates`: zálohová faktura
+            převzatá bez sazeb DPH (Money S3) nemá daňový doklad k platbě se sazbou, nebo ho má jen
+            na část zálohy; sazbu plnění nejde určit a konečnou fakturu je nutné vystavit ručně.
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }

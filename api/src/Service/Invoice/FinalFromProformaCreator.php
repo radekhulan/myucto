@@ -122,18 +122,6 @@ final class FinalFromProformaCreator
         $taxDate = $taxDate ?? date('Y-m-d');
         $dueDate = $dueDate ?? date('Y-m-d');
 
-        VatRateValidityGuard::assertValidOn(
-            $pdo,
-            array_column(
-                array_filter(
-                    $proforma['items'],
-                    static fn (array $item): bool => (float) ($item['total_with_vat'] ?? 0) > 0.0,
-                ),
-                'vat_rate_id',
-            ),
-            $taxDate,
-        );
-
         // Daňové doklady k přijatým platbám proformy (§ 37a ZDPH): jejich základ/daň
         // se na vyúčtování odečte zápornými řádky per doklad per sazba — daň na finálu
         // pak vychází jen ze zbytku (už zdaněná část se nedaní podruhé). Drafty a
@@ -169,6 +157,32 @@ final class FinalFromProformaCreator
         }
         $taxDocGross = round($taxDocGross, 2);
 
+        // Záloha, jejíž položky sazbu plnění nenesou (převzatá z programu, který zálohy vede
+        // bez sazeb): položky konečné faktury nesou sazby jejích DDKP, jinak by odpočtové
+        // řádky DDKP vyšly proti nulové sazbě a faktura se zápornou DPH ({@see ProformaVatRates}).
+        $taxDocVat = round(array_sum(array_map(static fn (array $r): float => (float) $r['vat'], $taxDocRates)), 2);
+        if (ProformaVatRates::itemsWithoutVat((array) $proforma['items']) && abs($taxDocVat) >= 0.005) {
+            $proforma['items'] = $this->itemsFromTaxDocuments($proforma, $taxDocRates, $taxDocGross);
+        } elseif (ProformaVatRates::ratesUnknown($pdo, $proforma, $taxDate)) {
+            throw new ProformaWithoutVatRatesException(sprintf(
+                'Zálohová faktura %s je převzatá z Money S3 bez sazeb DPH a nemá daňový doklad k přijaté platbě se sazbou. '
+                . 'Konečná faktura by vyšla bez DPH. Vystavte ji ručně se sazbami plnění, nebo nejdřív doplňte sazby položek zálohy.',
+                (string) ($proforma['varsymbol'] ?? '#' . $proformaId),
+            ));
+        }
+
+        VatRateValidityGuard::assertValidOn(
+            $pdo,
+            array_column(
+                array_filter(
+                    $proforma['items'],
+                    static fn (array $item): bool => (float) ($item['total_with_vat'] ?? 0) > 0.0,
+                ),
+                'vat_rate_id',
+            ),
+            $taxDate,
+        );
+
         if ($advance === null) {
             $paidTotal = (float) ($proforma['paid_total'] ?? 0);
             if ($paidTotal > 0 || $taxDocGross > 0) {
@@ -192,7 +206,6 @@ final class FinalFromProformaCreator
         // Proforma s DDKP s daní: zaúčtování konečné faktury zúčtuje jen přijatou zálohu,
         // kterou nese deník (stejně jako čerpání v AdvancePartialDrawdown). Faktura odečte
         // DDKP odpočtovými řádky a úhradu bez DDKP v hlavičce, obojí musí přijatá záloha krýt.
-        $taxDocVat = round(array_sum(array_map(static fn (array $r): float => (float) $r['vat'], $taxDocRates)), 2);
         if ($requirePostedReceipt && abs($taxDocVat) >= 0.005) {
             (new AdvanceReceiptGuard($this->db))->assertCovers(
                 (int) $proforma['supplier_id'],
@@ -448,6 +461,63 @@ final class FinalFromProformaCreator
         }
 
         return $finalId;
+    }
+
+    /**
+     * Položky konečné faktury k záloze bez sazeb: jedna položka na sazbu (a místo plnění
+     * či klasifikaci) jejích DDKP v jejich výši, takže odpočtové řádky § 37a je přesně
+     * vyrovnají. Část zálohy, kterou DDKP nepokrývají, sazbu nemá a faktura by ji vyúčtovala
+     * bez daně; takovou zálohu nejde vyúčtovat automaticky.
+     *
+     * @param array<string,mixed> $proforma
+     * @param list<array<string,mixed>> $taxDocRates
+     * @return list<array<string,mixed>>
+     */
+    private function itemsFromTaxDocuments(array $proforma, array $taxDocRates, float $taxDocGross): array
+    {
+        $proformaItems = (array) $proforma['items'];
+        if ((float) $proforma['total_with_vat'] - $taxDocGross >= 0.01) {
+            throw new ProformaWithoutVatRatesException(sprintf(
+                'Zálohová faktura %s nenese sazby DPH a daňové doklady k přijatým platbám pokrývají jen %s z %s. '
+                . 'Sazbu zbytku nejde určit; vystavte konečnou fakturu ručně se sazbami plnění.',
+                (string) ($proforma['varsymbol'] ?? '#' . $proforma['id']),
+                number_format($taxDocGross, 2, ',', ' '),
+                number_format((float) $proforma['total_with_vat'], 2, ',', ' '),
+            ));
+        }
+        $first = $proformaItems[0] ?? [];
+        $description = count($proformaItems) === 1 && trim((string) ($first['description'] ?? '')) !== ''
+            ? (string) $first['description']
+            : ((($proforma['language'] ?? 'cs') === 'en' ? 'Supply under advance invoice ' : 'Plnění dle zálohové faktury ') . ($proforma['varsymbol'] ?? ''));
+        $grossMode = !empty($proforma['prices_include_vat']);
+        $groups = [];
+        foreach ($taxDocRates as $r) {
+            $key = implode('|', array_map(static fn ($v): string => (string) $v, array_diff_key($r, array_flip(['id', 'varsymbol', 'base', 'vat', 'gross']))));
+            $groups[$key] ??= $r + ['base_sum' => 0.0, 'gross_sum' => 0.0];
+            $groups[$key]['base_sum'] += (float) $r['base'];
+            $groups[$key]['gross_sum'] += (float) $r['gross'];
+        }
+        $items = [];
+        $order = 0;
+        foreach ($groups as $g) {
+            $amount = round($grossMode ? $g['gross_sum'] : $g['base_sum'], 2);
+            if (abs($amount) < 0.005) {
+                continue;
+            }
+            $items[] = array_diff_key($g, array_flip(['id', 'varsymbol', 'base', 'vat', 'gross', 'base_sum', 'gross_sum'])) + [
+                'description' => count($groups) > 1 ? $description . ' (' . rtrim(rtrim(number_format((float) $g['vat_rate_snapshot'], 2, '.', ''), '0'), '.') . ' %)' : $description,
+                'quantity' => 1,
+                'duration_minutes' => null,
+                'unit' => (string) ($first['unit'] ?? ''),
+                'unit_price_without_vat' => $amount,
+                'order_index' => ++$order,
+                'item_kind' => 'standard',
+                'revenue_account_code' => $first['revenue_account_code'] ?? null,
+                'total_without_vat' => round($g['base_sum'], 2),
+                'total_with_vat' => round($g['gross_sum'], 2),
+            ];
+        }
+        return $items;
     }
 
     /**

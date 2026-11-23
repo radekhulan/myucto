@@ -13,6 +13,7 @@ use MyInvoice\Repository\InvoiceRepository;
 use MyInvoice\Service\Accounting\DocumentLockService;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Invoice\AdvanceReceiptNotPostedException;
+use MyInvoice\Service\Invoice\ProformaWithoutVatRatesException;
 use MyInvoice\Service\Invoice\FinalFromProformaCreator;
 use MyInvoice\Service\IpMatcher;
 use MyInvoice\Service\SalesQuote\QuoteException;
@@ -98,6 +99,8 @@ final class IssueFinalFromProformaAction
             return Json::error($response, $e->errorCode, $e->getMessage(), $e->httpStatus);
         } catch (AdvanceReceiptNotPostedException $e) {
             return Json::error($response, AdvanceReceiptNotPostedException::ERROR_CODE, $e->getMessage(), 409);
+        } catch (ProformaWithoutVatRatesException $e) {
+            return Json::error($response, ProformaWithoutVatRatesException::ERROR_CODE, $e->getMessage(), 409);
         } catch (\Throwable $e) {
             return Json::internalError($response, 'create_failed', $e->getMessage(), 500);
         }

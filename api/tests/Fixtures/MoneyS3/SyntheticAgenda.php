@@ -1214,15 +1214,19 @@ final class SyntheticAgenda
             $line('FV', 'FV25042', '2025-12-15', 'Prodej', '311000', '602000', 500.0, '2025642'),
             $line('FV', 'FV25042', '2025-12-15', 'Prodej', '311000', '343200', 105.0, '2025642'),
             $line('BK', 'BP25050', '2025-09-05', 'Úhrada zálohové faktury ZV25050', '221001', '324000', 1210.0, '25050'),
-            $line('FV', 'DD25050', '2025-09-05', 'DPH ze zálohy', '324000', '343200', 210.0, '25050'),
+            $line('FV', 'DD25050', '2025-09-05', 'DPH ze zálohy', '324000', '343200', 210.0, ''),
             $line('ID', 'ID25051', '2025-09-10', 'Zápočet zálohy', '325000', '324000', 605.0, '25051'),
-            $line('FV', 'DD25051', '2025-09-10', 'DPH ze zálohy', '324000', '343200', 105.0, '25051'),
+            $line('FV', 'DD25051', '2025-09-10', 'DPH ze zálohy', '324000', '343200', 105.0, ''),
         ]);
         $customer = [
             'O_ICO' => self::CUSTOMER_ICO, 'O_DIC' => 'CZ' . self::CUSTOMER_ICO, 'O_Nazev' => 'Odběratel Beta a.s.',
             'O_Ulice' => 'Ukázková 7', 'O_Mesto' => 'Ostrava', 'O_Psc' => '702 00',
             'SazbaDPH1' => 12.0, 'SazbaDPH2' => 21.0, 'Druh' => 'N', 'KodDPH' => self::KOD_DPH_SALE, 'Uhrada' => 'převodem',
         ];
+        // Zálohy má jiný odběratel: otevřenou zálohu Odběratele Beta by čerpání podle saldokonta
+        // přiřadilo k odpočtu zálohy na FV25030.
+        $zeta = ['O_ICO' => self::ADVANCE_CUSTOMER_ICO, 'O_DIC' => 'CZ' . self::ADVANCE_CUSTOMER_ICO, 'O_Nazev' => 'Odběratel Zeta s.r.o.',
+            'O_Ulice' => 'Ukázková 9', 'O_Mesto' => 'Olomouc', 'O_Psc' => '779 00'] + $customer;
         $dates = static fn (string $date): array => ['Vystaveno' => $date, 'DatUcPr' => $date, 'PlnenoDPH' => $date, 'Splatno' => $date];
         $append('ROK.002/VFaktury.DAT', array_merge(self::ISSUED_FIELDS, [['Cislo', 'L', 4], ['ValutyZak2', 'E', 10], ['ValutyDPH2', 'E', 10]]), [
             ['Cislo' => 640, 'Doklad' => 'FV25040', 'VarSymbol' => '2025640', 'Zaklad_2' => 1000.0, 'DPH_2' => 210.0,
@@ -1233,13 +1237,13 @@ final class SyntheticAgenda
             ['Cislo' => 642, 'Doklad' => 'FV25042', 'VarSymbol' => '2025642', 'Zaklad_2' => 500.0, 'DPH_2' => 105.0,
                 'CelkemSDPH' => 605.0, 'Uhrazeno' => '2026-01-15', 'Popis' => 'Prodej'] + $customer + $dates('2025-12-15'),
             ['Cislo' => 650, 'Druh' => 'L', 'Doklad' => 'ZV25050', 'VarSymbol' => '25050', 'Zaklad_0' => 1210.0,
-                'CelkemSDPH' => 1210.0, 'Uhrazeno' => '2025-09-05', 'UDoklad' => 'BP25050', 'Popis' => 'Záloha'] + $customer + $dates('2025-09-01'),
+                'CelkemSDPH' => 1210.0, 'Uhrazeno' => '2025-09-05', 'UDoklad' => 'BP25050', 'Popis' => 'Záloha'] + $zeta + $dates('2025-09-01'),
             ['Cislo' => 651, 'Druh' => 'D', 'Doklad' => 'DD25050', 'VarSymbol' => '25050', 'Zaklad_2' => 1000.0, 'DPH_2' => 210.0,
-                'CelkemSDPH' => 1210.0, 'Popis' => 'Doklad k přijaté platbě (záloha ZV25050)'] + $customer + $dates('2025-09-05'),
+                'CelkemSDPH' => 1210.0, 'Popis' => 'Doklad k přijaté platbě (záloha ZV25050)'] + $zeta + $dates('2025-09-05'),
             ['Cislo' => 652, 'Druh' => 'L', 'Doklad' => 'ZV25051', 'VarSymbol' => '25051', 'Zaklad_0' => 605.0,
-                'CelkemSDPH' => 605.0, 'Uhrazeno' => '2025-09-10', 'UDoklad' => 'ID25051', 'Popis' => 'Záloha'] + $customer + $dates('2025-09-02'),
+                'CelkemSDPH' => 605.0, 'Uhrazeno' => '2025-09-10', 'UDoklad' => 'ID25051', 'Popis' => 'Záloha'] + $zeta + $dates('2025-09-02'),
             ['Cislo' => 653, 'Druh' => 'D', 'Doklad' => 'DD25051', 'VarSymbol' => '25051', 'Zaklad_2' => 500.0, 'DPH_2' => 105.0,
-                'CelkemSDPH' => 605.0, 'Popis' => 'Doklad k přijaté platbě (záloha ZV25051)'] + $customer + $dates('2025-09-10'),
+                'CelkemSDPH' => 605.0, 'Popis' => 'Doklad k přijaté platbě (záloha ZV25051)'] + $zeta + $dates('2025-09-10'),
         ]);
         $append('ROK.002/PFaktury.DAT', array_merge(self::PURCHASE_FIELDS, [['Cislo', 'L', 4]]), [[
             'D_ICO' => self::VENDOR_ICO, 'D_DIC' => 'CZ' . self::VENDOR_ICO, 'D_Nazev' => 'Dodavatel Alfa s.r.o.', 'D_Ulice' => 'Vzorová 1',
@@ -1250,7 +1254,7 @@ final class SyntheticAgenda
         ]]);
         $append('ROK.002/BankKnih.DAT', self::BANK_FIELDS, [[
             'Doklad' => 'BP25050', 'Ucet' => 'BU', 'Vydej' => 0, 'DatUcPr' => '2025-09-05', 'DatPlat' => '2025-09-05', 'Celkem' => 1210.0,
-            'VarSym' => '25050', 'AdNazev' => 'Odběratel Beta a.s.', 'Popis' => 'Úhrada zálohy', 'Vypis' => 30,
+            'VarSym' => '25050', 'AdNazev' => 'Odběratel Zeta s.r.o.', 'Popis' => 'Úhrada zálohy', 'Vypis' => 30,
         ]]);
         return $files;
     }

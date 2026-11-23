@@ -224,6 +224,13 @@ final class PaymentTaxDocumentCreator
                 'Daňový doklad k přijaté platbě vystavuje jen plátce DPH — firma jím k datu přijetí platby nebyla.'
             );
         }
+        // Záloha převzatá bez sazeb DPH (Money S3): rozpad podle sazeb položek by vyšel na 0 %
+        // a úplata by zůstala nezdaněná ({@see ProformaVatRates}). Doklad vystaví uživatel ručně.
+        if (ProformaVatRates::ratesUnknown($pdo, $proforma, (string) $payment['paid_on'])) {
+            throw new PaymentTaxDocumentNotApplicableException(
+                'Zálohová faktura je převzatá z Money S3 bez sazeb DPH - daňový doklad k platbě by vyšel bez daně. Vystavte ho ručně se sazbou plnění.'
+            );
+        }
 
         // Brutto váhy per sazba ze stored řádkových totálů proformy (vč. slevových řádků).
         //
