@@ -716,6 +716,9 @@ vstup za dropdown.
 | Pořadí | Číslo pro řazení v dropdownu |
 | Desetinná místa množství | Kolik desetinných míst smí mít množství s touto jednotkou: `0` až `3`. Prázdné (v seznamu pomlčka) znamená bez omezení, jako dosud |
 
+Změna popisku se projeví v editoru a detailu faktury. Uložené PDF vystavené faktury má původní popisek.
+Při novém vygenerování použije PDF aktuální popisek v jazyce dokladu.
+
 **Desetinná místa množství.** Volba platí pro řádky faktury a pro ruční skladové doklady (příjemka, výdejka, převodka).
 Na faktuře se řídí jednotkou řádku, na skladovém dokladu jednotkou skladové karty. Jednotka na kartě i na řádku je volný
 text, s číselníkem se páruje podle kódu bez ohledu na velikost písmen (`KS` = `ks`). Jednotka, která v číselníku není,

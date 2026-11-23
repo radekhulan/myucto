@@ -583,6 +583,35 @@ final class InvoiceItemTrackingTest extends StockTestCase
         self::assertSame(1, substr_count($html, 'Výr. č.:'), 'Řádek bez výběru nic nevypisuje.');
     }
 
+    public function testChangedUnitLabelKeepsStoredIssuedPdfAndAppliesToNewRendering(): void
+    {
+        $sid = $this->createSupplier();
+        $warehouse = $this->warehouse($sid);
+        $item = $this->item($sid, 'UNIT-CACHE');
+        $invoiceId = $this->createInvoice($sid, [$this->line($item, $warehouse, '1', null)]);
+        $this->markIssued($invoiceId);
+        $renderer = $this->container->get(\MyInvoice\Service\Pdf\InvoicePdfRenderer::class);
+        $pdo = $this->db->pdo();
+        $code = 'ul' . bin2hex(random_bytes(6));
+        $pdo->prepare('INSERT INTO units (code, label_cs, label_en) VALUES (?, ?, ?)')->execute([$code, 'Původní jednotka', 'Original unit']);
+        $path = null;
+        try {
+            $pdo->prepare('UPDATE invoice_items SET unit = ? WHERE invoice_id = ?')->execute([$code, $invoiceId]);
+            $path = $renderer->render($invoiceId);
+            $stored = file_get_contents($path);
+            self::assertNotFalse($stored);
+            $pdo->prepare('UPDATE units SET label_cs = ?, label_en = ? WHERE code = ?')->execute(['Testovací jednotka', 'Test unit', $code]);
+
+            self::assertMatchesRegularExpression('/Testovací jednotka|Test unit/', $this->pdfHtml($invoiceId));
+            self::assertSame($stored, file_get_contents($renderer->render($invoiceId)));
+        } finally {
+            if ($path !== null && is_file($path)) {
+                unlink($path);
+            }
+            $pdo->prepare('DELETE FROM units WHERE code = ?')->execute([$code]);
+        }
+    }
+
     public function testPdfLotQuantityUsesBaseUnitEvenWithoutPackagingBreakdown(): void
     {
         $sid = $this->createSupplier();

@@ -25,6 +25,7 @@ import InvoiceEditor from './InvoiceEditor.vue'
 
 type Vm = {
   form: { items: Array<Record<string, unknown>> }
+  units: Array<{ id: number; code: string; label_cs: string; label_en: string }>
   itemRowMenuActions: (index: number) => RowAction[]
 }
 
@@ -72,6 +73,20 @@ describe('InvoiceEditor položky na telefonu', () => {
     expect(vm.form.items.map(i => i.description)).toEqual(['B', 'A'])
     vm.itemRowMenuActions(1)[2].run!()
     expect(vm.form.items.map(i => i.description)).toEqual(['B'])
+    wrapper.unmount()
+  })
+
+  it('zobrazí popisek staršího kódu jednotky a zachová jeho uloženou hodnotu', async () => {
+    const { wrapper, vm } = await mountEditor()
+    vm.units = [{ id: 1, code: 'ks', label_cs: 'kus', label_en: 'piece' }]
+    vm.form.items[0].unit = ' KS '
+    vm.form.items[1].unit = 'vlastní'
+    await nextTick()
+
+    const legacyOptions = wrapper.findAll('option').filter(option => option.attributes('value') === ' KS ')
+    expect(legacyOptions.map(option => option.text())).toEqual(['kus', 'kus'])
+    expect(wrapper.findAll('option[value="vlastní"]').map(option => option.text())).toEqual(['vlastní', 'vlastní'])
+    expect(vm.form.items[0].unit).toBe(' KS ')
     wrapper.unmount()
   })
 

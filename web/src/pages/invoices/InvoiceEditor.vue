@@ -3865,7 +3865,7 @@ useWindowTitle(
                 </select>
                 <select v-else v-model="item.unit" @change="onItemUnitChange(item)" class="w-full h-9 px-1 border border-neutral-300 rounded text-sm bg-surface">
                   <option v-for="u in units" :key="u.id" :value="u.code">{{ unitLabel(u.code) }}</option>
-                  <option v-if="item.unit && !units.some(u => u.code === item.unit)" :value="item.unit">{{ item.unit }}</option>
+                  <option v-if="item.unit && !units.some(u => u.code === item.unit)" :value="item.unit">{{ unitLabel(item.unit) }}</option>
                 </select>
               </td>
               <td class="px-3 py-2">
@@ -4251,7 +4251,7 @@ useWindowTitle(
                 </select>
                 <select v-else v-model="item.unit" @change="onItemUnitChange(item)" class="w-full h-10 px-2 border border-neutral-300 rounded text-sm bg-surface">
                   <option v-for="u in units" :key="u.id" :value="u.code">{{ unitLabel(u.code) }}</option>
-                  <option v-if="item.unit && !units.some(u => u.code === item.unit)" :value="item.unit">{{ item.unit }}</option>
+                  <option v-if="item.unit && !units.some(u => u.code === item.unit)" :value="item.unit">{{ unitLabel(item.unit) }}</option>
                 </select>
               </div>
             </div>
@@ -4768,7 +4768,7 @@ useWindowTitle(
                 <td class="px-2 py-1.5">
                   <select v-model="m.unit" class="w-full h-9 px-2 border border-neutral-300 rounded text-sm bg-surface">
                     <option v-for="u in units" :key="u.id" :value="u.code">{{ unitLabel(u.code) }}</option>
-                    <option v-if="m.unit && !units.some(u => u.code === m.unit)" :value="m.unit">{{ m.unit }}</option>
+                    <option v-if="m.unit && !units.some(u => u.code === m.unit)" :value="m.unit">{{ unitLabel(m.unit) }}</option>
                   </select>
                 </td>
                 <td class="px-2 py-1.5">
@@ -4836,7 +4836,7 @@ useWindowTitle(
                   <label class="block text-xs font-medium text-neutral-600 mb-1">{{ t('invoice.wr_material_unit') }}</label>
                   <select v-model="m.unit" class="w-full h-10 px-3 border border-neutral-300 rounded text-sm bg-surface">
                     <option v-for="u in units" :key="u.id" :value="u.code">{{ unitLabel(u.code) }}</option>
-                    <option v-if="m.unit && !units.some(u => u.code === m.unit)" :value="m.unit">{{ m.unit }}</option>
+                    <option v-if="m.unit && !units.some(u => u.code === m.unit)" :value="m.unit">{{ unitLabel(m.unit) }}</option>
                   </select>
                 </div>
               </div>
