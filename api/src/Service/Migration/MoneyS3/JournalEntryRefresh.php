@@ -70,7 +70,7 @@ final class JournalEntryRefresh
         $nets = [];
         foreach (array_chunk($entryIds, 1000) as $chunk) {
             $stmt = $this->db->pdo()->prepare(
-                "SELECT l.entry_id, l.account_id, SUM(CASE WHEN l.side = 'debit' THEN l.amount ELSE -l.amount END)
+                "SELECT l.entry_id, l.account_id, SUM(CASE WHEN l.side = 'debit' THEN l.signed_amount ELSE -l.signed_amount END)
                    FROM journal_entry_lines l
                   WHERE l.supplier_id = ? AND l.entry_id IN (" . implode(',', array_fill(0, count($chunk), '?')) . ')
                   GROUP BY l.entry_id, l.account_id'

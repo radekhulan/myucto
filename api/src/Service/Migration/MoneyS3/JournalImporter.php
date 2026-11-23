@@ -254,11 +254,11 @@ final class JournalImporter
                 $source = JournalEntryRefresh::fingerprint(JournalEntryRefresh::net(
                     $this->groupLines($ctx, $groupRows, $groupKey, $fxAccounts, $isOpening, $period['starts_on'])[0]
                 ));
-                $now = $current[$entryId] ?? null;
-                if ($now !== null && ($stored[$key] ?? null) !== $source && $now !== $source) {
+                $entryState = $current[$entryId] ?? null;
+                if ($entryState !== null && ($stored[$key] ?? null) !== $source && $entryState !== $source) {
                     // Money zápis změnilo. Přepíše se, jen když ho v MyÚčtu nikdo neupravil:
                     // zápis odpovídá otisku z převodu (starší převod otisk nemá) a nemá zásah uživatele.
-                    $edited = ($stored[$key] ?? null) !== null && $stored[$key] !== $now;
+                    $edited = ($stored[$key] ?? null) !== null && $stored[$key] !== $entryState;
                     if ($edited || isset($touched[$entryId]) || !$this->replaceEntry($ctx, $entryId, $groupRows, $groupKey, $fxAccounts, $isOpening, $period, $forms)) {
                         $refreshed['kept'][] = $docLabel;
                         $p->count(self::STEP, 'changed_kept');
@@ -269,7 +269,7 @@ final class JournalImporter
                         $stats['existing']++;
                         continue;
                     }
-                } elseif ($now !== null && ($stored[$key] ?? null) !== $source) {
+                } elseif ($entryState !== null && ($stored[$key] ?? null) !== $source) {
                     $fingerprints[$key] = [$entryId, $source];
                 }
             }

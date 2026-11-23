@@ -208,11 +208,11 @@ final class MoneyS3Importer
      * rok, vynechané pozdější adresáře zálohy) a zda roky převodu vybral uživatel.
      *
      * @param array{plan:list<array<string,mixed>>,chain_breaks:list<array<string,mixed>>}|null $journalPreview
-     * @return array{0:ImportOptions,1:list<array{level:string,code:string,message:string,context:array<string,mixed>}>,2:bool}
+     * @return array{0:ImportOptions,1:list<array{level:string,code:string,message:string,context:array<string,mixed>}>,2:array{from:bool,to:bool}}
      */
     private function resolveToYear(int $supplierId, Ms3Backup $backup, AgendaInfo $agenda, ImportOptions $options, ?array $journalPreview): array
     {
-        $explicit = $options->toYear !== null || $options->fromYear !== null;
+        $explicit = ['from' => $options->fromYear !== null, 'to' => $options->toYear !== null];
         if ($agenda->taxRecordsOnly()) {
             return [$options, [], $explicit];
         }
@@ -249,7 +249,10 @@ final class MoneyS3Importer
      * Výchozí „Převést do roku": poslední rok zálohy, který v MyÚčtu nemá vlastní zápisy,
      * když po něm v rozvrhu následují roky, které už vlastní zápisy mají (firma v MyÚčtu
      * účtuje rok 2027 a z Money se převádí rok 2026). Bez takových let null - převádějí se
-     * všechny roky jako dřív. Opravný převod vazeb vlastní zápisy nechává, hranici nepotřebuje.
+     * všechny roky jako dřív. Null i tehdy, když by v rozsahu nezůstal žádný rok, do kterého
+     * převod zapisuje (otevřené nebo nové období): kontrola pak ohlásí vlastní zápisy
+     * (`journal_not_empty`) jako dřív. Opravný převod vazeb vlastní zápisy nechává, hranici
+     * nepotřebuje.
      *
      * @param list<array<string,mixed>> $plan rozvrh bez horní hranice
      * @return array{to_year:int,own_years:list<int>}|null
@@ -261,6 +264,7 @@ final class MoneyS3Importer
         }
         $own = [];
         $last = null;
+        $writable = [];
         foreach ($plan as $item) {
             $period = $this->periods->findByYear($supplierId, (int) $item['year']);
             if ($period !== null && $this->journal->foreignEntryCount($supplierId, (int) $period['id']) > 0) {
@@ -268,8 +272,12 @@ final class MoneyS3Importer
             } else {
                 $last = (int) $item['year'];
             }
+            if ($period === null || (string) $period['status'] === 'open') {
+                $writable[] = (int) $item['year'];
+            }
         }
-        if ($last === null || $last === (int) $plan[count($plan) - 1]['year']) {
+        if ($last === null || $last === (int) $plan[count($plan) - 1]['year']
+            || array_filter($writable, static fn (int $y): bool => $y <= $last) === []) {
             return null;
         }
         return ['to_year' => $last, 'own_years' => array_values(array_filter($own, static fn (int $y): bool => $y > $last))];
@@ -306,13 +314,15 @@ final class MoneyS3Importer
 
     /**
      * Kontroly před převodem s rozhodnutým „Převést do roku" ({@see resolveToYear()}).
-     * `$explicit` = roky převodu vybral uživatel (od/do roku): uzavřené období, do kterého
-     * by převod zapsal, je pak chyba, ne jen přeskočený rok.
+     * `$explicit` = které hranice převodu vybral uživatel (od/do roku): uzavřené období roku
+     * zvoleného v „Převést do roku" je pak chyba, ne jen přeskočený rok. Uzavřený rok
+     * „od roku" chybou není - opakovaný převod jím běžně začíná a uzavřené roky přeskočí.
      *
      * @param array{plan:list<array<string,mixed>>,chain_breaks:list<array<string,mixed>>}|null $journalPreview
+     * @param array{from:bool,to:bool} $explicit
      * @return list<array{level:string,code:string,message:string,context:array<string,mixed>}>
      */
-    private function checks(int $supplierId, Ms3Backup $backup, AgendaInfo $agenda, ImportOptions $options, ?array $journalPreview, bool $explicit): array
+    private function checks(int $supplierId, Ms3Backup $backup, AgendaInfo $agenda, ImportOptions $options, ?array $journalPreview, array $explicit): array
     {
         $calendar = $this->periods->fiscalCalendar($supplierId);
         if ($options->fromYear !== null || $options->firstPeriodStart !== null || !self::journalPreviewComplete($journalPreview)
@@ -403,8 +413,6 @@ final class MoneyS3Importer
             $add('info', 'suggested_from_year', "Roky od {$suggested} v Money navazují — převod od roku {$suggested} (volba „Převést od roku“) půjde celý uzavřít. Starší roky zůstanou v archivu Money.", ['from_year' => $suggested]);
         }
         $lockedUntil = $taxRecords ? null : $this->settings->getLockedUntil($supplierId);
-        $writableYears = 0;
-        $closedYears = [];
         foreach ($plan as $item) {
             // Adresář ROK = jeden účetní rok Money = jedno účetní období firmy. Tvar roku
             // určuje nastavení firmy „Účetní rok začíná"; rok zdroje, který by se rozpadl do
@@ -419,10 +427,6 @@ final class MoneyS3Importer
             if ($blocker !== null && $blocker->errorCode === 'date_locked') {
                 // Rok, do kterého by převod zapisoval, zasahuje do zámku účtování k datu.
                 $add('error', $blocker->errorCode, $blocker->getMessage(), $blocker->context);
-            } elseif ($blocker === null) {
-                $writableYears++;
-            } else {
-                $closedYears[] = (int) $item['year'];
             }
             if ($period === null) {
                 continue;
@@ -436,14 +440,11 @@ final class MoneyS3Importer
             }
             if ((string) $period['status'] !== 'open' && !$mapped) {
                 $add('error', 'period_not_open', "Účetní období {$item['year']} je v MyÚčtu uzavřené.", ['year' => $item['year']]);
-            } elseif ((string) $period['status'] !== 'open' && $explicit && !$options->relinkOnly && (int) $item['year'] === $options->toYear) {
+            } elseif ((string) $period['status'] !== 'open' && $explicit['to'] && !$options->relinkOnly && (int) $item['year'] === $options->toYear) {
                 // Uzavřený historický rok převod jen přeskočí; rok, do kterého má převod podle
                 // volby „Převést do roku" zapisovat, ale uzavřený být nesmí.
                 $add('error', 'period_not_open', "Účetní období {$item['year']}, do kterého má převod zapisovat (volba „Převést do roku“), je v MyÚčtu uzavřené.", ['year' => $item['year']]);
             }
-        }
-        if ($plan !== [] && $explicit && !$options->relinkOnly && $writableYears === 0 && $closedYears !== []) {
-            $add('error', 'period_not_open', 'Všechny vybrané roky (' . implode(', ', $closedYears) . ') jsou v MyÚčtu uzavřené, převod by do nich nic nezapsal.', ['years' => $closedYears]);
         }
         if ($plan !== [] && !$taxRecords && $conflict === null && ($supplier['accounting_mode'] ?? '') !== 'double_entry') {
             $add('info', 'switch_to_double_entry', 'Firma se převodem přepne do podvojného účetnictví.');

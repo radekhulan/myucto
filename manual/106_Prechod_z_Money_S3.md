@@ -88,6 +88,9 @@ Instalace Money se zálohou nijak nemění.
    - **Převést od roku** (výchozí je rok, od kterého navazují stavy; **Všechny
      roky zálohy** převede celou zálohu; rokem je účetní rok firmy jako
      v tabulce let),
+   - **Převést do roku** (výchozí **Automaticky**: převedou se roky až po
+     poslední rok, který v MyÚčtu ještě nemá vlastní zápisy; pozdější roky
+     zálohy se nepřevedou, viz [§ 106.10.8](#106108-opakovany-prevod)),
    - **Uzavřít historické roky průvodcem uzávěrkou** (výchozí zapnuto),
    - **Začátek prvního účetního období** jen u firmy založené během prvního
      převáděného roku,
@@ -107,7 +110,8 @@ Instalace Money se zálohou nijak nemění.
 
 Kontrola před převodem zastaví převod, když se agenda v Money z podvojného
 účetnictví vrátila do daňové evidence, záloha patří firmě s jiným IČO, účetní období v MyÚčtu už obsahuje zápisy, které nevznikly převodem, období je
-uzavřené, nebo by se účetní rok Money rozdělil do dvou účetních období firmy
+uzavřené, rok, do kterého má převod zapisovat, zasahuje do zámku účtování k datu,
+nebo by se účetní rok Money rozdělil do dvou účetních období firmy
 (agenda vede jiný účetní rok, než má firma nastavený; hlášení navrhne měsíc
 pro nastavení **Účetní rok začíná**). Chybí-li
 IČO v záloze nebo ve firmě, zkouška jen upozorní a ostrý převod se spustí až po
@@ -432,8 +436,15 @@ bankovních účtech nebo ve dvou pokladnách.
    - agenda se v Money z podvojného účetnictví vrátila do daňové evidence
      (rok daňové evidence leží po roce podvojného účetnictví),
    - záloha patří firmě s jiným IČO,
-   - účetní období v MyÚčtu už obsahuje zápisy, které nevznikly převodem,
-   - období je v MyÚčtu uzavřené,
+   - účetní období v MyÚčtu už obsahuje zápisy, které nevznikly převodem
+     (rok s vlastními zápisy, který leží za převáděnými roky, automatická volba
+     **Převést do roku** vynechá sama a kontrola to ohlásí jako upozornění),
+   - období je v MyÚčtu uzavřené a převod ho ještě nezaložil, nebo je to rok
+     zvolený v **Převést do roku**, případně jsou uzavřené všechny vybrané roky,
+   - rok, do kterého převod zapisuje (otevřené nebo nové období), zasahuje do
+     [zámku účtování k datu](72_Uzaverka.md#72123-zamek-uctovani-k-datu). Zámek se
+     kontroluje znovu na začátku každého kroku převodu; nastavíte-li ho během
+     převodu, převod se zastaví dřív, než pod zámek cokoli zapíše,
    - účetní rok Money by se rozdělil do dvou účetních období firmy, protože
      agenda vede jiný účetní rok, než má firma nastavený (`Firma → Nastavení`,
      záložka **Daně a účetnictví**, pole **Účetní rok začíná**). Hlášení
@@ -445,6 +456,11 @@ bankovních účtech nebo ve dvou pokladnách.
    výslovném potvrzení.
 
    Volby:
+   - *Převést do roku* - poslední převáděný účetní rok. Pozdější adresáře zálohy
+     (deník, doklady, banka, pokladna) se nepřevedou a protokol je vyjmenuje.
+     Automatická volba skončí posledním rokem, který v MyÚčtu ještě nemá vlastní
+     zápisy, pokud po něm následují roky, které už v MyÚčtu účtujete; jinak
+     převede všechny roky zálohy. U daňové evidence se volba nenabízí.
    - *Uzavřít historické roky* - viz [§ 106.10.6](#106106-uzaverka-historickych-let), ve výchozím stavu zapnuto.
    - *Začátek prvního účetního období* - jen u firmy založené během prvního
      převáděného roku. Bez něj začíná první období prvním dnem účetního roku
@@ -601,13 +617,61 @@ Agenda daňové evidence režim firmy ani automatiku účtování nemění
 
 Převod si pamatuje, co z které agendy už vzniklo. Opakovaný převod téže nebo
 novější zálohy založí jen to, co ještě chybí, a nic nezdvojí. Převod přerušený
-chybou tak stačí po opravě spustit znovu. Do uzavřeného roku už převod nic
-nepřidá.
+chybou tak stačí po opravě spustit znovu.
 
-Už převedené doklady ani zápisy deníku opakovaný převod nepřepisuje, protože
-mohly být mezitím zaúčtované, spárované nebo upravené v MyÚčtu. Změnila-li se
-v Money celková částka faktury, protokol ji vypíše jako změněnou v Money
-a ponechanou v MyÚčtu; upravte ji ručně.
+**Uzavřené roky a zámek k datu.** Do uzavřeného roku převod nic nepřidá:
+deník, doklady, banku ani pokladnu takového roku přeskočí a v uzavřených
+letech nezakládá ani nová párování úhrad, čerpání záloh a vazby dokladů na
+deník. Ty v uzavřených letech doplní jen opravný převod vazeb (dávka, volba
+**Firma už v MyÚčtu je: opravný převod vazeb**). Rok, do kterého převod
+zapisuje, nesmí zasahovat do zámku účtování k datu, jinak se převod nespustí.
+
+**Převod roku vedle běžícího dalšího roku.** Firma může v MyÚčtu účtovat nový
+rok (třeba 2027), zatímco předchozí rok (2026) se ještě účtuje v Money a do
+MyÚčta se převádí znovu, průběžně i po uzávěrce v Money:
+
+1. Ve volbě **Převést do roku** nechte **Automaticky**, nebo zvolte rok 2026.
+   Obsahuje-li záloha z Money už adresář roku 2027 (Money ho založí s počátečními
+   stavy), převod ho vynechá a nic z něj nepřimíchá k dokladům a zápisům zadaným
+   v MyÚčtu.
+2. Zámek účtování k datu nastavujte jen do konce roku, který už se z Money
+   nepřevádí. Zámek zasahující do roku 2026 převod zastaví.
+3. Vlastní zápisy, doklady a období roku 2027 převod nemění; popisy přepisuje
+   jen u zápisů, které v daném běhu navázal na převzaté doklady.
+
+**Úhrady po konci převáděných let.** Datum úhrady z Money (`Uhrazeno`) převod
+převezme jen do konce posledního převáděného roku. Faktura 2026 zaplacená
+v lednu 2027, kterou Money už zná, přijde jako neuhrazená a lednovou platbu
+spárujete v MyÚčtu. Částečná úhrada pohybem z roku 2026 se převezme jako platba
+a zbytek zůstane k úhradě.
+
+**Doklady a zápisy změněné v Money.** V otevřeném roce mimo zámek převod
+aktualizuje to, co Money od minulého převodu změnilo:
+
+- zápis deníku převzatý z Money, který Money změnilo, přepíše podle Money
+  (zápis zůstává tentýž, vazby na doklad zůstanou), a zápis, který Money
+  smazalo, smaže. Doklad, kterému Money změnilo datum nebo číslo, se převede
+  jako nový zápis a starý se smaže,
+- u vydané a přijaté faktury přepíše částky po sazbách, data a položky.
+
+Jen u záznamů, se kterými se v MyÚčtu nepracovalo. Zápis upravený v MyÚčtu,
+stornovaný, spárovaný v saldokontu, s poznámkou, přílohou nebo vazbou zadanou
+v MyÚčtu převod nezmění, stejně jako doklad s úhradou nebo párováním zadaným
+v MyÚčtu, zápočtem, navázaným dobropisem, daňovým dokladem nebo čerpáním
+zálohy. Nezmění ani doklad, u kterého se v Money změnil druh, členění DPH nebo
+měna. Takové záznamy protokol vypíše jako změněné v Money a ponechané v MyÚčtu;
+upravte je ručně podle Money. Doklady a zápisy převedené dřív, než převod začal
+změny sledovat, protokol při změně jen vypíše a od dalšího převodu už se
+sledují.
+
+**Pohyby stažené z banky.** Stahuje-li MyÚčto pohyby účtu, který dosud vede
+Money (bankovní API, nahrané výpisy GPC nebo PDF), převod je na tomto účtu od
+začátku převáděného roku do data posledního pohybu v Money smaže a nahradí
+pohyby z Money. Pohyby po posledním pohybu v Money zůstanou. Pohyb, který už
+je v MyÚčtu spárovaný, zaúčtovaný nebo ignorovaný, převod nesmaže a zastaví se
+s jeho výpisem: zrušte u něj párování a zaúčtování (nebo ho smažte) a převod
+spusťte znovu. Dokud firma účtuje banku v Money, pohyby těchto účtů v MyÚčtu
+nepárujte ani neúčtujte.
 
 Daňovou uznatelnost nákladových účtů převezme převod z osnovy Money jen u účtů,
 které zakládá, a při prvním převodu firmy. Opakovaný převod ji u existujících
@@ -695,7 +759,7 @@ php api/bin/money-s3-batch.php --dir=<adresář se zálohami> --all --dry-run
 php api/bin/money-s3-batch.php --dir=<adresář se zálohami> --all --dppo-dir=<adresář s XML> --report=souhrn.json
 ```
 
-Volby odpovídají průvodci (`--from-year=auto|RRRR|all`, `--existing=skip|update`,
+Volby odpovídají průvodci (`--from-year=auto|RRRR|all`, `--to-year=auto|RRRR`, `--existing=skip|update`,
 `--group="Název"`, `--related-parties`, `--no-close`, `--no-registry`), na konci
 je souhrn po firmách s K1 až K4.
 

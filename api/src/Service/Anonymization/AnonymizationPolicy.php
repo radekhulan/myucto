@@ -470,7 +470,7 @@ final class AnonymizationPolicy
         'migration_batch_items' => ['agenda_ico' => 'ico', 'agenda_name' => 'party_name', 'error' => 'text', 'file_name' => 'file_name', 'source' => 'keep', 'summary' => 'json', 'token' => 'keep'],
         'migration_parallel_checks' => ['classifications' => 'json', 'inputs' => 'json', 'note' => 'text', 'period_month' => 'keep', 'result' => 'json', 'source_system' => 'keep'],
         'migrations' => ['filename' => 'keep'],
-        'money_s3_import_map' => ['kind' => 'keep', 'money_key' => 'text'],
+        'money_s3_import_map' => ['fingerprint' => 'keep', 'kind' => 'keep', 'money_key' => 'text'],
         'money_s3_imports' => ['agenda_ico' => 'ico', 'agenda_name' => 'party_name', 'automation_snapshot' => 'json', 'backup_sha256' => 'keep', 'money_version' => 'keep', 'protocol' => 'json'],
         'monthly_report_sends' => ['cc' => 'json', 'comment' => 'text', 'sent_to' => 'json', 'smtp_response' => 'text'],
         'odometer_readings' => ['note' => 'text', 'source' => 'keep'],

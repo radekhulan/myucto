@@ -206,6 +206,11 @@ export interface MoneyS3StartParams {
   confirm_ico?: boolean
   /** První převáděný účetní rok; starší roky zálohy se vynechají. */
   from_year?: number | null
+  /**
+   * Poslední převáděný účetní rok; pozdější roky zálohy se vynechají. Null = automaticky
+   * (poslední rok, za kterým už firma v MyÚčtu účtuje rok s vlastními zápisy).
+   */
+  to_year?: number | null
   /** Ostrý převod přijme rozdíly, na kterých selhala zkouška nanečisto. */
   accept_differences?: boolean
 }

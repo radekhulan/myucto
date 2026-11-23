@@ -49,6 +49,35 @@ final class MoneyS3YearSelectionTest extends MoneyS3ImportTestCase
         self::assertSame(2024, $default->get('options')['to_year']);
     }
 
+    /**
+     * Firma převedená z Money, která rok 2025 už účtuje v MyÚčtu, a rok 2024 je uzavřený:
+     * výchozí „Převést do roku" by nenechal žádný rok, do kterého převod zapisuje, proto se
+     * nepoužije a převod ohlásí vlastní zápisy jako dřív. Uzavřený rok zvolený výslovně
+     * v „Převést do roku" je chyba.
+     */
+    public function testClosedYearsWithOwnJournalAfterThemStopImport(): void
+    {
+        $supplierId = $this->supplier();
+        self::assertFalse($this->import($supplierId)->hasErrors());
+        $period = $this->container(AccountingPeriodRepository::class)->findByYear($supplierId, 2025);
+        $stmt = $this->db->pdo()->prepare("SELECT id FROM chart_of_accounts WHERE supplier_id = ? AND account_code IN ('518.000', '211.000') ORDER BY account_code");
+        $stmt->execute([$supplierId]);
+        [$cash, $expense] = array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN));
+        $this->container(JournalEntryRepository::class)->insert(
+            ['supplier_id' => $supplierId, 'period_id' => (int) $period['id'], 'entry_date' => '2025-12-20', 'source_type' => 'manual', 'posted_at' => '2025-12-20 10:00:00'],
+            [['account_id' => $expense, 'side' => 'debit', 'amount' => '75.00'], ['account_id' => $cash, 'side' => 'credit', 'amount' => '75.00']],
+        );
+
+        $default = $this->convert($supplierId, new ImportOptions(ImportOptions::MODE_DRY_RUN));
+        $codes = array_column($default->get('preflight'), 'code');
+        self::assertContains('journal_not_empty', $codes, $this->explain($default));
+        self::assertNotContains('to_year_default', $codes);
+
+        $closed = $this->convert($supplierId, new ImportOptions(ImportOptions::MODE_DRY_RUN, toYear: 2024));
+        self::assertTrue($closed->failed());
+        self::assertContains('period_not_open', array_column($closed->get('preflight'), 'code'), $this->explain($closed));
+    }
+
     public function testRepeatImportRespectsCompanyDateLock(): void
     {
         $supplierId = $this->supplier();
@@ -160,6 +189,7 @@ final class MoneyS3YearSelectionTest extends MoneyS3ImportTestCase
         self::assertSame($entryId, $this->entryOf($supplierId, 'FP25001'), 'Zápis se přepsal na místě.');
         self::assertSame(['321.000' => -6050.0, '343.100' => 1050.0, '501.100' => 5000.0], $this->entryNet($entryId));
         self::assertSame(1, $this->rowCount('journal_entries', $supplierId, "document_no = 'FP25001' AND entry_date = '2025-01-15'"));
+        self::assertSame(1, $this->rowCount('journal_entries', $supplierId, "document_no = 'ID25099' AND posted_at IS NOT NULL"), 'Nový zápis Money vedle aktualizovaných.');
         $journal = array_column($protocol->toArray()['steps'], null, 'key')['journal'];
         self::assertSame(1, $journal['counts']['replaced'] ?? 0, $this->explain($protocol));
     }
@@ -323,11 +353,17 @@ final class MoneyS3YearSelectionTest extends MoneyS3ImportTestCase
         ]);
     }
 
-    /** Novější záloha: Money přeúčtovalo náklad FP25001 z 518 na 501. @return array<string,string> */
+    /**
+     * Novější záloha: Money přeúčtovalo náklad FP25001 z 518 na 501 a přibyl interní doklad
+     * ID25099 (nový zápis za aktualizovanými).
+     *
+     * @return array<string,string>
+     */
     private function filesWithFp25001On501(): array
     {
         return SyntheticAgenda::patch(SyntheticAgenda::files(), 'ROK.002/UcDenik.DAT',
-            static fn (array $r): array => trim((string) $r['Doklad']) === 'FP25001' && (string) $r['UcMD'] === '518000' ? ['UcMD' => '501100'] + $r : $r);
+            static fn (array $r): array => trim((string) $r['Doklad']) === 'FP25001' && (string) $r['UcMD'] === '518000' ? ['UcMD' => '501100'] + $r : $r,
+            [['Cislo' => 401, 'Zdroj' => 'ID', 'Doklad' => 'ID25099', 'Datum' => '2025-12-30', 'Popis' => 'Dohadná položka', 'UcMD' => '518000', 'UcD' => '325000', 'Castka' => 100.0]]);
     }
 
     /**

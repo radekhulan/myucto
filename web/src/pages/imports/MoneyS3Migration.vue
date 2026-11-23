@@ -52,6 +52,7 @@ const auth = useAuthStore()
 const closeHistory = ref(true)
 const firstPeriodStart = ref('')
 const fromYear = ref<number | null>(null)
+const toYear = ref<number | null>(null)
 const confirmIco = ref(false)
 const reportBusy = ref<number | null>(null)
 
@@ -72,6 +73,7 @@ const {
     firstPeriodStart.value = params.first_period_start ?? ''
     confirmIco.value = params.confirm_ico ?? false
     fromYear.value = params.from_year ?? null
+    toYear.value = params.to_year ?? null
   },
 })
 
@@ -80,6 +82,15 @@ const agenda = computed(() => upload.value?.agenda ?? null)
 /** Agenda vedená v Money jako daňová evidence: bez voleb podvojného účetnictví (předvahy, začátek období). */
 const taxRecords = computed(() => agenda.value?.tax_records === true)
 const preflightErrors = computed(() => (upload.value?.preflight ?? []).filter(m => m.level === 'error'))
+/** Roky zálohy s účetním rokem firmy (volby „Převést od roku" a „Převést do roku"). */
+const agendaYears = computed(() => (agenda.value?.years ?? []).filter(y => y.fiscal_year !== null))
+/** Výchozí „Převést do roku" podle kontroly před převodem: firma už účtuje pozdější rok v MyÚčtu. */
+const defaultToYear = computed(() => {
+  const message = (upload.value?.preflight ?? []).find(m => m.code === 'to_year_default')
+  const year = message?.context?.to_year
+  return typeof year === 'number' ? year : null
+})
+const toYearOptions = computed(() => agendaYears.value.filter(y => fromYear.value === null || (y.fiscal_year as number) >= fromYear.value))
 // IČO chybí v záloze nebo ve firmě — ostrý převod potřebuje výslovné potvrzení (BE ico_unverified).
 const icoUnverified = computed(() => (upload.value?.preflight ?? []).some(m => m.code === 'agenda_ico_missing' || m.code === 'supplier_ico_missing'))
 // Stejná práva jako BE MoneyS3MigrationAction::missingLiveImportRights().
@@ -117,6 +128,7 @@ async function start(mode: 'dry_run' | 'import'): Promise<void> {
     first_period_start: firstPeriodStart.value || null,
     confirm_ico: confirmIco.value,
     from_year: fromYear.value,
+    to_year: toYear.value !== null && (fromYear.value === null || toYear.value >= fromYear.value) ? toYear.value : null,
   })
 }
 
@@ -286,10 +298,19 @@ const actions = computed<ActionItem[]>(() => {
         <label class="mb-1 block max-w-xs text-sm font-medium">{{ t('money_s3.from_year') }}
           <select v-model="fromYear" class="mt-1 h-10 w-full rounded-md border border-neutral-300 px-3 text-sm" data-testid="from-year">
             <option :value="null">{{ t('money_s3.from_year_all') }}</option>
-            <option v-for="y in agenda.years.filter(y => y.fiscal_year !== null)" :key="y.dir" :value="y.fiscal_year">{{ migrationYearLabel(y.fiscal_year as number, y, locale) }}</option>
+            <option v-for="y in agendaYears" :key="y.dir" :value="y.fiscal_year">{{ migrationYearLabel(y.fiscal_year as number, y, locale) }}</option>
           </select>
         </label>
         <p class="mb-5 text-sm text-neutral-500">{{ t('money_s3.from_year_hint') }}</p>
+        <template v-if="!taxRecords">
+          <label class="mb-1 block max-w-xs text-sm font-medium">{{ t('money_s3.to_year') }}
+            <select v-model="toYear" class="mt-1 h-10 w-full rounded-md border border-neutral-300 px-3 text-sm" data-testid="to-year">
+              <option :value="null">{{ defaultToYear !== null ? t('money_s3.to_year_auto_year', { year: defaultToYear }) : t('money_s3.to_year_auto') }}</option>
+              <option v-for="y in toYearOptions" :key="y.dir" :value="y.fiscal_year">{{ migrationYearLabel(y.fiscal_year as number, y, locale) }}</option>
+            </select>
+          </label>
+          <p class="mb-5 text-sm text-neutral-500">{{ t('money_s3.to_year_hint') }}</p>
+        </template>
 
         <template v-if="!taxRecords">
           <h3 class="mb-1 text-sm font-semibold uppercase tracking-wide text-neutral-500">{{ t('money_s3.reports_title') }}</h3>
