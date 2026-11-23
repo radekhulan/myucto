@@ -65,11 +65,18 @@ final class MoneyS3SettledPaymentsTest extends MoneyS3ImportTestCase
         self::assertSame(1, $this->rowCount('invoice_settlements', $sid,
             "doc_type = 'invoice' AND doc_id = {$fv20} AND amount = 1210.00 AND journal_entry_id = {$this->entry('ID25020')} AND invoice_payment_id IS NOT NULL"));
         self::assertSame(1, $this->rowCount('invoice_payments', $sid, "invoice_id = {$fv20} AND note = 'Převzato z Money S3, zápočet interním dokladem ID25020'"));
-        // Zápočet, který převod k dokladu nepřiřadil, nese chráněná platba bez dokladu úhrady.
+        // Zápočet, který párovací symbol nepřiřadil, se najde podle čísla a data úhrady z Money
+        // (zápis vyrovnává vydanou i přijatou fakturu).
         $fv40 = $this->invoice('FV25040');
+        $id40 = $this->entry('ID25040');
+        self::assertSame(1, $this->rowCount('invoice_settlements', $sid,
+            "doc_type = 'invoice' AND doc_id = {$fv40} AND amount = 1210.00 AND journal_entry_id = {$id40} AND invoice_payment_id IS NOT NULL"));
+        self::assertSame(1, $this->rowCount('invoice_settlements', $sid,
+            "doc_type = 'purchase_invoice' AND doc_id = {$this->purchase('DF-2025-640')} AND amount = 1210.00 AND journal_entry_id = {$id40}"));
+        // Úhrada bez čísla nese chráněná platba bez dokladu úhrady.
+        $fv30 = $this->invoice('FV25030');
         self::assertSame(1, $this->rowCount('invoice_payments', $sid,
-            "invoice_id = {$fv40} AND source = 'settlement' AND amount = 1210.00 AND paid_on = '2025-11-30' AND currency = 'CZK'
-             AND note = " . $this->db->pdo()->quote(MoneyS3SettledPayments::note('ID25040'))));
+            "invoice_id = {$fv30} AND source = 'settlement' AND amount = 800.00 AND paid_on = '2025-12-10' AND note = " . $this->db->pdo()->quote(MoneyS3SettledPayments::note())));
         // Platba v měně dokladu.
         $fv41 = $this->invoice('FV25041');
         self::assertSame(1, $this->rowCount('invoice_payments', $sid,
@@ -78,7 +85,7 @@ final class MoneyS3SettledPaymentsTest extends MoneyS3ImportTestCase
         self::assertSame(0, $this->rowCount('invoice_payments', $sid, "invoice_id = {$this->invoice('FV25042')}"));
 
         $open = $this->openDocuments();
-        foreach (['FV25020', 'FV25040', 'FV25041', 'FP25020', 'FP25040'] as $no) {
+        foreach (['FV25020', 'FV25030', 'FV25040', 'FV25041', 'FP25020', 'FP25040', 'FP25041'] as $no) {
             self::assertNotContains($no, $open, 'Uhrazený doklad nesmí být v saldokontu otevřený: ' . json_encode($open));
         }
         $this->assertRerunChangesNothing();
@@ -87,19 +94,19 @@ final class MoneyS3SettledPaymentsTest extends MoneyS3ImportTestCase
     public function testPaidPurchaseInvoiceWithoutPaymentIsNotMatchCandidate(): void
     {
         $sid = $this->supplierId;
-        $fp40 = $this->purchase('DF-2025-640');
+        $fp41 = $this->purchase('DF-2025-641');
         // Platba se stejným symbolem a částkou v dalším roce se s fakturou uhrazenou zápočtem
         // v Money nespáruje (nanejvýš ji párovač nabídne ke kontrole dvojí úhrady).
         $statement = (int) $this->scalar('SELECT MIN(id) FROM bank_statements WHERE supplier_id = ?', [$sid]);
         $pdo = $this->db->pdo();
         $pdo->prepare("INSERT INTO bank_transactions (statement_id, posted_at, amount, currency, variable_symbol, counterparty_name, match_status)
-            VALUES (?, '2026-01-20 00:00:00', -1210.00, 'CZK', '2025650', 'Dodavatel Alfa s.r.o.', 'unmatched')")->execute([$statement]);
+            VALUES (?, '2026-01-20 00:00:00', -605.00, 'CZK', '2025651', 'Dodavatel Alfa s.r.o.', 'unmatched')")->execute([$statement]);
         $tx = (int) $pdo->lastInsertId();
         $result = $this->container(StatementMatcher::class)->matchBatch([$tx])[$tx] ?? [];
 
         self::assertNotContains($result['status'] ?? null, ['auto_exact', 'auto_partial', 'manual'], json_encode($result));
         self::assertSame(0, (int) $this->scalar('SELECT COUNT(*) FROM payment_matches WHERE bank_transaction_id = ?', [$tx]));
-        self::assertSame(1210.0, (float) $this->scalar('SELECT settled_outside_amount FROM purchase_invoices WHERE id = ?', [$fp40]));
+        self::assertSame(605.0, (float) $this->scalar('SELECT settled_outside_amount FROM purchase_invoices WHERE id = ?', [$fp41]));
 
         // Zápis navázaný na FP25020 se stane zápočtem, mimo evidenci nezůstane nic.
         $fp20 = $this->purchase('DF-2025-300');
@@ -145,8 +152,10 @@ final class MoneyS3SettledPaymentsTest extends MoneyS3ImportTestCase
         $pdo = $this->db->pdo();
         // Stav firmy převedené dřív: úhrady bez dokladu jen v paid_total, zápis ID25020 jen vazbou,
         // přijaté doklady bez úhrady mimo evidenci a platba zálohy bez vazby na DDKP.
-        $pdo->prepare("DELETE s, p FROM invoice_settlements s LEFT JOIN invoice_payments p ON p.id = s.invoice_payment_id
-                        WHERE s.supplier_id = ? AND s.journal_entry_id = ?")->execute([$sid, $this->entry('ID25020')]);
+        foreach (['ID25020', 'ID25040'] as $entry) {
+            $pdo->prepare("DELETE s, p FROM invoice_settlements s LEFT JOIN invoice_payments p ON p.id = s.invoice_payment_id
+                            WHERE s.supplier_id = ? AND s.journal_entry_id = ?")->execute([$sid, $this->entry($entry)]);
+        }
         $pdo->prepare("DELETE FROM invoice_payments WHERE supplier_id = ? AND source = 'settlement' AND note LIKE ?")
             ->execute([$sid, TakenOverPayment::MONEY_S3_WITHOUT_DOCUMENT_NOTE . '%']);
         $pdo->prepare('UPDATE purchase_invoices SET settled_outside_amount = 0 WHERE supplier_id = ?')->execute([$sid]);

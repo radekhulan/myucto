@@ -1174,7 +1174,9 @@ final class SyntheticAgenda
      * Úhrady, ke kterým převedená data nemají doklad úhrady ({@see filesWithSettlementGaps()} a navíc):
      *   - vydaná FV25040 (1 210) a přijatá FP25040 (1 210, VS 2025650) Money uhradilo zápočtem
      *     ID25040 (MD 321 / D 311) pod vlastním symbolem a bez čísel dokladů v popisu, takže ho
-     *     převod k dokladům nepřiřadí; obě mají v `UDoklad` ID25040,
+     *     párovací symbol k dokladům nepřiřadí; obě mají v `UDoklad` ID25040 a datum úhrady
+     *     zápisu,
+     *   - přijatá FP25041 (605, VS 2025651) uhrazená bez čísla úhrady,
      *   - vydaná FV25041 v eurech (100 + 21 EUR kurzem 25) uhrazená bez čísla úhrady,
      *   - vydaná FV25042 (605) s datem úhrady 15. 1. 2026, po konci posledního převáděného
      *     roku 2025,
@@ -1209,6 +1211,8 @@ final class SyntheticAgenda
             $line('FP', 'FP25040', '2025-11-21', 'Nákup', '518000', '321000', 1000.0, '2025650', self::VENDOR_ICO),
             $line('FP', 'FP25040', '2025-11-21', 'Nákup', '343100', '321000', 210.0, '2025650', self::VENDOR_ICO),
             $line('ID', 'ID25040', '2025-11-30', 'Vzájemný zápočet', '321000', '311000', 1210.0, '9999040'),
+            $line('FP', 'FP25041', '2025-11-24', 'Nákup', '518000', '321000', 500.0, '2025651', self::VENDOR_ICO),
+            $line('FP', 'FP25041', '2025-11-24', 'Nákup', '343100', '321000', 105.0, '2025651', self::VENDOR_ICO),
             $line('FV', 'FV25041', '2025-11-22', 'Prodej EU', '311000', '602000', 2500.0, '2025641'),
             $line('FV', 'FV25041', '2025-11-22', 'Prodej EU', '311000', '343200', 525.0, '2025641'),
             $line('FV', 'FV25042', '2025-12-15', 'Prodej', '311000', '602000', 500.0, '2025642'),
@@ -1251,6 +1255,12 @@ final class SyntheticAgenda
             'Uhrada' => 'převodem', 'Druh' => 'N', 'Cislo' => 640, 'Doklad' => 'FP25040', 'PrijatDokl' => 'DF-2025-640', 'VarSymbol' => '2025650',
             'Vystaveno' => '2025-11-21', 'DatUcPr' => '2025-11-21', 'PlnenoDPH' => '2025-11-21', 'Splatno' => '2025-12-05', 'Doruceno' => '2025-11-21',
             'Zaklad_2' => 1000.0, 'DPH_2' => 210.0, 'CelkemSDPH' => 1210.0, 'Uhrazeno' => '2025-11-30', 'UDoklad' => 'ID25040', 'Popis' => 'Nákup',
+        ], [
+            'D_ICO' => self::VENDOR_ICO, 'D_DIC' => 'CZ' . self::VENDOR_ICO, 'D_Nazev' => 'Dodavatel Alfa s.r.o.', 'D_Ulice' => 'Vzorová 1',
+            'D_Mesto' => 'Praha', 'D_Psc' => '110 00', 'SazbaDPH1' => 12.0, 'SazbaDPH2' => 21.0, 'KodDPH' => self::KOD_DPH_PURCHASE,
+            'Uhrada' => 'převodem', 'Druh' => 'N', 'Cislo' => 641, 'Doklad' => 'FP25041', 'PrijatDokl' => 'DF-2025-641', 'VarSymbol' => '2025651',
+            'Vystaveno' => '2025-11-24', 'DatUcPr' => '2025-11-24', 'PlnenoDPH' => '2025-11-24', 'Splatno' => '2025-12-08', 'Doruceno' => '2025-11-24',
+            'Zaklad_2' => 500.0, 'DPH_2' => 105.0, 'CelkemSDPH' => 605.0, 'Uhrazeno' => '2025-12-01', 'Popis' => 'Nákup',
         ]]);
         $append('ROK.002/BankKnih.DAT', self::BANK_FIELDS, [[
             'Doklad' => 'BP25050', 'Ucet' => 'BU', 'Vydej' => 0, 'DatUcPr' => '2025-09-05', 'DatPlat' => '2025-09-05', 'Celkem' => 1210.0,

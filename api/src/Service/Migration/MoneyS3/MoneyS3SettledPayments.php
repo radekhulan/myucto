@@ -107,7 +107,7 @@ final class MoneyS3SettledPayments
      * úhrady u dokladu uhrazeného později se zruší.
      *
      * @return list<array{id:int,document_no:string,invoice_type:string,status:string,currency:string,rate:?float,
-     *                    paid_at:?string,paid_total:float,amount_to_pay:float,others:float,own_id:?int,own_amount:float,in_range:bool}>
+     *                    paid_at:?string,paid_total:float,amount_to_pay:float,others:float,own_id:?int,own_amount:float,in_range:bool,payment_no:?string}>
      */
     public function issuedCandidates(int $supplierId, string $lastEnd, bool $forUpdate = false): array
     {
@@ -116,12 +116,13 @@ final class MoneyS3SettledPayments
         $stmt = $this->db->pdo()->prepare(
             "SELECT i.id, COALESCE(NULLIF(i.varsymbol, ''), CONCAT('#', i.id)) AS document_no, i.invoice_type, i.status,
                     cur.code AS currency, i.exchange_rate, i.paid_at, i.paid_total, i.amount_to_pay,
-                    COALESCE(pay.others, 0) AS others, pay.own_id, COALESCE(pay.own_amount, 0) AS own_amount
+                    COALESCE(pay.others, 0) AS others, pay.own_id, pay.own_note, COALESCE(pay.own_amount, 0) AS own_amount
                FROM invoices i
                JOIN currencies cur ON cur.id = i.currency_id
                LEFT JOIN (SELECT ip.invoice_id,
                                  SUM(CASE WHEN ip.source = ? AND ip.note LIKE ? THEN 0 ELSE ip.amount END) AS others,
                                  MIN(CASE WHEN ip.source = ? AND ip.note LIKE ? THEN ip.id END) AS own_id,
+                                 MIN(CASE WHEN ip.source = ? AND ip.note LIKE ? THEN ip.note END) AS own_note,
                                  SUM(CASE WHEN ip.source = ? AND ip.note LIKE ? THEN ip.amount ELSE 0 END) AS own_amount
                             FROM invoice_payments ip WHERE ip.supplier_id = ? GROUP BY ip.invoice_id) pay ON pay.invoice_id = i.id
               WHERE i.supplier_id = ? AND i.invoice_type IN ({$types}) AND i.status NOT IN ('draft', 'cancelled')
@@ -129,7 +130,7 @@ final class MoneyS3SettledPayments
                 AND (i.paid_total - COALESCE(pay.others, 0) - COALESCE(pay.own_amount, 0) >= 0.01 OR pay.own_id IS NOT NULL)
               ORDER BY i.id" . ($forUpdate ? ' FOR UPDATE' : '')
         );
-        $stmt->execute([self::SOURCE, $note . '%', self::SOURCE, $note . '%', self::SOURCE, $note . '%', $supplierId, $supplierId, MoneyS3ImportRepository::KIND_INVOICE]);
+        $stmt->execute([self::SOURCE, $note . '%', self::SOURCE, $note . '%', self::SOURCE, $note . '%', self::SOURCE, $note . '%', $supplierId, $supplierId, MoneyS3ImportRepository::KIND_INVOICE]);
         $out = [];
         foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $r) {
             $paidAt = $r['paid_at'] === null ? null : substr((string) $r['paid_at'], 0, 10);
@@ -140,6 +141,7 @@ final class MoneyS3SettledPayments
                 'paid_at' => $paidAt, 'paid_total' => (float) $r['paid_total'], 'amount_to_pay' => (float) $r['amount_to_pay'],
                 'others' => (float) $r['others'], 'own_id' => $r['own_id'] !== null ? (int) $r['own_id'] : null,
                 'own_amount' => (float) $r['own_amount'], 'in_range' => $paidAt !== null && $paidAt <= $lastEnd,
+                'payment_no' => self::paymentNoFromNote($r['own_note'] !== null ? (string) $r['own_note'] : null),
             ];
         }
         return $out;
@@ -165,7 +167,15 @@ final class MoneyS3SettledPayments
             return $out;
         }
         $pdo = $this->db->pdo();
-        $linked = $this->linkedSettlements($supplierId, 'invoice', array_column($candidates, 'id'));
+        $named = [];
+        foreach ($candidates as $c) {
+            $no = $paymentNos[$c['id']] ?? $c['payment_no'];
+            if ($c['in_range'] && $no !== null && $no !== '') {
+                $named[$c['id']] = ['no' => $no, 'date' => (string) $c['paid_at']];
+            }
+        }
+        $capacity = [];
+        $linked = $this->settlementEntries($supplierId, 'invoice', array_column($candidates, 'id'), $named, $capacity);
         $insert = $pdo->prepare('INSERT INTO invoice_payments (supplier_id, invoice_id, paid_on, amount, currency, note, source, created_by)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?)');
         $update = $pdo->prepare('UPDATE invoice_payments SET amount = ?, paid_on = ?, note = ? WHERE id = ? AND supplier_id = ?');
@@ -174,8 +184,7 @@ final class MoneyS3SettledPayments
             $settled = 0.0;
             if ($c['in_range']) {
                 foreach ($linked[$c['id']] ?? [] as $entry) {
-                    $amount = $this->inDocumentCurrency($c, $entry);
-                    $amount = round(min($amount, $room - $settled), 2);
+                    $amount = $this->capped($c, $entry, $room - $settled, $capacity);
                     if ($amount < 0.01 || $entry['account_id'] === null) {
                         continue;
                     }
@@ -265,22 +274,30 @@ final class MoneyS3SettledPayments
      * párování banky bere doklad uhrazený zápočtem v Money jako nekrytý a spáruje s ním
      * platbu se stejným symbolem. Volat UVNITŘ transakce volajícího.
      *
+     * @param array<int,string> $paymentNos id dokladu => číslo úhrady z Money (`UDoklad`)
      * @return array{updated:int,settlements:int,settlement_amount:float,amount:float,documents:list<array<string,mixed>>}
      */
-    public function restorePurchaseSettlements(int $supplierId, ?int $userId, string $lastEnd): array
+    public function restorePurchaseSettlements(int $supplierId, ?int $userId, string $lastEnd, array $paymentNos = []): array
     {
         $out = ['updated' => 0, 'settlements' => 0, 'settlement_amount' => 0.0, 'amount' => 0.0, 'documents' => []];
         $rows = $this->purchaseCandidates($supplierId, $lastEnd, true);
         if ($rows === []) {
             return $out;
         }
-        $linked = $this->linkedSettlements($supplierId, 'purchase_invoice', array_column($rows, 'id'));
+        $named = [];
+        foreach ($rows as $r) {
+            if (($paymentNos[$r['id']] ?? '') !== '') {
+                $named[$r['id']] = ['no' => $paymentNos[$r['id']], 'date' => $r['paid_at']];
+            }
+        }
+        $capacity = [];
+        $linked = $this->settlementEntries($supplierId, 'purchase_invoice', array_column($rows, 'id'), $named, $capacity);
         $update = $this->db->pdo()->prepare('UPDATE purchase_invoices SET settled_outside_amount = ? WHERE id = ? AND supplier_id = ?');
         foreach ($rows as $r) {
             $open = round($r['amount_to_pay'] - $r['covered'], 2);
             $settled = 0.0;
             foreach ($linked[$r['id']] ?? [] as $entry) {
-                $amount = round(min($this->inDocumentCurrency($r, $entry), $open - $settled), 2);
+                $amount = $this->capped($r, $entry, $open - $settled, $capacity);
                 if ($amount < 0.01 || $entry['account_id'] === null) {
                     continue;
                 }
@@ -302,6 +319,121 @@ final class MoneyS3SettledPayments
         $out['amount'] = round($out['amount'], 2);
         $out['settlement_amount'] = round($out['settlement_amount'], 2);
         return $out;
+    }
+
+    /** Číslo úhrady z poznámky platby bez dokladu úhrady ({@see note()}), pokud ho nese. */
+    public static function paymentNoFromNote(?string $note): ?string
+    {
+        if ($note === null || preg_match('/\(([^()]+)\)$/u', $note, $m) !== 1) {
+            return null;
+        }
+        return trim($m[1]);
+    }
+
+    /**
+     * Zápisy, kterými Money doklad vyrovnalo: ruční zápis navázaný na doklad
+     * ({@see linkedSettlements()}) a zápis interního dokladu, jehož číslo a datum Money
+     * u dokladu vede jako úhradu (`UDoklad` a `Uhrazeno`; převod ho k dokladu nepřiřadil,
+     * protože nese jiný párovací symbol). Zápis interního dokladu bývá zápočtem víc dokladů:
+     * jeho kapacitu (vyrovnání v Kč na saldokontní straně minus už evidované zápočty téhož
+     * druhu) hlídá `$capacity` napříč doklady.
+     *
+     * @param 'invoice'|'purchase_invoice' $docType
+     * @param list<int> $docIds
+     * @param array<int,array{no:string,date:string}> $named id dokladu => číslo a datum úhrady
+     * @param array<int,float> $capacity id zápisu => zbývající vyrovnání v Kč (MĚNÍ SE)
+     * @return array<int,list<array<string,mixed>>>
+     */
+    private function settlementEntries(int $supplierId, string $docType, array $docIds, array $named, array &$capacity): array
+    {
+        $out = $this->linkedSettlements($supplierId, $docType, $docIds);
+        if ($named === []) {
+            return $out;
+        }
+        $side = self::SETTLEMENT_ACCOUNTS[$docType]['side'];
+        $receivable = implode(' OR ', array_map(static fn (string $p): string => "COALESCE(pa.account_code, ca.account_code) LIKE '{$p}%'", self::SETTLEMENT_ACCOUNTS[$docType]['prefixes']));
+        $pdo = $this->db->pdo();
+        foreach (array_chunk($named, 500, true) as $chunk) {
+            $dates = array_values(array_unique(array_column($chunk, 'date')));
+            $numbers = array_values(array_unique(array_column($chunk, 'no')));
+            $stmt = $pdo->prepare(
+                "SELECT e.id AS entry_id, e.entry_date, e.document_no,
+                        SUM(CASE WHEN ({$receivable}) THEN (CASE WHEN l.side = '{$side}' THEN l.signed_amount ELSE -l.signed_amount END) ELSE 0 END) AS czk,
+                        SUM(CASE WHEN ({$receivable}) THEN (CASE WHEN l.side = '{$side}' THEN COALESCE(l.signed_amount_foreign, 0) ELSE -COALESCE(l.signed_amount_foreign, 0) END) ELSE 0 END) AS foreign_amount,
+                        MAX(CASE WHEN ({$receivable}) THEN l.currency_code END) AS currency_code,
+                        (SELECT COALESCE(SUM(s.amount), 0) FROM invoice_settlements s
+                          WHERE s.supplier_id = e.supplier_id AND s.journal_entry_id = e.id AND s.doc_type = ? AND s.status = 'confirmed') AS used
+                   FROM journal_entries e
+                   JOIN journal_entry_lines l ON l.entry_id = e.id AND l.supplier_id = e.supplier_id
+                   JOIN chart_of_accounts ca ON ca.id = l.account_id
+                   LEFT JOIN chart_of_accounts pa ON pa.id = ca.parent_id
+                  WHERE e.supplier_id = ? AND e.entry_date IN (" . implode(',', array_fill(0, count($dates), '?')) . ")
+                    AND e.document_no IN (" . implode(',', array_fill(0, count($numbers), '?')) . ")
+                    AND e.source_type = 'manual' AND e.posted_at IS NOT NULL AND e.reversed_by IS NULL
+                    AND EXISTS (SELECT 1 FROM money_s3_import_map m WHERE m.supplier_id = e.supplier_id AND m.kind = ? AND m.target_id = e.id)
+                  GROUP BY e.id, e.entry_date, e.document_no
+                 HAVING czk >= 0.01"
+            );
+            $stmt->execute([$docType, $supplierId, ...$dates, ...$numbers, MoneyS3ImportRepository::KIND_JOURNAL_ENTRY]);
+            $byKey = [];
+            foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $r) {
+                $byKey[substr((string) $r['entry_date'], 0, 10) . '|' . $r['document_no']][] = $r;
+            }
+            $entries = [];
+            foreach ($chunk as $docId => $w) {
+                $found = $byKey[$w['date'] . '|' . $w['no']] ?? [];
+                if (count($found) !== 1) {
+                    continue; // číslo dokladu Money se může opakovat; bez jednoznačného zápisu nic
+                }
+                $r = $found[0];
+                $entryId = (int) $r['entry_id'];
+                $capacity[$entryId] ??= round((float) $r['czk'] - (float) $r['used'], 2);
+                if (in_array($entryId, array_column($out[$docId] ?? [], 'entry_id'), true)) {
+                    continue;
+                }
+                $entries[$entryId] = true;
+                $out[$docId][] = [
+                    'entry_id' => $entryId, 'date' => substr((string) $r['entry_date'], 0, 10), 'document_no' => (string) $r['document_no'],
+                    'czk' => round((float) $r['czk'], 2), 'foreign' => round((float) $r['foreign_amount'], 2),
+                    'currency' => $r['currency_code'] !== null ? (string) $r['currency_code'] : null, 'account_id' => null, 'shared' => true,
+                ];
+            }
+            if ($entries !== []) {
+                $counter = $this->counterAccounts($supplierId, array_keys($entries), $receivable, $side === 'credit' ? 'debit' : 'credit');
+                foreach ($out as $docId => $list) {
+                    foreach ($list as $i => $e) {
+                        if (($e['shared'] ?? false) && $e['account_id'] === null) {
+                            $out[$docId][$i]['account_id'] = $counter[$e['entry_id']] ?? null;
+                        }
+                    }
+                }
+            }
+        }
+        return $out;
+    }
+
+    /**
+     * Částka zápočtu v měně dokladu: vyrovnání zápisu, nejvýš do `$room` a u zápisu
+     * sdíleného víc doklady do jeho zbývající kapacity v Kč (`$capacity` se sníží).
+     *
+     * @param array<string,mixed> $doc
+     * @param array<string,mixed> $entry
+     * @param array<int,float> $capacity
+     */
+    private function capped(array $doc, array $entry, float $room, array &$capacity): float
+    {
+        $amount = round(min($this->inDocumentCurrency($doc, $entry), $room), 2);
+        if (!($entry['shared'] ?? false) || $amount < 0.01) {
+            return $amount;
+        }
+        $rate = $doc['currency'] === 'CZK' ? 1.0 : ($doc['rate'] ?? null);
+        $left = $capacity[$entry['entry_id']] ?? 0.0;
+        if ($rate === null || $left < 0.01) {
+            return 0.0;
+        }
+        $amount = round(min($amount, $left / $rate), 2);
+        $capacity[$entry['entry_id']] = round($left - $amount * $rate, 2);
+        return $amount;
     }
 
     /**

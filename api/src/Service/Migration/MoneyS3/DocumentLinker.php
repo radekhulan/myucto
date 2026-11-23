@@ -385,7 +385,15 @@ final class DocumentLinker
         if ($lastEnd === null) {
             return;
         }
-        $out = $payments->restorePurchaseSettlements($ctx->supplierId, $ctx->userId > 0 ? $ctx->userId : null, $lastEnd);
+        $paymentNos = [];
+        foreach ($ctx->backup->rowsAcrossYears('PFaktury') as $r) {
+            $docId = $ctx->purchaseInvoices[$ctx->yearOf($r) . '|' . trim((string) ($r['Doklad'] ?? ''))] ?? null;
+            $settledBy = trim((string) ($r['UDoklad'] ?? ''));
+            if ($docId !== null && $settledBy !== '') {
+                $paymentNos[$docId] = $settledBy;
+            }
+        }
+        $out = $payments->restorePurchaseSettlements($ctx->supplierId, $ctx->userId > 0 ? $ctx->userId : null, $lastEnd, $paymentNos);
         if ($out['settlements'] > 0) {
             $ctx->protocol->count(self::STEP_PAYMENTS, 'purchase_settled_internal_document', $out['settlements']);
         }
