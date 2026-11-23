@@ -860,16 +860,15 @@ výpočtu** ukáže samostatně čtyři kroky se stavem a důvodem:
 - **Právní profil:** potvrzený profil vybraného období.
 - **Shoda profilu s posouzením:** postavení v posouzení odpovídá právnímu profilu.
   Odkaz vede do daňového posouzení.
-- **Údaje pro přiznání:** výsledek posouzení navazuje na řádek 62 výsledovky
-  a úpravy a dary uložené v přiznání jsou platné. Opravíte je v části s úpravami
-  na této stránce nebo v přiznání.
+- **Návaznost na výkazy:** výsledek posouzení navazuje na řádek 62 výsledovky
+  a podklady výpočtu DPPO jsou úplné. Úpravy, dary a snížení zadané v přiznání
+  ověří až výpočet přiznání, kde je také opravíte.
 
 Výpočet se zastaví na první chybě; kroky, ke kterým se nedostal, zůstanou
-neověřené. Chyba,
-která nepatří žádnému kroku (například jiný účetní rámec v části období), se
-ukáže samostatně pod tlačítkem. Chybějící
-právní profil a chybějící potvrzené posouzení se ale ukážou současně. Teprve po
-úspěšné kontrole obrazovka nabídne převzetí do přiznání.
+neověřené. Chybějící právní profil a chybějící potvrzené posouzení se ale ukážou
+současně. Chyba, která nepatří žádnému kroku (například jiný účetní rámec v části
+období nebo období mimo podporovaná pravidla), se ukáže samostatně pod tlačítkem.
+Teprve po úspěšné kontrole obrazovka nabídne převzetí do přiznání.
 
 V **Uzávěrka → Daňové posouzení** zvolte u nákladu **Posoudit** a zadejte **Uznatelnou část nákladu před vyloučením financování** v Kč. U záporného nákladu zadejte zápornou uznatelnou část nebo nulu. U povinně neuznatelného nebo vyloučeného nákladu aplikace nastaví nulu. Po uložení rozhodnutí spusťte **Náhled**.
 

@@ -177,12 +177,16 @@ final class J6SourceFindingsHttpTest extends TestCase
         $bank = $this->entry('2025-04-10', [['602', 'credit'], ['221', 'debit']], 'bank', $transaction);
         $reversal = $this->entry('2025-04-11', [['602', 'debit'], ['221', 'credit']], 'bank', null);
         $this->pdo->prepare('UPDATE journal_entries SET reversed_by=? WHERE id=?')->execute([$reversal, $bank]);
+        $purchase = $this->entry('2025-04-12', [['518', 'debit'], ['221', 'credit']], 'purchase_invoice', 77);
 
         [, $page] = $this->http('GET', '/source-findings/lines', ['code' => 'missing_activity']);
         $rows = array_column($page['rows'], null, 'entry_id');
         self::assertSame(['bank', $transaction, $transaction, $statement], [$rows[$bank]['source_type'], $rows[$bank]['source_id'], $rows[$bank]['source_link_id'], $rows[$bank]['source_statement_id']]);
         self::assertSame([null, $transaction, $statement], [$rows[$reversal]['source_id'], $rows[$reversal]['source_link_id'], $rows[$reversal]['source_statement_id']],
             'Protizápis vede na doklad stornovaného zápisu.');
+        [, $page] = $this->http('GET', '/source-findings/lines', ['code' => 'missing_activity', 'account' => '518']);
+        $row = array_column($page['rows'], null, 'entry_id')[$purchase];
+        self::assertSame(['purchase_invoice', 77, 77], [$row['source_type'], $row['source_id'], $row['source_link_id']]);
     }
 
     public function testEntryRemovedBeforeEnrichmentIsSkipped(): void

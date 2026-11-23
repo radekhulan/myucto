@@ -356,6 +356,14 @@ final class NonprofitReferenceAssociationEndToEndTest extends TestCase
         self::assertSame((int) $confirmed['assessment_id'], $data['nonprofit']['assessment']['id']);
         self::assertSame(130400.0, (float) $data['vh']);
         self::assertSame($before, $history());
+
+        // Po akceptaci výpočtu nabídne připravenost dokončení přiznání (filing_ready) jako dosud.
+        (new NonprofitDppoAcceptanceService($this->db))->change($this->supplier, NonprofitDppoAcceptanceService::ACCEPT, true,
+            'Syntetický protokol porovnání s etalonem TJ Příklad', 'Syntetická akceptace výpočtu', 'tj-ready-accept', null, $this->actor);
+        $caps = $this->readiness();
+        self::assertTrue($caps['calculation_ready']);
+        self::assertTrue($caps['filing_ready']);
+        self::assertSame([], $caps['preparation_findings']);
     }
 
     public function testReadinessFollowsLegacyAssessmentPath(): void
@@ -417,22 +425,29 @@ final class NonprofitReferenceAssociationEndToEndTest extends TestCase
         self::assertFalse($body['capabilities']['calculation_ready']);
     }
 
-    public function testReadinessChecksSavedReturnInputsAsReturnData(): void
+    public function testReadinessLeavesSavedReturnInputsToTheReturnCalculation(): void
     {
-        // Údaje pro přiznání se ověřují nad uloženými vstupy přiznání stejně jako výpočet:
-        // úprava navázaná na neexistující řádek posouzení selže až v tomto kroku.
+        // Rozhodnutí: připravenost ověřuje podklady výpočtu bez vstupů přiznání. Úpravy, dary a snížení
+        // uložené v přiznání (i v opravné či dodatečné variantě) ověří a ukáže výpočet přiznání, kde se opravují.
         $this->postReferenceYear();
         (new NonprofitLegalProfileService($this->db))->confirm($this->supplier, $this->period, $this->legalRequest('tj-legal-inputs'), $this->actor);
         $this->confirmPaged($this->period, $this->referenceAssessment(), 'tj-inputs-' . $this->supplier);
-        $this->container->get(TaxReturnService::class)->getReturn($this->supplier, $this->year, 'po', $this->actor);
+        $service = $this->container->get(TaxReturnService::class);
+        $service->getReturn($this->supplier, $this->year, 'po', $this->actor);
         $inputs = ['nonprofit' => ['adjustments' => [['kind' => 'expense_addback', 'source_id' => 'line:999999999', 'amount_cents' => 100,
             'legal_basis' => 'zdp_25', 'evidence' => 'Syntetická úprava navázaná na zaniklý řádek']]]];
         $this->pdo->prepare("UPDATE income_tax_returns SET inputs=? WHERE supplier_id=? AND year=? AND taxpayer_type='po'")
             ->execute([json_encode($inputs), $this->supplier, $this->year]);
         $caps = $this->readiness();
-        self::assertSame(['sources' => 'ok', 'legal_profile' => 'ok', 'profile_match' => 'ok', 'return_data' => 'failed'],
+        self::assertSame(array_fill_keys(\MyInvoice\Service\Tax\Nonprofit\NonprofitDppoReadiness::STEPS, 'ok'),
             array_column($caps['readiness_steps'], 'status', 'step'));
-        self::assertSame('nonprofit_dppo_adjustment_invalid', $caps['readiness_steps'][3]['code']);
+        self::assertTrue($caps['calculation_ready']);
+        try {
+            $service->getReturn($this->supplier, $this->year, 'po', $this->actor);
+            self::fail('Return calculation accepted an invalid saved adjustment.');
+        } catch (TaxReturnException $e) {
+            self::assertSame('nonprofit_dppo_adjustment_invalid', $e->errorCode);
+        }
     }
 
     public function testIncompleteSourcesStillStopCalculationWithTheSameCode(): void

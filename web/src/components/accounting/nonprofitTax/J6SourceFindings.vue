@@ -184,10 +184,10 @@ watch(() => [props.supplierId, props.periodId], () => {
           <p class="text-xs text-neutral-600">{{ date(line.date) }} · {{ line.account_code }}<template v-if="line.description"> · {{ line.description }}</template></p>
           <div v-for="code in line.codes" :key="code" class="mt-1 text-xs text-warning-700">{{ findingLabel(code) }}</div>
           <div class="mt-2 flex flex-wrap gap-x-4 gap-y-1">
-            <RouterLink :to="lineLink(line).to" class="text-xs font-medium text-primary-600 hover:underline whitespace-nowrap">
+            <RouterLink :to="lineLink(line).to" data-test="source-finding-card-link" class="text-xs font-medium text-primary-600 hover:underline whitespace-nowrap">
               {{ lineLink(line).document ? t('nonprofitTaxJ6.sourceFindings.openDocument') : t('nonprofitTaxJ6.sourceFindings.openEntry') }} →
             </RouterLink>
-            <RouterLink v-if="needsJointAllocation(line)" :to="{ name: 'accounting-joint-allocations' }" class="text-xs font-medium text-primary-600 hover:underline whitespace-nowrap">
+            <RouterLink v-if="needsJointAllocation(line)" :to="{ name: 'accounting-joint-allocations' }" data-test="source-finding-card-joint" class="text-xs font-medium text-primary-600 hover:underline whitespace-nowrap">
               {{ t('nonprofitTaxJ6.sourceFindings.openJointAllocations') }} →
             </RouterLink>
           </div>

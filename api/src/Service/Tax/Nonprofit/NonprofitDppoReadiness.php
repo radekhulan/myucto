@@ -6,7 +6,6 @@ namespace MyInvoice\Service\Tax\Nonprofit;
 
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\NonprofitTaxAssessmentRepository;
-use MyInvoice\Repository\TaxReturnRepository;
 use MyInvoice\Service\Tax\Return\TaxReturnException;
 
 /**
@@ -50,9 +49,10 @@ final readonly class NonprofitDppoReadiness
     {
         $passed = [];
         try {
-            // Stejné uložené vstupy přiznání jako výpočet (TaxReturnService::compute), aby krok údajů pro přiznání
-            // ověřil totéž, co pak výpočet použije (úpravy, dary).
-            $this->provider->gather($supplierId, (int) $period['fiscal_year'], $this->savedInputs($supplierId, (int) $period['fiscal_year']), static function (string $step) use (&$passed): void {
+            // Bez vstupů přiznání: krok return_data ověřuje podklady výpočtu (návaznost na výkazy, ř. 62).
+            // Úpravy, dary a snížení zadané v přiznání ověří výpočet přiznání v jeho vybrané variantě,
+            // kde se také opravují (TaxReturnService::compute).
+            $this->provider->gather($supplierId, (int) $period['fiscal_year'], [], static function (string $step) use (&$passed): void {
                 $passed[$step] = true;
             });
             return ['ready' => true, 'steps' => array_map(static fn (string $step): array => ['step' => $step, 'status' => 'ok', 'code' => null, 'message' => null], self::STEPS), 'findings' => []];
@@ -127,10 +127,4 @@ final readonly class NonprofitDppoReadiness
         return ['code' => $error->errorCode, 'message' => $error->getMessage()];
     }
 
-    /** Uložené vstupy řádného přiznání PO za rok; bez přiznání prázdné. */
-    private function savedInputs(int $supplierId, int $year): array
-    {
-        $row = (new TaxReturnRepository($this->db))->find($supplierId, $year, 'po');
-        return is_array($row['inputs'] ?? null) ? $row['inputs'] : [];
-    }
 }

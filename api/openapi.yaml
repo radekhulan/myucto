@@ -48018,7 +48018,10 @@ components:
                 xsd_sha256: { type: string }
                 xsd_verified: { type: boolean }
                 official_source: { type: string, format: uri }
-            preparation_findings: { type: array, items: { type: object } }
+            preparation_findings:
+              type: array
+              description: Všechna zjištění kontroly připravenosti (může jich být víc); zjištění kroku je zároveň v readiness_steps, ostatní (akceptace, nepodporované období) jen zde.
+              items: { type: object }
             readiness_steps:
               type: array
               description: Kroky připravenosti DPPO 504 v pořadí výpočtu; bez kontroly připravenosti všechny not_evaluated.

@@ -171,6 +171,12 @@ describe('J6 source findings', () => {
     const rows = w.findAll('[data-test=source-finding-line]')
     expect(JSON.parse(rows[0]!.get('[data-test=source-finding-joint]').attributes('data-to')!)).toEqual({ name: 'accounting-joint-allocations' })
     expect(rows[1]!.find('[data-test=source-finding-joint]').exists()).toBe(false)
+    // Karty na úzké obrazovce nesou stejné odkazy.
+    const cards = w.findAll('[data-test=source-finding-line-card]')
+    expect(JSON.parse(cards[0]!.get('[data-test=source-finding-card-joint]').attributes('data-to')!)).toEqual({ name: 'accounting-joint-allocations' })
+    expect(cards[1]!.find('[data-test=source-finding-card-joint]').exists()).toBe(false)
+    expect(cards.map(c => JSON.parse(c.get('[data-test=source-finding-card-link]').attributes('data-to')!))).toEqual(
+      w.findAll('[data-test=source-finding-link]').map(l => JSON.parse(l.attributes('data-to')!)))
   })
 
   it('warns when the summary was computed over other sources than the page overview', async () => {
