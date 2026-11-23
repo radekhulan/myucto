@@ -77,6 +77,46 @@
 {% if counter_filter %}
     <div class="sign-note">Filtr protiúčtu: {{ counter_filter.account_code }} {{ counter_filter.name }}. Zůstatek je zůstatek celého účtu.</div>
 {% endif %}
+{% for note in scope_notes|default([]) %}
+    <div class="sign-note">{{ note }}</div>
+{% endfor %}
+{% if dimension_breakdown is defined %}
+    <div class="opening-line">Rozpad podle: {{ dimension_breakdown.type_name }}</div>
+    {% if not dimension_breakdown.matches %}
+        <p class="unusual">Součet rozpadu nesouhlasí se součtem výpisu účtu.</p>
+    {% endif %}
+    <table class="book" style="margin-bottom: 4mm;">
+        <thead>
+            <tr>
+                <th class="thl" style="width:40%;">Hodnota dimenze</th>
+                <th style="width:15%;">Počáteční stav</th>
+                <th style="width:15%;">Obrat MD</th>
+                <th style="width:15%;">Obrat D</th>
+                <th style="width:15%;">Konečný stav</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for row in dimension_breakdown.rows %}
+                <tr>
+                    <td style="width:40%;">{{ row.value_id is null ? 'Bez dimenze' : (row.code ~ ' ' ~ row.name)|trim }}</td>
+                    <td class="num" style="width:15%;">{{ row.opening_balance_signed|cz_money }}</td>
+                    <td class="num" style="width:15%;">{{ row.turnover_md|cz_money }}</td>
+                    <td class="num" style="width:15%;">{{ row.turnover_d|cz_money }}</td>
+                    <td class="num" style="width:15%;">{{ row.closing_balance_signed|cz_money }}</td>
+                </tr>
+            {% endfor %}
+        </tbody>
+        <tfoot>
+            <tr>
+                <td>Celkem</td>
+                <td class="num">{{ dimension_breakdown.totals.opening_balance_signed|cz_money }}</td>
+                <td class="num">{{ dimension_breakdown.totals.turnover_md|cz_money }}</td>
+                <td class="num">{{ dimension_breakdown.totals.turnover_d|cz_money }}</td>
+                <td class="num">{{ dimension_breakdown.totals.closing_balance_signed|cz_money }}</td>
+            </tr>
+        </tfoot>
+    </table>
+{% endif %}
 
 {% if items is empty %}
     <p style="text-align:center; color:#888; padding: 10mm 0;">

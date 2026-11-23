@@ -4,14 +4,23 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Integration\Accounting;
 
+use MyInvoice\Action\Accounting\Reports\AccountStatementAction;
 use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Middleware\AuthMiddleware;
+use MyInvoice\Middleware\SupplierScopeMiddleware;
 use MyInvoice\Repository\AccountingPeriodRepository;
+use MyInvoice\Repository\DimensionRepository;
 use MyInvoice\Service\Accounting\ChartOfAccountsSeeder;
+use MyInvoice\Service\Accounting\Dimension\DimensionService;
 use MyInvoice\Service\Accounting\PostingService;
+use MyInvoice\Service\Accounting\Reports\AccountStatementScope;
 use MyInvoice\Service\Accounting\Reports\AccountStatementService;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
+use Psr\Container\ContainerInterface;
+use Slim\Psr7\Factory\ServerRequestFactory;
+use Slim\Psr7\Response;
 
 /**
  * Integrační test opisu účtu (Epic F2, T6): běžící zůstatek řádek po řádku,
@@ -29,6 +38,7 @@ final class AccountStatementReportTest extends TestCase
     private PostingService $posting;
     private AccountStatementService $statement;
     private AccountingPeriodRepository $periods;
+    private ContainerInterface $container;
 
     private int $supplierId = 0;
     private int $currencyId = 0;
@@ -46,6 +56,7 @@ final class AccountStatementReportTest extends TestCase
         }
         try {
             $container = Bootstrap::buildContainer();
+            $this->container = $container;
             $this->db        = $container->get(Connection::class);
             $this->posting   = $container->get(PostingService::class);
             $this->statement = $container->get(AccountStatementService::class);
@@ -72,13 +83,7 @@ final class AccountStatementReportTest extends TestCase
         // Izolovaný supplier (kopie FK hodnot z prvního): kumulativní PS rozvahových
         // účtů (R6) jde přes celou historii deníku, sdílený dev supplier s reálnými
         // zápisy by rozbil bilanční asserty a previousPeriod.
-        $isoStmt = $pdo->prepare(
-            'INSERT INTO supplier (company_name, street, city, zip, country_id, email, default_currency_id, default_vat_rate_id)
-             SELECT ?, "Testovací", "Praha", "11000", country_id, ?, default_currency_id, default_vat_rate_id
-               FROM supplier WHERE id = ?'
-        );
-        $isoStmt->execute(['Izolovaný test s.r.o.', 'izolace@example.com', $this->supplierId]);
-        $this->supplierId = (int) $pdo->lastInsertId();
+        $this->supplierId = $this->newSupplier('Izolovaný test s.r.o.');
 
         $seeder->seedForSupplier($this->supplierId);
         $this->periodId = $this->periods->create($this->supplierId, self::YEAR, self::YEAR . '-01-01', self::YEAR . '-12-31');
@@ -249,7 +254,156 @@ final class AccountStatementReportTest extends TestCase
         self::assertSame(self::cents(14232.00), self::cents($data['closing_balance']), 'V pokladně je to, co v ní reálně je.');
     }
 
+    public function testDimensionBreakdownReconcilesOpeningAnalyticsSplitsAndRedStorno(): void
+    {
+        $dimensions = $this->container->get(DimensionService::class);
+        $dimensions->setEnabled($this->supplierId, true);
+        $type = $dimensions->ensureDefaultTypes($this->supplierId, ['stredisko'])['cost_center'];
+        $parent = (int) $dimensions->createValue($this->supplierId, $type, ['code' => 'S1', 'name' => 'Testovací oddělení'])['id'];
+        $child = (int) $dimensions->createValue($this->supplierId, $type, ['code' => 'S2', 'name' => 'Testovací tým', 'parent_id' => $parent])['id'];
+        $tag = ['dimensions' => [$type => $parent]];
+        $split = ['dimension_splits' => [$type => [$parent => 0.5, $child => 0.5]]];
+        $account = $this->accountId('211');
+        $this->periods->create($this->supplierId, self::YEAR - 1, '2098-01-01', '2098-12-31');
+        $this->manual([self::l('211', 'debit', 999.00) + $tag, self::l('602', 'credit', 999.00) + $tag], '2098-12-01');
+        $this->technical([self::l('211', 'debit', 120.00) + $tag, self::l('701', 'credit', 120.00)], '2099-01-01', 'opening', null, 'OT-DIM-1');
+        $this->db->pdo()->prepare("INSERT INTO chart_of_accounts (supplier_id, account_code, name, account_type, normal_side, is_synthetic, parent_id)
+            SELECT supplier_id, '211.123', 'Testovací analytika', account_type, normal_side, 0, id FROM chart_of_accounts WHERE id = ?")
+            ->execute([$account]);
+        $this->manual([self::l('211.123', 'debit', 20.00) + ['cost_center' => 'S2'], self::l('602', 'credit', 20.00) + $tag], '2099-01-10');
+        $this->manual([self::l('211.123', 'debit', 100.01) + $split, self::l('602', 'credit', 100.01) + $tag], '2099-02-10');
+        $red = ['is_red_storno' => true];
+        $this->manual([self::l('211.123', 'debit', 20.00) + $split + $red, self::l('602', 'credit', 20.00) + $tag + $red], '2099-02-11');
+        $this->manual([self::l('518', 'debit', 7.25), self::l('211.123', 'credit', 7.25)], '2099-02-12');
+
+        $build = fn (int $id, string $from = '2099-02-01', ?AccountStatementScope $scope = null, int $page = 1): array => $this->statement->build(
+            $this->supplierId, $id, $from, '2099-02-28', $page, 1, scope: $scope, groupByDimensionType: $type,
+        );
+        $data = $build($account);
+        $breakdown = $data['dimension_breakdown'];
+        self::assertTrue($breakdown['matches']);
+        self::assertSame($type, $breakdown['type_id']);
+        self::assertSame($breakdown, $build($account, page: 2)['dimension_breakdown']);
+        self::assertSame([120.00, 20.00, 0.00], array_column($breakdown['rows'], 'opening_balance_signed'));
+        self::assertSame([$parent, $child, null], array_column($breakdown['rows'], 'value_id'));
+        self::assertSame([40.00, 40.01, 0.00], array_column($breakdown['rows'], 'turnover_md'));
+        self::assertSame([0.00, 0.00, 7.25], array_column($breakdown['rows'], 'turnover_d'));
+        self::assertSame([
+            'opening_balance_signed' => 140.00, 'turnover_md' => 80.01, 'turnover_d' => 7.25, 'closing_balance_signed' => 212.76,
+        ], $breakdown['totals']);
+
+        $january = $build($account, '2099-01-01')['dimension_breakdown'];
+        self::assertTrue($january['matches']);
+        self::assertSame(120.00, $january['totals']['opening_balance_signed']);
+        self::assertSame(100.01, $january['totals']['turnover_md']);
+
+        $branch = $build($account, scope: new AccountStatementScope(['dimension' => $dimensions->filter($this->supplierId, $parent)]))['dimension_breakdown'];
+        self::assertTrue($branch['matches']);
+        self::assertSame([$parent, $child, null], array_column($branch['rows'], 'value_id'));
+        self::assertSame(220.01, $branch['totals']['closing_balance_signed']);
+
+        $exact = $build($account, scope: new AccountStatementScope(['dimension' => $dimensions->filter($this->supplierId, $parent, false)]))['dimension_breakdown'];
+        self::assertTrue($exact['matches']);
+        self::assertSame([$parent, null], array_column($exact['rows'], 'value_id'));
+        self::assertSame(160.00, $exact['totals']['closing_balance_signed']);
+
+        $own = $build($account, scope: new AccountStatementScope(withAnalytics: false))['dimension_breakdown'];
+        self::assertTrue($own['matches']);
+        self::assertSame(120.00, $own['totals']['closing_balance_signed']);
+
+        $revenue = $build($this->accountId('602'))['dimension_breakdown'];
+        self::assertTrue($revenue['matches']);
+        self::assertSame(20.00, $revenue['totals']['opening_balance_signed']);
+        self::assertSame(100.01, $revenue['totals']['closing_balance_signed']);
+    }
+
+    public function testDimensionBreakdownAllocatesTheRoundedAmountOfCombinedFilters(): void
+    {
+        $dimensions = $this->container->get(DimensionService::class);
+        $dimensions->setEnabled($this->supplierId, true);
+        $types = $dimensions->ensureDefaultTypes($this->supplierId, ['stredisko', 'projekt']);
+        $center = $types['cost_center'];
+        $project = $types['project'];
+        $value = fn (int $type, string $code): int => (int) $dimensions->createValue($this->supplierId, $type, ['code' => $code, 'name' => $code])['id'];
+        $first = $value($center, 'ST-A');
+        $second = $value($center, 'ST-B');
+        $selected = $value($project, 'PR-A');
+        $other = $value($project, 'PR-B');
+        $this->manual([
+            self::l('518', 'debit', 0.02) + ['dimension_splits' => [$center => [$first => 0.5, $second => 0.5], $project => [$selected => 0.5, $other => 0.5]]],
+            self::l('321', 'credit', 0.02),
+        ], '2099-03-01');
+
+        $scope = new AccountStatementScope(['dimension' => $dimensions->filters($this->supplierId, [$first, $second, $selected])]);
+        $data = $this->statement->build(
+            $this->supplierId, $this->accountId('518'), '2099-01-01', '2099-12-31', 1, 50,
+            scope: $scope, groupByDimensionType: $center,
+        );
+        $breakdown = $data['dimension_breakdown'];
+        self::assertTrue($breakdown['matches']);
+        self::assertSame(0.01, $data['turnover_md']);
+        self::assertSame($data['turnover_md'], $breakdown['totals']['turnover_md']);
+        self::assertSame([0.00, 0.01, 0.00], array_column($breakdown['rows'], 'turnover_md'));
+    }
+
+    public function testDimensionBreakdownRejectsForeignTypesAndKeepsSharedValuesTenantScoped(): void
+    {
+        $foreign = $this->newSupplier('Jiná syntetická firma');
+        $this->container->get(ChartOfAccountsSeeder::class)->seedForSupplier($foreign);
+        $this->periods->create($foreign, self::YEAR, '2099-01-01', '2099-12-31');
+        $dimensions = $this->container->get(DimensionService::class);
+        $repo = $this->container->get(DimensionRepository::class);
+        $group = $repo->createGroup('Syntetická skupina pro opis');
+        foreach ([$this->supplierId, $foreign] as $supplierId) {
+            $repo->setSupplierGroup($supplierId, $group);
+            $dimensions->setEnabled($supplierId, true);
+        }
+        $shared = (int) $dimensions->createType($foreign, ['code' => 'shared', 'name' => 'Společný projekt', 'level' => 'global'])['id'];
+        $private = (int) $dimensions->createType($foreign, ['code' => 'private', 'name' => 'Cizí projekt'])['id'];
+        $value = (int) $dimensions->createValue($foreign, $shared, ['code' => 'SYN', 'name' => 'Testovací projekt'])['id'];
+        $this->posting->postDocument($foreign, 'manual', null, [
+            self::l('211', 'debit', 999.00) + ['dimensions' => [$shared => $value]],
+            self::l('602', 'credit', 999.00),
+        ], ['entry_date' => '2099-03-01', 'posted_by' => $this->userId]);
+
+        $this->manual([self::l('211', 'debit', 12.00) + ['dimensions' => [$shared => $value]], self::l('602', 'credit', 12.00)], '2099-03-01');
+        $action = $this->container->get(AccountStatementAction::class);
+        $args = ['accountId' => (string) $this->accountId('211')];
+        $query = ['from' => '2099-01-01', 'to' => '2099-12-31'];
+        $request = (new ServerRequestFactory())->createServerRequest('GET', '/api/accounting/reports/account-statement/' . $args['accountId'])
+            ->withAttribute(SupplierScopeMiddleware::ATTR_CURRENT_ID, $this->supplierId)
+            ->withAttribute(AuthMiddleware::ATTR_USER, ['id' => $this->userId, 'role' => 'accountant']);
+
+        $bad = $action->get($request->withQueryParams($query + ['group_by_dimension_type' => ['1']]), new Response(), $args);
+        self::assertSame(422, $bad->getStatusCode());
+        $hidden = $action->get($request->withQueryParams($query + ['group_by_dimension_type' => (string) $private]), new Response(), $args);
+        self::assertSame(404, $hidden->getStatusCode());
+        $grouped = $query + ['group_by_dimension_type' => (string) $shared];
+        $ok = $action->get($request->withQueryParams($grouped), new Response(), $args);
+        self::assertSame(200, $ok->getStatusCode(), (string) $ok->getBody());
+        $data = json_decode((string) $ok->getBody(), true, 512, JSON_THROW_ON_ERROR);
+        $breakdown = ($data['data'] ?? $data)['dimension_breakdown'];
+        self::assertTrue($breakdown['matches']);
+        self::assertSame([$value, null], array_column($breakdown['rows'], 'value_id'));
+        self::assertSame(12, $breakdown['totals']['turnover_md']);
+
+        $export = $action->export($request->withQueryParams($grouped + ['format' => 'xlsx', 'dimension_value_id' => (string) $value]), new Response(), $args);
+        self::assertSame(200, $export->getStatusCode(), $export->getStatusCode() === 200 ? '' : (string) $export->getBody());
+        self::assertStringStartsWith('PK', (string) $export->getBody());
+    }
+
     // ── helpers ──────────────────────────────────────────────────────────────
+
+    private function newSupplier(string $name): int
+    {
+        $pdo = $this->db->pdo();
+        $pdo->prepare(
+            'INSERT INTO supplier (company_name, street, city, zip, country_id, email, default_currency_id, default_vat_rate_id, accounting_mode)
+             SELECT ?, "Testovací", "Praha", "11000", country_id, ?, default_currency_id, default_vat_rate_id, "double_entry"
+               FROM supplier WHERE id = ?'
+        )->execute([$name, 'izolace@example.com', $this->supplierId]);
+        return (int) $pdo->lastInsertId();
+    }
 
     private function accountId(string $code): int
     {

@@ -7,6 +7,7 @@ namespace MyInvoice\Repository;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Accounting\Closing\ClosingSourceId;
 use MyInvoice\Service\Accounting\Dimension\DimensionFilter;
+use MyInvoice\Service\Accounting\Dimension\DimensionSplitAllocation;
 use MyInvoice\Service\Accounting\Reports\AccountStatementScope;
 use MyInvoice\Service\Tax\Return\JournalTaxOrigin;
 use PDO;
@@ -357,35 +358,34 @@ final class LedgerReportRepository
     public function accountOpening(int $supplierId, int $accountId, string $from, string $periodStart, bool $excludeClosing = false, ?AccountStatementScope $scope = null): float
     {
         $scope ??= new AccountStatementScope();
-        $filters = $scope->filters;
-        $accountDefinitions=AccountDefinitionRepository::relation($from,$supplierId);
+        [$sql, $params] = $this->accountOpeningSource($supplierId, $accountId, $from, $periodStart, $excludeClosing, $scope);
+        $stmt = $this->db->pdo()->prepare(
+            ($excludeClosing ? 'WITH RECURSIVE ' . JournalTaxOrigin::cte($supplierId) . ' ' : '')
+            . "SELECT COALESCE(SUM(CASE WHEN l.side = 'debit' THEN l.signed_amount ELSE -l.signed_amount END), 0) {$sql}"
+        );
+        $stmt->execute($params);
+        return round((float) $stmt->fetchColumn(), 2);
+    }
+
+    private function accountOpeningSource(int $supplierId, int $accountId, string $from, string $periodStart, bool $excludeClosing, AccountStatementScope $scope, bool $grouped = false): array
+    {
         $anchor = $this->openingAnchor($supplierId, $from);
         $closingSql = $excludeClosing ? " AND " . JournalTaxOrigin::includedSql() : '';
         // Rozvahové účty čtou od kotvy, výsledkové od začátku období; bez kotvy celou historii.
-        [$linesSql, $linesParams, , $filterSql, $filterParams] = $this->statementLineSource(
-            $supplierId, $filters, $anchor !== null ? min($anchor, $periodStart) : null, $from,
+        [$source, $params, $base] = $this->accountTotalsSource(
+            $supplierId, $accountId, $anchor !== null ? min($anchor, $periodStart) : null, $from, $excludeClosing, $scope, $grouped,
         );
-        $stmt = $this->db->pdo()->prepare(
-            ($excludeClosing ? "WITH RECURSIVE " . JournalTaxOrigin::cte($supplierId) . " " : "") . "SELECT COALESCE(SUM(CASE WHEN l.side = 'debit' THEN l.signed_amount ELSE -l.signed_amount END), 0)
-               FROM {$linesSql}
-               JOIN journal_entries e    ON e.id = l.entry_id
-               " . ($excludeClosing ? JournalTaxOrigin::join() : "") . "
-               JOIN {$accountDefinitions} ca ON ca.id = l.account_id
-              WHERE l.supplier_id = ? AND e.posted_at IS NOT NULL
-                AND (l.account_id = ? OR ca.parent_id = ?)
+        $source .= "
                 -- Otevírací zápis z prvního dne období patří do počátečního stavu,
                 -- ne až mezi pohyby — viz trialBalanceRows().
                 AND (e.entry_date < ? OR (e.entry_date = ? AND e.source_type = 'opening'))
                 AND (ca.account_type NOT IN ('revenue','expense') OR e.entry_date >= ?)
-                AND (ca.account_type NOT IN ('asset','liability','equity') OR ? IS NULL OR e.entry_date >= ?){$closingSql}{$filterSql}"
-        );
-        $params = [...$linesParams, $supplierId, $accountId, $scope->parentId($accountId), $from, $scope->openingDate ?? $from, $periodStart, $anchor, $anchor];
+                AND (ca.account_type NOT IN ('asset','liability','equity') OR ? IS NULL OR e.entry_date >= ?){$closingSql}";
+        array_push($params, $from, $scope->openingDate ?? $from, $periodStart, $anchor, $anchor);
         if ($excludeClosing) {
             $params[] = ClosingSourceId::STOCK_SLOT_BASE;
         }
-        array_push($params, ...$filterParams);
-        $stmt->execute($params);
-        return round((float) $stmt->fetchColumn(), 2);
+        return [$source, $params, $base];
     }
 
     /**
@@ -653,26 +653,135 @@ final class LedgerReportRepository
     public function accountTurnovers(int $supplierId, int $accountId, string $from, string $to, bool $excludeClosing = false, ?AccountStatementScope $scope = null): array
     {
         $scope ??= new AccountStatementScope();
-        $accountDefinitions=AccountDefinitionRepository::relation($to,$supplierId);
-        [$technicalSql, $technicalParams] = $this->technicalEntryFilter($from, $excludeClosing, $scope->openingDate);
-        [$linesSql, $linesParams, , $filterSql, $filterParams] = $this->statementLineSource($supplierId, $scope->filters, $from, $to);
+        [$sql, $params] = $this->accountTurnoverSource($supplierId, $accountId, $from, $to, $excludeClosing, $scope);
         $stmt = $this->db->pdo()->prepare(
-            ($excludeClosing ? "WITH RECURSIVE " . JournalTaxOrigin::cte($supplierId) . " " : "") . "SELECT COALESCE(SUM(CASE WHEN l.side = 'debit'  THEN l.signed_amount ELSE 0 END), 0) AS md,
+            ($excludeClosing ? 'WITH RECURSIVE ' . JournalTaxOrigin::cte($supplierId) . ' ' : '')
+            . "SELECT COALESCE(SUM(CASE WHEN l.side = 'debit'  THEN l.signed_amount ELSE 0 END), 0) AS md,
                     COALESCE(SUM(CASE WHEN l.side = 'credit' THEN l.signed_amount ELSE 0 END), 0) AS d
-               FROM {$linesSql}
-               JOIN journal_entries e    ON e.id = l.entry_id
-               " . ($excludeClosing ? JournalTaxOrigin::join() : "") . "
-               JOIN {$accountDefinitions} ca ON ca.id = l.account_id
-              WHERE l.supplier_id = ? AND e.posted_at IS NOT NULL
-                AND (l.account_id = ? OR ca.parent_id = ?)
-                AND e.entry_date BETWEEN ? AND ?{$technicalSql}{$filterSql}"
+               {$sql}"
         );
-        $stmt->execute([...$linesParams, $supplierId, $accountId, $scope->parentId($accountId), $from, $to, ...$technicalParams, ...$filterParams]);
+        $stmt->execute($params);
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
         return [
             'md' => round((float) ($row['md'] ?? 0), 2),
             'd'  => round((float) ($row['d'] ?? 0), 2),
         ];
+    }
+
+    private function accountTurnoverSource(int $supplierId, int $accountId, string $from, string $to, bool $excludeClosing, AccountStatementScope $scope, bool $grouped = false): array
+    {
+        [$technicalSql, $technicalParams] = $this->technicalEntryFilter($from, $excludeClosing, $scope->openingDate);
+        [$source, $params, $base] = $this->accountTotalsSource($supplierId, $accountId, $from, $to, $excludeClosing, $scope, $grouped);
+        return ["{$source} AND e.entry_date BETWEEN ? AND ?{$technicalSql}", [...$params, $from, $to, ...$technicalParams], $base];
+    }
+
+    private function accountTotalsSource(int $supplierId, int $accountId, ?string $from, string $to, bool $excludeClosing, AccountStatementScope $scope, bool $grouped): array
+    {
+        $definitions = AccountDefinitionRepository::relation($to, $supplierId);
+        [$lines, $params, $base, $filter, $filterParams] = $this->statementLineSource($supplierId, $scope->filters, $from, $to);
+        $joinEntry = 'JOIN journal_entries e ON e.id = l.entry_id AND e.supplier_id = l.supplier_id';
+        $joinTaxOrigin = $excludeClosing ? JournalTaxOrigin::join() : '';
+        $accounts = '(ca.id = ? OR ca.parent_id = ?)';
+        $fromSql = "FROM {$lines} {$joinEntry} {$joinTaxOrigin}
+                    JOIN {$definitions} ca ON ca.id = l.account_id
+                   WHERE l.supplier_id = ? AND {$accounts}";
+        if ($grouped && !isset($scope->filters['dimension'])) {
+            $fromSql = "FROM {$definitions} ca
+                        STRAIGHT_JOIN journal_entry_lines l FORCE INDEX (idx_jel_supplier_account)
+                            ON l.supplier_id = ? AND l.account_id = ca.id
+                        {$joinEntry} {$joinTaxOrigin}
+                       WHERE {$accounts}";
+        }
+        return [
+            "{$fromSql} AND e.posted_at IS NOT NULL{$filter}",
+            [...$params, $supplierId, $accountId, $scope->parentId($accountId), ...$filterParams],
+            $base,
+        ];
+    }
+
+    /** @return list<array<string,mixed>> */
+    public function accountDimensionTotals(int $supplierId, int $accountId, string $from, string $to, string $periodStart, bool $excludeClosing, AccountStatementScope $scope, int $typeId, bool $costCenter): array
+    {
+        [$sql, $params] = $this->accountDimensionTotalsQuery($supplierId, $accountId, $from, $to, $periodStart, $excludeClosing, $scope, $typeId, $costCenter);
+        $stmt = $this->db->pdo()->prepare($sql);
+        $stmt->execute($params);
+        return $stmt->fetchAll(PDO::FETCH_ASSOC);
+    }
+
+    /** @return array{0:string,1:list<mixed>} */
+    public function accountDimensionTotalsQuery(int $supplierId, int $accountId, string $from, string $to, string $periodStart, bool $excludeClosing, AccountStatementScope $scope, int $typeId, bool $costCenter): array
+    {
+        [$opening, $openingParams, $openingBase] = $this->accountOpeningSource($supplierId, $accountId, $from, $periodStart, $excludeClosing, $scope, true);
+        [$turnover, $turnoverParams, $turnoverBase] = $this->accountTurnoverSource($supplierId, $accountId, $from, $to, $excludeClosing, $scope, true);
+        $dimension = $scope->filters['dimension'] ?? null;
+        $selected = $dimension?->criterion($typeId)?->valueIds ?? [];
+        $marks = implode(',', array_fill(0, count($selected), '?'));
+        $valueFilter = $marks === '' ? '' : " WHERE value_id IN ({$marks}) OR value_id IS NULL";
+
+        $centerJoin = '';
+        $centerColumns = '';
+        $centerParams = [];
+        if ($costCenter) {
+            $centerColumns = ', cc.id';
+            $selectedCenters = $marks === '' ? '' : " AND c.id IN ({$marks})";
+            $centerJoin = 'LEFT JOIN (
+                             SELECT c.supplier_id, c.code, CASE WHEN COUNT(*) = 1 THEN MIN(c.id) END AS id
+                               FROM (' . DimensionRepository::costCenterLinksSql() . ") c
+                              WHERE c.supplier_id = ? AND c.type_id = ?{$selectedCenters}
+                              GROUP BY c.supplier_id, c.code
+                          ) cc
+                              ON s.line_id IS NULL AND d.line_id IS NULL
+                             AND cc.supplier_id = l.supplier_id AND cc.code = l.cost_center";
+            $centerParams = [$supplierId, $typeId, ...$selected];
+        }
+        $assignment = "SELECT l.line_id, l.side, l.storno, l.is_opening, l.scoped_amount,
+                              l.raw_amount AS amount, COALESCE(s.share, 1) AS weight,
+                              COALESCE(s.dimension_value_id, d.dimension_value_id{$centerColumns}) AS value_id
+                         FROM scoped_lines l
+                         LEFT JOIN journal_entry_line_dimension_splits s
+                           ON s.line_id = l.line_id AND s.supplier_id = l.supplier_id AND s.dimension_type_id = ?
+                         LEFT JOIN journal_entry_line_dimensions d
+                           ON s.line_id IS NULL AND d.line_id = l.line_id
+                          AND d.supplier_id = l.supplier_id AND d.dimension_type_id = ?
+                         {$centerJoin}";
+        $parts = DimensionSplitAllocation::distributeSql($assignment);
+        $prefix = $excludeClosing ? 'WITH RECURSIVE ' . JournalTaxOrigin::cte($supplierId) . ', ' : 'WITH ';
+        $params = [...$openingParams, ...$turnoverParams, $typeId, $typeId, ...$centerParams, ...$selected];
+        $sql = $prefix . "scoped_lines AS (
+                    SELECT l.id AS line_id, l.supplier_id, l.side, l.amount AS scoped_amount,
+                           {$openingBase}.is_red_storno AS storno, {$openingBase}.amount AS raw_amount,
+                           l.cost_center, 1 AS is_opening {$opening}
+                    UNION ALL
+                    SELECT l.id, l.supplier_id, l.side, l.amount,
+                           {$turnoverBase}.is_red_storno, {$turnoverBase}.amount, l.cost_center, 0 {$turnover}
+                ), parts AS ({$parts}), selected_parts AS (
+                    SELECT line_id, value_id, side, storno, is_opening, scoped_amount, allocated_amount
+                      FROM parts{$valueFilter}
+                )";
+        if ($dimension?->without($typeId) !== null) {
+            // Při kombinaci typů už je scoped_amount zaokrouhlená součinová částka filtru.
+            // Její haléře rozdělíme stejným pravidlem podle původních dílů vybraných hodnot.
+            $allocated = DimensionSplitAllocation::distributeSql(
+                'SELECT line_id, value_id, side, storno, is_opening, scoped_amount AS amount,
+                        CAST(allocated_amount AS DECIMAL(25,10)) AS weight FROM selected_parts'
+            );
+            $sql .= ", allocated AS ({$allocated})";
+        } else {
+            $sql .= ', allocated AS (SELECT * FROM selected_parts)';
+        }
+        $sql .= "
+                SELECT b.value_id, v.code, v.name, b.opening_balance, b.turnover_md, b.turnover_d
+                  FROM (
+                    SELECT value_id,
+                           SUM(CASE WHEN is_opening = 1 THEN IF(side = 'debit', amount, -amount) ELSE 0 END) AS opening_balance,
+                           SUM(CASE WHEN is_opening = 0 AND side = 'debit' THEN amount ELSE 0 END) AS turnover_md,
+                           SUM(CASE WHEN is_opening = 0 AND side = 'credit' THEN amount ELSE 0 END) AS turnover_d
+                      FROM (SELECT value_id, side, is_opening, IF(storno = 1, -allocated_amount, allocated_amount) AS amount FROM allocated) a
+                     GROUP BY value_id
+                  ) b
+                  LEFT JOIN dimension_values v ON v.id = b.value_id AND v.type_id = ?
+                 ORDER BY b.value_id IS NULL, v.code, v.name, b.value_id";
+        return [$sql, [...$params, $typeId]];
     }
 
     /**
