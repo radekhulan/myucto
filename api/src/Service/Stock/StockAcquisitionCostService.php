@@ -39,7 +39,17 @@ final class StockAcquisitionCostService
         return $qty > 0 ? $this->amount($context, $item) / $qty : 0.0;
     }
 
-    public function applyLandedCosts(int $supplierId, int $documentId, string $docDate, array $rawCosts): void
+    /**
+     * Nahradí uložené vedlejší náklady konceptu příjemky poslaným seznamem (úprava konceptu).
+     * Do řádků je rozpustí volající ({@see StockDocumentService::updateDraft()}) spolu s ostatními.
+     */
+    public function replaceLandedCosts(int $supplierId, int $documentId, array $rawCosts): void
+    {
+        $this->landedCosts->deleteForDocument($supplierId, $documentId);
+        $this->applyLandedCosts($supplierId, $documentId, '', $rawCosts, allocate: false);
+    }
+
+    public function applyLandedCosts(int $supplierId, int $documentId, string $docDate, array $rawCosts, bool $allocate = true): void
     {
         if ($rawCosts === []) {
             return;
@@ -85,7 +95,7 @@ final class StockAcquisitionCostService
             ]);
             $costs[] = ['amount' => StockValuation::valueToC($amountStr), 'allocation' => $allocation];
         }
-        if ($costs === []) {
+        if ($costs === [] || !$allocate) {
             return;
         }
 

@@ -27927,7 +27927,7 @@ paths:
       tags:
       - Stock
       summary: Detail skladového dokladu
-      description: Vč. řádků.
+      description: Vč. řádků. U příjemky i `landed_costs`, uložené vedlejší náklady.
       responses:
         '200':
           description: OK
@@ -27991,6 +27991,24 @@ paths:
                   type: array
                   items:
                     type: object
+                landed_costs:
+                  type: array
+                  description: |
+                    Jen koncept příjemky, která už uložené vedlejší náklady má (založená z přijaté
+                    faktury nebo objednávky s `landed_costs`). Nahradí je (přidání, úprava i smazání,
+                    `[]` smaže všechny) a server je rozpustí do `extra_cost` řádků. Dokud má příjemka
+                    uložené náklady, `extra_cost` poslaný v řádcích se nebere. Vynechaný klíč uložené
+                    náklady ponechá. Příjemka bez uložených nákladů bere `extra_cost` z řádků jako dosud
+                    a neprázdný seznam odmítne s 422, stejně jako jiný doklad.
+                  items:
+                    type: object
+                    required: [amount]
+                    properties:
+                      purchase_invoice_id: { type: integer, format: int64 }
+                      purchase_invoice_item_id: { type: integer, format: int64 }
+                      description: { type: string, maxLength: 255 }
+                      amount: { type: number, minimum: 0.01, maximum: 999999999999.99 }
+                      allocation: { type: string, enum: [by_value, by_qty], default: by_value }
                 allow_over_delivery:
                   type: boolean
                   default: false
@@ -28000,7 +28018,7 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
         '422':
-          description: Doklad není draft, nebo validace řádků selhala.
+          description: Doklad není draft, nebo validace řádků či vedlejších nákladů selhala.
     delete:
       tags:
       - Stock

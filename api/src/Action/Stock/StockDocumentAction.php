@@ -8,6 +8,7 @@ use MyInvoice\Action\Accounting\AccountingActionSupport;
 use MyInvoice\Http\Json;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\StockDocumentRepository;
+use MyInvoice\Repository\StockLandedCostRepository;
 use MyInvoice\Repository\WarehouseRepository;
 use MyInvoice\Security\AccessLevel;
 use MyInvoice\Security\RequestAuthorization;
@@ -48,6 +49,7 @@ final class StockDocumentAction
         private readonly ActivityLogger $logger,
         private readonly IpMatcher $ipMatcher,
         private readonly StockDocumentPdfRenderer $pdfRenderer,
+        private readonly StockLandedCostRepository $landedCosts,
     ) {}
 
     public function list(Request $request, Response $response): Response
@@ -97,6 +99,7 @@ final class StockDocumentAction
                 (int) $args['id'],
                 RequestAuthorization::allows($request, 'invoices', AccessLevel::READ),
             );
+            $doc['landed_costs'] = $this->landedCosts->listForDocument($supplierId, (int) $args['id']);
         }
         return Json::ok($response, $doc);
     }

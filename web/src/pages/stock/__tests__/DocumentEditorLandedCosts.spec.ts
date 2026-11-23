@@ -37,7 +37,7 @@ describe('DocumentEditor: vedlejší náklady', () => {
       doc_date: '2026-11-09', description: 'Příjem', partner_name: null,
       lines: [{ stock_item_id: 7, qty: '2', unit_cost: '100', extra_cost: extraCost, sku: 'M1', name: 'Motorka', unit: 'ks', tracking_mode: 'none', tracking_allocations: [] }],
     })
-    m.getDocument.mockImplementation(async () => draft())
+    m.getDocument.mockImplementationOnce(async () => draft()).mockRejectedValue(new Error('network'))
     m.updateDocument.mockImplementation(async (_id: number, payload: { lines: Array<{ extra_cost?: string }> }) => {
       extraCost = payload.lines[0].extra_cost ?? '0'
       return draft()
@@ -64,6 +64,147 @@ describe('DocumentEditor: vedlejší náklady', () => {
     await vm.post()
     await flushPromises()
     expect(m.updateDocument.mock.calls[1][1].lines[0].extra_cost).toBe('1000.00')
+    wrapper.unmount()
+  })
+
+  it('u příjemky s uloženými náklady pošle přidaný náklad v seznamu, ne do extra_cost', async () => {
+    const stored = { id: 9, description: 'Freight Charge', amount: '122.28', allocation: 'by_value', purchase_invoice_id: 4, purchase_invoice_item_id: 41 }
+    const draft = () => ({
+      id: 6, status: 'draft', doc_type: 'receipt', origin: 'purchase_invoice', purchase_invoice_id: 4, warehouse_id: 3, warehouse_to_id: null,
+      doc_date: '2026-11-04', description: 'Příjem z faktury', partner_name: null, landed_costs: [stored],
+      lines: [{ stock_item_id: 7, qty: '1', unit_cost: '1000', extra_cost: '122.28', sku: 'M1', name: 'Motorka', unit: 'ks', tracking_mode: 'none', tracking_allocations: [], purchase_invoice_item_id: 40 }],
+    })
+    m.getDocument.mockImplementation(async () => draft())
+    m.updateDocument.mockImplementation(async () => draft())
+
+    const router = createRouter({ history: createMemoryHistory(), routes: [{ path: '/stock/documents/:id', component: { render: () => null } }] })
+    await router.push('/stock/documents/6')
+    const wrapper = mount({ ...DocumentEditor, render: () => null }, { global: { plugins: [router] } })
+    const vm = wrapper.vm as unknown as {
+      form: { warehouse_id: number | null }
+      landedCosts: Array<{ description: string; amount: string; allocation: 'by_value' | 'by_qty' }>
+      saveDraft: () => Promise<void>
+    }
+
+    await vi.waitFor(() => expect(vm.landedCosts).toHaveLength(1))
+    vm.landedCosts.push({ description: 'Doprava', amount: '38000', allocation: 'by_qty' })
+    await vm.saveDraft()
+    await flushPromises()
+
+    const payload = m.updateDocument.mock.calls[0][1]
+    expect(payload.landed_costs).toEqual([
+      { description: 'Freight Charge', amount: 122.28, allocation: 'by_value', purchase_invoice_id: 4, purchase_invoice_item_id: 41 },
+      { description: 'Doprava', amount: 38000, allocation: 'by_qty' },
+    ])
+    // Dopravu rozpustí server, klient ji do extra_cost řádku nepřičte.
+    expect(payload.lines[0].extra_cost).toBe('122.28')
+    wrapper.unmount()
+  })
+
+  it('když znovunačtení po uložení selže, další uložení uložené náklady nesmaže', async () => {
+    const stored = { id: 9, description: 'Clo', amount: '40.00', allocation: 'by_qty', purchase_invoice_id: null, purchase_invoice_item_id: null }
+    const draft = () => ({
+      id: 8, status: 'draft', doc_type: 'receipt', warehouse_id: 3, warehouse_to_id: null,
+      doc_date: '2026-11-04', description: 'Příjem z faktury', partner_name: null, landed_costs: [stored],
+      lines: [{ stock_item_id: 7, qty: '1', unit_cost: '100', extra_cost: '40.00', sku: 'M1', name: 'Motorka', unit: 'ks', tracking_mode: 'none', tracking_allocations: [] }],
+    })
+    m.getDocument.mockImplementationOnce(async () => draft()).mockRejectedValue(new Error('network'))
+    m.updateDocument.mockImplementation(async () => draft())
+
+    const router = createRouter({ history: createMemoryHistory(), routes: [{ path: '/stock/documents/:id', component: { render: () => null } }] })
+    await router.push('/stock/documents/8')
+    const wrapper = mount({ ...DocumentEditor, render: () => null }, { global: { plugins: [router] } })
+    const vm = wrapper.vm as unknown as {
+      landedCosts: Array<{ description: string; amount: string; allocation: 'by_value' | 'by_qty' }>
+      saveDraft: () => Promise<void>
+    }
+
+    await vi.waitFor(() => expect(vm.landedCosts).toHaveLength(1))
+    await vm.saveDraft()
+    await flushPromises()
+    await vm.saveDraft()
+    await flushPromises()
+
+    expect(m.updateDocument.mock.calls[1][1].landed_costs).toEqual([{ description: 'Clo', amount: 40, allocation: 'by_qty' }])
+    wrapper.unmount()
+  })
+
+  it.each(['saveDraft', 'post'] as const)('neplatný vedlejší náklad zastaví uložení i zaúčtování a koš ho odstraní při %s', async operation => {
+    const stored = { id: 9, description: 'Clo', amount: '40.00', allocation: 'by_qty', purchase_invoice_id: null, purchase_invoice_item_id: null }
+    const draft = {
+      id: 8, status: 'draft', doc_type: 'receipt', warehouse_id: 3, warehouse_to_id: null,
+      doc_date: '2026-11-04', description: 'Příjem z faktury', partner_name: null, landed_costs: [stored],
+      lines: [{ stock_item_id: 7, qty: '1', unit_cost: '100', extra_cost: '40.00', sku: 'M1', name: 'Motorka', unit: 'ks', tracking_mode: 'none', tracking_allocations: [] }],
+    }
+    m.getDocument.mockResolvedValueOnce(draft).mockRejectedValue(new Error('network'))
+    m.updateDocument.mockResolvedValue({ ...draft, landed_costs: [], lines: [{ ...draft.lines[0], extra_cost: '0.00' }] })
+    m.postDocument.mockRejectedValueOnce(new Error('network'))
+
+    const router = createRouter({ history: createMemoryHistory(), routes: [{ path: '/stock/documents/:id', component: { render: () => null } }] })
+    await router.push('/stock/documents/8')
+    const wrapper = mount({ ...DocumentEditor, render: () => null }, { global: { plugins: [router] } })
+    const vm = wrapper.vm as unknown as {
+      landedCosts: Array<{ description: string; amount: string }>
+      saveDraft: () => Promise<void>
+      post: () => Promise<void>
+      removeLandedCost: (index: number) => void
+      error: string
+    }
+
+    await vi.waitFor(() => expect(vm.landedCosts).toHaveLength(1))
+    for (const amount of ['', '0', '-5', '0.001']) {
+      vm.landedCosts[0].amount = amount
+      await vm.saveDraft()
+      expect(vm.error).toBe('stock.documents.landed_cost_invalid_amount')
+      await vm.post()
+      expect(vm.error).toBe('stock.documents.landed_cost_invalid_amount')
+      expect(vm.landedCosts).toHaveLength(1)
+    }
+
+    vm.landedCosts[0].amount = '40.00'
+    vm.landedCosts[0].description = 'ž'.repeat(256)
+    await vm.saveDraft()
+    expect(vm.error).toBe('stock.documents.landed_cost_invalid_description')
+    expect(m.updateDocument).not.toHaveBeenCalled()
+    expect(m.postDocument).not.toHaveBeenCalled()
+
+    vm.removeLandedCost(0)
+    await vm[operation]()
+    expect(m.updateDocument).toHaveBeenCalledExactlyOnceWith(8, expect.objectContaining({ landed_costs: [] }))
+
+    await vm.saveDraft()
+    const retried = m.updateDocument.mock.calls[1][1]
+    expect(retried.landed_costs).toBeUndefined()
+    expect(retried.lines[0].extra_cost).toBeUndefined()
+    wrapper.unmount()
+  })
+
+  it('příjemka bez uložených nákladů seznam neposílá', async () => {
+    const draft = () => ({
+      id: 7, status: 'draft', doc_type: 'receipt', warehouse_id: 3, warehouse_to_id: null,
+      doc_date: '2026-11-04', description: 'Ruční příjem', partner_name: null, landed_costs: [],
+      lines: [{ stock_item_id: 7, qty: '1', unit_cost: '100', extra_cost: '0', sku: 'M1', name: 'Motorka', unit: 'ks', tracking_mode: 'none', tracking_allocations: [] }],
+    })
+    m.getDocument.mockImplementation(async () => draft())
+    m.updateDocument.mockImplementation(async () => draft())
+
+    const router = createRouter({ history: createMemoryHistory(), routes: [{ path: '/stock/documents/:id', component: { render: () => null } }] })
+    await router.push('/stock/documents/7')
+    const wrapper = mount({ ...DocumentEditor, render: () => null }, { global: { plugins: [router] } })
+    const vm = wrapper.vm as unknown as {
+      form: { warehouse_id: number | null }
+      landedCosts: Array<{ description: string; amount: string; allocation: 'by_value' | 'by_qty' }>
+      saveDraft: () => Promise<void>
+    }
+
+    await vi.waitFor(() => expect(vm.form.warehouse_id).toBe(3))
+    vm.landedCosts.push({ description: 'Doprava', amount: '50', allocation: 'by_qty' })
+    await vm.saveDraft()
+    await flushPromises()
+
+    const payload = m.updateDocument.mock.calls[0][1]
+    expect(payload.landed_costs).toBeUndefined()
+    expect(payload.lines[0].extra_cost).toBe('50.00')
     wrapper.unmount()
   })
 })
