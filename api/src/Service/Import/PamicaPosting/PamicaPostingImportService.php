@@ -315,13 +315,15 @@ final class PamicaPostingImportService
         }
         $totals = self::totals($parsed, $resolved);
         foreach ($totals['clearing'] as $code => $balance) {
+            // Účet jako v osnově firmy (331.000), ne jak ho píše PAMICA (331000).
+            $shown = $resolved[$code] ?? $code;
             if (abs($balance['difference']) < 0.005) {
                 $checks[] = self::check('clearing_balanced', 'ok',
-                    'Účet ' . $code . ': hrubé mzdy ' . self::money($balance['credit']) . ' Kč = srážky a čisté mzdy '
+                    'Účet ' . $shown . ': hrubé mzdy ' . self::money($balance['credit']) . ' Kč = srážky a čisté mzdy '
                     . self::money($balance['debit'] + $balance['without_posting']) . ' Kč.', ['account' => $code]);
             } else {
                 $checks[] = self::check('clearing_difference', 'warning',
-                    'Účet ' . $code . ' po načtení nebude vyrovnaný: Dal ' . self::money($balance['credit']) . ' Kč, MD a závazky bez zaúčtování '
+                    'Účet ' . $shown . ' po načtení nebude vyrovnaný: Dal ' . self::money($balance['credit']) . ' Kč, MD a závazky bez zaúčtování '
                     . self::money($balance['debit'] + $balance['without_posting']) . ' Kč (rozdíl ' . self::money($balance['difference']) . ' Kč).',
                     ['account' => $code]);
             }

@@ -126,6 +126,18 @@ final class PamicaPostingImportTest extends TestCase
         self::assertSame(0, $this->rowCount('payroll_posting_imports'));
     }
 
+    /** Kontrola zúčtování mezd píše účet tak, jak je v osnově firmy (331.000), ne kód PAMICY (331000). */
+    public function testClearingCheckNamesAccountAsInChart(): void
+    {
+        $this->analytic('331.000');
+        $messages = array_column($this->service->preview($this->supplierId, $this->xml)['checks'], 'message', 'code');
+        self::assertStringStartsWith('Účet 331.000: hrubé mzdy', $messages['clearing_balanced']);
+
+        $unbalanced = str_replace('<typ:priceNone>12000</typ:priceNone>', '<typ:priceNone>12100</typ:priceNone>', $this->xml);
+        $messages = array_column($this->service->preview($this->supplierId, $unbalanced)['checks'], 'message', 'code');
+        self::assertStringStartsWith('Účet 331.000 po načtení nebude vyrovnaný', $messages['clearing_difference'] ?? '');
+    }
+
     public function testApplyPostsInternalDocumentAndCommitments(): void
     {
         $result = $this->service->apply($this->supplierId, $this->xml, 'mzdy.xml', true, $this->audit());
