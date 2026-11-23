@@ -46945,6 +46945,7 @@ components:
         to_on: { type: string, format: date, nullable: true }
         days: { type: integer, nullable: true }
         amount_planned: { type: number }
+        closed_period_amount: { type: number, description: "Část řádku za uzavřené období (sloučené starší řádky), účtovaná do běžného období. Jen v detailu položky." }
         status: { type: string, enum: [planned, posted, linked, cancelled] }
         journal_entry_id: { type: integer, nullable: true }
         entry_date: { type: string, format: date, nullable: true }

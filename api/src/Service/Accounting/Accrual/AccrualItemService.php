@@ -91,7 +91,9 @@ final class AccrualItemService
         $item['balance'] = round($bal['balance'] * $sign, 2);
         $item['released'] = round(-$bal['released'] * $sign, 2);
         $item['balance_after_all'] = round($total['balance'] * $sign, 2);
-        $item['next_release'] = $next;
+        $closed = $this->closedPeriods($supplierId);
+        $schedule = array_map(fn (array $r): array => $r + ['closed_period_amount' => self::closedPeriodAmount($r, $closed)], $schedule);
+        $item['next_release'] = $next === null ? null : $next + ['closed_period_amount' => self::closedPeriodAmount($next, $closed)];
         $item['schedule'] = $schedule;
         $item['links'] = array_map(static fn (array $l): array => $l + ['amount_normal' => round($l['amount'] * $sign, 2)], $links);
         $item['covered_through'] = self::coveredThrough($item, $schedule);
@@ -215,14 +217,21 @@ final class AccrualItemService
                     $handover = $this->closingHandover($supplierId, (string) ($input['source_type'] ?? ''), (int) ($input['source_id'] ?? 0),
                         isset($input['source_item_id']) && ctype_digit((string) $input['source_item_id']) ? (int) $input['source_item_id'] : null)
                         ?? throw new AccrualException('no_closing_deferral', 'Doklad nemá odklad zaúčtovaný uzávěrkou.', 422, 'closing_handover');
+                    // Řádek dokladu bere předání ze záznamu kroku uzávěrky, ne z dnešních dat
+                    // dokladu: po změně období řádku nebo u částky s neuplatněnou daní by se
+                    // nedohledal a otevření roku by tranši rozpustilo podruhé.
+                    if (count($handover['source_item_ids']) > 1) {
+                        throw new AccrualException('source_item_required', 'Uzávěrka odložila víc řádků dokladu. Vyberte řádek, který položka převezme.', 422, 'source_item_id');
+                    }
                     $input = array_merge($input, [
                         'accrual_account_code' => $handover['account_code'],
                         'opening_balance' => $handover['remaining'],
                         'opening_as_of' => $handover['opening_as_of'],
                         'origin_entry_id' => null,
+                        'source_item_id' => $handover['source_item_ids'][0] ?? 0,
                     ]);
                 }
-                $data = $this->validated($supplierId, $input, null);
+                $data = $this->validated($supplierId, $input, null, $handover !== null);
                 $data['managed_by'] = 'agenda';
                 $data['status'] = 'draft';
                 $data['created_by'] = $userId;
@@ -467,11 +476,9 @@ final class AccrualItemService
      * @param list<array<string,mixed>> $rows
      * @return list<array<string,mixed>>
      */
-    public function mergeClosedPeriodRows(int $supplierId, array $rows): array
+    /** @return list<array{0:string,1:string}> uzavřená účetní období (od, do) */
+    public function closedPeriods(int $supplierId): array
     {
-        if ($rows === []) {
-            return $rows;
-        }
         $stmt = $this->db->pdo()->prepare('SELECT starts_on, ends_on, status FROM accounting_periods WHERE supplier_id = ? ORDER BY starts_on');
         $stmt->execute([$supplierId]);
         $closed = [];
@@ -480,6 +487,50 @@ final class AccrualItemService
                 $closed[] = [(string) $p['starts_on'], (string) $p['ends_on']];
             }
         }
+        return $closed;
+    }
+
+    /**
+     * Část řádku rozpuštění, která patří do uzavřeného období: řádek účtovaný do otevřeného
+     * období, jehož úsek začíná v uzavřeném (sloučené nebo převzaté starší řádky). Plán se
+     * rozkládá poměrem dnů, část je tedy podíl dnů úseku v uzavřených obdobích.
+     *
+     * @param array<string,mixed> $row
+     * @param list<array{0:string,1:string}> $closed
+     */
+    public static function closedPeriodAmount(array $row, array $closed): float
+    {
+        if ($closed === [] || ($row['kind'] ?? 'release') !== 'release' || !in_array($row['status'] ?? 'planned', ['planned', 'posted'], true)
+            || empty($row['from_on'])) {
+            return 0.0;
+        }
+        $from = (string) $row['from_on'];
+        $to = (string) ($row['to_on'] ?? $row['due_on']);
+        $due = (string) $row['due_on'];
+        $overlap = 0;
+        foreach ($closed as [$start, $end]) {
+            if ($due >= $start && $due <= $end) {
+                return 0.0;
+            }
+            $a = max($from, $start);
+            $b = min($to, $end);
+            if ($a <= $b) {
+                $overlap += AccrualScheduleCalculator::daysInclusive($a, $b);
+            }
+        }
+        if ($overlap === 0 || $to < $from) {
+            return 0.0;
+        }
+        $total = AccrualScheduleCalculator::daysInclusive($from, $to);
+        return $overlap >= $total ? round((float) $row['amount_planned'], 2) : round((float) $row['amount_planned'] * $overlap / $total, 2);
+    }
+
+    public function mergeClosedPeriodRows(int $supplierId, array $rows): array
+    {
+        if ($rows === []) {
+            return $rows;
+        }
+        $closed = $this->closedPeriods($supplierId);
         if ($closed === []) {
             return $rows;
         }
@@ -715,9 +766,13 @@ final class AccrualItemService
         $basis = 0.0;
         $from = null;
         $to = null;
+        $lineIds = [];
         foreach ($matched as $it) {
             if ((int) $it['period_id'] !== $periodId) {
                 continue;
+            }
+            if ((int) ($it['item_id'] ?? 0) > 0) {
+                $lineIds[(int) $it['item_id']] = true;
             }
             $deferred = round($deferred + AccrualScheduleCalculator::deferredAmount((float) $it['basis'], (string) $it['from'], (string) $it['to'], $endsOn), 2);
             $basis = round($basis + (float) $it['basis'], 2);
@@ -762,6 +817,7 @@ final class AccrualItemService
             'released' => $released,
             'remaining' => round($deferred - $released, 2),
             'opening_as_of' => AccrualPlanBuilder::dayAfter($covered),
+            'source_item_ids' => array_keys($lineIds),
         ];
     }
 
@@ -878,7 +934,7 @@ final class AccrualItemService
      * @param array<string,mixed>|null $current
      * @return array<string,mixed>
      */
-    private function validated(int $supplierId, array $input, ?array $current): array
+    private function validated(int $supplierId, array $input, ?array $current, bool $sourceItemFixed = false): array
     {
         $title = trim((string) ($input['title'] ?? ''));
         if ($title === '') {
@@ -937,7 +993,10 @@ final class AccrualItemService
         $openingAsOf = self::dateOr($input['opening_as_of'] ?? null, null, 'opening_as_of');
         $sourceItemId = $current !== null ? $current['source_item_id']
             : (isset($input['source_item_id']) && ctype_digit((string) $input['source_item_id']) ? (int) $input['source_item_id'] : null);
-        if ($current === null && $sourceItemId === 0) {
+        if ($current === null && $sourceItemFixed) {
+            // Předání z uzávěrky: řádek určil záznam kroku uzávěrky.
+            $sourceItemId = $sourceItemId === 0 ? null : $sourceItemId;
+        } elseif ($current === null && $sourceItemId === 0) {
             // Výslovně žádný řádek: položka nespravuje řádek s obdobím, uzávěrka je odkládá dál.
             $sourceItemId = null;
         } elseif ($current === null && $sourceId !== null && in_array($sourceType, ['invoice', 'purchase_invoice'], true)) {

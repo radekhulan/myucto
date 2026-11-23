@@ -899,6 +899,42 @@ final class ClosingPrepaidExpenseAccrualTest extends TestCase
     }
 
     /**
+     * Předání z uzávěrky převezme řádek dokladu ze záznamu kroku uzávěrky. Po změně období
+     * řádku a s odkladem včetně neuplatněné daně (částka se neshoduje s řádkem) ho podle
+     * dnešních dat dohledat nejde, a otevření roku přesto tranši nesmí rozpustit podruhé.
+     */
+    public function testHandoverKeepsClosingLineAfterLineChange(): void
+    {
+        $this->setNonPayer();
+        $pi = $this->purchaseWithVat('PF-2091-PREDANI', 1000.00, 210.00, self::YEAR . '-07-01', 'full');
+        $line = $this->itemWithVat($pi, 1000.00, 210.00, '2091-07-01', '2092-06-30', '518');
+        $this->postDocument($pi);
+        $this->driveCloseWithAccrual();
+        $this->closing->closeBooks($this->supplierId, $this->periodId, $this->rv(), $this->meta());
+        $this->db->pdo()->prepare('UPDATE purchase_invoice_items SET accrual_from = ?, accrual_to = ? WHERE id = ?')
+            ->execute(['2091-08-01', '2092-07-31', $line]);
+
+        $service = Bootstrap::buildContainer()->get(\MyInvoice\Service\Accounting\Accrual\AccrualItemService::class);
+        $handover = $service->closingHandover($this->supplierId, 'purchase_invoice', $pi, null);
+        self::assertNotNull($handover);
+        $item = $service->create($this->supplierId, [
+            'title' => 'Služba předaná z uzávěrky', 'kind' => 'prepaid_expense', 'counter_account_code' => '518',
+            'basis_amount' => $handover['basis'], 'period_from' => $handover['period_from'], 'period_to' => $handover['period_to'],
+            'method' => 'monthly_days', 'source_type' => 'purchase_invoice', 'source_id' => $pi,
+            'closing_handover' => true, 'activate' => true,
+        ], $this->userId);
+
+        $open = $this->closing->openNext($this->supplierId, $this->periodId, $this->rv(), $this->meta());
+        self::assertNull($open['prepaid_expense_release_entry_id'], 'Otevření roku rozpustilo předanou tranši podruhé.');
+        self::assertNull($this->journal->findBySource($this->supplierId, 'prepaid_expense_accrual', ClosingSourceId::prepaidExpenseAccrualRelease($this->periodId)));
+        $planned = round(array_sum(array_map(static fn (array $r): float => (float) $r['amount_planned'],
+            array_filter($item['schedule'], static fn (array $r): bool => $r['kind'] === 'release'))), 2);
+        self::assertEqualsWithDelta(601.69, $planned, 0.001, 'Tranši rozpouští jen agenda, jednou a celou.');
+        self::assertSame($line, $item['source_item_id'], 'Předání vzalo řádek ze záznamu kroku uzávěrky.');
+        self::assertSame([$line], $handover['source_item_ids']);
+    }
+
+    /**
      * Položka agendy ke zdrojovému dokladu: s interním zápisem odkladu MD 381 / D 548, předaná
      * z uzávěrky (`handover`, vazba na odklad uzávěrky) nebo jako koncept bez vzniku (`draft`).
      */

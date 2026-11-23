@@ -475,6 +475,12 @@ final class AccrualAgendaTest extends TestCase
         self::assertSame('2091-07-01', $jan['from_on']);
         $first = round(AccrualScheduleCalculator::cumRecognized(12_000.00, '2091-07-01', '2092-06-30', '2092-01-31'), 2);
         self::assertEqualsWithDelta($first, $jan['amount_planned'], 0.02);
+        // Řádek nese rozpuštění za uzavřený rok: detail i náhled zaúčtování ukážou jeho část.
+        $closedPart = round(AccrualScheduleCalculator::cumRecognized(12_000.00, '2091-07-01', '2092-06-30', '2091-12-31'), 2);
+        self::assertEqualsWithDelta($closedPart, $jan['closed_period_amount'], 0.05);
+        self::assertSame(0.0, $this->rowOn($item, '2092-02-29')['closed_period_amount']);
+        $preview = $this->accrualPosting->previewRow($this->supplierId, $item['id'], $jan['id']);
+        self::assertEqualsWithDelta($closedPart, $preview['row']['closed_period_amount'], 0.05);
         $after = $this->accrualPosting->postRow($this->supplierId, $item['id'], $jan['id'], $this->meta());
         self::assertSame('posted', $this->rowOn($after, '2092-01-31')['status']);
         self::assertSame(round(12_000.00 - $jan['amount_planned'], 2), $after['balance_after_all']);

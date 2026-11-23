@@ -202,6 +202,44 @@ final class PohodaAccrualTakeoverTest extends TestCase
         self::assertSame('2092-06-30', $again['terminated_on']);
     }
 
+    /**
+     * Faktura roku převodu bez řádku 384 v deníku, ale se zápisem řady CR: položka bez zápisu
+     * vzniku se převezme jako koncept s varováním, neblokuje uzavření roku a nic nehlásí
+     * k zaúčtování.
+     */
+    public function testTakeoverItemWithoutOrigin(): void
+    {
+        $this->invoice('SYN2605', '2092-02-01', 12_000.00);
+        $this->cr('92CR0002', 'SYN2605', '2092-02-29', 958.90);
+        $preview = $this->takeover->preview($this->supplierId);
+        $warning = array_values(array_filter($preview['warnings'], static fn (array $w): bool => $w['code'] === 'item_without_origin'));
+        self::assertCount(1, $warning);
+        self::assertSame('92CR0002', $warning[0]['item_no']);
+        self::assertSame(1, $preview['summary']['without_origin']);
+
+        $this->takeover->apply($this->supplierId, $this->userId);
+        $d = $this->item('pohoda:92CR0002');
+        self::assertSame('draft', $d['status']);
+        $container = Bootstrap::buildContainer();
+        $full = $container->get(\MyInvoice\Service\Accounting\Accrual\AccrualItemService::class)->get($this->supplierId, $d['id'], '2092-12-31');
+        $planned = array_values(array_filter($full['schedule'], fn ($r) => $r['kind'] === 'release' && $r['status'] === 'planned'));
+        self::assertSame([], $planned, 'Koncept bez zápisu vzniku nemá plán k zaúčtování.');
+        $guard = new \MyInvoice\Service\Accounting\Accrual\AccrualAgendaGuard($this->db);
+        $others = (int) $this->db->pdo()->query("SELECT COUNT(*) FROM accrual_schedule s JOIN accrual_items ai ON ai.id = s.accrual_item_id
+            WHERE ai.supplier_id = {$this->supplierId} AND ai.status = 'active' AND s.status = 'planned' AND s.due_on <= '2092-12-31'")->fetchColumn();
+        self::assertSame($others, $guard->pendingRowsCount($this->supplierId, '2092-01-01', '2092-12-31'), 'Koncept nepřidává nezaúčtované rozpuštění.');
+        self::assertSame(0.0, $this->reconciliation->reconcile($this->supplierId, '2092-12-31')['totals']['difference'],
+            'Převzatý zápis CR nese koncept, odsouhlasení sedí.');
+        try {
+            $container->get(\MyInvoice\Service\Accounting\Accrual\AccrualItemService::class)->activate($this->supplierId, $d['id'], $this->userId);
+            self::fail('Koncept bez zápisu vzniku se aktivoval.');
+        } catch (\MyInvoice\Service\Accounting\Accrual\AccrualException $e) {
+            self::assertSame('origin_required', $e->errorCode);
+        }
+        $this->takeover->apply($this->supplierId, $this->userId);
+        self::assertSame('draft', $this->item('pohoda:92CR0002')['status'], 'Opakované převzetí koncept neaktivuje.');
+    }
+
     private function invoice(string $number, string $date, float $base): int
     {
         $this->db->pdo()->prepare(

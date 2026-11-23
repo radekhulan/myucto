@@ -39,6 +39,8 @@ final class PohodaAccrualTakeoverService
 {
     public const IMPORT_PREFIX = 'pohoda:';
 
+    private const WITHOUT_ORIGIN = 'Zdrojový doklad nemá v deníku zápis na účtu položky ani podíl na počátečním stavu. Položka zůstává konceptem: přiřaďte jí zápis vzniku v odsouhlasení a aktivujte ji.';
+
     /** @var list<array<string,mixed>> konflikty posledního převzetí (zápis už navázaný či rozpuštěný agendou) */
     private array $conflicts = [];
 
@@ -71,6 +73,7 @@ final class PohodaAccrualTakeoverService
                 $updated = 0;
                 $activeIds = [];
                 $skipped = [];
+                $drafted = [];
                 $this->conflicts = [];
                 foreach ($plan['items'] as $p) {
                     $existing = $this->items->findByImportKey($supplierId, $p['import_key']);
@@ -107,7 +110,8 @@ final class PohodaAccrualTakeoverService
                         $itemId = (int) $existing['id'];
                         // Položku, kterou agenda mezitím ukončila, dokončila nebo účetní zrušila,
                         // převzetí nemění: jinak by přepsalo stav i vazby nastavené v agendě.
-                        if ($existing['status'] !== 'active') {
+                        // Koncept bez zápisu vzniku z dřívějšího převzetí se doplňuje dál.
+                        if (!in_array($existing['status'], ['active', 'draft'], true)) {
                             $skipped[] = ['item_no' => $existing['item_no'], 'status' => $existing['status']];
                             continue;
                         }
@@ -118,9 +122,22 @@ final class PohodaAccrualTakeoverService
                         }
                     }
                     $this->linkItem($supplierId, $itemId, $p, $plan, $userId);
-                    if ($p['status'] === 'active') {
-                        $activeIds[] = $itemId;
+                    if ($p['status'] === 'terminated') {
+                        continue;
                     }
+                    // Položka s plánem bez zápisu vzniku (ani podílu PS) by měla záporný zůstatek:
+                    // řádky plánu by nešly zaúčtovat a blokovaly by uzavření roku. Zůstane
+                    // konceptem, dokud jí účetní zápis vzniku nepřiřadí a neaktivuje ji.
+                    if ($p['method'] !== 'manual' && !$this->service->hasOriginLink($supplierId, $itemId) && !$this->hasAgendaPostings($supplierId, $itemId)) {
+                        $pdo->prepare("DELETE FROM accrual_schedule WHERE supplier_id = ? AND accrual_item_id = ? AND status = 'planned'")->execute([$supplierId, $itemId]);
+                        $this->items->update($supplierId, $itemId, ['status' => 'draft', 'updated_by' => $userId]);
+                        $drafted[] = ['item_no' => $p['item_no'], 'code' => 'item_without_origin', 'message' => self::WITHOUT_ORIGIN];
+                        continue;
+                    }
+                    if (($existing['status'] ?? 'active') === 'draft') {
+                        $this->items->update($supplierId, $itemId, ['status' => 'active', 'updated_by' => $userId]);
+                    }
+                    $activeIds[] = $itemId;
                 }
                 foreach ($plan['opening'] as $o) {
                     if ($o['entry_id'] === null) {
@@ -173,7 +190,7 @@ final class PohodaAccrualTakeoverService
                 if ($own && $pdo->inTransaction()) $pdo->rollBack();
                 throw $e;
             }
-            return ['created' => $created, 'updated' => $updated, 'skipped' => $skipped, 'conflicts' => $this->conflicts] + $this->analyze($supplierId);
+            return ['created' => $created, 'updated' => $updated, 'skipped' => $skipped, 'conflicts' => $this->conflicts, 'drafted' => $drafted] + $this->analyze($supplierId);
         });
     }
 
@@ -246,6 +263,14 @@ final class PohodaAccrualTakeoverService
             return;
         }
         $this->items->addLink($supplierId, $itemId, $entryId, $accountId, $amount, $role, $matchedBy, $scheduleId, $userId);
+    }
+
+    /** Rozpustila už položku agenda (zaúčtovaný řádek plánu)? Takovou převzetí nevrací do konceptu. */
+    private function hasAgendaPostings(int $supplierId, int $itemId): bool
+    {
+        $stmt = $this->db->pdo()->prepare("SELECT 1 FROM accrual_schedule WHERE supplier_id = ? AND accrual_item_id = ? AND status = 'posted' LIMIT 1");
+        $stmt->execute([$supplierId, $itemId]);
+        return $stmt->fetchColumn() !== false;
     }
 
     private function completeIfDone(int $supplierId, int $itemId): void
@@ -366,6 +391,17 @@ final class PohodaAccrualTakeoverService
                 $opening[$code]['allocated'] = $allocated;
             }
         }
+        // Položka s plánem bez zápisu vzniku v deníku a bez podílu na počátečním stavu (faktura
+        // roku převodu zaúčtovaná mimo účet položky): převezme se jako koncept s důvodem.
+        foreach ($items as &$p) {
+            if ($p['status'] === 'active' && $p['method'] !== 'manual' && $p['origin'] === null && $p['opening_share'] === null) {
+                $p['status'] = 'draft';
+                $p['note'] .= ' ' . self::WITHOUT_ORIGIN;
+                $warnings[] = ['code' => 'item_without_origin', 'item_no' => $p['item_no'], 'account_code' => $p['account_code'],
+                    'source_document_no' => $p['source_document_no'], 'message' => self::WITHOUT_ORIGIN];
+            }
+        }
+        unset($p);
         $openingRows = [];
         foreach ($openingEntries['amounts'] as $code => $o) {
             $code = (string) $code;
@@ -399,6 +435,7 @@ final class PohodaAccrualTakeoverService
                 'items' => count($items),
                 'new' => count(array_filter($items, static fn (array $p): bool => $p['existing_id'] === null)),
                 'terminated' => count(array_filter($items, static fn (array $p): bool => $p['status'] === 'terminated')),
+                'without_origin' => count(array_filter($items, static fn (array $p): bool => $p['status'] === 'draft')),
                 'unpaired_sources' => count(array_filter($items, static fn (array $p): bool => $p['source_id'] === null)),
                 'opening_remainder' => round(array_sum(array_column($openingRows, 'remainder')), 2),
             ],

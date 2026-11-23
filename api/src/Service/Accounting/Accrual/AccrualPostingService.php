@@ -47,6 +47,14 @@ final class AccrualPostingService
     public function previewRow(int $supplierId, int $itemId, int $rowId): array
     {
         [$item, $row] = $this->itemAndRow($supplierId, $itemId, $rowId, false);
+        if ($row['kind'] === 'release' && $row['status'] === 'planned') {
+            try {
+                $row = $this->absorbEarlier($supplierId, $itemId, $row, false);
+            } catch (AccrualException) {
+                // Starší řádek jde zaúčtovat dřív: náhled ukáže řádek, jak je.
+            }
+        }
+        $row['closed_period_amount'] = AccrualItemService::closedPeriodAmount($row, $this->service->closedPeriods($supplierId));
         return [
             'row' => $row,
             'entry_date' => $row['due_on'],
@@ -98,30 +106,7 @@ final class AccrualPostingService
         if ($row['due_on'] > $this->today() && empty($meta['allow_future'])) {
             throw new AccrualException('row_not_due', 'Rozpuštění lze zaúčtovat nejdřív v den konce úseku.', 409);
         }
-        // Starší nezaúčtovaný řádek, který zaúčtovat jde, má přednost. Starší řádek, který
-        // zaúčtovat nejde (uzavřené období, datum za zámkem otevřeného období), toto
-        // rozpuštění převezme: jeho částka a dny se přičtou, plán tak nezamrzne.
-        $closingStep = !empty($meta['closing_step']);
-        $absorbed = 0.0;
-        $absorbedFrom = null;
-        $absorbedIds = [];
-        foreach ($this->items->schedule($supplierId, $itemId) as $other) {
-            if ($other['kind'] !== 'release' || $other['status'] !== 'planned' || $other['due_on'] >= $row['due_on']) {
-                continue;
-            }
-            if ($this->postableOn($supplierId, (string) $other['due_on'], $closingStep)) {
-                throw new AccrualException('row_not_first', 'Nejdřív zaúčtujte starší rozpuštění (' . $other['due_on'] . ').', 409, null, ['first_due_on' => $other['due_on']]);
-            }
-            $absorbed = round($absorbed + (float) $other['amount_planned'], 2);
-            $from = (string) ($other['from_on'] ?? $other['due_on']);
-            $absorbedFrom = $absorbedFrom === null || $from < $absorbedFrom ? $from : $absorbedFrom;
-            $absorbedIds[] = (int) $other['id'];
-        }
-        if ($absorbedFrom !== null) {
-            $row['amount_planned'] = round((float) $row['amount_planned'] + $absorbed, 2);
-            $row['from_on'] = min($absorbedFrom, (string) ($row['from_on'] ?? $row['due_on']));
-            $row['absorbed_ids'] = $absorbedIds;
-        }
+        $row = $this->absorbEarlier($supplierId, $itemId, $row, !empty($meta['closing_step']));
         $sign = AccrualKinds::normalSign((string) $item['kind']);
         $balance = round(($this->items->balances($supplierId, [$itemId], '9999-12-31')[$itemId]['balance'] ?? 0.0) * $sign, 2);
         $amount = (float) $row['amount_planned'];
@@ -149,6 +134,39 @@ final class AccrualPostingService
                 'user_agent' => $meta['user_agent'] ?? null,
             ],
         ];
+    }
+
+    /**
+     * Starší nezaúčtovaný řádek, který zaúčtovat jde, má přednost (row_not_first). Starší
+     * řádek, který zaúčtovat nejde (uzavřené období, datum za zámkem otevřeného období),
+     * toto rozpuštění převezme: jeho částka a dny se přičtou, plán tak nezamrzne.
+     *
+     * @param array<string,mixed> $row
+     * @return array<string,mixed>
+     */
+    private function absorbEarlier(int $supplierId, int $itemId, array $row, bool $closingStep): array
+    {
+        $absorbed = 0.0;
+        $absorbedFrom = null;
+        $absorbedIds = [];
+        foreach ($this->items->schedule($supplierId, $itemId) as $other) {
+            if ($other['kind'] !== 'release' || $other['status'] !== 'planned' || $other['due_on'] >= $row['due_on']) {
+                continue;
+            }
+            if ($this->postableOn($supplierId, (string) $other['due_on'], $closingStep)) {
+                throw new AccrualException('row_not_first', 'Nejdřív zaúčtujte starší rozpuštění (' . $other['due_on'] . ').', 409, null, ['first_due_on' => $other['due_on']]);
+            }
+            $absorbed = round($absorbed + (float) $other['amount_planned'], 2);
+            $from = (string) ($other['from_on'] ?? $other['due_on']);
+            $absorbedFrom = $absorbedFrom === null || $from < $absorbedFrom ? $from : $absorbedFrom;
+            $absorbedIds[] = (int) $other['id'];
+        }
+        if ($absorbedFrom !== null) {
+            $row['amount_planned'] = round((float) $row['amount_planned'] + $absorbed, 2);
+            $row['from_on'] = min($absorbedFrom, (string) ($row['from_on'] ?? $row['due_on']));
+            $row['absorbed_ids'] = $absorbedIds;
+        }
+        return $row;
     }
 
     /**
