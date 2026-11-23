@@ -134,7 +134,20 @@ watch(() => [props.supplierId, props.periodId], () => {
       <p v-if="changedSinceOverview" data-test="source-findings-changed" class="rounded-lg border border-warning-300 bg-warning-50 p-3 text-sm text-warning-800">{{ t('nonprofitTaxJ6.sourceFindings.changed') }}</p>
       <p class="text-sm" data-test="source-findings-total">{{ t('nonprofitTaxJ6.sourceFindings.total', { lines: summary.line_count, rows: summary.source.row_count }) }}</p>
       <p v-if="!summary.groups.length" class="rounded-lg border border-success-300 bg-success-50 p-3 text-sm text-success-700">{{ t('nonprofitTaxJ6.sourceFindings.none') }}</p>
-      <div v-else class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-x-auto">
+      <!-- Úzká obrazovka: karty jako výpis podkladů konceptu; od sm tabulka jako Úplnost dokladů. -->
+      <div v-if="summary.groups.length" class="space-y-2 sm:hidden">
+        <article v-for="group in summary.groups" :key="'card:' + group.account_code + ':' + group.code" data-test="source-finding-group-card" class="rounded-lg border border-neutral-200 bg-surface p-3 text-sm">
+          <div class="font-medium">{{ accountLabel(group) }}</div>
+          <div class="mt-1 text-neutral-700">{{ findingLabel(group.code) }}</div>
+          <div class="mt-2 flex flex-wrap items-center justify-between gap-2">
+            <span class="text-neutral-600">{{ t('nonprofitTaxJ6.sourceFindings.lines') }}: {{ group.line_count }}</span>
+            <button type="button" class="whitespace-nowrap" :class="btnOutline('neutral')" :disabled="loading" @click="showLines(group)">
+              <svg class="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path :d="ICONS.eye" /></svg>{{ t('nonprofitTaxJ6.sourceFindings.showLines') }}
+            </button>
+          </div>
+        </article>
+      </div>
+      <div v-if="summary.groups.length" class="hidden sm:block bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-x-auto">
         <table class="w-full text-sm">
           <thead class="bg-neutral-50 text-xs text-neutral-500 uppercase tracking-wide">
             <tr>
@@ -162,7 +175,26 @@ watch(() => [props.supplierId, props.periodId], () => {
 
     <template v-if="filter">
       <h4 class="text-sm font-semibold" data-test="source-finding-filter">{{ t('nonprofitTaxJ6.sourceFindings.linesTitle', { filter: filterLabel }) }}</h4>
-      <div class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-x-auto">
+      <div class="space-y-2 sm:hidden">
+        <article v-for="line in lines" :key="'card:' + line.line_id" data-test="source-finding-line-card" class="rounded-lg border border-neutral-200 bg-surface p-3 text-sm">
+          <div class="flex flex-wrap items-baseline justify-between gap-2">
+            <strong>{{ line.document_no || '—' }}</strong>
+            <span class="font-mono whitespace-nowrap">{{ money(line.amount_cents) }}</span>
+          </div>
+          <p class="text-xs text-neutral-600">{{ date(line.date) }} · {{ line.account_code }}<template v-if="line.description"> · {{ line.description }}</template></p>
+          <div v-for="code in line.codes" :key="code" class="mt-1 text-xs text-warning-700">{{ findingLabel(code) }}</div>
+          <div class="mt-2 flex flex-wrap gap-x-4 gap-y-1">
+            <RouterLink :to="lineLink(line).to" class="text-xs font-medium text-primary-600 hover:underline whitespace-nowrap">
+              {{ lineLink(line).document ? t('nonprofitTaxJ6.sourceFindings.openDocument') : t('nonprofitTaxJ6.sourceFindings.openEntry') }} →
+            </RouterLink>
+            <RouterLink v-if="needsJointAllocation(line)" :to="{ name: 'accounting-joint-allocations' }" class="text-xs font-medium text-primary-600 hover:underline whitespace-nowrap">
+              {{ t('nonprofitTaxJ6.sourceFindings.openJointAllocations') }} →
+            </RouterLink>
+          </div>
+        </article>
+        <p v-if="!lines.length && !loading" class="text-sm text-neutral-600">{{ t(after ? 'nonprofitTaxJ6.sourceFindings.continueSearch' : 'nonprofitTaxJ6.empty') }}</p>
+      </div>
+      <div class="hidden sm:block bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-x-auto">
         <table class="w-full text-sm">
           <thead class="bg-neutral-50 text-xs text-neutral-500 uppercase tracking-wide">
             <tr>

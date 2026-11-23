@@ -51,6 +51,8 @@ describe('J6 source findings', () => {
     expect(groups[0]!.text()).toContain('nonprofitTax.findings.missing_activity_kind')
     expect(groups[1]!.text()).toContain('602')
     expect(w.get('[data-test=source-findings-total]').text()).toContain('"lines":3')
+    // Úzká obrazovka má stejné skupiny jako karty.
+    expect(w.findAll('[data-test=source-finding-group-card]').map(c => c.text().includes('nonprofitTax.findings.'))).toEqual([true, true])
   })
 
   it('lists lines of the chosen group page by page with a link to the place of fix', async () => {
@@ -66,6 +68,7 @@ describe('J6 source findings', () => {
     expect(api.sourceFindingLines).toHaveBeenLastCalledWith(1, 7, { account: '518', code: 'missing_activity_kind' }, null)
     const rows = w.findAll('[data-test=source-finding-line]')
     expect(rows).toHaveLength(2)
+    expect(w.findAll('[data-test=source-finding-line-card]')).toHaveLength(2)
     expect(rows[0]!.text()).toContain('SYN-1')
     expect(rows[0]!.text()).toContain('nonprofitTax.findings.unknown_activity_kind_origin')
     const links = w.findAll('[data-test=source-finding-link]')
