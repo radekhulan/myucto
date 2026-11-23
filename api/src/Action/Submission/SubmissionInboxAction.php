@@ -18,6 +18,7 @@ use MyInvoice\Service\Submission\Channel\Isds\DirectIsdsInboxTransport;
 use MyInvoice\Service\Submission\Channel\Isds\MobileKeyIsdsAuthenticator;
 use MyInvoice\Service\Submission\Channel\Isds\SmsIsdsAuthenticator;
 use MyInvoice\Service\Submission\Channel\SensitiveValue;
+use MyInvoice\Service\Submission\IsdsAccessService;
 use MyInvoice\Service\Submission\Channel\SubmissionChannelException;
 use MyInvoice\Service\Submission\SubmissionCredentialService;
 use MyInvoice\Service\Submission\SubmissionInboxPollFlow;
@@ -47,6 +48,7 @@ final class SubmissionInboxAction
         private readonly IsdsMobileCredentialService $mobileCredentials,
         private readonly SubmissionInboxPrivacyService $privacy,
         private readonly ActivityLogger $logger,
+        private readonly IsdsAccessService $access,
     ) {}
 
     public function list(Request $request, Response $response): Response
@@ -150,6 +152,17 @@ final class SubmissionInboxAction
         $body = (array) ($request->getParsedBody() ?? []);
         if (($error = $this->acknowledgementError($body, $response)) !== null) {
             return $error;
+        }
+        if (array_key_exists('access_id', $body)) {
+            $supplierId = SupplierGuard::currentId($request);
+            $actor = $this->userId($request);
+            try {
+                $selected = $this->access->useSelected($request, $supplierId, $actor, 'receive', $body);
+                $result = $this->pollFlow->poll($selected['context'], $this->directTransport, $actor, $selected['can_receipts']);
+                return $this->pollResult($response, $result);
+            } catch (SubmissionChannelException $e) {
+                return Json::error($response, $e->errorCode, $e->getMessage(), $e->httpStatus);
+            }
         }
         $environment = (string) ($body['environment'] ?? 'production');
         $username = trim((string) ($body['username'] ?? ''));

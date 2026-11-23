@@ -110,20 +110,26 @@ Firmy, kde nejste členem, se akce nedotkne. Výjimkou je správce systému, kte
 všechny: u něj se akce týká všech firem. Povolení certifikát ve firmě jen zpřístupní. Který certifikát se v dané
 firmě skutečně použije pro podpisový profil, EPO nebo mzdová podání, se dál volí v příslušném nastavení té firmy.
 
+**Použití ve firmách.** U uloženého certifikátu rozbalte **Použití ve firmách**. V přehledu vidíte firmy,
+kde máte oprávnění číst nastavení elektronických podpisů. Sloupce ukazují, jestli je certifikát dostupný pro výběr
+v EPO, jestli je vybraný pro mzdová podání v produkčním nebo testovacím prostředí a k jakým datovým schránkám
+je nastavený. U mzdových podání přehled porovná sériové číslo certifikátu s číslem zadaným podle oznámení ČSSZ.
+U datové schránky je vidět ID schránky, druh přístupu a povolené operace.
+
 **Nahradit certifikát ve všech firmách.** Když certifikát obnovíte, vyberte v poli **Nahradit certifikát** ten starý
 a nový nahrajte, nebo u už nahraného nového klikněte na **Povolit v dalších firmách**. Aplikace se jednou zeptá na
 potvrzení a pak:
 
 - nový certifikát povolí ve všech firmách, kam akce dosáhne, i v aktuální firmě a i tam, kde už platný certifikát je
   (volba **Jen do firem bez platného certifikátu** se při náhradě nepoužije),
-- přepojí na něj přístup k datové schránce, osobní podpisové profily a volbu certifikátu pro mzdová podání, které
+- přepojí na něj firemní přístup k datové schránce, osobní podpisové profily a volbu certifikátu pro mzdová podání, které
   používaly starý certifikát.
 
 V přehledu po firmách je u takové firmy **Nahrazeno** a počet přepojených míst. Starý certifikát zůstane v trezoru
 a když ho už nic nepoužívá, smažete ho běžně. Nemění se odesílací brána ISDS (je společná pro celou instalaci
 a registrovaná přímo v ISDS) ani registrace certifikátu u ČSSZ: nový certifikát je potřeba u ČSSZ zaregistrovat
-a obrazovka mezd to do té doby hlásí. Přístup k datové schránce bude po náhradě potřeba znovu ověřit přihlášením.
-Dříve podepsaná PDF zůstávají podepsaná starým certifikátem.
+a obrazovka mezd to do té doby hlásí. Firemní přístup k datové schránce bude po náhradě potřeba znovu ověřit přihlášením.
+Certifikát pro sdílený přístup aktualizujte v **Systém → Přístupové údaje**. Dříve podepsaná PDF zůstávají podepsaná starým certifikátem.
 
 **Soubor se zastaralým šifrováním (RC2).** Starší exporty certifikátů, zejména z Windows a od některých autorit, jsou
 chráněné zastaralou šifrou RC2, kterou server nepodporuje. Aplikace to ohlásí výslovnou hláškou, že soubor používá

@@ -15,6 +15,7 @@ use MyInvoice\Service\Submission\Channel\ChannelCredentials;
 use MyInvoice\Service\Submission\Channel\Isds\MobileKeyIsdsAuthenticator;
 use MyInvoice\Service\Submission\Channel\Isds\SmsIsdsAuthenticator;
 use MyInvoice\Service\Submission\Channel\SensitiveValue;
+use MyInvoice\Service\Submission\IsdsAccessService;
 use MyInvoice\Service\Submission\Channel\SubmissionChannelException;
 use MyInvoice\Service\Submission\IsdsMobileCredentialService;
 use MyInvoice\Service\Submission\SubmissionCredentialService;
@@ -42,6 +43,7 @@ final class SubmissionOutboxAction
         private readonly MobileKeyIsdsAuthenticator $mobileKey,
         private readonly IsdsMobileCredentialService $mobileCredentials,
         private readonly SmsIsdsAuthenticator $sms,
+        private readonly IsdsAccessService $access,
     ) {}
 
     public function list(Request $request, Response $response): Response
@@ -245,6 +247,16 @@ final class SubmissionOutboxAction
             return Json::error($response, 'submission_not_found', 'Podání neexistuje.', 404);
         }
         $body = (array) ($request->getParsedBody() ?? []);
+        if (array_key_exists('access_id', $body)) {
+            $supplierId = SupplierGuard::currentId($request);
+            $actor = $this->userId($request);
+            try {
+                $selected = $this->access->useSelected($request, $supplierId, $actor, 'send', $body);
+                return $this->sendWithContext($response, $supplierId, $id, $actor, $selected['context']);
+            } catch (SubmissionChannelException $e) {
+                return Json::error($response, $e->errorCode, $e->getMessage(), $e->httpStatus);
+            }
+        }
         $environment = (string) ($body['environment'] ?? 'production');
         $username = trim((string) ($body['username'] ?? ''));
         $password = (string) ($body['password'] ?? '');
@@ -677,6 +689,16 @@ final class SubmissionOutboxAction
         if (($ids = $this->batchIds($body, $response)) instanceof Response) {
             return $ids;
         }
+        if (array_key_exists('access_id', $body)) {
+            $supplierId = SupplierGuard::currentId($request);
+            $actor = $this->userId($request);
+            try {
+                $selected = $this->access->useSelected($request, $supplierId, $actor, 'send', $body);
+                return $this->sendBatchWithContext($response, $supplierId, $ids, $actor, $selected['context']);
+            } catch (SubmissionChannelException $e) {
+                return Json::error($response, $e->errorCode, $e->getMessage(), $e->httpStatus);
+            }
+        }
         $environment = (string) ($body['environment'] ?? 'production');
         $username = trim((string) ($body['username'] ?? ''));
         $password = (string) ($body['password'] ?? '');
@@ -867,7 +889,12 @@ final class SubmissionOutboxAction
         $body = (array) ($request->getParsedBody() ?? []);
 
         try {
-            $context = $this->credentials->unlock($supplierId, (string) ($body['environment'] ?? 'production'));
+            $environment = IsdsAccessService::environment($body['environment'] ?? 'production');
+            if (array_key_exists('access_id', $body)) {
+                $context = $this->access->useSelected($request, $supplierId, $this->userId($request), 'send', $body)['context'];
+            } else {
+                $context = $this->credentials->unlock($supplierId, $environment);
+            }
             $row = $this->outbox->resolveUncertain($supplierId, (int) ($args['id'] ?? 0), $context);
         } catch (SubmissionChannelException $e) {
             return Json::error($response, $e->errorCode, $e->getMessage(), $e->httpStatus);

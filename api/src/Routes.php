@@ -4119,6 +4119,7 @@ final class Routes
         // i mzdová podání. EPO endpointy zůstávají a míří do téhož trezoru.
         $app->get    ('/api/settings/certificates',        [\MyInvoice\Action\Settings\CertificateVaultAction::class, 'list']);
         $app->post   ('/api/settings/certificates',        [\MyInvoice\Action\Settings\CertificateVaultAction::class, 'upload']);
+        $app->get    ('/api/settings/certificates/{credentialId:[0-9]+}/usage', [\MyInvoice\Action\Settings\CertificateVaultAction::class, 'usage']);
         $app->post   ('/api/settings/certificates/{credentialId:[0-9]+}/share', [\MyInvoice\Action\Settings\CertificateVaultAction::class, 'shareWithOtherSuppliers']);
         $app->delete ('/api/settings/certificates/{credentialId:[0-9]+}', [\MyInvoice\Action\Settings\CertificateVaultAction::class, 'delete']);
         // Datová schránka jako průřezový kanál podání (DPH, KH, SH, DPPO,
@@ -4140,6 +4141,13 @@ final class Routes
         $app->post   ('/api/settings/isds-gateway',        [\MyInvoice\Action\Submission\IsdsGatewayAction::class, 'saveSettings']);
         $app->post   ('/api/settings/isds-gateway/active', [\MyInvoice\Action\Submission\IsdsGatewayAction::class, 'setActive']);
         $app->delete ('/api/settings/isds-gateway/{environment:production|test}', [\MyInvoice\Action\Submission\IsdsGatewayAction::class, 'deleteSettings']);
+        $app->get    ('/api/admin/isds/access', [\MyInvoice\Action\Submission\IsdsAccessAction::class, 'adminList']);
+        $app->post   ('/api/admin/isds/access', [\MyInvoice\Action\Submission\IsdsAccessAction::class, 'adminSave']);
+        $app->put    ('/api/admin/isds/access/{id:[0-9]+}', [\MyInvoice\Action\Submission\IsdsAccessAction::class, 'adminSave']);
+        $app->delete ('/api/admin/isds/access/{id:[0-9]+}', [\MyInvoice\Action\Submission\IsdsAccessAction::class, 'adminRemove']);
+        $app->get    ('/api/submissions/isds/access', [\MyInvoice\Action\Submission\IsdsAccessAction::class, 'choices']);
+        $app->post   ('/api/submissions/isds/access/personal', [\MyInvoice\Action\Submission\IsdsAccessAction::class, 'remember']);
+        $app->delete ('/api/submissions/isds/access/personal/{id:[0-9]+}', [\MyInvoice\Action\Submission\IsdsAccessAction::class, 'forget']);
         $app->get    ('/api/submissions/recipients',       [\MyInvoice\Action\Submission\SubmissionRecipientAction::class, 'list']);
         $app->post   ('/api/submissions/recipients',       [\MyInvoice\Action\Submission\SubmissionRecipientAction::class, 'save']);
         $app->delete ('/api/submissions/recipients/{id:[0-9]+}', [\MyInvoice\Action\Submission\SubmissionRecipientAction::class, 'delete']);
@@ -4152,8 +4160,7 @@ final class Routes
         $app->post   ('/api/submissions/outbox/{id:[0-9]+}/confirm',  [\MyInvoice\Action\Submission\SubmissionOutboxAction::class, 'confirm']);
         // Odeslání datovkou v relaci potvrzené Mobilním klíčem. Stav a odeslání
         // je JEDEN endpoint schválně: potvrzení se dá vyzvednout jen jednou.
-        // Odeslat smí každá metoda, kterou umí i čtení — jméno a heslo projde
-        // requestem do ISDS a nikam se neukládá, certifikát se potvrzuje zvlášť.
+        // Uložené přihlášení i odeslání certifikátem se výslovně potvrzuje.
         $app->post   ('/api/submissions/outbox/{id:[0-9]+}/password-send', [\MyInvoice\Action\Submission\SubmissionOutboxAction::class, 'passwordSend']);
         $app->post   ('/api/submissions/outbox/{id:[0-9]+}/certificate-send', [\MyInvoice\Action\Submission\SubmissionOutboxAction::class, 'certificateSend']);
         $app->post   ('/api/submissions/outbox/{id:[0-9]+}/sms/start',    [\MyInvoice\Action\Submission\SubmissionOutboxAction::class, 'smsStart']);

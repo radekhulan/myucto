@@ -58,6 +58,7 @@ final class SystemWriteTokenGuardTest extends TestCase
         'Action/Settings/SupplierCarryOverAction.php' => 'převzetí certifikátů z jiných firem',
         'Action/Settings/SupplierDomainAction.php' => 'přihlašovací domény',
         'Action/Submission/DataBoxSettingsAction.php' => 'přístup do datové schránky',
+        'Action/Submission/IsdsAccessAction.php' => 'správa uložených přihlašovacích údajů k datovým schránkám',
         'Action/Submission/SubmissionInboxStorageSettingsAction.php' => 'nastavení datové schránky',
         'Action/WorkReport/PublicWorkReportGetAction.php' => 'veřejný odkaz, náhled jen pro člověka v aplikaci',
         'Middleware/PermissionMiddleware.php' => 'technický účet instance',
@@ -69,6 +70,7 @@ final class SystemWriteTokenGuardTest extends TestCase
         'Service/Auth/SensitiveOperationReauth.php' => 'opětovné ověření',
         'Service/Bank/Connector/BankOAuthCallbackHandler.php' => 'napojení banky',
         'Service/Epo/EpoStepUpService.php' => 'MFA step-up podání',
+        'Service/Submission/IsdsAccessService.php' => 'použití osobních či sdílených údajů k datové schránce po potvrzení v relaci',
     ];
 
     public function testSessionOnlyGateIsReservedForSecuritySurfaces(): void

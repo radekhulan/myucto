@@ -234,7 +234,7 @@ final class EpoSigningCredentialService
                 $places[] = 'podpisový profil (Systém → E-maily a certifikáty → Elektronické podpisy → Podpisové profily)';
             }
             if (($usage['data_box_channels'] ?? 0) > 0) {
-                $places[] = 'přístup k datové schránce (Datová schránka)';
+                $places[] = 'přístup k datové schránce (Datová schránka nebo Systém → Přístupové údaje)';
             }
             if (($usage['isds_gateways'] ?? 0) > 0) {
                 $places[] = 'odesílací brána ISDS (Nastavení odesílací brány)';

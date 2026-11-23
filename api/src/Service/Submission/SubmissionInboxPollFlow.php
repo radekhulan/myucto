@@ -35,7 +35,7 @@ final readonly class SubmissionInboxPollFlow
      *   receipts:array{attached:int,pending:int,failed:int}|null
      * }
      */
-    public function poll(ChannelContext $context, IsdsTransport $transport, ?int $actorUserId): array
+    public function poll(ChannelContext $context, IsdsTransport $transport, ?int $actorUserId, bool $includeReceipts = true): array
     {
         $result = $this->inbox->pollWithChannel(
             $context,
@@ -47,7 +47,7 @@ final readonly class SubmissionInboxPollFlow
         $reachable = $result['error'] === null || $result['fetched'] > 0;
 
         return $result + [
-            'receipts' => $reachable && $actorUserId !== null
+            'receipts' => $includeReceipts && $reachable && $actorUserId !== null
                 ? $this->collectReceipts($context, $transport, $actorUserId)
                 : null,
         ];

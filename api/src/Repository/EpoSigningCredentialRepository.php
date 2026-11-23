@@ -107,9 +107,7 @@ final class EpoSigningCredentialRepository
                   WHERE sc.vault_credential_id = ?
                     AND sc.deleted_at IS NULL AND sp.deleted_at IS NULL'
             ),
-            'data_box_channels' => $this->db->hasTable('submission_channel_credentials')
-                ? $count('SELECT COUNT(*) FROM submission_channel_credentials WHERE credential_id = ?')
-                : 0,
+            'data_box_channels' => $this->dataBoxUsage($credentialId),
             'isds_gateways' => $this->db->hasTable('isds_gateway_registrations')
                 ? $count('SELECT COUNT(*) FROM isds_gateway_registrations WHERE credential_id = ?')
                 : 0,
@@ -117,6 +115,25 @@ final class EpoSigningCredentialRepository
                 ? $count('SELECT COUNT(*) FROM payroll_submission_signing_profiles WHERE credential_id = ?')
                 : 0,
         ];
+    }
+
+    private function dataBoxUsage(int $credentialId): int
+    {
+        $counts = [];
+        if ($this->db->hasTable('submission_channel_credentials')) {
+            $counts[] = '(SELECT COUNT(*) FROM submission_channel_credentials WHERE credential_id = ?)';
+        }
+        if ($this->db->hasTable('isds_access_profiles')) {
+            $counts[] = '(SELECT COUNT(*) FROM isds_access_profiles WHERE certificate_id = ?)';
+        }
+        if ($counts === []) {
+            return 0;
+        }
+
+        $stmt = $this->db->pdo()->prepare('SELECT ' . implode(' + ', $counts));
+        $stmt->execute(array_fill(0, count($counts), $credentialId));
+
+        return (int) $stmt->fetchColumn();
     }
 
     /**

@@ -27,6 +27,9 @@ const m = vi.hoisted(() => ({
   testAllowed: true,
 }))
 
+vi.mock('@/stores/supplier', () => ({ useSupplierStore: () => ({ currentSupplierId: 1 }) }))
+vi.mock('@/api/isdsAccess', () => ({ isdsAccessApi: { choices: vi.fn().mockResolvedValue([]) } }))
+
 vi.mock('@/api/payroll', () => ({
   payrollApi: {
     jmhzTransportHistory: m.jmhzTransportHistory,

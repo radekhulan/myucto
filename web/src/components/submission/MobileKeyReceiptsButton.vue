@@ -12,6 +12,8 @@ import { useI18n } from 'vue-i18n'
 import { apiErrorMessage } from '@/api/errors'
 import { dataBoxApi, type IsdsMobileCredentialProfile, type ReceiptBatchResult } from '@/api/dataBox'
 import { btnFilledSm, btnOutlineSm, ICONS } from '@/components/ui/buttonStyles'
+import IsdsSavedAccessPicker from './IsdsSavedAccessPicker.vue'
+import { useIsdsSavedAccess } from './useIsdsSavedAccess'
 
 const props = defineProps<{
   environment: 'production' | 'test'
@@ -22,6 +24,9 @@ const emit = defineEmits<{ done: [result: ReceiptBatchResult] }>()
 const { t } = useI18n()
 
 const open = ref(false)
+const method = ref<'mobile_key' | 'saved'>('mobile_key')
+const access = useIsdsSavedAccess(() => props.environment, 'receipts', () => open.value)
+const canUseSaved = access.canUseSelected
 const username = ref('')
 const code = ref('')
 const useSaved = ref(false)
@@ -38,6 +43,7 @@ function clearTimer() {
 }
 
 async function openPanel() {
+  method.value = 'mobile_key'
   open.value = true
   error.value = ''
   flowToken.value = ''
@@ -58,6 +64,26 @@ function close() {
   flowToken.value = ''
   status.value = ''
   code.value = ''
+}
+
+async function fetchSavedReceipts() {
+  const selected = access.selected.value
+  if (!canUseSaved.value || !selected || busy.value) return
+  const isCurrent = access.captureScope()
+  busy.value = true
+  error.value = ''
+  try {
+    const result = await dataBoxApi.downloadReceiptsBatchWithPassword(
+      props.environment, { access_id: selected.id, authorized: true },
+    )
+    if (!isCurrent()) return
+    close()
+    emit('done', result)
+  } catch (exception) {
+    if (isCurrent()) error.value = apiErrorMessage(exception, t('databox.outbox.receiptsBatch.action'))
+  } finally {
+    busy.value = false
+  }
 }
 
 async function start() {
@@ -131,7 +157,18 @@ onBeforeUnmount(clearTimer)
       <p class="text-sm text-neutral-700">
         {{ t('payroll.submissions.monthly_checklist.send.receipts_intro') }}
       </p>
-      <div v-if="flowToken === ''" class="mt-3 grid gap-3 sm:grid-cols-2">
+      <div v-if="flowToken === '' && access.state.choices.length" class="mt-3 flex flex-wrap gap-3">
+        <label class="flex items-center gap-2 text-sm">
+          <input v-model="method" type="radio" value="mobile_key" :disabled="busy">
+          {{ t('databox.inbox.auth.mobile_key.title') }}
+        </label>
+        <label class="flex items-center gap-2 text-sm">
+          <input v-model="method" type="radio" value="saved" :disabled="busy" @change="access.reset()">
+          {{ t('databox.savedAccess.title') }}
+        </label>
+      </div>
+      <IsdsSavedAccessPicker v-if="method === 'saved'" class="mt-3" :access="access" :disabled="busy" />
+      <div v-else-if="flowToken === ''" class="mt-3 grid gap-3 sm:grid-cols-2">
         <label class="block">
           <span class="text-sm font-medium">{{ t('databox.outbox.mobileKey.username') }}</span>
           <input v-model="username" type="text" maxlength="128" autocomplete="off" class="form-input mt-1 w-full">
@@ -142,7 +179,7 @@ onBeforeUnmount(clearTimer)
           <span class="mt-1 block text-xs text-neutral-500">{{ t('databox.outbox.mobileKey.codeHint') }}</span>
         </label>
       </div>
-      <label v-if="flowToken === '' && savedProfile?.saved" class="mt-3 flex items-center gap-2 text-sm">
+      <label v-if="method === 'mobile_key' && flowToken === '' && savedProfile?.saved" class="mt-3 flex items-center gap-2 text-sm">
         <input v-model="useSaved" type="checkbox">
         {{ t('databox.outbox.mobileKey.useSaved') }}
       </label>
@@ -150,7 +187,18 @@ onBeforeUnmount(clearTimer)
       <p v-if="error" class="mt-3 text-sm text-danger-700" role="alert" data-test="mobile-key-receipts-error">{{ error }}</p>
       <div class="mt-3 flex flex-wrap gap-2">
         <button
-          v-if="flowToken === ''"
+          v-if="method === 'saved'"
+          type="button"
+          :class="btnFilledSm('success')"
+          :disabled="busy || !canUseSaved"
+          data-test="payroll-saved-receipts-submit"
+          @click="fetchSavedReceipts"
+        >
+          <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.download" /></svg>
+          {{ t('databox.outbox.receiptsBatch.action') }}
+        </button>
+        <button
+          v-else-if="flowToken === ''"
           type="button"
           :class="[btnFilledSm('success'), 'whitespace-nowrap']"
           :disabled="busy"

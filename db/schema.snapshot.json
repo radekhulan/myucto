@@ -1231,7 +1231,8 @@
         "2325_sales_quote_orders.sql",
         "2326_sales_quote_order_line_origins.sql",
         "2327_sales_quote_permissions.sql",
-        "2328_stock_sales_retired_skus.sql"
+        "2328_stock_sales_retired_skus.sql",
+        "2329_isds_access_profiles.sql"
     ],
     "tables": {
         "abra_flexi_connections": {
@@ -7751,6 +7752,83 @@
                 "bank_snapshot": "json_valid(`bank_snapshot`)",
                 "client_snapshot": "json_valid(`client_snapshot`)",
                 "supplier_snapshot": "json_valid(`supplier_snapshot`)"
+            }
+        },
+        "isds_access_inbox_owners": {
+            "type": "BASE TABLE",
+            "engine": "InnoDB",
+            "collation": "utf8mb4_unicode_ci",
+            "columns": {
+                "box_id": "char(7) NOT NULL",
+                "environment": "enum('production','test') NOT NULL",
+                "supplier_id": "int(10) unsigned NOT NULL"
+            },
+            "indexes": {
+                "PRIMARY": "UNIQUE BTREE (environment, box_id)",
+                "fk_isds_access_inbox_owner": "BTREE (supplier_id)"
+            },
+            "foreign_keys": {
+                "fk_isds_access_inbox_owner": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE CASCADE"
+            },
+            "checks": []
+        },
+        "isds_access_profile_suppliers": {
+            "type": "BASE TABLE",
+            "engine": "InnoDB",
+            "collation": "utf8mb4_unicode_ci",
+            "columns": {
+                "can_receipts": "tinyint(1) NOT NULL",
+                "can_receive": "tinyint(1) NOT NULL",
+                "can_send": "tinyint(1) NOT NULL",
+                "profile_id": "bigint(20) unsigned NOT NULL",
+                "supplier_id": "int(10) unsigned NOT NULL"
+            },
+            "indexes": {
+                "PRIMARY": "UNIQUE BTREE (profile_id, supplier_id)",
+                "ix_isds_access_supplier_profile": "BTREE (supplier_id, profile_id)"
+            },
+            "foreign_keys": {
+                "fk_isds_access_supplier": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE CASCADE",
+                "fk_isds_access_supplier_profile": "(profile_id) -> isds_access_profiles (id) ON UPDATE RESTRICT ON DELETE CASCADE"
+            },
+            "checks": []
+        },
+        "isds_access_profiles": {
+            "type": "BASE TABLE",
+            "engine": "InnoDB",
+            "collation": "utf8mb4_unicode_ci",
+            "columns": {
+                "box_id": "char(7) NOT NULL",
+                "certificate_id": "bigint(20) unsigned NULL DEFAULT NULL",
+                "created_at": "timestamp NOT NULL DEFAULT current_timestamp()",
+                "environment": "enum('production','test') NOT NULL",
+                "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
+                "label": "varchar(120) NOT NULL",
+                "method": "enum('password','certificate','user_certificate') NOT NULL",
+                "owner_user_id": "bigint(20) unsigned NOT NULL",
+                "password_ciphertext": "text NULL DEFAULT NULL",
+                "personal_supplier_id": "int(10) unsigned NULL DEFAULT NULL",
+                "scope": "enum('personal','shared') NOT NULL",
+                "secret_context": "char(32) NOT NULL",
+                "updated_at": "timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE CURRENT_TIMESTAMP()",
+                "username_ciphertext": "text NULL DEFAULT NULL"
+            },
+            "indexes": {
+                "PRIMARY": "UNIQUE BTREE (id)",
+                "fk_isds_access_personal_supplier": "BTREE (personal_supplier_id)",
+                "ix_isds_access_box": "BTREE (environment, box_id)",
+                "ix_isds_access_certificate": "BTREE (certificate_id)",
+                "uq_isds_access_personal": "UNIQUE BTREE (owner_user_id, personal_supplier_id, environment, box_id)"
+            },
+            "foreign_keys": {
+                "fk_isds_access_certificate": "(certificate_id) -> epo_signing_credentials (id) ON UPDATE RESTRICT ON DELETE CASCADE",
+                "fk_isds_access_owner": "(owner_user_id) -> users (id) ON UPDATE RESTRICT ON DELETE CASCADE",
+                "fk_isds_access_personal_supplier": "(personal_supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE CASCADE"
+            },
+            "checks": {
+                "chk_isds_access_password_encrypted": "`password_ciphertext` is null or `password_ciphertext` like 'enc:v%'",
+                "chk_isds_access_scope": "`scope` = 'personal' and `personal_supplier_id` is not null and `method` = 'password' or `scope` = 'shared' and `personal_supplier_id` is null",
+                "chk_isds_access_username_encrypted": "`username_ciphertext` is null or `username_ciphertext` like 'enc:v%'"
             }
         },
         "isds_gateway_registrations": {
@@ -27571,6 +27649,7 @@
                 "failed_at": "datetime NULL DEFAULT NULL",
                 "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
                 "idempotency_key_hash": "binary(32) NOT NULL",
+                "isds_sender_box_id": "char(7) NULL DEFAULT NULL",
                 "last_error_code": "varchar(64) NULL DEFAULT NULL COLLATE ascii_bin",
                 "last_error_message": "varchar(500) NULL DEFAULT NULL",
                 "receipt_attached_at": "datetime NULL DEFAULT NULL",

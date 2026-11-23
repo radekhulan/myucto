@@ -15,6 +15,7 @@ use MyInvoice\Service\Epo\EpoStepUpService;
 use MyInvoice\Service\Epo\EpoSubmissionException;
 use MyInvoice\Service\IpMatcher;
 use MyInvoice\Service\Signing\CertificateVaultSupplierSharing;
+use MyInvoice\Service\Signing\CertificateVaultUsage;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 use Psr\Http\Message\UploadedFileInterface;
@@ -45,6 +46,7 @@ final class CertificateVaultAction
         private readonly ActivityLogger $logger,
         private readonly CertificateVaultSupplierSharing $sharing,
         private readonly IpMatcher $ipMatcher,
+        private readonly CertificateVaultUsage $certificateUsage,
     ) {}
 
     public function list(Request $request, Response $response): Response
@@ -59,6 +61,24 @@ final class CertificateVaultAction
                 SupplierGuard::currentId($request),
             ),
         ]);
+    }
+
+    public function usage(Request $request, Response $response, array $args): Response
+    {
+        if (($denied = $this->guard($request, $response, AccessLevel::READ)) !== null) {
+            return $denied;
+        }
+
+        $companies = $this->certificateUsage->companies(
+            $request,
+            (int) ($args['credentialId'] ?? 0),
+            $this->userId($request),
+        );
+        if ($companies === null) {
+            return Json::error($response, 'credential_not_found', 'Certifikát nebyl nalezen.', 404);
+        }
+
+        return Json::ok($response->withHeader('Cache-Control', 'private, no-store'), ['companies' => $companies]);
     }
 
     public function upload(Request $request, Response $response): Response

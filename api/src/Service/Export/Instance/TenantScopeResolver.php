@@ -69,6 +69,7 @@ final class TenantScopeResolver
         'epo_signing_credentials', 'epo_signing_credential_suppliers',
         'submission_channel_credentials',
         'submission_isds_mobile_credentials', 'submission_isds_auth_flows',
+        'isds_access_profiles', 'isds_access_profile_suppliers', 'isds_access_inbox_owners',
         'payroll_ruleset_audit',
         'payroll_submission_signing_profiles',
         'payroll_document_download_grants',

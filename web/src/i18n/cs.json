@@ -2141,6 +2141,7 @@
     "purchase_stats": "Náklady",
     "bank": "Banka",
     "system": "Systém",
+    "access_credentials": "Přístupové údaje",
     "section_taxes": "Daně",
     "section_payroll": "Mzdy",
     "payroll_overview": "Přehled mezd",
@@ -9698,7 +9699,7 @@
           "databox_sent": "Odesláno do datových schránek: {sent}. Nepovedlo se: {failed}.",
           "receipts_following": "Doručenky se v téže relaci Mobilního klíče dotahují samy (několik minut). Přehled pojišťovně je podaný doručením do její schránky.",
           "load_receipts_count": "Načíst doručenky ({count})",
-          "receipts_intro": "Jedno přihlášení Mobilním klíčem stáhne doručenky všech odeslaných zpráv, které je ještě nemají. Schránka doručených zpráv se nečte.",
+          "receipts_intro": "Doručenky k odeslaným zprávám můžete načíst Mobilním klíčem nebo uloženým přístupem.",
           "receipts_pending": "Čeká na doručenku - doručenku má {delivered} z {total} odeslaných zpráv.",
           "receipts_pending_hint": "Přehled pojišťovně je podaný doručením do její schránky; dokud doručenka není načtená, měsíc se neukáže jako splněný.",
           "receipts_loaded": "Doručenky připojené: {attached}. Ještě nedoručené: {pending}.",
@@ -29065,14 +29066,51 @@
     "certificate_vault_share_status_already_enabled": "Už bylo povoleno",
     "certificate_vault_replace": "Nahradit certifikát",
     "certificate_vault_replace_none": "Nic nenahrazovat",
-    "certificate_vault_replace_hint": "Pro obnovený certifikát. Nově nahraný certifikát (nebo ten, u kterého kliknete na Povolit v dalších firmách) se zapíše do všech firem i tam, kde už platný certifikát je, a datová schránka, podpisové profily a mzdová podání se ze zvoleného certifikátu přepojí na něj. Starý certifikát zůstane v trezoru, smazat ho můžete potom.",
-    "certificate_vault_replace_confirm": "Nahradit certifikát {name} ve všech firmách? Datová schránka, podpisové profily a mzdová podání, které ho používají, se přepojí na nový certifikát.",
+    "certificate_vault_replace_hint": "Pro obnovený certifikát. Nově nahraný certifikát (nebo ten, u kterého kliknete na Povolit v dalších firmách) se zapíše do všech firem i tam, kde už platný certifikát je, a firemní přístup k datové schránce, podpisové profily a mzdová podání se ze zvoleného certifikátu přepojí na něj. Starý certifikát zůstane v trezoru, smazat ho můžete potom.",
+    "certificate_vault_replace_confirm": "Nahradit certifikát {name} ve všech firmách? Firemní přístup k datové schránce, podpisové profily a mzdová podání, které ho používají, se přepojí na nový certifikát.",
     "certificate_vault_replace_same": "Certifikát nelze nahradit sám sebou. Vyberte v poli Nahradit certifikát ten starý.",
     "certificate_vault_replace_done": "Certifikát je nahrazený ve všech firmách.",
     "certificate_vault_replace_failed": "Certifikát je uložený, ale náhrada starého neproběhla: {reason}",
     "certificate_vault_replace_counts": "Přepojeno: datová schránka {dataBox}, podpisové profily {profiles}, mzdová podání {payroll}",
     "certificate_vault_share_status_skipped_has_valid": "Přeskočeno, má platný certifikát",
     "certificate_vault_share_status_skipped_no_permission": "Přeskočeno, chybí oprávnění",
+    "certificate_vault_company_usage": {
+      "title": "Použití ve firmách",
+      "company": "Firma",
+      "epo_title": "EPO",
+      "epo": {
+        "eligible": "Povolený k výběru",
+        "invalid": "Povolený, nyní neplatný",
+        "disabled": "Nepovolený"
+      },
+      "payroll": "Mzdová podání",
+      "payroll_selected": "{environment} · Vybraný",
+      "payroll_unused": "Nevybraný",
+      "registration": {
+        "missing": "ČSSZ · Sériové číslo chybí",
+        "matches": "ČSSZ · Sériové číslo souhlasí",
+        "mismatch": "ČSSZ · Sériové číslo nesouhlasí",
+        "unknown": "ČSSZ · Sériové číslo certifikátu nelze ověřit"
+      },
+      "databox": "Datová schránka",
+      "databox_unused": "Nenastavený",
+      "databox_config": "{environment} · {source}",
+      "source": {
+        "company": "Firemní přístup",
+        "shared": "Sdílený přístup"
+      },
+      "operation": {
+        "send": "Odesílání",
+        "receive": "Příjem",
+        "receipts": "Doručenky"
+      },
+      "environment": {
+        "production": "Produkce",
+        "test": "Test"
+      },
+      "empty": "Nemáte žádnou firmu s přístupem k přehledu elektronických podpisů.",
+      "error": "Použití certifikátu se nepodařilo načíst."
+    },
     "certificate_vault_load_failed": "Certifikáty se nepodařilo načíst.",
     "certificate_vault_step_up_password": "Heslo do MyÚčta",
     "certificate_vault_step_up_totp": "Kód z autentikátoru",
@@ -29086,7 +29124,7 @@
     "certificate_vault_deleted_payroll": "Certifikát byl smazán z trezoru. Zrušené volby certifikátu pro mzdová podání: {count}.",
     "certificate_vault_delete_in_use": "Certifikát nejde smazat, ještě se používá: {places}. Nejdříve ho tam odpojte.",
     "certificate_vault_usage_profiles": "podpisové profily ({count}), odpojte v sekci Podpisové profily níže",
-    "certificate_vault_usage_data_box": "přístup k datové schránce ({count}), odpojte v Systém → Datová schránka",
+    "certificate_vault_usage_data_box": "přístup k datové schránce ({count}), odpojte v Datové schránce nebo v Systém → Přístupové údaje",
     "certificate_vault_usage_isds_gateway": "odesílací brána ISDS, změňte v Nastavení odesílací brány",
     "certificate_vault_step_up_or_password": "nebo se ověřte heslem",
     "certificate_vault_verify_passkey": "Ověřit passkey",
@@ -34704,7 +34742,72 @@
     "attach_privacy": "Balíček se vytvoří u vás v instalaci a zůstane u vás, dokud ho sami nepřiložíte k incidentu. Logy v něm ve výchozím stavu nejsou; když je přidáte, uvidíte předtím jejich obsah.",
     "open_diagnostics": "Přejít na Diagnostiku"
   },
+  "isdsAccess": {
+    "admin": {
+      "title": "Přístupové údaje",
+      "intro": "Sdílejte přístup k datovým schránkám s vybranými firmami. Uživatelé s odpovídajícím oprávněním mohou přístup použít bez znalosti vašich přihlašovacích údajů.",
+      "add": "Přidat přístup",
+      "empty": "Zatím nemáte žádné sdílené přístupy k datovým schránkám.",
+      "removed": "Sdílený přístup byl odebrán.",
+      "saved": "Sdílený přístup byl uložen.",
+      "remove": "Odebrat",
+      "removeTitle": "Odebrat sdílený přístup",
+      "editTitle": "Upravit sdílený přístup",
+      "label": "Název přístupu",
+      "environmentLabel": "Prostředí ISDS",
+      "verifiedBox": "Ověřené ID schránky",
+      "replace": "Nahradit přihlašovací údaje nebo certifikát",
+      "methodLabel": "Způsob přihlášení",
+      "username": "Uživatelské jméno ISDS",
+      "password": "Heslo ISDS",
+      "certificate": "Certifikát z trezoru",
+      "selectCertificate": "Vyberte certifikát",
+      "certificateValidity": "Platí do {date}",
+      "goToVault": "Otevřít trezor certifikátů",
+      "verifyExisting": "MyÚčto ověří, že nové přihlašovací údaje patří ke stejné schránce.",
+      "verifyNew": "MyÚčto při uložení ověří přístupy v ISDS a zjistí ID schránky.",
+      "companies": "Použití ve firmách",
+      "companiesHint": "Odesílání a doručenky můžete povolit více firmám. Pro příchozí zprávy má každá schránka v daném prostředí jedinou cílovou firmu.",
+      "noCompanies": "Nejsou dostupné žádné firmy.",
+      "noGrants": "Přístup zatím nemá povolené použití v žádné firmě.",
+      "companyFallback": "Firma č. {id}",
+      "removeHint": "Přístup „{label}“ už nepůjde použít v žádné firmě.",
+      "verifyIdentity": "Potvrzení totožnosti",
+      "verifyIdentityHint": "Změnu potvrďte ověřením totožnosti.",
+      "reauthPassword": "Heslo k účtu MyÚčto",
+      "totp": "Kód z ověřovací aplikace",
+      "environment": {
+        "production": "Produkční",
+        "test": "Testovací"
+      },
+      "method": {
+        "password": "Jméno a heslo",
+        "certificate": "Systémový certifikát",
+        "user_certificate": "Uživatelský certifikát, jméno a heslo"
+      },
+      "operation": {
+        "send": "Odesílání",
+        "receive": "Příjem zpráv",
+        "receipts": "Doručenky"
+      }
+    }
+  },
   "databox": {
+    "savedAccess": {
+      "title": "Uložený přístup",
+      "description": "Použít osobní nebo sdílené přihlášení.",
+      "select": "Vyberte přístup",
+      "option": "{label} · {box} · {scope}",
+      "personal": "Osobní",
+      "shared": "Sdílený",
+      "confirm": "Potvrzuji použití schránky {box}.",
+      "remember": "Zapamatovat pro mě v této firmě",
+      "forget": "Zapomenout přístup",
+      "forgetConfirm": "Odebrat uložené přihlášení ke schránce {box}?",
+      "downloadReceipt": "Načíst doručenku uloženým přístupem",
+      "resolveBox": "Pro dohledání je potřeba uložený přístup ke schránce {box}.",
+      "forgetFailed": "Přístup se nepodařilo odebrat."
+    },
     "title": "Datová schránka",
     "subtitle": "Datová schránka této firmy: odesílání podání a čtení doručených zpráv. Daňová podání (DPH, kontrolní a souhrnné hlášení, DPPO a DPFO) sem můžete poslat z Daně → EPO podání a archív. Z aplikace tudy chodí přehledy a hlášení zdravotním pojišťovnám (HOZ, PPZ), měsíční hlášení zaměstnavatele ČSSZ (JMHZ) jako alternativa k přímému kanálu VREP a součinnost exekutorům.",
     "howItWorks": "Jak to funguje a kudy co odchází",
@@ -34853,18 +34956,18 @@
       "loginMobileKeyTerm": "Mobilní klíč eGovernmentu - doporučeno",
       "loginMobileKeyText": "Jméno a komunikační kód, každou relaci potvrdíte v mobilu. Funguje na odesílání i na čtení a lze ho šifrovaně zapamatovat.",
       "loginPasswordTerm": "Jméno a heslo",
-      "loginPasswordText": "Jednorázově pro jeden úkon. S aktivní SMS autentizací zadáte kód ve druhém kroku. Neukládá se.",
+      "loginPasswordText": "Jméno a heslo můžete zadat pro jeden úkon nebo si je zapamatovat pro svůj účet v této firmě.",
       "loginCertificateTerm": "Systémový certifikát firmy",
       "loginCertificateText": "Jen pro čtení a strojové operace. Odesílat s ním nelze - u odeslání by nikdo nestál.",
       "whatIsStored": "Co se ukládá a co ne",
       "whatGoesThrough": "Co přes bránu odchází",
-      "loginBoundary": "Běžné heslo se neukládá do profilu. U SMS mezikroku zůstane nejvýše několik minut v jednorázovém šifrovaném toku; po použití se smaže a po vypršení už ho nelze použít. SMS kód se neukládá. Jméno a komunikační kód Mobilního klíče lze na Vaši žádost uložit šifrovaně pouze pro kombinaci firma + uživatel. Schránka se nikdy nenačítá automaticky.",
+      "loginBoundary": "Uložené jméno a heslo se šifrují v databázi. Osobní přístup je vázaný na účet, firmu a prostředí. V nabídce Systém → Přístupové údaje lze přístup sdílet s vybranými firmami.",
       "inboxLoginTitle": "Přihlášení pro příchozí zprávy",
       "inboxLoginDescription": "Při ručním načtení si zvolíte způsob přístupu. Odesílací brána s tímto načtením nesouvisí.",
       "inboxMobileKey": "Mobilní klíč: jméno + komunikační kód (heslo pro aplikaci) a potvrzení každé relace v klíči. Tento osobní přístup lze šifrovaně zapamatovat pro Vás a právě zvolenou firmu.",
-      "inboxPassword": "Jméno + heslo: použijí se jednorázově pro jeden požadavek; pokud má účet aktivní SMS autentizaci, kód zadáte ve druhém kroku.",
+      "inboxPassword": "Jméno a heslo můžete zadat pro jedno načtení nebo použít uložený přístup dostupný pro tuto firmu.",
       "inboxCertificate": "Systémový certifikát: šifrovaně uložený u právě zvolené firmy.",
-      "inboxLoginBoundary": "Běžné heslo se neukládá do profilu. U SMS mezikroku zůstane nejvýše několik minut v jednorázovém šifrovaném toku; po použití se smaže a po vypršení už ho nelze použít. SMS kód se neukládá. Jméno a komunikační kód Mobilního klíče lze na Vaši žádost uložit šifrovaně pouze pro kombinaci firma + uživatel. Schránka se nikdy nenačítá automaticky.",
+      "inboxLoginBoundary": "Příjem z uložené datové schránky lze povolit v jedné firmě v každém prostředí. Každé načtení potvrdíte ručně.",
       "certificateSettings": "Nastavení systémového certifikátu",
       "certificateOnly": "Toto nastavení platí jen pro právě zvolenou firmu. Interaktivní přihlášení při odeslání probíhá odděleně přímo v ISDS.",
       "label": "Označení",
@@ -35007,7 +35110,7 @@
         "testEnvironmentWarning": "Jste v testovacím prostředí. Testovací ISDS (datovka-test.gov.cz) má vlastní účty - přihlášení do ostré datové schránky tu neprojde. Pro odeslání ostrého podání přepněte nahoře na Ostré prostředí."
       },
       "passwordSend": {
-        "intro": "Přihlášení platí jen pro tohle jedno odeslání. Heslo projde do ISDS a nikam se neukládá.",
+        "intro": "Přihlašovací údaje můžete použít jednou nebo je uložit pro příště.",
         "username": "Uživatelské jméno ISDS",
         "password": "Heslo k datové schránce",
         "submit": "Přihlásit a odeslat",
@@ -35048,7 +35151,7 @@
       },
       "password": {
         "title": "Jméno a heslo",
-        "description": "Přihlašovací údaje k datové schránce pro toto jedno odeslání. Heslo se nikam neukládá."
+        "description": "Zadejte přihlašovací údaje k datové schránce."
       },
       "sms": {
         "title": "Jméno, heslo a SMS kód",
@@ -35252,7 +35355,7 @@
       "manualOnly": "Schránka se automaticky nevybírá. Každé načtení musíte spustit a potvrdit Vy.",
       "pollConfirm": "Opravdu teď chcete načíst nové zprávy z datové schránky? Vyzvednutí se může počítat jako doručení a spustit zákonné lhůty.",
       "authTitle": "Jak se chcete pro toto načtení přihlásit?",
-      "authIntro": "Každé načtení spouštíte ručně. Mobilní klíč lze osobně zapamatovat pro tuto firmu; běžné heslo a SMS kód zůstávají jednorázové.",
+      "authIntro": "Každé načtení spouštíte ručně. Můžete použít jednorázové, osobní nebo sdílené přihlášení.",
       "auth": {
         "mobile_key": {
           "title": "Mobilní klíč eGovernmentu",
@@ -35260,7 +35363,7 @@
         },
         "password": {
           "title": "Jméno a heslo",
-          "description": "Pro účet bez druhého faktoru. MyÚčto heslo přijme na serveru pouze pro právě spuštěné načtení, předá ho ISDS a nikam ho neuloží."
+          "description": "Pro účet bez druhého faktoru. Údaje můžete zadat jednorázově nebo je uložit pro příště."
         },
         "sms": {
           "title": "Jméno, heslo a SMS kód",

@@ -10,23 +10,9 @@ use MyInvoice\Service\Submission\Channel\SubmissionChannelException;
 /**
  * Přímý přístup k ISDS pro úkony, které spouští člověk.
  *
- * Čtení podporuje systémový certifikát firmy, jednorázové jméno a heslo
- * i krátkou relaci Mobilního klíče nebo SMS.
- *
- * ── Proč tahle třída nově SMÍ i odesílat ───────────────────────────────────
- * Původně odchozí operace odmítala s odkazem na odesílací bránu, protože
- * u strojového odeslání chyběl souhlas člověka. U Mobilního klíče (a SMS)
- * je ale ten souhlas **už součástí přihlášení**: účetní relaci schválí ve své
- * mobilní aplikaci a ISDS ji vydá jen na pár minut. Odeslání v takové relaci
- * tedy není „bez vědomí člověka" — je to jeho vlastní úkon, jen provedený
- * odsud místo z webu datové schránky. Odesílat proto smí VÝHRADNĚ kontext
- * s takovou živou relací; viz {@see hasConfirmedSession()} a
- * {@see assertConfirmedSession()}. Systémový certifikát ani uložené heslo
- * odeslání neotevírají — ty by znamenaly odeslání bez člověka u toho.
- *
- * Čtení schránky zůstává beze změny právně významným úkonem (§ 17 odst. 3
- * zák. 300/2008 Sb.) a bránu na výslovný souhlas drží dál
- * {@see \MyInvoice\Service\Submission\SubmissionInboxService}.
+ * Pro jednotlivé požadavky používá HTTP Basic autentizaci, klientský
+ * certifikát nebo krátkou relaci potvrzenou Mobilním klíčem či SMS.
+ * Výslovné potvrzení pro čtení a odeslání kontrolují akce a služby podání.
  */
 final class DirectIsdsInboxTransport implements IsdsTransport
 {
@@ -99,8 +85,24 @@ final class DirectIsdsInboxTransport implements IsdsTransport
             'mobile_key', 'sms' => $credentials->sessionCookie !== null,
             'password' => $credentials->username !== null && $credentials->password !== null,
             'certificate' => $credentials->certificate !== null,
+            'user_certificate' => $credentials->certificate !== null && $credentials->username !== null && $credentials->password !== null,
             default => false,
         };
+    }
+
+    public function authenticatedBoxId(ChannelContext $context): string
+    {
+        $body = $this->envelope(static function (\XMLWriter $writer): void {
+            $writer->startElementNS('isds', 'GetOwnerInfoFromLogin2', self::NS_ISDS);
+            $writer->writeElementNS('isds', 'dbDummy', null, '');
+            $writer->endElement();
+        });
+        $xpath = $this->request($context, 'DsManage', $body, self::MAX_SEND_RESPONSE_BYTES);
+        $boxId = strtolower($this->firstValue($xpath, 'dbID') ?? '');
+        if ($this->firstValue($xpath, 'dbStatusCode') !== '0000' || preg_match('/^[a-z0-9]{7}$/D', $boxId) !== 1) {
+            throw new SubmissionChannelException('isds_identity_unverified', 'Nepodařilo se ověřit ID přihlášené datové schránky.', 422);
+        }
+        return $boxId;
     }
 
     public function checkRecipientBox(ChannelContext $context, string $boxId): IsdsBoxCheck
@@ -563,7 +565,7 @@ final class DirectIsdsInboxTransport implements IsdsTransport
             ];
 
             $credentials = $context->credentials;
-            if ($credentials->authMode === 'certificate') {
+            if (in_array($credentials->authMode, ['certificate', 'user_certificate'], true)) {
                 try {
                     $clientCertificate = IsdsClientCertificate::fromBase64(
                         $credentials->certificate?->reveal() ?? '',
@@ -572,7 +574,8 @@ final class DirectIsdsInboxTransport implements IsdsTransport
                 } catch (\UnexpectedValueException) {
                     throw new SubmissionChannelException('isds_certificate_unreadable', 'Systémový certifikát firmy se nepodařilo otevřít.', 500);
                 }
-            } elseif ($credentials->authMode === 'password') {
+            }
+            if (in_array($credentials->authMode, ['password', 'user_certificate'], true)) {
                 if ($credentials->username === null || $credentials->password === null) {
                     throw new SubmissionChannelException('isds_credentials_missing', 'Chybí jednorázové přihlášení k datové schránce.', 400);
                 }
@@ -584,7 +587,7 @@ final class DirectIsdsInboxTransport implements IsdsTransport
                 }
                 $cookie = $this->safeCookie($credentials->sessionCookie->reveal());
                 $options[CURLOPT_COOKIE] = 'IPCZ-X-COOKIE=' . $cookie;
-            } else {
+            } elseif ($credentials->authMode !== 'certificate') {
                 throw new SubmissionChannelException('isds_auth_mode_invalid', 'Nepodporovaný způsob přihlášení k datové schránce.', 400);
             }
 
@@ -634,6 +637,7 @@ final class DirectIsdsInboxTransport implements IsdsTransport
         $test = $context->environment === 'test';
         return match ($context->credentials->authMode) {
             'certificate' => 'https://ws1c.' . ($test ? 'datovka-test.gov.cz' : 'datovka.gov.cz') . '/cert',
+            'user_certificate' => 'https://ws1c.' . ($test ? 'datovka-test.gov.cz' : 'datovka.gov.cz') . '/certds',
             'password' => 'https://ws1.' . ($test ? 'datovka-test.gov.cz' : 'datovka.gov.cz'),
             'mobile_key', 'sms' => 'https://www.' . ($test ? 'datovka-test.gov.cz' : 'datovka.gov.cz') . '/apps',
             default => throw new SubmissionChannelException('isds_auth_mode_invalid', 'Nepodporovaný způsob přihlášení k datové schránce.', 400),
@@ -711,7 +715,8 @@ final class DirectIsdsInboxTransport implements IsdsTransport
      */
     private function assertHttpStatus(int $status, ChannelContext $context): void
     {
-        $inSession = self::hasConfirmedSession($context);
+        $inSession = in_array($context->credentials->authMode, self::CONFIRMED_SESSION_MODES, true)
+            && $context->credentials->sessionCookie !== null;
         if ($status === 401 || $status === 403 || ($inSession && $status >= 300 && $status < 400)) {
             throw $inSession
                 ? new SubmissionChannelException(
@@ -722,7 +727,7 @@ final class DirectIsdsInboxTransport implements IsdsTransport
                 : new SubmissionChannelException(
                     'isds_login_rejected',
                     'Datová schránka přihlášení odmítla. Zkontrolujte zvolený účet a způsob přihlášení.',
-                    401,
+                    422,
                 );
         }
         if ($status < 200 || $status >= 300) {

@@ -906,6 +906,7 @@ const navSections = computed<NavSection[]>(() => {
           ...(auth.isDemo ? [] : [{ to: '/admin/users', label: t('nav.users'), icon: ICONS.users }]),
           { to: '/admin/roles',        label: t('nav.roles'),      icon: ICONS.approvals },
           { to: '/admin/emails',       label: t('nav.emails'),     icon: ICONS.email },
+          ...(auth.isDemo ? [] : [{ to: '/admin/access-credentials', label: t('nav.access_credentials'), icon: ICONS.api_tokens }]),
           { to: '/admin/activity-log', label: t('nav.log'),        icon: ICONS.log },
           { to: '/admin/cron-jobs',    label: t('nav.cron_jobs'),  icon: ICONS.cron },
           { to: '/admin/update',       label: t('nav.updates'),    icon: ICONS.updates },

@@ -290,6 +290,14 @@ final readonly class DeliveryReceiptService
                 409,
             );
         }
+        $senderBox = $submission['isds_sender_box_id'] ?? null;
+        if ($context->verifiedBoxId !== null && $senderBox !== null && $context->verifiedBoxId !== $senderBox) {
+            throw new SubmissionChannelException(
+                'isds_access_box_mismatch',
+                'Doručenku vyžádejte ze schránky, ze které bylo podání odesláno.',
+                409,
+            );
+        }
         if ($submission['receipt_document_id'] !== null) {
             throw new SubmissionChannelException(
                 'receipt_already_attached',
@@ -384,7 +392,7 @@ final readonly class DeliveryReceiptService
         int $limit = 50,
     ): array {
         $this->assertEnvironment($environment);
-        $rows = $this->outbox->listAwaitingDeliveryReceipt($supplierId, $environment, $limit);
+        $rows = $this->outbox->listAwaitingDeliveryReceipt($supplierId, $environment, $limit, $context->verifiedBoxId);
 
         $items = [];
         $attached = 0;

@@ -95,6 +95,7 @@
     "integrations",
     "internal_documents",
     "invoice_default_note",
+    "isdsAccess",
     "kb_plus",
     "linked_documents",
     "list_nav",
@@ -1313,6 +1314,10 @@
     ],
     "admin-isds-gateway": [
       "databox"
+    ],
+    "admin-access-credentials": [
+      "isdsAccess",
+      "reports"
     ],
     "isds-gateway-callback": [
       "databox"
