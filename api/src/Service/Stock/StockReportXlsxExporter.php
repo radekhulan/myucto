@@ -266,7 +266,11 @@ final class StockReportXlsxExporter
         foreach ($data['items'] ?? [] as $row) {
             $sheet->setCellValue([1, $r], $this->czDate((string) $row['tax_date']));
             $sheet->setCellValueExplicit([2, $r], (string) ($row['invoice_number'] ?? ''), DataType::TYPE_STRING);
-            $sheet->setCellValueExplicit([3, $r], $row['invoice_type'] === 'credit_note' ? 'Dobropis' : 'Faktura', DataType::TYPE_STRING);
+            $type = $row['invoice_type'] === 'credit_note' ? 'Dobropis' : 'Faktura';
+            if (!empty($row['matched_by_code'])) {
+                $type .= ' (převzatá, spárováno podle kódu)';
+            }
+            $sheet->setCellValueExplicit([3, $r], $type, DataType::TYPE_STRING);
             $sheet->setCellValueExplicit([4, $r], (string) $row['client_name'], DataType::TYPE_STRING);
             $sheet->setCellValueExplicit([5, $r], (string) $row['sku'], DataType::TYPE_STRING);
             $sheet->setCellValueExplicit([6, $r], (string) $row['name'], DataType::TYPE_STRING);

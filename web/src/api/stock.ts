@@ -912,6 +912,8 @@ export interface StockSalesFilters {
   stock_item_id?: number
   q?: string
   group_by?: 'none' | 'client' | 'item'
+  /** Přidá řádky importovaných faktur bez karty spárované s kartou podle kódu položky. */
+  include_imported?: boolean
   page?: number
   per_page?: number
 }
@@ -939,6 +941,8 @@ export interface StockSalesRow {
   currency: string
   /** Sériová čísla a šarže vydané k řádku faktury. */
   identifiers: string[]
+  /** Řádek importované faktury bez karty, spárovaný podle kódu položky (jen s include_imported). */
+  matched_by_code?: boolean
 }
 
 export interface StockSalesGroup {

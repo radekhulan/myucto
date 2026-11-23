@@ -28597,6 +28597,10 @@ paths:
           schema: { type: string, enum: [none, client, item], default: none }
           description: Souhrn `groups` po odběratelích nebo kartách (dokladů, řádků, množství, částky po měnách).
         - in: query
+          name: include_imported
+          schema: { type: boolean, default: false }
+          description: Přidá řádky importovaných faktur a dobropisů k nim bez karty, jejichž kód položky (`seller_item_code`) se shoduje s kódem karty. Takový řádek má `matched_by_code`, dobropis odečítá množství z řádku a sklad se nemění. Uvolněné kódy se znovu nepárují. S filtrem konkrétního skladu se přidají jen převzaté řádky s uloženým skladem.
+        - in: query
           name: page
           schema: { type: integer, default: 1, minimum: 1 }
         - in: query
