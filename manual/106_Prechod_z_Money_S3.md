@@ -433,8 +433,16 @@ banky převod spáruje, i v uzavřeném roce (deník se tím nemění).
   nezakládá. Protokol ji vypíše k ověření: Money staré roky často
   neaktualizovalo a počáteční stav ji nemusí nést. Potřebujete-li ji v MyÚčtu,
   založte ji ze zůstatku v saldokontu.
-- Převyšuje-li součet otevřených faktur strany počáteční stav účtu 311 (vydané)
-  nebo 321 (přijaté), nezaloží se žádný doklad té strany a protokol to ohlásí.
+- Fakturu, kterou už máte v MyÚčtu jako doklad počátečního stavu (z dřívějšího
+  převodu nebo doplněnou ručně a označenou jako převzatou z počátečních stavů),
+  převod znovu nezaloží. Shoduje-li se doklad s fakturou z Money číslem dokladu
+  nebo variabilním symbolem, partnerem (IČO) i částkou, převod ho převezme jako
+  její protějšek a spáruje k němu úhrady. Shoduje-li se číslem nebo symbolem, ale
+  ne částkou, nebo odpovídá více fakturám, protokol ho vypíše k ověření a faktura
+  se nezaloží.
+- Převyšuje-li součet nově zakládaných faktur strany počáteční stav účtu 311
+  (vydané) nebo 321 (přijaté) po odečtení dokladů, které už na otevírací zápis
+  navázané jsou, nezaloží se žádný nový doklad té strany a protokol to ohlásí.
   Money pak vede úhrady starých faktur jinak než deník (částečné úhrady,
   zápočty); ověřte je v Money.
 

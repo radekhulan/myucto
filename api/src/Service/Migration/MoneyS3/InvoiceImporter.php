@@ -103,7 +103,10 @@ final class InvoiceImporter
               WHERE supplier_id = ? AND vendor_id = ? AND vendor_invoice_number = ? AND issue_date = ? LIMIT 1'
         );
         if (!$ctx->taxRecords) {
-            OpeningDocuments::plan($ctx, $pdo, false, self::STEP_PURCHASE);
+            foreach (OpeningDocuments::plan($ctx, $pdo, false, self::STEP_PURCHASE, $existing) as $key => $id) {
+                $this->map->put($ctx->supplierId, MoneyS3ImportRepository::KIND_PURCHASE_INVOICE, $key, $id, $ctx->runId);
+                $existing[$key] = $id;
+            }
         }
 
         foreach ($ctx->backup->rowsAcrossYears('PFaktury') as $r) {
@@ -322,7 +325,10 @@ final class InvoiceImporter
         }
 
         if (!$ctx->taxRecords) {
-            OpeningDocuments::plan($ctx, $this->db->pdo(), true, self::STEP_ISSUED);
+            foreach (OpeningDocuments::plan($ctx, $this->db->pdo(), true, self::STEP_ISSUED, $existing) as $key => $id) {
+                $this->map->put($ctx->supplierId, MoneyS3ImportRepository::KIND_INVOICE, $key, $id, $ctx->runId);
+                $existing[$key] = $id;
+            }
         }
         $clients = [];
         foreach ($ctx->backup->rowsAcrossYears('VFaktury') as $r) {

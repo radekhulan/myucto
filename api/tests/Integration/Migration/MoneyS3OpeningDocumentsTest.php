@@ -4,6 +4,9 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Integration\Migration;
 
+use MyInvoice\Repository\MoneyS3ImportRepository;
+use MyInvoice\Repository\SaldoRepository;
+use MyInvoice\Service\Accounting\Activation\OpeningBalanceDocumentMarker;
 use MyInvoice\Service\Accounting\Activation\OpeningBalanceDocuments;
 use MyInvoice\Service\Migration\MoneyS3\ImportOptions;
 use MyInvoice\Service\Migration\MoneyS3\ImportProtocol;
@@ -98,11 +101,112 @@ final class MoneyS3OpeningDocumentsTest extends MoneyS3ImportTestCase
         self::assertNotNull($this->purchase($supplierId, 'FP23001'), 'Přijatá strana sedí na počáteční stav 321.');
     }
 
+    /**
+     * Po převodu bez dokladů počátečního stavu účetní pohledávku FV23001 doplnila ručně
+     * a označila jako doklad počátečního stavu. Opakovaný převod ji převezme do mapy,
+     * nový doklad (FV23001/2023) nezaloží a saldokonto 311 ji nezdvojí.
+     */
+    public function testRepeatedImportAdoptsManuallyMarkedOpeningDocument(): void
+    {
+        $supplierId = $this->convertWithoutOpeningDocuments();
+        $manual = $this->manualOpeningInvoice($supplierId, 'FV23001', 1210.0);
+
+        SyntheticAgenda::writeLzFiles($this->tmp . '/agenda.lz', SyntheticAgenda::filesWithDocumentsBeforeFirstYear());
+        $protocol = $this->convert($supplierId, closeHistory: false);
+
+        self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
+        self::assertSame(1, $this->rowCount('invoices', $supplierId, "varsymbol LIKE 'FV23001%'"), $this->explain($protocol));
+        self::assertSame($manual, $this->map->all($supplierId, MoneyS3ImportRepository::KIND_INVOICE)['2023|FV23001'] ?? null);
+        self::assertContains('opening_documents_adopted', $this->codes($protocol, 'issued_invoices'));
+        self::assertSame(1210.0, $this->openingReceivables($supplierId), 'Saldokonto 311 k začátku roku nese pohledávku jednou.');
+        self::assertSame(1, $this->rowCount('invoice_payments', $supplierId, "invoice_id = {$manual} AND source = 'bank' AND amount = 1210.00"),
+            'Úhradu z převedené banky převod spáruje s převzatým ručním dokladem.');
+        self::assertNotNull($this->purchase($supplierId, 'FP23001'), 'Přijatá strana se převádí jako dřív.');
+    }
+
+    /** Ručně navázaný jiný doklad zmenší zbývající krytí počátečního stavu 311: FV23001 se už nevejde. */
+    public function testManuallyLinkedDocumentReducesRemainingOpeningBalance(): void
+    {
+        $supplierId = $this->convertWithoutOpeningDocuments();
+        $this->manualOpeningInvoice($supplierId, 'RUCNI-001', 500.0);
+
+        SyntheticAgenda::writeLzFiles($this->tmp . '/agenda.lz', SyntheticAgenda::filesWithDocumentsBeforeFirstYear());
+        $protocol = $this->convert($supplierId, closeHistory: false);
+
+        self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
+        self::assertSame(0, $this->rowCount('invoices', $supplierId, "varsymbol LIKE 'FV23001%'"), $this->explain($protocol));
+        self::assertContains('opening_documents_exceed_balance', $this->codes($protocol, 'issued_invoices'));
+        self::assertSame(500.0, $this->openingReceivables($supplierId));
+    }
+
+    /** Ručně navázaný doklad se stejným číslem, ale jinou částkou: kandidát se ohlásí a nezaloží. */
+    public function testConflictingManualOpeningDocumentIsReported(): void
+    {
+        $supplierId = $this->convertWithoutOpeningDocuments();
+        $manual = $this->manualOpeningInvoice($supplierId, 'FV23001', 1000.0);
+
+        SyntheticAgenda::writeLzFiles($this->tmp . '/agenda.lz', SyntheticAgenda::filesWithDocumentsBeforeFirstYear());
+        $protocol = $this->convert($supplierId, closeHistory: false);
+
+        self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
+        self::assertSame(1, $this->rowCount('invoices', $supplierId, "varsymbol LIKE 'FV23001%'"), $this->explain($protocol));
+        self::assertArrayNotHasKey('2023|FV23001', $this->map->all($supplierId, MoneyS3ImportRepository::KIND_INVOICE));
+        self::assertContains('opening_documents_ambiguous', $this->codes($protocol, 'issued_invoices'));
+        self::assertTrue(OpeningBalanceDocuments::isInOpening($this->db->pdo(), $supplierId, 'invoice', $manual));
+    }
+
     // ── pomocníci ─────────────────────────────────────────────────────────────
 
-    private function convert(int $supplierId): ImportProtocol
+    private function convert(int $supplierId, bool $closeHistory = true): ImportProtocol
     {
-        return $this->importer->run($supplierId, $this->userId, $this->backup(), new ImportOptions(ImportOptions::MODE_IMPORT, fromYear: 2024));
+        return $this->importer->run($supplierId, $this->userId, $this->backup(), new ImportOptions(ImportOptions::MODE_IMPORT, $closeHistory, fromYear: 2024));
+    }
+
+    /** Převod bez let před rokem 2024 (bez dokladů počátečního stavu), rok 2024 zůstane otevřený. */
+    private function convertWithoutOpeningDocuments(): int
+    {
+        $files = SyntheticAgenda::filesWithDocumentsBeforeFirstYear();
+        foreach (array_keys($files) as $path) {
+            if (str_starts_with($path, 'ROK.003/')) {
+                unset($files[$path]);
+            }
+        }
+        SyntheticAgenda::writeLzFiles($this->tmp . '/agenda.lz', $files);
+        $supplierId = $this->supplier();
+        $protocol = $this->convert($supplierId, closeHistory: false);
+        self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
+        self::assertNull($this->invoice($supplierId, 'FV23001'));
+        return $supplierId;
+    }
+
+    /** Ručně založená pohledávka odběratele z Money, označená jako doklad počátečního stavu. */
+    private function manualOpeningInvoice(int $supplierId, string $number, float $total): int
+    {
+        $pdo = $this->db->pdo();
+        $client = $pdo->prepare('SELECT id FROM clients WHERE supplier_id = ? AND ic = ?');
+        $client->execute([$supplierId, SyntheticAgenda::CUSTOMER_ICO]);
+        $currency = (int) $pdo->query("SELECT default_currency_id FROM supplier WHERE id = {$supplierId}")->fetchColumn();
+        $base = round($total / 1.21, 2);
+        $pdo->prepare(
+            "INSERT INTO invoices (supplier_id, invoice_type, status, client_id, varsymbol, issue_date, tax_date, due_date, currency_id, total_without_vat, total_vat, total_with_vat)
+             VALUES (?, 'invoice', 'sent', ?, ?, '2023-11-10', '2023-11-10', '2023-11-24', ?, ?, ?, ?)"
+        )->execute([$supplierId, (int) $client->fetchColumn(), $number, $currency, $base, round($total - $base, 2), $total]);
+        $id = (int) $pdo->lastInsertId();
+        self::assertTrue($this->container(OpeningBalanceDocumentMarker::class)->mark($supplierId, 'invoice', $id, $this->userId)['in_opening']);
+        return $id;
+    }
+
+    /** Neuhrazené pohledávky saldokonta 311 k 1. 1. 2024. */
+    private function openingReceivables(int $supplierId): float
+    {
+        $saldo = $this->container(SaldoRepository::class);
+        $account = $saldo->resolveAccount($supplierId, '311', '2024-01-01');
+        self::assertNotNull($account);
+        $sum = 0.0;
+        foreach ($saldo->openItems($supplierId, (int) $account['id'], '2024-01-01', '311') as $item) {
+            $sum += $item['booked_signed'] * (1 - $item['paid_ratio']);
+        }
+        return round($sum, 2);
     }
 
     /** @return list<string> */
