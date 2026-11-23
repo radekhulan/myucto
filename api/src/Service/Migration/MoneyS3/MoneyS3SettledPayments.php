@@ -81,14 +81,14 @@ final class MoneyS3SettledPayments
      * V běhu převodu je to poslední období rozvrhu deníku (`ImportContext::$periods`), v opravě
      * dříve převedené firmy poslední období z mapy převodu (druh `period`).
      *
-     * Dočasná náhrada `ImportContext::lastPeriodEnd()` (výběr převáděných let „Převést do roku"),
-     * po jeho zavedení volat jen to; pravidlo je stejné.
+     * V běhu převodu se ptá {@see ImportContext::lastPeriodEnd()} (stejné pravidlo jako
+     * {@see ImportContext::paidWithin()} u data úhrady dokladu).
      */
     public function lastTransferredPeriodEnd(int $supplierId, ?ImportContext $ctx = null): ?string
     {
         if ($ctx !== null) {
-            $ends = array_map(static fn (array $p): string => substr((string) $p['ends_on'], 0, 10), $ctx->periods);
-            return $ends === [] ? null : max($ends);
+            $end = $ctx->lastPeriodEnd();
+            return $end === null ? null : substr($end, 0, 10);
         }
         $stmt = $this->db->pdo()->prepare(
             "SELECT MAX(ap.ends_on) FROM money_s3_import_map m
