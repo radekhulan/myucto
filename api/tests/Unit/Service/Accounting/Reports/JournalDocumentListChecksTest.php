@@ -20,6 +20,12 @@ final class JournalDocumentListChecksTest extends TestCase
     {
         self::assertSame(['K doložení převyšuje celkovou částku dokladu'],
             JournalDocumentListService::checks(self::row(['amount' => 1000.01])));
+        self::assertSame(['Reverse charge: k doložení zahrnuje DPH přiznanou odběratelem, která na faktuře není; doložte ji výpočtem k faktuře a rekapitulací přiznání a úhrady za období'],
+            JournalDocumentListService::checks(self::row(['amount' => 1210.00, 'self_assessed_vat' => 210.00])),
+            'Přenesená daňová povinnost: náklad nad celkem dokladu vysvětluje přiznaná DPH.');
+        self::assertSame(['Reverse charge: k doložení zahrnuje DPH přiznanou odběratelem, která na faktuře není; doložte ji výpočtem k faktuře a rekapitulací přiznání a úhrady za období', 'K doložení převyšuje celkovou částku dokladu'],
+            JournalDocumentListService::checks(self::row(['amount' => 1300.00, 'self_assessed_vat' => 210.00])),
+            'Rozdíl nad přiznanou DPH se dál označí.');
         self::assertSame([], JournalDocumentListService::checks(self::row(['amount' => 300.00, 'document_total' => -1000.00])),
             'Dobropis se záporným celkem porovná absolutní hodnoty.');
     }

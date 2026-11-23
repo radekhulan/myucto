@@ -1348,7 +1348,7 @@ final class ReportXlsxExporter
         $sheet = $ss->getActiveSheet();
         $sheet->setTitle('Soupiska dokladů');
         $headers = ['Pořadí', 'Druh dokladu', 'Naše číslo', 'Číslo protistrany', 'Datum', 'Protistrana', 'IČO', 'Popis',
-            'Účty', 'Zápisy deníku', 'K ověření', 'Měna', 'Celkem dokladu', 'K doložení (Kč)'];
+            'Účty', 'Zápisy deníku', 'K ověření', 'Měna', 'Celkem dokladu', 'DPH reverse charge (Kč)', 'K doložení (Kč)'];
         $cols = count($headers);
         $lastCol = Coordinate::stringFromColumnIndex($cols);
 
@@ -1357,8 +1357,9 @@ final class ReportXlsxExporter
         $sub = 'Období: ' . JournalSourceLabel::period($this->czDate((string) ($filters['date_from'] ?? '')), $this->czDate((string) ($filters['date_to'] ?? '')))
             . ' · Účty soupisky: ' . (string) ($filters['line_account_from'] ?? '') . ' až ' . (string) ($filters['line_account_to'] ?? '');
         if (!empty($filters['dimension'])) {
+            // Popisek filtru už nese „(vč. podřízených)“, má-li hodnota podřízené (DimensionService::filter).
             $sub .= ' · Dimenze: ' . (string) $filters['dimension']
-                . (($filters['dimension_descendants'] ?? true) ? ' (včetně podřízených)' : ' (bez podřízených)');
+                . (($filters['dimension_descendants'] ?? true) ? '' : ' (bez podřízených)');
         }
         $journal = (array) ($filters['journal'] ?? []);
         $intro = [
@@ -1411,7 +1412,10 @@ final class ReportXlsxExporter
             if (($doc['document_total'] ?? null) !== null) {
                 $sheet->setCellValue([13, $r], (float) $doc['document_total']);
             }
-            $sheet->setCellValue([14, $r], (float) $doc['amount']);
+            if (($doc['self_assessed_vat'] ?? null) !== null) {
+                $sheet->setCellValue([14, $r], (float) $doc['self_assessed_vat']);
+            }
+            $sheet->setCellValue([15, $r], (float) $doc['amount']);
             $r++;
         }
         if (($data['documents'] ?? []) === []) {
@@ -1426,8 +1430,8 @@ final class ReportXlsxExporter
         $sheet->setCellValue("A{$tr}", 'Počet dokladů: ' . (int) ($t['count'] ?? 0) . ' · k ověření: ' . (int) ($t['to_check'] ?? 0));
         $sheet->mergeCells("A{$tr}:L{$tr}");
         $sheet->getStyle("A{$tr}")->getFont()->setBold(true);
-        $sheet->setCellValue("N{$tr}", (float) ($t['amount'] ?? 0));
-        $sheet->getStyle("N{$tr}")->getFont()->setBold(true);
+        $sheet->setCellValue("O{$tr}", (float) ($t['amount'] ?? 0));
+        $sheet->getStyle("O{$tr}")->getFont()->setBold(true);
 
         // Data filtru ověřila akce (IsoDate), meze období jdou z databáze.
         return $this->out($ss, 'soupiska-dokladu-' . ((string) ($filters['date_from'] ?? '') ?: 'vse') . '_' . ((string) ($filters['date_to'] ?? '') ?: 'vse') . '.xlsx');

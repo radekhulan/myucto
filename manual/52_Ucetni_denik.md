@@ -705,7 +705,15 @@ u zápisu bez dokladu datum zápisu), protistranu a IČO, popis, účty, čísla
 **celkovou částku dokladu** a **částku k doložení**. U bankovního pohybu je datem datum zápisu,
 celková částka pokladního dokladu je v Kč. Sloupec **K ověření** upozorní na zápis bez dokladu,
 chybějící celkovou částku, storno nebo opravu mimo filtr, doklad v cizí měně,
-zápornou částku a částku k doložení vyšší než celý doklad. Hlavička uvádí firmu, období, rozsah účtů soupisky,
+zápornou částku a částku k doložení vyšší než celý doklad. U přijaté faktury v režimu přenesené
+daňové povinnosti (reverse charge), kde náklad obsahuje DPH přiznanou odběratelem (neplátce,
+identifikovaná osoba nebo neodpočtená část), uvádí sloupec **DPH reverse charge** díl částky
+k doložení připadající na tuto DPH (v poměru základu a daně, i u faktury jen dílem v dimenzi). Tato DPH na faktuře
+není, celková částka dokladu ji neobsahuje; částka k doložení je součet obou. Faktura ji proto
+nedokládá a sloupec **K ověření** připomene: doložte ji výpočtem DPH k faktuře
+(například interním dokladem) a rekapitulací přiznání a úhrady daně za období, protože přiznání
+i platba finančnímu úřadu jsou součtem více položek. Vyšší částka k doložení o přiznanou DPH se
+jako převýšení dokladu neoznačuje. Hlavička uvádí firmu, období, rozsah účtů soupisky,
 dimenzi, všechny další použité filtry Deníku, datum a čas vytvoření a autora. Soupiska je pracovní
 podklad ke dni vytvoření: pozdější přeúčtování nebo změna dimenzí ji změní. Když filtru nic
 neodpovídá, soubor to uvede. Soupiska je omezená na **5 000 dokladů** a stáhne ji každý, kdo

@@ -74,6 +74,7 @@ final class JournalDocumentListService
             );
         }
 
+        $rows = $this->withSelfAssessedVat($supplierId, $rows);
         $documents = [];
         $amount = 0.0;
         $toCheck = 0;
@@ -103,8 +104,44 @@ final class JournalDocumentListService
                 'drafts_excluded'       => $this->journal->documentSelectionDraftCount($supplierId, $filters, $lineAccountFrom, $lineAccountTo),
             ],
             'documents' => $documents,
-            'totals'    => ['amount' => round($amount, 2), 'count' => count($documents), 'to_check' => $toCheck],
+            'totals'    => [
+                'amount'   => round($amount, 2),
+                'count'    => count($documents),
+                'to_check' => $toCheck,
+            ],
         ];
+    }
+
+    /**
+     * Přijatá faktura v režimu přenesené daňové povinnosti: celkem dokladu je bez DPH, kterou si
+     * odběratel přiznal sám. Pokud ji zápisy nesou v nákladu (neplátce, identifikovaná osoba,
+     * neodpočtená část), řádek dostane `self_assessed_vat` = díl částky k doložení připadající
+     * na přiznanou DPH (poměr základu a daně, platí i pro fakturu jen dílem v dimenzi). Faktura
+     * tu DPH nedokládá, proto ji soupiska uvádí zvlášť a vyzve k jejímu doložení.
+     *
+     * @param list<array<string,mixed>> $rows
+     * @return list<array<string,mixed>>
+     */
+    private function withSelfAssessedVat(int $supplierId, array $rows): array
+    {
+        $entryIds = [];
+        foreach ($rows as $row) {
+            if ($row['reverse_charge'] ?? false) {
+                array_push($entryIds, ...$row['entry_ids']);
+            }
+        }
+        $vatByEntry = $this->journal->selfAssessedVatByEntry($supplierId, array_values(array_unique($entryIds)));
+        $out = [];
+        foreach ($rows as $row) {
+            // DPH je načtená jen pro zápisy faktur v režimu přenesené daňové povinnosti.
+            $vat = round(array_sum(array_map(static fn (int $id): float => $vatByEntry[$id] ?? 0.0, $row['entry_ids'])), 2);
+            $base = (float) ($row['document_total'] ?? 0);
+            $row['self_assessed_vat'] = $vat > 0 && $base + $vat > 0
+                ? round((float) $row['amount'] * $vat / ($base + $vat), 2)
+                : null;
+            $out[] = $row;
+        }
+        return $out;
     }
 
     /**
@@ -167,6 +204,10 @@ final class JournalDocumentListService
     public static function checks(array $row): array
     {
         $checks = [];
+        $selfAssessedVat = (float) ($row['self_assessed_vat'] ?? 0);
+        if ($selfAssessedVat > 0) {
+            $checks[] = 'Reverse charge: k doložení zahrnuje DPH přiznanou odběratelem, která na faktuře není; doložte ji výpočtem k faktuře a rekapitulací přiznání a úhrady za období';
+        }
         if ($row['doc_kind'] === 'entry') {
             $checks[] = 'Zápis bez dokladu v evidenci';
         } elseif ($row['document_total'] === null) {
@@ -185,7 +226,7 @@ final class JournalDocumentListService
         if ((float) $row['amount'] < 0) {
             $checks[] = 'Záporná částka (vratka nebo storno)';
         } elseif ($row['document_total'] !== null && $currency === 'CZK'
-            && round(abs((float) $row['amount']) - abs((float) $row['document_total']), 2) > 0) {
+            && round(abs((float) $row['amount'] - $selfAssessedVat) - abs((float) $row['document_total']), 2) > 0) {
             $checks[] = 'K doložení převyšuje celkovou částku dokladu';
         }
         return $checks;

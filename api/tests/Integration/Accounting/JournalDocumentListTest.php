@@ -386,7 +386,9 @@ final class JournalDocumentListTest extends TestCase
         self::assertSame('Soupiska dokladů', $sheet->getCell('A1')->getValue());
         self::assertStringContainsString('Účty soupisky: 5 až 5', (string) $sheet->getCell('A3')->getValue());
         self::assertStringContainsString('Hodnota DOT-A', (string) $sheet->getCell('A3')->getValue());
-        self::assertStringContainsString('(včetně podřízených)', (string) $sheet->getCell('A3')->getValue());
+        self::assertSame(1, substr_count((string) $sheet->getCell('A3')->getValue(), 'podřízených'), 'Údaj o podřízených hodnotách jen jednou.');
+        self::assertStringContainsString('Hodnota DOT-A (vč. podřízených)', (string) $sheet->getCell('A3')->getValue());
+        self::assertStringContainsString('(bez podřízených)', (string) $this->sheet($this->call($query + self::LINES + ['dimension_descendants' => '0'])['raw'])->getCell('A3')->getValue());
         self::assertSame('Další filtr Deníku: jen zaúčtované · bez storen · částka zápisu od 100,00', $sheet->getCell('A4')->getValue());
         self::assertStringContainsString('Pracovní podklad, stav k ', (string) $sheet->getCell('A5')->getValue());
         self::assertStringContainsString('Vytvořil: Syntetická účetní', (string) $sheet->getCell('A5')->getValue());
@@ -397,9 +399,10 @@ final class JournalDocumentListTest extends TestCase
         self::assertIsNumeric($sheet->getCell('E9')->getValue(), 'Datum je skutečné datum, ne text.');
         self::assertSame('', (string) $sheet->getCell('K9')->getValue());
         self::assertEqualsWithDelta(1210.00, (float) $sheet->getCell('M9')->getValue(), 0.001);
-        self::assertEqualsWithDelta(1210.00, (float) $sheet->getCell('N9')->getValue(), 0.001);
+        self::assertNull($sheet->getCell('N9')->getValue());
+        self::assertEqualsWithDelta(1210.00, (float) $sheet->getCell('O9')->getValue(), 0.001);
         self::assertSame('Počet dokladů: 1 · k ověření: 0', $sheet->getCell('A11')->getValue());
-        self::assertEqualsWithDelta(1210.00, (float) $sheet->getCell('N11')->getValue(), 0.001);
+        self::assertEqualsWithDelta(1210.00, (float) $sheet->getCell('O11')->getValue(), 0.001);
 
         $audit = $this->db->pdo()->prepare("SELECT payload FROM activity_log WHERE supplier_id = ? AND action = 'report.accounting_export' ORDER BY id DESC LIMIT 1");
         $audit->execute([$this->supplierId]);
@@ -590,6 +593,40 @@ final class JournalDocumentListTest extends TestCase
         $balanceAndCost = $this->byDoc($this->service->build($this->supplierId, [], '3', '5')['documents']);
         self::assertSame([$mixed], $balanceAndCost['purchase_invoice:' . $doc]['checks']);
         self::assertFalse($vat[0]['mixed_sides'], 'Doklad s jedním druhem účtů v rozsahu se neoznačí.');
+    }
+
+    public function testReverseChargeVatIsShownWithinTheInvoiceRow(): void
+    {
+        $rc = $this->purchase('PF-RC', 'DOD-RC', 1000.00);
+        $this->db->pdo()->prepare('UPDATE purchase_invoices SET reverse_charge = 1 WHERE id = ?')->execute([$rc]);
+        $this->postPurchase($rc, [
+            ['518', 'debit', 726.00, ['dimensions' => [$this->type => $this->valueA]]],
+            ['518', 'debit', 484.00, ['dimensions' => [$this->type => $this->valueB]]],
+            ['343', 'credit', 210.00], ['321', 'credit', 1000.00],
+        ]);
+        $payer = $this->purchase('PF-RCP', 'DOD-RCP', 500.00);
+        $this->db->pdo()->prepare('UPDATE purchase_invoices SET reverse_charge = 1 WHERE id = ?')->execute([$payer]);
+        $this->postPurchase($payer, [['518', 'debit', 500.00], ['343', 'debit', 105.00], ['343', 'credit', 105.00], ['321', 'credit', 500.00]]);
+        $plain = $this->purchase('PF-NRC', 'DOD-NRC', 1000.00);
+        $this->postPurchase($plain, [['518', 'debit', 1210.00], ['343', 'credit', 210.00], ['321', 'credit', 1000.00]]);
+        $rcText = 'Reverse charge: k doložení zahrnuje DPH přiznanou odběratelem, která na faktuře není; doložte ji výpočtem k faktuře a rekapitulací přiznání a úhrady za období';
+
+        $all = $this->service->build($this->supplierId, [], '5', '5');
+        $rows = array_map(static fn (array $r): array => [$r['our_no'], $r['amount'], $r['document_total'], $r['self_assessed_vat'], $r['checks']], $all['documents']);
+
+        self::assertContains(['PF-RC', 1210.00, 1000.00, 210.00, [$rcText]], $rows);
+        self::assertContains(['PF-RCP', 500.00, 500.00, null, []], $rows, 'Plátce s odpočtem nemá DPH v nákladu.');
+        self::assertContains(['PF-NRC', 1210.00, 1000.00, null, ['K doložení převyšuje celkovou částku dokladu']], $rows);
+        self::assertSame([3, 2920.00], [$all['totals']['count'], $all['totals']['amount']]);
+
+        $dim = $this->service->build($this->supplierId, ['dimension' => $this->dimensions->filters($this->supplierId, [$this->valueA])], '5', '5')['documents'];
+        self::assertSame([[726.00, 126.00]], array_map(static fn (array $r): array => [$r['amount'], $r['self_assessed_vat']], $dim),
+            'Díl v dimenzi nese přiznanou DPH stejným poměrem.');
+
+        $sheet = $this->sheet($this->call(self::LINES + ['source_type' => 'purchase_invoice', 'source_id' => (string) $rc])['raw']);
+        self::assertSame('DPH reverse charge (Kč)', $sheet->getCell('N8')->getValue());
+        self::assertSame([1000.0, 210.0, 1210.0], [(float) $sheet->getCell('M9')->getValue(), (float) $sheet->getCell('N9')->getValue(), (float) $sheet->getCell('O9')->getValue()]);
+        self::assertEqualsWithDelta(1210.00, (float) $sheet->getCell('O11')->getValue(), 0.001);
     }
 
     public function testExcludedDraftsAreCountedInTheHeader(): void

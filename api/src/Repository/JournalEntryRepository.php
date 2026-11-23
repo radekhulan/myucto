@@ -2421,6 +2421,9 @@ final class JournalEntryRepository
                            WHEN 'internal_document' THEN did.document_no
                        END, je.document_no) AS our_no,
                        IF(g.doc_kind = 'purchase_invoice', dpi.vendor_invoice_number, NULL) AS counterparty_no,
+                       -- Přenesená daňová povinnost: celkem dokladu je bez DPH, kterou si odběratel
+                       -- přiznává sám (u neplátce či identifikované osoby jde do nákladu).
+                       COALESCE(g.doc_kind = 'purchase_invoice' AND dpi.reverse_charge = 1, 0) AS reverse_charge,
                        CASE g.doc_kind
                            WHEN 'invoice' THEN di.total_with_vat
                            WHEN 'purchase_invoice' THEN dpi.total_with_vat
@@ -2493,8 +2496,37 @@ final class JournalEntryRepository
             $r['document_total'] = $r['document_total'] === null ? null : round((float) $r['document_total'], 2);
             $r['corrected_outside'] = (bool) $r['corrected_outside'];
             $r['mixed_sides'] = (bool) $r['mixed_sides'];
+            $r['reverse_charge'] = (bool) $r['reverse_charge'];
             return $r;
         }, $stmt->fetchAll(PDO::FETCH_ASSOC));
+    }
+
+    /**
+     * Čistá částka na účtech DPH (343, Dal − MD) po zápisech: u přijaté faktury v režimu přenesené
+     * daňové povinnosti je to přiznaná DPH, kterou zápis nese v nákladu (neplátce, identifikovaná
+     * osoba, nebo neodpočtená část); u plátce s plným odpočtem se výstup a vstup vyruší na nulu.
+     *
+     * @param list<int> $entryIds
+     * @return array<int, float> entry_id => částka
+     */
+    public function selfAssessedVatByEntry(int $supplierId, array $entryIds): array
+    {
+        if ($entryIds === []) {
+            return [];
+        }
+        [$from, $to] = AccountCodeRange::sqlBoundsFor('343', '343');
+        $marks = implode(',', array_fill(0, count($entryIds), '?'));
+        $stmt = $this->db->pdo()->prepare("SELECT l.entry_id, SUM(CASE WHEN l.side = 'credit' THEN l.signed_amount ELSE -l.signed_amount END) AS vat
+              FROM journal_entry_lines l
+              JOIN chart_of_accounts a ON a.supplier_id = l.supplier_id AND a.id = l.account_id
+             WHERE l.supplier_id = ? AND l.entry_id IN ({$marks}) AND a.account_code BETWEEN ? AND ?
+             GROUP BY l.entry_id");
+        $stmt->execute([$supplierId, ...array_values($entryIds), $from, $to]);
+        $out = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $r) {
+            $out[(int) $r['entry_id']] = (float) $r['vat'];
+        }
+        return $out;
     }
 
     /**
