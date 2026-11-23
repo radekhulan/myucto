@@ -74,6 +74,14 @@ export interface J6SourceFindingLine {
   codes: J6FindingCode[]
   source_type: string
   source_id: number | null
+  /** Obohacení zdroje jako v deníku (journalSourceLink): výpis banky, pokladní doklad, majetek, zápočet, storno. */
+  source_link_id: number | null
+  source_statement_id: number | null
+  source_doc_number: string | null
+  source_register_id: number | null
+  source_asset_id: number | null
+  source_settlement_doc_type: string | null
+  source_settlement_doc_id: number | null
   document_no: string | null
   description: string | null
 }

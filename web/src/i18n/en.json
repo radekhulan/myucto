@@ -41630,7 +41630,7 @@
     },
     "sourceFindings": {
       "title": "Source findings",
-      "help": "Revenue and expense lines missing the activity, activity type or preliminary tax classification with a documented origin. The summary is computed on request in one pass over the period sources. Fix the classification in the document or entry and compute the summary again.",
+      "help": "Revenue and expense lines missing the activity, activity type or preliminary tax classification with a documented origin, or whose classification does not match the joint allocation. The summary is computed on request in one pass over the period sources. Fix the classification in the document or entry, split lines in the joint allocation, and compute the summary again.",
       "show": "Show findings",
       "refresh": "Compute again",
       "total": "{lines} of {rows} accounting lines have findings.",
@@ -44111,8 +44111,7 @@
       },
       "links": {
         "sources": "Open the tax assessment",
-        "profile_match": "Open the tax assessment",
-        "return_data": "Open the income statement"
+        "profile_match": "Open the tax assessment"
       }
     }
   },

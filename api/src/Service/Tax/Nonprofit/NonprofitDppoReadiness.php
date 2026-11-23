@@ -23,10 +23,16 @@ final readonly class NonprofitDppoReadiness
     public const STEPS = ['sources', 'legal_profile', 'profile_match', 'return_data'];
 
     /** Chyby, které nepatří žádnému kroku: období nebo rámec, nad kterými se DPPO 504 nepočítá vůbec. */
-    private const GENERAL = ['nonprofit_dppo_period_required', 'nonprofit_legal_profile_framework_required'];
+    private const GENERAL = ['nonprofit_dppo_period_required', 'nonprofit_legal_profile_framework_required', 'nonprofit_legal_profile_period_not_found'];
 
-    /** Chyby, jejichž krok nejde odvodit z pořadí (legacy cesta ověřuje profil před posouzením). */
-    private const CODE_STEPS = ['nonprofit_dppo_legal_profile_required' => 'legal_profile', 'nonprofit_dppo_profile_conflict' => 'profile_match'];
+    /**
+     * Chyby, jejichž krok nejde odvodit z pořadí: legacy cesta ověřuje profil před posouzením
+     * a neplatný uložený profil (NonprofitDppoLegalRules, důkaz profilu) se ozve už při
+     * sestavení podkladů, protože ho čte i otisk a legacy snímek.
+     */
+    private const CODE_STEPS = ['nonprofit_dppo_legal_profile_required' => 'legal_profile', 'nonprofit_dppo_legal_profile_invalid' => 'legal_profile',
+        'nonprofit_legal_profile_invalid' => 'legal_profile', 'nonprofit_legal_profile_proof_invalid' => 'legal_profile',
+        'nonprofit_dppo_profile_conflict' => 'profile_match'];
 
     public function __construct(private Connection $db, private NonprofitDppoDataProvider $provider) {}
 
@@ -86,7 +92,7 @@ final readonly class NonprofitDppoReadiness
             if ($finding === false) continue;
             $step = ['step' => $step['step'], 'status' => $finding === null ? ($step['step'] === 'sources' ? 'not_evaluated' : 'ok') : 'failed',
                 'code' => $finding['code'] ?? null, 'message' => $finding['message'] ?? null];
-            if ($finding !== null) $findings[] = $finding;
+            if ($finding !== null && !in_array($finding['code'], array_column($findings, 'code'), true)) $findings[] = $finding;
         }
         unset($step);
         return ['ready' => false, 'steps' => $steps, 'findings' => $findings];

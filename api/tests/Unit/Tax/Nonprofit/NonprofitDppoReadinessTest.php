@@ -36,6 +36,26 @@ final class NonprofitDppoReadinessTest extends TestCase
         self::assertSame(['nonprofit_dppo_legal_profile_required'], array_column($result['findings'], 'code'));
     }
 
+    public function testInvalidStoredLegalProfileRaisedWhileReadingSourcesBelongsToLegalProfile(): void
+    {
+        // Neplatný uložený profil (např. zapnutý modul SVJ k jinému postavení) vyhodí už otisk podkladů.
+        $failure = ['code' => 'nonprofit_dppo_legal_profile_invalid', 'message' => 'Synthetic invalid profile.'];
+        $result = NonprofitDppoReadiness::afterFailure([], $failure,
+            static fn (string $step): array|false|null => match ($step) { 'sources' => null, 'legal_profile' => $failure, default => false });
+        self::assertSame(['sources' => 'not_evaluated', 'legal_profile' => 'failed', 'profile_match' => 'not_evaluated', 'return_data' => 'not_evaluated'], self::statuses($result));
+        self::assertSame(['nonprofit_dppo_legal_profile_invalid'], array_column($result['findings'], 'code'));
+    }
+
+    public function testIndependentFindingWithTheSameCodeIsReportedOnce(): void
+    {
+        $failure = ['code' => 'nonprofit_dppo_assessment_required', 'message' => 'Synthetic missing assessment.'];
+        $result = NonprofitDppoReadiness::afterFailure([], ['code' => 'nonprofit_dppo_legal_profile_required', 'message' => 'Synthetic missing profile.'],
+            static fn (string $step): array|false|null => $step === 'sources' ? $failure : false);
+        self::assertSame(['nonprofit_dppo_legal_profile_required', 'nonprofit_dppo_assessment_required'], array_column($result['findings'], 'code'));
+        $again = NonprofitDppoReadiness::afterFailure([], $failure, static fn (string $step): array|false|null => $step === 'legal_profile' ? $failure : false);
+        self::assertSame(['nonprofit_dppo_assessment_required'], array_column($again['findings'], 'code'));
+    }
+
     public function testGeneralFailureLeavesAllStepsUnevaluated(): void
     {
         $result = NonprofitDppoReadiness::afterFailure([], ['code' => 'nonprofit_dppo_period_required', 'message' => 'Chybí období.'], self::unexpected(...));

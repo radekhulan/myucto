@@ -118,7 +118,12 @@ const operations = computed(() => operationKeys.flatMap(key => { const op = lega
 const formManifest = computed(() => legal.value?.capabilities.form_manifest || null)
 const readinessPending = computed(() => legal.value?.capabilities.readiness_checked === false && legal.value.capabilities.native_dppo === true)
 // Kroky ukazujeme jen po kontrole připravenosti; zjištění bez vlastního kroku (akceptace, rámec) zůstávají v seznamu pod nimi.
-const readinessSteps = computed(() => legal.value?.capabilities.readiness_checked ? legal.value.capabilities.readiness_steps ?? [] : [])
+// Údaje pro přiznání nemají odkaz: výsledovka nebere období z adresy a úpravy se opravují na této stránce.
+const readinessSteps = computed(() => {
+ const steps = legal.value?.capabilities.readiness_checked ? legal.value.capabilities.readiness_steps ?? [] : []
+ // Obecná chyba (období, rámec) nevyhodnotí žádný krok; důvod pak stojí sám v seznamu pod nimi.
+ return steps.some(step => step.status !== 'not_evaluated') ? steps : []
+})
 const otherFindings = computed(() => {
  const shown = new Set(readinessSteps.value.filter(step => step.status === 'failed').map(step => step.code))
  return (legal.value?.capabilities.preparation_findings ?? []).filter(finding => !shown.has(finding.code))
@@ -126,7 +131,6 @@ const otherFindings = computed(() => {
 function stepLink(step: ReadinessStepKey): RouteLocationRaw | null {
  if (!legal.value) return null
  if (step === 'sources' || step === 'profile_match') return { name: 'accounting-nonprofit-tax', params: { id: String(legal.value.period.id) } }
- if (step === 'return_data') return { name: 'accounting-income-statement' }
  return null
 }
 const filingActions = computed<ActionItem[]>(() => [{ key: 'open-filing', label: t('nonprofitDppo.openFiling'), icon: 'doc', variant: 'primary', tier: 'primary', show: filingReady.value, to: { name: 'reports-income-tax', query: { type: 'po', year: String(legal.value?.period.fiscal_year), tab: 'nahled' } } }])

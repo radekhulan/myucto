@@ -861,9 +861,11 @@ výpočtu** ukáže samostatně čtyři kroky se stavem a důvodem:
 - **Shoda profilu s posouzením:** postavení v posouzení odpovídá právnímu profilu.
   Odkaz vede do daňového posouzení.
 - **Údaje pro přiznání:** výsledek posouzení navazuje na řádek 62 výsledovky
-  a doložené úpravy jsou platné. Odkaz vede na výsledovku.
+  a doložené úpravy jsou platné.
 
-Výpočet se zastaví na první chybě, krok za ní proto zůstane neověřený. Chybějící
+Výpočet se zastaví na první chybě, krok za ní proto zůstane neověřený. Chyba,
+která nepatří žádnému kroku (například jiný účetní rámec v části období), se
+ukáže samostatně pod tlačítkem. Chybějící
 právní profil a chybějící potvrzené posouzení se ale ukážou současně. Teprve po
 úspěšné kontrole obrazovka nabídne převzetí do přiznání.
 

@@ -51,7 +51,7 @@ final class J6SourceFindingsHttpTest extends TestCase
         $this->pdo->prepare('INSERT INTO dimension_values(type_id,supplier_id,code,name) VALUES(?,?,?,?)')
             ->execute([$this->catalog['activity_kind']['id'], $this->supplier, 'SPORT', 'Syntetický druh sport']);
         $this->kind = (int) $this->pdo->lastInsertId();
-        foreach (['221' => 'asset', '518' => 'expense', '602' => 'revenue'] as $code => $type) {
+        foreach (['221' => 'asset', '518' => 'expense', '602' => 'revenue', '518.100' => 'expense', '518.200' => 'expense'] as $code => $type) {
             $this->pdo->prepare('INSERT INTO chart_of_accounts(supplier_id,account_code,name,account_type) VALUES(?,?,?,?)')
                 ->execute([$this->supplier, (string) $code, 'Syntetický účet ' . $code, $type]);
             $this->accounts[(string) $code] = (int) $this->pdo->lastInsertId();
@@ -83,7 +83,7 @@ final class J6SourceFindingsHttpTest extends TestCase
         self::assertSame(3, $groups['602:missing_tax_regime']);
         self::assertSame(2, $groups['518:missing_activity_kind']);
         self::assertArrayNotHasKey('518:missing_activity', $groups);
-        self::assertSame(array_keys($groups), array_values(array_unique(array_keys($groups))));
+        self::assertCount(count($groups), $summary['groups'], 'Každá dvojice účet × kód je ve výsledku jen jednou.');
         self::assertSame('Syntetický účet 518', $summary['groups'][0]['account_name']);
         self::assertSame('518', $summary['groups'][0]['account_code'], 'Skupiny jsou seřazené podle účtu.');
     }
@@ -123,6 +123,76 @@ final class J6SourceFindingsHttpTest extends TestCase
         self::assertSame([$first[0], $last[0]], array_column($page['rows'], 'entry_id'));
     }
 
+    public function testAnalyticAccountsFormSeparateGroups(): void
+    {
+        $this->entries('2025-02-01', '518.100', 'debit', 2, ['activity']);
+        $this->entries('2025-02-01', '518.200', 'debit', 1, ['activity']);
+        [, $summary] = $this->http('GET', '/source-findings');
+        $kind = array_values(array_filter($summary['groups'], static fn (array $g): bool => $g['code'] === 'missing_activity_kind'));
+        self::assertSame([['518.100', 2], ['518.200', 1]], array_map(static fn (array $g): array => [$g['account_code'], $g['line_count']], $kind));
+    }
+
+    public function testLinesResumeInsideOneEntryAndSkipClosingEntries(): void
+    {
+        // Dva výsledkové řádky téhož zápisu a mezi zápisy uzávěrkový zápis, který do podkladů nevstupuje.
+        $first = $this->entry('2025-03-01', [['518', 'debit'], ['518', 'debit'], ['221', 'credit', '200.00']]);
+        $closing = $this->entry('2025-03-01', [['518', 'debit'], ['221', 'credit']], 'closing');
+        $second = $this->entry('2025-03-02', [['602', 'credit'], ['221', 'debit']]);
+        $lines = [];
+        $after = null;
+        $calls = 0;
+        do {
+            [$status, $page] = $this->http('GET', '/source-findings/lines', ['limit' => '1', 'code' => 'missing_activity'] + ($after === null ? [] : ['after' => $after]));
+            self::assertSame(200, $status, json_encode($page));
+            foreach ($page['rows'] as $row) $lines[] = $row['line_id'];
+            $after = $page['after'];
+        } while ($after !== null && ++$calls < 10);
+        self::assertSame([...$this->resultLines($first), ...$this->resultLines($second)], $lines);
+        self::assertSame([], array_intersect($lines, $this->resultLines($closing)));
+    }
+
+    public function testFullPageEndingAtTheLastFindingHasNoNextCursor(): void
+    {
+        $this->entries('2025-02-01', '602', 'credit', 3, null);
+        [, $page] = $this->http('GET', '/source-findings/lines', ['limit' => '3', 'code' => 'missing_activity']);
+        self::assertCount(3, $page['rows']);
+        self::assertNull($page['after'], 'Po posledním zjištění se nenabízí prázdná další stránka.');
+        [, $page] = $this->http('GET', '/source-findings/lines', ['limit' => '2', 'code' => 'missing_activity']);
+        self::assertNotNull($page['after']);
+    }
+
+    public function testLineCarriesTheSameSourceEnrichmentAsTheJournal(): void
+    {
+        $this->pdo->prepare("INSERT INTO bank_statements(supplier_id,file_name,file_hash,account_number,statement_date) VALUES(?,'syn.gpc',?,'1000000005/0100','2025-04-30')")
+            ->execute([$this->supplier, str_repeat('a', 64)]);
+        $statement = (int) $this->pdo->lastInsertId();
+        $this->pdo->prepare("INSERT INTO bank_transactions(statement_id,posted_at,amount) VALUES(?,'2025-04-10',100)")->execute([$statement]);
+        $transaction = (int) $this->pdo->lastInsertId();
+        $bank = $this->entry('2025-04-10', [['602', 'credit'], ['221', 'debit']], 'bank', $transaction);
+        $reversal = $this->entry('2025-04-11', [['602', 'debit'], ['221', 'credit']], 'bank', null);
+        $this->pdo->prepare('UPDATE journal_entries SET reversed_by=? WHERE id=?')->execute([$reversal, $bank]);
+
+        [, $page] = $this->http('GET', '/source-findings/lines', ['code' => 'missing_activity']);
+        $rows = array_column($page['rows'], null, 'entry_id');
+        self::assertSame(['bank', $transaction, $transaction, $statement], [$rows[$bank]['source_type'], $rows[$bank]['source_id'], $rows[$bank]['source_link_id'], $rows[$bank]['source_statement_id']]);
+        self::assertSame([null, $transaction, $statement], [$rows[$reversal]['source_id'], $rows[$reversal]['source_link_id'], $rows[$reversal]['source_statement_id']],
+            'Protizápis vede na doklad stornovaného zápisu.');
+    }
+
+    public function testSummaryReadsTheSourcesOnlyOnce(): void
+    {
+        $this->entries('2025-02-01', '602', 'credit', 600, null);
+        $questions = fn (): int => (int) $this->pdo->query("SHOW SESSION STATUS LIKE 'Questions'")->fetch(PDO::FETCH_NUM)[1];
+        $start = $questions();
+        $this->container->get(J6CurrentProviderFactory::class)->fingerprint($this->supplier, $this->period);
+        $fingerprint = $questions() - $start - 1;
+        $start = $questions();
+        $this->container->get(J6SourceFindingService::class)->summary($this->supplier, $this->period);
+        $summary = $questions() - $start - 1;
+        self::assertGreaterThan(5, $fingerprint);
+        self::assertLessThanOrEqual($fingerprint + 1, $summary, 'Souhrn nečte podklady podruhé.');
+    }
+
     public function testLinesStopAtScanBudgetAndResumeFromCursor(): void
     {
         $count = intdiv(J6SourceFindingService::SCAN_BUDGET, 2) + 10;
@@ -142,9 +212,12 @@ final class J6SourceFindingsHttpTest extends TestCase
         $this->entries('2025-02-01', '602', 'credit', 3, null);
         [, $page] = $this->http('GET', '/source-findings/lines', ['limit' => '1', 'code' => 'missing_activity']);
         self::assertNotNull($page['after']);
-        [$status, $body] = $this->http('GET', '/source-findings/lines', ['limit' => '1', 'code' => 'missing_tax_regime', 'after' => $page['after']]);
-        self::assertSame(409, $status);
-        self::assertSame('nonprofit_tax_cursor_stale', $body['error']['code']);
+        foreach ([[['limit' => '1', 'code' => 'missing_tax_regime'], null], [['limit' => '2', 'code' => 'missing_activity'], null],
+            [['limit' => '1', 'code' => 'missing_activity', 'account' => '602'], null], [['limit' => '1', 'code' => 'missing_activity'], $this->actor + 1000]] as [$query, $actor]) {
+            [$status, $body] = $this->http('GET', '/source-findings/lines', $query + ['after' => $page['after']], actor: $actor);
+            self::assertSame(409, $status, json_encode($query) . ' / ' . $actor);
+            self::assertSame('nonprofit_tax_cursor_stale', $body['error']['code']);
+        }
         foreach ([['code' => 'Missing'], ['account' => '5 18'], ['limit' => '0'], ['limit' => '201'], ['after' => 'x!']] as $invalid) {
             [$status, $body] = $this->http('GET', '/source-findings/lines', $invalid);
             self::assertSame(400, $status, json_encode($invalid));
@@ -225,9 +298,35 @@ final class J6SourceFindingsHttpTest extends TestCase
         return $ids;
     }
 
+    /**
+     * Jeden zaúčtovaný zápis; řádek bez třetího prvku má částku 100.00. Výsledkové řádky jsou bez dimenzí.
+     *
+     * @param list<array{0:string,1:string,2?:string}> $lines
+     */
+    private function entry(string $date, array $lines, string $sourceType = 'manual', ?int $sourceId = null): int
+    {
+        $this->pdo->prepare('INSERT INTO journal_entries(supplier_id,period_id,entry_date,source_type,source_id,description,posted_at) VALUES(?,?,?,?,?,?,NOW())')
+            ->execute([$this->supplier, $this->period, $date, $sourceType, $sourceId, 'Syntetický zápis ' . $sourceType]);
+        $entry = (int) $this->pdo->lastInsertId();
+        foreach ($lines as $number => $line) {
+            $this->pdo->prepare('INSERT INTO journal_entry_lines(supplier_id,entry_id,line_no,account_id,side,amount) VALUES(?,?,?,?,?,?)')
+                ->execute([$this->supplier, $entry, $number + 1, $this->accounts[$line[0]], $line[1], $line[2] ?? '100.00']);
+        }
+        return $entry;
+    }
+
+    /** @return list<int> řádky výsledkových účtů zápisu v pořadí čísla řádku */
+    private function resultLines(int $entry): array
+    {
+        $stmt = $this->pdo->prepare("SELECT l.id FROM journal_entry_lines l JOIN chart_of_accounts a ON a.id=l.account_id
+            WHERE l.supplier_id=? AND l.entry_id=? AND (a.account_code LIKE '5%' OR a.account_code LIKE '6%') ORDER BY l.id");
+        $stmt->execute([$this->supplier, $entry]);
+        return array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN));
+    }
+
     /** @return array{0:int, 1:array<string,mixed>} */
     private function http(string $method, string $path, array $query = [], ?string $auth = 'session', ?string $period = null,
-        array $permissions = ['accounting' => 2, 'accounting.periods.close' => 2]): array
+        array $permissions = ['accounting' => 2, 'accounting.periods.close' => 2], ?int $actor = null): array
     {
         $app = \Slim\Factory\AppFactory::create(new \Slim\Psr7\Factory\ResponseFactory(), $this->container);
         \MyInvoice\Routes::register($app);
@@ -235,7 +334,7 @@ final class J6SourceFindingsHttpTest extends TestCase
             ->createServerRequest($method, '/api/accounting/periods/' . ($period ?? $this->period) . '/nonprofit-tax' . $path)
             ->withQueryParams($query)
             ->withAttribute(\MyInvoice\Middleware\AuthMiddleware::ATTR_METHOD, $auth)
-            ->withAttribute(\MyInvoice\Middleware\AuthMiddleware::ATTR_USER, ['id' => $this->actor, 'role' => 'accountant'])
+            ->withAttribute(\MyInvoice\Middleware\AuthMiddleware::ATTR_USER, ['id' => $actor ?? $this->actor, 'role' => 'accountant'])
             ->withAttribute('auth.effective_role', new \MyInvoice\Security\EffectiveRole(125, 'Synthetic findings', 'staff', true, $permissions))
             ->withAttribute(\MyInvoice\Middleware\SupplierScopeMiddleware::ATTR_CURRENT_ID, $this->supplier);
         $response = $app->handle($request);

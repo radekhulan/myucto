@@ -45,7 +45,7 @@ function accountLabel(group: J6SourceFindingGroup): string {
   return group.account_name ? `${group.account_code} ${group.account_name}` : group.account_code
 }
 function lineLink(line: J6SourceFindingLine): { to: RouteLocationRaw; document: boolean } {
-  const to = journalSourceLink({ source_type: line.source_type, source_id: line.source_id })
+  const to = journalSourceLink(line)
   return to ? { to, document: true } : { to: journalEntryLink(line.entry_id), document: false }
 }
 
@@ -63,33 +63,35 @@ async function run<T>(work: () => Promise<T>, apply: (value: T) => void) {
   }
 }
 async function loadSummary() {
+  // Při přepočtu se staré počty nezobrazují, ani když přepočet selže.
+  summary.value = null
   filter.value = null
   lines.value = []
   await run(() => nonprofitTaxJ6Api.sourceFindings(props.supplierId, props.periodId), value => { summary.value = value })
 }
-async function loadLines(position: string | null) {
+/** Zásobník předchozích stránek se mění až po úspěšném načtení, aby chyba nepřeskočila stránku. */
+async function loadLines(position: string | null, history?: (string | null)[]) {
   const selected = filter.value
   if (!selected) return
   await run(() => nonprofitTaxJ6Api.sourceFindingLines(props.supplierId, props.periodId, selected, position), page => {
     lines.value = page.rows
     after.value = page.after
     cursor.value = position
+    if (history) back.value = history
   })
 }
 async function showLines(group: J6SourceFindingGroup) {
   filter.value = { account: group.account_code, code: group.code }
-  back.value = []
-  await loadLines(null)
+  lines.value = []
+  await loadLines(null, [])
 }
 async function next() {
   if (!after.value) return
-  back.value.push(cursor.value)
-  await loadLines(after.value)
+  await loadLines(after.value, [...back.value, cursor.value])
 }
 async function previous() {
-  const position = back.value.pop()
-  if (position === undefined) return
-  await loadLines(position)
+  if (!back.value.length) return
+  await loadLines(back.value[back.value.length - 1]!, back.value.slice(0, -1))
 }
 
 watch(() => [props.supplierId, props.periodId], () => {

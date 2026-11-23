@@ -43622,8 +43622,7 @@
       },
       "links": {
         "sources": "Otevřít daňové posouzení",
-        "profile_match": "Otevřít daňové posouzení",
-        "return_data": "Otevřít výsledovku"
+        "profile_match": "Otevřít daňové posouzení"
       }
     }
   },
@@ -44234,7 +44233,7 @@
     },
     "sourceFindings": {
       "title": "Zjištění podkladů",
-      "help": "Řádky výnosů a nákladů, kterým chybí činnost, druh činnosti nebo předběžné daňové zařazení s doloženým původem. Souhrn se spočítá na vyžádání jedním průchodem podkladů období. Členění opravte v dokladu nebo zápisu a souhrn spočítejte znovu.",
+      "help": "Řádky výnosů a nákladů, kterým chybí činnost, druh činnosti nebo předběžné daňové zařazení s doloženým původem, nebo jejichž členění nesouhlasí se společnou alokací. Souhrn se spočítá na vyžádání jedním průchodem podkladů období. Členění opravte v dokladu nebo zápisu, rozdělené řádky ve společné alokaci, a souhrn spočítejte znovu.",
       "show": "Zobrazit zjištění",
       "refresh": "Spočítat znovu",
       "total": "Zjištění má {lines} z {rows} účetních řádků.",

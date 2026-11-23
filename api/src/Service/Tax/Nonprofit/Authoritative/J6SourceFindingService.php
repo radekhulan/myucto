@@ -76,22 +76,30 @@ final readonly class J6SourceFindingService
             $scanned += $page->scannedCount;
             $codes = [];
             foreach ($page->findings as $finding) $codes[$finding['line_id']][] = $finding['code'];
+            $last = null;
             foreach ($page->rows as $row) {
                 $lineCodes = $codes[$row['line_id']] ?? [];
                 if ($lineCodes === [] || ($code !== null && !in_array($code, $lineCodes, true))
                     || ($account !== null && $row['account_code'] !== $account)) continue;
-                $out[] = ['line_id' => $row['line_id'], 'entry_id' => $row['entry_id'], 'line_no' => $row['line_no'],
-                    'date' => $row['date'], 'account_code' => $row['account_code'], 'kind' => $row['kind'],
-                    'amount_cents' => $row['amount_cents'], 'codes' => $lineCodes,
-                    'source_type' => $row['source_type'], 'source_id' => $row['source_id']];
-                if (count($out) === $limit) {
-                    $next = new SnapshotCursor($row['date'], $row['entry_id'], $row['line_id']);
+                if ($last !== null) {
+                    // Stránka je plná a za ní je ještě shodný řádek: pokračuje se za posledním vráceným.
+                    $next = new SnapshotCursor($last['date'], $last['entry_id'], $last['line_id']);
                     break 2;
                 }
+                $out[] = ['line_id' => $row['line_id'], 'entry_id' => $row['entry_id'], 'line_no' => $row['line_no'],
+                    'date' => $row['date'], 'account_code' => $row['account_code'], 'kind' => $row['kind'],
+                    'amount_cents' => $row['amount_cents'], 'codes' => $lineCodes];
+                if (count($out) === $limit) $last = $row;
+            }
+            if ($last !== null) {
+                // Plná stránka bez dalšího shodného řádku v téže stránce podkladů: konec období
+                // znamená konec seznamu, jinak se pokračuje od dalšího čtení podkladů.
+                $next = $page->nextCursor === null ? null : new SnapshotCursor($last['date'], $last['entry_id'], $last['line_id']);
+                break;
             }
             $cursor = $page->nextCursor;
         } while ($cursor !== null && $scanned < self::SCAN_BUDGET);
-        $next ??= $cursor;
+        if (count($out) < $limit) $next = $cursor;
         return ['rows' => $this->withEntries($supplierId, $out), 'next_cursor' => $next?->toArray()];
     }
 
@@ -107,19 +115,49 @@ final readonly class J6SourceFindingService
         return $names;
     }
 
-    /** Číslo dokladu a popis zápisu jedním dotazem pro celou stránku. */
+    /**
+     * Číslo dokladu, popis a zdroj zápisu jedním dotazem pro celou stránku. Zdroj nese stejné
+     * obohacení jako deník ({@see \MyInvoice\Repository\JournalEntryRepository::paginate()}),
+     * aby proklik vedl na tentýž prvotní doklad (výpis banky, pokladní doklad, karta majetku,
+     * vyrovnaný doklad zápočtu, u protizápisu zdroj stornovaného zápisu).
+     */
     private function withEntries(int $supplierId, array $rows): array
     {
         $ids = array_values(array_unique(array_column($rows, 'entry_id')));
         if ($ids === []) return [];
-        $stmt = $this->db->pdo()->prepare('SELECT id, document_no, description FROM journal_entries WHERE supplier_id=? AND id IN ('
-            . implode(',', array_fill(0, count($ids), '?')) . ')');
+        $stmt = $this->db->pdo()->prepare("SELECT je.id,
+                   COALESCE(je.document_no, src_i.varsymbol, src_pi.vendor_invoice_number, src_pi.varsymbol) AS document_no,
+                   je.description, je.source_type, je.source_id,
+                   COALESCE(je.source_id, rev_src.source_id) AS source_link_id,
+                   COALESCE(bt.statement_id, rev_bt.statement_id) AS source_statement_id,
+                   COALESCE(cd.doc_number, rev_cd.doc_number) AS source_doc_number,
+                   COALESCE(cd.register_id, rev_cd.register_id) AS source_register_id,
+                   ast.id AS source_asset_id,
+                   stl.doc_type AS source_settlement_doc_type,
+                   stl.doc_id AS source_settlement_doc_id
+              FROM journal_entries je
+         LEFT JOIN journal_entries rev_src FORCE INDEX (idx_je_supplier_reversed_by)
+                ON rev_src.supplier_id = je.supplier_id AND rev_src.reversed_by = je.id
+         LEFT JOIN bank_transactions rev_bt ON rev_src.source_type = 'bank' AND rev_bt.id = rev_src.source_id
+         LEFT JOIN cash_documents rev_cd ON rev_src.source_type = 'cash' AND rev_cd.id = rev_src.source_id
+         LEFT JOIN bank_transactions bt ON je.source_type = 'bank' AND bt.id = je.source_id
+         LEFT JOIN cash_documents cd ON je.source_type = 'cash' AND cd.id = je.source_id
+         LEFT JOIN invoice_settlements stl ON je.source_type = 'settlement' AND stl.id = je.source_id AND stl.supplier_id = je.supplier_id
+         LEFT JOIN invoices src_i ON je.source_type = 'invoice' AND src_i.id = je.source_id AND src_i.supplier_id = je.supplier_id
+         LEFT JOIN purchase_invoices src_pi ON je.source_type = 'purchase_invoice' AND src_pi.id = je.source_id AND src_pi.supplier_id = je.supplier_id
+         LEFT JOIN depreciation_entries dep ON je.source_type = 'depreciation' AND dep.id = je.source_id AND dep.supplier_id = je.supplier_id
+         LEFT JOIN assets ast ON ast.supplier_id = je.supplier_id
+                AND ast.id = CASE WHEN je.source_type IN ('asset', 'asset_disposal') THEN je.source_id
+                                  WHEN je.source_type = 'depreciation' THEN dep.asset_id ELSE NULL END
+             WHERE je.supplier_id = ? AND je.id IN (" . implode(',', array_fill(0, count($ids), '?')) . ')');
         $stmt->execute([$supplierId, ...$ids]);
         $entries = [];
         foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $entry) $entries[(int) $entry['id']] = $entry;
+        $ints = ['source_id', 'source_link_id', 'source_statement_id', 'source_register_id', 'source_asset_id', 'source_settlement_doc_id'];
         foreach ($rows as &$row) {
-            $row['document_no'] = $entries[$row['entry_id']]['document_no'] ?? null;
-            $row['description'] = $entries[$row['entry_id']]['description'] ?? null;
+            $entry = $entries[$row['entry_id']];
+            foreach (['document_no', 'description', 'source_type', 'source_doc_number', 'source_settlement_doc_type'] as $key) $row[$key] = $entry[$key];
+            foreach ($ints as $key) $row[$key] = $entry[$key] === null ? null : (int) $entry[$key];
         }
         unset($row);
         return $rows;
