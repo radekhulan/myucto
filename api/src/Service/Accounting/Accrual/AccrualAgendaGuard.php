@@ -23,8 +23,8 @@ final class AccrualAgendaGuard
     public function __construct(private readonly Connection $db) {}
 
     /**
-     * Doklady a řádky dokladů spravované agendou: klíče `druh:id` (celý doklad) a
-     * `druh:id:řádek` (jen řádek dokladu). Koncept položky doklad ještě nespravuje: dokud ho
+     * Doklady a řádky dokladů spravované agendou: klíče `druh:id:řádek` (řádek faktury) a
+     * `other_item:id` (ostatní položka celá). Koncept položky doklad ještě nespravuje: dokud ho
      * účetní neaktivuje, odkládá doklad dál uzávěrka.
      *
      * @return array<string,true>
@@ -41,7 +41,14 @@ final class AccrualAgendaGuard
         $keys = [];
         foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $r) {
             $key = $r['source_type'] . ':' . (int) $r['source_id'];
-            $keys[$r['source_item_id'] === null ? $key : $key . ':' . (int) $r['source_item_id']] = true;
+            if ($r['source_item_id'] !== null) {
+                $keys[$key . ':' . (int) $r['source_item_id']] = true;
+            } elseif ($r['source_type'] === 'other_item') {
+                // Ostatní položka nemá řádky s vlastním obdobím: spravuje ji celá položka.
+                $keys[$key] = true;
+            }
+            // Faktura bez určeného řádku: položka nespravuje žádný řádek s obdobím, ty dál
+            // odkládá uzávěrka.
         }
         return $keys;
     }

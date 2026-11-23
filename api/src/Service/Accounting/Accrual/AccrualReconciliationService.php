@@ -237,6 +237,12 @@ final class AccrualReconciliationService
                 throw new AccrualException('link_imported', 'Převzatou vazbu nelze zrušit ručně. Položku zrušte nebo převezměte znovu.', 409);
             }
             $this->items->deleteLink($supplierId, $itemId, $linkId);
+            $item = $this->items->find($supplierId, $itemId);
+            if ($link['role'] === 'origin' && $item !== null && $item['status'] === 'active' && $item['method'] !== 'manual'
+                && !$this->service->hasOriginLink($supplierId, $itemId)) {
+                // Aktivní položka s plánem musí mít z čeho rozpouštět (stejná podmínka jako aktivace).
+                throw new AccrualException('origin_required', 'Jediný zápis vzniku aktivní položky nelze odebrat. Položku nejdřív zrušte.', 409);
+            }
             $this->service->rebuildPlan($supplierId, $itemId);
             if ($own) $pdo->commit();
         } catch (\Throwable $e) {

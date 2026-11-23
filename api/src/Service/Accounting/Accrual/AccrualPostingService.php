@@ -98,10 +98,29 @@ final class AccrualPostingService
         if ($row['due_on'] > $this->today() && empty($meta['allow_future'])) {
             throw new AccrualException('row_not_due', 'Rozpuštění lze zaúčtovat nejdřív v den konce úseku.', 409);
         }
+        // Starší nezaúčtovaný řádek, který zaúčtovat jde, má přednost. Starší řádek, který
+        // zaúčtovat nejde (uzavřené období, datum za zámkem otevřeného období), toto
+        // rozpuštění převezme: jeho částka a dny se přičtou, plán tak nezamrzne.
+        $closingStep = !empty($meta['closing_step']);
+        $absorbed = 0.0;
+        $absorbedFrom = null;
+        $absorbedIds = [];
         foreach ($this->items->schedule($supplierId, $itemId) as $other) {
-            if ($other['kind'] === 'release' && $other['status'] === 'planned' && $other['due_on'] < $row['due_on']) {
+            if ($other['kind'] !== 'release' || $other['status'] !== 'planned' || $other['due_on'] >= $row['due_on']) {
+                continue;
+            }
+            if ($this->postableOn($supplierId, (string) $other['due_on'], $closingStep)) {
                 throw new AccrualException('row_not_first', 'Nejdřív zaúčtujte starší rozpuštění (' . $other['due_on'] . ').', 409, null, ['first_due_on' => $other['due_on']]);
             }
+            $absorbed = round($absorbed + (float) $other['amount_planned'], 2);
+            $from = (string) ($other['from_on'] ?? $other['due_on']);
+            $absorbedFrom = $absorbedFrom === null || $from < $absorbedFrom ? $from : $absorbedFrom;
+            $absorbedIds[] = (int) $other['id'];
+        }
+        if ($absorbedFrom !== null) {
+            $row['amount_planned'] = round((float) $row['amount_planned'] + $absorbed, 2);
+            $row['from_on'] = min($absorbedFrom, (string) ($row['from_on'] ?? $row['due_on']));
+            $row['absorbed_ids'] = $absorbedIds;
         }
         $sign = AccrualKinds::normalSign((string) $item['kind']);
         $balance = round(($this->items->balances($supplierId, [$itemId], '9999-12-31')[$itemId]['balance'] ?? 0.0) * $sign, 2);
@@ -141,9 +160,12 @@ final class AccrualPostingService
     {
         $item = $prepared['item'];
         $rowId = (int) $prepared['row']['id'];
-        if (abs($prepared['amount'] - (float) $prepared['row']['amount_planned']) > 0.004) {
-            $this->db->pdo()->prepare('UPDATE accrual_schedule SET amount_planned = ? WHERE supplier_id = ? AND id = ?')
-                ->execute([$prepared['amount'], $supplierId, $rowId]);
+        $this->db->pdo()->prepare('UPDATE accrual_schedule SET amount_planned = ?, from_on = ? WHERE supplier_id = ? AND id = ?')
+            ->execute([$prepared['amount'], $prepared['row']['from_on'] ?? null, $supplierId, $rowId]);
+        if (($prepared['row']['absorbed_ids'] ?? []) !== []) {
+            // Převzaté starší řádky pokrývá toto rozpuštění.
+            $this->db->pdo()->prepare('DELETE FROM accrual_schedule WHERE supplier_id = ? AND id IN ('
+                . implode(',', array_map('intval', $prepared['row']['absorbed_ids'])) . ')')->execute([$supplierId]);
         }
         $this->items->setScheduleStatus($supplierId, $rowId, 'posted', $entryId, date('Y-m-d H:i:s'));
         $accountId = $this->accountId($supplierId, (string) $item['accrual_account_code']);
@@ -449,6 +471,20 @@ final class AccrualPostingService
             $out[$key . '_total'] = round($out[$key . '_total'] + $r['amount_planned'], 2);
         }
         return $out;
+    }
+
+    /**
+     * Jde k datu zaúčtovat rozpuštění? Agenda účtuje jen do otevřeného období za zámkem
+     * k datu; krok uzávěrky i do období, které se uzavírá (zámek k datu tam obchází jako
+     * ostatní závěrkové zápisy).
+     */
+    private function postableOn(int $supplierId, string $date, bool $closingStep): bool
+    {
+        $lock = $this->lockInfo($supplierId, $date);
+        if ($closingStep) {
+            return !$lock['closed'] && $lock['period_status'] !== null;
+        }
+        return $lock['postable'] && $lock['period_status'] !== null;
     }
 
     /** Položka bez nezaúčtovaných řádků a s nulovým zůstatkem je dokončená. */

@@ -42,7 +42,7 @@ final class AccrualClosingProjection
         $agenda = static fn (string $type, string $docSql, ?string $lineSql): string => "NOT EXISTS (SELECT 1 FROM accrual_items ai
                     WHERE ai.supplier_id = d.supplier_id AND ai.managed_by = 'agenda' AND ai.status IN ('active', 'completed', 'terminated')
                       AND ai.source_type = '{$type}' AND ai.source_id = {$docSql}"
-            . ($lineSql === null ? '' : " AND (ai.source_item_id IS NULL OR ai.source_item_id = {$lineSql})") . ')';
+            . ($lineSql === null ? '' : " AND ai.source_item_id = {$lineSql}") . ')';
         $sql = "SELECT * FROM (
                   SELECT 'prepaid_expense' AS kind, 'purchase_invoice' AS source_type, d.id AS source_id, it.id AS source_item_id,
                          COALESCE(NULLIF(d.vendor_invoice_number, ''), d.varsymbol) AS document_no, it.description AS title,

@@ -779,7 +779,7 @@ final class ClosingPrepaidExpenseAccrualTest extends TestCase
         $this->postPurchaseExpense($pi, '548', 36600.00, self::YEAR . '-11-15');
         $this->driveCloseWithAccrual();
         $this->closing->closeBooks($this->supplierId, $this->periodId, $this->rv(), $this->meta());
-        $this->agendaItem($pi, null);
+        $this->agendaItem($pi, null, 'handover');
 
         $open = $this->closing->openNext($this->supplierId, $this->periodId, $this->rv(), $this->meta());
 
@@ -795,7 +795,7 @@ final class ClosingPrepaidExpenseAccrualTest extends TestCase
         $this->postPurchaseExpense($pi, '548', 36600.00, self::YEAR . '-11-15');
         $this->driveCloseWithAccrual();
         $this->closing->closeBooks($this->supplierId, $this->periodId, $this->rv(), $this->meta());
-        $this->agendaItem($pi, null);
+        $this->agendaItem($pi, null, 'handover');
         $this->closing->openNext($this->supplierId, $this->periodId, $this->rv(), $this->meta());
         $next = (int) $this->db->pdo()->query("SELECT id FROM accounting_periods WHERE supplier_id = {$this->supplierId} AND starts_on = '" . (self::YEAR + 1) . "-01-01'")->fetchColumn();
         $prior = $this->closing->priorDeferralReleaseProjection($this->supplierId, $next);
@@ -863,7 +863,7 @@ final class ClosingPrepaidExpenseAccrualTest extends TestCase
         $this->postPurchaseExpense($pi, '548', 36600.00, self::YEAR . '-11-15');
         $this->driveCloseWithAccrual();
         $this->closing->closeBooks($this->supplierId, $this->periodId, $this->rv(), $this->meta());
-        $this->agendaItem($pi, null);
+        $this->agendaItem($pi, null, 'draft');
         $this->closing->openNext($this->supplierId, $this->periodId, $this->rv(), $this->meta());
         $pdo = $this->db->pdo();
         $itemId = (int) $pdo->query("SELECT id FROM accrual_items WHERE supplier_id = {$this->supplierId} ORDER BY id DESC LIMIT 1")->fetchColumn();
@@ -875,8 +875,34 @@ final class ClosingPrepaidExpenseAccrualTest extends TestCase
         self::assertSame(0.0, $after['difference']);
     }
 
-    /** Položka agendy ke zdrojovému dokladu; volitelně s interním zápisem odkladu MD 381 / D 548. */
-    private function agendaItem(int $purchaseId, ?float $deferral): void
+    /** N3: jediný řádek s obdobím se položce přiřadí jen při shodě částky nebo období. */
+    public function testN4SinglePeriodLineAutoResolve(): void
+    {
+        // Řádek A (pojistné 12 000, bez období, účetní ho vede v agendě), řádek B (předplatné 24 400 s obdobím, odkládá uzávěrka).
+        $pi = $this->purchase('PF-2091-N4', 36400.00, self::YEAR . '-11-15');
+        $this->item($pi, 12000.00, null, null, '548');
+        $lineB = $this->item($pi, 24400.00, '2091-07-01', '2092-06-30', '518');
+        $this->postPurchaseExpense($pi, '548', 36400.00, self::YEAR . '-11-15');
+        $before = (float) $this->closing->prepaidExpenseAccrualPreview($this->supplierId, $this->periodId)['total'];
+        $origin = $this->posting->postDocument($this->supplierId, 'manual', null, [
+            ['account_code' => '381', 'side' => 'debit', 'amount' => 6000.00],
+            ['account_code' => '548', 'side' => 'credit', 'amount' => 6000.00],
+        ], ['entry_date' => self::ENDS_ON, 'posted' => true, 'posted_by' => $this->userId, 'user_id' => $this->userId]);
+        $item = Bootstrap::buildContainer()->get(\MyInvoice\Service\Accounting\Accrual\AccrualItemService::class)->create($this->supplierId, [
+            'title' => 'Pojistné', 'kind' => 'prepaid_expense', 'accrual_account_code' => '381', 'counter_account_code' => '548',
+            'basis_amount' => 12000.00, 'period_from' => '2091-10-01', 'period_to' => '2092-09-30', 'method' => 'monthly_days',
+            'source_type' => 'purchase_invoice', 'source_id' => $pi, 'origin_entry_id' => $origin, 'activate' => true,
+        ], $this->userId);
+        $after = (float) $this->closing->prepaidExpenseAccrualPreview($this->supplierId, $this->periodId)['total'];
+        self::assertNull($item['source_item_id'], 'Jediný řádek s obdobím se k položce nehodí částkou ani obdobím.');
+        self::assertEqualsWithDelta($before, $after, 0.01, 'Řádek B, který položka nespravuje, uzávěrka přestala odkládat.');
+    }
+
+    /**
+     * Položka agendy ke zdrojovému dokladu: s interním zápisem odkladu MD 381 / D 548, předaná
+     * z uzávěrky (`handover`, vazba na odklad uzávěrky) nebo jako koncept bez vzniku (`draft`).
+     */
+    private function agendaItem(int $purchaseId, ?float $deferral, string $mode = 'origin'): void
     {
         $container = Bootstrap::buildContainer();
         $origin = null;
@@ -898,7 +924,8 @@ final class ClosingPrepaidExpenseAccrualTest extends TestCase
             'source_type' => 'purchase_invoice',
             'source_id' => $purchaseId,
             'origin_entry_id' => $origin,
-            'activate' => true,
+            'closing_handover' => $mode === 'handover',
+            'activate' => $mode !== 'draft',
         ], $this->userId);
     }
 

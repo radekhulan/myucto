@@ -327,6 +327,8 @@ final class AccrualAgendaTest extends TestCase
         $draft = $this->items->create($this->supplierId, $this->input(), $this->userId);
         self::assertSame('draft', $draft['status']);
         self::assertSame([], $draft['schedule']);
+        $this->assertAccrualError('origin_required', fn () => $this->items->activate($this->supplierId, $draft['id'], $this->userId));
+        $this->reconciliation->assign($this->supplierId, $draft['id'], $this->manualEntry('2091-01-01', '311', '384', 12_000.00, 'FV-SYN-DRAFT'), '384', null, $this->userId);
         self::assertSame('active', $this->items->activate($this->supplierId, $draft['id'], $this->userId)['status']);
         self::assertSame('cancelled', $this->items->cancel($this->supplierId, $draft['id'], $this->userId)['status']);
 
@@ -334,9 +336,10 @@ final class AccrualAgendaTest extends TestCase
         $other = $this->revenueItem(5_000.00, '2091-01-01', '2091-12-31');
         $cancelled = $this->items->cancel($this->supplierId, $other['id'], $this->userId);
         self::assertSame([], $cancelled['links']);
+        // Bez položky jsou vznik zrušeného konceptu (12 000) i této položky (5 000).
         $rec = $this->account($this->reconciliation->reconcile($this->supplierId, '2091-06-30'), '384');
-        self::assertSame(5_000.00, $rec['difference']);
-        self::assertSame(5_000.00, $this->reconciliation->unallocated($this->supplierId, '2091-06-30')['total']);
+        self::assertSame(17_000.00, $rec['difference']);
+        self::assertSame(17_000.00, $this->reconciliation->unallocated($this->supplierId, '2091-06-30')['total']);
         $this->items->delete($this->supplierId, $draft['id']);
         $this->assertAccrualError('not_found', fn () => $this->items->get($this->supplierId, $draft['id']));
     }
@@ -451,6 +454,75 @@ final class AccrualAgendaTest extends TestCase
         } catch (PostingException $e) {
             self::assertSame('date_locked', $e->errorCode);
         }
+    }
+
+    // ── regrese z ověřovacího review: řádky, které nejde zaúčtovat ─────────────
+
+    /**
+     * N1: položka založená po uzavření roku, jehož část už uplynula. Řádky v uzavřeném roce
+     * nikdo nezaúčtuje: jejich částka a dny přejdou do prvního řádku otevřeného roku, plán
+     * ani uzavření dalšího roku nezamrzne.
+     */
+    public function testN1RowInClosedYear(): void
+    {
+        $this->db->pdo()->exec("UPDATE accounting_periods SET status = 'closed' WHERE supplier_id = {$this->supplierId} AND fiscal_year = 2091");
+        $origin = $this->manualEntry('2092-01-05', '311', '384', 12_000.00, 'FV-N1');
+        $item = $this->items->create($this->supplierId, $this->input([
+            'basis_amount' => 12_000.00, 'period_from' => '2091-07-01', 'period_to' => '2092-06-30', 'origin_entry_id' => $origin, 'activate' => true,
+        ]), $this->userId);
+        self::assertSame(0.0, $this->sumPlannedIn($item, '2091'), 'V uzavřeném roce nesmí zůstat řádek plánu.');
+        $jan = $this->rowOn($item, '2092-01-31');
+        self::assertSame('2091-07-01', $jan['from_on']);
+        $first = round(AccrualScheduleCalculator::cumRecognized(12_000.00, '2091-07-01', '2092-06-30', '2092-01-31'), 2);
+        self::assertEqualsWithDelta($first, $jan['amount_planned'], 0.02);
+        $after = $this->accrualPosting->postRow($this->supplierId, $item['id'], $jan['id'], $this->meta());
+        self::assertSame('posted', $this->rowOn($after, '2092-01-31')['status']);
+        self::assertSame(round(12_000.00 - $jan['amount_planned'], 2), $after['balance_after_all']);
+        $pending = (new AccrualAgendaGuard($this->db))->pendingRowsCount($this->supplierId, '2092-01-01', '2092-12-31');
+        self::assertSame(count($this->planned($after)), $pending);
+    }
+
+    /** N2: aktivní položka s plánem musí mít zápis vzniku, jinak by blokovala uzavření roku. */
+    public function testN2NoOrigin(): void
+    {
+        $this->assertAccrualError('origin_required', fn () => $this->items->create($this->supplierId, $this->input(['activate' => true]), $this->userId));
+        $item = $this->revenueItem(12_000.00, '2091-01-01', '2091-12-31');
+        $origin = array_values(array_filter($item['links'], static fn (array $l): bool => $l['role'] === 'origin'))[0];
+        $this->assertAccrualError('origin_required', fn () => $this->reconciliation->unassign($this->supplierId, $item['id'], $origin['id']));
+    }
+
+    /** N6: záporný základ (dobropis) náhled i uložení odmítnou stejně. */
+    public function testN3NegativeBasis(): void
+    {
+        $this->assertAccrualError('negative_basis', fn () => $this->items->previewPlan($this->supplierId,
+            ['method' => 'monthly_days', 'basis_amount' => -12000, 'period_from' => '2091-01-01', 'period_to' => '2091-12-31']));
+        $this->assertAccrualError('negative_basis', fn () => $this->items->create($this->supplierId, $this->input(['basis_amount' => -12_000.00]), $this->userId));
+    }
+
+    /**
+     * N5: první řádek za zámkem k datu (podané DPH) nezablokuje zbytek roku. Únor převezme
+     * zamčený leden (částku i dny), leden sám zaúčtovat nejde.
+     */
+    public function testN5LockedFirstRow(): void
+    {
+        $item = $this->revenueItem(12_000.00, '2091-01-01', '2091-12-31');
+        $janRow = $this->rowOn($item, '2091-01-31');
+        $febRow = $this->rowOn($item, '2091-02-28');
+        $this->lockUntil('2091-01-31');
+        try {
+            $this->accrualPosting->postRow($this->supplierId, $item['id'], $janRow['id'], $this->meta());
+            self::fail('Leden za zámkem se zaúčtoval.');
+        } catch (PostingException $e) {
+            self::assertSame('date_locked', $e->errorCode);
+        }
+        $after = $this->accrualPosting->postRow($this->supplierId, $item['id'], $febRow['id'], $this->meta());
+        $feb = $this->rowOn($after, '2091-02-28');
+        self::assertSame('posted', $feb['status']);
+        self::assertSame('2091-01-01', $feb['from_on']);
+        self::assertSame(round($janRow['amount_planned'] + $febRow['amount_planned'], 2), $feb['amount_planned']);
+        self::assertSame(round(12_000.00 - $feb['amount_planned'], 2), $after['balance_after_all']);
+        self::assertSame($after['balance_after_all'], round(array_sum(array_column($this->planned($after), 'amount_planned')), 2));
+        self::assertFalse(in_array('2091-01-31', array_column($this->planned($after), 'due_on'), true), 'Převzatý leden zůstal v plánu.');
     }
 
     // ── pomocné ──────────────────────────────────────────────────────────────

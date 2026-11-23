@@ -183,7 +183,7 @@ final class AccrualItemService
         if (!in_array($method, AccrualPlanBuilder::METHODS, true)) {
             throw new AccrualException('invalid_method', 'Neznámá metoda rozpouštění.', 422, 'method');
         }
-        $basis = self::amount($input['basis_amount'] ?? null, 'basis_amount');
+        $basis = self::positiveBasis($input['basis_amount'] ?? null);
         $from = self::requiredDate($input['period_from'] ?? null, 'period_from');
         $to = self::requiredDate($input['period_to'] ?? null, 'period_to');
         if ($to < $from) {
@@ -338,8 +338,27 @@ final class AccrualItemService
         if ($item['method'] !== 'manual' && $item['counter_account_code'] === null) {
             throw new AccrualException('counter_account_required', 'Pro plán rozpouštění vyplňte protiúčet.', 422, 'counter_account_code');
         }
+        // Položka s plánem musí mít v deníku zůstatek, který rozpouští (zápis vzniku, převzatý
+        // nebo předaný zůstatek). Bez něj by nešlo zaúčtovat žádný řádek, a přitom by plán
+        // blokoval uzavření roku a vstupoval do projekce DPPO i průběžného výkazu.
+        if ($item['method'] !== 'manual' && !$this->hasOriginLink($supplierId, $id)) {
+            throw new AccrualException('origin_required', 'Před aktivací navažte zápis vzniku (zápis na účtu položky), ze kterého se rozpouští.', 422, 'origin_entry_id');
+        }
         $this->items->update($supplierId, $id, ['status' => 'active', 'updated_by' => $userId]);
         $this->rebuildPlan($supplierId, $id);
+    }
+
+    /** Má položka živou vazbu vzniku (zaúčtovaný, nestornovaný zápis)? */
+    public function hasOriginLink(int $supplierId, int $id): bool
+    {
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT 1 FROM accrual_entry_links al
+               JOIN journal_entries je ON je.id = al.journal_entry_id AND je.supplier_id = al.supplier_id
+              WHERE al.supplier_id = ? AND al.accrual_item_id = ? AND al.role = 'origin'
+                AND je.posted_at IS NOT NULL AND je.reversed_by IS NULL LIMIT 1"
+        );
+        $stmt->execute([$supplierId, $id]);
+        return $stmt->fetchColumn() !== false;
     }
 
     /** Zruší položku bez zaúčtovaného rozpouštění agendy; vazby na zápisy se uvolní. */
@@ -430,8 +449,75 @@ final class AccrualItemService
         }));
         $target = $this->remainingTarget($supplierId, $item);
         $rows = (int) round($target * 100) > 0 ? AccrualPlanBuilder::spreadTo($rows, $target) : [];
+        $rows = $this->mergeClosedPeriodRows($supplierId, $rows);
         $this->items->replacePlanned($supplierId, $id, array_values(array_filter($rows,
             static fn (array $r): bool => (int) round($r['amount_planned'] * 100) !== 0)));
+    }
+
+    /**
+     * Řádky splatné v uzavřeném účetním období už nikdo nezaúčtuje (uzavřené období zápis
+     * nepřijme). Jejich částka se proto přičte k prvnímu řádku v neuzavřeném období a ten
+     * pokryje i jejich dny: položka založená po uzavření roku, jehož část už uplynula, rozpustí
+     * dlužnou část prvním otevřeným rozpuštěním a neblokuje plán ani uzavření dalšího roku.
+     * Řádky v období, které se uzavírá, zůstávají: zaúčtuje je krok uzávěrky.
+     * Řádky v uzamčeném datu otevřeného období řeší až zaúčtování
+     * ({@see AccrualPostingService::prepareRelease()}): zámek se může posunout a uzavíraný rok
+     * je musí mít ve svém období.
+     *
+     * @param list<array<string,mixed>> $rows
+     * @return list<array<string,mixed>>
+     */
+    public function mergeClosedPeriodRows(int $supplierId, array $rows): array
+    {
+        if ($rows === []) {
+            return $rows;
+        }
+        $stmt = $this->db->pdo()->prepare('SELECT starts_on, ends_on, status FROM accounting_periods WHERE supplier_id = ? ORDER BY starts_on');
+        $stmt->execute([$supplierId]);
+        $closed = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $p) {
+            if (\MyInvoice\Service\Accounting\AccountingPeriodStatus::isClosed((string) $p['status'])) {
+                $closed[] = [(string) $p['starts_on'], (string) $p['ends_on']];
+            }
+        }
+        if ($closed === []) {
+            return $rows;
+        }
+        $inClosed = static function (string $date) use ($closed): bool {
+            foreach ($closed as [$from, $to]) {
+                if ($date >= $from && $date <= $to) {
+                    return true;
+                }
+            }
+            return false;
+        };
+        $out = [];
+        $carry = 0.0;
+        $carryFrom = null;
+        $carryDays = 0;
+        foreach ($rows as $row) {
+            if ($inClosed((string) $row['due_on'])) {
+                $carry = round($carry + (float) $row['amount_planned'], 2);
+                $carryFrom ??= (string) $row['from_on'];
+                $carryDays += (int) ($row['days'] ?? 0);
+                continue;
+            }
+            if ($carryFrom !== null) {
+                $row['amount_planned'] = round((float) $row['amount_planned'] + $carry, 2);
+                $row['from_on'] = $carryFrom;
+                $row['days'] = (int) ($row['days'] ?? 0) + $carryDays;
+                $carry = 0.0;
+                $carryFrom = null;
+                $carryDays = 0;
+            }
+            $out[] = $row;
+        }
+        if ($carryFrom !== null) {
+            // Celý zbytek plánu leží v uzavřených obdobích: jeden řádek prvním dnem po nich.
+            $due = AccrualPlanBuilder::dayAfter(max(array_map(static fn (array $c): string => $c[1], $closed)));
+            $out[] = ['kind' => 'release', 'due_on' => $due, 'from_on' => $carryFrom, 'to_on' => $due, 'days' => $carryDays, 'amount_planned' => $carry];
+        }
+        return $out;
     }
 
     /**
@@ -700,11 +786,12 @@ final class AccrualItemService
             $entryIds = array_map(static fn (array $e): int => (int) $e['id'], $this->postingGroup->active($supplierId, $sourceType, $sourceId));
             $itemTable = $sourceType === 'invoice' ? 'invoice_items' : 'purchase_invoice_items';
             $fk = $sourceType === 'invoice' ? 'invoice_id' : 'purchase_invoice_id';
-            $p = $pdo->prepare("SELECT it.id, it.accrual_from, it.accrual_to FROM {$itemTable} it JOIN " . ($sourceType === 'invoice' ? 'invoices' : 'purchase_invoices')
+            $p = $pdo->prepare("SELECT it.id, it.accrual_from, it.accrual_to, it.total_without_vat, it.description FROM {$itemTable} it JOIN " . ($sourceType === 'invoice' ? 'invoices' : 'purchase_invoices')
                 . " d ON d.id = it.{$fk} WHERE d.supplier_id = ? AND it.{$fk} = ? AND it.accrual_from IS NOT NULL AND it.accrual_to IS NOT NULL");
             $p->execute([$supplierId, $sourceId]);
             foreach ($p->fetchAll(PDO::FETCH_ASSOC) as $r) {
-                $periods[] = ['item_id' => (int) $r['id'], 'from' => (string) $r['accrual_from'], 'to' => (string) $r['accrual_to']];
+                $periods[] = ['item_id' => (int) $r['id'], 'from' => (string) $r['accrual_from'], 'to' => (string) $r['accrual_to'],
+                    'amount' => round((float) $r['total_without_vat'], 2), 'description' => mb_substr((string) ($r['description'] ?? ''), 0, 120)];
             }
             $doc['title'] = null;
         } elseif ($sourceType === 'other_item') {
@@ -828,7 +915,7 @@ final class AccrualItemService
         if ($from !== null && $to !== null && $to < $from) {
             throw new AccrualException('invalid_period', 'Konec období je před jeho začátkem.', 422, 'period_to');
         }
-        $basis = self::amount($input['basis_amount'] ?? null, 'basis_amount');
+        $basis = self::positiveBasis($input['basis_amount'] ?? null);
         $partnerId = isset($input['partner_id']) && $input['partner_id'] !== null && $input['partner_id'] !== '' ? (int) $input['partner_id'] : null;
         if ($partnerId !== null) {
             $p = $this->db->pdo()->prepare('SELECT id FROM clients WHERE supplier_id = ? AND id = ?');
@@ -850,7 +937,10 @@ final class AccrualItemService
         $openingAsOf = self::dateOr($input['opening_as_of'] ?? null, null, 'opening_as_of');
         $sourceItemId = $current !== null ? $current['source_item_id']
             : (isset($input['source_item_id']) && ctype_digit((string) $input['source_item_id']) ? (int) $input['source_item_id'] : null);
-        if ($current === null && $sourceId !== null && in_array($sourceType, ['invoice', 'purchase_invoice'], true)) {
+        if ($current === null && $sourceItemId === 0) {
+            // Výslovně žádný řádek: položka nespravuje řádek s obdobím, uzávěrka je odkládá dál.
+            $sourceItemId = null;
+        } elseif ($current === null && $sourceId !== null && in_array($sourceType, ['invoice', 'purchase_invoice'], true)) {
             $sourceItemId = $this->resolveSourceItem($supplierId, $sourceType, $sourceId, $sourceItemId, $basis, $from, $to);
         }
         $projectId = isset($input['project_id']) && ctype_digit((string) $input['project_id']) ? (int) $input['project_id'] : null;
@@ -889,8 +979,9 @@ final class AccrualItemService
     /**
      * Řádek zdrojové faktury, který položka spravuje. Uzávěrka vyřadí z odkladu jen tento
      * řádek ({@see AccrualAgendaGuard}), ostatní řádky s obdobím dál odkládá sama. Bez
-     * zadaného řádku se dohledá: jediný řádek s obdobím, jinak řádek se stejným obdobím
-     * nebo částkou jako položka; nejednoznačný doklad vyžaduje výběr řádku.
+     * zadaného řádku se dohledá řádek s obdobím, který se s položkou shoduje částkou
+     * a obdobím, částkou nebo obdobím. Žádná shoda = položka nespravuje žádný řádek
+     * s obdobím; víc shod vyžaduje výběr řádku.
      */
     private function resolveSourceItem(int $supplierId, string $sourceType, int $sourceId, ?int $itemId, float $basis, ?string $from, ?string $to): ?int
     {
@@ -911,20 +1002,28 @@ final class AccrualItemService
             throw new AccrualException('source_item_not_found', 'Řádek nepatří ke zdrojovému dokladu.', 422, 'source_item_id');
         }
         $period = array_values(array_filter($lines, static fn (array $l): bool => $l['accrual_from'] !== null && $l['accrual_to'] !== null));
-        if (count($period) <= 1) {
-            return $period === [] ? null : (int) $period[0]['id'];
+        if ($period === []) {
+            return null;
         }
+        // I jediný řádek s obdobím musí položce odpovídat částkou nebo obdobím. Jinak položka
+        // spravuje něco jiného (řádek bez období, část dokladu) a řádek s obdobím dál odkládá
+        // uzávěrka.
+        $samePeriod = static fn (array $l): bool => (string) $l['accrual_from'] === (string) $from && (string) $l['accrual_to'] === (string) $to;
+        $sameAmount = static fn (array $l): bool => abs((float) $l['total_without_vat'] - $basis) < 0.005;
         foreach ([
-            static fn (array $l): bool => (string) $l['accrual_from'] === (string) $from && (string) $l['accrual_to'] === (string) $to
-                && abs((float) $l['total_without_vat'] - $basis) < 0.005,
-            static fn (array $l): bool => abs((float) $l['total_without_vat'] - $basis) < 0.005,
+            static fn (array $l): bool => $samePeriod($l) && $sameAmount($l),
+            $sameAmount,
+            $samePeriod,
         ] as $match) {
             $found = array_values(array_filter($period, $match));
             if (count($found) === 1) {
                 return (int) $found[0]['id'];
             }
+            if (count($found) > 1) {
+                throw new AccrualException('source_item_required', 'Doklad má víc odpovídajících řádků s obdobím. Vyberte řádek, který položka spravuje.', 422, 'source_item_id');
+            }
         }
-        throw new AccrualException('source_item_required', 'Doklad má víc řádků s obdobím. Vyberte řádek, který položka spravuje.', 422, 'source_item_id');
+        return null;
     }
 
     private function assertAccount(int $supplierId, string $code, string $field): void
@@ -972,6 +1071,21 @@ final class AccrualItemService
             throw new AccrualException('invalid_amount', 'Částka musí být nenulová.', 422, $field);
         }
         return $amount;
+    }
+
+    /**
+     * Základ položky je kladný. Dobropis k rozlišenému dokladu snižuje zůstatek: zadejte ho
+     * jako přiřazený zápis k původní položce (plán se přepočte na zbývající zůstatek), nebo
+     * jako samostatnou položku opačného druhu.
+     */
+    private static function positiveBasis(mixed $value): float
+    {
+        $basis = self::amount($value, 'basis_amount');
+        if ($basis < 0) {
+            throw new AccrualException('negative_basis',
+                'Základ musí být kladný. Dobropis přiřaďte k původní položce jako zápis, nebo ho zadejte jako položku opačného druhu.', 422, 'basis_amount');
+        }
+        return $basis;
     }
 
     private static function requiredDate(mixed $value, string $field): string

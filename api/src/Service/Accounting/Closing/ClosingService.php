@@ -3217,7 +3217,7 @@ final class ClosingService
                     break;
                 }
                 $prepared = $this->accrualPosting->prepareRelease($supplierId, (int) $row['item_id'], (int) $row['schedule_id'],
-                    ['user_id' => $meta['user_id'] ?? null, 'allow_future' => true]);
+                    ['user_id' => $meta['user_id'] ?? null, 'allow_future' => true, 'closing_step' => true]);
                 $entryId = $this->posting->postDocument($supplierId, 'accrual_release', (int) $row['schedule_id'], $prepared['lines'],
                     $prepared['meta'] + ['allow_closing_period' => true]);
                 $this->accrualPosting->recordRelease($supplierId, $prepared, $entryId, $meta['user_id'] ?? null);
