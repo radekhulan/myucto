@@ -131,7 +131,7 @@ final class OpeningDocuments
         if (round($sum - $balance, 2) > 1.0) {
             $ctx->protocol->warn($step, 'opening_documents_exceed_balance', sprintf(
                 'Otevřené %s faktury z let před rokem %d (%d dokladů, %s Kč) převyšují počáteční stav účtu %s (%s Kč). Doklady počátečního stavu převod nezaložil, ověřte úhrady v Money.',
-                $label, (int) substr($start, 0, 4), count($open), number_format($sum, 2, ',', ' '), $account, number_format($balance, 2, ',', ' '),
+                $issued ? 'vydané' : 'přijaté', (int) substr($start, 0, 4), count($open), number_format($sum, 2, ',', ' '), $account, number_format($balance, 2, ',', ' '),
             ), ['documents' => count($open), 'amount' => round($sum, 2), 'balance' => $balance]);
             return;
         }
